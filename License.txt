@@ -1,0 +1,15 @@
+LICENCJA BURSZTYN OS – WSZELKIE PRAWA ZASTRZEŻONE
+
+Prawa autorskie (c) 2026 Dymitr Wygowski. Wszelkie prawa zastrzeżone.
+
+Niniejszy kod źródłowy systemu operacyjnego Bursztyn OS udostępniony jest w repozytorium wyłącznie w celach edukacyjnych, demonstracyjnych i do publicznego wglądu.
+
+Bez uzyskania uprzedniej, wyraźnej i pisemnej zgody autora surowo zabrania się:
+
+    Kopiowania, powielania i dystrybucji niniejszego kodu (w całości lub w części).
+
+    Rozwijania, modyfikowania kodu i tworzenia na jego bazie dzieł pochodnych (tzw. forków).
+
+    Wykorzystywania systemu i jego kodu źródłowego do jakichkolwiek celów komercyjnych.
+
+Zgodnie z regulaminem platformy GitHub (Terms of Service), użytkownicy posiadają jedynie prawo do przeglądania kodu oraz pobierania go na własne urządzenia w celu jego osobistego przestudiowania. Właścicielem praw majątkowych oraz wyłącznym podmiotem uprawnionym do rozwoju systemu pozostaje autor.
