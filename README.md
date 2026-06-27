@@ -28,10 +28,78 @@ Poniższe pliki zawierają pełną specyfikację techniczną, opisy mechanizmów
 * **Wielozadaniowość/Asynchroniczność:** Nowoczesny APIC + Zegar LAPIC (Wektor 32) po całkowitym uśpieniu archaicznego PIC.
 * **System plików:** BSP (Bursztynowy System Plików) – bloki 512 B, drzewo teczek oparte na węzłach indeksowych.
 
+# Jak uruchomić system Burstzyn w QEMU na Windows 11
+## Krok 1: pobierz plik BursztynOS.iso na pc, otwórz wiersz polecenia cmd
+Naciśnij na klawiaturze skrót Win + R, wpisz cmd i wciśnij Enter.
+## Krok 2: Przejście do folderu z systemem
+Wpisz po kolei te dwie komendy (każdą zatwierdź Enterem), aby przełączyć się na dysk D: czy C: i wejść do katalogu z najnowszym wydaniem:
+```
+D:
+cd D:\Bursztyn-OS\
+```
+
+## Krok 3: Uruchomienie QEMU
+Będąc już w folderze, w którym leży plik BursztynOS.iso, odwołaj się do programu zainstalowanego na dysku C:. Skopiuj całą tę linijkę (z zachowaniem cudzysłowów) i wklej do konsoli:
+```
+"C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom BursztynOS.iso -m 2G
+```
+## Jeżeli są błędy przy uruchomieniu
+### Błąd akceleracji (Hyper-V / WHPX)
+Jak to wygląda: failed to initialize WHPX: No accelerator found lub Could not initialize KVM.
+
+Dlaczego? Na tym komputerze z Windowsem nie jest włączona sprzętowa wirtualizacja (Hyper-V). QEMU próbuje użyć szybkiego trybu, ale system mu na to nie pozwala.
+
+Rozwiązanie: Uruchom Bursztyn OS w trybie podstawowym (emulacji programowej), po prostu usuwając parametr -accel whpx:
+```
+"C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom BursztynOS.iso -m 2G
+```
+
+## 2. Brak pliku ISO w danym folderze
+Jak to wygląda: qemu-system-x86_64.exe: -cdrom BursztynOS.iso: Could not open 'BursztynOS.iso': No such file or directory
+
+Dlaczego? Konsola CMD jest otwarta w innym folderze, niż ten, w którym fizycznie leży Twój plik .iso (lub nazwa pliku różni się wielkością liter/ma dopisaną jakąś cyfrę).
+
+Rozwiązanie: Upewnij się komendą dir, że w wierszu poleceń na pewno jesteś w odpowiednim folderze i że plik z systemem tam jest.
+
+##  3. Problem ze spacją (zgubione cudzysłowy)
+Jak to wygląda: 'C:\Program' is not recognized as an internal or external command, operable program or batch file.
+
+Dlaczego? Jeśli w CMD wpiszesz ścieżkę ze spacją bez cudzysłowów, konsola utnie ją na słowie Program i spróbuje to uruchomić, ignorując resztę.
+
+Rozwiązanie: Bezwzględnie pamiętaj o znakach " na początku i końcu ścieżki do QEMU.
+
+# Jak uruchomić system Burstzyn w QEMU na Linux Mint
+## Krok 1: Otwórz terminal w folderze z plikiem
+Najszybsza metoda w systemach takich jak Linux Mint:
+
+1. Otwórz menedżera plików i wejdź do folderu, w którym leży BursztynOS.iso.
+
+2. Kliknij prawym przyciskiem myszy w puste miejsce w tym folderze.
+
+3. Wybierz opcję "Otwórz w terminalu" (Open in Terminal).
+
+(Alternatywnie możesz użyć komendy cd, np. cd ~/Pulpit/Bursztyn\ OS/kod).
+
+## Krok 2: Wpisz komendę uruchamiającą
+1. W Linuksie program QEMU jest dodany do globalnych ścieżek systemu, więc nie musisz podawać do niego pełnej ścieżki w cudzysłowach tak jak na Windowsie. 
+1. Po prostu wklej to:
+```
+
+qemu-system-x86_64 -cdrom BursztynOS.iso -m 2G
+```
+
+### Krok 3: (Opcjonalnie) Włącz dopalacze KVM! 🚀
+Na Windowsie próbowaliśmy włączyć akcelerację WHPX, ale to na Linuksie QEMU rozwija prawdziwe skrzydła dzięki natywnej akceleracji KVM (Kernel-based Virtual Machine). Zamiast emulować procesor programowo, system pozwala wirtualnej maszynie używać Twojego fizycznego procesora. Bursztyn OS uruchomi się wtedy z prędkością światła!
+
+Aby to zrobić, po prostu dodaj flagę -enable-kvm:
+```
+qemu-system-x86_64 -enable-kvm -cdrom BursztynOS.iso -m 2G
+```
+
 ## Uruchomiony system Bursztyn OS na Linux Mint w QEMU
 ![alt](image/BursztynOS.png)
 
-# Uruchomienie systemu na Linux Mint w QEMU
+# Kompilowanie systemu ze źródel na Linux Mint i uruchomienie w QEMU 
 ### Przygotowanie Środowiska w Linux Mint
 1. Otwórz natywny terminal i wykonaj te trzy polecenia:
 1. Aktualizacja repozytoriów:
