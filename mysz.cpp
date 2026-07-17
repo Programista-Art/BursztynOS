@@ -17,6 +17,11 @@ static inline uint8_t wejscie_port_bajt(uint16_t port) {
     return wartosc;
 }
 
+// Zewnętrzne zmienne systemowe
+extern "C" void wypisz_na_ekranie(const char* buf);
+extern volatile uint32_t* baza_lapic_wirtualna; // Z apic.cpp
+#define LAPIC_EOI_OFFSET 0x0B0                  // Rejestr End of Interrupt
+
 // Oczekuje dopóki port sprzętowy kontrolera (0x64) nie da zgody na Zapis (bit 1)
 void MyszCzekajNaZapis() {
     uint32_t odliczenie = 100000;
@@ -40,88 +45,90 @@ void MyszCzekajNaOdczyt() {
 extern "C" void InicjalizujMyszPS2() {
     uint8_t status_kontrolera;
 
-    // 1. Zezwól na obsługę urządzenia pomocniczego przez wysłanie komendy do rejestru statusu
+    // 1. Zezwól na obsługę urządzenia pomocniczego
     MyszCzekajNaZapis();
     wyjscie_port_bajt(0x64, 0xA8);
 
-    // 2. Wczytaj obecny status konfiguracyjny (Bajt informacyjny 0x20, Odbierz 0x60)
+    // 2. Wczytaj obecny status konfiguracyjny
     MyszCzekajNaZapis();
     wyjscie_port_bajt(0x64, 0x20);
     MyszCzekajNaOdczyt();
     status_kontrolera = wejscie_port_bajt(0x60);
 
-    // 3. Włącz sprzętowe przerwania kontrolera dla wektora Myszy (Bit nr 1 = 1)
+    // 3. Włącz przerwania dla wektora Myszy (Bit nr 1 = 1) i zapobiegnij deaktywacji zegara
     status_kontrolera |= 2;
-    // Zapobiegnij deaktywacji zegara podrzędnego (Oczyść bit nr 5)
     status_kontrolera &= ~0x20;
 
-    // 4. Zapisz z powrotem zaktualizowany konfigurator (Komenda zapisu to 0x60)
+    // 4. Zapisz z powrotem zaktualizowany konfigurator
     MyszCzekajNaZapis();
     wyjscie_port_bajt(0x64, 0x60);
     MyszCzekajNaZapis();
     wyjscie_port_bajt(0x60, status_kontrolera);
 
-    // 5. Powiedz myszy by domyślnie używała jej wewnętrznego protokołu. Komendy dla myszy przesyłamy poprzedzając je bajtem 0xD4 
+    // 5. Zresetuj mysz (0xFF lub 0xF6) i użyj domyślnych ustawień
     MyszCzekajNaZapis();
     wyjscie_port_bajt(0x64, 0xD4);
     MyszCzekajNaZapis();
-    wyjscie_port_bajt(0x60, 0xF6); // Komenda Reset / Przywróć Ustawienia domyślne dla Myszy
+    wyjscie_port_bajt(0x60, 0xF6);
     MyszCzekajNaOdczyt();
-    wejscie_port_bajt(0x60);       // Odbierz potwierdzenie ACK (0xFA)
+    wejscie_port_bajt(0x60); // Odbierz ACK (0xFA)
     
-    // 6. Nakaz myszy by uruchomiła ciągły przepływ i nasłuch pakietów (Enable Data Reporting)
+    // 6. Uruchom ciągły przepływ i nasłuch pakietów (Enable Data Reporting)
     MyszCzekajNaZapis();
     wyjscie_port_bajt(0x64, 0xD4);
     MyszCzekajNaZapis();
-    wyjscie_port_bajt(0x60, 0xF4); // Komenda Włączenia nasłuchu ruchu
+    wyjscie_port_bajt(0x60, 0xF4);
     MyszCzekajNaOdczyt();
-    wejscie_port_bajt(0x60);       // Odbierz potwierdzenie ACK (0xFA)
+    wejscie_port_bajt(0x60); // Odbierz ACK (0xFA)
 }
 
 // Zmienne gromadzące stan cyklu pakietowania
 uint8_t licznik_pakietu = 0;
 uint8_t pakiety[3];
 
-extern "C" void WypiszNaEkranie(const char* buf);
-char temp_string[80] = "Mysz zostala uzyta.";
-
 /*
  * Obsługa Przerwania od Myszy. 
  * Zbiera wektor 3-częściowy do jednej puli i uwalnia dopiero gdy otrzyma całość
  */
 extern "C" void ObslugaPrzerwaniaMyszy() {
-    // Port 0x60 wyrzuca zbuforowane bajty. 
-    // Trzeba upewnić się, czy coś w ogóle przyszło lub kontroler się odblokował, 
-    // by zapobiec fałszywym stanom zsynchronizowanych kolejek.
     uint8_t d = wejscie_port_bajt(0x60);
     
-    // Zapewnienie synchronizacji paczki: Pakiet początkowy (część 1) zazwyczaj posiada zawsze włączony bit 3
+    // Synchronizacja: Pierwszy bajt zawsze musi mieć bit 3 ustawiony na 1
     if (licznik_pakietu == 0 && !(d & 0x08)) {
-        return; // To jest zły pakiet, pomijamy synchronizację
+        // Zły pakiet - zwalniamy przerwanie, ale nie zapisujemy
+        if(baza_lapic_wirtualna) baza_lapic_wirtualna[LAPIC_EOI_OFFSET / 4] = 0;
+        return;
     }
 
     pakiety[licznik_pakietu] = d;
     licznik_pakietu++;
 
     if (licznik_pakietu >= 3) {
-        // Posiadamy całą wiadomość 3 bajtową!
-        
-        // pakiety[0]: Stan kliknięcia, Zwrot X (Bit 4), Zwrot Y (Bit 5), Przepełnienie
-        // pakiety[1]: Ruch na osi X (8 bitowe)
-        // pakiety[2]: Ruch na osi Y (8 bitowe)
+        // Mamy pełne 3 bajty! Dekodujemy logikę.
         bool l_klik = pakiety[0] & 0x01;
         bool p_klik = pakiety[0] & 0x02;
 
+        // Rozszerzanie znaku (Sign Extension) dla osi X i Y
+        int delta_x = pakiety[1];
+        if (pakiety[0] & 0x10) delta_x |= 0xFFFFFF00; // Jeśli bit 4=1, liczba jest ujemna
+
+        int delta_y = pakiety[2];
+        if (pakiety[0] & 0x20) delta_y |= 0xFFFFFF00; // Jeśli bit 5=1, liczba jest ujemna
+
         if (l_klik) {
-            WypiszNaEkranie("Mysz: Lewy przycisk");
+            wypisz_na_ekranie("Mysz: Lewy klik         ");
         } else if (p_klik) {
-            WypiszNaEkranie("Mysz: Prawy przycisk");
-        } else {
-            // Wypisz jako Echo by upewnić się że funkcja odczytuje relatywne osie
-            WypiszNaEkranie(temp_string);
+            wypisz_na_ekranie("Mysz: Prawy klik        ");
+        } else if (delta_x != 0 || delta_y != 0) {
+            // Wypisujemy z dużą ilością spacji, aby nadpisać "stare" komunikaty na żółtym pasku
+            wypisz_na_ekranie("Mysz: Przesuniecie      ");
         }
 
-        // Zakończenie cyklu (od nowa)
-        licznik_pakietu = 0;
+        licznik_pakietu = 0; // Reset na poczet następnej ramki
+    }
+
+    // KRYTYCZNE: Powiedz LAPIC, że obsłużyłeś przerwanie, by wysłał kolejne!
+    if(baza_lapic_wirtualna) {
+        baza_lapic_wirtualna[LAPIC_EOI_OFFSET / 4] = 0;
     }
 }

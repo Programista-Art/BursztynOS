@@ -10,7 +10,7 @@ static inline void wyjscie_port_bajt(uint16_t port, uint8_t wartosc) {
     asm volatile ("outb %0, %1" : : "a"(wartosc), "Nd"(port));
 }
 
-extern "C" void WypiszNaEkranie(const char* buf);
+extern "C" void wypisz_na_ekranie(const char* buf);
 
 // Deklaracje sterowników sprzętowych podpiętych do jądra
 extern "C" void ObslugaPrzerwaniaKlawiatury();
@@ -60,7 +60,7 @@ extern volatile uint32_t* baza_lapic_wirtualna;
 // --- NOWY DYSPOZYTOR PRZERWAŃ ---
 extern "C" void WspolnaObslugaPrzerwan(struct RejestryStanowe* stan) {
     if (stan->wektor_przerwania < 32) {
-        WypiszNaEkranie("BLAD SYSTEMOWY: Wystapil wyjatek sprzetowy!");
+        wypisz_na_ekranie("BLAD SYSTEMOWY: Wystapil wyjatek sprzetowy!");
         while(1) asm volatile("hlt");
     }
 

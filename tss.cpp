@@ -33,13 +33,20 @@ struct tss_wpis {
 } __attribute__((packed));
 
 // Globalna instancja TSS, która będzie osadzona w naszym systemie
-struct tss_wpis globalny_tss = {0};
+struct tss_wpis globalny_tss;
 
 /*
  * Konfiguruje TSS ładując podany na wejściu adres szczytu stosu jądra (ring 0) 
  * tak, aby sprzęt wiedział jak dokonać zrzutu środowiska podczas zmiany pierścieni.
  */
 extern "C" void inicjalizuj_tss(void* stos_jadra) {
+    // Zabezpieczenie: Czyścimy całą strukturę zerami.
+    // W środowiskach 'freestanding' lepiej nie ufać domyślnej inicjalizacji BSS.
+    uint8_t* tss_ptr = (uint8_t*)&globalny_tss;
+    for(uint32_t i = 0; i < sizeof(struct tss_wpis); i++) {
+        tss_ptr[i] = 0;
+    }
+
     globalny_tss.rsp0 = (uint64_t)stos_jadra;
     
     // Blokujemy mechanizm nadpisywania portów z Ring 3 (brak mapy wejścia/wyjścia)
@@ -48,9 +55,15 @@ extern "C" void inicjalizuj_tss(void* stos_jadra) {
 }
 
 /*
+ * Zewnętrzna, wygodna funkcja dla jądra do załadowania Task Registera w procesorze
+ */
+extern "C" void zaladuj_tss(uint16_t selektor_tss) {
+    asm volatile("ltr %0" : : "rm"(selektor_tss));
+}
+
+/*
  * === [INSTRUKCJA INTEGRACJI GDT DLA DEWELOPERA] ===
- * 
- * Aby procesor uznał nową tablicę TSS, musisz dodać wpis do GDT i załadować
+ * * Aby procesor uznał nową tablicę TSS, musisz dodać wpis do GDT i załadować
  * nowy wskaźnik (LTR - Load Task Register). W przeciwieństwie do standardowych 
  * wpisów segmentacji danych, TSS w Long Mode waży DWA RAZY tyle (16 bajtów), 
  * gdyż jego baza zajmuje pełne 64-bity.
@@ -58,23 +71,18 @@ extern "C" void inicjalizuj_tss(void* stos_jadra) {
  * 1. Zmień rozmiar swojej GDT (np. nasza_tablica_gdt) by miała 7 wpisów (5 starych + 2 podwójnego złączenia dla TSS).
  *
  * 2. W Twoim pliku zarządzającym GDT (np. `gdt.cpp`) dodaj na końcu ładowanie 16-bajtowego deskryptora:
- * 
- *    extern "C" struct tss_wpis globalny_tss; // Deklaracja z tego pliku
- *    uint64_t baza_tss = (uint64_t)&globalny_tss;
- *    uint32_t limit_tss = sizeof(struct tss_wpis) - 1;
- * 
- *    // Wpis nr 5 (Pierwsze 8 bajtów):
- *    UstawWpisGDT(5, baza_tss, limit_tss, 0x89, 0x00); // 0x89 (Present, Ring 0, Systemowy typ = 64-bit TSS)
- *    
- *    // Wpis nr 6 (Kolejne 8 bajtów, po prostu góra wskaźnika przeniesiona niżej):
- *    // Wymaga ręcznej interpolacji, jeśli twoja UstawWpisGDT przyjmuje 32-bit:
- *    nasza_tablica_gdt[6].limit_dolny = (baza_tss >> 32) & 0xFFFF;
- *    nasza_tablica_gdt[6].baza_dolna = (baza_tss >> 48) & 0xFFFF;
- *    // Z resztą wyzerowaną dla wpisu nr 6!
+ * * extern "C" struct tss_wpis globalny_tss; // Deklaracja z tego pliku
+ * uint64_t baza_tss = (uint64_t)&globalny_tss;
+ * uint32_t limit_tss = sizeof(struct tss_wpis) - 1;
+ * * // Wpis nr 5 (Pierwsze 8 bajtów):
+ * UstawWpisGDT(5, baza_tss, limit_tss, 0x89, 0x00); // 0x89 (Present, Ring 0, Systemowy typ = 64-bit TSS)
+ * * // Wpis nr 6 (Kolejne 8 bajtów, po prostu góra wskaźnika przeniesiona niżej):
+ * // Wymaga ręcznej interpolacji, jeśli twoja UstawWpisGDT przyjmuje 32-bit:
+ * nasza_tablica_gdt[6].limit_dolny = (baza_tss >> 32) & 0xFFFF;
+ * nasza_tablica_gdt[6].baza_dolna = (baza_tss >> 48) & 0xFFFF;
+ * // Z resztą wyzerowaną dla wpisu nr 6!
  *
  * 3. Zwiększ wymiar swojego GDTR.rozmiar do `(sizeof(DeskryptorGDT) * 7) - 1`.
- * 
- * 4. Po załadowaniu `lgdt`, musisz poinformować procesor o obecności TSS 
- *    poprzez polecenie z Asemblera (Selektor 5 wpisu z przesunięciem 8 bitów to 0x28):
- *    asm volatile("mov $0x28, %ax; ltr %ax"); 
+ * * 4. Po załadowaniu `lgdt` i przeładowaniu segmentów, po prostu wywołaj nową funkcję:
+ * zaladuj_tss(0x28); // 5. wpis * 8 bitów = 0x28
  */

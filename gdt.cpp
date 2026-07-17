@@ -1,75 +1,72 @@
-/*
- * Mechanizm: Globalna Tablica Deskryptorów (GDT) dla 64-bit
- * Opis: Ustawia segmenty jądra oraz przestrzeni użytkownika dla trybu Long Mode.
- * Mimo iż stronicowanie przejmuje główną kontrolę, segmentacja w Ring 0 i 3 jest 
- * wymagana konwencyjnie.
- */
-
 #include <stdint.h>
 
-// Flagi konfiguracyjne określające właściwości segmentu w architekturze x86_64
-#define DOSTEP_KOD_JADRA   0x9A // 1001 1010 - Present, Ring 0, Kod, Wykonywalny/Odczyt
-#define DOSTEP_DANE_JADRA  0x92 // 1001 0010 - Present, Ring 0, Dane, Odczyt/Zapis
-#define DOSTEP_KOD_USER    0xFA // 1111 1010 - Present, Ring 3, Kod, Wykonywalny/Odczyt
-#define DOSTEP_DANE_USER   0xF2 // 1111 0010 - Present, Ring 3, Dane, Odczyt/Zapis
-
-#define FLAGA_64_BIT       0x20 // 0010 0000 - Bit Long Mode (L) dla kodu x86_64
-#define FLAGA_DOMYSLNA     0x00 // Puste flagi wymiarowe dla sekcji danych
-
-// Pojedynczy wpis (deskryptor) GDT w architekturze 64-bit ma długość 8 bajtów (zgodność wsteczna)
+// Struktura pojedynczego wpisu GDT (8 bajtów)
 struct DeskryptorGDT {
-    uint16_t limit_dolny;       // Pierwsze 16 bitów z limitu segmentu
-    uint16_t baza_dolna;        // Pierwsze 16 bitów bazowego adresu
-    uint8_t  baza_srodkowa;     // Następne 8 bitów bazy
-    uint8_t  bajt_dostepu;      // Flagi uprawnień oraz rodzaj segmentu
-    uint8_t  granulacja_flagi;  // Górne 4 bity limitu oraz 4 bity flag (np. 64-bit)
-    uint8_t  baza_gorna;        // Ostatnie 8 bitów bazy (dla deskryptorów systemowych TSS jest to inaczej)
+    uint16_t limit_dolny;
+    uint16_t baza_dolna;
+    uint8_t  baza_srodkowa;
+    uint8_t  dostep;
+    uint8_t  granicznik_flagi;
+    uint8_t  baza_gorna;
 } __attribute__((packed));
 
-// Rejestr GDT (GDTR) używany przez procesor przy wywołaniu specjalnej instrukcji LGDT (10 bajtów)
 struct RejestrGDT {
-    uint16_t rozmiar;           // Pełny rozmiar tablicy minus 1 bajt
-    uint64_t adres;             // Liniowy adres w pamięci, gdzie spoczywa tablica (64-bit)
+    uint16_t rozmiar;
+    uint64_t adres;
 } __attribute__((packed));
 
-// Stworzenie tablicy z 5 wpisami:
-// 0: Null, 1: Kod Jądra, 2: Dane Jądra, 3: Kod Użytkownika, 4: Dane Użytkownika
-struct DeskryptorGDT nasza_tablica_gdt[5];
+// POTRZEBUJEMY 7 WPISÓW! (Null, KernCode, KernData, UserData, UserCode, TSS_Dolny, TSS_Gorny)
+struct DeskryptorGDT tablica_gdt[7];
 struct RejestrGDT wskaznik_gdtr;
 
-// Zewnętrzna procedura w Asemblerze ładująca struktury GDT prosto do szyny i zmieniająca CS
 extern "C" void zaladuj_zaktualizowane_gdt(uint64_t adres_gdtr);
 
-// Pomocnicza funkcja do kompozycji pojedynczego bloku pamięci GDT 
-void UstawWpisGDT(int indeks, uint32_t baza, uint32_t limit, uint8_t dostep, uint8_t flagi) {
-    // Rozkład bitowy bazy (Ignorowany w 64-bit dla zwykłych segmentów, musi być 0)
-    nasza_tablica_gdt[indeks].baza_dolna    = (baza & 0xFFFF);
-    nasza_tablica_gdt[indeks].baza_srodkowa = (baza >> 16) & 0xFF;
-    nasza_tablica_gdt[indeks].baza_gorna    = (baza >> 24) & 0xFF;
+// Importujemy globalny stan TSS utworzony i zadeklarowany w pliku tss.cpp
+extern uint8_t globalny_tss; 
 
-    // Rozkład bitowy limitu (Ignorowany, 0)
-    nasza_tablica_gdt[indeks].limit_dolny   = (limit & 0xFFFF);
+void UstawWpisGDT(int numer, uint64_t baza, uint32_t limit, uint8_t dostep, uint8_t flagi) {
+    tablica_gdt[numer].baza_dolna = (baza & 0xFFFF);
+    tablica_gdt[numer].baza_srodkowa = (baza >> 16) & 0xFF;
+    tablica_gdt[numer].baza_gorna = (baza >> 24) & 0xFF;
 
-    // Połączenie wyższego nibble limitu z flagami (Takimi jak Long Mode flag i Granulacja)
-    nasza_tablica_gdt[indeks].granulacja_flagi = (limit >> 16) & 0x0F;
-    nasza_tablica_gdt[indeks].granulacja_flagi |= (flagi & 0xF0);
-    
-    // Uprawnienia Ring i Typ (Kod/Dane)
-    nasza_tablica_gdt[indeks].bajt_dostepu  = dostep;
+    tablica_gdt[numer].limit_dolny = (limit & 0xFFFF);
+    tablica_gdt[numer].granicznik_flagi = ((limit >> 16) & 0x0F) | (flagi & 0xF0);
+
+    tablica_gdt[numer].dostep = dostep;
 }
 
-// Główna funkcja wywoływana z poziomu jądra w celu zbudowania architektury ochrony pamięci
 extern "C" void InicjalizujGDT() {
-    wskaznik_gdtr.rozmiar = (sizeof(struct DeskryptorGDT) * 5) - 1;
-    wskaznik_gdtr.adres   = (uint64_t)&nasza_tablica_gdt;
+    // 0. Null Descriptor (Wymóg sprzętowy x86)
+    UstawWpisGDT(0, 0, 0, 0, 0);
+    
+    // 1. Kernel Code (Kod Jądra Ring 0) - Offset 0x08
+    UstawWpisGDT(1, 0, 0xFFFFF, 0x9A, 0xAF);
+    
+    // 2. Kernel Data (Dane Jądra Ring 0) - Offset 0x10
+    UstawWpisGDT(2, 0, 0xFFFFF, 0x92, 0xAF);
+    
+    // 3. User Data (Dane Aplikacji Ring 3) - Offset 0x18
+    // KRYTYCZNE: Instrukcja SYSRET wymaga by Dane Użytkownika leżały w GDT PRZED Kodem Użytkownika!
+    UstawWpisGDT(3, 0, 0xFFFFF, 0xF2, 0xAF); // 0xF2 = (DPL 3) Zezwolenie na Ring 3
+    
+    // 4. User Code (Kod Aplikacji Ring 3) - Offset 0x20
+    UstawWpisGDT(4, 0, 0xFFFFF, 0xFA, 0xAF); // 0xFA = (DPL 3) Zezwolenie na Ring 3
 
-    // Definiowanie wymaganej płaskiej struktury segmentacji:
-    UstawWpisGDT(0, 0, 0, 0, 0);                               // Segment zerowy (Null)
-    UstawWpisGDT(1, 0, 0, DOSTEP_KOD_JADRA, FLAGA_64_BIT);     // Segment Kodu Jądra (Selektor = 0x08)
-    UstawWpisGDT(2, 0, 0, DOSTEP_DANE_JADRA, FLAGA_DOMYSLNA);  // Segment Danych Jądra (Selektor = 0x10)
-    UstawWpisGDT(3, 0, 0, DOSTEP_KOD_USER, FLAGA_64_BIT);      // Segment Kodu Użytkownika Ring 3 (0x1B)
-    UstawWpisGDT(4, 0, 0, DOSTEP_DANE_USER, FLAGA_DOMYSLNA);   // Segment Danych Użytkownika Ring 3 (0x23)
+    // 5 i 6. Task State Segment (TSS) - Specjalny podwójny wpis 16-bajtowy dla 64-bitów! - Offset 0x28
+    uint64_t baza_tss = (uint64_t)&globalny_tss;
+    uint32_t limit_tss = 104 - 1; // Struktura tss_wpis ma dokładnie 104 bajty (0x68)
+    
+    // Część dolna (Wpis nr 5)
+    UstawWpisGDT(5, baza_tss, limit_tss, 0x89, 0x00); // 0x89 = Typ Systemowy TSS (64-bit)
+    
+    // Część górna (Wpis nr 6) - Kontynuacja wskaźnika bazy 64-bitowego
+    UstawWpisGDT(6, 0, 0, 0, 0); // Zerujemy podstawy
+    tablica_gdt[6].limit_dolny = (baza_tss >> 32) & 0xFFFF;
+    tablica_gdt[6].baza_dolna = (baza_tss >> 48) & 0xFFFF;
 
-    // Załaduj wskaźnik GDTR
+    // Przekazanie nowego rozmiaru tabeli do rejestru GDTR
+    wskaznik_gdtr.rozmiar = (sizeof(struct DeskryptorGDT) * 7) - 1;
+    wskaznik_gdtr.adres = (uint64_t)&tablica_gdt;
+
     zaladuj_zaktualizowane_gdt((uint64_t)&wskaznik_gdtr);
 }

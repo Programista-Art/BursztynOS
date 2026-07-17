@@ -6,10 +6,11 @@
  */
 
 #include <stdint.h>
+#include <stdbool.h>
 
 // Prototyp zewnętrznej funkcji API jądra dla ekranu i operacji w systemie plików (Z Etapu 5)
 extern "C" {
-    void WypiszNaEkranie(const char* buf); 
+    void wypisz_na_ekranie(const char* buf); 
     bool utworz_plik(const char* sciezka);
     bool zapisz_do_pliku(const char* sciezka, const char* dane, uint32_t dlugosc);
 }
@@ -20,10 +21,14 @@ extern "C" void brama_wywolan_systemowych();
 // Zewnętrzny adres ze strefy linkera symbolizujący środek stosu Ring 0
 extern "C" uint64_t stack_top;
 
+// KRYTYCZNA ZMIANA: Globalna zmienna przechowująca wskaźnik na rdzenny stos.
+// Dzięki temu asemblerowe 'movq %gs:0, %rsp' odczyta wartość z poprawnego obszaru RAM.
+uint64_t bezpieczny_stos_jadra;
+
 // Pomocnicza funkcja C przestrzeni zapisującej do Model Specific Registers (MSR)
 static inline void zapisz_msr(uint32_t msr, uint64_t wartosc) {
-    uint32_t dolny = wartosc & 0xFFFFFFFF;
-    uint32_t gorny = wartosc >> 32;
+    uint32_t dolny = (uint32_t)(wartosc & 0xFFFFFFFF);
+    uint32_t gorny = (uint32_t)(wartosc >> 32);
     asm volatile("wrmsr" : : "a"(dolny), "d"(gorny), "c"(msr));
 }
 
@@ -43,25 +48,26 @@ extern "C" void inicjalizuj_syscalls() {
     zapisz_msr(0xC0000080, efer | 1); // Włącz bit System Call Enable (SCE)
 
     // 2. MSR_STAR (Ring 0 & Ring 3 Target Selectors)
-    // Instrukcja SYSRET potrzebuje selektorów dla powrotu do użytkownika:
-    // Odgórnie dodaje +16 do zadeklarowanego CS z MSR STAR! Więc mając CS w GDT=0x1B, ładujemy tu 0x0B (lub odpowiednio pod Twoje przesunięcia GDT).
-    // Załóżmy zgodnie z Etapem 2 układ selektorów GDT:
-    // Null (0x00), Kern Code (0x08), Kern Data (0x10), User Code (0x18), User Data (0x20)
-    // Syscall dodaje bity więc STAR konfigurujemy na (Sysret CS = User Code - 16 = 0x18 - 0x10 = 0x08).  
-    // W praktyce jednak x86 jest trudne: dla User mode konwencjonalnie STAR[63:48] to 0x18 | 0x3 = 0x1B. STAR[47:32] to 0x08 dla jadra.
-    uint32_t star_gorny = (0x1B << 16) | 0x08;
+    // Instrukcja SYSRET nakłada żelazne zasady dla GDT w x86_64:
+    // SS dla Ring 3 procesor odczytuje jako = (STAR[63:48] + 8) | 3
+    // CS dla Ring 3 procesor odczytuje jako = (STAR[63:48] + 16) | 3
+    // Aby to zadziałało, w Twoim gdt.cpp DANE UŻYTKOWNIKA (User Data) MUSZĄ BYĆ PRZED KODEM (User Code)!
+    // Baza = 0x13 (Co oznacza Segment Jądra Danych 0x10 + RPL 3).
+    // Wtedy SS = 0x13 + 8 = 0x1B (Wpis 0x18 w GDT to odtąd User Data)
+    // Wtedy CS = 0x13 + 16 = 0x23 (Wpis 0x20 w GDT to odtąd User Code)
+    uint32_t star_gorny = (0x13 << 16) | 0x08; 
     zapisz_msr(0xC0000081, ((uint64_t)star_gorny << 32));
 
-    // 3. MSR_LSTAR (Target RIP) - wskażnik wejściowy bramy asemblera
+    // 3. MSR_LSTAR (Target RIP) - wskaźnik wejściowy bramy asemblera
     zapisz_msr(0xC0000082, (uint64_t)&brama_wywolan_systemowych);
 
     // 4. MSR_FMASK (Flagi ucinane przy wywołaniu). Wymuszamy 0x200 czyli zamknięcie powiadomień (Clear Interrupt Flag) dla bezpieczeństwa Jądra.
     zapisz_msr(0xC0000084, 0x200);
 
     // 5. Zabezpieczenie dla swapgs:
-    // swapgs wymienia KernelGSBase z bieżącym GS. W Ring 3 GSBase = stan_uzytkownika, KernelGSBase = stan_jadra.
-    // Ładujemy wirtualną pozycję stosu Kernelowego pod pomocniczy pointer do późniejszego pobrania w Asemblerze
-    zapisz_msr(0xC0000102, (uint64_t)&stack_top); // Adres zadeklarowany i chroniony w sekcji boot.S
+    // Do MSR_KernelGSBase ładujemy adres naszej bezpiecznej zmiennej, która trzyma adres stosu.
+    bezpieczny_stos_jadra = (uint64_t)&stack_top;
+    zapisz_msr(0xC0000102, (uint64_t)&bezpieczny_stos_jadra);
 }
 
 /*
@@ -77,8 +83,8 @@ extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t ar
     switch(nr_funkcji) {
         case 1: {
             // sys_wypisz_tekst(const char* tekst)
-            // arg1 zawiera przekazany liniowo wskaźnik na surowy tekst w ciele Ring 3.
-            WypiszNaEkranie((const char*)arg1);
+            // UWAGA: W przyszłości (PZB-0) będziesz musiał sprawdzać, czy wskaźnik arg1 faktycznie należy do Ring 3!
+            wypisz_na_ekranie((const char*)arg1);
             kod_wyniku = 1; // Sukces
             break;
         }
@@ -98,8 +104,8 @@ extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t ar
         }
 
         default:
-            WypiszNaEkranie("[!] Otrzymano nierozpoznany wektor z Ring 3!");
-            kod_wyniku = -1;
+            wypisz_na_ekranie("[!] Otrzymano nierozpoznany wektor z Ring 3!");
+            kod_wyniku = (uint64_t)-1;
             break;
     }
 

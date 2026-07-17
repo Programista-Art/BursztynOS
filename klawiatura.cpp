@@ -15,7 +15,7 @@ static inline uint8_t wejscie_port_bajt(uint16_t port) {
 }
 
 // Zewnętrzna funkcja z kernel.cpp z Etapu 1, użyta do generowania potwierdzenia wizualnego (ECHO)
-extern "C" void WypiszNaEkranie(const char* buf);
+extern "C" void wypisz_na_ekranie(const char* buf);
 
 // Tablica tłumaczeń (Lookup Table) Scancode Set 1 ograniczona do podstawowych liter amerykańskiej klawiatury.
 // Mapowanie zakłada tryb pisania po polsku bez znaków diakrytycznych.
@@ -73,7 +73,7 @@ extern "C" void ObslugaPrzerwaniaKlawiatury() {
             // Koniec linii, aby print nadpisał starą linijkę
             bufor_klawiatury[79] = '\0';
             
-            WypiszNaEkranie(bufor_klawiatury);
+            wypisz_na_ekranie(bufor_klawiatury);
         }
     }
 }

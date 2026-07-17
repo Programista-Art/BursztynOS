@@ -9,6 +9,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h> // Zabezpieczenie dla typu bool w przypadku kompilacji C/C++
 
 #define PSF_ROZMIAR_BLOKU 512
 #define PSF_MAX_NAZWA 28 // 28 znaków nazwy + 4 bajty ID = 32 bajty na wpis
@@ -50,10 +51,19 @@ struct wpis_katalogowy {
 
 // --- API Publiczne Jądra (Konwencja snake_case) ---
 
+#ifdef __cplusplus
 extern "C" {
+#endif
+
     void inicjalizuj_psf(void* adres_ram_dysku, uint32_t rozmiar_w_bajtach);
     bool utworz_katalog(const char* sciezka);
     bool utworz_plik(const char* sciezka);
     bool zapisz_do_pliku(const char* sciezka, const char* dane, uint32_t dlugosc);
     bool czytaj_z_pliku(const char* sciezka, char* bufor, uint32_t max_dlugosc);
+    
+    // Funkcja dodana w celu spięcia Systemu Plików z Loaderem programów (.bur)
+    uint8_t* bsp_wczytaj_plik_do_pamieci(const char* sciezka, uint64_t* rozmiar_wyj);
+
+#ifdef __cplusplus
 }
+#endif

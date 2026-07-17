@@ -5,25 +5,31 @@
  */
 
 .global brama_wywolan_systemowych
+
+/* Bezpieczny, globalny schowek na wskaźnik stosu aplikacji (Ring 3) */
+.section .data
+.align 8
+bws_user_rsp_schowek:
+    .quad 0
+
 .section .text
 .code64
 
 brama_wywolan_systemowych:
     /* Instrukcja SYSCALL zmieniła CPL na 0 (Tryb Jądra) oraz wymieniła CS i SS z MSR STAR.
        Dodatkowo zapisała adres powrotny w RCX oraz RFLAGS w R11. Odtąd, RSP nadal wskazuje 
-       na stos Użytkownika, co jest niebezpieczne. MSR_FMASK zadbało jednak o ukrycie przerwań sprzętowych.
+       na stos Użytkownika, co jest niebezpieczne.
     */
     
     /* 1. Odmrażamy przygotowaną przestrzeń Jądra dla stosu poprzez operację na rejestrach w tle */
-    swapgs                                       /* Zamienia aktualny rejestr GS z ukrytym wskaźnikiem KernelGSBase (ustawionym w jadrze) */
+    swapgs                                       /* Zamienia aktualny rejestr GS z ukrytym wskaźnikiem KernelGSBase */
     
-    /* Zapiszemy stary wskaźnik użytkownika w bezpiecznym miejscu (offset względem gs) i załadujemy rdzenny wskaźnik jądra. 
-       W kodzie C++ GS Base to adres zmiennej wskaźnika do stosu, dlatego korzystamy z `%gs:0` jako docelowego wskaźnika RSP,
-       a adres przed nim (%gs:-8) wykorzystujemy jako tymczasowy schowek dla RSP Użytkownika.
+    /* Zapiszemy stary wskaźnik użytkownika w bezpiecznym miejscu w pamięci (.data) i załadujemy rdzenny wskaźnik jądra. 
+       Unikamy zapisu w %gs:-8, co mogłoby wywołać błąd stronicowania (Page Fault)!
     */
-    movq %rsp, %gs:-8                            /* Skryj User RSP poniżej aktualnego ukrytego wskaźnika MSR (bezpieczny schowek przed stosem Jądra) */
-    movq %gs:0, %rsp                             /* Załaduj prawdziwy, bezpieczny stos Jądra */
-    pushq %gs:-8                                 /* Popchnij zachowany przed chwilą wskaźnik User RSP na nowo utworzony stos Ring 0, by łatwo go odzyskać na końcu */
+    movq %rsp, bws_user_rsp_schowek(%rip)        /* Skryj User RSP w bezpiecznej zmiennej (adresowanie RIP-relative) */
+    movq %gs:0, %rsp                             /* Załaduj prawdziwy, bezpieczny stos Jądra zdefiniowany wcześniej */
+    pushq bws_user_rsp_schowek(%rip)             /* Popchnij zachowany wskaźnik User RSP na nowo utworzony stos Ring 0 */
 
     /* 2. Zabezpiecz rejestry zepsute przez SYSCALL (RCX, R11) */
     pushq %rcx                                   /* Adres powrotu do procedury wewnątrz procesu Ring 3 */
@@ -37,20 +43,18 @@ brama_wywolan_systemowych:
        - 3. Argument                         => w R12
        - 4. Argument                         => w R13
        
-       Standard System V AMD64 ABI, jakiego oczekuje funkcja kompilatora C++ (`obsluga_wywolan_systemowych`):
+       Standard System V AMD64 ABI, jakiego oczekuje funkcja kompilatora C++:
        - 1. Param (Numer BWS)                => w RDI
        - 2. Param (Arg 1)                    => w RSI
        - 3. Param (Arg 2)                    => w RDX
        - 4. Param (Arg 3)                    => w RCX
        - 5. Param (Arg 4)                    => w R8
-       
-       UWAGA NA KOLEJNOŚĆ! Przesyłamy od góry do dołu, by nie zniszczyć starych wartości potrzebnych później.
     */
     movq %r8,  %rdi                              /* Przesuń Numer Funkcji (z R8 na RDI dla parametru 1) */
     movq %r9,  %rsi                              /* Przesuń Argument 1 (z R9 na RSI dla parametru 2) */
     movq %r10, %rdx                              /* Przesuń Argument 2 (z R10 na RDX dla parametru 3) */
     movq %r12, %rcx                              /* Przesuń Argument 3 (z R12 na RCX dla parametru 4) */
-    movq %r13, %r8                               /* Przesuń Argument 4 (z R13 z powrotem na użyty przed chwilą R8 jako argument 5 dla System V) */
+    movq %r13, %r8                               /* Przesuń Argument 4 (z R13 na użyty przed chwilą R8 jako argument 5) */
 
     /* Utrwalenie środowiska (Zachowaj użyte rejestry, przed wywołaniem obcego kodu w C++) */
     pushq %rbx
@@ -59,6 +63,9 @@ brama_wywolan_systemowych:
     pushq %r13
     pushq %r14
     pushq %r15
+
+    /* KRYTYCZNE: Zgodnie z wytycznymi ABI, należy wyzerować flagę kierunku przed skokiem do C++! */
+    cld
 
     /* 4. Rozwiń skrzydła, wywołując docelowy parser systemu */
     .extern obsluga_wywolan_systemowych

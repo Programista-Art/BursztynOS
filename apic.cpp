@@ -17,12 +17,12 @@ static inline uint64_t odczytaj_msr(uint32_t msr) {
 }
 
 static inline void zapisz_msr(uint32_t msr, uint64_t wartosc) {
-    uint32_t dolny = wartosc & 0xFFFFFFFF;
-    uint32_t gorny = wartosc >> 32;
+    uint32_t dolny = (uint32_t)(wartosc & 0xFFFFFFFF);
+    uint32_t gorny = (uint32_t)(wartosc >> 32);
     asm volatile("wrmsr" : : "a"(dolny), "d"(gorny), "c"(msr));
 }
 
-void WylaczPrzestarzalePIC() {
+void wylacz_przestarzale_pic() {
     wyjscie_port_bajt(0x21, 0xFF);
     wyjscie_port_bajt(0xA1, 0xFF);
 }
@@ -38,7 +38,7 @@ volatile uint32_t* baza_lapic_wirtualna;
 // --- NOWE: Struktury dla IOAPIC (Routing Sprzętowy) ---
 volatile uint32_t* baza_ioapic_wirtualna;
 
-void PrzekierujPrzerwanieIOAPIC(uint8_t irq, uint8_t wektor_docelowy) {
+void przekieruj_przerwanie_ioapic(uint8_t irq, uint8_t wektor_docelowy) {
     uint32_t dolny = wektor_docelowy; // Flagi: odmaskowane (bit 16=0), edge-triggered
     uint32_t gorny = 0;               // Docelowy APIC ID = 0 (nasz jedyny procesor)
     uint8_t rejestr = 0x10 + (irq * 2); // Wpisy w tabeli przekierowań zaczynają się od offsetu 0x10
@@ -52,12 +52,12 @@ void PrzekierujPrzerwanieIOAPIC(uint8_t irq, uint8_t wektor_docelowy) {
     baza_ioapic_wirtualna[4] = gorny;
 }
 
-extern "C" void InicjalizujAPIC() {
-    WylaczPrzestarzalePIC();
+extern "C" void inicjalizuj_apic() {
+    wylacz_przestarzale_pic();
 
     // Inicjalizacja Local APIC (Rdzeń procesora)
     uint64_t rejestr_apic_base = odczytaj_msr(0x1B);
-    baza_lapic_wirtualna = (uint32_t*)(rejestr_apic_base & 0xFFFFF000);
+    baza_lapic_wirtualna = (volatile uint32_t*)(rejestr_apic_base & 0xFFFFF000);
     zapisz_msr(0x1B, rejestr_apic_base | (1 << 11));
     baza_lapic_wirtualna[APIC_SPURIOUS_INT_REGISTER / 4] = 255 | 0x100;
 
@@ -67,11 +67,11 @@ extern "C" void InicjalizujAPIC() {
     baza_lapic_wirtualna[APIC_TIMER_INITIAL_COUNT / 4] = 0x05FFFFFF;
 
     // --- NOWE: Inicjalizacja routingu wejścia z urządzeń w IOAPIC ---
-    baza_ioapic_wirtualna = (uint32_t*)0xFEC00000; // Standardowy fizyczny adres chipsetu IOAPIC
+    baza_ioapic_wirtualna = (volatile uint32_t*)0xFEC00000; // Standardowy fizyczny adres chipsetu IOAPIC
     
     // Klawiatura PS/2 operuje na standardowym kablu IRQ 1. Wysyłamy ją do wektora 33 w Jądrze.
-    PrzekierujPrzerwanieIOAPIC(1, 33);
+    przekieruj_przerwanie_ioapic(1, 33);
     
     // Mysz PS/2 operuje na standardowym kablu IRQ 12. Wysyłamy ją do wektora 44 w Jądrze.
-    PrzekierujPrzerwanieIOAPIC(12, 44);
+    przekieruj_przerwanie_ioapic(12, 44);
 }
