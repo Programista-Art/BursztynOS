@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 // Symboliczne adresy początku i końca z linkera
+// UWAGA: Aby uzyskać ich fizyczny adres w kodzie C++, należy użyć operatora '&', np. &__kernel_start
 extern "C" uint64_t __kernel_start;
 extern "C" uint64_t __kernel_end;
 
@@ -64,3 +65,18 @@ void ZmapujStrone(void* adres_wirtualny, void* adres_fizyczny, uint32_t flagi);
 
 // Główna funkcja przebudowująca identity paging z Asemblera na dedykowane C++
 void InicjalizujVMM();
+
+// --- STRUKTURY GRAFIKI (FRAMEBUFFER) ---
+#define MULTIBOOT_TAG_TYPE_FRAMEBUFFER 8
+
+struct TagFramebufferMB2 {
+    uint32_t typ;
+    uint32_t rozmiar;
+    uint64_t adres_fizyczny;
+    uint32_t pitch;     // Ilość bajtów na jeden pełny wiersz pikseli
+    uint32_t szerokosc; // Rozdzielczość X
+    uint32_t wysokosc;  // Rozdzielczość Y
+    uint8_t  bpp;       // Bits per pixel (zazwyczaj 32)
+    uint8_t  typ_bufora;
+    uint16_t zarezerwowane; // POPRAWKA: Specyfikacja MB2 wymaga tu dokładnie 2 bajtów (uint16_t)
+} __attribute__((packed));

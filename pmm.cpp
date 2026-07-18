@@ -10,7 +10,6 @@
 #include <stddef.h>
 
 // Uproszczony model - rezerwacja z góry 32 MB mapy by pomieścić aż do 1 Terabajta RAM.
-// 1 TB = 2^40 bajtów = 2^28 ramek = ~268 milionów bitów = 33 Megabajty zajętości w pamięci.
 // By skrócić binarkę dla deweloperki ograniczmy obsługę do 4GB max (131072 bajty mapy).
 #define MAX_RAMEK (1048576) // (4GB / 4KB)
 uint8_t mapa_bitowa[MAX_RAMEK / 8];
@@ -25,8 +24,8 @@ void OdblokujRamke(uint64_t adres_fizyczny) {
 
     uint64_t indeks_bajtu = numer_ramki / 8;
     uint8_t  indeks_bitu  = numer_ramki % 8;
-    mapa_bitowa[indeks_bajtu] |= (1 << indeks_bitu); // Ustawienie na 1 oznacza że blokuje... wróć, tu na odwrót, umówmy się że 1 to WOLNE, by malloc znalazł "1"
-    // Poprawka myślowa - 1 to wolne, 0 to zajęte (częsta konwencja ułatwiająca szukanie z pomocą instrukcji popcnt)
+    // 1 oznacza WOLNE, by ZaalokujRamke łatwiej znalazło "1"
+    mapa_bitowa[indeks_bajtu] |= (1 << indeks_bitu); 
 }
 
 void ZabezpieczRamke(uint64_t adres_fizyczny) {
@@ -35,7 +34,8 @@ void ZabezpieczRamke(uint64_t adres_fizyczny) {
 
     uint64_t indeks_bajtu = numer_ramki / 8;
     uint8_t  indeks_bitu  = numer_ramki % 8;
-    mapa_bitowa[indeks_bajtu] &= ~(1 << indeks_bitu); // Wyzerowanie bitu na 0 = Zajęte
+    // 0 oznacza ZAJĘTE/ZABLOKOWANE
+    mapa_bitowa[indeks_bajtu] &= ~(1 << indeks_bitu); 
 }
 
 bool CzyRamkaWolna(uint64_t adres_fizyczny) {
@@ -83,18 +83,21 @@ void InicjalizujPMM(uint64_t adres_info_multiboot) {
         // Oblicz ilość wpisów na podstawie długości zwróconego tagu
         uint32_t liczba_wpisow = (mapa_mmap->rozmiar - sizeof(TagMapyPamieciMB2)) / mapa_mmap->rozmiar_wpisu;
 
-        // Przejdź wszystkie znalezione partycje i zwolnij ramki należące do użytecznych sektorów
         for (uint32_t i = 0; i < liczba_wpisow; i++) {
-            WpisMapyPamieciMB2* wezel = &mapa_mmap->wpisy[i];
+            // POPRAWKA ZGODNOŚCIOWA: Iterowanie po surowych bajtach uwzględniając `rozmiar_wpisu` od GRUB-a.
+            WpisMapyPamieciMB2* wezel = (WpisMapyPamieciMB2*)((uint8_t*)mapa_mmap->wpisy + (i * mapa_mmap->rozmiar_wpisu));
             
             // Typ 1 = Wolny, dostępny RAM. Pozostałe (ACPI itp.) ignorujemy.
             if (wezel->typ_obszaru == 1) {
                 // Odbezpiecz iteracyjnie co stronę w obszarze
                 for (uint64_t adres = wezel->adres_bazowy; adres < (wezel->adres_bazowy + wezel->dlugosc); adres += ROZMIAR_RAMKI) {
                     OdblokujRamke(adres);
-                    if (adres / ROZMIAR_RAMKI > najwyzsza_znaleziona_ramka) {
-                        najwyzsza_znaleziona_ramka = adres / ROZMIAR_RAMKI;
-                    }
+                }
+                
+                // POPRAWKA WYDAJNOŚCIOWA: Aktualizuj szczyt pamięci tylko raz dla sekcji (zamiast dla każdej ramki osobno)
+                uint64_t koncowa_ramka = (wezel->adres_bazowy + wezel->dlugosc) / ROZMIAR_RAMKI;
+                if (koncowa_ramka > najwyzsza_znaleziona_ramka) {
+                    najwyzsza_znaleziona_ramka = koncowa_ramka;
                 }
             }
         }
@@ -110,12 +113,15 @@ void InicjalizujPMM(uint64_t adres_info_multiboot) {
     uint64_t jadro_koniec = (uint64_t)&__kernel_end;
     for (uint64_t a = jadro_start; a < jadro_koniec; a += ROZMIAR_RAMKI) ZabezpieczRamke(a);
 
-    // Blokujemy przestrzeń samych struktur z Multiboot2 by ich nie utracić przed przepisaniem!
-    // (Załóżmy skromnie że zajęły 1 ramkę w przydziale Bootloadera, tu powinna być odliczona długość z `calkowity_rozmiar`)
-    ZabezpieczRamke(adres_info_multiboot);
+    // POPRAWKA BEZPIECZEŃSTWA: Zabezpiecz całą strukturę Multiboot2 w pamięci.
+    // Struktura ta potrafi być duża (często >4KB), więc pętla chroni nas przed utratą tych danych!
+    for (uint64_t a = adres_info_multiboot; a < adres_info_multiboot + calkowity_rozmiar; a += ROZMIAR_RAMKI) {
+        ZabezpieczRamke(a);
+    }
 
     // Blokujemy obszar APIC MMIO 0xFEE00000 (Zaraz pod granicą 4GB)
     ZabezpieczRamke(0xFEE00000);
+    ZabezpieczRamke(0xFEC00000);
 }
 
 // Wydziel z puli

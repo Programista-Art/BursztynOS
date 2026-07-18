@@ -9,15 +9,16 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h> 
 
 #define PSF_ROZMIAR_BLOKU 512
-#define PSF_MAX_NAZWA 28 // 28 znaków nazwy + 4 bajty ID = 32 bajty na wpis
-#define PSF_MAX_BLOKOW_W_WEZLE 10 // Uproszczenie, na razie tylko bezpośrednie wskaźniki na bloki
+#define PSF_MAX_NAZWA 28 
+#define PSF_MAX_BLOKOW_W_WEZLE 64 // <-- ZWIĘKSZONO! Pozwala na pliki do 32 KB
 
-// Deklaracje flag dla identyfikacji węzła
-#define TYP_WOLNY 0
-#define TYP_PLIK 1
-#define TYP_KATALOG 2
+// --- DEFINICJE TYPÓW WĘZŁÓW ---
+#define TYP_WOLNY    0
+#define TYP_PLIK     1
+#define TYP_KATALOG  2
 
 // Struktura opisująca korzeń i układ pamięci RAM dysku
 struct superblok {
@@ -29,31 +30,34 @@ struct superblok {
     uint32_t start_danych;      // Od którego bloku fizycznie zaczynają się dane surowe
 } __attribute__((packed));
 
-// Węzeł Indeksowy (tzw. Inode). Reprezentuje jeden twór na dysku (Plik lub Katalog)
+// Węzeł Indeksowy (Inode) - Zwiększono do 512 bajtów (1 Pełny Blok)
 struct wezel_indeksowy {
-    uint8_t typ;                                 // TYP_WOLNY, TYP_PLIK, lub TYP_KATALOG
-    uint32_t rozmiar_w_bajtach;                  // Aktualny rozmiar zarezerwowanych danych pliku (lub ilość wpisów katalogowych)
-    uint32_t wskazniki_blokow[PSF_MAX_BLOKOW_W_WEZLE]; // Bezpośrednie identyfikatory bloków surowych przydzielonych dla tego tworu
+    uint8_t typ;                                 
+    uint32_t rozmiar_w_bajtach;                  
+    uint32_t wskazniki_blokow[PSF_MAX_BLOKOW_W_WEZLE]; 
     
-    // Wypełniacz do równych 64 bajtów by na jednym bloku (512b) zmieściło się ich równo 8.
-    // 1 (typ) + 4 (rozmiar) + 40 (wskazniki 10x4) = 45 bajtow. Zostaje 19.
-    uint8_t zarezerwowane[19]; 
+    // Wypychacz struktury do równego rozmiaru 512 bajtów 
+    // (1 bajt typ + 4 bajty rozmiar + 256 bajtów wskazniki = 261. Zostaje 251 bajtów)
+    uint8_t zarezerwowane[251]; 
 } __attribute__((packed));
 
-// Pojedynczy wpis leżący na bloku przypisanym węzłowi typu KATALOG
-// Jeśli wezel o typie KATALOG wskazuje na blok danych np. nr 5, to na bloku nr 5
-// ułożona jest tablica tych wpisów (512 / 32 = 16 Wpisów w jednym bloku)
 struct wpis_katalogowy {
-    uint32_t id_wezla;                 // Odnośnik - 0 oznacza pusty wpis, inne to cel do `wezel_indeksowy`
-    char nazwa[PSF_MAX_NAZWA];         // C-String z nazwą (np. "plik.txt" lub "System")
+    uint32_t id_wezla;                 
+    char nazwa[PSF_MAX_NAZWA];         
 } __attribute__((packed));
 
-// --- API Publiczne Jądra (Konwencja snake_case) ---
-
+#ifdef __cplusplus
 extern "C" {
+#endif
+
     void inicjalizuj_psf(void* adres_ram_dysku, uint32_t rozmiar_w_bajtach);
     bool utworz_katalog(const char* sciezka);
     bool utworz_plik(const char* sciezka);
     bool zapisz_do_pliku(const char* sciezka, const char* dane, uint32_t dlugosc);
     bool czytaj_z_pliku(const char* sciezka, char* bufor, uint32_t max_dlugosc);
+    uint8_t* bsp_wczytaj_plik_do_pamieci(const char* sciezka, uint64_t* rozmiar_wyj);
+    bool wylistuj_katalog(const char* sciezka, char* bufor, uint32_t max_dlugosc);
+
+#ifdef __cplusplus
 }
+#endif

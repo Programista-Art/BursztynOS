@@ -26,8 +26,7 @@ zaladuj_zaktualizowane_gdt:
     mov %ax, %gs                               /* Rejestr przestrzeni specjalnej GS */
     mov %ax, %ss                               /* Rejestr wskaźnika docelowego Stack Segment (SS) */
 
-    /* 
-     * Aby zaktualizować Segment Kodu Jądra CS używamy "Far Jump" / Return na 64 bity (iretq albo retfq).
+    /* * Aby zaktualizować Segment Kodu Jądra CS używamy "Far Jump" / Return na 64 bity (iretq albo retfq).
      * Odłóż wymagany Selektor Kodu (0x08) i spreparowany w C++ adres na stos 
      * zanim wymusisz zsynchronizowanie rejestru skokiem LRETQ.
      */
@@ -151,6 +150,9 @@ wspolne_isr_wejscie:
     /* Oczekujemy na zwrot wskaźnika w obróbce System V AMD64 do RDI. To nasz "struct RejestryStanowe* r" na wlocie C++! */
     movq %rsp, %rdi                            
 
+    /* KRYTYCZNE: Zgodnie z wytycznymi ABI, należy wyzerować flagę kierunku (Direction Flag) przed skokiem do C++! */
+    cld
+
     /* Rozpoczynamy procedurę C++ z nowym, wyjętym środowiskiem w C++ bez obaw o stan starego kodu */
     .extern WspolnaObslugaPrzerwan
     call WspolnaObslugaPrzerwan
@@ -179,8 +181,7 @@ wspolne_isr_wejscie:
     /* Opuść wektor procedury przywracając ostateczny RIP i powracając z dalekiej zaświatówki przez specyficzny Return po Interrupt Gate */
     iretq
 
-/* 
- * Zadeklarowanie tabeli macierzowej zbierającej wskaźniki na poszczególne pakiety 
+/* * Zadeklarowanie tabeli macierzowej zbierającej wskaźniki na poszczególne pakiety 
  * dla skryptu C++ który poprosi o jej załadowanie do GDT pod numerami (Indeksy w tabeli wskaźników 0-47)
  */
 .section .data

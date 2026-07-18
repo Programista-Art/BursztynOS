@@ -1,83 +1,55 @@
 /*
- * Minimalny punkt wejściowy jądra systemu operacyjnego zrealizowany w języku C++ (64-bit).
- * Zostaje on wywołany przez skrypt `boot.S` po przełączeniu procesora
- * ze środowiska chronionego (Protected Mode) w ostateczny tryb Long Mode.
+ * Minimalny punkt wejściowy jądra Bursztyn OS w języku C++ (64-bit).
+ * Przystosowany do Trybu Graficznego (Linear Framebuffer).
  */
 
 #include <stdint.h>
 
 #include "pamiec.h"
 #include "psf.h"
+#include "grafika.h" // PODŁĄCZENIE GRAFIKI
+#include "loader.h"  // Zapewnia dostęp do Loadera programów .bur
 
-// Deklaracje dostępnych publicznych metod z innych modułów
+// Deklaracje zewnętrznych procedur asemblerowych i systemowych
 extern "C" void InicjalizujGDT();
 extern "C" void InicjalizujIDT();
-extern "C" void InicjalizujAPIC();
-extern "C" void InicjalizujMyszPS2(); // Deklaracja z mysz.cpp
+extern "C" void inicjalizuj_apic(); // NAPRAWIONE: Brakujący średnik!
+extern "C" void InicjalizujMyszPS2();
 
-// Pobieramy informację o najwyższej ramce z PMM (Menedżera Pamięci Fizycznej)
+// Nowe podsystemy z poprzednich kroków (TSS i BWS)
+extern "C" void inicjalizuj_tss(void* stos_jadra);
+extern "C" void zaladuj_tss(uint16_t selektor_tss);
+extern "C" void inicjalizuj_syscalls();
+extern "C" uint64_t stack_top; // Wskaźnik na szczyt stosu zdefiniowany w boot.S
+
+// Zmienna z PMM (Physical Memory Manager) określająca ilość pamięci RAM
 extern uint64_t najwyzsza_znaleziona_ramka; 
 
-// --- NOWE: ULEPSZONE ZARZĄDZANIE EKRANEM ---
-static int aktualny_wiersz_logow = 0;
+// Automatycznie wygenerowane wskaźniki na binarkę powłoki
+extern "C" uint8_t _binary_shell_bin_start[];
+extern "C" uint8_t _binary_shell_bin_end[];
 
-// Wypisuje logi systemowe linijka po linijce (od góry)
-void WypiszLog(const char* tekst) {
-    volatile uint16_t* bufor_vga = (uint16_t*)0xB8000;
-    // uint16_t kolor = (0x0A << 8); // Jasnozielony dla logów jądra
-    uint16_t kolor = (0x06 << 8); // Kod 0x06 to Brązowy/Ciemnopomarańczowy
-    
-    // Zabezpieczenie przed wyjściem za ekran (zostawiamy wiersz 24 na klawiaturę)
-    if (aktualny_wiersz_logow >= 23) {
-        aktualny_wiersz_logow = 0; // W prymitywnej wersji po prostu wracamy na góre ekranu
-    }
+// ---------------------------------------------------------
+// Własne, wbudowane funkcje pomocnicze (ponieważ nie mamy biblioteki standardowej <string.h>)
+// ---------------------------------------------------------
 
-    int i = 0;
-    while (tekst[i] != '\0' && i < 80) {
-        bufor_vga[(aktualny_wiersz_logow * 80) + i] = kolor | tekst[i];
-        i++;
-    }
-    aktualny_wiersz_logow++;
-}
-
-// Funkcja współdzielona z klawiatura.cpp i mysz.cpp
-// Zarezerwowana wyłącznie dla dolnego paska (wiersz 24)
-extern "C" void WypiszNaEkranie(const char* tekst) {
-    volatile uint16_t* bufor_vga = (uint16_t*)0xB8000;
-    uint16_t kolor = (0x0E << 8); // Żółty kolor dla interakcji (klawiatura/mysz)
-    int i = 0;
-    
-    // Piszemy tylko na ostatnim, 24. wierszu ekranu
-    while (tekst[i] != '\0' && i < 80) {
-        bufor_vga[(24 * 80) + i] = kolor | tekst[i];
-        i++;
-    }
-    
-    // Wyczyść resztę linii wizualnie (niezbędne, by klawisz Backspace działał poprawnie)
-    while (i < 80) {
-        bufor_vga[(24 * 80) + i] = kolor | ' ';
-        i++;
-    }
-}
-
-// --- NOWE: FUNKCJE POMOCNICZE (Liczby na tekst) ---
 void UIntToStr(uint64_t wartosc, char* bufor) {
-    if (wartosc == 0) {
-        bufor[0] = '0';
-        bufor[1] = '\0';
-        return;
+    if (wartosc == 0) { 
+        bufor[0] = '0'; 
+        bufor[1] = '\0'; 
+        return; 
     }
-    int i = 0;
+    int i = 0; 
     char temp[32];
-    // Wyciąganie reszty z dzielenia by zbudować tekst od tyłu
-    while (wartosc > 0) {
-        temp[i++] = (wartosc % 10) + '0';
-        wartosc /= 10;
+    
+    while (wartosc > 0) { 
+        temp[i++] = (wartosc % 10) + '0'; 
+        wartosc /= 10; 
     }
-    // Odwrócenie na poprawną kolejność
-    int j = 0;
-    while (i > 0) {
-        bufor[j++] = temp[--i];
+    
+    int j = 0; 
+    while (i > 0) { 
+        bufor[j++] = temp[--i]; 
     }
     bufor[j] = '\0';
 }
@@ -90,43 +62,54 @@ void ZlaczStringi(char* cel, const char* str1, const char* str2, const char* str
     cel[i] = '\0';
 }
 
-// --- GŁÓWNY PUNKT WEJŚCIA ---
+// ---------------------------------------------------------
+// GŁÓWNA FUNKCJA JĄDRA SYSTEMU
+// ---------------------------------------------------------
+
 extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_ptr) {
+    // 1. Ochrona: Upewnijmy się, że uruchomił nas autoryzowany bootloader (GRUB)
     if (multiboot_magic != 0x36D76289) {
-        return; 
+        return; // Kernel Panic: Zły bootloader!
     }
-
+    InicjalizujGDT();
+    InicjalizujIDT();
+        // (Musi odbyć się bezpośrednio po GDT, a przed jakimikolwiek przerwaniami)
+    inicjalizuj_tss((void*)&stack_top);
+    zaladuj_tss(0x28); // Ładujemy 5. wpis w GDT (5 * 8 bajtów = 0x28)
+    // 2. Fundamentalna inicjalizacja hardware'u i zarządzania pamięcią
     InicjalizujPMM(multiboot_info_ptr);
+   
+   
+    InicjalizujVMM(); // Paging 4-poziomowy
 
-    WypiszLog("========================================");
-    WypiszLog("      Witamy w Bursztyn OS 64-bit       ");
-    WypiszLog("========================================");
+    // --- NOWE: Inicjalizacja Bursztynowych Wywołań Systemowych (BWS) ---
+    inicjalizuj_syscalls();
 
-    // Dynamiczne obliczanie i wypisywanie pamięci RAM w megabajtach
-    // 1 Ramka = 4096 bajtów (4KB)
+    // 3. WŁĄCZENIE EKRANU W TRYBIE GRAFICZNYM (LFB pobrany z tagów Multiboot2)
+    InicjalizujGrafike(multiboot_info_ptr);
+
+    // UWAGA: Od tego momentu mamy GUI! Używamy graficznego WypiszLog.
+    WypiszLog("==================================================");
+    WypiszLog(" Witamy w Bursztyn OS 64-bit (Skladacz Obrazu LFB)");
+    WypiszLog("==================================================");
+
+    // 4. Obliczanie i logowanie dostępnej pamięci RAM
     uint64_t ram_mb = (najwyzsza_znaleziona_ramka * 4096) / (1024 * 1024);
-    
-    char ram_str[32];
-    char ram_msg[80];
+    char ram_str[32]; char ram_msg[80];
     UIntToStr(ram_mb, ram_str);
     ZlaczStringi(ram_msg, "[PMM] Skan pamieci fizycznej. Wykryto: ", ram_str, " MB RAM");
     WypiszLog(ram_msg);
 
-    InicjalizujGDT();
-    WypiszLog("[GDT] Tablica Deskryptorow zaladowana.");
+    WypiszLog("[VMM] Paging 4-poziomowy aktywowany. Tablice przebudowane.");
 
-    InicjalizujIDT();
-    WypiszLog("[IDT] Tabela Przerwan (ISR) gotowa.");
-
-    InicjalizujVMM();
-    WypiszLog("[VMM] Paging 4-poziomowy aktywowany.");
-
-    uint64_t adres_wirtualny_dysku = 0x40000000;
-    uint32_t rozmiar_dysku = 2 * 1024 * 1024; // 2 MB
+    // 5. Konfiguracja RAM-Dysku pod system plików BSP (Bursztynowy System Plików)
+    uint64_t adres_wirtualny_dysku = 0x40000000; // Podnosimy wysoko - 1GB
+    uint32_t rozmiar_dysku = 2 * 1024 * 1024;    // 2 MB przestrzeni
 
     for (uint32_t i = 0; i < rozmiar_dysku; i += 4096) {
         void* wolna_ramka_fizyczna = ZaalokujRamke();
         if (wolna_ramka_fizyczna) {
+            // Flagi 0b11 = Present (Obecna) | Read/Write (Zapisywalna)
             ZmapujStrone((void*)(adres_wirtualny_dysku + i), wolna_ramka_fizyczna, 0b00000011);
         }
     }
@@ -134,21 +117,47 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     inicjalizuj_psf((void*)adres_wirtualny_dysku, rozmiar_dysku);
     WypiszLog("[BSP] Bursztynowy System Plikow zamontowany w RAM (2MB).");
 
-    InicjalizujAPIC();
-    WypiszLog("[APIC] Nowoczesny kontroler przerwan uruchomiony.");
-
-    // Inicjalizacja myszy PS/2 przed włączeniem przerwań
+    // 6. Inicjalizacja asynchronicznych mechanizmów wejścia
+    inicjalizuj_apic();
+    WypiszLog("[APIC] Kontroler przerwan (LAPIC/IOAPIC) uruchomiony.");
+    
     InicjalizujMyszPS2();
     WypiszLog("[I/O] Sterowniki Mysz i Klawiatura (PS/2) gotowe.");
-    
-    WypiszLog("----------------------------------------");
-    WypiszLog("System operacyjny gotowy. Mozesz pisac!");
+    WypiszLog("[BWS] API Wywolan Systemowych gotowe.");
 
-    // Rozpoczynamy asynchroniczne przyjmowanie przerwań (klawiatura ożywa)
+    WypiszLog("--------------------------------------------------");
+    WypiszLog("System operacyjny gotowy!");
+
+    // 7. Odblokowanie przerwań sprzętowych
     asm volatile("sti");
 
+    // UWAGA: Jeśli masz już skompilowaną binarkę `.bur`, możesz zapisać ją 
+    // sztucznie do systemu plików i przetestować ładowarkę Ring 3:
+    // bws_uruchom_program_z_pliku("/aplikacja.bur", 4, 0xFF);
+// 7. Odblokowanie przerwań sprzętowych
+    asm volatile("sti");
+
+ // Zapisujemy wyodrębnioną binarkę powłoki na wirtualny RAM Dysk
+    utworz_plik("/shell.bur"); // <-- DODANA LINIJKA: Tworzy plik przed zapisem!
+    uint64_t shell_rozmiar = (uint64_t)(_binary_shell_bin_end - _binary_shell_bin_start);
+
+
+   // Logowanie diagnostyczne rozmiaru (pomoże nam upewnić się, czy plik nie jest pusty)
+    char dbg_rozmiar[32];
+    char dbg_msg[80];
+    UIntToStr(shell_rozmiar, dbg_rozmiar);
+    ZlaczStringi(dbg_msg, "[JADRO] Binarka shell.bur pobrana z linkera, rozmiar: ", dbg_rozmiar, " bajtow");
+    WypiszLog(dbg_msg);
+
+    zapisz_do_pliku("/shell.bur", (const char*)_binary_shell_bin_start, shell_rozmiar);
+    WypiszLog("[BSP] Wbudowana Powloka gotowa do odczytu z dysku.");
+
+    // Skaczemy do Ring 3 uruchamiając Terminal!
+    bws_uruchom_program_z_pliku("/shell.bur", 4, 0xFF);
+
+
+    // 8. Pętla bezczynności - Kernel czeka na eventy (Halt state)
     while (true) {
-        // Procesor śpi dopóki nie zostanie wybudzony np. przez wciśnięcie klawisza
         asm volatile ("hlt");
     }
 }
