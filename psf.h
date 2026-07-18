@@ -67,6 +67,8 @@ extern "C" {
     bool czytaj_z_pliku(const char* sciezka, char* bufor, uint32_t max_dlugosc);
     uint8_t* bsp_wczytaj_plik_do_pamieci(const char* sciezka, uint64_t* rozmiar_wyj);
     bool wylistuj_katalog(const char* sciezka, char* bufor, uint32_t max_dlugosc);
+    bool usun_twor(const char* sciezka);
+    bool zmien_nazwe_tworu(const char* sciezka, const char* nowa_nazwa);
 
 #ifdef __cplusplus
 }

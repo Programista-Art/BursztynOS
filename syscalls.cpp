@@ -17,6 +17,10 @@ extern "C" {
     char pobierz_znak_klawiatury(); 
     bool czytaj_z_pliku(const char* sciezka, char* bufor, uint32_t max_dlugosc);
     bool wylistuj_katalog(const char* sciezka, char* bufor, uint32_t max_dlugosc);
+    
+    // NOWOŚĆ: Prototypy dla usuwania i zmiany nazwy
+    bool usun_twor(const char* sciezka);
+    bool zmien_nazwe_tworu(const char* sciezka, const char* nowa_nazwa);
 }
 
 // Zewnętrzny odnośnik do punktu wejściowego SYSCALL zakodowanego w Asemblerze
@@ -92,7 +96,7 @@ extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t ar
             // PZB: Użytkownicy (poziom 4 i wyżej) nie mają praw modyfikowania krytycznych folderów systemowych!
             if (aktywny_proces.poziom_zaufania >= PZB_UZYTKOWNIK && 
                (sciezka_zaczyna_sie_od(sciezka, "/system") || sciezka_zaczyna_sie_od(sciezka, "/jadro"))) {
-                wypisz_na_ekranie("\n[PZB Odrzucono] Ring 3 probuje modyfikowac pliki systemowe!\n");
+                wypisz_na_ekranie("\n[PZB Odrzucono] Ring 3 probuje tworzyc pliki w obszarze systemowym!\n");
                 return 0; 
             }
 
@@ -144,6 +148,47 @@ extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t ar
                 return 0;
             }
             bool result = wylistuj_katalog((const char*)arg1, (char*)arg2, (uint32_t)arg3);
+            kod_wyniku = result ? 1 : 0;
+            break;
+        }
+        
+        case 7: {
+            // sys_usun_twor(const char* sciezka) - NOWOŚĆ
+            if (!(aktywny_proces.uprawnienia & PRAWO_PLIKI_ZAPISZ)) {
+                wypisz_na_ekranie("\n[BWS Zablokowano] Brak uprawnienia PRAWO_PLIKI_ZAPISZ!\n");
+                return 0;
+            }
+            const char* sciezka = (const char*)arg1;
+            
+            // Ochrona folderów systemowych
+            if (aktywny_proces.poziom_zaufania >= PZB_UZYTKOWNIK && 
+               (sciezka_zaczyna_sie_od(sciezka, "/system") || sciezka_zaczyna_sie_od(sciezka, "/jadro"))) {
+                wypisz_na_ekranie("\n[PZB Odrzucono] Ring 3 probuje usuwac pliki systemowe!\n");
+                return 0; 
+            }
+
+            bool result = usun_twor(sciezka);
+            kod_wyniku = result ? 1 : 0;
+            break;
+        }
+        
+        case 8: {
+            // sys_zmien_nazwe_tworu(const char* sciezka, const char* nowa_nazwa) - NOWOŚĆ
+            if (!(aktywny_proces.uprawnienia & PRAWO_PLIKI_ZAPISZ)) {
+                wypisz_na_ekranie("\n[BWS Zablokowano] Brak uprawnienia PRAWO_PLIKI_ZAPISZ!\n");
+                return 0;
+            }
+            const char* sciezka = (const char*)arg1;
+            const char* nowa_nazwa = (const char*)arg2;
+            
+            // Ochrona folderów systemowych
+            if (aktywny_proces.poziom_zaufania >= PZB_UZYTKOWNIK && 
+               (sciezka_zaczyna_sie_od(sciezka, "/system") || sciezka_zaczyna_sie_od(sciezka, "/jadro"))) {
+                wypisz_na_ekranie("\n[PZB Odrzucono] Ring 3 probuje zmieniac nazwy plikow systemowych!\n");
+                return 0; 
+            }
+
+            bool result = zmien_nazwe_tworu(sciezka, nowa_nazwa);
             kod_wyniku = result ? 1 : 0;
             break;
         }

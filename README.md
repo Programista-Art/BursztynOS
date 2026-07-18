@@ -11,7 +11,7 @@ System jest rozwijany z myślą o architekturze x86-64, implementując własne J
 # Program  powłoka systemowa shell
 ![alt](image/shell1.png)
 
-## Dostępne 14 komend w Shellu
+## Dostępne 16 komend w Shellu
 1. pomoc - wyświetla dostępną listę komend.
 1. system - wypisuje informacje o architekturze Bursztyn OS.
 1. wersja - krótka informacja o wersji powłoki i OS
@@ -21,7 +21,9 @@ System jest rozwijany z myślą o architekturze x86-64, implementując własne J
 1. utworz - tworzy nowy, pusty plik na RAM-Dysku.
 1. zapisz - zapisuje plik
 1. czytaj [plik] - wyświetla zawartość pliku  
-1. pliki - wylistuj wszystkie pliki
+1. pliki [kat] - wylistuj wszystkie pliki
+1. usun [sciezka]- usuwa plik lub katalog
+1. zmien_nazwe - zmienia nazwę (kreator)
 1. gdzie - ścieżka obecnego katalogu
 1. pisz [tekst] - wypisze z powrotem na ekran to, co wpiszesz po spacji.
 1. cytat - wypisze losowy, motywujący cytat programistyczny.

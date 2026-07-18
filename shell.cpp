@@ -30,8 +30,8 @@ extern "C" __attribute__((section(".naglowek"), used))
 const struct NaglowekBur naglowek = {
     {'B', 'U', 'R', '\0'},
     (uint64_t)&_start,
-    4096,  8192, 0x401000, // ZWIĘKSZONE: Kod powłoki zajmuje teraz do 8 KB (2 strony)
-    12288, 8192, 0x403000  // ZWIĘKSZONE: Dane przesunięte na offset 12 KB, pojemność zwiększona do 8 KB
+    4096,  8192, 0x401000, // ZWIĘKSZONE: Kod powłoki zajmuje do 8 KB (2 strony)
+    12288, 8192, 0x403000  // ZWIĘKSZONE: Dane przesunięte na offset 12 KB, pojemność do 8 KB
 };
 
 // ---------------------------------------------------------
@@ -61,9 +61,11 @@ void print(const char* tekst) { bws_wywolaj(1, (uint64_t)tekst); }
 bool utworz(const char* plik) { return bws_wywolaj(2, (uint64_t)plik) != 0; }
 bool zapisz_plik(const char* plik, const char* dane, uint32_t dlugosc) { return bws_wywolaj(3, (uint64_t)plik, (uint64_t)dane, dlugosc) != 0; }
 char getch() { return (char)bws_wywolaj(4); }
-// Nowe funkcjonalności dyskowe
 bool czytaj_plik(const char* plik, char* bufor, uint32_t max_dlugosc) { return bws_wywolaj(5, (uint64_t)plik, (uint64_t)bufor, max_dlugosc) != 0; }
 bool wylistuj_katalog(const char* sciezka, char* bufor, uint32_t max_dlugosc) { return bws_wywolaj(6, (uint64_t)sciezka, (uint64_t)bufor, max_dlugosc) != 0; }
+// NOWE: Zaawansowane manipulacje na plikach (BWS-7 i BWS-8)
+bool usun_twor(const char* sciezka) { return bws_wywolaj(7, (uint64_t)sciezka) != 0; }
+bool zmien_nazwe_tworu(const char* sciezka, const char* nowa_nazwa) { return bws_wywolaj(8, (uint64_t)sciezka, (uint64_t)nowa_nazwa) != 0; }
 
 int strlen(const char* str) {
     int len = 0;
@@ -81,7 +83,6 @@ bool strncmp(const char* s1, const char* s2, int n) {
     return n == 0 || *(const unsigned char*)s1 == *(const unsigned char*)s2;
 }
 
-// Prawdziwa sprzętowa losowość w oparciu o cykle taktowania procesora (RDTSC)
 static inline uint64_t pobierz_cykle() {
     uint32_t lo, hi;
     asm volatile ("rdtsc" : "=a" (lo), "=d" (hi));
@@ -125,7 +126,6 @@ void formatuj_sciezke(const char* wejscie, char* wyjscie) {
     }
 }
 
-// Zmienia liczbę całkowitą na tekst (potrzebne do gier/kalkulatora/losuj)
 void int_do_str(int wartosc, char* bufor) {
     if (wartosc == 0) { bufor[0] = '0'; bufor[1] = '\0'; return; }
     int i = 0;
@@ -141,7 +141,6 @@ void int_do_str(int wartosc, char* bufor) {
     bufor[j] = '\0';
 }
 
-// Pamięć historii poleceń
 char historia[5][128];
 int hist_ilosc = 0;
 
@@ -152,7 +151,7 @@ int hist_ilosc = 0;
 extern "C" void _start() {
     print("\n");
     print("==================================================\n");
-    print(" Bursztyn Shell v1.5 (Ring 3 Uzytkownik)\n");
+    print(" Bursztyn Shell v1.6 (Bursztyn OS Ring 3)\n");
     print(" Wpisz 'pomoc', aby zobaczyc liste komend.\n");
     print("==================================================\n");
 
@@ -165,7 +164,6 @@ extern "C" void _start() {
 
         if (strlen(bufor_komendy) == 0) continue;
 
-        // Zapis do historii (przesunięcie starych wpisów w dół)
         for(int i = 4; i > 0; i--) {
             for(int j=0; j<128; j++) historia[i][j] = historia[i-1][j];
         }
@@ -182,10 +180,12 @@ extern "C" void _start() {
             print("  historia      - ostatnie 5 polecen\n");
             print("  czysc         - czysci ekran terminala\n");
             print("--- KATEGORIA: PLIKI ---\n");
-            print("  utworz        - nowy, pusty plik\n");
+            print("  utworz        - nowy, pusty plik / katalog\n");
             print("  zapisz        - dodaje tekst do pliku\n");
             print("  czytaj [plik] - wyswietla zawartosc pliku\n");
-            print("  pliki         - wylistuj wszystkie pliki\n");
+            print("  pliki [kat]   - listuje pliki. Daj sciezke, np: pliki /programy\n");
+            print("  usun [sciezka]- usuwa plik lub katalog\n");
+            print("  zmien_nazwe   - zmienia nazwe (kreator)\n");
             print("  gdzie         - sciezka obecnego katalogu\n");
             print("--- KATEGORIA: ROZRYWKA ---\n");
             print("  pisz [txt]    - powtarza tekst\n");
@@ -193,10 +193,12 @@ extern "C" void _start() {
             print("  losuj         - rzuca koscia (1-6)\n");
         }
         else if (strcmp(bufor_komendy, "system")) {
-            print("OS: Bursztyn OS x86_64\nJadro: Monolityczne, VMM Paging 4-lvl\nDysk: RAM Dysk (BSP) 2MB\n");
+            print("OS: Bursztyn OS x86_64\nJadro: Monolityczne, VMM Paging 4-lvl\n");
+            print("Dysk: Bursztynowy System Plikow (BSP64), Bloki 4KB\n");
+            print("Ochrona: Poziomy Zaufania Bursztyna (PZB) Aktywne.\n");
         }
         else if (strcmp(bufor_komendy, "wersja")) {
-            print("Bursztyn Shell v1.5 (Build: Ring 3 Freestanding)\n");
+            print("Bursztyn Shell v1.6 (Build: Ring 3 Freestanding)\n");
         }
         else if (strcmp(bufor_komendy, "kto")) {
             print("Zalogowano jako: Gosc (Prawa: Przestrzen Uzytkownika Ring 3)\n");
@@ -206,73 +208,67 @@ extern "C" void _start() {
         }
         else if (strcmp(bufor_komendy, "historia")) {
             for(int i = 0; i < hist_ilosc; i++) {
-                char numer[4];
-                int_do_str(i + 1, numer);
+                char numer[4]; int_do_str(i + 1, numer);
                 print(numer); print(". "); print(historia[i]); print("\n");
             }
         }
         else if (strcmp(bufor_komendy, "czysc")) {
-            for(int i = 0; i < 40; i++) print("\n"); // "Czyści" poprzez wypchnięcie tekstu w górę
+            for(int i = 0; i < 40; i++) print("\n");
         }
         else if (strcmp(bufor_komendy, "losuj")) {
             uint64_t cykle = pobierz_cykle();
             int kosc = (cykle % 6) + 1;
-            char wynik_str[8];
-            int_do_str(kosc, wynik_str);
+            char wynik_str[8]; int_do_str(kosc, wynik_str);
             print("Rzucasz koscmi... Wypadlo: "); print(wynik_str); print("!\n");
         }
         else if (strcmp(bufor_komendy, "cytat")) {
-            char buf[512];
-            for(int i=0; i<512; i++) buf[i] = 0; // Wyczyść bufor
-
+            char buf[512]; for(int i=0; i<512; i++) buf[i] = 0; 
             if (czytaj_plik("/cytaty.txt", buf, 511)) {
-                print("--- Cytaty wczytane z /cytaty.txt ---\n");
-                print(buf);
-                print("\n-------------------------------------\n");
+                print("--- Cytaty wczytane z /cytaty.txt ---\n"); print(buf); print("\n");
             } else {
-                print("Brak pliku /cytaty.txt na dysku. Tworze domyslny...\n");
+                print("Tworze domyslny plik /cytaty.txt...\n");
                 if (utworz("/cytaty.txt")) {
-                    const char* domyslne = "1. U mnie dziala.\n2. Programowanie to w 10% pisanie kodu i 90% szukanie bledu.\n3. Brak bledu to tez blad.\n";
+                    const char* domyslne = "1. U mnie dziala.\n2. Brak bledu to tez blad.\n";
                     zapisz_plik("/cytaty.txt", domyslne, strlen(domyslne));
-                    print("Plik gotowy! Wpisz komende 'cytat' jeszcze raz.\n");
-                } else {
-                    print("Blad: Nie udalo sie utworzyc /cytaty.txt\n");
+                    print("Gotowe! Wpisz 'cytat' ponownie.\n");
                 }
             }
         }
-        else if (strcmp(bufor_komendy, "pliki")) {
-            char buf[512];
-            for(int i=0; i<512; i++) buf[i] = 0; // Wyczyść bufor
-
-            if (wylistuj_katalog("/", buf, 511)) {
-                print("Pliki na wirtualnym dysku (katalog /):\n");
-                print(buf);
-                print("\n");
+        else if (strncmp(bufor_komendy, "pliki", 5)) {
+            char sciezka[64];
+            // Jeśli wpisano np. "pliki /programy", formatujemy ten fragment. Jeśli samo "pliki", używamy "/"
+            if (bufor_komendy[5] == ' ' && bufor_komendy[6] != '\0') {
+                formatuj_sciezke(&bufor_komendy[6], sciezka);
             } else {
-                print("Blad: Nie mozna odczytac katalogu glownego.\n");
+                sciezka[0] = '/'; sciezka[1] = '\0';
+            }
+
+            char buf[512];
+            for(int i=0; i<512; i++) buf[i] = 0;
+
+            if (wylistuj_katalog(sciezka, buf, 511)) {
+                print("Zawartosc zrodla ("); print(sciezka); print("):\n");
+                print(buf);
+            } else {
+                print("Blad: Katalog nie istnieje lub pusty.\n");
             }
         }
         else if (strncmp(bufor_komendy, "czytaj ", 7)) {
-            char sciezka[64];
-            formatuj_sciezke(&bufor_komendy[7], sciezka);
-            
-            char buf[512];
-            for(int i=0; i<512; i++) buf[i] = 0; // Wyczyść bufor
+            char sciezka[64]; formatuj_sciezke(&bufor_komendy[7], sciezka);
+            char buf[512]; for(int i=0; i<512; i++) buf[i] = 0; 
             
             if (czytaj_plik(sciezka, buf, 511)) {
-                print("--- Zawartosc pliku: "); print(sciezka); print(" ---\n");
-                print(buf);
-                print("\n----------------------\n");
+                print("--- "); print(sciezka); print(" ---\n"); print(buf); print("\n");
             } else {
-                print("Blad: Plik '"); print(sciezka); print("' nie istnieje lub jest pusty.\n");
+                print("Blad odczytu: Brak pliku.\n");
             }
         }
         else if (strcmp(bufor_komendy, "utworz")) {
-            print("Nazwa nowego pliku: ");
+            print("Nazwa nowego pliku/folderu (np. /moj_katalog/test.txt): ");
             char sciezka[64]; pobierz_linie(sciezka, 64); print("\n");
             char bezp[64]; formatuj_sciezke(sciezka, bezp);
             if (utworz(bezp)) { print("Zalozono: "); print(bezp); print("\n"); }
-            else print("Blad operacji dyskowej.\n");
+            else print("Blad: Zablokowane przez PZB lub bledna sciezka.\n");
         }
         else if (strcmp(bufor_komendy, "zapisz")) {
             print("Plik docelowy: ");
@@ -284,6 +280,28 @@ extern "C" void _start() {
             
             if (zapisz_plik(bezp, dane, strlen(dane))) print("Zapisano!\n");
             else print("Blad zapisu.\n");
+        }
+        else if (strncmp(bufor_komendy, "usun ", 5)) {
+            char sciezka[64]; formatuj_sciezke(&bufor_komendy[5], sciezka);
+            if (usun_twor(sciezka)) {
+                print("Usunieto obiekt: "); print(sciezka); print("\n");
+            } else {
+                print("Blad: Nie mozna usunac (sprawdz PZB lub nazwe).\n");
+            }
+        }
+        else if (strcmp(bufor_komendy, "zmien_nazwe")) {
+            print("Sciezka do zmiany (np. /stary.txt): ");
+            char stara[64]; pobierz_linie(stara, 64); print("\n");
+            char bezp_stara[64]; formatuj_sciezke(stara, bezp_stara);
+
+            print("Nowa nazwa (samo slowo, np. nowy.txt): ");
+            char nowa[64]; pobierz_linie(nowa, 64); print("\n");
+            
+            if (zmien_nazwe_tworu(bezp_stara, nowa)) {
+                print("Pyslnie zmieniono nazwe.\n");
+            } else {
+                print("Blad: Blokada PZB lub brak podanego pliku.\n");
+            }
         }
         else if (strncmp(bufor_komendy, "pisz ", 5)) {
             print(&bufor_komendy[5]); print("\n");

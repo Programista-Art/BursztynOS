@@ -54,6 +54,18 @@ static void oznacz_blok_jak_zajety(uint64_t id_bloku_danych) {
     }
 }
 
+// NOWOŚĆ: Funkcja zwalniająca blok danych (do usuwania)
+static void zwolnij_blok_danych(uint64_t id_bloku_danych) {
+    uint64_t bajt_w_bitmapie = id_bloku_danych / 8;
+    uint64_t nr_bloku_bitmapy = 1 + (bajt_w_bitmapie / PSF_ROZMIAR_BLOKU);
+    uint64_t offset_w_bloku = bajt_w_bitmapie % PSF_ROZMIAR_BLOKU;
+
+    uint8_t* blok_tablicy = pobierz_blok(nr_bloku_bitmapy);
+    if (blok_tablicy) {
+        blok_tablicy[offset_w_bloku] &= ~(1 << (id_bloku_danych % 8));
+    }
+}
+
 static uint64_t zaalokuj_wolny_blok_danych() {
     for (uint64_t i = 0; i < calkowita_liczba_blokow_danych; i++) {
         uint64_t bajt_w_bitmapie = i / 8;
@@ -375,7 +387,6 @@ extern "C" uint8_t* bsp_wczytaj_plik_do_pamieci(const char* sciezka, uint64_t* r
     return bufor_wymiany_plikow;
 }
 
-// Zaktualizowana funkcja listująca zawartość z podziałem na linie i tagami [KAT]/[PLIK]
 extern "C" bool wylistuj_katalog(const char* sciezka, char* bufor, uint32_t max_dlugosc) {
     uint64_t kat_id = rozwiaz_sciezke(sciezka, nullptr, false);
     if (kat_id == 0) return false; 
@@ -395,24 +406,20 @@ extern "C" bool wylistuj_katalog(const char* sciezka, char* bufor, uint32_t max_
         for(int j = 0; j < PSF_ROZMIAR_BLOKU / (int)sizeof(wpis_katalogowy); j++) {
             if (wpisy[j].id_wezla != 0) {
                 
-                // Pobieramy węzeł, na który wskazuje wpis w katalogu, aby sprawdzić jego typ
                 wezel_indeksowy* element = pobierz_wezel(wpisy[j].id_wezla);
                 
-                // Dodanie prefiksu [KAT] lub [PLIK]
                 const char* tag = (element && element->typ == TYP_KATALOG) ? "[KAT]  " : "[PLIK] ";
                 int t = 0;
                 while (tag[t] != '\0' && pozycja < max_dlugosc - 1) {
                     bufor[pozycja++] = tag[t++];
                 }
 
-                // Dodanie samej nazwy (np. "jadro" albo "shell.bur")
                 const char* nazwa = wpisy[j].nazwa;
                 int idx = 0;
                 while (nazwa[idx] != '\0' && pozycja < max_dlugosc - 1) {
                     bufor[pozycja++] = nazwa[idx++];
                 }
                 
-                // Złamanie linii (ENTER) na koniec każdego elementu
                 if (pozycja < max_dlugosc - 1) {
                     bufor[pozycja++] = '\n'; 
                 }
@@ -421,4 +428,74 @@ extern "C" bool wylistuj_katalog(const char* sciezka, char* bufor, uint32_t max_
     }
     bufor[pozycja] = '\0';
     return true;
+}
+
+// NOWOŚĆ: Funkcja do usuwania plików i katalogów
+extern "C" bool usun_twor(const char* sciezka) {
+    char nazwa_docelowa[PSF_MAX_NAZWA];
+    uint64_t rodzic_id = rozwiaz_sciezke(sciezka, nazwa_docelowa, true);
+    if (rodzic_id == 0) return false;
+
+    wezel_indeksowy* rodzic = pobierz_wezel(rodzic_id);
+    if (!rodzic || rodzic->typ != TYP_KATALOG) return false;
+
+    uint64_t cel_id = 0;
+
+    // Krok 1: Odnajdź wpis w katalogu i usuń powiązanie
+    for (int k = 0; k < PSF_MAX_BLOKOW_W_WEZLE; k++) {
+        if (rodzic->wskazniki_blokow[k] == BARK_BLOKU) continue;
+
+        wpis_katalogowy* wpisy = (wpis_katalogowy*)pobierz_blok(dysk_superblok->start_danych + rodzic->wskazniki_blokow[k]);
+        if (!wpisy) continue;
+
+        for(int j = 0; j < PSF_ROZMIAR_BLOKU / (int)sizeof(wpis_katalogowy); j++) {
+            if (wpisy[j].id_wezla != 0 && czy_identyczne_str(wpisy[j].nazwa, nazwa_docelowa)) {
+                cel_id = wpisy[j].id_wezla;
+                wpisy[j].id_wezla = 0; // Zwolnienie wpisu w folderze!
+                break;
+            }
+        }
+        if(cel_id != 0) break;
+    }
+
+    if (cel_id == 0) return false;
+
+    // Krok 2: Zwolnij wszystkie bloki danych węzła w mapie bitowej
+    wezel_indeksowy* cel = pobierz_wezel(cel_id);
+    if (cel) {
+        cel->typ = TYP_WOLNY;
+        for (int k = 0; k < PSF_MAX_BLOKOW_W_WEZLE; k++) {
+            if (cel->wskazniki_blokow[k] != BARK_BLOKU) {
+                zwolnij_blok_danych(cel->wskazniki_blokow[k]);
+                cel->wskazniki_blokow[k] = BARK_BLOKU;
+            }
+        }
+    }
+    return true;
+}
+
+// NOWOŚĆ: Funkcja do zmiany nazwy pliku lub folderu
+extern "C" bool zmien_nazwe_tworu(const char* sciezka, const char* nowa_nazwa) {
+    char stara_nazwa_docelowa[PSF_MAX_NAZWA];
+    uint64_t rodzic_id = rozwiaz_sciezke(sciezka, stara_nazwa_docelowa, true);
+    if (rodzic_id == 0) return false;
+
+    wezel_indeksowy* rodzic = pobierz_wezel(rodzic_id);
+    if (!rodzic || rodzic->typ != TYP_KATALOG) return false;
+
+    // Znajdź stary wpis i podmień ciąg tekstowy
+    for (int k = 0; k < PSF_MAX_BLOKOW_W_WEZLE; k++) {
+        if (rodzic->wskazniki_blokow[k] == BARK_BLOKU) continue;
+
+        wpis_katalogowy* wpisy = (wpis_katalogowy*)pobierz_blok(dysk_superblok->start_danych + rodzic->wskazniki_blokow[k]);
+        if (!wpisy) continue;
+
+        for(int j = 0; j < PSF_ROZMIAR_BLOKU / (int)sizeof(wpis_katalogowy); j++) {
+            if (wpisy[j].id_wezla != 0 && czy_identyczne_str(wpisy[j].nazwa, stara_nazwa_docelowa)) {
+                kopiuj_str(wpisy[j].nazwa, nowa_nazwa, PSF_MAX_NAZWA);
+                return true;
+            }
+        }
+    }
+    return false;
 }
