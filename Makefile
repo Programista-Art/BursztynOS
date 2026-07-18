@@ -6,11 +6,10 @@ LD = x86_64-linux-gnu-ld
 # Restrykcyjne flagi kompilacji dla jądra (C++)
 CXXFLAGS = -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2
 ASFLAGS = 
-# LDFLAGS = -T linker.ld -nostdlib -no-pie
 LDFLAGS = -T linker.ld -nostdlib -no-pie -z noexecstack
 
-# Lista plików obiektowych
-OBJS = boot.o gdt.o tss.o apic.o idt.o przerwania.o klawiatura.o mysz.o pmm.o vmm.o psf.o grafika.o syscall.o syscalls.o ring3.o loader.o kernel.o
+# Lista plików obiektowych (shell_blob.o na samym końcu)
+OBJS = boot.o gdt.o tss.o apic.o idt.o przerwania.o klawiatura.o mysz.o pmm.o vmm.o psf.o grafika.o syscall.o syscalls.o ring3.o loader.o kernel.o shell_blob.o
 
 # Domyślny cel kompilacji
 all: system_operacyjny.bin
@@ -26,12 +25,19 @@ system_operacyjny.bin: $(OBJS)
 %.o: %.S
 	$(AS) $(ASFLAGS) -c $< -o $@
 
+# --- KOMPILACJA PROGRAMU UŻYTKOWNIKA (Terminal Ring 3) ---
+shell_blob.o: shell.cpp shell_linker.ld
+	$(CC) $(CXXFLAGS) -fno-pie -c shell.cpp -o shell_tmp.o
+	$(LD) -T shell_linker.ld -nostdlib -no-pie shell_tmp.o -o shell.elf
+	x86_64-linux-gnu-objcopy -O binary shell.elf shell.bin
+	$(LD) -r -b binary shell.bin -o shell_blob.o
+
 # === BUDOWA OBRAZU I URUCHAMIANIE ===
 # Reguła generująca pełny obraz ISO z własnym menu GRUB
 iso: system_operacyjny.bin
 	mkdir -p isodir/boot/grub
 	cp system_operacyjny.bin isodir/boot/
-	echo 'set timeout=1' > isodir/boot/grub/grub.cfg
+	echo 'set timeout=0' > isodir/boot/grub/grub.cfg
 	echo 'set default=0' >> isodir/boot/grub/grub.cfg
 	echo 'menuentry "Bursztyn OS" {' >> isodir/boot/grub/grub.cfg
 	echo '    multiboot2 /boot/system_operacyjny.bin' >> isodir/boot/grub/grub.cfg
@@ -45,5 +51,5 @@ run: iso
 
 # Reguła czyszcząca artefakty
 clear:
-	rm -f $(OBJS) system_operacyjny.bin BursztynOS.iso
+	rm -f $(OBJS) system_operacyjny.bin BursztynOS.iso shell_tmp.o shell.elf shell.bin
 	rm -rf isodir

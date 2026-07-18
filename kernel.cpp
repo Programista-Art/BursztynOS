@@ -25,6 +25,10 @@ extern "C" uint64_t stack_top; // Wskaźnik na szczyt stosu zdefiniowany w boot.
 // Zmienna z PMM (Physical Memory Manager) określająca ilość pamięci RAM
 extern uint64_t najwyzsza_znaleziona_ramka; 
 
+// Automatycznie wygenerowane wskaźniki na binarkę powłoki
+extern "C" uint8_t _binary_shell_bin_start[];
+extern "C" uint8_t _binary_shell_bin_end[];
+
 // ---------------------------------------------------------
 // Własne, wbudowane funkcje pomocnicze (ponieważ nie mamy biblioteki standardowej <string.h>)
 // ---------------------------------------------------------
@@ -130,6 +134,27 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     // UWAGA: Jeśli masz już skompilowaną binarkę `.bur`, możesz zapisać ją 
     // sztucznie do systemu plików i przetestować ładowarkę Ring 3:
     // bws_uruchom_program_z_pliku("/aplikacja.bur", 4, 0xFF);
+// 7. Odblokowanie przerwań sprzętowych
+    asm volatile("sti");
+
+ // Zapisujemy wyodrębnioną binarkę powłoki na wirtualny RAM Dysk
+    utworz_plik("/shell.bur"); // <-- DODANA LINIJKA: Tworzy plik przed zapisem!
+    uint64_t shell_rozmiar = (uint64_t)(_binary_shell_bin_end - _binary_shell_bin_start);
+
+
+   // Logowanie diagnostyczne rozmiaru (pomoże nam upewnić się, czy plik nie jest pusty)
+    char dbg_rozmiar[32];
+    char dbg_msg[80];
+    UIntToStr(shell_rozmiar, dbg_rozmiar);
+    ZlaczStringi(dbg_msg, "[JADRO] Binarka shell.bur pobrana z linkera, rozmiar: ", dbg_rozmiar, " bajtow");
+    WypiszLog(dbg_msg);
+
+    zapisz_do_pliku("/shell.bur", (const char*)_binary_shell_bin_start, shell_rozmiar);
+    WypiszLog("[BSP] Wbudowana Powloka gotowa do odczytu z dysku.");
+
+    // Skaczemy do Ring 3 uruchamiając Terminal!
+    bws_uruchom_program_z_pliku("/shell.bur", 4, 0xFF);
+
 
     // 8. Pętla bezczynności - Kernel czeka na eventy (Halt state)
     while (true) {

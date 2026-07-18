@@ -245,8 +245,10 @@ extern "C" void inicjalizuj_psf(void* adres_ram_dysku, uint32_t rozmiar_w_bajtac
     for(uint32_t i=0; i<rozmiar_w_bajtach; i++) dysk[i] = 0;
 
     ram_dysk = dysk;
-    dysk_superblok = (superblok*)pobierz_blok(0);
-    if(!dysk_superblok) return;
+    
+    // KRYTYCZNA POPRAWKA: Pamięć RAM to czysta płaszczyzna, więc przypisujemy
+    // Superblok bezpośrednio do adresu ram_dysk, omijając weryfikację.
+    dysk_superblok = (superblok*)ram_dysk;
 
     // Domyślna prosta architektura podziału miejsca 1:4 (Wezły : Dane surowe)
     uint32_t ilosc_blokow = rozmiar_w_bajtach / PSF_ROZMIAR_BLOKU;
@@ -375,7 +377,7 @@ extern "C" uint8_t* bsp_wczytaj_plik_do_pamieci(const char* sciezka, uint64_t* r
 
     uint32_t dlugosc_pliku = wezel->rozmiar_w_bajtach;
     if (dlugosc_pliku == 0 || dlugosc_pliku > sizeof(bufor_wymiany_plikow)) {
-        // Zbyt duży plik na nasz statyczny bufor (max 5120 bajtów dla tej architektury) lub pusty plik
+        // Zbyt duży plik na nasz statyczny bufor lub pusty plik
         return nullptr;
     }
 
@@ -401,4 +403,38 @@ extern "C" uint8_t* bsp_wczytaj_plik_do_pamieci(const char* sciezka, uint64_t* r
 
     *rozmiar_wyj = przeczytano;
     return bufor_wymiany_plikow;
+}
+
+// Funkcja API dla Powłoki - Zwraca nazwy plików w katalogu oddzielone spacją
+extern "C" bool wylistuj_katalog(const char* sciezka, char* bufor, uint32_t max_dlugosc) {
+    uint32_t kat_id = rozwiaz_sciezke(sciezka, nullptr, false);
+    if (kat_id == 0) return false; 
+
+    wezel_indeksowy* wezel = pobierz_wezel(kat_id);
+    if (!wezel || wezel->typ != TYP_KATALOG) return false;
+
+    uint32_t pozycja = 0;
+    bufor[0] = '\0';
+
+    for (int k = 0; k < PSF_MAX_BLOKOW_W_WEZLE; k++) {
+        if (wezel->wskazniki_blokow[k] == 0xFFFFFFFF) continue;
+
+        wpis_katalogowy* wpisy = (wpis_katalogowy*)pobierz_blok(dysk_superblok->start_danych + wezel->wskazniki_blokow[k]);
+        if (!wpisy) continue;
+
+        for(int j = 0; j < PSF_ROZMIAR_BLOKU / (int)sizeof(wpis_katalogowy); j++) {
+            if (wpisy[j].id_wezla != 0) {
+                const char* nazwa = wpisy[j].nazwa;
+                int idx = 0;
+                while (nazwa[idx] != '\0' && pozycja < max_dlugosc - 2) {
+                    bufor[pozycja++] = nazwa[idx++];
+                }
+                if (pozycja < max_dlugosc - 2) {
+                    bufor[pozycja++] = ' ';
+                }
+            }
+        }
+    }
+    bufor[pozycja] = '\0';
+    return true;
 }

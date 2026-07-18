@@ -1,16 +1,14 @@
 #include "grafika.h"
 #include "pamiec.h"
 
-// USUNIĘTO: Definicja TagFramebufferMB2. 
-// Kompilator pobiera ją teraz poprawnie i bezpiecznie bezpośrednio z "pamiec.h".
-
 // Zmienne globalne stanu matrycy
 static uint32_t* lfb = nullptr;
 static uint32_t  lfb_szerokosc = 0;
 static uint32_t  lfb_wysokosc = 0;
 static uint32_t  lfb_pitch = 0;
 
-static uint32_t  log_y = 10; // Aktualna linijka logów
+static uint32_t  log_y = 10;  // Aktualna linijka w pionie
+static uint32_t  term_x = 20; // Aktualna pozycja kursora w poziomie
 
 // Uproszczona czcionka 8x8 (Litery, Cyfry, Znaki spec.)
 static const uint8_t czcionka_8x8[96][8] = {
@@ -27,17 +25,16 @@ void PostawPiksel(uint32_t x, uint32_t y, uint32_t kolor) {
     lfb[y * (lfb_pitch / 4) + x] = kolor;
 }
 
-// Rysuje znak skalując piksele (np. skala=2 to znak 16x16)
+// Rysuje znak oraz jego CZARNE TŁO.
 void RysujZnak(char c, uint32_t px, uint32_t py, uint32_t kolor, int skala) {
     if(c < 32 || c > 126) c = '?';
     const uint8_t* znak = czcionka_8x8[c - 32];
     for(int y = 0; y < 8; y++) {
         for(int x = 0; x < 8; x++) {
-            if(znak[y] & (1 << (7 - x))) {
-                for(int sy=0; sy<skala; sy++)
-                    for(int sx=0; sx<skala; sx++)
-                        PostawPiksel(px + (x*skala) + sx, py + (y*skala) + sy, kolor);
-            }
+            uint32_t docelowy_kolor = (znak[y] & (1 << (7 - x))) ? kolor : 0x00000000;
+            for(int sy=0; sy<skala; sy++)
+                for(int sx=0; sx<skala; sx++)
+                    PostawPiksel(px + (x*skala) + sx, py + (y*skala) + sy, docelowy_kolor);
         }
     }
 }
@@ -57,11 +54,10 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
     uint64_t aktualny = adres_mb2 + 8;
     uint64_t lfb_fizyczny = 0;
 
-    // Parser struktury Multiboot w poszukiwaniu danych ekranu
     while(aktualny < adres_mb2 + rozmiar) {
         TagFramebufferMB2* tag = (TagFramebufferMB2*)aktualny;
         if(tag->typ == 0) break;
-        if(tag->typ == 8) { // Mamy to! Jądro odnalazło Framebuffer!
+        if(tag->typ == 8) { 
             lfb_fizyczny = tag->adres_fizyczny;
             lfb_pitch = tag->pitch;
             lfb_szerokosc = tag->szerokosc;
@@ -72,27 +68,34 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
     }
 
     if(lfb_fizyczny != 0) {
-        // Zmuszamy VMM do zmapowania tego obszaru pamięci na stałe
         uint64_t lfb_waga = lfb_pitch * lfb_wysokosc;
         for(uint64_t i = 0; i < lfb_waga; i += 4096) {
-            // Flagi: Zapisywalny, Obecny, Ominięcie Pamięci Podręcznej (Cache Disable - By ekran nie "smużył")
             ZmapujStrone((void*)(lfb_fizyczny + i), (void*)(lfb_fizyczny + i), 0b11 | 0x10 | 0x08);
         }
         lfb = (uint32_t*)lfb_fizyczny;
-        CzyscEkran(0x00000000); // Wyczyść na czarno startowo
+        CzyscEkran(0x00000000); 
     }
 }
 
-// Piękny System Logowania w Trybie Graficznym!
+// Logowanie systemowe jądra (kolor pomarańczowy) - Zaktualizowane o SCROLLING!
 void WypiszLog(const char* tekst) {
     if(!lfb) return;
-    uint32_t kolor = 0x00FFA500; // TWÓJ UPRAGNIONY POMARAŃCZOWY! (Hex: A=00, R=FF, G=A5, B=00)
-    int skala = 2; // Rozmiar czcionki (2x)
+    uint32_t kolor = 0x00FFA500; 
+    int skala = 2; 
+    uint32_t wysokosc_linii = (8 * skala) + 6;
 
-    // Jeśli tekst ucieka za ekran, czyścimy go
-    if(log_y > lfb_wysokosc - 80) {
-        CzyscEkran(0x00000000);
-        log_y = 10;
+    if(log_y > lfb_wysokosc - wysokosc_linii) {
+        for (uint32_t y = 10; y < lfb_wysokosc - wysokosc_linii; y++) {
+            for (uint32_t x = 0; x < lfb_szerokosc; x++) {
+                lfb[y * (lfb_pitch/4) + x] = lfb[(y + wysokosc_linii) * (lfb_pitch/4) + x];
+            }
+        }
+        for (uint32_t y = lfb_wysokosc - wysokosc_linii; y < lfb_wysokosc; y++) {
+            for (uint32_t x = 0; x < lfb_szerokosc; x++) {
+                lfb[y * (lfb_pitch/4) + x] = 0x00000000;
+            }
+        }
+        log_y -= wysokosc_linii;
     }
 
     uint32_t px = 20;
@@ -100,26 +103,62 @@ void WypiszLog(const char* tekst) {
         RysujZnak(tekst[i], px, log_y, kolor, skala);
         px += 8 * skala;
     }
-    log_y += (8 * skala) + 6; // Odstęp miedzy linijkami
+    log_y += wysokosc_linii; 
+    term_x = 20; // Synchronizacja dla terminala
 }
 
-// Zaktualizowano na snake_case zgodnie z dyspozycją!
+// NOWOŚĆ: Prawdziwy, wielowierszowy Terminal dla Ring 3 z SCROLLOWANIEM EKRANU!
 extern "C" void wypisz_na_ekranie(const char* tekst) {
     if(!lfb) return;
-    int skala = 3; // Klawiatura pisze 3x większą czcionką!
-    uint32_t py = lfb_wysokosc - (8 * skala) - 20; // 20px od samego dołu ekranu
-    uint32_t kolor = 0x00FFFF00; // Zostawiamy Żółty dla różnicy
+    uint32_t kolor = 0x0000FF00; // Zielony hakerski terminal!
+    int skala = 2; 
+    uint32_t wysokosc_linii = (8 * skala) + 6;
 
-    // Czyszczenie tego konkretnego, paska na samym dole ekranu (Zamiast całego ekranu!)
-    for(uint32_t y = py; y < py + (8 * skala); y++) {
-        for(uint32_t x = 0; x < lfb_szerokosc; x++) {
-            PostawPiksel(x, y, 0x00000000);
-        }
-    }
-
-    uint32_t px = 20;
     for(int i = 0; tekst[i] != '\0'; i++) {
-        RysujZnak(tekst[i], px, py, kolor, skala);
-        px += 8 * skala;
+        if (tekst[i] == '\n') {
+            term_x = 20;
+            log_y += wysokosc_linii;
+            if(log_y > lfb_wysokosc - 40) {
+                // --- SKRYPT PRZEWIJANIA EKRANU (SCROLLING) ---
+                for (uint32_t y = 10; y < lfb_wysokosc - wysokosc_linii; y++) {
+                    for (uint32_t x = 0; x < lfb_szerokosc; x++) {
+                        lfb[y * (lfb_pitch/4) + x] = lfb[(y + wysokosc_linii) * (lfb_pitch/4) + x];
+                    }
+                }
+                for (uint32_t y = lfb_wysokosc - wysokosc_linii; y < lfb_wysokosc; y++) {
+                    for (uint32_t x = 0; x < lfb_szerokosc; x++) {
+                        lfb[y * (lfb_pitch/4) + x] = 0x00000000;
+                    }
+                }
+                log_y -= wysokosc_linii;
+            }
+        } else if (tekst[i] == '\r') {
+            term_x = 20;
+        } else if (tekst[i] == '\b') { // Obsługa cofania kursora (Backspace)
+            if (term_x > 20) {
+                term_x -= 8 * skala;
+            }
+        } else {
+            RysujZnak(tekst[i], term_x, log_y, kolor, skala);
+            term_x += 8 * skala;
+            if(term_x > lfb_szerokosc - 20) { // Zawijanie wiersza na brzegu ekranu
+                term_x = 20;
+                log_y += wysokosc_linii;
+                if(log_y > lfb_wysokosc - 40) {
+                    // --- SKRYPT PRZEWIJANIA EKRANU (SCROLLING) ---
+                    for (uint32_t y = 10; y < lfb_wysokosc - wysokosc_linii; y++) {
+                        for (uint32_t x = 0; x < lfb_szerokosc; x++) {
+                            lfb[y * (lfb_pitch/4) + x] = lfb[(y + wysokosc_linii) * (lfb_pitch/4) + x];
+                        }
+                    }
+                    for (uint32_t y = lfb_wysokosc - wysokosc_linii; y < lfb_wysokosc; y++) {
+                        for (uint32_t x = 0; x < lfb_szerokosc; x++) {
+                            lfb[y * (lfb_pitch/4) + x] = 0x00000000;
+                        }
+                    }
+                    log_y -= wysokosc_linii;
+                }
+            }
+        }
     }
 }

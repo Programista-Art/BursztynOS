@@ -1,59 +1,50 @@
 /*
- * Mechanizm: Ręczne przełączenie powrotu kontekstu do Ring 3
- * Opis: Używa mechaniki IRETQ do oszukania stosu tak, jakby procesor wracał
- * ze sprzętowego przerwania Ring 3, w którym nigdy de facto nie byliśmy! Wkłada
- * fałszywe flagi ochronne by uziemić kod w niskim pierścieniu uprawnień użytkownika.
+ * Mechanizm: Skok z Jądra (Ring 0) do Programu Użytkownika (Ring 3)
+ * Opis: Ustawia segmenty procesora na wariant User Data (0x1B) 
+ * i używa sztuczki z IRETQ do obniżenia uprawnień i wykonania skoku w User Code (0x23).
  */
 
 .global przejdz_do_ring3
+
 .section .text
 .code64
 
 /*
- * void przejdz_do_ring3(void* adres_kodu, void* adres_stosu)
- * Zgodnie z ABI, adres docelowy w C++ ląduje w RDI, a wskazanie przydzielonego stosu procesu w RSI.
+ * extern "C" void przejdz_do_ring3(uint64_t rip, uint64_t rsp);
+ * RDI = Punkt wejścia (RIP z loadera)
+ * RSI = Wirtualny szczyt stosu Ring 3 (RSP z loadera)
  */
 przejdz_do_ring3:
-    /* Przerwania na czas ładowania nowego wózka ratunkowego muszą zostać zablokowane by ochronić stack jądra */
-    cli
+    /* 1. Ładowanie rejestrów segmentowych danymi Użytkownika. 
+       KRYTYCZNE: 0x18 to offset w GDT, ale w Ring 3 musimy dodać flagę RPL=3.
+       0x18 | 3 = 0x1B. 
+    */
+    mov $0x1B, %ax
+    mov %ax, %ds
+    mov %ax, %es
+    mov %ax, %fs
+    mov %ax, %gs
+
+    /* 2. Przygotowanie fałszywego stosu dla instrukcji IRETQ */
     
-    /* 
-     * Aby wykonać IRETQ wymagane jest ułożenie stosu w rygorystyczny sposób (5 elementowy):
-     * SS (Stack Segment) -> RSP (Wskaźnik stosu) -> RFLAGS -> CS (Code Segment) -> RIP (Instruction Pointer).
-     */
+    /* PUSH 1: SS (Stack Segment) - Musi być 0x1B! */
+    pushq $0x1B      
     
-    /* 1. SS (Stack Segment User Data) */
-    /* Zgodnie z konwencją GDT Bursztyn OS z etapu 2 i logiką Fast Syscall, User Data to wpis 4 (0x20). 
-       Zawsze dodajemy +3 (co robi OR z flagą RPL=3) by poinformować procesor, że segment ten ma przywileje Ring 3. */
-    pushq $0x23                                  /* Zrzucamy 0x20 (User Data) + 3 (Ring) */
+    /* PUSH 2: RSP (Wskaźnik stosu przekazany przez Loader w RSI) */
+    pushq %rsi       
+    
+    /* PUSH 3: RFLAGS (Flagi procesora) - Włączamy przerwania (bit 9 = 0x200) */
+    pushfq
+    popq %rax
+    orq $0x200, %rax
+    pushq %rax       
+    
+    /* PUSH 4: CS (Code Segment) - Znowu dodajemy RPL=3 (0x20 | 3 = 0x23!) */
+    pushq $0x23      
+    
+    /* PUSH 5: RIP (Adres pierwszej instrukcji shell.cpp przekazany w RDI) */
+    pushq %rdi       
 
-    /* 2. RSP (User Stack Pointer) */
-    /* Przydzielony docelowemu programowi Ring 3 stos wciągnięto jako argument funkcji w RSI */
-    pushq %rsi                                   /* Zrzucamy Wskaźnik */
-
-    /* 3. RFLAGS */
-    /* Należy włączyć tu przerwania z powrotem. Bit nr 9 to IF (Interrupt Enable Flag) 0x200 */
-    pushf                                        /* Zrzuć obecne RFLAGS rdzennego wirtualizatora by zachować integralność architekturalną */
-    popq %rax                                    /* Podejmij go z powrotem lecz przemieść na stół operacyjny (RAX) */
-    orq $0x200, %rax                             /* Doklej flagę przerwań sprzętowych. Inaczej Ring 3 padłby pod powłoką zamrożenia układu i powiadomień. */
-    pushq %rax                                   /* Skryj nowo zmodyfikowaną flagę sprzętową znów w ramce wyjściowej */
-
-    /* 4. CS (Code Segment User Code) */
-    /* Wedle Bursztyn OS (i naszego ustawienia GDT), User Code to wpis 3 (0x18). Dodajemy RPL=3. */
-    pushq $0x1B                                  /* Zrzucamy 0x18 (User Code) + 3 (Ring) */
-
-    /* 5. RIP (Instruction Pointer) */
-    /* Przesłany w RDI jako pierwszy argument */
-    pushq %rdi                                   /* Odkładamy jako ostanie zwieńczenie punkt docelowy powrotu procedury pod IRET! */
-
-    /* Fałszywy wektor został w pełni i bezstratnie ułożony w obrębie 5 zmiennych sprzętowych... */
-
-    /* Zmiana rejestrów wspierających dla przestrzeni użytkownika (Mimo braku pełnego wymogu w 64-bitach, lepiej chronić pule) */
-    movw $0x23, %ax
-    movw %ax, %ds                                /* Podpinamy nowy zestaw segmentu na pule Data Usera */
-    movw %ax, %es                                /* Kopia dla ES */
-    movw %ax, %fs                                /* Kopia dla rzutnika FS */
-    movw %ax, %gs                                /* Kopia docelowego zagnieżdżenia percesowego GS */
-
-    /* Procesor poprawnie usunie zdefiniowane wpisy na stosie przywracając oznaczony kontekst do pierścienia 3, i opuści kernel */
+    /* 3. Ostateczny skok! Procesor zdejmie te 5 wartości, obniży sobie 
+       poziom uprawnień do Ring 3 i bezpiecznie wyląduje w powłoce. */
     iretq
