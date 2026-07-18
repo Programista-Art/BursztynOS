@@ -1,6 +1,6 @@
 #include "loader.h"
 #include "grafika.h" // Używamy Składacza Obrazu do pięknych logów!
-#include "pamiec.h"  // Zapewnia dostęp do ZaalokujRamke() i ZmapujStrone() bez błędów linkera!
+#include "pamiec.h"  // Zapewnia dostęp do natywnych funkcji C++: ZaalokujRamke() i ZmapujStrone()
 
 // Oczekiwana funkcja z vmm.cpp zwracająca wskaźnik na drzewo stron (dodana na końcu vmm.cpp)
 extern "C" void* PobierzAktualnePML4();
@@ -11,6 +11,9 @@ extern "C" void przejdz_do_ring3(uint64_t punkt_wejscia, uint64_t wirtualny_stos
 
 // Oczekiwana funkcja z Twojego Bursztynowego Systemu Plików (BSP)
 extern "C" uint8_t* bsp_wczytaj_plik_do_pamieci(const char* sciezka, uint64_t* rozmiar_wyj);
+
+#include "pzb.h"
+proces_t aktywny_proces; // Globalna zmienna przechowująca stan obecnego procesu w systemie
 
 // ---------------------------------------------------------
 // Własne funkcje pomocnicze do pamięci (brak <string.h>)
@@ -58,7 +61,7 @@ extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka_pliku, uint8_t b
     WypiszLog("[LOADER] Sygnatura BUR poprawna. Alokacja pamieci uzytkownika...");
 
     // Obliczamy flagi VMM. FLAGA_USER (bit 2) jest KRYTYCZNA dla Ring 3!
-    uint64_t flagi_vmm_user = FLAGA_OBECNA | FLAGA_ZAPIS | FLAGA_USER;
+    uint32_t flagi_vmm_user = FLAGA_OBECNA | FLAGA_ZAPIS | FLAGA_USER;
 
     // 4. Mapowanie sekcji .tekst (KODU)
     for (uint64_t offset = 0; offset < naglowek->tekst_rozmiar; offset += 4096) {
@@ -88,17 +91,13 @@ extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka_pliku, uint8_t b
     }
     uint64_t wirtualny_szczyt_stosu = wirtualna_baza_stosu + 16384; // Stos rośnie w dół na x86
 
-    // 7. Utworzenie struktury procesu
-    proces_t nowy_proces;
-    nowy_proces.pid = 1; 
-    nowy_proces.poziom_zaufania = bzl_poziom;
-    nowy_proces.uprawnienia = flagi_praw;
-    nowy_proces.przestrzen_adresowa = PobierzAktualnePML4();
-    
-    // Zapobiega ostrzeżeniu kompilatora ([-Wunused-but-set-variable]) dopóki nie dodasz Menedżera Procesów
-    (void)nowy_proces; 
+    // 7. Rejestracja struktury procesu w Jądrze (PZB)
+    aktywny_proces.pid = 1; 
+    aktywny_proces.poziom_zaufania = bzl_poziom;
+    aktywny_proces.uprawnienia = flagi_praw;
+    aktywny_proces.przestrzen_adresowa = PobierzAktualnePML4();
 
-    WypiszLog("[LOADER] Program zaladowany. Przejscie do Ring 3...");
+    WypiszLog("[LOADER] Program zaladowany. Zastosowano zabezpieczenia PZB. Przejscie do Ring 3...");
 
     // 8. Ostateczny Skok!
     przejdz_do_ring3(naglowek->punkt_wejscia, wirtualny_szczyt_stosu);

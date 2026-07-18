@@ -1,9 +1,7 @@
 /*
- * Mechanizm: Polski System Plików (PSF) - Definicje Struktur i API
- * Opis: Hierarchiczny system plików operujący na blokach 512 bajtowych,
- * wyposażony we wskaźniki katalogów w celu obsługi wielowarstwowych ścieżek
- * typu "/katalog/podkatalog/plik.txt". Konwencja publicznego API i struktur
- * dostosowana do standardu snake_case.
+ * Mechanizm: Polski System Plików 64-bit (BSP64 / BursztynFS)
+ * Opis: Architektura wzorowana na nowoczesnych rozwiązaniach (ext4).
+ * Używa bloków 4KB, 64-bitowych wskaźników i wyrównania do Cache-Line.
  */
 
 #pragma once
@@ -11,38 +9,50 @@
 #include <stdint.h>
 #include <stdbool.h> 
 
-#define PSF_ROZMIAR_BLOKU 512
-#define PSF_MAX_NAZWA 28 
-#define PSF_MAX_BLOKOW_W_WEZLE 64 // <-- ZWIĘKSZONO! Pozwala na pliki do 32 KB
+// NOWOCZESNA ARCHITEKTURA 64-BITOWA
+#define PSF_ROZMIAR_BLOKU 4096
+#define PSF_MAX_NAZWA 56 // (8 bajtów ID + 56 bajtów nazwa = Równe 64 bajty na wpis!)
+#define PSF_MAX_BLOKOW_W_WEZLE 490 // Pozwala na pliki do ~2 MB na samych wskaźnikach bezpośrednich
 
-// --- DEFINICJE TYPÓW WĘZŁÓW ---
 #define TYP_WOLNY    0
 #define TYP_PLIK     1
 #define TYP_KATALOG  2
 
-// Struktura opisująca korzeń i układ pamięci RAM dysku
+// Znacznik pustego bloku/adresu
+#define BARK_BLOKU 0xFFFFFFFFFFFFFFFFULL
+
+// Nowoczesny 64-bitowy Superblok
 struct superblok {
-    char sygnatura[4];          // Zawsze "PSF1"
-    uint32_t calkowity_rozmiar; // Pojemność całkowita dysku RAM w bajtach
-    uint32_t ilosc_blokow;      // Ile bloków mieści dysk RAM
-    uint32_t id_korzenia;       // Numer węzła startowego (katalog "/"), zazwyczaj 1.
-    uint32_t start_wezlow;      // Od którego bloku fizycznie na dysku zaczynają się struktury "wezel_indeksowy"
-    uint32_t start_danych;      // Od którego bloku fizycznie zaczynają się dane surowe
+    char sygnatura[4];          // "BSP2" (Wersja 64-bit)
+    uint64_t calkowity_rozmiar; // Pojemność dysku
+    uint64_t ilosc_blokow;      // Ile bloków mieści dysk
+    uint64_t id_korzenia;       // Numer węzła startowego "/"
+    uint64_t start_wezlow;      // Start węzłów (Inodes)
+    uint64_t start_danych;      // Start danych surowych
 } __attribute__((packed));
 
-// Węzeł Indeksowy (Inode) - Zwiększono do 512 bajtów (1 Pełny Blok)
+// Węzeł Indeksowy (Inode) - Konstrukcja przystosowana pod ogromne dyski (Waga: 4096 bajtów)
 struct wezel_indeksowy {
-    uint8_t typ;                                 
-    uint32_t rozmiar_w_bajtach;                  
-    uint32_t wskazniki_blokow[PSF_MAX_BLOKOW_W_WEZLE]; 
+    uint8_t  typ;                                 
+    uint64_t rozmiar_w_bajtach;
+    uint64_t czas_utworzenia;  // Na przyszłość dla zegara RTC
+    uint64_t flagi_zabezpieczen; // Na przyszłość dla praw dostępu
+
+    // 1. Bloki bezpośrednie (Ext4 style)
+    uint64_t wskazniki_blokow[PSF_MAX_BLOKOW_W_WEZLE]; 
     
-    // Wypychacz struktury do równego rozmiaru 512 bajtów 
-    // (1 bajt typ + 4 bajty rozmiar + 256 bajtów wskazniki = 261. Zostaje 251 bajtów)
-    uint8_t zarezerwowane[251]; 
+    // 2. Architektura pod ogromne pliki (Bloki Pośrednie)
+    uint64_t blok_posredni_1; // Prowadzi do bloku z 512 wskaźnikami (dodatkowe 2MB)
+    uint64_t blok_posredni_2; // Prowadzi do bloku z blokami (dodatkowy 1GB)
+    uint64_t blok_posredni_3; // Prowadzi do bloku z blokami bloków (dodatkowe 512GB)
+
+    // Wypychacz struktury do równego rozmiaru 4096 bajtów (1 Pełny Blok)
+    uint8_t zarezerwowane[127]; 
 } __attribute__((packed));
 
+// Wpis wewnątrz folderu (Równe 64 Bajty!)
 struct wpis_katalogowy {
-    uint32_t id_wezla;                 
+    uint64_t id_wezla;                 
     char nazwa[PSF_MAX_NAZWA];         
 } __attribute__((packed));
 

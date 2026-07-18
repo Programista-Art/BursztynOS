@@ -2,6 +2,8 @@
 #define LOADER_H
 
 #include <stdint.h>
+#include <stdbool.h>
+#include "pzb.h" 
 
 // Flagi stronicowania x86-64 rozszerzone o dostęp dla Ring 3
 #define FLAGA_OBECNA  (1 << 0) // Bit 0: Strona znajduje się w pamięci RAM
@@ -22,13 +24,7 @@ struct NaglowekBur {
     uint64_t dane_wirtualny;      // Docelowy adres wirtualny aplikacji dla sekcji .dane
 } __attribute__((packed));
 
-// Struktura opisująca instancję procesu w pamięci Jądra Bursztyna
-typedef struct proces {
-    uint64_t pid;                 // Unikalny identyfikator procesu
-    uint8_t  poziom_zaufania;     // Wartość logiczna BZL (0-5)
-    uint64_t uprawnienia;         // Bitowa mapa przyznanych praw aplikacyjnych
-    void* przestrzen_adresowa; // Wskaźnik na tablicę stron PML4 procesu (VMM)
-} proces_t;
+
 
 // Publiczne funkcje modułu Loadera
 extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka_pliku, uint8_t bzl_poziom, uint64_t flagi_praw);

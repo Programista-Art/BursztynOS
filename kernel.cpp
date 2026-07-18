@@ -13,7 +13,7 @@
 // Deklaracje zewnętrznych procedur asemblerowych i systemowych
 extern "C" void InicjalizujGDT();
 extern "C" void InicjalizujIDT();
-extern "C" void inicjalizuj_apic(); // NAPRAWIONE: Brakujący średnik!
+extern "C" void inicjalizuj_apic(); 
 extern "C" void InicjalizujMyszPS2();
 
 // Nowe podsystemy z poprzednich kroków (TSS i BWS)
@@ -25,9 +25,14 @@ extern "C" uint64_t stack_top; // Wskaźnik na szczyt stosu zdefiniowany w boot.
 // Zmienna z PMM (Physical Memory Manager) określająca ilość pamięci RAM
 extern uint64_t najwyzsza_znaleziona_ramka; 
 
-// Automatycznie wygenerowane wskaźniki na binarkę powłoki
-extern "C" uint8_t _binary_shell_bin_start[];
-extern "C" uint8_t _binary_shell_bin_end[];
+// --- NAPRAWA BŁĘDÓW KOMPILACJI (BRAKUJĄCE DEKLARACJE) ---
+// Symbole wstrzykiwane przez GNU Linker (objcopy) z pliku shell_blob.o
+extern char _binary_shell_bin_start[];
+extern char _binary_shell_bin_end[];
+
+// Prototyp funkcji uruchamiającej program z uwzględnieniem Systemu Uprawnień PZB
+extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka, uint8_t bzl_poziom, uint64_t flagi_praw);
+// --------------------------------------------------------
 
 // ---------------------------------------------------------
 // Własne, wbudowane funkcje pomocnicze (ponieważ nie mamy biblioteki standardowej <string.h>)
@@ -71,18 +76,20 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     if (multiboot_magic != 0x36D76289) {
         return; // Kernel Panic: Zły bootloader!
     }
-    InicjalizujGDT();
-    InicjalizujIDT();
-        // (Musi odbyć się bezpośrednio po GDT, a przed jakimikolwiek przerwaniami)
-    inicjalizuj_tss((void*)&stack_top);
-    zaladuj_tss(0x28); // Ładujemy 5. wpis w GDT (5 * 8 bajtów = 0x28)
+
     // 2. Fundamentalna inicjalizacja hardware'u i zarządzania pamięcią
     InicjalizujPMM(multiboot_info_ptr);
-   
-   
+    InicjalizujGDT();
+    
+    // --- Inicjalizacja TSS ---
+    // (Musi odbyć się bezpośrednio po GDT, a przed jakimikolwiek przerwaniami)
+    inicjalizuj_tss((void*)&stack_top);
+    zaladuj_tss(0x28); // Ładujemy 5. wpis w GDT (5 * 8 bajtów = 0x28)
+
+    InicjalizujIDT();
     InicjalizujVMM(); // Paging 4-poziomowy
 
-    // --- NOWE: Inicjalizacja Bursztynowych Wywołań Systemowych (BWS) ---
+    // --- Inicjalizacja Bursztynowych Wywołań Systemowych (BWS) ---
     inicjalizuj_syscalls();
 
     // 3. WŁĄCZENIE EKRANU W TRYBIE GRAFICZNYM (LFB pobrany z tagów Multiboot2)
@@ -117,6 +124,19 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     inicjalizuj_psf((void*)adres_wirtualny_dysku, rozmiar_dysku);
     WypiszLog("[BSP] Bursztynowy System Plikow zamontowany w RAM (2MB).");
 
+    // --- Tworzenie zaufanego drzewa katalogów (Wg specyfikacji Bursztyna) ---
+    utworz_katalog("/jadro");
+    utworz_katalog("/system");
+    utworz_katalog("/programy");
+    utworz_katalog("/uslugi");
+    utworz_katalog("/sterowniki");
+    utworz_katalog("/uzytkownicy");
+    utworz_katalog("/ustawienia");
+    utworz_katalog("/logi");
+    utworz_katalog("/piaskownica");
+    utworz_katalog("/tymczasowe");
+    WypiszLog("[BSP] Pomyslnie wygenerowano polskie drzewo katalogow.");
+
     // 6. Inicjalizacja asynchronicznych mechanizmów wejścia
     inicjalizuj_apic();
     WypiszLog("[APIC] Kontroler przerwan (LAPIC/IOAPIC) uruchomiony.");
@@ -131,30 +151,24 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     // 7. Odblokowanie przerwań sprzętowych
     asm volatile("sti");
 
-    // UWAGA: Jeśli masz już skompilowaną binarkę `.bur`, możesz zapisać ją 
-    // sztucznie do systemu plików i przetestować ładowarkę Ring 3:
-    // bws_uruchom_program_z_pliku("/aplikacja.bur", 4, 0xFF);
-// 7. Odblokowanie przerwań sprzętowych
-    asm volatile("sti");
-
- // Zapisujemy wyodrębnioną binarkę powłoki na wirtualny RAM Dysk
-    utworz_plik("/shell.bur"); // <-- DODANA LINIJKA: Tworzy plik przed zapisem!
+    // Zapisujemy wyodrębnioną binarkę powłoki na wirtualny RAM Dysk
+    utworz_plik("/shell.bur");
     uint64_t shell_rozmiar = (uint64_t)(_binary_shell_bin_end - _binary_shell_bin_start);
-
-
-   // Logowanie diagnostyczne rozmiaru (pomoże nam upewnić się, czy plik nie jest pusty)
+    
+    // --- DIAGNOSTYCZNE LOGOWANIE ROZMIARU W BAJTACH ---
     char dbg_rozmiar[32];
     char dbg_msg[80];
     UIntToStr(shell_rozmiar, dbg_rozmiar);
     ZlaczStringi(dbg_msg, "[JADRO] Binarka shell.bur pobrana z linkera, rozmiar: ", dbg_rozmiar, " bajtow");
     WypiszLog(dbg_msg);
+    // --------------------------------------------------------
 
     zapisz_do_pliku("/shell.bur", (const char*)_binary_shell_bin_start, shell_rozmiar);
     WypiszLog("[BSP] Wbudowana Powloka gotowa do odczytu z dysku.");
 
-    // Skaczemy do Ring 3 uruchamiając Terminal!
+    // Skaczemy do Ring 3 uruchamiając Terminal! 
+    // Poziom PZB: 4 (Użytkownik), Uprawnienia: 0xFF (pełne prawa np. do pisania poza /system)
     bws_uruchom_program_z_pliku("/shell.bur", 4, 0xFF);
-
 
     // 8. Pętla bezczynności - Kernel czeka na eventy (Halt state)
     while (true) {

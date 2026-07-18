@@ -1,14 +1,15 @@
 /*
  * Mechanizm: API Wywołań Systemowych (Syscalls) w konwencji Bursztyn OS
  * Opis: Punkt docelowy C++ odbierający przełączone w locie asynchroniczne żądania
- * wywołane ze strefy programu Ring 3 z wykorzystaniem MSR_LSTAR. Definiuje procedurę
- * konfiguracyjną i dyspozytor odpowiadający konwencji `snake_case`.
+ * wywołane ze strefy programu Ring 3 z wykorzystaniem MSR_LSTAR.
+ * Wzbogacony o restrykcyjną warstwę bezpieczeństwa (PZB).
  */
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "pzb.h" // Włączenie mechanizmu uprawnień PZB
 
-// Prototyp zewnętrznej funkcji API jądra dla ekranu i operacji w systemie plików (Z Etapu 5)
+// Prototypy zewnętrznych funkcji API jądra 
 extern "C" {
     void wypisz_na_ekranie(const char* buf); 
     bool utworz_plik(const char* sciezka);
@@ -54,8 +55,18 @@ extern "C" void inicjalizuj_syscalls() {
     zapisz_msr(0xC0000102, (uint64_t)&bezpieczny_stos_jadra);
 }
 
+// Pomocnicza funkcja dla Jądra, przydatna przy ochronie katalogów systemowych
+static bool sciezka_zaczyna_sie_od(const char* sciezka, const char* prefiks) {
+    int i = 0;
+    while (prefiks[i] != '\0') {
+        if (sciezka[i] != prefiks[i]) return false;
+        i++;
+    }
+    return true;
+}
+
 /*
- * --- DYSPOZYTOR KODÓW (Bursztyn OS ABI) ---
+ * --- DYSPOZYTOR KODÓW (Bursztyn OS ABI) Z SYSTEMEM BZL/PZB ---
  */
 extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4) {
     (void)arg4; 
@@ -64,7 +75,7 @@ extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t ar
 
     switch(nr_funkcji) {
         case 1: {
-            // sys_wypisz_tekst(const char* tekst)
+            // sys_wypisz_tekst(const char* tekst) - Zawsze dozwolone dla terminala
             wypisz_na_ekranie((const char*)arg1);
             kod_wyniku = 1; 
             break;
@@ -72,14 +83,39 @@ extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t ar
 
         case 2: {
             // sys_utworz_plik(const char* sciezka)
-            bool result = utworz_plik((const char*)arg1);
+            if (!(aktywny_proces.uprawnienia & PRAWO_PLIKI_ZAPISZ)) {
+                wypisz_na_ekranie("\n[BWS Zablokowano] Brak uprawnienia PRAWO_PLIKI_ZAPISZ!\n");
+                return 0;
+            }
+            const char* sciezka = (const char*)arg1;
+            
+            // PZB: Użytkownicy (poziom 4 i wyżej) nie mają praw modyfikowania krytycznych folderów systemowych!
+            if (aktywny_proces.poziom_zaufania >= PZB_UZYTKOWNIK && 
+               (sciezka_zaczyna_sie_od(sciezka, "/system") || sciezka_zaczyna_sie_od(sciezka, "/jadro"))) {
+                wypisz_na_ekranie("\n[PZB Odrzucono] Ring 3 probuje modyfikowac pliki systemowe!\n");
+                return 0; 
+            }
+
+            bool result = utworz_plik(sciezka);
             kod_wyniku = result ? 1 : 0;
             break;
         }
 
         case 3: {
             // sys_zapisz_do_pliku(const char* sciezka, const char* dane, uint32_t dlugosc)
-            bool result = zapisz_do_pliku((const char*)arg1, (const char*)arg2, (uint32_t)arg3);
+            if (!(aktywny_proces.uprawnienia & PRAWO_PLIKI_ZAPISZ)) {
+                wypisz_na_ekranie("\n[BWS Zablokowano] Brak uprawnienia PRAWO_PLIKI_ZAPISZ!\n");
+                return 0;
+            }
+            const char* sciezka = (const char*)arg1;
+            
+            if (aktywny_proces.poziom_zaufania >= PZB_UZYTKOWNIK && 
+               (sciezka_zaczyna_sie_od(sciezka, "/system") || sciezka_zaczyna_sie_od(sciezka, "/jadro"))) {
+                wypisz_na_ekranie("\n[PZB Odrzucono] Ring 3 probuje wprowadzac zmiany w plikach systemowych!\n");
+                return 0; 
+            }
+
+            bool result = zapisz_do_pliku(sciezka, (const char*)arg2, (uint32_t)arg3);
             kod_wyniku = result ? 1 : 0;
             break;
         }
@@ -92,6 +128,10 @@ extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t ar
 
         case 5: {
             // sys_czytaj_z_pliku
+            if (!(aktywny_proces.uprawnienia & PRAWO_PLIKI_CZYTAJ)) {
+                wypisz_na_ekranie("\n[BWS Zablokowano] Brak uprawnienia PRAWO_PLIKI_CZYTAJ!\n");
+                return 0;
+            }
             bool result = czytaj_z_pliku((const char*)arg1, (char*)arg2, (uint32_t)arg3);
             kod_wyniku = result ? 1 : 0;
             break;
@@ -99,6 +139,10 @@ extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t ar
 
         case 6: {
             // sys_wylistuj_katalog
+            if (!(aktywny_proces.uprawnienia & PRAWO_PLIKI_CZYTAJ)) {
+                wypisz_na_ekranie("\n[BWS Zablokowano] Brak uprawnienia PRAWO_PLIKI_CZYTAJ!\n");
+                return 0;
+            }
             bool result = wylistuj_katalog((const char*)arg1, (char*)arg2, (uint32_t)arg3);
             kod_wyniku = result ? 1 : 0;
             break;
