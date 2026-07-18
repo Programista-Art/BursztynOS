@@ -8,6 +8,27 @@ Witaj w oficjalnej dokumentacji **Bursztyn OS** – niezależnego, 64-bitowego s
 
 System jest rozwijany z myślą o architekturze x86-64, implementując własne Jądro, autorski system plików, niezależny logiczny model bezpieczeństwa oraz natywne środowisko uruchomieniowe dla programów skompilowanych z języka Avocado.
 
+# Program  powłoka systemowa shell
+![alt](image/shell1.png)
+
+## Dostępne 14 komend w Shellu
+1. pomoc - wyświetla dostępną listę komend.
+1. system - wypisuje informacje o architekturze Bursztyn OS.
+1. wersja - krótka informacja o wersji powłoki i OS
+1. kto - odpowie, na jakich prawach aktualnie działasz.
+1. historia – pokaże 5 ostatnich wpisanych przez Ciebie poleceń!
+1. czysc - czyści ekran terminala
+1. utworz - tworzy nowy, pusty plik na RAM-Dysku.
+1. zapisz - zapisuje plik
+1. czytaj [plik] - wyświetla zawartość pliku  
+1. pliki - wylistuj wszystkie pliki
+1. gdzie - ścieżka obecnego katalogu
+1. pisz [tekst] - wypisze z powrotem na ekran to, co wpiszesz po spacji.
+1. cytat - wypisze losowy, motywujący cytat programistyczny.
+1. losuj - rzuci wirtualną sześciościenną kością.
+
+    
+
 ## 🗂️ Struktura Dokumentacji
 
 Poniższe pliki zawierają pełną specyfikację techniczną, opisy mechanizmów oraz analizę kodu źródłowego systemu:
