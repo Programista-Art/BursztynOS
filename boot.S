@@ -8,9 +8,7 @@
 .set MULTIBOOT_HEADER_TAG_END, 0
 .set MULTIBOOT_TAG_TYPE_MEMORY_MAP, 6
 
-/* KRYTYCZNA ZMIANA: Flaga "a" (allocatable) jest WYMAGANA przez nowsze wersje GNU Binutils.
-   Bez niej sekcja .multiboot nie trafi do głównego segmentu ładowania (PT_LOAD) pliku ELF,
-   a GRUB 2.12 jej nie znajdzie (błąd "No multiboot header found"). */
+/* Flaga "a" (allocatable) jest WYMAGANA przez nowsze wersje GNU Binutils. */
 .section .multiboot, "a"
 .align 8
 header_start:
@@ -27,15 +25,17 @@ header_start:
     .long 12
     .long MULTIBOOT_TAG_TYPE_MEMORY_MAP
 
-    /* Znacznik nr 5: Prośba o Framebuffer (Dla grafika.cpp, 1920x1080)
-       Bez tego GRUB nie przełączy karty graficznej w Linear Framebuffer! */
+    /* KRYTYCZNA ZMIANA: Zezwolenie GRUB-owi na dobranie najlepszej rodzielczości!
+       Ustawienie na sztywno 1920x1080 powodowało ignorowanie żądania przez QEMU.
+       0, 0 oznacza "najlepsza dostępna".
+    */
     .align 8
     .short 5
     .short 0
     .long 20
-    .long 1920
-    .long 1080
-    .long 32
+    .long 0      /* Szerokość (0 = dowolna) */
+    .long 0      /* Wysokość (0 = dowolna) */
+    .long 32     /* Głębia (32 bity to wymóg bezwzględny dla renderowania okien!) */
 
     /* Znacznik końcowy Multiboot2 */
     .align 8

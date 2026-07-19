@@ -1,55 +1,58 @@
-# Definicja narzędzi używanych do kompilacji i łączenia (Cross-Compiler x86_64-elf)
-CC = x86_64-linux-gnu-g++
+# Narzędzia kompilacji
+CXX = x86_64-linux-gnu-g++
 AS = x86_64-linux-gnu-as
 LD = x86_64-linux-gnu-ld
+OBJCOPY = x86_64-linux-gnu-objcopy
 
-# Restrykcyjne flagi kompilacji dla jądra (C++)
+# Flagi kompilatora C++ (Freestanding, brak standardowej biblioteki)
 CXXFLAGS = -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2
-ASFLAGS = 
-LDFLAGS = -T linker.ld -nostdlib -no-pie -z noexecstack
 
-# Lista plików obiektowych (shell_blob.o na samym końcu)
+# Lista wszystkich skompilowanych obiektów jądra
 OBJS = boot.o gdt.o tss.o apic.o idt.o przerwania.o klawiatura.o mysz.o pmm.o vmm.o psf.o grafika.o syscall.o syscalls.o ring3.o loader.o kernel.o shell_blob.o
 
-# Domyślny cel kompilacji
+# Główny cel domyślny
 all: system_operacyjny.bin
 
-# Reguła łącząca pliki w ostateczny obraz
-system_operacyjny.bin: $(OBJS)
-	$(CC) $(LDFLAGS) -o $@ $(OBJS) -lgcc
-
-# Reguły kompilacji dla C++ i Asemblera
+# Reguły kompilacji dla plików C++ (.cpp do .o)
 %.o: %.cpp
-	$(CC) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
+# Reguły kompilacji dla plików Asemblera (.S do .o)
 %.o: %.S
-	$(AS) $(ASFLAGS) -c $< -o $@
+	$(AS) -c $< -o $@
 
-# --- KOMPILACJA PROGRAMU UŻYTKOWNIKA (Terminal Ring 3) ---
-shell_blob.o: shell.cpp shell_linker.ld
-	$(CC) $(CXXFLAGS) -fno-pie -c shell.cpp -o shell_tmp.o
+# === BUDOWANIE POWŁOKI BURSZTYNA (RING 3) ===
+shell_tmp.o: shell.cpp
+	$(CXX) $(CXXFLAGS) -fno-pie -c shell.cpp -o shell_tmp.o
+
+shell_blob.o: shell_tmp.o
 	$(LD) -T shell_linker.ld -nostdlib -no-pie shell_tmp.o -o shell.elf
-	x86_64-linux-gnu-objcopy -O binary shell.elf shell.bin
+	$(OBJCOPY) -O binary shell.elf shell.bin
 	$(LD) -r -b binary shell.bin -o shell_blob.o
 
-# === BUDOWA OBRAZU I URUCHAMIANIE ===
-# Reguła generująca pełny obraz ISO z własnym menu GRUB
+# === KONSOLIDACJA JĄDRA ===
+system_operacyjny.bin: $(OBJS)
+	$(CXX) -T linker.ld -nostdlib -no-pie -z noexecstack -o system_operacyjny.bin $(OBJS) -lgcc
+
+# === BUDOWANIE OBRAZU ISO I KONFIGURACJA GRUB-A ===
 iso: system_operacyjny.bin
 	mkdir -p isodir/boot/grub
 	cp system_operacyjny.bin isodir/boot/
 	echo 'set timeout=0' > isodir/boot/grub/grub.cfg
 	echo 'set default=0' >> isodir/boot/grub/grub.cfg
 	echo 'menuentry "Bursztyn OS" {' >> isodir/boot/grub/grub.cfg
+	echo '    insmod all_video' >> isodir/boot/grub/grub.cfg
+	echo '    set gfxpayload=1024x768x32' >> isodir/boot/grub/grub.cfg
 	echo '    multiboot2 /boot/system_operacyjny.bin' >> isodir/boot/grub/grub.cfg
 	echo '    boot' >> isodir/boot/grub/grub.cfg
 	echo '}' >> isodir/boot/grub/grub.cfg
 	grub-mkrescue -o BursztynOS.iso isodir --xorriso=xorriso
 
-# Uruchomienie w maszynie wirtualnej
+# === URUCHOMIENIE W QEMU ===
 run: iso
-	qemu-system-x86_64 -cdrom BursztynOS.iso -m 2G
+	qemu-system-x86_64 -cdrom BursztynOS.iso -m 2G -vga std -serial stdio
 
-# Reguła czyszcząca artefakty
+# === CZYSZCZENIE PROJEKTU ===
 clear:
-	rm -f $(OBJS) system_operacyjny.bin BursztynOS.iso shell_tmp.o shell.elf shell.bin
+	rm -f *.o *.bin *.elf *.iso
 	rm -rf isodir
