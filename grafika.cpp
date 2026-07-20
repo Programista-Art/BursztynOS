@@ -1,7 +1,6 @@
 #include "grafika.h"
 #include "pamiec.h"
-#include <stdint.h>
-#include <stdbool.h>
+#include "zegar-rtc.h"
 
 // ==================== ZMIENNE GLOBALNE MATRYCY ====================
 static uint32_t* lfb = nullptr;
@@ -386,6 +385,15 @@ void OdswiezEkran() {
             WypiszTekst(okna[i].krotka_nazwa, taskbar_x + 10, lfb_wysokosc - 28, kolor_tekstu_btn, 2);
             taskbar_x += 190;
         }
+
+        // --- WYSWIETLANIE ZEGARA RTC ---
+        CzasRTC czas;
+        PobierzCzasRTC(&czas);
+        char bufor_czasu[16];
+        FormatujCzasDoStringa(&czas, bufor_czasu);
+        
+        // Rysujemy po prawej stronie ekranu (odleglosc 150px od konca szerokosci matrycy)
+        WypiszTekst(bufor_czasu, lfb_szerokosc - 150, lfb_wysokosc - 28, 0x00FFBF00, 2);
     }
 
     if (menu_otwarte) {
