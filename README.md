@@ -10,6 +10,9 @@ System jest rozwijany z myślą o architekturze x86-64, implementując własne J
 
 # Programy w Bursztynie powłoka systemowa shell i prosty notatnik
 ![alt](image/natywny-sterownik-bochs-vbe.png)
+![alt](image/bursztyn1.png)
+![alt](image/bursztyn-terminal.png)
+
 
 
 ## Dostępne 16 komend w Shellu
