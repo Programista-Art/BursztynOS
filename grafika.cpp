@@ -19,9 +19,10 @@ struct Okno {
     bool zmaksymalizowane;
 };
 
+// Delikatnie poszerzamy okno terminala, by przy skali=1 pieknie pomiescilo 80 kolumn!
 static Okno okna[2] = {
-    { 20, 20, 600, 400,  0,0,0,0, "Powloka Bursztyna (Ring 3 Terminal)", "Terminal", 0x00000000, true, false },
-    { 180, 80, 560, 400, 0,0,0,0, "Edytor Avocado - Nowy Plik", "Edytor", 0x00FFFFFF, true, false }
+    { 20, 20, 660, 360,  0,0,0,0, "Powloka Bursztyna (Ring 3 Terminal)", "Terminal", 0x001A0B00, true, false },
+    { 180, 80, 560, 400, 0,0,0,0, "Edytor Avocado - Nowy Plik", "Edytor", 0x00280F00, true, false }
 };
 
 static int z_order[2] = {1, 0}; // 0 = spod, 1 = wierzch
@@ -29,14 +30,14 @@ static int z_order[2] = {1, 0}; // 0 = spod, 1 = wierzch
 static int okno_przeciagane = -1;
 static int chwyt_x = 0;
 static int chwyt_y = 0;
-static bool lewy_wcisniety = false;
 
 struct ZnakTerminala {
     char znak;
     uint32_t kolor;
 };
-#define MAX_ROWS 60
-#define MAX_COLS 120
+// Zwiekszone limity tablicy, aby zmiescic znaki na zmaksymalizowanym ekranie 1024x768
+#define MAX_ROWS 80
+#define MAX_COLS 140
 static ZnakTerminala term_buf[MAX_ROWS][MAX_COLS];
 static int term_r = 0, term_c = 0;
 static int term_max_r = 25, term_max_c = 80;
@@ -234,18 +235,22 @@ void RysujOkno(int id) {
 
     if (szer < 10 || wys < 40) return;
     
-    // Cien / obrys
-    RysujProstokat(px, py, szer, wys, 0x00C0C0C0);             
+    // Cien / obrys okna
+    RysujProstokat(px, py, szer, wys, 0x008A5A00);             
     
     // Belka Tytulowa (Kolor zalezy od tego, czy okno ma Focus)
     bool aktywne = (z_order[1] == id);
-    uint32_t kolor_paska = aktywne ? 0x000000A0 : 0x00808080;
+    uint32_t kolor_paska = aktywne ? 0x00FFBF00 : 0x008A5A00;
     RysujProstokat(px + 2, py + 2, szer - 4, 24, kolor_paska);  
-    WypiszTekst(okna[id].tytul, px + 8, py + 6, 0x00FFFFFF, 2);         
+    
+    // Jasna (aktywna) belka = ciemny tekst; Ciemna belka = zgaszony tekst
+    uint32_t kolor_tekstu_paska = aktywne ? 0x001A0B00 : 0x00D1D5DB;
+    // Tytul okna pozostawiamy w skali=2 by ladnie wygladal w GUI
+    WypiszTekst(okna[id].tytul, px + 8, py + 6, kolor_tekstu_paska, 2);         
     
     // Przycisk MAKSYMALIZUJ [ ^ ] lub PRZYWROC [ v ]
-    RysujProstokat(px + szer - 50, py + 4, 20, 20, 0x0000AA00);
-    WypiszTekst(okna[id].zmaksymalizowane ? "v" : "^", px + szer - 46, py + 6, 0x00FFFFFF, 2);
+    RysujProstokat(px + szer - 50, py + 4, 20, 20, 0x00E58A00);
+    WypiszTekst(okna[id].zmaksymalizowane ? "v" : "^", px + szer - 46, py + 6, 0x001A0B00, 2);
 
     // Przycisk ZAMKNIJ/MINIMALIZUJ [ X ]
     RysujProstokat(px + szer - 26, py + 4, 20, 20, 0x00AA0000);
@@ -256,8 +261,9 @@ void RysujOkno(int id) {
 }
 
 void RysujZawartoscTerminala(int px, int py, int szer, int wys) {
-    int skala = 2;
-    int wysokosc_linii = (8 * skala) + 6;
+    // NAPRAWA: Zmniejszono skale terminala z 2 do 1, by zmiescil 80 kolumn w normalnym oknie
+    int skala = 1;
+    int wysokosc_linii = 12; // 8 pikseli wysokosci + 4 piksele przerwy
     int start_x = px + 6;
     int start_y = py + 28 + 4;
     
@@ -272,7 +278,7 @@ void RysujZawartoscTerminala(int px, int py, int szer, int wys) {
             char z = term_buf[r][c].znak;
             if (z != 0) {
                 // ZABEZPIECZENIE: Zatrzymanie renderowania przed wyjsciem za ramke osi X
-                if (cx + 8*skala >= px + szer) break;
+                if (cx + 8*skala >= px + szer - 6) break;
                 RysujZnak(z, cx, cy, term_buf[r][c].kolor, 0, true, skala);
             }
             cx += 8 * skala;
@@ -318,27 +324,36 @@ void OdswiezEkran() {
     if(!backbuffer) return;
     
     // Tlo Pulpitu
-    RysujProstokat(0, 0, lfb_szerokosc, lfb_wysokosc, 0x00005A8C);
+    RysujProstokat(0, 0, lfb_szerokosc, lfb_wysokosc, 0x001A0B00);
     
-    // PASEK ZADAN (Taskbar)
+    // Pasek Zadan
     if (lfb_wysokosc >= 40) {
-        RysujProstokat(0, lfb_wysokosc - 40, lfb_szerokosc, 40, 0x00222222);
-        WypiszTekst("Menu", 10, lfb_wysokosc - 28, 0x00FFFFFF, 2);
+        RysujProstokat(0, lfb_wysokosc - 40, lfb_szerokosc, 40, 0x00280F00);
+        RysujProstokat(0, lfb_wysokosc - 40, lfb_szerokosc, 2, 0x008A5A00);
+        
+        WypiszTekst("Menu", 10, lfb_wysokosc - 28, 0x00FFBF00, 2);
         
         int taskbar_x = 100;
         for (int i = 0; i < 2; i++) {
-            // Kolor przycisku zalezy od stanu aplikacji
-            uint32_t kolor_btn = 0x00333333; // W tle, widoczne
-            if (!okna[i].widoczne) kolor_btn = 0x00111111; // Zminimalizowane (Schowane)
-            else if (z_order[1] == i) kolor_btn = 0x00555555; // Wcisniete / Aktywne
+            uint32_t kolor_btn = 0x008A5A00;
+            uint32_t kolor_tekstu_btn = 0x00D1D5DB; 
+            
+            if (!okna[i].widoczne) {
+                kolor_btn = 0x001A0B00; 
+                kolor_tekstu_btn = 0x008A5A00;
+            }
+            else if (z_order[1] == i) {
+                kolor_btn = 0x00E58A00; 
+                kolor_tekstu_btn = 0x001A0B00;
+            }
             
             RysujProstokat(taskbar_x, lfb_wysokosc - 35, 200, 30, kolor_btn);
-            WypiszTekst(okna[i].krotka_nazwa, taskbar_x + 10, lfb_wysokosc - 28, 0x00FFFFFF, 2);
+            WypiszTekst(okna[i].krotka_nazwa, taskbar_x + 10, lfb_wysokosc - 28, kolor_tekstu_btn, 2);
             taskbar_x += 210;
         }
     }
     
-    // Rysowanie Okien Z-Order (od tego na spodzie, do tego na wierzchu)
+    // Z-Order
     for(int k = 0; k < 2; k++) {
         int i = z_order[k];
         if (!okna[i].widoczne) continue;
@@ -348,12 +363,12 @@ void OdswiezEkran() {
         if (i == 0) {
             RysujZawartoscTerminala(okna[i].x, okna[i].y, okna[i].szer, okna[i].wys);
         } else if (i == 1) {
-            // Ochrona przed pisaniem we wnetrzu mikroskopijnego okna
             if (okna[1].szer > 150 && okna[1].wys > 150) {
-                WypiszTekst("Edytor Avocado - Gotowy!", okna[1].x + 20, okna[1].y + 50, 0x00000000, 2);
-                WypiszTekst("Przycisk [X] minimalizuje okno", okna[1].x + 20, okna[1].y + 80, 0x00000000, 2);
-                WypiszTekst("na pasek zadan w dolnym ekranie.", okna[1].x + 20, okna[1].y + 110, 0x00000000, 2);
-                WypiszTekst("Zielony przycisk [^] maksymalizuje", okna[1].x + 20, okna[1].y + 140, 0x00AA0000, 2);
+                // Dostosowano skale w edytorze z 2 do 1, zeby dopasowac wyglad do nowych proporcji
+                WypiszTekst("Edytor Avocado - Gotowy!", okna[1].x + 20, okna[1].y + 50, 0x00FFBF00, 1);
+                WypiszTekst("Przycisk [X] minimalizuje okno", okna[1].x + 20, okna[1].y + 70, 0x00D1D5DB, 1);
+                WypiszTekst("na pasek zadan w dolnym ekranie.", okna[1].x + 20, okna[1].y + 90, 0x00D1D5DB, 1);
+                WypiszTekst("Pomaranczowy przycisk [^] maksymalizuje", okna[1].x + 20, okna[1].y + 110, 0x00E58A00, 1);
             }
         }
     }
@@ -387,7 +402,6 @@ void PokazKursor() {
 }
 
 static bool TrafieniePasekTyulu(const Okno& o, int mx, int my) {
-    // Odcinamy prawy margines, na ktorym znajduja sie przyciski [^] i [X] (55 pikseli)
     if (mx < o.x + 2 || mx >= o.x + o.szer - 55) return false;
     if (my < o.y + 2 || my >= o.y + 26)          return false;
     return true;
@@ -406,11 +420,11 @@ static bool TrafienieCaleOkno(const Okno& o, int mx, int my) {
 }
 
 static void OgraniczOkno(Okno& o) {
-    if (o.zmaksymalizowane) return; // Zmaksymalizowanych nie ograniczamy, sa sztywne
+    if (o.zmaksymalizowane) return; 
     int32_t min_x = -(int32_t)o.szer + 80;
     int32_t max_x = (int32_t)lfb_szerokosc - 80;
     int32_t min_y = 0;
-    int32_t max_y = (int32_t)lfb_wysokosc - 40; // Uwzglednia wysokosc paska zadan
+    int32_t max_y = (int32_t)lfb_wysokosc - 40; 
 
     if ((int32_t)o.x < min_x) o.x = (uint32_t)min_x;
     if ((int32_t)o.x > max_x) o.x = (uint32_t)max_x;
@@ -419,7 +433,7 @@ static void OgraniczOkno(Okno& o) {
 }
 
 static void WyciagnijNaWierzch(int id_okna) {
-    if (z_order[1] == id_okna) return; // Okno juz jest na samej gorze
+    if (z_order[1] == id_okna) return; 
     z_order[0] = z_order[1];
     z_order[1] = id_okna;
 }
@@ -451,16 +465,13 @@ extern "C" void ZaktualizujMysze(int dx, int dy, uint8_t przyciski) {
     if (klik_lewy && okno_przeciagane == -1) {
         bool przechwycono = false;
         
-        // 1. Sprawdz Pasek Zadan na samym dole
+        // Pasek Zadan na samym dole
         if (mysz_y >= (int)lfb_wysokosc - 40) {
             int taskbar_x = 100;
             for (int i = 0; i < 2; i++) {
                 if (mysz_x >= taskbar_x && mysz_x <= taskbar_x + 200) {
-                    if (okna[i].widoczne && z_order[1] == i) {
-                        // Jesli jest na wierzchu - schowaj (Zminimalizuj)
-                        okna[i].widoczne = false;
-                    } else {
-                        // Odwrotnie - przywroc lub wyciagnij przed szereg
+                    if (okna[i].widoczne && z_order[1] == i) okna[i].widoczne = false;
+                    else {
                         okna[i].widoczne = true;
                         WyciagnijNaWierzch(i);
                     }
@@ -472,37 +483,44 @@ extern "C" void ZaktualizujMysze(int dx, int dy, uint8_t przyciski) {
             }
         }
         
-        // 2. Sprawdz klikniecie w Okno
         if (!przechwycono) {
             for (int k = 1; k >= 0; k--) {
                 int i = z_order[k];
                 if (!okna[i].widoczne) continue;
                 
-                if (TrafieniePrzycisk(okna[i], mysz_x, mysz_y, 26)) { // Przycisk [X] - Zminimalizuj na pasek
+                if (TrafieniePrzycisk(okna[i], mysz_x, mysz_y, 26)) { 
                     okna[i].widoczne = false;
                     wymaga_odrysowania = true;
                     break;
                 }
-                else if (TrafieniePrzycisk(okna[i], mysz_x, mysz_y, 50)) { // Przycisk [^] - Maksymalizuj
+                else if (TrafieniePrzycisk(okna[i], mysz_x, mysz_y, 50)) { // MAKSYMALIZACJA
                     WyciagnijNaWierzch(i);
                     if (!okna[i].zmaksymalizowane) {
                         okna[i].stary_x = okna[i].x; okna[i].stary_y = okna[i].y;
                         okna[i].stary_szer = okna[i].szer; okna[i].stary_wys = okna[i].wys;
                         okna[i].x = 0; okna[i].y = 0;
                         okna[i].szer = lfb_szerokosc; 
-                        okna[i].wys = lfb_wysokosc - 40; // Omija Pasek Zadan
+                        okna[i].wys = lfb_wysokosc - 40; 
                         okna[i].zmaksymalizowane = true;
                     } else {
                         okna[i].x = okna[i].stary_x; okna[i].y = okna[i].stary_y;
                         okna[i].szer = okna[i].stary_szer; okna[i].wys = okna[i].stary_wys;
                         okna[i].zmaksymalizowane = false;
                     }
+                    
+                    // NAPRAWA: Zaktualizuj i przelicz rzedy/kolumny dla Terminala!
+                    if (i == 0) {
+                        term_max_c = (okna[0].szer - 12) / 8;
+                        term_max_r = (okna[0].wys - 36) / 12;
+                        if (term_max_c > MAX_COLS) term_max_c = MAX_COLS;
+                        if (term_max_r > MAX_ROWS) term_max_r = MAX_ROWS;
+                    }
                     wymaga_odrysowania = true;
                     break;
                 }
-                else if (TrafieniePasekTyulu(okna[i], mysz_x, mysz_y)) { // Przeciaganie okna
+                else if (TrafieniePasekTyulu(okna[i], mysz_x, mysz_y)) { 
                     WyciagnijNaWierzch(i);
-                    if (!okna[i].zmaksymalizowane) { // Tylko wolne okna mozna przeciagac
+                    if (!okna[i].zmaksymalizowane) { 
                         okno_przeciagane = i;
                         chwyt_x = mysz_x - okna[i].x;
                         chwyt_y = mysz_y - okna[i].y;
@@ -510,7 +528,7 @@ extern "C" void ZaktualizujMysze(int dx, int dy, uint8_t przyciski) {
                     wymaga_odrysowania = true;
                     break;
                 }
-                else if (TrafienieCaleOkno(okna[i], mysz_x, mysz_y)) { // Klikniecie w zawartosc - tylko focus
+                else if (TrafienieCaleOkno(okna[i], mysz_x, mysz_y)) { 
                     WyciagnijNaWierzch(i);
                     wymaga_odrysowania = true;
                     break;
@@ -522,19 +540,11 @@ extern "C" void ZaktualizujMysze(int dx, int dy, uint8_t przyciski) {
         okno_przeciagane = -1;
     }
     
-    // Obsluga plynnego przesuwania okna
+    // Przesuwanie okna
     if (okno_przeciagane != -1 && lewy_teraz && (dx != 0 || dy != 0)) {
         okna[okno_przeciagane].x = mysz_x - chwyt_x;
         okna[okno_przeciagane].y = mysz_y - chwyt_y;
         OgraniczOkno(okna[okno_przeciagane]);
-        
-        // Zabezpieczenie Clippingu podczas zmiany rozmiaru
-        if (okno_przeciagane == 0) {
-            term_max_c = (okna[0].szer - 12) / 16;
-            term_max_r = (okna[0].wys - 36) / 22;
-            if (term_max_c > MAX_COLS) term_max_c = MAX_COLS;
-            if (term_max_r > MAX_ROWS) term_max_r = MAX_ROWS;
-        }
         wymaga_odrysowania = true;
     }
     
@@ -608,7 +618,6 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
         for(uint64_t i = 0; i < lfb_waga; i++) backbuffer[i] = 0;
         for(int r = 0; r < MAX_ROWS; r++) { for(int c = 0; c < MAX_COLS; c++) term_buf[r][c].znak = 0; }
         
-        // Zabezpieczenie przed oknami wypadajacymi poza mikroskopijne monitory (Fallback)
         if (okna[0].x + okna[0].szer > (int)lfb_szerokosc) okna[0].szer = lfb_szerokosc - okna[0].x - 20;
         if (okna[0].y + okna[0].wys > (int)lfb_wysokosc - 40) okna[0].wys = lfb_wysokosc - okna[0].y - 40;
 
@@ -622,8 +631,9 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
         OgraniczOkno(okna[0]);
         OgraniczOkno(okna[1]);
         
-        term_max_c = (okna[0].szer - 12) / 16;
-        term_max_r = (okna[0].wys - 36) / 22;
+        // NAPRAWA: Poprawne kalkulowanie limitow znakow przy starcie dla nowej czcionki (Skala 1)
+        term_max_c = (okna[0].szer - 12) / 8;
+        term_max_r = (okna[0].wys - 36) / 12;
         if (term_max_c > MAX_COLS) term_max_c = MAX_COLS;
         if (term_max_r > MAX_ROWS) term_max_r = MAX_ROWS;
         
@@ -640,8 +650,8 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
 void WypiszLog(const char* tekst) {
     if(!backbuffer) return;
     UkryjKursor();
-    DopiszDoBufora(tekst, 0x00FFA500);
-    DopiszDoBufora("\n", 0x00FFA500);
+    DopiszDoBufora(tekst, 0x00FFBF00);
+    DopiszDoBufora("\n", 0x00FFBF00);
     OdswiezEkran();
     PokazKursor();
     PrzeniesNaEkran();
@@ -650,7 +660,7 @@ void WypiszLog(const char* tekst) {
 extern "C" void wypisz_na_ekranie(const char* tekst) {
     if(!backbuffer) return;
     UkryjKursor();
-    DopiszDoBufora(tekst, 0x0000FF00);
+    DopiszDoBufora(tekst, 0x00E58A00);
     OdswiezEkran();
     PokazKursor();
     PrzeniesNaEkran();

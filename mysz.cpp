@@ -2,6 +2,7 @@
  * Mechanizm: Sterownik Myszy PS/2 z Odkodowywaniem Pakietów (GUI)
  * Opis: Odbiera 3-bajtowe pakiety od kontrolera 8042, dekoduje
  * przesunięcia osi X i Y oraz przesyła je do Składacza Obrazu.
+ * Wzbogacony o sprzętową i programową akcelerację dla matryc HD.
  */
 
 #include <stdint.h>
@@ -34,21 +35,39 @@ void MyszCzekajNaOdczyt() {
 
 extern "C" void InicjalizujMyszPS2() {
     uint8_t status;
-    MyszCzekajNaZapis(); wyjscie_port_bajt(0x64, 0xA8);
-    MyszCzekajNaZapis(); wyjscie_port_bajt(0x64, 0x20);
+    
+    MyszCzekajNaZapis(); wyjscie_port_bajt(0x64, 0xA8); // Aktywacja drugiego portu PS/2
+    MyszCzekajNaZapis(); wyjscie_port_bajt(0x64, 0x20); // Żądanie statusu kontrolera
     MyszCzekajNaOdczyt(); status = wejscie_port_bajt(0x60);
     
-    status |= 2;
-    status &= ~0x20;
+    status |= 2;       // Włącz przerwania (IRQ 12)
+    status &= ~0x20;   // Włącz zegar myszy
     
     MyszCzekajNaZapis(); wyjscie_port_bajt(0x64, 0x60);
     MyszCzekajNaZapis(); wyjscie_port_bajt(0x60, status);
     
-    // Włączenie raportowania pakietów w urządzeniu
+    // 1. Przywrócenie ustawień domyślnych
     MyszCzekajNaZapis(); wyjscie_port_bajt(0x64, 0xD4);
     MyszCzekajNaZapis(); wyjscie_port_bajt(0x60, 0xF6);
     MyszCzekajNaOdczyt(); wejscie_port_bajt(0x60); 
+
+    // 2. --- ZWIĘKSZENIE CZUŁOŚCI (Rozdzielczość sprzętowa) ---
+    MyszCzekajNaZapis(); wyjscie_port_bajt(0x64, 0xD4);
+    MyszCzekajNaZapis(); wyjscie_port_bajt(0x60, 0xE8); // Komenda set resolution
+    MyszCzekajNaOdczyt(); wejscie_port_bajt(0x60); 
+    MyszCzekajNaZapis(); wyjscie_port_bajt(0x64, 0xD4);
+    MyszCzekajNaZapis(); wyjscie_port_bajt(0x60, 0x03); // Maksymalna rozdzielczość (8 counts/mm)
+    MyszCzekajNaOdczyt(); wejscie_port_bajt(0x60); 
+
+    // 3. --- ZWIĘKSZENIE CZĘSTOTLIWOŚCI (Sample Rate) ---
+    MyszCzekajNaZapis(); wyjscie_port_bajt(0x64, 0xD4);
+    MyszCzekajNaZapis(); wyjscie_port_bajt(0x60, 0xF3); // Komenda set sample rate
+    MyszCzekajNaOdczyt(); wejscie_port_bajt(0x60); 
+    MyszCzekajNaZapis(); wyjscie_port_bajt(0x64, 0xD4);
+    MyszCzekajNaZapis(); wyjscie_port_bajt(0x60, 200);  // Maksymalne 200 próbek na sekundę
+    MyszCzekajNaOdczyt(); wejscie_port_bajt(0x60); 
     
+    // 4. Włączenie raportowania pakietów w urządzeniu
     MyszCzekajNaZapis(); wyjscie_port_bajt(0x64, 0xD4);
     MyszCzekajNaZapis(); wyjscie_port_bajt(0x60, 0xF4);
     MyszCzekajNaOdczyt(); wejscie_port_bajt(0x60); 
@@ -72,18 +91,26 @@ extern "C" void ObslugaPrzerwaniaMyszy() {
     if (licznik_pakietu >= 3) {
         uint8_t flagi = pakiety[0];
         
-        // Konwersja surowych bajtów na przesunięcie ze znakiem
-        int dx = pakiety[1];
-        int dy = pakiety[2];
+        // Zabezpieczenie: Ignorujemy pakiet, jeśli wystąpiło przepełnienie sprzętowe (zbyt gwałtowny ruch)
+        if (!(flagi & 0xC0)) {
+            // Konwersja surowych bajtów na przesunięcie ze znakiem
+            int dx = pakiety[1];
+            int dy = pakiety[2];
 
-        // Wyciąganie ujemnych wartości na podstawie flag (Uzupełnienie do dwóch)
-        if (flagi & (1 << 4)) dx -= 256; 
-        if (flagi & (1 << 5)) dy -= 256;
+            // Wyciąganie ujemnych wartości na podstawie flag (Uzupełnienie do dwóch)
+            if (flagi & (1 << 4)) dx -= 256; 
+            if (flagi & (1 << 5)) dy -= 256;
 
-        uint8_t przyciski = flagi & 0x07; // 3 pierwsze bity to Lewy, Prawy, Srodkowy
+            // --- AKCELERACJA PROGRAMOWA ---
+            // Mnożymy przesunięcie, aby kursor był szybki i z łatwością pokrył całą matrycę 1024x768
+            dx *= 2;
+            dy *= 2;
 
-        // Wywołaj sprzętowy aktualizator grafiki!
-        ZaktualizujMysze(dx, dy, przyciski);
+            uint8_t przyciski = flagi & 0x07; // 3 pierwsze bity to Lewy, Prawy, Środkowy
+
+            // Wywołaj sprzętowy aktualizator grafiki w Menedżerze Okien
+            ZaktualizujMysze(dx, dy, przyciski);
+        }
         
         licznik_pakietu = 0; 
     }
