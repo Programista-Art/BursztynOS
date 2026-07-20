@@ -1,410 +1,250 @@
 
-# 05. Bursztynowy System Plików (BSP64)
 
-Niniejszy dokument opisuje architekturę, struktury danych oraz mechanizmy operacyjne **Bursztynowego Systemu Plików (BSP64)**. Jest to autorski, hierarchiczny system plików zaprojektowany specjalnie dla systemu operacyjnego **Bursztyn OS**.
+# Dokumentacja Systemu Operacyjnego Bursztyn OS
 
-BSP64 został zaprojektowany z wykorzystaniem nowoczesnej architektury blokowej opartej na blokach **4096 bajtów (4 KB)**. Rozwiązanie to zastąpiło wcześniejszą koncepcję bloków 512-bajtowych i lepiej odpowiada architekturze współczesnych systemów operacyjnych oraz urządzeń pamięci masowej.
+![alt](image/logo-bursztyn-os.png)
 
-System plików jest zintegrowany bezpośrednio z jądrem Bursztyna oraz systemem wywołań systemowych BWS (Bursztynowe Wywołania Systemowe).
+Witaj w oficjalnej dokumentacji **Bursztyn OS** – niezależnego, 64-bitowego systemu operacyjnego z polską duszą inżynieryjną, tworzonego całkowicie od zera (czysty bare-metal).
 
----
+System jest rozwijany z myślą o architekturze x86-64, implementując własne Jądro, autorski system plików, niezależny logiczny model bezpieczeństwa oraz natywne środowisko uruchomieniowe dla programów skompilowanych z języka Avocado.
 
-## 5.1 Aktualny status implementacji
+# Program  powłoka systemowa shell
+![alt](image/shell1.png)
 
-Bursztynowy System Plików jest obecnie działającym elementem systemu operacyjnego.
+## Dostępne 16 komend w Shellu
+1. pomoc - wyświetla dostępną listę komend.
+1. system - wypisuje informacje o architekturze Bursztyn OS.
+1. wersja - krótka informacja o wersji powłoki i OS
+1. kto - odpowie, na jakich prawach aktualnie działasz.
+1. historia – pokaże 5 ostatnich wpisanych przez Ciebie poleceń!
+1. czysc - czyści ekran terminala
+1. utworz - tworzy nowy, pusty plik na RAM-Dysku.
+1. zapisz - zapisuje plik
+1. czytaj [plik] - wyświetla zawartość pliku  
+1. pliki [kat] - wylistuj wszystkie pliki
+1. usun [sciezka]- usuwa plik lub katalog
+1. zmien_nazwe - zmienia nazwę (kreator)
+1. gdzie - ścieżka obecnego katalogu
+1. pisz [tekst] - wypisze z powrotem na ekran to, co wpiszesz po spacji.
+1. cytat - wypisze losowy, motywujący cytat programistyczny.
+1. losuj - rzuci wirtualną sześciościenną kością.
 
-Aktualnie zaimplementowane i działające funkcje obejmują:
+    
 
-* tworzenie plików,
-* odczyt danych z plików,
-* zapis danych do plików,
-* tworzenie katalogów,
-* obsługę hierarchicznej struktury katalogów,
-* listowanie zawartości dysku,
-* wyszukiwanie elementów w systemie plików,
-* obsługę ścieżek plików i katalogów,
-* komunikację z przestrzenią użytkownika poprzez BWS.
+## 🗂️ Struktura Dokumentacji
 
-BSP64 jest wykorzystywany przez powłokę systemową działającą w **Ring 3**, która komunikuje się z jądrem za pomocą sprzętowej instrukcji `syscall`.
+Poniższe pliki zawierają pełną specyfikację techniczną, opisy mechanizmów oraz analizę kodu źródłowego systemu:
 
----
+1. [01_wstep_i_filozofia.md](docs/01_wstep_i_filozofia.md) – Wizja projektu, założenia ideologiczne, polskie nazewnictwo i roadmapa rozwoju.
+2. [02_architektura_systemu.md](docs/02_architektura_systemu.md) – Podział na przestrzenie Ring 0/Ring 3, szczegółowa specyfikacja modelu BZL (Bursztynowy Poziom Zaufania) oraz wprowadzenie do BWS.
+3. [03_proces_rozruchu.md](docs/03_proces_rozruchu.md) – Analiza `boot.S`, wielopoziomowe tablice stron, przejście do trybu Long Mode i przekazanie parametrów z GRUB.
+4. [04_zarzadzanie_sprzetem.md](docs/04_zarzadzanie_sprzetem.md) – Inicjalizacja GDT, IDT, kontroler APIC, Zegar Systemowy (LAPIC Timer) oraz sterowniki wejścia/wyjścia (klawiatura PS/2, ekran tekstowy).
+5. [05_bursztynowy_system_plikow.md](docs/05_bursztynowy_system_plikow.md) – Specyfikacja BSP, struktura węzłów indeksowych, parser ścieżek i implementacja RAM-dysku.
+6. [06_wywolania_systemowe.md](docs/06_wywolania_systemowe.md) – Architektura BWS, Standard BWS dla rejestrów (R8-R13) i wykaz dostępnych wywołań systemowych.
+7. [07_ekosystem_i_formaty.md](docs/07_ekosystem_i_formaty.md) – Specyfikacja binarna `.bur`, struktura paczek `.cebula` oraz manifesty `opis.aplikacji`.
+8. [08_bursztynowy_slownik_i_architektura.md](docs/08_bursztynowy_slownik_i_architektura.md) – Oficjalny słownik pojęć rdzennych (Teczka, Włókna, Planista) oraz strategia pełnego wdrożenia UTF-8.
+9. [09_tryb_graficzny.md](docs/09_tryb_graficzny.md) - Tryb Graficzny i Składacz Obrazu
 
-## 5.2 Architektura blokowa BSP64
+## 🛠️ Architektura w pigułce
 
-Podstawową jednostką przechowywania danych w BSP64 jest blok o rozmiarze:
+* **Tryb procesora:** 64-bit Long Mode (wymagany start z GRUB za pomocą Multiboot2).
+* **Zarządzanie pamięcią:** Zarządca Pamięci Fizycznej (mapa bitowa) + Zarządca Pamięci Wirtualnej (4-poziomowe stronicowanie PML4/PDP/PD/PT).
+* **Wielozadaniowość/Asynchroniczność:** Nowoczesny APIC + Zegar LAPIC (Wektor 32) po całkowitym uśpieniu archaicznego PIC.
+* **System plików:** BSP (Bursztynowy System Plików) BSP64 został zaprojektowany z wykorzystaniem nowoczesnej architektury blokowej opartej na blokach 4096 bajtów (4 KB), drzewo teczek oparte na węzłach indeksowych.
 
-```text
-4096 bajtów (4 KB)
-````
-
-Wprowadzenie bloków 4 KB stanowi podstawę architektury BSP64.
-
-### Główne zalety bloków 4 KB:
-
-* lepsze dopasowanie do rozmiaru stron pamięci w architekturze x86_64,
-* mniejszy narzut zarządzania dużymi strukturami danych,
-* lepsza współpraca z systemem pamięci wirtualnej,
-* naturalna integracja z mechanizmem VMM,
-* zgodność z typowymi rozmiarami bloków stosowanymi przez nowoczesne systemy plików,
-* możliwość dalszej rozbudowy systemu plików bez konieczności zmiany podstawowej architektury.
-
-BSP64 nie jest już projektowany jako system oparty na archaicznych blokach 512-bajtowych. Wprowadzenie bloków 4 KB było jednym z kluczowych kroków rozwoju systemu plików.
-
----
-
-## 5.3 Podstawowe elementy systemu plików
-
-Architektura BSP64 opiera się na kilku podstawowych elementach:
-
-1. blokach danych,
-2. węzłach indeksowych,
-3. wpisach katalogowych,
-4. strukturze hierarchicznej katalogów,
-5. mechanizmie obsługi ścieżek.
-
-### 1. Bloki danych
-
-Blok danych ma rozmiar:
-
-```text
-4096 bajtów
+# Jak uruchomić system Burstzyn w QEMU na Windows 11
+## Krok 1: pobierz plik BursztynOS.iso na pc, otwórz wiersz polecenia cmd
+Naciśnij na klawiaturze skrót Win + R, wpisz cmd i wciśnij Enter.
+## Krok 2: Przejście do folderu z systemem
+Wpisz po kolei te dwie komendy (każdą zatwierdź Enterem), aby przełączyć się na dysk D: czy C: i wejść do katalogu z najnowszym wydaniem:
+```
+D:
+cd D:\Bursztyn-OS\
 ```
 
-Dane plików są przechowywane w jednym lub wielu blokach. Rozmiar pliku może być większy niż pojedynczy blok, dlatego system plików musi obsługiwać przypisywanie wielu bloków do jednego pliku.
+## Krok 3: Uruchomienie QEMU
+Będąc już w folderze, w którym leży plik BursztynOS.iso, odwołaj się do programu zainstalowanego na dysku C:. Skopiuj całą tę linijkę (z zachowaniem cudzysłowów) i wklej do konsoli:
+```
+"C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom BursztynOS.iso -m 2G
+```
+## Jeżeli są błędy przy uruchomieniu
+### Błąd akceleracji (Hyper-V / WHPX)
+Jak to wygląda: failed to initialize WHPX: No accelerator found lub Could not initialize KVM.
 
----
+Dlaczego? Na tym komputerze z Windowsem nie jest włączona sprzętowa wirtualizacja (Hyper-V). QEMU próbuje użyć szybkiego trybu, ale system mu na to nie pozwala.
 
-### 2. Węzeł indeksowy (`wezel_indeksowy`)
-
-Węzeł indeksowy przechowuje metadane dotyczące pliku lub katalogu.
-
-W zależności od aktualnej implementacji może zawierać informacje takie jak:
-
-* typ obiektu,
-* rozmiar pliku,
-* liczba zajmowanych bloków,
-* informacje o lokalizacji danych,
-* informacje wymagane do obsługi katalogów i plików.
-
-Węzeł indeksowy nie musi przechowywać nazwy pliku. Nazwa jest przechowywana w strukturze wpisu katalogowego, która wskazuje odpowiedni węzeł indeksowy.
-
-Takie rozdzielenie nazwy oraz metadanych pozwala na stworzenie hierarchicznej struktury systemu plików.
-
----
-
-### 3. Wpis katalogowy (`teczka_wpis`)
-
-Katalog w BSP64 zawiera wpisy opisujące znajdujące się w nim pliki i podkatalogi.
-
-Wpis katalogowy łączy:
-
-```text
-nazwa pliku lub katalogu
-        ↓
-numer odpowiedniego węzła indeksowego
+Rozwiązanie: Uruchom Bursztyn OS w trybie podstawowym (emulacji programowej), po prostu usuwając parametr -accel whpx:
+```
+"C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom BursztynOS.iso -m 2G
 ```
 
-Dzięki temu system może przejść od czytelnej dla użytkownika ścieżki tekstowej do właściwych danych przechowywanych przez system plików.
+## 2. Brak pliku ISO w danym folderze
+Jak to wygląda: qemu-system-x86_64.exe: -cdrom BursztynOS.iso: Could not open 'BursztynOS.iso': No such file or directory
 
----
+Dlaczego? Konsola CMD jest otwarta w innym folderze, niż ten, w którym fizycznie leży Twój plik .iso (lub nazwa pliku różni się wielkością liter/ma dopisaną jakąś cyfrę).
 
-## 5.4 Hierarchiczna struktura katalogów
+Rozwiązanie: Upewnij się komendą dir, że w wierszu poleceń na pewno jesteś w odpowiednim folderze i że plik z systemem tam jest.
 
-BSP64 obsługuje hierarchiczną strukturę katalogów.
+##  3. Problem ze spacją (zgubione cudzysłowy)
+Jak to wygląda: 'C:\Program' is not recognized as an internal or external command, operable program or batch file.
 
-Przykładowa struktura systemu plików może wyglądać następująco:
+Dlaczego? Jeśli w CMD wpiszesz ścieżkę ze spacją bez cudzysłowów, konsola utnie ją na słowie Program i spróbuje to uruchomić, ignorując resztę.
 
-```text
-/                    # Katalog główny (Root)
-├── jadro/           # Komponenty i pliki związane z jądrem
-├── system/          # Globalne pliki systemowe i konfiguracja
-├── sterowniki/      # Sterowniki urządzeń
-├── uslugi/          # Usługi systemowe
-├── programy/        # Programy i aplikacje systemowe
-├── ustawienia/      # Ustawienia systemu i użytkownika
-├── logi/            # Logi systemowe
-├── uzytkownicy/     # Dane użytkowników
-├── piaskownica/     # Izolowana przestrzeń aplikacji
-└── tymczasowe/      # Pliki tymczasowe
+Rozwiązanie: Bezwzględnie pamiętaj o znakach " na początku i końcu ścieżki do QEMU.
+
+# Jak uruchomić system Burstzyn w QEMU na Linux Mint
+## Krok 1: Otwórz terminal w folderze z plikiem
+Najszybsza metoda w systemach takich jak Linux Mint:
+
+1. Otwórz menedżera plików i wejdź do folderu, w którym leży BursztynOS.iso.
+
+2. Kliknij prawym przyciskiem myszy w puste miejsce w tym folderze.
+
+3. Wybierz opcję "Otwórz w terminalu" (Open in Terminal).
+
+(Alternatywnie możesz użyć komendy cd, np. cd ~/Pulpit/Bursztyn\ OS/kod).
+
+## Krok 2: Wpisz komendę uruchamiającą
+1. W Linuksie program QEMU jest dodany do globalnych ścieżek systemu, więc nie musisz podawać do niego pełnej ścieżki w cudzysłowach tak jak na Windowsie. 
+1. Po prostu wklej to:
 ```
 
-Struktura ta może być rozwijana wraz z rozwojem systemu operacyjnego.
-
----
-
-## 5.5 Mechanizm obsługi ścieżek
-
-Jądro Bursztyn OS posiada mechanizm interpretacji ścieżek systemu plików.
-
-Przykładowa ścieżka:
-
-```text
-/system/konfiguracja.cfg
+qemu-system-x86_64 -cdrom BursztynOS.iso -m 2G
 ```
 
-jest analizowana etapami.
+### Krok 3: (Opcjonalnie) Włącz dopalacze KVM! 🚀
+Na Windowsie próbowaliśmy włączyć akcelerację WHPX, ale to na Linuksie QEMU rozwija prawdziwe skrzydła dzięki natywnej akceleracji KVM (Kernel-based Virtual Machine). Zamiast emulować procesor programowo, system pozwala wirtualnej maszynie używać Twojego fizycznego procesora. Bursztyn OS uruchomi się wtedy z prędkością światła!
 
-### 1. Tokenizacja
-
-Ścieżka jest dzielona na poszczególne elementy:
-
-```text
-system
-konfiguracja.cfg
+Aby to zrobić, po prostu dodaj flagę -enable-kvm:
+```
+qemu-system-x86_64 -enable-kvm -cdrom BursztynOS.iso -m 2G
 ```
 
----
+## Uruchomiony system Bursztyn OS na Linux Mint w QEMU
+![alt](image/BursztynOS.png)
 
-### 2. Rozpoczęcie od katalogu głównego
-
-Analiza rozpoczyna się od katalogu głównego:
-
-```text
-/
+# Kompilowanie systemu ze źródel na Linux Mint i uruchomienie w QEMU 
+### Przygotowanie Środowiska w Linux Mint
+1. Otwórz natywny terminal i wykonaj te trzy polecenia:
+1. Aktualizacja repozytoriów:
+```
+sudo apt update && sudo apt upgrade -y
 ```
 
----
+2. Instalacja narzędzi budujących i kompilatora skrośnego: Narzędzie build-essential dostarczy nam program make, a pakiety g++ pozwolą kompilować kod.
+sudo apt install build-essential gcc-x86-64-linux-gnu g++-x86-64-linux-gnu -y
 
-### 3. Wyszukiwanie wpisu
-
-System przeszukuje wpisy katalogu głównego i szuka elementu:
-
-```text
-system
+3. Instalacja narzędzi do tworzenia obrazu ISO (Multiboot)
+Aby komenda grub-mkrescue działała bezbłędnie podczas budowania obrazu .iso  systemu Bursztyn OS, musisz doinstalować te pakiety:
+```
+sudo apt install xorriso mtools grub-pc-bin grub-common -y
 ```
 
-Po znalezieniu odpowiedniego wpisu system uzyskuje dostęp do katalogu `/system`.
-
----
-
-### 4. Przejście do kolejnego elementu
-
-Następnie wyszukiwany jest:
-
-```text
-konfiguracja.cfg
+4. Emulator do szybkich testów (Opcjonalnie)
+Zamiast za każdym razem uruchamiać cięższe środowiska i przeklikiwać się przez interfejs VirtualBoxa, w systemie Linux Mint możesz zainstalować lekki emulator QEMU. Pozwala on na błyskawiczne uruchomiać system bezpośrednio z terminala za pomocą jednej komendy (np. qemu-system-x86_64 -cdrom BursztynOS.iso).
+Aby zainstalować QEMU, wpisz w terminalu:
+```
+sudo apt install qemu-system-x86 -y
 ```
 
----
 
-### 5. Uzyskanie dostępu do danych
+5. Wybór Edytora Kodu
+    1. Możesz użyć wbudowanego w Minta lekkiego programu Xed.
+    1. Możesz pobrać Visual Studio Code (wersję natywną dla Linuxa, instalowaną z pakietu .deb).
+    1. Możesz użyć dowolnego innego narzędzia (np. Vim, Nano, CLion), w którym pisze Ci się wygodnie.
+Skrypt Makefile i tak zajmie się całą "magią" kompilacji i budowania pliku ISO w tle, niezależnie od tego, w jakim programie edytujesz pliki źródłowe.
 
-Po znalezieniu odpowiedniego elementu system plików uzyskuje dostęp do właściwego węzła indeksowego oraz bloków zawierających dane pliku.
 
-Jeżeli element nie zostanie znaleziony, system zwraca odpowiedni kod błędu.
+Aby w pełni skompilować kod Bursztyn OS i uruchomić go na maszynie wirtualnej, musisz połączyć wygenerowany plik binarny z programem rozruchowym GRUB (zgodnie ze standardem Multiboot2) i stworzyć obraz ISO.
+Oto instrukcja krok po kroku, jak to zrobić na Twoim systemie Linux Mint:
+## Krok 1: Dostosowanie Makefile do kompilatorów w Linux Mint
+Makefile narzędzia są zdefiniowane jako standardowy cross-compiler x86_64-elf:
 
----
-
-## 5.6 Integracja z jądrem Bursztyn OS
-
-BSP64 jest bezpośrednio zintegrowany z jądrem systemu operacyjnego.
-
-Operacje na plikach nie są wykonywane bezpośrednio przez programy użytkownika. Aplikacje działające w przestrzeni użytkownika komunikują się z jądrem za pomocą systemu:
-
-# BWS — Bursztynowe Wywołania Systemowe
-
-Powłoka systemowa działająca w Ring 3 wykorzystuje sprzętową instrukcję:
-
-```asm
-syscall
+```
+CC = x86_64-elf-g++
+AS = x86_64-elf-as
+LD = x86_64-elf-ld
 ```
 
-do przechodzenia z przestrzeni użytkownika do jądra.
+## Krok 2: Kompilacja Jądra Bursztyna
+Otwórz terminal w folderze, w którym znajduje się Twój plik Makefile i kod źródłowy, a następnie wpisz:
+make
 
-Przykładowy przepływ operacji wygląda następująco:
-
-```text
-┌─────────────────────────────┐
-│      Program użytkownika    │
-│           Ring 3             │
-└──────────────┬──────────────┘
-               │
-               │ syscall
-               ▼
-┌─────────────────────────────┐
-│        BWS / Jądro           │
-│           Ring 0              │
-└──────────────┬──────────────┘
-               │
-               ▼
-┌─────────────────────────────┐
-│          BSP64               │
-│   Obsługa plików i katalogów │
-└─────────────────────────────┘
+Skrypt automatycznie skompiluje pliki boot.o, gdt.o, pmm.o, vmm.o, kernel.o itd. i połączy je za pomocą Twojego skryptu linker.ld. Jeśli nie ma błędów w kodzie, w folderze pojawi się plik system_operacyjny.bin.
+## Krok 3: Przygotowanie struktury pliku ISO (GRUB Multiboot2)
+Bursztyn OS operuje w 64-bitowym Long Mode, więc wymaga programu rozruchowego (GRUB), który przekaże parametry Multiboot2. Musisz zbudować prostą strukturę teczek dla obrazu płyty:
+W terminalu utwórz katalogi: 
+```
+mkdir -p isodir/boot/grub 
+```
+Skopiuj swoje skompilowane jądro do katalogu /boot: 
+```
+cp system_operacyjny.bin isodir/boot/ 
 ```
 
-Aktualnie system BWS obsługuje między innymi:
+Stwórz plik konfiguracyjny GRUBa o nazwie grub.cfg (np. za pomocą xed isodir/boot/grub/grub.cfg lub nano isodir/boot/grub/grub.cfg) i wklej do niego ten kod: 
 
-* pisanie na ekranie,
-* odczyt klawiatury,
-* tworzenie plików,
-* odczyt plików,
-* zapis plików,
-* listowanie zawartości dysku.
+set timeout=0
+set default=0
 
----
+menuentry "Bursztyn OS" {
+    multiboot2 /boot/system_operacyjny.bin
+    boot
+}
 
-## 5.7 System plików a przestrzeń użytkownika
+## Krok 4: Generowanie bootowalnego obrazu ISO
+Mając gotową strukturę (isodir), użyj zainstalowanego wcześniej narzędzia grub-mkrescue, aby "zamknąć" to w plik .iso:
 
-BSP64 jest wykorzystywany przez programy działające w **Ring 3**.
+grub-mkrescue -o BursztynOS.iso isodir 
 
-Oznacza to, że aplikacja użytkownika nie posiada bezpośredniego dostępu do pamięci jądra ani do wewnętrznych struktur systemu plików.
+W głównym folderze pojawi się nowy plik BursztynOS.iso.
 
-Schemat działania:
-
-```text
-Program w Ring 3
-       │
-       ▼
-Wywołanie BWS
-       │
-       ▼
-Jądro w Ring 0
-       │
-       ▼
-BSP64
-       │
-       ▼
-Operacja na pliku lub katalogu
+## Krok 5: Uruchomienie w QEMU
+Teraz czas ożywić polski system operacyjny! Użyj QEMU, ładując wygenerowany obraz płyty:
+```
+qemu-system-x86_64 -cdrom BursztynOS.iso -m 2G -serial stdio
 ```
 
-Taki model zapewnia podstawową separację pomiędzy przestrzenią użytkownika a jądrem systemu.
+(Flaga -m 2G przydziela 2 Gigabajty pamięci RAM dla maszyny, co przyda się przy testowaniu Zarządcy Pamięci (PMM/VMM) w Etapie 3, a -serial stdio pozwala kierować logi z jądra bezpośrednio do Twojego terminala Linux).
+Po wykonaniu tej komendy powinno wyskoczyć okno emulatora wyświetlające GRUB, a zaraz po nim kod z pliku kernel.cpp Bursztyn OS! 
 
----
 
-## 5.8 BSP64 a pamięć i zarządzanie zasobami
-
-BSP64 współpracuje z podstawowymi mechanizmami pamięci Bursztyn OS.
-
-System operacyjny posiada:
-
-* PMM — Physical Memory Manager,
-* VMM — Virtual Memory Manager,
-* stronicowanie pamięci,
-* mapowanie pamięci wirtualnej,
-* zarządzanie pamięcią jądra.
-
-Dzięki temu system plików może być rozwijany w kierunku pełnej obsługi fizycznych urządzeń pamięci masowej.
-
-Obecna architektura BSP64 została zaprojektowana tak, aby w przyszłości mogła zostać połączona z natywnymi sterownikami urządzeń, takich jak:
-
-* SATA,
-* NVMe,
-* inne kontrolery pamięci masowej.
-
----
-
-## 5.9 Integracja z formatem wykonywalnym `.bur`
-
-BSP64 współpracuje z natywnym formatem programów wykonywalnych Bursztyn OS:
-
-```text
-.bur
+Komenda make clear - usuwa pliki .o
+```
+make clear
 ```
 
-Format `.bur` został zaimplementowany zgodnie ze specyfikacją:
+Skompiluj wszystko od nowa wpisując: 
 
-```text
-Specyfikacja_BUR_v1
+make 
+
+Teraz kompilator przejdzie przez wszystkie moduły (włącznie z systemem plików psf.o i urządzeniami), a na końcu wyświetli Ci poprawnie sklejony plik system_operacyjny.bin, który będziesz mógł podpiąć do GRUBa za pomocą komendy 
+
+
+Ostatnie kroki w terminalu:
+Wpisz po kolei te polecenia 
+1. Skompiluj kod:
+```
+make
+```
+2. Skopiuj wygenerowany obraz do struktury wirtualnej płyty:
+```
+cp system_operacyjny.bin isodir/boot/
+```
+3. Stwórz plik ISO:
+```
+grub-mkrescue -o BursztynOS.iso isodir
+```
+lub
+```
+grub-mkrescue -o BursztynOS.iso isodir --xorriso=xorriso
+```
+4. Uruchom system!:
+```
+qemu-system-x86_64 -cdrom BursztynOS.iso -m 2G -serial stdio
 ```
 
-Loader systemu:
-
-```text
-loader.cpp
+ewentualnie po prostu wpisz ```make run``` i wszystko się zrobi automatycznie
 ```
-
-wyszukuje nagłówek:
-
-```text
-BUR\0
+make run 
 ```
-
-następnie odczytuje wymagane informacje z pliku, w tym rozmiar tekstu programu, i ładuje program do przestrzeni użytkownika.
-
-Po załadowaniu program może zostać uruchomiony w:
-
-```text
-Ring 3
-```
-
-Dzięki temu BSP64, loader `.bur`, BWS oraz przestrzeń użytkownika tworzą wspólny, działający mechanizm uruchamiania programów.
-
----
-
-## 5.10 Aktualny stan architektury systemu plików
-
-Aktualna architektura Bursztyn OS przedstawia się następująco:
-
-```text
-┌──────────────────────────────────┐
-│          Aplikacja .bur           │
-│             Ring 3                │
-└────────────────┬─────────────────┘
-                 │
-                 ▼
-┌──────────────────────────────────┐
-│          Powłoka Bursztyna        │
-│            shell.cpp              │
-└────────────────┬─────────────────┘
-                 │
-                 │ syscall
-                 ▼
-┌──────────────────────────────────┐
-│              BWS                  │
-│   Bursztynowe Wywołania Systemowe │
-└────────────────┬─────────────────┘
-                 │
-                 ▼
-┌──────────────────────────────────┐
-│              Jądro                │
-│             Ring 0                │
-└────────────────┬─────────────────┘
-                 │
-                 ▼
-┌──────────────────────────────────┐
-│             BSP64                 │
-│    System plików bloków 4 KB      │
-└──────────────────────────────────┘
-```
-
-Wszystkie te elementy są obecnie częścią działającej architektury Bursztyn OS.
-
----
-
-## 5.11 Planowany dalszy rozwój
-
-Dalszy rozwój BSP64 obejmuje między innymi:
-
-* rozbudowę obsługi fizycznych urządzeń pamięci masowej,
-* sterowniki SATA i NVMe,
-* trwałe przechowywanie danych,
-* dalszą rozbudowę metadanych plików,
-* system uprawnień i ochrony zasobów,
-* rozszerzenie obsługi procesów,
-* rozbudowę systemu aplikacji `.bur`,
-* mechanizmy instalacji i zarządzania programami.
-
-Docelowo BSP64 ma stać się pełnoprawnym, natywnym systemem plików Bursztyn OS, zintegrowanym z jądrem, pamięcią wirtualną, systemem BWS oraz przestrzenią użytkownika.
-
----
-
-## Podsumowanie
-
-BSP64 jest jednym z kluczowych fundamentów Bursztyn OS.
-
-Aktualnie system operacyjny posiada:
-
-* działający 64-bitowy Long Mode,
-* GDT i IDT,
-* kontroler przerwań APIC/IOAPIC,
-* zarządzanie pamięcią PMM i VMM,
-* działający system plików BSP64 oparty na blokach 4 KB,
-* format programów wykonywalnych `.bur`,
-* loader programów działający w Ring 3,
-* system BWS oparty na instrukcji `syscall`,
-* działającą powłokę systemową `shell.cpp`,
-* izolację przestrzeni użytkownika od jądra.
-
-Bursztyn OS posiada zatem działający fundament systemu operacyjnego: od uruchomienia procesora w trybie 64-bitowym, przez zarządzanie pamięcią i system plików, aż po uruchamianie programów użytkownika w Ring 3.
-
