@@ -7,26 +7,29 @@ static uint32_t  lfb_wysokosc = 0;
 static uint32_t  lfb_pitch = 0;
 static uint8_t   lfb_bpp = 32;
 
-// --- DYNAMICZNE PODWOJNE BUFOROWANIE ---
 static uint8_t* backbuffer = nullptr;
 
 struct Okno {
-    uint32_t x, y, szer, wys;
+    int x, y, szer, wys;
+    int stary_x, stary_y, stary_szer, stary_wys; // Pamiec dla maksymalizacji
     const char* tytul;
+    const char* krotka_nazwa; // Wyswietlane na pasku zadan
     uint32_t kolor_tla;
     bool widoczne;
+    bool zmaksymalizowane;
 };
 
-// Startowe parametry okien
-static Okno okno_term = { 20, 20, 640, 440, "Powloka Bursztyna (Ring 3 Terminal)", 0x00000000, true };
-static Okno okno_edit = { 180, 100, 560, 400, "Edytor Avocado - Nowy Plik", 0x00FFFFFF, true };
+static Okno okna[2] = {
+    { 20, 20, 600, 400,  0,0,0,0, "Powloka Bursztyna (Ring 3 Terminal)", "Terminal", 0x00000000, true, false },
+    { 180, 80, 560, 400, 0,0,0,0, "Edytor Avocado - Nowy Plik", "Edytor", 0x00FFFFFF, true, false }
+};
 
-enum DragStan { DRAG_BRAK, DRAG_TERM, DRAG_EDIT };
-static DragStan drag_stan   = DRAG_BRAK;
-static int      drag_offset_x = 0;
-static int      drag_offset_y = 0;
-static bool     edit_na_wierzchu = true; 
-static uint8_t  ostatnie_przyciski = 0;
+static int z_order[2] = {1, 0}; // 0 = spod, 1 = wierzch
+
+static int okno_przeciagane = -1;
+static int chwyt_x = 0;
+static int chwyt_y = 0;
+static bool lewy_wcisniety = false;
 
 struct ZnakTerminala {
     char znak;
@@ -42,6 +45,7 @@ static int mysz_x = 500;
 static int mysz_y = 300;
 static uint32_t bufor_kursora[16][16];
 static bool kursor_widoczny = false;
+static uint8_t ostatnie_przyciski = 0;
 
 static inline void serial_outb(uint16_t port, uint8_t val) {
     asm volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
@@ -56,7 +60,6 @@ static void SerialLogHex(uint32_t val) {
     SerialLog(buf);
 }
 
-// Sterownik Bochs VBE
 #define VBE_DISPI_IOPORT_INDEX 0x01CE
 #define VBE_DISPI_IOPORT_DATA  0x01CF
 #define VBE_DISPI_INDEX_ID     0
@@ -69,9 +72,13 @@ static void SerialLogHex(uint32_t val) {
 #define VBE_DISPI_ENABLED      0x01
 #define VBE_DISPI_LFB_ENABLED  0x40
 
-static inline void outw(uint16_t port, uint16_t val) { asm volatile ("outw %0, %1" : : "a"(val), "Nd"(port)); }
-static inline uint16_t inw(uint16_t port) { uint16_t val; asm volatile ("inw %1, %0" : "=a"(val) : "Nd"(port)); return val; }
-
+static inline void outw(uint16_t port, uint16_t val) {
+    asm volatile ("outw %0, %1" : : "a"(val), "Nd"(port));
+}
+static inline uint16_t inw(uint16_t port) {
+    uint16_t val; asm volatile ("inw %1, %0" : "=a"(val) : "Nd"(port));
+    return val;
+}
 void BochsVBE_Write(uint16_t index, uint16_t value) {
     outw(VBE_DISPI_IOPORT_INDEX, index);
     outw(VBE_DISPI_IOPORT_DATA, value);
@@ -111,8 +118,9 @@ static const uint8_t czcionka_8x8[96][8] = {
 
 void PrzeniesNaEkran() {
     if (!lfb || !backbuffer) return;
-    uint32_t* dst = (uint32_t*)lfb;
+    volatile uint32_t* dst = (volatile uint32_t*)lfb;
     uint32_t* src = (uint32_t*)backbuffer;
+    
     uint64_t ilosc_pikseli = ((uint64_t)lfb_pitch * (uint64_t)lfb_wysokosc) / 4;
     for(uint64_t i = 0; i < ilosc_pikseli; i++) {
         dst[i] = src[i];
@@ -125,12 +133,13 @@ void PrzeniesFragmentNaEkran(int x, int y, int szer, int wys) {
     int start_y = y < 0 ? 0 : y;
     int end_x = x + szer;
     int end_y = y + wys;
+    
     if(end_x > (int)lfb_szerokosc) end_x = lfb_szerokosc;
     if(end_y > (int)lfb_wysokosc) end_y = lfb_wysokosc;
     
     int bajtow_na_piksel = lfb_bpp / 8;
     for(int rzad = start_y; rzad < end_y; rzad++) {
-        uint8_t* dst = (uint8_t*)lfb + rzad * lfb_pitch + start_x * bajtow_na_piksel;
+        volatile uint8_t* dst = (volatile uint8_t*)lfb + rzad * lfb_pitch + start_x * bajtow_na_piksel;
         uint8_t* src = backbuffer + rzad * lfb_pitch + start_x * bajtow_na_piksel;
         int bajtow = (end_x - start_x) * bajtow_na_piksel;
         for(int b = 0; b < bajtow; b++) dst[b] = src[b];
@@ -179,7 +188,6 @@ void RysujProstokat(int px, int py, int szer, int wys, uint32_t kolor) {
     int start_y = py < 0 ? 0 : py;
     int end_x = px + szer;
     int end_y = py + wys;
-    
     if (end_x > (int)lfb_szerokosc) end_x = lfb_szerokosc;
     if (end_y > (int)lfb_wysokosc) end_y = lfb_wysokosc;
     
@@ -217,62 +225,59 @@ void WypiszTekst(const char* tekst, int px, int py, uint32_t kolor_tekstu, int s
     }
 }
 
-void RysujOkno(const Okno& o) {
-    if (!o.widoczne) return;
-    if (o.szer < 10 || o.wys < 40) return;
-    
-    // Cien/Ramka okna
-    RysujProstokat(o.x, o.y, o.szer, o.wys, 0x00C0C0C0);             
-    
-    // Pasek Tytulu
-    RysujProstokat(o.x + 2, o.y + 2, o.szer - 4, 24, 0x000000A0);  
-    WypiszTekst(o.tytul, o.x + 8, o.y + 6, 0x00FFFFFF, 2);         
-    
-    // Przycisk ZAMKNIJ [X]
-    RysujProstokat(o.x + o.szer - 26, o.y + 4, 20, 20, 0x00AA0000);
-    WypiszTekst("X", o.x + o.szer - 20, o.y + 6, 0x00FFFFFF, 2);
+void RysujOkno(int id) {
+    if (!okna[id].widoczne) return;
+    int px = okna[id].x;
+    int py = okna[id].y;
+    int szer = okna[id].szer;
+    int wys = okna[id].wys;
 
-    // Cialo/Wnetrze Okna
-    RysujProstokat(o.x + 2, o.y + 28, o.szer - 4, o.wys - 30, o.kolor_tla); 
+    if (szer < 10 || wys < 40) return;
+    
+    // Cien / obrys
+    RysujProstokat(px, py, szer, wys, 0x00C0C0C0);             
+    
+    // Belka Tytulowa (Kolor zalezy od tego, czy okno ma Focus)
+    bool aktywne = (z_order[1] == id);
+    uint32_t kolor_paska = aktywne ? 0x000000A0 : 0x00808080;
+    RysujProstokat(px + 2, py + 2, szer - 4, 24, kolor_paska);  
+    WypiszTekst(okna[id].tytul, px + 8, py + 6, 0x00FFFFFF, 2);         
+    
+    // Przycisk MAKSYMALIZUJ [ ^ ] lub PRZYWROC [ v ]
+    RysujProstokat(px + szer - 50, py + 4, 20, 20, 0x0000AA00);
+    WypiszTekst(okna[id].zmaksymalizowane ? "v" : "^", px + szer - 46, py + 6, 0x00FFFFFF, 2);
+
+    // Przycisk ZAMKNIJ/MINIMALIZUJ [ X ]
+    RysujProstokat(px + szer - 26, py + 4, 20, 20, 0x00AA0000);
+    WypiszTekst("X", px + szer - 22, py + 6, 0x00FFFFFF, 2);
+
+    // Wnetrze
+    RysujProstokat(px + 2, py + 28, szer - 4, wys - 30, okna[id].kolor_tla); 
 }
 
-void RysujZawartoscTerminala(const Okno& o) {
-    if(!o.widoczne) return;
+void RysujZawartoscTerminala(int px, int py, int szer, int wys) {
     int skala = 2;
     int wysokosc_linii = (8 * skala) + 6;
-    int start_x = o.x + 6;
-    int start_y = o.y + 28 + 4;
+    int start_x = px + 6;
+    int start_y = py + 28 + 4;
     
     for (int r = 0; r < term_max_r; r++) {
         int cx = start_x;
         int cy = start_y + (r * wysokosc_linii);
         
-        // KRYTYCZNE ZABEZPIECZENIE (Clipping Y)
-        if (cy + wysokosc_linii >= (int)(o.y + o.wys)) break; 
+        // ZABEZPIECZENIE: Zatrzymanie renderowania przed wyjsciem za ramke osi Y
+        if (cy + wysokosc_linii >= py + wys) break;
         
         for (int c = 0; c < term_max_c; c++) {
             char z = term_buf[r][c].znak;
             if (z != 0) {
-                // KRYTYCZNE ZABEZPIECZENIE (Clipping X)
-                if (cx + 8*skala >= (int)(o.x + o.szer)) break;
-                RysujZnak(z, cx, cy, term_buf[r][c].kolor, o.kolor_tla, true, skala);
+                // ZABEZPIECZENIE: Zatrzymanie renderowania przed wyjsciem za ramke osi X
+                if (cx + 8*skala >= px + szer) break;
+                RysujZnak(z, cx, cy, term_buf[r][c].kolor, 0, true, skala);
             }
             cx += 8 * skala;
         }
     }
-}
-
-void RysujZawartoscEdytora(const Okno& o) {
-    if(!o.widoczne) return;
-    // Ochrona przed pisaniem poza male okno
-    if (o.szer < 100 || o.wys < 100) return;
-    
-    WypiszTekst("Witamy w Edytorze Avocado!", o.x + 20, o.y + 50, 0x00000000, 2);
-    WypiszTekst("Poprawiono renderowanie tekstu.", o.x + 20, o.y + 80, 0x00000000, 2);
-    WypiszTekst("Sprobuj mnie zamknac [X] ->", o.x + 20, o.y + 110, 0x00AA0000, 2);
-    
-    // Wizualizacja kursora edytora
-    RysujProstokat(o.x + 20, o.y + 135, 16, 2, 0x00000000);
 }
 
 void DopiszDoBufora(const char* tekst, uint32_t kolor) {
@@ -312,31 +317,45 @@ void DopiszDoBufora(const char* tekst, uint32_t kolor) {
 void OdswiezEkran() {
     if(!backbuffer) return;
     
-    // 1. Tlo Pulpitu
+    // Tlo Pulpitu
     RysujProstokat(0, 0, lfb_szerokosc, lfb_wysokosc, 0x00005A8C);
     
-    // 2. Pasek Zadan
+    // PASEK ZADAN (Taskbar)
     if (lfb_wysokosc >= 40) {
         RysujProstokat(0, lfb_wysokosc - 40, lfb_szerokosc, 40, 0x00222222);
-        WypiszTekst("Bursztyn OS 64-bit | Menu |", 20, lfb_wysokosc - 28, 0x00FFFFFF, 2);
+        WypiszTekst("Menu", 10, lfb_wysokosc - 28, 0x00FFFFFF, 2);
+        
+        int taskbar_x = 100;
+        for (int i = 0; i < 2; i++) {
+            // Kolor przycisku zalezy od stanu aplikacji
+            uint32_t kolor_btn = 0x00333333; // W tle, widoczne
+            if (!okna[i].widoczne) kolor_btn = 0x00111111; // Zminimalizowane (Schowane)
+            else if (z_order[1] == i) kolor_btn = 0x00555555; // Wcisniete / Aktywne
+            
+            RysujProstokat(taskbar_x, lfb_wysokosc - 35, 200, 30, kolor_btn);
+            WypiszTekst(okna[i].krotka_nazwa, taskbar_x + 10, lfb_wysokosc - 28, 0x00FFFFFF, 2);
+            taskbar_x += 210;
+        }
     }
     
-    // Z-Order: Decyzja kto jest pod spodem, a kto na wierzchu
-    Okno* pod_spodem = edit_na_wierzchu ? &okno_term : &okno_edit;
-    Okno* na_wierzchu = edit_na_wierzchu ? &okno_edit : &okno_term;
-
-    // 3. Rysowanie Okna "Z tylu" (Renderowane Pierwsze)
-    if (pod_spodem->widoczne) {
-        RysujOkno(*pod_spodem);
-        if (pod_spodem == &okno_term) RysujZawartoscTerminala(*pod_spodem);
-        else RysujZawartoscEdytora(*pod_spodem);
-    }
-
-    // 4. Rysowanie Okna "Na przodzie" (Renderowane Ostatnie = Przykrywa Spod)
-    if (na_wierzchu->widoczne) {
-        RysujOkno(*na_wierzchu);
-        if (na_wierzchu == &okno_term) RysujZawartoscTerminala(*na_wierzchu);
-        else RysujZawartoscEdytora(*na_wierzchu);
+    // Rysowanie Okien Z-Order (od tego na spodzie, do tego na wierzchu)
+    for(int k = 0; k < 2; k++) {
+        int i = z_order[k];
+        if (!okna[i].widoczne) continue;
+        
+        RysujOkno(i);
+        
+        if (i == 0) {
+            RysujZawartoscTerminala(okna[i].x, okna[i].y, okna[i].szer, okna[i].wys);
+        } else if (i == 1) {
+            // Ochrona przed pisaniem we wnetrzu mikroskopijnego okna
+            if (okna[1].szer > 150 && okna[1].wys > 150) {
+                WypiszTekst("Edytor Avocado - Gotowy!", okna[1].x + 20, okna[1].y + 50, 0x00000000, 2);
+                WypiszTekst("Przycisk [X] minimalizuje okno", okna[1].x + 20, okna[1].y + 80, 0x00000000, 2);
+                WypiszTekst("na pasek zadan w dolnym ekranie.", okna[1].x + 20, okna[1].y + 110, 0x00000000, 2);
+                WypiszTekst("Zielony przycisk [^] maksymalizuje", okna[1].x + 20, okna[1].y + 140, 0x00AA0000, 2);
+            }
+        }
     }
 }
 
@@ -368,41 +387,41 @@ void PokazKursor() {
 }
 
 static bool TrafieniePasekTyulu(const Okno& o, int mx, int my) {
-    if (!o.widoczne) return false;
-    // Wylaczamy obszar czerwonego przycisku [X] z mozliwosci drag&drop
-    if (mx >= (int)(o.x + o.szer - 26) && mx <= (int)(o.x + o.szer - 6) && my >= (int)(o.y + 4) && my <= (int)(o.y + 24)) return false;
-    
-    if (mx < (int)o.x + 2 || mx >= (int)o.x + (int)o.szer - 2) return false;
-    if (my < (int)o.y + 2 || my >= (int)o.y + 26)              return false;
+    // Odcinamy prawy margines, na ktorym znajduja sie przyciski [^] i [X] (55 pikseli)
+    if (mx < o.x + 2 || mx >= o.x + o.szer - 55) return false;
+    if (my < o.y + 2 || my >= o.y + 26)          return false;
     return true;
 }
 
-static bool TrafieniePrzyciskZamknij(const Okno& o, int mx, int my) {
-    if (!o.widoczne) return false;
-    if (mx >= (int)(o.x + o.szer - 26) && mx <= (int)(o.x + o.szer - 6) &&
-        my >= (int)(o.y + 4) && my <= (int)(o.y + 24)) {
-        return true;
-    }
+static bool TrafieniePrzycisk(const Okno& o, int mx, int my, int offset_x) {
+    if (mx >= o.x + o.szer - offset_x && mx <= o.x + o.szer - offset_x + 20 &&
+        my >= o.y + 4 && my <= o.y + 24) return true;
     return false;
 }
 
 static bool TrafienieCaleOkno(const Okno& o, int mx, int my) {
-    if (!o.widoczne) return false;
-    if (mx < (int)o.x || mx >= (int)o.x + (int)o.szer) return false;
-    if (my < (int)o.y || my >= (int)o.y + (int)o.wys)  return false;
+    if (mx < o.x || mx >= o.x + o.szer) return false;
+    if (my < o.y || my >= o.y + o.wys)  return false;
     return true;
 }
 
 static void OgraniczOkno(Okno& o) {
+    if (o.zmaksymalizowane) return; // Zmaksymalizowanych nie ograniczamy, sa sztywne
     int32_t min_x = -(int32_t)o.szer + 80;
     int32_t max_x = (int32_t)lfb_szerokosc - 80;
     int32_t min_y = 0;
-    int32_t max_y = (int32_t)lfb_wysokosc - 40;
+    int32_t max_y = (int32_t)lfb_wysokosc - 40; // Uwzglednia wysokosc paska zadan
 
     if ((int32_t)o.x < min_x) o.x = (uint32_t)min_x;
     if ((int32_t)o.x > max_x) o.x = (uint32_t)max_x;
     if ((int32_t)o.y < min_y) o.y = (uint32_t)min_y;
     if ((int32_t)o.y > max_y) o.y = (uint32_t)max_y;
+}
+
+static void WyciagnijNaWierzch(int id_okna) {
+    if (z_order[1] == id_okna) return; // Okno juz jest na samej gorze
+    z_order[0] = z_order[1];
+    z_order[1] = id_okna;
 }
 
 extern "C" void ZaktualizujMysze(int dx, int dy, uint8_t przyciski) {
@@ -429,61 +448,94 @@ extern "C" void ZaktualizujMysze(int dx, int dy, uint8_t przyciski) {
     
     bool wymaga_odrysowania = false;
     
-    if (klik_lewy && drag_stan == DRAG_BRAK) {
-        Okno* wierzch = edit_na_wierzchu ? &okno_edit : &okno_term;
-        Okno* spod = edit_na_wierzchu ? &okno_term : &okno_edit;
+    if (klik_lewy && okno_przeciagane == -1) {
+        bool przechwycono = false;
         
-        // 1. Sprawdzamy okno ktore jest NA GORZE (najwyzszy Z-Order)
-        if (wierzch->widoczne && TrafieniePrzyciskZamknij(*wierzch, mysz_x, mysz_y)) {
-            wierzch->widoczne = false;
-            wymaga_odrysowania = true;
-        } 
-        else if (wierzch->widoczne && TrafieniePasekTyulu(*wierzch, mysz_x, mysz_y)) {
-            drag_stan = edit_na_wierzchu ? DRAG_EDIT : DRAG_TERM;
-            drag_offset_x = mysz_x - wierzch->x;
-            drag_offset_y = mysz_y - wierzch->y;
+        // 1. Sprawdz Pasek Zadan na samym dole
+        if (mysz_y >= (int)lfb_wysokosc - 40) {
+            int taskbar_x = 100;
+            for (int i = 0; i < 2; i++) {
+                if (mysz_x >= taskbar_x && mysz_x <= taskbar_x + 200) {
+                    if (okna[i].widoczne && z_order[1] == i) {
+                        // Jesli jest na wierzchu - schowaj (Zminimalizuj)
+                        okna[i].widoczne = false;
+                    } else {
+                        // Odwrotnie - przywroc lub wyciagnij przed szereg
+                        okna[i].widoczne = true;
+                        WyciagnijNaWierzch(i);
+                    }
+                    wymaga_odrysowania = true;
+                    przechwycono = true;
+                    break;
+                }
+                taskbar_x += 210;
+            }
         }
-        else if (wierzch->widoczne && TrafienieCaleOkno(*wierzch, mysz_x, mysz_y)) {
-            // Trafienie w korpus aktywnego okna nic nie zmienia
+        
+        // 2. Sprawdz klikniecie w Okno
+        if (!przechwycono) {
+            for (int k = 1; k >= 0; k--) {
+                int i = z_order[k];
+                if (!okna[i].widoczne) continue;
+                
+                if (TrafieniePrzycisk(okna[i], mysz_x, mysz_y, 26)) { // Przycisk [X] - Zminimalizuj na pasek
+                    okna[i].widoczne = false;
+                    wymaga_odrysowania = true;
+                    break;
+                }
+                else if (TrafieniePrzycisk(okna[i], mysz_x, mysz_y, 50)) { // Przycisk [^] - Maksymalizuj
+                    WyciagnijNaWierzch(i);
+                    if (!okna[i].zmaksymalizowane) {
+                        okna[i].stary_x = okna[i].x; okna[i].stary_y = okna[i].y;
+                        okna[i].stary_szer = okna[i].szer; okna[i].stary_wys = okna[i].wys;
+                        okna[i].x = 0; okna[i].y = 0;
+                        okna[i].szer = lfb_szerokosc; 
+                        okna[i].wys = lfb_wysokosc - 40; // Omija Pasek Zadan
+                        okna[i].zmaksymalizowane = true;
+                    } else {
+                        okna[i].x = okna[i].stary_x; okna[i].y = okna[i].stary_y;
+                        okna[i].szer = okna[i].stary_szer; okna[i].wys = okna[i].stary_wys;
+                        okna[i].zmaksymalizowane = false;
+                    }
+                    wymaga_odrysowania = true;
+                    break;
+                }
+                else if (TrafieniePasekTyulu(okna[i], mysz_x, mysz_y)) { // Przeciaganie okna
+                    WyciagnijNaWierzch(i);
+                    if (!okna[i].zmaksymalizowane) { // Tylko wolne okna mozna przeciagac
+                        okno_przeciagane = i;
+                        chwyt_x = mysz_x - okna[i].x;
+                        chwyt_y = mysz_y - okna[i].y;
+                    }
+                    wymaga_odrysowania = true;
+                    break;
+                }
+                else if (TrafienieCaleOkno(okna[i], mysz_x, mysz_y)) { // Klikniecie w zawartosc - tylko focus
+                    WyciagnijNaWierzch(i);
+                    wymaga_odrysowania = true;
+                    break;
+                }
+            }
         }
-        // 2. Jesli kliknieto obok okna "na gorze", sprawdzamy okno "POD SPODEM"
-        else if (spod->widoczne && TrafieniePrzyciskZamknij(*spod, mysz_x, mysz_y)) {
-            spod->widoczne = false;
-            wymaga_odrysowania = true;
-        }
-        else if (spod->widoczne && TrafieniePasekTyulu(*spod, mysz_x, mysz_y)) {
-            edit_na_wierzchu = !edit_na_wierzchu; // PULL TO FRONT!
-            wymaga_odrysowania = true;
-            drag_stan = edit_na_wierzchu ? DRAG_EDIT : DRAG_TERM; 
-            drag_offset_x = mysz_x - spod->x;
-            drag_offset_y = mysz_y - spod->y;
-        }
-        else if (spod->widoczne && TrafienieCaleOkno(*spod, mysz_x, mysz_y)) {
-            edit_na_wierzchu = !edit_na_wierzchu; // PULL TO FRONT!
-            wymaga_odrysowania = true;
-        }
+    }
+    else if (puszcz_lewy && okno_przeciagane != -1) {
+        okno_przeciagane = -1;
     }
     
-    // Przeciaganie uchwyconego okna
-    if (drag_stan != DRAG_BRAK && lewy_teraz) {
-        int nowy_x, nowy_y;
-        if (drag_stan == DRAG_TERM) {
-            nowy_x = mysz_x - drag_offset_x;
-            nowy_y = mysz_y - drag_offset_y;
-            okno_term.x = (uint32_t)(nowy_x > 0 ? nowy_x : 0);
-            okno_term.y = (uint32_t)(nowy_y > 0 ? nowy_y : 0);
-            OgraniczOkno(okno_term);
-        } else {
-            nowy_x = mysz_x - drag_offset_x;
-            nowy_y = mysz_y - drag_offset_y;
-            okno_edit.x = (uint32_t)(nowy_x > 0 ? nowy_x : 0);
-            okno_edit.y = (uint32_t)(nowy_y > 0 ? nowy_y : 0);
-            OgraniczOkno(okno_edit);
+    // Obsluga plynnego przesuwania okna
+    if (okno_przeciagane != -1 && lewy_teraz && (dx != 0 || dy != 0)) {
+        okna[okno_przeciagane].x = mysz_x - chwyt_x;
+        okna[okno_przeciagane].y = mysz_y - chwyt_y;
+        OgraniczOkno(okna[okno_przeciagane]);
+        
+        // Zabezpieczenie Clippingu podczas zmiany rozmiaru
+        if (okno_przeciagane == 0) {
+            term_max_c = (okna[0].szer - 12) / 16;
+            term_max_r = (okna[0].wys - 36) / 22;
+            if (term_max_c > MAX_COLS) term_max_c = MAX_COLS;
+            if (term_max_r > MAX_ROWS) term_max_r = MAX_ROWS;
         }
         wymaga_odrysowania = true;
-    }
-    else if (puszcz_lewy && drag_stan != DRAG_BRAK) {
-        drag_stan = DRAG_BRAK;
     }
     
     if (wymaga_odrysowania) {
@@ -501,25 +553,25 @@ extern "C" void* PobierzAktualnePML4();
 
 void InicjalizujGrafike(uint64_t adres_mb2) {
     SerialLog("[GRAFIKA] Sprawdzanie natywnego interfejsu Bochs VBE (QEMU)...\n");
-    
     uint16_t bga_id = BochsVBE_Read(VBE_DISPI_INDEX_ID);
-    SerialLog("[GRAFIKA] ID Karty Graficznej VBE: "); SerialLogHex(bga_id); SerialLog("\n");
+    
+    SerialLog("[GRAFIKA] ID Karty Graficznej VBE znalezione: ");
+    SerialLogHex(bga_id); SerialLog("\n");
     
     uint64_t lfb_fizyczny = 0;
     
     if (bga_id >= 0xB0C0 && bga_id <= 0xB0C6) {
+        SerialLog("[GRAFIKA] ZNALEZIONO KONTROLER VBE! Wymuszanie 1024x768x32...\n");
         BochsVBE_Write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_DISABLED);
         BochsVBE_Write(VBE_DISPI_INDEX_XRES, 1024);
         BochsVBE_Write(VBE_DISPI_INDEX_YRES, 768);
         BochsVBE_Write(VBE_DISPI_INDEX_BPP, 32);
         BochsVBE_Write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_ENABLED | VBE_DISPI_LFB_ENABLED);
 
-        lfb_szerokosc = 1024;
-        lfb_wysokosc = 768;
-        lfb_bpp = 32;
-        lfb_pitch = 1024 * 4;
+        lfb_szerokosc = 1024; lfb_wysokosc = 768; lfb_bpp = 32; lfb_pitch = 1024 * 4;
         lfb_fizyczny = 0xFD000000ULL; 
     } else {
+        SerialLog("[GRAFIKA] Brak Bochs VBE. Fallback do odczytu Multiboot2...\n");
         if(adres_mb2 == 0) return;
         uint32_t rozmiar = *(uint32_t*)adres_mb2;
         uint64_t aktualny = adres_mb2 + 8;
@@ -528,10 +580,7 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
             if(tag->typ == 0) break;
             if(tag->typ == 8) { 
                 lfb_fizyczny = tag->adres_fizyczny;
-                lfb_pitch = tag->pitch;
-                lfb_szerokosc = tag->szerokosc;
-                lfb_wysokosc = tag->wysokosc;
-                lfb_bpp = tag->bpp;
+                lfb_pitch = tag->pitch; lfb_szerokosc = tag->szerokosc; lfb_wysokosc = tag->wysokosc; lfb_bpp = tag->bpp;
                 break;
             }
             aktualny += (tag->rozmiar + 7) & ~7;
@@ -539,14 +588,14 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
     }
     
     if(lfb_fizyczny != 0 && lfb_szerokosc > 0 && lfb_wysokosc > 0 && lfb_pitch > 0) {
+        SerialLog("[GRAFIKA] Mapowanie pamieci zewnetrznej do PMM/VMM...\n");
         uint64_t lfb_waga = (uint64_t)lfb_pitch * (uint64_t)lfb_wysokosc;
         uint64_t map_limit = (lfb_waga + 4095) & ~4095ULL;
         
-        for(uint64_t i = 0; i < map_limit; i += 4096) {
-            ZmapujStrone((void*)(lfb_fizyczny + i), (void*)(lfb_fizyczny + i), 0b11 | 0x10);
-        }
+        for(uint64_t i = 0; i < map_limit; i += 4096) ZmapujStrone((void*)(lfb_fizyczny + i), (void*)(lfb_fizyczny + i), 0b11 | 0x10);
         lfb = (uint32_t*)lfb_fizyczny;
         
+        SerialLog("[GRAFIKA] Alokacja wirtualnego Backbuffera RAM...\n");
         uint64_t vaddr_backbuffer = 0x80000000ULL; 
         for(uint64_t i = 0; i < map_limit; i += 4096) ZmapujStrone((void*)(vaddr_backbuffer + i), (void*)0, 0b11);
         for(uint64_t i = 0; i < map_limit; i += 4096) {
@@ -557,25 +606,24 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
         backbuffer = (uint8_t*)vaddr_backbuffer;
         
         for(uint64_t i = 0; i < lfb_waga; i++) backbuffer[i] = 0;
-        for(int r = 0; r < MAX_ROWS; r++) {
-            for(int c = 0; c < MAX_COLS; c++) term_buf[r][c].znak = 0;
-        }
+        for(int r = 0; r < MAX_ROWS; r++) { for(int c = 0; c < MAX_COLS; c++) term_buf[r][c].znak = 0; }
         
-        if (okno_term.x + okno_term.szer > lfb_szerokosc) okno_term.szer = lfb_szerokosc - okno_term.x - 20;
-        if (okno_term.y + okno_term.wys > lfb_wysokosc - 40) okno_term.wys = lfb_wysokosc - okno_term.y - 40;
+        // Zabezpieczenie przed oknami wypadajacymi poza mikroskopijne monitory (Fallback)
+        if (okna[0].x + okna[0].szer > (int)lfb_szerokosc) okna[0].szer = lfb_szerokosc - okna[0].x - 20;
+        if (okna[0].y + okna[0].wys > (int)lfb_wysokosc - 40) okna[0].wys = lfb_wysokosc - okna[0].y - 40;
 
-        okno_edit.szer = 560;
-        if (okno_edit.x + okno_edit.szer > lfb_szerokosc - 20) {
-            okno_edit.x = 20; 
-            if (okno_edit.x + okno_edit.szer > lfb_szerokosc - 20) okno_edit.szer = lfb_szerokosc - 40; 
+        okna[1].szer = 560;
+        if (okna[1].x + okna[1].szer > (int)lfb_szerokosc - 20) {
+            okna[1].x = 20; 
+            if (okna[1].x + okna[1].szer > (int)lfb_szerokosc - 20) okna[1].szer = lfb_szerokosc - 40; 
         }
-        if (okno_edit.y + okno_edit.wys > lfb_wysokosc - 40) okno_edit.wys = lfb_wysokosc - okno_edit.y - 40;
+        if (okna[1].y + okna[1].wys > (int)lfb_wysokosc - 40) okna[1].wys = lfb_wysokosc - okna[1].y - 40;
 
-        OgraniczOkno(okno_term);
-        OgraniczOkno(okno_edit);
+        OgraniczOkno(okna[0]);
+        OgraniczOkno(okna[1]);
         
-        term_max_c = (okno_term.szer - 12) / 16;
-        term_max_r = (okno_term.wys - 36) / 22;
+        term_max_c = (okna[0].szer - 12) / 16;
+        term_max_r = (okna[0].wys - 36) / 22;
         if (term_max_c > MAX_COLS) term_max_c = MAX_COLS;
         if (term_max_r > MAX_ROWS) term_max_r = MAX_ROWS;
         
@@ -584,6 +632,7 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
         PrzeniesNaEkran();     
         
     } else {
+        SerialLog("[GRAFIKA] BLAD KRYTYCZNY: Nie znaleziono Framebuffera!\n");
         while(true) asm volatile("cli; hlt");
     }
 }
