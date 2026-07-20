@@ -1,6 +1,17 @@
 #include "grafika.h"
 #include "pamiec.h"
+#include <stdint.h>
+#include <stdbool.h>
 
+// ==================== DEKLARACJE ZAPOWIADAJACE ====================
+void UkryjKursor();
+void PokazKursor();
+void OdswiezEkran();
+void PrzeniesNaEkran();
+void PrzeniesFragmentNaEkran(int x, int y, int szer, int wys);
+void DopiszZnakDoEdytora(char c);
+
+// ==================== ZMIENNE GLOBALNE MATRYCY ====================
 static uint32_t* lfb = nullptr;
 static uint32_t  lfb_szerokosc = 0;
 static uint32_t  lfb_wysokosc = 0;
@@ -9,45 +20,52 @@ static uint8_t   lfb_bpp = 32;
 
 static uint8_t* backbuffer = nullptr;
 
+// ==================== STRUKTURY I ZMIENNE OKIEN ====================
 struct Okno {
-    int x, y, szer, wys;
-    int stary_x, stary_y, stary_szer, stary_wys; // Pamiec dla maksymalizacji
+    uint32_t x, y, szer, wys;
+    uint32_t stary_x, stary_y, stary_szer, stary_wys; 
+    const char* krotka_nazwa;
     const char* tytul;
-    const char* krotka_nazwa; // Wyswietlane na pasku zadan
     uint32_t kolor_tla;
     bool widoczne;
     bool zmaksymalizowane;
 };
 
+// 0 - Terminal, 1 - Edytor Avocado
 static Okno okna[2] = {
-    { 20, 20, 660, 360,  0,0,0,0, "Powloka Bursztyna (Ring 3 Terminal)", "Terminal", 0x001A0B00, true, false },
-    { 180, 80, 560, 400, 0,0,0,0, "Edytor Avocado - Nowy Plik", "Edytor", 0x00280F00, true, false }
+    { 20, 20, 660, 360,  0,0,0,0, "Terminal", "Powloka Bursztyna (Ring 3 Terminal)", 0x001A0B00, true, false },
+    { 180, 80, 560, 400, 0,0,0,0, "Edytor", "Edytor Avocado - Nowy Plik", 0x00280F00, true, false }
 };
 
-static int z_order[2] = {1, 0}; // 0 = spod, 1 = wierzch
+static int z_order[2] = {1, 0}; 
 
 static int okno_przeciagane = -1;
 static int chwyt_x = 0;
 static int chwyt_y = 0;
 static uint8_t ostatnie_przyciski = 0;
 
+// ==================== ZMIENNE TERMINALA I EDYTORA ====================
 struct ZnakTerminala {
     char znak;
     uint32_t kolor;
 };
 
-// Zwiekszone limity tablicy, aby zmiescic znaki na zmaksymalizowanym ekranie 1024x768
 #define MAX_ROWS 80
 #define MAX_COLS 140
 static ZnakTerminala term_buf[MAX_ROWS][MAX_COLS];
 static int term_r = 0, term_c = 0;
 static int term_max_r = 25, term_max_c = 80;
 
+static ZnakTerminala edit_buf[MAX_ROWS][MAX_COLS];
+static int edit_r = 0, edit_c = 0;
+static int edit_max_r = 25, edit_max_c = 80;
+
 static int mysz_x = 500;
 static int mysz_y = 300;
 static uint32_t bufor_kursora[16][16];
 static bool kursor_widoczny = false;
 
+// ==================== DIAGNOSTYKA (SERIAL PORT) ====================
 static inline void serial_outb(uint16_t port, uint8_t val) {
     asm volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
 }
@@ -61,6 +79,7 @@ static void SerialLogHex(uint32_t val) {
     SerialLog(buf);
 }
 
+// ==================== STEROWNIK BOCHS VBE ====================
 #define VBE_DISPI_IOPORT_INDEX 0x01CE
 #define VBE_DISPI_IOPORT_DATA  0x01CF
 #define VBE_DISPI_INDEX_ID     0
@@ -89,6 +108,7 @@ uint16_t BochsVBE_Read(uint16_t index) {
     return inw(VBE_DISPI_IOPORT_DATA);
 }
 
+// ==================== BITMAPY KURSORA I CZCIONEK ====================
 static const uint8_t kursor_bitmapa[16][16] = {
     {1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
     {1,2,1,0,0,0,0,0,0,0,0,0,0,0,0,0},
@@ -108,6 +128,27 @@ static const uint8_t kursor_bitmapa[16][16] = {
     {0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0}
 };
 
+static const uint8_t czcionka_pl_8x8[18][8] = {
+    {0x00,0x00,0x3C,0x06,0x3E,0x66,0x3E,0x0C}, // ą (0xB9)
+    {0x08,0x10,0x3C,0x60,0x60,0x66,0x3C,0x00}, // ć (0xE6)
+    {0x00,0x00,0x3E,0x66,0x7E,0x60,0x3C,0x0C}, // ę (0xEA)
+    {0x18,0x18,0x38,0x78,0x18,0x18,0x18,0x00}, // ł (0xB3)
+    {0x08,0x10,0x7C,0x66,0x66,0x66,0x66,0x00}, // ń (0xF1)
+    {0x08,0x10,0x3C,0x66,0x66,0x66,0x3C,0x00}, // ó (0xF3)
+    {0x08,0x10,0x3E,0x60,0x3C,0x06,0x7C,0x00}, // ś (0x9C)
+    {0x08,0x10,0x7E,0x0C,0x18,0x30,0x7E,0x00}, // ź (0x9F)
+    {0x00,0x18,0x7E,0x0C,0x18,0x30,0x7E,0x00}, // ż (0xBF)
+    {0x18,0x3C,0x66,0x7E,0x66,0x66,0x66,0x0C}, // Ą (0xA5)
+    {0x08,0x10,0x3C,0x66,0x60,0x60,0x66,0x3C}, // Ć (0xC6)
+    {0x7E,0x60,0x60,0x78,0x60,0x60,0x7E,0x0C}, // Ę (0xCA)
+    {0x60,0x60,0x60,0x70,0x60,0x60,0x7E,0x00}, // Ł (0xA3)
+    {0x08,0x10,0x66,0x76,0x7E,0x7E,0x6E,0x66}, // Ń (0xD1)
+    {0x08,0x10,0x3C,0x66,0x66,0x66,0x66,0x3C}, // Ó (0xD3)
+    {0x08,0x10,0x3C,0x66,0x60,0x3C,0x06,0x66}, // Ś (0x8C)
+    {0x08,0x10,0x7E,0x06,0x0C,0x18,0x30,0x60}, // Ź (0x8F)
+    {0x18,0x00,0x7E,0x06,0x0C,0x18,0x30,0x60}  // Ż (0xAF)
+};
+
 static const uint8_t czcionka_8x8[96][8] = {
     {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},{0x18,0x3C,0x3C,0x18,0x18,0x00,0x18,0x00},{0x66,0x66,0x24,0x00,0x00,0x00,0x00,0x00},{0x6C,0x6C,0xFE,0x6C,0xFE,0x6C,0x6C,0x00},{0x18,0x3E,0x60,0x3C,0x06,0x7C,0x18,0x00},{0x00,0x66,0x6C,0x18,0x36,0x66,0x00,0x00},{0x38,0x6C,0x6C,0x38,0x6D,0x66,0x3B,0x00},{0x18,0x18,0x30,0x00,0x00,0x00,0x00,0x00},{0x0C,0x18,0x30,0x30,0x30,0x18,0x0C,0x00},{0x30,0x18,0x0C,0x0C,0x0C,0x18,0x30,0x00},{0x00,0x66,0x3C,0xFF,0x3C,0x66,0x00,0x00},{0x00,0x18,0x18,0x7E,0x18,0x18,0x00,0x00},{0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x30},{0x00,0x00,0x00,0x7E,0x00,0x00,0x00,0x00},{0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x00},{0x06,0x0C,0x18,0x30,0x60,0xC0,0x80,0x00},
     {0x3C,0x66,0x6E,0x76,0x66,0x66,0x3C,0x00},{0x18,0x38,0x18,0x18,0x18,0x18,0x7E,0x00},{0x3C,0x66,0x06,0x0C,0x30,0x60,0x7E,0x00},{0x3C,0x66,0x06,0x1C,0x06,0x66,0x3C,0x00},{0x1C,0x3C,0x6C,0xCC,0xFE,0x0C,0x0C,0x00},{0x7E,0x60,0x7C,0x06,0x06,0x66,0x3C,0x00},{0x3C,0x66,0x60,0x7C,0x66,0x66,0x3C,0x00},{0x7E,0x66,0x0C,0x18,0x30,0x30,0x30,0x00},{0x3C,0x66,0x66,0x3C,0x66,0x66,0x3C,0x00},{0x3C,0x66,0x66,0x3E,0x06,0x66,0x3C,0x00},{0x00,0x18,0x18,0x00,0x00,0x18,0x18,0x00},{0x00,0x18,0x18,0x00,0x00,0x18,0x18,0x30},{0x0C,0x18,0x30,0x60,0x30,0x18,0x0C,0x00},{0x00,0x00,0x7E,0x00,0x7E,0x00,0x00,0x00},{0x30,0x18,0x0C,0x06,0x0C,0x18,0x30,0x00},{0x3C,0x66,0x06,0x0C,0x18,0x00,0x18,0x00},
@@ -117,15 +158,13 @@ static const uint8_t czcionka_8x8[96][8] = {
     {0x00,0x00,0x7C,0x66,0x66,0x7C,0x60,0x60},{0x00,0x00,0x3E,0x66,0x66,0x3E,0x06,0x06},{0x00,0x00,0x7C,0x66,0x60,0x60,0x60,0x00},{0x00,0x00,0x3E,0x60,0x3C,0x06,0x7C,0x00},{0x30,0x30,0x7C,0x30,0x30,0x34,0x18,0x00},{0x00,0x00,0x66,0x66,0x66,0x66,0x3E,0x00},{0x00,0x00,0x66,0x66,0x66,0x3C,0x18,0x00},{0x00,0x00,0xC6,0xD6,0xFE,0x6C,0x6C,0x00},{0x00,0x00,0x66,0x3C,0x18,0x3C,0x66,0x00},{0x00,0x00,0x66,0x66,0x66,0x3E,0x06,0x3C},{0x00,0x00,0x7E,0x0C,0x18,0x30,0x7E,0x00},{0x0E,0x18,0x18,0x70,0x18,0x18,0x0E,0x00},{0x18,0x18,0x18,0x00,0x18,0x18,0x18,0x00},{0x70,0x18,0x18,0x0E,0x18,0x18,0x70,0x00},{0x3B,0x6E,0x00,0x00,0x00,0x00,0x00,0x00},{0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}
 };
 
+// ==================== DOUBLE BUFFERING (RENDEROWANIE) ====================
 void PrzeniesNaEkran() {
     if (!lfb || !backbuffer) return;
     volatile uint32_t* dst = (volatile uint32_t*)lfb;
     uint32_t* src = (uint32_t*)backbuffer;
-    
     uint64_t ilosc_pikseli = ((uint64_t)lfb_pitch * (uint64_t)lfb_wysokosc) / 4;
-    for(uint64_t i = 0; i < ilosc_pikseli; i++) {
-        dst[i] = src[i];
-    }
+    for(uint64_t i = 0; i < ilosc_pikseli; i++) dst[i] = src[i];
 }
 
 void PrzeniesFragmentNaEkran(int x, int y, int szer, int wys) {
@@ -152,9 +191,8 @@ void PostawPiksel(int x, int y, uint32_t kolor) {
     uint32_t offset = y * lfb_pitch + x * (lfb_bpp / 8);
     uint8_t* piksel = backbuffer + offset;
     
-    if (lfb_bpp == 32) {
-        *(uint32_t*)piksel = kolor;
-    } else if (lfb_bpp == 24) {
+    if (lfb_bpp == 32) *(uint32_t*)piksel = kolor;
+    else if (lfb_bpp == 24) {
         piksel[0] = kolor & 0xFF;         
         piksel[1] = (kolor >> 8) & 0xFF;  
         piksel[2] = (kolor >> 16) & 0xFF; 
@@ -184,6 +222,7 @@ uint32_t PobierzPiksel(int x, int y) {
     return 0;
 }
 
+// ==================== RYSOWANIE KSZTAŁTÓW I TEKSTU ====================
 void RysujProstokat(int px, int py, int szer, int wys, uint32_t kolor) {
     int start_x = px < 0 ? 0 : px;
     int start_y = py < 0 ? 0 : py;
@@ -200,8 +239,25 @@ void RysujProstokat(int px, int py, int szer, int wys, uint32_t kolor) {
 }
 
 void RysujZnak(char c, int px, int py, uint32_t kolor_tekstu, uint32_t kolor_tla, bool przezroczyste_tlo, int skala) {
-    if(c < 32 || c > 126) c = '?';
-    const uint8_t* znak = czcionka_8x8[c - 32];
+    const uint8_t* znak = nullptr;
+    uint8_t kod = (uint8_t)c;
+    
+    if (kod >= 32 && kod <= 126) {
+        znak = czcionka_8x8[kod - 32];
+    } else {
+        int pl_idx = -1;
+        switch(kod) {
+            case 0xB9: pl_idx = 0; break; case 0xE6: pl_idx = 1; break; case 0xEA: pl_idx = 2; break;
+            case 0xB3: pl_idx = 3; break; case 0xF1: pl_idx = 4; break; case 0xF3: pl_idx = 5; break;
+            case 0x9C: pl_idx = 6; break; case 0x9F: pl_idx = 7; break; case 0xBF: pl_idx = 8; break;
+            case 0xA5: pl_idx = 9; break; case 0xC6: pl_idx = 10; break; case 0xCA: pl_idx = 11; break;
+            case 0xA3: pl_idx = 12; break; case 0xD1: pl_idx = 13; break; case 0xD3: pl_idx = 14; break;
+            case 0x8C: pl_idx = 15; break; case 0x8F: pl_idx = 16; break; case 0xAF: pl_idx = 17; break;
+        }
+        if (pl_idx != -1) znak = czcionka_pl_8x8[pl_idx];
+        else znak = czcionka_8x8['?' - 32];
+    }
+
     for(int y = 0; y < 8; y++) {
         for(int x = 0; x < 8; x++) {
             bool zmaluj = znak[y] & (1 << (7 - x));
@@ -226,6 +282,7 @@ void WypiszTekst(const char* tekst, int px, int py, uint32_t kolor_tekstu, int s
     }
 }
 
+// ==================== RENDERY OKIEN I PULPITU ====================
 void RysujOkno(int id) {
     if (!okna[id].widoczne) return;
     int px = okna[id].x;
@@ -235,17 +292,15 @@ void RysujOkno(int id) {
 
     if (szer < 10 || wys < 40) return;
     
+    bool aktywne = (z_order[1] == id);
+    uint32_t kolor_paska = aktywne ? 0x00FFBF00 : 0x008A5A00;
+    uint32_t kolor_tekstu_paska = aktywne ? 0x001A0B00 : 0x00D1D5DB;
+
     // Cien / obrys okna
     RysujProstokat(px, py, szer, wys, 0x008A5A00);             
     
-    // Belka Tytulowa (Kolor zalezy od tego, czy okno ma Focus)
-    bool aktywne = (z_order[1] == id);
-    uint32_t kolor_paska = aktywne ? 0x00FFBF00 : 0x008A5A00;
+    // Belka Tytulowa
     RysujProstokat(px + 2, py + 2, szer - 4, 24, kolor_paska);  
-    
-    // Jasna (aktywna) belka = ciemny tekst; Ciemna belka = zgaszony tekst
-    uint32_t kolor_tekstu_paska = aktywne ? 0x001A0B00 : 0x00D1D5DB;
-    // Tytul okna pozostawiamy w skali=2 by ladnie wygladal w GUI
     WypiszTekst(okna[id].tytul, px + 8, py + 6, kolor_tekstu_paska, 2);         
     
     // Przycisk MINIMALIZUJ [ - ]
@@ -265,7 +320,6 @@ void RysujOkno(int id) {
 }
 
 void RysujZawartoscTerminala(int px, int py, int szer, int wys) {
-    // NAPRAWA: Zmniejszono skale terminala z 2 do 1, by zmiescil 80 kolumn w normalnym oknie
     int skala = 1;
     int wysokosc_linii = 12; // 8 pikseli wysokosci + 4 piksele przerwy
     int start_x = px + 6;
@@ -274,14 +328,11 @@ void RysujZawartoscTerminala(int px, int py, int szer, int wys) {
     for (int r = 0; r < term_max_r; r++) {
         int cx = start_x;
         int cy = start_y + (r * wysokosc_linii);
-        
-        // ZABEZPIECZENIE: Zatrzymanie renderowania przed wyjsciem za ramke osi Y
         if (cy + wysokosc_linii >= py + wys) break;
         
         for (int c = 0; c < term_max_c; c++) {
             char z = term_buf[r][c].znak;
             if (z != 0) {
-                // ZABEZPIECZENIE: Zatrzymanie renderowania przed wyjsciem za ramke osi X
                 if (cx + 8*skala >= px + szer - 6) break;
                 RysujZnak(z, cx, cy, term_buf[r][c].kolor, 0, true, skala);
             }
@@ -290,36 +341,24 @@ void RysujZawartoscTerminala(int px, int py, int szer, int wys) {
     }
 }
 
-void DopiszDoBufora(const char* tekst, uint32_t kolor) {
-    for(int i = 0; tekst[i] != '\0'; i++) {
-        if (tekst[i] == '\n') {
-            term_r++; term_c = 0;
-        } else if (tekst[i] == '\r') {
-            term_c = 0;
-        } else if (tekst[i] == '\b') {
-            if (term_c > 0) {
-                term_c--;
-                term_buf[term_r][term_c].znak = 0;
-            }
-        } else {
-            term_buf[term_r][term_c].znak = tekst[i];
-            term_buf[term_r][term_c].kolor = kolor;
-            term_c++;
-            if (term_c >= term_max_c) {
-                term_r++; term_c = 0;
-            }
-        }
+void RysujZawartoscEdytora(int px, int py, int szer, int wys) {
+    int skala = 1;
+    int wysokosc_linii = 12; 
+    int start_x = px + 6;
+    int start_y = py + 28 + 4;
+    
+    for (int r = 0; r < edit_max_r; r++) {
+        int cx = start_x;
+        int cy = start_y + (r * wysokosc_linii);
+        if (cy + wysokosc_linii >= py + wys) break;
         
-        if (term_r >= term_max_r) {
-            for(int r = 1; r < term_max_r; r++) {
-                for(int c = 0; c < term_max_c; c++) {
-                    term_buf[r-1][c] = term_buf[r][c];
-                }
+        for (int c = 0; c < edit_max_c; c++) {
+            char z = edit_buf[r][c].znak;
+            if (z != 0) {
+                if (cx + 8*skala >= px + szer - 6) break;
+                RysujZnak(z, cx, cy, edit_buf[r][c].kolor, 0, true, skala);
             }
-            for(int c = 0; c < term_max_c; c++) {
-                term_buf[term_max_r-1][c].znak = 0;
-            }
-            term_r = term_max_r - 1;
+            cx += 8 * skala;
         }
     }
 }
@@ -327,7 +366,7 @@ void DopiszDoBufora(const char* tekst, uint32_t kolor) {
 void OdswiezEkran() {
     if(!backbuffer) return;
     
-    // Tlo Pulpitu
+    // Tlo Pulpitu Bursztyn OS
     RysujProstokat(0, 0, lfb_szerokosc, lfb_wysokosc, 0x001A0B00);
     
     // Pasek Zadan
@@ -357,26 +396,102 @@ void OdswiezEkran() {
         }
     }
     
-    // Z-Order
+    // Z-Order: Najpierw spod, potem wierzch
     for(int k = 0; k < 2; k++) {
         int i = z_order[k];
         if (!okna[i].widoczne) continue;
         
         RysujOkno(i);
         
-        if (i == 0) {
-            RysujZawartoscTerminala(okna[i].x, okna[i].y, okna[i].szer, okna[i].wys);
-        } else if (i == 1) {
-            if (okna[1].szer > 150 && okna[1].wys > 150) {
-                WypiszTekst("Edytor Avocado - Gotowy!", okna[1].x + 20, okna[1].y + 50, 0x00FFBF00, 1);
-                WypiszTekst("Przycisk [X] minimalizuje okno", okna[1].x + 20, okna[1].y + 70, 0x00D1D5DB, 1);
-                WypiszTekst("na pasek zadan w dolnym ekranie.", okna[1].x + 20, okna[1].y + 90, 0x00D1D5DB, 1);
-                WypiszTekst("Pomaranczowy przycisk [^] maksymalizuje", okna[1].x + 20, okna[1].y + 110, 0x00E58A00, 1);
+        if (i == 0) RysujZawartoscTerminala(okna[i].x, okna[i].y, okna[i].szer, okna[i].wys);
+        else if (i == 1) {
+            RysujZawartoscEdytora(okna[i].x, okna[i].y, okna[i].szer, okna[i].wys);
+            
+            // Kursor pisania edytora
+            if (z_order[1] == 1) {
+                int cx = okna[i].x + 6 + (edit_c * 8);
+                int cy = okna[i].y + 28 + 4 + (edit_r * 12);
+                if (cy + 10 < (int)(okna[i].y + okna[i].wys) && cx + 8 < (int)(okna[i].x + okna[i].szer)) {
+                    RysujProstokat(cx, cy + 10, 8, 2, 0x00FFBF00); 
+                }
             }
         }
     }
 }
 
+// ==================== ODBIERANIE DANYCH ====================
+void DopiszZnakDoEdytora(char c) {
+    if (c == '\n' || c == '\r') {
+        edit_r++; edit_c = 0;
+    } else if (c == '\b') {
+        if (edit_c > 0) {
+            edit_c--;
+            edit_buf[edit_r][edit_c].znak = 0;
+        } else if (edit_r > 0) {
+            edit_r--;
+            edit_c = edit_max_c - 1;
+            while(edit_c > 0 && edit_buf[edit_r][edit_c].znak == 0) edit_c--;
+            if (edit_buf[edit_r][edit_c].znak != 0) edit_c++;
+        }
+    } else {
+        edit_buf[edit_r][edit_c].znak = c;
+        edit_buf[edit_r][edit_c].kolor = 0x00D1D5DB; 
+        edit_c++;
+        if (edit_c >= edit_max_c) { edit_r++; edit_c = 0; }
+    }
+    
+    if (edit_r >= edit_max_r) {
+        for(int r = 1; r < edit_max_r; r++) {
+            for(int c = 0; c < edit_max_c; c++) edit_buf[r-1][c] = edit_buf[r][c];
+        }
+        for(int c = 0; c < edit_max_c; c++) edit_buf[edit_max_r-1][c].znak = 0;
+        edit_r = edit_max_r - 1;
+    }
+}
+
+void DopiszDoBufora(const char* tekst, uint32_t kolor) {
+    for(int i = 0; tekst[i] != '\0'; i++) {
+        if (tekst[i] == '\n') {
+            term_r++; term_c = 0;
+        } else if (tekst[i] == '\r') {
+            term_c = 0;
+        } else if (tekst[i] == '\b') {
+            if (term_c > 0) { term_c--; term_buf[term_r][term_c].znak = 0; }
+        } else {
+            term_buf[term_r][term_c].znak = tekst[i];
+            term_buf[term_r][term_c].kolor = kolor;
+            term_c++;
+            if (term_c >= term_max_c) { term_r++; term_c = 0; }
+        }
+        
+        if (term_r >= term_max_r) {
+            for(int r = 1; r < term_max_r; r++) {
+                for(int c = 0; c < term_max_c; c++) term_buf[r-1][c] = term_buf[r][c];
+            }
+            for(int c = 0; c < term_max_c; c++) term_buf[term_max_r-1][c].znak = 0;
+            term_r = term_max_r - 1;
+        }
+    }
+}
+
+extern "C" bool ZaktualizujKlawiatureGUI(char znak) {
+    if (!backbuffer) return false;
+    
+    int aktywne_okno = z_order[1];
+    if (!okna[aktywne_okno].widoczne) aktywne_okno = z_order[0];
+    
+    if (aktywne_okno == 1 && okna[1].widoczne) { // Edytor zbiera event
+        UkryjKursor();
+        DopiszZnakDoEdytora(znak);
+        OdswiezEkran();
+        PokazKursor();
+        PrzeniesNaEkran();
+        return true; 
+    }
+    return false; // Terminal odbiera przez Syscall (shell.bur)
+}
+
+// ==================== KURSOR I MYSZKA ====================
 void UkryjKursor() {
     if (!kursor_widoczny || !backbuffer) return;
     for(int y=0; y<16; y++) {
@@ -389,7 +504,7 @@ void UkryjKursor() {
     kursor_widoczny = false;
 }
 
-static void PokazKursor() {
+void PokazKursor() {
     if (kursor_widoczny || !backbuffer) return;
     for(int y=0; y<16; y++) {
         for(int x=0; x<16; x++) {
@@ -405,21 +520,21 @@ static void PokazKursor() {
 }
 
 static bool TrafieniePasekTyulu(const Okno& o, int mx, int my) {
-    if (mx < o.x + 2 || mx >= o.x + o.szer - 79) return false;
-    if (my < o.y + 2 || my >= o.y + 26)          return false;
+    if (mx < (int)o.x + 2 || mx >= (int)o.x + (int)o.szer - 79) return false;
+    if (my < (int)o.y + 2 || my >= (int)o.y + 26) return false;
     return true;
 }
 
 static bool TrafieniePrzycisk(const Okno& o, int mx, int my, int offset_x) {
-    int px = o.x + o.szer - offset_x;
-    int py = o.y + 4;
+    int px = (int)o.x + (int)o.szer - offset_x;
+    int py = (int)o.y + 4;
     if (mx >= px && mx <= px + 20 && my >= py && my <= py + 20) return true;
     return false;
 }
 
 static bool TrafienieCaleOkno(const Okno& o, int mx, int my) {
-    if (mx < o.x || mx >= o.x + o.szer) return false;
-    if (my < o.y || my >= o.y + o.wys)  return false;
+    if (mx < (int)o.x || mx >= (int)o.x + (int)o.szer) return false;
+    if (my < (int)o.y || my >= (int)o.y + (int)o.wys) return false;
     return true;
 }
 
@@ -448,7 +563,6 @@ extern "C" void ZaktualizujMysze(int dx, int dy, uint8_t przyciski) {
     int stary_mysz_y = mysz_y;
     
     UkryjKursor();
-    
     mysz_x += dx;
     mysz_y -= dy; 
     
@@ -469,8 +583,7 @@ extern "C" void ZaktualizujMysze(int dx, int dy, uint8_t przyciski) {
     if (klik_lewy && okno_przeciagane == -1) {
         bool przechwycono = false;
         
-        // Pasek Zadan na samym dole
-        if (mysz_y >= (int)lfb_wysokosc - 40) {
+        if (mysz_y >= (int)lfb_wysokosc - 40) { // Pasek Zadań
             int taskbar_x = 100;
             for (int i = 0; i < 2; i++) {
                 if (mysz_x >= taskbar_x && mysz_x <= taskbar_x + 200) {
@@ -492,17 +605,17 @@ extern "C" void ZaktualizujMysze(int dx, int dy, uint8_t przyciski) {
                 int i = z_order[k];
                 if (!okna[i].widoczne) continue;
                 
-                if (TrafieniePrzycisk(okna[i], mysz_x, mysz_y, 26)) { // ZAMKNIJ
+                if (TrafieniePrzycisk(okna[i], mysz_x, mysz_y, 26)) { // X
                     okna[i].widoczne = false;
                     wymaga_odrysowania = true;
                     break;
                 }
-                else if (TrafieniePrzycisk(okna[i], mysz_x, mysz_y, 74)) { // MINIMALIZACJA
+                else if (TrafieniePrzycisk(okna[i], mysz_x, mysz_y, 74)) { // MIN
                     okna[i].widoczne = false;
                     wymaga_odrysowania = true;
                     break;
                 }
-                else if (TrafieniePrzycisk(okna[i], mysz_x, mysz_y, 50)) { // MAKSYMALIZACJA
+                else if (TrafieniePrzycisk(okna[i], mysz_x, mysz_y, 50)) { // MAX
                     WyciagnijNaWierzch(i);
                     if (!okna[i].zmaksymalizowane) {
                         okna[i].stary_x = okna[i].x; okna[i].stary_y = okna[i].y;
@@ -517,12 +630,17 @@ extern "C" void ZaktualizujMysze(int dx, int dy, uint8_t przyciski) {
                         okna[i].zmaksymalizowane = false;
                     }
                     
-                    // NAPRAWA: Zaktualizuj i przelicz rzedy/kolumny dla Terminala!
                     if (i == 0) {
                         term_max_c = (okna[0].szer - 12) / 8;
                         term_max_r = (okna[0].wys - 36) / 12;
                         if (term_max_c > MAX_COLS) term_max_c = MAX_COLS;
                         if (term_max_r > MAX_ROWS) term_max_r = MAX_ROWS;
+                    }
+                    else if (i == 1) {
+                        edit_max_c = (okna[1].szer - 12) / 8;
+                        edit_max_r = (okna[1].wys - 36) / 12;
+                        if (edit_max_c > MAX_COLS) edit_max_c = MAX_COLS;
+                        if (edit_max_r > MAX_ROWS) edit_max_r = MAX_ROWS;
                     }
                     wymaga_odrysowania = true;
                     break;
@@ -568,19 +686,17 @@ extern "C" void ZaktualizujMysze(int dx, int dy, uint8_t przyciski) {
     }
 }
 
+// ==================== INICJALIZACJA HARDWARE ====================
 extern "C" void* PobierzAktualnePML4();
 
 void InicjalizujGrafike(uint64_t adres_mb2) {
-    SerialLog("[GRAFIKA] Sprawdzanie natywnego interfejsu Bochs VBE (QEMU)...\n");
+    SerialLog("[GRAFIKA] Sprawdzanie natywnego interfejsu Bochs VBE...\n");
     uint16_t bga_id = BochsVBE_Read(VBE_DISPI_INDEX_ID);
-    
-    SerialLog("[GRAFIKA] ID Karty Graficznej VBE znalezione: ");
-    SerialLogHex(bga_id); SerialLog("\n");
+    SerialLog("[GRAFIKA] ID Karty: "); SerialLogHex(bga_id); SerialLog("\n");
     
     uint64_t lfb_fizyczny = 0;
     
     if (bga_id >= 0xB0C0 && bga_id <= 0xB0C6) {
-        SerialLog("[GRAFIKA] ZNALEZIONO KONTROLER VBE! Wymuszanie 1024x768x32...\n");
         BochsVBE_Write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_DISABLED);
         BochsVBE_Write(VBE_DISPI_INDEX_XRES, 1024);
         BochsVBE_Write(VBE_DISPI_INDEX_YRES, 768);
@@ -590,7 +706,7 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
         lfb_szerokosc = 1024; lfb_wysokosc = 768; lfb_bpp = 32; lfb_pitch = 1024 * 4;
         lfb_fizyczny = 0xFD000000ULL; 
     } else {
-        SerialLog("[GRAFIKA] Brak Bochs VBE. Fallback do odczytu Multiboot2...\n");
+        SerialLog("[GRAFIKA] Brak Bochs VBE. Opadniecie do Multiboot2...\n");
         if(adres_mb2 == 0) return;
         uint32_t rozmiar = *(uint32_t*)adres_mb2;
         uint64_t aktualny = adres_mb2 + 8;
@@ -607,14 +723,12 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
     }
     
     if(lfb_fizyczny != 0 && lfb_szerokosc > 0 && lfb_wysokosc > 0 && lfb_pitch > 0) {
-        SerialLog("[GRAFIKA] Mapowanie pamieci zewnetrznej do PMM/VMM...\n");
         uint64_t lfb_waga = (uint64_t)lfb_pitch * (uint64_t)lfb_wysokosc;
         uint64_t map_limit = (lfb_waga + 4095) & ~4095ULL;
         
         for(uint64_t i = 0; i < map_limit; i += 4096) ZmapujStrone((void*)(lfb_fizyczny + i), (void*)(lfb_fizyczny + i), 0b11 | 0x10);
         lfb = (uint32_t*)lfb_fizyczny;
         
-        SerialLog("[GRAFIKA] Alokacja wirtualnego Backbuffera RAM...\n");
         uint64_t vaddr_backbuffer = 0x80000000ULL; 
         for(uint64_t i = 0; i < map_limit; i += 4096) ZmapujStrone((void*)(vaddr_backbuffer + i), (void*)0, 0b11);
         for(uint64_t i = 0; i < map_limit; i += 4096) {
@@ -625,26 +739,38 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
         backbuffer = (uint8_t*)vaddr_backbuffer;
         
         for(uint64_t i = 0; i < lfb_waga; i++) backbuffer[i] = 0;
-        for(int r = 0; r < MAX_ROWS; r++) { for(int c = 0; c < MAX_COLS; c++) term_buf[r][c].znak = 0; }
+        for(int r = 0; r < MAX_ROWS; r++) { 
+            for(int c = 0; c < MAX_COLS; c++) {
+                term_buf[r][c].znak = 0;
+                edit_buf[r][c].znak = 0; 
+            }
+        }
         
-        if (okna[0].x + okna[0].szer > (int)lfb_szerokosc) okna[0].szer = lfb_szerokosc - okna[0].x - 20;
-        if (okna[0].y + okna[0].wys > (int)lfb_wysokosc - 40) okna[0].wys = lfb_wysokosc - okna[0].y - 40;
+        if (okna[0].x + okna[0].szer > lfb_szerokosc) okna[0].szer = lfb_szerokosc - okna[0].x - 20;
+        if (okna[0].y + okna[0].wys > lfb_wysokosc - 40) okna[0].wys = lfb_wysokosc - okna[0].y - 40;
 
         okna[1].szer = 560;
-        if (okna[1].x + okna[1].szer > (int)lfb_szerokosc - 20) {
+        if (okna[1].x + okna[1].szer > lfb_szerokosc - 20) {
             okna[1].x = 20; 
-            if (okna[1].x + okna[1].szer > (int)lfb_szerokosc - 20) okna[1].szer = lfb_szerokosc - 40; 
+            if (okna[1].x + okna[1].szer > lfb_szerokosc - 20) okna[1].szer = lfb_szerokosc - 40; 
         }
-        if (okna[1].y + okna[1].wys > (int)lfb_wysokosc - 40) okna[1].wys = lfb_wysokosc - okna[1].y - 40;
+        if (okna[1].y + okna[1].wys > lfb_wysokosc - 40) okna[1].wys = lfb_wysokosc - okna[1].y - 40;
 
         OgraniczOkno(okna[0]);
         OgraniczOkno(okna[1]);
         
-        // NAPRAWA: Poprawne kalkulowanie limitow znakow przy starcie dla nowej czcionki (Skala 1)
-        term_max_c = (okna[0].szer - 12) / 8;
+        term_max_c = (okna[0].szer - 12) / 8; 
         term_max_r = (okna[0].wys - 36) / 12;
-        if (term_max_c > MAX_COLS) term_max_c = MAX_COLS;
-        if (term_max_r > MAX_ROWS) term_max_r = MAX_ROWS;
+        if (term_max_c > MAX_COLS) { term_max_c = MAX_COLS; }
+        if (term_max_r > MAX_ROWS) { term_max_r = MAX_ROWS; }
+        
+        edit_max_c = (okna[1].szer - 12) / 8; 
+        edit_max_r = (okna[1].wys - 36) / 12;
+        if (edit_max_c > MAX_COLS) { edit_max_c = MAX_COLS; }
+        if (edit_max_r > MAX_ROWS) { edit_max_r = MAX_ROWS; }
+        
+        const char* hlo = "Witaj w Edytorze Avocado! Przetestuj polskie znaki: Zazolc gesla jazn.\n\nKliknij to okno by pisac. Kliknij Terminal aby uzywac powloki Bursztyna.\n";
+        for(int i = 0; hlo[i] != '\0'; i++) DopiszZnakDoEdytora(hlo[i]);
         
         OdswiezEkran();
         PokazKursor();
@@ -656,6 +782,7 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
     }
 }
 
+// ==================== ZEWNETRZNE API DO LOGOW ====================
 void WypiszLog(const char* tekst) {
     if(!backbuffer) return;
     UkryjKursor();
