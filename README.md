@@ -8,8 +8,9 @@ Witaj w oficjalnej dokumentacji **Bursztyn OS** – niezależnego, 64-bitowego s
 
 System jest rozwijany z myślą o architekturze x86-64, implementując własne Jądro, autorski system plików, niezależny logiczny model bezpieczeństwa oraz natywne środowisko uruchomieniowe dla programów skompilowanych z języka Avocado.
 
-# Program  powłoka systemowa shell
-![alt](image/shell1.png)
+# Programy w Bursztynie powłoka systemowa shell i prosty notatnik
+![alt](image/natywny-sterownik-bochs-vbe.png)
+
 
 ## Dostępne 16 komend w Shellu
 1. pomoc - wyświetla dostępną listę komend.
