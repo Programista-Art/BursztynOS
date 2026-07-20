@@ -36,21 +36,39 @@ system_operacyjny.bin: $(OBJS)
 
 # === BUDOWANIE OBRAZU ISO I KONFIGURACJA GRUB-A ===
 iso: system_operacyjny.bin
+	rm -rf isodir
 	mkdir -p isodir/boot/grub
 	cp system_operacyjny.bin isodir/boot/
 	echo 'set timeout=0' > isodir/boot/grub/grub.cfg
 	echo 'set default=0' >> isodir/boot/grub/grub.cfg
 	echo 'menuentry "Bursztyn OS" {' >> isodir/boot/grub/grub.cfg
 	echo '    insmod all_video' >> isodir/boot/grub/grub.cfg
-	echo '    set gfxpayload=1024x768x32' >> isodir/boot/grub/grub.cfg
+	echo '    set gfxpayload=1024x768x32,1024x768x24,800x600x32,auto' >> isodir/boot/grub/grub.cfg
+# 	echo '    set gfxpayload=1024x768x32' >> isodir/boot/grub/grub.cfg
 	echo '    multiboot2 /boot/system_operacyjny.bin' >> isodir/boot/grub/grub.cfg
 	echo '    boot' >> isodir/boot/grub/grub.cfg
 	echo '}' >> isodir/boot/grub/grub.cfg
 	grub-mkrescue -o BursztynOS.iso isodir --xorriso=xorriso
 
+isodir/boot/grub/grub.cfg:
+	mkdir -p isodir/boot/grub
+	echo 'set timeout=0' > isodir/boot/grub/grub.cfg
+	echo 'set default=0' >> isodir/boot/grub/grub.cfg
+	echo 'insmod vbe' >> isodir/boot/grub/grub.cfg
+	echo 'insmod vga' >> isodir/boot/grub/grub.cfg
+	echo 'insmod video' >> isodir/boot/grub/grub.cfg
+	echo 'set gfxmode=1024x768x32' >> isodir/boot/grub/grub.cfg
+	echo 'set gfxpayload=1024x768x32,1024x768x24,800x600x32,auto' >> isodir/boot/grub/grub.cfg
+	echo 'menuentry "Bursztyn OS" {' >> isodir/boot/grub/grub.cfg
+	echo '    multiboot2 /boot/system_operacyjny.bin' >> isodir/boot/grub/grub.cfg
+	echo '    boot' >> isodir/boot/grub/grub.cfg
+	echo '}' >> isodir/boot/grub/grub.cfg	
+
 # === URUCHOMIENIE W QEMU ===
 run: iso
 	qemu-system-x86_64 -cdrom BursztynOS.iso -m 2G -vga std -serial stdio
+# 	qemu-system-x86_64 -cdrom BursztynOS.iso -m 2G -vga cirrus -serial stdio
+# 	qemu-system-x86_64 -cdrom BursztynOS.iso -m 2G -vga none -serial stdio
 
 # === CZYSZCZENIE PROJEKTU ===
 clear:

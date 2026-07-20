@@ -18,24 +18,24 @@ header_start:
     /* Suma kontrolna nagłówka */
     .long -(MULTIBOOT2_HEADER_MAGIC + GRUB_MULTIBOOT_ARCHITECTURE_I386 + (header_end - header_start))
 
-    /* Znacznik nr 1: Prośba o mapę pamięci (Dla PMM) */
+    /* Znacznik nr 1: Żądanie Framebuffera (Typ 5) */
+    /* KRYTYCZNA ZMIANA: Zamiast 0,0,32 podajemy konkretne wymiary 1024x768x32, 
+       które są w 100% obsługiwane przez QEMU (-vga std). 
+       GRUB ma problem z "0" (dowolne) i może zignorować żądanie graficzne! */
+    .align 8
+    .short 5
+    .short 0
+    .long 20
+    .long 1024   /* Szerokość na sztywno */
+    .long 768    /* Wysokość na sztywno */
+    .long 32     /* Głębia kolorów (32 bity) */
+
+    /* Znacznik nr 2: Prośba o mapę pamięci (Dla PMM) */
     .align 8
     .short 1
     .short 0
     .long 12
     .long MULTIBOOT_TAG_TYPE_MEMORY_MAP
-
-    /* KRYTYCZNA ZMIANA: Zezwolenie GRUB-owi na dobranie najlepszej rodzielczości!
-       Ustawienie na sztywno 1920x1080 powodowało ignorowanie żądania przez QEMU.
-       0, 0 oznacza "najlepsza dostępna".
-    */
-    .align 8
-    .short 5
-    .short 0
-    .long 20
-    .long 0      /* Szerokość (0 = dowolna) */
-    .long 0      /* Wysokość (0 = dowolna) */
-    .long 32     /* Głębia (32 bity to wymóg bezwzględny dla renderowania okien!) */
 
     /* Znacznik końcowy Multiboot2 */
     .align 8
