@@ -19,7 +19,6 @@ struct Okno {
     bool zmaksymalizowane;
 };
 
-// Delikatnie poszerzamy okno terminala, by przy skali=1 pieknie pomiescilo 80 kolumn!
 static Okno okna[2] = {
     { 20, 20, 660, 360,  0,0,0,0, "Powloka Bursztyna (Ring 3 Terminal)", "Terminal", 0x001A0B00, true, false },
     { 180, 80, 560, 400, 0,0,0,0, "Edytor Avocado - Nowy Plik", "Edytor", 0x00280F00, true, false }
@@ -30,11 +29,13 @@ static int z_order[2] = {1, 0}; // 0 = spod, 1 = wierzch
 static int okno_przeciagane = -1;
 static int chwyt_x = 0;
 static int chwyt_y = 0;
+static uint8_t ostatnie_przyciski = 0;
 
 struct ZnakTerminala {
     char znak;
     uint32_t kolor;
 };
+
 // Zwiekszone limity tablicy, aby zmiescic znaki na zmaksymalizowanym ekranie 1024x768
 #define MAX_ROWS 80
 #define MAX_COLS 140
@@ -46,7 +47,6 @@ static int mysz_x = 500;
 static int mysz_y = 300;
 static uint32_t bufor_kursora[16][16];
 static bool kursor_widoczny = false;
-static uint8_t ostatnie_przyciski = 0;
 
 static inline void serial_outb(uint16_t port, uint8_t val) {
     asm volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
@@ -248,6 +248,10 @@ void RysujOkno(int id) {
     // Tytul okna pozostawiamy w skali=2 by ladnie wygladal w GUI
     WypiszTekst(okna[id].tytul, px + 8, py + 6, kolor_tekstu_paska, 2);         
     
+    // Przycisk MINIMALIZUJ [ - ]
+    RysujProstokat(px + szer - 74, py + 4, 20, 20, 0x00E58A00);
+    WypiszTekst("-", px + szer - 70, py + 6, 0x001A0B00, 2);
+
     // Przycisk MAKSYMALIZUJ [ ^ ] lub PRZYWROC [ v ]
     RysujProstokat(px + szer - 50, py + 4, 20, 20, 0x00E58A00);
     WypiszTekst(okna[id].zmaksymalizowane ? "v" : "^", px + szer - 46, py + 6, 0x001A0B00, 2);
@@ -364,7 +368,6 @@ void OdswiezEkran() {
             RysujZawartoscTerminala(okna[i].x, okna[i].y, okna[i].szer, okna[i].wys);
         } else if (i == 1) {
             if (okna[1].szer > 150 && okna[1].wys > 150) {
-                // Dostosowano skale w edytorze z 2 do 1, zeby dopasowac wyglad do nowych proporcji
                 WypiszTekst("Edytor Avocado - Gotowy!", okna[1].x + 20, okna[1].y + 50, 0x00FFBF00, 1);
                 WypiszTekst("Przycisk [X] minimalizuje okno", okna[1].x + 20, okna[1].y + 70, 0x00D1D5DB, 1);
                 WypiszTekst("na pasek zadan w dolnym ekranie.", okna[1].x + 20, okna[1].y + 90, 0x00D1D5DB, 1);
@@ -386,7 +389,7 @@ void UkryjKursor() {
     kursor_widoczny = false;
 }
 
-void PokazKursor() {
+static void PokazKursor() {
     if (kursor_widoczny || !backbuffer) return;
     for(int y=0; y<16; y++) {
         for(int x=0; x<16; x++) {
@@ -402,14 +405,15 @@ void PokazKursor() {
 }
 
 static bool TrafieniePasekTyulu(const Okno& o, int mx, int my) {
-    if (mx < o.x + 2 || mx >= o.x + o.szer - 55) return false;
+    if (mx < o.x + 2 || mx >= o.x + o.szer - 79) return false;
     if (my < o.y + 2 || my >= o.y + 26)          return false;
     return true;
 }
 
 static bool TrafieniePrzycisk(const Okno& o, int mx, int my, int offset_x) {
-    if (mx >= o.x + o.szer - offset_x && mx <= o.x + o.szer - offset_x + 20 &&
-        my >= o.y + 4 && my <= o.y + 24) return true;
+    int px = o.x + o.szer - offset_x;
+    int py = o.y + 4;
+    if (mx >= px && mx <= px + 20 && my >= py && my <= py + 20) return true;
     return false;
 }
 
@@ -488,7 +492,12 @@ extern "C" void ZaktualizujMysze(int dx, int dy, uint8_t przyciski) {
                 int i = z_order[k];
                 if (!okna[i].widoczne) continue;
                 
-                if (TrafieniePrzycisk(okna[i], mysz_x, mysz_y, 26)) { 
+                if (TrafieniePrzycisk(okna[i], mysz_x, mysz_y, 26)) { // ZAMKNIJ
+                    okna[i].widoczne = false;
+                    wymaga_odrysowania = true;
+                    break;
+                }
+                else if (TrafieniePrzycisk(okna[i], mysz_x, mysz_y, 74)) { // MINIMALIZACJA
                     okna[i].widoczne = false;
                     wymaga_odrysowania = true;
                     break;
