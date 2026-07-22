@@ -142,7 +142,7 @@ extern "C" void _start() {
     print("\n");
     print("==================================================\n");
     print(" Bursztyn Shell v1.6 (Bursztyn OS Ring 3)\n");
-    print(" Wpisz 'pomoc', aby zobaczyć listę komend.\n");
+    print(" Wpisz 'pomoc', aby zobaczyc liste komend.\n");
     print("==================================================\n");
 
     char bufor_komendy[128];

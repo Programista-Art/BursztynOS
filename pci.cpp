@@ -1,23 +1,30 @@
-#include "pci.h"
+/*
+ * Mechanizm: Skaner Magistrali PCI (Peripheral Component Interconnect)
+ * Opis: Umożliwia odczytywanie danych konfiguracyjnych urządzeń na płycie głównej
+ * (np. znajdowanie kontrolera dysków AHCI, kart sieciowych, itp.).
+ */
+
 #include <stdint.h>
 
-// Zewnętrzne funkcje jądra (Składacz Obrazu i System Plików BSP)
-// NAPRAWA: Usunięto extern "C", ponieważ WypiszLog jest standardową funkcją C++ w grafika.cpp
-void WypiszLog(const char* tekst);
+// Funkcje z innych modułów jądra
+extern void WypiszLog(const char* tekst);
 extern "C" bool utworz_plik(const char* sciezka);
 extern "C" bool zapisz_do_pliku(const char* sciezka, const char* dane, uint32_t dlugosc);
 
+// Pomocnicza funkcja asemblerowa do wysyłania 32-bitowych danych na port I/O
 static inline void wyjscie_port_dword(uint16_t port, uint32_t wartosc) {
     asm volatile ("outl %0, %1" : : "a"(wartosc), "Nd"(port));
 }
 
+// Pomocnicza funkcja asemblerowa do odczytywania 32-bitowych danych z portu I/O
 static inline uint32_t wejscie_port_dword(uint16_t port) {
     uint32_t wartosc;
     asm volatile ("inl %1, %0" : "=a"(wartosc) : "Nd"(port));
     return wartosc;
 }
 
-uint32_t pci_odczytaj_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
+// Główna funkcja odczytująca dane z płyty głównej (poprawnie wyeksportowana do C)
+extern "C" uint32_t pci_odczytaj_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
     uint32_t address;
     uint32_t lbus  = (uint32_t)bus;
     uint32_t lslot = (uint32_t)slot;
@@ -31,6 +38,7 @@ uint32_t pci_odczytaj_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t off
     return wejscie_port_dword(0xCFC);
 }
 
+// Pomocnicze funkcje tekstowe dla skanera
 static void pci_int_do_str(int wartosc, char* bufor) {
     if (wartosc == 0) { bufor[0] = '0'; bufor[1] = '\0'; return; }
     int i = 0; char temp[16];
@@ -45,7 +53,8 @@ static void pci_str_dopisz(char* cel, const char* zrodlo) {
     cel[i] = '\0';
 }
 
-void skanuj_magistrale_pci() {
+// Skaner magistrali zapisujący logi na dysk (KRYTYCZNE: posiada extern "C")
+extern "C" void skanuj_magistrale_pci() {
     WypiszLog("[PCI] Skanowanie plyty glownej w poszukiwaniu sprzetu...");
     
     // Potężny bufor na raport tekstowy (ok. 2 KB)
@@ -66,7 +75,6 @@ void skanuj_magistrale_pci() {
             uint32_t info_klasy = pci_odczytaj_dword(bus, slot, 0, 0x08);
             uint8_t klasa    = (info_klasy >> 24) & 0xFF;
             uint8_t podklasa = (info_klasy >> 16) & 0xFF;
-            // NAPRAWA: Usunięto nieużywaną zmienną prog_if, by wyciszyć ostrzeżenia kompilatora (-Wall)
 
             // Tworzenie pojedynczej linii logu dla znalezionego urządzenia
             char log_msg[128]; log_msg[0] = '\0';
@@ -97,7 +105,6 @@ void skanuj_magistrale_pci() {
     if (znaleziono > 0) {
         WypiszLog("[PCI] Skanowanie zakonczone. Zapisuje log do /logi/pci.txt");
         
-        // Magia Unixa: Zrzucamy wiedzę sprzętową Ring 0 do pliku tekstowego na RAM-Dysk
         utworz_plik("/logi/pci.txt");
         
         int len = 0;

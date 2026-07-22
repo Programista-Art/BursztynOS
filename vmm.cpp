@@ -70,7 +70,12 @@ void InicjalizujVMM() {
     if (!globalne_pml4) return;
     WyzerujStrone(globalne_pml4);
 
-    // Mapowanie jądra
+    // --- ROZWIAZANIE PROBLEMU KURY I JAJKA (DWUFAZOWE MAPOWANIE) ---
+    
+    // FAZA 1: Mapujemy tylko 16 MB.
+    // Dlaczego? boot.S dał nam tylko 2 MB widocznej pamięci. Wygenerowanie 
+    // tablic dla 16 MB zajmie zaledwie kilka ramek, które PMM bezpiecznie
+    // znajdzie poniżej ograniczenia 2 MB.
     for (uint64_t i = 0; i < 4096; i++) {
         void* ptr = (void*)(i * ROZMIAR_RAMKI);
         ZmapujStrone(ptr, ptr, FLAGA_OBECNA | FLAGA_ZAPIS);
@@ -79,11 +84,22 @@ void InicjalizujVMM() {
     ZmapujStrone((void*)0xFEE00000ULL, (void*)0xFEE00000ULL, FLAGA_OBECNA | FLAGA_ZAPIS | 0x10 | 0x08); 
     ZmapujStrone((void*)0xFEC00000ULL, (void*)0xFEC00000ULL, FLAGA_OBECNA | FLAGA_ZAPIS | 0x10 | 0x08); 
 
+    // ZMIANA KONTEKSTU: Przełączamy procesor na nowe tablice!
+    // Od tej sekundy Jądro sprzętowo widzi i ma dostęp do 16 MB pamięci RAM.
     uint64_t adres_bazy = (uint64_t)globalne_pml4;
     asm volatile("mov %0, %%cr3" : : "r"(adres_bazy) : "memory");
+
+    // FAZA 2: Bezpieczne rozszerzenie pamięci do 256 MB.
+    // Skoro widzimy już wolny RAM aż do 16 MB, system może bez problemu 
+    // pobierać ramki np. z 6. czy 10. Megabajta, a funkcja WyzerujStrone()
+    // nie spowoduje już błędu Triple/Page Fault!
+    for (uint64_t i = 4096; i < 65536; i++) { // 65536 ramek = potężne 256 MB
+        void* ptr = (void*)(i * ROZMIAR_RAMKI);
+        ZmapujStrone(ptr, ptr, FLAGA_OBECNA | FLAGA_ZAPIS);
+    }
 }
 
-// Zewnętrzny interfejs dla loadera programów Ring 3 - Wymagany do kompilacji kernela!
+// Zewnętrzny interfejs dla loadera programów Ring 3
 extern "C" void* PobierzAktualnePML4() {
     return (void*)globalne_pml4;
 }

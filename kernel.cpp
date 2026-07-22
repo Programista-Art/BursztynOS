@@ -9,6 +9,7 @@
 #include "psf.h"
 #include "grafika.h" // PODŁĄCZENIE GRAFIKI
 #include "loader.h"  // Zapewnia dostęp do Loadera programów .bur
+#include "ahci.h"    // STEROWNIK DYSKU
 
 // Deklaracje zewnętrznych procedur asemblerowych i systemowych
 extern "C" void InicjalizujGDT();
@@ -21,6 +22,9 @@ extern "C" void inicjalizuj_tss(void* stos_jadra);
 extern "C" void zaladuj_tss(uint16_t selektor_tss);
 extern "C" void inicjalizuj_syscalls();
 extern "C" uint64_t stack_top; // Wskaźnik na szczyt stosu zdefiniowany w boot.S
+
+extern "C" void skanuj_magistrale_pci();
+extern "C" void wczytaj_tapete_z_dysku();
 
 // Zmienna z PMM (Physical Memory Manager) określająca ilość pamięci RAM
 extern uint64_t najwyzsza_znaleziona_ramka; 
@@ -41,7 +45,7 @@ extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka, uint8_t bzl_poz
 // --------------------------------------------------------
 
 // ---------------------------------------------------------
-// Własne, wbudowane funkcje pomocnicze (ponieważ nie mamy biblioteki standardowej <string.h>)
+// Własne, wbudowane funkcje pomocnicze
 // ---------------------------------------------------------
 
 void UIntToStr(uint64_t wartosc, char* bufor) {
@@ -151,8 +155,24 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     WypiszLog("[I/O] Sterowniki Mysz i Klawiatura (PS/2) gotowe.");
     WypiszLog("[BWS] API Wywolan Systemowych gotowe.");
 
+    //START DYSKU I ŁADOWANIE MULTIMEDIÓW 
+  
+
     // --- WYWOŁANIE SKANERA PCI (Wpisuje logi do /logi/pci.txt) ---
     skanuj_magistrale_pci();
+
+    // --- NOWY STEROWNIK DYSKU (SATA) ---
+    inicjalizuj_kontroler_ahci();
+    wczytaj_tapete_z_dysku();
+    // // Krotki test odczytu prawdziwego dysku na maszynie wirtualnej (Tylko Ring 0)
+    // void* bufor_testowy_dysku = ZaalokujRamke(); // Daje nam bezpieczne 4096 bajtow z mapy
+    // if (czytaj_z_glownego_dysku_ahci(0, 1, bufor_testowy_dysku)) {
+    //     WypiszLog("[AHCI-TEST] Odczyt Sektora LBA 0 (512 bajtow) ZAKONCZONY SUKCESEM!");
+    // } else {
+    //     WypiszLog("[AHCI-TEST] Blad! Zaden z dyskow twardych nie odpowiedzial.");
+    // }
+
+    // -----------------------------------
 
     WypiszLog("--------------------------------------------------");
     WypiszLog("System operacyjny gotowy!");

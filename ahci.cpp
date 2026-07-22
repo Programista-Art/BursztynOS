@@ -14,7 +14,7 @@ void ZlaczStringi(char* cel, const char* str1, const char* str2, const char* str
 void UIntToStr(uint64_t wartosc, char* bufor);
 
 // ---------------------------------------------------------
-// FUNKCJE ZAPISU DO MAGISTRALI PCI (Brakowało ich wcześniej)
+// FUNKCJE ZAPISU DO MAGISTRALI PCI
 // ---------------------------------------------------------
 static inline void wyjscie_port_dword(uint16_t port, uint32_t wartosc) {
     asm volatile ("outl %0, %1" : : "a"(wartosc), "Nd"(port));
@@ -118,19 +118,15 @@ struct struktura_fisu_host_dysk_ahci {
 } __attribute__((packed));
 
 
-// Zmienne globalne stanu
-static pamiec_kontrolera_ahci* adres_bazy_ahci = nullptr;
+// --- KRYTYCZNA ZMIANA: Dodano VOLATILE do wskaźnika bazy! ---
+// Informuje kompilator (-O2), że rejestry kontrolera mogą zmieniać się same z siebie.
+static volatile pamiec_kontrolera_ahci* adres_bazy_ahci = nullptr;
 static int glowny_port_dysku = -1;
 
-// --- NOWOŚĆ: BEZPIECZNE BUFORY DMA JĄDRA ---
-// Dysk AHCI czyta wyłącznie adresy FIZYCZNE. Ponieważ Jądro Bursztyna mapuje 
-// samego siebie 1:1, umieszczając tablice tutaj mamy gwarancję bezpieczeństwa,
-// a dodatkowo kompilator sam zajmie się rygorystycznym wyrównaniem (Alignment).
 static uint8_t dma_lista_komend[1024] __attribute__((aligned(1024)));
 static uint8_t dma_bufor_fis[256]     __attribute__((aligned(256)));
 static uint8_t dma_tablica_komend[4096] __attribute__((aligned(128)));
 
-// Bufor Bounce - pozwala przesyłać maksymalnie 32 sektory (16 KB) naraz
 static uint8_t dma_bufor_danych[16384] __attribute__((aligned(4096)));
 
 
@@ -140,7 +136,8 @@ static void wyzeruj_pamiec(void* wskaznik, uint32_t bajty) {
     for(uint32_t i = 0; i < bajty; i++) pamiec[i] = 0;
 }
 
-static void zatrzymaj_silnik_komend(struktura_portu_ahci* port) {
+// KRYTYCZNA ZMIANA: port stał się volatile
+static void zatrzymaj_silnik_komend(volatile struktura_portu_ahci* port) {
     port->status_i_sterowanie &= ~(1 << 0); // Bit ST
     port->status_i_sterowanie &= ~(1 << 4); // Bit FRE
     
@@ -151,14 +148,14 @@ static void zatrzymaj_silnik_komend(struktura_portu_ahci* port) {
     }
 }
 
-static void uruchom_silnik_komend(struktura_portu_ahci* port) {
+static void uruchom_silnik_komend(volatile struktura_portu_ahci* port) {
     while (port->status_i_sterowanie & (1 << 15)); 
     port->status_i_sterowanie |= (1 << 4); // Bit FRE
     port->status_i_sterowanie |= (1 << 0); // Bit ST
 }
 
 // --- WYSZUKIWANIE I INICJALIZACJA ---
-void inicjalizuj_kontroler_ahci() {
+extern "C" void inicjalizuj_kontroler_ahci() {
     WypiszLog("[AHCI] Szukam kontrolera pamieci masowej na magistrali PCI...");
     uint32_t adres_fizyczny_abar = 0;
     
@@ -188,17 +185,14 @@ void inicjalizuj_kontroler_ahci() {
         return;
     }
 
-    // KRYTYCZNA POPRAWKA: Aktywacja Bus Mastering w PCI!
-    // Bez tego karta PCI nie ma prawa wpisywać danych bezpośrednio do pamięci RAM.
     uint32_t komenda_pci = pci_odczytaj_dword(final_bus, final_slot, 0, 0x04);
     if ((komenda_pci & 0x06) != 0x06) {
         pci_zapisz_dword(final_bus, final_slot, 0, 0x04, komenda_pci | 0x06);
         WypiszLog("[AHCI] Aktywowano prawa zapisu do RAM (PCI Bus Mastering).");
     }
     
-    // Mapowanie bez buforowania cache dla sprzętu
     ZmapujStrone((void*)((uint64_t)adres_fizyczny_abar), (void*)((uint64_t)adres_fizyczny_abar), 0b11 | 0x10);
-    adres_bazy_ahci = (pamiec_kontrolera_ahci*)((uint64_t)adres_fizyczny_abar);
+    adres_bazy_ahci = (volatile pamiec_kontrolera_ahci*)((uint64_t)adres_fizyczny_abar);
     
     WypiszLog("[AHCI] Kontroler aktywny. Skanuje wewnetrzne porty SATA...");
     
@@ -208,14 +202,12 @@ void inicjalizuj_kontroler_ahci() {
     
     for (int i = 0; i < 32; i++) {
         if (aktywne_porty & (1 << i)) {
-            struktura_portu_ahci* port = &adres_bazy_ahci->porty[i];
+            volatile struktura_portu_ahci* port = &adres_bazy_ahci->porty[i];
             
-            // Czy dysk zgłosił gotowość (SATA Status = 3)
             if ((port->status_sata & 0x0F) == 3 && port->sygnatura == 0x00000101) { 
                 
                 zatrzymaj_silnik_komend(port);
                 
-                // Użycie przygotowanych buforów statycznych (Omija błędy Alignmentu)
                 wyzeruj_pamiec(dma_lista_komend, 1024);
                 wyzeruj_pamiec(dma_bufor_fis, 256);
                 wyzeruj_pamiec(dma_tablica_komend, 4096);
@@ -246,9 +238,10 @@ void inicjalizuj_kontroler_ahci() {
 // --- FAKTYCZNY ODCZYT/ZAPIS (Z UŻYCIEM BOUNCE BUFFER) ---
 static bool operacja_dysku_ahci(uint64_t lba, uint32_t ilosc_sektorow, void* wirtualny_bufor, bool czy_zapisz) {
     if (glowny_port_dysku == -1) return false;
-    if (ilosc_sektorow > 32) return false; // Blokada przed uszkodzeniem pamięci!
+    if (ilosc_sektorow > 32) return false; 
 
-    struktura_portu_ahci* port = &adres_bazy_ahci->porty[glowny_port_dysku];
+    // KRYTYCZNA ZMIANA: port jest VOLATILE, wymuszając fizyczny odczyt/zapis za każdym razem!
+    volatile struktura_portu_ahci* port = &adres_bazy_ahci->porty[glowny_port_dysku];
     port->status_przerwan = 0xFFFFFFFF; 
     
     naglowek_komendy_ahci* naglowek = (naglowek_komendy_ahci*)&dma_lista_komend;
@@ -258,7 +251,6 @@ static bool operacja_dysku_ahci(uint64_t lba, uint32_t ilosc_sektorow, void* wir
     tablica_komend_ahci* tablica = (tablica_komend_ahci*)&dma_tablica_komend;
     wyzeruj_pamiec(tablica->ramka_polecenia_fis, 64);
     
-    // Jeśli zapisujemy, najpierw wgrywamy dane z wyższych adresów wirtualnych do bufora DMA jądra
     uint32_t bajty_transferu = ilosc_sektorow * 512;
     uint8_t* ptr_user = (uint8_t*)wirtualny_bufor;
     
@@ -266,22 +258,20 @@ static bool operacja_dysku_ahci(uint64_t lba, uint32_t ilosc_sektorow, void* wir
         for(uint32_t i=0; i<bajty_transferu; i++) dma_bufor_danych[i] = ptr_user[i];
     }
 
-    // Deskryptor PRDT uderza bezpośrednio w FIZYCZNIE identyczny bufor DMA
     tablica->wpisy_pamieci[0].adres_bazowy_dolny = (uint64_t)&dma_bufor_danych & 0xFFFFFFFF;
     tablica->wpisy_pamieci[0].adres_bazowy_gorny = ((uint64_t)&dma_bufor_danych >> 32) & 0xFFFFFFFF;
     tablica->wpisy_pamieci[0].rozmiar_bajtowy_oraz_flagi = bajty_transferu - 1;
-    tablica->wpisy_pamieci[0].rozmiar_bajtowy_oraz_flagi |= (1 << 31); 
-    
+
     struktura_fisu_host_dysk_ahci* fis = (struktura_fisu_host_dysk_ahci*)(&tablica->ramka_polecenia_fis);
     fis->typ_fisu = 0x27; 
-    fis->flagi_portu = 0x80; 
+    fis->flagi_portu = 1 << 7; 
     fis->komenda = czy_zapisz ? 0x35 : 0x25; 
     
     fis->lba0 = (uint8_t)(lba & 0xFF);
     fis->lba1 = (uint8_t)((lba >> 8) & 0xFF);
     fis->lba2 = (uint8_t)((lba >> 16) & 0xFF);
-    fis->urzadzenie = 0x40; 
-    
+    fis->urzadzenie = 1 << 6; 
+
     fis->lba3 = (uint8_t)((lba >> 24) & 0xFF);
     fis->lba4 = (uint8_t)((lba >> 32) & 0xFF);
     fis->lba5 = (uint8_t)((lba >> 40) & 0xFF);
@@ -289,20 +279,47 @@ static bool operacja_dysku_ahci(uint64_t lba, uint32_t ilosc_sektorow, void* wir
     fis->licznik_sektorow_dolny = (uint8_t)(ilosc_sektorow & 0xFF);
     fis->licznik_sektorow_gorny = (uint8_t)((ilosc_sektorow >> 8) & 0xFF);
     
-    int timeout = 0;
-    while ((port->status_zadania & (1 | 0x80)) && timeout < 1000000) timeout++;
+    volatile int timeout = 0;
+    
+    while ((port->status_zadania & (0x80 | 0x08)) && timeout < 100000000) {
+        asm volatile("pause");
+        timeout++;
+    }
+    if (port->status_zadania & (0x80 | 0x08)) {
+        WypiszLog("[AHCI] Blad: Dysk zamrozony (Timeout BSY/DRQ)!");
+        return false;
+    }
+
+    port->status_przerwan = 0xFFFFFFFF; 
+
+    // KRYTYCZNE: BARIERA PAMIĘCI! 
+    // Mówimy kompilatorowi: "Zrzuć ramki FIS i listy komend z Cache do fizycznego RAM-u, natychmiast!"
+    asm volatile("mfence" ::: "memory");
 
     // BUM! Wyzwolenie kontrolera
     port->powiadomienia_komend = 1;
     
     timeout = 0;
+    // Pętla odpytuje rejestr. Dzięki volatile, robi to uczciwie w każdym przejściu pętli!
     while (port->powiadomienia_komend & 1) {
-        if (port->status_przerwan & (1 << 30)) return false; 
+        if (port->status_przerwan & (1 << 30)) {
+            WypiszLog("[AHCI] Blad: Task File Error (Bit 30)!");
+            return false; 
+        }
+        
+        asm volatile("pause");
         timeout++;
-        if (timeout > 5000000) break;
+        
+        if (timeout > 500000000) { 
+            WypiszLog("[AHCI] Blad: Przekroczono czas oczekiwania na paczke DMA!");
+            return false;
+        }
     }
     
-    // Jeśli czytaliśmy, wyciągamy pobrane fizycznie bajty z bufora DMA do przestrzeni docelowej w VMM
+    // KRYTYCZNE: BARIERA PAMIĘCI DLA ODCZYTU!
+    // Mówimy kompilatorowi: "Zanim zaczniesz kopiować, poczekaj aż dysk na pewno skończy wlewać dane!"
+    asm volatile("lfence" ::: "memory");
+
     if (!czy_zapisz) {
         for(uint32_t i=0; i<bajty_transferu; i++) ptr_user[i] = dma_bufor_danych[i];
     }

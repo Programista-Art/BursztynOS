@@ -1,6 +1,7 @@
 #include "grafika.h"
 #include "pamiec.h"
 #include "zegar-rtc.h"
+#include "ahci.h"
 
 // ==================== ZMIENNE GLOBALNE MATRYCY ====================
 static uint32_t* lfb = nullptr;
@@ -10,6 +11,8 @@ static uint32_t  lfb_pitch = 0;
 static uint8_t   lfb_bpp = 32;
 
 static uint8_t* backbuffer = nullptr;
+static uint32_t* bufor_tapety = nullptr; 
+static bool tapeta_zaladowana = false;   
 
 // ==================== DEKLARACJE ZAPOWIADAJACE ====================
 void UkryjKursor();
@@ -18,6 +21,7 @@ void OdswiezEkran();
 void PrzeniesNaEkran();
 void PrzeniesFragmentNaEkran(int x, int y, int szer, int wys);
 void DopiszZnakDoEdytora(char c);
+void rysuj_zegar_rtc();
 
 // ==================== STRUKTURY OKIEN ====================
 struct Okno {
@@ -86,26 +90,11 @@ void SerialLog(const char* str) {
     for(int i = 0; str[i] != '\0'; i++) serial_outb(0x3F8, str[i]);
 } 
 
-// ==================== STEROWNIK BOCHS VBE ====================
-#define VBE_DISPI_IOPORT_INDEX 0x01CE
-#define VBE_DISPI_IOPORT_DATA  0x01CF
-#define VBE_DISPI_INDEX_ID     0
-#define VBE_DISPI_INDEX_XRES   1
-#define VBE_DISPI_INDEX_YRES   2
-#define VBE_DISPI_INDEX_BPP    3
-#define VBE_DISPI_INDEX_ENABLE 4
-#define VBE_DISPI_DISABLED     0x00
-#define VBE_DISPI_ENABLED      0x01
-#define VBE_DISPI_LFB_ENABLED  0x40
-
-static inline void outw(uint16_t port, uint16_t val) { asm volatile ("outw %0, %1" : : "a"(val), "Nd"(port)); }
-static inline uint16_t inw(uint16_t port) { uint16_t val; asm volatile ("inw %1, %0" : "=a"(val) : "Nd"(port)); return val; }
-
-void BochsVBE_Write(uint16_t index, uint16_t value) {
-    outw(VBE_DISPI_IOPORT_INDEX, index); outw(VBE_DISPI_IOPORT_DATA, value);
-}
-uint16_t BochsVBE_Read(uint16_t index) {
-    outw(VBE_DISPI_IOPORT_INDEX, index); return inw(VBE_DISPI_IOPORT_DATA);
+static void SerialLogHex(uint32_t val) {
+    const char* hex = "0123456789ABCDEF";
+    char buf[11] = "0x00000000";
+    for(int i = 0; i < 8; i++) buf[9 - i] = hex[(val >> (i * 4)) & 0xF];
+    SerialLog(buf);
 }
 
 // ==================== BITMAPY KURSORA I CZCIONEK ====================
@@ -152,21 +141,29 @@ static const uint8_t czcionka_8x8[96][8] = {
     {0x18,0x18,0x18,0x00,0x18,0x18,0x18,0x00},{0x70,0x18,0x18,0x0E,0x18,0x18,0x70,0x00},{0x3B,0x6E,0x00,0x00,0x00,0x00,0x00,0x00},{0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}
 };
 
-// --- PODWÓJNE BUFOROWANIE ---
+// ==================== ZEWNĘTRZNE API LOGOWANIA ====================
+void WypiszLog(const char* tekst);
+
+// ==================== PODWÓJNE BUFOROWANIE ====================
 void PrzeniesNaEkran() {
     if (!lfb || !backbuffer) return;
     uint32_t* dst = (uint32_t*)lfb;
     uint32_t* src = (uint32_t*)backbuffer;
     uint64_t ilosc_pikseli = ((uint64_t)lfb_pitch * (uint64_t)lfb_wysokosc) / 4;
-    for(uint64_t i = 0; i < ilosc_pikseli; i++) dst[i] = src[i];
+    for(uint64_t i = 0; i < ilosc_pikseli; i++) {
+        dst[i] = src[i];
+    }
 }
 
 void PrzeniesFragmentNaEkran(int x, int y, int szer, int wys) {
     if(!lfb || !backbuffer) return;
-    int start_x = x < 0 ? 0 : x; int start_y = y < 0 ? 0 : y;
-    int end_x = x + szer; int end_y = y + wys;
+    int start_x = x < 0 ? 0 : x;
+    int start_y = y < 0 ? 0 : y;
+    int end_x = x + szer;
+    int end_y = y + wys;
     if(end_x > (int)lfb_szerokosc) end_x = lfb_szerokosc;
     if(end_y > (int)lfb_wysokosc) end_y = lfb_wysokosc;
+
     int bajtow_na_piksel = lfb_bpp / 8;
     for(int rzad = start_y; rzad < end_y; rzad++) {
         volatile uint8_t* dst = (volatile uint8_t*)lfb + rzad * lfb_pitch + start_x * bajtow_na_piksel;
@@ -178,23 +175,36 @@ void PrzeniesFragmentNaEkran(int x, int y, int szer, int wys) {
 
 void PostawPiksel(int x, int y, uint32_t kolor) {
     if(!backbuffer || x < 0 || x >= (int)lfb_szerokosc || y < 0 || y >= (int)lfb_wysokosc) return;
+    
     uint32_t offset = y * lfb_pitch + x * (lfb_bpp / 8);
     uint8_t* piksel = backbuffer + offset;
-    if (lfb_bpp == 32) *(uint32_t*)piksel = kolor;
-    else if (lfb_bpp == 24) { piksel[0] = kolor & 0xFF; piksel[1] = (kolor >> 8) & 0xFF; piksel[2] = (kolor >> 16) & 0xFF; } 
-    else if (lfb_bpp == 16) {
-        uint16_t r = (kolor >> 16) & 0xFF; uint16_t g = (kolor >> 8) & 0xFF; uint16_t b = kolor & 0xFF;
-        *(uint16_t*)piksel = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+    
+    if (lfb_bpp == 32) {
+        *(uint32_t*)piksel = kolor;
+    } else if (lfb_bpp == 24) {
+        piksel[0] = kolor & 0xFF;         
+        piksel[1] = (kolor >> 8) & 0xFF;  
+        piksel[2] = (kolor >> 16) & 0xFF; 
+    } else if (lfb_bpp == 16) {
+        uint16_t r = (kolor >> 16) & 0xFF;
+        uint16_t g = (kolor >> 8) & 0xFF;
+        uint16_t b = kolor & 0xFF;
+        uint16_t k16 = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+        *(uint16_t*)piksel = k16;
     }
 }
 
 uint32_t PobierzPiksel(int x, int y) {
     if(!backbuffer || x < 0 || x >= (int)lfb_szerokosc || y < 0 || y >= (int)lfb_wysokosc) return 0;
+    
     uint32_t offset = y * lfb_pitch + x * (lfb_bpp / 8);
     uint8_t* piksel = backbuffer + offset;
-    if (lfb_bpp == 32) return *(uint32_t*)piksel;
-    else if (lfb_bpp == 24) return piksel[0] | (piksel[1] << 8) | (piksel[2] << 16);
-    else if (lfb_bpp == 16) {
+    
+    if (lfb_bpp == 32) {
+        return *(uint32_t*)piksel;
+    } else if (lfb_bpp == 24) {
+        return piksel[0] | (piksel[1] << 8) | (piksel[2] << 16);
+    } else if (lfb_bpp == 16) {
         uint16_t k = *(uint16_t*)piksel;
         return (((k >> 11) & 0x1F) << 19) | (((k >> 5) & 0x3F) << 10) | ((k & 0x1F) << 3);
     }
@@ -202,19 +212,27 @@ uint32_t PobierzPiksel(int x, int y) {
 }
 
 void RysujProstokat(int px, int py, int szer, int wys, uint32_t kolor) {
-    int start_x = px < 0 ? 0 : px; int start_y = py < 0 ? 0 : py;
-    int end_x = px + szer; int end_y = py + wys;
+    int start_x = px < 0 ? 0 : px;
+    int start_y = py < 0 ? 0 : py;
+    int end_x = px + szer;
+    int end_y = py + wys;
     if (end_x > (int)lfb_szerokosc) end_x = lfb_szerokosc;
     if (end_y > (int)lfb_wysokosc) end_y = lfb_wysokosc;
+
     for(int y = start_y; y < end_y; y++) {
-        for(int x = start_x; x < end_x; x++) PostawPiksel(x, y, kolor);
+        for(int x = start_x; x < end_x; x++) {
+            PostawPiksel(x, y, kolor);
+        }
     }
 }
 
 void RysujZnak(char c, int px, int py, uint32_t kolor_tekstu, uint32_t kolor_tla, bool przezroczyste_tlo, int skala) {
-    const uint8_t* znak = nullptr; uint8_t kod = (uint8_t)c;
-    if (kod >= 32 && kod <= 126) znak = czcionka_8x8[kod - 32];
-    else {
+    const uint8_t* znak = nullptr; 
+    uint8_t kod = (uint8_t)c;
+    
+    if (kod >= 32 && kod <= 126) {
+        znak = czcionka_8x8[kod - 32];
+    } else {
         int pl_idx = -1;
         switch(kod) {
             case 0xB9: pl_idx = 0; break; case 0xE6: pl_idx = 1; break; case 0xEA: pl_idx = 2; break;
@@ -232,9 +250,13 @@ void RysujZnak(char c, int px, int py, uint32_t kolor_tekstu, uint32_t kolor_tla
         for(int x = 0; x < 8; x++) {
             bool zmaluj = znak[y] & (1 << (7 - x));
             if(zmaluj) {
-                for(int sy=0; sy<skala; sy++) for(int sx=0; sx<skala; sx++) PostawPiksel(px + (x*skala) + sx, py + (y*skala) + sy, kolor_tekstu);
+                for(int sy=0; sy<skala; sy++)
+                    for(int sx=0; sx<skala; sx++)
+                        PostawPiksel(px + (x*skala) + sx, py + (y*skala) + sy, kolor_tekstu);
             } else if (!przezroczyste_tlo) { 
-                for(int sy=0; sy<skala; sy++) for(int sx=0; sx<skala; sx++) PostawPiksel(px + (x*skala) + sx, py + (y*skala) + sy, kolor_tla);
+                for(int sy=0; sy<skala; sy++)
+                    for(int sx=0; sx<skala; sx++)
+                        PostawPiksel(px + (x*skala) + sx, py + (y*skala) + sy, kolor_tla);
             }
         }
     }
@@ -242,10 +264,13 @@ void RysujZnak(char c, int px, int py, uint32_t kolor_tekstu, uint32_t kolor_tla
 
 void WypiszTekst(const char* tekst, int px, int py, uint32_t kolor_tekstu, int skala) {
     int start_x = px;
-    for(int i = 0; tekst[i] != '\0'; i++) { RysujZnak(tekst[i], start_x, py, kolor_tekstu, 0, true, skala); start_x += 8 * skala; }
+    for(int i = 0; tekst[i] != '\0'; i++) {
+        RysujZnak(tekst[i], start_x, py, kolor_tekstu, 0, true, skala);
+        start_x += 8 * skala;
+    }
 }
 
-// Funkcja typu Case-Insensitive do filtrowania menu
+// Funkcja filtrowania menu
 static bool ZawieraTekst(const char* pelny_tekst, const char* szukany) {
     if (szukany[0] == '\0') return true; 
     for (int i = 0; pelny_tekst[i] != '\0'; i++) {
@@ -263,7 +288,6 @@ static bool ZawieraTekst(const char* pelny_tekst, const char* szukany) {
     return false;
 }
 
-// ==================== POMOCNIK ZEGARA ====================
 void rysuj_zegar_rtc() {
     czas_rtc czas;
     pobierz_czas_rtc(&czas);
@@ -273,7 +297,7 @@ void rysuj_zegar_rtc() {
     int zegar_x = lfb_szerokosc - 150;
     int zegar_y = lfb_wysokosc - 28;
     
-    RysujProstokat(zegar_x, zegar_y - 7, 140, 24, 0x00280F00); // Tlo pod zegarem
+    RysujProstokat(zegar_x, zegar_y - 7, 140, 24, 0x00280F00); 
     WypiszTekst(bufor_czasu, zegar_x, zegar_y, 0x00FFBF00, 2);
 }
 
@@ -340,7 +364,10 @@ void RysujZawartoscTerminala(int px, int py, int szer, int wys) {
         if (cy + wysokosc_linii >= py + wys) break;
         for (int c = 0; c < term_max_c; c++) {
             char z = term_buf[r][c].znak;
-            if (z != 0) { if (cx + 8*skala >= px + szer - 6) break; RysujZnak(z, cx, cy, term_buf[r][c].kolor, 0, true, skala); }
+            if (z != 0) { 
+                if (cx + 8*skala >= px + szer - 6) break; 
+                RysujZnak(z, cx, cy, term_buf[r][c].kolor, 0, true, skala); 
+            }
             cx += 8 * skala;
         }
     }
@@ -353,33 +380,113 @@ void RysujZawartoscEdytora(int px, int py, int szer, int wys) {
         if (cy + wysokosc_linii >= py + wys) break;
         for (int c = 0; c < edit_max_c; c++) {
             char z = edit_buf[r][c].znak;
-            if (z != 0) { if (cx + 8*skala >= px + szer - 6) break; RysujZnak(z, cx, cy, edit_buf[r][c].kolor, 0, true, skala); }
+            if (z != 0) { 
+                if (cx + 8*skala >= px + szer - 6) break; 
+                RysujZnak(z, cx, cy, edit_buf[r][c].kolor, 0, true, skala); 
+            }
             cx += 8 * skala;
         }
     }
 }
 
+// ==================== ZARZADZANIE BUFORAMI TEKSTOWYMI ====================
+void DopiszZnakDoEdytora(char c) {
+    if (c == '\n' || c == '\r') { edit_r++; edit_c = 0; }
+    else if (c == '\b') {
+        if (edit_c > 0) { edit_c--; edit_buf[edit_r][edit_c].znak = 0; } 
+        else if (edit_r > 0) {
+            edit_r--; edit_c = edit_max_c - 1;
+            while(edit_c > 0 && edit_buf[edit_r][edit_c].znak == 0) edit_c--;
+            if (edit_buf[edit_r][edit_c].znak != 0) edit_c++;
+        }
+    } else {
+        edit_buf[edit_r][edit_c].znak = c;
+        edit_buf[edit_r][edit_c].kolor = 0x00D1D5DB; 
+        edit_c++;
+        if (edit_c >= edit_max_c) { edit_r++; edit_c = 0; }
+    }
+    if (edit_r >= edit_max_r) {
+        for(int r = 1; r < edit_max_r; r++) {
+            for(int c = 0; c < edit_max_c; c++) {
+                edit_buf[r-1][c] = edit_buf[r][c];
+            }
+        }
+        for(int c = 0; c < edit_max_c; c++) edit_buf[edit_max_r-1][c].znak = 0;
+        edit_r = edit_max_r - 1;
+    }
+}
+
+void DopiszDoBufora(const char* tekst, uint32_t kolor) {
+    for(int i = 0; tekst[i] != '\0'; i++) {
+        if (tekst[i] == '\n') { term_r++; term_c = 0; }
+        else if (tekst[i] == '\r') { term_c = 0; }
+        else if (tekst[i] == '\b') { if (term_c > 0) { term_c--; term_buf[term_r][term_c].znak = 0; } }
+        else {
+            term_buf[term_r][term_c].znak = tekst[i]; 
+            term_buf[term_r][term_c].kolor = kolor; 
+            term_c++;
+            if (term_c >= term_max_c) { term_r++; term_c = 0; }
+        }
+        if (term_r >= term_max_r) {
+            for(int r = 1; r < term_max_r; r++) {
+                for(int c = 0; c < term_max_c; c++) {
+                    term_buf[r-1][c] = term_buf[r][c];
+                }
+            }
+            for(int c = 0; c < term_max_c; c++) term_buf[term_max_r-1][c].znak = 0;
+            term_r = term_max_r - 1;
+        }
+    }
+}
+
+void WypiszLog(const char* tekst) {
+    if(!backbuffer) return;
+    UkryjKursor();
+    DopiszDoBufora(tekst, 0x00FFBF00);
+    DopiszDoBufora("\n", 0x00FFBF00);
+    OdswiezEkran();
+    PokazKursor();
+    PrzeniesNaEkran();
+}
+
+// ==================== ODSWIEZANIE EKRANU ====================
 void OdswiezEkran() {
     if(!backbuffer) return;
-    RysujProstokat(0, 0, lfb_szerokosc, lfb_wysokosc, 0x001A0B00);
     
+    // Rysowanie wczytanej tapety zamiast sztywnego tła!
+    if (tapeta_zaladowana && bufor_tapety) {
+        uint32_t* dst = (uint32_t*)backbuffer;
+        uint32_t* src = bufor_tapety;
+        uint64_t ilosc_pikseli = ((uint64_t)lfb_szerokosc * (uint64_t)lfb_wysokosc);
+        for(uint64_t i = 0; i < ilosc_pikseli; i++) {
+            dst[i] = src[i];
+        }
+    } else {
+        RysujProstokat(0, 0, lfb_szerokosc, lfb_wysokosc, 0x001A0B00);
+    }
+    
+    // Rysowanie okien
     for(int k = 0; k < 2; k++) {
         int i = z_order[k];
         if (!okna[i].widoczne) continue;
+        
         RysujOkno(i);
-        if (i == 0) RysujZawartoscTerminala(okna[i].x, okna[i].y, okna[i].szer, okna[i].wys);
-        else if (i == 1) {
-            RysujZawartoscEdytora(okna[i].x, okna[i].y, okna[i].szer, okna[i].wys);
-            if (z_order[1] == 1) {
-                int cx = okna[i].x + 6 + (edit_c * 8);
-                int cy = okna[i].y + 28 + 4 + (edit_r * 12);
-                if (cy + 10 < (int)(okna[i].y + okna[i].wys) && cx + 8 < (int)(okna[i].x + okna[i].szer)) {
+        
+        if (i == 0) {
+            RysujZawartoscTerminala(okna[0].x, okna[0].y, okna[0].szer, okna[0].wys);
+        } else if (i == 1) {
+            RysujZawartoscEdytora(okna[1].x, okna[1].y, okna[1].szer, okna[1].wys);
+            if (z_order[1] == 1) { // Rysuj kursor
+                int cx = okna[1].x + 6 + (edit_c * 8);
+                int cy = okna[1].y + 28 + 4 + (edit_r * 12);
+                if (cy + 10 < (int)(okna[1].y + okna[1].wys) && cx + 8 < (int)(okna[1].x + okna[1].szer)) {
                     RysujProstokat(cx, cy + 10, 8, 2, 0x00FFBF00); 
                 }
             }
         }
     }
 
+    // Pasek zadań
     if (lfb_wysokosc >= 40) {
         RysujProstokat(0, lfb_wysokosc - 40, lfb_szerokosc, 40, 0x00280F00); 
         RysujProstokat(0, lfb_wysokosc - 40, lfb_szerokosc, 2, 0x008A5A00);  
@@ -402,54 +509,13 @@ void OdswiezEkran() {
             taskbar_x += 190;
         }
 
-        // Rysujemy po prawej stronie ekranu uzywajac wspolnego helpera (zgodnosc z przerwaniami)
         rysuj_zegar_rtc();
     }
 
-    if (menu_otwarte) {
-        RysujMenu();
-    }
+    if (menu_otwarte) RysujMenu();
 }
 
-void DopiszZnakDoEdytora(char c) {
-    if (c == '\n' || c == '\r') { edit_r++; edit_c = 0; }
-    else if (c == '\b') {
-        if (edit_c > 0) { edit_c--; edit_buf[edit_r][edit_c].znak = 0; } 
-        else if (edit_r > 0) {
-            edit_r--; edit_c = edit_max_c - 1;
-            while(edit_c > 0 && edit_buf[edit_r][edit_c].znak == 0) edit_c--;
-            if (edit_buf[edit_r][edit_c].znak != 0) edit_c++;
-        }
-    } else {
-        edit_buf[edit_r][edit_c].znak = c;
-        edit_buf[edit_r][edit_c].kolor = 0x00D1D5DB; 
-        edit_c++;
-        if (edit_c >= edit_max_c) { edit_r++; edit_c = 0; }
-    }
-    if (edit_r >= edit_max_r) {
-        for(int r = 1; r < edit_max_r; r++) for(int c = 0; c < edit_max_c; c++) edit_buf[r-1][c] = edit_buf[r][c];
-        for(int c = 0; c < edit_max_c; c++) edit_buf[edit_max_r-1][c].znak = 0;
-        edit_r = edit_max_r - 1;
-    }
-}
-
-void DopiszDoBufora(const char* tekst, uint32_t kolor) {
-    for(int i = 0; tekst[i] != '\0'; i++) {
-        if (tekst[i] == '\n') { term_r++; term_c = 0; }
-        else if (tekst[i] == '\r') { term_c = 0; }
-        else if (tekst[i] == '\b') { if (term_c > 0) { term_c--; term_buf[term_r][term_c].znak = 0; } }
-        else {
-            term_buf[term_r][term_c].znak = tekst[i]; term_buf[term_r][term_c].kolor = kolor; term_c++;
-            if (term_c >= term_max_c) { term_r++; term_c = 0; }
-        }
-        if (term_r >= term_max_r) {
-            for(int r = 1; r < term_max_r; r++) for(int c = 0; c < term_max_c; c++) term_buf[r-1][c] = term_buf[r][c];
-            for(int c = 0; c < term_max_c; c++) term_buf[term_max_r-1][c].znak = 0;
-            term_r = term_max_r - 1;
-        }
-    }
-}
-
+// ==================== KONTROLA URZADZEN ====================
 extern "C" bool zaktualizuj_klawiature_gui(char znak) {
     if (!backbuffer) return false;
     
@@ -659,19 +725,111 @@ extern "C" void zaktualizuj_mysze(int dx, int dy, uint8_t przyciski) {
 
 extern "C" void* PobierzAktualnePML4();
 
+// ==================== ZALADOWANIE BMP (AHCI) ====================
+extern "C" void wczytaj_tapete_z_dysku() {
+    // NAPRAWA: Zmieniliśmy ciche logowanie do ukrytego COM1 na oficjalną terminalową funkcję WypiszLog!
+    WypiszLog("[GRAFIKA] Proba wczytania tapeta.bmp z dysku AHCI (LBA 10)...");
+
+    uint64_t vaddr_raw = 0x91000000ULL;
+    for(uint64_t i = 0; i < 3 * 1024 * 1024; i += 4096) ZmapujStrone((void*)(vaddr_raw + i), ZaalokujRamke(), 0b11);
+    asm volatile("mov %0, %%cr3" : : "r"(PobierzAktualnePML4()) : "memory");
+    uint8_t* raw_bmp = (uint8_t*)vaddr_raw;
+
+    if (!czytaj_z_glownego_dysku_ahci(10, 1, raw_bmp)) { 
+        WypiszLog("[GRAFIKA] Blad odczytu DMA z fizycznego kontrolera AHCI."); 
+        return; 
+    }
+    
+    if (raw_bmp[0] != 'B' || raw_bmp[1] != 'M') { 
+        WypiszLog("[GRAFIKA] Brak sygnatury BMP na sektorze 10. To nie jest plik BMP."); 
+        return; 
+    }
+
+    uint32_t rozmiar_pliku = *(uint32_t*)(&raw_bmp[2]);
+    uint32_t sektory_do_odczytu = (rozmiar_pliku + 511) / 512;
+    if (sektory_do_odczytu > (3 * 1024 * 1024 / 512)) sektory_do_odczytu = (3 * 1024 * 1024 / 512);
+
+    WypiszLog("[GRAFIKA] Pobieranie surowych danych z dysku DMA (do 3 MB)...");
+
+    uint32_t lba = 10;
+    uint32_t przeczytane = 0;
+    while (przeczytane < sektory_do_odczytu) {
+        uint32_t paczka = sektory_do_odczytu - przeczytane;
+        if (paczka > 32) paczka = 32;
+         // Jeśli AHCI zgłosi błąd/timeout, całkowicie przerywamy proces!
+        if (!czytaj_z_glownego_dysku_ahci(lba, paczka, raw_bmp + (przeczytane * 512))) {
+            WypiszLog("[GRAFIKA] Zatrzymano ladowanie tapety - sterownik dysku AHCI zgubil dane!");
+            return;
+        }
+        lba += paczka; przeczytane += paczka;
+    }
+
+    uint32_t piksele_offset = *(uint32_t*)(&raw_bmp[10]);
+    int32_t bmp_szerokosc = *(int32_t*)(&raw_bmp[18]);
+    int32_t bmp_wysokosc = *(int32_t*)(&raw_bmp[22]);
+    uint16_t bmp_bpp = *(uint16_t*)(&raw_bmp[28]);
+
+    // Zabezpieczenie przed ujemną wysokością w nowoczesnych Bitmapach (Top-Down)
+    bool rysuj_od_gory = false;
+    if (bmp_wysokosc < 0) {
+        bmp_wysokosc = -bmp_wysokosc;
+        rysuj_od_gory = true;
+    }
+
+    if (bmp_bpp != 24 && bmp_bpp != 32) {
+        WypiszLog("[GRAFIKA] Blad dekodowania! Tapeta musi byc 24-bit lub 32-bit.");
+        return;
+    }
+
+    uint64_t vaddr_tapeta = 0x90000000ULL;
+    uint64_t waga_tapety = (uint64_t)lfb_szerokosc * (uint64_t)lfb_wysokosc * 4;
+    for(uint64_t i = 0; i < waga_tapety; i += 4096) ZmapujStrone((void*)(vaddr_tapeta + i), ZaalokujRamke(), 0b11);
+    asm volatile("mov %0, %%cr3" : : "r"(PobierzAktualnePML4()) : "memory");
+    bufor_tapety = (uint32_t*)vaddr_tapeta;
+
+    WypiszLog("[GRAFIKA] Przetwarzanie i transkodowanie pikseli (ARGB/RGB)...");
+
+    for (int y = 0; y < bmp_wysokosc; y++) {
+        for (int x = 0; x < bmp_szerokosc; x++) {
+            if (x >= (int)lfb_szerokosc || y >= (int)lfb_wysokosc) continue;
+            
+            int d_y = rysuj_od_gory ? y : (bmp_wysokosc - 1 - y);
+            int rzad_bajtow = ((bmp_szerokosc * bmp_bpp) + 31) / 32 * 4;
+            uint8_t* piksel = raw_bmp + piksele_offset + (d_y * rzad_bajtow) + (x * (bmp_bpp / 8));
+            
+            uint32_t kolor = 0;
+            if (bmp_bpp == 24 || bmp_bpp == 32) kolor = (piksel[2] << 16) | (piksel[1] << 8) | piksel[0]; 
+            bufor_tapety[y * lfb_szerokosc + x] = kolor;
+        }
+    }
+
+    tapeta_zaladowana = true;
+    WypiszLog("[GRAFIKA] Tapeta dekodowana pomyslnie! Ladowanie na Pulpit...");
+    OdswiezEkran(); 
+    PrzeniesNaEkran();
+}
+
+// ==================== INICJALIZACJA GRAFIKI ====================
 void InicjalizujGrafike(uint64_t adres_mb2) {
     if(adres_mb2 == 0) return;
-    uint32_t rozmiar = *(uint32_t*)adres_mb2; uint64_t aktualny = adres_mb2 + 8;
+    
+    uint32_t rozmiar = *(uint32_t*)adres_mb2;
+    uint64_t aktualny = adres_mb2 + 8;
     uint64_t lfb_fizyczny = 0;
+
+    SerialLog("[MB2] Calkowity rozmiar informacji MB2: "); SerialLogHex(rozmiar); SerialLog("\n");
+
     while(aktualny < adres_mb2 + rozmiar) {
         TagFramebufferMB2* tag = (TagFramebufferMB2*)aktualny;
         if(tag->typ == 0) break;
         if(tag->typ == 8) { 
-            lfb_fizyczny = tag->adres_fizyczny; lfb_pitch = tag->pitch; lfb_szerokosc = tag->szerokosc; lfb_wysokosc = tag->wysokosc; lfb_bpp = tag->bpp; break;
+            lfb_fizyczny = tag->adres_fizyczny; lfb_pitch = tag->pitch; 
+            lfb_szerokosc = tag->szerokosc; lfb_wysokosc = tag->wysokosc; lfb_bpp = tag->bpp; 
+            break;
         }
         aktualny += (tag->rozmiar + 7) & ~7;
     }
-    
+
     if(lfb_fizyczny != 0 && lfb_szerokosc > 0 && lfb_wysokosc > 0 && lfb_pitch > 0) {
         uint64_t lfb_waga = (uint64_t)lfb_pitch * (uint64_t)lfb_wysokosc;
         uint64_t map_limit = (lfb_waga + 4095) & ~4095ULL;
@@ -709,19 +867,9 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
         
         OdswiezEkran(); PokazKursor(); PrzeniesNaEkran();     
     } else {
+        SerialLog("[GRAFIKA] BLAD KRYTYCZNY: Brak LFB!\n");
         while(true) asm volatile("cli; hlt");
     }
-}
-
-// ==================== ZEWNETRZNE API ====================
-void WypiszLog(const char* tekst) {
-    if(!backbuffer) return;
-    UkryjKursor();
-    DopiszDoBufora(tekst, 0x00FFBF00);
-    DopiszDoBufora("\n", 0x00FFBF00);
-    OdswiezEkran();
-    PokazKursor();
-    PrzeniesNaEkran();
 }
 
 extern "C" void wypisz_na_ekranie(const char* tekst) {
@@ -733,26 +881,19 @@ extern "C" void wypisz_na_ekranie(const char* tekst) {
     PrzeniesNaEkran();
 }
 
-// Funkcja obsługująca sprzętowe przerwania Zegara RTC wprost z idt.cpp (Wektor 32)
-// Odświeża malutki prostokąt, jeśli nastąpiła zmiana fizycznej sekundy.
 extern "C" void obsluga_przerwania_zegara() {
     static uint8_t stara_sekunda = 255;
     czas_rtc czas;
     pobierz_czas_rtc(&czas);
     
-    // Rysuj tylko wtedy, gdy zmieniła się sekunda (nie obciąża procesora setkami rysowań w ciągu sekundy)
     if (czas.sekundy != stara_sekunda) {
         stara_sekunda = czas.sekundy;
-        
         if (!backbuffer || lfb_wysokosc < 40) return;
         
         bool kursor_byl = kursor_widoczny;
         if (kursor_byl) UkryjKursor();
         
-        // Funkcja rysujaca tylko i wyłacznie czas
         rysuj_zegar_rtc();
-        
-        // Odświeżamy TYLKO ten mały wycinek matrycy by nie blokować GUI
         int zegar_x = lfb_szerokosc - 150;
         int zegar_y = lfb_wysokosc - 28;
         PrzeniesFragmentNaEkran(zegar_x, zegar_y - 7, 140, 24);
