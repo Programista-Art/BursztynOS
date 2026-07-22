@@ -145,3 +145,4 @@ hlt_loop:
     cli
     hlt
     jmp hlt_loop
+    

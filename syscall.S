@@ -80,3 +80,4 @@ brama_wywolan_systemowych:
     swapgs
 
     sysretq
+    

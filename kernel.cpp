@@ -25,10 +25,16 @@ extern "C" uint64_t stack_top; // Wskaźnik na szczyt stosu zdefiniowany w boot.
 // Zmienna z PMM (Physical Memory Manager) określająca ilość pamięci RAM
 extern uint64_t najwyzsza_znaleziona_ramka; 
 
+// --- DEKLARACJA NASZEGO NOWEGO SKANERA PCI ---
+extern void skanuj_magistrale_pci();
+
 // --- NAPRAWA BŁĘDÓW KOMPILACJI (BRAKUJĄCE DEKLARACJE) ---
 // Symbole wstrzykiwane przez GNU Linker (objcopy) z pliku shell_blob.o
 extern char _binary_shell_bin_start[];
 extern char _binary_shell_bin_end[];
+
+// --- DEKLARACJA NASZEGO NOWEGO SKANERA PCI ---
+extern void skanuj_magistrale_pci();
 
 // Prototyp funkcji uruchamiającej program z uwzględnieniem Systemu Uprawnień PZB
 extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka, uint8_t bzl_poziom, uint64_t flagi_praw);
@@ -77,7 +83,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
         return; // Kernel Panic: Zły bootloader!
     }
 
-    // 2. Fundamentalna inicjalizacja hardware'u i zarządzania pamięcią
+    // 2. Fundamentalna inicjalizacja hardware'u i zarządzania pamięci
     InicjalizujPMM(multiboot_info_ptr);
     InicjalizujGDT();
     
@@ -144,6 +150,9 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     InicjalizujMyszPS2();
     WypiszLog("[I/O] Sterowniki Mysz i Klawiatura (PS/2) gotowe.");
     WypiszLog("[BWS] API Wywolan Systemowych gotowe.");
+
+    // --- WYWOŁANIE SKANERA PCI (Wpisuje logi do /logi/pci.txt) ---
+    skanuj_magistrale_pci();
 
     WypiszLog("--------------------------------------------------");
     WypiszLog("System operacyjny gotowy!");

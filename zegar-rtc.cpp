@@ -1,9 +1,7 @@
 /*
  * Mechanizm: Sterownik Zegara Czasu Rzeczywistego (RTC / CMOS)
- * Opis: Komunikuje sie z ukladem plyty glownej by pobrac obecny, fizyczny
- * czas komputera. Konwertuje archaiczny format BCD na zwykle liczby dziesietne.
+ * Opis: Komunikuje sie z ukladem plyty glownej by pobrac obecny czas.
  */
-
 #include "zegar-rtc.h"
 
 static inline void outb_rtc(uint16_t port, uint8_t val) {
@@ -26,8 +24,9 @@ static uint8_t pobierz_rejestr_rtc(int rejestr) {
     return inb_rtc(0x71);
 }
 
-void PobierzCzasRTC(CzasRTC* czas) {
-    // Czekamy, az uklad CMOS skonczy ewentualna, wlasna aktualizacje
+// Pobiera fizyczny czas ze sprzetowego ukladu CMOS plyty glownej
+void pobierz_czas_rtc(czas_rtc* czas) {
+    // Czekamy, az uklad CMOS skonczy ewentualna wlasna aktualizacje
     while (czy_aktualizacja_w_toku());
     
     uint8_t sekundy = pobierz_rejestr_rtc(0x00);
@@ -40,7 +39,6 @@ void PobierzCzasRTC(CzasRTC* czas) {
     uint8_t rejestr_b = pobierz_rejestr_rtc(0x0B);
 
     // Konwersja z BCD (Binary-Coded Decimal) z powrotem do systemu binarnego
-    // (Płyty główne zazwyczaj zapisują czas jako BCD by było to czytelne hexadecymalnie)
     if (!(rejestr_b & 0x04)) {
         sekundy = (sekundy & 0x0F) + ((sekundy / 16) * 10);
         minuty = (minuty & 0x0F) + ((minuty / 16) * 10);
@@ -50,8 +48,7 @@ void PobierzCzasRTC(CzasRTC* czas) {
         rok = (rok & 0x0F) + ((rok / 16) * 10);
     }
 
-    // Korekta strefy czasowej (Dla Polski GMT+2 w czasie letnim).
-    // Możesz to zoptymalizować dodając parametry dla czasu zimowego/letniego.
+    // Korekta strefy czasowej (np. GMT+2 dla Polski)
     godziny = (godziny + 2) % 24;
 
     czas->sekundy = sekundy;
@@ -59,11 +56,11 @@ void PobierzCzasRTC(CzasRTC* czas) {
     czas->godziny = godziny;
     czas->dzien = dzien;
     czas->miesiac = miesiac;
-    czas->rok = 2000 + rok; // Zakladamy XXI wiek
+    czas->rok = 2000 + rok;
 }
 
-void FormatujCzasDoStringa(const CzasRTC* czas, char* bufor) {
-    // Prosta konwersja cyfr na tekst ASCII w formacie HH:MM:SS
+// Tlumaczy strukture czasu na ladny tekst dla GUI
+void formatuj_czas_do_stringa(const czas_rtc* czas, char* bufor) {
     bufor[0] = (czas->godziny / 10) + '0';
     bufor[1] = (czas->godziny % 10) + '0';
     bufor[2] = ':';

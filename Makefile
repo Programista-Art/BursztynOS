@@ -8,8 +8,8 @@ OBJCOPY = x86_64-linux-gnu-objcopy
 CXXFLAGS = -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2
 
 # Lista wszystkich skompilowanych obiektów jądra
-OBJS = boot.o gdt.o tss.o apic.o idt.o przerwania.o klawiatura.o mysz.o zegar-rtc.o pmm.o vmm.o psf.o grafika.o syscall.o syscalls.o ring3.o loader.o kernel.o shell_blob.o
-
+# OBJS = boot.o gdt.o tss.o apic.o idt.o przerwania.o klawiatura.o mysz.o pmm.o vmm.o psf.o grafika.o syscalls.o pci.o ring3.o loader.o kernel.o shell_blob.o
+OBJS = boot.o gdt.o tss.o apic.o idt.o przerwania.o klawiatura.o mysz.o zegar-rtc.o pmm.o vmm.o psf.o grafika.o syscall.o syscalls.o pci.o ring3.o loader.o kernel.o shell_blob.o
 # Główny cel domyślny
 all: system_operacyjny.bin
 

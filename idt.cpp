@@ -1,10 +1,6 @@
 /*
- * Mechanizm: Zmodyfikowana wersja IDT z obsługą dla Advanced Programmable Interrupt Controller
- * Opis: Przygotowuje bramki od 0 do 47 z 256 dostępnych, gdzie pierwsze 32 
- * zarezerwowane są dla wyjątków a wektory > 32 dla urządzeń zewnętrznych.
- * Dodano zaawansowany ekran błędu (BSOD) do precyzyjnego debugowania sprzętu!
+ * Mechanizm: Zmodyfikowana wersja IDT z obsługa dla Advanced Programmable Interrupt Controller
  */
-
 #include <stdint.h>
 
 static inline void wyjscie_port_bajt(uint16_t port, uint8_t wartosc) {
@@ -13,9 +9,10 @@ static inline void wyjscie_port_bajt(uint16_t port, uint8_t wartosc) {
 
 extern "C" void wypisz_na_ekranie(const char* buf);
 
-// Deklaracje sterowników sprzętowych podpiętych do jądra
-extern "C" void ObslugaPrzerwaniaKlawiatury();
-extern "C" void ObslugaPrzerwaniaMyszy();
+// Refaktoryzacja do snake_case dla procedur sprzętowych
+extern "C" void obsluga_przerwania_klawiatury();
+extern "C" void obsluga_przerwania_myszy();
+extern "C" void obsluga_przerwania_zegara();
 
 struct DeskryptorIDT {
     uint16_t offset_czesc1;
@@ -58,7 +55,6 @@ struct RejestryStanowe {
 extern volatile uint32_t* baza_lapic_wirtualna;
 #define LAPIC_EOI_OFFSET 0x0B0
 
-// Pomocnicza funkcja do budowy raportu BSOD (Zamienia surowe liczby na czytelny tekst Hex)
 void UintDoHexStr(uint64_t wartosc, char* bufor) {
     const char* cyfry = "0123456789ABCDEF";
     for (int i = 15; i >= 0; i--) {
@@ -67,15 +63,12 @@ void UintDoHexStr(uint64_t wartosc, char* bufor) {
     }
 }
 
-// --- NOWY DYSPOZYTOR PRZERWAŃ Z EKRANEM BSOD ---
 extern "C" void WspolnaObslugaPrzerwan(struct RejestryStanowe* stan) {
-    // Odchwytujemy wszystkie błędy sprzętowe (Numery wyjątków od 0 do 31)
     if (stan->wektor_przerwania < 32) {
         wypisz_na_ekranie("\n========================================================\n");
         wypisz_na_ekranie("  KRYTYCZNY BLAD SYSTEMU (BSOD) - WYJATEK PROCESORA!\n");
         wypisz_na_ekranie("========================================================\n");
         
-        // Poprawione indeksy formatowania (33) zapobiegają usterkom wizualnym
         char linia_wektor[] = "  [!] Numer wektora (Wyjatek): 0x0000000000000000\n";
         UintDoHexStr(stan->wektor_przerwania, &linia_wektor[33]);
         wypisz_na_ekranie(linia_wektor);
@@ -91,20 +84,21 @@ extern "C" void WspolnaObslugaPrzerwan(struct RejestryStanowe* stan) {
         wypisz_na_ekranie("\nSystem zostal zatrzymany ze wzgledow bezpieczenstwa.\n");
         wypisz_na_ekranie("Przekaz powyzsze dane inzynierowi OS do analizy.\n");
         
-        // Zatrzymanie CPU
         while(1) asm volatile("cli; hlt");
     }
 
     if (stan->wektor_przerwania >= 32) {
-        // Przekierowanie do odpowiedniego sterownika sprzętowego
-        if (stan->wektor_przerwania == 33) {
-            ObslugaPrzerwaniaKlawiatury(); // Klawiatura
+        // Dyspozytor po nowemu (snake_case)
+        if (stan->wektor_przerwania == 32) {
+            obsluga_przerwania_zegara();
+        } 
+        else if (stan->wektor_przerwania == 33) {
+            obsluga_przerwania_klawiatury();
         } 
         else if (stan->wektor_przerwania == 44) {
-            ObslugaPrzerwaniaMyszy();      // Mysz
+            obsluga_przerwania_myszy();
         }
 
-        // Sygnał EOI (End of Interrupt) dla LAPIC po każdym przerwaniu zewnętrznym
         if(baza_lapic_wirtualna) {
             baza_lapic_wirtualna[LAPIC_EOI_OFFSET / 4] = 0;
         }
@@ -115,7 +109,6 @@ extern "C" void InicjalizujIDT() {
     wskaznik_idtr.rozmiar = (sizeof(struct DeskryptorIDT) * 256) - 1;
     wskaznik_idtr.adres   = (uint64_t)&tablica_idt;
 
-    // Załaduj 48 przerwań
     for (int i = 0; i < 48; i++) {
         UstawWpisIDT(i, tablica_isr[i], 0x8E);
     }

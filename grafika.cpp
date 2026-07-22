@@ -50,12 +50,13 @@ static const MenuApp menu_aplikacje[2] = {
     {0, "Terminal (shell)"},
     {1, "Edytor Avocado"}
 };
-static int aktualne_menu_y[2] = {-1, -1}; // Przechowuje pozycje Y narysowanych apek dla myszy
+static int aktualne_menu_y[2] = {-1, -1};
 
 static int okno_przeciagane = -1;
 static int chwyt_x = 0;
 static int chwyt_y = 0;
-static uint8_t ostatnie_przyciski = 0;
+
+static bool lewy_wcisniety = false;
 
 // ==================== PAMIEC TERMINALA I EDYTORA ====================
 struct ZnakTerminala {
@@ -151,9 +152,10 @@ static const uint8_t czcionka_8x8[96][8] = {
     {0x18,0x18,0x18,0x00,0x18,0x18,0x18,0x00},{0x70,0x18,0x18,0x0E,0x18,0x18,0x70,0x00},{0x3B,0x6E,0x00,0x00,0x00,0x00,0x00,0x00},{0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}
 };
 
+// --- PODWÓJNE BUFOROWANIE ---
 void PrzeniesNaEkran() {
     if (!lfb || !backbuffer) return;
-    volatile uint32_t* dst = (volatile uint32_t*)lfb;
+    uint32_t* dst = (uint32_t*)lfb;
     uint32_t* src = (uint32_t*)backbuffer;
     uint64_t ilosc_pikseli = ((uint64_t)lfb_pitch * (uint64_t)lfb_wysokosc) / 4;
     for(uint64_t i = 0; i < ilosc_pikseli; i++) dst[i] = src[i];
@@ -243,7 +245,7 @@ void WypiszTekst(const char* tekst, int px, int py, uint32_t kolor_tekstu, int s
     for(int i = 0; tekst[i] != '\0'; i++) { RysujZnak(tekst[i], start_x, py, kolor_tekstu, 0, true, skala); start_x += 8 * skala; }
 }
 
-// Funkcja typu Case-Insensitive (ignoruje wielkosc liter) do filtrowania menu
+// Funkcja typu Case-Insensitive do filtrowania menu
 static bool ZawieraTekst(const char* pelny_tekst, const char* szukany) {
     if (szukany[0] == '\0') return true; 
     for (int i = 0; pelny_tekst[i] != '\0'; i++) {
@@ -259,6 +261,20 @@ static bool ZawieraTekst(const char* pelny_tekst, const char* szukany) {
         if (szukany[j] == '\0') return true; 
     }
     return false;
+}
+
+// ==================== POMOCNIK ZEGARA ====================
+void rysuj_zegar_rtc() {
+    czas_rtc czas;
+    pobierz_czas_rtc(&czas);
+    char bufor_czasu[16];
+    formatuj_czas_do_stringa(&czas, bufor_czasu);
+    
+    int zegar_x = lfb_szerokosc - 150;
+    int zegar_y = lfb_wysokosc - 28;
+    
+    RysujProstokat(zegar_x, zegar_y - 7, 140, 24, 0x00280F00); // Tlo pod zegarem
+    WypiszTekst(bufor_czasu, zegar_x, zegar_y, 0x00FFBF00, 2);
 }
 
 void RysujMenu() {
@@ -386,14 +402,8 @@ void OdswiezEkran() {
             taskbar_x += 190;
         }
 
-        // --- WYSWIETLANIE ZEGARA RTC ---
-        CzasRTC czas;
-        PobierzCzasRTC(&czas);
-        char bufor_czasu[16];
-        FormatujCzasDoStringa(&czas, bufor_czasu);
-        
-        // Rysujemy po prawej stronie ekranu (odleglosc 150px od konca szerokosci matrycy)
-        WypiszTekst(bufor_czasu, lfb_szerokosc - 150, lfb_wysokosc - 28, 0x00FFBF00, 2);
+        // Rysujemy po prawej stronie ekranu uzywajac wspolnego helpera (zgodnosc z przerwaniami)
+        rysuj_zegar_rtc();
     }
 
     if (menu_otwarte) {
@@ -440,7 +450,7 @@ void DopiszDoBufora(const char* tekst, uint32_t kolor) {
     }
 }
 
-extern "C" bool ZaktualizujKlawiatureGUI(char znak) {
+extern "C" bool zaktualizuj_klawiature_gui(char znak) {
     if (!backbuffer) return false;
     
     if (menu_otwarte) {
@@ -495,36 +505,23 @@ void PokazKursor() {
     kursor_widoczny = true;
 }
 
-static bool TrafieniePasekTyulu(const Okno& o, int mx, int my) {
-    if (mx < (int)o.x + 2 || mx >= (int)o.x + (int)o.szer - 79) return false;
-    if (my < (int)o.y + 2 || my >= (int)o.y + 26) return false;
-    return true;
-}
-static bool TrafieniePrzycisk(const Okno& o, int mx, int my, int offset_x) {
-    int px = (int)o.x + (int)o.szer - offset_x; int py = (int)o.y + 4;
-    if (mx >= px && mx <= px + 20 && my >= py && my <= py + 20) return true;
-    return false;
-}
-static bool TrafienieCaleOkno(const Okno& o, int mx, int my) {
-    if (mx < (int)o.x || mx >= (int)o.x + (int)o.szer) return false;
-    if (my < (int)o.y || my >= (int)o.y + (int)o.wys) return false;
-    return true;
-}
 static void OgraniczOkno(Okno& o) {
     if (o.zmaksymalizowane) return; 
     int32_t min_x = -(int32_t)o.szer + 80; int32_t max_x = (int32_t)lfb_szerokosc - 80;
     int32_t min_y = 0; int32_t max_y = (int32_t)lfb_wysokosc - 40; 
+    
     if ((int32_t)o.x < min_x) o.x = (uint32_t)min_x;
     if ((int32_t)o.x > max_x) o.x = (uint32_t)max_x;
     if ((int32_t)o.y < min_y) o.y = (uint32_t)min_y;
     if ((int32_t)o.y > max_y) o.y = (uint32_t)max_y;
 }
+
 static void WyciagnijNaWierzch(int id_okna) {
     if (z_order[1] == id_okna) return; 
     z_order[0] = z_order[1]; z_order[1] = id_okna;
 }
 
-extern "C" void ZaktualizujMysze(int dx, int dy, uint8_t przyciski) {
+extern "C" void zaktualizuj_mysze(int dx, int dy, uint8_t przyciski) {
     if (!backbuffer) return;
     int stary_mysz_x = mysz_x; int stary_mysz_y = mysz_y;
     
@@ -535,12 +532,9 @@ extern "C" void ZaktualizujMysze(int dx, int dy, uint8_t przyciski) {
     if (mysz_y < 0) mysz_y = 0;
     if (mysz_y >= (int)lfb_wysokosc - 2) mysz_y = lfb_wysokosc - 2;
     
-    const uint8_t LEWY = 0x01;
-    bool lewy_teraz   = (przyciski & LEWY) != 0;
-    bool lewy_poprz   = (ostatnie_przyciski & LEWY) != 0;
-    bool klik_lewy    = (lewy_teraz && !lewy_poprz);
-    bool puszcz_lewy  = (!lewy_teraz && lewy_poprz);
-    ostatnie_przyciski = przyciski;
+    bool nowy_lewy = (przyciski & 0x01);
+    bool klik_lewy = (nowy_lewy && !lewy_wcisniety);
+    bool puszcz_lewy = (!nowy_lewy && lewy_wcisniety);
     
     bool wymaga_odrysowania = false;
     
@@ -598,49 +592,50 @@ extern "C" void ZaktualizujMysze(int dx, int dy, uint8_t przyciski) {
                 int i = z_order[k];
                 if (!okna[i].widoczne) continue;
                 
-                if (TrafieniePrzycisk(okna[i], mysz_x, mysz_y, 26)) { 
-                    okna[i].widoczne = false; wymaga_odrysowania = true; break;
-                }
-                else if (TrafieniePrzycisk(okna[i], mysz_x, mysz_y, 74)) { 
-                    okna[i].widoczne = false; wymaga_odrysowania = true; break;
-                }
-                else if (TrafieniePrzycisk(okna[i], mysz_x, mysz_y, 50)) { 
+                int px = (int)okna[i].x; int py = (int)okna[i].y; int sz = (int)okna[i].szer; int wy = (int)okna[i].wys;
+                
+                if (mysz_x >= px && mysz_x <= px + sz && mysz_y >= py && mysz_y <= py + wy) {
                     WyciagnijNaWierzch(i);
-                    if (!okna[i].zmaksymalizowane) {
-                        okna[i].stary_x = okna[i].x; okna[i].stary_y = okna[i].y;
-                        okna[i].stary_szer = okna[i].szer; okna[i].stary_wys = okna[i].wys;
-                        okna[i].x = 0; okna[i].y = 0;
-                        okna[i].szer = lfb_szerokosc; okna[i].wys = lfb_wysokosc - 40; 
-                        okna[i].zmaksymalizowane = true;
-                    } else {
-                        okna[i].x = okna[i].stary_x; okna[i].y = okna[i].stary_y;
-                        okna[i].szer = okna[i].stary_szer; okna[i].wys = okna[i].stary_wys;
-                        okna[i].zmaksymalizowane = false;
+                    wymaga_odrysowania = true;
+                    
+                    if (mysz_y <= py + 26) {
+                        if (mysz_x >= px + sz - 26 && mysz_x <= px + sz - 6) { 
+                            okna[i].widoczne = false; break;
+                        }
+                        if (mysz_x >= px + sz - 50 && mysz_x <= px + sz - 30) { 
+                            if (!okna[i].zmaksymalizowane) {
+                                okna[i].stary_x = okna[i].x; okna[i].stary_y = okna[i].y;
+                                okna[i].stary_szer = okna[i].szer; okna[i].stary_wys = okna[i].wys;
+                                okna[i].x = 0; okna[i].y = 0;
+                                okna[i].szer = lfb_szerokosc; okna[i].wys = lfb_wysokosc - 40; 
+                                okna[i].zmaksymalizowane = true;
+                            } else {
+                                okna[i].x = okna[i].stary_x; okna[i].y = okna[i].stary_y;
+                                okna[i].szer = okna[i].stary_szer; okna[i].wys = okna[i].stary_wys;
+                                okna[i].zmaksymalizowane = false;
+                            }
+                            if (i == 0) {
+                                term_max_c = (okna[0].szer - 12) / 8;
+                                term_max_r = (okna[0].wys - 36) / 12;
+                                if (term_max_c > MAX_COLS) term_max_c = MAX_COLS;
+                                if (term_max_r > MAX_ROWS) term_max_r = MAX_ROWS;
+                            } else if (i == 1) {
+                                edit_max_c = (okna[1].szer - 12) / 8;
+                                edit_max_r = (okna[1].wys - 36) / 12;
+                                if (edit_max_c > MAX_COLS) edit_max_c = MAX_COLS;
+                                if (edit_max_r > MAX_ROWS) edit_max_r = MAX_ROWS;
+                            }
+                            break;
+                        }
+                        if (mysz_x >= px + sz - 74 && mysz_x <= px + sz - 54) { 
+                            okna[i].widoczne = false; break;
+                        }
+                        if (!okna[i].zmaksymalizowane && mysz_x < px + sz - 79) { 
+                            okno_przeciagane = i;
+                            chwyt_x = mysz_x - okna[i].x; chwyt_y = mysz_y - okna[i].y;
+                        }
                     }
-                    if (i == 0) {
-                        term_max_c = (okna[0].szer - 12) / 8;
-                        term_max_r = (okna[0].wys - 36) / 12;
-                        if (term_max_c > MAX_COLS) term_max_c = MAX_COLS;
-                        if (term_max_r > MAX_ROWS) term_max_r = MAX_ROWS;
-                    } else if (i == 1) {
-                        edit_max_c = (okna[1].szer - 12) / 8;
-                        edit_max_r = (okna[1].wys - 36) / 12;
-                        if (edit_max_c > MAX_COLS) edit_max_c = MAX_COLS;
-                        if (edit_max_r > MAX_ROWS) edit_max_r = MAX_ROWS;
-                    }
-                    wymaga_odrysowania = true; break;
-                }
-                else if (TrafieniePasekTyulu(okna[i], mysz_x, mysz_y)) { 
-                    WyciagnijNaWierzch(i);
-                    if (!okna[i].zmaksymalizowane) { 
-                        okno_przeciagane = i;
-                        chwyt_x = mysz_x - okna[i].x; chwyt_y = mysz_y - okna[i].y;
-                    }
-                    wymaga_odrysowania = true; break;
-                }
-                else if (TrafienieCaleOkno(okna[i], mysz_x, mysz_y)) { 
-                    WyciagnijNaWierzch(i);
-                    wymaga_odrysowania = true; break;
+                    break; 
                 }
             }
         }
@@ -649,13 +644,15 @@ extern "C" void ZaktualizujMysze(int dx, int dy, uint8_t przyciski) {
         okno_przeciagane = -1;
     }
     
-    if (okno_przeciagane != -1 && lewy_teraz && (dx != 0 || dy != 0)) {
+    if (okno_przeciagane != -1 && nowy_lewy && (dx != 0 || dy != 0)) {
         okna[okno_przeciagane].x = mysz_x - chwyt_x;
         okna[okno_przeciagane].y = mysz_y - chwyt_y;
         OgraniczOkno(okna[okno_przeciagane]);
         wymaga_odrysowania = true;
     }
     
+    lewy_wcisniety = nowy_lewy;
+
     if (wymaga_odrysowania) { OdswiezEkran(); PokazKursor(); PrzeniesNaEkran(); } 
     else { PokazKursor(); PrzeniesFragmentNaEkran(stary_mysz_x, stary_mysz_y, 16, 16); PrzeniesFragmentNaEkran(mysz_x, mysz_y, 16, 16); }
 }
@@ -663,28 +660,16 @@ extern "C" void ZaktualizujMysze(int dx, int dy, uint8_t przyciski) {
 extern "C" void* PobierzAktualnePML4();
 
 void InicjalizujGrafike(uint64_t adres_mb2) {
-    SerialLog("[GRAFIKA] Sprawdzanie interfejsu Bochs VBE...\n");
-    uint16_t bga_id = BochsVBE_Read(VBE_DISPI_INDEX_ID);
+    if(adres_mb2 == 0) return;
+    uint32_t rozmiar = *(uint32_t*)adres_mb2; uint64_t aktualny = adres_mb2 + 8;
     uint64_t lfb_fizyczny = 0;
-    
-    if (bga_id >= 0xB0C0 && bga_id <= 0xB0C6) {
-        BochsVBE_Write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_DISABLED);
-        BochsVBE_Write(VBE_DISPI_INDEX_XRES, 1024);
-        BochsVBE_Write(VBE_DISPI_INDEX_YRES, 768);
-        BochsVBE_Write(VBE_DISPI_INDEX_BPP, 32);
-        BochsVBE_Write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_ENABLED | VBE_DISPI_LFB_ENABLED);
-        lfb_szerokosc = 1024; lfb_wysokosc = 768; lfb_bpp = 32; lfb_pitch = 1024 * 4; lfb_fizyczny = 0xFD000000ULL; 
-    } else {
-        if(adres_mb2 == 0) return;
-        uint32_t rozmiar = *(uint32_t*)adres_mb2; uint64_t aktualny = adres_mb2 + 8;
-        while(aktualny < adres_mb2 + rozmiar) {
-            TagFramebufferMB2* tag = (TagFramebufferMB2*)aktualny;
-            if(tag->typ == 0) break;
-            if(tag->typ == 8) { 
-                lfb_fizyczny = tag->adres_fizyczny; lfb_pitch = tag->pitch; lfb_szerokosc = tag->szerokosc; lfb_wysokosc = tag->wysokosc; lfb_bpp = tag->bpp; break;
-            }
-            aktualny += (tag->rozmiar + 7) & ~7;
+    while(aktualny < adres_mb2 + rozmiar) {
+        TagFramebufferMB2* tag = (TagFramebufferMB2*)aktualny;
+        if(tag->typ == 0) break;
+        if(tag->typ == 8) { 
+            lfb_fizyczny = tag->adres_fizyczny; lfb_pitch = tag->pitch; lfb_szerokosc = tag->szerokosc; lfb_wysokosc = tag->wysokosc; lfb_bpp = tag->bpp; break;
         }
+        aktualny += (tag->rozmiar + 7) & ~7;
     }
     
     if(lfb_fizyczny != 0 && lfb_szerokosc > 0 && lfb_wysokosc > 0 && lfb_pitch > 0) {
@@ -724,7 +709,7 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
         
         OdswiezEkran(); PokazKursor(); PrzeniesNaEkran();     
     } else {
-        SerialLog("[GRAFIKA] BLAD KRYTYCZNY: Nie znaleziono Framebuffera!\n"); while(true) asm volatile("cli; hlt");
+        while(true) asm volatile("cli; hlt");
     }
 }
 
@@ -746,4 +731,32 @@ extern "C" void wypisz_na_ekranie(const char* tekst) {
     OdswiezEkran();
     PokazKursor();
     PrzeniesNaEkran();
+}
+
+// Funkcja obsługująca sprzętowe przerwania Zegara RTC wprost z idt.cpp (Wektor 32)
+// Odświeża malutki prostokąt, jeśli nastąpiła zmiana fizycznej sekundy.
+extern "C" void obsluga_przerwania_zegara() {
+    static uint8_t stara_sekunda = 255;
+    czas_rtc czas;
+    pobierz_czas_rtc(&czas);
+    
+    // Rysuj tylko wtedy, gdy zmieniła się sekunda (nie obciąża procesora setkami rysowań w ciągu sekundy)
+    if (czas.sekundy != stara_sekunda) {
+        stara_sekunda = czas.sekundy;
+        
+        if (!backbuffer || lfb_wysokosc < 40) return;
+        
+        bool kursor_byl = kursor_widoczny;
+        if (kursor_byl) UkryjKursor();
+        
+        // Funkcja rysujaca tylko i wyłacznie czas
+        rysuj_zegar_rtc();
+        
+        // Odświeżamy TYLKO ten mały wycinek matrycy by nie blokować GUI
+        int zegar_x = lfb_szerokosc - 150;
+        int zegar_y = lfb_wysokosc - 28;
+        PrzeniesFragmentNaEkran(zegar_x, zegar_y - 7, 140, 24);
+        
+        if (kursor_byl) PokazKursor();
+    }
 }

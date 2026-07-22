@@ -12,26 +12,23 @@
 // STRUKTURA NAGŁÓWKA PROGRAMU (Wymóg Loadera Bursztyna)
 // ---------------------------------------------------------
 struct NaglowekBur {
-    uint8_t  magia[4];            // Sygnatura identyfikacyjna "BUR\0"
-    uint64_t punkt_wejscia;       // Gdzie zaczyna się kod (_start)
-    
-    uint64_t tekst_przesuniecie;  // Przesunięcie sekcji .text w pliku binarnym
-    uint64_t tekst_rozmiar;       // Rozmiar sekcji .text
-    uint64_t tekst_wirtualny;     // Docelowy adres wirtualny dla .text
-    
-    uint64_t dane_przesuniecie;   // Przesunięcie sekcji .data w pliku binarnym
-    uint64_t dane_rozmiar;        // Rozmiar sekcji .data
-    uint64_t dane_wirtualny;      // Docelowy adres wirtualny dla .data
+    uint8_t  magia[4];            
+    uint64_t punkt_wejscia;       
+    uint64_t tekst_przesuniecie;  
+    uint64_t tekst_rozmiar;       
+    uint64_t tekst_wirtualny;     
+    uint64_t dane_przesuniecie;   
+    uint64_t dane_rozmiar;        
+    uint64_t dane_wirtualny;      
 } __attribute__((packed));
 
 extern "C" void _start();
 
-extern "C" __attribute__((section(".naglowek"), used))
-const struct NaglowekBur naglowek = {
+extern "C" __attribute__((section(".naglowek"), used)) const struct NaglowekBur naglowek = {
     {'B', 'U', 'R', '\0'},
     (uint64_t)&_start,
-    4096,  8192, 0x401000, // ZWIĘKSZONE: Kod powłoki zajmuje do 8 KB (2 strony)
-    12288, 8192, 0x403000  // ZWIĘKSZONE: Dane przesunięte na offset 12 KB, pojemność do 8 KB
+    4096,  8192, 0x401000, 
+    12288, 8192, 0x403000  
 };
 
 // ---------------------------------------------------------
@@ -63,9 +60,13 @@ bool zapisz_plik(const char* plik, const char* dane, uint32_t dlugosc) { return 
 char getch() { return (char)bws_wywolaj(4); }
 bool czytaj_plik(const char* plik, char* bufor, uint32_t max_dlugosc) { return bws_wywolaj(5, (uint64_t)plik, (uint64_t)bufor, max_dlugosc) != 0; }
 bool wylistuj_katalog(const char* sciezka, char* bufor, uint32_t max_dlugosc) { return bws_wywolaj(6, (uint64_t)sciezka, (uint64_t)bufor, max_dlugosc) != 0; }
+
 // NOWE: Zaawansowane manipulacje na plikach (BWS-7 i BWS-8)
 bool usun_twor(const char* sciezka) { return bws_wywolaj(7, (uint64_t)sciezka) != 0; }
 bool zmien_nazwe_tworu(const char* sciezka, const char* nowa_nazwa) { return bws_wywolaj(8, (uint64_t)sciezka, (uint64_t)nowa_nazwa) != 0; }
+
+// NOWE: Odczyt czasu z plyty glownej (BWS-9)
+bool pobierz_czas_systemowy(char* bufor) { return bws_wywolaj(9, (uint64_t)bufor) != 0; }
 
 int strlen(const char* str) {
     int len = 0;
@@ -94,18 +95,15 @@ void pobierz_linie(char* bufor, int max_dlugosc) {
     while (true) {
         char c = getch();
         if (c == 0) continue; 
-
         if (c == '\n' || c == '\r') {
             bufor[pozycja] = '\0';
             break;
-        } 
-        else if (c == '\b') {
+        } else if (c == '\b') {
             if (pozycja > 0) {
                 pozycja--;
                 print("\b \b");
             }
-        } 
-        else if (pozycja < max_dlugosc - 1) {
+        } else if (pozycja < max_dlugosc - 1) {
             bufor[pozycja++] = c;
             char tmp[2] = {c, '\0'};
             print(tmp);
@@ -128,16 +126,9 @@ void formatuj_sciezke(const char* wejscie, char* wyjscie) {
 
 void int_do_str(int wartosc, char* bufor) {
     if (wartosc == 0) { bufor[0] = '0'; bufor[1] = '\0'; return; }
-    int i = 0;
-    char temp[16];
-    while (wartosc > 0) {
-        temp[i++] = (wartosc % 10) + '0';
-        wartosc /= 10;
-    }
-    int j = 0;
-    while (i > 0) {
-        bufor[j++] = temp[--i];
-    }
+    int i = 0; char temp[16];
+    while (wartosc > 0) { temp[i++] = (wartosc % 10) + '0'; wartosc /= 10; }
+    int j = 0; while (i > 0) { bufor[j++] = temp[--i]; }
     bufor[j] = '\0';
 }
 
@@ -147,12 +138,11 @@ int hist_ilosc = 0;
 // ---------------------------------------------------------
 // GŁÓWNA PĘTLA POWŁOKI (ENTRY POINT)
 // ---------------------------------------------------------
-
 extern "C" void _start() {
     print("\n");
     print("==================================================\n");
     print(" Bursztyn Shell v1.6 (Bursztyn OS Ring 3)\n");
-    print(" Wpisz 'pomoc', aby zobaczyc liste komend.\n");
+    print(" Wpisz 'pomoc', aby zobaczyć listę komend.\n");
     print("==================================================\n");
 
     char bufor_komendy[128];
@@ -178,6 +168,8 @@ extern "C" void _start() {
             print("  wersja        - wersja powloki i OS\n");
             print("  kto           - zalogowany uzytkownik\n");
             print("  historia      - ostatnie 5 polecen\n");
+            print("  pci           - sprawdza urzadzenia na plycie glownej\n");
+            print("  czas          - wyswietla aktualny czas z plyty glownej\n");
             print("  czysc         - czysci ekran terminala\n");
             print("--- KATEGORIA: PLIKI ---\n");
             print("  utworz        - nowy, pusty plik / katalog\n");
@@ -212,8 +204,27 @@ extern "C" void _start() {
                 print(numer); print(". "); print(historia[i]); print("\n");
             }
         }
+        else if (strcmp(bufor_komendy, "pci")) {
+            char buf[2048]; for(int i=0; i<2048; i++) buf[i] = 0; 
+            if (czytaj_plik("/logi/pci.txt", buf, 2047)) {
+                print("--- Raport Skanowania Magistrali PCI ---\n");
+                print(buf);
+            } else {
+                print("Blad: Brak raportu PCI w systemie plikow (Ring 0 nie przekazal logu).\n");
+            }
+        }
         else if (strcmp(bufor_komendy, "czysc")) {
             for(int i = 0; i < 40; i++) print("\n");
+        }
+        else if (strcmp(bufor_komendy, "czas")) {
+            char bufor_czasu[32];
+            if (pobierz_czas_systemowy(bufor_czasu)) {
+                print("Aktualny czas komputera (RTC): ");
+                print(bufor_czasu);
+                print("\n");
+            } else {
+                print("Blad: Jadro odrzucilo zadanie pobrania czasu.\n");
+            }
         }
         else if (strcmp(bufor_komendy, "losuj")) {
             uint64_t cykle = pobierz_cykle();
@@ -236,16 +247,13 @@ extern "C" void _start() {
         }
         else if (strncmp(bufor_komendy, "pliki", 5)) {
             char sciezka[64];
-            // Jeśli wpisano np. "pliki /programy", formatujemy ten fragment. Jeśli samo "pliki", używamy "/"
             if (bufor_komendy[5] == ' ' && bufor_komendy[6] != '\0') {
                 formatuj_sciezke(&bufor_komendy[6], sciezka);
             } else {
                 sciezka[0] = '/'; sciezka[1] = '\0';
             }
-
             char buf[512];
             for(int i=0; i<512; i++) buf[i] = 0;
-
             if (wylistuj_katalog(sciezka, buf, 511)) {
                 print("Zawartosc zrodla ("); print(sciezka); print("):\n");
                 print(buf);
@@ -255,8 +263,7 @@ extern "C" void _start() {
         }
         else if (strncmp(bufor_komendy, "czytaj ", 7)) {
             char sciezka[64]; formatuj_sciezke(&bufor_komendy[7], sciezka);
-            char buf[512]; for(int i=0; i<512; i++) buf[i] = 0; 
-            
+            char buf[512]; for(int i=0; i<512; i++) buf[i] = 0;              
             if (czytaj_plik(sciezka, buf, 511)) {
                 print("--- "); print(sciezka); print(" ---\n"); print(buf); print("\n");
             } else {
@@ -293,7 +300,6 @@ extern "C" void _start() {
             print("Sciezka do zmiany (np. /stary.txt): ");
             char stara[64]; pobierz_linie(stara, 64); print("\n");
             char bezp_stara[64]; formatuj_sciezke(stara, bezp_stara);
-
             print("Nowa nazwa (samo slowo, np. nowy.txt): ");
             char nowa[64]; pobierz_linie(nowa, 64); print("\n");
             

@@ -192,3 +192,4 @@ tablica_isr:
     .quad isr20, isr21, isr22, isr23, isr24, isr25, isr26, isr27, isr28, isr29
     .quad isr30, isr31, isr32, isr33, isr34, isr35, isr36, isr37, isr38, isr39
     .quad isr40, isr41, isr42, isr43, isr44, isr45, isr46, isr47
+    

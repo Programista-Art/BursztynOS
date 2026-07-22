@@ -70,7 +70,13 @@ cd D:\Bursztyn-OS\
 Będąc już w folderze, w którym leży plik BursztynOS.iso, odwołaj się do programu zainstalowanego na dysku C:. Skopiuj całą tę linijkę (z zachowaniem cudzysłowów) i wklej do konsoli:
 ```
 "C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom BursztynOS.iso -m 2G
+``` 
+## Jak uruchomić w power shell w QEMU na Windows 11
+Jeżeli masz pobrnay obraz iso w folderze na pustym miejscu kliknij prawym przyciskiem myszy i wybierz Otwórz w terminalu dalej wpisz to 
 ```
+& "C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom BursztynOS.iso -m 2G
+```
+
 ## Jeżeli są błędy przy uruchomieniu
 ### Błąd akceleracji (Hyper-V / WHPX)
 Jak to wygląda: failed to initialize WHPX: No accelerator found lub Could not initialize KVM.

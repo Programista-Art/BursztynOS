@@ -1,8 +1,7 @@
 #pragma once
 #include <stdint.h>
 
-
-struct CzasRTC {
+struct czas_rtc {
     uint8_t sekundy;
     uint8_t minuty;
     uint8_t godziny;
@@ -11,8 +10,6 @@ struct CzasRTC {
     uint32_t rok;
 };
 
-// Pobiera fizyczny czas ze sprzetowego ukladu CMOS plyty glownej
-void PobierzCzasRTC(CzasRTC* czas);
-
-// Tlumaczy strukture czasu na ladny tekst (np. "14:05:09") dla GUI
-void FormatujCzasDoStringa(const CzasRTC* czas, char* bufor);
+// Funkcje w stylu snake_case
+void pobierz_czas_rtc(czas_rtc* czas);
+void formatuj_czas_do_stringa(const czas_rtc* czas, char* bufor);
