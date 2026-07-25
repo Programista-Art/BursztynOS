@@ -21,7 +21,7 @@ static uint8_t bufor_wymiany_plikow[MAX_LOADER_BUF];
 
 // --- NOWOŚĆ: Przesunięcie partycji ---
 // Rozpoczynamy partycję plików ok. 5 MB w głąb dysku, by nie nadpisać tapety!
-#define BSP_START_LBA 10000 
+#define BSP_START_LBA 40000 
 
 // --- NOWOŚĆ: Synchronizacja z Dyskiem Fizycznym ---
 static void bsp_zapisz_zmiany() {

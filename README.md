@@ -10,7 +10,8 @@ System jest rozwijany z myślą o architekturze x86-64, implementując własne J
 
 # Programy w Bursztynie powłoka systemowa shell i prosty notatnik
 
-![alt](image/BursztynOS.png)
+![alt](image/BursztynOs1.png)
+![alt](image/BursztynOs2.png)
 
 
 
