@@ -23,11 +23,18 @@ header_start:
        które są w 100% obsługiwane przez QEMU (-vga std). 
        GRUB ma problem z "0" (dowolne) i może zignorować żądanie graficzne! */
     .align 8
+    .short 1
+    .short 0
+    .long 16
+    .long MULTIBOOT_TAG_TYPE_MEMORY_MAP
+    .long 8  
+    /* Znacznik nr 5: Wymuszenie sprzętowego trybu graficznego */ 
+    .align 8
     .short 5
     .short 0
     .long 20
-    .long 1024   /* Szerokość na sztywno */
-    .long 768    /* Wysokość na sztywno */
+    .long 1280   /* Szerokość na sztywno */
+    .long 720    /* Wysokość na sztywno */
     .long 32     /* Głębia kolorów (32 bity) */
 
     /* Znacznik nr 2: Prośba o mapę pamięci (Dla PMM) */

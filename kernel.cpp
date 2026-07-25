@@ -27,9 +27,12 @@ extern "C" uint64_t stack_top; // Wskaźnik na szczyt stosu zdefiniowany w boot.
 // Zmienna z PMM (Physical Memory Manager) określająca ilość pamięci RAM
 extern uint64_t najwyzsza_znaleziona_ramka; 
 
-// --- DEKLARACJA NASZEGO NOWEGO SKANERA PCI I GRAFIKI ---
+// --- POPRAWIONE DEKLARACJE ---
 extern "C" void skanuj_magistrale_pci();
-extern "C" void wczytaj_tapete_z_dysku();  // <--- TEJ LINIJKI BRAKOWAŁO!
+// Funkcja inicjalizuj_kontroler_ahci() ładuje się sama z pliku "ahci.h" powyżej!
+
+// Tapeta była zdefiniowana z extern "C" w grafika.cpp, więc musi tu zostać
+extern "C" void wczytaj_tapete_z_dysku();  
     
 // Zewnętrzne wywołania powłoki i operacji na plikach
 extern "C" bool usun_twor(const char* sciezka);
@@ -125,7 +128,6 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     WypiszLog("[BWS] API Wywolan Systemowych gotowe.");
 
     // 6. URUCHOMIENIE DYSKÓW FIZYCZNYCH (AHCI) I TAPETY
-    // Zwróć uwagę, że NIE skanujemy tu jeszcze PCI! Najpierw sprzęt dyskowy i grafika.
     inicjalizuj_kontroler_ahci();
     wczytaj_tapete_z_dysku();
 
@@ -151,12 +153,11 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     utworz_katalog("/sterowniki");
     utworz_katalog("/uzytkownicy");
     utworz_katalog("/ustawienia");
-    utworz_katalog("/logi");         // <-- Tu powstaje katalog /logi !!!
+    utworz_katalog("/logi");         
     utworz_katalog("/piaskownica");
     utworz_katalog("/tymczasowe");
 
     // 8. ODCZYT SPRZĘTU (PCI) I ZAPIS DO PLIKU
-    // DOPIERO TERAZ uruchamiamy skaner PCI, bo system plików żyje i ma folder /logi!
     skanuj_magistrale_pci();
 
     WypiszLog("--------------------------------------------------");

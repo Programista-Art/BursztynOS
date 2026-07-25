@@ -3,6 +3,9 @@
 #include "zegar-rtc.h"
 #include "ahci.h"
 
+// --- PODŁĄCZENIE NOWEJ, GŁADKIEJ CZCIONKI 8x16 ---
+#include "czcionki.h"
+
 // ==================== ZMIENNE GLOBALNE MATRYCY ====================
 static uint32_t* lfb = nullptr;
 static uint32_t  lfb_szerokosc = 0;
@@ -89,7 +92,6 @@ static inline void serial_outb(uint16_t port, uint8_t val) {
 void SerialLog(const char* str) {
     for(int i = 0; str[i] != '\0'; i++) serial_outb(0x3F8, str[i]);
 } 
-
 static void SerialLogHex(uint32_t val) {
     const char* hex = "0123456789ABCDEF";
     char buf[11] = "0x00000000";
@@ -97,48 +99,12 @@ static void SerialLogHex(uint32_t val) {
     SerialLog(buf);
 }
 
-// ==================== BITMAPY KURSORA I CZCIONEK ====================
+// ==================== BITMAPA KURSORA ====================
 static const uint8_t kursor_bitmapa[16][16] = {
     {1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0},{1,2,1,0,0,0,0,0,0,0,0,0,0,0,0,0},{1,2,2,1,0,0,0,0,0,0,0,0,0,0,0,0},{1,2,2,2,1,0,0,0,0,0,0,0,0,0,0,0},
     {1,2,2,2,2,1,0,0,0,0,0,0,0,0,0,0},{1,2,2,2,2,2,1,0,0,0,0,0,0,0,0,0},{1,2,2,2,2,2,2,1,0,0,0,0,0,0,0,0},{1,2,2,2,2,2,2,2,1,0,0,0,0,0,0,0},
     {1,2,2,2,2,2,2,2,2,1,0,0,0,0,0,0},{1,2,2,2,2,2,2,2,2,2,1,0,0,0,0,0},{1,2,2,2,2,2,2,1,1,1,1,1,0,0,0,0},{1,2,2,1,2,2,2,1,0,0,0,0,0,0,0,0},
     {1,2,1,0,1,2,2,2,1,0,0,0,0,0,0,0},{1,1,0,0,0,1,2,2,1,0,0,0,0,0,0,0},{0,0,0,0,0,0,1,2,2,1,0,0,0,0,0,0},{0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0}
-};
-
-static const uint8_t czcionka_pl_8x8[18][8] = {
-    {0x00,0x00,0x3C,0x06,0x3E,0x66,0x3E,0x0C}, {0x08,0x10,0x3C,0x60,0x60,0x66,0x3C,0x00}, {0x00,0x00,0x3E,0x66,0x7E,0x60,0x3C,0x0C}, 
-    {0x18,0x18,0x38,0x78,0x18,0x18,0x18,0x00}, {0x08,0x10,0x7C,0x66,0x66,0x66,0x66,0x00}, {0x08,0x10,0x3C,0x66,0x66,0x66,0x3C,0x00}, 
-    {0x08,0x10,0x3E,0x60,0x3C,0x06,0x7C,0x00}, {0x08,0x10,0x7E,0x0C,0x18,0x30,0x7E,0x00}, {0x00,0x18,0x7E,0x0C,0x18,0x30,0x7E,0x00}, 
-    {0x18,0x3C,0x66,0x7E,0x66,0x66,0x66,0x0C}, {0x08,0x10,0x3C,0x66,0x60,0x60,0x66,0x3C}, {0x7E,0x60,0x60,0x78,0x60,0x60,0x7E,0x0C}, 
-    {0x60,0x60,0x60,0x70,0x60,0x60,0x7E,0x00}, {0x08,0x10,0x66,0x76,0x7E,0x7E,0x6E,0x66}, {0x08,0x10,0x3C,0x66,0x66,0x66,0x66,0x3C}, 
-    {0x08,0x10,0x3C,0x66,0x60,0x3C,0x06,0x66}, {0x08,0x10,0x7E,0x06,0x0C,0x18,0x30,0x60}, {0x18,0x00,0x7E,0x06,0x0C,0x18,0x30,0x60}  
-};
-
-static const uint8_t czcionka_8x8[96][8] = {
-    {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},{0x18,0x3C,0x3C,0x18,0x18,0x00,0x18,0x00},{0x66,0x66,0x24,0x00,0x00,0x00,0x00,0x00},{0x6C,0x6C,0xFE,0x6C,0xFE,0x6C,0x6C,0x00},
-    {0x18,0x3E,0x60,0x3C,0x06,0x7C,0x18,0x00},{0x00,0x66,0x6C,0x18,0x36,0x66,0x00,0x00},{0x38,0x6C,0x6C,0x38,0x6D,0x66,0x3B,0x00},{0x18,0x18,0x30,0x00,0x00,0x00,0x00,0x00},
-    {0x0C,0x18,0x30,0x30,0x30,0x18,0x0C,0x00},{0x30,0x18,0x0C,0x0C,0x0C,0x18,0x30,0x00},{0x00,0x66,0x3C,0xFF,0x3C,0x66,0x00,0x00},{0x00,0x18,0x18,0x7E,0x18,0x18,0x00,0x00},
-    {0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x30},{0x00,0x00,0x00,0x7E,0x00,0x00,0x00,0x00},{0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x00},{0x06,0x0C,0x18,0x30,0x60,0xC0,0x80,0x00},
-    {0x3C,0x66,0x6E,0x76,0x66,0x66,0x3C,0x00},{0x18,0x38,0x18,0x18,0x18,0x18,0x7E,0x00},{0x3C,0x66,0x06,0x0C,0x30,0x60,0x7E,0x00},{0x3C,0x66,0x06,0x1C,0x06,0x66,0x3C,0x00},
-    {0x1C,0x3C,0x6C,0xCC,0xFE,0x0C,0x0C,0x00},{0x7E,0x60,0x7C,0x06,0x06,0x66,0x3C,0x00},{0x3C,0x66,0x60,0x7C,0x66,0x66,0x3C,0x00},{0x7E,0x66,0x0C,0x18,0x30,0x30,0x30,0x00},
-    {0x3C,0x66,0x66,0x3C,0x66,0x66,0x3C,0x00},{0x3C,0x66,0x66,0x3E,0x06,0x66,0x3C,0x00},{0x00,0x18,0x18,0x00,0x00,0x18,0x18,0x00},{0x00,0x18,0x18,0x00,0x00,0x18,0x18,0x30},
-    {0x0C,0x18,0x30,0x60,0x30,0x18,0x0C,0x00},{0x00,0x00,0x7E,0x00,0x7E,0x00,0x00,0x00},{0x30,0x18,0x0C,0x06,0x0C,0x18,0x30,0x00},{0x3C,0x66,0x06,0x0C,0x18,0x00,0x18,0x00},
-    {0x3C,0x66,0x6E,0x6E,0x60,0x66,0x3C,0x00},{0x18,0x3C,0x66,0x7E,0x66,0x66,0x66,0x00},{0x7C,0x66,0x66,0x7C,0x66,0x66,0x7C,0x00},{0x3C,0x66,0x60,0x60,0x60,0x66,0x3C,0x00},
-    {0x78,0x6C,0x66,0x66,0x66,0x6C,0x78,0x00},{0x7E,0x60,0x60,0x78,0x60,0x60,0x7E,0x00},{0x7E,0x60,0x60,0x78,0x60,0x60,0x60,0x00},{0x3C,0x66,0x60,0x6E,0x66,0x66,0x3E,0x00},
-    {0x66,0x66,0x66,0x7E,0x66,0x66,0x66,0x00},{0x3E,0x18,0x18,0x18,0x18,0x18,0x3E,0x00},{0x06,0x06,0x06,0x06,0x06,0x66,0x3C,0x00},{0x66,0x6C,0x78,0x70,0x78,0x6C,0x66,0x00},
-    {0x60,0x60,0x60,0x60,0x60,0x60,0x7E,0x00},{0x63,0x77,0x7F,0x6B,0x63,0x63,0x63,0x00},{0x66,0x76,0x7E,0x7E,0x6E,0x66,0x66,0x00},{0x3C,0x66,0x66,0x66,0x66,0x66,0x3C,0x00},
-    {0x7C,0x66,0x66,0x7C,0x60,0x60,0x60,0x00},{0x3C,0x66,0x66,0x66,0x6A,0x6C,0x36,0x00},{0x7C,0x66,0x66,0x7C,0x6C,0x66,0x66,0x00},{0x3C,0x66,0x60,0x3C,0x06,0x66,0x3C,0x00},
-    {0x7E,0x18,0x18,0x18,0x18,0x18,0x18,0x00},{0x66,0x66,0x66,0x66,0x66,0x66,0x3C,0x00},{0x66,0x66,0x66,0x66,0x66,0x3C,0x18,0x00},{0x63,0x63,0x6B,0x7F,0x77,0x63,0x63,0x00},
-    {0x66,0x66,0x3C,0x18,0x3C,0x66,0x66,0x00},{0x66,0x66,0x66,0x3C,0x18,0x18,0x18,0x00},{0x7E,0x06,0x0C,0x18,0x30,0x60,0x7E,0x00},{0x3C,0x30,0x30,0x30,0x30,0x30,0x3C,0x00},
-    {0x80,0xC0,0x60,0x30,0x18,0x0C,0x06,0x00},{0x3C,0x0C,0x0C,0x0C,0x0C,0x0C,0x3C,0x00},{0x18,0x3C,0x66,0x00,0x00,0x00,0x00,0x00},{0x00,0x00,0x00,0x00,0x00,0x00,0xFF,0x00},
-    {0x60,0x30,0x18,0x00,0x00,0x00,0x00,0x00},{0x00,0x00,0x3C,0x06,0x3E,0x66,0x3E,0x00},{0x60,0x60,0x7C,0x66,0x66,0x66,0x7C,0x00},{0x00,0x00,0x3C,0x60,0x60,0x66,0x3C,0x00},
-    {0x06,0x06,0x3E,0x66,0x66,0x66,0x3E,0x00},{0x00,0x00,0x3C,0x66,0x7E,0x60,0x3C,0x00},{0x1C,0x30,0x7C,0x30,0x30,0x30,0x30,0x00},{0x00,0x00,0x3E,0x66,0x66,0x3E,0x06,0x3C},
-    {0x60,0x60,0x7C,0x66,0x66,0x66,0x66,0x00},{0x18,0x00,0x38,0x18,0x18,0x18,0x3C,0x00},{0x18,0x00,0x38,0x18,0x18,0x18,0x18,0x70},{0x60,0x60,0x66,0x6C,0x78,0x6C,0x66,0x00},
-    {0x38,0x18,0x18,0x18,0x18,0x18,0x3C,0x00},{0x00,0x00,0x6C,0xFE,0xD6,0xD6,0xC6,0x00},{0x00,0x00,0x7C,0x66,0x66,0x66,0x66,0x00},{0x00,0x00,0x3C,0x66,0x66,0x66,0x3C,0x00},
-    {0x00,0x00,0x7C,0x66,0x66,0x7C,0x60,0x60},{0x00,0x00,0x3E,0x66,0x66,0x3E,0x06,0x06},{0x00,0x00,0x7C,0x66,0x60,0x60,0x60,0x00},{0x00,0x00,0x3E,0x60,0x3C,0x06,0x7C,0x00},
-    {0x30,0x30,0x7C,0x30,0x30,0x34,0x18,0x00},{0x00,0x00,0x66,0x66,0x66,0x66,0x3E,0x00},{0x00,0x00,0x66,0x66,0x66,0x3C,0x18,0x00},{0x00,0x00,0xC6,0xD6,0xFE,0x6C,0x6C,0x00},
-    {0x00,0x00,0x66,0x3C,0x18,0x3C,0x66,0x00},{0x00,0x00,0x66,0x66,0x66,0x3E,0x06,0x3C},{0x00,0x00,0x7E,0x0C,0x18,0x30,0x7E,0x00},{0x0E,0x18,0x18,0x70,0x18,0x18,0x0E,0x00},
-    {0x18,0x18,0x18,0x00,0x18,0x18,0x18,0x00},{0x70,0x18,0x18,0x0E,0x18,0x18,0x70,0x00},{0x3B,0x6E,0x00,0x00,0x00,0x00,0x00,0x00},{0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}
 };
 
 // ==================== ZEWNĘTRZNE API LOGOWANIA ====================
@@ -226,29 +192,24 @@ void RysujProstokat(int px, int py, int szer, int wys, uint32_t kolor) {
     }
 }
 
-void RysujZnak(char c, int px, int py, uint32_t kolor_tekstu, uint32_t kolor_tla, bool przezroczyste_tlo, int skala) {
-    const uint8_t* znak = nullptr; 
-    uint8_t kod = (uint8_t)c;
+// --- ZMODYFIKOWANY DEKODER UNICODE: Rozsunięcie liter (Kerning 9px)! ---
+void RysujZnak(uint32_t unicode, int px, int py, uint32_t kolor_tekstu, uint32_t kolor_tla, bool przezroczyste_tlo, int skala) {
+    const uint8_t* glyph = PobierzZnakPL(unicode);
     
-    if (kod >= 32 && kod <= 126) {
-        znak = czcionka_8x8[kod - 32];
-    } else {
-        int pl_idx = -1;
-        switch(kod) {
-            case 0xB9: pl_idx = 0; break; case 0xE6: pl_idx = 1; break; case 0xEA: pl_idx = 2; break;
-            case 0xB3: pl_idx = 3; break; case 0xF1: pl_idx = 4; break; case 0xF3: pl_idx = 5; break;
-            case 0x9C: pl_idx = 6; break; case 0x9F: pl_idx = 7; break; case 0xBF: pl_idx = 8; break;
-            case 0xA5: pl_idx = 9; break; case 0xC6: pl_idx = 10; break; case 0xCA: pl_idx = 11; break;
-            case 0xA3: pl_idx = 12; break; case 0xD1: pl_idx = 13; break; case 0xD3: pl_idx = 14; break;
-            case 0x8C: pl_idx = 15; break; case 0x8F: pl_idx = 16; break; case 0xAF: pl_idx = 17; break;
+    if (!glyph) {
+        if (unicode >= 32 && unicode <= 126) {
+            glyph = czcionka_ascii_8x16[unicode - 32];
+        } else {
+            glyph = czcionka_ascii_8x16[0]; 
         }
-        if (pl_idx != -1) znak = czcionka_pl_8x8[pl_idx];
-        else znak = czcionka_8x8['?' - 32];
     }
 
-    for(int y = 0; y < 8; y++) {
-        for(int x = 0; x < 8; x++) {
-            bool zmaluj = znak[y] & (1 << (7 - x));
+    // 1 PIKSEL ODSTĘPU DLA ZWIĘKSZONEJ CZYTELNOŚCI WYRAZÓW
+    for(int y = 0; y < 16; y++) {
+        for(int x = 0; x < 9; x++) { 
+            bool zmaluj = false;
+            if (x < 8) zmaluj = glyph[y] & (1 << (7 - x));
+            
             if(zmaluj) {
                 for(int sy=0; sy<skala; sy++)
                     for(int sx=0; sx<skala; sx++)
@@ -264,13 +225,23 @@ void RysujZnak(char c, int px, int py, uint32_t kolor_tekstu, uint32_t kolor_tla
 
 void WypiszTekst(const char* tekst, int px, int py, uint32_t kolor_tekstu, int skala) {
     int start_x = px;
-    for(int i = 0; tekst[i] != '\0'; i++) {
-        RysujZnak(tekst[i], start_x, py, kolor_tekstu, 0, true, skala);
-        start_x += 8 * skala;
+    int i = 0;
+    while (tekst[i] != '\0') {
+        uint32_t unicode = (uint8_t)tekst[i];
+        
+        if ((tekst[i] & 0xE0) == 0xC0 && tekst[i+1] != '\0') {
+            uint8_t b1 = (uint8_t)tekst[i];
+            uint8_t b2 = (uint8_t)tekst[i+1];
+            unicode = ((b1 & 0x1F) << 6) | (b2 & 0x3F);
+            i++; 
+        }
+        
+        RysujZnak(unicode, start_x, py, kolor_tekstu, 0, true, skala);
+        start_x += 9 * skala; 
+        i++;
     }
 }
 
-// Funkcja filtrowania menu
 static bool ZawieraTekst(const char* pelny_tekst, const char* szukany) {
     if (szukany[0] == '\0') return true; 
     for (int i = 0; pelny_tekst[i] != '\0'; i++) {
@@ -295,9 +266,9 @@ void rysuj_zegar_rtc() {
     formatuj_czas_do_stringa(&czas, bufor_czasu);
     
     int zegar_x = lfb_szerokosc - 150;
-    int zegar_y = lfb_wysokosc - 28;
+    int zegar_y = lfb_wysokosc - 32;
     
-    RysujProstokat(zegar_x, zegar_y - 7, 140, 24, 0x00280F00); 
+    RysujProstokat(zegar_x, zegar_y - 3, 140, 32, 0x00280F00); 
     WypiszTekst(bufor_czasu, zegar_x, zegar_y, 0x00FFBF00, 2);
 }
 
@@ -312,11 +283,11 @@ void RysujMenu() {
     RysujProstokat(menu_x + 2, menu_y + 2, menu_szer - 4, menu_wys - 4, 0x001A0B00); 
 
     RysujProstokat(menu_x + 10, menu_y + 10, menu_szer - 20, 36, 0x00280F00); 
-    WypiszTekst("Szukaj:", menu_x + 16, menu_y + 20, 0x008A5A00, 2);
-    WypiszTekst(menu_szukaj, menu_x + 130, menu_y + 20, 0x00D1D5DB, 2);
+    WypiszTekst("Szukaj:", menu_x + 16, menu_y + 12, 0x008A5A00, 1);
+    WypiszTekst(menu_szukaj, menu_x + 130, menu_y + 12, 0x00D1D5DB, 1);
     
     if (menu_otwarte) {
-        RysujProstokat(menu_x + 130 + (menu_szukaj_len * 16), menu_y + 34, 12, 2, 0x00FFBF00);
+        RysujProstokat(menu_x + 130 + (menu_szukaj_len * 9), menu_y + 28, 9, 2, 0x00FFBF00);
     }
     RysujProstokat(menu_x + 10, menu_y + 60, menu_szer - 20, 2, 0x008A5A00); 
 
@@ -325,8 +296,8 @@ void RysujMenu() {
         if (ZawieraTekst(menu_aplikacje[i].nazwa, menu_szukaj)) {
             aktualne_menu_y[i] = rysuj_y; 
             RysujProstokat(menu_x + 10, rysuj_y, menu_szer - 20, 40, 0x00280F00); 
-            WypiszTekst("> ", menu_x + 20, rysuj_y + 12, 0x00FFBF00, 2);
-            WypiszTekst(menu_aplikacje[i].nazwa, menu_x + 50, rysuj_y + 12, 0x00FFBF00, 2);
+            WypiszTekst("> ", menu_x + 20, rysuj_y + 12, 0x00FFBF00, 1);
+            WypiszTekst(menu_aplikacje[i].nazwa, menu_x + 50, rysuj_y + 12, 0x00FFBF00, 1);
             rysuj_y += 50; 
         } else {
             aktualne_menu_y[i] = -1; 
@@ -345,46 +316,68 @@ void RysujOkno(int id) {
 
     RysujProstokat(px, py, szer, wys, 0x008A5A00);             
     RysujProstokat(px + 2, py + 2, szer - 4, 24, kolor_paska);  
-    WypiszTekst(okna[id].tytul, px + 8, py + 6, kolor_tekstu_paska, 2);         
+    WypiszTekst(okna[id].tytul, px + 8, py + 4, kolor_tekstu_paska, 1);         
     
     RysujProstokat(px + szer - 74, py + 4, 20, 20, 0x00E58A00); 
-    WypiszTekst("-", px + szer - 70, py + 6, 0x001A0B00, 2);
+    WypiszTekst("-", px + szer - 70, py + 6, 0x001A0B00, 1);
     RysujProstokat(px + szer - 50, py + 4, 20, 20, 0x00E58A00); 
-    WypiszTekst(okna[id].zmaksymalizowane ? "v" : "^", px + szer - 46, py + 6, 0x001A0B00, 2);
+    WypiszTekst(okna[id].zmaksymalizowane ? "v" : "^", px + szer - 46, py + 6, 0x001A0B00, 1);
     RysujProstokat(px + szer - 26, py + 4, 20, 20, 0x00AA0000); 
-    WypiszTekst("X", px + szer - 22, py + 6, 0x00FFFFFF, 2);
+    WypiszTekst("X", px + szer - 22, py + 6, 0x00FFFFFF, 1);
 
     RysujProstokat(px + 2, py + 28, szer - 4, wys - 30, okna[id].kolor_tla); 
 }
 
 void RysujZawartoscTerminala(int px, int py, int szer, int wys) {
-    int skala = 1; int wysokosc_linii = 12; int start_x = px + 6; int start_y = py + 28 + 4;
+    int skala = 1; int wysokosc_linii = 16 * skala; 
+    int start_x = px + 6; int start_y = py + 28 + 4;
+    
     for (int r = 0; r < term_max_r; r++) {
         int cx = start_x; int cy = start_y + (r * wysokosc_linii);
         if (cy + wysokosc_linii >= py + wys) break;
+        
         for (int c = 0; c < term_max_c; c++) {
             char z = term_buf[r][c].znak;
+            uint32_t kolor = term_buf[r][c].kolor;
+            
             if (z != 0) { 
-                if (cx + 8*skala >= px + szer - 6) break; 
-                RysujZnak(z, cx, cy, term_buf[r][c].kolor, 0, true, skala); 
+                uint32_t unicode = (uint8_t)z;
+                if ((z & 0xE0) == 0xC0 && c + 1 < term_max_c && term_buf[r][c+1].znak != 0) {
+                    uint8_t z2 = (uint8_t)term_buf[r][c+1].znak;
+                    unicode = ((unicode & 0x1F) << 6) | (z2 & 0x3F);
+                    c++; 
+                }
+                if (cx + 9*skala >= px + szer - 6) break; 
+                RysujZnak(unicode, cx, cy, kolor, 0, true, skala); 
             }
-            cx += 8 * skala;
+            cx += 9 * skala;
         }
     }
 }
 
 void RysujZawartoscEdytora(int px, int py, int szer, int wys) {
-    int skala = 1; int wysokosc_linii = 12; int start_x = px + 6; int start_y = py + 28 + 4;
+    int skala = 1; int wysokosc_linii = 16 * skala; 
+    int start_x = px + 6; int start_y = py + 28 + 4;
+    
     for (int r = 0; r < edit_max_r; r++) {
         int cx = start_x; int cy = start_y + (r * wysokosc_linii);
         if (cy + wysokosc_linii >= py + wys) break;
+        
         for (int c = 0; c < edit_max_c; c++) {
             char z = edit_buf[r][c].znak;
+            uint32_t kolor = edit_buf[r][c].kolor;
+            
             if (z != 0) { 
-                if (cx + 8*skala >= px + szer - 6) break; 
-                RysujZnak(z, cx, cy, edit_buf[r][c].kolor, 0, true, skala); 
+                uint32_t unicode = (uint8_t)z;
+                if ((z & 0xE0) == 0xC0 && c + 1 < edit_max_c && edit_buf[r][c+1].znak != 0) {
+                    uint8_t z2 = (uint8_t)edit_buf[r][c+1].znak;
+                    unicode = ((unicode & 0x1F) << 6) | (z2 & 0x3F);
+                    c++; 
+                }
+                if (cx + 9*skala >= px + szer - 6) break; 
+                RysujZnak(unicode, cx, cy, kolor, 0, true, skala); 
             }
-            cx += 8 * skala;
+            cx += 9 * skala;
         }
     }
 }
@@ -393,7 +386,14 @@ void RysujZawartoscEdytora(int px, int py, int szer, int wys) {
 void DopiszZnakDoEdytora(char c) {
     if (c == '\n' || c == '\r') { edit_r++; edit_c = 0; }
     else if (c == '\b') {
-        if (edit_c > 0) { edit_c--; edit_buf[edit_r][edit_c].znak = 0; } 
+        if (edit_c > 0) { 
+            edit_c--; 
+            edit_buf[edit_r][edit_c].znak = 0; 
+            if (edit_c > 0 && (edit_buf[edit_r][edit_c-1].znak & 0xE0) == 0xC0) {
+                edit_c--;
+                edit_buf[edit_r][edit_c].znak = 0;
+            }
+        } 
         else if (edit_r > 0) {
             edit_r--; edit_c = edit_max_c - 1;
             while(edit_c > 0 && edit_buf[edit_r][edit_c].znak == 0) edit_c--;
@@ -420,7 +420,16 @@ void DopiszDoBufora(const char* tekst, uint32_t kolor) {
     for(int i = 0; tekst[i] != '\0'; i++) {
         if (tekst[i] == '\n') { term_r++; term_c = 0; }
         else if (tekst[i] == '\r') { term_c = 0; }
-        else if (tekst[i] == '\b') { if (term_c > 0) { term_c--; term_buf[term_r][term_c].znak = 0; } }
+        else if (tekst[i] == '\b') { 
+            if (term_c > 0) { 
+                term_c--; 
+                term_buf[term_r][term_c].znak = 0; 
+                if (term_c > 0 && (term_buf[term_r][term_c-1].znak & 0xE0) == 0xC0) {
+                    term_c--;
+                    term_buf[term_r][term_c].znak = 0;
+                }
+            } 
+        }
         else {
             term_buf[term_r][term_c].znak = tekst[i]; 
             term_buf[term_r][term_c].kolor = kolor; 
@@ -453,7 +462,6 @@ void WypiszLog(const char* tekst) {
 void OdswiezEkran() {
     if(!backbuffer) return;
     
-    // Rysowanie wczytanej tapety zamiast sztywnego tła!
     if (tapeta_zaladowana && bufor_tapety) {
         uint32_t* dst = (uint32_t*)backbuffer;
         uint32_t* src = bufor_tapety;
@@ -465,7 +473,6 @@ void OdswiezEkran() {
         RysujProstokat(0, 0, lfb_szerokosc, lfb_wysokosc, 0x001A0B00);
     }
     
-    // Rysowanie okien
     for(int k = 0; k < 2; k++) {
         int i = z_order[k];
         if (!okna[i].widoczne) continue;
@@ -476,17 +483,16 @@ void OdswiezEkran() {
             RysujZawartoscTerminala(okna[0].x, okna[0].y, okna[0].szer, okna[0].wys);
         } else if (i == 1) {
             RysujZawartoscEdytora(okna[1].x, okna[1].y, okna[1].szer, okna[1].wys);
-            if (z_order[1] == 1) { // Rysuj kursor
-                int cx = okna[1].x + 6 + (edit_c * 8);
-                int cy = okna[1].y + 28 + 4 + (edit_r * 12);
-                if (cy + 10 < (int)(okna[1].y + okna[1].wys) && cx + 8 < (int)(okna[1].x + okna[1].szer)) {
-                    RysujProstokat(cx, cy + 10, 8, 2, 0x00FFBF00); 
+            if (z_order[1] == 1) { 
+                int cx = okna[1].x + 6 + (edit_c * 9);
+                int cy = okna[1].y + 28 + 4 + (edit_r * 16); 
+                if (cy + 14 < (int)(okna[1].y + okna[1].wys) && cx + 9 < (int)(okna[1].x + okna[1].szer)) {
+                    RysujProstokat(cx, cy + 14, 9, 2, 0x00FFBF00); 
                 }
             }
         }
     }
 
-    // Pasek zadań
     if (lfb_wysokosc >= 40) {
         RysujProstokat(0, lfb_wysokosc - 40, lfb_szerokosc, 40, 0x00280F00); 
         RysujProstokat(0, lfb_wysokosc - 40, lfb_szerokosc, 2, 0x008A5A00);  
@@ -494,7 +500,7 @@ void OdswiezEkran() {
         uint32_t kolor_menu_btn = menu_otwarte ? 0x00E58A00 : 0x001A0B00;
         uint32_t kolor_menu_txt = menu_otwarte ? 0x001A0B00 : 0x00FFBF00;
         RysujProstokat(0, lfb_wysokosc - 38, 120, 38, kolor_menu_btn);
-        WypiszTekst("Menu", 28, lfb_wysokosc - 28, kolor_menu_txt, 2);
+        WypiszTekst("Menu", 28, lfb_wysokosc - 28, kolor_menu_txt, 1);
         
         int taskbar_x = 130;
         for (int i = 0; i < 2; i++) {
@@ -505,7 +511,7 @@ void OdswiezEkran() {
             else if (z_order[1] == i && !menu_otwarte) { kolor_btn = 0x00E58A00; kolor_tekstu_btn = 0x001A0B00; }
             
             RysujProstokat(taskbar_x, lfb_wysokosc - 35, 180, 30, kolor_btn);
-            WypiszTekst(okna[i].krotka_nazwa, taskbar_x + 10, lfb_wysokosc - 28, kolor_tekstu_btn, 2);
+            WypiszTekst(okna[i].krotka_nazwa, taskbar_x + 10, lfb_wysokosc - 28, kolor_tekstu_btn, 1);
             taskbar_x += 190;
         }
 
@@ -681,13 +687,13 @@ extern "C" void zaktualizuj_mysze(int dx, int dy, uint8_t przyciski) {
                                 okna[i].zmaksymalizowane = false;
                             }
                             if (i == 0) {
-                                term_max_c = (okna[0].szer - 12) / 8;
-                                term_max_r = (okna[0].wys - 36) / 12;
+                                term_max_c = (okna[0].szer - 12) / 9;
+                                term_max_r = (okna[0].wys - 36) / 16; 
                                 if (term_max_c > MAX_COLS) term_max_c = MAX_COLS;
                                 if (term_max_r > MAX_ROWS) term_max_r = MAX_ROWS;
                             } else if (i == 1) {
-                                edit_max_c = (okna[1].szer - 12) / 8;
-                                edit_max_r = (okna[1].wys - 36) / 12;
+                                edit_max_c = (okna[1].szer - 12) / 9;
+                                edit_max_r = (okna[1].wys - 36) / 16; 
                                 if (edit_max_c > MAX_COLS) edit_max_c = MAX_COLS;
                                 if (edit_max_r > MAX_ROWS) edit_max_r = MAX_ROWS;
                             }
@@ -727,11 +733,10 @@ extern "C" void* PobierzAktualnePML4();
 
 // ==================== ZALADOWANIE BMP (AHCI) ====================
 extern "C" void wczytaj_tapete_z_dysku() {
-    // NAPRAWA: Zmieniliśmy ciche logowanie do ukrytego COM1 na oficjalną terminalową funkcję WypiszLog!
     WypiszLog("[GRAFIKA] Proba wczytania tapeta.bmp z dysku AHCI (LBA 10)...");
 
     uint64_t vaddr_raw = 0x91000000ULL;
-    for(uint64_t i = 0; i < 3 * 1024 * 1024; i += 4096) ZmapujStrone((void*)(vaddr_raw + i), ZaalokujRamke(), 0b11);
+    for(uint64_t i = 0; i < 32 * 1024 * 1024; i += 4096) ZmapujStrone((void*)(vaddr_raw + i), ZaalokujRamke(), 0b11);
     asm volatile("mov %0, %%cr3" : : "r"(PobierzAktualnePML4()) : "memory");
     uint8_t* raw_bmp = (uint8_t*)vaddr_raw;
 
@@ -747,20 +752,21 @@ extern "C" void wczytaj_tapete_z_dysku() {
 
     uint32_t rozmiar_pliku = *(uint32_t*)(&raw_bmp[2]);
     uint32_t sektory_do_odczytu = (rozmiar_pliku + 511) / 512;
-    if (sektory_do_odczytu > (3 * 1024 * 1024 / 512)) sektory_do_odczytu = (3 * 1024 * 1024 / 512);
+    if (sektory_do_odczytu > (32 * 1024 * 1024 / 512)) sektory_do_odczytu = (32 * 1024 * 1024 / 512);
 
-    WypiszLog("[GRAFIKA] Pobieranie surowych danych z dysku DMA (do 3 MB)...");
+    WypiszLog("[GRAFIKA] Pobieranie surowych danych z dysku DMA...");
 
     uint32_t lba = 10;
     uint32_t przeczytane = 0;
     while (przeczytane < sektory_do_odczytu) {
         uint32_t paczka = sektory_do_odczytu - przeczytane;
         if (paczka > 32) paczka = 32;
-         // Jeśli AHCI zgłosi błąd/timeout, całkowicie przerywamy proces!
+        
         if (!czytaj_z_glownego_dysku_ahci(lba, paczka, raw_bmp + (przeczytane * 512))) {
             WypiszLog("[GRAFIKA] Zatrzymano ladowanie tapety - sterownik dysku AHCI zgubil dane!");
             return;
         }
+        
         lba += paczka; przeczytane += paczka;
     }
 
@@ -769,7 +775,6 @@ extern "C" void wczytaj_tapete_z_dysku() {
     int32_t bmp_wysokosc = *(int32_t*)(&raw_bmp[22]);
     uint16_t bmp_bpp = *(uint16_t*)(&raw_bmp[28]);
 
-    // Zabezpieczenie przed ujemną wysokością w nowoczesnych Bitmapach (Top-Down)
     bool rysuj_od_gory = false;
     if (bmp_wysokosc < 0) {
         bmp_wysokosc = -bmp_wysokosc;
@@ -782,16 +787,32 @@ extern "C" void wczytaj_tapete_z_dysku() {
     }
 
     uint64_t vaddr_tapeta = 0x90000000ULL;
-    uint64_t waga_tapety = (uint64_t)lfb_szerokosc * (uint64_t)lfb_wysokosc * 4;
-    for(uint64_t i = 0; i < waga_tapety; i += 4096) ZmapujStrone((void*)(vaddr_tapeta + i), ZaalokujRamke(), 0b11);
+    uint64_t waga_tapety_bajty = (uint64_t)lfb_szerokosc * (uint64_t)lfb_wysokosc * 4;
+    for(uint64_t i = 0; i < waga_tapety_bajty; i += 4096) ZmapujStrone((void*)(vaddr_tapeta + i), ZaalokujRamke(), 0b11);
     asm volatile("mov %0, %%cr3" : : "r"(PobierzAktualnePML4()) : "memory");
     bufor_tapety = (uint32_t*)vaddr_tapeta;
 
-    WypiszLog("[GRAFIKA] Przetwarzanie i transkodowanie pikseli (ARGB/RGB)...");
+    WypiszLog("[GRAFIKA] Centrowanie tapety na pulpicie...");
+
+    // --- NOWOŚĆ: Malowanie tła całego ekranu! ---
+    uint64_t ilosc_pikseli_ekranu = lfb_szerokosc * lfb_wysokosc;
+    for(uint64_t i = 0; i < ilosc_pikseli_ekranu; i++) {
+        bufor_tapety[i] = 0x000A0500; // Elegancki, bardzo ciemny bursztynowy kolor tła
+    }
+
+    // --- NOWOŚĆ: Wyliczanie matematycznego środka ekranu ---
+    int offset_x = ((int)lfb_szerokosc - (int)bmp_szerokosc) / 2;
+    int offset_y = ((int)lfb_wysokosc - (int)bmp_wysokosc) / 2;
+    if (offset_x < 0) offset_x = 0;
+    if (offset_y < 0) offset_y = 0;
 
     for (int y = 0; y < bmp_wysokosc; y++) {
         for (int x = 0; x < bmp_szerokosc; x++) {
-            if (x >= (int)lfb_szerokosc || y >= (int)lfb_wysokosc) continue;
+            int docelowy_x = offset_x + x;
+            int docelowy_y = offset_y + y;
+            
+            // Zabezpieczenie przed wyjściem poza ekran
+            if (docelowy_x >= (int)lfb_szerokosc || docelowy_y >= (int)lfb_wysokosc) continue;
             
             int d_y = rysuj_od_gory ? y : (bmp_wysokosc - 1 - y);
             int rzad_bajtow = ((bmp_szerokosc * bmp_bpp) + 31) / 32 * 4;
@@ -799,12 +820,14 @@ extern "C" void wczytaj_tapete_z_dysku() {
             
             uint32_t kolor = 0;
             if (bmp_bpp == 24 || bmp_bpp == 32) kolor = (piksel[2] << 16) | (piksel[1] << 8) | piksel[0]; 
-            bufor_tapety[y * lfb_szerokosc + x] = kolor;
+            
+            // Zapisz piksel do wycentrowanej pamięci!
+            bufor_tapety[docelowy_y * lfb_szerokosc + docelowy_x] = kolor;
         }
     }
 
     tapeta_zaladowana = true;
-    WypiszLog("[GRAFIKA] Tapeta dekodowana pomyslnie! Ladowanie na Pulpit...");
+    WypiszLog("[GRAFIKA] Pulpit i tapeta gotowe!");
     OdswiezEkran(); 
     PrzeniesNaEkran();
 }
@@ -853,12 +876,12 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
         if (okna[1].y + okna[1].wys > lfb_wysokosc - 40) okna[1].wys = lfb_wysokosc - okna[1].y - 40;
         OgraniczOkno(okna[0]); OgraniczOkno(okna[1]);
         
-        term_max_c = (okna[0].szer - 12) / 8;
-        term_max_r = (okna[0].wys - 36) / 12;
+        term_max_c = (okna[0].szer - 12) / 9;
+        term_max_r = (okna[0].wys - 36) / 16; 
         if (term_max_c > MAX_COLS) term_max_c = MAX_COLS;
         if (term_max_r > MAX_ROWS) term_max_r = MAX_ROWS;
-        edit_max_c = (okna[1].szer - 12) / 8;
-        edit_max_r = (okna[1].wys - 36) / 12;
+        edit_max_c = (okna[1].szer - 12) / 9;
+        edit_max_r = (okna[1].wys - 36) / 16; 
         if (edit_max_c > MAX_COLS) edit_max_c = MAX_COLS;
         if (edit_max_r > MAX_ROWS) edit_max_r = MAX_ROWS;
         
@@ -895,8 +918,8 @@ extern "C" void obsluga_przerwania_zegara() {
         
         rysuj_zegar_rtc();
         int zegar_x = lfb_szerokosc - 150;
-        int zegar_y = lfb_wysokosc - 28;
-        PrzeniesFragmentNaEkran(zegar_x, zegar_y - 7, 140, 24);
+        int zegar_y = lfb_wysokosc - 32; 
+        PrzeniesFragmentNaEkran(zegar_x, zegar_y - 3, 140, 32);
         
         if (kursor_byl) PokazKursor();
     }
