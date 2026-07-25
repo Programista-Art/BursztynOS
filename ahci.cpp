@@ -10,8 +10,26 @@
 // Funkcje dostarczane przez inne części Jądra Bursztyna
 extern "C" uint32_t pci_odczytaj_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset);
 extern void WypiszLog(const char* tekst);
-void ZlaczStringi(char* cel, const char* str1, const char* str2, const char* str3);
-void UIntToStr(uint64_t wartosc, char* bufor);
+
+// Lokalne implementacje funkcji tekstowych -
+static void ZlaczStringi(char* cel, const char* str1, const char* str2, const char* str3) {
+    int i = 0, j = 0;
+    while(str1 && str1[j] != '\0') { cel[i++] = str1[j++]; }
+    j = 0;
+    while(str2 && str2[j] != '\0') { cel[i++] = str2[j++]; }
+    j = 0;
+    while(str3 && str3[j] != '\0') { cel[i++] = str3[j++]; }
+    cel[i] = '\0';
+}
+
+
+static void UIntToStr(uint64_t wartosc, char* bufor) {
+    if (wartosc == 0) { bufor[0] = '0'; bufor[1] = '\0'; return; }
+    int i = 0; char temp[32];
+    while (wartosc > 0) { temp[i++] = (wartosc % 10) + '0'; wartosc /= 10; }
+    int j = 0; while (i > 0) bufor[j++] = temp[--i];
+    bufor[j] = '\0';
+}
 
 // ---------------------------------------------------------
 // FUNKCJE ZAPISU DO MAGISTRALI PCI
@@ -117,9 +135,6 @@ struct struktura_fisu_host_dysk_ahci {
     uint32_t zarezerwowane;
 } __attribute__((packed));
 
-
-// --- KRYTYCZNA ZMIANA: Dodano VOLATILE do wskaźnika bazy! ---
-// Informuje kompilator (-O2), że rejestry kontrolera mogą zmieniać się same z siebie.
 static volatile pamiec_kontrolera_ahci* adres_bazy_ahci = nullptr;
 static int glowny_port_dysku = -1;
 
@@ -129,14 +144,11 @@ static uint8_t dma_tablica_komend[4096] __attribute__((aligned(128)));
 
 static uint8_t dma_bufor_danych[16384] __attribute__((aligned(4096)));
 
-
-// --- POMOCNICY ---
 static void wyzeruj_pamiec(void* wskaznik, uint32_t bajty) {
     uint8_t* pamiec = (uint8_t*)wskaznik;
     for(uint32_t i = 0; i < bajty; i++) pamiec[i] = 0;
 }
 
-// KRYTYCZNA ZMIANA: port stał się volatile
 static void zatrzymaj_silnik_komend(volatile struktura_portu_ahci* port) {
     port->status_i_sterowanie &= ~(1 << 0); // Bit ST
     port->status_i_sterowanie &= ~(1 << 4); // Bit FRE
@@ -154,7 +166,6 @@ static void uruchom_silnik_komend(volatile struktura_portu_ahci* port) {
     port->status_i_sterowanie |= (1 << 0); // Bit ST
 }
 
-// --- WYSZUKIWANIE I INICJALIZACJA ---
 extern "C" void inicjalizuj_kontroler_ahci() {
     WypiszLog("[AHCI] Szukam kontrolera pamieci masowej na magistrali PCI...");
     uint32_t adres_fizyczny_abar = 0;
@@ -235,12 +246,10 @@ extern "C" void inicjalizuj_kontroler_ahci() {
     }
 }
 
-// --- FAKTYCZNY ODCZYT/ZAPIS (Z UŻYCIEM BOUNCE BUFFER) ---
 static bool operacja_dysku_ahci(uint64_t lba, uint32_t ilosc_sektorow, void* wirtualny_bufor, bool czy_zapisz) {
     if (glowny_port_dysku == -1) return false;
     if (ilosc_sektorow > 32) return false; 
 
-    // KRYTYCZNA ZMIANA: port jest VOLATILE, wymuszając fizyczny odczyt/zapis za każdym razem!
     volatile struktura_portu_ahci* port = &adres_bazy_ahci->porty[glowny_port_dysku];
     port->status_przerwan = 0xFFFFFFFF; 
     
@@ -291,16 +300,11 @@ static bool operacja_dysku_ahci(uint64_t lba, uint32_t ilosc_sektorow, void* wir
     }
 
     port->status_przerwan = 0xFFFFFFFF; 
-
-    // KRYTYCZNE: BARIERA PAMIĘCI! 
-    // Mówimy kompilatorowi: "Zrzuć ramki FIS i listy komend z Cache do fizycznego RAM-u, natychmiast!"
     asm volatile("mfence" ::: "memory");
 
-    // BUM! Wyzwolenie kontrolera
     port->powiadomienia_komend = 1;
     
     timeout = 0;
-    // Pętla odpytuje rejestr. Dzięki volatile, robi to uczciwie w każdym przejściu pętli!
     while (port->powiadomienia_komend & 1) {
         if (port->status_przerwan & (1 << 30)) {
             WypiszLog("[AHCI] Blad: Task File Error (Bit 30)!");
@@ -316,8 +320,6 @@ static bool operacja_dysku_ahci(uint64_t lba, uint32_t ilosc_sektorow, void* wir
         }
     }
     
-    // KRYTYCZNE: BARIERA PAMIĘCI DLA ODCZYTU!
-    // Mówimy kompilatorowi: "Zanim zaczniesz kopiować, poczekaj aż dysk na pewno skończy wlewać dane!"
     asm volatile("lfence" ::: "memory");
 
     if (!czy_zapisz) {

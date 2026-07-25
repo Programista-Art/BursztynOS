@@ -48,3 +48,4 @@ przejdz_do_ring3:
     /* 3. Ostateczny skok! Procesor zdejmie te 5 wartości, obniży sobie 
        poziom uprawnień do Ring 3 i bezpiecznie wyląduje w powłoce. */
     iretq
+    

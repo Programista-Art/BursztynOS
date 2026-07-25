@@ -1,10 +1,14 @@
 /*
  * Mechanizm: Menedżer i Parser Polskiego Systemu Plików 64-bit (BSP64)
  * Opis: Abstrakcja obsługująca formatowanie, alokację, nawigację.
- * Dostosowana do pracy na blokach 4096-bajtowych i pełnych 64-bitowych wskaźnikach.
+ * Posiada Hybrydowy mechanizm zapisu (Cache-Write-Through) łączący się z fizycznym kontrolerem AHCI.
  */
 
 #include "psf.h"
+#include "ahci.h"
+
+// Funkcja logująca ze Składacza Obrazu
+extern void WypiszLog(const char* tekst);
 
 static uint8_t* ram_dysk = nullptr;
 static superblok* dysk_superblok = nullptr;
@@ -12,10 +16,30 @@ static superblok* dysk_superblok = nullptr;
 static uint64_t calkowita_liczba_wezlow = 0;
 static uint64_t calkowita_liczba_blokow_danych = 0;
 
-// Bufor ograniczony do 128 KB, by chronić wczesną przestrzeń BSS Jądra.
-// Pozwala wczytać potężną powłokę bez crashu braku pamięci (OOM).
 #define MAX_LOADER_BUF (128 * 1024)
 static uint8_t bufor_wymiany_plikow[MAX_LOADER_BUF];
+
+// --- NOWOŚĆ: Przesunięcie partycji ---
+// Rozpoczynamy partycję plików ok. 5 MB w głąb dysku, by nie nadpisać tapety!
+#define BSP_START_LBA 10000 
+
+// --- NOWOŚĆ: Synchronizacja z Dyskiem Fizycznym ---
+static void bsp_zapisz_zmiany() {
+    if (!ram_dysk || !dysk_superblok) return;
+    
+    uint32_t ilosc_sektorow = dysk_superblok->calkowity_rozmiar / 512;
+    uint32_t lba = BSP_START_LBA;
+    uint32_t zapisane = 0;
+    
+    // Przesyłamy cały stan partycji do AHCI w paczkach po 32 sektory (16KB)
+    while (zapisane < ilosc_sektorow) {
+        uint32_t paczka = ilosc_sektorow - zapisane;
+        if (paczka > 32) paczka = 32;
+        zapisz_na_glowny_dysk_ahci(lba, paczka, ram_dysk + (zapisane * 512));
+        lba += paczka;
+        zapisane += paczka;
+    }
+}
 
 /*
  * --- METODY DOSTĘPOWE (RAW) ---
@@ -28,7 +52,7 @@ static inline uint8_t* pobierz_blok(uint64_t nr_bloku) {
 static wezel_indeksowy* pobierz_wezel(uint64_t id_wezla) {
     if (id_wezla == 0 || id_wezla > calkowita_liczba_wezlow) return nullptr;
     
-    uint64_t wezlow_na_blok = PSF_ROZMIAR_BLOKU / sizeof(wezel_indeksowy); // W BSP64 wynosi dokładnie 1!
+    uint64_t wezlow_na_blok = PSF_ROZMIAR_BLOKU / sizeof(wezel_indeksowy); 
     uint64_t relatywny_indeks = id_wezla - 1; 
     uint64_t nr_bloku = dysk_superblok->start_wezlow + (relatywny_indeks / wezlow_na_blok);
     uint64_t wektor_w_bloku = relatywny_indeks % wezlow_na_blok;
@@ -54,7 +78,6 @@ static void oznacz_blok_jak_zajety(uint64_t id_bloku_danych) {
     }
 }
 
-// NOWOŚĆ: Funkcja zwalniająca blok danych (do usuwania)
 static void zwolnij_blok_danych(uint64_t id_bloku_danych) {
     uint64_t bajt_w_bitmapie = id_bloku_danych / 8;
     uint64_t nr_bloku_bitmapy = 1 + (bajt_w_bitmapie / PSF_ROZMIAR_BLOKU);
@@ -235,11 +258,42 @@ static bool dodaj_wpis_do_katalogu(uint64_t wezel_katalogu_id, uint64_t nowy_two
 extern "C" void inicjalizuj_psf(void* adres_ram_dysku, uint32_t rozmiar_w_bajtach) {
     if (!adres_ram_dysku || rozmiar_w_bajtach < PSF_ROZMIAR_BLOKU * 10) return; 
     
-    uint8_t* dysk = (uint8_t*)adres_ram_dysku;
-    for(uint32_t i=0; i<rozmiar_w_bajtach; i++) dysk[i] = 0;
-
-    ram_dysk = dysk;
+    ram_dysk = (uint8_t*)adres_ram_dysku;
     dysk_superblok = (superblok*)ram_dysk;
+
+    WypiszLog("[BSP] Sprawdzanie nosnika AHCI w poszukiwaniu trwalego systemu plikow...");
+
+    // Odczyt próbny superbloku z dysku fizycznego
+    if (czytaj_z_glownego_dysku_ahci(BSP_START_LBA, 1, ram_dysk)) {
+        if (dysk_superblok->sygnatura[0] == 'B' && dysk_superblok->sygnatura[1] == 'S' &&
+            dysk_superblok->sygnatura[2] == 'P' && dysk_superblok->sygnatura[3] == '2') {
+            
+            WypiszLog("[BSP] Odkryto istniejacy system plikow! Ladowanie mapy z dysku (DMA)...");
+            
+            uint32_t ilosc_sektorow = dysk_superblok->calkowity_rozmiar / 512;
+            if (ilosc_sektorow > rozmiar_w_bajtach / 512) ilosc_sektorow = rozmiar_w_bajtach / 512;
+
+            uint32_t lba = BSP_START_LBA;
+            uint32_t przeczytane = 0;
+            while (przeczytane < ilosc_sektorow) {
+                uint32_t paczka = ilosc_sektorow - przeczytane;
+                if (paczka > 32) paczka = 32;
+                czytaj_z_glownego_dysku_ahci(lba, paczka, ram_dysk + (przeczytane * 512));
+                lba += paczka; przeczytane += paczka;
+            }
+            
+            // Odtworzenie zmiennych stanu
+            calkowita_liczba_wezlow = (dysk_superblok->start_danych - dysk_superblok->start_wezlow) * (PSF_ROZMIAR_BLOKU / sizeof(wezel_indeksowy));
+            calkowita_liczba_blokow_danych = dysk_superblok->ilosc_blokow - dysk_superblok->start_danych;
+            
+            WypiszLog("[BSP] Trwaly system plikow pomyslnie zaladowany z nosnika SATA!");
+            return;
+        }
+    }
+
+    WypiszLog("[BSP] Pusty dysk. Formatowanie nowej partycji 2MB...");
+
+    for(uint32_t i=0; i<rozmiar_w_bajtach; i++) ram_dysk[i] = 0;
 
     uint64_t ilosc_blokow = rozmiar_w_bajtach / PSF_ROZMIAR_BLOKU;
     
@@ -261,9 +315,16 @@ extern "C" void inicjalizuj_psf(void* adres_ram_dysku, uint32_t rozmiar_w_bajtac
 
     uint64_t id_korzenia = zaalokuj_wolny_wezel(TYP_KATALOG);
     dysk_superblok->id_korzenia = id_korzenia;
+
+    // NOWOŚĆ: Zapisz nowo uformowaną partycję na fizyczny dysk
+    bsp_zapisz_zmiany();
+    WypiszLog("[BSP] Formatowanie zakonczone. Struktura utrwalona na dysku!");
 }
 
 extern "C" bool utworz_katalog(const char* sciezka) {
+    // Zabezpieczenie przed duplikatami
+    if (rozwiaz_sciezke(sciezka, nullptr, false) != 0) return false;
+
     char nowa_nazwa[PSF_MAX_NAZWA];
     uint64_t wezel_rodzica_id = rozwiaz_sciezke(sciezka, nowa_nazwa, true);
     if (wezel_rodzica_id == 0) return false; 
@@ -271,10 +332,15 @@ extern "C" bool utworz_katalog(const char* sciezka) {
     uint64_t nowy_id = zaalokuj_wolny_wezel(TYP_KATALOG);
     if (nowy_id == 0) return false;
 
-    return dodaj_wpis_do_katalogu(wezel_rodzica_id, nowy_id, nowa_nazwa);
+    bool sukces = dodaj_wpis_do_katalogu(wezel_rodzica_id, nowy_id, nowa_nazwa);
+    if (sukces) bsp_zapisz_zmiany(); // Zrzut Cache do Dysku
+    return sukces;
 }
 
 extern "C" bool utworz_plik(const char* sciezka) {
+    // Zabezpieczenie przed duplikatami
+    if (rozwiaz_sciezke(sciezka, nullptr, false) != 0) return false;
+
     char nowa_nazwa[PSF_MAX_NAZWA];
     uint64_t wezel_rodzica_id = rozwiaz_sciezke(sciezka, nowa_nazwa, true);
     if (wezel_rodzica_id == 0) return false; 
@@ -282,7 +348,9 @@ extern "C" bool utworz_plik(const char* sciezka) {
     uint64_t nowy_id = zaalokuj_wolny_wezel(TYP_PLIK);
     if (nowy_id == 0) return false;
 
-    return dodaj_wpis_do_katalogu(wezel_rodzica_id, nowy_id, nowa_nazwa);
+    bool sukces = dodaj_wpis_do_katalogu(wezel_rodzica_id, nowy_id, nowa_nazwa);
+    if (sukces) bsp_zapisz_zmiany(); // Zrzut Cache do Dysku
+    return sukces;
 }
 
 extern "C" bool zapisz_do_pliku(const char* sciezka, const char* dane, uint32_t dlugosc) {
@@ -316,6 +384,7 @@ extern "C" bool zapisz_do_pliku(const char* sciezka, const char* dane, uint32_t 
     }
     
     wezel->rozmiar_w_bajtach = zapisano;
+    bsp_zapisz_zmiany(); // Zrzut Cache do Dysku
     return (zapisano == dlugosc);
 }
 
@@ -430,7 +499,6 @@ extern "C" bool wylistuj_katalog(const char* sciezka, char* bufor, uint32_t max_
     return true;
 }
 
-// NOWOŚĆ: Funkcja do usuwania plików i katalogów
 extern "C" bool usun_twor(const char* sciezka) {
     char nazwa_docelowa[PSF_MAX_NAZWA];
     uint64_t rodzic_id = rozwiaz_sciezke(sciezka, nazwa_docelowa, true);
@@ -441,7 +509,6 @@ extern "C" bool usun_twor(const char* sciezka) {
 
     uint64_t cel_id = 0;
 
-    // Krok 1: Odnajdź wpis w katalogu i usuń powiązanie
     for (int k = 0; k < PSF_MAX_BLOKOW_W_WEZLE; k++) {
         if (rodzic->wskazniki_blokow[k] == BARK_BLOKU) continue;
 
@@ -451,7 +518,7 @@ extern "C" bool usun_twor(const char* sciezka) {
         for(int j = 0; j < PSF_ROZMIAR_BLOKU / (int)sizeof(wpis_katalogowy); j++) {
             if (wpisy[j].id_wezla != 0 && czy_identyczne_str(wpisy[j].nazwa, nazwa_docelowa)) {
                 cel_id = wpisy[j].id_wezla;
-                wpisy[j].id_wezla = 0; // Zwolnienie wpisu w folderze!
+                wpisy[j].id_wezla = 0; 
                 break;
             }
         }
@@ -460,7 +527,6 @@ extern "C" bool usun_twor(const char* sciezka) {
 
     if (cel_id == 0) return false;
 
-    // Krok 2: Zwolnij wszystkie bloki danych węzła w mapie bitowej
     wezel_indeksowy* cel = pobierz_wezel(cel_id);
     if (cel) {
         cel->typ = TYP_WOLNY;
@@ -471,10 +537,10 @@ extern "C" bool usun_twor(const char* sciezka) {
             }
         }
     }
+    bsp_zapisz_zmiany(); // Zrzut Cache do Dysku
     return true;
 }
 
-// NOWOŚĆ: Funkcja do zmiany nazwy pliku lub folderu
 extern "C" bool zmien_nazwe_tworu(const char* sciezka, const char* nowa_nazwa) {
     char stara_nazwa_docelowa[PSF_MAX_NAZWA];
     uint64_t rodzic_id = rozwiaz_sciezke(sciezka, stara_nazwa_docelowa, true);
@@ -483,7 +549,6 @@ extern "C" bool zmien_nazwe_tworu(const char* sciezka, const char* nowa_nazwa) {
     wezel_indeksowy* rodzic = pobierz_wezel(rodzic_id);
     if (!rodzic || rodzic->typ != TYP_KATALOG) return false;
 
-    // Znajdź stary wpis i podmień ciąg tekstowy
     for (int k = 0; k < PSF_MAX_BLOKOW_W_WEZLE; k++) {
         if (rodzic->wskazniki_blokow[k] == BARK_BLOKU) continue;
 
@@ -493,6 +558,7 @@ extern "C" bool zmien_nazwe_tworu(const char* sciezka, const char* nowa_nazwa) {
         for(int j = 0; j < PSF_ROZMIAR_BLOKU / (int)sizeof(wpis_katalogowy); j++) {
             if (wpisy[j].id_wezla != 0 && czy_identyczne_str(wpisy[j].nazwa, stara_nazwa_docelowa)) {
                 kopiuj_str(wpisy[j].nazwa, nowa_nazwa, PSF_MAX_NAZWA);
+                bsp_zapisz_zmiany(); // Zrzut Cache do Dysku
                 return true;
             }
         }
