@@ -9,13 +9,13 @@ Witaj w oficjalnej dokumentacji **Bursztyn OS** – niezależnego, 64-bitowego s
 System jest rozwijany z myślą o architekturze x86-64, implementując własne Jądro, autorski system plików, niezależny logiczny model bezpieczeństwa oraz natywne środowisko uruchomieniowe dla programów skompilowanych z języka Avocado.
 
 # Programy w Bursztynie powłoka systemowa shell i prosty notatnik
-![alt](image/natywny-sterownik-bochs-vbe.png)
-![alt](image/bursztyn1.png)
-![alt](image/bursztyn-terminal.png)
+
+![alt](image/BursztynOS.png)
 
 
 
-## Dostępne 16 komend w Shellu
+
+## Dostępne 17 komend w Shellu
 1. pomoc - wyświetla dostępną listę komend.
 1. system - wypisuje informacje o architekturze Bursztyn OS.
 1. wersja - krótka informacja o wersji powłoki i OS
@@ -32,6 +32,7 @@ System jest rozwijany z myślą o architekturze x86-64, implementując własne J
 1. pisz [tekst] - wypisze z powrotem na ekran to, co wpiszesz po spacji.
 1. cytat - wypisze losowy, motywujący cytat programistyczny.
 1. losuj - rzuci wirtualną sześciościenną kością.
+1. pci - wypisze podłączone urządzenia
 
     
 
@@ -71,10 +72,16 @@ Będąc już w folderze, w którym leży plik BursztynOS.iso, odwołaj się do p
 ```
 "C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom BursztynOS.iso -m 2G
 ``` 
+
+
 ## Jak uruchomić w power shell w QEMU na Windows 11
 Jeżeli masz pobrnay obraz iso w folderze na pustym miejscu kliknij prawym przyciskiem myszy i wybierz Otwórz w terminalu dalej wpisz to 
 ```
 & "C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom BursztynOS.iso -m 2G
+```
+Jeżeli chcesz uruchomić wraz z wirtualnym dyskiem wpisz polecenie
+```
+& "C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom BursztynOS.iso -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G
 ```
 
 ## Jeżeli są błędy przy uruchomieniu
@@ -120,6 +127,11 @@ Najszybsza metoda w systemach takich jak Linux Mint:
 ```
 
 qemu-system-x86_64 -cdrom BursztynOS.iso -m 2G
+```
+
+## Jeżeli chcesz uruchomić wraz z wirtualnym dyskiem wpisz polecenie w terminalu
+```
+qemu-system-x86_64 -cdrom BursztynOS.iso -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -serial stdio
 ```
 
 ### Krok 3: (Opcjonalnie) Włącz dopalacze KVM! 🚀
