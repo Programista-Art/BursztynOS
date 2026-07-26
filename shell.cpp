@@ -77,6 +77,14 @@ bool strcmp(const char* s1, const char* s2) {
     while (*s1 && (*s1 == *s2)) { s1++; s2++; }
     return *(const unsigned char*)s1 == *(const unsigned char*)s2;
 }
+bool zaczyna_sie_od(const char* str, const char* prefix) {
+    while (*prefix) {
+        if (*str != *prefix) return false;
+        str++;
+        prefix++;
+    }
+    return true;
+}
 
 bool strncmp(const char* s1, const char* s2, int n) {
     while (n && *s1 && (*s1 == *s2)) { s1++; s2++; n--; }
@@ -178,6 +186,7 @@ extern "C" void _start() {
             print("  wersja        - wersja powloki i OS\n");
             print("  kto           - zalogowany uzytkownik\n");
             print("  pci           - WYŚWIETLA URZĄDZENIA NA PŁYCIE GŁÓWNEJ\n");
+            print("  uruchom [plik]- URUCHAMIA APLIKACJE (np. uruchom /programy/kalk.bur)\n");
             print("  historia      - ostatnie 5 polecen\n");
             print("  czysc         - czysci ekran terminala\n");
             print("--- KATEGORIA: PLIKI ---\n");
@@ -217,6 +226,25 @@ extern "C" void _start() {
                 print("Blad: Brak raportu PCI w systemie plikow (Ring 0 nie przekazal logu).\n");
             }
         }
+        else if (zaczyna_sie_od(bufor_komendy, "uruchom ")) {
+            char sciezka_pliku[64];
+            int i = 8, j = 0;
+            // Wycinamy ścieżkę do pliku z polecenia (np. "/programy/kalk.bur")
+            while (bufor_komendy[i] != '\0' && bufor_komendy[i] != ' ' && j < 63) {
+                sciezka_pliku[j++] = bufor_komendy[i++];
+            }
+            sciezka_pliku[j] = '\0';
+            
+            print("Uruchamianie procesu: ");
+            print(sciezka_pliku);
+            print("...\n");
+            
+            // Wywołanie systemowe 9: Uruchom Program (Zastępuje aktualny proces w Ring 3)
+            uint64_t wynik = bws_wywolaj(10, (uint64_t)sciezka_pliku);
+            if (wynik == 0) {
+                print("Blad: Nie udalo sie zaladowac programu z dysku (zla sciezka lub brak uprawnien).\n");
+            }
+        }
         else if (strcmp(bufor_komendy, "gdzie")) {
             print("Obecna lokalizacja: / (Korzen Systemu Plikow)\n");
         }
@@ -224,6 +252,17 @@ extern "C" void _start() {
             for(int i = 0; i < hist_ilosc; i++) {
                 char numer[4]; int_do_str(i + 1, numer);
                 print(numer); print(". "); print(historia[i]); print("\n");
+            }
+        }
+        else if (strncmp(bufor_komendy, "uruchom ", 8)) {
+            char sciezka[64]; formatuj_sciezke(&bufor_komendy[8], sciezka);
+            print("Uruchamiam: "); print(sciezka); print("...\n");
+            
+            // Wolamy BWS 10. Jesli sie uda, nasze pamiec zostanie nadpisana nowym programem.
+            // Jesli wroci kod 0, znaczy to ze Jądro odrzucilo plik (np. nie istnieje)
+            uint64_t wynik = bws_wywolaj(10, (uint64_t)sciezka);
+            if (wynik == 0) {
+                print("Blad: Nie mozna uruchomic programu (PZB lub brak pliku).\n");
             }
         }
         else if (strcmp(bufor_komendy, "czysc")) {

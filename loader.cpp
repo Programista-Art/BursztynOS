@@ -5,9 +5,8 @@
 // Oczekiwana funkcja z vmm.cpp zwracająca wskaźnik na drzewo stron (dodana na końcu vmm.cpp)
 extern "C" void* PobierzAktualnePML4();
 
-// Oczekiwana funkcja z Asemblera (ring3.S), która wykonuje instrukcję IRETQ
-// UWAGA: Nazwa musi dokładnie pasować do wyeksportowanego symbolu w asemblerze!
-extern "C" void przejdz_do_ring3(uint64_t punkt_wejscia, uint64_t wirtualny_stos);
+// Oczekiwana funkcja z Asemblera (ring3.S), która wykonuje instrukcję IRETQ oraz SWAPGS (jeśli z_syscalla = true)
+extern "C" void przejdz_do_ring3(uint64_t punkt_wejscia, uint64_t wirtualny_stos, bool z_syscalla);
 
 // Oczekiwana funkcja z Twojego Bursztynowego Systemu Plików (BSP)
 extern "C" uint8_t* bsp_wczytaj_plik_do_pamieci(const char* sciezka, uint64_t* rozmiar_wyj);
@@ -36,7 +35,7 @@ bool PorownajPamiec(const void* ptr1, const void* ptr2, uint64_t rozmiar) {
 // ---------------------------------------------------------
 // GŁÓWNY SYSTEM ŁADOWANIA APLIKACJI .BUR
 // ---------------------------------------------------------
-extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka_pliku, uint8_t bzl_poziom, uint64_t flagi_praw) {
+extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka_pliku, uint8_t bzl_poziom, uint64_t flagi_praw, bool z_syscalla) {
     WypiszLog("[LOADER] Proba uruchomienia programu...");
 
     // 1. Wczytanie pliku z BSP
@@ -99,8 +98,8 @@ extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka_pliku, uint8_t b
 
     WypiszLog("[LOADER] Program zaladowany. Zastosowano zabezpieczenia PZB. Przejscie do Ring 3...");
 
-    // 8. Ostateczny Skok!
-    przejdz_do_ring3(naglowek->punkt_wejscia, wirtualny_szczyt_stosu);
+    // 8. Ostateczny Skok z uwzględnieniem stanu Syscalla!
+    przejdz_do_ring3(naglowek->punkt_wejscia, wirtualny_szczyt_stosu, z_syscalla);
 
     return true;
 }

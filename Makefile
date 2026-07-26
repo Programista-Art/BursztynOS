@@ -7,7 +7,7 @@ OBJCOPY = x86_64-linux-gnu-objcopy
 # Flagi kompilatora C++ (Freestanding, brak standardowej biblioteki)
 CXXFLAGS = -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2
 
-# Lista wszystkich skompilowanych obiektów jądra
+# Lista wszystkich skompilowanych obiektów jądra (BEZ KALKULATORA!)
 OBJS = boot.o gdt.o tss.o apic.o idt.o przerwania.o klawiatura.o mysz.o zegar-rtc.o pmm.o vmm.o psf.o grafika.o syscall.o syscalls.o pci.o ahci.o ring3.o loader.o kernel.o shell_blob.o
 
 # Główny cel domyślny
@@ -50,9 +50,7 @@ iso: system_operacyjny.bin
 
 # === URUCHOMIENIE W QEMU ===
 run: iso
-	# Tworzymy surowy plik dysku (raw) jeśli nie istnieje
 	if [ ! -f wirtualny_dysk.img ]; then qemu-img create -f raw wirtualny_dysk.img 40M; fi
-	# Jeśli masz plik tapeta.bmp w folderze, wgraj go na dysk zaczynając od Sektora 10 (LBA 10)
 	if [ -f tapeta.bmp ]; then dd if=tapeta.bmp of=wirtualny_dysk.img bs=512 seek=10 conv=notrunc; fi
 	qemu-system-x86_64 -cdrom BursztynOS.iso -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -vga std -serial stdio
 
@@ -61,4 +59,4 @@ clear:
 	rm -f *.o *.bin *.elf *.iso
 	rm -rf isodir
 cdysk:
-	rm -rf wirtualny_dysk.img	
+	rm -rf wirtualny_dysk.img

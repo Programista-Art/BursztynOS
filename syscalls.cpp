@@ -22,6 +22,7 @@ extern "C" {
     // Prototypy dla usuwania i zmiany nazwy
     bool usun_twor(const char* sciezka);
     bool zmien_nazwe_tworu(const char* sciezka, const char* nowa_nazwa);
+    bool bws_uruchom_program_z_pliku(const char* sciezka_pliku, uint8_t bzl_poziom, uint64_t flagi_praw);
 }
 
 // Zewnetrzny odnosnik do punktu wejsciowego SYSCALL zakodowanego w Asemblerze
@@ -191,6 +192,22 @@ extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t ar
             formatuj_czas_do_stringa(&czas, (char*)arg1);
             kod_wyniku = 1;
             break;
+        }
+        case 10: {
+        // sys_uruchom_program(const char* sciezka) - PRZEŁĄCZANIE PROCESÓW!
+        if (!(aktywny_proces.uprawnienia & PRAWO_URUCHOM_PROGRAM)) {
+            wypisz_na_ekranie("\n[BWS Zablokowano] Brak uprawnienia PRAWO_URUCHOM_PROGRAM!\n");
+            return 0;
+        }
+        const char* sciezka = (const char*)arg1;
+        
+        // Jądro zastępuje obecny proces w Ring 3 nowym procesem z dysku!
+        bool result = bws_uruchom_program_z_pliku(sciezka, PZB_UZYTKOWNIK, 0xFFFFFFFF);
+        
+        // Jeśli bws_uruchom_program_z_pliku się powiedzie, w procesorze zostanie wykonana instrukcja iretq
+        // i NIGDY tu nie wrócimy. Jeśli kod przejdzie dalej, znaczy to że plik nie istnieje lub jest uszkodzony.
+        kod_wyniku = result ? 1 : 0;
+        break;
         }
 
         default: {
