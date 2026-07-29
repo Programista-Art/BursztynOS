@@ -39,7 +39,7 @@ struct Okno {
 
 // Skrojone na miarę okienko Kalkulatora Graficznego
 static Okno okna[3] = {
-    { 20, 20, 660, 360,  0,0,0,0, "Terminal", "Powloka Bursztyna (Ring 3 Terminal)", 0x001A0B00, true, false },
+    { 20, 20, 660, 360,  0,0,0,0, "Terminal", "Powłoka Bursztynowa (Ring 3 Terminal)", 0x001A0B00, true, false },
     { 180, 80, 560, 400, 0,0,0,0, "Edytor", "Edytor Avocado - Nowy Plik", 0x00280F00, true, false },
     { 300, 150, 320, 380, 0,0,0,0, "Kalkulator", "Kalkulator Systemowy", 0x000A1015, false, false } 
 };
@@ -56,7 +56,7 @@ struct MenuApp {
     const char* nazwa;
 };
 static const MenuApp menu_aplikacje[3] = {
-    {0, "Terminal (shell)"},
+    {0, "Powłoka Bursztynowa"},
     {1, "Edytor Avocado"},
     {2, "Kalkulator"}
 };
@@ -157,7 +157,7 @@ void KalkulatorKlik(char btn) {
     } else if (btn == '+' || btn == '-' || btn == '*' || btn == '/') {
         if (calc_state == 0) {
             calc_op1 = calc_str_to_int(calc_num_buf); calc_op = btn; calc_state = 1;
-            char b[2] = {btn, 0}; calc_append_str(calc_display, b); // POPRAWKA: Usunięcie spacji!
+            char b[2] = {btn, 0}; calc_append_str(calc_display, b); // Usunięcie spacji!
         } else if (calc_state == 1) {
             calc_op = btn;
             int len = 0; while(calc_display[len]) len++;
@@ -221,7 +221,63 @@ static const uint8_t kursor_bitmapa[16][16] = {
     {1,2,1,0,1,2,2,2,1,0,0,0,0,0,0,0},{1,1,0,0,0,1,2,2,1,0,0,0,0,0,0,0},{0,0,0,0,0,0,1,2,2,1,0,0,0,0,0,0},{0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0}
 };
 
-void WypiszLog(const char* tekst);
+// ==================== ZARZADZANIE BUFORAMI TEKSTOWYMI ====================
+void DopiszZnakDoEdytora(char c) {
+    if (c == '\n' || c == '\r') { edit_r++; edit_c = 0; }
+    else if (c == '\b') {
+        if (edit_c > 0) { 
+            edit_c--; edit_buf[edit_r][edit_c].znak = 0; 
+            if (edit_c > 0 && (edit_buf[edit_r][edit_c-1].znak & 0xE0) == 0xC0) { edit_c--; edit_buf[edit_r][edit_c].znak = 0; }
+        } 
+        else if (edit_r > 0) {
+            edit_r--; edit_c = edit_max_c - 1;
+            while(edit_c > 0 && edit_buf[edit_r][edit_c].znak == 0) edit_c--;
+            if (edit_buf[edit_r][edit_c].znak != 0) edit_c++;
+        }
+    } else {
+        edit_buf[edit_r][edit_c].znak = c; edit_buf[edit_r][edit_c].kolor = 0x00D1D5DB; edit_c++;
+        if (edit_c >= edit_max_c) { edit_r++; edit_c = 0; }
+    }
+    if (edit_r >= edit_max_r) {
+        for(int r = 1; r < edit_max_r; r++) { for(int c = 0; c < edit_max_c; c++) edit_buf[r-1][c] = edit_buf[r][c]; }
+        for(int c = 0; c < edit_max_c; c++) edit_buf[edit_max_r-1][c].znak = 0;
+        edit_r = edit_max_r - 1;
+    }
+}
+
+void DopiszDoBufora(const char* tekst, uint32_t kolor) {
+    for(int i = 0; tekst[i] != '\0'; i++) {
+        if (tekst[i] == '\n') { term_r++; term_c = 0; }
+        else if (tekst[i] == '\r') { term_c = 0; }
+        else if (tekst[i] == '\b') { 
+            if (term_c > 0) { 
+                term_c--; term_buf[term_r][term_c].znak = 0; 
+                if (term_c > 0 && (term_buf[term_r][term_c-1].znak & 0xE0) == 0xC0) { term_c--; term_buf[term_r][term_c].znak = 0; }
+            } 
+        }
+        else {
+            term_buf[term_r][term_c].znak = tekst[i]; term_buf[term_r][term_c].kolor = kolor; term_c++;
+            if (term_c >= term_max_c) { term_r++; term_c = 0; }
+        }
+        if (term_r >= term_max_r) {
+            for(int r = 1; r < term_max_r; r++) { for(int c = 0; c < term_max_c; c++) term_buf[r-1][c] = term_buf[r][c]; }
+            for(int c = 0; c < term_max_c; c++) term_buf[term_max_r-1][c].znak = 0;
+            term_r = term_max_r - 1;
+        }
+    }
+}
+
+// ==================== ZMODYFIKOWANA FUNKCJA LOGÓW ====================
+void WypiszLog(const char* tekst) {
+    // KRYTYCZNA POPRAWKA: Wysyłanie logów bezpośrednio do terminala Linuksa!
+    SerialLog(tekst);
+    SerialLog("\n");
+
+    if(!backbuffer) return;
+    UkryjKursor();
+    DopiszDoBufora(tekst, 0x00FFBF00); DopiszDoBufora("\n", 0x00FFBF00);
+    OdswiezEkran(); PokazKursor(); PrzeniesNaEkran();
+}
 
 // ==================== SILNIK GRAFICZNY ====================
 void PrzeniesNaEkran() {
@@ -377,13 +433,11 @@ void RysujOkno(int id) {
     RysujProstokat(px + 2, py + 2, szer - 4, 24, kolor_paska);  
     WypiszTekst(okna[id].tytul, px + 8, py + 4, kolor_tekstu_paska, 1);         
     
-    // POPRAWKA: Przesunięcie przycisku minimalizacji (jeśli to Kalkulator, przylega on do krzyżyka)
     int min_btn_x = (id == 2) ? (px + szer - 50) : (px + szer - 74);
     
     RysujProstokat(min_btn_x, py + 4, 20, 20, 0x00E58A00); 
     WypiszTekst("-", min_btn_x + 4, py + 6, 0x001A0B00, 1);
     
-    // Brak przycisku Maksymalizuj dla Kalkulatora (id == 2)
     if (id != 2) {
         RysujProstokat(px + szer - 50, py + 4, 20, 20, 0x00E58A00); 
         WypiszTekst(okna[id].zmaksymalizowane ? "v" : "^", px + szer - 46, py + 6, 0x001A0B00, 1);
@@ -451,61 +505,6 @@ void RysujKalkulatorGUI(int px, int py, int szer, int wys) {
             WypiszTekst(calc_btns[row*4 + col], bx + bw/2 - 8, by + bh/2 - 8, txt_color, 2);
         }
     }
-}
-
-// ==================== ZARZADZANIE BUFORAMI TEKSTOWYMI ====================
-void DopiszZnakDoEdytora(char c) {
-    if (c == '\n' || c == '\r') { edit_r++; edit_c = 0; }
-    else if (c == '\b') {
-        if (edit_c > 0) { 
-            edit_c--; edit_buf[edit_r][edit_c].znak = 0; 
-            if (edit_c > 0 && (edit_buf[edit_r][edit_c-1].znak & 0xE0) == 0xC0) { edit_c--; edit_buf[edit_r][edit_c].znak = 0; }
-        } 
-        else if (edit_r > 0) {
-            edit_r--; edit_c = edit_max_c - 1;
-            while(edit_c > 0 && edit_buf[edit_r][edit_c].znak == 0) edit_c--;
-            if (edit_buf[edit_r][edit_c].znak != 0) edit_c++;
-        }
-    } else {
-        edit_buf[edit_r][edit_c].znak = c; edit_buf[edit_r][edit_c].kolor = 0x00D1D5DB; edit_c++;
-        if (edit_c >= edit_max_c) { edit_r++; edit_c = 0; }
-    }
-    if (edit_r >= edit_max_r) {
-        for(int r = 1; r < edit_max_r; r++) { for(int c = 0; c < edit_max_c; c++) edit_buf[r-1][c] = edit_buf[r][c]; }
-        for(int c = 0; c < edit_max_c; c++) edit_buf[edit_max_r-1][c].znak = 0;
-        edit_r = edit_max_r - 1;
-    }
-}
-
-void DopiszDoBufora(const char* tekst, uint32_t kolor) {
-    for(int i = 0; tekst[i] != '\0'; i++) {
-        if (tekst[i] == '\n') { term_r++; term_c = 0; }
-        else if (tekst[i] == '\r') { term_c = 0; }
-        else if (tekst[i] == '\b') { 
-            if (term_c > 0) { 
-                term_c--; term_buf[term_r][term_c].znak = 0; 
-                if (term_c > 0 && (term_buf[term_r][term_c-1].znak & 0xE0) == 0xC0) { term_c--; term_buf[term_r][term_c].znak = 0; }
-            } 
-        }
-        else {
-            term_buf[term_r][term_c].znak = tekst[i]; term_buf[term_r][term_c].kolor = kolor; term_c++;
-            if (term_c >= term_max_c) { term_r++; term_c = 0; }
-        }
-        if (term_r >= term_max_r) {
-            for(int r = 1; r < term_max_r; r++) { for(int c = 0; c < term_max_c; c++) term_buf[r-1][c] = term_buf[r][c]; }
-            for(int c = 0; c < term_max_c; c++) term_buf[term_max_r-1][c].znak = 0;
-            term_r = term_max_r - 1;
-        }
-    }
-}
-
-void WypiszLog(const char* tekst) {
-    SerialLog(tekst);
-    SerialLog("\n");
-    if(!backbuffer) return;
-    UkryjKursor();
-    DopiszDoBufora(tekst, 0x00FFBF00); DopiszDoBufora("\n", 0x00FFBF00);
-    OdswiezEkran(); PokazKursor(); PrzeniesNaEkran();
 }
 
 // ==================== ODSWIEZANIE EKRANU ====================
@@ -683,15 +682,19 @@ extern "C" void zaktualizuj_mysze(int dx, int dy, uint8_t przyciski) {
                 
                 if (mysz_x >= px && mysz_x <= px + sz && mysz_y >= py && mysz_y <= py + wy) {
                     WyciagnijNaWierzch(i); wymaga_odrysowania = true;
-                    
-                    if (mysz_y <= py + 26) {
-                        if (mysz_x >= px + sz - 26 && mysz_x <= px + sz - 6) { okna[i].widoczne = false; break; }
-                        
-                        // Zaktualizowany Hitbox dla przycisku Minimalizuj
+              
+                 if (mysz_y <= py + 26) {
+                        // 1. Sprawdzenie przycisku ZAMKNIJ (X) - rysowany na px + sz - 26
+                        if (mysz_x >= px + sz - 26 && mysz_x <= px + sz - 6) { 
+                            okna[i].widoczne = false; 
+                            break; 
+                        }
+
+                        // 2. Sprawdzenie przycisku MINIMALIZUJ (-)
                         int min_btn_x = (i == 2) ? (px + sz - 50) : (px + sz - 74);
                         if (mysz_x >= min_btn_x && mysz_x <= min_btn_x + 20) { okna[i].widoczne = false; break; }
 
-                        // Zabezpieczenie przed klikaniem "Maksymalizuj" dla Kalkulatora (i != 2)
+                        // 3. Sprawdzenie przycisku MAKSYMALIZUJ (^/v)
                         if (i != 2 && mysz_x >= px + sz - 50 && mysz_x <= px + sz - 30) { 
                             if (!okna[i].zmaksymalizowane) {
                                 okna[i].stary_x = okna[i].x; okna[i].stary_y = okna[i].y; okna[i].stary_szer = okna[i].szer; okna[i].stary_wys = okna[i].wys;
@@ -869,13 +872,19 @@ extern "C" void wypisz_na_ekranie(const char* tekst) {
 }
 
 extern "C" void obsluga_przerwania_zegara() {
-    static uint8_t stara_sekunda = 255; czas_rtc czas; pobierz_czas_rtc(&czas);
+    static uint8_t stara_sekunda = 255;
+    czas_rtc czas; 
+    pobierz_czas_rtc(&czas);
+    
     if (czas.sekundy != stara_sekunda) {
         stara_sekunda = czas.sekundy;
         if (!backbuffer || lfb_wysokosc < 40) return;
-        bool kursor_byl = kursor_widoczny; if (kursor_byl) UkryjKursor();
+        bool kursor_byl = kursor_widoczny; 
+        if (kursor_byl) UkryjKursor();
         
-        rysuj_zegar_rtc(); int zegar_x = lfb_szerokosc - 150; int zegar_y = lfb_wysokosc - 32; 
+        rysuj_zegar_rtc(); 
+        int zegar_x = lfb_szerokosc - 150; 
+        int zegar_y = lfb_wysokosc - 32; 
         PrzeniesFragmentNaEkran(zegar_x, zegar_y - 3, 140, 32);
         
         if (kursor_byl) PokazKursor();
