@@ -11,6 +11,14 @@ extern void WypiszLog(const char* tekst);
 extern "C" bool utworz_plik(const char* sciezka);
 extern "C" bool zapisz_do_pliku(const char* sciezka, const char* dane, uint32_t dlugosc);
 
+extern "C" void pci_zapisz_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t data) {
+    uint32_t address = (uint32_t)((bus << 16) | (slot << 11) | (func << 8) | (offset & 0xFC) | 0x80000000);
+    // Zapis adresu urządzenia na specjalny port na płycie głównej
+    asm volatile ("outl %0, %1" : : "a"(address), "Nd"((uint16_t)0xCF8));
+    // Zapis nowych danych
+    asm volatile ("outl %0, %1" : : "a"(data), "Nd"((uint16_t)0xCFC));
+}
+
 // Pomocnicza funkcja asemblerowa do wysyłania 32-bitowych danych na port I/O
 static inline void wyjscie_port_dword(uint16_t port, uint32_t wartosc) {
     asm volatile ("outl %0, %1" : : "a"(wartosc), "Nd"(port));

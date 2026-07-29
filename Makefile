@@ -8,7 +8,7 @@ OBJCOPY = x86_64-linux-gnu-objcopy
 CXXFLAGS = -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2
 
 # Lista wszystkich skompilowanych obiektów jądra (BEZ KALKULATORA!)
-OBJS = boot.o gdt.o tss.o apic.o idt.o przerwania.o klawiatura.o mysz.o zegar-rtc.o pmm.o vmm.o psf.o grafika.o syscall.o syscalls.o pci.o ahci.o ring3.o loader.o kernel.o shell_blob.o
+OBJS = boot.o gdt.o tss.o apic.o idt.o przerwania.o e1000.o siec.o klawiatura.o mysz.o zegar-rtc.o pmm.o vmm.o psf.o grafika.o syscall.o syscalls.o pci.o ahci.o ring3.o loader.o kernel.o shell_blob.o
 
 # Główny cel domyślny
 all: system_operacyjny.bin
@@ -52,8 +52,8 @@ iso: system_operacyjny.bin
 run: iso
 	if [ ! -f wirtualny_dysk.img ]; then qemu-img create -f raw wirtualny_dysk.img 40M; fi
 	if [ -f tapeta.bmp ]; then dd if=tapeta.bmp of=wirtualny_dysk.img bs=512 seek=10 conv=notrunc; fi
-	qemu-system-x86_64 -cdrom BursztynOS.iso -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -vga std -serial stdio
-
+# 	qemu-system-x86_64 -cdrom BursztynOS.iso -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -vga std -serial stdio
+	qemu-system-x86_64 -cdrom BursztynOS.iso -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -netdev user,id=n1 -device e1000,netdev=n1 -m 2G -vga std -serial stdio
 # === CZYSZCZENIE PROJEKTU ===
 clear:
 	rm -f *.o *.bin *.elf *.iso

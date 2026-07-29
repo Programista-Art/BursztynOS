@@ -500,6 +500,8 @@ void DopiszDoBufora(const char* tekst, uint32_t kolor) {
 }
 
 void WypiszLog(const char* tekst) {
+    SerialLog(tekst);
+    SerialLog("\n");
     if(!backbuffer) return;
     UkryjKursor();
     DopiszDoBufora(tekst, 0x00FFBF00); DopiszDoBufora("\n", 0x00FFBF00);

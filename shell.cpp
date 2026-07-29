@@ -64,7 +64,7 @@ char getch() { return (char)bws_wywolaj(4); }
 bool czytaj_plik(const char* plik, char* bufor, uint32_t max_dlugosc) { return bws_wywolaj(5, (uint64_t)plik, (uint64_t)bufor, max_dlugosc) != 0; }
 bool wylistuj_katalog(const char* sciezka, char* bufor, uint32_t max_dlugosc) { return bws_wywolaj(6, (uint64_t)sciezka, (uint64_t)bufor, max_dlugosc) != 0; }
 // NOWE: Zaawansowane manipulacje na plikach (BWS-7 i BWS-8)
-bool usun_twor(const char* sciezka) { return bws_wywolaj(7, (uint64_t)sciezka) != 0; }
+bool usun_plik(const char* sciezka) { return bws_wywolaj(7, (uint64_t)sciezka) != 0; }
 bool zmien_nazwe_tworu(const char* sciezka, const char* nowa_nazwa) { return bws_wywolaj(8, (uint64_t)sciezka, (uint64_t)nowa_nazwa) != 0; }
 
 int strlen(const char* str) {
@@ -159,7 +159,7 @@ int hist_ilosc = 0;
 extern "C" void _start() {
     print("\n");
     print("==================================================\n");
-    print(" Bursztyn Shell v1.6 (Bursztyn OS Ring 3)\n");
+    print(" Bursztyn Shell v1.7 (Bursztyn OS Ring 3 - Siec)\n");
     print(" Wpisz 'pomoc', aby zobaczyc liste komend.\n");
     print("==================================================\n");
 
@@ -189,6 +189,7 @@ extern "C" void _start() {
             print("  uruchom [plik]- URUCHAMIA APLIKACJE (np. uruchom /programy/kalk.bur)\n");
             print("  historia      - ostatnie 5 polecen\n");
             print("  czysc         - czysci ekran terminala\n");
+            print("  ping [IP]     - WYSYLA PING DO SIECI (np. ping 10.0.2.2)\n");
             print("--- KATEGORIA: PLIKI ---\n");
             print("  utworz        - nowy, pusty plik / katalog\n");
             print("  zapisz        - dodaje tekst do pliku\n");
@@ -202,13 +203,32 @@ extern "C" void _start() {
             print("  cytat         - wczytuje cytaty z pliku\n");
             print("  losuj         - rzuca koscia (1-6)\n");
         }
+        else if (zaczyna_sie_od(bufor_komendy, "ping ")) {
+            int ip[4] = {0,0,0,0};
+            int czesc = 0;
+            int i = 5;
+            while(bufor_komendy[i] != '\0' && czesc < 4) {
+                if (bufor_komendy[i] == '.') { czesc++; i++; continue; }
+                if (bufor_komendy[i] >= '0' && bufor_komendy[i] <= '9') {
+                    ip[czesc] = ip[czesc] * 10 + (bufor_komendy[i] - '0');
+                }
+                i++;
+            }
+            print("Wysylanie sygnalu PING na podany adres IP...\n");
+            
+            // Wywołanie systemowe 11: Wysyłanie pingu z bezpiecznego Ring 3 do Jądra!
+            bws_wywolaj(11, ip[0], ip[1], ip[2], ip[3]);
+            
+            print("Sygnal zostal wyrzucony kablem! Zobacz glowne logi Systemu, by odczytac wynik.\n");
+        }
         else if (strcmp(bufor_komendy, "system")) {
             print("OS: Bursztyn OS x86_64\nJadro: Monolityczne, VMM Paging 4-lvl\n");
             print("Dysk: Bursztynowy System Plikow (BSP64), Bloki 4KB\n");
+            print("Siec: Intel PRO/1000 E1000 - Obsluga PING\n");
             print("Ochrona: Poziomy Zaufania Bursztyna (PZB) Aktywne.\n");
         }
         else if (strcmp(bufor_komendy, "wersja")) {
-            print("Bursztyn Shell v1.6 (Build: Ring 3 Freestanding)\n");
+            print("Bursztyn Shell v1.7 (Build: Ring 3 Freestanding z Siecia)\n");
         }
         else if (strcmp(bufor_komendy, "kto")) {
             print("Zalogowano jako: Gosc (Prawa: Przestrzen Uzytkownika Ring 3)\n");
@@ -336,7 +356,7 @@ extern "C" void _start() {
         }
         else if (strncmp(bufor_komendy, "usun ", 5)) {
             char sciezka[64]; formatuj_sciezke(&bufor_komendy[5], sciezka);
-            if (usun_twor(sciezka)) {
+            if (usun_plik(sciezka)) {
                 print("Usunieto obiekt: "); print(sciezka); print("\n");
             } else {
                 print("Blad: Nie mozna usunac (sprawdz PZB lub nazwe).\n");
@@ -351,7 +371,7 @@ extern "C" void _start() {
             char nowa[64]; pobierz_linie(nowa, 64); print("\n");
             
             if (zmien_nazwe_tworu(bezp_stara, nowa)) {
-                print("Pyslnie zmieniono nazwe.\n");
+                print("Pomyślnie zmieniono nazwe.\n");
             } else {
                 print("Blad: Blokada PZB lub brak podanego pliku.\n");
             }

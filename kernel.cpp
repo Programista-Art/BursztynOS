@@ -42,6 +42,10 @@ extern "C" uint8_t _binary_shell_bin_end[];
 // Prototyp funkcji uruchamiającej program z uwzględnieniem Systemu Uprawnień PZB oraz flagi z_syscalla
 extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka, uint8_t bzl_poziom, uint64_t flagi_praw, bool z_syscalla);
 
+// --- NOWE: FUNKCJE SIECIOWE (Karta Intel E1000) ---
+extern "C" void inicjalizuj_e1000();
+extern "C" void e1000_obsluz_odbior();
+
 void UIntToStr(uint64_t wartosc, char* bufor) {
     if (wartosc == 0) { bufor[0] = '0'; bufor[1] = '\0'; return; }
     int i = 0; char temp[32];
@@ -93,6 +97,9 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     inicjalizuj_kontroler_ahci();
     wczytaj_tapete_z_dysku();
 
+    // --- PODNIESIENIE INTERFEJSU SIECIOWEGO ---
+    inicjalizuj_e1000();
+
     uint64_t adres_wirtualny_dysku = 0x40000000; 
     uint32_t rozmiar_dysku = 2 * 1024 * 1024;    
 
@@ -130,7 +137,10 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     // UWAGA: Przekazujemy FALSE, ponieważ nie uruchamiamy tego z wnętrza procedury Syscall, lecz bezpośrednio z jądra!
     bws_uruchom_program_z_pliku("/shell.bur", 4, 0xFFFFFFFF, false);
 
+    // 10. Pętla bezczynności - Kernel sprawdza sieć (Polling)
     while (true) {
+        // Analiza czy karta sieciowa (DMA) zrzuciła nowe pakiety do RAM-u
+        e1000_obsluz_odbior(); 
         asm volatile ("hlt");
     }
 }

@@ -22,7 +22,12 @@ extern "C" {
     // Prototypy dla usuwania i zmiany nazwy
     bool usun_twor(const char* sciezka);
     bool zmien_nazwe_tworu(const char* sciezka, const char* nowa_nazwa);
-    bool bws_uruchom_program_z_pliku(const char* sciezka_pliku, uint8_t bzl_poziom, uint64_t flagi_praw);
+    
+    // POPRAWKA: Prawidłowa sygnatura z 4 argumentami (z_syscalla)
+    bool bws_uruchom_program_z_pliku(const char* sciezka_pliku, uint8_t bzl_poziom, uint64_t flagi_praw, bool z_syscalla);
+    
+    // NOWOŚĆ: Deklaracja wywołania sieciowego na zewnątrz funkcji!
+    void bws_siec_ping(uint8_t ip1, uint8_t ip2, uint8_t ip3, uint8_t ip4);
 }
 
 // Zewnetrzny odnosnik do punktu wejsciowego SYSCALL zakodowanego w Asemblerze
@@ -79,31 +84,26 @@ extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t ar
 
     switch(nr_funkcji) {
         case 1: {
-            // sys_wypisz_tekst(const char* tekst) - Zawsze dozwolone dla terminala
             wypisz_na_ekranie((const char*)arg1);
             kod_wyniku = 1; 
             break;
         }
         case 2: {
-            // sys_utworz_plik(const char* sciezka)
             if (!(aktywny_proces.uprawnienia & PRAWO_PLIKI_ZAPISZ)) {
                 wypisz_na_ekranie("\n[BWS Zablokowano] Brak uprawnienia PRAWO_PLIKI_ZAPISZ!\n");
                 return 0;
             }
             const char* sciezka = (const char*)arg1;
             
-            // PZB: Uzytkownicy (poziom 4 i wyzej) nie maja praw modyfikowania krytycznych folderow systemowych!
             if (aktywny_proces.poziom_zaufania >= PZB_UZYTKOWNIK &&
                 (sciezka_zaczyna_sie_od(sciezka, "/system") || sciezka_zaczyna_sie_od(sciezka, "/jadro"))) {
                 wypisz_na_ekranie("\n[PZB Odrzucono] Ring 3 probuje tworzyc pliki w obszarze systemowym!\n");
                 return 0; 
             }
-            bool result = utworz_plik(sciezka);
-            kod_wyniku = result ? 1 : 0;
+            kod_wyniku = utworz_plik(sciezka) ? 1 : 0;
             break;
         }
         case 3: {
-            // sys_zapisz_do_pliku(const char* sciezka, const char* dane, uint32_t dlugosc)
             if (!(aktywny_proces.uprawnienia & PRAWO_PLIKI_ZAPISZ)) {
                 wypisz_na_ekranie("\n[BWS Zablokowano] Brak uprawnienia PRAWO_PLIKI_ZAPISZ!\n");
                 return 0;
@@ -115,57 +115,45 @@ extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t ar
                 wypisz_na_ekranie("\n[PZB Odrzucono] Ring 3 probuje wprowadzac zmiany w plikach systemowych!\n");
                 return 0; 
             }
-            bool result = zapisz_do_pliku(sciezka, (const char*)arg2, (uint32_t)arg3);
-            kod_wyniku = result ? 1 : 0;
+            kod_wyniku = zapisz_do_pliku(sciezka, (const char*)arg2, (uint32_t)arg3) ? 1 : 0;
             break;
         }
         case 4: {
-            // sys_pobierz_znak()
             kod_wyniku = (uint64_t)pobierz_znak_klawiatury();
             break;
         }
         case 5: {
-            // sys_czytaj_z_pliku
             if (!(aktywny_proces.uprawnienia & PRAWO_PLIKI_CZYTAJ)) {
                 wypisz_na_ekranie("\n[BWS Zablokowano] Brak uprawnienia PRAWO_PLIKI_CZYTAJ!\n");
                 return 0;
             }
-            bool result = czytaj_z_pliku((const char*)arg1, (char*)arg2, (uint32_t)arg3);
-            kod_wyniku = result ? 1 : 0;
+            kod_wyniku = czytaj_z_pliku((const char*)arg1, (char*)arg2, (uint32_t)arg3) ? 1 : 0;
             break;
         }
         case 6: {
-            // sys_wylistuj_katalog
             if (!(aktywny_proces.uprawnienia & PRAWO_PLIKI_CZYTAJ)) {
                 wypisz_na_ekranie("\n[BWS Zablokowano] Brak uprawnienia PRAWO_PLIKI_CZYTAJ!\n");
                 return 0;
             }
-            bool result = wylistuj_katalog((const char*)arg1, (char*)arg2, (uint32_t)arg3);
-            kod_wyniku = result ? 1 : 0;
+            kod_wyniku = wylistuj_katalog((const char*)arg1, (char*)arg2, (uint32_t)arg3) ? 1 : 0;
             break;
         }
-        
         case 7: {
-            // sys_usun_twor(const char* sciezka) - NOWO
             if (!(aktywny_proces.uprawnienia & PRAWO_PLIKI_ZAPISZ)) {
                 wypisz_na_ekranie("\n[BWS Zablokowano] Brak uprawnienia PRAWO_PLIKI_ZAPISZ!\n");
                 return 0;
             }
             const char* sciezka = (const char*)arg1;
             
-            // Ochrona folderow systemowych
             if (aktywny_proces.poziom_zaufania >= PZB_UZYTKOWNIK &&
                 (sciezka_zaczyna_sie_od(sciezka, "/system") || sciezka_zaczyna_sie_od(sciezka, "/jadro"))) {
                 wypisz_na_ekranie("\n[PZB Odrzucono] Ring 3 probuje usuwac pliki systemowe!\n");
                 return 0; 
             }
-            bool result = usun_twor(sciezka);
-            kod_wyniku = result ? 1 : 0;
+            kod_wyniku = usun_twor(sciezka) ? 1 : 0;
             break;
         }
-        
         case 8: {
-            // sys_zmien_nazwe_tworu(const char* sciezka, const char* nowa_nazwa) - NOWO
             if (!(aktywny_proces.uprawnienia & PRAWO_PLIKI_ZAPISZ)) {
                 wypisz_na_ekranie("\n[BWS Zablokowano] Brak uprawnienia PRAWO_PLIKI_ZAPISZ!\n");
                 return 0;
@@ -173,20 +161,15 @@ extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t ar
             const char* sciezka = (const char*)arg1;
             const char* nowa_nazwa = (const char*)arg2;
             
-            // Ochrona folderow systemowych
             if (aktywny_proces.poziom_zaufania >= PZB_UZYTKOWNIK &&
                 (sciezka_zaczyna_sie_od(sciezka, "/system") || sciezka_zaczyna_sie_od(sciezka, "/jadro"))) {
                 wypisz_na_ekranie("\n[PZB Odrzucono] Ring 3 probuje zmieniac nazwy plikow systemowych!\n");
                 return 0; 
             }
-            bool result = zmien_nazwe_tworu(sciezka, nowa_nazwa);
-            kod_wyniku = result ? 1 : 0;
+            kod_wyniku = zmien_nazwe_tworu(sciezka, nowa_nazwa) ? 1 : 0;
             break;
         }
-        
         case 9: {
-            // sys_pobierz_czas(char* bufor) - BWS nr 9
-            // Umozliwia aplikacjom z Ring 3 odczyt czasu z plyty glownej
             czas_rtc czas;
             pobierz_czas_rtc(&czas);
             formatuj_czas_do_stringa(&czas, (char*)arg1);
@@ -194,28 +177,29 @@ extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t ar
             break;
         }
         case 10: {
-        // sys_uruchom_program(const char* sciezka) - PRZEŁĄCZANIE PROCESÓW!
-        if (!(aktywny_proces.uprawnienia & PRAWO_URUCHOM_PROGRAM)) {
-            wypisz_na_ekranie("\n[BWS Zablokowano] Brak uprawnienia PRAWO_URUCHOM_PROGRAM!\n");
-            return 0;
+            if (!(aktywny_proces.uprawnienia & PRAWO_URUCHOM_PROGRAM)) {
+                wypisz_na_ekranie("\n[BWS Zablokowano] Brak uprawnienia PRAWO_URUCHOM_PROGRAM!\n");
+                return 0;
+            }
+            const char* sciezka = (const char*)arg1;
+            
+            // Jądro zastępuje obecny proces w Ring 3 nowym procesem z dysku (przekazujemy argument 4: z_syscalla = true)
+            bool result = bws_uruchom_program_z_pliku(sciezka, PZB_UZYTKOWNIK, 0xFFFFFFFF, true);
+            
+            kod_wyniku = result ? 1 : 0;
+            break;
         }
-        const char* sciezka = (const char*)arg1;
-        
-        // Jądro zastępuje obecny proces w Ring 3 nowym procesem z dysku!
-        bool result = bws_uruchom_program_z_pliku(sciezka, PZB_UZYTKOWNIK, 0xFFFFFFFF);
-        
-        // Jeśli bws_uruchom_program_z_pliku się powiedzie, w procesorze zostanie wykonana instrukcja iretq
-        // i NIGDY tu nie wrócimy. Jeśli kod przejdzie dalej, znaczy to że plik nie istnieje lub jest uszkodzony.
-        kod_wyniku = result ? 1 : 0;
-        break;
+        case 11: {
+            // Bezpieczne, prawidłowe wywołanie funkcji sieciowej zadeklarowanej na górze pliku
+            bws_siec_ping((uint8_t)arg1, (uint8_t)arg2, (uint8_t)arg3, (uint8_t)arg4);
+            kod_wyniku = 1;
+            break;
         }
-
         default: {
             wypisz_na_ekranie("[!] Otrzymano nierozpoznany wektor z Ring 3!");
             kod_wyniku = (uint64_t)-1;
             break;
         }
     }
-
     return kod_wyniku;
 }
