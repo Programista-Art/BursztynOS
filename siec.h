@@ -5,8 +5,11 @@
 #pragma once
 #include <stdint.h>
 
+// Makra do obracania bajtów (Little Endian <-> Big Endian)
 #define HTONS(x) ((((x) & 0xFF) << 8) | (((x) >> 8) & 0xFF))
 #define HTONL(x) ((((x) & 0xFF) << 24) | (((x) & 0xFF00) << 8) | (((x) >> 8) & 0xFF00) | (((x) >> 24) & 0xFF))
+#define NTOHS(x) HTONS(x)
+#define NTOHL(x) HTONL(x)
 
 struct ethernet_header {
     uint8_t  cel_mac[6];
@@ -73,7 +76,6 @@ struct dhcp_header {
     uint8_t  options[64];   
 } __attribute__((packed));
 
-// --- NOWOŚĆ KROK 1: Nagłówek DNS ---
 struct dns_header {
     uint16_t id;
     uint16_t flags;
@@ -82,3 +84,34 @@ struct dns_header {
     uint16_t nscount;
     uint16_t arcount;
 } __attribute__((packed));
+
+// --- NOWOŚĆ KROK 1: Warstwa 4 (TCP) ---
+
+struct tcp_header {
+    uint16_t port_zrodlowy;
+    uint16_t port_docelowy;
+    uint32_t numer_sekwencyjny;    // Sequence Number (SEQ)
+    uint32_t numer_potwierdzenia;  // Acknowledgment Number (ACK)
+    uint8_t  przesuniecie_danych;  // Data Offset (długość nagłówka)
+    uint8_t  flagi;                // Flagi (FIN, SYN, RST, PSH, ACK, URG)
+    uint16_t rozmiar_okna;         // Window Size
+    uint16_t suma_kontrolna;       // Checksum
+    uint16_t wazny_wskaznik;       // Urgent Pointer
+} __attribute__((packed));
+
+// Unikalny wymóg TCP: "Pseudo-nagłówek" potrzebny tylko do liczenia sumy kontrolnej.
+// Nigdy nie jest wysyłany do sieci bezpośrednio jako struktura.
+struct tcp_pseudo_header {
+    uint8_t  zrodlo_ip[4];
+    uint8_t  cel_ip[4];
+    uint8_t  zero;
+    uint8_t  protokol; // Dla TCP wynosi 6
+    uint16_t dlugosc_tcp;
+} __attribute__((packed));
+
+// Flagi TCP
+#define TCP_FIN 0x01
+#define TCP_SYN 0x02
+#define TCP_RST 0x04
+#define TCP_PSH 0x08
+#define TCP_ACK 0x10

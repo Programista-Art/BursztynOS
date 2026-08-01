@@ -124,7 +124,7 @@ int hist_ilosc = 0;
 extern "C" void _start() {
     print("\n");
     print("==================================================\n");
-    print(" Powłoka Bursztynowa v1.8 (Ring 3 - DNS Klient)\n");
+    print(" Powłoka Bursztynowa v1.9.1 (Duży Bufor Odczytu)\n");
     print(" Wpisz 'pomoc', aby zobaczyć listę poleceń.\n");
     print("==================================================\n");
 
@@ -152,7 +152,10 @@ extern "C" void _start() {
             print("  historia      - wyświetla historię 5 ostatnich poleceń\n");
             print("  czysc         - czyści ekran terminala\n");
             print("  czas          - wyświetla aktualną godzinę z zegara RTC\n");
+            print("--- KATEGORIA: SIEĆ (INTERNET) ---\n");
             print("  ping [Cel]    - wysyła sygnał PING (np. ping 10.0.2.2 lub ping google.com)\n");
+            print("  pobierz [domena] [sciezka] [zapis_jako]\n");
+            print("                - pobiera plik z sieci (np. pobierz example.com / /test.html)\n");
             print("--- KATEGORIA: PLIKI ---\n");
             print("  utworz        - tworzy nowy, pusty plik lub katalog\n");
             print("  zapisz        - zapisuje wprowadzony tekst do pliku\n");
@@ -174,11 +177,8 @@ extern "C" void _start() {
             int ip[4] = {0,0,0,0};
             bool to_ip = true;
             
-            // Jeśli w haśle występują litery (a nie tylko cyfry/kropki), wzywamy DNS!
             for (int i = 0; cel[i] != '\0'; i++) {
-                if ((cel[i] < '0' || cel[i] > '9') && cel[i] != '.') {
-                    to_ip = false; break;
-                }
+                if ((cel[i] < '0' || cel[i] > '9') && cel[i] != '.') { to_ip = false; break; }
             }
             
             if (to_ip) {
@@ -193,21 +193,54 @@ extern "C" void _start() {
             } else {
                 print("Rozwiązywanie domeny DNS: "); print(cel); print("...\n");
                 uint8_t resolved[4] = {0, 0, 0, 0};
-                
-                // Wywołanie autorskiego BWS nr 12 - Zapytanie DNS do Jądra
                 if (bws_wywolaj(12, (uint64_t)cel, (uint64_t)resolved)) {
                     print("Sukces! Znaleziono zmapowany adres IP: ");
-                    char buf[16]; 
-                    int_do_str(resolved[0], buf); print(buf); print(".");
+                    char buf[16]; int_do_str(resolved[0], buf); print(buf); print(".");
                     int_do_str(resolved[1], buf); print(buf); print(".");
                     int_do_str(resolved[2], buf); print(buf); print(".");
                     int_do_str(resolved[3], buf); print(buf); print("\n");
-                    
                     print("Wysyłanie sygnału PING (ICMP)...\n");
                     bws_wywolaj(11, resolved[0], resolved[1], resolved[2], resolved[3]);
-                } else {
-                    print("Błąd: Nie udało się rozwiązać domeny DNS (Timeout lub brak serwera).\n");
-                }
+                } else { print("Błąd: Nie udało się rozwiązać domeny DNS.\n"); }
+            }
+        }
+        else if (zaczyna_sie_od(bufor_komendy, "pobierz ")) {
+            char domena[64] = {0}; char sciezka_http[64] = {0}; char sciezka_dyskowa[64] = {0};
+            int i = 8, j = 0;
+            
+            while (bufor_komendy[i] != ' ' && bufor_komendy[i] != '\0' && j < 63) domena[j++] = bufor_komendy[i++];
+            domena[j] = '\0';
+            if (bufor_komendy[i] == ' ') { i++; }
+            j = 0;
+            
+            while (bufor_komendy[i] != ' ' && bufor_komendy[i] != '\0' && j < 63) sciezka_http[j++] = bufor_komendy[i++];
+            sciezka_http[j] = '\0';
+            if (bufor_komendy[i] == ' ') { i++; }
+            j = 0;
+            
+            while (bufor_komendy[i] != ' ' && bufor_komendy[i] != '\0' && j < 63) sciezka_dyskowa[j++] = bufor_komendy[i++];
+            sciezka_dyskowa[j] = '\0';
+
+            if (domena[0] == '\0' || sciezka_http[0] == '\0' || sciezka_dyskowa[0] == '\0') {
+                print("Składnia: pobierz [domena] [sciezka_na_serwerze] [zapisz_jako]\n");
+                print("Przykład: pobierz example.com / /test.html\n");
+            } else {
+                print("1. Rozwiązywanie domeny DNS: "); print(domena); print("...\n");
+                uint8_t resolved_ip[4] = {0, 0, 0, 0};
+                
+                if (bws_wywolaj(12, (uint64_t)domena, (uint64_t)resolved_ip)) {
+                    print("2. Adres IP znaleziony. Nawiązywanie sesji TCP i pobieranie danych (HTTP)...\n");
+                    char bezp_sciezka[64]; formatuj_sciezke(sciezka_dyskowa, bezp_sciezka);
+                    
+                    uint64_t wynik = bws_wywolaj(13, (uint64_t)resolved_ip, (uint64_t)domena, (uint64_t)sciezka_http, (uint64_t)bezp_sciezka);
+                    
+                    if (wynik == 1) {
+                        print("3. SUKCES! Plik został pobrany z Internetu i utrwalony na dysku jako: "); print(bezp_sciezka); print("\n");
+                        print("Wpisz: czytaj "); print(bezp_sciezka); print(" aby zobaczyć jego zawartość!\n");
+                    } else {
+                        print("BLĄD: Serwer nie odpowiedział, zerwał połączenie, lub brak uprawnień dyskowych.\n");
+                    }
+                } else { print("BLĄD: Nie udało się rozwiązać domeny DNS.\n"); }
             }
         }
         else if (strcmp(bufor_komendy, "czas")) {
@@ -216,10 +249,10 @@ extern "C" void _start() {
         }
         else if (strcmp(bufor_komendy, "system")) {
             print("OS: Bursztyn OS x86_64\nJądro: Monolityczne, VMM Paging 4-lvl\n");
-            print("Sieć: Zintegrowany klient DHCP, ARP, ICMP oraz klient DNS (UDP)\n");
+            print("Sieć: Zintegrowany klient DHCP, ARP, ICMP oraz Klient HTTP (TCP/DNS)\n");
         }
         else if (strcmp(bufor_komendy, "wersja")) {
-            print("Powłoka Bursztynowa v1.8 (Build: DNS Resolver)\n");
+            print("Powłoka Bursztynowa v1.9.1 (Build: Sieć + Pobieranie TCP)\n");
         }
         else if (strcmp(bufor_komendy, "kto")) {
             print("Zalogowano jako: Administrator Systemu (Ring 3)\n");
@@ -268,12 +301,25 @@ extern "C" void _start() {
             if (wylistuj_katalog(sciezka, buf, 511)) { print("Zawartość źródła ("); print(sciezka); print("):\n"); print(buf); } 
             else print("Błąd: Katalog nie istnieje lub jest pusty.\n");
         }
+        // --- ZMODYFIKOWANA KOMENDA CZYTAJ (Zwiększony bufor) ---
         else if (strncmp(bufor_komendy, "czytaj ", 7)) {
             char sciezka[64]; formatuj_sciezke(&bufor_komendy[7], sciezka);
-            char buf[512]; for(int i=0; i<512; i++) buf[i] = 0; 
-            if (czytaj_plik(sciezka, buf, 511)) { print("--- "); print(sciezka); print(" ---\n"); print(buf); print("\n"); } 
-            else print("Błąd odczytu: Brak pliku.\n");
+            
+            // Rezerwujemy 4 KB na stosie! (Stos Ring 3 ma 16 KB, więc to bezpieczne)
+            // Usunięto 'static', które wywoływało Page Fault z powodu ograniczeń sekcji .bss.
+            char duzy_bufor[4096]; 
+            for(int i=0; i<4096; i++) duzy_bufor[i] = 0; 
+            
+            if (czytaj_plik(sciezka, duzy_bufor, 4095)) { 
+                print("--- "); print(sciezka); print(" ---\n"); 
+                print(duzy_bufor); 
+                print("\n"); 
+            } 
+            else {
+                print("Błąd odczytu: Brak pliku lub plik pusty.\n");
+            }
         }
+        // --------------------------------------------------------
         else if (strcmp(bufor_komendy, "utworz")) {
             print("Nazwa nowego pliku/folderu: "); char sciezka[64]; pobierz_linie(sciezka, 64); print("\n");
             char bezp[64]; formatuj_sciezke(sciezka, bezp);
