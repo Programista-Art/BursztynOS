@@ -25,9 +25,10 @@ extern "C" {
     
     // POPRAWKA: Prawidłowa sygnatura z 4 argumentami (z_syscalla)
     bool bws_uruchom_program_z_pliku(const char* sciezka_pliku, uint8_t bzl_poziom, uint64_t flagi_praw, bool z_syscalla);
-    
-    // NOWOŚĆ: Deklaracja wywołania sieciowego na zewnątrz funkcji!
+    // Funkcje sieciowe 
+    // Deklaracja wywołania sieciowego na zewnątrz funkcji!
     void bws_siec_ping(uint8_t ip1, uint8_t ip2, uint8_t ip3, uint8_t ip4);
+    bool bws_siec_dns(const char* domena, uint8_t* wyjsciowy_ip); 
 }
 
 // Zewnetrzny odnosnik do punktu wejsciowego SYSCALL zakodowanego w Asemblerze
@@ -193,6 +194,11 @@ extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t ar
             // Bezpieczne, prawidłowe wywołanie funkcji sieciowej zadeklarowanej na górze pliku
             bws_siec_ping((uint8_t)arg1, (uint8_t)arg2, (uint8_t)arg3, (uint8_t)arg4);
             kod_wyniku = 1;
+            break;
+        }
+        case 12: {
+            // Zlecenie Jądru operacji odpytania serwera DNS o domenę!
+            kod_wyniku = bws_siec_dns((const char*)arg1, (uint8_t*)arg2) ? 1 : 0;
             break;
         }
         default: {

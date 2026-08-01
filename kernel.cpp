@@ -42,9 +42,10 @@ extern "C" uint8_t _binary_shell_bin_end[];
 // Prototyp funkcji uruchamiającej program z uwzględnieniem Systemu Uprawnień PZB oraz flagi z_syscalla
 extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka, uint8_t bzl_poziom, uint64_t flagi_praw, bool z_syscalla);
 
-// --- NOWE: FUNKCJE SIECIOWE (Karta Intel E1000) ---
+// --- NOWE: FUNKCJE SIECIOWE (Karta Intel E1000 i DHCP) ---
 extern "C" void inicjalizuj_e1000();
 extern "C" void e1000_obsluz_odbior();
+extern "C" void uruchom_klienta_dhcp();
 
 void UIntToStr(uint64_t wartosc, char* bufor) {
     if (wartosc == 0) { bufor[0] = '0'; bufor[1] = '\0'; return; }
@@ -99,6 +100,9 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
 
     // --- PODNIESIENIE INTERFEJSU SIECIOWEGO ---
     inicjalizuj_e1000();
+    
+    // --- AKTYWACJA DHCP ZARAZ PO PODNIESIENIU KARTY! ---
+    uruchom_klienta_dhcp();
 
     uint64_t adres_wirtualny_dysku = 0x40000000; 
     uint32_t rozmiar_dysku = 2 * 1024 * 1024;    
