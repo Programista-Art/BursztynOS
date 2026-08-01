@@ -11,9 +11,18 @@ System jest rozwijany z myślą o architekturze x86-64, implementując własne J
 # Programy w Bursztynie powłoka systemowa shell i prosty notatnik
 
 ![alt](image/BursztynOs1.png)
+
 ![alt](image/BursztynOs2.png)
+
+### Pobranie strony avocado-code.com
+
 ![alt](image/BurstzynOS-http.png)
+
+### Ping strony
+
 ![alt](image/BursztynOS-ping.png)
+### Prosty kalkulator w Burstzyn OS z GUI.
+
 ![alt](image/kalkulator.png)
 
 
@@ -27,7 +36,7 @@ System jest rozwijany z myślą o architekturze x86-64, implementując własne J
 1. uruchom [plik]- uruchamia aplikację (np. uruchom /programy/kalk.bur
 1. historia – pokaże 5 ostatnich wpisanych przez Ciebie poleceń!
 1. czas - wyświetla aktualną godzinę z zegara RTC\n")
-1. # KATEGORIA: SIEĆ (INTERNET)
+1. ### KATEGORIA: SIEĆ (INTERNET)
 1. ping [nazwa strony] - wysyła sygnał PING (np. ping 10.0.2.2 lub ping google.com)
 1. pobierz [domena] [sciezka] [zapis_jako] - pobiera plik z sieci (np. pobierz example.com / /test.html)
 1. czysc - czyści ekran terminala
