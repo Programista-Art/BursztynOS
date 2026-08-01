@@ -12,16 +12,24 @@ System jest rozwijany z myślą o architekturze x86-64, implementując własne J
 
 ![alt](image/BursztynOs1.png)
 ![alt](image/BursztynOs2.png)
+![alt](image/BurstzynOS-http.png)
+![alt](image/BursztynOS-ping.png)
+![alt](image/kalkulator.png)
 
 
 
-
-## Dostępne 17 komend w Shellu
+## Dostępne 21 komend w Shellu
 1. pomoc - wyświetla dostępną listę komend.
 1. system - wypisuje informacje o architekturze Bursztyn OS.
 1. wersja - krótka informacja o wersji powłoki i OS
 1. kto - odpowie, na jakich prawach aktualnie działasz.
+1. pci - wyświetla urządzenia na płycie głównej (magistrala PCI)\n");
+1. uruchom [plik]- uruchamia aplikację (np. uruchom /programy/kalk.bur
 1. historia – pokaże 5 ostatnich wpisanych przez Ciebie poleceń!
+1. czas - wyświetla aktualną godzinę z zegara RTC\n")
+1. # KATEGORIA: SIEĆ (INTERNET)
+1. ping [nazwa strony] - wysyła sygnał PING (np. ping 10.0.2.2 lub ping google.com)
+1. pobierz [domena] [sciezka] [zapis_jako] - pobiera plik z sieci (np. pobierz example.com / /test.html)
 1. czysc - czyści ekran terminala
 1. utworz - tworzy nowy, pusty plik na RAM-Dysku.
 1. zapisz - zapisuje plik
@@ -30,10 +38,9 @@ System jest rozwijany z myślą o architekturze x86-64, implementując własne J
 1. usun [sciezka]- usuwa plik lub katalog
 1. zmien_nazwe - zmienia nazwę (kreator)
 1. gdzie - ścieżka obecnego katalogu
-1. pisz [tekst] - wypisze z powrotem na ekran to, co wpiszesz po spacji.
-1. cytat - wypisze losowy, motywujący cytat programistyczny.
-1. losuj - rzuci wirtualną sześciościenną kością.
-1. pci - wypisze podłączone urządzenia
+1. pisz [tekst] - wypisuje podany tekst na ekran
+1. cytat - wczytuje i wyświetla cytaty z pliku
+1. losuj - rzuca wirtualną kością (wynik 1-6).
 
     
 
@@ -50,6 +57,7 @@ Poniższe pliki zawierają pełną specyfikację techniczną, opisy mechanizmów
 7. [07_ekosystem_i_formaty.md](docs/07_ekosystem_i_formaty.md) – Specyfikacja binarna `.bur`, struktura paczek `.cebula` oraz manifesty `opis.aplikacji`.
 8. [08_bursztynowy_slownik_i_architektura.md](docs/08_bursztynowy_slownik_i_architektura.md) – Oficjalny słownik pojęć rdzennych (Teczka, Włókna, Planista) oraz strategia pełnego wdrożenia UTF-8.
 9. [09_tryb_graficzny.md](docs/09_tryb_graficzny.md) - Tryb Graficzny i Składacz Obrazu
+10. [10_siec.md](docs/10_siec.md) - Sieć w Bursztyn OS
 
 ## 🛠️ Architektura w pigułce
 
