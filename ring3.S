@@ -14,24 +14,24 @@
  * RDX = flaga z_syscalla (1 = wykonaj swapgs, 0 = nie wykonuj)
  */
 przejdz_do_ring3:
+    /* Ustawiamy segmenty danych dla Ring 3. 
+       UWAGA: W 64-bit NIE RUSZAMY FS i GS! GS jest zarządzany przez SWAPGS! */
     mov $0x1B, %ax
     mov %ax, %ds
     mov %ax, %es
-    mov %ax, %fs
-    mov %ax, %gs
 
-    pushq $0x1B      
-    pushq %rsi       
+    pushq $0x1B      /* SS (Segment Stosu Ring 3) */
+    pushq %rsi       /* RSP (Szczyt stosu Ring 3) */
     
     pushfq
     popq %rax
-    orq $0x200, %rax
-    pushq %rax       
+    orq $0x200, %rax /* Włącz flagę przerwań (IF) */
+    pushq %rax       /* RFLAGS */
     
-    pushq $0x23      
-    pushq %rdi       
+    pushq $0x23      /* CS (Segment Kodu Ring 3) */
+    pushq %rdi       /* RIP (Punkt wejścia) */
 
-    /* TESTUJ CZY WYMAGANY JEST SWAPGS PRZED SKOKIEM */
+    /* Jeśli z_syscalla == true, wykonaj SWAPGS aby przywrócić GS użytkownika */
     test %rdx, %rdx
     jz brak_swapgs
     swapgs

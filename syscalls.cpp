@@ -124,9 +124,10 @@ extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t ar
         case 9: {
             czas_rtc czas; pobierz_czas_rtc(&czas); formatuj_czas_do_stringa(&czas, (char*)arg1); kod_wyniku = 1; break;
         }
+        // OBSŁUGA SYSCALL NR 10 (uruchom program)
         case 10: {
-            if (!(aktywny_proces.uprawnienia & PRAWO_URUCHOM_PROGRAM)) return 0;
-            kod_wyniku = bws_uruchom_program_z_pliku((const char*)arg1, PZB_UZYTKOWNIK, 0xFFFFFFFF, true) ? 1 : 0; break;
+            const char* sciezka = (const char*)arg1;
+            return bws_uruchom_program_z_pliku(sciezka, PZB_UZYTKOWNIK, 0xFFFFFFFF, true);
         }
         case 11: {
             bws_siec_ping((uint8_t)arg1, (uint8_t)arg2, (uint8_t)arg3, (uint8_t)arg4); kod_wyniku = 1; break;

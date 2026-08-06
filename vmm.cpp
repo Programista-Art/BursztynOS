@@ -89,11 +89,9 @@ void InicjalizujVMM() {
     uint64_t adres_bazy = (uint64_t)globalne_pml4;
     asm volatile("mov %0, %%cr3" : : "r"(adres_bazy) : "memory");
 
-    // FAZA 2: Bezpieczne rozszerzenie pamięci do 256 MB.
-    // Skoro widzimy już wolny RAM aż do 16 MB, system może bez problemu 
-    // pobierać ramki np. z 6. czy 10. Megabajta, a funkcja WyzerujStrone()
-    // nie spowoduje już błędu Triple/Page Fault!
-    for (uint64_t i = 4096; i < 65536; i++) { // 65536 ramek = potężne 256 MB
+    // FAZA 2: Bezpieczne rozszerzenie pamięci do 4 GB.
+    // 1048576 ramek * 4KB = 4GB, co pokrywa się z limitem MAX_RAMEK w Twoim pmm.cpp
+    for (uint64_t i = 4096; i < 1048576; i++) { 
         void* ptr = (void*)(i * ROZMIAR_RAMKI);
         ZmapujStrone(ptr, ptr, FLAGA_OBECNA | FLAGA_ZAPIS);
     }

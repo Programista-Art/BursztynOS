@@ -5,10 +5,12 @@ LD = x86_64-linux-gnu-ld
 OBJCOPY = x86_64-linux-gnu-objcopy
 
 # Flagi kompilatora C++ (Freestanding, brak standardowej biblioteki)
-CXXFLAGS = -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2
+# CXXFLAGS = -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2
+# Flagi kompilatora C++ (Freestanding, brak standardowej biblioteki)
+CXXFLAGS = -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none
 
 # Lista wszystkich skompilowanych obiektów jądra (BEZ KALKULATORA!)
-OBJS = boot.o gdt.o tss.o apic.o idt.o przerwania.o e1000.o siec.o klawiatura.o mysz.o zegar-rtc.o pmm.o vmm.o psf.o grafika.o syscall.o syscalls.o pci.o ahci.o ring3.o loader.o kernel.o shell_blob.o
+OBJS = boot.o gdt.o tss.o apic.o idt.o przerwania.o e1000.o siec.o klawiatura.o mysz.o notatnik_blob.o zegar-rtc.o pmm.o vmm.o psf.o grafika.o syscall.o syscalls.o pci.o ahci.o ring3.o loader.o kernel.o shell_blob.o
 
 # Główny cel domyślny
 all: system_operacyjny.bin
@@ -29,6 +31,15 @@ shell_blob.o: shell_tmp.o
 	$(LD) -T shell_linker.ld -nostdlib -no-pie shell_tmp.o -o shell.elf
 	$(OBJCOPY) -O binary shell.elf shell.bin
 	$(LD) -r -b binary shell.bin -o shell_blob.o
+
+# === BUDOWANIE NOTATNIKA AVOCADO (RING 3) ===
+notatnik_tmp.o: notatnik.cpp
+	$(CXX) $(CXXFLAGS) -fno-pie -c notatnik.cpp -o notatnik_tmp.o
+
+notatnik_blob.o: notatnik_tmp.o
+	$(LD) -T notatnik_linker.ld -nostdlib -no-pie notatnik_tmp.o -o notatnik.elf
+	$(OBJCOPY) -O binary notatnik.elf notatnik.bin
+	$(LD) -r -b binary notatnik.bin -o notatnik_blob.o	
 
 # === KONSOLIDACJA JĄDRA ===
 system_operacyjny.bin: $(OBJS)

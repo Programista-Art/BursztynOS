@@ -39,6 +39,9 @@ extern "C" bool utworz_katalog(const char* sciezka);
 extern "C" uint8_t _binary_shell_bin_start[];
 extern "C" uint8_t _binary_shell_bin_end[];
 
+extern "C" uint8_t _binary_notatnik_bin_start[];
+extern "C" uint8_t _binary_notatnik_bin_end[];
+
 // Prototyp funkcji uruchamiającej program z uwzględnieniem Systemu Uprawnień PZB oraz flagi z_syscalla
 extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka, uint8_t bzl_poziom, uint64_t flagi_praw, bool z_syscalla);
 
@@ -103,6 +106,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     
     // --- AKTYWACJA DHCP ZARAZ PO PODNIESIENIU KARTY! ---
     uruchom_klienta_dhcp();
+    WypiszLog("[SIEC] Stos TCP/IP (DHCP, ARP, ICMP, DNS) w pelni operacyjny.");
 
     uint64_t adres_wirtualny_dysku = 0x40000000; 
     uint32_t rozmiar_dysku = 2 * 1024 * 1024;    
@@ -137,9 +141,40 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     uint64_t shell_rozmiar = (uint64_t)(_binary_shell_bin_end - _binary_shell_bin_start);
     zapisz_do_pliku("/shell.bur", (const char*)_binary_shell_bin_start, shell_rozmiar);
     WypiszLog("[BSP] Wbudowana Powloka gotowa do odczytu z dysku.");
+  
+  const char* manifest_notatnika = 
+        "nazwa = \"Notatnik\"\n"
+        "autor = \"Programista Art\"\n"
+        "wersja = \"0.1\"\n"
+        "poziom_zaufania = 4\n"
+        "plik_startowy = \"notatnik.bur\"\n"
+        "uprawnienia = [\n"
+        "    \"okna\",\n"
+        "    \"pliki_czytaj\",\n"
+        "    \"pliki_zapisz\"\n"
+        "]\n";
+        
+    int len_manifest = 0;
+    while (manifest_notatnika[len_manifest] != '\0') len_manifest++;
+    
+    // Zapis manifestu
+    utworz_plik("/opis_notatnika.txt");
+    zapisz_do_pliku("/opis_notatnika.txt", manifest_notatnika, len_manifest);
 
-    // UWAGA: Przekazujemy FALSE, ponieważ nie uruchamiamy tego z wnętrza procedury Syscall, lecz bezpośrednio z jądra!
-    bws_uruchom_program_z_pliku("/shell.bur", 4, 0xFFFFFFFF, false);
+    // Pobranie PRAWIDŁOWEGO rozmiaru wyliczonego przez czysty GNU Linker
+    uint64_t notatnik_rozmiar = (uint64_t)(_binary_notatnik_bin_end - _binary_notatnik_bin_start);
+    
+    // Zapis binarnego, natywnego pliku z kodem maszynowym .bur
+    utworz_plik("/notatnik.bur");
+    zapisz_do_pliku("/notatnik.bur", (const char*)_binary_notatnik_bin_start, notatnik_rozmiar);
+    
+    WypiszLog("[BSP] Aplikacja Notatnik zainstalowana w glownym katalogu (/)!");
+
+    // =========================================================
+    
+    // Start Powłoki Ring 3
+    bws_uruchom_program_z_pliku("/shell.bur", PZB_UZYTKOWNIK, 0xFFFFFFFF, false);
+
 
     // 10. Pętla bezczynności - Kernel sprawdza sieć (Polling)
     while (true) {
