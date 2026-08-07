@@ -24,7 +24,6 @@ void PokazKursor();
 void OdswiezEkran();
 void PrzeniesNaEkran();
 void PrzeniesFragmentNaEkran(int x, int y, int szer, int wys);
-void DopiszZnakDoEdytora(char c);
 void rysuj_zegar_rtc();
 
 // ==================== STRUKTURY OKIEN ====================
@@ -38,38 +37,20 @@ struct Okno {
     bool zmaksymalizowane;
 };
 
-// Skrojone na miarę okienko Kalkulatora Graficznego
-static Okno okna[3] = {
-    { 20, 20, 660, 360,  0,0,0,0, "Terminal", "Powłoka Bursztynowa (Ring 3 Terminal)", 0x001A0B00, true, false },
-    { 180, 80, 560, 400, 0,0,0,0, "Edytor", "Edytor Avocado - Nowy Plik", 0x00280F00, true, false },
-    { 300, 150, 320, 380, 0,0,0,0, "Kalkulator", "Kalkulator Systemowy", 0x000A1015, false, false } 
+// Tylko jedno awaryjne okno Jądra - Terminal!
+static Okno okna[1] = {
+    { 20, 20, 660, 360,  0,0,0,0, "Terminal", "Powłoka Bursztynowa (Ring 3 Terminal)", 0x001A0B00, true, false }
 };
 
-static int z_order[3] = {0, 1, 2}; 
+static int z_order[1] = {0}; 
 
-// ==================== ZMIENNE MENU BURSZTYN ====================
-static bool menu_otwarte = false;
-static char menu_szukaj[32] = {0};
-static int  menu_szukaj_len = 0;
-
-struct MenuApp {
-    int id_okna;
-    const char* nazwa;
-};
-static const MenuApp menu_aplikacje[3] = {
-    {0, "Powłoka Bursztynowa"},
-    {1, "Edytor Avocado"},
-    {2, "Kalkulator"}
-};
-static int aktualne_menu_y[3] = {-1, -1, -1};
-
+// ==================== ZMIENNE ====================
 static int okno_przeciagane = -1;
 static int chwyt_x = 0;
 static int chwyt_y = 0;
-
 static bool lewy_wcisniety = false;
 
-// ==================== PAMIEC TERMINALA I EDYTORA ====================
+// ==================== PAMIEC TERMINALA ====================
 struct ZnakTerminala {
     char znak;
     uint32_t kolor;
@@ -79,128 +60,6 @@ struct ZnakTerminala {
 static ZnakTerminala term_buf[MAX_ROWS][MAX_COLS];
 static int term_r = 0, term_c = 0;
 static int term_max_r = 25, term_max_c = 80;
-
-static ZnakTerminala edit_buf[MAX_ROWS][MAX_COLS];
-static int edit_r = 0, edit_c = 0;
-static int edit_max_r = 25, edit_max_c = 80;
-
-// ==================== LOGIKA KALKULATORA GRAFICZNEGO ====================
-static char calc_display[64] = "0";     // To co widać na ekranie
-static char calc_num_buf[32] = "0";     // Liczba aktualnie wpisywana
-static int  calc_op1 = 0;               // Pierwszy argument
-static char calc_op = 0;                // Znak operatora
-static int  calc_state = 0;             // 0: start/num1, 1: op pressed, 2: num2, 3: wynik
-
-const char* calc_btns[16] = {
-    "7", "8", "9", "/",
-    "4", "5", "6", "*",
-    "1", "2", "3", "-",
-    "C", "0", "=", "+"
-};
-
-void calc_append_str(char* dest, const char* src) {
-    int i = 0; while(dest[i]) i++;
-    int j = 0; while(src[j] && i < 62) dest[i++] = src[j++];
-    dest[i] = '\0';
-}
-
-void calc_set_str(char* dest, const char* src) {
-    int i = 0; while(src[i] && i < 62) { dest[i] = src[i]; i++; }
-    dest[i] = '\0';
-}
-
-int calc_str_to_int(const char* str) {
-    int res = 0; int i = 0; bool neg = false;
-    if (str[i] == '-') { neg = true; i++; }
-    while (str[i] >= '0' && str[i] <= '9') { res = res * 10 + (str[i] - '0'); i++; }
-    return neg ? -res : res;
-}
-
-void calc_int_to_str(int val, char* buf) {
-    if (val == 0) { buf[0] = '0'; buf[1] = '\0'; return; }
-    int i = 0; bool neg = false;
-    if (val < 0) { neg = true; val = -val; }
-    char temp[32];
-    while (val > 0) { temp[i++] = (val % 10) + '0'; val /= 10; }
-    int j = 0;
-    if (neg) buf[j++] = '-';
-    while (i > 0) buf[j++] = temp[--i];
-    buf[j] = '\0';
-}
-
-void KalkulatorKlik(char btn) {
-    if (btn >= '0' && btn <= '9') {
-        if (calc_state == 0 || calc_state == 3) {
-            if (calc_state == 3 || (calc_num_buf[0] == '0' && calc_num_buf[1] == '\0')) {
-                calc_num_buf[0] = btn; calc_num_buf[1] = '\0';
-                calc_set_str(calc_display, calc_num_buf);
-            } else {
-                char b[2] = {btn, 0};
-                calc_append_str(calc_num_buf, b);
-                calc_append_str(calc_display, b);
-            }
-            calc_state = 0;
-        } else if (calc_state == 1) { 
-            calc_num_buf[0] = btn; calc_num_buf[1] = '\0';
-            char b[2] = {btn, 0};
-            calc_append_str(calc_display, b);
-            calc_state = 2;
-        } else if (calc_state == 2) {
-            if (!(calc_num_buf[0] == '0' && calc_num_buf[1] == '\0')) {
-                char b[2] = {btn, 0};
-                calc_append_str(calc_num_buf, b);
-                calc_append_str(calc_display, b);
-            }
-        }
-    } else if (btn == 'C' || btn == 'c') {
-        calc_set_str(calc_display, "0"); calc_set_str(calc_num_buf, "0");
-        calc_op1 = 0; calc_op = 0; calc_state = 0;
-    } else if (btn == '+' || btn == '-' || btn == '*' || btn == '/') {
-        if (calc_state == 0) {
-            calc_op1 = calc_str_to_int(calc_num_buf); calc_op = btn; calc_state = 1;
-            char b[2] = {btn, 0}; calc_append_str(calc_display, b); // Usunięcie spacji!
-        } else if (calc_state == 1) {
-            calc_op = btn;
-            int len = 0; while(calc_display[len]) len++;
-            if (len >= 1) calc_display[len-1] = btn; // Zmiana operatora w locie
-        } else if (calc_state == 2) {
-            int op2 = calc_str_to_int(calc_num_buf);
-            int res = 0; bool ok = true;
-            if (calc_op == '+') res = calc_op1 + op2;
-            if (calc_op == '-') res = calc_op1 - op2;
-            if (calc_op == '*') res = calc_op1 * op2;
-            if (calc_op == '/') { if(op2 != 0) res = calc_op1 / op2; else ok = false; }
-            
-            if (!ok) { calc_set_str(calc_display, "ERR"); calc_state = 3; } 
-            else {
-                calc_op1 = res; calc_op = btn;
-                calc_int_to_str(res, calc_num_buf);
-                calc_set_str(calc_display, calc_num_buf);
-                char b[2] = {btn, 0}; calc_append_str(calc_display, b);
-                calc_state = 1;
-            }
-        } else if (calc_state == 3) {
-            if (calc_display[0] == 'E') { calc_op1 = 0; calc_set_str(calc_display, "0"); calc_set_str(calc_num_buf, "0"); } 
-            else { calc_op1 = calc_str_to_int(calc_display); }
-            calc_op = btn;
-            char b[2] = {btn, 0}; calc_append_str(calc_display, b);
-            calc_state = 1;
-        }
-    } else if (btn == '=' || btn == '\n' || btn == '\r') {
-        if (calc_state == 2) {
-            int op2 = calc_str_to_int(calc_num_buf);
-            int res = 0; bool ok = true;
-            if (calc_op == '+') res = calc_op1 + op2;
-            if (calc_op == '-') res = calc_op1 - op2;
-            if (calc_op == '*') res = calc_op1 * op2;
-            if (calc_op == '/') { if(op2 != 0) res = calc_op1 / op2; else ok = false; }
-            
-            if (!ok) calc_set_str(calc_display, "ERR");
-            else { calc_int_to_str(res, calc_num_buf); calc_set_str(calc_display, calc_num_buf); }
-            calc_state = 3; calc_op = 0;
-        }
-    }
-}
 
 // ==================== KURSOR I MYSZ ====================
 static int mysz_x = 500;
@@ -223,29 +82,6 @@ static const uint8_t kursor_bitmapa[16][16] = {
 };
 
 // ==================== ZARZADZANIE BUFORAMI TEKSTOWYMI ====================
-void DopiszZnakDoEdytora(char c) {
-    if (c == '\n' || c == '\r') { edit_r++; edit_c = 0; }
-    else if (c == '\b') {
-        if (edit_c > 0) { 
-            edit_c--; edit_buf[edit_r][edit_c].znak = 0; 
-            if (edit_c > 0 && (edit_buf[edit_r][edit_c-1].znak & 0xE0) == 0xC0) { edit_c--; edit_buf[edit_r][edit_c].znak = 0; }
-        } 
-        else if (edit_r > 0) {
-            edit_r--; edit_c = edit_max_c - 1;
-            while(edit_c > 0 && edit_buf[edit_r][edit_c].znak == 0) edit_c--;
-            if (edit_buf[edit_r][edit_c].znak != 0) edit_c++;
-        }
-    } else {
-        edit_buf[edit_r][edit_c].znak = c; edit_buf[edit_r][edit_c].kolor = 0x00D1D5DB; edit_c++;
-        if (edit_c >= edit_max_c) { edit_r++; edit_c = 0; }
-    }
-    if (edit_r >= edit_max_r) {
-        for(int r = 1; r < edit_max_r; r++) { for(int c = 0; c < edit_max_c; c++) edit_buf[r-1][c] = edit_buf[r][c]; }
-        for(int c = 0; c < edit_max_c; c++) edit_buf[edit_max_r-1][c].znak = 0;
-        edit_r = edit_max_r - 1;
-    }
-}
-
 void DopiszDoBufora(const char* tekst, uint32_t kolor) {
     for(int i = 0; tekst[i] != '\0'; i++) {
         if (tekst[i] == '\n') { term_r++; term_c = 0; }
@@ -268,9 +104,7 @@ void DopiszDoBufora(const char* tekst, uint32_t kolor) {
     }
 }
 
-// ==================== ZMODYFIKOWANA FUNKCJA LOGÓW ====================
 void wypisz_log(const char* tekst) {
-    // KRYTYCZNA POPRAWKA: Wysyłanie logów bezpośrednio do terminala Linuksa!
     SerialLog(tekst);
     SerialLog("\n");
 
@@ -292,7 +126,13 @@ void PrzeniesFragmentNaEkran(int x, int y, int szer, int wys) {
     if(!lfb || !backbuffer) return;
     int start_x = x < 0 ? 0 : x; int start_y = y < 0 ? 0 : y;
     int end_x = x + szer; int end_y = y + wys;
-    if(end_x > (int)lfb_szerokosc) end_x = lfb_szerokosc; if(end_y > (int)lfb_wysokosc) end_y = lfb_wysokosc;
+    
+    if(end_x > (int)lfb_szerokosc) {
+        end_x = lfb_szerokosc; 
+    }
+    if(end_y > (int)lfb_wysokosc) {
+        end_y = lfb_wysokosc;
+    }
 
     int bajtow_na_piksel = lfb_bpp / 8;
     for(int rzad = start_y; rzad < end_y; rzad++) {
@@ -329,7 +169,13 @@ uint32_t PobierzPiksel(int x, int y) {
 void RysujProstokat(int px, int py, int szer, int wys, uint32_t kolor) {
     int start_x = px < 0 ? 0 : px; int start_y = py < 0 ? 0 : py;
     int end_x = px + szer; int end_y = py + wys;
-    if (end_x > (int)lfb_szerokosc) end_x = lfb_szerokosc; if (end_y > (int)lfb_wysokosc) end_y = lfb_wysokosc;
+    
+    if (end_x > (int)lfb_szerokosc) {
+        end_x = lfb_szerokosc; 
+    }
+    if (end_y > (int)lfb_wysokosc) {
+        end_y = lfb_wysokosc;
+    }
 
     for(int y = start_y; y < end_y; y++) {
         for(int x = start_x; x < end_x; x++) PostawPiksel(x, y, kolor);
@@ -372,53 +218,21 @@ void WypiszTekst(const char* tekst, int px, int py, uint32_t kolor_tekstu, int s
     }
 }
 
-static bool ZawieraTekst(const char* pelny_tekst, const char* szukany) {
-    if (szukany[0] == '\0') return true; 
-    for (int i = 0; pelny_tekst[i] != '\0'; i++) {
-        int j = 0;
-        while (szukany[j] != '\0' && pelny_tekst[i + j] != '\0') {
-            char t = pelny_tekst[i + j]; char s = szukany[j];
-            if (t >= 'A' && t <= 'Z') t += 32; if (s >= 'A' && s <= 'Z') s += 32;
-            if (t != s) break; j++;
-        }
-        if (szukany[j] == '\0') return true; 
-    }
-    return false;
-}
-
 void rysuj_zegar_rtc() {
-    czas_rtc czas; pobierz_czas_rtc(&czas);
-    char bufor_czasu[16]; formatuj_czas_do_stringa(&czas, bufor_czasu);
+    czas_rtc czas; 
+    pobierz_czas_rtc(&czas);
+    char bufor_czasu[16]; 
+    formatuj_czas_do_stringa(&czas, bufor_czasu);
     
-    int zegar_x = lfb_szerokosc - 150; int zegar_y = lfb_wysokosc - 32;
-    RysujProstokat(zegar_x, zegar_y - 3, 140, 32, 0x00280F00); 
-    WypiszTekst(bufor_czasu, zegar_x, zegar_y, 0x00FFBF00, 2);
-}
-
-void RysujMenu() {
-    if (!menu_otwarte) return;
-    int menu_szer = 300; int menu_wys = 400;
-    int menu_x = 0; int menu_y = lfb_wysokosc - 40 - menu_wys;
-
-    RysujProstokat(menu_x, menu_y, menu_szer, menu_wys, 0x008A5A00);             
-    RysujProstokat(menu_x + 2, menu_y + 2, menu_szer - 4, menu_wys - 4, 0x001A0B00); 
-
-    RysujProstokat(menu_x + 10, menu_y + 10, menu_szer - 20, 36, 0x00280F00); 
-    WypiszTekst("Szukaj:", menu_x + 16, menu_y + 12, 0x008A5A00, 1);
-    WypiszTekst(menu_szukaj, menu_x + 130, menu_y + 12, 0x00D1D5DB, 1);
-    if (menu_otwarte) RysujProstokat(menu_x + 130 + (menu_szukaj_len * 9), menu_y + 28, 9, 2, 0x00FFBF00);
-    RysujProstokat(menu_x + 10, menu_y + 60, menu_szer - 20, 2, 0x008A5A00); 
-
-    int rysuj_y = menu_y + 70;
-    for (int i = 0; i < 3; i++) {
-        if (ZawieraTekst(menu_aplikacje[i].nazwa, menu_szukaj)) {
-            aktualne_menu_y[i] = rysuj_y; 
-            RysujProstokat(menu_x + 10, rysuj_y, menu_szer - 20, 40, 0x00280F00); 
-            WypiszTekst("> ", menu_x + 20, rysuj_y + 12, 0x00FFBF00, 1);
-            WypiszTekst(menu_aplikacje[i].nazwa, menu_x + 50, rysuj_y + 12, 0x00FFBF00, 1);
-            rysuj_y += 50; 
-        } else { aktualne_menu_y[i] = -1; }
-    }
+    int zegar_x = lfb_szerokosc - 150; 
+    int zegar_y = lfb_wysokosc - 32;
+    
+    // Zegarmistrzowski kamuflaż: Rysujemy tło identyczne jak Pasek Zadań!
+    RysujProstokat(zegar_x, lfb_wysokosc - 40, 150, 40, 0x001A0B00); // Tło paska
+    RysujProstokat(zegar_x, lfb_wysokosc - 40, 150, 2, 0x00E58A00);  // Złota ramka na górze
+    
+    // Rysujemy żółty tekst zegara
+    WypiszTekst(bufor_czasu, zegar_x + 10, zegar_y, 0x00FFBF00, 2);
 }
 
 void RysujOkno(int id) {
@@ -426,7 +240,7 @@ void RysujOkno(int id) {
     int px = okna[id].x; int py = okna[id].y; int szer = okna[id].szer; int wys = okna[id].wys;
     if (szer < 10 || wys < 40) return;
     
-    bool aktywne = (z_order[2] == id);
+    bool aktywne = (z_order[0] == id);
     uint32_t kolor_paska = aktywne ? 0x00FFBF00 : 0x008A5A00;
     uint32_t kolor_tekstu_paska = aktywne ? 0x001A0B00 : 0x00D1D5DB;
 
@@ -434,15 +248,13 @@ void RysujOkno(int id) {
     RysujProstokat(px + 2, py + 2, szer - 4, 24, kolor_paska);  
     WypiszTekst(okna[id].tytul, px + 8, py + 4, kolor_tekstu_paska, 1);         
     
-    int min_btn_x = (id == 2) ? (px + szer - 50) : (px + szer - 74);
+    int min_btn_x = (px + szer - 74);
     
     RysujProstokat(min_btn_x, py + 4, 20, 20, 0x00E58A00); 
     WypiszTekst("-", min_btn_x + 4, py + 6, 0x001A0B00, 1);
     
-    if (id != 2) {
-        RysujProstokat(px + szer - 50, py + 4, 20, 20, 0x00E58A00); 
-        WypiszTekst(okna[id].zmaksymalizowane ? "v" : "^", px + szer - 46, py + 6, 0x001A0B00, 1);
-    }
+    RysujProstokat(px + szer - 50, py + 4, 20, 20, 0x00E58A00); 
+    WypiszTekst(okna[id].zmaksymalizowane ? "v" : "^", px + szer - 46, py + 6, 0x001A0B00, 1);
     
     RysujProstokat(px + szer - 26, py + 4, 20, 20, 0x00AA0000); 
     WypiszTekst("X", px + szer - 22, py + 6, 0x00FFFFFF, 1);
@@ -477,37 +289,6 @@ void RysujTekstZBufora(ZnakTerminala buf[][MAX_COLS], int max_r, int max_c, int 
     }
 }
 
-// Generowanie Wyglądu Graficznego Kalkulatora
-void RysujKalkulatorGUI(int px, int py, int szer, int wys) {
-    RysujProstokat(px + 10, py + 35, szer - 20, 50, 0x00020503);
-    
-    int len = 0; while(calc_display[len]) len++;
-    int text_x = px + szer - 20 - (len * 18); 
-    if (text_x < px + 15) text_x = px + 15; 
-    
-    WypiszTekst(calc_display, text_x, py + 45, 0x00FFBF00, 2);
-
-    int start_x = px + 10;
-    int start_y = py + 95;
-    int bw = (szer - 50) / 4;
-    int bh = (wys - 140) / 4;
-
-    for(int row=0; row<4; row++) {
-        for(int col=0; col<4; col++) {
-            int bx = start_x + col*(bw+10);
-            int by = start_y + row*(bh+10);
-            
-            uint32_t btn_color = 0x00280F00;
-            if (calc_btns[row*4 + col][0] == 'C') btn_color = 0x008A2000;
-            else if (calc_btns[row*4 + col][0] == '=') btn_color = 0x00E58A00;
-            
-            RysujProstokat(bx, by, bw, bh, btn_color);
-            uint32_t txt_color = (btn_color == 0x00E58A00) ? 0x001A0B00 : 0x00D1D5DB;
-            WypiszTekst(calc_btns[row*4 + col], bx + bw/2 - 8, by + bh/2 - 8, txt_color, 2);
-        }
-    }
-}
-
 // ==================== ODSWIEZANIE EKRANU ====================
 void OdswiezEkran() {
     if(!backbuffer) return;
@@ -516,74 +297,35 @@ void OdswiezEkran() {
         for(int y = 0; y < (int)lfb_wysokosc; y++) {
             uint32_t* dst_row = (uint32_t*)(backbuffer + y * lfb_pitch);
             uint32_t* src_row = bufor_tapety + y * lfb_szerokosc;
-            for(int x = 0; x < (int)lfb_szerokosc; x++) {
-                dst_row[x] = src_row[x];
-            }
+            for(int x = 0; x < (int)lfb_szerokosc; x++) dst_row[x] = src_row[x];
         }
     } else {
         RysujProstokat(0, 0, lfb_szerokosc, lfb_wysokosc, 0x001A0B00);
     }
     
-    for(int k = 0; k < 3; k++) {
+    for(int k = 0; k < 1; k++) {
         int i = z_order[k];
         if (!okna[i].widoczne) continue;
         
         RysujOkno(i);
         if (i == 0) RysujTekstZBufora(term_buf, term_max_r, term_max_c, term_r, term_c, okna[0].x, okna[0].y, okna[0].szer, okna[0].wys, false, false);
-        else if (i == 1) RysujTekstZBufora(edit_buf, edit_max_r, edit_max_c, edit_r, edit_c, okna[1].x, okna[1].y, okna[1].szer, okna[1].wys, true, z_order[2] == 1);
-        else if (i == 2) RysujKalkulatorGUI(okna[2].x, okna[2].y, okna[2].szer, okna[2].wys);
     }
 
     if (lfb_wysokosc >= 40) {
-        RysujProstokat(0, lfb_wysokosc - 40, lfb_szerokosc, 40, 0x00280F00); RysujProstokat(0, lfb_wysokosc - 40, lfb_szerokosc, 2, 0x008A5A00);  
-        uint32_t kolor_menu_btn = menu_otwarte ? 0x00E58A00 : 0x001A0B00; uint32_t kolor_menu_txt = menu_otwarte ? 0x001A0B00 : 0x00FFBF00;
-        RysujProstokat(0, lfb_wysokosc - 38, 120, 38, kolor_menu_btn); WypiszTekst("Menu", 28, lfb_wysokosc - 28, kolor_menu_txt, 1);
-        
-        int taskbar_x = 130;
-        for (int i = 0; i < 3; i++) { 
-            uint32_t kolor_btn = 0x008A5A00; uint32_t kolor_tekstu_btn = 0x00D1D5DB; 
-            if (!okna[i].widoczne) { kolor_btn = 0x001A0B00; kolor_tekstu_btn = 0x008A5A00; }
-            else if (z_order[2] == i && !menu_otwarte) { kolor_btn = 0x00E58A00; kolor_tekstu_btn = 0x001A0B00; }
-            
-            RysujProstokat(taskbar_x, lfb_wysokosc - 35, 140, 30, kolor_btn);
-            WypiszTekst(okna[i].krotka_nazwa, taskbar_x + 10, lfb_wysokosc - 28, kolor_tekstu_btn, 1);
-            taskbar_x += 150;
+        // ROZWIĄZANIE PROBLEMU: Kiedy Pulpit jest uśpiony, Jądro rysuje awaryjny pasek 
+        // na całą szerokość ekranu. Dzięki temu zegar nie wisi brzydko w powietrzu!
+        if (!ring3_gui_active) {
+            RysujProstokat(0, lfb_wysokosc - 40, lfb_szerokosc, 40, 0x001A0B00);
+            RysujProstokat(0, lfb_wysokosc - 40, lfb_szerokosc, 2, 0x00E58A00);
+            WypiszTekst("Bursztyn OS - Terminal", 20, lfb_wysokosc - 28, 0x008A5A00, 1);
         }
         rysuj_zegar_rtc();
     }
-    if (menu_otwarte) RysujMenu();
 }
 
 // ==================== KONTROLA URZADZEN ====================
 extern "C" bool zaktualizuj_klawiature_gui(char znak) {
-    if (!backbuffer) return false;
-    
-    if (menu_otwarte) {
-        UkryjKursor();
-        if (znak == '\b') { if (menu_szukaj_len > 0) { menu_szukaj_len--; menu_szukaj[menu_szukaj_len] = '\0'; } } 
-        else if (znak >= 32 && znak <= 126 && menu_szukaj_len < 30) { menu_szukaj[menu_szukaj_len++] = znak; menu_szukaj[menu_szukaj_len] = '\0'; }
-        OdswiezEkran(); PokazKursor(); PrzeniesNaEkran(); return true; 
-    }
-
-    int aktywne_okno = z_order[2];
-    if (!okna[aktywne_okno].widoczne) aktywne_okno = z_order[1];
-    if (!okna[aktywne_okno].widoczne) aktywne_okno = z_order[0];
-    
-    if (aktywne_okno == 1 && okna[1].widoczne) { 
-        UkryjKursor(); DopiszZnakDoEdytora(znak); OdswiezEkran(); PokazKursor(); PrzeniesNaEkran(); return true; 
-    }
-    
-    if (aktywne_okno == 2 && okna[2].widoczne) { 
-        UkryjKursor();
-        if ((znak >= '0' && znak <= '9') || znak == '+' || znak == '-' || znak == '*' || znak == '/' || znak == '=' || znak == 'C' || znak == 'c') {
-            KalkulatorKlik(znak);
-            OdswiezEkran(); PokazKursor(); PrzeniesNaEkran();
-            return true;
-        }
-        if (znak == '\n' || znak == '\r') { KalkulatorKlik('='); OdswiezEkran(); PokazKursor(); PrzeniesNaEkran(); return true; }
-        OdswiezEkran(); PokazKursor(); PrzeniesNaEkran();
-        return true; 
-    }
+    // Terminal nie przejmuje wpisywania klawiatury jeśli Ring 3 działa.
     return false; 
 }
 
@@ -616,18 +358,24 @@ void PokazKursor() {
 
 static void OgraniczOkno(Okno& o) {
     if (o.zmaksymalizowane) return; 
-    int32_t min_x = -(int32_t)o.szer + 80; int32_t max_x = (int32_t)lfb_szerokosc - 80;
-    int32_t min_y = 0; int32_t max_y = (int32_t)lfb_wysokosc - 40; 
-    if ((int32_t)o.x < min_x) o.x = (uint32_t)min_x; if ((int32_t)o.x > max_x) o.x = (uint32_t)max_x;
-    if ((int32_t)o.y < min_y) o.y = (uint32_t)min_y; if ((int32_t)o.y > max_y) o.y = (uint32_t)max_y;
-}
-
-static void WyciagnijNaWierzch(int id_okna) {
-    if (z_order[2] == id_okna) return; 
-    int idx = -1; for(int i = 0; i < 3; i++) { if (z_order[i] == id_okna) { idx = i; break; } }
-    if (idx == -1) return;
-    for(int i = idx; i < 2; i++) { z_order[i] = z_order[i+1]; }
-    z_order[2] = id_okna;
+    int32_t min_x = -(int32_t)o.szer + 80; 
+    int32_t max_x = (int32_t)lfb_szerokosc - 80;
+    int32_t min_y = 0; 
+    int32_t max_y = (int32_t)lfb_wysokosc - 40; 
+    
+    if ((int32_t)o.x < min_x) {
+        o.x = (uint32_t)min_x; 
+    }
+    if ((int32_t)o.x > max_x) {
+        o.x = (uint32_t)max_x;
+    }
+    
+    if ((int32_t)o.y < min_y) {
+        o.y = (uint32_t)min_y; 
+    }
+    if ((int32_t)o.y > max_y) {
+        o.y = (uint32_t)max_y;
+    }
 }
 
 extern "C" void zaktualizuj_mysze(int dx, int dy, uint8_t przyciski) {
@@ -635,10 +383,21 @@ extern "C" void zaktualizuj_mysze(int dx, int dy, uint8_t przyciski) {
     int stary_mysz_x = mysz_x; int stary_mysz_y = mysz_y;
     UkryjKursor();
     mysz_x += dx; mysz_y -= dy; 
-    if (mysz_x < 0) mysz_x = 0; if (mysz_x >= (int)lfb_szerokosc - 2) mysz_x = lfb_szerokosc - 2;
-    if (mysz_y < 0) mysz_y = 0; if (mysz_y >= (int)lfb_wysokosc - 2) mysz_y = lfb_wysokosc - 2;
     
-    // NOWY WARUNEK: Jeśli Ring 3 przejął mysz, jądro tylko aktualizuje pozycję i rysuje kursor!
+    if (mysz_x < 0) {
+        mysz_x = 0; 
+    }
+    if (mysz_x >= (int)lfb_szerokosc - 2) {
+        mysz_x = lfb_szerokosc - 2;
+    }
+    
+    if (mysz_y < 0) {
+        mysz_y = 0; 
+    }
+    if (mysz_y >= (int)lfb_wysokosc - 2) {
+        mysz_y = lfb_wysokosc - 2;
+    }
+    
     if (ring3_gui_active) {
         lewy_wcisniety = (przyciski & 0x01);
         PokazKursor(); 
@@ -654,58 +413,20 @@ extern "C" void zaktualizuj_mysze(int dx, int dy, uint8_t przyciski) {
     
     if (klik_lewy && okno_przeciagane == -1) {
         bool przechwycono = false;
-
-        if (mysz_x >= 0 && mysz_x <= 120 && mysz_y >= (int)lfb_wysokosc - 40) {
-            menu_otwarte = !menu_otwarte; wymaga_odrysowania = true; przechwycono = true;
-        }
-
-        if (!przechwycono && menu_otwarte) {
-            int menu_szer = 300; int menu_wys = 400; int menu_x = 0; int menu_y = lfb_wysokosc - 40 - menu_wys;
-            if (mysz_x >= menu_x && mysz_x <= menu_x + menu_szer && mysz_y >= menu_y && mysz_y <= menu_y + menu_wys) {
-                for (int i = 0; i < 3; i++) {
-                    if (aktualne_menu_y[i] != -1 && mysz_y >= aktualne_menu_y[i] && mysz_y <= aktualne_menu_y[i] + 40) {
-                        okna[menu_aplikacje[i].id_okna].widoczne = true; WyciagnijNaWierzch(menu_aplikacje[i].id_okna);
-                        menu_otwarte = false; menu_szukaj[0] = '\0'; menu_szukaj_len = 0;
-                        wymaga_odrysowania = true; przechwycono = true; break;
-                    }
-                }
-                if (!przechwycono) przechwycono = true; 
-            } else { menu_otwarte = false; wymaga_odrysowania = true; }
-        }
-        
-        if (!przechwycono && mysz_y >= (int)lfb_wysokosc - 40) { 
-            int taskbar_x = 130;
-            for (int i = 0; i < 3; i++) {
-                if (mysz_x >= taskbar_x && mysz_x <= taskbar_x + 140) {
-                    if (okna[i].widoczne && z_order[2] == i) okna[i].widoczne = false;
-                    else { okna[i].widoczne = true; WyciagnijNaWierzch(i); }
-                    wymaga_odrysowania = true; przechwycono = true; break;
-                }
-                taskbar_x += 150;
-            }
-        }
         
         if (!przechwycono) {
-            for (int k = 2; k >= 0; k--) {
+            for (int k = 0; k >= 0; k--) {
                 int i = z_order[k]; if (!okna[i].widoczne) continue;
                 int px = (int)okna[i].x; int py = (int)okna[i].y; int sz = (int)okna[i].szer; int wy = (int)okna[i].wys;
                 
                 if (mysz_x >= px && mysz_x <= px + sz && mysz_y >= py && mysz_y <= py + wy) {
-                    WyciagnijNaWierzch(i); wymaga_odrysowania = true;
+                    wymaga_odrysowania = true;
               
                  if (mysz_y <= py + 26) {
-                        // 1. Sprawdzenie przycisku ZAMKNIJ (X) - rysowany na px + sz - 26
-                        if (mysz_x >= px + sz - 26 && mysz_x <= px + sz - 6) { 
-                            okna[i].widoczne = false; 
-                            break; 
-                        }
-
-                        // 2. Sprawdzenie przycisku MINIMALIZUJ (-)
-                        int min_btn_x = (i == 2) ? (px + sz - 50) : (px + sz - 74);
+                        if (mysz_x >= px + sz - 26 && mysz_x <= px + sz - 6) { okna[i].widoczne = false; break; }
+                        int min_btn_x = (px + sz - 74);
                         if (mysz_x >= min_btn_x && mysz_x <= min_btn_x + 20) { okna[i].widoczne = false; break; }
-
-                        // 3. Sprawdzenie przycisku MAKSYMALIZUJ (^/v)
-                        if (i != 2 && mysz_x >= px + sz - 50 && mysz_x <= px + sz - 30) { 
+                        if (mysz_x >= px + sz - 50 && mysz_x <= px + sz - 30) { 
                             if (!okna[i].zmaksymalizowane) {
                                 okna[i].stary_x = okna[i].x; okna[i].stary_y = okna[i].y; okna[i].stary_szer = okna[i].szer; okna[i].stary_wys = okna[i].wys;
                                 okna[i].x = 0; okna[i].y = 0; okna[i].szer = lfb_szerokosc; okna[i].wys = lfb_wysokosc - 40; 
@@ -716,28 +437,14 @@ extern "C" void zaktualizuj_mysze(int dx, int dy, uint8_t przyciski) {
                             }
                             if (i == 0) {
                                 term_max_c = (okna[0].szer - 12) / 9; term_max_r = (okna[0].wys - 36) / 16; 
-                                if (term_max_c > MAX_COLS) term_max_c = MAX_COLS; if (term_max_r > MAX_ROWS) term_max_r = MAX_ROWS;
-                            } else if (i == 1) {
-                                edit_max_c = (okna[1].szer - 12) / 9; edit_max_r = (okna[1].wys - 36) / 16; 
-                                if (edit_max_c > MAX_COLS) edit_max_c = MAX_COLS; if (edit_max_r > MAX_ROWS) edit_max_r = MAX_ROWS;
+                                if (term_max_c > MAX_COLS) term_max_c = MAX_COLS; 
+                                if (term_max_r > MAX_ROWS) term_max_r = MAX_ROWS;
                             }
                             break;
                         }
-                        
-                        int drag_max = (i == 2) ? (px + sz - 55) : (px + sz - 79);
+                        int drag_max = (px + sz - 79);
                         if (!okna[i].zmaksymalizowane && mysz_x < drag_max) { 
                             okno_przeciagane = i; chwyt_x = mysz_x - okna[i].x; chwyt_y = mysz_y - okna[i].y;
-                        }
-                    } else if (i == 2 && !okna[i].zmaksymalizowane) { 
-                        int start_x = px + 10; int start_y = py + 95;
-                        int bw = (sz - 50) / 4; int bh = (wy - 140) / 4; 
-                        for(int row=0; row<4; row++) {
-                            for(int col=0; col<4; col++) {
-                                int bx = start_x + col*(bw+10); int by = start_y + row*(bh+10);
-                                if (mysz_x >= bx && mysz_x <= bx + bw && mysz_y >= by && mysz_y <= by + bh) {
-                                    KalkulatorKlik(calc_btns[row*4 + col][0]); break;
-                                }
-                            }
                         }
                     }
                     break; 
@@ -802,7 +509,13 @@ extern "C" void wczytaj_tapete_z_dysku() {
 
     int offset_x = ((int)lfb_szerokosc - (int)bmp_szerokosc) / 2;
     int offset_y = ((int)lfb_wysokosc - (int)bmp_wysokosc) / 2;
-    if (offset_x < 0) offset_x = 0; if (offset_y < 0) offset_y = 0;
+    
+    if (offset_x < 0) {
+        offset_x = 0; 
+    }
+    if (offset_y < 0) {
+        offset_y = 0;
+    }
 
     for (int y = 0; y < bmp_wysokosc; y++) {
         for (int x = 0; x < bmp_szerokosc; x++) {
@@ -853,21 +566,20 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
         backbuffer = (uint8_t*)vaddr_backbuffer;
         
         for(uint64_t i = 0; i < lfb_waga; i++) backbuffer[i] = 0;
-        for(int r = 0; r < MAX_ROWS; r++) { for(int c = 0; c < MAX_COLS; c++) { term_buf[r][c].znak = 0; edit_buf[r][c].znak = 0; } }
+        for(int r = 0; r < MAX_ROWS; r++) { for(int c = 0; c < MAX_COLS; c++) { term_buf[r][c].znak = 0; } }
         
         if (okna[0].x + okna[0].szer > lfb_szerokosc) okna[0].szer = lfb_szerokosc - okna[0].x - 20;
         if (okna[0].y + okna[0].wys > lfb_wysokosc - 40) okna[0].wys = lfb_wysokosc - okna[0].y - 40;
-        if (okna[1].x + okna[1].szer > lfb_szerokosc - 20) { okna[1].x = 20; if (okna[1].x + okna[1].szer > lfb_szerokosc - 20) okna[1].szer = lfb_szerokosc - 40; }
-        if (okna[1].y + okna[1].wys > lfb_wysokosc - 40) okna[1].wys = lfb_wysokosc - okna[1].y - 40;
-        OgraniczOkno(okna[0]); OgraniczOkno(okna[1]); OgraniczOkno(okna[2]);
+        OgraniczOkno(okna[0]);
         
         term_max_c = (okna[0].szer - 12) / 9; term_max_r = (okna[0].wys - 36) / 16; 
-        if (term_max_c > MAX_COLS) term_max_c = MAX_COLS; if (term_max_r > MAX_ROWS) term_max_r = MAX_ROWS;
-        edit_max_c = (okna[1].szer - 12) / 9; edit_max_r = (okna[1].wys - 36) / 16; 
-        if (edit_max_c > MAX_COLS) edit_max_c = MAX_COLS; if (edit_max_r > MAX_ROWS) edit_max_r = MAX_ROWS;
         
-        const char* hlo = "Witaj w Edytorze Avocado! Mozesz wprowadzac tu notatki.\n";
-        for(int i = 0; hlo[i] != '\0'; i++) DopiszZnakDoEdytora(hlo[i]);
+        if (term_max_c > MAX_COLS) {
+            term_max_c = MAX_COLS; 
+        }
+        if (term_max_r > MAX_ROWS) {
+            term_max_r = MAX_ROWS;
+        }
         
         OdswiezEkran(); PokazKursor(); PrzeniesNaEkran();     
     } else {
@@ -894,8 +606,9 @@ extern "C" void obsluga_przerwania_zegara() {
         
         rysuj_zegar_rtc(); 
         int zegar_x = lfb_szerokosc - 150; 
-        int zegar_y = lfb_wysokosc - 32; 
-        PrzeniesFragmentNaEkran(zegar_x, zegar_y - 3, 140, 32);
+        
+        // Zwiększyliśmy obszar odświeżania na ekran, by objął całą wysokość paska (40 pikseli)
+        PrzeniesFragmentNaEkran(zegar_x, lfb_wysokosc - 40, 150, 40);
         
         if (kursor_byl) PokazKursor();
     }
@@ -908,7 +621,7 @@ extern "C" void bws_gui_rysuj_okno(int x, int y, int szer, int wys, const char* 
     RysujProstokat(x, y, szer, wys, 0x008A5A00);             // Ramka
     RysujProstokat(x + 2, y + 2, szer - 4, 24, 0x00FFBF00);  // Pasek tytułu
     WypiszTekst(tytul, x + 8, y + 4, 0x001A0B00, 1);         // Tytuł
-    RysujProstokat(x + 2, y + 28, szer - 4, wys - 30, 0x00280F00); // Tło edytora
+    RysujProstokat(x + 2, y + 28, szer - 4, wys - 30, 0x00280F00); // Tło
     PokazKursor();
 }
 
@@ -938,22 +651,26 @@ extern "C" void bws_gui_pobierz_mysz(int* x, int* y, uint8_t* przyciski) {
     *przyciski = lewy_wcisniety ? 1 : 0;
 }
 
-// Czyści ekran i rysuje pulpit (aby usunąć ślady po przesuwanym oknie)
+// Czyści ekran i rysuje pulpit
 extern "C" void bws_gui_odswiez_pulpit() {
     if(!backbuffer) return;
     UkryjKursor();
-    OdswiezEkran(); // Rysuje tapetę i okna jądra na nowo
-    PokazKursor();
-}
-// NOWA FUNKCJA: Rysowanie tekstu w określonym kolorze dla Ring 3
-extern "C" void bws_gui_wypisz_tekst_kolor(int x, int y, uint32_t kolor, const char* text) {
-    if(!backbuffer) return;
-    UkryjKursor();
-    WypiszTekst(text, x, y, kolor, 1);
+    OdswiezEkran(); 
     PokazKursor();
 }
 
-// Rysuje ładny prostokąt (do przycisków) dla Ring 3
+// ODCZYTUJEMY SKALĘ ZE ZMIENNEJ 64-bitowej!
+extern "C" void bws_gui_wypisz_tekst_kolor(int x, int y, uint64_t kolor_skala, const char* text) {
+    if(!backbuffer) return;
+    uint32_t kolor = kolor_skala & 0xFFFFFFFF;
+    int skala = (kolor_skala >> 32) & 0xFFFFFFFF;
+    if (skala == 0) skala = 1; // Kompatybilność wsteczna z powłoką i notatnikiem
+    
+    UkryjKursor();
+    WypiszTekst(text, x, y, kolor, skala);
+    PokazKursor();
+}
+
 extern "C" void bws_gui_rysuj_prostokat(int x, int y, int w, int h, uint32_t kolor) {
     if(!backbuffer) return;
     UkryjKursor();
@@ -961,17 +678,12 @@ extern "C" void bws_gui_rysuj_prostokat(int x, int y, int w, int h, uint32_t kol
     PokazKursor();
 }
 
-// Pozwala aplikacji Ring 3 wyłączyć obsługę okien przez jądro
-
 extern "C" void bws_gui_ustaw_przejecie_myszy(bool stan) {
     ring3_gui_active = stan;
-    if (stan) {
-        for(int i=0; i<3; i++) okna[i].widoczne = false; // Ukryj okna jądra
-    } else {
-        okna[0].widoczne = true; // Przywróć Terminal
-    }
+    if (stan) okna[0].widoczne = false; 
+    else okna[0].widoczne = true; 
 }
-// NOWA FUNKCJA: Pobieranie rozdzielczości ekranu (Syscall 23)
+
 extern "C" void bws_gui_pobierz_rozdzielczosc(int* szer, int* wys) {
     if(szer) *szer = lfb_szerokosc;
     if(wys) *wys = lfb_wysokosc;

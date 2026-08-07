@@ -80,6 +80,12 @@ void gui_wypisz_tekst_kolor(int x, int y, uint32_t kolor, const char* t) {
     bws_wywolaj(20, x, y, kolor, (uint64_t)t); 
 }
 
+void gui_wypisz_tekst_kolor_skala(int x, int y, uint32_t kolor, int skala, const char* tekst) {
+    uint64_t kolor_skala = ((uint64_t)skala << 32) | kolor;
+    bws_wywolaj(20, x, y, kolor_skala, (uint64_t)tekst);
+}
+
+
 void gui_rysuj_prostokat(int x, int y, int w, int h, uint32_t kolor) { 
     bws_wywolaj(21, ((uint64_t)x << 32) | y, ((uint64_t)w << 32) | h, kolor); 
 }

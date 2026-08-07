@@ -31,34 +31,38 @@ int screen_w = 1024, screen_h = 768;
 bool menu_start_otwarte = false;
 
 void RysujPulpit(bool wymus_pelne_odswiezenie) {
-    if (wymus_pelne_odswiezenie) {
-        gui_odswiez_pulpit(); // Jądro czyści ekran i rysuje tapetę
-    }
+    if (wymus_pelne_odswiezenie) gui_odswiez_pulpit();
 
-    // Rysowanie Paska Zadań Ring 3 - Zostawiamy 120px miejsca na Zegar!
-    gui_rysuj_prostokat(0, screen_h - 40, screen_w - 120, 40, 0x001A0B00); // Tło paska
-    gui_rysuj_prostokat(0, screen_h - 40, screen_w - 120, 2, 0x00E58A00);  // Złota ramka na górze
+    // Pasek z powrotem na całą szerokość! Zegar wtopi się idealnie.
+    gui_rysuj_prostokat(0, screen_h - 40, screen_w, 40, 0x001A0B00); 
+    gui_rysuj_prostokat(0, screen_h - 40, screen_w, 2, 0x00E58A00);  
 
-    // Przycisk "Start / Menu"
     RysujPrzycisk(10, screen_h - 35, 80, 30, 0x00E58A00, 0x001A0B00, " Menu");
 
-    // Ikona Notatnika na pulpicie
     gui_rysuj_prostokat(50, 50, 64, 64, 0x00FFBF00);
     gui_rysuj_prostokat(52, 52, 60, 60, 0x00FFFFFF);
     gui_wypisz_tekst_kolor(46, 120, 0x00FFFFFF, "Notatnik");
 
-    // Jeśli Menu Start jest otwarte, rysujemy je na wierzchu!
-    if (menu_start_otwarte) {
-        gui_rysuj_prostokat(10, screen_h - 100, 220, 60, 0x00301500); 
-        
-        // Złota ramka dookoła menu Start
-        gui_rysuj_prostokat(10, screen_h - 100, 220, 1, 0x00E58A00);
-        gui_rysuj_prostokat(10, screen_h - 100, 1, 60, 0x00E58A00);
-        gui_rysuj_prostokat(229, screen_h - 100, 1, 60, 0x00E58A00);
-        
-        gui_wypisz_tekst_kolor(20, screen_h - 80, 0x00FFFFFF, "> Powłoka Bursztyna");
-    }
+    gui_rysuj_prostokat(150, 50, 64, 64, 0x008A5A00);
+    gui_rysuj_prostokat(152, 52, 60, 60, 0x001A0B00);
+    gui_wypisz_tekst_kolor(165, 65, 0x00FFBF00, "+ -");
+    gui_wypisz_tekst_kolor(165, 85, 0x00FFBF00, "* =");
+    gui_wypisz_tekst_kolor(138, 120, 0x00FFFFFF, "Kalkulator");
 
+    if (menu_start_otwarte) {
+        int menu_wys = 105; // WYŻSZE MENU
+        int menu_y = screen_h - 40 - menu_wys;
+        
+        gui_rysuj_prostokat(10, menu_y, 220, menu_wys, 0x00301500); 
+        gui_rysuj_prostokat(10, menu_y, 220, 1, 0x00E58A00);
+        gui_rysuj_prostokat(10, menu_y, 1, menu_wys, 0x00E58A00);
+        gui_rysuj_prostokat(229, menu_y, 1, menu_wys, 0x00E58A00);
+        
+        // DODANY NOTATNIK!
+        gui_wypisz_tekst_kolor(20, menu_y + 15, 0x00FFFFFF, "> Powłoka Bursztyna");
+        gui_wypisz_tekst_kolor(20, menu_y + 40, 0x00FFFFFF, "> Notatnik");
+        gui_wypisz_tekst_kolor(20, menu_y + 65, 0x00FFFFFF, "> Kalkulator");
+    }
     gui_odswiez();
 }
 
@@ -83,18 +87,34 @@ extern "C" __attribute__((noreturn)) void _start() {
                 // Zabijamy Pulpit i ładujemy Notatnik
                 bws_wywolaj(10, (uint64_t)"/programy/notatnik.cebula/notatnik.bur");
             }
+            // 1.5. Kliknięcie w ikonę Kalkulatora na pulpicie
+            else if (!menu_start_otwarte && mx >= 150 && mx <= 214 && my >= 50 && my <= 114) {
+                gui_ustaw_przejecie_myszy(false);
+                bws_wywolaj(10, (uint64_t)"/programy/kalkulator.cebula/kalkulator.bur");
+            }
             // 2. Kliknięcie w przycisk Start (Menu)
             else if (mx >= 10 && mx <= 90 && my >= screen_h - 35 && my <= screen_h - 5) {
                 menu_start_otwarte = !menu_start_otwarte;
                 RysujPulpit(false); // Rysujemy bez odświeżania tła (brak mrugania zegara!)
             }
             // 3. Kliknięcia wewnątrz otwartego Menu Start
-            else if (menu_start_otwarte && mx >= 10 && mx <= 230 && my >= screen_h - 100 && my <= screen_h - 40) {
+            else if (menu_start_otwarte && mx >= 10 && mx <= 230 && my >= screen_h - 145 && my <= screen_h - 40) {
+                int menu_y = screen_h - 40 - 105;
+                
                 // Wybrano: Powłoka Bursztyna
-                if (my >= screen_h - 90 && my < screen_h - 60) {
+                if (my >= menu_y + 10 && my < menu_y + 35) {
                     gui_ustaw_przejecie_myszy(false);
-                    // Zabijamy Pulpit i ładujemy powłokę testową (stary pasek powróci)
                     bws_wywolaj(10, (uint64_t)"/shell.bur"); 
+                }
+                // POPRAWKA: Wybrano: Notatnik
+                else if (my >= menu_y + 35 && my < menu_y + 60) {
+                    gui_ustaw_przejecie_myszy(false);
+                    bws_wywolaj(10, (uint64_t)"/programy/notatnik.cebula/notatnik.bur"); 
+                }
+                // Wybrano: Kalkulator
+                else if (my >= menu_y + 60 && my < menu_y + 85) {
+                    gui_ustaw_przejecie_myszy(false);
+                    bws_wywolaj(10, (uint64_t)"/programy/kalkulator.cebula/kalkulator.bur"); 
                 }
             }
             // 4. Kliknięcie gdziekolwiek indziej (Zamyka Menu Start, jeśli było otwarte)

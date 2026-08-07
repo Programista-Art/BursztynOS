@@ -19,8 +19,9 @@ void gui_wyczyscz_obszar(int x, int y, int w, int h);
 void gui_odswiez();
 void gui_pobierz_mysz(int* x, int* y, uint8_t* b);
 void gui_odswiez_pulpit();
-void gui_wypisz_tekst_kolor(int x, int y, uint32_t kolor, const char* t);
-void gui_rysuj_prostokat(int x, int y, int w, int h, uint32_t kolor);
+void gui_wypisz_tekst_kolor(int x, int y, uint32_t kolor, const char* tekst);
+void gui_wypisz_tekst_kolor_skala(int x, int y, uint32_t kolor, int skala, const char* tekst); // <--- Musi tu być!
+void gui_rysuj_prostokat(int x, int y, int szer, int wys, uint32_t kolor);
 void gui_ustaw_przejecie_myszy(bool stan);
 void gui_pobierz_rozdzielczosc(int* w, int* h);
 

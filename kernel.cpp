@@ -45,6 +45,10 @@ extern "C" uint8_t _binary_shell_bin_end[];
 extern "C" uint8_t _binary_notatnik_bin_start[];
 extern "C" uint8_t _binary_notatnik_bin_end[];
 
+// NOWOŚĆ: Deklaracja symboli Kalkulatora z pliku Makefile!
+extern "C" uint8_t _binary_kalkulator_bin_start[];
+extern "C" uint8_t _binary_kalkulator_bin_end[];
+
 // NOWOŚĆ: Deklaracja symboli Menedżera Okien
 extern "C" uint8_t _binary_menedzer_okien_bin_start[];
 extern "C" uint8_t _binary_menedzer_okien_bin_end[];
@@ -132,7 +136,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     utworz_katalog("/jadro");
     utworz_katalog("/system");
     utworz_katalog("/programy");
-    utworz_katalog("/programy/notatnik.cebula"); // Paczka aplikacji!
+    utworz_katalog("/programy/notatnik.cebula"); // Paczka aplikacji Notatnik!
+    utworz_katalog("/programy/kalkulator.cebula"); // NOWOŚĆ: Paczka Kalkulatora!
     utworz_katalog("/uslugi");
     utworz_katalog("/sterowniki");
     utworz_katalog("/uzytkownicy");
@@ -186,6 +191,32 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     utworz_plik("/programy/notatnik.cebula/notatnik.bur");
     zapisz_do_pliku("/programy/notatnik.cebula/notatnik.bur", (const char*)_binary_notatnik_bin_start, notatnik_rozmiar);
     wypisz_log("[BSP] Aplikacja Notatnik zainstalowana jako paczka .cebula!");
+
+    // =========================================================
+    // --- WDRAŻANIE PACZKI APLIKACJI (KALKULATOR.CEBULA) ---
+    // =========================================================
+    const char* manifest_kalkulatora = 
+        "nazwa = \"Kalkulator\"\n"
+        "autor = \"Programista Art\"\n"
+        "wersja = \"1.0\"\n"
+        "poziom_zaufania = 4\n"
+        "plik_startowy = \"kalkulator.bur\"\n"
+        "uprawnienia = [\n"
+        "    \"okna\"\n"
+        "]\n";
+        
+    int len_manifest_kalk = 0;
+    while (manifest_kalkulatora[len_manifest_kalk] != '\0') len_manifest_kalk++;
+
+    utworz_plik("/programy/kalkulator.cebula/opis.aplikacji");
+    zapisz_do_pliku("/programy/kalkulator.cebula/opis.aplikacji", manifest_kalkulatora, len_manifest_kalk);
+
+    uint64_t kalkulator_rozmiar = (uint64_t)(_binary_kalkulator_bin_end - _binary_kalkulator_bin_start);
+    if(kalkulator_rozmiar < 24576) kalkulator_rozmiar = 24576; 
+    
+    utworz_plik("/programy/kalkulator.cebula/kalkulator.bur");
+    zapisz_do_pliku("/programy/kalkulator.cebula/kalkulator.bur", (const char*)_binary_kalkulator_bin_start, kalkulator_rozmiar);
+    wypisz_log("[BSP] Aplikacja Kalkulator zainstalowana jako paczka .cebula!");
 
     // =========================================================
     // --- WDRAŻANIE MENEDŻERA OKIEN (PULPIT) ---

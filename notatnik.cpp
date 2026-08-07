@@ -74,14 +74,17 @@ void RysujPrzyciskNaPaskuZadan(bool aktywny) {
 
 void RysujInterfejs(bool odswiez_tlo) {
     if (odswiez_tlo) {
-        gui_odswiez_pulpit(); // Wywołanie systemowe do jądra - czyszczenie ekranu
+        gui_odswiez_pulpit(); 
         
-        // Rysujemy pasek menedżera, ale zostawiamy 120px miejsca na Zegar z prawej strony!
-        gui_rysuj_prostokat(0, screen_h - 40, screen_w - 120, 40, 0x001A0B00); 
-        gui_rysuj_prostokat(0, screen_h - 40, screen_w - 120, 2, 0x00E58A00);
+        // Pasek na całą szerokość ekranu (Zegar z Jądra wtopi się idealnie)
+        gui_rysuj_prostokat(0, screen_h - 40, screen_w, 40, 0x001A0B00); 
+        gui_rysuj_prostokat(0, screen_h - 40, screen_w, 2, 0x00E58A00);
         RysujPrzycisk(10, screen_h - 35, 80, 30, 0x00E58A00, 0x001A0B00, " Menu");
+        
+        // Wywołujemy naszą gotową funkcję rysującą przycisk Notatnika (na pozycji 100)
         RysujPrzyciskNaPaskuZadan(!aplikacja_zminimalizowana); 
     }
+    
     
     // Blokada rysowania jeśli okno ma być schowane
     if (aplikacja_zminimalizowana) { gui_odswiez(); return; }

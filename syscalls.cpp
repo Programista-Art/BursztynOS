@@ -28,22 +28,20 @@ extern "C" {
     // Funkcje sieciowe
     void bws_siec_ping(uint8_t ip1, uint8_t ip2, uint8_t ip3, uint8_t ip4);
     bool bws_siec_dns(const char* domena, uint8_t* wyjsciowy_ip);
-    
-    // Deklaracja nowej funkcji TCP/HTTP w API Jądra
     bool bws_siec_pobierz_http(uint8_t cel_ip[4], const char* domena, const char* sciezka, char* bufor, uint32_t max_dlugosc);
-    // FUNKCJE GUI
+    
+    // Funkcje GUI
     void bws_gui_rysuj_okno(int x, int y, int szer, int wys, const char* tytul);
     void bws_gui_wypisz_tekst(int x, int y, const char* text);
     void bws_gui_wyczyscz_obszar(int x, int y, int szer, int wys);
     void bws_gui_odswiez();
     void bws_gui_pobierz_mysz(int* x, int* y, uint8_t* przyciski);
     void bws_gui_odswiez_pulpit();
-    void bws_gui_wypisz_tekst_kolor(int x, int y, uint32_t kolor, const char* text);
+    void bws_gui_wypisz_tekst_kolor(int x, int y, uint64_t kolor_skala, const char* text); // Poprawka dla skalowania!
     void bws_gui_rysuj_prostokat(int x, int y, int w, int h, uint32_t kolor);
     void bws_gui_ustaw_przejecie_myszy(bool stan);
     void bws_gui_pobierz_rozdzielczosc(int* szer, int* wys);
 }
-
 
 // Globalna zmienna z siec.cpp przetrzymująca ilość pobranych bajtów z Internetu
 extern uint32_t tcp_zapisano_bajtow;
@@ -136,10 +134,9 @@ extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t ar
         case 9: {
             czas_rtc czas; pobierz_czas_rtc(&czas); formatuj_czas_do_stringa(&czas, (char*)arg1); kod_wyniku = 1; break;
         }
-        // OBSŁUGA SYSCALL NR 10 (uruchom program)
         case 10: {
-            const char* sciezka = (const char*)arg1;
-            return bws_uruchom_program_z_pliku(sciezka, PZB_UZYTKOWNIK, 0xFFFFFFFF, true);
+            if (!(aktywny_proces.uprawnienia & PRAWO_URUCHOM_PROGRAM)) return 0;
+            kod_wyniku = bws_uruchom_program_z_pliku((const char*)arg1, PZB_UZYTKOWNIK, 0xFFFFFFFF, true) ? 1 : 0; break;
         }
         case 11: {
             bws_siec_ping((uint8_t)arg1, (uint8_t)arg2, (uint8_t)arg3, (uint8_t)arg4); kod_wyniku = 1; break;
@@ -149,7 +146,7 @@ extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t ar
             break;
         }
         case 13: {
-            // --- NOWOŚĆ KROK 3: Wywołanie pobierania HTTP i zapis na dysk AHCI ---
+            // WYWOŁANIE 13: Pobieranie HTTP i zapis na dysk AHCI
             if (!(aktywny_proces.uprawnienia & PRAWO_PLIKI_ZAPISZ)) return 0;
             
             uint8_t* cel_ip = (uint8_t*)arg1;
@@ -163,37 +160,32 @@ extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t ar
             
             // Pobieramy dane z Internetu prosto do bufora Jądra
             if (bws_siec_pobierz_http(cel_ip, domena, sciezka_http, bufor_pobierania, 65535)) {
-                // Skoro pobrano poprawnie, tworzymy pusty plik w systemie BSP
                 utworz_plik(sciezka_dyskowa);
-                // Zapisujemy całe "mięsko" (samą zawartość bez nagłówków!) strony HTTP na dysk!
-                kod_wyniku = zapisz_do_pliku(sciezka_dyskowa, bufor_pobierania, tcp_zapisano_bajtow) ? 1 : 0;
-            } else {
-                kod_wyniku = 0;
+                zapisz_do_pliku(sciezka_dyskowa, bufor_pobierania, tcp_zapisano_bajtow);
+                kod_wyniku = 1;
             }
             break;
         }
-        
         case 14: { 
-            // Wypakowujemy x, y, szer, wys z dwóch argumentów
             int x = arg1 >> 32; int y = arg1 & 0xFFFFFFFF;
             int w = arg2 >> 32; int h = arg2 & 0xFFFFFFFF;
             bws_gui_rysuj_okno(x, y, w, h, (const char*)arg3); 
             kod_wyniku = 1; break; 
         }
-        case 15: { bws_gui_wypisz_tekst((int)arg1, (int)arg2, (const char*)arg3); kod_wyniku = 1; break; }
-        case 16: { bws_gui_wyczyscz_obszar((int)arg1, (int)arg2, (int)arg3, (int)arg4); kod_wyniku = 1; break; }
-        case 17: { bws_gui_odswiez(); kod_wyniku = 1; break;} 
+        case 15: { bws_gui_wypisz_tekst(arg1, arg2, (const char*)arg3); kod_wyniku = 1; break; }
+        case 16: { bws_gui_wyczyscz_obszar(arg1, arg2, arg3, arg4); kod_wyniku = 1; break; }
+        case 17: { bws_gui_odswiez(); kod_wyniku = 1; break; }
         case 18: { bws_gui_pobierz_mysz((int*)arg1, (int*)arg2, (uint8_t*)arg3); kod_wyniku = 1; break; }
         case 19: { bws_gui_odswiez_pulpit(); kod_wyniku = 1; break; }
-        case 20: { bws_gui_wypisz_tekst_kolor((int)arg1, (int)arg2, (uint32_t)arg3, (const char*)arg4); kod_wyniku = 1; break; }
-       case 21: { 
+        case 20: { bws_gui_wypisz_tekst_kolor(arg1, arg2, arg3, (const char*)arg4); kod_wyniku = 1; break; }
+        case 21: { 
             int x = arg1 >> 32; int y = arg1 & 0xFFFFFFFF;
             int w = arg2 >> 32; int h = arg2 & 0xFFFFFFFF;
             bws_gui_rysuj_prostokat(x, y, w, h, arg3); 
             kod_wyniku = 1; break; 
         }
         case 22: { bws_gui_ustaw_przejecie_myszy(arg1 != 0); kod_wyniku = 1; break; }
-        case 23: { bws_gui_pobierz_rozdzielczosc((int*)arg1, (int*)arg2); kod_wyniku = 1; break; } 
+        case 23: { bws_gui_pobierz_rozdzielczosc((int*)arg1, (int*)arg2); kod_wyniku = 1; break; }
         
         default: {
             wypisz_na_ekranie("[!] Otrzymano nierozpoznany wektor z Ring 3!"); kod_wyniku = (uint64_t)-1; break;

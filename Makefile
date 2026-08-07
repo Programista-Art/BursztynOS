@@ -8,7 +8,7 @@ OBJCOPY = x86_64-linux-gnu-objcopy
 CXXFLAGS = -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none
 
 # Lista wszystkich skompilowanych obiektów jądra (BEZ KALKULATORA!)
-OBJS = boot.o gdt.o tss.o apic.o idt.o przerwania.o e1000.o siec.o klawiatura.o mysz.o notatnik_blob.o zegar-rtc.o pmm.o vmm.o psf.o grafika.o syscall.o syscalls.o pci.o ahci.o ring3.o loader.o kernel.o shell_blob.o menedzer_okien_blob.o
+OBJS = boot.o gdt.o tss.o apic.o idt.o przerwania.o e1000.o siec.o klawiatura.o mysz.o notatnik_blob.o zegar-rtc.o pmm.o vmm.o psf.o grafika.o syscall.o syscalls.o pci.o ahci.o ring3.o loader.o kernel.o shell_blob.o menedzer_okien_blob.o kalkulator_blob.o
 
 # Główny cel domyślny
 all: system_operacyjny.bin
@@ -49,6 +49,16 @@ notatnik_blob.o: notatnik_tmp.o bursztyn_gui.o
 	$(LD) -T notatnik_linker.ld -nostdlib -no-pie notatnik_tmp.o bursztyn_gui.o -o notatnik.elf
 	$(OBJCOPY) -O binary notatnik.elf notatnik.bin
 	$(LD) -r -b binary notatnik.bin -o notatnik_blob.o
+
+# Kalkulator
+# === BUDOWANIE KALKULATORA (RING 3) ===
+kalkulator_tmp.o: kalkulator.cpp
+	$(CXX) $(CXXFLAGS) -fno-pie -c kalkulator.cpp -o kalkulator_tmp.o
+
+kalkulator_blob.o: kalkulator_tmp.o bursztyn_gui.o
+	$(LD) -T notatnik_linker.ld -nostdlib -no-pie kalkulator_tmp.o bursztyn_gui.o -o kalkulator.elf
+	$(OBJCOPY) -O binary kalkulator.elf kalkulator.bin
+	$(LD) -r -b binary kalkulator.bin -o kalkulator_blob.o
 
 # BUDOWANIE MENEDZERA OKIEN (RING 3)
 menedzer_okien_tmp.o: menedzer_okien.cpp
