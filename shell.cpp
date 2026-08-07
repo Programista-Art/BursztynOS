@@ -1,10 +1,10 @@
 /*
  * Aplikacja: Powłoka Bursztynowa (bsh)
  * Poziom: Ring 3 (Przestrzeń Użytkownika)
+ * Wersja zoptymalizowana: Korzysta z biblioteki bursztyn_gui.h
  */
 
-#include <stdint.h>
-#include <stdbool.h>
+#include "bursztyn_gui.h"
 
 struct NaglowekBur {
     uint8_t  magia[4];            
@@ -27,28 +27,7 @@ const struct NaglowekBur naglowek = {
     12288, 8192, 0x403000  
 };
 
-uint64_t bws_wywolaj(uint64_t nr_funkcji, uint64_t arg1 = 0, uint64_t arg2 = 0, uint64_t arg3 = 0, uint64_t arg4 = 0) {
-    register uint64_t r8 asm("r8") = nr_funkcji;
-    register uint64_t r9 asm("r9") = arg1;
-    register uint64_t r10 asm("r10") = arg2;
-    register uint64_t r12 asm("r12") = arg3;
-    register uint64_t r13 asm("r13") = arg4;
-    register uint64_t rax asm("rax");
-
-    asm volatile (
-        "syscall"
-        : "=a" (rax)
-        : "r" (r8), "r" (r9), "r" (r10), "r" (r12), "r" (r13)
-        : "rcx", "r11", "memory"
-    );
-    return rax;
-}
-
-void print(const char* tekst) { bws_wywolaj(1, (uint64_t)tekst); }
-bool utworz(const char* plik) { return bws_wywolaj(2, (uint64_t)plik) != 0; }
-bool zapisz_plik(const char* plik, const char* dane, uint32_t dlugosc) { return bws_wywolaj(3, (uint64_t)plik, (uint64_t)dane, dlugosc) != 0; }
-char getch() { return (char)bws_wywolaj(4); }
-bool czytaj_plik(const char* plik, char* bufor, uint32_t max_dlugosc) { return bws_wywolaj(5, (uint64_t)plik, (uint64_t)bufor, max_dlugosc) != 0; }
+// Funkcje obsługi plików, których nie dodawaliśmy jeszcze do bursztyn_gui.h
 bool wylistuj_katalog(const char* sciezka, char* bufor, uint32_t max_dlugosc) { return bws_wywolaj(6, (uint64_t)sciezka, (uint64_t)bufor, max_dlugosc) != 0; }
 bool usun_twor(const char* sciezka) { return bws_wywolaj(7, (uint64_t)sciezka) != 0; }
 bool zmien_nazwe_tworu(const char* sciezka, const char* nowa_nazwa) { return bws_wywolaj(8, (uint64_t)sciezka, (uint64_t)nowa_nazwa) != 0; }
@@ -84,7 +63,7 @@ static inline uint64_t pobierz_cykle() {
 void pobierz_linie(char* bufor, int max_dlugosc) {
     int pozycja = 0;
     while (true) {
-        char c = getch();
+        char c = pobierz_znak(); // Korzystamy z API bursztyn_gui.h
         if (c == 0) continue; 
 
         if (c == '\n' || c == '\r') {
@@ -92,11 +71,11 @@ void pobierz_linie(char* bufor, int max_dlugosc) {
             break;
         } 
         else if (c == '\b') {
-            if (pozycja > 0) { pozycja--; print("\b \b"); }
+            if (pozycja > 0) { pozycja--; wypisz("\b \b"); }
         } 
         else if (pozycja < max_dlugosc - 1) {
             bufor[pozycja++] = c;
-            char tmp[2] = {c, '\0'}; print(tmp);
+            char tmp[2] = {c, '\0'}; wypisz(tmp);
         }
     }
 }
@@ -122,18 +101,18 @@ char historia[5][128];
 int hist_ilosc = 0;
 
 extern "C" void _start() {
-    print("\n");
-    print("==================================================\n");
-    print(" Powłoka Bursztynowa v1.9.1 (Duży Bufor Odczytu)\n");
-    print(" Wpisz 'pomoc', aby zobaczyć listę poleceń.\n");
-    print("==================================================\n");
+    wypisz("\n");
+    wypisz("==================================================\n");
+    wypisz(" Powłoka Bursztynowa v1.9.2 (Optymalizacja API)\n");
+    wypisz(" Wpisz 'pomoc', aby zobaczyć listę poleceń.\n");
+    wypisz("==================================================\n");
 
     char bufor_komendy[128];
 
     while (true) {
-        print("\npowłoka> ");
+        wypisz("\npowłoka> ");
         pobierz_linie(bufor_komendy, 128);
-        print("\n");
+        wypisz("\n");
 
         if (strlen(bufor_komendy) == 0) continue;
 
@@ -142,35 +121,39 @@ extern "C" void _start() {
         if (hist_ilosc < 5) hist_ilosc++;
 
         if (strcmp(bufor_komendy, "pomoc")) {
-            print("--- KATEGORIA: SYSTEM ---\n");
-            print("  pomoc         - wyświetla ten ekran pomocy\n");
-            print("  system        - wyświetla parametry sprzętowe i systemowe\n");
-            print("  wersja        - wyświetla wersję powłoki i systemu\n");
-            print("  kto           - wyświetla zalogowanego użytkownika\n");
-            print("  pci           - wyświetla urządzenia na płycie głównej (magistrala PCI)\n");
-            print("  uruchom [plik]- uruchamia aplikację (np. uruchom /programy/kalk.bur)\n");
-            print("  historia      - wyświetla historię 5 ostatnich poleceń\n");
-            print("  czysc         - czyści ekran terminala\n");
-            print("  czas          - wyświetla aktualną godzinę z zegara RTC\n");
-            print("--- KATEGORIA: SIEĆ (INTERNET) ---\n");
-            print("  ping [Cel]    - wysyła sygnał PING (np. ping 10.0.2.2 lub ping google.com)\n");
-            print("  pobierz [domena] [sciezka] [zapis_jako]\n");
-            print("                - pobiera plik z sieci (np. pobierz example.com / /test.html)\n");
-            print("--- KATEGORIA: PLIKI ---\n");
-            print("  utworz        - tworzy nowy, pusty plik lub katalog\n");
-            print("  zapisz        - zapisuje wprowadzony tekst do pliku\n");
-            print("  czytaj [plik] - wyświetla zawartość wskazanego pliku\n");
-            print("  pliki [kat]   - wyświetla listę plików w katalogu (np. pliki /programy)\n");
-            print("  usun [sciezka]- trwale usuwa plik lub katalog\n");
-            print("  zmien_nazwe   - uruchamia kreator zmiany nazwy pliku\n");
-            print("  gdzie         - wyświetla ścieżkę obecnego katalogu\n");
-            print("--- KATEGORIA: ROZRYWKA ---\n");
-            print("  pisz [txt]    - wypisuje podany tekst na ekran\n");
-            print("  cytat         - wczytuje i wyświetla cytaty z pliku\n");
-            print("  losuj         - rzuca wirtualną kością (wynik 1-6)\n");
+            wypisz("--- KATEGORIA: SYSTEM ---\n");
+            wypisz("  pomoc         - wyświetla ten ekran pomocy\n");
+            wypisz("  system        - wyświetla parametry sprzętowe i systemowe\n");
+            wypisz("  wersja        - wyświetla wersję powłoki i systemu\n");
+            wypisz("  kto           - wyświetla zalogowanego użytkownika\n");
+            wypisz("  pci           - wyświetla urządzenia na płycie głównej (magistrala PCI)\n");
+            wypisz("  uruchom [plik]- uruchamia aplikację (np. uruchom /programy/kalk.bur)\n");
+            wypisz("  historia      - wyświetla historię 5 ostatnich poleceń\n");
+            wypisz("  czysc         - czyści ekran terminala\n");
+            wypisz("  czas          - wyświetla aktualną godzinę z zegara RTC\n");
+            wypisz("  wyjdz         - zamyka terminal i wraca na Pulpit (Menedżer Okien)\n");
+            wypisz("--- KATEGORIA: SIEĆ (INTERNET) ---\n");
+            wypisz("  ping [Cel]    - wysyła sygnał PING (np. ping 10.0.2.2 lub ping google.com)\n");
+            wypisz("  pobierz       - pobiera plik z sieci (np. pobierz example.com / /test.html)\n");
+            wypisz("--- KATEGORIA: PLIKI ---\n");
+            wypisz("  utworz        - tworzy nowy, pusty plik lub katalog\n");
+            wypisz("  zapisz        - zapisuje wprowadzony tekst do pliku\n");
+            wypisz("  czytaj [plik] - wyświetla zawartość wskazanego pliku\n");
+            wypisz("  pliki [kat]   - wyświetla listę plików w katalogu (np. pliki /programy)\n");
+            wypisz("  usun [sciezka]- trwale usuwa plik lub katalog\n");
+            wypisz("  zmien_nazwe   - uruchamia kreator zmiany nazwy pliku\n");
+            wypisz("  gdzie         - wyświetla ścieżkę obecnego katalogu\n");
+            wypisz("--- KATEGORIA: ROZRYWKA ---\n");
+            wypisz("  pisz [txt]    - wypisuje podany tekst na ekran\n");
+            wypisz("  cytat         - wczytuje i wyświetla cytaty z pliku\n");
+            wypisz("  losuj         - rzuca wirtualną kością (wynik 1-6)\n");
+        }
+        else if (strcmp(bufor_komendy, "wyjdz") || strcmp(bufor_komendy, "exit")) {
+            wypisz("Zamykanie Powłoki... Powrót do Menedżera Okien.\n");
+            bws_wywolaj(10, (uint64_t)"/menedzer_okien.bur");
         }
         else if (strcmp(bufor_komendy, "ping")) {
-            print("Składnia polecenia: ping [adres IP lub domena] (np. ping google.com)\n");
+            wypisz("Składnia polecenia: ping [adres IP lub domena] (np. ping google.com)\n");
         }
         else if (zaczyna_sie_od(bufor_komendy, "ping ")) {
             char* cel = &bufor_komendy[5];
@@ -188,20 +171,20 @@ extern "C" void _start() {
                     if (cel[i] >= '0' && cel[i] <= '9') ip[czesc] = ip[czesc] * 10 + (cel[i] - '0');
                     i++;
                 }
-                print("Wysyłanie sygnału PING na podany adres IP...\n");
+                wypisz("Wysyłanie sygnału PING na podany adres IP...\n");
                 bws_wywolaj(11, ip[0], ip[1], ip[2], ip[3]);
             } else {
-                print("Rozwiązywanie domeny DNS: "); print(cel); print("...\n");
+                wypisz("Rozwiązywanie domeny DNS: "); wypisz(cel); wypisz("...\n");
                 uint8_t resolved[4] = {0, 0, 0, 0};
                 if (bws_wywolaj(12, (uint64_t)cel, (uint64_t)resolved)) {
-                    print("Sukces! Znaleziono zmapowany adres IP: ");
-                    char buf[16]; int_do_str(resolved[0], buf); print(buf); print(".");
-                    int_do_str(resolved[1], buf); print(buf); print(".");
-                    int_do_str(resolved[2], buf); print(buf); print(".");
-                    int_do_str(resolved[3], buf); print(buf); print("\n");
-                    print("Wysyłanie sygnału PING (ICMP)...\n");
+                    wypisz("Sukces! Znaleziono zmapowany adres IP: ");
+                    char buf[16]; int_do_str(resolved[0], buf); wypisz(buf); wypisz(".");
+                    int_do_str(resolved[1], buf); wypisz(buf); wypisz(".");
+                    int_do_str(resolved[2], buf); wypisz(buf); wypisz(".");
+                    int_do_str(resolved[3], buf); wypisz(buf); wypisz("\n");
+                    wypisz("Wysyłanie sygnału PING (ICMP)...\n");
                     bws_wywolaj(11, resolved[0], resolved[1], resolved[2], resolved[3]);
-                } else { print("Błąd: Nie udało się rozwiązać domeny DNS.\n"); }
+                } else { wypisz("Błąd: Nie udało się rozwiązać domeny DNS.\n"); }
             }
         }
         else if (zaczyna_sie_od(bufor_komendy, "pobierz ")) {
@@ -222,73 +205,73 @@ extern "C" void _start() {
             sciezka_dyskowa[j] = '\0';
 
             if (domena[0] == '\0' || sciezka_http[0] == '\0' || sciezka_dyskowa[0] == '\0') {
-                print("Składnia: pobierz [domena] [sciezka_na_serwerze] [zapisz_jako]\n");
-                print("Przykład: pobierz example.com / /test.html\n");
+                wypisz("Składnia: pobierz [domena] [sciezka_na_serwerze] [zapisz_jako]\n");
+                wypisz("Przykład: pobierz example.com / /test.html\n");
             } else {
-                print("1. Rozwiązywanie domeny DNS: "); print(domena); print("...\n");
+                wypisz("1. Rozwiązywanie domeny DNS: "); wypisz(domena); wypisz("...\n");
                 uint8_t resolved_ip[4] = {0, 0, 0, 0};
                 
                 if (bws_wywolaj(12, (uint64_t)domena, (uint64_t)resolved_ip)) {
-                    print("2. Adres IP znaleziony. Nawiązywanie sesji TCP i pobieranie danych (HTTP)...\n");
+                    wypisz("2. Adres IP znaleziony. Nawiązywanie sesji TCP i pobieranie danych (HTTP)...\n");
                     char bezp_sciezka[64]; formatuj_sciezke(sciezka_dyskowa, bezp_sciezka);
                     
                     uint64_t wynik = bws_wywolaj(13, (uint64_t)resolved_ip, (uint64_t)domena, (uint64_t)sciezka_http, (uint64_t)bezp_sciezka);
                     
                     if (wynik == 1) {
-                        print("3. SUKCES! Plik został pobrany z Internetu i utrwalony na dysku jako: "); print(bezp_sciezka); print("\n");
-                        print("Wpisz: czytaj "); print(bezp_sciezka); print(" aby zobaczyć jego zawartość!\n");
+                        wypisz("3. SUKCES! Plik został pobrany z Internetu i utrwalony na dysku jako: "); wypisz(bezp_sciezka); wypisz("\n");
+                        wypisz("Wpisz: czytaj "); wypisz(bezp_sciezka); wypisz(" aby zobaczyć jego zawartość!\n");
                     } else {
-                        print("BLĄD: Serwer nie odpowiedział, zerwał połączenie, lub brak uprawnień dyskowych.\n");
+                        wypisz("BLĄD: Serwer nie odpowiedział, zerwał połączenie, lub brak uprawnień dyskowych.\n");
                     }
-                } else { print("BLĄD: Nie udało się rozwiązać domeny DNS.\n"); }
+                } else { wypisz("BLĄD: Nie udało się rozwiązać domeny DNS.\n"); }
             }
         }
         else if (strcmp(bufor_komendy, "czas")) {
             char bufor_czasu[32]; bws_wywolaj(9, (uint64_t)bufor_czasu);
-            print("Aktualny czas z zegara RTC to: "); print(bufor_czasu); print("\n");
+            wypisz("Aktualny czas z zegara RTC to: "); wypisz(bufor_czasu); wypisz("\n");
         }
         else if (strcmp(bufor_komendy, "system")) {
-            print("OS: Bursztyn OS x86_64\nJądro: Monolityczne, VMM Paging 4-lvl\n");
-            print("Sieć: Zintegrowany klient DHCP, ARP, ICMP oraz Klient HTTP (TCP/DNS)\n");
+            wypisz("OS: Bursztyn OS x86_64\nJądro: Monolityczne, VMM Paging 4-lvl\n");
+            wypisz("Sieć: Zintegrowany klient DHCP, ARP, ICMP oraz Klient HTTP (TCP/DNS)\n");
         }
         else if (strcmp(bufor_komendy, "wersja")) {
-            print("Powłoka Bursztynowa v1.9.1 (Build: Sieć + Pobieranie TCP)\n");
+            wypisz("Powłoka Bursztynowa v1.9.2 (Build: Modularne API GUI)\n");
         }
         else if (strcmp(bufor_komendy, "kto")) {
-            print("Zalogowano jako: Administrator Systemu (Ring 3)\n");
+            wypisz("Zalogowano jako: Administrator Systemu (Ring 3)\n");
         }
         else if (strcmp(bufor_komendy, "pci")) {
             char buf_pci[2048]; for(int i = 0; i < 2048; i++) buf_pci[i] = 0; 
             if (czytaj_plik("/logi/pci.txt", buf_pci, 2047)) {
-                print("--- Raport PCI (Zapisany przez Ring 0) ---\n"); print(buf_pci); print("\n");
-            } else print("Błąd: Brak raportu PCI w systemie plików.\n");
+                wypisz("--- Raport PCI (Zapisany przez Ring 0) ---\n"); wypisz(buf_pci); wypisz("\n");
+            } else wypisz("Błąd: Brak raportu PCI w systemie plików.\n");
         }
         else if (zaczyna_sie_od(bufor_komendy, "uruchom ")) {
             char sciezka_pliku[64]; int i = 8, j = 0;
             while (bufor_komendy[i] != '\0' && bufor_komendy[i] != ' ' && j < 63) sciezka_pliku[j++] = bufor_komendy[i++];
             sciezka_pliku[j] = '\0';
-            print("Uruchamianie procesu: "); print(sciezka_pliku); print("...\n");
-            if (bws_wywolaj(10, (uint64_t)sciezka_pliku) == 0) print("Błąd: Nie udało się załadować programu z dysku.\n");
+            wypisz("Uruchamianie procesu: "); wypisz(sciezka_pliku); wypisz("...\n");
+            if (bws_wywolaj(10, (uint64_t)sciezka_pliku) == 0) wypisz("Błąd: Nie udało się załadować programu z dysku.\n");
         }
-        else if (strcmp(bufor_komendy, "gdzie")) { print("Obecna lokalizacja: / (Korzeń Systemu Plików)\n"); }
+        else if (strcmp(bufor_komendy, "gdzie")) { wypisz("Obecna lokalizacja: / (Korzeń Systemu Plików)\n"); }
         else if (strcmp(bufor_komendy, "historia")) {
             for(int i = 0; i < hist_ilosc; i++) {
-                char numer[4]; int_do_str(i + 1, numer); print(numer); print(". "); print(historia[i]); print("\n");
+                char numer[4]; int_do_str(i + 1, numer); wypisz(numer); wypisz(". "); wypisz(historia[i]); wypisz("\n");
             }
         }
-        else if (strcmp(bufor_komendy, "czysc")) { for(int i = 0; i < 40; i++) print("\n"); }
+        else if (strcmp(bufor_komendy, "czysc")) { for(int i = 0; i < 40; i++) wypisz("\n"); }
         else if (strcmp(bufor_komendy, "losuj")) {
             uint64_t cykle = pobierz_cykle(); int kosc = (cykle % 6) + 1;
             char wynik_str[8]; int_do_str(kosc, wynik_str);
-            print("Rzucasz kośćmi... Wypadło: "); print(wynik_str); print("!\n");
+            wypisz("Rzucasz kośćmi... Wypadło: "); wypisz(wynik_str); wypisz("!\n");
         }
         else if (strcmp(bufor_komendy, "cytat")) {
             char buf[512]; for(int i=0; i<512; i++) buf[i] = 0; 
-            if (czytaj_plik("/cytaty.txt", buf, 511)) { print("--- Cytaty z pliku ---\n"); print(buf); print("\n"); } 
+            if (czytaj_plik("/cytaty.txt", buf, 511)) { wypisz("--- Cytaty z pliku ---\n"); wypisz(buf); wypisz("\n"); } 
             else {
                 if (utworz("/cytaty.txt")) {
                     const char* domyslne = "1. U mnie działa.\n2. Brak błędu to też błąd.\n";
-                    zapisz_plik("/cytaty.txt", domyslne, strlen(domyslne)); print("Plik utworzony!\n");
+                    zapisz_plik("/cytaty.txt", domyslne, strlen(domyslne)); wypisz("Plik utworzony!\n");
                 }
             }
         }
@@ -298,50 +281,46 @@ extern "C" void _start() {
             else { sciezka[0] = '/'; sciezka[1] = '\0'; }
 
             char buf[512]; for(int i=0; i<512; i++) buf[i] = 0;
-            if (wylistuj_katalog(sciezka, buf, 511)) { print("Zawartość źródła ("); print(sciezka); print("):\n"); print(buf); } 
-            else print("Błąd: Katalog nie istnieje lub jest pusty.\n");
+            if (wylistuj_katalog(sciezka, buf, 511)) { wypisz("Zawartość źródła ("); wypisz(sciezka); wypisz("):\n"); wypisz(buf); } 
+            else wypisz("Błąd: Katalog nie istnieje lub jest pusty.\n");
         }
-        // --- ZMODYFIKOWANA KOMENDA CZYTAJ (Zwiększony bufor) ---
         else if (strncmp(bufor_komendy, "czytaj ", 7)) {
             char sciezka[64]; formatuj_sciezke(&bufor_komendy[7], sciezka);
             
-            // Rezerwujemy 4 KB na stosie! (Stos Ring 3 ma 16 KB, więc to bezpieczne)
-            // Usunięto 'static', które wywoływało Page Fault z powodu ograniczeń sekcji .bss.
             char duzy_bufor[4096]; 
             for(int i=0; i<4096; i++) duzy_bufor[i] = 0; 
             
             if (czytaj_plik(sciezka, duzy_bufor, 4095)) { 
-                print("--- "); print(sciezka); print(" ---\n"); 
-                print(duzy_bufor); 
-                print("\n"); 
+                wypisz("--- "); wypisz(sciezka); wypisz(" ---\n"); 
+                wypisz(duzy_bufor); 
+                wypisz("\n"); 
             } 
             else {
-                print("Błąd odczytu: Brak pliku lub plik pusty.\n");
+                wypisz("Błąd odczytu: Brak pliku lub plik pusty.\n");
             }
         }
-        // --------------------------------------------------------
         else if (strcmp(bufor_komendy, "utworz")) {
-            print("Nazwa nowego pliku/folderu: "); char sciezka[64]; pobierz_linie(sciezka, 64); print("\n");
+            wypisz("Nazwa nowego pliku/folderu: "); char sciezka[64]; pobierz_linie(sciezka, 64); wypisz("\n");
             char bezp[64]; formatuj_sciezke(sciezka, bezp);
-            if (utworz(bezp)) { print("Założono: "); print(bezp); print("\n"); } else print("Błąd: Zablokowane lub błędna ścieżka.\n");
+            if (utworz(bezp)) { wypisz("Założono: "); wypisz(bezp); wypisz("\n"); } else wypisz("Błąd: Zablokowane lub błędna ścieżka.\n");
         }
         else if (strcmp(bufor_komendy, "zapisz")) {
-            print("Plik docelowy: "); char sciezka[64]; pobierz_linie(sciezka, 64); print("\n");
+            wypisz("Plik docelowy: "); char sciezka[64]; pobierz_linie(sciezka, 64); wypisz("\n");
             char bezp[64]; formatuj_sciezke(sciezka, bezp);
-            print("Tekst: "); char dane[128]; pobierz_linie(dane, 128); print("\n");
-            if (zapisz_plik(bezp, dane, strlen(dane))) print("Zapisano!\n"); else print("Błąd zapisu.\n");
+            wypisz("Tekst: "); char dane[128]; pobierz_linie(dane, 128); wypisz("\n");
+            if (zapisz_plik(bezp, dane, strlen(dane))) wypisz("Zapisano!\n"); else wypisz("Błąd zapisu.\n");
         }
         else if (strncmp(bufor_komendy, "usun ", 5)) {
             char sciezka[64]; formatuj_sciezke(&bufor_komendy[5], sciezka);
-            if (usun_twor(sciezka)) { print("Usunięto obiekt: "); print(sciezka); print("\n"); } 
-            else print("Błąd: Nie można usunąć.\n");
+            if (usun_twor(sciezka)) { wypisz("Usunięto obiekt: "); wypisz(sciezka); wypisz("\n"); } 
+            else wypisz("Błąd: Nie można usunąć.\n");
         }
         else if (strcmp(bufor_komendy, "zmien_nazwe")) {
-            print("Ścieżka do zmiany: "); char stara[64]; pobierz_linie(stara, 64); print("\n"); char bezp_stara[64]; formatuj_sciezke(stara, bezp_stara);
-            print("Nowa nazwa: "); char nowa[64]; pobierz_linie(nowa, 64); print("\n");
-            if (zmien_nazwe_tworu(bezp_stara, nowa)) print("Zmieniono nazwę.\n"); else print("Błąd zmiany nazwy.\n");
+            wypisz("Ścieżka do zmiany: "); char stara[64]; pobierz_linie(stara, 64); wypisz("\n"); char bezp_stara[64]; formatuj_sciezke(stara, bezp_stara);
+            wypisz("Nowa nazwa: "); char nowa[64]; pobierz_linie(nowa, 64); wypisz("\n");
+            if (zmien_nazwe_tworu(bezp_stara, nowa)) wypisz("Zmieniono nazwę.\n"); else wypisz("Błąd zmiany nazwy.\n");
         }
-        else if (strncmp(bufor_komendy, "pisz ", 5)) { print(&bufor_komendy[5]); print("\n"); }
-        else { print("Nieznane polecenie: '"); print(bufor_komendy); print("'. Wpisz 'pomoc'.\n"); }
+        else if (strncmp(bufor_komendy, "pisz ", 5)) { wypisz(&bufor_komendy[5]); wypisz("\n"); }
+        else { wypisz("Nieznane polecenie: '"); wypisz(bufor_komendy); wypisz("'. Wpisz 'pomoc'.\n"); }
     }
 }

@@ -26,6 +26,7 @@ System jest rozwijany z myślą o architekturze x86-64, implementując własne J
 ![alt](image/kalkulator.png)
 
 # Pierwsza aplikacja z GUI działająca w Ring 3
+### Abu uruchomić notatnik wpisz polecenie w powłoce. uruchom /programy/notatnik.cebula/notatnik.bur
 ## Notatnik
 ![alt](image/notatnik/notatnik1.png)
 ## Notatnik

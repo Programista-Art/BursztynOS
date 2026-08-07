@@ -29,25 +29,27 @@ extern uint64_t najwyzsza_znaleziona_ramka;
 
 extern "C" void skanuj_magistrale_pci();
 extern "C" void wczytaj_tapete_z_dysku();  
-// extern "C" void inicjalizuj_psf(void* adres_ram_dysku, uint32_t rozmiar_w_bajtach);
     
 extern "C" bool usun_twor(const char* sciezka);
 extern "C" bool utworz_plik(const char* sciezka);
 extern "C" bool zapisz_do_pliku(const char* sciezka, const char* dane, uint32_t dlugosc);
 extern "C" bool utworz_katalog(const char* sciezka);
 
-// NOWOŚĆ: Deklaracja inicjalizacji zrewidowanego, drzewiastego BSP
-// extern "C" void inicjalizuj_bsp();
+// Deklaracja inicjalizacji zrewidowanego, drzewiastego BSP
 extern "C" void inicjalizuj_psf(void* adres_ram_dysku, uint32_t rozmiar_w_bajtach);
 
-// Symbole wstrzykiwane przez GNU Linker (objcopy) z pliku shell_blob.o i notatnik_blob.o
+// Symbole wstrzykiwane przez GNU Linker (objcopy) z plików aplikacji
 extern "C" uint8_t _binary_shell_bin_start[];
 extern "C" uint8_t _binary_shell_bin_end[];
 
 extern "C" uint8_t _binary_notatnik_bin_start[];
 extern "C" uint8_t _binary_notatnik_bin_end[];
 
-// Prototyp funkcji uruchamiającej program z uwzględnieniem Systemu Uprawnień PZB oraz flagi z_syscalla
+// NOWOŚĆ: Deklaracja symboli Menedżera Okien
+extern "C" uint8_t _binary_menedzer_okien_bin_start[];
+extern "C" uint8_t _binary_menedzer_okien_bin_end[];
+
+// Prototyp funkcji uruchamiającej program z uwzględnieniem Systemu Uprawnień PZB
 extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka, uint8_t bzl_poziom, uint64_t flagi_praw, bool z_syscalla);
 
 // --- FUNKCJE SIECIOWE (Karta Intel E1000 i DHCP) ---
@@ -87,8 +89,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
 
     wypisz_log("==================================================");
     wypisz_log(" Witamy w Bursztyn OS 64-bit ");
-    wypisz_log("Polski System Operacyjny");
-    wypisz_log("Github: Programista-Art/BursztynOS ");
+    wypisz_log(" Polski System Operacyjny");
+    wypisz_log(" Github: Programista-Art/BursztynOS ");
     wypisz_log("==================================================");
 
     uint64_t ram_mb = (najwyzsza_znaleziona_ramka * 4096) / (1024 * 1024);
@@ -115,18 +117,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     uruchom_klienta_dhcp();
     wypisz_log("[SIEC] Stos TCP/IP (DHCP, ARP, ICMP, DNS) w pelni operacyjny.");
 
-    // // --- WIRTUALIZACJA I DRZEWIASTY SYSTEM PLIKÓW ---
-    // uint64_t adres_wirtualny_dysku = 0x40000000; 
-    // uint32_t rozmiar_dysku = 2 * 1024 * 1024;    
-
-    // for (uint32_t i = 0; i < rozmiar_dysku; i += 4096) {
-    //     void* wolna_ramka_fizyczna = ZaalokujRamke();
-    //     if (wolna_ramka_fizyczna) ZmapujStrone((void*)(adres_wirtualny_dysku + i), wolna_ramka_fizyczna, 0b00000011);
-    // }
-        // --- AKTYWACJA DHCP ZARAZ PO PODNIESIENIU KARTY! ---
-    uruchom_klienta_dhcp();
-    wypisz_log("[SIEC] Stos TCP/IP (DHCP, ARP, ICMP, DNS) w pelni operacyjny.");
-
+    // --- WIRTUALIZACJA I DRZEWIASTY SYSTEM PLIKÓW ---
     uint64_t adres_wirtualny_dysku = 0x40000000; 
     uint32_t rozmiar_dysku = 2 * 1024 * 1024;    
 
@@ -135,11 +126,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
         if (wolna_ramka_fizyczna) ZmapujStrone((void*)(adres_wirtualny_dysku + i), wolna_ramka_fizyczna, 0b00000011);
     }
 
-
     inicjalizuj_psf((void*)adres_wirtualny_dysku, rozmiar_dysku);
-    
-    // Inicjalizujemy nowy, hierarchiczny układ dysku
-    // inicjalizuj_bsp();
 
     // Tworzenie drzewa katalogów
     utworz_katalog("/jadro");
@@ -188,42 +175,32 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     int len_manifest = 0;
     while (manifest_notatnika[len_manifest] != '\0') len_manifest++;
 
-    // // Zapis manifestu wewnątrz paczki
-    // utworz_plik("/programy/notatnik.cebula/opis.aplikacji");
-    // zapisz_do_pliku("/programy/notatnik.cebula/opis.aplikacji", manifest_notatnika, len_manifest);
+    utworz_plik("/programy/notatnik.cebula/opis.aplikacji");
+    zapisz_do_pliku("/programy/notatnik.cebula/opis.aplikacji", manifest_notatnika, len_manifest);
 
-    // // Zapis pliku binarnego wewnątrz paczki
-    // uint64_t notatnik_rozmiar = (uint64_t)(_binary_notatnik_bin_end - _binary_notatnik_bin_start);
-    // if (notatnik_rozmiar < 24576) notatnik_rozmiar = 24576; // Padding
-    
-    // utworz_plik("/programy/notatnik.cebula/notatnik.bur");
-    // zapisz_do_pliku("/programy/notatnik.cebula/notatnik.bur", (const char*)_binary_notatnik_bin_start, notatnik_rozmiar);
-    
-    // wypisz_log("[BSP] Aplikacja Notatnik zainstalowana jako paczka .cebula!");
-
-    // // =========================================================
-    // // --- URUCHOMIENIE RING 3 ---
-    // // =========================================================
-    // bws_uruchom_program_z_pliku("/shell.bur", PZB_UZYTKOWNIK, 0xFFFFFFFF, false);
-     // Zapis manifestu
-    utworz_plik("/opis_notatnika.txt");
-    zapisz_do_pliku("/opis_notatnika.txt", manifest_notatnika, len_manifest);
-
-    // Pobranie PRAWIDŁOWEGO rozmiaru wyliczonego przez czysty GNU Linker
+    // Padding pliku (by uchronić Notatnik przed nadpisaniem kodu powłoki przy małym buforze)
     uint64_t notatnik_rozmiar = (uint64_t)(_binary_notatnik_bin_end - _binary_notatnik_bin_start);
+    if(notatnik_rozmiar < 24576) notatnik_rozmiar = 24576; 
     
-    // Zapis binarnego, natywnego pliku z kodem maszynowym .bur
-    utworz_plik("/notatnik.bur");
-    zapisz_do_pliku("/notatnik.bur", (const char*)_binary_notatnik_bin_start, notatnik_rozmiar);
-    
-    wypisz_log("[BSP] Aplikacja Notatnik zainstalowana w glownym katalogu (/)!");
+    // Instalacja prawidłowo do folderu paczki (tam gdzie szuka go Pulpit!)
+    utworz_plik("/programy/notatnik.cebula/notatnik.bur");
+    zapisz_do_pliku("/programy/notatnik.cebula/notatnik.bur", (const char*)_binary_notatnik_bin_start, notatnik_rozmiar);
+    wypisz_log("[BSP] Aplikacja Notatnik zainstalowana jako paczka .cebula!");
+
+    // =========================================================
+    // --- WDRAŻANIE MENEDŻERA OKIEN (PULPIT) ---
+    // =========================================================
+    utworz_plik("/menedzer_okien.bur");
+    uint64_t menedzer_rozmiar = (uint64_t)(_binary_menedzer_okien_bin_end - _binary_menedzer_okien_bin_start);
+    zapisz_do_pliku("/menedzer_okien.bur", (const char*)_binary_menedzer_okien_bin_start, menedzer_rozmiar);
+    wypisz_log("[BSP] Menedzer Okien zainstalowany i gotowy!");
 
     // =========================================================
     
-    // Start Powłoki Ring 3
-    bws_uruchom_program_z_pliku("/shell.bur", PZB_UZYTKOWNIK, 0xFFFFFFFF, false);
+    // Zamiast terminala (shell.bur), system włącza od razu Twój nowy Pulpit!
+    bws_uruchom_program_z_pliku("/menedzer_okien.bur", PZB_UZYTKOWNIK, 0xFFFFFFFF, false);
 
-    // 10. Pętla bezczynności - Kernel sprawdza sieć (Polling)
+    // Pętla bezczynności - Kernel sprawdza sieć (Polling)
     while (true) {
         e1000_obsluz_odbior(); 
         asm volatile ("hlt");
