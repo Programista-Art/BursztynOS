@@ -10,9 +10,13 @@ System jest rozwijany z myślą o architekturze x86-64, implementując własne J
 
 # Programy w Bursztynie powłoka systemowa shell i prosty notatnik
 
-![alt](image/BursztynOs1.png)
+## Pulpit Bursztyna
 
-![alt](image/BursztynOs2.png)
+![alt](image/pulpit/pulpit-bursztyna.png)
+
+![alt](image/pulpit/2.png)
+
+![alt](image/pulpit/3.png)
 
 ### Pobranie strony avocado-code.com
 
@@ -23,7 +27,7 @@ System jest rozwijany z myślą o architekturze x86-64, implementując własne J
 ![alt](image/BursztynOS-ping.png)
 ### Prosty kalkulator w Burstzyn OS z GUI.
 
-![alt](image/kalkulator.png)
+![alt](image/pulpit/2.png)
 
 # Pierwsza aplikacja z GUI działająca w Ring 3
 ### Abu uruchomić notatnik wpisz polecenie w powłoce. uruchom /programy/notatnik.cebula/notatnik.bur

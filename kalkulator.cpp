@@ -31,7 +31,7 @@ static char calc_display[64] __attribute__((section(".data"))) = "0";
 static char calc_num_buf[32] __attribute__((section(".data"))) = "0";
 static int  calc_op1 = 0;
 static char calc_op = 0;
-static int  calc_state = 0; // 0: start/num1, 1: op pressed, 2: num2, 3: wynik
+static int  calc_state = 0; 
 
 const char* calc_btns[16] = {
     "7", "8", "9", "/",
@@ -146,7 +146,6 @@ void RysujInterfejs(bool odswiez_tlo) {
     if (odswiez_tlo) {
         gui_odswiez_pulpit();
         
-        // Pasek na całą szerokość ekranu
         gui_rysuj_prostokat(0, screen_h - 40, screen_w, 40, 0x001A0B00); 
         gui_rysuj_prostokat(0, screen_h - 40, screen_w, 2, 0x00E58A00);
         
@@ -165,14 +164,12 @@ void RysujInterfejs(bool odswiez_tlo) {
 
     gui_rysuj_okno(WIN_X, WIN_Y, WIN_W, WIN_H, "Kalkulator Systemowy");
     
-    // Zamykanie i minimalizowanie
     gui_rysuj_prostokat(WIN_X + WIN_W - 50, WIN_Y + 4, 20, 20, 0x00E58A00);
     gui_wypisz_tekst_kolor(WIN_X + WIN_W - 50 + 4, WIN_Y + 6, 0x001A0B00, "-");
     
     gui_rysuj_prostokat(WIN_X + WIN_W - 26, WIN_Y + 4, 20, 20, 0x00AA0000);
     gui_wypisz_tekst_kolor(WIN_X + WIN_W - 26 + 4, WIN_Y + 6, 0x00FFFFFF, "X");
 
-    // RAMKA WYSWIETLACZA KALKULATORA
     gui_rysuj_prostokat(WIN_X + 10, WIN_Y + 35, WIN_W - 20, 50, 0x00020503);
     gui_rysuj_prostokat(WIN_X + 10, WIN_Y + 35, WIN_W - 20, 1, 0x00E58A00);
     gui_rysuj_prostokat(WIN_X + 10, WIN_Y + 84, WIN_W - 20, 1, 0x00E58A00);
@@ -182,9 +179,8 @@ void RysujInterfejs(bool odswiez_tlo) {
     int len = 0; while(calc_display[len]) len++;
     int text_x = WIN_X + WIN_W - 20 - (len * 18); 
     if (text_x < WIN_X + 15) text_x = WIN_X + 15; 
-    gui_wypisz_tekst_kolor_skala(text_x, WIN_Y + 45, 0x00FFBF00, 2, calc_display); // NOWOŚĆ: Skalowanie x2!
+    gui_wypisz_tekst_kolor_skala(text_x, WIN_Y + 45, 0x00FFBF00, 2, calc_display);
 
-    // Rysowanie przycisków
     int start_x = WIN_X + 10;
     int start_y = WIN_Y + 95;
     int bw = (WIN_W - 50) / 4;
@@ -195,14 +191,12 @@ void RysujInterfejs(bool odswiez_tlo) {
             int bx = start_x + col*(bw+10);
             int by = start_y + row*(bh+10);
             
-            // Kolor Jaśniejszy niż tło okna!
             uint32_t btn_color = 0x004A2500;
             if (calc_btns[row*4 + col][0] == 'C') btn_color = 0x008A2000;
             else if (calc_btns[row*4 + col][0] == '=') btn_color = 0x00E58A00;
             
             gui_rysuj_prostokat(bx, by, bw, bh, btn_color);
             
-            // BARDZO WAŻNE: Złote obramowania dla każdego przycisku!
             gui_rysuj_prostokat(bx, by, bw, 1, 0x00E58A00);
             gui_rysuj_prostokat(bx, by + bh - 1, bw, 1, 0x00E58A00);
             gui_rysuj_prostokat(bx, by, 1, bh, 0x00E58A00);
@@ -211,13 +205,23 @@ void RysujInterfejs(bool odswiez_tlo) {
             uint32_t txt_color = (btn_color == 0x00E58A00) ? 0x001A0B00 : 0x00FFFFFF;
             int offset_x = (calc_btns[row*4 + col][0] == 'C') ? 8 : 4;
             
-            gui_wypisz_tekst_kolor_skala(bx + bw/2 - offset_x, by + bh/2 - 8, txt_color, 2, calc_btns[row*4 + col]); // NOWOŚĆ: Duży tekst!
+            gui_wypisz_tekst_kolor_skala(bx + bw/2 - offset_x, by + bh/2 - 8, txt_color, 2, calc_btns[row*4 + col]); 
         }
     }
     gui_odswiez();
 }
 
 extern "C" __attribute__((noreturn)) void _start() {
+    // BARDZO WAŻNE: Ręczna inicjalizacja środowiska z ominięciem śmieci w pamięci
+    calc_state = 0;
+    calc_op1 = 0;
+    calc_op = 0;
+    calc_display[0] = '0'; calc_display[1] = '\0';
+    calc_num_buf[0] = '0'; calc_num_buf[1] = '\0';
+    dragging = false;
+    aplikacja_zminimalizowana = false;
+    drag_off_x = 0; drag_off_y = 0;
+
     gui_pobierz_rozdzielczosc(&screen_w, &screen_h);
     gui_ustaw_przejecie_myszy(true);
 
@@ -227,52 +231,54 @@ extern "C" __attribute__((noreturn)) void _start() {
     while (!wyjdz) {
         int mx, my; uint8_t mb; gui_pobierz_mysz(&mx, &my, &mb);
         bool klik = (mb == 1 && poprz_przycisk == 0);
-        bool pusc = (mb == 0 && poprz_przycisk == 1);
         bool przytrzymany = (mb == 1);
 
-        if (mx != old_mx || my != old_my) { if (dragging && !aplikacja_zminimalizowana) odswiez_tlo = true; redraw = true; }
+        if (mx != old_mx || my != old_my) { 
+            if (dragging && !aplikacja_zminimalizowana) {
+                odswiez_tlo = true; 
+                redraw = true; 
+            }
+        }
 
         if (klik) {
-                    if (my >= screen_h - 40) {
-                        if (mx >= 100 && mx <= 240) { aplikacja_zminimalizowana = !aplikacja_zminimalizowana; odswiez_tlo = true; redraw = true; }
-                    }
-                    else if (!aplikacja_zminimalizowana && mx >= WIN_X && mx <= WIN_X + WIN_W && my >= WIN_Y && my <= WIN_Y + WIN_H) {
-                        if (my >= WIN_Y && my <= WIN_Y + 26) {
-                            if (mx >= WIN_X + WIN_W - 50 && mx <= WIN_X + WIN_W - 30) { aplikacja_zminimalizowana = true; odswiez_tlo = true; } 
-                            else if (mx >= WIN_X + WIN_W - 26 && mx <= WIN_X + WIN_W - 6) { wyjdz = true; }
-                            else { dragging = true; drag_off_x = mx - WIN_X; drag_off_y = my - WIN_Y; }
-                        } else {
-                            // POPRAWKA: Precyzyjne pozycjonowanie względem ruchomego okna (WIN_X / WIN_Y)
-                            int start_x = WIN_X + 10; 
-                            int start_y = WIN_Y + 95;
-                            int bw = (WIN_W - 50) / 4; 
-                            int bh = (WIN_H - 140) / 4;
-                            bool trafiono = false; 
-                            for(int row=0; row<4 && !trafiono; row++) {
-                                for(int col=0; col<4; col++) {
-                                    int bx = start_x + col*(bw+10); 
-                                    int by = start_y + row*(bh+10);
-                                    if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
-                                        KalkulatorKlik(calc_btns[row*4 + col][0]);
-                                        redraw = true; trafiono = true; break;
-                                    }
-                                }
+            if (my >= screen_h - 40) {
+                if (mx >= 100 && mx <= 240) { aplikacja_zminimalizowana = !aplikacja_zminimalizowana; odswiez_tlo = true; redraw = true; }
+            }
+            else if (!aplikacja_zminimalizowana && mx >= WIN_X && mx <= WIN_X + WIN_W && my >= WIN_Y && my <= WIN_Y + WIN_H) {
+                if (my >= WIN_Y && my <= WIN_Y + 26) {
+                    if (mx >= WIN_X + WIN_W - 50 && mx <= WIN_X + WIN_W - 30) { 
+                        aplikacja_zminimalizowana = true; 
+                        odswiez_tlo = true; 
+                        redraw = true; 
+                    } 
+                    else if (mx >= WIN_X + WIN_W - 26 && mx <= WIN_X + WIN_W - 6) { wyjdz = true; }
+                    else { dragging = true; drag_off_x = mx - WIN_X; drag_off_y = my - WIN_Y; }
+                } else {
+                    int start_x = WIN_X + 10; int start_y = WIN_Y + 95;
+                    int bw = (WIN_W - 50) / 4; int bh = (WIN_H - 140) / 4;
+                    bool trafiono = false; 
+                    for(int row=0; row<4 && !trafiono; row++) {
+                        for(int col=0; col<4; col++) {
+                            int bx = start_x + col*(bw+10); int by = start_y + row*(bh+10);
+                            if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
+                                KalkulatorKlik(calc_btns[row*4 + col][0]);
+                                redraw = true; trafiono = true; break;
                             }
                         }
                     }
                 }
-
-        if (pusc) { dragging = false; redraw = true; }
-        if (dragging && przytrzymany && !aplikacja_zminimalizowana) { WIN_X = mx - drag_off_x; WIN_Y = my - drag_off_y; if (WIN_X < 0) { WIN_X = 0; } if (WIN_Y < 0) { WIN_Y = 0; } odswiez_tlo = true; redraw = true; }
-        poprz_przycisk = mb; old_mx = mx; old_my = my;
-
-        char c = pobierz_znak();
-        if (c != 0 && !aplikacja_zminimalizowana) {
-            if ((c >= '0' && c <= '9') || c == '+' || c == '-' || c == '*' || c == '/' || c == '=' || c == 'C' || c == 'c') {
-                KalkulatorKlik(c); redraw = true;
             }
-            if (c == '\n' || c == '\r') { KalkulatorKlik('='); redraw = true; }
         }
+
+        if (mb == 0) { dragging = false; }
+        
+        if (dragging && przytrzymany && !aplikacja_zminimalizowana) { 
+            WIN_X = mx - drag_off_x; WIN_Y = my - drag_off_y; 
+            if (WIN_X < 0) { WIN_X = 0; } if (WIN_Y < 0) { WIN_Y = 0; } 
+            odswiez_tlo = true; redraw = true; 
+        }
+        
+        poprz_przycisk = mb; old_mx = mx; old_my = my;
 
         if (redraw) { RysujInterfejs(odswiez_tlo); redraw = false; odswiez_tlo = false; }
     }
