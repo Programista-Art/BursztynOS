@@ -7,8 +7,8 @@
 #include "psf.h"
 #include "ahci.h"
 
-// Funkcja logująca ze Składacza Obrazu
-extern void WypiszLog(const char* tekst);
+// Funkcja logująca ze Składacza Obrazu (Konwencja snake_case)
+void wypisz_log(const char* tekst);
 
 static uint8_t* ram_dysk = nullptr;
 static superblok* dysk_superblok = nullptr;
@@ -19,11 +19,11 @@ static uint64_t calkowita_liczba_blokow_danych = 0;
 #define MAX_LOADER_BUF (128 * 1024)
 static uint8_t bufor_wymiany_plikow[MAX_LOADER_BUF];
 
-// --- NOWOŚĆ: Przesunięcie partycji ---
+// --- Przesunięcie partycji ---
 // Rozpoczynamy partycję plików ok. 5 MB w głąb dysku, by nie nadpisać tapety!
 #define BSP_START_LBA 40000 
 
-// --- NOWOŚĆ: Synchronizacja z Dyskiem Fizycznym ---
+// --- Synchronizacja z Dyskiem Fizycznym ---
 static void bsp_zapisz_zmiany() {
     if (!ram_dysk || !dysk_superblok) return;
     
@@ -261,14 +261,14 @@ extern "C" void inicjalizuj_psf(void* adres_ram_dysku, uint32_t rozmiar_w_bajtac
     ram_dysk = (uint8_t*)adres_ram_dysku;
     dysk_superblok = (superblok*)ram_dysk;
 
-    WypiszLog("[BSP] Sprawdzanie nosnika AHCI w poszukiwaniu trwalego systemu plikow...");
+    wypisz_log("[BSP] Sprawdzanie nosnika AHCI w poszukiwaniu trwalego systemu plikow...");
 
     // Odczyt próbny superbloku z dysku fizycznego
     if (czytaj_z_glownego_dysku_ahci(BSP_START_LBA, 1, ram_dysk)) {
         if (dysk_superblok->sygnatura[0] == 'B' && dysk_superblok->sygnatura[1] == 'S' &&
             dysk_superblok->sygnatura[2] == 'P' && dysk_superblok->sygnatura[3] == '2') {
             
-            WypiszLog("[BSP] Odkryto istniejacy system plikow! Ladowanie mapy z dysku (DMA)...");
+            wypisz_log("[BSP] Odkryto istniejacy system plikow! Ladowanie mapy z dysku (DMA)...");
             
             uint32_t ilosc_sektorow = dysk_superblok->calkowity_rozmiar / 512;
             if (ilosc_sektorow > rozmiar_w_bajtach / 512) ilosc_sektorow = rozmiar_w_bajtach / 512;
@@ -286,12 +286,12 @@ extern "C" void inicjalizuj_psf(void* adres_ram_dysku, uint32_t rozmiar_w_bajtac
             calkowita_liczba_wezlow = (dysk_superblok->start_danych - dysk_superblok->start_wezlow) * (PSF_ROZMIAR_BLOKU / sizeof(wezel_indeksowy));
             calkowita_liczba_blokow_danych = dysk_superblok->ilosc_blokow - dysk_superblok->start_danych;
             
-            WypiszLog("[BSP] Trwaly system plikow pomyslnie zaladowany z nosnika SATA!");
+            wypisz_log("[BSP] Trwaly system plikow pomyslnie zaladowany z nosnika SATA!");
             return;
         }
     }
 
-    WypiszLog("[BSP] Pusty dysk. Formatowanie nowej partycji 2MB...");
+    wypisz_log("[BSP] Pusty dysk. Formatowanie nowej partycji 2MB...");
 
     for(uint32_t i=0; i<rozmiar_w_bajtach; i++) ram_dysk[i] = 0;
 
@@ -316,13 +316,12 @@ extern "C" void inicjalizuj_psf(void* adres_ram_dysku, uint32_t rozmiar_w_bajtac
     uint64_t id_korzenia = zaalokuj_wolny_wezel(TYP_KATALOG);
     dysk_superblok->id_korzenia = id_korzenia;
 
-    // NOWOŚĆ: Zapisz nowo uformowaną partycję na fizyczny dysk
+    // Zapisz nowo uformowaną partycję na fizyczny dysk
     bsp_zapisz_zmiany();
-    WypiszLog("[BSP] Formatowanie zakonczone. Struktura utrwalona na dysku!");
+    wypisz_log("[BSP] Formatowanie zakonczone. Struktura utrwalona na dysku!");
 }
 
 extern "C" bool utworz_katalog(const char* sciezka) {
-    // Zabezpieczenie przed duplikatami
     if (rozwiaz_sciezke(sciezka, nullptr, false) != 0) return false;
 
     char nowa_nazwa[PSF_MAX_NAZWA];
@@ -333,12 +332,11 @@ extern "C" bool utworz_katalog(const char* sciezka) {
     if (nowy_id == 0) return false;
 
     bool sukces = dodaj_wpis_do_katalogu(wezel_rodzica_id, nowy_id, nowa_nazwa);
-    if (sukces) bsp_zapisz_zmiany(); // Zrzut Cache do Dysku
+    if (sukces) bsp_zapisz_zmiany();
     return sukces;
 }
 
 extern "C" bool utworz_plik(const char* sciezka) {
-    // Zabezpieczenie przed duplikatami
     if (rozwiaz_sciezke(sciezka, nullptr, false) != 0) return false;
 
     char nowa_nazwa[PSF_MAX_NAZWA];
@@ -349,7 +347,7 @@ extern "C" bool utworz_plik(const char* sciezka) {
     if (nowy_id == 0) return false;
 
     bool sukces = dodaj_wpis_do_katalogu(wezel_rodzica_id, nowy_id, nowa_nazwa);
-    if (sukces) bsp_zapisz_zmiany(); // Zrzut Cache do Dysku
+    if (sukces) bsp_zapisz_zmiany();
     return sukces;
 }
 
@@ -384,7 +382,7 @@ extern "C" bool zapisz_do_pliku(const char* sciezka, const char* dane, uint32_t 
     }
     
     wezel->rozmiar_w_bajtach = zapisano;
-    bsp_zapisz_zmiany(); // Zrzut Cache do Dysku
+    bsp_zapisz_zmiany();
     return (zapisano == dlugosc);
 }
 
@@ -478,13 +476,13 @@ extern "C" bool wylistuj_katalog(const char* sciezka, char* bufor, uint32_t max_
                 wezel_indeksowy* element = pobierz_wezel(wpisy[j].id_wezla);
                 
                 const char* tag = (element && element->typ == TYP_KATALOG) ? "[KAT]  " : "[PLIK] ";
-                int t = 0;
+                uint32_t t = 0;
                 while (tag[t] != '\0' && pozycja < max_dlugosc - 1) {
                     bufor[pozycja++] = tag[t++];
                 }
 
                 const char* nazwa = wpisy[j].nazwa;
-                int idx = 0;
+                uint32_t idx = 0;
                 while (nazwa[idx] != '\0' && pozycja < max_dlugosc - 1) {
                     bufor[pozycja++] = nazwa[idx++];
                 }
@@ -537,7 +535,7 @@ extern "C" bool usun_twor(const char* sciezka) {
             }
         }
     }
-    bsp_zapisz_zmiany(); // Zrzut Cache do Dysku
+    bsp_zapisz_zmiany();
     return true;
 }
 
@@ -558,7 +556,7 @@ extern "C" bool zmien_nazwe_tworu(const char* sciezka, const char* nowa_nazwa) {
         for(int j = 0; j < PSF_ROZMIAR_BLOKU / (int)sizeof(wpis_katalogowy); j++) {
             if (wpisy[j].id_wezla != 0 && czy_identyczne_str(wpisy[j].nazwa, stara_nazwa_docelowa)) {
                 kopiuj_str(wpisy[j].nazwa, nowa_nazwa, PSF_MAX_NAZWA);
-                bsp_zapisz_zmiany(); // Zrzut Cache do Dysku
+                bsp_zapisz_zmiany();
                 return true;
             }
         }

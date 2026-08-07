@@ -30,13 +30,13 @@ bool PorownajPamiec(const void* ptr1, const void* ptr2, uint64_t rozmiar) {
 }
 
 extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka_pliku, uint8_t bzl_poziom, uint64_t flagi_praw, bool z_syscalla) {
-    WypiszLog("[LOADER] Proba uruchomienia programu...");
+    wypisz_log("[LOADER] Proba uruchomienia programu...");
 
     uint64_t rozmiar_pliku = 0;
     uint8_t* bufor_pliku = bsp_wczytaj_plik_do_pamieci(sciezka_pliku, &rozmiar_pliku);
     
     if (!bufor_pliku || rozmiar_pliku < sizeof(NaglowekBur)) {
-        WypiszLog("[LOADER-BLAD] Nie znaleziono pliku lub plik jest za maly!");
+        wypisz_log("[LOADER-BLAD] Nie znaleziono pliku lub plik jest za maly!");
         return false;
     }
 
@@ -44,11 +44,11 @@ extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka_pliku, uint8_t b
 
     const uint8_t oczekiwana_magia[4] = {'B', 'U', 'R', '\0'};
     if (!PorownajPamiec(naglowek->magia, oczekiwana_magia, 4)) {
-        WypiszLog("[LOADER-BLAD] Nieprawidlowy format pliku! To nie jest program .bur");
+        wypisz_log("[LOADER-BLAD] Nieprawidlowy format pliku! To nie jest program .bur");
         return false;
     }
 
-    WypiszLog("[LOADER] Sygnatura BUR poprawna. Alokacja pamieci uzytkownika...");
+    wypisz_log("[LOADER] Sygnatura BUR poprawna. Alokacja pamieci uzytkownika...");
 
     uint32_t flagi_vmm_user = FLAGA_OBECNA | FLAGA_ZAPIS | FLAGA_USER;
 
@@ -105,7 +105,7 @@ extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka_pliku, uint8_t b
     aktywny_proces.uprawnienia = flagi_praw;
     aktywny_proces.przestrzen_adresowa = PobierzAktualnePML4();
 
-    WypiszLog("[LOADER] Program zaladowany. Zastosowano zabezpieczenia PZB. Przejscie do Ring 3...");
+    wypisz_log("[LOADER] Program zaladowany. Zastosowano zabezpieczenia PZB. Przejscie do Ring 3...");
 
     // 8. Ostateczny Skok
     przejdz_do_ring3(naglowek->punkt_wejscia, wirtualny_szczyt_stosu, z_syscalla);

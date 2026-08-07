@@ -1,7 +1,7 @@
 #include "siec.h"
 #include "e1000.h"
 
-extern void WypiszLog(const char* tekst);
+void wypisz_log(const char* tekst);
 extern "C" void e1000_obsluz_odbior();
 
 // Globalne ustawienia i adresy
@@ -159,21 +159,21 @@ void wyslij_pakiet_dhcp(uint8_t typ_wiadomosci, uint8_t* zapytanie_ip, uint8_t* 
 }
 
 extern "C" void uruchom_klienta_dhcp() {
-    WypiszLog("[DHCP] Uruchamiam klienta DHCP (Wysylam UDP DISCOVER)...");
+    wypisz_log("[DHCP] Uruchamiam klienta DHCP (Wysylam UDP DISCOVER)...");
     wyslij_pakiet_dhcp(1, nullptr, nullptr);
     int timeout = 0;
     while (nasz_ip[0] == 0 && timeout < 100000000) { e1000_obsluz_odbior(); timeout++; asm volatile("pause"); }
-    if (nasz_ip[0] == 0) WypiszLog("[DHCP] Blad: Nie udalo sie odebrac adresu IP od rutera (Timeout).");
+    if (nasz_ip[0] == 0) wypisz_log("[DHCP] Blad: Nie udalo sie odebrac adresu IP od rutera (Timeout).");
 }
 
 // ---------------------------------------------------------
 // PING (ICMP) I DNS (UDP)
 // ---------------------------------------------------------
 extern "C" void bws_siec_ping(uint8_t ip1, uint8_t ip2, uint8_t ip3, uint8_t ip4) {
-    if (nasz_ip[0] == 0) { WypiszLog("[SIEC] Blad PING: Brak IP!"); return; }
+    if (nasz_ip[0] == 0) { wypisz_log("[SIEC] Blad PING: Brak IP!"); return; }
     uint8_t cel_ip[4] = {ip1, ip2, ip3, ip4}; uint8_t docelowy_mac[6];
 
-    if (!rozwiaz_adres_mac(cel_ip, docelowy_mac)) { WypiszLog("[SIEC] Blad PING: Brak trasy do celu (Ruter/Host nie odpowiada)."); return; }
+    if (!rozwiaz_adres_mac(cel_ip, docelowy_mac)) { wypisz_log("[SIEC] Blad PING: Brak trasy do celu (Ruter/Host nie odpowiada)."); return; }
 
     uint8_t pakiet[74]; for(int i=0; i<74; i++) pakiet[i] = 0;
     ethernet_header* eth = (ethernet_header*)pakiet;
@@ -192,7 +192,7 @@ extern "C" void bws_siec_ping(uint8_t ip1, uint8_t ip2, uint8_t ip3, uint8_t ip4
     e1000_wyslij_pakiet(pakiet, 74);
     int timeout_ping = 0;
     while (!odebrano_pong && timeout_ping < 50000000) { e1000_obsluz_odbior(); timeout_ping++; asm volatile("pause"); }
-    if (!odebrano_pong) WypiszLog("[SIEC] Upinal czas oczekiwania na odpowiedz (Request timed out).");
+    if (!odebrano_pong) wypisz_log("[SIEC] Upinal czas oczekiwania na odpowiedz (Request timed out).");
 }
 
 extern "C" bool bws_siec_dns(const char* domena, uint8_t* wyjsciowy_ip) {
@@ -315,7 +315,7 @@ extern "C" bool bws_siec_pobierz_http(uint8_t cel_ip[4], const char* domena, con
     if (nasz_ip[0] == 0) return false;
 
     if (!rozwiaz_adres_mac(cel_ip, tcp_cel_mac)) {
-        WypiszLog("[TCP] Blad routingu do serwera docelowego.");
+        wypisz_log("[TCP] Blad routingu do serwera docelowego.");
         return false;
     }
 
@@ -333,7 +333,7 @@ extern "C" bool bws_siec_pobierz_http(uint8_t cel_ip[4], const char* domena, con
     for(uint32_t i=0; i<max_dlugosc; i++) bufor[i] = 0;
 
     // Etap 1: Inicjacja Połączenia (SYN)
-    WypiszLog("[TCP] Rozpoczynam Handshake (Wysylam SYN)...");
+    wypisz_log("[TCP] Rozpoczynam Handshake (Wysylam SYN)...");
     stan_tcp = TCP_SYN_SENT;
     wyslij_pakiet_tcp(TCP_SYN, nullptr, 0);
 
@@ -343,12 +343,12 @@ extern "C" bool bws_siec_pobierz_http(uint8_t cel_ip[4], const char* domena, con
         e1000_obsluz_odbior(); timeout++; asm volatile("pause");
     }
     if(stan_tcp != TCP_ESTABLISHED) {
-        WypiszLog("[TCP] Timeout oczekiwania na SYN-ACK (Brak odpowiedzi ze strony WWW).");
+        wypisz_log("[TCP] Timeout oczekiwania na SYN-ACK (Brak odpowiedzi ze strony WWW).");
         return false;
     }
 
     // Etap 2: Konstrukcja Zapytania HTTP (GET)
-    WypiszLog("[HTTP] Sesja nawiazana. Wysylam zapytanie HTTP GET...");
+    wypisz_log("[HTTP] Sesja nawiazana. Wysylam zapytanie HTTP GET...");
     char http_get[256]; http_get[0] = 0;
     siec_kopiuj_str(http_get, "GET "); siec_dopisz_str(http_get, sciezka);
     siec_dopisz_str(http_get, " HTTP/1.0\r\nHost: "); siec_dopisz_str(http_get, domena);
@@ -371,11 +371,11 @@ extern "C" bool bws_siec_pobierz_http(uint8_t cel_ip[4], const char* domena, con
     if (tcp_zapisano_bajtow > 0) {
         char log[128]; siec_kopiuj_str(log, "[HTTP] Zmieszczono w buforze transferu (bajtow): ");
         char nbuf[16]; siec_int_do_str(tcp_zapisano_bajtow, nbuf); siec_dopisz_str(log, nbuf);
-        WypiszLog(log);
+        wypisz_log(log);
         return true;
     }
     
-    WypiszLog("[HTTP] Blad: Polaczenie powiodlo sie, ale serwer nie wyslal danych.");
+    wypisz_log("[HTTP] Blad: Polaczenie powiodlo sie, ale serwer nie wyslal danych.");
     return false;
 }
 
@@ -401,7 +401,7 @@ void obsluz_pakiet_sieciowy(uint8_t* pakiet, uint16_t dlugosc) {
                 skopiuj_mac(arp->nadawca_mac, pobierz_mac_adres()); skopiuj_ip(arp->nadawca_ip, nasz_ip);
                 e1000_wyslij_pakiet(pakiet, dlugosc);
             }
-            else if (HTONS(arp->operacja) == 2) WypiszLog("[ARP] Odebrano dopasowanie MAC. Tabela Cache zaktualizowana!");
+            else if (HTONS(arp->operacja) == 2) wypisz_log("[ARP] Odebrano dopasowanie MAC. Tabela Cache zaktualizowana!");
         }
     } 
     else if (typ_eth == 0x0800) { 
@@ -417,7 +417,7 @@ void obsluz_pakiet_sieciowy(uint8_t* pakiet, uint16_t dlugosc) {
             icmp_header* icmp = (icmp_header*)((uint8_t*)ip + ihl_bajty);
             
             if (icmp->typ == 8) {
-                WypiszLog("[SIEC] Odebrano zewnetrzny PING. Odbijam (PONG!)...");
+                wypisz_log("[SIEC] Odebrano zewnetrzny PING. Odbijam (PONG!)...");
                 skopiuj_mac(eth->cel_mac, eth->zrodlo_mac); skopiuj_mac(eth->zrodlo_mac, pobierz_mac_adres());
                 uint8_t stary_zrodlowy_ip[4]; skopiuj_ip(stary_zrodlowy_ip, ip->zrodlo_ip);
                 skopiuj_ip(ip->zrodlo_ip, nasz_ip); skopiuj_ip(ip->cel_ip, stary_zrodlowy_ip);
@@ -453,7 +453,7 @@ void obsluz_pakiet_sieciowy(uint8_t* pakiet, uint16_t dlugosc) {
                     siec_int_do_str(nasz_ip[1], buf); siec_dopisz_str(log, buf); siec_dopisz_str(log, ".");
                     siec_int_do_str(nasz_ip[2], buf); siec_dopisz_str(log, buf); siec_dopisz_str(log, ".");
                     siec_int_do_str(nasz_ip[3], buf); siec_dopisz_str(log, buf);
-                    WypiszLog(log);
+                    wypisz_log(log);
                 }
                 }
             }
@@ -497,7 +497,7 @@ void obsluz_pakiet_sieciowy(uint8_t* pakiet, uint16_t dlugosc) {
 
                 // ODEBRANO: SYN-ACK (Uścisk Dłoni: Akceptacja przez Serwer)
                 if (stan_tcp == TCP_SYN_SENT && (flagi & TCP_SYN) && (flagi & TCP_ACK)) {
-                    WypiszLog("[TCP] Otrzymano SYN-ACK. Serwer podjal polaczenie. Wysylam potwierdzenie ACK...");
+                    wypisz_log("[TCP] Otrzymano SYN-ACK. Serwer podjal polaczenie. Wysylam potwierdzenie ACK...");
                     tcp_nasz_ack = NTOHL(tcp->numer_sekwencyjny) + 1;
                     tcp_nasz_seq++; 
                     stan_tcp = TCP_ESTABLISHED;
@@ -539,7 +539,7 @@ void obsluz_pakiet_sieciowy(uint8_t* pakiet, uint16_t dlugosc) {
                     
                     // Serwer mówi, że skończył wysyłanie (FIN) - zamykamy!
                     if (flagi & TCP_FIN) {
-                        WypiszLog("[TCP] Transmisja zakonczona. Serwer inicjuje rozlaczenie (FIN).");
+                        wypisz_log("[TCP] Transmisja zakonczona. Serwer inicjuje rozlaczenie (FIN).");
                         tcp_nasz_ack = NTOHL(tcp->numer_sekwencyjny) + 1;
                         wyslij_pakiet_tcp(TCP_ACK, nullptr, 0);
                         stan_tcp = TCP_CLOSED;

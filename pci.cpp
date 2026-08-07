@@ -7,7 +7,7 @@
 #include <stdint.h>
 
 // Funkcje z innych modułów jądra
-extern void WypiszLog(const char* tekst);
+void wypisz_log(const char* tekst);
 extern "C" bool utworz_plik(const char* sciezka);
 extern "C" bool zapisz_do_pliku(const char* sciezka, const char* dane, uint32_t dlugosc);
 
@@ -63,7 +63,7 @@ static void pci_str_dopisz(char* cel, const char* zrodlo) {
 
 // Skaner magistrali zapisujący logi na dysk (KRYTYCZNE: posiada extern "C")
 extern "C" void skanuj_magistrale_pci() {
-    WypiszLog("[PCI] Skanowanie plyty glownej w poszukiwaniu sprzetu...");
+    wypisz_log("[PCI] Skanowanie plyty glownej w poszukiwaniu sprzetu...");
     
     // Potężny bufor na raport tekstowy (ok. 2 KB)
     char pelny_raport[2048];
@@ -111,7 +111,7 @@ extern "C" void skanuj_magistrale_pci() {
     }
 
     if (znaleziono > 0) {
-        WypiszLog("[PCI] Skanowanie zakonczone. Zapisuje log do /logi/pci.txt");
+        wypisz_log("[PCI] Skanowanie zakonczone. Zapisuje log do /logi/pci.txt");
         
         utworz_plik("/logi/pci.txt");
         
@@ -120,6 +120,6 @@ extern "C" void skanuj_magistrale_pci() {
         
         zapisz_do_pliku("/logi/pci.txt", pelny_raport, len);
     } else {
-        WypiszLog("[PCI] UWAGA: Nie wykryto zadnych urzadzen PCI!");
+        wypisz_log("[PCI] UWAGA: Nie wykryto zadnych urzadzen PCI!");
     }
 }

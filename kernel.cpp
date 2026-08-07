@@ -29,13 +29,18 @@ extern uint64_t najwyzsza_znaleziona_ramka;
 
 extern "C" void skanuj_magistrale_pci();
 extern "C" void wczytaj_tapete_z_dysku();  
+// extern "C" void inicjalizuj_psf(void* adres_ram_dysku, uint32_t rozmiar_w_bajtach);
     
 extern "C" bool usun_twor(const char* sciezka);
 extern "C" bool utworz_plik(const char* sciezka);
 extern "C" bool zapisz_do_pliku(const char* sciezka, const char* dane, uint32_t dlugosc);
 extern "C" bool utworz_katalog(const char* sciezka);
 
-// Symbole wstrzykiwane przez GNU Linker (objcopy) z pliku shell_blob.o
+// NOWOŚĆ: Deklaracja inicjalizacji zrewidowanego, drzewiastego BSP
+// extern "C" void inicjalizuj_bsp();
+extern "C" void inicjalizuj_psf(void* adres_ram_dysku, uint32_t rozmiar_w_bajtach);
+
+// Symbole wstrzykiwane przez GNU Linker (objcopy) z pliku shell_blob.o i notatnik_blob.o
 extern "C" uint8_t _binary_shell_bin_start[];
 extern "C" uint8_t _binary_shell_bin_end[];
 
@@ -45,7 +50,7 @@ extern "C" uint8_t _binary_notatnik_bin_end[];
 // Prototyp funkcji uruchamiającej program z uwzględnieniem Systemu Uprawnień PZB oraz flagi z_syscalla
 extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka, uint8_t bzl_poziom, uint64_t flagi_praw, bool z_syscalla);
 
-// --- NOWE: FUNKCJE SIECIOWE (Karta Intel E1000 i DHCP) ---
+// --- FUNKCJE SIECIOWE (Karta Intel E1000 i DHCP) ---
 extern "C" void inicjalizuj_e1000();
 extern "C" void e1000_obsluz_odbior();
 extern "C" void uruchom_klienta_dhcp();
@@ -80,23 +85,25 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     inicjalizuj_syscalls();
     InicjalizujGrafike(multiboot_info_ptr);
 
-    WypiszLog("==================================================");
-    WypiszLog(" Witamy w Bursztyn OS 64-bit (GUI + Paging)");
-    WypiszLog("==================================================");
+    wypisz_log("==================================================");
+    wypisz_log(" Witamy w Bursztyn OS 64-bit ");
+    wypisz_log("Polski System Operacyjny");
+    wypisz_log("Github: Programista-Art/BursztynOS ");
+    wypisz_log("==================================================");
 
     uint64_t ram_mb = (najwyzsza_znaleziona_ramka * 4096) / (1024 * 1024);
     char ram_str[32]; char ram_msg[80];
     UIntToStr(ram_mb, ram_str);
     ZlaczStringi(ram_msg, "[PMM] Skan pamieci fizycznej. Wykryto: ", ram_str, " MB RAM");
-    WypiszLog(ram_msg);
+    wypisz_log(ram_msg);
 
-    WypiszLog("[VMM] Paging 4-poziomowy aktywowany. Tablice przebudowane.");
+    wypisz_log("[VMM] Paging 4-poziomowy aktywowany. Tablice przebudowane.");
 
     inicjalizuj_apic();
-    WypiszLog("[APIC] Kontroler przerwan (LAPIC/IOAPIC) uruchomiony.");
+    wypisz_log("[APIC] Kontroler przerwan (LAPIC/IOAPIC) uruchomiony.");
     InicjalizujMyszPS2();
-    WypiszLog("[I/O] Sterowniki Mysz i Klawiatura (PS/2) gotowe.");
-    WypiszLog("[BWS] API Wywolan Systemowych gotowe.");
+    wypisz_log("[I/O] Sterowniki Mysz i Klawiatura (PS/2) gotowe.");
+    wypisz_log("[BWS] API Wywolan Systemowych gotowe.");
 
     inicjalizuj_kontroler_ahci();
     wczytaj_tapete_z_dysku();
@@ -106,7 +113,19 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     
     // --- AKTYWACJA DHCP ZARAZ PO PODNIESIENIU KARTY! ---
     uruchom_klienta_dhcp();
-    WypiszLog("[SIEC] Stos TCP/IP (DHCP, ARP, ICMP, DNS) w pelni operacyjny.");
+    wypisz_log("[SIEC] Stos TCP/IP (DHCP, ARP, ICMP, DNS) w pelni operacyjny.");
+
+    // // --- WIRTUALIZACJA I DRZEWIASTY SYSTEM PLIKÓW ---
+    // uint64_t adres_wirtualny_dysku = 0x40000000; 
+    // uint32_t rozmiar_dysku = 2 * 1024 * 1024;    
+
+    // for (uint32_t i = 0; i < rozmiar_dysku; i += 4096) {
+    //     void* wolna_ramka_fizyczna = ZaalokujRamke();
+    //     if (wolna_ramka_fizyczna) ZmapujStrone((void*)(adres_wirtualny_dysku + i), wolna_ramka_fizyczna, 0b00000011);
+    // }
+        // --- AKTYWACJA DHCP ZARAZ PO PODNIESIENIU KARTY! ---
+    uruchom_klienta_dhcp();
+    wypisz_log("[SIEC] Stos TCP/IP (DHCP, ARP, ICMP, DNS) w pelni operacyjny.");
 
     uint64_t adres_wirtualny_dysku = 0x40000000; 
     uint32_t rozmiar_dysku = 2 * 1024 * 1024;    
@@ -116,11 +135,17 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
         if (wolna_ramka_fizyczna) ZmapujStrone((void*)(adres_wirtualny_dysku + i), wolna_ramka_fizyczna, 0b00000011);
     }
 
-    inicjalizuj_psf((void*)adres_wirtualny_dysku, rozmiar_dysku);
 
+    inicjalizuj_psf((void*)adres_wirtualny_dysku, rozmiar_dysku);
+    
+    // Inicjalizujemy nowy, hierarchiczny układ dysku
+    // inicjalizuj_bsp();
+
+    // Tworzenie drzewa katalogów
     utworz_katalog("/jadro");
     utworz_katalog("/system");
     utworz_katalog("/programy");
+    utworz_katalog("/programy/notatnik.cebula"); // Paczka aplikacji!
     utworz_katalog("/uslugi");
     utworz_katalog("/sterowniki");
     utworz_katalog("/uzytkownicy");
@@ -131,18 +156,24 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
 
     skanuj_magistrale_pci();
 
-    WypiszLog("--------------------------------------------------");
-    WypiszLog("System operacyjny gotowy!");
+    wypisz_log("--------------------------------------------------");
+    wypisz_log("System operacyjny gotowy!");
 
     asm volatile("sti");
 
+    // =========================================================
+    // --- INSTALACJA POWŁOKI (shell.bur) ---
+    // =========================================================
     usun_twor("/shell.bur"); 
     utworz_plik("/shell.bur");
     uint64_t shell_rozmiar = (uint64_t)(_binary_shell_bin_end - _binary_shell_bin_start);
     zapisz_do_pliku("/shell.bur", (const char*)_binary_shell_bin_start, shell_rozmiar);
-    WypiszLog("[BSP] Wbudowana Powloka gotowa do odczytu z dysku.");
-  
-  const char* manifest_notatnika = 
+    wypisz_log("[BSP] Wbudowana Powloka gotowa do odczytu z dysku.");
+
+    // =========================================================
+    // --- WDRAŻANIE PACZKI APLIKACJI (NOTATNIK.CEBULA) ---
+    // =========================================================
+    const char* manifest_notatnika = 
         "nazwa = \"Notatnik\"\n"
         "autor = \"Programista Art\"\n"
         "wersja = \"0.1\"\n"
@@ -156,8 +187,25 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
         
     int len_manifest = 0;
     while (manifest_notatnika[len_manifest] != '\0') len_manifest++;
+
+    // // Zapis manifestu wewnątrz paczki
+    // utworz_plik("/programy/notatnik.cebula/opis.aplikacji");
+    // zapisz_do_pliku("/programy/notatnik.cebula/opis.aplikacji", manifest_notatnika, len_manifest);
+
+    // // Zapis pliku binarnego wewnątrz paczki
+    // uint64_t notatnik_rozmiar = (uint64_t)(_binary_notatnik_bin_end - _binary_notatnik_bin_start);
+    // if (notatnik_rozmiar < 24576) notatnik_rozmiar = 24576; // Padding
     
-    // Zapis manifestu
+    // utworz_plik("/programy/notatnik.cebula/notatnik.bur");
+    // zapisz_do_pliku("/programy/notatnik.cebula/notatnik.bur", (const char*)_binary_notatnik_bin_start, notatnik_rozmiar);
+    
+    // wypisz_log("[BSP] Aplikacja Notatnik zainstalowana jako paczka .cebula!");
+
+    // // =========================================================
+    // // --- URUCHOMIENIE RING 3 ---
+    // // =========================================================
+    // bws_uruchom_program_z_pliku("/shell.bur", PZB_UZYTKOWNIK, 0xFFFFFFFF, false);
+     // Zapis manifestu
     utworz_plik("/opis_notatnika.txt");
     zapisz_do_pliku("/opis_notatnika.txt", manifest_notatnika, len_manifest);
 
@@ -168,17 +216,15 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     utworz_plik("/notatnik.bur");
     zapisz_do_pliku("/notatnik.bur", (const char*)_binary_notatnik_bin_start, notatnik_rozmiar);
     
-    WypiszLog("[BSP] Aplikacja Notatnik zainstalowana w glownym katalogu (/)!");
+    wypisz_log("[BSP] Aplikacja Notatnik zainstalowana w glownym katalogu (/)!");
 
     // =========================================================
     
     // Start Powłoki Ring 3
     bws_uruchom_program_z_pliku("/shell.bur", PZB_UZYTKOWNIK, 0xFFFFFFFF, false);
 
-
     // 10. Pętla bezczynności - Kernel sprawdza sieć (Polling)
     while (true) {
-        // Analiza czy karta sieciowa (DMA) zrzuciła nowe pakiety do RAM-u
         e1000_obsluz_odbior(); 
         asm volatile ("hlt");
     }

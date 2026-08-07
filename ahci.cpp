@@ -9,7 +9,7 @@
 
 // Funkcje dostarczane przez inne części Jądra Bursztyna
 extern "C" uint32_t pci_odczytaj_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset);
-extern void WypiszLog(const char* tekst);
+void wypisz_log(const char* tekst);
 
 // Lokalne implementacje funkcji tekstowych -
 static void ZlaczStringi(char* cel, const char* str1, const char* str2, const char* str3) {
@@ -167,7 +167,7 @@ static void uruchom_silnik_komend(volatile struktura_portu_ahci* port) {
 }
 
 extern "C" void inicjalizuj_kontroler_ahci() {
-    WypiszLog("[AHCI] Szukam kontrolera pamieci masowej na magistrali PCI...");
+    wypisz_log("[AHCI] Szukam kontrolera pamieci masowej na magistrali PCI...");
     uint32_t adres_fizyczny_abar = 0;
     
     uint8_t final_bus = 0, final_slot = 0;
@@ -192,20 +192,20 @@ extern "C" void inicjalizuj_kontroler_ahci() {
     }
     
     if (adres_fizyczny_abar == 0) {
-        WypiszLog("[AHCI] Nie znaleziono kontrolera dyskow!");
+        wypisz_log("[AHCI] Nie znaleziono kontrolera dyskow!");
         return;
     }
 
     uint32_t komenda_pci = pci_odczytaj_dword(final_bus, final_slot, 0, 0x04);
     if ((komenda_pci & 0x06) != 0x06) {
         pci_zapisz_dword(final_bus, final_slot, 0, 0x04, komenda_pci | 0x06);
-        WypiszLog("[AHCI] Aktywowano prawa zapisu do RAM (PCI Bus Mastering).");
+        wypisz_log("[AHCI] Aktywowano prawa zapisu do RAM (PCI Bus Mastering).");
     }
     
     ZmapujStrone((void*)((uint64_t)adres_fizyczny_abar), (void*)((uint64_t)adres_fizyczny_abar), 0b11 | 0x10);
     adres_bazy_ahci = (volatile pamiec_kontrolera_ahci*)((uint64_t)adres_fizyczny_abar);
     
-    WypiszLog("[AHCI] Kontroler aktywny. Skanuje wewnetrzne porty SATA...");
+    wypisz_log("[AHCI] Kontroler aktywny. Skanuje wewnetrzne porty SATA...");
     
     adres_bazy_ahci->globalne_sterowanie |= (1 << 31); // Włącz tryb AHCI (GHC.AE)
     
@@ -240,7 +240,7 @@ extern "C" void inicjalizuj_kontroler_ahci() {
                 
                 char log[64]; char nr[4]; UIntToStr(i, nr);
                 ZlaczStringi(log, "[AHCI] Przypisano i aktywowano dysk SATA na porcie ", nr, ".");
-                WypiszLog(log);
+                wypisz_log(log);
             }
         }
     }
@@ -295,7 +295,7 @@ static bool operacja_dysku_ahci(uint64_t lba, uint32_t ilosc_sektorow, void* wir
         timeout++;
     }
     if (port->status_zadania & (0x80 | 0x08)) {
-        WypiszLog("[AHCI] Blad: Dysk zamrozony (Timeout BSY/DRQ)!");
+        wypisz_log("[AHCI] Blad: Dysk zamrozony (Timeout BSY/DRQ)!");
         return false;
     }
 
@@ -307,7 +307,7 @@ static bool operacja_dysku_ahci(uint64_t lba, uint32_t ilosc_sektorow, void* wir
     timeout = 0;
     while (port->powiadomienia_komend & 1) {
         if (port->status_przerwan & (1 << 30)) {
-            WypiszLog("[AHCI] Blad: Task File Error (Bit 30)!");
+            wypisz_log("[AHCI] Blad: Task File Error (Bit 30)!");
             return false; 
         }
         
@@ -315,7 +315,7 @@ static bool operacja_dysku_ahci(uint64_t lba, uint32_t ilosc_sektorow, void* wir
         timeout++;
         
         if (timeout > 500000000) { 
-            WypiszLog("[AHCI] Blad: Przekroczono czas oczekiwania na paczke DMA!");
+            wypisz_log("[AHCI] Blad: Przekroczono czas oczekiwania na paczke DMA!");
             return false;
         }
     }

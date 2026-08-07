@@ -16,6 +16,7 @@ static uint8_t   lfb_bpp = 32;
 static uint8_t* backbuffer = nullptr;
 static uint32_t* bufor_tapety = nullptr; 
 static bool tapeta_zaladowana = false;   
+static bool ring3_gui_active = false;
 
 // ==================== DEKLARACJE ZAPOWIADAJACE ====================
 void UkryjKursor();
@@ -268,7 +269,7 @@ void DopiszDoBufora(const char* tekst, uint32_t kolor) {
 }
 
 // ==================== ZMODYFIKOWANA FUNKCJA LOGÓW ====================
-void WypiszLog(const char* tekst) {
+void wypisz_log(const char* tekst) {
     // KRYTYCZNA POPRAWKA: Wysyłanie logów bezpośrednio do terminala Linuksa!
     SerialLog(tekst);
     SerialLog("\n");
@@ -637,6 +638,15 @@ extern "C" void zaktualizuj_mysze(int dx, int dy, uint8_t przyciski) {
     if (mysz_x < 0) mysz_x = 0; if (mysz_x >= (int)lfb_szerokosc - 2) mysz_x = lfb_szerokosc - 2;
     if (mysz_y < 0) mysz_y = 0; if (mysz_y >= (int)lfb_wysokosc - 2) mysz_y = lfb_wysokosc - 2;
     
+    // NOWY WARUNEK: Jeśli Ring 3 przejął mysz, jądro tylko aktualizuje pozycję i rysuje kursor!
+    if (ring3_gui_active) {
+        lewy_wcisniety = (przyciski & 0x01);
+        PokazKursor(); 
+        PrzeniesFragmentNaEkran(stary_mysz_x, stary_mysz_y, 16, 16); 
+        PrzeniesFragmentNaEkran(mysz_x, mysz_y, 16, 16);
+        return;
+    }
+
     bool nowy_lewy = (przyciski & 0x01);
     bool klik_lewy = (nowy_lewy && !lewy_wcisniety);
     bool puszcz_lewy = (!nowy_lewy && lewy_wcisniety);
@@ -751,7 +761,7 @@ extern "C" void* PobierzAktualnePML4();
 
 // ==================== ZALADOWANIE BMP (AHCI) ====================
 extern "C" void wczytaj_tapete_z_dysku() {
-    WypiszLog("[GRAFIKA] Proba wczytania tapeta.bmp z dysku AHCI (LBA 10)...");
+    wypisz_log("[GRAFIKA] Proba wczytania tapeta.bmp z dysku AHCI (LBA 10)...");
     uint64_t vaddr_raw = 0x91000000ULL;
     for(uint64_t i = 0; i < 32 * 1024 * 1024; i += 4096) ZmapujStrone((void*)(vaddr_raw + i), ZaalokujRamke(), 0b11);
     asm volatile("mov %0, %%cr3" : : "r"(PobierzAktualnePML4()) : "memory");
@@ -810,7 +820,7 @@ extern "C" void wczytaj_tapete_z_dysku() {
     }
 
     tapeta_zaladowana = true;
-    WypiszLog("[GRAFIKA] Pulpit i tapeta gotowe!");
+    wypisz_log("[GRAFIKA] Pulpit i tapeta gotowe!");
     OdswiezEkran(); PrzeniesNaEkran();
 }
 
@@ -889,4 +899,80 @@ extern "C" void obsluga_przerwania_zegara() {
         
         if (kursor_byl) PokazKursor();
     }
+}
+
+// === NOWE FUNKCJE GUI DLA RING 3 (SYSCALLS) ===
+extern "C" void bws_gui_rysuj_okno(int x, int y, int szer, int wys, const char* tytul) {
+    if(!backbuffer) return;
+    UkryjKursor();
+    RysujProstokat(x, y, szer, wys, 0x008A5A00);             // Ramka
+    RysujProstokat(x + 2, y + 2, szer - 4, 24, 0x00FFBF00);  // Pasek tytułu
+    WypiszTekst(tytul, x + 8, y + 4, 0x001A0B00, 1);         // Tytuł
+    RysujProstokat(x + 2, y + 28, szer - 4, wys - 30, 0x00280F00); // Tło edytora
+    PokazKursor();
+}
+
+extern "C" void bws_gui_wypisz_tekst(int x, int y, const char* text) {
+    if(!backbuffer) return;
+    UkryjKursor();
+    WypiszTekst(text, x, y, 0x00D1D5DB, 1);
+    PokazKursor();
+}
+
+extern "C" void bws_gui_wyczyscz_obszar(int x, int y, int szer, int wys) {
+    if(!backbuffer) return;
+    UkryjKursor();
+    RysujProstokat(x, y, szer, wys, 0x00280F00);
+    PokazKursor();
+}
+
+extern "C" void bws_gui_odswiez() {
+    if(!backbuffer) return;
+    PrzeniesNaEkran();
+}
+// Zwraca pozycję myszy do programów Ring 3
+extern "C" void bws_gui_pobierz_mysz(int* x, int* y, uint8_t* przyciski) {
+    if(!backbuffer || !x || !y || !przyciski) return;
+    *x = mysz_x;
+    *y = mysz_y;
+    *przyciski = lewy_wcisniety ? 1 : 0;
+}
+
+// Czyści ekran i rysuje pulpit (aby usunąć ślady po przesuwanym oknie)
+extern "C" void bws_gui_odswiez_pulpit() {
+    if(!backbuffer) return;
+    UkryjKursor();
+    OdswiezEkran(); // Rysuje tapetę i okna jądra na nowo
+    PokazKursor();
+}
+// NOWA FUNKCJA: Rysowanie tekstu w określonym kolorze dla Ring 3
+extern "C" void bws_gui_wypisz_tekst_kolor(int x, int y, uint32_t kolor, const char* text) {
+    if(!backbuffer) return;
+    UkryjKursor();
+    WypiszTekst(text, x, y, kolor, 1);
+    PokazKursor();
+}
+
+// Rysuje ładny prostokąt (do przycisków) dla Ring 3
+extern "C" void bws_gui_rysuj_prostokat(int x, int y, int w, int h, uint32_t kolor) {
+    if(!backbuffer) return;
+    UkryjKursor();
+    RysujProstokat(x, y, w, h, kolor);
+    PokazKursor();
+}
+
+// Pozwala aplikacji Ring 3 wyłączyć obsługę okien przez jądro
+
+extern "C" void bws_gui_ustaw_przejecie_myszy(bool stan) {
+    ring3_gui_active = stan;
+    if (stan) {
+        for(int i=0; i<3; i++) okna[i].widoczne = false; // Ukryj okna jądra
+    } else {
+        okna[0].widoczne = true; // Przywróć Terminal
+    }
+}
+// NOWA FUNKCJA: Pobieranie rozdzielczości ekranu (Syscall 23)
+extern "C" void bws_gui_pobierz_rozdzielczosc(int* szer, int* wys) {
+    if(szer) *szer = lfb_szerokosc;
+    if(wys) *wys = lfb_wysokosc;
 }

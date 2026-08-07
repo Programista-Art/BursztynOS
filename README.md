@@ -25,6 +25,16 @@ System jest rozwijany z myślą o architekturze x86-64, implementując własne J
 
 ![alt](image/kalkulator.png)
 
+# Pierwsza aplikacja z GUI działająca w Ring 3
+## Notatnik
+![alt](image/notatnik/notatnik1.png)
+## Notatnik
+![alt](image/notatnik/notatnik2.png)
+## Notatnik
+![alt](image/notatnik/notatnik3.png)
+## Notatnik
+![alt](image/notatnik/notatnik4.png)
+
 
 
 ## Dostępne 21 komend w Shellu

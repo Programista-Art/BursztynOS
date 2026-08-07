@@ -1,7 +1,7 @@
 #include "e1000.h"
 #include "pamiec.h"
 
-extern void WypiszLog(const char* tekst);
+void wypisz_log(const char* tekst);
 extern "C" uint32_t pci_odczytaj_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset);
 extern "C" void pci_zapisz_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t data);
 
@@ -64,7 +64,7 @@ static inline uint32_t czytaj_rejestr(uint16_t offset) {
 uint8_t* pobierz_mac_adres() { return mac_adres; }
 
 extern "C" void inicjalizuj_e1000() {
-    WypiszLog("[E1000] Szukam karty sieciowej Intel PRO/1000...");
+    wypisz_log("[E1000] Szukam karty sieciowej Intel PRO/1000...");
     uint32_t pci_bar0 = 0;
     
     uint16_t bus = 0, slot = 0; 
@@ -81,7 +81,7 @@ extern "C" void inicjalizuj_e1000() {
         if (znaleziono) break;
     }
 
-    if (!znaleziono) { WypiszLog("[E1000] Brak wspieranej karty sieciowej."); return; }
+    if (!znaleziono) {  wypisz_log("[E1000] Brak wspieranej karty sieciowej."); return; }
 
     uint32_t cmd = pci_odczytaj_dword((uint8_t)bus, (uint8_t)slot, 0, 0x04);
     pci_zapisz_dword((uint8_t)bus, (uint8_t)slot, 0, 0x04, cmd | (1 << 2)); // Włącz Bus Mastering (DMA)
@@ -109,7 +109,7 @@ extern "C" void inicjalizuj_e1000() {
     char mac_log[64] = "[E1000] Zarejestrowano MAC: ";
     char buf[4];
     for(int i=0; i<6; i++) { HexDoStr(mac_adres[i], buf); ZlaczStringi(mac_log, mac_log, buf); if(i<5) ZlaczStringi(mac_log, mac_log, ":"); }
-    WypiszLog(mac_log);
+    wypisz_log(mac_log);
 
     // Inicjalizacja buforów odbiorczych (RX)
     rx_descs = (struct e1000_rx_desc*)ZaalokujRamke();
@@ -142,7 +142,7 @@ extern "C" void inicjalizuj_e1000() {
     // Aktywuj Przerwania (Choć my użyjemy Pollingu dla uproszczenia w Jądrze)
     zapisz_rejestr(0x00D0, 0x1F6DC); // IMS
 
-    WypiszLog("[E1000] Karta podniesiona. Link aktywny!");
+    wypisz_log("[E1000] Karta podniesiona. Link aktywny!");
 }
 
 extern "C" void e1000_wyslij_pakiet(void* dane, uint16_t dlugosc) {
