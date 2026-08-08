@@ -1,5 +1,6 @@
 /*
  * Kalkulator (GUI) dla Bursztyn OS (Aplikacja Ring 3)
+ * Wersja nowoczesna z idealnie wyśrodkowanymi przyciskami.
  */
 
 #include "bursztyn_gui.h"
@@ -44,6 +45,9 @@ int WIN_X = 300, WIN_Y = 150, WIN_W = 320, WIN_H = 380;
 bool dragging = false, aplikacja_zminimalizowana = false;
 int drag_off_x = 0, drag_off_y = 0;
 int screen_w = 1024, screen_h = 768; 
+
+
+
 
 void calc_append_str(char* dest, const char* src) {
     int i = 0; while(dest[i]) i++;
@@ -150,7 +154,7 @@ void RysujInterfejs(bool odswiez_tlo) {
         gui_rysuj_prostokat(0, screen_h - 40, screen_w, 2, 0x00E58A00);
         
         gui_rysuj_prostokat(10, screen_h - 35, 80, 30, 0x00E58A00);
-        gui_wypisz_tekst_kolor(10 + 4, screen_h - 35 + 2, 0x001A0B00, " Menu");
+        gui_wypisz_tekst_kolor(14, screen_h - 33, 0x001A0B00, "Menu");
         
         uint32_t kolor_tla = aplikacja_zminimalizowana ? 0x001A0B00 : 0x004A2500;
         gui_rysuj_prostokat(100, screen_h - 40, 140, 40, kolor_tla);
@@ -164,23 +168,25 @@ void RysujInterfejs(bool odswiez_tlo) {
 
     gui_rysuj_okno(WIN_X, WIN_Y, WIN_W, WIN_H, "Kalkulator Systemowy");
     
+    // Przyciski kontrolne okna
     gui_rysuj_prostokat(WIN_X + WIN_W - 50, WIN_Y + 4, 20, 20, 0x00E58A00);
-    gui_wypisz_tekst_kolor(WIN_X + WIN_W - 50 + 4, WIN_Y + 6, 0x001A0B00, "-");
+    rysuj_tekst_wysrodkowany(WIN_X + WIN_W - 50, WIN_Y + 4, 20, 20, 1, 0x001A0B00, "-");
     
     gui_rysuj_prostokat(WIN_X + WIN_W - 26, WIN_Y + 4, 20, 20, 0x00AA0000);
-    gui_wypisz_tekst_kolor(WIN_X + WIN_W - 26 + 4, WIN_Y + 6, 0x00FFFFFF, "X");
+    rysuj_tekst_wysrodkowany(WIN_X + WIN_W - 26, WIN_Y + 4, 20, 20, 1, 0x00FFFFFF, "X");
 
-    gui_rysuj_prostokat(WIN_X + 10, WIN_Y + 35, WIN_W - 20, 50, 0x00020503);
-    gui_rysuj_prostokat(WIN_X + 10, WIN_Y + 35, WIN_W - 20, 1, 0x00E58A00);
-    gui_rysuj_prostokat(WIN_X + 10, WIN_Y + 84, WIN_W - 20, 1, 0x00E58A00);
-    gui_rysuj_prostokat(WIN_X + 10, WIN_Y + 35, 1, 50, 0x00E58A00);
-    gui_rysuj_prostokat(WIN_X + WIN_W - 11, WIN_Y + 35, 1, 50, 0x00E58A00);
-
-    int len = 0; while(calc_display[len]) len++;
-    int text_x = WIN_X + WIN_W - 20 - (len * 18); 
+    // Nowoczesny wyświetlacz (Ciemny ekran z subtelnym dolnym pasekiem)
+    gui_rysuj_prostokat(WIN_X + 10, WIN_Y + 35, WIN_W - 20, 50, 0x00050200);
+    gui_rysuj_prostokat(WIN_X + 10, WIN_Y + 84, WIN_W - 20, 2, 0x00E58A00);
+    
+    // Tekst wyświetlacza (Prawo-stronnie wyrównany do środka)
+    int szer_tekstu = oblicz_szerokosc_tekstu(calc_display, 2);
+    int text_x = WIN_X + WIN_W - 20 - 10 - szer_tekstu; 
     if (text_x < WIN_X + 15) text_x = WIN_X + 15; 
-    gui_wypisz_tekst_kolor_skala(text_x, WIN_Y + 45, 0x00FFBF00, 2, calc_display);
+    int text_y = WIN_Y + 35 + 25 - 16; // Wyśrodkowanie w pionie
+    gui_wypisz_tekst_kolor_skala(text_x, text_y, 0x00FFBF00, 2, calc_display);
 
+    // Siatka przycisków
     int start_x = WIN_X + 10;
     int start_y = WIN_Y + 95;
     int bw = (WIN_W - 50) / 4;
@@ -191,28 +197,32 @@ void RysujInterfejs(bool odswiez_tlo) {
             int bx = start_x + col*(bw+10);
             int by = start_y + row*(bh+10);
             
-            uint32_t btn_color = 0x004A2500;
-            if (calc_btns[row*4 + col][0] == 'C') btn_color = 0x008A2000;
-            else if (calc_btns[row*4 + col][0] == '=') btn_color = 0x00E58A00;
+            char btn_char = calc_btns[row*4 + col][0];
+            uint32_t btn_color = 0x00242424; // Ciemnoszary jak w nowoczesnych Kalkulatorach Windows
+            uint32_t txt_color = 0x00FFFFFF;
+            
+            if (btn_char == 'C') { btn_color = 0x00661100; txt_color = 0x00FF5555; } // Ciemna czerwień
+            else if (btn_char == '=') { btn_color = 0x00E58A00; txt_color = 0x001A0B00; } // Bursztyn
+            else if (btn_char == '/' || btn_char == '*' || btn_char == '-' || btn_char == '+') { 
+                btn_color = 0x00302211; txt_color = 0x00E58A00; // Ciemny bursztyn dla operatorów
+            }
             
             gui_rysuj_prostokat(bx, by, bw, bh, btn_color);
             
-            gui_rysuj_prostokat(bx, by, bw, 1, 0x00E58A00);
-            gui_rysuj_prostokat(bx, by + bh - 1, bw, 1, 0x00E58A00);
-            gui_rysuj_prostokat(bx, by, 1, bh, 0x00E58A00);
-            gui_rysuj_prostokat(bx + bw - 1, by, 1, bh, 0x00E58A00);
+            // Cienka, elegancka ramka dla głębi
+            gui_rysuj_prostokat(bx, by, bw, 1, 0x00404040);
+            gui_rysuj_prostokat(bx, by + bh - 1, bw, 1, 0x00101010);
+            gui_rysuj_prostokat(bx, by, 1, bh, 0x00404040);
+            gui_rysuj_prostokat(bx + bw - 1, by, 1, bh, 0x00101010);
 
-            uint32_t txt_color = (btn_color == 0x00E58A00) ? 0x001A0B00 : 0x00FFFFFF;
-            int offset_x = (calc_btns[row*4 + col][0] == 'C') ? 8 : 4;
-            
-            gui_wypisz_tekst_kolor_skala(bx + bw/2 - offset_x, by + bh/2 - 8, txt_color, 2, calc_btns[row*4 + col]); 
+            // Używamy nowej funkcji do idealnego wyśrodkowania!
+            rysuj_tekst_wysrodkowany(bx, by, bw, bh, 2, txt_color, calc_btns[row*4 + col]); 
         }
     }
     gui_odswiez();
 }
 
 extern "C" __attribute__((noreturn)) void _start() {
-    // BARDZO WAŻNE: Ręczna inicjalizacja środowiska z ominięciem śmieci w pamięci
     calc_state = 0;
     calc_op1 = 0;
     calc_op = 0;

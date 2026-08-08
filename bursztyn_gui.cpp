@@ -98,6 +98,12 @@ void gui_pobierz_rozdzielczosc(int* w, int* h) {
     bws_wywolaj(23, (uint64_t)w, (uint64_t)h); 
 }
 
+int gui_pobierz_szerokosc_znaku(uint32_t z) {
+    return (int)bws_wywolaj(24, z);
+}
+
+
+
 // ==========================================
 // 3. ELEMENTY INTERFEJSU (WIDGETY)
 // ==========================================
@@ -105,4 +111,29 @@ void gui_pobierz_rozdzielczosc(int* w, int* h) {
 void RysujPrzycisk(int x, int y, int w, int h, uint32_t kolor_bg, uint32_t kolor_txt, const char* t) {
     gui_rysuj_prostokat(x, y, w, h, kolor_bg);
     gui_wypisz_tekst_kolor(x + 4, y + 2, kolor_txt, t);
+}
+
+// Oblicza szerokość tekstu w pikselach z uwzględnieniem skali i polskich znaków (UTF-8)
+int oblicz_szerokosc_tekstu(const char* t, int skala) {
+    int w = 0; int i = 0;
+    while (t[i] != '\0') {
+        uint32_t z = (uint8_t)t[i];
+        if ((t[i] & 0xE0) == 0xC0 && t[i+1] != '\0') {
+            uint8_t b1 = (uint8_t)t[i]; uint8_t b2 = (uint8_t)t[i+1];
+            z = ((b1 & 0x1F) << 6) | (b2 & 0x3F);
+            i++;
+        }
+        w += (gui_pobierz_szerokosc_znaku(z) + 1) * skala;
+        i++;
+    }
+    return w;
+}
+
+// Rysuje tekst idealnie na środku zadanego obszaru (przydatne do przycisków i ikon)
+void rysuj_tekst_wysrodkowany(int px, int py, int w, int h, int skala, uint32_t kolor, const char* t) {
+    int szer_tekstu = oblicz_szerokosc_tekstu(t, skala);
+    int wys_tekstu = 16 * skala; // Wysokość czcionki to zawsze 16px
+    int tx = px + (w / 2) - (szer_tekstu / 2);
+    int ty = py + (h / 2) - (wys_tekstu / 2);
+    gui_wypisz_tekst_kolor_skala(tx, ty, kolor, skala, t);
 }

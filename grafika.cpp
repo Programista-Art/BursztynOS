@@ -3,9 +3,20 @@
 #include "zegar-rtc.h"
 #include "ahci.h"
 
-// --- PODŁĄCZENIE NOWEJ, GŁADKIEJ CZCIONKI 8x16 ---
-#include "czcionki.h"
+// PODŁĄCZENIE CZCIONKI 
+// #include "czcionki/czcionki.h"
+#include "czcionki/extronic16B_unicode.h"
+extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka_pliku, uint8_t bzl_poziom, uint64_t flagi_praw, bool z_syscalla);
 
+
+bool flaga_zamkniecia_powloki = false;
+extern "C" bool gui_czy_zamknieto_powloke() {
+    if (flaga_zamkniecia_powloki) {
+        flaga_zamkniecia_powloki = false;
+        return true;
+    }
+    return false;
+}
 // ==================== ZMIENNE GLOBALNE MATRYCY ====================
 static uint32_t* lfb = nullptr;
 static uint32_t  lfb_szerokosc = 0;
@@ -183,16 +194,26 @@ void RysujProstokat(int px, int py, int szer, int wys, uint32_t kolor) {
 }
 
 void RysujZnak(uint32_t unicode, int px, int py, uint32_t kolor_tekstu, uint32_t kolor_tla, bool przezroczyste_tlo, int skala) {
-    const uint8_t* glyph = PobierzZnakPL(unicode);
-    if (!glyph) {
-        if (unicode >= 32 && unicode <= 126) glyph = czcionka_ascii_8x16[unicode - 32];
-        else glyph = czcionka_ascii_8x16[0]; 
+    const uint16_t* glyph = nullptr;
+    
+    uint32_t max_znaki = sizeof(nowa_czcionka_16x16) / sizeof(nowa_czcionka_16x16[0]);
+    int szerokosc = 8;
+    
+    if (unicode < max_znaki) {
+        glyph = nowa_czcionka_16x16[unicode];
+        szerokosc = nowa_czcionka_szerokosci[unicode];
+    } else {
+        glyph = nowa_czcionka_16x16[0]; 
     }
 
+    if (szerokosc > 16) szerokosc = 16; // Ogranicznik bezpieczeństwa (max 16x16)
+
     for(int y = 0; y < 16; y++) {
-        for(int x = 0; x < 9; x++) { 
+        // Pętla idzie teraz dokładnie do faktycznej szerokości litery, a nie zawsze do 9!
+        for(int x = 0; x < szerokosc; x++) { 
             bool zmaluj = false;
-            if (x < 8) zmaluj = glyph[y] & (1 << (7 - x));
+            // Nowa maska binarna dla 16 bitów: przesuwamy o (15 - x)
+            zmaluj = (glyph[y] & (1 << (15 - x))) != 0;
             
             if(zmaluj) {
                 for(int sy=0; sy<skala; sy++)
@@ -207,14 +228,26 @@ void RysujZnak(uint32_t unicode, int px, int py, uint32_t kolor_tekstu, uint32_t
 
 void WypiszTekst(const char* tekst, int px, int py, uint32_t kolor_tekstu, int skala) {
     int start_x = px; int i = 0;
+    
+    uint32_t max_znaki = sizeof(nowa_czcionka_16x16) / sizeof(nowa_czcionka_16x16[0]);
+    
     while (tekst[i] != '\0') {
         uint32_t unicode = (uint8_t)tekst[i];
         if ((tekst[i] & 0xE0) == 0xC0 && tekst[i+1] != '\0') {
             uint8_t b1 = (uint8_t)tekst[i]; uint8_t b2 = (uint8_t)tekst[i+1];
             unicode = ((b1 & 0x1F) << 6) | (b2 & 0x3F); i++; 
         }
+        
         RysujZnak(unicode, start_x, py, kolor_tekstu, 0, true, skala);
-        start_x += 9 * skala; i++;
+        
+        // Zmienna, naturalna szerokość każdego znaku
+        int szerokosc_znaku = 8;
+        if (unicode < max_znaki) {
+            szerokosc_znaku = nowa_czcionka_szerokosci[unicode];
+        }
+        
+        start_x += (szerokosc_znaku + 1) * skala; 
+        i++;
     }
 }
 
@@ -261,7 +294,55 @@ void RysujOkno(int id) {
 
     RysujProstokat(px + 2, py + 28, szer - 4, wys - 30, okna[id].kolor_tla); 
 }
-
+void RysujTekstZBufora(ZnakTerminala buf[][MAX_COLS], int max_r, int max_c, int r_cursor, int c_cursor, int px, int py, int szer, int wys, bool rysuj_kursor, bool aktywne_okno) {
+    int skala = 1; int wysokosc_linii = 16 * skala; 
+    int start_x = px + 6; int start_y = py + 28 + 4;
+    uint32_t max_znaki = sizeof(nowa_czcionka_16x16) / sizeof(nowa_czcionka_16x16[0]);
+    
+    for (int r = 0; r < max_r; r++) {
+        int cx = start_x; int cy = start_y + (r * wysokosc_linii);
+        if (cy + wysokosc_linii >= py + wys) break;
+        
+        for (int c = 0; c < max_c; c++) {
+            char z = buf[r][c].znak; uint32_t kolor = buf[r][c].kolor;
+            if (z != 0) { 
+                uint32_t unicode = (uint8_t)z;
+                if ((z & 0xE0) == 0xC0 && c + 1 < max_c && buf[r][c+1].znak != 0) {
+                    uint8_t z2 = (uint8_t)buf[r][c+1].znak; unicode = ((unicode & 0x1F) << 6) | (z2 & 0x3F); c++; 
+                }
+                
+                RysujZnak(unicode, cx, cy, kolor, 0, true, skala); 
+                
+                // Obliczanie dynamicznej szerokości znaku
+                int szerokosc_znaku = 8;
+                if (unicode < max_znaki) {
+                    szerokosc_znaku = nowa_czcionka_szerokosci[unicode];
+                }
+                cx += (szerokosc_znaku + 1) * skala;
+            } else {
+                cx += 9 * skala; // Puste znaki zachowują stałą szerokość
+            }
+        }
+    }
+    
+    // Obliczanie pozycji kursora w Terminalu
+    if (rysuj_kursor && aktywne_okno) {
+        int cx = start_x; 
+        for(int c = 0; c < c_cursor; c++) {
+            uint32_t unicode = (uint8_t)buf[r_cursor][c].znak;
+            if (unicode != 0) {
+                int sw = 8;
+                if (unicode < max_znaki) sw = nowa_czcionka_szerokosci[unicode];
+                cx += (sw + 1);
+            } else {
+                cx += 9;
+            }
+        }
+        int cy = start_y + (r_cursor * wysokosc_linii); 
+        if (cy + 14 < py + wys && cx + 9 < px + szer) RysujProstokat(cx, cy + 14, 9, 2, 0x00FFBF00); 
+    }
+}
+/*
 void RysujTekstZBufora(ZnakTerminala buf[][MAX_COLS], int max_r, int max_c, int r_cursor, int c_cursor, int px, int py, int szer, int wys, bool rysuj_kursor, bool aktywne_okno) {
     int skala = 1; int wysokosc_linii = 16 * skala; 
     int start_x = px + 6; int start_y = py + 28 + 4;
@@ -288,6 +369,7 @@ void RysujTekstZBufora(ZnakTerminala buf[][MAX_COLS], int max_r, int max_c, int 
         if (cy + 14 < py + wys && cx + 9 < px + szer) RysujProstokat(cx, cy + 14, 9, 2, 0x00FFBF00); 
     }
 }
+*/
 
 // ==================== ODSWIEZANIE EKRANU ====================
 void OdswiezEkran() {
@@ -325,6 +407,7 @@ void OdswiezEkran() {
 
 // ==================== KONTROLA URZADZEN ====================
 extern "C" bool zaktualizuj_klawiature_gui(char znak) {
+    (void)znak; // Usunięcie ostrzeżenia "unused parameter"
     // Terminal nie przejmuje wpisywania klawiatury jeśli Ring 3 działa.
     return false; 
 }
@@ -423,9 +506,29 @@ extern "C" void zaktualizuj_mysze(int dx, int dy, uint8_t przyciski) {
                     wymaga_odrysowania = true;
               
                  if (mysz_y <= py + 26) {
-                        if (mysz_x >= px + sz - 26 && mysz_x <= px + sz - 6) { okna[i].widoczne = false; break; }
+                        // 1. Sprawdzenie przycisku ZAMKNIJ (X)
+                        if (mysz_x >= px + sz - 26 && mysz_x <= px + sz - 6) { 
+                            okna[i].widoczne = false; 
+                            
+                            // NOWOŚĆ: Ustaw flagę, zamiast uruchamiać program z przerwania!
+                            if (i == 0) {
+                                flaga_zamkniecia_powloki = true;
+                            }
+                            break; 
+                        }
+                        
+                        // 2. Sprawdzenie przycisku MINIMALIZUJ (-)
                         int min_btn_x = (px + sz - 74);
-                        if (mysz_x >= min_btn_x && mysz_x <= min_btn_x + 20) { okna[i].widoczne = false; break; }
+                        if (mysz_x >= min_btn_x && mysz_x <= min_btn_x + 20) { 
+                            okna[i].widoczne = false; 
+                            
+                            // NOWOŚĆ: Ustaw flagę, zamiast uruchamiać program z przerwania!
+                            if (i == 0) {
+                                flaga_zamkniecia_powloki = true;
+                            }
+                            break; 
+                        }
+                        
                         if (mysz_x >= px + sz - 50 && mysz_x <= px + sz - 30) { 
                             if (!okna[i].zmaksymalizowane) {
                                 okna[i].stary_x = okna[i].x; okna[i].stary_y = okna[i].y; okna[i].stary_szer = okna[i].szer; okna[i].stary_wys = okna[i].wys;
@@ -687,4 +790,10 @@ extern "C" void bws_gui_ustaw_przejecie_myszy(bool stan) {
 extern "C" void bws_gui_pobierz_rozdzielczosc(int* szer, int* wys) {
     if(szer) *szer = lfb_szerokosc;
     if(wys) *wys = lfb_wysokosc;
+}
+
+extern "C" int bws_gui_pobierz_szerokosc_znaku(uint32_t unicode) {
+    uint32_t max_znaki = sizeof(nowa_czcionka_16x16) / sizeof(nowa_czcionka_16x16[0]);
+    if (unicode < max_znaki) return nowa_czcionka_szerokosci[unicode];
+    return 8;
 }

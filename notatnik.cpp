@@ -74,21 +74,16 @@ void RysujPrzyciskNaPaskuZadan(bool aktywny) {
 
 void RysujInterfejs(bool odswiez_tlo) {
     if (odswiez_tlo) {
-        gui_odswiez_pulpit(); 
-        
-        // Pasek na całą szerokość ekranu (Zegar z Jądra wtopi się idealnie)
-        gui_rysuj_prostokat(0, screen_h - 40, screen_w, 40, 0x001A0B00); 
-        gui_rysuj_prostokat(0, screen_h - 40, screen_w, 2, 0x00E58A00);
+        gui_odswiez_pulpit(); // Wywołanie systemowe do jądra - czyszczenie ekranu
+        // Rysujemy pasek menedżera, ale zostawiamy 120px miejsca na Zegar z prawej strony!
+        gui_rysuj_prostokat(0, screen_h - 40, screen_w - 120, 40, 0x001A0B00); 
+        gui_rysuj_prostokat(0, screen_h - 40, screen_w - 120, 2, 0x00E58A00);
         RysujPrzycisk(10, screen_h - 35, 80, 30, 0x00E58A00, 0x001A0B00, " Menu");
-        
-        // Wywołujemy naszą gotową funkcję rysującą przycisk Notatnika (na pozycji 100)
         RysujPrzyciskNaPaskuZadan(!aplikacja_zminimalizowana); 
     }
     
-    
     // Blokada rysowania jeśli okno ma być schowane
     if (aplikacja_zminimalizowana) { gui_odswiez(); return; }
-      
     
     gui_rysuj_okno(WIN_X, WIN_Y, WIN_W, WIN_H, "Notatnik");
     RysujPrzycisk(WIN_X + WIN_W - 74, WIN_Y + 4, 20, 20, 0x00E58A00, 0x001A0B00, "-");
@@ -97,8 +92,8 @@ void RysujInterfejs(bool odswiez_tlo) {
 
     gui_rysuj_prostokat(WIN_X + 2, WIN_Y + 26, WIN_W - 4, 20, 0x00301500);
     gui_wypisz_tekst_kolor(WIN_X + 10, WIN_Y + 28, 0x00FFBF00, "Plik");
-    gui_wypisz_tekst_kolor(WIN_X + 60, WIN_Y + 28, 0x00FFBF00, "Ustawienia");
-    gui_wypisz_tekst_kolor(WIN_X + 160, WIN_Y + 28, 0x00FFBF00, "Pomoc");
+    gui_wypisz_tekst_kolor(WIN_X + 45, WIN_Y + 28, 0x00FFBF00, "Ustawienia");
+    gui_wypisz_tekst_kolor(WIN_X + 120, WIN_Y + 28, 0x00FFBF00, "Pomoc");
 
     gui_rysuj_prostokat(WIN_X + 2, WIN_Y + WIN_H - 22, WIN_W - 4, 20, 0x001A0B00);
     
@@ -141,13 +136,13 @@ void RysujInterfejs(bool odswiez_tlo) {
         gui_wypisz_tekst_kolor(WIN_X + 10, WIN_Y + 98, 0x00FFFFFF, "Zamknij");
     }
     else if (menu_ustawienia_otwarte) {
-        gui_rysuj_prostokat(WIN_X + 55, WIN_Y + 46, 190, 40, 0x004A2500); 
-        gui_rysuj_prostokat(WIN_X + 55, WIN_Y + 46, 190, 1, 0x00E58A00);
-        gui_rysuj_prostokat(WIN_X + 55, WIN_Y + 85, 190, 1, 0x00E58A00);
-        gui_rysuj_prostokat(WIN_X + 55, WIN_Y + 46, 1, 40, 0x00E58A00);
-        gui_rysuj_prostokat(WIN_X + 244, WIN_Y + 46, 1, 40, 0x00E58A00);
-        gui_wypisz_tekst_kolor(WIN_X + 60, WIN_Y + 50, 0x00D1D5DB, "Motyw: Bursztyn");
-        gui_wypisz_tekst_kolor(WIN_X + 60, WIN_Y + 66, 0x00D1D5DB, "Czcionka: Systemowa");
+        gui_rysuj_prostokat(WIN_X + 40, WIN_Y + 46, 170, 40, 0x004A2500); 
+        gui_rysuj_prostokat(WIN_X + 40, WIN_Y + 46, 170, 1, 0x00E58A00);
+        gui_rysuj_prostokat(WIN_X + 40, WIN_Y + 85, 170, 1, 0x00E58A00);
+        gui_rysuj_prostokat(WIN_X + 40, WIN_Y + 46, 1, 40, 0x00E58A00);
+        gui_rysuj_prostokat(WIN_X + 209, WIN_Y + 46, 1, 40, 0x00E58A00);
+        gui_wypisz_tekst_kolor(WIN_X + 55, WIN_Y + 50, 0x00D1D5DB, "Motyw: Bursztyn");
+        gui_wypisz_tekst_kolor(WIN_X + 55, WIN_Y + 66, 0x00D1D5DB, "Czcionka: extronic16B_unicode");
     }
 
     if (okno_pomoc_widoczne) {
@@ -164,7 +159,7 @@ void RysujInterfejs(bool odswiez_tlo) {
         gui_wypisz_tekst_kolor(px + 20, py + 80, 0x00D1D5DB, "Twórca: Programista Art");
         gui_wypisz_tekst_kolor(px + 20, py + 100, 0x00D1D5DB,"Data: Sierpień 2026");
         gui_wypisz_tekst_kolor(px + 20, py + 140, 0x00FFBF00, "Bursztyn OS - Edycja GUI");
-        RysujPrzycisk(px + 110, py + 165, 80, 24, 0x00E58A00, 0x001A0B00, "   OK");
+        RysujPrzycisk(px + 110, py + 165, 80, 24, 0x00E58A00, 0x001A0B00, "  OK");
     }
     gui_odswiez();
 }
@@ -232,9 +227,9 @@ extern "C" __attribute__((noreturn)) void _start() {
                         else if (!zmaksymalizowane) { dragging = true; drag_off_x = mx - WIN_X; drag_off_y = my - WIN_Y; menu_plik_otwarte = false; menu_ustawienia_otwarte = false; }
                     } 
                     else if (my > WIN_Y + 26 && my <= WIN_Y + 46) {
-                        if (mx >= WIN_X + 5 && mx <= WIN_X + 50) { menu_plik_otwarte = !menu_plik_otwarte; menu_ustawienia_otwarte = false; }
-                        else if (mx >= WIN_X + 55 && mx <= WIN_X + 150) { menu_ustawienia_otwarte = !menu_ustawienia_otwarte; menu_plik_otwarte = false; }
-                        else if (mx >= WIN_X + 155 && mx <= WIN_X + 215) { okno_pomoc_widoczne = true; menu_plik_otwarte = false; menu_ustawienia_otwarte = false; }
+                        if (mx >= WIN_X + 5 && mx <= WIN_X + 40) { menu_plik_otwarte = !menu_plik_otwarte; menu_ustawienia_otwarte = false; }
+                        else if (mx >= WIN_X + 41 && mx <= WIN_X + 115) { menu_ustawienia_otwarte = !menu_ustawienia_otwarte; menu_plik_otwarte = false; }
+                        else if (mx >= WIN_X + 116 && mx <= WIN_X + 165) { okno_pomoc_widoczne = true; menu_plik_otwarte = false; menu_ustawienia_otwarte = false; }
                         else { menu_plik_otwarte = false; menu_ustawienia_otwarte = false; }
                     }
                     else if (menu_plik_otwarte && mx >= WIN_X + 5 && mx <= WIN_X + 135 && my > WIN_Y + 46 && my <= WIN_Y + 118) {
@@ -243,7 +238,7 @@ extern "C" __attribute__((noreturn)) void _start() {
                         else if (my >= WIN_Y + 78 && my < WIN_Y + 94) { tryb = WPROWADZANIE_SCIEZKI_ZAPIS; for(sciezka_len=0; aktualna_sciezka[sciezka_len] != '\0'; sciezka_len++) { sciezka_input[sciezka_len] = aktualna_sciezka[sciezka_len]; } sciezka_input[sciezka_len] = '\0'; menu_plik_otwarte = false; }
                         else if (my >= WIN_Y + 94 && my <= WIN_Y + 118) { wyjdz = true; menu_plik_otwarte = false; }
                     } 
-                    else if (menu_ustawienia_otwarte && mx >= WIN_X + 55 && mx <= WIN_X + 245 && my > WIN_Y + 46 && my <= WIN_Y + 86) { menu_ustawienia_otwarte = false; ustaw_status("Te opcje wczytaly sie poprawnie."); }
+                    else if (menu_ustawienia_otwarte && mx >= WIN_X + 40 && mx <= WIN_X + 210 && my > WIN_Y + 46 && my <= WIN_Y + 86) { menu_ustawienia_otwarte = false; ustaw_status("Te opcje wczytaly sie poprawnie."); }
                     else { menu_plik_otwarte = false; menu_ustawienia_otwarte = false; }
                 } else { menu_plik_otwarte = false; menu_ustawienia_otwarte = false; }
             }
@@ -253,7 +248,6 @@ extern "C" __attribute__((noreturn)) void _start() {
         if (dragging && przytrzymany && !aplikacja_zminimalizowana) { WIN_X = mx - drag_off_x; WIN_Y = my - drag_off_y; if (WIN_X < 0) { WIN_X = 0; } if (WIN_Y < 0) { WIN_Y = 0; } odswiez_tlo = true; redraw = true; }
         poprz_przycisk = mb; old_mx = mx; old_my = my;
 
-        // Poprawiona polska nazwa wywołania API klawiatury
         char c = pobierz_znak();
         if (c != 0) {
             if (aplikacja_zminimalizowana) continue; 
@@ -301,7 +295,6 @@ extern "C" __attribute__((noreturn)) void _start() {
     gui_ustaw_przejecie_myszy(false); 
     gui_odswiez_pulpit(); 
     gui_odswiez();
-    // BARDZO WAŻNE: Zamykając aplikację wracamy do Menedżera Okien, a nie do terminala shell.bur!
     bws_wywolaj(10, (uint64_t)"/menedzer_okien.bur");
     while(true);
 }

@@ -41,6 +41,8 @@ extern "C" {
     void bws_gui_rysuj_prostokat(int x, int y, int w, int h, uint32_t kolor);
     void bws_gui_ustaw_przejecie_myszy(bool stan);
     void bws_gui_pobierz_rozdzielczosc(int* szer, int* wys);
+    int bws_gui_pobierz_szerokosc_znaku(uint32_t unicode);
+    bool gui_czy_zamknieto_powloke();
 }
 
 // Globalna zmienna z siec.cpp przetrzymująca ilość pobranych bajtów z Internetu
@@ -92,9 +94,18 @@ static bool sciezka_zaczyna_sie_od(const char* sciezka, const char* prefiks) {
 /*
  * --- DYSPOZYTOR KODOW (Bursztyn OS ABI) Z SYSTEMEM BZL/PZB ---
  */
+// extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4) {
+//     (void)arg4; 
+//     uint64_t kod_wyniku = 0;
 extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4) {
+    // Bezpieczne uruchomienie Menedżera Okien, jeśli kliknięto X na Powłoce
+    if (gui_czy_zamknieto_powloke()) {
+        bws_uruchom_program_z_pliku("/menedzer_okien.bur", PZB_UZYTKOWNIK, 0xFFFFFFFF, true);
+    }
+
     (void)arg4; 
     uint64_t kod_wyniku = 0;
+    // ... reszta kodu (switch) ...
 
     switch(nr_funkcji) {
         case 1: { wypisz_na_ekranie((const char*)arg1); kod_wyniku = 1; break; }
@@ -186,7 +197,19 @@ extern "C" uint64_t obsluga_wywolan_systemowych(uint64_t nr_funkcji, uint64_t ar
         }
         case 22: { bws_gui_ustaw_przejecie_myszy(arg1 != 0); kod_wyniku = 1; break; }
         case 23: { bws_gui_pobierz_rozdzielczosc((int*)arg1, (int*)arg2); kod_wyniku = 1; break; }
-        
+        case 24: { kod_wyniku = (uint64_t)bws_gui_pobierz_szerokosc_znaku((uint32_t)arg1); break; }
+        case 25: { 
+            // Uruchom ponownie (Reset przez kontroler klawiatury 8042)
+            asm volatile("outb %0, %1" : : "a"((uint8_t)0xFE), "Nd"((uint16_t)0x64));
+            while(true) asm volatile("cli; hlt");
+            break; 
+        }
+        case 26: { 
+            // Zamknij system (ACPI Shutdown dla QEMU - port 0x604)
+            asm volatile("outw %0, %1" : : "a"((uint16_t)0x2000), "Nd"((uint16_t)0x604));
+            while(true) asm volatile("cli; hlt");
+            break; 
+        }
         default: {
             wypisz_na_ekranie("[!] Otrzymano nierozpoznany wektor z Ring 3!"); kod_wyniku = (uint64_t)-1; break;
         }

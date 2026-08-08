@@ -99,3 +99,8 @@ clear:
 	rm -rf isodir
 cdysk:
 	rm -rf wirtualny_dysk.img
+
+rm:
+	rm -f *.o *.bin *.elf *.iso
+	rm -rf isodir
+	rm -rf wirtualny_dysk.img

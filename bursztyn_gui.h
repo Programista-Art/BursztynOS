@@ -24,6 +24,10 @@ void gui_wypisz_tekst_kolor_skala(int x, int y, uint32_t kolor, int skala, const
 void gui_rysuj_prostokat(int x, int y, int szer, int wys, uint32_t kolor);
 void gui_ustaw_przejecie_myszy(bool stan);
 void gui_pobierz_rozdzielczosc(int* w, int* h);
+int gui_pobierz_szerokosc_znaku(uint32_t z); 
+// Nowe funkcje pomocnicze do wyśrodkowanego tekstu
+int oblicz_szerokosc_tekstu(const char* t, int skala);
+void rysuj_tekst_wysrodkowany(int px, int py, int w, int h, int skala, uint32_t kolor, const char* t);
 
 // 4. Elementy Interfejsu (Widgets)
 void RysujPrzycisk(int x, int y, int w, int h, uint32_t kolor_bg, uint32_t kolor_txt, const char* t);

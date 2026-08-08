@@ -63,7 +63,7 @@ static inline uint64_t pobierz_cykle() {
 void pobierz_linie(char* bufor, int max_dlugosc) {
     int pozycja = 0;
     while (true) {
-        char c = pobierz_znak(); // Korzystamy z API bursztyn_gui.h
+        char c = pobierz_znak(); 
         if (c == 0) continue; 
 
         if (c == '\n' || c == '\r') {
@@ -150,7 +150,10 @@ extern "C" void _start() {
         }
         else if (strcmp(bufor_komendy, "wyjdz") || strcmp(bufor_komendy, "exit")) {
             wypisz("Zamykanie Powłoki... Powrót do Menedżera Okien.\n");
-            bws_wywolaj(10, (uint64_t)"/menedzer_okien.bur");
+            uint64_t wynik = bws_wywolaj(10, (uint64_t)"/menedzer_okien.bur");
+            if (wynik == 0) {
+                wypisz("BŁĄD: Nie znaleziono menedzera okien na dysku!\n");
+            }
         }
         else if (strcmp(bufor_komendy, "ping")) {
             wypisz("Składnia polecenia: ping [adres IP lub domena] (np. ping google.com)\n");

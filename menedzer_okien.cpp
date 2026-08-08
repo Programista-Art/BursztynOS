@@ -30,27 +30,45 @@ extern "C" {
 int screen_w = 1024, screen_h = 768;
 bool menu_start_otwarte = false;
 
+int hover_mx = -1, hover_my = -1;
+int old_mx = -1, old_my = -1;
+
 void RysujPulpit(bool wymus_pelne_odswiezenie) {
     if (wymus_pelne_odswiezenie) gui_odswiez_pulpit();
 
-    // Pasek z powrotem na całą szerokość! Zegar wtopi się idealnie.
     gui_rysuj_prostokat(0, screen_h - 40, screen_w, 40, 0x001A0B00); 
     gui_rysuj_prostokat(0, screen_h - 40, screen_w, 2, 0x00E58A00);  
 
-    RysujPrzycisk(10, screen_h - 35, 80, 30, 0x00E58A00, 0x001A0B00, " Menu");
+    // Przycisk Menu z wyśrodkowanym tekstem
+    gui_rysuj_prostokat(10, screen_h - 35, 80, 30, 0x00E58A00);
+    rysuj_tekst_wysrodkowany(10, screen_h - 35, 80, 30, 1, 0x001A0B00, "Menu");
 
-    gui_rysuj_prostokat(50, 50, 64, 64, 0x00FFBF00);
-    gui_rysuj_prostokat(52, 52, 60, 60, 0x00FFFFFF);
-    gui_wypisz_tekst_kolor(46, 120, 0x00FFFFFF, "Notatnik");
+    // Ikona Notatnika
+    gui_rysuj_prostokat(50, 50, 48, 48, 0x00FFBF00); 
+    gui_rysuj_prostokat(52, 52, 44, 44, 0x00FFFFFF); 
+    gui_rysuj_prostokat(56, 58, 32, 2, 0x00000000);
+    gui_rysuj_prostokat(56, 64, 32, 2, 0x00000000);
+    gui_rysuj_prostokat(56, 70, 20, 2, 0x00000000);
+    gui_rysuj_prostokat(56, 76, 32, 2, 0x00000000);
+    gui_rysuj_prostokat(56, 82, 24, 2, 0x00000000);
+    
+    // Wyśrodkowany tekst pod ikoną Notatnika (obszar: x=50, y=104, w=48, h=16)
+    rysuj_tekst_wysrodkowany(50, 104, 48, 16, 1, 0x00FFFFFF, "Notatnik");
 
-    gui_rysuj_prostokat(150, 50, 64, 64, 0x008A5A00);
-    gui_rysuj_prostokat(152, 52, 60, 60, 0x001A0B00);
-    gui_wypisz_tekst_kolor(165, 65, 0x00FFBF00, "+ -");
-    gui_wypisz_tekst_kolor(165, 85, 0x00FFBF00, "* =");
-    gui_wypisz_tekst_kolor(138, 120, 0x00FFFFFF, "Kalkulator");
+    // Ikona Kalkulatora
+    gui_rysuj_prostokat(130, 50, 48, 48, 0x008A5A00); 
+    gui_rysuj_prostokat(132, 52, 44, 44, 0x001A0B00); 
+    
+    // Wyśrodkowany tekst W EWNĘTRZU ikony Kalkulatora
+    rysuj_tekst_wysrodkowany(130, 60, 48, 16, 1, 0x00FFBF00, "+ -");
+    rysuj_tekst_wysrodkowany(130, 80, 48, 16, 1, 0x00FFBF00, "* =");
+    
+    // Wyśrodkowany tekst pod ikoną Kalkulatora
+    rysuj_tekst_wysrodkowany(130, 104, 48, 16, 1, 0x00FFFFFF, "Kalkulator");
 
+    // Menu Start
     if (menu_start_otwarte) {
-        int menu_wys = 105; // WYŻSZE MENU
+        int menu_wys = 160; // ZWIĘKSZONO WYSOKOŚĆ dla 5 elementów
         int menu_y = screen_h - 40 - menu_wys;
         
         gui_rysuj_prostokat(10, menu_y, 220, menu_wys, 0x00301500); 
@@ -58,19 +76,29 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
         gui_rysuj_prostokat(10, menu_y, 1, menu_wys, 0x00E58A00);
         gui_rysuj_prostokat(229, menu_y, 1, menu_wys, 0x00E58A00);
         
-        // DODANY NOTATNIK!
-        gui_wypisz_tekst_kolor(20, menu_y + 15, 0x00FFFFFF, "> Powłoka Bursztyna");
-        gui_wypisz_tekst_kolor(20, menu_y + 40, 0x00FFFFFF, "> Notatnik");
-        gui_wypisz_tekst_kolor(20, menu_y + 65, 0x00FFFFFF, "> Kalkulator");
+        // 5 elementów w menu
+        const char* menu_elementy[5] = {"> Powłoka Bursztyna", "> Notatnik", "> Kalkulator", "> Uruchom ponownie", "> Zamknij"};
+        
+        for (int i = 0; i < 5; i++) {
+            int item_y = menu_y + 10 + (i * 25); 
+            
+            bool podswietl = (hover_mx >= 10 && hover_mx <= 230 && hover_my >= item_y && hover_my < item_y + 25);
+            
+            if (podswietl) {
+                gui_rysuj_prostokat(11, item_y, 218, 25, 0x00E58A00);
+                gui_wypisz_tekst_kolor(20, item_y + 5, 0x001A0B00, menu_elementy[i]);
+            } else {
+                gui_wypisz_tekst_kolor(20, item_y + 5, 0x00FFFFFF, menu_elementy[i]);
+            }
+        }
     }
     gui_odswiez();
 }
 
 extern "C" __attribute__((noreturn)) void _start() {
     gui_pobierz_rozdzielczosc(&screen_w, &screen_h);
-    gui_ustaw_przejecie_myszy(true); // Wyłączamy wbudowane okna Jądra
+    gui_ustaw_przejecie_myszy(true);
     
-    // Rysujemy pulpit pierwszy raz
     RysujPulpit(true);
     
     uint8_t poprz_przycisk = 0;
@@ -80,48 +108,42 @@ extern "C" __attribute__((noreturn)) void _start() {
         gui_pobierz_mysz(&mx, &my, &mb);
         bool klik = (mb == 1 && poprz_przycisk == 0);
         
+        hover_mx = mx; 
+        hover_my = my;
+
+        if ((mx != old_mx || my != old_my) && menu_start_otwarte) {
+            RysujPulpit(false);
+        }
+        old_mx = mx; old_my = my;
+
         if (klik) {
-            // 1. Kliknięcie w ikonę Notatnika na pulpicie
-            if (!menu_start_otwarte && mx >= 50 && mx <= 114 && my >= 50 && my <= 114) {
-                gui_ustaw_przejecie_myszy(false); // Oddajemy władzę
-                // Zabijamy Pulpit i ładujemy Notatnik
+            if (!menu_start_otwarte && mx >= 50 && mx <= 98 && my >= 50 && my <= 98) {
+                gui_ustaw_przejecie_myszy(false);
                 bws_wywolaj(10, (uint64_t)"/programy/notatnik.cebula/notatnik.bur");
             }
-            // 1.5. Kliknięcie w ikonę Kalkulatora na pulpicie
-            else if (!menu_start_otwarte && mx >= 150 && mx <= 214 && my >= 50 && my <= 114) {
+            else if (!menu_start_otwarte && mx >= 130 && mx <= 178 && my >= 50 && my <= 98) {
                 gui_ustaw_przejecie_myszy(false);
                 bws_wywolaj(10, (uint64_t)"/programy/kalkulator.cebula/kalkulator.bur");
             }
-            // 2. Kliknięcie w przycisk Start (Menu)
             else if (mx >= 10 && mx <= 90 && my >= screen_h - 35 && my <= screen_h - 5) {
                 menu_start_otwarte = !menu_start_otwarte;
-                RysujPulpit(false); // Rysujemy bez odświeżania tła (brak mrugania zegara!)
+                RysujPulpit(false); 
             }
-            // 3. Kliknięcia wewnątrz otwartego Menu Start
-            else if (menu_start_otwarte && mx >= 10 && mx <= 230 && my >= screen_h - 145 && my <= screen_h - 40) {
-                int menu_y = screen_h - 40 - 105;
+            else if (menu_start_otwarte && mx >= 10 && mx <= 230 && my >= screen_h - 200 && my <= screen_h - 40) {
+                int menu_y = screen_h - 40 - 160;
+                int item_index = (my - (menu_y + 10)) / 25;
                 
-                // Wybrano: Powłoka Bursztyna
-                if (my >= menu_y + 10 && my < menu_y + 35) {
-                    gui_ustaw_przejecie_myszy(false);
-                    bws_wywolaj(10, (uint64_t)"/shell.bur"); 
-                }
-                // POPRAWKA: Wybrano: Notatnik
-                else if (my >= menu_y + 35 && my < menu_y + 60) {
-                    gui_ustaw_przejecie_myszy(false);
-                    bws_wywolaj(10, (uint64_t)"/programy/notatnik.cebula/notatnik.bur"); 
-                }
-                // Wybrano: Kalkulator
-                else if (my >= menu_y + 60 && my < menu_y + 85) {
-                    gui_ustaw_przejecie_myszy(false);
-                    bws_wywolaj(10, (uint64_t)"/programy/kalkulator.cebula/kalkulator.bur"); 
+                if (item_index >= 0 && item_index < 5) {
+                    if (item_index == 0) { gui_ustaw_przejecie_myszy(false); bws_wywolaj(10, (uint64_t)"/shell.bur"); }
+                    else if (item_index == 1) { gui_ustaw_przejecie_myszy(false); bws_wywolaj(10, (uint64_t)"/programy/notatnik.cebula/notatnik.bur"); }
+                    else if (item_index == 2) { gui_ustaw_przejecie_myszy(false); bws_wywolaj(10, (uint64_t)"/programy/kalkulator.cebula/kalkulator.bur"); }
+                    else if (item_index == 3) { bws_wywolaj(25); while(true); } // Uruchom ponownie
+                    else if (item_index == 4) { bws_wywolaj(26); while(true); } // Zamknij
                 }
             }
-            // 4. Kliknięcie gdziekolwiek indziej (Zamyka Menu Start, jeśli było otwarte)
             else {
                 if (menu_start_otwarte) {
                     menu_start_otwarte = false;
-                    // Tu musimy odświeżyć tapetę, żeby zmazać czarne tło menu start
                     RysujPulpit(true); 
                 }
             }
