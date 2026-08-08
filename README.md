@@ -12,37 +12,30 @@ System jest rozwijany z myślą o architekturze x86-64, implementując własne J
 
 ## Pulpit Bursztyna
 
-![alt](image/pulpit/pulpit-bursztyna.png)
+![alt](image/pulpit/1.png)
 
 ![alt](image/pulpit/2.png)
 
 ![alt](image/pulpit/3.png)
 
-### Pobranie strony avocado-code.com
+![alt](image/pulpit/4.png)
 
-![alt](image/BurstzynOS-http.png)
-
-### Ping strony
-
-![alt](image/BursztynOS-ping.png)
+## Polecenie w Powłoce Bursztynowej pomoc
+![alt](image/pulpit/5.png)
 ### Prosty kalkulator w Burstzyn OS z GUI.
 
-![alt](image/pulpit/2.png)
+![alt](image/pulpit/6.png)
 
 # Pierwsza aplikacja z GUI działająca w Ring 3
-### Abu uruchomić notatnik wpisz polecenie w powłoce. uruchom /programy/notatnik.cebula/notatnik.bur
+### Abu uruchomić notatnik możesz wpisać polecenie w powłoce. uruchom /programy/notatnik.cebula/notatnik.bur
+Lub na pulpicie jest ikonka notatnika
 ## Notatnik
-![alt](image/notatnik/notatnik1.png)
-## Notatnik
-![alt](image/notatnik/notatnik2.png)
-## Notatnik
-![alt](image/notatnik/notatnik3.png)
-## Notatnik
-![alt](image/notatnik/notatnik4.png)
+![alt](image/pulpit/7.png)
 
 
 
-## Dostępne 21 komend w Shellu
+
+## Dostępne 22 komend w Shellu
 1. pomoc - wyświetla dostępną listę komend.
 1. system - wypisuje informacje o architekturze Bursztyn OS.
 1. wersja - krótka informacja o wersji powłoki i OS
@@ -65,6 +58,7 @@ System jest rozwijany z myślą o architekturze x86-64, implementując własne J
 1. pisz [tekst] - wypisuje podany tekst na ekran
 1. cytat - wczytuje i wyświetla cytaty z pliku
 1. losuj - rzuca wirtualną kością (wynik 1-6).
+1. wyjdz - zamyka powłokę bursztynową shell
 
     
 
