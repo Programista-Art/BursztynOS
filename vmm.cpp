@@ -1,21 +1,26 @@
 /*
  * Mechanizm: Zarządzanie Pamięcią Wirtualną (VMM - Virtual Memory Manager)
- * Opis: Hierarchiczna implementacja struktury tablic strony dla przestrzeni Ring 0 i 3.
- * Pobiera ramki operacyjne z nowo powstałego mechanizmu PMM.
+ * Opis: Niezawodna inicjalizacja za pomocą z góry alokowanych w .bss tablic stron.
+ * Rozwiązuje problem 'Kury i Jajka' przy rozruchu na starszych BIOS-ach.
  */
 
 #include "pamiec.h"
 #include <stdint.h>
 
-// Makra stałych decydujących o charakterystyce mapowanego przydziału
-#define FLAGA_OBECNA      0b00000001  // Bit 0 = P
-#define FLAGA_ZAPIS       0b00000010  // Bit 1 = RW (Zezwolenie na rzut z zapisem)
-#define FLAGA_UZYTKOWNIKA 0b00000100  // Bit 2 = US (Zezwolenie na przydział dostępny dla Ring 3)
+#define FLAGA_OBECNA         0b00000001
+#define FLAGA_ZAPIS          0b00000010
+#define FLAGA_UZYTKOWNIKA    0b00000100
+#define FLAGA_ROZMIAR_STRONY 0b10000000 // Bit 7 (PS) - aktywuje wielkie strony 2MB
 
 #define MASKA_INDEKSU 0x1FF
 #define MASKA_ADRESU_FIZYCZNEGO 0x000FFFFFFFFFF000ULL 
 
-// Bazowy, najwyższy punkt drzewa nowej wirtualnej instalacji
+// Statyczne tablice dla pierwszych 4 GB. Zapewniają absolutne bezpieczeństwo 
+// przy przełączaniu trybów, bo na 100% są początkowo zmapowane przez boot.S
+static uint64_t st_pml4[512] __attribute__((aligned(4096)));
+static uint64_t st_pdp[512] __attribute__((aligned(4096)));
+static uint64_t st_pd[4][512] __attribute__((aligned(4096)));
+
 uint64_t* globalne_pml4 = nullptr;
 
 void WyzerujStrone(void* wskaznik) {
@@ -52,6 +57,14 @@ void ZmapujStrone(void* adres_wirtualny, void* adres_fizyczny, uint32_t flagi) {
     }
     uint64_t* w_pd = (uint64_t*)(w_pdp[wew_pdp] & MASKA_ADRESU_FIZYCZNEGO);
 
+    // ZABEZPIECZENIE: Jeśli trafiliśmy na Wielką Stronę 2MB (np. obszar 0-4 GB z InicjalizujVMM)
+    if (w_pd[wew_pd] & FLAGA_ROZMIAR_STRONY) {
+        // Jeśli moduł grafiki nakłada flagi Cache Disable na bufor, dodajemy je do wielkiej strony!
+        w_pd[wew_pd] |= flagi;
+        asm volatile("invlpg (%0)" : : "r" (adres_wirtualny) : "memory");
+        return; 
+    }
+
     if (!(w_pd[wew_pd] & FLAGA_OBECNA)) {
         uint64_t* nowa_pt = (uint64_t*)ZaalokujRamke();
         if (!nowa_pt) return; 
@@ -66,38 +79,35 @@ void ZmapujStrone(void* adres_wirtualny, void* adres_fizyczny, uint32_t flagi) {
 }
 
 void InicjalizujVMM() {
-    globalne_pml4 = (uint64_t*)ZaalokujRamke();
-    if (!globalne_pml4) return;
-    WyzerujStrone(globalne_pml4);
+    WyzerujStrone(st_pml4);
+    WyzerujStrone(st_pdp);
+    for(int i = 0; i < 4; i++) WyzerujStrone(st_pd[i]);
 
-    // --- ROZWIAZANIE PROBLEMU KURY I JAJKA (DWUFAZOWE MAPOWANIE) ---
+    // Linkowanie rdzennej hierarchii
+    st_pml4[0] = ((uint64_t)st_pdp) | FLAGA_OBECNA | FLAGA_ZAPIS | FLAGA_UZYTKOWNIKA;
+
+    for(int i = 0; i < 4; i++) {
+        st_pdp[i] = ((uint64_t)st_pd[i]) | FLAGA_OBECNA | FLAGA_ZAPIS | FLAGA_UZYTKOWNIKA;
+    }
+
+    // Mapowanie CAŁYCH 4 GIGABAJTÓW pamięci za pomocą gigantycznych stron 2MB!
+    for (uint64_t p = 0; p < 4; p++) {
+        for (uint64_t i = 0; i < 512; i++) {
+            uint64_t fiz = (p * 1024 * 1024 * 1024ULL) + (i * 2 * 1024 * 1024ULL);
+            st_pd[p][i] = fiz | FLAGA_OBECNA | FLAGA_ZAPIS | FLAGA_UZYTKOWNIKA | FLAGA_ROZMIAR_STRONY;
+        }
+    }
+
+    // Oznaczamy APIC oraz IOAPIC jako Cache Disable (0x10 | 0x08) wprost na strukturach 2MB
+    st_pd[3][503] = 0xFEE00000ULL | FLAGA_OBECNA | FLAGA_ZAPIS | 0x10 | 0x08 | FLAGA_ROZMIAR_STRONY;
+    st_pd[3][502] = 0xFEC00000ULL | FLAGA_OBECNA | FLAGA_ZAPIS | 0x10 | 0x08 | FLAGA_ROZMIAR_STRONY;
+
+    globalne_pml4 = st_pml4;
     
-    // FAZA 1: Mapujemy tylko 16 MB.
-    // Dlaczego? boot.S dał nam tylko 2 MB widocznej pamięci. Wygenerowanie 
-    // tablic dla 16 MB zajmie zaledwie kilka ramek, które PMM bezpiecznie
-    // znajdzie poniżej ograniczenia 2 MB.
-    for (uint64_t i = 0; i < 4096; i++) {
-        void* ptr = (void*)(i * ROZMIAR_RAMKI);
-        ZmapujStrone(ptr, ptr, FLAGA_OBECNA | FLAGA_ZAPIS);
-    }
-
-    ZmapujStrone((void*)0xFEE00000ULL, (void*)0xFEE00000ULL, FLAGA_OBECNA | FLAGA_ZAPIS | 0x10 | 0x08); 
-    ZmapujStrone((void*)0xFEC00000ULL, (void*)0xFEC00000ULL, FLAGA_OBECNA | FLAGA_ZAPIS | 0x10 | 0x08); 
-
-    // ZMIANA KONTEKSTU: Przełączamy procesor na nowe tablice!
-    // Od tej sekundy Jądro sprzętowo widzi i ma dostęp do 16 MB pamięci RAM.
-    uint64_t adres_bazy = (uint64_t)globalne_pml4;
-    asm volatile("mov %0, %%cr3" : : "r"(adres_bazy) : "memory");
-
-    // FAZA 2: Bezpieczne rozszerzenie pamięci do 4 GB.
-    // 1048576 ramek * 4KB = 4GB, co pokrywa się z limitem MAX_RAMEK w Twoim pmm.cpp
-    for (uint64_t i = 4096; i < 1048576; i++) { 
-        void* ptr = (void*)(i * ROZMIAR_RAMKI);
-        ZmapujStrone(ptr, ptr, FLAGA_OBECNA | FLAGA_ZAPIS);
-    }
+    // Atomowe przełączenie - od tej pory Jądro i Aplikacje cieszą się w pełni stabilnymi 4 GB pamięci!
+    asm volatile("mov %0, %%cr3" : : "r"((uint64_t)globalne_pml4) : "memory");
 }
 
-// Zewnętrzny interfejs dla loadera programów Ring 3
 extern "C" void* PobierzAktualnePML4() {
     return (void*)globalne_pml4;
 }

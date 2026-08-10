@@ -122,7 +122,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     wypisz_log("[SIEC] Stos TCP/IP (DHCP, ARP, ICMP, DNS) w pelni operacyjny.");
 
     // --- WIRTUALIZACJA I DRZEWIASTY SYSTEM PLIKÓW ---
-    uint64_t adres_wirtualny_dysku = 0x40000000; 
+    // ZMIANA VMM: Przenosimy 1 GB ramdysk powyżej granicy 4 GB
+    uint64_t adres_wirtualny_dysku = 0x130000000ULL; 
     uint32_t rozmiar_dysku = 2 * 1024 * 1024;    
 
     for (uint32_t i = 0; i < rozmiar_dysku; i += 4096) {
@@ -221,17 +222,11 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     // =========================================================
     // --- WDRAŻANIE MENEDŻERA OKIEN (PULPIT) ---
     // =========================================================
-    /*
     utworz_plik("/menedzer_okien.bur");
     uint64_t menedzer_rozmiar = (uint64_t)(_binary_menedzer_okien_bin_end - _binary_menedzer_okien_bin_start);
     zapisz_do_pliku("/menedzer_okien.bur", (const char*)_binary_menedzer_okien_bin_start, menedzer_rozmiar);
     wypisz_log("[BSP] Menedzer Okien zainstalowany i gotowy!");
-    */
-    usun_twor("/menedzer_okien.bur"); 
-    utworz_plik("/menedzer_okien.bur");
-    uint64_t menedzer_rozmiar = (uint64_t)(_binary_menedzer_okien_bin_end - _binary_menedzer_okien_bin_start);
-    zapisz_do_pliku("/menedzer_okien.bur", (const char*)_binary_menedzer_okien_bin_start, menedzer_rozmiar);
-    wypisz_log("[BSP] Menedzer Okien gotowy do odczytu z dysku.");
+
     // =========================================================
     
     // Zamiast terminala (shell.bur), system włącza od razu Twój nowy Pulpit!

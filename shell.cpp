@@ -1,7 +1,8 @@
 /*
  * Aplikacja: Powłoka Bursztynowa (bsh)
  * Poziom: Ring 3 (Przestrzeń Użytkownika)
- * Wersja zoptymalizowana: Korzysta z biblioteki bursztyn_gui.h
+ * Wersja zoptymalizowana: Korzysta z biblioteki bursztyn_gui.h oraz 
+ * zawiera pełną obsługę sieci i plików z polskimi znakami.
  */
 
 #include "bursztyn_gui.h"
@@ -17,17 +18,19 @@ struct NaglowekBur {
     uint64_t dane_wirtualny;      
 } __attribute__((packed));
 
-extern "C" void _start();
+extern "C" __attribute__((noreturn)) void _start();
 
-extern "C" __attribute__((section(".naglowek"), used))
-const struct NaglowekBur naglowek = {
-    {'B', 'U', 'R', '\0'},
-    (uint64_t)&_start,
-    4096,  8192, 0x401000, 
-    12288, 8192, 0x403000  
-};
+extern "C" {
+    __attribute__((section(".naglowek"), used))
+    struct NaglowekBur naglowek = {
+        {'B', 'U', 'R', '\0'},
+        (uint64_t)&_start,
+        4096,  16384, 0x601000, 
+        20480, 32768, 0x605000  
+    };
+}
 
-// Funkcje obsługi plików, których nie dodawaliśmy jeszcze do bursztyn_gui.h
+// Funkcje obsługi plików z Jądra
 bool wylistuj_katalog(const char* sciezka, char* bufor, uint32_t max_dlugosc) { return bws_wywolaj(6, (uint64_t)sciezka, (uint64_t)bufor, max_dlugosc) != 0; }
 bool usun_twor(const char* sciezka) { return bws_wywolaj(7, (uint64_t)sciezka) != 0; }
 bool zmien_nazwe_tworu(const char* sciezka, const char* nowa_nazwa) { return bws_wywolaj(8, (uint64_t)sciezka, (uint64_t)nowa_nazwa) != 0; }
@@ -71,7 +74,11 @@ void pobierz_linie(char* bufor, int max_dlugosc) {
             break;
         } 
         else if (c == '\b') {
-            if (pozycja > 0) { pozycja--; wypisz("\b \b"); }
+            if (pozycja > 0) { 
+                pozycja--; 
+                // Nowy sterownik terminala w grafika.cpp radzi sobie perfekcyjnie z samym \b
+                wypisz("\b"); 
+            }
         } 
         else if (pozycja < max_dlugosc - 1) {
             bufor[pozycja++] = c;
@@ -100,10 +107,13 @@ void int_do_str(int wartosc, char* bufor) {
 char historia[5][128];
 int hist_ilosc = 0;
 
-extern "C" void _start() {
+extern "C" __attribute__((noreturn)) void _start() {
+    // Oddajemy kontrolę nad myszą menedżerowi okien
+    gui_ustaw_przejecie_myszy(false);
+
     wypisz("\n");
     wypisz("==================================================\n");
-    wypisz(" Powłoka Bursztynowa v1.9.2 (Optymalizacja API)\n");
+    wypisz(" Powłoka Bursztynowa v2.1 (Zintegrowana z GUI)\n");
     wypisz(" Wpisz 'pomoc', aby zobaczyć listę poleceń.\n");
     wypisz("==================================================\n");
 
@@ -121,6 +131,10 @@ extern "C" void _start() {
         if (hist_ilosc < 5) hist_ilosc++;
 
         if (strcmp(bufor_komendy, "pomoc")) {
+            wypisz("--- KATEGORIA: APLIKACJE GUI ---\n");
+            wypisz("  notatnik      - uruchamia graficzny edytor tekstu\n");
+            wypisz("  kalkulator    - uruchamia kalkulator systemowy\n");
+            wypisz("  pulpit        - wraca do Menedżera Okien\n");
             wypisz("--- KATEGORIA: SYSTEM ---\n");
             wypisz("  pomoc         - wyświetla ten ekran pomocy\n");
             wypisz("  system        - wyświetla parametry sprzętowe i systemowe\n");
@@ -131,7 +145,7 @@ extern "C" void _start() {
             wypisz("  historia      - wyświetla historię 5 ostatnich poleceń\n");
             wypisz("  czysc         - czyści ekran terminala\n");
             wypisz("  czas          - wyświetla aktualną godzinę z zegara RTC\n");
-            wypisz("  wyjdz         - zamyka terminal i wraca na Pulpit (Menedżer Okien)\n");
+            wypisz("  wyjdz         - zamyka terminal i wraca na Pulpit\n");
             wypisz("--- KATEGORIA: SIEĆ (INTERNET) ---\n");
             wypisz("  ping [Cel]    - wysyła sygnał PING (np. ping 10.0.2.2 lub ping google.com)\n");
             wypisz("  pobierz       - pobiera plik z sieci (np. pobierz example.com / /test.html)\n");
@@ -148,12 +162,17 @@ extern "C" void _start() {
             wypisz("  cytat         - wczytuje i wyświetla cytaty z pliku\n");
             wypisz("  losuj         - rzuca wirtualną kością (wynik 1-6)\n");
         }
-        else if (strcmp(bufor_komendy, "wyjdz") || strcmp(bufor_komendy, "exit")) {
-            wypisz("Zamykanie Powłoki... Powrót do Menedżera Okien.\n");
-            uint64_t wynik = bws_wywolaj(10, (uint64_t)"/menedzer_okien.bur");
-            if (wynik == 0) {
-                wypisz("BŁĄD: Nie znaleziono menedzera okien na dysku!\n");
-            }
+        else if (strcmp(bufor_komendy, "notatnik")) {
+            wypisz("Uruchamianie Notatnika...\n");
+            bws_wywolaj(10, (uint64_t)"/programy/notatnik.cebula/notatnik.bur");
+        }
+        else if (strcmp(bufor_komendy, "kalkulator")) {
+            wypisz("Uruchamianie Kalkulatora...\n");
+            bws_wywolaj(10, (uint64_t)"/programy/kalkulator.cebula/kalkulator.bur");
+        }
+        else if (strcmp(bufor_komendy, "pulpit") || strcmp(bufor_komendy, "wyjdz") || strcmp(bufor_komendy, "exit")) {
+            wypisz("Powrót do Menedżera Okien...\n");
+            bws_wywolaj(10, (uint64_t)"/menedzer_okien.bur");
         }
         else if (strcmp(bufor_komendy, "ping")) {
             wypisz("Składnia polecenia: ping [adres IP lub domena] (np. ping google.com)\n");
@@ -224,9 +243,9 @@ extern "C" void _start() {
                         wypisz("3. SUKCES! Plik został pobrany z Internetu i utrwalony na dysku jako: "); wypisz(bezp_sciezka); wypisz("\n");
                         wypisz("Wpisz: czytaj "); wypisz(bezp_sciezka); wypisz(" aby zobaczyć jego zawartość!\n");
                     } else {
-                        wypisz("BLĄD: Serwer nie odpowiedział, zerwał połączenie, lub brak uprawnień dyskowych.\n");
+                        wypisz("BŁĄD: Serwer nie odpowiedział, zerwał połączenie, lub brak uprawnień dyskowych.\n");
                     }
-                } else { wypisz("BLĄD: Nie udało się rozwiązać domeny DNS.\n"); }
+                } else { wypisz("BŁĄD: Nie udało się rozwiązać domeny DNS.\n"); }
             }
         }
         else if (strcmp(bufor_komendy, "czas")) {
@@ -234,11 +253,11 @@ extern "C" void _start() {
             wypisz("Aktualny czas z zegara RTC to: "); wypisz(bufor_czasu); wypisz("\n");
         }
         else if (strcmp(bufor_komendy, "system")) {
-            wypisz("OS: Bursztyn OS x86_64\nJądro: Monolityczne, VMM Paging 4-lvl\n");
+            wypisz("OS: Bursztyn OS x86_64\nJądro: Monolityczne, VMM Paging 4-lvl, Własne API GUI\n");
             wypisz("Sieć: Zintegrowany klient DHCP, ARP, ICMP oraz Klient HTTP (TCP/DNS)\n");
         }
         else if (strcmp(bufor_komendy, "wersja")) {
-            wypisz("Powłoka Bursztynowa v1.9.2 (Build: Modularne API GUI)\n");
+            wypisz("Powłoka Bursztynowa v2.1 (Build: Zintegrowana z Menedżerem Okien)\n");
         }
         else if (strcmp(bufor_komendy, "kto")) {
             wypisz("Zalogowano jako: Administrator Systemu (Ring 3)\n");
