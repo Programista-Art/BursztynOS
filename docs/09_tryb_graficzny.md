@@ -1,69 +1,49 @@
-## 08. Podsumowanie Etapu 7: Tryb Graficzny i Składacz Obrazu
+# Wieloplatformowy Tryb Graficzny, Warstwa HAL i Architektura Ring 3
 
-Niniejszy dokument stanowi oficjalne podsumowanie i kamień milowy w rozwoju Bursztyn OS. System z powodzeniem opuścił archaiczny tryb tekstowy (VGA Text Mode) i wkroczył w erę w pełni okienkowego interfejsu graficznego (GUI), zarządzanego przez autorski Składacz Obrazu (Compositor).
+Niniejszy dokument stanowi oficjalne podsumowanie i potężny kamień milowy w rozwoju Bursztyn OS. System operacyjny ostatecznie porzucił sztywne, ograniczone sterowniki i wkroczył w erę w pełni obiektowego, sprzętowo niezależnego interfejsu graficznego (GUI). Dzięki zintegrowaniu z zaawansowanym zarządzaniem pamięcią, Bursztyn OS jest teraz pełnoprawnym, nowoczesnym systemem okienkowym.
 
-# 1. Zrealizowane Cele Technologiczne
+## 1. Zrealizowane Cele Technologiczne
 
 Podczas tego etapu udało się z powodzeniem wdrożyć i ustabilizować następujące kluczowe technologie:
 
-## 1.1 Natywny Sterownik Bochs VBE
+### 1.1 Zorientowana Obiektowo Warstwa Abstrakcji Sprzętu (HAL)
 
-System nie polega już wyłącznie na łasce bootloadera (GRUB-a) w kwestii grafiki. Zaimplementowano bezpośrednią komunikację ze sprzętem z wykorzystaniem portów I/O (0x01CE i 0x01CF). Pozwala to na:
+System nie polega już wyłącznie na jednym przestarzałym standardzie. Zaimplementowano wirtualną klasę bazową `SterownikEkranu`, po której dziedziczą konkretne sterowniki. Jądro dynamicznie analizuje środowisko rozruchowe za pomocą tagów Multiboot2 i wybiera jeden z trzech dostępnych trybów:
 
-* Weryfikację obecności kompatybilnej karty graficznej na szynie.
+* **Sterownik UEFI GOP:** Nowoczesny, natywny protokół graficzny aktywowany przy uruchamianiu systemu na najnowszych płytach głównych i firmware EFI.
+* **Sterownik VESA VBE:** Uniwersalny standard (Legacy BIOS), idealny dla starszych fizycznych komputerów oraz tradycyjnych maszyn wirtualnych.
+* **Bochs VBE (Fallback):** Bezpośrednia komunikacja z portami I/O (0x01CE) jako wsparcie dla starszych i specyficznych emulatorów.
 
-* Sprzętowe wymuszenie rozdzielczości (obecnie 1024x768x32) w dowolnym momencie działania jądra.
+Aby to osiągnąć w środowisku Bare-Metal bez biblioteki standardowej C++ (`libstdc++`), zaimplementowano technikę **Placement New**, co zapobiega błędom wskaźników wirtualnych (vtable) i chroni system przed awariami (BSOD).
 
-* Pobranie bezpośredniego wskaźnika do pamięci karty wideo (LFB - Linear Framebuffer).
+### 1.2 Optymalizacja VMM (Wielkie Strony 2 MB) i Ochrona Pamięci
 
-# 1.2 Ochrona Pamięci i Double Buffering
+Rozwiązano słynny "Problem Kury i Jajka" oraz drastycznie przyspieszono start systemu:
 
-Dzięki rozbudowie Menedżera Pamięci Wirtualnej (VMM), system bezpiecznie mapuje ogromne ilości pamięci graficznej.
+* **Huge Pages (PS):** Menedżer Pamięci Wirtualnej mapuje przestrzeń RAM za pomocą bloków o rozmiarze 2 MB zamiast klasycznych 4 KB. Skraca to czas budowy tablic z kilkunastu sekund do ułamka milisekundy.
+* **Bezpieczny Backbuffer:** Bufor ekranu (LFB), tapety oraz ramdysku zostały przeniesione w bezpieczne rejony przestrzeni wirtualnej (powyżej granicy 4 GB). Eliminuje to całkowicie konflikty pamięciowe ze starymi systemami BIOS.
 
-* Zaimplementowano system Podwójnego Buforowania (Double Buffering). Cały obraz jest najpierw rysowany w ukrytej pamięci RAM (Backbuffer alokowany na adresie 0x80000000), a następnie błyskawicznie kopiowany na ekran. Całkowicie eliminuje to efekt migotania (flickering).
+### 1.3 Menedżer Okien (Pulpit) jako Aplikacja Ring 3
 
-# 1.3 Menedżer Okien i Z-Order (Aktywny Focus)
+Wszystkie plany dotyczące GUI zostały w pełni zrealizowane. Menedżer Okien przestał być zaszyty w Jądrze i stał się pełnoprawnym programem przestrzeni użytkownika (`menedzer_okien.bur`):
 
-* Zbudowano od zera podstawy Menedżera Okien:
+* Posiada interaktywny **Pasek Zadań** i **Menu Start**.
+* Wspiera renderowanie ikon na pulpicie.
+* Obsługuje pełny system **Z-Order** (Aktywny Focus), przyciski akcji na belce tytułowej (Zwiń, Maksymalizuj, Zamknij [X]) oraz płynne przeciąganie okien bez migotania (dzięki Double Bufferingowi).
 
-Okna posiadają strukturę (współrzędne, wymiary, pasek tytułowy, tło).
+### 1.4 Aplikacje Użytkowe Ring 3 (Z systemem PZB)
 
-* Wprowadzono Z-Order. System wie, które okno jest "pod spodem", a które "na wierzchu".
+Zbudowano bogate API biblioteki `bursztyn_gui.h`, pozwalające zewnętrznym aplikacjom na proste rysowanie własnych okien, odczyt myszy i wypisywanie polskiego tekstu. Wdrożono pakiety aplikacji `.cebula`:
 
-* Po kliknięciu w dowolne okno, algorytm natychmiast przenosi je na pierwszą warstwę widoczności.
-
-# 1.4 Interakcja i Drag & Drop (Przeciąganie)
-
-Sterownik myszy PS/2 został zintegrowany z interfejsem graficznym.
-
-* Zbudowano maszynę stanów (DragStan), która wykrywa wciśnięcie lewego przycisku myszy na niebieskiej belce tytułowej.
-
-* Użytkownik może płynnie przesuwać okna po całym ekranie, a system w czasie rzeczywistym odrysowuje pulpit, zachowując zawartość pod spodem.
-
-2. Architektura Komunikacyjna GUI
-
-Przepływ danych w nowym trybie graficznym Bursztyn OS prezentuje się następująco:
-
-[ Klawiatura/Mysz PS/2 ] ---> [ Przerwania APIC (Wektor 33, 44) ]
-                                            |
-                                            v
-[ Aplikacja Ring 3 (Terminal) ] <---> [ BWS / Jądro ]
-                                            |
-                                            v
-[ SKŁADACZ OBRAZU (Menedżer Okien) ] ---> [ Backbuffer (RAM) ]
-                                            |
-                                            v
-                                     [ Karta Bochs VBE (LFB) ] ---> MONITOR
+* **Notatnik:** Graficzny edytor z obsługą odczytu/zapisu plików, wielolinijkowym wprowadzaniem tekstu i przewijaniem.
+* **Kalkulator:** W pełni funkcjonalny, okienkowy kalkulator z maszyną stanów.
+* **Terminal (bsh):** Potężna, ponad 300-linijkowa powłoka zintegrowana w okno Menedżera, posiadająca zintegrowanego klienta sieci (PING, HTTP, DHCP) i menedżer plików.
 
 
-# 3. Kolejne Kroki (Roadmapa na Etap 8)
+## 2. Architektura Komunikacyjna GUI
 
-Mając tak potężny i stabilny fundament, projekt jest gotowy na przyjęcie kolejnych funkcji interfejsu użytkownika:
 
-1. Routing Klawiatury (Pisanie w oknie): Połączenie wejścia z klawiatury z systemem Focusu. Jeśli Edytor jest na wierzchu, wciśnięte klawisze powinny pojawiać się w nim, a nie w Terminalu.
+Przepływ danych i kontroli w nowym, hybrydowym trybie graficznym Bursztyn OS prezentuje się następująco:
 
-1. Przyciski i Eventy: Dodanie przycisku [X] (Zakończ/Zamknij) na pasku tytułowym.
+![alt](image/tryby-graficzne.jpg)
 
-1. Pasek Zadań (Taskbar): Zmiana dolnego, szarego paska w interaktywne menu, z którego można minimalizować okna lub uruchamiać nowe programy .bur.
-
-1. Dynamiczne Tworzenie Okien: Rozbudowa BWS, aby programy uruchomione z RAM-dysku (BSP) mogły poprosić system o "Narysowanie własnego okna o wymiarach X na Y" i przejąć nad nim kontrolę.

@@ -1,74 +1,86 @@
 # 06. Bursztynowe Wywołania Systemowe (BWS)
 
-Niniejszy dokument definiuje specyfikację warstwy **BWS (Bursztynowe Wywołania Systemowe)**, która zastępuje klasyczne, anglosaskie określenia typu *Syscall Interface* lub *Application Binary Interface (ABI)*. BWS stanowi jedyny, bezpieczny i kontrolowany most komunikacyjny, przez który programy użytkownika (`.bur`) działające w Ring 3 mogą żądać od Jądra Bursztyna (Ring 0) wykonania operacji uprzywilejowanych.
+Niniejszy dokument definiuje specyfikację warstwy BWS (Bursztynowe Wywołania Systemowe), która zastępuje klasyczne, anglosaskie określenia typu Syscall Interface lub Application Binary Interface (ABI). BWS stanowi jedyny, bezpieczny i kontrolowany most komunikacyjny, przez który programy użytkownika (.bur) działające w Ring 3 mogą żądać od Jądra Bursztyna (Ring 0) wykonania operacji uprzywilejowanych.
+6.1 Mechanizm Sprzętowy SYSCALL i Przejście Ring 3 -> Ring 0
 
-## 6.1 Mechanizm Sprzętowy `SYSCALL` i Przejście Ring 3 -> Ring 0
+W architekturze x86-64 tradycyjne przerwania programowe (np. int 0x80 znane z systemów 32-bitowych) zostały zastąpione dedykowanymi, ultraszybkimi instrukcjami sprzętowymi: SYSCALL (wywołanie) oraz SYSRET / IRETQ (powrót).
 
-W architekturze x86-64 tradycyjne przerwania programowe (np. `int 0x80` znane z systemów 32-bitowych) zostały zastąpione dedykowanymi, ultraszybkimi instrukcjami sprzętowymi: `SYSCALL` (wywołanie) oraz `SYSRET` (powrót).
+## Proces przejścia ze strefy użytkownika do Jądra w Bursztyn OS przebiega następująco:
 
-Proces przejścia ze strefy użytkownika do jądra w Bursztyn OS przebiega następująco:
+1. Inicjalizacja rejestrów MSR: Podczas rozruchu Jądro konfiguruje rejestry specyficzne dla modelu (MSR). Do rejestru IA32_LSTAR wpisywany jest adres wskaźnika niskopoziomowej asemblerowej funkcji obsługi (bws_obsluga). Do rejestru IA32_STAR ładowane są selektory segmentów kodu i danych dla Ring 0 oraz Ring 3 (zdefiniowane w GDT).
 
-1. **Inicjalizacja rejestrów MSR:** Podczas rozruchu jądro konfiguruje rejestry specyficzne dla modelu (MSR). Do rejestru `IA32_LSTAR` wpisywany jest adres wskaźnika niskopoziomowej funkcji obsługi przerwań systemowych (`bws_obsluga`). Do rejestru `IA32_STAR` ładowane są selektory segmentów kodu i danych dla Ring 0 oraz Ring 3 (zdefiniowane w GDT).
-2. **Wywołanie instrukcji:** Program użytkownika umieszcza kod identyfikacyjny wywołania oraz wymagane parametry w rejestrach procesora, a następnie wykonuje instrukcję `SYSCALL`.
-3. **Działanie procesora:** Procesor natychmiastowo przełącza segment kodu `CS` na Ring 0, zapisuje adres powrotny w rejestrze `RCX`, stan flag procesora w `R11` i wykonuje skok pod adres zapisany w `IA32_LSTAR` (`bws_obsluga`).
-4. **Obsługa w jądrze:** Jądro zabezpiecza rejestry aplikacyjne na stosie systemowym, przeprowadza weryfikację zabezpieczeń BZL i wykonuje żądaną operację.
+1. Wywołanie instrukcji: Program użytkownika (np. Terminal lub Notatnik) umieszcza kod identyfikacyjny wywołania (RAX) oraz wymagane parametry w rejestrach procesora, a następnie wykonuje instrukcję SYSCALL.
 
-## 6.2 Konwencja Bursztyn OS BWS (Rejestry R8–R13)
+1. Działanie procesora: Procesor natychmiastowo przełącza segment kodu CS na Ring 0 (Jądro), zapisuje adres powrotny w rejestrze RCX, stan flag w R11 i wykonuje skok pod adres zapisany w IA32_LSTAR. Dodatkowo, sprzętowy segment TSS (Task State Segment) podmienia wskaźnik stosu (RSP) na bezpieczny stos Jądra.
 
-Bursztyn OS wdraża unikalny standard przekazywania parametrów, odmienny od standardów POSIX czy Windows. W celu zachowania czytelności kodu i optymalizacji bare-metal, jądro wykorzystuje do komunikacji wyłącznie rejestry ogólnego przeznaczenia z rodziny **R8-R13**.
+1. Obsługa w Jądrze: Jądro zabezpiecza rejestry aplikacyjne na stosie, przeprowadza rygorystyczną weryfikację uprawnień zaufania (BZL) i wykonuje żądaną operację (np. odczyt z dysku AHCI, renderowanie okna, wysłanie pakietu sieciowego).
 
-### Rozkład Rejestrów w Standardzie BWS:
+# 6.2 Konwencja Bursztyn OS BWS
 
-* **`RAX`** – Numer identyfikacyjny wywołania systemowego (Kod BWS).
-* **`R8`** – Pierwszy parametr wywołania (np. wskaźnik do ciągu znaków, uchwyt okna).
-* **`R9`** – Drugi parametr wywołania (np. długość bufora, współrzędna X okna).
-* **`R10`** – Trzeci parametr wywołania (np. flagi otwarcia pliku, współrzędna Y okna).
-* **`R11`** – Czwarty parametr wywołania (*Zarezerwowany sprzętowo przez CPU dla flag RFLAGS, jądro używa go wyłącznie wewnętrznie*).
-* **`R12`** – Piąty parametr wywołania.
-* **`R13`** – Szósty parametr wywołania.
+Bursztyn OS wykorzystuje autorski standard przekazywania parametrów w C/C++ poprzez funkcję mostkującą bws_wywolaj(). W celu zachowania czytelności kodu i optymalizacji bare-metal, wszystkie wywołania są zgrupowane w potężnej instrukcji switch w pliku syscalls.cpp.
 
-Po zakończeniu operacji, jądro zwraca wynik (kod błędu lub status sukcesu) zawsze w rejestrze **`RAX`**. Wartość ujemna (np. `-1`) oznacza błąd wykonania wywołania systemowego.
+* RAX – Numer identyfikacyjny wywołania systemowego (Kod BWS).
 
-## 6.3 Oficjalna Rejestracja Wywołań BWS
+* Pozostałe rejestry argumentów (R8-R13) – Zgodnie ze standardem x86_64 ABI, przekazują kolejne parametry wywołania. Rejestry przed wysłaniem są często kompresowane metodą przesunięć bitowych (np. X i Y pakowane w jeden rejestr 64-bitowy (x << 32) | y).
 
-Poniższa tabela stanowi kompletną mapę zarejestrowanych wywołań systemowych w Bursztyn OS. Każde wywołanie posiada swój unikalny identyfikator numeryczny (`Kod`), nazwę techniczną oraz zdefiniowane wymagania systemowe.
+Po zakończeniu operacji, Jądro zwraca wynik (kod błędu, ilość przeczytanych bajtów lub status sukcesu) zawsze w rejestrze RAX. Wartość numeryczna 0 najczęściej oznacza brak dostępu lub błąd wykonania.
+## 6.3 Pełny Rejestr Funkcji Jądra (Tabela BWS)
 
-| Kod BWS | Nazwa Techniczna | Parametry wejściowe (R8-R13) | Zastosowanie / Opis | Wymagany Poziom / Flaga BZL |
-| --- | --- | --- | --- | --- |
-| **`BWS-001`** | `bws_pisz_tekst` | `R8`: adres tekstu (char*) | Wyświetlenie tekstu w powłoce systemowej lub konsoli. | `PRAWO_GUI` lub BZL-3+ |
-| **`BWS-002`** | `bws_czytaj_klawisz` | Brak | Pobranie kodu naciśniętego klawisza ze sprzętowego bufora. | Wszystkie |
-| **`BWS-003`** | `bws_otworz_plik` | `R8`: ścieżka pliku (char*) | Otwarcie uchwytu pliku w strukturach BSP. | `PRAWO_PLIKI_CZYTAJ` |
-| **`BWS-004`** | `bws_zapisz_plik` | `R8`: ścieżka, `R9`: adres danych | Zapis bloku danych do pliku w systemie BSP. | `PRAWO_PLIKI_ZAPISZ` |
-| **`BWS-005`** | `bws_zakoncz_program` | `R8`: kod wyjścia (int) | Bezpieczne zamknięcie procesu i zwolnienie jego pamięci. | Wszystkie |
-| **`BWS-006`** | `bws_utworz_okno` | `R8`: tytuł, `R9`: X, `R10`: Y | Żądanie utworzenia okna graficznego w Składaczu Obrazu. | `PRAWO_GUI` |
-| **`BWS-007`** | `bws_rysuj_tekst` | `R8`: id_okna, `R9`: tekst, `R10`: X | Renderowanie czcionki bitmapowej wewnątrz okna GUI. | `PRAWO_GUI` |
-| **`BWS-008`** | `bws_pobierz_mysz` | `R8`: adres struktury myszy | Odczyt aktualnej pozycji i stanu przycisków myszy PS/2. | `PRAWO_GUI` |
-| **`BWS-009`** | `bws_uruchom_program` | `R8`: ścieżka .bur (char*) | Załadowanie do pamięci i start nowego procesu w Ring 3. | `PRAWO_URUCHOM_PROGRAM` |
+Poniższa tabela stanowi kompletną mapę zaimplementowanych 26 wywołań systemowych w Bursztyn OS (moduły Plikowe, Sieciowe, GUI i Systemowe).
 
-## 6.4 Kontrola Uprawnień BZL w Obsłudze BWS
+Kod BWS (RAX),Wywoływana funkcja w Jądrze,Zastosowanie / Opis Operacji,Wymagane Uprawnienie BZL / PZB
+BWS-001,wypisz_na_ekranie,Wyświetlenie tekstu bezpośrednio na terminalu.,Wszystkie
+BWS-002,utworz_plik,"Tworzy nowy, pusty plik / teczkę w BSP (Dysk AHCI).",PRAWO_PLIKI_ZAPISZ
+BWS-003,zapisz_do_pliku,Zapisuje ciąg bajtów do otwartego pliku BSP.,PRAWO_PLIKI_ZAPISZ
+BWS-004,pobierz_znak_klawiatury,Odczyt kodu sprzętowego kontrolera i8042 (Ring 3).,Wszystkie
+BWS-005,czytaj_z_pliku,Odczytuje dane z pliku BSP do bufora w Ring 3.,PRAWO_PLIKI_CZYTAJ
+BWS-006,wylistuj_katalog,Zwraca ciąg tekstowy reprezentujący zawartość teczki.,PRAWO_PLIKI_CZYTAJ
+BWS-007,usun_twor,Trwałe wykasowanie obiektu (pliku/teczki) z dysku.,PRAWO_PLIKI_ZAPISZ
+BWS-008,zmien_nazwe_tworu,Modyfikuje nazwę węzła indeksowego w strukturach BSP.,PRAWO_PLIKI_ZAPISZ
+BWS-009,pobierz_czas_rtc,Odczyt godziny BCD ze sprzętowego modułu CMOS.,Wszystkie
+BWS-010,bws_uruchom_program...,Powołuje nowy proces (.bur / .cebula) w nowej tablicy VMM.,PRAWO_URUCHOM_PROGRAM
+BWS-011,bws_siec_ping,Generuje ramkę ICMP Echo i wysyła przez kartę E1000.,PRAWO_SIEC
+BWS-012,bws_siec_dns,Tłumaczy domenę tekstową na tablicę 4 oktetów IP (UDP).,PRAWO_SIEC
+BWS-013,bws_siec_pobierz_http,"Nawiązuje sesję TCP, pobiera zawartość HTTP i utrwala na AHCI.",PRAWO_SIEC + PRAWO_PLIKI_ZAPISZ
+BWS-014,bws_gui_rysuj_okno,Prosi Menedżera Kompozycji o narysowanie ramki nowego okna.,PRAWO_GUI
+BWS-015,bws_gui_wypisz_tekst,Rysuje stałokolorowy ciąg UTF-8 na pulpicie.,PRAWO_GUI
+BWS-016,bws_gui_wyczyscz_obszar,Rysuje czysty prostokąt w kolorze tła.,PRAWO_GUI
+BWS-017,bws_gui_odswiez,Kopiuje Liniowy Backbuffer na adresy karty VESA/UEFI.,PRAWO_GUI
+BWS-018,bws_gui_pobierz_mysz,"Zwraca współrzędne (X,Y) i flagi przycisków myszy PS/2.",PRAWO_GUI
+BWS-019,bws_gui_odswiez_pulpit,Odbudowuje tło i tapetę w przypadku ruchu oknem.,PRAWO_GUI
+BWS-020,bws_gui_wypisz_tekst...,Zaawansowane renderowanie UTF-8 ze skalowaniem i paletą ARGB.,PRAWO_GUI
+BWS-021,bws_gui_rysuj_prostokat,"Rysuje wypełnioną figurę na ekranie (X, Y, W, H).",PRAWO_GUI
+BWS-022,bws_gui_ustaw_przejecie..,Moduł Z-Order. Przypisuje globalnego Focusa Myszki do okna aplikacji.,PRAWO_GUI
+BWS-023,bws_gui_pobierz_rozdzie..,Zwraca dynamiczną rozdzielczość na podstawie wybranego trybu HAL.,PRAWO_GUI
+BWS-024,bws_gui_pobierz_szeroko..,Zwraca szerokość znaku Unicode (w pikselach) dla proporcjonalnej czcionki.,PRAWO_GUI
+BWS-025,(Reboot Systemu),Wysyła instrukcję sprzętową Reset do kontrolera portu 0x64.,Domyślnie brak praw z Ring 3
+BWS-026,(ACPI Shutdown),Zamyka system wirtualny (QEMU) wysyłając sygnał ACPI na port 0x604.,Domyślnie brak praw z Ring 3
 
-Jądro Bursztyna kategorycznie odrzuca zasadę ślepego ufania aplikacjom przestrzeni użytkownika. Każde wywołanie trafiające do funkcji `bws_obsluga` jest poddawane dwufazowej weryfikacji logicznej w oparciu o strukturę wywołującego procesu (`proces_t`):
+## Graficzne przedstawienie BWS
+![BWS](image/BWS.jpg)
 
-1. **Weryfikacja Flag Uprawnień:**
-Przed wykonaniem kodu specyficznego dla danego wywołania, jądro wykonuje operację bitową AND na mapie bitowej praw procesu.
 
-```cpp
-// Przykład dla BWS-004 (Zapis pliku)
-if (!(aktualny_proces->uprawnienia & PRAWO_PLIKI_ZAPISZ)) {
-    return -1; // RAX = -1 -> Brak uprawnień do zapisu plików
-}
+# 6.4 Kontrola Uprawnień BZL / PZB w Obsłudze BWS
 
-```
+Jądro Bursztyna kategorycznie odrzuca zasadę ślepego ufania aplikacjom przestrzeni użytkownika. Każde wywołanie trafiające do struktury asynchronicznej Jądra jest poddawane rygorystycznej, dwufazowej weryfikacji w oparciu o manifest procesu (opis.aplikacji zawarty w paczce .cebula):
 
-2. **Weryfikacja Poziomu Zaufania BZL:**
-Jeśli aplikacja posiada flagę ogólną, jądro sprawdza, czy jej poziom zaufania pozwala na modyfikację wybranego zasobu w relacji ze strukturą BSP.
-
-```cpp
-// Blokada zapisu do teczek systemowych dla zwykłych aplikacji (BZL-4) i piaskownicy (BZL-5)
-if (aktualny_proces->poziom_zaufania >= 4 && sciezka_zaczyna_sie_od(sciezka, "/system")) {
-    return -2; // RAX = -2 -> Odmowa dostępu: aplikacja użytkownika nie może pisać do teczki /system
-}
+1. Weryfikacja Flag Uprawnień (Maski Bitowe):
+    Przed wykonaniem wrażliwego kodu specyficznego (np. odczyt dysku, transmisja TCP, renderowanie grafiki), Jądro weryfikuje flagi BZL nadane programowi przez kompilator.
 
 ```
-
-Dzięki temu system BWS gwarantuje absolutną szczelność systemu – stabilność i bezpieczeństwo struktur pamięci oraz systemu plików BSP zależą wyłącznie od decyzji podejmowanych w Ring 0 przez Jądro Bursztyna.
+// Przykład mechanizmu izolacji dla BWS-013 (Pobieranie pliku z sieci HTTP)
+if (!(aktywny_proces.uprawnienia & PRAWO_PLIKI_ZAPISZ)) {
+    return 0; // Odmowa - brak uprawnień dyskowych
+}
+```
+2. Weryfikacja Poziomu Zaufania (Ochrona Ścieżek BZL):
+Jądro chroni rdzenne elementy systemu. Nawet jeśli program ma flagę zapisu (np. Notatnik), nie może modyfikować plików krytycznych Jądra.
+```
+// Blokada modyfikacji katalogów systemowych dla aplikacji użytkownika w Ring 3 (BZL_UZYTKOWNIK)
+const char* sciezka = (const char*)arg1;
+if (aktywny_proces.poziom_zaufania >= PZB_UZYTKOWNIK && 
+   (sciezka_zaczyna_sie_od(sciezka, "/system") || sciezka_zaczyna_sie_od(sciezka, "/jadro"))) {
+    return 0; // Odmowa: Integralność systemu chroniona!
+}
+```
+Dzięki tak zbudowanej architekturze, BWS gwarantuje absolutną szczelność systemu operacyjnego. Żadna aplikacja w Ring 3 nie ma prawa wysłać nieautoryzowanych pakietów sieciowych, mazać bezpośrednio po pamięci wideo HAL ani usunąć Jądra, ponieważ napotka nieprzebijalny pancerz logiczny podczas obsługi SYSCALL w pliku syscalls.cpp.

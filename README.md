@@ -35,7 +35,7 @@ Lub na pulpicie jest ikonka notatnika
 
 
 
-## Dostępne 22 komend w Shellu
+## Dostępne 22 komendy w Powłoce Bursztynowej(Shell)
 1. pomoc - wyświetla dostępną listę komend.
 1. system - wypisuje informacje o architekturze Bursztyn OS.
 1. wersja - krótka informacja o wersji powłoki i OS
@@ -101,7 +101,7 @@ Będąc już w folderze, w którym leży plik BursztynOS.iso, odwołaj się do p
 ``` 
 
 
-## Jak uruchomić w power shell w QEMU na Windows 11
+## Jak uruchomić w power shell w QEMU na Windows 11 
 Jeżeli masz pobrnay obraz iso w folderze na pustym miejscu kliknij prawym przyciskiem myszy i wybierz Otwórz w terminalu dalej wpisz to 
 ```
 & "C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom BursztynOS.iso -m 2G
@@ -110,6 +110,7 @@ Jeżeli chcesz uruchomić wraz z wirtualnym dyskiem wpisz polecenie
 ```
 & "C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom BursztynOS.iso -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G
 ```
+
 
 ## Jeżeli są błędy przy uruchomieniu
 ### Błąd akceleracji (Hyper-V / WHPX)
@@ -136,6 +137,24 @@ Dlaczego? Jeśli w CMD wpiszesz ścieżkę ze spacją bez cudzysłowów, konsola
 
 Rozwiązanie: Bezwzględnie pamiętaj o znakach " na początku i końcu ścieżki do QEMU.
 
+# Jak uruchomić Burstzyn w trybie UEFI (OVMF) z UEFI GOP w power shell w QEMU na Windows 11 od wersji pliki iso BursztynOS v1.0.0.5
+```
+& "C:\Program Files\qemu\qemu-system-x86_64.exe" `
+    -drive if=pflash,format=raw,unit=0,readonly=on,file="C:\Program Files\qemu\share\edk2-x86_64-code.fd" `
+    -cdrom BursztynOS.iso `
+    -drive "id=disk,file=wirtualny_dysk.img,format=raw,if=none" `
+    -device ahci,id=ahci `
+    -device ide-hd,drive=disk,bus=ahci.0 `
+    -m 2G `
+    -vga std `
+    -serial stdio
+```
+
+# Jak uruchomić Burstzyn w trybie Legacy BIOS + QEMU VGA w power shell w QEMU na Windows 11 od wersji pliki iso BursztynOS v1.0.0.5
+```
+& "C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom BursztynOS.iso -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -vga std -serial stdio
+```
+
 # Jak uruchomić system Burstzyn w QEMU na Linux Mint
 ## Krok 1: Otwórz terminal w folderze z plikiem
 Najszybsza metoda w systemach takich jak Linux Mint:
@@ -160,6 +179,24 @@ qemu-system-x86_64 -cdrom BursztynOS.iso -m 2G
 ```
 qemu-system-x86_64 -cdrom BursztynOS.iso -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -serial stdio
 ```
+# Jak uruchomić Burstzyn w trybie UEFI (OVMF) z UEFI GOP w QEMU na Linux Mint od wersji pliki iso BursztynOS v1.0.0.5
+```
+qemu-system-x86_64 \
+    -bios /usr/share/qemu/OVMF.fd \
+    -cdrom BursztynOS.iso \
+    -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none \
+    -device ahci,id=ahci \
+    -device ide-hd,drive=disk,bus=ahci.0 \
+    -m 2G \
+    -vga std \
+    -serial stdio
+```
+
+# Jak uruchomić Burstzyn w trybie Legacy BIOS + QEMU VGA w QEMU na Linux Mint od wersji pliki iso BursztynOS v1.0.0.5
+```
+qemu-system-x86_64 -cdrom BursztynOS.iso -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -vga std -serial stdio
+```
+
 
 ### Krok 3: (Opcjonalnie) Włącz dopalacze KVM! 🚀
 Na Windowsie próbowaliśmy włączyć akcelerację WHPX, ale to na Linuksie QEMU rozwija prawdziwe skrzydła dzięki natywnej akceleracji KVM (Kernel-based Virtual Machine). Zamiast emulować procesor programowo, system pozwala wirtualnej maszynie używać Twojego fizycznego procesora. Bursztyn OS uruchomi się wtedy z prędkością światła!
