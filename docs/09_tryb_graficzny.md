@@ -45,5 +45,5 @@ Zbudowano bogate API biblioteki `bursztyn_gui.h`, pozwalające zewnętrznym apli
 
 Przepływ danych i kontroli w nowym, hybrydowym trybie graficznym Bursztyn OS prezentuje się następująco:
 
-![alt](image/tryby-graficzne.jpg)
+![alt](../image/tryby-graficzne.jpg)
 

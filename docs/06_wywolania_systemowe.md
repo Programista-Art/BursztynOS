@@ -57,7 +57,8 @@ BWS-025,(Reboot Systemu),Wysyła instrukcję sprzętową Reset do kontrolera por
 BWS-026,(ACPI Shutdown),Zamyka system wirtualny (QEMU) wysyłając sygnał ACPI na port 0x604.,Domyślnie brak praw z Ring 3
 
 ## Graficzne przedstawienie BWS
-![BWS](image/BWS.jpg)
+![BWS](../image/BWS.jpg)
+
 
 
 # 6.4 Kontrola Uprawnień BZL / PZB w Obsłudze BWS

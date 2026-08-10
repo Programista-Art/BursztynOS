@@ -15,6 +15,7 @@ System w pełni wykorzystuje architekturę stronicowania (VMM) i segmentacji (GD
 ## PZB to unikalna, logiczna warstwa zabezpieczeń zarządzana programowo przez Jądro. Nie stanowi ona dodatkowych ringów sprzętowych procesora. Cała przestrzeń użytkownika działa sprzętowo w Ring 3, jednak Jądro podczas ładowania procesu z dysku przypisuje mu logiczny poziom zaufania, determinując jego wpływ na system.
 
 Poziom PZB,Nazwa Poziomu,Przeznaczenie i Zakres Dostępności
+```
 
 PZB-0,Jądro / HAL,"Działa w sprzętowym Ring 0. Pełny dostęp do Zarządcy Pamięci, Planisty Włókien i sprzętu."
 PZB-1,Usługi Niskopoziomowe,Przyszłościowe sterowniki ładowane w Ring 3 (mikrojądrowe). Specjalne prawa dostępu do sprzętu.
@@ -22,7 +23,7 @@ PZB-2,Środowisko GUI,"Zarezerwowane dla systemowego Menedżera Okien (/menedzer
 PZB-3,Aplikacje Zaufane,Systemowa Powłoka (/shell.bur). Szeroki dostęp do operacji na plikach (odczyt/zapis struktury BSP).
 PZB-4,Aplikacje Użytkownika,"Zwykłe programy instalowane z paczek .cebula (np. Notatnik, Kalkulator). Jądro nadaje im PZB-4 na podstawie pliku opis.aplikacji. Izolacja logiki."
 PZB-5,Piaskownica (Sandbox),Niezaufane programy. Restrykcyjna izolacja. Dostęp wyłącznie do teczki /piaskownica/[app] oraz /tymczasowe. Odcięcie od plików innych użytkowników.
-
+```
 ## 2.3 Flagi Uprawnień Procesu (Maski Bitowe)
 
 Poziom PZB definiuje nadrzędne ramy izolacji, jednak precyzyjna kontrola opiera się na bitowych flagach uprawnień zaszytych w strukturze procesu. Flagi te są dynamicznie wczytywane przez Jądro na podstawie manifestu opis.aplikacji.
