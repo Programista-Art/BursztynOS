@@ -1,5 +1,5 @@
 
-# 琥 Bursztyn OS 
+# Bursztyn OS 
 
 ![Logo Bursztyn OS](image/logo-bursztyn-os.png)
 
@@ -218,8 +218,6 @@ Aby to zrobić, po prostu dodaj flagę -enable-kvm:
 qemu-system-x86_64 -enable-kvm -cdrom BursztynOS.iso -m 2G
 ```
 
-## Uruchomiony system Bursztyn OS na Linux Mint w QEMU
-![alt](image/BursztynOS.png)
 
 # Kompilowanie systemu ze źródel na Linux Mint i uruchomienie w QEMU 
 ### Przygotowanie Środowiska w Linux Mint
