@@ -1,88 +1,100 @@
 
+# 琥 Bursztyn OS 
 
-# Dokumentacja Systemu Operacyjnego Bursztyn OS
+![Logo Bursztyn OS](image/logo-bursztyn-os.png)
 
-![alt](image/logo-bursztyn-os.png)
+Witaj w oficjalnej dokumentacji **Bursztyn OS** – niezależnego, 64-bitowego systemu operacyjnego z polską duszą inżynieryjną, tworzonego całkowicie od zera (czysty bare-metal). 
 
-Witaj w oficjalnej dokumentacji **Bursztyn OS** – niezależnego, 64-bitowego systemu operacyjnego z polską duszą inżynieryjną, tworzonego całkowicie od zera (czysty bare-metal).
+System jest rozwijany z myślą o architekturze x86-64, implementując własne Jądro, natywny stos sieciowy TCP/IP, autorski system plików na dyskach AHCI SATA, niezależny logiczny model bezpieczeństwa (PZB) oraz w pełni graficzne środowisko uruchomieniowe (GUI) dla programów w Ring 3.
 
-System jest rozwijany z myślą o architekturze x86-64, implementując własne Jądro, autorski system plików, niezależny logiczny model bezpieczeństwa oraz natywne środowisko uruchomieniowe dla programów skompilowanych z języka Avocado.
+---
 
-# Programy w Bursztynie powłoka systemowa shell i prosty notatnik
+## 🖥️ Środowisko Graficzne i Aplikacje (Ring 3)
 
-## Pulpit Bursztyna
+Bursztyn OS to pełnoprawny system okienkowy. Posiada autorską warstwę HAL (obsługa UEFI GOP oraz VESA VBE) i proporcjonalne czcionki UTF-8. 
 
-![alt](image/pulpit/1.png)
+**Menedżer Okien (Pulpit)**
+System uruchamia interaktywny pulpit z paskiem zadań, rozwijanym menu i wsparciem dla myszy PS/2 (Z-Order, Drag & Drop).
+![Pulpit Bursztyna 1](image/pulpit/1.png)
+![Pulpit Bursztyna 2](image/pulpit/2.png)
+![Pulpit Bursztyna 3](image/pulpit/3.png)
+![Pulpit Bursztyna 4](image/pulpit/4.png)
 
-![alt](image/pulpit/2.png)
+**Aplikacje użytkowe (Paczki .cebula)**
+Programy w Bursztyn OS są odizolowane i posiadają własne manifesty uprawnień. Aplikacje możesz uruchamiać klikając w ikony na pulpicie lub wywołując je z terminala (np. `uruchom /programy/notatnik.cebula/notatnik.bur`).
 
-![alt](image/pulpit/3.png)
+* **Notatnik:** Edytor tekstowy obsługujący odczyt i zapis z dysku AHCI.
+![Notatnik](image/pulpit/7.png)
 
-![alt](image/pulpit/4.png)
+* **Kalkulator:** Okienkowa aplikacja użytkowa.
+![Kalkulator](image/pulpit/6.png)
 
-## Polecenie w Powłoce Bursztynowej pomoc
-![alt](image/pulpit/5.png)
-### Prosty kalkulator w Burstzyn OS z GUI.
+---
 
-![alt](image/pulpit/6.png)
+## ⌨️ Powłoka Bursztynowa (Terminal)
 
-# Pierwsza aplikacja z GUI działająca w Ring 3
-### Abu uruchomić notatnik możesz wpisać polecenie w powłoce. uruchom /programy/notatnik.cebula/notatnik.bur
-Lub na pulpicie jest ikonka notatnika
-## Notatnik
-![alt](image/pulpit/7.png)
+Powłoka systemowa to potężne, zintegrowane narzędzie działające w oknie. Oferuje pełną obsługę polskich znaków oraz natywnego klienta sieci.
+![Powłoka Bursztynowa](image/pulpit/5.png)
 
+**Dostępne polecenia:**
 
+**⚙️ Systemowe:**
+* `pomoc` - wyświetla dostępną listę komend.
+* `system` - wypisuje informacje o architekturze Bursztyn OS.
+* `wersja` - krótka informacja o wersji powłoki i OS.
+* `kto` - odpowiada, na jakich prawach PZB aktualnie działasz.
+* `pci` - wyświetla urządzenia na płycie głównej (magistrala PCI).
+* `czas` - wyświetla aktualną godzinę ze sprzętowego zegara RTC.
+* `historia` - pokazuje 5 ostatnich wpisanych przez Ciebie poleceń.
+* `czysc` - czyści ekran terminala.
+* `wyjdz` - zamyka powłokę bursztynową i wraca na pulpit.
 
+**🌐 Sieć i Internet (TCP/IP):**
+* `ping [adres/domena]` - wysyła sygnał ICMP (np. `ping 10.0.2.2` lub `ping google.com`).
+* `pobierz [domena] [sciezka] [zapisz_jako]` - pobiera plik z sieci przez HTTP (np. `pobierz example.com / /test.html`).
 
-## Dostępne 22 komendy w Powłoce Bursztynowej(Shell)
-1. pomoc - wyświetla dostępną listę komend.
-1. system - wypisuje informacje o architekturze Bursztyn OS.
-1. wersja - krótka informacja o wersji powłoki i OS
-1. kto - odpowie, na jakich prawach aktualnie działasz.
-1. pci - wyświetla urządzenia na płycie głównej (magistrala PCI)\n");
-1. uruchom [plik]- uruchamia aplikację (np. uruchom /programy/kalk.bur
-1. historia – pokaże 5 ostatnich wpisanych przez Ciebie poleceń!
-1. czas - wyświetla aktualną godzinę z zegara RTC\n")
-1. ### KATEGORIA: SIEĆ (INTERNET)
-1. ping [nazwa strony] - wysyła sygnał PING (np. ping 10.0.2.2 lub ping google.com)
-1. pobierz [domena] [sciezka] [zapis_jako] - pobiera plik z sieci (np. pobierz example.com / /test.html)
-1. czysc - czyści ekran terminala
-1. utworz - tworzy nowy, pusty plik na RAM-Dysku.
-1. zapisz - zapisuje plik
-1. czytaj [plik] - wyświetla zawartość pliku  
-1. pliki [kat] - wylistuj wszystkie pliki
-1. usun [sciezka]- usuwa plik lub katalog
-1. zmien_nazwe - zmienia nazwę (kreator)
-1. gdzie - ścieżka obecnego katalogu
-1. pisz [tekst] - wypisuje podany tekst na ekran
-1. cytat - wczytuje i wyświetla cytaty z pliku
-1. losuj - rzuca wirtualną kością (wynik 1-6).
-1. wyjdz - zamyka powłokę bursztynową shell
+**📁 Zarządzanie Plikami (Dysk AHCI):**
+* `uruchom [plik]` - uruchamia aplikację (np. `uruchom /programy/kalkulator.cebula/kalkulator.bur`).
+* `utworz` - kreator tworzenia nowego, pustego pliku/katalogu na dysku.
+* `zapisz` - zapisuje tekst do pliku.
+* `czytaj [plik]` - wyświetla zawartość wskazanego pliku.
+* `pliki [katalog]` - wylistowuje zawartość katalogu.
+* `usun [sciezka]` - trwale usuwa plik lub katalog z dysku.
+* `zmien_nazwe` - kreator zmiany nazwy pliku/katalogu.
+* `gdzie` - wyświetla ścieżkę obecnego katalogu.
 
-    
+**🎲 Rozrywka:**
+* `pisz [tekst]` - wypisuje podany tekst na ekran (echo).
+* `cytat` - wczytuje i wyświetla cytaty z pliku.
+* `losuj` - rzuca wirtualną kością (wynik 1-6).
 
-## 🗂️ Struktura Dokumentacji
+---
+
+## 🗂️ Struktura Dokumentacji Technicznej
 
 Poniższe pliki zawierają pełną specyfikację techniczną, opisy mechanizmów oraz analizę kodu źródłowego systemu:
 
-1. [01_wstep_i_filozofia.md](docs/01_wstep_i_filozofia.md) – Wizja projektu, założenia ideologiczne, polskie nazewnictwo i roadmapa rozwoju.
-2. [02_architektura_systemu.md](docs/02_architektura_systemu.md) – Podział na przestrzenie Ring 0/Ring 3, szczegółowa specyfikacja modelu BZL (Bursztynowy Poziom Zaufania) oraz wprowadzenie do BWS.
-3. [03_proces_rozruchu.md](docs/03_proces_rozruchu.md) – Analiza `boot.S`, wielopoziomowe tablice stron, przejście do trybu Long Mode i przekazanie parametrów z GRUB.
-4. [04_zarzadzanie_sprzetem.md](docs/04_zarzadzanie_sprzetem.md) – Inicjalizacja GDT, IDT, kontroler APIC, Zegar Systemowy (LAPIC Timer) oraz sterowniki wejścia/wyjścia (klawiatura PS/2, ekran tekstowy).
-5. [05_bursztynowy_system_plikow.md](docs/05_bursztynowy_system_plikow.md) – Specyfikacja BSP, struktura węzłów indeksowych, parser ścieżek i implementacja RAM-dysku.
-6. [06_wywolania_systemowe.md](docs/06_wywolania_systemowe.md) – Architektura BWS, Standard BWS dla rejestrów (R8-R13) i wykaz dostępnych wywołań systemowych.
+1. [01_wstep_i_filozofia.md](docs/01_wstep_i_filozofia.md) – Wizja projektu, założenia ideologiczne, polskie nazewnictwo i roadmapa.
+2. [02_architektura_systemu.md](docs/02_architektura_systemu.md) – Podział Ring 0/Ring 3, sprzętowy TSS oraz logiczny model bezpieczeństwa PZB (Poziom Zaufania Bursztyna).
+3. [03_proces_rozruchu.md](docs/03_proces_rozruchu.md) – Analiza wymuszeń graficznych Multiboot2, tymczasowe stronicowanie i skok do Long Mode.
+4. [04_zarzadzanie_sprzetem.md](docs/04_zarzadzanie_sprzetem.md) – Inicjalizacja GDT, IDT (z systemem BSOD), APIC, Zegar Systemowy, RTC oraz mysz PS/2.
+5. [05_bursztynowy_system_plikow.md](docs/05_bursztynowy_system_plikow.md) – Specyfikacja systemu BSP trwale zapisywanego na sterowniku AHCI SATA.
+6. [06_wywolania_systemowe.md](docs/06_wywolania_systemowe.md) – Architektura 26 funkcji BWS (Bursztynowych Wywołań Systemowych) izolujących Ring 3.
 7. [07_ekosystem_i_formaty.md](docs/07_ekosystem_i_formaty.md) – Specyfikacja binarna `.bur`, struktura paczek `.cebula` oraz manifesty `opis.aplikacji`.
-8. [08_bursztynowy_slownik_i_architektura.md](docs/08_bursztynowy_slownik_i_architektura.md) – Oficjalny słownik pojęć rdzennych (Teczka, Włókna, Planista) oraz strategia pełnego wdrożenia UTF-8.
-9. [09_tryb_graficzny.md](docs/09_tryb_graficzny.md) - Tryb Graficzny i Składacz Obrazu
-10. [10_siec.md](docs/10_siec.md) - Sieć w Bursztyn OS
+8. [08_bursztynowy_slownik_i_architektura.md](docs/08_bursztynowy_slownik_i_architektura.md) – Oficjalny słownik pojęć (Teczka, Włókno, Planista) oraz rendering UTF-8.
+9. [09_tryb_graficzny.md](docs/09_tryb_graficzny.md) - Zorientowana obiektowo warstwa HAL (UEFI GOP, VESA), Double Buffering i Z-Order.
+10. [10_siec.md](docs/10_siec.md) - Stos sieciowy: E1000, ICMP, DHCP, klient DNS (UDP) oraz pobieranie plików (TCP/HTTP).
+
+---
 
 ## 🛠️ Architektura w pigułce
 
-* **Tryb procesora:** 64-bit Long Mode (wymagany start z GRUB za pomocą Multiboot2).
-* **Zarządzanie pamięcią:** Zarządca Pamięci Fizycznej (mapa bitowa) + Zarządca Pamięci Wirtualnej (4-poziomowe stronicowanie PML4/PDP/PD/PT).
-* **Wielozadaniowość/Asynchroniczność:** Nowoczesny APIC + Zegar LAPIC (Wektor 32) po całkowitym uśpieniu archaicznego PIC.
-* **System plików:** BSP (Bursztynowy System Plików) BSP64 został zaprojektowany z wykorzystaniem nowoczesnej architektury blokowej opartej na blokach 4096 bajtów (4 KB), drzewo teczek oparte na węzłach indeksowych.
+* **Procesor:** x86-64 Long Mode (Start przez standard Multiboot2 z GRUB).
+* **Izolacja / Bezpieczeństwo:** Sprzętowe Ring 3 wymuszane przez `SYSCALL/SYSRET` + sprzętowy segment TSS + programowy pancerz PZB.
+* **Pamięć:** Wielkie Strony (Huge Pages 2 MB), VMM z dynamicznym mapowaniem adresów do `0x130000000ULL` (powyżej 4 GB).
+* **Asynchroniczność:** Pełne odejście od układów PIC na rzecz nowoczesnego kontrolera APIC i asynchronicznego LAPIC Timera we współpracy z RTC.
+* **Grafika (HAL):** Abstrakcyjna warstwa renderująca (Liniowy Bufor Ramki) wybierająca natywnie między UEFI GOP a Legacy VESA.
+* **Storage i Pliki:** Własny sterownik dysków twardych AHCI SATA. System BSP używa sektorów 512B natywnie zmapowanych na bloki dyskowe.
 
 # Jak uruchomić system Burstzyn w QEMU na Windows 11
 ## Krok 1: pobierz plik BursztynOS.iso na pc, otwórz wiersz polecenia cmd
