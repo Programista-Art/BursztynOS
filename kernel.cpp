@@ -12,6 +12,7 @@
 #include "loader.h"  // Zapewnia dostęp do Loadera programów .bur
 #include "ahci.h"    // STEROWNIK DYSKU
 #include "sterowniki/dzwiek/hda.h" // STEROWNIK DŹWIĘKU INTEL HDA
+#include "heap.h"    // ALOKATOR PAMIĘCI (STERTA)
 
 // Deklaracje zewnętrznych procedur asemblerowych i systemowych
 extern "C" void InicjalizujGDT();
@@ -23,9 +24,8 @@ extern "C" void InicjalizujMyszPS2();
 extern "C" void inicjalizuj_tss(void* stos_jadra);
 extern "C" void zaladuj_tss(uint16_t selektor_tss);
 extern "C" void inicjalizuj_syscalls();
-extern "C" void inicjalizuj_mbedtls(); 
+extern "C" void inicjalizuj_mbedtls(); // <--- DODAJ TĘ LINIJKĘ TUTAJ
 extern "C" uint64_t stack_top; // Wskaźnik na szczyt stosu zdefiniowany w boot.S
-
 
 // Zmienna z PMM (Physical Memory Manager) określająca ilość pamięci RAM
 extern uint64_t najwyzsza_znaleziona_ramka; 
@@ -48,17 +48,16 @@ extern "C" uint8_t _binary_shell_bin_end[];
 extern "C" uint8_t _binary_notatnik_bin_start[];
 extern "C" uint8_t _binary_notatnik_bin_end[];
 
-// NOWOŚĆ: Deklaracja symboli Kalkulatora z pliku Makefile!
+//  Deklaracja symboli Kalkulatora z pliku Makefile!
 extern "C" uint8_t _binary_kalkulator_bin_start[];
 extern "C" uint8_t _binary_kalkulator_bin_end[];
 
-// NOWOŚĆ: Deklaracja symboli Menedżera Okien
+// Deklaracja symboli Menedżera Okien
 extern "C" uint8_t _binary_menedzer_okien_bin_start[];
 extern "C" uint8_t _binary_menedzer_okien_bin_end[];
 
-extern "C" uint8_t _binary_przegladarka_bin_start[];
-extern "C" uint8_t _binary_przegladarka_bin_end[];
-extern "C" void inicjalizuj_syscalls();
+extern "C" char _binary_przegladarka_bin_start[];
+extern "C" char _binary_przegladarka_bin_end[];
 
 // Prototyp funkcji uruchamiającej program z uwzględnieniem Systemu Uprawnień PZB
 extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka, uint8_t bzl_poziom, uint64_t flagi_praw, bool z_syscalla);
@@ -96,15 +95,12 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     InicjalizujIDT();
     InicjalizujVMM(); 
     inicjalizuj_syscalls();
-    inicjalizuj_mbedtls();
-    wypisz_log("[KRYPTO] mbedTLS: Silnik kryptograficzny z buforem 256 KB gotowy!");
     InicjalizujGrafike(multiboot_info_ptr);
 
     wypisz_log("==================================================");
     wypisz_log(" Witamy w Bursztyn OS 64-bit ");
     wypisz_log(" Polski System Operacyjny");
     wypisz_log(" Github: Programista-Art/BursztynOS ");
-    wypisz_log(" Twórca systemu Dymitr Wygowski (Programista Art) ");
     wypisz_log("==================================================");
 
     uint64_t ram_mb = (najwyzsza_znaleziona_ramka * 4096) / (1024 * 1024);
@@ -114,6 +110,28 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     wypisz_log(ram_msg);
 
     wypisz_log("[VMM] Paging 4-poziomowy aktywowany. Tablice przebudowane.");
+
+    // --- INICJALIZACJA STERTY JĄDRA (HEAP) ---
+    uint64_t adres_wirtualny_sterty = 0x500000000ULL; // Bezpieczny adres wysoko w pamięci (20 GB)
+    uint64_t rozmiar_sterty = 16 * 1024 * 1024;       // 16 MB na stertę
+
+    for (uint64_t i = 0; i < rozmiar_sterty; i += 4096) {
+        void* wolna_ramka = ZaalokujRamke();
+        if (wolna_ramka) {
+            ZmapujStrone((void*)(adres_wirtualny_sterty + i), wolna_ramka, 0b00000011); // Present + Writable
+        }
+    }
+    inicjalizuj_sterte_jadra((void*)adres_wirtualny_sterty, rozmiar_sterty);
+    wypisz_log("[HEAP] Alokator Pamieci (Sterta 16 MB) gotowy! Operatory new/delete aktywne.");
+
+    /*
+     * mbedTLS korzysta z osobnej, statycznej puli 256 KiB zdefiniowanej w
+     * mbedtls_port.cpp. Bez tej inicjalizacji mbedtls_calloc() zwraca nullptr,
+     * a mbedtls_ssl_setup() konczy sie bledem -0x7F00
+     * (MBEDTLS_ERR_SSL_ALLOC_FAILED).
+     */
+    inicjalizuj_mbedtls();
+    wypisz_log("[KRYPTO] Pula pamieci mbedTLS 256 KiB gotowa.");
 
     inicjalizuj_apic();
     wypisz_log("[APIC] Kontroler przerwan (LAPIC/IOAPIC) uruchomiony.");
@@ -132,12 +150,9 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     wypisz_log("[SIEC] Stos TCP/IP (DHCP, ARP, ICMP, DNS) w pelni operacyjny.");
 
     // --- INICJALIZACJA KARTY DŹWIĘKOWEJ ---
-    extern bool inicjalizuj_hda();
-    extern bool hda_test_ton(uint32_t czestotliwosc_hz, uint32_t czas_ms);
-    
     if (inicjalizuj_hda()) {
         wypisz_log("[HDA] Karta wykryta poprawnie, odtwarzam dzwiek startowy!");
-        // hda_test_ton(880, 500);
+        hda_test_ton(880, 500);
     }
 
     // --- WIRTUALIZACJA I DRZEWIASTY SYSTEM PLIKÓW ---
@@ -156,9 +171,9 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     utworz_katalog("/jadro");
     utworz_katalog("/system");
     utworz_katalog("/programy");
-    utworz_katalog("/programy/notatnik.cebula"); 
+    utworz_katalog("/programy/notatnik.cebula");
     utworz_katalog("/programy/kalkulator.cebula"); 
-    utworz_katalog("/programy/przegladarka.cebula");
+    utworz_katalog("/programy/przegladarka.cebula"); 
     utworz_katalog("/uslugi");
     utworz_katalog("/sterowniki");
     utworz_katalog("/uzytkownicy");
@@ -182,6 +197,35 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     uint64_t shell_rozmiar = (uint64_t)(_binary_shell_bin_end - _binary_shell_bin_start);
     zapisz_do_pliku("/shell.bur", (const char*)_binary_shell_bin_start, shell_rozmiar);
     wypisz_log("[BSP] Wbudowana Powloka gotowa do odczytu z dysku.");
+
+
+    uint32_t przegladarka_rozmiar = (uint32_t)(_binary_przegladarka_bin_end - _binary_przegladarka_bin_start);
+    if(przegladarka_rozmiar < 24576) przegladarka_rozmiar = 24576; 
+
+    //Przegladarka
+    // utworz_katalog("/programy");
+    // utworz_katalog("/programy/przegladarka.cebula");
+    // --- WDRAŻANIE PACZKI APLIKACJI (PRZEGLĄDARKA HUSSAR) ---
+    // =========================================================
+    const char* manifest_przegladarki = 
+        "nazwa = \"Hussar\"\n"
+        "autor = \"Programista Art\"\n"
+        "wersja = \"0.1\"\n"
+        "poziom_zaufania = 4\n"
+        "plik_startowy = \"przegladarka.bur\"\n"
+        "uprawnienia = [\n"
+        "    \"okna\",\n"
+        "    \"siec\",\n"
+        "    \"pliki_czytaj\"\n"
+        "]\n";
+        
+    int len_manifest_p = 0;
+    while (manifest_przegladarki[len_manifest_p] != '\0') len_manifest_p++;
+
+
+    utworz_plik("/programy/przegladarka.cebula/przegladarka.bur");
+    zapisz_do_pliku("/programy/przegladarka.cebula/przegladarka.bur", _binary_przegladarka_bin_start, przegladarka_rozmiar);
+    wypisz_log("[BSP] Przeglądarka Hussar zainstalowana jako paczka .cebula!");
 
     // =========================================================
     // --- WDRAŻANIE PACZKI APLIKACJI (NOTATNIK.CEBULA) ---
@@ -212,37 +256,6 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
     utworz_plik("/programy/notatnik.cebula/notatnik.bur");
     zapisz_do_pliku("/programy/notatnik.cebula/notatnik.bur", (const char*)_binary_notatnik_bin_start, notatnik_rozmiar);
     wypisz_log("[BSP] Aplikacja Notatnik zainstalowana jako paczka .cebula!");
-
-
-// =========================================================
-    // --- WDRAŻANIE PACZKI APLIKACJI (PRZEGLĄDARKA HUSSAR) ---
-    // =========================================================
-    const char* manifest_przegladarki = 
-        "nazwa = \"Hussar\"\n"
-        "autor = \"Programista Art\"\n"
-        "wersja = \"0.1\"\n"
-        "poziom_zaufania = 4\n"
-        "plik_startowy = \"przegladarka.bur\"\n"
-        "uprawnienia = [\n"
-        "    \"okna\",\n"
-        "    \"siec\",\n"
-        "    \"pliki_czytaj\"\n"
-        "]\n";
-        
-    int len_manifest_p = 0;
-    while (manifest_przegladarki[len_manifest_p] != '\0') len_manifest_p++;
-
-    utworz_plik("/programy/przegladarka.cebula/opis.aplikacji");
-    zapisz_do_pliku("/programy/przegladarka.cebula/opis.aplikacji", manifest_przegladarki, len_manifest_p);
-
-    // Padding pliku zapobiegający nadpisywaniu
-    uint64_t przegladarka_rozmiar = (uint64_t)(_binary_przegladarka_bin_end - _binary_przegladarka_bin_start);
-    if(przegladarka_rozmiar < 24576) przegladarka_rozmiar = 24576; 
-    
-    // Instalacja pliku wykonywalnego do folderu paczki
-    utworz_plik("/programy/przegladarka.cebula/przegladarka.bur");
-    zapisz_do_pliku("/programy/przegladarka.cebula/przegladarka.bur", (const char*)_binary_przegladarka_bin_start, przegladarka_rozmiar);
-    wypisz_log("[BSP] Przeglądarka Hussar zainstalowana jako paczka .cebula!");
 
     // =========================================================
     // --- WDRAŻANIE PACZKI APLIKACJI (KALKULATOR.CEBULA) ---

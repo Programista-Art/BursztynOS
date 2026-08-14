@@ -7,10 +7,6 @@
 #include "czcionki/extronic16B_unicode.h"
 #include "sterowniki/grafika/uefi_gop.h"
 
-// --- ŁATKI DLA BARE-METAL C++ (Brak stdlibc++) ---
-void operator delete(void*, unsigned long) {}
-void operator delete(void*) {}
-
 // Własna definicja "Placement New". 
 // Zmusza C++ do zbudowania vtable klasy pod wskazanym bezpiecznym adresem w pamięci RAM.
 inline void* operator new(unsigned long, void* p) { return p; }

@@ -7,10 +7,13 @@
 #include "mbedtls/ssl.h"
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/entropy.h"
-#include "mbedtls/x509_crt.h"
 #include "mbedtls/error.h"
 
 static bool ostatni_certyfikat_zaufany = false;
+
+// Liczba bajtow ciala ostatniej odpowiedzi. Zmienna nalezy do stosu TCP i
+// jest uzywana m.in. przez warstwe syscalli podczas zapisu pobranego pliku.
+extern uint32_t tcp_zapisano_bajtow;
 
 void wypisz_blad_mbedtls(int ret) {
     char buf[32] = "[TLS] Blad: -0x0000";
@@ -52,41 +55,6 @@ static void tls_log_blad(const char* etap, int kod) {
     wypisz_log(log);
 }
 
-// ISRG Root X1 (Let's Encrypt). Kolejne korzenie mozna dopisac do tego
-// lancucha PEM bez zmian w kodzie TLS.
-static const char zaufane_ca[] =
-"-----BEGIN CERTIFICATE-----\n"
-"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\n"
-"-----END CERTIFICATE-----\n";
-
 extern "C" bool kernel_tls_certyfikat_zaufany() {
     return ostatni_certyfikat_zaufany;
 }
@@ -123,6 +91,7 @@ extern "C" bool kernel_siec_pobierz_https(uint8_t* cel_ip, const char* domena,
                                             uint32_t max_dlugosc) {
     if (!cel_ip || !domena || !sciezka || !bufor || max_dlugosc < 2) return false;
     ostatni_certyfikat_zaufany = false;
+    tcp_zapisano_bajtow = 0;
     for (uint32_t i = 0; i < max_dlugosc; i++) bufor[i] = 0;
 
     if (!tcp_gniazdo_polacz(cel_ip, 443)) {
@@ -134,12 +103,10 @@ extern "C" bool kernel_siec_pobierz_https(uint8_t* cel_ip, const char* domena,
     mbedtls_ssl_config config;
     mbedtls_ctr_drbg_context drbg;
     mbedtls_entropy_context entropy;
-    mbedtls_x509_crt magazyn_ca;
     mbedtls_ssl_init(&ssl);
     mbedtls_ssl_config_init(&config);
     mbedtls_ctr_drbg_init(&drbg);
     mbedtls_entropy_init(&entropy);
-    mbedtls_x509_crt_init(&magazyn_ca);
 
     bool sukces = false;
     char zadanie[512] = {0};
@@ -147,6 +114,7 @@ extern "C" bool kernel_siec_pobierz_https(uint8_t* cel_ip, const char* domena,
     uint32_t dlugosc_zadania = 0;
     uint32_t odebrano = 0;
     uint32_t puste_proby = 0;
+    uint32_t puste_proby_zapisu = 0;
     const unsigned char personalizacja[] = "BursztynOS-Hussar-TLS";
     int wynik = mbedtls_ctr_drbg_seed(&drbg, mbedtls_entropy_func, &entropy,
                                      personalizacja, sizeof(personalizacja) - 1);
@@ -162,17 +130,10 @@ extern "C" bool kernel_siec_pobierz_https(uint8_t* cel_ip, const char* domena,
         goto koniec;
     }
 
-    // Bez magazynu CA nadal sprawdzamy nazwę hosta i czytamy cały łańcuch X.509.
-    // Flaga zaufania pozostaje fałszywa, dopóki łańcuch nie ma zaufanego korzenia.
-    // Tryb diagnostyczny: bledny czas RTC lub brak CA nie przerywa handshake'u.
-    mbedtls_ssl_conf_authmode(&config, MBEDTLS_SSL_VERIFY_OPTIONAL);
-    wynik = mbedtls_x509_crt_parse(&magazyn_ca, (const unsigned char*)zaufane_ca,
-                                   sizeof(zaufane_ca));
-    if (wynik < 0) {
-        tls_log_blad("parsera certyfikatu CA", wynik);
-        goto koniec;
-    }
-    mbedtls_ssl_conf_ca_chain(&config, &magazyn_ca, nullptr);
+    // Tymczasowy tryb bez Trust Store: transmisja jest szyfrowana, lecz
+    // tozsamosc serwera nie jest weryfikowana. Nie wolno oznaczac takiej
+    // sesji jako zaufanej; docelowo nalezy przywrocic VERIFY_REQUIRED.
+    mbedtls_ssl_conf_authmode(&config, MBEDTLS_SSL_VERIFY_NONE);
     mbedtls_ssl_conf_rng(&config, mbedtls_ctr_drbg_random, &drbg);
     wynik = mbedtls_ssl_setup(&ssl, &config);
     if (wynik != 0) {
@@ -187,7 +148,7 @@ extern "C" bool kernel_siec_pobierz_https(uint8_t* cel_ip, const char* domena,
     }
     mbedtls_ssl_set_bio(&ssl, nullptr, tls_wyslij, tls_odbierz, nullptr);
 
-    wypisz_log("[TLS] ClientHello: TLS 1.2, SNI i walidacja X.509...");
+    wypisz_log("[TLS] ClientHello: TLS 1.2, SNI, bez weryfikacji CA...");
     for (uint32_t proby = 0; proby < 10000000; proby++) {
         wynik = mbedtls_ssl_handshake(&ssl);
         if (wynik == 0) break;
@@ -201,12 +162,11 @@ extern "C" bool kernel_siec_pobierz_https(uint8_t* cel_ip, const char* domena,
         // czeka, musimy recznie przenosic ramki E1000 do stosu TCP.
         tls_pompuj_siec();
     }
-    if (wynik != 0 || mbedtls_ssl_get_peer_cert(&ssl) == nullptr) goto koniec;
+    if (wynik != 0) goto koniec;
 
-    ostatni_certyfikat_zaufany = mbedtls_ssl_get_verify_result(&ssl) == 0;
-    wypisz_log(ostatni_certyfikat_zaufany
-        ? "[X509] Lancuch i nazwa hosta sa zaufane."
-        : "[X509] Certyfikat odczytany; brak zaufanego korzenia CA w systemie.");
+    // VERIFY_NONE oznacza, ze wynik sesji nigdy nie dowodzi zaufania X.509.
+    ostatni_certyfikat_zaufany = false;
+    wypisz_log("[TLS] Kanal szyfrowany; certyfikat serwera niezweryfikowany.");
 
     tekst_dodaj(zadanie, sizeof(zadanie), "GET ");
     tekst_dodaj(zadanie, sizeof(zadanie), sciezka);
@@ -218,10 +178,17 @@ extern "C" bool kernel_siec_pobierz_https(uint8_t* cel_ip, const char* domena,
     while (wyslano < dlugosc_zadania) {
         wynik = mbedtls_ssl_write(&ssl, (const unsigned char*)zadanie + wyslano,
                                   dlugosc_zadania - wyslano);
-        if (wynik > 0) wyslano += (uint32_t)wynik;
+        if (wynik > 0) {
+            wyslano += (uint32_t)wynik;
+            puste_proby_zapisu = 0;
+        }
         else if (wynik != MBEDTLS_ERR_SSL_WANT_READ && wynik != MBEDTLS_ERR_SSL_WANT_WRITE) {
             wypisz_blad_mbedtls(wynik);
             tls_log_blad("ssl_write", wynik);
+            goto koniec;
+        }
+        else if (++puste_proby_zapisu >= 10000000) {
+            wypisz_log("[TLS] Timeout podczas wysylania zadania HTTPS.");
             goto koniec;
         }
 
@@ -229,10 +196,21 @@ extern "C" bool kernel_siec_pobierz_https(uint8_t* cel_ip, const char* domena,
         tls_pompuj_siec();
     }
 
+    /*
+     * Zwracamy do Ring 3 pelna, surowa odpowiedz HTTP po odszyfrowaniu TLS:
+     * linie statusu, wszystkie naglowki, pusta linie oraz cialo dokumentu.
+     * Interpretacja statusu i odciecie naglowkow naleza do przegladarki.
+     * Jeden bajt bufora rezerwujemy na terminator tekstu C.
+     */
     while (odebrano + 1 < max_dlugosc && puste_proby < 10000000) {
-        wynik = mbedtls_ssl_read(&ssl, (unsigned char*)bufor + odebrano,
-                                 max_dlugosc - odebrano - 1);
-        if (wynik > 0) { odebrano += (uint32_t)wynik; puste_proby = 0; }
+        const uint32_t pozostalo = max_dlugosc - odebrano - 1;
+        wynik = mbedtls_ssl_read(&ssl,
+                                 reinterpret_cast<unsigned char*>(bufor) + odebrano,
+                                 pozostalo);
+        if (wynik > 0) {
+            odebrano += static_cast<uint32_t>(wynik);
+            puste_proby = 0;
+        }
         else if (wynik == MBEDTLS_ERR_SSL_WANT_READ || wynik == MBEDTLS_ERR_SSL_WANT_WRITE) {
             puste_proby++;
             tls_pompuj_siec();
@@ -245,8 +223,19 @@ extern "C" bool kernel_siec_pobierz_https(uint8_t* cel_ip, const char* domena,
         }
     }
     bufor[odebrano] = 0;
+    tcp_zapisano_bajtow = odebrano;
     sukces = odebrano > 0;
-    if (tcp_gniazdo_otwarte()) mbedtls_ssl_close_notify(&ssl);
+
+    // close_notify takze moze wymagac oproznienia kolejki TCP.
+    if (tcp_gniazdo_otwarte()) {
+        for (uint32_t proby = 0; proby < 100000; proby++) {
+            wynik = mbedtls_ssl_close_notify(&ssl);
+            if (wynik == 0) break;
+            if (wynik != MBEDTLS_ERR_SSL_WANT_READ &&
+                wynik != MBEDTLS_ERR_SSL_WANT_WRITE) break;
+            tls_pompuj_siec();
+        }
+    }
 
 koniec:
     if (!sukces) wypisz_log("[TLS] Handshake lub transmisja HTTPS nie powiodla sie.");
@@ -254,7 +243,6 @@ koniec:
     mbedtls_ssl_config_free(&config);
     mbedtls_ctr_drbg_free(&drbg);
     mbedtls_entropy_free(&entropy);
-    mbedtls_x509_crt_free(&magazyn_ca);
     tcp_gniazdo_zamknij();
     return sukces;
 }

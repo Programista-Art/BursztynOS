@@ -20,6 +20,13 @@ System uruchamia interaktywny pulpit z paskiem zadań, rozwijanym menu i wsparci
 ![Pulpit Bursztyna 3](image/pulpit/3.png)
 ![Pulpit Bursztyna 4](image/pulpit/4.png)
 
+## Przeglądarka Hussar ##
+
+![Przeglądarka Hussar](image/hussar/Hussar-1.png)
+![Przeglądarka Hussar](image/hussar/Hussar-2.png)
+![Przeglądarka Hussar](image/hussar/Hussar-3.png)
+![Przeglądarka Hussar](image/hussar/Hussar-4.png)
+
 **Aplikacje użytkowe (Paczki .cebula)**
 Programy w Bursztyn OS są odizolowane i posiadają własne manifesty uprawnień. Aplikacje możesz uruchamiać klikając w ikony na pulpicie lub wywołując je z terminala (np. `uruchom /programy/notatnik.cebula/notatnik.bur`).
 

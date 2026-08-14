@@ -33,7 +33,7 @@ OBJS = boot.o gdt.o tss.o apic.o idt.o przerwania.o e1000.o siec.o hda.o klawiat
        przegladarka_blob.o mysz.o zegar-rtc.o pmm.o vmm.o psf.o grafika.o syscall.o \
        syscalls.o pci.o ahci.o ring3.o notatnik_blob.o kalkulator_blob.o loader.o \
        kernel.o shell_blob.o menedzer_okien_blob.o uefi_gop.o bursztyn_gui.o dzwiek_blob.o \
-       mbedtls_port.o tls.o $(MBEDTLS_OBJS)
+       heap.o mbedtls_port.o tls.o $(MBEDTLS_OBJS)
 
 # Główny cel domyślny
 all: system_operacyjny.bin

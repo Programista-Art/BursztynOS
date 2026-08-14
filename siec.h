@@ -14,7 +14,7 @@
 extern "C" {
     bool kernel_siec_dns(const char* domena, uint8_t* wyjsciowy_ip);
     bool kernel_siec_pobierz_http(uint8_t* cel_ip, const char* domena, const char* sciezka, char* bufor, uint32_t max_dlugosc);
-    bool kernel_siec_pobierz_https(uint8_t* cel_ip, const char* domena, const char* sciezka, char* bufor, uint32_t max_dlugosc);
+    bool kernel_siec_pobierz_https(uint8_t cel_ip[4], const char* domena, const char* sciezka, char* bufor, uint32_t max_dlugosc);
     bool kernel_tls_certyfikat_zaufany();
 
     bool tcp_gniazdo_polacz(uint8_t* cel_ip, uint16_t port);
