@@ -102,6 +102,11 @@ extern "C" void skanuj_magistrale_pci() {
             else if (klasa == 0x03) pci_str_dopisz(log_msg, "Karta Graficzna (VGA/3D)\n");
             else if (klasa == 0x0C && podklasa == 0x03) pci_str_dopisz(log_msg, "Kontroler portow USB\n");
             else if (klasa == 0x06) pci_str_dopisz(log_msg, "Mostek systemowy (Bridge)\n");
+            else if (klasa == 0x04) {
+                if (podklasa == 0x01) pci_str_dopisz(log_msg, "Karta Dzwiekowa (AC97)\n");
+                else if (podklasa == 0x03) pci_str_dopisz(log_msg, "Karta Dzwiekowa (Intel HD Audio)\n");
+                else pci_str_dopisz(log_msg, "Urządzenie Multimedialne\n");
+            }
             else pci_str_dopisz(log_msg, "Nierozpoznany sprzet\n");
 
             // Dopisanie linii do globalnego raportu

@@ -20,18 +20,18 @@ przejdz_do_ring3:
     mov %ax, %ds
     mov %ax, %es
 
-    pushq $0x1B      /* SS (Segment Stosu Ring 3) */
-    pushq %rsi       /* RSP (Szczyt stosu Ring 3) */
+    pushq $0x1B      
+    pushq %rsi       
     
     pushfq
     popq %rax
-    orq $0x200, %rax /* Włącz flagę przerwań (IF) */
-    pushq %rax       /* RFLAGS */
+    orq $0x200, %rax
+    pushq %rax       
     
-    pushq $0x23      /* CS (Segment Kodu Ring 3) */
-    pushq %rdi       /* RIP (Punkt wejścia) */
+    pushq $0x23      
+    pushq %rdi       
 
-    /* Jeśli z_syscalla == true, wykonaj SWAPGS aby przywrócić GS użytkownika */
+    /* TESTUJ CZY WYMAGANY JEST SWAPGS PRZED SKOKIEM */
     test %rdx, %rdx
     jz brak_swapgs
     swapgs

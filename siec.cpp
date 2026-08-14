@@ -1,6 +1,8 @@
 #include "siec.h"
 #include "e1000.h"
 
+
+
 void wypisz_log(const char* tekst);
 extern "C" void e1000_obsluz_odbior();
 
@@ -195,7 +197,7 @@ extern "C" void bws_siec_ping(uint8_t ip1, uint8_t ip2, uint8_t ip3, uint8_t ip4
     if (!odebrano_pong) wypisz_log("[SIEC] Upinal czas oczekiwania na odpowiedz (Request timed out).");
 }
 
-extern "C" bool bws_siec_dns(const char* domena, uint8_t* wyjsciowy_ip) {
+extern "C" bool kernel_siec_dns(const char* domena, uint8_t* wyjsciowy_ip) {
     if (nasz_ip[0] == 0) return false;
     uint8_t serwer_dns[4] = {8, 8, 8, 8}; uint8_t docelowy_mac[6];
     if (!rozwiaz_adres_mac(serwer_dns, docelowy_mac)) return false; 
@@ -260,6 +262,10 @@ char* tcp_bufor_odbiorczy = nullptr;
 uint32_t tcp_zapisano_bajtow = 0;
 uint32_t tcp_max_bajtow = 0;
 bool tcp_pomin_naglowki_http = false;
+static uint8_t tcp_bufor_gniazda[65536];
+static volatile uint32_t tcp_gniazdo_poczatek = 0;
+static volatile uint32_t tcp_gniazdo_koniec = 0;
+static bool tcp_tryb_gniazda = false;
 
 // Wewnętrzna funkcja łącząca (Multiplexer) dla pakietów TCP
 void wyslij_pakiet_tcp(uint8_t flagi, uint8_t* payload, uint16_t payload_len) {
@@ -310,8 +316,68 @@ void wyslij_pakiet_tcp(uint8_t flagi, uint8_t* payload, uint16_t payload_len) {
     e1000_wyslij_pakiet(pakiet, sizeof(ethernet_header) + 20 + sizeof(tcp_header) + payload_len);
 }
 
+extern "C" bool tcp_gniazdo_polacz(uint8_t* cel_ip, uint16_t port) {
+    if (!cel_ip || nasz_ip[0] == 0 || stan_tcp != TCP_CLOSED) return false;
+    if (!rozwiaz_adres_mac(cel_ip, tcp_cel_mac)) return false;
+    skopiuj_ip(tcp_cel_ip, cel_ip);
+    tcp_cel_port = port;
+    if (++tcp_nasz_port < 49152) tcp_nasz_port = 50000;
+    tcp_nasz_seq = 1000;
+    tcp_nasz_ack = 0;
+    tcp_gniazdo_poczatek = tcp_gniazdo_koniec = 0;
+    tcp_tryb_gniazda = true;
+    tcp_bufor_odbiorczy = nullptr;
+    stan_tcp = TCP_SYN_SENT;
+    wyslij_pakiet_tcp(TCP_SYN, nullptr, 0);
+    for (uint32_t timeout = 0; timeout < 50000000; timeout++) {
+        e1000_obsluz_odbior();
+        if (stan_tcp == TCP_ESTABLISHED) return true;
+        asm volatile("pause");
+    }
+    stan_tcp = TCP_CLOSED;
+    tcp_tryb_gniazda = false;
+    return false;
+}
+
+extern "C" int tcp_gniazdo_wyslij(const uint8_t* dane, uint32_t dlugosc) {
+    if (!dane || stan_tcp != TCP_ESTABLISHED) return -1;
+    uint32_t wyslano = 0;
+    while (wyslano < dlugosc) {
+        uint16_t fragment = (dlugosc - wyslano > 1400) ? 1400 : (uint16_t)(dlugosc - wyslano);
+        wyslij_pakiet_tcp(TCP_PSH | TCP_ACK, (uint8_t*)dane + wyslano, fragment);
+        tcp_nasz_seq += fragment;
+        wyslano += fragment;
+    }
+    return (int)wyslano;
+}
+
+extern "C" int tcp_gniazdo_odbierz(uint8_t* dane, uint32_t maksymalna_dlugosc) {
+    if (!dane || maksymalna_dlugosc == 0) return -1;
+    e1000_obsluz_odbior();
+    uint32_t dostepne = tcp_gniazdo_koniec - tcp_gniazdo_poczatek;
+    if (dostepne == 0) return stan_tcp == TCP_CLOSED ? 0 : -2;
+    uint32_t n = dostepne < maksymalna_dlugosc ? dostepne : maksymalna_dlugosc;
+    for (uint32_t i = 0; i < n; i++) dane[i] = tcp_bufor_gniazda[tcp_gniazdo_poczatek + i];
+    tcp_gniazdo_poczatek += n;
+    if (tcp_gniazdo_poczatek == tcp_gniazdo_koniec) tcp_gniazdo_poczatek = tcp_gniazdo_koniec = 0;
+    return (int)n;
+}
+
+extern "C" bool tcp_gniazdo_otwarte() { return stan_tcp == TCP_ESTABLISHED; }
+
+extern "C" void tcp_gniazdo_zamknij() {
+    if (stan_tcp == TCP_ESTABLISHED) {
+        wyslij_pakiet_tcp(TCP_FIN | TCP_ACK, nullptr, 0);
+        tcp_nasz_seq++;
+    }
+    stan_tcp = TCP_CLOSED;
+    tcp_tryb_gniazda = false;
+    tcp_bufor_odbiorczy = nullptr;
+    tcp_gniazdo_poczatek = tcp_gniazdo_koniec = 0;
+}
+
 // Główna publiczna funkcja Jądra wywoływana z powłoki jako HTTP Downloader
-extern "C" bool bws_siec_pobierz_http(uint8_t cel_ip[4], const char* domena, const char* sciezka, char* bufor, uint32_t max_dlugosc) {
+extern "C" bool kernel_siec_pobierz_http(uint8_t cel_ip[4], const char* domena, const char* sciezka, char* bufor, uint32_t max_dlugosc) {
     if (nasz_ip[0] == 0) return false;
 
     if (!rozwiaz_adres_mac(cel_ip, tcp_cel_mac)) {
@@ -329,7 +395,8 @@ extern "C" bool bws_siec_pobierz_http(uint8_t cel_ip[4], const char* domena, con
     tcp_max_bajtow = max_dlugosc;
     tcp_zapisano_bajtow = 0;
     tcp_dane_odebrane = false;
-    tcp_pomin_naglowki_http = false;
+    // Hussar analizuje kod statusu i sam oddziela naglowki od tresci.
+    tcp_pomin_naglowki_http = true;
     for(uint32_t i=0; i<max_dlugosc; i++) bufor[i] = 0;
 
     // Etap 1: Inicjacja Połączenia (SYN)
@@ -509,6 +576,28 @@ void obsluz_pakiet_sieciowy(uint8_t* pakiet, uint16_t dlugosc) {
                     
                     if (payload_len > 0) {
                         uint8_t* payload = (uint8_t*)tcp + tcp_hdr_len;
+                        uint32_t numer_seq = NTOHL(tcp->numer_sekwencyjny);
+
+                        if (numer_seq != tcp_nasz_ack) {
+                            wyslij_pakiet_tcp(TCP_ACK, nullptr, 0);
+                            return;
+                        }
+
+                        if (tcp_tryb_gniazda) {
+                            if (tcp_gniazdo_koniec + payload_len > sizeof(tcp_bufor_gniazda) &&
+                                tcp_gniazdo_poczatek > 0) {
+                                uint32_t pozostalo = tcp_gniazdo_koniec - tcp_gniazdo_poczatek;
+                                for (uint32_t i = 0; i < pozostalo; i++)
+                                    tcp_bufor_gniazda[i] = tcp_bufor_gniazda[tcp_gniazdo_poczatek + i];
+                                tcp_gniazdo_poczatek = 0;
+                                tcp_gniazdo_koniec = pozostalo;
+                            }
+                            uint32_t wolne = sizeof(tcp_bufor_gniazda) - tcp_gniazdo_koniec;
+                            uint32_t kopiuj = payload_len < wolne ? payload_len : wolne;
+                            for (uint32_t i = 0; i < kopiuj; i++)
+                                tcp_bufor_gniazda[tcp_gniazdo_koniec + i] = payload[i];
+                            tcp_gniazdo_koniec += kopiuj;
+                        }
                         
                         // Przepisujemy odebrane bajty z karty sieciowej do bufora transferowego (wirtualnego dysku)
                         if (tcp_bufor_odbiorczy && tcp_zapisano_bajtow < tcp_max_bajtow) {
@@ -533,14 +622,14 @@ void obsluz_pakiet_sieciowy(uint8_t* pakiet, uint16_t dlugosc) {
                         }
                         
                         // Zawsze musimy pokwitować serwerowi odebranie pakietu danych (ACK), inaczem zacznie nam je retransmitować!
-                        tcp_nasz_ack = NTOHL(tcp->numer_sekwencyjny) + payload_len;
+                        tcp_nasz_ack = numer_seq + payload_len;
                         wyslij_pakiet_tcp(TCP_ACK, nullptr, 0);
                     }
                     
                     // Serwer mówi, że skończył wysyłanie (FIN) - zamykamy!
                     if (flagi & TCP_FIN) {
                         wypisz_log("[TCP] Transmisja zakonczona. Serwer inicjuje rozlaczenie (FIN).");
-                        tcp_nasz_ack = NTOHL(tcp->numer_sekwencyjny) + 1;
+                        tcp_nasz_ack++;
                         wyslij_pakiet_tcp(TCP_ACK, nullptr, 0);
                         stan_tcp = TCP_CLOSED;
                     }

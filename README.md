@@ -149,7 +149,7 @@ Dlaczego? Jeśli w CMD wpiszesz ścieżkę ze spacją bez cudzysłowów, konsola
 
 Rozwiązanie: Bezwzględnie pamiętaj o znakach " na początku i końcu ścieżki do QEMU.
 
-# Jak uruchomić Burstzyn w trybie UEFI (OVMF) z UEFI GOP w power shell w QEMU na Windows 11 od wersji pliki iso BursztynOS v1.0.0.5
+# Jak uruchomić Bursztyn w trybie UEFI (OVMF) z UEFI GOP w power shell w QEMU na Windows 11 od wersji pliki iso BursztynOS v1.0.0.5
 ```
 & "C:\Program Files\qemu\qemu-system-x86_64.exe" `
     -drive if=pflash,format=raw,unit=0,readonly=on,file="C:\Program Files\qemu\share\edk2-x86_64-code.fd" `
@@ -162,12 +162,12 @@ Rozwiązanie: Bezwzględnie pamiętaj o znakach " na początku i końcu ścieżk
     -serial stdio
 ```
 
-# Jak uruchomić Burstzyn w trybie Legacy BIOS + QEMU VGA w power shell w QEMU na Windows 11 od wersji pliki iso BursztynOS v1.0.0.5
+# Jak uruchomić Bursztyn w trybie Legacy BIOS + QEMU VGA w power shell w QEMU na Windows 11 od wersji pliki iso BursztynOS v1.0.0.5
 ```
 & "C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom BursztynOS.iso -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -vga std -serial stdio
 ```
 
-# Jak uruchomić system Burstzyn w QEMU na Linux Mint
+# Jak uruchomić system Bursztyn w QEMU na Linux Mint
 ## Krok 1: Otwórz terminal w folderze z plikiem
 Najszybsza metoda w systemach takich jak Linux Mint:
 
@@ -191,7 +191,7 @@ qemu-system-x86_64 -cdrom BursztynOS.iso -m 2G
 ```
 qemu-system-x86_64 -cdrom BursztynOS.iso -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -serial stdio
 ```
-# Jak uruchomić Burstzyn w trybie UEFI (OVMF) z UEFI GOP w QEMU na Linux Mint od wersji pliki iso BursztynOS v1.0.0.5
+# Jak uruchomić Bursztyn w trybie UEFI (OVMF) z UEFI GOP w QEMU na Linux Mint od wersji pliki iso BursztynOS v1.0.0.5
 ```
 qemu-system-x86_64 \
     -bios /usr/share/qemu/OVMF.fd \
@@ -204,7 +204,7 @@ qemu-system-x86_64 \
     -serial stdio
 ```
 
-# Jak uruchomić Burstzyn w trybie Legacy BIOS + QEMU VGA w QEMU na Linux Mint od wersji pliki iso BursztynOS v1.0.0.5
+# Jak uruchomić Bursztyn w trybie Legacy BIOS + QEMU VGA w QEMU na Linux Mint od wersji pliki iso BursztynOS v1.0.0.5
 ```
 qemu-system-x86_64 -cdrom BursztynOS.iso -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -vga std -serial stdio
 ```

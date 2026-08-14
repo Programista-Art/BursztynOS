@@ -7,12 +7,19 @@ static inline void wyjscie_port_bajt(uint16_t port, uint8_t wartosc) {
     asm volatile ("outb %0, %1" : : "a"(wartosc), "Nd"(port));
 }
 
-extern "C" void wypisz_na_ekranie(const char* buf);
+// Zgrupowane zewnętrzne funkcje i zmienne (żeby uniknąć problemów z linkerem C++)
+extern "C" {
+    void wypisz_na_ekranie(const char* buf);
+    void obsluga_przerwania_klawiatury();
+    void obsluga_przerwania_myszy();
+    void obsluga_przerwania_zegara();
+    void zaladuj_zaktualizowane_idt(uint64_t adres_idtr);
+    
+    extern uint64_t tablica_isr[];
+    extern volatile uint32_t* baza_lapic_wirtualna;
+}
 
-// Refaktoryzacja do snake_case dla procedur sprzętowych
-extern "C" void obsluga_przerwania_klawiatury();
-extern "C" void obsluga_przerwania_myszy();
-extern "C" void obsluga_przerwania_zegara();
+#define LAPIC_EOI_OFFSET 0x0B0
 
 struct DeskryptorIDT {
     uint16_t offset_czesc1;
@@ -29,11 +36,8 @@ struct RejestrIDT {
     uint64_t adres;
 } __attribute__((packed));
 
-struct DeskryptorIDT tablica_idt[256];
-struct RejestrIDT wskaznik_idtr;
-
-extern "C" void zaladuj_zaktualizowane_idt(uint64_t adres_idtr);
-extern uint64_t tablica_isr[];
+struct DeskryptorIDT tablica_idt[256] __attribute__((aligned(4096)));
+struct RejestrIDT wskaznik_idtr __attribute__((aligned(16)));
 
 void UstawWpisIDT(uint8_t wektor, uint64_t procedura_isr, uint8_t flagi) {
     tablica_idt[wektor].offset_czesc1     = procedura_isr & 0xFFFF;
@@ -51,9 +55,6 @@ struct RejestryStanowe {
     uint64_t wektor_przerwania, kod_bledu;
     uint64_t adres_powrotu, rejestr_cs, rflags, stary_rsp, stary_ss;
 } __attribute__((packed));
-
-extern volatile uint32_t* baza_lapic_wirtualna;
-#define LAPIC_EOI_OFFSET 0x0B0
 
 void UintDoHexStr(uint64_t wartosc, char* bufor) {
     const char* cyfry = "0123456789ABCDEF";

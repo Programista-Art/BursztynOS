@@ -1,3 +1,9 @@
+/*
+ * Mechanizm: Global Descriptor Table (GDT) dla x86_64
+ * Opis: Definiuje podstawowe segmenty pamięci dla Jądra i Aplikacji.
+ * Układ ściśle dostosowany pod wymogi sprzętowe instrukcji SYSCALL/SYSRET!
+ */
+
 #include <stdint.h>
 
 // Struktura pojedynczego wpisu GDT (8 bajtów)
@@ -19,10 +25,12 @@ struct RejestrGDT {
 struct DeskryptorGDT tablica_gdt[7];
 struct RejestrGDT wskaznik_gdtr;
 
+// Funkcja z asemblera (przerwania.S) do przeładowania segmentów w procesorze
 extern "C" void zaladuj_zaktualizowane_gdt(uint64_t adres_gdtr);
 
-// Importujemy globalny stan TSS utworzony i zadeklarowany w pliku tss.cpp
-extern uint8_t globalny_tss; 
+// Profesjonalny import instancji TSS (bez konfliktów typów w C++)
+struct tss_wpis;
+extern struct tss_wpis globalny_tss; 
 
 void UstawWpisGDT(int numer, uint64_t baza, uint32_t limit, uint8_t dostep, uint8_t flagi) {
     tablica_gdt[numer].baza_dolna = (baza & 0xFFFF);
@@ -36,7 +44,7 @@ void UstawWpisGDT(int numer, uint64_t baza, uint32_t limit, uint8_t dostep, uint
 }
 
 extern "C" void InicjalizujGDT() {
-    // 0. Null Descriptor (Wymóg sprzętowy x86)
+    // 0. Null Descriptor (Wymóg sprzętowy procesorów x86)
     UstawWpisGDT(0, 0, 0, 0, 0);
     
     // 1. Kernel Code (Kod Jądra Ring 0) - Offset 0x08
@@ -68,5 +76,6 @@ extern "C" void InicjalizujGDT() {
     wskaznik_gdtr.rozmiar = (sizeof(struct DeskryptorGDT) * 7) - 1;
     wskaznik_gdtr.adres = (uint64_t)&tablica_gdt;
 
+    // Asembler ładuje zaktualizowaną GDT do procesora i odświeża segmenty
     zaladuj_zaktualizowane_gdt((uint64_t)&wskaznik_gdtr);
 }

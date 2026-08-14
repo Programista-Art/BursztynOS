@@ -16,7 +16,7 @@ static superblok* dysk_superblok = nullptr;
 static uint64_t calkowita_liczba_wezlow = 0;
 static uint64_t calkowita_liczba_blokow_danych = 0;
 
-#define MAX_LOADER_BUF (128 * 1024)
+#define MAX_LOADER_BUF (512 * 1024)
 static uint8_t bufor_wymiany_plikow[MAX_LOADER_BUF];
 
 // --- Przesunięcie partycji ---
@@ -538,6 +538,20 @@ extern "C" bool usun_twor(const char* sciezka) {
     bsp_zapisz_zmiany();
     return true;
 }
+
+extern "C" uint32_t rozmiar_pliku(const char* sciezka) {
+    if (!dysk_superblok || !sciezka) return 0;
+
+    char nazwa[PSF_MAX_NAZWA];
+    uint64_t id_wezla = rozwiaz_sciezke(sciezka, nazwa, false);
+    if (id_wezla == 0) return 0;
+
+    wezel_indeksowy* w = pobierz_wezel(id_wezla);
+    if (!w || w->typ != TYP_PLIK) return 0;
+
+    return (uint32_t)w->rozmiar_w_bajtach;
+}
+
 
 extern "C" bool zmien_nazwe_tworu(const char* sciezka, const char* nowa_nazwa) {
     char stara_nazwa_docelowa[PSF_MAX_NAZWA];

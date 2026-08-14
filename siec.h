@@ -11,6 +11,20 @@
 #define NTOHS(x) HTONS(x)
 #define NTOHL(x) HTONL(x)
 
+extern "C" {
+    bool kernel_siec_dns(const char* domena, uint8_t* wyjsciowy_ip);
+    bool kernel_siec_pobierz_http(uint8_t* cel_ip, const char* domena, const char* sciezka, char* bufor, uint32_t max_dlugosc);
+    bool kernel_siec_pobierz_https(uint8_t* cel_ip, const char* domena, const char* sciezka, char* bufor, uint32_t max_dlugosc);
+    bool kernel_tls_certyfikat_zaufany();
+
+    bool tcp_gniazdo_polacz(uint8_t* cel_ip, uint16_t port);
+    int tcp_gniazdo_wyslij(const uint8_t* dane, uint32_t dlugosc);
+    int tcp_gniazdo_odbierz(uint8_t* dane, uint32_t maksymalna_dlugosc);
+    void tcp_gniazdo_zamknij();
+    bool tcp_gniazdo_otwarte();
+}
+
+
 struct ethernet_header {
     uint8_t  cel_mac[6];
     uint8_t  zrodlo_mac[6];

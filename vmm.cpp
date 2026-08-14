@@ -14,6 +14,7 @@
 
 #define MASKA_INDEKSU 0x1FF
 #define MASKA_ADRESU_FIZYCZNEGO 0x000FFFFFFFFFF000ULL 
+#define MASKA_ADRESU_DUZEJ_STRONY 0x000FFFFFFFE00000ULL
 
 // Statyczne tablice dla pierwszych 4 GB. Zapewniają absolutne bezpieczeństwo 
 // przy przełączaniu trybów, bo na 100% są początkowo zmapowane przez boot.S
@@ -57,12 +58,25 @@ void ZmapujStrone(void* adres_wirtualny, void* adres_fizyczny, uint32_t flagi) {
     }
     uint64_t* w_pd = (uint64_t*)(w_pdp[wew_pdp] & MASKA_ADRESU_FIZYCZNEGO);
 
-    // ZABEZPIECZENIE: Jeśli trafiliśmy na Wielką Stronę 2MB (np. obszar 0-4 GB z InicjalizujVMM)
+    // Jeśli adres leży w istniejącym mapowaniu 2 MB, rozbijamy je na 512
+    // stron 4 KB. Samo dopisanie flag do dużej strony pozostawiało mapowanie
+    // identity i powodowało, że kod Ring 3 nadpisywał fizyczny backbuffer.
     if (w_pd[wew_pd] & FLAGA_ROZMIAR_STRONY) {
-        // Jeśli moduł grafiki nakłada flagi Cache Disable na bufor, dodajemy je do wielkiej strony!
-        w_pd[wew_pd] |= flagi;
+        uint64_t stary_wpis = w_pd[wew_pd];
+        uint64_t* nowa_pt = (uint64_t*)ZaalokujRamke();
+        if (!nowa_pt) return;
+
+        uint64_t baza_fizyczna = stary_wpis & MASKA_ADRESU_DUZEJ_STRONY;
+        uint64_t zachowane_flagi = stary_wpis &
+            (FLAGA_OBECNA | FLAGA_ZAPIS | FLAGA_UZYTKOWNIKA | 0x08 | 0x10 | 0x100 | (1ULL << 63));
+
+        for (uint64_t i = 0; i < 512; i++) {
+            nowa_pt[i] = (baza_fizyczna + i * 4096) | zachowane_flagi;
+        }
+
+        w_pd[wew_pd] = ((uint64_t)nowa_pt) | FLAGA_OBECNA | FLAGA_ZAPIS |
+                        (stary_wpis & FLAGA_UZYTKOWNIKA);
         asm volatile("invlpg (%0)" : : "r" (adres_wirtualny) : "memory");
-        return; 
     }
 
     if (!(w_pd[wew_pd] & FLAGA_OBECNA)) {

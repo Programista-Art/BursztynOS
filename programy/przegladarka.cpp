@@ -1,11 +1,15 @@
 /*
  * Przeglądarka Internetowa "Hussar" dla Bursztyn OS (Ring 3)
- * Wersja z obsługą myszy, pełnym oknem, parsowaniem HTML i skalowaniem.
+ * Wersja z obsługą myszy, inteligentnym parserem URL, skalowaniem czcionek
+ * oraz inteligentną obsługą kodów błędów HTTP.
  */
 
 #include "../bursztyn_gui.h"
 #include <stdint.h>
 #include <stdbool.h>
+
+// --- DOŁĄCZENIE NOWEGO MODUŁU OBSŁUGI BŁĘDÓW HTTP ---
+#include "http_kody.h"
 
 struct NaglowekBur {
     uint8_t  magia[4];            
@@ -25,12 +29,14 @@ extern "C" {
     struct NaglowekBur naglowek = {
         {'B', 'U', 'R', '\0'},
         (uint64_t)&_start,
-        4096,  16384, 0x601000, 
-        20480, 524288, 0x605000  // 512 KB Pamięci dla zakładek (Loader zaalokuje to w locie)
+        4096, 61440, 0x601000,
+        65536, 262144, 0x610000
     };
     
     bool bws_siec_dns(const char* domena, uint8_t* wyjsciowy_ip);
     bool bws_siec_pobierz_http(uint8_t* cel_ip, const char* domena, const char* sciezka, char* bufor, uint32_t max_dlugosc);
+    bool bws_siec_pobierz_https(uint8_t* cel_ip, const char* domena, const char* sciezka, char* bufor, uint32_t max_dlugosc);
+    bool bws_tls_certyfikat_zaufany();
 }
 
 // =========================================================================
@@ -115,7 +121,6 @@ extern "C" __attribute__((noreturn)) void _start() {
     bool przerysuj = true;
     bool odswiez_tlo = true;
 
-    // Domyślny startowy adres URL
     const char* start_url = "example.com/";
     int iter = 0; while (start_url[iter]) { zakladki[0].url[iter] = start_url[iter]; iter++; }
     zakladki[0].url[iter] = '\0';
@@ -137,7 +142,6 @@ extern "C" __attribute__((noreturn)) void _start() {
         if (klik) {
             przerysuj = true; odswiez_tlo = true;
             
-            // 1. Przyciski okna (Prawy róg)
             if (my >= okno_y + 4 && my <= okno_y + 24) {
                 if (mx >= okno_x + okno_w - 74 && mx <= okno_x + okno_w - 54) { dziala = false; } 
                 else if (mx >= okno_x + okno_w - 50 && mx <= okno_x + okno_w - 30) { 
@@ -152,12 +156,10 @@ extern "C" __attribute__((noreturn)) void _start() {
                 }
                 else if (mx >= okno_x + okno_w - 26 && mx <= okno_x + okno_w - 6) { dziala = false; } 
             }
-            // 2. Przeciąganie okna
             else if (my >= okno_y && my <= okno_y + 26 && mx >= okno_x && mx < okno_x + okno_w - 80) {
                 przeciagane = true; chwyt_x = mx - okno_x; chwyt_y = my - okno_y; w_polu_url = false;
                 ustaw_status("Przesuwanie okna...");
             }
-            // 3. Zakładki
             else if (my >= okno_y + 28 && my <= okno_y + 52) {
                 for(int i = 0; i < liczba_zakladek; i++) {
                     int tx = okno_x + 10 + (i * 110);
@@ -188,7 +190,6 @@ extern "C" __attribute__((noreturn)) void _start() {
                     }
                 }
             }
-            // 4. Pasek adresu i Idź
             else if (my >= okno_y + 56 && my <= okno_y + 92) {
                 int narzedzia_y = okno_y + 56;
                 if (mx >= okno_x + 10 && mx <= okno_x + okno_w - 210 && my >= narzedzia_y + 4 && my <= narzedzia_y + 32) {
@@ -204,7 +205,6 @@ extern "C" __attribute__((noreturn)) void _start() {
 
         if (pusc) { przeciagane = false; przerysuj = true; if(status_bufor[0]=='P') ustaw_status("Gotowy"); }
         
-        // Aktualizacja pozycji przeciąganego okna
         if (przeciagane && przytrzymany) {
             okno_x = mx - chwyt_x; okno_y = my - chwyt_y;
             if (okno_x < 0) okno_x = 0;
@@ -263,17 +263,14 @@ extern "C" void* memset(void* dest, int val, unsigned long n) {
     return dest;
 }
 
-// Nowa, niezawodna funkcja skalująca
 void wypisz_skalowane(int x, int y, uint32_t kolor, int skala, const char* text) {
     uint64_t arg_kolor_skala = ((uint64_t)skala << 32) | kolor;
     bws_wywolaj(20, (uint64_t)x, (uint64_t)y, arg_kolor_skala, (uint64_t)text);
 }
 
-// INTELEGIENTNE RYSOWANIE PRZYCISKÓW (Idealne wyśrodkowanie bez krzywego tekstu)
 void RysujPrzyciskLokalny(int x, int y, int w, int h, uint32_t bg, uint32_t fg, const char* txt) {
     gui_rysuj_prostokat(x, y, w, h, bg);
     
-    // Obliczamy fizyczną, precyzyjną szerokość napisu w pikselach
     int text_w = 0;
     int i = 0;
     while (txt[i] != '\0') {
@@ -285,11 +282,10 @@ void RysujPrzyciskLokalny(int x, int y, int w, int h, uint32_t bg, uint32_t fg, 
         }
         int sw = (int)bws_wywolaj(24, unicode);
         if (sw <= 0) sw = 8;
-        text_w += sw + 1; // szerokość znaku + 1px odstępu
+        text_w += sw + 1; 
         i += char_bytes;
     }
     
-    // Rysowanie z wyliczeniem matematycznego środka
     int px = x + (w - text_w) / 2;
     int py = y + (h - 16) / 2;
     if (py < y) py = y;
@@ -321,11 +317,10 @@ bool czy_tag(const char* s, int pos, const char* tag) {
     return true;
 }
 
-// ZAAWANSOWANY SILNIK RENDERUJĄCY HTML Z DYNAMICZNĄ SZEROKOŚCIĄ
 void rysuj_html(int px, int py, int max_szer, int max_wys, const char* tekst, uint32_t domyslny_kolor, int przewin) {
     int obecny_x = px;
     int obecny_y = py - przewin;
-    int wys_linii = 20; // Zwiększona interlinia (koniec z pionowym nachodzeniem na siebie)
+    int wys_linii = 20; 
     int skala = 1;
     uint32_t kolor = domyslny_kolor;
     bool pomin_tekst = false;
@@ -344,7 +339,7 @@ void rysuj_html(int px, int py, int max_szer, int max_wys, const char* tekst, ui
                 else if (czy_tag(tekst, i, "</h1") || czy_tag(tekst, i, "</h2")) skala = 1;
                 else if (czy_tag(tekst, i, "<p") || czy_tag(tekst, i, "</p") || czy_tag(tekst, i, "<br") || czy_tag(tekst, i, "<li") || czy_tag(tekst, i, "<div")) {
                     obecny_x = px; 
-                    obecny_y += (wys_linii * skala) + 6; // Odstęp akapitu
+                    obecny_y += (wys_linii * skala) + 6; 
                 }
             }
             while (tekst[i] != '>' && tekst[i] != '\0') i++;
@@ -361,7 +356,6 @@ void rysuj_html(int px, int py, int max_szer, int max_wys, const char* tekst, ui
             char_bytes = 2;
         }
 
-        // POPRAWKA KRYTYCZNA: Pobieramy dokładną, dynamiczną szerokość tego konkretnego znaku
         int szer_znaku = (int)bws_wywolaj(24, unicode);
         if (szer_znaku <= 0 || szer_znaku > 16) szer_znaku = 8;
         int pelna_szer = (szer_znaku + 1) * skala;
@@ -383,7 +377,6 @@ void rysuj_html(int px, int py, int max_szer, int max_wys, const char* tekst, ui
             wypisz_skalowane(obecny_x, obecny_y, kolor, skala, znak);
         }
         
-        // Zamiast sztywnego 9*skala, dodajemy faktyczną szerokość litery
         obecny_x += pelna_szer;
         i += char_bytes;
     }
@@ -395,7 +388,7 @@ void rysuj_html(int px, int py, int max_szer, int max_wys, const char* tekst, ui
 void rysuj_zwykly_tekst(int px, int py, int max_szer, int max_wys, const char* tekst, uint32_t kolor, int przewin) {
     int obecny_x = px;
     int obecny_y = py - przewin;
-    int wys_linii = 20; // Zwiększona interlinia
+    int wys_linii = 20; 
     int skala = 1;
 
     int i = 0;
@@ -409,7 +402,6 @@ void rysuj_zwykly_tekst(int px, int py, int max_szer, int max_wys, const char* t
             char_bytes = 2;
         }
 
-        // Dynamiczna szerokość dla zwykłego tekstu
         int szer_znaku = (int)bws_wywolaj(24, unicode);
         if (szer_znaku <= 0 || szer_znaku > 16) szer_znaku = 8;
         int pelna_szer = (szer_znaku + 1) * skala;
@@ -441,14 +433,12 @@ void RysujInterfejs(bool odswiez_tlo) {
         gui_rysuj_prostokat(0, ekran_h - 40, ekran_w, 40, 0x001A0B00);
         gui_rysuj_prostokat(0, ekran_h - 40, ekran_w, 2, 0x00E58A00);
         
-        // Zastępujemy biblioteczne przyciski naszą perfekcyjną funkcją
         RysujPrzyciskLokalny(10, ekran_h - 35, 80, 30, 0x00E58A00, 0x001A0B00, "Menu");
         RysujPrzyciskLokalny(100, ekran_h - 35, 140, 30, 0x004A2500, 0x00FFFFFF, "Hussar");
     }
 
     gui_rysuj_okno(okno_x, okno_y, okno_w, okno_h, "Hussar - Przegladarka WWW");
     
-    // Przyciski kontrolne okna
     RysujPrzyciskLokalny(okno_x + okno_w - 74, okno_y + 4, 20, 20, 0x00E58A00, 0x001A0B00, "-");
     RysujPrzyciskLokalny(okno_x + okno_w - 50, okno_y + 4, 20, 20, 0x00E58A00, 0x001A0B00, zmaksymalizowane ? "v" : "^");
     RysujPrzyciskLokalny(okno_x + okno_w - 26, okno_y + 4, 20, 20, 0x00AA0000, 0x00FFFFFF, "X");
@@ -484,7 +474,6 @@ void RysujInterfejs(bool odswiez_tlo) {
     gui_wypisz_tekst_kolor(okno_x + 15, narzedzia_y + 10, kolor_txt_url, zakladki[aktywna_zakladka].url);
     if (w_polu_url) {
         int url_len = dlugosc_tekstu(zakladki[aktywna_zakladka].url);
-        // Oblicz precyzyjnie szerokość wpisanego URL'a
         int px_kursora = okno_x + 15;
         for(int k=0; k<url_len; k++) {
              int sw = bws_wywolaj(24, (uint8_t)zakladki[aktywna_zakladka].url[k]);
@@ -493,7 +482,6 @@ void RysujInterfejs(bool odswiez_tlo) {
         gui_wypisz_tekst_kolor(px_kursora, narzedzia_y + 10, 0x00000000, "_");
     }
 
-    // Pasek przycisków
     RysujPrzyciskLokalny(okno_x + okno_w - 200, narzedzia_y + 4, 40, 28, 0x00AA0000, 0x00FFFFFF, "<-"); 
     RysujPrzyciskLokalny(okno_x + okno_w - 150, narzedzia_y + 4, 40, 28, 0x004A2500, 0x00FFFFFF, "O");   
     RysujPrzyciskLokalny(okno_x + okno_w - 100, narzedzia_y + 4, 90, 28, 0x00E58A00, 0x001A0B00, "Idz");
@@ -529,6 +517,7 @@ void RysujInterfejs(bool odswiez_tlo) {
     gui_odswiez();
 }
 
+// --- ZMODYFIKOWANA FUNKCJA PobierzStrone() Z OBSŁUGĄ KODÓW HTTP ---
 void PobierzStrone() {
     ustaw_status("DNS: Szukanie serwera...");
     zakladki[aktywna_zakladka].wczytana = false;
@@ -544,43 +533,88 @@ void PobierzStrone() {
     char sciezka[128] = {0};
     
     int i = 0;
-    while (zakladki[aktywna_zakladka].url[i] != '/' && zakladki[aktywna_zakladka].url[i] != '\0' && i < 63) {
-        domena[i] = zakladki[aktywna_zakladka].url[i]; i++;
+    const char* raw_url = zakladki[aktywna_zakladka].url;
+    bool uzyj_https = true;
+    
+    // Ignorowanie HTTP
+    if (raw_url[0] == 'h' && raw_url[1] == 't' && raw_url[2] == 't' && raw_url[3] == 'p' && raw_url[4] == ':' && raw_url[5] == '/' && raw_url[6] == '/') {
+        i = 7;
+        uzyj_https = false;
     }
-    domena[i] = '\0';
+    // Wykrywanie i elegancka blokada HTTPS
+    else if (raw_url[0] == 'h' && raw_url[1] == 't' && raw_url[2] == 't' && raw_url[3] == 'p' && raw_url[4] == 's' && raw_url[5] == ':' && raw_url[6] == '/' && raw_url[7] == '/') {
+        i = 8;
+        uzyj_https = true;
+    }
+
+    int d_idx = 0;
+    while (raw_url[i] != '/' && raw_url[i] != '\0' && d_idx < 63) {
+        domena[d_idx++] = raw_url[i++];
+    }
+    domena[d_idx] = '\0';
     
     int k = 0;
-    if (zakladki[aktywna_zakladka].url[i] == '/') {
-        while (zakladki[aktywna_zakladka].url[i] != '\0' && k < 127) { sciezka[k++] = zakladki[aktywna_zakladka].url[i++]; }
+    if (raw_url[i] == '/') {
+        while (raw_url[i] != '\0' && k < 127) { sciezka[k++] = raw_url[i++]; }
         sciezka[k] = '\0';
     } else { sciezka[0] = '/'; sciezka[1] = '\0'; }
 
     uint8_t ip_serwera[4] = {0,0,0,0};
     if (bws_siec_dns(domena, ip_serwera)) {
-        ustaw_status("HTTP: Pobieranie...");
+        ustaw_status(uzyj_https ? "TLS: Uscisk dloni..." : "HTTP: Pobieranie...");
         RysujInterfejs(false); 
 
         for(int c = 0; c < 32000; c++) temp_bufor[c] = 0;
 
-        if (bws_siec_pobierz_http(ip_serwera, domena, sciezka, temp_bufor, 31999)) {
-            const char* html_start = oczysc_http(temp_bufor);
-            int j = 0;
-            while(html_start[j] != '\0' && j < 31999) { zakladki[aktywna_zakladka].html[j] = html_start[j]; j++; }
-            zakladki[aktywna_zakladka].html[j] = '\0';
-            zakladki[aktywna_zakladka].to_jest_html = true;
-            ustaw_status("Gotowy");
+        // Jeśli Jądro poprawnie odebrało ramki TCP
+        bool pobrano = uzyj_https
+            ? bws_siec_pobierz_https(ip_serwera, domena, sciezka, temp_bufor, 31999)
+            : bws_siec_pobierz_http(ip_serwera, domena, sciezka, temp_bufor, 31999);
+        if (pobrano) {
+            
+            // --- ODCZYTUJEMY KOD STATUSU Z MODUŁU http_kody.h ---
+            int kod_http = wyciagnij_kod_http(temp_bufor);
+            
+            if (kod_http >= 200 && kod_http < 300) {
+                // Kod 2xx, czyli sukces, ładujemy treść!
+                const char* html_start = oczysc_http(temp_bufor);
+                int j = 0;
+                while(html_start[j] != '\0' && j < 31999) { zakladki[aktywna_zakladka].html[j] = html_start[j]; j++; }
+                zakladki[aktywna_zakladka].html[j] = '\0';
+                zakladki[aktywna_zakladka].to_jest_html = true;
+                if (uzyj_https && !bws_tls_certyfikat_zaufany())
+                    ustaw_status("HTTPS: szyfrowane, certyfikat bez zaufanego CA");
+                else ustaw_status(uzyj_https ? "HTTPS: polaczenie bezpieczne" : "Gotowy");
+                
+            } else if (kod_http > 0) {
+                // Kod 3xx, 4xx, 5xx - Serwer zwrócił błąd lub przekierowanie
+                const char* opis = pobierz_opis_kodu_http(kod_http);
+                zloz_strone_bledu(zakladki[aktywna_zakladka].html, kod_http, opis);
+                zakladki[aktywna_zakladka].to_jest_html = true; // Złożyliśmy to w ładny HTML
+                ustaw_status("Odebrano status HTTP");
+                
+            } else {
+                // Kod = 0, brak poprawnego nagłówka HTTP w pakiecie TCP
+                const char* err = "<h1>Blad protokolu</h1><br><p>Odpowiedz serwera nie jest zgodna ze standardem HTTP.</p>";
+                int err_p = 0; while(err[err_p]) { zakladki[aktywna_zakladka].html[err_p] = err[err_p]; err_p++; }
+                zakladki[aktywna_zakladka].html[err_p] = '\0';
+                zakladki[aktywna_zakladka].to_jest_html = true;
+                ustaw_status("Nierozpoznana odpowiedz");
+            }
+            
         } else {
+            // Problem z samym połączeniem TCP w Jądrze
             zakladki[aktywna_zakladka].to_jest_html = false;
-            const char* err = "Blad HTTP.";
-            p = 0; while(err[p]) { zakladki[aktywna_zakladka].html[p] = err[p]; p++; }
-            zakladki[aktywna_zakladka].html[p] = '\0';
+            const char* err = "Blad HTTP: Brak polaczenia TCP.";
+            int err_p = 0; while(err[err_p]) { zakladki[aktywna_zakladka].html[err_p] = err[err_p]; err_p++; }
+            zakladki[aktywna_zakladka].html[err_p] = '\0';
             ustaw_status("Blad HTTP");
         }
     } else {
         zakladki[aktywna_zakladka].to_jest_html = false;
-        const char* err = "Blad DNS.";
-        p = 0; while(err[p]) { zakladki[aktywna_zakladka].html[p] = err[p]; p++; }
-        zakladki[aktywna_zakladka].html[p] = '\0';
+        const char* err = "Blad DNS: Nie udalo sie rozwiazac adresu IP domeny.";
+        int err_p = 0; while(err[err_p]) { zakladki[aktywna_zakladka].html[err_p] = err[err_p]; err_p++; }
+        zakladki[aktywna_zakladka].html[err_p] = '\0';
         ustaw_status("Blad DNS");
     }
 }

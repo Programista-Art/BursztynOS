@@ -147,7 +147,7 @@ struct Okno {
 };
 
 static Okno okna[1] = {
-    { 20, 20, 660, 360,  0,0,0,0, "Terminal", "Powłoka Bursztynowa (Ring 3 Terminal)", 0x001A0B00, true, false }
+    { 20, 20, 660, 360,  0,0,0,0, "Terminal", "Powłoka Bursztynowa", 0x001A0B00, true, false }
 };
 static int z_order[1] = {0}; 
 static int okno_przeciagane = -1;

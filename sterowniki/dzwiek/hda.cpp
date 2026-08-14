@@ -211,7 +211,11 @@ bool hda_test_ton(uint32_t czestotliwosc_hz, uint32_t czas_ms) {
         hda_bdl[i].adres_gorny = 0;
         uint32_t len = (pozostalo > HDA_ROZMIAR_BUFORA) ? HDA_ROZMIAR_BUFORA : pozostalo;
         hda_bdl[i].dlugosc = len;
-        hda_bdl[i].flagi = (i == ilosc_buforow - 1) ? 1 : 0; // IOC włączone na ostatnim
+        
+        // KRYTYCZNE ZABEZPIECZENIE: Całkowicie wyłączamy IOC (Interrupt On Completion).
+        // Zapobiega to rzucaniu sprzętowych wyjątków (BSOD) na koniec odtwarzania dźwięku!
+        hda_bdl[i].flagi = 0; 
+        
         pozostalo -= len;
     }
 

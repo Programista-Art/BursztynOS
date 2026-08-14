@@ -47,6 +47,28 @@ bool czytaj_plik(const char* p, char* b, uint32_t m) {
     return bws_wywolaj(5, (uint64_t)p, (uint64_t)b, m) != 0; 
 }
 
+void bws_dzwiek_test(uint32_t czestotliwosc, uint32_t czas) {
+    // Przekazujemy częstotliwość w arg1 (r9) i czas w arg2 (r10)
+    bws_wywolaj(27, czestotliwosc, czas, 0, 0);
+}
+
+extern "C" {
+    bool bws_siec_dns(const char* domena, uint8_t* wyjsciowy_ip) {
+        return bws_wywolaj(28, (uint64_t)domena, (uint64_t)wyjsciowy_ip, 0, 0) != 0;
+    }
+
+    bool bws_siec_pobierz_http(uint8_t* cel_ip, const char* domena, const char* sciezka, char* bufor, uint32_t max_dlugosc) {
+        return bws_wywolaj(29, (uint64_t)cel_ip, (uint64_t)domena, (uint64_t)sciezka, ((uint64_t)bufor << 32) | max_dlugosc) != 0;
+    }
+
+    bool bws_siec_pobierz_https(uint8_t* cel_ip, const char* domena, const char* sciezka, char* bufor, uint32_t max_dlugosc) {
+        return bws_wywolaj(30, (uint64_t)cel_ip, (uint64_t)domena, (uint64_t)sciezka, ((uint64_t)bufor << 32) | max_dlugosc) != 0;
+    }
+
+    bool bws_tls_certyfikat_zaufany() { return bws_wywolaj(31) != 0; }
+}
+
+
 // ==========================================
 // 2. ZAAWANSOWANE API GRAFICZNE (Ring 3 GUI)
 // ==========================================

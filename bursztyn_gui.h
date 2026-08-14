@@ -31,3 +31,19 @@ void rysuj_tekst_wysrodkowany(int px, int py, int w, int h, int skala, uint32_t 
 
 // 4. Elementy Interfejsu (Widgets)
 void RysujPrzycisk(int x, int y, int w, int h, uint32_t kolor_bg, uint32_t kolor_txt, const char* t);
+
+// ... existing code ...
+// Nowe funkcje pomocnicze do wyśrodkowanego tekstu
+int oblicz_szerokosc_tekstu(const char* t, int skala);
+void rysuj_tekst_wysrodkowany(int px, int py, int w, int h, int skala, uint32_t kolor, const char* t);
+
+// 4. Elementy Interfejsu (Widgets)
+void RysujPrzycisk(int x, int y, int w, int h, uint32_t kolor_bg, uint32_t kolor_txt, const char* t);
+
+// 5. Odtwarzanie Dźwięku (HDA / AC97)
+void bws_dzwiek_test(uint32_t czestotliwosc, uint32_t czas);
+
+extern "C" bool bws_siec_dns(const char* domena, uint8_t* wyjsciowy_ip);
+extern "C" bool bws_siec_pobierz_http(uint8_t* cel_ip, const char* domena, const char* sciezka, char* bufor, uint32_t max_dlugosc);
+extern "C" bool bws_siec_pobierz_https(uint8_t* cel_ip, const char* domena, const char* sciezka, char* bufor, uint32_t max_dlugosc);
+extern "C" bool bws_tls_certyfikat_zaufany();

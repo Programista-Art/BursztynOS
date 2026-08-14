@@ -7,6 +7,8 @@
 
 #include "bursztyn_gui.h"
 
+
+
 struct NaglowekBur {
     uint8_t  magia[4];            
     uint64_t punkt_wejscia;       
@@ -25,10 +27,13 @@ extern "C" {
     struct NaglowekBur naglowek = {
         {'B', 'U', 'R', '\0'},
         (uint64_t)&_start,
-        4096,  16384, 0x601000, 
-        20480, 32768, 0x605000  
+        4096, 32768, 0x601000,
+        36864, 131072, 0x609000
     };
 }
+extern "C" void bws_gui_odswiez();
+// void bws_dzwiek_test(uint32_t czestotliwosc, uint32_t czas);
+
 
 // Funkcje obsługi plików z Jądra
 bool wylistuj_katalog(const char* sciezka, char* bufor, uint32_t max_dlugosc) { return bws_wywolaj(6, (uint64_t)sciezka, (uint64_t)bufor, max_dlugosc) != 0; }
@@ -161,6 +166,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             wypisz("  pisz [txt]    - wypisuje podany tekst na ekran\n");
             wypisz("  cytat         - wczytuje i wyświetla cytaty z pliku\n");
             wypisz("  losuj         - rzuca wirtualną kością (wynik 1-6)\n");
+            wypisz("  dzwiek        - test dźwięku karta hda intel)\n");
         }
         else if (strcmp(bufor_komendy, "notatnik")) {
             wypisz("Uruchamianie Notatnika...\n");
@@ -257,7 +263,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             wypisz("Sieć: Zintegrowany klient DHCP, ARP, ICMP oraz Klient HTTP (TCP/DNS)\n");
         }
         else if (strcmp(bufor_komendy, "wersja")) {
-            wypisz("Powłoka Bursztynowa v2.1 (Build: Zintegrowana z Menedżerem Okien)\n");
+            wypisz("Powłoka Bursztynowa v2.2\n");
         }
         else if (strcmp(bufor_komendy, "kto")) {
             wypisz("Zalogowano jako: Administrator Systemu (Ring 3)\n");
@@ -341,6 +347,13 @@ extern "C" __attribute__((noreturn)) void _start() {
             wypisz("Ścieżka do zmiany: "); char stara[64]; pobierz_linie(stara, 64); wypisz("\n"); char bezp_stara[64]; formatuj_sciezke(stara, bezp_stara);
             wypisz("Nowa nazwa: "); char nowa[64]; pobierz_linie(nowa, 64); wypisz("\n");
             if (zmien_nazwe_tworu(bezp_stara, nowa)) wypisz("Zmieniono nazwę.\n"); else wypisz("Błąd zmiany nazwy.\n");
+        }
+         else if (strcmp(bufor_komendy, "dzwiek")) {
+            // Używamy Twojej funkcji wypisz!
+            wypisz("Odtwarzanie dzwieku testowego HDA (880 Hz)...\n");
+            
+            // Wywołanie systemowe do Jądra
+            bws_dzwiek_test(880, 500);
         }
         else if (strncmp(bufor_komendy, "pisz ", 5)) { wypisz(&bufor_komendy[5]); wypisz("\n"); }
         else { wypisz("Nieznane polecenie: '"); wypisz(bufor_komendy); wypisz("'. Wpisz 'pomoc'.\n"); }

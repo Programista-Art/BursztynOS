@@ -1,14 +1,9 @@
 #include "loader.h"
-#include "grafika.h" // Używamy Składacza Obrazu do pięknych logów!
-#include "pamiec.h"  // Zapewnia dostęp do natywnych funkcji C++: ZaalokujRamke() i ZmapujStrone()
+#include "grafika.h" 
+#include "pamiec.h"  
 
-// Oczekiwana funkcja z vmm.cpp zwracająca wskaźnik na drzewo stron
 extern "C" void* PobierzAktualnePML4();
-
-// Oczekiwana funkcja z Asemblera (ring3.S)
 extern "C" void przejdz_do_ring3(uint64_t punkt_wejscia, uint64_t wirtualny_stos, bool z_syscalla);
-
-// Oczekiwana funkcja z BSP
 extern "C" uint8_t* bsp_wczytaj_plik_do_pamieci(const char* sciezka, uint64_t* rozmiar_wyj);
 
 #include "pzb.h"
@@ -41,7 +36,6 @@ extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka_pliku, uint8_t b
     }
 
     NaglowekBur* naglowek = (NaglowekBur*)bufor_pliku;
-
     const uint8_t oczekiwana_magia[4] = {'B', 'U', 'R', '\0'};
     if (!PorownajPamiec(naglowek->magia, oczekiwana_magia, 4)) {
         wypisz_log("[LOADER-BLAD] Nieprawidlowy format pliku! To nie jest program .bur");
@@ -50,56 +44,73 @@ extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka_pliku, uint8_t b
 
     wypisz_log("[LOADER] Sygnatura BUR poprawna. Alokacja pamieci uzytkownika...");
 
+    if (naglowek->tekst_rozmiar == 0 ||
+        (naglowek->tekst_wirtualny & 0xFFF) != 0 ||
+        (naglowek->dane_rozmiar > 0 && (naglowek->dane_wirtualny & 0xFFF) != 0) ||
+        naglowek->tekst_przesuniecie > rozmiar_pliku ||
+        naglowek->tekst_wirtualny + naglowek->tekst_rozmiar < naglowek->tekst_wirtualny ||
+        naglowek->dane_wirtualny + naglowek->dane_rozmiar < naglowek->dane_wirtualny ||
+        naglowek->punkt_wejscia < naglowek->tekst_wirtualny ||
+        naglowek->punkt_wejscia >= naglowek->tekst_wirtualny + naglowek->tekst_rozmiar) {
+        wypisz_log("[LOADER-BLAD] Nieprawidlowy uklad segmentow programu!");
+        return false;
+    }
+
     uint32_t flagi_vmm_user = FLAGA_OBECNA | FLAGA_ZAPIS | FLAGA_USER;
 
-    // 4. Mapowanie sekcji .tekst (KODU)
+    // 1. Alokacja Kodu
     for (uint64_t offset = 0; offset < naglowek->tekst_rozmiar; offset += 4096) {
         void* ramka = ZaalokujRamke();
+        if (!ramka) {
+            wypisz_log("[LOADER-BLAD] Brak pamieci dla segmentu kodu!");
+            return false;
+        }
+        for (uint64_t i = 0; i < 4096; i++) ((uint8_t*)ramka)[i] = 0;
         void* adres_wirtualny = (void*)(naglowek->tekst_wirtualny + offset);
         ZmapujStrone(adres_wirtualny, ramka, flagi_vmm_user);
     }
-    
-    // --- BEZPIECZNE KOPIOWANIE KODU ---
-    // Kopiujemy tylko tyle bajtów, ile faktycznie znajduje się w pliku!
-    uint64_t dostepny_kod_w_pliku = 0;
-    if (rozmiar_pliku > naglowek->tekst_przesuniecie) {
-        dostepny_kod_w_pliku = rozmiar_pliku - naglowek->tekst_przesuniecie;
-    }
-    uint64_t do_skopiowania_kod = (naglowek->tekst_rozmiar < dostepny_kod_w_pliku) ? naglowek->tekst_rozmiar : dostepny_kod_w_pliku;
-    KopiujPamiec((void*)naglowek->tekst_wirtualny, bufor_pliku + naglowek->tekst_przesuniecie, do_skopiowania_kod);
+    uint64_t dostepny_tekst = rozmiar_pliku - naglowek->tekst_przesuniecie;
+    uint64_t kopiowany_tekst = naglowek->tekst_rozmiar < dostepny_tekst
+        ? naglowek->tekst_rozmiar : dostepny_tekst;
+    KopiujPamiec((void*)naglowek->tekst_wirtualny,
+                 bufor_pliku + naglowek->tekst_przesuniecie, kopiowany_tekst);
 
-    // 5. Mapowanie sekcji .dane (ZMIENNE)
+    // 2. Alokacja Danych
     if (naglowek->dane_rozmiar > 0) {
-        for (uint64_t offset = 0; offset < naglowek->dane_rozmiar; offset += 4096) { // TUTAJ JEST offset += 4096
+        for (uint64_t offset = 0; offset < naglowek->dane_rozmiar; offset += 4096) {
             void* ramka = ZaalokujRamke();
+            if (!ramka) {
+                wypisz_log("[LOADER-BLAD] Brak pamieci dla segmentu danych!");
+                return false;
+            }
+            for (uint64_t i = 0; i < 4096; i++) ((uint8_t*)ramka)[i] = 0;
             void* adres_wirtualny = (void*)(naglowek->dane_wirtualny + offset);
             ZmapujStrone(adres_wirtualny, ramka, flagi_vmm_user);
         }
-        
-        // WYZEROWANIE PAMIĘCI DLA .BSS
-        uint8_t* ptr_dane = (uint8_t*)naglowek->dane_wirtualny;
-        for (uint64_t i = 0; i < naglowek->dane_rozmiar; i++) {
-            ptr_dane[i] = 0;
+        if (naglowek->dane_przesuniecie < rozmiar_pliku) {
+            uint64_t dostepne_dane = rozmiar_pliku - naglowek->dane_przesuniecie;
+            uint64_t kopiowane_dane = naglowek->dane_rozmiar < dostepne_dane
+                ? naglowek->dane_rozmiar : dostepne_dane;
+            KopiujPamiec((void*)naglowek->dane_wirtualny,
+                         bufor_pliku + naglowek->dane_przesuniecie, kopiowane_dane);
         }
-
-        // --- KOPIOWANIE DANYCH ---
-        uint64_t dostepne_dane_w_pliku = 0;
-        if (rozmiar_pliku > naglowek->dane_przesuniecie) {
-            dostepne_dane_w_pliku = rozmiar_pliku - naglowek->dane_przesuniecie;
-        }
-        uint64_t do_skopiowania_dane = (naglowek->dane_rozmiar < dostepne_dane_w_pliku) ? naglowek->dane_rozmiar : dostepne_dane_w_pliku;
-        KopiujPamiec((void*)naglowek->dane_wirtualny, bufor_pliku + naglowek->dane_przesuniecie, do_skopiowania_dane);
     }
 
-    // 6. Utworzenie Stosu Użytkownika (16 KB na wysokim adresie)
+    // 3. Utworzenie nowego Stosu dla Aplikacji (16 KB)
     uint64_t wirtualna_baza_stosu = 0x00007FFFF0000000; 
-    for (int i = 0; i < 8; i++) { // ZMIENIONO NA 8 stron * 4KB = 32KB stosu
+    for (int i = 0; i < 4; i++) { 
         void* ramka_stosu = ZaalokujRamke();
+        if (!ramka_stosu) {
+            wypisz_log("[LOADER-BLAD] Brak pamieci dla stosu programu!");
+            return false;
+        }
+        for (uint64_t j = 0; j < 4096; j++) ((uint8_t*)ramka_stosu)[j] = 0;
         ZmapujStrone((void*)(wirtualna_baza_stosu + (i * 4096)), ramka_stosu, flagi_vmm_user);
     }
-    uint64_t wirtualny_szczyt_stosu = wirtualna_baza_stosu + 32768 - 8; // ZMIENIONO NA 32768 (32 KB) - 8 dla wyrównania ABI
+    // KRYTYCZNA POPRAWKA ABI: Stos w x86_64 na starcie musi być przesunięty o 8 bajtów (wyrównanie 16n + 8)!
+    uint64_t wirtualny_szczyt_stosu = wirtualna_baza_stosu + 16384 - 8;
 
-    // 7. Rejestracja struktury procesu w Jądrze (PZB)
+    // 4. Rejestracja parametrów w procesie
     aktywny_proces.pid = 1; 
     aktywny_proces.poziom_zaufania = bzl_poziom;
     aktywny_proces.uprawnienia = flagi_praw;
@@ -107,8 +118,10 @@ extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka_pliku, uint8_t b
 
     wypisz_log("[LOADER] Program zaladowany. Zastosowano zabezpieczenia PZB. Przejscie do Ring 3...");
 
-    // 8. Ostateczny Skok
+    // ROZWIĄZANIE PROBLEMU: Nieważne czy jesteśmy w Syscallu, dokonujemy 
+    // sprzętowego skoku, porzucając kod pożegnalny w "syscall.S".
+    // Twoja funkcja "przejdz_do_ring3" wykonuje stosowny IRETQ / SWAPGS.
     przejdz_do_ring3(naglowek->punkt_wejscia, wirtualny_szczyt_stosu, z_syscalla);
 
-    return true;
+    return true; // Kod technicznie nigdy tu nie dotrze.
 }

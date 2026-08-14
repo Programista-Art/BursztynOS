@@ -23,8 +23,8 @@ extern "C" {
     struct NaglowekBur naglowek = {
         {'B', 'U', 'R', '\0'},
         (uint64_t)&_start,
-        4096,  16384, 0x601000, 
-        20480, 32768, 0x605000  
+        4096, 32768, 0x601000,
+        36864, 131072, 0x609000
     };
 }
 
@@ -102,7 +102,7 @@ void RysujInterfejs(bool odswiez_tlo) {
         gui_wypisz_tekst_kolor(WIN_X + 130, WIN_Y + WIN_H - 18, 0x00FFFFFF, sciezka_input);
         gui_wypisz_tekst_kolor(WIN_X + 130 + (sciezka_len * 9), WIN_Y + WIN_H - 18, 0x00FFFFFF, "_");
     } else if (tryb == WPROWADZANIE_SCIEZKI_OTWORZ) {
-        gui_wypisz_tekst_kolor(WIN_X + 8, WIN_Y + WIN_H - 18, 0x00E58A00, "Otworz plik: ");
+        gui_wypisz_tekst_kolor(WIN_X + 8, WIN_Y + WIN_H - 18, 0x00E58A00, "Otwórz plik: ");
         gui_wypisz_tekst_kolor(WIN_X + 130, WIN_Y + WIN_H - 18, 0x00FFFFFF, sciezka_input);
         gui_wypisz_tekst_kolor(WIN_X + 130 + (sciezka_len * 9), WIN_Y + WIN_H - 18, 0x00FFFFFF, "_");
     } else {
@@ -131,7 +131,7 @@ void RysujInterfejs(bool odswiez_tlo) {
         gui_rysuj_prostokat(WIN_X + 5, WIN_Y + 46, 1, 72, 0x00E58A00);
         gui_rysuj_prostokat(WIN_X + 134, WIN_Y + 46, 1, 72, 0x00E58A00);
         gui_wypisz_tekst_kolor(WIN_X + 10, WIN_Y + 50, 0x00FFFFFF, "Nowy plik");
-        gui_wypisz_tekst_kolor(WIN_X + 10, WIN_Y + 66, 0x00FFFFFF, "Otworz...");
+        gui_wypisz_tekst_kolor(WIN_X + 10, WIN_Y + 66, 0x00FFFFFF, "Otwórz...");
         gui_wypisz_tekst_kolor(WIN_X + 10, WIN_Y + 82, 0x00FFFFFF, "Zapisz jako...");
         gui_wypisz_tekst_kolor(WIN_X + 10, WIN_Y + 98, 0x00FFFFFF, "Zamknij");
     }
@@ -142,7 +142,7 @@ void RysujInterfejs(bool odswiez_tlo) {
         gui_rysuj_prostokat(WIN_X + 40, WIN_Y + 46, 1, 40, 0x00E58A00);
         gui_rysuj_prostokat(WIN_X + 209, WIN_Y + 46, 1, 40, 0x00E58A00);
         gui_wypisz_tekst_kolor(WIN_X + 55, WIN_Y + 50, 0x00D1D5DB, "Motyw: Bursztyn");
-        gui_wypisz_tekst_kolor(WIN_X + 55, WIN_Y + 66, 0x00D1D5DB, "Czcionka: extronic16B_unicode");
+        // gui_wypisz_tekst_kolor(WIN_X + 55, WIN_Y + 66, 0x00D1D5DB, "");
     }
 
     if (okno_pomoc_widoczne) {
@@ -173,8 +173,8 @@ void ZapiszDoPliku(const char* sciezka_docelowa) {
     }
     liniowy_bufor[idx] = '\0';
     utworz(sciezka_docelowa);
-    if (zapisz_plik(sciezka_docelowa, liniowy_bufor, idx)) ustaw_status("Zapisano pomyslnie!");
-    else ustaw_status("Blad: Zapis nie powiodl sie.");
+    if (zapisz_plik(sciezka_docelowa, liniowy_bufor, idx)) ustaw_status("Zapisano pomyślnie!");
+    else ustaw_status("Blad: Zapis nie powiódl się.");
 }
 
 void OtworzZPliku(const char* sciezka_zrodlowa) {
@@ -187,8 +187,8 @@ void OtworzZPliku(const char* sciezka_zrodlowa) {
             if (temp_buf[i] == '\n') { r++; c = 0; }
             else if (c < 127 && r < 50) { bufor[r][c++] = temp_buf[i]; }
         }
-        ustaw_status("Wczytano plik pomyslnie.");
-    } else ustaw_status("Blad: Brak pliku na dysku!"); 
+        ustaw_status("Wczytano plik.");
+    } else ustaw_status("Błąd: Brak pliku na dysku!"); 
 }
 
 extern "C" __attribute__((noreturn)) void _start() {
