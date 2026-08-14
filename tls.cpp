@@ -1,4 +1,5 @@
 #include "siec.h"
+#include "e1000.h"
 #include "grafika.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -10,6 +11,46 @@
 #include "mbedtls/error.h"
 
 static bool ostatni_certyfikat_zaufany = false;
+
+void wypisz_blad_mbedtls(int ret) {
+    char buf[32] = "[TLS] Blad: -0x0000";
+    int val = ret < 0 ? -ret : ret;
+    const char* hex = "0123456789ABCDEF";
+    buf[15] = hex[(val >> 12) & 0xF];
+    buf[16] = hex[(val >> 8) & 0xF];
+    buf[17] = hex[(val >> 4) & 0xF];
+    buf[18] = hex[val & 0xF];
+    wypisz_log(buf);
+}
+
+static void tls_pompuj_siec() {
+    e1000_obsluz_odbior();
+    asm volatile("pause");
+}
+
+static void tls_log_blad(const char* etap, int kod) {
+    char log[96] = "[TLS] Blad ";
+    int p = 11;
+    int i = 0;
+    while (etap[i] && p < 70) log[p++] = etap[i++];
+    log[p++] = ' ';
+    log[p++] = '(';
+    log[p++] = '0';
+    log[p++] = 'x';
+    const char cyfry[] = "0123456789ABCDEF";
+    uint32_t wartosc = kod < 0 ? (uint32_t)(-kod) : (uint32_t)kod;
+    bool zaczeto = false;
+    for (int przesuniecie = 28; przesuniecie >= 0; przesuniecie -= 4) {
+        uint8_t cyfra = (wartosc >> przesuniecie) & 0x0F;
+        if (cyfra || zaczeto || przesuniecie == 0) {
+            log[p++] = cyfry[cyfra];
+            zaczeto = true;
+        }
+    }
+    log[p++] = ')';
+    log[p] = '\0';
+    wypisz_log(log);
+}
 
 // ISRG Root X1 (Let's Encrypt). Kolejne korzenie mozna dopisac do tego
 // lancucha PEM bez zmian w kodzie TLS.
@@ -52,11 +93,14 @@ extern "C" bool kernel_tls_certyfikat_zaufany() {
 
 static int tls_wyslij(void*, const unsigned char* dane, size_t dlugosc) {
     int wynik = tcp_gniazdo_wyslij(dane, (uint32_t)dlugosc);
+    if (wynik == -2) return MBEDTLS_ERR_SSL_WANT_WRITE;
     return wynik < 0 ? MBEDTLS_ERR_SSL_INTERNAL_ERROR : wynik;
 }
 
 static int tls_odbierz(void*, unsigned char* dane, size_t dlugosc) {
     int wynik = tcp_gniazdo_odbierz(dane, (uint32_t)dlugosc);
+    // Brak danych w tej chwili nie jest zerwaniem polaczenia. mbedTLS
+    // ponowi odczyt po zwrocie WANT_READ; zero pozostaje poprawnym EOF.
     if (wynik == -2) return MBEDTLS_ERR_SSL_WANT_READ;
     return wynik < 0 ? MBEDTLS_ERR_SSL_INTERNAL_ERROR : wynik;
 }
@@ -106,29 +150,56 @@ extern "C" bool kernel_siec_pobierz_https(uint8_t* cel_ip, const char* domena,
     const unsigned char personalizacja[] = "BursztynOS-Hussar-TLS";
     int wynik = mbedtls_ctr_drbg_seed(&drbg, mbedtls_entropy_func, &entropy,
                                      personalizacja, sizeof(personalizacja) - 1);
-    if (wynik != 0) goto koniec;
+    if (wynik != 0) {
+        tls_log_blad("inicjalizacji DRBG", wynik);
+        goto koniec;
+    }
     wynik = mbedtls_ssl_config_defaults(&config, MBEDTLS_SSL_IS_CLIENT,
                                        MBEDTLS_SSL_TRANSPORT_STREAM,
                                        MBEDTLS_SSL_PRESET_DEFAULT);
-    if (wynik != 0) goto koniec;
+    if (wynik != 0) {
+        tls_log_blad("konfiguracji SSL", wynik);
+        goto koniec;
+    }
 
     // Bez magazynu CA nadal sprawdzamy nazwę hosta i czytamy cały łańcuch X.509.
     // Flaga zaufania pozostaje fałszywa, dopóki łańcuch nie ma zaufanego korzenia.
+    // Tryb diagnostyczny: bledny czas RTC lub brak CA nie przerywa handshake'u.
     mbedtls_ssl_conf_authmode(&config, MBEDTLS_SSL_VERIFY_OPTIONAL);
-    if (mbedtls_x509_crt_parse(&magazyn_ca, (const unsigned char*)zaufane_ca,
-                               sizeof(zaufane_ca)) < 0) goto koniec;
+    wynik = mbedtls_x509_crt_parse(&magazyn_ca, (const unsigned char*)zaufane_ca,
+                                   sizeof(zaufane_ca));
+    if (wynik < 0) {
+        tls_log_blad("parsera certyfikatu CA", wynik);
+        goto koniec;
+    }
     mbedtls_ssl_conf_ca_chain(&config, &magazyn_ca, nullptr);
     mbedtls_ssl_conf_rng(&config, mbedtls_ctr_drbg_random, &drbg);
-    if (mbedtls_ssl_setup(&ssl, &config) != 0) goto koniec;
-    if (mbedtls_ssl_set_hostname(&ssl, domena) != 0) goto koniec;
+    wynik = mbedtls_ssl_setup(&ssl, &config);
+    if (wynik != 0) {
+        tls_log_blad("ssl_setup", wynik);
+        goto koniec;
+    }
+    // Ustawia jednoczesnie nazwe do walidacji X.509 i rozszerzenie TLS SNI.
+    wynik = mbedtls_ssl_set_hostname(&ssl, domena);
+    if (wynik != 0) {
+        tls_log_blad("ustawiania SNI", wynik);
+        goto koniec;
+    }
     mbedtls_ssl_set_bio(&ssl, nullptr, tls_wyslij, tls_odbierz, nullptr);
 
     wypisz_log("[TLS] ClientHello: TLS 1.2, SNI i walidacja X.509...");
     for (uint32_t proby = 0; proby < 10000000; proby++) {
         wynik = mbedtls_ssl_handshake(&ssl);
         if (wynik == 0) break;
-        if (wynik != MBEDTLS_ERR_SSL_WANT_READ && wynik != MBEDTLS_ERR_SSL_WANT_WRITE)
+        if (wynik != MBEDTLS_ERR_SSL_WANT_READ && wynik != MBEDTLS_ERR_SSL_WANT_WRITE) {
+            wypisz_blad_mbedtls(wynik);
+            tls_log_blad("handshake", wynik);
             goto koniec;
+        }
+
+        // Bare-metal nie ma osobnego watku obslugi IRQ/TCP. Dopoki mbedTLS
+        // czeka, musimy recznie przenosic ramki E1000 do stosu TCP.
+        tls_pompuj_siec();
     }
     if (wynik != 0 || mbedtls_ssl_get_peer_cert(&ssl) == nullptr) goto koniec;
 
@@ -148,16 +219,30 @@ extern "C" bool kernel_siec_pobierz_https(uint8_t* cel_ip, const char* domena,
         wynik = mbedtls_ssl_write(&ssl, (const unsigned char*)zadanie + wyslano,
                                   dlugosc_zadania - wyslano);
         if (wynik > 0) wyslano += (uint32_t)wynik;
-        else if (wynik != MBEDTLS_ERR_SSL_WANT_READ && wynik != MBEDTLS_ERR_SSL_WANT_WRITE) goto koniec;
+        else if (wynik != MBEDTLS_ERR_SSL_WANT_READ && wynik != MBEDTLS_ERR_SSL_WANT_WRITE) {
+            wypisz_blad_mbedtls(wynik);
+            tls_log_blad("ssl_write", wynik);
+            goto koniec;
+        }
+
+        // Przetworz ACK-i i ewentualne rekordy TLS pomiedzy kolejnymi zapisami.
+        tls_pompuj_siec();
     }
 
     while (odebrano + 1 < max_dlugosc && puste_proby < 10000000) {
         wynik = mbedtls_ssl_read(&ssl, (unsigned char*)bufor + odebrano,
                                  max_dlugosc - odebrano - 1);
         if (wynik > 0) { odebrano += (uint32_t)wynik; puste_proby = 0; }
-        else if (wynik == MBEDTLS_ERR_SSL_WANT_READ || wynik == MBEDTLS_ERR_SSL_WANT_WRITE) puste_proby++;
+        else if (wynik == MBEDTLS_ERR_SSL_WANT_READ || wynik == MBEDTLS_ERR_SSL_WANT_WRITE) {
+            puste_proby++;
+            tls_pompuj_siec();
+        }
         else if (wynik == 0 || wynik == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) break;
-        else goto koniec;
+        else {
+            wypisz_blad_mbedtls(wynik);
+            tls_log_blad("ssl_read", wynik);
+            goto koniec;
+        }
     }
     bufor[odebrano] = 0;
     sukces = odebrano > 0;

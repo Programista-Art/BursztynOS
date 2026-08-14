@@ -43,6 +43,12 @@ static ArpWpis tablica_arp[ROZMIAR_TABLICY_ARP];
 static void skopiuj_mac(uint8_t* cel, uint8_t* zrodlo) { for(int i=0; i<6; i++) cel[i] = zrodlo[i]; }
 static void skopiuj_ip(uint8_t* cel, uint8_t* zrodlo) { for(int i=0; i<4; i++) cel[i] = zrodlo[i]; }
 
+static bool mac_jest_poprawny(const uint8_t mac[6]) {
+    uint8_t suma = 0;
+    for (int i = 0; i < 6; i++) suma |= mac[i];
+    return suma != 0;
+}
+
 bool szukaj_w_cache_arp(uint8_t ip[4], uint8_t wyjscie_mac[6]) {
     for(int i = 0; i < ROZMIAR_TABLICY_ARP; i++) {
         if(tablica_arp[i].aktywny && tablica_arp[i].ip[0] == ip[0] && tablica_arp[i].ip[1] == ip[1] &&
@@ -269,6 +275,13 @@ static bool tcp_tryb_gniazda = false;
 
 // Wewnętrzna funkcja łącząca (Multiplexer) dla pakietów TCP
 void wyslij_pakiet_tcp(uint8_t flagi, uint8_t* payload, uint16_t payload_len) {
+    // Ramka z zerowym MAC-em nigdy nie dotrze do hosta ani do bramy.
+    // tcp_cel_mac jest ustawiany przez rozwiaz_adres_mac() przed pierwszym SYN-em.
+    if (!mac_jest_poprawny(tcp_cel_mac)) {
+        wypisz_log("[TCP] Blad: Brak docelowego adresu MAC (ARP).");
+        return;
+    }
+
     uint8_t pakiet[1500]; for(int i=0; i<1500; i++) pakiet[i] = 0;
 
     ethernet_header* eth = (ethernet_header*)pakiet;
@@ -285,6 +298,8 @@ void wyslij_pakiet_tcp(uint8_t flagi, uint8_t* payload, uint16_t payload_len) {
 
     tcp_header* tcp = (tcp_header*)(pakiet + sizeof(ethernet_header) + 20);
     tcp->port_zrodlowy = HTONS(tcp_nasz_port);
+    // Wszystkie pola wielobajtowe naglowka sa wysylane w kolejnosci sieciowej.
+    // Dla HTTPS zamienia to 443 (0x01BB) na bajty 01 BB na przewodzie.
     tcp->port_docelowy = HTONS(tcp_cel_port);
     tcp->numer_sekwencyjny = HTONL(tcp_nasz_seq);
     tcp->numer_potwierdzenia = HTONL(tcp_nasz_ack);
@@ -318,7 +333,15 @@ void wyslij_pakiet_tcp(uint8_t flagi, uint8_t* payload, uint16_t payload_len) {
 
 extern "C" bool tcp_gniazdo_polacz(uint8_t* cel_ip, uint16_t port) {
     if (!cel_ip || nasz_ip[0] == 0 || stan_tcp != TCP_CLOSED) return false;
-    if (!rozwiaz_adres_mac(cel_ip, tcp_cel_mac)) return false;
+
+    // Najpierw ustal adres warstwy Ethernet. Dla adresu spoza podsieci
+    // rozwiaz_adres_mac() odpytuje ARP o brame, a nie o zdalny serwer.
+    uint8_t docelowy_mac[6] = {0, 0, 0, 0, 0, 0};
+    if (!rozwiaz_adres_mac(cel_ip, docelowy_mac) || !mac_jest_poprawny(docelowy_mac)) {
+        wypisz_log("[TCP] Blad: Nie udalo sie rozwiazac adresu MAC przez ARP.");
+        return false;
+    }
+    skopiuj_mac(tcp_cel_mac, docelowy_mac);
     skopiuj_ip(tcp_cel_ip, cel_ip);
     tcp_cel_port = port;
     if (++tcp_nasz_port < 49152) tcp_nasz_port = 50000;

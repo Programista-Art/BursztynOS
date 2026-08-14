@@ -71,6 +71,7 @@ struct Zakladka {
 static Zakladka zakladki[MAX_ZAKLADKI]; 
 static char temp_bufor[32000]; 
 static char status_bufor[64];
+static int glebokosc_przekierowan = 0;
 
 int liczba_zakladek;
 int aktywna_zakladka;
@@ -517,8 +518,80 @@ void RysujInterfejs(bool odswiez_tlo) {
     gui_odswiez();
 }
 
+static char przegladarka_mala_litera(char znak) {
+    return (znak >= 'A' && znak <= 'Z') ? znak + ('a' - 'A') : znak;
+}
+
+static bool przegladarka_prefiks(const char* tekst, const char* prefiks) {
+    int i = 0;
+    while (prefiks[i]) {
+        if (tekst[i] != prefiks[i]) return false;
+        i++;
+    }
+    return true;
+}
+
+static bool znajdz_location(const char* odpowiedz, char* wynik, int pojemnosc) {
+    int i = 0;
+    while (odpowiedz[i]) {
+        if (odpowiedz[i] == '\r' && odpowiedz[i + 1] == '\n' &&
+            odpowiedz[i + 2] == '\r' && odpowiedz[i + 3] == '\n') break;
+
+        bool poczatek_linii = (i == 0 || odpowiedz[i - 1] == '\n');
+        const char nazwa[] = "location:";
+        bool pasuje = poczatek_linii;
+        for (int j = 0; pasuje && nazwa[j]; j++)
+            pasuje = przegladarka_mala_litera(odpowiedz[i + j]) == nazwa[j];
+
+        if (pasuje) {
+            i += 9;
+            while (odpowiedz[i] == ' ' || odpowiedz[i] == '\t') i++;
+            int j = 0;
+            while (odpowiedz[i] && odpowiedz[i] != '\r' && odpowiedz[i] != '\n' && j + 1 < pojemnosc)
+                wynik[j++] = odpowiedz[i++];
+            wynik[j] = '\0';
+            return j > 0;
+        }
+        i++;
+    }
+    wynik[0] = '\0';
+    return false;
+}
+
+static void ustaw_url_z_przekierowania(char* cel, const char* location,
+                                       bool bylo_https, const char* domena) {
+    int j = 0;
+    const char* schemat = bylo_https ? "https:" : "http:";
+    const char* pelny_schemat = bylo_https ? "https://" : "http://";
+
+    if (przegladarka_prefiks(location, "http://") || przegladarka_prefiks(location, "https://")) {
+        while (location[j] && j < 255) { cel[j] = location[j]; j++; }
+    } else {
+        const char* poczatek = (location[0] == '/' && location[1] == '/') ? schemat : pelny_schemat;
+        int i = 0;
+        while (poczatek[i] && j < 255) cel[j++] = poczatek[i++];
+        if (!(location[0] == '/' && location[1] == '/')) {
+            i = 0;
+            while (domena[i] && j < 255) cel[j++] = domena[i++];
+            if (location[0] != '/' && j < 255) cel[j++] = '/';
+        }
+        i = 0;
+        while (location[i] && j < 255) cel[j++] = location[i++];
+    }
+    cel[j] = '\0';
+}
+
 // --- ZMODYFIKOWANA FUNKCJA PobierzStrone() Z OBSŁUGĄ KODÓW HTTP ---
 void PobierzStrone() {
+    char* url = zakladki[aktywna_zakladka].url;
+    if (!przegladarka_prefiks(url, "http://") && !przegladarka_prefiks(url, "https://")) {
+        int dlugosc = dlugosc_tekstu(url);
+        if (dlugosc > 247) dlugosc = 247;
+        for (int j = dlugosc; j >= 0; j--) url[j + 8] = url[j];
+        const char https[] = "https://";
+        for (int j = 0; j < 8; j++) url[j] = https[j];
+    }
+
     ustaw_status("DNS: Szukanie serwera...");
     zakladki[aktywna_zakladka].wczytana = false;
     zakladki[aktywna_zakladka].to_jest_html = false;
@@ -527,7 +600,10 @@ void PobierzStrone() {
     zakladki[aktywna_zakladka].html[p] = '\0';
     zakladki[aktywna_zakladka].przewin_y = 0;
     
-    RysujInterfejs(false); 
+    // DNS jest synchroniczny. Najpierw pokaz caly pulpit, pasek zadan i status,
+    // aby zatrzymana na czas sieci petla programu nie pozostawila polramki.
+    RysujInterfejs(true);
+    gui_odswiez();
 
     char domena[64] = {0};
     char sciezka[128] = {0};
@@ -562,7 +638,9 @@ void PobierzStrone() {
     uint8_t ip_serwera[4] = {0,0,0,0};
     if (bws_siec_dns(domena, ip_serwera)) {
         ustaw_status(uzyj_https ? "TLS: Uscisk dloni..." : "HTTP: Pobieranie...");
-        RysujInterfejs(false); 
+        // Pobranie HTTP/HTTPS rowniez blokuje proces do zakonczenia transmisji.
+        RysujInterfejs(true);
+        gui_odswiez();
 
         for(int c = 0; c < 32000; c++) temp_bufor[c] = 0;
 
@@ -586,6 +664,23 @@ void PobierzStrone() {
                     ustaw_status("HTTPS: szyfrowane, certyfikat bez zaufanego CA");
                 else ustaw_status(uzyj_https ? "HTTPS: polaczenie bezpieczne" : "Gotowy");
                 
+            } else if (kod_http == 301 || kod_http == 302 || kod_http == 307 || kod_http == 308) {
+                char location[256] = {0};
+                if (glebokosc_przekierowan < 3 && znajdz_location(temp_bufor, location, sizeof(location))) {
+                    ustaw_url_z_przekierowania(zakladki[aktywna_zakladka].url,
+                                               location, uzyj_https, domena);
+                    glebokosc_przekierowan++;
+                    ustaw_status("Przekierowanie HTTP...");
+                    PobierzStrone();
+                    glebokosc_przekierowan--;
+                    return;
+                }
+
+                const char* opis = glebokosc_przekierowan >= 3
+                    ? "Przekroczono limit przekierowan." : "Brak naglowka Location.";
+                zloz_strone_bledu(zakladki[aktywna_zakladka].html, kod_http, opis);
+                zakladki[aktywna_zakladka].to_jest_html = true;
+                ustaw_status("Blad przekierowania HTTP");
             } else if (kod_http > 0) {
                 // Kod 3xx, 4xx, 5xx - Serwer zwrócił błąd lub przekierowanie
                 const char* opis = pobierz_opis_kodu_http(kod_http);
@@ -609,6 +704,9 @@ void PobierzStrone() {
             int err_p = 0; while(err[err_p]) { zakladki[aktywna_zakladka].html[err_p] = err[err_p]; err_p++; }
             zakladki[aktywna_zakladka].html[err_p] = '\0';
             ustaw_status("Blad HTTP");
+            // Blad TCP/TLS nie jest przekierowaniem. Natychmiast zakoncz probe,
+            // aby nie uruchomic ponownie DNS ani polaczenia z rekurencji redirectu.
+            return;
         }
     } else {
         zakladki[aktywna_zakladka].to_jest_html = false;
