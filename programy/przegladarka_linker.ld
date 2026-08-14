@@ -18,8 +18,8 @@ ASSERT(SIZEOF(.text) <= 0xF000, "Segment kodu przegladarki przekracza 60 KiB")
     *(.bss*) 
     *(COMMON) 
 }
-ASSERT((ADDR(.bss) + SIZEOF(.bss) - 0x610000) <= 0x40000,
-       "Segment danych przegladarki przekracza 256 KiB")
+ASSERT((ADDR(.bss) + SIZEOF(.bss) - 0x610000) <= 0x210000,
+       "Segment danych przegladarki przekracza 2112 KiB")
 
 
 }

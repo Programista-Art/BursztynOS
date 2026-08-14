@@ -140,7 +140,8 @@ int oblicz_szerokosc_tekstu(const char* t, int skala) {
     int w = 0; int i = 0;
     while (t[i] != '\0') {
         uint32_t z = (uint8_t)t[i];
-        if ((t[i] & 0xE0) == 0xC0 && t[i+1] != '\0') {
+        if (((uint8_t)t[i] & 0xE0) == 0xC0 && t[i+1] != '\0' &&
+            ((uint8_t)t[i+1] & 0xC0) == 0x80) {
             uint8_t b1 = (uint8_t)t[i]; uint8_t b2 = (uint8_t)t[i+1];
             z = ((b1 & 0x1F) << 6) | (b2 & 0x3F);
             i++;
