@@ -1,49 +1,190 @@
 #pragma once
+
+/*
+ * Bursztyn OS - publiczne API GUI dla aplikacji Ring 3.
+ *
+ * Ten naglowek odpowiada implementacji z bursztyn_gui.cpp i udostepnia:
+ *  - Bursztynowe Wywolania Systemowe (BWS),
+ *  - API plikow, dzwieku, sieci i procesow,
+ *  - API graficzne i warstwy,
+ *  - prywatna sterte aplikacji,
+ *  - podstawowe widgety GUI.
+ */
+
 #include <stdint.h>
 #include <stdbool.h>
 
-// 1. Główne wywołanie systemowe do Jądra
-uint64_t bws_wywolaj(uint64_t nr_funkcji, uint64_t arg1 = 0, uint64_t arg2 = 0, uint64_t arg3 = 0, uint64_t arg4 = 0);
+/* =========================================================================
+ * 1. GLOWNE WYWOLANIE SYSTEMOWE BWS
+ * ========================================================================= */
 
-// 2. Standardowe API Systemowe
-void wypisz(const char* t);
-bool utworz(const char* p);
-bool zapisz_plik(const char* p, const char* d, uint32_t l);
-bool czytaj_plik(const char* p, char* b, uint32_t m);
+uint64_t bws_wywolaj(uint64_t nr_funkcji,
+                     uint64_t arg1 = 0,
+                     uint64_t arg2 = 0,
+                     uint64_t arg3 = 0,
+                     uint64_t arg4 = 0);
+
+/* =========================================================================
+ * 2. STANDARDOWE API SYSTEMOWE
+ * ========================================================================= */
+
+void wypisz(const char* tekst);
+
+bool utworz(const char* sciezka);
+
+bool zapisz_plik(const char* sciezka,
+                 const char* dane,
+                 uint32_t dlugosc);
+
+bool czytaj_plik(const char* sciezka,
+                 char* bufor,
+                 uint32_t maksymalna_dlugosc);
+
 char pobierz_znak();
 
-// 3. Zaawansowane API Graficzne (Ring 3 GUI)
-void gui_rysuj_okno(int x, int y, int w, int h, const char* tytul);
-void gui_wypisz_tekst(int x, int y, const char* t);
-void gui_wyczyscz_obszar(int x, int y, int w, int h);
+/* =========================================================================
+ * 3. PRYWATNA STERTA PROCESU RING 3
+ * ========================================================================= */
+
+void* gui_malloc(unsigned long rozmiar);
+void gui_free(void* ptr);
+
+void* operator new(unsigned long rozmiar);
+void* operator new[](unsigned long rozmiar);
+
+void operator delete(void* p) noexcept;
+void operator delete[](void* p) noexcept;
+
+void operator delete(void* p,
+                     unsigned long rozmiar) noexcept;
+
+void operator delete[](void* p,
+                       unsigned long rozmiar) noexcept;
+
+/* =========================================================================
+ * 4. API GRAFICZNE RING 3
+ * ========================================================================= */
+
+void gui_rysuj_okno(int x,
+                    int y,
+                    int w,
+                    int h,
+                    const char* tytul);
+
+void gui_wypisz_tekst(int x,
+                      int y,
+                      const char* tekst);
+
+void gui_wyczyscz_obszar(int x,
+                         int y,
+                         int w,
+                         int h);
+
 void gui_odswiez();
-void gui_pobierz_mysz(int* x, int* y, uint8_t* b);
+
+void gui_pobierz_mysz(int* x,
+                      int* y,
+                      uint8_t* przyciski);
+
 void gui_odswiez_pulpit();
-void gui_wypisz_tekst_kolor(int x, int y, uint32_t kolor, const char* tekst);
-void gui_wypisz_tekst_kolor_skala(int x, int y, uint32_t kolor, int skala, const char* tekst); // <--- Musi tu być!
-void gui_rysuj_prostokat(int x, int y, int szer, int wys, uint32_t kolor);
+
+void gui_wypisz_tekst_kolor(int x,
+                            int y,
+                            uint32_t kolor,
+                            const char* tekst);
+
+void gui_wypisz_tekst_kolor_skala(int x,
+                                  int y,
+                                  uint32_t kolor,
+                                  int skala,
+                                  const char* tekst);
+
+void gui_rysuj_prostokat(int x,
+                         int y,
+                         int szer,
+                         int wys,
+                         uint32_t kolor);
+
 void gui_ustaw_przejecie_myszy(bool stan);
-void gui_pobierz_rozdzielczosc(int* w, int* h);
-int gui_pobierz_szerokosc_znaku(uint32_t z); 
-// Nowe funkcje pomocnicze do wyśrodkowanego tekstu
-int oblicz_szerokosc_tekstu(const char* t, int skala);
-void rysuj_tekst_wysrodkowany(int px, int py, int w, int h, int skala, uint32_t kolor, const char* t);
 
-// 4. Elementy Interfejsu (Widgets)
-void RysujPrzycisk(int x, int y, int w, int h, uint32_t kolor_bg, uint32_t kolor_txt, const char* t);
+void gui_pobierz_rozdzielczosc(int* w,
+                               int* h);
 
-// ... existing code ...
-// Nowe funkcje pomocnicze do wyśrodkowanego tekstu
-int oblicz_szerokosc_tekstu(const char* t, int skala);
-void rysuj_tekst_wysrodkowany(int px, int py, int w, int h, int skala, uint32_t kolor, const char* t);
+int gui_pobierz_szerokosc_znaku(uint32_t znak);
 
-// 4. Elementy Interfejsu (Widgets)
-void RysujPrzycisk(int x, int y, int w, int h, uint32_t kolor_bg, uint32_t kolor_txt, const char* t);
+/*
+ * Tworzy jedna warstwe nalezaca do biezacego procesu.
+ * Zwraca identyfikator warstwy albo -1 przy bledzie.
+ */
+int bws_utworz_warstwe(int x,
+                       int y,
+                       int szer,
+                       int wys,
+                       int z_order);
 
-// 5. Odtwarzanie Dźwięku (HDA / AC97)
-void bws_dzwiek_test(uint32_t czestotliwosc, uint32_t czas);
+/*
+ * Przesuwa warstwe nalezaca do biezacego procesu.
+ */
+void bws_przesun_warstwe(int nowy_x,
+                         int nowy_y);
 
-extern "C" bool bws_siec_dns(const char* domena, uint8_t* wyjsciowy_ip);
-extern "C" bool bws_siec_pobierz_http(uint8_t* cel_ip, const char* domena, const char* sciezka, char* bufor, uint32_t max_dlugosc);
-extern "C" bool bws_siec_pobierz_https(uint8_t* cel_ip, const char* domena, const char* sciezka, char* bufor, uint32_t max_dlugosc);
-extern "C" bool bws_tls_certyfikat_zaufany();
+/* =========================================================================
+ * 5. WIDGETY I FUNKCJE POMOCNICZE
+ * ========================================================================= */
+
+int oblicz_szerokosc_tekstu(const char* tekst,
+                            int skala);
+
+void rysuj_tekst_wysrodkowany(int px,
+                              int py,
+                              int w,
+                              int h,
+                              int skala,
+                              uint32_t kolor,
+                              const char* tekst);
+
+void RysujPrzycisk(int x,
+                   int y,
+                   int w,
+                   int h,
+                   uint32_t kolor_bg,
+                   uint32_t kolor_txt,
+                   const char* tekst);
+
+/* =========================================================================
+ * 6. DZWIEK
+ * ========================================================================= */
+
+void bws_dzwiek_test(uint32_t czestotliwosc,
+                     uint32_t czas);
+
+/* =========================================================================
+ * 7. SIEC I ZARZADZANIE PROCESEM
+ * ========================================================================= */
+
+extern "C" {
+
+bool bws_siec_dns(const char* domena,
+                  uint8_t* wyjsciowy_ip);
+
+bool bws_siec_pobierz_http(uint8_t* cel_ip,
+                           const char* domena,
+                           const char* sciezka,
+                           char* bufor,
+                           uint32_t max_dlugosc);
+
+bool bws_siec_pobierz_https(uint8_t* cel_ip,
+                            const char* domena,
+                            const char* sciezka,
+                            char* bufor,
+                            uint32_t max_dlugosc);
+
+bool bws_tls_certyfikat_zaufany();
+
+__attribute__((noreturn))
+void bws_zakoncz_proces();
+
+__attribute__((noreturn))
+void gui_zakoncz_aplikacje();
+
+} // extern "C"

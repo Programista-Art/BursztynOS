@@ -1,143 +1,311 @@
 /*
- * Mechanizm: Zewnętrzne interfejsy i sterowanie wyjątkami Asembler x86_64
- * Opis: Pełni rolę nośną, tworzy skrypty ładujące tablice do rejestrów w procesorze
- * oraz implementuje szkielet makr dla obsługi wejść z poszczególnych wektorów wyjątków.
+ * Bursztyn OS - obsluga GDT/IDT oraz stuby przerwan x86_64
+ *
+ * Plik odpowiada za:
+ *  - przeladowanie GDTR i segmentow jadra,
+ *  - zaladowanie IDTR,
+ *  - utworzenie stubow ISR 0..47,
+ *  - ujednolicenie ramy wyjatkow z kodem i bez kodu bledu,
+ *  - zachowanie wszystkich ogolnych rejestrow procesora,
+ *  - bezpieczne wejscie do WspolnaObslugaPrzerwan(),
+ *  - powrot przez iretq, rowniez do Ring 3,
+ *  - wspolprace z schedulerem zwracajacym nowy wskaznik ramy w RAX.
+ *
+ * Uklad ramy po zapisaniu GPR musi odpowiadac strukturze RejestryStanowe
+ * uzywanej przez pzb.h / idt.cpp / loader.cpp:
+ *
+ *   +0x00  r15
+ *   +0x08  r14
+ *   +0x10  r13
+ *   +0x18  r12
+ *   +0x20  r11
+ *   +0x28  r10
+ *   +0x30  r9
+ *   +0x38  r8
+ *   +0x40  rbp
+ *   +0x48  rsi
+ *   +0x50  rdi
+ *   +0x58  rdx
+ *   +0x60  rcx
+ *   +0x68  rbx
+ *   +0x70  rax
+ *   +0x78  wektor_przerwania
+ *   +0x80  kod_bledu
+ *   +0x88  RIP
+ *   +0x90  CS
+ *   +0x98  RFLAGS
+ *   +0xA0  stary RSP   (tylko przy zmianie CPL/IST)
+ *   +0xA8  stary SS    (tylko przy zmianie CPL/IST)
+ *
+ * Przy wyjatkach bez sprzetowego kodu bledu stub dodaje sztuczne zero.
+ * Dzieki temu pola wektor/kod/RIP/CS/RFLAGS maja zawsze te same offsety.
  */
-
-.global zaladuj_zaktualizowane_gdt
-.global zaladuj_zaktualizowane_idt
-.global tablica_isr
 
 .section .text
 .code64
 
+/* =========================================================================
+ * STALE
+ * ========================================================================= */
+
+.set SELEKTOR_KODU_JADRA,  0x08
+.set SELEKTOR_DANYCH_JADRA, 0x10
+
 /*
- * Ładowanie wskaźnika tablicy Deskryptorów globalnych (GDT).
- * System V AMD64 ABI przekazuje pierwszy argument (czyli `adres_gdtr`) z funkcji w C++ do RDI.
+ * Offset pola CS wzgledem poczatku RejestryStanowe po PUSH_GPRS.
  */
+.set RAMA_OFFSET_CS, 0x90
+
+/*
+ * Liczba bajtow zajmowana przez:
+ *   wektor + kod bledu
+ */
+.set RAMA_ROZMIAR_NORMALIZACJI, 16
+
+/* =========================================================================
+ * IMPORT DYSPozytora C++
+ * ========================================================================= */
+
+.extern WspolnaObslugaPrzerwan
+
+/* =========================================================================
+ * PRZELADOWANIE GDT
+ * ========================================================================= */
+
+.global zaladuj_zaktualizowane_gdt
+.type zaladuj_zaktualizowane_gdt, @function
+
 zaladuj_zaktualizowane_gdt:
-    lgdt (%rdi)                                /* Załaduj specjalny wektor z wykorzystaniem zarezerwowanego adresu RDI */
-
-    /* Wymuś wymianę w segmencie Danych Jądra poprzez przesunięcie 0x10 */
-    mov $0x10, %ax
-    mov %ax, %ds                               /* Rejestr Data Segment (DS) */
-    mov %ax, %es                               /* Rejestr Extra Segment (ES) */
-    mov %ax, %fs                               /* Rejestr przestrzeni specjalnej FS */
-    mov %ax, %gs                               /* Rejestr przestrzeni specjalnej GS */
-    mov %ax, %ss                               /* Rejestr wskaźnika docelowego Stack Segment (SS) */
-
-    /* * Aby zaktualizować Segment Kodu Jądra CS używamy "Far Jump" / Return na 64 bity (iretq albo retfq).
-     * Odłóż wymagany Selektor Kodu (0x08) i spreparowany w C++ adres na stos 
-     * zanim wymusisz zsynchronizowanie rejestru skokiem LRETQ.
+    /*
+     * Pierwszy argument System V AMD64 ABI:
+     *   RDI = adres 10-bajtowego GDTR.
+     *
+     * Na czas wymiany GDT blokujemy maskowalne IRQ. Oryginalny stan IF
+     * przywracamy po przeladowaniu CS.
      */
-    pushq $0x08                                /* Pchamy selektor Kodu Jądra */
-    lea _przeladuj_cs(%rip), %rax              /* Generujemy przesunięcie etykiety z ominięciem RIP pod bezpieczny wskaźnik do RAX */
-    pushq %rax                                 /* Pchamy wygenerowany adres skoku powrotnego jako wskaźnik docelowy powrotu */
-    lretq                                      /* Daleki powrót procesora konsumujący selektor oraz RIP nadpisując starą tablicę */
+    pushfq
+    cli
 
-_przeladuj_cs:
-    ret                                        /* System poprawnie przebrnął i ładuje powrót z powrotem na główną ścieżkę jądra C++ */
+    lgdt (%rdi)
 
-/*
- * Ładowanie wskaźnika tablicy Deskryptorów z Przerwaniami IDT.
- */
-zaladuj_zaktualizowane_idt:
-    lidt (%rdi)                                /* Wykorzystaj wbudowaną instrukcję w rdzeń procesora w celu załadowania zlokalizowanego pakietu */
+    /*
+     * Segmenty danych sa plaskie. W long mode ich base/limit nie steruja
+     * zwykla adresacja, ale poprawne selektory nadal sa wymagane m.in.
+     * przez mechanizmy ochrony i przejscia poziomow uprzywilejowania.
+     */
+    movw $SELEKTOR_DANYCH_JADRA, %ax
+    movw %ax, %ds
+    movw %ax, %es
+    movw %ax, %ss
+
+    /*
+     * Celowo NIE przeladowujemy FS ani GS.
+     *
+     * W x86_64 ich bazy moga sluzyc do TLS/per-CPU i byc ustawiane przez
+     * MSR/FSGSBASE. Resetowanie selektora podczas pozniejszego lgdt mogloby
+     * zniszczyc ten stan.
+     */
+
+    /*
+     * CS nie da sie zapisac zwyklym MOV. Far return laduje nowy selektor
+     * kodu i wraca do lokalnej etykiety.
+     *
+     * Stos przed lretq:
+     *   [RSP + 0]  nowy RIP
+     *   [RSP + 8]  nowy CS
+     *   [RSP +16]  zapisane RFLAGS
+     */
+    pushq $SELEKTOR_KODU_JADRA
+    leaq .Lgdt_cs_przeladowany(%rip), %rax
+    pushq %rax
+    lretq
+
+.Lgdt_cs_przeladowany:
+    /*
+     * Przywrocenie flag przywraca rowniez poprzedni stan IF.
+     */
+    popfq
     ret
 
-/*
- * -------------------------------------------------------------
- * MACRA BUDUJĄCE Procedury Obsługi Błędów (ISR Stubs)
- * Generują unikalne wektory zrzucające odpowiedni numer w stosie (i ewentualnie 0 dla błędu "BezKoduBledu").
- * Zawsze odwołują się do głównego wektora analizy `wspolne_isr_wejscie`.
- * -------------------------------------------------------------
- */
-.macro ISR_BEZKODUBLEDU nr
-.global isr\nr
-isr\nr:
-    pushq $0                                   /* Odłóż symboliczne 0 jako zapchajdziurę by struktura w C++ pokrywała się wymiarami dla wyjątków bez kodu błędu */
-    pushq $\nr                                 /* Odłóż informację o numerze wywołanego wektora by C++ wiedział z jakim wyjątkiem ma do czynienia */
-    jmp wspolne_isr_wejscie                    /* Zawsze przekieruj bieg akcji z zachowaniem stosu do wspólnej instrukcji przygotowawczej Push-All */
-.endm
+.size zaladuj_zaktualizowane_gdt, .-zaladuj_zaktualizowane_gdt
 
-.macro ISR_Z_KODEMBLEDU nr
-.global isr\nr
-isr\nr:
-    /* Procesor intelowsko już sam odłożył prawdziwy 8 Bajtowy Kod Błędu na stosie */
-    pushq $\nr                                 /* My dorzucamy wyłącznie unikalny dla tego wyjątku numer identyfikacyjny wektora */
-    jmp wspolne_isr_wejscie                    /* Powrót w ramiona Push-All */
-.endm
+/* =========================================================================
+ * ZALADOWANIE IDT
+ * ========================================================================= */
 
-/* Zadeklarowanie poszczególnych systemowych procedur procesora (0-31 to zarezerwowane błędy, 32-255 to przerwania hardware/software, np LAPIC Timer) */
-ISR_BEZKODUBLEDU 0  /* Błąd operacji dzielenia przez zero (Działający test zadania w C++) */
-ISR_BEZKODUBLEDU 1  /* Wyjątek operacji debugowania i Trace */
-ISR_BEZKODUBLEDU 2  /* Systemowy niemaskowalny NMI (Non Maskable Interrupt) */
-ISR_BEZKODUBLEDU 3  /* Operacja pułapki czasowej (Breakpoint INT 3) */
-ISR_BEZKODUBLEDU 4  /* Ostrzeżenie na temat przepełnienia stosu na szynie Overflow (INTO) */
-ISR_BEZKODUBLEDU 5  /* Złamanie granicy zasięgu alokowanej puli operacji tablicowych */
-ISR_BEZKODUBLEDU 6  /* Invalid Opcode - Najbardziej morderczy przypadek podania błędnego polecenia kompilatorowi! */
-ISR_BEZKODUBLEDU 7  /* Wymóg emulacji jednostki zmiennoprzecinkowej z koprocesora FPU */
-ISR_Z_KODEMBLEDU 8  /* Przerażający Double Fault (Błąd podczas próby obsługi błędu...) Cudem uratowany przez wektor IST */
-ISR_BEZKODUBLEDU 9  /* Koprocesor złamał zasady chronione przy generowaniu segmentów (Przestarzałe zjawisko) */
-ISR_Z_KODEMBLEDU 10 /* TSS, tablica wyboru procesów pożarła przydział (Bad TSS) */
-ISR_Z_KODEMBLEDU 11 /* Pamięć Segmentacji nieobecna po załadowaniu na flagę */
-ISR_Z_KODEMBLEDU 12 /* Błąd przydziału stosu lokalnego chronionego Stack-Segment Fault */
-ISR_Z_KODEMBLEDU 13 /* General Protection Fault - Błąd segmentacji i uprawnień we wczesnych środowiskach bez VMM! */
-ISR_Z_KODEMBLEDU 14 /* Słynny Błąd Stronicowania (Page Fault), po przydziale i odczytaniu nieistniejących lub pustych wskaźników */
-ISR_BEZKODUBLEDU 15 /* Wolny odział awaryjny procesora (Zastrzeżony przez Intel/AMD) */
-ISR_BEZKODUBLEDU 16 /* Exception związany z matematycznym działaniem Koprocesora x87 FPU (Kropka Zmiennoprzecinkowa) */
-ISR_Z_KODEMBLEDU 17 /* Wektor wyrównania (Alignment Check) uległ kompresji bez zapowiedzi w 4 poziomie bazy (Rzadkie) */
-ISR_BEZKODUBLEDU 18 /* Zastrzeżony mechanizm wyjątku testów sprawdzających platformy sprzętowej (Machine Check, zazwyczaj sprzęt pada) */
-ISR_BEZKODUBLEDU 19 /* Przerwano działanie specjalnej puli rzutowania SIMD w środowiskach Streaming extensions x86_64 */
-ISR_BEZKODUBLEDU 20 /* Awaria / Ostrzeżenie na mechanizmie procesowym zagnieżdżania trybów sprzętowych Virtualization VMM (Tryb VMX) */
+.global zaladuj_zaktualizowane_idt
+.type zaladuj_zaktualizowane_idt, @function
 
-/* Odcinki puste, zarezerwowane oficjalnie by zajmować przestrzeń (od 21 do 31) */
-ISR_BEZKODUBLEDU 21
-ISR_BEZKODUBLEDU 22
-ISR_BEZKODUBLEDU 23
-ISR_BEZKODUBLEDU 24
-ISR_BEZKODUBLEDU 25
-ISR_BEZKODUBLEDU 26
-ISR_BEZKODUBLEDU 27
-ISR_BEZKODUBLEDU 28
-ISR_BEZKODUBLEDU 29
-ISR_Z_KODEMBLEDU 30 /* Zabezpieczony wyjątek związany z incydentami Security Extensions. Kody zawsze zwracają wektor błędu. */
-ISR_BEZKODUBLEDU 31 /* Koniec chronionej bramy. */
+zaladuj_zaktualizowane_idt:
+    /*
+     * RDI = adres 10-bajtowego IDTR.
+     *
+     * Samo LIDT jest atomowe z punktu widzenia widocznosci nowej bazy
+     * deskryptorow. InicjalizujIDT() dodatkowo kontroluje stan IF.
+     */
+    lidt (%rdi)
+    ret
 
-/* LAPIC Timer (zaprogramowany przez nas w apic.cpp aby wywołać wektor np. 32) */
-ISR_BEZKODUBLEDU 32
+.size zaladuj_zaktualizowane_idt, .-zaladuj_zaktualizowane_idt
 
-/* Inne wolne dla sprzętu np APIC (od 33 do 47 zarezerwowane na przyszłe testy) */
-ISR_BEZKODUBLEDU 33
-ISR_BEZKODUBLEDU 34
-ISR_BEZKODUBLEDU 35
-ISR_BEZKODUBLEDU 36
-ISR_BEZKODUBLEDU 37
-ISR_BEZKODUBLEDU 38
-ISR_BEZKODUBLEDU 39
-ISR_BEZKODUBLEDU 40
-ISR_BEZKODUBLEDU 41
-ISR_BEZKODUBLEDU 42
-ISR_BEZKODUBLEDU 43
-ISR_BEZKODUBLEDU 44
-ISR_BEZKODUBLEDU 45
-ISR_BEZKODUBLEDU 46
-ISR_BEZKODUBLEDU 47
+/* =========================================================================
+ * MAKRA ISR
+ * ========================================================================= */
 
 /*
- * PUSH-ALL (Zrzucenie pełnego środowiska do stosu by ochronić stan przed utratą z powodu obsługi wyjątku w C++)
+ * Wyjatek/przerwanie BEZ kodu bledu wypychanego przez CPU.
+ *
+ * Po wejsciu CPU pozostawil:
+ *
+ *   RIP
+ *   CS
+ *   RFLAGS
+ *   [RSP, SS gdy nastapila zmiana CPL]
+ *
+ * Dokladamy:
+ *
+ *   0
+ *   wektor
+ *
+ * W efekcie na szczycie stosu:
+ *
+ *   wektor
+ *   kod_bledu=0
+ *   RIP
+ *   CS
+ *   RFLAGS
  */
-wspolne_isr_wejscie:
-    /* Każdy makro wiersz powyżej dorzucił kod + i numer błędu do stosu (Zgodnie z ułożeniem struct RejestryStanowe). Pchamy resztę w tył. */
-    pushq %rax                                 /* Przestrzeń głównego roboczego EAX wyrzutni systemu */
-    pushq %rbx                                 /* Akcelerator pamięci podręcznej rejestru danych systemu */
-    pushq %rcx                                 /* Wskaźnik pętlowy iteratorów RCX */
-    pushq %rdx                                 /* Wskźanik bazowy połówki danych wejścia I/O RDX */
-    pushq %rdi                                 /* Pamięciowy offset danych odbiorczych */
-    pushq %rsi                                 /* Pamięciowy offset danych nadawczych na źródle strumieni RDI RSI */
-    pushq %rbp                                 /* Głębinowy pod-wskaźnik ramki w odzyskiwaniu Base Pointer stosu */
-    
-    /* Głębsze wejścia procesora z nowości systemu x86_64, generalne rejestry z R prefixem */
+.macro ISR_BEZ_KODU nr
+    .global isr\nr
+    .type isr\nr, @function
+
+isr\nr:
+    pushq $0
+    pushq $\nr
+    jmp wspolne_isr_wejscie
+
+    .size isr\nr, .-isr\nr
+.endm
+
+/*
+ * Wyjatek Z kodem bledu wypychanego przez CPU.
+ *
+ * CPU pozostawil:
+ *
+ *   kod_bledu
+ *   RIP
+ *   CS
+ *   RFLAGS
+ *   [RSP, SS]
+ *
+ * Dokladamy tylko numer wektora.
+ */
+.macro ISR_Z_KODEM nr
+    .global isr\nr
+    .type isr\nr, @function
+
+isr\nr:
+    pushq $\nr
+    jmp wspolne_isr_wejscie
+
+    .size isr\nr, .-isr\nr
+.endm
+
+/* =========================================================================
+ * WYJATKI CPU 0..31
+ * ========================================================================= */
+
+/*
+ * Lista wektorow z kodem bledu jest zgodna z x86_64:
+ *
+ *   8   #DF  Double Fault
+ *   10  #TS  Invalid TSS
+ *   11  #NP  Segment Not Present
+ *   12  #SS  Stack-Segment Fault
+ *   13  #GP  General Protection
+ *   14  #PF  Page Fault
+ *   17  #AC  Alignment Check
+ *   21  #CP  Control Protection
+ *   29  #VC  VMM Communication (AMD)
+ *   30  #SX  Security Exception
+ *
+ * #CP i #VC byly w starej wersji blednie traktowane jako wyjatki bez kodu,
+ * co przesuwalo cala rame i prowadzilo do blednego RIP/CS przy obsludze.
+ */
+
+ISR_BEZ_KODU 0      /* #DE Divide Error */
+ISR_BEZ_KODU 1      /* #DB Debug */
+ISR_BEZ_KODU 2      /* NMI */
+ISR_BEZ_KODU 3      /* #BP Breakpoint */
+ISR_BEZ_KODU 4      /* #OF Overflow */
+ISR_BEZ_KODU 5      /* #BR BOUND Range Exceeded */
+ISR_BEZ_KODU 6      /* #UD Invalid Opcode */
+ISR_BEZ_KODU 7      /* #NM Device Not Available */
+ISR_Z_KODEM   8     /* #DF Double Fault */
+ISR_BEZ_KODU 9      /* legacy Coprocessor Segment Overrun */
+ISR_Z_KODEM   10    /* #TS Invalid TSS */
+ISR_Z_KODEM   11    /* #NP Segment Not Present */
+ISR_Z_KODEM   12    /* #SS Stack-Segment Fault */
+ISR_Z_KODEM   13    /* #GP General Protection */
+ISR_Z_KODEM   14    /* #PF Page Fault */
+ISR_BEZ_KODU 15     /* Reserved */
+ISR_BEZ_KODU 16     /* #MF x87 Floating-Point */
+ISR_Z_KODEM   17    /* #AC Alignment Check */
+ISR_BEZ_KODU 18     /* #MC Machine Check */
+ISR_BEZ_KODU 19     /* #XM SIMD Floating-Point */
+ISR_BEZ_KODU 20     /* #VE Virtualization */
+ISR_Z_KODEM   21    /* #CP Control Protection */
+ISR_BEZ_KODU 22     /* Reserved */
+ISR_BEZ_KODU 23     /* Reserved */
+ISR_BEZ_KODU 24     /* Reserved */
+ISR_BEZ_KODU 25     /* Reserved */
+ISR_BEZ_KODU 26     /* Reserved */
+ISR_BEZ_KODU 27     /* Reserved */
+ISR_BEZ_KODU 28     /* #HV Hypervisor Injection */
+ISR_Z_KODEM   29    /* #VC VMM Communication */
+ISR_Z_KODEM   30    /* #SX Security Exception */
+ISR_BEZ_KODU 31     /* Reserved */
+
+/* =========================================================================
+ * WEKTORY APIC / IRQ 32..47
+ * ========================================================================= */
+
+ISR_BEZ_KODU 32     /* Local APIC timer */
+ISR_BEZ_KODU 33     /* PS/2 keyboard / IRQ1 */
+
+ISR_BEZ_KODU 34
+ISR_BEZ_KODU 35
+ISR_BEZ_KODU 36
+ISR_BEZ_KODU 37
+ISR_BEZ_KODU 38
+ISR_BEZ_KODU 39
+ISR_BEZ_KODU 40
+ISR_BEZ_KODU 41
+ISR_BEZ_KODU 42
+ISR_BEZ_KODU 43
+
+ISR_BEZ_KODU 44     /* PS/2 mouse / IRQ12 */
+
+ISR_BEZ_KODU 45
+ISR_BEZ_KODU 46
+ISR_BEZ_KODU 47     /* Local APIC spurious vector */
+
+/* =========================================================================
+ * ZAPIS / ODTWORZENIE GPR
+ * ========================================================================= */
+
+.macro PUSH_GPRS
+    /*
+     * Kolejnosc jest celowa: po ostatnim PUSH RSP wskazuje na R15,
+     * czyli pierwszy element RejestryStanowe.
+     */
+    pushq %rax
+    pushq %rbx
+    pushq %rcx
+    pushq %rdx
+    pushq %rdi
+    pushq %rsi
+    pushq %rbp
     pushq %r8
     pushq %r9
     pushq %r10
@@ -146,18 +314,9 @@ wspolne_isr_wejscie:
     pushq %r13
     pushq %r14
     pushq %r15
+.endm
 
-    /* Oczekujemy na zwrot wskaźnika w obróbce System V AMD64 do RDI. To nasz "struct RejestryStanowe* r" na wlocie C++! */
-    movq %rsp, %rdi                            
-
-    /* KRYTYCZNE: Zgodnie z wytycznymi ABI, należy wyzerować flagę kierunku (Direction Flag) przed skokiem do C++! */
-    cld
-
-    /* Rozpoczynamy procedurę C++ z nowym, wyjętym środowiskiem w C++ bez obaw o stan starego kodu */
-    .extern WspolnaObslugaPrzerwan
-    call WspolnaObslugaPrzerwan
-
-    /* Po udanym zakończeniu operacji zdejmij wszystko używając procedur od tyłu (POP-ALL) */
+.macro POP_GPRS
     popq %r15
     popq %r14
     popq %r13
@@ -166,7 +325,6 @@ wspolne_isr_wejscie:
     popq %r10
     popq %r9
     popq %r8
-
     popq %rbp
     popq %rsi
     popq %rdi
@@ -174,22 +332,179 @@ wspolne_isr_wejscie:
     popq %rcx
     popq %rbx
     popq %rax
+.endm
 
-    /* Wyzeruj z pamięci wygenerowany nr wyjątku i ewentualny nadpisywany kod błędu (łącznie 16 bajtów) bez destrukcji */
-    addq $16, %rsp
+/* =========================================================================
+ * WSPOLNE WEJSCIE ISR
+ * ========================================================================= */
 
-    /* Opuść wektor procedury przywracając ostateczny RIP i powracając z dalekiej zaświatówki przez specyficzny Return po Interrupt Gate */
+.type wspolne_isr_wejscie, @function
+.p2align 4
+
+wspolne_isr_wejscie:
+    /*
+     * Interrupt gate wyczyscil IF, ale DF jest czescia RFLAGS procesu.
+     * Zachowujemy oryginalne RFLAGS na ramie sprzetowej, a przed C++
+     * zerujemy DF zgodnie z System V AMD64 ABI.
+     */
+    PUSH_GPRS
+
+    /*
+     * Jezeli przerwanie przyszlo z Ring 3, procesor zmienil juz CS na
+     * kernelowy, lecz baza GS moze nadal nalezec do procesu.
+     *
+     * SWAPGS przelacza na kernelowy GS. Na wyjsciu decyzja jest wykonywana
+     * ponownie na podstawie CS RAMY WYBRANEJ przez scheduler, wiec poprawnie
+     * obsluguje takze:
+     *
+     *   Ring3 -> Ring3
+     *   Ring3 -> Ring0
+     *   Ring0 -> Ring3 (pierwszy start procesu z PID 0)
+     */
+    testq $3, RAMA_OFFSET_CS(%rsp)
+    jz .Lbez_swapgs_wejscie
+    swapgs
+
+.Lbez_swapgs_wejscie:
+    cld
+
+    /*
+     * RDI = RejestryStanowe*.
+     */
+    movq %rsp, %rdi
+
+    /*
+     * Wymog ABI:
+     * przed CALL RSP musi byc wyrownany do 16 bajtow.
+     *
+     * Przerwanie moze wystapic w dowolnej instrukcji kodu Ring 0, dlatego
+     * nie wolno zakladac konkretnego ulozenia RSP. Zaokraglamy stos w dol.
+     * Maksymalnie zuzywamy dodatkowe 15 bajtow, nie naruszajac zapisanej
+     * ramy, bo CALL zapisuje adres powrotu ponizej niej.
+     */
+    andq $-16, %rsp
+
+    call WspolnaObslugaPrzerwan
+
+    /*
+     * Dispatcher zwraca w RAX wskaznik ramy, z ktorej mamy wykonac iretq.
+     * Moze to byc rama tego samego procesu albo rama wybrana przez scheduler.
+     *
+     * Null oznacza krytyczne uszkodzenie schedulera/dispatchera. Nie wolno
+     * wykonac MOV RSP,0 ani kontynuowac do przypadkowej pamieci.
+     */
+    testq %rax, %rax
+    jz .Lfatalny_rsp
+
+    movq %rax, %rsp
+
+    /*
+     * Jezeli WYBRANA rama wraca do Ring 3, przed iretq przywracamy user GS.
+     *
+     * Dziala to rowniez przy pierwszym przejsciu PID0 Ring0 -> Ring3:
+     * na wejsciu nie bylo SWAPGS, tutaj zostanie wykonany jeden SWAPGS.
+     */
+    testq $3, RAMA_OFFSET_CS(%rsp)
+    jz .Lbez_swapgs_wyjscie
+    swapgs
+
+.Lbez_swapgs_wyjscie:
+    POP_GPRS
+
+    /*
+     * Usuwamy zawsze dwa ujednolicone pola:
+     *   wektor_przerwania
+     *   kod_bledu
+     *
+     * Dla wyjatku z kodem pierwsze pochodzi od stuba, drugie od CPU.
+     * Dla pozostalych oba zostaly utworzone przez stub.
+     */
+    addq $RAMA_ROZMIAR_NORMALIZACJI, %rsp
+
+    /*
+     * IRETQ sam rozpoznaje, czy wraca do Ring 0 czy Ring 3.
+     * Przy powrocie do Ring 3 pobierze dodatkowo zapisane RSP i SS.
+     */
     iretq
 
-/* * Zadeklarowanie tabeli macierzowej zbierającej wskaźniki na poszczególne pakiety 
- * dla skryptu C++ który poprosi o jej załadowanie do GDT pod numerami (Indeksy w tabeli wskaźników 0-47)
- */
-.section .data
+.Lfatalny_rsp:
+    /*
+     * Nie probujemy wywolywac loggera: jego stos lub przestrzen adresowa
+     * mogly byc przyczyna bledu. UD2 jest pomocne w emulatorze/GDB, a HLT
+     * gwarantuje zatrzymanie nawet gdy debugger kontynuuje wykonanie.
+     */
+    cli
+    ud2
+
+.Lfatalny_rsp_hlt:
+    hlt
+    jmp .Lfatalny_rsp_hlt
+
+.size wspolne_isr_wejscie, .-wspolne_isr_wejscie
+
+/* =========================================================================
+ * TABLICA ADRESOW ISR 0..47
+ * ========================================================================= */
+
+.section .rodata
 .align 8
+
+.global tablica_isr
+.type tablica_isr, @object
+
 tablica_isr:
-    .quad isr0, isr1, isr2, isr3, isr4, isr5, isr6, isr7, isr8, isr9
-    .quad isr10, isr11, isr12, isr13, isr14, isr15, isr16, isr17, isr18, isr19
-    .quad isr20, isr21, isr22, isr23, isr24, isr25, isr26, isr27, isr28, isr29
-    .quad isr30, isr31, isr32, isr33, isr34, isr35, isr36, isr37, isr38, isr39
-    .quad isr40, isr41, isr42, isr43, isr44, isr45, isr46, isr47
-    
+    .quad isr0
+    .quad isr1
+    .quad isr2
+    .quad isr3
+    .quad isr4
+    .quad isr5
+    .quad isr6
+    .quad isr7
+    .quad isr8
+    .quad isr9
+    .quad isr10
+    .quad isr11
+    .quad isr12
+    .quad isr13
+    .quad isr14
+    .quad isr15
+    .quad isr16
+    .quad isr17
+    .quad isr18
+    .quad isr19
+    .quad isr20
+    .quad isr21
+    .quad isr22
+    .quad isr23
+    .quad isr24
+    .quad isr25
+    .quad isr26
+    .quad isr27
+    .quad isr28
+    .quad isr29
+    .quad isr30
+    .quad isr31
+    .quad isr32
+    .quad isr33
+    .quad isr34
+    .quad isr35
+    .quad isr36
+    .quad isr37
+    .quad isr38
+    .quad isr39
+    .quad isr40
+    .quad isr41
+    .quad isr42
+    .quad isr43
+    .quad isr44
+    .quad isr45
+    .quad isr46
+    .quad isr47
+
+.size tablica_isr, .-tablica_isr
+
+/*
+ * Informacja dla linkera ELF: ten plik nie wymaga wykonywalnego stosu.
+ */
+.section .note.GNU-stack,"",@progbits

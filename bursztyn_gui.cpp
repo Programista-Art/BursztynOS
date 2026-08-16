@@ -1,162 +1,797 @@
 /*
- * Biblioteka Współdzielona GUI dla Bursztyn OS (Ring 3)
- * Zawiera wrappery do komunikacji z Jądrem (Syscalls)
+ * Bursztyn OS - biblioteka GUI dla aplikacji Ring 3.
+ * Wrappery BWS, prywatna sterta procesu i podstawowe widgety.
  */
 
 #include "bursztyn_gui.h"
 
-// Główne wywołanie systemowe (most między aplikacją a Jądrem)
-uint64_t bws_wywolaj(uint64_t nr_funkcji, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4) {
-    register uint64_t r8 asm("r8") = nr_funkcji;
-    register uint64_t r9 asm("r9") = arg1;
+#include <stdint.h>
+#include <stddef.h>
+
+/* =========================================================================
+ * 1. PRYWATNA STERTA APLIKACJI RING 3
+ * ========================================================================= */
+
+namespace {
+
+constexpr unsigned long WYROWNANIE_STERTY = 16UL;
+constexpr unsigned long ROZMIAR_STRONY = 4096UL;
+constexpr unsigned long MINIMALNY_BLOK = 16UL;
+
+struct alignas(16) BlokPamieci {
+    unsigned long rozmiar;
+    bool wolny;
+    BlokPamieci* nastepny;
+};
+
+static_assert(alignof(BlokPamieci) == 16,
+              "BlokPamieci musi miec wyrownanie 16 bajtow");
+static_assert((sizeof(BlokPamieci) % 16) == 0,
+              "BlokPamieci musi miec rozmiar wielokrotnosci 16 bajtow");
+
+BlokPamieci* poczatek_sterty = nullptr;
+
+bool dodaj_bez_przepelnienia(unsigned long a,
+                             unsigned long b,
+                             unsigned long* wynik) {
+    if (!wynik) return false;
+    if (a > ~0UL - b) return false;
+    *wynik = a + b;
+    return true;
+}
+
+bool wyrownaj_w_gore(unsigned long wartosc,
+                     unsigned long wyrownanie,
+                     unsigned long* wynik) {
+    if (!wynik || wyrownanie == 0) return false;
+    if ((wyrownanie & (wyrownanie - 1UL)) != 0) return false;
+
+    const unsigned long maska = wyrownanie - 1UL;
+    if (wartosc > ~0UL - maska) return false;
+
+    *wynik = (wartosc + maska) & ~maska;
+    return true;
+}
+
+bool bloki_sasiaduja(const BlokPamieci* lewy,
+                     const BlokPamieci* prawy) {
+    if (!lewy || !prawy) return false;
+
+    const uintptr_t adres_lewego =
+        reinterpret_cast<uintptr_t>(lewy);
+    const uintptr_t adres_prawego =
+        reinterpret_cast<uintptr_t>(prawy);
+
+    if (adres_lewego > UINTPTR_MAX - sizeof(BlokPamieci))
+        return false;
+
+    const uintptr_t dane =
+        adres_lewego + sizeof(BlokPamieci);
+
+    if (lewy->rozmiar > UINTPTR_MAX - dane)
+        return false;
+
+    return dane + lewy->rozmiar == adres_prawego;
+}
+
+void polacz_z_nastepnym(BlokPamieci* blok) {
+    if (!blok || !blok->wolny || !blok->nastepny)
+        return;
+
+    BlokPamieci* nastepny = blok->nastepny;
+
+    if (!nastepny->wolny ||
+        !bloki_sasiaduja(blok, nastepny)) {
+        return;
+    }
+
+    unsigned long temp = 0;
+    unsigned long nowy_rozmiar = 0;
+
+    if (!dodaj_bez_przepelnienia(
+            blok->rozmiar,
+            static_cast<unsigned long>(sizeof(BlokPamieci)),
+            &temp)) {
+        return;
+    }
+
+    if (!dodaj_bez_przepelnienia(
+            temp,
+            nastepny->rozmiar,
+            &nowy_rozmiar)) {
+        return;
+    }
+
+    blok->rozmiar = nowy_rozmiar;
+    blok->nastepny = nastepny->nastepny;
+}
+
+uint64_t spakuj_dwa_i32(int a, int b) {
+    return (static_cast<uint64_t>(
+                static_cast<uint32_t>(a)) << 32) |
+           static_cast<uint64_t>(
+                static_cast<uint32_t>(b));
+}
+
+uint64_t i32_do_u64(int wartosc) {
+    return static_cast<uint64_t>(
+        static_cast<int64_t>(wartosc));
+}
+
+int popraw_skale(int skala) {
+    if (skala < 1) return 1;
+    if (skala > 4) return 4;
+    return skala;
+}
+
+} // namespace
+
+void* gui_malloc(unsigned long rozmiar) {
+    if (rozmiar == 0)
+        return nullptr;
+
+    unsigned long potrzebne = 0;
+    if (!wyrownaj_w_gore(
+            rozmiar,
+            WYROWNANIE_STERTY,
+            &potrzebne)) {
+        return nullptr;
+    }
+
+    BlokPamieci* ostatni = nullptr;
+
+    for (BlokPamieci* blok = poczatek_sterty;
+         blok != nullptr;
+         blok = blok->nastepny) {
+
+        ostatni = blok;
+
+        if (!blok->wolny ||
+            blok->rozmiar < potrzebne) {
+            continue;
+        }
+
+        const unsigned long reszta =
+            blok->rozmiar - potrzebne;
+
+        if (reszta >=
+            sizeof(BlokPamieci) + MINIMALNY_BLOK) {
+
+            unsigned char* dane =
+                reinterpret_cast<unsigned char*>(blok + 1);
+
+            BlokPamieci* nowy =
+                reinterpret_cast<BlokPamieci*>(
+                    dane + potrzebne);
+
+            nowy->rozmiar =
+                reszta - sizeof(BlokPamieci);
+            nowy->wolny = true;
+            nowy->nastepny = blok->nastepny;
+
+            blok->rozmiar = potrzebne;
+            blok->nastepny = nowy;
+        }
+
+        blok->wolny = false;
+        return static_cast<void*>(blok + 1);
+    }
+
+    unsigned long zamawiane = 0;
+    if (!dodaj_bez_przepelnienia(
+            potrzebne,
+            static_cast<unsigned long>(sizeof(BlokPamieci)),
+            &zamawiane)) {
+        return nullptr;
+    }
+
+    unsigned long przydzielone = 0;
+    if (!wyrownaj_w_gore(
+            zamawiane,
+            ROZMIAR_STRONY,
+            &przydzielone)) {
+        return nullptr;
+    }
+
+    void* surowa_pamiec =
+        reinterpret_cast<void*>(
+            bws_wywolaj(
+                35,
+                static_cast<uint64_t>(przydzielone),
+                0, 0, 0));
+
+    if (!surowa_pamiec)
+        return nullptr;
+
+    if ((reinterpret_cast<uintptr_t>(surowa_pamiec) &
+         (WYROWNANIE_STERTY - 1UL)) != 0) {
+        return nullptr;
+    }
+
+    BlokPamieci* nowy =
+        static_cast<BlokPamieci*>(surowa_pamiec);
+
+    nowy->rozmiar =
+        przydzielone - sizeof(BlokPamieci);
+    nowy->wolny = false;
+    nowy->nastepny = nullptr;
+
+    if (ostatni)
+        ostatni->nastepny = nowy;
+    else
+        poczatek_sterty = nowy;
+
+    const unsigned long reszta =
+        nowy->rozmiar - potrzebne;
+
+    if (reszta >=
+        sizeof(BlokPamieci) + MINIMALNY_BLOK) {
+
+        unsigned char* dane =
+            reinterpret_cast<unsigned char*>(nowy + 1);
+
+        BlokPamieci* wolna_reszta =
+            reinterpret_cast<BlokPamieci*>(
+                dane + potrzebne);
+
+        wolna_reszta->rozmiar =
+            reszta - sizeof(BlokPamieci);
+        wolna_reszta->wolny = true;
+        wolna_reszta->nastepny = nullptr;
+
+        nowy->rozmiar = potrzebne;
+        nowy->nastepny = wolna_reszta;
+    }
+
+    return static_cast<void*>(nowy + 1);
+}
+
+void gui_free(void* ptr) {
+    if (!ptr || !poczatek_sterty)
+        return;
+
+    BlokPamieci* poprzedni = nullptr;
+    BlokPamieci* blok = poczatek_sterty;
+
+    while (blok &&
+           static_cast<void*>(blok + 1) != ptr) {
+        poprzedni = blok;
+        blok = blok->nastepny;
+    }
+
+    if (!blok || blok->wolny)
+        return;
+
+    blok->wolny = true;
+
+    polacz_z_nastepnym(blok);
+
+    if (poprzedni && poprzedni->wolny)
+        polacz_z_nastepnym(poprzedni);
+}
+
+void* operator new(unsigned long rozmiar) {
+    if (rozmiar == 0) rozmiar = 1;
+    return gui_malloc(rozmiar);
+}
+
+void* operator new[](unsigned long rozmiar) {
+    if (rozmiar == 0) rozmiar = 1;
+    return gui_malloc(rozmiar);
+}
+
+void operator delete(void* p) noexcept {
+    gui_free(p);
+}
+
+void operator delete[](void* p) noexcept {
+    gui_free(p);
+}
+
+void operator delete(void* p, unsigned long) noexcept {
+    gui_free(p);
+}
+
+void operator delete[](void* p, unsigned long) noexcept {
+    gui_free(p);
+}
+
+/* =========================================================================
+ * 2. GLOWNE WYWOLANIE SYSTEMOWE BWS
+ * ========================================================================= */
+
+uint64_t bws_wywolaj(uint64_t nr_funkcji,
+                     uint64_t arg1,
+                     uint64_t arg2,
+                     uint64_t arg3,
+                     uint64_t arg4) {
+    register uint64_t r8  asm("r8")  = nr_funkcji;
+    register uint64_t r9  asm("r9")  = arg1;
     register uint64_t r10 asm("r10") = arg2;
     register uint64_t r12 asm("r12") = arg3;
     register uint64_t r13 asm("r13") = arg4;
     register uint64_t rax asm("rax");
-    
-    asm volatile (
-        "syscall" 
-        : "=a" (rax) 
-        : "r" (r8), "r" (r9), "r" (r10), "r" (r12), "r" (r13) 
-        : "rcx", "r11", "memory"
+
+    asm volatile(
+        "syscall"
+        : "=a"(rax)
+        : "r"(r8),
+          "r"(r9),
+          "r"(r10),
+          "r"(r12),
+          "r"(r13)
+        : "rcx", "r11", "memory", "cc"
     );
+
     return rax;
 }
 
-// ==========================================
-// 1. STANDARDOWE API SYSTEMOWE
-// ==========================================
+/* =========================================================================
+ * 3. STANDARDOWE API SYSTEMOWE
+ * ========================================================================= */
 
-void wypisz(const char* t) { 
-    bws_wywolaj(1, (uint64_t)t); 
+void wypisz(const char* tekst) {
+    if (!tekst) return;
+
+    bws_wywolaj(
+        1,
+        reinterpret_cast<uint64_t>(tekst),
+        0, 0, 0);
 }
 
-bool utworz(const char* p) { 
-    return bws_wywolaj(2, (uint64_t)p) != 0; 
+bool utworz(const char* sciezka) {
+    if (!sciezka) return false;
+
+    return bws_wywolaj(
+        2,
+        reinterpret_cast<uint64_t>(sciezka),
+        0, 0, 0) != 0;
 }
 
-bool zapisz_plik(const char* p, const char* d, uint32_t l) { 
-    return bws_wywolaj(3, (uint64_t)p, (uint64_t)d, l) != 0; 
+bool zapisz_plik(const char* sciezka,
+                 const char* dane,
+                 uint32_t dlugosc) {
+    if (!sciezka) return false;
+    if (dlugosc != 0 && !dane) return false;
+
+    return bws_wywolaj(
+        3,
+        reinterpret_cast<uint64_t>(sciezka),
+        reinterpret_cast<uint64_t>(dane),
+        static_cast<uint64_t>(dlugosc),
+        0) != 0;
 }
 
-char pobierz_znak() { 
-    return (char)bws_wywolaj(4); 
+char pobierz_znak() {
+    return static_cast<char>(
+        bws_wywolaj(4, 0, 0, 0, 0));
 }
 
-bool czytaj_plik(const char* p, char* b, uint32_t m) { 
-    return bws_wywolaj(5, (uint64_t)p, (uint64_t)b, m) != 0; 
+bool czytaj_plik(const char* sciezka,
+                 char* bufor,
+                 uint32_t maksymalna_dlugosc) {
+    if (!sciezka) return false;
+    if (maksymalna_dlugosc != 0 && !bufor) return false;
+
+    return bws_wywolaj(
+        5,
+        reinterpret_cast<uint64_t>(sciezka),
+        reinterpret_cast<uint64_t>(bufor),
+        static_cast<uint64_t>(maksymalna_dlugosc),
+        0) != 0;
 }
 
-void bws_dzwiek_test(uint32_t czestotliwosc, uint32_t czas) {
-    // Przekazujemy częstotliwość w arg1 (r9) i czas w arg2 (r10)
-    bws_wywolaj(27, czestotliwosc, czas, 0, 0);
+void bws_dzwiek_test(uint32_t czestotliwosc,
+                     uint32_t czas) {
+    bws_wywolaj(
+        27,
+        static_cast<uint64_t>(czestotliwosc),
+        static_cast<uint64_t>(czas),
+        0, 0);
 }
 
 extern "C" {
-    bool bws_siec_dns(const char* domena, uint8_t* wyjsciowy_ip) {
-        return bws_wywolaj(28, (uint64_t)domena, (uint64_t)wyjsciowy_ip, 0, 0) != 0;
+
+bool bws_siec_dns(const char* domena,
+                  uint8_t* wyjsciowy_ip) {
+    if (!domena || !wyjsciowy_ip)
+        return false;
+
+    return bws_wywolaj(
+        28,
+        reinterpret_cast<uint64_t>(domena),
+        reinterpret_cast<uint64_t>(wyjsciowy_ip),
+        0, 0) != 0;
+}
+
+bool bws_siec_pobierz_http(uint8_t* cel_ip,
+                           const char* domena,
+                           const char* sciezka,
+                           char* bufor,
+                           uint32_t max_dlugosc) {
+    if (!cel_ip || !domena || !sciezka)
+        return false;
+
+    if (max_dlugosc != 0 && !bufor)
+        return false;
+
+    /*
+     * Zachowanie zgodnosci z aktualnym ABI BWS 29.
+     * Arg4 zawiera wskaznik i rozmiar w formacie oczekiwanym
+     * przez obecna implementacje jadra.
+     */
+    const uint64_t bufor_i_rozmiar =
+        (reinterpret_cast<uint64_t>(bufor) << 32) |
+        static_cast<uint64_t>(max_dlugosc);
+
+    return bws_wywolaj(
+        29,
+        reinterpret_cast<uint64_t>(cel_ip),
+        reinterpret_cast<uint64_t>(domena),
+        reinterpret_cast<uint64_t>(sciezka),
+        bufor_i_rozmiar) != 0;
+}
+
+bool bws_siec_pobierz_https(uint8_t* cel_ip,
+                            const char* domena,
+                            const char* sciezka,
+                            char* bufor,
+                            uint32_t max_dlugosc) {
+    if (!cel_ip || !domena || !sciezka)
+        return false;
+
+    if (max_dlugosc != 0 && !bufor)
+        return false;
+
+    const uint64_t bufor_i_rozmiar =
+        (reinterpret_cast<uint64_t>(bufor) << 32) |
+        static_cast<uint64_t>(max_dlugosc);
+
+    return bws_wywolaj(
+        30,
+        reinterpret_cast<uint64_t>(cel_ip),
+        reinterpret_cast<uint64_t>(domena),
+        reinterpret_cast<uint64_t>(sciezka),
+        bufor_i_rozmiar) != 0;
+}
+
+bool bws_tls_certyfikat_zaufany() {
+    return bws_wywolaj(
+        31, 0, 0, 0, 0) != 0;
+}
+
+__attribute__((noreturn))
+void bws_zakoncz_proces() {
+    bws_wywolaj(
+        32, 0, 0, 0, 0);
+
+    while (true)
+        asm volatile("pause");
+}
+
+__attribute__((noreturn))
+void gui_zakoncz_aplikacje() {
+    bws_zakoncz_proces();
+}
+
+} // extern "C"
+
+/* =========================================================================
+ * 4. API GRAFICZNE RING 3
+ * ========================================================================= */
+
+void gui_rysuj_okno(int x,
+                    int y,
+                    int w,
+                    int h,
+                    const char* tytul) {
+    if (w <= 0 || h <= 0 || !tytul)
+        return;
+
+    bws_wywolaj(
+        14,
+        spakuj_dwa_i32(x, y),
+        spakuj_dwa_i32(w, h),
+        reinterpret_cast<uint64_t>(tytul),
+        0);
+}
+
+void gui_wypisz_tekst(int x,
+                      int y,
+                      const char* tekst) {
+    if (!tekst)
+        return;
+
+    bws_wywolaj(
+        15,
+        i32_do_u64(x),
+        i32_do_u64(y),
+        reinterpret_cast<uint64_t>(tekst),
+        0);
+}
+
+void gui_wyczyscz_obszar(int x,
+                         int y,
+                         int w,
+                         int h) {
+    if (w <= 0 || h <= 0)
+        return;
+
+    bws_wywolaj(
+        16,
+        i32_do_u64(x),
+        i32_do_u64(y),
+        i32_do_u64(w),
+        i32_do_u64(h));
+}
+
+void gui_odswiez() {
+    bws_wywolaj(
+        17, 0, 0, 0, 0);
+}
+
+void gui_pobierz_mysz(int* x,
+                      int* y,
+                      uint8_t* przyciski) {
+    if (!x || !y || !przyciski)
+        return;
+
+    bws_wywolaj(
+        18,
+        reinterpret_cast<uint64_t>(x),
+        reinterpret_cast<uint64_t>(y),
+        reinterpret_cast<uint64_t>(przyciski),
+        0);
+}
+
+void gui_odswiez_pulpit() {
+    bws_wywolaj(
+        19, 0, 0, 0, 0);
+}
+
+void gui_wypisz_tekst_kolor(int x,
+                            int y,
+                            uint32_t kolor,
+                            const char* tekst) {
+    if (!tekst)
+        return;
+
+    bws_wywolaj(
+        20,
+        i32_do_u64(x),
+        i32_do_u64(y),
+        static_cast<uint64_t>(kolor),
+        reinterpret_cast<uint64_t>(tekst));
+}
+
+void gui_wypisz_tekst_kolor_skala(int x,
+                                  int y,
+                                  uint32_t kolor,
+                                  int skala,
+                                  const char* tekst) {
+    if (!tekst)
+        return;
+
+    const uint32_t poprawna_skala =
+        static_cast<uint32_t>(
+            popraw_skale(skala));
+
+    const uint64_t kolor_skala =
+        (static_cast<uint64_t>(poprawna_skala) << 32) |
+        static_cast<uint64_t>(kolor);
+
+    bws_wywolaj(
+        20,
+        i32_do_u64(x),
+        i32_do_u64(y),
+        kolor_skala,
+        reinterpret_cast<uint64_t>(tekst));
+}
+
+void gui_rysuj_prostokat(int x,
+                         int y,
+                         int w,
+                         int h,
+                         uint32_t kolor) {
+    if (w <= 0 || h <= 0)
+        return;
+
+    bws_wywolaj(
+        21,
+        spakuj_dwa_i32(x, y),
+        spakuj_dwa_i32(w, h),
+        static_cast<uint64_t>(kolor),
+        0);
+}
+
+void gui_ustaw_przejecie_myszy(bool stan) {
+    bws_wywolaj(
+        22,
+        stan ? 1ULL : 0ULL,
+        0, 0, 0);
+}
+
+void gui_pobierz_rozdzielczosc(int* w,
+                               int* h) {
+    if (!w || !h)
+        return;
+
+    bws_wywolaj(
+        23,
+        reinterpret_cast<uint64_t>(w),
+        reinterpret_cast<uint64_t>(h),
+        0, 0);
+}
+
+int gui_pobierz_szerokosc_znaku(uint32_t znak) {
+    const uint64_t wynik =
+        bws_wywolaj(
+            24,
+            static_cast<uint64_t>(znak),
+            0, 0, 0);
+
+    if (wynik > 64)
+        return 8;
+
+    return static_cast<int>(wynik);
+}
+
+int bws_utworz_warstwe(int x,
+                       int y,
+                       int szer,
+                       int wys,
+                       int z_order) {
+    if (szer <= 0 || wys <= 0)
+        return -1;
+
+    const uint64_t pozycja =
+        spakuj_dwa_i32(x, y);
+
+    const uint64_t rozmiar =
+        spakuj_dwa_i32(szer, wys);
+
+    const uint64_t wynik =
+        bws_wywolaj(
+            33,
+            pozycja,
+            rozmiar,
+            i32_do_u64(z_order),
+            0);
+
+    if (wynik == 0)
+        return -1;
+
+    if (wynik - 1ULL >
+        static_cast<uint64_t>(INT32_MAX)) {
+        return -1;
     }
 
-    bool bws_siec_pobierz_http(uint8_t* cel_ip, const char* domena, const char* sciezka, char* bufor, uint32_t max_dlugosc) {
-        return bws_wywolaj(29, (uint64_t)cel_ip, (uint64_t)domena, (uint64_t)sciezka, ((uint64_t)bufor << 32) | max_dlugosc) != 0;
-    }
-
-    bool bws_siec_pobierz_https(uint8_t* cel_ip, const char* domena, const char* sciezka, char* bufor, uint32_t max_dlugosc) {
-        return bws_wywolaj(30, (uint64_t)cel_ip, (uint64_t)domena, (uint64_t)sciezka, ((uint64_t)bufor << 32) | max_dlugosc) != 0;
-    }
-
-    bool bws_tls_certyfikat_zaufany() { return bws_wywolaj(31) != 0; }
+    return static_cast<int>(
+        wynik - 1ULL);
 }
 
-
-// ==========================================
-// 2. ZAAWANSOWANE API GRAFICZNE (Ring 3 GUI)
-// ==========================================
-
-void gui_rysuj_okno(int x, int y, int w, int h, const char* tytul) { 
-    // Pakowanie argumentów do zmiennych 64-bitowych (żeby ominąć limit 4 argumentów)
-    bws_wywolaj(14, ((uint64_t)x << 32) | y, ((uint64_t)w << 32) | h, (uint64_t)tytul); 
+void bws_przesun_warstwe(int nowy_x,
+                         int nowy_y) {
+    bws_wywolaj(
+        34,
+        i32_do_u64(nowy_x),
+        i32_do_u64(nowy_y),
+        0, 0);
 }
 
-void gui_wypisz_tekst(int x, int y, const char* t) { 
-    bws_wywolaj(15, x, y, (uint64_t)t); 
+/* =========================================================================
+ * 5. WIDGETY
+ * ========================================================================= */
+
+void RysujPrzycisk(int x,
+                   int y,
+                   int w,
+                   int h,
+                   uint32_t kolor_bg,
+                   uint32_t kolor_txt,
+                   const char* tekst) {
+    if (w <= 0 || h <= 0 || !tekst)
+        return;
+
+    gui_rysuj_prostokat(
+        x, y, w, h, kolor_bg);
+
+    gui_wypisz_tekst_kolor(
+        x + 4,
+        y + 2,
+        kolor_txt,
+        tekst);
 }
 
-void gui_wyczyscz_obszar(int x, int y, int w, int h) { 
-    bws_wywolaj(16, x, y, w, h); 
-}
+int oblicz_szerokosc_tekstu(const char* tekst,
+                            int skala) {
+    if (!tekst)
+        return 0;
 
-void gui_odswiez() { 
-    bws_wywolaj(17); 
-}
+    const int poprawna_skala =
+        popraw_skale(skala);
 
-void gui_pobierz_mysz(int* x, int* y, uint8_t* b) { 
-    bws_wywolaj(18, (uint64_t)x, (uint64_t)y, (uint64_t)b); 
-}
+    int szerokosc = 0;
+    size_t i = 0;
 
-void gui_odswiez_pulpit() { 
-    bws_wywolaj(19); 
-}
+    while (tekst[i] != '\0') {
+        uint32_t znak =
+            static_cast<uint8_t>(tekst[i]);
 
-void gui_wypisz_tekst_kolor(int x, int y, uint32_t kolor, const char* t) { 
-    bws_wywolaj(20, x, y, kolor, (uint64_t)t); 
-}
+        const uint8_t b0 =
+            static_cast<uint8_t>(tekst[i]);
 
-void gui_wypisz_tekst_kolor_skala(int x, int y, uint32_t kolor, int skala, const char* tekst) {
-    uint64_t kolor_skala = ((uint64_t)skala << 32) | kolor;
-    bws_wywolaj(20, x, y, kolor_skala, (uint64_t)tekst);
-}
+        if ((b0 & 0xE0U) == 0xC0U &&
+            tekst[i + 1] != '\0') {
 
+            const uint8_t b1 =
+                static_cast<uint8_t>(tekst[i + 1]);
 
-void gui_rysuj_prostokat(int x, int y, int w, int h, uint32_t kolor) { 
-    bws_wywolaj(21, ((uint64_t)x << 32) | y, ((uint64_t)w << 32) | h, kolor); 
-}
-
-void gui_ustaw_przejecie_myszy(bool stan) { 
-    bws_wywolaj(22, stan ? 1 : 0); 
-}
-
-void gui_pobierz_rozdzielczosc(int* w, int* h) { 
-    bws_wywolaj(23, (uint64_t)w, (uint64_t)h); 
-}
-
-int gui_pobierz_szerokosc_znaku(uint32_t z) {
-    return (int)bws_wywolaj(24, z);
-}
-
-
-
-// ==========================================
-// 3. ELEMENTY INTERFEJSU (WIDGETY)
-// ==========================================
-
-void RysujPrzycisk(int x, int y, int w, int h, uint32_t kolor_bg, uint32_t kolor_txt, const char* t) {
-    gui_rysuj_prostokat(x, y, w, h, kolor_bg);
-    gui_wypisz_tekst_kolor(x + 4, y + 2, kolor_txt, t);
-}
-
-// Oblicza szerokość tekstu w pikselach z uwzględnieniem skali i polskich znaków (UTF-8)
-int oblicz_szerokosc_tekstu(const char* t, int skala) {
-    int w = 0; int i = 0;
-    while (t[i] != '\0') {
-        uint32_t z = (uint8_t)t[i];
-        if (((uint8_t)t[i] & 0xE0) == 0xC0 && t[i+1] != '\0' &&
-            ((uint8_t)t[i+1] & 0xC0) == 0x80) {
-            uint8_t b1 = (uint8_t)t[i]; uint8_t b2 = (uint8_t)t[i+1];
-            z = ((b1 & 0x1F) << 6) | (b2 & 0x3F);
-            i++;
+            if ((b1 & 0xC0U) == 0x80U) {
+                znak =
+                    (static_cast<uint32_t>(
+                         b0 & 0x1FU) << 6) |
+                    static_cast<uint32_t>(
+                         b1 & 0x3FU);
+                i++;
+            }
         }
-        w += (gui_pobierz_szerokosc_znaku(z) + 1) * skala;
+
+        int szerokosc_znaku =
+            gui_pobierz_szerokosc_znaku(znak);
+
+        if (szerokosc_znaku < 0 ||
+            szerokosc_znaku > 64) {
+            szerokosc_znaku = 8;
+        }
+
+        const int przyrost =
+            (szerokosc_znaku + 1) *
+            poprawna_skala;
+
+        if (szerokosc >
+            INT32_MAX - przyrost) {
+            return INT32_MAX;
+        }
+
+        szerokosc += przyrost;
         i++;
     }
-    return w;
+
+    return szerokosc;
 }
 
-// Rysuje tekst idealnie na środku zadanego obszaru (przydatne do przycisków i ikon)
-void rysuj_tekst_wysrodkowany(int px, int py, int w, int h, int skala, uint32_t kolor, const char* t) {
-    int szer_tekstu = oblicz_szerokosc_tekstu(t, skala);
-    int wys_tekstu = 16 * skala; // Wysokość czcionki to zawsze 16px
-    int tx = px + (w / 2) - (szer_tekstu / 2);
-    int ty = py + (h / 2) - (wys_tekstu / 2);
-    gui_wypisz_tekst_kolor_skala(tx, ty, kolor, skala, t);
+void rysuj_tekst_wysrodkowany(int px,
+                              int py,
+                              int w,
+                              int h,
+                              int skala,
+                              uint32_t kolor,
+                              const char* tekst) {
+    if (!tekst || w <= 0 || h <= 0)
+        return;
+
+    const int poprawna_skala =
+        popraw_skale(skala);
+
+    const int szer_tekstu =
+        oblicz_szerokosc_tekstu(
+            tekst,
+            poprawna_skala);
+
+    const int wys_tekstu =
+        16 * poprawna_skala;
+
+    const int tx =
+        px + (w - szer_tekstu) / 2;
+
+    const int ty =
+        py + (h - wys_tekstu) / 2;
+
+    gui_wypisz_tekst_kolor_skala(
+        tx,
+        ty,
+        kolor,
+        poprawna_skala,
+        tekst);
 }

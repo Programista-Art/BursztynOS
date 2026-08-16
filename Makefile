@@ -1,173 +1,558 @@
-# ==========================================
-# Makefile dla Bursztyn OS (64-bit)
-# ==========================================
+# ============================================================================
+# Bursztyn OS - Makefile
+# x86_64, BIOS/GRUB Multiboot2 + UEFI/OVMF/GRUB Multiboot2
+#
+# Najwazniejsze cele:
+#
+#   make / make all     - buduje kernel
+#   make iso            - buduje hybrydowe ISO GRUB
+#   make bios           - alias do budowania ISO dla uruchomienia BIOS
+#   make uefi           - alias do budowania ISO dla uruchomienia UEFI
+#   make run            - QEMU w trybie BIOS
+#   make runuefi        - QEMU w trybie UEFI/OVMF
+#
+# Ten sam kernel Multiboot2 jest ladowany przez GRUB zarowno po starcie
+# legacy BIOS, jak i po starcie GRUB-a z firmware UEFI.
+# ============================================================================
 
-# Narzędzia kompilacji
-CC = x86_64-linux-gnu-gcc
-CXX = x86_64-linux-gnu-g++
-AS = x86_64-linux-gnu-as
-LD = x86_64-linux-gnu-ld
-OBJCOPY = x86_64-linux-gnu-objcopy
+.DELETE_ON_ERROR:
 
-# Wspólne flagi dla C i C++
-COMMON_FLAGS = -ffreestanding -O2 -Wall -Wextra -mcmodel=large -mno-red-zone \
-               -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none \
-               -DMBEDTLS_USER_CONFIG_FILE=\"bursztyn_mbedtls_config.h\" \
-               -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls
+# ============================================================================
+# 1. NARZEDZIA
+# ============================================================================
 
-# Rozdzielenie flag na C (mbedTLS) i C++ (Jądro)
-CFLAGS = $(COMMON_FLAGS)
-CXXFLAGS = $(COMMON_FLAGS) -fno-exceptions -fno-rtti
+CROSS ?= x86_64-linux-gnu-
 
-# KRYTYCZNA POPRAWKA: Wycofanie -Os na rzecz stabilnego -O2. 
-# Zabezpiecza to przed samowolnym generowaniem ukrytych skoków przez GCC.
-RING3_FLAGS = -ffreestanding -O2 -Wall -Wextra -mcmodel=large -mno-red-zone \
-              -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none \
-              -fno-exceptions -fno-rtti -fno-pie
+CC      := $(CROSS)gcc
+CXX     := $(CROSS)g++
+LD      := $(CROSS)ld
+OBJCOPY := $(CROSS)objcopy
+NM      := $(CROSS)nm
+READELF := $(CROSS)readelf
 
-# --- Budowanie silnika krypto (mbedTLS) ---
-MBEDTLS_OBJS = $(patsubst %.c, %.o, $(wildcard biblioteki/mbedtls/library/*.c))
+QEMU     ?= qemu-system-x86_64
+QEMU_IMG ?= qemu-img
 
-# Lista wszystkich skompilowanych obiektów jądra
-OBJS = boot.o gdt.o tss.o apic.o idt.o przerwania.o e1000.o siec.o hda.o klawiatura.o \
-       przegladarka_blob.o mysz.o zegar-rtc.o pmm.o vmm.o psf.o grafika.o syscall.o \
-       syscalls.o pci.o ahci.o ring3.o notatnik_blob.o kalkulator_blob.o loader.o \
-       kernel.o shell_blob.o menedzer_okien_blob.o uefi_gop.o bursztyn_gui.o dzwiek_blob.o \
-       heap.o mbedtls_port.o tls.o $(MBEDTLS_OBJS)
+GRUB_MKRESCUE ?= grub-mkrescue
+GRUB_FILE     ?= grub-file
+XORRISO       ?= xorriso
 
-# Główny cel domyślny
-all: system_operacyjny.bin
+# ============================================================================
+# 2. PLIKI / OBRAZY
+# ============================================================================
 
-# Reguły kompilacji dla plików C++ (.cpp do .o)
+KERNEL := system_operacyjny.bin
+ISO    := BursztynOS.iso
+
+ISO_DIR     := isodir
+GRUB_CFG    := $(ISO_DIR)/boot/grub/grub.cfg
+VIRTUAL_DISK := wirtualny_dysk.img
+
+# ============================================================================
+# 3. OVMF / UEFI
+# ============================================================================
+#
+# Obslugujemy dwa popularne uklady pakietow:
+#
+#   1. monolityczne OVMF.fd -> QEMU -bios
+#   2. OVMF_CODE.fd + OVMF_VARS.fd -> dwa urzadzenia pflash
+#
+# Sciezki mozna zawsze nadpisac:
+#
+#   make runuefi OVMF_MONO=/moja/sciezka/OVMF.fd
+#
+# albo:
+#
+#   make runuefi OVMF_CODE=/.../OVMF_CODE.fd OVMF_VARS=/.../OVMF_VARS.fd
+#
+
+OVMF_MONO ?= $(firstword \
+	$(wildcard /usr/share/ovmf/OVMF.fd) \
+	$(wildcard /usr/share/OVMF/OVMF.fd) \
+	$(wildcard /usr/share/qemu/OVMF.fd))
+
+OVMF_CODE ?= $(firstword \
+	$(wildcard /usr/share/OVMF/OVMF_CODE.fd) \
+	$(wildcard /usr/share/OVMF/OVMF_CODE_4M.fd) \
+	$(wildcard /usr/share/edk2/x64/OVMF_CODE.fd) \
+	$(wildcard /usr/share/edk2/ovmf/OVMF_CODE.fd))
+
+OVMF_VARS ?= $(firstword \
+	$(wildcard /usr/share/OVMF/OVMF_VARS.fd) \
+	$(wildcard /usr/share/OVMF/OVMF_VARS_4M.fd) \
+	$(wildcard /usr/share/edk2/x64/OVMF_VARS.fd) \
+	$(wildcard /usr/share/edk2/ovmf/OVMF_VARS.fd))
+
+OVMF_VARS_RUNTIME := .bursztyn_ovmf_vars.fd
+
+# ============================================================================
+# 4. FLAGI KOMPILACJI
+# ============================================================================
+
+CPU_FLAGS := \
+	-mcmodel=large \
+	-mno-red-zone \
+	-mno-mmx \
+	-mno-sse \
+	-mno-sse2
+
+HARDEN_FLAGS := \
+	-fno-stack-protector \
+	-fcf-protection=none \
+	-fno-pic \
+	-fno-pie
+
+FREESTANDING_FLAGS := \
+	-ffreestanding \
+	-fno-asynchronous-unwind-tables \
+	-fno-unwind-tables
+
+WARN_CXX := \
+	-Wall \
+	-Wextra \
+	-Wpedantic
+
+WARN_C := \
+	-Wall \
+	-Wextra
+
+MBEDTLS_INCLUDES := \
+	-Ibiblioteki/mbedtls/include \
+	-Ibiblioteki/mbedtls
+
+MBEDTLS_CONFIG := \
+	-DMBEDTLS_USER_CONFIG_FILE=\"bursztyn_mbedtls_config.h\"
+
+KERNEL_CXXFLAGS := \
+	-std=gnu++17 \
+	-O2 \
+	$(FREESTANDING_FLAGS) \
+	$(CPU_FLAGS) \
+	$(HARDEN_FLAGS) \
+	$(WARN_CXX) \
+	-fno-exceptions \
+	-fno-rtti \
+	$(MBEDTLS_CONFIG) \
+	$(MBEDTLS_INCLUDES)
+
+MBEDTLS_CFLAGS := \
+	-std=gnu11 \
+	-O2 \
+	$(FREESTANDING_FLAGS) \
+	$(CPU_FLAGS) \
+	$(HARDEN_FLAGS) \
+	$(WARN_C) \
+	$(MBEDTLS_CONFIG) \
+	$(MBEDTLS_INCLUDES)
+
+RING3_FLAGS := \
+	-std=gnu++17 \
+	-O2 \
+	$(FREESTANDING_FLAGS) \
+	$(CPU_FLAGS) \
+	$(HARDEN_FLAGS) \
+	$(WARN_CXX) \
+	-fno-exceptions \
+	-fno-rtti
+
+#
+# Pliki .S kompilujemy przez GCC, nie bezposrednio przez `as`.
+# Dzieki temu zachowujemy prawidlowa obsluge assembler-with-cpp dla .S.
+#
+ASM_FLAGS := \
+	-ffreestanding \
+	-mno-red-zone \
+	-fno-pic \
+	-fno-pie
+
+KERNEL_LDFLAGS := \
+	-T linker.ld \
+	-nostdlib \
+	-no-pie \
+	-static \
+	-Wl,-z,noexecstack \
+	-Wl,-z,max-page-size=0x1000 \
+	-Wl,--build-id=none
+
+RING3_LDFLAGS := \
+	-nostdlib \
+	-no-pie
+
+# ============================================================================
+# 5. LINKERY APLIKACJI .bur
+# ============================================================================
+
+#
+# Shell, Kalkulator i Menedzer Okien maja obecnie identyczny kontrakt BUR:
+#
+#   TEXT off 0x1000, size 0x8000, VA 0x601000
+#   DATA off 0x9000, size 0x20000, VA 0x609000
+#
+# Dlatego korzystaja ze wspolnego, zweryfikowanego shell_linker.ld.
+#
+RING3_STD_LINKER := shell_linker.ld
+
+NOTATNIK_LINKER := notatnik_linker.ld
+
+PRZEGLADARKA_LINKER := programy/przegladarka_linker.ld
+
+# ============================================================================
+# 6. MBEDTLS
+# ============================================================================
+
+MBEDTLS_SRCS := $(wildcard biblioteki/mbedtls/library/*.c)
+MBEDTLS_OBJS := $(MBEDTLS_SRCS:.c=.o)
+
+# ============================================================================
+# 7. OBIEKTY JADRA
+# ============================================================================
+
+OBJS := \
+	boot.o \
+	gdt.o \
+	tss.o \
+	apic.o \
+	idt.o \
+	przerwania.o \
+	e1000.o \
+	siec.o \
+	hda.o \
+	klawiatura.o \
+	przegladarka_blob.o \
+	mysz.o \
+	zegar-rtc.o \
+	pmm.o \
+	vmm.o \
+	psf.o \
+	grafika.o \
+	syscall.o \
+	syscalls.o \
+	pci.o \
+	ahci.o \
+	ring3.o \
+	notatnik_blob.o \
+	kalkulator_blob.o \
+	loader.o \
+	kernel.o \
+	shell_blob.o \
+	menedzer_okien_blob.o \
+	uefi_gop.o \
+	dzwiek_blob.o \
+	heap.o \
+	scheduler.o \
+	skladacz_obrazu.o \
+	mbedtls_port.o \
+	tls.o \
+	bezpieczenstwo.o \
+	$(MBEDTLS_OBJS)
+
+# ============================================================================
+# 8. CELE GLOWNE
+# ============================================================================
+
+.PHONY: \
+	all kernel iso bios uefi run runuefi \
+	check-kernel check-tools check-ovmf \
+	prepare-disk clean clear distclean cdysk rm help
+
+all: $(KERNEL)
+
+kernel: $(KERNEL)
+
+#
+# `bios` i `uefi` buduja to samo hybrydowe ISO GRUB.
+# Roznica jest w firmware QEMU podczas uruchamiania.
+#
+bios: iso
+
+uefi: iso
+
+# ============================================================================
+# 9. REGULY OGOLNE
+# ============================================================================
+
 %.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
-# Reguły kompilacji dla plików C (.c do .o) - dla mbedTLS
-biblioteki/mbedtls/library/%.o: biblioteki/mbedtls/library/%.c
-	$(CC) $(CFLAGS) -c $< -o $@
-
-# Reguły kompilacji dla plików Asemblera (.S do .o)
 %.o: %.S
-	$(AS) -c $< -o $@
+	$(CC) $(ASM_FLAGS) -c $< -o $@
 
-# Kompilacja portu łączącego Jądro z mbedTLS
-mbedtls_port.o: biblioteki/mbedtls/mbedtls_port.cpp
-	$(CXX) $(CXXFLAGS) -c biblioteki/mbedtls/mbedtls_port.cpp -o mbedtls_port.o
+biblioteki/mbedtls/library/%.o: biblioteki/mbedtls/library/%.c
+	$(CC) $(MBEDTLS_CFLAGS) -c $< -o $@
 
-# === NOWY STEROWNIK DŹWIĘKU INTEL HDA ===
-hda.o: sterowniki/dzwiek/hda.cpp
-	$(CXX) $(CXXFLAGS) -fno-pie -c sterowniki/dzwiek/hda.cpp -o hda.o    
+# ============================================================================
+# 10. OBIEKTY ZE SPECJALNYMI SCIEZKAMI
+# ============================================================================
 
-# === STEROWNIK UEFI GOP ===
-uefi_gop.o: sterowniki/grafika/uefi_gop.cpp
-	$(CXX) $(CXXFLAGS) -c sterowniki/grafika/uefi_gop.cpp -o uefi_gop.o    
+mbedtls_port.o: biblioteki/mbedtls/mbedtls_port.cpp biblioteki/mbedtls/bursztyn_mbedtls_config.h
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
-# BIBLIOTEKA GUI (RING 3) - Używa RING3_FLAGS (-Os)
-bursztyn_gui.o: bursztyn_gui.cpp
-	$(CXX) $(RING3_FLAGS) -c bursztyn_gui.cpp -o bursztyn_gui.o
+hda.o: sterowniki/dzwiek/hda.cpp sterowniki/dzwiek/hda.h pamiec.h pci.h
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
-# === BUDOWANIE POWŁOKI BURSZTYNA (RING 3) ===
-shell_tmp.o: shell.cpp
-	$(CXX) $(RING3_FLAGS) -c shell.cpp -o shell_tmp.o
+uefi_gop.o: sterowniki/grafika/uefi_gop.cpp sterowniki/grafika/uefi_gop.h
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
-shell_blob.o: shell_tmp.o bursztyn_gui.o
-	$(LD) -T notatnik_linker.ld -nostdlib -no-pie shell_tmp.o bursztyn_gui.o -o shell.elf
+# ============================================================================
+# 11. BIBLIOTEKA GUI RING 3
+# ============================================================================
+
+bursztyn_gui.o: bursztyn_gui.cpp bursztyn_gui.h
+	$(CXX) $(RING3_FLAGS) -c $< -o $@
+
+# ============================================================================
+# 12. SHELL .bur
+# ============================================================================
+
+shell_tmp.o: shell.cpp bursztyn_gui.h
+	$(CXX) $(RING3_FLAGS) -c $< -o $@
+
+shell_blob.o: shell_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
+	$(LD) -T $(RING3_STD_LINKER) $(RING3_LDFLAGS) \
+		shell_tmp.o bursztyn_gui.o -o shell.elf
 	$(OBJCOPY) -O binary shell.elf shell.bin
 	$(LD) -r -b binary shell.bin -o shell_blob.o
 
-# Budowanie Przeglądarki Hussar (Ring 3)
-przegladarka_tmp.o: programy/przegladarka.cpp
-	$(CXX) $(RING3_FLAGS) -c programy/przegladarka.cpp -o przegladarka_tmp.o
+# ============================================================================
+# 13. PRZEGLADARKA HUSSAR .bur
+# ============================================================================
 
-przegladarka_blob.o: przegladarka_tmp.o bursztyn_gui.o
-	$(LD) -T programy/przegladarka_linker.ld -nostdlib -no-pie przegladarka_tmp.o bursztyn_gui.o -o przegladarka.elf
+przegladarka_tmp.o: programy/przegladarka.cpp programy/http_kody.h bursztyn_gui.h
+	$(CXX) $(RING3_FLAGS) -c $< -o $@
+
+przegladarka_blob.o: przegladarka_tmp.o bursztyn_gui.o $(PRZEGLADARKA_LINKER)
+	$(LD) -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) \
+		przegladarka_tmp.o bursztyn_gui.o -o przegladarka.elf
 	$(OBJCOPY) -O binary przegladarka.elf przegladarka.bin
 	$(LD) -r -b binary przegladarka.bin -o przegladarka_blob.o
 
-# BUDOWANIE NOTATNIKA (RING 3)
-notatnik_tmp.o: notatnik.cpp
-	$(CXX) $(RING3_FLAGS) -c notatnik.cpp -o notatnik_tmp.o
+# ============================================================================
+# 14. NOTATNIK .bur
+# ============================================================================
 
-notatnik_blob.o: notatnik_tmp.o bursztyn_gui.o
-	$(LD) -T notatnik_linker.ld -nostdlib -no-pie notatnik_tmp.o bursztyn_gui.o -o notatnik.elf
+notatnik_tmp.o: notatnik.cpp bursztyn_gui.h
+	$(CXX) $(RING3_FLAGS) -c $< -o $@
+
+notatnik_blob.o: notatnik_tmp.o bursztyn_gui.o $(NOTATNIK_LINKER)
+	$(LD) -T $(NOTATNIK_LINKER) $(RING3_LDFLAGS) \
+		notatnik_tmp.o bursztyn_gui.o -o notatnik.elf
 	$(OBJCOPY) -O binary notatnik.elf notatnik.bin
 	$(LD) -r -b binary notatnik.bin -o notatnik_blob.o
 
-# === BUDOWANIE KALKULATORA (RING 3) ===
-kalkulator_tmp.o: kalkulator.cpp
-	$(CXX) $(RING3_FLAGS) -c kalkulator.cpp -o kalkulator_tmp.o
+# ============================================================================
+# 15. KALKULATOR .bur
+# ============================================================================
 
-kalkulator_blob.o: kalkulator_tmp.o bursztyn_gui.o
-	$(LD) -T notatnik_linker.ld -nostdlib -no-pie kalkulator_tmp.o bursztyn_gui.o -o kalkulator.elf
+kalkulator_tmp.o: kalkulator.cpp bursztyn_gui.h
+	$(CXX) $(RING3_FLAGS) -c $< -o $@
+
+kalkulator_blob.o: kalkulator_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
+	$(LD) -T $(RING3_STD_LINKER) $(RING3_LDFLAGS) \
+		kalkulator_tmp.o bursztyn_gui.o -o kalkulator.elf
 	$(OBJCOPY) -O binary kalkulator.elf kalkulator.bin
 	$(LD) -r -b binary kalkulator.bin -o kalkulator_blob.o
 
-# BUDOWANIE MENEDZERA OKIEN (RING 3)
-menedzer_okien_tmp.o: menedzer_okien.cpp
-	$(CXX) $(RING3_FLAGS) -c menedzer_okien.cpp -o menedzer_okien_tmp.o
+# ============================================================================
+# 16. MENEDZER OKIEN .bur
+# ============================================================================
 
-menedzer_okien_blob.o: menedzer_okien_tmp.o bursztyn_gui.o
-	$(LD) -T notatnik_linker.ld -nostdlib -no-pie menedzer_okien_tmp.o bursztyn_gui.o -o menedzer_okien.elf
+menedzer_okien_tmp.o: menedzer_okien.cpp bursztyn_gui.h
+	$(CXX) $(RING3_FLAGS) -c $< -o $@
+
+menedzer_okien_blob.o: menedzer_okien_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
+	$(LD) -T $(RING3_STD_LINKER) $(RING3_LDFLAGS) \
+		menedzer_okien_tmp.o bursztyn_gui.o -o menedzer_okien.elf
 	$(OBJCOPY) -O binary menedzer_okien.elf menedzer_okien.bin
 	$(LD) -r -b binary menedzer_okien.bin -o menedzer_okien_blob.o
 
-# === DODANIE PLIKU WAV BEZPOŚREDNIO DO JĄDRA ===
+# ============================================================================
+# 17. DZWIEK WAV OSADZONY W JADRZE
+# ============================================================================
+
 dzwiek.wav:
-	@echo "UWAGA: Brak pliku dzwiek.wav! Generuje pusty plik (odegra sie dzwiek zastepczy)."
-	touch dzwiek.wav
+	@echo "UWAGA: brak dzwiek.wav - tworze pusty plik zastepczy."
+	@touch $@
 
 dzwiek_blob.o: dzwiek.wav
-	$(LD) -r -b binary dzwiek.wav -o dzwiek_blob.o
+	$(LD) -r -b binary $< -o $@
 
-# KONSOLIDACJA JĄDRA 
-system_operacyjny.bin: $(OBJS) linker.ld
-	$(CXX) -T linker.ld -nostdlib -no-pie -z noexecstack -o system_operacyjny.bin $(OBJS) -lgcc
+# ============================================================================
+# 18. LINKOWANIE JADRA
+# ============================================================================
 
-# === BUDOWANIE OBRAZU ISO I KONFIGURACJA GRUB-A ===
-iso: system_operacyjny.bin
-	mkdir -p isodir/boot/grub
-	cp system_operacyjny.bin isodir/boot/
-	echo 'set timeout=0' > isodir/boot/grub/grub.cfg
-	echo 'set default=0' >> isodir/boot/grub/grub.cfg
-	echo 'menuentry "Bursztyn OS" {' >> isodir/boot/grub/grub.cfg
-	echo '    insmod all_video' >> isodir/boot/grub/grub.cfg
-	echo '    set gfxmode=1024x768x32,auto' >> isodir/boot/grub/grub.cfg
-	echo '    set gfxpayload=keep' >> isodir/boot/grub/grub.cfg
-	echo '    multiboot2 /boot/system_operacyjny.bin' >> isodir/boot/grub/grub.cfg
-	echo '    boot' >> isodir/boot/grub/grub.cfg
-	echo '}' >> isodir/boot/grub/grub.cfg
-	grub-mkrescue -o BursztynOS.iso isodir --xorriso=xorriso
+$(KERNEL): $(OBJS) linker.ld
+	$(CXX) $(KERNEL_LDFLAGS) -o $@ $(OBJS) -lgcc
 
-# === URUCHOMIENIE W QEMU (LINUX - ALSA + INTEL HDA) ===
-run: iso
-	if [ ! -f wirtualny_dysk.img ]; then qemu-img create -f raw wirtualny_dysk.img 40M; fi
-	if [ -f tapeta.bmp ]; then dd if=tapeta.bmp of=wirtualny_dysk.img bs=512 seek=10 conv=notrunc; fi
-	
-	qemu-system-x86_64 \
-		-accel tcg,thread=single \
-		-cdrom BursztynOS.iso \
-		-drive id=disk,file=wirtualny_dysk.img,format=raw,if=none \
-		-device ahci,id=ahci \
-		-device ide-hd,drive=disk,bus=ahci.0 \
-		-netdev user,id=n1 \
-		-device e1000,netdev=n1 \
-		-audiodev alsa,id=snd \
-		-device intel-hda \
-		-device hda-output,audiodev=snd \
-		-m 2G \
-		-vga std \
-		-serial stdio
+# ============================================================================
+# 19. KONTROLA MULTIBOOT2
+# ============================================================================
 
-# === CZYSZCZENIE PROJEKTU ===
-clear:
+check-kernel: $(KERNEL)
+	@if command -v $(GRUB_FILE) >/dev/null 2>&1; then \
+		if $(GRUB_FILE) --is-x86-multiboot2 $(KERNEL); then \
+			echo "[OK] $(KERNEL) jest poprawnym obrazem Multiboot2."; \
+		else \
+			echo "[BLAD] GRUB nie rozpoznaje $(KERNEL) jako Multiboot2."; \
+			exit 1; \
+		fi; \
+	else \
+		echo "[UWAGA] Brak grub-file - pomijam dodatkowa walidacje Multiboot2."; \
+	fi
+
+# ============================================================================
+# 20. ISO GRUB - BIOS + UEFI
+# ============================================================================
+
+$(GRUB_CFG): $(KERNEL)
+	@mkdir -p $(ISO_DIR)/boot/grub
+	@cp $(KERNEL) $(ISO_DIR)/boot/
+	@printf '%s\n' \
+		'set timeout=0' \
+		'set default=0' \
+		'' \
+		'menuentry "Bursztyn OS" {' \
+		'    insmod all_video' \
+		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxpayload=keep' \
+		'    multiboot2 /boot/system_operacyjny.bin' \
+		'    boot' \
+		'}' \
+		> $(GRUB_CFG)
+
+$(ISO): check-kernel $(GRUB_CFG)
+	$(GRUB_MKRESCUE) -o $@ $(ISO_DIR) --xorriso=$(XORRISO)
+
+iso: $(ISO)
+
+# ============================================================================
+# 21. DYSK TESTOWY
+# ============================================================================
+
+$(VIRTUAL_DISK):
+	$(QEMU_IMG) create -f raw $@ 40M
+
+prepare-disk: $(VIRTUAL_DISK)
+	@if [ -f tapeta.bmp ]; then \
+		echo "[QEMU] Kopiuje tapeta.bmp do sektora 10 dysku testowego."; \
+		dd if=tapeta.bmp of=$(VIRTUAL_DISK) bs=512 seek=10 conv=notrunc status=none; \
+	fi
+
+# ============================================================================
+# 22. QEMU - WSPOLNE OPCJE
+# ============================================================================
+
+QEMU_COMMON_ARGS := \
+	-accel tcg,thread=single \
+	-drive id=disk,file=$(VIRTUAL_DISK),format=raw,if=none \
+	-device ich9-ahci,id=ahci \
+	-device ide-hd,drive=disk,bus=ahci.0,unit=0 \
+	-netdev user,id=n1 \
+	-device e1000,netdev=n1 \
+	-audiodev alsa,id=snd \
+	-device intel-hda \
+	-device hda-output,audiodev=snd \
+	-m 2G \
+	-vga std \
+	-serial stdio
+
+# ============================================================================
+# 23. RUN - LEGACY BIOS
+# ============================================================================
+
+run: iso prepare-disk
+	$(QEMU) \
+		$(QEMU_COMMON_ARGS) \
+		-cdrom $(ISO)
+
+# ============================================================================
+# 24. RUNUEFI - UEFI / OVMF
+# ============================================================================
+
+check-ovmf:
+	@if [ -n "$(OVMF_MONO)" ]; then \
+		echo "[OK] OVMF monolityczne: $(OVMF_MONO)"; \
+	elif [ -n "$(OVMF_CODE)" ] && [ -n "$(OVMF_VARS)" ]; then \
+		echo "[OK] OVMF CODE: $(OVMF_CODE)"; \
+		echo "[OK] OVMF VARS: $(OVMF_VARS)"; \
+	else \
+		echo "[BLAD] Nie znaleziono kompletnego firmware OVMF."; \
+		echo "Zainstaluj pakiet ovmf albo podaj OVMF_MONO=..."; \
+		echo "ewentualnie OVMF_CODE=... OVMF_VARS=..."; \
+		exit 1; \
+	fi
+
+runuefi: uefi prepare-disk check-ovmf
+	@if [ -n "$(OVMF_MONO)" ]; then \
+		echo "[QEMU] Start Bursztyn OS przez UEFI/OVMF (-bios)."; \
+		exec $(QEMU) \
+			-bios "$(OVMF_MONO)" \
+			$(QEMU_COMMON_ARGS) \
+			-cdrom $(ISO); \
+	else \
+		echo "[QEMU] Start Bursztyn OS przez UEFI/OVMF (pflash CODE+VARS)."; \
+		cp "$(OVMF_VARS)" "$(OVMF_VARS_RUNTIME)"; \
+		exec $(QEMU) \
+			-drive if=pflash,format=raw,readonly=on,file="$(OVMF_CODE)" \
+			-drive if=pflash,format=raw,file="$(OVMF_VARS_RUNTIME)" \
+			$(QEMU_COMMON_ARGS) \
+			-cdrom $(ISO); \
+	fi
+
+# ============================================================================
+# 25. KONTROLA NARZEDZI
+# ============================================================================
+
+check-tools:
+	@set -e; \
+	for narzedzie in \
+		$(CC) $(CXX) $(LD) $(OBJCOPY) \
+		$(QEMU) $(QEMU_IMG) $(GRUB_MKRESCUE) $(XORRISO); \
+	do \
+		if ! command -v $$narzedzie >/dev/null 2>&1; then \
+			echo "[BRAK] $$narzedzie"; \
+			exit 1; \
+		fi; \
+	done; \
+	echo "[OK] Podstawowe narzedzia sa dostepne."
+
+# ============================================================================
+# 26. CZYSZCZENIE
+# ============================================================================
+
+clean:
 	rm -f *.o *.bin *.elf *.iso
 	rm -f biblioteki/mbedtls/library/*.o
-	rm -rf isodir
+	rm -f $(OVMF_VARS_RUNTIME)
+	rm -rf $(ISO_DIR)
+
+#
+# Zachowanie starej nazwy `clear`.
+#
+clear: clean
+
 cdysk:
-	rm -rf wirtualny_dysk.img
+	rm -f $(VIRTUAL_DISK)
 
-rm:
-	rm -f *.o *.bin *.elf *.iso
-	rm -f biblioteki/mbedtls/library/*.o
-	rm -rf wirtualny_dysk.img
-	rm -rf isodir
+distclean: clean cdysk
+
+#
+# Zachowanie starego `make rm`, ale teraz jako alias pelnego czyszczenia.
+#
+rm: distclean
+
+# ============================================================================
+# 27. POMOC
+# ============================================================================
+
+help:
+	@echo "Bursztyn OS - cele Makefile:"
+	@echo "  make all       - zbuduj kernel"
+	@echo "  make iso       - zbuduj hybrydowe ISO GRUB"
+	@echo "  make bios      - zbuduj ISO do startu BIOS"
+	@echo "  make uefi      - zbuduj ISO do startu UEFI"
+	@echo "  make run       - uruchom QEMU w trybie BIOS"
+	@echo "  make runuefi   - uruchom QEMU z OVMF/UEFI"
+	@echo "  make check-tools - sprawdz wymagane narzedzia"
+	@echo "  make clean     - usun artefakty kompilacji"
+	@echo "  make cdysk     - usun wirtualny dysk"
+	@echo "  make distclean - clean + cdysk"

@@ -1,161 +1,656 @@
 /*
- * Port integracyjny mbedTLS -> Bursztyn OS
+ * Bursztyn OS - port mbedTLS 2.28.x
+ *
+ * Nie ma tutaj rand(), LCG ani stalego seeda.
+ * Brak kryptograficznego zrodla losowosci powoduje fail-closed.
  */
+
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
+#include <stdarg.h>
 
-extern "C" {
-    void mbedtls_memory_buffer_alloc_init(unsigned char *buf, size_t len);
-    int snprintf_dummy(char * s, size_t n, const char * format, ...) { (void)s; (void)n; (void)format; return 0; }
-    int printf_dummy(const char * format, ...) { (void)format; return 0; }
+#include "mbedtls/entropy.h"
+#include "mbedtls/memory_buffer_alloc.h"
+#include "mbedtls/platform.h"
 
-    void *memset(void *s, int c, size_t n) {
-        unsigned char *p = (unsigned char *)s;
-        while (n--) *p++ = (unsigned char)c;
-        return s;
+namespace {
+
+constexpr size_t MBEDTLS_HEAP_SIZE =
+    256U * 1024U;
+
+alignas(64)
+unsigned char mbedtls_heap[
+    MBEDTLS_HEAP_SIZE
+];
+
+bool mbedtls_port_gotowy =
+    false;
+
+}
+
+/*
+ * Docelowy hook kernela.
+ *
+ * Implementacja MUSI byc CSPRNG/bezpiecznym zrodlem entropii.
+ * Nie uzywaj stalego seeda, LCG, samego RDTSC ani samego RTC.
+ */
+extern "C" bool bursztyn_krypto_wypelnij_losowe(
+    uint8_t* bufor,
+    size_t dlugosc
+) __attribute__((weak));
+
+extern "C" int mbedtls_hardware_poll(
+    void* data,
+    unsigned char* output,
+    size_t len,
+    size_t* olen
+) {
+    (void)data;
+
+    if (!olen) {
+        return
+            MBEDTLS_ERR_ENTROPY_SOURCE_FAILED;
     }
 
-    void *memcpy(void *dest, const void *src, size_t n) {
-        unsigned char *d = (unsigned char *)dest;
-        const unsigned char *s = (const unsigned char *)src;
-        while (n--) *d++ = *s++;
-        return dest;
-    }
+    *olen =
+        0;
 
-    void *memmove(void *dest, const void *src, size_t n) {
-        unsigned char *d = (unsigned char *)dest;
-        const unsigned char *s = (const unsigned char *)src;
-        if (d == s) return d;
-        if (d < s) {
-            while (n--) *d++ = *s++;
-        } else {
-            d += n;
-            s += n;
-            while (n--) *(--d) = *(--s);
-        }
-        return dest;
-    }
-
-    int memcmp(const void *s1, const void *s2, size_t n) {
-        const unsigned char *p1 = (const unsigned char *)s1;
-        const unsigned char *p2 = (const unsigned char *)s2;
-        while (n--) {
-            if (*p1 != *p2) return *p1 - *p2;
-            p1++; p2++;
-        }
+    if (len == 0) {
         return 0;
     }
 
-    size_t strlen(const char *s) {
-        size_t len = 0;
-        while (s[len]) len++;
-        return len;
+    if (!output ||
+        !bursztyn_krypto_wypelnij_losowe) {
+
+        return
+            MBEDTLS_ERR_ENTROPY_SOURCE_FAILED;
     }
 
-    char *strncpy(char *dest, const char *src, size_t n) {
-        size_t i;
-        for (i = 0; i < n && src[i] != '\0'; i++) {
-            dest[i] = src[i];
-        }
-        for ( ; i < n; i++) {
-            dest[i] = '\0';
-        }
+    if (!bursztyn_krypto_wypelnij_losowe(
+            output,
+            len)) {
+
+        return
+            MBEDTLS_ERR_ENTROPY_SOURCE_FAILED;
+    }
+
+    *olen =
+        len;
+
+    return 0;
+}
+
+/* -------------------------------------------------------------------------
+ * Minimalne funkcje libc wymagane przez kod mbedTLS
+ * ------------------------------------------------------------------------- */
+
+extern "C" void* memset(
+    void* dest,
+    int value,
+    size_t n
+) {
+    if (!dest) {
         return dest;
     }
 
-    void *__memcpy_chk(void *dest, const void *src, size_t len, size_t destlen) {
-        (void)destlen;
-        return memcpy(dest, src, len);
+    unsigned char* p =
+        static_cast<unsigned char*>(
+            dest
+        );
+
+    const unsigned char v =
+        static_cast<unsigned char>(
+            value
+        );
+
+    while (n-- != 0) {
+        *p++ =
+            v;
     }
 
-    void *__memset_chk(void *dest, int c, size_t len, size_t destlen) {
-        (void)destlen;
-        return memset(dest, c, len);
+    return dest;
+}
+
+extern "C" void* memcpy(
+    void* dest,
+    const void* src,
+    size_t n
+) {
+    if (!dest ||
+        !src) {
+
+        return dest;
     }
 
-    int __vsnprintf_chk(char *s, size_t maxlen, int flag, size_t os, const char *format, __builtin_va_list ap) {
-        (void)s; (void)maxlen; (void)flag; (void)os; (void)format; (void)ap;
+    unsigned char* d =
+        static_cast<unsigned char*>(
+            dest
+        );
+
+    const unsigned char* s =
+        static_cast<const unsigned char*>(
+            src
+        );
+
+    while (n-- != 0) {
+        *d++ =
+            *s++;
+    }
+
+    return dest;
+}
+
+extern "C" void* memmove(
+    void* dest,
+    const void* src,
+    size_t n
+) {
+    if (!dest ||
+        !src ||
+        dest == src ||
+        n == 0) {
+
+        return dest;
+    }
+
+    unsigned char* d =
+        static_cast<unsigned char*>(
+            dest
+        );
+
+    const unsigned char* s =
+        static_cast<const unsigned char*>(
+            src
+        );
+
+    if (d < s) {
+        while (n-- != 0) {
+            *d++ =
+                *s++;
+        }
+    } else {
+        d +=
+            n;
+
+        s +=
+            n;
+
+        while (n-- != 0) {
+            *--d =
+                *--s;
+        }
+    }
+
+    return dest;
+}
+
+extern "C" int memcmp(
+    const void* lhs,
+    const void* rhs,
+    size_t n
+) {
+    if (n == 0) {
         return 0;
     }
 
-    int strcmp(const char *s1, const char *s2) {
-        while (*s1 && (*s1 == *s2)) { s1++; s2++; }
-        return *(const unsigned char*)s1 - *(const unsigned char*)s2;
+    if (!lhs) {
+        return rhs ? -1 : 0;
     }
 
-    int strncmp(const char *s1, const char *s2, size_t n) {
-        while (n && *s1 && (*s1 == *s2)) { ++s1; ++s2; --n; }
-        if (n == 0) return 0;
-        return *(const unsigned char*)s1 - *(const unsigned char*)s2;
+    if (!rhs) {
+        return 1;
     }
 
-    char *strchr(const char *s, int c) {
-        while (*s != (char)c) {
-            if (!*s++) return NULL;
+    const unsigned char* a =
+        static_cast<const unsigned char*>(
+            lhs
+        );
+
+    const unsigned char* b =
+        static_cast<const unsigned char*>(
+            rhs
+        );
+
+    for (size_t i = 0;
+         i < n;
+         ++i) {
+
+        if (a[i] !=
+            b[i]) {
+
+            return
+                a[i] <
+                        b[i]
+                    ? -1
+                    : 1;
         }
-        return (char *)s;
     }
 
-    char *strstr(const char *haystack, const char *needle) {
-        size_t n = 0;
-        while (needle[n]) n++; 
-        if (n == 0) return (char *)haystack;
-        while (*haystack) {
-            size_t i = 0;
-            while (haystack[i] == needle[i]) {
-                i++;
-                if (i == n) return (char *)haystack;
-            }
-            haystack++;
+    return 0;
+}
+
+extern "C" size_t strlen(
+    const char* s
+) {
+    if (!s) {
+        return 0;
+    }
+
+    size_t n =
+        0;
+
+    while (s[n] != '\0') {
+        ++n;
+    }
+
+    return n;
+}
+
+extern "C" int strcmp(
+    const char* lhs,
+    const char* rhs
+) {
+    if (!lhs) {
+        return rhs ? -1 : 0;
+    }
+
+    if (!rhs) {
+        return 1;
+    }
+
+    while (*lhs != '\0' &&
+           *lhs == *rhs) {
+
+        ++lhs;
+        ++rhs;
+    }
+
+    const unsigned char a =
+        static_cast<unsigned char>(
+            *lhs
+        );
+
+    const unsigned char b =
+        static_cast<unsigned char>(
+            *rhs
+        );
+
+    return
+        a == b
+            ? 0
+            : (a < b ? -1 : 1);
+}
+
+extern "C" int strncmp(
+    const char* lhs,
+    const char* rhs,
+    size_t n
+) {
+    if (n == 0) {
+        return 0;
+    }
+
+    if (!lhs) {
+        return rhs ? -1 : 0;
+    }
+
+    if (!rhs) {
+        return 1;
+    }
+
+    for (size_t i = 0;
+         i < n;
+         ++i) {
+
+        const unsigned char a =
+            static_cast<unsigned char>(
+                lhs[i]
+            );
+
+        const unsigned char b =
+            static_cast<unsigned char>(
+                rhs[i]
+            );
+
+        if (a != b) {
+            return
+                a < b
+                    ? -1
+                    : 1;
         }
-        return NULL;
+
+        if (a == 0) {
+            return 0;
+        }
     }
 
-    void exit_dummy(int status) {
-        (void)status;
-        while(1) { asm volatile("cli; hlt"); }
+    return 0;
+}
+
+extern "C" char* strncpy(
+    char* dest,
+    const char* src,
+    size_t n
+) {
+    if (!dest) {
+        return dest;
     }
 
-    // BEZPIECZNY GENERATOR: Omijamy instrukcję 'RDRAND', ponieważ wirtualizacja VirtualBox'a może ją blokować i rzucać BSOD!
-    int rand(void) {
-        static uint32_t ziarno = 0x12345678;
-        ziarno = (1103515245 * ziarno + 12345) % 2147483648;
-        return (int)ziarno;
+    size_t i =
+        0;
+
+    if (src) {
+        while (i < n &&
+               src[i] != '\0') {
+
+            dest[i] =
+                src[i];
+
+            ++i;
+        }
+    }
+
+    while (i < n) {
+        dest[i++] =
+            '\0';
+    }
+
+    return dest;
+}
+
+extern "C" char* strchr(
+    const char* s,
+    int c
+) {
+    if (!s) {
+        return nullptr;
+    }
+
+    const char needle =
+        static_cast<char>(
+            c
+        );
+
+    for (;;) {
+        if (*s ==
+            needle) {
+
+            return
+                const_cast<char*>(
+                    s
+                );
+        }
+
+        if (*s ==
+            '\0') {
+
+            return nullptr;
+        }
+
+        ++s;
     }
 }
 
-// Handshake TLS z łańcuchem X.509 potrzebuje więcej pamięci niż prosty AES.
-unsigned char mbedtls_heap[256 * 1024] __attribute__((aligned(16)));
+extern "C" char* strstr(
+    const char* haystack,
+    const char* needle
+) {
+    if (!haystack ||
+        !needle) {
+
+        return nullptr;
+    }
+
+    if (*needle ==
+        '\0') {
+
+        return
+            const_cast<char*>(
+                haystack
+            );
+    }
+
+    for (const char* h =
+             haystack;
+         *h != '\0';
+         ++h) {
+
+        const char* a =
+            h;
+
+        const char* b =
+            needle;
+
+        while (*a != '\0' &&
+               *b != '\0' &&
+               *a == *b) {
+
+            ++a;
+            ++b;
+        }
+
+        if (*b ==
+            '\0') {
+
+            return
+                const_cast<char*>(
+                    h
+                );
+        }
+    }
+
+    return nullptr;
+}
+
+extern "C" void* __memcpy_chk(
+    void* dest,
+    const void* src,
+    size_t len,
+    size_t destlen
+) {
+    if (len >
+        destlen) {
+
+        return nullptr;
+    }
+
+    return
+        memcpy(
+            dest,
+            src,
+            len
+        );
+}
+
+extern "C" void* __memset_chk(
+    void* dest,
+    int value,
+    size_t len,
+    size_t destlen
+) {
+    if (len >
+        destlen) {
+
+        return nullptr;
+    }
+
+    return
+        memset(
+            dest,
+            value,
+            len
+        );
+}
+
+/* -------------------------------------------------------------------------
+ * Platform printf/snprintf.
+ *
+ * To jest tylko diagnostyka. Funkcja zachowuje NUL i nie interpretuje
+ * format stringa, wiec nie jest powierzchnia format-string dla kernela.
+ * ------------------------------------------------------------------------- */
+
+static int bursztyn_vsnprintf(
+    char* out,
+    size_t out_size,
+    const char* format,
+    va_list args
+) {
+    (void)args;
+
+    if (!format) {
+        if (out &&
+            out_size > 0) {
+
+            out[0] =
+                '\0';
+        }
+
+        return -1;
+    }
+
+    size_t len =
+        0;
+
+    while (format[len] != '\0') {
+        ++len;
+    }
+
+    if (out &&
+        out_size > 0) {
+
+        size_t copy =
+            len;
+
+        if (copy >=
+            out_size) {
+
+            copy =
+                out_size -
+                1U;
+        }
+
+        for (size_t i = 0;
+             i < copy;
+             ++i) {
+
+            out[i] =
+                format[i];
+        }
+
+        out[copy] =
+            '\0';
+    }
+
+    if (len >
+        0x7FFFFFFFU) {
+
+        return -1;
+    }
+
+    return
+        static_cast<int>(
+            len
+        );
+}
+
+static int bursztyn_snprintf(
+    char* out,
+    size_t out_size,
+    const char* format,
+    ...
+) {
+    va_list args;
+
+    va_start(
+        args,
+        format
+    );
+
+    const int ret =
+        bursztyn_vsnprintf(
+            out,
+            out_size,
+            format,
+            args
+        );
+
+    va_end(
+        args
+    );
+
+    return ret;
+}
+
+static int bursztyn_printf(
+    const char* format,
+    ...
+) {
+    (void)format;
+    return 0;
+}
+
+[[noreturn]]
+static void bursztyn_exit(
+    int status
+) {
+    (void)status;
+
+    asm volatile(
+        "cli"
+        :
+        :
+        : "memory"
+    );
+
+    for (;;) {
+        asm volatile(
+            "hlt"
+            :
+            :
+            : "memory"
+        );
+    }
+}
+
+/* -------------------------------------------------------------------------
+ * Inicjalizacja
+ * ------------------------------------------------------------------------- */
 
 extern "C" void inicjalizuj_mbedtls() {
-    mbedtls_memory_buffer_alloc_init(mbedtls_heap, sizeof(mbedtls_heap));
-}
+    if (__atomic_load_n(
+            &mbedtls_port_gotowy,
+            __ATOMIC_ACQUIRE)) {
 
-extern "C" int mbedtls_hardware_poll(void *data, unsigned char *output, size_t len, size_t *olen) {
-    (void)data;
-    uint32_t eax = 1, ebx, ecx, edx;
-    asm volatile("cpuid" : "+a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx));
-    bool ma_rdrand = (ecx & (1u << 30)) != 0;
-    size_t zapisano = 0;
-    while (ma_rdrand && zapisano < len) {
-        uint64_t losowa = 0;
-        unsigned char sukces = 0;
-        for (int proba = 0; proba < 10 && !sukces; proba++)
-            asm volatile("rdrand %0; setc %1" : "=r"(losowa), "=qm"(sukces));
-        if (!sukces) break;
-        for (int i = 0; i < 8 && zapisano < len; i++, zapisano++)
-            output[zapisano] = (unsigned char)(losowa >> (i * 8));
+        return;
     }
-    // Awaryjne mieszanie dla maszyn bez RDRAND. Zapewnia uruchomienie TLS,
-    // ale log informuje, że taka platforma nie ma sprzętowego CSPRNG.
-    uint32_t tsc_lo, tsc_hi;
-    asm volatile("rdtsc" : "=a"(tsc_lo), "=d"(tsc_hi));
-    uint64_t stan = ((uint64_t)tsc_hi << 32) | tsc_lo;
-    stan ^= (uint64_t)(uintptr_t)output ^ ((uint64_t)rand() << 32);
-    while (zapisano < len) {
-        stan ^= stan << 13; stan ^= stan >> 7; stan ^= stan << 17;
-        output[zapisano++] = (unsigned char)stan;
-    }
-    *olen = len;
-    return 0;
+
+    mbedtls_memory_buffer_alloc_init(
+        mbedtls_heap,
+        sizeof(
+            mbedtls_heap
+        )
+    );
+
+    (void)mbedtls_platform_set_printf(
+        bursztyn_printf
+    );
+
+    (void)mbedtls_platform_set_snprintf(
+        bursztyn_snprintf
+    );
+
+    (void)mbedtls_platform_set_vsnprintf(
+        bursztyn_vsnprintf
+    );
+
+    (void)mbedtls_platform_set_exit(
+        bursztyn_exit
+    );
+
+    __atomic_store_n(
+        &mbedtls_port_gotowy,
+        true,
+        __ATOMIC_RELEASE
+    );
 }

@@ -1,361 +1,2184 @@
 /*
- * Aplikacja: Powłoka Bursztynowa (bsh)
- * Poziom: Ring 3 (Przestrzeń Użytkownika)
- * Wersja zoptymalizowana: Korzysta z biblioteki bursztyn_gui.h oraz 
- * zawiera pełną obsługę sieci i plików z polskimi znakami.
+ * Bursztyn OS - Powłoka Bursztynowa (bsh)
+ *
+ * Ring 3 / aplikacja .bur
+ *
+ * Funkcje:
+ *  - podstawowe polecenia systemowe,
+ *  - uruchamianie programow,
+ *  - operacje BSP2,
+ *  - DNS / ICMP / prosty HTTP,
+ *  - historia polecen,
+ *  - test RTC, PCI i HDA.
+ *
+ * Bezpieczenstwo:
+ *  - brak niezabezpieczonych kopii stringow,
+ *  - brak cichego obcinania sciezek/argumentow,
+ *  - scisla walidacja IPv4,
+ *  - odczyty plikow sa zawsze terminowane NUL-em przed wypisaniem,
+ *  - parser komend obsluguje spacje i cudzyslowy,
+ *  - nie korzystamy ze starych numerow BWS DNS/HTTP 12/13,
+ *  - HTTP jest ograniczony przez aktualne ABI BWS do bufora w dolnych 4 GiB.
+ *
+ * UWAGA:
+ * Naglowek BUR zachowuje obecny layout zgodny z notatnik_linker.ld:
+ *
+ *   text: offset 0x1000,  rozmiar 0x8000,  VA 0x601000
+ *   data: offset 0x9000,  rozmiar 0x20000, VA 0x609000
+ *
+ * Zmiana tych wartosci wymaga jednoczesnej zmiany linkera aplikacji.
  */
 
 #include "bursztyn_gui.h"
 
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
 
+/* =========================================================================
+ * 1. NAGLOWEK BUR
+ * ========================================================================= */
 
 struct NaglowekBur {
-    uint8_t  magia[4];            
-    uint64_t punkt_wejscia;       
-    uint64_t tekst_przesuniecie;  
-    uint64_t tekst_rozmiar;       
-    uint64_t tekst_wirtualny;     
-    uint64_t dane_przesuniecie;   
-    uint64_t dane_rozmiar;        
-    uint64_t dane_wirtualny;      
+    uint8_t  magia[4];
+    uint64_t punkt_wejscia;
+
+    uint64_t tekst_przesuniecie;
+    uint64_t tekst_rozmiar;
+    uint64_t tekst_wirtualny;
+
+    uint64_t dane_przesuniecie;
+    uint64_t dane_rozmiar;
+    uint64_t dane_wirtualny;
 } __attribute__((packed));
 
-extern "C" __attribute__((noreturn)) void _start();
+static_assert(
+    sizeof(NaglowekBur) == 60,
+    "Naglowek BUR musi miec 60 bajtow"
+);
 
-extern "C" {
-    __attribute__((section(".naglowek"), used))
-    struct NaglowekBur naglowek = {
-        {'B', 'U', 'R', '\0'},
-        (uint64_t)&_start,
-        4096, 32768, 0x601000,
-        36864, 131072, 0x609000
-    };
-}
-extern "C" void bws_gui_odswiez();
-// void bws_dzwiek_test(uint32_t czestotliwosc, uint32_t czas);
+static_assert(
+    offsetof(NaglowekBur, punkt_wejscia) == 0x04,
+    "Nieprawidlowy layout BUR"
+);
 
+static_assert(
+    offsetof(NaglowekBur, tekst_przesuniecie) == 0x0C,
+    "Nieprawidlowy layout BUR"
+);
 
-// Funkcje obsługi plików z Jądra
-bool wylistuj_katalog(const char* sciezka, char* bufor, uint32_t max_dlugosc) { return bws_wywolaj(6, (uint64_t)sciezka, (uint64_t)bufor, max_dlugosc) != 0; }
-bool usun_twor(const char* sciezka) { return bws_wywolaj(7, (uint64_t)sciezka) != 0; }
-bool zmien_nazwe_tworu(const char* sciezka, const char* nowa_nazwa) { return bws_wywolaj(8, (uint64_t)sciezka, (uint64_t)nowa_nazwa) != 0; }
+static_assert(
+    offsetof(NaglowekBur, tekst_rozmiar) == 0x14,
+    "Nieprawidlowy layout BUR"
+);
 
-int strlen(const char* str) {
-    int len = 0; while (str[len] != '\0') len++; return len;
-}
+static_assert(
+    offsetof(NaglowekBur, tekst_wirtualny) == 0x1C,
+    "Nieprawidlowy layout BUR"
+);
 
-bool strcmp(const char* s1, const char* s2) {
-    while (*s1 && (*s1 == *s2)) { s1++; s2++; }
-    return *(const unsigned char*)s1 == *(const unsigned char*)s2;
-}
+static_assert(
+    offsetof(NaglowekBur, dane_przesuniecie) == 0x24,
+    "Nieprawidlowy layout BUR"
+);
 
-bool zaczyna_sie_od(const char* str, const char* prefix) {
-    while (*prefix) {
-        if (*str != *prefix) return false;
-        str++; prefix++;
+static_assert(
+    offsetof(NaglowekBur, dane_rozmiar) == 0x2C,
+    "Nieprawidlowy layout BUR"
+);
+
+static_assert(
+    offsetof(NaglowekBur, dane_wirtualny) == 0x34,
+    "Nieprawidlowy layout BUR"
+);
+
+namespace {
+
+constexpr uint64_t BUR_TEXT_OFFSET = 0x1000ULL;
+constexpr uint64_t BUR_TEXT_SIZE   = 0x8000ULL;
+constexpr uint64_t BUR_TEXT_VADDR  = 0x601000ULL;
+
+constexpr uint64_t BUR_DATA_OFFSET = 0x9000ULL;
+constexpr uint64_t BUR_DATA_SIZE   = 0x20000ULL;
+constexpr uint64_t BUR_DATA_VADDR  = 0x609000ULL;
+
+constexpr size_t MAX_LINIA = 128;
+constexpr size_t MAX_SCIEZKA = 64;
+constexpr size_t MAX_NAZWA_HOSTA = 64;
+constexpr size_t MAX_SCIEZKA_HTTP = 96;
+
+constexpr size_t HISTORIA_MAX = 5;
+
+constexpr uint32_t BUF_CZYTAJ_PLIK = 4096;
+constexpr uint32_t BUF_LISTA = 1024;
+constexpr uint32_t BUF_PCI = 2048;
+
+/*
+ * Bufor jest STATYCZNY celowo.
+ *
+ * Aktualny wrapper bws_siec_pobierz_http() pakuje wskaznik do gornych
+ * 32 bitow jednego argumentu ABI. Dziala wiec tylko, jezeli wskaznik bufora
+ * miesci sie w 32 bitach. Statyczne .data/.bss obecnej aplikacji znajduje
+ * sie przy 0x609000, natomiast stos Ring 3 lezy wysoko i nie nadaje sie
+ * do tego ABI.
+ *
+ * Po poprawieniu ABI BWS 29 ten warunek mozna usunac.
+ */
+constexpr uint32_t HTTP_BUF_SIZE = 32U * 1024U;
+
+alignas(16)
+char bufor_http[HTTP_BUF_SIZE] = {};
+
+char historia[HISTORIA_MAX][MAX_LINIA] = {};
+size_t historia_ilosc = 0;
+
+/* =========================================================================
+ * 2. PROSTE WRAPPERY BWS NIEOBECNE W bursztyn_gui.h
+ * ========================================================================= */
+
+bool bsh_wylistuj_katalog(
+    const char* sciezka,
+    char* bufor,
+    uint32_t max_dlugosc
+) {
+    if (!sciezka ||
+        !bufor ||
+        max_dlugosc == 0) {
+        return false;
     }
+
+    return
+        bws_wywolaj(
+            6,
+            reinterpret_cast<uint64_t>(sciezka),
+            reinterpret_cast<uint64_t>(bufor),
+            static_cast<uint64_t>(max_dlugosc),
+            0
+        ) != 0;
+}
+
+bool bsh_usun_twor(
+    const char* sciezka
+) {
+    if (!sciezka) {
+        return false;
+    }
+
+    return
+        bws_wywolaj(
+            7,
+            reinterpret_cast<uint64_t>(sciezka),
+            0, 0, 0
+        ) != 0;
+}
+
+bool bsh_zmien_nazwe(
+    const char* sciezka,
+    const char* nowa_nazwa
+) {
+    if (!sciezka ||
+        !nowa_nazwa) {
+        return false;
+    }
+
+    return
+        bws_wywolaj(
+            8,
+            reinterpret_cast<uint64_t>(sciezka),
+            reinterpret_cast<uint64_t>(nowa_nazwa),
+            0, 0
+        ) != 0;
+}
+
+bool bsh_pobierz_czas(
+    char* bufor
+) {
+    if (!bufor) {
+        return false;
+    }
+
+    return
+        bws_wywolaj(
+            9,
+            reinterpret_cast<uint64_t>(bufor),
+            0, 0, 0
+        ) != 0;
+}
+
+bool bsh_uruchom_program(
+    const char* sciezka
+) {
+    if (!sciezka) {
+        return false;
+    }
+
+    return
+        bws_wywolaj(
+            10,
+            reinterpret_cast<uint64_t>(sciezka),
+            0, 0, 0
+        ) != 0;
+}
+
+bool bsh_ping_ipv4(
+    const uint8_t ip[4]
+) {
+    if (!ip) {
+        return false;
+    }
+
+    return
+        bws_wywolaj(
+            11,
+            ip[0],
+            ip[1],
+            ip[2],
+            ip[3]
+        ) != 0;
+}
+
+/* =========================================================================
+ * 3. FUNKCJE STRING / PAMIEC BEZ LIBC
+ * ========================================================================= */
+
+size_t dlugosc_tekstu_limit(
+    const char* tekst,
+    size_t limit
+) {
+    if (!tekst) {
+        return 0;
+    }
+
+    size_t i = 0;
+
+    while (i < limit &&
+           tekst[i] != '\0') {
+        ++i;
+    }
+
+    return i;
+}
+
+bool tekst_zakonczony_w_limicie(
+    const char* tekst,
+    size_t limit,
+    size_t* dlugosc_wyj = nullptr
+) {
+    if (!tekst ||
+        limit == 0) {
+        return false;
+    }
+
+    for (size_t i = 0;
+         i < limit;
+         ++i) {
+
+        if (tekst[i] == '\0') {
+            if (dlugosc_wyj) {
+                *dlugosc_wyj = i;
+            }
+
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void wyzeruj(
+    void* ptr,
+    size_t rozmiar
+) {
+    if (!ptr) {
+        return;
+    }
+
+    uint8_t* p =
+        static_cast<uint8_t*>(ptr);
+
+    for (size_t i = 0;
+         i < rozmiar;
+         ++i) {
+        p[i] = 0;
+    }
+}
+
+bool kopiuj_tekst(
+    char* cel,
+    size_t pojemnosc,
+    const char* zrodlo
+) {
+    if (!cel ||
+        pojemnosc == 0 ||
+        !zrodlo) {
+        return false;
+    }
+
+    size_t dlugosc = 0;
+
+    if (!tekst_zakonczony_w_limicie(
+            zrodlo,
+            pojemnosc,
+            &dlugosc)) {
+        cel[0] = '\0';
+        return false;
+    }
+
+    for (size_t i = 0;
+         i <= dlugosc;
+         ++i) {
+        cel[i] = zrodlo[i];
+    }
+
     return true;
 }
 
-bool strncmp(const char* s1, const char* s2, int n) {
-    while (n && *s1 && (*s1 == *s2)) { s1++; s2++; n--; }
-    return n == 0 || *(const unsigned char*)s1 == *(const unsigned char*)s2;
+bool tekst_rowny(
+    const char* a,
+    const char* b
+) {
+    if (!a ||
+        !b) {
+        return false;
+    }
+
+    while (*a != '\0' &&
+           *b != '\0') {
+
+        if (*a != *b) {
+            return false;
+        }
+
+        ++a;
+        ++b;
+    }
+
+    return
+        *a == '\0' &&
+        *b == '\0';
 }
 
-static inline uint64_t pobierz_cykle() {
-    uint32_t lo, hi;
-    asm volatile ("rdtsc" : "=a" (lo), "=d" (hi));
-    return ((uint64_t)hi << 32) | lo;
+bool jest_biala_spacja(
+    char c
+) {
+    return
+        c == ' ' ||
+        c == '\t';
 }
 
-void pobierz_linie(char* bufor, int max_dlugosc) {
-    int pozycja = 0;
-    while (true) {
-        char c = pobierz_znak(); 
-        if (c == 0) continue; 
+void wypisz_znak(
+    char c
+) {
+    char tmp[2] = {
+        c,
+        '\0'
+    };
 
-        if (c == '\n' || c == '\r') {
+    wypisz(tmp);
+}
+
+void uint_do_str(
+    uint64_t wartosc,
+    char* bufor,
+    size_t pojemnosc
+) {
+    if (!bufor ||
+        pojemnosc == 0) {
+        return;
+    }
+
+    if (wartosc == 0) {
+        if (pojemnosc >= 2) {
+            bufor[0] = '0';
+            bufor[1] = '\0';
+        } else {
+            bufor[0] = '\0';
+        }
+
+        return;
+    }
+
+    char odwrotnie[32] = {};
+    size_t n = 0;
+
+    while (wartosc != 0 &&
+           n < sizeof(odwrotnie)) {
+
+        odwrotnie[n++] =
+            static_cast<char>(
+                '0' +
+                (wartosc % 10ULL)
+            );
+
+        wartosc /= 10ULL;
+    }
+
+    if (n + 1 > pojemnosc) {
+        bufor[0] = '\0';
+        return;
+    }
+
+    size_t out = 0;
+
+    while (n > 0) {
+        bufor[out++] =
+            odwrotnie[--n];
+    }
+
+    bufor[out] = '\0';
+}
+
+/* =========================================================================
+ * 4. WEJSCIE TERMINALA
+ * ========================================================================= */
+
+char pobierz_znak_blokujaco() {
+    for (;;) {
+        if (bws_wywolaj(
+                36,
+                0, 0, 0, 0) != 0) {
+
+            gui_zakoncz_aplikacje();
+        }
+
+        const char c =
+            pobierz_znak();
+
+        if (c != 0) {
+            return c;
+        }
+
+        /*
+         * Nie wykonujemy HLT w Ring 3. Scheduler/IRQ nadal musza dzialac.
+         */
+        asm volatile(
+            "pause"
+            :
+            :
+            : "memory"
+        );
+    }
+}
+
+/*
+ * Zwraca true, jezeli cala linia zmiescila sie w buforze.
+ * Po przekroczeniu limitu reszta wejscia jest konsumowana, ale nie zapisywana.
+ */
+bool pobierz_linie(
+    char* bufor,
+    size_t pojemnosc
+) {
+    if (!bufor ||
+        pojemnosc < 2) {
+        return false;
+    }
+
+    size_t pozycja = 0;
+    bool przepelnienie = false;
+
+    bufor[0] = '\0';
+
+    for (;;) {
+        char c =
+            pobierz_znak_blokujaco();
+
+        if (c == '\n' ||
+            c == '\r') {
+
             bufor[pozycja] = '\0';
-            break;
-        } 
-        else if (c == '\b') {
-            if (pozycja > 0) { 
-                pozycja--; 
-                // Nowy sterownik terminala w grafika.cpp radzi sobie perfekcyjnie z samym \b
-                wypisz("\b"); 
+            return !przepelnienie;
+        }
+
+        /*
+         * Backspace lub DEL.
+         */
+        if (c == '\b' ||
+            static_cast<uint8_t>(c) == 0x7FU) {
+
+            if (!przepelnienie &&
+                pozycja > 0) {
+
+                --pozycja;
+                bufor[pozycja] = '\0';
+
+                /*
+                 * Cofnij, wyczysc znak, cofnij ponownie.
+                 */
+                wypisz("\b \b");
             }
-        } 
-        else if (pozycja < max_dlugosc - 1) {
-            bufor[pozycja++] = c;
-            char tmp[2] = {c, '\0'}; wypisz(tmp);
+
+            continue;
+        }
+
+        /*
+         * Klawiatura moze emitowac sekwencje ANSI dla klawiszy specjalnych.
+         * Nie wprowadzamy surowego ESC do komendy.
+         *
+         * Aktualny byte-stream BWS nie pozwala niezawodnie rozpoznac calego
+         * zdarzenia klawisza, wiec po prostu pomijamy sam ESC.
+         */
+        if (static_cast<uint8_t>(c) ==
+            0x1BU) {
+            continue;
+        }
+
+        /*
+         * Pomijamy pozostale znaki sterujace poza TAB.
+         */
+        if (static_cast<uint8_t>(c) <
+                0x20U &&
+            c != '\t') {
+            continue;
+        }
+
+        if (przepelnienie) {
+            continue;
+        }
+
+        if (pozycja + 1 >=
+            pojemnosc) {
+
+            przepelnienie = true;
+            continue;
+        }
+
+        bufor[pozycja++] = c;
+        bufor[pozycja] = '\0';
+
+        wypisz_znak(c);
+    }
+}
+
+/* =========================================================================
+ * 5. PARSER WIERSZA POLECEN
+ * ========================================================================= */
+
+struct Argumenty {
+    static constexpr size_t MAX_ARG = 5;
+    static constexpr size_t MAX_ARG_LEN = 96;
+
+    char dane[MAX_ARG][MAX_ARG_LEN];
+    size_t liczba;
+};
+
+bool parse_argumenty(
+    const char* linia,
+    Argumenty* wynik
+) {
+    if (!linia ||
+        !wynik) {
+        return false;
+    }
+
+    wynik->liczba = 0;
+
+    for (size_t i = 0;
+         i < Argumenty::MAX_ARG;
+         ++i) {
+        wynik->dane[i][0] = '\0';
+    }
+
+    size_t i = 0;
+
+    while (linia[i] != '\0') {
+        while (jest_biala_spacja(
+                   linia[i])) {
+            ++i;
+        }
+
+        if (linia[i] == '\0') {
+            break;
+        }
+
+        if (wynik->liczba >=
+            Argumenty::MAX_ARG) {
+            return false;
+        }
+
+        char* dst =
+            wynik->dane[
+                wynik->liczba];
+
+        size_t out = 0;
+        bool cudzyslow =
+            linia[i] == '"';
+
+        if (cudzyslow) {
+            ++i;
+        }
+
+        while (linia[i] != '\0') {
+            const char c =
+                linia[i];
+
+            if (cudzyslow) {
+                if (c == '"') {
+                    ++i;
+                    break;
+                }
+            } else if (jest_biala_spacja(c)) {
+                break;
+            }
+
+            if (out + 1 >=
+                Argumenty::MAX_ARG_LEN) {
+                return false;
+            }
+
+            dst[out++] = c;
+            ++i;
+        }
+
+        if (cudzyslow &&
+            linia[i - 1] != '"') {
+            return false;
+        }
+
+        dst[out] = '\0';
+
+        if (out == 0) {
+            return false;
+        }
+
+        if (!cudzyslow) {
+            while (jest_biala_spacja(
+                       linia[i])) {
+                ++i;
+            }
+        } else {
+            /*
+             * Po zamknieciu cudzyslowu wymagamy konca lub separatora.
+             */
+            if (linia[i] != '\0' &&
+                !jest_biala_spacja(
+                    linia[i])) {
+                return false;
+            }
+
+            while (jest_biala_spacja(
+                       linia[i])) {
+                ++i;
+            }
+        }
+
+        ++wynik->liczba;
+    }
+
+    return true;
+}
+
+/* =========================================================================
+ * 6. SCIEZKI
+ * ========================================================================= */
+
+bool utworz_sciezke_absolutna(
+    const char* wejscie,
+    char* wyjscie,
+    size_t pojemnosc
+) {
+    if (!wejscie ||
+        !wyjscie ||
+        pojemnosc < 2) {
+        return false;
+    }
+
+    size_t dlugosc = 0;
+
+    if (!tekst_zakonczony_w_limicie(
+            wejscie,
+            pojemnosc,
+            &dlugosc)) {
+        return false;
+    }
+
+    if (dlugosc == 0) {
+        return false;
+    }
+
+    if (wejscie[0] == '/') {
+        return kopiuj_tekst(
+            wyjscie,
+            pojemnosc,
+            wejscie
+        );
+    }
+
+    /*
+     * Potrzebujemy '/' + wejscie + '\0'.
+     */
+    if (dlugosc + 2 >
+        pojemnosc) {
+        return false;
+    }
+
+    wyjscie[0] = '/';
+
+    for (size_t i = 0;
+         i <= dlugosc;
+         ++i) {
+        wyjscie[i + 1] =
+            wejscie[i];
+    }
+
+    return true;
+}
+
+/* =========================================================================
+ * 7. IPv4 / DNS
+ * ========================================================================= */
+
+bool parsuj_ipv4(
+    const char* tekst,
+    uint8_t wynik[4]
+) {
+    if (!tekst ||
+        !wynik) {
+        return false;
+    }
+
+    size_t pos = 0;
+
+    for (size_t oktet = 0;
+         oktet < 4;
+         ++oktet) {
+
+        if (tekst[pos] < '0' ||
+            tekst[pos] > '9') {
+            return false;
+        }
+
+        uint32_t wartosc = 0;
+        size_t cyfr = 0;
+
+        while (tekst[pos] >= '0' &&
+               tekst[pos] <= '9') {
+
+            if (cyfr >= 3) {
+                return false;
+            }
+
+            wartosc =
+                wartosc * 10U +
+                static_cast<uint32_t>(
+                    tekst[pos] - '0'
+                );
+
+            if (wartosc > 255U) {
+                return false;
+            }
+
+            ++cyfr;
+            ++pos;
+        }
+
+        wynik[oktet] =
+            static_cast<uint8_t>(
+                wartosc
+            );
+
+        if (oktet < 3) {
+            if (tekst[pos] != '.') {
+                return false;
+            }
+
+            ++pos;
+        } else {
+            if (tekst[pos] != '\0') {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+void wypisz_ipv4(
+    const uint8_t ip[4]
+) {
+    if (!ip) {
+        return;
+    }
+
+    char liczba[4] = {};
+
+    for (size_t i = 0;
+         i < 4;
+         ++i) {
+
+        uint_do_str(
+            ip[i],
+            liczba,
+            sizeof(liczba)
+        );
+
+        wypisz(liczba);
+
+        if (i != 3) {
+            wypisz(".");
         }
     }
 }
 
-void formatuj_sciezke(const char* wejscie, char* wyjscie) {
-    if (wejscie[0] == '/') {
-        int i = 0; while (wejscie[i] != '\0') { wyjscie[i] = wejscie[i]; i++; } wyjscie[i] = '\0';
-    } else {
-        wyjscie[0] = '/';
-        int i = 0; while (wejscie[i] != '\0') { wyjscie[i+1] = wejscie[i]; i++; } wyjscie[i+1] = '\0';
+/* =========================================================================
+ * 8. HISTORIA
+ * ========================================================================= */
+
+void dodaj_do_historii(
+    const char* komenda
+) {
+    if (!komenda ||
+        komenda[0] == '\0') {
+        return;
+    }
+
+    for (size_t i = HISTORIA_MAX - 1;
+         i > 0;
+         --i) {
+
+        for (size_t j = 0;
+             j < MAX_LINIA;
+             ++j) {
+
+            historia[i][j] =
+                historia[i - 1][j];
+        }
+    }
+
+    wyzeruj(
+        historia[0],
+        MAX_LINIA
+    );
+
+    (void)kopiuj_tekst(
+        historia[0],
+        MAX_LINIA,
+        komenda
+    );
+
+    if (historia_ilosc <
+        HISTORIA_MAX) {
+        ++historia_ilosc;
     }
 }
 
-void int_do_str(int wartosc, char* bufor) {
-    if (wartosc == 0) { bufor[0] = '0'; bufor[1] = '\0'; return; }
-    int i = 0; char temp[16];
-    while (wartosc > 0) { temp[i++] = (wartosc % 10) + '0'; wartosc /= 10; }
-    int j = 0; while (i > 0) { bufor[j++] = temp[--i]; }
-    bufor[j] = '\0';
+/* =========================================================================
+ * 9. RDTSC - TYLKO DO ZABAWY / LOSUJ
+ * ========================================================================= */
+
+uint64_t pobierz_cykle() {
+    uint32_t lo = 0;
+    uint32_t hi = 0;
+
+    asm volatile(
+        "rdtsc"
+        : "=a"(lo),
+          "=d"(hi)
+        :
+        : "memory"
+    );
+
+    return
+        (static_cast<uint64_t>(hi) << 32) |
+        static_cast<uint64_t>(lo);
 }
 
-char historia[5][128];
-int hist_ilosc = 0;
+/* =========================================================================
+ * 10. POMOC
+ * ========================================================================= */
 
-extern "C" __attribute__((noreturn)) void _start() {
-    // Oddajemy kontrolę nad myszą menedżerowi okien
-    gui_ustaw_przejecie_myszy(false);
+void wypisz_pomoc() {
+    wypisz(
+        "Polecenia Powłoki Bursztynowej:\n"
+        "  pomoc                         - pokazuje pomoc\n"
+        "  notatnik                      - uruchamia Notatnik\n"
+        "  kalkulator                    - uruchamia Kalkulator\n"
+        "  przegladarka                  - uruchamia przegladarke Hussar\n"
+        "  uruchom <plik.bur>            - uruchamia program .bur\n"
+        "  pulpit | wyjdz | exit         - konczy powloke\n"
+        "  czas                          - pokazuje czas RTC\n"
+        "  system                        - informacje o systemie\n"
+        "  pci                           - wyswietla /logi/pci.txt\n"
+        "  ping <IPv4|domena>            - DNS + ICMP echo\n"
+        "  pobierz <host> <url> <plik>   - pobiera tekst HTTP do BSP2\n"
+        "  utworz <plik>                 - tworzy pusty plik\n"
+        "  zapisz <plik> <tekst>         - nadpisuje plik tekstem\n"
+        "  czytaj <plik>                 - wyswietla plik tekstowy\n"
+        "  pliki [katalog]               - listuje katalog\n"
+        "  usun <sciezka>                - usuwa plik/pusty katalog\n"
+        "  zmien_nazwe <sciezka> <nazwa> - zmienia nazwe\n"
+        "  gdzie                         - pokazuje katalog roboczy\n"
+        "  historia                      - ostatnie polecenia\n"
+        "  cytat                         - pokazuje /cytaty.txt\n"
+        "  dzwiek                        - test HDA 880 Hz\n"
+        "  czysc                         - wizualnie czysci terminal\n"
+        "  losuj                         - rzut kostka (nie kryptograficzny)\n"
+        "  pisz <tekst>                  - wypisuje tekst\n"
+        "\n"
+        "Argument zawierajacy spacje mozna zapisac w cudzyslowie.\n"
+    );
+}
 
+/* =========================================================================
+ * 11. POLECENIA
+ * ========================================================================= */
+
+void polecenie_uruchom(
+    const char* sciezka_wej
+) {
+    char sciezka[MAX_SCIEZKA] = {};
+
+    if (!utworz_sciezke_absolutna(
+            sciezka_wej,
+            sciezka,
+            sizeof(sciezka))) {
+
+        wypisz(
+            "Blad: sciezka jest pusta lub zbyt dluga.\n"
+        );
+        return;
+    }
+
+    wypisz("Uruchamianie procesu: ");
+    wypisz(sciezka);
+    wypisz("...\n");
+
+    if (!bsh_uruchom_program(
+            sciezka)) {
+
+        wypisz(
+            "Blad: nie udalo sie uruchomic programu. "
+            "Sprawdz plik, prawa PZB i blokade wielu instancji.\n"
+        );
+    }
+}
+
+void polecenie_ping(
+    const char* cel
+) {
+    if (!cel ||
+        cel[0] == '\0') {
+
+        wypisz(
+            "Skladnia: ping <adres IPv4 lub domena>\n"
+        );
+        return;
+    }
+
+    uint8_t ip[4] = {};
+
+    if (parsuj_ipv4(
+            cel,
+            ip)) {
+
+        wypisz("PING ");
+        wypisz_ipv4(ip);
+        wypisz("...\n");
+
+        if (!bsh_ping_ipv4(ip)) {
+            wypisz(
+                "Blad: wyslanie ICMP nie powiodlo sie.\n"
+            );
+        }
+
+        return;
+    }
+
+    /*
+     * Jezeli argument zawiera cyfry i kropki, ale nie jest poprawnym IPv4,
+     * nie traktujemy go jako domeny. Pomaga wykryc np. 999.1.1.1.
+     */
+    bool tylko_ipv4_znaki = true;
+
+    for (size_t i = 0;
+         cel[i] != '\0';
+         ++i) {
+
+        const char c = cel[i];
+
+        if (!((c >= '0' &&
+               c <= '9') ||
+              c == '.')) {
+
+            tylko_ipv4_znaki = false;
+            break;
+        }
+    }
+
+    if (tylko_ipv4_znaki) {
+        wypisz(
+            "Blad: nieprawidlowy adres IPv4. "
+            "Wymagane sa 4 oktety 0..255.\n"
+        );
+        return;
+    }
+
+    size_t dlugosc_hosta = 0;
+
+    if (!tekst_zakonczony_w_limicie(
+            cel,
+            MAX_NAZWA_HOSTA,
+            &dlugosc_hosta) ||
+        dlugosc_hosta == 0) {
+
+        wypisz(
+            "Blad: nazwa domeny jest zbyt dluga.\n"
+        );
+        return;
+    }
+
+    wypisz("DNS: ");
+    wypisz(cel);
+    wypisz("...\n");
+
+    if (!bws_siec_dns(
+            cel,
+            ip)) {
+
+        wypisz(
+            "Blad: nie udalo sie rozwiazac domeny DNS.\n"
+        );
+        return;
+    }
+
+    wypisz("Adres: ");
+    wypisz_ipv4(ip);
+    wypisz("\nPING...\n");
+
+    if (!bsh_ping_ipv4(ip)) {
+        wypisz(
+            "Blad: wyslanie ICMP nie powiodlo sie.\n"
+        );
+    }
+}
+
+size_t znajdz_koniec_tekstu(
+    const char* bufor,
+    size_t pojemnosc
+) {
+    if (!bufor) {
+        return 0;
+    }
+
+    for (size_t i = 0;
+         i < pojemnosc;
+         ++i) {
+
+        if (bufor[i] == '\0') {
+            return i;
+        }
+    }
+
+    return pojemnosc;
+}
+
+void polecenie_pobierz(
+    const char* domena,
+    const char* sciezka_http,
+    const char* sciezka_pliku
+) {
+    if (!domena ||
+        !sciezka_http ||
+        !sciezka_pliku) {
+
+        wypisz(
+            "Skladnia: pobierz <domena> <sciezka_HTTP> <plik_docelowy>\n"
+        );
+        return;
+    }
+
+    size_t host_len = 0;
+    size_t http_len = 0;
+
+    if (!tekst_zakonczony_w_limicie(
+            domena,
+            MAX_NAZWA_HOSTA,
+            &host_len) ||
+        host_len == 0) {
+
+        wypisz(
+            "Blad: nieprawidlowa lub zbyt dluga domena.\n"
+        );
+        return;
+    }
+
+    if (!tekst_zakonczony_w_limicie(
+            sciezka_http,
+            MAX_SCIEZKA_HTTP,
+            &http_len) ||
+        http_len == 0 ||
+        sciezka_http[0] != '/') {
+
+        wypisz(
+            "Blad: sciezka HTTP musi zaczynac sie od '/' i miescic w limicie.\n"
+        );
+        return;
+    }
+
+    char cel[MAX_SCIEZKA] = {};
+
+    if (!utworz_sciezke_absolutna(
+            sciezka_pliku,
+            cel,
+            sizeof(cel))) {
+
+        wypisz(
+            "Blad: nieprawidlowa sciezka pliku docelowego.\n"
+        );
+        return;
+    }
+
+    uint8_t ip[4] = {};
+
+    wypisz("DNS: ");
+    wypisz(domena);
+    wypisz("...\n");
+
+    if (!bws_siec_dns(
+            domena,
+            ip)) {
+
+        wypisz(
+            "Blad: DNS nie zwrocil adresu.\n"
+        );
+        return;
+    }
+
+    wypisz("IP: ");
+    wypisz_ipv4(ip);
+    wypisz("\nHTTP GET ");
+    wypisz(sciezka_http);
     wypisz("\n");
-    wypisz("==================================================\n");
-    wypisz(" Powłoka Bursztynowa v2.1 (Zintegrowana z GUI)\n");
-    wypisz(" Wpisz 'pomoc', aby zobaczyć listę poleceń.\n");
-    wypisz("==================================================\n");
 
-    char bufor_komendy[128];
+    /*
+     * Ochrona starego ABI BWS 29.
+     */
+    const uint64_t adres_bufora =
+        reinterpret_cast<uint64_t>(
+            bufor_http
+        );
 
-    while (true) {
-        wypisz("\npowłoka> ");
-        pobierz_linie(bufor_komendy, 128);
+    if (adres_bufora >
+        UINT32_MAX) {
+
+        wypisz(
+            "Blad ABI: bufor HTTP lezy powyzej 4 GiB. "
+            "BWS 29 wymaga jeszcze poprawy sposobu przekazywania wskaznika.\n"
+        );
+        return;
+    }
+
+    wyzeruj(
+        bufor_http,
+        sizeof(bufor_http)
+    );
+
+    /*
+     * Zostawiamy ostatni bajt na NUL, aby odpowiedz tekstowa zawsze mogla
+     * zostac bezpiecznie zmierzona.
+     */
+    if (!bws_siec_pobierz_http(
+            ip,
+            domena,
+            sciezka_http,
+            bufor_http,
+            HTTP_BUF_SIZE - 1U)) {
+
+        wypisz(
+            "Blad: pobieranie HTTP nie powiodlo sie.\n"
+        );
+        return;
+    }
+
+    bufor_http[
+        HTTP_BUF_SIZE - 1U] =
+        '\0';
+
+    const size_t odebrano =
+        znajdz_koniec_tekstu(
+            bufor_http,
+            HTTP_BUF_SIZE
+        );
+
+    if (odebrano == 0) {
+        wypisz(
+            "Blad: serwer zwrocil pusty bufor lub aktualne ABI nie przekazuje dlugosci odpowiedzi.\n"
+        );
+        return;
+    }
+
+    if (odebrano >=
+        HTTP_BUF_SIZE) {
+
+        wypisz(
+            "Blad: odpowiedz HTTP nie jest poprawnym tekstem NUL-terminated.\n"
+        );
+        return;
+    }
+
+    /*
+     * utworz() moze zwrocic false, gdy plik juz istnieje. To nie jest
+     * problem - zapisz_plik() nadpisuje istniejacy plik.
+     */
+    (void)utworz(cel);
+
+    if (!zapisz_plik(
+            cel,
+            bufor_http,
+            static_cast<uint32_t>(
+                odebrano))) {
+
+        wypisz(
+            "Blad: odpowiedz pobrano, ale nie udalo sie zapisac jej w BSP2.\n"
+        );
+        return;
+    }
+
+    wypisz("Zapisano ");
+    char liczba[24] = {};
+
+    uint_do_str(
+        odebrano,
+        liczba,
+        sizeof(liczba)
+    );
+
+    wypisz(liczba);
+    wypisz(" bajtow do ");
+    wypisz(cel);
+    wypisz(".\n");
+}
+
+void polecenie_czytaj(
+    const char* wejscie
+) {
+    char sciezka[MAX_SCIEZKA] = {};
+
+    if (!utworz_sciezke_absolutna(
+            wejscie,
+            sciezka,
+            sizeof(sciezka))) {
+
+        wypisz(
+            "Blad: nieprawidlowa sciezka.\n"
+        );
+        return;
+    }
+
+    char bufor[BUF_CZYTAJ_PLIK] = {};
+
+    /*
+     * Czytamy najwyzej N-1, bo czytaj_plik() jest API binarnym i samo
+     * nie dopisuje terminatora.
+     */
+    if (!czytaj_plik(
+            sciezka,
+            bufor,
+            BUF_CZYTAJ_PLIK - 1U)) {
+
+        wypisz(
+            "Blad odczytu pliku.\n"
+        );
+        return;
+    }
+
+    bufor[
+        BUF_CZYTAJ_PLIK - 1U] =
+        '\0';
+
+    wypisz("--- ");
+    wypisz(sciezka);
+    wypisz(" ---\n");
+    wypisz(bufor);
+    wypisz("\n");
+}
+
+void polecenie_pliki(
+    const char* wejscie
+) {
+    char sciezka[MAX_SCIEZKA] = {};
+
+    if (!wejscie ||
+        wejscie[0] == '\0') {
+
+        sciezka[0] = '/';
+        sciezka[1] = '\0';
+    } else if (!utworz_sciezke_absolutna(
+                   wejscie,
+                   sciezka,
+                   sizeof(sciezka))) {
+
+        wypisz(
+            "Blad: nieprawidlowa sciezka katalogu.\n"
+        );
+        return;
+    }
+
+    char bufor[BUF_LISTA] = {};
+
+    if (!bsh_wylistuj_katalog(
+            sciezka,
+            bufor,
+            BUF_LISTA)) {
+
+        wypisz(
+            "Blad: katalog nie istnieje lub brak uprawnien.\n"
+        );
+        return;
+    }
+
+    bufor[
+        BUF_LISTA - 1U] =
+        '\0';
+
+    wypisz("Zawartosc ");
+    wypisz(sciezka);
+    wypisz(":\n");
+
+    if (bufor[0] == '\0') {
+        wypisz("  <pusty katalog>\n");
+    } else {
+        wypisz(bufor);
+
+        const size_t len =
+            dlugosc_tekstu_limit(
+                bufor,
+                BUF_LISTA
+            );
+
+        if (len > 0 &&
+            bufor[len - 1] != '\n') {
+            wypisz("\n");
+        }
+    }
+}
+
+void polecenie_cytat() {
+    constexpr const char* SCIEZKA =
+        "/cytaty.txt";
+
+    char bufor[512] = {};
+
+    if (czytaj_plik(
+            SCIEZKA,
+            bufor,
+            sizeof(bufor) - 1U)) {
+
+        bufor[
+            sizeof(bufor) - 1U] =
+            '\0';
+
+        wypisz("--- Cytaty z pliku ---\n");
+        wypisz(bufor);
+        wypisz("\n");
+        return;
+    }
+
+    constexpr const char* DOMYSLNE =
+        "1. U mnie dziala.\n"
+        "2. Brak bledu to tez blad.\n";
+
+    if (!utworz(SCIEZKA)) {
+        /*
+         * Plik mogl juz istniec, ale odczyt nie udal sie z innego powodu.
+         * Probujemy zapisu tylko wtedy, gdy API na to pozwoli.
+         */
+    }
+
+    const size_t dlugosc =
+        dlugosc_tekstu_limit(
+            DOMYSLNE,
+            256
+        );
+
+    if (zapisz_plik(
+            SCIEZKA,
+            DOMYSLNE,
+            static_cast<uint32_t>(
+                dlugosc))) {
+
+        wypisz(
+            "Utworzono domyslny /cytaty.txt.\n"
+        );
+    } else {
+        wypisz(
+            "Blad: nie mozna odczytac ani utworzyc /cytaty.txt.\n"
+        );
+    }
+}
+
+void polecenie_pci() {
+    char bufor[BUF_PCI] = {};
+
+    if (!czytaj_plik(
+            "/logi/pci.txt",
+            bufor,
+            BUF_PCI - 1U)) {
+
+        wypisz(
+            "Blad: brak raportu /logi/pci.txt lub brak uprawnien.\n"
+        );
+        return;
+    }
+
+    bufor[
+        BUF_PCI - 1U] =
+        '\0';
+
+    wypisz(
+        "--- Raport PCI zapisany przez Ring 0 ---\n"
+    );
+
+    wypisz(bufor);
+    wypisz("\n");
+}
+
+/* =========================================================================
+ * 12. DISPATCH POLECEN
+ * ========================================================================= */
+
+void wykonaj_polecenie(
+    const Argumenty& a
+) {
+    if (a.liczba == 0) {
+        return;
+    }
+
+    const char* cmd =
+        a.dane[0];
+
+    if (tekst_rowny(
+            cmd,
+            "pomoc") ||
+        tekst_rowny(
+            cmd,
+            "help")) {
+
+        if (a.liczba != 1) {
+            wypisz(
+                "Skladnia: pomoc\n"
+            );
+            return;
+        }
+
+        wypisz_pomoc();
+        return;
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "notatnik")) {
+
+        if (a.liczba != 1) {
+            wypisz(
+                "Skladnia: notatnik\n"
+            );
+            return;
+        }
+
+        polecenie_uruchom(
+            "/programy/notatnik.cebula/notatnik.bur"
+        );
+        return;
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "kalkulator")) {
+
+        if (a.liczba != 1) {
+            wypisz(
+                "Skladnia: kalkulator\n"
+            );
+            return;
+        }
+
+        polecenie_uruchom(
+            "/programy/kalkulator.cebula/kalkulator.bur"
+        );
+        return;
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "przegladarka")) {
+
+        if (a.liczba != 1) {
+            wypisz(
+                "Skladnia: przegladarka\n"
+            );
+            return;
+        }
+
+        polecenie_uruchom(
+            "/programy/przegladarka.cebula/przegladarka.bur"
+        );
+        return;
+    }
+
+    if (tekst_rowny(cmd, "pulpit") ||
+        tekst_rowny(cmd, "wyjdz") ||
+        tekst_rowny(cmd, "exit")) {
+
+        if (a.liczba != 1) {
+            wypisz(
+                "Skladnia: wyjdz\n"
+            );
+            return;
+        }
+
+        wypisz(
+            "Powrot do Menedzera Okien...\n"
+        );
+
+        gui_zakoncz_aplikacje();
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "uruchom")) {
+
+        if (a.liczba != 2) {
+            wypisz(
+                "Skladnia: uruchom <plik.bur>\n"
+            );
+            return;
+        }
+
+        polecenie_uruchom(
+            a.dane[1]
+        );
+        return;
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "ping")) {
+
+        if (a.liczba != 2) {
+            wypisz(
+                "Skladnia: ping <IPv4 lub domena>\n"
+            );
+            return;
+        }
+
+        polecenie_ping(
+            a.dane[1]
+        );
+        return;
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "pobierz")) {
+
+        if (a.liczba != 4) {
+            wypisz(
+                "Skladnia: pobierz <domena> <sciezka_HTTP> <plik_docelowy>\n"
+            );
+            return;
+        }
+
+        polecenie_pobierz(
+            a.dane[1],
+            a.dane[2],
+            a.dane[3]
+        );
+        return;
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "czas")) {
+
+        if (a.liczba != 1) {
+            wypisz(
+                "Skladnia: czas\n"
+            );
+            return;
+        }
+
+        char bufor[32] = {};
+
+        if (!bsh_pobierz_czas(
+                bufor)) {
+
+            wypisz(
+                "Blad: RTC/BWS nie zwrocil czasu.\n"
+            );
+            return;
+        }
+
+        bufor[
+            sizeof(bufor) - 1U] =
+            '\0';
+
+        wypisz("Aktualny czas RTC: ");
+        wypisz(bufor);
+        wypisz("\n");
+        return;
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "system")) {
+
+        if (a.liczba != 1) {
+            wypisz(
+                "Skladnia: system\n"
+            );
+            return;
+        }
+
+        wypisz(
+            "OS: Bursztyn OS x86_64\n"
+            "Jadro: autorskie, monolityczne, paging x86_64 4-level\n"
+            "Procesy: Ring 3 + PZB/BZL + prywatne przestrzenie adresowe\n"
+            "FS: BSP2 / Bursztynowy System Plikow\n"
+            "GUI: autorski kompozytor warstw\n"
+            "Siec: E1000, DHCP, ARP, ICMP, DNS, TCP/HTTP\n"
+        );
+        return;
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "pci")) {
+
+        if (a.liczba != 1) {
+            wypisz(
+                "Skladnia: pci\n"
+            );
+            return;
+        }
+
+        polecenie_pci();
+        return;
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "gdzie")) {
+
+        if (a.liczba != 1) {
+            wypisz(
+                "Skladnia: gdzie\n"
+            );
+            return;
+        }
+
+        /*
+         * Obecna powloka nie posiada jeszcze chdir/cwd w ABI.
+         */
+        wypisz(
+            "Obecny katalog roboczy: /\n"
+        );
+        return;
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "historia")) {
+
+        if (a.liczba != 1) {
+            wypisz(
+                "Skladnia: historia\n"
+            );
+            return;
+        }
+
+        if (historia_ilosc == 0) {
+            wypisz(
+                "<historia pusta>\n"
+            );
+            return;
+        }
+
+        for (size_t i = 0;
+             i < historia_ilosc;
+             ++i) {
+
+            char numer[8] = {};
+
+            uint_do_str(
+                i + 1,
+                numer,
+                sizeof(numer)
+            );
+
+            wypisz(numer);
+            wypisz(". ");
+            wypisz(historia[i]);
+            wypisz("\n");
+        }
+
+        return;
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "czysc")) {
+
+        if (a.liczba != 1) {
+            wypisz(
+                "Skladnia: czysc\n"
+            );
+            return;
+        }
+
+        /*
+         * Terminal BWS nie ma jeszcze dedykowanego clear-screen.
+         */
+        for (size_t i = 0;
+             i < 40;
+             ++i) {
+            wypisz("\n");
+        }
+
+        return;
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "losuj")) {
+
+        if (a.liczba != 1) {
+            wypisz(
+                "Skladnia: losuj\n"
+            );
+            return;
+        }
+
+        const uint64_t cykle =
+            pobierz_cykle();
+
+        const uint64_t kosc =
+            cykle % 6ULL + 1ULL;
+
+        char wynik[8] = {};
+
+        uint_do_str(
+            kosc,
+            wynik,
+            sizeof(wynik)
+        );
+
+        wypisz(
+            "Rzut kostka (RDTSC, nie kryptograficzny): "
+        );
+
+        wypisz(wynik);
+        wypisz("\n");
+        return;
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "cytat")) {
+
+        if (a.liczba != 1) {
+            wypisz(
+                "Skladnia: cytat\n"
+            );
+            return;
+        }
+
+        polecenie_cytat();
+        return;
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "pliki")) {
+
+        if (a.liczba > 2) {
+            wypisz(
+                "Skladnia: pliki [katalog]\n"
+            );
+            return;
+        }
+
+        polecenie_pliki(
+            a.liczba == 2
+                ? a.dane[1]
+                : nullptr
+        );
+        return;
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "czytaj")) {
+
+        if (a.liczba != 2) {
+            wypisz(
+                "Skladnia: czytaj <plik>\n"
+            );
+            return;
+        }
+
+        polecenie_czytaj(
+            a.dane[1]
+        );
+        return;
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "utworz")) {
+
+        if (a.liczba != 2) {
+            wypisz(
+                "Skladnia: utworz <plik>\n"
+            );
+            return;
+        }
+
+        char sciezka[MAX_SCIEZKA] = {};
+
+        if (!utworz_sciezke_absolutna(
+                a.dane[1],
+                sciezka,
+                sizeof(sciezka))) {
+
+            wypisz(
+                "Blad: nieprawidlowa lub zbyt dluga sciezka.\n"
+            );
+            return;
+        }
+
+        if (utworz(sciezka)) {
+            wypisz("Utworzono: ");
+            wypisz(sciezka);
+            wypisz("\n");
+        } else {
+            wypisz(
+                "Blad: plik istnieje, sciezka jest bledna lub brak uprawnien.\n"
+            );
+        }
+
+        return;
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "zapisz")) {
+
+        if (a.liczba != 3) {
+            wypisz(
+                "Skladnia: zapisz <plik> <tekst>\n"
+                "Dla tekstu ze spacjami uzyj cudzyslowu.\n"
+            );
+            return;
+        }
+
+        char sciezka[MAX_SCIEZKA] = {};
+
+        if (!utworz_sciezke_absolutna(
+                a.dane[1],
+                sciezka,
+                sizeof(sciezka))) {
+
+            wypisz(
+                "Blad: nieprawidlowa sciezka.\n"
+            );
+            return;
+        }
+
+        size_t dlugosc = 0;
+
+        if (!tekst_zakonczony_w_limicie(
+                a.dane[2],
+                Argumenty::MAX_ARG_LEN,
+                &dlugosc)) {
+
+            wypisz(
+                "Blad: tekst jest za dlugi.\n"
+            );
+            return;
+        }
+
+        /*
+         * Utworzenie jest best-effort: jesli plik juz istnieje, zapis
+         * nadal moze sie udac.
+         */
+        (void)utworz(sciezka);
+
+        if (zapisz_plik(
+                sciezka,
+                a.dane[2],
+                static_cast<uint32_t>(
+                    dlugosc))) {
+
+            wypisz("Zapisano.\n");
+        } else {
+            wypisz(
+                "Blad zapisu lub brak PRAWO_PLIKI_ZAPISZ.\n"
+            );
+        }
+
+        return;
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "usun")) {
+
+        if (a.liczba != 2) {
+            wypisz(
+                "Skladnia: usun <sciezka>\n"
+            );
+            return;
+        }
+
+        char sciezka[MAX_SCIEZKA] = {};
+
+        if (!utworz_sciezke_absolutna(
+                a.dane[1],
+                sciezka,
+                sizeof(sciezka))) {
+
+            wypisz(
+                "Blad: nieprawidlowa sciezka.\n"
+            );
+            return;
+        }
+
+        if (tekst_rowny(
+                sciezka,
+                "/")) {
+
+            wypisz(
+                "Blad: nie mozna usunac korzenia '/'.\n"
+            );
+            return;
+        }
+
+        if (bsh_usun_twor(
+                sciezka)) {
+
+            wypisz("Usunieto: ");
+            wypisz(sciezka);
+            wypisz("\n");
+        } else {
+            wypisz(
+                "Blad: obiekt nie istnieje, katalog nie jest pusty lub brak uprawnien.\n"
+            );
+        }
+
+        return;
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "zmien_nazwe")) {
+
+        if (a.liczba != 3) {
+            wypisz(
+                "Skladnia: zmien_nazwe <sciezka> <nowa_nazwa>\n"
+            );
+            return;
+        }
+
+        char sciezka[MAX_SCIEZKA] = {};
+
+        if (!utworz_sciezke_absolutna(
+                a.dane[1],
+                sciezka,
+                sizeof(sciezka))) {
+
+            wypisz(
+                "Blad: nieprawidlowa sciezka.\n"
+            );
+            return;
+        }
+
+        /*
+         * Nowa nazwa nie moze zawierac slash, bo BWS 8 zmienia nazwe
+         * wewnatrz tego samego katalogu.
+         */
+        if (a.dane[2][0] == '\0') {
+            wypisz(
+                "Blad: pusta nazwa.\n"
+            );
+            return;
+        }
+
+        for (size_t i = 0;
+             a.dane[2][i] != '\0';
+             ++i) {
+
+            if (a.dane[2][i] == '/' ||
+                a.dane[2][i] == '\\') {
+
+                wypisz(
+                    "Blad: nowa nazwa nie moze zawierac '/' ani '\\\\'.\n"
+                );
+                return;
+            }
+        }
+
+        if (bsh_zmien_nazwe(
+                sciezka,
+                a.dane[2])) {
+
+            wypisz(
+                "Zmieniono nazwe.\n"
+            );
+        } else {
+            wypisz(
+                "Blad: zmiana nazwy nie powiodla sie.\n"
+            );
+        }
+
+        return;
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "dzwiek")) {
+
+        if (a.liczba != 1) {
+            wypisz(
+                "Skladnia: dzwiek\n"
+            );
+            return;
+        }
+
+        wypisz(
+            "Odtwarzanie tonu testowego HDA 880 Hz / 500 ms...\n"
+        );
+
+        bws_dzwiek_test(
+            880,
+            500
+        );
+
+        return;
+    }
+
+    if (tekst_rowny(
+            cmd,
+            "pisz")) {
+
+        if (a.liczba != 2) {
+            wypisz(
+                "Skladnia: pisz <tekst>\n"
+                "Dla tekstu ze spacjami uzyj cudzyslowu.\n"
+            );
+            return;
+        }
+
+        wypisz(a.dane[1]);
+        wypisz("\n");
+        return;
+    }
+
+    wypisz("Nieznane polecenie: '");
+    wypisz(cmd);
+    wypisz("'. Wpisz 'pomoc'.\n");
+}
+
+} // namespace
+
+/* =========================================================================
+ * 13. NAGLOWEK BINARNY APLIKACJI
+ * ========================================================================= */
+
+extern "C"
+__attribute__((noreturn))
+void _start();
+
+extern "C" {
+
+__attribute__((section(".naglowek"), used))
+NaglowekBur naglowek = {
+    {'B', 'U', 'R', '\0'},
+
+    reinterpret_cast<uint64_t>(
+        &_start
+    ),
+
+    BUR_TEXT_OFFSET,
+    BUR_TEXT_SIZE,
+    BUR_TEXT_VADDR,
+
+    BUR_DATA_OFFSET,
+    BUR_DATA_SIZE,
+    BUR_DATA_VADDR
+};
+
+} // extern "C"
+
+/* =========================================================================
+ * 14. ENTRY POINT
+ * ========================================================================= */
+
+extern "C"
+__attribute__((noreturn))
+void _start() {
+    /*
+     * Terminal nie powinien przejmowac sterowania mysza.
+     */
+    gui_ustaw_przejecie_myszy(
+        false
+    );
+
+    wypisz(
+        "\n"
+        "==================================================\n"
+        " Powłoka Bursztynowa bsh v2.3\n"
+        " Ring 3 / BWS / BSP2 / PZB\n"
+        "==================================================\n"
+        "Wpisz 'pomoc', aby zobaczyc polecenia.\n"
+    );
+
+    char linia[MAX_LINIA] = {};
+
+    for (;;) {
+        wypisz("\npowloka> ");
+
+        const bool cala_linia =
+            pobierz_linie(
+                linia,
+                sizeof(linia)
+            );
+
         wypisz("\n");
 
-        if (strlen(bufor_komendy) == 0) continue;
+        if (!cala_linia) {
+            wypisz(
+                "Blad: polecenie przekracza limit 127 bajtow i zostalo odrzucone.\n"
+            );
+            continue;
+        }
 
-        for(int i = 4; i > 0; i--) { for(int j=0; j<128; j++) historia[i][j] = historia[i-1][j]; }
-        for(int j=0; j<128; j++) historia[0][j] = bufor_komendy[j];
-        if (hist_ilosc < 5) hist_ilosc++;
+        if (linia[0] == '\0') {
+            continue;
+        }
 
-        if (strcmp(bufor_komendy, "pomoc")) {
-            wypisz("--- KATEGORIA: APLIKACJE GUI ---\n");
-            wypisz("  notatnik      - uruchamia graficzny edytor tekstu\n");
-            wypisz("  kalkulator    - uruchamia kalkulator systemowy\n");
-            wypisz("  pulpit        - wraca do Menedżera Okien\n");
-            wypisz("--- KATEGORIA: SYSTEM ---\n");
-            wypisz("  pomoc         - wyświetla ten ekran pomocy\n");
-            wypisz("  system        - wyświetla parametry sprzętowe i systemowe\n");
-            wypisz("  wersja        - wyświetla wersję powłoki i systemu\n");
-            wypisz("  kto           - wyświetla zalogowanego użytkownika\n");
-            wypisz("  pci           - wyświetla urządzenia na płycie głównej (magistrala PCI)\n");
-            wypisz("  uruchom [plik]- uruchamia aplikację (np. uruchom /programy/kalk.bur)\n");
-            wypisz("  historia      - wyświetla historię 5 ostatnich poleceń\n");
-            wypisz("  czysc         - czyści ekran terminala\n");
-            wypisz("  czas          - wyświetla aktualną godzinę z zegara RTC\n");
-            wypisz("  wyjdz         - zamyka terminal i wraca na Pulpit\n");
-            wypisz("--- KATEGORIA: SIEĆ (INTERNET) ---\n");
-            wypisz("  ping [Cel]    - wysyła sygnał PING (np. ping 10.0.2.2 lub ping google.com)\n");
-            wypisz("  pobierz       - pobiera plik z sieci (np. pobierz example.com / /test.html)\n");
-            wypisz("--- KATEGORIA: PLIKI ---\n");
-            wypisz("  utworz        - tworzy nowy, pusty plik lub katalog\n");
-            wypisz("  zapisz        - zapisuje wprowadzony tekst do pliku\n");
-            wypisz("  czytaj [plik] - wyświetla zawartość wskazanego pliku\n");
-            wypisz("  pliki [kat]   - wyświetla listę plików w katalogu (np. pliki /programy)\n");
-            wypisz("  usun [sciezka]- trwale usuwa plik lub katalog\n");
-            wypisz("  zmien_nazwe   - uruchamia kreator zmiany nazwy pliku\n");
-            wypisz("  gdzie         - wyświetla ścieżkę obecnego katalogu\n");
-            wypisz("--- KATEGORIA: ROZRYWKA ---\n");
-            wypisz("  pisz [txt]    - wypisuje podany tekst na ekran\n");
-            wypisz("  cytat         - wczytuje i wyświetla cytaty z pliku\n");
-            wypisz("  losuj         - rzuca wirtualną kością (wynik 1-6)\n");
-            wypisz("  dzwiek        - test dźwięku karta hda intel)\n");
-        }
-        else if (strcmp(bufor_komendy, "notatnik")) {
-            wypisz("Uruchamianie Notatnika...\n");
-            bws_wywolaj(10, (uint64_t)"/programy/notatnik.cebula/notatnik.bur");
-        }
-        else if (strcmp(bufor_komendy, "kalkulator")) {
-            wypisz("Uruchamianie Kalkulatora...\n");
-            bws_wywolaj(10, (uint64_t)"/programy/kalkulator.cebula/kalkulator.bur");
-        }
-        else if (strcmp(bufor_komendy, "pulpit") || strcmp(bufor_komendy, "wyjdz") || strcmp(bufor_komendy, "exit")) {
-            wypisz("Powrót do Menedżera Okien...\n");
-            bws_wywolaj(10, (uint64_t)"/menedzer_okien.bur");
-        }
-        else if (strcmp(bufor_komendy, "ping")) {
-            wypisz("Składnia polecenia: ping [adres IP lub domena] (np. ping google.com)\n");
-        }
-        else if (zaczyna_sie_od(bufor_komendy, "ping ")) {
-            char* cel = &bufor_komendy[5];
-            int ip[4] = {0,0,0,0};
-            bool to_ip = true;
-            
-            for (int i = 0; cel[i] != '\0'; i++) {
-                if ((cel[i] < '0' || cel[i] > '9') && cel[i] != '.') { to_ip = false; break; }
-            }
-            
-            if (to_ip) {
-                int czesc = 0; int i = 0;
-                while(cel[i] != '\0' && czesc < 4) {
-                    if (cel[i] == '.') { czesc++; i++; continue; }
-                    if (cel[i] >= '0' && cel[i] <= '9') ip[czesc] = ip[czesc] * 10 + (cel[i] - '0');
-                    i++;
-                }
-                wypisz("Wysyłanie sygnału PING na podany adres IP...\n");
-                bws_wywolaj(11, ip[0], ip[1], ip[2], ip[3]);
-            } else {
-                wypisz("Rozwiązywanie domeny DNS: "); wypisz(cel); wypisz("...\n");
-                uint8_t resolved[4] = {0, 0, 0, 0};
-                if (bws_wywolaj(12, (uint64_t)cel, (uint64_t)resolved)) {
-                    wypisz("Sukces! Znaleziono zmapowany adres IP: ");
-                    char buf[16]; int_do_str(resolved[0], buf); wypisz(buf); wypisz(".");
-                    int_do_str(resolved[1], buf); wypisz(buf); wypisz(".");
-                    int_do_str(resolved[2], buf); wypisz(buf); wypisz(".");
-                    int_do_str(resolved[3], buf); wypisz(buf); wypisz("\n");
-                    wypisz("Wysyłanie sygnału PING (ICMP)...\n");
-                    bws_wywolaj(11, resolved[0], resolved[1], resolved[2], resolved[3]);
-                } else { wypisz("Błąd: Nie udało się rozwiązać domeny DNS.\n"); }
-            }
-        }
-        else if (zaczyna_sie_od(bufor_komendy, "pobierz ")) {
-            char domena[64] = {0}; char sciezka_http[64] = {0}; char sciezka_dyskowa[64] = {0};
-            int i = 8, j = 0;
-            
-            while (bufor_komendy[i] != ' ' && bufor_komendy[i] != '\0' && j < 63) domena[j++] = bufor_komendy[i++];
-            domena[j] = '\0';
-            if (bufor_komendy[i] == ' ') { i++; }
-            j = 0;
-            
-            while (bufor_komendy[i] != ' ' && bufor_komendy[i] != '\0' && j < 63) sciezka_http[j++] = bufor_komendy[i++];
-            sciezka_http[j] = '\0';
-            if (bufor_komendy[i] == ' ') { i++; }
-            j = 0;
-            
-            while (bufor_komendy[i] != ' ' && bufor_komendy[i] != '\0' && j < 63) sciezka_dyskowa[j++] = bufor_komendy[i++];
-            sciezka_dyskowa[j] = '\0';
+        Argumenty argumenty{};
 
-            if (domena[0] == '\0' || sciezka_http[0] == '\0' || sciezka_dyskowa[0] == '\0') {
-                wypisz("Składnia: pobierz [domena] [sciezka_na_serwerze] [zapisz_jako]\n");
-                wypisz("Przykład: pobierz example.com / /test.html\n");
-            } else {
-                wypisz("1. Rozwiązywanie domeny DNS: "); wypisz(domena); wypisz("...\n");
-                uint8_t resolved_ip[4] = {0, 0, 0, 0};
-                
-                if (bws_wywolaj(12, (uint64_t)domena, (uint64_t)resolved_ip)) {
-                    wypisz("2. Adres IP znaleziony. Nawiązywanie sesji TCP i pobieranie danych (HTTP)...\n");
-                    char bezp_sciezka[64]; formatuj_sciezke(sciezka_dyskowa, bezp_sciezka);
-                    
-                    uint64_t wynik = bws_wywolaj(13, (uint64_t)resolved_ip, (uint64_t)domena, (uint64_t)sciezka_http, (uint64_t)bezp_sciezka);
-                    
-                    if (wynik == 1) {
-                        wypisz("3. SUKCES! Plik został pobrany z Internetu i utrwalony na dysku jako: "); wypisz(bezp_sciezka); wypisz("\n");
-                        wypisz("Wpisz: czytaj "); wypisz(bezp_sciezka); wypisz(" aby zobaczyć jego zawartość!\n");
-                    } else {
-                        wypisz("BŁĄD: Serwer nie odpowiedział, zerwał połączenie, lub brak uprawnień dyskowych.\n");
-                    }
-                } else { wypisz("BŁĄD: Nie udało się rozwiązać domeny DNS.\n"); }
-            }
-        }
-        else if (strcmp(bufor_komendy, "czas")) {
-            char bufor_czasu[32]; bws_wywolaj(9, (uint64_t)bufor_czasu);
-            wypisz("Aktualny czas z zegara RTC to: "); wypisz(bufor_czasu); wypisz("\n");
-        }
-        else if (strcmp(bufor_komendy, "system")) {
-            wypisz("OS: Bursztyn OS x86_64\nJądro: Monolityczne, VMM Paging 4-lvl, Własne API GUI\n");
-            wypisz("Sieć: Zintegrowany klient DHCP, ARP, ICMP oraz Klient HTTP (TCP/DNS)\n");
-        }
-        else if (strcmp(bufor_komendy, "wersja")) {
-            wypisz("Powłoka Bursztynowa v2.2\n");
-        }
-        else if (strcmp(bufor_komendy, "kto")) {
-            wypisz("Zalogowano jako: Administrator Systemu (Ring 3)\n");
-        }
-        else if (strcmp(bufor_komendy, "pci")) {
-            char buf_pci[2048]; for(int i = 0; i < 2048; i++) buf_pci[i] = 0; 
-            if (czytaj_plik("/logi/pci.txt", buf_pci, 2047)) {
-                wypisz("--- Raport PCI (Zapisany przez Ring 0) ---\n"); wypisz(buf_pci); wypisz("\n");
-            } else wypisz("Błąd: Brak raportu PCI w systemie plików.\n");
-        }
-        else if (zaczyna_sie_od(bufor_komendy, "uruchom ")) {
-            char sciezka_pliku[64]; int i = 8, j = 0;
-            while (bufor_komendy[i] != '\0' && bufor_komendy[i] != ' ' && j < 63) sciezka_pliku[j++] = bufor_komendy[i++];
-            sciezka_pliku[j] = '\0';
-            wypisz("Uruchamianie procesu: "); wypisz(sciezka_pliku); wypisz("...\n");
-            if (bws_wywolaj(10, (uint64_t)sciezka_pliku) == 0) wypisz("Błąd: Nie udało się załadować programu z dysku.\n");
-        }
-        else if (strcmp(bufor_komendy, "gdzie")) { wypisz("Obecna lokalizacja: / (Korzeń Systemu Plików)\n"); }
-        else if (strcmp(bufor_komendy, "historia")) {
-            for(int i = 0; i < hist_ilosc; i++) {
-                char numer[4]; int_do_str(i + 1, numer); wypisz(numer); wypisz(". "); wypisz(historia[i]); wypisz("\n");
-            }
-        }
-        else if (strcmp(bufor_komendy, "czysc")) { for(int i = 0; i < 40; i++) wypisz("\n"); }
-        else if (strcmp(bufor_komendy, "losuj")) {
-            uint64_t cykle = pobierz_cykle(); int kosc = (cykle % 6) + 1;
-            char wynik_str[8]; int_do_str(kosc, wynik_str);
-            wypisz("Rzucasz kośćmi... Wypadło: "); wypisz(wynik_str); wypisz("!\n");
-        }
-        else if (strcmp(bufor_komendy, "cytat")) {
-            char buf[512]; for(int i=0; i<512; i++) buf[i] = 0; 
-            if (czytaj_plik("/cytaty.txt", buf, 511)) { wypisz("--- Cytaty z pliku ---\n"); wypisz(buf); wypisz("\n"); } 
-            else {
-                if (utworz("/cytaty.txt")) {
-                    const char* domyslne = "1. U mnie działa.\n2. Brak błędu to też błąd.\n";
-                    zapisz_plik("/cytaty.txt", domyslne, strlen(domyslne)); wypisz("Plik utworzony!\n");
-                }
-            }
-        }
-        else if (strncmp(bufor_komendy, "pliki", 5)) {
-            char sciezka[64];
-            if (bufor_komendy[5] == ' ' && bufor_komendy[6] != '\0') formatuj_sciezke(&bufor_komendy[6], sciezka);
-            else { sciezka[0] = '/'; sciezka[1] = '\0'; }
+        if (!parse_argumenty(
+                linia,
+                &argumenty)) {
 
-            char buf[512]; for(int i=0; i<512; i++) buf[i] = 0;
-            if (wylistuj_katalog(sciezka, buf, 511)) { wypisz("Zawartość źródła ("); wypisz(sciezka); wypisz("):\n"); wypisz(buf); } 
-            else wypisz("Błąd: Katalog nie istnieje lub jest pusty.\n");
+            wypisz(
+                "Blad skladni: za duzo argumentow, argument jest za dlugi "
+                "lub brakuje zamykajacego cudzyslowu.\n"
+            );
+            continue;
         }
-        else if (strncmp(bufor_komendy, "czytaj ", 7)) {
-            char sciezka[64]; formatuj_sciezke(&bufor_komendy[7], sciezka);
-            
-            char duzy_bufor[4096]; 
-            for(int i=0; i<4096; i++) duzy_bufor[i] = 0; 
-            
-            if (czytaj_plik(sciezka, duzy_bufor, 4095)) { 
-                wypisz("--- "); wypisz(sciezka); wypisz(" ---\n"); 
-                wypisz(duzy_bufor); 
-                wypisz("\n"); 
-            } 
-            else {
-                wypisz("Błąd odczytu: Brak pliku lub plik pusty.\n");
-            }
+
+        if (argumenty.liczba == 0) {
+            continue;
         }
-        else if (strcmp(bufor_komendy, "utworz")) {
-            wypisz("Nazwa nowego pliku/folderu: "); char sciezka[64]; pobierz_linie(sciezka, 64); wypisz("\n");
-            char bezp[64]; formatuj_sciezke(sciezka, bezp);
-            if (utworz(bezp)) { wypisz("Założono: "); wypisz(bezp); wypisz("\n"); } else wypisz("Błąd: Zablokowane lub błędna ścieżka.\n");
-        }
-        else if (strcmp(bufor_komendy, "zapisz")) {
-            wypisz("Plik docelowy: "); char sciezka[64]; pobierz_linie(sciezka, 64); wypisz("\n");
-            char bezp[64]; formatuj_sciezke(sciezka, bezp);
-            wypisz("Tekst: "); char dane[128]; pobierz_linie(dane, 128); wypisz("\n");
-            if (zapisz_plik(bezp, dane, strlen(dane))) wypisz("Zapisano!\n"); else wypisz("Błąd zapisu.\n");
-        }
-        else if (strncmp(bufor_komendy, "usun ", 5)) {
-            char sciezka[64]; formatuj_sciezke(&bufor_komendy[5], sciezka);
-            if (usun_twor(sciezka)) { wypisz("Usunięto obiekt: "); wypisz(sciezka); wypisz("\n"); } 
-            else wypisz("Błąd: Nie można usunąć.\n");
-        }
-        else if (strcmp(bufor_komendy, "zmien_nazwe")) {
-            wypisz("Ścieżka do zmiany: "); char stara[64]; pobierz_linie(stara, 64); wypisz("\n"); char bezp_stara[64]; formatuj_sciezke(stara, bezp_stara);
-            wypisz("Nowa nazwa: "); char nowa[64]; pobierz_linie(nowa, 64); wypisz("\n");
-            if (zmien_nazwe_tworu(bezp_stara, nowa)) wypisz("Zmieniono nazwę.\n"); else wypisz("Błąd zmiany nazwy.\n");
-        }
-         else if (strcmp(bufor_komendy, "dzwiek")) {
-            // Używamy Twojej funkcji wypisz!
-            wypisz("Odtwarzanie dzwieku testowego HDA (880 Hz)...\n");
-            
-            // Wywołanie systemowe do Jądra
-            bws_dzwiek_test(880, 500);
-        }
-        else if (strncmp(bufor_komendy, "pisz ", 5)) { wypisz(&bufor_komendy[5]); wypisz("\n"); }
-        else { wypisz("Nieznane polecenie: '"); wypisz(bufor_komendy); wypisz("'. Wpisz 'pomoc'.\n"); }
+
+        dodaj_do_historii(
+            linia
+        );
+
+        wykonaj_polecenie(
+            argumenty
+        );
     }
 }

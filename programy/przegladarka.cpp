@@ -1,1306 +1,6635 @@
 /*
- * Przeglądarka Internetowa "Hussar" dla Bursztyn OS (Ring 3)
- * Wersja z obsługą myszy, inteligentnym parserem URL, skalowaniem czcionek
- * oraz inteligentną obsługą kodów błędów HTTP.
+ * Bursztyn OS - Hussar
+ *
+ * Przegladarka WWW Ring 3 dla Bursztyn OS.
+ *
+ * Najwazniejsze zalozenia tej wersji:
+ *
+ *   - jedna warstwa GUI nalezaca do procesu,
+ *   - maksymalnie 6 zakladek,
+ *   - HTTP i HTTPS przez BWS 28..31,
+ *   - do 5 przekierowan,
+ *   - podstawowy renderer HTML bez JavaScript,
+ *   - bezpieczny parser statusu HTTP z http_kody.h,
+ *   - bezpieczne ograniczenia wszystkich buforow,
+ *   - zakladki trzymaja tresc na stercie zamiast kopiowac 256 KiB struct,
+ *   - specjalny statyczny bufor sieciowy ponizej 4 GiB.
+ *
+ * WAZNE O ABI SIECI:
+ *
+ * Aktualny wrapper bws_siec_pobierz_http()/https() pakuje wskaznik bufora
+ * do gornych 32 bitow jednego argumentu syscall. Jadro dekoduje wiec tylko
+ * 32-bitowy adres user-space. Sterta Ring 3 zaczyna sie pod 0x800000000,
+ * dlatego bufor przekazywany bezposrednio z gui_malloc() zostalby obciety.
+ *
+ * `siec_bufor` jest celowo globalnym BSS aplikacji pod niskim VA 0x610000+.
+ * Po naprawieniu ABI BWS29/BWS30 do pelnego uint64_t ten bounce-buffer
+ * bedzie mozna usunac.
  */
 
 #include "../bursztyn_gui.h"
-#include <stdint.h>
-#include <stdbool.h>
-
-// --- DOŁĄCZENIE NOWEGO MODUŁU OBSŁUGI BŁĘDÓW HTTP ---
 #include "http_kody.h"
 
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+
+/* =========================================================================
+ * 1. FORMAT .bur
+ * ========================================================================= */
+
+/*
+ * Nowy DATA/BSS ma 512 KiB, poniewaz zawiera 256 KiB niskiego bounce-buffera
+ * wymaganego przez obecne 32-bitowe pakowanie wskaznika HTTP.
+ *
+ * przegladarka_linker.ld MUSI miec ten sam layout:
+ *
+ *   HEADER  off 0x0000  VA 0x600000  region 0x1000
+ *   TEXT    off 0x1000  VA 0x601000  region 0xF000
+ *   DATA    off 0x10000 VA 0x610000  memory 0x80000
+ */
 struct NaglowekBur {
-    uint8_t  magia[4];            
-    uint64_t punkt_wejscia;       
-    uint64_t tekst_przesuniecie;  
-    uint64_t tekst_rozmiar;       
-    uint64_t tekst_wirtualny;     
-    uint64_t dane_przesuniecie;   
-    uint64_t dane_rozmiar;        
-    uint64_t dane_wirtualny;      
+    uint8_t magia[4];
+
+    uint64_t punkt_wejscia;
+
+    uint64_t tekst_przesuniecie;
+    uint64_t tekst_rozmiar;
+    uint64_t tekst_wirtualny;
+
+    uint64_t dane_przesuniecie;
+    uint64_t dane_rozmiar;
+    uint64_t dane_wirtualny;
 } __attribute__((packed));
 
-extern "C" __attribute__((noreturn)) void _start();
+static_assert(
+    sizeof(NaglowekBur) == 60U,
+    "Naglowek .bur musi miec dokladnie 60 bajtow"
+);
+
+static_assert(
+    offsetof(NaglowekBur, punkt_wejscia) == 4U,
+    "Nieprawidlowy layout NaglowekBur"
+);
+
+static_assert(
+    offsetof(NaglowekBur, dane_wirtualny) == 52U,
+    "Nieprawidlowy layout NaglowekBur"
+);
+
+extern "C" [[noreturn]] void _start();
 
 extern "C" {
-    __attribute__((section(".naglowek"), used))
-    struct NaglowekBur naglowek = {
-        {'B', 'U', 'R', '\0'},
-        (uint64_t)&_start,
-        4096, 61440, 0x601000,
-        65536, 0x210000, 0x610000
-    };
-    
-    bool bws_siec_dns(const char* domena, uint8_t* wyjsciowy_ip);
-    bool bws_siec_pobierz_http(uint8_t* cel_ip, const char* domena, const char* sciezka, char* bufor, uint32_t max_dlugosc);
-    bool bws_siec_pobierz_https(uint8_t* cel_ip, const char* domena, const char* sciezka, char* bufor, uint32_t max_dlugosc);
-    bool bws_tls_certyfikat_zaufany();
+
+__attribute__((section(".naglowek"), used))
+NaglowekBur naglowek = {
+    {'B', 'U', 'R', '\0'},
+
+    reinterpret_cast<uint64_t>(
+        &_start
+    ),
+
+    0x1000ULL,
+    0xF000ULL,
+    0x601000ULL,
+
+    0x10000ULL,
+    0x80000ULL,
+    0x610000ULL
+};
+
 }
 
-// =========================================================================
-// DEKLARACJE WYPRZEDZAJĄCE
-// =========================================================================
-extern "C" void* memcpy(void* dest, const void* src, unsigned long n);
-extern "C" void* memset(void* dest, int val, unsigned long n);
-void RysujInterfejs(bool odswiez_tlo);
-void PobierzStrone();
-int dlugosc_tekstu(const char* s);
-void dopisz_znak(char* s, char z, int max_len);
-void usun_ostatni_znak(char* s);
-void ustaw_status(const char* txt);
-const char* oczysc_http(const char* zrodlo);
-void usun_tagi_html(const char* wejscie, char* wyjscie, int limit);
-void RysujDrzewoHTML(int start_x, int start_y, const char* html_kod);
-bool czy_tag(const char* s, int pos, const char* tag);
-void rysuj_html(int px, int py, int max_szer, int max_wys, const char* tekst, uint32_t domyslny_kolor, int przewin);
-void rysuj_zwykly_tekst(int px, int py, int max_szer, int max_wys, const char* tekst, uint32_t kolor, int przewin);
-void wypisz_skalowane(int x, int y, uint32_t kolor, int skala, const char* text);
-void RysujPrzyciskLokalny(int x, int y, int w, int h, uint32_t bg, uint32_t fg, const char* txt);
-void Nawiguj(bool nowa_strona, bool rozpoznaj_wyszukiwanie);
-void WczytajUlubione();
-void ZapiszUlubione();
-void DodajObecnaDoUlubionych();
+/* =========================================================================
+ * 2. STALE APLIKACJI
+ * ========================================================================= */
+
+namespace {
+
+constexpr int MAX_ZAKLADKI =
+    6;
+
+constexpr int MAX_HISTORIA =
+    20;
+
+constexpr int MAX_ULUBIONE =
+    10;
+
+constexpr size_t URL_POJEMNOSC =
+    256U;
+
+constexpr size_t DOMENA_POJEMNOSC =
+    256U;
+
+constexpr size_t SCIEZKA_POJEMNOSC =
+    512U;
+
+constexpr size_t HTML_POJEMNOSC =
+    256U *
+    1024U;
+
+constexpr size_t SIEC_POJEMNOSC =
+    256U *
+    1024U;
+
+constexpr size_t ULUBIONE_PLIK_POJEMNOSC =
+    4096U;
+
+constexpr size_t STATUS_POJEMNOSC =
+    96U;
+
+constexpr int PASEK_SYSTEMOWY_WYS =
+    40;
+
+constexpr int TYTUL_WYS =
+    26;
+
+constexpr int ZAKLADKI_Y =
+    28;
+
+constexpr int ZAKLADKI_WYS =
+    24;
+
+constexpr int NARZEDZIA_Y =
+    56;
+
+constexpr int NARZEDZIA_WYS =
+    36;
+
+constexpr int TRESC_Y =
+    96;
+
+constexpr int STATUS_WYS =
+    22;
+
+constexpr int MIN_WIN_W =
+    560;
+
+constexpr int MIN_WIN_H =
+    360;
+
+constexpr int DOMYSLNY_WIN_W =
+    800;
+
+constexpr int DOMYSLNY_WIN_H =
+    550;
+
+constexpr int MAX_PRZEKIEROWAN =
+    5;
+
+constexpr int Z_ORDER_HUSSAR =
+    10;
+
+constexpr uint32_t KOLOR_TLO =
+    0x00F8F9FAU;
+
+constexpr uint32_t KOLOR_TEKST =
+    0x00222222U;
+
+constexpr uint32_t KOLOR_BIALY =
+    0x00FFFFFFU;
+
+constexpr uint32_t KOLOR_AKTYWNY =
+    0x004A2500U;
+
+constexpr uint32_t KOLOR_POMARANCZ =
+    0x00E58A00U;
+
+constexpr uint32_t KOLOR_STATUS =
+    0x00FFBF00U;
+
+constexpr uint32_t KOLOR_CZERWONY =
+    0x00AA0000U;
+
+/*
+ * Bounce buffer BWS29/BWS30.
+ *
+ * Musi znajdowac sie w niskim DATA/BSS aplikacji, nie na stercie 32 GiB.
+ */
+char siec_bufor[
+    SIEC_POJEMNOSC
+] __attribute__((section(".bss"), aligned(4096))) = {};
+
+/* =========================================================================
+ * 3. STRUKTURY
+ * ========================================================================= */
 
 struct Zakladka {
-    char url[256];
-    char html[256000];
+    char url[
+        URL_POJEMNOSC
+    ];
+
+    char* tresc;
+
     int przewin_y;
+
     bool to_jest_html;
     bool wczytana;
 };
 
-#define MAX_ZAKLADKI 6
-#define HTML_POJEMNOSC 256000
+struct ParsedUrl {
+    bool https;
 
-// Zmienne BSS
-static Zakladka zakladki[MAX_ZAKLADKI] __attribute__((section(".bss")));
-static char temp_bufor[HTML_POJEMNOSC] __attribute__((section(".bss")));
-static char status_bufor[64];
-static int glebokosc_przekierowan = 0;
-static char plik_ulubionych[2560] __attribute__((section(".bss")));
+    char domena[
+        DOMENA_POJEMNOSC
+    ];
 
-char historia[20][256];
-int historia_idx = -1;
-int historia_max = -1;
-char ulubione[10][256];
-int ulubione_ilosc = 0;
-bool menu_ulubione_otwarte = false;
-bool menu_ustawienia_otwarte = false;
-static bool nagraj_historie_po_sukcesie = false;
-
-int liczba_zakladek;
-int aktywna_zakladka;
-int WIN_X = 50, WIN_Y = 50, WIN_W = 800, WIN_H = 550;
-int old_win_x = 50, old_win_y = 50, old_win_w = 800, old_win_h = 550;
-bool zmaksymalizowane;
-bool dragging = false;
-int drag_off_x = 0, drag_off_y = 0;
-int screen_w = 1024, screen_h = 768;
-int max_przewin_y;
-int calkowita_wysokosc_strony;
-bool w_polu_url;
-
-static void ogranicz_przewiniecie() {
-    int& przewin = zakladki[aktywna_zakladka].przewin_y;
-    if (przewin < 0) przewin = 0;
-    if (przewin > max_przewin_y) przewin = max_przewin_y;
-}
-
-static void kopiuj_tekst_limit(char* cel, const char* zrodlo, int pojemnosc) {
-    int i = 0;
-    while (zrodlo[i] && i + 1 < pojemnosc) { cel[i] = zrodlo[i]; i++; }
-    if (zrodlo[i] && (((uint8_t)zrodlo[i] & 0xC0) == 0x80)) {
-        while (i > 0 && (((uint8_t)cel[i - 1] & 0xC0) == 0x80)) i--;
-        if (i > 0) i--;
-    }
-    cel[i] = '\0';
-}
-
-static bool tekst_ma_kropke(const char* tekst) {
-    for (int i = 0; tekst[i]; i++) if (tekst[i] == '.') return true;
-    return false;
-}
-
-static void przygotuj_adres_wyszukiwania(char* url) {
-    if (url[0] == '\0' || tekst_ma_kropke(url)) return;
-    char zapytanie[256];
-    kopiuj_tekst_limit(zapytanie, url, sizeof(zapytanie));
-    const char prefiks[] = "https://html.duckduckgo.com/html/?q=";
-    int o = 0;
-    while (prefiks[o] && o < 255) { url[o] = prefiks[o]; o++; }
-    for (int i = 0; zapytanie[i] && o < 255; i++)
-        url[o++] = zapytanie[i] == ' ' ? '+' : zapytanie[i];
-    url[o] = '\0';
-}
-
-static void DopiszDoHistorii(const char* url) {
-    if (historia_idx >= 0) {
-        int i = 0;
-        while (historia[historia_idx][i] && historia[historia_idx][i] == url[i]) i++;
-        if (historia[historia_idx][i] == '\0' && url[i] == '\0') return;
-    }
-    if (historia_idx < 19) historia_idx++;
-    else {
-        for (int h = 1; h < 20; h++) kopiuj_tekst_limit(historia[h - 1], historia[h], 256);
-        historia_idx = 19;
-    }
-    kopiuj_tekst_limit(historia[historia_idx], url, 256);
-    historia_max = historia_idx;
-}
-
-void WczytajUlubione() {
-    ulubione_ilosc = 0;
-    for (int i = 0; i < 2560; i++) plik_ulubionych[i] = '\0';
-    if (!czytaj_plik("/uzytkownicy/zakladki.txt", plik_ulubionych, 2559)) return;
-    int i = 0;
-    while (plik_ulubionych[i] && ulubione_ilosc < 10) {
-        int j = 0;
-        while (plik_ulubionych[i] && plik_ulubionych[i] != '\n' &&
-               plik_ulubionych[i] != '\r' && j < 255)
-            ulubione[ulubione_ilosc][j++] = plik_ulubionych[i++];
-        ulubione[ulubione_ilosc][j] = '\0';
-        while (plik_ulubionych[i] == '\n' || plik_ulubionych[i] == '\r') i++;
-        if (j > 0) ulubione_ilosc++;
-    }
-}
-
-void ZapiszUlubione() {
-    int p = 0;
-    for (int u = 0; u < ulubione_ilosc; u++) {
-        for (int i = 0; ulubione[u][i] && p < 2559; i++) plik_ulubionych[p++] = ulubione[u][i];
-        if (p < 2559) plik_ulubionych[p++] = '\n';
-    }
-    plik_ulubionych[p] = '\0';
-    const char* sciezka = "/uzytkownicy/zakladki.txt";
-    utworz(sciezka);
-    if (zapisz_plik(sciezka, plik_ulubionych, p)) ustaw_status("Zapisano zakładki.");
-    else ustaw_status("Błąd zapisu zakładek.");
-}
-
-void DodajObecnaDoUlubionych() {
-    const char* url = zakladki[aktywna_zakladka].url;
-    if (!url[0]) { ustaw_status("Brak adresu do zapisania."); return; }
-    if (ulubione_ilosc >= 10) { ustaw_status("Lista zakładek jest pełna."); return; }
-    kopiuj_tekst_limit(ulubione[ulubione_ilosc++], url, 256);
-    ZapiszUlubione();
-}
-
-void Nawiguj(bool nowa_strona, bool rozpoznaj_wyszukiwanie) {
-    char* url = zakladki[aktywna_zakladka].url;
-    if (!url[0]) { ustaw_status("Wpisz adres lub szukaną frazę."); return; }
-    if (rozpoznaj_wyszukiwanie) przygotuj_adres_wyszukiwania(url);
-    nagraj_historie_po_sukcesie = nowa_strona;
-    PobierzStrone();
-    nagraj_historie_po_sukcesie = false;
-}
-
-// =========================================================================
-// GŁÓWNY PUNKT WEJŚCIA PROGRAMU (Musi być dokładnie tutaj)
-// =========================================================================
-extern "C" __attribute__((noreturn)) void _start() {
-    liczba_zakladek = 1;
-    aktywna_zakladka = 0;
-    WIN_X = 50; WIN_Y = 50; WIN_W = 800; WIN_H = 550;
-    old_win_x = WIN_X; old_win_y = WIN_Y; old_win_w = WIN_W; old_win_h = WIN_H;
-    zmaksymalizowane = false;
-    dragging = false;
-    drag_off_x = 0; drag_off_y = 0;
-    max_przewin_y = 0;
-    calkowita_wysokosc_strony = 0;
-    w_polu_url = false;
-
-    const char* txt_start = "Gotowy";
-    int z = 0; while (txt_start[z]) { status_bufor[z] = txt_start[z]; z++; }
-    status_bufor[z] = '\0';
-
-    for(int i = 0; i < MAX_ZAKLADKI; i++) {
-        for(int j = 0; j < 256; j++) ((volatile char*)zakladki[i].url)[j] = 0;
-        for(int j = 0; j < HTML_POJEMNOSC; j++) ((volatile char*)zakladki[i].html)[j] = 0;
-        zakladki[i].przewin_y = 0;
-        zakladki[i].to_jest_html = false;
-        zakladki[i].wczytana = false;
-    }
-    for(int i = 0; i < HTML_POJEMNOSC; i++) ((volatile char*)temp_bufor)[i] = 0;
-    WczytajUlubione();
-
-    gui_pobierz_rozdzielczosc(&screen_w, &screen_h);
-    gui_ustaw_przejecie_myszy(true);
-
-    bool dziala = true;
-    uint8_t poprz_przycisk = 0;
-    int stary_mysz_x = -1, stary_mysz_y = -1;
-    int ansi_stan = 0;
-    
-    bool przerysuj = true;
-    bool odswiez_tlo = true;
-    bool scroll_dragging = false;
-    int scroll_drag_start_my = 0;
-    int scroll_drag_start_val = 0;
-
-    const char* start_url = "example.com/";
-    int iter = 0; while (start_url[iter]) { zakladki[0].url[iter] = start_url[iter]; iter++; }
-    zakladki[0].url[iter] = '\0';
-    zakladki[0].html[0] = '\0';
-
-    while (dziala) {
-        int mx, my; uint8_t mb;
-        gui_pobierz_mysz(&mx, &my, &mb);
-        
-        bool klik = (mb == 1 && poprz_przycisk == 0);
-        bool pusc = (mb == 0 && poprz_przycisk == 1);
-        bool przytrzymany = (mb == 1);
-
-        if (mx != stary_mysz_x || my != stary_mysz_y) {
-            if (dragging) odswiez_tlo = true;
-            przerysuj = true;
-        }
-
-        if (klik) {
-            przerysuj = true; odswiez_tlo = true;
-
-            bool obsluzono_menu = false;
-            int menu_x = WIN_X + WIN_W - 270;
-            int menu_y = WIN_Y + 94;
-            if (menu_ulubione_otwarte && mx >= menu_x && mx <= menu_x + 260 &&
-                my >= menu_y && my <= menu_y + 24 + ulubione_ilosc * 20) {
-                if (my < menu_y + 24) DodajObecnaDoUlubionych();
-                else {
-                    int wybrana = (my - (menu_y + 24)) / 20;
-                    if (wybrana >= 0 && wybrana < ulubione_ilosc) {
-                        kopiuj_tekst_limit(zakladki[aktywna_zakladka].url,
-                                           ulubione[wybrana], 256);
-                        menu_ulubione_otwarte = false;
-                        Nawiguj(true, false);
-                    }
-                }
-                obsluzono_menu = true;
-            } else if (menu_ustawienia_otwarte &&
-                       mx >= WIN_X + WIN_W - 180 && mx <= WIN_X + WIN_W - 8 &&
-                       my >= menu_y && my <= menu_y + 32) {
-                ustaw_status("Brak opcji.");
-                menu_ustawienia_otwarte = false;
-                obsluzono_menu = true;
-            }
-
-            bool nad_scrollbarem = !obsluzono_menu && max_przewin_y > 0 &&
-                mx >= WIN_X + WIN_W - 20 && mx <= WIN_X + WIN_W &&
-                my >= WIN_Y + 96 && my < WIN_Y + WIN_H - 24;
-            if (obsluzono_menu) {
-                w_polu_url = false;
-            } else if (nad_scrollbarem) {
-                scroll_dragging = true;
-                scroll_drag_start_my = my;
-                scroll_drag_start_val = zakladki[aktywna_zakladka].przewin_y;
-                w_polu_url = false;
-            }
-            else if (my >= WIN_Y && my <= WIN_Y + 26 &&
-                     mx >= WIN_X && mx <= WIN_X + WIN_W) {
-                if (mx >= WIN_X + WIN_W - 74 && mx <= WIN_X + WIN_W - 54) { dziala = false; }
-                else if (mx >= WIN_X + WIN_W - 50 && mx <= WIN_X + WIN_W - 30) {
-                    if (!zmaksymalizowane) {
-                        old_win_x = WIN_X; old_win_y = WIN_Y; old_win_w = WIN_W; old_win_h = WIN_H;
-                        WIN_X = 0; WIN_Y = 0; WIN_W = screen_w; WIN_H = screen_h - 40;
-                        zmaksymalizowane = true;
-                    } else {
-                        WIN_X = old_win_x; WIN_Y = old_win_y; WIN_W = old_win_w; WIN_H = old_win_h;
-                        zmaksymalizowane = false;
-                    }
-                }
-                else if (mx >= WIN_X + WIN_W - 26 && mx <= WIN_X + WIN_W - 6) { dziala = false; }
-                else if (!zmaksymalizowane) {
-                    dragging = true;
-                    drag_off_x = mx - WIN_X;
-                    drag_off_y = my - WIN_Y;
-                    w_polu_url = false;
-                    ustaw_status("Przesuwanie okna...");
-                }
-            }
-            else if (my >= WIN_Y + 28 && my <= WIN_Y + 52) {
-                for(int i = 0; i < liczba_zakladek; i++) {
-                    int tx = WIN_X + 10 + (i * 110);
-                    if (mx >= tx && mx <= tx + 100) {
-                        if (liczba_zakladek > 1 && mx >= tx + 80 && mx <= tx + 96) {
-                            for(int j = i; j < liczba_zakladek-1; j++) zakladki[j] = zakladki[j+1];
-                            liczba_zakladek--;
-                            if (aktywna_zakladka >= liczba_zakladek) aktywna_zakladka = liczba_zakladek - 1;
-                            ustaw_status("Zamknięto zakładkę.");
-                        } else {
-                            aktywna_zakladka = i;
-                            ustaw_status("Przełączono zakładkę.");
-                        }
-                        w_polu_url = false;
-                        break;
-                    }
-                }
-                if (liczba_zakladek < MAX_ZAKLADKI) {
-                    int plus_x = WIN_X + 10 + (liczba_zakladek * 110);
-                    if (mx >= plus_x && mx <= plus_x + 24) {
-                        zakladki[liczba_zakladek].url[0] = '\0';
-                        zakladki[liczba_zakladek].html[0] = '\0';
-                        zakladki[liczba_zakladek].przewin_y = 0;
-                        zakladki[liczba_zakladek].to_jest_html = false;
-                        aktywna_zakladka = liczba_zakladek;
-                        liczba_zakladek++;
-                        ustaw_status("Nowa zakładka.");
-                    }
-                }
-            }
-            else if (my >= WIN_Y + 56 && my <= WIN_Y + 92) {
-                int narzedzia_y = WIN_Y + 56;
-                int adres_x = WIN_X + 122;
-                int adres_w = WIN_W - 412;
-                if (mx >= WIN_X + 8 && mx <= WIN_X + 42 && historia_idx > 0) {
-                    historia_idx--;
-                    kopiuj_tekst_limit(zakladki[aktywna_zakladka].url,
-                                       historia[historia_idx], 256);
-                    Nawiguj(false, false);
-                }
-                else if (mx >= WIN_X + 44 && mx <= WIN_X + 78 && historia_idx < historia_max) {
-                    historia_idx++;
-                    kopiuj_tekst_limit(zakladki[aktywna_zakladka].url,
-                                       historia[historia_idx], 256);
-                    Nawiguj(false, false);
-                }
-                else if (mx >= WIN_X + 80 && mx <= WIN_X + 114) {
-                    Nawiguj(false, false);
-                }
-                else if (mx >= adres_x && mx <= adres_x + adres_w &&
-                         my >= narzedzia_y + 4 && my <= narzedzia_y + 32) {
-                    w_polu_url = true; ustaw_status("Edycja adresu URL...");
-                }
-                else if (mx >= WIN_X + WIN_W - 286 && mx <= WIN_X + WIN_W - 258) {
-                    zakladki[aktywna_zakladka].url[0] = '\0'; w_polu_url = true;
-                }
-                else if (mx >= WIN_X + WIN_W - 254 && mx <= WIN_X + WIN_W - 200) {
-                    w_polu_url = false; Nawiguj(true, true);
-                }
-                else if (mx >= WIN_X + WIN_W - 196 && mx <= WIN_X + WIN_W - 108) {
-                    menu_ulubione_otwarte = !menu_ulubione_otwarte;
-                    menu_ustawienia_otwarte = false; w_polu_url = false;
-                }
-                else if (mx >= WIN_X + WIN_W - 104 && mx <= WIN_X + WIN_W - 8) {
-                    menu_ustawienia_otwarte = !menu_ustawienia_otwarte;
-                    menu_ulubione_otwarte = false; w_polu_url = false;
-                }
-                else { w_polu_url = false; }
-            }
-            else {
-                w_polu_url = false;
-                menu_ulubione_otwarte = false;
-                menu_ustawienia_otwarte = false;
-            }
-        }
-
-        if (pusc) { dragging = false; przerysuj = true; if(status_bufor[0]=='P') ustaw_status("Gotowy"); }
-        if (mb == 0) scroll_dragging = false;
-
-        if (scroll_dragging && przytrzymany) {
-            zakladki[aktywna_zakladka].przewin_y =
-                scroll_drag_start_val + (my - scroll_drag_start_my) * 3;
-            ogranicz_przewiniecie();
-            przerysuj = true;
-            odswiez_tlo = false;
-        }
-        
-        if (dragging && przytrzymany) {
-            WIN_X = mx - drag_off_x; WIN_Y = my - drag_off_y;
-            if (WIN_X < 0) WIN_X = 0;
-            if (WIN_Y < 0) WIN_Y = 0;
-            odswiez_tlo = true; przerysuj = true;
-        }
-        
-        poprz_przycisk = mb; stary_mysz_x = mx; stary_mysz_y = my;
-
-        char znak = pobierz_znak();
-        if (znak != 0) {
-            przerysuj = true; odswiez_tlo = false;
-            if (ansi_stan == 0 && znak == '\x1B') { ansi_stan = 1; }
-            else if (ansi_stan == 1 && znak == '[') { ansi_stan = 2; }
-            else if (ansi_stan == 2) {
-                ansi_stan = 0;
-                if (znak == 'A') zakladki[aktywna_zakladka].przewin_y -= 100;
-                else if (znak == 'B') zakladki[aktywna_zakladka].przewin_y += 100;
-                ogranicz_przewiniecie();
-            } else {
-                ansi_stan = 0;
-                if (w_polu_url) {
-                    if (znak == '\n' || znak == '\r') { w_polu_url = false; Nawiguj(true, true); }
-                    else if (znak == '\b') usun_ostatni_znak(zakladki[aktywna_zakladka].url);
-                    // Bajty UTF-8 mają ustawiony bit 7 i przy signed char były odrzucane.
-                    else if ((uint8_t)znak >= 32) dopisz_znak(zakladki[aktywna_zakladka].url, znak, 255);
-                }
-            }
-        }
-
-        if (przerysuj) {
-            RysujInterfejs(odswiez_tlo);
-            przerysuj = false; odswiez_tlo = false;
-        }
-    }
-
-    gui_ustaw_przejecie_myszy(false);
-    gui_odswiez_pulpit(); 
-    gui_odswiez();
-    bws_wywolaj(10, (uint64_t)"/menedzer_okien.bur");
-    while(true);
-}
-
-// =========================================================================
-// IMPLEMENTACJA FUNKCJI
-// =========================================================================
-
-extern "C" void* memcpy(void* dest, const void* src, unsigned long n) {
-    char* d = (char*)dest;
-    const char* s = (const char*)src;
-    for (unsigned long i = 0; i < n; i++) d[i] = s[i];
-    return dest;
-}
-
-extern "C" void* memset(void* dest, int val, unsigned long n) {
-    char* d = (char*)dest;
-    for (unsigned long i = 0; i < n; i++) d[i] = (char)val;
-    return dest;
-}
-
-void wypisz_skalowane(int x, int y, uint32_t kolor, int skala, const char* text) {
-    uint64_t arg_kolor_skala = ((uint64_t)skala << 32) | kolor;
-    bws_wywolaj(20, (uint64_t)x, (uint64_t)y, arg_kolor_skala, (uint64_t)text);
-}
-
-void RysujPrzyciskLokalny(int x, int y, int w, int h, uint32_t bg, uint32_t fg, const char* txt) {
-    gui_rysuj_prostokat(x, y, w, h, bg);
-    
-    int text_w = 0;
-    int i = 0;
-    while (txt[i] != '\0') {
-        uint32_t unicode = (uint8_t)txt[i];
-        int char_bytes = 1;
-        if (((uint8_t)txt[i] & 0xE0) == 0xC0 && txt[i+1] != '\0' &&
-            ((uint8_t)txt[i+1] & 0xC0) == 0x80) {
-            unicode = (((uint8_t)txt[i] & 0x1F) << 6) | ((uint8_t)txt[i+1] & 0x3F);
-            char_bytes = 2;
-        }
-        int sw = (int)bws_wywolaj(24, unicode);
-        if (sw <= 0) sw = 8;
-        text_w += sw + 1; 
-        i += char_bytes;
-    }
-    
-    int px = x + (w - text_w) / 2;
-    int py = y + (h - 16) / 2;
-    if (py < y) py = y;
-    gui_wypisz_tekst_kolor(px, py, fg, txt);
-}
-
-int dlugosc_tekstu(const char* s) { int len = 0; while (s[len]) len++; return len; }
-void dopisz_znak(char* s, char z, int max_len) { int len = dlugosc_tekstu(s); if (len < max_len - 1) { s[len] = z; s[len+1] = '\0'; } }
-void usun_ostatni_znak(char* s) {
-    int len = dlugosc_tekstu(s);
-    if (len == 0) return;
-    len--;
-    // Nie zostawiaj osieroconego bajtu kontynuacji UTF-8.
-    while (len > 0 && (((uint8_t)s[len] & 0xC0) == 0x80)) len--;
-    s[len] = '\0';
-}
-void ustaw_status(const char* txt) {
-    int i = 0;
-    while (txt[i] && i < 63) { status_bufor[i] = txt[i]; i++; }
-    // Ograniczony bufor nie może kończyć się w środku znaku UTF-8.
-    if (txt[i] != '\0' && (((uint8_t)txt[i] & 0xC0) == 0x80))
-        while (i > 0 && (((uint8_t)status_bufor[i - 1] & 0xC0) == 0x80)) i--;
-    if (txt[i] != '\0' && (((uint8_t)txt[i] & 0xC0) == 0x80) && i > 0) i--;
-    status_bufor[i] = '\0';
-}
-
-const char* oczysc_http(const char* zrodlo) {
-    int i = 0;
-    while (zrodlo[i] != '\0') {
-        if (zrodlo[i] == '\r' && zrodlo[i+1] == '\n' && zrodlo[i+2] == '\r' && zrodlo[i+3] == '\n') {
-            return &zrodlo[i+4];
-        }
-        i++;
-    }
-    return zrodlo; 
-}
-
-static char html_mala_litera(char znak) {
-    return (znak >= 'A' && znak <= 'Z') ? znak + ('a' - 'A') : znak;
-}
-
-static bool html_nazwa_rowna(const char* nazwa, int dlugosc, const char* wzorzec) {
-    int i = 0;
-    while (wzorzec[i]) {
-        if (i >= dlugosc || html_mala_litera(nazwa[i]) != wzorzec[i]) return false;
-        i++;
-    }
-    return i == dlugosc;
-}
-
-static bool html_tag_blokowy(const char* nazwa, int dlugosc) {
-    return html_nazwa_rowna(nazwa, dlugosc, "p") ||
-           html_nazwa_rowna(nazwa, dlugosc, "div") ||
-           html_nazwa_rowna(nazwa, dlugosc, "h1") ||
-           html_nazwa_rowna(nazwa, dlugosc, "h2") ||
-           html_nazwa_rowna(nazwa, dlugosc, "h3") ||
-           html_nazwa_rowna(nazwa, dlugosc, "h4") ||
-           html_nazwa_rowna(nazwa, dlugosc, "h5") ||
-           html_nazwa_rowna(nazwa, dlugosc, "h6") ||
-           html_nazwa_rowna(nazwa, dlugosc, "li") ||
-           html_nazwa_rowna(nazwa, dlugosc, "header") ||
-           html_nazwa_rowna(nazwa, dlugosc, "footer") ||
-           html_nazwa_rowna(nazwa, dlugosc, "section") ||
-           html_nazwa_rowna(nazwa, dlugosc, "article") ||
-           html_nazwa_rowna(nazwa, dlugosc, "tr");
-}
-
-void usun_tagi_html(const char* wejscie, char* wyjscie, int limit) {
-    enum PominSekcje { POMIN_NIC, POMIN_HEAD, POMIN_SCRIPT, POMIN_STYLE, POMIN_SVG };
-    PominSekcje pomin = POMIN_NIC;
-    int i = 0;
-    int o = 0;
-    bool oczekuje_spacji = false;
-
-    while (wejscie[i] && o + 1 < limit) {
-        if (wejscie[i] == '<') {
-            // Komentarze HTML moga zawierac znak '>', wiec konczymy je dopiero na "-->".
-            if (wejscie[i + 1] == '!' && wejscie[i + 2] == '-' && wejscie[i + 3] == '-') {
-                i += 4;
-                while (wejscie[i] && !(wejscie[i] == '-' && wejscie[i + 1] == '-' && wejscie[i + 2] == '>')) i++;
-                if (wejscie[i]) i += 3;
-                continue;
-            }
-
-            int koniec = i + 1;
-            bool zamykajacy = false;
-            while (wejscie[koniec] == ' ' || wejscie[koniec] == '\t' || wejscie[koniec] == '\r' || wejscie[koniec] == '\n') koniec++;
-            if (wejscie[koniec] == '/') { zamykajacy = true; koniec++; }
-            while (wejscie[koniec] == ' ' || wejscie[koniec] == '\t') koniec++;
-            int nazwa_start = koniec;
-            while ((wejscie[koniec] >= 'a' && wejscie[koniec] <= 'z') ||
-                   (wejscie[koniec] >= 'A' && wejscie[koniec] <= 'Z') ||
-                   (wejscie[koniec] >= '0' && wejscie[koniec] <= '9')) koniec++;
-            int nazwa_len = koniec - nazwa_start;
-            while (wejscie[koniec] && wejscie[koniec] != '>') koniec++;
-            if (wejscie[koniec] == '>') koniec++;
-
-            PominSekcje rodzaj = POMIN_NIC;
-            if (html_nazwa_rowna(wejscie + nazwa_start, nazwa_len, "head")) rodzaj = POMIN_HEAD;
-            else if (html_nazwa_rowna(wejscie + nazwa_start, nazwa_len, "script")) rodzaj = POMIN_SCRIPT;
-            else if (html_nazwa_rowna(wejscie + nazwa_start, nazwa_len, "style")) rodzaj = POMIN_STYLE;
-            else if (html_nazwa_rowna(wejscie + nazwa_start, nazwa_len, "svg")) rodzaj = POMIN_SVG;
-
-            if (pomin != POMIN_NIC) {
-                if (zamykajacy && rodzaj == pomin) pomin = POMIN_NIC;
-                i = koniec;
-                continue;
-            }
-            if (!zamykajacy && rodzaj != POMIN_NIC) {
-                pomin = rodzaj;
-                i = koniec;
-                continue;
-            }
-
-            bool nowa_linia = html_nazwa_rowna(wejscie + nazwa_start, nazwa_len, "br") ||
-                               (zamykajacy && html_tag_blokowy(wejscie + nazwa_start, nazwa_len));
-            if (nowa_linia && o > 0 && wyjscie[o - 1] != '\n') {
-                while (o > 0 && wyjscie[o - 1] == ' ') o--;
-                if (o + 1 < limit) wyjscie[o++] = '\n';
-                oczekuje_spacji = false;
-            }
-            i = koniec;
-            continue;
-        }
-
-        if (pomin != POMIN_NIC) { i++; continue; }
-
-        char znak = wejscie[i];
-        int zuzyto = 1;
-        if (znak == '&') {
-            if (czy_tag(wejscie, i, "&nbsp;")) { znak = ' '; zuzyto = 6; }
-            else if (czy_tag(wejscie, i, "&amp;")) { znak = '&'; zuzyto = 5; }
-            else if (czy_tag(wejscie, i, "&lt;")) { znak = '<'; zuzyto = 4; }
-            else if (czy_tag(wejscie, i, "&gt;")) { znak = '>'; zuzyto = 4; }
-        }
-
-        if (znak == ' ' || znak == '\t' || znak == '\r' || znak == '\n') {
-            oczekuje_spacji = o > 0 && wyjscie[o - 1] != '\n';
-        } else {
-            if (oczekuje_spacji && o + 1 < limit) wyjscie[o++] = ' ';
-            oczekuje_spacji = false;
-            if (o + 1 < limit) wyjscie[o++] = znak;
-        }
-        i += zuzyto;
-    }
-    while (o > 0 && (wyjscie[o - 1] == ' ' || wyjscie[o - 1] == '\n')) o--;
-    wyjscie[o] = '\0';
-}
-
-bool czy_tag(const char* s, int pos, const char* tag) {
-    int i = 0;
-    while(tag[i] != '\0') {
-        if ((s[pos+i] | 32) != tag[i]) return false; 
-        i++;
-    }
-    return true;
-}
-
-struct HtmlStyl {
-    uint32_t kolor;
-    int skala;
-    char tag[16];
+    char sciezka[
+        SCIEZKA_POJEMNOSC
+    ];
 };
 
-static bool html_fragment_rowny(const char* tekst, int poczatek, int koniec, const char* wzorzec) {
-    int i = 0;
-    while (wzorzec[i]) {
-        if (poczatek + i >= koniec || html_mala_litera(tekst[poczatek + i]) != wzorzec[i]) return false;
-        i++;
+struct OdpowiedzHttp {
+    int kod;
+
+    const char* body;
+    size_t body_len;
+
+    bool chunked;
+    bool html;
+    bool tekst;
+};
+
+/* =========================================================================
+ * 4. STAN APLIKACJI
+ * ========================================================================= */
+
+Zakladka zakladki[
+    MAX_ZAKLADKI
+] = {};
+
+int liczba_zakladek =
+    0;
+
+int aktywna_zakladka =
+    0;
+
+char historia[
+    MAX_HISTORIA
+][
+    URL_POJEMNOSC
+] = {};
+
+int historia_idx =
+    -1;
+
+int historia_max =
+    -1;
+
+char ulubione[
+    MAX_ULUBIONE
+][
+    URL_POJEMNOSC
+] = {};
+
+int ulubione_ilosc =
+    0;
+
+char plik_ulubionych[
+    ULUBIONE_PLIK_POJEMNOSC
+] = {};
+
+char status_bufor[
+    STATUS_POJEMNOSC
+] = {};
+
+bool menu_ulubione_otwarte =
+    false;
+
+bool menu_ustawienia_otwarte =
+    false;
+
+bool w_polu_url =
+    false;
+
+bool zmaksymalizowane =
+    false;
+
+bool aplikacja_zminimalizowana =
+    false;
+
+bool dragging =
+    false;
+
+int drag_off_x =
+    0;
+
+int drag_off_y =
+    0;
+
+int screen_w =
+    1024;
+
+int screen_h =
+    768;
+
+int WIN_X =
+    50;
+
+int WIN_Y =
+    50;
+
+int WIN_W =
+    DOMYSLNY_WIN_W;
+
+int WIN_H =
+    DOMYSLNY_WIN_H;
+
+int old_win_x =
+    50;
+
+int old_win_y =
+    50;
+
+int old_win_w =
+    DOMYSLNY_WIN_W;
+
+int old_win_h =
+    DOMYSLNY_WIN_H;
+
+int max_przewin_y =
+    0;
+
+int calkowita_wysokosc_strony =
+    0;
+
+/* =========================================================================
+ * 5. FREESTANDING MEMCPY/MEMSET
+ * ========================================================================= */
+
+} // namespace
+
+extern "C" void* memcpy(
+    void* dest,
+    const void* src,
+    unsigned long n
+) {
+    if (!dest ||
+        !src) {
+
+        return dest;
     }
-    return poczatek + i == koniec;
+
+    uint8_t* d =
+        static_cast<uint8_t*>(
+            dest
+        );
+
+    const uint8_t* s =
+        static_cast<const uint8_t*>(
+            src
+        );
+
+    for (unsigned long i = 0;
+         i < n;
+         ++i) {
+
+        d[i] =
+            s[i];
+    }
+
+    return dest;
 }
 
-static int css_liczba_px(const char* tekst, int poczatek, int koniec) {
-    while (poczatek < koniec && (tekst[poczatek] == ' ' || tekst[poczatek] == '\t')) poczatek++;
-    int wynik = 0;
-    while (poczatek < koniec && tekst[poczatek] >= '0' && tekst[poczatek] <= '9')
-        wynik = wynik * 10 + (tekst[poczatek++] - '0');
-    return wynik;
+extern "C" void* memset(
+    void* dest,
+    int val,
+    unsigned long n
+) {
+    if (!dest) {
+        return dest;
+    }
+
+    uint8_t* d =
+        static_cast<uint8_t*>(
+            dest
+        );
+
+    for (unsigned long i = 0;
+         i < n;
+         ++i) {
+
+        d[i] =
+            static_cast<uint8_t>(
+                val
+            );
+    }
+
+    return dest;
 }
 
-static bool css_kolor_hex(const char* tekst, int poczatek, int koniec, uint32_t* wynik) {
-    while (poczatek < koniec && (tekst[poczatek] == ' ' || tekst[poczatek] == '\t')) poczatek++;
-    if (poczatek >= koniec || tekst[poczatek++] != '#' || poczatek + 6 > koniec) return false;
-    uint32_t kolor = 0;
-    for (int i = 0; i < 6; i++) {
-        char c = html_mala_litera(tekst[poczatek++]);
-        int cyfra = (c >= '0' && c <= '9') ? c - '0' : (c >= 'a' && c <= 'f') ? c - 'a' + 10 : -1;
-        if (cyfra < 0) return false;
-        kolor = (kolor << 4) | (uint32_t)cyfra;
+namespace {
+
+/* =========================================================================
+ * 6. HELPERY TEKSTOWE
+ * ========================================================================= */
+
+size_t dlugosc_limit(
+    const char* s,
+    size_t limit
+) {
+    if (!s) {
+        return 0;
     }
-    *wynik = kolor;
+
+    size_t n =
+        0;
+
+    while (n < limit &&
+           s[n] != '\0') {
+
+        ++n;
+    }
+
+    return n;
+}
+
+bool ascii_biala(
+    char c
+) {
+    return
+        c == ' ' ||
+        c == '\t' ||
+        c == '\r' ||
+        c == '\n';
+}
+
+char ascii_mala(
+    char c
+) {
+    if (c >= 'A' &&
+        c <= 'Z') {
+
+        return
+            static_cast<char>(
+                c +
+                ('a' - 'A')
+            );
+    }
+
+    return c;
+}
+
+bool tekst_rowny_ci(
+    const char* a,
+    size_t a_len,
+    const char* b
+) {
+    if (!a ||
+        !b) {
+
+        return false;
+    }
+
+    size_t i =
+        0;
+
+    while (b[i] != '\0') {
+        if (i >= a_len ||
+            ascii_mala(a[i]) !=
+                ascii_mala(b[i])) {
+
+            return false;
+        }
+
+        ++i;
+    }
+
+    return
+        i ==
+        a_len;
+}
+
+bool prefiks_ci(
+    const char* tekst,
+    const char* prefiks
+) {
+    if (!tekst ||
+        !prefiks) {
+
+        return false;
+    }
+
+    for (size_t i = 0;
+         prefiks[i] != '\0';
+         ++i) {
+
+        if (tekst[i] == '\0' ||
+            ascii_mala(
+                tekst[i]) !=
+            ascii_mala(
+                prefiks[i])) {
+
+            return false;
+        }
+    }
+
     return true;
 }
 
-static void html_inline_css(const char* html, int od, int do_, uint32_t* kolor,
-                            bool* ma_tlo, uint32_t* tlo, int* szer, int* wys) {
-    int i = od;
-    while (i < do_) {
-        if (html_mala_litera(html[i]) == 's' && i + 5 < do_ &&
-            czy_tag(html, i, "style")) {
-            int p = i + 5;
-            while (p < do_ && (html[p] == ' ' || html[p] == '\t')) p++;
-            if (p >= do_ || html[p] != '=') { i++; continue; }
-            p++;
-            while (p < do_ && (html[p] == ' ' || html[p] == '\t')) p++;
-            if (p >= do_ || (html[p] != '"' && html[p] != '\'')) return;
-            char cytat = html[p++];
-            int styl_koniec = p;
-            while (styl_koniec < do_ && html[styl_koniec] != cytat) styl_koniec++;
+bool kopiuj_limit(
+    char* cel,
+    size_t pojemnosc,
+    const char* zrodlo
+) {
+    if (!cel ||
+        pojemnosc == 0) {
 
-            while (p < styl_koniec) {
-                while (p < styl_koniec && (html[p] == ' ' || html[p] == '\t' || html[p] == ';')) p++;
-                int nazwa_od = p;
-                while (p < styl_koniec && html[p] != ':' && html[p] != ';') p++;
-                int nazwa_do = p;
-                while (nazwa_do > nazwa_od && (html[nazwa_do - 1] == ' ' || html[nazwa_do - 1] == '\t')) nazwa_do--;
-                if (p >= styl_koniec || html[p] != ':') { p++; continue; }
-                int wartosc_od = ++p;
-                while (p < styl_koniec && html[p] != ';') p++;
-                int wartosc_do = p;
-                if (html_fragment_rowny(html, nazwa_od, nazwa_do, "background-color"))
-                    *ma_tlo = css_kolor_hex(html, wartosc_od, wartosc_do, tlo);
-                else if (html_fragment_rowny(html, nazwa_od, nazwa_do, "color"))
-                    css_kolor_hex(html, wartosc_od, wartosc_do, kolor);
-                else if (html_fragment_rowny(html, nazwa_od, nazwa_do, "width"))
-                    *szer = css_liczba_px(html, wartosc_od, wartosc_do);
-                else if (html_fragment_rowny(html, nazwa_od, nazwa_do, "height"))
-                    *wys = css_liczba_px(html, wartosc_od, wartosc_do);
+        return false;
+    }
+
+    cel[0] =
+        '\0';
+
+    if (!zrodlo) {
+        return true;
+    }
+
+    size_t i =
+        0;
+
+    while (zrodlo[i] != '\0' &&
+           i + 1U <
+               pojemnosc) {
+
+        cel[i] =
+            zrodlo[i];
+
+        ++i;
+    }
+
+    /*
+     * Nie zakoncz UTF-8 po samym lead byte albo w srodku continuation.
+     */
+    if (zrodlo[i] != '\0') {
+        while (i > 0 &&
+               (static_cast<uint8_t>(
+                    cel[i - 1]) &
+                0xC0U) ==
+                    0x80U) {
+
+            --i;
+        }
+
+        if (i > 0) {
+            const uint8_t lead =
+                static_cast<uint8_t>(
+                    cel[i - 1]
+                );
+
+            size_t potrzeba =
+                1;
+
+            if ((lead &
+                 0xE0U) ==
+                0xC0U) {
+
+                potrzeba =
+                    2;
+            } else if ((lead &
+                        0xF0U) ==
+                       0xE0U) {
+
+                potrzeba =
+                    3;
+            } else if ((lead &
+                        0xF8U) ==
+                       0xF0U) {
+
+                potrzeba =
+                    4;
             }
+
+            if (potrzeba > 1) {
+                const size_t dostepne =
+                    i -
+                    (i - 1U);
+
+                if (dostepne <
+                    potrzeba) {
+
+                    --i;
+                }
+            }
+        }
+    }
+
+    cel[i] =
+        '\0';
+
+    return
+        zrodlo[i] ==
+        '\0';
+}
+
+void wyzeruj(
+    void* ptr,
+    size_t n
+) {
+    if (!ptr) {
+        return;
+    }
+
+    uint8_t* p =
+        static_cast<uint8_t*>(
+            ptr
+        );
+
+    for (size_t i = 0;
+         i < n;
+         ++i) {
+
+        p[i] =
+            0;
+    }
+}
+
+bool dopisz_znak_limit(
+    char* s,
+    size_t pojemnosc,
+    char znak
+) {
+    if (!s ||
+        pojemnosc < 2U) {
+
+        return false;
+    }
+
+    const size_t len =
+        dlugosc_limit(
+            s,
+            pojemnosc
+        );
+
+    if (len >=
+        pojemnosc ||
+        len + 1U >=
+            pojemnosc) {
+
+        return false;
+    }
+
+    s[len] =
+        znak;
+
+    s[len + 1U] =
+        '\0';
+
+    return true;
+}
+
+size_t utf8_poprzedni(
+    const char* s,
+    size_t pos
+) {
+    if (!s ||
+        pos == 0) {
+
+        return 0;
+    }
+
+    --pos;
+
+    while (pos > 0 &&
+           (static_cast<uint8_t>(
+                s[pos]) &
+            0xC0U) ==
+                0x80U) {
+
+        --pos;
+    }
+
+    return pos;
+}
+
+void usun_ostatni_utf8(
+    char* s,
+    size_t pojemnosc
+) {
+    if (!s ||
+        pojemnosc == 0) {
+
+        return;
+    }
+
+    const size_t len =
+        dlugosc_limit(
+            s,
+            pojemnosc
+        );
+
+    if (len == 0 ||
+        len >= pojemnosc) {
+
+        return;
+    }
+
+    s[
+        utf8_poprzedni(
+            s,
+            len
+        )
+    ] =
+        '\0';
+}
+
+void ustaw_status(
+    const char* tekst
+) {
+    (void)kopiuj_limit(
+        status_bufor,
+        sizeof(status_bufor),
+        tekst
+    );
+}
+
+bool punkt_w_prostokacie(
+    int px,
+    int py,
+    int x,
+    int y,
+    int w,
+    int h
+) {
+    return
+        w > 0 &&
+        h > 0 &&
+        px >= x &&
+        py >= y &&
+        px < x + w &&
+        py < y + h;
+}
+
+/* =========================================================================
+ * 7. UTF-8
+ * ========================================================================= */
+
+struct Utf8Znak {
+    uint32_t kod;
+    int bajty;
+};
+
+Utf8Znak dekoduj_utf8(
+    const char* s
+) {
+    Utf8Znak z{
+        0xFFFDU,
+        1
+    };
+
+    if (!s ||
+        s[0] == '\0') {
+
+        z.kod =
+            0;
+
+        return z;
+    }
+
+    const uint8_t b0 =
+        static_cast<uint8_t>(
+            s[0]
+        );
+
+    if (b0 < 0x80U) {
+        z.kod =
+            b0;
+
+        return z;
+    }
+
+    if ((b0 &
+         0xE0U) ==
+            0xC0U) {
+
+        if (s[1] == '\0') {
+            return z;
+        }
+
+        const uint8_t b1 =
+            static_cast<uint8_t>(
+                s[1]
+            );
+
+        if ((b1 &
+             0xC0U) !=
+                0x80U) {
+
+            return z;
+        }
+
+        const uint32_t cp =
+            ((b0 &
+              0x1FU) << 6) |
+            (b1 &
+             0x3FU);
+
+        if (cp <
+            0x80U) {
+
+            return z;
+        }
+
+        z.kod =
+            cp;
+
+        z.bajty =
+            2;
+
+        return z;
+    }
+
+    if ((b0 &
+         0xF0U) ==
+            0xE0U) {
+
+        if (s[1] == '\0') {
+            return z;
+        }
+
+        const uint8_t b1 =
+            static_cast<uint8_t>(
+                s[1]
+            );
+
+        if ((b1 &
+             0xC0U) !=
+                0x80U ||
+            s[2] ==
+                '\0') {
+
+            return z;
+        }
+
+        const uint8_t b2 =
+            static_cast<uint8_t>(
+                s[2]
+            );
+
+        if ((b2 &
+             0xC0U) !=
+                0x80U) {
+
+            return z;
+        }
+
+        const uint32_t cp =
+            ((b0 &
+              0x0FU) << 12) |
+            ((b1 &
+              0x3FU) << 6) |
+            (b2 &
+             0x3FU);
+
+        if (cp <
+                0x800U ||
+            (cp >= 0xD800U &&
+             cp <= 0xDFFFU)) {
+
+            return z;
+        }
+
+        z.kod =
+            cp;
+
+        z.bajty =
+            3;
+
+        return z;
+    }
+
+    if ((b0 &
+         0xF8U) ==
+            0xF0U) {
+
+        if (s[1] == '\0') {
+            return z;
+        }
+
+        const uint8_t b1 =
+            static_cast<uint8_t>(
+                s[1]
+            );
+
+        if ((b1 &
+             0xC0U) !=
+                0x80U ||
+            s[2] ==
+                '\0') {
+
+            return z;
+        }
+
+        const uint8_t b2 =
+            static_cast<uint8_t>(
+                s[2]
+            );
+
+        if ((b2 &
+             0xC0U) !=
+                0x80U ||
+            s[3] ==
+                '\0') {
+
+            return z;
+        }
+
+        const uint8_t b3 =
+            static_cast<uint8_t>(
+                s[3]
+            );
+
+        if ((b3 &
+             0xC0U) !=
+                0x80U) {
+
+            return z;
+        }
+
+        const uint32_t cp =
+            ((b0 &
+              0x07U) << 18) |
+            ((b1 &
+              0x3FU) << 12) |
+            ((b2 &
+              0x3FU) << 6) |
+            (b3 &
+             0x3FU);
+
+        if (cp <
+                0x10000U ||
+            cp >
+                0x10FFFFU) {
+
+            return z;
+        }
+
+        z.kod =
+            cp;
+
+        z.bajty =
+            4;
+
+        return z;
+    }
+
+    return z;
+}
+
+int szerokosc_znaku(
+    uint32_t unicode
+) {
+    int sw =
+        static_cast<int>(
+            bws_wywolaj(
+                24,
+                unicode
+            )
+        );
+
+    if (sw <= 0 ||
+        sw > 32) {
+
+        sw =
+            8;
+    }
+
+    return sw;
+}
+
+void wypisz_skalowane(
+    int x,
+    int y,
+    uint32_t kolor,
+    int skala,
+    const char* tekst
+) {
+    if (!tekst ||
+        skala < 1) {
+
+        return;
+    }
+
+    const uint64_t arg =
+        (static_cast<uint64_t>(
+             static_cast<uint32_t>(
+                 skala)) << 32) |
+        kolor;
+
+    bws_wywolaj(
+        20,
+        static_cast<uint64_t>(
+            static_cast<int64_t>(
+                x
+            )
+        ),
+        static_cast<uint64_t>(
+            static_cast<int64_t>(
+                y
+            )
+        ),
+        arg,
+        reinterpret_cast<uint64_t>(
+            tekst
+        )
+    );
+}
+
+/* =========================================================================
+ * 8. ZAKLADKI / PAMIEC
+ * ========================================================================= */
+
+bool alokuj_tresc_zakladki(
+    Zakladka& z
+) {
+    if (z.tresc) {
+        return true;
+    }
+
+    z.tresc =
+        static_cast<char*>(
+            gui_malloc(
+                HTML_POJEMNOSC
+            )
+        );
+
+    if (!z.tresc) {
+        return false;
+    }
+
+    z.tresc[0] =
+        '\0';
+
+    return true;
+}
+
+void wyczysc_zakladke(
+    Zakladka& z,
+    bool zwolnij_tresc
+) {
+    if (zwolnij_tresc &&
+        z.tresc) {
+
+        gui_free(
+            z.tresc
+        );
+    }
+
+    z.tresc =
+        nullptr;
+
+    z.url[0] =
+        '\0';
+
+    z.przewin_y =
+        0;
+
+    z.to_jest_html =
+        false;
+
+    z.wczytana =
+        false;
+}
+
+bool nowa_zakladka() {
+    if (liczba_zakladek >=
+        MAX_ZAKLADKI) {
+
+        ustaw_status(
+            "Osiagnieto limit 6 zakladek."
+        );
+
+        return false;
+    }
+
+    Zakladka& z =
+        zakladki[
+            liczba_zakladek
+        ];
+
+    wyczysc_zakladke(
+        z,
+        false
+    );
+
+    if (!alokuj_tresc_zakladki(
+            z)) {
+
+        ustaw_status(
+            "Brak pamieci na nowa zakladke."
+        );
+
+        return false;
+    }
+
+    aktywna_zakladka =
+        liczba_zakladek;
+
+    ++liczba_zakladek;
+
+    max_przewin_y =
+        0;
+
+    calkowita_wysokosc_strony =
+        0;
+
+    ustaw_status(
+        "Nowa zakladka."
+    );
+
+    return true;
+}
+
+void zamknij_zakladke(
+    int indeks
+) {
+    if (indeks < 0 ||
+        indeks >=
+            liczba_zakladek) {
+
+        return;
+    }
+
+    if (liczba_zakladek <= 1) {
+        Zakladka& z =
+            zakladki[0];
+
+        z.url[0] =
+            '\0';
+
+        if (z.tresc) {
+            z.tresc[0] =
+                '\0';
+        }
+
+        z.przewin_y =
+            0;
+
+        z.to_jest_html =
+            false;
+
+        z.wczytana =
+            false;
+
+        max_przewin_y =
+            0;
+
+        ustaw_status(
+            "Wyczyszczono zakladke."
+        );
+
+        return;
+    }
+
+    if (zakladki[indeks].tresc) {
+        gui_free(
+            zakladki[indeks].tresc
+        );
+
+        zakladki[indeks].tresc =
+            nullptr;
+    }
+
+    /*
+     * Przenosimy tylko mala strukture z POINTEREM do tresci.
+     * Stara wersja kopiowala tutaj po 256 KiB na kazda zakladke.
+     */
+    for (int i = indeks;
+         i + 1 <
+            liczba_zakladek;
+         ++i) {
+
+        zakladki[i] =
+            zakladki[i + 1];
+    }
+
+    --liczba_zakladek;
+
+    /*
+     * Ostatni wpis jest duplikatem przeniesionego pointera.
+     * Zerujemy go bez free.
+     */
+    zakladki[
+        liczba_zakladek
+    ].tresc =
+        nullptr;
+
+    zakladki[
+        liczba_zakladek
+    ].url[0] =
+        '\0';
+
+    if (aktywna_zakladka >=
+        liczba_zakladek) {
+
+        aktywna_zakladka =
+            liczba_zakladek -
+            1;
+    } else if (aktywna_zakladka >
+               indeks) {
+
+        --aktywna_zakladka;
+    }
+
+    max_przewin_y =
+        0;
+
+    ustaw_status(
+        "Zamknieto zakladke."
+    );
+}
+
+void zwolnij_wszystkie_zakladki() {
+    for (int i = 0;
+         i < liczba_zakladek;
+         ++i) {
+
+        wyczysc_zakladke(
+            zakladki[i],
+            true
+        );
+    }
+
+    liczba_zakladek =
+        0;
+
+    aktywna_zakladka =
+        0;
+}
+
+/* =========================================================================
+ * 9. HISTORIA / ULUBIONE
+ * ========================================================================= */
+
+bool tekst_rowny(
+    const char* a,
+    const char* b
+) {
+    if (!a ||
+        !b) {
+
+        return false;
+    }
+
+    size_t i =
+        0;
+
+    while (a[i] != '\0' &&
+           b[i] != '\0') {
+
+        if (a[i] !=
+            b[i]) {
+
+            return false;
+        }
+
+        ++i;
+    }
+
+    return
+        a[i] ==
+        b[i];
+}
+
+void dopisz_do_historii(
+    const char* url
+) {
+    if (!url ||
+        url[0] ==
+            '\0') {
+
+        return;
+    }
+
+    if (historia_idx >= 0 &&
+        tekst_rowny(
+            historia[
+                historia_idx
+            ],
+            url)) {
+
+        return;
+    }
+
+    /*
+     * Nawigacja po historii, a potem nowa strona: kasujemy forward branch.
+     */
+    if (historia_idx <
+        historia_max) {
+
+        historia_max =
+            historia_idx;
+    }
+
+    if (historia_idx + 1 <
+        MAX_HISTORIA) {
+
+        ++historia_idx;
+    } else {
+        for (int i = 1;
+             i <
+                MAX_HISTORIA;
+             ++i) {
+
+            (void)kopiuj_limit(
+                historia[
+                    i - 1
+                ],
+                URL_POJEMNOSC,
+                historia[i]
+            );
+        }
+
+        historia_idx =
+            MAX_HISTORIA -
+            1;
+    }
+
+    (void)kopiuj_limit(
+        historia[
+            historia_idx
+        ],
+        URL_POJEMNOSC,
+        url
+    );
+
+    historia_max =
+        historia_idx;
+}
+
+void wczytaj_ulubione() {
+    ulubione_ilosc =
+        0;
+
+    wyzeruj(
+        plik_ulubionych,
+        sizeof(
+            plik_ulubionych
+        )
+    );
+
+    if (!czytaj_plik(
+            "/uzytkownicy/zakladki.txt",
+            plik_ulubionych,
+            static_cast<uint32_t>(
+                sizeof(
+                    plik_ulubionych
+                ) -
+                1U
+            )
+        )) {
+
+        return;
+    }
+
+    plik_ulubionych[
+        sizeof(
+            plik_ulubionych
+        ) -
+        1U
+    ] =
+        '\0';
+
+    size_t i =
+        0;
+
+    while (plik_ulubionych[i] != '\0' &&
+           ulubione_ilosc <
+               MAX_ULUBIONE) {
+
+        while (plik_ulubionych[i] ==
+                   '\r' ||
+               plik_ulubionych[i] ==
+                   '\n') {
+
+            ++i;
+        }
+
+        if (plik_ulubionych[i] ==
+            '\0') {
+
+            break;
+        }
+
+        size_t j =
+            0;
+
+        while (plik_ulubionych[i] != '\0' &&
+               plik_ulubionych[i] != '\r' &&
+               plik_ulubionych[i] != '\n') {
+
+            if (j + 1U <
+                URL_POJEMNOSC) {
+
+                ulubione[
+                    ulubione_ilosc
+                ][j++] =
+                    plik_ulubionych[i];
+            }
+
+            ++i;
+        }
+
+        ulubione[
+            ulubione_ilosc
+        ][j] =
+            '\0';
+
+        if (j > 0) {
+            ++ulubione_ilosc;
+        }
+    }
+}
+
+void zapisz_ulubione() {
+    size_t p =
+        0;
+
+    for (int u = 0;
+         u <
+            ulubione_ilosc;
+         ++u) {
+
+        for (size_t i = 0;
+             ulubione[u][i] != '\0';
+             ++i) {
+
+            if (p + 2U >
+                sizeof(
+                    plik_ulubionych
+                )) {
+
+                ustaw_status(
+                    "Lista zakladek jest zbyt duza."
+                );
+
+                return;
+            }
+
+            plik_ulubionych[
+                p++
+            ] =
+                ulubione[u][i];
+        }
+
+        if (p + 2U >
+            sizeof(
+                plik_ulubionych
+            )) {
+
+            ustaw_status(
+                "Lista zakladek jest zbyt duza."
+            );
+
             return;
         }
-        i++;
-    }
-}
 
-void RysujDrzewoHTML(int start_x, int start_y, const char* html_kod) {
-    const int min_y = WIN_Y + 98;
-    const int max_x = WIN_X + WIN_W - 16;
-    const int max_y = WIN_Y + WIN_H - 12;
-    int kursor_x = start_x;
-    int kursor_y = start_y;
-    uint32_t kolor = 0x00000000;
-    int skala = 1;
-    bool w_body = false;
-    enum UkrytaSekcja { UKRYTA_NIC, UKRYTA_HEAD, UKRYTA_STYLE, UKRYTA_SCRIPT } ukryta = UKRYTA_NIC;
-    HtmlStyl stos[32];
-    int stos_n = 0;
-    bool byla_spacja = false;
-
-    for (int i = 0; html_kod[i];) {
-        if (html_kod[i] == '<') {
-            int p = i + 1;
-            bool zamkniecie = false;
-            while (html_kod[p] == ' ' || html_kod[p] == '\t' || html_kod[p] == '\n') p++;
-            if (html_kod[p] == '/') { zamkniecie = true; p++; }
-            while (html_kod[p] == ' ' || html_kod[p] == '\t') p++;
-            int nazwa_od = p;
-            while ((html_kod[p] >= 'a' && html_kod[p] <= 'z') ||
-                   (html_kod[p] >= 'A' && html_kod[p] <= 'Z') ||
-                   (html_kod[p] >= '0' && html_kod[p] <= '9')) p++;
-            int nazwa_do = p;
-            int tag_koniec = p;
-            while (html_kod[tag_koniec] && html_kod[tag_koniec] != '>') tag_koniec++;
-
-            bool tag_head = html_fragment_rowny(html_kod, nazwa_od, nazwa_do, "head");
-            bool tag_style = html_fragment_rowny(html_kod, nazwa_od, nazwa_do, "style");
-            bool tag_script = html_fragment_rowny(html_kod, nazwa_od, nazwa_do, "script");
-            bool tag_body = html_fragment_rowny(html_kod, nazwa_od, nazwa_do, "body");
-            if (!zamkniecie && tag_head) ukryta = UKRYTA_HEAD;
-            else if (!zamkniecie && tag_style) ukryta = UKRYTA_STYLE;
-            else if (!zamkniecie && tag_script) ukryta = UKRYTA_SCRIPT;
-            else if (zamkniecie && ((tag_head && ukryta == UKRYTA_HEAD) ||
-                     (tag_style && ukryta == UKRYTA_STYLE) || (tag_script && ukryta == UKRYTA_SCRIPT))) ukryta = UKRYTA_NIC;
-            else if (tag_body) w_body = !zamkniecie;
-            else if (w_body && ukryta == UKRYTA_NIC) {
-                bool blok = html_fragment_rowny(html_kod, nazwa_od, nazwa_do, "br") ||
-                            html_fragment_rowny(html_kod, nazwa_od, nazwa_do, "div") ||
-                            html_fragment_rowny(html_kod, nazwa_od, nazwa_do, "p") ||
-                            html_fragment_rowny(html_kod, nazwa_od, nazwa_do, "h1");
-                if (zamkniecie) {
-                    if (stos_n > 0 && html_fragment_rowny(html_kod, nazwa_od, nazwa_do,
-                                                          stos[stos_n - 1].tag)) {
-                        kolor = stos[--stos_n].kolor;
-                        skala = stos[stos_n].skala;
-                    }
-                } else {
-                    uint32_t poprzedni_kolor = kolor;
-                    int poprzednia_skala = skala;
-                    bool ma_tlo = false; uint32_t tlo = 0; int szer = 0, wys = 0;
-                    html_inline_css(html_kod, p, tag_koniec, &kolor, &ma_tlo, &tlo, &szer, &wys);
-                    if (html_fragment_rowny(html_kod, nazwa_od, nazwa_do, "h1")) skala = 2;
-                    if ((kolor != poprzedni_kolor || skala != poprzednia_skala) && stos_n < 32) {
-                        stos[stos_n].kolor = poprzedni_kolor;
-                        stos[stos_n].skala = poprzednia_skala;
-                        int n = 0;
-                        while (nazwa_od + n < nazwa_do && n < 15) {
-                            stos[stos_n].tag[n] = html_mala_litera(html_kod[nazwa_od + n]);
-                            n++;
-                        }
-                        stos[stos_n].tag[n] = '\0';
-                        stos_n++;
-                    }
-                    if (ma_tlo && szer > 0 && wys > 0 && kursor_x < max_x && kursor_y < max_y) {
-                        if (kursor_x + szer > max_x) szer = max_x - kursor_x;
-                        if (kursor_y + wys > max_y) wys = max_y - kursor_y;
-                        if (szer > 0 && wys > 0 && kursor_y + wys >= min_y)
-                            gui_rysuj_prostokat(kursor_x, kursor_y < min_y ? min_y : kursor_y,
-                                               szer, wys, tlo);
-                    }
-                }
-                if (blok) { kursor_x = start_x; kursor_y += 20 * skala; byla_spacja = false; }
-            }
-            i = html_kod[tag_koniec] ? tag_koniec + 1 : tag_koniec;
-            continue;
-        }
-
-        if (!w_body || ukryta != UKRYTA_NIC) { i++; continue; }
-        char znak[3] = {0, 0, 0};
-        uint32_t unicode = (uint8_t)html_kod[i];
-        int bajty_znaku = 1;
-        znak[0] = html_kod[i];
-        if ((((uint8_t)html_kod[i] & 0xE0) == 0xC0) &&
-            html_kod[i + 1] != '\0' && (((uint8_t)html_kod[i + 1] & 0xC0) == 0x80)) {
-            znak[1] = html_kod[i + 1];
-            unicode = (((uint8_t)html_kod[i] & 0x1F) << 6) |
-                      ((uint8_t)html_kod[i + 1] & 0x3F);
-            bajty_znaku = 2;
-        }
-        i += bajty_znaku;
-        if (znak[0] == ' ' || znak[0] == '\n' || znak[0] == '\r' || znak[0] == '\t') { byla_spacja = true; continue; }
-        if (byla_spacja && kursor_x > start_x) kursor_x += 8 * skala;
-        byla_spacja = false;
-        int szer_znaku = (int)bws_wywolaj(24, unicode);
-        if (szer_znaku <= 0 || szer_znaku > 16) szer_znaku = 8;
-        if (kursor_x + (szer_znaku + 1) * skala > max_x) { kursor_x = start_x; kursor_y += 20 * skala; }
-        if (kursor_y >= min_y && kursor_y < max_y) {
-            wypisz_skalowane(kursor_x, kursor_y, kolor, skala, znak);
-        }
-        kursor_x += (szer_znaku + 1) * skala;
-    }
-    calkowita_wysokosc_strony = (kursor_y - start_y) + 20;
-    int wysokosc_obszaru_roboczego = WIN_H - 96 - 24;
-    max_przewin_y = calkowita_wysokosc_strony > wysokosc_obszaru_roboczego
-        ? calkowita_wysokosc_strony - wysokosc_obszaru_roboczego : 0;
-    ogranicz_przewiniecie();
-}
-
-void rysuj_html(int px, int py, int max_szer, int max_wys, const char* tekst, uint32_t domyslny_kolor, int przewin) {
-    int obecny_x = px;
-    int obecny_y = py - przewin;
-    int wys_linii = 20; 
-    int skala = 1;
-    uint32_t kolor = domyslny_kolor;
-    bool pomin_tekst = false;
-
-    int i = 0;
-    while (tekst[i] != '\0') {
-        if (obecny_y > py + max_wys) break;
-
-        if (tekst[i] == '<') {
-            if (czy_tag(tekst, i, "<style") || czy_tag(tekst, i, "<script") || czy_tag(tekst, i, "<head")) {
-                pomin_tekst = true;
-            } else if (czy_tag(tekst, i, "</style") || czy_tag(tekst, i, "</script") || czy_tag(tekst, i, "</head")) {
-                pomin_tekst = false;
-            } else if (!pomin_tekst) {
-                if (czy_tag(tekst, i, "<h1") || czy_tag(tekst, i, "<h2")) skala = 2;
-                else if (czy_tag(tekst, i, "</h1") || czy_tag(tekst, i, "</h2")) skala = 1;
-                else if (czy_tag(tekst, i, "<p") || czy_tag(tekst, i, "</p") || czy_tag(tekst, i, "<br") || czy_tag(tekst, i, "<li") || czy_tag(tekst, i, "<div")) {
-                    obecny_x = px; 
-                    obecny_y += (wys_linii * skala) + 6; 
-                }
-            }
-            while (tekst[i] != '>' && tekst[i] != '\0') i++;
-            if (tekst[i] == '>') i++;
-            continue;
-        }
-
-        if (pomin_tekst) { i++; continue; }
-
-        uint32_t unicode = (uint8_t)tekst[i];
-        int char_bytes = 1;
-        if (((uint8_t)tekst[i] & 0xE0) == 0xC0 && tekst[i+1] != '\0' &&
-            ((uint8_t)tekst[i+1] & 0xC0) == 0x80) {
-            unicode = (((uint8_t)tekst[i] & 0x1F) << 6) | ((uint8_t)tekst[i+1] & 0x3F);
-            char_bytes = 2;
-        }
-
-        int szer_znaku = (int)bws_wywolaj(24, unicode);
-        if (szer_znaku <= 0 || szer_znaku > 16) szer_znaku = 8;
-        int pelna_szer = (szer_znaku + 1) * skala;
-
-        if (tekst[i] == ' ' || tekst[i] == '\n' || tekst[i] == '\t' || tekst[i] == '\r') {
-            if (obecny_x > px) obecny_x += 8 * skala;
-            i += char_bytes;
-            continue;
-        }
-
-        if (obecny_x + pelna_szer > px + max_szer) {
-            obecny_x = px;
-            obecny_y += (wys_linii * skala);
-        }
-        
-        if (obecny_y >= py && obecny_y < py + max_wys) {
-            char znak[3] = { tekst[i], '\0', '\0' };
-            if (char_bytes == 2) znak[1] = tekst[i+1];
-            wypisz_skalowane(obecny_x, obecny_y, kolor, skala, znak);
-        }
-        
-        obecny_x += pelna_szer;
-        i += char_bytes;
+        plik_ulubionych[
+            p++
+        ] =
+            '\n';
     }
 
-    if (obecny_y > py + max_wys) max_przewin_y = (obecny_y - (py + max_wys)) + (wys_linii * skala);
-    else max_przewin_y = 0;
-}
+    plik_ulubionych[p] =
+        '\0';
 
-void rysuj_zwykly_tekst(int px, int py, int max_szer, int max_wys, const char* tekst, uint32_t kolor, int przewin) {
-    int obecny_x = px;
-    int obecny_y = py - przewin;
-    int wys_linii = 20; 
-    int skala = 1;
+    const char* sciezka =
+        "/uzytkownicy/zakladki.txt";
 
-    int i = 0;
-    while (tekst[i] != '\0') {
-        if (obecny_y > py + max_wys) break;
-        
-        uint32_t unicode = (uint8_t)tekst[i];
-        int char_bytes = 1;
-        if (((uint8_t)tekst[i] & 0xE0) == 0xC0 && tekst[i+1] != '\0' &&
-            ((uint8_t)tekst[i+1] & 0xC0) == 0x80) {
-            unicode = (((uint8_t)tekst[i] & 0x1F) << 6) | ((uint8_t)tekst[i+1] & 0x3F);
-            char_bytes = 2;
-        }
+    /*
+     * `utworz()` moze zwrocic false, gdy plik juz istnieje.
+     * O powodzeniu decyduje faktyczny zapis.
+     */
+    (void)utworz(
+        sciezka
+    );
 
-        int szer_znaku = (int)bws_wywolaj(24, unicode);
-        if (szer_znaku <= 0 || szer_znaku > 16) szer_znaku = 8;
-        int pelna_szer = (szer_znaku + 1) * skala;
+    if (zapisz_plik(
+            sciezka,
+            plik_ulubionych,
+            static_cast<uint32_t>(
+                p
+            )
+        )) {
 
-        if (tekst[i] == '\n' || tekst[i] == '\r') {
-            obecny_x = px; obecny_y += wys_linii * skala; i += char_bytes; continue;
-        }
-
-        if (obecny_x + pelna_szer > px + max_szer) { 
-            obecny_x = px; 
-            obecny_y += wys_linii * skala; 
-        }
-
-        if (obecny_y >= py && obecny_y < py + max_wys) {
-            char znak[3] = { tekst[i], '\0', '\0' };
-            if (char_bytes == 2) znak[1] = tekst[i+1];
-            wypisz_skalowane(obecny_x, obecny_y, kolor, skala, znak);
-        }
-        obecny_x += pelna_szer;
-        i += char_bytes;
-    }
-    if (obecny_y > py + max_wys) max_przewin_y = (obecny_y - (py + max_wys)) + (wys_linii * skala);
-    else max_przewin_y = 0;
-}
-
-void RysujInterfejs(bool odswiez_tlo) {
-    if (odswiez_tlo) {
-        gui_odswiez_pulpit();
-        gui_rysuj_prostokat(0, screen_h - 40, screen_w, 40, 0x001A0B00);
-        gui_rysuj_prostokat(0, screen_h - 40, screen_w, 2, 0x00E58A00);
-        RysujPrzycisk(10, screen_h - 35, 80, 30, 0x00E58A00, 0x001A0B00, " Menu");
-
-        gui_rysuj_prostokat(100, screen_h - 40, 140, 40, 0x004A2500);
-        gui_rysuj_prostokat(100, screen_h - 40, 1, 40, 0x00E58A00);
-        gui_rysuj_prostokat(239, screen_h - 40, 1, 40, 0x00E58A00);
-        gui_rysuj_prostokat(100, screen_h - 40, 140, 1, 0x00E58A00);
-        gui_wypisz_tekst_kolor(130, screen_h - 28, 0x00FFFFFF, "Hussar");
-    }
-
-    gui_rysuj_okno(WIN_X, WIN_Y, WIN_W, WIN_H, "Hussar - Polska Przeglądarka WWW");
-    
-    RysujPrzyciskLokalny(WIN_X + WIN_W - 74, WIN_Y + 4, 20, 20, 0x00E58A00, 0x001A0B00, "-");
-    RysujPrzyciskLokalny(WIN_X + WIN_W - 50, WIN_Y + 4, 20, 20, 0x00E58A00, 0x001A0B00, zmaksymalizowane ? "v" : "^");
-    RysujPrzyciskLokalny(WIN_X + WIN_W - 26, WIN_Y + 4, 20, 20, 0x00AA0000, 0x00FFFFFF, "X");
-
-    int zakladka_y = WIN_Y + 28;
-    for(int i = 0; i < liczba_zakladek; i++) {
-        int tx = WIN_X + 10 + (i * 110);
-        uint32_t bg = (i == aktywna_zakladka) ? 0x004A2500 : 0x00202020;
-        uint32_t tk = (i == aktywna_zakladka) ? 0x00FFFFFF : 0x00D1D5DB;
-        gui_rysuj_prostokat(tx, zakladka_y, 100, 24, bg);
-        
-        char krotki_url[12] = {0};
-        int j = 0;
-        while (j < 8 && zakladki[i].url[j]) { krotki_url[j] = zakladki[i].url[j]; j++; }
-        if (j == 8 && (((uint8_t)krotki_url[j - 1] & 0xE0) == 0xC0)) krotki_url[--j] = '\0';
-        if(zakladki[i].url[0] == '\0') { krotki_url[0]='N'; krotki_url[1]='o'; krotki_url[2]='w'; krotki_url[3]='a'; krotki_url[4]='\0'; }
-        gui_wypisz_tekst_kolor(tx + 5, zakladka_y + 4, tk, krotki_url);
-
-        if (liczba_zakladek > 1) {
-            RysujPrzyciskLokalny(tx + 80, zakladka_y + 2, 16, 20, 0x00AA0000, 0x00FFFFFF, "X");
-        }
-    }
-    
-    if (liczba_zakladek < MAX_ZAKLADKI) {
-        int plus_x = WIN_X + 10 + (liczba_zakladek * 110);
-        RysujPrzyciskLokalny(plus_x, zakladka_y, 24, 24, 0x00E58A00, 0x001A0B00, "+");
-    }
-
-    int narzedzia_y = WIN_Y + 56;
-    gui_rysuj_prostokat(WIN_X + 2, narzedzia_y, WIN_W - 4, 36, 0x00202020);
-
-    uint32_t aktywny = 0x004A2500;
-    uint32_t nieaktywny = 0x00303030;
-    RysujPrzyciskLokalny(WIN_X + 8, narzedzia_y + 4, 34, 28,
-                         historia_idx > 0 ? aktywny : nieaktywny, 0x00FFFFFF, "<-");
-    RysujPrzyciskLokalny(WIN_X + 44, narzedzia_y + 4, 34, 28,
-                         historia_idx < historia_max ? aktywny : nieaktywny, 0x00FFFFFF, "->");
-    RysujPrzyciskLokalny(WIN_X + 80, narzedzia_y + 4, 34, 28,
-                         aktywny, 0x00FFFFFF, "C");
-
-    int adres_x = WIN_X + 122;
-    int adres_w = WIN_W - 412;
-    uint32_t kolor_paska = w_polu_url ? 0x00FFFFFF : 0x00303030;
-    uint32_t kolor_txt_url = w_polu_url ? 0x00000000 : 0x00D1D5DB;
-    gui_rysuj_prostokat(adres_x, narzedzia_y + 4, adres_w, 28, kolor_paska);
-    gui_wypisz_tekst_kolor(adres_x + 5, narzedzia_y + 10, kolor_txt_url,
-                           zakladki[aktywna_zakladka].url);
-    if (w_polu_url) {
-        int url_len = dlugosc_tekstu(zakladki[aktywna_zakladka].url);
-        int px_kursora = adres_x + 5;
-        for(int k=0; k<url_len;) {
-             uint32_t unicode = (uint8_t)zakladki[aktywna_zakladka].url[k];
-             int bajty = 1;
-             if (((uint8_t)zakladki[aktywna_zakladka].url[k] & 0xE0) == 0xC0 &&
-                 k + 1 < url_len && ((uint8_t)zakladki[aktywna_zakladka].url[k + 1] & 0xC0) == 0x80) {
-                 unicode = (((uint8_t)zakladki[aktywna_zakladka].url[k] & 0x1F) << 6) |
-                           ((uint8_t)zakladki[aktywna_zakladka].url[k + 1] & 0x3F);
-                 bajty = 2;
-             }
-             int sw = bws_wywolaj(24, unicode);
-             px_kursora += (sw > 0 ? sw : 8) + 1;
-             k += bajty;
-        }
-        gui_wypisz_tekst_kolor(px_kursora, narzedzia_y + 10, 0x00000000, "_");
-    }
-
-    RysujPrzyciskLokalny(WIN_X + WIN_W - 286, narzedzia_y + 4, 28, 28,
-                         0x00AA0000, 0x00FFFFFF, "X");
-    RysujPrzyciskLokalny(WIN_X + WIN_W - 254, narzedzia_y + 4, 54, 28,
-                         0x00E58A00, 0x001A0B00, "Idź");
-    RysujPrzyciskLokalny(WIN_X + WIN_W - 196, narzedzia_y + 4, 88, 28,
-                         aktywny, 0x00FFFFFF, "Zakładki");
-    RysujPrzyciskLokalny(WIN_X + WIN_W - 104, narzedzia_y + 4, 96, 28,
-                         aktywny, 0x00FFFFFF, "Ustawienia");
-
-    gui_rysuj_prostokat(WIN_X + 2, WIN_Y + WIN_H - 22, WIN_W - 4, 20, 0x00202020);
-    gui_wypisz_tekst_kolor(WIN_X + 8, WIN_Y + WIN_H - 18, 0x00FFBF00, status_bufor);
-
-    int obszar_y = WIN_Y + 96;
-    int obszar_h = WIN_H - 96 - 24;
-    gui_rysuj_prostokat(WIN_X + 2, obszar_y, WIN_W - 4, obszar_h, 0x00F8F9FA);
-    
-    if (zakladki[aktywna_zakladka].to_jest_html) {
-        RysujDrzewoHTML(WIN_X + 8, obszar_y + 5 - zakladki[aktywna_zakladka].przewin_y,
-                        zakladki[aktywna_zakladka].html);
+        ustaw_status(
+            "Zapisano zakladki."
+        );
     } else {
-        const char* do_wysw = zakladki[aktywna_zakladka].html;
-        if(do_wysw[0] == '\0') do_wysw = "Wpisz adres strony u góry i wciśnij „Idź”.";
-        rysuj_zwykly_tekst(WIN_X + 8, obszar_y + 5, WIN_W - 24, obszar_h - 10, do_wysw, 0x00222222, zakladki[aktywna_zakladka].przewin_y);
+        ustaw_status(
+            "Blad zapisu zakladek."
+        );
+    }
+}
+
+void dodaj_obecna_do_ulubionych() {
+    if (liczba_zakladek <= 0) {
+        return;
     }
 
-    // Layout powyżej wyznacza aktualne max_przewin_y; dopiero teraz rysujemy suwak.
-    if (max_przewin_y > 0) {
-        int scroll_x = WIN_X + WIN_W - 8;
-        gui_rysuj_prostokat(scroll_x, obszar_y + 2, 6, obszar_h - 4, 0x00CCCCCC);
+    const char* url =
+        zakladki[
+            aktywna_zakladka
+        ].url;
 
-        int mianownik = obszar_h + max_przewin_y;
-        if (mianownik <= 0) mianownik = 1;
+    if (!url ||
+        url[0] ==
+            '\0') {
 
-        int suwak_h = (obszar_h * obszar_h) / mianownik;
-        if (suwak_h < 10) suwak_h = 10;
-        int suwak_y = obszar_y + 2 +
-            ((obszar_h - 4 - suwak_h) * zakladki[aktywna_zakladka].przewin_y) / max_przewin_y;
-        gui_rysuj_prostokat(scroll_x, suwak_y, 6, suwak_h, 0x00E58A00);
+        ustaw_status(
+            "Brak adresu do zapisania."
+        );
+
+        return;
     }
 
-    int menu_x = WIN_X + WIN_W - 270;
-    int menu_y = WIN_Y + 94;
-    if (menu_ulubione_otwarte) {
-        int menu_h = 24 + ulubione_ilosc * 20;
-        gui_rysuj_prostokat(menu_x, menu_y, 260, menu_h, 0x004A2500);
-        gui_rysuj_prostokat(menu_x, menu_y, 260, 1, 0x00E58A00);
-        gui_wypisz_tekst_kolor(menu_x + 8, menu_y + 4, 0x00FFFFFF,
-                               "+ Dodaj obecną stronę");
-        for (int u = 0; u < ulubione_ilosc; u++) {
-            char etykieta[29];
-            kopiuj_tekst_limit(etykieta, ulubione[u], sizeof(etykieta));
-            gui_wypisz_tekst_kolor(menu_x + 8, menu_y + 26 + u * 20,
-                                   0x00FFFFFF, etykieta);
+    for (int i = 0;
+         i <
+            ulubione_ilosc;
+         ++i) {
+
+        if (tekst_rowny(
+                ulubione[i],
+                url)) {
+
+            ustaw_status(
+                "Adres jest juz w zakladkach."
+            );
+
+            return;
         }
-    } else if (menu_ustawienia_otwarte) {
-        int ustawienia_x = WIN_X + WIN_W - 180;
-        gui_rysuj_prostokat(ustawienia_x, menu_y, 172, 32, 0x004A2500);
-        gui_rysuj_prostokat(ustawienia_x, menu_y, 172, 1, 0x00E58A00);
-        gui_wypisz_tekst_kolor(ustawienia_x + 12, menu_y + 8,
-                               0x00FFFFFF, "Brak opcji");
     }
 
-    gui_odswiez();
-}
+    if (ulubione_ilosc >=
+        MAX_ULUBIONE) {
 
-static char przegladarka_mala_litera(char znak) {
-    return (znak >= 'A' && znak <= 'Z') ? znak + ('a' - 'A') : znak;
-}
+        ustaw_status(
+            "Lista zakladek jest pelna."
+        );
 
-static bool przegladarka_prefiks(const char* tekst, const char* prefiks) {
-    int i = 0;
-    while (prefiks[i]) {
-        if (tekst[i] != prefiks[i]) return false;
-        i++;
+        return;
     }
-    return true;
+
+    (void)kopiuj_limit(
+        ulubione[
+            ulubione_ilosc
+        ],
+        URL_POJEMNOSC,
+        url
+    );
+
+    ++ulubione_ilosc;
+
+    zapisz_ulubione();
 }
 
-static bool znajdz_location(const char* odpowiedz, char* wynik, int pojemnosc) {
-    int i = 0;
-    while (odpowiedz[i]) {
-        if (odpowiedz[i] == '\r' && odpowiedz[i + 1] == '\n' &&
-            odpowiedz[i + 2] == '\r' && odpowiedz[i + 3] == '\n') break;
+/* =========================================================================
+ * 10. URL / WYSZUKIWANIE
+ * ========================================================================= */
 
-        bool poczatek_linii = (i == 0 || odpowiedz[i - 1] == '\n');
-        const char nazwa[] = "location:";
-        bool pasuje = poczatek_linii;
-        for (int j = 0; pasuje && nazwa[j]; j++)
-            pasuje = przegladarka_mala_litera(odpowiedz[i + j]) == nazwa[j];
+bool url_ma_biale_znaki(
+    const char* tekst
+) {
+    if (!tekst) {
+        return false;
+    }
 
-        if (pasuje) {
-            i += 9;
-            while (odpowiedz[i] == ' ' || odpowiedz[i] == '\t') i++;
-            int j = 0;
-            while (odpowiedz[i] && odpowiedz[i] != '\r' && odpowiedz[i] != '\n' && j + 1 < pojemnosc)
-                wynik[j++] = odpowiedz[i++];
-            wynik[j] = '\0';
-            return j > 0;
+    for (size_t i = 0;
+         tekst[i] != '\0';
+         ++i) {
+
+        if (ascii_biala(
+                tekst[i])) {
+
+            return true;
         }
-        i++;
     }
-    wynik[0] = '\0';
+
     return false;
 }
 
-static void ustaw_url_z_przekierowania(char* cel, const char* location,
-                                       bool bylo_https, const char* domena) {
-    int j = 0;
-    const char* schemat = bylo_https ? "https:" : "http:";
-    const char* pelny_schemat = bylo_https ? "https://" : "http://";
-
-    if (przegladarka_prefiks(location, "http://") || przegladarka_prefiks(location, "https://")) {
-        while (location[j] && j < 255) { cel[j] = location[j]; j++; }
-    } else {
-        const char* poczatek = (location[0] == '/' && location[1] == '/') ? schemat : pelny_schemat;
-        int i = 0;
-        while (poczatek[i] && j < 255) cel[j++] = poczatek[i++];
-        if (!(location[0] == '/' && location[1] == '/')) {
-            i = 0;
-            while (domena[i] && j < 255) cel[j++] = domena[i++];
-            if (location[0] != '/' && j < 255) cel[j++] = '/';
-        }
-        i = 0;
-        while (location[i] && j < 255) cel[j++] = location[i++];
+bool url_ma_kropke(
+    const char* tekst
+) {
+    if (!tekst) {
+        return false;
     }
-    cel[j] = '\0';
+
+    for (size_t i = 0;
+         tekst[i] != '\0';
+         ++i) {
+
+        if (tekst[i] ==
+            '.') {
+
+            return true;
+        }
+
+        if (tekst[i] ==
+                '/' ||
+            tekst[i] ==
+                '?' ||
+            tekst[i] ==
+                '#') {
+
+            break;
+        }
+    }
+
+    return false;
 }
 
-// --- ZMODYFIKOWANA FUNKCJA PobierzStrone() Z OBSŁUGĄ KODÓW HTTP ---
-void PobierzStrone() {
-    char* url = zakladki[aktywna_zakladka].url;
-    if (!przegladarka_prefiks(url, "http://") && !przegladarka_prefiks(url, "https://")) {
-        int dlugosc = dlugosc_tekstu(url);
-        if (dlugosc > 247) dlugosc = 247;
-        for (int j = dlugosc; j >= 0; j--) url[j + 8] = url[j];
-        const char https[] = "https://";
-        for (int j = 0; j < 8; j++) url[j] = https[j];
+bool url_zaczyna_sie_schematem(
+    const char* tekst
+) {
+    return
+        prefiks_ci(
+            tekst,
+            "http://"
+        ) ||
+        prefiks_ci(
+            tekst,
+            "https://"
+        );
+}
+
+bool query_unreserved(
+    uint8_t c
+) {
+    return
+        (c >= 'A' &&
+         c <= 'Z') ||
+        (c >= 'a' &&
+         c <= 'z') ||
+        (c >= '0' &&
+         c <= '9') ||
+        c == '-' ||
+        c == '_' ||
+        c == '.' ||
+        c == '~';
+}
+
+char hex_cyfra(
+    uint8_t n
+) {
+    static constexpr char HEX[] =
+        "0123456789ABCDEF";
+
+    return
+        HEX[
+            n &
+            0x0FU
+        ];
+}
+
+bool przygotuj_adres_wyszukiwania(
+    char* url
+) {
+    if (!url ||
+        url[0] ==
+            '\0') {
+
+        return false;
     }
 
-    ustaw_status("DNS: Szukanie serwera...");
-    zakladki[aktywna_zakladka].wczytana = false;
-    zakladki[aktywna_zakladka].to_jest_html = false;
-    const char* l1 = "Ładowanie strony...";
-    int p = 0; while(l1[p]) { zakladki[aktywna_zakladka].html[p] = l1[p]; p++; }
-    zakladki[aktywna_zakladka].html[p] = '\0';
-    zakladki[aktywna_zakladka].przewin_y = 0;
-    
-    // DNS jest synchroniczny. Najpierw pokaz caly pulpit, pasek zadan i status,
-    // aby zatrzymana na czas sieci petla programu nie pozostawila polramki.
-    RysujInterfejs(true);
-    gui_odswiez();
+    if (url_zaczyna_sie_schematem(
+            url)) {
 
-    char domena[64] = {0};
-    char sciezka[256] = {0};
-    
-    int i = 0;
-    const char* raw_url = zakladki[aktywna_zakladka].url;
-    bool uzyj_https = true;
-    
-    // Ignorowanie HTTP
-    if (raw_url[0] == 'h' && raw_url[1] == 't' && raw_url[2] == 't' && raw_url[3] == 'p' && raw_url[4] == ':' && raw_url[5] == '/' && raw_url[6] == '/') {
-        i = 7;
-        uzyj_https = false;
-    }
-    // Wykrywanie i elegancka blokada HTTPS
-    else if (raw_url[0] == 'h' && raw_url[1] == 't' && raw_url[2] == 't' && raw_url[3] == 'p' && raw_url[4] == 's' && raw_url[5] == ':' && raw_url[6] == '/' && raw_url[7] == '/') {
-        i = 8;
-        uzyj_https = true;
+        return true;
     }
 
-    int d_idx = 0;
-    while (raw_url[i] != '/' && raw_url[i] != '\0' && d_idx < 63) {
-        domena[d_idx++] = raw_url[i++];
+    /*
+     * Bez spacji i z kropka traktujemy jako nazwe hosta.
+     */
+    if (!url_ma_biale_znaki(
+            url) &&
+        url_ma_kropke(
+            url)) {
+
+        return true;
     }
-    domena[d_idx] = '\0';
-    
-    int k = 0;
-    if (raw_url[i] == '/') {
-        while (raw_url[i] != '\0' && k < 255) { sciezka[k++] = raw_url[i++]; }
-        sciezka[k] = '\0';
-    } else { sciezka[0] = '/'; sciezka[1] = '\0'; }
 
-    uint8_t ip_serwera[4] = {0,0,0,0};
-    if (bws_siec_dns(domena, ip_serwera)) {
-        ustaw_status(uzyj_https ? "TLS: Uścisk dłoni..." : "HTTP: Pobieranie...");
-        // Pobranie HTTP/HTTPS rowniez blokuje proces do zakonczenia transmisji.
-        RysujInterfejs(true);
-        gui_odswiez();
+    char wejscie[
+        URL_POJEMNOSC
+    ] = {};
 
-        for(int c = 0; c < HTML_POJEMNOSC; c++) temp_bufor[c] = 0;
+    (void)kopiuj_limit(
+        wejscie,
+        sizeof(wejscie),
+        url
+    );
 
-        // Jeśli Jądro poprawnie odebrało ramki TCP
-        bool pobrano = uzyj_https
-            ? bws_siec_pobierz_https(ip_serwera, domena, sciezka, temp_bufor, HTML_POJEMNOSC - 1)
-            : bws_siec_pobierz_http(ip_serwera, domena, sciezka, temp_bufor, HTML_POJEMNOSC - 1);
-        if (pobrano) {
-            
-            // --- ODCZYTUJEMY KOD STATUSU Z MODUŁU http_kody.h ---
-            int kod_http = wyciagnij_kod_http(temp_bufor);
-            
-            if (kod_http >= 200 && kod_http < 300) {
-                // Zachowujemy surowy HTML: silnik layoutu interpretuje tagi i CSS
-                // podczas rysowania, zamiast bezpowrotnie zamieniac je na tekst.
-                const char* html_start = oczysc_http(temp_bufor);
-                int j = 0;
-                while(html_start[j] != '\0' && j < HTML_POJEMNOSC - 1) {
-                    zakladki[aktywna_zakladka].html[j] = html_start[j];
-                    j++;
-                }
-                if (html_start[j] != '\0' && (((uint8_t)html_start[j] & 0xC0) == 0x80))
-                    while (j > 0 && (((uint8_t)zakladki[aktywna_zakladka].html[j - 1] & 0xC0) == 0x80)) j--;
-                if (html_start[j] != '\0' && (((uint8_t)html_start[j] & 0xC0) == 0x80) && j > 0) j--;
-                zakladki[aktywna_zakladka].html[j] = '\0';
-                zakladki[aktywna_zakladka].to_jest_html = true;
-                if (nagraj_historie_po_sukcesie) {
-                    DopiszDoHistorii(zakladki[aktywna_zakladka].url);
-                    nagraj_historie_po_sukcesie = false;
-                }
-                if (uzyj_https && !bws_tls_certyfikat_zaufany())
-                    ustaw_status("HTTPS: szyfrowane, certyfikat bez zaufanego CA");
-                else ustaw_status(uzyj_https ? "HTTPS: połączenie bezpieczne" : "Gotowy");
-                
-            } else if (kod_http == 301 || kod_http == 302 || kod_http == 307 || kod_http == 308) {
-                char location[256] = {0};
-                if (glebokosc_przekierowan < 3 && znajdz_location(temp_bufor, location, sizeof(location))) {
-                    ustaw_url_z_przekierowania(zakladki[aktywna_zakladka].url,
-                                               location, uzyj_https, domena);
-                    glebokosc_przekierowan++;
-                    ustaw_status("Przekierowanie HTTP...");
-                    PobierzStrone();
-                    glebokosc_przekierowan--;
-                    return;
-                }
+    static constexpr char PREFIKS[] =
+        "https://html.duckduckgo.com/html/?q=";
 
-                const char* opis = glebokosc_przekierowan >= 3
-                    ? "Przekroczono limit przekierowań." : "Brak nagłówka Location.";
-                zloz_strone_bledu(zakladki[aktywna_zakladka].html, kod_http, opis);
-                zakladki[aktywna_zakladka].to_jest_html = true;
-                ustaw_status("Błąd przekierowania HTTP");
-            } else if (kod_http > 0) {
-                // Kod 3xx, 4xx, 5xx - Serwer zwrócił błąd lub przekierowanie
-                const char* opis = pobierz_opis_kodu_http(kod_http);
-                zloz_strone_bledu(zakladki[aktywna_zakladka].html, kod_http, opis);
-                zakladki[aktywna_zakladka].to_jest_html = true; // Złożyliśmy to w ładny HTML
-                ustaw_status("Odebrano status HTTP");
-                
-            } else {
-                // Kod = 0, brak poprawnego nagłówka HTTP w pakiecie TCP
-                const char* err = "<h1>Błąd protokołu</h1><br><p>Odpowiedź serwera nie jest zgodna ze standardem HTTP.</p>";
-                int err_p = 0; while(err[err_p]) { zakladki[aktywna_zakladka].html[err_p] = err[err_p]; err_p++; }
-                zakladki[aktywna_zakladka].html[err_p] = '\0';
-                zakladki[aktywna_zakladka].to_jest_html = true;
-                ustaw_status("Nierozpoznana odpowiedź");
+    size_t p =
+        0;
+
+    for (size_t i = 0;
+         PREFIKS[i] != '\0';
+         ++i) {
+
+        if (p + 1U >=
+            URL_POJEMNOSC) {
+
+            return false;
+        }
+
+        url[p++] =
+            PREFIKS[i];
+    }
+
+    for (size_t i = 0;
+         wejscie[i] != '\0';
+         ++i) {
+
+        const uint8_t c =
+            static_cast<uint8_t>(
+                wejscie[i]
+            );
+
+        if (c ==
+            ' ') {
+
+            if (p + 1U >=
+                URL_POJEMNOSC) {
+
+                return false;
             }
-            
+
+            url[p++] =
+                '+';
+
+            continue;
+        }
+
+        if (query_unreserved(
+                c)) {
+
+            if (p + 1U >=
+                URL_POJEMNOSC) {
+
+                return false;
+            }
+
+            url[p++] =
+                static_cast<char>(
+                    c
+                );
+
+            continue;
+        }
+
+        if (p + 3U >=
+            URL_POJEMNOSC) {
+
+            return false;
+        }
+
+        url[p++] =
+            '%';
+
+        url[p++] =
+            hex_cyfra(
+                c >>
+                4
+            );
+
+        url[p++] =
+            hex_cyfra(
+                c
+            );
+    }
+
+    url[p] =
+        '\0';
+
+    return true;
+}
+
+bool domena_znak_poprawny(
+    char c
+) {
+    return
+        (c >= 'a' &&
+         c <= 'z') ||
+        (c >= 'A' &&
+         c <= 'Z') ||
+        (c >= '0' &&
+         c <= '9') ||
+        c == '-' ||
+        c == '.';
+}
+
+bool parsuj_url(
+    const char* url,
+    ParsedUrl* wynik
+) {
+    if (!url ||
+        !wynik ||
+        url[0] ==
+            '\0') {
+
+        return false;
+    }
+
+    size_t i =
+        0;
+
+    if (prefiks_ci(
+            url,
+            "https://")) {
+
+        wynik->https =
+            true;
+
+        i =
+            8U;
+    } else if (prefiks_ci(
+                   url,
+                   "http://")) {
+
+        wynik->https =
+            false;
+
+        i =
+            7U;
+    } else {
+        return false;
+    }
+
+    if (url[i] ==
+        '\0') {
+
+        return false;
+    }
+
+    size_t d =
+        0;
+
+    while (url[i] != '\0' &&
+           url[i] != '/' &&
+           url[i] != '?' &&
+           url[i] != '#') {
+
+        const char c =
+            url[i];
+
+        /*
+         * Userinfo oraz niestandardowe porty nie sa obecnie wspierane przez
+         * BWS29/BWS30, bo port jest na stale 80/443 w kernelu.
+         */
+        if (c == '@' ||
+            c == ':') {
+
+            return false;
+        }
+
+        if (!domena_znak_poprawny(
+                c)) {
+
+            return false;
+        }
+
+        if (d + 1U >=
+            sizeof(
+                wynik->domena
+            )) {
+
+            return false;
+        }
+
+        wynik->domena[d++] =
+            c;
+
+        ++i;
+    }
+
+    if (d == 0 ||
+        wynik->domena[0] ==
+            '.' ||
+        wynik->domena[
+            d - 1U] ==
+            '.') {
+
+        return false;
+    }
+
+    wynik->domena[d] =
+        '\0';
+
+    size_t p =
+        0;
+
+    if (url[i] ==
+            '\0' ||
+        url[i] ==
+            '#') {
+
+        wynik->sciezka[0] =
+            '/';
+
+        wynik->sciezka[1] =
+            '\0';
+
+        return true;
+    }
+
+    if (url[i] ==
+        '?') {
+
+        wynik->sciezka[p++] =
+            '/';
+    }
+
+    while (url[i] != '\0' &&
+           url[i] != '#') {
+
+        const uint8_t c =
+            static_cast<uint8_t>(
+                url[i]
+            );
+
+        if (c < 0x20U ||
+            c ==
+                0x7FU) {
+
+            return false;
+        }
+
+        if (p + 1U >=
+            sizeof(
+                wynik->sciezka
+            )) {
+
+            return false;
+        }
+
+        wynik->sciezka[p++] =
+            static_cast<char>(
+                c
+            );
+
+        ++i;
+    }
+
+    wynik->sciezka[p] =
+        '\0';
+
+    return
+        p > 0;
+}
+
+/* =========================================================================
+ * 11. HTTP HEADERS
+ * ========================================================================= */
+
+const char* znajdz_koniec_naglowkow(
+    const char* dane,
+    size_t dlugosc,
+    size_t* body_offset
+) {
+    if (!dane ||
+        !body_offset) {
+
+        return nullptr;
+    }
+
+    for (size_t i = 0;
+         i + 3U <
+             dlugosc;
+         ++i) {
+
+        if (dane[i] ==
+                '\r' &&
+            dane[i + 1U] ==
+                '\n' &&
+            dane[i + 2U] ==
+                '\r' &&
+            dane[i + 3U] ==
+                '\n') {
+
+            *body_offset =
+                i +
+                4U;
+
+            return
+                dane +
+                *body_offset;
+        }
+    }
+
+    for (size_t i = 0;
+         i + 1U <
+             dlugosc;
+         ++i) {
+
+        if (dane[i] ==
+                '\n' &&
+            dane[i + 1U] ==
+                '\n') {
+
+            *body_offset =
+                i +
+                2U;
+
+            return
+                dane +
+                *body_offset;
+        }
+    }
+
+    return nullptr;
+}
+
+bool nazwa_headera_rowna(
+    const char* linia,
+    size_t nazwa_len,
+    const char* oczekiwana
+) {
+    return
+        tekst_rowny_ci(
+            linia,
+            nazwa_len,
+            oczekiwana
+        );
+}
+
+bool znajdz_header(
+    const char* dane,
+    size_t naglowki_len,
+    const char* nazwa,
+    char* wynik,
+    size_t pojemnosc
+) {
+    if (!dane ||
+        !nazwa ||
+        !wynik ||
+        pojemnosc == 0) {
+
+        return false;
+    }
+
+    wynik[0] =
+        '\0';
+
+    size_t i =
+        0;
+
+    /*
+     * Pomin status-line.
+     */
+    while (i < naglowki_len &&
+           dane[i] != '\n') {
+
+        ++i;
+    }
+
+    if (i < naglowki_len) {
+        ++i;
+    }
+
+    while (i < naglowki_len) {
+        const size_t line_start =
+            i;
+
+        while (i < naglowki_len &&
+               dane[i] != '\n') {
+
+            ++i;
+        }
+
+        size_t line_end =
+            i;
+
+        if (line_end >
+                line_start &&
+            dane[
+                line_end -
+                1U] ==
+                '\r') {
+
+            --line_end;
+        }
+
+        if (line_end ==
+            line_start) {
+
+            return false;
+        }
+
+        size_t colon =
+            line_start;
+
+        while (colon < line_end &&
+               dane[colon] != ':') {
+
+            ++colon;
+        }
+
+        if (colon < line_end &&
+            nazwa_headera_rowna(
+                dane +
+                    line_start,
+                colon -
+                    line_start,
+                nazwa)) {
+
+            size_t value =
+                colon +
+                1U;
+
+            while (value < line_end &&
+                   (dane[value] ==
+                        ' ' ||
+                    dane[value] ==
+                        '\t')) {
+
+                ++value;
+            }
+
+            size_t value_end =
+                line_end;
+
+            while (value_end > value &&
+                   (dane[
+                        value_end -
+                        1U] ==
+                        ' ' ||
+                    dane[
+                        value_end -
+                        1U] ==
+                        '\t')) {
+
+                --value_end;
+            }
+
+            const size_t n =
+                value_end -
+                value;
+
+            const size_t kopia =
+                n <
+                        pojemnosc -
+                        1U
+                    ? n
+                    : pojemnosc -
+                        1U;
+
+            for (size_t k = 0;
+                 k < kopia;
+                 ++k) {
+
+                wynik[k] =
+                    dane[
+                        value +
+                        k
+                    ];
+            }
+
+            wynik[kopia] =
+                '\0';
+
+            return
+                kopia ==
+                n;
+        }
+
+        if (i < naglowki_len) {
+            ++i;
+        }
+    }
+
+    return false;
+}
+
+bool tekst_zawiera_ci(
+    const char* tekst,
+    const char* fragment
+) {
+    if (!tekst ||
+        !fragment ||
+        fragment[0] ==
+            '\0') {
+
+        return false;
+    }
+
+    for (size_t i = 0;
+         tekst[i] != '\0';
+         ++i) {
+
+        size_t j =
+            0;
+
+        while (fragment[j] != '\0' &&
+               tekst[i + j] != '\0' &&
+               ascii_mala(
+                   tekst[i + j]) ==
+               ascii_mala(
+                   fragment[j])) {
+
+            ++j;
+        }
+
+        if (fragment[j] ==
+            '\0') {
+
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool parsuj_odpowiedz_http(
+    const char* dane,
+    size_t dlugosc,
+    OdpowiedzHttp* wynik
+) {
+    if (!dane ||
+        !wynik ||
+        dlugosc == 0) {
+
+        return false;
+    }
+
+    wynik->kod =
+        wyciagnij_kod_http(
+            dane,
+            dlugosc
+        );
+
+    if (!http_kod_poprawny(
+            wynik->kod)) {
+
+        return false;
+    }
+
+    size_t body_offset =
+        0;
+
+    wynik->body =
+        znajdz_koniec_naglowkow(
+            dane,
+            dlugosc,
+            &body_offset
+        );
+
+    if (!wynik->body ||
+        body_offset >
+            dlugosc) {
+
+        return false;
+    }
+
+    wynik->body_len =
+        dlugosc -
+        body_offset;
+
+    char transfer[
+        64
+    ] = {};
+
+    wynik->chunked =
+        znajdz_header(
+            dane,
+            body_offset,
+            "transfer-encoding",
+            transfer,
+            sizeof(transfer)
+        ) &&
+        tekst_zawiera_ci(
+            transfer,
+            "chunked"
+        );
+
+    char content_type[
+        96
+    ] = {};
+
+    const bool ma_typ =
+        znajdz_header(
+            dane,
+            body_offset,
+            "content-type",
+            content_type,
+            sizeof(content_type)
+        );
+
+    wynik->html =
+        ma_typ &&
+        (tekst_zawiera_ci(
+             content_type,
+             "text/html") ||
+         tekst_zawiera_ci(
+             content_type,
+             "application/xhtml"));
+
+    wynik->tekst =
+        !ma_typ ||
+        wynik->html ||
+        tekst_zawiera_ci(
+            content_type,
+            "text/plain"
+        ) ||
+        tekst_zawiera_ci(
+            content_type,
+            "application/json"
+        ) ||
+        tekst_zawiera_ci(
+            content_type,
+            "application/xml"
+        );
+
+    if (!ma_typ &&
+        wynik->body_len > 0) {
+
+        size_t i =
+            0;
+
+        while (i <
+                   wynik->body_len &&
+               ascii_biala(
+                   wynik->body[i])) {
+
+            ++i;
+        }
+
+        if (i <
+                wynik->body_len &&
+            wynik->body[i] ==
+                '<') {
+
+            wynik->html =
+                true;
+        }
+    }
+
+    char encoding[
+        64
+    ] = {};
+
+    if (znajdz_header(
+            dane,
+            body_offset,
+            "content-encoding",
+            encoding,
+            sizeof(encoding)
+        ) &&
+        encoding[0] != '\0' &&
+        !tekst_zawiera_ci(
+            encoding,
+            "identity"
+        )) {
+
+        /*
+         * Kernel GET nie prosi o gzip, ale jezeli serwer mimo to kompresuje,
+         * nie probujemy renderowac skompresowanych bajtow jako HTML.
+         */
+        wynik->tekst =
+            false;
+    }
+
+    return true;
+}
+
+/* =========================================================================
+ * 12. HTTP CHUNKED
+ * ========================================================================= */
+
+int hex_wartosc(
+    char c
+) {
+    if (c >= '0' &&
+        c <= '9') {
+
+        return
+            c -
+            '0';
+    }
+
+    c =
+        ascii_mala(
+            c
+        );
+
+    if (c >= 'a' &&
+        c <= 'f') {
+
+        return
+            c -
+            'a' +
+            10;
+    }
+
+    return -1;
+}
+
+bool dekoduj_chunked(
+    const char* wejscie,
+    size_t wej_len,
+    char* wyjscie,
+    size_t wyj_cap,
+    size_t* wyj_len
+) {
+    if (!wejscie ||
+        !wyjscie ||
+        wyj_cap == 0 ||
+        !wyj_len) {
+
+        return false;
+    }
+
+    size_t in =
+        0;
+
+    size_t out =
+        0;
+
+    for (;;) {
+        uint64_t chunk =
+            0;
+
+        bool ma_cyfre =
+            false;
+
+        while (in < wej_len) {
+            const char c =
+                wejscie[in];
+
+            if (c == ';') {
+                while (in < wej_len &&
+                       wejscie[in] != '\n') {
+
+                    ++in;
+                }
+
+                break;
+            }
+
+            if (c == '\r' ||
+                c == '\n') {
+
+                break;
+            }
+
+            const int hv =
+                hex_wartosc(
+                    c
+                );
+
+            if (hv < 0) {
+                return false;
+            }
+
+            ma_cyfre =
+                true;
+
+            if (chunk >
+                (UINT64_MAX -
+                 static_cast<uint64_t>(
+                     hv)) /
+                    16ULL) {
+
+                return false;
+            }
+
+            chunk =
+                chunk *
+                16ULL +
+                static_cast<uint64_t>(
+                    hv
+                );
+
+            ++in;
+        }
+
+        if (!ma_cyfre) {
+            return false;
+        }
+
+        /*
+         * Do konca linii rozmiaru.
+         */
+        while (in < wej_len &&
+               wejscie[in] != '\n') {
+
+            ++in;
+        }
+
+        if (in >= wej_len) {
+            return false;
+        }
+
+        ++in;
+
+        if (chunk == 0) {
+            if (out >= wyj_cap) {
+                return false;
+            }
+
+            wyjscie[out] =
+                '\0';
+
+            *wyj_len =
+                out;
+
+            return true;
+        }
+
+        if (chunk >
+            wej_len -
+            in) {
+
+            return false;
+        }
+
+        if (chunk >
+            wyj_cap -
+            1U -
+            out) {
+
+            return false;
+        }
+
+        for (uint64_t j = 0;
+             j < chunk;
+             ++j) {
+
+            wyjscie[
+                out++
+            ] =
+                wejscie[
+                    in++
+                ];
+        }
+
+        if (in < wej_len &&
+            wejscie[in] ==
+                '\r') {
+
+            ++in;
+        }
+
+        if (in >= wej_len ||
+            wejscie[in] !=
+                '\n') {
+
+            return false;
+        }
+
+        ++in;
+    }
+}
+
+/* =========================================================================
+ * 13. REDIRECT
+ * ========================================================================= */
+
+bool ustaw_url_z_location(
+    char* cel,
+    size_t pojemnosc,
+    const char* location,
+    const ParsedUrl& obecny
+) {
+    if (!cel ||
+        pojemnosc == 0 ||
+        !location ||
+        location[0] ==
+            '\0') {
+
+        return false;
+    }
+
+    if (prefiks_ci(
+            location,
+            "http://") ||
+        prefiks_ci(
+            location,
+            "https://")) {
+
+        return
+            kopiuj_limit(
+                cel,
+                pojemnosc,
+                location
+            );
+    }
+
+    char wynik[
+        URL_POJEMNOSC
+    ] = {};
+
+    size_t p =
+        0;
+
+    const char* scheme =
+        obecny.https
+            ? "https://"
+            : "http://";
+
+    auto append = [&wynik, &p](
+        const char* s
+    ) -> bool {
+        if (!s) {
+            return false;
+        }
+
+        for (size_t i = 0;
+             s[i] != '\0';
+             ++i) {
+
+            if (p + 1U >=
+                sizeof(wynik)) {
+
+                return false;
+            }
+
+            wynik[p++] =
+                s[i];
+        }
+
+        wynik[p] =
+            '\0';
+
+        return true;
+    };
+
+    /*
+     * Scheme-relative URL: //host/path
+     */
+    if (location[0] ==
+            '/' &&
+        location[1] ==
+            '/') {
+
+        const char* scheme_only =
+            obecny.https
+                ? "https:"
+                : "http:";
+
+        if (!append(
+                scheme_only) ||
+            !append(
+                location)) {
+
+            return false;
+        }
+
+        return
+            kopiuj_limit(
+                cel,
+                pojemnosc,
+                wynik
+            );
+    }
+
+    if (!append(
+            scheme) ||
+        !append(
+            obecny.domena)) {
+
+        return false;
+    }
+
+    if (location[0] ==
+        '/') {
+
+        if (!append(
+                location)) {
+
+            return false;
+        }
+
+        return
+            kopiuj_limit(
+                cel,
+                pojemnosc,
+                wynik
+            );
+    }
+
+    /*
+     * Relative path: /katalog/stara -> /katalog/nowa
+     */
+    char katalog[
+        SCIEZKA_POJEMNOSC
+    ] = {};
+
+    size_t slash =
+        0;
+
+    for (size_t i = 0;
+         obecny.sciezka[i] != '\0';
+         ++i) {
+
+        if (obecny.sciezka[i] ==
+            '/') {
+
+            slash =
+                i;
+        }
+
+        if (obecny.sciezka[i] ==
+            '?' ||
+            obecny.sciezka[i] ==
+            '#') {
+
+            break;
+        }
+    }
+
+    size_t kp =
+        0;
+
+    for (size_t i = 0;
+         i <= slash &&
+         obecny.sciezka[i] != '\0';
+         ++i) {
+
+        if (kp + 1U >=
+            sizeof(katalog)) {
+
+            return false;
+        }
+
+        katalog[kp++] =
+            obecny.sciezka[i];
+    }
+
+    if (kp == 0) {
+        katalog[kp++] =
+            '/';
+    }
+
+    katalog[kp] =
+        '\0';
+
+    if (!append(
+            katalog) ||
+        !append(
+            location)) {
+
+        return false;
+    }
+
+    return
+        kopiuj_limit(
+            cel,
+            pojemnosc,
+            wynik
+        );
+}
+
+/* =========================================================================
+ * 14. RENDERER TEKSTU
+ * ========================================================================= */
+
+struct Renderer {
+    int x;
+    int y;
+    int szer;
+    int wys;
+    int przewin;
+
+    int logiczny_x;
+    int logiczny_y;
+
+    int line_height;
+
+    uint32_t kolor;
+    int skala;
+
+    bool ostatnia_spacja;
+};
+
+void renderer_nowa_linia(
+    Renderer& r,
+    int dodatkowo = 0
+) {
+    r.logiczny_x =
+        0;
+
+    r.logiczny_y +=
+        r.line_height *
+        r.skala +
+        dodatkowo;
+
+    r.ostatnia_spacja =
+        false;
+}
+
+void renderer_znak(
+    Renderer& r,
+    const char* bytes,
+    uint32_t unicode,
+    int bytes_count
+) {
+    if (!bytes ||
+        bytes_count <= 0) {
+
+        return;
+    }
+
+    const int sw =
+        szerokosc_znaku(
+            unicode
+        );
+
+    const int pelna =
+        (sw +
+         1) *
+        r.skala;
+
+    if (r.logiczny_x +
+            pelna >
+        r.szer) {
+
+        renderer_nowa_linia(
+            r
+        );
+    }
+
+    const int draw_y =
+        r.y +
+        r.logiczny_y -
+        r.przewin;
+
+    if (draw_y +
+            r.line_height *
+            r.skala >=
+            r.y &&
+        draw_y <
+            r.y +
+            r.wys) {
+
+        char temp[
+            5
+        ] = {};
+
+        for (int i = 0;
+             i < bytes_count &&
+             i < 4;
+             ++i) {
+
+            temp[i] =
+                bytes[i];
+        }
+
+        wypisz_skalowane(
+            r.x +
+                r.logiczny_x,
+            draw_y,
+            r.kolor,
+            r.skala,
+            temp
+        );
+    }
+
+    r.logiczny_x +=
+        pelna;
+}
+
+void renderer_spacja(
+    Renderer& r
+) {
+    if (r.logiczny_x == 0 ||
+        r.ostatnia_spacja) {
+
+        return;
+    }
+
+    r.logiczny_x +=
+        8 *
+        r.skala;
+
+    r.ostatnia_spacja =
+        true;
+}
+
+void renderer_tekst(
+    Renderer& r,
+    const char* tekst
+) {
+    if (!tekst) {
+        return;
+    }
+
+    for (size_t i = 0;
+         tekst[i] != '\0';) {
+
+        const char c =
+            tekst[i];
+
+        if (c == '\r') {
+            ++i;
+            continue;
+        }
+
+        if (c == '\n') {
+            renderer_nowa_linia(
+                r
+            );
+
+            ++i;
+            continue;
+        }
+
+        if (c == ' ' ||
+            c == '\t') {
+
+            renderer_spacja(
+                r
+            );
+
+            ++i;
+            continue;
+        }
+
+        r.ostatnia_spacja =
+            false;
+
+        const Utf8Znak z =
+            dekoduj_utf8(
+                tekst +
+                i
+            );
+
+        renderer_znak(
+            r,
+            tekst +
+                i,
+            z.kod,
+            z.bajty
+        );
+
+        i +=
+            static_cast<size_t>(
+                z.bajty
+            );
+    }
+}
+
+/* =========================================================================
+ * 15. HTML PARSER/RENDERER
+ * ========================================================================= */
+
+bool tag_nazwa_znak(
+    char c
+) {
+    return
+        (c >= 'a' &&
+         c <= 'z') ||
+        (c >= 'A' &&
+         c <= 'Z') ||
+        (c >= '0' &&
+         c <= '9');
+}
+
+bool tag_rowny(
+    const char* name,
+    size_t len,
+    const char* expected
+) {
+    return
+        tekst_rowny_ci(
+            name,
+            len,
+            expected
+        );
+}
+
+bool html_tag_blokowy(
+    const char* name,
+    size_t len
+) {
+    return
+        tag_rowny(
+            name,
+            len,
+            "p") ||
+        tag_rowny(
+            name,
+            len,
+            "div") ||
+        tag_rowny(
+            name,
+            len,
+            "section") ||
+        tag_rowny(
+            name,
+            len,
+            "article") ||
+        tag_rowny(
+            name,
+            len,
+            "header") ||
+        tag_rowny(
+            name,
+            len,
+            "footer") ||
+        tag_rowny(
+            name,
+            len,
+            "li") ||
+        tag_rowny(
+            name,
+            len,
+            "tr") ||
+        tag_rowny(
+            name,
+            len,
+            "blockquote") ||
+        tag_rowny(
+            name,
+            len,
+            "pre");
+}
+
+bool html_heading(
+    const char* name,
+    size_t len
+) {
+    return
+        tag_rowny(
+            name,
+            len,
+            "h1") ||
+        tag_rowny(
+            name,
+            len,
+            "h2") ||
+        tag_rowny(
+            name,
+            len,
+            "h3");
+}
+
+bool html_entity(
+    const char* s,
+    uint32_t* unicode,
+    size_t* zuzyto
+) {
+    if (!s ||
+        s[0] != '&' ||
+        !unicode ||
+        !zuzyto) {
+
+        return false;
+    }
+
+    struct Encja {
+        const char* nazwa;
+        uint32_t kod;
+    };
+
+    static constexpr Encja ENCJE[] = {
+        {"&amp;",  '&'},
+        {"&lt;",   '<'},
+        {"&gt;",   '>'},
+        {"&quot;", '"'},
+        {"&#39;",  '\''},
+        {"&apos;", '\''},
+        {"&nbsp;", ' '}
+    };
+
+    for (const Encja& e :
+         ENCJE) {
+
+        size_t i =
+            0;
+
+        while (e.nazwa[i] != '\0' &&
+               s[i] != '\0' &&
+               e.nazwa[i] ==
+                   s[i]) {
+
+            ++i;
+        }
+
+        if (e.nazwa[i] ==
+            '\0') {
+
+            *unicode =
+                e.kod;
+
+            *zuzyto =
+                i;
+
+            return true;
+        }
+    }
+
+    if (s[1] ==
+        '#') {
+
+        size_t i =
+            2;
+
+        bool hex =
+            false;
+
+        if (s[i] ==
+                'x' ||
+            s[i] ==
+                'X') {
+
+            hex =
+                true;
+
+            ++i;
+        }
+
+        uint32_t value =
+            0;
+
+        bool any =
+            false;
+
+        while (s[i] != '\0' &&
+               s[i] != ';') {
+
+            int digit =
+                -1;
+
+            if (hex) {
+                digit =
+                    hex_wartosc(
+                        s[i]
+                    );
+            } else if (s[i] >= '0' &&
+                       s[i] <= '9') {
+
+                digit =
+                    s[i] -
+                    '0';
+            }
+
+            if (digit < 0) {
+                return false;
+            }
+
+            const uint32_t base =
+                hex
+                    ? 16U
+                    : 10U;
+
+            if (value >
+                (0x10FFFFU -
+                 static_cast<uint32_t>(
+                     digit)) /
+                    base) {
+
+                return false;
+            }
+
+            value =
+                value *
+                base +
+                static_cast<uint32_t>(
+                    digit
+                );
+
+            any =
+                true;
+
+            ++i;
+        }
+
+        if (!any ||
+            s[i] != ';' ||
+            value == 0 ||
+            value >
+                0x10FFFFU ||
+            (value >= 0xD800U &&
+             value <= 0xDFFFU)) {
+
+            return false;
+        }
+
+        *unicode =
+            value;
+
+        *zuzyto =
+            i +
+            1U;
+
+        return true;
+    }
+
+    return false;
+}
+
+int utf8_zapisz(
+    uint32_t cp,
+    char out[5]
+) {
+    if (!out) {
+        return 0;
+    }
+
+    out[0] =
+        '\0';
+
+    if (cp <=
+        0x7FU) {
+
+        out[0] =
+            static_cast<char>(
+                cp
+            );
+
+        out[1] =
+            '\0';
+
+        return 1;
+    }
+
+    if (cp <=
+        0x7FFU) {
+
+        out[0] =
+            static_cast<char>(
+                0xC0U |
+                (cp >> 6)
+            );
+
+        out[1] =
+            static_cast<char>(
+                0x80U |
+                (cp &
+                 0x3FU)
+            );
+
+        out[2] =
+            '\0';
+
+        return 2;
+    }
+
+    if (cp <=
+        0xFFFFU) {
+
+        out[0] =
+            static_cast<char>(
+                0xE0U |
+                (cp >> 12)
+            );
+
+        out[1] =
+            static_cast<char>(
+                0x80U |
+                ((cp >> 6) &
+                 0x3FU)
+            );
+
+        out[2] =
+            static_cast<char>(
+                0x80U |
+                (cp &
+                 0x3FU)
+            );
+
+        out[3] =
+            '\0';
+
+        return 3;
+    }
+
+    out[0] =
+        static_cast<char>(
+            0xF0U |
+            (cp >> 18)
+        );
+
+    out[1] =
+        static_cast<char>(
+            0x80U |
+            ((cp >> 12) &
+             0x3FU)
+        );
+
+    out[2] =
+        static_cast<char>(
+            0x80U |
+            ((cp >> 6) &
+             0x3FU)
+        );
+
+    out[3] =
+        static_cast<char>(
+            0x80U |
+            (cp &
+             0x3FU)
+        );
+
+    out[4] =
+        '\0';
+
+    return 4;
+}
+
+void renderuj_html(
+    Renderer& r,
+    const char* html
+) {
+    if (!html) {
+        return;
+    }
+
+    enum class Ukryte {
+        Nic,
+        Head,
+        Script,
+        Style,
+        Svg
+    };
+
+    Ukryte ukryte =
+        Ukryte::Nic;
+
+    int poprzednia_skala[
+        16
+    ] = {};
+
+    int stack =
+        0;
+
+    bool widziano_body =
+        false;
+
+    bool w_body =
+        false;
+
+    for (size_t i = 0;
+         html[i] != '\0';) {
+
+        if (html[i] ==
+            '<') {
+
+            /*
+             * Komentarz <!-- ... -->
+             */
+            if (html[i + 1U] ==
+                    '!' &&
+                html[i + 2U] ==
+                    '-' &&
+                html[i + 3U] ==
+                    '-') {
+
+                i +=
+                    4U;
+
+                while (html[i] != '\0' &&
+                       !(html[i] ==
+                             '-' &&
+                         html[i + 1U] ==
+                             '-' &&
+                         html[i + 2U] ==
+                             '>')) {
+
+                    ++i;
+                }
+
+                if (html[i] != '\0') {
+                    i +=
+                        3U;
+                }
+
+                continue;
+            }
+
+            size_t p =
+                i +
+                1U;
+
+            while (ascii_biala(
+                       html[p])) {
+
+                ++p;
+            }
+
+            bool closing =
+                false;
+
+            if (html[p] ==
+                '/') {
+
+                closing =
+                    true;
+
+                ++p;
+
+                while (ascii_biala(
+                           html[p])) {
+
+                    ++p;
+                }
+            }
+
+            const size_t name_start =
+                p;
+
+            while (tag_nazwa_znak(
+                       html[p])) {
+
+                ++p;
+            }
+
+            const size_t name_len =
+                p -
+                name_start;
+
+            bool quote =
+                false;
+
+            char quote_char =
+                '\0';
+
+            size_t end =
+                p;
+
+            while (html[end] != '\0') {
+                const char c =
+                    html[end];
+
+                if (quote) {
+                    if (c ==
+                        quote_char) {
+
+                        quote =
+                            false;
+                    }
+                } else if (c ==
+                               '"' ||
+                           c ==
+                               '\'') {
+
+                    quote =
+                        true;
+
+                    quote_char =
+                        c;
+                } else if (c ==
+                           '>') {
+
+                    ++end;
+                    break;
+                }
+
+                ++end;
+            }
+
+            if (name_len == 0) {
+                i =
+                    end;
+
+                continue;
+            }
+
+            const char* name =
+                html +
+                name_start;
+
+            const bool is_head =
+                tag_rowny(
+                    name,
+                    name_len,
+                    "head"
+                );
+
+            const bool is_script =
+                tag_rowny(
+                    name,
+                    name_len,
+                    "script"
+                );
+
+            const bool is_style =
+                tag_rowny(
+                    name,
+                    name_len,
+                    "style"
+                );
+
+            const bool is_svg =
+                tag_rowny(
+                    name,
+                    name_len,
+                    "svg"
+                );
+
+            const bool is_body =
+                tag_rowny(
+                    name,
+                    name_len,
+                    "body"
+                );
+
+            if (is_body) {
+                widziano_body =
+                    true;
+
+                w_body =
+                    !closing;
+
+                i =
+                    end;
+
+                continue;
+            }
+
+            Ukryte rodzaj =
+                Ukryte::Nic;
+
+            if (is_head) {
+                rodzaj =
+                    Ukryte::Head;
+            } else if (is_script) {
+                rodzaj =
+                    Ukryte::Script;
+            } else if (is_style) {
+                rodzaj =
+                    Ukryte::Style;
+            } else if (is_svg) {
+                rodzaj =
+                    Ukryte::Svg;
+            }
+
+            if (ukryte !=
+                Ukryte::Nic) {
+
+                if (closing &&
+                    rodzaj ==
+                        ukryte) {
+
+                    ukryte =
+                        Ukryte::Nic;
+                }
+
+                i =
+                    end;
+
+                continue;
+            }
+
+            if (!closing &&
+                rodzaj !=
+                    Ukryte::Nic) {
+
+                ukryte =
+                    rodzaj;
+
+                i =
+                    end;
+
+                continue;
+            }
+
+            /*
+             * Jezeli HTML nie ma jawnego <body>, renderujemy zawartosc
+             * poza head/script/style - czeste w prostych stronach/errorach.
+             */
+            const bool renderowac =
+                !widziano_body ||
+                w_body;
+
+            if (renderowac) {
+                if (tag_rowny(
+                        name,
+                        name_len,
+                        "br")) {
+
+                    renderer_nowa_linia(
+                        r
+                    );
+                }
+
+                if (html_heading(
+                        name,
+                        name_len)) {
+
+                    if (!closing) {
+                        if (r.logiczny_x != 0) {
+                            renderer_nowa_linia(
+                                r,
+                                4
+                            );
+                        }
+
+                        if (stack <
+                            16) {
+
+                            poprzednia_skala[
+                                stack++
+                            ] =
+                                r.skala;
+                        }
+
+                        r.skala =
+                            tag_rowny(
+                                name,
+                                name_len,
+                                "h1")
+                                ? 2
+                                : 1;
+                    } else {
+                        renderer_nowa_linia(
+                            r,
+                            6
+                        );
+
+                        if (stack > 0) {
+                            r.skala =
+                                poprzednia_skala[
+                                    --stack
+                                ];
+                        } else {
+                            r.skala =
+                                1;
+                        }
+                    }
+                } else if (html_tag_blokowy(
+                               name,
+                               name_len)) {
+
+                    if (closing ||
+                        r.logiczny_x != 0) {
+
+                        renderer_nowa_linia(
+                            r,
+                            4
+                        );
+                    }
+                }
+
+                if (!closing &&
+                    tag_rowny(
+                        name,
+                        name_len,
+                        "li")) {
+
+                    renderer_tekst(
+                        r,
+                        "- "
+                    );
+                }
+            }
+
+            i =
+                end;
+
+            continue;
+        }
+
+        const bool renderowac =
+            ukryte ==
+                Ukryte::Nic &&
+            (!widziano_body ||
+             w_body);
+
+        if (!renderowac) {
+            ++i;
+            continue;
+        }
+
+        if (html[i] ==
+            '&') {
+
+            uint32_t cp =
+                0;
+
+            size_t used =
+                0;
+
+            if (html_entity(
+                    html +
+                        i,
+                    &cp,
+                    &used)) {
+
+                if (cp ==
+                    ' ') {
+
+                    renderer_spacja(
+                        r
+                    );
+                } else {
+                    char encoded[
+                        5
+                    ] = {};
+
+                    const int n =
+                        utf8_zapisz(
+                            cp,
+                            encoded
+                        );
+
+                    renderer_znak(
+                        r,
+                        encoded,
+                        cp,
+                        n
+                    );
+
+                    r.ostatnia_spacja =
+                        false;
+                }
+
+                i +=
+                    used;
+
+                continue;
+            }
+        }
+
+        const char c =
+            html[i];
+
+        if (ascii_biala(
+                c)) {
+
+            renderer_spacja(
+                r
+            );
+
+            ++i;
+
+            continue;
+        }
+
+        const Utf8Znak z =
+            dekoduj_utf8(
+                html +
+                i
+            );
+
+        renderer_znak(
+            r,
+            html +
+                i,
+            z.kod,
+            z.bajty
+        );
+
+        r.ostatnia_spacja =
+            false;
+
+        i +=
+            static_cast<size_t>(
+                z.bajty
+            );
+    }
+}
+
+void przelicz_scroll(
+    const Renderer& r,
+    int obszar_h
+) {
+    calkowita_wysokosc_strony =
+        r.logiczny_y +
+        r.line_height *
+        r.skala +
+        8;
+
+    if (calkowita_wysokosc_strony >
+        obszar_h) {
+
+        max_przewin_y =
+            calkowita_wysokosc_strony -
+            obszar_h;
+    } else {
+        max_przewin_y =
+            0;
+    }
+
+    if (liczba_zakladek <= 0) {
+        return;
+    }
+
+    int& scroll =
+        zakladki[
+            aktywna_zakladka
+        ].przewin_y;
+
+    if (scroll < 0) {
+        scroll =
+            0;
+    }
+
+    if (scroll >
+        max_przewin_y) {
+
+        scroll =
+            max_przewin_y;
+    }
+}
+
+/* =========================================================================
+ * 16. GUI - PRZYCISK / URL WIDTH
+ * ========================================================================= */
+
+int szerokosc_utf8(
+    const char* tekst,
+    int skala = 1
+) {
+    if (!tekst) {
+        return 0;
+    }
+
+    int width =
+        0;
+
+    for (size_t i = 0;
+         tekst[i] != '\0';) {
+
+        const Utf8Znak z =
+            dekoduj_utf8(
+                tekst +
+                i
+            );
+
+        width +=
+            (szerokosc_znaku(
+                 z.kod) +
+             1) *
+            skala;
+
+        i +=
+            static_cast<size_t>(
+                z.bajty
+            );
+    }
+
+    return width;
+}
+
+void RysujPrzyciskLokalny(
+    int x,
+    int y,
+    int w,
+    int h,
+    uint32_t bg,
+    uint32_t fg,
+    const char* tekst
+) {
+    gui_rysuj_prostokat(
+        x,
+        y,
+        w,
+        h,
+        bg
+    );
+
+    const int tw =
+        szerokosc_utf8(
+            tekst
+        );
+
+    const int tx =
+        x +
+        (w -
+         tw) /
+            2;
+
+    int ty =
+        y +
+        (h -
+         16) /
+            2;
+
+    if (ty <
+        y) {
+
+        ty =
+            y;
+    }
+
+    gui_wypisz_tekst_kolor(
+        tx,
+        ty,
+        fg,
+        tekst
+    );
+}
+
+/* =========================================================================
+ * 17. LAYER/WINDOW
+ * ========================================================================= */
+
+void ogranicz_okno_do_ekranu() {
+    if (screen_w <
+        MIN_WIN_W) {
+
+        WIN_W =
+            screen_w;
+    } else if (WIN_W <
+               MIN_WIN_W) {
+
+        WIN_W =
+            MIN_WIN_W;
+    } else if (WIN_W >
+               screen_w) {
+
+        WIN_W =
+            screen_w;
+    }
+
+    const int max_h =
+        screen_h -
+        PASEK_SYSTEMOWY_WYS;
+
+    if (max_h <
+        MIN_WIN_H) {
+
+        WIN_H =
+            max_h;
+    } else if (WIN_H <
+               MIN_WIN_H) {
+
+        WIN_H =
+            MIN_WIN_H;
+    } else if (WIN_H >
+               max_h) {
+
+        WIN_H =
+            max_h;
+    }
+
+    if (WIN_X < 0) {
+        WIN_X =
+            0;
+    }
+
+    if (WIN_Y < 0) {
+        WIN_Y =
+            0;
+    }
+
+    if (WIN_X +
+            WIN_W >
+        screen_w) {
+
+        WIN_X =
+            screen_w -
+            WIN_W;
+    }
+
+    if (WIN_Y +
+            WIN_H >
+        max_h) {
+
+        WIN_Y =
+            max_h -
+            WIN_H;
+    }
+
+    if (WIN_X < 0) {
+        WIN_X =
+            0;
+    }
+
+    if (WIN_Y < 0) {
+        WIN_Y =
+            0;
+    }
+}
+
+bool ustaw_geometrie_warstwy(
+    int x,
+    int y,
+    int w,
+    int h
+) {
+    const int stary_x =
+        WIN_X;
+
+    const int stary_y =
+        WIN_Y;
+
+    const int stary_w =
+        WIN_W;
+
+    const int stary_h =
+        WIN_H;
+
+    WIN_X =
+        x;
+
+    WIN_Y =
+        y;
+
+    WIN_W =
+        w;
+
+    WIN_H =
+        h;
+
+    ogranicz_okno_do_ekranu();
+
+    if (bws_utworz_warstwe(
+            WIN_X,
+            WIN_Y,
+            WIN_W,
+            WIN_H,
+            Z_ORDER_HUSSAR
+        ) < 0) {
+
+        WIN_X =
+            stary_x;
+
+        WIN_Y =
+            stary_y;
+
+        WIN_W =
+            stary_w;
+
+        WIN_H =
+            stary_h;
+
+        (void)bws_utworz_warstwe(
+            WIN_X,
+            WIN_Y,
+            WIN_W,
+            WIN_H,
+            Z_ORDER_HUSSAR
+        );
+
+        return false;
+    }
+
+    return true;
+}
+
+void przelacz_maksymalizacje() {
+    if (!zmaksymalizowane) {
+        old_win_x =
+            WIN_X;
+
+        old_win_y =
+            WIN_Y;
+
+        old_win_w =
+            WIN_W;
+
+        old_win_h =
+            WIN_H;
+
+        if (ustaw_geometrie_warstwy(
+                0,
+                0,
+                screen_w,
+                screen_h -
+                    PASEK_SYSTEMOWY_WYS)) {
+
+            zmaksymalizowane =
+                true;
         } else {
-            // Problem z samym połączeniem TCP w Jądrze
-            zakladki[aktywna_zakladka].to_jest_html = false;
-            const char* err = "Błąd HTTP: Brak połączenia TCP.";
-            int err_p = 0; while(err[err_p]) { zakladki[aktywna_zakladka].html[err_p] = err[err_p]; err_p++; }
-            zakladki[aktywna_zakladka].html[err_p] = '\0';
-            ustaw_status("Błąd HTTP");
-            // Blad TCP/TLS nie jest przekierowaniem. Natychmiast zakoncz probe,
-            // aby nie uruchomic ponownie DNS ani polaczenia z rekurencji redirectu.
-            return;
+            ustaw_status(
+                "Brak pamieci na maksymalizacje okna."
+            );
         }
     } else {
-        zakladki[aktywna_zakladka].to_jest_html = false;
-        const char* err = "Błąd DNS: Nie udało się rozwiązać adresu IP domeny.";
-        int err_p = 0; while(err[err_p]) { zakladki[aktywna_zakladka].html[err_p] = err[err_p]; err_p++; }
-        zakladki[aktywna_zakladka].html[err_p] = '\0';
-        ustaw_status("Błąd DNS");
+        if (ustaw_geometrie_warstwy(
+                old_win_x,
+                old_win_y,
+                old_win_w,
+                old_win_h)) {
+
+            zmaksymalizowane =
+                false;
+        } else {
+            ustaw_status(
+                "Nie udalo sie przywrocic rozmiaru okna."
+            );
+        }
     }
+
+    max_przewin_y =
+        0;
+}
+
+void zminimalizuj() {
+    aplikacja_zminimalizowana =
+        true;
+
+    dragging =
+        false;
+
+    menu_ulubione_otwarte =
+        false;
+
+    menu_ustawienia_otwarte =
+        false;
+
+    w_polu_url =
+        false;
+
+    /*
+     * Dla procesu warstwowego BWS19 zeruje jego prywatna warstwe.
+     */
+    gui_odswiez_pulpit();
+    gui_odswiez();
+}
+
+bool klik_przywraca_z_paska(
+    int mx,
+    int my
+) {
+    /*
+     * Tymczasowy kontrakt z obecnym menedzer_okien.cpp:
+     * Hussar ma skrot "W" pod x=180..211 na dolnym pasku.
+     *
+     * Docelowo minimalizacja/focus/raise powinny byc zdarzeniami
+     * menedzera okien, a nie hardcoded wspolrzednymi aplikacji.
+     */
+    return
+        punkt_w_prostokacie(
+            mx,
+            my,
+            180,
+            screen_h -
+                36,
+            32,
+            28
+        );
+}
+
+/* =========================================================================
+ * 18. GUI - RYSOWANIE
+ * ========================================================================= */
+
+void rysuj_krotki_url(
+    int x,
+    int y,
+    uint32_t kolor,
+    const char* url
+) {
+    char temp[
+        16
+    ] = {};
+
+    if (!url ||
+        url[0] ==
+            '\0') {
+
+        (void)kopiuj_limit(
+            temp,
+            sizeof(temp),
+            "Nowa"
+        );
+    } else {
+        (void)kopiuj_limit(
+            temp,
+            sizeof(temp),
+            url
+        );
+    }
+
+    gui_wypisz_tekst_kolor(
+        x,
+        y,
+        kolor,
+        temp
+    );
+}
+
+void RysujInterfejs(
+    bool odswiez_tlo
+) {
+    if (aplikacja_zminimalizowana) {
+        return;
+    }
+
+    if (odswiez_tlo) {
+        gui_odswiez_pulpit();
+    }
+
+    gui_rysuj_okno(
+        WIN_X,
+        WIN_Y,
+        WIN_W,
+        WIN_H,
+        "Hussar - Polska Przegladarka WWW"
+    );
+
+    RysujPrzyciskLokalny(
+        WIN_X +
+            WIN_W -
+            74,
+        WIN_Y +
+            4,
+        20,
+        20,
+        KOLOR_POMARANCZ,
+        0x001A0B00U,
+        "-"
+    );
+
+    RysujPrzyciskLokalny(
+        WIN_X +
+            WIN_W -
+            50,
+        WIN_Y +
+            4,
+        20,
+        20,
+        KOLOR_POMARANCZ,
+        0x001A0B00U,
+        zmaksymalizowane
+            ? "v"
+            : "^"
+    );
+
+    RysujPrzyciskLokalny(
+        WIN_X +
+            WIN_W -
+            26,
+        WIN_Y +
+            4,
+        20,
+        20,
+        KOLOR_CZERWONY,
+        KOLOR_BIALY,
+        "X"
+    );
+
+    /*
+     * Zakladki.
+     */
+    for (int i = 0;
+         i <
+            liczba_zakladek;
+         ++i) {
+
+        const int tx =
+            WIN_X +
+            10 +
+            i *
+                110;
+
+        if (tx +
+                100 >
+            WIN_X +
+                WIN_W -
+                90) {
+
+            break;
+        }
+
+        const uint32_t bg =
+            i ==
+                    aktywna_zakladka
+                ? KOLOR_AKTYWNY
+                : 0x00202020U;
+
+        gui_rysuj_prostokat(
+            tx,
+            WIN_Y +
+                ZAKLADKI_Y,
+            100,
+            ZAKLADKI_WYS,
+            bg
+        );
+
+        rysuj_krotki_url(
+            tx +
+                5,
+            WIN_Y +
+                ZAKLADKI_Y +
+                4,
+            KOLOR_BIALY,
+            zakladki[i].url
+        );
+
+        if (liczba_zakladek >
+            1) {
+
+            RysujPrzyciskLokalny(
+                tx +
+                    80,
+                WIN_Y +
+                    ZAKLADKI_Y +
+                    2,
+                16,
+                20,
+                KOLOR_CZERWONY,
+                KOLOR_BIALY,
+                "X"
+            );
+        }
+    }
+
+    if (liczba_zakladek <
+        MAX_ZAKLADKI) {
+
+        const int plus_x =
+            WIN_X +
+            10 +
+            liczba_zakladek *
+                110;
+
+        if (plus_x +
+                24 <
+            WIN_X +
+                WIN_W -
+                80) {
+
+            RysujPrzyciskLokalny(
+                plus_x,
+                WIN_Y +
+                    ZAKLADKI_Y,
+                24,
+                24,
+                KOLOR_POMARANCZ,
+                0x001A0B00U,
+                "+"
+            );
+        }
+    }
+
+    /*
+     * Pasek nawigacji.
+     */
+    const int narzedzia_y =
+        WIN_Y +
+        NARZEDZIA_Y;
+
+    gui_rysuj_prostokat(
+        WIN_X +
+            2,
+        narzedzia_y,
+        WIN_W -
+            4,
+        NARZEDZIA_WYS,
+        0x00202020U
+    );
+
+    const uint32_t nieaktywny =
+        0x00303030U;
+
+    RysujPrzyciskLokalny(
+        WIN_X +
+            8,
+        narzedzia_y +
+            4,
+        34,
+        28,
+        historia_idx >
+                0
+            ? KOLOR_AKTYWNY
+            : nieaktywny,
+        KOLOR_BIALY,
+        "<-"
+    );
+
+    RysujPrzyciskLokalny(
+        WIN_X +
+            44,
+        narzedzia_y +
+            4,
+        34,
+        28,
+        historia_idx >= 0 &&
+                historia_idx <
+                    historia_max
+            ? KOLOR_AKTYWNY
+            : nieaktywny,
+        KOLOR_BIALY,
+        "->"
+    );
+
+    RysujPrzyciskLokalny(
+        WIN_X +
+            80,
+        narzedzia_y +
+            4,
+        34,
+        28,
+        KOLOR_AKTYWNY,
+        KOLOR_BIALY,
+        "R"
+    );
+
+    const int przyciski_prawe =
+        286;
+
+    const int adres_x =
+        WIN_X +
+        122;
+
+    int adres_w =
+        WIN_W -
+        122 -
+        przyciski_prawe -
+        8;
+
+    if (adres_w <
+        80) {
+
+        adres_w =
+            80;
+    }
+
+    const uint32_t kolor_paska =
+        w_polu_url
+            ? KOLOR_BIALY
+            : 0x00303030U;
+
+    const uint32_t kolor_url =
+        w_polu_url
+            ? 0x00000001U
+            : 0x00D1D5DBU;
+
+    gui_rysuj_prostokat(
+        adres_x,
+        narzedzia_y +
+            4,
+        adres_w,
+        28,
+        kolor_paska
+    );
+
+    /*
+     * URL moze byc dluzszy od paska. Na razie GUI API nie ma clippingu
+     * tekstu, wiec tworzymy widoczny suffix/prefix ograniczony bajtowo.
+     */
+    char url_widoczny[
+        96
+    ] = {};
+
+    if (liczba_zakladek > 0) {
+        (void)kopiuj_limit(
+            url_widoczny,
+            sizeof(url_widoczny),
+            zakladki[
+                aktywna_zakladka
+            ].url
+        );
+    }
+
+    gui_wypisz_tekst_kolor(
+        adres_x +
+            5,
+        narzedzia_y +
+            10,
+        kolor_url,
+        url_widoczny
+    );
+
+    if (w_polu_url) {
+        int cursor_x =
+            adres_x +
+            5 +
+            szerokosc_utf8(
+                url_widoczny
+            );
+
+        if (cursor_x >
+            adres_x +
+                adres_w -
+                8) {
+
+            cursor_x =
+                adres_x +
+                adres_w -
+                8;
+        }
+
+        gui_wypisz_tekst_kolor(
+            cursor_x,
+            narzedzia_y +
+                10,
+            0x00000001U,
+            "_"
+        );
+    }
+
+    RysujPrzyciskLokalny(
+        WIN_X +
+            WIN_W -
+            286,
+        narzedzia_y +
+            4,
+        28,
+        28,
+        KOLOR_CZERWONY,
+        KOLOR_BIALY,
+        "X"
+    );
+
+    RysujPrzyciskLokalny(
+        WIN_X +
+            WIN_W -
+            254,
+        narzedzia_y +
+            4,
+        54,
+        28,
+        KOLOR_POMARANCZ,
+        0x001A0B00U,
+        "Idz"
+    );
+
+    RysujPrzyciskLokalny(
+        WIN_X +
+            WIN_W -
+            196,
+        narzedzia_y +
+            4,
+        88,
+        28,
+        KOLOR_AKTYWNY,
+        KOLOR_BIALY,
+        "Zakladki"
+    );
+
+    RysujPrzyciskLokalny(
+        WIN_X +
+            WIN_W -
+            104,
+        narzedzia_y +
+            4,
+        96,
+        28,
+        KOLOR_AKTYWNY,
+        KOLOR_BIALY,
+        "Ustawienia"
+    );
+
+    /*
+     * Status.
+     */
+    gui_rysuj_prostokat(
+        WIN_X +
+            2,
+        WIN_Y +
+            WIN_H -
+            STATUS_WYS,
+        WIN_W -
+            4,
+        STATUS_WYS -
+            2,
+        0x00202020U
+    );
+
+    gui_wypisz_tekst_kolor(
+        WIN_X +
+            8,
+        WIN_Y +
+            WIN_H -
+            18,
+        KOLOR_STATUS,
+        status_bufor
+    );
+
+    /*
+     * Tresc.
+     */
+    const int obszar_y =
+        WIN_Y +
+        TRESC_Y;
+
+    const int obszar_h =
+        WIN_H -
+        TRESC_Y -
+        STATUS_WYS -
+        2;
+
+    gui_rysuj_prostokat(
+        WIN_X +
+            2,
+        obszar_y,
+        WIN_W -
+            4,
+        obszar_h,
+        KOLOR_TLO
+    );
+
+    if (liczba_zakladek >
+        0) {
+
+        Zakladka& z =
+            zakladki[
+                aktywna_zakladka
+            ];
+
+        const char* tresc =
+            z.tresc;
+
+        if (!tresc ||
+            tresc[0] ==
+                '\0') {
+
+            tresc =
+                "Wpisz adres strony lub zapytanie i wybierz Idz.";
+        }
+
+        Renderer r{
+            WIN_X + 8,
+            obszar_y + 5,
+            WIN_W - 24,
+            obszar_h - 10,
+            z.przewin_y,
+
+            0,
+            0,
+
+            20,
+
+            KOLOR_TEKST,
+            1,
+
+            false
+        };
+
+        if (z.to_jest_html) {
+            renderuj_html(
+                r,
+                tresc
+            );
+        } else {
+            renderer_tekst(
+                r,
+                tresc
+            );
+        }
+
+        przelicz_scroll(
+            r,
+            obszar_h -
+            10
+        );
+
+        /*
+         * Scrollbar.
+         */
+        if (max_przewin_y >
+            0) {
+
+            const int scroll_x =
+                WIN_X +
+                WIN_W -
+                8;
+
+            const int track_h =
+                obszar_h -
+                4;
+
+            gui_rysuj_prostokat(
+                scroll_x,
+                obszar_y +
+                    2,
+                6,
+                track_h,
+                0x00CCCCCCU
+            );
+
+            int denom =
+                obszar_h +
+                max_przewin_y;
+
+            if (denom <= 0) {
+                denom =
+                    1;
+            }
+
+            int suwak_h =
+                (obszar_h *
+                 obszar_h) /
+                denom;
+
+            if (suwak_h <
+                12) {
+
+                suwak_h =
+                    12;
+            }
+
+            if (suwak_h >
+                track_h) {
+
+                suwak_h =
+                    track_h;
+            }
+
+            const int droga =
+                track_h -
+                suwak_h;
+
+            const int suwak_y =
+                obszar_y +
+                2 +
+                (droga *
+                 z.przewin_y) /
+                    max_przewin_y;
+
+            gui_rysuj_prostokat(
+                scroll_x,
+                suwak_y,
+                6,
+                suwak_h,
+                KOLOR_POMARANCZ
+            );
+        }
+    }
+
+    /*
+     * Menu Zakladek.
+     */
+    const int menu_y =
+        WIN_Y +
+        94;
+
+    if (menu_ulubione_otwarte) {
+        const int menu_x =
+            WIN_X +
+            WIN_W -
+            270;
+
+        const int menu_h =
+            26 +
+            ulubione_ilosc *
+                20;
+
+        gui_rysuj_prostokat(
+            menu_x,
+            menu_y,
+            260,
+            menu_h,
+            KOLOR_AKTYWNY
+        );
+
+        gui_wypisz_tekst_kolor(
+            menu_x +
+                8,
+            menu_y +
+                5,
+            KOLOR_BIALY,
+            "+ Dodaj obecna strone"
+        );
+
+        for (int i = 0;
+             i <
+                ulubione_ilosc;
+             ++i) {
+
+            char label[
+                30
+            ] = {};
+
+            (void)kopiuj_limit(
+                label,
+                sizeof(label),
+                ulubione[i]
+            );
+
+            gui_wypisz_tekst_kolor(
+                menu_x +
+                    8,
+                menu_y +
+                    28 +
+                    i *
+                        20,
+                KOLOR_BIALY,
+                label
+            );
+        }
+    }
+
+    if (menu_ustawienia_otwarte) {
+        const int menu_x =
+            WIN_X +
+            WIN_W -
+            190;
+
+        gui_rysuj_prostokat(
+            menu_x,
+            menu_y,
+            180,
+            48,
+            KOLOR_AKTYWNY
+        );
+
+        gui_wypisz_tekst_kolor(
+            menu_x +
+                8,
+            menu_y +
+                7,
+            KOLOR_BIALY,
+            "JavaScript: wyl."
+        );
+
+        gui_wypisz_tekst_kolor(
+            menu_x +
+                8,
+            menu_y +
+                27,
+            KOLOR_BIALY,
+            "Renderer: prosty HTML"
+        );
+    }
+
+    gui_odswiez();
+}
+
+/* =========================================================================
+ * 19. POBIERANIE STRONY
+ * ========================================================================= */
+
+void ustaw_tresc(
+    Zakladka& z,
+    const char* tekst,
+    bool html
+) {
+    if (!alokuj_tresc_zakladki(
+            z)) {
+
+        return;
+    }
+
+    (void)kopiuj_limit(
+        z.tresc,
+        HTML_POJEMNOSC,
+        tekst
+    );
+
+    z.to_jest_html =
+        html;
+
+    z.wczytana =
+        true;
+
+    z.przewin_y =
+        0;
+}
+
+void ustaw_blad_html(
+    Zakladka& z,
+    int kod,
+    const char* opis
+) {
+    if (!alokuj_tresc_zakladki(
+            z)) {
+
+        return;
+    }
+
+    if (!zloz_strone_bledu(
+            z.tresc,
+            HTML_POJEMNOSC,
+            kod,
+            opis
+        )) {
+
+        (void)kopiuj_limit(
+            z.tresc,
+            HTML_POJEMNOSC,
+            "Blad HTTP."
+        );
+
+        z.to_jest_html =
+            false;
+    } else {
+        z.to_jest_html =
+            true;
+    }
+
+    z.wczytana =
+        true;
+
+    z.przewin_y =
+        0;
+}
+
+bool pobierz_jeden_url(
+    Zakladka& z,
+    bool* redirect,
+    char redirect_url[
+        URL_POJEMNOSC
+    ]
+) {
+    if (!redirect ||
+        !redirect_url) {
+
+        return false;
+    }
+
+    *redirect =
+        false;
+
+    redirect_url[0] =
+        '\0';
+
+    ParsedUrl p{};
+
+    if (!parsuj_url(
+            z.url,
+            &p)) {
+
+        ustaw_tresc(
+            z,
+            "Nieprawidlowy URL. Hussar obsluguje obecnie http:// i https:// bez niestandardowego portu.",
+            false
+        );
+
+        ustaw_status(
+            "Nieprawidlowy URL."
+        );
+
+        return false;
+    }
+
+    ustaw_status(
+        "DNS: wyszukiwanie serwera..."
+    );
+
+    RysujInterfejs(
+        true
+    );
+
+    uint8_t ip[
+        4
+    ] = {};
+
+    if (!bws_siec_dns(
+            p.domena,
+            ip)) {
+
+        ustaw_tresc(
+            z,
+            "Blad DNS: nie udalo sie rozwiazac nazwy domeny.",
+            false
+        );
+
+        ustaw_status(
+            "Blad DNS."
+        );
+
+        return false;
+    }
+
+    /*
+     * Bounce buffer musi byc niskim adresem z powodu aktualnego BWS29/30.
+     */
+    const uint64_t adres_bufora =
+        reinterpret_cast<uint64_t>(
+            siec_bufor
+        );
+
+    if (adres_bufora >
+        UINT32_MAX) {
+
+        ustaw_tresc(
+            z,
+            "Blad ABI: bufor HTTP aplikacji nie miesci sie w 32-bitowym adresie BWS29/BWS30.",
+            false
+        );
+
+        ustaw_status(
+            "Blad ABI HTTP."
+        );
+
+        return false;
+    }
+
+    wyzeruj(
+        siec_bufor,
+        sizeof(
+            siec_bufor
+        )
+    );
+
+    ustaw_status(
+        p.https
+            ? "HTTPS: laczenie TLS..."
+            : "HTTP: pobieranie..."
+    );
+
+    RysujInterfejs(
+        true
+    );
+
+    const bool pobrano =
+        p.https
+            ? bws_siec_pobierz_https(
+                  ip,
+                  p.domena,
+                  p.sciezka,
+                  siec_bufor,
+                  static_cast<uint32_t>(
+                      sizeof(
+                          siec_bufor
+                      )
+                  )
+              )
+            : bws_siec_pobierz_http(
+                  ip,
+                  p.domena,
+                  p.sciezka,
+                  siec_bufor,
+                  static_cast<uint32_t>(
+                      sizeof(
+                          siec_bufor
+                      )
+                  )
+              );
+
+    if (!pobrano) {
+        ustaw_tresc(
+            z,
+            p.https
+                ? "Nie udalo sie pobrac strony HTTPS. Sprawdz siec, TLS, certyfikat CA i serwer."
+                : "Nie udalo sie pobrac strony HTTP. Sprawdz siec i serwer.",
+            false
+        );
+
+        ustaw_status(
+            p.https
+                ? "Blad HTTPS/TLS."
+                : "Blad HTTP/TCP."
+        );
+
+        return false;
+    }
+
+    /*
+     * Syscall dopisuje NUL. Nadal stosujemy bounded strlen.
+     */
+    const size_t response_len =
+        dlugosc_limit(
+            siec_bufor,
+            sizeof(
+                siec_bufor
+            )
+        );
+
+    if (response_len == 0 ||
+        response_len >=
+            sizeof(
+                siec_bufor
+            )) {
+
+        ustaw_tresc(
+            z,
+            "Odpowiedz HTTP jest pusta albo nieprawidlowo zakonczona.",
+            false
+        );
+
+        ustaw_status(
+            "Blad odpowiedzi HTTP."
+        );
+
+        return false;
+    }
+
+    OdpowiedzHttp odp{};
+
+    if (!parsuj_odpowiedz_http(
+            siec_bufor,
+            response_len,
+            &odp)) {
+
+        ustaw_tresc(
+            z,
+            "Odpowiedz serwera nie zawiera poprawnej linii statusu/naglowkow HTTP.",
+            false
+        );
+
+        ustaw_status(
+            "Nierozpoznana odpowiedz HTTP."
+        );
+
+        return false;
+    }
+
+    if (http_kod_przekierowanie(
+            odp.kod) &&
+        (odp.kod == 301 ||
+         odp.kod == 302 ||
+         odp.kod == 303 ||
+         odp.kod == 307 ||
+         odp.kod == 308)) {
+
+        size_t header_len =
+            static_cast<size_t>(
+                odp.body -
+                siec_bufor
+            );
+
+        char location[
+            URL_POJEMNOSC
+        ] = {};
+
+        if (!znajdz_header(
+                siec_bufor,
+                header_len,
+                "location",
+                location,
+                sizeof(location)
+            )) {
+
+            ustaw_blad_html(
+                z,
+                odp.kod,
+                "Serwer zwrocil przekierowanie bez poprawnego naglowka Location."
+            );
+
+            ustaw_status(
+                "Blad przekierowania HTTP."
+            );
+
+            return false;
+        }
+
+        if (!ustaw_url_z_location(
+                redirect_url,
+                URL_POJEMNOSC,
+                location,
+                p)) {
+
+            ustaw_blad_html(
+                z,
+                odp.kod,
+                "Naglowek Location jest zbyt dlugi lub ma nieobslugiwany format."
+            );
+
+            ustaw_status(
+                "Nieprawidlowe przekierowanie."
+            );
+
+            return false;
+        }
+
+        *redirect =
+            true;
+
+        return true;
+    }
+
+    if (!http_kod_sukces(
+            odp.kod)) {
+
+        ustaw_blad_html(
+            z,
+            odp.kod,
+            pobierz_opis_kodu_http(
+                odp.kod
+            )
+        );
+
+        ustaw_status(
+            "Odebrano status HTTP."
+        );
+
+        return true;
+    }
+
+    if (!odp.tekst) {
+        ustaw_tresc(
+            z,
+            "Hussar nie potrafi jeszcze wyswietlic skompresowanej albo binarnej odpowiedzi tego typu.",
+            false
+        );
+
+        ustaw_status(
+            "Nieobslugiwany typ odpowiedzi."
+        );
+
+        return true;
+    }
+
+    if (!alokuj_tresc_zakladki(
+            z)) {
+
+        ustaw_status(
+            "Brak pamieci na tresc strony."
+        );
+
+        return false;
+    }
+
+    size_t body_len =
+        odp.body_len;
+
+    bool body_ok =
+        true;
+
+    if (odp.chunked) {
+        body_ok =
+            dekoduj_chunked(
+                odp.body,
+                odp.body_len,
+                z.tresc,
+                HTML_POJEMNOSC,
+                &body_len
+            );
+    } else {
+        if (body_len >=
+            HTML_POJEMNOSC) {
+
+            body_len =
+                HTML_POJEMNOSC -
+                1U;
+
+            body_ok =
+                false;
+        }
+
+        for (size_t i = 0;
+             i < body_len;
+             ++i) {
+
+            z.tresc[i] =
+                odp.body[i];
+        }
+
+        z.tresc[
+            body_len
+        ] =
+            '\0';
+    }
+
+    if (!body_ok) {
+        /*
+         * Przy nieudanym dechunkowaniu nie pokazujemy surowego framingu jako
+         * HTML. To mogloby wygladac jak poprawna strona mimo uszkodzenia.
+         */
+        if (odp.chunked) {
+            ustaw_tresc(
+                z,
+                "Nie udalo sie bezpiecznie zdekodowac Transfer-Encoding: chunked.",
+                false
+            );
+
+            ustaw_status(
+                "Blad dekodowania HTTP chunked."
+            );
+
+            return false;
+        }
+
+        ustaw_status(
+            "Strona zostala ucieta do limitu Hussara."
+        );
+    } else if (p.https) {
+        ustaw_status(
+            bws_tls_certyfikat_zaufany()
+                ? "HTTPS: polaczenie zweryfikowane."
+                : "HTTPS: brak potwierdzenia zaufanego CA."
+        );
+    } else {
+        ustaw_status(
+            "Gotowy."
+        );
+    }
+
+    z.to_jest_html =
+        odp.html;
+
+    z.wczytana =
+        true;
+
+    z.przewin_y =
+        0;
+
+    return true;
+}
+
+bool PobierzStrone(
+    bool zapisz_historie
+) {
+    if (liczba_zakladek <= 0) {
+        return false;
+    }
+
+    Zakladka& z =
+        zakladki[
+            aktywna_zakladka
+        ];
+
+    if (z.url[0] ==
+        '\0') {
+
+        ustaw_status(
+            "Wpisz adres lub zapytanie."
+        );
+
+        return false;
+    }
+
+    /*
+     * Brak schematu -> domyslnie HTTPS.
+     */
+    if (!url_zaczyna_sie_schematem(
+            z.url)) {
+
+        char temp[
+            URL_POJEMNOSC
+        ] = {};
+
+        (void)kopiuj_limit(
+            temp,
+            sizeof(temp),
+            z.url
+        );
+
+        if (!kopiuj_limit(
+                z.url,
+                sizeof(z.url),
+                "https://")) {
+
+            return false;
+        }
+
+        size_t p =
+            dlugosc_limit(
+                z.url,
+                sizeof(z.url)
+            );
+
+        for (size_t i = 0;
+             temp[i] != '\0';
+             ++i) {
+
+            if (p + 1U >=
+                sizeof(z.url)) {
+
+                ustaw_status(
+                    "Adres URL jest zbyt dlugi."
+                );
+
+                return false;
+            }
+
+            z.url[p++] =
+                temp[i];
+        }
+
+        z.url[p] =
+            '\0';
+    }
+
+    z.wczytana =
+        false;
+
+    z.to_jest_html =
+        false;
+
+    z.przewin_y =
+        0;
+
+    ustaw_tresc(
+        z,
+        "Ladowanie strony...",
+        false
+    );
+
+    char final_url[
+        URL_POJEMNOSC
+    ] = {};
+
+    (void)kopiuj_limit(
+        final_url,
+        sizeof(final_url),
+        z.url
+    );
+
+    for (int redirect_count = 0;
+         redirect_count <=
+             MAX_PRZEKIEROWAN;
+         ++redirect_count) {
+
+        bool redirect =
+            false;
+
+        char redirect_url[
+            URL_POJEMNOSC
+        ] = {};
+
+        const bool ok =
+            pobierz_jeden_url(
+                z,
+                &redirect,
+                redirect_url
+            );
+
+        if (!ok) {
+            return false;
+        }
+
+        if (!redirect) {
+            (void)kopiuj_limit(
+                final_url,
+                sizeof(final_url),
+                z.url
+            );
+
+            if (zapisz_historie) {
+                dopisz_do_historii(
+                    final_url
+                );
+            }
+
+            return true;
+        }
+
+        if (redirect_count >=
+            MAX_PRZEKIEROWAN) {
+
+            ustaw_blad_html(
+                z,
+                310,
+                "Przekroczono limit 5 przekierowan."
+            );
+
+            ustaw_status(
+                "Za duzo przekierowan."
+            );
+
+            return false;
+        }
+
+        (void)kopiuj_limit(
+            z.url,
+            sizeof(z.url),
+            redirect_url
+        );
+
+        ustaw_status(
+            "Przekierowanie HTTP..."
+        );
+    }
+
+    return false;
+}
+
+void Nawiguj(
+    bool nowa_strona,
+    bool rozpoznaj_wyszukiwanie
+) {
+    if (liczba_zakladek <= 0) {
+        return;
+    }
+
+    Zakladka& z =
+        zakladki[
+            aktywna_zakladka
+        ];
+
+    if (z.url[0] ==
+        '\0') {
+
+        ustaw_status(
+            "Wpisz adres lub szukana fraze."
+        );
+
+        return;
+    }
+
+    if (rozpoznaj_wyszukiwanie &&
+        !przygotuj_adres_wyszukiwania(
+            z.url)) {
+
+        ustaw_status(
+            "Zapytanie jest zbyt dlugie."
+        );
+
+        return;
+    }
+
+    (void)PobierzStrone(
+        nowa_strona
+    );
+}
+
+/* =========================================================================
+ * 20. OBSLUGA KLIKNIEC
+ * ========================================================================= */
+
+void ustaw_scroll(
+    int wartosc
+) {
+    if (liczba_zakladek <= 0) {
+        return;
+    }
+
+    if (wartosc < 0) {
+        wartosc =
+            0;
+    }
+
+    if (wartosc >
+        max_przewin_y) {
+
+        wartosc =
+            max_przewin_y;
+    }
+
+    zakladki[
+        aktywna_zakladka
+    ].przewin_y =
+        wartosc;
+}
+
+bool klik_menu(
+    int mx,
+    int my
+) {
+    const int menu_y =
+        WIN_Y +
+        94;
+
+    if (menu_ulubione_otwarte) {
+        const int menu_x =
+            WIN_X +
+            WIN_W -
+            270;
+
+        const int menu_h =
+            26 +
+            ulubione_ilosc *
+                20;
+
+        if (punkt_w_prostokacie(
+                mx,
+                my,
+                menu_x,
+                menu_y,
+                260,
+                menu_h)) {
+
+            if (my <
+                menu_y +
+                26) {
+
+                dodaj_obecna_do_ulubionych();
+            } else {
+                const int index =
+                    (my -
+                     (menu_y +
+                      26)) /
+                    20;
+
+                if (index >= 0 &&
+                    index <
+                        ulubione_ilosc) {
+
+                    (void)kopiuj_limit(
+                        zakladki[
+                            aktywna_zakladka
+                        ].url,
+                        URL_POJEMNOSC,
+                        ulubione[
+                            index
+                        ]
+                    );
+
+                    menu_ulubione_otwarte =
+                        false;
+
+                    Nawiguj(
+                        true,
+                        false
+                    );
+                }
+            }
+
+            return true;
+        }
+    }
+
+    if (menu_ustawienia_otwarte) {
+        const int menu_x =
+            WIN_X +
+            WIN_W -
+            190;
+
+        if (punkt_w_prostokacie(
+                mx,
+                my,
+                menu_x,
+                menu_y,
+                180,
+                48)) {
+
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void klik_zakladki(
+    int mx,
+    int my
+) {
+    for (int i = 0;
+         i <
+            liczba_zakladek;
+         ++i) {
+
+        const int tx =
+            WIN_X +
+            10 +
+            i *
+                110;
+
+        if (!punkt_w_prostokacie(
+                mx,
+                my,
+                tx,
+                WIN_Y +
+                    ZAKLADKI_Y,
+                100,
+                ZAKLADKI_WYS)) {
+
+            continue;
+        }
+
+        if (liczba_zakladek >
+                1 &&
+            punkt_w_prostokacie(
+                mx,
+                my,
+                tx +
+                    80,
+                WIN_Y +
+                    ZAKLADKI_Y +
+                    2,
+                16,
+                20)) {
+
+            zamknij_zakladke(
+                i
+            );
+        } else {
+            aktywna_zakladka =
+                i;
+
+            max_przewin_y =
+                0;
+
+            ustaw_status(
+                "Przelaczono zakladke."
+            );
+        }
+
+        return;
+    }
+
+    if (liczba_zakladek <
+        MAX_ZAKLADKI) {
+
+        const int plus_x =
+            WIN_X +
+            10 +
+            liczba_zakladek *
+                110;
+
+        if (punkt_w_prostokacie(
+                mx,
+                my,
+                plus_x,
+                WIN_Y +
+                    ZAKLADKI_Y,
+                24,
+                24)) {
+
+            (void)nowa_zakladka();
+        }
+    }
+}
+
+void klik_narzedzia(
+    int mx,
+    int my
+) {
+    if (liczba_zakladek <= 0) {
+        return;
+    }
+
+    const int y =
+        WIN_Y +
+        NARZEDZIA_Y;
+
+    if (punkt_w_prostokacie(
+            mx,
+            my,
+            WIN_X +
+                8,
+            y +
+                4,
+            34,
+            28)) {
+
+        if (historia_idx >
+            0) {
+
+            --historia_idx;
+
+            (void)kopiuj_limit(
+                zakladki[
+                    aktywna_zakladka
+                ].url,
+                URL_POJEMNOSC,
+                historia[
+                    historia_idx
+                ]
+            );
+
+            Nawiguj(
+                false,
+                false
+            );
+        }
+
+        w_polu_url =
+            false;
+
+        return;
+    }
+
+    if (punkt_w_prostokacie(
+            mx,
+            my,
+            WIN_X +
+                44,
+            y +
+                4,
+            34,
+            28)) {
+
+        if (historia_idx >= 0 &&
+            historia_idx <
+                historia_max) {
+
+            ++historia_idx;
+
+            (void)kopiuj_limit(
+                zakladki[
+                    aktywna_zakladka
+                ].url,
+                URL_POJEMNOSC,
+                historia[
+                    historia_idx
+                ]
+            );
+
+            Nawiguj(
+                false,
+                false
+            );
+        }
+
+        w_polu_url =
+            false;
+
+        return;
+    }
+
+    if (punkt_w_prostokacie(
+            mx,
+            my,
+            WIN_X +
+                80,
+            y +
+                4,
+            34,
+            28)) {
+
+        Nawiguj(
+            false,
+            false
+        );
+
+        w_polu_url =
+            false;
+
+        return;
+    }
+
+    const int adres_x =
+        WIN_X +
+        122;
+
+    int adres_w =
+        WIN_W -
+        122 -
+        286 -
+        8;
+
+    if (adres_w <
+        80) {
+
+        adres_w =
+            80;
+    }
+
+    if (punkt_w_prostokacie(
+            mx,
+            my,
+            adres_x,
+            y +
+                4,
+            adres_w,
+            28)) {
+
+        w_polu_url =
+            true;
+
+        menu_ulubione_otwarte =
+            false;
+
+        menu_ustawienia_otwarte =
+            false;
+
+        ustaw_status(
+            "Edycja adresu URL..."
+        );
+
+        return;
+    }
+
+    if (punkt_w_prostokacie(
+            mx,
+            my,
+            WIN_X +
+                WIN_W -
+                286,
+            y +
+                4,
+            28,
+            28)) {
+
+        zakladki[
+            aktywna_zakladka
+        ].url[0] =
+            '\0';
+
+        w_polu_url =
+            true;
+
+        return;
+    }
+
+    if (punkt_w_prostokacie(
+            mx,
+            my,
+            WIN_X +
+                WIN_W -
+                254,
+            y +
+                4,
+            54,
+            28)) {
+
+        w_polu_url =
+            false;
+
+        Nawiguj(
+            true,
+            true
+        );
+
+        return;
+    }
+
+    if (punkt_w_prostokacie(
+            mx,
+            my,
+            WIN_X +
+                WIN_W -
+                196,
+            y +
+                4,
+            88,
+            28)) {
+
+        menu_ulubione_otwarte =
+            !menu_ulubione_otwarte;
+
+        menu_ustawienia_otwarte =
+            false;
+
+        w_polu_url =
+            false;
+
+        return;
+    }
+
+    if (punkt_w_prostokacie(
+            mx,
+            my,
+            WIN_X +
+                WIN_W -
+                104,
+            y +
+                4,
+            96,
+            28)) {
+
+        menu_ustawienia_otwarte =
+            !menu_ustawienia_otwarte;
+
+        menu_ulubione_otwarte =
+            false;
+
+        w_polu_url =
+            false;
+
+        return;
+    }
+
+    w_polu_url =
+        false;
+}
+
+bool obsluz_klik(
+    int mx,
+    int my
+) {
+    if (aplikacja_zminimalizowana) {
+        if (klik_przywraca_z_paska(
+                mx,
+                my)) {
+
+            aplikacja_zminimalizowana =
+                false;
+
+            (void)bws_utworz_warstwe(
+                WIN_X,
+                WIN_Y,
+                WIN_W,
+                WIN_H,
+                Z_ORDER_HUSSAR
+            );
+
+            ustaw_status(
+                "Przywrocono Hussara."
+            );
+
+            RysujInterfejs(
+                true
+            );
+        }
+
+        return true;
+    }
+
+    if (!punkt_w_prostokacie(
+            mx,
+            my,
+            WIN_X,
+            WIN_Y,
+            WIN_W,
+            WIN_H)) {
+
+        return false;
+    }
+
+    if (klik_menu(
+            mx,
+            my)) {
+
+        return true;
+    }
+
+    /*
+     * Klik poza otwartym menu zamyka je.
+     */
+    if (menu_ulubione_otwarte ||
+        menu_ustawienia_otwarte) {
+
+        menu_ulubione_otwarte =
+            false;
+
+        menu_ustawienia_otwarte =
+            false;
+    }
+
+    if (punkt_w_prostokacie(
+            mx,
+            my,
+            WIN_X,
+            WIN_Y,
+            WIN_W,
+            TYTUL_WYS)) {
+
+        if (punkt_w_prostokacie(
+                mx,
+                my,
+                WIN_X +
+                    WIN_W -
+                    74,
+                WIN_Y +
+                    4,
+                20,
+                20)) {
+
+            zminimalizuj();
+
+            return true;
+        }
+
+        if (punkt_w_prostokacie(
+                mx,
+                my,
+                WIN_X +
+                    WIN_W -
+                    50,
+                WIN_Y +
+                    4,
+                20,
+                20)) {
+
+            przelacz_maksymalizacje();
+
+            return true;
+        }
+
+        if (punkt_w_prostokacie(
+                mx,
+                my,
+                WIN_X +
+                    WIN_W -
+                    26,
+                WIN_Y +
+                    4,
+                20,
+                20)) {
+
+            return false;
+        }
+
+        if (!zmaksymalizowane) {
+            dragging =
+                true;
+
+            drag_off_x =
+                mx -
+                WIN_X;
+
+            drag_off_y =
+                my -
+                WIN_Y;
+
+            w_polu_url =
+                false;
+        }
+
+        return true;
+    }
+
+    if (punkt_w_prostokacie(
+            mx,
+            my,
+            WIN_X,
+            WIN_Y +
+                ZAKLADKI_Y,
+            WIN_W,
+            ZAKLADKI_WYS)) {
+
+        klik_zakladki(
+            mx,
+            my
+        );
+
+        return true;
+    }
+
+    if (punkt_w_prostokacie(
+            mx,
+            my,
+            WIN_X,
+            WIN_Y +
+                NARZEDZIA_Y,
+            WIN_W,
+            NARZEDZIA_WYS)) {
+
+        klik_narzedzia(
+            mx,
+            my
+        );
+
+        return true;
+    }
+
+    w_polu_url =
+        false;
+
+    return true;
+}
+
+/* =========================================================================
+ * 21. KLAWIATURA
+ * ========================================================================= */
+
+void obsluz_znak(
+    char znak,
+    int* ansi_stan
+) {
+    if (!ansi_stan ||
+        liczba_zakladek <= 0) {
+
+        return;
+    }
+
+    Zakladka& z =
+        zakladki[
+            aktywna_zakladka
+        ];
+
+    if (*ansi_stan == 0 &&
+        znak ==
+            '\x1B') {
+
+        *ansi_stan =
+            1;
+
+        return;
+    }
+
+    if (*ansi_stan == 1) {
+        if (znak ==
+            '[') {
+
+            *ansi_stan =
+                2;
+
+            return;
+        }
+
+        *ansi_stan =
+            0;
+
+        return;
+    }
+
+    if (*ansi_stan == 2) {
+        *ansi_stan =
+            0;
+
+        if (znak ==
+            'A') {
+
+            ustaw_scroll(
+                z.przewin_y -
+                100
+            );
+        } else if (znak ==
+                   'B') {
+
+            ustaw_scroll(
+                z.przewin_y +
+                100
+            );
+        }
+
+        return;
+    }
+
+    *ansi_stan =
+        0;
+
+    if (!w_polu_url) {
+        return;
+    }
+
+    if (znak ==
+            '\n' ||
+        znak ==
+            '\r') {
+
+        w_polu_url =
+            false;
+
+        Nawiguj(
+            true,
+            true
+        );
+
+        return;
+    }
+
+    if (znak ==
+        '\b') {
+
+        usun_ostatni_utf8(
+            z.url,
+            sizeof(
+                z.url
+            )
+        );
+
+        return;
+    }
+
+    const uint8_t b =
+        static_cast<uint8_t>(
+            znak
+        );
+
+    if (b >=
+        0x20U) {
+
+        if (!dopisz_znak_limit(
+                z.url,
+                sizeof(z.url),
+                znak)) {
+
+            ustaw_status(
+                "Adres URL osiagnal limit 255 bajtow."
+            );
+        }
+    }
+}
+
+/* =========================================================================
+ * 22. START / PETLA
+ * ========================================================================= */
+
+void inicjalizuj_stan() {
+    liczba_zakladek =
+        0;
+
+    aktywna_zakladka =
+        0;
+
+    historia_idx =
+        -1;
+
+    historia_max =
+        -1;
+
+    ulubione_ilosc =
+        0;
+
+    menu_ulubione_otwarte =
+        false;
+
+    menu_ustawienia_otwarte =
+        false;
+
+    w_polu_url =
+        false;
+
+    zmaksymalizowane =
+        false;
+
+    aplikacja_zminimalizowana =
+        false;
+
+    dragging =
+        false;
+
+    max_przewin_y =
+        0;
+
+    calkowita_wysokosc_strony =
+        0;
+
+    gui_pobierz_rozdzielczosc(
+        &screen_w,
+        &screen_h
+    );
+
+    if (screen_w <= 0 ||
+        screen_h <=
+            PASEK_SYSTEMOWY_WYS) {
+
+        gui_zakoncz_aplikacje();
+    }
+
+    WIN_W =
+        screen_w <
+                DOMYSLNY_WIN_W
+            ? screen_w
+            : DOMYSLNY_WIN_W;
+
+    WIN_H =
+        screen_h -
+            PASEK_SYSTEMOWY_WYS <
+                DOMYSLNY_WIN_H
+            ? screen_h -
+                PASEK_SYSTEMOWY_WYS
+            : DOMYSLNY_WIN_H;
+
+    WIN_X =
+        (screen_w -
+         WIN_W) /
+        2;
+
+    WIN_Y =
+        40;
+
+    if (WIN_Y +
+            WIN_H >
+        screen_h -
+            PASEK_SYSTEMOWY_WYS) {
+
+        WIN_Y =
+            0;
+    }
+
+    ogranicz_okno_do_ekranu();
+
+    old_win_x =
+        WIN_X;
+
+    old_win_y =
+        WIN_Y;
+
+    old_win_w =
+        WIN_W;
+
+    old_win_h =
+        WIN_H;
+
+    ustaw_status(
+        "Gotowy."
+    );
+
+    if (!nowa_zakladka()) {
+        gui_zakoncz_aplikacje();
+    }
+
+    (void)kopiuj_limit(
+        zakladki[0].url,
+        sizeof(
+            zakladki[0].url
+        ),
+        "https://example.com/"
+    );
+
+    wczytaj_ulubione();
+}
+
+} // namespace
+
+extern "C" [[noreturn]] void _start() {
+    inicjalizuj_stan();
+
+    gui_ustaw_przejecie_myszy(
+        true
+    );
+
+    if (bws_utworz_warstwe(
+            WIN_X,
+            WIN_Y,
+            WIN_W,
+            WIN_H,
+            Z_ORDER_HUSSAR
+        ) < 0) {
+
+        zwolnij_wszystkie_zakladki();
+
+        gui_ustaw_przejecie_myszy(
+            false
+        );
+
+        gui_zakoncz_aplikacje();
+    }
+
+    RysujInterfejs(
+        true
+    );
+
+    bool dziala =
+        true;
+
+    bool lewy_poprzednio =
+        false;
+
+    bool scroll_dragging =
+        false;
+
+    int scroll_drag_start_y =
+        0;
+
+    int scroll_drag_start_value =
+        0;
+
+    int ansi_stan =
+        0;
+
+    while (dziala) {
+        int mx =
+            0;
+
+        int my =
+            0;
+
+        uint8_t mb =
+            0;
+
+        gui_pobierz_mysz(
+            &mx,
+            &my,
+            &mb
+        );
+
+        const bool lewy =
+            (mb &
+             1U) != 0;
+
+        const bool klik =
+            lewy &&
+            !lewy_poprzednio;
+
+        const bool pusc =
+            !lewy &&
+            lewy_poprzednio;
+
+        bool trzeba_rysowac =
+            false;
+
+        bool pelne_tlo =
+            false;
+
+        if (klik) {
+            if (!aplikacja_zminimalizowana &&
+                punkt_w_prostokacie(
+                    mx,
+                    my,
+                    WIN_X +
+                        WIN_W -
+                        26,
+                    WIN_Y +
+                        4,
+                    20,
+                    20)) {
+
+                dziala =
+                    false;
+            } else {
+                const bool wewnatrz =
+                    obsluz_klik(
+                        mx,
+                        my
+                    );
+
+                (void)wewnatrz;
+
+                trzeba_rysowac =
+                    !aplikacja_zminimalizowana;
+
+                pelne_tlo =
+                    true;
+            }
+
+            if (!aplikacja_zminimalizowana &&
+                max_przewin_y >
+                    0) {
+
+                const int obszar_y =
+                    WIN_Y +
+                    TRESC_Y;
+
+                const int obszar_h =
+                    WIN_H -
+                    TRESC_Y -
+                    STATUS_WYS -
+                    2;
+
+                if (punkt_w_prostokacie(
+                        mx,
+                        my,
+                        WIN_X +
+                            WIN_W -
+                            20,
+                        obszar_y,
+                        20,
+                        obszar_h)) {
+
+                    scroll_dragging =
+                        true;
+
+                    scroll_drag_start_y =
+                        my;
+
+                    scroll_drag_start_value =
+                        zakladki[
+                            aktywna_zakladka
+                        ].przewin_y;
+
+                    dragging =
+                        false;
+                }
+            }
+        }
+
+        if (dragging &&
+            lewy &&
+            !zmaksymalizowane) {
+
+            WIN_X =
+                mx -
+                drag_off_x;
+
+            WIN_Y =
+                my -
+                drag_off_y;
+
+            ogranicz_okno_do_ekranu();
+
+            bws_przesun_warstwe(
+                WIN_X,
+                WIN_Y
+            );
+
+            gui_odswiez();
+        }
+
+        if (scroll_dragging &&
+            lewy &&
+            liczba_zakladek >
+                0) {
+
+            const int obszar_h =
+                WIN_H -
+                TRESC_Y -
+                STATUS_WYS -
+                2;
+
+            const int ruch =
+                my -
+                scroll_drag_start_y;
+
+            int skala =
+                max_przewin_y >
+                        obszar_h
+                    ? max_przewin_y /
+                        (obszar_h > 0
+                             ? obszar_h
+                             : 1)
+                    : 1;
+
+            if (skala <
+                1) {
+
+                skala =
+                    1;
+            }
+
+            ustaw_scroll(
+                scroll_drag_start_value +
+                ruch *
+                    skala
+            );
+
+            trzeba_rysowac =
+                true;
+        }
+
+        if (pusc) {
+            if (dragging) {
+                dragging =
+                    false;
+
+                trzeba_rysowac =
+                    true;
+
+                pelne_tlo =
+                    true;
+            }
+
+            scroll_dragging =
+                false;
+        }
+
+        lewy_poprzednio =
+            lewy;
+
+        const char znak =
+            pobierz_znak();
+
+        if (znak !=
+            0) {
+
+            obsluz_znak(
+                znak,
+                &ansi_stan
+            );
+
+            trzeba_rysowac =
+                true;
+        }
+
+        if (trzeba_rysowac &&
+            !aplikacja_zminimalizowana) {
+
+            RysujInterfejs(
+                pelne_tlo
+            );
+        }
+    }
+
+    /*
+     * Wyjscie w uporzadkowanej kolejnosci.
+     */
+    zwolnij_wszystkie_zakladki();
+
+    gui_zakoncz_aplikacje();
 }

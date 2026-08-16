@@ -1,213 +1,573 @@
 /*
- * Minimalny punkt wejściowy jądra Bursztyn OS w języku C++ (64-bit).
- * Przystosowany do Trybu Graficznego (Linear Framebuffer).
+ * Bursztyn OS - glowny punkt wejscia jadra x86_64.
+ *
+ * Kolejnosc startu:
+ *  1. PMM / GDT / TSS / IDT / VMM
+ *  2. BWS i grafika
+ *  3. sterta jadra i scheduler
+ *  4. APIC / PS2 / PCI / sterowniki
+ *  5. PSF i instalacja wbudowanych aplikacji
+ *  6. utworzenie procesu Menedzera Okien
+ *  7. wlaczenie wielozadaniowosci i przerwan
+ *
+ * Przerwania pozostaja wylaczone przez cala faze inicjalizacji.
  */
 
 #include <stdint.h>
+#include <stddef.h>
 #include <stdbool.h>
 
 #include "pamiec.h"
 #include "psf.h"
-#include "grafika.h" // PODŁĄCZENIE GRAFIKI
-#include "loader.h"  // Zapewnia dostęp do Loadera programów .bur
-#include "ahci.h"    // STEROWNIK DYSKU
-#include "sterowniki/dzwiek/hda.h" // STEROWNIK DŹWIĘKU INTEL HDA
-#include "heap.h"    // ALOKATOR PAMIĘCI (STERTA)
+#include "grafika.h"
+#include "loader.h"
+#include "ahci.h"
+#include "e1000.h"
+#include "heap.h"
+#include "scheduler.h"
+#include "sterowniki/dzwiek/hda.h"
 
-// Deklaracje zewnętrznych procedur asemblerowych i systemowych
+/* =========================================================================
+ * POLACZENIA Z INNYMI MODULAMI
+ * ========================================================================= */
+
 extern "C" void InicjalizujGDT();
 extern "C" void InicjalizujIDT();
-extern "C" void inicjalizuj_apic(); 
+extern "C" void inicjalizuj_apic();
 extern "C" void InicjalizujMyszPS2();
 
-// Nowe podsystemy z poprzednich kroków (TSS i BWS)
 extern "C" void inicjalizuj_tss(void* stos_jadra);
 extern "C" void zaladuj_tss(uint16_t selektor_tss);
 extern "C" void inicjalizuj_syscalls();
-extern "C" void inicjalizuj_mbedtls(); // <--- DODAJ TĘ LINIJKĘ TUTAJ
-extern "C" uint64_t stack_top; // Wskaźnik na szczyt stosu zdefiniowany w boot.S
+extern "C" void inicjalizuj_mbedtls();
 
-// Zmienna z PMM (Physical Memory Manager) określająca ilość pamięci RAM
-extern uint64_t najwyzsza_znaleziona_ramka; 
+/*
+ * stack_top jest symbolem linkera z boot.S, a nie zmienna przechowujaca
+ * adres. Deklaracja jako tablica pozwala uzyc samego adresu symbolu.
+ */
+extern "C" uint8_t stack_top[];
+
+extern uint64_t najwyzsza_znaleziona_ramka;
 
 extern "C" void skanuj_magistrale_pci();
-extern "C" void wczytaj_tapete_z_dysku();  
-    
+extern "C" void wczytaj_tapete_z_dysku();
+
 extern "C" bool usun_twor(const char* sciezka);
 extern "C" bool utworz_plik(const char* sciezka);
-extern "C" bool zapisz_do_pliku(const char* sciezka, const char* dane, uint32_t dlugosc);
+extern "C" bool zapisz_do_pliku(const char* sciezka,
+                                const char* dane,
+                                uint32_t dlugosc);
 extern "C" bool utworz_katalog(const char* sciezka);
 
-// Deklaracja inicjalizacji zrewidowanego, drzewiastego BSP
-extern "C" void inicjalizuj_psf(void* adres_ram_dysku, uint32_t rozmiar_w_bajtach);
+extern "C" void inicjalizuj_psf(void* adres_ram_dysku,
+                                uint32_t rozmiar_w_bajtach);
 
-// Symbole wstrzykiwane przez GNU Linker (objcopy) z plików aplikacji
+extern "C" void uruchom_klienta_dhcp();
+
+/* =========================================================================
+ * WBUDOWANE PLIKI .BUR
+ * ========================================================================= */
+
 extern "C" uint8_t _binary_shell_bin_start[];
 extern "C" uint8_t _binary_shell_bin_end[];
 
 extern "C" uint8_t _binary_notatnik_bin_start[];
 extern "C" uint8_t _binary_notatnik_bin_end[];
 
-//  Deklaracja symboli Kalkulatora z pliku Makefile!
 extern "C" uint8_t _binary_kalkulator_bin_start[];
 extern "C" uint8_t _binary_kalkulator_bin_end[];
 
-// Deklaracja symboli Menedżera Okien
 extern "C" uint8_t _binary_menedzer_okien_bin_start[];
 extern "C" uint8_t _binary_menedzer_okien_bin_end[];
 
-extern "C" char _binary_przegladarka_bin_start[];
-extern "C" char _binary_przegladarka_bin_end[];
+extern "C" uint8_t _binary_przegladarka_bin_start[];
+extern "C" uint8_t _binary_przegladarka_bin_end[];
 
-// Prototyp funkcji uruchamiającej program z uwzględnieniem Systemu Uprawnień PZB
-extern "C" bool bws_uruchom_program_z_pliku(const char* sciezka, uint8_t bzl_poziom, uint64_t flagi_praw, bool z_syscalla);
+/* =========================================================================
+ * STALE STARTOWE
+ * ========================================================================= */
 
-// --- FUNKCJE SIECIOWE (Karta Intel E1000 i DHCP) ---
-extern "C" void inicjalizuj_e1000();
-extern "C" void e1000_obsluz_odbior();
-extern "C" void uruchom_klienta_dhcp();
+namespace {
 
-void UIntToStr(uint64_t wartosc, char* bufor) {
-    if (wartosc == 0) { bufor[0] = '0'; bufor[1] = '\0'; return; }
-    int i = 0; char temp[32];
-    while (wartosc > 0) { temp[i++] = (wartosc % 10) + '0'; wartosc /= 10; }
-    int j = 0; while (i > 0) { bufor[j++] = temp[--i]; }
-    bufor[j] = '\0';
+constexpr uint64_t MULTIBOOT2_BOOTLOADER_MAGIC = 0x36D76289ULL;
+
+constexpr uint64_t ROZMIAR_STRONY = 4096ULL;
+constexpr uint64_t FLAGI_STRONY_JADRA = 0b00000011ULL;
+
+constexpr uint64_t ADRES_STERTY_JADRA = 0x500000000ULL;
+constexpr uint64_t ROZMIAR_STERTY_JADRA =
+    16ULL * 1024ULL * 1024ULL;
+
+/*
+ * Poprawiony grafika.cpp rezerwuje:
+ *  0x100000000 - backbuffer
+ *  0x110000000 - tapeta
+ *  0x120000000 - surowy BMP
+ *  0x130000000 - wirtualne mapowanie framebufferu
+ *
+ * Dlatego PSF nie moze juz uzywac 0x130000000.
+ */
+constexpr uint64_t ADRES_RAM_DYSKU_PSF = 0x200000000ULL;
+constexpr uint32_t ROZMIAR_RAM_DYSKU_PSF =
+    2U * 1024U * 1024U;
+
+constexpr uint16_t PORT_COM1 = 0x3F8;
+
+constexpr uint64_t PRAWA_MENEDZERA_OKIEN = 0xFFFFFFFFULL;
+
+bool grafika_gotowa = false;
+
+/* =========================================================================
+ * NISKIE FUNKCJE STARTOWE
+ * ========================================================================= */
+
+static inline void serial_outb(uint16_t port,
+                               uint8_t wartosc) {
+    asm volatile(
+        "outb %0, %1"
+        :
+        : "a"(wartosc), "Nd"(port)
+        : "memory");
 }
 
-void ZlaczStringi(char* cel, const char* str1, const char* str2, const char* str3) {
-    int i = 0;
-    while (*str1) cel[i++] = *str1++;
-    while (*str2) cel[i++] = *str2++;
-    while (*str3) cel[i++] = *str3++;
-    cel[i] = '\0';
-}
+void serial_wypisz(const char* tekst) {
+    if (!tekst) return;
 
-extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_ptr) {
-    if (multiboot_magic != 0x36D76289) return; 
-
-    InicjalizujPMM(multiboot_info_ptr);
-    InicjalizujGDT();
-    
-    inicjalizuj_tss((void*)&stack_top);
-    zaladuj_tss(0x28); 
-
-    InicjalizujIDT();
-    InicjalizujVMM(); 
-    inicjalizuj_syscalls();
-    InicjalizujGrafike(multiboot_info_ptr);
-
-    wypisz_log("==================================================");
-    wypisz_log(" Witamy w Bursztyn OS 64-bit ");
-    wypisz_log(" Polski System Operacyjny");
-    wypisz_log(" Github: Programista-Art/BursztynOS ");
-    wypisz_log("==================================================");
-
-    uint64_t ram_mb = (najwyzsza_znaleziona_ramka * 4096) / (1024 * 1024);
-    char ram_str[32]; char ram_msg[80];
-    UIntToStr(ram_mb, ram_str);
-    ZlaczStringi(ram_msg, "[PMM] Skan pamieci fizycznej. Wykryto: ", ram_str, " MB RAM");
-    wypisz_log(ram_msg);
-
-    wypisz_log("[VMM] Paging 4-poziomowy aktywowany. Tablice przebudowane.");
-
-    // --- INICJALIZACJA STERTY JĄDRA (HEAP) ---
-    uint64_t adres_wirtualny_sterty = 0x500000000ULL; // Bezpieczny adres wysoko w pamięci (20 GB)
-    uint64_t rozmiar_sterty = 16 * 1024 * 1024;       // 16 MB na stertę
-
-    for (uint64_t i = 0; i < rozmiar_sterty; i += 4096) {
-        void* wolna_ramka = ZaalokujRamke();
-        if (wolna_ramka) {
-            ZmapujStrone((void*)(adres_wirtualny_sterty + i), wolna_ramka, 0b00000011); // Present + Writable
-        }
+    for (size_t i = 0; tekst[i] != '\0'; ++i) {
+        serial_outb(
+            PORT_COM1,
+            static_cast<uint8_t>(tekst[i]));
     }
-    inicjalizuj_sterte_jadra((void*)adres_wirtualny_sterty, rozmiar_sterty);
-    wypisz_log("[HEAP] Alokator Pamieci (Sterta 16 MB) gotowy! Operatory new/delete aktywne.");
+}
+
+[[noreturn]]
+void zatrzymaj_start(const char* powod) {
+    asm volatile("cli" ::: "memory");
+
+    serial_wypisz("\n[KERNEL-PANIC] ");
+    serial_wypisz(
+        powod ? powod : "Nieznany blad startu.");
+    serial_wypisz("\n");
+
+    if (grafika_gotowa) {
+        wypisz_log("[KERNEL-PANIC] Start systemu zatrzymany.");
+        if (powod)
+            wypisz_log(powod);
+    }
+
+    while (true)
+        asm volatile("hlt");
+}
+
+void przeladuj_cr3() {
+    void* pml4 =
+        PobierzAktualnePML4();
+
+    if (!pml4)
+        zatrzymaj_start(
+            "Brak aktywnego PML4 podczas odswiezania mapowania.");
+
+    asm volatile(
+        "mov %0, %%cr3"
+        :
+        : "r"(pml4)
+        : "memory");
+}
+
+/* =========================================================================
+ * BEZPIECZNE MAPOWANIE OBSZAROW JADRA
+ * ========================================================================= */
+
+bool zakres_stron_poprawny(uint64_t adres,
+                           uint64_t rozmiar) {
+    if (rozmiar == 0)
+        return false;
+
+    if ((adres & (ROZMIAR_STRONY - 1ULL)) != 0)
+        return false;
+
+    if ((rozmiar & (ROZMIAR_STRONY - 1ULL)) != 0)
+        return false;
+
+    if (adres > UINT64_MAX - rozmiar)
+        return false;
+
+    return true;
+}
+
+void mapuj_nowy_obszar_albo_zatrzymaj(
+    uint64_t adres_wirtualny,
+    uint64_t rozmiar,
+    const char* komunikat_bledu) {
+
+    if (!zakres_stron_poprawny(
+            adres_wirtualny,
+            rozmiar)) {
+        zatrzymaj_start(
+            "Niepoprawny zakres mapowania pamieci jadra.");
+    }
+
+    for (uint64_t offset = 0;
+         offset < rozmiar;
+         offset += ROZMIAR_STRONY) {
+
+        void* ramka =
+            ZaalokujRamke();
+
+        /*
+         * Nie wolno inicjalizowac sterty lub PSF na czesciowo
+         * zmapowanym zakresie. Poprzednia wersja pomijala brakujace
+         * ramki, a potem udostepniala caly obszar.
+         */
+        if (!ramka) {
+            zatrzymaj_start(
+                komunikat_bledu ?
+                komunikat_bledu :
+                "Brak fizycznej ramki pamieci.");
+        }
+
+        ZmapujStrone(
+            reinterpret_cast<void*>(
+                adres_wirtualny + offset),
+            ramka,
+            FLAGI_STRONY_JADRA);
+    }
+
+    przeladuj_cr3();
+}
+
+void wyzeruj_obszar(void* adres,
+                    uint64_t rozmiar) {
+    if (!adres || rozmiar == 0)
+        return;
+
+    volatile uint8_t* p =
+        reinterpret_cast<volatile uint8_t*>(adres);
+
+    for (uint64_t i = 0; i < rozmiar; ++i)
+        p[i] = 0;
+}
+
+/* =========================================================================
+ * PROSTE FUNKCJE TEKSTOWE
+ * ========================================================================= */
+
+bool uint_do_str(uint64_t wartosc,
+                 char* bufor,
+                 size_t pojemnosc) {
+    if (!bufor || pojemnosc < 2)
+        return false;
+
+    char odwrotnie[32] = {};
+    size_t n = 0;
+
+    if (wartosc == 0) {
+        bufor[0] = '0';
+        bufor[1] = '\0';
+        return true;
+    }
+
+    while (wartosc > 0) {
+        if (n >= sizeof(odwrotnie))
+            return false;
+
+        odwrotnie[n++] =
+            static_cast<char>(
+                '0' + (wartosc % 10ULL));
+
+        wartosc /= 10ULL;
+    }
+
+    if (n + 1 > pojemnosc)
+        return false;
+
+    size_t j = 0;
+
+    while (n > 0)
+        bufor[j++] = odwrotnie[--n];
+
+    bufor[j] = '\0';
+    return true;
+}
+
+bool dolacz_tekst(char* cel,
+                  size_t pojemnosc,
+                  const char* tekst) {
+    if (!cel || !tekst || pojemnosc == 0)
+        return false;
+
+    size_t dst = 0;
+
+    while (dst < pojemnosc &&
+           cel[dst] != '\0') {
+        ++dst;
+    }
+
+    if (dst >= pojemnosc)
+        return false;
+
+    size_t src = 0;
+
+    while (tekst[src] != '\0') {
+        if (dst + 1 >= pojemnosc)
+            return false;
+
+        cel[dst++] = tekst[src++];
+    }
+
+    cel[dst] = '\0';
+    return true;
+}
+
+bool dlugosc_tekstu_u32(const char* tekst,
+                        uint32_t* wynik) {
+    if (!tekst || !wynik)
+        return false;
+
+    uint64_t dlugosc = 0;
+
+    while (tekst[dlugosc] != '\0') {
+        ++dlugosc;
+
+        if (dlugosc > UINT32_MAX)
+            return false;
+    }
+
+    *wynik =
+        static_cast<uint32_t>(dlugosc);
+
+    return true;
+}
+
+/* =========================================================================
+ * BEZPIECZNA INSTALACJA PLIKOW WBUDOWANYCH
+ * ========================================================================= */
+
+bool pobierz_rozmiar_bloba(
+    const uint8_t* poczatek,
+    const uint8_t* koniec,
+    uint32_t* wynik) {
+
+    if (!poczatek || !koniec || !wynik)
+        return false;
+
+    const uintptr_t start =
+        reinterpret_cast<uintptr_t>(
+            poczatek);
+
+    const uintptr_t end =
+        reinterpret_cast<uintptr_t>(
+            koniec);
+
+    if (end < start)
+        return false;
+
+    const uint64_t rozmiar =
+        static_cast<uint64_t>(
+            end - start);
+
+    if (rozmiar == 0 ||
+        rozmiar > UINT32_MAX) {
+        return false;
+    }
+
+    *wynik =
+        static_cast<uint32_t>(
+            rozmiar);
+
+    return true;
+}
+
+bool zapisz_plik_od_nowa(const char* sciezka,
+                         const char* dane,
+                         uint32_t rozmiar) {
+    if (!sciezka)
+        return false;
+
+    if (rozmiar != 0 && !dane)
+        return false;
 
     /*
-     * mbedTLS korzysta z osobnej, statycznej puli 256 KiB zdefiniowanej w
-     * mbedtls_port.cpp. Bez tej inicjalizacji mbedtls_calloc() zwraca nullptr,
-     * a mbedtls_ssl_setup() konczy sie bledem -0x7F00
-     * (MBEDTLS_ERR_SSL_ALLOC_FAILED).
+     * usun_twor() moze zwrocic false, gdy plik jeszcze nie istnieje.
+     * To nie jest blad instalacji.
      */
-    inicjalizuj_mbedtls();
-    wypisz_log("[KRYPTO] Pula pamieci mbedTLS 256 KiB gotowa.");
+    (void)usun_twor(sciezka);
 
-    inicjalizuj_apic();
-    wypisz_log("[APIC] Kontroler przerwan (LAPIC/IOAPIC) uruchomiony.");
-    InicjalizujMyszPS2();
-    wypisz_log("[I/O] Sterowniki Mysz i Klawiatura (PS/2) gotowe.");
-    wypisz_log("[BWS] API Wywolan Systemowych gotowe.");
+    if (!utworz_plik(sciezka))
+        return false;
 
-    inicjalizuj_kontroler_ahci();
-    wczytaj_tapete_z_dysku();
+    if (rozmiar == 0)
+        return true;
 
-    // --- PODNIESIENIE INTERFEJSU SIECIOWEGO ---
-    inicjalizuj_e1000();
-    
-    // --- AKTYWACJA DHCP ZARAZ PO PODNIESIENIU KARTY! ---
-    uruchom_klienta_dhcp();
-    wypisz_log("[SIEC] Stos TCP/IP (DHCP, ARP, ICMP, DNS) w pelni operacyjny.");
+    if (!zapisz_do_pliku(
+            sciezka,
+            dane,
+            rozmiar)) {
 
-    // --- INICJALIZACJA KARTY DŹWIĘKOWEJ ---
-    if (inicjalizuj_hda()) {
-        wypisz_log("[HDA] Karta wykryta poprawnie, odtwarzam dzwiek startowy!");
-        hda_test_ton(880, 500);
+        /*
+         * Nie zostawiamy polowicznie zainstalowanego pliku.
+         */
+        (void)usun_twor(sciezka);
+        return false;
     }
 
-    // --- WIRTUALIZACJA I DRZEWIASTY SYSTEM PLIKÓW ---
-    // ZMIANA VMM: Przenosimy 1 GB ramdysk powyżej granicy 4 GB
-    uint64_t adres_wirtualny_dysku = 0x130000000ULL; 
-    uint32_t rozmiar_dysku = 2 * 1024 * 1024;    
+    return true;
+}
 
-    for (uint32_t i = 0; i < rozmiar_dysku; i += 4096) {
-        void* wolna_ramka_fizyczna = ZaalokujRamke();
-        if (wolna_ramka_fizyczna) ZmapujStrone((void*)(adres_wirtualny_dysku + i), wolna_ramka_fizyczna, 0b00000011);
+bool zapisz_blob_bur(
+    const char* sciezka,
+    const uint8_t* poczatek,
+    const uint8_t* koniec) {
+
+    uint32_t rozmiar = 0;
+
+    if (!pobierz_rozmiar_bloba(
+            poczatek,
+            koniec,
+            &rozmiar)) {
+        return false;
     }
 
-    inicjalizuj_psf((void*)adres_wirtualny_dysku, rozmiar_dysku);
+    /*
+     * Minimalna kontrola chroni przed zapisaniem pustego/uszkodzonego
+     * symbolu jako programu .bur.
+     */
+    if (rozmiar < sizeof(NaglowekBur))
+        return false;
 
-    // Tworzenie drzewa katalogów
-    utworz_katalog("/jadro");
-    utworz_katalog("/system");
-    utworz_katalog("/programy");
-    utworz_katalog("/programy/notatnik.cebula");
-    utworz_katalog("/programy/kalkulator.cebula"); 
-    utworz_katalog("/programy/przegladarka.cebula"); 
-    utworz_katalog("/uslugi");
-    utworz_katalog("/sterowniki");
-    utworz_katalog("/uzytkownicy");
-    utworz_katalog("/ustawienia");
-    utworz_katalog("/logi");         
-    utworz_katalog("/piaskownica");
-    utworz_katalog("/tymczasowe");
+    return zapisz_plik_od_nowa(
+        sciezka,
+        reinterpret_cast<const char*>(poczatek),
+        rozmiar);
+}
 
-    skanuj_magistrale_pci();
+bool zapisz_manifest(const char* sciezka,
+                     const char* manifest) {
+    uint32_t dlugosc = 0;
 
-    wypisz_log("--------------------------------------------------");
-    wypisz_log("System operacyjny gotowy!");
+    if (!dlugosc_tekstu_u32(
+            manifest,
+            &dlugosc)) {
+        return false;
+    }
 
-    asm volatile("sti");
+    return zapisz_plik_od_nowa(
+        sciezka,
+        manifest,
+        dlugosc);
+}
 
-    // =========================================================
-    // --- INSTALACJA POWŁOKI (shell.bur) ---
-    // =========================================================
-    usun_twor("/shell.bur"); 
-    utworz_plik("/shell.bur");
-    uint64_t shell_rozmiar = (uint64_t)(_binary_shell_bin_end - _binary_shell_bin_start);
-    zapisz_do_pliku("/shell.bur", (const char*)_binary_shell_bin_start, shell_rozmiar);
-    wypisz_log("[BSP] Wbudowana Powloka gotowa do odczytu z dysku.");
+bool instaluj_paczke(
+    const char* sciezka_manifestu,
+    const char* manifest,
+    const char* sciezka_programu,
+    const uint8_t* blob_start,
+    const uint8_t* blob_end) {
 
+    if (!zapisz_manifest(
+            sciezka_manifestu,
+            manifest)) {
+        return false;
+    }
 
-    uint32_t przegladarka_rozmiar = (uint32_t)(_binary_przegladarka_bin_end - _binary_przegladarka_bin_start);
-    if(przegladarka_rozmiar < 24576) przegladarka_rozmiar = 24576; 
+    if (!zapisz_blob_bur(
+            sciezka_programu,
+            blob_start,
+            blob_end)) {
+        (void)usun_twor(
+            sciezka_manifestu);
 
-    //Przegladarka
-    // utworz_katalog("/programy");
-    // utworz_katalog("/programy/przegladarka.cebula");
-    // --- WDRAŻANIE PACZKI APLIKACJI (PRZEGLĄDARKA HUSSAR) ---
-    // =========================================================
-    const char* manifest_przegladarki = 
+        return false;
+    }
+
+    return true;
+}
+
+/* =========================================================================
+ * SYSTEM PLIKOW
+ * ========================================================================= */
+
+/*
+ * Sprawdza, czy podana sciezka wskazuje na istniejacy katalog.
+ *
+ * Uzywamy publicznego API PSF zamiast zagladac do jego prywatnych struktur.
+ * wylistuj_katalog() zwraca true tylko dla poprawnego, istniejacego katalogu.
+ * Bufor o rozmiarze 1 jest wystarczajacy do samego testu istnienia/typu.
+ */
+bool katalog_istnieje(const char* sciezka) {
+    if (!sciezka)
+        return false;
+
+    char bufor_testowy[1] = {'\0'};
+
+    return wylistuj_katalog(
+        sciezka,
+        bufor_testowy,
+        sizeof(bufor_testowy));
+}
+
+/*
+ * Zapewnia istnienie katalogu, ale nie traktuje ponownego uruchomienia
+ * systemu jako bledu.
+ *
+ * To jest wazne dla trwalego BSP2: po pierwszym uruchomieniu katalogi sa
+ * juz zapisane na SATA. utworz_katalog() zgodnie z API zwraca false, gdy
+ * obiekt juz istnieje, dlatego nie wolno uzywac samego wyniku CREATE jako
+ * testu poprawnosci startu.
+ */
+bool zapewnij_katalog(const char* sciezka) {
+    if (!sciezka)
+        return false;
+
+    if (katalog_istnieje(sciezka))
+        return true;
+
+    if (!utworz_katalog(sciezka))
+        return false;
+
+    /*
+     * Weryfikujemy rezultat po utworzeniu. Chroni to start przed sytuacja,
+     * w ktorej implementacja PSF zwroci sukces, ale katalog nie bedzie
+     * mozliwy do poprawnego odczytania.
+     */
+    return katalog_istnieje(sciezka);
+}
+
+void utworz_drabine_katalogow() {
+    static const char* const KATALOGI[] = {
+        "/jadro",
+        "/system",
+        "/programy",
+        "/programy/notatnik.cebula",
+        "/programy/kalkulator.cebula",
+        "/programy/przegladarka.cebula",
+        "/uslugi",
+        "/sterowniki",
+        "/uzytkownicy",
+        "/ustawienia",
+        "/logi",
+        "/piaskownica",
+        "/tymczasowe"
+    };
+
+    for (size_t i = 0;
+         i < sizeof(KATALOGI) / sizeof(KATALOGI[0]);
+         ++i) {
+
+        if (!zapewnij_katalog(KATALOGI[i])) {
+            /*
+             * Dopuszczamy katalogi odziedziczone z trwalego BSP2, ale nadal
+             * zatrzymujemy start, jezeli wymaganej sciezki nie mozna ani
+             * odczytac jako katalogu, ani poprawnie utworzyc.
+             */
+            zatrzymaj_start(
+                "Nie mozna przygotowac podstawowego drzewa katalogow PSF.");
+        }
+    }
+}
+
+void instaluj_wbudowane_programy() {
+    static const char MANIFEST_PRZEGLADARKI[] =
         "nazwa = \"Hussar\"\n"
         "autor = \"Programista Art\"\n"
         "wersja = \"0.1\"\n"
@@ -218,19 +578,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
         "    \"siec\",\n"
         "    \"pliki_czytaj\"\n"
         "]\n";
-        
-    int len_manifest_p = 0;
-    while (manifest_przegladarki[len_manifest_p] != '\0') len_manifest_p++;
 
-
-    utworz_plik("/programy/przegladarka.cebula/przegladarka.bur");
-    zapisz_do_pliku("/programy/przegladarka.cebula/przegladarka.bur", _binary_przegladarka_bin_start, przegladarka_rozmiar);
-    wypisz_log("[BSP] Przeglądarka Hussar zainstalowana jako paczka .cebula!");
-
-    // =========================================================
-    // --- WDRAŻANIE PACZKI APLIKACJI (NOTATNIK.CEBULA) ---
-    // =========================================================
-    const char* manifest_notatnika = 
+    static const char MANIFEST_NOTATNIKA[] =
         "nazwa = \"Notatnik\"\n"
         "autor = \"Programista Art\"\n"
         "wersja = \"0.1\"\n"
@@ -241,26 +590,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
         "    \"pliki_czytaj\",\n"
         "    \"pliki_zapisz\"\n"
         "]\n";
-        
-    int len_manifest = 0;
-    while (manifest_notatnika[len_manifest] != '\0') len_manifest++;
 
-    utworz_plik("/programy/notatnik.cebula/opis.aplikacji");
-    zapisz_do_pliku("/programy/notatnik.cebula/opis.aplikacji", manifest_notatnika, len_manifest);
-
-    // Padding pliku (by uchronić Notatnik przed nadpisaniem kodu powłoki przy małym buforze)
-    uint64_t notatnik_rozmiar = (uint64_t)(_binary_notatnik_bin_end - _binary_notatnik_bin_start);
-    if(notatnik_rozmiar < 24576) notatnik_rozmiar = 24576; 
-    
-    // Instalacja prawidłowo do folderu paczki (tam gdzie szuka go Pulpit!)
-    utworz_plik("/programy/notatnik.cebula/notatnik.bur");
-    zapisz_do_pliku("/programy/notatnik.cebula/notatnik.bur", (const char*)_binary_notatnik_bin_start, notatnik_rozmiar);
-    wypisz_log("[BSP] Aplikacja Notatnik zainstalowana jako paczka .cebula!");
-
-    // =========================================================
-    // --- WDRAŻANIE PACZKI APLIKACJI (KALKULATOR.CEBULA) ---
-    // =========================================================
-    const char* manifest_kalkulatora = 
+    static const char MANIFEST_KALKULATORA[] =
         "nazwa = \"Kalkulator\"\n"
         "autor = \"Programista Art\"\n"
         "wersja = \"1.0\"\n"
@@ -269,35 +600,389 @@ extern "C" void kernel_main(uint64_t multiboot_magic, uint64_t multiboot_info_pt
         "uprawnienia = [\n"
         "    \"okna\"\n"
         "]\n";
-        
-    int len_manifest_kalk = 0;
-    while (manifest_kalkulatora[len_manifest_kalk] != '\0') len_manifest_kalk++;
 
-    utworz_plik("/programy/kalkulator.cebula/opis.aplikacji");
-    zapisz_do_pliku("/programy/kalkulator.cebula/opis.aplikacji", manifest_kalkulatora, len_manifest_kalk);
+    /*
+     * WAZNE:
+     * zapisujemy DOKLADNY rozmiar kazdego bloba z objcopy.
+     *
+     * Poprzedni kod wymuszal minimum 24576 bajtow dla kilku aplikacji.
+     * Gdy blob byl mniejszy, zapisz_do_pliku() czytal wtedy pamiec ZA
+     * symbolem _binary_*_end. To moglo kopiowac przypadkowe dane jadra.
+     */
+    if (!zapisz_blob_bur(
+            "/shell.bur",
+            _binary_shell_bin_start,
+            _binary_shell_bin_end)) {
 
-    uint64_t kalkulator_rozmiar = (uint64_t)(_binary_kalkulator_bin_end - _binary_kalkulator_bin_start);
-    if(kalkulator_rozmiar < 24576) kalkulator_rozmiar = 24576; 
-    
-    utworz_plik("/programy/kalkulator.cebula/kalkulator.bur");
-    zapisz_do_pliku("/programy/kalkulator.cebula/kalkulator.bur", (const char*)_binary_kalkulator_bin_start, kalkulator_rozmiar);
-    wypisz_log("[BSP] Aplikacja Kalkulator zainstalowana jako paczka .cebula!");
+        zatrzymaj_start(
+            "Nie mozna zainstalowac /shell.bur.");
+    }
 
-    // =========================================================
-    // --- WDRAŻANIE MENEDŻERA OKIEN (PULPIT) ---
-    // =========================================================
-    utworz_plik("/menedzer_okien.bur");
-    uint64_t menedzer_rozmiar = (uint64_t)(_binary_menedzer_okien_bin_end - _binary_menedzer_okien_bin_start);
-    zapisz_do_pliku("/menedzer_okien.bur", (const char*)_binary_menedzer_okien_bin_start, menedzer_rozmiar);
-    wypisz_log("[BSP] Menedzer Okien zainstalowany i gotowy!");
+    wypisz_log(
+        "[BSP] Wbudowana Powloka zainstalowana.");
 
-    // =========================================================
-    
-    // Zamiast terminala (shell.bur), system włącza od razu Twój nowy Pulpit!
-    bws_uruchom_program_z_pliku("/menedzer_okien.bur", PZB_UZYTKOWNIK, 0xFFFFFFFF, false);
+    if (!instaluj_paczke(
+            "/programy/przegladarka.cebula/opis.aplikacji",
+            MANIFEST_PRZEGLADARKI,
+            "/programy/przegladarka.cebula/przegladarka.bur",
+            _binary_przegladarka_bin_start,
+            _binary_przegladarka_bin_end)) {
+
+        wypisz_log(
+            "[BSP-BLAD] Nie mozna zainstalowac przegladarki Hussar.");
+    } else {
+        wypisz_log(
+            "[BSP] Przegladarka Hussar zainstalowana jako .cebula.");
+    }
+
+    if (!instaluj_paczke(
+            "/programy/notatnik.cebula/opis.aplikacji",
+            MANIFEST_NOTATNIKA,
+            "/programy/notatnik.cebula/notatnik.bur",
+            _binary_notatnik_bin_start,
+            _binary_notatnik_bin_end)) {
+
+        wypisz_log(
+            "[BSP-BLAD] Nie mozna zainstalowac Notatnika.");
+    } else {
+        wypisz_log(
+            "[BSP] Notatnik zainstalowany jako .cebula.");
+    }
+
+    if (!instaluj_paczke(
+            "/programy/kalkulator.cebula/opis.aplikacji",
+            MANIFEST_KALKULATORA,
+            "/programy/kalkulator.cebula/kalkulator.bur",
+            _binary_kalkulator_bin_start,
+            _binary_kalkulator_bin_end)) {
+
+        wypisz_log(
+            "[BSP-BLAD] Nie mozna zainstalowac Kalkulatora.");
+    } else {
+        wypisz_log(
+            "[BSP] Kalkulator zainstalowany jako .cebula.");
+    }
+
+    if (!zapisz_blob_bur(
+            "/menedzer_okien.bur",
+            _binary_menedzer_okien_bin_start,
+            _binary_menedzer_okien_bin_end)) {
+
+        zatrzymaj_start(
+            "Nie mozna zainstalowac Menedzera Okien.");
+    }
+
+    wypisz_log(
+        "[BSP] Menedzer Okien zainstalowany.");
+}
+
+/* =========================================================================
+ * LOG RAM
+ * ========================================================================= */
+
+void wypisz_ilosc_ram() {
+    /*
+     * Oryginalny kod liczyl:
+     * highest_frame * 4096 / 1 MiB.
+     *
+     * Dzielenie numeru ramki przez 256 daje ten sam wynik bez ryzyka
+     * przepelnienia przy mnozeniu.
+     */
+    const uint64_t ram_mb =
+        najwyzsza_znaleziona_ramka / 256ULL;
+
+    char ram_str[32] = {};
+
+    if (!uint_do_str(
+            ram_mb,
+            ram_str,
+            sizeof(ram_str))) {
+        wypisz_log(
+            "[PMM] Nie mozna sformatowac rozmiaru RAM.");
+        return;
+    }
+
+    char komunikat[96] = {};
+
+    if (!dolacz_tekst(
+            komunikat,
+            sizeof(komunikat),
+            "[PMM] Skan pamieci fizycznej. Wykryto: ") ||
+        !dolacz_tekst(
+            komunikat,
+            sizeof(komunikat),
+            ram_str) ||
+        !dolacz_tekst(
+            komunikat,
+            sizeof(komunikat),
+            " MB RAM")) {
+
+        wypisz_log(
+            "[PMM] Pamiec fizyczna wykryta.");
+        return;
+    }
+
+    wypisz_log(komunikat);
+}
+
+} // namespace
+
+/* =========================================================================
+ * KERNEL MAIN
+ * ========================================================================= */
+
+extern "C" void kernel_main(uint64_t multiboot_magic,
+                            uint64_t multiboot_info_ptr) {
+    /*
+     * Cala faza inicjalizacji wykonuje sie atomowo wzgledem IRQ.
+     * Szczegolnie wazne jest, aby timer APIC nie uruchomil schedulera
+     * zanim zostanie zainstalowany i utworzony pierwszy proces Ring 3.
+     */
+    asm volatile("cli" ::: "memory");
+
+    if (multiboot_magic !=
+        MULTIBOOT2_BOOTLOADER_MAGIC) {
+
+        zatrzymaj_start(
+            "Nieprawidlowy magic Multiboot2.");
+    }
+
+    if (multiboot_info_ptr == 0) {
+        zatrzymaj_start(
+            "Brak wskaznika informacji Multiboot2.");
+    }
+
+    /* ---------------------------------------------------------------------
+     * Fundament CPU i pamieci
+     * ------------------------------------------------------------------ */
+
+    InicjalizujPMM(
+        multiboot_info_ptr);
+
+    InicjalizujGDT();
+
+    inicjalizuj_tss(
+        static_cast<void*>(stack_top));
+
+    zaladuj_tss(
+        0x28);
+
+    InicjalizujIDT();
+
+    InicjalizujVMM();
+
+    if (!PobierzAktualnePML4()) {
+        zatrzymaj_start(
+            "VMM nie udostepnil aktywnego PML4.");
+    }
+
+    inicjalizuj_syscalls();
+
+    InicjalizujGrafike(
+        multiboot_info_ptr);
+
+    grafika_gotowa = true;
+
+    wypisz_log(
+        "==================================================");
+    wypisz_log(" Witamy w Bursztyn OS 64-bit ");
+    wypisz_log(" Polski System Operacyjny");
+    wypisz_log(" Github: Programista-Art/BursztynOS ");
+    wypisz_log(" Autor: Dymitr Wygowski ");
+    wypisz_log("==================================================");
+
+    wypisz_ilosc_ram();
+
+    wypisz_log(
+        "[VMM] Paging 4-poziomowy aktywowany.");
+
+    /* ---------------------------------------------------------------------
+     * Sterta jadra
+     * ------------------------------------------------------------------ */
+
+    mapuj_nowy_obszar_albo_zatrzymaj(
+        ADRES_STERTY_JADRA,
+        ROZMIAR_STERTY_JADRA,
+        "Brak pamieci fizycznej dla sterty jadra.");
+
+    inicjalizuj_sterte_jadra(
+        reinterpret_cast<void*>(
+            ADRES_STERTY_JADRA),
+        ROZMIAR_STERTY_JADRA);
+
+    /*
+     * Prosty test po inicjalizacji. Wykrywa m.in. brak mapowania albo
+     * odrzucenie obszaru przez walidacje poprawionego heap.cpp.
+     */
+    void* test_sterty =
+        kmalloc(16);
+
+    if (!test_sterty) {
+        zatrzymaj_start(
+            "Sterta jadra nie przeszla testu kmalloc.");
+    }
+
+    kfree(test_sterty);
+
+    wypisz_log(
+        "[HEAP] Sterta jadra 16 MiB gotowa.");
+
+    /* ---------------------------------------------------------------------
+     * Scheduler i kryptografia
+     * ------------------------------------------------------------------ */
+
+    InicjalizujPlaniste(
+        reinterpret_cast<uint64_t>(
+            stack_top),
+        reinterpret_cast<uint64_t>(
+            PobierzAktualnePML4()));
+
+    wypisz_log(
+        "[SCHED] PID 0 (idle) przygotowany.");
+
+    inicjalizuj_mbedtls();
+
+    wypisz_log(
+        "[KRYPTO] Pula mbedTLS gotowa.");
+
+    /* ---------------------------------------------------------------------
+     * PCI i kontrolery przerwan
+     * ------------------------------------------------------------------ */
+
+    skanuj_magistrale_pci();
+
+    inicjalizuj_apic();
+
+    wypisz_log(
+        "[APIC] LAPIC/IOAPIC uruchomiony.");
+
+    InicjalizujMyszPS2();
+
+    wypisz_log(
+        "[I/O] PS/2 gotowe.");
+
+    wypisz_log(
+        "[BWS] API Wywolan Systemowych gotowe.");
+
+    /* ---------------------------------------------------------------------
+     * Dysk AHCI i tapeta
+     * ------------------------------------------------------------------ */
+
+    inicjalizuj_kontroler_ahci();
+
+    wczytaj_tapete_z_dysku();
+
+    /* ---------------------------------------------------------------------
+     * Siec
+     * ------------------------------------------------------------------ */
+
+    inicjalizuj_e1000();
+
+    /*
+     * Obecny stos E1000/DHCP korzysta z dotychczasowego API void,
+     * wiec kernel.cpp nie ma jeszcze wiarygodnej funkcji statusowej
+     * informujacej, czy karta zostala odnaleziona.
+     */
+    uruchom_klienta_dhcp();
+
+    wypisz_log(
+        "[SIEC] Inicjalizacja stosu sieciowego zakonczona.");
+
+    /* ---------------------------------------------------------------------
+     * Dzwiek
+     * ------------------------------------------------------------------ */
+
+    if (inicjalizuj_hda()) {
+        wypisz_log(
+            "[HDA] Karta HDA gotowa.");
+
+        hda_test_ton(
+            880,
+            500);
+    } else {
+        wypisz_log(
+            "[HDA] Brak dostepnego urzadzenia HDA.");
+    }
+
+    /* ---------------------------------------------------------------------
+     * PSF - osobny, niekolidujacy obszar wirtualny
+     * ------------------------------------------------------------------ */
+
+    mapuj_nowy_obszar_albo_zatrzymaj(
+        ADRES_RAM_DYSKU_PSF,
+        ROZMIAR_RAM_DYSKU_PSF,
+        "Brak pamieci fizycznej dla ramdysku PSF.");
+
+    /*
+     * PSF nie moze dziedziczyc przypadkowej zawartosci starych ramek PMM.
+     */
+    wyzeruj_obszar(
+        reinterpret_cast<void*>(
+            ADRES_RAM_DYSKU_PSF),
+        ROZMIAR_RAM_DYSKU_PSF);
+
+    inicjalizuj_psf(
+        reinterpret_cast<void*>(
+            ADRES_RAM_DYSKU_PSF),
+        ROZMIAR_RAM_DYSKU_PSF);
+
+    utworz_drabine_katalogow();
+
+    wypisz_log(
+        "[BSP] Drzewiasty system plikow PSF gotowy.");
+
+    /* ---------------------------------------------------------------------
+     * Instalacja wbudowanych programow
+     * ------------------------------------------------------------------ */
+
+    instaluj_wbudowane_programy();
+
+    /* ---------------------------------------------------------------------
+     * Pierwszy proces Ring 3
+     * ------------------------------------------------------------------ */
+
+    if (!bws_uruchom_program_z_pliku(
+            "/menedzer_okien.bur",
+            PZB_UZYTKOWNIK,
+            PRAWA_MENEDZERA_OKIEN,
+            false)) {
+
+        zatrzymaj_start(
+            "Loader nie utworzyl procesu Menedzera Okien.");
+    }
+
+    /*
+     * Flaga musi zostac ustawiona PRZED STI.
+     * Pierwsze przerwanie timera moze od razu wykonac PrzelaczKontekst().
+     */
+    wielozadaniowosc_aktywna = true;
+
+    wypisz_log(
+        "[SCHED] Wielozadaniowosc Round-Robin aktywna.");
+
+    wypisz_log(
+        "--------------------------------------------------");
+    wypisz_log(
+        "System operacyjny gotowy!");
+
+    /*
+     * Dopiero teraz dopuszczamy IRQ:
+     * - IDT jest gotowe,
+     * - APIC jest gotowy,
+     * - scheduler jest gotowy,
+     * - Menedzer Okien istnieje jako proces Ring 3.
+     */
+    asm volatile("sti" ::: "memory");
 
     while (true) {
-        e1000_obsluz_odbior(); 
-        asm volatile ("hlt");
+        /*
+         * STI przed HLT chroni idle przed przypadkowym pozostawieniem IF=0
+         * przez kod, ktory w przyszlosci moze wejsc do tej petli.
+         */
+        asm volatile(
+            "sti; hlt"
+            :
+            :
+            : "memory");
     }
 }
