@@ -599,26 +599,18 @@ extern "C" __attribute__((noreturn)) void _start() {
 
     gui_ustaw_przejecie_myszy(true);
 
-    uint8_t poprzednie_przyciski = 0;
     bool wyjdz = false;
 
     RysujInterfejs(true);
 
     while (!wyjdz) {
-        int mx = 0;
-        int my = 0;
-        uint8_t mb = 0;
-        gui_pobierz_mysz(
-            &mx,
-            &my,
-            &mb
-        );
-
-
-        const bool lewy = (mb & 0x01U) != 0;
-        const bool poprzedni_lewy = (poprzednie_przyciski & 0x01U) != 0;
-        const bool klik_lewy = lewy && !poprzedni_lewy;
-        const bool puszczenie_lewego = !lewy && poprzedni_lewy;
+        bws_zdarzenie zdarzenie{};
+        if (!gui_czekaj_na_zdarzenie(&zdarzenie)) continue;
+        const int mx = zdarzenie.x;
+        const int my = zdarzenie.y;
+        const bool lewy = (zdarzenie.przyciski & 0x01U) != 0;
+        const bool klik_lewy = zdarzenie.typ == BWS_ZDARZENIE_MYSZ_DOWN;
+        const bool puszczenie_lewego = zdarzenie.typ == BWS_ZDARZENIE_MYSZ_UP;
 
         bool redraw = false;
         bool pelne_czyszczenie = false;
@@ -633,8 +625,6 @@ extern "C" __attribute__((noreturn)) void _start() {
                 redraw = true;
                 pelne_czyszczenie = true;
             }
-
-            poprzednie_przyciski = mb;
 
             if (redraw) {
                 RysujInterfejs(pelne_czyszczenie);
@@ -666,6 +656,7 @@ extern "C" __attribute__((noreturn)) void _start() {
                                          WIN_X, WIN_Y,
                                          WIN_W, 26)) {
                 dragging = true;
+                gui_ustaw_capture_myszy(true);
                 drag_off_x = mx - WIN_X;
                 drag_off_y = my - WIN_Y;
             }
@@ -711,9 +702,8 @@ extern "C" __attribute__((noreturn)) void _start() {
 
         if (puszczenie_lewego && dragging) {
             dragging = false;
+            gui_ustaw_capture_myszy(false);
         }
-
-        poprzednie_przyciski = mb;
 
         if (redraw && !wyjdz) {
             RysujInterfejs(pelne_czyszczenie);

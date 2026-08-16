@@ -53,6 +53,7 @@
 #include "siec.h"
 #include "scheduler.h"
 #include "skladacz_obrazu.h"
+#include "bws_zdarzenia.h"
 #include "pamiec.h"
 #include "loader.h"
 #include "heap.h"
@@ -2157,12 +2158,14 @@ void bws_zakoncz_biezacy_proces() {
                 aktualny_pid
             );
 
+            bws_gui_usun_stan_procesu(aktualny_pid);
+
             bws_gui_zwolnij_mysz_procesu(
                 aktualny_pid
             );
         }
 
-        skladacz_obrazu_zloz_klatke();
+        skladacz_obrazu_oznacz_dirty();
     }
 
     zakoncz_aktualny_proces();
@@ -2550,8 +2553,6 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
                 return 0;
             }
 
-            ZablokujAktualnyProcesNaMyszy();
-
             bws_gui_pobierz_mysz(
                 reinterpret_cast<int*>(
                     arg1
@@ -2923,6 +2924,28 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
                 gui_czy_zamknieto_powloke()
                     ? 1ULL
                     : 0ULL;
+
+        case 37:
+        case 38: {
+            if (!proces_ma_prawo(proces, PRAWO_GUI) || arg1 == 0 ||
+                !czy_bezpieczny_zakres_uzytkownika_do_zapisu(
+                    reinterpret_cast<void*>(arg1), sizeof(bws_zdarzenie)))
+                return 0;
+            bws_zdarzenie zdarzenie{};
+            if (!scheduler_pobierz_zdarzenie(aktualny_pid, &zdarzenie)) {
+                if (nr_funkcji == 38)
+                    scheduler_czekaj_na_zdarzenie(aktualny_pid);
+                return 0;
+            }
+            return skopiuj_do_przestrzeni_uzytkownika(
+                       reinterpret_cast<void*>(arg1), &zdarzenie,
+                       sizeof(zdarzenie)) ? 1ULL : 0ULL;
+        }
+
+        case 39:
+            if (!proces_ma_prawo(proces, PRAWO_GUI)) return 0;
+            bws_gui_ustaw_capture(arg1 != 0);
+            return 1;
 
         default:
             /*

@@ -12,6 +12,7 @@
  */
 
 #include <stdint.h>
+#include "bws_zdarzenia.h"
 #include <stdbool.h>
 
 /* =========================================================================
@@ -106,6 +107,9 @@ void gui_rysuj_prostokat(int x,
                          uint32_t kolor);
 
 void gui_ustaw_przejecie_myszy(bool stan);
+void gui_ustaw_capture_myszy(bool stan);
+bool gui_pobierz_zdarzenie(bws_zdarzenie* zdarzenie);
+bool gui_czekaj_na_zdarzenie(bws_zdarzenie* zdarzenie);
 
 void gui_pobierz_rozdzielczosc(int* w,
                                int* h);

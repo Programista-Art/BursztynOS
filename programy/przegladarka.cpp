@@ -6066,6 +6066,7 @@ bool obsluz_klik(
         if (!zmaksymalizowane) {
             dragging =
                 true;
+            gui_ustaw_capture_myszy(true);
 
             drag_off_x =
                 mx -
@@ -6399,9 +6400,6 @@ extern "C" [[noreturn]] void _start() {
     bool dziala =
         true;
 
-    bool lewy_poprzednio =
-        false;
-
     bool scroll_dragging =
         false;
 
@@ -6415,32 +6413,19 @@ extern "C" [[noreturn]] void _start() {
         0;
 
     while (dziala) {
-        int mx =
-            0;
-
-        int my =
-            0;
-
-        uint8_t mb =
-            0;
-
-        gui_pobierz_mysz(
-            &mx,
-            &my,
-            &mb
-        );
+        bws_zdarzenie zdarzenie{};
+        if (!gui_czekaj_na_zdarzenie(&zdarzenie)) continue;
+        const int mx = zdarzenie.x;
+        const int my = zdarzenie.y;
+        const uint8_t mb = static_cast<uint8_t>(zdarzenie.przyciski);
 
         const bool lewy =
             (mb &
              1U) != 0;
 
-        const bool klik =
-            lewy &&
-            !lewy_poprzednio;
+        const bool klik = zdarzenie.typ == BWS_ZDARZENIE_MYSZ_DOWN;
 
-        const bool pusc =
-            !lewy &&
-            lewy_poprzednio;
+        const bool pusc = zdarzenie.typ == BWS_ZDARZENIE_MYSZ_UP;
 
         bool trzeba_rysowac =
             false;
@@ -6505,6 +6490,7 @@ extern "C" [[noreturn]] void _start() {
 
                     scroll_dragging =
                         true;
+                    gui_ustaw_capture_myszy(true);
 
                     scroll_drag_start_y =
                         my;
@@ -6587,6 +6573,7 @@ extern "C" [[noreturn]] void _start() {
             if (dragging) {
                 dragging =
                     false;
+                gui_ustaw_capture_myszy(false);
 
                 trzeba_rysowac =
                     true;
@@ -6597,13 +6584,11 @@ extern "C" [[noreturn]] void _start() {
 
             scroll_dragging =
                 false;
+            gui_ustaw_capture_myszy(false);
         }
 
-        lewy_poprzednio =
-            lewy;
-
-        const char znak =
-            pobierz_znak();
+        const char znak = zdarzenie.typ == BWS_ZDARZENIE_KLAWISZ
+            ? static_cast<char>(zdarzenie.kod) : 0;
 
         if (znak !=
             0) {

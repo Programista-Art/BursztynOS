@@ -4,6 +4,8 @@
 #include "ahci.h"
 #include "scheduler.h"
 #include "skladacz_obrazu.h"
+#include "bws_zdarzenia.h"
+#include "scheduler.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -365,6 +367,8 @@ static bool tapeta_zaladowana = false;
 // -1 = stary tryb terminalowy jadra.
 // >=0 = PID procesu, ktory ostatnio aktywowal GUI Ring 3.
 static int pid_przejmujacy_mysz = -1;
+static int aktywny_pid_gui = -1;
+static int capture_pid_gui = -1;
 
 static bool tryb_skladania_obrazu = false;
 
@@ -1477,8 +1481,13 @@ extern "C" void grafika_naloz_okno_terminala() {
 // =========================================================================
 
 extern "C" bool zaktualizuj_klawiature_gui(char znak) {
-    (void)znak;
-    return false;
+    if (aktywny_pid_gui <= 0)
+        return false;
+    bws_zdarzenie e{};
+    e.typ = BWS_ZDARZENIE_KLAWISZ;
+    e.kod = static_cast<uint8_t>(znak);
+    e.timestamp = scheduler_pobierz_tick();
+    return scheduler_dodaj_zdarzenie(aktywny_pid_gui, &e);
 }
 
 // =========================================================================
@@ -1638,6 +1647,40 @@ static void NaprawWlascicielaMyszyJesliProcesZniknal() {
         okna[0].widoczne = true;
 }
 
+static int znajdz_warstwe_pod_punktem(int x, int y) {
+    int wynik = -1;
+    int najlepsze_z = -2147483647 - 1;
+    for (int pid = 1; pid < SKLADACZ_MAKS_WARSTW; ++pid) {
+        warstwa_obrazu* w = pobierz_warstwe(pid);
+        if (!w || x < w->x || y < w->y ||
+            static_cast<int64_t>(x) >= static_cast<int64_t>(w->x) + w->szerokosc ||
+            static_cast<int64_t>(y) >= static_cast<int64_t>(w->y) + w->wysokosc)
+            continue;
+        if (wynik < 0 || w->z_order > najlepsze_z ||
+            (w->z_order == najlepsze_z && pid > wynik)) {
+            wynik = pid;
+            najlepsze_z = w->z_order;
+        }
+    }
+    return wynik;
+}
+
+static void ustaw_focus_gui(int pid) {
+    if (pid == aktywny_pid_gui) return;
+    const int stary = aktywny_pid_gui;
+    aktywny_pid_gui = pid;
+    bws_zdarzenie e{};
+    e.timestamp = scheduler_pobierz_tick();
+    if (stary > 0) {
+        e.typ = BWS_ZDARZENIE_BLUR;
+        scheduler_dodaj_zdarzenie(stary, &e);
+    }
+    if (pid > 0) {
+        e.typ = BWS_ZDARZENIE_FOCUS;
+        scheduler_dodaj_zdarzenie(pid, &e);
+    }
+}
+
 extern "C" void zaktualizuj_mysze(int dx,
                                   int dy,
                                   uint8_t przyciski) {
@@ -1682,6 +1725,25 @@ extern "C" void zaktualizuj_mysze(int dx,
     if (pid_przejmujacy_mysz != -1) {
         lewy_wcisniety =
             (przyciski & 0x01U) != 0;
+
+        static uint8_t poprzednie_przyciski_gui = 0;
+        const bool klik = (przyciski & 1U) != 0 &&
+                          (poprzednie_przyciski_gui & 1U) == 0;
+        const bool pusc = (przyciski & 1U) == 0 &&
+                          (poprzednie_przyciski_gui & 1U) != 0;
+        if (klik) ustaw_focus_gui(znajdz_warstwe_pod_punktem(mysz_x, mysz_y));
+        const int cel = capture_pid_gui > 0 ? capture_pid_gui : aktywny_pid_gui;
+        if (cel > 0) {
+            bws_zdarzenie e{};
+            e.typ = klik ? BWS_ZDARZENIE_MYSZ_DOWN :
+                    (pusc ? BWS_ZDARZENIE_MYSZ_UP : BWS_ZDARZENIE_MYSZ_RUCH);
+            e.x = mysz_x; e.y = mysz_y; e.dx = dx; e.dy = -dy;
+            e.przyciski = przyciski;
+            e.timestamp = scheduler_pobierz_tick();
+            scheduler_dodaj_zdarzenie(cel, &e);
+        }
+        if (pusc) capture_pid_gui = -1;
+        poprzednie_przyciski_gui = przyciski;
 
         PokazKursor();
 
@@ -1860,6 +1922,22 @@ extern "C" void zaktualizuj_mysze(int dx,
 }
 
 extern "C" void obsluga_przerwania_zegara() {
+    /* Tylko bounded enqueue; RTC i renderowanie pozostaja poza IRQ. */
+    int desktop_pid = -1;
+    int najnizsze_z = 2147483647;
+    for (int pid = 1; pid < SKLADACZ_MAKS_WARSTW; ++pid) {
+        warstwa_obrazu* w = pobierz_warstwe(pid);
+        if (w && w->z_order < najnizsze_z) {
+            najnizsze_z = w->z_order;
+            desktop_pid = pid;
+        }
+    }
+    if (desktop_pid > 0) {
+        bws_zdarzenie e{};
+        e.typ = BWS_ZDARZENIE_TIMER;
+        e.timestamp = scheduler_pobierz_tick();
+        scheduler_dodaj_zdarzenie(desktop_pid, &e);
+    }
 }
 
 // =========================================================================
@@ -2511,7 +2589,7 @@ extern "C" void bws_gui_odswiez() {
     if (!BwsProcesMaWarstwe())
         return;
 
-    skladacz_obrazu_zloz_klatke();
+    skladacz_obrazu_oznacz_dirty();
 }
 
 extern "C" void bws_gui_pobierz_mysz(int* x,
@@ -2645,8 +2723,9 @@ extern "C" void bws_gui_ustaw_przejecie_myszy(bool stan) {
         if (!BwsProcesMaWarstwe())
             return;
 
-        pid_przejmujacy_mysz =
-            aktualny_pid;
+        pid_przejmujacy_mysz = aktualny_pid;
+        if (aktywny_pid_gui < 0)
+            ustaw_focus_gui(aktualny_pid);
 
         okna[0].widoczne = false;
         return;
@@ -2659,6 +2738,27 @@ extern "C" void bws_gui_ustaw_przejecie_myszy(bool stan) {
     pid_przejmujacy_mysz = -1;
     okna[0].widoczne = true;
 }
+
+extern "C" void bws_gui_ustaw_capture(bool stan) {
+    if (stan) {
+        if (aktualny_pid == aktywny_pid_gui && BwsProcesMaWarstwe())
+            capture_pid_gui = aktualny_pid;
+    } else if (capture_pid_gui == aktualny_pid) {
+        capture_pid_gui = -1;
+    }
+}
+
+extern "C" void bws_gui_usun_stan_procesu(int pid) {
+    if (capture_pid_gui == pid) capture_pid_gui = -1;
+    if (aktywny_pid_gui == pid) {
+        aktywny_pid_gui = -1;
+        for (int i = SKLADACZ_MAKS_WARSTW - 1; i > 0; --i) {
+            if (pobierz_warstwe(i)) { ustaw_focus_gui(i); break; }
+        }
+    }
+}
+
+extern "C" int bws_gui_aktywny_pid() { return aktywny_pid_gui; }
 
 extern "C" void bws_gui_zwolnij_mysz_procesu(int pid) {
     if (pid < 0 ||

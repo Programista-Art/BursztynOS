@@ -165,6 +165,9 @@ void bws_gui_rysuj_prostokat(int x,
                              uint32_t kolor);
 
 void bws_gui_ustaw_przejecie_myszy(bool stan);
+void bws_gui_ustaw_capture(bool stan);
+void bws_gui_usun_stan_procesu(int pid);
+int bws_gui_aktywny_pid();
 
 void bws_gui_pobierz_rozdzielczosc(int* szer,
                                    int* wys);

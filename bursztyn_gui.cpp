@@ -611,6 +611,27 @@ void gui_ustaw_przejecie_myszy(bool stan) {
         0, 0, 0);
 }
 
+bool gui_pobierz_zdarzenie(bws_zdarzenie* zdarzenie) {
+    if (!zdarzenie) return false;
+    return bws_wywolaj(37,
+        reinterpret_cast<uint64_t>(zdarzenie), 0, 0, 0) != 0;
+}
+
+bool gui_czekaj_na_zdarzenie(bws_zdarzenie* zdarzenie) {
+    if (!zdarzenie) return false;
+    for (;;) {
+        if (bws_wywolaj(38,
+                reinterpret_cast<uint64_t>(zdarzenie), 0, 0, 0) != 0)
+            return true;
+        /* Proces zostal oznaczony BLOCKED; timer przelaczy go z Ring 3. */
+        asm volatile("pause" ::: "memory");
+    }
+}
+
+void gui_ustaw_capture_myszy(bool stan) {
+    bws_wywolaj(39, stan ? 1ULL : 0ULL, 0, 0, 0);
+}
+
 void gui_pobierz_rozdzielczosc(int* w,
                                int* h) {
     if (!w || !h)

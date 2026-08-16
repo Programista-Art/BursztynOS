@@ -330,6 +330,8 @@ warstwa_obrazu* pobierz_warstwe(
  * Poprawiona implementacja odrzuca zagniezdzone skladanie tej samej klatki.
  */
 void skladacz_obrazu_zloz_klatke();
+void skladacz_obrazu_oznacz_dirty();
+void skladacz_obrazu_obsluz_dirty();
 
 #ifdef __cplusplus
 

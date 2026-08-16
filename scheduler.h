@@ -26,6 +26,7 @@
 #include <stdbool.h>
 
 #include "pzb.h"
+#include "bws_zdarzenia.h"
 
 /* =========================================================================
  * 1. LIMIT PROCESOW
@@ -79,9 +80,10 @@ static_assert(
 #define PROCES_GOTOWY            1
 #define PROCES_ZABLOKOWANY       2
 #define PROCES_ZABLOKOWANY_MYSZ  3
+#define PROCES_ZABLOKOWANY_ZDARZENIE 4
 
 #define PROCES_STAN_MIN PROCES_PUSTY
-#define PROCES_STAN_MAX PROCES_ZABLOKOWANY_MYSZ
+#define PROCES_STAN_MAX PROCES_ZABLOKOWANY_ZDARZENIE
 
 #ifdef __cplusplus
 
@@ -89,7 +91,8 @@ static_assert(
     PROCES_PUSTY == 0 &&
     PROCES_GOTOWY == 1 &&
     PROCES_ZABLOKOWANY == 2 &&
-    PROCES_ZABLOKOWANY_MYSZ == 3,
+    PROCES_ZABLOKOWANY_MYSZ == 3 &&
+    PROCES_ZABLOKOWANY_ZDARZENIE == 4,
     "Zmiana numerow stanow wymaga aktualizacji loadera i schedulera"
 );
 
@@ -488,3 +491,10 @@ bool czy_proces_uruchomiony(
  * i scheduler bedzie mogl bezpiecznie przejsc do innego procesu.
  */
 void ZablokujAktualnyProcesNaMyszy();
+
+/* Bounded, bezalokacyjna kolejka GUI per PID. Bezpieczna z IRQ. */
+bool scheduler_dodaj_zdarzenie(int pid, const bws_zdarzenie* zdarzenie);
+bool scheduler_pobierz_zdarzenie(int pid, bws_zdarzenie* zdarzenie);
+void scheduler_czekaj_na_zdarzenie(int pid);
+void scheduler_usun_zdarzenia_procesu(int pid);
+uint64_t scheduler_pobierz_tick();

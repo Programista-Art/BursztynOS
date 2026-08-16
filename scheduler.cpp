@@ -79,6 +79,17 @@ static uint64_t termin_wybudzenia_myszy[
     MAKS_PROCESOW
 ] = {};
 
+namespace {
+constexpr uint32_t ROZMIAR_KOLEJKI_ZDARZEN = 32;
+struct KolejkaZdarzen {
+    bws_zdarzenie wpisy[ROZMIAR_KOLEJKI_ZDARZEN];
+    uint32_t glowa;
+    uint32_t ogon;
+    uint64_t przepelnienia;
+};
+KolejkaZdarzen kolejki_zdarzen[MAKS_PROCESOW] = {};
+}
+
 /* =========================================================================
  * POLACZENIE Z TSS / SYSCALL / VMM
  * ========================================================================= */
@@ -684,6 +695,104 @@ extern "C" void WybudzProcesyOczekujaceNaMysz() {
     }
 }
 
+bool scheduler_dodaj_zdarzenie(
+    int pid, const bws_zdarzenie* zdarzenie) {
+    if (!pid_uzytkownika(pid) || !zdarzenie)
+        return false;
+
+    KolejkaZdarzen& q = kolejki_zdarzen[pid];
+    const StanPrzerwan irq = zapisz_i_wylacz_przerwania();
+    uint32_t glowa = q.glowa;
+    const uint32_t ogon = q.ogon;
+
+    /* Ruch moze zastapic ostatni ruch, zdarzen krawedziowych nie gubimy. */
+    if ((zdarzenie->typ == BWS_ZDARZENIE_MYSZ_RUCH ||
+         zdarzenie->typ == BWS_ZDARZENIE_TIMER) && glowa != ogon) {
+        const uint32_t ostatni = (glowa + ROZMIAR_KOLEJKI_ZDARZEN - 1U) %
+                                 ROZMIAR_KOLEJKI_ZDARZEN;
+        if (q.wpisy[ostatni].typ == zdarzenie->typ) {
+            q.wpisy[ostatni] = *zdarzenie;
+            if (odczytaj_stan_procesu(tablica_procesow[pid]) ==
+                PROCES_ZABLOKOWANY_ZDARZENIE)
+                ustaw_stan_procesu(tablica_procesow[pid], PROCES_GOTOWY);
+            przywroc_przerwania(irq);
+            return true;
+        }
+    }
+
+    uint32_t nastepna = (glowa + 1U) % ROZMIAR_KOLEJKI_ZDARZEN;
+    if (nastepna == ogon) {
+        /* Dla DOWN/UP/KEY wyrzucamy stary ruch/timer, nigdy krawedz. */
+        uint32_t usun = ogon;
+        while (usun != glowa &&
+               q.wpisy[usun].typ != BWS_ZDARZENIE_MYSZ_RUCH &&
+               q.wpisy[usun].typ != BWS_ZDARZENIE_TIMER)
+            usun = (usun + 1U) % ROZMIAR_KOLEJKI_ZDARZEN;
+        if (usun == glowa) {
+            ++q.przepelnienia;
+            przywroc_przerwania(irq);
+            return false;
+        }
+        uint32_t i = usun;
+        uint32_t kolejny = (i + 1U) % ROZMIAR_KOLEJKI_ZDARZEN;
+        while (kolejny != glowa) {
+            q.wpisy[i] = q.wpisy[kolejny];
+            i = kolejny;
+            kolejny = (kolejny + 1U) % ROZMIAR_KOLEJKI_ZDARZEN;
+        }
+        glowa = (glowa + ROZMIAR_KOLEJKI_ZDARZEN - 1U) %
+                ROZMIAR_KOLEJKI_ZDARZEN;
+        q.glowa = glowa;
+        nastepna = (glowa + 1U) % ROZMIAR_KOLEJKI_ZDARZEN;
+        ++q.przepelnienia;
+    }
+    q.wpisy[glowa] = *zdarzenie;
+    q.glowa = nastepna;
+    if (odczytaj_stan_procesu(tablica_procesow[pid]) ==
+        PROCES_ZABLOKOWANY_ZDARZENIE)
+        ustaw_stan_procesu(tablica_procesow[pid], PROCES_GOTOWY);
+    przywroc_przerwania(irq);
+    return true;
+}
+
+bool scheduler_pobierz_zdarzenie(
+    int pid, bws_zdarzenie* zdarzenie) {
+    if (!pid_uzytkownika(pid) || !zdarzenie)
+        return false;
+    KolejkaZdarzen& q = kolejki_zdarzen[pid];
+    const StanPrzerwan irq = zapisz_i_wylacz_przerwania();
+    if (q.ogon == q.glowa) {
+        przywroc_przerwania(irq);
+        return false;
+    }
+    *zdarzenie = q.wpisy[q.ogon];
+    q.ogon = (q.ogon + 1U) % ROZMIAR_KOLEJKI_ZDARZEN;
+    przywroc_przerwania(irq);
+    return true;
+}
+
+void scheduler_czekaj_na_zdarzenie(int pid) {
+    if (!pid_uzytkownika(pid)) return;
+    const StanPrzerwan irq = zapisz_i_wylacz_przerwania();
+    KolejkaZdarzen& q = kolejki_zdarzen[pid];
+    if (q.ogon == q.glowa &&
+        odczytaj_stan_procesu(tablica_procesow[pid]) == PROCES_GOTOWY)
+        ustaw_stan_procesu(tablica_procesow[pid],
+                           PROCES_ZABLOKOWANY_ZDARZENIE);
+    przywroc_przerwania(irq);
+}
+
+void scheduler_usun_zdarzenia_procesu(int pid) {
+    if (!pid_uzytkownika(pid)) return;
+    const StanPrzerwan irq = zapisz_i_wylacz_przerwania();
+    kolejki_zdarzen[pid] = {};
+    przywroc_przerwania(irq);
+}
+
+uint64_t scheduler_pobierz_tick() {
+    return __atomic_load_n(&licznik_tykniec_zegara, __ATOMIC_RELAXED);
+}
+
 /* =========================================================================
  * INICJALIZACJA PLANISTY
  * ========================================================================= */
@@ -719,6 +828,7 @@ void InicjalizujPlaniste(
 
         ostatnie_zdarzenie_myszy_procesu[i] = 0;
         termin_wybudzenia_myszy[i] = 0;
+        kolejki_zdarzen[i] = {};
 
         zasoby_do_zwolnienia[i] = {};
     }
@@ -1021,6 +1131,8 @@ extern "C" void zakoncz_aktualny_proces() {
 
     proces_t& proces =
         tablica_procesow[pid];
+
+    scheduler_usun_zdarzenia_procesu(pid);
 
     ZasobyDoZwolnienia& zasoby =
         zasoby_do_zwolnienia[pid];

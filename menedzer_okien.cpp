@@ -343,18 +343,12 @@ extern "C" __attribute__((noreturn)) void _start() {
 
     RysujPulpit(true);
 
-    uint8_t poprz_przycisk = 0;
-
     while (true) {
-        int mx = 0;
-        int my = 0;
-        uint8_t mb = 0;
-
-        gui_pobierz_mysz(&mx, &my, &mb);
-
-        const bool lewy_wcisniety = (mb & 0x01) != 0;
-        const bool poprzednio_wcisniety = (poprz_przycisk & 0x01) != 0;
-        const bool klik = lewy_wcisniety && !poprzednio_wcisniety;
+        bws_zdarzenie zdarzenie{};
+        if (!gui_czekaj_na_zdarzenie(&zdarzenie)) continue;
+        const int mx = zdarzenie.x;
+        const int my = zdarzenie.y;
+        const bool klik = zdarzenie.typ == BWS_ZDARZENIE_MYSZ_DOWN;
 
         // Zegar jest nakladka jadra rysowana przez skladacz obrazu. Gdy czas
         // sie zmieni, wystarczy zlozyc nowa klatke; nie trzeba ponownie
@@ -367,10 +361,5 @@ extern "C" __attribute__((noreturn)) void _start() {
             obsluz_klikniecie(mx, my);
         }
 
-        poprz_przycisk = mb;
-
-        // Nie jest to pelny scheduler-yield, ale ogranicza koszt goracej
-        // petli pollingu do czasu dodania blokujacego BWS zdarzen GUI.
-        asm volatile("pause");
     }
 }

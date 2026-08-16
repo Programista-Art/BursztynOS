@@ -115,6 +115,7 @@ uint64_t zajete_bajty_warstw =
  */
 bool skladanie_w_toku =
     false;
+bool compositor_dirty = true;
 
 bool pid_poprawny(
     int pid
@@ -826,6 +827,7 @@ int utworz_warstwe(
             __ATOMIC_RELEASE
         );
 
+        skladacz_obrazu_oznacz_dirty();
         return pid;
     }
 
@@ -941,6 +943,7 @@ int utworz_warstwe(
         );
     }
 
+    skladacz_obrazu_oznacz_dirty();
     return pid;
 }
 
@@ -971,6 +974,7 @@ void zaktualizuj_pozycje_warstwy(
 
     warstwa->y =
         nowy_y;
+    skladacz_obrazu_oznacz_dirty();
 }
 
 /* =========================================================================
@@ -1012,6 +1016,7 @@ void wyczysc_warstwe(
         warstwa->bufor_pikseli,
         liczba_pikseli
     );
+    skladacz_obrazu_oznacz_dirty();
 }
 
 /* =========================================================================
@@ -1062,6 +1067,7 @@ void usun_warstwe(
             bufor
         );
     }
+    skladacz_obrazu_oznacz_dirty();
 
     oddaj_bajty(
         bajty
@@ -1304,4 +1310,14 @@ void skladacz_obrazu_zloz_klatke() {
      *   - opuszcza surowy tryb skladania.
      */
     grafika_zakoncz_skladanie();
+}
+
+void skladacz_obrazu_oznacz_dirty() {
+    __atomic_store_n(&compositor_dirty, true, __ATOMIC_RELEASE);
+}
+
+void skladacz_obrazu_obsluz_dirty() {
+    if (!__atomic_exchange_n(&compositor_dirty, false, __ATOMIC_ACQ_REL))
+        return;
+    skladacz_obrazu_zloz_klatke();
 }

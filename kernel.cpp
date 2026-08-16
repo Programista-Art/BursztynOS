@@ -25,6 +25,7 @@
 #include "e1000.h"
 #include "heap.h"
 #include "scheduler.h"
+#include "skladacz_obrazu.h"
 #include "sterowniki/dzwiek/hda.h"
 
 /* =========================================================================
@@ -975,6 +976,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     asm volatile("sti" ::: "memory");
 
     while (true) {
+        skladacz_obrazu_obsluz_dirty();
         /*
          * STI przed HLT chroni idle przed przypadkowym pozostawieniem IF=0
          * przez kod, ktory w przyszlosci moze wejsc do tej petli.

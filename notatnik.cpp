@@ -3201,6 +3201,7 @@ void obsluz_klik(
         if (!zmaksymalizowane) {
             dragging =
                 true;
+            gui_ustaw_capture_myszy(true);
 
             drag_off_x =
                 mx -
@@ -3473,36 +3474,25 @@ void _start() {
         true;
 
     while (!wyjdz) {
-        int mx =
-            0;
-
-        int my =
-            0;
-
-        uint8_t mb =
-            0;
-
-        gui_pobierz_mysz(
-            &mx,
-            &my,
-            &mb
-        );
+        bws_zdarzenie zdarzenie{};
+        if (!gui_czekaj_na_zdarzenie(&zdarzenie)) continue;
+        int mx = old_mx;
+        int my = old_my;
+        uint8_t mb = poprzednie_przyciski;
+        if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_RUCH ||
+            zdarzenie.typ == BWS_ZDARZENIE_MYSZ_DOWN ||
+            zdarzenie.typ == BWS_ZDARZENIE_MYSZ_UP) {
+            mx = zdarzenie.x; my = zdarzenie.y;
+            mb = static_cast<uint8_t>(zdarzenie.przyciski);
+        }
 
         const bool lewy =
             (mb &
              0x01U) != 0;
 
-        const bool poprzedni_lewy =
-            (poprzednie_przyciski &
-             0x01U) != 0;
+        const bool klik = zdarzenie.typ == BWS_ZDARZENIE_MYSZ_DOWN;
 
-        const bool klik =
-            lewy &&
-            !poprzedni_lewy;
-
-        const bool puszczenie =
-            !lewy &&
-            poprzedni_lewy;
+        const bool puszczenie = zdarzenie.typ == BWS_ZDARZENIE_MYSZ_UP;
 
         if (klik) {
             obsluz_klik(
@@ -3527,6 +3517,7 @@ void _start() {
             if (dragging) {
                 dragging =
                     false;
+                gui_ustaw_capture_myszy(false);
 
                 redraw =
                     true;
@@ -3553,8 +3544,8 @@ void _start() {
         old_my =
             my;
 
-        const char c =
-            pobierz_znak();
+        const char c = zdarzenie.typ == BWS_ZDARZENIE_KLAWISZ
+            ? static_cast<char>(zdarzenie.kod) : 0;
 
         if (c != 0 &&
             !aplikacja_zminimalizowana) {
