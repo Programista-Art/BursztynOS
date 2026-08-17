@@ -1,0 +1,6 @@
+Najtrudniejszy pierwszy krok jest nadal krokiem naprzod.
+Prosty kod latwiej sprawdzic, utrzymac i naprawic.
+Dobry system nie ukrywa bledu, lecz pomaga znalezc jego zrodlo.
+Najpierw zmierz, potem poprawiaj.
+Stabilnosc powstaje z dobrze okreslonych granic.
+Kazda warstwa powinna miec jednoznacznego wlasciciela.

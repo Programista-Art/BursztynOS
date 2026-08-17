@@ -3,6 +3,7 @@
 #include "zegar-rtc.h"
 #include "ahci.h"
 #include "scheduler.h"
+#include "sterowniki/czas/hpet.h"
 #include "skladacz_obrazu.h"
 #include "bws_zdarzenia.h"
 #include "scheduler.h"
@@ -258,14 +259,14 @@ protected:
                     static_cast<uint64_t>(pitch) +
                 static_cast<uint64_t>(start_x) * 4ULL;
 
-            volatile uint8_t* dst =
-                framebuffer_fizyczny + offset;
-
-            const uint8_t* src =
-                bufor + offset;
-
-            for (uint64_t i = 0; i < bajtow_w_wierszu; ++i)
-                dst[i] = src[i];
+            volatile uint64_t* dst64=reinterpret_cast<volatile uint64_t*>(framebuffer_fizyczny+offset);
+            const uint64_t* src64=reinterpret_cast<const uint64_t*>(bufor+offset);
+            const uint64_t slow64=bajtow_w_wierszu/8ULL;
+            for(uint64_t i=0;i<slow64;++i)dst64[i]=src64[i];
+            if(bajtow_w_wierszu&4ULL){
+                volatile uint32_t* d32=reinterpret_cast<volatile uint32_t*>(framebuffer_fizyczny+offset+slow64*8ULL);
+                const uint32_t* s32=reinterpret_cast<const uint32_t*>(bufor+offset+slow64*8ULL);*d32=*s32;
+            }
         }
     }
 
@@ -313,6 +314,16 @@ public:
     uint32_t PobierzWysokosc() const { return wysokosc; }
     uint32_t PobierzPitch() const { return pitch; }
     uint8_t PobierzBpp() const { return bpp; }
+
+    void ZapiszPikselFramebuffer(int x, int y, uint32_t kolor) {
+        if (!framebuffer_fizyczny || bpp != 32 || x < 0 || y < 0 ||
+            x >= static_cast<int>(szerokosc) || y >= static_cast<int>(wysokosc))
+            return;
+        volatile uint32_t* dst = reinterpret_cast<volatile uint32_t*>(
+            framebuffer_fizyczny + static_cast<uint64_t>(y) * pitch +
+            static_cast<uint64_t>(x) * 4ULL);
+        *dst = kolor;
+    }
 };
 
 class SterownikVESA final : public SterownikEkranu {
@@ -369,8 +380,32 @@ static bool tapeta_zaladowana = false;
 static int pid_przejmujacy_mysz = -1;
 static int aktywny_pid_gui = -1;
 static int capture_pid_gui = -1;
+static GuiDirtyRect oczekujacy_dirty[SKLADACZ_MAKS_WARSTW] = {};
+static bool ma_oczekujacy_dirty[SKLADACZ_MAKS_WARSTW] = {};
+
+static void zapamietaj_dirty_rysowania(int x,int y,int w,int h) {
+    if(aktualny_pid<=0||aktualny_pid>=SKLADACZ_MAKS_WARSTW||w<=0||h<=0)return;
+    GuiDirtyRect r{x,y,w,h};
+    if(!ma_oczekujacy_dirty[aktualny_pid]){oczekujacy_dirty[aktualny_pid]=r;ma_oczekujacy_dirty[aktualny_pid]=true;return;}
+    GuiDirtyRect&a=oczekujacy_dirty[aktualny_pid];int x0=a.x<r.x?a.x:r.x,y0=a.y<r.y?a.y:r.y;
+    int x1=a.x+a.width>r.x+r.width?a.x+a.width:r.x+r.width;
+    int y1=a.y+a.height>r.y+r.height?a.y+a.height:r.y+r.height;a={x0,y0,x1-x0,y1-y0};
+}
+
+static uint64_t znacznik_zdarzenia() {
+    return hpet_dostepny() ? czas_monotoniczny_ns() : scheduler_pobierz_tick();
+}
 
 static bool tryb_skladania_obrazu = false;
+static bool clip_terminala_aktywny = false;
+static int clip_terminala_x0 = 0;
+static int clip_terminala_y0 = 0;
+static int clip_terminala_x1 = 0;
+static int clip_terminala_y1 = 0;
+
+#ifndef BURSZTYN_DEBUG_GUI_BOUNDS
+#define BURSZTYN_DEBUG_GUI_BOUNDS 0
+#endif
 
 // =========================================================================
 // DEKLARACJE LOKALNE
@@ -440,6 +475,7 @@ static int term_r = 0;
 static int term_c = 0;
 static int term_max_r = 25;
 static int term_max_c = 80;
+static bool terminal_przewinieto = false;
 
 // =========================================================================
 // MYSZ I KURSOR
@@ -488,6 +524,18 @@ void SerialLog(const char* str) {
         serial_outb(0x3F8, static_cast<uint8_t>(str[i]));
 }
 
+#ifndef BURSZTYN_DEBUG_GUI_INPUT
+#define BURSZTYN_DEBUG_GUI_INPUT 0
+#endif
+
+#if BURSZTYN_DEBUG_GUI_INPUT
+static void SerialLiczba(int v) {
+    char b[16]; int n=0; unsigned x=v<0?static_cast<unsigned>(-v):static_cast<unsigned>(v);
+    if(v<0)SerialLog("-"); do{b[n++]=static_cast<char>('0'+x%10U);x/=10U;}while(x&&n<15);
+    while(n) { char s[2]={b[--n],'\0'}; SerialLog(s); }
+}
+#endif
+
 // =========================================================================
 // TERMINAL
 // =========================================================================
@@ -520,6 +568,7 @@ static void AktualizujRozmiarTerminala() {
 
 static void PrzewinTerminalJesliTrzeba() {
     while (term_r >= term_max_r) {
+        terminal_przewinieto = true;
         for (int r = 1; r < term_max_r; ++r) {
             for (int c = 0; c < term_max_c; ++c)
                 term_buf[r - 1][c] = term_buf[r][c];
@@ -599,13 +648,41 @@ void DopiszDoBufora(const char* tekst, uint32_t kolor) {
     }
 }
 
+static void OznaczDirtyTerminalaPoDopisaniu(int stary_r) {
+    if (pid_przejmujacy_mysz != -1 || !okna[0].widoczne)
+        return;
+
+    if (terminal_przewinieto) {
+        skladacz_obrazu_oznacz_dirty_rect(
+            okna[0].x, okna[0].y, okna[0].szer, okna[0].wys);
+        return;
+    }
+
+    int pierwszy_r = stary_r < term_r ? stary_r : term_r;
+    int ostatni_r = stary_r > term_r ? stary_r : term_r;
+    if (pierwszy_r < 0) pierwszy_r = 0;
+    if (ostatni_r >= term_max_r) ostatni_r = term_max_r - 1;
+
+    skladacz_obrazu_oznacz_dirty_rect(
+        okna[0].x + 6,
+        okna[0].y + 32 + pierwszy_r * 16,
+        okna[0].szer - 12,
+        (ostatni_r - pierwszy_r + 1) * 16);
+}
+
 void wypisz_log(const char* tekst) {
     if (!tekst) return;
 
     SerialLog(tekst);
     SerialLog("\n");
+}
 
-    if (pid_przejmujacy_mysz != -1)
+void klog_serial(const char* tekst) {
+    wypisz_log(tekst);
+}
+
+void boot_log_gui(const char* tekst) {
+    if (!tekst || pid_przejmujacy_mysz != -1)
         return;
 
     if (!backbuffer || !aktywny_ekran)
@@ -665,6 +742,12 @@ int grafika_pobierz_wysokosc() {
         return INT32_MAX;
 
     return static_cast<int>(wys);
+}
+
+uint32_t* grafika_pobierz_wiersz_backbuffer(int y) {
+    if(!backbuffer||!aktywny_ekran||y<0||y>=grafika_pobierz_wysokosc())return nullptr;
+    return reinterpret_cast<uint32_t*>(backbuffer+
+        static_cast<uint64_t>(y)*aktywny_ekran->PobierzPitch());
 }
 
 // =========================================================================
@@ -742,6 +825,29 @@ void grafika_odtworz_tlo_skladania() {
     }
 }
 
+void grafika_odtworz_tlo_regionu(int x, int y, int szer, int wys) {
+    if (!backbuffer || !aktywny_ekran || szer <= 0 || wys <= 0) return;
+    int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
+    int x1 = x + szer, y1 = y + wys;
+    const int ekran_szer = grafika_pobierz_szerokosc();
+    const int ekran_wys = grafika_pobierz_wysokosc();
+    if (x1 > ekran_szer) x1 = ekran_szer;
+    if (y1 > ekran_wys) y1 = ekran_wys;
+    if (x0 >= x1 || y0 >= y1) return;
+    const uint32_t pitch = aktywny_ekran->PobierzPitch();
+    for (int py = y0; py < y1; ++py) {
+        uint32_t* dst = reinterpret_cast<uint32_t*>(backbuffer +
+            static_cast<uint64_t>(py) * pitch) + x0;
+        if (tapeta_zaladowana && bufor_tapety) {
+            const uint32_t* src = bufor_tapety +
+                static_cast<uint64_t>(py) * ekran_szer + x0;
+            for (int px = x0; px < x1; ++px) *dst++ = *src++;
+        } else {
+            for (int px = x0; px < x1; ++px) *dst++ = 0x001A0B00;
+        }
+    }
+}
+
 void grafika_zapisz_surowy_piksel(int x,
                                    int y,
                                    uint32_t kolor) {
@@ -763,12 +869,49 @@ void grafika_zakoncz_skladanie() {
     tryb_skladania_obrazu = false;
 }
 
+void grafika_naloz_kursor_regionu(int x, int y, int szer, int wys) {
+    if (!backbuffer || !aktywny_ekran || szer <= 0 || wys <= 0) return;
+    const int x1=x+szer, y1=y+wys;
+    for (int cy=0;cy<16;++cy) for(int cx=0;cx<16;++cx) {
+        const int px=mysz_x+cx, py=mysz_y+cy;
+        if(px<x||py<y||px>=x1||py>=y1) continue;
+        const uint8_t typ=kursor_bitmapa[cy][cx];
+        if(typ==1) ZapiszPikselBackbuffer(px,py,0x00000000);
+        else if(typ==2) ZapiszPikselBackbuffer(px,py,0x00FFFFFF);
+    }
+}
+
+void grafika_zakoncz_skladanie_regionu(int x,int y,int szer,int wys) {
+    if (!backbuffer || !aktywny_ekran) { tryb_skladania_obrazu=false; return; }
+    grafika_naloz_kursor_regionu(x,y,szer,wys);
+    PrzeniesFragmentNaEkran(x,y,szer,wys);
+    tryb_skladania_obrazu=false;
+    kursor_widoczny=false; /* region compositor nie korzysta z save/restore */
+}
+
+void grafika_prezentuj_region(int x,int y,int szer,int wys){PrzeniesFragmentNaEkran(x,y,szer,wys);}
+
+void grafika_prezentuj_kursor(){
+    if(!aktywny_ekran)return;
+    const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
+    for(int cy=0;cy<16;++cy)for(int cx=0;cx<16;++cx){int px=mysz_x+cx,py=mysz_y+cy;if(px<0||py<0||px>=sw||py>=sh)continue;uint8_t typ=kursor_bitmapa[cy][cx];if(!typ)continue;aktywny_ekran->ZapiszPikselFramebuffer(px,py,typ==1?0x00000000:0x00FFFFFF);}
+}
+
+void grafika_zakoncz_scene(){tryb_skladania_obrazu=false;kursor_widoczny=false;}
+
+void grafika_pobierz_pozycje_kursora(int* x,int* y) {
+    if(x) *x=mysz_x;
+    if(y) *y=mysz_y;
+}
+
 // =========================================================================
 // PODSTAWOWE RYSOWANIE
 // =========================================================================
 
 void PostawPiksel(int x, int y, uint32_t kolor) {
-    if (!tryb_skladania_obrazu) {
+    /* Tryb compositora nalezy do PID 0. Po wywlaszczeniu PID 0 proces
+       Ring 3 nadal musi pisac do swojej warstwy, nie do backbufferu. */
+    if (!tryb_skladania_obrazu || aktualny_pid != 0) {
         warstwa_obrazu* warstwa =
             pobierz_warstwe(aktualny_pid);
 
@@ -802,9 +945,20 @@ void PostawPiksel(int x, int y, uint32_t kolor) {
 
                 warstwa->bufor_pikseli[indeks] = kolor;
             }
+#if BURSZTYN_DEBUG_GUI_BOUNDS
+            else {
+                SerialLog("[GUI] OOB write do warstwy\n");
+            }
+#endif
 
             return;
         }
+    }
+
+    if (clip_terminala_aktywny &&
+        (x < clip_terminala_x0 || x >= clip_terminala_x1 ||
+         y < clip_terminala_y0 || y >= clip_terminala_y1)) {
+        return;
     }
 
     ZapiszPikselBackbuffer(x, y, kolor);
@@ -1370,7 +1524,7 @@ void OdswiezEkran() {
     if (pid_przejmujacy_mysz == -1 &&
         znajdz_pierwsza_warstwe_gui() != -1) {
 
-        skladacz_obrazu_zloz_klatke();
+        skladacz_obrazu_oznacz_dirty();
         return;
     }
 
@@ -1450,14 +1604,26 @@ void OdswiezEkran() {
         poprzedni_tryb;
 }
 
-extern "C" void grafika_naloz_okno_terminala() {
+extern "C" void grafika_naloz_okno_terminala_region(int x,
+                                                       int y,
+                                                       int szer,
+                                                       int wys) {
     if (!backbuffer ||
         !aktywny_ekran ||
         pid_przejmujacy_mysz != -1 ||
-        !okna[0].widoczne) {
+        !okna[0].widoczne ||
+        szer <= 0 || wys <= 0) {
 
         return;
     }
+
+    const int64_t x1_64 = static_cast<int64_t>(x) + szer;
+    const int64_t y1_64 = static_cast<int64_t>(y) + wys;
+    clip_terminala_x0 = x < 0 ? 0 : x;
+    clip_terminala_y0 = y < 0 ? 0 : y;
+    clip_terminala_x1 = x1_64 > INT32_MAX ? INT32_MAX : static_cast<int>(x1_64);
+    clip_terminala_y1 = y1_64 > INT32_MAX ? INT32_MAX : static_cast<int>(y1_64);
+    clip_terminala_aktywny = true;
 
     RysujOkno(0);
 
@@ -1474,6 +1640,8 @@ extern "C" void grafika_naloz_okno_terminala() {
         false,
         false
     );
+
+    clip_terminala_aktywny = false;
 }
 
 // =========================================================================
@@ -1486,8 +1654,15 @@ extern "C" bool zaktualizuj_klawiature_gui(char znak) {
     bws_zdarzenie e{};
     e.typ = BWS_ZDARZENIE_KLAWISZ;
     e.kod = static_cast<uint8_t>(znak);
-    e.timestamp = scheduler_pobierz_tick();
-    return scheduler_dodaj_zdarzenie(aktywny_pid_gui, &e);
+    e.timestamp = znacznik_zdarzenia();
+#if BURSZTYN_DEBUG_GUI_INPUT
+    SerialLog("[KEY] char="); SerialLiczba(static_cast<uint8_t>(znak));
+    SerialLog(" focus_pid="); SerialLiczba(aktywny_pid_gui); SerialLog("\n");
+#endif
+    (void)scheduler_dodaj_zdarzenie(aktywny_pid_gui, &e);
+    /* Aktywny model GUI jest wylacznym odbiorca. Nawet przepelnienie jego
+       kolejki nie moze spowodowac double-delivery do legacy byte-streamu. */
+    return true;
 }
 
 // =========================================================================
@@ -1648,6 +1823,8 @@ static void NaprawWlascicielaMyszyJesliProcesZniknal() {
 }
 
 static int znajdz_warstwe_pod_punktem(int x, int y) {
+    const int overlay = skladacz_obrazu_overlay_pod_punktem(x, y);
+    if (overlay >= 0) return overlay;
     int wynik = -1;
     int najlepsze_z = -2147483647 - 1;
     for (int pid = 1; pid < SKLADACZ_MAKS_WARSTW; ++pid) {
@@ -1669,8 +1846,12 @@ static void ustaw_focus_gui(int pid) {
     if (pid == aktywny_pid_gui) return;
     const int stary = aktywny_pid_gui;
     aktywny_pid_gui = pid;
+#if BURSZTYN_DEBUG_GUI_INPUT
+    SerialLog("[FOCUS] old="); SerialLiczba(stary);
+    SerialLog(" new="); SerialLiczba(pid); SerialLog("\n");
+#endif
     bws_zdarzenie e{};
-    e.timestamp = scheduler_pobierz_tick();
+    e.timestamp = znacznik_zdarzenia();
     if (stary > 0) {
         e.typ = BWS_ZDARZENIE_BLUR;
         scheduler_dodaj_zdarzenie(stary, &e);
@@ -1679,6 +1860,27 @@ static void ustaw_focus_gui(int pid) {
         e.typ = BWS_ZDARZENIE_FOCUS;
         scheduler_dodaj_zdarzenie(pid, &e);
     }
+    if (pid > 0) bws_gui_powiadom_lifecycle(BWS_ZDARZENIE_OKNO_FOCUS, pid);
+}
+
+extern "C" void bws_gui_powiadom_lifecycle(uint32_t typ, int pid) {
+    int manager = -1;
+    int najnizsze_z = 2147483647;
+    for (int i = 1; i < SKLADACZ_MAKS_WARSTW; ++i) {
+        warstwa_obrazu* w = pobierz_warstwe(i);
+        if (w && w->z_order < najnizsze_z) {
+            manager = i;
+            najnizsze_z = w->z_order;
+        }
+    }
+    if (manager <= 0 ||
+        (manager == pid && typ == BWS_ZDARZENIE_OKNO_FOCUS))
+        return;
+    bws_zdarzenie e{};
+    e.typ = typ;
+    e.kod = static_cast<uint32_t>(pid);
+    e.timestamp = znacznik_zdarzenia();
+    scheduler_dodaj_zdarzenie(manager, &e);
 }
 
 extern "C" void zaktualizuj_mysze(int dx,
@@ -1691,8 +1893,6 @@ extern "C" void zaktualizuj_mysze(int dx,
 
     const int stary_mysz_x = mysz_x;
     const int stary_mysz_y = mysz_y;
-
-    UkryjKursor();
 
     int64_t nowy_x =
         static_cast<int64_t>(mysz_x) +
@@ -1731,7 +1931,15 @@ extern "C" void zaktualizuj_mysze(int dx,
                           (poprzednie_przyciski_gui & 1U) == 0;
         const bool pusc = (przyciski & 1U) == 0 &&
                           (poprzednie_przyciski_gui & 1U) != 0;
-        if (klik) ustaw_focus_gui(znajdz_warstwe_pod_punktem(mysz_x, mysz_y));
+        if (klik) {
+            /* Nowa sekwencja przycisku nie moze odziedziczyc capture po
+               poprzednim, niedokonczonym drag. Focus i adresat DOWN musza
+               wskazywac ten sam hit-testowany proces. */
+            capture_pid_gui = -1;
+            const int trafiony = znajdz_warstwe_pod_punktem(mysz_x, mysz_y);
+            skladacz_obrazu_podnies_warstwe(trafiony);
+            ustaw_focus_gui(trafiony);
+        }
         const int cel = capture_pid_gui > 0 ? capture_pid_gui : aktywny_pid_gui;
         if (cel > 0) {
             bws_zdarzenie e{};
@@ -1739,26 +1947,14 @@ extern "C" void zaktualizuj_mysze(int dx,
                     (pusc ? BWS_ZDARZENIE_MYSZ_UP : BWS_ZDARZENIE_MYSZ_RUCH);
             e.x = mysz_x; e.y = mysz_y; e.dx = dx; e.dy = -dy;
             e.przyciski = przyciski;
-            e.timestamp = scheduler_pobierz_tick();
+            e.timestamp = znacznik_zdarzenia();
             scheduler_dodaj_zdarzenie(cel, &e);
         }
         if (pusc) capture_pid_gui = -1;
         poprzednie_przyciski_gui = przyciski;
 
-        PokazKursor();
-
-        PrzeniesFragmentNaEkran(
-            stary_mysz_x,
-            stary_mysz_y,
-            16,
-            16);
-
-        PrzeniesFragmentNaEkran(
-            mysz_x,
-            mysz_y,
-            16,
-            16);
-
+        skladacz_obrazu_oznacz_ruch_kursora(
+            stary_mysz_x, stary_mysz_y, mysz_x, mysz_y);
         WybudzProcesyOczekujaceNaMysz();
         return;
     }
@@ -1773,6 +1969,10 @@ extern "C" void zaktualizuj_mysze(int dx,
         !nowy_lewy && lewy_wcisniety;
 
     bool wymaga_odrysowania = false;
+    const int stary_okno_x = okna[0].x;
+    const int stary_okno_y = okna[0].y;
+    const int stary_okno_szer = okna[0].szer;
+    const int stary_okno_wys = okna[0].wys;
 
     if (klik_lewy && okno_przeciagane == -1) {
         for (int k = 0; k >= 0; --k) {
@@ -1811,6 +2011,8 @@ extern "C" void zaktualizuj_mysze(int dx,
                     if (i == 0)
                         flaga_zamkniecia_powloki = true;
 
+                    scheduler_wybudz_klawiature();
+
                     break;
                 }
 
@@ -1823,6 +2025,8 @@ extern "C" void zaktualizuj_mysze(int dx,
 
                     if (i == 0)
                         flaga_zamkniecia_powloki = true;
+
+                    scheduler_wybudz_klawiature();
 
                     break;
                 }
@@ -1901,28 +2105,40 @@ extern "C" void zaktualizuj_mysze(int dx,
     WybudzProcesyOczekujaceNaMysz();
 
     if (wymaga_odrysowania) {
-        OdswiezEkran();
-        PokazKursor();
-        PrzeniesNaEkran();
-    } else {
-        PokazKursor();
-
-        PrzeniesFragmentNaEkran(
-            stary_mysz_x,
-            stary_mysz_y,
-            16,
-            16);
-
-        PrzeniesFragmentNaEkran(
-            mysz_x,
-            mysz_y,
-            16,
-            16);
+        /* Odbuduj zarowno stary, jak i nowy obszar okna. Prezentacja
+           nalezy wylacznie do PID 0; IRQ myszy nie dotyka framebufferu. */
+        skladacz_obrazu_oznacz_dirty_rect(
+            stary_okno_x, stary_okno_y, stary_okno_szer, stary_okno_wys);
+        if (okna[0].widoczne) {
+            skladacz_obrazu_oznacz_dirty_rect(
+                okna[0].x, okna[0].y, okna[0].szer, okna[0].wys);
+        }
     }
+
+    skladacz_obrazu_oznacz_ruch_kursora(
+        stary_mysz_x, stary_mysz_y, mysz_x, mysz_y);
 }
 
 extern "C" void obsluga_przerwania_zegara() {
     /* Tylko bounded enqueue; RTC i renderowanie pozostaja poza IRQ. */
+    scheduler_zarejestruj_irq_timera();
+    static uint64_t nastepny_zegar_ns = 0;
+    static uint32_t fallback_ticki = 0;
+    bool termin = false;
+    if (hpet_dostepny()) {
+        const uint64_t teraz = czas_monotoniczny_ns();
+        if (nastepny_zegar_ns == 0) nastepny_zegar_ns = teraz + 1000000000ULL;
+        if (teraz >= nastepny_zegar_ns) {
+            termin = true;
+            nastepny_zegar_ns = teraz + 1000000000ULL;
+        }
+    } else if (++fallback_ticki >= 100U) {
+        fallback_ticki = 0; termin = true;
+    }
+    if (!termin) return;
+    skladacz_obrazu_oznacz_dirty_rect(
+        grafika_pobierz_szerokosc()-150,
+        grafika_pobierz_wysokosc()-40,150,40);
     int desktop_pid = -1;
     int najnizsze_z = 2147483647;
     for (int pid = 1; pid < SKLADACZ_MAKS_WARSTW; ++pid) {
@@ -1935,7 +2151,7 @@ extern "C" void obsluga_przerwania_zegara() {
     if (desktop_pid > 0) {
         bws_zdarzenie e{};
         e.typ = BWS_ZDARZENIE_TIMER;
-        e.timestamp = scheduler_pobierz_tick();
+        e.timestamp = znacznik_zdarzenia();
         scheduler_dodaj_zdarzenie(desktop_pid, &e);
     }
 }
@@ -2209,13 +2425,13 @@ extern "C" void wczytaj_tapete_z_dysku() {
     wypisz_log(
         "[GRAFIKA] Pulpit i tapeta gotowe!");
 
-    if (pid_przejmujacy_mysz == -1) {
+    if (pid_przejmujacy_mysz == -1 && aktualny_pid == 0) {
         UkryjKursor();
         OdswiezEkran();
         PokazKursor();
         PrzeniesNaEkran();
     } else {
-        skladacz_obrazu_zloz_klatke();
+        skladacz_obrazu_oznacz_dirty();
     }
 }
 
@@ -2227,15 +2443,20 @@ extern "C" void wypisz_na_ekranie(const char* tekst) {
     if (!tekst || !backbuffer || !aktywny_ekran)
         return;
 
-    UkryjKursor();
-
+    const int stary_r = term_r;
+    terminal_przewinieto = false;
     DopiszDoBufora(
         tekst,
         0x00E58A00);
 
-    OdswiezEkran();
-    PokazKursor();
-    PrzeniesNaEkran();
+    /*
+     * Shell jest legacy terminalem kernela, ale od startu compositora nie
+     * wolno mu prezentowac backbufferu samodzielnie. Stara sekwencja
+     * UkryjKursor/OdswiezEkran/PokazKursor/PrzeniesNaEkran kopiowala scene
+     * w trakcie oczekujacej kompozycji i zapisywala kursor myszy w scene
+     * backbufferze. Kolejny cursor restore odtwarzal potem jego stare kopie.
+     */
+    OznaczDirtyTerminalaPoDopisaniu(stary_r);
 }
 
 // =========================================================================
@@ -2510,6 +2731,9 @@ extern "C" void bws_gui_rysuj_okno(int x,
         return;
     }
 
+    if (skladacz_obrazu_ustaw_tytul(aktualny_pid, tytul_bezp))
+        bws_gui_powiadom_lifecycle(BWS_ZDARZENIE_OKNO_TYTUL, aktualny_pid);
+
     RysujProstokat(
         x,
         y,
@@ -2537,6 +2761,7 @@ extern "C" void bws_gui_rysuj_okno(int x,
         szer - 4,
         wys - 30,
         0x00280F00);
+    zapamietaj_dirty_rysowania(x,y,szer,wys);
 }
 
 extern "C" void bws_gui_wypisz_tekst(int x,
@@ -2562,6 +2787,8 @@ extern "C" void bws_gui_wypisz_tekst(int x,
         y,
         0x00D1D5DB,
         1);
+    int dl=0;while(text_bezp[dl]&&dl<255)++dl;
+    zapamietaj_dirty_rysowania(x,y,dl*9,18);
 }
 
 extern "C" void bws_gui_wyczyscz_obszar(int x,
@@ -2580,6 +2807,7 @@ extern "C" void bws_gui_wyczyscz_obszar(int x,
         szer,
         wys,
         0x00280F00);
+    zapamietaj_dirty_rysowania(x,y,szer,wys);
 }
 
 extern "C" void bws_gui_odswiez() {
@@ -2589,7 +2817,10 @@ extern "C" void bws_gui_odswiez() {
     if (!BwsProcesMaWarstwe())
         return;
 
-    skladacz_obrazu_oznacz_dirty();
+    if(ma_oczekujacy_dirty[aktualny_pid]){
+        const GuiDirtyRect r=oczekujacy_dirty[aktualny_pid];ma_oczekujacy_dirty[aktualny_pid]=false;
+        skladacz_obrazu_oznacz_dirty_rect(r.x,r.y,r.width,r.height);
+    }
 }
 
 extern "C" void bws_gui_pobierz_mysz(int* x,
@@ -2650,6 +2881,7 @@ extern "C" void bws_gui_odswiez_pulpit() {
         return;
 
     wyczysc_warstwe(aktualny_pid);
+    ma_oczekujacy_dirty[aktualny_pid]=false;
 }
 
 extern "C" void bws_gui_wypisz_tekst_kolor(
@@ -2695,6 +2927,8 @@ extern "C" void bws_gui_wypisz_tekst_kolor(
         y,
         kolor,
         skala);
+    int dl=0;while(text_bezp[dl]&&dl<255)++dl;
+    zapamietaj_dirty_rysowania(x,y,dl*9*skala,18*skala);
 }
 
 extern "C" void bws_gui_rysuj_prostokat(
@@ -2716,6 +2950,7 @@ extern "C" void bws_gui_rysuj_prostokat(
         w,
         h,
         kolor);
+    zapamietaj_dirty_rysowania(x,y,w,h);
 }
 
 extern "C" void bws_gui_ustaw_przejecie_myszy(bool stan) {
@@ -2723,9 +2958,17 @@ extern "C" void bws_gui_ustaw_przejecie_myszy(bool stan) {
         if (!BwsProcesMaWarstwe())
             return;
 
+        if (okna[0].widoczne) {
+            skladacz_obrazu_oznacz_dirty_rect(
+                okna[0].x, okna[0].y, okna[0].szer, okna[0].wys);
+        }
+
         pid_przejmujacy_mysz = aktualny_pid;
-        if (aktywny_pid_gui < 0)
-            ustaw_focus_gui(aktualny_pid);
+        /* Nowo uruchomione okno staje sie aktywne. Jest to rowniez jego
+           pierwsze zdarzenie, potrzebne aplikacjom renderujacym po wejściu
+           do petli eventowej (np. Notatnik). */
+        ustaw_focus_gui(aktualny_pid);
+        skladacz_obrazu_podnies_warstwe(aktualny_pid);
 
         okna[0].widoczne = false;
         return;
@@ -2736,7 +2979,10 @@ extern "C" void bws_gui_ustaw_przejecie_myszy(bool stan) {
      * Zachowujemy to ABI dla menedzera okien / shell.bur.
      */
     pid_przejmujacy_mysz = -1;
+    flaga_zamkniecia_powloki = false;
     okna[0].widoczne = true;
+    skladacz_obrazu_oznacz_dirty_rect(
+        okna[0].x, okna[0].y, okna[0].szer, okna[0].wys);
 }
 
 extern "C" void bws_gui_ustaw_capture(bool stan) {
@@ -2749,16 +2995,51 @@ extern "C" void bws_gui_ustaw_capture(bool stan) {
 }
 
 extern "C" void bws_gui_usun_stan_procesu(int pid) {
+    if(pid>0&&pid<SKLADACZ_MAKS_WARSTW)ma_oczekujacy_dirty[pid]=false;
     if (capture_pid_gui == pid) capture_pid_gui = -1;
     if (aktywny_pid_gui == pid) {
         aktywny_pid_gui = -1;
-        for (int i = SKLADACZ_MAKS_WARSTW - 1; i > 0; --i) {
-            if (pobierz_warstwe(i)) { ustaw_focus_gui(i); break; }
-        }
+        int best=-1,best_z=-2147483647;
+        for(int i=1;i<SKLADACZ_MAKS_WARSTW;++i){warstwa_obrazu*w=pobierz_warstwe(i);if(w&&(w->z_order>best_z||(w->z_order==best_z&&i>best))){best=i;best_z=w->z_order;}}
+        if(best>0)ustaw_focus_gui(best);
     }
 }
 
 extern "C" int bws_gui_aktywny_pid() { return aktywny_pid_gui; }
+
+extern "C" void bws_gui_aktywuj_warstwe(int pid) {
+    if(pid<=0||!pobierz_warstwe(pid))return;
+    ustaw_focus_gui(pid);
+    skladacz_obrazu_podnies_warstwe(pid);
+}
+
+extern "C" bool bws_gui_minimalizuj_warstwe(int pid) {
+    if (pid <= 0 || !skladacz_obrazu_minimalizuj(pid)) return false;
+    if (capture_pid_gui == pid) capture_pid_gui = -1;
+    if (aktywny_pid_gui == pid) {
+        ustaw_focus_gui(-1);
+        int best = -1, best_z = -2147483647;
+        for (int i = 1; i < SKLADACZ_MAKS_WARSTW; ++i) {
+            warstwa_obrazu* w = pobierz_warstwe(i);
+            if (w && (w->z_order > best_z ||
+                      (w->z_order == best_z && i > best))) {
+                best = i; best_z = w->z_order;
+            }
+        }
+        if (best > 0) ustaw_focus_gui(best);
+    }
+    bws_gui_powiadom_lifecycle(BWS_ZDARZENIE_OKNO_ZMINIMALIZOWANE, pid);
+    return true;
+}
+
+extern "C" bool bws_gui_aktywuj_okno(uint64_t window_id) {
+    if (!skladacz_obrazu_przywroc(window_id)) return false;
+    const int pid = static_cast<int>(static_cast<uint32_t>(window_id));
+    skladacz_obrazu_podnies_warstwe(pid);
+    ustaw_focus_gui(pid);
+    bws_gui_powiadom_lifecycle(BWS_ZDARZENIE_OKNO_PRZYWROCONE, pid);
+    return true;
+}
 
 extern "C" void bws_gui_zwolnij_mysz_procesu(int pid) {
     if (pid < 0 ||

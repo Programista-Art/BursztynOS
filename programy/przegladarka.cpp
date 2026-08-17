@@ -1608,37 +1608,6 @@ bool url_ma_biale_znaki(
     return false;
 }
 
-bool url_ma_kropke(
-    const char* tekst
-) {
-    if (!tekst) {
-        return false;
-    }
-
-    for (size_t i = 0;
-         tekst[i] != '\0';
-         ++i) {
-
-        if (tekst[i] ==
-            '.') {
-
-            return true;
-        }
-
-        if (tekst[i] ==
-                '/' ||
-            tekst[i] ==
-                '?' ||
-            tekst[i] ==
-                '#') {
-
-            break;
-        }
-    }
-
-    return false;
-}
-
 bool url_zaczyna_sie_schematem(
     const char* tekst
 ) {
@@ -1682,6 +1651,37 @@ char hex_cyfra(
         ];
 }
 
+bool wejscie_jest_hostem(const char* tekst) {
+    if (!tekst || tekst[0] == '\0' || url_ma_biale_znaki(tekst)) return false;
+    bool poprzedni_separator = true;
+    bool port = false;
+    for (size_t i = 0; tekst[i] != '\0'; ++i) {
+        const char c = tekst[i];
+        if (c == ':') {
+            if (port || poprzedni_separator || tekst[i + 1] == '\0') return false;
+            port = true;
+            poprzedni_separator = true;
+            continue;
+        }
+        if (port) {
+            if (c < '0' || c > '9') return false;
+            poprzedni_separator = false;
+            continue;
+        }
+        const bool alnum = (c >= 'a' && c <= 'z') ||
+                           (c >= 'A' && c <= 'Z') ||
+                           (c >= '0' && c <= '9');
+        if (alnum) { poprzedni_separator = false; continue; }
+        if (c == '.' || c == '-') {
+            if (poprzedni_separator || tekst[i + 1] == '\0') return false;
+            poprzedni_separator = true;
+            continue;
+        }
+        return false;
+    }
+    return !poprzedni_separator;
+}
+
 bool przygotuj_adres_wyszukiwania(
     char* url
 ) {
@@ -1698,13 +1698,7 @@ bool przygotuj_adres_wyszukiwania(
         return true;
     }
 
-    /*
-     * Bez spacji i z kropka traktujemy jako nazwe hosta.
-     */
-    if (!url_ma_biale_znaki(
-            url) &&
-        url_ma_kropke(
-            url)) {
+    if (wejscie_jest_hostem(url)) {
 
         return true;
     }
@@ -1747,21 +1741,6 @@ bool przygotuj_adres_wyszukiwania(
             static_cast<uint8_t>(
                 wejscie[i]
             );
-
-        if (c ==
-            ' ') {
-
-            if (p + 1U >=
-                URL_POJEMNOSC) {
-
-                return false;
-            }
-
-            url[p++] =
-                '+';
-
-            continue;
-        }
 
         if (query_unreserved(
                 c)) {
@@ -4111,8 +4090,7 @@ void przelacz_maksymalizacje() {
 }
 
 void zminimalizuj() {
-    aplikacja_zminimalizowana =
-        true;
+    aplikacja_zminimalizowana = gui_minimalizuj_okno();
 
     dragging =
         false;
@@ -4126,34 +4104,7 @@ void zminimalizuj() {
     w_polu_url =
         false;
 
-    /*
-     * Dla procesu warstwowego BWS19 zeruje jego prywatna warstwe.
-     */
-    gui_odswiez_pulpit();
-    gui_odswiez();
-}
-
-bool klik_przywraca_z_paska(
-    int mx,
-    int my
-) {
-    /*
-     * Tymczasowy kontrakt z obecnym menedzer_okien.cpp:
-     * Hussar ma skrot "W" pod x=180..211 na dolnym pasku.
-     *
-     * Docelowo minimalizacja/focus/raise powinny byc zdarzeniami
-     * menedzera okien, a nie hardcoded wspolrzednymi aplikacji.
-     */
-    return
-        punkt_w_prostokacie(
-            mx,
-            my,
-            180,
-            screen_h -
-                36,
-            32,
-            28
-        );
+    gui_ustaw_capture_myszy(false);
 }
 
 /* =========================================================================
@@ -4211,49 +4162,11 @@ void RysujInterfejs(
         WIN_Y,
         WIN_W,
         WIN_H,
-        "Hussar - Polska Przegladarka WWW"
+        "Husarz - Polska Przegladarka WWW"
     );
-
-    RysujPrzyciskLokalny(
-        WIN_X +
-            WIN_W -
-            74,
-        WIN_Y +
-            4,
-        20,
-        20,
-        KOLOR_POMARANCZ,
-        0x001A0B00U,
-        "-"
-    );
-
-    RysujPrzyciskLokalny(
-        WIN_X +
-            WIN_W -
-            50,
-        WIN_Y +
-            4,
-        20,
-        20,
-        KOLOR_POMARANCZ,
-        0x001A0B00U,
-        zmaksymalizowane
-            ? "v"
-            : "^"
-    );
-
-    RysujPrzyciskLokalny(
-        WIN_X +
-            WIN_W -
-            26,
-        WIN_Y +
-            4,
-        20,
-        20,
-        KOLOR_CZERWONY,
-        KOLOR_BIALY,
-        "X"
-    );
+    gui_rysuj_standardowa_belke(WIN_X, WIN_Y, WIN_W,
+                                "Husarz - Polska Przegladarka WWW",
+                                zmaksymalizowane);
 
     /*
      * Zakladki.
@@ -4930,7 +4843,7 @@ bool pobierz_jeden_url(
 
         ustaw_tresc(
             z,
-            "Nieprawidlowy URL. Hussar obsluguje obecnie http:// i https:// bez niestandardowego portu.",
+            "Nieprawidlowy URL. Husarz obsluguje obecnie http:// i https:// bez niestandardowego portu.",
             false
         );
 
@@ -5189,7 +5102,7 @@ bool pobierz_jeden_url(
     if (!odp.tekst) {
         ustaw_tresc(
             z,
-            "Hussar nie potrafi jeszcze wyswietlic skompresowanej albo binarnej odpowiedzi tego typu.",
+            "Husarz nie potrafi jeszcze wyswietlic skompresowanej albo binarnej odpowiedzi tego typu.",
             false
         );
 
@@ -5271,7 +5184,7 @@ bool pobierz_jeden_url(
         }
 
         ustaw_status(
-            "Strona zostala ucieta do limitu Hussara."
+            "Strona zostala ucieta do limitu Husarza."
         );
     } else if (p.https) {
         ustaw_status(
@@ -5319,9 +5232,7 @@ bool PobierzStrone(
         return false;
     }
 
-    /*
-     * Brak schematu -> domyslnie HTTPS.
-     */
+    /* Brak schematu oznacza jawnie domyslny transport HTTP/80. */
     if (!url_zaczyna_sie_schematem(
             z.url)) {
 
@@ -5338,7 +5249,7 @@ bool PobierzStrone(
         if (!kopiuj_limit(
                 z.url,
                 sizeof(z.url),
-                "https://")) {
+                "http://")) {
 
             return false;
         }
@@ -5951,30 +5862,6 @@ bool obsluz_klik(
     int my
 ) {
     if (aplikacja_zminimalizowana) {
-        if (klik_przywraca_z_paska(
-                mx,
-                my)) {
-
-            aplikacja_zminimalizowana =
-                false;
-
-            (void)bws_utworz_warstwe(
-                WIN_X,
-                WIN_Y,
-                WIN_W,
-                WIN_H,
-                Z_ORDER_HUSSAR
-            );
-
-            ustaw_status(
-                "Przywrocono Hussara."
-            );
-
-            RysujInterfejs(
-                true
-            );
-        }
-
         return true;
     }
 
@@ -6361,7 +6248,7 @@ void inicjalizuj_stan() {
         sizeof(
             zakladki[0].url
         ),
-        "https://example.com/"
+        "http://example.com/"
     );
 
     wczytaj_ulubione();
@@ -6415,6 +6302,8 @@ extern "C" [[noreturn]] void _start() {
     while (dziala) {
         bws_zdarzenie zdarzenie{};
         if (!gui_czekaj_na_zdarzenie(&zdarzenie)) continue;
+        if (zdarzenie.typ == BWS_ZDARZENIE_FOCUS && aplikacja_zminimalizowana)
+            aplikacja_zminimalizowana = false;
         const int mx = zdarzenie.x;
         const int my = zdarzenie.y;
         const uint8_t mb = static_cast<uint8_t>(zdarzenie.przyciski);

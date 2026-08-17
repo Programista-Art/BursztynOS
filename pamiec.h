@@ -104,6 +104,8 @@ extern "C" uint8_t __bss_end[];
 #define MULTIBOOT_TAG_TYPE_FRAMEBUFFER  8U
 #define MULTIBOOT_TAG_TYPE_EFI32        11U
 #define MULTIBOOT_TAG_TYPE_EFI64        12U
+#define MULTIBOOT_TAG_TYPE_ACPI_OLD     14U
+#define MULTIBOOT_TAG_TYPE_ACPI_NEW     15U
 
 /*
  * Standard Multiboot2 wymaga wyrownania kazdego tagu informacji do 8 bajtow.
@@ -300,6 +302,9 @@ inline constexpr uint32_t VMM_FLAGA_OBECNA =
 
 inline constexpr uint32_t VMM_FLAGA_ZAPIS =
     1U << 1;
+
+inline constexpr uint32_t VMM_FLAGA_PRESENT =
+    1U << 0;
 
 inline constexpr uint32_t VMM_FLAGA_USER =
     1U << 2;

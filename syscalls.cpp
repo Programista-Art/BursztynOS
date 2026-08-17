@@ -58,6 +58,7 @@
 #include "loader.h"
 #include "heap.h"
 #include "psf.h"
+#include "acpi.h"
 
 /* =========================================================================
  * PUBLICZNY STAN UZYWANY PRZEZ GUI / SYSCALL ASM
@@ -83,7 +84,7 @@ void wypisz_na_ekranie(
 
 char pobierz_znak_klawiatury();
 
-void bws_siec_ping(
+uint32_t bws_siec_ping(
     uint8_t ip1,
     uint8_t ip2,
     uint8_t ip3,
@@ -847,9 +848,10 @@ uint64_t bws_utworz_plik(
     if (!proces_moze_modyfikowac_sciezke(
             proces,
             sciezka)) {
-
+        wypisz_log("[PZB] file_create=DENY");
         return 0;
     }
+    wypisz_log("[PZB] file_create=ALLOW");
 
     return
         utworz_plik(
@@ -877,9 +879,10 @@ uint64_t bws_zapisz_plik(
     if (!proces_moze_modyfikowac_sciezke(
             proces,
             sciezka)) {
-
+        wypisz_log("[PZB] file_write=DENY");
         return 0;
     }
+    wypisz_log("[PZB] file_write=ALLOW");
 
     if (arg3 >
         MAX_PLIK_BSP2_BWS) {
@@ -1299,6 +1302,29 @@ uint64_t bws_uruchom(
         znane_prawa(
             rodzic
         );
+
+    auto rowna_sciezka = [](const char* a, const char* b) {
+        if (!a || !b) return false;
+        size_t i = 0;
+        while (a[i] != '\0' && b[i] != '\0' && a[i] == b[i]) ++i;
+        return a[i] == '\0' && b[i] == '\0';
+    };
+
+    /* BWS10 uruchamia plik_startowy bez parsera .cebula. Ograniczamy maske
+       do praw deklarowanych przez zaufane, wbudowane paczki. */
+    uint64_t wymagane = prawa_dziecka;
+    if (rowna_sciezka(sciezka, "/programy/notatnik.cebula/notatnik.bur"))
+        wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ | PRAWO_PLIKI_ZAPISZ;
+    else if (rowna_sciezka(sciezka,
+                           "/programy/przegladarka.cebula/przegladarka.bur"))
+        wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ | PRAWO_SIEC;
+    else if (rowna_sciezka(sciezka,
+                           "/programy/kalkulator.cebula/kalkulator.bur"))
+        wymagane = PRAWO_GUI;
+    else if (rowna_sciezka(sciezka, "/shell.bur"))
+        wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ | PRAWO_PLIKI_ZAPISZ |
+                   PRAWO_SIEC | PRAWO_URUCHOM_PROGRAM;
+    prawa_dziecka &= wymagane;
 
     /*
      * Proces uruchamiany przez zwykle Ring 3 nie dziedziczy praw do
@@ -1803,6 +1829,12 @@ bool operacja_systemowa_dozwolona(
 }
 
 uint64_t reset_ps2() {
+    wypisz_log("[POWER] Restart systemu.");
+    asm volatile("cli" ::: "memory");
+    if (acpi_wykonaj_restart()) {
+        for (;;) asm volatile("hlt" ::: "memory");
+    }
+    wypisz_log("[POWER] Restart przez fallback 8042.");
     bool gotowe = false;
 
     for (uint32_t proby = 0;
@@ -1865,6 +1897,17 @@ uint64_t reset_ps2() {
 
 [[noreturn]]
 void wylacz_qemu() {
+    wypisz_log("[POWER] Wylaczanie systemu.");
+    asm volatile("cli" ::: "memory");
+    if (acpi_wykonaj_shutdown()) {
+        for (;;) asm volatile("hlt" ::: "memory");
+    }
+
+#ifndef BURSZTYN_DEVELOPER_QEMU_POWER_FALLBACK
+#define BURSZTYN_DEVELOPER_QEMU_POWER_FALLBACK 0
+#endif
+#if BURSZTYN_DEVELOPER_QEMU_POWER_FALLBACK
+    wypisz_log("[POWER] Shutdown QEMU fallback.");
     /*
      * QEMU/Bochs compatibility ports.
      */
@@ -1881,7 +1924,6 @@ void wylacz_qemu() {
           )
         : "memory"
     );
-
     asm volatile(
         "outw %0, %1"
         :
@@ -1909,6 +1951,9 @@ void wylacz_qemu() {
           )
         : "memory"
     );
+#else
+    wypisz_log("[POWER-WARN] Brak wspieranego mechanizmu shutdown.");
+#endif
 
     for (;;) {
         asm volatile(
@@ -2158,6 +2203,11 @@ void bws_zakoncz_biezacy_proces() {
                 aktualny_pid
             );
 
+            bws_gui_powiadom_lifecycle(
+                BWS_ZDARZENIE_OKNO_ZAMKNIETE,
+                aktualny_pid
+            );
+
             bws_gui_usun_stan_procesu(aktualny_pid);
 
             bws_gui_zwolnij_mysz_procesu(
@@ -2165,7 +2215,8 @@ void bws_zakoncz_biezacy_proces() {
             );
         }
 
-        skladacz_obrazu_oznacz_dirty();
+        /* usun_warstwe() zachowuje stary rect i oznacza dokladnie ten
+           obszar. Pelnoekranowy dirty przy kazdym SYS_EXIT byl zbedny. */
     }
 
     zakoncz_aktualny_proces();
@@ -2303,13 +2354,10 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
                     arg3
                 );
 
-        case 4:
-            return
-                static_cast<uint64_t>(
-                    static_cast<uint8_t>(
-                        pobierz_znak_klawiatury()
-                    )
-                );
+        case 4: {
+            const char znak=scheduler_pobierz_klawisz_lub_zablokuj(aktualny_pid);
+            return static_cast<uint64_t>(static_cast<uint8_t>(znak));
+        }
 
         case 5:
             return
@@ -2365,11 +2413,11 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
             if (!proces_ma_prawo(
                     proces,
                     PRAWO_SIEC)) {
-
+                wypisz_log("[ICMP] result=NET_ERR_PERMISSION");
                 return 0;
             }
 
-            bws_siec_ping(
+            return bws_siec_ping(
                 static_cast<uint8_t>(
                     arg1),
                 static_cast<uint8_t>(
@@ -2379,8 +2427,6 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
                 static_cast<uint8_t>(
                     arg4)
             );
-
-            return 1;
         }
 
         case 12:
@@ -2882,6 +2928,12 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
                     z_order
                 );
 
+            if (id >= 0)
+                bws_gui_aktywuj_warstwe(aktualny_pid);
+            if (id >= 0)
+                bws_gui_powiadom_lifecycle(BWS_ZDARZENIE_OKNO_UTWORZONE,
+                                           aktualny_pid);
+
             return
                 id >= 0
                     ? static_cast<uint64_t>(
@@ -2946,6 +2998,38 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
             if (!proces_ma_prawo(proces, PRAWO_GUI)) return 0;
             bws_gui_ustaw_capture(arg1 != 0);
             return 1;
+
+        case 40:
+            if (!operacja_systemowa_dozwolona(proces) ||
+                !proces_ma_prawo(proces, PRAWO_GUI)) return 0;
+            skladacz_obrazu_ustaw_overlay(
+                aktualny_pid, arg1 != 0, gorne_i32(arg2), dolne_i32(arg2),
+                gorne_i32(arg3), dolne_i32(arg3));
+            return 1;
+
+        case 41:
+            if (!proces_ma_prawo(proces, PRAWO_GUI)) return 0;
+            return bws_gui_minimalizuj_warstwe(aktualny_pid) ? 1ULL : 0ULL;
+
+        case 42: {
+            if (!operacja_systemowa_dozwolona(proces) || arg1 == 0 ||
+                arg2 == 0 || arg2 > SKLADACZ_MAKS_WARSTW) return 0;
+            const uint32_t max = static_cast<uint32_t>(arg2);
+            const size_t bytes = static_cast<size_t>(max) * sizeof(GuiOknoInfo);
+            if (!czy_bezpieczny_zakres_uzytkownika_do_zapisu(
+                    reinterpret_cast<void*>(arg1), bytes)) return 0;
+            GuiOknoInfo snapshot[SKLADACZ_MAKS_WARSTW] = {};
+            const uint32_t count = skladacz_obrazu_snapshot_okien(
+                snapshot, max, bws_gui_aktywny_pid());
+            return skopiuj_do_przestrzeni_uzytkownika(
+                       reinterpret_cast<void*>(arg1), snapshot,
+                       static_cast<size_t>(count) * sizeof(GuiOknoInfo))
+                       ? count : 0ULL;
+        }
+
+        case 43:
+            if (!operacja_systemowa_dozwolona(proces) || arg1 == 0) return 0;
+            return bws_gui_aktywuj_okno(arg1) ? 1ULL : 0ULL;
 
         default:
             /*

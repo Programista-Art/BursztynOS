@@ -571,9 +571,8 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
 
     if (aktualny_pid > 0 &&
         aktualny_pid < MAKS_PROCESOW) {
-        proces_juz_pusty =
-            tablica_procesow[aktualny_pid].stan ==
-            PROCES_PUSTY;
+        const int stan_procesu=tablica_procesow[aktualny_pid].stan;
+        proces_juz_pusty=stan_procesu==PROCES_PUSTY||stan_procesu==PROCES_KONCZACY;
     }
 
     /*

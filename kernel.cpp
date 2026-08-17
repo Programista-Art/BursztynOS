@@ -23,10 +23,45 @@
 #include "loader.h"
 #include "ahci.h"
 #include "e1000.h"
+#include "siec.h"
 #include "heap.h"
 #include "scheduler.h"
 #include "skladacz_obrazu.h"
+#include "acpi.h"
+#include "sterowniki/czas/hpet.h"
 #include "sterowniki/dzwiek/hda.h"
+
+#ifndef BURSZTYN_DEBUG_NET_SELFTEST
+#define BURSZTYN_DEBUG_NET_SELFTEST 0
+#endif
+
+#ifndef BURSZTYN_DEBUG_PSF_SELFTEST
+#define BURSZTYN_DEBUG_PSF_SELFTEST 0
+#endif
+
+#if BURSZTYN_DEBUG_NET_SELFTEST
+static void wykonaj_selftest_sieci() {
+    const uint32_t gateway = bws_siec_ping(10, 0, 2, 2);
+    wypisz_log(gateway ? "[NET-TEST] ping 10.0.2.2 send: OK" :
+                         "[NET-TEST] ping 10.0.2.2 send: BLAD");
+    const uint32_t dns = bws_siec_ping(10, 0, 2, 3);
+    wypisz_log(dns ? "[NET-TEST] ping 10.0.2.3 send: OK" :
+                     "[NET-TEST] ping 10.0.2.3 send: BLAD");
+    if (gateway && dns) {
+        uint8_t ip[4] = {};
+        const bool dns_ok = kernel_siec_dns("example.com", ip);
+        wypisz_log(dns_ok ? "[NET-TEST] DNS example.com: OK" :
+                           "[NET-TEST] DNS example.com: BLAD");
+        if (dns_ok) {
+            static char odpowiedz[32U * 1024U];
+            const bool http_ok = kernel_siec_pobierz_http(
+                ip, "example.com", "/", odpowiedz, sizeof(odpowiedz));
+            wypisz_log(http_ok ? "[NET-TEST] HTTP/80 example.com: OK" :
+                                "[NET-TEST] HTTP/80 example.com: BLAD");
+        }
+    }
+}
+#endif
 
 /* =========================================================================
  * POLACZENIA Z INNYMI MODULAMI
@@ -58,6 +93,9 @@ extern "C" bool utworz_plik(const char* sciezka);
 extern "C" bool zapisz_do_pliku(const char* sciezka,
                                 const char* dane,
                                 uint32_t dlugosc);
+extern "C" bool czytaj_z_pliku(const char* sciezka,
+                                char* dane,
+                                uint32_t dlugosc);
 extern "C" bool utworz_katalog(const char* sciezka);
 
 extern "C" void inicjalizuj_psf(void* adres_ram_dysku,
@@ -71,6 +109,8 @@ extern "C" void uruchom_klienta_dhcp();
 
 extern "C" uint8_t _binary_shell_bin_start[];
 extern "C" uint8_t _binary_shell_bin_end[];
+extern "C" uint8_t _binary_cytaty_txt_start[];
+extern "C" uint8_t _binary_cytaty_txt_end[];
 
 extern "C" uint8_t _binary_notatnik_bin_start[];
 extern "C" uint8_t _binary_notatnik_bin_end[];
@@ -114,7 +154,9 @@ constexpr uint32_t ROZMIAR_RAM_DYSKU_PSF =
 
 constexpr uint16_t PORT_COM1 = 0x3F8;
 
-constexpr uint64_t PRAWA_MENEDZERA_OKIEN = 0xFFFFFFFFULL;
+constexpr uint64_t PRAWA_MENEDZERA_OKIEN =
+    PRAWO_GUI | PRAWO_URUCHOM_PROGRAM | PRAWO_SYSTEM_CONFIG |
+    PRAWO_PLIKI_CZYTAJ | PRAWO_PLIKI_ZAPISZ | PRAWO_SIEC;
 
 bool grafika_gotowa = false;
 
@@ -569,7 +611,7 @@ void utworz_drabine_katalogow() {
 
 void instaluj_wbudowane_programy() {
     static const char MANIFEST_PRZEGLADARKI[] =
-        "nazwa = \"Hussar\"\n"
+        "nazwa = \"Husarz\"\n"
         "autor = \"Programista Art\"\n"
         "wersja = \"0.1\"\n"
         "poziom_zaufania = 4\n"
@@ -622,6 +664,17 @@ void instaluj_wbudowane_programy() {
     wypisz_log(
         "[BSP] Wbudowana Powloka zainstalowana.");
 
+    uint32_t cytaty_rozmiar = 0;
+    if (!pobierz_rozmiar_bloba(_binary_cytaty_txt_start,
+                               _binary_cytaty_txt_end, &cytaty_rozmiar) ||
+        !zapisz_plik_od_nowa("/cytaty.txt",
+            reinterpret_cast<const char*>(_binary_cytaty_txt_start),
+            cytaty_rozmiar)) {
+        wypisz_log("[BSP-BLAD] Nie mozna zainstalowac /cytaty.txt.");
+    } else {
+        wypisz_log("[BSP] /cytaty.txt zainstalowany.");
+    }
+
     if (!instaluj_paczke(
             "/programy/przegladarka.cebula/opis.aplikacji",
             MANIFEST_PRZEGLADARKI,
@@ -630,10 +683,10 @@ void instaluj_wbudowane_programy() {
             _binary_przegladarka_bin_end)) {
 
         wypisz_log(
-            "[BSP-BLAD] Nie mozna zainstalowac przegladarki Hussar.");
+            "[BSP-BLAD] Nie mozna zainstalowac przegladarki Husarz.");
     } else {
         wypisz_log(
-            "[BSP] Przegladarka Hussar zainstalowana jako .cebula.");
+            "[BSP] Przegladarka Husarz zainstalowana jako .cebula.");
     }
 
     if (!instaluj_paczke(
@@ -828,6 +881,15 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     wypisz_log(
         "[HEAP] Sterta jadra 16 MiB gotowa.");
 
+    if (!acpi_inicjalizuj(multiboot_info_ptr))
+        wypisz_log("[ACPI] Brak poprawnej tabeli HPET w RSDT/XSDT.");
+    else
+        wypisz_log(acpi_uzyto_xsdt() ? "[ACPI] Uzywam XSDT." : "[ACPI] Uzywam RSDT.");
+    if (hpet_inicjalizuj())
+        wypisz_log(hpet_test_wrap_diagnostyczny()
+            ? "[HPET-TEST] 32-bit wrap monotonic: OK"
+            : "[HPET-TEST] 32-bit wrap monotonic: BLAD");
+
     /* ---------------------------------------------------------------------
      * Scheduler i kryptografia
      * ------------------------------------------------------------------ */
@@ -885,6 +947,9 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
      * informujacej, czy karta zostala odnaleziona.
      */
     uruchom_klienta_dhcp();
+#if BURSZTYN_DEBUG_NET_SELFTEST
+    wykonaj_selftest_sieci();
+#endif
 
     wypisz_log(
         "[SIEC] Inicjalizacja stosu sieciowego zakonczona.");
@@ -929,6 +994,29 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
 
     utworz_drabine_katalogow();
 
+#if BURSZTYN_DEBUG_PSF_SELFTEST
+    {
+        static const char sciezka[] = "/logi/test_kernel.txt";
+        static const char wzorzec[] = "ABC123";
+        char odczyt[sizeof(wzorzec)] = {};
+        if (czytaj_z_pliku(sciezka, odczyt, sizeof(odczyt) - 1U) &&
+            odczyt[0] == 'A' && odczyt[1] == 'B' && odczyt[2] == 'C' &&
+            odczyt[3] == '1' && odczyt[4] == '2' && odczyt[5] == '3') {
+            wypisz_log("[PSF-TEST] persisted read: OK");
+        } else {
+            (void)utworz_plik(sciezka);
+            const bool zapis = zapisz_do_pliku(
+                sciezka, wzorzec, static_cast<uint32_t>(sizeof(wzorzec) - 1U));
+            wypisz_log(zapis ? "[PSF-TEST] create/write: OK" :
+                               "[PSF-TEST] create/write: BLAD");
+        }
+    }
+#endif
+
+    /* Pierwszy skan wykrywa urzadzenia przed istnieniem PSF. Ten przebieg
+       zapisuje raport dopiero po utworzeniu /logi. */
+    skanuj_magistrale_pci();
+
     wypisz_log(
         "[BSP] Drzewiasty system plikow PSF gotowy.");
 
@@ -944,7 +1032,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
 
     if (!bws_uruchom_program_z_pliku(
             "/menedzer_okien.bur",
-            PZB_UZYTKOWNIK,
+            PZB_USLUGI,
             PRAWA_MENEDZERA_OKIEN,
             false)) {
 

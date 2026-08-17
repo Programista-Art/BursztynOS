@@ -46,6 +46,14 @@ multiboot_header_start:
     .long MULTIBOOT2_INFO_TAG_MEMORY_MAP
     .long MULTIBOOT2_INFO_TAG_FRAMEBUFFER
 
+    /* ACPI old/new sa opcjonalne: brak HPET nie moze blokowac bootu. */
+    .balign 8
+    .short MULTIBOOT2_HEADER_TAG_INFO_REQUEST
+    .short 1
+    .long 16
+    .long 14
+    .long 15
+
     /*
      * Preferowany tryb framebuffer.
      */

@@ -51,10 +51,15 @@
 
 #include "siec.h"
 #include "e1000.h"
+#include "sterowniki/czas/hpet.h"
 
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+
+#ifndef BURSZTYN_DEBUG_DNS_RAW
+#define BURSZTYN_DEBUG_DNS_RAW 0
+#endif
 
 /* =========================================================================
  * 1. API ZEWNĘTRZNE
@@ -153,23 +158,17 @@ constexpr size_t MAKS_RAMKA_ETH =
 constexpr size_t MAKS_PAKIET_IPV4 =
     1500U;
 
-constexpr uint32_t ARP_TIMEOUT_PETLE =
-    2U * 1000U * 1000U;
+constexpr uint64_t ARP_TIMEOUT_MS = 2000;
+constexpr uint64_t DHCP_TIMEOUT_MS = 8000;
+constexpr uint64_t PING_TIMEOUT_MS = 4000;
+constexpr uint64_t DNS_TIMEOUT_MS = 4000;
+constexpr uint64_t TCP_CONNECT_TIMEOUT_MS = 5000;
+constexpr uint64_t HTTP_TIMEOUT_MS = 12000;
 
-constexpr uint32_t DHCP_TIMEOUT_PETLE =
-    8U * 1000U * 1000U;
-
-constexpr uint32_t PING_TIMEOUT_PETLE =
-    4U * 1000U * 1000U;
-
-constexpr uint32_t DNS_TIMEOUT_PETLE =
-    4U * 1000U * 1000U;
-
-constexpr uint32_t TCP_CONNECT_TIMEOUT_PETLE =
-    5U * 1000U * 1000U;
-
-constexpr uint32_t HTTP_TIMEOUT_PETLE =
-    12U * 1000U * 1000U;
+uint64_t deadline_ms(uint64_t odstep) {
+    const uint64_t teraz = czas_monotoniczny_ms();
+    return teraz > UINT64_MAX - odstep ? UINT64_MAX : teraz + odstep;
+}
 
 constexpr size_t ROZMIAR_TABLICY_ARP =
     16;
@@ -865,6 +864,44 @@ void wypisz_ip_log(
     );
 }
 
+#if BURSZTYN_DEBUG_DNS_RAW
+void wypisz_dns_u16(const char* prefix, uint16_t wartosc) {
+    char log[96] = {};
+    char liczba[8] = {};
+    size_t p = 0;
+    uint_do_str(wartosc, liczba, sizeof(liczba));
+    if (dopisz_tekst(log, sizeof(log), &p, prefix) &&
+        dopisz_tekst(log, sizeof(log), &p, liczba)) wypisz_log(log);
+}
+
+void wypisz_dns_u32(const char* prefix, uint32_t wartosc) {
+    char log[96] = {};
+    char liczba[16] = {};
+    size_t p = 0;
+    uint_do_str(wartosc, liczba, sizeof(liczba));
+    if (dopisz_tekst(log, sizeof(log), &p, prefix) &&
+        dopisz_tekst(log, sizeof(log), &p, liczba)) wypisz_log(log);
+}
+
+void wypisz_dns_hexdump(const uint8_t* dane, size_t dlugosc) {
+    static const char hex[] = "0123456789ABCDEF";
+    if (!dane) return;
+    if (dlugosc > DNS_PACKET_MAX) dlugosc = DNS_PACKET_MAX;
+    for (size_t off = 0; off < dlugosc; off += 16U) {
+        char linia[64] = "[DNS-RAW] ";
+        size_t p = 10U;
+        const size_t koniec = off + 16U < dlugosc ? off + 16U : dlugosc;
+        for (size_t i = off; i < koniec && p + 3U < sizeof(linia); ++i) {
+            linia[p++] = hex[(dane[i] >> 4U) & 0x0FU];
+            linia[p++] = hex[dane[i] & 0x0FU];
+            linia[p++] = ' ';
+        }
+        linia[p] = '\0';
+        wypisz_log(linia);
+    }
+}
+#endif
+
 /* =========================================================================
  * 6. INTERNET CHECKSUM
  * ========================================================================= */
@@ -1042,6 +1079,12 @@ uint8_t nasz_ip[4] = {
 uint8_t brama_ip[4] = {
     0, 0, 0, 0
 };
+
+volatile uint64_t ipv4_rx_packets = 0;
+volatile uint64_t udp_rx_packets = 0;
+volatile uint64_t dns_rx_packets = 0;
+volatile uint64_t arp_rx_packets = 0;
+volatile uint64_t icmp_rx_packets = 0;
 
 namespace {
 
@@ -1499,14 +1542,14 @@ bool wyslij_ethernet(
             60U;
     }
 
-    e1000_wyslij_pakiet(
+    const bool wyslano = e1000_wyslij_pakiet(
         ramka,
         static_cast<uint16_t>(
             dlugosc
         )
     );
 
-    return true;
+    return wyslano;
 }
 
 /* =========================================================================
@@ -1638,6 +1681,12 @@ bool rozwiaz_adres_mac(
         return false;
     }
 
+    /* 127/8 jest przestrzenia loopback i nigdy nie moze trafic do E1000. */
+    if (cel_ip[0] == 127U) {
+        wypisz_log("[ROUTE] result=NET_ERR_LOOPBACK_UNSUPPORTED");
+        return false;
+    }
+
     if (ip_rowne(
             cel_ip,
             nasz_ip)) {
@@ -1681,6 +1730,7 @@ bool rozwiaz_adres_mac(
             nastepny_hop,
             cel_ip
         );
+        wypisz_log("[ROUTE] local subnet");
     } else {
         if (ip_jest_zero(
                 brama_ip)) {
@@ -1692,23 +1742,26 @@ bool rozwiaz_adres_mac(
             nastepny_hop,
             brama_ip
         );
+        wypisz_log("[ROUTE] via gateway");
     }
+    wypisz_ip_log("[ROUTE] next_hop=", nastepny_hop);
 
     if (szukaj_w_cache_arp(
             nastepny_hop,
             wyjscie_mac)) {
-
+        wypisz_ip_log("[ARP] cache hit ip=", nastepny_hop);
         return true;
     }
+
+    wypisz_ip_log("[ARP] cache miss ip=", nastepny_hop);
+    wypisz_ip_log("[ARP] request ip=", nastepny_hop);
 
     wyslij_zapytanie_arp(
         nastepny_hop
     );
 
-    for (uint32_t proba = 0;
-         proba <
-            ARP_TIMEOUT_PETLE;
-         ++proba) {
+    const uint64_t arp_deadline = deadline_ms(ARP_TIMEOUT_MS);
+    while (czas_monotoniczny_ms() < arp_deadline) {
 
         e1000_obsluz_odbior();
 
@@ -1716,6 +1769,7 @@ bool rozwiaz_adres_mac(
                 nastepny_hop,
                 wyjscie_mac)) {
 
+            wypisz_ip_log("[ARP] resolved ip=", nastepny_hop);
             return true;
         }
 
@@ -1724,6 +1778,7 @@ bool rozwiaz_adres_mac(
         );
     }
 
+    wypisz_ip_log("[ARP] timeout ip=", nastepny_hop);
     return false;
 }
 
@@ -2241,10 +2296,8 @@ extern "C" void uruchom_klienta_dhcp() {
         return;
     }
 
-    for (uint32_t proba = 0;
-         proba <
-            DHCP_TIMEOUT_PETLE;
-         ++proba) {
+    const uint64_t offer_deadline = deadline_ms(DHCP_TIMEOUT_MS);
+    while (czas_monotoniczny_ms() < offer_deadline) {
 
         e1000_obsluz_odbior();
 
@@ -2287,10 +2340,8 @@ extern "C" void uruchom_klienta_dhcp() {
         return;
     }
 
-    for (uint32_t proba = 0;
-         proba <
-            DHCP_TIMEOUT_PETLE;
-         ++proba) {
+    const uint64_t ack_deadline = deadline_ms(DHCP_TIMEOUT_MS);
+    while (czas_monotoniczny_ms() < ack_deadline) {
 
         e1000_obsluz_odbior();
 
@@ -2345,6 +2396,11 @@ extern "C" void uruchom_klienta_dhcp() {
     );
 
     wypisz_ip_log(
+        "[DHCP] Maska: ",
+        maska_podsieci
+    );
+
+    wypisz_ip_log(
         "[DHCP] DNS: ",
         serwer_dns_ip
     );
@@ -2368,7 +2424,7 @@ uint16_t oczekiwany_ping_seq =
 volatile bool odebrano_pong =
     false;
 
-extern "C" void bws_siec_ping(
+extern "C" uint32_t bws_siec_ping(
     uint8_t ip1,
     uint8_t ip2,
     uint8_t ip3,
@@ -2376,10 +2432,9 @@ extern "C" void bws_siec_ping(
 ) {
     if (!konfiguracja_ipv4_gotowa) {
         wypisz_log(
-            "[ICMP] Brak konfiguracji IPv4."
+            "[ICMP] result=NET_ERR_NO_IP"
         );
-
-        return;
+        return 0;
     }
 
     uint8_t cel_ip[4] = {
@@ -2394,11 +2449,12 @@ extern "C" void bws_siec_ping(
             cel_ip)) {
 
         wypisz_log(
-            "[ICMP] Nieprawidlowy cel PING."
+            "[ICMP] result=NET_ERR_INVALID_ARG"
         );
-
-        return;
+        return 0;
     }
+
+    wypisz_ip_log("[ICMP] dst=", cel_ip);
 
     uint8_t docelowy_mac[6] = {};
 
@@ -2407,10 +2463,9 @@ extern "C" void bws_siec_ping(
             docelowy_mac)) {
 
         wypisz_log(
-            "[ICMP] Brak trasy/ARP do celu."
+            "[ICMP] result=NET_ERR_ARP_TIMEOUT"
         );
-
-        return;
+        return 0;
     }
 
     constexpr size_t ICMP_PAYLOAD =
@@ -2453,7 +2508,8 @@ extern "C" void bws_siec_ping(
             nasz_ip,
             cel_ip)) {
 
-        return;
+        wypisz_log("[ICMP] result=NET_ERR_IPV4_HEADER");
+        return 0;
     }
 
     IcmpEchoNaglowek* icmp =
@@ -2528,13 +2584,14 @@ extern "C" void bws_siec_ping(
             ramka,
             sizeof(ramka))) {
 
-        return;
+        wypisz_log("[ICMP] result=NET_ERR_E1000_TX");
+        return 0;
     }
+    wypisz_ip_log("[IP] source=", nasz_ip);
+    wypisz_log("[ICMP] send=NET_OK");
 
-    for (uint32_t proba = 0;
-         proba <
-            PING_TIMEOUT_PETLE;
-         ++proba) {
+    const uint64_t ping_deadline = deadline_ms(PING_TIMEOUT_MS);
+    while (czas_monotoniczny_ms() < ping_deadline) {
 
         e1000_obsluz_odbior();
 
@@ -2545,8 +2602,8 @@ extern "C" void bws_siec_ping(
             wypisz_log(
                 "[ICMP] Echo Reply odebrane."
             );
-
-            return;
+            wypisz_log("[ICMP] result=NET_OK_REPLY");
+            return 2;
         }
 
         asm volatile(
@@ -2555,8 +2612,9 @@ extern "C" void bws_siec_ping(
     }
 
     wypisz_log(
-        "[ICMP] Timeout oczekiwania na Echo Reply."
+        "[ICMP] result=NET_OK_REPLY_TIMEOUT"
     );
+    return 1;
 }
 
 /* =========================================================================
@@ -3026,6 +3084,10 @@ extern "C" bool kernel_siec_dns(
             PORT_DNS_START
         );
 
+    wypisz_log("[DNS] query host=");
+    wypisz_log(domena);
+    wypisz_ip_log("[DNS] server=", serwer_dns_ip);
+
     dns_oczekiwane_id =
         id;
 
@@ -3057,10 +3119,8 @@ extern "C" bool kernel_siec_dns(
         return false;
     }
 
-    for (uint32_t proba = 0;
-         proba <
-            DNS_TIMEOUT_PETLE;
-         ++proba) {
+    const uint64_t dns_deadline = deadline_ms(DNS_TIMEOUT_MS);
+    while (czas_monotoniczny_ms() < dns_deadline) {
 
         e1000_obsluz_odbior();
 
@@ -3073,6 +3133,8 @@ extern "C" bool kernel_siec_dns(
                 dns_resolved_ip
             );
 
+            wypisz_ip_log("[DNS] A=", dns_resolved_ip);
+
             return
                 !ip_jest_zero(
                     wyjsciowy_ip
@@ -3083,6 +3145,7 @@ extern "C" bool kernel_siec_dns(
             "pause"
         );
     }
+    wypisz_log("[DNS] response timeout.");
 
     return false;
 }
@@ -3497,10 +3560,8 @@ bool tcp_przygotuj_polaczenie(
 }
 
 bool tcp_czekaj_na_polaczenie() {
-    for (uint32_t proba = 0;
-         proba <
-            TCP_CONNECT_TIMEOUT_PETLE;
-         ++proba) {
+    const uint64_t connect_deadline = deadline_ms(TCP_CONNECT_TIMEOUT_MS);
+    while (czas_monotoniczny_ms() < connect_deadline) {
 
         e1000_obsluz_odbior();
 
@@ -4211,10 +4272,8 @@ extern "C" bool kernel_siec_pobierz_http(
             fragment;
     }
 
-    for (uint32_t proba = 0;
-         proba <
-            HTTP_TIMEOUT_PETLE;
-         ++proba) {
+    const uint64_t http_deadline = deadline_ms(HTTP_TIMEOUT_MS);
+    while (czas_monotoniczny_ms() < http_deadline) {
 
         e1000_obsluz_odbior();
 
@@ -4433,6 +4492,9 @@ bool udp_poprawny(
     }
 
     if (udp->suma_kontrolna != 0) {
+        /* Generator koduje wynik 0 jako 0xFFFF dla UDP (RFC 768).
+           Ta sama funkcja uzyta do weryfikacji zwraca wiec 0xFFFF dla
+           poprawnego segmentu zawierajacego juz checksum. */
         if (suma_transport_ipv4(
                 widok.ip->zrodlo_ip,
                 widok.ip->cel_ip,
@@ -4440,7 +4502,7 @@ bool udp_poprawny(
                 reinterpret_cast<uint8_t*>(
                     udp
                 ),
-                udp_len) != 0) {
+                udp_len) != 0xFFFFU) {
 
             return false;
         }
@@ -4473,6 +4535,7 @@ void obsluz_arp(
 
         return;
     }
+    __atomic_add_fetch(&arp_rx_packets, 1ULL, __ATOMIC_RELAXED);
 
     EthNaglowek* eth =
         reinterpret_cast<EthNaglowek*>(
@@ -4525,6 +4588,7 @@ void obsluz_arp(
         arp->nadawca_ip,
         arp->nadawca_mac
     );
+    wypisz_ip_log("[ARP] reply/cache ip=", arp->nadawca_ip);
 
     if (!konfiguracja_ipv4_gotowa ||
         !ip_rowne(
@@ -4847,6 +4911,25 @@ void obsluz_dns(
             payload + 6
         );
 
+    const uint16_t nscount =
+        czytaj_be16(payload + 8);
+    const uint16_t arcount =
+        czytaj_be16(payload + 10);
+
+#if BURSZTYN_DEBUG_DNS_RAW
+    wypisz_dns_u16("[DNS-RAW] txid=", id);
+    wypisz_dns_u16("[DNS-RAW] flags=", flags);
+    wypisz_dns_u16("[DNS-RAW] rcode=", flags & 0x000FU);
+    wypisz_dns_u16("[DNS-RAW] qdcount=", qdcount);
+    wypisz_dns_u16("[DNS-RAW] ancount=", ancount);
+    wypisz_dns_u16("[DNS-RAW] nscount=", nscount);
+    wypisz_dns_u16("[DNS-RAW] arcount=", arcount);
+    wypisz_dns_hexdump(payload, payload_len);
+#else
+    (void)nscount;
+    (void)arcount;
+#endif
+
     if (id !=
             dns_oczekiwane_id ||
         (flags &
@@ -4921,6 +5004,18 @@ void obsluz_dns(
                 8U
             );
 
+#if BURSZTYN_DEBUG_DNS_RAW
+        const uint32_t ttl =
+            (static_cast<uint32_t>(payload[pos + 4U]) << 24U) |
+            (static_cast<uint32_t>(payload[pos + 5U]) << 16U) |
+            (static_cast<uint32_t>(payload[pos + 6U]) << 8U) |
+            static_cast<uint32_t>(payload[pos + 7U]);
+        wypisz_dns_u16("[DNS-RAW] answer type=", typ);
+        wypisz_dns_u16("[DNS-RAW] answer class=", klasa);
+        wypisz_dns_u32("[DNS-RAW] answer ttl=", ttl);
+        wypisz_dns_u16("[DNS-RAW] answer rdlength=", rdlen);
+#endif
+
         pos +=
             10U;
 
@@ -4935,6 +5030,11 @@ void obsluz_dns(
         if (typ == 1 &&
             klasa == 1 &&
             rdlen == 4) {
+
+#if BURSZTYN_DEBUG_DNS_RAW
+            /* To jest RDATA z pakietu przed jakakolwiek interpretacja. */
+            wypisz_ip_log("[DNS-RAW] A rdata=", payload + pos);
+#endif
 
             skopiuj_ip(
                 dns_resolved_ip,
@@ -4980,6 +5080,7 @@ void obsluz_udp(
 
         return;
     }
+    __atomic_add_fetch(&udp_rx_packets, 1ULL, __ATOMIC_RELAXED);
 
     const uint16_t port_docelowy =
         siec_na_host16(
@@ -5010,6 +5111,8 @@ void obsluz_udp(
     if (port_docelowy ==
         dns_oczekiwany_port) {
 
+        __atomic_add_fetch(&dns_rx_packets, 1ULL, __ATOMIC_RELAXED);
+
         obsluz_dns(
             widok,
             udp,
@@ -5030,6 +5133,7 @@ void obsluz_icmp(
 
         return;
     }
+    __atomic_add_fetch(&icmp_rx_packets, 1ULL, __ATOMIC_RELAXED);
 
     if (suma_kontrolna_bajty(
             widok.payload,
@@ -5399,6 +5503,7 @@ void obsluz_ipv4(
 
         return;
     }
+    __atomic_add_fetch(&ipv4_rx_packets, 1ULL, __ATOMIC_RELAXED);
 
     /*
      * DHCP musi byc dopuszczone zanim nasz_ip zostanie skonfigurowane.

@@ -217,7 +217,7 @@ char sciezka_input[
 char aktualna_sciezka[
     BAJTY_SCIEZKI
 ] __attribute__((section(".data"))) =
-    "/plik.txt";
+    "/uzytkownicy/plik.txt";
 
 int liczba_linii =
     1;
@@ -1995,12 +1995,8 @@ void ustaw_minimalizacje(
         false;
 
     if (stan) {
-        /*
-         * Dla warstwy procesu gui_odswiez_pulpit() czysci powierzchnie
-         * aplikacji do przezroczystosci.
-         */
-        gui_odswiez_pulpit();
-        gui_odswiez();
+        if (!gui_minimalizuj_okno()) aplikacja_zminimalizowana = false;
+        gui_ustaw_capture_myszy(false);
     }
 }
 
@@ -2080,6 +2076,13 @@ void rysuj_status() {
             sciezka_input
         );
 
+        gui_wypisz_tekst_kolor(
+            WIN_X + 120 + oblicz_szerokosc_tekstu(sciezka_input, 1),
+            WIN_Y + WIN_H - 18,
+            KOLOR_BURSZTYN_JASNY,
+            "_"
+        );
+
         return;
     }
 
@@ -2100,6 +2103,13 @@ void rysuj_status() {
             sciezka_input
         );
 
+        gui_wypisz_tekst_kolor(
+            WIN_X + 120 + oblicz_szerokosc_tekstu(sciezka_input, 1),
+            WIN_Y + WIN_H - 18,
+            KOLOR_BURSZTYN_JASNY,
+            "_"
+        );
+
         return;
     }
 
@@ -2118,6 +2128,28 @@ void rysuj_status() {
             "*"
         );
     }
+}
+
+void rysuj_pole_sciezki() {
+    const int x = WIN_X + 120;
+    const int y = WIN_Y + WIN_H - 18;
+    const int w = WIN_W - 128;
+
+    gui_rysuj_prostokat(x, y, w, 18, KOLOR_TLO);
+
+    /* Najszerszy glif ma 16 px + 1 px odstepu. Pokazujemy koniec sciezki,
+       ale nigdy nie pozwalamy tekstowi rozszerzyc dirty poza pole. */
+    const int maks_znakow = (w - 18) / 17;
+    int start = sciezka_len > maks_znakow ? sciezka_len - maks_znakow : 0;
+    while (start < sciezka_len &&
+           utf8_kontynuacja(static_cast<unsigned char>(sciezka_input[start])))
+        ++start;
+    const char* widoczna = sciezka_input + start;
+    gui_wypisz_tekst_kolor(x, y, KOLOR_BIALY, widoczna);
+
+    const int advance = oblicz_szerokosc_tekstu(widoczna, 1);
+    gui_wypisz_tekst_kolor(x + advance, y,
+                           KOLOR_BURSZTYN_JASNY, "_");
 }
 
 void rysuj_menu_plik() {
@@ -2343,13 +2375,40 @@ void rysuj_pomoc() {
     );
 }
 
-void rysuj_tekst_dokumentu() {
-    const int max_lines =
-        liczba_widocznych_linii();
-
+void rysuj_wiersz_dokumentu(int actual_r) {
     char widoczna[
         BAJTY_LINII
     ] = {};
+
+    const int i = actual_r - scroll_y;
+    if (i < 0 || i >= liczba_widocznych_linii()) return;
+
+    const int y = WIN_Y + TEXT_Y_OFFSET + i * LINE_H;
+    gui_wyczyscz_obszar(WIN_X + 8, y, WIN_W - 16, LINE_H);
+
+    if (actual_r < 0 || actual_r >= liczba_linii) return;
+
+    zbuduj_widoczna_linie(actual_r, widoczna, sizeof(widoczna));
+    if (widoczna[0] != '\0') gui_wypisz_tekst(WIN_X + 8, y, widoczna);
+
+    if (actual_r == cur_r && tryb == TrybPracy::EDYCJA_TEKSTU &&
+        !okno_pomoc_widoczne) {
+        const int ekran_kolumna = kolumna_kursora() - scroll_x;
+        if (ekran_kolumna >= 0 &&
+            ekran_kolumna < liczba_widocznych_kolumn()) {
+            char prefiks_karetki[256] = {};
+            int limit = ekran_kolumna > 255 ? 255 : ekran_kolumna;
+            for (int k = 0; k < limit && widoczna[k] != '\0'; ++k)
+                prefiks_karetki[k] = widoczna[k];
+            const int advance = oblicz_szerokosc_tekstu(prefiks_karetki, 1);
+            gui_wypisz_tekst_kolor(WIN_X + 8 + advance, y,
+                                   KOLOR_BURSZTYN_JASNY, "_");
+        }
+    }
+}
+
+void rysuj_tekst_dokumentu() {
+    const int max_lines = liczba_widocznych_linii();
 
     for (int i = 0;
          i <
@@ -2360,67 +2419,7 @@ void rysuj_tekst_dokumentu() {
             scroll_y +
             i;
 
-        const int y =
-            WIN_Y +
-            TEXT_Y_OFFSET +
-            i *
-                LINE_H;
-
-        gui_wyczyscz_obszar(
-            WIN_X + 8,
-            y,
-            WIN_W - 16,
-            LINE_H
-        );
-
-        if (actual_r >=
-            liczba_linii) {
-
-            continue;
-        }
-
-        zbuduj_widoczna_linie(
-            actual_r,
-            widoczna,
-            sizeof(widoczna)
-        );
-
-        if (widoczna[0] != '\0') {
-            gui_wypisz_tekst(
-                WIN_X + 8,
-                y,
-                widoczna
-            );
-        }
-
-        if (actual_r ==
-                cur_r &&
-            tryb ==
-                TrybPracy::EDYCJA_TEKSTU &&
-            !okno_pomoc_widoczne) {
-
-            const int kolumna =
-                kolumna_kursora();
-
-            const int ekran_kolumna =
-                kolumna -
-                scroll_x;
-
-            if (ekran_kolumna >= 0 &&
-                ekran_kolumna <
-                    liczba_widocznych_kolumn()) {
-
-                gui_wypisz_tekst_kolor(
-                    WIN_X +
-                        8 +
-                        ekran_kolumna *
-                            PRZYBLIZONA_SZER_ZNAKU,
-                    y,
-                    KOLOR_BURSZTYN_JASNY,
-                    "_"
-                );
-            }
-        }
+        rysuj_wiersz_dokumentu(actual_r);
     }
 }
 
@@ -2445,38 +2444,8 @@ void rysuj_interfejs(
             ? "Notatnik *"
             : "Notatnik"
     );
-
-    RysujPrzycisk(
-        WIN_X + WIN_W - 74,
-        WIN_Y + 4,
-        20,
-        20,
-        KOLOR_BURSZTYN,
-        KOLOR_TLO,
-        "-"
-    );
-
-    RysujPrzycisk(
-        WIN_X + WIN_W - 50,
-        WIN_Y + 4,
-        20,
-        20,
-        KOLOR_BURSZTYN,
-        KOLOR_TLO,
-        zmaksymalizowane
-            ? "v"
-            : "^"
-    );
-
-    RysujPrzycisk(
-        WIN_X + WIN_W - 26,
-        WIN_Y + 4,
-        20,
-        20,
-        KOLOR_CZERWONY,
-        KOLOR_BIALY,
-        "X"
-    );
+    gui_rysuj_standardowa_belke(WIN_X, WIN_Y, WIN_W,
+        dokument_zmieniony ? "Notatnik *" : "Notatnik", zmaksymalizowane);
 
     gui_rysuj_prostokat(
         WIN_X + 2,
@@ -2593,7 +2562,7 @@ void nowy_dokument() {
     (void)kopiuj_tekst(
         aktualna_sciezka,
         sizeof(aktualna_sciezka),
-        "/plik.txt"
+        "/uzytkownicy/plik.txt"
     );
 
     ustaw_status(
@@ -2608,11 +2577,37 @@ void zapisz_aktualny() {
 }
 
 void zatwierdz_sciezke() {
+    char sciezka_docelowa[BAJTY_SCIEZKI] = {};
+
+    if (sciezka_input[0] == '/') {
+        if (!kopiuj_tekst(sciezka_docelowa,
+                          sizeof(sciezka_docelowa),
+                          sciezka_input)) {
+            ustaw_status("Sciezka jest za dluga.");
+            return;
+        }
+    } else {
+        static const char katalog[] = "/uzytkownicy/";
+        size_t p = 0;
+        while (katalog[p] != '\0') {
+            sciezka_docelowa[p] = katalog[p];
+            ++p;
+        }
+        for (size_t i = 0; sciezka_input[i] != '\0'; ++i) {
+            if (p + 1U >= sizeof(sciezka_docelowa)) {
+                ustaw_status("Sciezka jest za dluga.");
+                return;
+            }
+            sciezka_docelowa[p++] = sciezka_input[i];
+        }
+        sciezka_docelowa[p] = '\0';
+    }
+
     if (!sciezka_poprawna(
-            sciezka_input)) {
+            sciezka_docelowa)) {
 
         ustaw_status(
-            "Sciezka musi byc absolutna i bez znakow kontrolnych."
+            "Nieprawidlowa sciezka pliku."
         );
 
         return;
@@ -2621,7 +2616,7 @@ void zatwierdz_sciezke() {
     if (!kopiuj_tekst(
             aktualna_sciezka,
             sizeof(aktualna_sciezka),
-            sciezka_input)) {
+            sciezka_docelowa)) {
 
         ustaw_status(
             "Sciezka jest za dluga."
@@ -3008,23 +3003,6 @@ void obsluz_klik(
      * przywrocic istniejaca instancje zamiast rysowac taskbar z aplikacji.
      */
     if (aplikacja_zminimalizowana) {
-        if (my >=
-                screen_h -
-                    TASKBAR_H &&
-            mx >= 100 &&
-            mx <= 140) {
-
-            ustaw_minimalizacje(
-                false
-            );
-
-            *redraw =
-                true;
-
-            *pelne =
-                true;
-        }
-
         return;
     }
 
@@ -3476,6 +3454,11 @@ void _start() {
     while (!wyjdz) {
         bws_zdarzenie zdarzenie{};
         if (!gui_czekaj_na_zdarzenie(&zdarzenie)) continue;
+        bool szybka_linia = false;
+        bool szybka_sciezka = false;
+        bool szybki_edytor = false;
+        if (zdarzenie.typ == BWS_ZDARZENIE_FOCUS && aplikacja_zminimalizowana)
+            aplikacja_zminimalizowana = false;
         int mx = old_mx;
         int my = old_my;
         uint8_t mb = poprzednie_przyciski;
@@ -3553,6 +3536,14 @@ void _start() {
             redraw =
                 true;
 
+            const bool byl_popup = menu_plik_otwarte ||
+                menu_ustawienia_otwarte || okno_pomoc_widoczne;
+            const int stary_r = cur_r;
+            const int stary_c = cur_c;
+            const int stary_scroll_x = scroll_x;
+            const int stary_scroll_y = scroll_y;
+            const TrybPracy stary_tryb = tryb;
+
             menu_plik_otwarte =
                 false;
 
@@ -3576,12 +3567,42 @@ void _start() {
                 obsluz_sciezke(
                     c
                 );
+                szybka_sciezka = !byl_popup && tryb == stary_tryb;
             } else {
                 obsluz_edycje(
                     &ansi,
                     c
                 );
+
+                const unsigned char uc = static_cast<unsigned char>(c);
+                const bool zwykla_edycja = uc >= 0x20U ||
+                    ((c == '\b' || uc == 0x7FU) && stary_c > 0);
+                if (!byl_popup && tryb == TrybPracy::EDYCJA_TEKSTU &&
+                    zwykla_edycja && cur_r == stary_r &&
+                    scroll_x == stary_scroll_x &&
+                    scroll_y == stary_scroll_y) {
+                    szybka_linia = true;
+                } else if (!byl_popup &&
+                           tryb == TrybPracy::EDYCJA_TEKSTU &&
+                           (c == '\n' || c == '\r' || c == '\b' ||
+                            uc == 0x7FU)) {
+                    szybki_edytor = true;
+                }
             }
+        }
+
+        if (!dragging && szybka_sciezka) {
+            rysuj_pole_sciezki();
+            gui_odswiez();
+            redraw = false;
+        } else if (!dragging && szybka_linia) {
+            rysuj_wiersz_dokumentu(cur_r);
+            gui_odswiez();
+            redraw = false;
+        } else if (!dragging && szybki_edytor) {
+            rysuj_tekst_dokumentu();
+            gui_odswiez();
+            redraw = false;
         }
 
         if (redraw &&

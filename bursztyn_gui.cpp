@@ -632,6 +632,51 @@ void gui_ustaw_capture_myszy(bool stan) {
     bws_wywolaj(39, stan ? 1ULL : 0ULL, 0, 0, 0);
 }
 
+void gui_ustaw_system_overlay(bool otwarty,
+                              int x, int y, int szer, int wys) {
+    bws_wywolaj(40, otwarty ? 1ULL : 0ULL,
+                spakuj_dwa_i32(x, y), spakuj_dwa_i32(szer, wys), 0);
+}
+
+bool gui_minimalizuj_okno() {
+    return bws_wywolaj(41, 0, 0, 0, 0) != 0;
+}
+
+uint32_t gui_pobierz_okna(GuiOknoInfo* okna, uint32_t max) {
+    if (!okna || max == 0) return 0;
+    return static_cast<uint32_t>(bws_wywolaj(
+        42, reinterpret_cast<uint64_t>(okna), max, 0, 0));
+}
+
+bool gui_aktywuj_okno(uint64_t window_id) {
+    return window_id != 0 && bws_wywolaj(43, window_id, 0, 0, 0) != 0;
+}
+
+void gui_rysuj_standardowa_belke(int x, int y, int szer,
+                                 const char* tytul, bool zmaksymalizowane) {
+    if (!tytul || szer < 90) return;
+    gui_rysuj_prostokat(x, y, szer, 28, 0x00301500);
+    gui_rysuj_prostokat(x, y, szer, 2, 0x00E58A00);
+    gui_wypisz_tekst_kolor(x + 8, y + 7, 0x00FFFFFF, tytul);
+    RysujPrzycisk(x + szer - 74, y + 4, 20, 20,
+                  0x00E58A00, 0x001A0B00, "-");
+    RysujPrzycisk(x + szer - 50, y + 4, 20, 20,
+                  0x00E58A00, 0x001A0B00,
+                  zmaksymalizowane ? "v" : "^");
+    RysujPrzycisk(x + szer - 26, y + 4, 20, 20,
+                  0x00AA0000, 0x00FFFFFF, "X");
+}
+
+gui_akcja_belki gui_hit_test_belki(int mx, int my,
+                                   int x, int y, int szer) {
+    if (szer < 90 || mx < x || mx >= x + szer || my < y || my >= y + 28)
+        return GUI_BELKA_BRAK;
+    if (mx >= x + szer - 26) return GUI_BELKA_ZAMKNIJ;
+    if (mx >= x + szer - 50) return GUI_BELKA_MAKSYMALIZUJ;
+    if (mx >= x + szer - 74) return GUI_BELKA_MINIMALIZUJ;
+    return GUI_BELKA_DRAG;
+}
+
 void gui_pobierz_rozdzielczosc(int* w,
                                int* h) {
     if (!w || !h)

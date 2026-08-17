@@ -18,6 +18,9 @@
 
 #include <stdint.h>
 #include "pamiec.h"
+#include "sterowniki/czas/hpet.h"
+
+extern void wypisz_log(const char* tekst);
 
 extern "C" {
     extern volatile uint32_t* baza_lapic_wirtualna;
@@ -47,6 +50,7 @@ constexpr uint32_t LAPIC_EOI               = 0x0B0;
 constexpr uint32_t LAPIC_SPURIOUS           = 0x0F0;
 constexpr uint32_t LAPIC_LVT_TIMER          = 0x320;
 constexpr uint32_t LAPIC_TIMER_INITIAL      = 0x380;
+constexpr uint32_t LAPIC_TIMER_CURRENT      = 0x390;
 constexpr uint32_t LAPIC_TIMER_DIVIDE       = 0x3E0;
 
 constexpr uint32_t LAPIC_SVR_ENABLE         = 1U << 8;
@@ -82,7 +86,14 @@ constexpr uint32_t APIC_TIMER_DIVIDE_BY_16   = 0x3;
  * Wartosci timera nie da sie poprawnie przeliczyc na Hz bez kalibracji
  * wzgledem PIT/HPET/TSC. Zachowujemy dotychczasowa wartosc Bursztyna.
  */
-constexpr uint32_t APIC_TIMER_INITIAL_COUNT  = 0x05FFFFFFU;
+/* Jawny fallback tylko dla platform bez HPET/alternatywnego clocksource. */
+constexpr uint32_t APIC_TIMER_FALLBACK_COUNT = 0x05FFFFFFU;
+constexpr uint32_t SCHEDULER_HZ_DOCELOWE = 250U;
+constexpr uint64_t KALIBRACJA_NS = 20000000ULL;
+
+uint64_t zmierzona_czestotliwosc_lapic = 0;
+uint32_t scheduler_hz_rzeczywiste = 0;
+uint32_t lapic_initial_rzeczywiste = APIC_TIMER_FALLBACK_COUNT;
 
 /*
  * Flagi VMM zgodne z obecnym Bursztynem:
@@ -200,6 +211,15 @@ static void zatrzymaj_system_apic() {
 
 static inline void bariera_mmio() {
     asm volatile("" ::: "memory");
+}
+
+static void log_timer(const char* prefiks, uint64_t wartosc, const char* sufiks) {
+    char out[112] = {}; char tmp[24]; uint32_t n=0,m=0;
+    while (prefiks && *prefiks && n+1<sizeof(out)) out[n++]=*prefiks++;
+    do { tmp[m++]=static_cast<char>('0'+wartosc%10ULL); wartosc/=10ULL; } while(wartosc&&m<sizeof(tmp));
+    while(m&&n+1<sizeof(out)) out[n++]=tmp[--m];
+    while(sufiks&&*sufiks&&n+1<sizeof(out)) out[n++]=*sufiks++;
+    out[n]='\0'; wypisz_log(out);
 }
 
 static void mapuj_strone_mmio(uint64_t adres_fizyczny) {
@@ -414,17 +434,50 @@ static bool skonfiguruj_timer_lapic() {
         LAPIC_TIMER_DIVIDE,
         APIC_TIMER_DIVIDE_BY_16);
 
+    uint32_t initial = APIC_TIMER_FALLBACK_COUNT;
+    if (hpet_dostepny()) {
+        lapic_zapisz(LAPIC_LVT_TIMER,
+            static_cast<uint32_t>(WEKTOR_TIMERA) | LAPIC_LVT_MASKED);
+        lapic_zapisz(LAPIC_TIMER_INITIAL, 0xFFFFFFFFU);
+        if (hpet_czekaj_ns_boot(KALIBRACJA_NS)) {
+            const uint32_t current = lapic_odczytaj(LAPIC_TIMER_CURRENT);
+            const uint64_t elapsed = 0xFFFFFFFFULL - current;
+            if (elapsed > 0 && elapsed <= UINT64_MAX / 50ULL) {
+                zmierzona_czestotliwosc_lapic = elapsed * 50ULL;
+                uint64_t obliczone = (zmierzona_czestotliwosc_lapic +
+                    SCHEDULER_HZ_DOCELOWE/2U) / SCHEDULER_HZ_DOCELOWE;
+                if (obliczone > 0 && obliczone <= 0xFFFFFFFFULL)
+                    initial = static_cast<uint32_t>(obliczone);
+            }
+        }
+    }
+    lapic_zapisz(LAPIC_TIMER_INITIAL, 0);
+    if (initial == APIC_TIMER_FALLBACK_COUNT && zmierzona_czestotliwosc_lapic == 0)
+        wypisz_log("[TIMER-WARN] LAPIC uruchomiony bez kalibracji.");
+    lapic_initial_rzeczywiste = initial;
+    scheduler_hz_rzeczywiste = zmierzona_czestotliwosc_lapic
+        ? SCHEDULER_HZ_DOCELOWE : 0;
+
     lapic_zapisz(
         LAPIC_TIMER_INITIAL,
-        APIC_TIMER_INITIAL_COUNT);
+        initial);
 
     lapic_zapisz(
         LAPIC_LVT_TIMER,
         static_cast<uint32_t>(WEKTOR_TIMERA) |
         LAPIC_TIMER_PERIODIC);
 
+    if (zmierzona_czestotliwosc_lapic) {
+        log_timer("[TIMER] LAPIC measured=", zmierzona_czestotliwosc_lapic, " Hz");
+        log_timer("[TIMER] Scheduler=", scheduler_hz_rzeczywiste, " Hz");
+        log_timer("[TIMER] LAPIC initial_count=", lapic_initial_rzeczywiste, "");
+    }
+
     return true;
 }
+
+extern "C" uint32_t timer_scheduler_hz() { return scheduler_hz_rzeczywiste; }
+extern "C" uint64_t timer_lapic_hz() { return zmierzona_czestotliwosc_lapic; }
 
 } // namespace
 

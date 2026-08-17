@@ -38,6 +38,13 @@
  */
 
 #include "skladacz_obrazu.h"
+#include "sterowniki/czas/hpet.h"
+#include "scheduler.h"
+
+extern void wypisz_log(const char* tekst);
+extern int grafika_pobierz_szerokosc();
+extern int grafika_pobierz_wysokosc();
+extern uint32_t* grafika_pobierz_wiersz_backbuffer(int y);
 #include "heap.h"
 
 #include <stddef.h>
@@ -102,6 +109,11 @@ uint64_t rozmiar_alokacji_warstwy[
     MAKS_WARSTW
 ] = {};
 
+bool widocznosc_warstwy[MAKS_WARSTW] = {};
+uint32_t generacja_okna[MAKS_WARSTW] = {};
+uint32_t stan_okna[MAKS_WARSTW] = {};
+char tytul_okna[MAKS_WARSTW][48] = {};
+
 /*
  * Steady-state budzet powierzchni.
  * Atomiki przygotowuja accounting pod przyszle wielordzeniowe wywolania.
@@ -109,13 +121,89 @@ uint64_t rozmiar_alokacji_warstwy[
 uint64_t zajete_bajty_warstw =
     0;
 
+struct SystemOverlayState {
+    bool otwarty;
+    int pid;
+    GuiDirtyRect rect;
+};
+SystemOverlayState system_overlay = {false, -1, {0, 0, 0, 0}};
+
 /*
  * Guard chroni przed zagniezdzonym / rownoleglym rozpoczeciem skladania
  * tej samej klatki. Nie jest zamiennikiem lifetime-locka dla warstw.
  */
 bool skladanie_w_toku =
     false;
-bool compositor_dirty = true;
+GuiDirtyRect dirty_rects[SKLADACZ_MAKS_DIRTY_RECT] = {};
+uint32_t dirty_count = 0;
+bool cursor_pending=false;
+GuiDirtyRect cursor_old{},cursor_new{};
+uint64_t dirty_generation = 1;
+uint64_t nastepna_klatka_ns = 0;
+constexpr uint64_t ODSTEP_KLATKI_NS = 16666667ULL;
+uint64_t licznik_dirty=0,licznik_klatek=0,licznik_full=0,licznik_region=0;
+uint64_t suma_compose_us=0,maks_compose_us=0,suma_present_us=0,maks_present_us=0;
+uint64_t suma_dirty_px=0,suma_rect=0,maks_dirty_px=0;
+[[maybe_unused]] uint64_t perf_deadline_ns=0,perf_stare_irq=0,perf_stare_ctx=0,perf_stare_klatki=0,perf_stare_dirty=0;
+[[maybe_unused]] uint64_t perf_stare_full=0,perf_stare_region=0,perf_stare_px=0,perf_stare_rect=0;
+
+struct LayerRenderInfo { uint32_t* buffer; int x,y,width,height,z,pid; uint64_t pixels; };
+struct DeferredBuffer { uint32_t* buffer; uint64_t bytes; };
+DeferredBuffer deferred[SKLADACZ_MAKS_DIRTY_RECT] = {};
+uint32_t deferred_count=0;
+uint32_t render_readers=0;
+
+uint64_t irq_off(){uint64_t f;asm volatile("pushfq; popq %0; cli":"=r"(f)::"memory","cc");return f;}
+void irq_restore(uint64_t f){if(f&(1ULL<<9))asm volatile("sti":::"memory");}
+
+bool rect_clip(GuiDirtyRect* r,int sw,int sh){
+    if(!r||r->width<=0||r->height<=0||sw<=0||sh<=0)return false;
+    int64_t x0=r->x,y0=r->y,x1=x0+r->width,y1=y0+r->height;
+    if(x0<0)x0=0;
+    if(y0<0)y0=0;
+    if(x1>sw)x1=sw;
+    if(y1>sh)y1=sh;
+    if(x0>=x1||y0>=y1)return false;
+    r->x=(int)x0;r->y=(int)y0;r->width=(int)(x1-x0);r->height=(int)(y1-y0);return true;
+}
+uint64_t rect_area(const GuiDirtyRect&r){return(uint64_t)(uint32_t)r.width*(uint32_t)r.height;}
+GuiDirtyRect rect_union(const GuiDirtyRect&a,const GuiDirtyRect&b){
+    int x0=a.x<b.x?a.x:b.x,y0=a.y<b.y?a.y:b.y;
+    int x1=a.x+a.width>b.x+b.width?a.x+a.width:b.x+b.width;
+    int y1=a.y+a.height>b.y+b.height?a.y+a.height:b.y+b.height;
+    return{x0,y0,x1-x0,y1-y0};
+}
+bool rect_merge_ok(const GuiDirtyRect&a,const GuiDirtyRect&b){
+    GuiDirtyRect u=rect_union(a,b);uint64_t ua=rect_area(u),sum=rect_area(a)+rect_area(b);
+    bool touch=a.x<=b.x+b.width&&b.x<=a.x+a.width&&a.y<=b.y+b.height&&b.y<=a.y+a.height;
+    return touch||ua<=sum+sum/2;
+}
+
+#ifndef BURSZTYN_DEBUG_PERF
+#define BURSZTYN_DEBUG_PERF 0
+#endif
+#ifndef BURSZTYN_DEBUG_GUI_LAYERS
+#define BURSZTYN_DEBUG_GUI_LAYERS 0
+#endif
+
+#if BURSZTYN_DEBUG_PERF || BURSZTYN_DEBUG_GUI_LAYERS
+void perf_num(char* b,size_t cap,size_t* n,uint64_t v){char t[24];size_t m=0;do{t[m++]=static_cast<char>('0'+v%10);v/=10;}while(v&&m<sizeof(t));while(m&&*n+1<cap)b[(*n)++]=t[--m];b[*n]='\0';}
+void perf_txt(char*b,size_t cap,size_t*n,const char*s){while(s&&*s&&*n+1<cap)b[(*n)++]=*s++;b[*n]='\0';}
+#endif
+void perf_log(uint64_t teraz){
+#if BURSZTYN_DEBUG_PERF
+    if(perf_deadline_ns==0){perf_deadline_ns=teraz+5000000000ULL;return;}
+    if(teraz<perf_deadline_ns) return;
+    perf_deadline_ns=teraz+5000000000ULL;
+    uint64_t irq=scheduler_liczba_irq_timera(),ctx=scheduler_liczba_przelaczen();
+    uint64_t fr=licznik_klatek,dr=licznik_dirty,delta_fr=fr-perf_stare_klatki;
+    uint64_t dp=suma_dirty_px,rc=suma_rect,screen=(uint64_t)grafika_pobierz_szerokosc()*grafika_pobierz_wysokosc();
+    char b[384]={};size_t n=0;perf_txt(b,sizeof(b),&n,"[PERF] sched=");perf_num(b,sizeof(b),&n,(irq-perf_stare_irq)/5);perf_txt(b,sizeof(b),&n,"/s ctx=");perf_num(b,sizeof(b),&n,(ctx-perf_stare_ctx)/5);perf_txt(b,sizeof(b),&n,"/s frames=");perf_num(b,sizeof(b),&n,delta_fr/5);perf_txt(b,sizeof(b),&n,"/s dirty_req=");perf_num(b,sizeof(b),&n,(dr-perf_stare_dirty)/5);perf_txt(b,sizeof(b),&n,"/s avg_rects=");perf_num(b,sizeof(b),&n,delta_fr?rc/delta_fr:0);perf_txt(b,sizeof(b),&n," avg_dirty_px=");perf_num(b,sizeof(b),&n,delta_fr?dp/delta_fr:0);perf_txt(b,sizeof(b),&n," avg_dirty_pct=");perf_num(b,sizeof(b),&n,screen&&delta_fr?(dp*100)/(screen*delta_fr):0);perf_txt(b,sizeof(b),&n," max_dirty_pct=");perf_num(b,sizeof(b),&n,screen?(maks_dirty_px*100)/screen:0);perf_txt(b,sizeof(b),&n," compose_avg_us=");perf_num(b,sizeof(b),&n,delta_fr?suma_compose_us/delta_fr:0);perf_txt(b,sizeof(b),&n," compose_max_us=");perf_num(b,sizeof(b),&n,maks_compose_us);perf_txt(b,sizeof(b),&n," present_avg_us=");perf_num(b,sizeof(b),&n,delta_fr?suma_present_us/delta_fr:0);perf_txt(b,sizeof(b),&n," present_max_us=");perf_num(b,sizeof(b),&n,maks_present_us);perf_txt(b,sizeof(b),&n," full=");perf_num(b,sizeof(b),&n,(licznik_full-perf_stare_full)/5);perf_txt(b,sizeof(b),&n,"/s regions=");perf_num(b,sizeof(b),&n,(licznik_region-perf_stare_region)/5);perf_txt(b,sizeof(b),&n,"/s");wypisz_log(b);
+    perf_stare_irq=irq;perf_stare_ctx=ctx;perf_stare_klatki=fr;perf_stare_dirty=dr;perf_stare_full=licznik_full;perf_stare_region=licznik_region;perf_stare_px=dp;perf_stare_rect=rc;suma_compose_us=0;maks_compose_us=0;suma_present_us=0;maks_present_us=0;suma_dirty_px=0;suma_rect=0;maks_dirty_px=0;
+#else
+    (void)teraz;
+#endif
+}
 
 bool pid_poprawny(
     int pid
@@ -292,11 +380,25 @@ void oddaj_bajty(
     }
 }
 
+void zwolnij_lub_odrocz(uint32_t* buffer,uint64_t bytes){
+    if(!buffer)return;
+    uint64_t f=irq_off();
+    if(render_readers&&deferred_count<SKLADACZ_MAKS_DIRTY_RECT)deferred[deferred_count++]={buffer,bytes};
+    else { irq_restore(f);kfree(buffer);oddaj_bajty(bytes);return; }
+    irq_restore(f);
+}
+
+void oproznij_odroczone(){
+    DeferredBuffer local[SKLADACZ_MAKS_DIRTY_RECT];uint32_t n=0;uint64_t f=irq_off();
+    if(!render_readers){n=deferred_count;for(uint32_t i=0;i<n;++i)local[i]=deferred[i];deferred_count=0;}
+    irq_restore(f);for(uint32_t i=0;i<n;++i){kfree(local[i].buffer);oddaj_bajty(local[i].bytes);}
+}
+
 /* =========================================================================
  * 3. WALIDACJA METADANYCH WARSTWY
  * ========================================================================= */
 
-bool warstwa_ma_spojny_bufor(
+bool warstwa_bufor_spojny(
     int indeks
 ) {
     if (!pid_poprawny(
@@ -346,6 +448,11 @@ bool warstwa_ma_spojny_bufor(
             &rozmiar_alokacji_warstwy[indeks],
             __ATOMIC_ACQUIRE
         );
+}
+
+bool warstwa_ma_spojny_bufor(int indeks) {
+    return pid_poprawny(indeks) && widocznosc_warstwy[indeks] &&
+           warstwa_bufor_spojny(indeks);
 }
 
 /* =========================================================================
@@ -625,13 +732,19 @@ warstwa_obrazu tablica_warstw[
  */
 extern void grafika_rozpocznij_skladanie();
 extern void grafika_odtworz_tlo_skladania();
+extern void grafika_odtworz_tlo_regionu(int,int,int,int);
 extern void grafika_zapisz_surowy_piksel(
     int x,
     int y,
     uint32_t kolor
 );
 extern void grafika_zakoncz_skladanie();
-extern "C" void grafika_naloz_okno_terminala();
+extern void grafika_zakoncz_skladanie_regionu(int,int,int,int);
+extern void grafika_prezentuj_region(int,int,int,int);
+extern void grafika_prezentuj_kursor();
+extern void grafika_zakoncz_scene();
+extern "C" void grafika_naloz_okno_terminala_region(int x, int y,
+                                                       int szer, int wys);
 
 extern int grafika_pobierz_szerokosc();
 extern int grafika_pobierz_wysokosc();
@@ -766,6 +879,7 @@ int utworz_warstwe(
 
     warstwa_obrazu& warstwa =
         tablica_warstw[pid];
+    const bool nowe_okno = !warstwa_bufor_spojny(pid);
 
     const uint64_t stare_bajty =
         __atomic_load_n(
@@ -775,6 +889,8 @@ int utworz_warstwe(
 
     uint32_t* stary_bufor =
         warstwa.bufor_pikseli;
+    const int stary_x=warstwa.x,stary_y=warstwa.y;
+    const int stary_szer=warstwa.szerokosc,stary_wys=warstwa.wysokosc;
 
     /*
      * Najczestszy przypadek przy ponownym tworzeniu tej samej powierzchni:
@@ -827,7 +943,15 @@ int utworz_warstwe(
             __ATOMIC_RELEASE
         );
 
-        skladacz_obrazu_oznacz_dirty();
+        widocznosc_warstwy[pid] = true;
+        if (nowe_okno) {
+            if (++generacja_okna[pid] == 0) ++generacja_okna[pid];
+            stan_okna[pid] = GUI_OKNO_NORMALNE;
+        }
+
+        if(stary_bufor)skladacz_obrazu_oznacz_dirty_rect(stary_x,stary_y,stary_szer,stary_wys);
+        skladacz_obrazu_oznacz_dirty_rect(x,y,szer,wys);
+        skladacz_obrazu_debug_warstwy("create/reuse");
         return pid;
     }
 
@@ -922,6 +1046,12 @@ int utworz_warstwe(
         __ATOMIC_RELEASE
     );
 
+    widocznosc_warstwy[pid] = true;
+    if (nowe_okno) {
+        if (++generacja_okna[pid] == 0) ++generacja_okna[pid];
+        stan_okna[pid] = GUI_OKNO_NORMALNE;
+    }
+
     /*
      * Stary bufor nie jest juz osiagalny przez nowa publikacje.
      */
@@ -929,9 +1059,7 @@ int utworz_warstwe(
         stary_bufor !=
             nowy_bufor) {
 
-        kfree(
-            stary_bufor
-        );
+        zwolnij_lub_odrocz(stary_bufor, 0);
     }
 
     if (stare_bajty >
@@ -943,7 +1071,9 @@ int utworz_warstwe(
         );
     }
 
-    skladacz_obrazu_oznacz_dirty();
+    if(stary_bufor)skladacz_obrazu_oznacz_dirty_rect(stary_x,stary_y,stary_szer,stary_wys);
+    skladacz_obrazu_oznacz_dirty_rect(x,y,szer,wys);
+    skladacz_obrazu_debug_warstwy("create");
     return pid;
 }
 
@@ -969,12 +1099,15 @@ void zaktualizuj_pozycje_warstwy(
      * Nie wykonujemy x+szer tutaj, wiec same skrajne wartosci int sa
      * bezpieczne. Kompozytor uzyje int64_t podczas clippingu.
      */
+    const int stary_x=warstwa->x,stary_y=warstwa->y;
+    const int szer=warstwa->szerokosc,wys=warstwa->wysokosc;
     warstwa->x =
         nowy_x;
 
     warstwa->y =
         nowy_y;
-    skladacz_obrazu_oznacz_dirty();
+    skladacz_obrazu_oznacz_dirty_rect(stary_x,stary_y,szer,wys);
+    skladacz_obrazu_oznacz_dirty_rect(nowy_x,nowy_y,szer,wys);
 }
 
 /* =========================================================================
@@ -1016,7 +1149,7 @@ void wyczysc_warstwe(
         warstwa->bufor_pikseli,
         liczba_pikseli
     );
-    skladacz_obrazu_oznacz_dirty();
+    skladacz_obrazu_oznacz_dirty_warstwy(pid);
 }
 
 /* =========================================================================
@@ -1034,6 +1167,10 @@ void usun_warstwe(
 
     warstwa_obrazu& warstwa =
         tablica_warstw[pid];
+    if (system_overlay.otwarty && system_overlay.pid == pid)
+        system_overlay = {false, -1, {0, 0, 0, 0}};
+    const int stare_x=warstwa.x, stare_y=warstwa.y;
+    const int stare_szer=warstwa.szerokosc, stare_wys=warstwa.wysokosc;
 
     /*
      * Najpierw przestajemy publikowac powierzchnie nowym czytelnikom.
@@ -1043,6 +1180,9 @@ void usun_warstwe(
         false,
         __ATOMIC_RELEASE
     );
+    widocznosc_warstwy[pid] = false;
+    stan_okna[pid] = GUI_OKNO_NORMALNE;
+    tytul_okna[pid][0] = '\0';
 
     uint32_t* bufor =
         warstwa.bufor_pikseli;
@@ -1062,16 +1202,9 @@ void usun_warstwe(
     warstwa.pid =
         pid;
 
-    if (bufor) {
-        kfree(
-            bufor
-        );
-    }
-    skladacz_obrazu_oznacz_dirty();
-
-    oddaj_bajty(
-        bajty
-    );
+    if (bufor) zwolnij_lub_odrocz(bufor, bajty);
+    skladacz_obrazu_oznacz_dirty_rect(stare_x, stare_y, stare_szer, stare_wys);
+    skladacz_obrazu_debug_warstwy("remove");
 }
 
 /* =========================================================================
@@ -1204,6 +1337,33 @@ void zloz_warstwe(
     }
 }
 
+void zloz_snapshot_region(const LayerRenderInfo& w,const GuiDirtyRect& r) {
+    int x0=w.x>r.x?w.x:r.x, y0=w.y>r.y?w.y:r.y;
+    int x1=w.x+w.width<r.x+r.width?w.x+w.width:r.x+r.width;
+    int y1=w.y+w.height<r.y+r.height?w.y+w.height:r.y+r.height;
+    if(x0>=x1||y0>=y1||!w.buffer)return;
+    for(int py=y0;py<y1;++py){
+        uint64_t first=(uint64_t)(py-w.y)*(uint32_t)w.width+(uint32_t)(x0-w.x);
+        uint64_t len=(uint32_t)(x1-x0);if(first>w.pixels||len>w.pixels-first)return;
+        const uint32_t* src=w.buffer+first;uint32_t* dst=grafika_pobierz_wiersz_backbuffer(py)+x0;
+        for(int px=x0;px<x1;++px){uint32_t c=*src++;if(c)*dst=c&SKLADACZ_MASKA_KOLORU_RGB;++dst;}
+    }
+}
+
+int snapshot_warstw(LayerRenderInfo* out) {
+    uint64_t f=irq_off();++render_readers;int n=0;
+    for(int i=0;i<MAKS_WARSTW;++i)if(warstwa_ma_spojny_bufor(i)){
+        const warstwa_obrazu&w=tablica_warstw[i];
+        out[n++]={w.bufor_pikseli,w.x,w.y,w.szerokosc,w.wysokosc,w.z_order,w.pid,
+            __atomic_load_n(&rozmiar_alokacji_warstwy[i],__ATOMIC_RELAXED)/sizeof(uint32_t)};
+    }
+    irq_restore(f);
+    for(int i=1;i<n;++i){LayerRenderInfo v=out[i];int j=i-1;while(j>=0&&(out[j].z>v.z||(out[j].z==v.z&&out[j].pid>v.pid))){out[j+1]=out[j];--j;}out[j+1]=v;}
+    return n;
+}
+
+void zakoncz_snapshot(){uint64_t f=irq_off();if(render_readers)--render_readers;irq_restore(f);oproznij_odroczone();}
+
 } // namespace
 
 /* =========================================================================
@@ -1295,8 +1455,15 @@ void skladacz_obrazu_zloz_klatke() {
         );
     }
 
-    /* Shell pozostaje zwyklym oknem nad pulpitem i innymi warstwami. */
-    grafika_naloz_okno_terminala();
+    if (system_overlay.otwarty &&
+        warstwa_ma_spojny_bufor(system_overlay.pid)) {
+        const warstwa_obrazu& ow = tablica_warstw[system_overlay.pid];
+        LayerRenderInfo oi{ow.bufor_pikseli, ow.x, ow.y, ow.szerokosc,
+                           ow.wysokosc, ow.z_order, ow.pid,
+            __atomic_load_n(&rozmiar_alokacji_warstwy[system_overlay.pid],
+                            __ATOMIC_RELAXED) / sizeof(uint32_t)};
+        zloz_snapshot_region(oi, system_overlay.rect);
+    }
 
     /*
      * Zegar jest nakladka kernela, nie powierzchnia dowolnego procesu.
@@ -1313,11 +1480,209 @@ void skladacz_obrazu_zloz_klatke() {
 }
 
 void skladacz_obrazu_oznacz_dirty() {
-    __atomic_store_n(&compositor_dirty, true, __ATOMIC_RELEASE);
+    skladacz_obrazu_oznacz_dirty_rect(0,0,grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc());
+}
+
+void skladacz_obrazu_oznacz_dirty_rect(int x,int y,int width,int height){
+    GuiDirtyRect r{x,y,width,height};const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
+    if(!rect_clip(&r,sw,sh))return;
+    uint64_t f=irq_off();++licznik_dirty;++dirty_generation;
+    /* Scalaj przechodnio tylko regiony, dla ktorych bounding box jest
+       rzeczywiscie oplacalny. Usuniecie przez swap nie pomija wpisu. */
+    uint32_t i=0;
+    while(i<dirty_count){
+        if(rect_merge_ok(dirty_rects[i],r)){
+            r=rect_union(dirty_rects[i],r);
+            dirty_rects[i]=dirty_rects[--dirty_count];
+            i=0;
+        } else ++i;
+    }
+    if(dirty_count<SKLADACZ_MAKS_DIRTY_RECT)dirty_rects[dirty_count++]=r;
+    else {GuiDirtyRect all=r;for(uint32_t k=0;k<dirty_count;++k)all=rect_union(all,dirty_rects[k]);dirty_rects[0]=all;dirty_count=1;}
+    irq_restore(f);
+}
+
+void skladacz_obrazu_oznacz_dirty_warstwy(int pid){warstwa_obrazu*w=pobierz_warstwe(pid);if(w)skladacz_obrazu_oznacz_dirty_rect(w->x,w->y,w->szerokosc,w->wysokosc);}
+
+void skladacz_obrazu_oznacz_ruch_kursora(int old_x,int old_y,int new_x,int new_y){
+    GuiDirtyRect oldr{old_x,old_y,16,16},newr{new_x,new_y,16,16};
+    const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
+    const bool old_ok=rect_clip(&oldr,sw,sh),new_ok=rect_clip(&newr,sw,sh);
+    if(!old_ok&&!new_ok)return;
+    if(!old_ok)oldr=newr;
+    if(!new_ok)newr=oldr;
+    uint64_t f=irq_off();++licznik_dirty;++dirty_generation;
+    if(!cursor_pending)cursor_old=oldr;
+    cursor_new=newr;cursor_pending=true;
+    irq_restore(f);
 }
 
 void skladacz_obrazu_obsluz_dirty() {
-    if (!__atomic_exchange_n(&compositor_dirty, false, __ATOMIC_ACQ_REL))
+    uint64_t f=irq_off();if(!dirty_count&&!cursor_pending){irq_restore(f);return;}irq_restore(f);
+    uint64_t now=hpet_dostepny()?czas_monotoniczny_ns():0;
+    if(hpet_dostepny()&&nastepna_klatka_ns&&now<nastepna_klatka_ns)return;
+    if(hpet_dostepny())nastepna_klatka_ns=now>UINT64_MAX-ODSTEP_KLATKI_NS?UINT64_MAX:now+ODSTEP_KLATKI_NS;
+    GuiDirtyRect work[SKLADACZ_MAKS_DIRTY_RECT];uint32_t count=0;uint64_t generation_start;bool cursor_work=false;GuiDirtyRect old_cursor{},new_cursor{};
+    f=irq_off();count=dirty_count;for(uint32_t i=0;i<count;++i)work[i]=dirty_rects[i];dirty_count=0;cursor_work=cursor_pending;old_cursor=cursor_old;new_cursor=cursor_new;cursor_pending=false;generation_start=dirty_generation;irq_restore(f);
+    GuardSkladania guard;if(!guard.aktywny()){for(uint32_t i=0;i<count;++i)skladacz_obrazu_oznacz_dirty_rect(work[i].x,work[i].y,work[i].width,work[i].height);if(cursor_work)skladacz_obrazu_oznacz_ruch_kursora(old_cursor.x,old_cursor.y,new_cursor.x,new_cursor.y);return;}
+    const uint64_t start=hpet_dostepny()?czas_monotoniczny_us():0;LayerRenderInfo layers[MAKS_WARSTW];int layer_count=0;
+    if(count)layer_count=snapshot_warstw(layers);
+    grafika_rozpocznij_skladanie();uint64_t pixels=0;
+    /* Faza A: wszystkie regiony trafiaja w calosci do scene backbufferu.
+       Framebuffer nie jest dotykany podczas kosztownego compositingu. */
+    const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
+    for(uint32_t ri=0;ri<count;++ri){const GuiDirtyRect&r=work[ri];pixels+=rect_area(r);grafika_odtworz_tlo_regionu(r.x,r.y,r.width,r.height);for(int li=0;li<layer_count;++li)zloz_snapshot_region(layers[li],r);if(system_overlay.otwarty){for(int li=0;li<layer_count;++li)if(layers[li].pid==system_overlay.pid){GuiDirtyRect o=system_overlay.rect;int x0=o.x>r.x?o.x:r.x,y0=o.y>r.y?o.y:r.y,x1=o.x+o.width<r.x+r.width?o.x+o.width:r.x+r.width,y1=o.y+o.height<r.y+r.height?o.y+o.height:r.y+r.height;if(x0<x1&&y0<y1){GuiDirtyRect clip{x0,y0,x1-x0,y1-y0};zloz_snapshot_region(layers[li],clip);}break;}}if(r.x+r.width>sw-150&&r.y+r.height>sh-40)rysuj_zegar_rtc();}
+    const uint64_t compose_end=hpet_dostepny()?czas_monotoniczny_us():0;
+    /* Faza B: prezentujemy dopiero gotowe wiersze, a kursor nakladamy raz,
+       jako ostatni overlay. Scene backbuffer pozostaje bez kursora. */
+    for(uint32_t ri=0;ri<count;++ri){const GuiDirtyRect&r=work[ri];grafika_prezentuj_region(r.x,r.y,r.width,r.height);}
+    if(cursor_work){grafika_prezentuj_region(old_cursor.x,old_cursor.y,old_cursor.width,old_cursor.height);grafika_prezentuj_region(new_cursor.x,new_cursor.y,new_cursor.width,new_cursor.height);pixels+=rect_area(old_cursor)+rect_area(new_cursor);}
+    grafika_prezentuj_kursor();
+    grafika_zakoncz_scene();
+    const uint64_t present_end=hpet_dostepny()?czas_monotoniczny_us():0;
+    if(count) zakoncz_snapshot();
+    ++licznik_klatek;
+    suma_dirty_px+=pixels;
+    suma_rect+=count+(cursor_work?2U:0U);
+    if(pixels>maks_dirty_px)maks_dirty_px=pixels;
+    uint64_t screen=(uint64_t)grafika_pobierz_szerokosc()*grafika_pobierz_wysokosc();if(pixels>=screen)++licznik_full;else ++licznik_region;
+    /* Nowe dirty powstale podczas klatki pozostaly w kolejce. Generation
+       sluzy jako jawna kontrola, ze nie wolno ich skasowac na koncu. */
+    f=irq_off();bool newer=dirty_generation!=generation_start;irq_restore(f);(void)newer;
+    if(hpet_dostepny()){uint64_t compose=compose_end>=start?compose_end-start:0;uint64_t present=present_end>=compose_end?present_end-compose_end:0;suma_compose_us+=compose;suma_present_us+=present;if(compose>maks_compose_us)maks_compose_us=compose;if(present>maks_present_us)maks_present_us=present;perf_log(present_end*1000ULL);}
+}
+
+void skladacz_obrazu_podnies_warstwe(int pid) {
+    warstwa_obrazu* cel = pobierz_warstwe(pid);
+    if (!cel || cel->z_order <= 0) return; /* pulpit pozostaje na dole */
+    int maks = cel->z_order;
+    for (int i=1;i<MAKS_WARSTW;++i) {
+        warstwa_obrazu* w=pobierz_warstwe(i);
+        if (w && w->z_order>0 && w->z_order>maks) maks=w->z_order;
+    }
+    if (maks < 30000) cel->z_order=maks+1;
+    else {
+        int kolejny=100;
+        bool uzyte[MAKS_WARSTW]={};
+        for (int n=0;n<MAKS_WARSTW;++n) {
+            int best=-1;
+            for(int i=1;i<MAKS_WARSTW;++i) {
+                warstwa_obrazu* w=pobierz_warstwe(i);
+                if(!uzyte[i]&&w&&w->z_order>0&&
+                   (best<0||w->z_order<tablica_warstw[best].z_order))
+                    best=i;
+            }
+            if(best<0) break;
+            uzyte[best]=true;
+            tablica_warstw[best].z_order=kolejny++;
+        }
+        cel->z_order=kolejny;
+    }
+    skladacz_obrazu_oznacz_dirty_rect(cel->x,cel->y,cel->szerokosc,cel->wysokosc);
+}
+
+bool skladacz_obrazu_ustaw_tytul(int pid, const char* tytul) {
+    if (!pid_poprawny(pid) || !tytul || !warstwa_bufor_spojny(pid)) return false;
+    bool zmieniony = false;
+    uint32_t i = 0;
+    for (; i + 1U < sizeof(tytul_okna[pid]) && tytul[i] != '\0'; ++i) {
+        if (tytul_okna[pid][i] != tytul[i]) zmieniony = true;
+        tytul_okna[pid][i] = tytul[i];
+    }
+    if (tytul_okna[pid][i] != '\0') zmieniony = true;
+    tytul_okna[pid][i] = '\0';
+    return zmieniony;
+}
+
+uint64_t skladacz_obrazu_id_okna(int pid) {
+    if (!pid_poprawny(pid) || !warstwa_bufor_spojny(pid)) return 0;
+    return (static_cast<uint64_t>(generacja_okna[pid]) << 32U) |
+           static_cast<uint32_t>(pid);
+}
+
+bool skladacz_obrazu_czy_widoczna(int pid) {
+    return pid_poprawny(pid) && widocznosc_warstwy[pid] &&
+           warstwa_bufor_spojny(pid);
+}
+
+bool skladacz_obrazu_minimalizuj(int pid) {
+    if (!pid_poprawny(pid) || !warstwa_bufor_spojny(pid) ||
+        !widocznosc_warstwy[pid]) return false;
+    const warstwa_obrazu& w = tablica_warstw[pid];
+    widocznosc_warstwy[pid] = false;
+    stan_okna[pid] = GUI_OKNO_ZMINIMALIZOWANE;
+    skladacz_obrazu_oznacz_dirty_rect(w.x, w.y, w.szerokosc, w.wysokosc);
+    return true;
+}
+
+bool skladacz_obrazu_przywroc(uint64_t window_id) {
+    const int pid = static_cast<int>(static_cast<uint32_t>(window_id));
+    const uint32_t generation = static_cast<uint32_t>(window_id >> 32U);
+    if (!pid_poprawny(pid) || generation == 0 ||
+        generacja_okna[pid] != generation || !warstwa_bufor_spojny(pid))
+        return false;
+    widocznosc_warstwy[pid] = true;
+    if (stan_okna[pid] == GUI_OKNO_ZMINIMALIZOWANE)
+        stan_okna[pid] = GUI_OKNO_NORMALNE;
+    const warstwa_obrazu& w = tablica_warstw[pid];
+    skladacz_obrazu_oznacz_dirty_rect(w.x, w.y, w.szerokosc, w.wysokosc);
+    return true;
+}
+
+uint32_t skladacz_obrazu_snapshot_okien(GuiOknoInfo* out, uint32_t max,
+                                        int aktywny_pid) {
+    if (!out || max == 0) return 0;
+    uint32_t count = 0;
+    for (int pid = 1; pid < MAKS_WARSTW && count < max; ++pid) {
+        if (!warstwa_bufor_spojny(pid)) continue;
+        const warstwa_obrazu& w = tablica_warstw[pid];
+        GuiOknoInfo& o = out[count++];
+        o = {};
+        o.window_id = skladacz_obrazu_id_okna(pid);
+        o.pid = pid;
+        o.generation = generacja_okna[pid];
+        o.stan = stan_okna[pid];
+        o.widoczne = widocznosc_warstwy[pid] ? 1U : 0U;
+        o.aktywne = pid == aktywny_pid ? 1U : 0U;
+        o.x = w.x; o.y = w.y; o.szerokosc = w.szerokosc; o.wysokosc = w.wysokosc;
+        for (uint32_t i = 0; i < sizeof(o.tytul); ++i) o.tytul[i] = tytul_okna[pid][i];
+    }
+    return count;
+}
+
+void skladacz_obrazu_ustaw_overlay(int pid, bool otwarty,
+                                   int x, int y, int szer, int wys) {
+    const GuiDirtyRect stary = system_overlay.rect;
+    const bool byl = system_overlay.otwarty;
+    if (!otwarty) {
+        system_overlay = {false, -1, {0, 0, 0, 0}};
+    } else if (pid_poprawny(pid) && warstwa_ma_spojny_bufor(pid) &&
+               szer > 0 && wys > 0) {
+        system_overlay = {true, pid, {x, y, szer, wys}};
+    } else {
         return;
-    skladacz_obrazu_zloz_klatke();
+    }
+    if (byl) skladacz_obrazu_oznacz_dirty_rect(stary.x, stary.y,
+                                                stary.width, stary.height);
+    if (system_overlay.otwarty)
+        skladacz_obrazu_oznacz_dirty_rect(x, y, szer, wys);
+}
+
+int skladacz_obrazu_overlay_pod_punktem(int x, int y) {
+    if (!system_overlay.otwarty) return -1;
+    (void)x;
+    (void)y;
+    /* Otwarty popup jest modalny dla pierwszego MOUSE_DOWN. Dzieki temu
+       klik poza nim zamyka popup i nie jest dostarczany drugi raz aplikacji. */
+    return system_overlay.pid;
+}
+
+void skladacz_obrazu_debug_warstwy(const char* powod) {
+#if BURSZTYN_DEBUG_GUI_LAYERS
+    char b[192];size_t n=0;perf_txt(b,sizeof(b),&n,"[GUI-LAYERS] ");perf_txt(b,sizeof(b),&n,powod?powod:"");wypisz_log(b);
+    for(int i=0;i<MAKS_WARSTW;++i){warstwa_obrazu*w=pobierz_warstwe(i);if(!w)continue;n=0;b[0]='\0';
+        perf_txt(b,sizeof(b),&n,"pid=");perf_num(b,sizeof(b),&n,w->pid);perf_txt(b,sizeof(b),&n," x=");perf_num(b,sizeof(b),&n,(uint32_t)w->x);perf_txt(b,sizeof(b),&n," y=");perf_num(b,sizeof(b),&n,(uint32_t)w->y);perf_txt(b,sizeof(b),&n," w=");perf_num(b,sizeof(b),&n,w->szerokosc);perf_txt(b,sizeof(b),&n," h=");perf_num(b,sizeof(b),&n,w->wysokosc);perf_txt(b,sizeof(b),&n," z=");perf_num(b,sizeof(b),&n,(uint32_t)w->z_order);perf_txt(b,sizeof(b),&n," visible=1");wypisz_log(b);}
+#else
+    (void)powod;
+#endif
 }

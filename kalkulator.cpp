@@ -111,14 +111,13 @@ static const char* const calc_btns[16] = {
 
 static int WIN_X = 300;
 static int WIN_Y = 150;
-static constexpr int WIN_W = 320;
-static constexpr int WIN_H = 380;
+static int WIN_W = 320;
+static int WIN_H = 380;
+static int restore_x = 300, restore_y = 150, restore_w = 320, restore_h = 380;
+static bool zmaksymalizowane = false;
 
 static constexpr int PASEK_SYSTEMOWY_H = 40;
 static constexpr int Z_ORDER_OKNA = 10;
-
-static constexpr int MINI_W = 150;
-static constexpr int MINI_H = 28;
 
 static bool dragging = false;
 static bool aplikacja_zminimalizowana = false;
@@ -484,16 +483,6 @@ static void ogranicz_pozycje_okna(int* x, int* y) {
     if (*y > max_y) *y = max_y;
 }
 
-static void rysuj_zminimalizowany() {
-    gui_rysuj_prostokat(WIN_X, WIN_Y, MINI_W, MINI_H, 0x00301500);
-    gui_rysuj_prostokat(WIN_X, WIN_Y, MINI_W, 2, 0x00E58A00);
-    gui_wypisz_tekst_kolor(WIN_X + 8, WIN_Y + 7, 0x00FFFFFF, "Kalkulator");
-
-    gui_rysuj_prostokat(WIN_X + MINI_W - 26, WIN_Y + 4, 20, 20, 0x00E58A00);
-    rysuj_tekst_wysrodkowany(WIN_X + MINI_W - 26, WIN_Y + 4,
-                             20, 20, 1, 0x001A0B00, "+");
-}
-
 static void RysujInterfejs(bool wyczysc_warstwe) {
     if (wyczysc_warstwe) {
         // Po poprawkach w grafika.cpp ta funkcja czysci tylko warstwe procesu.
@@ -501,22 +490,12 @@ static void RysujInterfejs(bool wyczysc_warstwe) {
     }
 
     if (aplikacja_zminimalizowana) {
-        rysuj_zminimalizowany();
-        gui_odswiez();
         return;
     }
 
     gui_rysuj_okno(WIN_X, WIN_Y, WIN_W, WIN_H, "Kalkulator Systemowy");
-
-    // Minimalizacja.
-    gui_rysuj_prostokat(WIN_X + WIN_W - 50, WIN_Y + 4, 20, 20, 0x00E58A00);
-    rysuj_tekst_wysrodkowany(WIN_X + WIN_W - 50, WIN_Y + 4,
-                             20, 20, 1, 0x001A0B00, "-");
-
-    // Zamkniecie.
-    gui_rysuj_prostokat(WIN_X + WIN_W - 26, WIN_Y + 4, 20, 20, 0x00AA0000);
-    rysuj_tekst_wysrodkowany(WIN_X + WIN_W - 26, WIN_Y + 4,
-                             20, 20, 1, 0x00FFFFFF, "X");
+    gui_rysuj_standardowa_belke(WIN_X, WIN_Y, WIN_W,
+                                "Kalkulator Systemowy", zmaksymalizowane);
 
     // Wyswietlacz.
     gui_rysuj_prostokat(WIN_X + 10, WIN_Y + 35, WIN_W - 20, 50, 0x00050200);
@@ -606,6 +585,8 @@ extern "C" __attribute__((noreturn)) void _start() {
     while (!wyjdz) {
         bws_zdarzenie zdarzenie{};
         if (!gui_czekaj_na_zdarzenie(&zdarzenie)) continue;
+        if (zdarzenie.typ == BWS_ZDARZENIE_FOCUS && aplikacja_zminimalizowana)
+            aplikacja_zminimalizowana = false;
         const int mx = zdarzenie.x;
         const int my = zdarzenie.y;
         const bool lewy = (zdarzenie.przyciski & 0x01U) != 0;
@@ -616,19 +597,9 @@ extern "C" __attribute__((noreturn)) void _start() {
         bool pelne_czyszczenie = false;
 
         // -------------------------------------------------------------
-        // Tryb zminimalizowany: pozostaje maly pasek do przywrocenia.
+        // Ukryte okno przywraca menedzer przez stabilny window_id.
         // -------------------------------------------------------------
         if (aplikacja_zminimalizowana) {
-            if (klik_lewy &&
-                punkt_w_prostokacie(mx, my, WIN_X, WIN_Y, MINI_W, MINI_H)) {
-                aplikacja_zminimalizowana = false;
-                redraw = true;
-                pelne_czyszczenie = true;
-            }
-
-            if (redraw) {
-                RysujInterfejs(pelne_czyszczenie);
-            }
             continue;
         }
 
@@ -637,24 +608,37 @@ extern "C" __attribute__((noreturn)) void _start() {
         // -------------------------------------------------------------
         if (klik_lewy &&
             punkt_w_prostokacie(mx, my, WIN_X, WIN_Y, WIN_W, WIN_H)) {
-
-            if (punkt_w_prostokacie(mx, my,
-                                    WIN_X + WIN_W - 50, WIN_Y + 4,
-                                    20, 20)) {
-                aplikacja_zminimalizowana = true;
+            const gui_akcja_belki akcja =
+                gui_hit_test_belki(mx, my, WIN_X, WIN_Y, WIN_W);
+            if (akcja == GUI_BELKA_MINIMALIZUJ) {
+                aplikacja_zminimalizowana = gui_minimalizuj_okno();
                 dragging = false;
-                redraw = true;
-                pelne_czyszczenie = true;
+                gui_ustaw_capture_myszy(false);
             }
-            else if (punkt_w_prostokacie(mx, my,
-                                         WIN_X + WIN_W - 26, WIN_Y + 4,
-                                         20, 20)) {
+            else if (akcja == GUI_BELKA_ZAMKNIJ) {
                 wyjdz = true;
                 dragging = false;
             }
-            else if (punkt_w_prostokacie(mx, my,
-                                         WIN_X, WIN_Y,
-                                         WIN_W, 26)) {
+            else if (akcja == GUI_BELKA_MAKSYMALIZUJ) {
+                if (!zmaksymalizowane) {
+                    restore_x = WIN_X; restore_y = WIN_Y;
+                    restore_w = WIN_W; restore_h = WIN_H;
+                    WIN_X = 0; WIN_Y = 0; WIN_W = screen_w;
+                    WIN_H = screen_h - PASEK_SYSTEMOWY_H;
+                    zmaksymalizowane = true;
+                } else {
+                    WIN_X = restore_x; WIN_Y = restore_y;
+                    WIN_W = restore_w; WIN_H = restore_h;
+                    zmaksymalizowane = false;
+                }
+                if (bws_utworz_warstwe(WIN_X, WIN_Y, WIN_W, WIN_H,
+                                       Z_ORDER_OKNA) < 0) {
+                    gui_zakoncz_aplikacje();
+                }
+                redraw = true;
+                pelne_czyszczenie = true;
+            }
+            else if (akcja == GUI_BELKA_DRAG && !zmaksymalizowane) {
                 dragging = true;
                 gui_ustaw_capture_myszy(true);
                 drag_off_x = mx - WIN_X;

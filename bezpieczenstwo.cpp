@@ -219,6 +219,29 @@ bool skopiuj_z_przestrzeni_uzytkownika(
     return true;
 }
 
+/* Kernelowy provider entropii. mbedTLS zna tylko ten kontrakt i nie posiada
+ * polityki sprzetowej. Brak RDRAND jest dozwolony przy starcie systemu, ale
+ * operacja kryptograficzna odmawia wtedy pracy (fail-closed). */
+extern "C" bool bursztyn_krypto_wypelnij_losowe(uint8_t* bufor,
+                                                 size_t dlugosc) {
+    if (!bufor && dlugosc != 0) return false;
+    uint32_t a=0,b=0,c=0,d=0;
+    asm volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d)
+                 : "a"(1U), "c"(0U));
+    (void)a; (void)b; (void)d;
+    if ((c & (1U << 30)) == 0) return false;
+    size_t off=0;
+    while (off < dlugosc) {
+        uint64_t v=0; unsigned char ok=0;
+        for (unsigned proba=0; proba<16 && !ok; ++proba)
+            asm volatile("rdrand %0; setc %1" : "=r"(v), "=qm"(ok) :: "cc");
+        if (!ok) return false;
+        for (unsigned i=0; i<8 && off<dlugosc; ++i,++off)
+            bufor[off]=static_cast<uint8_t>(v>>(i*8));
+    }
+    return true;
+}
+
 /**
  * Odpowiednik copy_to_user.
  *

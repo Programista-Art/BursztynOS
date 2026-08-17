@@ -492,6 +492,11 @@ extern volatile bool odebrano_pong;
 
 extern volatile bool dns_odebrano;
 extern uint8_t dns_resolved_ip[4];
+extern volatile uint64_t ipv4_rx_packets;
+extern volatile uint64_t udp_rx_packets;
+extern volatile uint64_t dns_rx_packets;
+extern volatile uint64_t arp_rx_packets;
+extern volatile uint64_t icmp_rx_packets;
 
 extern volatile bool tcp_dane_odebrane;
 
@@ -598,7 +603,7 @@ void uruchom_klienta_dhcp();
  *
  * Obecne ABI nie zwraca bool - wynik trafia do logu.
  */
-void bws_siec_ping(
+uint32_t bws_siec_ping(
     uint8_t ip1,
     uint8_t ip2,
     uint8_t ip3,

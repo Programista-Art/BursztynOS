@@ -21,6 +21,8 @@
 
 void InicjalizujGrafike(uint64_t adres_info_multiboot);
 void wypisz_log(const char* tekst);
+void klog_serial(const char* tekst);
+void boot_log_gui(const char* tekst);
 
 /* =========================================================================
  * 2. INFORMACJE O EKRANIE I PREZENTACJA
@@ -28,6 +30,7 @@ void wypisz_log(const char* tekst);
 
 int grafika_pobierz_szerokosc();
 int grafika_pobierz_wysokosc();
+uint32_t* grafika_pobierz_wiersz_backbuffer(int y);
 
 void PrzeniesNaEkran();
 
@@ -46,6 +49,7 @@ void PrzeniesFragmentNaEkran(int x,
  * do backbufferu.
  */
 void grafika_rozpocznij_skladanie();
+void grafika_odtworz_tlo_regionu(int x, int y, int szer, int wys);
 
 /*
  * Odtwarza tapete albo awaryjny kolor tla do backbufferu.
@@ -63,6 +67,12 @@ void grafika_zapisz_surowy_piksel(int x,
  * Konczy skladanie, rysuje kursor i prezentuje gotowa klatke.
  */
 void grafika_zakoncz_skladanie();
+void grafika_zakoncz_skladanie_regionu(int x, int y, int szer, int wys);
+void grafika_prezentuj_region(int x, int y, int szer, int wys);
+void grafika_prezentuj_kursor();
+void grafika_zakoncz_scene();
+void grafika_naloz_kursor_regionu(int x, int y, int szer, int wys);
+void grafika_pobierz_pozycje_kursora(int* x, int* y);
 
 /* Nakladka jadra rysowana przez compositor. */
 void rysuj_zegar_rtc();
@@ -167,7 +177,11 @@ void bws_gui_rysuj_prostokat(int x,
 void bws_gui_ustaw_przejecie_myszy(bool stan);
 void bws_gui_ustaw_capture(bool stan);
 void bws_gui_usun_stan_procesu(int pid);
+void bws_gui_aktywuj_warstwe(int pid);
+bool bws_gui_minimalizuj_warstwe(int pid);
+bool bws_gui_aktywuj_okno(uint64_t window_id);
 int bws_gui_aktywny_pid();
+void bws_gui_powiadom_lifecycle(uint32_t typ, int pid);
 
 void bws_gui_pobierz_rozdzielczosc(int* szer,
                                    int* wys);

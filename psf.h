@@ -389,6 +389,8 @@ bool zapisz_do_pliku(
     uint32_t dlugosc
 );
 
+bool psf_czy_gotowy();
+
 /*
  * Czyta maksymalnie max_dlugosc bajtow.
  *

@@ -47,6 +47,7 @@
 #include "siec.h"
 #include "e1000.h"
 #include "grafika.h"
+#include "sterowniki/czas/hpet.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -71,7 +72,51 @@
 extern "C" bool bursztyn_tls_pobierz_magazyn_ca(
     const unsigned char** dane,
     size_t* dlugosc
-) __attribute__((weak));
+);
+
+/* Minimalny, jawny magazyn zaufania zachowany z ostatniej dzialajacej
+   wersji HTTPS. To publiczny ISRG Root X1, nie certyfikat serwera i nie
+   obejscie VERIFY_REQUIRED. */
+static const unsigned char ISRG_ROOT_X1[] =
+"-----BEGIN CERTIFICATE-----\n"
+"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\n"
+"-----END CERTIFICATE-----\n";
+
+extern "C" bool bursztyn_tls_pobierz_magazyn_ca(
+    const unsigned char** dane,size_t* dlugosc) {
+    if(!dane||!dlugosc)return false;
+    *dane=ISRG_ROOT_X1;
+    *dlugosc=sizeof(ISRG_ROOT_X1);
+    return true;
+}
 
 /* =========================================================================
  * 2. STAN PUBLICZNY
@@ -120,21 +165,14 @@ constexpr size_t TLS_HTTP_REQUEST_MAX =
 constexpr size_t TLS_BIO_FRAGMENT_MAX =
     16U * 1024U;
 
-/*
- * Bare-metal nie ma jeszcze monotonicznego timera API dla warstwy TLS.
- * Timeouty sa wiec ograniczona liczba iteracji "pump + retry".
- *
- * To jest bezpieczniejsze od petli nieskonczonych, ale docelowo nalezy
- * zamienic je na deadline oparty o zegar monotoniczny kernela.
- */
-constexpr uint32_t TLS_HANDSHAKE_MAX_PROB =
-    2U * 1000U * 1000U;
+constexpr uint64_t TLS_HANDSHAKE_TIMEOUT_MS = 15000;
+constexpr uint64_t TLS_IO_TIMEOUT_MS = 15000;
+constexpr uint64_t TLS_CLOSE_TIMEOUT_MS = 1000;
 
-constexpr uint32_t TLS_IO_MAX_PUSTYCH_PROB =
-    2U * 1000U * 1000U;
-
-constexpr uint32_t TLS_CLOSE_MAX_PROB =
-    100U * 1000U;
+uint64_t tls_deadline(uint64_t timeout_ms) {
+    const uint64_t now = czas_monotoniczny_ms();
+    return now > UINT64_MAX - timeout_ms ? UINT64_MAX : now + timeout_ms;
+}
 
 /* =========================================================================
  * 4. PROSTE FUNKCJE POMOCNICZE
@@ -719,14 +757,6 @@ bool tls_zaladuj_ca(
         return false;
     }
 
-    if (!bursztyn_tls_pobierz_magazyn_ca) {
-        wypisz_log(
-            "[TLS] Brak magazynu zaufanych CA - HTTPS odrzucone."
-        );
-
-        return false;
-    }
-
     const unsigned char* dane =
         nullptr;
 
@@ -799,10 +829,8 @@ bool tls_handshake(
         return false;
     }
 
-    for (uint32_t proba = 0;
-         proba <
-            TLS_HANDSHAKE_MAX_PROB;
-         ++proba) {
+    const uint64_t deadline=tls_deadline(TLS_HANDSHAKE_TIMEOUT_MS);
+    while(czas_monotoniczny_ms()<deadline) {
 
         const int wynik =
             mbedtls_ssl_handshake(
@@ -853,8 +881,7 @@ bool tls_wyslij_calosc(
     size_t wyslano =
         0;
 
-    uint32_t puste_proby =
-        0;
+    uint64_t deadline=tls_deadline(TLS_IO_TIMEOUT_MS);
 
     while (wyslano <
            dlugosc) {
@@ -886,8 +913,7 @@ bool tls_wyslij_calosc(
             wyslano +=
                 n;
 
-            puste_proby =
-                0;
+            deadline=tls_deadline(TLS_IO_TIMEOUT_MS);
 
             tls_pompuj_siec();
 
@@ -895,8 +921,7 @@ bool tls_wyslij_calosc(
         }
 
         if (wynik == 0) {
-            if (++puste_proby >=
-                TLS_IO_MAX_PUSTYCH_PROB) {
+            if (czas_monotoniczny_ms() >= deadline) {
 
                 wypisz_log(
                     "[TLS] Timeout: ssl_write bez postepu."
@@ -920,8 +945,7 @@ bool tls_wyslij_calosc(
             return false;
         }
 
-        if (++puste_proby >=
-            TLS_IO_MAX_PUSTYCH_PROB) {
+        if (czas_monotoniczny_ms() >= deadline) {
 
             wypisz_log(
                 "[TLS] Timeout podczas wysylania HTTPS."
@@ -964,8 +988,7 @@ WynikOdczytuTLS tls_odbierz_odpowiedz(
     uint32_t odebrano =
         0;
 
-    uint32_t puste_proby =
-        0;
+    uint64_t deadline=tls_deadline(TLS_IO_TIMEOUT_MS);
 
     for (;;) {
         if (odebrano + 1U >=
@@ -1033,8 +1056,7 @@ WynikOdczytuTLS tls_odbierz_odpowiedz(
                     WynikOdczytuTLS::BLAD;
             }
 
-            if (++puste_proby >=
-                TLS_IO_MAX_PUSTYCH_PROB) {
+            if (czas_monotoniczny_ms() >= deadline) {
 
                 return
                     WynikOdczytuTLS::PRZEPELNIENIE;
@@ -1075,8 +1097,7 @@ WynikOdczytuTLS tls_odbierz_odpowiedz(
             odebrano +=
                 n;
 
-            puste_proby =
-                0;
+            deadline=tls_deadline(TLS_IO_TIMEOUT_MS);
 
             /*
              * Utrzymuj NUL dla bezpiecznej diagnostyki tekstowej.
@@ -1124,8 +1145,7 @@ WynikOdczytuTLS tls_odbierz_odpowiedz(
                 WynikOdczytuTLS::BLAD;
         }
 
-        if (++puste_proby >=
-            TLS_IO_MAX_PUSTYCH_PROB) {
+        if (czas_monotoniczny_ms() >= deadline) {
 
             wypisz_log(
                 "[TLS] Timeout podczas odbierania odpowiedzi HTTPS."
@@ -1152,10 +1172,8 @@ void tls_wyslij_close_notify(
         return;
     }
 
-    for (uint32_t proba = 0;
-         proba <
-            TLS_CLOSE_MAX_PROB;
-         ++proba) {
+    const uint64_t deadline=tls_deadline(TLS_CLOSE_TIMEOUT_MS);
+    while(czas_monotoniczny_ms()<deadline) {
 
         const int wynik =
             mbedtls_ssl_close_notify(
@@ -1476,6 +1494,7 @@ extern "C" bool kernel_siec_pobierz_https(
 
         handshake_gotowy =
             true;
+        wypisz_log("[TLS] HANDSHAKE OK");
 
         const uint32_t wynik_weryfikacji =
             mbedtls_ssl_get_verify_result(
@@ -1499,6 +1518,7 @@ extern "C" bool kernel_siec_pobierz_https(
             true,
             __ATOMIC_RELEASE
         );
+        wypisz_log("[TLS] VERIFY=OK");
 
         char zadanie[
             TLS_HTTP_REQUEST_MAX

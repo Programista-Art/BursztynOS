@@ -81,9 +81,11 @@ static_assert(
 #define PROCES_ZABLOKOWANY       2
 #define PROCES_ZABLOKOWANY_MYSZ  3
 #define PROCES_ZABLOKOWANY_ZDARZENIE 4
+#define PROCES_ZABLOKOWANY_KLAWIATURA 5
+#define PROCES_KONCZACY          6
 
 #define PROCES_STAN_MIN PROCES_PUSTY
-#define PROCES_STAN_MAX PROCES_ZABLOKOWANY_ZDARZENIE
+#define PROCES_STAN_MAX PROCES_KONCZACY
 
 #ifdef __cplusplus
 
@@ -92,7 +94,9 @@ static_assert(
     PROCES_GOTOWY == 1 &&
     PROCES_ZABLOKOWANY == 2 &&
     PROCES_ZABLOKOWANY_MYSZ == 3 &&
-    PROCES_ZABLOKOWANY_ZDARZENIE == 4,
+    PROCES_ZABLOKOWANY_ZDARZENIE == 4 &&
+    PROCES_ZABLOKOWANY_KLAWIATURA == 5 &&
+    PROCES_KONCZACY == 6,
     "Zmiana numerow stanow wymaga aktualizacji loadera i schedulera"
 );
 
@@ -497,4 +501,11 @@ bool scheduler_dodaj_zdarzenie(int pid, const bws_zdarzenie* zdarzenie);
 bool scheduler_pobierz_zdarzenie(int pid, bws_zdarzenie* zdarzenie);
 void scheduler_czekaj_na_zdarzenie(int pid);
 void scheduler_usun_zdarzenia_procesu(int pid);
+void scheduler_czekaj_na_klawiature(int pid);
+char scheduler_pobierz_klawisz_lub_zablokuj(int pid);
+extern "C" void scheduler_wybudz_klawiature();
 uint64_t scheduler_pobierz_tick();
+void scheduler_zarejestruj_irq_timera();
+uint64_t scheduler_liczba_irq_timera();
+uint64_t scheduler_liczba_przelaczen();
+uint64_t scheduler_liczba_wybudzen_event();

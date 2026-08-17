@@ -35,6 +35,11 @@
 #include <stddef.h>
 #include <stdbool.h>
 
+/* Shell ma wlasny terminal w prywatnej warstwie. Wszystkie dotychczasowe
+ * wywolania wypisz() w tym pliku sa kierowane do tej powierzchni, a nie do
+ * legacy term_buf jadra. */
+#define wypisz shell_wypisz
+
 /* =========================================================================
  * 1. NAGLOWEK BUR
  * ========================================================================= */
@@ -93,6 +98,152 @@ static_assert(
 );
 
 namespace {
+
+constexpr int SHELL_X_START = 20;
+constexpr int SHELL_Y_START = 20;
+constexpr int SHELL_W = 660;
+constexpr int SHELL_H = 360;
+constexpr int SHELL_TITLE_H = 28;
+constexpr int SHELL_TEXT_X = 8;
+constexpr int SHELL_TEXT_Y = 34;
+constexpr int SHELL_LINE_H = 16;
+constexpr int SHELL_COLS = 70;
+constexpr int SHELL_ROWS = 19;
+
+char shell_ekran[SHELL_ROWS][SHELL_COLS + 1] = {};
+int shell_wiersz = 0;
+int shell_kolumna = 0;
+int shell_x = SHELL_X_START;
+int shell_y = SHELL_Y_START;
+int shell_w = SHELL_W;
+int shell_h = SHELL_H;
+int shell_screen_w = 1024;
+int shell_screen_h = 768;
+int shell_restore_x = SHELL_X_START;
+int shell_restore_y = SHELL_Y_START;
+int shell_restore_w = SHELL_W;
+int shell_restore_h = SHELL_H;
+bool shell_maximized = false;
+bool shell_minimized = false;
+bool shell_drag = false;
+int shell_drag_mouse_x = 0;
+int shell_drag_mouse_y = 0;
+int shell_drag_window_x = 0;
+int shell_drag_window_y = 0;
+
+void shell_rysuj_terminal() {
+    gui_rysuj_okno(shell_x, shell_y, shell_w, shell_h, "Powloka Bursztynowa");
+    gui_rysuj_standardowa_belke(shell_x, shell_y, shell_w,
+                                "Powloka Bursztynowa", shell_maximized);
+    if (shell_minimized) { gui_odswiez(); return; }
+    gui_rysuj_prostokat(shell_x + 4, shell_y + SHELL_TITLE_H, shell_w - 8,
+                        shell_h - SHELL_TITLE_H - 4, 0x001A0B00);
+    for (int r = 0; r < SHELL_ROWS; ++r) {
+        shell_ekran[r][SHELL_COLS] = '\0';
+        gui_wypisz_tekst_kolor(shell_x + SHELL_TEXT_X,
+                               shell_y + SHELL_TEXT_Y + r * SHELL_LINE_H,
+                               0x00E58A00, shell_ekran[r]);
+    }
+    /* Kursor tekstowy jest zwyklym fragmentem powierzchni Shella. */
+    int caret_advance = 0;
+    for (int c = 0; c < shell_kolumna; ++c) {
+        int a = gui_pobierz_szerokosc_znaku(
+            static_cast<uint8_t>(shell_ekran[shell_wiersz][c]));
+        if (a < 1) a = 1;
+        caret_advance += a + 1;
+    }
+    gui_rysuj_prostokat(shell_x + SHELL_TEXT_X + caret_advance,
+                        shell_y + SHELL_TEXT_Y + shell_wiersz * SHELL_LINE_H + 14,
+                        8, 2, 0x00FFBF00);
+    gui_odswiez();
+}
+
+void shell_przewin() {
+    for (int r = 1; r < SHELL_ROWS; ++r)
+        for (int c = 0; c <= SHELL_COLS; ++c)
+            shell_ekran[r - 1][c] = shell_ekran[r][c];
+    for (int c = 0; c <= SHELL_COLS; ++c)
+        shell_ekran[SHELL_ROWS - 1][c] = '\0';
+    shell_wiersz = SHELL_ROWS - 1;
+}
+
+void shell_dopisz_znak(char c) {
+    if (c == '\r') { shell_kolumna = 0; return; }
+    if (c == '\n') {
+        shell_kolumna = 0;
+        if (++shell_wiersz >= SHELL_ROWS) shell_przewin();
+        return;
+    }
+    if (c == '\b') {
+        if (shell_kolumna > 0) {
+            shell_ekran[shell_wiersz][--shell_kolumna] = '\0';
+        }
+        return;
+    }
+    if (shell_kolumna >= SHELL_COLS) {
+        shell_kolumna = 0;
+        if (++shell_wiersz >= SHELL_ROWS) shell_przewin();
+    }
+    shell_ekran[shell_wiersz][shell_kolumna++] = c;
+    shell_ekran[shell_wiersz][shell_kolumna] = '\0';
+}
+
+void shell_wypisz(const char* tekst) {
+    if (!tekst) return;
+    for (size_t i = 0; tekst[i] != '\0'; ++i) shell_dopisz_znak(tekst[i]);
+    shell_rysuj_terminal();
+}
+
+void shell_obsluz_mysz(const bws_zdarzenie& e) {
+    if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN) {
+        const gui_akcja_belki akcja =
+            gui_hit_test_belki(e.x, e.y, shell_x, shell_y, shell_w);
+        if (akcja == GUI_BELKA_ZAMKNIJ) gui_zakoncz_aplikacje();
+        if (akcja == GUI_BELKA_MINIMALIZUJ) {
+            shell_minimized = gui_minimalizuj_okno();
+            shell_drag = false;
+            gui_ustaw_capture_myszy(false);
+            return;
+        }
+        if (akcja == GUI_BELKA_MAKSYMALIZUJ) {
+            if (!shell_maximized) {
+                shell_restore_x=shell_x; shell_restore_y=shell_y;
+                shell_restore_w=shell_w; shell_restore_h=shell_h;
+                shell_x=0; shell_y=0; shell_w=shell_screen_w;
+                shell_h=shell_screen_h > 40 ? shell_screen_h-40 : shell_screen_h;
+                shell_maximized=true;
+            } else {
+                shell_x=shell_restore_x; shell_y=shell_restore_y;
+                shell_w=shell_restore_w; shell_h=shell_restore_h;
+                shell_maximized=false;
+            }
+            (void)bws_utworz_warstwe(shell_x,shell_y,shell_w,shell_h,10);
+            shell_rysuj_terminal();
+            return;
+        }
+        if (akcja == GUI_BELKA_DRAG && !shell_maximized) {
+            shell_drag = true;
+            shell_drag_mouse_x = e.x;
+            shell_drag_mouse_y = e.y;
+            shell_drag_window_x = shell_x;
+            shell_drag_window_y = shell_y;
+            gui_ustaw_capture_myszy(true);
+        }
+    } else if (e.typ == BWS_ZDARZENIE_MYSZ_RUCH && shell_drag) {
+        const int nx = shell_drag_window_x + (e.x - shell_drag_mouse_x);
+        const int ny = shell_drag_window_y + (e.y - shell_drag_mouse_y);
+        if (nx != shell_x || ny != shell_y) {
+            shell_x = nx;
+            shell_y = ny;
+            /* Przesuwamy metadane warstwy. Bufor pikseli pozostaje nietkniety. */
+            bws_przesun_warstwe(shell_x, shell_y);
+            gui_odswiez();
+        }
+    } else if (e.typ == BWS_ZDARZENIE_MYSZ_UP && shell_drag) {
+        shell_drag = false;
+        gui_ustaw_capture_myszy(false);
+    }
+}
 
 constexpr uint64_t BUR_TEXT_OFFSET = 0x1000ULL;
 constexpr uint64_t BUR_TEXT_SIZE   = 0x8000ULL;
@@ -434,29 +585,19 @@ void uint_do_str(
 
 char pobierz_znak_blokujaco() {
     for (;;) {
-        if (bws_wywolaj(
-                36,
-                0, 0, 0, 0) != 0) {
-
-            gui_zakoncz_aplikacje();
+        bws_zdarzenie e{};
+        if (!gui_czekaj_na_zdarzenie(&e)) continue;
+        if (e.typ == BWS_ZDARZENIE_FOCUS && shell_minimized)
+            shell_minimized = false;
+        if (e.typ == BWS_ZDARZENIE_ZAMKNIJ) gui_zakoncz_aplikacje();
+        if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN ||
+            e.typ == BWS_ZDARZENIE_MYSZ_RUCH ||
+            e.typ == BWS_ZDARZENIE_MYSZ_UP) {
+            shell_obsluz_mysz(e);
+            continue;
         }
-
-        const char c =
-            pobierz_znak();
-
-        if (c != 0) {
-            return c;
-        }
-
-        /*
-         * Nie wykonujemy HLT w Ring 3. Scheduler/IRQ nadal musza dzialac.
-         */
-        asm volatile(
-            "pause"
-            :
-            :
-            : "memory"
-        );
+        if (e.typ == BWS_ZDARZENIE_KLAWISZ && e.kod != 0)
+            return static_cast<char>(e.kod);
     }
 }
 
@@ -892,7 +1033,7 @@ void wypisz_pomoc() {
         "  pomoc                         - pokazuje pomoc\n"
         "  notatnik                      - uruchamia Notatnik\n"
         "  kalkulator                    - uruchamia Kalkulator\n"
-        "  przegladarka                  - uruchamia przegladarke Hussar\n"
+        "  przegladarka                  - uruchamia przegladarke Husarz\n"
         "  uruchom <plik.bur>            - uruchamia program .bur\n"
         "  pulpit | wyjdz | exit         - konczy powloke\n"
         "  czas                          - pokazuje czas RTC\n"
@@ -1356,54 +1497,49 @@ void polecenie_cytat() {
     constexpr const char* SCIEZKA =
         "/cytaty.txt";
 
-    char bufor[512] = {};
+    char bufor[1024] = {};
+    if (!czytaj_plik(SCIEZKA, bufor, sizeof(bufor) - 1U)) {
+        wypisz("Nie znaleziono pliku cytaty.txt.\n");
+        return;
+    }
+    bufor[sizeof(bufor) - 1U] = '\0';
 
-    if (czytaj_plik(
-            SCIEZKA,
-            bufor,
-            sizeof(bufor) - 1U)) {
-
-        bufor[
-            sizeof(bufor) - 1U] =
-            '\0';
-
-        wypisz("--- Cytaty z pliku ---\n");
-        wypisz(bufor);
-        wypisz("\n");
+    uint32_t liczba = 0;
+    bool poczatek = true;
+    for (size_t i = 0; bufor[i] != '\0'; ++i) {
+        if (poczatek && bufor[i] != '\n' && bufor[i] != '\r') ++liczba;
+        poczatek = bufor[i] == '\n';
+    }
+    if (liczba == 0) {
+        wypisz("Brak cytatow.\n");
         return;
     }
 
-    constexpr const char* DOMYSLNE =
-        "1. U mnie dziala.\n"
-        "2. Brak bledu to tez blad.\n";
+    /* Lekki PRNG uzytkowy. Nie jest i nie moze byc zrodlem entropii TLS. */
+    static uint32_t stan = UINT32_C(0xB0527A11);
+    stan ^= stan << 13U;
+    stan ^= stan >> 17U;
+    stan ^= stan << 5U;
+    const uint32_t wybrany = stan % liczba;
 
-    if (!utworz(SCIEZKA)) {
-        /*
-         * Plik mogl juz istniec, ale odczyt nie udal sie z innego powodu.
-         * Probujemy zapisu tylko wtedy, gdy API na to pozwoli.
-         */
+    uint32_t indeks = 0;
+    size_t start = 0;
+    for (size_t i = 0;; ++i) {
+        const bool koniec = bufor[i] == '\n' || bufor[i] == '\0';
+        if (!koniec) continue;
+        if (i > start) {
+            if (indeks == wybrany) {
+                bufor[i] = '\0';
+                wypisz(bufor + start);
+                wypisz("\n");
+                return;
+            }
+            ++indeks;
+        }
+        if (bufor[i] == '\0') break;
+        start = i + 1U;
     }
-
-    const size_t dlugosc =
-        dlugosc_tekstu_limit(
-            DOMYSLNE,
-            256
-        );
-
-    if (zapisz_plik(
-            SCIEZKA,
-            DOMYSLNE,
-            static_cast<uint32_t>(
-                dlugosc))) {
-
-        wypisz(
-            "Utworzono domyslny /cytaty.txt.\n"
-        );
-    } else {
-        wypisz(
-            "Blad: nie mozna odczytac ani utworzyc /cytaty.txt.\n"
-        );
-    }
+    wypisz("Nie mozna odczytac cytatow.\n");
 }
 
 void polecenie_pci() {
@@ -2116,12 +2252,11 @@ NaglowekBur naglowek = {
 extern "C"
 __attribute__((noreturn))
 void _start() {
-    /*
-     * Terminal nie powinien przejmowac sterowania mysza.
-     */
-    gui_ustaw_przejecie_myszy(
-        false
-    );
+    gui_pobierz_rozdzielczosc(&shell_screen_w, &shell_screen_h);
+    if (bws_utworz_warstwe(shell_x, shell_y, shell_w, shell_h, 10) < 0)
+        gui_zakoncz_aplikacje();
+    gui_ustaw_przejecie_myszy(true);
+    shell_rysuj_terminal();
 
     wypisz(
         "\n"

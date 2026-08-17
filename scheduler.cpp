@@ -68,6 +68,9 @@ uint64_t ostatnie_zdarzenie_myszy_procesu[
  * skalibrowany, jednostka pozostaje "tickiem schedulera".
  */
 static uint64_t licznik_tykniec_zegara = 0;
+static uint64_t licznik_irq_timera = 0;
+static uint64_t licznik_przelaczen_kontekstu = 0;
+static uint64_t licznik_wybudzen_event = 0;
 
 /*
  * Stary kod wybudzal wszystkie procesy myszy co 20 tickow.
@@ -80,7 +83,10 @@ static uint64_t termin_wybudzenia_myszy[
 ] = {};
 
 namespace {
-constexpr uint32_t ROZMIAR_KOLEJKI_ZDARZEN = 32;
+/* Burst klawiatury nie moze konkurowac z gestem myszy o 31 slotow. Ruch i
+ * timer sa koalescowane, a 127 wpisow daje zapas dla zdarzen krawedziowych
+ * podczas kosztownego redraw aplikacji Ring 3. */
+constexpr uint32_t ROZMIAR_KOLEJKI_ZDARZEN = 128;
 struct KolejkaZdarzen {
     bws_zdarzenie wpisy[ROZMIAR_KOLEJKI_ZDARZEN];
     uint32_t glowa;
@@ -491,6 +497,13 @@ static void posprzataj_zakonczone_procesy(
          * Pozostanie tylko bezpieczny wyciek strony/tabel VMM.
          */
         zasoby.oczekuje = false;
+        proces_t& proces=tablica_procesow[pid];
+        proces.sciezka_pliku[0]='\0';
+        proces.przestrzen_adresowa=nullptr;
+        proces.kernel_rsp=0;
+        proces.baza_stosu_jadra=0;
+        proces.szczyt_stosu_jadra=0;
+        ustaw_stan_procesu(proces,PROCES_PUSTY);
     }
 }
 
@@ -705,13 +718,23 @@ bool scheduler_dodaj_zdarzenie(
     uint32_t glowa = q.glowa;
     const uint32_t ogon = q.ogon;
 
-    /* Ruch moze zastapic ostatni ruch, zdarzen krawedziowych nie gubimy. */
+    /* MOVE zastępuje najnowszy nieodebrany MOVE po ostatniej krawędzi.
+       TIMER pomiędzy nimi nie może tworzyć historii pozycji kursora. */
     if ((zdarzenie->typ == BWS_ZDARZENIE_MYSZ_RUCH ||
          zdarzenie->typ == BWS_ZDARZENIE_TIMER) && glowa != ogon) {
-        const uint32_t ostatni = (glowa + ROZMIAR_KOLEJKI_ZDARZEN - 1U) %
-                                 ROZMIAR_KOLEJKI_ZDARZEN;
-        if (q.wpisy[ostatni].typ == zdarzenie->typ) {
-            q.wpisy[ostatni] = *zdarzenie;
+        uint32_t szukaj=(glowa+ROZMIAR_KOLEJKI_ZDARZEN-1U)%ROZMIAR_KOLEJKI_ZDARZEN;
+        bool znaleziono=false;
+        while(true){
+            const uint8_t typ=q.wpisy[szukaj].typ;
+            if(typ==zdarzenie->typ){znaleziono=true;break;}
+            if(typ==BWS_ZDARZENIE_MYSZ_DOWN||typ==BWS_ZDARZENIE_MYSZ_UP||
+               typ==BWS_ZDARZENIE_KLAWISZ||typ==BWS_ZDARZENIE_FOCUS||
+               typ==BWS_ZDARZENIE_BLUR||typ==BWS_ZDARZENIE_ZAMKNIJ)break;
+            if(szukaj==ogon)break;
+            szukaj=(szukaj+ROZMIAR_KOLEJKI_ZDARZEN-1U)%ROZMIAR_KOLEJKI_ZDARZEN;
+        }
+        if (znaleziono) {
+            q.wpisy[szukaj] = *zdarzenie;
             if (odczytaj_stan_procesu(tablica_procesow[pid]) ==
                 PROCES_ZABLOKOWANY_ZDARZENIE)
                 ustaw_stan_procesu(tablica_procesow[pid], PROCES_GOTOWY);
@@ -749,8 +772,10 @@ bool scheduler_dodaj_zdarzenie(
     q.wpisy[glowa] = *zdarzenie;
     q.glowa = nastepna;
     if (odczytaj_stan_procesu(tablica_procesow[pid]) ==
-        PROCES_ZABLOKOWANY_ZDARZENIE)
+        PROCES_ZABLOKOWANY_ZDARZENIE) {
         ustaw_stan_procesu(tablica_procesow[pid], PROCES_GOTOWY);
+        __atomic_add_fetch(&licznik_wybudzen_event,1ULL,__ATOMIC_RELAXED);
+    }
     przywroc_przerwania(irq);
     return true;
 }
@@ -789,9 +814,39 @@ void scheduler_usun_zdarzenia_procesu(int pid) {
     przywroc_przerwania(irq);
 }
 
+void scheduler_czekaj_na_klawiature(int pid) {
+    if (!pid_uzytkownika(pid)) return;
+    const StanPrzerwan irq=zapisz_i_wylacz_przerwania();
+    if(odczytaj_stan_procesu(tablica_procesow[pid])==PROCES_GOTOWY)
+        ustaw_stan_procesu(tablica_procesow[pid],PROCES_ZABLOKOWANY_KLAWIATURA);
+    przywroc_przerwania(irq);
+}
+
+extern "C" char pobierz_znak_klawiatury();
+char scheduler_pobierz_klawisz_lub_zablokuj(int pid) {
+    if(!pid_uzytkownika(pid))return 0;
+    const StanPrzerwan irq=zapisz_i_wylacz_przerwania();
+    const char znak=pobierz_znak_klawiatury();
+    if(znak==0&&odczytaj_stan_procesu(tablica_procesow[pid])==PROCES_GOTOWY)
+        ustaw_stan_procesu(tablica_procesow[pid],PROCES_ZABLOKOWANY_KLAWIATURA);
+    przywroc_przerwania(irq);
+    return znak;
+}
+
+extern "C" void scheduler_wybudz_klawiature() {
+    for(int pid=1;pid<MAKS_PROCESOW;++pid)
+        if(odczytaj_stan_procesu(tablica_procesow[pid])==PROCES_ZABLOKOWANY_KLAWIATURA)
+            ustaw_stan_procesu(tablica_procesow[pid],PROCES_GOTOWY);
+}
+
 uint64_t scheduler_pobierz_tick() {
     return __atomic_load_n(&licznik_tykniec_zegara, __ATOMIC_RELAXED);
 }
+
+void scheduler_zarejestruj_irq_timera(){__atomic_add_fetch(&licznik_irq_timera,1ULL,__ATOMIC_RELAXED);}
+uint64_t scheduler_liczba_irq_timera(){return __atomic_load_n(&licznik_irq_timera,__ATOMIC_RELAXED);}
+uint64_t scheduler_liczba_przelaczen(){return __atomic_load_n(&licznik_przelaczen_kontekstu,__ATOMIC_RELAXED);}
+uint64_t scheduler_liczba_wybudzen_event(){return __atomic_load_n(&licznik_wybudzen_event,__ATOMIC_RELAXED);}
 
 /* =========================================================================
  * INICJALIZACJA PLANISTY
@@ -954,9 +1009,8 @@ extern "C" uint64_t PrzelaczKontekst(
      *
      * Proces PUSTY zostal zakonczony i nie potrzebuje juz ramy.
      */
-    if (odczytaj_stan_procesu(
-            stary_proces) !=
-        PROCES_PUSTY) {
+    const int stan_starego=odczytaj_stan_procesu(stary_proces);
+    if (stan_starego != PROCES_PUSTY && stan_starego != PROCES_KONCZACY) {
 
         stary_proces.kernel_rsp =
             stary_rsp;
@@ -1088,6 +1142,8 @@ extern "C" uint64_t PrzelaczKontekst(
     aktualny_pid =
         nastepny_pid;
 
+    ++licznik_przelaczen_kontekstu;
+
     aktywny_proces =
         nastepny;
 
@@ -1158,9 +1214,6 @@ extern "C" void zakoncz_aktualny_proces() {
      * timer przerwany w Ring 0 moze wtedy wywolac PrzelaczKontekst(),
      * mimo ze normalnie nie zmieniamy procesu wewnatrz kodu kernela.
      */
-    proces.sciezka_pliku[0] =
-        '\0';
-
     proces.poziom_zaufania =
         PZB_PIASKOWNICA;
 
@@ -1169,7 +1222,7 @@ extern "C" void zakoncz_aktualny_proces() {
 
     ustaw_stan_procesu(
         proces,
-        PROCES_PUSTY
+        PROCES_KONCZACY
     );
 
     aktywny_proces =
@@ -1225,9 +1278,8 @@ extern "C" bool czy_proces_uruchomiony(
          * slotu podczas budowania procesu. Traktujemy kazdy niepusty stan
          * jako istniejaca instancje.
          */
-        if (odczytaj_stan_procesu(
-                proces) ==
-            PROCES_PUSTY) {
+        const int stan=odczytaj_stan_procesu(proces);
+        if (stan==PROCES_PUSTY || stan==PROCES_KONCZACY) {
 
             continue;
         }

@@ -278,7 +278,7 @@ static bool sciezka_juz_zarezerwowana(
     for (int i = 1; i < MAKS_PROCESOW; ++i) {
         const proces_t& proces = tablica_procesow[i];
 
-        if (proces.stan == PROCES_PUSTY) continue;
+        if (proces.stan == PROCES_PUSTY || proces.stan == PROCES_KONCZACY) continue;
 
         if (takie_same_sciezki(
                 proces.sciezka_pliku,

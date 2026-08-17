@@ -38,7 +38,7 @@ bool mbedtls_port_gotowy =
 extern "C" bool bursztyn_krypto_wypelnij_losowe(
     uint8_t* bufor,
     size_t dlugosc
-) __attribute__((weak));
+);
 
 extern "C" int mbedtls_hardware_poll(
     void* data,
@@ -60,8 +60,7 @@ extern "C" int mbedtls_hardware_poll(
         return 0;
     }
 
-    if (!output ||
-        !bursztyn_krypto_wypelnij_losowe) {
+    if (!output) {
 
         return
             MBEDTLS_ERR_ENTROPY_SOURCE_FAILED;

@@ -2954,6 +2954,10 @@ extern "C" bool utworz_plik(
     );
 }
 
+extern "C" bool psf_czy_gotowy() {
+    return psf_gotowy;
+}
+
 /* =========================================================================
  * PUBLICZNE API - ZAPIS
  * ========================================================================= */
@@ -3206,9 +3210,7 @@ extern "C" bool zapisz_do_pliku(
         plik_id
     );
 
-    (void)bsp_zapisz_zmiany();
-
-    return true;
+    return bsp_zapisz_zmiany();
 }
 
 /* =========================================================================

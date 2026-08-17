@@ -69,6 +69,13 @@
 extern "C" {
 #endif
 
+extern volatile uint64_t e1000_rx_packets;
+extern volatile uint64_t e1000_tx_attempts;
+extern volatile uint64_t e1000_tx_success;
+extern volatile uint64_t e1000_tx_errors;
+extern volatile uint64_t e1000_tx_timeout;
+extern volatile uint64_t e1000_tx_ring_full;
+
 /*
  * Inicjalizuje Intel 82540EM / QEMU E1000.
  *
@@ -111,7 +118,7 @@ void inicjalizuj_e1000();
  *
  * razem z e1000.cpp i siec.cpp.
  */
-void e1000_wyslij_pakiet(
+bool e1000_wyslij_pakiet(
     void* dane,
     uint16_t dlugosc
 );

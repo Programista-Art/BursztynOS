@@ -48,6 +48,9 @@ constexpr int SKROT_W = 32;
 constexpr int SKROT_H = 32;
 
 constexpr int BUFOR_CZASU = 32;
+constexpr int TASK_BUTTON_X = 100;
+constexpr int TASK_BUTTON_W = 112;
+constexpr int TASK_BUTTON_GAP = 4;
 
 const char* const SCIEZKA_POWLOKA = "/shell.bur";
 const char* const SCIEZKA_NOTATNIK = "/programy/notatnik.cebula/notatnik.bur";
@@ -58,6 +61,30 @@ int screen_w = 1024;
 int screen_h = 768;
 bool menu_start_otwarte = false;
 char ostatni_czas[BUFOR_CZASU] = {};
+GuiOknoInfo okna_taskbara[SKLADACZ_MAKS_WARSTW] = {};
+uint32_t liczba_okien_taskbara = 0;
+
+bool tekst_zaczyna_sie(const char* tekst, const char* prefiks) {
+    if (!tekst || !prefiks) return false;
+    for (int i = 0; prefiks[i] != '\0'; ++i)
+        if (tekst[i] != prefiks[i]) return false;
+    return true;
+}
+
+uint64_t sygnatura_okien() {
+    uint64_t h = liczba_okien_taskbara;
+    for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
+        const GuiOknoInfo& o = okna_taskbara[i];
+        h ^= o.window_id + (h << 6U) + (h >> 2U);
+        h ^= (static_cast<uint64_t>(o.stan) << 1U) | o.aktywne;
+    }
+    return h;
+}
+
+void odswiez_snapshot_okien() {
+    liczba_okien_taskbara = gui_pobierz_okna(
+        okna_taskbara, SKLADACZ_MAKS_WARSTW);
+}
 
 bool punkt_w_prostokacie(int px, int py, int x, int y, int w, int h) {
     if (w <= 0 || h <= 0) return false;
@@ -95,37 +122,42 @@ bool pobierz_i_zaktualizuj_czas() {
     return zmieniony;
 }
 
+void RysujTaskbar() {
+    gui_rysuj_prostokat(0, screen_h - PASEK_WYS,
+                        screen_w, PASEK_WYS, 0x001A0B00);
+    gui_rysuj_prostokat(0, screen_h - PASEK_WYS,
+                        screen_w, 2, 0x00E58A00);
+    gui_rysuj_prostokat(PRZYCISK_MENU_X, screen_h - 35,
+                        PRZYCISK_MENU_W, PRZYCISK_MENU_H, 0x00E58A00);
+    rysuj_tekst_wysrodkowany(PRZYCISK_MENU_X, screen_h - 35,
+                             PRZYCISK_MENU_W, PRZYCISK_MENU_H,
+                             1, 0x001A0B00, "Menu");
+    int task_x = TASK_BUTTON_X;
+    for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
+        const GuiOknoInfo& o = okna_taskbara[i];
+        if (o.tytul[0] == '\0' || task_x + TASK_BUTTON_W > screen_w - 150)
+            continue;
+        const uint32_t kolor = o.aktywne ? 0x00E58A00 :
+            (o.stan == GUI_OKNO_ZMINIMALIZOWANE ? 0x00452B00 : 0x008A5A00);
+        gui_rysuj_prostokat(task_x, screen_h - 36,
+                            TASK_BUTTON_W, SKROT_H, kolor);
+        char podpis[15] = {};
+        for (int c = 0; c < 14 && o.tytul[c] != '\0'; ++c)
+            podpis[c] = o.tytul[c];
+        rysuj_tekst_wysrodkowany(task_x, screen_h - 36,
+                                 TASK_BUTTON_W, SKROT_H, 1,
+                                 0x00FFFFFF, podpis);
+        task_x += TASK_BUTTON_W + TASK_BUTTON_GAP;
+    }
+}
+
 void RysujPulpit(bool wymus_pelne_odswiezenie) {
     if (wymus_pelne_odswiezenie) {
         // Dla procesu warstwowego BWS 19 zeruje prywatna warstwe.
         gui_odswiez_pulpit();
     }
 
-    // Pasek zadan.
-    gui_rysuj_prostokat(0, screen_h - PASEK_WYS,
-                        screen_w, PASEK_WYS, 0x001A0B00);
-    gui_rysuj_prostokat(0, screen_h - PASEK_WYS,
-                        screen_w, 2, 0x00E58A00);
-
-    // Przycisk Menu.
-    gui_rysuj_prostokat(PRZYCISK_MENU_X, screen_h - 35,
-                        PRZYCISK_MENU_W, PRZYCISK_MENU_H, 0x00E58A00);
-    rysuj_tekst_wysrodkowany(PRZYCISK_MENU_X, screen_h - 35,
-                             PRZYCISK_MENU_W, PRZYCISK_MENU_H,
-                             1, 0x001A0B00, "Menu");
-
-    // Skroty na pasku zadan.
-    gui_rysuj_prostokat(100, screen_h - 36, SKROT_W, SKROT_H, 0x00FFBF00);
-    rysuj_tekst_wysrodkowany(100, screen_h - 36, SKROT_W, SKROT_H,
-                             1, 0x00000000, "N");
-
-    gui_rysuj_prostokat(140, screen_h - 36, SKROT_W, SKROT_H, 0x008A5A00);
-    rysuj_tekst_wysrodkowany(140, screen_h - 36, SKROT_W, SKROT_H,
-                             1, 0x00FFFFFF, "+-");
-
-    gui_rysuj_prostokat(180, screen_h - 36, SKROT_W, SKROT_H, 0x000078D7);
-    rysuj_tekst_wysrodkowany(180, screen_h - 36, SKROT_W, SKROT_H,
-                             1, 0x00FFFFFF, "W");
+    RysujTaskbar();
 
     // Ikona Notatnika.
     gui_rysuj_prostokat(50, 50, IKONA_W, IKONA_H, 0x00FFBF00);
@@ -154,7 +186,7 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
     rysuj_tekst_wysrodkowany(210, 65, IKONA_W, 16,
                              1, 0x00FFFFFF, "WWW");
     rysuj_tekst_wysrodkowany(210, 104, IKONA_W, 16,
-                             1, 0x00FFFFFF, "Hussar");
+                             1, 0x00FFFFFF, "Husarz");
 
     if (menu_start_otwarte) {
         const int menu_y = screen_h - PASEK_WYS - MENU_WYS;
@@ -169,7 +201,7 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
             "> Powloka Bursztyna",
             "> Notatnik",
             "> Kalkulator",
-            "> Przegladarka Hussar",
+            "> Przegladarka Husarz",
             "> Uruchom ponownie",
             "> Zamknij"
         };
@@ -188,7 +220,9 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
 
 void zamknij_menu_i_odtworz_pulpit() {
     if (!menu_start_otwarte) return;
+    const int menu_y = screen_h - PASEK_WYS - MENU_WYS;
     menu_start_otwarte = false;
+    gui_ustaw_system_overlay(false, MENU_X, menu_y, MENU_W, MENU_WYS);
     RysujPulpit(true);
 }
 
@@ -204,19 +238,23 @@ void uruchom_program_gui(const char* sciezka) {
     bws_wywolaj(10, (uint64_t)sciezka);
 }
 
-void uruchom_powloke() {
-    zamknij_menu_i_odtworz_pulpit();
-
-    // Powloka korzysta z dotychczasowego trybu terminalowego Bursztyna.
-    // Zachowujemy zgodnosc z poprzednim menedzerem okien.
-    gui_ustaw_przejecie_myszy(false);
-    uint64_t wynik = bws_wywolaj(10, (uint64_t)SCIEZKA_POWLOKA);
-
-    // Jezeli uruchomienie sie nie powiodlo, pulpit musi odzyskac tryb GUI.
-    if (wynik == 0) {
-        gui_ustaw_przejecie_myszy(true);
-        RysujPulpit(true);
+bool aktywuj_istniejace(const char* prefiks_tytulu) {
+    odswiez_snapshot_okien();
+    for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
+        if (tekst_zaczyna_sie(okna_taskbara[i].tytul, prefiks_tytulu)) {
+            zamknij_menu_i_odtworz_pulpit();
+            return gui_aktywuj_okno(okna_taskbara[i].window_id);
+        }
     }
+    return false;
+}
+
+void uruchom_lub_aktywuj(const char* sciezka, const char* prefiks_tytulu) {
+    if (!aktywuj_istniejace(prefiks_tytulu)) uruchom_program_gui(sciezka);
+}
+
+void uruchom_powloke() {
+    uruchom_lub_aktywuj(SCIEZKA_POWLOKA, "Powloka Bursztynowa");
 }
 
 void wykonaj_restart() {
@@ -235,13 +273,13 @@ void obsluz_element_menu(int item_index) {
             uruchom_powloke();
             break;
         case 1:
-            uruchom_program_gui(SCIEZKA_NOTATNIK);
+            uruchom_lub_aktywuj(SCIEZKA_NOTATNIK, "Notatnik");
             break;
         case 2:
-            uruchom_program_gui(SCIEZKA_KALKULATOR);
+            uruchom_lub_aktywuj(SCIEZKA_KALKULATOR, "Kalkulator");
             break;
         case 3:
-            uruchom_program_gui(SCIEZKA_HUSSAR);
+            uruchom_lub_aktywuj(SCIEZKA_HUSSAR, "Husarz");
             break;
         case 4:
             wykonaj_restart();
@@ -264,6 +302,10 @@ void obsluz_klikniecie(int mx, int my) {
                             PRZYCISK_MENU_X, screen_h - 35,
                             PRZYCISK_MENU_W, PRZYCISK_MENU_H)) {
         menu_start_otwarte = !menu_start_otwarte;
+
+        gui_ustaw_system_overlay(menu_start_otwarte, MENU_X,
+                                 screen_h - PASEK_WYS - MENU_WYS,
+                                 MENU_W, MENU_WYS);
 
         // Przy zamykaniu trzeba wyczyscic stary prostokat menu z warstwy.
         RysujPulpit(!menu_start_otwarte);
@@ -290,34 +332,30 @@ void obsluz_klikniecie(int mx, int my) {
 
     // Ikony na pulpicie.
     if (punkt_w_prostokacie(mx, my, 50, 50, IKONA_W, IKONA_H)) {
-        uruchom_program_gui(SCIEZKA_NOTATNIK);
+        uruchom_lub_aktywuj(SCIEZKA_NOTATNIK, "Notatnik");
         return;
     }
 
     if (punkt_w_prostokacie(mx, my, 130, 50, IKONA_W, IKONA_H)) {
-        uruchom_program_gui(SCIEZKA_KALKULATOR);
+        uruchom_lub_aktywuj(SCIEZKA_KALKULATOR, "Kalkulator");
         return;
     }
 
     if (punkt_w_prostokacie(mx, my, 210, 50, IKONA_W, IKONA_H)) {
-        uruchom_program_gui(SCIEZKA_HUSSAR);
+        uruchom_lub_aktywuj(SCIEZKA_HUSSAR, "Husarz");
         return;
     }
 
-    // Skroty na pasku zadan.
-    if (punkt_w_prostokacie(mx, my, 100, screen_h - 36, SKROT_W, SKROT_H)) {
-        uruchom_program_gui(SCIEZKA_NOTATNIK);
-        return;
-    }
-
-    if (punkt_w_prostokacie(mx, my, 140, screen_h - 36, SKROT_W, SKROT_H)) {
-        uruchom_program_gui(SCIEZKA_KALKULATOR);
-        return;
-    }
-
-    if (punkt_w_prostokacie(mx, my, 180, screen_h - 36, SKROT_W, SKROT_H)) {
-        uruchom_program_gui(SCIEZKA_HUSSAR);
-        return;
+    int task_x = TASK_BUTTON_X;
+    for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
+        if (okna_taskbara[i].tytul[0] == '\0' ||
+            task_x + TASK_BUTTON_W > screen_w - 150) continue;
+        if (punkt_w_prostokacie(mx, my, task_x, screen_h - 36,
+                                TASK_BUTTON_W, SKROT_H)) {
+            (void)gui_aktywuj_okno(okna_taskbara[i].window_id);
+            return;
+        }
+        task_x += TASK_BUTTON_W + TASK_BUTTON_GAP;
     }
 }
 
@@ -340,12 +378,22 @@ extern "C" __attribute__((noreturn)) void _start() {
     // Zasiej stan zegara, aby pierwsza iteracja nie wymuszala od razu
     // dodatkowej, niepotrzebnej kompozycji calej klatki.
     (void)pobierz_i_zaktualizuj_czas();
+    odswiez_snapshot_okien();
 
     RysujPulpit(true);
 
     while (true) {
         bws_zdarzenie zdarzenie{};
         if (!gui_czekaj_na_zdarzenie(&zdarzenie)) continue;
+        const uint64_t stara_sygnatura = sygnatura_okien();
+        odswiez_snapshot_okien();
+        const bool lifecycle =
+            zdarzenie.typ >= BWS_ZDARZENIE_OKNO_UTWORZONE &&
+            zdarzenie.typ <= BWS_ZDARZENIE_OKNO_TYTUL;
+        if (lifecycle || sygnatura_okien() != stara_sygnatura) {
+            RysujTaskbar();
+            gui_odswiez();
+        }
         const int mx = zdarzenie.x;
         const int my = zdarzenie.y;
         const bool klik = zdarzenie.typ == BWS_ZDARZENIE_MYSZ_DOWN;

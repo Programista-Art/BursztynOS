@@ -168,6 +168,7 @@ static inline uint8_t wejscie_port_bajt(uint16_t port) {
  * ========================================================================= */
 
 extern "C" bool zaktualizuj_klawiature_gui(char znak);
+extern "C" void scheduler_wybudz_klawiature();
 
 /* =========================================================================
  * POMOCNICZE OPERACJE BUFORA
@@ -224,7 +225,8 @@ void zglos_bajt_do_systemu(uint8_t bajt) {
         return;
     }
 
-    (void)dodaj_bajt_do_bufora(bajt);
+    if(dodaj_bajt_do_bufora(bajt))
+        scheduler_wybudz_klawiature();
 }
 
 /* =========================================================================

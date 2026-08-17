@@ -13,6 +13,7 @@
 
 #include <stdint.h>
 #include "bws_zdarzenia.h"
+#include "skladacz_obrazu.h"
 #include <stdbool.h>
 
 /* =========================================================================
@@ -132,6 +133,12 @@ int bws_utworz_warstwe(int x,
 void bws_przesun_warstwe(int nowy_x,
                          int nowy_y);
 
+void gui_ustaw_system_overlay(bool otwarty,
+                              int x, int y, int szer, int wys);
+bool gui_minimalizuj_okno();
+uint32_t gui_pobierz_okna(GuiOknoInfo* okna, uint32_t max);
+bool gui_aktywuj_okno(uint64_t window_id);
+
 /* =========================================================================
  * 5. WIDGETY I FUNKCJE POMOCNICZE
  * ========================================================================= */
@@ -154,6 +161,19 @@ void RysujPrzycisk(int x,
                    uint32_t kolor_bg,
                    uint32_t kolor_txt,
                    const char* tekst);
+
+enum gui_akcja_belki : uint32_t {
+    GUI_BELKA_BRAK = 0,
+    GUI_BELKA_DRAG,
+    GUI_BELKA_MINIMALIZUJ,
+    GUI_BELKA_MAKSYMALIZUJ,
+    GUI_BELKA_ZAMKNIJ
+};
+
+void gui_rysuj_standardowa_belke(int x, int y, int szer,
+                                 const char* tytul, bool zmaksymalizowane);
+gui_akcja_belki gui_hit_test_belki(int mx, int my,
+                                   int x, int y, int szer);
 
 /* =========================================================================
  * 6. DZWIEK

@@ -135,6 +135,36 @@ struct warstwa_obrazu {
     bool aktywna;
 };
 
+struct GuiDirtyRect {
+    int32_t x;
+    int32_t y;
+    int32_t width;
+    int32_t height;
+};
+
+enum GuiStanOkna : uint32_t {
+    GUI_OKNO_NORMALNE = 0,
+    GUI_OKNO_ZMAKSYMALIZOWANE = 1,
+    GUI_OKNO_ZMINIMALIZOWANE = 2
+};
+
+/* Kopiowalny snapshot ABI taskbara. Nie zawiera wskaznikow kernela. */
+struct GuiOknoInfo {
+    uint64_t window_id;
+    int32_t pid;
+    uint32_t generation;
+    uint32_t stan;
+    uint32_t widoczne;
+    uint32_t aktywne;
+    int32_t x;
+    int32_t y;
+    int32_t szerokosc;
+    int32_t wysokosc;
+    char tytul[48];
+};
+
+inline constexpr uint32_t SKLADACZ_MAKS_DIRTY_RECT = 64;
+
 /* =========================================================================
  * 4. KONTROLA ABI warstwa_obrazu
  * ========================================================================= */
@@ -331,7 +361,27 @@ warstwa_obrazu* pobierz_warstwe(
  */
 void skladacz_obrazu_zloz_klatke();
 void skladacz_obrazu_oznacz_dirty();
+void skladacz_obrazu_oznacz_dirty_rect(int x, int y, int width, int height);
+void skladacz_obrazu_oznacz_ruch_kursora(int old_x, int old_y,
+                                         int new_x, int new_y);
+void skladacz_obrazu_oznacz_dirty_warstwy(int pid);
 void skladacz_obrazu_obsluz_dirty();
+void skladacz_obrazu_podnies_warstwe(int pid);
+bool skladacz_obrazu_ustaw_tytul(int pid, const char* tytul);
+bool skladacz_obrazu_minimalizuj(int pid);
+bool skladacz_obrazu_przywroc(uint64_t window_id);
+bool skladacz_obrazu_czy_widoczna(int pid);
+uint64_t skladacz_obrazu_id_okna(int pid);
+uint32_t skladacz_obrazu_snapshot_okien(GuiOknoInfo* out, uint32_t max,
+                                        int aktywny_pid);
+
+/* Rejestruje prostokat SYSTEM_OVERLAY nalezacy do warstwy procesu.
+ * Warstwa jest nadal skladana normalnie, ale ten fragment jest skladany
+ * ponownie po wszystkich APPLICATION i przed kursorem. */
+void skladacz_obrazu_ustaw_overlay(int pid, bool otwarty,
+                                  int x, int y, int szer, int wys);
+int skladacz_obrazu_overlay_pod_punktem(int x, int y);
+void skladacz_obrazu_debug_warstwy(const char* powod);
 
 #ifdef __cplusplus
 

@@ -211,6 +211,8 @@ OBJS := \
 	boot.o \
 	gdt.o \
 	tss.o \
+	acpi.o \
+	hpet.o \
 	apic.o \
 	idt.o \
 	przerwania.o \
@@ -238,6 +240,7 @@ OBJS := \
 	menedzer_okien_blob.o \
 	uefi_gop.o \
 	dzwiek_blob.o \
+	cytaty_blob.o \
 	heap.o \
 	scheduler.o \
 	skladacz_obrazu.o \
@@ -292,6 +295,9 @@ hda.o: sterowniki/dzwiek/hda.cpp sterowniki/dzwiek/hda.h pamiec.h pci.h
 
 uefi_gop.o: sterowniki/grafika/uefi_gop.cpp sterowniki/grafika/uefi_gop.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+
+hpet.o: sterowniki/czas/hpet.cpp sterowniki/czas/hpet.h acpi.h pamiec.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
 
 # ============================================================================
 # 11. BIBLIOTEKA GUI RING 3
@@ -376,6 +382,9 @@ dzwiek.wav:
 dzwiek_blob.o: dzwiek.wav
 	$(LD) -r -b binary $< -o $@
 
+cytaty_blob.o: cytaty.txt
+	$(LD) -r -b binary $< -o $@
+
 # ============================================================================
 # 18. LINKOWANIE JADRA
 # ============================================================================
@@ -442,6 +451,8 @@ prepare-disk: $(VIRTUAL_DISK)
 # ============================================================================
 
 QEMU_COMMON_ARGS := \
+	-machine pc,hpet=on \
+	-cpu max \
 	-accel tcg,thread=single \
 	-drive id=disk,file=$(VIRTUAL_DISK),format=raw,if=none \
 	-device ich9-ahci,id=ahci \

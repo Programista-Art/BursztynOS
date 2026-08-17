@@ -54,6 +54,7 @@ extern "C" bool zapisz_do_pliku(
     const char* dane,
     uint32_t dlugosc
 );
+extern "C" bool psf_czy_gotowy();
 
 /* =========================================================================
  * 2. STALE PCI
@@ -1243,6 +1244,10 @@ extern "C" void skanuj_magistrale_pci() {
                 &raport
             );
         }
+    }
+
+    if (!psf_czy_gotowy()) {
+        return;
     }
 
     if (raport.dlugosc >

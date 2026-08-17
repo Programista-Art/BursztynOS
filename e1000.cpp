@@ -2343,10 +2343,11 @@ extern "C" void inicjalizuj_e1000() {
  * 23. TX
  * ========================================================================= */
 
-extern "C" void e1000_wyslij_pakiet(
+extern "C" bool e1000_wyslij_pakiet(
     void* dane,
     uint16_t dlugosc
 ) {
+    __atomic_add_fetch(&e1000_tx_attempts, 1ULL, __ATOMIC_RELAXED);
     if (!dane ||
         dlugosc <
             E1000_MIN_RAMKA_ETH ||
@@ -2359,7 +2360,8 @@ extern "C" void e1000_wyslij_pakiet(
             __ATOMIC_ACQUIRE) ||
         !tx_descs) {
 
-        return;
+        __atomic_add_fetch(&e1000_tx_errors, 1ULL, __ATOMIC_RELAXED);
+        return false;
     }
 
     /*
@@ -2374,10 +2376,11 @@ extern "C" void e1000_wyslij_pakiet(
 
     if (!guard.aktywny()) {
         /*
-         * ABI zwraca void, wiec nie ma jak przekazac bledu wyzej.
-         * Bezpieczniej zgubic ramke niz zakleszczyc kernel.
+         * Ograniczony try-lock przekazuje blad do wspolnej sciezki TX.
          */
-        return;
+        __atomic_add_fetch(&e1000_tx_ring_full, 1ULL, __ATOMIC_RELAXED);
+        __atomic_add_fetch(&e1000_tx_errors, 1ULL, __ATOMIC_RELAXED);
+        return false;
     }
 
     const uint16_t slot =
@@ -2414,7 +2417,9 @@ extern "C" void e1000_wyslij_pakiet(
             "[E1000] TX descriptor pozostaje zajety."
         );
 
-        return;
+        __atomic_add_fetch(&e1000_tx_ring_full, 1ULL, __ATOMIC_RELAXED);
+        __atomic_add_fetch(&e1000_tx_errors, 1ULL, __ATOMIC_RELAXED);
+        return false;
     }
 
     void* bufor_phys =
@@ -2425,7 +2430,8 @@ extern "C" void e1000_wyslij_pakiet(
     if (!ramka_dma_dostepna_cpu(
             bufor_phys)) {
 
-        return;
+        __atomic_add_fetch(&e1000_tx_errors, 1ULL, __ATOMIC_RELAXED);
+        return false;
     }
 
     void* bufor =
@@ -2512,12 +2518,26 @@ extern "C" void e1000_wyslij_pakiet(
         wypisz_log(
             "[E1000] Timeout transmisji TX."
         );
+        __atomic_add_fetch(&e1000_tx_timeout, 1ULL, __ATOMIC_RELAXED);
+        __atomic_add_fetch(&e1000_tx_errors, 1ULL, __ATOMIC_RELAXED);
+        return false;
     }
+    __atomic_add_fetch(&e1000_tx_success, 1ULL, __ATOMIC_RELAXED);
+    return true;
 }
 
 /* =========================================================================
  * 24. RX
  * ========================================================================= */
+
+extern "C" {
+volatile uint64_t e1000_rx_packets = 0;
+volatile uint64_t e1000_tx_attempts = 0;
+volatile uint64_t e1000_tx_success = 0;
+volatile uint64_t e1000_tx_errors = 0;
+volatile uint64_t e1000_tx_timeout = 0;
+volatile uint64_t e1000_tx_ring_full = 0;
+}
 
 extern "C" void e1000_obsluz_odbior() {
     if (!__atomic_load_n(
@@ -2608,6 +2628,8 @@ extern "C" void e1000_obsluz_odbior() {
                         bufor_phys
                     )
                 );
+
+            __atomic_add_fetch(&e1000_rx_packets, 1ULL, __ATOMIC_RELAXED);
 
             /*
              * siec.cpp ponownie wykonuje bounds-checking wszystkich
