@@ -13,14 +13,11 @@ System jest rozwijany z myślą o architekturze x86-64, implementując własne J
 
 Bursztyn OS to pełnoprawny system okienkowy. Posiada autorską warstwę HAL (obsługa UEFI GOP oraz VESA VBE) i proporcjonalne czcionki UTF-8. 
 
-**Menedżer Okien (Pulpit)**
+**Menedżer Okien (Pulpit) v systemu v.1.0.0.7 wielozadaniowa**
 System uruchamia interaktywny pulpit z paskiem zadań, rozwijanym menu i wsparciem dla myszy PS/2 (Z-Order, Drag & Drop).
-![Pulpit Bursztyna 1](image/pulpit/1.png)
-![Pulpit Bursztyna 2](image/pulpit/2.png)
-![Pulpit Bursztyna 3](image/pulpit/3.png)
-![Pulpit Bursztyna 4](image/pulpit/4.png)
+![Pulpit Bursztyna 1](image/BursztynOS.jpg)
 
-## Przeglądarka Husarz ##
+## Przeglądarka Husarz v 1.0.0.6 ##
 
 ![Przeglądarka Husarz](image/hussar/Hussar-1.png)
 ![Przeglądarka Husarz](image/hussar/Hussar-2.png)
@@ -74,6 +71,10 @@ Powłoka systemowa to potężne, zintegrowane narzędzie działające w oknie. O
 * `pisz [tekst]` - wypisuje podany tekst na ekran (echo).
 * `cytat` - wczytuje i wyświetla cytaty z pliku.
 * `losuj` - rzuca wirtualną kością (wynik 1-6).
+
+**Testowanie
+*`dzwiek` - generuje ton dla testu dźwięku w systemie
+
 
 ---
 
@@ -129,32 +130,6 @@ Jeżeli chcesz uruchomić wraz z wirtualnym dyskiem wpisz polecenie
 ```
 & "C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom BursztynOS.iso -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G
 ```
-
-
-## Jeżeli są błędy przy uruchomieniu
-### Błąd akceleracji (Hyper-V / WHPX)
-Jak to wygląda: failed to initialize WHPX: No accelerator found lub Could not initialize KVM.
-
-Dlaczego? Na tym komputerze z Windowsem nie jest włączona sprzętowa wirtualizacja (Hyper-V). QEMU próbuje użyć szybkiego trybu, ale system mu na to nie pozwala.
-
-Rozwiązanie: Uruchom Bursztyn OS w trybie podstawowym (emulacji programowej), po prostu usuwając parametr -accel whpx:
-```
-"C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom BursztynOS.iso -m 2G
-```
-
-## 2. Brak pliku ISO w danym folderze
-Jak to wygląda: qemu-system-x86_64.exe: -cdrom BursztynOS.iso: Could not open 'BursztynOS.iso': No such file or directory
-
-Dlaczego? Konsola CMD jest otwarta w innym folderze, niż ten, w którym fizycznie leży Twój plik .iso (lub nazwa pliku różni się wielkością liter/ma dopisaną jakąś cyfrę).
-
-Rozwiązanie: Upewnij się komendą dir, że w wierszu poleceń na pewno jesteś w odpowiednim folderze i że plik z systemem tam jest.
-
-##  3. Problem ze spacją (zgubione cudzysłowy)
-Jak to wygląda: 'C:\Program' is not recognized as an internal or external command, operable program or batch file.
-
-Dlaczego? Jeśli w CMD wpiszesz ścieżkę ze spacją bez cudzysłowów, konsola utnie ją na słowie Program i spróbuje to uruchomić, ignorując resztę.
-
-Rozwiązanie: Bezwzględnie pamiętaj o znakach " na początku i końcu ścieżki do QEMU.
 
 # Jak uruchomić Bursztyn w trybie UEFI (OVMF) z UEFI GOP w power shell w QEMU na Windows 11 od wersji pliki iso BursztynOS v1.0.0.5
 ```
