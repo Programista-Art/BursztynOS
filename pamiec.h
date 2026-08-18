@@ -355,11 +355,15 @@ void OdblokujRamke(uint64_t adres_fizyczny);
  */
 void* ZaalokujRamke();
 
+/* Fizycznie ciagly przebieg ramek 4 KiB (dla DMA). */
+void* ZaalokujCiagleRamki(size_t liczba_ramek);
+
 /*
  * Zwraca ramke do PMM.
  * Wskaznik powinien byc adresem otrzymanym z ZaalokujRamke().
  */
 void ZwolnijRamke(void* adres_fizyczny);
+void ZwolnijCiagleRamki(void* adres_fizyczny, size_t liczba_ramek);
 
 /*
  * Buduje stan PMM na podstawie tagu Memory Map z Multiboot2 i zabezpiecza

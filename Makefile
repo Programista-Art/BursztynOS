@@ -213,6 +213,10 @@ OBJS := \
 	tss.o \
 	acpi.o \
 	hpet.o \
+	dma.o \
+	usb.o \
+	xhci.o \
+	xhci_ring.o \
 	apic.o \
 	idt.o \
 	przerwania.o \
@@ -254,7 +258,7 @@ OBJS := \
 # ============================================================================
 
 .PHONY: \
-	all kernel iso bios uefi run runuefi \
+	all kernel iso bios uefi run runusb runusbkbd runuefi \
 	check-kernel check-tools check-ovmf \
 	prepare-disk clean clear distclean cdysk rm help
 
@@ -297,6 +301,18 @@ uefi_gop.o: sterowniki/grafika/uefi_gop.cpp sterowniki/grafika/uefi_gop.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
 hpet.o: sterowniki/czas/hpet.cpp sterowniki/czas/hpet.h acpi.h pamiec.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+dma.o: sterowniki/dma.cpp sterowniki/dma.h pamiec.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+usb.o: sterowniki/usb/usb.cpp sterowniki/usb/usb.h sterowniki/usb/xhci.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+xhci.o: sterowniki/usb/xhci.cpp sterowniki/usb/xhci.h sterowniki/usb/xhci_ring.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+xhci_ring.o: sterowniki/usb/xhci_ring.cpp sterowniki/usb/xhci_ring.h sterowniki/usb/xhci_trb.h
 	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
 
 # ============================================================================
@@ -473,6 +489,19 @@ QEMU_COMMON_ARGS := \
 run: iso prepare-disk
 	$(QEMU) \
 		$(QEMU_COMMON_ARGS) \
+		-cdrom $(ISO)
+
+runusb: iso prepare-disk
+	$(QEMU) \
+		$(QEMU_COMMON_ARGS) \
+		-device qemu-xhci,id=xhci \
+		-cdrom $(ISO)
+
+runusbkbd: iso prepare-disk
+	$(QEMU) \
+		$(QEMU_COMMON_ARGS) \
+		-device qemu-xhci,id=xhci \
+		-device usb-kbd,bus=xhci.0 \
 		-cdrom $(ISO)
 
 # ============================================================================

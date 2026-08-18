@@ -30,6 +30,7 @@
 #include "acpi.h"
 #include "sterowniki/czas/hpet.h"
 #include "sterowniki/dzwiek/hda.h"
+#include "sterowniki/usb/usb.h"
 
 #ifndef BURSZTYN_DEBUG_NET_SELFTEST
 #define BURSZTYN_DEBUG_NET_SELFTEST 0
@@ -919,6 +920,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     wypisz_log(
         "[APIC] LAPIC/IOAPIC uruchomiony.");
 
+    usb_inicjalizuj();
+
     InicjalizujMyszPS2();
 
     wypisz_log(
@@ -1064,6 +1067,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     asm volatile("sti" ::: "memory");
 
     while (true) {
+        usb_obsluz();
         skladacz_obrazu_obsluz_dirty();
         /*
          * STI przed HLT chroni idle przed przypadkowym pozostawieniem IF=0

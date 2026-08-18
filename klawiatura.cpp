@@ -602,3 +602,29 @@ extern "C" char pobierz_znak_klawiatury() {
 
     return znak;
 }
+
+/* Wspolny punkt wejscia dla USB HID Boot Keyboard. USB przekazuje Usage ID,
+ * nigdy skan-kod PS/2; tutaj oba zrodla koncza w tej samej kolejce znakow. */
+extern "C" void usb_wprowadz_raport_klawiatury(const uint8_t* raport) {
+    if (!raport) return;
+    const uint8_t modyfikatory=raport[0];
+    const bool przesuniecie=(modyfikatory&0x22U)!=0;
+    static uint8_t poprzedni_raport[8]={};
+    for (uint8_t i=0;i<6;++i) {
+        const uint8_t u=raport[2+i]; if (!u||u==1U) continue;
+        bool poprzedni=false;
+        for (uint8_t j=0;j<6;++j) if (poprzedni_raport[2+j]==u) poprzedni=true;
+        if (poprzedni) continue;
+        char znak=0;
+        if(u>=4U&&u<=29U) znak=static_cast<char>((przesuniecie?'A':'a')+(u-4U));
+        else if(u>=30U&&u<=39U){static const char zwykle[]="1234567890";static const char sz[]="!@#$%^&*()";znak=(przesuniecie?sz:zwykle)[u-30U];}
+        else if(u==40U)znak='\n'; else if(u==41U)znak=27; else if(u==42U)znak='\b';
+        else if(u==43U)znak='\t'; else if(u==44U)znak=' ';
+        else if(u==45U)znak=przesuniecie?'_':'-'; else if(u==46U)znak=przesuniecie?'+':'=';
+        else if(u==51U)znak=przesuniecie?':':';'; else if(u==52U)znak=przesuniecie?'"':'\'';
+        else if(u==53U)znak=przesuniecie?'~':'`'; else if(u==54U)znak=przesuniecie?'<':',';
+        else if(u==55U)znak=przesuniecie?'>':'.'; else if(u==56U)znak=przesuniecie?'?':'/';
+        if(znak)zglos_bajt_do_systemu(static_cast<uint8_t>(znak));
+    }
+    for(uint8_t i=0;i<8;++i)poprzedni_raport[i]=raport[i];
+}

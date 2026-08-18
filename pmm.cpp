@@ -1314,6 +1314,39 @@ void* ZaalokujRamke() {
     return nullptr;
 }
 
+void* ZaalokujCiagleRamki(size_t liczba_ramek) {
+    if (liczba_ramek == 0 ||
+        liczba_ramek > static_cast<size_t>(MAX_RAMEK_ALOKOWALNYCH)) {
+        return nullptr;
+    }
+
+    BlokadaPMM blokada;
+    if (!pmm_zainicjalizowany) return nullptr;
+
+    uint64_t limit = najwyzsza_znaleziona_ramka;
+    if (limit > MAX_RAMEK_ALOKOWALNYCH) limit = MAX_RAMEK_ALOKOWALNYCH;
+    const uint64_t potrzebne = static_cast<uint64_t>(liczba_ramek);
+    if (potrzebne > limit) return nullptr;
+
+    const uint64_t pierwsza = GRANICA_NISKIEJ_PAMIECI / ROZMIAR_STRONY;
+    for (uint64_t start = pierwsza; start <= limit - potrzebne; ++start) {
+        bool wolne = true;
+        for (uint64_t i = 0; i < potrzebne; ++i) {
+            if (!ramka_dostepna(start + i) || !ramka_wolna(start + i)) {
+                wolne = false;
+                start += i;
+                break;
+            }
+        }
+        if (!wolne) continue;
+        for (uint64_t i = 0; i < potrzebne; ++i) ustaw_ramke_zajeta(start + i);
+        ostatnia_alokacja = start + potrzebne;
+        if (ostatnia_alokacja >= limit) ostatnia_alokacja = 0;
+        return reinterpret_cast<void*>(start * ROZMIAR_STRONY);
+    }
+    return nullptr;
+}
+
 /* =========================================================================
  * ZWALNIANIE
  * ========================================================================= */
@@ -1386,4 +1419,23 @@ void ZwolnijRamke(
         ostatnia_alokacja =
             numer_ramki;
     }
+}
+
+void ZwolnijCiagleRamki(void* adres_fizyczny, size_t liczba_ramek) {
+    if (!adres_fizyczny || liczba_ramek == 0) return;
+    const uint64_t adres = reinterpret_cast<uint64_t>(adres_fizyczny);
+    if ((adres & (ROZMIAR_STRONY - 1ULL)) != 0 ||
+        liczba_ramek > static_cast<size_t>(MAX_RAMEK_ALOKOWALNYCH)) return;
+
+    BlokadaPMM blokada;
+    if (!pmm_zainicjalizowany) return;
+    const uint64_t start = adres / ROZMIAR_STRONY;
+    const uint64_t n = static_cast<uint64_t>(liczba_ramek);
+    if (start >= MAX_RAMEK_ALOKOWALNYCH ||
+        n > MAX_RAMEK_ALOKOWALNYCH - start) return;
+    for (uint64_t i = 0; i < n; ++i) {
+        if (!ramka_dostepna(start + i) || ramka_wolna(start + i)) return;
+    }
+    for (uint64_t i = 0; i < n; ++i) ustaw_ramke_wolna(start + i);
+    if (start < ostatnia_alokacja) ostatnia_alokacja = start;
 }
