@@ -35,6 +35,10 @@
 #include <stddef.h>
 #include <stdbool.h>
 
+#ifndef BURSZTYN_DEBUG_GUI_PERF
+#define BURSZTYN_DEBUG_GUI_PERF 0
+#endif
+
 /* Shell ma wlasny terminal w prywatnej warstwie. Wszystkie dotychczasowe
  * wywolania wypisz() w tym pliku sa kierowane do tej powierzchni, a nie do
  * legacy term_buf jadra. */
@@ -131,7 +135,39 @@ int shell_drag_mouse_y = 0;
 int shell_drag_window_x = 0;
 int shell_drag_window_y = 0;
 
+struct ShellPerf {
+    uint64_t key_count, full_redraw_count, partial_redraw_count;
+    uint64_t dirty_area, compose_requests, allocations_key;
+} shell_perf{};
+
+void shell_dopisz_znak(char c);
+
+int shell_caret_advance(int row,int column) {
+    int advance=0;
+    for(int c=0;c<column;++c){int a=gui_pobierz_szerokosc_znaku(
+        static_cast<uint8_t>(shell_ekran[row][c]));if(a<1)a=1;advance+=a+1;}
+    return advance;
+}
+
+void shell_rysuj_wiersz(int row,bool caret) {
+    if(row<0||row>=SHELL_ROWS)return;
+    const int x=shell_x+SHELL_TEXT_X,y=shell_y+SHELL_TEXT_Y+row*SHELL_LINE_H;
+    const int width=shell_w-2*SHELL_TEXT_X;
+    gui_rysuj_prostokat(x,y,width,SHELL_LINE_H,0x001A0B00);
+    shell_ekran[row][SHELL_COLS]='\0';
+    gui_wypisz_tekst_kolor(x,y,0x00E58A00,shell_ekran[row]);
+    if(caret)gui_rysuj_prostokat(x+shell_caret_advance(row,shell_kolumna),y+14,8,2,0x00FFBF00);
+    ++shell_perf.partial_redraw_count;shell_perf.dirty_area+=static_cast<uint64_t>(width)*SHELL_LINE_H;
+}
+
+void shell_rysuj_zmiane_wejscia(int old_row) {
+    if(old_row!=shell_wiersz)shell_rysuj_wiersz(old_row,false);
+    shell_rysuj_wiersz(shell_wiersz,true);
+    gui_odswiez();++shell_perf.compose_requests;
+}
+
 void shell_rysuj_terminal() {
+    ++shell_perf.full_redraw_count;
     gui_rysuj_okno(shell_x, shell_y, shell_w, shell_h, "Powloka Bursztynowa");
     gui_rysuj_standardowa_belke(shell_x, shell_y, shell_w,
                                 "Powloka Bursztynowa", shell_maximized);
@@ -520,12 +556,9 @@ bool jest_biala_spacja(
 void wypisz_znak(
     char c
 ) {
-    char tmp[2] = {
-        c,
-        '\0'
-    };
-
-    wypisz(tmp);
+    const int old_row=shell_wiersz;
+    shell_dopisz_znak(c);
+    shell_rysuj_zmiane_wejscia(old_row);
 }
 
 void uint_do_str(
@@ -642,10 +675,10 @@ bool pobierz_linie(
                 --pozycja;
                 bufor[pozycja] = '\0';
 
-                /*
-                 * Cofnij, wyczysc znak, cofnij ponownie.
-                 */
-                wypisz("\b \b");
+                const int old_row=shell_wiersz;
+                shell_dopisz_znak('\b');
+                shell_rysuj_zmiane_wejscia(old_row);
+                ++shell_perf.key_count;
             }
 
             continue;
@@ -686,6 +719,7 @@ bool pobierz_linie(
         bufor[pozycja++] = c;
         bufor[pozycja] = '\0';
 
+        ++shell_perf.key_count;
         wypisz_znak(c);
     }
 }

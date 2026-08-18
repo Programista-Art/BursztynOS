@@ -22,16 +22,11 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "mysz_input.h"
 
 /* =========================================================================
  * POLACZENIE Z PODSYSTEMEM GRAFIKI
  * ========================================================================= */
-
-extern "C" void zaktualizuj_mysze(
-    int dx,
-    int dy,
-    uint8_t przyciski
-);
 
 /* =========================================================================
  * STALE KONTROLERA PS/2
@@ -375,7 +370,7 @@ void przetworz_pakiet() {
 
     const uint8_t przyciski =
         static_cast<uint8_t>(
-            flagi & 0x07U);
+            flagi & MYSZ_MASKA_PRZYCISKOW);
 
     zaktualizuj_mysze(
         dx,

@@ -34,6 +34,10 @@
 #include <stddef.h>
 #include <stdbool.h>
 
+#ifndef BURSZTYN_DEBUG_GUI_PERF
+#define BURSZTYN_DEBUG_GUI_PERF 0
+#endif
+
 /* =========================================================================
  * 1. FORMAT .bur
  * ========================================================================= */
@@ -4146,9 +4150,35 @@ void rysuj_krotki_url(
     );
 }
 
+struct HusarzPerf {
+    uint64_t key_count, full_redraw_count, partial_redraw_count;
+    uint64_t dirty_area, compose_requests, allocations_key;
+} husarz_perf{};
+
+void husarz_rysuj_pole_adresu() {
+    if(aplikacja_zminimalizowana||liczba_zakladek<=0)return;
+    const int x=WIN_X+122,y=WIN_Y+NARZEDZIA_Y+4;
+    int width=WIN_W-122-286-8;if(width<80)width=80;
+    const char* url=zakladki[aktywna_zakladka].url;
+    const int max_text_width=width-13;
+    size_t length=0;while(url[length]!='\0'&&length+1U<URL_POJEMNOSC)++length;
+    const size_t visible_bytes=static_cast<size_t>(max_text_width>0?max_text_width/9:0);
+    size_t start=length>visible_bytes?length-visible_bytes:0;
+    while(start<length&&(static_cast<uint8_t>(url[start])&0xC0U)==0x80U)++start;
+    char visible[URL_POJEMNOSC]{};
+    (void)kopiuj_limit(visible,sizeof(visible),url+start);
+    gui_rysuj_prostokat(x,y,width,28,w_polu_url?KOLOR_BIALY:0x00303030U);
+    gui_wypisz_tekst_kolor(x+5,y+6,w_polu_url?0x00000001U:0x00D1D5DBU,visible);
+    if(w_polu_url){int caret=x+5+szerokosc_utf8(visible);if(caret>x+width-8)caret=x+width-8;
+        gui_wypisz_tekst_kolor(caret,y+6,0x00000001U,"_");}
+    gui_odswiez();++husarz_perf.partial_redraw_count;++husarz_perf.compose_requests;
+    husarz_perf.dirty_area+=static_cast<uint64_t>(width)*28U;
+}
+
 void RysujInterfejs(
     bool odswiez_tlo
 ) {
+    ++husarz_perf.full_redraw_count;
     if (aplikacja_zminimalizowana) {
         return;
     }
@@ -6479,17 +6509,25 @@ extern "C" [[noreturn]] void _start() {
         const char znak = zdarzenie.typ == BWS_ZDARZENIE_KLAWISZ
             ? static_cast<char>(zdarzenie.kod) : 0;
 
+        bool szybkie_pole_url=false;
         if (znak !=
             0) {
+
+            const bool url_przed=w_polu_url;
 
             obsluz_znak(
                 znak,
                 &ansi_stan
             );
 
-            trzeba_rysowac =
-                true;
+            const uint8_t u=static_cast<uint8_t>(znak);
+            szybkie_pole_url=url_przed&&w_polu_url&&
+                (u>=0x20U||znak=='\b'||u==0x7FU);
+            ++husarz_perf.key_count;
+            trzeba_rysowac=!szybkie_pole_url;
         }
+
+        if(szybkie_pole_url)husarz_rysuj_pole_adresu();
 
         if (trzeba_rysowac &&
             !aplikacja_zminimalizowana) {

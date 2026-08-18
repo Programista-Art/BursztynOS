@@ -258,7 +258,7 @@ OBJS := \
 # ============================================================================
 
 .PHONY: \
-	all kernel iso bios uefi run runusb runusbkbd runuefi \
+	all kernel iso bios uefi run runusb runusbkbd runusbmouse runusbhid runuefi \
 	check-kernel check-tools check-ovmf \
 	prepare-disk clean clear distclean cdysk rm help
 
@@ -501,7 +501,22 @@ runusbkbd: iso prepare-disk
 	$(QEMU) \
 		$(QEMU_COMMON_ARGS) \
 		-device qemu-xhci,id=xhci \
-		-device usb-kbd,bus=xhci.0 \
+		-device usb-kbd,id=usbkbd,bus=xhci.0 \
+		-cdrom $(ISO)
+
+runusbmouse: iso prepare-disk
+	$(QEMU) \
+		$(QEMU_COMMON_ARGS) \
+		-device qemu-xhci,id=xhci \
+		-device usb-mouse,id=usbmouse,bus=xhci.0 \
+		-cdrom $(ISO)
+
+runusbhid: iso prepare-disk
+	$(QEMU) \
+		$(QEMU_COMMON_ARGS) \
+		-device qemu-xhci,id=xhci \
+		-device usb-kbd,id=usbkbd,bus=xhci.0 \
+		-device usb-mouse,id=usbmouse,bus=xhci.0 \
 		-cdrom $(ISO)
 
 # ============================================================================

@@ -1,4 +1,5 @@
 #include "grafika.h"
+#include "mysz_input.h"
 #include "pamiec.h"
 #include "zegar-rtc.h"
 #include "ahci.h"
@@ -891,11 +892,12 @@ void grafika_zakoncz_skladanie_regionu(int x,int y,int szer,int wys) {
 
 void grafika_prezentuj_region(int x,int y,int szer,int wys){PrzeniesFragmentNaEkran(x,y,szer,wys);}
 
-void grafika_prezentuj_kursor(){
+void grafika_prezentuj_kursor_w(int cursor_x,int cursor_y){
     if(!aktywny_ekran)return;
     const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
-    for(int cy=0;cy<16;++cy)for(int cx=0;cx<16;++cx){int px=mysz_x+cx,py=mysz_y+cy;if(px<0||py<0||px>=sw||py>=sh)continue;uint8_t typ=kursor_bitmapa[cy][cx];if(!typ)continue;aktywny_ekran->ZapiszPikselFramebuffer(px,py,typ==1?0x00000000:0x00FFFFFF);}
+    for(int cy=0;cy<16;++cy)for(int cx=0;cx<16;++cx){int px=cursor_x+cx,py=cursor_y+cy;if(px<0||py<0||px>=sw||py>=sh)continue;uint8_t typ=kursor_bitmapa[cy][cx];if(!typ)continue;aktywny_ekran->ZapiszPikselFramebuffer(px,py,typ==1?0x00000000:0x00FFFFFF);}
 }
+void grafika_prezentuj_kursor(){grafika_prezentuj_kursor_w(mysz_x,mysz_y);}
 
 void grafika_zakoncz_scene(){tryb_skladania_obrazu=false;kursor_widoczny=false;}
 
@@ -1924,13 +1926,13 @@ extern "C" void zaktualizuj_mysze(int dx,
 
     if (pid_przejmujacy_mysz != -1) {
         lewy_wcisniety =
-            (przyciski & 0x01U) != 0;
+            (przyciski & MYSZ_PRZYCISK_LEWY) != 0;
 
         static uint8_t poprzednie_przyciski_gui = 0;
-        const bool klik = (przyciski & 1U) != 0 &&
-                          (poprzednie_przyciski_gui & 1U) == 0;
-        const bool pusc = (przyciski & 1U) == 0 &&
-                          (poprzednie_przyciski_gui & 1U) != 0;
+        const bool klik = (przyciski & MYSZ_PRZYCISK_LEWY) != 0 &&
+                          (poprzednie_przyciski_gui & MYSZ_PRZYCISK_LEWY) == 0;
+        const bool pusc = (przyciski & MYSZ_PRZYCISK_LEWY) == 0 &&
+                          (poprzednie_przyciski_gui & MYSZ_PRZYCISK_LEWY) != 0;
         if (klik) {
             /* Nowa sekwencja przycisku nie moze odziedziczyc capture po
                poprzednim, niedokonczonym drag. Focus i adresat DOWN musza
@@ -1960,7 +1962,7 @@ extern "C" void zaktualizuj_mysze(int dx,
     }
 
     const bool nowy_lewy =
-        (przyciski & 0x01U) != 0;
+        (przyciski & MYSZ_PRZYCISK_LEWY) != 0;
 
     const bool klik_lewy =
         nowy_lewy && !lewy_wcisniety;

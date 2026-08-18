@@ -365,6 +365,7 @@ void skladacz_obrazu_oznacz_dirty_rect(int x, int y, int width, int height);
 void skladacz_obrazu_oznacz_ruch_kursora(int old_x, int old_y,
                                          int new_x, int new_y);
 void skladacz_obrazu_oznacz_dirty_warstwy(int pid);
+void skladacz_obrazu_zastosuj_pending_geometrii(int pid);
 void skladacz_obrazu_obsluz_dirty();
 void skladacz_obrazu_podnies_warstwe(int pid);
 bool skladacz_obrazu_ustaw_tytul(int pid, const char* tytul);

@@ -138,6 +138,10 @@ GuiDirtyRect dirty_rects[SKLADACZ_MAKS_DIRTY_RECT] = {};
 uint32_t dirty_count = 0;
 bool cursor_pending=false;
 GuiDirtyRect cursor_old{},cursor_new{};
+struct PendingGeometry { bool pending; int x,y,old_x,old_y,width,height; };
+PendingGeometry pending_geometry[MAKS_WARSTW]{};
+uint64_t drag_moves_received=0,drag_moves_coalesced=0,drag_frames_presented=0;
+uint64_t dirty_area_drag=0,cursor_fast_present_count=0;
 uint64_t dirty_generation = 1;
 uint64_t nastepna_klatka_ns = 0;
 constexpr uint64_t ODSTEP_KLATKI_NS = 16666667ULL;
@@ -155,6 +159,15 @@ uint32_t render_readers=0;
 
 uint64_t irq_off(){uint64_t f;asm volatile("pushfq; popq %0; cli":"=r"(f)::"memory","cc");return f;}
 void irq_restore(uint64_t f){if(f&(1ULL<<9))asm volatile("sti":::"memory");}
+
+void apply_pending_geometry(int only_pid){
+    for(int pid=1;pid<MAKS_WARSTW;++pid){if(only_pid>0&&pid!=only_pid)continue;
+        PendingGeometry p{};uint64_t f=irq_off();if(pending_geometry[pid].pending){p=pending_geometry[pid];pending_geometry[pid].pending=false;}irq_restore(f);if(!p.pending)continue;
+        warstwa_obrazu* w=pobierz_warstwe(pid);if(!w)continue;w->x=p.x;w->y=p.y;
+        skladacz_obrazu_oznacz_dirty_rect(p.old_x,p.old_y,p.width,p.height);skladacz_obrazu_oznacz_dirty_rect(p.x,p.y,p.width,p.height);
+        ++drag_frames_presented;dirty_area_drag+=static_cast<uint64_t>(p.width)*static_cast<uint64_t>(p.height)*2U;
+    }
+}
 
 bool rect_clip(GuiDirtyRect* r,int sw,int sh){
     if(!r||r->width<=0||r->height<=0||sw<=0||sh<=0)return false;
@@ -742,6 +755,8 @@ extern void grafika_zakoncz_skladanie();
 extern void grafika_zakoncz_skladanie_regionu(int,int,int,int);
 extern void grafika_prezentuj_region(int,int,int,int);
 extern void grafika_prezentuj_kursor();
+extern void grafika_prezentuj_kursor_w(int,int);
+extern void grafika_pobierz_pozycje_kursora(int*,int*);
 extern void grafika_zakoncz_scene();
 extern "C" void grafika_naloz_okno_terminala_region(int x, int y,
                                                        int szer, int wys);
@@ -1099,16 +1114,14 @@ void zaktualizuj_pozycje_warstwy(
      * Nie wykonujemy x+szer tutaj, wiec same skrajne wartosci int sa
      * bezpieczne. Kompozytor uzyje int64_t podczas clippingu.
      */
-    const int stary_x=warstwa->x,stary_y=warstwa->y;
-    const int szer=warstwa->szerokosc,wys=warstwa->wysokosc;
-    warstwa->x =
-        nowy_x;
-
-    warstwa->y =
-        nowy_y;
-    skladacz_obrazu_oznacz_dirty_rect(stary_x,stary_y,szer,wys);
-    skladacz_obrazu_oznacz_dirty_rect(nowy_x,nowy_y,szer,wys);
+    ++drag_moves_received;
+    uint64_t f=irq_off();PendingGeometry& p=pending_geometry[pid];
+    if(p.pending)++drag_moves_coalesced;
+    else{p.old_x=warstwa->x;p.old_y=warstwa->y;p.width=warstwa->szerokosc;p.height=warstwa->wysokosc;p.pending=true;}
+    p.x=nowy_x;p.y=nowy_y;irq_restore(f);
 }
+
+void skladacz_obrazu_zastosuj_pending_geometrii(int pid){apply_pending_geometry(pid);}
 
 /* =========================================================================
  * 12. CZYSZCZENIE WARSTWY
@@ -1518,6 +1531,7 @@ void skladacz_obrazu_oznacz_ruch_kursora(int old_x,int old_y,int new_x,int new_y
 }
 
 void skladacz_obrazu_obsluz_dirty() {
+    apply_pending_geometry(-1);
     uint64_t f=irq_off();if(!dirty_count&&!cursor_pending){irq_restore(f);return;}irq_restore(f);
     uint64_t now=hpet_dostepny()?czas_monotoniczny_ns():0;
     if(hpet_dostepny()&&nastepna_klatka_ns&&now<nastepna_klatka_ns)return;
@@ -1536,8 +1550,11 @@ void skladacz_obrazu_obsluz_dirty() {
     /* Faza B: prezentujemy dopiero gotowe wiersze, a kursor nakladamy raz,
        jako ostatni overlay. Scene backbuffer pozostaje bez kursora. */
     for(uint32_t ri=0;ri<count;++ri){const GuiDirtyRect&r=work[ri];grafika_prezentuj_region(r.x,r.y,r.width,r.height);}
-    if(cursor_work){grafika_prezentuj_region(old_cursor.x,old_cursor.y,old_cursor.width,old_cursor.height);grafika_prezentuj_region(new_cursor.x,new_cursor.y,new_cursor.width,new_cursor.height);pixels+=rect_area(old_cursor)+rect_area(new_cursor);}
-    grafika_prezentuj_kursor();
+    int cursor_x=0,cursor_y=0;if(cursor_work){grafika_prezentuj_region(old_cursor.x,old_cursor.y,old_cursor.width,old_cursor.height);cursor_x=new_cursor.x;cursor_y=new_cursor.y;pixels+=rect_area(old_cursor);}else grafika_pobierz_pozycje_kursora(&cursor_x,&cursor_y);
+    /* Overlay jest rysowany z tego samego snapshotu co restore. Scene nigdy
+       nie zawiera kursora, a dirty przecinajace jego rect jest naprawiane
+       przez ten finalny overlay. */
+    grafika_prezentuj_kursor_w(cursor_x,cursor_y);++cursor_fast_present_count;
     grafika_zakoncz_scene();
     const uint64_t present_end=hpet_dostepny()?czas_monotoniczny_us():0;
     if(count) zakoncz_snapshot();
