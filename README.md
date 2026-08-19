@@ -267,8 +267,6 @@ Pakiet `qemu-kvm` ma akcelerację KVM wbudowaną domyślnie — dopisz `-enable-
 /usr/libexec/qemu-kvm -enable-kvm -cpu host -cdrom BursztynOS.iso -m 2G
 ```
 
-> Gotowy skrypt `start.md`/`start_linux.sh` w tym repozytorium wykrywa to wszystko automatycznie (ścieżkę binarki, ścieżkę OVMF-a i dostępność GTK/SDL vs. VNC), więc na RHEL wystarczy go po prostu uruchomić.
-
 
 # Kompilowanie systemu ze źródel na Linux Mint i uruchomienie w QEMU 
 ### Przygotowanie Środowiska w Linux Mint
