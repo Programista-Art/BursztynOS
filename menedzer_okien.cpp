@@ -36,7 +36,7 @@ constexpr int MENU_W = 220;
 constexpr int MENU_WYS = 185;
 constexpr int MENU_GORNY_MARGINES = 10;
 constexpr int MENU_ELEMENT_WYS = 25;
-constexpr int MENU_ELEMENTOW = 6;
+constexpr int MENU_ELEMENTOW = 7;
 
 constexpr int PRZYCISK_MENU_X = 10;
 constexpr int PRZYCISK_MENU_W = 80;
@@ -56,6 +56,7 @@ const char* const SCIEZKA_POWLOKA = "/shell.bur";
 const char* const SCIEZKA_NOTATNIK = "/programy/notatnik.cebula/notatnik.bur";
 const char* const SCIEZKA_KALKULATOR = "/programy/kalkulator.cebula/kalkulator.bur";
 const char* const SCIEZKA_HUSSAR = "/programy/przegladarka.cebula/przegladarka.bur";
+const char* const SCIEZKA_TEST = "/programy/test.cebula/test.bur";
 
 int screen_w = 1024;
 int screen_h = 768;
@@ -187,6 +188,14 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
                              1, 0x00FFFFFF, "WWW");
     rysuj_tekst_wysrodkowany(210, 104, IKONA_W, 16,
                              1, 0x00FFFFFF, "Husarz");
+    //Test apka
+    gui_rysuj_prostokat(290, 50, IKONA_W, IKONA_H, 0x00CC33CC);
+    gui_rysuj_prostokat(292, 52, 44, 44, 0x00881188);
+    rysuj_tekst_wysrodkowany(290, 65, IKONA_W, 16,
+                             1, 0x00FFFFFF, "Test");
+    rysuj_tekst_wysrodkowany(290, 104, IKONA_W, 16,
+                             1, 0x00FFFFFF, "Test");
+
 
     if (menu_start_otwarte) {
         const int menu_y = screen_h - PASEK_WYS - MENU_WYS;
@@ -202,6 +211,7 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
             "> Notatnik",
             "> Kalkulator",
             "> Przegladarka Husarz",
+            "> Test",
             "> Uruchom ponownie",
             "> Zamknij"
         };
@@ -282,9 +292,12 @@ void obsluz_element_menu(int item_index) {
             uruchom_lub_aktywuj(SCIEZKA_HUSSAR, "Husarz");
             break;
         case 4:
+            uruchom_lub_aktywuj(SCIEZKA_TEST, "Test");
+            break;
+        case 5:    
             wykonaj_restart();
             break;
-        case 5:
+        case 6:
             wykonaj_zamkniecie();
             break;
         default:
@@ -345,6 +358,12 @@ void obsluz_klikniecie(int mx, int my) {
         uruchom_lub_aktywuj(SCIEZKA_HUSSAR, "Husarz");
         return;
     }
+
+    if (punkt_w_prostokacie(mx, my, 290, 50, IKONA_W, IKONA_H)) {
+        uruchom_lub_aktywuj(SCIEZKA_TEST, "Test");
+        return;
+    }
+
 
     int task_x = TASK_BUTTON_X;
     for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {

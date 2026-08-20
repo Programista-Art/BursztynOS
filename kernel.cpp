@@ -125,6 +125,9 @@ extern "C" uint8_t _binary_menedzer_okien_bin_end[];
 extern "C" uint8_t _binary_przegladarka_bin_start[];
 extern "C" uint8_t _binary_przegladarka_bin_end[];
 
+extern "C" uint8_t _binary_test_bin_start[];
+extern "C" uint8_t _binary_test_bin_end[];
+
 /* =========================================================================
  * STALE STARTOWE
  * ========================================================================= */
@@ -585,6 +588,7 @@ void utworz_drabine_katalogow() {
         "/programy/notatnik.cebula",
         "/programy/kalkulator.cebula",
         "/programy/przegladarka.cebula",
+        "/programy/test.cebula",
         "/uslugi",
         "/sterowniki",
         "/uzytkownicy",
@@ -645,6 +649,17 @@ void instaluj_wbudowane_programy() {
         "    \"okna\"\n"
         "]\n";
 
+    static const char MANIFEST_TEST[] =
+        "nazwa = \"Test\"\n"
+        "autor = \"Programista Art\"\n"
+        "wersja = \"1.0\"\n"
+        "poziom_zaufania = 4\n"
+        "plik_startowy = \"test.bur\"\n"
+        "uprawnienia = [\n"
+        "    \"okna\"\n"
+        "]\n";
+    
+
     /*
      * WAZNE:
      * zapisujemy DOKLADNY rozmiar kazdego bloba z objcopy.
@@ -702,6 +717,21 @@ void instaluj_wbudowane_programy() {
     } else {
         wypisz_log(
             "[BSP] Notatnik zainstalowany jako .cebula.");
+    }
+
+
+    if (!instaluj_paczke(
+            "/programy/test.cebula/opis.aplikacji",
+             MANIFEST_TEST,
+            "/programy/test.cebula/test.bur",
+            _binary_test_bin_start,
+            _binary_test_bin_end)) {
+
+        wypisz_log(
+            "[BSP-BLAD] Nie mozna zainstalowac Aplikacji Testowej.");
+    } else {
+        wypisz_log(
+            "[BSP] Aplikacja Testowa zainstalowana jako .cebula.");
     }
 
     if (!instaluj_paczke(
