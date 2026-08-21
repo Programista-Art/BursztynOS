@@ -42,6 +42,14 @@ bool czytaj_plik(const char* sciezka,
                  char* bufor,
                  uint32_t maksymalna_dlugosc);
 
+/* BWS 6: tekstowa lista wpisow "[KAT]  nazwa" / "[PLIK] nazwa". */
+bool wylistuj_katalog_uzytkownika(const char* sciezka,
+                                  char* bufor,
+                                  uint32_t maksymalna_dlugosc);
+
+/* BWS 10: uruchomienie .bur przez loader i kontrole PZB. */
+bool uruchom_program_uzytkownika(const char* sciezka);
+
 /* Addytywne ABI: zwraca rozmiar bez kopiowania danych. */
 bool pobierz_rozmiar_pliku(const char* sciezka, uint32_t* rozmiar);
 

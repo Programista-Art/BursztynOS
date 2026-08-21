@@ -237,6 +237,7 @@ OBJS := \
 	ahci.o \
 	ring3.o \
 	notatnik_blob.o \
+	eksplorator_blob.o \
 	kalkulator_blob.o \
 	loader.o \
 	kernel.o \
@@ -363,7 +364,20 @@ notatnik_blob.o: notatnik_tmp.o bursztyn_gui.o $(NOTATNIK_LINKER)
 	$(LD) -r -b binary notatnik.bin -o notatnik_blob.o
 
 # ============================================================================
-# 15. KALKULATOR .bur
+# 15. EKSPLORATOR PLIKOW .bur
+# ============================================================================
+
+eksplorator_tmp.o: programy/eksplorator/eksplorator-plikow.cpp bursztyn_gui.h
+	$(CXX) $(RING3_FLAGS) -c $< -o $@
+
+eksplorator_blob.o: eksplorator_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
+	$(LD) -T $(RING3_STD_LINKER) $(RING3_LDFLAGS) \
+		eksplorator_tmp.o bursztyn_gui.o -o eksplorator.elf
+	$(OBJCOPY) -O binary eksplorator.elf eksplorator.bin
+	$(LD) -r -b binary eksplorator.bin -o eksplorator_blob.o
+
+# ============================================================================
+# 16. KALKULATOR .bur
 # ============================================================================
 
 kalkulator_tmp.o: kalkulator.cpp bursztyn_gui.h

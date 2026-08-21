@@ -1315,6 +1315,11 @@ uint64_t bws_uruchom(
     uint64_t wymagane = prawa_dziecka;
     if (rowna_sciezka(sciezka, "/programy/notatnik.cebula/notatnik.bur"))
         wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ | PRAWO_PLIKI_ZAPISZ;
+    else if (rowna_sciezka(
+                sciezka,
+                "/programy/eksplorator.cebula/eksplorator-plikow.bur"))
+        wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ | PRAWO_PLIKI_ZAPISZ |
+                   PRAWO_URUCHOM_PROGRAM;
     else if (rowna_sciezka(sciezka,
                            "/programy/przegladarka.cebula/przegladarka.bur"))
         wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ | PRAWO_SIEC;

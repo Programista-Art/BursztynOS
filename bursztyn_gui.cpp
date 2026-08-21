@@ -381,6 +381,26 @@ bool czytaj_plik(const char* sciezka,
         0) != 0;
 }
 
+bool wylistuj_katalog_uzytkownika(const char* sciezka,
+                                  char* bufor,
+                                  uint32_t maksymalna_dlugosc) {
+    if (!sciezka || !bufor || maksymalna_dlugosc == 0) return false;
+    return bws_wywolaj(
+        6,
+        reinterpret_cast<uint64_t>(sciezka),
+        reinterpret_cast<uint64_t>(bufor),
+        static_cast<uint64_t>(maksymalna_dlugosc),
+        0) != 0;
+}
+
+bool uruchom_program_uzytkownika(const char* sciezka) {
+    if (!sciezka) return false;
+    return bws_wywolaj(
+        10,
+        reinterpret_cast<uint64_t>(sciezka),
+        0, 0, 0) != 0;
+}
+
 bool pobierz_rozmiar_pliku(const char* sciezka, uint32_t* rozmiar) {
     if (!sciezka || !rozmiar) return false;
     const uint64_t wynik = bws_wywolaj(

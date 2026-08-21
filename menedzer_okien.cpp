@@ -33,10 +33,10 @@ namespace {
 constexpr int PASEK_WYS = 40;
 constexpr int MENU_X = 10;
 constexpr int MENU_W = 220;
-constexpr int MENU_WYS = 185;
+constexpr int MENU_WYS = 210;
 constexpr int MENU_GORNY_MARGINES = 10;
 constexpr int MENU_ELEMENT_WYS = 25;
-constexpr int MENU_ELEMENTOW = 7;
+constexpr int MENU_ELEMENTOW = 8;
 
 constexpr int PRZYCISK_MENU_X = 10;
 constexpr int PRZYCISK_MENU_W = 80;
@@ -53,6 +53,8 @@ constexpr int TASK_BUTTON_W = 112;
 constexpr int TASK_BUTTON_GAP = 4;
 
 const char* const SCIEZKA_POWLOKA = "/shell.bur";
+const char* const SCIEZKA_EKSPLORATOR =
+    "/programy/eksplorator.cebula/eksplorator-plikow.bur";
 const char* const SCIEZKA_NOTATNIK = "/programy/notatnik.cebula/notatnik.bur";
 const char* const SCIEZKA_KALKULATOR = "/programy/kalkulator.cebula/kalkulator.bur";
 const char* const SCIEZKA_HUSSAR = "/programy/przegladarka.cebula/przegladarka.bur";
@@ -196,6 +198,13 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
     rysuj_tekst_wysrodkowany(290, 104, IKONA_W, 16,
                              1, 0x00FFFFFF, "Test");
 
+    // Ikona Eksploratora Plikow.
+    gui_rysuj_prostokat(370, 50, IKONA_W, IKONA_H, 0x00FFBF00);
+    gui_rysuj_prostokat(372, 58, 44, 38, 0x00D59600);
+    gui_rysuj_prostokat(376, 52, 20, 10, 0x00FFBF00);
+    rysuj_tekst_wysrodkowany(370, 104, IKONA_W, 16,
+                             1, 0x00FFFFFF, "Pliki");
+
 
     if (menu_start_otwarte) {
         const int menu_y = screen_h - PASEK_WYS - MENU_WYS;
@@ -208,6 +217,7 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
 
         const char* menu_elementy[MENU_ELEMENTOW] = {
             "> Powloka Bursztyna",
+            "> Eksplorator Plikow",
             "> Notatnik",
             "> Kalkulator",
             "> Przegladarka Husarz",
@@ -283,21 +293,25 @@ void obsluz_element_menu(int item_index) {
             uruchom_powloke();
             break;
         case 1:
-            uruchom_lub_aktywuj(SCIEZKA_NOTATNIK, "Notatnik");
+            uruchom_lub_aktywuj(SCIEZKA_EKSPLORATOR,
+                                "Eksplorator Plikow");
             break;
         case 2:
-            uruchom_lub_aktywuj(SCIEZKA_KALKULATOR, "Kalkulator");
+            uruchom_lub_aktywuj(SCIEZKA_NOTATNIK, "Notatnik");
             break;
         case 3:
-            uruchom_lub_aktywuj(SCIEZKA_HUSSAR, "Husarz");
+            uruchom_lub_aktywuj(SCIEZKA_KALKULATOR, "Kalkulator");
             break;
         case 4:
+            uruchom_lub_aktywuj(SCIEZKA_HUSSAR, "Husarz");
+            break;
+        case 5:
             uruchom_lub_aktywuj(SCIEZKA_TEST, "Test");
             break;
-        case 5:    
+        case 6:
             wykonaj_restart();
             break;
-        case 6:
+        case 7:
             wykonaj_zamkniecie();
             break;
         default:
@@ -361,6 +375,11 @@ void obsluz_klikniecie(int mx, int my) {
 
     if (punkt_w_prostokacie(mx, my, 290, 50, IKONA_W, IKONA_H)) {
         uruchom_lub_aktywuj(SCIEZKA_TEST, "Test");
+        return;
+    }
+
+    if (punkt_w_prostokacie(mx, my, 370, 50, IKONA_W, IKONA_H)) {
+        uruchom_lub_aktywuj(SCIEZKA_EKSPLORATOR, "Eksplorator Plikow");
         return;
     }
 

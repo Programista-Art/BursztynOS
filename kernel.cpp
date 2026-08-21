@@ -116,6 +116,9 @@ extern "C" uint8_t _binary_cytaty_txt_end[];
 extern "C" uint8_t _binary_notatnik_bin_start[];
 extern "C" uint8_t _binary_notatnik_bin_end[];
 
+extern "C" uint8_t _binary_eksplorator_bin_start[];
+extern "C" uint8_t _binary_eksplorator_bin_end[];
+
 extern "C" uint8_t _binary_kalkulator_bin_start[];
 extern "C" uint8_t _binary_kalkulator_bin_end[];
 
@@ -586,6 +589,7 @@ void utworz_drabine_katalogow() {
         "/system",
         "/programy",
         "/programy/notatnik.cebula",
+        "/programy/eksplorator.cebula",
         "/programy/kalkulator.cebula",
         "/programy/przegladarka.cebula",
         "/programy/test.cebula",
@@ -637,6 +641,19 @@ void instaluj_wbudowane_programy() {
         "    \"okna\",\n"
         "    \"pliki_czytaj\",\n"
         "    \"pliki_zapisz\"\n"
+        "]\n";
+
+    static const char MANIFEST_EKSPLORATORA[] =
+        "nazwa = \"Eksplorator Plikow\"\n"
+        "autor = \"Programista Art\"\n"
+        "wersja = \"1.0\"\n"
+        "poziom_zaufania = 4\n"
+        "plik_startowy = \"eksplorator-plikow.bur\"\n"
+        "uprawnienia = [\n"
+        "    \"okna\",\n"
+        "    \"pliki_czytaj\",\n"
+        "    \"pliki_zapisz\",\n"
+        "    \"uruchom_program\"\n"
         "]\n";
 
     static const char MANIFEST_KALKULATORA[] =
@@ -717,6 +734,20 @@ void instaluj_wbudowane_programy() {
     } else {
         wypisz_log(
             "[BSP] Notatnik zainstalowany jako .cebula.");
+    }
+
+    if (!instaluj_paczke(
+            "/programy/eksplorator.cebula/opis.aplikacji",
+            MANIFEST_EKSPLORATORA,
+            "/programy/eksplorator.cebula/eksplorator-plikow.bur",
+            _binary_eksplorator_bin_start,
+            _binary_eksplorator_bin_end)) {
+
+        wypisz_log(
+            "[BSP-BLAD] Nie mozna zainstalowac Eksploratora Plikow.");
+    } else {
+        wypisz_log(
+            "[BSP] Eksplorator Plikow zainstalowany jako .cebula.");
     }
 
 
