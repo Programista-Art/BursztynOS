@@ -113,7 +113,7 @@ constexpr size_t WIDOCZNA_LINIA_POJEMNOSC =
     1024U;
 
 constexpr int BAJTY_SCIEZKI =
-    128;
+    512;
 
 constexpr int MAKS_SCIEZKA =
     BAJTY_SCIEZKI - 1;
@@ -3306,6 +3306,12 @@ void _start() {
         true
     );
 
+    char argument_startowy[512] = {};
+    if (pobierz_argument_startowy(
+            argument_startowy, sizeof(argument_startowy))) {
+        (void)otworz_z_pliku(argument_startowy);
+    }
+
     StanANSI ansi =
         StanANSI::BRAK;
 
@@ -3333,6 +3339,18 @@ void _start() {
         bool szybka_sciezka = false;
         bool szybki_edytor = false;
         ZakresRedraw szybki_zakres{};
+        if (zdarzenie.typ == BWS_ZDARZENIE_OTWORZ_PLIK) {
+            char nowa_sciezka[512] = {};
+            if (pobierz_argument_startowy(
+                    nowa_sciezka, sizeof(nowa_sciezka))) {
+                (void)otworz_z_pliku(nowa_sciezka);
+                tryb = TrybPracy::EDYCJA_TEKSTU;
+                menu_plik_otwarte = false;
+                menu_ustawienia_otwarte = false;
+                okno_pomoc_widoczne = false;
+                redraw = true;
+            }
+        }
         if (zdarzenie.typ == BWS_ZDARZENIE_FOCUS && aplikacja_zminimalizowana)
             aplikacja_zminimalizowana = false;
         int mx = old_mx;

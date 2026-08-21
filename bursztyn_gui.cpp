@@ -124,6 +124,39 @@ int popraw_skale(int skala) {
     return skala;
 }
 
+size_t dekoduj_utf8_gui(const char* tekst, size_t i, uint32_t* znak) {
+    if (!tekst || !znak || tekst[i] == '\0') return 0;
+    const uint8_t b0 = static_cast<uint8_t>(tekst[i]);
+    *znak = b0;
+    if (b0 < 0xC2U || b0 > 0xF4U) return 1;
+    const uint8_t b1 = static_cast<uint8_t>(tekst[i + 1]);
+    if (b1 == 0 || (b1 & 0xC0U) != 0x80U) return 1;
+    if (b0 <= 0xDFU) {
+        *znak = (static_cast<uint32_t>(b0 & 0x1FU) << 6) |
+                static_cast<uint32_t>(b1 & 0x3FU);
+        return 2;
+    }
+    const uint8_t b2 = static_cast<uint8_t>(tekst[i + 2]);
+    if (b2 == 0 || (b2 & 0xC0U) != 0x80U) return 1;
+    if (b0 <= 0xEFU) {
+        if ((b0 == 0xE0U && b1 < 0xA0U) ||
+            (b0 == 0xEDU && b1 > 0x9FU)) return 1;
+        *znak = (static_cast<uint32_t>(b0 & 0x0FU) << 12) |
+                (static_cast<uint32_t>(b1 & 0x3FU) << 6) |
+                static_cast<uint32_t>(b2 & 0x3FU);
+        return 3;
+    }
+    const uint8_t b3 = static_cast<uint8_t>(tekst[i + 3]);
+    if (b3 == 0 || (b3 & 0xC0U) != 0x80U ||
+        (b0 == 0xF0U && b1 < 0x90U) ||
+        (b0 == 0xF4U && b1 > 0x8FU)) return 1;
+    *znak = (static_cast<uint32_t>(b0 & 0x07U) << 18) |
+            (static_cast<uint32_t>(b1 & 0x3FU) << 12) |
+            (static_cast<uint32_t>(b2 & 0x3FU) << 6) |
+            static_cast<uint32_t>(b3 & 0x3FU);
+    return 4;
+}
+
 } // namespace
 
 void* gui_malloc(unsigned long rozmiar) {
@@ -348,6 +381,14 @@ bool utworz(const char* sciezka) {
         0, 0, 0) != 0;
 }
 
+bool utworz_katalog_uzytkownika(const char* sciezka) {
+    if (!sciezka) return false;
+    return bws_wywolaj(
+        46,
+        reinterpret_cast<uint64_t>(sciezka),
+        0, 0, 0) != 0;
+}
+
 bool zapisz_plik(const char* sciezka,
                  const char* dane,
                  uint32_t dlugosc) {
@@ -399,6 +440,51 @@ bool uruchom_program_uzytkownika(const char* sciezka) {
         10,
         reinterpret_cast<uint64_t>(sciezka),
         0, 0, 0) != 0;
+}
+
+bool uruchom_program_z_argumentem_uzytkownika(const char* program,
+                                               const char* argument) {
+    if (!program || !argument) return false;
+    return bws_wywolaj(
+        10,
+        reinterpret_cast<uint64_t>(program),
+        reinterpret_cast<uint64_t>(argument),
+        0, 0) != 0;
+}
+
+bool pobierz_argument_startowy(char* bufor, uint32_t pojemnosc) {
+    if (!bufor || pojemnosc == 0) return false;
+    return bws_wywolaj(
+        45,
+        reinterpret_cast<uint64_t>(bufor),
+        static_cast<uint64_t>(pojemnosc),
+        0, 0) != 0;
+}
+
+namespace {
+
+bool tekst_konczy_sie_gui(const char* tekst, const char* sufiks) {
+    if (!tekst || !sufiks) return false;
+    size_t lt = 0;
+    size_t ls = 0;
+    while (lt < 511U && tekst[lt] != '\0') ++lt;
+    while (ls < 32U && sufiks[ls] != '\0') ++ls;
+    if (lt == 511U || ls == 32U || ls > lt) return false;
+    for (size_t i = 0; i < ls; ++i)
+        if (tekst[lt - ls + i] != sufiks[i]) return false;
+    return true;
+}
+
+} // namespace
+
+wynik_otwarcia_skojarzonego otworz_plik_skojarzony(const char* sciezka) {
+    if (!sciezka || sciezka[0] != '/') return OTWORZ_PLIK_BLAD;
+    if (!tekst_konczy_sie_gui(sciezka, ".txt"))
+        return OTWORZ_PLIK_BRAK_SKOJARZENIA;
+    return uruchom_program_z_argumentem_uzytkownika(
+               "/programy/notatnik.cebula/notatnik.bur", sciezka)
+        ? OTWORZ_PLIK_URUCHOMIONO
+        : OTWORZ_PLIK_BLAD;
 }
 
 bool pobierz_rozmiar_pliku(const char* sciezka, uint32_t* rozmiar) {
@@ -682,6 +768,46 @@ bool gui_aktywuj_okno(uint64_t window_id) {
     return window_id != 0 && bws_wywolaj(43, window_id, 0, 0, 0) != 0;
 }
 
+bool usun_twor_uzytkownika(const char* sciezka) {
+    return sciezka && bws_wywolaj(7, reinterpret_cast<uint64_t>(sciezka)) != 0;
+}
+
+bool zmien_nazwe_uzytkownika(const char* sciezka, const char* nowa_nazwa) {
+    return sciezka && nowa_nazwa &&
+        bws_wywolaj(8, reinterpret_cast<uint64_t>(sciezka),
+                    reinterpret_cast<uint64_t>(nowa_nazwa)) != 0;
+}
+
+bool pobierz_metadane_pliku(const char* sciezka,
+                            BwsMetadanePliku* metadane) {
+    return sciezka && metadane &&
+        bws_wywolaj(47, reinterpret_cast<uint64_t>(sciezka),
+                    reinterpret_cast<uint64_t>(metadane)) != 0;
+}
+
+bool przenies_twor_uzytkownika(const char* sciezka,
+                               const char* folder_docelowy) {
+    return sciezka && folder_docelowy &&
+        bws_wywolaj(48, reinterpret_cast<uint64_t>(sciezka),
+                    reinterpret_cast<uint64_t>(folder_docelowy)) != 0;
+}
+
+bool gui_rejestruj_cele_drop(const BwsCelDrop* cele, uint32_t liczba) {
+    if (liczba > BWS_DROP_CELE_MAX || (liczba != 0 && !cele)) return false;
+    return bws_wywolaj(49, reinterpret_cast<uint64_t>(cele), liczba) != 0;
+}
+
+BwsWynikDrop gui_aktualizuj_drag(const char* sciezka,
+                                 int x, int y, bool wykonaj_drop) {
+    if (!sciezka) return BWS_DROP_BLAD;
+    const uint64_t pozycja = spakuj_dwa_i32(x, y);
+    const uint64_t wynik = bws_wywolaj(
+        50, reinterpret_cast<uint64_t>(sciezka), pozycja,
+        wykonaj_drop ? 1ULL : 0ULL);
+    return wynik <= BWS_DROP_BLAD
+        ? static_cast<BwsWynikDrop>(wynik) : BWS_DROP_BLAD;
+}
+
 void gui_rysuj_standardowa_belke(int x, int y, int szer,
                                  const char* tytul, bool zmaksymalizowane) {
     if (!tytul || szer < 90) return;
@@ -730,6 +856,11 @@ int gui_pobierz_szerokosc_znaku(uint32_t znak) {
         return 8;
 
     return static_cast<int>(wynik);
+}
+
+int gui_pobierz_wysokosc_fontu() {
+    const uint64_t wynik = bws_wywolaj(51, 0, 0, 0, 0);
+    return wynik >= 1 && wynik <= 64 ? static_cast<int>(wynik) : 16;
 }
 
 int bws_utworz_warstwe(int x,
@@ -792,11 +923,7 @@ void RysujPrzycisk(int x,
     gui_rysuj_prostokat(
         x, y, w, h, kolor_bg);
 
-    gui_wypisz_tekst_kolor(
-        x + 4,
-        y + 2,
-        kolor_txt,
-        tekst);
+    rysuj_tekst_wysrodkowany(x, y, w, h, 1, kolor_txt, tekst);
 }
 
 int oblicz_szerokosc_tekstu(const char* tekst,
@@ -811,27 +938,8 @@ int oblicz_szerokosc_tekstu(const char* tekst,
     size_t i = 0;
 
     while (tekst[i] != '\0') {
-        uint32_t znak =
-            static_cast<uint8_t>(tekst[i]);
-
-        const uint8_t b0 =
-            static_cast<uint8_t>(tekst[i]);
-
-        if ((b0 & 0xE0U) == 0xC0U &&
-            tekst[i + 1] != '\0') {
-
-            const uint8_t b1 =
-                static_cast<uint8_t>(tekst[i + 1]);
-
-            if ((b1 & 0xC0U) == 0x80U) {
-                znak =
-                    (static_cast<uint32_t>(
-                         b0 & 0x1FU) << 6) |
-                    static_cast<uint32_t>(
-                         b1 & 0x3FU);
-                i++;
-            }
-        }
+        uint32_t znak = 0;
+        const size_t zuzyte = dekoduj_utf8_gui(tekst, i, &znak);
 
         int szerokosc_znaku =
             gui_pobierz_szerokosc_znaku(znak);
@@ -851,7 +959,7 @@ int oblicz_szerokosc_tekstu(const char* tekst,
         }
 
         szerokosc += przyrost;
-        i++;
+        i += zuzyte;
     }
 
     return szerokosc;
@@ -876,7 +984,7 @@ void rysuj_tekst_wysrodkowany(int px,
             poprawna_skala);
 
     const int wys_tekstu =
-        16 * poprawna_skala;
+        gui_pobierz_wysokosc_fontu() * poprawna_skala;
 
     const int tx =
         px + (w - szer_tekstu) / 2;

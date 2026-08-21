@@ -78,6 +78,17 @@
 
 #define PSF_ROZMIAR_SYGNATURY 4U
 
+/* Wersjonowane uzycie dwoch historycznie zarezerwowanych pol inode.
+ * Uklad inode i sygnatura BSP2 pozostaja bez zmian. Wartosc bez tego
+ * znacznika jest traktowana jak stary węzeł bez metadanych. */
+#define PSF_META_MAGIC_MASK UINT64_C(0xFFFFFFFF00000000)
+#define PSF_META_MAGIC      UINT64_C(0x5053464D00000000)
+#define PSF_META_WERSJA_MASK UINT64_C(0x00000000FF000000)
+#define PSF_META_WERSJA_1    UINT64_C(0x0000000001000000)
+#define PSF_META_CZAS_WAZNY  UINT64_C(0x0000000000000100)
+#define PSF_META_PZB_WAZNY   UINT64_C(0x0000000000000200)
+#define PSF_META_PZB_MASK    UINT64_C(0x0000000000000007)
+
 /*
  * Rozmiar danych osiagalny przez obecne wskazniki bezposrednie.
  */
@@ -180,6 +191,15 @@ struct wpis_katalogowy {
     uint64_t id_wezla;
     char nazwa[PSF_MAX_NAZWA];
 } __attribute__((packed));
+
+struct psf_metadane {
+    uint64_t rozmiar;
+    uint64_t czas_utworzenia_rtc;
+    uint8_t typ;
+    uint8_t poziom_pzb;
+    uint8_t czas_dostepny;
+    uint8_t pzb_dostepny;
+};
 
 /* =========================================================================
  * 5. KONTROLA ABI FORMATU DYSKOWEGO
@@ -374,6 +394,9 @@ bool utworz_plik(
     const char* sciezka
 );
 
+bool utworz_katalog_z_pzb(const char* sciezka, uint8_t poziom_pzb);
+bool utworz_plik_z_pzb(const char* sciezka, uint8_t poziom_pzb);
+
 /*
  * Nadpisuje caly plik.
  *
@@ -463,6 +486,12 @@ bool zmien_nazwe_tworu(
     const char* sciezka,
     const char* nowa_nazwa
 );
+
+/* Przenosi do istniejacego folderu, zachowujac nazwe. Nie nadpisuje. */
+bool przenies_twor(const char* sciezka, const char* folder_docelowy);
+
+/* Odczyt rzeczywistych danych inode; stare BSP2 jawnie nie maja czasu/PZB. */
+bool pobierz_metadane_tworu(const char* sciezka, psf_metadane* metadane);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -1211,6 +1211,42 @@ void RysujZnak(uint32_t unicode,
     }
 }
 
+static size_t dekoduj_utf8_renderera(const char* tekst, size_t i,
+                                     size_t limit, uint32_t* znak) {
+    if (!tekst || !znak || i >= limit || tekst[i] == '\0') return 0;
+    const uint8_t b0 = static_cast<uint8_t>(tekst[i]);
+    *znak = b0;
+    if (b0 < 0xC2U || b0 > 0xF4U || i + 1 >= limit) return 1;
+    const uint8_t b1 = static_cast<uint8_t>(tekst[i + 1]);
+    if (b1 == 0 || (b1 & 0xC0U) != 0x80U) return 1;
+    if (b0 <= 0xDFU) {
+        *znak = (static_cast<uint32_t>(b0 & 0x1FU) << 6) |
+                static_cast<uint32_t>(b1 & 0x3FU);
+        return 2;
+    }
+    if (i + 2 >= limit) return 1;
+    const uint8_t b2 = static_cast<uint8_t>(tekst[i + 2]);
+    if (b2 == 0 || (b2 & 0xC0U) != 0x80U) return 1;
+    if (b0 <= 0xEFU) {
+        if ((b0 == 0xE0U && b1 < 0xA0U) ||
+            (b0 == 0xEDU && b1 > 0x9FU)) return 1;
+        *znak = (static_cast<uint32_t>(b0 & 0x0FU) << 12) |
+                (static_cast<uint32_t>(b1 & 0x3FU) << 6) |
+                static_cast<uint32_t>(b2 & 0x3FU);
+        return 3;
+    }
+    if (i + 3 >= limit) return 1;
+    const uint8_t b3 = static_cast<uint8_t>(tekst[i + 3]);
+    if (b3 == 0 || (b3 & 0xC0U) != 0x80U ||
+        (b0 == 0xF0U && b1 < 0x90U) ||
+        (b0 == 0xF4U && b1 > 0x8FU)) return 1;
+    *znak = (static_cast<uint32_t>(b0 & 0x07U) << 18) |
+            (static_cast<uint32_t>(b1 & 0x3FU) << 12) |
+            (static_cast<uint32_t>(b2 & 0x3FU) << 6) |
+            static_cast<uint32_t>(b3 & 0x3FU);
+    return 4;
+}
+
 void WypiszTekst(const char* tekst,
                  int px,
                  int py,
@@ -1230,26 +1266,9 @@ void WypiszTekst(const char* tekst,
     while (i < MAX_TEKST_WEWNETRZNY &&
            tekst[i] != '\0') {
 
-        uint32_t unicode =
-            static_cast<uint8_t>(tekst[i]);
-
-        const uint8_t b0 =
-            static_cast<uint8_t>(tekst[i]);
-
-        if ((b0 & 0xE0U) == 0xC0U &&
-            i + 1 < MAX_TEKST_WEWNETRZNY &&
-            tekst[i + 1] != '\0') {
-
-            const uint8_t b1 =
-                static_cast<uint8_t>(tekst[i + 1]);
-
-            if ((b1 & 0xC0U) == 0x80U) {
-                unicode =
-                    (static_cast<uint32_t>(b0 & 0x1FU) << 6) |
-                    static_cast<uint32_t>(b1 & 0x3FU);
-                ++i;
-            }
-        }
+        uint32_t unicode = 0;
+        const size_t zuzyte = dekoduj_utf8_renderera(
+            tekst, i, MAX_TEKST_WEWNETRZNY, &unicode);
 
         if (pozycja_x >= INT32_MIN &&
             pozycja_x <= INT32_MAX) {
@@ -1276,7 +1295,7 @@ void WypiszTekst(const char* tekst,
             static_cast<int64_t>(
                 (szerokosc_znaku + 1) * skala);
 
-        ++i;
+        i += zuzyte;
     }
 }
 
@@ -2131,20 +2150,15 @@ extern "C" void obsluga_przerwania_zegara() {
     skladacz_obrazu_oznacz_dirty_rect(
         grafika_pobierz_szerokosc()-150,
         grafika_pobierz_wysokosc()-40,150,40);
-    int desktop_pid = -1;
-    int najnizsze_z = 2147483647;
+    bws_zdarzenie e{};
+    e.typ = BWS_ZDARZENIE_TIMER;
+    e.timestamp = znacznik_zdarzenia();
+    /* Timer GUI ma czestotliwosc zegara pulpitu (1 Hz), ale trafia do
+       kazdej istniejacej aplikacji z warstwa. Aplikacje same decyduja,
+       czy potrzebuja wykonac okresowa prace; nie jest to tick compositora. */
     for (int pid = 1; pid < SKLADACZ_MAKS_WARSTW; ++pid) {
         warstwa_obrazu* w = pobierz_warstwe(pid);
-        if (w && w->z_order < najnizsze_z) {
-            najnizsze_z = w->z_order;
-            desktop_pid = pid;
-        }
-    }
-    if (desktop_pid > 0) {
-        bws_zdarzenie e{};
-        e.typ = BWS_ZDARZENIE_TIMER;
-        e.timestamp = znacznik_zdarzenia();
-        scheduler_dodaj_zdarzenie(desktop_pid, &e);
+        if (w) scheduler_dodaj_zdarzenie(pid, &e);
     }
 }
 

@@ -18,7 +18,12 @@ enum bws_typ_zdarzenia : uint32_t {
     BWS_ZDARZENIE_OKNO_PRZYWROCONE = 12,
     BWS_ZDARZENIE_OKNO_FOCUS = 13,
     BWS_ZDARZENIE_OKNO_ZAMKNIETE = 14,
-    BWS_ZDARZENIE_OKNO_TYTUL = 15
+    BWS_ZDARZENIE_OKNO_TYTUL = 15,
+    /* Program skojarzony powinien ponownie pobrac argument startowy. */
+    BWS_ZDARZENIE_OTWORZ_PLIK = 16,
+    BWS_ZDARZENIE_DRAG_HOVER = 17,
+    BWS_ZDARZENIE_DRAG_LEAVE = 18,
+    BWS_ZDARZENIE_DRAG_DROP = 19
 };
 
 struct bws_zdarzenie {

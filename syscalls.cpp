@@ -54,6 +54,7 @@
 #include "scheduler.h"
 #include "skladacz_obrazu.h"
 #include "bws_zdarzenia.h"
+#include "bws_pliki.h"
 #include "pamiec.h"
 #include "loader.h"
 #include "heap.h"
@@ -351,6 +352,17 @@ constexpr uint64_t KONIEC_STERTY_USER =
  */
 constexpr uint64_t MAX_ALOKACJA_STERTY_NA_BWS =
     16ULL * 1024ULL * 1024ULL;
+
+struct StanDropProcesu {
+    BwsCelDrop cele[BWS_DROP_CELE_MAX];
+    uint32_t liczba;
+    uint64_t ostatnia_rejestracja;
+    int ostatni_cel;
+    int ostatni_pid_celu;
+};
+
+StanDropProcesu cele_drop[PZB_MAKS_PROCESOW] = {};
+constexpr uint64_t DROP_WYGASA_PO_TICKACH = 1000ULL;
 
 /* =========================================================================
  * LOCK EKRANU
@@ -716,6 +728,61 @@ bool proces_moze_modyfikowac_sciezke(
     return true;
 }
 
+bool poziom_pliku_pozwala_modyfikowac(
+    const proces_t& proces,
+    const char* sciezka
+) {
+    psf_metadane meta{};
+    if (!pobierz_metadane_tworu(sciezka, &meta)) return false;
+    /* Stare BSP2 nie maja etykiety: zachowuja dotychczasowa polityke
+     * prawa PRAWO_PLIKI_ZAPISZ i ochrony drzew systemowych. */
+    return !meta.pzb_dostepny || proces.poziom_zaufania <= meta.poziom_pzb;
+}
+
+bool pobierz_rodzica_sciezki(
+    const char* sciezka,
+    char* rodzic,
+    size_t pojemnosc
+) {
+    if (!sciezka || !rodzic || pojemnosc < 2 || sciezka[0] != '/')
+        return false;
+    const size_t dlugosc = dlugosc_stringa_limit(sciezka, pojemnosc);
+    if (dlugosc == 0 || dlugosc >= pojemnosc) return false;
+    size_t slash = dlugosc;
+    while (slash > 0 && sciezka[slash] != '/') --slash;
+    if (slash == 0) {
+        rodzic[0] = '/';
+        rodzic[1] = '\0';
+        return true;
+    }
+    if (slash + 1 > pojemnosc) return false;
+    for (size_t i = 0; i < slash; ++i) rodzic[i] = sciezka[i];
+    rodzic[slash] = '\0';
+    return true;
+}
+
+bool proces_moze_utworzyc_w_sciezce(
+    const proces_t& proces,
+    const char* sciezka
+) {
+    if (!proces_moze_modyfikowac_sciezke(proces, sciezka)) return false;
+    char rodzic[MAX_SCIEZKA_PLIKU_BWS] = {};
+    return pobierz_rodzica_sciezki(sciezka, rodzic, sizeof(rodzic)) &&
+           poziom_pliku_pozwala_modyfikowac(proces, rodzic);
+}
+
+bool proces_moze_modyfikowac_obiekt(
+    const proces_t& proces,
+    const char* sciezka
+) {
+    if (!proces_moze_modyfikowac_sciezke(proces, sciezka) ||
+        !poziom_pliku_pozwala_modyfikowac(proces, sciezka)) return false;
+    if (sciezka[0] == '/' && sciezka[1] == '\0') return true;
+    char rodzic[MAX_SCIEZKA_PLIKU_BWS] = {};
+    return pobierz_rodzica_sciezki(sciezka, rodzic, sizeof(rodzic)) &&
+           poziom_pliku_pozwala_modyfikowac(proces, rodzic);
+}
+
 /* =========================================================================
  * POMOCNICZE BUFOROWANIE KERNELA
  * ========================================================================= */
@@ -845,7 +912,7 @@ uint64_t bws_utworz_plik(
         return 0;
     }
 
-    if (!proces_moze_modyfikowac_sciezke(
+    if (!proces_moze_utworzyc_w_sciezce(
             proces,
             sciezka)) {
         wypisz_log("[PZB] file_create=DENY");
@@ -854,8 +921,9 @@ uint64_t bws_utworz_plik(
     wypisz_log("[PZB] file_create=ALLOW");
 
     return
-        utworz_plik(
-            sciezka)
+        utworz_plik_z_pzb(
+            sciezka,
+            proces.poziom_zaufania)
             ? 1ULL
             : 0ULL;
 }
@@ -876,7 +944,7 @@ uint64_t bws_zapisz_plik(
         return 0;
     }
 
-    if (!proces_moze_modyfikowac_sciezke(
+    if (!proces_moze_modyfikowac_obiekt(
             proces,
             sciezka)) {
         wypisz_log("[PZB] file_write=DENY");
@@ -1149,7 +1217,7 @@ uint64_t bws_usun_twor(
         return 0;
     }
 
-    if (!proces_moze_modyfikowac_sciezke(
+    if (!proces_moze_modyfikowac_obiekt(
             proces,
             sciezka)) {
 
@@ -1184,7 +1252,7 @@ uint64_t bws_zmien_nazwe(
         return 0;
     }
 
-    if (!proces_moze_modyfikowac_sciezke(
+    if (!proces_moze_modyfikowac_obiekt(
             proces,
             sciezka)) {
 
@@ -1197,6 +1265,183 @@ uint64_t bws_zmien_nazwe(
             nowa_nazwa)
             ? 1ULL
             : 0ULL;
+}
+
+uint64_t bws_pobierz_metadane(
+    proces_t& proces,
+    uint64_t arg1,
+    uint64_t arg2
+) {
+    if (!proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ) || arg2 == 0 ||
+        !czy_bezpieczny_zakres_uzytkownika_do_zapisu(
+            reinterpret_cast<void*>(arg2), sizeof(BwsMetadanePliku)))
+        return 0;
+    char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
+    if (!pobierz_sciezke_pliku(arg1, sciezka)) return 0;
+    psf_metadane psf{};
+    if (!pobierz_metadane_tworu(sciezka, &psf)) return 0;
+    BwsMetadanePliku wynik{};
+    wynik.wersja = BWS_METADANE_WERSJA;
+    wynik.typ = psf.typ;
+    wynik.rozmiar = psf.rozmiar;
+    wynik.czas_utworzenia_rtc = psf.czas_utworzenia_rtc;
+    wynik.poziom_pzb = psf.poziom_pzb;
+    if (psf.typ == TYP_PLIK) wynik.flagi |= BWS_META_ROZMIAR_DOSTEPNY;
+    if (psf.czas_dostepny) wynik.flagi |= BWS_META_CZAS_DOSTEPNY;
+    if (psf.pzb_dostepny) wynik.flagi |= BWS_META_PZB_DOSTEPNY;
+    return skopiuj_do_przestrzeni_uzytkownika(
+        reinterpret_cast<void*>(arg2), &wynik, sizeof(wynik)) ? 1ULL : 0ULL;
+}
+
+uint64_t bws_przenies(
+    proces_t& proces,
+    uint64_t arg1,
+    uint64_t arg2
+) {
+    char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
+    char folder[MAX_SCIEZKA_PLIKU_BWS] = {};
+    if (!pobierz_sciezke_pliku(arg1, sciezka) ||
+        !pobierz_sciezke_pliku(arg2, folder)) return 0;
+    if (!proces_moze_modyfikowac_obiekt(proces, sciezka) ||
+        !proces_moze_modyfikowac_sciezke(proces, folder) ||
+        !poziom_pliku_pozwala_modyfikowac(proces, folder)) {
+        wypisz_log("[PZB] file_move=DENY");
+        return 0;
+    }
+    const bool wynik = przenies_twor(sciezka, folder);
+    wypisz_log(wynik ? "[PZB] file_move=ALLOW" : "[PSF] file_move=ERROR");
+    return wynik ? 1ULL : 0ULL;
+}
+
+bool punkt_w_celu_drop(int32_t x, int32_t y, const BwsCelDrop& cel) {
+    if (cel.szer <= 0 || cel.wys <= 0) return false;
+    const int64_t prawa = static_cast<int64_t>(cel.x) + cel.szer;
+    const int64_t dol = static_cast<int64_t>(cel.y) + cel.wys;
+    return static_cast<int64_t>(x) >= cel.x &&
+           static_cast<int64_t>(y) >= cel.y &&
+           static_cast<int64_t>(x) < prawa &&
+           static_cast<int64_t>(y) < dol;
+}
+
+bool poprawny_folder_celu_drop(const char* folder) {
+    if (!folder || folder[0] != '/') return false;
+    const size_t n = dlugosc_stringa_limit(folder, BWS_DROP_SCIEZKA_MAX);
+    if (n == 0 || n >= BWS_DROP_SCIEZKA_MAX) return false;
+    return czy_katalog_istnieje(folder);
+}
+
+void wyslij_zdarzenie_drop(int pid, uint32_t typ, int32_t x, int32_t y,
+                           uint32_t kod) {
+    if (!scheduler_pid_uzytkownika(pid)) return;
+    bws_zdarzenie zdarzenie{};
+    zdarzenie.typ = typ;
+    zdarzenie.x = x;
+    zdarzenie.y = y;
+    zdarzenie.kod = kod;
+    zdarzenie.timestamp = scheduler_pobierz_tick();
+    (void)scheduler_dodaj_zdarzenie(pid, &zdarzenie);
+}
+
+uint64_t bws_rejestruj_cele_drop(
+    proces_t& proces,
+    uint64_t arg1,
+    uint64_t arg2
+) {
+    if (!proces_ma_prawo(proces, PRAWO_GUI) ||
+        !proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ) ||
+        aktualny_pid <= 0 || aktualny_pid >= static_cast<int>(PZB_MAKS_PROCESOW) ||
+        arg2 > BWS_DROP_CELE_MAX || (arg2 != 0 && arg1 == 0)) return 0;
+    StanDropProcesu& stan = cele_drop[aktualny_pid];
+    stan.liczba = 0;
+    if (arg2 != 0) {
+        const size_t bajty = static_cast<size_t>(arg2) * sizeof(BwsCelDrop);
+        if (!czy_bezpieczny_zakres_uzytkownika_do_odczytu(
+                reinterpret_cast<const void*>(arg1), bajty) ||
+            !skopiuj_z_przestrzeni_uzytkownika(
+                stan.cele, reinterpret_cast<const void*>(arg1), bajty))
+            return 0;
+        for (uint32_t i = 0; i < static_cast<uint32_t>(arg2); ++i) {
+            BwsCelDrop& cel = stan.cele[i];
+            if (cel.szer <= 0 || cel.wys <= 0 ||
+                !poprawny_folder_celu_drop(cel.folder)) {
+                stan.liczba = 0;
+                return 0;
+            }
+        }
+        stan.liczba = static_cast<uint32_t>(arg2);
+    }
+    stan.ostatnia_rejestracja = scheduler_pobierz_tick();
+    return 1;
+}
+
+bool znajdz_cel_drop(int32_t x, int32_t y, int* pid_wyj, int* indeks_wyj) {
+    int najlepszy_pid = -1;
+    int najlepszy = -1;
+    int64_t najlepsze_pole = INT64_MAX;
+    const uint64_t teraz = scheduler_pobierz_tick();
+    for (int pid = 1; pid < static_cast<int>(PZB_MAKS_PROCESOW); ++pid) {
+        StanDropProcesu& stan = cele_drop[pid];
+        if (stan.liczba == 0 || teraz < stan.ostatnia_rejestracja ||
+            teraz - stan.ostatnia_rejestracja > DROP_WYGASA_PO_TICKACH)
+            continue;
+        for (uint32_t i = 0; i < stan.liczba; ++i) {
+            if (!punkt_w_celu_drop(x, y, stan.cele[i])) continue;
+            const int64_t pole = static_cast<int64_t>(stan.cele[i].szer) *
+                                 static_cast<int64_t>(stan.cele[i].wys);
+            if (pole < najlepsze_pole) {
+                najlepsze_pole = pole;
+                najlepszy_pid = pid;
+                najlepszy = static_cast<int>(i);
+            }
+        }
+    }
+    if (pid_wyj) *pid_wyj = najlepszy_pid;
+    if (indeks_wyj) *indeks_wyj = najlepszy;
+    return najlepszy_pid > 0 && najlepszy >= 0;
+}
+
+uint64_t bws_aktualizuj_drag(
+    proces_t& proces,
+    uint64_t arg1,
+    uint64_t arg2,
+    uint64_t arg3
+) {
+    if (!proces_ma_prawo(proces, PRAWO_GUI) ||
+        aktualny_pid <= 0 || aktualny_pid >= static_cast<int>(PZB_MAKS_PROCESOW))
+        return BWS_DROP_BLAD;
+    char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
+    if (!pobierz_sciezke_pliku(arg1, sciezka)) return BWS_DROP_BLAD;
+    const int32_t x = static_cast<int32_t>(arg2 >> 32U);
+    const int32_t y = static_cast<int32_t>(arg2 & UINT64_C(0xFFFFFFFF));
+    int pid_celu = -1;
+    int indeks = -1;
+    const bool znaleziony = znajdz_cel_drop(x, y, &pid_celu, &indeks);
+    StanDropProcesu& zrodlo = cele_drop[aktualny_pid];
+    if (zrodlo.ostatni_pid_celu != pid_celu || zrodlo.ostatni_cel != indeks) {
+        if (zrodlo.ostatni_pid_celu > 0)
+            wyslij_zdarzenie_drop(zrodlo.ostatni_pid_celu,
+                                  BWS_ZDARZENIE_DRAG_LEAVE, x, y, 0);
+        if (znaleziony)
+            wyslij_zdarzenie_drop(pid_celu, BWS_ZDARZENIE_DRAG_HOVER,
+                                  x, y, static_cast<uint32_t>(indeks));
+        zrodlo.ostatni_pid_celu = pid_celu;
+        zrodlo.ostatni_cel = indeks;
+    }
+    if (!znaleziony) return BWS_DROP_BRAK_CELU;
+    if (arg3 == 0) return BWS_DROP_CEL_POPRAWNY;
+
+    const BwsCelDrop& cel = cele_drop[pid_celu].cele[indeks];
+    const bool przeniesiono =
+        proces_moze_modyfikowac_obiekt(proces, sciezka) &&
+        proces_moze_modyfikowac_sciezke(proces, cel.folder) &&
+        poziom_pliku_pozwala_modyfikowac(proces, cel.folder) &&
+        przenies_twor(sciezka, cel.folder);
+    wyslij_zdarzenie_drop(pid_celu,
+        przeniesiono ? BWS_ZDARZENIE_DRAG_DROP : BWS_ZDARZENIE_DRAG_LEAVE,
+        x, y, static_cast<uint32_t>(indeks));
+    zrodlo.ostatni_pid_celu = -1;
+    zrodlo.ostatni_cel = -1;
+    return przeniesiono ? BWS_DROP_PRZENIESIONO : BWS_DROP_BLAD;
 }
 
 /* =========================================================================
@@ -1263,7 +1508,8 @@ uint64_t bws_rtc(
 
 uint64_t bws_uruchom(
     proces_t& rodzic,
-    uint64_t arg1
+    uint64_t arg1,
+    uint64_t arg2
 ) {
     if (!proces_ma_prawo(
             rodzic,
@@ -1281,6 +1527,9 @@ uint64_t bws_uruchom(
 
         return 0;
     }
+
+    char argument[MAX_SCIEZKA_PLIKU_BWS] = {};
+    if (arg2 != 0 && !pobierz_sciezke_pliku(arg2, argument)) return 0;
 
     /*
      * Ring 3 nigdy nie tworzy procesu bardziej zaufanego niz:
@@ -1348,14 +1597,24 @@ uint64_t bws_uruchom(
      * Sciezka jest juz skopiowana do bufora Ring 0, wiec loader otrzymuje
      * z_syscalla=false. To usuwa podwojna dereferencje user pointera.
      */
-    return
-        bws_uruchom_program_z_pliku(
-            sciezka,
-            poziom_dziecka,
-            prawa_dziecka,
-            false)
-            ? 1ULL
-            : 0ULL;
+    if (arg2 != 0) {
+        const int istniejacy = loader_przekaz_argument_uruchomionemu(
+            sciezka, argument);
+        if (istniejacy > 0) {
+            bws_zdarzenie zdarzenie{};
+            zdarzenie.typ = BWS_ZDARZENIE_OTWORZ_PLIK;
+            zdarzenie.timestamp = scheduler_pobierz_tick();
+            return scheduler_dodaj_zdarzenie(istniejacy, &zdarzenie)
+                ? 1ULL : 0ULL;
+        }
+        return bws_uruchom_program_z_pliku_z_argumentem(
+                   sciezka, poziom_dziecka, prawa_dziecka, false, argument)
+            ? 1ULL : 0ULL;
+    }
+
+    return bws_uruchom_program_z_pliku(
+               sciezka, poziom_dziecka, prawa_dziecka, false)
+        ? 1ULL : 0ULL;
 }
 
 /* =========================================================================
@@ -2410,7 +2669,8 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
             return
                 bws_uruchom(
                     proces,
-                    arg1
+                    arg1,
+                    arg2
                 );
 
         /* -------------------------------------------------------------
@@ -3046,6 +3306,50 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
             /* +1 zachowuje 0 jako blad i pozwala reprezentowac pusty plik. */
             return static_cast<uint64_t>(rozmiar_pliku(sciezka)) + 1ULL;
         }
+
+        case 45: {
+            if (arg1 == 0 || arg2 == 0 || arg2 > MAX_SCIEZKA_PLIKU_BWS)
+                return 0;
+            if (!czy_bezpieczny_zakres_uzytkownika_do_zapisu(
+                    reinterpret_cast<void*>(arg1), static_cast<size_t>(arg2)))
+                return 0;
+            char argument[MAX_SCIEZKA_PLIKU_BWS] = {};
+            if (!loader_pobierz_argument_startowy(
+                    aktualny_pid, argument, sizeof(argument))) return 0;
+            const size_t len = dlugosc_stringa_limit(argument, sizeof(argument));
+            if (len >= sizeof(argument) || len + 1U > arg2) return 0;
+            return skopiuj_do_przestrzeni_uzytkownika(
+                       reinterpret_cast<void*>(arg1), argument, len + 1U)
+                ? 1ULL : 0ULL;
+        }
+
+        case 46: {
+            char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
+            if (!pobierz_sciezke_pliku(arg1, sciezka)) return 0;
+            if (!proces_moze_utworzyc_w_sciezce(proces, sciezka)) {
+                wypisz_log("[PZB] directory_create=DENY");
+                return 0;
+            }
+            wypisz_log("[PZB] directory_create=ALLOW");
+            return utworz_katalog_z_pzb(sciezka, proces.poziom_zaufania)
+                ? 1ULL : 0ULL;
+        }
+
+        case 47:
+            return bws_pobierz_metadane(proces, arg1, arg2);
+
+        case 48:
+            return bws_przenies(proces, arg1, arg2);
+
+        case 49:
+            return bws_rejestruj_cele_drop(proces, arg1, arg2);
+
+        case 50:
+            return bws_aktualizuj_drag(proces, arg1, arg2, arg3);
+
+        case 51:
+            /* extronic16B_unicode.h: jeden glif ma 16 wierszy bitmapy. */
+            return proces_ma_prawo(proces, PRAWO_GUI) ? 16ULL : 0ULL;
 
         default:
             /*

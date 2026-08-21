@@ -596,6 +596,7 @@ void utworz_drabine_katalogow() {
         "/uslugi",
         "/sterowniki",
         "/uzytkownicy",
+        "/uzytkownicy/Pulpit",
         "/ustawienia",
         "/logi",
         "/piaskownica",
@@ -644,7 +645,7 @@ void instaluj_wbudowane_programy() {
         "]\n";
 
     static const char MANIFEST_EKSPLORATORA[] =
-        "nazwa = \"Eksplorator Plikow\"\n"
+        "nazwa = \"Eksplorator Plików\"\n"
         "autor = \"Programista Art\"\n"
         "wersja = \"1.0\"\n"
         "poziom_zaufania = 4\n"

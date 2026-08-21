@@ -31,6 +31,7 @@
 
 #include "psf.h"
 #include "ahci.h"
+#include "zegar-rtc.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -48,6 +49,40 @@ namespace {
  * ========================================================================= */
 
 constexpr uint64_t ROZMIAR_SEKTORA = 512ULL;
+
+constexpr uint8_t DOMYSLNY_PZB_PLIKU = 4U;
+
+bool zapakuj_prawdziwy_czas_rtc(uint64_t* wynik) {
+    if (!wynik) return false;
+    czas_rtc czas{};
+    if (!pobierz_czas_rtc_bezpiecznie(&czas)) return false;
+    uint64_t wartosc = czas.rok;
+    wartosc = wartosc * 100ULL + czas.miesiac;
+    wartosc = wartosc * 100ULL + czas.dzien;
+    wartosc = wartosc * 100ULL + czas.godziny;
+    wartosc = wartosc * 100ULL + czas.minuty;
+    wartosc = wartosc * 100ULL + czas.sekundy;
+    *wynik = wartosc;
+    return true;
+}
+
+bool znacznik_metadanych_poprawny(uint64_t flagi) {
+    return (flagi & PSF_META_MAGIC_MASK) == PSF_META_MAGIC &&
+           (flagi & PSF_META_WERSJA_MASK) == PSF_META_WERSJA_1;
+}
+
+void ustaw_metadane_nowego_wezla(wezel_indeksowy* w, uint8_t pzb) {
+    if (!w || pzb > 5U) return;
+    uint64_t flagi = PSF_META_MAGIC | PSF_META_WERSJA_1 |
+                     PSF_META_PZB_WAZNY |
+                     static_cast<uint64_t>(pzb);
+    uint64_t czas = 0;
+    if (zapakuj_prawdziwy_czas_rtc(&czas)) {
+        w->czas_utworzenia = czas;
+        flagi |= PSF_META_CZAS_WAZNY;
+    }
+    w->flagi_zabezpieczen = flagi;
+}
 
 /*
  * Zachowujemy dotychczasowe polozenie BSP2 na dysku.
@@ -2671,7 +2706,8 @@ bool wczytaj_istniejacy_bsp2() {
 
 bool utworz_twor(
     const char* sciezka,
-    uint8_t typ
+    uint8_t typ,
+    uint8_t poziom_pzb
 ) {
     if (!psf_gotowy ||
         !bezpieczna_sciezka(
@@ -2730,6 +2766,12 @@ bool utworz_twor(
     if (nowy_id == 0) {
         return false;
     }
+
+    ustaw_metadane_nowego_wezla(
+        pobierz_wezel(nowy_id),
+        poziom_pzb
+    );
+    oznacz_wezel_jako_brudny(nowy_id);
 
     if (!dodaj_wpis_do_katalogu(
             rodzic_id,
@@ -2939,7 +2981,8 @@ extern "C" bool utworz_katalog(
 
     return utworz_twor(
         sciezka,
-        TYP_KATALOG
+        TYP_KATALOG,
+        DOMYSLNY_PZB_PLIKU
     );
 }
 
@@ -2950,8 +2993,27 @@ extern "C" bool utworz_plik(
 
     return utworz_twor(
         sciezka,
-        TYP_PLIK
+        TYP_PLIK,
+        DOMYSLNY_PZB_PLIKU
     );
+}
+
+extern "C" bool utworz_katalog_z_pzb(
+    const char* sciezka,
+    uint8_t poziom_pzb
+) {
+    BlokadaPSF blokada;
+    if (poziom_pzb > 5U) return false;
+    return utworz_twor(sciezka, TYP_KATALOG, poziom_pzb);
+}
+
+extern "C" bool utworz_plik_z_pzb(
+    const char* sciezka,
+    uint8_t poziom_pzb
+) {
+    BlokadaPSF blokada;
+    if (poziom_pzb > 5U) return false;
+    return utworz_twor(sciezka, TYP_PLIK, poziom_pzb);
 }
 
 extern "C" bool psf_czy_gotowy() {
@@ -3996,5 +4058,111 @@ extern "C" bool zmien_nazwe_tworu(
 
     (void)bsp_zapisz_zmiany();
 
+    return true;
+}
+
+/* =========================================================================
+ * PUBLICZNE API - METADANE I PRZENOSZENIE
+ * ========================================================================= */
+
+extern "C" bool pobierz_metadane_tworu(
+    const char* sciezka,
+    psf_metadane* metadane
+) {
+    BlokadaPSF blokada;
+    if (!psf_gotowy || !bezpieczna_sciezka(sciezka) || !metadane)
+        return false;
+
+    const uint64_t id = rozwiaz_sciezke(sciezka, nullptr, false);
+    wezel_indeksowy* w = pobierz_wezel(id);
+    if (id == 0 || !w || w->typ == TYP_WOLNY) return false;
+
+    metadane->rozmiar = w->rozmiar_w_bajtach;
+    metadane->czas_utworzenia_rtc = 0;
+    metadane->typ = w->typ;
+    metadane->poziom_pzb = 0;
+    metadane->czas_dostepny = 0;
+    metadane->pzb_dostepny = 0;
+
+    if (!znacznik_metadanych_poprawny(w->flagi_zabezpieczen))
+        return true;
+
+    if ((w->flagi_zabezpieczen & PSF_META_CZAS_WAZNY) != 0 &&
+        w->czas_utworzenia != 0) {
+        metadane->czas_utworzenia_rtc = w->czas_utworzenia;
+        metadane->czas_dostepny = 1;
+    }
+
+    const uint8_t pzb = static_cast<uint8_t>(
+        w->flagi_zabezpieczen & PSF_META_PZB_MASK);
+    if ((w->flagi_zabezpieczen & PSF_META_PZB_WAZNY) != 0 && pzb <= 5U) {
+        metadane->poziom_pzb = pzb;
+        metadane->pzb_dostepny = 1;
+    }
+    return true;
+}
+
+extern "C" bool przenies_twor(
+    const char* sciezka,
+    const char* folder_docelowy
+) {
+    BlokadaPSF blokada;
+    if (!psf_gotowy || !bezpieczna_sciezka(sciezka) ||
+        !bezpieczna_sciezka(folder_docelowy)) return false;
+    if ((sciezka[0] == '/' && sciezka[1] == '\0') ||
+        (folder_docelowy[0] == '/' && folder_docelowy[1] == '\0' &&
+         sciezka[0] == '/' && sciezka[1] == '\0')) return false;
+
+    char nazwa[PSF_MAX_NAZWA] = {};
+    const uint64_t stary_rodzic_id =
+        rozwiaz_sciezke(sciezka, nazwa, true);
+    const uint64_t cel_id =
+        rozwiaz_sciezke(sciezka, nullptr, false);
+    const uint64_t nowy_rodzic_id =
+        rozwiaz_sciezke(folder_docelowy, nullptr, false);
+    if (stary_rodzic_id == 0 || cel_id == 0 || nowy_rodzic_id == 0 ||
+        stary_rodzic_id == nowy_rodzic_id || !poprawna_nazwa(nazwa))
+        return false;
+
+    wezel_indeksowy* cel = pobierz_wezel(cel_id);
+    wezel_indeksowy* stary_rodzic = pobierz_wezel(stary_rodzic_id);
+    wezel_indeksowy* nowy_rodzic = pobierz_wezel(nowy_rodzic_id);
+    if (!cel || !stary_rodzic || !nowy_rodzic ||
+        stary_rodzic->typ != TYP_KATALOG || nowy_rodzic->typ != TYP_KATALOG)
+        return false;
+
+    /* Bez dowiazan/symlinkow kanoniczny prefiks komponentu jednoznacznie
+     * wykrywa probe przeniesienia folderu do jego wlasnego poddrzewa. */
+    if (cel->typ == TYP_KATALOG) {
+        size_t i = 0;
+        while (sciezka[i] != '\0' && folder_docelowy[i] == sciezka[i]) ++i;
+        if (sciezka[i] == '\0' &&
+            (folder_docelowy[i] == '\0' || folder_docelowy[i] == '/'))
+            return false;
+    }
+
+    if (znajdz_wpis_w_katalogu(nowy_rodzic_id, nazwa).znaleziony)
+        return false; /* nigdy nie nadpisujemy celu */
+
+    const ZnalezionyWpis stary =
+        znajdz_wpis_w_katalogu(stary_rodzic_id, nazwa);
+    if (!stary.znaleziony || stary.id_wezla != cel_id) return false;
+
+    wpis_katalogowy* wpisy = pobierz_wpisy_katalogowe(stary.id_bloku_danych);
+    if (!wpisy || stary.indeks_wpisu >= wpisow_katalogowych_na_blok())
+        return false;
+
+    /* Najpierw publikujemy nowy wpis. Po pomyslnym dodaniu usuniecie
+     * zweryfikowanego starego slotu nie wymaga juz alokacji. */
+    if (!dodaj_wpis_do_katalogu(nowy_rodzic_id, cel_id, nazwa))
+        return false;
+    wpisy[stary.indeks_wpisu].id_wezla = 0;
+    wyzeruj_pamiec(wpisy[stary.indeks_wpisu].nazwa, PSF_MAX_NAZWA);
+    const uint64_t absolutny = absolutny_blok_danych(stary.id_bloku_danych);
+    if (absolutny != UINT64_MAX) oznacz_blok_jako_brudny(absolutny);
+    if (stary_rodzic->rozmiar_w_bajtach > 0)
+        --stary_rodzic->rozmiar_w_bajtach;
+    oznacz_wezel_jako_brudny(stary_rodzic_id);
+    (void)bsp_zapisz_zmiany();
     return true;
 }

@@ -60,6 +60,11 @@ constexpr uint64_t ROZMIAR_STRONY = 4096ULL;
 constexpr uint64_t MASKA_STRONY = ROZMIAR_STRONY - 1ULL;
 
 constexpr size_t MAKS_DLUGOSC_SCIEZKI = 64;
+constexpr size_t MAKS_ARGUMENT_STARTOWY = 512;
+
+/* Argument nie jest czescia ABI proces_t. Prywatna, indeksowana PID-em
+   skrzynka zachowuje ABI schedulera i jest czyszczona przy kazdej rezerwacji. */
+char argument_startowy_procesu[PZB_MAKS_PROCESOW][MAKS_ARGUMENT_STARTOWY] = {};
 
 constexpr uint64_t MIN_ADRES_USER = 0x0000000000001000ULL;
 constexpr uint64_t KONIEC_ADRESOW_USER = 0x0000800000000000ULL;
@@ -257,6 +262,21 @@ static bool pobierz_bezpieczna_sciezke(
     return cel[0] != '\0';
 }
 
+static bool kopiuj_argument_startowy(char* cel, const char* zrodlo) {
+    if (!cel) return false;
+    cel[0] = '\0';
+    if (!zrodlo) return true;
+    size_t i = 0;
+    for (; i + 1U < MAKS_ARGUMENT_STARTOWY && zrodlo[i] != '\0'; ++i)
+        cel[i] = zrodlo[i];
+    if (zrodlo[i] != '\0') {
+        cel[0] = '\0';
+        return false;
+    }
+    cel[i] = '\0';
+    return true;
+}
+
 static void wyzeruj_znane_pola_procesu(
     proces_t& proces
 ) {
@@ -317,6 +337,7 @@ static int zarezerwuj_slot_procesu(
         proces_t& proces = tablica_procesow[pid];
 
         wyzeruj_znane_pola_procesu(proces);
+        argument_startowy_procesu[pid][0] = '\0';
         proces.pid = static_cast<uint64_t>(pid);
 
         size_t i = 0;
@@ -353,6 +374,7 @@ static void zwolnij_rezerwacje_procesu(
     proces_t& proces = tablica_procesow[pid];
 
     wyzeruj_znane_pola_procesu(proces);
+    argument_startowy_procesu[pid][0] = '\0';
 
     __atomic_store_n(
         &proces.stan,
@@ -675,11 +697,12 @@ bool PorownajPamiec(
     return true;
 }
 
-extern "C" bool bws_uruchom_program_z_pliku(
+static bool uruchom_program_z_pliku_impl(
     const char* sciezka_pliku,
     uint8_t bzl_poziom,
     uint64_t flagi_praw,
-    bool z_syscalla
+    bool z_syscalla,
+    const char* argument_startowy
 ) {
     /*
      * Bursztynowe Poziomy Zaufania maja zakres 0..5.
@@ -690,6 +713,7 @@ extern "C" bool bws_uruchom_program_z_pliku(
     }
 
     char bezpieczna_sciezka[MAKS_DLUGOSC_SCIEZKI];
+    char bezpieczny_argument[MAKS_ARGUMENT_STARTOWY] = {};
 
     if (!pobierz_bezpieczna_sciezke(
             bezpieczna_sciezka,
@@ -697,6 +721,9 @@ extern "C" bool bws_uruchom_program_z_pliku(
             z_syscalla)) {
         return false;
     }
+
+    if (!kopiuj_argument_startowy(bezpieczny_argument, argument_startowy))
+        return false;
 
     /*
      * Rezerwacja i kontrola single-instance sa jedna operacja atomowa
@@ -967,6 +994,12 @@ extern "C" bool bws_uruchom_program_z_pliku(
     proces.granica_sterty =
         BAZA_STERTY_USER;
 
+    if (!kopiuj_argument_startowy(
+            argument_startowy_procesu[pid], bezpieczny_argument)) {
+        przywroc_przerwania(stan_przerwan);
+        return false;
+    }
+
     /*
      * RELEASE gwarantuje, ze scheduler po zobaczeniu PROCES_GOTOWY
      * zobaczy rowniez wszystkie wyzej zapisane pola.
@@ -982,4 +1015,73 @@ extern "C" bool bws_uruchom_program_z_pliku(
     );
 
     return true;
+}
+
+extern "C" bool bws_uruchom_program_z_pliku(
+    const char* sciezka_pliku,
+    uint8_t bzl_poziom,
+    uint64_t flagi_praw,
+    bool z_syscalla
+) {
+    return uruchom_program_z_pliku_impl(
+        sciezka_pliku, bzl_poziom, flagi_praw, z_syscalla, nullptr);
+}
+
+extern "C" bool bws_uruchom_program_z_pliku_z_argumentem(
+    const char* sciezka_pliku,
+    uint8_t bzl_poziom,
+    uint64_t flagi_praw,
+    bool z_syscalla,
+    const char* argument_startowy
+) {
+    if (!argument_startowy || argument_startowy[0] == '\0') return false;
+    return uruchom_program_z_pliku_impl(
+        sciezka_pliku, bzl_poziom, flagi_praw, z_syscalla,
+        argument_startowy);
+}
+
+extern "C" bool loader_pobierz_argument_startowy(
+    int pid,
+    char* wynik,
+    size_t pojemnosc
+) {
+    if (pid <= 0 || pid >= MAKS_PROCESOW || !wynik || pojemnosc == 0)
+        return false;
+    const char* zrodlo = argument_startowy_procesu[pid];
+    size_t i = 0;
+    for (; i + 1U < pojemnosc && zrodlo[i] != '\0'; ++i)
+        wynik[i] = zrodlo[i];
+    if (zrodlo[i] != '\0') {
+        wynik[0] = '\0';
+        return false;
+    }
+    wynik[i] = '\0';
+    return i != 0;
+}
+
+extern "C" int loader_przekaz_argument_uruchomionemu(
+    const char* sciezka_pliku,
+    const char* argument_startowy
+) {
+    if (!sciezka_pliku || !argument_startowy || argument_startowy[0] == '\0')
+        return -1;
+    char kopia[MAKS_ARGUMENT_STARTOWY] = {};
+    if (!kopiuj_argument_startowy(kopia, argument_startowy)) return -1;
+    const StanPrzerwan stan = wylacz_przerwania();
+    zablokuj_loader();
+    int znaleziony = 0;
+    for (int pid = 1; pid < MAKS_PROCESOW; ++pid) {
+        const proces_t& proces = tablica_procesow[pid];
+        if (proces.stan == PROCES_PUSTY || proces.stan == PROCES_KONCZACY)
+            continue;
+        if (takie_same_sciezki(proces.sciezka_pliku, sciezka_pliku)) {
+            (void)kopiuj_argument_startowy(
+                argument_startowy_procesu[pid], kopia);
+            znaleziony = pid;
+            break;
+        }
+    }
+    odblokuj_loader();
+    przywroc_przerwania(stan);
+    return znaleziony;
 }

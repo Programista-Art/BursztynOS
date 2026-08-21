@@ -194,6 +194,8 @@ RING3_STD_LINKER := shell_linker.ld
 
 NOTATNIK_LINKER := notatnik_linker.ld
 
+EKSPLORATOR_LINKER := programy/eksplorator/eksplorator_linker.ld
+
 PRZEGLADARKA_LINKER := programy/przegladarka_linker.ld
 
 # ============================================================================
@@ -368,10 +370,10 @@ notatnik_blob.o: notatnik_tmp.o bursztyn_gui.o $(NOTATNIK_LINKER)
 # ============================================================================
 
 eksplorator_tmp.o: programy/eksplorator/eksplorator-plikow.cpp bursztyn_gui.h
-	$(CXX) $(RING3_FLAGS) -c $< -o $@
+	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
 
-eksplorator_blob.o: eksplorator_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
-	$(LD) -T $(RING3_STD_LINKER) $(RING3_LDFLAGS) \
+eksplorator_blob.o: eksplorator_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
+	$(LD) -T $(EKSPLORATOR_LINKER) $(RING3_LDFLAGS) \
 		eksplorator_tmp.o bursztyn_gui.o -o eksplorator.elf
 	$(OBJCOPY) -O binary eksplorator.elf eksplorator.bin
 	$(LD) -r -b binary eksplorator.bin -o eksplorator_blob.o

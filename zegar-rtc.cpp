@@ -1241,6 +1241,31 @@ void pobierz_czas_rtc(
     );
 }
 
+bool pobierz_czas_rtc_bezpiecznie(
+    czas_rtc* czas
+) {
+    if (!czas) {
+        return false;
+    }
+
+    BlokadaCMOS blokada;
+    czas_rtc nowy{};
+
+    if (pobierz_czas_rtc_wewnetrznie(&nowy)) {
+        ostatni_poprawny_czas = nowy;
+        mamy_ostatni_poprawny_czas = true;
+        *czas = nowy;
+        return true;
+    }
+
+    if (mamy_ostatni_poprawny_czas) {
+        *czas = ostatni_poprawny_czas;
+        return true;
+    }
+
+    return false;
+}
+
 /* =========================================================================
  * 13. FORMATOWANIE HH:MM:SS
  * ========================================================================= */

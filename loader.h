@@ -165,3 +165,24 @@ extern "C" bool bws_uruchom_program_z_pliku(
     uint64_t flagi_praw,
     bool z_syscalla
 );
+
+/* Wariant uzywany przez rozszerzone BWS 10. Argument jest ograniczona,
+   zaufana kopia kernelowa i nie zmienia formatu programu .bur. */
+extern "C" bool bws_uruchom_program_z_pliku_z_argumentem(
+    const char* sciezka_pliku,
+    uint8_t bzl_poziom,
+    uint64_t flagi_praw,
+    bool z_syscalla,
+    const char* argument_startowy
+);
+
+extern "C" bool loader_pobierz_argument_startowy(
+    int pid,
+    char* wynik,
+    size_t pojemnosc
+);
+
+extern "C" int loader_przekaz_argument_uruchomionemu(
+    const char* sciezka_pliku,
+    const char* argument_startowy
+);

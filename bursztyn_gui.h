@@ -13,6 +13,7 @@
 
 #include <stdint.h>
 #include "bws_zdarzenia.h"
+#include "bws_pliki.h"
 #include "skladacz_obrazu.h"
 #include <stdbool.h>
 
@@ -34,6 +35,9 @@ void wypisz(const char* tekst);
 
 bool utworz(const char* sciezka);
 
+/* BWS 46: tworzy katalog przez istniejace API PSF i kontrole PZB. */
+bool utworz_katalog_uzytkownika(const char* sciezka);
+
 bool zapisz_plik(const char* sciezka,
                  const char* dane,
                  uint32_t dlugosc);
@@ -50,8 +54,34 @@ bool wylistuj_katalog_uzytkownika(const char* sciezka,
 /* BWS 10: uruchomienie .bur przez loader i kontrole PZB. */
 bool uruchom_program_uzytkownika(const char* sciezka);
 
+/* Rozszerzenie BWS 10: uruchamia program z ograniczonym argumentem sciezki. */
+bool uruchom_program_z_argumentem_uzytkownika(const char* program,
+                                               const char* argument);
+
+/* BWS 45: argument startowy biezacego procesu. */
+bool pobierz_argument_startowy(char* bufor, uint32_t pojemnosc);
+
+enum wynik_otwarcia_skojarzonego : uint32_t {
+    OTWORZ_PLIK_BRAK_SKOJARZENIA = 0,
+    OTWORZ_PLIK_URUCHOMIONO = 1,
+    OTWORZ_PLIK_BLAD = 2
+};
+
+/* Jedno centralne miejsce skojarzen typow plikow dla aplikacji GUI. */
+wynik_otwarcia_skojarzonego otworz_plik_skojarzony(const char* sciezka);
+
 /* Addytywne ABI: zwraca rozmiar bez kopiowania danych. */
 bool pobierz_rozmiar_pliku(const char* sciezka, uint32_t* rozmiar);
+
+/* BWS 7/8 oraz addytywne BWS 47..50. */
+bool usun_twor_uzytkownika(const char* sciezka);
+bool zmien_nazwe_uzytkownika(const char* sciezka, const char* nowa_nazwa);
+bool pobierz_metadane_pliku(const char* sciezka, BwsMetadanePliku* metadane);
+bool przenies_twor_uzytkownika(const char* sciezka,
+                               const char* folder_docelowy);
+bool gui_rejestruj_cele_drop(const BwsCelDrop* cele, uint32_t liczba);
+BwsWynikDrop gui_aktualizuj_drag(const char* sciezka,
+                                 int x, int y, bool wykonaj_drop);
 
 char pobierz_znak();
 
@@ -127,6 +157,7 @@ void gui_pobierz_rozdzielczosc(int* w,
                                int* h);
 
 int gui_pobierz_szerokosc_znaku(uint32_t znak);
+int gui_pobierz_wysokosc_fontu();
 
 /*
  * Tworzy jedna warstwe nalezaca do biezacego procesu.

@@ -171,6 +171,12 @@ void pobierz_czas_rtc(
     czas_rtc* czas
 );
 
+/* Nie zwraca kalendarzowego fallbacku: false oznacza brak prawdziwej
+ * probki CMOS (i brak wczesniej zapamietanej poprawnej probki). */
+bool pobierz_czas_rtc_bezpiecznie(
+    czas_rtc* czas
+);
+
 /*
  * Formatuje tylko godzine:
  *
