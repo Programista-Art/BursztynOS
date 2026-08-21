@@ -1854,6 +1854,9 @@ static int znajdz_warstwe_pod_punktem(int x, int y) {
 static void ustaw_focus_gui(int pid) {
     if (pid == aktywny_pid_gui) return;
     const int stary = aktywny_pid_gui;
+    if (stary > 0)
+        (void)skladacz_obrazu_ustaw_popup_aplikacji(
+            stary, false, 0, 0, 0, 0);
     aktywny_pid_gui = pid;
 #if BURSZTYN_DEBUG_GUI_INPUT
     SerialLog("[FOCUS] old="); SerialLiczba(stary);
@@ -1942,7 +1945,11 @@ extern "C" void zaktualizuj_mysze(int dx,
                           (poprzednie_przyciski_gui & MYSZ_PRZYCISK_LEWY) == 0;
         const bool pusc = (przyciski & MYSZ_PRZYCISK_LEWY) == 0 &&
                           (poprzednie_przyciski_gui & MYSZ_PRZYCISK_LEWY) != 0;
-        if (klik) {
+        const bool prawy_klik = (przyciski & MYSZ_PRZYCISK_PRAWY) != 0 &&
+            (poprzednie_przyciski_gui & MYSZ_PRZYCISK_PRAWY) == 0;
+        const bool prawy_pusc = (przyciski & MYSZ_PRZYCISK_PRAWY) == 0 &&
+            (poprzednie_przyciski_gui & MYSZ_PRZYCISK_PRAWY) != 0;
+        if (klik || prawy_klik) {
             /* Nowa sekwencja przycisku nie moze odziedziczyc capture po
                poprzednim, niedokonczonym drag. Focus i adresat DOWN musza
                wskazywac ten sam hit-testowany proces. */
@@ -1953,13 +1960,25 @@ extern "C" void zaktualizuj_mysze(int dx,
         }
         const int cel = capture_pid_gui > 0 ? capture_pid_gui : aktywny_pid_gui;
         if (cel > 0) {
-            bws_zdarzenie e{};
-            e.typ = klik ? BWS_ZDARZENIE_MYSZ_DOWN :
-                    (pusc ? BWS_ZDARZENIE_MYSZ_UP : BWS_ZDARZENIE_MYSZ_RUCH);
-            e.x = mysz_x; e.y = mysz_y; e.dx = dx; e.dy = -dy;
-            e.przyciski = przyciski;
-            e.timestamp = znacznik_zdarzenia();
-            scheduler_dodaj_zdarzenie(cel, &e);
+            if (klik || pusc || dx != 0 || dy != 0) {
+                bws_zdarzenie e{};
+                e.typ = klik ? BWS_ZDARZENIE_MYSZ_DOWN :
+                        (pusc ? BWS_ZDARZENIE_MYSZ_UP : BWS_ZDARZENIE_MYSZ_RUCH);
+                e.x = mysz_x; e.y = mysz_y; e.dx = dx; e.dy = -dy;
+                e.przyciski = przyciski;
+                e.timestamp = znacznik_zdarzenia();
+                scheduler_dodaj_zdarzenie(cel, &e);
+            }
+            if (prawy_klik || prawy_pusc) {
+                bws_zdarzenie e{};
+                e.typ = prawy_klik ? BWS_ZDARZENIE_MYSZ_PRAWY_DOWN
+                                   : BWS_ZDARZENIE_MYSZ_PRAWY_UP;
+                e.x = mysz_x; e.y = mysz_y; e.dx = dx; e.dy = -dy;
+                e.przyciski = przyciski;
+                e.kod = MYSZ_PRZYCISK_PRAWY;
+                e.timestamp = znacznik_zdarzenia();
+                scheduler_dodaj_zdarzenie(cel, &e);
+            }
         }
         if (pusc) capture_pid_gui = -1;
         poprzednie_przyciski_gui = przyciski;

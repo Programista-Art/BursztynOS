@@ -383,6 +383,9 @@ uint32_t skladacz_obrazu_snapshot_okien(GuiOknoInfo* out, uint32_t max,
 void skladacz_obrazu_ustaw_overlay(int pid, bool otwarty,
                                   int x, int y, int szer, int wys);
 int skladacz_obrazu_overlay_pod_punktem(int x, int y);
+bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
+                                           int x, int y, int szer, int wys);
+void skladacz_obrazu_ustaw_drag_overlay(int pid, bool aktywny, int x, int y);
 void skladacz_obrazu_debug_warstwy(const char* powod);
 
 #ifdef __cplusplus

@@ -803,6 +803,63 @@ public:
         return true;
     }
 
+    bool put_selected_on_clipboard(BwsOperacjaSchowka operation) {
+        char source[PATH_CAP] = {};
+        if (!selected_path(source, sizeof(source))) {
+            set_status("Najpierw zaznacz plik albo folder.");
+            return false;
+        }
+        if (!ustaw_schowek_plikow(source, operation)) {
+            set_status(operation == BWS_SCHOWEK_CUT
+                ? "Wytnij: odmowa PZB albo element już nie istnieje."
+                : "Kopiuj: brak prawa odczytu albo element już nie istnieje.");
+            return false;
+        }
+        set_status(operation == BWS_SCHOWEK_CUT
+            ? "Element wycięto do systemowego schowka."
+            : "Element skopiowano do systemowego schowka.");
+        return true;
+    }
+
+    bool paste_clipboard() {
+        BwsSchowekPlikow clipboard{};
+        if (!pobierz_schowek_plikow(&clipboard) ||
+            clipboard.wersja != BWS_SCHOWEK_WERSJA ||
+            clipboard.operacja == BWS_SCHOWEK_PUSTY ||
+            clipboard.sciezka[0] != '/') {
+            set_status("Schowek plików jest pusty.");
+            return false;
+        }
+        bool success = false;
+        if (clipboard.operacja == BWS_SCHOWEK_COPY) {
+            success = kopiuj_twor_uzytkownika(clipboard.sciezka, path_);
+        } else if (clipboard.operacja == BWS_SCHOWEK_CUT) {
+            /* Move zachowuje atomowa semantyke istniejacego BWS48. */
+            success = przenies_twor_uzytkownika(clipboard.sciezka, path_);
+            if (success) (void)wyczysc_schowek_plikow(clipboard.generacja);
+        }
+        if (!success) {
+            set_status("Wklejanie nie powiodło się: konflikt nazwy, poddrzewo lub PZB.");
+            return false;
+        }
+        hash_valid_ = false;
+        set_status(clipboard.operacja == BWS_SCHOWEK_COPY
+            ? "Wklejono kopię bez nadpisywania celu."
+            : "Przeniesiono element przez BWS48 i wyczyszczono CUT.");
+        return true;
+    }
+
+    void run_selected_context() {
+        const Entry* item = entry(selected_);
+        if (!item) {
+            set_status("Najpierw zaznacz element.");
+            return;
+        }
+        if (item->type == EntryType::CEBULA) run_selected_package();
+        else if (item->type == EntryType::BUR) (void)activate();
+        else set_status("Dla tego typu nie ma osobnej akcji Uruchom.");
+    }
+
 private:
     Entry* entries_;
     int* order_;
@@ -1647,18 +1704,34 @@ enum class EditMode : uint8_t {
     NONE, PATH, SEARCH, CREATE_FOLDER, CREATE_FILE, RENAME, MOVE, CONFIRM_DELETE
 };
 
+enum class ContextAction : uint8_t {
+    NONE, OPEN, RUN, COPY, CUT, RENAME, REMOVE, PROPERTIES,
+    PASTE, NEW_FILE, NEW_FOLDER, REFRESH
+};
+
+struct ContextItem { const char* label; ContextAction action; };
+
 class AktowkaView {
 public:
     AktowkaView(AktowkaModel& model, AktowkaWindow& window)
         : model_(model), window_(window), edit_mode_(EditMode::NONE),
           edit_length_(0), edit_caret_(0), edit_view_start_(0),
-          drop_target_entry_(-1), drop_target_body_(false) {
+          drop_target_entry_(-1), drop_target_body_(false),
+          context_open_(false), context_empty_(false), context_hover_(-1),
+          context_count_(0), context_rect_{} {
         edit_[0] = '\0';
     }
 
     AktowkaLayout layout() const { return calculate_layout(window_); }
     EditMode edit_mode() const { return edit_mode_; }
     const char* edit_text() const { return edit_; }
+    bool modal_open() const {
+        return edit_mode_ == EditMode::CREATE_FOLDER ||
+               edit_mode_ == EditMode::CREATE_FILE ||
+               edit_mode_ == EditMode::RENAME ||
+               edit_mode_ == EditMode::CONFIRM_DELETE;
+    }
+    bool context_open() const { return context_open_; }
 
     void begin_edit(EditMode mode) {
         const char* initial = "";
@@ -1685,6 +1758,95 @@ public:
         edit_length_ = 0;
         edit_caret_ = 0;
         edit_view_start_ = 0;
+    }
+
+    Rect modal_area() const {
+        const int client_x = window_.x + 2;
+        const int client_y = window_.y + TITLE_H;
+        return {client_x, client_y, window_.w > 4 ? window_.w - 4 : 0,
+                window_.h > TITLE_H + 2 ? window_.h - TITLE_H - 2 : 0};
+    }
+
+    Rect modal_box() const {
+        const Rect area = modal_area();
+        int width = area.w > 430 ? 430 : (area.w > 20 ? area.w - 20 : area.w);
+        int height = edit_mode_ == EditMode::CONFIRM_DELETE ? 150 : 176;
+        if (height > area.h - 16) height = area.h > 16 ? area.h - 16 : area.h;
+        return {area.x + (area.w - width) / 2,
+                area.y + (area.h - height) / 2, width, height};
+    }
+
+    Rect modal_field() const {
+        const Rect box = modal_box();
+        return {box.x + 18, box.y + 70, box.w > 36 ? box.w - 36 : 0, TOOL_H};
+    }
+
+    Rect modal_ok() const {
+        const Rect box = modal_box();
+        return {box.x + box.w - 190, box.y + box.h - 38, 78, TOOL_H};
+    }
+
+    Rect modal_cancel() const {
+        const Rect box = modal_box();
+        return {box.x + box.w - 102, box.y + box.h - 38, 84, TOOL_H};
+    }
+
+    bool open_modal(EditMode mode) {
+        close_context();
+        if (mode == EditMode::RENAME || mode == EditMode::CONFIRM_DELETE) {
+            const Entry* selected = model_.entry(model_.selected());
+            if (!selected || selected->type == EntryType::PARENT) {
+                model_.set_status("Najpierw zaznacz plik albo folder.");
+                draw_status();
+                gui_odswiez();
+                return false;
+            }
+        }
+        begin_edit(mode);
+        const Rect area = modal_area();
+        if (!modal_open() || area.w <= 0 || area.h <= 0 ||
+            !gui_ustaw_popup_aplikacji(true, area.x, area.y, area.w, area.h)) {
+            end_edit();
+            model_.set_status("Nie można otworzyć dialogu modalnego.");
+            return false;
+        }
+        (void)gui_rejestruj_cele_drop(nullptr, 0);
+        draw_modal(true);
+        gui_odswiez();
+        return true;
+    }
+
+    void close_modal() {
+        if (!modal_open()) return;
+        (void)gui_ustaw_popup_aplikacji(false, 0, 0, 0, 0);
+        end_edit();
+        register_drop_targets();
+        gui_odswiez();
+    }
+
+    int modal_button_at(int x, int y) const {
+        if (!modal_open()) return 0;
+        if (hit(x, y, modal_ok())) return 1;
+        if (hit(x, y, modal_cancel())) return 2;
+        return 0;
+    }
+
+    void place_modal_caret(int mouse_x) {
+        if (!modal_open() || edit_mode_ == EditMode::CONFIRM_DELETE) return;
+        const Rect field = modal_field();
+        int wanted = mouse_x - field.x - 6;
+        size_t position = edit_view_start_;
+        while (wanted > 0 && position < edit_length_) {
+            const size_t next = next_codepoint(edit_, position, edit_length_);
+            char glyph[8] = {};
+            for (size_t i = position; i < next && i - position + 1 < sizeof(glyph); ++i)
+                glyph[i - position] = edit_[i];
+            const int width = oblicz_szerokosc_tekstu(glyph, 1);
+            if (wanted < width / 2) break;
+            wanted -= width;
+            position = next;
+        }
+        edit_caret_ = position;
     }
 
     bool append_input(char character) {
@@ -1805,7 +1967,7 @@ public:
 
     void register_drop_targets() {
         /* Zminimalizowane okno nie moze zostawiac niewidzialnych celow drop. */
-        if (window_.minimized) {
+        if (window_.minimized || modal_open() || context_open_) {
             (void)gui_rejestruj_cele_drop(nullptr, 0);
             return;
         }
@@ -1852,7 +2014,6 @@ public:
 
     void set_drop_hover(int x, int y, bool active) {
         const int old_entry = drop_target_entry_;
-        const bool old_body = drop_target_body_;
         drop_target_entry_ = -1;
         drop_target_body_ = false;
         if (active) {
@@ -1864,7 +2025,6 @@ public:
         if (old_entry >= 0) draw_entry_row(old_entry);
         if (drop_target_entry_ >= 0 && drop_target_entry_ != old_entry)
             draw_entry_row(drop_target_entry_);
-        if (old_body != drop_target_body_) draw_drop_body_border();
     }
 
     void draw_full(bool clear_desktop) {
@@ -1907,8 +2067,7 @@ public:
         draw_button(value.new_folder, BORDER, "Nowy folder");
         draw_button(value.new_file, BORDER, "Nowy plik");
         draw_button(value.rename, BORDER, "Zmień nazwę");
-        draw_button(value.remove, BORDER,
-                    edit_mode_ == EditMode::CONFIRM_DELETE ? "Potwierdź" : "Usuń");
+        draw_button(value.remove, BORDER, "Usuń");
         draw_button(value.move, BORDER, "Przenieś");
         draw_button(value.run, BORDER, "Uruchom");
         draw_path_field();
@@ -1956,19 +2115,10 @@ public:
     void draw_search_field() {
         const AktowkaLayout value = layout();
         const bool active = edit_mode_ == EditMode::SEARCH ||
-                            edit_mode_ == EditMode::CREATE_FOLDER ||
-                            edit_mode_ == EditMode::CREATE_FILE ||
-                            edit_mode_ == EditMode::RENAME ||
                             edit_mode_ == EditMode::MOVE;
         draw_field(value.search, active);
         char source[PATH_CAP] = {};
-        if (edit_mode_ == EditMode::CREATE_FOLDER)
-            (void)append_text(source, sizeof(source), "Folder: ");
-        else if (edit_mode_ == EditMode::CREATE_FILE)
-            (void)append_text(source, sizeof(source), "Plik: ");
-        else if (edit_mode_ == EditMode::RENAME)
-            (void)append_text(source, sizeof(source), "Nazwa: ");
-        else if (edit_mode_ == EditMode::MOVE)
+        if (edit_mode_ == EditMode::MOVE)
             (void)append_text(source, sizeof(source), "Do folderu: ");
         else
             (void)append_text(source, sizeof(source), "Szukaj: ");
@@ -2179,6 +2329,124 @@ public:
                      value.status.w - 12, model_.status(), TEXT, false);
     }
 
+    void draw_modal(bool draw_shade = false) {
+        if (!modal_open()) return;
+        const Rect area = modal_area();
+        /* Brak alpha w ABI warstwy: rzadki raster przyciemnia, nie kasujac
+         * calego obrazu pod dialogiem. Backup kompozytora odtworzy ten rect. */
+        if (draw_shade) {
+            for (int y = area.y; y < area.y + area.h; y += 3)
+                gui_rysuj_prostokat(area.x, y, area.w, 1, 0x00100800U);
+        }
+        const Rect box = modal_box();
+        gui_rysuj_prostokat(box.x, box.y, box.w, box.h, PANEL_ALT);
+        gui_rysuj_prostokat(box.x, box.y, box.w, 2, BORDER);
+        gui_rysuj_prostokat(box.x, box.y + box.h - 2, box.w, 2, BORDER_DARK);
+        gui_rysuj_prostokat(box.x, box.y, 2, box.h, BORDER);
+        gui_rysuj_prostokat(box.x + box.w - 2, box.y, 2, box.h, BORDER_DARK);
+        const char* title = edit_mode_ == EditMode::CREATE_FILE ? "Nowy plik" :
+            (edit_mode_ == EditMode::CREATE_FOLDER ? "Nowy folder" :
+             (edit_mode_ == EditMode::RENAME ? "Zmień nazwę" : "Usuń element"));
+        draw_clipped(box.x + 18, box.y + 14, box.w - 36, title, TEXT, false);
+        if (edit_mode_ == EditMode::CONFIRM_DELETE) {
+            char question[SHOW_CAP] = {};
+            (void)append_text(question, sizeof(question), "Czy na pewno usunąć ");
+            const Entry* selected = model_.entry(model_.selected());
+            (void)append_text(question, sizeof(question), selected ? selected->name : "element");
+            (void)append_text(question, sizeof(question), "?");
+            draw_clipped(box.x + 18, box.y + 52, box.w - 36,
+                         question, TEXT2, false);
+        } else {
+            draw_edit_field(modal_field());
+        }
+        draw_button(modal_ok(), edit_mode_ == EditMode::CONFIRM_DELETE
+            ? 0x00AA0000U : BORDER,
+            edit_mode_ == EditMode::CONFIRM_DELETE ? "Usuń" : "OK");
+        draw_button(modal_cancel(), BORDER, "Anuluj");
+    }
+
+    bool open_context(int mouse_x, int mouse_y, bool empty) {
+        if (modal_open()) return false;
+        close_context();
+        context_empty_ = empty;
+        context_count_ = 0;
+        if (empty) {
+            add_context("Wklej", ContextAction::PASTE);
+            add_context("Nowy plik", ContextAction::NEW_FILE);
+            add_context("Nowy folder", ContextAction::NEW_FOLDER);
+            add_context("Odśwież", ContextAction::REFRESH);
+        } else {
+            const Entry* item = model_.entry(model_.selected());
+            if (!item || item->type == EntryType::PARENT) return false;
+            add_context("Otwórz", ContextAction::OPEN);
+            if (item->type == EntryType::BUR || item->type == EntryType::CEBULA)
+                add_context("Uruchom", ContextAction::RUN);
+            add_context("Kopiuj", ContextAction::COPY);
+            add_context("Wytnij", ContextAction::CUT);
+            add_context("Zmień nazwę", ContextAction::RENAME);
+            add_context("Usuń", ContextAction::REMOVE);
+            add_context("Właściwości", ContextAction::PROPERTIES);
+        }
+        const int width = 190;
+        const int height = context_count_ * ROW_H + 4;
+        int x = mouse_x;
+        int y = mouse_y;
+        const int min_x = window_.x + 2;
+        const int min_y = window_.y + TITLE_H;
+        const int max_x = window_.x + window_.w - width - 2;
+        const int max_y = window_.y + window_.h - height - 2;
+        x = clamp_int(x, min_x, max_x);
+        y = clamp_int(y, min_y, max_y);
+        context_rect_ = {x, y, width, height};
+        context_hover_ = -1;
+        if (!gui_ustaw_popup_aplikacji(true, x, y, width, height)) {
+            context_count_ = 0;
+            return false;
+        }
+        context_open_ = true;
+        (void)gui_rejestruj_cele_drop(nullptr, 0);
+        draw_context();
+        gui_odswiez();
+        return true;
+    }
+
+    void close_context() {
+        if (!context_open_) return;
+        (void)gui_ustaw_popup_aplikacji(false, 0, 0, 0, 0);
+        context_open_ = false;
+        context_count_ = 0;
+        context_hover_ = -1;
+        register_drop_targets();
+        gui_odswiez();
+    }
+
+    ContextAction context_action_at(int x, int y) const {
+        if (!context_open_ || !hit(x, y, context_rect_)) return ContextAction::NONE;
+        const int index = (y - context_rect_.y - 2) / ROW_H;
+        return index >= 0 && index < context_count_
+            ? context_items_[index].action : ContextAction::NONE;
+    }
+
+    void context_hover(int x, int y) {
+        if (!context_open_) return;
+        int next = -1;
+        if (hit(x, y, context_rect_)) {
+            next = (y - context_rect_.y - 2) / ROW_H;
+            if (next < 0 || next >= context_count_) next = -1;
+        }
+        if (next == context_hover_) return;
+        const int old = context_hover_;
+        context_hover_ = next;
+        if (old >= 0) draw_context_row(old);
+        if (next >= 0) draw_context_row(next);
+        gui_odswiez();
+    }
+
+    void close_transient() {
+        if (context_open_) close_context();
+        if (modal_open()) close_modal();
+    }
+
 private:
     AktowkaModel& model_;
     AktowkaWindow& window_;
@@ -2189,15 +2457,67 @@ private:
     size_t edit_view_start_;
     int drop_target_entry_;
     bool drop_target_body_;
+    bool context_open_;
+    bool context_empty_;
+    int context_hover_;
+    int context_count_;
+    Rect context_rect_;
+    ContextItem context_items_[8];
 
-    void draw_drop_body_border() {
-        const AktowkaLayout value = layout();
-        if (value.list_body.w <= 1 || value.list_body.h <= 1) return;
-        const uint32_t color = drop_target_body_ ? DROP_TARGET : BORDER_DARK;
-        gui_rysuj_prostokat(value.list_body.x, value.list_body.y,
-                            value.list_body.w, 1, color);
-        gui_rysuj_prostokat(value.list_body.x, value.list_body.y + value.list_body.h - 1,
-                            value.list_body.w, 1, color);
+    void add_context(const char* label, ContextAction action) {
+        if (context_count_ >= static_cast<int>(sizeof(context_items_) /
+                                               sizeof(context_items_[0]))) return;
+        context_items_[context_count_++] = {label, action};
+    }
+
+    void draw_edit_field(const Rect& field) {
+        draw_field(field, true);
+        const int available = field.w - 12;
+        while (edit_view_start_ > edit_caret_)
+            edit_view_start_ = previous_codepoint(edit_, edit_view_start_);
+        while (edit_view_start_ < edit_caret_) {
+            char before[PATH_CAP] = {};
+            size_t out = 0;
+            for (size_t i = edit_view_start_; i < edit_caret_ &&
+                 out + 1 < sizeof(before); ++i) before[out++] = edit_[i];
+            if (oblicz_szerokosc_tekstu(before, 1) +
+                oblicz_szerokosc_tekstu("|", 1) <= available) break;
+            edit_view_start_ = next_codepoint(edit_, edit_view_start_, edit_length_);
+        }
+        char shown[PATH_CAP + 2] = {};
+        size_t out = 0;
+        for (size_t i = edit_view_start_; i < edit_length_ && out + 2 < sizeof(shown); ++i) {
+            if (i == edit_caret_) shown[out++] = '|';
+            shown[out++] = edit_[i];
+        }
+        if (edit_caret_ == edit_length_ && out + 1 < sizeof(shown)) shown[out++] = '|';
+        shown[out] = '\0';
+        draw_clipped(field.x + 6, field.y + 5, available, shown, TEXT, false);
+    }
+
+    void draw_context_row(int index) {
+        if (index < 0 || index >= context_count_) return;
+        const Rect row{context_rect_.x + 2,
+                       context_rect_.y + 2 + index * ROW_H,
+                       context_rect_.w - 4, ROW_H};
+        gui_rysuj_prostokat(row.x, row.y, row.w, row.h,
+                            index == context_hover_ ? SELECT : PANEL_ALT);
+        draw_clipped(row.x + 9, row.y + 5, row.w - 18,
+                     context_items_[index].label, TEXT, false);
+    }
+
+    void draw_context() {
+        gui_rysuj_prostokat(context_rect_.x, context_rect_.y,
+                            context_rect_.w, context_rect_.h, PANEL_ALT);
+        gui_rysuj_prostokat(context_rect_.x, context_rect_.y,
+                            context_rect_.w, 2, BORDER);
+        gui_rysuj_prostokat(context_rect_.x, context_rect_.y + context_rect_.h - 2,
+                            context_rect_.w, 2, BORDER_DARK);
+        gui_rysuj_prostokat(context_rect_.x, context_rect_.y,
+                            2, context_rect_.h, BORDER);
+        gui_rysuj_prostokat(context_rect_.x + context_rect_.w - 2,
+                            context_rect_.y, 2, context_rect_.h, BORDER_DARK);
+        for (int i = 0; i < context_count_; ++i) draw_context_row(i);
     }
 
     void draw_button(const Rect& rect, uint32_t border, const char* label) {
@@ -2330,6 +2650,76 @@ void redraw_sort(AktowkaView& view) {
     gui_odswiez();
 }
 
+void submit_modal(AktowkaView& view, AktowkaModel& model) {
+    const EditMode mode = view.edit_mode();
+    bool success = false;
+    if (mode == EditMode::CONFIRM_DELETE) {
+        success = model.delete_selected();
+    } else if (mode == EditMode::RENAME) {
+        char name[NAME_CAP] = {};
+        success = copy_text(name, sizeof(name), view.edit_text()) &&
+                  model.rename_selected(name);
+    } else if (mode == EditMode::CREATE_FOLDER || mode == EditMode::CREATE_FILE) {
+        char name[NAME_CAP] = {};
+        success = copy_text(name, sizeof(name), view.edit_text()) &&
+            (mode == EditMode::CREATE_FOLDER
+                ? model.create_folder(name) : model.create_file(name));
+    }
+    view.close_modal();
+    if (success) present_workspace_change(view, model.refresh());
+    else {
+        view.draw_status();
+        gui_odswiez();
+    }
+}
+
+void perform_context_action(AktowkaView& view, AktowkaModel& model,
+                            ContextAction action) {
+    view.close_context();
+    switch (action) {
+        case ContextAction::OPEN:
+            present_activation(view, model.activate());
+            break;
+        case ContextAction::RUN:
+            model.run_selected_context();
+            view.draw_status(); gui_odswiez();
+            break;
+        case ContextAction::COPY:
+            (void)model.put_selected_on_clipboard(BWS_SCHOWEK_COPY);
+            view.draw_status(); gui_odswiez();
+            break;
+        case ContextAction::CUT:
+            (void)model.put_selected_on_clipboard(BWS_SCHOWEK_CUT);
+            view.draw_selected_row(); view.draw_status(); gui_odswiez();
+            break;
+        case ContextAction::RENAME:
+            (void)view.open_modal(EditMode::RENAME);
+            break;
+        case ContextAction::REMOVE:
+            (void)view.open_modal(EditMode::CONFIRM_DELETE);
+            break;
+        case ContextAction::PROPERTIES:
+            model.set_status("Właściwości zaznaczonego elementu są w panelu Szczegóły.");
+            view.draw_details_panel(); view.draw_status(); gui_odswiez();
+            break;
+        case ContextAction::PASTE:
+            if (model.paste_clipboard())
+                present_workspace_change(view, model.refresh());
+            else { view.draw_status(); gui_odswiez(); }
+            break;
+        case ContextAction::NEW_FILE:
+            (void)view.open_modal(EditMode::CREATE_FILE);
+            break;
+        case ContextAction::NEW_FOLDER:
+            (void)view.open_modal(EditMode::CREATE_FOLDER);
+            break;
+        case ContextAction::REFRESH:
+            present_workspace_change(view, model.refresh());
+            break;
+        default: break;
+    }
+}
+
 } // namespace
 
 #ifndef AKTOWKA_HOST_TEST
@@ -2366,7 +2756,17 @@ extern "C" __attribute__((noreturn)) void _start() {
         bws_zdarzenie event{};
         if (!gui_czekaj_na_zdarzenie(&event)) continue;
         if (event.typ == BWS_ZDARZENIE_ZAMKNIJ) {
+            view.close_transient();
             quit = true;
+            continue;
+        }
+        if (event.typ == BWS_ZDARZENIE_BLUR) {
+            view.close_transient();
+            item_drag_candidate = false;
+            item_dragging = false;
+            dragging = false;
+            gui_ustaw_capture_myszy(false);
+            (void)gui_rejestruj_cele_drop(nullptr, 0);
             continue;
         }
         if (event.typ == BWS_ZDARZENIE_OTWORZ_PLIK) {
@@ -2377,12 +2777,19 @@ extern "C" __attribute__((noreturn)) void _start() {
             continue;
         }
         if (event.typ == BWS_ZDARZENIE_FOCUS) {
+            view.close_transient();
             const bool restored = window.minimized;
             window.minimized = false;
             refresh_ticks = 0;
             const Change change = model.refresh();
             if (restored) view.draw_full(false);
             else present_workspace_change(view, change);
+            continue;
+        }
+        if (event.typ == BWS_ZDARZENIE_PLIKI_ZMIENIONE) {
+            refresh_ticks = 0;
+            if (!window.minimized && !view.modal_open() && !view.context_open())
+                present_workspace_change(view, model.refresh());
             continue;
         }
         if (event.typ == BWS_ZDARZENIE_DRAG_HOVER) {
@@ -2404,13 +2811,16 @@ extern "C" __attribute__((noreturn)) void _start() {
             if (view.edit_mode() != EditMode::NONE && ansi == AnsiState::ESC) {
                 ansi = AnsiState::NONE;
                 const EditMode cancelled = view.edit_mode();
-                view.end_edit();
-                if (cancelled == EditMode::PATH) view.draw_path_field();
-                else if (cancelled == EditMode::CONFIRM_DELETE) view.draw_toolbar();
-                else view.draw_search_field();
+                if (view.modal_open()) view.close_modal();
+                else {
+                    view.end_edit();
+                    if (cancelled == EditMode::PATH) view.draw_path_field();
+                    else view.draw_search_field();
+                }
                 gui_odswiez();
             }
-            if (!window.minimized && ++refresh_ticks >= REFRESH_TICKS) {
+            if (!window.minimized && !view.modal_open() &&
+                !view.context_open() && ++refresh_ticks >= REFRESH_TICKS) {
                 refresh_ticks = 0;
                 present_workspace_change(view, model.refresh());
             }
@@ -2422,6 +2832,72 @@ extern "C" __attribute__((noreturn)) void _start() {
         const int mx = event.x;
         const int my = event.y;
         const bool left_button = (event.przyciski & 1U) != 0;
+
+        if (view.context_open()) {
+            if (event.typ == BWS_ZDARZENIE_MYSZ_RUCH) {
+                view.context_hover(mx, my);
+                continue;
+            }
+            if (event.typ == BWS_ZDARZENIE_MYSZ_DOWN) {
+                const ContextAction action = view.context_action_at(mx, my);
+                if (action == ContextAction::NONE) view.close_context();
+                else perform_context_action(view, model, action);
+                continue;
+            }
+            if (event.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN) {
+                view.close_context();
+                continue;
+            }
+            if (event.typ == BWS_ZDARZENIE_KLAWISZ &&
+                static_cast<char>(event.kod) == '\x1B') {
+                view.close_context();
+                ansi = AnsiState::NONE;
+                continue;
+            }
+        }
+
+        if (view.modal_open() &&
+            (event.typ == BWS_ZDARZENIE_MYSZ_DOWN ||
+             event.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN)) {
+            if (event.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN) continue;
+            const gui_akcja_belki modal_title = gui_hit_test_belki(
+                mx, my, window.x, window.y, window.w);
+            if (modal_title == GUI_BELKA_ZAMKNIJ) {
+                view.close_transient();
+                quit = true;
+                continue;
+            }
+            if (modal_title == GUI_BELKA_MINIMALIZUJ) {
+                view.close_transient();
+                window.minimized = gui_minimalizuj_okno();
+                gui_ustaw_capture_myszy(false);
+                continue;
+            }
+            const int button = view.modal_button_at(mx, my);
+            if (button == 1) submit_modal(view, model);
+            else if (button == 2) view.close_modal();
+            else if (hit(mx, my, view.modal_field())) {
+                view.place_modal_caret(mx);
+                view.draw_modal();
+                gui_odswiez();
+            }
+            continue; /* modal przechwytuje input tylko procesu wlasciciela */
+        }
+
+        if (event.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN) {
+            const int visual_index = view.row_at(mx, my);
+            if (visual_index >= 0) {
+                const int old_entry = model.selected();
+                bool scroll_changed = false;
+                (void)model.select_visible(visual_index, view.visible_rows(),
+                                           &scroll_changed);
+                redraw_selection(view, model, old_entry, scroll_changed);
+                (void)view.open_context(mx, my, false);
+            } else if (hit(mx, my, view.layout().list_body)) {
+                (void)view.open_context(mx, my, true);
+            }
+            continue;
+        }
         if (event.typ == BWS_ZDARZENIE_MYSZ_RUCH && dragging && left_button) {
             window.x = mx - drag_x;
             window.y = my - drag_y;
@@ -2473,16 +2949,19 @@ extern "C" __attribute__((noreturn)) void _start() {
             const gui_akcja_belki title_action = gui_hit_test_belki(
                 mx, my, window.x, window.y, window.w);
             if (title_action == GUI_BELKA_ZAMKNIJ) {
+                view.close_transient();
                 quit = true;
                 continue;
             }
             if (title_action == GUI_BELKA_MINIMALIZUJ) {
+                view.close_transient();
                 window.minimized = gui_minimalizuj_okno();
                 dragging = false;
                 gui_ustaw_capture_myszy(false);
                 continue;
             }
             if (title_action == GUI_BELKA_MAKSYMALIZUJ) {
+                view.close_transient();
                 if (!window.toggle_maximize())
                     model.set_status("Błąd: nie można zmienić rozmiaru okna.");
                 model.clamp_scroll(view.visible_rows());
@@ -2534,46 +3013,19 @@ extern "C" __attribute__((noreturn)) void _start() {
                 continue;
             }
             if (hit(mx, my, layout.new_folder)) {
-                view.begin_edit(EditMode::CREATE_FOLDER);
-                model.set_status("Wpisz nazwę folderu i naciśnij Enter.");
-                view.draw_search_field();
-                view.draw_status();
-                gui_odswiez();
+                (void)view.open_modal(EditMode::CREATE_FOLDER);
                 continue;
             }
             if (hit(mx, my, layout.new_file)) {
-                view.begin_edit(EditMode::CREATE_FILE);
-                model.set_status("Wpisz nazwę pliku i naciśnij Enter.");
-                view.draw_search_field();
-                view.draw_status();
-                gui_odswiez();
+                (void)view.open_modal(EditMode::CREATE_FILE);
                 continue;
             }
             if (hit(mx, my, layout.rename)) {
-                view.begin_edit(EditMode::RENAME);
-                model.set_status("Wpisz nową nazwę i naciśnij Enter.");
-                view.draw_search_field();
-                view.draw_status();
-                gui_odswiez();
+                (void)view.open_modal(EditMode::RENAME);
                 continue;
             }
             if (hit(mx, my, layout.remove)) {
-                if (view.edit_mode() != EditMode::CONFIRM_DELETE) {
-                    view.begin_edit(EditMode::CONFIRM_DELETE);
-                    model.set_status("Usuwanie jest trwałe. Kliknij Potwierdź albo naciśnij Enter.");
-                    view.draw_toolbar();
-                    view.draw_status();
-                    gui_odswiez();
-                } else {
-                    const bool removed = model.delete_selected();
-                    view.end_edit();
-                    if (removed) present_workspace_change(view, model.refresh());
-                    else {
-                        view.draw_toolbar();
-                        view.draw_status();
-                        gui_odswiez();
-                    }
-                }
+                (void)view.open_modal(EditMode::CONFIRM_DELETE);
                 continue;
             }
             if (hit(mx, my, layout.move)) {
@@ -2644,7 +3096,6 @@ extern "C" __attribute__((noreturn)) void _start() {
                 const EditMode old_mode = view.edit_mode();
                 view.end_edit();
                 if (old_mode == EditMode::PATH) view.draw_path_field();
-                else if (old_mode == EditMode::CONFIRM_DELETE) view.draw_toolbar();
                 else view.draw_search_field();
                 gui_odswiez();
             }
@@ -2691,10 +3142,12 @@ extern "C" __attribute__((noreturn)) void _start() {
                 }
                 ansi = AnsiState::NONE;
                 const EditMode cancelled = view.edit_mode();
-                view.end_edit();
-                view.draw_path_field();
-                if (cancelled == EditMode::CONFIRM_DELETE) view.draw_toolbar();
-                else view.draw_search_field();
+                if (view.modal_open()) view.close_modal();
+                else {
+                    view.end_edit();
+                    if (cancelled == EditMode::PATH) view.draw_path_field();
+                    else view.draw_search_field();
+                }
                 gui_odswiez();
                 continue;
             }
@@ -2702,14 +3155,16 @@ extern "C" __attribute__((noreturn)) void _start() {
                 if (character == 'D') {
                     ansi = AnsiState::NONE;
                     if (view.move_caret_left()) {
-                        if (mode == EditMode::PATH) view.draw_path_field();
+                        if (view.modal_open()) view.draw_modal();
+                        else if (mode == EditMode::PATH) view.draw_path_field();
                         else view.draw_search_field();
                         gui_odswiez();
                     }
                 } else if (character == 'C') {
                     ansi = AnsiState::NONE;
                     if (view.move_caret_right()) {
-                        if (mode == EditMode::PATH) view.draw_path_field();
+                        if (view.modal_open()) view.draw_modal();
+                        else if (mode == EditMode::PATH) view.draw_path_field();
                         else view.draw_search_field();
                         gui_odswiez();
                     }
@@ -2727,7 +3182,8 @@ extern "C" __attribute__((noreturn)) void _start() {
                         (void)model.set_filter(view.edit_text());
                         redraw_filter(view);
                     } else {
-                        if (mode == EditMode::PATH) view.draw_path_field();
+                        if (view.modal_open()) view.draw_modal();
+                        else if (mode == EditMode::PATH) view.draw_path_field();
                         else view.draw_search_field();
                         gui_odswiez();
                     }
@@ -2747,44 +3203,14 @@ extern "C" __attribute__((noreturn)) void _start() {
                     view.end_edit();
                     view.draw_search_field();
                     gui_odswiez();
-                } else if (mode == EditMode::CONFIRM_DELETE) {
-                    const bool removed = model.delete_selected();
-                    view.end_edit();
-                    if (removed) present_workspace_change(view, model.refresh());
-                    else {
-                        view.draw_toolbar();
-                        view.draw_status();
-                        gui_odswiez();
-                    }
-                } else if (mode == EditMode::RENAME) {
-                    char name[NAME_CAP] = {};
-                    (void)copy_text(name, sizeof(name), view.edit_text());
-                    const bool renamed = model.rename_selected(name);
-                    view.end_edit();
-                    if (renamed) present_workspace_change(view, model.refresh());
-                    else {
-                        view.draw_search_field();
-                        view.draw_status();
-                        gui_odswiez();
-                    }
+                } else if (view.modal_open()) {
+                    submit_modal(view, model);
                 } else if (mode == EditMode::MOVE) {
                     char destination[PATH_CAP] = {};
                     (void)copy_text(destination, sizeof(destination), view.edit_text());
                     const bool moved = model.move_selected(destination);
                     view.end_edit();
                     if (moved) present_workspace_change(view, model.refresh());
-                    else {
-                        view.draw_search_field();
-                        view.draw_status();
-                        gui_odswiez();
-                    }
-                } else {
-                    char name[NAME_CAP] = {};
-                    (void)copy_text(name, sizeof(name), view.edit_text());
-                    const bool created = mode == EditMode::CREATE_FOLDER
-                        ? model.create_folder(name) : model.create_file(name);
-                    view.end_edit();
-                    if (created) present_workspace_change(view, model.refresh());
                     else {
                         view.draw_search_field();
                         view.draw_status();
@@ -2799,6 +3225,9 @@ extern "C" __attribute__((noreturn)) void _start() {
                     } else if (mode == EditMode::PATH) {
                         view.draw_path_field();
                         gui_odswiez();
+                    } else if (view.modal_open()) {
+                        view.draw_modal();
+                        gui_odswiez();
                     } else {
                         view.draw_search_field();
                         gui_odswiez();
@@ -2810,6 +3239,9 @@ extern "C" __attribute__((noreturn)) void _start() {
                     redraw_filter(view);
                 } else if (mode == EditMode::PATH) {
                     view.draw_path_field();
+                    gui_odswiez();
+                } else if (view.modal_open()) {
+                    view.draw_modal();
                     gui_odswiez();
                 } else {
                     view.draw_search_field();

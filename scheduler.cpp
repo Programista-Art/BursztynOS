@@ -728,6 +728,8 @@ bool scheduler_dodaj_zdarzenie(
             const uint8_t typ=q.wpisy[szukaj].typ;
             if(typ==zdarzenie->typ){znaleziono=true;break;}
             if(typ==BWS_ZDARZENIE_MYSZ_DOWN||typ==BWS_ZDARZENIE_MYSZ_UP||
+               typ==BWS_ZDARZENIE_MYSZ_PRAWY_DOWN||
+               typ==BWS_ZDARZENIE_MYSZ_PRAWY_UP||
                typ==BWS_ZDARZENIE_KLAWISZ||typ==BWS_ZDARZENIE_FOCUS||
                typ==BWS_ZDARZENIE_BLUR||typ==BWS_ZDARZENIE_ZAMKNIJ)break;
             if(szukaj==ogon)break;

@@ -23,7 +23,11 @@ enum bws_typ_zdarzenia : uint32_t {
     BWS_ZDARZENIE_OTWORZ_PLIK = 16,
     BWS_ZDARZENIE_DRAG_HOVER = 17,
     BWS_ZDARZENIE_DRAG_LEAVE = 18,
-    BWS_ZDARZENIE_DRAG_DROP = 19
+    BWS_ZDARZENIE_DRAG_DROP = 19,
+    /* Addytywne typy: stare aplikacje nie pomyla PPM z lewym DOWN/UP. */
+    BWS_ZDARZENIE_MYSZ_PRAWY_DOWN = 20,
+    BWS_ZDARZENIE_MYSZ_PRAWY_UP = 21,
+    BWS_ZDARZENIE_PLIKI_ZMIENIONE = 22
 };
 
 struct bws_zdarzenie {

@@ -39,6 +39,24 @@ enum BwsWynikDrop : uint32_t {
     BWS_DROP_BLAD = 3
 };
 
+/* Wspoldzielony, bezplikowy schowek operacji na plikach (BWS 52..55). */
+#define BWS_SCHOWEK_WERSJA 1U
+
+enum BwsOperacjaSchowka : uint8_t {
+    BWS_SCHOWEK_PUSTY = 0,
+    BWS_SCHOWEK_COPY = 1,
+    BWS_SCHOWEK_CUT = 2
+};
+
+struct BwsSchowekPlikow {
+    uint16_t wersja;
+    uint8_t operacja;
+    uint8_t typ;
+    uint32_t zarezerwowane;
+    uint64_t generacja;
+    char sciezka[BWS_DROP_SCIEZKA_MAX];
+};
+
 #ifdef __cplusplus
 static_assert(sizeof(BwsMetadanePliku) == 24,
               "Zmiana BwsMetadanePliku narusza ABI BWS 47");
@@ -46,4 +64,8 @@ static_assert(offsetof(BwsMetadanePliku, rozmiar) == 8,
               "Nieprawidlowy uklad BwsMetadanePliku");
 static_assert(sizeof(BwsCelDrop) == 528,
               "Zmiana BwsCelDrop narusza ABI BWS 49");
+static_assert(sizeof(BwsSchowekPlikow) == 528,
+              "Zmiana BwsSchowekPlikow narusza ABI BWS 52/53");
+static_assert(offsetof(BwsSchowekPlikow, sciezka) == 16,
+              "Nieprawidlowy uklad schowka plikow");
 #endif

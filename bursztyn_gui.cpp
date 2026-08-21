@@ -808,6 +808,38 @@ BwsWynikDrop gui_aktualizuj_drag(const char* sciezka,
         ? static_cast<BwsWynikDrop>(wynik) : BWS_DROP_BLAD;
 }
 
+bool ustaw_schowek_plikow(const char* sciezka,
+                          BwsOperacjaSchowka operacja) {
+    if (!sciezka || (operacja != BWS_SCHOWEK_COPY &&
+                     operacja != BWS_SCHOWEK_CUT)) return false;
+    return bws_wywolaj(52, reinterpret_cast<uint64_t>(sciezka),
+                       static_cast<uint64_t>(operacja), 0, 0) != 0;
+}
+
+bool pobierz_schowek_plikow(BwsSchowekPlikow* schowek) {
+    return schowek && bws_wywolaj(
+        53, reinterpret_cast<uint64_t>(schowek), 0, 0, 0) != 0;
+}
+
+bool wyczysc_schowek_plikow(uint64_t oczekiwana_generacja) {
+    return oczekiwana_generacja != 0 &&
+        bws_wywolaj(54, oczekiwana_generacja, 0, 0, 0) != 0;
+}
+
+bool kopiuj_twor_uzytkownika(const char* sciezka,
+                             const char* folder_docelowy) {
+    return sciezka && folder_docelowy &&
+        bws_wywolaj(55, reinterpret_cast<uint64_t>(sciezka),
+                    reinterpret_cast<uint64_t>(folder_docelowy), 0, 0) != 0;
+}
+
+bool gui_ustaw_popup_aplikacji(bool otwarty,
+                               int x, int y, int szer, int wys) {
+    return bws_wywolaj(56, otwarty ? 1ULL : 0ULL,
+                       spakuj_dwa_i32(x, y),
+                       spakuj_dwa_i32(szer, wys), 0) != 0;
+}
+
 void gui_rysuj_standardowa_belke(int x, int y, int szer,
                                  const char* tytul, bool zmaksymalizowane) {
     if (!tytul || szer < 90) return;

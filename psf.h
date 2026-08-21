@@ -490,6 +490,11 @@ bool zmien_nazwe_tworu(
 /* Przenosi do istniejacego folderu, zachowujac nazwe. Nie nadpisuje. */
 bool przenies_twor(const char* sciezka, const char* folder_docelowy);
 
+/* Kopia bez nadpisywania. Pliki sa kopiowane blokami 4 KiB, foldery
+ * rekurencyjnie z limitem glebokosci; nowe wezly otrzymuja poziom tworzacego. */
+bool kopiuj_twor_z_pzb(const char* sciezka, const char* folder_docelowy,
+                       uint8_t poziom_pzb);
+
 /* Odczyt rzeczywistych danych inode; stare BSP2 jawnie nie maja czasu/PZB. */
 bool pobierz_metadane_tworu(const char* sciezka, psf_metadane* metadane);
 

@@ -87,6 +87,19 @@ uint64_t hash_pulpitu = 0;
 bool hash_pulpitu_wazny = false;
 bool pulpit_drop_hover = false;
 int pulpit_refresh_ticks = 0;
+BwsCelDrop cele_drop_pulpitu[BWS_DROP_CELE_MAX] = {};
+
+enum class PulpitContextAction : uint8_t {
+    NONE, OPEN, RUN, COPY, CUT, PASTE, REFRESH
+};
+struct PulpitContextItem { const char* label; PulpitContextAction action; };
+bool pulpit_context_open = false;
+int pulpit_context_x = 0;
+int pulpit_context_y = 0;
+int pulpit_context_w = 184;
+int pulpit_context_count = 0;
+int pulpit_context_hover = -1;
+PulpitContextItem pulpit_context_items[8] = {};
 
 bool punkt_w_prostokacie(int px, int py, int x, int y, int w, int h);
 void wyzeruj_bufor(char* bufor, int rozmiar);
@@ -300,14 +313,26 @@ void RysujTaskbar() {
 }
 
 void zarejestruj_pulpit_jako_cel_drop() {
-    BwsCelDrop cel{};
-    cel.x = 0;
-    cel.y = 0;
-    cel.szer = screen_w;
-    cel.wys = screen_h > PASEK_WYS ? screen_h - PASEK_WYS : 0;
-    if (cel.wys > 0 && kopiuj_tekst(
-            cel.folder, static_cast<int>(sizeof(cel.folder)), SCIEZKA_PULPIT))
-        (void)gui_rejestruj_cele_drop(&cel, 1);
+    for (uint32_t i = 0; i < BWS_DROP_CELE_MAX; ++i)
+        cele_drop_pulpitu[i] = BwsCelDrop{};
+    uint32_t count = 0;
+    for (int i = 0; i < liczba_wpisow_pulpitu &&
+         count + 1U < BWS_DROP_CELE_MAX; ++i) {
+        if (!wpisy_pulpitu[i].folder) continue;
+        int x = 0, y = 0;
+        prostokat_wpisu_pulpitu(i, &x, &y);
+        BwsCelDrop& cel = cele_drop_pulpitu[count];
+        cel.x = x; cel.y = y; cel.szer = 68; cel.wys = 72;
+        if (!sciezka_wpisu_pulpitu(i, cel.folder, sizeof(cel.folder))) continue;
+        ++count;
+    }
+    BwsCelDrop& pulpit = cele_drop_pulpitu[count];
+    pulpit.x = 0; pulpit.y = 0; pulpit.szer = screen_w;
+    pulpit.wys = screen_h > PASEK_WYS ? screen_h - PASEK_WYS : 0;
+    if (pulpit.wys > 0 && kopiuj_tekst(
+            pulpit.folder, static_cast<int>(sizeof(pulpit.folder)), SCIEZKA_PULPIT))
+        ++count;
+    (void)gui_rejestruj_cele_drop(cele_drop_pulpitu, count);
 }
 
 void RysujWpisyPulpitu() {
@@ -327,11 +352,6 @@ void RysujWpisyPulpitu() {
         char podpis[40] = {};
         podpis_wpisu(wpisy_pulpitu[i].nazwa, podpis, sizeof(podpis));
         rysuj_tekst_wysrodkowany(x, y + 49, 68, 18, 1, 0x00FFFFFF, podpis);
-    }
-    if (pulpit_drop_hover) {
-        gui_rysuj_prostokat(2, 2, screen_w > 4 ? screen_w - 4 : 0, 2, 0x00E58A00);
-        gui_rysuj_prostokat(2, screen_h - PASEK_WYS - 3,
-                            screen_w > 4 ? screen_w - 4 : 0, 2, 0x00E58A00);
     }
 }
 
@@ -460,6 +480,120 @@ void otworz_wpis_pulpitu(int indeks) {
         return;
     }
     (void)otworz_plik_skojarzony(sciezka);
+}
+
+void dodaj_pulpit_context(const char* label, PulpitContextAction action) {
+    if (pulpit_context_count >= 8) return;
+    pulpit_context_items[pulpit_context_count++] = {label, action};
+}
+
+int pulpit_context_h() { return pulpit_context_count * 24 + 4; }
+
+void rysuj_pulpit_context_row(int index) {
+    if (index < 0 || index >= pulpit_context_count) return;
+    const int y = pulpit_context_y + 2 + index * 24;
+    gui_rysuj_prostokat(pulpit_context_x + 2, y,
+                        pulpit_context_w - 4, 24,
+                        index == pulpit_context_hover ? 0x00603800 : 0x00301500);
+    gui_wypisz_tekst_kolor(pulpit_context_x + 10, y + 5,
+                           0x00FFFFFF, pulpit_context_items[index].label);
+}
+
+void zamknij_pulpit_context() {
+    if (!pulpit_context_open) return;
+    (void)gui_ustaw_popup_aplikacji(false, 0, 0, 0, 0);
+    pulpit_context_open = false;
+    pulpit_context_count = 0;
+    pulpit_context_hover = -1;
+    zarejestruj_pulpit_jako_cel_drop();
+    gui_odswiez();
+}
+
+bool otworz_pulpit_context(int x, int y, int wpis) {
+    zamknij_pulpit_context();
+    pulpit_context_count = 0;
+    if (wpis >= 0 && wpis < liczba_wpisow_pulpitu) {
+        dodaj_pulpit_context("Otwórz", PulpitContextAction::OPEN);
+        if (konczy_sie(wpisy_pulpitu[wpis].nazwa, ".bur"))
+            dodaj_pulpit_context("Uruchom", PulpitContextAction::RUN);
+        dodaj_pulpit_context("Kopiuj", PulpitContextAction::COPY);
+        dodaj_pulpit_context("Wytnij", PulpitContextAction::CUT);
+    } else {
+        dodaj_pulpit_context("Wklej", PulpitContextAction::PASTE);
+        dodaj_pulpit_context("Odśwież", PulpitContextAction::REFRESH);
+    }
+    const int height = pulpit_context_h();
+    pulpit_context_x = x;
+    pulpit_context_y = y;
+    if (pulpit_context_x + pulpit_context_w > screen_w)
+        pulpit_context_x = screen_w - pulpit_context_w;
+    if (pulpit_context_y + height > screen_h - PASEK_WYS)
+        pulpit_context_y = screen_h - PASEK_WYS - height;
+    if (pulpit_context_x < 0) pulpit_context_x = 0;
+    if (pulpit_context_y < 0) pulpit_context_y = 0;
+    pulpit_context_hover = -1;
+    if (!gui_ustaw_popup_aplikacji(true, pulpit_context_x, pulpit_context_y,
+                                   pulpit_context_w, height)) return false;
+    pulpit_context_open = true;
+    (void)gui_rejestruj_cele_drop(nullptr, 0);
+    gui_rysuj_prostokat(pulpit_context_x, pulpit_context_y,
+                        pulpit_context_w, height, 0x00301500);
+    gui_rysuj_prostokat(pulpit_context_x, pulpit_context_y,
+                        pulpit_context_w, 2, 0x00E58A00);
+    gui_rysuj_prostokat(pulpit_context_x, pulpit_context_y,
+                        2, height, 0x00E58A00);
+    gui_rysuj_prostokat(pulpit_context_x + pulpit_context_w - 2,
+                        pulpit_context_y, 2, height, 0x00794400);
+    gui_rysuj_prostokat(pulpit_context_x, pulpit_context_y + height - 2,
+                        pulpit_context_w, 2, 0x00794400);
+    for (int i = 0; i < pulpit_context_count; ++i) rysuj_pulpit_context_row(i);
+    gui_odswiez();
+    return true;
+}
+
+PulpitContextAction pulpit_context_action(int x, int y) {
+    if (!pulpit_context_open || !punkt_w_prostokacie(
+            x, y, pulpit_context_x, pulpit_context_y,
+            pulpit_context_w, pulpit_context_h())) return PulpitContextAction::NONE;
+    const int index = (y - pulpit_context_y - 2) / 24;
+    return index >= 0 && index < pulpit_context_count
+        ? pulpit_context_items[index].action : PulpitContextAction::NONE;
+}
+
+void wykonaj_pulpit_context(PulpitContextAction action) {
+    const int selected = zaznaczony_wpis_pulpitu;
+    char source[512] = {};
+    if (selected >= 0) (void)sciezka_wpisu_pulpitu(
+        selected, source, static_cast<int>(sizeof(source)));
+    zamknij_pulpit_context();
+    if (action == PulpitContextAction::OPEN) otworz_wpis_pulpitu(selected);
+    else if (action == PulpitContextAction::RUN && source[0])
+        (void)uruchom_program_uzytkownika(source);
+    else if (action == PulpitContextAction::COPY && source[0])
+        (void)ustaw_schowek_plikow(source, BWS_SCHOWEK_COPY);
+    else if (action == PulpitContextAction::CUT && source[0])
+        (void)ustaw_schowek_plikow(source, BWS_SCHOWEK_CUT);
+    else if (action == PulpitContextAction::PASTE) {
+        BwsSchowekPlikow clipboard{};
+        if (pobierz_schowek_plikow(&clipboard) &&
+            clipboard.wersja == BWS_SCHOWEK_WERSJA) {
+            bool ok = false;
+            if (clipboard.operacja == BWS_SCHOWEK_COPY)
+                ok = kopiuj_twor_uzytkownika(clipboard.sciezka, SCIEZKA_PULPIT);
+            else if (clipboard.operacja == BWS_SCHOWEK_CUT) {
+                ok = przenies_twor_uzytkownika(clipboard.sciezka, SCIEZKA_PULPIT);
+                if (ok) (void)wyczysc_schowek_plikow(clipboard.generacja);
+            }
+        }
+    }
+    if (action == PulpitContextAction::PASTE ||
+        action == PulpitContextAction::REFRESH) {
+        hash_pulpitu_wazny = false;
+        (void)odswiez_wpisy_pulpitu();
+        RysujPulpit(true);
+    } else {
+        gui_odswiez();
+    }
 }
 
 bool aktywuj_istniejace(const char* prefiks_tytulu) {
@@ -650,18 +784,70 @@ extern "C" __attribute__((noreturn)) void _start() {
         const int my = zdarzenie.y;
         const bool klik = zdarzenie.typ == BWS_ZDARZENIE_MYSZ_DOWN;
 
-        if (zdarzenie.typ == BWS_ZDARZENIE_DRAG_HOVER) {
-            if (!pulpit_drop_hover) {
-                pulpit_drop_hover = true;
-                RysujPulpit(true);
+        if (zdarzenie.typ == BWS_ZDARZENIE_BLUR) {
+            zamknij_pulpit_context();
+            continue;
+        }
+
+        if (zdarzenie.typ == BWS_ZDARZENIE_PLIKI_ZMIENIONE) {
+            zamknij_pulpit_context();
+            if (odswiez_wpisy_pulpitu()) RysujPulpit(true);
+            continue;
+        }
+
+        if (pulpit_context_open) {
+            if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_RUCH) {
+                int next = -1;
+                if (punkt_w_prostokacie(mx, my, pulpit_context_x,
+                                        pulpit_context_y, pulpit_context_w,
+                                        pulpit_context_h())) {
+                    next = (my - pulpit_context_y - 2) / 24;
+                    if (next < 0 || next >= pulpit_context_count) next = -1;
+                }
+                if (next != pulpit_context_hover) {
+                    const int old = pulpit_context_hover;
+                    pulpit_context_hover = next;
+                    if (old >= 0) rysuj_pulpit_context_row(old);
+                    if (next >= 0) rysuj_pulpit_context_row(next);
+                    gui_odswiez();
+                }
+                continue;
             }
+            if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_DOWN) {
+                const PulpitContextAction action = pulpit_context_action(mx, my);
+                if (action == PulpitContextAction::NONE) zamknij_pulpit_context();
+                else wykonaj_pulpit_context(action);
+                continue;
+            }
+            if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN ||
+                (zdarzenie.typ == BWS_ZDARZENIE_KLAWISZ &&
+                 static_cast<char>(zdarzenie.kod) == '\x1B')) {
+                zamknij_pulpit_context();
+                continue;
+            }
+        }
+
+        if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN) {
+            if (menu_start_otwarte) zamknij_menu_i_odtworz_pulpit();
+            drag_candidate = false;
+            dragging_file = false;
+            gui_ustaw_capture_myszy(false);
+            const int desktop_entry = wpis_pulpitu_w_punkcie(mx, my);
+            zaznaczony_wpis_pulpitu = desktop_entry;
+            RysujPulpit(true);
+            if (my < screen_h - PASEK_WYS)
+                (void)otworz_pulpit_context(mx, my, desktop_entry);
+            continue;
+        }
+
+        if (zdarzenie.typ == BWS_ZDARZENIE_DRAG_HOVER) {
+            /* Wizualny stan drag jest osobnym, paced overlayem skladacza.
+             * Pulpit nie rysuje juz pelnoekranowej ramki nad taskbarem. */
+            pulpit_drop_hover = true;
             continue;
         }
         if (zdarzenie.typ == BWS_ZDARZENIE_DRAG_LEAVE) {
-            if (pulpit_drop_hover) {
-                pulpit_drop_hover = false;
-                RysujPulpit(true);
-            }
+            pulpit_drop_hover = false;
             continue;
         }
         if (zdarzenie.typ == BWS_ZDARZENIE_DRAG_DROP) {
@@ -704,7 +890,8 @@ extern "C" __attribute__((noreturn)) void _start() {
 
         if (zdarzenie.typ == BWS_ZDARZENIE_TIMER) {
             zarejestruj_pulpit_jako_cel_drop();
-            if (++pulpit_refresh_ticks >= PULPIT_REFRESH_TICKS) {
+            if (!pulpit_context_open &&
+                ++pulpit_refresh_ticks >= PULPIT_REFRESH_TICKS) {
                 pulpit_refresh_ticks = 0;
                 if (odswiez_wpisy_pulpitu()) RysujPulpit(true);
             }

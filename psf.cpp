@@ -2849,6 +2849,116 @@ bool wskazniki_pliku_poprawne(
     return true;
 }
 
+constexpr uint32_t PSF_MAKS_GLEBOKOSC_KOPII = 32U;
+
+/* Dotyczy wylacznie jeszcze nieopublikowanego poddrzewa utworzonego przez
+ * kopiowanie. Nie przyjmuje sciezki ani nie usuwa istniejacych obiektow. */
+bool zwolnij_nieopublikowana_kopie(uint64_t id, uint32_t glebokosc) {
+    if (id == 0 || glebokosc > PSF_MAKS_GLEBOKOSC_KOPII) return false;
+    wezel_indeksowy* w = pobierz_wezel(id);
+    if (!w || w->typ == TYP_WOLNY) return false;
+
+    if (w->typ == TYP_KATALOG) {
+        const uint64_t na_blok = wpisow_katalogowych_na_blok();
+        for (size_t k = 0; k < static_cast<size_t>(PSF_MAX_BLOKOW_W_WEZLE); ++k) {
+            const uint64_t blok_id = w->wskazniki_blokow[k];
+            if (blok_id == BARK_BLOKU) continue;
+            wpis_katalogowy* wpisy = pobierz_wpisy_katalogowe(blok_id);
+            if (!wpisy) return false;
+            for (uint64_t j = 0; j < na_blok; ++j) {
+                if (wpisy[j].id_wezla != 0 &&
+                    !zwolnij_nieopublikowana_kopie(
+                        wpisy[j].id_wezla, glebokosc + 1U)) return false;
+            }
+            if (!zwolnij_blok_danych(blok_id)) return false;
+            w->wskazniki_blokow[k] = BARK_BLOKU;
+        }
+    } else if (w->typ == TYP_PLIK) {
+        for (size_t k = 0; k < static_cast<size_t>(PSF_MAX_BLOKOW_W_WEZLE); ++k) {
+            const uint64_t blok_id = w->wskazniki_blokow[k];
+            if (blok_id == BARK_BLOKU) continue;
+            if (!zwolnij_blok_danych(blok_id)) return false;
+            w->wskazniki_blokow[k] = BARK_BLOKU;
+        }
+    } else {
+        return false;
+    }
+    return zwolnij_wezel(id);
+}
+
+uint64_t sklonuj_wezel_rekurencyjnie(uint64_t zrodlo_id, uint8_t poziom_pzb,
+                                     uint32_t glebokosc,
+                                     uint64_t* przodkowie) {
+    if (!przodkowie || glebokosc >= PSF_MAKS_GLEBOKOSC_KOPII) return 0;
+    for (uint32_t i = 0; i < glebokosc; ++i)
+        if (przodkowie[i] == zrodlo_id) return 0; /* uszkodzony cykl */
+
+    wezel_indeksowy* zrodlo = pobierz_wezel(zrodlo_id);
+    if (!zrodlo || (zrodlo->typ != TYP_PLIK && zrodlo->typ != TYP_KATALOG))
+        return 0;
+    if (zrodlo->typ == TYP_PLIK && !wskazniki_pliku_poprawne(zrodlo)) return 0;
+    przodkowie[glebokosc] = zrodlo_id;
+
+    const uint64_t nowy_id = zaalokuj_wolny_wezel(zrodlo->typ);
+    wezel_indeksowy* nowy = pobierz_wezel(nowy_id);
+    if (nowy_id == 0 || !nowy) return 0;
+    ustaw_metadane_nowego_wezla(nowy, poziom_pzb);
+    oznacz_wezel_jako_brudny(nowy_id);
+
+    if (zrodlo->typ == TYP_PLIK) {
+        const uint64_t potrzebne = podziel_w_gore(
+            zrodlo->rozmiar_w_bajtach,
+            static_cast<uint64_t>(PSF_ROZMIAR_BLOKU));
+        for (uint64_t k = 0; k < potrzebne; ++k) {
+            const uint64_t stary_blok = zrodlo->wskazniki_blokow[k];
+            const uint64_t nowy_blok = zaalokuj_wolny_blok_danych();
+            uint8_t* src = pobierz_blok_danych(stary_blok);
+            uint8_t* dst = pobierz_blok_danych(nowy_blok);
+            if (nowy_blok == BARK_BLOKU || !src || !dst) {
+                if (nowy_blok != BARK_BLOKU) (void)zwolnij_blok_danych(nowy_blok);
+                (void)zwolnij_nieopublikowana_kopie(nowy_id, glebokosc);
+                return 0;
+            }
+            uint64_t porcja = zrodlo->rozmiar_w_bajtach -
+                               k * static_cast<uint64_t>(PSF_ROZMIAR_BLOKU);
+            if (porcja > PSF_ROZMIAR_BLOKU) porcja = PSF_ROZMIAR_BLOKU;
+            kopiuj_pamiec(dst, src, porcja);
+            if (porcja < PSF_ROZMIAR_BLOKU)
+                wyzeruj_pamiec(dst + porcja, PSF_ROZMIAR_BLOKU - porcja);
+            nowy->wskazniki_blokow[k] = nowy_blok;
+            const uint64_t absolutny = absolutny_blok_danych(nowy_blok);
+            if (absolutny != UINT64_MAX) oznacz_blok_jako_brudny(absolutny);
+        }
+        nowy->rozmiar_w_bajtach = zrodlo->rozmiar_w_bajtach;
+        oznacz_wezel_jako_brudny(nowy_id);
+        return nowy_id;
+    }
+
+    const uint64_t na_blok = wpisow_katalogowych_na_blok();
+    for (size_t k = 0; k < static_cast<size_t>(PSF_MAX_BLOKOW_W_WEZLE); ++k) {
+        const uint64_t blok_id = zrodlo->wskazniki_blokow[k];
+        if (blok_id == BARK_BLOKU) continue;
+        wpis_katalogowy* wpisy = pobierz_wpisy_katalogowe(blok_id);
+        if (!wpisy) {
+            (void)zwolnij_nieopublikowana_kopie(nowy_id, glebokosc);
+            return 0;
+        }
+        for (uint64_t j = 0; j < na_blok; ++j) {
+            if (wpisy[j].id_wezla == 0) continue;
+            const uint64_t dziecko = sklonuj_wezel_rekurencyjnie(
+                wpisy[j].id_wezla, poziom_pzb, glebokosc + 1U, przodkowie);
+            if (dziecko == 0 || !dodaj_wpis_do_katalogu(
+                    nowy_id, dziecko, wpisy[j].nazwa)) {
+                if (dziecko != 0)
+                    (void)zwolnij_nieopublikowana_kopie(dziecko, glebokosc + 1U);
+                (void)zwolnij_nieopublikowana_kopie(nowy_id, glebokosc);
+                return 0;
+            }
+        }
+    }
+    return nowy_id;
+}
+
 /* =========================================================================
  * PUBLICZNE API - INICJALIZACJA
  * ========================================================================= */
@@ -4163,6 +4273,46 @@ extern "C" bool przenies_twor(
     if (stary_rodzic->rozmiar_w_bajtach > 0)
         --stary_rodzic->rozmiar_w_bajtach;
     oznacz_wezel_jako_brudny(stary_rodzic_id);
+    (void)bsp_zapisz_zmiany();
+    return true;
+}
+
+extern "C" bool kopiuj_twor_z_pzb(
+    const char* sciezka,
+    const char* folder_docelowy,
+    uint8_t poziom_pzb
+) {
+    BlokadaPSF blokada;
+    if (!psf_gotowy || poziom_pzb > 5U || !bezpieczna_sciezka(sciezka) ||
+        !bezpieczna_sciezka(folder_docelowy) ||
+        (sciezka[0] == '/' && sciezka[1] == '\0')) return false;
+
+    char nazwa[PSF_MAX_NAZWA] = {};
+    const uint64_t zrodlo_id = rozwiaz_sciezke(sciezka, nullptr, false);
+    const uint64_t zrodlo_rodzic = rozwiaz_sciezke(sciezka, nazwa, true);
+    const uint64_t cel_rodzic = rozwiaz_sciezke(folder_docelowy, nullptr, false);
+    wezel_indeksowy* zrodlo = pobierz_wezel(zrodlo_id);
+    wezel_indeksowy* cel = pobierz_wezel(cel_rodzic);
+    if (zrodlo_id == 0 || zrodlo_rodzic == 0 || cel_rodzic == 0 ||
+        !zrodlo || !cel || cel->typ != TYP_KATALOG || !poprawna_nazwa(nazwa) ||
+        znajdz_wpis_w_katalogu(cel_rodzic, nazwa).znaleziony) return false;
+
+    if (zrodlo->typ == TYP_KATALOG) {
+        size_t i = 0;
+        while (sciezka[i] != '\0' && folder_docelowy[i] == sciezka[i]) ++i;
+        if (sciezka[i] == '\0' &&
+            (folder_docelowy[i] == '\0' || folder_docelowy[i] == '/'))
+            return false;
+    }
+
+    uint64_t przodkowie[PSF_MAKS_GLEBOKOSC_KOPII] = {};
+    const uint64_t kopia_id = sklonuj_wezel_rekurencyjnie(
+        zrodlo_id, poziom_pzb, 0, przodkowie);
+    if (kopia_id == 0) return false;
+    if (!dodaj_wpis_do_katalogu(cel_rodzic, kopia_id, nazwa)) {
+        (void)zwolnij_nieopublikowana_kopie(kopia_id, 0);
+        return false;
+    }
     (void)bsp_zapisz_zmiany();
     return true;
 }

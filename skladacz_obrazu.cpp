@@ -127,6 +127,31 @@ struct SystemOverlayState {
     GuiDirtyRect rect;
 };
 SystemOverlayState system_overlay = {false, -1, {0, 0, 0, 0}};
+struct ApplicationPopupState {
+    bool otwarty;
+    int pid;
+    uint32_t generacja;
+    GuiDirtyRect rect;
+    uint32_t* tlo;
+    uint64_t piksele;
+};
+ApplicationPopupState application_popup = {
+    false, -1, 0, {0, 0, 0, 0}, nullptr, 0};
+
+struct DragOverlayState { bool aktywny; int pid; int x; int y; };
+struct PendingDragOverlay {
+    bool pending;
+    bool aktywny;
+    int pid;
+    int x;
+    int y;
+};
+DragOverlayState drag_overlay = {false, -1, 0, 0};
+PendingDragOverlay pending_drag_overlay = {};
+constexpr int DRAG_OVERLAY_W = 34;
+constexpr int DRAG_OVERLAY_H = 22;
+constexpr int DRAG_OVERLAY_DX = 12;
+constexpr int DRAG_OVERLAY_DY = 12;
 
 /*
  * Guard chroni przed zagniezdzonym / rownoleglym rozpoczeciem skladania
@@ -176,6 +201,40 @@ bool ma_pending_geometry(){
     uint64_t f=irq_off();bool wynik=false;
     for(int pid=1;pid<MAKS_WARSTW;++pid)if(pending_geometry[pid].pending){wynik=true;break;}
     irq_restore(f);return wynik;
+}
+
+bool ma_pending_drag_overlay() {
+    uint64_t f = irq_off();
+    const bool wynik = pending_drag_overlay.pending;
+    irq_restore(f);
+    return wynik;
+}
+
+GuiDirtyRect drag_rect(const DragOverlayState& stan) {
+    return {stan.x + DRAG_OVERLAY_DX, stan.y + DRAG_OVERLAY_DY,
+            DRAG_OVERLAY_W, DRAG_OVERLAY_H};
+}
+
+void apply_pending_drag_overlay() {
+    PendingDragOverlay pending{};
+    uint64_t f = irq_off();
+    if (pending_drag_overlay.pending) {
+        pending = pending_drag_overlay;
+        pending_drag_overlay.pending = false;
+    }
+    irq_restore(f);
+    if (!pending.pending) return;
+    const DragOverlayState stary = drag_overlay;
+    drag_overlay = {pending.aktywny, pending.pid, pending.x, pending.y};
+    if (stary.aktywny) {
+        const GuiDirtyRect r = drag_rect(stary);
+        skladacz_obrazu_oznacz_dirty_rect(r.x, r.y, r.width, r.height);
+    }
+    if (drag_overlay.aktywny) {
+        const GuiDirtyRect r = drag_rect(drag_overlay);
+        skladacz_obrazu_oznacz_dirty_rect(r.x, r.y, r.width, r.height);
+    }
+    drag_frame_waiting = true;
 }
 
 bool rect_clip(GuiDirtyRect* r,int sw,int sh){
@@ -1221,6 +1280,13 @@ void wyczysc_warstwe(
 void usun_warstwe(
     int pid
 ) {
+    if (application_popup.pid == pid)
+        skladacz_obrazu_ustaw_popup_aplikacji(pid, false, 0, 0, 0, 0);
+    if (drag_overlay.pid == pid ||
+        (pending_drag_overlay.pending && pending_drag_overlay.pid == pid))
+        skladacz_obrazu_ustaw_drag_overlay(pid, false, 0, 0);
+    if (system_overlay.pid == pid)
+        skladacz_obrazu_ustaw_overlay(pid, false, 0, 0, 0, 0);
     if (!pid_poprawny(
             pid)) {
 
@@ -1417,6 +1483,59 @@ void zloz_snapshot_region(const LayerRenderInfo& w,const GuiDirtyRect& r) {
     }
 }
 
+void rysuj_drag_overlay_region(const GuiDirtyRect& region) {
+    if (!drag_overlay.aktywny) return;
+    GuiDirtyRect d = drag_rect(drag_overlay);
+    const int x0 = d.x > region.x ? d.x : region.x;
+    const int y0 = d.y > region.y ? d.y : region.y;
+    const int x1 = d.x + d.width < region.x + region.width
+        ? d.x + d.width : region.x + region.width;
+    const int y1 = d.y + d.height < region.y + region.height
+        ? d.y + d.height : region.y + region.height;
+    if (x0 >= x1 || y0 >= y1) return;
+    for (int y = y0; y < y1; ++y) {
+        uint32_t* row = grafika_pobierz_wiersz_backbuffer(y);
+        if (!row) continue;
+        for (int x = x0; x < x1; ++x) {
+            const int lx = x - d.x;
+            const int ly = y - d.y;
+            const bool border = lx < 2 || ly < 2 ||
+                                lx >= d.width - 2 || ly >= d.height - 2;
+            const bool glyph = (lx >= 8 && lx < 26 && ly >= 7 && ly < 15);
+            if (border) row[x] = 0x00E58A00U;
+            else if (glyph) row[x] = 0x00FFBF00U;
+            else if (((lx + ly) & 1) == 0) row[x] = 0x00502A08U;
+        }
+    }
+}
+
+bool popup_aplikacji_spojny() {
+    return application_popup.otwarty &&
+           application_popup.pid > 0 &&
+           application_popup.pid < MAKS_WARSTW &&
+           generacja_okna[application_popup.pid] == application_popup.generacja &&
+           warstwa_ma_spojny_bufor(application_popup.pid);
+}
+
+void zloz_popup_aplikacji(LayerRenderInfo* layers, int count,
+                          const GuiDirtyRect& region) {
+    if (!popup_aplikacji_spojny()) return;
+    const GuiDirtyRect& p = application_popup.rect;
+    const int x0 = p.x > region.x ? p.x : region.x;
+    const int y0 = p.y > region.y ? p.y : region.y;
+    const int x1 = p.x + p.width < region.x + region.width
+        ? p.x + p.width : region.x + region.width;
+    const int y1 = p.y + p.height < region.y + region.height
+        ? p.y + p.height : region.y + region.height;
+    if (x0 >= x1 || y0 >= y1) return;
+    const GuiDirtyRect clip{x0, y0, x1 - x0, y1 - y0};
+    for (int i = 0; i < count; ++i)
+        if (layers[i].pid == application_popup.pid) {
+            zloz_snapshot_region(layers[i], clip);
+            return;
+        }
+}
+
 int snapshot_warstw(LayerRenderInfo* out) {
     uint64_t f=irq_off();++render_readers;int n=0;
     for(int i=0;i<MAKS_WARSTW;++i)if(warstwa_ma_spojny_bufor(i)){
@@ -1522,6 +1641,17 @@ void skladacz_obrazu_zloz_klatke() {
         );
     }
 
+    const GuiDirtyRect caly_ekran{0, 0, ekran_szer, ekran_wys};
+    rysuj_drag_overlay_region(caly_ekran);
+    if (popup_aplikacji_spojny()) {
+        const warstwa_obrazu& pw = tablica_warstw[application_popup.pid];
+        LayerRenderInfo pi{pw.bufor_pikseli, pw.x, pw.y, pw.szerokosc,
+                           pw.wysokosc, pw.z_order, pw.pid,
+            __atomic_load_n(&rozmiar_alokacji_warstwy[application_popup.pid],
+                            __ATOMIC_RELAXED) / sizeof(uint32_t)};
+        zloz_snapshot_region(pi, application_popup.rect);
+    }
+
     if (system_overlay.otwarty &&
         warstwa_ma_spojny_bufor(system_overlay.pid)) {
         const warstwa_obrazu& ow = tablica_warstw[system_overlay.pid];
@@ -1587,10 +1717,11 @@ void skladacz_obrazu_oznacz_ruch_kursora(int old_x,int old_y,int new_x,int new_y
 void skladacz_obrazu_obsluz_dirty() {
     uint64_t f=irq_off();bool ma_dirty=dirty_count!=0,ma_cursor=cursor_pending;irq_restore(f);
     const bool ma_geometrie=ma_pending_geometry();
-    if(!ma_dirty&&!ma_cursor&&!ma_geometrie)return;
+    const bool ma_drag=ma_pending_drag_overlay();
+    if(!ma_dirty&&!ma_cursor&&!ma_geometrie&&!ma_drag)return;
 
     uint64_t now=hpet_dostepny()?czas_monotoniczny_ns():0;
-    const bool klatka_potrzebna=ma_dirty||ma_geometrie;
+    const bool klatka_potrzebna=ma_dirty||ma_geometrie||ma_drag;
     if(klatka_potrzebna&&hpet_dostepny()&&nastepna_klatka_ns&&now<nastepna_klatka_ns){
         /* Kursor nie czeka na pacing duzych warstw. Restore i overlay nadal
            wykonuje petla PID 0, nigdy IRQ myszy. */
@@ -1612,6 +1743,7 @@ void skladacz_obrazu_obsluz_dirty() {
     /* Geometria jest konsumowana dopiero przez klatke, dzieki czemu wiele
        MOVE pomiedzy dwiema klatkami zastępuje poprzednia pozycje. */
     apply_pending_geometry(-1);
+    apply_pending_drag_overlay();
     bool drag_frame_work=false;
     f=irq_off();drag_frame_work=drag_frame_waiting;drag_frame_waiting=false;irq_restore(f);
     GuiDirtyRect work[SKLADACZ_MAKS_DIRTY_RECT];uint32_t count=0;uint64_t generation_start;bool cursor_work=false;GuiDirtyRect old_cursor{},new_cursor{};
@@ -1630,7 +1762,7 @@ void skladacz_obrazu_obsluz_dirty() {
     /* Faza A: wszystkie regiony trafiaja w calosci do scene backbufferu.
        Framebuffer nie jest dotykany podczas kosztownego compositingu. */
     const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
-    for(uint32_t ri=0;ri<count;++ri){const GuiDirtyRect&r=work[ri];pixels+=rect_area(r);grafika_odtworz_tlo_regionu(r.x,r.y,r.width,r.height);for(int li=0;li<layer_count;++li)zloz_snapshot_region(layers[li],r);if(system_overlay.otwarty){for(int li=0;li<layer_count;++li)if(layers[li].pid==system_overlay.pid){GuiDirtyRect o=system_overlay.rect;int x0=o.x>r.x?o.x:r.x,y0=o.y>r.y?o.y:r.y,x1=o.x+o.width<r.x+r.width?o.x+o.width:r.x+r.width,y1=o.y+o.height<r.y+r.height?o.y+o.height:r.y+r.height;if(x0<x1&&y0<y1){GuiDirtyRect clip{x0,y0,x1-x0,y1-y0};zloz_snapshot_region(layers[li],clip);}break;}}if(r.x+r.width>sw-150&&r.y+r.height>sh-40)rysuj_zegar_rtc();}
+    for(uint32_t ri=0;ri<count;++ri){const GuiDirtyRect&r=work[ri];pixels+=rect_area(r);grafika_odtworz_tlo_regionu(r.x,r.y,r.width,r.height);for(int li=0;li<layer_count;++li)zloz_snapshot_region(layers[li],r);rysuj_drag_overlay_region(r);zloz_popup_aplikacji(layers,layer_count,r);if(system_overlay.otwarty){for(int li=0;li<layer_count;++li)if(layers[li].pid==system_overlay.pid){GuiDirtyRect o=system_overlay.rect;int x0=o.x>r.x?o.x:r.x,y0=o.y>r.y?o.y:r.y,x1=o.x+o.width<r.x+r.width?o.x+o.width:r.x+r.width,y1=o.y+o.height<r.y+r.height?o.y+o.height:r.y+r.height;if(x0<x1&&y0<y1){GuiDirtyRect clip{x0,y0,x1-x0,y1-y0};zloz_snapshot_region(layers[li],clip);}break;}}if(r.x+r.width>sw-150&&r.y+r.height>sh-40)rysuj_zegar_rtc();}
     const uint64_t compose_end=hpet_dostepny()?czas_monotoniczny_us():0;
     /* Faza B: prezentujemy dopiero gotowe wiersze, a kursor nakladamy raz,
        jako ostatni overlay. Scene backbuffer pozostaje bez kursora. */
@@ -1721,6 +1853,11 @@ bool skladacz_obrazu_minimalizuj(int pid) {
         !widocznosc_warstwy[pid]) return false;
     const warstwa_obrazu& w = tablica_warstw[pid];
     widocznosc_warstwy[pid] = false;
+    if (application_popup.pid == pid)
+        skladacz_obrazu_ustaw_popup_aplikacji(pid, false, 0, 0, 0, 0);
+    if (drag_overlay.pid == pid ||
+        (pending_drag_overlay.pending && pending_drag_overlay.pid == pid))
+        skladacz_obrazu_ustaw_drag_overlay(pid, false, 0, 0);
     stan_okna[pid] = GUI_OKNO_ZMINIMALIZOWANE;
     skladacz_obrazu_oznacz_dirty_rect(w.x, w.y, w.szerokosc, w.wysokosc);
     return true;
@@ -1786,6 +1923,74 @@ int skladacz_obrazu_overlay_pod_punktem(int x, int y) {
     /* Otwarty popup jest modalny dla pierwszego MOUSE_DOWN. Dzieki temu
        klik poza nim zamyka popup i nie jest dostarczany drugi raz aplikacji. */
     return system_overlay.pid;
+}
+
+bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
+                                           int x, int y, int szer, int wys) {
+    if (!pid_poprawny(pid)) return false;
+    if (application_popup.otwarty) {
+        if (application_popup.pid != pid) return false;
+        const ApplicationPopupState stary = application_popup;
+        if (stary.tlo && stary.piksele != 0 &&
+            generacja_okna[pid] == stary.generacja &&
+            warstwa_ma_spojny_bufor(pid)) {
+            warstwa_obrazu& w = tablica_warstw[pid];
+            const int lokalny_x = stary.rect.x - w.x;
+            const int lokalny_y = stary.rect.y - w.y;
+            for (int py = 0; py < stary.rect.height; ++py) {
+                uint32_t* dst = w.bufor_pikseli +
+                    static_cast<uint64_t>(lokalny_y + py) * w.szerokosc +
+                    lokalny_x;
+                const uint32_t* src = stary.tlo +
+                    static_cast<uint64_t>(py) * stary.rect.width;
+                for (int px = 0; px < stary.rect.width; ++px) dst[px] = src[px];
+            }
+        }
+        if (stary.tlo) kfree(stary.tlo);
+        application_popup = {
+            false, -1, 0, {0, 0, 0, 0}, nullptr, 0};
+        skladacz_obrazu_oznacz_dirty_rect(stary.rect.x, stary.rect.y,
+                                          stary.rect.width, stary.rect.height);
+    }
+    if (!otwarty) return true;
+    if (!warstwa_ma_spojny_bufor(pid) || szer <= 0 || wys <= 0) return false;
+    warstwa_obrazu& w = tablica_warstw[pid];
+    const int64_t prawa = static_cast<int64_t>(x) + szer;
+    const int64_t dol = static_cast<int64_t>(y) + wys;
+    if (x < w.x || y < w.y || prawa > static_cast<int64_t>(w.x) + w.szerokosc ||
+        dol > static_cast<int64_t>(w.y) + w.wysokosc) return false;
+    const uint64_t piksele = static_cast<uint64_t>(static_cast<uint32_t>(szer)) *
+                              static_cast<uint32_t>(wys);
+    if (piksele == 0 || piksele > UINT64_MAX / sizeof(uint32_t)) return false;
+    uint32_t* tlo = static_cast<uint32_t*>(kmalloc(piksele * sizeof(uint32_t)));
+    if (!tlo) return false;
+    const int lokalny_x = x - w.x;
+    const int lokalny_y = y - w.y;
+    for (int py = 0; py < wys; ++py) {
+        const uint32_t* src = w.bufor_pikseli +
+            static_cast<uint64_t>(lokalny_y + py) * w.szerokosc + lokalny_x;
+        uint32_t* dst = tlo + static_cast<uint64_t>(py) * szer;
+        for (int px = 0; px < szer; ++px) dst[px] = src[px];
+    }
+    application_popup = {true, pid, generacja_okna[pid],
+                         {x, y, szer, wys}, tlo, piksele};
+    skladacz_obrazu_oznacz_dirty_rect(x, y, szer, wys);
+    return true;
+}
+
+void skladacz_obrazu_ustaw_drag_overlay(int pid, bool aktywny, int x, int y) {
+    if (!pid_poprawny(pid)) return;
+    uint64_t f = irq_off();
+    const int wlasciciel = pending_drag_overlay.pending
+        ? pending_drag_overlay.pid : drag_overlay.pid;
+    if (!aktywny && wlasciciel != pid) {
+        irq_restore(f);
+        return;
+    }
+    if (pending_drag_overlay.pending) ++drag_moves_coalesced;
+    pending_drag_overlay = {true, aktywny, aktywny ? pid : -1, x, y};
+    ++drag_moves_received;
+    irq_restore(f);
 }
 
 void skladacz_obrazu_debug_warstwy(const char* powod) {

@@ -364,6 +364,29 @@ struct StanDropProcesu {
 StanDropProcesu cele_drop[PZB_MAKS_PROCESOW] = {};
 constexpr uint64_t DROP_WYGASA_PO_TICKACH = 1000ULL;
 
+BwsSchowekPlikow schowek_plikow = {};
+uint64_t schowek_generacja = 0;
+bool schowek_blokada = false;
+
+struct BlokadaSchowka {
+    BlokadaSchowka() {
+        while (__atomic_test_and_set(&schowek_blokada, __ATOMIC_ACQUIRE))
+            asm volatile("pause" ::: "memory");
+    }
+    ~BlokadaSchowka() {
+        __atomic_clear(&schowek_blokada, __ATOMIC_RELEASE);
+    }
+};
+
+void powiadom_zmiane_systemu_plikow() {
+    bws_zdarzenie zdarzenie{};
+    zdarzenie.typ = BWS_ZDARZENIE_PLIKI_ZMIENIONE;
+    zdarzenie.timestamp = scheduler_pobierz_tick();
+    for (int pid = 1; pid < static_cast<int>(PZB_MAKS_PROCESOW); ++pid)
+        if (scheduler_pid_uzytkownika(pid))
+            (void)scheduler_dodaj_zdarzenie(pid, &zdarzenie);
+}
+
 /* =========================================================================
  * LOCK EKRANU
  * ========================================================================= */
@@ -920,12 +943,9 @@ uint64_t bws_utworz_plik(
     }
     wypisz_log("[PZB] file_create=ALLOW");
 
-    return
-        utworz_plik_z_pzb(
-            sciezka,
-            proces.poziom_zaufania)
-            ? 1ULL
-            : 0ULL;
+    const bool wynik = utworz_plik_z_pzb(sciezka, proces.poziom_zaufania);
+    if (wynik) powiadom_zmiane_systemu_plikow();
+    return wynik ? 1ULL : 0ULL;
 }
 
 uint64_t bws_zapisz_plik(
@@ -964,13 +984,9 @@ uint64_t bws_zapisz_plik(
         );
 
     if (dlugosc == 0) {
-        return
-            zapisz_do_pliku(
-                sciezka,
-                nullptr,
-                0)
-                ? 1ULL
-                : 0ULL;
+        const bool wynik = zapisz_do_pliku(sciezka, nullptr, 0);
+        if (wynik) powiadom_zmiane_systemu_plikow();
+        return wynik ? 1ULL : 0ULL;
     }
 
     if (arg2 == 0) {
@@ -996,13 +1012,9 @@ uint64_t bws_zapisz_plik(
         return 0;
     }
 
-    return
-        zapisz_do_pliku(
-            sciezka,
-            dane.jako_char(),
-            dlugosc)
-            ? 1ULL
-            : 0ULL;
+    const bool wynik = zapisz_do_pliku(sciezka, dane.jako_char(), dlugosc);
+    if (wynik) powiadom_zmiane_systemu_plikow();
+    return wynik ? 1ULL : 0ULL;
 }
 
 uint64_t bws_czytaj_plik(
@@ -1224,11 +1236,9 @@ uint64_t bws_usun_twor(
         return 0;
     }
 
-    return
-        usun_twor(
-            sciezka)
-            ? 1ULL
-            : 0ULL;
+    const bool wynik = usun_twor(sciezka);
+    if (wynik) powiadom_zmiane_systemu_plikow();
+    return wynik ? 1ULL : 0ULL;
 }
 
 uint64_t bws_zmien_nazwe(
@@ -1259,12 +1269,9 @@ uint64_t bws_zmien_nazwe(
         return 0;
     }
 
-    return
-        zmien_nazwe_tworu(
-            sciezka,
-            nowa_nazwa)
-            ? 1ULL
-            : 0ULL;
+    const bool wynik = zmien_nazwe_tworu(sciezka, nowa_nazwa);
+    if (wynik) powiadom_zmiane_systemu_plikow();
+    return wynik ? 1ULL : 0ULL;
 }
 
 uint64_t bws_pobierz_metadane(
@@ -1310,6 +1317,7 @@ uint64_t bws_przenies(
     }
     const bool wynik = przenies_twor(sciezka, folder);
     wypisz_log(wynik ? "[PZB] file_move=ALLOW" : "[PSF] file_move=ERROR");
+    if (wynik) powiadom_zmiane_systemu_plikow();
     return wynik ? 1ULL : 0ULL;
 }
 
@@ -1409,10 +1417,14 @@ uint64_t bws_aktualizuj_drag(
     if (!proces_ma_prawo(proces, PRAWO_GUI) ||
         aktualny_pid <= 0 || aktualny_pid >= static_cast<int>(PZB_MAKS_PROCESOW))
         return BWS_DROP_BLAD;
+    if (arg3 != 0)
+        skladacz_obrazu_ustaw_drag_overlay(aktualny_pid, false, 0, 0);
     char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
     if (!pobierz_sciezke_pliku(arg1, sciezka)) return BWS_DROP_BLAD;
     const int32_t x = static_cast<int32_t>(arg2 >> 32U);
     const int32_t y = static_cast<int32_t>(arg2 & UINT64_C(0xFFFFFFFF));
+    if (arg3 == 0)
+        skladacz_obrazu_ustaw_drag_overlay(aktualny_pid, true, x, y);
     int pid_celu = -1;
     int indeks = -1;
     const bool znaleziony = znajdz_cel_drop(x, y, &pid_celu, &indeks);
@@ -1441,7 +1453,85 @@ uint64_t bws_aktualizuj_drag(
         x, y, static_cast<uint32_t>(indeks));
     zrodlo.ostatni_pid_celu = -1;
     zrodlo.ostatni_cel = -1;
+    if (przeniesiono) powiadom_zmiane_systemu_plikow();
     return przeniesiono ? BWS_DROP_PRZENIESIONO : BWS_DROP_BLAD;
+}
+
+uint64_t bws_ustaw_schowek_plikow(proces_t& proces,
+                                  uint64_t arg1, uint64_t arg2) {
+    if (!proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ) ||
+        (arg2 != BWS_SCHOWEK_COPY && arg2 != BWS_SCHOWEK_CUT)) return 0;
+    char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
+    if (!pobierz_sciezke_pliku(arg1, sciezka)) return 0;
+    psf_metadane meta{};
+    if (!pobierz_metadane_tworu(sciezka, &meta)) return 0;
+    if (arg2 == BWS_SCHOWEK_CUT &&
+        !proces_moze_modyfikowac_obiekt(proces, sciezka)) {
+        wypisz_log("[PZB] clipboard_cut=DENY");
+        return 0;
+    }
+
+    BlokadaSchowka blokada;
+    BwsSchowekPlikow nowy{};
+    nowy.wersja = BWS_SCHOWEK_WERSJA;
+    nowy.operacja = static_cast<uint8_t>(arg2);
+    nowy.typ = meta.typ;
+    ++schowek_generacja;
+    if (schowek_generacja == 0) ++schowek_generacja;
+    nowy.generacja = schowek_generacja;
+    size_t i = 0;
+    for (; i + 1U < sizeof(nowy.sciezka) && sciezka[i] != '\0'; ++i)
+        nowy.sciezka[i] = sciezka[i];
+    if (sciezka[i] != '\0') return 0;
+    nowy.sciezka[i] = '\0';
+    schowek_plikow = nowy;
+    return 1;
+}
+
+uint64_t bws_pobierz_schowek_plikow(proces_t& proces, uint64_t arg1) {
+    if (!proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ) || arg1 == 0 ||
+        !czy_bezpieczny_zakres_uzytkownika_do_zapisu(
+            reinterpret_cast<void*>(arg1), sizeof(BwsSchowekPlikow))) return 0;
+    BwsSchowekPlikow kopia{};
+    {
+        BlokadaSchowka blokada;
+        kopia = schowek_plikow;
+        if (kopia.wersja == 0) kopia.wersja = BWS_SCHOWEK_WERSJA;
+    }
+    return skopiuj_do_przestrzeni_uzytkownika(
+        reinterpret_cast<void*>(arg1), &kopia, sizeof(kopia)) ? 1ULL : 0ULL;
+}
+
+uint64_t bws_wyczysc_schowek_plikow(proces_t& proces, uint64_t generacja) {
+    if (!proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ) || generacja == 0)
+        return 0;
+    BlokadaSchowka blokada;
+    if (schowek_plikow.operacja == BWS_SCHOWEK_PUSTY ||
+        schowek_plikow.generacja != generacja) return 0;
+    schowek_plikow = {};
+    schowek_plikow.wersja = BWS_SCHOWEK_WERSJA;
+    schowek_plikow.generacja = generacja;
+    return 1;
+}
+
+uint64_t bws_kopiuj_twor(proces_t& proces, uint64_t arg1, uint64_t arg2) {
+    if (!proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ)) return 0;
+    char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
+    char folder[MAX_SCIEZKA_PLIKU_BWS] = {};
+    if (!pobierz_sciezke_pliku(arg1, sciezka) ||
+        !pobierz_sciezke_pliku(arg2, folder)) return 0;
+    psf_metadane meta{};
+    if (!pobierz_metadane_tworu(sciezka, &meta) ||
+        !proces_moze_modyfikowac_sciezke(proces, folder) ||
+        !poziom_pliku_pozwala_modyfikowac(proces, folder)) {
+        wypisz_log("[PZB] file_copy=DENY");
+        return 0;
+    }
+    const bool wynik = kopiuj_twor_z_pzb(
+        sciezka, folder, proces.poziom_zaufania);
+    wypisz_log(wynik ? "[PZB] file_copy=ALLOW" : "[PSF] file_copy=ERROR");
+    if (wynik) powiadom_zmiane_systemu_plikow();
+    return wynik ? 1ULL : 0ULL;
 }
 
 /* =========================================================================
@@ -2466,6 +2556,14 @@ void bws_zakoncz_biezacy_proces() {
         if (scheduler_pid_uzytkownika(
                 aktualny_pid)) {
 
+            if (aktualny_pid < static_cast<int>(PZB_MAKS_PROCESOW)) {
+                StanDropProcesu& drop = cele_drop[aktualny_pid];
+                if (drop.ostatni_pid_celu > 0)
+                    wyslij_zdarzenie_drop(drop.ostatni_pid_celu,
+                        BWS_ZDARZENIE_DRAG_LEAVE, 0, 0, 0);
+                drop = {};
+            }
+
             usun_warstwe(
                 aktualny_pid
             );
@@ -3331,8 +3429,10 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
                 return 0;
             }
             wypisz_log("[PZB] directory_create=ALLOW");
-            return utworz_katalog_z_pzb(sciezka, proces.poziom_zaufania)
-                ? 1ULL : 0ULL;
+            const bool wynik = utworz_katalog_z_pzb(
+                sciezka, proces.poziom_zaufania);
+            if (wynik) powiadom_zmiane_systemu_plikow();
+            return wynik ? 1ULL : 0ULL;
         }
 
         case 47:
@@ -3350,6 +3450,25 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
         case 51:
             /* extronic16B_unicode.h: jeden glif ma 16 wierszy bitmapy. */
             return proces_ma_prawo(proces, PRAWO_GUI) ? 16ULL : 0ULL;
+
+        case 52:
+            return bws_ustaw_schowek_plikow(proces, arg1, arg2);
+
+        case 53:
+            return bws_pobierz_schowek_plikow(proces, arg1);
+
+        case 54:
+            return bws_wyczysc_schowek_plikow(proces, arg1);
+
+        case 55:
+            return bws_kopiuj_twor(proces, arg1, arg2);
+
+        case 56:
+            if (!proces_ma_prawo(proces, PRAWO_GUI)) return 0;
+            if (arg1 != 0 && bws_gui_aktywny_pid() != aktualny_pid) return 0;
+            return skladacz_obrazu_ustaw_popup_aplikacji(
+                aktualny_pid, arg1 != 0, gorne_i32(arg2), dolne_i32(arg2),
+                gorne_i32(arg3), dolne_i32(arg3)) ? 1ULL : 0ULL;
 
         default:
             /*

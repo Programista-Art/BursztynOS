@@ -73,7 +73,7 @@ wynik_otwarcia_skojarzonego otworz_plik_skojarzony(const char* sciezka);
 /* Addytywne ABI: zwraca rozmiar bez kopiowania danych. */
 bool pobierz_rozmiar_pliku(const char* sciezka, uint32_t* rozmiar);
 
-/* BWS 7/8 oraz addytywne BWS 47..50. */
+/* BWS 7/8 oraz addytywne BWS 47..56. */
 bool usun_twor_uzytkownika(const char* sciezka);
 bool zmien_nazwe_uzytkownika(const char* sciezka, const char* nowa_nazwa);
 bool pobierz_metadane_pliku(const char* sciezka, BwsMetadanePliku* metadane);
@@ -82,6 +82,14 @@ bool przenies_twor_uzytkownika(const char* sciezka,
 bool gui_rejestruj_cele_drop(const BwsCelDrop* cele, uint32_t liczba);
 BwsWynikDrop gui_aktualizuj_drag(const char* sciezka,
                                  int x, int y, bool wykonaj_drop);
+bool ustaw_schowek_plikow(const char* sciezka, BwsOperacjaSchowka operacja);
+bool pobierz_schowek_plikow(BwsSchowekPlikow* schowek);
+bool wyczysc_schowek_plikow(uint64_t oczekiwana_generacja);
+bool kopiuj_twor_uzytkownika(const char* sciezka,
+                             const char* folder_docelowy);
+/* Popup aplikacji jest skladany nad zwyklymi oknami, ale pod menu systemu. */
+bool gui_ustaw_popup_aplikacji(bool otwarty,
+                               int x, int y, int szer, int wys);
 
 char pobierz_znak();
 
