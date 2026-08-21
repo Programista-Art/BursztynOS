@@ -120,12 +120,15 @@ constexpr int MAX_ULUBIONE =
     10;
 
 constexpr size_t URL_POJEMNOSC =
-    256U;
+    2048U;
 
 constexpr size_t DOMENA_POJEMNOSC =
-    256U;
+    254U;
 
 constexpr size_t SCIEZKA_POJEMNOSC =
+    2048U;
+
+constexpr size_t URL_WIDOCZNY_POJEMNOSC =
     512U;
 
 constexpr size_t HTML_POJEMNOSC =
@@ -137,7 +140,7 @@ constexpr size_t SIEC_POJEMNOSC =
     1024U;
 
 constexpr size_t ULUBIONE_PLIK_POJEMNOSC =
-    4096U;
+    24U * 1024U;
 
 constexpr size_t STATUS_POJEMNOSC =
     96U;
@@ -1305,6 +1308,18 @@ void dopisz_do_historii(
         return;
     }
 
+    if (dlugosc_limit(
+            url,
+            URL_POJEMNOSC) >=
+        URL_POJEMNOSC) {
+
+        ustaw_status(
+            "Adres jest zbyt dlugi dla historii."
+        );
+
+        return;
+    }
+
     if (historia_idx >= 0 &&
         tekst_rowny(
             historia[
@@ -1335,13 +1350,20 @@ void dopisz_do_historii(
                 MAX_HISTORIA;
              ++i) {
 
-            (void)kopiuj_limit(
+            if (!kopiuj_limit(
                 historia[
                     i - 1
                 ],
                 URL_POJEMNOSC,
                 historia[i]
-            );
+            )) {
+                historia[i - 1][0] =
+                    '\0';
+                ustaw_status(
+                    "Uszkodzony wpis historii."
+                );
+                return;
+            }
         }
 
         historia_idx =
@@ -1349,13 +1371,21 @@ void dopisz_do_historii(
             1;
     }
 
-    (void)kopiuj_limit(
+    if (!kopiuj_limit(
         historia[
             historia_idx
         ],
         URL_POJEMNOSC,
         url
-    );
+    )) {
+        historia[
+            historia_idx
+        ][0] = '\0';
+        ustaw_status(
+            "Adres jest zbyt dlugi dla historii."
+        );
+        return;
+    }
 
     historia_max =
         historia_idx;
@@ -1417,6 +1447,7 @@ void wczytaj_ulubione() {
 
         size_t j =
             0;
+        bool za_dlugi=false;
 
         while (plik_ulubionych[i] != '\0' &&
                plik_ulubionych[i] != '\r' &&
@@ -1429,7 +1460,7 @@ void wczytaj_ulubione() {
                     ulubione_ilosc
                 ][j++] =
                     plik_ulubionych[i];
-            }
+            } else za_dlugi=true;
 
             ++i;
         }
@@ -1439,8 +1470,11 @@ void wczytaj_ulubione() {
         ][j] =
             '\0';
 
-        if (j > 0) {
+        if (j > 0&&!za_dlugi) {
             ++ulubione_ilosc;
+        }else if(za_dlugi){
+            ulubione[ulubione_ilosc][0]='\0';
+            ustaw_status("Pominieto zbyt dlugi URL w pliku zakladek.");
         }
     }
 }
@@ -1574,13 +1608,21 @@ void dodaj_obecna_do_ulubionych() {
         return;
     }
 
-    (void)kopiuj_limit(
+    if (!kopiuj_limit(
         ulubione[
             ulubione_ilosc
         ],
         URL_POJEMNOSC,
         url
-    );
+    )) {
+        ulubione[
+            ulubione_ilosc
+        ][0] = '\0';
+        ustaw_status(
+            "Adres jest zbyt dlugi dla zakladek."
+        );
+        return;
+    }
 
     ++ulubione_ilosc;
 
@@ -1711,11 +1753,13 @@ bool przygotuj_adres_wyszukiwania(
         URL_POJEMNOSC
     ] = {};
 
-    (void)kopiuj_limit(
+    if (!kopiuj_limit(
         wejscie,
         sizeof(wejscie),
         url
-    );
+    )) {
+        return false;
+    }
 
     static constexpr char PREFIKS[] =
         "https://html.duckduckgo.com/html/?q=";
@@ -2570,7 +2614,7 @@ bool dekoduj_chunked(
  * 13. REDIRECT
  * ========================================================================= */
 
-bool ustaw_url_z_location(
+__attribute__((noinline)) bool ustaw_url_z_location(
     char* cel,
     size_t pojemnosc,
     const char* location,
@@ -4162,10 +4206,12 @@ void husarz_rysuj_pole_adresu() {
     const char* url=zakladki[aktywna_zakladka].url;
     const int max_text_width=width-13;
     size_t length=0;while(url[length]!='\0'&&length+1U<URL_POJEMNOSC)++length;
-    const size_t visible_bytes=static_cast<size_t>(max_text_width>0?max_text_width/9:0);
+    size_t visible_bytes=static_cast<size_t>(max_text_width>0?max_text_width/9:0);
+    if(visible_bytes+1U>URL_WIDOCZNY_POJEMNOSC)
+        visible_bytes=URL_WIDOCZNY_POJEMNOSC-1U;
     size_t start=length>visible_bytes?length-visible_bytes:0;
     while(start<length&&(static_cast<uint8_t>(url[start])&0xC0U)==0x80U)++start;
-    char visible[URL_POJEMNOSC]{};
+    char visible[URL_WIDOCZNY_POJEMNOSC]{};
     (void)kopiuj_limit(visible,sizeof(visible),url+start);
     gui_rysuj_prostokat(x,y,width,28,w_polu_url?KOLOR_BIALY:0x00303030U);
     gui_wypisz_tekst_kolor(x+5,y+6,w_polu_url?0x00000001U:0x00D1D5DBU,visible);
@@ -4398,17 +4444,19 @@ void RysujInterfejs(
      * URL moze byc dluzszy od paska. Na razie GUI API nie ma clippingu
      * tekstu, wiec tworzymy widoczny suffix/prefix ograniczony bajtowo.
      */
-    char url_widoczny[
-        96
-    ] = {};
+    char url_widoczny[URL_WIDOCZNY_POJEMNOSC] = {};
 
     if (liczba_zakladek > 0) {
+        const char* pelny=zakladki[aktywna_zakladka].url;
+        size_t len=dlugosc_limit(pelny,URL_POJEMNOSC);
+        size_t widoczne=adres_w>13?static_cast<size_t>((adres_w-13)/9):0U;
+        if(widoczne+1U>sizeof(url_widoczny))widoczne=sizeof(url_widoczny)-1U;
+        size_t start=len>widoczne?len-widoczne:0U;
+        while(start<len&&(static_cast<uint8_t>(pelny[start])&0xC0U)==0x80U)++start;
         (void)kopiuj_limit(
             url_widoczny,
             sizeof(url_widoczny),
-            zakladki[
-                aktywna_zakladka
-            ].url
+            pelny+start
         );
     }
 
@@ -4846,7 +4894,7 @@ void ustaw_blad_html(
         0;
 }
 
-bool pobierz_jeden_url(
+__attribute__((noinline)) bool pobierz_jeden_url(
     Zakladka& z,
     bool* redirect,
     char redirect_url[
@@ -5270,11 +5318,16 @@ bool PobierzStrone(
             URL_POJEMNOSC
         ] = {};
 
-        (void)kopiuj_limit(
+        if (!kopiuj_limit(
             temp,
             sizeof(temp),
             z.url
-        );
+        )) {
+            ustaw_status(
+                "Adres URL jest zbyt dlugi."
+            );
+            return false;
+        }
 
         if (!kopiuj_limit(
                 z.url,
@@ -5327,16 +5380,6 @@ bool PobierzStrone(
         false
     );
 
-    char final_url[
-        URL_POJEMNOSC
-    ] = {};
-
-    (void)kopiuj_limit(
-        final_url,
-        sizeof(final_url),
-        z.url
-    );
-
     for (int redirect_count = 0;
          redirect_count <=
              MAX_PRZEKIEROWAN;
@@ -5361,15 +5404,9 @@ bool PobierzStrone(
         }
 
         if (!redirect) {
-            (void)kopiuj_limit(
-                final_url,
-                sizeof(final_url),
-                z.url
-            );
-
             if (zapisz_historie) {
                 dopisz_do_historii(
-                    final_url
+                    z.url
                 );
             }
 
@@ -5392,11 +5429,16 @@ bool PobierzStrone(
             return false;
         }
 
-        (void)kopiuj_limit(
+        if (!kopiuj_limit(
             z.url,
             sizeof(z.url),
             redirect_url
-        );
+        )) {
+            ustaw_status(
+                "Adres przekierowania jest zbyt dlugi."
+            );
+            return false;
+        }
 
         ustaw_status(
             "Przekierowanie HTTP..."
@@ -5517,7 +5559,7 @@ bool klik_menu(
                     index <
                         ulubione_ilosc) {
 
-                    (void)kopiuj_limit(
+                    if (!kopiuj_limit(
                         zakladki[
                             aktywna_zakladka
                         ].url,
@@ -5525,7 +5567,12 @@ bool klik_menu(
                         ulubione[
                             index
                         ]
-                    );
+                    )) {
+                        ustaw_status(
+                            "Uszkodzony adres w zakladkach."
+                        );
+                        return false;
+                    }
 
                     menu_ulubione_otwarte =
                         false;
@@ -5670,7 +5717,7 @@ void klik_narzedzia(
 
             --historia_idx;
 
-            (void)kopiuj_limit(
+            if (!kopiuj_limit(
                 zakladki[
                     aktywna_zakladka
                 ].url,
@@ -5678,7 +5725,13 @@ void klik_narzedzia(
                 historia[
                     historia_idx
                 ]
-            );
+            )) {
+                ++historia_idx;
+                ustaw_status(
+                    "Uszkodzony wpis historii."
+                );
+                return;
+            }
 
             Nawiguj(
                 false,
@@ -5708,7 +5761,7 @@ void klik_narzedzia(
 
             ++historia_idx;
 
-            (void)kopiuj_limit(
+            if (!kopiuj_limit(
                 zakladki[
                     aktywna_zakladka
                 ].url,
@@ -5716,7 +5769,13 @@ void klik_narzedzia(
                 historia[
                     historia_idx
                 ]
-            );
+            )) {
+                --historia_idx;
+                ustaw_status(
+                    "Uszkodzony wpis historii."
+                );
+                return;
+            }
 
             Nawiguj(
                 false,
@@ -6158,7 +6217,7 @@ void obsluz_znak(
                 znak)) {
 
             ustaw_status(
-                "Adres URL osiagnal limit 255 bajtow."
+                "Adres URL osiagnal limit 2047 bajtow."
             );
         }
     }
@@ -6377,10 +6436,11 @@ extern "C" [[noreturn]] void _start() {
                 (void)wewnatrz;
 
                 trzeba_rysowac =
-                    !aplikacja_zminimalizowana;
+                    !aplikacja_zminimalizowana &&
+                    !dragging;
 
                 pelne_tlo =
-                    true;
+                    !dragging;
             }
 
             if (!aplikacja_zminimalizowana &&
@@ -6443,8 +6503,6 @@ extern "C" [[noreturn]] void _start() {
                 WIN_X,
                 WIN_Y
             );
-
-            gui_odswiez();
         }
 
         if (scroll_dragging &&
@@ -6493,12 +6551,6 @@ extern "C" [[noreturn]] void _start() {
                 dragging =
                     false;
                 gui_ustaw_capture_myszy(false);
-
-                trzeba_rysowac =
-                    true;
-
-                pelne_tlo =
-                    true;
             }
 
             scroll_dragging =

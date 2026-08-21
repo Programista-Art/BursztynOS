@@ -381,6 +381,16 @@ bool czytaj_plik(const char* sciezka,
         0) != 0;
 }
 
+bool pobierz_rozmiar_pliku(const char* sciezka, uint32_t* rozmiar) {
+    if (!sciezka || !rozmiar) return false;
+    const uint64_t wynik = bws_wywolaj(
+        44, reinterpret_cast<uint64_t>(sciezka), 0, 0, 0);
+    if (wynik == 0 || wynik > static_cast<uint64_t>(UINT32_MAX) + 1ULL)
+        return false;
+    *rozmiar = static_cast<uint32_t>(wynik - 1ULL);
+    return true;
+}
+
 void bws_dzwiek_test(uint32_t czestotliwosc,
                      uint32_t czas) {
     bws_wywolaj(

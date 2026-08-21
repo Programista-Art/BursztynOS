@@ -10,6 +10,10 @@
 #define BURSZTYN_DEBUG_GUI_PERF 0
 #endif
 
+#ifndef BURSZTYN_DEBUG_XHCI
+#define BURSZTYN_DEBUG_XHCI 0
+#endif
+
 void wypisz_log(const char* tekst);
 
 namespace {
@@ -393,7 +397,13 @@ struct hid_wynik_konfiguracji { uint8_t konfiguracja, interfejs, alternatywa, en
 uint32_t* xhci_context_ptr(DmaBuffer& kontekst,uint8_t indeks){
     return reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(kontekst.virtual_address)+static_cast<size_t>(indeks+1U)*xhc.context_size);
 }
-void xhci_log_cfg(const char* pole,uint64_t wartosc){char s[128],*p=s,*e=s+sizeof(s);append(p,e,"[xHCI-CFG] ");append(p,e,pole);append(p,e,"=");append_hex(p,e,wartosc);*p=0;wypisz_log(s);}
+void xhci_log_cfg(const char* pole,uint64_t wartosc){
+#if BURSZTYN_DEBUG_XHCI
+    char s[128],*p=s,*e=s+sizeof(s);append(p,e,"[xHCI-CFG] ");append(p,e,pole);append(p,e,"=");append_hex(p,e,wartosc);*p=0;wypisz_log(s);
+#else
+    (void)pole;(void)wartosc;
+#endif
+}
 bool xhci_waliduj_configure_endpoint(XhciDevice& d,const hid_wynik_konfiguracji& h,uint32_t* kontrola,uint32_t* slot,uint32_t* ep){
     const uint32_t add=kontrola[1],drop=kontrola[0],entries=(slot[0]>>27)&31U,typ=(ep[1]>>3)&7U,stan=ep[0]&7U;
     const uint32_t interval=(ep[0]>>16)&255U,mps=(ep[1]>>16)&0x7FFU,burst=(ep[1]>>8)&255U,esit=ep[4]&0xFFFFU,pstreams=(ep[0]>>10)&31U;

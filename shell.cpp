@@ -113,6 +113,7 @@ constexpr int SHELL_TEXT_Y = 34;
 constexpr int SHELL_LINE_H = 16;
 constexpr int SHELL_COLS = 70;
 constexpr int SHELL_ROWS = 19;
+constexpr size_t VISUAL_COLUMNS = static_cast<size_t>(SHELL_COLS);
 
 char shell_ekran[SHELL_ROWS][SHELL_COLS + 1] = {};
 int shell_wiersz = 0;
@@ -222,6 +223,10 @@ void shell_dopisz_znak(char c) {
     }
     shell_ekran[shell_wiersz][shell_kolumna++] = c;
     shell_ekran[shell_wiersz][shell_kolumna] = '\0';
+    if (shell_kolumna >= SHELL_COLS) {
+        shell_kolumna = 0;
+        if (++shell_wiersz >= SHELL_ROWS) shell_przewin();
+    }
 }
 
 void shell_wypisz(const char* tekst) {
@@ -273,7 +278,6 @@ void shell_obsluz_mysz(const bws_zdarzenie& e) {
             shell_y = ny;
             /* Przesuwamy metadane warstwy. Bufor pikseli pozostaje nietkniety. */
             bws_przesun_warstwe(shell_x, shell_y);
-            gui_odswiez();
         }
     } else if (e.typ == BWS_ZDARZENIE_MYSZ_UP && shell_drag) {
         shell_drag = false;
@@ -289,10 +293,11 @@ constexpr uint64_t BUR_DATA_OFFSET = 0x9000ULL;
 constexpr uint64_t BUR_DATA_SIZE   = 0x20000ULL;
 constexpr uint64_t BUR_DATA_VADDR  = 0x609000ULL;
 
-constexpr size_t MAX_LINIA = 128;
-constexpr size_t MAX_SCIEZKA = 64;
-constexpr size_t MAX_NAZWA_HOSTA = 64;
-constexpr size_t MAX_SCIEZKA_HTTP = 96;
+constexpr size_t SHELL_INPUT_CAPACITY = 2048;
+constexpr size_t SHELL_HISTORY_ENTRY_CAPACITY = 2048;
+constexpr size_t MAX_SCIEZKA = 512;
+constexpr size_t MAX_NAZWA_HOSTA = 254;
+constexpr size_t MAX_SCIEZKA_HTTP = 2048;
 
 constexpr size_t HISTORIA_MAX = 5;
 
@@ -316,7 +321,8 @@ constexpr uint32_t HTTP_BUF_SIZE = 32U * 1024U;
 alignas(16)
 char bufor_http[HTTP_BUF_SIZE] = {};
 
-char historia[HISTORIA_MAX][MAX_LINIA] = {};
+char historia[HISTORIA_MAX][SHELL_HISTORY_ENTRY_CAPACITY] = {};
+char komenda_dla_historii[SHELL_HISTORY_ENTRY_CAPACITY] = {};
 size_t historia_ilosc = 0;
 
 /* =========================================================================
@@ -561,6 +567,27 @@ void wypisz_znak(
     shell_rysuj_zmiane_wejscia(old_row);
 }
 
+void usun_znak_wejscia_wizualnie() {
+    const int old_row=shell_wiersz;
+    if(shell_kolumna>0){
+        shell_ekran[shell_wiersz][--shell_kolumna]='\0';
+    }else if(shell_wiersz>0){
+        --shell_wiersz;shell_kolumna=static_cast<int>(VISUAL_COLUMNS);
+        shell_ekran[shell_wiersz][--shell_kolumna]='\0';
+    }else return;
+    if(old_row!=shell_wiersz)shell_rysuj_wiersz(old_row,false);
+    shell_rysuj_wiersz(shell_wiersz,true);gui_odswiez();++shell_perf.compose_requests;
+}
+
+void odtworz_widoczny_ogon_wejscia(const char* tekst,size_t len){
+    if(!tekst)return;
+    for(int r=0;r<SHELL_ROWS;++r)for(int c=0;c<=SHELL_COLS;++c)shell_ekran[r][c]='\0';
+    const size_t cap=static_cast<size_t>(SHELL_ROWS)*VISUAL_COLUMNS;
+    size_t start=len>cap?len-cap:0;shell_wiersz=0;shell_kolumna=0;
+    for(size_t i=start;i<len;++i)shell_dopisz_znak(tekst[i]);
+    shell_rysuj_terminal();
+}
+
 void uint_do_str(
     uint64_t wartosc,
     char* bufor,
@@ -671,13 +698,16 @@ bool pobierz_linie(
 
             if (!przepelnienie &&
                 pozycja > 0) {
-
-                --pozycja;
+                size_t usunieto=1U;--pozycja;
+                while(pozycja>0&&
+                      (static_cast<uint8_t>(bufor[pozycja])&0xC0U)==0x80U){
+                    --pozycja;++usunieto;
+                }
                 bufor[pozycja] = '\0';
 
-                const int old_row=shell_wiersz;
-                shell_dopisz_znak('\b');
-                shell_rysuj_zmiane_wejscia(old_row);
+                if(shell_wiersz==0&&shell_kolumna==0)
+                    odtworz_widoczny_ogon_wejscia(bufor,pozycja);
+                else for(size_t i=0;i<usunieto;++i)usun_znak_wejscia_wizualnie();
                 ++shell_perf.key_count;
             }
 
@@ -729,15 +759,13 @@ bool pobierz_linie(
  * ========================================================================= */
 
 struct Argumenty {
-    static constexpr size_t MAX_ARG = 5;
-    static constexpr size_t MAX_ARG_LEN = 96;
-
-    char dane[MAX_ARG][MAX_ARG_LEN];
+    static constexpr size_t MAX_ARG = 8;
+    char* dane[MAX_ARG];
     size_t liczba;
 };
 
 bool parse_argumenty(
-    const char* linia,
+    char* linia,
     Argumenty* wynik
 ) {
     if (!linia ||
@@ -750,7 +778,7 @@ bool parse_argumenty(
     for (size_t i = 0;
          i < Argumenty::MAX_ARG;
          ++i) {
-        wynik->dane[i][0] = '\0';
+        wynik->dane[i] = nullptr;
     }
 
     size_t i = 0;
@@ -770,71 +798,23 @@ bool parse_argumenty(
             return false;
         }
 
-        char* dst =
-            wynik->dane[
-                wynik->liczba];
-
-        size_t out = 0;
         bool cudzyslow =
             linia[i] == '"';
 
         if (cudzyslow) {
             ++i;
+            wynik->dane[wynik->liczba]=&linia[i];
+            if(linia[i]=='"')return false;
+            while(linia[i]!='\0'&&linia[i]!='"')++i;
+            if(linia[i]!='"')return false;
+            linia[i++]='\0';
+            if(linia[i]!='\0'&&!jest_biala_spacja(linia[i]))return false;
+        }else{
+            wynik->dane[wynik->liczba]=&linia[i];
+            while(linia[i]!='\0'&&!jest_biala_spacja(linia[i]))++i;
+            if(linia[i]!='\0')linia[i++]='\0';
         }
-
-        while (linia[i] != '\0') {
-            const char c =
-                linia[i];
-
-            if (cudzyslow) {
-                if (c == '"') {
-                    ++i;
-                    break;
-                }
-            } else if (jest_biala_spacja(c)) {
-                break;
-            }
-
-            if (out + 1 >=
-                Argumenty::MAX_ARG_LEN) {
-                return false;
-            }
-
-            dst[out++] = c;
-            ++i;
-        }
-
-        if (cudzyslow &&
-            linia[i - 1] != '"') {
-            return false;
-        }
-
-        dst[out] = '\0';
-
-        if (out == 0) {
-            return false;
-        }
-
-        if (!cudzyslow) {
-            while (jest_biala_spacja(
-                       linia[i])) {
-                ++i;
-            }
-        } else {
-            /*
-             * Po zamknieciu cudzyslowu wymagamy konca lub separatora.
-             */
-            if (linia[i] != '\0' &&
-                !jest_biala_spacja(
-                    linia[i])) {
-                return false;
-            }
-
-            while (jest_biala_spacja(
-                       linia[i])) {
-                ++i;
-            }
-        }
+        while(jest_biala_spacja(linia[i]))++i;
 
         ++wynik->liczba;
     }
@@ -1011,7 +991,7 @@ void dodaj_do_historii(
          --i) {
 
         for (size_t j = 0;
-             j < MAX_LINIA;
+             j < SHELL_HISTORY_ENTRY_CAPACITY;
              ++j) {
 
             historia[i][j] =
@@ -1021,12 +1001,12 @@ void dodaj_do_historii(
 
     wyzeruj(
         historia[0],
-        MAX_LINIA
+        SHELL_HISTORY_ENTRY_CAPACITY
     );
 
     (void)kopiuj_tekst(
         historia[0],
-        MAX_LINIA,
+        SHELL_HISTORY_ENTRY_CAPACITY,
         komenda
     );
 
@@ -2058,7 +2038,7 @@ void wykonaj_polecenie(
 
         if (!tekst_zakonczony_w_limicie(
                 a.dane[2],
-                Argumenty::MAX_ARG_LEN,
+                SHELL_INPUT_CAPACITY,
                 &dlugosc)) {
 
             wypisz(
@@ -2301,7 +2281,7 @@ void _start() {
         "Wpisz 'pomoc', aby zobaczyc polecenia.\n"
     );
 
-    char linia[MAX_LINIA] = {};
+    char linia[SHELL_INPUT_CAPACITY] = {};
 
     for (;;) {
         wypisz("\npowloka> ");
@@ -2316,7 +2296,7 @@ void _start() {
 
         if (!cala_linia) {
             wypisz(
-                "Blad: polecenie przekracza limit 127 bajtow i zostalo odrzucone.\n"
+                "Blad: polecenie przekracza limit 2047 bajtow i zostalo odrzucone.\n"
             );
             continue;
         }
@@ -2327,13 +2307,17 @@ void _start() {
 
         Argumenty argumenty{};
 
+        if(!kopiuj_tekst(komenda_dla_historii,sizeof(komenda_dla_historii),linia)){
+            wypisz("Blad: nie mozna zapisac komendy w bounded historii.\n");
+            continue;
+        }
+
         if (!parse_argumenty(
                 linia,
                 &argumenty)) {
 
             wypisz(
-                "Blad skladni: za duzo argumentow, argument jest za dlugi "
-                "lub brakuje zamykajacego cudzyslowu.\n"
+                "Blad skladni: za duzo argumentow lub brakuje zamykajacego cudzyslowu.\n"
             );
             continue;
         }
@@ -2343,7 +2327,7 @@ void _start() {
         }
 
         dodaj_do_historii(
-            linia
+            komenda_dla_historii
         );
 
         wykonaj_polecenie(

@@ -680,7 +680,6 @@ extern "C" __attribute__((noreturn)) void _start() {
                 WIN_Y = nowy_y;
 
                 bws_przesun_warstwe(WIN_X, WIN_Y);
-                gui_odswiez();
             }
         }
 

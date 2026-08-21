@@ -299,7 +299,7 @@ constexpr size_t MAX_DOMENA_BWS =
     256;
 
 constexpr size_t MAX_SCIEZKA_HTTP_BWS =
-    512;
+    2048;
 
 constexpr uint32_t MAX_LISTA_KATALOGU_BWS =
     64U * 1024U;
@@ -1769,7 +1769,10 @@ bool waliduj_tekst_gui(
      * Wlasciwa funkcja grafiki kopiuje string ponownie do lokalnego bufora.
      * Ten odczyt daje syscallowi wiarygodny kod wyniku dla zlego wskaznika.
      */
-    char tmp[256] = {};
+    constexpr size_t MAX_TEKST_GUI_SYSCALL =
+        1024U;
+
+    char tmp[MAX_TEKST_GUI_SYSCALL] = {};
 
     if (limit >
         sizeof(tmp)) {
@@ -2501,7 +2504,7 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
                     PRAWO_GUI) ||
                 !waliduj_tekst_gui(
                     arg3,
-                    256)) {
+                    1024)) {
 
                 return 0;
             }
@@ -2635,7 +2638,7 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
                     PRAWO_GUI) ||
                 !waliduj_tekst_gui(
                     arg4,
-                    256)) {
+                    1024)) {
 
                 return 0;
             }
@@ -3030,6 +3033,14 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
         case 43:
             if (!operacja_systemowa_dozwolona(proces) || arg1 == 0) return 0;
             return bws_gui_aktywuj_okno(arg1) ? 1ULL : 0ULL;
+
+        case 44: {
+            if (!proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ)) return 0;
+            char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
+            if (!pobierz_sciezke_pliku(arg1, sciezka)) return 0;
+            /* +1 zachowuje 0 jako blad i pozwala reprezentowac pusty plik. */
+            return static_cast<uint64_t>(rozmiar_pliku(sciezka)) + 1ULL;
+        }
 
         default:
             /*

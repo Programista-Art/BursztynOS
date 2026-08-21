@@ -4,9 +4,9 @@
  * Aplikacja Ring 3 korzystajaca z bursztyn_gui.
  *
  * Model dokumentu:
- *   - maks. 50 linii,
- *   - maks. 127 bajtow UTF-8 + NUL na linie,
- *   - maks. 6399 bajtow przy wczytywaniu pliku przez aktualne API,
+ *   - jeden bounded bufor 64 KiB,
+ *   - linie maja zmienna dlugosc i sa rozdzielone NUL-em wewnatrz bufora,
+ *   - nie istnieje osobny maly limit dlugosci pojedynczej linii,
  *   - zapis zachowuje puste linie pomiedzy tekstem,
  *   - edycja jest insert-mode: znak wstawia sie w srodku linii,
  *   - Enter dzieli linie, Backspace na poczatku laczy z poprzednia.
@@ -15,15 +15,14 @@
  *   - kazda operacja na buforach ma jawny limit,
  *   - sciezki sa ograniczone do 127 bajtow i musza byc absolutne,
  *   - CR/LF i znaki kontrolne nie sa wpuszczane do sciezki,
- *   - parser pliku jest ograniczony rozmiarem temp_buf i obsluguje CRLF,
+ *   - parser pliku pracuje in-place i obsluguje CRLF,
  *   - nie przekazujemy surowych wskaznikow Ring 3 poza wrappery GUI,
  *   - proces konczy sie przez gui_zakoncz_aplikacje(),
  *   - aplikacja tworzy wlasna warstwe compositor'a i przesuwa ja przez
  *     bws_przesun_warstwe(), zamiast wykonywac syscall 34 recznie.
  *
- * Ograniczenie aktualnego API plikowego:
- * czytaj_plik() zwraca tylko bool, a nie liczbe bajtow. Dlatego przed
- * odczytem zerujemy caly temp_buf i parser nigdy nie czyta poza jego koniec.
+ * Rozmiar jest pobierany addytywnym wywolaniem BWS 44 przed odczytem, wiec
+ * load i save korzystaja z tego samego limitu calego dokumentu.
  */
 
 #include "bursztyn_gui.h"
@@ -103,20 +102,15 @@ NaglowekBur naglowek = {
 
 namespace {
 
-constexpr int LICZBA_LINII =
-    50;
+constexpr size_t DOKUMENT_POJEMNOSC =
+    64U * 1024U;
 
-constexpr int BAJTY_LINII =
-    128;
+constexpr size_t MAKS_ROZMIAR_PLIKU =
+    DOKUMENT_POJEMNOSC - 1U;
 
-constexpr int MAKS_TEKST_LINII =
-    BAJTY_LINII - 1;
-
-constexpr size_t BUFOR_PLIKU =
-    6400U;
-
-constexpr size_t MAKS_ODCZYT_PLIKU =
-    BUFOR_PLIKU - 1U;
+/* To limit chwilowego fragmentu viewportu, a nie limit linii dokumentu. */
+constexpr size_t WIDOCZNA_LINIA_POJEMNOSC =
+    1024U;
 
 constexpr int BAJTY_SCIEZKI =
     128;
@@ -160,9 +154,6 @@ constexpr int DOMYSLNY_WIN_W =
 constexpr int DOMYSLNY_WIN_H =
     400;
 
-constexpr int PRZYBLIZONA_SZER_ZNAKU =
-    9;
-
 constexpr uint32_t KOLOR_BURSZTYN =
     0x00E58A00U;
 
@@ -187,23 +178,20 @@ constexpr uint32_t KOLOR_SZARY =
 constexpr uint32_t KOLOR_CZERWONY =
     0x00AA0000U;
 
+#ifndef BURSZTYN_DEBUG_GUI_PERF
+#define BURSZTYN_DEBUG_GUI_PERF 0
+#endif
+
 /* =========================================================================
  * 3. STAN DOKUMENTU
  * ========================================================================= */
 
 char dokument[
-    LICZBA_LINII
-][
-    BAJTY_LINII
-] __attribute__((section(".data"))) = {};
+    DOKUMENT_POJEMNOSC
+] __attribute__((section(".bss"), aligned(16))) = {};
 
-char liniowy_bufor[
-    BUFOR_PLIKU
-] __attribute__((section(".data"))) = {};
-
-char temp_buf[
-    BUFOR_PLIKU
-] __attribute__((section(".data"))) = {};
+/* Liczy wszystkie bajty modelu, lacznie z koncowym separatorem NUL. */
+size_t dokument_uzyte = 1U;
 
 char pasek_statusu[
     BAJTY_STATUSU
@@ -229,9 +217,6 @@ int cur_c =
     0;
 
 int scroll_y =
-    0;
-
-int scroll_x =
     0;
 
 bool dokument_zmieniony =
@@ -306,6 +291,65 @@ bool zmaksymalizowane =
 
 bool aplikacja_zminimalizowana =
     false;
+
+struct ProstokatEdytora {
+    int x;
+    int y;
+    int szerokosc;
+    int wysokosc;
+};
+
+struct WierszEkranowy {
+    int linia;
+    int poczatek;
+    int koniec;
+};
+
+struct StanLayoutEdycji {
+    bool poprawny;
+    int scroll;
+    int wiersz_kursora;
+    int pierwszy_wiersz_linii;
+    int wiersze_linii;
+    int linia;
+    int kursor_bajt;
+    int poprzedni_kodpunkt;
+    int dlugosc;
+    int poczatek_segmentu;
+    int koniec_segmentu;
+    int wszystkie_linie;
+};
+
+struct ZakresRedraw {
+    bool pelny_viewport;
+    int pierwszy_wiersz;
+    int ostatni_wiersz;
+};
+
+#if BURSZTYN_DEBUG_GUI_PERF
+volatile uint64_t notatnik_key = 0;
+volatile uint64_t notatnik_redraw_pixels = 0;
+volatile uint64_t notatnik_full_viewport_redraw = 0;
+volatile uint64_t notatnik_visual_row_redraw = 0;
+#endif
+
+int cache_szerokosci_ascii[128] = {};
+
+/*
+ * Jedyne zrodlo geometrii pola tekstowego. Helper jest celowo bez cache:
+ * kazde renderowanie, hit-test i przeliczenie soft wrapu korzysta z
+ * aktualnych WIN_W/WIN_H, rowniez bezposrednio po maximize/restore.
+ */
+ProstokatEdytora aktualny_prostokat_edytora() {
+    ProstokatEdytora wynik{};
+    wynik.x = WIN_X + 8;
+    wynik.y = WIN_Y + TEXT_Y_OFFSET;
+    wynik.szerokosc = WIN_W - 16;
+    if (wynik.szerokosc < 1) wynik.szerokosc = 1;
+    wynik.wysokosc = WIN_H - TEXT_Y_OFFSET - STATUS_H - 4;
+    if (wynik.wysokosc < 1) wynik.wysokosc = 1;
+    return wynik;
+}
 
 /* =========================================================================
  * 5. PROSTE OPERACJE PAMIECIOWE / TEKST
@@ -443,6 +487,42 @@ int clamp_int(
     return v;
 }
 
+bool przesun_dokument(size_t cel, size_t zrodlo, size_t ile) {
+    if (cel > DOKUMENT_POJEMNOSC || zrodlo > dokument_uzyte ||
+        ile > dokument_uzyte - zrodlo ||
+        ile > DOKUMENT_POJEMNOSC - cel) {
+        return false;
+    }
+    if (ile == 0 || cel == zrodlo) return true;
+    if (cel < zrodlo) {
+        for (size_t i = 0; i < ile; ++i) dokument[cel + i] = dokument[zrodlo + i];
+    } else {
+        for (size_t i = ile; i > 0; --i) dokument[cel + i - 1U] = dokument[zrodlo + i - 1U];
+    }
+    return true;
+}
+
+size_t offset_linii(int r) {
+    if (r < 0 || r >= liczba_linii || dokument_uzyte == 0 ||
+        dokument_uzyte > DOKUMENT_POJEMNOSC) return dokument_uzyte;
+    size_t p = 0;
+    for (int linia = 0; linia < r; ++linia) {
+        while (p < dokument_uzyte && dokument[p] != '\0') ++p;
+        if (p >= dokument_uzyte) return dokument_uzyte;
+        ++p;
+    }
+    return p < dokument_uzyte ? p : dokument_uzyte;
+}
+
+char* pobierz_linie(int r) {
+    const size_t p = offset_linii(r);
+    return p < dokument_uzyte ? dokument + p : nullptr;
+}
+
+const char* pobierz_linie_const(int r) {
+    return pobierz_linie(r);
+}
+
 /* =========================================================================
  * 6. UTF-8 / KURSOR
  * ========================================================================= */
@@ -459,19 +539,11 @@ bool utf8_kontynuacja(
 int dlugosc_linii(
     int r
 ) {
-    if (r < 0 ||
-        r >= LICZBA_LINII) {
-
-        return 0;
-    }
-
-    return
-        static_cast<int>(
-            dlugosc_limit(
-                dokument[r],
-                BAJTY_LINII
-            )
-        );
+    const size_t p = offset_linii(r);
+    if (p >= dokument_uzyte) return 0;
+    const size_t len = dlugosc_limit(dokument + p, dokument_uzyte - p);
+    if (len >= dokument_uzyte - p || len > static_cast<size_t>(INT32_MAX)) return 0;
+    return static_cast<int>(len);
 }
 
 int utf8_poprzedni_start(
@@ -529,21 +601,14 @@ int utf8_nastepny_start(
 
 int utf8_przytnij_do_granicy(
     const char* tekst,
-    int pozycja
+    int pozycja,
+    int len
 ) {
     if (!tekst ||
         pozycja <= 0) {
 
         return 0;
     }
-
-    int len =
-        static_cast<int>(
-            dlugosc_limit(
-                tekst,
-                BAJTY_LINII
-            )
-        );
 
     if (pozycja >= len) {
         return len;
@@ -564,83 +629,27 @@ int utf8_przytnij_do_granicy(
     return p;
 }
 
-int utf8_liczba_znakow_do(
+int szerokosc_fragmentu(
     const char* tekst,
-    int bajty
-) {
-    if (!tekst ||
-        bajty <= 0) {
+    int poczatek,
+    int koniec,
+    int len
+);
 
-        return 0;
-    }
+bool pobierz_wiersz_ekranowy(
+    int indeks,
+    WierszEkranowy* wynik
+);
 
-    int znaki =
-        0;
+int wiersz_ekranowy_kursora();
 
-    for (int i = 0;
-         i < bajty &&
-         tekst[i] != '\0';
-         ++i) {
-
-        if (!utf8_kontynuacja(
-                static_cast<unsigned char>(
-                    tekst[i]
-                ))) {
-
-            ++znaki;
-        }
-    }
-
-    return znaki;
-}
-
-int utf8_bajt_dla_kolumny(
-    const char* tekst,
-    int kolumna
-) {
-    if (!tekst ||
-        kolumna <= 0) {
-
-        return 0;
-    }
-
-    int len =
-        static_cast<int>(
-            dlugosc_limit(
-                tekst,
-                BAJTY_LINII
-            )
-        );
-
-    int p =
-        0;
-
-    int znak =
-        0;
-
-    while (p < len &&
-           znak < kolumna) {
-
-        p =
-            utf8_nastepny_start(
-                tekst,
-                p,
-                len
-            );
-
-        ++znak;
-    }
-
-    return p;
-}
-
-int kolumna_kursora() {
-    return
-        utf8_liczba_znakow_do(
-            dokument[cur_r],
-            cur_c
-        );
-}
+int bajt_dla_piksela(
+    const char* linia,
+    int poczatek,
+    int koniec,
+    int len,
+    int x
+);
 
 /* =========================================================================
  * 7. DOKUMENT - RESET / NORMALIZACJA
@@ -651,6 +660,8 @@ void wyczysc_dokument() {
         dokument,
         sizeof(dokument)
     );
+
+    dokument_uzyte = 1U;
 
     liczba_linii =
         1;
@@ -664,9 +675,6 @@ void wyczysc_dokument() {
     scroll_y =
         0;
 
-    scroll_x =
-        0;
-
     dokument_zmieniony =
         false;
 }
@@ -676,7 +684,7 @@ void normalizuj_kursor() {
         clamp_int(
             liczba_linii,
             1,
-            LICZBA_LINII
+            static_cast<int>(DOKUMENT_POJEMNOSC)
         );
 
     cur_r =
@@ -698,23 +706,10 @@ void normalizuj_kursor() {
             len
         );
 
-    cur_c =
-        utf8_przytnij_do_granicy(
-            dokument[cur_r],
-            cur_c
-        );
+    const char* linia = pobierz_linie_const(cur_r);
+    cur_c = linia ? utf8_przytnij_do_granicy(linia,cur_c,len) : 0;
 
-    scroll_y =
-        clamp_int(
-            scroll_y,
-            0,
-            liczba_linii - 1
-        );
-
-    if (scroll_x < 0) {
-        scroll_x =
-            0;
-    }
+    if (scroll_y < 0) scroll_y = 0;
 }
 
 /* =========================================================================
@@ -725,43 +720,27 @@ bool wstaw_bajt(
     unsigned char znak
 ) {
     normalizuj_kursor();
-
-    char* linia =
-        dokument[cur_r];
-
-    const int len =
-        dlugosc_linii(
-            cur_r
-        );
-
-    if (len >=
-        MAKS_TEKST_LINII) {
-
-        ustaw_status(
-            "Linia jest pelna."
-        );
-
+    if (dokument_uzyte >= DOKUMENT_POJEMNOSC) {
+        ustaw_status("Dokument osiagnal limit 64 KiB.");
         return false;
     }
-
-    for (int i = len;
-         i >= cur_c;
-         --i) {
-
-        linia[i + 1] =
-            linia[i];
+    size_t wymagane=1U;
+    if(znak>=0xC2U&&znak<=0xDFU)wymagane=2U;
+    else if(znak>=0xE0U&&znak<=0xEFU)wymagane=3U;
+    else if(znak>=0xF0U&&znak<=0xF4U)wymagane=4U;
+    if(wymagane>DOKUMENT_POJEMNOSC-dokument_uzyte){
+        ustaw_status("Brak miejsca na caly znak UTF-8.");return false;
     }
-
-    linia[cur_c] =
-        static_cast<char>(
-            znak
-        );
-
+    const size_t linia = offset_linii(cur_r);
+    if (linia >= dokument_uzyte || cur_c < 0 ||
+        static_cast<size_t>(cur_c) > dokument_uzyte - linia) return false;
+    const size_t pozycja = linia + static_cast<size_t>(cur_c);
+    const size_t tail = dokument_uzyte - pozycja;
+    if (!przesun_dokument(pozycja + 1U,pozycja,tail)) return false;
+    dokument[pozycja] = static_cast<char>(znak);
+    ++dokument_uzyte;
     ++cur_c;
-
-    dokument_zmieniony =
-        true;
-
+    dokument_zmieniony = true;
     return true;
 }
 
@@ -769,38 +748,17 @@ bool usun_poprzedni_znak() {
     normalizuj_kursor();
 
     if (cur_c > 0) {
-        char* linia =
-            dokument[cur_r];
-
-        const int len =
-            dlugosc_linii(
-                cur_r
-            );
-
-        const int start =
-            utf8_poprzedni_start(
-                linia,
-                cur_c
-            );
-
-        const int ile =
-            cur_c -
-            start;
-
-        for (int i = start;
-             i + ile <= len;
-             ++i) {
-
-            linia[i] =
-                linia[i + ile];
-        }
-
-        cur_c =
-            start;
-
-        dokument_zmieniony =
-            true;
-
+        char* linia = pobierz_linie(cur_r);
+        if (!linia) return false;
+        const int start = utf8_poprzedni_start(linia,cur_c);
+        const size_t ile = static_cast<size_t>(cur_c-start);
+        const size_t pozycja = offset_linii(cur_r)+static_cast<size_t>(start);
+        const size_t zrodlo = pozycja+ile;
+        if (zrodlo > dokument_uzyte ||
+            !przesun_dokument(pozycja,zrodlo,dokument_uzyte-zrodlo)) return false;
+        dokument_uzyte-=ile;
+        cur_c=start;
+        dokument_zmieniony=true;
         return true;
     }
 
@@ -813,110 +771,32 @@ bool usun_poprzedni_znak() {
             cur_r - 1
         );
 
-    const int obecny_len =
-        dlugosc_linii(
-            cur_r
-        );
-
-    if (poprzedni_len +
-            obecny_len >
-        MAKS_TEKST_LINII) {
-
-        ustaw_status(
-            "Nie mozna polaczyc: poprzednia linia jest za dluga."
-        );
-
-        return false;
-    }
-
-    char* poprzednia =
-        dokument[
-            cur_r - 1
-        ];
-
-    char* obecna =
-        dokument[
-            cur_r
-        ];
-
-    for (int i = 0;
-         i <= obecny_len;
-         ++i) {
-
-        poprzednia[
-            poprzedni_len + i] =
-            obecna[i];
-    }
-
-    for (int r = cur_r;
-         r <
-            liczba_linii - 1;
-         ++r) {
-
-        for (int c = 0;
-             c <
-                BAJTY_LINII;
-             ++c) {
-
-            dokument[r][c] =
-                dokument[r + 1][c];
-        }
-    }
-
-    wyzeruj(
-        dokument[
-            liczba_linii - 1
-        ],
-        BAJTY_LINII
-    );
-
+    const size_t obecna = offset_linii(cur_r);
+    if (obecna == 0 || obecna >= dokument_uzyte) return false;
+    /* Usuwamy wylacznie separator NUL miedzy liniami. */
+    if (!przesun_dokument(obecna-1U,obecna,dokument_uzyte-obecna)) return false;
+    --dokument_uzyte;
     --liczba_linii;
-
     --cur_r;
-
-    cur_c =
-        poprzedni_len;
-
-    dokument_zmieniony =
-        true;
-
+    cur_c=poprzedni_len;
+    dokument_zmieniony=true;
     return true;
 }
 
 bool usun_nastepny_znak() {
     normalizuj_kursor();
 
-    char* linia =
-        dokument[cur_r];
-
-    const int len =
-        dlugosc_linii(
-            cur_r
-        );
+    char* linia=pobierz_linie(cur_r);
+    if(!linia)return false;
+    const int len=dlugosc_linii(cur_r);
 
     if (cur_c < len) {
-        const int koniec =
-            utf8_nastepny_start(
-                linia,
-                cur_c,
-                len
-            );
-
-        const int ile =
-            koniec -
-            cur_c;
-
-        for (int i = cur_c;
-             i + ile <= len;
-             ++i) {
-
-            linia[i] =
-                linia[i + ile];
-        }
-
-        dokument_zmieniony =
-            true;
-
+        const int koniec=utf8_nastepny_start(linia,cur_c,len);
+        const size_t ile=static_cast<size_t>(koniec-cur_c);
+        const size_t pozycja=offset_linii(cur_r)+static_cast<size_t>(cur_c);
+        const size_t zrodlo=pozycja+ile;
+        if(zrodlo>dokument_uzyte||!przesun_dokument(pozycja,zrodlo,dokument_uzyte-zrodlo))return false;
+        dokument_uzyte-=ile;dokument_zmieniony=true;
         return true;
     }
 
@@ -926,140 +806,27 @@ bool usun_nastepny_znak() {
         return false;
     }
 
-    const int nastepny_len =
-        dlugosc_linii(
-            cur_r + 1
-        );
-
-    if (len +
-            nastepny_len >
-        MAKS_TEKST_LINII) {
-
-        ustaw_status(
-            "Nie mozna polaczyc: linia jest za dluga."
-        );
-
-        return false;
-    }
-
-    for (int i = 0;
-         i <= nastepny_len;
-         ++i) {
-
-        linia[len + i] =
-            dokument[
-                cur_r + 1
-            ][i];
-    }
-
-    for (int r = cur_r + 1;
-         r <
-            liczba_linii - 1;
-         ++r) {
-
-        for (int c = 0;
-             c <
-                BAJTY_LINII;
-             ++c) {
-
-            dokument[r][c] =
-                dokument[r + 1][c];
-        }
-    }
-
-    wyzeruj(
-        dokument[
-            liczba_linii - 1
-        ],
-        BAJTY_LINII
-    );
-
-    --liczba_linii;
-
-    dokument_zmieniony =
-        true;
-
+    const size_t separator=offset_linii(cur_r)+static_cast<size_t>(len);
+    if(separator+1U>dokument_uzyte||
+       !przesun_dokument(separator,separator+1U,dokument_uzyte-separator-1U))return false;
+    --dokument_uzyte;--liczba_linii;dokument_zmieniony=true;
     return true;
 }
 
 bool podziel_linie() {
     normalizuj_kursor();
 
-    if (liczba_linii >=
-        LICZBA_LINII) {
-
-        ustaw_status(
-            "Osiagnieto limit 50 linii."
-        );
-
+    if (dokument_uzyte >= DOKUMENT_POJEMNOSC) {
+        ustaw_status("Dokument osiagnal limit 64 KiB.");
         return false;
     }
-
-    /*
-     * Najpierw robimy miejsce na nowy wiersz.
-     */
-    for (int r = liczba_linii;
-         r > cur_r + 1;
-         --r) {
-
-        for (int c = 0;
-             c <
-                BAJTY_LINII;
-             ++c) {
-
-            dokument[r][c] =
-                dokument[r - 1][c];
-        }
-    }
-
-    char* stara =
-        dokument[cur_r];
-
-    char* nowa =
-        dokument[
-            cur_r + 1
-        ];
-
-    wyzeruj(
-        nowa,
-        BAJTY_LINII
-    );
-
-    const int len =
-        dlugosc_linii(
-            cur_r
-        );
-
-    const int tail =
-        len -
-        cur_c;
-
-    for (int i = 0;
-         i < tail;
-         ++i) {
-
-        nowa[i] =
-            stara[
-                cur_c + i
-            ];
-    }
-
-    nowa[tail] =
-        '\0';
-
-    stara[cur_c] =
-        '\0';
-
-    ++liczba_linii;
-
-    ++cur_r;
-
-    cur_c =
-        0;
-
-    dokument_zmieniony =
-        true;
-
+    const size_t poczatek=offset_linii(cur_r);
+    if(poczatek>=dokument_uzyte||cur_c<0)return false;
+    const size_t pozycja=poczatek+static_cast<size_t>(cur_c);
+    if(pozycja>=dokument_uzyte||
+       !przesun_dokument(pozycja+1U,pozycja,dokument_uzyte-pozycja))return false;
+    dokument[pozycja]='\0';++dokument_uzyte;++liczba_linii;++cur_r;cur_c=0;
+    dokument_zmieniony=true;
     return true;
 }
 
@@ -1071,9 +838,11 @@ void kursor_lewo() {
     normalizuj_kursor();
 
     if (cur_c > 0) {
+        const char* linia=pobierz_linie_const(cur_r);
+        if(!linia)return;
         cur_c =
             utf8_poprzedni_start(
-                dokument[cur_r],
+                linia,
                 cur_c
             );
 
@@ -1099,9 +868,11 @@ void kursor_prawo() {
         );
 
     if (cur_c < len) {
+        const char* linia=pobierz_linie_const(cur_r);
+        if(!linia)return;
         cur_c =
             utf8_nastepny_start(
-                dokument[cur_r],
+                linia,
                 cur_c,
                 len
             );
@@ -1120,41 +891,41 @@ void kursor_prawo() {
 void kursor_gora() {
     normalizuj_kursor();
 
-    if (cur_r <= 0) {
-        return;
-    }
+    const int obecny_indeks = wiersz_ekranowy_kursora();
+    WierszEkranowy obecny{};
+    WierszEkranowy cel{};
+    if (!pobierz_wiersz_ekranowy(obecny_indeks, &obecny) ||
+        !pobierz_wiersz_ekranowy(obecny_indeks - 1, &cel)) return;
 
-    const int kolumna =
-        kolumna_kursora();
-
-    --cur_r;
-
-    cur_c =
-        utf8_bajt_dla_kolumny(
-            dokument[cur_r],
-            kolumna
-        );
+    const char* obecna_linia = pobierz_linie_const(obecny.linia);
+    const char* docelowa_linia = pobierz_linie_const(cel.linia);
+    if (!obecna_linia || !docelowa_linia) return;
+    const int x = szerokosc_fragmentu(
+        obecna_linia, obecny.poczatek, cur_c, dlugosc_linii(obecny.linia));
+    cur_r = cel.linia;
+    const int len = dlugosc_linii(cur_r);
+    cur_c = bajt_dla_piksela(
+        docelowa_linia, cel.poczatek, cel.koniec, len, x);
 }
 
 void kursor_dol() {
     normalizuj_kursor();
 
-    if (cur_r + 1 >=
-        liczba_linii) {
+    const int obecny_indeks = wiersz_ekranowy_kursora();
+    WierszEkranowy obecny{};
+    WierszEkranowy cel{};
+    if (!pobierz_wiersz_ekranowy(obecny_indeks, &obecny) ||
+        !pobierz_wiersz_ekranowy(obecny_indeks + 1, &cel)) return;
 
-        return;
-    }
-
-    const int kolumna =
-        kolumna_kursora();
-
-    ++cur_r;
-
-    cur_c =
-        utf8_bajt_dla_kolumny(
-            dokument[cur_r],
-            kolumna
-        );
+    const char* obecna_linia = pobierz_linie_const(obecny.linia);
+    const char* docelowa_linia = pobierz_linie_const(cel.linia);
+    if (!obecna_linia || !docelowa_linia) return;
+    const int x = szerokosc_fragmentu(
+        obecna_linia, obecny.poczatek, cur_c, dlugosc_linii(obecny.linia));
+    cur_r = cel.linia;
+    const int len = dlugosc_linii(cur_r);
+    cur_c = bajt_dla_piksela(
+        docelowa_linia, cel.poczatek, cel.koniec, len, x);
 }
 
 void kursor_home() {
@@ -1174,44 +945,389 @@ void kursor_end() {
  * ========================================================================= */
 
 int liczba_widocznych_linii() {
-    const int dostepne =
-        WIN_H -
-        TEXT_Y_OFFSET -
-        STATUS_H -
-        4;
-
-    if (dostepne <= 0) {
-        return 1;
-    }
-
-    const int n =
-        dostepne /
-        LINE_H;
-
-    return
-        max_int(
-            1,
-            n
-        );
+    const ProstokatEdytora editor =
+        aktualny_prostokat_edytora();
+    return max_int(1, editor.wysokosc / LINE_H);
 }
 
-int liczba_widocznych_kolumn() {
-    const int dostepne =
-        WIN_W -
-        24;
+uint32_t utf8_kodpunkt(
+    const char* tekst,
+    int poczatek,
+    int koniec
+) {
+    if (!tekst || poczatek < 0 || poczatek >= koniec) return 0;
 
-    if (dostepne <=
-        PRZYBLIZONA_SZER_ZNAKU) {
+    const uint8_t b0 = static_cast<uint8_t>(tekst[poczatek]);
+    const int bajty = koniec - poczatek;
+    if (bajty == 2 && b0 >= 0xC2U && b0 <= 0xDFU) {
+        const uint8_t b1 = static_cast<uint8_t>(tekst[poczatek + 1]);
+        if (utf8_kontynuacja(b1)) {
+            return (static_cast<uint32_t>(b0 & 0x1FU) << 6) |
+                static_cast<uint32_t>(b1 & 0x3FU);
+        }
+    } else if (bajty == 3 && b0 >= 0xE0U && b0 <= 0xEFU) {
+        const uint8_t b1 = static_cast<uint8_t>(tekst[poczatek + 1]);
+        const uint8_t b2 = static_cast<uint8_t>(tekst[poczatek + 2]);
+        if (utf8_kontynuacja(b1) && utf8_kontynuacja(b2)) {
+            return (static_cast<uint32_t>(b0 & 0x0FU) << 12) |
+                (static_cast<uint32_t>(b1 & 0x3FU) << 6) |
+                static_cast<uint32_t>(b2 & 0x3FU);
+        }
+    } else if (bajty == 4 && b0 >= 0xF0U && b0 <= 0xF4U) {
+        const uint8_t b1 = static_cast<uint8_t>(tekst[poczatek + 1]);
+        const uint8_t b2 = static_cast<uint8_t>(tekst[poczatek + 2]);
+        const uint8_t b3 = static_cast<uint8_t>(tekst[poczatek + 3]);
+        if (utf8_kontynuacja(b1) && utf8_kontynuacja(b2) &&
+            utf8_kontynuacja(b3)) {
+            return (static_cast<uint32_t>(b0 & 0x07U) << 18) |
+                (static_cast<uint32_t>(b1 & 0x3FU) << 12) |
+                (static_cast<uint32_t>(b2 & 0x3FU) << 6) |
+                static_cast<uint32_t>(b3 & 0x3FU);
+        }
+    }
+    return b0;
+}
 
-        return 1;
+int szerokosc_znaku_ekranowego(
+    const char* tekst,
+    int poczatek,
+    int koniec
+) {
+    const int bajty = koniec - poczatek;
+    if (tekst && bajty >= 3) {
+        /*
+         * Obecny renderer GUI dekoduje sekwencje 2-bajtowe, a dluzsze
+         * wyswietla bajt po bajcie. Sumujemy dokladnie taki advance, lecz
+         * wrap i hit-test nadal traktuja cala sekwencje jako jeden znak.
+         */
+        int suma = 0;
+        for (int i = poczatek; i < koniec; ++i) {
+            int szerokosc = gui_pobierz_szerokosc_znaku(
+                static_cast<uint8_t>(tekst[i]));
+            if (szerokosc < 1) szerokosc = 1;
+            if (szerokosc > 64) szerokosc = 8;
+            suma += szerokosc + 1;
+        }
+        return suma;
+    }
+    uint32_t znak = utf8_kodpunkt(tekst, poczatek, koniec);
+    if (znak < 128U && cache_szerokosci_ascii[znak] > 0) {
+        return cache_szerokosci_ascii[znak];
+    }
+    int szerokosc = gui_pobierz_szerokosc_znaku(znak);
+    if (szerokosc < 1) szerokosc = 1;
+    if (szerokosc > 64) szerokosc = 8;
+    const int advance = szerokosc + 1;
+    if (znak < 128U) cache_szerokosci_ascii[znak] = advance;
+    return advance;
+}
+
+int szerokosc_fragmentu(
+    const char* tekst,
+    int poczatek,
+    int koniec,
+    int len
+) {
+    if (!tekst || poczatek < 0 || koniec < poczatek || poczatek > len) {
+        return 0;
+    }
+    koniec = min_int(koniec, len);
+    int piksele = 0;
+    for (int p = poczatek; p < koniec;) {
+        const int next = utf8_nastepny_start(tekst, p, len);
+        if (next <= p || next > koniec) break;
+        const int advance = szerokosc_znaku_ekranowego(tekst, p, next);
+        if (piksele > INT32_MAX - advance) return INT32_MAX;
+        piksele += advance;
+        p = next;
+    }
+    return piksele;
+}
+
+/*
+ * Soft wrap dzieli tylko widok. Zwracane offsety zawsze wskazuja granice
+ * kodpunktow UTF-8, a co najmniej jeden kodpunkt trafia do wiersza nawet,
+ * gdy pojedynczy glif jest szerszy od bardzo malego viewportu.
+ */
+int koniec_wiersza_ekranowego(
+    const char* linia,
+    int poczatek,
+    int len,
+    int szerokosc
+) {
+    if (!linia || poczatek >= len) return len;
+    if (szerokosc < 1) szerokosc = 1;
+
+    int p = poczatek;
+    int piksele = 0;
+    while (p < len) {
+        const int next = utf8_nastepny_start(linia, p, len);
+        if (next <= p) break;
+        const int advance = szerokosc_znaku_ekranowego(linia, p, next);
+        if (p > poczatek && advance > szerokosc - piksele) break;
+        piksele += advance;
+        p = next;
+    }
+    if (p == poczatek) p = utf8_nastepny_start(linia, p, len);
+    return p;
+}
+
+int liczba_wierszy_ekranowych() {
+    const int szerokosc = aktualny_prostokat_edytora().szerokosc;
+    int wynik = 0;
+    size_t offset = 0;
+    for (int r = 0; r < liczba_linii && offset < dokument_uzyte; ++r) {
+        const size_t pozostalo = dokument_uzyte - offset;
+        const size_t len_size = dlugosc_limit(dokument + offset, pozostalo);
+        if (len_size >= pozostalo || len_size > static_cast<size_t>(INT32_MAX)) {
+            break;
+        }
+        const int len = static_cast<int>(len_size);
+        if (len == 0) {
+            ++wynik;
+        } else {
+            int p = 0;
+            while (p < len) {
+                const int next = koniec_wiersza_ekranowego(
+                    dokument + offset, p, len, szerokosc);
+                if (next <= p) break;
+                ++wynik;
+                p = next;
+            }
+        }
+        offset += len_size + 1U;
+    }
+    return max_int(1, wynik);
+}
+
+bool pobierz_wiersz_ekranowy(
+    int indeks,
+    WierszEkranowy* wynik
+) {
+    if (!wynik || indeks < 0) return false;
+    const int szerokosc = aktualny_prostokat_edytora().szerokosc;
+    int numer = 0;
+    size_t offset = 0;
+    for (int r = 0; r < liczba_linii && offset < dokument_uzyte; ++r) {
+        const size_t pozostalo = dokument_uzyte - offset;
+        const size_t len_size = dlugosc_limit(dokument + offset, pozostalo);
+        if (len_size >= pozostalo || len_size > static_cast<size_t>(INT32_MAX)) {
+            return false;
+        }
+        const int len = static_cast<int>(len_size);
+        if (len == 0) {
+            if (numer == indeks) {
+                *wynik = {r, 0, 0};
+                return true;
+            }
+            ++numer;
+        } else {
+            int p = 0;
+            while (p < len) {
+                const int next = koniec_wiersza_ekranowego(
+                    dokument + offset, p, len, szerokosc);
+                if (next <= p) return false;
+                if (numer == indeks) {
+                    *wynik = {r, p, next};
+                    return true;
+                }
+                ++numer;
+                p = next;
+            }
+        }
+        offset += len_size + 1U;
+    }
+    return false;
+}
+
+bool nastepny_wiersz_ekranowy(WierszEkranowy* wiersz) {
+    if (!wiersz || wiersz->linia < 0 || wiersz->linia >= liczba_linii) {
+        return false;
+    }
+    const int len = dlugosc_linii(wiersz->linia);
+    if (wiersz->koniec < len) {
+        const char* linia = pobierz_linie_const(wiersz->linia);
+        if (!linia) return false;
+        wiersz->poczatek = wiersz->koniec;
+        wiersz->koniec = koniec_wiersza_ekranowego(
+            linia,
+            wiersz->poczatek,
+            len,
+            aktualny_prostokat_edytora().szerokosc
+        );
+        return wiersz->koniec > wiersz->poczatek;
+    }
+    if (wiersz->linia + 1 >= liczba_linii) return false;
+    ++wiersz->linia;
+    wiersz->poczatek = 0;
+    const char* linia = pobierz_linie_const(wiersz->linia);
+    if (!linia) return false;
+    const int nastepny_len = dlugosc_linii(wiersz->linia);
+    wiersz->koniec = nastepny_len == 0 ? 0 : koniec_wiersza_ekranowego(
+        linia,
+        0,
+        nastepny_len,
+        aktualny_prostokat_edytora().szerokosc
+    );
+    return nastepny_len == 0 || wiersz->koniec > 0;
+}
+
+int wiersz_ekranowy_kursora() {
+    const int szerokosc = aktualny_prostokat_edytora().szerokosc;
+    int numer = 0;
+    size_t offset = 0;
+    for (int r = 0; r < liczba_linii && offset < dokument_uzyte; ++r) {
+        const size_t pozostalo = dokument_uzyte - offset;
+        const size_t len_size = dlugosc_limit(dokument + offset, pozostalo);
+        if (len_size >= pozostalo || len_size > static_cast<size_t>(INT32_MAX)) {
+            break;
+        }
+        const int len = static_cast<int>(len_size);
+        if (len == 0) {
+            if (r == cur_r) return numer;
+            ++numer;
+        } else {
+            int p = 0;
+            while (p < len) {
+                const int next = koniec_wiersza_ekranowego(
+                    dokument + offset, p, len, szerokosc);
+                if (next <= p) break;
+                if (r == cur_r && (cur_c < next || next == len)) return numer;
+                ++numer;
+                p = next;
+            }
+        }
+        offset += len_size + 1U;
+    }
+    return max_int(0, numer - 1);
+}
+
+StanLayoutEdycji pobierz_stan_layoutu_edycji() {
+    StanLayoutEdycji stan{};
+    stan.scroll = scroll_y;
+    stan.wiersz_kursora = wiersz_ekranowy_kursora();
+    stan.linia = cur_r;
+    stan.kursor_bajt = cur_c;
+    const char* aktualna_linia = pobierz_linie_const(cur_r);
+    stan.poprzedni_kodpunkt = aktualna_linia
+        ? utf8_poprzedni_start(aktualna_linia, cur_c)
+        : cur_c;
+    stan.dlugosc = dlugosc_linii(cur_r);
+    stan.wszystkie_linie = liczba_linii;
+    if (!aktualna_linia) return stan;
+
+    if (stan.dlugosc == 0) {
+        stan.wiersze_linii = 1;
+        stan.pierwszy_wiersz_linii = stan.wiersz_kursora;
+        stan.poprawny = true;
+        return stan;
     }
 
-    return
-        max_int(
-            1,
-            dostepne /
-            PRZYBLIZONA_SZER_ZNAKU
+    const int szerokosc = aktualny_prostokat_edytora().szerokosc;
+    int lokalny_wiersz = 0;
+    int lokalny_wiersz_kursora = -1;
+    for (int p = 0; p < stan.dlugosc;) {
+        const int next = koniec_wiersza_ekranowego(
+            aktualna_linia,
+            p,
+            stan.dlugosc,
+            szerokosc
         );
+        if (next <= p) return stan;
+        if (lokalny_wiersz_kursora < 0 &&
+            (cur_c < next || next == stan.dlugosc)) {
+            lokalny_wiersz_kursora = lokalny_wiersz;
+            stan.poczatek_segmentu = p;
+            stan.koniec_segmentu = next;
+        }
+        ++lokalny_wiersz;
+        p = next;
+    }
+
+    stan.wiersze_linii = lokalny_wiersz;
+    if (lokalny_wiersz_kursora < 0 || stan.wiersze_linii <= 0) return stan;
+    stan.pierwszy_wiersz_linii =
+        stan.wiersz_kursora - lokalny_wiersz_kursora;
+    stan.poprawny = true;
+    return stan;
+}
+
+ZakresRedraw zaplanuj_redraw_po_edycji(
+    const StanLayoutEdycji& przed,
+    const StanLayoutEdycji& po,
+    bool zwykla_edycja,
+    bool backspace
+) {
+    const int ostatni_widoczny =
+        scroll_y + liczba_widocznych_linii() - 1;
+
+    if (!przed.poprawny || !po.poprawny || przed.scroll != po.scroll) {
+        return {true, scroll_y, ostatni_widoczny};
+    }
+
+    int pierwszy = min_int(przed.wiersz_kursora, po.wiersz_kursora);
+    /* Edycja dokladnie na granicy wrapu moze zmienic takze poprzedni
+       visual row (np. gdy nowy, waski glif jeszcze sie w nim zmiesci). */
+    if (przed.poczatek_segmentu > 0 &&
+        zwykla_edycja &&
+        (przed.kursor_bajt == przed.poczatek_segmentu ||
+         (backspace &&
+          przed.poprzedni_kodpunkt == przed.poczatek_segmentu))) {
+        pierwszy = min_int(pierwszy, przed.wiersz_kursora - 1);
+    }
+
+    if (!zwykla_edycja || przed.linia != po.linia) {
+        return {false, pierwszy, ostatni_widoczny};
+    }
+
+    const int koniec_przed =
+        przed.pierwszy_wiersz_linii + przed.wiersze_linii - 1;
+    const int koniec_po =
+        po.pierwszy_wiersz_linii + po.wiersze_linii - 1;
+    const bool ostatni_segment_przed =
+        przed.koniec_segmentu == przed.dlugosc;
+    const bool ostatni_segment_po =
+        po.koniec_segmentu == po.dlugosc;
+
+    if (przed.wiersze_linii == po.wiersze_linii &&
+        ostatni_segment_przed && ostatni_segment_po) {
+        return {false, pierwszy,
+            max_int(przed.wiersz_kursora, po.wiersz_kursora)};
+    }
+
+    if (przed.wiersze_linii == po.wiersze_linii) {
+        return {false, pierwszy, max_int(koniec_przed, koniec_po)};
+    }
+
+    /* Zmiana liczby visual rows przesuwa kolejne linie logiczne. Jesli
+       takie istnieja, tylko widoczny ogon viewportu wymaga odswiezenia. */
+    int ostatni = max_int(koniec_przed, koniec_po);
+    if (po.linia + 1 < po.wszystkie_linie ||
+        przed.linia + 1 < przed.wszystkie_linie) {
+        ostatni = ostatni_widoczny;
+    }
+    return {false, pierwszy, ostatni};
+}
+
+int bajt_dla_piksela(
+    const char* linia,
+    int poczatek,
+    int koniec,
+    int len,
+    int x
+) {
+    if (!linia || x <= 0) return poczatek;
+    int piksele = 0;
+    for (int p = poczatek; p < koniec;) {
+        const int next = utf8_nastepny_start(linia, p, len);
+        if (next <= p || next > koniec) break;
+        const int advance = szerokosc_znaku_ekranowego(linia, p, next);
+        if (x < piksele + advance / 2) return p;
+        if (x < piksele + advance) return next;
+        piksele += advance;
+        p = next;
+    }
+    return koniec;
 }
 
 void dopasuj_scroll_do_kursora() {
@@ -1220,145 +1336,38 @@ void dopasuj_scroll_do_kursora() {
     const int widoczne_linie =
         liczba_widocznych_linii();
 
-    if (cur_r <
-        scroll_y) {
+    const int wszystkie_linie =
+        liczba_wierszy_ekranowych();
 
+    const int wiersz_kursora =
+        wiersz_ekranowy_kursora();
+
+    const int maks_scroll =
+        max_int(0, wszystkie_linie - widoczne_linie);
+
+    scroll_y = clamp_int(scroll_y, 0, maks_scroll);
+
+    if (wiersz_kursora <
+        scroll_y) {
         scroll_y =
-            cur_r;
+            wiersz_kursora;
     }
 
-    if (cur_r >=
+    if (wiersz_kursora >=
         scroll_y +
             widoczne_linie) {
-
         scroll_y =
-            cur_r -
+            wiersz_kursora -
             widoczne_linie +
             1;
     }
 
-    const int kolumna =
-        kolumna_kursora();
-
-    const int widoczne_kolumny =
-        liczba_widocznych_kolumn();
-
-    if (kolumna <
-        scroll_x) {
-
-        scroll_x =
-            kolumna;
-    }
-
-    if (kolumna >=
-        scroll_x +
-            widoczne_kolumny) {
-
-        scroll_x =
-            kolumna -
-            widoczne_kolumny +
-            1;
-    }
-
-    if (scroll_x < 0) {
-        scroll_x = 0;
-    }
+    scroll_y = clamp_int(scroll_y, 0, maks_scroll);
 }
 
 /* =========================================================================
- * 11. WIDOCZNY FRAGMENT LINII
+ * 11. WIERSZE EKRANOWE
  * ========================================================================= */
-
-void zbuduj_widoczna_linie(
-    int r,
-    char* out,
-    size_t pojemnosc
-) {
-    if (!out ||
-        pojemnosc == 0) {
-
-        return;
-    }
-
-    out[0] =
-        '\0';
-
-    if (r < 0 ||
-        r >= liczba_linii) {
-
-        return;
-    }
-
-    const char* linia =
-        dokument[r];
-
-    const int start =
-        utf8_bajt_dla_kolumny(
-            linia,
-            scroll_x
-        );
-
-    const int len =
-        dlugosc_linii(
-            r
-        );
-
-    const int max_kolumn =
-        liczba_widocznych_kolumn();
-
-    int p =
-        start;
-
-    int znaki =
-        0;
-
-    size_t out_i =
-        0;
-
-    while (p < len &&
-           znaki <
-               max_kolumn &&
-           out_i + 1U <
-               pojemnosc) {
-
-        const int next =
-            utf8_nastepny_start(
-                linia,
-                p,
-                len
-            );
-
-        const int bytes =
-            next -
-            p;
-
-        if (bytes <= 0 ||
-            out_i +
-                static_cast<size_t>(
-                    bytes) +
-                1U >
-                pojemnosc) {
-
-            break;
-        }
-
-        for (int i = p;
-             i < next;
-             ++i) {
-
-            out[out_i++] =
-                linia[i];
-        }
-
-        p =
-            next;
-
-        ++znaki;
-    }
-
-    out[out_i] =
-        '\0';
-}
 
 /* =========================================================================
  * 12. SCIEZKI
@@ -1448,72 +1457,19 @@ void rozpocznij_wprowadzanie_sciezki(
 bool serializuj_dokument(
     uint32_t* wynik_dlugosc
 ) {
-    if (!wynik_dlugosc) {
-        return false;
-    }
-
-    size_t p =
-        0;
-
-    for (int r = 0;
-         r <
-            liczba_linii;
-         ++r) {
-
-        const size_t len =
-            dlugosc_limit(
-                dokument[r],
-                BAJTY_LINII
-            );
-
-        if (len >=
-            BAJTY_LINII) {
-
-            return false;
-        }
-
-        if (len >
-            MAKS_ODCZYT_PLIKU -
-                p) {
-
-            return false;
-        }
-
-        for (size_t i = 0;
-             i < len;
-             ++i) {
-
-            liniowy_bufor[p++] =
-                dokument[r][i];
-        }
-
-        /*
-         * Newline umieszczamy POMIEDZY liniami, niezaleznie od tego czy
-         * linia jest pusta. Stara wersja tracila puste linie.
-         */
-        if (r + 1 <
-            liczba_linii) {
-
-            if (p >=
-                MAKS_ODCZYT_PLIKU) {
-
-                return false;
-            }
-
-            liniowy_bufor[p++] =
-                '\n';
-        }
-    }
-
-    liniowy_bufor[p] =
-        '\0';
-
-    *wynik_dlugosc =
-        static_cast<uint32_t>(
-            p
-        );
-
+    if (!wynik_dlugosc || dokument_uzyte == 0 ||
+        dokument_uzyte > DOKUMENT_POJEMNOSC ||
+        dokument[dokument_uzyte-1U] != '\0') return false;
+    for(size_t i=0;i+1U<dokument_uzyte;++i)
+        if(dokument[i]=='\0')dokument[i]='\n';
+    *wynik_dlugosc=static_cast<uint32_t>(dokument_uzyte-1U);
     return true;
+}
+
+void przywroc_separatory_dokumentu(){
+    if(dokument_uzyte==0||dokument_uzyte>DOKUMENT_POJEMNOSC)return;
+    for(size_t i=0;i+1U<dokument_uzyte;++i)
+        if(dokument[i]=='\n')dokument[i]='\0';
 }
 
 bool zapisz_do_pliku(
@@ -1554,10 +1510,15 @@ bool zapisz_do_pliku(
         sciezka_docelowa
     );
 
-    if (!zapisz_plik(
+    const bool zapis_ok=zapisz_plik(
             sciezka_docelowa,
-            liniowy_bufor,
-            dlugosc)) {
+            dokument,
+            dlugosc);
+
+    /* Syscall kopiuje synchronicznie; po nim wracamy do separatorow modelu. */
+    przywroc_separatory_dokumentu();
+
+    if (!zapis_ok) {
 
         ustaw_status(
             "Blad: zapis nie powiodl sie."
@@ -1587,133 +1548,22 @@ bool zapisz_do_pliku(
  * ========================================================================= */
 
 bool parsuj_plik_do_dokumentu(
-    bool* uciety
+    size_t rozmiar_pliku_wej
 ) {
-    if (!uciety) {
-        return false;
+    if(rozmiar_pliku_wej>MAKS_ROZMIAR_PLIKU)return false;
+    /* Plik tekstowy z osadzonym NUL-em jest odrzucany, nie cicho ucinany. */
+    for(size_t i=0;i<rozmiar_pliku_wej;++i)if(dokument[i]=='\0')return false;
+    size_t src=0,dst=0;liczba_linii=1;
+    while(src<rozmiar_pliku_wej){
+        const char ch=dokument[src++];
+        if(ch=='\r'){
+            dokument[dst++]='\0';++liczba_linii;
+            if(src<rozmiar_pliku_wej&&dokument[src]=='\n')++src;
+        }else if(ch=='\n'){
+            dokument[dst++]='\0';++liczba_linii;
+        }else dokument[dst++]=ch;
     }
-
-    *uciety =
-        false;
-
-    wyzeruj(
-        dokument,
-        sizeof(dokument)
-    );
-
-    int r =
-        0;
-
-    int c =
-        0;
-
-    liczba_linii =
-        1;
-
-    bool poprzedni_cr =
-        false;
-
-    for (size_t i = 0;
-         i <
-            MAKS_ODCZYT_PLIKU;
-         ++i) {
-
-        const unsigned char ch =
-            static_cast<unsigned char>(
-                temp_buf[i]
-            );
-
-        if (ch == 0) {
-            break;
-        }
-
-        if (ch == '\r') {
-            /*
-             * CRLF i samotne CR traktujemy jak koniec linii.
-             */
-            if (r + 1 >=
-                LICZBA_LINII) {
-
-                *uciety =
-                    true;
-
-                break;
-            }
-
-            ++r;
-            c = 0;
-
-            liczba_linii =
-                r + 1;
-
-            poprzedni_cr =
-                true;
-
-            continue;
-        }
-
-        if (ch == '\n') {
-            if (poprzedni_cr) {
-                poprzedni_cr =
-                    false;
-
-                continue;
-            }
-
-            if (r + 1 >=
-                LICZBA_LINII) {
-
-                *uciety =
-                    true;
-
-                break;
-            }
-
-            ++r;
-            c = 0;
-
-            liczba_linii =
-                r + 1;
-
-            continue;
-        }
-
-        poprzedni_cr =
-            false;
-
-        if (c >=
-            MAKS_TEKST_LINII) {
-
-            /*
-             * Nie nadpisujemy kolejnej linii. Pomijamy reszte za dlugiej
-             * linii do jej newline i raportujemy truncation.
-             */
-            *uciety =
-                true;
-
-            continue;
-        }
-
-        dokument[r][c++] =
-            static_cast<char>(
-                ch
-            );
-
-        dokument[r][c] =
-            '\0';
-    }
-
-    /*
-     * Jezeli ostatni bezpieczny bajt jest niezerowy, plik mogl byc wiekszy
-     * niz aktualne API potrafi zwrocic. Nie czytamy dalej.
-     */
-    if (temp_buf[
-            MAKS_ODCZYT_PLIKU - 1U] !=
-        '\0') {
-
-        *uciety =
-            true;
-    }
+    dokument[dst++]='\0';dokument_uzyte=dst;
 
     cur_r =
         0;
@@ -1722,9 +1572,6 @@ bool parsuj_plik_do_dokumentu(
         0;
 
     scroll_y =
-        0;
-
-    scroll_x =
         0;
 
     dokument_zmieniony =
@@ -1752,17 +1599,18 @@ bool otworz_z_pliku(
         "Otwieranie pliku..."
     );
 
-    wyzeruj(
-        temp_buf,
-        sizeof(temp_buf)
-    );
+    uint32_t rozmiar=0;
+    if(!pobierz_rozmiar_pliku(sciezka_zrodlowa,&rozmiar)){
+        ustaw_status("Blad: nie mozna pobrac rozmiaru pliku.");return false;
+    }
+    if(rozmiar>MAKS_ROZMIAR_PLIKU){
+        ustaw_status("Blad: plik przekracza limit dokumentu 64 KiB.");return false;
+    }
 
     if (!czytaj_plik(
             sciezka_zrodlowa,
-            temp_buf,
-            static_cast<uint32_t>(
-                MAKS_ODCZYT_PLIKU
-            ))) {
+            dokument,
+            rozmiar)) {
 
         ustaw_status(
             "Blad: nie mozna odczytac pliku."
@@ -1771,18 +1619,8 @@ bool otworz_z_pliku(
         return false;
     }
 
-    /*
-     * NUL gwarantowany nawet gdy syscall wypelnil caly dozwolony obszar.
-     */
-    temp_buf[
-        MAKS_ODCZYT_PLIKU] =
-        '\0';
-
-    bool uciety =
-        false;
-
     if (!parsuj_plik_do_dokumentu(
-            &uciety)) {
+            rozmiar)) {
 
         ustaw_status(
             "Blad parsera dokumentu."
@@ -1797,15 +1635,9 @@ bool otworz_z_pliku(
         sciezka_zrodlowa
     );
 
-    if (uciety) {
-        ustaw_status(
-            "Wczytano, ale dokument zostal uciety do limitow Notatnika."
-        );
-    } else {
-        ustaw_status(
-            "Wczytano plik pomyslnie."
-        );
-    }
+    ustaw_status(
+        "Wczytano plik pomyslnie."
+    );
 
     return true;
 }
@@ -2375,52 +2207,111 @@ void rysuj_pomoc() {
     );
 }
 
-void rysuj_wiersz_dokumentu(int actual_r) {
-    char widoczna[
-        BAJTY_LINII
-    ] = {};
+void rysuj_wiersz_ekranowy(
+    const WierszEkranowy& wiersz,
+    int numer_na_ekranie,
+    bool rysuj_karetke
+) {
+    const ProstokatEdytora editor = aktualny_prostokat_edytora();
+    const char* linia = pobierz_linie_const(wiersz.linia);
+    if (!linia) return;
+    const int len = dlugosc_linii(wiersz.linia);
+    const int y = editor.y + numer_na_ekranie * LINE_H;
+    int x = editor.x;
 
-    const int i = actual_r - scroll_y;
-    if (i < 0 || i >= liczba_widocznych_linii()) return;
-
-    const int y = WIN_Y + TEXT_Y_OFFSET + i * LINE_H;
-    gui_wyczyscz_obszar(WIN_X + 8, y, WIN_W - 16, LINE_H);
-
-    if (actual_r < 0 || actual_r >= liczba_linii) return;
-
-    zbuduj_widoczna_linie(actual_r, widoczna, sizeof(widoczna));
-    if (widoczna[0] != '\0') gui_wypisz_tekst(WIN_X + 8, y, widoczna);
-
-    if (actual_r == cur_r && tryb == TrybPracy::EDYCJA_TEKSTU &&
-        !okno_pomoc_widoczne) {
-        const int ekran_kolumna = kolumna_kursora() - scroll_x;
-        if (ekran_kolumna >= 0 &&
-            ekran_kolumna < liczba_widocznych_kolumn()) {
-            char prefiks_karetki[256] = {};
-            int limit = ekran_kolumna > 255 ? 255 : ekran_kolumna;
-            for (int k = 0; k < limit && widoczna[k] != '\0'; ++k)
-                prefiks_karetki[k] = widoczna[k];
-            const int advance = oblicz_szerokosc_tekstu(prefiks_karetki, 1);
-            gui_wypisz_tekst_kolor(WIN_X + 8 + advance, y,
-                                   KOLOR_BURSZTYN_JASNY, "_");
+    /*
+     * BWS przyjmuje maks. 1023 bajty tekstu na wywolanie. Bardzo szeroki
+     * wiersz rysujemy wiec kilkoma fragmentami, bez tworzenia dodatkowego
+     * zawiniecia i bez przecinania UTF-8.
+     */
+    for (int p = wiersz.poczatek; p < wiersz.koniec;) {
+        char fragment[WIDOCZNA_LINIA_POJEMNOSC] = {};
+        size_t out = 0;
+        int koniec_fragmentu = p;
+        while (koniec_fragmentu < wiersz.koniec) {
+            const int next = utf8_nastepny_start(linia, koniec_fragmentu, len);
+            if (next <= koniec_fragmentu || next > wiersz.koniec) break;
+            const size_t bajty = static_cast<size_t>(next - koniec_fragmentu);
+            if (out + bajty + 1U > sizeof(fragment)) break;
+            for (int i = koniec_fragmentu; i < next; ++i) {
+                fragment[out++] = linia[i];
+            }
+            koniec_fragmentu = next;
         }
+        if (koniec_fragmentu <= p) break;
+        fragment[out] = '\0';
+        gui_wypisz_tekst(x, y, fragment);
+        x += szerokosc_fragmentu(linia, p, koniec_fragmentu, len);
+        p = koniec_fragmentu;
+    }
+
+    if (rysuj_karetke && tryb == TrybPracy::EDYCJA_TEKSTU &&
+        !okno_pomoc_widoczne) {
+        int caret_x = editor.x + szerokosc_fragmentu(
+            linia, wiersz.poczatek, cur_c, len);
+        caret_x = clamp_int(caret_x, editor.x, editor.x + editor.szerokosc - 2);
+        gui_rysuj_prostokat(
+            caret_x, y + LINE_H - 2, 2, 2, KOLOR_BURSZTYN_JASNY);
+    }
+}
+
+void rysuj_zakres_wierszy_ekranowych(
+    int pierwszy_wiersz,
+    int ostatni_wiersz,
+    bool pelny_viewport
+) {
+    const ProstokatEdytora editor = aktualny_prostokat_edytora();
+    const int max_lines = liczba_widocznych_linii();
+    const int caret_wiersz = wiersz_ekranowy_kursora();
+    const int pierwszy_widoczny = scroll_y;
+    const int ostatni_widoczny = scroll_y + max_lines - 1;
+
+    if (pelny_viewport) {
+        pierwszy_wiersz = pierwszy_widoczny;
+        ostatni_wiersz = ostatni_widoczny;
+    } else {
+        pierwszy_wiersz = max_int(pierwszy_wiersz, pierwszy_widoczny);
+        ostatni_wiersz = min_int(ostatni_wiersz, ostatni_widoczny);
+        if (pierwszy_wiersz > ostatni_wiersz) return;
+    }
+
+    const int y = editor.y +
+        (pierwszy_wiersz - pierwszy_widoczny) * LINE_H;
+    int wysokosc = (ostatni_wiersz - pierwszy_wiersz + 1) * LINE_H;
+    if (pelny_viewport) wysokosc = editor.wysokosc;
+    wysokosc = min_int(wysokosc, editor.y + editor.wysokosc - y);
+    if (wysokosc <= 0) return;
+
+    gui_wyczyscz_obszar(
+        editor.x, y, editor.szerokosc, wysokosc);
+
+#if BURSZTYN_DEBUG_GUI_PERF
+    notatnik_redraw_pixels += static_cast<uint64_t>(editor.szerokosc) *
+        static_cast<uint64_t>(wysokosc);
+    if (pelny_viewport) {
+        ++notatnik_full_viewport_redraw;
+    } else {
+        notatnik_visual_row_redraw += static_cast<uint64_t>(
+            ostatni_wiersz - pierwszy_wiersz + 1);
+    }
+#endif
+
+    WierszEkranowy wiersz{};
+    if (!pobierz_wiersz_ekranowy(pierwszy_wiersz, &wiersz)) return;
+    for (int indeks = pierwszy_wiersz;
+         indeks <= ostatni_wiersz;
+         ++indeks) {
+        rysuj_wiersz_ekranowy(
+            wiersz,
+            indeks - pierwszy_widoczny,
+            indeks == caret_wiersz
+        );
+        if (!nastepny_wiersz_ekranowy(&wiersz)) break;
     }
 }
 
 void rysuj_tekst_dokumentu() {
-    const int max_lines = liczba_widocznych_linii();
-
-    for (int i = 0;
-         i <
-            max_lines;
-         ++i) {
-
-        const int actual_r =
-            scroll_y +
-            i;
-
-        rysuj_wiersz_dokumentu(actual_r);
-    }
+    rysuj_zakres_wierszy_ekranowych(0, 0, true);
 }
 
 void rysuj_interfejs(
@@ -2508,46 +2399,33 @@ void ustaw_kursor_z_myszy(
     int mx,
     int my
 ) {
-    const int text_y =
-        WIN_Y +
-        TEXT_Y_OFFSET;
+    const ProstokatEdytora editor = aktualny_prostokat_edytora();
 
     const int i =
         (my -
-         text_y) /
+         editor.y) /
         LINE_H;
 
-    int r =
-        scroll_y +
-        i;
-
-    r =
-        clamp_int(
-            r,
-            0,
-            liczba_linii - 1
-        );
+    WierszEkranowy wiersz{};
+    if (!pobierz_wiersz_ekranowy(scroll_y + i, &wiersz)) {
+        cur_r = liczba_linii - 1;
+        cur_c = dlugosc_linii(cur_r);
+        dopasuj_scroll_do_kursora();
+        return;
+    }
 
     const int x =
         max_int(
             0,
             mx -
-                (WIN_X + 8)
+                editor.x
         );
 
-    const int kolumna =
-        scroll_x +
-        x /
-            PRZYBLIZONA_SZER_ZNAKU;
-
-    cur_r =
-        r;
-
-    cur_c =
-        utf8_bajt_dla_kolumny(
-            dokument[cur_r],
-            kolumna
-        );
+    cur_r = wiersz.linia;
+    const char* linia=pobierz_linie_const(cur_r);
+    const int len=dlugosc_linii(cur_r);
+    cur_c = linia ? bajt_dla_piksela(
+        linia, wiersz.poczatek, wiersz.koniec, len, x) : 0;
 
     dopasuj_scroll_do_kursora();
 }
@@ -3254,18 +3132,17 @@ void obsluz_klik(
     /*
      * Klik w obszar tekstu ustawia kursor.
      */
-    const int text_h =
-        liczba_widocznych_linii() *
-        LINE_H;
+    const ProstokatEdytora editor = aktualny_prostokat_edytora();
+    const int text_h = liczba_widocznych_linii() * LINE_H;
 
     if (tryb ==
             TrybPracy::EDYCJA_TEKSTU &&
         mysz_w_prostokacie(
             mx,
             my,
-            WIN_X + 8,
-            WIN_Y + TEXT_Y_OFFSET,
-            WIN_W - 16,
+            editor.x,
+            editor.y,
+            editor.szerokosc,
             text_h)) {
 
         ustaw_kursor_z_myszy(
@@ -3364,7 +3241,6 @@ void aktualizuj_dragging(
      * Warstwa zawiera juz narysowana zawartosc; compositor moze ja
      * przesunac bez ponownego renderowania wszystkich widgetow.
      */
-    gui_odswiez();
 }
 
 /* =========================================================================
@@ -3454,9 +3330,9 @@ void _start() {
     while (!wyjdz) {
         bws_zdarzenie zdarzenie{};
         if (!gui_czekaj_na_zdarzenie(&zdarzenie)) continue;
-        bool szybka_linia = false;
         bool szybka_sciezka = false;
         bool szybki_edytor = false;
+        ZakresRedraw szybki_zakres{};
         if (zdarzenie.typ == BWS_ZDARZENIE_FOCUS && aplikacja_zminimalizowana)
             aplikacja_zminimalizowana = false;
         int mx = old_mx;
@@ -3501,21 +3377,7 @@ void _start() {
                 dragging =
                     false;
                 gui_ustaw_capture_myszy(false);
-
-                redraw =
-                    true;
             }
-        }
-
-        if ((mx != old_mx ||
-             my != old_my) &&
-            !dragging) {
-
-            /*
-             * Kursor myszy jest rysowany przez compositor, wiec samo
-             * przesuniecie nie wymaga pelnego redraw UI.
-             */
-            gui_odswiez();
         }
 
         poprzednie_przyciski =
@@ -3538,10 +3400,7 @@ void _start() {
 
             const bool byl_popup = menu_plik_otwarte ||
                 menu_ustawienia_otwarte || okno_pomoc_widoczne;
-            const int stary_r = cur_r;
             const int stary_c = cur_c;
-            const int stary_scroll_x = scroll_x;
-            const int stary_scroll_y = scroll_y;
             const TrybPracy stary_tryb = tryb;
 
             menu_plik_otwarte =
@@ -3569,24 +3428,37 @@ void _start() {
                 );
                 szybka_sciezka = !byl_popup && tryb == stary_tryb;
             } else {
+                const StanLayoutEdycji layout_przed =
+                    pobierz_stan_layoutu_edycji();
+
                 obsluz_edycje(
                     &ansi,
                     c
                 );
 
+                const StanLayoutEdycji layout_po =
+                    pobierz_stan_layoutu_edycji();
+
                 const unsigned char uc = static_cast<unsigned char>(c);
-                const bool zwykla_edycja = uc >= 0x20U ||
-                    ((c == '\b' || uc == 0x7FU) && stary_c > 0);
+                const bool zwykly_znak = uc >= 0x20U && uc != 0x7FU;
+                const bool backspace = c == '\b' || uc == 0x7FU;
+                const bool zwykla_edycja = zwykly_znak ||
+                    (backspace && stary_c > 0);
                 if (!byl_popup && tryb == TrybPracy::EDYCJA_TEKSTU &&
-                    zwykla_edycja && cur_r == stary_r &&
-                    scroll_x == stary_scroll_x &&
-                    scroll_y == stary_scroll_y) {
-                    szybka_linia = true;
+                    zwykla_edycja) {
+                    szybki_edytor = true;
+                    szybki_zakres = zaplanuj_redraw_po_edycji(
+                        layout_przed, layout_po, true, backspace);
+#if BURSZTYN_DEBUG_GUI_PERF
+                    ++notatnik_key;
+#endif
                 } else if (!byl_popup &&
                            tryb == TrybPracy::EDYCJA_TEKSTU &&
                            (c == '\n' || c == '\r' || c == '\b' ||
                             uc == 0x7FU)) {
                     szybki_edytor = true;
+                    szybki_zakres = zaplanuj_redraw_po_edycji(
+                        layout_przed, layout_po, false, backspace);
                 }
             }
         }
@@ -3595,12 +3467,16 @@ void _start() {
             rysuj_pole_sciezki();
             gui_odswiez();
             redraw = false;
-        } else if (!dragging && szybka_linia) {
-            rysuj_wiersz_dokumentu(cur_r);
-            gui_odswiez();
-            redraw = false;
         } else if (!dragging && szybki_edytor) {
-            rysuj_tekst_dokumentu();
+            if (szybki_zakres.pelny_viewport) {
+                rysuj_tekst_dokumentu();
+            } else {
+                rysuj_zakres_wierszy_ekranowych(
+                    szybki_zakres.pierwszy_wiersz,
+                    szybki_zakres.ostatni_wiersz,
+                    false
+                );
+            }
             gui_odswiez();
             redraw = false;
         }

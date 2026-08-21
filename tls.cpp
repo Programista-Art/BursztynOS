@@ -153,10 +153,10 @@ constexpr size_t TLS_MAX_LABEL =
     63U;
 
 constexpr size_t TLS_MAX_SCIEZKA_HTTP =
-    512U;
+    2047U;
 
 constexpr size_t TLS_HTTP_REQUEST_MAX =
-    1024U;
+    4096U;
 
 /*
  * Ograniczamy pojedyncze wywolanie BIO do 16 KiB.

@@ -42,6 +42,9 @@ bool czytaj_plik(const char* sciezka,
                  char* bufor,
                  uint32_t maksymalna_dlugosc);
 
+/* Addytywne ABI: zwraca rozmiar bez kopiowania danych. */
+bool pobierz_rozmiar_pliku(const char* sciezka, uint32_t* rozmiar);
+
 char pobierz_znak();
 
 /* =========================================================================

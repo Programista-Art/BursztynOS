@@ -62,8 +62,18 @@ constexpr uint64_t VADDR_FRAMEBUFFER  = 0x130000000ULL;
 
 constexpr uint64_t MAX_RAW_BMP = 32ULL * 1024ULL * 1024ULL;
 
+/*
+ * LFB jest MMIO, nie zwykla pamiecia RAM. Na obecnym sprzecie nie
+ * programujemy jeszcze PAT dla write-combining, wiec wybieramy jeden,
+ * konserwatywny typ UC- (PCD=1, PWT=0) dla KAZDEGO aliasu LFB.
+ */
+constexpr uint32_t FLAGI_CACHE_FRAMEBUFFER =
+    VMM_FLAGA_OBECNA | VMM_FLAGA_ZAPIS | VMM_FLAGA_PCD;
+constexpr uint64_t LIMIT_IDENTITY_MAP = 4ULL * 1024ULL * 1024ULL * 1024ULL;
+
 constexpr int MAX_SKALA_TEKSTU = 4;
 constexpr size_t MAX_TEKST_WEWNETRZNY = 4096;
+constexpr size_t MAX_TEKST_GUI_BWS = 1024;
 
 bool surowy_bufor_bmp_zmapowany = false;
 bool bufor_tapety_zmapowany = false;
@@ -138,10 +148,26 @@ bool zmapuj_framebuffer(uint64_t adres_fizyczny,
         return false;
 
     for (uint64_t i = 0; i < rozmiar_mapowania; i += ROZMIAR_STRONY) {
+        const uint64_t fizyczny = baza_fizyczna + i;
+
         ZmapujStrone(
             reinterpret_cast<void*>(VADDR_FRAMEBUFFER + i),
-            reinterpret_cast<void*>(baza_fizyczna + i),
-            0b11 | 0x10);
+            reinterpret_cast<void*>(fizyczny),
+            FLAGI_CACHE_FRAMEBUFFER);
+
+        /*
+         * VBE LFB zwykle lezy ponizej 4 GiB i byl jednoczesnie widoczny
+         * przez bootstrapowy identity-map jako WB. Alias WB + alias PCD
+         * tej samej pamieci jest niedozwolona kombinacja typow cache x86.
+         * Rozbicie odpowiedniej huge-page i ponowne zmapowanie identity
+         * aliasu usuwa roznice bez kasowania potrzebnego mapowania MMIO.
+         */
+        if (fizyczny < LIMIT_IDENTITY_MAP) {
+            ZmapujStrone(
+                reinterpret_cast<void*>(fizyczny),
+                reinterpret_cast<void*>(fizyczny),
+                FLAGI_CACHE_FRAMEBUFFER);
+        }
     }
 
     przeladuj_cr3();
@@ -485,8 +511,10 @@ static bool terminal_przewinieto = false;
 static int mysz_x = 500;
 static int mysz_y = 300;
 
-static uint32_t bufor_kursora[16][16];
-static bool kursor_widoczny = false;
+/* Pozycja faktycznie narysowanego overlayu w fizycznym framebufferze. */
+static bool kursor_overlay_widoczny = false;
+static int kursor_overlay_x = 0;
+static int kursor_overlay_y = 0;
 
 static const uint8_t kursor_bitmapa[16][16] = {
     {1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
@@ -527,6 +555,35 @@ void SerialLog(const char* str) {
 
 #ifndef BURSZTYN_DEBUG_GUI_INPUT
 #define BURSZTYN_DEBUG_GUI_INPUT 0
+#endif
+
+#ifndef BURSZTYN_DEBUG_GFX
+#define BURSZTYN_DEBUG_GFX 0
+#endif
+
+#if BURSZTYN_DEBUG_GFX
+void SerialU64(uint64_t v) {
+    char cyfry[24] = {};
+    int n = 0;
+    do { cyfry[n++] = static_cast<char>('0' + v % 10U); v /= 10U; }
+    while (v != 0 && n < static_cast<int>(sizeof(cyfry)));
+    while (n > 0) { char s[2] = {cyfry[--n], '\0'}; SerialLog(s); }
+}
+
+void SerialHex64(uint64_t v) {
+    static constexpr char HEX[] = "0123456789ABCDEF";
+    char out[19] = {'0','x'};
+    for (int i = 0; i < 16; ++i)
+        out[2 + i] = HEX[(v >> ((15 - i) * 4)) & 0xFU];
+    out[18] = '\0';
+    SerialLog(out);
+}
+
+void LogGfxU64(const char* key, uint64_t value, bool hex = false) {
+    SerialLog(key);
+    if (hex) SerialHex64(value); else SerialU64(value);
+    SerialLog("\n");
+}
 #endif
 
 #if BURSZTYN_DEBUG_GUI_INPUT
@@ -689,14 +746,14 @@ void boot_log_gui(const char* tekst) {
     if (!backbuffer || !aktywny_ekran)
         return;
 
-    UkryjKursor();
-
     DopiszDoBufora(tekst, 0x00FFBF00);
     DopiszDoBufora("\n", 0x00FFBF00);
 
     OdswiezEkran();
-    PokazKursor();
     PrzeniesNaEkran();
+    /* Scene zostaje bez kursora; overlay powstaje dopiero po present. */
+    kursor_overlay_widoczny = false;
+    PokazKursor();
 }
 
 // =========================================================================
@@ -781,7 +838,6 @@ void grafika_rozpocznij_skladanie() {
     if (!backbuffer || !aktywny_ekran)
         return;
 
-    UkryjKursor();
     tryb_skladania_obrazu = true;
 }
 
@@ -865,45 +921,60 @@ void grafika_zakoncz_skladanie() {
         return;
     }
 
-    PokazKursor();
     PrzeniesNaEkran();
+    kursor_overlay_widoczny = false;
+    PokazKursor();
     tryb_skladania_obrazu = false;
 }
 
 void grafika_naloz_kursor_regionu(int x, int y, int szer, int wys) {
-    if (!backbuffer || !aktywny_ekran || szer <= 0 || wys <= 0) return;
+    if (!aktywny_ekran || szer <= 0 || wys <= 0) return;
     const int x1=x+szer, y1=y+wys;
     for (int cy=0;cy<16;++cy) for(int cx=0;cx<16;++cx) {
         const int px=mysz_x+cx, py=mysz_y+cy;
         if(px<x||py<y||px>=x1||py>=y1) continue;
         const uint8_t typ=kursor_bitmapa[cy][cx];
-        if(typ==1) ZapiszPikselBackbuffer(px,py,0x00000000);
-        else if(typ==2) ZapiszPikselBackbuffer(px,py,0x00FFFFFF);
+        if(typ==1) aktywny_ekran->ZapiszPikselFramebuffer(px,py,0x00000000);
+        else if(typ==2) aktywny_ekran->ZapiszPikselFramebuffer(px,py,0x00FFFFFF);
     }
 }
 
 void grafika_zakoncz_skladanie_regionu(int x,int y,int szer,int wys) {
     if (!backbuffer || !aktywny_ekran) { tryb_skladania_obrazu=false; return; }
-    grafika_naloz_kursor_regionu(x,y,szer,wys);
     PrzeniesFragmentNaEkran(x,y,szer,wys);
+    grafika_prezentuj_kursor_w(mysz_x,mysz_y);
     tryb_skladania_obrazu=false;
-    kursor_widoczny=false; /* region compositor nie korzysta z save/restore */
 }
 
 void grafika_prezentuj_region(int x,int y,int szer,int wys){PrzeniesFragmentNaEkran(x,y,szer,wys);}
 
 void grafika_prezentuj_kursor_w(int cursor_x,int cursor_y){
-    if(!aktywny_ekran)return;
+    if(!aktywny_ekran||!backbuffer)return;
+    if(kursor_overlay_widoczny){
+        PrzeniesFragmentNaEkran(kursor_overlay_x,kursor_overlay_y,16,16);
+        kursor_overlay_widoczny=false;
+    }
+    /* Call barrier wystarcza sprzetowo dla UC-. Jawna bariera kompilatora
+       utrzymuje jednak niezalezna od optymalizatora kolejnosc restore->draw,
+       takze gdy stary i nowy prostokat sie przecinaja. */
+    asm volatile("" ::: "memory");
     const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
     for(int cy=0;cy<16;++cy)for(int cx=0;cx<16;++cx){int px=cursor_x+cx,py=cursor_y+cy;if(px<0||py<0||px>=sw||py>=sh)continue;uint8_t typ=kursor_bitmapa[cy][cx];if(!typ)continue;aktywny_ekran->ZapiszPikselFramebuffer(px,py,typ==1?0x00000000:0x00FFFFFF);}
+    kursor_overlay_x=cursor_x;kursor_overlay_y=cursor_y;kursor_overlay_widoczny=true;
 }
 void grafika_prezentuj_kursor(){grafika_prezentuj_kursor_w(mysz_x,mysz_y);}
 
-void grafika_zakoncz_scene(){tryb_skladania_obrazu=false;kursor_widoczny=false;}
+void grafika_zakoncz_scene(){tryb_skladania_obrazu=false;}
 
 void grafika_pobierz_pozycje_kursora(int* x,int* y) {
     if(x) *x=mysz_x;
     if(y) *y=mysz_y;
+}
+
+void grafika_pobierz_overlay_kursora(int* x,int* y,bool* widoczny) {
+    if(x) *x=kursor_overlay_x;
+    if(y) *y=kursor_overlay_y;
+    if(widoczny) *widoczny=kursor_overlay_widoczny;
 }
 
 // =========================================================================
@@ -1672,96 +1743,13 @@ extern "C" bool zaktualizuj_klawiature_gui(char znak) {
 // =========================================================================
 
 void UkryjKursor() {
-    if (!kursor_widoczny ||
-        !backbuffer ||
-        !aktywny_ekran) {
-        return;
-    }
-
-    const bool poprzedni_tryb =
-        tryb_skladania_obrazu;
-
-    tryb_skladania_obrazu = true;
-
-    const int szer =
-        static_cast<int>(
-            aktywny_ekran->PobierzSzerokosc());
-
-    const int wys =
-        static_cast<int>(
-            aktywny_ekran->PobierzWysokosc());
-
-    for (int y = 0; y < 16; ++y) {
-        for (int x = 0; x < 16; ++x) {
-            const int px = mysz_x + x;
-            const int py = mysz_y + y;
-
-            if (px < 0 || py < 0 ||
-                px >= szer || py >= wys) {
-                continue;
-            }
-
-            ZapiszPikselBackbuffer(
-                px,
-                py,
-                bufor_kursora[y][x]);
-        }
-    }
-
-    kursor_widoczny = false;
-    tryb_skladania_obrazu =
-        poprzedni_tryb;
+    if (!kursor_overlay_widoczny || !backbuffer || !aktywny_ekran) return;
+    PrzeniesFragmentNaEkran(kursor_overlay_x,kursor_overlay_y,16,16);
+    kursor_overlay_widoczny=false;
 }
 
 void PokazKursor() {
-    if (kursor_widoczny ||
-        !backbuffer ||
-        !aktywny_ekran) {
-        return;
-    }
-
-    const bool poprzedni_tryb =
-        tryb_skladania_obrazu;
-
-    tryb_skladania_obrazu = true;
-
-    const int szer =
-        static_cast<int>(
-            aktywny_ekran->PobierzSzerokosc());
-
-    const int wys =
-        static_cast<int>(
-            aktywny_ekran->PobierzWysokosc());
-
-    for (int y = 0; y < 16; ++y) {
-        for (int x = 0; x < 16; ++x) {
-            const int px = mysz_x + x;
-            const int py = mysz_y + y;
-
-            if (px < 0 || py < 0 ||
-                px >= szer || py >= wys) {
-                continue;
-            }
-
-            bufor_kursora[y][x] =
-                PobierzPiksel(px, py);
-
-            const uint8_t typ =
-                kursor_bitmapa[y][x];
-
-            if (typ == 1) {
-                ZapiszPikselBackbuffer(
-                    px, py, 0x00000000);
-            } else if (typ == 2) {
-                ZapiszPikselBackbuffer(
-                    px, py, 0x00FFFFFF);
-            }
-        }
-    }
-
-    kursor_widoczny = true;
-    tryb_skladania_obrazu =
-        poprzedni_tryb;
+    grafika_prezentuj_kursor_w(mysz_x,mysz_y);
 }
 
 // =========================================================================
@@ -1890,6 +1878,8 @@ extern "C" void zaktualizuj_mysze(int dx,
                                   uint8_t przyciski) {
     if (!backbuffer || !aktywny_ekran)
         return;
+
+    skladacz_obrazu_zarejestruj_raport_myszy(dx != 0 || dy != 0);
 
     NaprawWlascicielaMyszyJesliProcesZniknal();
 
@@ -2428,10 +2418,10 @@ extern "C" void wczytaj_tapete_z_dysku() {
         "[GRAFIKA] Pulpit i tapeta gotowe!");
 
     if (pid_przejmujacy_mysz == -1 && aktualny_pid == 0) {
-        UkryjKursor();
         OdswiezEkran();
-        PokazKursor();
         PrzeniesNaEkran();
+        kursor_overlay_widoczny=false;
+        PokazKursor();
     } else {
         skladacz_obrazu_oznacz_dirty();
     }
@@ -2495,6 +2485,12 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
     uint32_t WYS = 0;
     uint32_t PITCH = 0;
     uint8_t BPP = 0;
+#if BURSZTYN_DEBUG_GFX
+    uint8_t TYP_PIKSELA = 0xFFU;
+    uint8_t RED_POS = 0, RED_MASK = 0;
+    uint8_t GREEN_POS = 0, GREEN_MASK = 0;
+    uint8_t BLUE_POS = 0, BLUE_MASK = 0;
+#endif
 
     bool mamy_efi = false;
 
@@ -2519,6 +2515,18 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
             SZER = tag->szerokosc;
             WYS = tag->wysokosc;
             BPP = tag->bpp;
+#if BURSZTYN_DEBUG_GFX
+            TYP_PIKSELA = tag->typ_bufora;
+            if (tag->typ_bufora == MULTIBOOT_FRAMEBUFFER_TYPE_RGB &&
+                tag->rozmiar >= sizeof(TagFramebufferMB2) + 6U) {
+                const uint8_t* rgb =
+                    reinterpret_cast<const uint8_t*>(tag) +
+                    sizeof(TagFramebufferMB2);
+                RED_POS = rgb[0]; RED_MASK = rgb[1];
+                GREEN_POS = rgb[2]; GREEN_MASK = rgb[3];
+                BLUE_POS = rgb[4]; BLUE_MASK = rgb[5];
+            }
+#endif
         }
 
         const uint64_t krok =
@@ -2622,6 +2630,37 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
         SerialLog(
             "[HAL] Aktywacja sterownika VESA VBE.\n");
     }
+
+#if BURSZTYN_DEBUG_GFX
+    uint64_t mapowane_z_offsetem = lfb_waga + (LFB & (ROZMIAR_STRONY - 1ULL));
+    uint64_t mapowane = 0;
+    (void)wyrownaj_do_strony(mapowane_z_offsetem, &mapowane);
+    SerialLog("[GFX-DEBUG]\nbackend=");
+    SerialLog(mamy_efi ? "GOP\n" : "VBE\n");
+    LogGfxU64("framebuffer_phys=", LFB, true);
+    LogGfxU64("width=", SZER);
+    LogGfxU64("height=", WYS);
+    LogGfxU64("pitch=", PITCH);
+    LogGfxU64("bpp=", BPP);
+    LogGfxU64("bytes_per_pixel=", BPP / 8U);
+    SerialLog("pixel_format=");
+    if (TYP_PIKSELA == MULTIBOOT_FRAMEBUFFER_TYPE_RGB &&
+        RED_POS == 16U && GREEN_POS == 8U && BLUE_POS == 0U &&
+        RED_MASK == 8U && GREEN_MASK == 8U && BLUE_MASK == 8U) {
+        SerialLog("XRGB8888\n");
+    } else if (TYP_PIKSELA == MULTIBOOT_FRAMEBUFFER_TYPE_RGB &&
+               RED_POS == 0U && GREEN_POS == 8U && BLUE_POS == 16U &&
+               RED_MASK == 8U && GREEN_MASK == 8U && BLUE_MASK == 8U) {
+        SerialLog("XBGR8888\n");
+    } else if (TYP_PIKSELA == MULTIBOOT_FRAMEBUFFER_TYPE_RGB) {
+        SerialLog("RGB-custom\n");
+    } else {
+        SerialLog("non-RGB\n");
+    }
+    LogGfxU64("mapped_size=", mapowane);
+    SerialLog("cache_flags=PRESENT|RW|PCD(UC-); identity_alias=");
+    SerialLog(LFB < LIMIT_IDENTITY_MAP ? "same-flags\n" : "none\n");
+#endif
 
     if (!aktywny_ekran ||
         !aktywny_ekran->Inicjalizuj(
@@ -2774,7 +2813,7 @@ extern "C" void bws_gui_wypisz_tekst(int x,
         return;
     }
 
-    char text_bezp[256] = {};
+    char text_bezp[MAX_TEKST_GUI_BWS] = {};
 
     if (!skopiuj_string_z_uzytkownika(
             text_bezp,
@@ -2789,8 +2828,10 @@ extern "C" void bws_gui_wypisz_tekst(int x,
         y,
         0x00D1D5DB,
         1);
-    int dl=0;while(text_bezp[dl]&&dl<255)++dl;
-    zapamietaj_dirty_rysowania(x,y,dl*9,18);
+    int dl=0;while(text_bezp[dl]&&dl<static_cast<int>(MAX_TEKST_GUI_BWS-1U))++dl;
+    /* Glif ma dokladnie 16 pikseli wysokosci; dodatkowe 2 px nie moga
+       rozszerzac jednowierszowego dirty Notatnika na sasiedni visual row. */
+    zapamietaj_dirty_rysowania(x,y,dl*9,16);
 }
 
 extern "C" void bws_gui_wyczyscz_obszar(int x,
@@ -2914,7 +2955,7 @@ extern "C" void bws_gui_wypisz_tekst_kolor(
         return;
     }
 
-    char text_bezp[256] = {};
+    char text_bezp[MAX_TEKST_GUI_BWS] = {};
 
     if (!skopiuj_string_z_uzytkownika(
             text_bezp,
@@ -2929,8 +2970,8 @@ extern "C" void bws_gui_wypisz_tekst_kolor(
         y,
         kolor,
         skala);
-    int dl=0;while(text_bezp[dl]&&dl<255)++dl;
-    zapamietaj_dirty_rysowania(x,y,dl*9*skala,18*skala);
+    int dl=0;while(text_bezp[dl]&&dl<static_cast<int>(MAX_TEKST_GUI_BWS-1U))++dl;
+    zapamietaj_dirty_rysowania(x,y,dl*9*skala,16*skala);
 }
 
 extern "C" void bws_gui_rysuj_prostokat(
@@ -2991,8 +3032,10 @@ extern "C" void bws_gui_ustaw_capture(bool stan) {
     if (stan) {
         if (aktualny_pid == aktywny_pid_gui && BwsProcesMaWarstwe())
             capture_pid_gui = aktualny_pid;
-    } else if (capture_pid_gui == aktualny_pid) {
-        capture_pid_gui = -1;
+    } else {
+        /* MOUSE_UP nie moze zostawic ostatniej probki w kolejce geometrii. */
+        skladacz_obrazu_zastosuj_pending_geometrii(aktualny_pid);
+        if (capture_pid_gui == aktualny_pid) capture_pid_gui = -1;
     }
 }
 

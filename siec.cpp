@@ -177,7 +177,7 @@ constexpr size_t TCP_BUFOR_GNIAZDA =
     64U * 1024U;
 
 constexpr size_t HTTP_REQUEST_MAX =
-    1024U;
+    4096U;
 
 constexpr size_t DNS_PACKET_MAX =
     512U;
@@ -4099,7 +4099,7 @@ bool zbuduj_http_get(
             false) ||
         !http_tekst_bez_crlf(
             sciezka,
-            512,
+            2047,
             true)) {
 
         return false;

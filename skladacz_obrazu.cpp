@@ -142,13 +142,15 @@ struct PendingGeometry { bool pending; int x,y,old_x,old_y,width,height; };
 PendingGeometry pending_geometry[MAKS_WARSTW]{};
 uint64_t drag_moves_received=0,drag_moves_coalesced=0,drag_frames_presented=0;
 uint64_t dirty_area_drag=0,cursor_fast_present_count=0;
+uint64_t mouse_reports=0,mouse_moves=0;
+bool drag_frame_waiting=false;
 uint64_t dirty_generation = 1;
 uint64_t nastepna_klatka_ns = 0;
 constexpr uint64_t ODSTEP_KLATKI_NS = 16666667ULL;
 uint64_t licznik_dirty=0,licznik_klatek=0,licznik_full=0,licznik_region=0;
 uint64_t suma_compose_us=0,maks_compose_us=0,suma_present_us=0,maks_present_us=0;
 uint64_t suma_dirty_px=0,suma_rect=0,maks_dirty_px=0;
-[[maybe_unused]] uint64_t perf_deadline_ns=0,perf_stare_irq=0,perf_stare_ctx=0,perf_stare_klatki=0,perf_stare_dirty=0;
+[[maybe_unused]] uint64_t perf_deadline_ns=0,gui_perf_deadline_ns=0,perf_stare_irq=0,perf_stare_ctx=0,perf_stare_klatki=0,perf_stare_dirty=0;
 [[maybe_unused]] uint64_t perf_stare_full=0,perf_stare_region=0,perf_stare_px=0,perf_stare_rect=0;
 
 struct LayerRenderInfo { uint32_t* buffer; int x,y,width,height,z,pid; uint64_t pixels; };
@@ -165,8 +167,15 @@ void apply_pending_geometry(int only_pid){
         PendingGeometry p{};uint64_t f=irq_off();if(pending_geometry[pid].pending){p=pending_geometry[pid];pending_geometry[pid].pending=false;}irq_restore(f);if(!p.pending)continue;
         warstwa_obrazu* w=pobierz_warstwe(pid);if(!w)continue;w->x=p.x;w->y=p.y;
         skladacz_obrazu_oznacz_dirty_rect(p.old_x,p.old_y,p.width,p.height);skladacz_obrazu_oznacz_dirty_rect(p.x,p.y,p.width,p.height);
-        ++drag_frames_presented;dirty_area_drag+=static_cast<uint64_t>(p.width)*static_cast<uint64_t>(p.height)*2U;
+        drag_frame_waiting=true;
+        dirty_area_drag+=static_cast<uint64_t>(p.width)*static_cast<uint64_t>(p.height)*2U;
     }
+}
+
+bool ma_pending_geometry(){
+    uint64_t f=irq_off();bool wynik=false;
+    for(int pid=1;pid<MAKS_WARSTW;++pid)if(pending_geometry[pid].pending){wynik=true;break;}
+    irq_restore(f);return wynik;
 }
 
 bool rect_clip(GuiDirtyRect* r,int sw,int sh){
@@ -180,6 +189,11 @@ bool rect_clip(GuiDirtyRect* r,int sw,int sh){
     r->x=(int)x0;r->y=(int)y0;r->width=(int)(x1-x0);r->height=(int)(y1-y0);return true;
 }
 uint64_t rect_area(const GuiDirtyRect&r){return(uint64_t)(uint32_t)r.width*(uint32_t)r.height;}
+bool rect_przecina(const GuiDirtyRect&a,const GuiDirtyRect&b){
+    return a.width>0&&a.height>0&&b.width>0&&b.height>0&&
+        a.x<b.x+b.width&&b.x<a.x+a.width&&
+        a.y<b.y+b.height&&b.y<a.y+a.height;
+}
 GuiDirtyRect rect_union(const GuiDirtyRect&a,const GuiDirtyRect&b){
     int x0=a.x<b.x?a.x:b.x,y0=a.y<b.y?a.y:b.y;
     int x1=a.x+a.width>b.x+b.width?a.x+a.width:b.x+b.width;
@@ -198,8 +212,15 @@ bool rect_merge_ok(const GuiDirtyRect&a,const GuiDirtyRect&b){
 #ifndef BURSZTYN_DEBUG_GUI_LAYERS
 #define BURSZTYN_DEBUG_GUI_LAYERS 0
 #endif
+#ifndef BURSZTYN_DEBUG_GUI_PERF
+#define BURSZTYN_DEBUG_GUI_PERF 0
+#endif
 
-#if BURSZTYN_DEBUG_PERF || BURSZTYN_DEBUG_GUI_LAYERS
+#if BURSZTYN_DEBUG_GUI_PERF
+uint64_t cursor_reoverlay_after_dirty=0;
+#endif
+
+#if BURSZTYN_DEBUG_PERF || BURSZTYN_DEBUG_GUI_LAYERS || BURSZTYN_DEBUG_GUI_PERF
 void perf_num(char* b,size_t cap,size_t* n,uint64_t v){char t[24];size_t m=0;do{t[m++]=static_cast<char>('0'+v%10);v/=10;}while(v&&m<sizeof(t));while(m&&*n+1<cap)b[(*n)++]=t[--m];b[*n]='\0';}
 void perf_txt(char*b,size_t cap,size_t*n,const char*s){while(s&&*s&&*n+1<cap)b[(*n)++]=*s++;b[*n]='\0';}
 #endif
@@ -215,6 +236,23 @@ void perf_log(uint64_t teraz){
     perf_stare_irq=irq;perf_stare_ctx=ctx;perf_stare_klatki=fr;perf_stare_dirty=dr;perf_stare_full=licznik_full;perf_stare_region=licznik_region;perf_stare_px=dp;perf_stare_rect=rc;suma_compose_us=0;maks_compose_us=0;suma_present_us=0;maks_present_us=0;suma_dirty_px=0;suma_rect=0;maks_dirty_px=0;
 #else
     (void)teraz;
+#endif
+#if BURSZTYN_DEBUG_GUI_PERF
+    if(gui_perf_deadline_ns==0){gui_perf_deadline_ns=teraz+5000000000ULL;return;}
+    if(teraz<gui_perf_deadline_ns)return;
+    gui_perf_deadline_ns=teraz+5000000000ULL;
+    char g[512]={};size_t gn=0;
+    perf_txt(g,sizeof(g),&gn,"[GUI-PERF] mouse_reports=");perf_num(g,sizeof(g),&gn,mouse_reports);
+    perf_txt(g,sizeof(g),&gn," mouse_moves=");perf_num(g,sizeof(g),&gn,mouse_moves);
+    perf_txt(g,sizeof(g),&gn," drag_moves_received=");perf_num(g,sizeof(g),&gn,drag_moves_received);
+    perf_txt(g,sizeof(g),&gn," drag_moves_coalesced=");perf_num(g,sizeof(g),&gn,drag_moves_coalesced);
+    perf_txt(g,sizeof(g),&gn," drag_frames_presented=");perf_num(g,sizeof(g),&gn,drag_frames_presented);
+    perf_txt(g,sizeof(g),&gn," dirty_area_drag=");perf_num(g,sizeof(g),&gn,dirty_area_drag);
+    perf_txt(g,sizeof(g),&gn," full_compose_count=");perf_num(g,sizeof(g),&gn,licznik_full);
+    perf_txt(g,sizeof(g),&gn," partial_compose_count=");perf_num(g,sizeof(g),&gn,licznik_region);
+    perf_txt(g,sizeof(g),&gn," cursor_fast_present_count=");perf_num(g,sizeof(g),&gn,cursor_fast_present_count);
+    perf_txt(g,sizeof(g),&gn," cursor_reoverlay_after_dirty=");perf_num(g,sizeof(g),&gn,cursor_reoverlay_after_dirty);
+    wypisz_log(g);
 #endif
 }
 
@@ -757,6 +795,7 @@ extern void grafika_prezentuj_region(int,int,int,int);
 extern void grafika_prezentuj_kursor();
 extern void grafika_prezentuj_kursor_w(int,int);
 extern void grafika_pobierz_pozycje_kursora(int*,int*);
+extern void grafika_pobierz_overlay_kursora(int*,int*,bool*);
 extern void grafika_zakoncz_scene();
 extern "C" void grafika_naloz_okno_terminala_region(int x, int y,
                                                        int szer, int wys);
@@ -894,6 +933,11 @@ int utworz_warstwe(
 
     warstwa_obrazu& warstwa =
         tablica_warstw[pid];
+    {
+        const uint64_t f=irq_off();
+        pending_geometry[pid]={};
+        irq_restore(f);
+    }
     const bool nowe_okno = !warstwa_bufor_spojny(pid);
 
     const uint64_t stare_bajty =
@@ -1123,6 +1167,11 @@ void zaktualizuj_pozycje_warstwy(
 
 void skladacz_obrazu_zastosuj_pending_geometrii(int pid){apply_pending_geometry(pid);}
 
+void skladacz_obrazu_zarejestruj_raport_myszy(bool ruch){
+    __atomic_fetch_add(&mouse_reports,1ULL,__ATOMIC_RELAXED);
+    if(ruch)__atomic_fetch_add(&mouse_moves,1ULL,__ATOMIC_RELAXED);
+}
+
 /* =========================================================================
  * 12. CZYSZCZENIE WARSTWY
  * ========================================================================= */
@@ -1180,6 +1229,11 @@ void usun_warstwe(
 
     warstwa_obrazu& warstwa =
         tablica_warstw[pid];
+    {
+        const uint64_t f=irq_off();
+        pending_geometry[pid]={};
+        irq_restore(f);
+    }
     if (system_overlay.otwarty && system_overlay.pid == pid)
         system_overlay = {false, -1, {0, 0, 0, 0}};
     const int stare_x=warstwa.x, stare_y=warstwa.y;
@@ -1531,16 +1585,47 @@ void skladacz_obrazu_oznacz_ruch_kursora(int old_x,int old_y,int new_x,int new_y
 }
 
 void skladacz_obrazu_obsluz_dirty() {
-    apply_pending_geometry(-1);
-    uint64_t f=irq_off();if(!dirty_count&&!cursor_pending){irq_restore(f);return;}irq_restore(f);
+    uint64_t f=irq_off();bool ma_dirty=dirty_count!=0,ma_cursor=cursor_pending;irq_restore(f);
+    const bool ma_geometrie=ma_pending_geometry();
+    if(!ma_dirty&&!ma_cursor&&!ma_geometrie)return;
+
     uint64_t now=hpet_dostepny()?czas_monotoniczny_ns():0;
-    if(hpet_dostepny()&&nastepna_klatka_ns&&now<nastepna_klatka_ns)return;
+    const bool klatka_potrzebna=ma_dirty||ma_geometrie;
+    if(klatka_potrzebna&&hpet_dostepny()&&nastepna_klatka_ns&&now<nastepna_klatka_ns){
+        /* Kursor nie czeka na pacing duzych warstw. Restore i overlay nadal
+           wykonuje petla PID 0, nigdy IRQ myszy. */
+        GuiDirtyRect nowy{};bool ruch=false;
+        f=irq_off();if(cursor_pending){nowy=cursor_new;cursor_pending=false;ruch=true;}irq_restore(f);
+        if(ruch){grafika_prezentuj_kursor_w(nowy.x,nowy.y);++cursor_fast_present_count;}
+        if(hpet_dostepny())perf_log(now);
+        return;
+    }
+    if(!klatka_potrzebna){
+        GuiDirtyRect nowy{};bool ruch=false;
+        f=irq_off();if(cursor_pending){nowy=cursor_new;cursor_pending=false;ruch=true;}irq_restore(f);
+        if(ruch){grafika_prezentuj_kursor_w(nowy.x,nowy.y);++cursor_fast_present_count;}
+        if(hpet_dostepny())perf_log(now);
+        return;
+    }
+
     if(hpet_dostepny())nastepna_klatka_ns=now>UINT64_MAX-ODSTEP_KLATKI_NS?UINT64_MAX:now+ODSTEP_KLATKI_NS;
+    /* Geometria jest konsumowana dopiero przez klatke, dzieki czemu wiele
+       MOVE pomiedzy dwiema klatkami zastępuje poprzednia pozycje. */
+    apply_pending_geometry(-1);
+    bool drag_frame_work=false;
+    f=irq_off();drag_frame_work=drag_frame_waiting;drag_frame_waiting=false;irq_restore(f);
     GuiDirtyRect work[SKLADACZ_MAKS_DIRTY_RECT];uint32_t count=0;uint64_t generation_start;bool cursor_work=false;GuiDirtyRect old_cursor{},new_cursor{};
     f=irq_off();count=dirty_count;for(uint32_t i=0;i<count;++i)work[i]=dirty_rects[i];dirty_count=0;cursor_work=cursor_pending;old_cursor=cursor_old;new_cursor=cursor_new;cursor_pending=false;generation_start=dirty_generation;irq_restore(f);
-    GuardSkladania guard;if(!guard.aktywny()){for(uint32_t i=0;i<count;++i)skladacz_obrazu_oznacz_dirty_rect(work[i].x,work[i].y,work[i].width,work[i].height);if(cursor_work)skladacz_obrazu_oznacz_ruch_kursora(old_cursor.x,old_cursor.y,new_cursor.x,new_cursor.y);return;}
+    GuardSkladania guard;if(!guard.aktywny()){for(uint32_t i=0;i<count;++i)skladacz_obrazu_oznacz_dirty_rect(work[i].x,work[i].y,work[i].width,work[i].height);if(cursor_work)skladacz_obrazu_oznacz_ruch_kursora(old_cursor.x,old_cursor.y,new_cursor.x,new_cursor.y);if(drag_frame_work){f=irq_off();drag_frame_waiting=true;irq_restore(f);}return;}
     const uint64_t start=hpet_dostepny()?czas_monotoniczny_us():0;LayerRenderInfo layers[MAKS_WARSTW];int layer_count=0;
     if(count)layer_count=snapshot_warstw(layers);
+    int overlay_x=0,overlay_y=0;bool overlay_widoczny=false;
+    grafika_pobierz_overlay_kursora(&overlay_x,&overlay_y,&overlay_widoczny);
+    const GuiDirtyRect overlay_rect{overlay_x,overlay_y,16,16};
+    bool dirty_przecina_kursor=false;
+    if(overlay_widoczny)for(uint32_t ri=0;ri<count;++ri){
+        if(rect_przecina(work[ri],overlay_rect)){dirty_przecina_kursor=true;break;}
+    }
     grafika_rozpocznij_skladanie();uint64_t pixels=0;
     /* Faza A: wszystkie regiony trafiaja w calosci do scene backbufferu.
        Framebuffer nie jest dotykany podczas kosztownego compositingu. */
@@ -1550,19 +1635,28 @@ void skladacz_obrazu_obsluz_dirty() {
     /* Faza B: prezentujemy dopiero gotowe wiersze, a kursor nakladamy raz,
        jako ostatni overlay. Scene backbuffer pozostaje bez kursora. */
     for(uint32_t ri=0;ri<count;++ri){const GuiDirtyRect&r=work[ri];grafika_prezentuj_region(r.x,r.y,r.width,r.height);}
-    int cursor_x=0,cursor_y=0;if(cursor_work){grafika_prezentuj_region(old_cursor.x,old_cursor.y,old_cursor.width,old_cursor.height);cursor_x=new_cursor.x;cursor_y=new_cursor.y;pixels+=rect_area(old_cursor);}else grafika_pobierz_pozycje_kursora(&cursor_x,&cursor_y);
-    /* Overlay jest rysowany z tego samego snapshotu co restore. Scene nigdy
-       nie zawiera kursora, a dirty przecinajace jego rect jest naprawiane
-       przez ten finalny overlay. */
-    grafika_prezentuj_kursor_w(cursor_x,cursor_y);++cursor_fast_present_count;
+    int cursor_x=overlay_x,cursor_y=overlay_y;
+    if(cursor_work){cursor_x=new_cursor.x;cursor_y=new_cursor.y;pixels+=rect_area(old_cursor);}
+    else if(!overlay_widoczny)grafika_pobierz_pozycje_kursora(&cursor_x,&cursor_y);
+    /* Scene nigdy nie zawiera kursora. Bez ruchu myszy overlay pozostaje
+       nietkniety, dopoki dirty faktycznie nie przecina jego 16x16. */
+    if(cursor_work||dirty_przecina_kursor||!overlay_widoczny){
+        grafika_prezentuj_kursor_w(cursor_x,cursor_y);++cursor_fast_present_count;
+#if BURSZTYN_DEBUG_GUI_PERF
+        if(dirty_przecina_kursor)++cursor_reoverlay_after_dirty;
+#endif
+    }
     grafika_zakoncz_scene();
+    if(drag_frame_work)++drag_frames_presented;
     const uint64_t present_end=hpet_dostepny()?czas_monotoniczny_us():0;
     if(count) zakoncz_snapshot();
     ++licznik_klatek;
     suma_dirty_px+=pixels;
     suma_rect+=count+(cursor_work?2U:0U);
     if(pixels>maks_dirty_px)maks_dirty_px=pixels;
-    uint64_t screen=(uint64_t)grafika_pobierz_szerokosc()*grafika_pobierz_wysokosc();if(pixels>=screen)++licznik_full;else ++licznik_region;
+    const bool pelny_compose=count==1U&&work[0].x==0&&work[0].y==0&&
+        work[0].width>=sw&&work[0].height>=sh;
+    if(pelny_compose)++licznik_full;else if(count!=0U)++licznik_region;
     /* Nowe dirty powstale podczas klatki pozostaly w kolejce. Generation
        sluzy jako jawna kontrola, ze nie wolno ich skasowac na koncu. */
     f=irq_off();bool newer=dirty_generation!=generation_start;irq_restore(f);(void)newer;
