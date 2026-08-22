@@ -201,6 +201,73 @@ qemu-system-x86_64 -enable-kvm -cdrom BursztynOS.iso -m 2G
 ```
 
 
+# Jak uruchomić system Bursztyn w QEMU na Red Hat Enterprise Linux 10.2
+
+RHEL pakuje QEMU inaczej niż Debian/Ubuntu/Linux Mint — nie ma tam pakietu `qemu-system-x86`, a binarka nie nazywa się `qemu-system-x86_64` ani nie leży w `PATH`. Trzeba to uwzględnić w komendach.
+
+## Krok 1: Zainstaluj QEMU i firmware UEFI (OVMF)
+```
+sudo dnf install -y qemu-kvm qemu-img edk2-ovmf virt-viewer
+```
+* `qemu-kvm` dostarcza binarkę pod `/usr/libexec/qemu-kvm` (odpowiednik `qemu-system-x86_64` z innych dystrybucji).
+* `edk2-ovmf` instaluje firmware UEFI pod `/usr/share/edk2/ovmf/OVMF_CODE.fd`.
+* `virt-viewer` dostarcza `remote-viewer` — przyda się w Kroku 4, bo RHEL-owy build QEMU nie ma wbudowanego okna GTK/SDL.
+
+## Krok 2: Przejście do folderu z systemem
+```
+cd ~/Pobrane/BursztynOS.v1.0.0.7
+```
+
+## Krok 3: Uruchomienie QEMU (tryb Legacy BIOS)
+Na RHEL binarkę wywołujesz z pełnej ścieżki `/usr/libexec/qemu-kvm`:
+```
+/usr/libexec/qemu-kvm -cdrom BursztynOS.iso -m 2G
+```
+
+Jeżeli chcesz uruchomić wraz z wirtualnym dyskiem:
+```
+/usr/libexec/qemu-kvm -cdrom BursztynOS.iso -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -serial stdio
+```
+
+## Jak uruchomić Bursztyn w trybie UEFI (OVMF) z UEFI GOP na Red Hat 10.2 od wersji pliku iso BursztynOS v1.0.0.5
+```
+/usr/libexec/qemu-kvm \
+    -cpu max \
+    -drive if=pflash,format=raw,unit=0,readonly=on,file=/usr/share/edk2/ovmf/OVMF_CODE.fd \
+    -cdrom BursztynOS.iso \
+    -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none \
+    -device ahci,id=ahci \
+    -device ide-hd,drive=disk,bus=ahci.0 \
+    -m 2G \
+    -vga std \
+    -serial stdio
+```
+
+## Krok 4: (Opcjonalnie) Zobacz prawdziwe okno zamiast trybu headless
+Domyślny build `qemu-kvm` na RHEL nie ma wkompilowanego GTK/SDL (tylko `none` i `egl-headless`), więc bez dodatkowych flag QEMU startuje bez okna, wystawiając jedynie serwer VNC. Żeby zobaczyć pulpit Bursztyn OS, dodaj `-display vnc=localhost:0` i podłącz się `remote-viewer`:
+```
+/usr/libexec/qemu-kvm \
+    -cpu max \
+    -drive if=pflash,format=raw,unit=0,readonly=on,file=/usr/share/edk2/ovmf/OVMF_CODE.fd \
+    -cdrom BursztynOS.iso \
+    -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none \
+    -device ahci,id=ahci \
+    -device ide-hd,drive=disk,bus=ahci.0 \
+    -m 2G \
+    -vga std \
+    -display vnc=localhost:0 \
+    -serial stdio &
+
+remote-viewer vnc://localhost:5900
+```
+
+### Krok 5: (Opcjonalnie) Włącz akcelerację KVM 🚀
+Pakiet `qemu-kvm` ma akcelerację KVM wbudowaną domyślnie — dopisz `-enable-kvm` (i opcjonalnie `-cpu host` zamiast `-cpu max`), żeby mieć pewność, że jest aktywna:
+```
+/usr/libexec/qemu-kvm -enable-kvm -cpu host -cdrom BursztynOS.iso -m 2G
+```
+
+
 # Kompilowanie systemu ze źródel na Linux Mint i uruchomienie w QEMU 
 ### Przygotowanie Środowiska w Linux Mint
 1. Otwórz natywny terminal i wykonaj te trzy polecenia:
