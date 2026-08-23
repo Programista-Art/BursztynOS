@@ -255,6 +255,8 @@ OBJS := \
 	tls.o \
 	bezpieczenstwo.o \
 	test_blob.o \
+	repro_blob.o \
+	snake_blob.o \
 	$(MBEDTLS_OBJS)
 
 # ============================================================================
@@ -400,6 +402,28 @@ test_blob.o: test_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
 		test_tmp.o bursztyn_gui.o -o test.elf
 	$(OBJCOPY) -O binary test.elf test.bin
 	$(LD) -r -b binary test.bin -o test_blob.o
+
+# Snake
+# Snake
+snake_tmp.o: gry/snake/snake.cpp bursztyn_gui.h
+	$(CXX) $(RING3_FLAGS) -c $< -o $@
+
+snake_blob.o: snake_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
+	$(LD) -T $(RING3_STD_LINKER) $(RING3_LDFLAGS) \
+		snake_tmp.o bursztyn_gui.o -o snake.elf
+	$(OBJCOPY) -O binary snake.elf snake.bin
+	$(LD) -r -b binary snake.bin -o snake_blob.o
+
+
+# REPRO (tylko diagnostyka BWS2/BWS46)
+repro_tmp.o: programy/repro/repro.cpp bursztyn_gui.h
+	$(CXX) $(RING3_FLAGS) -c $< -o $@
+
+repro_blob.o: repro_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
+	$(LD) -T $(EKSPLORATOR_LINKER) $(RING3_LDFLAGS) \
+		repro_tmp.o bursztyn_gui.o -o repro.elf
+	$(OBJCOPY) -O binary repro.elf repro.bin
+	$(LD) -r -b binary repro.bin -o repro_blob.o
 
 # ============================================================================
 # 16. MENEDZER OKIEN .bur

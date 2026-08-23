@@ -131,6 +131,13 @@ extern "C" uint8_t _binary_przegladarka_bin_end[];
 extern "C" uint8_t _binary_test_bin_start[];
 extern "C" uint8_t _binary_test_bin_end[];
 
+extern "C" uint8_t _binary_snake_bin_start[];
+extern "C" uint8_t _binary_snake_bin_end[];
+
+/* TEMP-REPRO: usunac po diagnozie BWS2/BWS46. */
+extern "C" uint8_t _binary_repro_bin_start[];
+extern "C" uint8_t _binary_repro_bin_end[];
+
 /* =========================================================================
  * STALE STARTOWE
  * ========================================================================= */
@@ -593,6 +600,8 @@ void utworz_drabine_katalogow() {
         "/programy/kalkulator.cebula",
         "/programy/przegladarka.cebula",
         "/programy/test.cebula",
+        "/gry",
+        "/gry/snake.cebula",
         "/uslugi",
         "/sterowniki",
         "/uzytkownicy",
@@ -677,7 +686,16 @@ void instaluj_wbudowane_programy() {
         "    \"okna\"\n"
         "]\n";
     
-
+    static const char MANIFEST_SNAKE[] =
+        "nazwa = \"Snake\"\n"
+        "autor = \"Programista Art\"\n"
+        "wersja = \"1.0\"\n"
+        "poziom_zaufania = 4\n"
+        "plik_startowy = \"snake.bur\"\n"
+        "uprawnienia = [\n"
+        "    \"okna\"\n"
+        "]\n";
+    
     /*
      * WAZNE:
      * zapisujemy DOKLADNY rozmiar kazdego bloba z objcopy.
@@ -751,7 +769,7 @@ void instaluj_wbudowane_programy() {
             "[BSP] Eksplorator Plikow zainstalowany jako .cebula.");
     }
 
-
+    //Program testowy
     if (!instaluj_paczke(
             "/programy/test.cebula/opis.aplikacji",
              MANIFEST_TEST,
@@ -765,6 +783,23 @@ void instaluj_wbudowane_programy() {
         wypisz_log(
             "[BSP] Aplikacja Testowa zainstalowana jako .cebula.");
     }
+    //Gra snake
+        if (!instaluj_paczke(
+            "/gry/snake.cebula/opis.aplikacji",
+             MANIFEST_SNAKE,
+            "/gry/snake.cebula/snake.bur",
+            _binary_snake_bin_start,
+            _binary_snake_bin_end)) {
+
+        wypisz_log(
+            "[BSP-BLAD] Nie mozna zainstalowac gry Snake.");
+    } else {
+        wypisz_log(
+            "[BSP] Gra snake zainstalowana jako .cebula.");
+    }
+
+
+/* TEMP-REPRO instalacja wylaczona na czas testu GUI */
 
     if (!instaluj_paczke(
             "/programy/kalkulator.cebula/opis.aplikacji",
@@ -1105,6 +1140,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
             "Loader nie utworzyl procesu Menedzera Okien.");
     }
 
+/* TEMP-REPRO wylaczony na czas testu GUI */
     /*
      * Flaga musi zostac ustawiona PRZED STI.
      * Pierwsze przerwanie timera moze od razu wykonac PrzelaczKontekst().

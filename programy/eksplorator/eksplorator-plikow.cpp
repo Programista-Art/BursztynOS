@@ -24,6 +24,20 @@ __attribute__((section(".naglowek"), used)) NaglowekBur naglowek = {
 
 namespace {
 
+/* TEMP-DEBUG: usunac po diagnozie. */
+void dbg(const char* tekst) {
+    static char buf[4096];
+    static size_t dl = 0;
+    if (!tekst) return;
+    size_t i = 0;
+    while (tekst[i] && dl + 1 < sizeof(buf)) buf[dl++] = tekst[i++];
+    while (tekst[i]) ++i; /* pomin reszte */
+    buf[dl] = '\0';
+    (void)utworz("/logi/eksplorator_debug.txt");
+    (void)zapisz_plik("/logi/eksplorator_debug.txt", buf,
+                      static_cast<uint32_t>(dl));
+}
+
 constexpr size_t PATH_CAP = 512;
 constexpr size_t NAME_CAP = 56;
 constexpr size_t SEARCH_CAP = 128;
@@ -1414,6 +1428,16 @@ private:
             set_status("Nie można utworzyć elementu: ścieżka przekracza 511 bajtów.");
             return false;
         }
+        {
+            char linia[PATH_CAP + 64] = {};
+            size_t i = 0;
+            const char* prefiks = directory ? "BWS46 mkdir=" : "BWS2 create=";
+            for (; *prefiks; ++prefiks) linia[i++] = *prefiks;
+            for (size_t j = 0; full[j] && i + 1 < sizeof(linia); ++j)
+                linia[i++] = full[j];
+            linia[i] = '\0';
+            dbg(linia);
+        }
         const bool success = directory
             ? utworz_katalog_uzytkownika(full)
             : utworz(full);
@@ -1724,7 +1748,9 @@ public:
 
     AktowkaLayout layout() const { return calculate_layout(window_); }
     EditMode edit_mode() const { return edit_mode_; }
-    const char* edit_text() const { return edit_; }
+    const char* edit_text() const {
+        return modal_open() ? gui_modal_tekst(&modal_) : edit_;
+    }
     bool modal_open() const {
         return edit_mode_ == EditMode::CREATE_FOLDER ||
                edit_mode_ == EditMode::CREATE_FILE ||
@@ -1739,9 +1765,6 @@ public:
             initial = model_.path();
         } else if (mode == EditMode::SEARCH) {
             initial = model_.filter();
-        } else if (mode == EditMode::RENAME) {
-            const Entry* selected = model_.entry(model_.selected());
-            if (selected && selected->type != EntryType::PARENT) initial = selected->name;
         } else if (mode == EditMode::MOVE) {
             initial = model_.path();
         }
@@ -1753,6 +1776,7 @@ public:
     }
 
     void end_edit() {
+        if (gui_modal_otwarty(&modal_)) gui_modal_zamknij(&modal_);
         edit_mode_ = EditMode::NONE;
         edit_[0] = '\0';
         edit_length_ = 0;
@@ -1767,28 +1791,10 @@ public:
                 window_.h > TITLE_H + 2 ? window_.h - TITLE_H - 2 : 0};
     }
 
-    Rect modal_box() const {
-        const Rect area = modal_area();
-        int width = area.w > 430 ? 430 : (area.w > 20 ? area.w - 20 : area.w);
-        int height = edit_mode_ == EditMode::CONFIRM_DELETE ? 150 : 176;
-        if (height > area.h - 16) height = area.h > 16 ? area.h - 16 : area.h;
-        return {area.x + (area.w - width) / 2,
-                area.y + (area.h - height) / 2, width, height};
-    }
-
     Rect modal_field() const {
-        const Rect box = modal_box();
-        return {box.x + 18, box.y + 70, box.w > 36 ? box.w - 36 : 0, TOOL_H};
-    }
-
-    Rect modal_ok() const {
-        const Rect box = modal_box();
-        return {box.x + box.w - 190, box.y + box.h - 38, 78, TOOL_H};
-    }
-
-    Rect modal_cancel() const {
-        const Rect box = modal_box();
-        return {box.x + box.w - 102, box.y + box.h - 38, 84, TOOL_H};
+        const GuiModalProstokat* pole = gui_modal_pole(&modal_);
+        return pole ? Rect{pole->x, pole->y, pole->szer, pole->wys}
+                    : Rect{0, 0, 0, 0};
     }
 
     bool open_modal(EditMode mode) {
@@ -1802,54 +1808,74 @@ public:
                 return false;
             }
         }
-        begin_edit(mode);
         const Rect area = modal_area();
-        if (!modal_open() || area.w <= 0 || area.h <= 0 ||
-            !gui_ustaw_popup_aplikacji(true, area.x, area.y, area.w, area.h)) {
+        if (area.w <= 0 || area.h <= 0) {
+            model_.set_status("Nie można otworzyć dialogu modalnego.");
+            return false;
+        }
+        const char* initial = "";
+        char question[SHOW_CAP] = {};
+        if (mode == EditMode::RENAME) {
+            const Entry* selected = model_.entry(model_.selected());
+            initial = selected ? selected->name : "";
+        } else if (mode == EditMode::CONFIRM_DELETE) {
+            const Entry* selected = model_.entry(model_.selected());
+            (void)append_text(question, sizeof(question), "Czy na pewno usunąć ");
+            (void)append_text(question, sizeof(question),
+                              selected ? selected->name : "element");
+            (void)append_text(question, sizeof(question), "?");
+        }
+        const char* title = mode == EditMode::CREATE_FILE ? "Nowy plik" :
+            (mode == EditMode::CREATE_FOLDER ? "Nowy folder" :
+             (mode == EditMode::RENAME ? "Zmień nazwę" : "Usuń element"));
+        edit_mode_ = mode;
+        gui_modal_ustaw_przycisk_ok(&modal_,
+            mode == EditMode::CONFIRM_DELETE ? "Usuń" : "OK",
+            mode == EditMode::CONFIRM_DELETE ? 0x00AA0000U : GUI_MODAL_RAMKA);
+        const GuiModalProstokat obszar{area.x, area.y, area.w, area.h};
+        dbg(mode == EditMode::CREATE_FOLDER ? "open_modal=CREATE_FOLDER"
+            : (mode == EditMode::CREATE_FILE ? "open_modal=CREATE_FILE"
+            : "open_modal=INNE"));
+        if (!gui_modal_otworz(&modal_, title,
+                              mode == EditMode::CONFIRM_DELETE
+                                  ? nullptr : initial,
+                              mode == EditMode::CONFIRM_DELETE
+                                  ? question : nullptr,
+                              &obszar,
+                              static_cast<uint32_t>(NAME_CAP - 1))) {
+            dbg("modal_otworz=FAIL");
             end_edit();
             model_.set_status("Nie można otworzyć dialogu modalnego.");
             return false;
         }
+        dbg("modal_otworz=OK");
         (void)gui_rejestruj_cele_drop(nullptr, 0);
-        draw_modal(true);
         gui_odswiez();
         return true;
     }
 
     void close_modal() {
         if (!modal_open()) return;
-        (void)gui_ustaw_popup_aplikacji(false, 0, 0, 0, 0);
+        if (gui_modal_otwarty(&modal_)) gui_modal_zamknij(&modal_);
         end_edit();
         register_drop_targets();
         gui_odswiez();
     }
 
-    int modal_button_at(int x, int y) const {
+    int modal_button_at(int x, int y) {
         if (!modal_open()) return 0;
-        if (hit(x, y, modal_ok())) return 1;
-        if (hit(x, y, modal_cancel())) return 2;
-        return 0;
+        const gui_modal_wynik wynik = gui_modal_klik(&modal_, x, y);
+        return wynik == GUI_MODAL_OK ? 1 :
+               (wynik == GUI_MODAL_ANULUJ ? 2 : 0);
     }
 
     void place_modal_caret(int mouse_x) {
         if (!modal_open() || edit_mode_ == EditMode::CONFIRM_DELETE) return;
-        const Rect field = modal_field();
-        int wanted = mouse_x - field.x - 6;
-        size_t position = edit_view_start_;
-        while (wanted > 0 && position < edit_length_) {
-            const size_t next = next_codepoint(edit_, position, edit_length_);
-            char glyph[8] = {};
-            for (size_t i = position; i < next && i - position + 1 < sizeof(glyph); ++i)
-                glyph[i - position] = edit_[i];
-            const int width = oblicz_szerokosc_tekstu(glyph, 1);
-            if (wanted < width / 2) break;
-            wanted -= width;
-            position = next;
-        }
-        edit_caret_ = position;
+        gui_modal_karetka_za_mysza(&modal_, mouse_x);
     }
 
     bool append_input(char character) {
+        if (modal_open()) return gui_modal_dopisz(&modal_, character);
         const uint8_t value = static_cast<uint8_t>(character);
         if (value < 0x20U || value == 0x7FU) return false;
         size_t capacity = sizeof(edit_);
@@ -1871,6 +1897,7 @@ public:
     }
 
     bool erase_input() {
+        if (modal_open()) return gui_modal_usun_wstecz(&modal_);
         if (edit_caret_ == 0) return false;
         const size_t previous = previous_codepoint(edit_, edit_caret_);
         const size_t removed = edit_caret_ - previous;
@@ -1883,6 +1910,7 @@ public:
     }
 
     bool delete_input() {
+        if (modal_open()) return gui_modal_usun_przed(&modal_);
         if (edit_caret_ >= edit_length_) return false;
         const size_t next = next_codepoint(edit_, edit_caret_, edit_length_);
         const size_t removed = next - edit_caret_;
@@ -1893,6 +1921,7 @@ public:
     }
 
     bool move_caret_left() {
+        if (modal_open()) return gui_modal_przesun_karetke(&modal_, -1);
         if (edit_caret_ == 0) return false;
         edit_caret_ = previous_codepoint(edit_, edit_caret_);
         if (edit_caret_ < edit_view_start_) edit_view_start_ = edit_caret_;
@@ -1900,6 +1929,7 @@ public:
     }
 
     bool move_caret_right() {
+        if (modal_open()) return gui_modal_przesun_karetke(&modal_, 1);
         if (edit_caret_ >= edit_length_) return false;
         edit_caret_ = next_codepoint(edit_, edit_caret_, edit_length_);
         return true;
@@ -2329,40 +2359,9 @@ public:
                      value.status.w - 12, model_.status(), TEXT, false);
     }
 
-    void draw_modal(bool draw_shade = false) {
+    void draw_modal() {
         if (!modal_open()) return;
-        const Rect area = modal_area();
-        /* Brak alpha w ABI warstwy: rzadki raster przyciemnia, nie kasujac
-         * calego obrazu pod dialogiem. Backup kompozytora odtworzy ten rect. */
-        if (draw_shade) {
-            for (int y = area.y; y < area.y + area.h; y += 3)
-                gui_rysuj_prostokat(area.x, y, area.w, 1, 0x00100800U);
-        }
-        const Rect box = modal_box();
-        gui_rysuj_prostokat(box.x, box.y, box.w, box.h, PANEL_ALT);
-        gui_rysuj_prostokat(box.x, box.y, box.w, 2, BORDER);
-        gui_rysuj_prostokat(box.x, box.y + box.h - 2, box.w, 2, BORDER_DARK);
-        gui_rysuj_prostokat(box.x, box.y, 2, box.h, BORDER);
-        gui_rysuj_prostokat(box.x + box.w - 2, box.y, 2, box.h, BORDER_DARK);
-        const char* title = edit_mode_ == EditMode::CREATE_FILE ? "Nowy plik" :
-            (edit_mode_ == EditMode::CREATE_FOLDER ? "Nowy folder" :
-             (edit_mode_ == EditMode::RENAME ? "Zmień nazwę" : "Usuń element"));
-        draw_clipped(box.x + 18, box.y + 14, box.w - 36, title, TEXT, false);
-        if (edit_mode_ == EditMode::CONFIRM_DELETE) {
-            char question[SHOW_CAP] = {};
-            (void)append_text(question, sizeof(question), "Czy na pewno usunąć ");
-            const Entry* selected = model_.entry(model_.selected());
-            (void)append_text(question, sizeof(question), selected ? selected->name : "element");
-            (void)append_text(question, sizeof(question), "?");
-            draw_clipped(box.x + 18, box.y + 52, box.w - 36,
-                         question, TEXT2, false);
-        } else {
-            draw_edit_field(modal_field());
-        }
-        draw_button(modal_ok(), edit_mode_ == EditMode::CONFIRM_DELETE
-            ? 0x00AA0000U : BORDER,
-            edit_mode_ == EditMode::CONFIRM_DELETE ? "Usuń" : "OK");
-        draw_button(modal_cancel(), BORDER, "Anuluj");
+        gui_modal_rysuj(&modal_);
     }
 
     bool open_context(int mouse_x, int mouse_y, bool empty) {
@@ -2450,6 +2449,7 @@ public:
 private:
     AktowkaModel& model_;
     AktowkaWindow& window_;
+    GuiModalDialog modal_{};
     EditMode edit_mode_;
     char edit_[PATH_CAP];
     size_t edit_length_;
@@ -2468,31 +2468,6 @@ private:
         if (context_count_ >= static_cast<int>(sizeof(context_items_) /
                                                sizeof(context_items_[0]))) return;
         context_items_[context_count_++] = {label, action};
-    }
-
-    void draw_edit_field(const Rect& field) {
-        draw_field(field, true);
-        const int available = field.w - 12;
-        while (edit_view_start_ > edit_caret_)
-            edit_view_start_ = previous_codepoint(edit_, edit_view_start_);
-        while (edit_view_start_ < edit_caret_) {
-            char before[PATH_CAP] = {};
-            size_t out = 0;
-            for (size_t i = edit_view_start_; i < edit_caret_ &&
-                 out + 1 < sizeof(before); ++i) before[out++] = edit_[i];
-            if (oblicz_szerokosc_tekstu(before, 1) +
-                oblicz_szerokosc_tekstu("|", 1) <= available) break;
-            edit_view_start_ = next_codepoint(edit_, edit_view_start_, edit_length_);
-        }
-        char shown[PATH_CAP + 2] = {};
-        size_t out = 0;
-        for (size_t i = edit_view_start_; i < edit_length_ && out + 2 < sizeof(shown); ++i) {
-            if (i == edit_caret_) shown[out++] = '|';
-            shown[out++] = edit_[i];
-        }
-        if (edit_caret_ == edit_length_ && out + 1 < sizeof(shown)) shown[out++] = '|';
-        shown[out] = '\0';
-        draw_clipped(field.x + 6, field.y + 5, available, shown, TEXT, false);
     }
 
     void draw_context_row(int index) {
@@ -2664,6 +2639,9 @@ void submit_modal(AktowkaView& view, AktowkaModel& model) {
         success = copy_text(name, sizeof(name), view.edit_text()) &&
             (mode == EditMode::CREATE_FOLDER
                 ? model.create_folder(name) : model.create_file(name));
+        dbg(success ? "submit_modal=create OK" : "submit_modal=create FAIL");
+    } else {
+        dbg("submit_modal=inny tryb");
     }
     view.close_modal();
     if (success) present_workspace_change(view, model.refresh());

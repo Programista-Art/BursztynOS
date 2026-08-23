@@ -1510,11 +1510,18 @@ void rysuj_drag_overlay_region(const GuiDirtyRect& region) {
 }
 
 bool popup_aplikacji_spojny() {
-    return application_popup.otwarty &&
-           application_popup.pid > 0 &&
-           application_popup.pid < MAKS_WARSTW &&
-           generacja_okna[application_popup.pid] == application_popup.generacja &&
-           warstwa_ma_spojny_bufor(application_popup.pid);
+    if (!application_popup.otwarty ||
+        application_popup.pid <= 0 ||
+        application_popup.pid >= MAKS_WARSTW ||
+        generacja_okna[application_popup.pid] != application_popup.generacja)
+        return false;
+    /* Popup sklada sie z biezacego surface wlasciciela; gdy warstwa zniknela
+       albo oddalila sie od recta, kompozycja musi zostac pominienta. */
+    const warstwa_obrazu& w = tablica_warstw[application_popup.pid];
+    const GuiDirtyRect& p = application_popup.rect;
+    return warstwa_ma_spojny_bufor(application_popup.pid) &&
+           p.x < w.x + w.szerokosc && p.y < w.y + w.wysokosc &&
+           p.x + p.width > w.x && p.y + p.height > w.y;
 }
 
 void zloz_popup_aplikacji(LayerRenderInfo* layers, int count,
@@ -1935,15 +1942,29 @@ bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
             generacja_okna[pid] == stary.generacja &&
             warstwa_ma_spojny_bufor(pid)) {
             warstwa_obrazu& w = tablica_warstw[pid];
-            const int lokalny_x = stary.rect.x - w.x;
-            const int lokalny_y = stary.rect.y - w.y;
-            for (int py = 0; py < stary.rect.height; ++py) {
-                uint32_t* dst = w.bufor_pikseli +
-                    static_cast<uint64_t>(lokalny_y + py) * w.szerokosc +
-                    lokalny_x;
-                const uint32_t* src = stary.tlo +
-                    static_cast<uint64_t>(py) * stary.rect.width;
-                for (int px = 0; px < stary.rect.width; ++px) dst[px] = src[px];
+            /* Odtwarzanie jest przycinane do AKTUALNYCH granic warstwy:
+               przesuniecie/zmiana rozmiaru miedzy otwarciem a zamknieciem
+               nie moze wyjsc poza bufor (pitch = szerokosc). */
+            const int sx0 = stary.rect.x > w.x ? stary.rect.x : w.x;
+            const int sy0 = stary.rect.y > w.y ? stary.rect.y : w.y;
+            const int sx1 =
+                stary.rect.x + stary.rect.width < w.x + w.szerokosc
+                    ? stary.rect.x + stary.rect.width : w.x + w.szerokosc;
+            const int sy1 =
+                stary.rect.y + stary.rect.height < w.y + w.wysokosc
+                    ? stary.rect.y + stary.rect.height : w.y + w.wysokosc;
+            if (sx0 < sx1 && sy0 < sy1) {
+                for (int py = sy0; py < sy1; ++py) {
+                    uint32_t* dst = w.bufor_pikseli +
+                        static_cast<uint64_t>(py - w.y) *
+                            static_cast<uint64_t>(w.szerokosc) +
+                        static_cast<uint64_t>(sx0 - w.x);
+                    const uint32_t* src = stary.tlo +
+                        static_cast<uint64_t>(py - stary.rect.y) *
+                            static_cast<uint64_t>(stary.rect.width) +
+                        static_cast<uint64_t>(sx0 - stary.rect.x);
+                    for (int px = 0; px < sx1 - sx0; ++px) dst[px] = src[px];
+                }
             }
         }
         if (stary.tlo) kfree(stary.tlo);

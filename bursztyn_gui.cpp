@@ -1031,3 +1031,397 @@ void rysuj_tekst_wysrodkowany(int px,
         poprawna_skala,
         tekst);
 }
+
+/* =========================================================================
+ * 6. WSPOLNY DIALOG MODALNY
+ * ========================================================================= */
+
+namespace {
+
+GuiModalDialog* modal_aktywny = nullptr;
+
+constexpr int MODAL_FIELD_H = 26;
+constexpr int MODAL_BTN_H = 26;
+constexpr int MODAL_BTN_OK_W = 78;
+constexpr int MODAL_BTN_ANULUJ_W = 84;
+
+size_t modal_dlugosc(const char* tekst, size_t pojemnosc) {
+    if (!tekst) return 0;
+    for (size_t i = 0; i < pojemnosc; ++i)
+        if (tekst[i] == '\0') return i;
+    return pojemnosc;
+}
+
+bool modal_kopiuj(char* cel, size_t pojemnosc, const char* zrodlo) {
+    if (!cel || pojemnosc == 0) return false;
+    cel[0] = '\0';
+    if (!zrodlo) return false;
+    const size_t dlugosc = modal_dlugosc(zrodlo, pojemnosc);
+    if (dlugosc >= pojemnosc) return false;
+    for (size_t i = 0; i <= dlugosc; ++i) cel[i] = zrodlo[i];
+    return true;
+}
+
+void modal_kopiuj_przytnij(char* cel, size_t pojemnosc, const char* zrodlo) {
+    if (!cel || pojemnosc == 0) return;
+    cel[0] = '\0';
+    if (!zrodlo || pojemnosc == 1) return;
+    size_t dlugosc = modal_dlugosc(zrodlo, pojemnosc - 1);
+    if (dlugosc > pojemnosc - 1) dlugosc = pojemnosc - 1;
+    for (size_t i = 0; i < dlugosc; ++i) cel[i] = zrodlo[i];
+    cel[dlugosc] = '\0';
+}
+
+bool modal_kontynuacja(uint8_t wartosc) {
+    return (wartosc & 0xC0U) == 0x80U;
+}
+
+int modal_bajty_znaku(uint8_t wartosc) {
+    if (wartosc >= 0xC2U && wartosc <= 0xDFU) return 2;
+    if (wartosc >= 0xE0U && wartosc <= 0xEFU) return 3;
+    if (wartosc >= 0xF0U && wartosc <= 0xF4U) return 4;
+    return 1;
+}
+
+size_t modal_nastepny(const char* tekst, size_t offset, size_t dlugosc) {
+    if (!tekst || offset >= dlugosc) return dlugosc;
+    const int ile = modal_bajty_znaku(static_cast<uint8_t>(tekst[offset]));
+    if (offset + static_cast<size_t>(ile) > dlugosc) return offset + 1;
+    for (int i = 1; i < ile; ++i)
+        if (!modal_kontynuacja(static_cast<uint8_t>(tekst[offset + i])))
+            return offset + 1;
+    return offset + static_cast<size_t>(ile);
+}
+
+size_t modal_poprzedni(const char* tekst, size_t offset) {
+    if (!tekst || offset == 0) return 0;
+    size_t poprzedni = offset - 1;
+    while (poprzedni > 0 &&
+           modal_kontynuacja(static_cast<uint8_t>(tekst[poprzedni])))
+        --poprzedni;
+    return poprzedni;
+}
+
+void modal_przytnij_px(const char* tekst, char* cel, size_t pojemnosc,
+                       int maks_pikseli) {
+    if (!cel || pojemnosc < 4) return;
+    cel[0] = '\0';
+    if (!tekst || maks_pikseli <= 0) return;
+    const size_t dlugosc = modal_dlugosc(tekst, pojemnosc - 1);
+    if (dlugosc >= pojemnosc) return;
+    size_t zaakceptowane = 0;
+    while (zaakceptowane < dlugosc) {
+        const size_t nastepny = modal_nastepny(tekst, zaakceptowane, dlugosc);
+        if (nastepny + 4 > pojemnosc) break;
+        char proba[192] = {};
+        for (size_t i = 0; i < nastepny; ++i) proba[i] = tekst[i];
+        if (oblicz_szerokosc_tekstu(proba, 1) > maks_pikseli) break;
+        zaakceptowane = nastepny;
+    }
+    if (zaakceptowane + 4 > pojemnosc) return;
+    for (size_t i = 0; i < zaakceptowane; ++i) cel[i] = tekst[i];
+    if (zaakceptowane < dlugosc) {
+        cel[zaakceptowane++] = '.';
+        cel[zaakceptowane++] = '.';
+        cel[zaakceptowane++] = '.';
+    }
+    cel[zaakceptowane] = '\0';
+}
+
+void modal_rysuj_ramke(const GuiModalProstokat& r) {
+    gui_rysuj_prostokat(r.x, r.y, r.szer, r.wys, GUI_MODAL_TLO);
+    gui_rysuj_prostokat(r.x, r.y, r.szer, 2, GUI_MODAL_RAMKA);
+    gui_rysuj_prostokat(r.x, r.y + r.wys - 2, r.szer, 2,
+                        GUI_MODAL_RAMKA_CIEMNA);
+    gui_rysuj_prostokat(r.x, r.y, 2, r.wys, GUI_MODAL_RAMKA);
+    gui_rysuj_prostokat(r.x + r.szer - 2, r.y, 2, r.wys,
+                        GUI_MODAL_RAMKA_CIEMNA);
+}
+
+void modal_rysuj_pole(GuiModalDialog& d) {
+    const GuiModalProstokat& p = d.pole;
+    if (p.szer <= 0 || p.wys <= 0) return;
+    gui_rysuj_prostokat(p.x, p.y, p.szer, p.wys, GUI_MODAL_POLE_AKTYWNE);
+    gui_rysuj_prostokat(p.x, p.y, p.szer, 1, GUI_MODAL_RAMKA);
+    gui_rysuj_prostokat(p.x, p.y + p.wys - 1, p.szer, 1, GUI_MODAL_RAMKA);
+    gui_rysuj_prostokat(p.x, p.y, 1, p.wys, GUI_MODAL_RAMKA_CIEMNA);
+    gui_rysuj_prostokat(p.x + p.szer - 1, p.y, 1, p.wys,
+                        GUI_MODAL_RAMKA_CIEMNA);
+
+    const int dostepne = p.szer - 12;
+    if (dostepne <= 0) return;
+
+    while (d.widoczne_od > d.karetka)
+        d.widoczne_od =
+            static_cast<uint32_t>(modal_poprzedni(d.tekst, d.widoczne_od));
+    while (d.widoczne_od < d.karetka) {
+        char przed[128] = {};
+        size_t out = 0;
+        for (size_t i = d.widoczne_od; i < d.karetka && out + 1 < sizeof(przed); ++i)
+            przed[out++] = d.tekst[i];
+        if (oblicz_szerokosc_tekstu(przed, 1) +
+            oblicz_szerokosc_tekstu("|", 1) <= dostepne)
+            break;
+        d.widoczne_od = static_cast<uint32_t>(
+            modal_nastepny(d.tekst, d.widoczne_od, d.dlugosc));
+    }
+
+    char pokazane[80] = {};
+    size_t out = 0;
+    for (size_t i = d.widoczne_od; i < d.dlugosc && out + 2 < sizeof(pokazane); ++i) {
+        if (i == d.karetka) pokazane[out++] = '|';
+        pokazane[out++] = d.tekst[i];
+    }
+    if (d.karetka == d.dlugosc && out + 1 < sizeof(pokazane))
+        pokazane[out++] = '|';
+    pokazane[out] = '\0';
+
+    char przyciete[80] = {};
+    modal_przytnij_px(pokazane, przyciete, sizeof(przyciete), dostepne);
+    gui_wypisz_tekst_kolor(p.x + 6, p.y + 5, GUI_MODAL_TEKST, przyciete);
+}
+
+} // namespace
+
+bool gui_modal_otworz(GuiModalDialog* dialog,
+                      const char* tytul,
+                      const char* tekst_poczatkowy,
+                      const char* pytanie,
+                      const GuiModalProstokat* obszar,
+                      uint32_t limit_tekstu) {
+    if (!dialog || !tytul || !obszar ||
+        obszar->szer <= 0 || obszar->wys <= 0)
+        return false;
+
+    /* Jeden modal na proces: nie nakladamy dwoch popupow na ten sam surface.
+       Ponowne otwarcie tego samego modala najpierw go zamyka, dzieki czemu
+       backup kompozytora nigdy nie zapamieta juz narysowanego dialogu. */
+    if (modal_aktywny && modal_aktywny != dialog)
+        gui_modal_zamknij(modal_aktywny);
+    if (dialog->otwarty)
+        gui_modal_zamknij(dialog);
+
+    GuiModalDialog czysty = {};
+    /* Etykieta i kolor OK moga byc ustawione wczesniej przez
+       gui_modal_ustaw_przycisk_ok; w przeciwnym razie stosujemy domyslne. */
+    if (dialog->etykieta_ok[0])
+        modal_kopiuj_przytnij(czysty.etykieta_ok, sizeof(czysty.etykieta_ok),
+                              dialog->etykieta_ok);
+    else
+        modal_kopiuj(czysty.etykieta_ok, sizeof(czysty.etykieta_ok), "OK");
+    czysty.kolor_ok = dialog->kolor_ok ? dialog->kolor_ok : GUI_MODAL_RAMKA;
+    czysty.limit_tekstu =
+        limit_tekstu == 0 || limit_tekstu > sizeof(czysty.tekst) - 1
+            ? static_cast<uint32_t>(sizeof(czysty.tekst) - 1) : limit_tekstu;
+    modal_kopiuj_przytnij(czysty.tytul, sizeof(czysty.tytul), tytul);
+    czysty.potwierdzenie = tekst_poczatkowy == nullptr;
+    if (!czysty.potwierdzenie) {
+        if (!modal_kopiuj(czysty.tekst, sizeof(czysty.tekst), tekst_poczatkowy))
+            return false;
+        czysty.dlugosc = modal_dlugosc(czysty.tekst, sizeof(czysty.tekst));
+        czysty.karetka = czysty.dlugosc;
+    } else {
+        modal_kopiuj_przytnij(czysty.pytanie, sizeof(czysty.pytanie), pytanie);
+    }
+    czysty.obszar = *obszar;
+
+    int szerokosc = czysty.obszar.szer > 430 ? 430
+        : (czysty.obszar.szer > 20 ? czysty.obszar.szer - 20 : czysty.obszar.szer);
+    int wysokosc = czysty.potwierdzenie ? 150 : 176;
+    if (wysokosc > czysty.obszar.wys - 16)
+        wysokosc = czysty.obszar.wys > 16 ? czysty.obszar.wys - 16 : czysty.obszar.wys;
+    if (szerokosc <= 0 || wysokosc <= 0) return false;
+
+    czysty.ramka = {czysty.obszar.x + (czysty.obszar.szer - szerokosc) / 2,
+                    czysty.obszar.y + (czysty.obszar.wys - wysokosc) / 2,
+                    szerokosc, wysokosc};
+    czysty.pole = {czysty.ramka.x + 18, czysty.ramka.y + 70,
+                   czysty.ramka.szer > 36 ? czysty.ramka.szer - 36 : 0,
+                   MODAL_FIELD_H};
+    czysty.przycisk_ok = {czysty.ramka.x + czysty.ramka.szer - 190,
+                          czysty.ramka.y + czysty.ramka.wys - MODAL_BTN_H - 12,
+                          MODAL_BTN_OK_W, MODAL_BTN_H};
+    czysty.przycisk_anuluj = {czysty.ramka.x + czysty.ramka.szer - 102,
+                              czysty.ramka.y + czysty.ramka.wys - MODAL_BTN_H - 12,
+                              MODAL_BTN_ANULUJ_W, MODAL_BTN_H};
+
+    if (!gui_ustaw_popup_aplikacji(true, czysty.obszar.x, czysty.obszar.y,
+                                   czysty.obszar.szer, czysty.obszar.wys))
+        return false;
+
+    *dialog = czysty;
+    dialog->otwarty = true;
+    modal_aktywny = dialog;
+    gui_modal_rysuj(dialog);
+    return true;
+}
+
+void gui_modal_ustaw_przycisk_ok(GuiModalDialog* dialog,
+                                 const char* etykieta,
+                                 uint32_t kolor) {
+    if (!dialog) return;
+    if (etykieta)
+        modal_kopiuj(dialog->etykieta_ok, sizeof(dialog->etykieta_ok), etykieta);
+    dialog->kolor_ok = kolor ? kolor : GUI_MODAL_RAMKA;
+}
+
+void gui_modal_zamknij(GuiModalDialog* dialog) {
+    if (!dialog || !dialog->otwarty) return;
+    (void)gui_ustaw_popup_aplikacji(false, 0, 0, 0, 0);
+    *dialog = GuiModalDialog{};
+    if (modal_aktywny == dialog) modal_aktywny = nullptr;
+}
+
+bool gui_modal_otwarty(const GuiModalDialog* dialog) {
+    return dialog && dialog->otwarty;
+}
+
+const char* gui_modal_tekst(const GuiModalDialog* dialog) {
+    return dialog ? dialog->tekst : "";
+}
+
+const GuiModalProstokat* gui_modal_pole(const GuiModalDialog* dialog) {
+    return dialog ? &dialog->pole : nullptr;
+}
+
+const GuiModalProstokat* gui_modal_ramka(const GuiModalDialog* dialog) {
+    return dialog ? &dialog->ramka : nullptr;
+}
+
+namespace {
+
+bool modal_punkt(const GuiModalProstokat& r, int x, int y) {
+    return x >= r.x && y >= r.y &&
+           x < r.x + r.szer && y < r.y + r.wys;
+}
+
+} // namespace
+
+gui_modal_wynik gui_modal_klik(GuiModalDialog* dialog, int mysz_x, int mysz_y) {
+    if (!dialog || !dialog->otwarty) return GUI_MODAL_BRAK;
+    if (modal_punkt(dialog->przycisk_ok, mysz_x, mysz_y)) return GUI_MODAL_OK;
+    if (modal_punkt(dialog->przycisk_anuluj, mysz_x, mysz_y))
+        return GUI_MODAL_ANULUJ;
+    return GUI_MODAL_BRAK;
+}
+
+bool gui_modal_pole_trafione(const GuiModalDialog* dialog,
+                             int mysz_x, int mysz_y) {
+    return dialog && dialog->otwarty && !dialog->potwierdzenie &&
+           modal_punkt(dialog->pole, mysz_x, mysz_y);
+}
+
+void gui_modal_karetka_za_mysza(GuiModalDialog* dialog, int mysz_x) {
+    if (!dialog || !dialog->otwarty || dialog->potwierdzenie) return;
+    const GuiModalProstokat& p = dialog->pole;
+    int pozostalo = mysz_x - p.x - 6;
+    size_t pozycja = dialog->widoczne_od;
+    while (pozostalo > 0 && pozycja < dialog->dlugosc) {
+        const size_t nastepny =
+            modal_nastepny(dialog->tekst, pozycja, dialog->dlugosc);
+        char glif[8] = {};
+        for (size_t i = pozycja;
+             i < nastepny && i - pozycja + 1 < sizeof(glif); ++i)
+            glif[i - pozycja] = dialog->tekst[i];
+        const int szerokosc = oblicz_szerokosc_tekstu(glif, 1);
+        if (pozostalo < szerokosc / 2) break;
+        pozostalo -= szerokosc;
+        pozycja = nastepny;
+    }
+    dialog->karetka = static_cast<uint32_t>(pozycja);
+}
+
+gui_modal_wynik gui_modal_klawisz(GuiModalDialog* dialog, char znak) {
+    if (!dialog || !dialog->otwarty) return GUI_MODAL_BRAK;
+    if (znak == '\n' || znak == '\r') return GUI_MODAL_OK;
+    if (znak == '\x1B') return GUI_MODAL_ANULUJ;
+    if (dialog->potwierdzenie) return GUI_MODAL_BRAK;
+    const uint8_t wartosc = static_cast<uint8_t>(znak);
+    if (wartosc == '\b' || wartosc == 0x7FU) (void)gui_modal_usun_wstecz(dialog);
+    else (void)gui_modal_dopisz(dialog, znak);
+    return GUI_MODAL_BRAK;
+}
+
+bool gui_modal_dopisz(GuiModalDialog* dialog, char znak) {
+    if (!dialog || !dialog->otwarty || dialog->potwierdzenie) return false;
+    const uint8_t wartosc = static_cast<uint8_t>(znak);
+    if (wartosc < 0x20U || wartosc == 0x7FU) return false;
+    if (dialog->dlugosc >= dialog->limit_tekstu) return false;
+    for (size_t i = dialog->dlugosc + 1; i > dialog->karetka; --i)
+        dialog->tekst[i] = dialog->tekst[i - 1];
+    dialog->tekst[dialog->karetka++] = znak;
+    ++dialog->dlugosc;
+    return true;
+}
+
+bool gui_modal_usun_wstecz(GuiModalDialog* dialog) {
+    if (!dialog || !dialog->otwarty || dialog->potwierdzenie) return false;
+    if (dialog->karetka == 0) return false;
+    const size_t poprzedni = modal_poprzedni(dialog->tekst, dialog->karetka);
+    const size_t usuniete = dialog->karetka - poprzedni;
+    for (size_t i = poprzedni; i + usuniete <= dialog->dlugosc; ++i)
+        dialog->tekst[i] = dialog->tekst[i + usuniete];
+    dialog->dlugosc -= static_cast<uint32_t>(usuniete);
+    dialog->karetka = static_cast<uint32_t>(poprzedni);
+    if (dialog->widoczne_od > dialog->karetka) dialog->widoczne_od = dialog->karetka;
+    return true;
+}
+
+bool gui_modal_usun_przed(GuiModalDialog* dialog) {
+    if (!dialog || !dialog->otwarty || dialog->potwierdzenie) return false;
+    if (dialog->karetka >= dialog->dlugosc) return false;
+    const size_t nastepny =
+        modal_nastepny(dialog->tekst, dialog->karetka, dialog->dlugosc);
+    const size_t usuniete = nastepny - dialog->karetka;
+    for (size_t i = dialog->karetka; i + usuniete <= dialog->dlugosc; ++i)
+        dialog->tekst[i] = dialog->tekst[i + usuniete];
+    dialog->dlugosc -= static_cast<uint32_t>(usuniete);
+    return true;
+}
+
+bool gui_modal_przesun_karetke(GuiModalDialog* dialog, int kierunek) {
+    if (!dialog || !dialog->otwarty || dialog->potwierdzenie) return false;
+    if (kierunek < 0) {
+        if (dialog->karetka == 0) return false;
+        dialog->karetka = static_cast<uint32_t>(
+            modal_poprzedni(dialog->tekst, dialog->karetka));
+        if (dialog->widoczne_od > dialog->karetka)
+            dialog->widoczne_od = dialog->karetka;
+        return true;
+    }
+    if (kierunek > 0) {
+        if (dialog->karetka >= dialog->dlugosc) return false;
+        dialog->karetka = static_cast<uint32_t>(
+            modal_nastepny(dialog->tekst, dialog->karetka, dialog->dlugosc));
+        return true;
+    }
+    return false;
+}
+
+void gui_modal_rysuj(GuiModalDialog* dialog) {
+    if (!dialog || !dialog->otwarty) return;
+
+    modal_rysuj_ramke(dialog->ramka);
+
+    char przyciete[160] = {};
+    modal_przytnij_px(dialog->tytul, przyciete, sizeof(przyciete),
+                      dialog->ramka.szer > 36 ? dialog->ramka.szer - 36 : 0);
+    gui_wypisz_tekst_kolor(dialog->ramka.x + 18, dialog->ramka.y + 14,
+                           GUI_MODAL_TEKST, przyciete);
+
+    if (dialog->potwierdzenie) {
+        modal_przytnij_px(dialog->pytanie, przyciete, sizeof(przyciete),
+                          dialog->ramka.szer > 36 ? dialog->ramka.szer - 36 : 0);
+        gui_wypisz_tekst_kolor(dialog->ramka.x + 18, dialog->ramka.y + 52,
+                               GUI_MODAL_TEKST_DRUGI, przyciete);
+    } else {
+        modal_rysuj_pole(*dialog);
+    }
+
+    RysujPrzycisk(dialog->przycisk_ok.x, dialog->przycisk_ok.y,
+                  dialog->przycisk_ok.szer, dialog->przycisk_ok.wys,
+                  dialog->kolor_ok, GUI_MODAL_POLE_TLO, dialog->etykieta_ok);
+    RysujPrzycisk(dialog->przycisk_anuluj.x, dialog->przycisk_anuluj.y,
+                  dialog->przycisk_anuluj.szer, dialog->przycisk_anuluj.wys,
+                  GUI_MODAL_RAMKA, GUI_MODAL_POLE_TLO, "Anuluj");
+}

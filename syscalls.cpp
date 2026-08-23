@@ -790,8 +790,52 @@ bool proces_moze_utworzyc_w_sciezce(
 ) {
     if (!proces_moze_modyfikowac_sciezke(proces, sciezka)) return false;
     char rodzic[MAX_SCIEZKA_PLIKU_BWS] = {};
-    return pobierz_rodzica_sciezki(sciezka, rodzic, sizeof(rodzic)) &&
-           poziom_pliku_pozwala_modyfikowac(proces, rodzic);
+    if (!pobierz_rodzica_sciezki(sciezka, rodzic, sizeof(rodzic))) return false;
+
+    psf_metadane meta{};
+    bool meta_ok = pobierz_metadane_tworu(rodzic, &meta);
+    uint8_t parent_pzb = (meta_ok && meta.pzb_dostepny) ? meta.poziom_pzb : 0;
+    uint8_t parent_type = meta_ok ? meta.typ : 0;
+    bool pzb_ok = !meta_ok || !meta.pzb_dostepny || proces.poziom_zaufania <= meta.poziom_pzb;
+
+    char log_buf[256];
+    size_t pos = 0;
+    const char* prefix = "[PSF/BWS] create parent=";
+    for (size_t i = 0; prefix[i]; ++i) log_buf[pos++] = prefix[i];
+    for (size_t i = 0; rodzic[i] && pos < sizeof(log_buf) - 1; ++i) log_buf[pos++] = rodzic[i];
+    log_buf[pos] = '\0';
+    wypisz_log(log_buf);
+
+    pos = 0;
+    const char* prefix2 = "[PSF/BWS] parent_type=";
+    for (size_t i = 0; prefix2[i]; ++i) log_buf[pos++] = prefix2[i];
+    log_buf[pos++] = '0' + parent_type;
+    log_buf[pos] = '\0';
+    wypisz_log(log_buf);
+
+    pos = 0;
+    const char* prefix3 = "[PSF/BWS] parent_pzb=";
+    for (size_t i = 0; prefix3[i]; ++i) log_buf[pos++] = prefix3[i];
+    log_buf[pos++] = '0' + parent_pzb;
+    log_buf[pos] = '\0';
+    wypisz_log(log_buf);
+
+    pos = 0;
+    const char* prefix4 = "[PSF/BWS] process_pzb=";
+    for (size_t i = 0; prefix4[i]; ++i) log_buf[pos++] = prefix4[i];
+    log_buf[pos++] = '0' + proces.poziom_zaufania;
+    log_buf[pos] = '\0';
+    wypisz_log(log_buf);
+
+    pos = 0;
+    const char* prefix5 = "[PSF/BWS] result=";
+    for (size_t i = 0; prefix5[i]; ++i) log_buf[pos++] = prefix5[i];
+    const char* result_str = pzb_ok ? "ALLOW" : "DENY";
+    for (size_t i = 0; result_str[i]; ++i) log_buf[pos++] = result_str[i];
+    log_buf[pos] = '\0';
+    wypisz_log(log_buf);
+
+    return pzb_ok;
 }
 
 bool proces_moze_modyfikowac_obiekt(

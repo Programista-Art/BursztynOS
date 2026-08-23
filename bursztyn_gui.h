@@ -17,6 +17,27 @@
 #include "skladacz_obrazu.h"
 #include <stdbool.h>
 
+
+struct GuiFragmentIkony {
+    uint8_t x;
+    uint8_t y;
+    uint8_t szer;
+    uint8_t wys;
+    uint8_t kolor;
+};
+
+struct GuiIkona {
+    uint8_t szer;
+    uint8_t wys;
+
+    const uint32_t* paleta;
+    uint16_t liczba_kolorow;
+
+    const GuiFragmentIkony* fragmenty;
+    uint16_t liczba_fragmentow;
+};
+
+
 /* =========================================================================
  * 1. GLOWNE WYWOLANIE SYSTEMOWE BWS
  * ========================================================================= */
@@ -90,6 +111,94 @@ bool kopiuj_twor_uzytkownika(const char* sciezka,
 /* Popup aplikacji jest skladany nad zwyklymi oknami, ale pod menu systemu. */
 bool gui_ustaw_popup_aplikacji(bool otwarty,
                                int x, int y, int szer, int wys);
+
+/* =========================================================================
+ * 2b. WSPOLNY DIALOG MODALNY DLA APLIKACJI GUI
+ * ========================================================================= */
+
+/*
+ * Modal jest nieprzezroczystym popupem wlasciciela: kompozytor sklada
+ * surface procesu jeszcze raz nad wszystkimi oknami (pod system overlayem)
+ * wewnatrz zarejestrowanego prostokata. Zadnych pseudo-przezroczystosci:
+ * dialog ma pelne, inicjalizowane tlo i ramke. Otwarcie/zamkniecie korzysta
+ * z dirty rect kompozytora - po zamknieciu tlo odtwarza scena, bez recznego
+ * kopiowania framebuffera.
+ */
+
+constexpr uint32_t GUI_MODAL_TLO = 0x00391B02U;
+constexpr uint32_t GUI_MODAL_RAMKA = 0x00E58A00U;
+constexpr uint32_t GUI_MODAL_RAMKA_CIEMNA = 0x00794400U;
+constexpr uint32_t GUI_MODAL_TEKST = 0x00FFFFFFU;
+constexpr uint32_t GUI_MODAL_TEKST_DRUGI = 0x00D1D5DBU;
+constexpr uint32_t GUI_MODAL_POLE_TLO = 0x00280F00U;
+constexpr uint32_t GUI_MODAL_POLE_AKTYWNE = 0x00603800U;
+constexpr uint32_t GUI_MODAL_PRZYCISK_OK = 0x00E58A00U;
+
+enum gui_modal_wynik : uint32_t {
+    GUI_MODAL_BRAK = 0,
+    GUI_MODAL_OK = 1,
+    GUI_MODAL_ANULUJ = 2
+};
+
+struct GuiModalProstokat {
+    int x;
+    int y;
+    int szer;
+    int wys;
+};
+
+struct GuiModalDialog {
+    bool otwarty;
+    bool potwierdzenie;      /* true = pytanie bez pola edycji */
+    char tytul[48];
+    char tekst[64];          /* pole edycji w trybie wprowadzania */
+    char pytanie[128];       /* tresc w trybie potwierdzenia */
+    char etykieta_ok[12];
+    uint32_t kolor_ok;
+    uint32_t limit_tekstu;   /* maksymalna dlugosc pola w bajtach */
+    uint32_t dlugosc;
+    uint32_t karetka;        /* offset w bajtach */
+    uint32_t widoczne_od;    /* poczatek widocznego okna pola */
+    GuiModalProstokat obszar;
+    GuiModalProstokat ramka;
+    GuiModalProstokat pole;
+    GuiModalProstokat przycisk_ok;
+    GuiModalProstokat przycisk_anuluj;
+};
+
+/* Obszar to prostokat popupu w wspolrzednych ekranu (dla okna: klient).
+   limit_tekstu 0 oznacza pelna pojemnosc pola (63 bajty). */
+bool gui_modal_otworz(GuiModalDialog* dialog,
+                      const char* tytul,
+                      const char* tekst_poczatkowy,   /* NULL = potwierdzenie */
+                      const char* pytanie,
+                      const GuiModalProstokat* obszar,
+                      uint32_t limit_tekstu = 0);
+
+/* Etykieta/kolor OK przed gui_modal_otworz (np. czerwone "Usun"). */
+void gui_modal_ustaw_przycisk_ok(GuiModalDialog* dialog,
+                                 const char* etykieta,
+                                 uint32_t kolor);
+
+void gui_modal_zamknij(GuiModalDialog* dialog);
+bool gui_modal_otwarty(const GuiModalDialog* dialog);
+const char* gui_modal_tekst(const GuiModalDialog* dialog);
+const GuiModalProstokat* gui_modal_pole(const GuiModalDialog* dialog);
+const GuiModalProstokat* gui_modal_ramka(const GuiModalDialog* dialog);
+
+gui_modal_wynik gui_modal_klik(GuiModalDialog* dialog, int mysz_x, int mysz_y);
+bool gui_modal_pole_trafione(const GuiModalDialog* dialog,
+                             int mysz_x, int mysz_y);
+void gui_modal_karetka_za_mysza(GuiModalDialog* dialog, int mysz_x);
+
+/* Zwraca OK/ANULUJ dla Enter/Escape, inaczej BRAK (pole zaktualizowane). */
+gui_modal_wynik gui_modal_klawisz(GuiModalDialog* dialog, char znak);
+bool gui_modal_dopisz(GuiModalDialog* dialog, char znak);
+bool gui_modal_usun_wstecz(GuiModalDialog* dialog);
+bool gui_modal_usun_przed(GuiModalDialog* dialog);      /* Delete */
+bool gui_modal_przesun_karetke(GuiModalDialog* dialog, int kierunek);
+
+void gui_modal_rysuj(GuiModalDialog* dialog);
 
 char pobierz_znak();
 
@@ -261,4 +370,6 @@ void bws_zakoncz_proces();
 __attribute__((noreturn))
 void gui_zakoncz_aplikacje();
 
-} // extern "C"
+} 
+
+
