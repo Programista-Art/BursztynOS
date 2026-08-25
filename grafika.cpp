@@ -1957,34 +1957,6 @@ extern "C" void zaktualizuj_mysze(int dx,
             const int trafiony = znajdz_warstwe_pod_punktem(mysz_x, mysz_y);
             skladacz_obrazu_podnies_warstwe(trafiony);
             ustaw_focus_gui(trafiony);
-            /* TEMP-DEBUG: usunac po diagnozie wejscia. */
-            {
-                char tb[72] = "[MYSZ-D] x=";
-                int p = 11;
-                int v = mysz_x;
-                char cy[12];
-                int n = 0;
-                if (v < 0) { tb[p++] = '-'; v = -v; }
-                do { cy[n++] = static_cast<char>('0' + v % 10); v /= 10; } while (v);
-                while (n) tb[p++] = cy[--n];
-                const char* sr = " y=";
-                for (const char* q = sr; *q; ++q) tb[p++] = *q;
-                v = mysz_y; n = 0;
-                do { cy[n++] = static_cast<char>('0' + v % 10); v /= 10; } while (v);
-                while (n) tb[p++] = cy[--n];
-                const char* sw = " warstwa=";
-                for (const char* q = sw; *q; ++q) tb[p++] = *q;
-                v = trafiony; n = 0;
-                if (v == 0) tb[p++] = '0';
-                else {
-                    bool ujemne = v < 0;
-                    if (ujemne) { tb[p++] = '-'; v = -v; }
-                    do { cy[n++] = static_cast<char>('0' + v % 10); v /= 10; } while (v);
-                    while (n) tb[p++] = cy[--n];
-                }
-                tb[p] = '\0';
-                wypisz_log(tb);
-            }
         }
         const int cel = capture_pid_gui > 0 ? capture_pid_gui : aktywny_pid_gui;
         if (cel > 0) {

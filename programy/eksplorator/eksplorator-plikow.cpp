@@ -24,20 +24,6 @@ __attribute__((section(".naglowek"), used)) NaglowekBur naglowek = {
 
 namespace {
 
-/* TEMP-DEBUG: usunac po diagnozie. */
-void dbg(const char* tekst) {
-    static char buf[4096];
-    static size_t dl = 0;
-    if (!tekst) return;
-    size_t i = 0;
-    while (tekst[i] && dl + 1 < sizeof(buf)) buf[dl++] = tekst[i++];
-    while (tekst[i]) ++i; /* pomin reszte */
-    buf[dl] = '\0';
-    (void)utworz("/logi/eksplorator_debug.txt");
-    (void)zapisz_plik("/logi/eksplorator_debug.txt", buf,
-                      static_cast<uint32_t>(dl));
-}
-
 constexpr size_t PATH_CAP = 512;
 constexpr size_t NAME_CAP = 56;
 constexpr size_t SEARCH_CAP = 128;
@@ -942,6 +928,7 @@ private:
         add_quick("Pulpit", "/uzytkownicy/Pulpit", false, true);
         add_quick("Użytkownicy", "/uzytkownicy", false, true);
         add_quick("Programy", "/programy", false, true);
+        add_quick("Gry", "/gry", false, true);
         if (directory_exists("/uzytkownicy/dokumenty"))
             add_quick("Dokumenty", "/uzytkownicy/dokumenty", false, false);
         else
@@ -1428,16 +1415,6 @@ private:
             set_status("Nie można utworzyć elementu: ścieżka przekracza 511 bajtów.");
             return false;
         }
-        {
-            char linia[PATH_CAP + 64] = {};
-            size_t i = 0;
-            const char* prefiks = directory ? "BWS46 mkdir=" : "BWS2 create=";
-            for (; *prefiks; ++prefiks) linia[i++] = *prefiks;
-            for (size_t j = 0; full[j] && i + 1 < sizeof(linia); ++j)
-                linia[i++] = full[j];
-            linia[i] = '\0';
-            dbg(linia);
-        }
         const bool success = directory
             ? utworz_katalog_uzytkownika(full)
             : utworz(full);
@@ -1833,9 +1810,6 @@ public:
             mode == EditMode::CONFIRM_DELETE ? "Usuń" : "OK",
             mode == EditMode::CONFIRM_DELETE ? 0x00AA0000U : GUI_MODAL_RAMKA);
         const GuiModalProstokat obszar{area.x, area.y, area.w, area.h};
-        dbg(mode == EditMode::CREATE_FOLDER ? "open_modal=CREATE_FOLDER"
-            : (mode == EditMode::CREATE_FILE ? "open_modal=CREATE_FILE"
-            : "open_modal=INNE"));
         if (!gui_modal_otworz(&modal_, title,
                               mode == EditMode::CONFIRM_DELETE
                                   ? nullptr : initial,
@@ -1843,12 +1817,10 @@ public:
                                   ? question : nullptr,
                               &obszar,
                               static_cast<uint32_t>(NAME_CAP - 1))) {
-            dbg("modal_otworz=FAIL");
             end_edit();
             model_.set_status("Nie można otworzyć dialogu modalnego.");
             return false;
         }
-        dbg("modal_otworz=OK");
         (void)gui_rejestruj_cele_drop(nullptr, 0);
         gui_odswiez();
         return true;
@@ -2639,9 +2611,6 @@ void submit_modal(AktowkaView& view, AktowkaModel& model) {
         success = copy_text(name, sizeof(name), view.edit_text()) &&
             (mode == EditMode::CREATE_FOLDER
                 ? model.create_folder(name) : model.create_file(name));
-        dbg(success ? "submit_modal=create OK" : "submit_modal=create FAIL");
-    } else {
-        dbg("submit_modal=inny tryb");
     }
     view.close_modal();
     if (success) present_workspace_change(view, model.refresh());

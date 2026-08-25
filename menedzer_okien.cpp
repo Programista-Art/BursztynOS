@@ -1245,7 +1245,7 @@ rysuj_ikone_paleta(
     IKONA_SNAKE_FRAGMENTY,
     IKONA_SNAKE_FRAGMENTOW);
 
-rysuj_tekst_wysrodkowany(390, 104, IKONA_W, 16, 1, 0x0095E600, "Snake");
+rysuj_tekst_wysrodkowany(370, 104, IKONA_W, 16, 1, 0x0095E600, "Snake");
 
 
     // Ikona Eksploratora Plikow.
