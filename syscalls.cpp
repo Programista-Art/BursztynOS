@@ -138,6 +138,18 @@ void bws_gui_rysuj_prostokat(
     uint32_t kolor
 );
 
+bool bws_gui_blit(
+    int x,
+    int y,
+    int szer,
+    int wys,
+    const uint32_t* piksele
+);
+
+bool bws_gui_ustaw_tytul_okna(
+    const char* tytul
+);
+
 void bws_gui_ustaw_przejecie_myszy(
     bool stan
 );
@@ -1036,9 +1048,7 @@ uint64_t bws_zapisz_plik(
     }
     wypisz_log("[PZB] file_write=ALLOW");
 
-    if (arg3 >
-        MAX_PLIK_BSP2_BWS) {
-
+    if (arg3 > PSF_MAKS_ROZMIAR_PLIKU) {
         return 0;
     }
 
@@ -1055,6 +1065,24 @@ uint64_t bws_zapisz_plik(
 
     if (arg2 == 0) {
         return 0;
+    }
+
+    // dla dużych plików użyj strumieniowego zapisu fragmentami (1M) aby nie alokować 100M w kernelu
+    if (dlugosc > (1U*1024U*1024U)) {
+        const uint32_t CHUNK = 64U*1024U;
+        BuforKernelowy chunk(CHUNK, false);
+        if (!chunk) return 0;
+        // najpierw skróć plik do 0
+        if (!zapisz_do_pliku(sciezka, nullptr, 0)) return 0;
+        uint64_t off = 0;
+        while (off < dlugosc) {
+            uint32_t porcja = dlugosc - (uint32_t)off > CHUNK ? CHUNK : dlugosc - (uint32_t)off;
+            if (!skopiuj_z_przestrzeni_uzytkownika(chunk.get(), reinterpret_cast<const void*>(arg2 + off), porcja)) return 0;
+            if (!zapisz_fragment_pliku(sciezka, off, static_cast<char*>(chunk.get()), porcja)) return 0;
+            off += porcja;
+        }
+        powiadom_zmiane_systemu_plikow();
+        return 1ULL;
     }
 
     BuforKernelowy dane(
@@ -1727,6 +1755,9 @@ uint64_t bws_uruchom(
                            "/programy/przegladarka.cebula/przegladarka.bur"))
         wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ | PRAWO_SIEC;
     else if (rowna_sciezka(sciezka,
+                           "/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur"))
+        wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ;
+    else if (rowna_sciezka(sciezka,
                            "/programy/kalkulator.cebula/kalkulator.bur"))
         wymagane = PRAWO_GUI;
     else if (rowna_sciezka(sciezka, "/shell.bur"))
@@ -2251,6 +2282,7 @@ bool operacja_systemowa_dozwolona(
 
 uint64_t reset_ps2() {
     wypisz_log("[POWER] Restart systemu.");
+    psf_flush_cache();
     asm volatile("cli" ::: "memory");
     if (acpi_wykonaj_restart()) {
         for (;;) asm volatile("hlt" ::: "memory");
@@ -2319,6 +2351,7 @@ uint64_t reset_ps2() {
 [[noreturn]]
 void wylacz_qemu() {
     wypisz_log("[POWER] Wylaczanie systemu.");
+    psf_flush_cache();
     asm volatile("cli" ::: "memory");
     if (acpi_wykonaj_shutdown()) {
         for (;;) asm volatile("hlt" ::: "memory");
@@ -3533,6 +3566,57 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
             return skladacz_obrazu_ustaw_popup_aplikacji(
                 aktualny_pid, arg1 != 0, gorne_i32(arg2), dolne_i32(arg2),
                 gorne_i32(arg3), dolne_i32(arg3)) ? 1ULL : 0ULL;
+
+        case 57: {
+            if (!proces_ma_prawo(proces, PRAWO_GUI)) return 0;
+            int x = gorne_i32(arg1);
+            int y = dolne_i32(arg1);
+            int szer = gorne_i32(arg2);
+            int wys = dolne_i32(arg2);
+            if (szer <= 0 || wys <= 0 || szer > 2048 || wys > 2048) return 0;
+            uint64_t cnt = 0;
+            if (__builtin_mul_overflow((uint64_t)szer, (uint64_t)wys, &cnt)) return 0;
+            if (cnt > 4ULL * 1024ULL * 1024ULL) return 0;
+            uint64_t bytes = 0;
+            if (__builtin_mul_overflow(cnt, (uint64_t)4, &bytes)) return 0;
+            if (bytes == 0 || bytes > 16ULL * 1024ULL * 1024ULL) return 0;
+            if (arg3 == 0) return 0;
+            if (!czy_bezpieczny_zakres_uzytkownika_do_odczytu(reinterpret_cast<const void*>(arg3), (size_t)bytes)) return 0;
+            if (bws_vmm_sprawdz_zakres_uzytkownika && !bws_vmm_sprawdz_zakres_uzytkownika(reinterpret_cast<const void*>(arg3), (size_t)bytes, false)) return 0;
+            BuforKernelowy tmp(bytes, false);
+            if (!tmp) return 0;
+            if (!skopiuj_z_przestrzeni_uzytkownika(tmp.get(), reinterpret_cast<const void*>(arg3), (size_t)bytes)) return 0;
+            BlokadaEkranu blokada;
+            return bws_gui_blit(x, y, szer, wys, static_cast<const uint32_t*>(tmp.get())) ? 1ULL : 0ULL;
+        }
+
+        case 58:
+            if (!proces_ma_prawo(proces, PRAWO_GUI) || arg1 == 0) return 0;
+            return bws_gui_ustaw_tytul_okna(reinterpret_cast<const char*>(arg1))
+                ? 1ULL : 0ULL;
+
+        case 59: {
+            if (!proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ)) return 0;
+            char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
+            if (!pobierz_sciezke_pliku(arg1, sciezka)) return 0;
+            uint64_t offset = arg2;
+            uint64_t buf_u = arg3;
+            uint64_t len64 = arg4;
+            if (buf_u == 0 || len64 == 0 || len64 > (1ULL*1024ULL*1024ULL)) return 0;
+            uint32_t len = static_cast<uint32_t>(len64);
+            if ((uint64_t)len != len64) return 0;
+            if (!czy_bezpieczny_zakres_uzytkownika_do_zapisu(reinterpret_cast<void*>(buf_u), len)) return 0;
+            if (bws_vmm_sprawdz_zakres_uzytkownika && !bws_vmm_sprawdz_zakres_uzytkownika(reinterpret_cast<void*>(buf_u), len, true)) return 0;
+            uint64_t end = 0;
+            if (__builtin_add_overflow(offset, (uint64_t)len, &end)) return 0;
+            BuforKernelowy tmp(len, false);
+            if (!tmp) return 0;
+            uint32_t got = 0;
+            if (!czytaj_fragment_pliku(sciezka, offset, static_cast<char*>(tmp.get()), len, &got)) return 0;
+            if (got > len) return 0;
+            if (got > 0 && !skopiuj_do_przestrzeni_uzytkownika(reinterpret_cast<void*>(buf_u), tmp.get(), got)) return 0;
+            return (uint64_t)got + 1ULL;
+        }
 
         default:
             /*

@@ -32,6 +32,7 @@
 #include "psf.h"
 #include "ahci.h"
 #include "zegar-rtc.h"
+#include "heap.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -68,12 +69,13 @@ bool zapakuj_prawdziwy_czas_rtc(uint64_t* wynik) {
 
 bool znacznik_metadanych_poprawny(uint64_t flagi) {
     return (flagi & PSF_META_MAGIC_MASK) == PSF_META_MAGIC &&
-           (flagi & PSF_META_WERSJA_MASK) == PSF_META_WERSJA_1;
+           ((flagi & PSF_META_WERSJA_MASK) == PSF_META_WERSJA_1 ||
+            (flagi & PSF_META_WERSJA_MASK) == PSF_META_WERSJA_2);
 }
 
 void ustaw_metadane_nowego_wezla(wezel_indeksowy* w, uint8_t pzb) {
     if (!w || pzb > 5U) return;
-    uint64_t flagi = PSF_META_MAGIC | PSF_META_WERSJA_1 |
+    uint64_t flagi = PSF_META_MAGIC | PSF_META_WERSJA_2 |
                      PSF_META_PZB_WAZNY |
                      static_cast<uint64_t>(pzb);
     uint64_t czas = 0;
@@ -82,6 +84,177 @@ void ustaw_metadane_nowego_wezla(wezel_indeksowy* w, uint8_t pzb) {
         flagi |= PSF_META_CZAS_WAZNY;
     }
     w->flagi_zabezpieczen = flagi;
+}
+
+constexpr uint64_t PTRS_PER_BLOCK = PSF_ROZMIAR_BLOKU / sizeof(uint64_t);
+
+// forward dla helperów pośrednich
+uint64_t zaalokuj_wolny_blok_danych();
+bool zwolnij_blok_danych(uint64_t id);
+uint8_t* pobierz_blok(uint64_t nr_bloku, bool wczytaj_z_dysku = true);
+uint8_t* pobierz_blok_danych(uint64_t id, bool wczytaj_z_dysku = true);
+uint64_t absolutny_blok_danych(uint64_t id);
+bool id_bloku_danych_poprawne(uint64_t id);
+bool czy_blok_danych_zajety(uint64_t id);
+bool wskazniki_pliku_poprawne(const wezel_indeksowy* w);
+void oznacz_blok_jako_brudny(uint64_t nr);
+void oznacz_wezel_jako_brudny(uint64_t id);
+
+bool pobierz_wskaznik_bloku(const wezel_indeksowy* w, uint64_t idx, uint64_t* out){
+    if(!w||!out) return false;
+    if(idx < PSF_MAX_BLOKOW_W_WEZLE){
+        *out = w->wskazniki_blokow[idx];
+        return true;
+    }
+    idx -= PSF_MAX_BLOKOW_W_WEZLE;
+    if(idx < PTRS_PER_BLOCK){
+        if(w->blok_posredni_1==BARK_BLOKU){ *out=BARK_BLOKU; return true; }
+        uint8_t* blk = pobierz_blok_danych(w->blok_posredni_1);
+        if(!blk) return false;
+        uint64_t* arr = reinterpret_cast<uint64_t*>(blk);
+        *out = arr[idx];
+        return true;
+    }
+    idx -= PTRS_PER_BLOCK;
+    // double indirect via blok_posredni_2
+    uint64_t per = PTRS_PER_BLOCK;
+    uint64_t tbl = idx / per;
+    uint64_t ent = idx % per;
+    if(tbl >= PTRS_PER_BLOCK) return false;
+    if(w->blok_posredni_2==BARK_BLOKU){ *out=BARK_BLOKU; return true; }
+    uint8_t* blk1 = pobierz_blok_danych(w->blok_posredni_2);
+    if(!blk1) return false;
+    uint64_t* arr1 = reinterpret_cast<uint64_t*>(blk1);
+    uint64_t id2 = arr1[tbl];
+    if(id2==BARK_BLOKU){ *out=BARK_BLOKU; return true; }
+    uint8_t* blk2 = pobierz_blok_danych(id2);
+    if(!blk2) return false;
+    uint64_t* arr2 = reinterpret_cast<uint64_t*>(blk2);
+    *out = arr2[ent];
+    return true;
+}
+
+bool ustaw_wskaznik_bloku(wezel_indeksowy* w, uint64_t idx, uint64_t blok_id, uint64_t wezel_id){
+    if(!w) return false;
+    if(idx < PSF_MAX_BLOKOW_W_WEZLE){
+        w->wskazniki_blokow[idx]=blok_id;
+        oznacz_wezel_jako_brudny(wezel_id);
+        return true;
+    }
+    idx -= PSF_MAX_BLOKOW_W_WEZLE;
+    if(idx < PTRS_PER_BLOCK){
+        if(w->blok_posredni_1==BARK_BLOKU){
+            uint64_t nid = zaalokuj_wolny_blok_danych();
+            if(nid==BARK_BLOKU) return false;
+            uint8_t* blk = pobierz_blok_danych(nid, false);
+            if(!blk){ (void)zwolnij_blok_danych(nid); return false; }
+            for(uint64_t i=0;i<PTRS_PER_BLOCK;i++) reinterpret_cast<uint64_t*>(blk)[i]=BARK_BLOKU;
+            w->blok_posredni_1=nid;
+            oznacz_wezel_jako_brudny(wezel_id);
+            uint64_t abs = absolutny_blok_danych(nid);
+            if(abs!=UINT64_MAX) oznacz_blok_jako_brudny(abs);
+        }
+        uint8_t* blk = pobierz_blok_danych(w->blok_posredni_1);
+        if(!blk) return false;
+        reinterpret_cast<uint64_t*>(blk)[idx]=blok_id;
+        uint64_t abs = absolutny_blok_danych(w->blok_posredni_1);
+        if(abs!=UINT64_MAX) oznacz_blok_jako_brudny(abs);
+        return true;
+    }
+    idx -= PTRS_PER_BLOCK;
+    uint64_t per = PTRS_PER_BLOCK;
+    uint64_t tbl = idx / per;
+    uint64_t ent = idx % per;
+    if(tbl >= PTRS_PER_BLOCK) return false;
+    if(w->blok_posredni_2==BARK_BLOKU){
+        uint64_t nid = zaalokuj_wolny_blok_danych();
+        if(nid==BARK_BLOKU) return false;
+        uint8_t* blk = pobierz_blok_danych(nid, false);
+        if(!blk){ (void)zwolnij_blok_danych(nid); return false; }
+        for(uint64_t i=0;i<PTRS_PER_BLOCK;i++) reinterpret_cast<uint64_t*>(blk)[i]=BARK_BLOKU;
+        w->blok_posredni_2=nid;
+        oznacz_wezel_jako_brudny(wezel_id);
+        uint64_t abs = absolutny_blok_danych(nid);
+        if(abs!=UINT64_MAX) oznacz_blok_jako_brudny(abs);
+    }
+    uint8_t* blk1 = pobierz_blok_danych(w->blok_posredni_2);
+    if(!blk1) return false;
+    uint64_t* arr1 = reinterpret_cast<uint64_t*>(blk1);
+    uint64_t id2 = arr1[tbl];
+    if(id2==BARK_BLOKU){
+        uint64_t nid = zaalokuj_wolny_blok_danych();
+        if(nid==BARK_BLOKU) return false;
+        uint8_t* blk2 = pobierz_blok_danych(nid, false);
+        if(!blk2){ (void)zwolnij_blok_danych(nid); return false; }
+        for(uint64_t i=0;i<PTRS_PER_BLOCK;i++) reinterpret_cast<uint64_t*>(blk2)[i]=BARK_BLOKU;
+        arr1[tbl]=nid;
+        uint64_t abs1 = absolutny_blok_danych(w->blok_posredni_2);
+        if(abs1!=UINT64_MAX) oznacz_blok_jako_brudny(abs1);
+        uint64_t abs2 = absolutny_blok_danych(nid);
+        if(abs2!=UINT64_MAX) oznacz_blok_jako_brudny(abs2);
+        id2=nid;
+    }
+    uint8_t* blk2 = pobierz_blok_danych(id2);
+    if(!blk2) return false;
+    reinterpret_cast<uint64_t*>(blk2)[ent]=blok_id;
+    uint64_t abs2 = absolutny_blok_danych(id2);
+    if(abs2!=UINT64_MAX) oznacz_blok_jako_brudny(abs2);
+    uint64_t abs1 = absolutny_blok_danych(w->blok_posredni_2);
+    if(abs1!=UINT64_MAX) oznacz_blok_jako_brudny(abs1);
+    return true;
+}
+
+bool zwolnij_wszystkie_bloki_wezla(wezel_indeksowy* w, uint64_t wezel_id) {
+    if (!w) return false;
+    // 1. Bezposrednie
+    for (size_t k = 0; k < static_cast<size_t>(PSF_MAX_BLOKOW_W_WEZLE); ++k) {
+        const uint64_t id = w->wskazniki_blokow[k];
+        if (id != BARK_BLOKU) {
+            (void)zwolnij_blok_danych(id);
+            w->wskazniki_blokow[k] = BARK_BLOKU;
+        }
+    }
+    // 2. Pojedyncze posrednie
+    if (w->blok_posredni_1 != BARK_BLOKU) {
+        uint8_t* blk = pobierz_blok_danych(w->blok_posredni_1);
+        if (blk) {
+            uint64_t* arr = reinterpret_cast<uint64_t*>(blk);
+            for (uint64_t i = 0; i < PTRS_PER_BLOCK; ++i) {
+                if (arr[i] != BARK_BLOKU) {
+                    (void)zwolnij_blok_danych(arr[i]);
+                }
+            }
+        }
+        (void)zwolnij_blok_danych(w->blok_posredni_1);
+        w->blok_posredni_1 = BARK_BLOKU;
+    }
+    // 3. Podwojne posrednie
+    if (w->blok_posredni_2 != BARK_BLOKU) {
+        uint8_t* blk1 = pobierz_blok_danych(w->blok_posredni_2);
+        if (blk1) {
+            uint64_t* arr1 = reinterpret_cast<uint64_t*>(blk1);
+            for (uint64_t i = 0; i < PTRS_PER_BLOCK; ++i) {
+                const uint64_t id2 = arr1[i];
+                if (id2 != BARK_BLOKU) {
+                    uint8_t* blk2 = pobierz_blok_danych(id2);
+                    if (blk2) {
+                        uint64_t* arr2 = reinterpret_cast<uint64_t*>(blk2);
+                        for (uint64_t j = 0; j < PTRS_PER_BLOCK; ++j) {
+                            if (arr2[j] != BARK_BLOKU) {
+                                (void)zwolnij_blok_danych(arr2[j]);
+                            }
+                        }
+                    }
+                    (void)zwolnij_blok_danych(id2);
+                }
+            }
+        }
+        (void)zwolnij_blok_danych(w->blok_posredni_2);
+        w->blok_posredni_2 = BARK_BLOKU;
+    }
+    w->blok_posredni_3 = BARK_BLOKU;
+    if (wezel_id != 0) oznacz_wezel_jako_brudny(wezel_id);
+    return true;
 }
 
 /*
@@ -108,6 +281,43 @@ constexpr size_t MAKS_BRUDNYCH_BLOKOW = 256;
  * superblok + bitmapa + wezly + dane.
  */
 constexpr uint64_t MINIMALNA_LICZBA_BLOKOW = 10;
+
+constexpr size_t POJEMNOSC_CACHE_BLOKOW = 256;
+
+struct WpisCacheBloku {
+    uint64_t nr_bloku;
+    bool brudny;
+    uint32_t wiek;
+    alignas(16) uint8_t dane[PSF_ROZMIAR_BLOKU];
+};
+
+WpisCacheBloku* wpisy_cache = nullptr;
+uint32_t licznik_wieku_cache = 0;
+
+static void alokuj_cache_jesli_brak() {
+    if (!wpisy_cache) {
+        wpisy_cache = static_cast<WpisCacheBloku*>(kmalloc(POJEMNOSC_CACHE_BLOKOW * sizeof(WpisCacheBloku)));
+        if (wpisy_cache) {
+            for (size_t i = 0; i < POJEMNOSC_CACHE_BLOKOW; ++i) {
+                wpisy_cache[i].nr_bloku = UINT64_MAX;
+                wpisy_cache[i].brudny = false;
+                wpisy_cache[i].wiek = 0;
+            }
+        }
+    }
+}
+
+void wyczysc_cache_blokow() {
+    alokuj_cache_jesli_brak();
+    if (wpisy_cache) {
+        for (size_t i = 0; i < POJEMNOSC_CACHE_BLOKOW; ++i) {
+            wpisy_cache[i].nr_bloku = UINT64_MAX;
+            wpisy_cache[i].brudny = false;
+            wpisy_cache[i].wiek = 0;
+        }
+    }
+    licznik_wieku_cache = 0;
+}
 
 /* =========================================================================
  * STAN GLOBALNY
@@ -441,13 +651,17 @@ void oznacz_caly_system_jako_brudny() {
 void oznacz_blok_jako_brudny(
     uint64_t nr_bloku
 ) {
-    if (!dysk_superblok) {
+    if (!dysk_superblok || nr_bloku >= dysk_superblok->ilosc_blokow) {
         return;
     }
 
-    if (nr_bloku >=
-        dysk_superblok->ilosc_blokow) {
-        return;
+    if (nr_bloku >= dysk_superblok->start_danych) {
+        for (size_t i = 0; i < POJEMNOSC_CACHE_BLOKOW; ++i) {
+            if (wpisy_cache[i].nr_bloku == nr_bloku) {
+                wpisy_cache[i].brudny = true;
+                break;
+            }
+        }
     }
 
     if (brudny_caly_system) {
@@ -479,7 +693,7 @@ void oznacz_blok_jako_brudny(
 bool zapisz_sektory_porcjami(
     uint64_t lba,
     uint64_t liczba_sektorow,
-    uint8_t* dane
+    const uint8_t* dane
 ) {
     if (!dane) {
         return false;
@@ -504,9 +718,9 @@ bool zapisz_sektory_porcjami(
         if (!zapisz_na_glowny_dysk_ahci(
                 lba + zapisano,
                 paczka,
-                dane +
+                const_cast<uint8_t*>(dane +
                     zapisano *
-                    ROZMIAR_SEKTORA)) {
+                    ROZMIAR_SEKTORA))) {
 
             return false;
         }
@@ -595,18 +809,29 @@ bool bsp_zapisz_zmiany() {
     bool sukces = true;
 
     if (brudny_caly_system) {
-        const uint64_t liczba_sektorow =
+        const uint64_t sektory_meta =
             static_cast<uint64_t>(
                 dysk_superblok->
-                    calkowity_rozmiar) /
-            ROZMIAR_SEKTORA;
+                    start_danych) *
+            sektory_na_blok;
 
         sukces =
             zapisz_sektory_porcjami(
                 BSP_START_LBA,
-                liczba_sektorow,
+                sektory_meta,
                 ram_dysk
             );
+
+        for (size_t i = 0; i < POJEMNOSC_CACHE_BLOKOW; ++i) {
+            if (wpisy_cache[i].brudny && wpisy_cache[i].nr_bloku != UINT64_MAX) {
+                uint64_t lba = BSP_START_LBA + wpisy_cache[i].nr_bloku * sektory_na_blok;
+                if (!zapisz_sektory_porcjami(lba, sektory_na_blok, wpisy_cache[i].dane)) {
+                    sukces = false;
+                } else {
+                    wpisy_cache[i].brudny = false;
+                }
+            }
+        }
     } else {
         for (size_t i = 0;
              i < liczba_brudnych_blokow;
@@ -614,18 +839,6 @@ bool bsp_zapisz_zmiany() {
 
             const uint64_t nr_bloku =
                 brudne_bloki[i];
-
-            uint64_t przesuniecie_bajtowe = 0;
-
-            if (!mnoz_u64(
-                    nr_bloku,
-                    static_cast<uint64_t>(
-                        PSF_ROZMIAR_BLOKU),
-                    &przesuniecie_bajtowe)) {
-
-                sukces = false;
-                break;
-            }
 
             uint64_t przesuniecie_lba = 0;
 
@@ -638,21 +851,54 @@ bool bsp_zapisz_zmiany() {
                 break;
             }
 
-            if (!zapisz_sektory_porcjami(
-                    BSP_START_LBA +
-                        przesuniecie_lba,
-                    sektory_na_blok,
-                    ram_dysk +
-                        przesuniecie_bajtowe)) {
+            if (nr_bloku < dysk_superblok->start_danych) {
+                uint64_t przesuniecie_bajtowe = 0;
 
-                sukces = false;
-                break;
+                if (!mnoz_u64(
+                        nr_bloku,
+                        static_cast<uint64_t>(
+                            PSF_ROZMIAR_BLOKU),
+                        &przesuniecie_bajtowe)) {
+
+                    sukces = false;
+                    break;
+                }
+
+                if (!zapisz_sektory_porcjami(
+                        BSP_START_LBA +
+                            przesuniecie_lba,
+                        sektory_na_blok,
+                        ram_dysk +
+                            przesuniecie_bajtowe)) {
+
+                    sukces = false;
+                    break;
+                }
+            } else {
+                for (size_t j = 0; j < POJEMNOSC_CACHE_BLOKOW; ++j) {
+                    if (wpisy_cache[j].nr_bloku == nr_bloku) {
+                        if (wpisy_cache[j].brudny) {
+                            if (!zapisz_sektory_porcjami(
+                                    BSP_START_LBA + przesuniecie_lba,
+                                    sektory_na_blok,
+                                    wpisy_cache[j].dane)) {
+                                sukces = false;
+                            } else {
+                                wpisy_cache[j].brudny = false;
+                            }
+                        }
+                        break;
+                    }
+                }
             }
         }
     }
 
     if (sukces) {
         wyczysc_liste_brudnych();
+        for (size_t i = 0; i < POJEMNOSC_CACHE_BLOKOW; ++i) {
+            wpisy_cache[i].brudny = false;
+        }
     }
 
     ostatni_flush_ok = sukces;
@@ -664,7 +910,8 @@ bool bsp_zapisz_zmiany() {
  * ========================================================================= */
 
 uint8_t* pobierz_blok(
-    uint64_t nr_bloku
+    uint64_t nr_bloku,
+    bool wczytaj_z_dysku
 ) {
     if (!ram_dysk ||
         !dysk_superblok) {
@@ -678,36 +925,87 @@ uint8_t* pobierz_blok(
         return nullptr;
     }
 
-    uint64_t offset = 0;
+    // Bloki metadanych (superblok, bitmapa, wezly indeksowe)
+    if (nr_bloku < dysk_superblok->start_danych) {
+        uint64_t offset = 0;
 
-    if (!mnoz_u64(
-            nr_bloku,
+        if (!mnoz_u64(
+                nr_bloku,
+                static_cast<uint64_t>(
+                    PSF_ROZMIAR_BLOKU),
+                &offset)) {
+
+            return nullptr;
+        }
+
+        uint64_t koniec = 0;
+
+        if (!dodaj_u64(
+                offset,
+                static_cast<uint64_t>(
+                    PSF_ROZMIAR_BLOKU),
+                &koniec)) {
+
+            return nullptr;
+        }
+
+        if (koniec >
             static_cast<uint64_t>(
-                PSF_ROZMIAR_BLOKU),
-            &offset)) {
+                rozmiar_ram_dysku)) {
 
-        return nullptr;
+            return nullptr;
+        }
+
+        return ram_dysk + offset;
     }
 
-    uint64_t koniec = 0;
-
-    if (!dodaj_u64(
-            offset,
-            static_cast<uint64_t>(
-                PSF_ROZMIAR_BLOKU),
-            &koniec)) {
-
-        return nullptr;
+    // Bloki danych - obsluga przez cache
+    for (size_t i = 0; i < POJEMNOSC_CACHE_BLOKOW; ++i) {
+        if (wpisy_cache[i].nr_bloku == nr_bloku) {
+            wpisy_cache[i].wiek = ++licznik_wieku_cache;
+            return wpisy_cache[i].dane;
+        }
     }
 
-    if (koniec >
-        static_cast<uint64_t>(
-            rozmiar_ram_dysku)) {
-
-        return nullptr;
+    size_t victim = 0;
+    uint32_t min_wiek = UINT32_MAX;
+    for (size_t i = 0; i < POJEMNOSC_CACHE_BLOKOW; ++i) {
+        if (wpisy_cache[i].nr_bloku == UINT64_MAX) {
+            victim = i;
+            break;
+        }
+        if (wpisy_cache[i].wiek < min_wiek) {
+            min_wiek = wpisy_cache[i].wiek;
+            victim = i;
+        }
     }
 
-    return ram_dysk + offset;
+    if (wpisy_cache[victim].brudny && wpisy_cache[victim].nr_bloku != UINT64_MAX) {
+        if (nosnik_ahci_dostepny && zapis_trwaly_dozwolony) {
+            const uint64_t sektory_na_blok = static_cast<uint64_t>(PSF_ROZMIAR_BLOKU) / ROZMIAR_SEKTORA;
+            const uint64_t lba = BSP_START_LBA + wpisy_cache[victim].nr_bloku * sektory_na_blok;
+            if (!zapisz_sektory_porcjami(lba, sektory_na_blok, wpisy_cache[victim].dane)) {
+                return nullptr;
+            }
+        }
+        wpisy_cache[victim].brudny = false;
+    }
+
+    wpisy_cache[victim].nr_bloku = nr_bloku;
+    wpisy_cache[victim].brudny = false;
+    wpisy_cache[victim].wiek = ++licznik_wieku_cache;
+
+    const uint64_t sektory_na_blok = static_cast<uint64_t>(PSF_ROZMIAR_BLOKU) / ROZMIAR_SEKTORA;
+    const uint64_t lba = BSP_START_LBA + nr_bloku * sektory_na_blok;
+    if (wczytaj_z_dysku && nosnik_ahci_dostepny) {
+        if (!czytaj_sektory_porcjami(lba, sektory_na_blok, wpisy_cache[victim].dane)) {
+            wyzeruj_pamiec(wpisy_cache[victim].dane, PSF_ROZMIAR_BLOKU);
+        }
+    } else {
+        wyzeruj_pamiec(wpisy_cache[victim].dane, PSF_ROZMIAR_BLOKU);
+    }
+
+    return wpisy_cache[victim].dane;
 }
 
 uint64_t wezlow_na_blok() {
@@ -830,7 +1128,8 @@ uint64_t absolutny_blok_danych(
 }
 
 uint8_t* pobierz_blok_danych(
-    uint64_t id
+    uint64_t id,
+    bool wczytaj_z_dysku
 ) {
     const uint64_t absolutny =
         absolutny_blok_danych(id);
@@ -840,7 +1139,8 @@ uint8_t* pobierz_blok_danych(
     }
 
     return pobierz_blok(
-        absolutny
+        absolutny,
+        wczytaj_z_dysku
     );
 }
 
@@ -1972,11 +2272,16 @@ bool wylicz_geometrie(
     if (calkowity <
             static_cast<uint64_t>(
                 PSF_ROZMIAR_BLOKU) *
-            MINIMALNA_LICZBA_BLOKOW ||
-        calkowity >
-            static_cast<uint64_t>(
-                dostepny_ram)) {
+            MINIMALNA_LICZBA_BLOKOW) {
 
+        return false;
+    }
+
+    const uint64_t bajty_metadanych =
+        static_cast<uint64_t>(sb->start_danych) *
+        static_cast<uint64_t>(PSF_ROZMIAR_BLOKU);
+
+    if (bajty_metadanych > static_cast<uint64_t>(dostepny_ram)) {
         return false;
     }
 
@@ -2068,6 +2373,30 @@ bool wylicz_geometrie(
         return false;
     }
 
+    const uint64_t sektory_na_blok =
+        static_cast<uint64_t>(PSF_ROZMIAR_BLOKU) / ROZMIAR_SEKTORA;
+
+    if (nosnik_ahci_dostepny) {
+        const uint64_t sektory_dysku = pobierz_liczbe_sektorow_glownego_dysku_ahci();
+        if (sektory_dysku > 0) {
+            if (sb->ilosc_blokow == 0) {
+                return false;
+            }
+            uint64_t potrzebne_sektory = 0;
+            if (!mnoz_u64(sb->ilosc_blokow, sektory_na_blok, &potrzebne_sektory)) {
+                return false;
+            }
+            uint64_t ostatnie_lba = 0;
+            if (!dodaj_u64(BSP_START_LBA, potrzebne_sektory - 1ULL, &ostatnie_lba)) {
+                return false;
+            }
+            if (ostatnie_lba >= sektory_dysku) {
+                wypisz_log("[BSP-BLAD] Superblok deklaruje geometrie wychodzaca poza fizyczny dysk AHCI.");
+                return false;
+            }
+        }
+    }
+
     *wezly =
         liczba_wezlow;
 
@@ -2088,11 +2417,10 @@ bool wskazniki_wezla_poprawne(
         return false;
     }
 
-    /*
-     * Indirect blocks nie sa jeszcze zaimplementowane przez obecny BSP2.
-     * Zamontowanie obrazu, ktory ich uzywa, skonczyloby sie utrata danych
-     * podczas modyfikacji, dlatego failujemy bezpiecznie.
-     */
+    if (w->typ == TYP_PLIK) {
+        return wskazniki_pliku_poprawne(w);
+    }
+
     if (w->blok_posredni_1 !=
             BARK_BLOKU ||
         w->blok_posredni_2 !=
@@ -2216,70 +2544,51 @@ bool waliduj_katalog(
 
             if (!cel ||
                 cel->typ == TYP_WOLNY) {
-
-                return false;
+                wpisy[j].id_wezla = 0;
+                wyzeruj_pamiec(wpisy[j].nazwa, PSF_MAX_NAZWA);
+                const uint64_t abs = absolutny_blok_danych(blok);
+                if (abs != UINT64_MAX) oznacz_blok_jako_brudny(abs);
+                continue;
             }
 
             /*
              * Brak duplikatow nazw w jednym katalogu.
              */
-            for (size_t k2 = 0;
-                 k2 <= k;
-                 ++k2) {
-
-                const uint64_t blok2 =
-                    w->wskazniki_blokow[k2];
-
-                if (blok2 ==
-                    BARK_BLOKU) {
-
-                    continue;
-                }
-
-                wpis_katalogowy* wpisy2 =
-                    pobierz_wpisy_katalogowe(
-                        blok2
-                    );
-
-                if (!wpisy2) {
-                    return false;
-                }
-
-                const uint64_t limit_j =
-                    k2 == k
-                        ? j
-                        : wpisow_na_blok;
-
-                for (uint64_t j2 = 0;
-                     j2 < limit_j;
-                     ++j2) {
-
-                    if (wpisy2[j2].id_wezla != 0 &&
-                        nazwy_rowne(
-                            wpisy2[j2].nazwa,
-                            wpisy[j].nazwa)) {
-
-                        return false;
+            bool duplicate = false;
+            for (size_t k2 = 0; k2 <= k; ++k2) {
+                const uint64_t blok2 = w->wskazniki_blokow[k2];
+                if (blok2 == BARK_BLOKU) continue;
+                wpis_katalogowy* wpisy2 = pobierz_wpisy_katalogowe(blok2);
+                if (!wpisy2) continue;
+                const uint64_t limit_j = (k2 == k) ? j : wpisow_na_blok;
+                for (uint64_t j2 = 0; j2 < limit_j; ++j2) {
+                    if (wpisy2[j2].id_wezla != 0 && nazwy_rowne(wpisy2[j2].nazwa, wpisy[j].nazwa)) {
+                        duplicate = true;
+                        break;
                     }
                 }
+                if (duplicate) break;
+            }
+            if (duplicate) {
+                wpisy[j].id_wezla = 0;
+                wyzeruj_pamiec(wpisy[j].nazwa, PSF_MAX_NAZWA);
+                const uint64_t abs = absolutny_blok_danych(blok);
+                if (abs != UINT64_MAX) oznacz_blok_jako_brudny(abs);
+                continue;
             }
 
             ++znalezionych;
         }
     }
 
-    /*
-     * W aktualnym formacie rozmiar katalogu jest liczba wpisow.
-     */
-    return
-        w->rozmiar_w_bajtach ==
-        znalezionych;
+    const_cast<wezel_indeksowy*>(w)->rozmiar_w_bajtach = znalezionych;
+    return true;
 }
 
 bool waliduj_metadane() {
     if (!dysk_superblok ||
         calkowita_liczba_wezlow == 0) {
-
+        wypisz_log("[WAL-DBG] no superblock or zero inodes");
         return false;
     }
 
@@ -2291,21 +2600,11 @@ bool waliduj_metadane() {
 
     if (!korzen ||
         korzen->typ != TYP_KATALOG) {
-
+        wypisz_log("[WAL-DBG] bad root");
         return false;
     }
 
-    uint64_t maks_rozmiar_pliku = 0;
-
-    if (!mnoz_u64(
-            static_cast<uint64_t>(
-                PSF_MAX_BLOKOW_W_WEZLE),
-            static_cast<uint64_t>(
-                PSF_ROZMIAR_BLOKU),
-            &maks_rozmiar_pliku)) {
-
-        return false;
-    }
+    const uint64_t maks_rozmiar_pliku = PSF_MAKS_ROZMIAR_PLIKU;
 
     for (uint64_t id = 1;
          id <=
@@ -2316,6 +2615,7 @@ bool waliduj_metadane() {
             pobierz_wezel(id);
 
         if (!w) {
+            wypisz_log("[WAL-DBG] null inode");
             return false;
         }
 
@@ -2325,20 +2625,20 @@ bool waliduj_metadane() {
 
         if (w->typ != TYP_PLIK &&
             w->typ != TYP_KATALOG) {
-
+            wypisz_log("[WAL-DBG] invalid node type");
             return false;
         }
 
         if (!wskazniki_wezla_poprawne(
                 w)) {
-
+            wypisz_log("[WAL-DBG] invalid pointers in inode");
             return false;
         }
 
         if (w->typ == TYP_PLIK) {
             if (w->rozmiar_w_bajtach >
                 maks_rozmiar_pliku) {
-
+                wypisz_log("[WAL-DBG] file exceeding max size limit");
                 return false;
             }
 
@@ -2348,16 +2648,28 @@ bool waliduj_metadane() {
                     PSF_ROZMIAR_BLOKU
                 );
 
+            if (wymagane > PSF_MAX_BLOCKS_DUZY) {
+                wypisz_log("[WAL-DBG] file exceeding max block count");
+                return false;
+            }
+
             for (uint64_t k = 0;
                  k < wymagane;
                  ++k) {
 
-                if (k >=
-                        static_cast<uint64_t>(
-                            PSF_MAX_BLOKOW_W_WEZLE) ||
-                    w->wskazniki_blokow[k] ==
-                        BARK_BLOKU) {
+                uint64_t bid = BARK_BLOKU;
+                if (!pobierz_wskaznik_bloku(w, k, &bid)) {
+                    wypisz_log("[WAL-DBG] failed to read block pointer");
+                    return false;
+                }
 
+                if (bid == BARK_BLOKU) {
+                    continue;
+                }
+
+                if (!id_bloku_danych_poprawne(bid) ||
+                    !czy_blok_danych_zajety(bid)) {
+                    wypisz_log("[WAL-DBG] file references unallocated/out-of-range data block");
                     return false;
                 }
             }
@@ -2365,7 +2677,7 @@ bool waliduj_metadane() {
             if (!waliduj_katalog(
                     id,
                     w)) {
-
+                wypisz_log("[WAL-DBG] directory validation failed");
                 return false;
             }
         }
@@ -2388,7 +2700,7 @@ bool sformatuj_ram_dysk(
         return false;
     }
 
-    const uint64_t rozmiar_uzyteczny =
+    uint64_t rozmiar_uzyteczny =
         (static_cast<uint64_t>(
              rozmiar_ram_dysku) /
          static_cast<uint64_t>(
@@ -2396,9 +2708,19 @@ bool sformatuj_ram_dysk(
         static_cast<uint64_t>(
             PSF_ROZMIAR_BLOKU);
 
-    if (rozmiar_uzyteczny >
-            UINT32_MAX ||
-        rozmiar_uzyteczny <
+    if (pozwol_na_zapis_fizyczny && nosnik_ahci_dostepny) {
+        const uint64_t sektory_dysku = pobierz_liczbe_sektorow_glownego_dysku_ahci();
+        if (sektory_dysku > BSP_START_LBA) {
+            const uint64_t dostepne_sektory = sektory_dysku - BSP_START_LBA;
+            const uint64_t sektory_na_blok =
+                static_cast<uint64_t>(PSF_ROZMIAR_BLOKU) / ROZMIAR_SEKTORA;
+            const uint64_t max_blokow = dostepne_sektory / sektory_na_blok;
+            rozmiar_uzyteczny =
+                max_blokow * static_cast<uint64_t>(PSF_ROZMIAR_BLOKU);
+        }
+    }
+
+    if (rozmiar_uzyteczny <
             static_cast<uint64_t>(
                 PSF_ROZMIAR_BLOKU) *
             MINIMALNA_LICZBA_BLOKOW) {
@@ -2406,26 +2728,11 @@ bool sformatuj_ram_dysk(
         return false;
     }
 
-    wyzeruj_pamiec(
-        ram_dysk,
-        rozmiar_uzyteczny
-    );
-
-    dysk_superblok =
-        reinterpret_cast<superblok*>(
-            ram_dysk
-        );
-
     const uint64_t ilosc_blokow =
         rozmiar_uzyteczny /
         static_cast<uint64_t>(
             PSF_ROZMIAR_BLOKU);
 
-    /*
-     * Bitmapa jest nieco przewymiarowana i ma bit dla kazdego bloku FS,
-     * mimo ze wykorzystujemy tylko pierwsze calkowita_liczba_blokow_danych
-     * bitow. Zachowuje to kompatybilny podzial z dotychczasowym BSP2.
-     */
     const uint64_t bajty_bitmapy =
         podziel_w_gore(
             ilosc_blokow,
@@ -2458,17 +2765,12 @@ bool sformatuj_ram_dysk(
         return false;
     }
 
-    uint64_t bloki_wezlow =
-        pozostale / 4ULL;
-
+    uint64_t bloki_wezlow = 1024ULL;
+    if (bloki_wezlow >= pozostale / 2ULL) {
+        bloki_wezlow = pozostale / 4ULL;
+    }
     if (bloki_wezlow == 0) {
         bloki_wezlow = 1;
-    }
-
-    if (bloki_wezlow >=
-        pozostale) {
-
-        return false;
     }
 
     const uint64_t start_danych =
@@ -2480,6 +2782,24 @@ bool sformatuj_ram_dysk(
 
         return false;
     }
+
+    const uint64_t bajty_metadanych =
+        start_danych * static_cast<uint64_t>(PSF_ROZMIAR_BLOKU);
+
+    if (bajty_metadanych > static_cast<uint64_t>(rozmiar_ram_dysku)) {
+        return false;
+    }
+
+    wyzeruj_pamiec(
+        ram_dysk,
+        static_cast<size_t>(bajty_metadanych)
+    );
+    wyczysc_cache_blokow();
+
+    dysk_superblok =
+        reinterpret_cast<superblok*>(
+            ram_dysk
+        );
 
     dysk_superblok->
         sygnatura[0] = 'B';
@@ -2569,6 +2889,32 @@ bool sformatuj_ram_dysk(
         pozwol_na_zapis_fizyczny &&
         nosnik_ahci_dostepny;
 
+    // Log geometrii
+    {
+        auto dopisz_dec = [](char* dst, size_t cap, uint64_t v) {
+            char tmp[24] = {0}; int n = 0;
+            if (v == 0) tmp[n++] = '0';
+            else {
+                char rev[24]; int r = 0;
+                while (v) { rev[r++] = '0' + static_cast<char>(v % 10ULL); v /= 10ULL; }
+                while (r--) tmp[n++] = rev[r];
+            }
+            tmp[n] = '\0';
+            size_t p = 0; while (dst[p] && p < cap) p++;
+            size_t i = 0; while (tmp[i] && p + 1 < cap) dst[p++] = tmp[i++];
+            dst[p] = '\0';
+        };
+        auto dopisz_str = [](char* dst, size_t cap, const char* src) {
+            size_t p = 0; while (dst[p] && p < cap) p++;
+            size_t i = 0; while (src[i] && p + 1 < cap) dst[p++] = src[i++];
+            dst[p] = '\0';
+        };
+        char b1[64] = {}; dopisz_str(b1, sizeof(b1), "[PSF] total_blocks="); dopisz_dec(b1, sizeof(b1), ilosc_blokow); wypisz_log(b1);
+        char b2[64] = {}; dopisz_str(b2, sizeof(b2), "[PSF] bitmap_start=1 count="); dopisz_dec(b2, sizeof(b2), bloki_bitmapy); wypisz_log(b2);
+        char b3[64] = {}; dopisz_str(b3, sizeof(b3), "[PSF] inode_start="); dopisz_dec(b3, sizeof(b3), start_wezlow); dopisz_str(b3, sizeof(b3), " count="); dopisz_dec(b3, sizeof(b3), bloki_wezlow); wypisz_log(b3);
+        char b4[64] = {}; dopisz_str(b4, sizeof(b4), "[PSF] data_start="); dopisz_dec(b4, sizeof(b4), start_danych); dopisz_str(b4, sizeof(b4), " count="); dopisz_dec(b4, sizeof(b4), ilosc_blokow - start_danych); wypisz_log(b4);
+    }
+
     if (zapis_trwaly_dozwolony) {
         (void)bsp_zapisz_zmiany();
     }
@@ -2642,20 +2988,22 @@ bool wczytaj_istniejacy_bsp2() {
         return false;
     }
 
-    const uint64_t liczba_sektorow =
-        static_cast<uint64_t>(
-            kandydat.
-                calkowity_rozmiar) /
-        ROZMIAR_SEKTORA;
+    const uint64_t sektory_na_blok =
+        static_cast<uint64_t>(PSF_ROZMIAR_BLOKU) / ROZMIAR_SEKTORA;
+
+    const uint64_t liczba_sektorow_meta =
+        static_cast<uint64_t>(kandydat.start_danych) * sektory_na_blok;
 
     if (!czytaj_sektory_porcjami(
             BSP_START_LBA,
-            liczba_sektorow,
+            liczba_sektorow_meta,
             ram_dysk)) {
 
         zapis_trwaly_dozwolony = false;
         return false;
     }
+
+    wyczysc_cache_blokow();
 
     dysk_superblok =
         reinterpret_cast<superblok*>(
@@ -2712,7 +3060,6 @@ bool utworz_twor(
     if (!psf_gotowy ||
         !bezpieczna_sciezka(
             sciezka)) {
-
         return false;
     }
 
@@ -2720,7 +3067,6 @@ bool utworz_twor(
             sciezka,
             nullptr,
             false) != 0) {
-
         return false;
     }
 
@@ -2736,7 +3082,6 @@ bool utworz_twor(
 
     if (rodzic_id == 0 ||
         !poprawna_nazwa(nazwa)) {
-
         return false;
     }
 
@@ -2747,14 +3092,12 @@ bool utworz_twor(
 
     if (!rodzic ||
         rodzic->typ != TYP_KATALOG) {
-
         return false;
     }
 
     if (znajdz_wpis_w_katalogu(
             rodzic_id,
             nazwa).znaleziony) {
-
         return false;
     }
 
@@ -2777,7 +3120,6 @@ bool utworz_twor(
             rodzic_id,
             nowy_id,
             nazwa)) {
-
         (void)zwolnij_wezel(
             nowy_id
         );
@@ -2808,11 +3150,38 @@ bool wskazniki_pliku_poprawne(
         return false;
     }
 
-    if (w->blok_posredni_1 != BARK_BLOKU ||
-        w->blok_posredni_2 != BARK_BLOKU ||
-        w->blok_posredni_3 != BARK_BLOKU) {
+    if (w->blok_posredni_3 != BARK_BLOKU) return false;
 
-        return false;
+    if (w->blok_posredni_1 != BARK_BLOKU) {
+        if (!id_bloku_danych_poprawne(w->blok_posredni_1) || !czy_blok_danych_zajety(w->blok_posredni_1)) return false;
+        uint8_t* blk = pobierz_blok_danych(w->blok_posredni_1);
+        if (!blk) return false;
+        uint64_t* arr = reinterpret_cast<uint64_t*>(blk);
+        for (uint64_t i = 0; i < PTRS_PER_BLOCK; ++i) {
+            uint64_t id = arr[i];
+            if (id == BARK_BLOKU) continue;
+            if (!id_bloku_danych_poprawne(id) || !czy_blok_danych_zajety(id)) return false;
+        }
+    }
+
+    if (w->blok_posredni_2 != BARK_BLOKU) {
+        if (!id_bloku_danych_poprawne(w->blok_posredni_2) || !czy_blok_danych_zajety(w->blok_posredni_2)) return false;
+        uint8_t* blk1 = pobierz_blok_danych(w->blok_posredni_2);
+        if (!blk1) return false;
+        uint64_t* arr1 = reinterpret_cast<uint64_t*>(blk1);
+        for (uint64_t i = 0; i < PTRS_PER_BLOCK; ++i) {
+            uint64_t id2 = arr1[i];
+            if (id2 == BARK_BLOKU) continue;
+            if (!id_bloku_danych_poprawne(id2) || !czy_blok_danych_zajety(id2)) return false;
+            uint8_t* blk2 = pobierz_blok_danych(id2);
+            if (!blk2) return false;
+            uint64_t* arr2 = reinterpret_cast<uint64_t*>(blk2);
+            for (uint64_t j = 0; j < PTRS_PER_BLOCK; ++j) {
+                uint64_t id = arr2[j];
+                if (id == BARK_BLOKU) continue;
+                if (!id_bloku_danych_poprawne(id) || !czy_blok_danych_zajety(id)) return false;
+            }
+        }
     }
 
     for (size_t k = 0;
@@ -2874,12 +3243,7 @@ bool zwolnij_nieopublikowana_kopie(uint64_t id, uint32_t glebokosc) {
             w->wskazniki_blokow[k] = BARK_BLOKU;
         }
     } else if (w->typ == TYP_PLIK) {
-        for (size_t k = 0; k < static_cast<size_t>(PSF_MAX_BLOKOW_W_WEZLE); ++k) {
-            const uint64_t blok_id = w->wskazniki_blokow[k];
-            if (blok_id == BARK_BLOKU) continue;
-            if (!zwolnij_blok_danych(blok_id)) return false;
-            w->wskazniki_blokow[k] = BARK_BLOKU;
-        }
+        if (!zwolnij_wszystkie_bloki_wezla(w, id)) return false;
     } else {
         return false;
     }
@@ -2910,12 +3274,24 @@ uint64_t sklonuj_wezel_rekurencyjnie(uint64_t zrodlo_id, uint8_t poziom_pzb,
             zrodlo->rozmiar_w_bajtach,
             static_cast<uint64_t>(PSF_ROZMIAR_BLOKU));
         for (uint64_t k = 0; k < potrzebne; ++k) {
-            const uint64_t stary_blok = zrodlo->wskazniki_blokow[k];
+            uint64_t stary_blok = BARK_BLOKU;
+            if (!pobierz_wskaznik_bloku(zrodlo, k, &stary_blok) || stary_blok == BARK_BLOKU) {
+                (void)zwolnij_nieopublikowana_kopie(nowy_id, glebokosc);
+                return 0;
+            }
             const uint64_t nowy_blok = zaalokuj_wolny_blok_danych();
+            if (nowy_blok == BARK_BLOKU) {
+                (void)zwolnij_nieopublikowana_kopie(nowy_id, glebokosc);
+                return 0;
+            }
+            if (!ustaw_wskaznik_bloku(nowy, k, nowy_blok, nowy_id)) {
+                (void)zwolnij_blok_danych(nowy_blok);
+                (void)zwolnij_nieopublikowana_kopie(nowy_id, glebokosc);
+                return 0;
+            }
             uint8_t* src = pobierz_blok_danych(stary_blok);
             uint8_t* dst = pobierz_blok_danych(nowy_blok);
-            if (nowy_blok == BARK_BLOKU || !src || !dst) {
-                if (nowy_blok != BARK_BLOKU) (void)zwolnij_blok_danych(nowy_blok);
+            if (!src || !dst) {
                 (void)zwolnij_nieopublikowana_kopie(nowy_id, glebokosc);
                 return 0;
             }
@@ -2925,7 +3301,6 @@ uint64_t sklonuj_wezel_rekurencyjnie(uint64_t zrodlo_id, uint8_t poziom_pzb,
             kopiuj_pamiec(dst, src, porcja);
             if (porcja < PSF_ROZMIAR_BLOKU)
                 wyzeruj_pamiec(dst + porcja, PSF_ROZMIAR_BLOKU - porcja);
-            nowy->wskazniki_blokow[k] = nowy_blok;
             const uint64_t absolutny = absolutny_blok_danych(nowy_blok);
             if (absolutny != UINT64_MAX) oznacz_blok_jako_brudny(absolutny);
         }
@@ -3134,6 +3509,76 @@ extern "C" bool psf_czy_gotowy() {
  * PUBLICZNE API - ZAPIS
  * ========================================================================= */
 
+/* =========================================================================
+ * PUBLICZNE API - ZAPIS I ODCZYT
+ * ========================================================================= */
+
+static bool zapisz_fragment_pliku_wewn(
+    const char* sciezka,
+    uint64_t offset,
+    const char* dane,
+    uint32_t len
+) {
+    if (!psf_gotowy || !sciezka || !dane || len == 0) return false;
+    if (len > 1U * 1024U * 1024U) return false;
+    uint64_t end = 0;
+    if (__builtin_add_overflow(offset, static_cast<uint64_t>(len), &end)) return false;
+    if (end > PSF_MAKS_ROZMIAR_PLIKU) return false;
+    const uint64_t pid = rozwiaz_sciezke(sciezka, nullptr, false);
+    if (pid == 0) return false;
+    wezel_indeksowy* w = pobierz_wezel(pid);
+    if (!w || w->typ != TYP_PLIK || !wskazniki_pliku_poprawne(w)) return false;
+    const uint64_t potrzebne = (end + PSF_ROZMIAR_BLOKU - 1ULL) / PSF_ROZMIAR_BLOKU;
+    uint64_t stare = (w->rozmiar_w_bajtach + PSF_ROZMIAR_BLOKU - 1ULL) / PSF_ROZMIAR_BLOKU;
+    if (w->rozmiar_w_bajtach == 0) stare = 0;
+
+    for (uint64_t k = stare; k < potrzebne; ++k) {
+        uint64_t cur = BARK_BLOKU;
+        if (!pobierz_wskaznik_bloku(w, k, &cur)) return false;
+        if (cur != BARK_BLOKU) continue;
+        const uint64_t nid = zaalokuj_wolny_blok_danych();
+        if (nid == BARK_BLOKU) return false;
+        if (!ustaw_wskaznik_bloku(w, k, nid, pid)) {
+            (void)zwolnij_blok_danych(nid);
+            return false;
+        }
+    }
+
+    uint64_t napisano = 0;
+    while (napisano < len) {
+        const uint64_t cur_off = offset + napisano;
+        const uint64_t blk_idx = cur_off / PSF_ROZMIAR_BLOKU;
+        const uint64_t w_bloku = cur_off % PSF_ROZMIAR_BLOKU;
+        uint64_t bid = BARK_BLOKU;
+        if (!pobierz_wskaznik_bloku(w, blk_idx, &bid) || bid == BARK_BLOKU) return false;
+        const uint64_t w_bloku_dost = PSF_ROZMIAR_BLOKU - w_bloku;
+        uint64_t porcja = len - napisano;
+        if (porcja > w_bloku_dost) porcja = w_bloku_dost;
+        const bool pelny = (w_bloku == 0 && porcja == PSF_ROZMIAR_BLOKU);
+        uint8_t* blk = pobierz_blok_danych(bid, !pelny);
+        if (!blk) return false;
+        kopiuj_pamiec(blk + w_bloku, dane + napisano, porcja);
+        const uint64_t abs = absolutny_blok_danych(bid);
+        if (abs != UINT64_MAX) oznacz_blok_jako_brudny(abs);
+        napisano += porcja;
+    }
+    if (end > w->rozmiar_w_bajtach) {
+        w->rozmiar_w_bajtach = end;
+        oznacz_wezel_jako_brudny(pid);
+    }
+    return true;
+}
+
+extern "C" bool zapisz_fragment_pliku(
+    const char* sciezka,
+    uint64_t offset,
+    const char* dane,
+    uint32_t len
+) {
+    BlokadaPSF blokada;
+    return zapisz_fragment_pliku_wewn(sciezka, offset, dane, len);
+}
+
 extern "C" bool zapisz_do_pliku(
     const char* sciezka,
     const char* dane,
@@ -3144,8 +3589,7 @@ extern "C" bool zapisz_do_pliku(
     if (!psf_gotowy ||
         !sciezka ||
         (dlugosc != 0 &&
-         !dane)) {
-
+          !dane)) {
         return false;
     }
 
@@ -3169,225 +3613,102 @@ extern "C" bool zapisz_do_pliku(
         w->typ != TYP_PLIK ||
         !wskazniki_pliku_poprawne(
             w)) {
-
         return false;
     }
 
-    uint64_t maks_rozmiar = 0;
-
-    if (!mnoz_u64(
-            static_cast<uint64_t>(
-                PSF_MAX_BLOKOW_W_WEZLE),
-            static_cast<uint64_t>(
-                PSF_ROZMIAR_BLOKU),
-            &maks_rozmiar)) {
-
+    if (static_cast<uint64_t>(dlugosc) > PSF_MAKS_ROZMIAR_PLIKU) {
         return false;
     }
 
-    if (static_cast<uint64_t>(
-            dlugosc) >
-        maks_rozmiar) {
-
-        /*
-         * Brak cichego, czesciowego zapisu.
-         */
-        return false;
+    if (dlugosc == 0) {
+        if (!zwolnij_wszystkie_bloki_wezla(w, plik_id)) return false;
+        w->rozmiar_w_bajtach = 0;
+        oznacz_wezel_jako_brudny(plik_id);
+        return bsp_zapisz_zmiany();
     }
 
-    const uint64_t potrzebne_bloki =
-        podziel_w_gore(
-            static_cast<uint64_t>(
-                dlugosc),
-            static_cast<uint64_t>(
-                PSF_ROZMIAR_BLOKU)
-        );
-
-    /*
-     * Najpierw alokujemy wszystkie brakujace bloki.
-     * Jesli zabraknie miejsca, cofamy tylko nowe alokacje i nie zmieniamy
-     * rozmiaru ani danych istniejacego pliku.
-     */
-    uint64_t nowe_id[
-        PSF_MAX_BLOKOW_W_WEZLE] = {};
-
-    uint64_t nowe_indeksy[
-        PSF_MAX_BLOKOW_W_WEZLE] = {};
-
-    size_t liczba_nowych = 0;
-
-    for (uint64_t k = 0;
-         k < potrzebne_bloki;
-         ++k) {
-
-        if (w->wskazniki_blokow[k] !=
-            BARK_BLOKU) {
-
-            continue;
-        }
-
-        const uint64_t nowy =
-            zaalokuj_wolny_blok_danych();
-
-        if (nowy ==
-            BARK_BLOKU) {
-
-            for (size_t i = 0;
-                 i < liczba_nowych;
-                 ++i) {
-
-                const uint64_t indeks =
-                    nowe_indeksy[i];
-
-                if (indeks <
-                    static_cast<uint64_t>(
-                        PSF_MAX_BLOKOW_W_WEZLE)) {
-
-                    w->wskazniki_blokow[
-                        indeks] =
-                        BARK_BLOKU;
-
-                    (void)zwolnij_blok_danych(
-                        nowe_id[i]
-                    );
-                }
+    // Skroc jesli plik byl wiekszy
+    if (w->rozmiar_w_bajtach > static_cast<uint64_t>(dlugosc)) {
+        const uint64_t potrzebne = (static_cast<uint64_t>(dlugosc) + PSF_ROZMIAR_BLOKU - 1ULL) / PSF_ROZMIAR_BLOKU;
+        const uint64_t stare = (w->rozmiar_w_bajtach + PSF_ROZMIAR_BLOKU - 1ULL) / PSF_ROZMIAR_BLOKU;
+        for (uint64_t k = potrzebne; k < stare; ++k) {
+            uint64_t b = BARK_BLOKU;
+            if (pobierz_wskaznik_bloku(w, k, &b) && b != BARK_BLOKU) {
+                (void)zwolnij_blok_danych(b);
+                (void)ustaw_wskaznik_bloku(w, k, BARK_BLOKU, plik_id);
             }
-
-            oznacz_wezel_jako_brudny(
-                plik_id
-            );
-
-            return false;
         }
-
-        w->wskazniki_blokow[k] =
-            nowy;
-
-        nowe_indeksy[liczba_nowych] =
-            k;
-
-        nowe_id[liczba_nowych] =
-            nowy;
-
-        ++liczba_nowych;
+        w->rozmiar_w_bajtach = dlugosc;
+        oznacz_wezel_jako_brudny(plik_id);
     }
 
-    /*
-     * Po udanej rezerwacji zapis nie powinien juz wymagac alokacji.
-     */
-    uint64_t zapisano = 0;
-
-    for (uint64_t k = 0;
-         k < potrzebne_bloki;
-         ++k) {
-
-        const uint64_t id =
-            w->wskazniki_blokow[k];
-
-        uint8_t* blok =
-            pobierz_blok_danych(
-                id
-            );
-
-        if (!blok) {
-            /*
-             * Metadane byly poprawne przed zapisem; ten przypadek oznacza
-             * powazna niespojnosc w trakcie operacji. Nie publikujemy
-             * nowego rozmiaru.
-             */
+    uint32_t offset = 0;
+    while (offset < dlugosc) {
+        uint32_t chunk = dlugosc - offset;
+        if (chunk > 1024U * 1024U) chunk = 1024U * 1024U;
+        if (!zapisz_fragment_pliku_wewn(sciezka, static_cast<uint64_t>(offset), dane + offset, chunk)) {
             return false;
         }
-
-        uint64_t porcja =
-            static_cast<uint64_t>(
-                dlugosc) -
-            zapisano;
-
-        if (porcja >
-            static_cast<uint64_t>(
-                PSF_ROZMIAR_BLOKU)) {
-
-            porcja =
-                PSF_ROZMIAR_BLOKU;
-        }
-
-        kopiuj_pamiec(
-            blok,
-            dane + zapisano,
-            porcja
-        );
-
-        /*
-         * Zerujemy koniec ostatniego bloku, aby stare dane po skroceniu
-         * nie pozostawaly w slack space.
-         */
-        if (porcja <
-            static_cast<uint64_t>(
-                PSF_ROZMIAR_BLOKU)) {
-
-            wyzeruj_pamiec(
-                blok + porcja,
-                static_cast<uint64_t>(
-                    PSF_ROZMIAR_BLOKU) -
-                    porcja
-            );
-        }
-
-        const uint64_t absolutny =
-            absolutny_blok_danych(
-                id
-            );
-
-        if (absolutny != UINT64_MAX) {
-            oznacz_blok_jako_brudny(
-                absolutny
-            );
-        }
-
-        zapisano += porcja;
+        offset += chunk;
     }
-
-    /*
-     * Skrocenie pliku zwalnia wszystkie niepotrzebne stare bloki.
-     */
-    for (uint64_t k = potrzebne_bloki;
-         k <
-            static_cast<uint64_t>(
-                PSF_MAX_BLOKOW_W_WEZLE);
-         ++k) {
-
-        const uint64_t id =
-            w->wskazniki_blokow[k];
-
-        if (id ==
-            BARK_BLOKU) {
-
-            continue;
-        }
-
-        if (!zwolnij_blok_danych(
-                id)) {
-
-            return false;
-        }
-
-        w->wskazniki_blokow[k] =
-            BARK_BLOKU;
-    }
-
-    w->rozmiar_w_bajtach =
-        dlugosc;
-
-    oznacz_wezel_jako_brudny(
-        plik_id
-    );
 
     return bsp_zapisz_zmiany();
 }
 
-/* =========================================================================
- * PUBLICZNE API - ODCZYT
- * ========================================================================= */
+static bool czytaj_fragment_pliku_wewn(
+    const char* sciezka,
+    uint64_t offset,
+    char* bufor,
+    uint32_t dlugosc,
+    uint32_t* odczytano
+) {
+    if (odczytano) *odczytano = 0;
+    if (!psf_gotowy ||
+        !sciezka ||
+        !bufor ||
+        dlugosc == 0) {
+        return false;
+    }
+    const uint64_t plik_id = rozwiaz_sciezke(sciezka, nullptr, false);
+    if (plik_id == 0) return false;
+    wezel_indeksowy* w = pobierz_wezel(plik_id);
+    if (!w || w->typ != TYP_PLIK || !wskazniki_pliku_poprawne(w)) return false;
+    const uint64_t rozmiar = w->rozmiar_w_bajtach;
+    if (offset >= rozmiar) {
+        // EOF - normalny przypadek, odczytano 0
+        return true;
+    }
+    const uint64_t dostepne = rozmiar - offset;
+    const uint64_t do_odczytu = (static_cast<uint64_t>(dlugosc) < dostepne) ? static_cast<uint64_t>(dlugosc) : dostepne;
+    uint64_t przeczytano = 0;
+    while (przeczytano < do_odczytu) {
+        const uint64_t cur_off = offset + przeczytano;
+        const uint64_t blok_idx = cur_off / PSF_ROZMIAR_BLOKU;
+        const uint64_t w_bloku = cur_off % PSF_ROZMIAR_BLOKU;
+        uint64_t bid = BARK_BLOKU;
+        if (!pobierz_wskaznik_bloku(w, blok_idx, &bid) || bid == BARK_BLOKU) return false;
+        uint8_t* blk = pobierz_blok_danych(bid);
+        if (!blk) return false;
+        const uint64_t w_bloku_dost = PSF_ROZMIAR_BLOKU - w_bloku;
+        uint64_t porcja = do_odczytu - przeczytano;
+        if (porcja > w_bloku_dost) porcja = w_bloku_dost;
+        kopiuj_pamiec(bufor + przeczytano, blk + w_bloku, porcja);
+        przeczytano += porcja;
+    }
+    if (odczytano) *odczytano = static_cast<uint32_t>(przeczytano);
+    return true;
+}
+
+extern "C" bool czytaj_fragment_pliku(
+    const char* sciezka,
+    uint64_t offset,
+    char* bufor,
+    uint32_t dlugosc,
+    uint32_t* odczytano
+) {
+    BlokadaPSF blokada;
+    return czytaj_fragment_pliku_wewn(sciezka, offset, bufor, dlugosc, odczytano);
+}
 
 extern "C" bool czytaj_z_pliku(
     const char* sciezka,
@@ -3395,105 +3716,15 @@ extern "C" bool czytaj_z_pliku(
     uint32_t max_dlugosc
 ) {
     BlokadaPSF blokada;
-
-    if (!psf_gotowy ||
-        !sciezka ||
-        (max_dlugosc != 0 &&
-         !bufor)) {
-
-        return false;
+    if (!psf_gotowy || !sciezka) return false;
+    if (max_dlugosc == 0) {
+        const uint64_t id = rozwiaz_sciezke(sciezka, nullptr, false);
+        wezel_indeksowy* w = pobierz_wezel(id);
+        return id != 0 && w && w->typ == TYP_PLIK;
     }
-
-    const uint64_t plik_id =
-        rozwiaz_sciezke(
-            sciezka,
-            nullptr,
-            false
-        );
-
-    if (plik_id == 0) {
-        return false;
-    }
-
-    wezel_indeksowy* w =
-        pobierz_wezel(
-            plik_id
-        );
-
-    if (!w ||
-        w->typ != TYP_PLIK ||
-        !wskazniki_pliku_poprawne(
-            w)) {
-
-        return false;
-    }
-
-    uint64_t do_odczytu =
-        w->rozmiar_w_bajtach;
-
-    if (do_odczytu >
-        static_cast<uint64_t>(
-            max_dlugosc)) {
-
-        do_odczytu =
-            max_dlugosc;
-    }
-
-    uint64_t przeczytano = 0;
-
-    for (uint64_t k = 0;
-         przeczytano < do_odczytu;
-         ++k) {
-
-        if (k >=
-            static_cast<uint64_t>(
-                PSF_MAX_BLOKOW_W_WEZLE)) {
-
-            return false;
-        }
-
-        const uint64_t id =
-            w->wskazniki_blokow[k];
-
-        if (id ==
-            BARK_BLOKU) {
-
-            return false;
-        }
-
-        uint8_t* blok =
-            pobierz_blok_danych(
-                id
-            );
-
-        if (!blok) {
-            return false;
-        }
-
-        uint64_t porcja =
-            do_odczytu -
-            przeczytano;
-
-        if (porcja >
-            static_cast<uint64_t>(
-                PSF_ROZMIAR_BLOKU)) {
-
-            porcja =
-                PSF_ROZMIAR_BLOKU;
-        }
-
-        kopiuj_pamiec(
-            bufor + przeczytano,
-            blok,
-            porcja
-        );
-
-        przeczytano += porcja;
-    }
-
-    return
-        przeczytano ==
-        do_odczytu;
+    if (!bufor) return false;
+    uint32_t odczytano = 0;
+    return czytaj_fragment_pliku_wewn(sciezka, 0, bufor, max_dlugosc, &odczytano);
 }
 
 /* =========================================================================
@@ -3504,8 +3735,6 @@ extern "C" uint8_t* bsp_wczytaj_plik_do_pamieci(
     const char* sciezka,
     uint64_t* rozmiar_wyj
 ) {
-    BlokadaPSF blokada;
-
     if (!rozmiar_wyj) {
         return nullptr;
     }
@@ -3518,108 +3747,54 @@ extern "C" uint8_t* bsp_wczytaj_plik_do_pamieci(
         return nullptr;
     }
 
-    const uint64_t plik_id =
+    BlokadaPSF blokada;
+
+    const uint64_t id =
         rozwiaz_sciezke(
             sciezka,
             nullptr,
             false
         );
 
-    if (plik_id == 0) {
+    if (id == 0) {
+        wypisz_log("[LOADER-DBG] id is 0");
         return nullptr;
     }
 
     wezel_indeksowy* w =
-        pobierz_wezel(
-            plik_id
-        );
+        pobierz_wezel(id);
 
     if (!w ||
-        w->typ != TYP_PLIK ||
-        !wskazniki_pliku_poprawne(
-            w)) {
-
+        w->typ != TYP_PLIK) {
+        wypisz_log("[LOADER-DBG] not file");
         return nullptr;
     }
 
-    const uint64_t dlugosc =
-        w->rozmiar_w_bajtach;
-
-    if (dlugosc == 0 ||
-        dlugosc >
-            MAX_LOADER_BUF) {
-
+    if (w->rozmiar_w_bajtach == 0) {
+        wypisz_log("[LOADER-DBG] rsz is 0");
         return nullptr;
     }
 
-    uint64_t przeczytano = 0;
-
-    for (uint64_t k = 0;
-         przeczytano < dlugosc;
-         ++k) {
-
-        if (k >=
-            static_cast<uint64_t>(
-                PSF_MAX_BLOKOW_W_WEZLE)) {
-
-            *rozmiar_wyj = 0;
-            return nullptr;
-        }
-
-        const uint64_t id =
-            w->wskazniki_blokow[k];
-
-        if (id ==
-            BARK_BLOKU) {
-
-            *rozmiar_wyj = 0;
-            return nullptr;
-        }
-
-        uint8_t* blok =
-            pobierz_blok_danych(
-                id
-            );
-
-        if (!blok) {
-            *rozmiar_wyj = 0;
-            return nullptr;
-        }
-
-        uint64_t porcja =
-            dlugosc -
-            przeczytano;
-
-        if (porcja >
-            static_cast<uint64_t>(
-                PSF_ROZMIAR_BLOKU)) {
-
-            porcja =
-                PSF_ROZMIAR_BLOKU;
-        }
-
-        kopiuj_pamiec(
-            bufor_wymiany_plikow +
-                przeczytano,
-            blok,
-            porcja
-        );
-
-        przeczytano += porcja;
+    if (w->rozmiar_w_bajtach > MAX_LOADER_BUF) {
+        wypisz_log("[LOADER-DBG] rsz > MAX_LOADER_BUF");
+        return nullptr;
     }
 
-    if (przeczytano !=
-        dlugosc) {
-
+    const uint32_t rsz = static_cast<uint32_t>(w->rozmiar_w_bajtach);
+    uint32_t odczytano = 0;
+    if (!czytaj_fragment_pliku_wewn(sciezka, 0, reinterpret_cast<char*>(bufor_wymiany_plikow), rsz, &odczytano)) {
+        wypisz_log("[LOADER-DBG] czytaj_fragment_pliku fail");
+        *rozmiar_wyj = 0;
+        return nullptr;
+    }
+    if (odczytano != rsz) {
+        wypisz_log("[LOADER-DBG] odczytano != rsz");
         *rozmiar_wyj = 0;
         return nullptr;
     }
 
-    *rozmiar_wyj =
-        dlugosc;
-
-    return
-        bufor_wymiany_plikow;
+    *rozmiar_wyj = rsz;
+    return bufor_wymiany_plikow;
 }
 
 /* =========================================================================
@@ -3861,62 +4036,35 @@ extern "C" bool usun_twor(
         return false;
     }
 
-    if (cel->blok_posredni_1 != BARK_BLOKU ||
-        cel->blok_posredni_2 != BARK_BLOKU ||
-        cel->blok_posredni_3 != BARK_BLOKU) {
-
-        return false;
-    }
-
-    /*
-     * Wszystkie potencjalne bledy sprawdzamy przed usunieciem wpisu
-     * katalogowego.
-     */
-    for (size_t k = 0;
-         k <
-            static_cast<size_t>(
-                PSF_MAX_BLOKOW_W_WEZLE);
-         ++k) {
-
-        const uint64_t id =
-            cel->wskazniki_blokow[k];
-
-        if (id ==
-            BARK_BLOKU) {
-
-            continue;
-        }
-
-        if (!id_bloku_danych_poprawne(id) ||
-            !czy_blok_danych_zajety(id)) {
-
-            return false;
-        }
-    }
-
-    for (size_t k = 0;
-         k <
-            static_cast<size_t>(
-                PSF_MAX_BLOKOW_W_WEZLE);
-         ++k) {
-
-        const uint64_t id =
-            cel->wskazniki_blokow[k];
-
-        if (id ==
-            BARK_BLOKU) {
-
-            continue;
-        }
-
-        if (!zwolnij_blok_danych(
-                id)) {
-
+    if (cel->typ == TYP_PLIK) {
+        (void)zwolnij_wszystkie_bloki_wezla(cel, znaleziony.id_wezla);
+    } else if (cel->typ == TYP_KATALOG) {
+        if (cel->blok_posredni_1 != BARK_BLOKU ||
+            cel->blok_posredni_2 != BARK_BLOKU ||
+            cel->blok_posredni_3 != BARK_BLOKU) {
             return false;
         }
 
-        cel->wskazniki_blokow[k] =
-            BARK_BLOKU;
+        for (size_t k = 0;
+             k < static_cast<size_t>(PSF_MAX_BLOKOW_W_WEZLE);
+             ++k) {
+            const uint64_t id = cel->wskazniki_blokow[k];
+            if (id == BARK_BLOKU) continue;
+            if (!id_bloku_danych_poprawne(id) || !czy_blok_danych_zajety(id)) {
+                return false;
+            }
+        }
+
+        for (size_t k = 0;
+             k < static_cast<size_t>(PSF_MAX_BLOKOW_W_WEZLE);
+             ++k) {
+            const uint64_t id = cel->wskazniki_blokow[k];
+            if (id == BARK_BLOKU) continue;
+            if (!zwolnij_blok_danych(id)) {
+                return false;
+            }
+            cel->wskazniki_blokow[k] = BARK_BLOKU;
+        }
     }
 
     wpis_katalogowy* wpisy =
@@ -4029,8 +4177,8 @@ extern "C" uint32_t rozmiar_pliku(
     );
 }
 
-extern "C" bool czy_katalog_istnieje(const char* sciezka) {
-    if (!sciezka)
+static bool czy_katalog_istnieje_wewn(const char* sciezka) {
+    if (!psf_gotowy || !sciezka)
         return false;
 
     uint64_t id =
@@ -4051,11 +4199,17 @@ extern "C" bool czy_katalog_istnieje(const char* sciezka) {
         w->typ == TYP_KATALOG;
 }
 
+extern "C" bool czy_katalog_istnieje(const char* sciezka) {
+    BlokadaPSF blokada;
+    return czy_katalog_istnieje_wewn(sciezka);
+}
+
 extern "C" bool zapewnij_katalog(const char* sciezka) {
-    if (czy_katalog_istnieje(sciezka))
+    BlokadaPSF blokada;
+    if (czy_katalog_istnieje_wewn(sciezka))
         return true;
 
-    return utworz_katalog(sciezka);
+    return utworz_twor(sciezka, TYP_KATALOG, DOMYSLNY_PZB_PLIKU);
 }
 
 
@@ -4315,4 +4469,12 @@ extern "C" bool kopiuj_twor_z_pzb(
     }
     (void)bsp_zapisz_zmiany();
     return true;
+}
+
+extern "C" bool psf_flush_cache() {
+    BlokadaPSF blokada;
+    if (!psf_gotowy) {
+        return false;
+    }
+    return bsp_zapisz_zmiany();
 }

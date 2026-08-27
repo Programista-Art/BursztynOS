@@ -589,4 +589,13 @@ SECTIONS
         __kernel_phys_end == __kernel_end,
         "Bursztyn OS: bootstrap wymaga VMA == LMA do konca obrazu"
     )
+
+    /*
+     * Obraz kernela (kod + rodata + data + bss) NIE MOZE nachodzic na
+     * przestrzen adresowa aplikacji Ring 3 (ladowanych od 0x00600000).
+     */
+    ASSERT(
+        __kernel_end < 0x00600000,
+        "Bursztyn OS: Obraz kernela (__kernel_end) nachodzi na przestrzen adresowa Ring 3 (0x600000)"
+    )
 }

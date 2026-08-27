@@ -463,15 +463,20 @@ bool pobierz_argument_startowy(char* bufor, uint32_t pojemnosc) {
 
 namespace {
 
-bool tekst_konczy_sie_gui(const char* tekst, const char* sufiks) {
+bool tekst_konczy_sie_ci(const char* tekst, const char* sufiks) {
     if (!tekst || !sufiks) return false;
     size_t lt = 0;
     size_t ls = 0;
     while (lt < 511U && tekst[lt] != '\0') ++lt;
     while (ls < 32U && sufiks[ls] != '\0') ++ls;
     if (lt == 511U || ls == 32U || ls > lt) return false;
-    for (size_t i = 0; i < ls; ++i)
-        if (tekst[lt - ls + i] != sufiks[i]) return false;
+    for (size_t i = 0; i < ls; ++i) {
+        char a = tekst[lt - ls + i];
+        char b = sufiks[i];
+        if (a >= 'A' && a <= 'Z') a = static_cast<char>(a + 32);
+        if (b >= 'A' && b <= 'Z') b = static_cast<char>(b + 32);
+        if (a != b) return false;
+    }
     return true;
 }
 
@@ -479,12 +484,19 @@ bool tekst_konczy_sie_gui(const char* tekst, const char* sufiks) {
 
 wynik_otwarcia_skojarzonego otworz_plik_skojarzony(const char* sciezka) {
     if (!sciezka || sciezka[0] != '/') return OTWORZ_PLIK_BLAD;
-    if (!tekst_konczy_sie_gui(sciezka, ".txt"))
-        return OTWORZ_PLIK_BRAK_SKOJARZENIA;
-    return uruchom_program_z_argumentem_uzytkownika(
-               "/programy/notatnik.cebula/notatnik.bur", sciezka)
-        ? OTWORZ_PLIK_URUCHOMIONO
-        : OTWORZ_PLIK_BLAD;
+    if (tekst_konczy_sie_ci(sciezka, ".txt")) {
+        return uruchom_program_z_argumentem_uzytkownika(
+                   "/programy/notatnik.cebula/notatnik.bur", sciezka)
+            ? OTWORZ_PLIK_URUCHOMIONO
+            : OTWORZ_PLIK_BLAD;
+    }
+    if (tekst_konczy_sie_ci(sciezka, ".bmp")) {
+        return uruchom_program_z_argumentem_uzytkownika(
+                   "/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur", sciezka)
+            ? OTWORZ_PLIK_URUCHOMIONO
+            : OTWORZ_PLIK_BLAD;
+    }
+    return OTWORZ_PLIK_BRAK_SKOJARZENIA;
 }
 
 bool pobierz_rozmiar_pliku(const char* sciezka, uint32_t* rozmiar) {
@@ -720,6 +732,25 @@ void gui_rysuj_prostokat(int x,
         0);
 }
 
+bool gui_blit(int x, int y, int szer, int wys, const uint32_t* piksele) {
+    if (!piksele || szer <= 0 || wys <= 0) return false;
+    const uint64_t wynik = bws_wywolaj(
+        57,
+        spakuj_dwa_i32(x, y),
+        spakuj_dwa_i32(szer, wys),
+        reinterpret_cast<uint64_t>(piksele),
+        0);
+    return wynik == 1ULL;
+}
+
+bool gui_ustaw_tytul_okna(const char* tytul) {
+    if (!tytul) return false;
+    return bws_wywolaj(
+        58,
+        reinterpret_cast<uint64_t>(tytul),
+        0, 0, 0) == 1ULL;
+}
+
 void gui_ustaw_przejecie_myszy(bool stan) {
     bws_wywolaj(
         22,
@@ -831,6 +862,23 @@ bool kopiuj_twor_uzytkownika(const char* sciezka,
     return sciezka && folder_docelowy &&
         bws_wywolaj(55, reinterpret_cast<uint64_t>(sciezka),
                     reinterpret_cast<uint64_t>(folder_docelowy), 0, 0) != 0;
+}
+
+bool czytaj_fragment_pliku(const char* sciezka, uint64_t offset,
+                           char* bufor, uint32_t dlugosc,
+                           uint32_t* odczytano) {
+    if (!sciezka || !bufor || dlugosc==0) return false;
+    if (odczytano) *odczytano = 0;
+    uint64_t res = bws_wywolaj(59,
+        reinterpret_cast<uint64_t>(sciezka),
+        offset,
+        reinterpret_cast<uint64_t>(bufor),
+        (uint64_t)dlugosc);
+    if (res==0 || res > (uint64_t)UINT32_MAX + 1ULL) return false;
+    uint32_t got = (uint32_t)(res - 1ULL);
+    if (got > dlugosc) return false;
+    if (odczytano) *odczytano = got;
+    return true;
 }
 
 bool gui_ustaw_popup_aplikacji(bool otwarty,

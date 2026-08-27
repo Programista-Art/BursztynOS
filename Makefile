@@ -257,6 +257,9 @@ OBJS := \
 	test_blob.o \
 	repro_blob.o \
 	snake_blob.o \
+	przegladarka_obrazow_blob.o \
+	test_bmp_blob.o \
+	test1_bmp_blob.o \
 	$(MBEDTLS_OBJS)
 
 # ============================================================================
@@ -403,7 +406,17 @@ test_blob.o: test_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
 	$(OBJCOPY) -O binary test.elf test.bin
 	$(LD) -r -b binary test.bin -o test_blob.o
 
-# Snake
+# Obraz testowy test.bmp	
+test_bmp_blob.o: obrazy/test.bmp
+	$(LD) -r -b binary obrazy/test.bmp -o test_bmp_blob.o
+
+# Drugi obraz testowy
+test1_bmp_blob.o: obrazy/test1.bmp
+	$(LD) -r -b binary obrazy/test1.bmp -o test1_bmp_blob.o
+
+
+
+
 # Snake
 snake_tmp.o: gry/snake/snake.cpp bursztyn_gui.h
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
@@ -414,6 +427,15 @@ snake_blob.o: snake_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
 	$(OBJCOPY) -O binary snake.elf snake.bin
 	$(LD) -r -b binary snake.bin -o snake_blob.o
 
+# Przegladarka Obrazow
+przegladarka_obrazow_tmp.o: programy/przegladarka-obrazow/przegladarka-obrazow.cpp bursztyn_gui.h
+	$(CXX) $(RING3_FLAGS) -c $< -o $@
+
+przegladarka_obrazow_blob.o: przegladarka_obrazow_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
+	$(LD) -T $(RING3_STD_LINKER) $(RING3_LDFLAGS) \
+		przegladarka_obrazow_tmp.o bursztyn_gui.o -o przegladarka_obrazow.elf
+	$(OBJCOPY) -O binary przegladarka_obrazow.elf przegladarka_obrazow.bin
+	$(LD) -r -b binary przegladarka_obrazow.bin -o przegladarka_obrazow_blob.o
 
 # REPRO (tylko diagnostyka BWS2/BWS46)
 repro_tmp.o: programy/repro/repro.cpp bursztyn_gui.h
@@ -505,7 +527,7 @@ iso: $(ISO)
 # ============================================================================
 
 $(VIRTUAL_DISK):
-	$(QEMU_IMG) create -f raw $@ 40M
+	$(QEMU_IMG) create -f raw $@ 512M
 
 prepare-disk: $(VIRTUAL_DISK)
 	@if [ -f tapeta.bmp ]; then \

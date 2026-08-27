@@ -176,6 +176,14 @@ void bws_gui_rysuj_prostokat(int x,
                              int wys,
                              uint32_t kolor);
 
+bool bws_gui_blit(int x,
+                  int y,
+                  int szer,
+                  int wys,
+                  const uint32_t* piksele);
+
+bool bws_gui_ustaw_tytul_okna(const char* tytul);
+
 void bws_gui_ustaw_przejecie_myszy(bool stan);
 void bws_gui_ustaw_capture(bool stan);
 void bws_gui_usun_stan_procesu(int pid);

@@ -445,6 +445,20 @@ void obsluz_e0(uint8_t scancode) {
             zglos_bajt_do_systemu('~');
             break;
 
+        case 0x49: // PageUp
+            zglos_bajt_do_systemu(0x1B);
+            zglos_bajt_do_systemu('[');
+            zglos_bajt_do_systemu('5');
+            zglos_bajt_do_systemu('~');
+            break;
+
+        case 0x51: // PageDown
+            zglos_bajt_do_systemu(0x1B);
+            zglos_bajt_do_systemu('[');
+            zglos_bajt_do_systemu('6');
+            zglos_bajt_do_systemu('~');
+            break;
+
         case 0x47: // Home
             zglos_bajt_do_systemu(0x1B);
             zglos_bajt_do_systemu('[');

@@ -35,12 +35,12 @@ constexpr int MENU_X = 10;
 constexpr int MENU_W = 260;
 constexpr int MENU_GORNY_MARGINES = 10;
 constexpr int MENU_ELEMENT_WYS = 25;
-constexpr int MENU_ELEMENTOW = 9;
+constexpr int MENU_ELEMENTOW = 10;
 constexpr int MENU_WYS =
     (MENU_GORNY_MARGINES * 2) + (MENU_ELEMENTOW * MENU_ELEMENT_WYS);
 
 // Pozycja "Gry ->" w glownym Menu Start.
-constexpr int MENU_GRY_INDEX = 6;
+constexpr int MENU_GRY_INDEX = 7;
 constexpr int MENU_GRY_W = 180;
 constexpr int MENU_GRY_ELEMENTOW = 1;
 constexpr int MENU_GRY_WYS =
@@ -75,6 +75,8 @@ const char* const SCIEZKA_KALKULATOR = "/programy/kalkulator.cebula/kalkulator.b
 const char* const SCIEZKA_HUSSAR = "/programy/przegladarka.cebula/przegladarka.bur";
 const char* const SCIEZKA_TEST = "/programy/test.cebula/test.bur";
 const char* const SCIEZKA_SNAKE = "/gry/snake.cebula/snake.bur";
+const char* const SCIEZKA_PRZEGLADARKA_OBRAZOW =
+    "/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur";
 const char* const SCIEZKA_PULPIT = "/uzytkownicy/Pulpit";
 
 struct WpisPulpitu {
@@ -1255,6 +1257,15 @@ rysuj_tekst_wysrodkowany(370, 104, IKONA_W, 16, 1, 0x0095E600, "Snake");
     rysuj_tekst_wysrodkowany(460, 104, IKONA_W, 16,
                              1, 0x00FFFFFF, "Eksplorator");
 
+    // Ikona Przeglądarki Obrazów.
+    gui_rysuj_prostokat(550, 50, IKONA_W, IKONA_H, 0x00301500);
+    gui_rysuj_prostokat(552, 52, 44, 44, 0x002080C0);
+    gui_rysuj_prostokat(558, 74, 18, 12, 0x00808080);
+    gui_rysuj_prostokat(572, 78, 14, 8, 0x00606060);
+    gui_rysuj_prostokat(580, 58, 8, 8, 0x00FFD700);
+    rysuj_tekst_wysrodkowany(550, 104, IKONA_W, 16, 1, 0x00FFFFFF, "Przeglądarka");
+    rysuj_tekst_wysrodkowany(550, 120, IKONA_W, 16, 1, 0x00FFFFFF, "Obrazów");
+
     RysujWpisyPulpitu();
 
 
@@ -1275,6 +1286,7 @@ rysuj_tekst_wysrodkowany(370, 104, IKONA_W, 16, 1, 0x0095E600, "Snake");
             "> Notatnik",
             "> Kalkulator",
             "> Przegladarka Husarz",
+            "> Przeglądarka Obrazów",
             "> Test",
             "> Gry ->",
             "> Uruchom ponownie",
@@ -1518,6 +1530,10 @@ void obsluz_element_menu(int item_index) {
             uruchom_lub_aktywuj(SCIEZKA_HUSSAR, "Husarz");
             break;
         case 5:
+            uruchom_lub_aktywuj(SCIEZKA_PRZEGLADARKA_OBRAZOW,
+                                "Przeglądarka Obrazów");
+            break;
+        case 6:
             uruchom_lub_aktywuj(SCIEZKA_TEST, "Test");
             break;
         case MENU_GRY_INDEX:
@@ -1525,10 +1541,10 @@ void obsluz_element_menu(int item_index) {
             aktualizuj_overlay_menu();
             RysujPulpit(true);
             break;
-        case 7:
+        case 8:
             wykonaj_restart();
             break;
-        case 8:
+        case 9:
             wykonaj_zamkniecie();
             break;
         default:
@@ -1644,6 +1660,10 @@ void obsluz_klikniecie(int mx, int my) {
         return;
     }
 
+    if (punkt_w_prostokacie(mx, my, 550, 50, IKONA_W, IKONA_H)) {
+        uruchom_lub_aktywuj(SCIEZKA_PRZEGLADARKA_OBRAZOW, "Przeglądarka Obrazów");
+        return;
+    }
 
     int task_x = TASK_BUTTON_X;
     for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {

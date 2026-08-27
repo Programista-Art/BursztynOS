@@ -108,6 +108,9 @@ bool pobierz_schowek_plikow(BwsSchowekPlikow* schowek);
 bool wyczysc_schowek_plikow(uint64_t oczekiwana_generacja);
 bool kopiuj_twor_uzytkownika(const char* sciezka,
                              const char* folder_docelowy);
+bool czytaj_fragment_pliku(const char* sciezka, uint64_t offset,
+                           char* bufor, uint32_t dlugosc,
+                           uint32_t* odczytano);
 /* Popup aplikacji jest skladany nad zwyklymi oknami, ale pod menu systemu. */
 bool gui_ustaw_popup_aplikacji(bool otwarty,
                                int x, int y, int szer, int wys);
@@ -264,6 +267,16 @@ void gui_rysuj_prostokat(int x,
                          int szer,
                          int wys,
                          uint32_t kolor);
+
+bool gui_blit(int x,
+              int y,
+              int szer,
+              int wys,
+              const uint32_t* piksele);
+
+/* BWS58: ustawia tytul warstwy biezacego procesu dla taskbara
+   (GuiOknoInfo.tytul) i wysyla BWS_ZDARZENIE_OKNO_TYTUL. */
+bool gui_ustaw_tytul_okna(const char* tytul);
 
 void gui_ustaw_przejecie_myszy(bool stan);
 void gui_ustaw_capture_myszy(bool stan);

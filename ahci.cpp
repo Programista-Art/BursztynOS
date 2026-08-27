@@ -2734,3 +2734,7 @@ extern "C" bool zapisz_na_glowny_dysk_ahci(
             true
         );
 }
+
+extern "C" uint64_t pobierz_liczbe_sektorow_glownego_dysku_ahci() {
+    return liczba_sektorow_dysku;
+}

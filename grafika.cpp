@@ -3029,6 +3029,73 @@ extern "C" void bws_gui_rysuj_prostokat(
     zapamietaj_dirty_rysowania(x,y,w,h);
 }
 
+extern "C" bool bws_gui_blit(
+    int x,
+    int y,
+    int szer,
+    int wys,
+    const uint32_t* piksele) {
+
+    if (!piksele) return false;
+    if (!backbuffer || !aktywny_ekran ||
+        !BwsProcesMaWarstwe() ||
+        !BwsPoprawnyWymiar(szer, wys)) {
+        return false;
+    }
+    if (szer > 2048 || wys > 2048) return false;
+    uint64_t cnt = 0;
+    if (__builtin_mul_overflow((uint64_t)szer, (uint64_t)wys, &cnt)) return false;
+    // limit 4M pikseli (~16 MiB)
+    if (cnt > 4ULL * 1024ULL * 1024ULL) return false;
+
+    warstwa_obrazu* warstwa = pobierz_warstwe(aktualny_pid);
+    if (!warstwa || !warstwa->bufor_pikseli) return false;
+
+    int x1 = x + szer;
+    int y1 = y + wys;
+    int lx0 = x < warstwa->x ? warstwa->x : x;
+    int ly0 = y < warstwa->y ? warstwa->y : y;
+    int lx1 = x1 > warstwa->x + (int)warstwa->szerokosc ? warstwa->x + (int)warstwa->szerokosc : x1;
+    int ly1 = y1 > warstwa->y + (int)warstwa->wysokosc ? warstwa->y + (int)warstwa->wysokosc : y1;
+    if (lx0 >= lx1 || ly0 >= ly1) return false;
+
+    for (int dy = ly0; dy < ly1; ++dy) {
+        int srcY = dy - y;
+        uint64_t srcRow = (uint64_t)srcY * (uint64_t)szer;
+        uint64_t dstRow = (uint64_t)(dy - warstwa->y) * (uint64_t)warstwa->szerokosc;
+        for (int dx = lx0; dx < lx1; ++dx) {
+            int srcX = dx - x;
+            uint64_t srcIdx = srcRow + (uint64_t)srcX;
+            uint32_t pix = piksele[srcIdx];
+            if (pix == SKLADACZ_PIKSEL_PRZEZROCZYSTY) continue;
+            uint64_t dstIdx = dstRow + (uint64_t)(dx - warstwa->x);
+            warstwa->bufor_pikseli[dstIdx] = pix;
+        }
+    }
+    zapamietaj_dirty_rysowania(lx0, ly0, lx1 - lx0, ly1 - ly0);
+    return true;
+}
+
+extern "C" bool bws_gui_ustaw_tytul_okna(const char* tytul) {
+    if (!backbuffer || !aktywny_ekran || !BwsProcesMaWarstwe() || !tytul)
+        return false;
+
+    char tytul_bezp[64] = {};
+
+    if (!skopiuj_string_z_uzytkownika(
+            tytul_bezp,
+            tytul,
+            sizeof(tytul_bezp))) {
+        return false;
+    }
+
+    if (!skladacz_obrazu_ustaw_tytul(aktualny_pid, tytul_bezp))
+        return false;
+
+    bws_gui_powiadom_lifecycle(BWS_ZDARZENIE_OKNO_TYTUL, aktualny_pid);
+    return true;
+}
+
 extern "C" void bws_gui_ustaw_przejecie_myszy(bool stan) {
     if (stan) {
         if (!BwsProcesMaWarstwe())

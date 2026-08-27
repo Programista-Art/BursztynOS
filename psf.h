@@ -85,6 +85,7 @@
 #define PSF_META_MAGIC      UINT64_C(0x5053464D00000000)
 #define PSF_META_WERSJA_MASK UINT64_C(0x00000000FF000000)
 #define PSF_META_WERSJA_1    UINT64_C(0x0000000001000000)
+#define PSF_META_WERSJA_2    UINT64_C(0x0000000002000000)
 #define PSF_META_CZAS_WAZNY  UINT64_C(0x0000000000000100)
 #define PSF_META_PZB_WAZNY   UINT64_C(0x0000000000000200)
 #define PSF_META_PZB_MASK    UINT64_C(0x0000000000000007)
@@ -94,6 +95,13 @@
  */
 #define PSF_MAKS_ROZMIAR_PLIKU_BEZPOSREDNI \
     (UINT64_C(PSF_MAX_BLOKOW_W_WEZLE) * UINT64_C(PSF_ROZMIAR_BLOKU))
+
+#define PSF_PTRS_PER_BLOCK (PSF_ROZMIAR_BLOKU / sizeof(uint64_t))
+#define PSF_MAKS_ROZMIAR_PLIKU_DUZY \
+    ( ( (uint64_t)PSF_MAX_BLOKOW_W_WEZLE + (uint64_t)PSF_PTRS_PER_BLOCK + \
+       (uint64_t)PSF_PTRS_PER_BLOCK * (uint64_t)PSF_PTRS_PER_BLOCK) * (uint64_t)PSF_ROZMIAR_BLOKU )
+#define PSF_MAKS_ROZMIAR_PLIKU PSF_MAKS_ROZMIAR_PLIKU_DUZY
+#define PSF_MAX_BLOCKS_DUZY ((uint64_t)PSF_MAX_BLOKOW_W_WEZLE + (uint64_t)PSF_PTRS_PER_BLOCK + (uint64_t)PSF_PTRS_PER_BLOCK*(uint64_t)PSF_PTRS_PER_BLOCK)
 
 /* =========================================================================
  * 2. SUPERBLOK BSP2
@@ -414,6 +422,13 @@ bool zapisz_do_pliku(
 
 bool psf_czy_gotowy();
 
+bool zapisz_fragment_pliku(
+    const char* sciezka,
+    uint64_t offset,
+    const char* dane,
+    uint32_t dlugosc
+);
+
 /*
  * Czyta maksymalnie max_dlugosc bajtow.
  *
@@ -423,6 +438,15 @@ bool czytaj_z_pliku(
     const char* sciezka,
     char* bufor,
     uint32_t max_dlugosc
+);
+
+/* Odczyt fragmentu (pread) – bezpieczny dla dużych plików */
+bool czytaj_fragment_pliku(
+    const char* sciezka,
+    uint64_t offset,
+    char* bufor,
+    uint32_t dlugosc,
+    uint32_t* odczytano
 );
 
 /*
@@ -497,6 +521,13 @@ bool kopiuj_twor_z_pzb(const char* sciezka, const char* folder_docelowy,
 
 /* Odczyt rzeczywistych danych inode; stare BSP2 jawnie nie maja czasu/PZB. */
 bool pobierz_metadane_tworu(const char* sciezka, psf_metadane* metadane);
+
+/*
+ * Zapisuje wszystkie brudne bloki metadanych oraz danych z cache na nosnik AHCI.
+ * Zwraca true w przypadku sukcesu. W razie bledu I/O brudne bloki pozostaja
+ * w cache do ponownej proby zapisu i funkcja zwraca false.
+ */
+bool psf_flush_cache();
 
 #ifdef __cplusplus
 } /* extern "C" */

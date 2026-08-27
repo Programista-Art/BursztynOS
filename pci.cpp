@@ -1260,10 +1260,6 @@ extern "C" void skanuj_magistrale_pci() {
         return;
     }
 
-    /*
-     * utworz_plik() moze zwrocic false, gdy plik juz istnieje.
-     * zapisz_do_pliku() jest operacja, ktorej wynik decyduje o sukcesie.
-     */
     (void)utworz_plik(
         PCI_SCIEZKA_RAPORTU
     );

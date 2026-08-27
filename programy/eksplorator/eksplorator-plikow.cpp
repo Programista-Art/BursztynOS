@@ -82,6 +82,7 @@ constexpr uint32_t FOLDER = 0x00FFBF00U;
 constexpr uint32_t BUR = 0x0038B000U;
 constexpr uint32_t CEBULA = 0x00D050A0U;
 constexpr uint32_t TXT = 0x004C9BE8U;
+constexpr uint32_t BMP = 0x00C04060U;
 constexpr uint32_t FILE_COLOR = 0x00708090U;
 
 struct Rect {
@@ -187,6 +188,21 @@ bool ends_with(const char* text, const char* suffix) {
         return false;
     for (size_t i = 0; i < suffix_length; ++i)
         if (text[text_length - suffix_length + i] != suffix[i]) return false;
+    return true;
+}
+
+bool ends_with_ci(const char* text, const char* suffix) {
+    if (!text || !suffix) return false;
+    const size_t tl = len_limit(text, PATH_CAP);
+    const size_t sl = len_limit(suffix, 32);
+    if (tl >= PATH_CAP || sl >= 32 || sl > tl) return false;
+    for (size_t i = 0; i < sl; ++i) {
+        char a = text[tl - sl + i];
+        char b = suffix[i];
+        if (a >= 'A' && a <= 'Z') a = static_cast<char>(a - 'A' + 'a');
+        if (b >= 'A' && b <= 'Z') b = static_cast<char>(b - 'A' + 'a');
+        if (a != b) return false;
+    }
     return true;
 }
 
@@ -378,7 +394,7 @@ uint64_t list_hash(const char* data, size_t length) {
     return hash ^ static_cast<uint64_t>(length);
 }
 
-enum class EntryType : uint8_t { PARENT, FOLDER, BUR, CEBULA, TXT, FILE };
+enum class EntryType : uint8_t { PARENT, FOLDER, BUR, CEBULA, TXT, BMP, FILE };
 enum class SortMode : uint8_t { AZ, ZA, TYPE, DATE };
 enum class Change : uint8_t { ERROR, UNCHANGED, DETAILS, CHANGED };
 enum class Activation : uint8_t { STATUS, NAVIGATION };
@@ -450,6 +466,7 @@ const char* entry_type_name(EntryType type) {
         case EntryType::BUR: return "Program BUR";
         case EntryType::CEBULA: return "Paczka Cebula";
         case EntryType::TXT: return "Dokument tekstowy";
+        case EntryType::BMP: return "Obraz BMP";
         default: return "Plik";
     }
 }
@@ -1003,6 +1020,7 @@ private:
             else if (item.directory) item.type = EntryType::FOLDER;
             else if (ends_with(item.name, ".bur")) item.type = EntryType::BUR;
             else if (ends_with(item.name, ".txt")) item.type = EntryType::TXT;
+            else if (ends_with_ci(item.name, ".bmp")) item.type = EntryType::BMP;
             else item.type = EntryType::FILE;
             char full[PATH_CAP] = {};
             BwsMetadanePliku meta{};
@@ -1034,6 +1052,7 @@ private:
             case EntryType::CEBULA: return 1;
             case EntryType::BUR: return 2;
             case EntryType::TXT: return 3;
+            case EntryType::BMP: return 3;
             default: return 4;
         }
     }
@@ -2522,6 +2541,7 @@ private:
         if (item.type == EntryType::BUR) return BUR;
         if (item.type == EntryType::CEBULA) return CEBULA;
         if (item.type == EntryType::TXT) return TXT;
+        if (item.type == EntryType::BMP) return BMP;
         return FILE_COLOR;
     }
 

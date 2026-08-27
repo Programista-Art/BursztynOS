@@ -40,6 +40,10 @@
 #define BURSZTYN_DEBUG_PSF_SELFTEST 0
 #endif
 
+#ifndef BURSZTYN_TESTY_PSF
+#define BURSZTYN_TESTY_PSF 0
+#endif
+
 #if BURSZTYN_DEBUG_NET_SELFTEST
 static void wykonaj_selftest_sieci() {
     const uint32_t gateway = bws_siec_ping(10, 0, 2, 2);
@@ -134,9 +138,19 @@ extern "C" uint8_t _binary_test_bin_end[];
 extern "C" uint8_t _binary_snake_bin_start[];
 extern "C" uint8_t _binary_snake_bin_end[];
 
+extern "C" uint8_t _binary_przegladarka_obrazow_bin_start[];
+extern "C" uint8_t _binary_przegladarka_obrazow_bin_end[];
+
 /* TEMP-REPRO: usunac po diagnozie BWS2/BWS46. */
 extern "C" uint8_t _binary_repro_bin_start[];
 extern "C" uint8_t _binary_repro_bin_end[];
+
+// obraz testowy
+extern "C" uint8_t _binary_obrazy_test_bmp_start[];
+extern "C" uint8_t _binary_obrazy_test_bmp_end[];
+
+extern "C" uint8_t _binary_obrazy_test1_bmp_start[];
+extern "C" uint8_t _binary_obrazy_test1_bmp_end[];
 
 /* =========================================================================
  * STALE STARTOWE
@@ -164,7 +178,7 @@ constexpr uint64_t ROZMIAR_STERTY_JADRA =
  */
 constexpr uint64_t ADRES_RAM_DYSKU_PSF = 0x200000000ULL;
 constexpr uint32_t ROZMIAR_RAM_DYSKU_PSF =
-    2U * 1024U * 1024U;
+    16U * 1024U * 1024U;
 
 constexpr uint16_t PORT_COM1 = 0x3F8;
 
@@ -563,6 +577,9 @@ bool katalog_istnieje(const char* sciezka) {
         sizeof(bufor_testowy));
 }
 
+
+
+
 /*
  * Zapewnia istnienie katalogu, ale nie traktuje ponownego uruchomienia
  * systemu jako bledu.
@@ -599,6 +616,7 @@ void utworz_drabine_katalogow() {
         "/programy/eksplorator.cebula",
         "/programy/kalkulator.cebula",
         "/programy/przegladarka.cebula",
+        "/programy/przegladarka-obrazow.cebula",
         "/programy/test.cebula",
         "/gry",
         "/gry/snake.cebula",
@@ -695,6 +713,17 @@ void instaluj_wbudowane_programy() {
         "uprawnienia = [\n"
         "    \"okna\"\n"
         "]\n";
+
+    static const char MANIFEST_PRZEGLADARKA_OBRAZOW[] =
+        "nazwa = \"Przeglądarka Obrazów\"\n"
+        "autor = \"Programista Art\"\n"
+        "wersja = \"0.1\"\n"
+        "poziom_zaufania = 4\n"
+        "plik_startowy = \"przegladarka-obrazow.bur\"\n"
+        "uprawnienia = [\n"
+        "    \"okna\",\n"
+        "    \"pliki_czytaj\"\n"
+        "]\n";
     
     /*
      * WAZNE:
@@ -726,6 +755,261 @@ void instaluj_wbudowane_programy() {
     } else {
         wypisz_log("[BSP] /cytaty.txt zainstalowany.");
     }
+
+    //testowy obrazek test.bmp + test1.bmp - diagnostyka i atomowość
+#if BURSZTYN_TESTY_PSF
+    auto log_u32 = [](const char* pref, uint32_t v){
+        char buf[96]={0};
+        size_t p=0;
+        while(pref[p] && p<80){buf[p]=pref[p];p++;}
+        // dec
+        char tmp[12]={0};
+        int n=0;
+        if(v==0) tmp[n++]='0';
+        else {char rev[12];int r=0;uint32_t t=v;while(t){rev[r++]='0'+t%10;t/=10;}while(r--) tmp[n++]=rev[r];}
+        tmp[n]='\0';
+        size_t i=0;
+        while(tmp[i] && p<95){buf[p++]=tmp[i++];}
+        buf[p]='\0';
+        wypisz_log(buf);
+    };
+#endif
+    const uint64_t test_bmp_rozmiar =
+        static_cast<uint64_t>(
+            _binary_obrazy_test_bmp_end -
+            _binary_obrazy_test_bmp_start);
+    const uint64_t test1_bmp_rozmiar =
+        static_cast<uint64_t>(
+            _binary_obrazy_test1_bmp_end -
+            _binary_obrazy_test1_bmp_start);
+#if BURSZTYN_TESTY_PSF
+    log_u32("[BSP-TEST] test.bmp blob size = ", (uint32_t)test_bmp_rozmiar);
+    log_u32("[BSP-TEST1] test1.bmp blob size = ", (uint32_t)test1_bmp_rozmiar);
+    if(test_bmp_rozmiar != test1_bmp_rozmiar){
+        wypisz_log("[BSP-TEST] UWAGA: rozmiary blob roznia sie");
+    }
+#endif
+    // helper lambda do instalacji z diagnostyka i read-back
+    auto instaluj_bmp = [&](const char* sciezka, const uint8_t* blob, uint32_t sz, const char* tag){
+#if BURSZTYN_TESTY_PSF
+        // usun
+        bool usun = usun_twor(sciezka);
+        (void)usun;
+        // utworz
+        bool ut = utworz_plik(sciezka);
+        {
+            char b[96]={0};
+            const char* pre="[BSP-TEST] utworz_plik ";
+            size_t p=0; while(pre[p]){b[p]=pre[p];p++;} size_t i=0; while(sciezka[i] && p<80){b[p++]=sciezka[i++];} b[p++]='='; b[p++]=' '; const char* s=ut?"OK":"FAIL"; size_t j=0; while(s[j]&&p<95) b[p++]=s[j++]; b[p]='\0'; wypisz_log(b);
+        }
+        if(!ut){
+            wypisz_log("[BSP-TEST] utworz_plik FAIL - przerywam");
+            return;
+        }
+        bool zap = zapisz_do_pliku(sciezka, reinterpret_cast<const char*>(blob), sz);
+        {
+            char b[96]={0};
+            const char* pre="[BSP-TEST] zapisz_do_pliku ";
+            size_t p=0; while(pre[p]){b[p]=pre[p];p++;} size_t i=0; while(sciezka[i] && p<70){b[p++]=sciezka[i++];} b[p++]='='; b[p++]=' '; const char* s=zap?"OK":"FAIL"; size_t j=0; while(s[j]&&p<95) b[p++]=s[j++]; b[p]='\0'; wypisz_log(b);
+        }
+        if(!zap){
+            wypisz_log("[BSP-TEST] zapisz FAIL -> usuwam niekompletny plik");
+            (void)usun_twor(sciezka);
+            return;
+        }
+        wypisz_log("[BSP-TEST] instalacja OK");
+        // read-back
+        uint32_t psf_sz = 0;
+        psf_sz = rozmiar_pliku(sciezka);
+        log_u32("[BSP-TEST] rozmiar w PSF = ", psf_sz);
+        if(psf_sz != sz){
+            wypisz_log("[BSP-TEST] mismatch rozmiar PSF vs blob");
+        } else {
+            wypisz_log("[BSP-TEST] rozmiar PSF OK");
+        }
+        if(psf_sz>0){
+            char hdr[64]={0};
+            bool rh = czytaj_z_pliku(sciezka, hdr, 64);
+            bool ok=true;
+            if(rh){
+                for(int i=0;i<64 && i<(int)sz;i++) if((uint8_t)hdr[i] != blob[i]){ok=false;break;}
+            } else ok=false;
+            wypisz_log(ok?"[BSP-TEST] pierwsze 64B OK":"[BSP-TEST] mismatch pierwsze 64B");
+            if(rh && (uint8_t)hdr[0]==0x42 && (uint8_t)hdr[1]==0x4D) wypisz_log("[BSP-TEST] BM OK");
+            else wypisz_log("[BSP-TEST] BM FAIL");
+            // pełne byte-for-byte
+            if(psf_sz==sz && rh && ok){
+                bool full_ok=true;
+                uint32_t mismatch_off=0;
+                if(sz <= 1024*1024){
+                    char* all = static_cast<char*>(kmalloc(sz));
+                    if(all && czytaj_z_pliku(sciezka, all, sz)){
+                        for(uint32_t i=0;i<sz;i++) if((uint8_t)all[i]!=blob[i]){full_ok=false; mismatch_off=i; break;}
+                    } else full_ok=false;
+                    if(all) kfree(all);
+                } else {
+                    full_ok=true;
+                }
+                if(full_ok) wypisz_log("[BSP-TEST] byte-for-byte PASS");
+                else {
+                    char m[64]={0};
+                    const char* pre="[BSP-TEST] mismatch offset=";
+                    size_t p=0; while(pre[p]){m[p]=pre[p];p++;}
+                    char tmp2[12]={0}; int n=0; uint32_t v=mismatch_off;
+                    if(v==0) tmp2[n++]='0';
+                    else {char rev[12];int r=0;uint32_t t=v;while(t){rev[r++]='0'+t%10;t/=10;}while(r--) tmp2[n++]=rev[r];}
+                    size_t i=0; while(tmp2[i]&&p<60) m[p++]=tmp2[i++];
+                    m[p]='\0';
+                    wypisz_log(m);
+                }
+            }
+        }
+#else
+        if (rozmiar_pliku(sciezka) == sz) {
+            return;
+        }
+        (void)usun_twor(sciezka);
+        if (!utworz_plik(sciezka)) return;
+        (void)zapisz_do_pliku(sciezka, reinterpret_cast<const char*>(blob), sz);
+#endif
+        (void)tag;
+    };
+    instaluj_bmp("/uzytkownicy/Pulpit/test.bmp", _binary_obrazy_test_bmp_start, (uint32_t)test_bmp_rozmiar, "test");
+    instaluj_bmp("/uzytkownicy/Pulpit/test1.bmp", _binary_obrazy_test1_bmp_start, (uint32_t)test1_bmp_rozmiar, "test1");
+
+#if BURSZTYN_TESTY_PSF
+    auto generuj_bmp_strumieniowo = [](const char* sciezka, uint32_t w, uint32_t h, uint16_t bpp) -> bool {
+        const uint32_t stride = ((w * bpp + 31U) / 32U) * 4U;
+        const uint64_t image_data_size = static_cast<uint64_t>(stride) * static_cast<uint64_t>(h);
+        const uint64_t total_size = 54ULL + image_data_size;
+
+        const uint32_t rsz = rozmiar_pliku(sciezka);
+        if (static_cast<uint64_t>(rsz) == total_size) {
+            char logbuf[96] = "[BMP-GEN] Istnieje: ";
+            size_t p = 0; while (logbuf[p]) ++p;
+            size_t s = 0; while (sciezka[s] && p + 1 < sizeof(logbuf)) logbuf[p++] = sciezka[s++];
+            logbuf[p] = '\0';
+            wypisz_log(logbuf);
+            return true;
+        }
+
+        (void)usun_twor(sciezka);
+        if (!utworz_plik(sciezka)) {
+            wypisz_log("[BMP-GEN] Nie mozna utworzyc pliku BMP.");
+            return false;
+        }
+
+        const uint32_t CHUNK = 256 * 1024;
+        uint8_t* bufor = static_cast<uint8_t*>(kmalloc(CHUNK));
+        if (!bufor) {
+            wypisz_log("[BMP-GEN] Brak pamieci na bufor.");
+            return false;
+        }
+
+        uint8_t hdr[54] = {
+            'B', 'M',
+            static_cast<uint8_t>(total_size & 0xFF),
+            static_cast<uint8_t>((total_size >> 8) & 0xFF),
+            static_cast<uint8_t>((total_size >> 16) & 0xFF),
+            static_cast<uint8_t>((total_size >> 24) & 0xFF),
+            0, 0, 0, 0,
+            54, 0, 0, 0,
+            40, 0, 0, 0,
+            static_cast<uint8_t>(w & 0xFF),
+            static_cast<uint8_t>((w >> 8) & 0xFF),
+            static_cast<uint8_t>((w >> 16) & 0xFF),
+            static_cast<uint8_t>((w >> 24) & 0xFF),
+            static_cast<uint8_t>(h & 0xFF),
+            static_cast<uint8_t>((h >> 8) & 0xFF),
+            static_cast<uint8_t>((h >> 16) & 0xFF),
+            static_cast<uint8_t>((h >> 24) & 0xFF),
+            1, 0,
+            static_cast<uint8_t>(bpp & 0xFF),
+            static_cast<uint8_t>((bpp >> 8) & 0xFF),
+            0, 0, 0, 0,
+            static_cast<uint8_t>(image_data_size & 0xFF),
+            static_cast<uint8_t>((image_data_size >> 8) & 0xFF),
+            static_cast<uint8_t>((image_data_size >> 16) & 0xFF),
+            static_cast<uint8_t>((image_data_size >> 24) & 0xFF),
+            0x13, 0x0B, 0, 0,
+            0x13, 0x0B, 0, 0,
+            0, 0, 0, 0,
+            0, 0, 0, 0
+        };
+
+        // Umiesc naglowek 54B na poczatku pierwszego bufora, aby zapisy byly wyrownane
+        for (size_t i = 0; i < 54; ++i) bufor[i] = hdr[i];
+        uint32_t buf_pos = 54;
+        uint64_t file_offset = 0;
+        const uint32_t row_bytes = (bpp == 24) ? (w * 3) : (w * 4);
+        const uint32_t pad = stride - row_bytes;
+
+        for (uint32_t y = 0; y < h; ++y) {
+            const uint8_t g = static_cast<uint8_t>(y & 0xFF);
+            for (uint32_t x = 0; x < w; ++x) {
+                const uint8_t r = static_cast<uint8_t>(x & 0xFF);
+                const uint8_t b = static_cast<uint8_t>((x ^ y) & 0xFF);
+
+                if (bpp == 24) {
+                    bufor[buf_pos++] = b;
+                    bufor[buf_pos++] = g;
+                    bufor[buf_pos++] = r;
+                } else {
+                    *reinterpret_cast<uint32_t*>(bufor + buf_pos) =
+                        0xFF000000U | (static_cast<uint32_t>(r) << 16) | (static_cast<uint32_t>(g) << 8) | static_cast<uint32_t>(b);
+                    buf_pos += 4;
+                }
+
+                if (buf_pos + 4 >= CHUNK) {
+                    if (!zapisz_fragment_pliku(sciezka, file_offset, reinterpret_cast<const char*>(bufor), buf_pos)) {
+                        wypisz_log("[BMP-GEN] Blad zapisu pikseli.");
+                        kfree(bufor);
+                        return false;
+                    }
+                    file_offset += buf_pos;
+                    buf_pos = 0;
+                }
+            }
+
+            for (uint32_t p = 0; p < pad; ++p) {
+                bufor[buf_pos++] = 0;
+                if (buf_pos >= CHUNK) {
+                    if (!zapisz_fragment_pliku(sciezka, file_offset, reinterpret_cast<const char*>(bufor), buf_pos)) {
+                        wypisz_log("[BMP-GEN] Blad zapisu paddingu.");
+                        kfree(bufor);
+                        return false;
+                    }
+                    file_offset += buf_pos;
+                    buf_pos = 0;
+                }
+            }
+        }
+
+        if (buf_pos > 0) {
+            if (!zapisz_fragment_pliku(sciezka, file_offset, reinterpret_cast<const char*>(bufor), buf_pos)) {
+                wypisz_log("[BMP-GEN] Blad zapisu koncowki pikseli.");
+                kfree(bufor);
+                return false;
+            }
+            file_offset += buf_pos;
+        }
+
+        kfree(bufor);
+        (void)psf_flush_cache();
+
+        char logok[96] = "[BMP-GEN] Utworzono: ";
+        size_t p = 0; while (logok[p]) ++p;
+        size_t s = 0; while (sciezka[s] && p + 1 < sizeof(logok)) logok[p++] = sciezka[s++];
+        logok[p] = '\0';
+        wypisz_log(logok);
+        return true;
+    };
+
+    generuj_bmp_strumieniowo("/uzytkownicy/Pulpit/obraz_4k_24b.bmp", 3840, 2160, 24);
+    generuj_bmp_strumieniowo("/uzytkownicy/Pulpit/obraz_8k_24b.bmp", 7680, 4320, 24);
+    generuj_bmp_strumieniowo("/uzytkownicy/Pulpit/obraz_8k_32b.bmp", 7680, 4320, 32);
+#endif
+
 
     if (!instaluj_paczke(
             "/programy/przegladarka.cebula/opis.aplikacji",
@@ -798,6 +1082,19 @@ void instaluj_wbudowane_programy() {
             "[BSP] Gra snake zainstalowana jako .cebula.");
     }
 
+    if (!instaluj_paczke(
+            "/programy/przegladarka-obrazow.cebula/opis.aplikacji",
+            MANIFEST_PRZEGLADARKA_OBRAZOW,
+            "/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur",
+            _binary_przegladarka_obrazow_bin_start,
+            _binary_przegladarka_obrazow_bin_end)) {
+        wypisz_log(
+            "[BSP-BLAD] Nie mozna zainstalowac Przegladarki Obrazow.");
+    } else {
+        wypisz_log(
+            "[BSP] Przegladarka Obrazow zainstalowana jako .cebula.");
+    }
+
 
 /* TEMP-REPRO instalacja wylaczona na czas testu GUI */
 
@@ -826,6 +1123,133 @@ void instaluj_wbudowane_programy() {
 
     wypisz_log(
         "[BSP] Menedzer Okien zainstalowany.");
+#if BURSZTYN_TESTY_PSF
+    // Test granic indirect oraz duzych plikow PSF – strumieniowo
+    {
+        auto fn_wzorzec64 = [](uint64_t off) -> uint64_t {
+            return (off * 6364136223846793005ULL) ^ 0xA5A5A5A5A5A5A5A5ULL;
+        };
+
+        auto test_plik_strumieniowy = [&](uint64_t sz, const char* name, const char* prefix_log) {
+            char sciezka[64] = {0};
+            const char* pref = "/logi/";
+            size_t i = 0; while (pref[i] && i < 30) { sciezka[i] = pref[i]; i++; }
+            size_t j = 0; while (name[j] && i < 60) { sciezka[i++] = name[j++]; }
+            sciezka[i] = '\0';
+
+            const uint32_t CHUNK = 256 * 1024; // 256 KiB bufor testowy
+            uint8_t* bufor = static_cast<uint8_t*>(kmalloc(CHUNK));
+            if (!bufor) {
+                wypisz_log("[PSF-TEST] kmalloc fail");
+                return;
+            }
+
+            uint32_t istniejacy_rsz = rozmiar_pliku(sciezka);
+            bool juz_istnieje = (istniejacy_rsz == sz);
+
+            if (!juz_istnieje) {
+                (void)usun_twor(sciezka);
+                if (!utworz_plik(sciezka)) {
+                    wypisz_log("[PSF-TEST] utworz FAIL");
+                    kfree(bufor);
+                    return;
+                }
+
+                // Zapis strumieniowy deterministycznym wzorcem
+                for (uint64_t off = 0; off < sz; off += CHUNK) {
+                    uint32_t por = (sz - off > CHUNK) ? CHUNK : static_cast<uint32_t>(sz - off);
+                    uint64_t* b64 = reinterpret_cast<uint64_t*>(bufor);
+                    uint32_t words = por / sizeof(uint64_t);
+                    for (uint32_t w = 0; w < words; ++w) {
+                        b64[w] = fn_wzorzec64(off + w * sizeof(uint64_t));
+                    }
+                    uint32_t tail_start = words * sizeof(uint64_t);
+                    if (tail_start < por) {
+                        uint64_t tail_val = fn_wzorzec64(off + tail_start);
+                        for (uint32_t k = tail_start; k < por; ++k) {
+                            bufor[k] = reinterpret_cast<uint8_t*>(&tail_val)[k - tail_start];
+                        }
+                    }
+                    if (!zapisz_fragment_pliku(sciezka, off, reinterpret_cast<const char*>(bufor), por)) {
+                        wypisz_log("[PSF-TEST] zapisz_fragment FAIL");
+                        kfree(bufor);
+                        return;
+                    }
+                }
+
+                // Flush cache do AHCI
+                if (!psf_flush_cache()) {
+                    wypisz_log("[PSF-TEST] flush FAIL");
+                }
+            }
+
+            // Odczyt strumieniowy i weryfikacja byte-for-byte
+            bool ok = true;
+            for (uint64_t off = 0; off < sz; off += CHUNK) {
+                uint32_t por = (sz - off > CHUNK) ? CHUNK : static_cast<uint32_t>(sz - off);
+                uint32_t got = 0;
+                if (!czytaj_fragment_pliku(sciezka, off, reinterpret_cast<char*>(bufor), por, &got) || got != por) {
+                    ok = false;
+                    break;
+                }
+                uint64_t* b64 = reinterpret_cast<uint64_t*>(bufor);
+                uint32_t words = por / sizeof(uint64_t);
+                for (uint32_t w = 0; w < words; ++w) {
+                    if (b64[w] != fn_wzorzec64(off + w * sizeof(uint64_t))) {
+                        ok = false;
+                        break;
+                    }
+                }
+                if (!ok) break;
+                uint32_t tail_start = words * sizeof(uint64_t);
+                if (tail_start < por) {
+                    uint64_t tail_val = fn_wzorzec64(off + tail_start);
+                    for (uint32_t k = tail_start; k < por; ++k) {
+                        if (bufor[k] != reinterpret_cast<uint8_t*>(&tail_val)[k - tail_start]) {
+                            ok = false;
+                            break;
+                        }
+                    }
+                }
+                if (!ok) break;
+            }
+
+            kfree(bufor);
+
+            if (!ok) {
+                wypisz_log("[PSF-TEST] MISMATCH FAIL");
+                return;
+            }
+
+            char logb[96] = {};
+            size_t pi = 0;
+            while (prefix_log[pi] && pi < 40) { logb[pi] = prefix_log[pi]; pi++; }
+            size_t ni = 0;
+            while (name[ni] && pi < 70) { logb[pi++] = name[ni++]; }
+            const char* suf = juz_istnieje ? " REBOOT PASS" : " WRITE+READ PASS";
+            size_t si = 0;
+            while (suf[si] && pi < 95) { logb[pi++] = suf[si++]; }
+            logb[pi] = '\0';
+            wypisz_log(logb);
+        };
+
+        // 1. Direct -> Single indirect boundary: 490*4096 = 2007040
+        test_plik_strumieniowy(490ULL * 4096ULL - 1ULL, "d_minus", "[PSF-TEST-BOUNDARY-1] ");
+        test_plik_strumieniowy(490ULL * 4096ULL,        "d_exact", "[PSF-TEST-BOUNDARY-1] ");
+        test_plik_strumieniowy(490ULL * 4096ULL + 1ULL, "d_plus",  "[PSF-TEST-BOUNDARY-1] ");
+
+        // 2. Single indirect -> Double indirect boundary: (490+512)*4096 = 4104192
+        test_plik_strumieniowy((490ULL + 512ULL) * 4096ULL - 1ULL, "s_minus", "[PSF-TEST-BOUNDARY-2] ");
+        test_plik_strumieniowy((490ULL + 512ULL) * 4096ULL,        "s_exact", "[PSF-TEST-BOUNDARY-2] ");
+        test_plik_strumieniowy((490ULL + 512ULL) * 4096ULL + 1ULL, "s_plus",  "[PSF-TEST-BOUNDARY-2] ");
+
+        // 3. Real Large File Streaming Tests
+        test_plik_strumieniowy(4ULL * 1024ULL * 1024ULL,   "4M",   "[PSF-TEST-BIG] ");
+        test_plik_strumieniowy(32ULL * 1024ULL * 1024ULL,  "32M",  "[PSF-TEST-BIG] ");
+        test_plik_strumieniowy(100ULL * 1024ULL * 1024ULL, "100M", "[PSF-TEST-BIG] ");
+        test_plik_strumieniowy(126ULL * 1024ULL * 1024ULL, "126M", "[PSF-TEST-BIG] ");
+    }
+#endif
 }
 
 /* =========================================================================
@@ -1094,23 +1518,17 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
 
     utworz_drabine_katalogow();
 
-#if BURSZTYN_DEBUG_PSF_SELFTEST
-    {
-        static const char sciezka[] = "/logi/test_kernel.txt";
-        static const char wzorzec[] = "ABC123";
-        char odczyt[sizeof(wzorzec)] = {};
-        if (czytaj_z_pliku(sciezka, odczyt, sizeof(odczyt) - 1U) &&
-            odczyt[0] == 'A' && odczyt[1] == 'B' && odczyt[2] == 'C' &&
-            odczyt[3] == '1' && odczyt[4] == '2' && odczyt[5] == '3') {
-            wypisz_log("[PSF-TEST] persisted read: OK");
-        } else {
-            (void)utworz_plik(sciezka);
-            const bool zapis = zapisz_do_pliku(
-                sciezka, wzorzec, static_cast<uint32_t>(sizeof(wzorzec) - 1U));
-            wypisz_log(zapis ? "[PSF-TEST] create/write: OK" :
-                               "[PSF-TEST] create/write: BLAD");
-        }
-    }
+#if BURSZTYN_TESTY_PSF
+    wypisz_log("[PSF-BOOT-TEST] create start");
+    bool c_ok = utworz_plik("/logi/test.txt");
+    wypisz_log(c_ok ? "[PSF-BOOT-TEST] create OK" : "[PSF-BOOT-TEST] create FAIL");
+    wypisz_log("[PSF-BOOT-TEST] write start");
+    bool w_ok = zapisz_do_pliku("/logi/test.txt", "ABC", 3);
+    wypisz_log(w_ok ? "[PSF-BOOT-TEST] write OK" : "[PSF-BOOT-TEST] write FAIL");
+    wypisz_log("[PSF-BOOT-TEST] read start");
+    char buf_test[8] = {};
+    bool r_ok = czytaj_z_pliku("/logi/test.txt", buf_test, 3) && buf_test[0]=='A' && buf_test[1]=='B' && buf_test[2]=='C';
+    wypisz_log(r_ok ? "[PSF-BOOT-TEST] read OK" : "[PSF-BOOT-TEST] read FAIL");
 #endif
 
     /* Pierwszy skan wykrywa urzadzenia przed istnieniem PSF. Ten przebieg

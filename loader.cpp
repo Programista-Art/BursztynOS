@@ -756,6 +756,7 @@ static bool uruchom_program_z_pliku_impl(
 
     if (!bufor_pliku ||
         rozmiar_pliku < sizeof(NaglowekBur)) {
+        wypisz_log("[LOADER-DBG] bsp_wczytaj_plik_do_pamieci fail");
         zwolnij_rezerwacje_procesu(pid);
         return false;
     }
@@ -774,6 +775,7 @@ static bool uruchom_program_z_pliku_impl(
     if (!poprawny_naglowek_bur(
             naglowek,
             rozmiar_pliku)) {
+        wypisz_log("[LOADER-DBG] poprawny_naglowek_bur fail");
         zwolnij_rezerwacje_procesu(pid);
         return false;
     }
@@ -789,6 +791,7 @@ static bool uruchom_program_z_pliku_impl(
         );
 
     if (!baza_stosu_jadra) {
+        wypisz_log("[LOADER-DBG] kmalloc baza_stosu_jadra fail");
         zwolnij_rezerwacje_procesu(pid);
         return false;
     }
@@ -825,6 +828,7 @@ static bool uruchom_program_z_pliku_impl(
         PobierzAktualnePML4();
 
     if (!poprzednie_pml4) {
+        wypisz_log("[LOADER-DBG] PobierzAktualnePML4 fail");
         kfree(baza_stosu_jadra);
         zwolnij_rezerwacje_procesu(pid);
         return false;
@@ -834,6 +838,7 @@ static bool uruchom_program_z_pliku_impl(
         UtworzPrzestrzenAdresowaProcesu();
 
     if (!pml4_procesu) {
+        wypisz_log("[LOADER-DBG] UtworzPrzestrzenAdresowaProcesu fail");
         kfree(baza_stosu_jadra);
         zwolnij_rezerwacje_procesu(pid);
         return false;
@@ -873,6 +878,7 @@ static bool uruchom_program_z_pliku_impl(
                 naglowek.tekst_przesuniecie,
             naglowek.tekst_rozmiar,
             flagi_kod)) {
+        wypisz_log("[LOADER-DBG] mapuj_segment_z_pliku kod fail");
         mapowanie_ok = false;
     }
 
@@ -900,6 +906,7 @@ static bool uruchom_program_z_pliku_impl(
                     naglowek.dane_przesuniecie,
                 kopiowane_dane,
                 flagi_dane)) {
+            wypisz_log("[LOADER-DBG] mapuj_segment_z_pliku dane fail");
             mapowanie_ok = false;
         }
     }
@@ -910,6 +917,7 @@ static bool uruchom_program_z_pliku_impl(
     if (mapowanie_ok &&
         !mapuj_stos_uzytkownika(
             flagi_dane)) {
+        wypisz_log("[LOADER-DBG] mapuj_stos_uzytkownika fail");
         mapowanie_ok = false;
     }
 

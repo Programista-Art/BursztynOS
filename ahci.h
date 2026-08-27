@@ -151,6 +151,12 @@ bool zapisz_na_glowny_dysk_ahci(
     void* dane_zrodlowe
 );
 
+/*
+ * Zwraca calkowita liczbe sektorow logicznych 512 B glownego dysku AHCI
+ * odczytana bezposrednio ze sprzetu przez IDENTIFY DEVICE.
+ */
+uint64_t pobierz_liczbe_sektorow_glownego_dysku_ahci();
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
