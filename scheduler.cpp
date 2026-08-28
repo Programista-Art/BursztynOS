@@ -461,13 +461,15 @@ static void posprzataj_zakonczone_procesy(
          * Najpierw PML4 i strony user.
          */
         if (zasoby.przestrzen_adresowa) {
-            const uint64_t stare_cr3 =
-                reinterpret_cast<uint64_t>(
-                    zasoby.przestrzen_adresowa
-                ) &
-                0x000FFFFFFFFFF000ULL;
+            uint64_t stare_cr3 = 0;
+            const bool stare_cr3_poprawne =
+                WirtualnyDoFizycznego(
+                    zasoby.przestrzen_adresowa,
+                    &stare_cr3
+                );
 
-            if (stare_cr3 != 0 &&
+            if (stare_cr3_poprawne &&
+                stare_cr3 != 0 &&
                 stare_cr3 != biezacy_cr3 &&
                 ZniszczPrzestrzenAdresowaProcesu) {
 
@@ -925,9 +927,17 @@ void InicjalizujPlaniste(
         PRAWA_ZNANE;
 
     jadro.przestrzen_adresowa =
-        reinterpret_cast<void*>(
-            czysty_cr3
+        FizycznyZakresDoWirtualnego(
+            czysty_cr3,
+            4096U
         );
+
+    if (!jadro.przestrzen_adresowa) {
+        przywroc_przerwania(
+            stan_irq
+        );
+        return;
+    }
 
     /*
      * kernel_rsp zostanie uzupelniony przez pierwsze przerwanie timera.
@@ -1078,10 +1088,16 @@ extern "C" uint64_t PrzelaczKontekst(
         nastepny.cr3 &
         0x000FFFFFFFFFF000ULL;
 
+    uint64_t nowy_cr3_z_hhdm = 0;
+
     if (nowy_rsp == 0 ||
         nowy_rsp0 == 0 ||
         !cr3_poprawne(
-            nowy_cr3)) {
+            nowy_cr3) ||
+        !WirtualnyDoFizycznego(
+            nastepny.przestrzen_adresowa,
+            &nowy_cr3_z_hhdm) ||
+        nowy_cr3_z_hhdm != nowy_cr3) {
 
         return stary_rsp;
     }
@@ -1109,9 +1125,7 @@ extern "C" uint64_t PrzelaczKontekst(
         obecny_cr3) {
 
         UstawPrzestrzenAdresowa(
-            reinterpret_cast<void*>(
-                nowy_cr3
-            )
+            nastepny.przestrzen_adresowa
         );
 
         /*

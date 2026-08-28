@@ -94,13 +94,22 @@ bool wyrownaj_do_strony(uint64_t wartosc, uint64_t* wynik) {
 }
 
 void przeladuj_cr3() {
-    void* pml4 = PobierzAktualnePML4();
-    if (!pml4) return;
+    uint64_t cr3 = 0;
+
+    asm volatile(
+        "mov %%cr3, %0"
+        : "=r"(cr3)
+        :
+        : "memory"
+    );
+
+    cr3 &= 0x000FFFFFFFFFF000ULL;
+    if (cr3 == 0) return;
 
     asm volatile(
         "mov %0, %%cr3"
         :
-        : "r"(pml4)
+        : "r"(cr3)
         : "memory");
 }
 

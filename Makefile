@@ -43,10 +43,15 @@ XORRISO       ?= xorriso
 
 KERNEL := system_operacyjny.bin
 ISO    := BursztynOS.iso
+ISO8K  := BursztynOS_8k.iso
 
 ISO_DIR     := isodir
+ISO8K_DIR   := isodir_8k
 GRUB_CFG    := $(ISO_DIR)/boot/grub/grub.cfg
+GRUB8K_CFG  := $(ISO8K_DIR)/boot/grub/grub.cfg
 VIRTUAL_DISK := wirtualny_dysk.img
+
+LARGE_TEST_BMP ?= $(firstword $(wildcard obrazy/test8k.bmp) $(wildcard obrazy/2test.bmp) obrazy/test8k.bmp)
 
 # ============================================================================
 # 3. OVMF / UEFI
@@ -125,7 +130,7 @@ MBEDTLS_CONFIG := \
 
 KERNEL_CXXFLAGS := \
 	-std=gnu++17 \
-	-O2 \
+	-O2 -g \
 	$(FREESTANDING_FLAGS) \
 	$(CPU_FLAGS) \
 	$(HARDEN_FLAGS) \
@@ -267,8 +272,8 @@ OBJS := \
 # ============================================================================
 
 .PHONY: \
-	all kernel iso bios uefi run runusb runusbkbd runusbmouse runusbhid runuefi \
-	check-kernel check-tools check-ovmf \
+	all kernel iso iso8k bios uefi run run8k runusb runusbkbd runusbmouse runusbhid runuefi \
+	check-kernel check-test8k check-tools check-ovmf \
 	prepare-disk clean clear distclean cdysk rm help
 
 all: $(KERNEL)
@@ -498,9 +503,12 @@ check-kernel: $(KERNEL)
 	fi
 
 # ============================================================================
-# 20. ISO GRUB - BIOS + UEFI
+# 20. ISO GRUB - STANDARD (BEZ MODULU 8K) + DEVELOPERSKIE ISO8K
 # ============================================================================
 
+#
+# Standardowe ISO (BursztynOS.iso) - czysty start bez ladowania 97 MiB do RAM
+#
 $(GRUB_CFG): $(KERNEL)
 	@mkdir -p $(ISO_DIR)/boot/grub
 	@cp $(KERNEL) $(ISO_DIR)/boot/
@@ -521,6 +529,40 @@ $(ISO): check-kernel $(GRUB_CFG)
 	$(GRUB_MKRESCUE) -o $@ $(ISO_DIR) --xorriso=$(XORRISO)
 
 iso: $(ISO)
+
+#
+# Developerskie ISO 8K (BursztynOS_8k.iso) - dolacza modul Multiboot2 test8k.bmp
+#
+check-test8k:
+	@if [ ! -f "$(LARGE_TEST_BMP)" ]; then \
+		echo "[BLAD] Brak pliku duzego obrazu testowego: $(LARGE_TEST_BMP)"; \
+		echo "Umiesc obraz BMP pod sciezka obrazy/test8k.bmp (lub obrazy/2test.bmp) albo podaj LARGE_TEST_BMP=..."; \
+		exit 1; \
+	fi
+
+$(GRUB8K_CFG): $(KERNEL) check-test8k
+	@mkdir -p $(ISO8K_DIR)/boot/grub
+	@cp $(KERNEL) $(ISO8K_DIR)/boot/
+	@echo "[ISO-8K] Kopiuje $(LARGE_TEST_BMP) jako /boot/test8k.bmp (modul Multiboot2)."
+	@cp "$(LARGE_TEST_BMP)" $(ISO8K_DIR)/boot/test8k.bmp
+	@printf '%s\n' \
+		'set timeout=0' \
+		'set default=0' \
+		'' \
+		'menuentry "Bursztyn OS (8K Test)" {' \
+		'    insmod all_video' \
+		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxpayload=keep' \
+		'    multiboot2 /boot/system_operacyjny.bin' \
+		'    module2 /boot/test8k.bmp test8k.bmp' \
+		'    boot' \
+		'}' \
+		> $(GRUB8K_CFG)
+
+$(ISO8K): check-kernel check-test8k $(GRUB8K_CFG)
+	$(GRUB_MKRESCUE) -o $@ $(ISO8K_DIR) --xorriso=$(XORRISO)
+
+iso8k: $(ISO8K)
 
 # ============================================================================
 # 21. DYSK TESTOWY
@@ -563,6 +605,11 @@ run: iso prepare-disk
 	$(QEMU) \
 		$(QEMU_COMMON_ARGS) \
 		-cdrom $(ISO)
+
+run8k: iso8k prepare-disk
+	$(QEMU) \
+		$(QEMU_COMMON_ARGS) \
+		-cdrom $(ISO8K)
 
 runusb: iso prepare-disk
 	$(QEMU) \
@@ -651,7 +698,7 @@ clean:
 	rm -f *.o *.bin *.elf *.iso
 	rm -f biblioteki/mbedtls/library/*.o
 	rm -f $(OVMF_VARS_RUNTIME)
-	rm -rf $(ISO_DIR)
+	rm -rf $(ISO_DIR) $(ISO8K_DIR)
 
 #
 # Zachowanie starej nazwy `clear`.
@@ -675,10 +722,12 @@ rm: distclean
 help:
 	@echo "Bursztyn OS - cele Makefile:"
 	@echo "  make all       - zbuduj kernel"
-	@echo "  make iso       - zbuduj hybrydowe ISO GRUB"
+	@echo "  make iso       - zbuduj standardowe hybrydowe ISO GRUB (bez modulu 8K)"
+	@echo "  make iso8k     - zbuduj developerskie ISO z modulem 8K BMP (~97 MiB)"
 	@echo "  make bios      - zbuduj ISO do startu BIOS"
 	@echo "  make uefi      - zbuduj ISO do startu UEFI"
-	@echo "  make run       - uruchom QEMU w trybie BIOS"
+	@echo "  make run       - uruchom QEMU w trybie BIOS ze standardowym ISO"
+	@echo "  make run8k     - uruchom QEMU w trybie BIOS z ISO zawierajacym modul 8K"
 	@echo "  make runuefi   - uruchom QEMU z OVMF/UEFI"
 	@echo "  make check-tools - sprawdz wymagane narzedzia"
 	@echo "  make clean     - usun artefakty kompilacji"

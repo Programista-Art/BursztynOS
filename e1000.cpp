@@ -32,12 +32,9 @@
  *   - brak MSI/MSI-X i IRQ; polling jest celowy,
  *   - brak jumbo frames,
  *   - brak offloadow checksum/TSO,
- *   - obecny PMM/VMM Bursztyna zaklada identity-map DMA ponizej 4 GiB,
+ *   - ramki DMA sa dostepne dla CPU wylacznie przez walidowany HHDM,
  *   - ZmapujStrone() zwraca void, wiec nie da sie jeszcze sprawdzic
  *     programowo nieudanego mapowania MMIO.
- *
- * Przy przyszlym HHDM nalezy zastapic dma_wirtualny_z_fizycznego()
- * centralnym helperem phys->virt.
  */
 
 #include "e1000.h"
@@ -576,14 +573,15 @@ bool mac_poprawny(
     return true;
 }
 
-/*
- * Obecny PMM zwraca fizyczny adres, a kernel ma identity-map pierwszych
- * 4 GiB. Ten helper izoluje zalozenie od reszty sterownika.
- */
 void* dma_wirtualny_z_fizycznego(
     void* phys
 ) {
-    return phys;
+    if (!phys) return nullptr;
+
+    return FizycznyZakresDoWirtualnego(
+        reinterpret_cast<uint64_t>(phys),
+        ROZMIAR_RAMKI_4K
+    );
 }
 
 bool ramka_dma_dostepna_cpu(
@@ -604,13 +602,14 @@ bool ramka_dma_dostepna_cpu(
         return false;
     }
 
-    /*
-     * CPU musi moc dereferencjonowac ramke przez obecny identity map.
-     */
     return
         p <=
-        UINT32_MAX -
-            (ROZMIAR_RAMKI_4K - 1U);
+            UINT32_MAX -
+                (ROZMIAR_RAMKI_4K - 1U) &&
+        CzyZakresWMapowaniuFizycznym(
+            p,
+            ROZMIAR_RAMKI_4K
+        );
 }
 
 /* =========================================================================

@@ -4,13 +4,13 @@
  * Aktualny model:
  *  - czteropoziomowe stronicowanie PML4 -> PDP -> PD -> PT,
  *  - bazowa przestrzen jadra posiada supervisor-only identity map 0..4 GiB,
+ *  - HHDM mapuje wylacznie zwykly RAM wskazany przez Multiboot2,
  *  - strona wirtualna 0 jest celowo niezmapowana,
  *  - programy Ring 3 otrzymuja prywatne kopie hierarchii stron,
  *  - flaga USER jest dodawana do przodkow tylko dla konkretnych mapowan
  *    nalezacych do aplikacji,
  *  - istniejace strony 2 MiB sa bezpiecznie rozbijane na strony 4 KiB,
- *  - PMM dostarcza tablice stron ponizej 1 GiB, wiec ich fizyczne adresy
- *    sa obecnie dostepne przez identity map,
+ *  - dynamiczne tablice stron sa dereferencjonowane wylacznie przez HHDM,
  *  - CR0.WP jest wlaczony, aby Ring 0 respektowal strony read-only.
  *
  * WAZNE:
@@ -92,14 +92,6 @@ constexpr uint64_t MASKA_FLAG_ZACHOWANYCH_Z_1G =
     PTE_NX;
 
 /*
- * Page-table frames sa obecnie alokowane przez poprawiony PMM ponizej 1 GiB.
- * Ten limit chroni VMM przed bezposrednim dereferencjonowaniem fizycznej
- * tablicy, ktora nie bylaby dostepna przez identity map.
- */
-constexpr uint64_t LIMIT_BEZPOSREDNIEGO_DOSTEPU_FIZ =
-    0x40000000ULL;
-
-/*
  * Bazowy identity map zachowujemy do 4 GiB, bo obecne sterowniki AHCI,
  * E1000, LAPIC i IOAPIC nadal korzystaja z fizycznych BAR/MMIO jako
  * adresow wirtualnych.
@@ -115,6 +107,18 @@ constexpr uint64_t IOAPIC_MMIO =
 
 constexpr uint64_t CR0_WP =
     1ULL << 16;
+
+constexpr uint32_t CPUID_EXTENDED_FEATURES =
+    0x80000001U;
+
+constexpr uint32_t CPUID_NX_BIT =
+    1U << 20;
+
+constexpr uint32_t IA32_EFER_MSR =
+    0xC0000080U;
+
+constexpr uint64_t IA32_EFER_NXE =
+    1ULL << 11;
 
 /* =========================================================================
  * STATYCZNE TABLICE STARTOWE JADRA
@@ -132,6 +136,22 @@ uint64_t st_pdp[512];
 
 alignas(4096)
 uint64_t st_pd[4][512];
+
+/*
+ * HHDM ma osobna hierarchie, aby nigdy nie dziedziczyl identity-map MMIO.
+ * Pula PT obsluguje fragmenty 2 MiB na brzegach regionow bez rozszerzania
+ * zakresow do MMIO. Przepelnienie konczy inicjalizacje fail-closed.
+ */
+alignas(4096)
+uint64_t st_hhdm_pdp[512];
+
+alignas(4096)
+uint64_t st_hhdm_pd[4][512];
+
+constexpr size_t MAKS_CZESCIOWYCH_PT_HHDM = 12;
+
+alignas(4096)
+uint64_t st_hhdm_pt[MAKS_CZESCIOWYCH_PT_HHDM][512];
 
 /*
  * Pierwsze 2 MiB sa rozbite na 4 KiB, aby strona NULL mogla pozostac
@@ -169,6 +189,12 @@ uint64_t* bazowe_pml4_jadra = nullptr;
 uint32_t blokada_vmm = 0;
 
 bool vmm_zainicjalizowany = false;
+
+bool nx_aktywny = false;
+
+static bool tabela_fizyczna_bezposrednio_dostepna(
+    uint64_t adres
+);
 
 /* =========================================================================
  * SYNCHRONIZACJA
@@ -270,13 +296,16 @@ static inline uint64_t* pml4_z_cr3() {
         odczytaj_cr3() &
         MASKA_ADRESU_4K;
 
-    if (fizyczny == 0 ||
-        fizyczny >= LIMIT_BEZPOSREDNIEGO_DOSTEPU_FIZ) {
+    if (!tabela_fizyczna_bezposrednio_dostepna(
+            fizyczny)) {
         return nullptr;
     }
 
-    return reinterpret_cast<uint64_t*>(
-        fizyczny
+    return static_cast<uint64_t*>(
+        FizycznyZakresDoWirtualnego(
+            fizyczny,
+            ROZMIAR_STRONY_4K
+        )
     );
 }
 
@@ -285,10 +314,14 @@ static inline void zapisz_cr3(
 ) {
     if (!pml4) return;
 
-    const uint64_t adres =
-        reinterpret_cast<uint64_t>(
-            pml4
-        );
+    uint64_t adres = 0;
+    if (!WirtualnyDoFizycznego(
+            pml4,
+            &adres) ||
+        !tabela_fizyczna_bezposrednio_dostepna(
+            adres)) {
+        return;
+    }
 
     asm volatile(
         "mov %0, %%cr3"
@@ -325,6 +358,73 @@ static inline void wlacz_cr0_wp() {
         : "r"(cr0)
         : "memory"
     );
+}
+
+static void wlacz_nx_jezeli_obslugiwane() {
+    uint32_t maksymalny_lisc = 0;
+
+    asm volatile(
+        "cpuid"
+        : "=a"(maksymalny_lisc)
+        : "a"(0x80000000U)
+        : "rbx", "rcx", "rdx", "memory"
+    );
+
+    if (maksymalny_lisc <
+        CPUID_EXTENDED_FEATURES) {
+        nx_aktywny = false;
+        return;
+    }
+
+    uint32_t edx = 0;
+    uint32_t eax = 0;
+    uint32_t ebx = 0;
+    uint32_t ecx = 0;
+
+    asm volatile(
+        "cpuid"
+        : "=a"(eax),
+          "=b"(ebx),
+          "=c"(ecx),
+          "=d"(edx)
+        : "a"(CPUID_EXTENDED_FEATURES)
+        : "memory"
+    );
+
+    if ((edx & CPUID_NX_BIT) == 0) {
+        nx_aktywny = false;
+        return;
+    }
+
+    uint32_t efer_lo = 0;
+    uint32_t efer_hi = 0;
+
+    asm volatile(
+        "rdmsr"
+        : "=a"(efer_lo),
+          "=d"(efer_hi)
+        : "c"(IA32_EFER_MSR)
+        : "memory"
+    );
+
+    uint64_t efer =
+        static_cast<uint64_t>(efer_lo) |
+        (static_cast<uint64_t>(efer_hi) << 32);
+
+    efer |= IA32_EFER_NXE;
+    efer_lo = static_cast<uint32_t>(efer);
+    efer_hi = static_cast<uint32_t>(efer >> 32);
+
+    asm volatile(
+        "wrmsr"
+        :
+        : "c"(IA32_EFER_MSR),
+          "a"(efer_lo),
+          "d"(efer_hi)
+        : "memory"
+    );
+
+    nx_aktywny = true;
 }
 
 /* =========================================================================
@@ -383,9 +483,28 @@ static bool tabela_fizyczna_bezposrednio_dostepna(
 ) {
     return
         adres != 0 &&
-        adres < LIMIT_BEZPOSREDNIEGO_DOSTEPU_FIZ &&
         (adres &
-         (ROZMIAR_STRONY_4K - 1ULL)) == 0;
+         (ROZMIAR_STRONY_4K - 1ULL)) == 0 &&
+        CzyZakresWMapowaniuFizycznym(
+            adres,
+            ROZMIAR_STRONY_4K
+        );
+}
+
+static uint64_t fizyczny_adres_tabeli(
+    const uint64_t* tabela
+) {
+    uint64_t fiz = 0;
+
+    if (!WirtualnyDoFizycznego(
+            tabela,
+            &fiz) ||
+        !tabela_fizyczna_bezposrednio_dostepna(
+            fiz)) {
+        return 0;
+    }
+
+    return fiz;
 }
 
 /* =========================================================================
@@ -473,13 +592,24 @@ static uint64_t* alokuj_tabele_stron() {
         return nullptr;
     }
 
+    uint64_t* tabela =
+        static_cast<uint64_t*>(
+            FizycznyZakresDoWirtualnego(
+                fiz,
+                ROZMIAR_STRONY_4K
+            )
+        );
+
+    if (!tabela) {
+        ZwolnijRamke(ramka);
+        return nullptr;
+    }
+
     WyzerujStrone(
-        ramka
+        tabela
     );
 
-    return static_cast<uint64_t*>(
-        ramka
-    );
+    return tabela;
 }
 
 static uint64_t* tabela_z_wpisu(
@@ -498,8 +628,11 @@ static uint64_t* tabela_z_wpisu(
         return nullptr;
     }
 
-    return reinterpret_cast<uint64_t*>(
-        fiz
+    return static_cast<uint64_t*>(
+        FizycznyZakresDoWirtualnego(
+            fiz,
+            ROZMIAR_STRONY_4K
+        )
     );
 }
 
@@ -574,9 +707,15 @@ static bool rozbij_strone_1g(
         wymagaj_user ||
         ((stary & PTE_USER) != 0);
 
+    const uint64_t nowy_pd_fiz =
+        fizyczny_adres_tabeli(nowy_pd);
+
+    if (nowy_pd_fiz == 0) {
+        return false;
+    }
+
     pdp[indeks] =
-        (reinterpret_cast<uint64_t>(
-            nowy_pd) &
+        (nowy_pd_fiz &
          MASKA_ADRESU_4K) |
         flagi_tabeli_posredniej(user);
 
@@ -636,9 +775,15 @@ static bool rozbij_strone_2m(
         wymagaj_user ||
         ((stary & PTE_USER) != 0);
 
+    const uint64_t nowy_pt_fiz =
+        fizyczny_adres_tabeli(nowy_pt);
+
+    if (nowy_pt_fiz == 0) {
+        return false;
+    }
+
     pd[indeks] =
-        (reinterpret_cast<uint64_t>(
-            nowy_pt) &
+        (nowy_pt_fiz &
          MASKA_ADRESU_4K) |
         flagi_tabeli_posredniej(user);
 
@@ -666,9 +811,13 @@ static bool pobierz_lub_utworz_pdp(
 
         if (!nowa) return false;
 
+        const uint64_t nowa_fiz =
+            fizyczny_adres_tabeli(nowa);
+
+        if (nowa_fiz == 0) return false;
+
         wpis =
-            (reinterpret_cast<uint64_t>(
-                nowa) &
+            (nowa_fiz &
              MASKA_ADRESU_4K) |
             flagi_tabeli_posredniej(user);
     } else {
@@ -722,9 +871,13 @@ static bool pobierz_lub_utworz_pd(
 
         if (!nowa) return false;
 
+        const uint64_t nowa_fiz =
+            fizyczny_adres_tabeli(nowa);
+
+        if (nowa_fiz == 0) return false;
+
         wpis =
-            (reinterpret_cast<uint64_t>(
-                nowa) &
+            (nowa_fiz &
              MASKA_ADRESU_4K) |
             flagi_tabeli_posredniej(user);
     } else {
@@ -771,9 +924,13 @@ static bool pobierz_lub_utworz_pt(
 
         if (!nowa) return false;
 
+        const uint64_t nowa_fiz =
+            fizyczny_adres_tabeli(nowa);
+
+        if (nowa_fiz == 0) return false;
+
         wpis =
-            (reinterpret_cast<uint64_t>(
-                nowa) &
+            (nowa_fiz &
              MASKA_ADRESU_4K) |
             flagi_tabeli_posredniej(user);
     } else {
@@ -1075,7 +1232,9 @@ static void zwolnij_sklonowane_tabele_bez_lisci(
     }
 
     ZwolnijRamke(
-        tabela
+        reinterpret_cast<void*>(
+            fizyczny_adres_tabeli(tabela)
+        )
     );
 }
 
@@ -1104,12 +1263,18 @@ static uint64_t* sklonuj_hierarchie(
             zrodlo[i];
 
         if ((wpis & PTE_PRESENT) == 0) {
-            /*
-             * Kopiujemy rowniez nie-present software bits tylko wtedy,
-             * gdy w przyszlosci VMM zacznie ich uzywac. Obecnie zero jest
-             * najbezpieczniejsze.
-             */
             kopia[i] = 0;
+            continue;
+        }
+
+        /*
+         * Na poziomie PML4 (poziom 4), tylko indeks 0 (dolne 512 GiB)
+         * zawiera przestrzen uzytkownika i wymaga sklonowania hierarchii.
+         * Wszystkie wyzsze wpisy (w tym indeks 256 dla Direct-Map HHDM)
+         * sa wspoldzielonymi strukturami jadra i sa kopiowane bezposrednio.
+         */
+        if (poziom == 4 && i != 0) {
+            kopia[i] = wpis;
             continue;
         }
 
@@ -1149,9 +1314,20 @@ static uint64_t* sklonuj_hierarchie(
         }
 
         const uint64_t* stare_dziecko =
-            reinterpret_cast<const uint64_t*>(
-                fiz_dziecka
+            static_cast<const uint64_t*>(
+                FizycznyZakresDoWirtualnego(
+                    fiz_dziecka,
+                    ROZMIAR_STRONY_4K
+                )
             );
+
+        if (!stare_dziecko) {
+            zwolnij_sklonowane_tabele_bez_lisci(
+                kopia,
+                poziom
+            );
+            return nullptr;
+        }
 
         uint64_t* nowe_dziecko =
             sklonuj_hierarchie(
@@ -1168,9 +1344,21 @@ static uint64_t* sklonuj_hierarchie(
             return nullptr;
         }
 
+        const uint64_t nowe_dziecko_fiz =
+            fizyczny_adres_tabeli(
+                nowe_dziecko
+            );
+
+        if (nowe_dziecko_fiz == 0) {
+            zwolnij_sklonowane_tabele_bez_lisci(
+                kopia,
+                poziom
+            );
+            return nullptr;
+        }
+
         kopia[i] =
-            (reinterpret_cast<uint64_t>(
-                nowe_dziecko) &
+            (nowe_dziecko_fiz &
              MASKA_ADRESU_4K) |
             (wpis & ~MASKA_ADRESU_4K);
     }
@@ -1224,7 +1412,11 @@ static void zniszcz_hierarchie_procesu(
             tabela[i] = 0;
         }
 
-        ZwolnijRamke(tabela);
+        ZwolnijRamke(
+            reinterpret_cast<void*>(
+                fizyczny_adres_tabeli(tabela)
+            )
+        );
         return;
     }
 
@@ -1263,21 +1455,33 @@ static void zniszcz_hierarchie_procesu(
         );
     }
 
-    ZwolnijRamke(tabela);
+    ZwolnijRamke(
+        reinterpret_cast<void*>(
+            fizyczny_adres_tabeli(tabela)
+        )
+    );
 }
 
 /* =========================================================================
  * BUDOWA BAZOWEJ PRZESTRZENI JADRA
  * ========================================================================= */
 
-static void przygotuj_identity_map_jadra() {
+static bool przygotuj_mapowania_jadra() {
     WyzerujStrone(st_pml4);
     WyzerujStrone(st_pdp);
+    WyzerujStrone(st_hhdm_pdp);
 
     for (size_t i = 0;
          i < 4;
          ++i) {
         WyzerujStrone(st_pd[i]);
+        WyzerujStrone(st_hhdm_pd[i]);
+    }
+
+    for (size_t i = 0;
+         i < MAKS_CZESCIOWYCH_PT_HHDM;
+         ++i) {
+        WyzerujStrone(st_hhdm_pt[i]);
     }
 
     WyzerujStrone(
@@ -1376,6 +1580,115 @@ static void przygotuj_identity_map_jadra() {
                 flagi;
         }
     }
+
+    /*
+     * HHDM posiada osobne PDP/PD/PT. Kazdy lisc powstaje dopiero po
+     * potwierdzeniu w PMM, ze caly odwzorowywany zakres jest zwyklym RAM-em.
+     * Dzieki temu LAPIC, IOAPIC, HPET, BAR-y PCI i LFB nie otrzymuja aliasu
+     * WB pod 0xFFFF800000000000.
+     */
+    const uint64_t flagi_hhdm_liscia =
+        PTE_PRESENT |
+        PTE_WRITE |
+        (nx_aktywny ? PTE_NX : 0ULL);
+
+    bool znaleziono_ram = false;
+    size_t uzyte_pt_hhdm = 0;
+
+    for (uint64_t gigabajt = 0;
+         gigabajt < 4;
+         ++gigabajt) {
+
+        bool pd_ma_wpis = false;
+
+        for (uint64_t i = 0;
+             i < 512;
+             ++i) {
+
+            const uint64_t fiz =
+                gigabajt *
+                    ROZMIAR_STRONY_1G +
+                i *
+                    ROZMIAR_STRONY_2M;
+
+            if (CzyZakresWMapowaniuFizycznym(
+                    fiz,
+                    ROZMIAR_STRONY_2M)) {
+
+                st_hhdm_pd[gigabajt][i] =
+                    (fiz & MASKA_ADRESU_2M) |
+                    flagi_hhdm_liscia |
+                    PDE_PS;
+
+                pd_ma_wpis = true;
+                znaleziono_ram = true;
+                continue;
+            }
+
+            bool pt_ma_wpis = false;
+
+            for (uint64_t j = 0;
+                 j < 512;
+                 ++j) {
+
+                const uint64_t strona =
+                    fiz +
+                    j * ROZMIAR_STRONY_4K;
+
+                if (!CzyZakresWMapowaniuFizycznym(
+                        strona,
+                        ROZMIAR_STRONY_4K)) {
+                    continue;
+                }
+
+                if (uzyte_pt_hhdm >=
+                    MAKS_CZESCIOWYCH_PT_HHDM) {
+                    return false;
+                }
+
+                st_hhdm_pt[uzyte_pt_hhdm][j] =
+                    (strona & MASKA_ADRESU_4K) |
+                    flagi_hhdm_liscia;
+
+                pt_ma_wpis = true;
+                znaleziono_ram = true;
+            }
+
+            if (pt_ma_wpis) {
+                st_hhdm_pd[gigabajt][i] =
+                    (reinterpret_cast<uint64_t>(
+                        st_hhdm_pt[uzyte_pt_hhdm]) &
+                     MASKA_ADRESU_4K) |
+                    PTE_PRESENT |
+                    PTE_WRITE;
+
+                ++uzyte_pt_hhdm;
+                pd_ma_wpis = true;
+            }
+        }
+
+        if (pd_ma_wpis) {
+            st_hhdm_pdp[gigabajt] =
+                (reinterpret_cast<uint64_t>(
+                    st_hhdm_pd[gigabajt]) &
+                 MASKA_ADRESU_4K) |
+                PTE_PRESENT |
+                PTE_WRITE;
+        }
+    }
+
+    if (!znaleziono_ram) {
+        return false;
+    }
+
+    st_pml4[256] =
+        (reinterpret_cast<uint64_t>(
+            st_hhdm_pdp) &
+         MASKA_ADRESU_4K) |
+        PTE_PRESENT |
+        PTE_WRITE;
+
+    return true;
 }
 
 } // namespace
@@ -1440,20 +1753,33 @@ void InicjalizujVMM() {
         return;
     }
 
-    przygotuj_identity_map_jadra();
+    wlacz_nx_jezeli_obslugiwane();
+
+    if (!przygotuj_mapowania_jadra()) {
+        return;
+    }
 
     bazowe_pml4_jadra =
-        st_pml4;
+        static_cast<uint64_t*>(
+            FizycznyZakresDoWirtualnego(
+                reinterpret_cast<uint64_t>(st_pml4),
+                ROZMIAR_STRONY_4K
+            )
+        );
+
+    if (!bazowe_pml4_jadra) {
+        return;
+    }
 
     globalne_pml4 =
-        st_pml4;
+        bazowe_pml4_jadra;
 
     /*
      * Wszystkie tablice statyczne znajduja sie w obrazie jadra, ktory
      * boot.S mapuje przed wejsciem tutaj.
      */
     zapisz_cr3(
-        st_pml4
+        bazowe_pml4_jadra
     );
 
     /*
@@ -1521,10 +1847,13 @@ void UstawPrzestrzenAdresowa(
         return;
     }
 
-    const uint64_t adres =
-        reinterpret_cast<uint64_t>(
-            pml4
-        );
+    uint64_t adres = 0;
+
+    if (!WirtualnyDoFizycznego(
+            pml4,
+            &adres)) {
+        return;
+    }
 
     if (!tabela_fizyczna_bezposrednio_dostepna(
             adres)) {
@@ -1583,10 +1912,13 @@ extern "C" void ZniszczPrzestrzenAdresowaProcesu(
         return;
     }
 
-    const uint64_t fiz =
-        reinterpret_cast<uint64_t>(
-            do_zniszczenia
-        );
+    uint64_t fiz = 0;
+
+    if (!WirtualnyDoFizycznego(
+            do_zniszczenia,
+            &fiz)) {
+        return;
+    }
 
     if (!tabela_fizyczna_bezposrednio_dostepna(
             fiz)) {

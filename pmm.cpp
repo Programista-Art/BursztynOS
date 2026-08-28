@@ -15,13 +15,10 @@
  *
  * UWAGA O OBECNEJ ARCHITEKTURZE:
  *
- * boot.S tworzy poczatkowo identity mapping tylko dla 0..1 GiB.
- * Jednoczesnie wiele obecnych modulow Bursztyna nadal dereferencjonuje
- * wartosc zwrocona przez ZaalokujRamke() jak zwykly wskaznik.
- *
- * Dlatego PMM sledzi pamiec fizyczna do 4 GiB, ale aktualnie WYDAJE tylko
- * ramki ponizej 1 GiB. Po wdrozeniu stalego direct-map/HHDM w VMM ten limit
- * mozna bezpiecznie podniesc.
+ * boot.S tworzy tymczasowy identity mapping 0..4 GiB, ale nie tworzy HHDM.
+ * Po inicjalizacji VMM ramki PMM sa dereferencjonowane przez walidowany
+ * Direct-Map. Limit alokacji ponizej 1 GiB pozostaje wymaganiem DMA obecnych
+ * sterownikow, a nie zalozeniem PA==VA.
  */
 
 #include "pamiec.h"
@@ -51,11 +48,8 @@ constexpr uint64_t ROZMIAR_MAPY_BITOWEJ =
     MAX_RAMEK / 8ULL;
 
 /*
- * boot.S:
- *   512 wpisow PDE * 2 MiB = 1 GiB identity mapping.
- *
- * Dopoki VMM nie udostepnia gwarantowanego direct-map calego RAM,
- * fizyczne wskazniki zwracane przez PMM musza miescic sie w tym obszarze.
+ * Obecne urzadzenia DMA bez gwarantowanego adresowania 64-bitowego wymagaja
+ * ramek ponizej 1 GiB.
  */
 constexpr uint64_t MAKS_ADRES_ALOKOWALNY =
     0x0000000040000000ULL;
@@ -116,6 +110,20 @@ uint8_t mapa_bitowa[ROZMIAR_MAPY_BITOWEJ] = {};
  */
 alignas(64)
 uint8_t mapa_dostepnosci[ROZMIAR_MAPY_BITOWEJ] = {};
+
+struct ZakresHHDM {
+    uint64_t poczatek;
+    uint64_t koniec;
+};
+
+constexpr size_t MAKS_ZAKRESOW_HHDM = 128;
+constexpr size_t MAKS_WYLACZEN_HHDM = 16;
+
+ZakresHHDM zakresy_hhdm[MAKS_ZAKRESOW_HHDM] = {};
+ZakresHHDM wylaczenia_hhdm[MAKS_WYLACZEN_HHDM] = {};
+size_t liczba_zakresow_hhdm = 0;
+size_t liczba_wylaczen_hhdm = 0;
+bool zakresy_hhdm_przepelnione = false;
 
 uint64_t ostatnia_alokacja = 0;
 
@@ -512,6 +520,17 @@ static void dodaj_dostepny_zakres(
     const uint64_t ramka_za_koncem =
         koniec_wyrownany / ROZMIAR_STRONY;
 
+    if (liczba_zakresow_hhdm >=
+        MAKS_ZAKRESOW_HHDM) {
+        zakresy_hhdm_przepelnione = true;
+        return;
+    }
+
+    zakresy_hhdm[liczba_zakresow_hhdm++] = {
+        start_wyrownany,
+        koniec_wyrownany
+    };
+
     for (uint64_t ramka = pierwsza_ramka;
          ramka < ramka_za_koncem;
          ++ramka) {
@@ -584,6 +603,121 @@ static void zarezerwuj_zakres_na_stale(
          ++ramka) {
 
         zarezerwuj_ramke_na_stale(
+            ramka
+        );
+    }
+}
+
+/*
+ * Usuwa z HHDM kazda strone przecinajaca wskazany zakres. Uzywane dla
+ * urzadzen i framebufferu, ktore maja dedykowane mapowania z typem cache
+ * innym niz WB.
+ */
+static void usun_zakres_z_hhdm(
+    uint64_t poczatek,
+    uint64_t dlugosc
+) {
+    if (dlugosc == 0 ||
+        poczatek >= MAKS_ADRES_FIZYCZNY_PMM) {
+        return;
+    }
+
+    uint64_t koniec = 0;
+    if (dlugosc >
+        MAKS_ADRES_FIZYCZNY_PMM - poczatek) {
+        koniec = MAKS_ADRES_FIZYCZNY_PMM;
+    } else {
+        koniec = poczatek + dlugosc;
+    }
+
+    const uint64_t poczatek_wyrownany =
+        wyrownaj_w_dol_do_strony(poczatek);
+
+    uint64_t koniec_wyrownany = 0;
+    if (!wyrownaj_w_gore_do_strony(
+            koniec,
+            &koniec_wyrownany) ||
+        koniec_wyrownany >
+            MAKS_ADRES_FIZYCZNY_PMM) {
+        koniec_wyrownany =
+            MAKS_ADRES_FIZYCZNY_PMM;
+    }
+
+    if (liczba_wylaczen_hhdm >=
+        MAKS_WYLACZEN_HHDM) {
+        zakresy_hhdm_przepelnione = true;
+        return;
+    }
+
+    wylaczenia_hhdm[liczba_wylaczen_hhdm++] = {
+        poczatek_wyrownany,
+        koniec_wyrownany
+    };
+}
+
+/*
+ * Rezerwacja obszaru modulu Multiboot2.
+ * Oznacza ramki jako zajete w mapa_bitowa, aby alokator PMM ich nie przydzielil,
+ * ale zachowuje bit w mapa_dostepnosci dla prawidlowego RAM-u, dzieki czemu
+ * po zaimportowaniu zawartosci do PSF ramki moga zostac zwolnione do puli (OdblokujZakres).
+ */
+static void zarezerwuj_zakres_modulu(
+    uint64_t poczatek,
+    uint64_t dlugosc
+) {
+    if (dlugosc == 0) return;
+    if (poczatek >= MAKS_ADRES_FIZYCZNY_PMM) return;
+
+    uint64_t koniec = 0;
+
+    if (dlugosc >
+        MAKS_ADRES_FIZYCZNY_PMM - poczatek) {
+        koniec = MAKS_ADRES_FIZYCZNY_PMM;
+    } else {
+        koniec = poczatek + dlugosc;
+    }
+
+    const uint64_t start_wyrownany =
+        wyrownaj_w_dol_do_strony(
+            poczatek
+        );
+
+    uint64_t koniec_wyrownany = 0;
+
+    if (!wyrownaj_w_gore_do_strony(
+            koniec,
+            &koniec_wyrownany)) {
+
+        koniec_wyrownany =
+            MAKS_ADRES_FIZYCZNY_PMM;
+    }
+
+    if (koniec_wyrownany >
+        MAKS_ADRES_FIZYCZNY_PMM) {
+
+        koniec_wyrownany =
+            MAKS_ADRES_FIZYCZNY_PMM;
+    }
+
+    if (start_wyrownany >= koniec_wyrownany) {
+        return;
+    }
+
+    const uint64_t pierwsza_ramka =
+        start_wyrownany / ROZMIAR_STRONY;
+
+    const uint64_t ramka_za_koncem =
+        koniec_wyrownany / ROZMIAR_STRONY;
+
+    for (uint64_t ramka = pierwsza_ramka;
+         ramka < ramka_za_koncem;
+         ++ramka) {
+
+        if (!numer_ramki_poprawny(ramka)) {
+            continue;
+        }
+
+        ustaw_ramke_zajeta(
             ramka
         );
     }
@@ -811,6 +945,9 @@ static bool przetworz_mape_pamieci(
  * REZERWACJA OBIEKTOW OPISANYCH PRZEZ MULTIBOOT2
  * ========================================================================= */
 
+constexpr uint64_t MAKS_ROZMIAR_MODULU =
+    256ULL * 1024ULL * 1024ULL;
+
 static void zarezerwuj_modul(
     const WpisTaguMB2* zwykly_tag
 ) {
@@ -839,13 +976,23 @@ static void zarezerwuj_modul(
         static_cast<uint64_t>(
             modul.mod_end);
 
-    if (koniec <= start) {
+    if (start == 0 || koniec <= start) {
         return;
     }
 
-    zarezerwuj_zakres_na_stale(
+    if (start >= MAKS_ADRES_FIZYCZNY_PMM ||
+        koniec > MAKS_ADRES_FIZYCZNY_PMM) {
+        return;
+    }
+
+    const uint64_t rozmiar = koniec - start;
+    if (rozmiar > MAKS_ROZMIAR_MODULU) {
+        return;
+    }
+
+    zarezerwuj_zakres_modulu(
         start,
-        koniec - start
+        rozmiar
     );
 }
 
@@ -893,6 +1040,11 @@ static void zarezerwuj_framebuffer(
         fb.adres_fizyczny,
         rozmiar
     );
+
+    usun_zakres_z_hhdm(
+        fb.adres_fizyczny,
+        rozmiar
+    );
 }
 
 /* =========================================================================
@@ -907,6 +1059,22 @@ static void wyzeruj_stan_pmm() {
         mapa_bitowa[i] = 0;
         mapa_dostepnosci[i] = 0;
     }
+
+    for (size_t i = 0;
+         i < MAKS_ZAKRESOW_HHDM;
+         ++i) {
+        zakresy_hhdm[i] = {};
+    }
+
+    for (size_t i = 0;
+         i < MAKS_WYLACZEN_HHDM;
+         ++i) {
+        wylaczenia_hhdm[i] = {};
+    }
+
+    liczba_zakresow_hhdm = 0;
+    liczba_wylaczen_hhdm = 0;
+    zakresy_hhdm_przepelnione = false;
 
     najwyzsza_znaleziona_ramka = 0;
     ostatnia_alokacja = 0;
@@ -949,6 +1117,114 @@ uint64_t najwyzsza_znaleziona_ramka = 0;
  * API PMM
  * ========================================================================= */
 
+bool CzyZakresWMapowaniuFizycznym(
+    uint64_t adres_fizyczny,
+    size_t rozmiar
+) {
+    if (rozmiar == 0 ||
+        adres_fizyczny >=
+            MAKS_ADRES_FIZYCZNY_PMM) {
+        return false;
+    }
+
+    const uint64_t n =
+        static_cast<uint64_t>(rozmiar);
+
+    if (n >
+        MAKS_ADRES_FIZYCZNY_PMM -
+            adres_fizyczny) {
+        return false;
+    }
+
+    const uint64_t koniec =
+        adres_fizyczny + n;
+
+    BlokadaPMM blokada;
+
+    if (!pmm_zainicjalizowany ||
+        zakresy_hhdm_przepelnione) {
+        return false;
+    }
+
+    bool w_ram = false;
+
+    for (size_t i = 0;
+         i < liczba_zakresow_hhdm;
+         ++i) {
+        if (adres_fizyczny >=
+                zakresy_hhdm[i].poczatek &&
+            koniec <=
+                zakresy_hhdm[i].koniec) {
+            w_ram = true;
+            break;
+        }
+    }
+
+    if (!w_ram) return false;
+
+    for (size_t i = 0;
+         i < liczba_wylaczen_hhdm;
+         ++i) {
+        if (adres_fizyczny <
+                wylaczenia_hhdm[i].koniec &&
+            koniec >
+                wylaczenia_hhdm[i].poczatek) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void* FizycznyZakresDoWirtualnego(
+    uint64_t adres_fizyczny,
+    size_t rozmiar
+) {
+    if (!CzyZakresWMapowaniuFizycznym(
+            adres_fizyczny,
+            rozmiar)) {
+        return nullptr;
+    }
+
+    return reinterpret_cast<void*>(
+        BAZA_MAPOWANIA_FIZYCZNEGO +
+        adres_fizyczny
+    );
+}
+
+bool WirtualnyDoFizycznego(
+    const void* adres_wirtualny,
+    uint64_t* adres_fizyczny
+) {
+    if (!adres_wirtualny ||
+        !adres_fizyczny) {
+        return false;
+    }
+
+    const uint64_t va =
+        reinterpret_cast<uint64_t>(
+            adres_wirtualny
+        );
+
+    if (va < BAZA_MAPOWANIA_FIZYCZNEGO ||
+        va >= BAZA_MAPOWANIA_FIZYCZNEGO +
+            ROZMIAR_MAPOWANIA_FIZYCZNEGO) {
+        return false;
+    }
+
+    const uint64_t fiz =
+        va - BAZA_MAPOWANIA_FIZYCZNEGO;
+
+    if (!CzyZakresWMapowaniuFizycznym(
+            fiz,
+            1U)) {
+        return false;
+    }
+
+    *adres_fizyczny = fiz;
+    return true;
+}
+
 void OdblokujRamke(
     uint64_t adres_fizyczny
 ) {
@@ -978,6 +1254,80 @@ void OdblokujRamke(
         ostatnia_alokacja) {
         ostatnia_alokacja =
             numer_ramki;
+    }
+}
+
+void OdblokujZakres(
+    uint64_t adres_fizyczny,
+    uint64_t dlugosc
+) {
+    if (dlugosc == 0 || adres_fizyczny >= MAKS_ADRES_FIZYCZNY_PMM) {
+        return;
+    }
+
+    BlokadaPMM blokada;
+
+    if (!pmm_zainicjalizowany) {
+        return;
+    }
+
+    uint64_t start_wyrownany = wyrownaj_w_dol_do_strony(adres_fizyczny);
+    uint64_t koniec = 0;
+
+    if (!dodaj_u64(adres_fizyczny, dlugosc, &koniec)) {
+        koniec = MAKS_ADRES_FIZYCZNY_PMM;
+    }
+    if (koniec > MAKS_ADRES_FIZYCZNY_PMM) {
+        koniec = MAKS_ADRES_FIZYCZNY_PMM;
+    }
+
+    uint64_t koniec_wyrownany = 0;
+    if (!wyrownaj_w_gore_do_strony(koniec, &koniec_wyrownany)) {
+        koniec_wyrownany = MAKS_ADRES_FIZYCZNY_PMM;
+    }
+    if (koniec_wyrownany > MAKS_ADRES_FIZYCZNY_PMM) {
+        koniec_wyrownany = MAKS_ADRES_FIZYCZNY_PMM;
+    }
+
+    const uint64_t pierwsza_ramka = start_wyrownany / ROZMIAR_STRONY;
+    const uint64_t ramka_za_koncem = koniec_wyrownany / ROZMIAR_STRONY;
+    const uint64_t limit_niski = GRANICA_NISKIEJ_PAMIECI / ROZMIAR_STRONY;
+
+    const uint64_t k_start_ramka = reinterpret_cast<uint64_t>(__kernel_start) / ROZMIAR_STRONY;
+    const uint64_t k_end_ramka = (reinterpret_cast<uint64_t>(__kernel_end) + ROZMIAR_STRONY - 1ULL) / ROZMIAR_STRONY;
+
+    uint64_t najnizsza_odblokowana = UINT64_MAX;
+
+    for (uint64_t ramka = pierwsza_ramka; ramka < ramka_za_koncem; ++ramka) {
+        if (!numer_ramki_poprawny(ramka)) {
+            continue;
+        }
+
+        if (ramka < limit_niski) {
+            continue;
+        }
+
+        if (ramka >= k_start_ramka && ramka < k_end_ramka) {
+            continue;
+        }
+
+        if (!ramka_dostepna(ramka)) {
+            continue;
+        }
+
+        if (ramka_wolna(ramka)) {
+            continue;
+        }
+
+        ustaw_ramke_wolna(ramka);
+
+        if (ramka < najnizsza_odblokowana) {
+            najnizsza_odblokowana = ramka;
+        }
+    }
+
+    if (najnizsza_odblokowana < ostatnia_alokacja) {
+        ostatnia_alokacja = najnizsza_odblokowana;
     }
 }
 
@@ -1181,10 +1531,25 @@ void InicjalizujPMM(
         ROZMIAR_STRONY
     );
 
+    usun_zakres_z_hhdm(
+        LAPIC_MMIO,
+        ROZMIAR_STRONY
+    );
+
     zarezerwuj_zakres_na_stale(
         IOAPIC_MMIO,
         ROZMIAR_STRONY
     );
+
+    usun_zakres_z_hhdm(
+        IOAPIC_MMIO,
+        ROZMIAR_STRONY
+    );
+
+    if (zakresy_hhdm_przepelnione) {
+        wyzeruj_stan_pmm();
+        return;
+    }
 
     /*
      * Kursor zaczyna od pierwszej ramki powyzej niskiego 1 MiB.
@@ -1214,10 +1579,7 @@ void* ZaalokujRamke() {
         limit = MAX_RAMEK;
     }
 
-    /*
-     * Krytyczny limit obecnej architektury:
-     * fizyczne ramki sa nadal czesto dereferencjonowane bez direct-map.
-     */
+    /* Limit wspolny dla obecnych sterownikow DMA. */
     if (limit > MAX_RAMEK_ALOKOWALNYCH) {
         limit = MAX_RAMEK_ALOKOWALNYCH;
     }

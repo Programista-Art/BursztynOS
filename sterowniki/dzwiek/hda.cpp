@@ -593,13 +593,12 @@ uint32_t nwd_u32(
 void* dma_wirtualny_z_fizycznego(
     void* phys
 ) {
-    /*
-     * Obecny VMM Bursztyna utrzymuje identity map niskiej pamieci, a PMM
-     * przydziela ramki DMA w tym obszarze.
-     *
-     * Przy przyszlym HHDM nalezy zastapic ten helper centralnym phys->virt.
-     */
-    return phys;
+    if (!phys) return nullptr;
+
+    return FizycznyZakresDoWirtualnego(
+        reinterpret_cast<uint64_t>(phys),
+        ROZMIAR_RAMKI_4K
+    );
 }
 
 bool fizyczny_dma_poprawny(
@@ -629,7 +628,10 @@ bool fizyczny_dma_poprawny(
         return false;
     }
 
-    return true;
+    return CzyZakresWMapowaniuFizycznym(
+        p,
+        ROZMIAR_RAMKI_4K
+    );
 }
 
 /* =========================================================================

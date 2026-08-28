@@ -22,9 +22,20 @@ bool dma_allocate(size_t size, size_t alignment, DmaBuffer* out) {
         ZwolnijCiagleRamki(physical, pages);
         return false;
     }
-    /* PMM wydaje obecnie RAM z identity-map; virtual i physical sa rowne. */
-    zero(physical, pages * PAGE);
-    out->virtual_address = physical;
+
+    void* const virtual_address =
+        FizycznyZakresDoWirtualnego(
+            address,
+            pages * PAGE
+        );
+
+    if (!virtual_address) {
+        ZwolnijCiagleRamki(physical, pages);
+        return false;
+    }
+
+    zero(virtual_address, pages * PAGE);
+    out->virtual_address = virtual_address;
     out->physical_address = address;
     out->size = size;
     out->page_count = pages;

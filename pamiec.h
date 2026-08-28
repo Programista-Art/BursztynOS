@@ -347,6 +347,12 @@ void ZabezpieczRamke(uint64_t adres_fizyczny);
 void OdblokujRamke(uint64_t adres_fizyczny);
 
 /*
+ * Oznacza caly zakres fizyczny jako dostepny (o ile ramki naleza do RAM).
+ * Przydatne m.in. do zwalniania modulow Multiboot2 po ich zaimportowaniu.
+ */
+void OdblokujZakres(uint64_t adres_fizyczny, uint64_t dlugosc);
+
+/*
  * Rezerwuje jedna fizyczna ramke 4 KiB.
  *
  * Zwraca:
@@ -445,3 +451,52 @@ inline constexpr uintptr_t PobierzAdresKernelStart() {
 inline constexpr uintptr_t PobierzAdresKernelEnd() {
     return reinterpret_cast<uintptr_t>(__kernel_end);
 }
+
+/* =========================================================================
+ * 11. BEZPOSREDNIE MAPOWANIE PAMIECI FIZYCZNEJ (HHDM / DIRECT-MAP)
+ * ========================================================================= */
+
+inline constexpr uint64_t BAZA_MAPOWANIA_FIZYCZNEGO =
+    0xFFFF800000000000ULL;
+
+inline constexpr uint64_t ROZMIAR_MAPOWANIA_FIZYCZNEGO =
+    0x0000000100000000ULL;
+
+/*
+ * HHDM nie jest mapa calej przestrzeni fizycznej. Zawiera tylko pelne
+ * strony zwyklego RAM-u zaakceptowane przez mape pamieci Multiboot2.
+ * W szczegolnosci nie zawiera MMIO ani framebufferu.
+ */
+bool CzyZakresWMapowaniuFizycznym(
+    uint64_t adres_fizyczny,
+    size_t rozmiar
+);
+
+/*
+ * Zwraca nullptr, jezeli caly zakres nie nalezy do HHDM. Wersja zakresowa
+ * powinna byc uzywana zawsze, gdy wywolujacy dereferencjonuje wiecej niz
+ * jeden bajt.
+ */
+void* FizycznyZakresDoWirtualnego(
+    uint64_t adres_fizyczny,
+    size_t rozmiar
+);
+
+inline void* FizycznyDoWirtualnego(
+    uint64_t adres_fizyczny
+) {
+    return FizycznyZakresDoWirtualnego(
+        adres_fizyczny,
+        1U
+    );
+}
+
+/*
+ * Konwersja jest celowo scisla: adres spoza HHDM (w tym identity VA albo
+ * MMIO) nie jest traktowany jak adres fizyczny. Wynik trafia do parametru
+ * wyjsciowego, aby fizyczny adres 0 nie kolidowal z wartoscia bledu.
+ */
+bool WirtualnyDoFizycznego(
+    const void* adres_wirtualny,
+    uint64_t* adres_fizyczny
+);

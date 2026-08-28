@@ -556,7 +556,18 @@ static bool mapuj_segment_z_pliku(
         void* ramka = ZaalokujRamke();
         if (!ramka) return false;
 
-        uint8_t* cel = static_cast<uint8_t*>(ramka);
+        const uint64_t pa = reinterpret_cast<uint64_t>(ramka);
+        uint8_t* cel = static_cast<uint8_t*>(
+            FizycznyZakresDoWirtualnego(
+                pa,
+                ROZMIAR_STRONY
+            )
+        );
+
+        if (!cel) {
+            ZwolnijRamke(ramka);
+            return false;
+        }
 
         for (uint64_t i = 0; i < ROZMIAR_STRONY; ++i) {
             cel[i] = 0;
@@ -604,7 +615,18 @@ static bool mapuj_stos_uzytkownika(
         void* ramka = ZaalokujRamke();
         if (!ramka) return false;
 
-        uint8_t* p = static_cast<uint8_t*>(ramka);
+        const uint64_t pa = reinterpret_cast<uint64_t>(ramka);
+        uint8_t* p = static_cast<uint8_t*>(
+            FizycznyZakresDoWirtualnego(
+                pa,
+                ROZMIAR_STRONY
+            )
+        );
+
+        if (!p) {
+            ZwolnijRamke(ramka);
+            return false;
+        }
 
         for (uint64_t j = 0; j < ROZMIAR_STRONY; ++j) {
             p[j] = 0;
@@ -970,6 +992,21 @@ static bool uruchom_program_z_pliku_impl(
         wirtualny_szczyt_stosu;
     rama->stary_ss = 0x1B;
 
+    uint64_t pml4_procesu_fiz = 0;
+    if (!WirtualnyDoFizycznego(
+            pml4_procesu,
+            &pml4_procesu_fiz)) {
+        przywroc_przerwania(
+            stan_przerwan
+        );
+        posprzataj_przestrzen_po_bledzie(
+            pml4_procesu
+        );
+        kfree(baza_stosu_jadra);
+        zwolnij_rezerwacje_procesu(pid);
+        return false;
+    }
+
     /*
      * Wszystkie pola procesu musza byc gotowe zanim stan zmieni sie
      * z ZABLOKOWANY na GOTOWY.
@@ -996,9 +1033,7 @@ static bool uruchom_program_z_pliku_impl(
     proces.szczyt_stosu_jadra =
         szczyt_stosu_jadra;
     proces.cr3 =
-        reinterpret_cast<uint64_t>(
-            pml4_procesu
-        );
+        pml4_procesu_fiz;
     proces.granica_sterty =
         BAZA_STERTY_USER;
 

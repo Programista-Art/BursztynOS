@@ -34,10 +34,7 @@
  *   - maks. 32 sektory / 16 KiB na jedno wywolanie,
  *   - brak NCQ i hot-plug,
  *   - polling zamiast IRQ,
- *   - obecny PMM/VMM udostepnia identity map fizycznej pamieci < 4 GiB.
- *
- * Przy przyszlym HHDM funkcja dma_wirtualny_z_fizycznego() musi zostac
- * zastapiona centralnym phys->virt helperem.
+ *   - ramki DMA sa dostepne dla CPU wylacznie przez walidowany HHDM.
  */
 
 #include "ahci.h"
@@ -530,14 +527,15 @@ uint64_t adres_fizyczny(
         );
 }
 
-/*
- * Obecny VMM Bursztyna utrzymuje identity map fizycznych 0..4 GiB.
- * PMM przydziela ramki DMA ponizej 1 GiB.
- */
 void* dma_wirtualny_z_fizycznego(
     void* phys
 ) {
-    return phys;
+    if (!phys) return nullptr;
+
+    return FizycznyZakresDoWirtualnego(
+        reinterpret_cast<uint64_t>(phys),
+        AHCI_DMA_STRONA
+    );
 }
 
 bool adres_dma_poprawny(
@@ -584,7 +582,10 @@ bool adres_dma_poprawny(
         }
     }
 
-    return true;
+    return CzyZakresWMapowaniuFizycznym(
+        p,
+        dlugosc
+    );
 }
 
 void bariera_przed_dma() {

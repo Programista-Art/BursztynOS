@@ -111,6 +111,8 @@ bool kopiuj_twor_uzytkownika(const char* sciezka,
 bool czytaj_fragment_pliku(const char* sciezka, uint64_t offset,
                            char* bufor, uint32_t dlugosc,
                            uint32_t* odczytano);
+/* BWS 60: monotoniczny czas HPET w nanosekundach (0, gdy HPET niedostepny). */
+uint64_t gui_czas_monotoniczny_ns();
 /* Popup aplikacji jest skladany nad zwyklymi oknami, ale pod menu systemu. */
 bool gui_ustaw_popup_aplikacji(bool otwarty,
                                int x, int y, int szer, int wys);
@@ -384,5 +386,4 @@ __attribute__((noreturn))
 void gui_zakoncz_aplikacje();
 
 } 
-
 

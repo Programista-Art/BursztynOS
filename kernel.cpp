@@ -187,6 +187,7 @@ constexpr uint64_t PRAWA_MENEDZERA_OKIEN =
     PRAWO_PLIKI_CZYTAJ | PRAWO_PLIKI_ZAPISZ | PRAWO_SIEC;
 
 bool grafika_gotowa = false;
+uint64_t g_multiboot_info_ptr = 0;
 
 /* =========================================================================
  * NISKIE FUNKCJE STARTOWE
@@ -231,17 +232,27 @@ void zatrzymaj_start(const char* powod) {
 }
 
 void przeladuj_cr3() {
-    void* pml4 =
-        PobierzAktualnePML4();
+    uint64_t cr3 = 0;
 
-    if (!pml4)
+    asm volatile(
+        "mov %%cr3, %0"
+        : "=r"(cr3)
+        :
+        : "memory"
+    );
+
+    cr3 &= 0x000FFFFFFFFFF000ULL;
+
+    if (cr3 == 0) {
         zatrzymaj_start(
-            "Brak aktywnego PML4 podczas odswiezania mapowania.");
+            "Brak aktywnego PML4 podczas odswiezania mapowania."
+        );
+    }
 
     asm volatile(
         "mov %0, %%cr3"
         :
-        : "r"(pml4)
+        : "r"(cr3)
         : "memory");
 }
 
@@ -408,6 +419,29 @@ bool dlugosc_tekstu_u32(const char* tekst,
         static_cast<uint32_t>(dlugosc);
 
     return true;
+}
+
+bool tekst_rowny(const char* a, const char* b) {
+    if (!a || !b) return false;
+    size_t i = 0;
+    while (a[i] != '\0' && b[i] != '\0') {
+        if (a[i] != b[i]) return false;
+        ++i;
+    }
+    return a[i] == b[i];
+}
+
+bool tekst_zawiera(const char* caly, const char* fragment) {
+    if (!caly || !fragment) return false;
+    if (fragment[0] == '\0') return true;
+    for (size_t i = 0; caly[i] != '\0'; ++i) {
+        size_t j = 0;
+        while (caly[i + j] != '\0' && fragment[j] != '\0' && caly[i + j] == fragment[j]) {
+            ++j;
+        }
+        if (fragment[j] == '\0') return true;
+    }
+    return false;
 }
 
 /* =========================================================================
@@ -644,6 +678,167 @@ void utworz_drabine_katalogow() {
                 "Nie mozna przygotowac podstawowego drzewa katalogow PSF.");
         }
     }
+}
+
+/* =========================================================================
+ * IMPORT MODULOW MULTIBOOT2 (test8k.bmp)
+ * ========================================================================= */
+
+struct ModulMB2 {
+    uint64_t start;
+    uint64_t koniec;
+    uint64_t rozmiar;
+    const char* cmdline;
+    bool poprawny;
+};
+
+bool znajdz_modul_mb2(uint64_t mbi, const char* nazwa_szukana, ModulMB2* wynik) {
+    if (!wynik || mbi == 0 || !nazwa_szukana) return false;
+    wynik->poprawny = false;
+
+    const volatile uint32_t* info = reinterpret_cast<const volatile uint32_t*>(mbi);
+    const uint32_t calosc = info[0];
+    if (calosc < 16 || mbi > UINT64_MAX - calosc) return false;
+
+    uint64_t off = 8;
+    while (off + sizeof(WpisTaguMB2) <= calosc) {
+        const WpisTaguMB2* tag = reinterpret_cast<const WpisTaguMB2*>(mbi + off);
+        if (tag->rozmiar < sizeof(WpisTaguMB2) || off + tag->rozmiar > calosc) return false;
+
+        if (tag->typ == 3 /* MULTIBOOT_TAG_TYPE_MODULE */ && tag->rozmiar >= 16) {
+            const uint32_t mod_start = *reinterpret_cast<const uint32_t*>(mbi + off + 8);
+            const uint32_t mod_end   = *reinterpret_cast<const uint32_t*>(mbi + off + 12);
+            const char* cmdline = reinterpret_cast<const char*>(mbi + off + 16);
+            const uint32_t max_cmdline_len = tag->rozmiar - 16;
+
+            bool ma_nul = false;
+            for (uint32_t i = 0; i < max_cmdline_len; ++i) {
+                if (cmdline[i] == '\0') {
+                    ma_nul = true;
+                    break;
+                }
+            }
+
+            if (ma_nul && mod_end > mod_start) {
+                if (tekst_rowny(cmdline, nazwa_szukana) || tekst_zawiera(cmdline, nazwa_szukana)) {
+                    wynik->start = static_cast<uint64_t>(mod_start);
+                    wynik->koniec = static_cast<uint64_t>(mod_end);
+                    wynik->rozmiar = static_cast<uint64_t>(mod_end - mod_start);
+                    wynik->cmdline = cmdline;
+                    wynik->poprawny = true;
+                    return true;
+                }
+            }
+        }
+
+        if (tag->typ == MULTIBOOT_TAG_TYPE_END) break;
+        off = (off + tag->rozmiar + 7ULL) & ~7ULL;
+    }
+
+    return false;
+}
+
+void importuj_modul_test8k(uint64_t mbi) {
+    if (mbi == 0) return;
+
+    ModulMB2 mod{};
+    if (!znajdz_modul_mb2(mbi, "test8k.bmp", &mod) || !mod.poprawny) {
+        return;
+    }
+
+    const uint64_t start = mod.start;
+    const uint64_t rozmiar = mod.rozmiar;
+    const char* sciezka_docelowa = "/uzytkownicy/Pulpit/test8k.bmp";
+
+    wypisz_log("[BSP] Znaleziono modul Multiboot2: test8k.bmp");
+
+    if (start == 0 || start >= 0x100000000ULL || mod.koniec > 0x100000000ULL ||
+        rozmiar == 0 || rozmiar > (256ULL * 1024ULL * 1024ULL)) {
+        wypisz_log("[BSP-BLAD] Nieprawidlowy zakres lub rozmiar modulu test8k.bmp.");
+        OdblokujZakres(start, rozmiar);
+        return;
+    }
+
+    const uint8_t* module_data = reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(start));
+
+    if (module_data[0] != 0x42 || module_data[1] != 0x4D) {
+        wypisz_log("[BSP-BLAD] Modul test8k.bmp nie posiada sygnatury BMP (0x42, 0x4D).");
+        OdblokujZakres(start, rozmiar);
+        return;
+    }
+
+    const uint32_t istniejacy_rozmiar = rozmiar_pliku(sciezka_docelowa);
+    if (istniejacy_rozmiar == static_cast<uint32_t>(rozmiar)) {
+        char hdr[2] = {0, 0};
+        uint32_t odczytano = 0;
+        if (czytaj_fragment_pliku(sciezka_docelowa, 0, hdr, 2, &odczytano) &&
+            odczytano == 2 &&
+            static_cast<uint8_t>(hdr[0]) == 0x42 &&
+            static_cast<uint8_t>(hdr[1]) == 0x4D) {
+            wypisz_log("[BSP] test8k.bmp juz istnieje - pomijam import.");
+            OdblokujZakres(start, rozmiar);
+            return;
+        }
+    }
+
+    (void)usun_twor(sciezka_docelowa);
+    if (!utworz_plik(sciezka_docelowa)) {
+        wypisz_log("[BSP-BLAD] Nie mozna utworzyc pliku /uzytkownicy/Pulpit/test8k.bmp w PSF.");
+        OdblokujZakres(start, rozmiar);
+        return;
+    }
+
+    wypisz_log("[BSP] Rozpoczynam strumieniowy import test8k.bmp do PSF...");
+
+    constexpr uint64_t CHUNK_SIZE = 256ULL * 1024ULL; // 256 KiB
+    uint64_t offset = 0;
+    bool zapis_sukces = true;
+
+    while (offset < rozmiar) {
+        const uint64_t pozostalo = rozmiar - offset;
+        const uint32_t chunk = (pozostalo > CHUNK_SIZE) ? static_cast<uint32_t>(CHUNK_SIZE) : static_cast<uint32_t>(pozostalo);
+        const char* chunk_ptr = reinterpret_cast<const char*>(module_data + offset);
+
+        if (!zapisz_fragment_pliku(sciezka_docelowa, offset, chunk_ptr, chunk)) {
+            zapis_sukces = false;
+            break;
+        }
+        offset += chunk;
+    }
+
+    if (!zapis_sukces) {
+        wypisz_log("[BSP-BLAD] Blad podczas strumieniowego zapisu test8k.bmp.");
+        (void)usun_twor(sciezka_docelowa);
+        OdblokujZakres(start, rozmiar);
+        return;
+    }
+
+    (void)psf_flush_cache();
+
+    const uint32_t psf_sz = rozmiar_pliku(sciezka_docelowa);
+    if (psf_sz != static_cast<uint32_t>(rozmiar)) {
+        wypisz_log("[BSP-BLAD] Mismatch rozmiaru test8k.bmp w PSF po zapisie.");
+        (void)usun_twor(sciezka_docelowa);
+        OdblokujZakres(start, rozmiar);
+        return;
+    }
+
+    char hdr_weryfikacja[2] = {0, 0};
+    uint32_t odczytano_weryfikacja = 0;
+    if (!czytaj_fragment_pliku(sciezka_docelowa, 0, hdr_weryfikacja, 2, &odczytano_weryfikacja) ||
+        odczytano_weryfikacja != 2 ||
+        static_cast<uint8_t>(hdr_weryfikacja[0]) != 0x42 ||
+        static_cast<uint8_t>(hdr_weryfikacja[1]) != 0x4D) {
+        wypisz_log("[BSP-BLAD] Blad weryfikacji naglowka BM w PSF dla test8k.bmp.");
+        (void)usun_twor(sciezka_docelowa);
+        OdblokujZakres(start, rozmiar);
+        return;
+    }
+
+    wypisz_log("[BSP] test8k.bmp zaimportowany pomyslnie do PSF.");
+
+    OdblokujZakres(start, rozmiar);
+    wypisz_log("[PMM] Pamiec fizyczna modulu test8k.bmp zwolniona do puli PMM.");
 }
 
 void instaluj_wbudowane_programy() {
@@ -1250,6 +1445,8 @@ void instaluj_wbudowane_programy() {
         test_plik_strumieniowy(126ULL * 1024ULL * 1024ULL, "126M", "[PSF-TEST-BIG] ");
     }
 #endif
+
+    importuj_modul_test8k(g_multiboot_info_ptr);
 }
 
 /* =========================================================================
@@ -1327,6 +1524,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
         zatrzymaj_start(
             "Brak wskaznika informacji Multiboot2.");
     }
+
+    g_multiboot_info_ptr = multiboot_info_ptr;
 
     /* ---------------------------------------------------------------------
      * Fundament CPU i pamieci
@@ -1416,11 +1615,22 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
      * Scheduler i kryptografia
      * ------------------------------------------------------------------ */
 
+    void* aktualne_pml4 =
+        PobierzAktualnePML4();
+    uint64_t aktualne_pml4_fiz = 0;
+
+    if (!WirtualnyDoFizycznego(
+            aktualne_pml4,
+            &aktualne_pml4_fiz)) {
+        zatrzymaj_start(
+            "Nie mozna wyznaczyc fizycznego CR3 jadra."
+        );
+    }
+
     InicjalizujPlaniste(
         reinterpret_cast<uint64_t>(
             stack_top),
-        reinterpret_cast<uint64_t>(
-            PobierzAktualnePML4()));
+        aktualne_pml4_fiz);
 
     wypisz_log(
         "[SCHED] PID 0 (idle) przygotowany.");

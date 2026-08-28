@@ -60,6 +60,7 @@
 #include "heap.h"
 #include "psf.h"
 #include "acpi.h"
+#include "sterowniki/czas/hpet.h"
 
 /* =========================================================================
  * PUBLICZNY STAN UZYWANY PRZEZ GUI / SYSCALL ASM
@@ -2555,12 +2556,24 @@ uint64_t bws_alokuj_sterte(
             break;
         }
 
-        /*
-         * PMM obecnie wydaje ramki ponizej 1 GiB, wiec fizyczny adres
-         * jest bezposrednio dostepny przez identity map kernela.
-         */
+        const uint64_t pa =
+            reinterpret_cast<uint64_t>(
+                ramka
+            );
+
+        void* ramka_wirtualna =
+            FizycznyZakresDoWirtualnego(
+                pa,
+                ROZMIAR_STRONY
+            );
+
+        if (!ramka_wirtualna) {
+            ZwolnijRamke(ramka);
+            break;
+        }
+
         wyzeruj(
-            ramka,
+            ramka_wirtualna,
             ROZMIAR_STRONY
         );
 
@@ -3583,11 +3596,17 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
             if (arg3 == 0) return 0;
             if (!czy_bezpieczny_zakres_uzytkownika_do_odczytu(reinterpret_cast<const void*>(arg3), (size_t)bytes)) return 0;
             if (bws_vmm_sprawdz_zakres_uzytkownika && !bws_vmm_sprawdz_zakres_uzytkownika(reinterpret_cast<const void*>(arg3), (size_t)bytes, false)) return 0;
-            BuforKernelowy tmp(bytes, false);
-            if (!tmp) return 0;
-            if (!skopiuj_z_przestrzeni_uzytkownika(tmp.get(), reinterpret_cast<const void*>(arg3), (size_t)bytes)) return 0;
+            /*
+             * Zakres Ring 3 zostal sprawdzony powyzej strona po stronie jako
+             * obecny i tylko do odczytu. Proces nie moze zostac przelaczony
+             * w trakcie obslugi SYSCALL, dlatego BWS57 moze czytac ten zakres
+             * bez posredniego kmalloc/kfree przy kazdej klatce. ABI BWS57 i
+             * wszystkie limity rozmiaru pozostaja bez zmian.
+             */
             BlokadaEkranu blokada;
-            return bws_gui_blit(x, y, szer, wys, static_cast<const uint32_t*>(tmp.get())) ? 1ULL : 0ULL;
+            return bws_gui_blit(
+                x, y, szer, wys,
+                reinterpret_cast<const uint32_t*>(arg3)) ? 1ULL : 0ULL;
         }
 
         case 58:
@@ -3609,14 +3628,23 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
             if (bws_vmm_sprawdz_zakres_uzytkownika && !bws_vmm_sprawdz_zakres_uzytkownika(reinterpret_cast<void*>(buf_u), len, true)) return 0;
             uint64_t end = 0;
             if (__builtin_add_overflow(offset, (uint64_t)len, &end)) return 0;
-            BuforKernelowy tmp(len, false);
-            if (!tmp) return 0;
+            /*
+             * Tak jak BWS57, zapisujemy bezposrednio do uprzednio
+             * zweryfikowanego, zapisywalnego zakresu aktywnego procesu.
+             * Usuwa to jedna alokacje i dodatkowa kopie na kazdy odczyt
+             * zakresowy, bez zmiany ABI BWS59 ani kodu PSF.
+             */
             uint32_t got = 0;
-            if (!czytaj_fragment_pliku(sciezka, offset, static_cast<char*>(tmp.get()), len, &got)) return 0;
+            if (!czytaj_fragment_pliku(
+                    sciezka, offset, reinterpret_cast<char*>(buf_u), len,
+                    &got)) return 0;
             if (got > len) return 0;
-            if (got > 0 && !skopiuj_do_przestrzeni_uzytkownika(reinterpret_cast<void*>(buf_u), tmp.get(), got)) return 0;
             return (uint64_t)got + 1ULL;
         }
+
+        case 60:
+            /* Addytywny, bezstanowy odczyt zegara; BWS57 pozostaje bez zmian. */
+            return hpet_dostepny() ? czas_monotoniczny_ns() : 0ULL;
 
         default:
             /*

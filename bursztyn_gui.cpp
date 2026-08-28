@@ -881,6 +881,10 @@ bool czytaj_fragment_pliku(const char* sciezka, uint64_t offset,
     return true;
 }
 
+uint64_t gui_czas_monotoniczny_ns() {
+    return bws_wywolaj(60, 0, 0, 0, 0);
+}
+
 bool gui_ustaw_popup_aplikacji(bool otwarty,
                                int x, int y, int szer, int wys) {
     return bws_wywolaj(56, otwarty ? 1ULL : 0ULL,
