@@ -161,8 +161,8 @@ bool skladanie_w_toku =
     false;
 GuiDirtyRect dirty_rects[SKLADACZ_MAKS_DIRTY_RECT] = {};
 uint32_t dirty_count = 0;
-bool cursor_pending=false;
-GuiDirtyRect cursor_old{},cursor_new{};
+bool cursor_pending = false;
+int cursor_new_x = 0, cursor_new_y = 0;
 struct PendingGeometry { bool pending; int x,y,old_x,old_y,width,height; };
 PendingGeometry pending_geometry[MAKS_WARSTW]{};
 uint64_t drag_moves_received=0,drag_moves_coalesced=0,drag_frames_presented=0;
@@ -261,8 +261,9 @@ GuiDirtyRect rect_union(const GuiDirtyRect&a,const GuiDirtyRect&b){
 }
 bool rect_merge_ok(const GuiDirtyRect&a,const GuiDirtyRect&b){
     GuiDirtyRect u=rect_union(a,b);uint64_t ua=rect_area(u),sum=rect_area(a)+rect_area(b);
-    bool touch=a.x<=b.x+b.width&&b.x<=a.x+a.width&&a.y<=b.y+b.height&&b.y<=a.y+a.height;
-    return touch||ua<=sum+sum/2;
+    bool touch_or_overlap=(a.x<b.x+b.width&&b.x<a.x+a.width&&a.y<=b.y+b.height&&b.y<=a.y+a.height)||
+                          (a.y<b.y+b.height&&b.y<a.y+a.height&&a.x<=b.x+b.width&&b.x<=a.x+a.width);
+    return touch_or_overlap||ua<=sum+sum/2;
 }
 
 #ifndef BURSZTYN_DEBUG_PERF
@@ -992,10 +993,18 @@ int utworz_warstwe(
 
     warstwa_obrazu& warstwa =
         tablica_warstw[pid];
+    PendingGeometry p_geom{};
     {
         const uint64_t f=irq_off();
-        pending_geometry[pid]={};
+        if(pending_geometry[pid].pending){
+            p_geom=pending_geometry[pid];
+            pending_geometry[pid]={};
+        }
         irq_restore(f);
+    }
+    if(p_geom.pending){
+        skladacz_obrazu_oznacz_dirty_rect(p_geom.old_x,p_geom.old_y,p_geom.width,p_geom.height);
+        skladacz_obrazu_oznacz_dirty_rect(p_geom.x,p_geom.y,p_geom.width,p_geom.height);
     }
     const bool nowe_okno = !warstwa_bufor_spojny(pid);
 
@@ -1067,7 +1076,8 @@ int utworz_warstwe(
             stan_okna[pid] = GUI_OKNO_NORMALNE;
         }
 
-        if(stary_bufor)skladacz_obrazu_oznacz_dirty_rect(stary_x,stary_y,stary_szer,stary_wys);
+        if(stary_bufor&&stary_szer>0&&stary_wys>0)
+            skladacz_obrazu_oznacz_dirty_rect(stary_x,stary_y,stary_szer,stary_wys);
         skladacz_obrazu_oznacz_dirty_rect(x,y,szer,wys);
         skladacz_obrazu_debug_warstwy("create/reuse");
         return pid;
@@ -1189,7 +1199,8 @@ int utworz_warstwe(
         );
     }
 
-    if(stary_bufor)skladacz_obrazu_oznacz_dirty_rect(stary_x,stary_y,stary_szer,stary_wys);
+    if(stary_bufor&&stary_szer>0&&stary_wys>0)
+        skladacz_obrazu_oznacz_dirty_rect(stary_x,stary_y,stary_szer,stary_wys);
     skladacz_obrazu_oznacz_dirty_rect(x,y,szer,wys);
     skladacz_obrazu_debug_warstwy("create");
     return pid;
@@ -1221,7 +1232,9 @@ void zaktualizuj_pozycje_warstwy(
     uint64_t f=irq_off();PendingGeometry& p=pending_geometry[pid];
     if(p.pending)++drag_moves_coalesced;
     else{p.old_x=warstwa->x;p.old_y=warstwa->y;p.width=warstwa->szerokosc;p.height=warstwa->wysokosc;p.pending=true;}
-    p.x=nowy_x;p.y=nowy_y;irq_restore(f);
+    p.x=nowy_x;p.y=nowy_y;
+    warstwa->x=nowy_x;warstwa->y=nowy_y;
+    irq_restore(f);
 }
 
 void skladacz_obrazu_zastosuj_pending_geometrii(int pid){apply_pending_geometry(pid);}
@@ -1295,9 +1308,13 @@ void usun_warstwe(
 
     warstwa_obrazu& warstwa =
         tablica_warstw[pid];
+    PendingGeometry p_geom{};
     {
         const uint64_t f=irq_off();
-        pending_geometry[pid]={};
+        if(pending_geometry[pid].pending){
+            p_geom=pending_geometry[pid];
+            pending_geometry[pid]={};
+        }
         irq_restore(f);
     }
     if (system_overlay.otwarty && system_overlay.pid == pid)
@@ -1336,7 +1353,12 @@ void usun_warstwe(
         pid;
 
     if (bufor) zwolnij_lub_odrocz(bufor, bajty);
-    skladacz_obrazu_oznacz_dirty_rect(stare_x, stare_y, stare_szer, stare_wys);
+    if(p_geom.pending){
+        skladacz_obrazu_oznacz_dirty_rect(p_geom.old_x,p_geom.old_y,p_geom.width,p_geom.height);
+        skladacz_obrazu_oznacz_dirty_rect(p_geom.x,p_geom.y,p_geom.width,p_geom.height);
+    }
+    if(stare_szer>0&&stare_wys>0)
+        skladacz_obrazu_oznacz_dirty_rect(stare_x, stare_y, stare_szer, stare_wys);
     skladacz_obrazu_debug_warstwy("remove");
 }
 
@@ -1669,6 +1691,8 @@ void skladacz_obrazu_zloz_klatke() {
         zloz_snapshot_region(oi, system_overlay.rect);
     }
 
+    grafika_naloz_okno_terminala_region(0, 0, ekran_szer, ekran_wys);
+
     /*
      * Zegar jest nakladka kernela, nie powierzchnia dowolnego procesu.
      */
@@ -1709,15 +1733,12 @@ void skladacz_obrazu_oznacz_dirty_rect(int x,int y,int width,int height){
 void skladacz_obrazu_oznacz_dirty_warstwy(int pid){warstwa_obrazu*w=pobierz_warstwe(pid);if(w)skladacz_obrazu_oznacz_dirty_rect(w->x,w->y,w->szerokosc,w->wysokosc);}
 
 void skladacz_obrazu_oznacz_ruch_kursora(int old_x,int old_y,int new_x,int new_y){
-    GuiDirtyRect oldr{old_x,old_y,16,16},newr{new_x,new_y,16,16};
+    (void)old_x; (void)old_y;
     const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
-    const bool old_ok=rect_clip(&oldr,sw,sh),new_ok=rect_clip(&newr,sw,sh);
-    if(!old_ok&&!new_ok)return;
-    if(!old_ok)oldr=newr;
-    if(!new_ok)newr=oldr;
+    if(sw<=0||sh<=0)return;
+    if(new_x<-16||new_y<-16||new_x>=sw+16||new_y>=sh+16)return;
     uint64_t f=irq_off();++licznik_dirty;++dirty_generation;
-    if(!cursor_pending)cursor_old=oldr;
-    cursor_new=newr;cursor_pending=true;
+    cursor_new_x=new_x;cursor_new_y=new_y;cursor_pending=true;
     irq_restore(f);
 }
 
@@ -1732,30 +1753,30 @@ void skladacz_obrazu_obsluz_dirty() {
     if(klatka_potrzebna&&hpet_dostepny()&&nastepna_klatka_ns&&now<nastepna_klatka_ns){
         /* Kursor nie czeka na pacing duzych warstw. Restore i overlay nadal
            wykonuje petla PID 0, nigdy IRQ myszy. */
-        GuiDirtyRect nowy{};bool ruch=false;
-        f=irq_off();if(cursor_pending){nowy=cursor_new;cursor_pending=false;ruch=true;}irq_restore(f);
-        if(ruch){grafika_prezentuj_kursor_w(nowy.x,nowy.y);++cursor_fast_present_count;}
+        int cx=0,cy=0;bool ruch=false;
+        f=irq_off();if(cursor_pending){cx=cursor_new_x;cy=cursor_new_y;cursor_pending=false;ruch=true;}irq_restore(f);
+        if(ruch){grafika_prezentuj_kursor_w(cx,cy);++cursor_fast_present_count;}
         if(hpet_dostepny())perf_log(now);
         return;
     }
     if(!klatka_potrzebna){
-        GuiDirtyRect nowy{};bool ruch=false;
-        f=irq_off();if(cursor_pending){nowy=cursor_new;cursor_pending=false;ruch=true;}irq_restore(f);
-        if(ruch){grafika_prezentuj_kursor_w(nowy.x,nowy.y);++cursor_fast_present_count;}
+        int cx=0,cy=0;bool ruch=false;
+        f=irq_off();if(cursor_pending){cx=cursor_new_x;cy=cursor_new_y;cursor_pending=false;ruch=true;}irq_restore(f);
+        if(ruch){grafika_prezentuj_kursor_w(cx,cy);++cursor_fast_present_count;}
         if(hpet_dostepny())perf_log(now);
         return;
     }
 
     if(hpet_dostepny())nastepna_klatka_ns=now>UINT64_MAX-ODSTEP_KLATKI_NS?UINT64_MAX:now+ODSTEP_KLATKI_NS;
     /* Geometria jest konsumowana dopiero przez klatke, dzieki czemu wiele
-       MOVE pomiedzy dwiema klatkami zastępuje poprzednia pozycje. */
+       MOVE pomiedzy dwiema klatkami zastepuje poprzednia pozycje. */
     apply_pending_geometry(-1);
     apply_pending_drag_overlay();
     bool drag_frame_work=false;
     f=irq_off();drag_frame_work=drag_frame_waiting;drag_frame_waiting=false;irq_restore(f);
-    GuiDirtyRect work[SKLADACZ_MAKS_DIRTY_RECT];uint32_t count=0;uint64_t generation_start;bool cursor_work=false;GuiDirtyRect old_cursor{},new_cursor{};
-    f=irq_off();count=dirty_count;for(uint32_t i=0;i<count;++i)work[i]=dirty_rects[i];dirty_count=0;cursor_work=cursor_pending;old_cursor=cursor_old;new_cursor=cursor_new;cursor_pending=false;generation_start=dirty_generation;irq_restore(f);
-    GuardSkladania guard;if(!guard.aktywny()){for(uint32_t i=0;i<count;++i)skladacz_obrazu_oznacz_dirty_rect(work[i].x,work[i].y,work[i].width,work[i].height);if(cursor_work)skladacz_obrazu_oznacz_ruch_kursora(old_cursor.x,old_cursor.y,new_cursor.x,new_cursor.y);if(drag_frame_work){f=irq_off();drag_frame_waiting=true;irq_restore(f);}return;}
+    GuiDirtyRect work[SKLADACZ_MAKS_DIRTY_RECT];uint32_t count=0;uint64_t generation_start;bool cursor_work=false;int cur_x=0,cur_y=0;
+    f=irq_off();count=dirty_count;for(uint32_t i=0;i<count;++i)work[i]=dirty_rects[i];dirty_count=0;cursor_work=cursor_pending;cur_x=cursor_new_x;cur_y=cursor_new_y;cursor_pending=false;generation_start=dirty_generation;irq_restore(f);
+    GuardSkladania guard;if(!guard.aktywny()){for(uint32_t i=0;i<count;++i)skladacz_obrazu_oznacz_dirty_rect(work[i].x,work[i].y,work[i].width,work[i].height);if(cursor_work)skladacz_obrazu_oznacz_ruch_kursora(cur_x,cur_y,cur_x,cur_y);if(drag_frame_work){f=irq_off();drag_frame_waiting=true;irq_restore(f);}return;}
     const uint64_t start=hpet_dostepny()?czas_monotoniczny_us():0;LayerRenderInfo layers[MAKS_WARSTW];int layer_count=0;
     if(count)layer_count=snapshot_warstw(layers);
     int overlay_x=0,overlay_y=0;bool overlay_widoczny=false;
@@ -1769,13 +1790,32 @@ void skladacz_obrazu_obsluz_dirty() {
     /* Faza A: wszystkie regiony trafiaja w calosci do scene backbufferu.
        Framebuffer nie jest dotykany podczas kosztownego compositingu. */
     const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
-    for(uint32_t ri=0;ri<count;++ri){const GuiDirtyRect&r=work[ri];pixels+=rect_area(r);grafika_odtworz_tlo_regionu(r.x,r.y,r.width,r.height);for(int li=0;li<layer_count;++li)zloz_snapshot_region(layers[li],r);rysuj_drag_overlay_region(r);zloz_popup_aplikacji(layers,layer_count,r);if(system_overlay.otwarty){for(int li=0;li<layer_count;++li)if(layers[li].pid==system_overlay.pid){GuiDirtyRect o=system_overlay.rect;int x0=o.x>r.x?o.x:r.x,y0=o.y>r.y?o.y:r.y,x1=o.x+o.width<r.x+r.width?o.x+o.width:r.x+r.width,y1=o.y+o.height<r.y+r.height?o.y+o.height:r.y+r.height;if(x0<x1&&y0<y1){GuiDirtyRect clip{x0,y0,x1-x0,y1-y0};zloz_snapshot_region(layers[li],clip);}break;}}if(r.x+r.width>sw-150&&r.y+r.height>sh-40)rysuj_zegar_rtc();}
+    const GuiDirtyRect rtc_rect{sw>150?sw-150:0,sh>40?sh-40:0,150,40};
+    for(uint32_t ri=0;ri<count;++ri){
+        const GuiDirtyRect&r=work[ri];
+        pixels+=rect_area(r);
+        grafika_odtworz_tlo_regionu(r.x,r.y,r.width,r.height);
+        for(int li=0;li<layer_count;++li)zloz_snapshot_region(layers[li],r);
+        rysuj_drag_overlay_region(r);
+        zloz_popup_aplikacji(layers,layer_count,r);
+        if(system_overlay.otwarty){
+            for(int li=0;li<layer_count;++li)
+                if(layers[li].pid==system_overlay.pid){
+                    GuiDirtyRect o=system_overlay.rect;
+                    int x0=o.x>r.x?o.x:r.x,y0=o.y>r.y?o.y:r.y,x1=o.x+o.width<r.x+r.width?o.x+o.width:r.x+r.width,y1=o.y+o.height<r.y+r.height?o.y+o.height:r.y+r.height;
+                    if(x0<x1&&y0<y1){GuiDirtyRect clip{x0,y0,x1-x0,y1-y0};zloz_snapshot_region(layers[li],clip);}
+                    break;
+                }
+        }
+        grafika_naloz_okno_terminala_region(r.x,r.y,r.width,r.height);
+        if(rect_przecina(r,rtc_rect))rysuj_zegar_rtc();
+    }
     const uint64_t compose_end=hpet_dostepny()?czas_monotoniczny_us():0;
     /* Faza B: prezentujemy dopiero gotowe wiersze, a kursor nakladamy raz,
        jako ostatni overlay. Scene backbuffer pozostaje bez kursora. */
     for(uint32_t ri=0;ri<count;++ri){const GuiDirtyRect&r=work[ri];grafika_prezentuj_region(r.x,r.y,r.width,r.height);}
     int cursor_x=overlay_x,cursor_y=overlay_y;
-    if(cursor_work){cursor_x=new_cursor.x;cursor_y=new_cursor.y;pixels+=rect_area(old_cursor);}
+    if(cursor_work){cursor_x=cur_x;cursor_y=cur_y;}
     else if(!overlay_widoczny)grafika_pobierz_pozycje_kursora(&cursor_x,&cursor_y);
     /* Scene nigdy nie zawiera kursora. Bez ruchu myszy overlay pozostaje
        nietkniety, dopoki dirty faktycznie nie przecina jego 16x16. */
@@ -1858,7 +1898,16 @@ bool skladacz_obrazu_czy_widoczna(int pid) {
 bool skladacz_obrazu_minimalizuj(int pid) {
     if (!pid_poprawny(pid) || !warstwa_bufor_spojny(pid) ||
         !widocznosc_warstwy[pid]) return false;
-    const warstwa_obrazu& w = tablica_warstw[pid];
+    warstwa_obrazu& w = tablica_warstw[pid];
+    PendingGeometry p_geom{};
+    {
+        const uint64_t f=irq_off();
+        if(pending_geometry[pid].pending){
+            p_geom=pending_geometry[pid];
+            pending_geometry[pid]={};
+        }
+        irq_restore(f);
+    }
     widocznosc_warstwy[pid] = false;
     if (application_popup.pid == pid)
         skladacz_obrazu_ustaw_popup_aplikacji(pid, false, 0, 0, 0, 0);
@@ -1866,7 +1915,13 @@ bool skladacz_obrazu_minimalizuj(int pid) {
         (pending_drag_overlay.pending && pending_drag_overlay.pid == pid))
         skladacz_obrazu_ustaw_drag_overlay(pid, false, 0, 0);
     stan_okna[pid] = GUI_OKNO_ZMINIMALIZOWANE;
-    skladacz_obrazu_oznacz_dirty_rect(w.x, w.y, w.szerokosc, w.wysokosc);
+    if (p_geom.pending) {
+        w.x = p_geom.x; w.y = p_geom.y;
+        skladacz_obrazu_oznacz_dirty_rect(p_geom.old_x, p_geom.old_y, p_geom.width, p_geom.height);
+        skladacz_obrazu_oznacz_dirty_rect(p_geom.x, p_geom.y, p_geom.width, p_geom.height);
+    } else {
+        skladacz_obrazu_oznacz_dirty_rect(w.x, w.y, w.szerokosc, w.wysokosc);
+    }
     return true;
 }
 

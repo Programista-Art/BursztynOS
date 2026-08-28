@@ -242,21 +242,19 @@ protected:
         if (!bufor || !framebuffer_fizyczny || bpp != 32)
             return;
 
-        const uint64_t bajtow =
-            static_cast<uint64_t>(pitch) *
-            static_cast<uint64_t>(wysokosc);
-
-        volatile uint32_t* dst =
-            reinterpret_cast<volatile uint32_t*>(
-                framebuffer_fizyczny);
-
-        const uint32_t* src =
-            reinterpret_cast<const uint32_t*>(bufor);
-
-        const uint64_t slow = bajtow / sizeof(uint32_t);
-
-        for (uint64_t i = 0; i < slow; ++i)
-            dst[i] = src[i];
+        for (uint32_t rzad = 0; rzad < wysokosc; ++rzad) {
+            const uint64_t offset =
+                static_cast<uint64_t>(rzad) * static_cast<uint64_t>(pitch);
+            volatile uint32_t* dst =
+                reinterpret_cast<volatile uint32_t*>(
+                    framebuffer_fizyczny + offset);
+            const uint32_t* src =
+                reinterpret_cast<const uint32_t*>(
+                    bufor + offset);
+            for (uint32_t x = 0; x < szerokosc; ++x) {
+                dst[x] = src[x];
+            }
+        }
     }
 
     void KopiujFragment32(uint8_t* bufor,
@@ -278,16 +276,16 @@ protected:
         if (start_y < 0) start_y = 0;
 
         if (end_x > static_cast<int64_t>(szerokosc))
-            end_x = szerokosc;
+            end_x = static_cast<int64_t>(szerokosc);
 
         if (end_y > static_cast<int64_t>(wysokosc))
-            end_y = wysokosc;
+            end_y = static_cast<int64_t>(wysokosc);
 
         if (start_x >= end_x || start_y >= end_y)
             return;
 
-        const uint64_t bajtow_w_wierszu =
-            static_cast<uint64_t>(end_x - start_x) * 4ULL;
+        const uint32_t pikseli_w_wierszu =
+            static_cast<uint32_t>(end_x - start_x);
 
         for (int64_t rzad = start_y; rzad < end_y; ++rzad) {
             const uint64_t offset =
@@ -295,13 +293,16 @@ protected:
                     static_cast<uint64_t>(pitch) +
                 static_cast<uint64_t>(start_x) * 4ULL;
 
-            volatile uint64_t* dst64=reinterpret_cast<volatile uint64_t*>(framebuffer_fizyczny+offset);
-            const uint64_t* src64=reinterpret_cast<const uint64_t*>(bufor+offset);
-            const uint64_t slow64=bajtow_w_wierszu/8ULL;
-            for(uint64_t i=0;i<slow64;++i)dst64[i]=src64[i];
-            if(bajtow_w_wierszu&4ULL){
-                volatile uint32_t* d32=reinterpret_cast<volatile uint32_t*>(framebuffer_fizyczny+offset+slow64*8ULL);
-                const uint32_t* s32=reinterpret_cast<const uint32_t*>(bufor+offset+slow64*8ULL);*d32=*s32;
+            volatile uint32_t* dst =
+                reinterpret_cast<volatile uint32_t*>(
+                    framebuffer_fizyczny + offset);
+
+            const uint32_t* src =
+                reinterpret_cast<const uint32_t*>(
+                    bufor + offset);
+
+            for (uint32_t i = 0; i < pikseli_w_wierszu; ++i) {
+                dst[i] = src[i];
             }
         }
     }
@@ -1256,12 +1257,12 @@ static size_t dekoduj_utf8_renderera(const char* tekst, size_t i,
     return 4;
 }
 
-void WypiszTekst(const char* tekst,
-                 int px,
-                 int py,
-                 uint32_t kolor_tekstu,
-                 int skala) {
-    if (!tekst) return;
+int WypiszTekst(const char* tekst,
+                int px,
+                int py,
+                uint32_t kolor_tekstu,
+                int skala) {
+    if (!tekst) return 0;
 
     skala = ogranicz_skale(skala);
 
@@ -1306,6 +1307,8 @@ void WypiszTekst(const char* tekst,
 
         i += zuzyte;
     }
+
+    return static_cast<int>(pozycja_x - px);
 }
 
 // =========================================================================
@@ -2864,16 +2867,13 @@ extern "C" void bws_gui_wypisz_tekst(int x,
         return;
     }
 
-    WypiszTekst(
+    const int szer_px = WypiszTekst(
         text_bezp,
         x,
         y,
         0x00D1D5DB,
         1);
-    int dl=0;while(text_bezp[dl]&&dl<static_cast<int>(MAX_TEKST_GUI_BWS-1U))++dl;
-    /* Glif ma dokladnie 16 pikseli wysokosci; dodatkowe 2 px nie moga
-       rozszerzac jednowierszowego dirty Notatnika na sasiedni visual row. */
-    zapamietaj_dirty_rysowania(x,y,dl*9,16);
+    zapamietaj_dirty_rysowania(x, y, szer_px, 16);
 }
 
 extern "C" void bws_gui_wyczyscz_obszar(int x,
@@ -3006,14 +3006,13 @@ extern "C" void bws_gui_wypisz_tekst_kolor(
         return;
     }
 
-    WypiszTekst(
+    const int szer_px = WypiszTekst(
         text_bezp,
         x,
         y,
         kolor,
         skala);
-    int dl=0;while(text_bezp[dl]&&dl<static_cast<int>(MAX_TEKST_GUI_BWS-1U))++dl;
-    zapamietaj_dirty_rysowania(x,y,dl*9*skala,16*skala);
+    zapamietaj_dirty_rysowania(x, y, szer_px, 16 * skala);
 }
 
 extern "C" void bws_gui_rysuj_prostokat(

@@ -104,7 +104,7 @@ void RysujZnak(uint32_t unicode,
                bool przezroczyste_tlo,
                int skala);
 
-void WypiszTekst(const char* tekst,
+int WypiszTekst(const char* tekst,
                  int x,
                  int y,
                  uint32_t kolor_tekstu,
