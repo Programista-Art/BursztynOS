@@ -50,6 +50,9 @@ constexpr int WIN_W0 = 740;
 constexpr int WIN_H0 = 500;
 constexpr int WIN_MIN_W = 360;
 constexpr int WIN_MIN_H = 260;
+constexpr int BELKA_H = 28;
+constexpr int STATUS_H = 22;
+constexpr int IMAGE_MARGIN = 2;
 
 constexpr uint32_t MAX_W = 8192;
 constexpr uint32_t MAX_H = 8192;
@@ -70,13 +73,16 @@ constexpr int BWS57_MAX_DIM = 2048;
 constexpr uint64_t FRAME_NS = 16666667ULL;
 constexpr size_t EVENT_BATCH = 64U;
 constexpr uint32_t FIT_ROW_CACHE_ROWS = 1U;
-constexpr uint32_t FIT_MAX_SOURCE_ROWS = 128U;
 
 // kolory
 constexpr uint32_t KOLOR_TLO = 0x00101010U;
 constexpr uint32_t KOLOR_STATUS_BG = 0x00201500U;
 constexpr uint32_t KOLOR_STATUS_TXT = 0x00FFFFFFU;
 constexpr uint32_t KOLOR_ERROR = 0x00FF5555U;
+constexpr uint32_t KOLOR_PRZYCISK = 0x00352A16U;
+constexpr uint32_t KOLOR_PRZYCISK_HOVER = 0x00483A20U;
+constexpr uint32_t KOLOR_PRZYCISK_AKTYWNY = 0x00A86D12U;
+constexpr uint32_t KOLOR_PRZYCISK_RAMKA = 0x00D8A43BU;
 
 // techniczny czarny - widoczna czerń zamiast 0x00000000 (klucz przezroczystości)
 constexpr uint32_t TECHNICZNY_CZARNY = 0x01000000U;
@@ -213,6 +219,10 @@ int pan_start_my = 0;
 int pan_start_vx = 0;
 int pan_start_vy = 0;
 
+enum class Kontrolka : uint8_t { BRAK, JEDEN_DO_JEDNEGO, DOPASUJ };
+Kontrolka kontrolka_hover = Kontrolka::BRAK;
+Kontrolka kontrolka_wcisnieta = Kontrolka::BRAK;
+
 char aktualna_sciezka[512] = {0};
 char status_txt[256] = {0};
 char blad_txt[128] = {0};
@@ -252,8 +262,16 @@ struct CacheViewportu {
 
 struct CacheDopasowania {
     bool valid;
+    uint64_t generation;
     int area_w;
     int area_h;
+};
+
+struct ProstokatObrazu {
+    int x;
+    int y;
+    int w;
+    int h;
 };
 
 struct SlotCacheWierszy {
@@ -272,6 +290,7 @@ size_t viewport_capacity = 0;
 SlotCacheWierszy row_cache_slots[MAX_ROW_CACHE_SLOTS] = {};
 uint32_t row_cache_slot_count = 0;
 uint64_t row_cache_clock = 0;
+uint64_t image_generation = 0;
 CacheViewportu viewport_cache{};
 CacheDopasowania fit_cache{};
 ProfilRedraw profil{};
@@ -279,6 +298,18 @@ bool profil_aktywny = false;
 bool profil_gotowy = false;
 uint64_t profil_start_ns = 0;
 bws_zdarzenie event_buf[EVENT_BATCH] = {};
+
+ProstokatObrazu pobierz_prostokat_obrazu() {
+    ProstokatObrazu r{
+        win_x + IMAGE_MARGIN,
+        win_y + BELKA_H + IMAGE_MARGIN,
+        win_w - 2 * IMAGE_MARGIN,
+        win_h - BELKA_H - STATUS_H - 2 * IMAGE_MARGIN
+    };
+    if (r.w < 0) r.w = 0;
+    if (r.h < 0) r.h = 0;
+    return r;
+}
 
 void* profilowany_malloc(unsigned long bytes) {
     if (profil_aktywny) ++profil.allocations;
@@ -469,6 +500,8 @@ void aktualizuj_pasek_statusu() {
     kopiuj_txt(status_txt, sizeof(status_txt), s);
 }
 
+bool aktywuj_tryb(TrybSkalowania nowy, bool nowy_obraz = false);
+
 /* =========================================================================
  * 6. OTWIERANIE PLIKU
  * ========================================================================= */
@@ -520,8 +553,11 @@ bool wczytaj_obraz(const char* sciezka) {
         return false;
     }
 
-    tryb = TrybSkalowania::DOPASUJ;
-    aktualizuj_pasek_statusu();
+    ++image_generation;
+    if (image_generation == 0) ++image_generation;
+    /* Otwieranie, D i przycisk przechodza przez aktywuj_tryb(). Dla nowego
+       obrazu ta funkcja synchronicznie buduje kompletny cache FIT. */
+    (void)aktywuj_tryb(TrybSkalowania::DOPASUJ, true);
 
     char tyt[96] = {};
     kopiuj_txt(tyt, sizeof(tyt), "Przeglądarka Obrazów");
@@ -688,7 +724,7 @@ bool prefetch_jeden_blok_1do1() {
     if (!img_valid || tryb != TrybSkalowania::JEDEN_DO_JEDNEGO ||
         row_cache_slot_count < 2 || img_h == 0) return false;
 
-    const int area_h = win_h - 28 - 22 - 4;
+    const int area_h = pobierz_prostokat_obrazu().h;
     if (area_h <= 0 || view_y < 0) return false;
     uint32_t visible_h = static_cast<uint32_t>(area_h);
     const uint32_t start_y = static_cast<uint32_t>(view_y);
@@ -852,7 +888,11 @@ bool przesun_zawartosc_viewportu(int area_w, int area_h,
     return true;
 }
 
-bool blit_viewport(int x, int y, int w, int h, const uint32_t* bufor) {
+bool blit_viewport(const ProstokatObrazu& obszar, const uint32_t* bufor) {
+    const int x = obszar.x;
+    const int y = obszar.y;
+    const int w = obszar.w;
+    const int h = obszar.h;
     if (!bufor || w <= 0 || h <= 0) return false;
     uint64_t pixels = 0;
     if (!mnoz_u64(static_cast<uint64_t>(w), static_cast<uint64_t>(h), &pixels) ||
@@ -879,6 +919,7 @@ bool blit_viewport(int x, int y, int w, int h, const uint32_t* bufor) {
                         bufor[src + static_cast<size_t>(dx)];
                 }
             }
+            if (!poprawny_prostokat(tx, ty, tile_w, tile_h, w, h)) return false;
             if (!profilowany_blit(x + tx, y + ty, tile_w, tile_h, kafel_buf)) ok = false;
         }
     }
@@ -886,11 +927,14 @@ bool blit_viewport(int x, int y, int w, int h, const uint32_t* bufor) {
 }
 
 bool renderuj_dopasowany(int aw, int ah) {
-    if (fit_cache.valid && fit_cache.area_w == aw && fit_cache.area_h == ah) {
+    if (fit_cache.valid && fit_cache.generation == image_generation &&
+        fit_cache.area_w == aw && fit_cache.area_h == ah) {
         return true;
     }
 
     if (!fit_buf) return false;
+    /* Bufor moze byc widoczny dopiero po ukonczeniu wszystkich wierszy. */
+    fit_cache.valid = false;
     wypelnij_bufor(fit_buf, aw, ah, KOLOR_TLO);
     uint64_t scale_w = (static_cast<uint64_t>(aw) * 65536ULL) / img_w;
     uint64_t scale_h = (static_cast<uint64_t>(ah) * 65536ULL) / img_h;
@@ -905,72 +949,59 @@ bool renderuj_dopasowany(int aw, int ah) {
     const int off_x = (aw - dst_w) / 2;
     const int off_y = (ah - dst_h) / 2;
 
-    const uint32_t bpp = img_bpp;
+    const uint32_t bytes_per_pixel = img_bpp / 8U;
     const size_t aw_sz = static_cast<size_t>(aw);
-    const uint32_t source_rows = static_cast<uint32_t>(dst_h) < FIT_MAX_SOURCE_ROWS
-        ? static_cast<uint32_t>(dst_h) : FIT_MAX_SOURCE_ROWS;
-    if (source_rows == 0) return false;
 
     for (int dy = 0; dy < dst_h; ++dy) {
-        uint32_t preview_y = static_cast<uint32_t>(
-            (static_cast<uint64_t>(dy) * source_rows) /
-            static_cast<uint64_t>(dst_h));
-        if (preview_y >= source_rows) preview_y = source_rows - 1U;
-        uint32_t src_y = static_cast<uint32_t>(
-            (static_cast<uint64_t>(preview_y) * img_h) /
-            static_cast<uint64_t>(source_rows));
-        if (src_y >= img_h) src_y = img_h - 1U;
-        /* Fit jest miniatura: ograniczona liczba probek pionowych zapobiega
-           setkom losowych odczytow. 1:1 zachowuje pelna jakosc i paczki 32. */
-        const uint8_t* row =
-            wczytaj_wiersz_bmp(src_y, FIT_ROW_CACHE_ROWS);
-        if (!row) return false;
+        int64_t sy_fp = static_cast<int64_t>(
+            ((static_cast<uint64_t>(2 * dy + 1) * img_h) << 15) /
+            static_cast<uint64_t>(dst_h)) - 32768;
+        if (sy_fp < 0) sy_fp = 0;
+        const int64_t max_sy_fp = static_cast<int64_t>(img_h - 1U) << 16;
+        if (sy_fp > max_sy_fp) sy_fp = max_sy_fp;
+        const uint32_t sy0 = static_cast<uint32_t>(sy_fp >> 16);
+        const uint32_t sy1 = sy0 + 1U < img_h ? sy0 + 1U : sy0;
+        const uint32_t fy = static_cast<uint32_t>(sy_fp) & 0xFFFFU;
+        const uint8_t* row0 = wczytaj_wiersz_bmp(sy0, FIT_ROW_CACHE_ROWS);
+        const uint8_t* row1 = wczytaj_wiersz_bmp(sy1, FIT_ROW_CACHE_ROWS);
+        if (!row0 || !row1) return false;
         const size_t dst_row = static_cast<size_t>(off_y + dy) * aw_sz + static_cast<size_t>(off_x);
         if (dst_row > viewport_capacity ||
             static_cast<size_t>(dst_w) > viewport_capacity - dst_row) return false;
 
         uint32_t* dst_ptr = fit_buf + dst_row;
 
-        if (bpp == 32) {
-            for (int dx = 0; dx < dst_w; ++dx) {
-                uint32_t src_x = static_cast<uint32_t>(
-                    (static_cast<uint64_t>(dx) * img_w) / static_cast<uint64_t>(dst_w));
-                if (src_x >= img_w) src_x = img_w - 1U;
-                const size_t byte_off = static_cast<size_t>(src_x) * 4U;
-                if (byte_off + 3U >= img_stride) {
-                    dst_ptr[dx] = TECHNICZNY_CZARNY;
-                    continue;
-                }
-                uint32_t b = row[byte_off];
-                uint32_t g = row[byte_off + 1U];
-                uint32_t r = row[byte_off + 2U];
-                uint32_t col = (r << 16) | (g << 8) | b;
-                if (col == 0) col = TECHNICZNY_CZARNY;
-                dst_ptr[dx] = col;
+        for (int dx = 0; dx < dst_w; ++dx) {
+            int64_t sx_fp = static_cast<int64_t>(
+                ((static_cast<uint64_t>(2 * dx + 1) * img_w) << 15) /
+                static_cast<uint64_t>(dst_w)) - 32768;
+            if (sx_fp < 0) sx_fp = 0;
+            const int64_t max_sx_fp = static_cast<int64_t>(img_w - 1U) << 16;
+            if (sx_fp > max_sx_fp) sx_fp = max_sx_fp;
+            const uint32_t sx0 = static_cast<uint32_t>(sx_fp >> 16);
+            const uint32_t sx1 = sx0 + 1U < img_w ? sx0 + 1U : sx0;
+            const uint32_t fx = static_cast<uint32_t>(sx_fp) & 0xFFFFU;
+            const size_t o0 = static_cast<size_t>(sx0) * bytes_per_pixel;
+            const size_t o1 = static_cast<size_t>(sx1) * bytes_per_pixel;
+            if (o0 + 3U > img_stride || o1 + 3U > img_stride) return false;
+
+            uint32_t kanal[3] = {};
+            for (uint32_t c = 0; c < 3; ++c) {
+                const uint32_t a = row0[o0 + c];
+                const uint32_t b = row0[o1 + c];
+                const uint32_t d = row1[o0 + c];
+                const uint32_t e = row1[o1 + c];
+                const uint32_t gora = (a * (65536U - fx) + b * fx + 32768U) >> 16;
+                const uint32_t dol = (d * (65536U - fx) + e * fx + 32768U) >> 16;
+                kanal[c] = (gora * (65536U - fy) + dol * fy + 32768U) >> 16;
             }
-        } else if (bpp == 24) {
-            for (int dx = 0; dx < dst_w; ++dx) {
-                uint32_t src_x = static_cast<uint32_t>(
-                    (static_cast<uint64_t>(dx) * img_w) / static_cast<uint64_t>(dst_w));
-                if (src_x >= img_w) src_x = img_w - 1U;
-                const size_t byte_off = static_cast<size_t>(src_x) * 3U;
-                if (byte_off + 3U > img_stride) {
-                    dst_ptr[dx] = TECHNICZNY_CZARNY;
-                    continue;
-                }
-                uint32_t b = row[byte_off];
-                uint32_t g = row[byte_off + 1U];
-                uint32_t r = row[byte_off + 2U];
-                uint32_t col = (r << 16) | (g << 8) | b;
-                if (col == 0) col = TECHNICZNY_CZARNY;
-                dst_ptr[dx] = col;
-            }
-        } else {
-            return false;
+            uint32_t col = (kanal[2] << 16) | (kanal[1] << 8) | kanal[0];
+            if (col == 0) col = TECHNICZNY_CZARNY;
+            dst_ptr[dx] = col;
         }
     }
 
-    fit_cache = CacheDopasowania{true, aw, ah};
+    fit_cache = CacheDopasowania{true, image_generation, aw, ah};
     return true;
 }
 
@@ -1039,17 +1070,40 @@ bool renderuj_1do1(int aw, int ah) {
     return true;
 }
 
+/* Jedyna sciezka zmiany trybu. OPEN_FILE, przyciski i klawiatura wywoluja
+   te sama funkcje i ten sam renderer cache, zanim obraz trafi do warstwy. */
+bool aktywuj_tryb(TrybSkalowania nowy, bool nowy_obraz) {
+    const bool zmiana = tryb != nowy;
+    tryb = nowy;
+    if (nowy_obraz) {
+        uniewaznij_cache_wierszy();
+        viewport_cache.valid = false;
+        fit_cache = CacheDopasowania{};
+        view_x = 0;
+        view_y = 0;
+    }
+
+    if (img_valid) {
+        const ProstokatObrazu obszar = pobierz_prostokat_obrazu();
+        if (obszar.w > 0 && obszar.h > 0) {
+            if (nowy == TrybSkalowania::DOPASUJ)
+                (void)renderuj_dopasowany(obszar.w, obszar.h);
+            else
+                (void)renderuj_1do1(obszar.w, obszar.h);
+        }
+        aktualizuj_pasek_statusu();
+    }
+    return zmiana || nowy_obraz;
+}
+
 void rysuj_obraz() {
     if (zminimalizowane) return;
 
-    const int BELKA_H = 28;
-    const int STATUS_H = 22;
-    const int MARGIN = 2;
-
-    int ax = win_x + MARGIN;
-    int ay = win_y + BELKA_H + MARGIN;
-    int aw = win_w - 2 * MARGIN;
-    int ah = win_h - BELKA_H - STATUS_H - 2 * MARGIN;
+    const ProstokatObrazu obszar = pobierz_prostokat_obrazu();
+    const int ax = obszar.x;
+    const int ay = obszar.y;
+    const int aw = obszar.w;
+    const int ah = obszar.h;
 
     if (aw <= 0 || ah <= 0) return;
 
@@ -1077,11 +1131,82 @@ void rysuj_obraz() {
     const bool ok = dopasuj ? renderuj_dopasowany(aw, ah)
                             : renderuj_1do1(aw, ah);
     if (ok) {
-        (void)blit_viewport(
-            ax, ay, aw, ah, dopasuj ? fit_buf : viewport_buf);
+        (void)blit_viewport(obszar, dopasuj ? fit_buf : viewport_buf);
     }
     zakoncz_profil();
     aktualizuj_pasek_statusu();
+}
+
+void geometria_przyciskow(int* y, int* x_1do1, int* x_fit) {
+    constexpr int W_1DO1 = 50;
+    constexpr int ODSTEP = 4;
+    constexpr int W_FIT = 76;
+    const int sx = win_x + 1;
+    const int sw = win_w - 2;
+    const int szerokosc = W_1DO1 + ODSTEP + W_FIT;
+    int start = sx + (sw - szerokosc) / 2;
+    if (start < sx) start = sx;
+    if (y) *y = win_y + win_h - STATUS_H - 1;
+    if (x_1do1) *x_1do1 = start;
+    if (x_fit) *x_fit = start + W_1DO1 + ODSTEP;
+}
+
+Kontrolka hit_test_kontrolek(int mx, int my) {
+    int y = 0, x_1do1 = 0, x_fit = 0;
+    geometria_przyciskow(&y, &x_1do1, &x_fit);
+    if (my < y + 2 || my >= y + 20) return Kontrolka::BRAK;
+    if (mx >= x_1do1 && mx < x_1do1 + 50) return Kontrolka::JEDEN_DO_JEDNEGO;
+    if (mx >= x_fit && mx < x_fit + 76) return Kontrolka::DOPASUJ;
+    return Kontrolka::BRAK;
+}
+
+void rysuj_przycisk_trybu(int x, int y, int w, const char* tekst,
+                          Kontrolka kontrolka, bool aktywny) {
+    uint32_t kolor = aktywny ? KOLOR_PRZYCISK_AKTYWNY : KOLOR_PRZYCISK;
+    if (kontrolka_hover == kontrolka && !aktywny) kolor = KOLOR_PRZYCISK_HOVER;
+    if (kontrolka_wcisnieta == kontrolka) kolor = KOLOR_PRZYCISK_AKTYWNY;
+    gui_rysuj_prostokat(x, y, w, 18, KOLOR_PRZYCISK_RAMKA);
+    gui_rysuj_prostokat(x + 1, y + 1, w - 2, 16, kolor);
+    const int tw = oblicz_szerokosc_tekstu(tekst, 1);
+    gui_wypisz_tekst_kolor(x + (w - tw) / 2, y + 4, KOLOR_STATUS_TXT, tekst);
+}
+
+void rysuj_pasek_kontrolek() {
+    const int sx = win_x + 1;
+    const int sy = win_y + win_h - STATUS_H - 1;
+    const int sw = win_w - 2;
+    if (sw <= 0) return;
+
+    gui_rysuj_prostokat(sx, sy, sw, STATUS_H, KOLOR_STATUS_BG);
+    int by = 0, x_1do1 = 0, x_fit = 0;
+    geometria_przyciskow(&by, &x_1do1, &x_fit);
+
+    /* Tekst statusu jest przycinany przed centralnymi przyciskami. */
+    const int max_text_w = x_1do1 - (sx + 6) - 6;
+    if (max_text_w > 0) {
+        const char* zrodlo = status_txt[0] ? status_txt
+            : (blad_txt[0] ? blad_txt : "1 / D: tryb | WASD: przesuwanie");
+        char widoczny[256] = {};
+        size_t n = 0;
+        while (zrodlo[n] && n + 1 < sizeof(widoczny)) {
+            widoczny[n] = zrodlo[n];
+            widoczny[n + 1] = '\0';
+            if (oblicz_szerokosc_tekstu(widoczny, 1) > max_text_w) {
+                widoczny[n] = '\0';
+                break;
+            }
+            ++n;
+        }
+        gui_wypisz_tekst_kolor(sx + 6, sy + 6,
+            blad_txt[0] && !status_txt[0] ? KOLOR_ERROR : KOLOR_STATUS_TXT,
+            widoczny);
+    }
+    rysuj_przycisk_trybu(x_1do1, by + 2, 50, "1:1",
+        Kontrolka::JEDEN_DO_JEDNEGO,
+        tryb == TrybSkalowania::JEDEN_DO_JEDNEGO);
+    rysuj_przycisk_trybu(x_fit, by + 2, 76, "Dopasuj",
+        Kontrolka::DOPASUJ, tryb == TrybSkalowania::DOPASUJ);
+
 }
 
 void rysuj_interfejs(bool pelne) {
@@ -1105,33 +1230,16 @@ void rysuj_interfejs(bool pelne) {
     gui_rysuj_standardowa_belke(win_x, win_y, win_w, tytul, zmaksymalizowane);
     rysuj_obraz();
 
-    const int STATUS_H = 22;
-    int sx = win_x + 1;
-    int sy = win_y + win_h - STATUS_H - 1;
-    int sw = win_w - 2;
-
-    if (sw > 0) {
-        gui_rysuj_prostokat(sx, sy, sw, STATUS_H, KOLOR_STATUS_BG);
-        if (status_txt[0]) {
-            gui_wypisz_tekst_kolor(sx + 6, sy + 6, KOLOR_STATUS_TXT, status_txt);
-        } else if (blad_txt[0]) {
-            gui_wypisz_tekst_kolor(sx + 6, sy + 6, KOLOR_ERROR, blad_txt);
-        } else {
-            gui_wypisz_tekst_kolor(sx + 6, sy + 6, KOLOR_STATUS_TXT,
-                "1: Tryb 1:1 | Shift+D: Dopasuj | WASD / Strzałki: Przesuwanie");
-        }
-    }
+    rysuj_pasek_kontrolek();
 
     gui_odswiez();
 }
 
 bool przesun_widok(int dx, int dy) {
     if (tryb != TrybSkalowania::JEDEN_DO_JEDNEGO || !img_valid) return false;
-    const int BELKA_H = 28;
-    const int STATUS_H = 22;
-    const int MARGIN = 2;
-    int aw = win_w - 2 * MARGIN;
-    int ah = win_h - BELKA_H - STATUS_H - 2 * MARGIN;
+    const ProstokatObrazu obszar = pobierz_prostokat_obrazu();
+    const int aw = obszar.w;
+    const int ah = obszar.h;
 
     int maxX = (static_cast<int>(img_w) > aw) ? (static_cast<int>(img_w) - aw) : 0;
     int maxY = (static_cast<int>(img_h) > ah) ? (static_cast<int>(img_h) - ah) : 0;
@@ -1221,6 +1329,7 @@ extern "C" __attribute__((noreturn)) void _start() {
 
     bool wyjdz = false;
     bool redraw = true;
+    bool redraw_controls = false;
     bool pelne = true;
     uint64_t ostatnia_klatka_ns = 0;
 
@@ -1239,10 +1348,15 @@ extern "C" __attribute__((noreturn)) void _start() {
             if (termin) {
                 rysuj_interfejs(pelne);
                 redraw = false;
+                redraw_controls = false;
                 pelne = false;
                 const uint64_t po_klatce = gui_czas_monotoniczny_ns();
                 ostatnia_klatka_ns = po_klatce != 0 ? po_klatce : teraz;
             }
+        } else if (redraw_controls && !zminimalizowane) {
+            rysuj_pasek_kontrolek();
+            gui_odswiez();
+            redraw_controls = false;
         }
 
         bool mamy_zdarzenie = false;
@@ -1301,19 +1415,39 @@ extern "C" __attribute__((noreturn)) void _start() {
             bool klik = (ev.typ == BWS_ZDARZENIE_MYSZ_DOWN);
             bool puszczenie = (ev.typ == BWS_ZDARZENIE_MYSZ_UP);
 
-            const int BELKA_H = 28;
-            const int STATUS_H = 22;
-            const int MARGIN = 2;
-            int ax = win_x + MARGIN;
-            int ay = win_y + BELKA_H + MARGIN;
-            int aw = win_w - 2 * MARGIN;
-            int ah = win_h - BELKA_H - STATUS_H - 2 * MARGIN;
+            const ProstokatObrazu obszar_obrazu = pobierz_prostokat_obrazu();
+            const int ax = obszar_obrazu.x;
+            const int ay = obszar_obrazu.y;
+            const int aw = obszar_obrazu.w;
+            const int ah = obszar_obrazu.h;
+
+            if (!zminimalizowane && ev.typ == BWS_ZDARZENIE_MYSZ_RUCH &&
+                !dragging_window && !panning_image) {
+                const Kontrolka nowy_hover = hit_test_kontrolek(mx, my);
+                if (nowy_hover != kontrolka_hover) {
+                    kontrolka_hover = nowy_hover;
+                    redraw_controls = true;
+                }
+            }
 
             if (klik && !zminimalizowane) {
                 bool wOknie = (mx >= win_x && mx < win_x + win_w && my >= win_y && my < win_y + win_h);
                 if (wOknie) {
+                    const Kontrolka kontrolka = hit_test_kontrolek(mx, my);
                     gui_akcja_belki akcja = gui_hit_test_belki(mx, my, win_x, win_y, win_w);
-                    if (akcja == GUI_BELKA_ZAMKNIJ) {
+                    if (kontrolka != Kontrolka::BRAK) {
+                        kontrolka_wcisnieta = kontrolka;
+                        const TrybSkalowania nowy =
+                            kontrolka == Kontrolka::JEDEN_DO_JEDNEGO
+                                ? TrybSkalowania::JEDEN_DO_JEDNEGO
+                                : TrybSkalowania::DOPASUJ;
+                        if (aktywuj_tryb(nowy)) {
+                            redraw = true;
+                            pelne = false;
+                        } else {
+                            redraw_controls = true;
+                        }
+                    } else if (akcja == GUI_BELKA_ZAMKNIJ) {
                         wyjdz = true;
                         dragging_window = false;
                     } else if (akcja == GUI_BELKA_MINIMALIZUJ) {
@@ -1420,6 +1554,10 @@ extern "C" __attribute__((noreturn)) void _start() {
             }
 
             if (puszczenie) {
+                if (kontrolka_wcisnieta != Kontrolka::BRAK) {
+                    kontrolka_wcisnieta = Kontrolka::BRAK;
+                    redraw_controls = true;
+                }
                 if (dragging_window || panning_image) {
                     dragging_window = false;
                     panning_image = false;
@@ -1484,14 +1622,12 @@ extern "C" __attribute__((noreturn)) void _start() {
                     ansi_seq[0] = '\x1B';
                     ansi_idx = 1;
                 } else if (c == '1') {
-                    if (tryb != TrybSkalowania::JEDEN_DO_JEDNEGO) {
-                        tryb = TrybSkalowania::JEDEN_DO_JEDNEGO;
+                    if (aktywuj_tryb(TrybSkalowania::JEDEN_DO_JEDNEGO)) {
                         redraw = true;
                         pelne = false;
                     }
                 } else if (c == 'D') {
-                    if (tryb != TrybSkalowania::DOPASUJ) {
-                        tryb = TrybSkalowania::DOPASUJ;
+                    if (aktywuj_tryb(TrybSkalowania::DOPASUJ)) {
                         redraw = true;
                         pelne = false;
                     }
