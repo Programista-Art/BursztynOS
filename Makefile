@@ -434,7 +434,7 @@ snake_blob.o: snake_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
 
 # Przegladarka Obrazow
 przegladarka_obrazow_tmp.o: programy/przegladarka-obrazow/przegladarka-obrazow.cpp bursztyn_gui.h
-	$(CXX) $(RING3_FLAGS) -c $< -o $@
+	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
 
 przegladarka_obrazow_blob.o: przegladarka_obrazow_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
 	$(LD) -T $(RING3_STD_LINKER) $(RING3_LDFLAGS) \

@@ -73,6 +73,11 @@ constexpr int BWS57_MAX_DIM = 2048;
 constexpr uint64_t FRAME_NS = 16666667ULL;
 constexpr size_t EVENT_BATCH = 64U;
 constexpr uint32_t FIT_ROW_CACHE_ROWS = 1U;
+constexpr uint32_t ONE_TO_ONE_STEP_ROWS = 16U;
+constexpr int MAX_DIRTY_RECTS = 3;
+constexpr int BUTTON_H = 18;
+constexpr int BUTTON_GAP = 4;
+constexpr int BUTTON_PAD_X = 10;
 
 // kolory
 constexpr uint32_t KOLOR_TLO = 0x00101010U;
@@ -274,6 +279,22 @@ struct ProstokatObrazu {
     int h;
 };
 
+struct Render1do1 {
+    bool active;
+    uint64_t generation;
+    CacheViewportu target;
+    ProstokatObrazu dirty[MAX_DIRTY_RECTS];
+    int dirty_count;
+    int dirty_index;
+    int next_row;
+};
+
+struct GeometriaKontrolek {
+    ProstokatObrazu bar;
+    ProstokatObrazu jeden_do_jednego;
+    ProstokatObrazu dopasuj;
+};
+
 struct SlotCacheWierszy {
     uint8_t* data;
     uint32_t first;
@@ -293,6 +314,7 @@ uint64_t row_cache_clock = 0;
 uint64_t image_generation = 0;
 CacheViewportu viewport_cache{};
 CacheDopasowania fit_cache{};
+Render1do1 render_1do1{};
 ProfilRedraw profil{};
 bool profil_aktywny = false;
 bool profil_gotowy = false;
@@ -309,6 +331,19 @@ ProstokatObrazu pobierz_prostokat_obrazu() {
     if (r.w < 0) r.w = 0;
     if (r.h < 0) r.h = 0;
     return r;
+}
+
+void anuluj_render_1do1() {
+    render_1do1 = Render1do1{};
+}
+
+void uniewaznij_cache_rozmiaru() {
+    anuluj_render_1do1();
+    profil_aktywny = false;
+    profil_gotowy = false;
+    profil_start_ns = 0;
+    viewport_cache.valid = false;
+    fit_cache.valid = false;
 }
 
 void* profilowany_malloc(unsigned long bytes) {
@@ -365,8 +400,7 @@ void zwolnij_bmp() {
     img_top_down = false;
     img_valid = false;
     uniewaznij_cache_wierszy();
-    viewport_cache.valid = false;
-    fit_cache.valid = false;
+    uniewaznij_cache_rozmiaru();
     plik_rozmiar = 0;
 }
 
@@ -443,8 +477,7 @@ const char* parsuj_naglowek_bmp(const uint8_t* dane, uint32_t hdr_len, uint64_t 
     img_top_down = (h_raw < 0);
     img_valid = true;
     uniewaznij_cache_wierszy();
-    viewport_cache.valid = false;
-    fit_cache.valid = false;
+    uniewaznij_cache_rozmiaru();
 
     return nullptr;
 }
@@ -579,6 +612,7 @@ bool wczytaj_obraz(const char* sciezka) {
  * ========================================================================= */
 void rozpocznij_profil() {
     profil = ProfilRedraw{};
+    profil_gotowy = false;
     profil_start_ns = gui_czas_monotoniczny_ns();
     profil_aktywny = true;
 }
@@ -721,8 +755,8 @@ const uint8_t* wczytaj_wiersz_bmp(uint32_t y,
 }
 
 bool prefetch_jeden_blok_1do1() {
-    if (!img_valid || tryb != TrybSkalowania::JEDEN_DO_JEDNEGO ||
-        row_cache_slot_count < 2 || img_h == 0) return false;
+    if (!img_valid || row_cache_slot_count < 2 || img_h == 0 ||
+        render_1do1.active) return false;
 
     const int area_h = pobierz_prostokat_obrazu().h;
     if (area_h <= 0 || view_y < 0) return false;
@@ -791,7 +825,8 @@ void wypelnij_bufor(uint32_t* bufor, int w, int h, uint32_t kolor) {
 
 bool dekoduj_prostokat_1do1(int area_w, int area_h,
                             int dst_x, int dst_y, int w, int h,
-                            int src_x, int src_y) {
+                            int src_x, int src_y,
+                            uint32_t preferowane_wiersze = ROW_CACHE_ROWS) {
     if (!viewport_buf || !img_valid ||
         !poprawny_prostokat(dst_x, dst_y, w, h, area_w, area_h) ||
         src_x < 0 || src_y < 0) return false;
@@ -804,7 +839,7 @@ bool dekoduj_prostokat_1do1(int area_w, int area_h,
 
     for (int dy = 0; dy < h; ++dy) {
         const uint32_t sy = static_cast<uint32_t>(src_y + dy);
-        const uint8_t* row = wczytaj_wiersz_bmp(sy);
+        const uint8_t* row = wczytaj_wiersz_bmp(sy, preferowane_wiersze);
         if (!row) return false;
 
         const size_t dst_row_start = static_cast<size_t>(dst_y + dy) * aw + static_cast<size_t>(dst_x);
@@ -926,6 +961,44 @@ bool blit_viewport(const ProstokatObrazu& obszar, const uint32_t* bufor) {
     return ok;
 }
 
+bool blit_fragment_viewportu(const ProstokatObrazu& obszar,
+                             int local_x, int local_y, int w, int h,
+                             const uint32_t* bufor) {
+    if (!bufor || !kafel_buf ||
+        !poprawny_prostokat(local_x, local_y, w, h, obszar.w, obszar.h))
+        return false;
+
+    /* BWS57 przyjmuje bufor ciasno upakowany. Fragment pionowy ma stride
+       calego viewportu, wiec kopiujemy tylko maly, aktualnie gotowy kafel. */
+    bool ok = true;
+    for (int ty = 0; ty < h; ty += TILE_H) {
+        const int tile_h = ty + TILE_H <= h ? TILE_H : h - ty;
+        for (int tx = 0; tx < w; tx += TILE_W) {
+            const int tile_w = tx + TILE_W <= w ? TILE_W : w - tx;
+            if (!poprawny_prostokat(local_x + tx, local_y + ty,
+                                    tile_w, tile_h, obszar.w, obszar.h))
+                return false;
+            for (int dy = 0; dy < tile_h; ++dy) {
+                const size_t src = static_cast<size_t>(local_y + ty + dy) *
+                    static_cast<size_t>(obszar.w) +
+                    static_cast<size_t>(local_x + tx);
+                const size_t dst = static_cast<size_t>(dy) *
+                    static_cast<size_t>(tile_w);
+                if (src > viewport_capacity ||
+                    static_cast<size_t>(tile_w) > viewport_capacity - src)
+                    return false;
+                for (int dx = 0; dx < tile_w; ++dx)
+                    kafel_buf[dst + static_cast<size_t>(dx)] =
+                        bufor[src + static_cast<size_t>(dx)];
+            }
+            if (!profilowany_blit(obszar.x + local_x + tx,
+                                  obszar.y + local_y + ty,
+                                  tile_w, tile_h, kafel_buf)) ok = false;
+        }
+    }
+    return ok;
+}
+
 bool renderuj_dopasowany(int aw, int ah) {
     if (fit_cache.valid && fit_cache.generation == image_generation &&
         fit_cache.area_w == aw && fit_cache.area_h == ah) {
@@ -1005,7 +1078,24 @@ bool renderuj_dopasowany(int aw, int ah) {
     return true;
 }
 
-bool renderuj_1do1(int aw, int ah) {
+bool dodaj_dirty_1do1(int x, int y, int w, int h, int aw, int ah) {
+    if (!poprawny_prostokat(x, y, w, h, aw, ah) ||
+        render_1do1.dirty_count >= MAX_DIRTY_RECTS) return false;
+    render_1do1.dirty[render_1do1.dirty_count++] =
+        ProstokatObrazu{x, y, w, h};
+    return true;
+}
+
+bool cache_viewportu_pasuje(const CacheViewportu& c,
+                            const CacheViewportu& target) {
+    return c.valid && c.mode == target.mode &&
+        c.area_w == target.area_w && c.area_h == target.area_h &&
+        c.image_x == target.image_x && c.image_y == target.image_y &&
+        c.image_w == target.image_w && c.image_h == target.image_h &&
+        c.view_x == target.view_x && c.view_y == target.view_y;
+}
+
+bool przygotuj_render_1do1(int aw, int ah) {
     const int max_x = static_cast<int>(img_w) > aw ? static_cast<int>(img_w) - aw : 0;
     const int max_y = static_cast<int>(img_h) > ah ? static_cast<int>(img_h) - ah : 0;
     if (view_x < 0) view_x = 0;
@@ -1020,6 +1110,17 @@ bool renderuj_1do1(int aw, int ah) {
     if (dst_w <= 0 || dst_h <= 0) return false;
     const int off_x = static_cast<int>(img_w) < aw ? (aw - dst_w) / 2 : 0;
     const int off_y = static_cast<int>(img_h) < ah ? (ah - dst_h) / 2 : 0;
+
+    const CacheViewportu target{true, TrybSkalowania::JEDEN_DO_JEDNEGO,
+        aw, ah, off_x, off_y, dst_w, dst_h, view_x, view_y};
+    if (cache_viewportu_pasuje(viewport_cache, target)) return true;
+    if (render_1do1.active && render_1do1.generation == image_generation &&
+        cache_viewportu_pasuje(render_1do1.target, target)) return true;
+
+    if (!profil_aktywny) rozpocznij_profil();
+    anuluj_render_1do1();
+    render_1do1.generation = image_generation;
+    render_1do1.target = target;
 
     bool reused = false;
     int delta_x = 0;
@@ -1039,34 +1140,90 @@ bool renderuj_1do1(int aw, int ah) {
 
     if (!reused) {
         wypelnij_bufor(viewport_buf, aw, ah, KOLOR_TLO);
-        if (!dekoduj_prostokat_1do1(
-                aw, ah, off_x, off_y, dst_w, dst_h, view_x, view_y)) return false;
+        if (!dodaj_dirty_1do1(off_x, off_y, dst_w, dst_h, aw, ah))
+            return false;
     } else {
-        if (delta_y > 0 &&
-            !dekoduj_prostokat_1do1(aw, ah, off_x, off_y + dst_h - delta_y,
-                                    dst_w, delta_y, view_x, view_y + dst_h - delta_y))
+        if (delta_y > 0 && !dodaj_dirty_1do1(
+                off_x, off_y + dst_h - delta_y, dst_w, delta_y, aw, ah))
             return false;
-        if (delta_y < 0 &&
-            !dekoduj_prostokat_1do1(aw, ah, off_x, off_y,
-                                    dst_w, -delta_y, view_x, view_y))
-            return false;
+        if (delta_y < 0 && !dodaj_dirty_1do1(
+                off_x, off_y, dst_w, -delta_y, aw, ah)) return false;
 
         const int overlap_y = delta_y < 0 ? -delta_y : 0;
         const int overlap_h = dst_h - (delta_y < 0 ? -delta_y : delta_y);
-        if (overlap_h > 0 && delta_x > 0 &&
-            !dekoduj_prostokat_1do1(aw, ah, off_x + dst_w - delta_x,
-                                    off_y + overlap_y, delta_x, overlap_h,
-                                    view_x + dst_w - delta_x, view_y + overlap_y))
+        if (overlap_h > 0 && delta_x > 0 && !dodaj_dirty_1do1(
+                off_x + dst_w - delta_x, off_y + overlap_y,
+                delta_x, overlap_h, aw, ah))
             return false;
-        if (overlap_h > 0 && delta_x < 0 &&
-            !dekoduj_prostokat_1do1(aw, ah, off_x, off_y + overlap_y,
-                                    -delta_x, overlap_h,
-                                    view_x, view_y + overlap_y))
+        if (overlap_h > 0 && delta_x < 0 && !dodaj_dirty_1do1(
+                off_x, off_y + overlap_y, -delta_x, overlap_h, aw, ah))
             return false;
     }
 
-    viewport_cache = CacheViewportu{true, TrybSkalowania::JEDEN_DO_JEDNEGO,
-        aw, ah, off_x, off_y, dst_w, dst_h, view_x, view_y};
+    viewport_cache.valid = false;
+    render_1do1.active = render_1do1.dirty_count > 0;
+    if (!render_1do1.active) viewport_cache = target;
+    return true;
+}
+
+bool renderuj_1do1(int aw, int ah) {
+    if (!przygotuj_render_1do1(aw, ah)) {
+        if (profil_aktywny) zakoncz_profil();
+        return false;
+    }
+    if (!render_1do1.active && profil_aktywny) zakoncz_profil();
+    return true;
+}
+
+bool krok_renderowania_1do1() {
+    if (!render_1do1.active || tryb != TrybSkalowania::JEDEN_DO_JEDNEGO ||
+        !img_valid || render_1do1.generation != image_generation) {
+        anuluj_render_1do1();
+        return false;
+    }
+
+    const ProstokatObrazu obszar = pobierz_prostokat_obrazu();
+    const CacheViewportu& target = render_1do1.target;
+    if (obszar.w != target.area_w || obszar.h != target.area_h ||
+        view_x != target.view_x || view_y != target.view_y ||
+        render_1do1.dirty_index >= render_1do1.dirty_count) {
+        anuluj_render_1do1();
+        return false;
+    }
+
+    const ProstokatObrazu& dirty =
+        render_1do1.dirty[render_1do1.dirty_index];
+    int rows = dirty.h - render_1do1.next_row;
+    if (rows > static_cast<int>(ONE_TO_ONE_STEP_ROWS))
+        rows = static_cast<int>(ONE_TO_ONE_STEP_ROWS);
+    if (rows <= 0) return false;
+
+    const int dst_y = dirty.y + render_1do1.next_row;
+    const int src_x = target.view_x + dirty.x - target.image_x;
+    const int src_y = target.view_y + dst_y - target.image_y;
+    if (!dekoduj_prostokat_1do1(
+            target.area_w, target.area_h, dirty.x, dst_y, dirty.w, rows,
+            src_x, src_y, ONE_TO_ONE_STEP_ROWS) ||
+        !blit_fragment_viewportu(
+            obszar, dirty.x, dst_y, dirty.w, rows, viewport_buf)) {
+        viewport_cache.valid = false;
+        anuluj_render_1do1();
+        if (profil_aktywny) zakoncz_profil();
+        return false;
+    }
+
+    render_1do1.next_row += rows;
+    if (render_1do1.next_row >= dirty.h) {
+        ++render_1do1.dirty_index;
+        render_1do1.next_row = 0;
+    }
+    if (render_1do1.dirty_index >= render_1do1.dirty_count) {
+        viewport_cache = render_1do1.target;
+        viewport_cache.valid = true;
+        anuluj_render_1do1();
+        if (profil_aktywny) zakoncz_profil();
+        aktualizuj_pasek_statusu();
+    }
     return true;
 }
 
@@ -1077,7 +1234,7 @@ bool aktywuj_tryb(TrybSkalowania nowy, bool nowy_obraz) {
     tryb = nowy;
     if (nowy_obraz) {
         uniewaznij_cache_wierszy();
-        viewport_cache.valid = false;
+        uniewaznij_cache_rozmiaru();
         fit_cache = CacheDopasowania{};
         view_x = 0;
         view_y = 0;
@@ -1086,10 +1243,13 @@ bool aktywuj_tryb(TrybSkalowania nowy, bool nowy_obraz) {
     if (img_valid) {
         const ProstokatObrazu obszar = pobierz_prostokat_obrazu();
         if (obszar.w > 0 && obszar.h > 0) {
-            if (nowy == TrybSkalowania::DOPASUJ)
+            if (nowy == TrybSkalowania::DOPASUJ) {
+                anuluj_render_1do1();
+                if (profil_aktywny) zakoncz_profil();
                 (void)renderuj_dopasowany(obszar.w, obszar.h);
-            else
+            } else {
                 (void)renderuj_1do1(obszar.w, obszar.h);
+            }
         }
         aktualizuj_pasek_statusu();
     }
@@ -1126,63 +1286,66 @@ void rysuj_obraz() {
         return;
     }
 
-    rozpocznij_profil();
     const bool dopasuj = tryb == TrybSkalowania::DOPASUJ;
-    const bool ok = dopasuj ? renderuj_dopasowany(aw, ah)
-                            : renderuj_1do1(aw, ah);
+    if (dopasuj) rozpocznij_profil();
+    const bool ok = dopasuj ? renderuj_dopasowany(aw, ah) : renderuj_1do1(aw, ah);
     if (ok) {
         (void)blit_viewport(obszar, dopasuj ? fit_buf : viewport_buf);
     }
-    zakoncz_profil();
+    if (dopasuj) zakoncz_profil();
     aktualizuj_pasek_statusu();
 }
 
-void geometria_przyciskow(int* y, int* x_1do1, int* x_fit) {
-    constexpr int W_1DO1 = 50;
-    constexpr int ODSTEP = 4;
-    constexpr int W_FIT = 76;
-    const int sx = win_x + 1;
-    const int sw = win_w - 2;
-    const int szerokosc = W_1DO1 + ODSTEP + W_FIT;
-    int start = sx + (sw - szerokosc) / 2;
-    if (start < sx) start = sx;
-    if (y) *y = win_y + win_h - STATUS_H - 1;
-    if (x_1do1) *x_1do1 = start;
-    if (x_fit) *x_fit = start + W_1DO1 + ODSTEP;
+GeometriaKontrolek pobierz_geometrie_kontrolek() {
+    GeometriaKontrolek g{};
+    g.bar = ProstokatObrazu{
+        win_x + 1, win_y + win_h - STATUS_H - 1, win_w - 2, STATUS_H};
+    if (g.bar.w < 0) g.bar.w = 0;
+
+    const int w_1do1 = oblicz_szerokosc_tekstu("1:1", 1) + 2 * BUTTON_PAD_X;
+    const int w_fit = oblicz_szerokosc_tekstu("Dopasuj", 1) + 2 * BUTTON_PAD_X;
+    const int group_w = w_1do1 + BUTTON_GAP + w_fit;
+    int start = g.bar.x + (g.bar.w - group_w) / 2;
+    if (start < g.bar.x) start = g.bar.x;
+    const int button_y = g.bar.y + (g.bar.h - BUTTON_H) / 2;
+    g.jeden_do_jednego = ProstokatObrazu{start, button_y, w_1do1, BUTTON_H};
+    g.dopasuj = ProstokatObrazu{
+        start + w_1do1 + BUTTON_GAP, button_y, w_fit, BUTTON_H};
+    return g;
+}
+
+bool punkt_w_prostokacie(int x, int y, const ProstokatObrazu& r) {
+    return r.w > 0 && r.h > 0 &&
+        x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 }
 
 Kontrolka hit_test_kontrolek(int mx, int my) {
-    int y = 0, x_1do1 = 0, x_fit = 0;
-    geometria_przyciskow(&y, &x_1do1, &x_fit);
-    if (my < y + 2 || my >= y + 20) return Kontrolka::BRAK;
-    if (mx >= x_1do1 && mx < x_1do1 + 50) return Kontrolka::JEDEN_DO_JEDNEGO;
-    if (mx >= x_fit && mx < x_fit + 76) return Kontrolka::DOPASUJ;
+    const GeometriaKontrolek g = pobierz_geometrie_kontrolek();
+    if (punkt_w_prostokacie(mx, my, g.jeden_do_jednego))
+        return Kontrolka::JEDEN_DO_JEDNEGO;
+    if (punkt_w_prostokacie(mx, my, g.dopasuj)) return Kontrolka::DOPASUJ;
     return Kontrolka::BRAK;
 }
 
-void rysuj_przycisk_trybu(int x, int y, int w, const char* tekst,
+void rysuj_przycisk_trybu(const ProstokatObrazu& r, const char* tekst,
                           Kontrolka kontrolka, bool aktywny) {
     uint32_t kolor = aktywny ? KOLOR_PRZYCISK_AKTYWNY : KOLOR_PRZYCISK;
     if (kontrolka_hover == kontrolka && !aktywny) kolor = KOLOR_PRZYCISK_HOVER;
     if (kontrolka_wcisnieta == kontrolka) kolor = KOLOR_PRZYCISK_AKTYWNY;
-    gui_rysuj_prostokat(x, y, w, 18, KOLOR_PRZYCISK_RAMKA);
-    gui_rysuj_prostokat(x + 1, y + 1, w - 2, 16, kolor);
-    const int tw = oblicz_szerokosc_tekstu(tekst, 1);
-    gui_wypisz_tekst_kolor(x + (w - tw) / 2, y + 4, KOLOR_STATUS_TXT, tekst);
+    gui_rysuj_prostokat(r.x, r.y, r.w, r.h, KOLOR_PRZYCISK_RAMKA);
+    gui_rysuj_prostokat(r.x + 1, r.y + 1, r.w - 2, r.h - 2, kolor);
+    rysuj_tekst_wysrodkowany(
+        r.x, r.y, r.w, r.h, 1, KOLOR_STATUS_TXT, tekst);
 }
 
 void rysuj_pasek_kontrolek() {
-    const int sx = win_x + 1;
-    const int sy = win_y + win_h - STATUS_H - 1;
-    const int sw = win_w - 2;
-    if (sw <= 0) return;
+    const GeometriaKontrolek g = pobierz_geometrie_kontrolek();
+    if (g.bar.w <= 0 || g.bar.h <= 0) return;
 
-    gui_rysuj_prostokat(sx, sy, sw, STATUS_H, KOLOR_STATUS_BG);
-    int by = 0, x_1do1 = 0, x_fit = 0;
-    geometria_przyciskow(&by, &x_1do1, &x_fit);
+    gui_rysuj_prostokat(g.bar.x, g.bar.y, g.bar.w, g.bar.h, KOLOR_STATUS_BG);
 
     /* Tekst statusu jest przycinany przed centralnymi przyciskami. */
-    const int max_text_w = x_1do1 - (sx + 6) - 6;
+    const int max_text_w = g.jeden_do_jednego.x - (g.bar.x + 6) - 6;
     if (max_text_w > 0) {
         const char* zrodlo = status_txt[0] ? status_txt
             : (blad_txt[0] ? blad_txt : "1 / D: tryb | WASD: przesuwanie");
@@ -1197,14 +1360,14 @@ void rysuj_pasek_kontrolek() {
             }
             ++n;
         }
-        gui_wypisz_tekst_kolor(sx + 6, sy + 6,
+        gui_wypisz_tekst_kolor(g.bar.x + 6, g.bar.y + 3,
             blad_txt[0] && !status_txt[0] ? KOLOR_ERROR : KOLOR_STATUS_TXT,
             widoczny);
     }
-    rysuj_przycisk_trybu(x_1do1, by + 2, 50, "1:1",
+    rysuj_przycisk_trybu(g.jeden_do_jednego, "1:1",
         Kontrolka::JEDEN_DO_JEDNEGO,
         tryb == TrybSkalowania::JEDEN_DO_JEDNEGO);
-    rysuj_przycisk_trybu(x_fit, by + 2, 76, "Dopasuj",
+    rysuj_przycisk_trybu(g.dopasuj, "Dopasuj",
         Kontrolka::DOPASUJ, tryb == TrybSkalowania::DOPASUJ);
 
 }
@@ -1370,6 +1533,16 @@ extern "C" __attribute__((noreturn)) void _start() {
             }
         } else {
             mamy_zdarzenie = gui_pobierz_zdarzenie(&event_buf[0]);
+            if (!mamy_zdarzenie && render_1do1.active) {
+                const bool zmieniono = krok_renderowania_1do1();
+                if (zmieniono && !zminimalizowane) {
+                    /* Fragment obrazu jest zawsze w image_rect. Pasek jest
+                       mimo to odnawiany, aby stan/metryki pozostaly widoczne. */
+                    rysuj_pasek_kontrolek();
+                    gui_odswiez();
+                }
+                continue;
+            }
             if (!mamy_zdarzenie && prefetch_jeden_blok_1do1()) continue;
             if (!mamy_zdarzenie)
                 mamy_zdarzenie = gui_czekaj_na_zdarzenie(&event_buf[0]);
@@ -1452,6 +1625,11 @@ extern "C" __attribute__((noreturn)) void _start() {
                         dragging_window = false;
                     } else if (akcja == GUI_BELKA_MINIMALIZUJ) {
                         zminimalizowane = gui_minimalizuj_okno();
+                        anuluj_render_1do1();
+                        viewport_cache.valid = false;
+                        profil_aktywny = false;
+                        profil_gotowy = false;
+                        profil_start_ns = 0;
                         dragging_window = false;
                         panning_image = false;
                         gui_ustaw_capture_myszy(false);
@@ -1476,10 +1654,12 @@ extern "C" __attribute__((noreturn)) void _start() {
                                 win_h = win_restore_h;
                             } else {
                                 zmaksymalizowane = true;
-                                viewport_cache.valid = false;
-                                fit_cache.valid = false;
+                                uniewaznij_cache_rozmiaru();
+                                kontrolka_hover = Kontrolka::BRAK;
+                                kontrolka_wcisnieta = Kontrolka::BRAK;
                                 redraw = true;
-                                pelne = false;
+                                redraw_controls = true;
+                                pelne = true;
                             }
                         } else {
                             win_x = win_restore_x;
@@ -1488,10 +1668,12 @@ extern "C" __attribute__((noreturn)) void _start() {
                             win_h = win_restore_h;
                             if (bws_utworz_warstwe(win_x, win_y, win_w, win_h, 10) >= 0) {
                                 zmaksymalizowane = false;
-                                viewport_cache.valid = false;
-                                fit_cache.valid = false;
+                                uniewaznij_cache_rozmiaru();
+                                kontrolka_hover = Kontrolka::BRAK;
+                                kontrolka_wcisnieta = Kontrolka::BRAK;
                                 redraw = true;
-                                pelne = false;
+                                redraw_controls = true;
+                                pelne = true;
                             }
                         }
                     } else if (akcja == GUI_BELKA_DRAG && !zmaksymalizowane) {
