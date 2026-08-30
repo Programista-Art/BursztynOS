@@ -311,7 +311,7 @@ mbedtls_port.o: biblioteki/mbedtls/mbedtls_port.cpp biblioteki/mbedtls/bursztyn_
 
 # Bounded resource tables in the modern BWS layer are intentionally dynamic;
 # optimize its dispatcher for size so the fixed pre-Ring3 kernel VA contract
-# (kernel below 0x600000) remains intact.
+# (kernel <= 14 MiB with >= 2 MiB guard below RING3_BASE at 16 MiB) remains intact.
 bws_nowoczesne.o: bws_nowoczesne.cpp bws_nowoczesne.h bws_api.h
 	$(CXX) $(KERNEL_CXXFLAGS) -Os -c $< -o $@
 

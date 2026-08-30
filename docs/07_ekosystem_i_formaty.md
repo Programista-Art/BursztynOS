@@ -15,15 +15,15 @@ Głównym celem ekosystemu Bursztyn OS jest dostarczenie programistom zunifikowa
 Format .bur stanowi uproszczony, lecz wysoce zoptymalizowany format binarny przeznaczony dla Long Mode w architekturze x86-64. Moduł jądra odpowiedzialny za ładowanie programów (loader.bur) przetwarza ten plik w celu zainicjalizowania nowej przestrzeni adresowej procesu.
 Struktura Nagłówka Pliku .bur (Specyfikacja Binarna):
 
-Każdy prawidłowy plik .bur rozpoczyna się od niskopoziomowego nagłówka strukturalnego NaglowekBur, wymuszającego relokację pamięci graficznej dla aplikacji (np. pod bazowy adres 0x600000):
+Każdy prawidłowy plik .bur rozpoczyna się od niskopoziomowego nagłówka strukturalnego NaglowekBur, wymuszającego relokację pamięci graficznej dla aplikacji (np. pod bazowy adres RING3_BASE = 0x1000000 = 16 MiB):
 
 1. Sygnatura Magiczna (4 bajty): Stała wartość identyfikująca format (np. 0x42 0x55 0x52 0x00 odpowiadająca ciągowi ASCII BUR\0).
 
 1. Punkt Wejścia (Entry Point - 8 bajtów): Adres wirtualny w przestrzeni Ring 3, pod który procesor ma wykonać skok po zakończeniu mapowania pamięci przez jądro.
 
-1. Sekcja Kodu (.tekst - 24 bajty): Przesunięcie w pliku, rozmiar bloku oraz docelowy adres wirtualny (np. 0x601000) instrukcji maszynowych przeznaczonych do wykonania (flagi: Present, Read, Execute).
+1. Sekcja Kodu (.tekst - 24 bajty): Przesunięcie w pliku, rozmiar bloku oraz docelowy adres wirtualny (np. 0x1001000) instrukcji maszynowych przeznaczonych do wykonania (flagi: Present, Read, Execute).
 
-1. Sekcja Danych (.dane - 24 bajty): Przesunięcie w pliku, rozmiar bloku oraz docelowy adres wirtualny (np. 0x605000) danych zainicjalizowanych aplikacji (flagi: Present, Read, Write).
+1. Sekcja Danych (.dane - 24 bajty): Przesunięcie w pliku, rozmiar bloku oraz docelowy adres wirtualny (np. 0x1009000) danych zainicjalizowanych aplikacji (flagi: Present, Read, Write).
 
 Podczas wywołania systemowego bws_uruchom_program_z_pliku, Jądro analizuje nagłówek, alokuje ramki fizyczne, mapuje je we wskazane w nagłówku adresy wirtualne, kopiuje sekcje z dysku AHCI/BSP, a następnie za pomocą instrukcji systemowej (SYSRET / IRETQ) przenosi egzekucję do Ring 3 na wskazany Punkt Wejścia.
 

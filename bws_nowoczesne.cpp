@@ -50,7 +50,7 @@ constexpr uint32_t SHM_OBIEKTOW_MAX = 16;
 constexpr uint32_t SHM_MAPOWAN_NA_PROCES = 8;
 constexpr uint32_t SHM_STRON_MAX = 512;
 constexpr uint64_t SHM_ROZMIAR_MAX = SHM_STRON_MAX * STRONA;
-constexpr uint64_t SHM_BAZA = 0x0000000900000000ULL;
+constexpr uint64_t SHM_BAZA = RING3_SHM_BASE;
 constexpr uint64_t SHM_SLOT_STRIDE = SHM_ROZMIAR_MAX;
 constexpr uint64_t SHM_GLOBAL_MAX = 8ULL * 1024ULL * 1024ULL;
 

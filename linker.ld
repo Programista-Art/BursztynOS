@@ -591,11 +591,13 @@ SECTIONS
     )
 
     /*
-     * Obraz kernela (kod + rodata + data + bss) NIE MOZE nachodzic na
-     * przestrzen adresowa aplikacji Ring 3 (ladowanych od 0x01000000 = 16 MiB).
+     * KANONICZNA ASERCJA GRANICY JĄDRA:
+     * Obraz jądra (__kernel_end) NIE MOŻE przekroczyć 14 MiB (0x00E00000),
+     * co bezwzględnie gwarantuje co najmniej 2 MiB marginesu ochronnego
+     * przed bazą Ring 3 (RING3_BASE = 0x01000000 = 16 MiB).
      */
     ASSERT(
-        __kernel_end < 0x01000000,
-        "Bursztyn OS: Obraz kernela (__kernel_end) nachodzi na przestrzen adresowa Ring 3 (0x1000000)"
+        __kernel_end <= (0x01000000 - 0x00200000),
+        "Bursztyn OS: __kernel_end przekracza limit 14 MiB (__kernel_end <= RING3_BASE - 2 MiB guard)!"
     )
 }

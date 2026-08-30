@@ -22,7 +22,7 @@
  * 32-bitowy adres user-space. Sterta Ring 3 zaczyna sie pod 0x800000000,
  * dlatego bufor przekazywany bezposrednio z gui_malloc() zostalby obciety.
  *
- * `siec_bufor` jest celowo globalnym BSS aplikacji pod niskim VA 0x610000+.
+ * `siec_bufor` jest celowo globalnym BSS aplikacji pod niskim VA 0x1010000+.
  * Po naprawieniu ABI BWS29/BWS30 do pelnego uint64_t ten bounce-buffer
  * bedzie mozna usunac.
  */
@@ -48,9 +48,9 @@
  *
  * przegladarka_linker.ld MUSI miec ten sam layout:
  *
- *   HEADER  off 0x0000  VA 0x600000  region 0x1000
- *   TEXT    off 0x1000  VA 0x601000  region 0xF000
- *   DATA    off 0x10000 VA 0x610000  memory 0x80000
+ *   HEADER  off 0x0000  VA 0x1000000  region 0x1000
+ *   TEXT    off 0x1000  VA 0x1001000  region 0xF000
+ *   DATA    off 0x10000 VA 0x1010000  memory 0x80000
  */
 struct NaglowekBur {
     uint8_t magia[4];

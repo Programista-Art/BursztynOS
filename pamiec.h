@@ -56,7 +56,47 @@ static_assert(
 );
 
 /* =========================================================================
- * 2. SYMBOLE LINKERA
+ * 2. KANONICZNY UKŁAD PRZESTRZENI ADRESOWEJ BURSZTYN OS (x86_64)
+ * =========================================================================
+ *
+ * 0x0000000000000000 .. 0x0000000000000FFF : Strona zerowa (brak mapowania / NULL guard)
+ * 0x0000000000001000 .. 0x00000000000FFFFF : Pamięć niska BIOS/EBDA/VGA
+ * 0x0000000000100000 .. __kernel_end        : Kod, rodata, data i BSS jądra (~5.99 MiB)
+ * __kernel_end       .. 0x0000000000E00000 : Zapas wzrostu jądra (Kernel Growth Margin)
+ * 0x0000000000E00000 .. 0x0000000001000000 : Minimalny margines ochronny (2 MiB Guard Gap)
+ * -------------------------------------------------------------------------
+ * 0x0000000001000000 .. 0x0000000001000FFF : Ring 3 Nagłówek aplikacji .bur (RING3_BASE = 16 MiB)
+ * 0x0000000001001000 .. 0x0000000001008FFF : Ring 3 Kod i stałe (.text / .rodata, domyślnie 32 KiB)
+ * 0x0000000001009000 .. 0x0000000001028FFF : Ring 3 Dane zainicjalizowane i BSS (.data / .bss, 128 KiB)
+ * 0x0000000800000000 .. 0x00000008FFFFFFFF : Ring 3 Sterta dynamiczna procesu (32 GiB)
+ * 0x0000000900000000 .. 0x00000009FFFFFFFF : Ring 3 Pamięć współdzielona SHM (36 GiB)
+ * 0x00007FFFF0000000 .. 0x00007FFFF0003FFF : Ring 3 Stos procesu (16 KiB + Guard page poniżej)
+ * ========================================================================= */
+
+inline constexpr uint64_t RING3_BASE                 = 0x0000000001000000ULL; // 16 MiB
+inline constexpr uint64_t KERNEL_RING3_GUARD_MIN     = 0x0000000000200000ULL; // 2 MiB
+inline constexpr uint64_t KERNEL_MAX_END_ALLOWED     = RING3_BASE - KERNEL_RING3_GUARD_MIN; // 0x00E00000 (14 MiB)
+
+inline constexpr uint64_t RING3_DEFAULT_TEXT_VA      = 0x0000000001001000ULL;
+inline constexpr uint64_t RING3_DEFAULT_DATA_VA      = 0x0000000001009000ULL;
+inline constexpr uint64_t RING3_EXP_DATA_VA          = 0x000000000100D000ULL;
+inline constexpr uint64_t RING3_BROWSER_DATA_VA      = 0x0000000001010000ULL;
+
+inline constexpr uint64_t RING3_HEAP_BASE            = 0x0000000800000000ULL; // 32 GiB
+inline constexpr uint64_t RING3_SHM_BASE             = 0x0000000900000000ULL; // 36 GiB
+inline constexpr uint64_t RING3_STACK_TOP            = 0x00007FFFF0000000ULL;
+
+static_assert(RING3_BASE == 0x01000000ULL, "RING3_BASE musi wynosic dokladnie 16 MiB");
+static_assert(KERNEL_RING3_GUARD_MIN >= 0x00200000ULL, "Minimalny margines ochronny to 2 MiB");
+static_assert(KERNEL_MAX_END_ALLOWED == 0x00E00000ULL, "Granica jadra z marginesem 2 MiB to 14 MiB");
+static_assert(RING3_DEFAULT_TEXT_VA > RING3_BASE, "Segment TEXT musi lezec powyzej RING3_BASE");
+static_assert(RING3_DEFAULT_DATA_VA > RING3_DEFAULT_TEXT_VA, "Segment DATA musi lezec powyzej TEXT");
+static_assert(RING3_HEAP_BASE > RING3_BASE, "Sterta musi lezec powyzej binarow");
+static_assert(RING3_SHM_BASE > RING3_HEAP_BASE, "SHM musi lezec powyzej sterty");
+static_assert(RING3_STACK_TOP > RING3_SHM_BASE, "Stos musi lezec powyzej SHM");
+
+/* =========================================================================
+ * 3. SYMBOLE LINKERA
  * ========================================================================= */
 
 /*

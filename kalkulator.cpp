@@ -36,12 +36,12 @@ extern "C" __attribute__((noreturn)) void _start();
 /*
  * UWAGA: BUR_TEKST_ROZMIAR musi odpowiadac skryptowi linkera aplikacji.
  * Domyslnie zachowujemy aktualny uklad repozytorium:
- *   TEXT: offset 0x1000, VA 0x601000, rozmiar 0x8000 (32768)
- *   DATA: offset 0x9000, VA 0x609000, rozmiar 0x20000 (131072)
+ *   TEXT: offset 0x1000, VA 0x1001000, rozmiar 0x8000 (32768)
+ *   DATA: offset 0x9000, VA 0x1009000, rozmiar 0x20000 (131072)
  *
  * Po przejsciu linkera na 60 KiB tekstu zmien tylko BUR_TEKST_ROZMIAR
  * na 61440ULL; offset i VA danych wylicza sie automatycznie:
- *   DATA offset = 0x10000, DATA VA = 0x610000.
+ *   DATA offset = 0x10000, DATA VA = 0x1010000.
  */
 #ifndef BUR_TEKST_ROZMIAR
 #define BUR_TEKST_ROZMIAR 32768ULL

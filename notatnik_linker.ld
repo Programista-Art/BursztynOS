@@ -8,28 +8,28 @@
  *
  *   naglowek:
  *     file offset  0x0000
- *     VA           0x600000
+ *     VA           0x1000000
  *     region       0x1000
  *
  *   TEXT:
  *     file offset  0x1000
- *     VA           0x601000
+ *     VA           0x1001000
  *     region       0x8000 = 32 KiB
  *
  *   DATA + BSS:
  *     file offset  0x9000
- *     VA           0x609000
+ *     VA           0x1009000
  *     memory size  0x20000 = 128 KiB
  *
  * Naglowek .bur w poprawionym notatnik.cpp zawiera dokladnie:
  *
  *   tekst_przesuniecie = 0x1000
  *   tekst_rozmiar      = 0x8000
- *   tekst_wirtualny    = 0x601000
+ *   tekst_wirtualny    = 0x1001000
  *
  *   dane_przesuniecie  = 0x9000
  *   dane_rozmiar       = 0x20000
- *   dane_wirtualny     = 0x609000
+ *   dane_wirtualny     = 0x1009000
  *
  * Loader Bursztyn OS wymaga calego segmentu TEXT w pliku, dlatego TEXT
  * jest dopelniany zerami do pelnych 32 KiB.

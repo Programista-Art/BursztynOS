@@ -4,9 +4,9 @@
  * Skrypt jest częścią ABI pliku .bur i musi być zgodny z NaglowekBur
  * zapisanym w shell.cpp:
  *
- *   nagłówek:  offset 0x0000, obszar 0x1000
- *   TEXT:      offset 0x1000, rozmiar 0x8000,  VA 0x601000
- *   DATA/BSS:  offset 0x9000, rozmiar 0x20000, VA 0x609000
+ *   nagłówek:  offset 0x0000, obszar 0x1000,   VA 0x1000000
+ *   TEXT:      offset 0x1000, rozmiar 0x8000,  VA 0x1001000
+ *   DATA/BSS:  offset 0x9000, rozmiar 0x20000, VA 0x1009000
  *
  * Loader Bursztyn OS zeruje cały segment danych przed kopiowaniem jego
  * zainicjalizowanej części, dlatego .bss jest NOLOAD i nie zwiększa .bur.

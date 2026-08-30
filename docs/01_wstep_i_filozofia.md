@@ -43,7 +43,7 @@ Rozwój Bursztyn OS osiągnął stan pełnej dojrzałości operacyjnej w następ
 
 * Kompletny interfejs BWS (26 wywołań systemowych) z kontrolą flag weryfikowanych przez PZB.
 
-* Ładowanie natywnych binarów .bur do pamięci użytkownika (np. pod adres 0x600000).
+* Ładowanie natywnych binarów .bur do pamięci użytkownika (np. pod bazowy adres RING3_BASE = 0x1000000 = 16 MiB).
 
 ### * Etap 6–7 (Zakończone sukcesem):
 

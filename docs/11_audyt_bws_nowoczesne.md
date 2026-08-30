@@ -160,8 +160,8 @@ limits are in `bws_nowoczesne.h`.
 - SHM, IPC, watcher and socket handles contain a non-zero generation and reject
   stale generations. SHM additionally has an explicit per-PID access set.
 - Dynamic allocations remain bounded by fixed object/queue/byte caps; they
-  replace large always-resident BSS reservations and preserve the existing
-  kernel-below-`0x600000` loader contract.
+  replace large always-resident BSS reservations and guarantee the
+  kernel-below-`0x00E00000` (RING3_BASE 16 MiB - 2 MiB guard) contract.
 - Process exit removes layers/cursors, mappings, SHM access, IPC messages and
   endpoints, file watches and the owned socket. Shared PTE leaves carry a
   software marker so generic address-space destruction does not double-free

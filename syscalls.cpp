@@ -358,7 +358,7 @@ constexpr uint64_t MASKA_STRONY =
     ROZMIAR_STRONY - 1ULL;
 
 constexpr uint64_t BAZA_STERTY_USER =
-    0x0000000800000000ULL;
+    RING3_HEAP_BASE;
 
 /*
  * 256 MiB prywatnej sterty na proces.

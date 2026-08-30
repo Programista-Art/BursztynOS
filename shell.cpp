@@ -23,8 +23,8 @@
  * UWAGA:
  * Naglowek BUR zachowuje obecny layout zgodny z notatnik_linker.ld:
  *
- *   text: offset 0x1000,  rozmiar 0x8000,  VA 0x601000
- *   data: offset 0x9000,  rozmiar 0x20000, VA 0x609000
+ *   text: offset 0x1000,  rozmiar 0x8000,  VA 0x1001000
+ *   data: offset 0x9000,  rozmiar 0x20000, VA 0x1009000
  *
  * Zmiana tych wartosci wymaga jednoczesnej zmiany linkera aplikacji.
  */
@@ -317,7 +317,7 @@ constexpr uint32_t BUF_PCI = 2048;
  * Aktualny wrapper bws_siec_pobierz_http() pakuje wskaznik do gornych
  * 32 bitow jednego argumentu ABI. Dziala wiec tylko, jezeli wskaznik bufora
  * miesci sie w 32 bitach. Statyczne .data/.bss obecnej aplikacji znajduje
- * sie przy 0x609000, natomiast stos Ring 3 lezy wysoko i nie nadaje sie
+ * sie przy 0x1009000, natomiast stos Ring 3 lezy wysoko i nie nadaje sie
  * do tego ABI.
  *
  * Po poprawieniu ABI BWS 29 ten warunek mozna usunac.

@@ -70,9 +70,9 @@ void _start();
 /*
  * Zachowujemy obecny layout Notatnika:
  *
- *   header  0x0000
- *   text    file 0x1000, VA 0x601000, 32 KiB
- *   data    file 0x9000, VA 0x609000, 128 KiB
+ *   header  0x0000, VA 0x1000000
+ *   text    file 0x1000, VA 0x1001000, 32 KiB
+ *   data    file 0x9000, VA 0x1009000, 128 KiB
  *
  * Linker script Notatnika MUSI miec identyczny layout.
  */

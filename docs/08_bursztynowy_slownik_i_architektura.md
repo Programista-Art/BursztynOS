@@ -20,7 +20,7 @@ Wprowadza się następujące oficjalne odpowiedniki struktur technicznych w kodz
 
 ## 3. Plik BUR (zamiast EXE / ELF / BIN)
 
-1. Definicja: Skompilowany, 64-bitowy plik wykonywalny przestrzeni użytkownika (Ring 3), zawierający własny nagłówek z sygnaturą "BUR" oraz przesunięciami pamięci wirtualnej (zazwyczaj na adres 0x600000).
+1. Definicja: Skompilowany, 64-bitowy plik wykonywalny przestrzeni użytkownika (Ring 3), zawierający własny nagłówek z sygnaturą "BUR" oraz przesunięciami pamięci wirtualnej (zazwyczaj na bazowy adres RING3_BASE = 0x1000000 = 16 MiB).
 
 1. Konwencja: Pliki z rozszerzeniem .bur (np. shell.bur, notatnik.bur).
 
@@ -96,7 +96,7 @@ struct teczka_wpis {
 struct NaglowekBur {
     uint8_t  magia[4];           // Magiczna sygnatura "BUR\0"
     uint64_t punkt_wejscia;      // Adres procedury _start
-    uint64_t tekst_wirtualny;    // Wirtualny adres ładowania kodu (np. 0x600000)
+    uint64_t tekst_wirtualny;    // Wirtualny adres ładowania kodu (np. 0x1001000)
 } __attribute__((packed));
 
 ```

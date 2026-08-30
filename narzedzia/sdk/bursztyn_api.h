@@ -15,8 +15,14 @@
 #include "../../skladacz_obrazu.h"
 
 // =====================================================================
-// STRUKTURY DANYCH (Muszą pokrywać się z definicjami w Jądrze!)
+// KANONICZNY UKŁAD PAMIĘCI APLIKACJI RING 3
 // =====================================================================
+inline constexpr uint64_t BUR_RING3_BASE            = 0x0000000001000000ULL; // 16 MiB
+inline constexpr uint64_t BUR_RING3_DEFAULT_TEXT_VA = 0x0000000001001000ULL;
+inline constexpr uint64_t BUR_RING3_DEFAULT_DATA_VA = 0x0000000001009000ULL;
+inline constexpr uint64_t BUR_RING3_HEAP_BASE       = 0x0000000800000000ULL; // 32 GiB
+inline constexpr uint64_t BUR_RING3_SHM_BASE        = 0x0000000900000000ULL; // 36 GiB
+inline constexpr uint64_t BUR_RING3_STACK_TOP       = 0x00007FFFF0000000ULL;
 
 // Struktury ABI sa importowane z kanonicznych naglowkow kernela/SDK.
 

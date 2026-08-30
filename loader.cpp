@@ -74,14 +74,14 @@ constexpr uint64_t KONIEC_ADRESOW_USER = 0x0000800000000000ULL;
  * wejsc w jej obszar, bo syscall przydzialu pamieci rozwija sterte
  * od tej granicy.
  */
-constexpr uint64_t BAZA_STERTY_USER = 0x0000000800000000ULL;
+constexpr uint64_t BAZA_STERTY_USER = RING3_HEAP_BASE;
 
 /*
  * Stos Ring 3 znajduje sie wysoko w dolnej, kanonicznej polowie adresow.
  * Cztery strony = 16 KiB. Strona bezposrednio ponizej pozostaje
  * niezmapowana i naturalnie pelni role guard page.
  */
-constexpr uint64_t BAZA_STOSU_USER = 0x00007FFFF0000000ULL;
+constexpr uint64_t BAZA_STOSU_USER = RING3_STACK_TOP;
 constexpr uint64_t LICZBA_STRON_STOSU_USER = 4ULL;
 constexpr uint64_t ROZMIAR_STOSU_USER =
     LICZBA_STRON_STOSU_USER * ROZMIAR_STRONY;

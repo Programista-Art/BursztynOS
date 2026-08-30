@@ -7,20 +7,20 @@
  *
  * Uklad surowego pliku .bur po `objcopy -O binary`:
  *
- *   plik 0x00000 .. 0x00FFF   HEADER  -> VA 0x600000
- *   plik 0x01000 .. 0x0FFFF   TEXT    -> VA 0x601000, 0xF000 bajtow
- *   plik 0x10000 ..           DATA    -> VA 0x610000
+ *   plik 0x00000 .. 0x00FFF   HEADER  -> VA 0x1000000
+ *   plik 0x01000 .. 0x0FFFF   TEXT    -> VA 0x1001000, 0xF000 bajtow
+ *   plik 0x10000 ..           DATA    -> VA 0x1010000
  *
  * Loader rezerwuje dla DATA+BSS lacznie 0x80000 bajtow:
  *
- *   VA 0x610000 .. 0x68FFFF
+ *   VA 0x1010000 .. 0x108FFFF
  *
  * BSS jest NOLOAD: nie powieksza pliku .bur. Loader kopiuje dostepna czesc
  * DATA z pliku i zeruje pozostala pamiec segmentu do rozmiaru 0x80000.
  *
  * Dlaczego DATA jest tak duze:
  * obecne ABI BWS29/BWS30 przenosi adres bufora HTTP tylko w 32 bitach.
- * Hussar trzyma dlatego niski 256 KiB bounce-buffer w .bss pod 0x610000+.
+ * Hussar trzyma dlatego niski 256 KiB bounce-buffer w .bss pod 0x1010000+.
  */
 
 OUTPUT_FORMAT(elf64-x86-64)
@@ -374,7 +374,7 @@ SECTIONS
 
     ASSERT(
         ADDR(.data) == BUR_DATA_VADDR,
-        "Hussar: DATA musi zaczynac sie pod 0x610000"
+        "Hussar: DATA musi zaczynac sie pod 0x1010000"
     )
 
     ASSERT(
@@ -393,12 +393,12 @@ SECTIONS
     )
 
     /*
-     * Caly DATA/BSS konczy sie pod 0x690000, a wiec daleko ponizej 4 GiB.
+     * Caly DATA/BSS konczy sie pod 0x1090000, a wiec daleko ponizej 4 GiB.
      * To zachowuje wymaganie obecnego 32-bitowego ABI bufora BWS29/BWS30.
      */
     ASSERT(
         __bur_data_memory_end <= BUR_DATA_END,
-        "Hussar: niski DATA/BSS wychodzi poza VA 0x610000..0x68FFFF"
+        "Hussar: niski DATA/BSS wychodzi poza VA 0x1010000..0x108FFFF"
     )
 
     ASSERT(
