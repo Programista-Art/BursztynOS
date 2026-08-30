@@ -74,6 +74,7 @@ constexpr uint64_t FRAME_NS = 16666667ULL;
 constexpr size_t EVENT_BATCH = 64U;
 constexpr uint32_t FIT_ROW_CACHE_ROWS = 1U;
 constexpr uint32_t ONE_TO_ONE_STEP_ROWS = 16U;
+constexpr uint32_t ONE_TO_ONE_BLIT_ROWS = 96U;
 constexpr int MAX_DIRTY_RECTS = 3;
 constexpr int BUTTON_H = 18;
 constexpr int BUTTON_GAP = 4;
@@ -287,6 +288,7 @@ struct Render1do1 {
     int dirty_count;
     int dirty_index;
     int next_row;
+    int presented_row;
 };
 
 struct GeometriaKontrolek {
@@ -968,8 +970,24 @@ bool blit_fragment_viewportu(const ProstokatObrazu& obszar,
         !poprawny_prostokat(local_x, local_y, w, h, obszar.w, obszar.h))
         return false;
 
-    /* BWS57 przyjmuje bufor ciasno upakowany. Fragment pionowy ma stride
-       calego viewportu, wiec kopiujemy tylko maly, aktualnie gotowy kafel. */
+    /* Pelnej szerokosci pas jest juz ciasno upakowany w viewport_buf.  Dzieki
+       temu sasiednie ukonczone kroki moga trafic do BWS57 jednym blitem. */
+    uint64_t pixels = 0;
+    if (local_x == 0 && w == obszar.w &&
+        w <= BWS57_MAX_DIM && h <= BWS57_MAX_DIM &&
+        mnoz_u64(static_cast<uint64_t>(w), static_cast<uint64_t>(h), &pixels) &&
+        pixels <= BWS57_MAX_PIXELS) {
+        const size_t src = static_cast<size_t>(local_y) *
+                           static_cast<size_t>(obszar.w);
+        if (src > viewport_capacity ||
+            static_cast<size_t>(pixels) > viewport_capacity - src)
+            return false;
+        return profilowany_blit(obszar.x, obszar.y + local_y,
+                                w, h, bufor + src);
+    }
+
+    /* Pozostale fragmenty maja stride calego viewportu, wiec sa pakowane do
+       stalego kafla; ta sciezka obsluguje m.in. waskie pasy po przesunieciu. */
     bool ok = true;
     for (int ty = 0; ty < h; ty += TILE_H) {
         const int tile_h = ty + TILE_H <= h ? TILE_H : h - ty;
@@ -1203,9 +1221,7 @@ bool krok_renderowania_1do1() {
     const int src_y = target.view_y + dst_y - target.image_y;
     if (!dekoduj_prostokat_1do1(
             target.area_w, target.area_h, dirty.x, dst_y, dirty.w, rows,
-            src_x, src_y, ONE_TO_ONE_STEP_ROWS) ||
-        !blit_fragment_viewportu(
-            obszar, dirty.x, dst_y, dirty.w, rows, viewport_buf)) {
+            src_x, src_y, ONE_TO_ONE_STEP_ROWS)) {
         viewport_cache.valid = false;
         anuluj_render_1do1();
         if (profil_aktywny) zakoncz_profil();
@@ -1213,9 +1229,29 @@ bool krok_renderowania_1do1() {
     }
 
     render_1do1.next_row += rows;
+    bool presented = false;
+    const int completed_rows =
+        render_1do1.next_row - render_1do1.presented_row;
+    const bool dirty_complete = render_1do1.next_row >= dirty.h;
+    if (completed_rows >= static_cast<int>(ONE_TO_ONE_BLIT_ROWS) ||
+        dirty_complete) {
+        const int presented_y = dirty.y + render_1do1.presented_row;
+        if (!blit_fragment_viewportu(
+                obszar, dirty.x, presented_y, dirty.w,
+                completed_rows, viewport_buf)) {
+            viewport_cache.valid = false;
+            anuluj_render_1do1();
+            if (profil_aktywny) zakoncz_profil();
+            return false;
+        }
+        render_1do1.presented_row = render_1do1.next_row;
+        presented = true;
+    }
+
     if (render_1do1.next_row >= dirty.h) {
         ++render_1do1.dirty_index;
         render_1do1.next_row = 0;
+        render_1do1.presented_row = 0;
     }
     if (render_1do1.dirty_index >= render_1do1.dirty_count) {
         viewport_cache = render_1do1.target;
@@ -1224,7 +1260,7 @@ bool krok_renderowania_1do1() {
         if (profil_aktywny) zakoncz_profil();
         aktualizuj_pasek_statusu();
     }
-    return true;
+    return presented;
 }
 
 /* Jedyna sciezka zmiany trybu. OPEN_FILE, przyciski i klawiatura wywoluja
