@@ -138,6 +138,9 @@ extern "C" uint8_t _binary_test_bin_end[];
 extern "C" uint8_t _binary_snake_bin_start[];
 extern "C" uint8_t _binary_snake_bin_end[];
 
+extern "C" uint8_t _binary_demo_ui_bin_start[];
+extern "C" uint8_t _binary_demo_ui_bin_end[];
+
 extern "C" uint8_t _binary_przegladarka_obrazow_bin_start[];
 extern "C" uint8_t _binary_przegladarka_obrazow_bin_end[];
 
@@ -661,6 +664,7 @@ void utworz_drabine_katalogow() {
         "/programy/kalkulator.cebula",
         "/programy/przegladarka.cebula",
         "/programy/przegladarka-obrazow.cebula",
+        "/programy/demo_ui.cebula",
         "/programy/test.cebula",
         "/gry",
         "/gry/snake.cebula",
@@ -928,6 +932,16 @@ void instaluj_wbudowane_programy() {
         "uprawnienia = [\n"
         "    \"okna\",\n"
         "    \"pliki_czytaj\"\n"
+        "]\n";
+
+    static const char MANIFEST_DEMO_UI[] =
+        "nazwa = \"BursztynUI Demo\"\n"
+        "autor = \"Programista Art\"\n"
+        "wersja = \"0.1\"\n"
+        "poziom_zaufania = 4\n"
+        "plik_startowy = \"demo_ui.bur\"\n"
+        "uprawnienia = [\n"
+        "    \"okna\"\n"
         "]\n";
     
     /*
@@ -1298,6 +1312,19 @@ void instaluj_wbudowane_programy() {
     } else {
         wypisz_log(
             "[BSP] Przegladarka Obrazow zainstalowana jako .cebula.");
+    }
+
+    if (!instaluj_paczke(
+            "/programy/demo_ui.cebula/opis.aplikacji",
+            MANIFEST_DEMO_UI,
+            "/programy/demo_ui.cebula/demo_ui.bur",
+            _binary_demo_ui_bin_start,
+            _binary_demo_ui_bin_end)) {
+        wypisz_log(
+            "[BSP-BLAD] Nie mozna zainstalowac BursztynUI Demo.");
+    } else {
+        wypisz_log(
+            "[BSP] BursztynUI Demo zainstalowane jako .cebula.");
     }
 
 
@@ -1781,6 +1808,12 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
 
     (void)bws_uruchom_program_z_pliku(
         "/programy/test.cebula/test.bur",
+        PZB_UZYTKOWNIK,
+        PRAWO_GUI,
+        false);
+
+    (void)bws_uruchom_program_z_pliku(
+        "/programy/demo_ui.cebula/demo_ui.bur",
         PZB_UZYTKOWNIK,
         PRAWO_GUI,
         false);

@@ -158,7 +158,8 @@ RING3_FLAGS := \
 	$(HARDEN_FLAGS) \
 	$(WARN_CXX) \
 	-fno-exceptions \
-	-fno-rtti
+	-fno-rtti \
+	-fno-threadsafe-statics
 
 #
 # Pliki .S kompilujemy przez GCC, nie bezposrednio przez `as`.
@@ -261,6 +262,7 @@ OBJS := \
 	tls.o \
 	bezpieczenstwo.o \
 	test_blob.o \
+	demo_ui_blob.o \
 	repro_blob.o \
 	snake_blob.o \
 	przegladarka_obrazow_blob.o \
@@ -417,6 +419,16 @@ test_blob.o: test_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
 		test_tmp.o bursztyn_gui.o -o test.elf
 	$(OBJCOPY) -O binary test.elf test.bin
 	$(LD) -r -b binary test.bin -o test_blob.o
+
+# BursztynUI Demo
+demo_ui_tmp.o: programy/demo_ui/demo_ui.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
+
+demo_ui_blob.o: demo_ui_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
+	$(LD) -T $(EKSPLORATOR_LINKER) $(RING3_LDFLAGS) \
+		demo_ui_tmp.o bursztyn_gui.o -o demo_ui.elf
+	$(OBJCOPY) -O binary demo_ui.elf demo_ui.bin
+	$(LD) -r -b binary demo_ui.bin -o demo_ui_blob.o
 
 # Obraz testowy test.bmp	
 test_bmp_blob.o: obrazy/test.bmp
