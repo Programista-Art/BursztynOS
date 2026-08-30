@@ -315,6 +315,12 @@ inline constexpr uint32_t VMM_FLAGA_PWT =
 inline constexpr uint32_t VMM_FLAGA_PCD =
     1U << 4;
 
+/* Bit software-available PTE. Oznacza lisc nalezacy do obiektu pamieci
+ * wspoldzielonej; niszczenie przestrzeni procesu nie zwalnia wtedy ramki,
+ * bo jej lifetime prowadzi warstwa SHM. Bit nigdy nie trafia do Ring 3. */
+inline constexpr uint32_t VMM_FLAGA_WSPOLDZIELONA =
+    1U << 9;
+
 /*
  * Execute Disable znajduje sie w bicie 63 wpisu PTE i dlatego nie miesci sie
  * w obecnym 32-bitowym parametrze flag funkcji ZmapujStrone().
@@ -396,6 +402,18 @@ void ZmapujStrone(
     void* adres_wirtualny,
     void* adres_fizyczny,
     uint32_t flagi
+);
+
+/* Waskie API dla natywnych obiektow SHM. Operuje tylko na aktualnym CR3,
+ * stronach 4 KiB USER i nigdy nie publikuje adresu fizycznego Ring 3. */
+extern "C" bool VmmMapujStroneWspoldzielona(
+    void* adres_wirtualny,
+    void* adres_fizyczny,
+    bool zapis
+);
+
+extern "C" bool VmmOdmapujStroneWspoldzielona(
+    void* adres_wirtualny
 );
 
 /*

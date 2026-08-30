@@ -14,6 +14,8 @@
 #include <stdint.h>
 #include "bws_zdarzenia.h"
 #include "bws_pliki.h"
+#include "bws_api.h"
+#include "bws_nowoczesne.h"
 #include "skladacz_obrazu.h"
 #include <stdbool.h>
 
@@ -116,6 +118,46 @@ uint64_t gui_czas_monotoniczny_ns();
 /* Popup aplikacji jest skladany nad zwyklymi oknami, ale pod menu systemu. */
 bool gui_ustaw_popup_aplikacji(bool otwarty,
                                int x, int y, int szer, int wys);
+
+/* BWS 61..83: addytywne fundamenty nowoczesnych aplikacji. */
+bool gui_ustaw_geometrie_okna(int x, int y, int szer, int wys);
+uint32_t gui_liczba_monitorow();
+bool gui_pobierz_monitor(uint32_t indeks, GuiMonitorInfo* info);
+bool gui_ustaw_obszar_roboczy(int x, int y, int szer, int wys);
+
+uint64_t shm_create(uint64_t rozmiar, uint32_t flagi);
+void* shm_map(uint64_t handle, uint32_t flagi);
+bool shm_unmap(void* adres);
+bool shm_close(uint64_t handle);
+
+uint64_t ipc_create();
+bool ipc_send(uint64_t endpoint, const BwsIpcWyslij* wiadomosc);
+bool ipc_receive(uint64_t endpoint, BwsIpcOdbierz* wiadomosc);
+bool ipc_close(uint64_t endpoint);
+
+uint64_t file_watch(const char* sciezka, uint32_t maska);
+bool file_unwatch(uint64_t handle);
+
+bool clipboard_format(uint32_t indeks, char* mime, uint32_t pojemnosc);
+bool clipboard_size(const char* mime, uint64_t* rozmiar);
+bool clipboard_read(const char* mime, void* dane, uint64_t pojemnosc,
+                    uint64_t* odczytano);
+bool clipboard_set(const char* mime, const void* dane, uint64_t rozmiar);
+
+bool gui_ustaw_kursor(uint32_t typ);
+bool gui_ustaw_kursor_custom(const GuiCustomCursorInfo* info);
+
+uint64_t socket_create(uint32_t typ = BWS_SOCKET_TCP_IPV4);
+bool socket_connect(uint64_t handle, const uint8_t ipv4[4], uint16_t port);
+bool socket_send(uint64_t handle, const void* dane, uint32_t rozmiar,
+                 BwsIoResult* wynik);
+bool socket_recv(uint64_t handle, void* dane, uint32_t pojemnosc,
+                 BwsIoResult* wynik);
+bool socket_close(uint64_t handle);
+
+/* Ring3 helper PSF; nie tworzy rejestru ani nowego ABI kernela. */
+bool ustawienia_sciezka(const char* app_id, const char* klucz,
+                        char* wynik, uint32_t pojemnosc);
 
 /* =========================================================================
  * 2b. WSPOLNY DIALOG MODALNY DLA APLIKACJI GUI
@@ -386,4 +428,3 @@ __attribute__((noreturn))
 void gui_zakoncz_aplikacje();
 
 } 
-

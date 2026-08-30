@@ -48,7 +48,7 @@ extern "C" __attribute__((noreturn)) void _start();
 #endif
 
 static constexpr uint64_t BUR_TEKST_PRZESUNIECIE = 4096ULL;
-static constexpr uint64_t BUR_TEKST_WIRTUALNY     = 0x601000ULL;
+static constexpr uint64_t BUR_TEKST_WIRTUALNY     = 0x1001000ULL;
 static constexpr uint64_t BUR_DANE_PRZESUNIECIE   =
     BUR_TEKST_PRZESUNIECIE + BUR_TEKST_ROZMIAR;
 static constexpr uint64_t BUR_DANE_WIRTUALNY       =

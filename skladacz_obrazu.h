@@ -296,6 +296,16 @@ void zaktualizuj_pozycje_warstwy(
     int nowy_y
 );
 
+/* Transakcyjna zmiana x/y/szer/wys istniejacej warstwy. Przy bledzie
+ * alokacji lub walidacji stara geometria i bufor pozostaja bez zmian. */
+bool zmien_geometrie_warstwy(
+    int pid,
+    int x,
+    int y,
+    int szer,
+    int wys
+);
+
 /* =========================================================================
  * 8. CZYSZCZENIE
  * ========================================================================= */

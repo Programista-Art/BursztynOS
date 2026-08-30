@@ -16,7 +16,7 @@ struct NaglowekBur {
 
 extern "C" __attribute__((noreturn)) void _start();
 static constexpr uint64_t TEKST_ROZMIAR = 32768ULL;
-static constexpr uint64_t TEKST_WIRTUALNY = 0x601000ULL;
+static constexpr uint64_t TEKST_WIRTUALNY = 0x1001000ULL;
 
 extern "C" {
 __attribute__((section(".naglowek"), used)) NaglowekBur naglowek = {

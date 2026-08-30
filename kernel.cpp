@@ -202,13 +202,23 @@ static inline void serial_outb(uint16_t port,
         : "memory");
 }
 
+void serial_inicjalizuj() {
+    serial_outb(PORT_COM1 + 1, 0x00);
+    serial_outb(PORT_COM1 + 3, 0x80);
+    serial_outb(PORT_COM1 + 0, 0x03);
+    serial_outb(PORT_COM1 + 1, 0x00);
+    serial_outb(PORT_COM1 + 3, 0x03);
+    serial_outb(PORT_COM1 + 2, 0xC7);
+    serial_outb(PORT_COM1 + 4, 0x0B);
+}
+
 void serial_wypisz(const char* tekst) {
     if (!tekst) return;
 
     for (size_t i = 0; tekst[i] != '\0'; ++i) {
-        serial_outb(
-            PORT_COM1,
-            static_cast<uint8_t>(tekst[i]));
+        const uint8_t c = static_cast<uint8_t>(tekst[i]);
+        serial_outb(PORT_COM1, c);
+        serial_outb(0xE9, c);
     }
 }
 
@@ -1512,6 +1522,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
      * zanim zostanie zainstalowany i utworzony pierwszy proces Ring 3.
      */
     asm volatile("cli" ::: "memory");
+    serial_inicjalizuj();
 
     if (multiboot_magic !=
         MULTIBOOT2_BOOTLOADER_MAGIC) {
@@ -1768,7 +1779,11 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
             "Loader nie utworzyl procesu Menedzera Okien.");
     }
 
-/* TEMP-REPRO wylaczony na czas testu GUI */
+    (void)bws_uruchom_program_z_pliku(
+        "/programy/test.cebula/test.bur",
+        PZB_UZYTKOWNIK,
+        PRAWO_GUI,
+        false);
     /*
      * Flaga musi zostac ustawiona PRZED STI.
      * Pierwsze przerwanie timera moze od razu wykonac PrzelaczKontekst().

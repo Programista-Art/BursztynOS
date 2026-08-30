@@ -378,7 +378,7 @@ bool utworz(const char* sciezka) {
     return bws_wywolaj(
         2,
         reinterpret_cast<uint64_t>(sciezka),
-        0, 0, 0) != 0;
+        0, 0, 0) == 1ULL;
 }
 
 bool utworz_katalog_uzytkownika(const char* sciezka) {
@@ -386,7 +386,7 @@ bool utworz_katalog_uzytkownika(const char* sciezka) {
     return bws_wywolaj(
         46,
         reinterpret_cast<uint64_t>(sciezka),
-        0, 0, 0) != 0;
+        0, 0, 0) == 1ULL;
 }
 
 bool zapisz_plik(const char* sciezka,
@@ -400,7 +400,7 @@ bool zapisz_plik(const char* sciezka,
         reinterpret_cast<uint64_t>(sciezka),
         reinterpret_cast<uint64_t>(dane),
         static_cast<uint64_t>(dlugosc),
-        0) != 0;
+        0) == 1ULL;
 }
 
 char pobierz_znak() {
@@ -419,7 +419,7 @@ bool czytaj_plik(const char* sciezka,
         reinterpret_cast<uint64_t>(sciezka),
         reinterpret_cast<uint64_t>(bufor),
         static_cast<uint64_t>(maksymalna_dlugosc),
-        0) != 0;
+        0) == 1ULL;
 }
 
 bool wylistuj_katalog_uzytkownika(const char* sciezka,
@@ -431,7 +431,7 @@ bool wylistuj_katalog_uzytkownika(const char* sciezka,
         reinterpret_cast<uint64_t>(sciezka),
         reinterpret_cast<uint64_t>(bufor),
         static_cast<uint64_t>(maksymalna_dlugosc),
-        0) != 0;
+        0) == 1ULL;
 }
 
 bool uruchom_program_uzytkownika(const char* sciezka) {
@@ -439,7 +439,7 @@ bool uruchom_program_uzytkownika(const char* sciezka) {
     return bws_wywolaj(
         10,
         reinterpret_cast<uint64_t>(sciezka),
-        0, 0, 0) != 0;
+        0, 0, 0) == 1ULL;
 }
 
 bool uruchom_program_z_argumentem_uzytkownika(const char* program,
@@ -449,7 +449,7 @@ bool uruchom_program_z_argumentem_uzytkownika(const char* program,
         10,
         reinterpret_cast<uint64_t>(program),
         reinterpret_cast<uint64_t>(argument),
-        0, 0) != 0;
+        0, 0) == 1ULL;
 }
 
 bool pobierz_argument_startowy(char* bufor, uint32_t pojemnosc) {
@@ -458,7 +458,7 @@ bool pobierz_argument_startowy(char* bufor, uint32_t pojemnosc) {
         45,
         reinterpret_cast<uint64_t>(bufor),
         static_cast<uint64_t>(pojemnosc),
-        0, 0) != 0;
+        0, 0) == 1ULL;
 }
 
 namespace {
@@ -529,7 +529,7 @@ bool bws_siec_dns(const char* domena,
         28,
         reinterpret_cast<uint64_t>(domena),
         reinterpret_cast<uint64_t>(wyjsciowy_ip),
-        0, 0) != 0;
+        0, 0) == 1ULL;
 }
 
 bool bws_siec_pobierz_http(uint8_t* cel_ip,
@@ -557,7 +557,7 @@ bool bws_siec_pobierz_http(uint8_t* cel_ip,
         reinterpret_cast<uint64_t>(cel_ip),
         reinterpret_cast<uint64_t>(domena),
         reinterpret_cast<uint64_t>(sciezka),
-        bufor_i_rozmiar) != 0;
+        bufor_i_rozmiar) == 1ULL;
 }
 
 bool bws_siec_pobierz_https(uint8_t* cel_ip,
@@ -580,12 +580,12 @@ bool bws_siec_pobierz_https(uint8_t* cel_ip,
         reinterpret_cast<uint64_t>(cel_ip),
         reinterpret_cast<uint64_t>(domena),
         reinterpret_cast<uint64_t>(sciezka),
-        bufor_i_rozmiar) != 0;
+        bufor_i_rozmiar) == 1ULL;
 }
 
 bool bws_tls_certyfikat_zaufany() {
     return bws_wywolaj(
-        31, 0, 0, 0, 0) != 0;
+        31, 0, 0, 0, 0) == 1ULL;
 }
 
 __attribute__((noreturn))
@@ -761,14 +761,14 @@ void gui_ustaw_przejecie_myszy(bool stan) {
 bool gui_pobierz_zdarzenie(bws_zdarzenie* zdarzenie) {
     if (!zdarzenie) return false;
     return bws_wywolaj(37,
-        reinterpret_cast<uint64_t>(zdarzenie), 0, 0, 0) != 0;
+        reinterpret_cast<uint64_t>(zdarzenie), 0, 0, 0) == 1ULL;
 }
 
 bool gui_czekaj_na_zdarzenie(bws_zdarzenie* zdarzenie) {
     if (!zdarzenie) return false;
     for (;;) {
         if (bws_wywolaj(38,
-                reinterpret_cast<uint64_t>(zdarzenie), 0, 0, 0) != 0)
+                reinterpret_cast<uint64_t>(zdarzenie), 0, 0, 0) == 1ULL)
             return true;
         /* Proces zostal oznaczony BLOCKED; timer przelaczy go z Ring 3. */
         asm volatile("pause" ::: "memory");
@@ -786,7 +786,7 @@ void gui_ustaw_system_overlay(bool otwarty,
 }
 
 bool gui_minimalizuj_okno() {
-    return bws_wywolaj(41, 0, 0, 0, 0) != 0;
+    return bws_wywolaj(41, 0, 0, 0, 0) == 1ULL;
 }
 
 uint32_t gui_pobierz_okna(GuiOknoInfo* okna, uint32_t max) {
@@ -796,36 +796,36 @@ uint32_t gui_pobierz_okna(GuiOknoInfo* okna, uint32_t max) {
 }
 
 bool gui_aktywuj_okno(uint64_t window_id) {
-    return window_id != 0 && bws_wywolaj(43, window_id, 0, 0, 0) != 0;
+    return window_id != 0 && bws_wywolaj(43, window_id, 0, 0, 0) == 1ULL;
 }
 
 bool usun_twor_uzytkownika(const char* sciezka) {
-    return sciezka && bws_wywolaj(7, reinterpret_cast<uint64_t>(sciezka)) != 0;
+    return sciezka && bws_wywolaj(7, reinterpret_cast<uint64_t>(sciezka)) == 1ULL;
 }
 
 bool zmien_nazwe_uzytkownika(const char* sciezka, const char* nowa_nazwa) {
     return sciezka && nowa_nazwa &&
         bws_wywolaj(8, reinterpret_cast<uint64_t>(sciezka),
-                    reinterpret_cast<uint64_t>(nowa_nazwa)) != 0;
+                    reinterpret_cast<uint64_t>(nowa_nazwa)) == 1ULL;
 }
 
 bool pobierz_metadane_pliku(const char* sciezka,
                             BwsMetadanePliku* metadane) {
     return sciezka && metadane &&
         bws_wywolaj(47, reinterpret_cast<uint64_t>(sciezka),
-                    reinterpret_cast<uint64_t>(metadane)) != 0;
+                    reinterpret_cast<uint64_t>(metadane)) == 1ULL;
 }
 
 bool przenies_twor_uzytkownika(const char* sciezka,
                                const char* folder_docelowy) {
     return sciezka && folder_docelowy &&
         bws_wywolaj(48, reinterpret_cast<uint64_t>(sciezka),
-                    reinterpret_cast<uint64_t>(folder_docelowy)) != 0;
+                    reinterpret_cast<uint64_t>(folder_docelowy)) == 1ULL;
 }
 
 bool gui_rejestruj_cele_drop(const BwsCelDrop* cele, uint32_t liczba) {
     if (liczba > BWS_DROP_CELE_MAX || (liczba != 0 && !cele)) return false;
-    return bws_wywolaj(49, reinterpret_cast<uint64_t>(cele), liczba) != 0;
+    return bws_wywolaj(49, reinterpret_cast<uint64_t>(cele), liczba) == 1ULL;
 }
 
 BwsWynikDrop gui_aktualizuj_drag(const char* sciezka,
@@ -844,24 +844,24 @@ bool ustaw_schowek_plikow(const char* sciezka,
     if (!sciezka || (operacja != BWS_SCHOWEK_COPY &&
                      operacja != BWS_SCHOWEK_CUT)) return false;
     return bws_wywolaj(52, reinterpret_cast<uint64_t>(sciezka),
-                       static_cast<uint64_t>(operacja), 0, 0) != 0;
+                       static_cast<uint64_t>(operacja), 0, 0) == 1ULL;
 }
 
 bool pobierz_schowek_plikow(BwsSchowekPlikow* schowek) {
     return schowek && bws_wywolaj(
-        53, reinterpret_cast<uint64_t>(schowek), 0, 0, 0) != 0;
+        53, reinterpret_cast<uint64_t>(schowek), 0, 0, 0) == 1ULL;
 }
 
 bool wyczysc_schowek_plikow(uint64_t oczekiwana_generacja) {
     return oczekiwana_generacja != 0 &&
-        bws_wywolaj(54, oczekiwana_generacja, 0, 0, 0) != 0;
+        bws_wywolaj(54, oczekiwana_generacja, 0, 0, 0) == 1ULL;
 }
 
 bool kopiuj_twor_uzytkownika(const char* sciezka,
                              const char* folder_docelowy) {
     return sciezka && folder_docelowy &&
         bws_wywolaj(55, reinterpret_cast<uint64_t>(sciezka),
-                    reinterpret_cast<uint64_t>(folder_docelowy), 0, 0) != 0;
+                    reinterpret_cast<uint64_t>(folder_docelowy), 0, 0) == 1ULL;
 }
 
 bool czytaj_fragment_pliku(const char* sciezka, uint64_t offset,
@@ -889,7 +889,171 @@ bool gui_ustaw_popup_aplikacji(bool otwarty,
                                int x, int y, int szer, int wys) {
     return bws_wywolaj(56, otwarty ? 1ULL : 0ULL,
                        spakuj_dwa_i32(x, y),
-                       spakuj_dwa_i32(szer, wys), 0) != 0;
+                       spakuj_dwa_i32(szer, wys), 0) == 1ULL;
+}
+
+bool gui_ustaw_geometrie_okna(int x, int y, int szer, int wys) {
+    if (szer <= 0 || wys <= 0) return false;
+    return bws_wywolaj(BWS_GUI_GEOMETRIA, spakuj_dwa_i32(x, y),
+                       spakuj_dwa_i32(szer, wys), 0, 0) == 1ULL;
+}
+
+uint32_t gui_liczba_monitorow() {
+    const uint64_t n = bws_wywolaj(BWS_GUI_MONITOR_INFO, 0, 0, 0, 0);
+    return n == UINT64_MAX || n > UINT32_MAX ? 0U : static_cast<uint32_t>(n);
+}
+
+bool gui_pobierz_monitor(uint32_t indeks, GuiMonitorInfo* info) {
+    if (!info) return false;
+    return bws_wywolaj(BWS_GUI_MONITOR_INFO, indeks,
+        reinterpret_cast<uint64_t>(info), 0, 0) == 1ULL;
+}
+
+bool gui_ustaw_obszar_roboczy(int x, int y, int szer, int wys) {
+    if (szer <= 0 || wys <= 0) return false;
+    return bws_wywolaj(BWS_GUI_USTAW_WORK_AREA, spakuj_dwa_i32(x, y),
+                       spakuj_dwa_i32(szer, wys), 0, 0) == 1ULL;
+}
+
+uint64_t shm_create(uint64_t rozmiar, uint32_t flagi) {
+    const uint64_t h = bws_wywolaj(BWS_SHM_CREATE, rozmiar, flagi, 0, 0);
+    return h == UINT64_MAX ? 0 : h;
+}
+
+void* shm_map(uint64_t handle, uint32_t flagi) {
+    if (!handle) return nullptr;
+    const uint64_t a = bws_wywolaj(BWS_SHM_MAP, handle, flagi, 0, 0);
+    return a == 0 || a == UINT64_MAX ? nullptr : reinterpret_cast<void*>(a);
+}
+
+bool shm_unmap(void* adres) {
+    return adres && bws_wywolaj(BWS_SHM_UNMAP,
+        reinterpret_cast<uint64_t>(adres), 0, 0, 0) == 1ULL;
+}
+
+bool shm_close(uint64_t handle) {
+    return handle && bws_wywolaj(BWS_SHM_CLOSE, handle, 0, 0, 0) == 1ULL;
+}
+
+uint64_t ipc_create() {
+    const uint64_t h = bws_wywolaj(BWS_IPC_CREATE, 0, 0, 0, 0);
+    return h == UINT64_MAX ? 0 : h;
+}
+
+bool ipc_send(uint64_t endpoint, const BwsIpcWyslij* wiadomosc) {
+    return endpoint && wiadomosc && bws_wywolaj(BWS_IPC_SEND, endpoint,
+        reinterpret_cast<uint64_t>(wiadomosc), 0, 0) == 1ULL;
+}
+
+bool ipc_receive(uint64_t endpoint, BwsIpcOdbierz* wiadomosc) {
+    return endpoint && wiadomosc && bws_wywolaj(BWS_IPC_RECEIVE, endpoint,
+        reinterpret_cast<uint64_t>(wiadomosc), 0, 0) == 1ULL;
+}
+
+bool ipc_close(uint64_t endpoint) {
+    return endpoint && bws_wywolaj(BWS_IPC_CLOSE, endpoint, 0, 0, 0) == 1ULL;
+}
+
+uint64_t file_watch(const char* sciezka, uint32_t maska) {
+    if (!sciezka || !maska) return 0;
+    const uint64_t h = bws_wywolaj(BWS_FILE_WATCH, BWS_FILE_WATCH_DODAJ,
+        reinterpret_cast<uint64_t>(sciezka), maska, 0);
+    return h == UINT64_MAX ? 0 : h;
+}
+
+bool file_unwatch(uint64_t handle) {
+    return handle && bws_wywolaj(BWS_FILE_WATCH, BWS_FILE_WATCH_USUN,
+                                 handle, 0, 0) == 1ULL;
+}
+
+bool clipboard_format(uint32_t indeks, char* mime, uint32_t pojemnosc) {
+    return mime && pojemnosc && bws_wywolaj(BWS_CLIPBOARD_ENUM, indeks,
+        reinterpret_cast<uint64_t>(mime), pojemnosc, 0) == 1ULL;
+}
+
+bool clipboard_size(const char* mime, uint64_t* rozmiar) {
+    return mime && rozmiar && bws_wywolaj(BWS_CLIPBOARD_SIZE,
+        reinterpret_cast<uint64_t>(mime), reinterpret_cast<uint64_t>(rozmiar),
+        0, 0) == 1ULL;
+}
+
+bool clipboard_read(const char* mime, void* dane, uint64_t pojemnosc,
+                    uint64_t* odczytano) {
+    return mime && odczytano && (pojemnosc == 0 || dane) &&
+        bws_wywolaj(BWS_CLIPBOARD_READ, reinterpret_cast<uint64_t>(mime),
+            reinterpret_cast<uint64_t>(dane), pojemnosc,
+            reinterpret_cast<uint64_t>(odczytano)) == 1ULL;
+}
+
+bool clipboard_set(const char* mime, const void* dane, uint64_t rozmiar) {
+    return mime && (rozmiar == 0 || dane) &&
+        bws_wywolaj(BWS_CLIPBOARD_SET, reinterpret_cast<uint64_t>(mime),
+            reinterpret_cast<uint64_t>(dane), rozmiar, 0) == 1ULL;
+}
+
+bool gui_ustaw_kursor(uint32_t typ) {
+    return bws_wywolaj(BWS_GUI_CURSOR_SHAPE, typ, 0, 0, 0) == 1ULL;
+}
+
+bool gui_ustaw_kursor_custom(const GuiCustomCursorInfo* info) {
+    return info && bws_wywolaj(BWS_GUI_CURSOR_CUSTOM,
+        reinterpret_cast<uint64_t>(info), 0, 0, 0) == 1ULL;
+}
+
+uint64_t socket_create(uint32_t typ) {
+    const uint64_t h = bws_wywolaj(BWS_SOCKET_CREATE, typ, 0, 0, 0);
+    return h == UINT64_MAX ? 0 : h;
+}
+
+bool socket_connect(uint64_t handle, const uint8_t ipv4[4], uint16_t port) {
+    return handle && ipv4 && port && bws_wywolaj(BWS_SOCKET_CONNECT, handle,
+        reinterpret_cast<uint64_t>(ipv4), port, 0) == 1ULL;
+}
+
+bool socket_send(uint64_t handle, const void* dane, uint32_t rozmiar,
+                 BwsIoResult* wynik) {
+    return handle && wynik && (rozmiar == 0 || dane) &&
+        bws_wywolaj(BWS_SOCKET_SEND, handle, reinterpret_cast<uint64_t>(dane),
+            rozmiar, reinterpret_cast<uint64_t>(wynik)) == 1ULL;
+}
+
+bool socket_recv(uint64_t handle, void* dane, uint32_t pojemnosc,
+                 BwsIoResult* wynik) {
+    return handle && dane && pojemnosc && wynik &&
+        bws_wywolaj(BWS_SOCKET_RECV, handle, reinterpret_cast<uint64_t>(dane),
+            pojemnosc, reinterpret_cast<uint64_t>(wynik)) == 1ULL;
+}
+
+bool socket_close(uint64_t handle) {
+    return handle && bws_wywolaj(BWS_SOCKET_CLOSE, handle, 0, 0, 0) == 1ULL;
+}
+
+bool ustawienia_sciezka(const char* app_id, const char* klucz,
+                        char* wynik, uint32_t pojemnosc) {
+    if (!app_id || !klucz || !wynik || pojemnosc < 2) return false;
+    const char* prefix = "/uzytkownicy/domyslny/Ustawienia/";
+    uint32_t out = 0;
+    for (uint32_t i = 0; prefix[i]; ++i) {
+        if (out + 1U >= pojemnosc) return false;
+        wynik[out++] = prefix[i];
+    }
+    auto segment = [&](const char* s) {
+        if (!s || !s[0]) return false;
+        for (uint32_t i = 0; s[i]; ++i) {
+            const char c = s[i];
+            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                  (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.'))
+                return false;
+            if (out + 1U >= pojemnosc) return false;
+            wynik[out++] = c;
+        }
+        return true;
+    };
+    if (!segment(app_id) || out + 1U >= pojemnosc) return false;
+    wynik[out++] = '/';
+    if (!segment(klucz) || out >= pojemnosc) return false;
+    wynik[out] = '\0';
+    return true;
 }
 
 void gui_rysuj_standardowa_belke(int x, int y, int szer,

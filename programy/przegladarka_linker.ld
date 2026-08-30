@@ -33,15 +33,15 @@ ENTRY(_start)
 
 BUR_HEADER_OFFSET = 0x00000;
 BUR_HEADER_SIZE   = 0x01000;
-BUR_HEADER_VADDR  = 0x600000;
+BUR_HEADER_VADDR  = 0x1000000;
 
 BUR_TEXT_OFFSET   = 0x01000;
 BUR_TEXT_SIZE     = 0x0F000;
-BUR_TEXT_VADDR    = 0x601000;
+BUR_TEXT_VADDR    = 0x1001000;
 
 BUR_DATA_OFFSET   = 0x10000;
 BUR_DATA_SIZE     = 0x80000;
-BUR_DATA_VADDR    = 0x610000;
+BUR_DATA_VADDR    = 0x1010000;
 
 BUR_TEXT_END      = BUR_TEXT_VADDR + BUR_TEXT_SIZE;
 BUR_DATA_END      = BUR_DATA_VADDR + BUR_DATA_SIZE;
@@ -344,12 +344,12 @@ SECTIONS
 
     ASSERT(
         naglowek == BUR_HEADER_VADDR,
-        "Hussar: symbol naglowek musi zaczynac sie pod 0x600000"
+        "Hussar: symbol naglowek musi zaczynac sie pod 0x1000000"
     )
 
     ASSERT(
         ADDR(.text) == BUR_TEXT_VADDR,
-        "Hussar: TEXT musi zaczynac sie pod 0x601000"
+        "Hussar: TEXT musi zaczynac sie pod 0x1001000"
     )
 
     ASSERT(

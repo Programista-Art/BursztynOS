@@ -19,8 +19,8 @@ extern "C" {
     struct NaglowekBur naglowek = {
         {'B', 'U', 'R', '\0'},
         (uint64_t)&_start,
-        4096, 32768, 0x601000,   // Tekst pod adresem 0x601000
-        36864, 131072, 0x609000  // Dane pod adresem 0x609000
+        4096, 32768, 0x1001000,   // Tekst pod adresem 0x1001000
+        36864, 131072, 0x1009000  // Dane pod adresem 0x1009000
     };
 }
 

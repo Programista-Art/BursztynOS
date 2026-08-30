@@ -17,8 +17,8 @@ extern "C" __attribute__((noreturn)) void _start();
 extern "C" {
 __attribute__((section(".naglowek"), used)) NaglowekBur naglowek = {
     {'B', 'U', 'R', '\0'}, reinterpret_cast<uint64_t>(&_start),
-    UINT64_C(0x1000), UINT64_C(0xC000), UINT64_C(0x601000),
-    UINT64_C(0xD000), UINT64_C(0x20000), UINT64_C(0x60D000)};
+    UINT64_C(0x1000), UINT64_C(0xC000), UINT64_C(0x1001000),
+    UINT64_C(0xD000), UINT64_C(0x20000), UINT64_C(0x100D000)};
 }
 #endif
 

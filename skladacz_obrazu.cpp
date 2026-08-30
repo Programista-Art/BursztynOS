@@ -855,7 +855,7 @@ extern void grafika_prezentuj_region(int,int,int,int);
 extern void grafika_prezentuj_kursor();
 extern void grafika_prezentuj_kursor_w(int,int);
 extern void grafika_pobierz_pozycje_kursora(int*,int*);
-extern void grafika_pobierz_overlay_kursora(int*,int*,bool*);
+extern void grafika_pobierz_overlay_kursora(int*,int*,int*,int*,bool*);
 extern void grafika_zakoncz_scene();
 extern "C" void grafika_naloz_okno_terminala_region(int x, int y,
                                                        int szer, int wys);
@@ -1235,6 +1235,37 @@ void zaktualizuj_pozycje_warstwy(
     p.x=nowy_x;p.y=nowy_y;
     warstwa->x=nowy_x;warstwa->y=nowy_y;
     irq_restore(f);
+}
+
+bool zmien_geometrie_warstwy(
+    int pid,
+    int x,
+    int y,
+    int szer,
+    int wys
+) {
+    warstwa_obrazu* warstwa = pobierz_warstwe(pid);
+    if (!warstwa || !wymiary_mieszcza_sie_na_ekranie(szer, wys))
+        return false;
+
+    if (warstwa->szerokosc == szer && warstwa->wysokosc == wys) {
+        zaktualizuj_pozycje_warstwy(pid, x, y);
+        skladacz_obrazu_zastosuj_pending_geometrii(pid);
+        return true;
+    }
+
+    const int z_order = warstwa->z_order;
+    const bool widoczna = widocznosc_warstwy[pid];
+    const uint32_t stan = stan_okna[pid];
+
+    /* utworz_warstwe najpierw alokuje i zeruje nowy bufor, a dopiero potem
+     * atomowo odpublikowuje stary. Jego sciezka bledu nie zmienia warstwy. */
+    if (utworz_warstwe(pid, x, y, szer, wys, z_order) < 0)
+        return false;
+
+    widocznosc_warstwy[pid] = widoczna;
+    stan_okna[pid] = stan;
+    return true;
 }
 
 void skladacz_obrazu_zastosuj_pending_geometrii(int pid){apply_pending_geometry(pid);}
@@ -1736,7 +1767,7 @@ void skladacz_obrazu_oznacz_ruch_kursora(int old_x,int old_y,int new_x,int new_y
     (void)old_x; (void)old_y;
     const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
     if(sw<=0||sh<=0)return;
-    if(new_x<-16||new_y<-16||new_x>=sw+16||new_y>=sh+16)return;
+    if(new_x<-64||new_y<-64||new_x>=sw+64||new_y>=sh+64)return;
     uint64_t f=irq_off();++licznik_dirty;++dirty_generation;
     cursor_new_x=new_x;cursor_new_y=new_y;cursor_pending=true;
     irq_restore(f);
@@ -1779,9 +1810,11 @@ void skladacz_obrazu_obsluz_dirty() {
     GuardSkladania guard;if(!guard.aktywny()){for(uint32_t i=0;i<count;++i)skladacz_obrazu_oznacz_dirty_rect(work[i].x,work[i].y,work[i].width,work[i].height);if(cursor_work)skladacz_obrazu_oznacz_ruch_kursora(cur_x,cur_y,cur_x,cur_y);if(drag_frame_work){f=irq_off();drag_frame_waiting=true;irq_restore(f);}return;}
     const uint64_t start=hpet_dostepny()?czas_monotoniczny_us():0;LayerRenderInfo layers[MAKS_WARSTW];int layer_count=0;
     if(count)layer_count=snapshot_warstw(layers);
-    int overlay_x=0,overlay_y=0;bool overlay_widoczny=false;
-    grafika_pobierz_overlay_kursora(&overlay_x,&overlay_y,&overlay_widoczny);
-    const GuiDirtyRect overlay_rect{overlay_x,overlay_y,16,16};
+    int overlay_x=0,overlay_y=0,overlay_w=16,overlay_h=16;
+    bool overlay_widoczny=false;
+    grafika_pobierz_overlay_kursora(&overlay_x,&overlay_y,&overlay_w,
+                                    &overlay_h,&overlay_widoczny);
+    const GuiDirtyRect overlay_rect{overlay_x,overlay_y,overlay_w,overlay_h};
     bool dirty_przecina_kursor=false;
     if(overlay_widoczny)for(uint32_t ri=0;ri<count;++ri){
         if(rect_przecina(work[ri],overlay_rect)){dirty_przecina_kursor=true;break;}

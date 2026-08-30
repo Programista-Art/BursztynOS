@@ -190,8 +190,8 @@ RING3_LDFLAGS := \
 #
 # Shell, Kalkulator i Menedzer Okien maja obecnie identyczny kontrakt BUR:
 #
-#   TEXT off 0x1000, size 0x8000, VA 0x601000
-#   DATA off 0x9000, size 0x20000, VA 0x609000
+#   TEXT off 0x1000, size 0x8000, VA 0x1001000
+#   DATA off 0x9000, size 0x20000, VA 0x1009000
 #
 # Dlatego korzystaja ze wspolnego, zweryfikowanego shell_linker.ld.
 #
@@ -240,6 +240,7 @@ OBJS := \
 	grafika.o \
 	syscall.o \
 	syscalls.o \
+	bws_nowoczesne.o \
 	pci.o \
 	ahci.o \
 	ring3.o \
@@ -308,6 +309,12 @@ biblioteki/mbedtls/library/%.o: biblioteki/mbedtls/library/%.c
 mbedtls_port.o: biblioteki/mbedtls/mbedtls_port.cpp biblioteki/mbedtls/bursztyn_mbedtls_config.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
+# Bounded resource tables in the modern BWS layer are intentionally dynamic;
+# optimize its dispatcher for size so the fixed pre-Ring3 kernel VA contract
+# (kernel below 0x600000) remains intact.
+bws_nowoczesne.o: bws_nowoczesne.cpp bws_nowoczesne.h bws_api.h
+	$(CXX) $(KERNEL_CXXFLAGS) -Os -c $< -o $@
+
 hda.o: sterowniki/dzwiek/hda.cpp sterowniki/dzwiek/hda.h pamiec.h pci.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
@@ -334,7 +341,7 @@ xhci_ring.o: sterowniki/usb/xhci_ring.cpp sterowniki/usb/xhci_ring.h sterowniki/
 # ============================================================================
 
 bursztyn_gui.o: bursztyn_gui.cpp bursztyn_gui.h
-	$(CXX) $(RING3_FLAGS) -c $< -o $@
+	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
 
 # ============================================================================
 # 12. SHELL .bur

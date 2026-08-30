@@ -9,13 +9,13 @@ SECTIONS
     }
 
     /* Sekcja kodu aplikacji */
-    . = 0x601000;
+    . = 0x1001000;
     .text : ALIGN(4K) {
         *(.text)
     }
 
     /* Sekcja danych aplikacji */
-    . = 0x609000;
+    . = 0x1009000;
     .data : ALIGN(4K) {
         *(.data)
         *(.rodata*)

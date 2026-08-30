@@ -55,6 +55,8 @@
 #include "skladacz_obrazu.h"
 #include "bws_zdarzenia.h"
 #include "bws_pliki.h"
+#include "bws_api.h"
+#include "bws_nowoczesne.h"
 #include "pamiec.h"
 #include "loader.h"
 #include "heap.h"
@@ -147,6 +149,10 @@ bool bws_gui_blit(
     const uint32_t* piksele
 );
 
+extern "C" void SerialLog(
+    const char* str
+);
+
 bool bws_gui_ustaw_tytul_okna(
     const char* tytul
 );
@@ -186,6 +192,14 @@ extern bool hda_test_ton(
     uint32_t czestotliwosc_hz,
     uint32_t czas_ms
 );
+
+extern "C" uint64_t bws_nowoczesne_obsluz(
+    uint64_t nr, proces_t* proces, uint64_t arg1, uint64_t arg2,
+    uint64_t arg3, uint64_t arg4);
+extern "C" void bws_nowoczesne_posprzataj_proces(int pid, bool aktywny_cr3);
+extern "C" bool bws_socket_rezerwuje_stos_tcp();
+extern "C" void bws_powiadom_zmiane_pliku(const char* sciezka,
+                                            uint32_t akcja);
 
 extern uint32_t tcp_zapisano_bajtow;
 
@@ -391,13 +405,17 @@ struct BlokadaSchowka {
     }
 };
 
-void powiadom_zmiane_systemu_plikow() {
+void powiadom_zmiane_systemu_plikow(
+    const char* sciezka = nullptr,
+    uint32_t akcja = BWS_FILE_MODIFY
+) {
     bws_zdarzenie zdarzenie{};
     zdarzenie.typ = BWS_ZDARZENIE_PLIKI_ZMIENIONE;
     zdarzenie.timestamp = scheduler_pobierz_tick();
     for (int pid = 1; pid < static_cast<int>(PZB_MAKS_PROCESOW); ++pid)
         if (scheduler_pid_uzytkownika(pid))
             (void)scheduler_dodaj_zdarzenie(pid, &zdarzenie);
+    if (sciezka) bws_powiadom_zmiane_pliku(sciezka, akcja);
 }
 
 /* =========================================================================
@@ -988,6 +1006,8 @@ uint64_t bws_wypisz(
         return 0;
     }
 
+    SerialLog(tekst);
+
     BlokadaEkranu blokada;
 
     wypisz_na_ekranie(
@@ -1021,7 +1041,7 @@ uint64_t bws_utworz_plik(
 
     const uint8_t eff = efektywny_pzb_dla_nowego(proces, sciezka);
     const bool wynik = utworz_plik_z_pzb(sciezka, eff);
-    if (wynik) powiadom_zmiane_systemu_plikow();
+    if (wynik) powiadom_zmiane_systemu_plikow(sciezka, BWS_FILE_CREATE);
     return wynik ? 1ULL : 0ULL;
 }
 
@@ -1060,7 +1080,7 @@ uint64_t bws_zapisz_plik(
 
     if (dlugosc == 0) {
         const bool wynik = zapisz_do_pliku(sciezka, nullptr, 0);
-        if (wynik) powiadom_zmiane_systemu_plikow();
+        if (wynik) powiadom_zmiane_systemu_plikow(sciezka, BWS_FILE_MODIFY);
         return wynik ? 1ULL : 0ULL;
     }
 
@@ -1082,7 +1102,7 @@ uint64_t bws_zapisz_plik(
             if (!zapisz_fragment_pliku(sciezka, off, static_cast<char*>(chunk.get()), porcja)) return 0;
             off += porcja;
         }
-        powiadom_zmiane_systemu_plikow();
+        powiadom_zmiane_systemu_plikow(sciezka, BWS_FILE_MODIFY);
         return 1ULL;
     }
 
@@ -1106,7 +1126,7 @@ uint64_t bws_zapisz_plik(
     }
 
     const bool wynik = zapisz_do_pliku(sciezka, dane.jako_char(), dlugosc);
-    if (wynik) powiadom_zmiane_systemu_plikow();
+    if (wynik) powiadom_zmiane_systemu_plikow(sciezka, BWS_FILE_MODIFY);
     return wynik ? 1ULL : 0ULL;
 }
 
@@ -1330,7 +1350,7 @@ uint64_t bws_usun_twor(
     }
 
     const bool wynik = usun_twor(sciezka);
-    if (wynik) powiadom_zmiane_systemu_plikow();
+    if (wynik) powiadom_zmiane_systemu_plikow(sciezka, BWS_FILE_DELETE);
     return wynik ? 1ULL : 0ULL;
 }
 
@@ -1363,7 +1383,7 @@ uint64_t bws_zmien_nazwe(
     }
 
     const bool wynik = zmien_nazwe_tworu(sciezka, nowa_nazwa);
-    if (wynik) powiadom_zmiane_systemu_plikow();
+    if (wynik) powiadom_zmiane_systemu_plikow(sciezka, BWS_FILE_RENAME);
     return wynik ? 1ULL : 0ULL;
 }
 
@@ -1410,7 +1430,7 @@ uint64_t bws_przenies(
     }
     const bool wynik = przenies_twor(sciezka, folder);
     wypisz_log(wynik ? "[PZB] file_move=ALLOW" : "[PSF] file_move=ERROR");
-    if (wynik) powiadom_zmiane_systemu_plikow();
+    if (wynik) powiadom_zmiane_systemu_plikow(sciezka, BWS_FILE_MOVE);
     return wynik ? 1ULL : 0ULL;
 }
 
@@ -1546,7 +1566,7 @@ uint64_t bws_aktualizuj_drag(
         x, y, static_cast<uint32_t>(indeks));
     zrodlo.ostatni_pid_celu = -1;
     zrodlo.ostatni_cel = -1;
-    if (przeniesiono) powiadom_zmiane_systemu_plikow();
+    if (przeniesiono) powiadom_zmiane_systemu_plikow(sciezka, BWS_FILE_MOVE);
     return przeniesiono ? BWS_DROP_PRZENIESIONO : BWS_DROP_BLAD;
 }
 
@@ -1623,7 +1643,7 @@ uint64_t bws_kopiuj_twor(proces_t& proces, uint64_t arg1, uint64_t arg2) {
     const bool wynik = kopiuj_twor_z_pzb(
         sciezka, folder, proces.poziom_zaufania);
     wypisz_log(wynik ? "[PZB] file_copy=ALLOW" : "[PSF] file_copy=ERROR");
-    if (wynik) powiadom_zmiane_systemu_plikow();
+    if (wynik) powiadom_zmiane_systemu_plikow(folder, BWS_FILE_CREATE);
     return wynik ? 1ULL : 0ULL;
 }
 
@@ -1760,6 +1780,12 @@ uint64_t bws_uruchom(
         wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ;
     else if (rowna_sciezka(sciezka,
                            "/programy/kalkulator.cebula/kalkulator.bur"))
+        wymagane = PRAWO_GUI;
+    else if (rowna_sciezka(sciezka,
+                           "/programy/test.cebula/test.bur"))
+        wymagane = PRAWO_GUI;
+    else if (rowna_sciezka(sciezka,
+                           "/gry/snake.cebula/snake.bur"))
         wymagane = PRAWO_GUI;
     else if (rowna_sciezka(sciezka, "/shell.bur"))
         wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ | PRAWO_PLIKI_ZAPISZ |
@@ -1947,7 +1973,8 @@ uint64_t bws_http_common(
 ) {
     if (!proces_ma_prawo(
             proces,
-            PRAWO_SIEC)) {
+            PRAWO_SIEC) ||
+        bws_socket_rezerwuje_stos_tcp()) {
 
         return 0;
     }
@@ -2107,7 +2134,8 @@ uint64_t bws_legacy_http_do_pliku(
             PRAWO_SIEC) ||
         !proces_ma_prawo(
             proces,
-            PRAWO_PLIKI_ZAPISZ)) {
+            PRAWO_PLIKI_ZAPISZ) ||
+        bws_socket_rezerwuje_stos_tcp()) {
 
         return 0;
     }
@@ -2192,13 +2220,11 @@ uint64_t bws_legacy_http_do_pliku(
         sciezka_dyskowa
     );
 
-    return
-        zapisz_do_pliku(
-            sciezka_dyskowa,
-            bufor.jako_char(),
-            odebrano)
-            ? 1ULL
-            : 0ULL;
+    const bool zapisano = zapisz_do_pliku(
+        sciezka_dyskowa, bufor.jako_char(), odebrano);
+    if (zapisano)
+        powiadom_zmiane_systemu_plikow(sciezka_dyskowa, BWS_FILE_MODIFY);
+    return zapisano ? 1ULL : 0ULL;
 }
 
 /* =========================================================================
@@ -2688,11 +2714,17 @@ void bws_zakoncz_biezacy_proces() {
             bws_gui_zwolnij_mysz_procesu(
                 aktualny_pid
             );
+
         }
 
         /* usun_warstwe() zachowuje stary rect i oznacza dokladnie ten
            obszar. Pelnoekranowy dirty przy kazdym SYS_EXIT byl zbedny. */
     }
+
+    /* Zwolnienie SHM/IPC/socketow nie wymaga blokady kompozytora. TCP close
+       moze obslugiwac pakiety, wiec nie wolno trzymac przy nim ekran_zajety. */
+    if (scheduler_pid_uzytkownika(aktualny_pid))
+        bws_nowoczesne_posprzataj_proces(aktualny_pid, true);
 
     zakoncz_aktualny_proces();
 
@@ -2801,6 +2833,12 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
 
     proces_t& proces =
         *proces_ptr;
+
+    if (nr_funkcji >= BWS_GUI_GEOMETRIA &&
+        nr_funkcji < BWS_PIERWSZY_WOLNY) {
+        return bws_nowoczesne_obsluz(
+            nr_funkcji, &proces, arg1, arg2, arg3, arg4);
+    }
 
     switch (nr_funkcji) {
         /* -------------------------------------------------------------
@@ -3541,7 +3579,8 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
             wypisz_log("[PZB] directory_create=ALLOW");
             const uint8_t eff = efektywny_pzb_dla_nowego(proces, sciezka);
             const bool wynik = utworz_katalog_z_pzb(sciezka, eff);
-            if (wynik) powiadom_zmiane_systemu_plikow();
+            if (wynik)
+                powiadom_zmiane_systemu_plikow(sciezka, BWS_FILE_CREATE);
             return wynik ? 1ULL : 0ULL;
         }
 

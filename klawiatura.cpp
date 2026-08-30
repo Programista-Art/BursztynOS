@@ -16,6 +16,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include "bws_zdarzenia.h"
 
 /* =========================================================================
  * PORTY PS/2
@@ -42,6 +43,11 @@ constexpr uint8_t SC_RSHIFT_DOWN = 0x36;
 constexpr uint8_t SC_RSHIFT_UP   = 0xB6;
 
 constexpr uint8_t SC_CAPSLOCK = 0x3A;
+constexpr uint8_t SC_NUMLOCK = 0x45;
+constexpr uint8_t SC_LCTRL_DOWN = 0x1D;
+constexpr uint8_t SC_LCTRL_UP = 0x9D;
+constexpr uint8_t SC_LALT_DOWN = 0x38;
+constexpr uint8_t SC_LALT_UP = 0xB8;
 
 constexpr uint8_t SC_RALT_DOWN_E0 = 0x38;
 constexpr uint8_t SC_RALT_UP_E0   = 0xB8;
@@ -88,6 +94,13 @@ bool lewy_shift = false;
 bool prawy_shift = false;
 bool prawy_alt = false;
 bool caps_lock = false;
+bool lewy_ctrl = false;
+bool prawy_ctrl = false;
+bool lewy_alt = false;
+bool lewy_super = false;
+bool prawy_super = false;
+bool num_lock = false;
+uint32_t usb_modyfikatory = 0;
 
 bool klawisz_rozszerzony_e0 = false;
 uint8_t pozostalo_e1 = 0;
@@ -168,7 +181,27 @@ static inline uint8_t wejscie_port_bajt(uint16_t port) {
  * ========================================================================= */
 
 extern "C" bool zaktualizuj_klawiature_gui(char znak);
+extern "C" bool zaktualizuj_klawisz_fizyczny_gui(
+    uint32_t kod, bool wcisniety, uint32_t modyfikatory);
+extern "C" bool zaktualizuj_tekst_gui(
+    uint32_t codepoint, uint32_t modyfikatory);
 extern "C" void scheduler_wybudz_klawiature();
+
+uint32_t aktualne_modyfikatory() {
+    uint32_t m = 0;
+    if (lewy_shift || prawy_shift) m |= BWS_MOD_SHIFT;
+    if (lewy_ctrl || prawy_ctrl) m |= BWS_MOD_CTRL;
+    if (lewy_alt || prawy_alt) m |= BWS_MOD_ALT;
+    if (lewy_super || prawy_super) m |= BWS_MOD_SUPER;
+    if (caps_lock) m |= BWS_MOD_CAPS;
+    if (num_lock) m |= BWS_MOD_NUM;
+    return m | usb_modyfikatory;
+}
+
+void zglos_fizyczny(uint32_t kod, bool down) {
+    (void)zaktualizuj_klawisz_fizyczny_gui(
+        kod, down, aktualne_modyfikatory());
+}
 
 /* =========================================================================
  * POMOCNICZE OPERACJE BUFORA
@@ -239,6 +272,10 @@ void zglos_utf8_2(uint8_t b1,
      * Para UTF-8 jest logicznie jednym znakiem. Ring buffer jest jednak
      * bajtowy, zgodnie z dotychczasowym API Bursztyna.
      */
+    const uint32_t codepoint =
+        (static_cast<uint32_t>(b1 & 0x1FU) << 6U) |
+        static_cast<uint32_t>(b2 & 0x3FU);
+    (void)zaktualizuj_tekst_gui(codepoint, aktualne_modyfikatory());
     zglos_bajt_do_systemu(b1);
     zglos_bajt_do_systemu(b2);
 }
@@ -382,6 +419,8 @@ void obsluz_zwykly_make_code(uint8_t scancode) {
             znak,
             shift);
 
+    (void)zaktualizuj_tekst_gui(
+        static_cast<uint8_t>(znak), aktualne_modyfikatory());
     zglos_bajt_do_systemu(
         static_cast<uint8_t>(znak));
 }
@@ -396,12 +435,27 @@ void obsluz_e0(uint8_t scancode) {
      */
     if (scancode == SC_RALT_DOWN_E0) {
         prawy_alt = true;
+        zglos_fizyczny(BWS_KEY_SOURCE_E0 | 0x38U, true);
         return;
     }
 
     if (scancode == SC_RALT_UP_E0) {
         prawy_alt = false;
+        zglos_fizyczny(BWS_KEY_SOURCE_E0 | 0x38U, false);
         return;
+    }
+
+    if (scancode == 0x1D) { prawy_ctrl = true;
+        zglos_fizyczny(BWS_KEY_SOURCE_E0 | 0x1DU, true); return; }
+    if (scancode == 0x9D) { prawy_ctrl = false;
+        zglos_fizyczny(BWS_KEY_SOURCE_E0 | 0x1DU, false); return; }
+    if (scancode == 0x5B || scancode == 0x5C) {
+        if (scancode == 0x5B) lewy_super = true; else prawy_super = true;
+        zglos_fizyczny(BWS_KEY_SOURCE_E0 | scancode, true); return;
+    }
+    if (scancode == 0xDB || scancode == 0xDC) {
+        if (scancode == 0xDB) lewy_super = false; else prawy_super = false;
+        zglos_fizyczny(BWS_KEY_SOURCE_E0 | (scancode & 0x7FU), false); return;
     }
 
     /*
@@ -410,6 +464,8 @@ void obsluz_e0(uint8_t scancode) {
      * Dzięki temu shell / edytor tekstu moze w przyszlosci obslugiwac
      * je bez rozszerzania aktualnego bajtowego API klawiatury.
      */
+    zglos_fizyczny(BWS_KEY_SOURCE_E0 | (scancode & 0x7FU),
+                   (scancode & SC_RELEASE_BIT) == 0);
     if ((scancode & SC_RELEASE_BIT) != 0)
         return;
 
@@ -544,22 +600,52 @@ extern "C" void obsluga_przerwania_klawiatury() {
     switch (scancode) {
         case SC_LSHIFT_DOWN:
             lewy_shift = true;
+            zglos_fizyczny(SC_LSHIFT_DOWN, true);
             return;
 
         case SC_LSHIFT_UP:
             lewy_shift = false;
+            zglos_fizyczny(SC_LSHIFT_DOWN, false);
             return;
 
         case SC_RSHIFT_DOWN:
             prawy_shift = true;
+            zglos_fizyczny(SC_RSHIFT_DOWN, true);
             return;
 
         case SC_RSHIFT_UP:
             prawy_shift = false;
+            zglos_fizyczny(SC_RSHIFT_DOWN, false);
             return;
 
         case SC_CAPSLOCK:
             caps_lock = !caps_lock;
+            zglos_fizyczny(SC_CAPSLOCK, true);
+            return;
+
+        case SC_NUMLOCK:
+            num_lock = !num_lock;
+            zglos_fizyczny(SC_NUMLOCK, true);
+            return;
+
+        case SC_LCTRL_DOWN:
+            lewy_ctrl = true;
+            zglos_fizyczny(SC_LCTRL_DOWN, true);
+            return;
+
+        case SC_LCTRL_UP:
+            lewy_ctrl = false;
+            zglos_fizyczny(SC_LCTRL_DOWN, false);
+            return;
+
+        case SC_LALT_DOWN:
+            lewy_alt = true;
+            zglos_fizyczny(SC_LALT_DOWN, true);
+            return;
+
+        case SC_LALT_UP:
+            lewy_alt = false;
+            zglos_fizyczny(SC_LALT_DOWN, false);
             return;
 
         default:
@@ -569,6 +655,7 @@ extern "C" void obsluga_przerwania_klawiatury() {
     /*
      * Break code zwyklego klawisza.
      */
+    zglos_fizyczny(scancode & 0x7FU, (scancode & SC_RELEASE_BIT) == 0);
     if ((scancode & SC_RELEASE_BIT) != 0)
         return;
 
@@ -580,6 +667,10 @@ extern "C" void obsluga_przerwania_klawiatury() {
      * WspolnaObslugaPrzerwan() w idt.cpp wykonuje je centralnie
      * i sprawdza ISR Local APIC, aby uniknac podwojnego EOI.
      */
+}
+
+extern "C" uint32_t klawiatura_modyfikatory() {
+    return aktualne_modyfikatory();
 }
 
 /* =========================================================================
@@ -621,16 +712,47 @@ extern "C" char pobierz_znak_klawiatury() {
  * nigdy skan-kod PS/2; tutaj oba zrodla koncza w tej samej kolejce znakow. */
 extern "C" void usb_wprowadz_raport_klawiatury(const uint8_t* raport) {
     if (!raport) return;
-    const uint8_t modyfikatory=raport[0];
-    const bool przesuniecie=(modyfikatory&0x22U)!=0;
     static uint8_t poprzedni_raport[8]={};
+    static bool usb_caps = false;
+    const uint8_t raw_mod = raport[0];
+    uint32_t mods = usb_caps ? BWS_MOD_CAPS : 0U;
+    if (raw_mod & 0x22U) mods |= BWS_MOD_SHIFT;
+    if (raw_mod & 0x11U) mods |= BWS_MOD_CTRL;
+    if (raw_mod & 0x44U) mods |= BWS_MOD_ALT;
+    if (raw_mod & 0x88U) mods |= BWS_MOD_SUPER;
+    usb_modyfikatory = mods;
+    for (uint8_t bit=0; bit<8; ++bit) {
+        const bool was=(poprzedni_raport[0]&(1U<<bit))!=0;
+        const bool now=(raw_mod&(1U<<bit))!=0;
+        if(was!=now)(void)zaktualizuj_klawisz_fizyczny_gui(
+            BWS_KEY_SOURCE_USB | static_cast<uint32_t>(224U+bit), now, mods);
+    }
+    for (uint8_t i=0;i<6;++i) {
+        const uint8_t old=poprzedni_raport[2+i]; if(!old||old==1U)continue;
+        bool nadal=false;for(uint8_t j=0;j<6;++j)if(raport[2+j]==old)nadal=true;
+        if(!nadal)(void)zaktualizuj_klawisz_fizyczny_gui(
+            BWS_KEY_SOURCE_USB|old,false,mods);
+    }
     for (uint8_t i=0;i<6;++i) {
         const uint8_t u=raport[2+i]; if (!u||u==1U) continue;
         bool poprzedni=false;
         for (uint8_t j=0;j<6;++j) if (poprzedni_raport[2+j]==u) poprzedni=true;
         if (poprzedni) continue;
+        (void)zaktualizuj_klawisz_fizyczny_gui(
+            BWS_KEY_SOURCE_USB|u,true,mods);
+        if (u == 57U) {
+            usb_caps = !usb_caps;
+            if (usb_caps)
+                mods |= BWS_MOD_CAPS;
+            else
+                mods &= ~BWS_MOD_CAPS;
+            usb_modyfikatory = mods;
+            continue;
+        }
+        const bool przesuniecie=(mods&BWS_MOD_SHIFT)!=0;
         char znak=0;
-        if(u>=4U&&u<=29U) znak=static_cast<char>((przesuniecie?'A':'a')+(u-4U));
+        if(u>=4U&&u<=29U){const bool upper=przesuniecie^usb_caps;
+            znak=static_cast<char>((upper?'A':'a')+(u-4U));}
         else if(u>=30U&&u<=39U){static const char zwykle[]="1234567890";static const char sz[]="!@#$%^&*()";znak=(przesuniecie?sz:zwykle)[u-30U];}
         else if(u==40U)znak='\n'; else if(u==41U)znak=27; else if(u==42U)znak='\b';
         else if(u==43U)znak='\t'; else if(u==44U)znak=' ';
@@ -638,7 +760,9 @@ extern "C" void usb_wprowadz_raport_klawiatury(const uint8_t* raport) {
         else if(u==51U)znak=przesuniecie?':':';'; else if(u==52U)znak=przesuniecie?'"':'\'';
         else if(u==53U)znak=przesuniecie?'~':'`'; else if(u==54U)znak=przesuniecie?'<':',';
         else if(u==55U)znak=przesuniecie?'>':'.'; else if(u==56U)znak=przesuniecie?'?':'/';
-        if(znak)zglos_bajt_do_systemu(static_cast<uint8_t>(znak));
+        if(znak){(void)zaktualizuj_tekst_gui(
+            static_cast<uint8_t>(znak),mods);
+            zglos_bajt_do_systemu(static_cast<uint8_t>(znak));}
     }
     for(uint8_t i=0;i<8;++i)poprzedni_raport[i]=raport[i];
 }

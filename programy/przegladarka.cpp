@@ -95,11 +95,11 @@ NaglowekBur naglowek = {
 
     0x1000ULL,
     0xF000ULL,
-    0x601000ULL,
+    0x1001000ULL,
 
     0x10000ULL,
     0x80000ULL,
-    0x610000ULL
+    0x1010000ULL
 };
 
 }

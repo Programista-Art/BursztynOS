@@ -46,6 +46,7 @@ constexpr uint64_t PTE_DIRTY     = 1ULL << 6;
 constexpr uint64_t PTE_PAT_4K    = 1ULL << 7;
 constexpr uint64_t PDE_PS        = 1ULL << 7;
 constexpr uint64_t PTE_GLOBAL    = 1ULL << 8;
+constexpr uint64_t PTE_SHARED    = 1ULL << 9;
 constexpr uint64_t PDE_PAT_LARGE = 1ULL << 12;
 constexpr uint64_t PTE_NX        = 1ULL << 63;
 
@@ -67,7 +68,8 @@ constexpr uint64_t MASKA_FLAG_LISCIA_4K =
     PTE_ACCESSED |
     PTE_DIRTY |
     PTE_PAT_4K |
-    PTE_GLOBAL;
+    PTE_GLOBAL |
+    PTE_SHARED;
 
 constexpr uint64_t MASKA_FLAG_ZACHOWANYCH_Z_2M =
     PTE_PRESENT |
@@ -1040,6 +1042,37 @@ static bool mapuj_strone_wewnetrznie(
     return true;
 }
 
+static bool odmapuj_wspoldzielona_wewnetrznie(
+    uint64_t* pml4,
+    uint64_t adres_wirtualny
+) {
+    if (!pml4 || !adres_strony_poprawny(adres_wirtualny) ||
+        !adres_user_kanoniczny(adres_wirtualny) ||
+        adres_wirtualny < ROZMIAR_STRONY_4K) return false;
+
+    const uint64_t e4 = pml4[indeks_pml4(adres_wirtualny)];
+    if ((e4 & (PTE_PRESENT | PTE_USER)) != (PTE_PRESENT | PTE_USER))
+        return false;
+    uint64_t* pdp = tabela_z_wpisu(e4);
+    if (!pdp) return false;
+    const uint64_t e3 = pdp[indeks_pdp(adres_wirtualny)];
+    if ((e3 & (PTE_PRESENT | PTE_USER)) != (PTE_PRESENT | PTE_USER) ||
+        (e3 & PDE_PS) != 0) return false;
+    uint64_t* pd = tabela_z_wpisu(e3);
+    if (!pd) return false;
+    const uint64_t e2 = pd[indeks_pd(adres_wirtualny)];
+    if ((e2 & (PTE_PRESENT | PTE_USER)) != (PTE_PRESENT | PTE_USER) ||
+        (e2 & PDE_PS) != 0) return false;
+    uint64_t* pt = tabela_z_wpisu(e2);
+    if (!pt) return false;
+    uint64_t& e1 = pt[indeks_pt(adres_wirtualny)];
+    if ((e1 & (PTE_PRESENT | PTE_USER | PTE_SHARED)) !=
+        (PTE_PRESENT | PTE_USER | PTE_SHARED)) return false;
+    e1 = 0;
+    uniewaznij_tlb(adres_wirtualny);
+    return true;
+}
+
 /* =========================================================================
  * WALKER TABLIC STRON
  * ========================================================================= */
@@ -1397,6 +1430,12 @@ static void zniszcz_hierarchie_procesu(
                 continue;
             }
 
+            /* Lifetime ramek SHM prowadzi tabela obiektow BWS. */
+            if ((wpis & PTE_SHARED) != 0) {
+                tabela[i] = 0;
+                continue;
+            }
+
             const uint64_t fiz =
                 wpis &
                 MASKA_ADRESU_4K;
@@ -1737,6 +1776,34 @@ void ZmapujStrone(
             adres_fizyczny),
         flagi
     );
+}
+
+extern "C" bool VmmMapujStroneWspoldzielona(
+    void* adres_wirtualny,
+    void* adres_fizyczny,
+    bool zapis
+) {
+    BlokadaVMM blokada;
+    if (!vmm_zainicjalizowany) return false;
+    uint64_t* aktualne = pml4_z_cr3();
+    if (!aktualne) return false;
+    const uint64_t va = reinterpret_cast<uint64_t>(adres_wirtualny);
+    const uint64_t pa = reinterpret_cast<uint64_t>(adres_fizyczny);
+    if (sprawdz_mapowanie(aktualne, va).obecna) return false;
+    uint32_t flagi = VMM_FLAGA_OBECNA | VMM_FLAGA_USER |
+                     VMM_FLAGA_WSPOLDZIELONA;
+    if (zapis) flagi |= VMM_FLAGA_ZAPIS;
+    return mapuj_strone_wewnetrznie(aktualne, va, pa, flagi);
+}
+
+extern "C" bool VmmOdmapujStroneWspoldzielona(
+    void* adres_wirtualny
+) {
+    BlokadaVMM blokada;
+    if (!vmm_zainicjalizowany) return false;
+    uint64_t* aktualne = pml4_z_cr3();
+    return aktualne && odmapuj_wspoldzielona_wewnetrznie(
+        aktualne, reinterpret_cast<uint64_t>(adres_wirtualny));
 }
 
 /* =========================================================================

@@ -27,8 +27,27 @@ enum bws_typ_zdarzenia : uint32_t {
     /* Addytywne typy: stare aplikacje nie pomyla PPM z lewym DOWN/UP. */
     BWS_ZDARZENIE_MYSZ_PRAWY_DOWN = 20,
     BWS_ZDARZENIE_MYSZ_PRAWY_UP = 21,
-    BWS_ZDARZENIE_PLIKI_ZMIENIONE = 22
+    BWS_ZDARZENIE_PLIKI_ZMIENIONE = 22,
+    /* Addytywne eventy zachowuja 40-bajtowy ABI struktury ponizej. */
+    BWS_ZDARZENIE_KLAWISZ_FIZYCZNY = 23,
+    BWS_ZDARZENIE_TEXT_INPUT = 24,
+    BWS_ZDARZENIE_MYSZ_KOLO = 25,
+    BWS_ZDARZENIE_WSKAZNIK_PRECYZYJNY = 26,
+    BWS_ZDARZENIE_FILE_WATCH = 27,
+    BWS_ZDARZENIE_IPC_READY = 28
 };
+
+enum bws_modyfikatory : uint32_t {
+    BWS_MOD_SHIFT = 1U << 0,
+    BWS_MOD_CTRL  = 1U << 1,
+    BWS_MOD_ALT   = 1U << 2,
+    BWS_MOD_SUPER = 1U << 3,
+    BWS_MOD_CAPS  = 1U << 4,
+    BWS_MOD_NUM   = 1U << 5
+};
+
+#define BWS_KEY_SOURCE_E0  (1U << 8)
+#define BWS_KEY_SOURCE_USB (1U << 16)
 
 struct bws_zdarzenie {
     uint32_t typ;

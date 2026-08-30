@@ -87,11 +87,11 @@ NaglowekBur naglowek = {
 
     UINT64_C(0x1000),
     UINT64_C(0x8000),
-    UINT64_C(0x601000),
+    UINT64_C(0x1001000),
 
     UINT64_C(0x9000),
     UINT64_C(0x20000),
-    UINT64_C(0x609000)
+    UINT64_C(0x1009000)
 };
 
 }

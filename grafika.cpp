@@ -7,6 +7,8 @@
 #include "sterowniki/czas/hpet.h"
 #include "skladacz_obrazu.h"
 #include "bws_zdarzenia.h"
+#include "bws_nowoczesne.h"
+#include "heap.h"
 #include "scheduler.h"
 
 #include <stdint.h>
@@ -30,6 +32,7 @@ extern bool skopiuj_do_przestrzeni_uzytkownika(
 extern bool czy_bezpieczny_zakres_uzytkownika_do_zapisu(
     void* ptr,
     size_t rozmiar);
+extern "C" uint32_t klawiatura_modyfikatory();
 
 // Placement new bez zaleznosci od biblioteki standardowej.
 inline void* operator new(unsigned long, void* p) { return p; }
@@ -525,6 +528,8 @@ static int mysz_y = 300;
 static bool kursor_overlay_widoczny = false;
 static int kursor_overlay_x = 0;
 static int kursor_overlay_y = 0;
+static int kursor_overlay_w = 16;
+static int kursor_overlay_h = 16;
 
 static const uint8_t kursor_bitmapa[16][16] = {
     {1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
@@ -545,6 +550,100 @@ static const uint8_t kursor_bitmapa[16][16] = {
     {0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0}
 };
 
+struct StanKursoraProcesu {
+    uint32_t typ;
+    uint32_t szer;
+    uint32_t wys;
+    uint32_t hotspot_x;
+    uint32_t hotspot_y;
+    uint32_t* piksele;
+};
+
+static StanKursoraProcesu kursory_procesow[SKLADACZ_MAKS_WARSTW] = {};
+
+static const StanKursoraProcesu* aktywny_stan_kursora() {
+    if (aktywny_pid_gui > 0 && aktywny_pid_gui < SKLADACZ_MAKS_WARSTW)
+        return &kursory_procesow[aktywny_pid_gui];
+    return nullptr;
+}
+
+static void parametry_kursora(const StanKursoraProcesu* s,
+                              int* w, int* h, int* hx, int* hy) {
+    if (s && s->typ == GUI_CURSOR_CUSTOM && s->szer && s->wys) {
+        *w = static_cast<int>(s->szer); *h = static_cast<int>(s->wys);
+        *hx = static_cast<int>(s->hotspot_x); *hy = static_cast<int>(s->hotspot_y);
+        return;
+    }
+    *w = 16; *h = 16;
+    const uint32_t typ = s ? s->typ : GUI_CURSOR_ARROW;
+    *hx = typ == GUI_CURSOR_ARROW ? 0 : 8;
+    *hy = typ == GUI_CURSOR_HAND ? 1 : (typ == GUI_CURSOR_ARROW ? 0 : 8);
+}
+
+static bool piksel_kursora(const StanKursoraProcesu* s, int x, int y,
+                           uint32_t* kolor) {
+    if (!kolor || x < 0 || y < 0) return false;
+    const uint32_t typ = s ? s->typ : GUI_CURSOR_ARROW;
+    if (typ == GUI_CURSOR_CUSTOM && s && x < static_cast<int>(s->szer) &&
+        y < static_cast<int>(s->wys)) {
+        if (!s->piksele) return false;
+        const uint32_t p = s->piksele[static_cast<uint32_t>(y) * s->szer +
+                                      static_cast<uint32_t>(x)];
+        if ((p >> 24U) == 0) return false;
+        *kolor = p & 0x00FFFFFFU;
+        return true;
+    }
+    if (x >= 16 || y >= 16) return false;
+    if (typ == GUI_CURSOR_ARROW) {
+        const uint8_t p = kursor_bitmapa[y][x];
+        if (!p) return false;
+        *kolor = p == 1 ? 0x00000000U : 0x00FFFFFFU;
+        return true;
+    }
+    bool on = false;
+    switch (typ) {
+        case GUI_CURSOR_HAND:
+            on = ((x == 7 || x == 8) && y >= 1 && y <= 12) ||
+                 (y >= 6 && y <= 12 && x >= 4 && x <= 11) ||
+                 (y == 13 && x >= 5 && x <= 10);
+            break;
+        case GUI_CURSOR_TEXT:
+            on = (x == 7 || x == 8) || ((y == 1 || y == 14) && x >= 4 && x <= 11);
+            break;
+        case GUI_CURSOR_RESIZE_NS:
+            on = (x == 7 || x == 8) || (y <= 4 && x >= 7-y && x <= 8+y) ||
+                 (y >= 11 && x >= y-8 && x <= 23-y);
+            break;
+        case GUI_CURSOR_RESIZE_EW:
+            on = (y == 7 || y == 8) || (x <= 4 && y >= 7-x && y <= 8+x) ||
+                 (x >= 11 && y >= x-8 && y <= 23-x);
+            break;
+        case GUI_CURSOR_RESIZE_NWSE:
+            on = (x == y || x + 1 == y || y + 1 == x) && x >= 2 && x <= 13;
+            on = on || (x <= 4 && y <= 4 && x + y >= 3) ||
+                 (x >= 11 && y >= 11 && x + y <= 27);
+            break;
+        case GUI_CURSOR_RESIZE_NESW:
+            on = (x + y >= 14 && x + y <= 16 && x >= 2 && x <= 13) ||
+                 (x >= 11 && y <= 4 && x-y <= 13) ||
+                 (x <= 4 && y >= 11 && y-x <= 13);
+            break;
+        case GUI_CURSOR_WAIT: {
+            const int dx = x - 7, dy = y - 7;
+            const int r2 = dx * dx + dy * dy;
+            on = r2 >= 30 && r2 <= 50;
+            break;
+        }
+        case GUI_CURSOR_CROSSHAIR:
+            on = x == 7 || x == 8 || y == 7 || y == 8;
+            break;
+        default: return false;
+    }
+    if (!on) return false;
+    *kolor = ((x + y) & 1) ? 0x00FFFFFFU : 0x00000000U;
+    return true;
+}
+
 // =========================================================================
 // SERIAL
 // =========================================================================
@@ -556,11 +655,14 @@ static inline void serial_outb(uint16_t port, uint8_t val) {
         : "a"(val), "Nd"(port));
 }
 
-void SerialLog(const char* str) {
+extern "C" void SerialLog(const char* str) {
     if (!str) return;
 
-    for (size_t i = 0; str[i] != '\0'; ++i)
-        serial_outb(0x3F8, static_cast<uint8_t>(str[i]));
+    for (size_t i = 0; str[i] != '\0'; ++i) {
+        const uint8_t c = static_cast<uint8_t>(str[i]);
+        serial_outb(0x3F8, c);
+        serial_outb(0xE9, c);
+    }
 }
 
 #ifndef BURSZTYN_DEBUG_GUI_INPUT
@@ -940,12 +1042,14 @@ void grafika_zakoncz_skladanie() {
 void grafika_naloz_kursor_regionu(int x, int y, int szer, int wys) {
     if (!aktywny_ekran || szer <= 0 || wys <= 0) return;
     const int x1=x+szer, y1=y+wys;
-    for (int cy=0;cy<16;++cy) for(int cx=0;cx<16;++cx) {
-        const int px=mysz_x+cx, py=mysz_y+cy;
+    const StanKursoraProcesu* stan=aktywny_stan_kursora();
+    int kw=16,kh=16,hx=0,hy=0;parametry_kursora(stan,&kw,&kh,&hx,&hy);
+    const int left=mysz_x-hx,top=mysz_y-hy;
+    for (int cy=0;cy<kh;++cy) for(int cx=0;cx<kw;++cx) {
+        const int px=left+cx, py=top+cy;
         if(px<x||py<y||px>=x1||py>=y1) continue;
-        const uint8_t typ=kursor_bitmapa[cy][cx];
-        if(typ==1) aktywny_ekran->ZapiszPikselFramebuffer(px,py,0x00000000);
-        else if(typ==2) aktywny_ekran->ZapiszPikselFramebuffer(px,py,0x00FFFFFF);
+        uint32_t kolor=0;if(piksel_kursora(stan,cx,cy,&kolor))
+            aktywny_ekran->ZapiszPikselFramebuffer(px,py,kolor);
     }
 }
 
@@ -961,7 +1065,8 @@ void grafika_prezentuj_region(int x,int y,int szer,int wys){PrzeniesFragmentNaEk
 void grafika_prezentuj_kursor_w(int cursor_x,int cursor_y){
     if(!aktywny_ekran||!backbuffer)return;
     if(kursor_overlay_widoczny){
-        PrzeniesFragmentNaEkran(kursor_overlay_x,kursor_overlay_y,16,16);
+        PrzeniesFragmentNaEkran(kursor_overlay_x,kursor_overlay_y,
+                                kursor_overlay_w,kursor_overlay_h);
         kursor_overlay_widoczny=false;
     }
     /* Call barrier wystarcza sprzetowo dla UC-. Jawna bariera kompilatora
@@ -969,8 +1074,12 @@ void grafika_prezentuj_kursor_w(int cursor_x,int cursor_y){
        takze gdy stary i nowy prostokat sie przecinaja. */
     asm volatile("" ::: "memory");
     const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
-    for(int cy=0;cy<16;++cy)for(int cx=0;cx<16;++cx){int px=cursor_x+cx,py=cursor_y+cy;if(px<0||py<0||px>=sw||py>=sh)continue;uint8_t typ=kursor_bitmapa[cy][cx];if(!typ)continue;aktywny_ekran->ZapiszPikselFramebuffer(px,py,typ==1?0x00000000:0x00FFFFFF);}
-    kursor_overlay_x=cursor_x;kursor_overlay_y=cursor_y;kursor_overlay_widoczny=true;
+    const StanKursoraProcesu* stan=aktywny_stan_kursora();
+    int kw=16,kh=16,hx=0,hy=0;parametry_kursora(stan,&kw,&kh,&hx,&hy);
+    const int left=cursor_x-hx,top=cursor_y-hy;
+    for(int cy=0;cy<kh;++cy)for(int cx=0;cx<kw;++cx){int px=left+cx,py=top+cy;if(px<0||py<0||px>=sw||py>=sh)continue;uint32_t kolor=0;if(!piksel_kursora(stan,cx,cy,&kolor))continue;aktywny_ekran->ZapiszPikselFramebuffer(px,py,kolor);}
+    kursor_overlay_x=left;kursor_overlay_y=top;kursor_overlay_w=kw;
+    kursor_overlay_h=kh;kursor_overlay_widoczny=true;
 }
 void grafika_prezentuj_kursor(){grafika_prezentuj_kursor_w(mysz_x,mysz_y);}
 
@@ -981,9 +1090,11 @@ void grafika_pobierz_pozycje_kursora(int* x,int* y) {
     if(y) *y=mysz_y;
 }
 
-void grafika_pobierz_overlay_kursora(int* x,int* y,bool* widoczny) {
+void grafika_pobierz_overlay_kursora(int* x,int* y,int* w,int* h,bool* widoczny) {
     if(x) *x=kursor_overlay_x;
     if(y) *y=kursor_overlay_y;
+    if(w) *w=kursor_overlay_w;
+    if(h) *h=kursor_overlay_h;
     if(widoczny) *widoczny=kursor_overlay_widoczny;
 }
 
@@ -1769,13 +1880,45 @@ extern "C" bool zaktualizuj_klawiature_gui(char znak) {
     return true;
 }
 
+extern "C" bool zaktualizuj_klawisz_fizyczny_gui(
+    uint32_t kod,
+    bool wcisniety,
+    uint32_t modyfikatory
+) {
+    if (aktywny_pid_gui <= 0) return false;
+    bws_zdarzenie e{};
+    e.typ = BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;
+    e.x = wcisniety ? 1 : 0;
+    e.przyciski = modyfikatory;
+    e.kod = kod;
+    e.timestamp = znacznik_zdarzenia();
+    (void)scheduler_dodaj_zdarzenie(aktywny_pid_gui, &e);
+    return true;
+}
+
+extern "C" bool zaktualizuj_tekst_gui(
+    uint32_t codepoint,
+    uint32_t modyfikatory
+) {
+    if (aktywny_pid_gui <= 0 || codepoint == 0 || codepoint > 0x10FFFFU ||
+        (codepoint >= 0xD800U && codepoint <= 0xDFFFU)) return false;
+    bws_zdarzenie e{};
+    e.typ = BWS_ZDARZENIE_TEXT_INPUT;
+    e.przyciski = modyfikatory;
+    e.kod = codepoint;
+    e.timestamp = znacznik_zdarzenia();
+    (void)scheduler_dodaj_zdarzenie(aktywny_pid_gui, &e);
+    return true;
+}
+
 // =========================================================================
 // KURSOR
 // =========================================================================
 
 void UkryjKursor() {
     if (!kursor_overlay_widoczny || !backbuffer || !aktywny_ekran) return;
-    PrzeniesFragmentNaEkran(kursor_overlay_x,kursor_overlay_y,16,16);
+    PrzeniesFragmentNaEkran(kursor_overlay_x,kursor_overlay_y,
+                            kursor_overlay_w,kursor_overlay_h);
     kursor_overlay_widoczny=false;
 }
 
@@ -1978,8 +2121,13 @@ extern "C" void zaktualizuj_mysze(int dx,
                         (pusc ? BWS_ZDARZENIE_MYSZ_UP : BWS_ZDARZENIE_MYSZ_RUCH);
                 e.x = mysz_x; e.y = mysz_y; e.dx = dx; e.dy = -dy;
                 e.przyciski = przyciski;
+                e.kod = klawiatura_modyfikatory();
                 e.timestamp = znacznik_zdarzenia();
                 scheduler_dodaj_zdarzenie(cel, &e);
+                if (dx != 0 || dy != 0) {
+                    e.typ = BWS_ZDARZENIE_WSKAZNIK_PRECYZYJNY;
+                    scheduler_dodaj_zdarzenie(cel, &e);
+                }
             }
             if (prawy_klik || prawy_pusc) {
                 bws_zdarzenie e{};
@@ -1987,7 +2135,7 @@ extern "C" void zaktualizuj_mysze(int dx,
                                    : BWS_ZDARZENIE_MYSZ_PRAWY_UP;
                 e.x = mysz_x; e.y = mysz_y; e.dx = dx; e.dy = -dy;
                 e.przyciski = przyciski;
-                e.kod = MYSZ_PRZYCISK_PRAWY;
+                e.kod = klawiatura_modyfikatory();
                 e.timestamp = znacznik_zdarzenia();
                 scheduler_dodaj_zdarzenie(cel, &e);
             }
@@ -2159,6 +2307,24 @@ extern "C" void zaktualizuj_mysze(int dx,
 
     skladacz_obrazu_oznacz_ruch_kursora(
         stary_mysz_x, stary_mysz_y, mysz_x, mysz_y);
+}
+
+extern "C" void zaktualizuj_kolo_myszy(
+    int pion,
+    int poziom,
+    uint8_t przyciski
+) {
+    if ((pion == 0 && poziom == 0) || aktywny_pid_gui <= 0) return;
+    const int cel = capture_pid_gui > 0 ? capture_pid_gui : aktywny_pid_gui;
+    if (cel <= 0) return;
+    bws_zdarzenie e{};
+    e.typ = BWS_ZDARZENIE_MYSZ_KOLO;
+    e.x = mysz_x; e.y = mysz_y;
+    e.dx = poziom; e.dy = pion;
+    e.przyciski = przyciski;
+    e.kod = klawiatura_modyfikatory();
+    e.timestamp = znacznik_zdarzenia();
+    (void)scheduler_dodaj_zdarzenie(cel, &e);
 }
 
 extern "C" void obsluga_przerwania_zegara() {
@@ -3148,7 +3314,12 @@ extern "C" void bws_gui_ustaw_capture(bool stan) {
 }
 
 extern "C" void bws_gui_usun_stan_procesu(int pid) {
-    if(pid>0&&pid<SKLADACZ_MAKS_WARSTW)ma_oczekujacy_dirty[pid]=false;
+    if(pid>0&&pid<SKLADACZ_MAKS_WARSTW){
+        ma_oczekujacy_dirty[pid]=false;
+        uint32_t* stare = kursory_procesow[pid].piksele;
+        kursory_procesow[pid]={};
+        if (stare) kfree(stare);
+    }
     if (capture_pid_gui == pid) capture_pid_gui = -1;
     if (aktywny_pid_gui == pid) {
         aktywny_pid_gui = -1;
@@ -3156,6 +3327,59 @@ extern "C" void bws_gui_usun_stan_procesu(int pid) {
         for(int i=1;i<SKLADACZ_MAKS_WARSTW;++i){warstwa_obrazu*w=pobierz_warstwe(i);if(w&&(w->z_order>best_z||(w->z_order==best_z&&i>best))){best=i;best_z=w->z_order;}}
         if(best>0)ustaw_focus_gui(best);
     }
+}
+
+extern "C" bool bws_gui_ustaw_kursor_ksztalt(int pid, uint32_t typ) {
+    if (pid <= 0 || pid >= SKLADACZ_MAKS_WARSTW ||
+        typ > GUI_CURSOR_CROSSHAIR) return false;
+    StanKursoraProcesu nowy{};
+    nowy.typ = typ;
+    uint32_t* stare = kursory_procesow[pid].piksele;
+    kursory_procesow[pid] = nowy;
+    if (stare) kfree(stare);
+    if (aktywny_pid_gui == pid)
+        skladacz_obrazu_oznacz_ruch_kursora(mysz_x, mysz_y, mysz_x, mysz_y);
+    return true;
+}
+
+extern "C" bool bws_gui_ustaw_kursor_custom(
+    int pid,
+    const GuiCustomCursorInfo* info,
+    const uint32_t* piksele
+) {
+    if (pid <= 0 || pid >= SKLADACZ_MAKS_WARSTW || !info || !piksele ||
+        info->szer == 0 || info->wys == 0 ||
+        info->szer > GUI_CURSOR_CUSTOM_MAX_W ||
+        info->wys > GUI_CURSOR_CUSTOM_MAX_H ||
+        info->hotspot_x >= info->szer || info->hotspot_y >= info->wys ||
+        (info->format != GUI_CURSOR_BGRA8888 &&
+         info->format != GUI_CURSOR_RGBA8888)) return false;
+    const uint32_t count = info->szer * info->wys;
+    uint32_t* kopia = static_cast<uint32_t*>(
+        kmalloc(static_cast<uint64_t>(count) * sizeof(uint32_t)));
+    if (!kopia) return false;
+    StanKursoraProcesu nowy{};
+    nowy.typ = GUI_CURSOR_CUSTOM;
+    nowy.szer = info->szer; nowy.wys = info->wys;
+    nowy.hotspot_x = info->hotspot_x; nowy.hotspot_y = info->hotspot_y;
+    nowy.piksele = kopia;
+    for (uint32_t i = 0; i < count; ++i) {
+        const uint32_t p = piksele[i];
+        if (info->format == GUI_CURSOR_BGRA8888) kopia[i] = p;
+        else {
+            const uint32_t a = p & 0xFF000000U;
+            const uint32_t r = p & 0x000000FFU;
+            const uint32_t g = p & 0x0000FF00U;
+            const uint32_t b = p & 0x00FF0000U;
+            kopia[i] = a | (r << 16U) | g | (b >> 16U);
+        }
+    }
+    uint32_t* stare = kursory_procesow[pid].piksele;
+    kursory_procesow[pid] = nowy;
+    if (stare) kfree(stare);
+    if (aktywny_pid_gui == pid)
+        skladacz_obrazu_oznacz_ruch_kursora(mysz_x, mysz_y, mysz_x, mysz_y);
+    return true;
 }
 
 extern "C" int bws_gui_aktywny_pid() { return aktywny_pid_gui; }

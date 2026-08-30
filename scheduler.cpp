@@ -117,6 +117,23 @@ extern "C" void ZniszczPrzestrzenAdresowaProcesu(
     void* pml4
 ) __attribute__((weak));
 
+extern "C" void bws_nowoczesne_posprzataj_proces(
+    int pid,
+    bool aktywny_cr3
+) __attribute__((weak));
+
+extern "C" void usun_warstwe(
+    int pid
+) __attribute__((weak));
+
+extern "C" void bws_gui_usun_stan_procesu(
+    int pid
+) __attribute__((weak));
+
+extern "C" void bws_gui_zwolnij_mysz_procesu(
+    int pid
+) __attribute__((weak));
+
 /* =========================================================================
  * POMOCNICZE OPERACJE CPU
  * ========================================================================= */
@@ -457,6 +474,15 @@ static void posprzataj_zakonczone_procesy(
             continue;
         }
 
+        if (bws_gui_usun_stan_procesu)
+            bws_gui_usun_stan_procesu(pid);
+        if (bws_gui_zwolnij_mysz_procesu)
+            bws_gui_zwolnij_mysz_procesu(pid);
+        if (usun_warstwe)
+            usun_warstwe(pid);
+        if (bws_nowoczesne_posprzataj_proces)
+            bws_nowoczesne_posprzataj_proces(pid, false);
+
         /*
          * Najpierw PML4 i strony user.
          */
@@ -723,6 +749,7 @@ bool scheduler_dodaj_zdarzenie(
     /* MOVE zastępuje najnowszy nieodebrany MOVE po ostatniej krawędzi.
        TIMER pomiędzy nimi nie może tworzyć historii pozycji kursora. */
     if ((zdarzenie->typ == BWS_ZDARZENIE_MYSZ_RUCH ||
+         zdarzenie->typ == BWS_ZDARZENIE_WSKAZNIK_PRECYZYJNY ||
          zdarzenie->typ == BWS_ZDARZENIE_TIMER) && glowa != ogon) {
         uint32_t szukaj=(glowa+ROZMIAR_KOLEJKI_ZDARZEN-1U)%ROZMIAR_KOLEJKI_ZDARZEN;
         bool znaleziono=false;
@@ -732,7 +759,10 @@ bool scheduler_dodaj_zdarzenie(
             if(typ==BWS_ZDARZENIE_MYSZ_DOWN||typ==BWS_ZDARZENIE_MYSZ_UP||
                typ==BWS_ZDARZENIE_MYSZ_PRAWY_DOWN||
                typ==BWS_ZDARZENIE_MYSZ_PRAWY_UP||
-               typ==BWS_ZDARZENIE_KLAWISZ||typ==BWS_ZDARZENIE_FOCUS||
+               typ==BWS_ZDARZENIE_KLAWISZ||
+               typ==BWS_ZDARZENIE_KLAWISZ_FIZYCZNY||
+               typ==BWS_ZDARZENIE_TEXT_INPUT||
+               typ==BWS_ZDARZENIE_MYSZ_KOLO||typ==BWS_ZDARZENIE_FOCUS||
                typ==BWS_ZDARZENIE_BLUR||typ==BWS_ZDARZENIE_ZAMKNIJ)break;
             if(szukaj==ogon)break;
             szukaj=(szukaj+ROZMIAR_KOLEJKI_ZDARZEN-1U)%ROZMIAR_KOLEJKI_ZDARZEN;
@@ -753,6 +783,7 @@ bool scheduler_dodaj_zdarzenie(
         uint32_t usun = ogon;
         while (usun != glowa &&
                q.wpisy[usun].typ != BWS_ZDARZENIE_MYSZ_RUCH &&
+               q.wpisy[usun].typ != BWS_ZDARZENIE_WSKAZNIK_PRECYZYJNY &&
                q.wpisy[usun].typ != BWS_ZDARZENIE_TIMER)
             usun = (usun + 1U) % ROZMIAR_KOLEJKI_ZDARZEN;
         if (usun == glowa) {

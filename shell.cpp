@@ -124,6 +124,10 @@ int shell_w = SHELL_W;
 int shell_h = SHELL_H;
 int shell_screen_w = 1024;
 int shell_screen_h = 768;
+int shell_work_x = 0;
+int shell_work_y = 0;
+int shell_work_w = 1024;
+int shell_work_h = 768;
 int shell_restore_x = SHELL_X_START;
 int shell_restore_y = SHELL_Y_START;
 int shell_restore_w = SHELL_W;
@@ -250,15 +254,17 @@ void shell_obsluz_mysz(const bws_zdarzenie& e) {
             if (!shell_maximized) {
                 shell_restore_x=shell_x; shell_restore_y=shell_y;
                 shell_restore_w=shell_w; shell_restore_h=shell_h;
-                shell_x=0; shell_y=0; shell_w=shell_screen_w;
-                shell_h=shell_screen_h > 40 ? shell_screen_h-40 : shell_screen_h;
+                shell_x=shell_work_x; shell_y=shell_work_y;
+                shell_w=shell_work_w; shell_h=shell_work_h;
                 shell_maximized=true;
             } else {
                 shell_x=shell_restore_x; shell_y=shell_restore_y;
                 shell_w=shell_restore_w; shell_h=shell_restore_h;
                 shell_maximized=false;
             }
-            (void)bws_utworz_warstwe(shell_x,shell_y,shell_w,shell_h,10);
+            if (!gui_ustaw_geometrie_okna(
+                    shell_x, shell_y, shell_w, shell_h))
+                gui_zakoncz_aplikacje();
             shell_rysuj_terminal();
             return;
         }
@@ -287,11 +293,11 @@ void shell_obsluz_mysz(const bws_zdarzenie& e) {
 
 constexpr uint64_t BUR_TEXT_OFFSET = 0x1000ULL;
 constexpr uint64_t BUR_TEXT_SIZE   = 0x8000ULL;
-constexpr uint64_t BUR_TEXT_VADDR  = 0x601000ULL;
+constexpr uint64_t BUR_TEXT_VADDR  = 0x1001000ULL;
 
 constexpr uint64_t BUR_DATA_OFFSET = 0x9000ULL;
 constexpr uint64_t BUR_DATA_SIZE   = 0x20000ULL;
-constexpr uint64_t BUR_DATA_VADDR  = 0x609000ULL;
+constexpr uint64_t BUR_DATA_VADDR  = 0x1009000ULL;
 
 constexpr size_t SHELL_INPUT_CAPACITY = 2048;
 constexpr size_t SHELL_HISTORY_ENTRY_CAPACITY = 2048;
@@ -2267,6 +2273,16 @@ extern "C"
 __attribute__((noreturn))
 void _start() {
     gui_pobierz_rozdzielczosc(&shell_screen_w, &shell_screen_h);
+    GuiMonitorInfo monitor{};
+    if (gui_pobierz_monitor(0, &monitor)) {
+        shell_work_x = monitor.work_x;
+        shell_work_y = monitor.work_y;
+        shell_work_w = monitor.work_szer;
+        shell_work_h = monitor.work_wys;
+    } else {
+        shell_work_w = shell_screen_w;
+        shell_work_h = shell_screen_h;
+    }
     if (bws_utworz_warstwe(shell_x, shell_y, shell_w, shell_h, 10) < 0)
         gui_zakoncz_aplikacje();
     gui_ustaw_przejecie_myszy(true);

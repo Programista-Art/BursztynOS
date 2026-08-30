@@ -23,8 +23,8 @@ extern "C" {
     struct NaglowekBur naglowek = {
         {'B', 'U', 'R', '\0'},
         (uint64_t)&_start,
-        4096, 32768, 0x601000,
-        36864, 131072, 0x609000
+        4096, 32768, 0x1001000,
+        36864, 131072, 0x1009000
     };
 }
 
@@ -1684,6 +1684,13 @@ extern "C" __attribute__((noreturn)) void _start() {
     gui_pobierz_rozdzielczosc(&screen_w, &screen_h);
 
     if (screen_w <= 0 || screen_h <= PASEK_WYS) {
+        gui_zakoncz_aplikacje();
+    }
+
+    /* Tylko zaufany manager z PRAWO_SYSTEM_CONFIG publikuje work area.
+       Aplikacje nie musza znac wysokosci taskbara. */
+    if (!gui_ustaw_obszar_roboczy(
+            0, 0, screen_w, screen_h - PASEK_WYS)) {
         gui_zakoncz_aplikacje();
     }
 

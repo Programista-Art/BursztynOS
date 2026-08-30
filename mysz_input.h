@@ -8,3 +8,5 @@ constexpr uint8_t MYSZ_MASKA_PRZYCISKOW = MYSZ_PRZYCISK_LEWY |
     MYSZ_PRZYCISK_PRAWY | MYSZ_PRZYCISK_SRODKOWY;
 
 extern "C" void zaktualizuj_mysze(int dx,int dy,uint8_t przyciski);
+extern "C" void zaktualizuj_kolo_myszy(
+    int pion, int poziom, uint8_t przyciski);
