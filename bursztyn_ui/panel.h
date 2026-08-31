@@ -1,298 +1,296 @@
 #pragma once
 
-#include "widget.h"
+#include "kontrolka.h"
 
 namespace BursztynUI {
 
-class Panel : public Widget {
+class Panel : public Kontrolka {
 public:
-    Panel(Orientation orientation = Orientation::Vertical)
-        : orientation_(orientation) {
-        style_ = Theme::get_default().panel_style;
-        padding_ = style_.padding;
-        h_align_ = HorizontalAlignment::Stretch;
-        v_align_ = VerticalAlignment::Stretch;
+    Panel(Orientacja orientacja = Orientacja::Pionowa)
+        : orientacja_(orientacja) {
+        styl_ = Motyw::pobierz_domyslny().styl_panelu;
+        wypelnienie_ = styl_.wypelnienie;
+        wyrownanie_poziome_ = WyrownaniePoziome::Rozciagnij;
+        wyrownanie_pionowe_ = WyrownaniePionowe::Rozciagnij;
     }
 
-    Orientation get_orientation() const { return orientation_; }
-    void set_orientation(Orientation o) {
-        if (orientation_ != o) {
-            orientation_ = o;
-            invalidate();
+    Orientacja orientacja() const { return orientacja_; }
+    void ustaw_orientacje(Orientacja o) {
+        if (orientacja_ != o) {
+            orientacja_ = o;
+            uniewaznij();
         }
     }
 
-    int get_spacing() const { return spacing_; }
-    void set_spacing(int s) {
-        if (spacing_ != s) {
-            spacing_ = s < 0 ? 0 : s;
-            invalidate();
+    int odstep() const { return odstep_; }
+    void ustaw_odstep(int o) {
+        if (odstep_ != o) {
+            odstep_ = (o < 0) ? 0 : o;
+            uniewaznij();
         }
     }
 
-    WidgetStyle& get_style() { return style_; }
-    void set_style(const WidgetStyle& s) { style_ = s; invalidate(); }
+    StylKontrolki& styl() { return styl_; }
+    void ustaw_styl(const StylKontrolki& s) { styl_ = s; uniewaznij(); }
 
-    Size measure(Size available_size) override {
-        int pad_h = padding_.horizontal() * dpi_scale_;
-        int pad_v = padding_.vertical() * dpi_scale_;
-        int mar_h = margin_.horizontal() * dpi_scale_;
-        int mar_v = margin_.vertical() * dpi_scale_;
+    Rozmiar zmierz(Rozmiar dostepny_rozmiar) override {
+        int pad_h = wypelnienie_.poziomo() * skala_dpi_;
+        int pad_v = wypelnienie_.pionowo() * skala_dpi_;
+        int mar_h = margines_.poziomo() * skala_dpi_;
+        int mar_v = margines_.pionowo() * skala_dpi_;
 
-        int inner_w = available_size.width - mar_h - pad_h;
-        int inner_h = available_size.height - mar_v - pad_v;
-        if (inner_w < 0) inner_w = 0;
-        if (inner_h < 0) inner_h = 0;
+        int wewn_w = dostepny_rozmiar.szerokosc - mar_h - pad_h;
+        int wewn_h = dostepny_rozmiar.wysokosc - mar_v - pad_v;
+        if (wewn_w < 0) wewn_w = 0;
+        if (wewn_h < 0) wewn_h = 0;
 
-        int total_primary = 0;
-        int max_cross = 0;
-        int visible_count = 0;
+        int suma_glowna = 0;
+        int maks_poprzeczna = 0;
+        int liczba_widocznych = 0;
 
-        for (size_t i = 0; i < child_count_; ++i) {
-            Widget* child = children_[i];
-            if (!child || !child->is_visible()) continue;
+        for (size_t i = 0; i < liczba_dzieci_; ++i) {
+            Kontrolka* child = dzieci_[i];
+            if (!child || !child->czy_widoczna()) continue;
 
-            visible_count++;
-            Thickness cm = child->get_margin();
-            int cm_h = cm.horizontal() * dpi_scale_;
-            int cm_v = cm.vertical() * dpi_scale_;
+            liczba_widocznych++;
+            Marginesy cm = child->margines();
+            int cm_h = cm.poziomo() * skala_dpi_;
+            int cm_v = cm.pionowo() * skala_dpi_;
 
-            Size child_avail(inner_w - cm_h > 0 ? inner_w - cm_h : 0,
-                             inner_h - cm_v > 0 ? inner_h - cm_v : 0);
-            Size measured = child->measure(child_avail);
+            Rozmiar child_avail(wewn_w - cm_h > 0 ? wewn_w - cm_h : 0,
+                                wewn_h - cm_v > 0 ? wewn_h - cm_v : 0);
+            Rozmiar zmierzony = child->zmierz(child_avail);
 
-            if (orientation_ == Orientation::Vertical) {
-                total_primary += measured.height + cm_v;
-                int child_w_with_margin = measured.width + cm_h;
-                if (child_w_with_margin > max_cross) max_cross = child_w_with_margin;
+            if (orientacja_ == Orientacja::Pionowa) {
+                suma_glowna += zmierzony.wysokosc + cm_v;
+                int child_w_with_margin = zmierzony.szerokosc + cm_h;
+                if (child_w_with_margin > maks_poprzeczna) maks_poprzeczna = child_w_with_margin;
             } else {
-                total_primary += measured.width + cm_h;
-                int child_h_with_margin = measured.height + cm_v;
-                if (child_h_with_margin > max_cross) max_cross = child_h_with_margin;
+                suma_glowna += zmierzony.szerokosc + cm_h;
+                int child_h_with_margin = zmierzony.wysokosc + cm_v;
+                if (child_h_with_margin > maks_poprzeczna) maks_poprzeczna = child_h_with_margin;
             }
         }
 
-        if (visible_count > 1) {
-            total_primary += (visible_count - 1) * spacing_ * dpi_scale_;
+        if (liczba_widocznych > 1) {
+            suma_glowna += (liczba_widocznych - 1) * odstep_ * skala_dpi_;
         }
 
-        Size desired;
-        if (orientation_ == Orientation::Vertical) {
-            desired.width = max_cross + pad_h;
-            desired.height = total_primary + pad_v;
+        Rozmiar zadany;
+        if (orientacja_ == Orientacja::Pionowa) {
+            zadany.szerokosc = maks_poprzeczna + pad_h;
+            zadany.wysokosc = suma_glowna + pad_v;
         } else {
-            desired.width = total_primary + pad_h;
-            desired.height = max_cross + pad_v;
+            zadany.szerokosc = suma_glowna + pad_h;
+            zadany.wysokosc = maks_poprzeczna + pad_v;
         }
 
-        if (preferred_size_.width >= 0) desired.width = preferred_size_.width * dpi_scale_;
-        if (preferred_size_.height >= 0) desired.height = preferred_size_.height * dpi_scale_;
+        if (preferowany_rozmiar_.szerokosc >= 0) zadany.szerokosc = preferowany_rozmiar_.szerokosc * skala_dpi_;
+        if (preferowany_rozmiar_.wysokosc >= 0) zadany.wysokosc = preferowany_rozmiar_.wysokosc * skala_dpi_;
 
-        desired.width = clamp(desired.width, min_size_.width * dpi_scale_, max_size_.width * dpi_scale_);
-        desired.height = clamp(desired.height, min_size_.height * dpi_scale_, max_size_.height * dpi_scale_);
+        zadany.szerokosc = przytnij(zadany.szerokosc, minimalny_rozmiar_.szerokosc * skala_dpi_, maksymalny_rozmiar_.szerokosc * skala_dpi_);
+        zadany.wysokosc = przytnij(zadany.wysokosc, minimalny_rozmiar_.wysokosc * skala_dpi_, maksymalny_rozmiar_.wysokosc * skala_dpi_);
 
-        desired.width += mar_h;
-        desired.height += mar_v;
-        return desired;
+        return zadany;
     }
 
-    void arrange(Rect final_rect) override {
-        bounds_ = final_rect;
-        Point parent_pos = parent_ ? parent_->get_screen_bounds().position() : Point(0, 0);
-        screen_bounds_ = Rect(parent_pos.x + bounds_.x, parent_pos.y + bounds_.y,
-                              bounds_.width, bounds_.height);
+    void rozmiesc(Prostokat docelowy_obszar) override {
+        obszar_ = docelowy_obszar;
+        Punkt rodzic_poz = rodzic_ ? rodzic_->obszar_ekranu().pozycja() : Punkt(0, 0);
+        obszar_ekranu_ = Prostokat(rodzic_poz.x + obszar_.x, rodzic_poz.y + obszar_.y,
+                                   obszar_.szerokosc, obszar_.wysokosc);
 
-        int pad_l = padding_.left * dpi_scale_;
-        int pad_t = padding_.top * dpi_scale_;
-        int pad_r = padding_.right * dpi_scale_;
-        int pad_b = padding_.bottom * dpi_scale_;
+        int pad_l = wypelnienie_.lewy * skala_dpi_;
+        int pad_t = wypelnienie_.gorny * skala_dpi_;
+        int pad_r = wypelnienie_.prawy * skala_dpi_;
+        int pad_b = wypelnienie_.dolny * skala_dpi_;
 
-        int client_x = pad_l;
-        int client_y = pad_t;
-        int client_w = bounds_.width - (pad_l + pad_r);
-        int client_h = bounds_.height - (pad_t + pad_b);
-        if (client_w < 0) client_w = 0;
-        if (client_h < 0) client_h = 0;
+        int klient_x = pad_l;
+        int klient_y = pad_t;
+        int klient_w = obszar_.szerokosc - (pad_l + pad_r);
+        int klient_h = obszar_.wysokosc - (pad_t + pad_b);
+        if (klient_w < 0) klient_w = 0;
+        if (klient_h < 0) klient_h = 0;
 
-        int num_visible = 0;
-        int fixed_primary = 0;
-        int stretch_count = 0;
+        int liczba_widocznych = 0;
+        int suma_stala_glowna = 0;
+        int liczba_rozciagliwych = 0;
 
-        for (size_t i = 0; i < child_count_; ++i) {
-            Widget* child = children_[i];
-            if (!child || !child->is_visible()) continue;
-            num_visible++;
+        for (size_t i = 0; i < liczba_dzieci_; ++i) {
+            Kontrolka* child = dzieci_[i];
+            if (!child || !child->czy_widoczna()) continue;
+            liczba_widocznych++;
 
-            Thickness cm = child->get_margin();
-            int cm_h = cm.horizontal() * dpi_scale_;
-            int cm_v = cm.vertical() * dpi_scale_;
+            Marginesy cm = child->margines();
+            int cm_h = cm.poziomo() * skala_dpi_;
+            int cm_v = cm.pionowo() * skala_dpi_;
 
-            Size sz = child->measure(Size(client_w - cm_h > 0 ? client_w - cm_h : 0,
-                                          client_h - cm_v > 0 ? client_h - cm_v : 0));
+            Rozmiar sz = child->zmierz(Rozmiar(klient_w - cm_h > 0 ? klient_w - cm_h : 0,
+                                               klient_h - cm_v > 0 ? klient_h - cm_v : 0));
 
-            if (orientation_ == Orientation::Vertical) {
-                if (child->get_vertical_alignment() == VerticalAlignment::Stretch) {
-                    stretch_count++;
+            if (orientacja_ == Orientacja::Pionowa) {
+                if (child->wyrownanie_pionowe() == WyrownaniePionowe::Rozciagnij) {
+                    liczba_rozciagliwych++;
                 } else {
-                    int h = sz.height;
-                    if (child->get_preferred_size().height >= 0) {
-                        h = child->get_preferred_size().height * dpi_scale_;
+                    int h = sz.wysokosc;
+                    if (child->preferowany_rozmiar().wysokosc >= 0) {
+                        h = child->preferowany_rozmiar().wysokosc * skala_dpi_;
                     }
-                    h = clamp(h, child->get_min_size().height * dpi_scale_, child->get_max_size().height * dpi_scale_);
-                    fixed_primary += h + cm_v;
+                    h = przytnij(h, child->minimalny_rozmiar().wysokosc * skala_dpi_, child->maksymalny_rozmiar().wysokosc * skala_dpi_);
+                    suma_stala_glowna += h + cm_v;
                 }
             } else {
-                if (child->get_horizontal_alignment() == HorizontalAlignment::Stretch) {
-                    stretch_count++;
+                if (child->wyrownanie_poziome() == WyrownaniePoziome::Rozciagnij) {
+                    liczba_rozciagliwych++;
                 } else {
-                    int w = sz.width;
-                    if (child->get_preferred_size().width >= 0) {
-                        w = child->get_preferred_size().width * dpi_scale_;
+                    int w = sz.szerokosc;
+                    if (child->preferowany_rozmiar().szerokosc >= 0) {
+                        w = child->preferowany_rozmiar().szerokosc * skala_dpi_;
                     }
-                    w = clamp(w, child->get_min_size().width * dpi_scale_, child->get_max_size().width * dpi_scale_);
-                    fixed_primary += w + cm_h;
+                    w = przytnij(w, child->minimalny_rozmiar().szerokosc * skala_dpi_, child->maksymalny_rozmiar().szerokosc * skala_dpi_);
+                    suma_stala_glowna += w + cm_h;
                 }
             }
         }
 
-        int total_spacing = (num_visible > 1) ? (num_visible - 1) * spacing_ * dpi_scale_ : 0;
-        int available_for_stretch = (orientation_ == Orientation::Vertical)
-                                   ? (client_h - fixed_primary - total_spacing)
-                                   : (client_w - fixed_primary - total_spacing);
-        if (available_for_stretch < 0) available_for_stretch = 0;
+        int calkowity_odstep = (liczba_widocznych > 1) ? (liczba_widocznych - 1) * odstep_ * skala_dpi_ : 0;
+        int dostepne_na_rozciagniecie = (orientacja_ == Orientacja::Pionowa)
+                                       ? (klient_h - suma_stala_glowna - calkowity_odstep)
+                                       : (klient_w - suma_stala_glowna - calkowity_odstep);
+        if (dostepne_na_rozciagniecie < 0) dostepne_na_rozciagniecie = 0;
 
-        int stretch_share = (stretch_count > 0) ? (available_for_stretch / stretch_count) : 0;
+        int porcja_rozciagniecia = (liczba_rozciagliwych > 0) ? (dostepne_na_rozciagniecie / liczba_rozciagliwych) : 0;
 
-        int cur_pos = (orientation_ == Orientation::Vertical) ? client_y : client_x;
+        int biez_pozycja = (orientacja_ == Orientacja::Pionowa) ? klient_y : klient_x;
 
-        for (size_t i = 0; i < child_count_; ++i) {
-            Widget* child = children_[i];
-            if (!child || !child->is_visible()) continue;
+        for (size_t i = 0; i < liczba_dzieci_; ++i) {
+            Kontrolka* child = dzieci_[i];
+            if (!child || !child->czy_widoczna()) continue;
 
-            Thickness cm = child->get_margin();
-            int cml = cm.left * dpi_scale_;
-            int cmt = cm.top * dpi_scale_;
-            int cmr = cm.right * dpi_scale_;
-            int cmb = cm.bottom * dpi_scale_;
+            Marginesy cm = child->margines();
+            int cml = cm.lewy * skala_dpi_;
+            int cmt = cm.gorny * skala_dpi_;
+            int cmr = cm.prawy * skala_dpi_;
+            int cmb = cm.dolny * skala_dpi_;
             int cm_h = cml + cmr;
             int cm_v = cmt + cmb;
 
-            Size sz = child->measure(Size(client_w - cm_h > 0 ? client_w - cm_h : 0,
-                                          client_h - cm_v > 0 ? client_h - cm_v : 0));
+            Rozmiar sz = child->zmierz(Rozmiar(klient_w - cm_h > 0 ? klient_w - cm_h : 0,
+                                               klient_h - cm_v > 0 ? klient_h - cm_v : 0));
 
-            Rect child_rect;
-            if (orientation_ == Orientation::Vertical) {
+            Prostokat obszar_dziecka;
+            if (orientacja_ == Orientacja::Pionowa) {
                 int child_h = 0;
-                if (child->get_vertical_alignment() == VerticalAlignment::Stretch) {
-                    child_h = stretch_share - cm_v;
+                if (child->wyrownanie_pionowe() == WyrownaniePionowe::Rozciagnij) {
+                    child_h = porcja_rozciagniecia - cm_v;
                     if (child_h < 0) child_h = 0;
                 } else {
-                    child_h = sz.height;
-                    if (child->get_preferred_size().height >= 0) {
-                        child_h = child->get_preferred_size().height * dpi_scale_;
+                    child_h = sz.wysokosc;
+                    if (child->preferowany_rozmiar().wysokosc >= 0) {
+                        child_h = child->preferowany_rozmiar().wysokosc * skala_dpi_;
                     }
                 }
-                child_h = clamp(child_h, child->get_min_size().height * dpi_scale_, child->get_max_size().height * dpi_scale_);
+                child_h = przytnij(child_h, child->minimalny_rozmiar().wysokosc * skala_dpi_, child->maksymalny_rozmiar().wysokosc * skala_dpi_);
 
                 int child_w = 0;
-                int child_x = client_x + cml;
-                int avail_w = client_w - cm_h;
-                if (avail_w < 0) avail_w = 0;
+                int child_x = klient_x + cml;
+                int dostepne_w = klient_w - cm_h;
+                if (dostepne_w < 0) dostepne_w = 0;
 
-                if (child->get_horizontal_alignment() == HorizontalAlignment::Stretch) {
-                    child_w = avail_w;
+                if (child->wyrownanie_poziome() == WyrownaniePoziome::Rozciagnij) {
+                    child_w = dostepne_w;
                 } else {
-                    child_w = sz.width;
-                    if (child->get_preferred_size().width >= 0) {
-                        child_w = child->get_preferred_size().width * dpi_scale_;
+                    child_w = sz.szerokosc;
+                    if (child->preferowany_rozmiar().szerokosc >= 0) {
+                        child_w = child->preferowany_rozmiar().szerokosc * skala_dpi_;
                     }
-                    if (child_w > avail_w) child_w = avail_w;
+                    if (child_w > dostepne_w) child_w = dostepne_w;
 
-                    if (child->get_horizontal_alignment() == HorizontalAlignment::Center) {
-                        child_x = client_x + cml + (avail_w - child_w) / 2;
-                    } else if (child->get_horizontal_alignment() == HorizontalAlignment::End) {
-                        child_x = client_x + client_w - cmr - child_w;
+                    if (child->wyrownanie_poziome() == WyrownaniePoziome::Srodek) {
+                        child_x = klient_x + cml + (dostepne_w - child_w) / 2;
+                    } else if (child->wyrownanie_poziome() == WyrownaniePoziome::Koniec) {
+                        child_x = klient_x + klient_w - cmr - child_w;
                     }
                 }
-                child_w = clamp(child_w, child->get_min_size().width * dpi_scale_, child->get_max_size().width * dpi_scale_);
+                child_w = przytnij(child_w, child->minimalny_rozmiar().szerokosc * skala_dpi_, child->maksymalny_rozmiar().szerokosc * skala_dpi_);
 
-                child_rect = Rect(child_x, cur_pos + cmt, child_w, child_h);
-                cur_pos += child_h + cm_v + spacing_ * dpi_scale_;
+                obszar_dziecka = Prostokat(child_x, biez_pozycja + cmt, child_w, child_h);
+                biez_pozycja += child_h + cm_v + odstep_ * skala_dpi_;
             } else {
                 int child_w = 0;
-                if (child->get_horizontal_alignment() == HorizontalAlignment::Stretch) {
-                    child_w = stretch_share - cm_h;
+                if (child->wyrownanie_poziome() == WyrownaniePoziome::Rozciagnij) {
+                    child_w = porcja_rozciagniecia - cm_h;
                     if (child_w < 0) child_w = 0;
                 } else {
-                    child_w = sz.width;
-                    if (child->get_preferred_size().width >= 0) {
-                        child_w = child->get_preferred_size().width * dpi_scale_;
+                    child_w = sz.szerokosc;
+                    if (child->preferowany_rozmiar().szerokosc >= 0) {
+                        child_w = child->preferowany_rozmiar().szerokosc * skala_dpi_;
                     }
                 }
-                child_w = clamp(child_w, child->get_min_size().width * dpi_scale_, child->get_max_size().width * dpi_scale_);
+                child_w = przytnij(child_w, child->minimalny_rozmiar().szerokosc * skala_dpi_, child->maksymalny_rozmiar().szerokosc * skala_dpi_);
 
                 int child_h = 0;
-                int child_y = client_y + cmt;
-                int avail_h = client_h - cm_v;
-                if (avail_h < 0) avail_h = 0;
+                int child_y = klient_y + cmt;
+                int dostepne_h = klient_h - cm_v;
+                if (dostepne_h < 0) dostepne_h = 0;
 
-                if (child->get_vertical_alignment() == VerticalAlignment::Stretch) {
-                    child_h = avail_h;
+                if (child->wyrownanie_pionowe() == WyrownaniePionowe::Rozciagnij) {
+                    child_h = dostepne_h;
                 } else {
-                    child_h = sz.height;
-                    if (child->get_preferred_size().height >= 0) {
-                        child_h = child->get_preferred_size().height * dpi_scale_;
+                    child_h = sz.wysokosc;
+                    if (child->preferowany_rozmiar().wysokosc >= 0) {
+                        child_h = child->preferowany_rozmiar().wysokosc * skala_dpi_;
                     }
-                    if (child_h > avail_h) child_h = avail_h;
+                    if (child_h > dostepne_h) child_h = dostepne_h;
 
-                    if (child->get_vertical_alignment() == VerticalAlignment::Center) {
-                        child_y = client_y + cmt + (avail_h - child_h) / 2;
-                    } else if (child->get_vertical_alignment() == VerticalAlignment::End) {
-                        child_y = client_y + client_h - cmb - child_h;
+                    if (child->wyrownanie_pionowe() == WyrownaniePionowe::Srodek) {
+                        child_y = klient_y + cmt + (dostepne_h - child_h) / 2;
+                    } else if (child->wyrownanie_pionowe() == WyrownaniePionowe::Koniec) {
+                        child_y = klient_y + klient_h - cmb - child_h;
                     }
                 }
-                child_h = clamp(child_h, child->get_min_size().height * dpi_scale_, child->get_max_size().height * dpi_scale_);
+                child_h = przytnij(child_h, child->minimalny_rozmiar().wysokosc * skala_dpi_, child->maksymalny_rozmiar().wysokosc * skala_dpi_);
 
-                child_rect = Rect(cur_pos + cml, child_y, child_w, child_h);
-                cur_pos += child_w + cm_h + spacing_ * dpi_scale_;
+                obszar_dziecka = Prostokat(biez_pozycja + cml, child_y, child_w, child_h);
+                biez_pozycja += child_w + cm_h + odstep_ * skala_dpi_;
             }
 
-            child->arrange(child_rect);
+            child->rozmiesc(obszar_dziecka);
         }
     }
 
-    void paint_self(DrawingContext& ctx) override {
-        const StateStyle& s = is_enabled_ ? style_.normal : style_.disabled;
-        if (s.background != 0) {
-            if (s.corner_radius > 0) {
-                ctx.draw_rounded_rect(Rect(0, 0, bounds_.width, bounds_.height), s.background, s.corner_radius * dpi_scale_);
+    void rysuj_siebie(KontekstRysowania& ctx) override {
+        const StylStanu& s = czy_wlaczona_ ? styl_.normalny : styl_.wylaczony;
+        if (s.tlo != 0) {
+            if (s.promien_zaokraglenia > 0) {
+                ctx.rysuj_zaokraglony_prostokat(Prostokat(0, 0, obszar_.szerokosc, obszar_.wysokosc), s.tlo, s.promien_zaokraglenia * skala_dpi_);
             } else {
-                ctx.draw_rect(Rect(0, 0, bounds_.width, bounds_.height), s.background);
+                ctx.rysuj_prostokat(Prostokat(0, 0, obszar_.szerokosc, obszar_.wysokosc), s.tlo);
             }
         }
-        if (s.border != 0 && s.border_thickness > 0) {
-            if (s.corner_radius > 0) {
-                ctx.draw_rounded_border(Rect(0, 0, bounds_.width, bounds_.height), s.border, s.corner_radius * dpi_scale_, s.border_thickness * dpi_scale_);
+        if (s.ramka != 0 && s.grubosc_ramki > 0) {
+            if (s.promien_zaokraglenia > 0) {
+                ctx.rysuj_zaokraglona_ramke(Prostokat(0, 0, obszar_.szerokosc, obszar_.wysokosc), s.ramka, s.promien_zaokraglenia * skala_dpi_, s.grubosc_ramki * skala_dpi_);
             } else {
-                ctx.draw_border(Rect(0, 0, bounds_.width, bounds_.height), s.border, s.border_thickness * dpi_scale_);
+                ctx.rysuj_ramke(Prostokat(0, 0, obszar_.szerokosc, obszar_.wysokosc), s.ramka, s.grubosc_ramki * skala_dpi_);
             }
         }
     }
 
 private:
-    Orientation orientation_{Orientation::Vertical};
-    int spacing_{6};
-    WidgetStyle style_;
+    Orientacja orientacja_{Orientacja::Pionowa};
+    int odstep_{6};
+    StylKontrolki styl_;
 };
 
-class Row : public Panel {
+class Wiersz : public Panel {
 public:
-    Row() : Panel(Orientation::Horizontal) {}
+    Wiersz() : Panel(Orientacja::Pozioma) {}
 };
 
-class Column : public Panel {
+class Kolumna : public Panel {
 public:
-    Column() : Panel(Orientation::Vertical) {}
+    Kolumna() : Panel(Orientacja::Pionowa) {}
 };
 
 } // namespace BursztynUI
