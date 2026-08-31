@@ -36,6 +36,10 @@ public:
         if (!glowne_okno_) return -1;
         czy_dziala_ = true;
 
+        // Geometria zadana przez aplikacje nie moze wyjsc poza obszar
+        // roboczy zwrocony przez BWS62 (np. zaslonic paska zadan).
+        glowne_okno_->dopasuj_do_obszaru_roboczego(true);
+
         int wx = glowne_okno_->x();
         int wy = glowne_okno_->y();
         int ww = glowne_okno_->szerokosc();

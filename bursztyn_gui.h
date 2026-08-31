@@ -255,6 +255,7 @@ char pobierz_znak();
 
 void* gui_malloc(unsigned long rozmiar);
 void gui_free(void* ptr);
+uint64_t gui_liczba_alokacji_sterty();
 
 void* operator new(unsigned long rozmiar);
 void* operator new[](unsigned long rozmiar);

@@ -15,6 +15,8 @@ public:
     Okno(const char* tytul_okna = "Okno BursztynUI", int szerokosc = 480, int wysokosc = 320)
         : szerokosc_(szerokosc), wysokosc_(wysokosc) {
         ustaw_tytul(tytul_okna);
+        dopasuj_do_obszaru_roboczego(true);
+        zapisana_geometria_ = Prostokat(x_, y_, szerokosc_, wysokosc_);
         domyslny_korzen_ = new Panel(Orientacja::Pionowa);
         kontrolka_glowna_ = domyslny_korzen_;
     }
@@ -50,14 +52,17 @@ public:
     void ustaw_pozycje(int x, int y) {
         x_ = x;
         y_ = y;
+        dopasuj_do_obszaru_roboczego(true);
     }
 
     void ustaw_rozmiar(int w, int h) {
         if (w < 100) w = 100;
         if (h < 60) h = 60;
-        if (szerokosc_ != w || wysokosc_ != h) {
-            szerokosc_ = w;
-            wysokosc_ = h;
+        bool zmiana = szerokosc_ != w || wysokosc_ != h;
+        szerokosc_ = w;
+        wysokosc_ = h;
+        dopasuj_do_obszaru_roboczego(true);
+        if (zmiana || szerokosc_ != w || wysokosc_ != h) {
             przelicz_uklad();
             czy_brudne_ = true;
         }
@@ -67,6 +72,28 @@ public:
         x_ = x;
         y_ = y;
         ustaw_rozmiar(w, h);
+        dopasuj_do_obszaru_roboczego(true);
+    }
+
+    // Wywolywane przed utworzeniem warstwy oraz po programowej zmianie
+    // geometrii. BWS62 jest jedynym zrodlem rozmiaru obszaru roboczego.
+    void dopasuj_do_obszaru_roboczego(bool dopasuj_rozmiar = true) {
+        Prostokat work = pobierz_obszar_roboczy();
+        if (dopasuj_rozmiar || szerokosc_ > work.szerokosc) {
+            if (szerokosc_ > work.szerokosc) szerokosc_ = work.szerokosc;
+        }
+        if (dopasuj_rozmiar || wysokosc_ > work.wysokosc) {
+            if (wysokosc_ > work.wysokosc) wysokosc_ = work.wysokosc;
+        }
+        if (szerokosc_ < 1) szerokosc_ = 1;
+        if (wysokosc_ < 1) wysokosc_ = 1;
+
+        int max_x = work.prawy() - szerokosc_;
+        int max_y = work.dolny() - wysokosc_;
+        if (max_x < work.x) max_x = work.x;
+        if (max_y < work.y) max_y = work.y;
+        x_ = przytnij(x_, work.x, max_x);
+        y_ = przytnij(y_, work.y, max_y);
     }
 
     Kontrolka* kontrolka_glowna() const { return kontrolka_glowna_; }
@@ -98,12 +125,19 @@ public:
             if (kontrolka_z_fokusem_) {
                 kontrolka_z_fokusem_->przy_fokusie();
             }
+            czy_brudne_ = true;
         }
     }
 
     Kontrolka* przechwycenie_myszy() const { return kontrolka_przechwytujaca_; }
-    void ustaw_przechwycenie_myszy(Kontrolka* k) { kontrolka_przechwytujaca_ = k; }
-    void zwolnij_przechwycenie_myszy() { kontrolka_przechwytujaca_ = nullptr; }
+    void ustaw_przechwycenie_myszy(Kontrolka* k) {
+        kontrolka_przechwytujaca_ = k;
+        gui_ustaw_capture_myszy(k != nullptr);
+    }
+    void zwolnij_przechwycenie_myszy() {
+        kontrolka_przechwytujaca_ = nullptr;
+        gui_ustaw_capture_myszy(false);
+    }
 
     int skala_dpi() const { return skala_dpi_; }
     void ustaw_skale_dpi(int skala) {
@@ -124,31 +158,76 @@ public:
         kontrolka_glowna_->zmierz(obszar_klienta.rozmiar());
         kontrolka_glowna_->rozmiesc(obszar_klienta);
         kontrolka_glowna_->uniewaznij();
+        czy_brudne_ = true;
+    }
+
+    Prostokat ostatni_obszar_odrysowania() const { return ostatni_obszar_odrysowania_; }
+    int ostatnia_powierzchnia_odrysowania() const { return ostatni_obszar_odrysowania_.szerokosc * ostatni_obszar_odrysowania_.wysokosc; }
+
+    void uniewaznij_obszar(Prostokat r) {
+        brudny_obszar_klienta_ = brudny_obszar_klienta_.suma(r);
     }
 
     void rysuj(KontekstRysowania& ctx, bool wymus = false) {
         if (czy_zminimalizowane_) return;
-        bool nalezy_rysowac = czy_brudne_ || wymus;
 
-        if (nalezy_rysowac) {
+        int belka_h = WYSOKOSC_BELKI_TYTULOWEJ * skala_dpi_;
+        int klient_h = wysokosc_ - belka_h;
+        if (klient_h < 0) klient_h = 0;
+        Prostokat obszar_klienta(0, belka_h, szerokosc_, klient_h);
+
+        bool pelne_odrysowanie = czy_brudne_ || wymus;
+
+        if (pelne_odrysowanie) {
+            ostatni_obszar_odrysowania_ = Prostokat(0, 0, szerokosc_, wysokosc_);
+
             // Narysuj standardową belkę tytułową na pozycji okna
             gui_rysuj_standardowa_belke(x_, y_, szerokosc_, tytul_, czy_zmaksymalizowane_);
+
             // Tło okna poniżej belki
-            int belka_h = WYSOKOSC_BELKI_TYTULOWEJ * skala_dpi_;
-            int klient_h = wysokosc_ - belka_h;
             if (klient_h > 0) {
                 ctx.dodaj_przesuniecie(Punkt(x_, y_));
-                ctx.rysuj_prostokat(Prostokat(0, belka_h, szerokosc_, klient_h), Kolory::BursztynowyCiemnyTlo);
+                ctx.dodaj_przyciecie(obszar_klienta);
+                ctx.rysuj_prostokat(obszar_klienta, Kolory::BursztynowyCiemnyTlo);
+
+                // Renderuj drzewo kontrolek na czystym tle
+                if (kontrolka_glowna_) {
+                    kontrolka_glowna_->rysuj(ctx, true);
+                    kontrolka_glowna_->wyczysc_brudny_obszar();
+                }
+
+                ctx.zdejmij_przyciecie();
                 ctx.zdejmij_przesuniecie();
             }
-            czy_brudne_ = false;
-        }
 
-        // Renderuj drzewo kontrolek
-        if (kontrolka_glowna_) {
-            ctx.dodaj_przesuniecie(Punkt(x_, y_));
-            kontrolka_glowna_->rysuj(ctx, nalezy_rysowac);
-            ctx.zdejmij_przesuniecie();
+            brudny_obszar_klienta_ = Prostokat(0, 0, 0, 0);
+            czy_brudne_ = false;
+        } else if (kontrolka_glowna_ && (kontrolka_glowna_->czy_brudna() || !brudny_obszar_klienta_.czy_pusty())) {
+            // Częściowe odrysowanie wyłącznie w obrębie brudnego prostokąta
+            Prostokat brudny = brudny_obszar_klienta_.suma(kontrolka_glowna_->pobierz_brudny_obszar());
+            if (brudny.czy_pusty()) {
+                brudny = obszar_klienta;
+            }
+            brudny = brudny.przeciecie(obszar_klienta);
+
+            if (!brudny.czy_pusty()) {
+                ostatni_obszar_odrysowania_ = brudny;
+
+                ctx.dodaj_przesuniecie(Punkt(x_, y_));
+                ctx.dodaj_przyciecie(brudny);
+
+                // Przywróć tło okna tylko w brudnym prostokącie
+                ctx.rysuj_prostokat(brudny, Kolory::BursztynowyCiemnyTlo);
+
+                // Narysuj kontrolki przecinające brudny prostokąt
+                kontrolka_glowna_->rysuj(ctx, false);
+                kontrolka_glowna_->wyczysc_brudny_obszar();
+
+                ctx.zdejmij_przyciecie();
+                ctx.zdejmij_przesuniecie();
+            }
+
+            brudny_obszar_klienta_ = Prostokat(0, 0, 0, 0);
         }
     }
 
@@ -163,47 +242,24 @@ public:
         gui_ustaw_capture_myszy(false);
 
         if (!czy_zmaksymalizowane_) {
-            // Zapisz bieżącą geometrię okna
             zapisana_geometria_ = Prostokat(x_, y_, szerokosc_, wysokosc_);
 
-            // Pobierz obszar roboczy bieżącego monitora
-            int docelowy_x = 0;
-            int docelowy_y = 0;
-            int docelowy_w = 800;
-            int docelowy_h = 600;
-
-            GuiMonitorInfo mon{};
-            if (gui_pobierz_monitor(0, &mon) && mon.work_szer > 0 && mon.work_wys > 0) {
-                docelowy_x = mon.work_x;
-                docelowy_y = mon.work_y;
-                docelowy_w = mon.work_szer;
-                docelowy_h = mon.work_wys;
-            } else {
-                int sw = 800, sh = 600;
-                gui_pobierz_rozdzielczosc(&sw, &sh);
-                docelowy_x = 0;
-                docelowy_y = 0;
-                docelowy_w = sw;
-                docelowy_h = (sh > 32) ? (sh - 32) : sh;
-            }
-
-            x_ = docelowy_x;
-            y_ = docelowy_y;
-            szerokosc_ = docelowy_w;
-            wysokosc_ = docelowy_h;
+            Prostokat work = pobierz_obszar_roboczy();
+            x_ = work.x;
+            y_ = work.y;
+            szerokosc_ = work.szerokosc;
+            wysokosc_ = work.wysokosc;
             czy_zmaksymalizowane_ = true;
         } else {
-            // Przywróć dokładną zapisaną geometrię
             x_ = zapisana_geometria_.x;
             y_ = zapisana_geometria_.y;
             szerokosc_ = zapisana_geometria_.szerokosc;
             wysokosc_ = zapisana_geometria_.wysokosc;
             czy_zmaksymalizowane_ = false;
+            dopasuj_do_obszaru_roboczego(true);
         }
 
-        bws_utworz_warstwe(x_, y_, szerokosc_, wysokosc_, 10);
         gui_ustaw_geometrie_okna(x_, y_, szerokosc_, wysokosc_);
-        bws_przesun_warstwe(x_, y_);
 
         przelicz_uklad();
         czy_brudne_ = true;
@@ -234,27 +290,13 @@ public:
                     int nx = mx - przesuniecie_ciagniecia_x_;
                     int ny = my - przesuniecie_ciagniecia_y_;
 
-                    int max_w = 1280, max_h = 720;
-                    GuiMonitorInfo mon{};
-                    if (gui_pobierz_monitor(0, &mon) && mon.work_szer > 0 && mon.work_wys > 0) {
-                        max_w = mon.work_x + mon.work_szer;
-                        max_h = mon.work_y + mon.work_wys;
-                    } else {
-                        int sw = 1280, sh = 720;
-                        gui_pobierz_rozdzielczosc(&sw, &sh);
-                        max_w = sw;
-                        max_h = (sh > 32) ? (sh - 32) : sh;
-                    }
-
-                    int max_pos_x = max_w - szerokosc_;
-                    int max_pos_y = max_h - wysokosc_;
-                    if (max_pos_x < 0) max_pos_x = 0;
-                    if (max_pos_y < 0) max_pos_y = 0;
-
-                    if (nx < 0) nx = 0;
-                    if (ny < 0) ny = 0;
-                    if (nx > max_pos_x) nx = max_pos_x;
-                    if (ny > max_pos_y) ny = max_pos_y;
+                    Prostokat work = pobierz_obszar_roboczy();
+                    int max_pos_x = work.prawy() - szerokosc_;
+                    int max_pos_y = work.dolny() - wysokosc_;
+                    if (max_pos_x < work.x) max_pos_x = work.x;
+                    if (max_pos_y < work.y) max_pos_y = work.y;
+                    nx = przytnij(nx, work.x, max_pos_x);
+                    ny = przytnij(ny, work.y, max_pos_y);
 
                     if (nx != x_ || ny != y_) {
                         x_ = nx;
@@ -271,13 +313,15 @@ public:
                     me.x = lokalny_x;
                     me.y = lokalny_y;
                     me.przycisk = surowe_zdarzenie.przyciski;
-                    kontrolka_przechwytujaca_->przy_ruchu_myszy(me);
+                    me.modyfikatory = surowe_zdarzenie.przyciski;
+                    me.timestamp = surowe_zdarzenie.timestamp;
+                    kontrolka_przechwytujaca_->obsluz_ruch_myszy(me);
                 } else if (kontrolka_glowna_) {
                     Kontrolka* hit = kontrolka_glowna_->sprawdz_trafienie(Punkt(lokalny_x, lokalny_y));
                     if (hit != kontrolka_najechana_) {
-                        if (kontrolka_najechana_) kontrolka_najechana_->przy_opuszczeniu();
+                        if (kontrolka_najechana_) kontrolka_najechana_->obsluz_opuszczenie_myszy();
                         kontrolka_najechana_ = hit;
-                        if (kontrolka_najechana_) kontrolka_najechana_->przy_najechaniu();
+                        if (kontrolka_najechana_) kontrolka_najechana_->obsluz_wejscie_myszy();
                     }
                     if (kontrolka_najechana_) {
                         ZdarzenieMyszki me;
@@ -285,7 +329,9 @@ public:
                         me.x = lokalny_x;
                         me.y = lokalny_y;
                         me.przycisk = surowe_zdarzenie.przyciski;
-                        kontrolka_najechana_->przy_ruchu_myszy(me);
+                        me.modyfikatory = surowe_zdarzenie.przyciski;
+                        me.timestamp = surowe_zdarzenie.timestamp;
+                        kontrolka_najechana_->obsluz_ruch_myszy(me);
                     }
                 }
                 break;
@@ -317,18 +363,33 @@ public:
                     Kontrolka* hit = kontrolka_glowna_->sprawdz_trafienie(Punkt(lokalny_x, lokalny_y));
                     if (hit && hit->czy_moze_miec_fokus()) {
                         ustaw_fokus(hit);
-                    } else if (!hit) {
-                        ustaw_fokus(nullptr);
                     }
 
                     if (hit) {
-                        kontrolka_przechwytujaca_ = hit;
+                        ustaw_przechwycenie_myszy(hit);
                         ZdarzenieMyszki me;
                         me.typ = TypZdarzenia::WcisniecieMyszy;
                         me.x = lokalny_x;
                         me.y = lokalny_y;
                         me.przycisk = (surowe_zdarzenie.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN) ? 2 : 1;
-                        hit->przy_wcisnieciu_myszy(me);
+                        me.modyfikatory = surowe_zdarzenie.przyciski;
+                        me.timestamp = surowe_zdarzenie.timestamp;
+
+                        uint64_t teraz = surowe_zdarzenie.timestamp;
+                        int ddx = (mx > ost_click_x_) ? (mx - ost_click_x_) : (ost_click_x_ - mx);
+                        int ddy = (my > ost_click_y_) ? (my - ost_click_y_) : (ost_click_y_ - my);
+
+                        if (teraz > 0 && ost_click_czas_ > 0 && (teraz - ost_click_czas_ < 400000000ULL || (teraz - ost_click_czas_ < 400 && teraz < 1000000000ULL)) && ddx < 5 && ddy < 5) {
+                            me.typ = TypZdarzenia::PodwojneKlikniecie;
+                            me.liczba_klikniec = 2;
+                            hit->obsluz_podwojne_klikniecie(me);
+                            ost_click_czas_ = 0;
+                        } else {
+                            hit->obsluz_wcisniecie_myszy(me);
+                            ost_click_czas_ = teraz;
+                            ost_click_x_ = mx;
+                            ost_click_y_ = my;
+                        }
                     }
                 }
                 break;
@@ -336,9 +397,10 @@ public:
 
             case BWS_ZDARZENIE_MYSZ_UP:
             case BWS_ZDARZENIE_MYSZ_PRAWY_UP: {
+                // Zwolnienie przycisku zawsze kończy systemowe i lokalne capture.
+                gui_ustaw_capture_myszy(false);
                 if (czy_przeciagane_) {
                     czy_przeciagane_ = false;
-                    gui_ustaw_capture_myszy(false);
                 }
 
                 Kontrolka* cel = kontrolka_przechwytujaca_;
@@ -354,7 +416,31 @@ public:
                     me.x = lokalny_x;
                     me.y = lokalny_y;
                     me.przycisk = (surowe_zdarzenie.typ == BWS_ZDARZENIE_MYSZ_PRAWY_UP) ? 2 : 1;
-                    cel->przy_zwolnieniu_myszy(me);
+                    me.modyfikatory = surowe_zdarzenie.przyciski;
+                    me.timestamp = surowe_zdarzenie.timestamp;
+                    cel->obsluz_zwolnienie_myszy(me);
+                }
+                break;
+            }
+
+            case BWS_ZDARZENIE_MYSZ_KOLO: {
+                Kontrolka* cel = kontrolka_najechana_;
+                if (!cel && kontrolka_glowna_) {
+                    cel = kontrolka_glowna_->sprawdz_trafienie(Punkt(lokalny_x, lokalny_y));
+                }
+                ZdarzenieRolki re;
+                re.typ = TypZdarzenia::RolkaMyszy;
+                re.x = lokalny_x;
+                re.y = lokalny_y;
+                re.delta_x = surowe_zdarzenie.dx;
+                re.delta_y = surowe_zdarzenie.dy;
+                re.modyfikatory = surowe_zdarzenie.kod;
+                if (cel) {
+                    cel->obsluz_rolke(re);
+                }
+                if (!re.obsluzone && kontrolka_z_fokusem_ &&
+                    kontrolka_z_fokusem_ != cel) {
+                    kontrolka_z_fokusem_->obsluz_rolke(re);
                 }
                 break;
             }
@@ -363,15 +449,17 @@ public:
                 if (kontrolka_z_fokusem_) {
                     ZdarzenieWprowadzaniaTekstu te;
                     te.punkt_kodowy = surowe_zdarzenie.kod;
-                    kontrolka_z_fokusem_->przy_wprowadzeniu_tekstu(te);
+                    kontrolka_z_fokusem_->obsluz_wprowadzenie_tekstu(te);
                 }
                 break;
             }
 
             case BWS_ZDARZENIE_KLAWISZ:
             case BWS_ZDARZENIE_KLAWISZ_FIZYCZNY: {
+                bool fizyczny = surowe_zdarzenie.typ == BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;
+                bool wcisniety = !fizyczny || surowe_zdarzenie.x != 0;
                 // Tab (9 lub scancode 0x0F) - nawigacja fokus
-                if (surowe_zdarzenie.kod == 9 || surowe_zdarzenie.kod == 0x0F) {
+                if (wcisniety && (surowe_zdarzenie.kod == 9 || surowe_zdarzenie.kod == 0x0F)) {
                     bool shift = (surowe_zdarzenie.przyciski & BWS_MOD_SHIFT) != 0;
                     nastepny_fokus(shift);
                     break;
@@ -381,9 +469,14 @@ public:
                     ZdarzenieKlawiatury ke;
                     ke.typ = TypZdarzenia::KlawiszWcisniety;
                     ke.kod_klawisza = surowe_zdarzenie.kod;
-                    ke.kod_scancode = surowe_zdarzenie.kod;
+                    ke.kod_skanu = surowe_zdarzenie.kod;
                     ke.modyfikatory = surowe_zdarzenie.przyciski;
-                    kontrolka_z_fokusem_->przy_wcisnieciu_klawisza(ke);
+                    if (wcisniety) {
+                        kontrolka_z_fokusem_->obsluz_wcisniecie_klawisza(ke);
+                    } else {
+                        ke.typ = TypZdarzenia::KlawiszZwolniony;
+                        kontrolka_z_fokusem_->obsluz_zwolnienie_klawisza(ke);
+                    }
                 }
                 break;
             }
@@ -400,6 +493,8 @@ public:
 
             case BWS_ZDARZENIE_BLUR: {
                 czy_aktywne_ = false;
+                zwolnij_przechwycenie_myszy();
+                ustaw_fokus(nullptr);
                 czy_brudne_ = true;
                 break;
             }
@@ -441,6 +536,20 @@ public:
     }
 
 private:
+    static Prostokat pobierz_obszar_roboczy() {
+        GuiMonitorInfo mon{};
+        if (gui_pobierz_monitor(0, &mon) && mon.work_szer > 0 && mon.work_wys > 0) {
+            return Prostokat(mon.work_x, mon.work_y, mon.work_szer, mon.work_wys);
+        }
+
+        int sw = 800;
+        int sh = 600;
+        gui_pobierz_rozdzielczosc(&sw, &sh);
+        if (sw < 1) sw = 1;
+        if (sh < 1) sh = 1;
+        return Prostokat(0, 0, sw, sh);
+    }
+
     static void zbierz_kontrolki_z_fokusem(Kontrolka* k, Kontrolka** out_lista, size_t& liczba) {
         if (!k || !k->czy_widoczna() || liczba >= 32) return;
         if (k->czy_moze_miec_fokus()) {
@@ -465,7 +574,13 @@ private:
     int przesuniecie_ciagniecia_x_{0};
     int przesuniecie_ciagniecia_y_{0};
     bool czy_brudne_{true};
+    Prostokat brudny_obszar_klienta_{0, 0, 0, 0};
+    Prostokat ostatni_obszar_odrysowania_{0, 0, 0, 0};
     Prostokat zapisana_geometria_{100, 100, 480, 320};
+
+    uint64_t ost_click_czas_{0};
+    int ost_click_x_{0};
+    int ost_click_y_{0};
 
     Kontrolka* kontrolka_glowna_{nullptr};
     Panel* domyslny_korzen_{nullptr};

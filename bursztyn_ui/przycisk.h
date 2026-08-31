@@ -1,6 +1,7 @@
 #pragma once
 
 #include "kontrolka.h"
+#include "czcionka.h"
 
 namespace BursztynUI {
 
@@ -12,40 +13,33 @@ public:
     Przycisk(const char* etykieta = "Przycisk") {
         styl_ = Motyw::pobierz_domyslny().styl_przycisku;
         wypelnienie_ = styl_.wypelnienie;
-        wyrownanie_poziome_ = WyrownaniePoziome::Rozciagnij;
+        wyrownanie_poziome_ = WyrownaniePoziome::Poczatek;
         wyrownanie_pionowe_ = WyrownaniePionowe::Poczatek;
         czy_moze_miec_fokus_ = true;
         ustaw_tekst(etykieta);
     }
 
-    const char* tekst() const { return tekst_; }
-    void ustaw_tekst(const char* nowy_tekst) {
-        if (!nowy_tekst) nowy_tekst = "";
-        size_t i = 0;
-        for (; i < sizeof(tekst_) - 1 && nowy_tekst[i] != '\0'; ++i) {
-            tekst_[i] = nowy_tekst[i];
-        }
-        tekst_[i] = '\0';
+    uint32_t ikona_id() const { return ikona_id_; }
+    void ustaw_ikone(uint32_t id) {
+        ikona_id_ = id;
         uniewaznij();
     }
 
     void przy_kliknieciu(FunkcjaKlikniecia cb, void* dane = nullptr) {
-        na_klikniecie_ = cb;
-        dane_uzytkownika_ = dane;
+        cb_klikniecie_przycisku_ = cb;
+        dane_klikniecia_przycisku_ = dane;
     }
-
-    StylKontrolki& styl() { return styl_; }
-    void ustaw_styl(const StylKontrolki& s) { styl_ = s; uniewaznij(); }
 
     Rozmiar zmierz(Rozmiar dostepny_rozmiar) override {
         (void)dostepny_rozmiar;
         int skala = skala_dpi_;
-        int txt_w = oblicz_szerokosc_tekstu(tekst_, skala);
-        int txt_h = gui_pobierz_wysokosc_fontu() * skala;
+        int txt_w = CzcionkaUI::zmierz_tekst(tekst_, skala);
+        int txt_h = CzcionkaUI::pobierz_wysokosc(skala);
 
-        int naturalna_wys = txt_h + wypelnienie_.pionowo() * skala + 8 * skala;
-        if (naturalna_wys < 28 * skala) naturalna_wys = 28 * skala;
-        int naturalna_szer = txt_w + wypelnienie_.poziomo() * skala + 16 * skala;
+        int ikona_w = (ikona_id_ > 0) ? (16 * skala + 6 * skala) : 0;
+        int naturalna_wys = txt_h + wypelnienie_.pionowo() * skala + 10 * skala;
+        if (naturalna_wys < 30 * skala) naturalna_wys = 30 * skala;
+        int naturalna_szer = txt_w + ikona_w + wypelnienie_.poziomo() * skala + 20 * skala;
 
         Rozmiar zadany(naturalna_szer, naturalna_wys);
 
@@ -60,89 +54,99 @@ public:
 
     void rysuj_siebie(KontekstRysowania& ctx) override {
         int skala = skala_dpi_;
-        const StylStanu* biezacy = &styl_.normalny;
-        if (!czy_wlaczona_) {
-            biezacy = &styl_.wylaczony;
-        } else if (czy_wcisnieta_) {
-            biezacy = &styl_.wcisniety;
-        } else if (czy_najechana_) {
-            biezacy = &styl_.najechany;
-        } else if (czy_ma_fokus_) {
-            biezacy = &styl_.fokus;
-        }
-
+        StylStanu s = wyznacz_biezacy_styl_stanu();
         Prostokat r(0, 0, obszar_.szerokosc, obszar_.wysokosc);
 
-        // Tło
-        if (biezacy->tlo != 0) {
-            if (biezacy->promien_zaokraglenia > 0) {
-                ctx.rysuj_zaokraglony_prostokat(r, biezacy->tlo, biezacy->promien_zaokraglenia * skala);
-            } else {
-                ctx.rysuj_prostokat(r, biezacy->tlo);
-            }
-        }
-
-        // Ramka
-        if (biezacy->ramka != 0 && biezacy->grubosc_ramki > 0) {
-            if (biezacy->promien_zaokraglenia > 0) {
-                ctx.rysuj_zaokraglona_ramke(r, biezacy->ramka, biezacy->promien_zaokraglenia * skala, biezacy->grubosc_ramki * skala);
-            } else {
-                ctx.rysuj_ramke(r, biezacy->ramka, biezacy->grubosc_ramki * skala);
-            }
-        }
+        rysuj_tlo_i_ramke(ctx, s);
 
         // Tekst
-        ctx.rysuj_tekst_wysrodkowany(r, tekst_, biezacy->tekst, skala);
+        ctx.rysuj_tekst_wysrodkowany(r, tekst_, s.tekst, skala);
     }
 
-    void przy_najechaniu() override {
+    void obsluz_wejscie_myszy() override {
+        if (!czy_wlaczona_) return;
         czy_najechana_ = true;
         uniewaznij();
+        if (cb_wejscie_myszy_) cb_wejscie_myszy_(this, dane_wejscia_myszy_);
     }
 
-    void przy_opuszczeniu() override {
+    void obsluz_opuszczenie_myszy() override {
+        if (!czy_wlaczona_) return;
         czy_najechana_ = false;
-        czy_wcisnieta_ = false;
         uniewaznij();
+        if (cb_opuszczenie_myszy_) cb_opuszczenie_myszy_(this, dane_opuszczenia_myszy_);
     }
 
-    void przy_wcisnieciu_myszy(ZdarzenieMyszki& e) override {
+    void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e) override {
         if (!czy_wlaczona_ || !e.czy_lewy_przycisk()) return;
         czy_wcisnieta_ = true;
         uniewaznij();
         e.obsluzone = true;
+        if (cb_wcisniecie_myszy_) cb_wcisniecie_myszy_(this, e, dane_wcisniecia_myszy_);
     }
 
-    void przy_zwolnieniu_myszy(ZdarzenieMyszki& e) override {
+    void obsluz_ruch_myszy(ZdarzenieMyszki& e) override {
         if (!czy_wlaczona_) return;
+        bool wewnatrz = obszar_ekranu_.zawiera(e.x, e.y);
         if (czy_wcisnieta_) {
-            czy_wcisnieta_ = false;
-            uniewaznij();
-            if (obszar_.zawiera(e.x, e.y) || obszar_ekranu_.zawiera(e.x, e.y)) {
-                if (na_klikniecie_) {
-                    na_klikniecie_(this, dane_uzytkownika_);
-                }
+            if (czy_najechana_ != wewnatrz) {
+                czy_najechana_ = wewnatrz;
+                uniewaznij();
             }
-            e.obsluzone = true;
         }
+        if (cb_ruch_myszy_) cb_ruch_myszy_(this, e, dane_ruchu_myszy_);
     }
 
-    void przy_wcisnieciu_klawisza(ZdarzenieKlawiatury& e) override {
+    void obsluz_zwolnienie_myszy(ZdarzenieMyszki& e) override {
+        if (!czy_wlaczona_) return;
+        bool byla_wcisnieta = czy_wcisnieta_;
+        czy_wcisnieta_ = false;
+        uniewaznij();
+
+        bool wewnatrz = obszar_ekranu_.zawiera(e.x, e.y);
+        if (byla_wcisnieta && wewnatrz) {
+            wykonaj_akcje_klikniecia(e);
+        }
+        e.obsluzone = true;
+        if (cb_zwolnienie_myszy_) cb_zwolnienie_myszy_(this, e, dane_zwolnienia_myszy_);
+    }
+
+    void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
         if (!czy_wlaczona_) return;
         // Spacja (32) lub Enter (13 / 10)
         if (e.kod_klawisza == 32 || e.kod_klawisza == 13 || e.kod_klawisza == 10) {
-            if (na_klikniecie_) {
-                na_klikniecie_(this, dane_uzytkownika_);
-            }
+            ZdarzenieMyszki me{};
+            me.typ = TypZdarzenia::Klikniecie;
+            me.x = obszar_ekranu_.x + obszar_ekranu_.szerokosc / 2;
+            me.y = obszar_ekranu_.y + obszar_ekranu_.wysokosc / 2;
+            wykonaj_akcje_klikniecia(me);
             e.obsluzone = true;
+            return;
         }
+        if (cb_klawisz_wcisniety_) cb_klawisz_wcisniety_(this, e, dane_klawisza_wcisnietego_);
+    }
+
+    void obsluz_podwojne_klikniecie(ZdarzenieMyszki& e) override {
+        if (!czy_wlaczona_) return;
+        wykonaj_akcje_klikniecia(e);
+        if (cb_podwojne_klikniecie_) cb_podwojne_klikniecie_(this, dane_podwojnego_klikniecia_);
+        e.obsluzone = true;
     }
 
 private:
-    char tekst_[64]{0};
-    StylKontrolki styl_;
-    FunkcjaKlikniecia na_klikniecie_{nullptr};
-    void* dane_uzytkownika_{nullptr};
+    void wykonaj_akcje_klikniecia(ZdarzenieMyszki& e) {
+        if (cb_klikniecie_przycisku_) {
+            cb_klikniecie_przycisku_(this, dane_klikniecia_przycisku_);
+        }
+        if (cb_klikniecie_) {
+            cb_klikniecie_(this, dane_klikniecia_);
+        }
+        obsluz_klikniecie(e);
+    }
+
+    uint32_t ikona_id_{0};
+    FunkcjaKlikniecia cb_klikniecie_przycisku_{nullptr};
+    void* dane_klikniecia_przycisku_{nullptr};
 };
 
 } // namespace BursztynUI

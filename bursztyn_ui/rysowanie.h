@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "typy.h"
+#include "czcionka.h"
 #include "../bursztyn_gui.h"
 
 namespace BursztynUI {
@@ -81,37 +82,71 @@ public:
 
     void rysuj_zaokraglony_prostokat(Prostokat r, uint32_t kolor, int promien = 2) {
         if (r.czy_pusty()) return;
-        if (promien <= 0 || r.szerokosc < 6 || r.wysokosc < 6) {
+        int max_p = (r.szerokosc < r.wysokosc ? r.szerokosc : r.wysokosc) / 2;
+        if (promien > max_p) promien = max_p;
+        if (promien <= 0 || r.szerokosc < 4 || r.wysokosc < 4) {
             rysuj_prostokat(r, kolor);
             return;
         }
-        // Środek
-        rysuj_prostokat(Prostokat(r.x + promien, r.y, r.szerokosc - 2 * promien, r.wysokosc), kolor);
-        // Boki
-        rysuj_prostokat(Prostokat(r.x, r.y + promien, promien, r.wysokosc - 2 * promien), kolor);
-        rysuj_prostokat(Prostokat(r.x + r.szerokosc - promien, r.y + promien, promien, r.wysokosc - 2 * promien), kolor);
+
+        int mid_w = r.szerokosc - 2 * promien;
+        int mid_h = r.wysokosc - 2 * promien;
+
+        // Środkowa kolumna (pełna wysokość)
+        if (mid_w > 0) {
+            rysuj_prostokat(Prostokat(r.x + promien, r.y, mid_w, r.wysokosc), kolor);
+        }
+        // Lewy i prawy bok
+        if (mid_h > 0) {
+            rysuj_prostokat(Prostokat(r.x, r.y + promien, promien, mid_h), kolor);
+            rysuj_prostokat(Prostokat(r.x + r.szerokosc - promien, r.y + promien, promien, mid_h), kolor);
+        }
+        // Zaokrąglone narożniki / zaokrąglone kapsułki
+        for (int dy = 0; dy < promien; ++dy) {
+            int inset = promien - 1 - dy;
+            if (inset < 0) inset = 0;
+            int line_w = r.szerokosc - 2 * inset;
+            if (line_w > 0) {
+                // Górna linia
+                rysuj_prostokat(Prostokat(r.x + inset, r.y + dy, line_w, 1), kolor);
+                // Dolna linia
+                rysuj_prostokat(Prostokat(r.x + inset, r.y + r.wysokosc - 1 - dy, line_w, 1), kolor);
+            }
+        }
     }
 
     void rysuj_zaokraglona_ramke(Prostokat r, uint32_t kolor, int promien = 2, int grubosc = 1) {
-        if (r.czy_pusty()) return;
-        if (promien <= 0 || r.szerokosc < 6 || r.wysokosc < 6) {
+        if (r.czy_pusty() || grubosc <= 0) return;
+        int max_p = (r.szerokosc < r.wysokosc ? r.szerokosc : r.wysokosc) / 2;
+        if (promien > max_p) promien = max_p;
+        if (promien <= 0 || r.szerokosc < 4 || r.wysokosc < 4) {
             rysuj_ramke(r, kolor, grubosc);
             return;
         }
-        // Górna krawędź
-        rysuj_prostokat(Prostokat(r.x + promien, r.y, r.szerokosc - 2 * promien, grubosc), kolor);
-        // Dolna krawędź
-        rysuj_prostokat(Prostokat(r.x + promien, r.y + r.wysokosc - grubosc, r.szerokosc - 2 * promien, grubosc), kolor);
-        // Lewa krawędź
-        rysuj_prostokat(Prostokat(r.x, r.y + promien, grubosc, r.wysokosc - 2 * promien), kolor);
-        // Prawa krawędź
-        rysuj_prostokat(Prostokat(r.x + r.szerokosc - grubosc, r.y + promien, grubosc, r.wysokosc - 2 * promien), kolor);
-        // Narożniki
-        if (promien > 1) {
-            rysuj_prostokat(Prostokat(r.x + 1, r.y + 1, grubosc, grubosc), kolor);
-            rysuj_prostokat(Prostokat(r.x + r.szerokosc - 1 - grubosc, r.y + 1, grubosc, grubosc), kolor);
-            rysuj_prostokat(Prostokat(r.x + 1, r.y + r.wysokosc - 1 - grubosc, grubosc, grubosc), kolor);
-            rysuj_prostokat(Prostokat(r.x + r.szerokosc - 1 - grubosc, r.y + r.wysokosc - 1 - grubosc, grubosc, grubosc), kolor);
+
+        int mid_w = r.szerokosc - 2 * promien;
+        int mid_h = r.wysokosc - 2 * promien;
+
+        // Górna i dolna krawędź
+        if (mid_w > 0) {
+            rysuj_prostokat(Prostokat(r.x + promien, r.y, mid_w, grubosc), kolor);
+            rysuj_prostokat(Prostokat(r.x + promien, r.y + r.wysokosc - grubosc, mid_w, grubosc), kolor);
+        }
+        // Lewa i prawa krawędź
+        if (mid_h > 0) {
+            rysuj_prostokat(Prostokat(r.x, r.y + promien, grubosc, mid_h), kolor);
+            rysuj_prostokat(Prostokat(r.x + r.szerokosc - grubosc, r.y + promien, grubosc, mid_h), kolor);
+        }
+        // Zaokrąglone narożniki
+        for (int dy = 0; dy < promien; ++dy) {
+            int inset = promien - 1 - dy;
+            if (inset < 0) inset = 0;
+            // Lewy róg (góra/dół)
+            rysuj_prostokat(Prostokat(r.x + inset, r.y + dy, grubosc, 1), kolor);
+            rysuj_prostokat(Prostokat(r.x + inset, r.y + r.wysokosc - 1 - dy, grubosc, 1), kolor);
+            // Prawy róg (góra/dół)
+            rysuj_prostokat(Prostokat(r.x + r.szerokosc - inset - grubosc, r.y + dy, grubosc, 1), kolor);
+            rysuj_prostokat(Prostokat(r.x + r.szerokosc - inset - grubosc, r.y + r.wysokosc - 1 - dy, grubosc, 1), kolor);
         }
     }
 
@@ -133,15 +168,33 @@ public:
         rysuj_tekst(Punkt(tx, ty), tekst, kolor, skala);
     }
 
-    Rozmiar zmierz_tekst(const char* tekst, int skala = 1) const {
-        if (!tekst || tekst[0] == '\0') return {0, 0};
-        int w = oblicz_szerokosc_tekstu(tekst, skala);
-        int h = gui_pobierz_wysokosc_fontu() * skala;
-        return {w, h};
+    void rysuj_linie_pozioma(int x, int y, int szer, uint32_t kolor) {
+        if (szer <= 0) return;
+        rysuj_prostokat(Prostokat(x, y, szer, 1), kolor);
     }
 
-    int pobierz_wysokosc_fontu(int skala = 1) const {
-        return gui_pobierz_wysokosc_fontu() * skala;
+    void rysuj_linie_pionowa(int x, int y, int wys, uint32_t kolor) {
+        if (wys <= 0) return;
+        rysuj_prostokat(Prostokat(x, y, 1, wys), kolor);
+    }
+
+    void rysuj_zaznaczenie(Prostokat r, uint32_t kolor) {
+        rysuj_prostokat(r, kolor);
+    }
+
+    void rysuj_tekst_obciety(Punkt pt, const char* tekst, uint32_t kolor, int max_szerokosc, int skala = 1) {
+        if (!tekst || tekst[0] == '\0' || max_szerokosc <= 0) return;
+        dodaj_przyciecie(Prostokat(pt.x, pt.y, max_szerokosc, pobierz_wysokosc_czcionki(skala) + 4));
+        rysuj_tekst(pt, tekst, kolor, skala);
+        zdejmij_przyciecie();
+    }
+
+    Rozmiar zmierz_tekst(const char* tekst, int skala = 1) const {
+        return CzcionkaUI::zmierz_rozmiar(tekst, skala);
+    }
+
+    int pobierz_wysokosc_czcionki(int skala = 1) const {
+        return CzcionkaUI::pobierz_wysokosc(skala);
     }
 
 private:

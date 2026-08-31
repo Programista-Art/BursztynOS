@@ -5,8 +5,11 @@
  * Dostepne wywolania BWS 1..56 opisane sa w bws_api.js / przegladarce API.
  */
 #include "bursztyn_gui.h"
+#include "bursztyn_ui/bursztyn_ui.h"
 #include <stddef.h>
 #include <stdint.h>
+
+using namespace BursztynUI;
 
 // -----------------------------------------------------------------------------
 // Format .bur (Naglowek wymagany przez Loadera)
@@ -25,14 +28,11 @@ struct NaglowekBur {
 
 extern "C" __attribute__((noreturn)) void _start();
 
-#ifndef BUR_TEKST_ROZMIAR
-#define BUR_TEKST_ROZMIAR 32768ULL
-#endif
-
-static constexpr uint64_t BUR_TEKST_PRZESUNIECIE = 4096ULL;
-static constexpr uint64_t BUR_TEKST_WIRTUALNY      = 0x1001000ULL;
-static constexpr uint64_t BUR_DANE_PRZESUNIECIE   = BUR_TEKST_PRZESUNIECIE + BUR_TEKST_ROZMIAR;
-static constexpr uint64_t BUR_DANE_WIRTUALNY       = BUR_TEKST_WIRTUALNY + BUR_TEKST_ROZMIAR;
+static constexpr uint64_t BUR_TEKST_ROZMIAR     = 0x20000ULL; // 128 KiB
+static constexpr uint64_t BUR_TEKST_PRZESUNIECIE = 0x1000ULL;
+static constexpr uint64_t BUR_TEKST_WIRTUALNY     = 0x1001000ULL;
+static constexpr uint64_t BUR_DANE_PRZESUNIECIE   = 0x21000ULL;
+static constexpr uint64_t BUR_DANE_WIRTUALNY       = 0x1021000ULL;
 static constexpr uint64_t BUR_DANE_ROZMIAR         = 131072ULL;
 
 extern "C" {
@@ -60,11 +60,39 @@ static int drag_off_y = 0;
 static int screen_w = 1024, screen_h = 768;
 static int work_x = 0, work_y = 0, work_w = 1024, work_h = 768;
 static int restore_x = 0, restore_y = 0, restore_w = 0, restore_h = 0;
-static const bool BELKA_PRZYCISK_MIN = true;
-static const bool BELKA_PRZYCISK_MAKS = true;
+
+// Prezentacja korzysta z jednego ukladu lokalnego wzgledem powierzchni okna.
+// Funkcje BWS rysuja we wspolrzednych ekranu, dlatego translacja o WIN_X/WIN_Y
+// jest wykonywana dopiero w funkcjach rysujacych i hit-testach ponizej.
+static constexpr int CHROME_H = 28;
+static constexpr int CLIENT_PAD = 14;
+static constexpr int GRID_GAP = 10;
+static constexpr int BUTTON_H = 30;
+static constexpr int COMBO_H = 24;
+static constexpr int STATUS_H = 16;
+
+struct TestUiRect {
+    int x;
+    int y;
+    int w;
+    int h;
+};
+
+struct TestUiLayout {
+    TestUiRect client;
+    TestUiRect toolbar[4];
+    TestUiRect selector;
+    TestUiRect status_bws;
+    TestUiRect status_ui;
+    TestUiRect output;
+};
+
+static bool wynik_bws_ok = false;
+static bool wynik_bursztyn_ui_ok = false;
 
 static bool combo_otwarty_TComboBox_3_3 = false;
 static int  combo_wybor_TComboBox_3_3 = 0;
+static const char* komunikat_output = "Interfejs testowy jest gotowy.";
 static uint32_t bws_test_ok = 0;
 static uint32_t bws_test_blad = 0;
 static uint32_t bws_test_kursor[GUI_CURSOR_CUSTOM_MAX_W *
@@ -74,11 +102,42 @@ static void bws_log(const char* s) {
     if (s) bws_wywolaj(1, reinterpret_cast<uint64_t>(s), 0, 0, 0);
 }
 
+static void bws_log_u64(const char* opis, uint64_t wartosc) {
+    char bufor[96];
+    size_t pos = 0;
+    if (opis) {
+        while (opis[pos] != '\0' && pos + 1 < sizeof(bufor)) {
+            bufor[pos] = opis[pos];
+            ++pos;
+        }
+    }
+    char odwrotnie[24];
+    size_t ile = 0;
+    do {
+        odwrotnie[ile++] = static_cast<char>('0' + (wartosc % 10));
+        wartosc /= 10;
+    } while (wartosc != 0 && ile < sizeof(odwrotnie));
+    while (ile > 0 && pos + 1 < sizeof(bufor)) bufor[pos++] = odwrotnie[--ile];
+    if (pos + 1 < sizeof(bufor)) bufor[pos++] = '\n';
+    bufor[pos] = '\0';
+    bws_log(bufor);
+}
+
 static void bws_sprawdz(bool warunek) {
     if (warunek) ++bws_test_ok;
     else {
         ++bws_test_blad;
         bws_log("[BWS TEST FAIL] Asercja nie powiodla sie!\n");
+    }
+}
+
+static void bws_sprawdz_msg(bool warunek, const char* msg) {
+    if (warunek) ++bws_test_ok;
+    else {
+        ++bws_test_blad;
+        bws_log("[BWS TEST FAIL] ");
+        if (msg) bws_log(msg);
+        bws_log("\n");
     }
 }
 
@@ -286,9 +345,675 @@ static void wykonaj_testy_bws_61_83() {
     }
 }
 
+static void wykonaj_testy_bursztyn_ui() {
+    bws_log("\n=== ROZPOCZECIE TESTOW BURSZTYNUI ===\n");
+
+    // -------------------------------------------------------------------------
+    // 1. Bezpieczenstwo czcionki extronic16B_unicode.h & UTF-8
+    // -------------------------------------------------------------------------
+    bws_log("[BURSZTYNUI 1/4] Bezpieczenstwo extronic16B_unicode.h i UTF-8...\n");
+
+    // Wysokosc kanoniczna
+    bws_sprawdz(CzcionkaUI::pobierz_wysokosc(1) == 16);
+    bws_sprawdz(CzcionkaUI::pobierz_wysokosc(2) == 32);
+
+    // Polskie znaki (male i duze)
+    const char* pl_tekst = "Zazolc gesla jazn ZAZOLC GESLA JAZN";
+    int szer_pl = CzcionkaUI::zmierz_tekst(pl_tekst, 1);
+    bws_sprawdz(szer_pl > 150);
+
+    // Weryfikacja kodowania i szerokosci kazdego z 18 polskich znakow
+    uint32_t polskie_litery[18] = {
+        260, 261, // A, a
+        262, 263, // C, c
+        280, 281, // E, e
+        321, 322, // L, l
+        323, 324, // N, n
+        211, 243, // O, o
+        346, 347, // S, s
+        377, 378, // Z, z
+        379, 380  // Z, z
+    };
+    for (int i = 0; i < 18; ++i) {
+        int w = CzcionkaUI::szerokosc_znaku(polskie_litery[i]);
+        bws_sprawdz(w >= 4 && w <= 16);
+    }
+
+    // Bezpieczenstwo przed wyjsciem poza tablice dla nieobslugiwanych punktow kodowych
+    uint32_t nieobslugiwane[5] = { 1170, 2000, 0x1F600, 0x10FFFF, 0xFFFFFFFF };
+    int w_pytajnik = CzcionkaUI::szerokosc_znaku('?');
+    for (int i = 0; i < 5; ++i) {
+        int w = CzcionkaUI::szerokosc_znaku(nieobslugiwane[i]);
+        bws_sprawdz(w == w_pytajnik); // Zastapienie bezpiecznym znakiem '?'
+    }
+
+    // Bezpieczenstwo uszkodzonego UTF-8 w dekoderze
+    const char uszkodzony_utf8[] = { static_cast<char>(0xC0), static_cast<char>(0x20), '\0' };
+    uint32_t cp_bad = 0;
+    size_t zuzyte_bad = CzcionkaUI::dekoduj_utf8(uszkodzony_utf8, 0, &cp_bad);
+    bws_sprawdz(zuzyte_bad == 1);
+    bws_sprawdz(cp_bad == 0xC0);
+
+    bws_log("[BURSZTYNUI 1/4] extronic16B_unicode.h & UTF-8: OK\n");
+
+    // -------------------------------------------------------------------------
+    // 2. Audyt przestrzeni wspolrzednych i hierarchii (Okno -> Kolumna -> Wiersz -> Przycisk)
+    // -------------------------------------------------------------------------
+    bws_log("[BURSZTYNUI 2/4] Audyt przestrzeni wspolrzednych i hit-testu...\n");
+
+    Okno okno("Test BursztynUI", 540, 350);
+    okno.ustaw_pozycje(130, 80);
+
+    auto& glowna = okno.dodaj<Kolumna>();
+    glowna.ustaw_wypelnienie(Marginesy(16, 12, 16, 12));
+    glowna.ustaw_odstep(8);
+
+    auto& lbl_tytul = glowna.dodaj<Etykieta>("BursztynUI Komponenty");
+    (void)lbl_tytul;
+    auto& lbl_status = glowna.dodaj<Etykieta>("Status poczatkowy");
+    (void)lbl_status;
+    auto& txt_input = glowna.dodaj<PoleTekstowe>("Wpisz tekst...");
+    txt_input.ustaw_tekst("Bursztyn OS");
+    txt_input.ustaw_preferowany_rozmiar(Rozmiar(508, 30));
+
+    auto& panel_opcji = glowna.dodaj<Wiersz>();
+    panel_opcji.ustaw_wypelnienie(Marginesy(10, 6, 10, 6));
+    panel_opcji.ustaw_preferowany_rozmiar(Rozmiar(508, 28));
+    auto& chk_haslo = panel_opcji.dodaj<PoleWyboru>("Haslo", false);
+    auto& chk_trojstan = panel_opcji.dodaj<PoleWyboru>("Trojstan", false);
+    chk_trojstan.ustaw_trojstanowe(true);
+
+    auto& wiersz_przyciskow = glowna.dodaj<Wiersz>();
+    wiersz_przyciskow.ustaw_wypelnienie(Marginesy(0, 0, 0, 0));
+    wiersz_przyciskow.ustaw_odstep(12);
+    wiersz_przyciskow.ustaw_preferowany_rozmiar(Rozmiar(508, 32));
+
+    auto& btn1 = wiersz_przyciskow.dodaj<Przycisk>("Zatwierdz tekst");
+    btn1.ustaw_preferowany_rozmiar(Rozmiar(230, 32));
+
+    auto& btn2 = wiersz_przyciskow.dodaj<Przycisk>("Aktualizacja grupowa");
+    btn2.ustaw_preferowany_rozmiar(Rozmiar(260, 32));
+
+    auto& suwak = glowna.dodaj<Suwak>();
+    suwak.ustaw_preferowany_rozmiar(Rozmiar(508, 32));
+    suwak.ustaw_zakres(0, 100);
+    suwak.ustaw_krok(1);
+    suwak.ustaw_wartosc(50);
+
+    okno.przelicz_uklad();
+
+    // Weryfikacja obszarow
+    Prostokat r_glowna = glowna.obszar_ekranu();
+    bws_sprawdz_msg(r_glowna.x == 0 && r_glowna.y == 28 && r_glowna.szerokosc == 540, "r_glowna != (0, 28, 540)");
+
+    Prostokat r_btn1 = btn1.obszar_ekranu();
+    Prostokat r_btn2 = btn2.obszar_ekranu();
+    bws_sprawdz_msg(r_btn1.szerokosc == 230 && r_btn1.wysokosc == 32, "r_btn1 size != (230, 32)");
+    bws_sprawdz_msg(r_btn2.szerokosc == 260 && r_btn2.wysokosc == 32, "r_btn2 size != (260, 32)");
+    bws_sprawdz_msg(r_btn1.x == 16, "r_btn1.x != 16");
+    bws_sprawdz_msg(r_btn2.x == 16 + 230 + 12, "r_btn2.x != 258");
+
+    // Test Hit-Testu we wszystkich punktach przycisku 1: srodek i wszystkie 4 krawedzie
+    int c1_x = r_btn1.x + r_btn1.szerokosc / 2;
+    int c1_y = r_btn1.y + r_btn1.wysokosc / 2;
+    bws_sprawdz_msg(glowna.sprawdz_trafienie(Punkt(c1_x, c1_y)) == &btn1, "btn1 center hit-test failed");
+    bws_sprawdz_msg(glowna.sprawdz_trafienie(Punkt(r_btn1.x, c1_y)) == &btn1, "btn1 left edge hit-test failed");
+    bws_sprawdz_msg(glowna.sprawdz_trafienie(Punkt(r_btn1.prawy() - 1, c1_y)) == &btn1, "btn1 right edge hit-test failed");
+    bws_sprawdz_msg(glowna.sprawdz_trafienie(Punkt(c1_x, r_btn1.y)) == &btn1, "btn1 top edge hit-test failed");
+    bws_sprawdz_msg(glowna.sprawdz_trafienie(Punkt(c1_x, r_btn1.dolny() - 1)) == &btn1, "btn1 bottom edge hit-test failed");
+
+    // Punkty 1px poza przyciskiem 1 (nie moga trafic w btn1)
+    bws_sprawdz_msg(glowna.sprawdz_trafienie(Punkt(r_btn1.x - 1, c1_y)) != &btn1, "btn1 left outer hit should not be btn1");
+    bws_sprawdz_msg(glowna.sprawdz_trafienie(Punkt(r_btn1.prawy(), c1_y)) != &btn1, "btn1 right outer hit should not be btn1");
+    bws_sprawdz_msg(glowna.sprawdz_trafienie(Punkt(c1_x, r_btn1.y - 1)) != &btn1, "btn1 top outer hit should not be btn1");
+    bws_sprawdz_msg(glowna.sprawdz_trafienie(Punkt(c1_x, r_btn1.dolny())) != &btn1, "btn1 bottom outer hit should not be btn1");
+
+    // Test Hit-Testu we wszystkich punktach przycisku 2: srodek i wszystkie 4 krawedzie
+    int c2_x = r_btn2.x + r_btn2.szerokosc / 2;
+    int c2_y = r_btn2.y + r_btn2.wysokosc / 2;
+    bws_sprawdz_msg(glowna.sprawdz_trafienie(Punkt(c2_x, c2_y)) == &btn2, "btn2 center hit-test failed");
+    bws_sprawdz_msg(glowna.sprawdz_trafienie(Punkt(r_btn2.x, c2_y)) == &btn2, "btn2 left edge hit-test failed");
+    bws_sprawdz_msg(glowna.sprawdz_trafienie(Punkt(r_btn2.prawy() - 1, c2_y)) == &btn2, "btn2 right edge hit-test failed");
+    bws_sprawdz_msg(glowna.sprawdz_trafienie(Punkt(c2_x, r_btn2.y)) == &btn2, "btn2 top edge hit-test failed");
+    bws_sprawdz_msg(glowna.sprawdz_trafienie(Punkt(c2_x, r_btn2.dolny() - 1)) == &btn2, "btn2 bottom edge hit-test failed");
+
+    // Test 10 klikniec w Przycisk 1
+    static int licznik_btn1 = 0;
+    licznik_btn1 = 0;
+    btn1.przy_kliknieciu([](Przycisk*, void*) {
+        licznik_btn1++;
+    });
+
+    for (int k = 0; k < 10; ++k) {
+        bws_zdarzenie down{};
+        down.typ = BWS_ZDARZENIE_MYSZ_DOWN;
+        down.x = okno.x() + c1_x;
+        down.y = okno.y() + c1_y;
+        down.przyciski = 1;
+        okno.obsluz_zdarzenie(down);
+
+        bws_zdarzenie up{};
+        up.typ = BWS_ZDARZENIE_MYSZ_UP;
+        up.x = okno.x() + c1_x;
+        up.y = okno.y() + c1_y;
+        up.przyciski = 0;
+        okno.obsluz_zdarzenie(up);
+    }
+    bws_sprawdz_msg(licznik_btn1 == 10, "btn1 10 clicks callback failed");
+
+    // Test 10 klikniec w Przycisk 2 (Batch)
+    static int licznik_btn2 = 0;
+    licznik_btn2 = 0;
+    btn2.przy_kliknieciu([](Przycisk*, void*) {
+        licznik_btn2++;
+    });
+
+    for (int k = 0; k < 10; ++k) {
+        bws_zdarzenie down{};
+        down.typ = BWS_ZDARZENIE_MYSZ_DOWN;
+        down.x = okno.x() + c2_x;
+        down.y = okno.y() + c2_y;
+        down.przyciski = 1;
+        okno.obsluz_zdarzenie(down);
+
+        bws_zdarzenie up{};
+        up.typ = BWS_ZDARZENIE_MYSZ_UP;
+        up.x = okno.x() + c2_x;
+        up.y = okno.y() + c2_y;
+        up.przyciski = 0;
+        okno.obsluz_zdarzenie(up);
+    }
+    bws_sprawdz_msg(licznik_btn2 == 10, "btn2 10 clicks callback failed");
+
+    bws_log("[BURSZTYNUI 2/4] Audyt wspolrzednych i 10x klikniec: OK\n");
+
+    // -------------------------------------------------------------------------
+    // 3. Dirty Redraw i pomiar powierzchni odrysowywania
+    // -------------------------------------------------------------------------
+    bws_log("[BURSZTYNUI 3/4] Dirty Redraw i pomiary powierzchni...\n");
+
+    KontekstRysowania ctx;
+    // 1. Pelne odrysowanie
+    okno.rysuj(ctx, true);
+    int pelna_powierzchnia = okno.ostatnia_powierzchnia_odrysowania();
+    bws_sprawdz_msg(pelna_powierzchnia == 540 * 350, "pelna_powierzchnia != 540*350");
+
+    // 2. Odrysowanie po wpisaniu 1 znaku w PoleTekstowe
+    txt_input.ustaw_tekst("Bursztyn OS: Zazolc gesla jazn!");
+    okno.rysuj(ctx, false);
+    int brudna_powierzchnia = okno.ostatnia_powierzchnia_odrysowania();
+    bws_sprawdz_msg(brudna_powierzchnia == txt_input.obszar_ekranu().szerokosc * txt_input.obszar_ekranu().wysokosc, "brudna_powierzchnia mismatch");
+    bws_sprawdz_msg(brudna_powierzchnia < pelna_powierzchnia / 5, "brudna_powierzchnia reduction < 80%");
+
+    // 3. Test skracania tekstu (usuwanie starych pikseli)
+    txt_input.ustaw_tekst("Bardzo dlugi tekst testowy do natychmiastowego skrocenia");
+    okno.rysuj(ctx, false);
+    txt_input.ustaw_tekst("Krotki");
+    okno.rysuj(ctx, false);
+    bws_sprawdz_msg(txt_input.tekst()[0] == 'K' && txt_input.tekst()[5] == 'i' && txt_input.tekst()[6] == '\0', "skrocenie tekstu mismatch");
+
+    // 4. Regresja hover dirty-rect: kontrolka na ekranie przesunietego okna
+    // musi zostac ponownie namalowana po kazdym wyczyszczeniu jej dirty rect.
+    // Pozycja okna jest celowo rozna od (0, 0), aby wykryc pomieszanie
+    // wspolrzednych klienta i ekranu.
+    Okno okno_hover("Dirty hover", 260, 250);
+    okno_hover.ustaw_pozycje(173, 91);
+    auto& hover_kolumna = okno_hover.dodaj<Kolumna>();
+    hover_kolumna.ustaw_wypelnienie(Marginesy(10));
+    hover_kolumna.ustaw_odstep(10);
+    auto& hover_checkbox = hover_kolumna.dodaj<PoleWyboru>("Hover 100x", true);
+    auto& hover_pion = hover_kolumna.dodaj<Suwak>();
+    hover_pion.ustaw_orientacje(Orientacja::Pionowa);
+    hover_pion.ustaw_preferowany_rozmiar(Rozmiar(52, 150));
+    hover_pion.ustaw_wartosc(60);
+
+    struct LicznikiHover {
+        int checkbox{0};
+        int pion{0};
+    } liczniki_hover;
+    hover_checkbox.przy_wlasnym_rysowaniu([](Kontrolka*, KontekstRysowania&, void* dane) {
+        ++static_cast<LicznikiHover*>(dane)->checkbox;
+    }, &liczniki_hover);
+    hover_pion.przy_wlasnym_rysowaniu([](Kontrolka*, KontekstRysowania&, void* dane) {
+        ++static_cast<LicznikiHover*>(dane)->pion;
+    }, &liczniki_hover);
+
+    okno_hover.przelicz_uklad();
+    KontekstRysowania ctx_hover;
+    okno_hover.rysuj(ctx_hover, true);
+    liczniki_hover.checkbox = 0;
+    liczniki_hover.pion = 0;
+
+    for (int i = 0; i < 100; ++i) {
+        hover_checkbox.obsluz_wejscie_myszy();
+        okno_hover.rysuj(ctx_hover, false);
+        bws_sprawdz_msg(liczniki_hover.checkbox == i * 2 + 1,
+                        "PoleWyboru zniknelo po hover-enter dirty redraw");
+        hover_checkbox.obsluz_opuszczenie_myszy();
+        okno_hover.rysuj(ctx_hover, false);
+        bws_sprawdz_msg(liczniki_hover.checkbox == i * 2 + 2,
+                        "PoleWyboru zniknelo po hover-leave dirty redraw");
+
+        hover_pion.obsluz_wejscie_myszy();
+        okno_hover.rysuj(ctx_hover, false);
+        bws_sprawdz_msg(liczniki_hover.pion == i * 2 + 1,
+                        "Pionowy Suwak zniknal po hover-enter dirty redraw");
+        hover_pion.obsluz_opuszczenie_myszy();
+        okno_hover.rysuj(ctx_hover, false);
+        bws_sprawdz_msg(liczniki_hover.pion == i * 2 + 2,
+                        "Pionowy Suwak zniknal po hover-leave dirty redraw");
+    }
+    bws_sprawdz_msg(liczniki_hover.checkbox == 200 && liczniki_hover.pion == 200,
+                    "Hover 100x: niepelna liczba odrysowan kontrolek");
+
+    bws_log("[BURSZTYNUI 3/4] Dirty Redraw + hover 100x: OK\n");
+
+    // -------------------------------------------------------------------------
+    // 4. Zaawansowane komponenty (PoleTekstowe, PoleWyboru, Fokus Tab, Maximize)
+    // -------------------------------------------------------------------------
+    bws_log("[BURSZTYNUI 4/4] Komponenty: PoleTekstowe, PoleWyboru, Fokus, Maximize...\n");
+
+    // PoleTekstowe: edycja, zaznaczanie, Backspace, Delete, Undo/Redo
+    txt_input.ustaw_tekst("Zazolc gesla jazn");
+    bws_sprawdz(txt_input.pozycja_kursora() > 0);
+
+    txt_input.zaznacz_wszystko();
+    bws_sprawdz(txt_input.czy_ma_zaznaczenie());
+    bws_sprawdz(txt_input.poczatek_zaznaczenia() == 0);
+    bws_sprawdz(txt_input.koniec_zaznaczenia() == txt_input.pozycja_kursora());
+
+    txt_input.zastap_zaznaczenie("Bursztyn");
+    bws_sprawdz(txt_input.pozycja_kursora() == 8);
+
+    // Undo / Redo
+    bws_sprawdz(txt_input.czy_mozna_cofnac());
+    txt_input.cofnij();
+    bws_sprawdz(txt_input.pozycja_kursora() > 8); // Przywrocono "Zazolc gesla jazn"
+    txt_input.ponow();
+    bws_sprawdz(txt_input.pozycja_kursora() == 8); // Ponowiono "Bursztyn"
+
+    // Tryb hasla
+    txt_input.ustaw_tryb_hasla(true);
+    bws_sprawdz(txt_input.czy_tryb_hasla());
+    txt_input.ustaw_tryb_hasla(false);
+    bws_sprawdz(!txt_input.czy_tryb_hasla());
+
+    // PoleWyboru: zwykle i trojstanowe
+    bws_sprawdz(!chk_haslo.czy_zaznaczone());
+    chk_haslo.ustaw_zaznaczone(true);
+    bws_sprawdz(chk_haslo.czy_zaznaczone());
+
+    bws_sprawdz(chk_trojstan.stan_wyboru() == StanWyboru::Niezaznaczone);
+    chk_trojstan.ustaw_stan_wyboru(StanWyboru::Zaznaczone);
+    bws_sprawdz(chk_trojstan.stan_wyboru() == StanWyboru::Zaznaczone);
+    chk_trojstan.ustaw_stan_wyboru(StanWyboru::Nieokreslone);
+    bws_sprawdz(chk_trojstan.czy_nieokreslone());
+
+    // Cykl fokusu (Tab / Shift+Tab)
+    okno.ustaw_fokus(&txt_input);
+    bws_sprawdz(okno.fokus() == &txt_input);
+    okno.nastepny_fokus(false); // Tab do chk_haslo
+    bws_sprawdz(okno.fokus() == &chk_haslo);
+    okno.nastepny_fokus(false); // Tab do chk_trojstan
+    bws_sprawdz(okno.fokus() == &chk_trojstan);
+    okno.nastepny_fokus(false); // Tab do btn1
+    bws_sprawdz(okno.fokus() == &btn1);
+    okno.nastepny_fokus(true);  // Shift+Tab z powrotem do chk_trojstan
+    bws_sprawdz(okno.fokus() == &chk_trojstan);
+
+    // Maksymalizacja i przywrocenie rozmiaru okna
+    int orig_w = okno.szerokosc();
+    int orig_h = okno.wysokosc();
+    int suwak_h_przed = suwak.obszar_ekranu().wysokosc;
+    int suwak_w_przed = suwak.obszar_ekranu().szerokosc;
+    GuiMonitorInfo ui_monitor{};
+    bws_sprawdz_msg(gui_pobierz_monitor(0, &ui_monitor),
+                    "BursztynUI: brak informacji BWS62 o obszarze roboczym");
+    okno.przelacz_maksymalizacje();
+    bws_sprawdz(okno.czy_zmaksymalizowane());
+    bws_sprawdz_msg(okno.x() == ui_monitor.work_x && okno.y() == ui_monitor.work_y &&
+                    okno.szerokosc() == ui_monitor.work_szer &&
+                    okno.wysokosc() == ui_monitor.work_wys,
+                    "BursztynUI: maksymalizacja nie uzyla work area BWS62");
+    bws_sprawdz(suwak.obszar_ekranu().wysokosc == suwak_h_przed);
+    bws_sprawdz(suwak.obszar_ekranu().szerokosc >= suwak_w_przed);
+    okno.przelacz_maksymalizacje();
+    bws_sprawdz(!okno.czy_zmaksymalizowane());
+    bws_sprawdz(okno.szerokosc() == orig_w && okno.wysokosc() == orig_h);
+    bws_sprawdz(suwak.obszar_ekranu().wysokosc == suwak_h_przed);
+
+    Okno ograniczone("Work area clamp", ui_monitor.work_szer + 200,
+                     ui_monitor.work_wys + 200);
+    ograniczone.ustaw_geometrie(ui_monitor.work_x - 100,
+                               ui_monitor.work_y + ui_monitor.work_wys - 10,
+                               ui_monitor.work_szer + 200,
+                               ui_monitor.work_wys + 200);
+    ograniczone.dopasuj_do_obszaru_roboczego(true);
+    bws_sprawdz_msg(ograniczone.x() == ui_monitor.work_x &&
+                    ograniczone.y() == ui_monitor.work_y &&
+                    ograniczone.szerokosc() == ui_monitor.work_szer &&
+                    ograniczone.wysokosc() == ui_monitor.work_wys,
+                    "BursztynUI: geometria poczatkowa wychodzi poza work area");
+
+    ograniczone.ustaw_geometrie(ui_monitor.work_x + ui_monitor.work_szer - 20,
+                               ui_monitor.work_y + ui_monitor.work_wys - 20,
+                               300, 180);
+    bws_sprawdz_msg(ograniczone.x() >= ui_monitor.work_x &&
+                    ograniczone.y() >= ui_monitor.work_y &&
+                    ograniczone.x() + ograniczone.szerokosc() <= ui_monitor.work_x + ui_monitor.work_szer &&
+                    ograniczone.y() + ograniczone.wysokosc() <= ui_monitor.work_y + ui_monitor.work_wys,
+                    "BursztynUI: ruch/resize przy dolnej krawedzi zaslania pasek zadan");
+
+    bws_log("[BURSZTYNUI 4/4] Komponenty, Fokus i Geometria: OK\n");
+
+    // -------------------------------------------------------------------------
+    // 5. Suwak: model, wejście, capture, callbacki, dirty rect i alokacje
+    // -------------------------------------------------------------------------
+    bws_log("[BURSZTYNUI SUWAK] Model i interakcje...\n");
+
+    struct PomiarSuwaka {
+        int zmiany{0};
+        int zatwierdzenia{0};
+    } pomiar;
+    suwak.przy_zmianie_wartosci([](Suwak*, int, void* dane) {
+        static_cast<PomiarSuwaka*>(dane)->zmiany++;
+    }, &pomiar);
+    suwak.przy_zatwierdzeniu_wartosci([](Suwak*, int, void* dane) {
+        static_cast<PomiarSuwaka*>(dane)->zatwierdzenia++;
+    }, &pomiar);
+
+    // Ten sam stan nie może wygenerować zdarzenia zmiany.
+    suwak.ustaw_wartosc(50);
+    suwak.ustaw_wartosc(50);
+    bws_sprawdz_msg(pomiar.zmiany == 0, "Suwak: duplicate callback dla tej samej wartosci");
+
+    // Klik toru przesuwa wartość i zatwierdza ją dopiero przy zwolnieniu.
+    Prostokat r_suwak = suwak.obszar_ekranu();
+    int y_suwak = r_suwak.y + r_suwak.wysokosc / 2;
+    int x_cwierc = r_suwak.x + r_suwak.szerokosc / 4;
+    bws_zdarzenie klik_down{};
+    klik_down.typ = BWS_ZDARZENIE_MYSZ_DOWN;
+    klik_down.x = okno.x() + x_cwierc;
+    klik_down.y = okno.y() + y_suwak;
+    klik_down.przyciski = 1;
+    okno.obsluz_zdarzenie(klik_down);
+    bws_sprawdz(suwak.wartosc() >= 20 && suwak.wartosc() <= 30);
+    bws_sprawdz(okno.przechwycenie_myszy() == &suwak);
+    bws_zdarzenie klik_up = klik_down;
+    klik_up.typ = BWS_ZDARZENIE_MYSZ_UP;
+    klik_up.przyciski = 0;
+    okno.obsluz_zdarzenie(klik_up);
+    bws_sprawdz(pomiar.zatwierdzenia == 1);
+    bws_sprawdz(okno.przechwycenie_myszy() == nullptr);
+    bws_sprawdz(!suwak.czy_wcisnieta());
+
+    // Instrumentowana sekwencja: uchwyt -> poza kontrolkę -> MouseUp poza oknem.
+    suwak.ustaw_wartosc(50);
+    pomiar.zmiany = 0;
+    pomiar.zatwierdzenia = 0;
+    okno.rysuj(ctx, false);
+    r_suwak = suwak.obszar_ekranu();
+    int x_uchwyt = r_suwak.x + r_suwak.szerokosc / 2;
+    y_suwak = r_suwak.y + r_suwak.wysokosc / 2;
+
+    bws_zdarzenie drag_down{};
+    drag_down.typ = BWS_ZDARZENIE_MYSZ_DOWN;
+    drag_down.x = okno.x() + x_uchwyt;
+    drag_down.y = okno.y() + y_suwak;
+    drag_down.przyciski = 1;
+    okno.obsluz_zdarzenie(drag_down);
+    okno.rysuj(ctx, false); // oddziela zmianę stanu pressed od pomiaru ruchu
+
+    uint64_t alokacje_przed = gui_liczba_alokacji_sterty();
+    int liczba_odrysowan = 0;
+    bws_zdarzenie drag_move{};
+    drag_move.typ = BWS_ZDARZENIE_MYSZ_RUCH;
+    drag_move.x = okno.x() + okno.szerokosc() + 120;
+    drag_move.y = okno.y() + y_suwak;
+    drag_move.przyciski = 1;
+    okno.obsluz_zdarzenie(drag_move);
+    okno.rysuj(ctx, false);
+    ++liczba_odrysowan;
+    int obszar_drag = okno.ostatnia_powierzchnia_odrysowania();
+
+    bws_zdarzenie drag_up = drag_move;
+    drag_up.typ = BWS_ZDARZENIE_MYSZ_UP;
+    drag_up.przyciski = 0;
+    okno.obsluz_zdarzenie(drag_up);
+    uint64_t alokacje_po = gui_liczba_alokacji_sterty();
+
+    bws_sprawdz_msg(suwak.wartosc() == 100, "Suwak: drag poza kontrolke nie osiagnal maksimum");
+    bws_sprawdz_msg(pomiar.zmiany == 1, "Suwak: callback zmiany podczas drag != 1");
+    bws_sprawdz_msg(pomiar.zatwierdzenia == 1, "Suwak: callback zatwierdzenia drag != 1");
+    bws_sprawdz_msg(okno.przechwycenie_myszy() == nullptr, "Suwak: capture pozostal po MouseUp");
+    bws_sprawdz_msg(!suwak.czy_wcisnieta(), "Suwak: pressed pozostal po MouseUp");
+    bws_sprawdz_msg(obszar_drag > 0 && obszar_drag < pelna_powierzchnia,
+                    "Suwak: drag nie byl odrysowaniem dirty-rect");
+    bws_sprawdz_msg(alokacje_po == alokacje_przed,
+                    "Suwak: alokacja sterty na goracej sciezce drag/render");
+    bws_log_u64("[SUWAK POMIAR] callback_zmiana=", static_cast<uint64_t>(pomiar.zmiany));
+    bws_log_u64("[SUWAK POMIAR] callback_zatwierdzenie=", static_cast<uint64_t>(pomiar.zatwierdzenia));
+    bws_log_u64("[SUWAK POMIAR] redraw_count=", static_cast<uint64_t>(liczba_odrysowan));
+    bws_log_u64("[SUWAK POMIAR] redraw_area_px=", static_cast<uint64_t>(obszar_drag));
+    bws_log_u64("[SUWAK POMIAR] heap_allocations=", alokacje_po - alokacje_przed);
+
+    // Powtarzane pełne interakcje nie zostawiają capture ani pressed.
+    pomiar.zmiany = 0;
+    pomiar.zatwierdzenia = 0;
+    for (int i = 0; i < 6; ++i) {
+        bws_zdarzenie down{};
+        down.typ = BWS_ZDARZENIE_MYSZ_DOWN;
+        down.x = okno.x() + (i % 2 == 0 ? r_suwak.x : r_suwak.prawy() - 1);
+        down.y = okno.y() + y_suwak;
+        down.przyciski = 1;
+        okno.obsluz_zdarzenie(down);
+        bws_zdarzenie up = down;
+        up.typ = BWS_ZDARZENIE_MYSZ_UP;
+        up.przyciski = 0;
+        okno.obsluz_zdarzenie(up);
+        bws_sprawdz(okno.przechwycenie_myszy() == nullptr);
+        bws_sprawdz(!suwak.czy_wcisnieta());
+    }
+    bws_sprawdz(pomiar.zmiany == 6 && pomiar.zatwierdzenia == 6);
+
+    // Klawiatura: key-up nie może powtórzyć zmiany wykonanej na key-down.
+    okno.ustaw_fokus(&suwak);
+    suwak.ustaw_wartosc(50);
+    pomiar.zmiany = 0;
+    pomiar.zatwierdzenia = 0;
+    bws_zdarzenie key{};
+    key.typ = BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;
+    key.x = 1;
+    key.kod = BWS_KEY_SOURCE_E0 | 0x4DU; // Right
+    okno.obsluz_zdarzenie(key);
+    key.x = 0;
+    okno.obsluz_zdarzenie(key);
+    bws_sprawdz(suwak.wartosc() == 51);
+    bws_sprawdz(pomiar.zmiany == 1 && pomiar.zatwierdzenia == 1);
+
+    key.x = 1;
+    key.kod = BWS_KEY_SOURCE_E0 | 0x47U; // Home
+    okno.obsluz_zdarzenie(key);
+    bws_sprawdz(suwak.wartosc() == suwak.minimum());
+    key.kod = BWS_KEY_SOURCE_E0 | 0x4FU; // End
+    okno.obsluz_zdarzenie(key);
+    bws_sprawdz(suwak.wartosc() == suwak.maksimum());
+    key.kod = BWS_KEY_SOURCE_E0 | 0x51U; // PageDown
+    okno.obsluz_zdarzenie(key);
+    bws_sprawdz(suwak.wartosc() == 90);
+    key.kod = BWS_KEY_SOURCE_USB | 75U; // USB PageUp
+    okno.obsluz_zdarzenie(key);
+    bws_sprawdz(suwak.wartosc() == 100);
+
+    bws_zdarzenie rolka{};
+    rolka.typ = BWS_ZDARZENIE_MYSZ_KOLO;
+    // Fokus musi wystarczyć także wtedy, gdy wskaźnik jest poza drzewem okna.
+    rolka.x = okno.x() + okno.szerokosc() + 40;
+    rolka.y = okno.y() + okno.wysokosc() + 40;
+    rolka.dy = -1;
+    okno.obsluz_zdarzenie(rolka);
+    bws_sprawdz(suwak.wartosc() == 99);
+
+    // Zakres ujemny, snapping, bezpieczne końce int oraz min == max.
+    Suwak model;
+    model.ustaw_zakres(-50, 50);
+    model.ustaw_krok(5);
+    model.ustaw_wartosc(-47);
+    bws_sprawdz(model.wartosc() == -45);
+    model.ustaw_wartosc(-50);
+    bws_sprawdz(model.wartosc() == -50);
+    model.ustaw_wartosc(50);
+    bws_sprawdz(model.wartosc() == 50);
+    model.ustaw_zakres(-2147483647 - 1, 2147483647);
+    model.ustaw_krok(1);
+    model.ustaw_wartosc(0);
+    bws_sprawdz(model.wartosc() == 0);
+    model.rozmiesc(Prostokat(0, 0, 300, 32));
+    ZdarzenieMyszki me{};
+    me.typ = TypZdarzenia::WcisniecieMyszy;
+    me.x = 299;
+    me.y = 16;
+    me.przycisk = 1;
+    model.obsluz_wcisniecie_myszy(me);
+    bws_sprawdz(model.wartosc() == 2147483647);
+    me.typ = TypZdarzenia::ZwolnienieMyszy;
+    model.obsluz_zwolnienie_myszy(me);
+    model.ustaw_zakres(7, 7);
+    model.ustaw_wartosc(-100);
+    bws_sprawdz(model.minimum() == 7 && model.maksimum() == 7 && model.wartosc() == 7);
+
+    // Pion: góra zwiększa, dół zmniejsza; wyłączony nie reaguje.
+    Suwak pion;
+    pion.ustaw_orientacje(Orientacja::Pionowa);
+    pion.ustaw_zakres(-50, 50);
+    pion.ustaw_krok(5);
+    pion.ustaw_wartosc(0);
+    ZdarzenieKlawiatury vk{};
+    vk.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x48U;
+    pion.obsluz_wcisniecie_klawisza(vk);
+    bws_sprawdz(pion.wartosc() == 5);
+    vk.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x50U;
+    pion.obsluz_wcisniecie_klawisza(vk);
+    bws_sprawdz(pion.wartosc() == 0);
+    pion.ustaw_wlaczona(false);
+    pion.obsluz_wcisniecie_klawisza(vk);
+    bws_sprawdz(pion.wartosc() == 0);
+
+    bws_log("[BURSZTYNUI SUWAK] Model, wejscie, capture i pomiary: OK\n");
+    bws_log("=== WSZYSTKIE TESTY BURSZTYNUI ZAKONCZONE SUKCESEM (PASS) ===\n\n");
+}
+
 static bool punkt_w_prostokacie(int px, int py, int x, int y, int w, int h) {
     if (w <= 0 || h <= 0) return false;
     return px >= x && px < x + w && py >= y && py < y + h;
+}
+
+static bool punkt_w_obszarze(int lokalny_x, int lokalny_y,
+                             const TestUiRect& obszar) {
+    return punkt_w_prostokacie(lokalny_x, lokalny_y,
+                               obszar.x, obszar.y, obszar.w, obszar.h);
+}
+
+static int minimum(int a, int b) {
+    return a < b ? a : b;
+}
+
+static TestUiLayout oblicz_uklad_prezentacji() {
+    TestUiLayout uklad{};
+    uklad.client = {
+        0,
+        CHROME_H,
+        WIN_W,
+        WIN_H > CHROME_H ? WIN_H - CHROME_H : 0
+    };
+
+    const int content_x = uklad.client.x + CLIENT_PAD;
+    const int content_w = uklad.client.w > 2 * CLIENT_PAD
+        ? uklad.client.w - 2 * CLIENT_PAD
+        : 0;
+    const int content_bottom = uklad.client.y + uklad.client.h - CLIENT_PAD;
+
+    const int preferowane_szerokosci[4] = {110, 100, 150, 120};
+    const int preferowana_suma = 110 + 100 + 150 + 120;
+    const int szerokosc_na_przyciski = content_w > 3 * GRID_GAP
+        ? content_w - 3 * GRID_GAP
+        : 0;
+
+    int szerokosci[4] = {};
+    if (szerokosc_na_przyciski >= preferowana_suma) {
+        for (int i = 0; i < 4; ++i) szerokosci[i] = preferowane_szerokosci[i];
+    } else if (szerokosc_na_przyciski > 0) {
+        const int wspolna = szerokosc_na_przyciski / 4;
+        int reszta = szerokosc_na_przyciski - wspolna * 4;
+        for (int i = 0; i < 4; ++i) {
+            szerokosci[i] = wspolna + (reszta > 0 ? 1 : 0);
+            if (reszta > 0) --reszta;
+        }
+    }
+
+    int x = content_x;
+    const int toolbar_y = uklad.client.y + CLIENT_PAD;
+    for (int i = 0; i < 4; ++i) {
+        uklad.toolbar[i] = {x, toolbar_y, szerokosci[i], BUTTON_H};
+        x += szerokosci[i] + GRID_GAP;
+    }
+
+    const int selector_y = toolbar_y + BUTTON_H + GRID_GAP;
+    uklad.selector = {content_x, selector_y, minimum(content_w, 200), COMBO_H};
+
+    const int status_bws_y = selector_y + COMBO_H + GRID_GAP;
+    uklad.status_bws = {content_x, status_bws_y, content_w, STATUS_H};
+    uklad.status_ui = {
+        content_x,
+        status_bws_y + STATUS_H + 4,
+        content_w,
+        STATUS_H
+    };
+
+    const int output_y = uklad.status_ui.y + STATUS_H + GRID_GAP;
+    uklad.output = {
+        content_x,
+        output_y,
+        content_w,
+        content_bottom > output_y ? content_bottom - output_y : 0
+    };
+    return uklad;
+}
+
+static void rysuj_prostokat_lokalny(const TestUiRect& obszar,
+                                    uint32_t kolor) {
+    if (obszar.w <= 0 || obszar.h <= 0) return;
+    gui_rysuj_prostokat(WIN_X + obszar.x, WIN_Y + obszar.y,
+                        obszar.w, obszar.h, kolor);
+}
+
+static void rysuj_ramke_lokalna(const TestUiRect& obszar,
+                                uint32_t kolor) {
+    if (obszar.w <= 1 || obszar.h <= 1) return;
+    gui_rysuj_prostokat(WIN_X + obszar.x, WIN_Y + obszar.y,
+                        obszar.w, 1, kolor);
+    gui_rysuj_prostokat(WIN_X + obszar.x,
+                        WIN_Y + obszar.y + obszar.h - 1,
+                        obszar.w, 1, kolor);
+    gui_rysuj_prostokat(WIN_X + obszar.x, WIN_Y + obszar.y,
+                        1, obszar.h, kolor);
+    gui_rysuj_prostokat(WIN_X + obszar.x + obszar.w - 1,
+                        WIN_Y + obszar.y, 1, obszar.h, kolor);
+}
+
+static void ogranicz_geometrie_okna() {
+    if (WIN_W > work_w) WIN_W = work_w;
+    if (WIN_H > work_h) WIN_H = work_h;
+    if (WIN_W < 1) WIN_W = 1;
+    if (WIN_H < 1) WIN_H = 1;
+    int max_x = work_x + work_w - WIN_W;
+    int max_y = work_y + work_h - WIN_H;
+    if (max_x < work_x) max_x = work_x;
+    if (max_y < work_y) max_y = work_y;
+    if (WIN_X < work_x) WIN_X = work_x;
+    if (WIN_Y < work_y) WIN_Y = work_y;
+    if (WIN_X > max_x) WIN_X = max_x;
+    if (WIN_Y > max_y) WIN_Y = max_y;
 }
 
 static void ogranicz_pozycje_okna(int* x, int* y) {
@@ -297,75 +1022,136 @@ static void ogranicz_pozycje_okna(int* x, int* y) {
     int max_y = work_y + work_h - WIN_H;
     if (max_x < work_x) max_x = work_x;
     if (max_y < work_y) max_y = work_y;
-    if (*x < work_x) *x = work_x;
-    if (*y < work_y) *y = work_y;
-    if (*x > max_x) *x = max_x;
-    if (*y > max_y) *y = max_y;
+    *x = przytnij(*x, work_x, max_x);
+    *y = przytnij(*y, work_y, max_y);
+}
+
+static bool przelacz_maksymalizacje_okna() {
+    int nowy_x = 0;
+    int nowy_y = 0;
+    int nowy_w = 0;
+    int nowy_h = 0;
+
+    if (!zmaksymalizowane) {
+        restore_x = WIN_X;
+        restore_y = WIN_Y;
+        restore_w = WIN_W;
+        restore_h = WIN_H;
+        nowy_x = work_x;
+        nowy_y = work_y;
+        nowy_w = work_w;
+        nowy_h = work_h;
+    } else {
+        nowy_x = restore_x;
+        nowy_y = restore_y;
+        nowy_w = restore_w;
+        nowy_h = restore_h;
+    }
+
+    if (!gui_ustaw_geometrie_okna(nowy_x, nowy_y, nowy_w, nowy_h)) {
+        return false;
+    }
+
+    WIN_X = nowy_x;
+    WIN_Y = nowy_y;
+    WIN_W = nowy_w;
+    WIN_H = nowy_h;
+    zmaksymalizowane = !zmaksymalizowane;
+    return true;
 }
 
 static void RysujInterfejs(bool wyczysc_warstwe) {
     if (wyczysc_warstwe) gui_odswiez_pulpit();
     if (aplikacja_zminimalizowana) return;
 
-    // Tlo Okna i Belka Systemowa
-    gui_rysuj_okno(WIN_X, WIN_Y, WIN_W, WIN_H, "Aplikacja Bursztyn (VCL Edition)");
-    gui_rysuj_standardowa_belke(WIN_X, WIN_Y, WIN_W, "Aplikacja Bursztyn (VCL Edition)", zmaksymalizowane);
+    const TestUiLayout uklad = oblicz_uklad_prezentacji();
+    const char* const etykiety[4] = {
+        "Otwórz", "Zamknij", "Maksymalizuj", "Minimalizuj"
+    };
 
-    // TButton_2 (TButton)
-    gui_rysuj_prostokat(WIN_X + 30, WIN_Y + 50, 120, 30, 0xFF2D2D2D);
-    gui_rysuj_prostokat(WIN_X + 30, WIN_Y + 50, 120, 1, 0x00404040);
-    gui_rysuj_prostokat(WIN_X + 30, WIN_Y + 50 + 30 - 1, 120, 1, 0x00101010);
-    gui_rysuj_prostokat(WIN_X + 30, WIN_Y + 50, 1, 30, 0x00404040);
-    gui_rysuj_prostokat(WIN_X + 30 + 120 - 1, WIN_Y + 50, 1, 30, 0x00101010);
-    rysuj_tekst_wysrodkowany(WIN_X + 30, WIN_Y + 50, 120, 30, 1, 0xFFFFFFFF, "Otwórz");
-    // TComboBox_3 (TComboBox)
-    gui_rysuj_prostokat(WIN_X + 30, WIN_Y + 100, 150, 24, 0xFFFFFFFF);
-    gui_rysuj_prostokat(WIN_X + 30, WIN_Y + 100, 150, 1, 0x00404040);
-    { const char* combo_items_TComboBox_3_3[] = { "Opcja 1", "Opcja 2", "Opcja 3" };
-      const int combo_n_TComboBox_3_3 = 3;
-      const char* combo_aktualny_TComboBox_3_3 = (combo_wybor_TComboBox_3_3 >= 0 && combo_wybor_TComboBox_3_3 < combo_n_TComboBox_3_3) ? combo_items_TComboBox_3_3[combo_wybor_TComboBox_3_3] : "";
-      gui_wypisz_tekst_kolor_skala(WIN_X + 30 + 4, WIN_Y + 100 + 4, 0xFF000000, 1, combo_aktualny_TComboBox_3_3);
-      gui_rysuj_prostokat(WIN_X + 162, WIN_Y + 100, 18, 24, 0x00E0E0E0);
-      gui_wypisz_tekst_kolor_skala(WIN_X + 166, WIN_Y + 104, 0x00303030, 1, combo_otwarty_TComboBox_3_3 ? "^" : "v");
-      if (combo_otwarty_TComboBox_3_3) {
-          const int lista_h_TComboBox_3_3 = combo_n_TComboBox_3_3 * 16;
-          gui_rysuj_prostokat(WIN_X + 30, WIN_Y + 100 + 24, 150, lista_h_TComboBox_3_3, 0x00FFFFFF);
-          gui_rysuj_prostokat(WIN_X + 30, WIN_Y + 100 + 24, 150, 1, 0x00404040);
-          for (int i_TComboBox_3_3 = 0; i_TComboBox_3_3 < combo_n_TComboBox_3_3; ++i_TComboBox_3_3) {
-              int iy_TComboBox_3_3 = WIN_Y + 100 + 24 + i_TComboBox_3_3 * 16;
-              if (i_TComboBox_3_3 == combo_wybor_TComboBox_3_3) gui_rysuj_prostokat(WIN_X + 30, iy_TComboBox_3_3, 150, 16, 0x000078D7);
-              gui_wypisz_tekst_kolor_skala(WIN_X + 30 + 4, iy_TComboBox_3_3 + 2, i_TComboBox_3_3 == combo_wybor_TComboBox_3_3 ? 0x00FFFFFF : 0x00000000, 1, combo_items_TComboBox_3_3[i_TComboBox_3_3]);
-          }
-      }
+    // Klient zaczyna sie dokladnie pod standardowym chrome 28 px.
+    rysuj_prostokat_lokalny(uklad.client, Kolory::BursztynowyCiemnyTlo);
+    gui_rysuj_standardowa_belke(WIN_X, WIN_Y, WIN_W,
+                                "Test BWS / BursztynUI",
+                                zmaksymalizowane);
+
+    for (int i = 0; i < 4; ++i) {
+        const TestUiRect& p = uklad.toolbar[i];
+        if (p.w <= 0) continue;
+        RysujPrzycisk(WIN_X + p.x, WIN_Y + p.y, p.w, p.h,
+                      Kolory::AkcentWcisniety, Kolory::TekstCiemny,
+                      i == 2 && zmaksymalizowane ? "Przywroc" : etykiety[i]);
     }
-    // TButton_5 (TButton)
-    gui_rysuj_prostokat(WIN_X + 160, WIN_Y + 50, 100, 30, 0xFFFFFFFF);
-    gui_rysuj_prostokat(WIN_X + 160, WIN_Y + 50, 100, 1, 0x00404040);
-    gui_rysuj_prostokat(WIN_X + 160, WIN_Y + 50 + 30 - 1, 100, 1, 0x00101010);
-    gui_rysuj_prostokat(WIN_X + 160, WIN_Y + 50, 1, 30, 0x00404040);
-    gui_rysuj_prostokat(WIN_X + 160 + 100 - 1, WIN_Y + 50, 1, 30, 0x00101010);
-    rysuj_tekst_wysrodkowany(WIN_X + 160, WIN_Y + 50, 100, 30, 1, 0xFF030000, "zamknij");
-    // TButton_6 (TButton)
-    gui_rysuj_prostokat(WIN_X + 270, WIN_Y + 50, 150, 30, 0xFF2D2D2D);
-    gui_rysuj_prostokat(WIN_X + 270, WIN_Y + 50, 150, 1, 0x00404040);
-    gui_rysuj_prostokat(WIN_X + 270, WIN_Y + 50 + 30 - 1, 150, 1, 0x00101010);
-    gui_rysuj_prostokat(WIN_X + 270, WIN_Y + 50, 1, 30, 0x00404040);
-    gui_rysuj_prostokat(WIN_X + 270 + 150 - 1, WIN_Y + 50, 1, 30, 0x00101010);
-    rysuj_tekst_wysrodkowany(WIN_X + 270, WIN_Y + 50, 150, 30, 1, 0xFFFFFFFF, "Maksymalizuj okno");
-    // TButton_7 (TButton)
-    gui_rysuj_prostokat(WIN_X + 430, WIN_Y + 50, 100, 30, 0xFF2D2D2D);
-    gui_rysuj_prostokat(WIN_X + 430, WIN_Y + 50, 100, 1, 0x00404040);
-    gui_rysuj_prostokat(WIN_X + 430, WIN_Y + 50 + 30 - 1, 100, 1, 0x00101010);
-    gui_rysuj_prostokat(WIN_X + 430, WIN_Y + 50, 1, 30, 0x00404040);
-    gui_rysuj_prostokat(WIN_X + 430 + 100 - 1, WIN_Y + 50, 1, 30, 0x00101010);
-    rysuj_tekst_wysrodkowany(WIN_X + 430, WIN_Y + 50, 100, 30, 1, 0xFFFFFFFF, "Minimalizuj");
-    // TMemo_8 (TMemo)
-    gui_rysuj_prostokat(WIN_X + 20, WIN_Y + 230, 435, 185, 0xFF515151);
-    if (234 < 403) gui_wypisz_tekst_kolor_skala(WIN_X + 20 + 4, WIN_Y + 234, 0xFF000000, 1, "");
 
-    gui_wypisz_tekst_kolor_skala(WIN_X + 24, WIN_Y + 205,
-        bws_test_blad == 0 ? 0x0000AA00U : 0x00AA0000U, 1,
-        bws_test_blad == 0 ? "BWS 61-83: PASS" : "BWS 61-83: FAIL");
+    rysuj_prostokat_lokalny(uklad.selector, 0x00FFFFFFU);
+    rysuj_ramke_lokalna(uklad.selector, Kolory::RamkaDomyslna);
+
+    const char* const combo_items[] = {"Opcja 1", "Opcja 2", "Opcja 3"};
+    const int combo_n = 3;
+    const char* const combo_aktualny =
+        combo_wybor_TComboBox_3_3 >= 0 && combo_wybor_TComboBox_3_3 < combo_n
+            ? combo_items[combo_wybor_TComboBox_3_3]
+            : "";
+    gui_wypisz_tekst_kolor_skala(WIN_X + uklad.selector.x + 6,
+                                  WIN_Y + uklad.selector.y + 4,
+                                  Kolory::TekstCiemny, 1, combo_aktualny);
+    if (uklad.selector.w >= 18) {
+        gui_rysuj_prostokat(WIN_X + uklad.selector.x + uklad.selector.w - 18,
+                            WIN_Y + uklad.selector.y, 18, uklad.selector.h,
+                            Kolory::AkcentWcisniety);
+        gui_wypisz_tekst_kolor_skala(
+            WIN_X + uklad.selector.x + uklad.selector.w - 14,
+            WIN_Y + uklad.selector.y + 4,
+            Kolory::TekstCiemny, 1,
+            combo_otwarty_TComboBox_3_3 ? "^" : "v");
+    }
+
+    gui_wypisz_tekst_kolor_skala(
+        WIN_X + uklad.status_bws.x, WIN_Y + uklad.status_bws.y,
+        wynik_bws_ok ? 0x0000CC66U : 0x00DD3333U, 1,
+        wynik_bws_ok ? "BWS 61..83: PASS" : "BWS 61..83: FAIL");
+    gui_wypisz_tekst_kolor_skala(
+        WIN_X + uklad.status_ui.x, WIN_Y + uklad.status_ui.y,
+        wynik_bursztyn_ui_ok ? 0x0000CC66U : 0x00DD3333U, 1,
+        wynik_bursztyn_ui_ok ? "BursztynUI: PASS" : "BursztynUI: FAIL");
+
+    rysuj_prostokat_lokalny(uklad.output, Kolory::PowierzchniaAlternatywna);
+    rysuj_ramke_lokalna(uklad.output, Kolory::RamkaDomyslna);
+    if (uklad.output.w > 20 && uklad.output.h >= 42) {
+        gui_wypisz_tekst_kolor_skala(
+            WIN_X + uklad.output.x + 10, WIN_Y + uklad.output.y + 8,
+            Kolory::TekstBialy, 1, "Wynik testow uruchomionych przy starcie.");
+        gui_wypisz_tekst_kolor_skala(
+            WIN_X + uklad.output.x + 10, WIN_Y + uklad.output.y + 26,
+            Kolory::TekstWyciszony, 1,
+            komunikat_output);
+    }
+
+    // Lista jest popupem prezentacji i musi znalezc sie nad statusem/outputem.
+    if (combo_otwarty_TComboBox_3_3 && uklad.selector.w > 0) {
+        const TestUiRect lista = {
+            uklad.selector.x,
+            uklad.selector.y + uklad.selector.h,
+            uklad.selector.w,
+            combo_n * STATUS_H
+        };
+        rysuj_prostokat_lokalny(lista, 0x00FFFFFFU);
+        rysuj_ramke_lokalna(lista, Kolory::RamkaDomyslna);
+        for (int i = 0; i < combo_n; ++i) {
+            const int iy = lista.y + i * STATUS_H;
+            if (i == combo_wybor_TComboBox_3_3) {
+                const TestUiRect zaznaczenie = {
+                    lista.x + 1, iy, lista.w > 2 ? lista.w - 2 : 0, STATUS_H
+                };
+                rysuj_prostokat_lokalny(zaznaczenie, Kolory::ZaznaczenieTlo);
+            }
+            gui_wypisz_tekst_kolor_skala(
+                WIN_X + lista.x + 6, WIN_Y + iy + 1,
+                i == combo_wybor_TComboBox_3_3
+                    ? Kolory::TekstBialy : Kolory::TekstCiemny,
+                1, combo_items[i]);
+        }
+    }
 
     gui_odswiez();
 }
@@ -380,114 +1166,145 @@ extern "C" __attribute__((noreturn)) void _start() {
     } else {
         work_w = screen_w; work_h = screen_h;
     }
-    ogranicz_pozycje_okna(&WIN_X, &WIN_Y);
+    ogranicz_geometrie_okna();
     if (bws_utworz_warstwe(WIN_X, WIN_Y, WIN_W, WIN_H, 10) < 0) gui_zakoncz_aplikacje();
     gui_ustaw_przejecie_myszy(true);
+
     wykonaj_testy_bws_61_83();
+    const uint32_t bledy_po_bws = bws_test_blad;
+    wynik_bws_ok = bledy_po_bws == 0;
+
+    wykonaj_testy_bursztyn_ui();
+    wynik_bursztyn_ui_ok = bws_test_blad == bledy_po_bws;
+
+    /*
+     * Testy BursztynUI celowo wywoluja BWS61 przez Okno::przelacz_maksymalizacje().
+     * Po ich zakonczeniu procesowa warstwa ma geometrie testowego Okna, a nie
+     * ponizszej prezentacji. Przywracamy ja przed pierwszym rysowaniem, aby
+     * wszystkie ekranowe wspolrzedne trafialy do wlasciwego bufora warstwy.
+     */
+    if (!gui_ustaw_geometrie_okna(WIN_X, WIN_Y, WIN_W, WIN_H)) {
+        gui_zakoncz_aplikacje();
+    }
+    if (!gui_ustaw_tytul_okna("Test BWS / BursztynUI")) {
+        gui_zakoncz_aplikacje();
+    }
+
     bool wyjdz = false;
     RysujInterfejs(true);
 
     while (!wyjdz) {
         bws_zdarzenie zdarzenie{};
         if (!gui_czekaj_na_zdarzenie(&zdarzenie)) continue;
-        if (zdarzenie.typ == BWS_ZDARZENIE_FOCUS && aplikacja_zminimalizowana) aplikacja_zminimalizowana = false;
-        const int mx = zdarzenie.x; const int my = zdarzenie.y;
+
+        if (zdarzenie.typ == BWS_ZDARZENIE_FOCUS && aplikacja_zminimalizowana) {
+            aplikacja_zminimalizowana = false;
+            RysujInterfejs(true);
+            continue;
+        }
+
+        const int mx = zdarzenie.x;
+        const int my = zdarzenie.y;
+        const int lokalny_x = mx - WIN_X;
+        const int lokalny_y = my - WIN_Y;
         const bool lewy = (zdarzenie.przyciski & 0x01U) != 0;
         const bool klik_lewy = zdarzenie.typ == BWS_ZDARZENIE_MYSZ_DOWN;
         const bool puszczenie_lewego = zdarzenie.typ == BWS_ZDARZENIE_MYSZ_UP;
-        bool redraw = false; bool pelne_czyszczenie = false;
+        bool redraw = false;
+        bool pelne_czyszczenie = false;
 
         if (aplikacja_zminimalizowana) continue;
 
-        bool okno_spec_obsluzone = false;
-        bool modal_zablokowane = false;
-        // Klikniecie w pozycje rozwinietej listy ComboBox (obsluga PRZED reszta trafien,
-        // bo lista rysuje sie NAD innymi kontrolkami).
+        const TestUiLayout uklad = oblicz_uklad_prezentacji();
         bool combo_klik_obsluzony = false;
-        if (klik_lewy) {
-            if (combo_otwarty_TComboBox_3_3) {
-                const int n_TComboBox_3_3 = 3;
-                if (punkt_w_prostokacie(mx, my, WIN_X + 30, WIN_Y + 100 + 24, 150, n_TComboBox_3_3 * 16)) {
-                    int wybrany_TComboBox_3_3 = (my - (WIN_Y + 100 + 24)) / 16;
-                    if (wybrany_TComboBox_3_3 >= 0 && wybrany_TComboBox_3_3 < n_TComboBox_3_3) combo_wybor_TComboBox_3_3 = wybrany_TComboBox_3_3;
-                    combo_otwarty_TComboBox_3_3 = false; redraw = true; pelne_czyszczenie = true; combo_klik_obsluzony = true;
-                } else if (punkt_w_prostokacie(mx, my, WIN_X + 30, WIN_Y + 100, 150, 24)) {
-                    combo_otwarty_TComboBox_3_3 = false; redraw = true; pelne_czyszczenie = true; combo_klik_obsluzony = true;
-                } else {
-                    combo_otwarty_TComboBox_3_3 = false; redraw = true; pelne_czyszczenie = true;
+        if (klik_lewy && combo_otwarty_TComboBox_3_3) {
+            const TestUiRect lista = {
+                uklad.selector.x,
+                uklad.selector.y + uklad.selector.h,
+                uklad.selector.w,
+                3 * STATUS_H
+            };
+            if (punkt_w_obszarze(lokalny_x, lokalny_y, lista)) {
+                const int wybrany = (lokalny_y - lista.y) / STATUS_H;
+                if (wybrany >= 0 && wybrany < 3) {
+                    combo_wybor_TComboBox_3_3 = wybrany;
                 }
+                combo_klik_obsluzony = true;
+            } else if (punkt_w_obszarze(lokalny_x, lokalny_y,
+                                         uklad.selector)) {
+                combo_klik_obsluzony = true;
             }
+            combo_otwarty_TComboBox_3_3 = false;
+            redraw = true;
+            pelne_czyszczenie = true;
         }
 
-        if (!okno_spec_obsluzone && !modal_zablokowane && !combo_klik_obsluzony && klik_lewy && punkt_w_prostokacie(mx, my, WIN_X, WIN_Y, WIN_W, WIN_H)) {
+        if (!combo_klik_obsluzony && klik_lewy &&
+            punkt_w_prostokacie(lokalny_x, lokalny_y, 0, 0, WIN_W, WIN_H)) {
             const gui_akcja_belki akcja = gui_hit_test_belki(mx, my, WIN_X, WIN_Y, WIN_W);
             if (akcja == GUI_BELKA_MINIMALIZUJ) {
                 aplikacja_zminimalizowana = gui_minimalizuj_okno();
-                dragging = false; gui_ustaw_capture_myszy(false);
+                dragging = false;
+                gui_ustaw_capture_myszy(false);
             } else if (akcja == GUI_BELKA_ZAMKNIJ) {
-                wyjdz = true; dragging = false;
+                wyjdz = true;
+                dragging = false;
+                gui_ustaw_capture_myszy(false);
             } else if (akcja == GUI_BELKA_MAKSYMALIZUJ) {
-                if (!zmaksymalizowane) {
-                    restore_x = WIN_X; restore_y = WIN_Y; restore_w = WIN_W; restore_h = WIN_H;
-                    WIN_X = work_x; WIN_Y = work_y;
-                    WIN_W = work_w; WIN_H = work_h;
-                    zmaksymalizowane = true;
-                } else {
-                    WIN_X = restore_x; WIN_Y = restore_y; WIN_W = restore_w; WIN_H = restore_h;
-                    zmaksymalizowane = false;
-                }
-                if (!gui_ustaw_geometrie_okna(
-                        WIN_X, WIN_Y, WIN_W, WIN_H)) gui_zakoncz_aplikacje();
-                redraw = true; pelne_czyszczenie = true;
+                if (!przelacz_maksymalizacje_okna()) gui_zakoncz_aplikacje();
+                redraw = true;
+                pelne_czyszczenie = true;
             } else if (akcja == GUI_BELKA_DRAG && !zmaksymalizowane) {
-                dragging = true; gui_ustaw_capture_myszy(true);
+                dragging = true;
+                gui_ustaw_capture_myszy(true);
                 drag_off_x = mx - WIN_X; drag_off_y = my - WIN_Y;
             } else {
-                if (punkt_w_prostokacie(mx, my, WIN_X + 20, WIN_Y + 230, 435, 185)) {
-                    gui_wypisz_tekst(20, 20, "Siemka");
-                    redraw = true; pelne_czyszczenie = true;
-                }
-                else if (punkt_w_prostokacie(mx, my, WIN_X + 430, WIN_Y + 50, 100, 30)) {
+                if (punkt_w_obszarze(lokalny_x, lokalny_y, uklad.toolbar[3])) {
                     aplikacja_zminimalizowana = gui_minimalizuj_okno();
-                    redraw = true; pelne_czyszczenie = true;
-                }
-                else if (punkt_w_prostokacie(mx, my, WIN_X + 270, WIN_Y + 50, 150, 30)) {
-                    // Maksymalizacja jest logiką aplikacji: pełny ekran = nowa warstwa BWS 33
-                    if (!zmaksymalizowane) {
-                        restore_x = WIN_X; restore_y = WIN_Y; restore_w = WIN_W; restore_h = WIN_H;
-                        WIN_X = work_x; WIN_Y = work_y;
-                        WIN_W = work_w; WIN_H = work_h;
-                        zmaksymalizowane = true;
-                    } else {
-                        WIN_X = restore_x; WIN_Y = restore_y; WIN_W = restore_w; WIN_H = restore_h;
-                        zmaksymalizowane = false;
-                    }
-                    if (!gui_ustaw_geometrie_okna(
-                            WIN_X, WIN_Y, WIN_W, WIN_H)) gui_zakoncz_aplikacje();
-                    redraw = true; pelne_czyszczenie = true;
-                    redraw = true; pelne_czyszczenie = true;
-                }
-                else if (punkt_w_prostokacie(mx, my, WIN_X + 160, WIN_Y + 50, 100, 30)) {
-                    gui_zakoncz_aplikacje(); // BWS 32 - nie wraca
-                    redraw = true; pelne_czyszczenie = true;
-                }
-                else if (punkt_w_prostokacie(mx, my, WIN_X + 30, WIN_Y + 100, 150, 24)) {
+                    dragging = false;
+                    gui_ustaw_capture_myszy(false);
+                } else if (punkt_w_obszarze(lokalny_x, lokalny_y,
+                                             uklad.toolbar[2])) {
+                    if (!przelacz_maksymalizacje_okna()) gui_zakoncz_aplikacje();
+                    redraw = true;
+                    pelne_czyszczenie = true;
+                } else if (punkt_w_obszarze(lokalny_x, lokalny_y,
+                                             uklad.toolbar[1])) {
+                    wyjdz = true;
+                } else if (punkt_w_obszarze(lokalny_x, lokalny_y,
+                                             uklad.selector)) {
                     combo_otwarty_TComboBox_3_3 = !combo_otwarty_TComboBox_3_3;
-                    redraw = true; pelne_czyszczenie = true;
-                }
-                else if (punkt_w_prostokacie(mx, my, WIN_X + 30, WIN_Y + 50, 120, 30)) {
-                    gui_wypisz_tekst_kolor_skala(20, 20, 0xFFFFBF00, 1, "Bursztyn");
-                    redraw = true; pelne_czyszczenie = true;
+                    redraw = true;
+                    pelne_czyszczenie = true;
+                } else if (punkt_w_obszarze(lokalny_x, lokalny_y,
+                                             uklad.toolbar[0])) {
+                    komunikat_output = "Otworz: Bursztyn";
+                    redraw = true;
+                    pelne_czyszczenie = true;
+                } else if (punkt_w_obszarze(lokalny_x, lokalny_y,
+                                             uklad.output)) {
+                    komunikat_output = "Kliknieto obszar wynikow.";
+                    redraw = true;
+                    pelne_czyszczenie = true;
                 }
             }
         }
 
         if (dragging && lewy) {
-            int nowy_x = mx - drag_off_x; int nowy_y = my - drag_off_y;
+            int nowy_x = mx - drag_off_x;
+            int nowy_y = my - drag_off_y;
             ogranicz_pozycje_okna(&nowy_x, &nowy_y);
-            if (nowy_x != WIN_X || nowy_y != WIN_Y) { WIN_X = nowy_x; WIN_Y = nowy_y; bws_przesun_warstwe(WIN_X, WIN_Y); gui_odswiez(); }
+            if (nowy_x != WIN_X || nowy_y != WIN_Y) {
+                WIN_X = nowy_x;
+                WIN_Y = nowy_y;
+                bws_przesun_warstwe(WIN_X, WIN_Y);
+                gui_odswiez();
+            }
         }
-        if (puszczenie_lewego && dragging) { dragging = false; gui_ustaw_capture_myszy(false); }
+        if (puszczenie_lewego && dragging) {
+            dragging = false;
+            gui_ustaw_capture_myszy(false);
+        }
         if (redraw && !wyjdz) RysujInterfejs(pelne_czyszczenie);
     }
     gui_zakoncz_aplikacje();

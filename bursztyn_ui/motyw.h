@@ -36,6 +36,10 @@ namespace Kolory {
     inline constexpr uint32_t WylaczonyTlo            = 0x00222222U;
     inline constexpr uint32_t WylaczonyTekst          = 0x00666666U;
     inline constexpr uint32_t WylaczonyRamka          = 0x00444444U;
+
+    inline constexpr uint32_t ZaznaczenieTlo          = 0x008A5000U;
+    inline constexpr uint32_t ZaznaczenieTekst        = 0x00FFFFFFU;
+    inline constexpr uint32_t NieokreslonyKolor       = 0x00E58A00U;
 }
 
 struct StylStanu {
@@ -44,6 +48,10 @@ struct StylStanu {
     uint32_t ramka{Kolory::RamkaDomyslna};
     int grubosc_ramki{1};
     int promien_zaokraglenia{0};
+    uint8_t przezroczystosc{255};
+    bool wlasne_tlo{false};
+    bool wlasny_tekst{false};
+    bool wlasna_ramka{false};
 };
 
 struct StylKontrolki {
@@ -52,7 +60,9 @@ struct StylKontrolki {
     StylStanu wcisniety;
     StylStanu fokus;
     StylStanu wylaczony;
+    StylStanu tylko_do_odczytu;
     Marginesy wypelnienie{4, 4, 4, 4};
+    Marginesy margines{0, 0, 0, 0};
 };
 
 class Motyw {
@@ -63,6 +73,7 @@ public:
     StylKontrolki styl_przycisku;
     StylKontrolki styl_pola_wyboru;
     StylKontrolki styl_pola_tekstowego;
+    StylKontrolki styl_suwaka;
 
     static Motyw& pobierz_domyslny() {
         static Motyw instancja;
@@ -161,7 +172,32 @@ private:
         styl_pola_tekstowego.wylaczony.tlo = Kolory::WylaczonyTlo;
         styl_pola_tekstowego.wylaczony.tekst = Kolory::WylaczonyTekst;
         styl_pola_tekstowego.wylaczony.ramka = Kolory::WylaczonyRamka;
+
+        styl_pola_tekstowego.tylko_do_odczytu.tlo = Kolory::PowierzchniaTlo;
+        styl_pola_tekstowego.tylko_do_odczytu.tekst = Kolory::TekstWyciszony;
+        styl_pola_tekstowego.tylko_do_odczytu.ramka = Kolory::RamkaDomyslna;
+        styl_pola_tekstowego.tylko_do_odczytu.grubosc_ramki = 1;
+
         styl_pola_tekstowego.wypelnienie = Marginesy(6, 4, 6, 4);
+
+        // Styl Suwaka
+        styl_suwaka.normalny.tlo = 0; // Przezroczysty - tor i uchwyt rysują się same
+        styl_suwaka.normalny.tekst = Kolory::TekstBialy;
+        styl_suwaka.normalny.ramka = 0;
+        styl_suwaka.normalny.grubosc_ramki = 0;
+        styl_suwaka.najechany = styl_suwaka.normalny;
+        styl_suwaka.najechany.ramka = Kolory::RamkaNajechana;
+        styl_suwaka.wcisniety = styl_suwaka.normalny;
+        styl_suwaka.wcisniety.ramka = Kolory::RamkaFokus;
+        styl_suwaka.fokus = styl_suwaka.normalny;
+        styl_suwaka.fokus.ramka = Kolory::RamkaFokus;
+        styl_suwaka.fokus.grubosc_ramki = 2;
+        styl_suwaka.wylaczony = styl_suwaka.normalny;
+        styl_suwaka.wylaczony.tlo = 0;
+        styl_suwaka.wylaczony.tekst = Kolory::WylaczonyTekst;
+        styl_suwaka.wylaczony.ramka = 0;
+        styl_suwaka.tylko_do_odczytu = styl_suwaka.wylaczony;
+        styl_suwaka.wypelnienie = Marginesy(4, 4, 4, 4);
     }
 };
 

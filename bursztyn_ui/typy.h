@@ -137,6 +137,12 @@ enum class Orientacja {
     Pionowa  // Kolumna
 };
 
+enum class StanWyboru {
+    Niezaznaczone = 0,
+    Zaznaczone = 1,
+    Nieokreslone = 2
+};
+
 template <typename T>
 constexpr T przytnij(T wartosc, T min_wart, T max_wart) {
     return (wartosc < min_wart) ? min_wart : ((wartosc > max_wart) ? max_wart : wartosc);

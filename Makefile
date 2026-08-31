@@ -343,7 +343,7 @@ xhci_ring.o: sterowniki/usb/xhci_ring.cpp sterowniki/usb/xhci_ring.h sterowniki/
 # ============================================================================
 
 bursztyn_gui.o: bursztyn_gui.cpp bursztyn_gui.h
-	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
+	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 # ============================================================================
 # 12. SHELL .bur
@@ -411,21 +411,21 @@ kalkulator_blob.o: kalkulator_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
 	$(LD) -r -b binary kalkulator.bin -o kalkulator_blob.o
 
 # Test
-test_tmp.o: test.cpp bursztyn_gui.h
-	$(CXX) $(RING3_FLAGS) -c $< -o $@
+test_tmp.o: test.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
 
-test_blob.o: test_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
-	$(LD) -T $(RING3_STD_LINKER) $(RING3_LDFLAGS) \
+test_blob.o: test_tmp.o bursztyn_gui.o programy/test/test_linker.ld
+	$(LD) -T programy/test/test_linker.ld $(RING3_LDFLAGS) \
 		test_tmp.o bursztyn_gui.o -o test.elf
 	$(OBJCOPY) -O binary test.elf test.bin
 	$(LD) -r -b binary test.bin -o test_blob.o
 
 # BursztynUI Demo
 demo_ui_tmp.o: programy/demo_ui/demo_ui.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
-	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
+	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 demo_ui_blob.o: demo_ui_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
-	$(LD) -T $(EKSPLORATOR_LINKER) $(RING3_LDFLAGS) \
+	$(LD) --gc-sections -T $(EKSPLORATOR_LINKER) $(RING3_LDFLAGS) \
 		demo_ui_tmp.o bursztyn_gui.o -o demo_ui.elf
 	$(OBJCOPY) -O binary demo_ui.elf demo_ui.bin
 	$(LD) -r -b binary demo_ui.bin -o demo_ui_blob.o
