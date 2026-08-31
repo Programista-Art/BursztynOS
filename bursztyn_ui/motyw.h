@@ -5,6 +5,15 @@
 
 namespace BursztynUI {
 
+enum class StanWizualny {
+    Normalny,
+    Najechany,
+    Wcisniety,
+    Fokus,
+    Wylaczony,
+    TylkoDoOdczytu
+};
+
 namespace Kolory {
     // Paleta Bursztynowa (Amber Gold Theme)
     inline constexpr uint32_t BursztynowyCiemnyTlo    = 0x001A0B00U;
@@ -107,7 +116,7 @@ private:
         styl_etykiety.wypelnienie = Marginesy(2, 2, 2, 2);
 
         // Styl Przycisku
-        styl_przycisku.normalny.tlo = Kolory::AkcentWcisniety; // 0x00E58A00
+        styl_przycisku.normalny.tlo = Kolory::AkcentZloty;
         styl_przycisku.normalny.tekst = Kolory::TekstCiemny;   // 0x001A0B00
         styl_przycisku.normalny.ramka = Kolory::RamkaDomyslna;
         styl_przycisku.normalny.grubosc_ramki = 1;
@@ -119,13 +128,13 @@ private:
         styl_przycisku.najechany.grubosc_ramki = 1;
         styl_przycisku.najechany.promien_zaokraglenia = 2;
 
-        styl_przycisku.wcisniety.tlo = Kolory::AkcentZloty;
+        styl_przycisku.wcisniety.tlo = Kolory::AkcentWcisniety;
         styl_przycisku.wcisniety.tekst = Kolory::TekstCiemny;
         styl_przycisku.wcisniety.ramka = Kolory::RamkaFokus;
         styl_przycisku.wcisniety.grubosc_ramki = 1;
         styl_przycisku.wcisniety.promien_zaokraglenia = 2;
 
-        styl_przycisku.fokus.tlo = Kolory::AkcentWcisniety;
+        styl_przycisku.fokus.tlo = Kolory::AkcentZloty;
         styl_przycisku.fokus.tekst = Kolory::TekstCiemny;
         styl_przycisku.fokus.ramka = Kolory::RamkaFokus;
         styl_przycisku.fokus.grubosc_ramki = 2;

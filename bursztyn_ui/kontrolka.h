@@ -288,6 +288,15 @@ public:
     }
 
     bool czy_najechana() const { return czy_najechana_; }
+    virtual bool czy_reaguje_wizualnie_na_najechanie() const {
+        return czy_reaguje_wizualnie_na_najechanie_;
+    }
+    void ustaw_reagowanie_wizualne_na_najechanie(bool reaguje) {
+        if (czy_reaguje_wizualnie_na_najechanie_ == reaguje) return;
+        bool trzeba_odrysowac = czy_najechana_ && czy_wlaczona_;
+        czy_reaguje_wizualnie_na_najechanie_ = reaguje;
+        if (trzeba_odrysowac) uniewaznij();
+    }
     bool czy_wcisnieta() const { return czy_wcisnieta_; }
     bool czy_ma_fokus() const { return czy_ma_fokus_; }
     bool czy_ma_skupienie() const { return czy_ma_fokus_; }
@@ -318,28 +327,52 @@ public:
     const StylKontrolki& styl() const { return styl_; }
     void ustaw_styl(const StylKontrolki& s) {
         styl_ = s;
-        uzyj_wlasnego_stylu_ = true;
         uniewaznij();
     }
 
-    uint32_t kolor_tla() const { return wlasny_kolor_tla_; }
+    StylStanu& styl_stanu(StanWizualny stan) {
+        return wybierz_styl_stanu(stan);
+    }
+    const StylStanu& styl_stanu(StanWizualny stan) const {
+        return wybierz_styl_stanu(stan);
+    }
+    void ustaw_styl_stanu(StanWizualny stan, const StylStanu& s) {
+        wybierz_styl_stanu(stan) = s;
+        uniewaznij();
+    }
+
+    // Proste settery ustawiają wyłącznie bazowy (normalny) stan kontrolki.
+    // Pozostałe stany mają jawne API i nie są wyprowadzane z nazwy koloru.
+    uint32_t kolor_tla() const { return styl_.normalny.tlo; }
     void ustaw_kolor_tla(uint32_t c) {
-        wlasny_kolor_tla_ = c;
-        czy_wlasny_kolor_tla_ = true;
+        styl_.normalny.tlo = c;
         uniewaznij();
     }
 
-    uint32_t kolor_tekstu() const { return wlasny_kolor_tekstu_; }
+    uint32_t kolor_tekstu() const { return styl_.normalny.tekst; }
     void ustaw_kolor_tekstu(uint32_t c) {
-        wlasny_kolor_tekstu_ = c;
-        czy_wlasny_kolor_tekstu_ = true;
+        styl_.normalny.tekst = c;
         uniewaznij();
     }
 
-    uint32_t kolor_ramki() const { return wlasny_kolor_ramki_; }
+    uint32_t kolor_ramki() const { return styl_.normalny.ramka; }
     void ustaw_kolor_ramki(uint32_t c) {
-        wlasny_kolor_ramki_ = c;
-        czy_wlasny_kolor_ramki_ = true;
+        styl_.normalny.ramka = c;
+        uniewaznij();
+    }
+
+    void ustaw_kolor_tla_stanu(StanWizualny stan, uint32_t c) {
+        wybierz_styl_stanu(stan).tlo = c;
+        uniewaznij();
+    }
+
+    void ustaw_kolor_tekstu_stanu(StanWizualny stan, uint32_t c) {
+        wybierz_styl_stanu(stan).tekst = c;
+        uniewaznij();
+    }
+
+    void ustaw_kolor_ramki_stanu(StanWizualny stan, uint32_t c) {
+        wybierz_styl_stanu(stan).ramka = c;
         uniewaznij();
     }
 
@@ -369,15 +402,12 @@ public:
             s = styl_.tylko_do_odczytu;
         } else if (czy_wcisnieta_) {
             s = styl_.wcisniety;
-        } else if (czy_najechana_) {
-            s = styl_.najechany;
         } else if (czy_ma_fokus_) {
             s = styl_.fokus;
+        } else if (czy_najechana_ && czy_reaguje_wizualnie_na_najechanie()) {
+            s = styl_.najechany;
         }
 
-        if (czy_wlasny_kolor_tla_) s.tlo = wlasny_kolor_tla_;
-        if (czy_wlasny_kolor_tekstu_) s.tekst = wlasny_kolor_tekstu_;
-        if (czy_wlasny_kolor_ramki_) s.ramka = wlasny_kolor_ramki_;
         if (wlasna_grubosc_ramki_ >= 0) s.grubosc_ramki = wlasna_grubosc_ramki_;
         if (wlasny_promien_zaokraglenia_ >= 0) s.promien_zaokraglenia = wlasny_promien_zaokraglenia_;
         s.przezroczystosc = przezroczystosc_;
@@ -649,15 +679,20 @@ public:
     // =========================================================================
 
     virtual void obsluz_wejscie_myszy() {
+        bool zmiana_wizualna = !czy_najechana_ && czy_wlaczona_ &&
+                               czy_reaguje_wizualnie_na_najechanie();
         czy_najechana_ = true;
-        uniewaznij();
+        if (zmiana_wizualna) uniewaznij();
         if (cb_wejscie_myszy_) cb_wejscie_myszy_(this, dane_wejscia_myszy_);
     }
 
     virtual void obsluz_opuszczenie_myszy() {
+        bool zmiana_wizualna = czy_wlaczona_ &&
+                               (czy_wcisnieta_ ||
+                                (czy_najechana_ && czy_reaguje_wizualnie_na_najechanie()));
         czy_najechana_ = false;
         czy_wcisnieta_ = false;
-        uniewaznij();
+        if (zmiana_wizualna) uniewaznij();
         if (cb_opuszczenie_myszy_) cb_opuszczenie_myszy_(this, dane_opuszczenia_myszy_);
     }
 
@@ -734,6 +769,30 @@ public:
     virtual void przy_utracie_fokusu() { obsluz_utrate_skupienia(); }
 
 protected:
+    StylStanu& wybierz_styl_stanu(StanWizualny stan) {
+        switch (stan) {
+            case StanWizualny::Najechany: return styl_.najechany;
+            case StanWizualny::Wcisniety: return styl_.wcisniety;
+            case StanWizualny::Fokus: return styl_.fokus;
+            case StanWizualny::Wylaczony: return styl_.wylaczony;
+            case StanWizualny::TylkoDoOdczytu: return styl_.tylko_do_odczytu;
+            case StanWizualny::Normalny:
+            default: return styl_.normalny;
+        }
+    }
+
+    const StylStanu& wybierz_styl_stanu(StanWizualny stan) const {
+        switch (stan) {
+            case StanWizualny::Najechany: return styl_.najechany;
+            case StanWizualny::Wcisniety: return styl_.wcisniety;
+            case StanWizualny::Fokus: return styl_.fokus;
+            case StanWizualny::Wylaczony: return styl_.wylaczony;
+            case StanWizualny::TylkoDoOdczytu: return styl_.tylko_do_odczytu;
+            case StanWizualny::Normalny:
+            default: return styl_.normalny;
+        }
+    }
+
     Kontrolka* rodzic_{nullptr};
     Kontrolka* dzieci_[MAKS_DZIECI]{nullptr};
     size_t liczba_dzieci_{0};
@@ -762,6 +821,7 @@ protected:
     bool czy_wlaczona_{true};
     bool czy_tylko_do_odczytu_{false};
     bool czy_najechana_{false};
+    bool czy_reaguje_wizualnie_na_najechanie_{false};
     bool czy_wcisnieta_{false};
     bool czy_ma_fokus_{false};
     bool czy_moze_miec_fokus_{false};
@@ -773,13 +833,6 @@ protected:
     Prostokat brudny_obszar_{0, 0, 0, 0};
 
     StylKontrolki styl_;
-    bool uzyj_wlasnego_stylu_{false};
-    uint32_t wlasny_kolor_tla_{0};
-    bool czy_wlasny_kolor_tla_{false};
-    uint32_t wlasny_kolor_tekstu_{0};
-    bool czy_wlasny_kolor_tekstu_{false};
-    uint32_t wlasny_kolor_ramki_{0};
-    bool czy_wlasny_kolor_ramki_{false};
     int wlasna_grubosc_ramki_{-1};
     int wlasny_promien_zaokraglenia_{-1};
     uint8_t przezroczystosc_{255};

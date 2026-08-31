@@ -13,6 +13,7 @@ public:
         styl_ = Motyw::pobierz_domyslny().styl_suwaka;
         wypelnienie_ = styl_.wypelnienie;
         czy_moze_miec_fokus_ = true;
+        czy_reaguje_wizualnie_na_najechanie_ = true;
         wyrownanie_poziome_ = WyrownaniePoziome::Rozciagnij;
         wyrownanie_pionowe_ = WyrownaniePionowe::Poczatek;
     }
@@ -210,20 +211,11 @@ public:
     }
 
     void obsluz_wejscie_myszy() override {
-        if (!czy_wlaczona_) return;
-        if (!czy_najechana_) {
-            czy_najechana_ = true;
-            uniewaznij();
-        }
-        if (cb_wejscie_myszy_) cb_wejscie_myszy_(this, dane_wejscia_myszy_);
+        Kontrolka::obsluz_wejscie_myszy();
     }
 
     void obsluz_opuszczenie_myszy() override {
-        if (czy_najechana_) {
-            czy_najechana_ = false;
-            uniewaznij();
-        }
-        if (cb_opuszczenie_myszy_) cb_opuszczenie_myszy_(this, dane_opuszczenia_myszy_);
+        Kontrolka::obsluz_opuszczenie_myszy();
     }
 
     void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e) override {

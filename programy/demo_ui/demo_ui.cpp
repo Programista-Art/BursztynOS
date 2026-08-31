@@ -69,6 +69,13 @@ struct StanAplikacji {
 
 static StanAplikacji g_stan;
 
+static void ustaw_kolory_stanu(Kontrolka& kontrolka, StanWizualny stan,
+                               uint32_t tlo, uint32_t tekst, uint32_t ramka) {
+    kontrolka.ustaw_kolor_tla_stanu(stan, tlo);
+    kontrolka.ustaw_kolor_tekstu_stanu(stan, tekst);
+    kontrolka.ustaw_kolor_ramki_stanu(stan, ramka);
+}
+
 static void dopisz_liczbe(char* bufor, size_t& pos, size_t pojemnosc, int n) {
     int cyfry[10];
     int ile = 0;
@@ -298,8 +305,16 @@ extern "C" void _start() {
     // 5a. Przycisk Główny (Zatwierdź)
     auto& btn_zatwierdz = wiersz_przyciskow.dodaj<Przycisk>("Zatwierdz tekst");
     btn_zatwierdz.ustaw_preferowany_rozmiar(Rozmiar(230, 32));
-    btn_zatwierdz.ustaw_kolor_tla(Kolory::AkcentWcisniety);
-    btn_zatwierdz.ustaw_kolor_tekstu(Kolory::TekstCiemny);
+    ustaw_kolory_stanu(btn_zatwierdz, StanWizualny::Normalny,
+                       Kolory::AkcentZloty, Kolory::TekstCiemny, Kolory::RamkaDomyslna);
+    ustaw_kolory_stanu(btn_zatwierdz, StanWizualny::Najechany,
+                       Kolory::AkcentNajechany, Kolory::TekstCiemny, Kolory::RamkaNajechana);
+    ustaw_kolory_stanu(btn_zatwierdz, StanWizualny::Wcisniety,
+                       Kolory::AkcentWcisniety, Kolory::TekstCiemny, Kolory::RamkaFokus);
+    ustaw_kolory_stanu(btn_zatwierdz, StanWizualny::Fokus,
+                       Kolory::AkcentZloty, Kolory::TekstCiemny, Kolory::RamkaFokus);
+    ustaw_kolory_stanu(btn_zatwierdz, StanWizualny::Wylaczony,
+                       Kolory::WylaczonyTlo, Kolory::WylaczonyTekst, Kolory::WylaczonyRamka);
     btn_zatwierdz.ustaw_promien_zaokraglenia(3);
     btn_zatwierdz.przy_kliknieciu([](Przycisk*, void* dane) {
         aktualizuj_status_zatwierdzenia(static_cast<StanAplikacji*>(dane));
@@ -309,9 +324,16 @@ extern "C" void _start() {
     // 5b. Przycisk Batch Update (Demonstracja rozpoczęcia/zakończenia aktualizacji)
     auto& btn_batch = wiersz_przyciskow.dodaj<Przycisk>("Aktualizacja grupowa (Batch)");
     btn_batch.ustaw_preferowany_rozmiar(Rozmiar(260, 32));
-    btn_batch.ustaw_kolor_tla(Kolory::PowierzchniaNajechana);
-    btn_batch.ustaw_kolor_tekstu(Kolory::TekstBialy);
-    btn_batch.ustaw_kolor_ramki(Kolory::RamkaDomyslna);
+    ustaw_kolory_stanu(btn_batch, StanWizualny::Normalny,
+                       Kolory::PowierzchniaAlternatywna, Kolory::TekstBialy, Kolory::RamkaDomyslna);
+    ustaw_kolory_stanu(btn_batch, StanWizualny::Najechany,
+                       Kolory::PowierzchniaNajechana, Kolory::TekstBialy, Kolory::RamkaNajechana);
+    ustaw_kolory_stanu(btn_batch, StanWizualny::Wcisniety,
+                       Kolory::PowierzchniaAktywna, Kolory::TekstBialy, Kolory::RamkaFokus);
+    ustaw_kolory_stanu(btn_batch, StanWizualny::Fokus,
+                       Kolory::PowierzchniaAlternatywna, Kolory::TekstBialy, Kolory::RamkaFokus);
+    ustaw_kolory_stanu(btn_batch, StanWizualny::Wylaczony,
+                       Kolory::WylaczonyTlo, Kolory::WylaczonyTekst, Kolory::WylaczonyRamka);
     btn_batch.ustaw_promien_zaokraglenia(3);
     btn_batch.przy_kliknieciu([](Przycisk*, void* dane) {
         StanAplikacji* stan = static_cast<StanAplikacji*>(dane);

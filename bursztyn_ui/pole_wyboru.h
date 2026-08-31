@@ -17,6 +17,7 @@ public:
         wyrownanie_poziome_ = WyrownaniePoziome::Poczatek;
         wyrownanie_pionowe_ = WyrownaniePionowe::Poczatek;
         czy_moze_miec_fokus_ = true;
+        czy_reaguje_wizualnie_na_najechanie_ = true;
         ustaw_tekst(etykieta);
     }
 
@@ -132,17 +133,11 @@ public:
     }
 
     void obsluz_wejscie_myszy() override {
-        if (!czy_wlaczona_) return;
-        czy_najechana_ = true;
-        uniewaznij();
-        if (cb_wejscie_myszy_) cb_wejscie_myszy_(this, dane_wejscia_myszy_);
+        Kontrolka::obsluz_wejscie_myszy();
     }
 
     void obsluz_opuszczenie_myszy() override {
-        if (!czy_wlaczona_) return;
-        czy_najechana_ = false;
-        uniewaznij();
-        if (cb_opuszczenie_myszy_) cb_opuszczenie_myszy_(this, dane_opuszczenia_myszy_);
+        Kontrolka::obsluz_opuszczenie_myszy();
     }
 
     void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e) override {
