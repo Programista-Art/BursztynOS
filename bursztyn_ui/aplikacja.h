@@ -57,7 +57,27 @@ public:
 
         bws_zdarzenie ev{};
         while (czy_dziala_) {
-            if (gui_czekaj_na_zdarzenie(&ev)) {
+            bool ma_animacje = glowne_okno_ && glowne_okno_->czy_wymaga_animacji();
+            bool odebrano = false;
+
+            if (ma_animacje) {
+                odebrano = gui_pobierz_zdarzenie(&ev);
+                if (!odebrano) {
+                    uint64_t teraz = gui_czas_monotoniczny_ns();
+                    glowne_okno_->krok_animacji(teraz);
+                    if (!glowne_okno_->czy_zminimalizowane()) {
+                        glowne_okno_->rysuj(ctx);
+                        gui_odswiez();
+                    }
+                    for (int p = 0; p < 2000; ++p) {
+                        asm volatile("pause" ::: "memory");
+                    }
+                }
+            } else {
+                odebrano = gui_czekaj_na_zdarzenie(&ev);
+            }
+
+            if (odebrano) {
                 glowne_okno_->obsluz_zdarzenie(ev);
 
                 // Sprawdź czy są dodatkowe zdarzenia w kolejce

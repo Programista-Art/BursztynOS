@@ -153,6 +153,7 @@ public:
     int pierwszy_widoczny_indeks() const {
         return static_cast<int>(pionowy_->wartosc());
     }
+    void przewin_do_elementu(int indeks) { przewin_do_indeksu(indeks); }
     Prostokat prostokat_widoku() const { return geometria().widok; }
     Prostokat prostokat_paska_pionowego() const { return geometria().pasek_pionowy; }
     Prostokat prostokat_paska_poziomego() const { return geometria().pasek_poziomy; }

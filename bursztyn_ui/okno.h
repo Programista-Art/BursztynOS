@@ -4,6 +4,7 @@
 #include "panel.h"
 #include "zdarzenia.h"
 #include "rysowanie.h"
+#include "popup.h"
 #include "../bursztyn_gui.h"
 
 namespace BursztynUI {
@@ -19,9 +20,13 @@ public:
         zapisana_geometria_ = Prostokat(x_, y_, szerokosc_, wysokosc_);
         domyslny_korzen_ = new Panel(Orientacja::Pionowa);
         kontrolka_glowna_ = domyslny_korzen_;
+        kontrolka_glowna_->ustaw_zarzadce_popupow(&popupy_);
+        popupy_.ustaw_geometrie_wlasciciela(Prostokat(x_, y_, szerokosc_, wysokosc_),
+                                            pobierz_obszar_roboczy());
     }
 
     virtual ~Okno() {
+        popupy_.zamknij(PowodZamknieciaPopup::WlascicielZamkniety);
         if (domyslny_korzen_) {
             delete domyslny_korzen_;
             domyslny_korzen_ = nullptr;
@@ -48,6 +53,16 @@ public:
     bool czy_zmaksymalizowane() const { return czy_zmaksymalizowane_; }
     bool czy_zminimalizowane() const { return czy_zminimalizowane_; }
     bool czy_przeciagane() const { return czy_przeciagane_; }
+
+    bool czy_wymaga_animacji() const {
+        return !czy_zminimalizowane_ && kontrolka_glowna_ && kontrolka_glowna_->czy_wymaga_animacji();
+    }
+
+    void krok_animacji(uint64_t teraz_ns = 0) {
+        if (czy_wymaga_animacji()) {
+            kontrolka_glowna_->krok_animacji(teraz_ns);
+        }
+    }
 
     void ustaw_pozycje(int x, int y) {
         x_ = x;
@@ -102,6 +117,7 @@ public:
             kontrolka_glowna_ = korzen;
             if (kontrolka_glowna_) {
                 kontrolka_glowna_->ustaw_skale_dpi(skala_dpi_);
+                kontrolka_glowna_->ustaw_zarzadce_popupow(&popupy_);
             }
             przelicz_uklad();
             czy_brudne_ = true;
@@ -116,6 +132,8 @@ public:
     }
 
     Kontrolka* fokus() const { return kontrolka_z_fokusem_; }
+    ZarzadcaPopupow& zarzadca_popupow() { return popupy_; }
+    const ZarzadcaPopupow& zarzadca_popupow() const { return popupy_; }
     void ustaw_fokus(Kontrolka* k) {
         if (kontrolka_z_fokusem_ != k) {
             if (kontrolka_z_fokusem_) {
@@ -142,6 +160,7 @@ public:
     int skala_dpi() const { return skala_dpi_; }
     void ustaw_skale_dpi(int skala) {
         skala_dpi_ = (skala < 1) ? 1 : skala;
+        popupy_.ustaw_skale_dpi(skala_dpi_);
         if (kontrolka_glowna_) {
             kontrolka_glowna_->ustaw_skale_dpi(skala_dpi_);
         }
@@ -150,6 +169,8 @@ public:
     }
 
     void przelicz_uklad() {
+        popupy_.ustaw_geometrie_wlasciciela(Prostokat(x_, y_, szerokosc_, wysokosc_),
+                                            pobierz_obszar_roboczy());
         if (!kontrolka_glowna_) return;
         int belka_h = WYSOKOSC_BELKI_TYTULOWEJ * skala_dpi_;
         int klient_h = wysokosc_ - belka_h;
@@ -195,6 +216,7 @@ public:
                     kontrolka_glowna_->rysuj(ctx, true);
                     kontrolka_glowna_->wyczysc_brudny_obszar();
                 }
+                popupy_.rysuj(ctx, true);
 
                 ctx.zdejmij_przyciecie();
                 ctx.zdejmij_przesuniecie();
@@ -202,9 +224,13 @@ public:
 
             brudny_obszar_klienta_ = Prostokat(0, 0, 0, 0);
             czy_brudne_ = false;
-        } else if (kontrolka_glowna_ && (kontrolka_glowna_->czy_brudna() || !brudny_obszar_klienta_.czy_pusty())) {
+        } else if ((kontrolka_glowna_ && kontrolka_glowna_->czy_brudna()) ||
+                   !brudny_obszar_klienta_.czy_pusty() || popupy_.czy_brudny()) {
             // Częściowe odrysowanie wyłącznie w obrębie brudnego prostokąta
-            Prostokat brudny = brudny_obszar_klienta_.suma(kontrolka_glowna_->pobierz_brudny_obszar());
+            Prostokat brudny = brudny_obszar_klienta_;
+            if (kontrolka_glowna_)
+                brudny = brudny.suma(kontrolka_glowna_->pobierz_brudny_obszar());
+            brudny = brudny.suma(popupy_.brudny_obszar());
             if (brudny.czy_pusty()) {
                 brudny = obszar_klienta;
             }
@@ -220,8 +246,11 @@ public:
                 ctx.rysuj_prostokat(brudny, Kolory::BursztynowyCiemnyTlo);
 
                 // Narysuj kontrolki przecinające brudny prostokąt
-                kontrolka_glowna_->rysuj(ctx, false);
-                kontrolka_glowna_->wyczysc_brudny_obszar();
+                if (kontrolka_glowna_) {
+                    kontrolka_glowna_->rysuj(ctx, false);
+                    kontrolka_glowna_->wyczysc_brudny_obszar();
+                }
+                popupy_.rysuj(ctx, false);
 
                 ctx.zdejmij_przyciecie();
                 ctx.zdejmij_przesuniecie();
@@ -232,12 +261,14 @@ public:
     }
 
     void minimalizuj() {
+        popupy_.zamknij(PowodZamknieciaPopup::WlascicielZminimalizowany);
         czy_przeciagane_ = false;
         gui_ustaw_capture_myszy(false);
         czy_zminimalizowane_ = gui_minimalizuj_okno();
     }
 
     void przelacz_maksymalizacje() {
+        popupy_.zamknij(PowodZamknieciaPopup::ZmianaGeometrii);
         czy_przeciagane_ = false;
         gui_ustaw_capture_myszy(false);
 
@@ -266,6 +297,7 @@ public:
     }
 
     void zamknij() {
+        popupy_.zamknij(PowodZamknieciaPopup::WlascicielZamkniety);
         czy_przeciagane_ = false;
         gui_ustaw_capture_myszy(false);
         if (kontrolka_z_fokusem_) {
@@ -286,6 +318,14 @@ public:
 
         switch (surowe_zdarzenie.typ) {
             case BWS_ZDARZENIE_MYSZ_RUCH: {
+                if (popupy_.czy_otwarty()) {
+                    ZdarzenieMyszki pe;
+                    pe.typ = TypZdarzenia::RuchMyszy;
+                    pe.x = lokalny_x; pe.y = lokalny_y;
+                    pe.modyfikatory = surowe_zdarzenie.przyciski;
+                    pe.timestamp = surowe_zdarzenie.timestamp;
+                    if (popupy_.obsluz_ruch(pe)) return;
+                }
                 if (czy_przeciagane_) {
                     int nx = mx - przesuniecie_ciagniecia_x_;
                     int ny = my - przesuniecie_ciagniecia_y_;
@@ -339,6 +379,17 @@ public:
 
             case BWS_ZDARZENIE_MYSZ_DOWN:
             case BWS_ZDARZENIE_MYSZ_PRAWY_DOWN: {
+                if (popupy_.czy_otwarty()) {
+                    ZdarzenieMyszki pe;
+                    pe.typ = TypZdarzenia::WcisniecieMyszy;
+                    pe.x = lokalny_x; pe.y = lokalny_y;
+                    pe.przycisk = static_cast<int>(
+                        surowe_zdarzenie.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN
+                        ? PrzyciskMyszy::Prawy : PrzyciskMyszy::Lewy);
+                    pe.modyfikatory = surowe_zdarzenie.przyciski;
+                    pe.timestamp = surowe_zdarzenie.timestamp;
+                    if (popupy_.obsluz_wcisniecie(pe)) return;
+                }
                 if (my >= y_ && my < y_ + belka_h && mx >= x_ && mx < x_ + szerokosc_) {
                     gui_akcja_belki akcja = gui_hit_test_belki(mx, my, x_, y_, szerokosc_);
                     if (akcja == GUI_BELKA_ZAMKNIJ) {
@@ -399,6 +450,17 @@ public:
 
             case BWS_ZDARZENIE_MYSZ_UP:
             case BWS_ZDARZENIE_MYSZ_PRAWY_UP: {
+                if (popupy_.czy_otwarty()) {
+                    ZdarzenieMyszki pe;
+                    pe.typ = TypZdarzenia::ZwolnienieMyszy;
+                    pe.x = lokalny_x; pe.y = lokalny_y;
+                    pe.przycisk = static_cast<int>(
+                        surowe_zdarzenie.typ == BWS_ZDARZENIE_MYSZ_PRAWY_UP
+                        ? PrzyciskMyszy::Prawy : PrzyciskMyszy::Lewy);
+                    pe.modyfikatory = surowe_zdarzenie.przyciski;
+                    pe.timestamp = surowe_zdarzenie.timestamp;
+                    if (popupy_.obsluz_zwolnienie(pe)) return;
+                }
                 // Zwolnienie przycisku zawsze kończy systemowe i lokalne capture.
                 gui_ustaw_capture_myszy(false);
                 if (czy_przeciagane_) {
@@ -441,6 +503,7 @@ public:
                 re.delta_x = surowe_zdarzenie.dx;
                 re.delta_y = surowe_zdarzenie.dy;
                 re.modyfikatory = surowe_zdarzenie.kod;
+                if (popupy_.obsluz_rolke(re)) break;
                 bool fokus_byl_na_sciezce = false;
                 for (Kontrolka* k = cel; k && !re.obsluzone; k = k->rodzic()) {
                     if (k == kontrolka_z_fokusem_) fokus_byl_na_sciezce = true;
@@ -454,6 +517,11 @@ public:
             }
 
             case BWS_ZDARZENIE_TEXT_INPUT: {
+                if (popupy_.czy_otwarty()) {
+                    ZdarzenieWprowadzaniaTekstu pe;
+                    pe.punkt_kodowy = surowe_zdarzenie.kod;
+                    if (popupy_.obsluz_tekst(pe)) break;
+                }
                 if (kontrolka_z_fokusem_) {
                     ZdarzenieWprowadzaniaTekstu te;
                     te.punkt_kodowy = surowe_zdarzenie.kod;
@@ -466,6 +534,15 @@ public:
             case BWS_ZDARZENIE_KLAWISZ_FIZYCZNY: {
                 bool fizyczny = surowe_zdarzenie.typ == BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;
                 bool wcisniety = !fizyczny || surowe_zdarzenie.x != 0;
+                uint32_t kod_bazowy = surowe_zdarzenie.kod & 0xFFU;
+                bool klawisz_alt = ((surowe_zdarzenie.kod & BWS_KEY_SOURCE_USB) &&
+                                    (kod_bazowy == 226U || kod_bazowy == 230U)) ||
+                                   (!(surowe_zdarzenie.kod & BWS_KEY_SOURCE_USB) &&
+                                    ((surowe_zdarzenie.kod & 0x7FU) == 0x38U));
+                if (wcisniety && klawisz_alt && kontrolka_glowna_) {
+                    Kontrolka* cel_alt = kontrolka_glowna_->kontrolka_aktywacji_alt();
+                    if (cel_alt) { ustaw_fokus(cel_alt); break; }
+                }
                 // Tab (9 lub scancode 0x0F) - nawigacja fokus
                 if (wcisniety && (surowe_zdarzenie.kod == 9 || surowe_zdarzenie.kod == 0x0F)) {
                     bool shift = (surowe_zdarzenie.przyciski & BWS_MOD_SHIFT) != 0;
@@ -473,12 +550,13 @@ public:
                     break;
                 }
 
+                ZdarzenieKlawiatury ke;
+                ke.typ = TypZdarzenia::KlawiszWcisniety;
+                ke.kod_klawisza = surowe_zdarzenie.kod;
+                ke.kod_skanu = surowe_zdarzenie.kod;
+                ke.modyfikatory = surowe_zdarzenie.przyciski;
+                if (wcisniety && popupy_.czy_otwarty() && popupy_.obsluz_klawisz(ke)) break;
                 if (kontrolka_z_fokusem_) {
-                    ZdarzenieKlawiatury ke;
-                    ke.typ = TypZdarzenia::KlawiszWcisniety;
-                    ke.kod_klawisza = surowe_zdarzenie.kod;
-                    ke.kod_skanu = surowe_zdarzenie.kod;
-                    ke.modyfikatory = surowe_zdarzenie.przyciski;
                     if (wcisniety) {
                         kontrolka_z_fokusem_->obsluz_wcisniecie_klawisza(ke);
                     } else {
@@ -500,6 +578,7 @@ public:
             }
 
             case BWS_ZDARZENIE_BLUR: {
+                popupy_.zamknij(PowodZamknieciaPopup::KlikPoza);
                 czy_aktywne_ = false;
                 zwolnij_przechwycenie_myszy();
                 ustaw_fokus(nullptr);
@@ -595,6 +674,7 @@ private:
     Kontrolka* kontrolka_z_fokusem_{nullptr};
     Kontrolka* kontrolka_najechana_{nullptr};
     Kontrolka* kontrolka_przechwytujaca_{nullptr};
+    ZarzadcaPopupow popupy_;
 };
 
 } // namespace BursztynUI

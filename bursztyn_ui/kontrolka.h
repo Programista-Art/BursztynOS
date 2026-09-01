@@ -9,6 +9,8 @@
 
 namespace BursztynUI {
 
+class ZarzadcaPopupow;
+
 class Kontrolka {
 public:
     static constexpr size_t MAKS_DZIECI = 64;
@@ -82,6 +84,12 @@ public:
     // =========================================================================
 
     Kontrolka* rodzic() const { return rodzic_; }
+    ZarzadcaPopupow* zarzadca_popupow() const { return zarzadca_popupow_; }
+    virtual void ustaw_zarzadce_popupow(ZarzadcaPopupow* zarzadca) {
+        zarzadca_popupow_ = zarzadca;
+        for (size_t i = 0; i < liczba_dzieci_; ++i)
+            if (dzieci_[i]) dzieci_[i]->ustaw_zarzadce_popupow(zarzadca);
+    }
     size_t liczba_dzieci() const { return liczba_dzieci_; }
     Kontrolka* dziecko(size_t indeks) const {
         return (indeks < liczba_dzieci_) ? dzieci_[indeks] : nullptr;
@@ -102,6 +110,7 @@ public:
         }
         kontrolka->rodzic_ = this;
         kontrolka->ustaw_skale_dpi(skala_dpi_);
+        kontrolka->ustaw_zarzadce_popupow(zarzadca_popupow_);
         dzieci_[liczba_dzieci_++] = kontrolka;
         uniewaznij();
         return true;
@@ -551,6 +560,21 @@ public:
         dane_wlasnego_rysowania_ = dane;
     }
 
+    virtual bool czy_wymaga_animacji() const {
+        if (!czy_widoczna_) return false;
+        for (size_t i = 0; i < liczba_dzieci_; ++i) {
+            if (dzieci_[i] && dzieci_[i]->czy_wymaga_animacji()) return true;
+        }
+        return false;
+    }
+
+    virtual void krok_animacji(uint64_t teraz_ns = 0) {
+        if (!czy_widoczna_) return;
+        for (size_t i = 0; i < liczba_dzieci_; ++i) {
+            if (dzieci_[i]) dzieci_[i]->krok_animacji(teraz_ns);
+        }
+    }
+
     virtual Rozmiar oblicz_naturalny_rozmiar() const {
         return Rozmiar(0, 0);
     }
@@ -672,6 +696,15 @@ public:
             }
         }
         return this;
+    }
+
+    virtual Kontrolka* kontrolka_aktywacji_alt() {
+        for (size_t i = 0; i < liczba_dzieci_; ++i) {
+            if (!dzieci_[i] || !dzieci_[i]->czy_widoczna()) continue;
+            Kontrolka* wynik = dzieci_[i]->kontrolka_aktywacji_alt();
+            if (wynik) return wynik;
+        }
+        return nullptr;
     }
 
     // =========================================================================
@@ -810,6 +843,7 @@ protected:
     }
 
     Kontrolka* rodzic_{nullptr};
+    ZarzadcaPopupow* zarzadca_popupow_{nullptr};
     Kontrolka* dzieci_[MAKS_DZIECI]{nullptr};
     size_t liczba_dzieci_{0};
 

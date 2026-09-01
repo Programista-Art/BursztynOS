@@ -12,6 +12,7 @@ public:
     static constexpr size_t MAKS_LINII_WIZUALNYCH = 2048;
     static constexpr size_t MAKS_HISTORIA = 8;
     using FunkcjaTekstu = void (*)(PoleWielowierszowe*, const char*, void*);
+    using FunkcjaMenuKontekstowego = void (*)(PoleWielowierszowe*, ZdarzenieMyszki&, void*);
 
     explicit PoleWielowierszowe(const char* placeholder = "") {
         styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
@@ -133,6 +134,9 @@ public:
     void przy_zatwierdzeniu(FunkcjaTekstu cb, void* dane = nullptr) {
         cb_zatwierdzenie_ = cb; dane_zatwierdzenia_ = dane;
     }
+    void przy_menu_kontekstowym(FunkcjaMenuKontekstowego cb, void* dane = nullptr) {
+        cb_menu_kontekstowe_ = cb; dane_menu_kontekstowego_ = dane;
+    }
 
     bool czy_ma_zaznaczenie() const { return kursor_ != kotwica_; }
     size_t pozycja_kursora() const { return kursor_; }
@@ -147,6 +151,12 @@ public:
         uniewaznij_obszar(geometria().widok);
     }
     void zaznacz_wszystko() { ustaw_zaznaczenie(0, dlugosc_); }
+    void kopiuj_do_schowka() { kopiuj(); }
+    void wytnij_do_schowka() {
+        if (!czy_tylko_do_odczytu_) { kopiuj(); usun_zaznaczenie(); }
+    }
+    void wklej_ze_schowka() { if (!czy_tylko_do_odczytu_) wklej(); }
+    void usun_zaznaczony_tekst() { if (!czy_tylko_do_odczytu_) usun_zaznaczenie(); }
 
     bool cofnij() {
         if (hist_pozycja_ == 0) return false;
@@ -224,6 +234,11 @@ public:
     }
 
     void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e) override {
+        if (czy_wlaczona_ && e.czy_prawy_przycisk() && cb_menu_kontekstowe_) {
+            cb_menu_kontekstowe_(this, e, dane_menu_kontekstowego_);
+            e.obsluzone = true;
+            return;
+        }
         if (!czy_wlaczona_ || !e.czy_lewy_przycisk()) return;
         size_t p = bajt_z_punktu(e.x - obszar_ekranu_.x, e.y - obszar_ekranu_.y);
         if (!e.czy_shift()) kotwica_ = p;
@@ -488,6 +503,8 @@ private:
     Linia linie_[MAKS_LINII_WIZUALNYCH]; size_t liczba_wizualnych_{0},liczba_logicznych_{1}; mutable size_t ostatnio_narysowane_{0};
     Migawka* historia_[MAKS_HISTORIA]{}; size_t hist_liczba_{0},hist_pozycja_{0};
     PasekPrzewijania* pionowy_{nullptr}; PasekPrzewijania* poziomy_{nullptr};
+    FunkcjaMenuKontekstowego cb_menu_kontekstowe_{nullptr};
+    void* dane_menu_kontekstowego_{nullptr};
     FunkcjaTekstu cb_zmiana_{nullptr},cb_zatwierdzenie_{nullptr}; void* dane_zmiany_{nullptr}; void* dane_zatwierdzenia_{nullptr};
 };
 
