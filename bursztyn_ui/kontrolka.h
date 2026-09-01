@@ -769,6 +769,22 @@ public:
     virtual void przy_utracie_fokusu() { obsluz_utrate_skupienia(); }
 
 protected:
+    // Uklad nie moze zmieniac sie przy przejsciu normalny/fokus/hover.
+    // Rezerwujemy najwieksza zadana grubosc sposrod stanow (albo jawne
+    // nadpisanie kontrolki), a biezacy stan zmienia jedynie sposob rysowania.
+    int grubosc_ramki_geometrii() const {
+        if (wlasna_grubosc_ramki_ >= 0)
+            return wlasna_grubosc_ramki_ * skala_dpi_;
+        int g = styl_.normalny.grubosc_ramki;
+        const StylStanu* stany[] = {
+            &styl_.najechany, &styl_.wcisniety, &styl_.fokus,
+            &styl_.wylaczony, &styl_.tylko_do_odczytu
+        };
+        for (size_t i = 0; i < sizeof(stany) / sizeof(stany[0]); ++i)
+            if (stany[i]->grubosc_ramki > g) g = stany[i]->grubosc_ramki;
+        return (g > 0 ? g : 0) * skala_dpi_;
+    }
+
     StylStanu& wybierz_styl_stanu(StanWizualny stan) {
         switch (stan) {
             case StanWizualny::Najechany: return styl_.najechany;

@@ -152,10 +152,71 @@ public:
 
     void rysuj_tekst(Punkt pt, const char* tekst, uint32_t kolor, int skala = 1) {
         if (!tekst || tekst[0] == '\0') return;
+        if (skala < 1) skala = 1;
         Punkt off = pobierz_przesuniecie();
         int tx = pt.x + off.x;
         int ty = pt.y + off.y;
-        gui_wypisz_tekst_kolor_skala(tx, ty, kolor, skala, tekst);
+        Prostokat granice(tx, ty, CzcionkaUI::zmierz_tekst(tekst, skala),
+                          CzcionkaUI::pobierz_wysokosc(skala));
+        Prostokat clip = pobierz_przyciecie();
+        Prostokat widoczny = granice.przeciecie(clip);
+        if (widoczny.czy_pusty()) return;
+
+        // Zwykly tekst, ktory w calosci miesci sie w klipie, zachowuje szybki
+        // syscall renderera. Tylko tekst przecinajacy krawedz wymaga lokalnego
+        // renderowania bitmapy; syscall 20 nie ma parametru przyciecia.
+        if (widoczny == granice) {
+            gui_wypisz_tekst_kolor_skala(tx, ty, kolor, skala, tekst);
+            dodaj_pomiar_tekstu(widoczny);
+            return;
+        }
+
+        int x_znaku = pt.x;
+        size_t i = 0;
+        while (tekst[i] != '\0') {
+            uint32_t cp = 0;
+            size_t zuzyte = CzcionkaUI::dekoduj_utf8(tekst, i, &cp);
+            if (zuzyte == 0) break;
+            int szerokosc = CzcionkaUI::szerokosc_znaku(cp);
+            int swiat_x = x_znaku + off.x;
+            int prawy_glifu = swiat_x + szerokosc * skala;
+            if (prawy_glifu > clip.x && swiat_x < clip.prawy()) {
+                const uint16_t* bitmapa = CzcionkaUI::bitmapa_znaku(cp);
+                for (int y = 0; y < CzcionkaUI::WYSOKOSC; ++y) {
+                    int poczatek = -1;
+                    for (int x = 0; x <= szerokosc; ++x) {
+                        bool piksel = x < szerokosc &&
+                            (bitmapa[y] & (1U << (15 - x))) != 0;
+                        if (piksel && poczatek < 0) poczatek = x;
+                        if (!piksel && poczatek >= 0) {
+                            Prostokat seria(x_znaku + poczatek * skala,
+                                             pt.y + y * skala,
+                                             (x - poczatek) * skala, skala);
+                            Prostokat seria_swiat(seria.x + off.x,
+                                                  seria.y + off.y,
+                                                  seria.szerokosc,
+                                                  seria.wysokosc);
+                            Prostokat seria_clip = seria_swiat.przeciecie(clip);
+                            if (!seria_clip.czy_pusty()) {
+                                gui_rysuj_prostokat(seria_clip.x, seria_clip.y,
+                                                    seria_clip.szerokosc,
+                                                    seria_clip.wysokosc, kolor);
+                                dodaj_pomiar_tekstu(seria_clip);
+                            }
+                            poczatek = -1;
+                        }
+                    }
+                }
+            }
+            x_znaku += CzcionkaUI::postep_znaku(cp, skala);
+            if (x_znaku + off.x >= clip.prawy()) break;
+            i += zuzyte;
+        }
+    }
+
+    void wyczysc_pomiar_tekstu() { obszar_narysowanego_tekstu_ = Prostokat(); }
+    Prostokat obszar_narysowanego_tekstu() const {
+        return obszar_narysowanego_tekstu_;
     }
 
     void rysuj_tekst_wysrodkowany(Prostokat r, const char* tekst, uint32_t kolor, int skala = 1) {
@@ -198,11 +259,16 @@ public:
     }
 
 private:
+    void dodaj_pomiar_tekstu(Prostokat r) {
+        obszar_narysowanego_tekstu_ = obszar_narysowanego_tekstu_.suma(r);
+    }
+
     static constexpr size_t MAKS_STOS = 16;
     Prostokat stos_przyciecia_[MAKS_STOS];
     Punkt stos_przesuniecia_[MAKS_STOS];
     size_t glebokosc_przyciecia_{0};
     size_t glebokosc_przesuniecia_{0};
+    Prostokat obszar_narysowanego_tekstu_{};
 };
 
 } // namespace BursztynUI

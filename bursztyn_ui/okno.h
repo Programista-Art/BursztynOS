@@ -312,7 +312,7 @@ public:
                     me.typ = TypZdarzenia::RuchMyszy;
                     me.x = lokalny_x;
                     me.y = lokalny_y;
-                    me.przycisk = surowe_zdarzenie.przyciski;
+                    me.przycisk = static_cast<int>(PrzyciskMyszy::Brak);
                     me.modyfikatory = surowe_zdarzenie.przyciski;
                     me.timestamp = surowe_zdarzenie.timestamp;
                     kontrolka_przechwytujaca_->obsluz_ruch_myszy(me);
@@ -328,7 +328,7 @@ public:
                         me.typ = TypZdarzenia::RuchMyszy;
                         me.x = lokalny_x;
                         me.y = lokalny_y;
-                        me.przycisk = surowe_zdarzenie.przyciski;
+                        me.przycisk = static_cast<int>(PrzyciskMyszy::Brak);
                         me.modyfikatory = surowe_zdarzenie.przyciski;
                         me.timestamp = surowe_zdarzenie.timestamp;
                         kontrolka_najechana_->obsluz_ruch_myszy(me);
@@ -371,7 +371,9 @@ public:
                         me.typ = TypZdarzenia::WcisniecieMyszy;
                         me.x = lokalny_x;
                         me.y = lokalny_y;
-                        me.przycisk = (surowe_zdarzenie.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN) ? 2 : 1;
+                        me.przycisk = static_cast<int>(
+                            (surowe_zdarzenie.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN)
+                            ? PrzyciskMyszy::Prawy : PrzyciskMyszy::Lewy);
                         me.modyfikatory = surowe_zdarzenie.przyciski;
                         me.timestamp = surowe_zdarzenie.timestamp;
 
@@ -415,7 +417,9 @@ public:
                     me.typ = TypZdarzenia::ZwolnienieMyszy;
                     me.x = lokalny_x;
                     me.y = lokalny_y;
-                    me.przycisk = (surowe_zdarzenie.typ == BWS_ZDARZENIE_MYSZ_PRAWY_UP) ? 2 : 1;
+                    me.przycisk = static_cast<int>(
+                        (surowe_zdarzenie.typ == BWS_ZDARZENIE_MYSZ_PRAWY_UP)
+                        ? PrzyciskMyszy::Prawy : PrzyciskMyszy::Lewy);
                     me.modyfikatory = surowe_zdarzenie.przyciski;
                     me.timestamp = surowe_zdarzenie.timestamp;
                     cel->obsluz_zwolnienie_myszy(me);
@@ -424,10 +428,12 @@ public:
             }
 
             case BWS_ZDARZENIE_MYSZ_KOLO: {
-                Kontrolka* cel = kontrolka_najechana_;
-                if (!cel && kontrolka_glowna_) {
-                    cel = kontrolka_glowna_->sprawdz_trafienie(Punkt(lokalny_x, lokalny_y));
-                }
+                // Zdarzenie kola niesie aktualne wspolrzedne BWS. Nie wolno
+                // kierowac go przez zapamietany hover: kolo moze przyjsc bez
+                // poprzedzajacego ruchu albo po zmianie ukladu pod kursorem.
+                Kontrolka* cel = kontrolka_glowna_
+                    ? kontrolka_glowna_->sprawdz_trafienie(Punkt(lokalny_x, lokalny_y))
+                    : nullptr;
                 ZdarzenieRolki re;
                 re.typ = TypZdarzenia::RolkaMyszy;
                 re.x = lokalny_x;
@@ -435,11 +441,13 @@ public:
                 re.delta_x = surowe_zdarzenie.dx;
                 re.delta_y = surowe_zdarzenie.dy;
                 re.modyfikatory = surowe_zdarzenie.kod;
-                if (cel) {
-                    cel->obsluz_rolke(re);
+                bool fokus_byl_na_sciezce = false;
+                for (Kontrolka* k = cel; k && !re.obsluzone; k = k->rodzic()) {
+                    if (k == kontrolka_z_fokusem_) fokus_byl_na_sciezce = true;
+                    k->obsluz_rolke(re);
                 }
                 if (!re.obsluzone && kontrolka_z_fokusem_ &&
-                    kontrolka_z_fokusem_ != cel) {
+                    !fokus_byl_na_sciezce) {
                     kontrolka_z_fokusem_->obsluz_rolke(re);
                 }
                 break;

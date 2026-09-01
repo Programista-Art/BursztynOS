@@ -22,11 +22,11 @@ using namespace BursztynUI;
 
 extern "C" void _start();
 
-static constexpr uint64_t BUR_TEKST_ROZMIAR     = 0xC000ULL; // 48 KiB
+static constexpr uint64_t BUR_TEKST_ROZMIAR     = 0x20000ULL; // 128 KiB
 static constexpr uint64_t BUR_TEKST_PRZESUNIECIE = 0x1000ULL;
 static constexpr uint64_t BUR_TEKST_WIRTUALNY     = 0x1001000ULL;
-static constexpr uint64_t BUR_DANE_PRZESUNIECIE   = 0xD000ULL;
-static constexpr uint64_t BUR_DANE_WIRTUALNY       = 0x100D000ULL;
+static constexpr uint64_t BUR_DANE_PRZESUNIECIE   = 0x21000ULL;
+static constexpr uint64_t BUR_DANE_WIRTUALNY       = 0x1021000ULL;
 static constexpr uint64_t BUR_DANE_ROZMIAR         = 131072ULL;
 
 extern "C" {
@@ -63,6 +63,12 @@ struct StanAplikacji {
     Etykieta* lbl_suwak_ujemny{nullptr};
     Etykieta* lbl_suwak_pionowy{nullptr};
     Etykieta* lbl_suwak_wylaczony{nullptr};
+    PasekPrzewijania* pasek_poziomy{nullptr};
+    PasekPrzewijania* pasek_pionowy{nullptr};
+    PasekPrzewijania* pasek_wylaczony{nullptr};
+    ListaWyboru* lista_wyboru{nullptr};
+    PoleWielowierszowe* memo_zawijane{nullptr};
+    PoleWielowierszowe* memo_bez_zawijania{nullptr};
     int licznik_zatwierdzen{0};
     int licznik_batch{0};
 };
@@ -214,7 +220,7 @@ extern "C" void _start() {
     suwak_pionowy.ustaw_krok(10);
     suwak_pionowy.ustaw_wartosc(60);
     suwak_pionowy.ustaw_pokazywanie_wartosci(true);
-    suwak_pionowy.ustaw_preferowany_rozmiar(Rozmiar(52, 138));
+    suwak_pionowy.ustaw_preferowany_rozmiar(Rozmiar(52, 55));
     auto& wartosc_pionowy = wiersz_pionowy.dodaj<Etykieta>("Wartosc: 60");
     wartosc_pionowy.ustaw_preferowany_rozmiar(Rozmiar(95, 24));
     suwak_pionowy.przy_zmianie_wartosci(aktualizuj_etykiete_suwaka, &wartosc_pionowy);
@@ -235,6 +241,37 @@ extern "C" void _start() {
     suwak_wylaczony.przy_zmianie_wartosci(aktualizuj_etykiete_suwaka, &wartosc_wylaczony);
     g_stan.suwak_wylaczony = &suwak_wylaczony;
     g_stan.lbl_suwak_wylaczony = &wartosc_wylaczony;
+
+    // Pasek przewijania korzysta ze wspolnego ModelPrzewijania. Zakres
+    // ujemny, rozmiar strony, strzalki, tor i uchwyt sa interaktywne.
+    auto& wiersz_paskow = panel_suwakow.dodaj<Wiersz>();
+    wiersz_paskow.ustaw_wypelnienie(Marginesy(0));
+    wiersz_paskow.ustaw_odstep(8);
+    auto& nazwa_paska = wiersz_paskow.dodaj<Etykieta>("Paski przewijania:");
+    nazwa_paska.ustaw_preferowany_rozmiar(Rozmiar(150, 24));
+    auto& pasek_poziomy = wiersz_paskow.dodaj<PasekPrzewijania>();
+    pasek_poziomy.ustaw_zakres(-200, 800);
+    pasek_poziomy.ustaw_rozmiar_strony(120);
+    pasek_poziomy.ustaw_maly_krok(10);
+    pasek_poziomy.ustaw_duzy_krok(120);
+    pasek_poziomy.ustaw_wartosc(-40);
+    pasek_poziomy.ustaw_preferowany_rozmiar(Rozmiar(260, 20));
+    pasek_poziomy.ustaw_podswietlanie_toru(true);
+    auto& pasek_pionowy = wiersz_paskow.dodaj<PasekPrzewijania>();
+    pasek_pionowy.ustaw_orientacje(Orientacja::Pionowa);
+    pasek_pionowy.ustaw_zakres(0, 500);
+    pasek_pionowy.ustaw_rozmiar_strony(80);
+    pasek_pionowy.ustaw_wartosc(180);
+    pasek_pionowy.ustaw_preferowany_rozmiar(Rozmiar(20, 92));
+    auto& pasek_wylaczony = wiersz_paskow.dodaj<PasekPrzewijania>();
+    pasek_wylaczony.ustaw_zakres(0, 100);
+    pasek_wylaczony.ustaw_rozmiar_strony(25);
+    pasek_wylaczony.ustaw_wartosc(55);
+    pasek_wylaczony.ustaw_preferowany_rozmiar(Rozmiar(100, 20));
+    pasek_wylaczony.ustaw_wlaczona(false);
+    g_stan.pasek_poziomy = &pasek_poziomy;
+    g_stan.pasek_pionowy = &pasek_pionowy;
+    g_stan.pasek_wylaczony = &pasek_wylaczony;
 
     // 4. Zaawansowane Pole Tekstowe (UTF-8, zaznaczanie, schowek, cofanie)
     auto& txt_input = glowna.dodaj<PoleTekstowe>("Wpisz tekst (np. Zażółć gęślą jaźń)...");
@@ -257,6 +294,61 @@ extern "C" void _start() {
         aktualizuj_status_zatwierdzenia(static_cast<StanAplikacji*>(dane));
     }, &g_stan);
     g_stan.txt_input = &txt_input;
+
+    auto& panel_memo = glowna.dodaj<Wiersz>();
+    panel_memo.ustaw_wypelnienie(Marginesy(0));
+    panel_memo.ustaw_odstep(10);
+    panel_memo.ustaw_preferowany_rozmiar(Rozmiar(680, 78));
+    auto& memo_zawijane = panel_memo.dodaj<PoleWielowierszowe>("Wpisz tekst wielowierszowy...");
+    memo_zawijane.ustaw_preferowany_rozmiar(Rozmiar(335, 78));
+    memo_zawijane.ustaw_tekst("PoleWielowierszowe — zawijanie.\nZażółć gęślą jaźń. Zaznaczaj tekst między wierszami, użyj Ctrl+C/X/V/Z/Y i rolki myszy.");
+    memo_zawijane.ustaw_zawijanie_wierszy(true);
+    auto& memo_bez_zawijania = panel_memo.dodaj<PoleWielowierszowe>("Bez zawijania...");
+    memo_bez_zawijania.ustaw_preferowany_rozmiar(Rozmiar(335, 78));
+    memo_bez_zawijania.ustaw_tekst(
+        "Brak zawijania — długi wiersz uruchamia poziomy PasekPrzewijania i pozostaje jedną linią logiczną.\n"
+        "Drugi wiersz UTF-8: Pchnąć w tę łódź jeża lub ośm skrzyń fig.\n"
+        "Trzeci wiersz wymusza przewijanie pionowe.\n"
+        "Czwarty wiersz pozwala sprawdzić oba paski naraz.\n"
+        "Piąty wiersz: Zażółć gęślą jaźń.\n"
+        "Szósty wiersz kończy próbę widoku.");
+    memo_bez_zawijania.ustaw_zawijanie_wierszy(false);
+    g_stan.memo_zawijane = &memo_zawijane;
+    g_stan.memo_bez_zawijania = &memo_bez_zawijania;
+
+    // Lokalne grupowanie opcji oraz lista renderujaca tylko widoczne wiersze.
+    auto& panel_wyboru = glowna.dodaj<Wiersz>();
+    panel_wyboru.ustaw_wypelnienie(Marginesy(0));
+    panel_wyboru.ustaw_odstep(10);
+    panel_wyboru.ustaw_preferowany_rozmiar(Rozmiar(680, 92));
+    auto& ramka_trybu = panel_wyboru.dodaj<RamkaGrupy>("Tryb uruchomienia");
+    ramka_trybu.ustaw_preferowany_rozmiar(Rozmiar(260, 92));
+    auto& opcja_normalna = ramka_trybu.dodaj_opcje("Normalny", 1);
+    auto& opcja_bezpieczna = ramka_trybu.dodaj_opcje("Bezpieczny", 2);
+    auto& opcja_diagnostyczna = ramka_trybu.dodaj_opcje("Diagnostyczny", 3);
+    (void)opcja_normalna;
+    (void)opcja_diagnostyczna;
+    opcja_bezpieczna.przy_zmianie([](PrzyciskOpcji*, bool zaznaczony, void*) {
+        if (zaznaczony && g_stan.lbl_status)
+            g_stan.lbl_status->ustaw_tekst("Grupa opcji: tryb bezpieczny");
+    });
+    auto& lista = panel_wyboru.dodaj<ListaWyboru>();
+    lista.ustaw_preferowany_rozmiar(Rozmiar(400, 92));
+    for (int i = 0; i < 48; ++i) {
+        char nazwa[40] = "Element listy ";
+        size_t pos = 14;
+        dopisz_liczbe(nazwa, pos, sizeof(nazwa), i + 1);
+        lista.dodaj_element(nazwa, static_cast<uint64_t>(i + 1));
+    }
+    lista.ustaw_wybrany_indeks(3);
+    lista.przy_zmianie_wyboru([](ListaWyboru*, int indeks, void*) {
+        if (!g_stan.lbl_status) return;
+        char tekst[64] = "ListaWyboru: indeks ";
+        size_t pos = 21;
+        dopisz_liczbe(tekst, pos, sizeof(tekst), indeks);
+        g_stan.lbl_status->ustaw_tekst(tekst);
+    });
+    g_stan.lista_wyboru = &lista;
 
     // 4. Zagnieżdżony panel opcji (Wiersz w ramce)
     auto& panel_opcji = glowna.dodaj<Wiersz>();
@@ -368,6 +460,12 @@ extern "C" void _start() {
             }
             buf[pos] = '\0';
             stan->lbl_status->ustaw_tekst(buf);
+        }
+
+        if (stan->pasek_poziomy) {
+            // Widoczna demonstracja ponownego wyliczenia proporcji uchwytu.
+            stan->pasek_poziomy->ustaw_rozmiar_strony(
+                (stan->licznik_batch & 1) ? 320 : 120);
         }
 
         stan->glowna_kolumna->zakoncz_aktualizacje();

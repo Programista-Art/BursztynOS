@@ -137,7 +137,7 @@ private:
         styl_przycisku.fokus.tlo = Kolory::AkcentZloty;
         styl_przycisku.fokus.tekst = Kolory::TekstCiemny;
         styl_przycisku.fokus.ramka = Kolory::RamkaFokus;
-        styl_przycisku.fokus.grubosc_ramki = 2;
+        styl_przycisku.fokus.grubosc_ramki = 1;
         styl_przycisku.fokus.promien_zaokraglenia = 2;
 
         styl_przycisku.wylaczony.tlo = Kolory::WylaczonyTlo;
@@ -159,7 +159,7 @@ private:
         styl_pola_wyboru.fokus.tlo = Kolory::WejscieTlo;
         styl_pola_wyboru.fokus.tekst = Kolory::TekstBialy;
         styl_pola_wyboru.fokus.ramka = Kolory::RamkaFokus;
-        styl_pola_wyboru.fokus.grubosc_ramki = 2;
+        styl_pola_wyboru.fokus.grubosc_ramki = 1;
         styl_pola_wyboru.wypelnienie = Marginesy(4, 4, 4, 4);
 
         // Styl Pola Tekstowego
@@ -176,11 +176,12 @@ private:
         styl_pola_tekstowego.fokus.tlo = Kolory::WejscieTlo;
         styl_pola_tekstowego.fokus.tekst = Kolory::TekstBialy;
         styl_pola_tekstowego.fokus.ramka = Kolory::RamkaFokus;
-        styl_pola_tekstowego.fokus.grubosc_ramki = 2;
+        styl_pola_tekstowego.fokus.grubosc_ramki = 1;
 
         styl_pola_tekstowego.wylaczony.tlo = Kolory::WylaczonyTlo;
         styl_pola_tekstowego.wylaczony.tekst = Kolory::WylaczonyTekst;
         styl_pola_tekstowego.wylaczony.ramka = Kolory::WylaczonyRamka;
+        styl_pola_tekstowego.wylaczony.grubosc_ramki = 1;
 
         styl_pola_tekstowego.tylko_do_odczytu.tlo = Kolory::PowierzchniaTlo;
         styl_pola_tekstowego.tylko_do_odczytu.tekst = Kolory::TekstWyciszony;
@@ -192,19 +193,19 @@ private:
         // Styl Suwaka
         styl_suwaka.normalny.tlo = 0; // Przezroczysty - tor i uchwyt rysują się same
         styl_suwaka.normalny.tekst = Kolory::TekstBialy;
-        styl_suwaka.normalny.ramka = 0;
-        styl_suwaka.normalny.grubosc_ramki = 0;
+        styl_suwaka.normalny.ramka = Kolory::RamkaDomyslna;
+        styl_suwaka.normalny.grubosc_ramki = 1;
         styl_suwaka.najechany = styl_suwaka.normalny;
         styl_suwaka.najechany.ramka = Kolory::RamkaNajechana;
         styl_suwaka.wcisniety = styl_suwaka.normalny;
         styl_suwaka.wcisniety.ramka = Kolory::RamkaFokus;
         styl_suwaka.fokus = styl_suwaka.normalny;
         styl_suwaka.fokus.ramka = Kolory::RamkaFokus;
-        styl_suwaka.fokus.grubosc_ramki = 2;
+        styl_suwaka.fokus.grubosc_ramki = 1;
         styl_suwaka.wylaczony = styl_suwaka.normalny;
         styl_suwaka.wylaczony.tlo = 0;
         styl_suwaka.wylaczony.tekst = Kolory::WylaczonyTekst;
-        styl_suwaka.wylaczony.ramka = 0;
+        styl_suwaka.wylaczony.ramka = Kolory::WylaczonyRamka;
         styl_suwaka.tylko_do_odczytu = styl_suwaka.wylaczony;
         styl_suwaka.wypelnienie = Marginesy(4, 4, 4, 4);
     }

@@ -172,6 +172,12 @@ public:
     void rysuj_siebie(KontekstRysowania& ctx) override {
         StylStanu s = wyznacz_biezacy_styl_stanu();
         rysuj_tlo_i_ramke(ctx, s);
+        int gr = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        Prostokat zewnetrzny(0, 0, obszar_.szerokosc, obszar_.wysokosc);
+        ctx.rysuj_ramke(zewnetrzny,
+                        czy_wlaczona_ ? Kolory::RamkaDomyslna
+                                      : Kolory::WylaczonyRamka,
+                        gr);
 
         Geometria g = oblicz_geometrie(wartosc_);
         if (!g.tor.czy_pusty()) {
@@ -197,8 +203,7 @@ public:
                                    skala_dpi_ < 1 ? 1 : skala_dpi_);
 
         if (czy_ma_fokus_ && czy_wlaczona_) {
-            int gr = skala_dpi_ < 1 ? 1 : skala_dpi_;
-            ctx.rysuj_ramke(Prostokat(0, 0, obszar_.szerokosc, obszar_.wysokosc),
+            ctx.rysuj_ramke(zewnetrzny.zmniejszony(Marginesy(gr)),
                             Kolory::AkcentFokus, gr);
         }
 

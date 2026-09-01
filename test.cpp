@@ -28,11 +28,11 @@ struct NaglowekBur {
 
 extern "C" __attribute__((noreturn)) void _start();
 
-static constexpr uint64_t BUR_TEKST_ROZMIAR     = 0x20000ULL; // 128 KiB
+static constexpr uint64_t BUR_TEKST_ROZMIAR     = 0x28000ULL; // 160 KiB
 static constexpr uint64_t BUR_TEKST_PRZESUNIECIE = 0x1000ULL;
 static constexpr uint64_t BUR_TEKST_WIRTUALNY     = 0x1001000ULL;
-static constexpr uint64_t BUR_DANE_PRZESUNIECIE   = 0x21000ULL;
-static constexpr uint64_t BUR_DANE_WIRTUALNY       = 0x1021000ULL;
+static constexpr uint64_t BUR_DANE_PRZESUNIECIE   = 0x29000ULL;
+static constexpr uint64_t BUR_DANE_WIRTUALNY       = 0x1029000ULL;
 static constexpr uint64_t BUR_DANE_ROZMIAR         = 131072ULL;
 
 extern "C" {
@@ -900,6 +900,493 @@ static void wykonaj_testy_bursztyn_ui() {
     bws_sprawdz(pion.wartosc() == 0);
 
     bws_log("[BURSZTYNUI SUWAK] Model, wejscie, capture i pomiary: OK\n");
+
+    // -------------------------------------------------------------------------
+    // 6. ModelPrzewijania i PasekPrzewijania: int64, geometria i capture
+    // -------------------------------------------------------------------------
+    bws_log("[BURSZTYNUI PASEK] Model int64, geometria i interakcje...\n");
+
+    ModelPrzewijania model_przewijania;
+    model_przewijania.ustaw_zakres(INT64_MIN, INT64_MAX);
+    model_przewijania.ustaw_wartosc(0);
+    model_przewijania.przewin_o(INT64_MAX);
+    bws_sprawdz(model_przewijania.wartosc() == INT64_MAX);
+    model_przewijania.przewin_o(INT64_MIN);
+    bws_sprawdz(model_przewijania.wartosc() == -1);
+    model_przewijania.przewin_o(INT64_MIN);
+    bws_sprawdz(model_przewijania.wartosc() == INT64_MIN);
+    model_przewijania.ustaw_zakres(7, 7);
+    model_przewijania.ustaw_wartosc(INT64_MAX);
+    bws_sprawdz(model_przewijania.minimum() == 7 &&
+                model_przewijania.maksimum() == 7 &&
+                model_przewijania.wartosc() == 7);
+
+    PasekPrzewijania pasek_model;
+    pasek_model.rozmiesc(Prostokat(0, 0, 300, 20));
+    pasek_model.ustaw_zakres(-100, 100);
+    pasek_model.ustaw_rozmiar_strony(25);
+    pasek_model.ustaw_maly_krok(3);
+    pasek_model.ustaw_duzy_krok(40);
+    pasek_model.ustaw_wartosc(-10);
+    bws_sprawdz(pasek_model.minimum() == -100 && pasek_model.maksimum() == 100);
+    bws_sprawdz(pasek_model.wartosc() == -10);
+    bws_sprawdz(pasek_model.rozmiar_strony() == 25);
+    bws_sprawdz(pasek_model.maly_krok() == 3 && pasek_model.duzy_krok() == 40);
+    Prostokat uchwyt_sredni = pasek_model.prostokat_uchwytu();
+    bws_sprawdz(uchwyt_sredni.szerokosc >= 12 && uchwyt_sredni.szerokosc < 260);
+
+    pasek_model.ustaw_rozmiar_strony(INT64_MAX);
+    Prostokat uchwyt_duza_strona = pasek_model.prostokat_uchwytu();
+    bws_sprawdz(uchwyt_duza_strona.szerokosc > uchwyt_sredni.szerokosc);
+    pasek_model.ustaw_zakres(5, 5);
+    bws_sprawdz(pasek_model.wartosc() == 5);
+    Prostokat uchwyt_pelny = pasek_model.prostokat_uchwytu();
+    bws_sprawdz(uchwyt_pelny.szerokosc >= uchwyt_duza_strona.szerokosc);
+
+    pasek_model.ustaw_zakres(INT64_MIN, INT64_MAX);
+    pasek_model.ustaw_rozmiar_strony(4096);
+    pasek_model.ustaw_wartosc(0);
+    Prostokat uchwyt_ogromny_zakres = pasek_model.prostokat_uchwytu();
+    bws_sprawdz(uchwyt_ogromny_zakres.szerokosc >= 12);
+
+    // Klawiatura pozioma oraz pionowa.
+    pasek_model.ustaw_zakres(-100, 100);
+    pasek_model.ustaw_wartosc(0);
+    ZdarzenieKlawiatury pk{};
+    pk.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x4DU; // Right
+    pasek_model.obsluz_wcisniecie_klawisza(pk);
+    bws_sprawdz(pasek_model.wartosc() == 3 && pk.obsluzone);
+    pk = {};
+    pk.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x51U; // PageDown
+    pasek_model.obsluz_wcisniecie_klawisza(pk);
+    bws_sprawdz(pasek_model.wartosc() == 43);
+    pk = {};
+    pk.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x47U; // Home
+    pasek_model.obsluz_wcisniecie_klawisza(pk);
+    bws_sprawdz(pasek_model.wartosc() == -100);
+    pk = {};
+    pk.kod_klawisza = BWS_KEY_SOURCE_USB | 77U; // End
+    pasek_model.obsluz_wcisniecie_klawisza(pk);
+    bws_sprawdz(pasek_model.wartosc() == 100);
+
+    pasek_model.ustaw_orientacje(Orientacja::Pionowa);
+    pasek_model.rozmiesc(Prostokat(0, 0, 20, 300));
+    pasek_model.ustaw_wartosc(0);
+    pk = {};
+    pk.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x48U; // Up zmniejsza offset
+    pasek_model.obsluz_wcisniecie_klawisza(pk);
+    bws_sprawdz(pasek_model.wartosc() == -3);
+    pasek_model.ustaw_wlaczona(false);
+    pasek_model.obsluz_wcisniecie_klawisza(pk);
+    bws_sprawdz(pasek_model.wartosc() == -3);
+
+    // Prawdziwy routing Okno zapewnia capture i ruch poza kontrolka/oknem.
+    Okno okno_paska("Test paska", 380, 110);
+    okno_paska.ustaw_pozycje(220, 140);
+    auto& panel_paska = okno_paska.dodaj<Kolumna>();
+    panel_paska.ustaw_wypelnienie(Marginesy(12));
+    auto& pasek = panel_paska.dodaj<PasekPrzewijania>();
+    pasek.ustaw_preferowany_rozmiar(Rozmiar(356, 20));
+    pasek.ustaw_zakres(-500, 500);
+    pasek.ustaw_rozmiar_strony(100);
+    pasek.ustaw_maly_krok(5);
+    pasek.ustaw_duzy_krok(100);
+    pasek.ustaw_wartosc(0);
+    struct PomiarPaska { int zmiany{0}; int zatwierdzenia{0}; } pomiar_paska;
+    pasek.przy_przewijaniu([](PasekPrzewijania*, int64_t, void* dane) {
+        ++static_cast<PomiarPaska*>(dane)->zmiany;
+    }, &pomiar_paska);
+    pasek.przy_zatwierdzeniu([](PasekPrzewijania*, int64_t, void* dane) {
+        ++static_cast<PomiarPaska*>(dane)->zatwierdzenia;
+    }, &pomiar_paska);
+    okno_paska.przelicz_uklad();
+    KontekstRysowania ctx_paska;
+    okno_paska.rysuj(ctx_paska, true);
+
+    Prostokat rp = pasek.obszar_ekranu();
+    Prostokat up_lokalny = pasek.prostokat_uchwytu();
+    int px_uchwytu = rp.x + up_lokalny.x + up_lokalny.szerokosc / 2;
+    int py_uchwytu = rp.y + up_lokalny.y + up_lokalny.wysokosc / 2;
+    bws_zdarzenie pdown{};
+    pdown.typ = BWS_ZDARZENIE_MYSZ_DOWN;
+    pdown.x = okno_paska.x() + px_uchwytu;
+    pdown.y = okno_paska.y() + py_uchwytu;
+    pdown.przyciski = 1;
+    okno_paska.obsluz_zdarzenie(pdown);
+    bws_sprawdz(okno_paska.przechwycenie_myszy() == &pasek);
+    okno_paska.rysuj(ctx_paska, false);
+
+    uint64_t pasek_alokacje_przed = gui_liczba_alokacji_sterty();
+    bws_zdarzenie pmove = pdown;
+    pmove.typ = BWS_ZDARZENIE_MYSZ_RUCH;
+    pmove.x = okno_paska.x() + okno_paska.szerokosc() + 200;
+    okno_paska.obsluz_zdarzenie(pmove);
+    okno_paska.rysuj(ctx_paska, false);
+    int pasek_obszar_drag = okno_paska.ostatnia_powierzchnia_odrysowania();
+    bws_zdarzenie pup = pmove;
+    pup.typ = BWS_ZDARZENIE_MYSZ_UP;
+    pup.przyciski = 0;
+    okno_paska.obsluz_zdarzenie(pup);
+    uint64_t pasek_alokacje_po = gui_liczba_alokacji_sterty();
+    bws_sprawdz(pasek.wartosc() == 500);
+    bws_sprawdz(okno_paska.przechwycenie_myszy() == nullptr);
+    bws_sprawdz(pomiar_paska.zmiany == 1 && pomiar_paska.zatwierdzenia == 1);
+    bws_sprawdz(pasek_obszar_drag > 0 &&
+                pasek_obszar_drag < okno_paska.szerokosc() * okno_paska.wysokosc());
+    bws_sprawdz(pasek_alokacje_po == pasek_alokacje_przed);
+
+    // Klik toru wykonuje jeden duzy krok i zatwierdza na MouseUp.
+    pasek.ustaw_wartosc(0);
+    pomiar_paska.zmiany = 0;
+    pomiar_paska.zatwierdzenia = 0;
+    rp = pasek.obszar_ekranu();
+    up_lokalny = pasek.prostokat_uchwytu();
+    pdown = {};
+    pdown.typ = BWS_ZDARZENIE_MYSZ_DOWN;
+    pdown.x = okno_paska.x() + rp.x + up_lokalny.prawy() + 8;
+    pdown.y = okno_paska.y() + rp.y + up_lokalny.y + up_lokalny.wysokosc / 2;
+    pdown.przyciski = 1;
+    okno_paska.obsluz_zdarzenie(pdown);
+    bws_sprawdz(pasek.wartosc() == 100);
+    pup = pdown;
+    pup.typ = BWS_ZDARZENIE_MYSZ_UP;
+    pup.przyciski = 0;
+    okno_paska.obsluz_zdarzenie(pup);
+    bws_sprawdz(pomiar_paska.zmiany == 1 && pomiar_paska.zatwierdzenia == 1);
+
+    // Wyłączona kontrolka nie reaguje na mysz.
+    pasek.ustaw_wlaczona(false);
+    int64_t wartosc_wylaczonego_paska = pasek.wartosc();
+    okno_paska.obsluz_zdarzenie(pdown);
+    okno_paska.obsluz_zdarzenie(pup);
+    bws_sprawdz(pasek.wartosc() == wartosc_wylaczonego_paska);
+
+    bws_log_u64("[PASEK POMIAR] redraw_area_px=", static_cast<uint64_t>(pasek_obszar_drag));
+    bws_log_u64("[PASEK POMIAR] heap_allocations_drag=", pasek_alokacje_po - pasek_alokacje_przed);
+    bws_log("[BURSZTYNUI PASEK] Model, capture, dirty i alokacje: OK\n");
+
+    // -------------------------------------------------------------------------
+    // 7. PrzyciskOpcji/RamkaGrupy oraz ListaWyboru
+    // -------------------------------------------------------------------------
+    bws_log("[BURSZTYNUI WYBOR] Grupy opcji i lista wirtualizowana...\n");
+    RamkaGrupy ramka("Tryb testu");
+    PrzyciskOpcji& opcja_a = ramka.dodaj_opcje("Pierwsza", 10);
+    PrzyciskOpcji& opcja_b = ramka.dodaj_opcje("Druga", 20);
+    PrzyciskOpcji& opcja_c = ramka.dodaj_opcje("Trzecia", 30);
+    bws_sprawdz(opcja_a.czy_zaznaczony());
+    bws_sprawdz(!opcja_b.czy_zaznaczony() && !opcja_c.czy_zaznaczony());
+    opcja_b.ustaw_zaznaczony(true);
+    bws_sprawdz(!opcja_a.czy_zaznaczony() && opcja_b.czy_zaznaczony() &&
+                !opcja_c.czy_zaznaczony());
+    bws_sprawdz(opcja_b.wartosc() == 20);
+    ZdarzenieKlawiatury ok_opcji{};
+    ok_opcji.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x50U; // Down
+    opcja_b.obsluz_wcisniecie_klawisza(ok_opcji);
+    bws_sprawdz(opcja_c.czy_zaznaczony() && !opcja_b.czy_zaznaczony());
+    opcja_a.ustaw_wlaczona(false);
+    opcja_c.obsluz_wcisniecie_klawisza(ok_opcji); // pomija disabled i zawija do B
+    bws_sprawdz(opcja_b.czy_zaznaczony());
+    ramka.grupa_opcji().ustaw_dopuszczanie_braku(true);
+    opcja_b.ustaw_zaznaczony(false);
+    bws_sprawdz(ramka.grupa_opcji().zaznaczona_opcja() == nullptr);
+
+    ListaWyboru* lista_ptr = new ListaWyboru();
+    bws_sprawdz(lista_ptr != nullptr);
+    ListaWyboru& lista = *lista_ptr;
+    lista.rozmiesc(Prostokat(0, 0, 280, 180));
+    bws_sprawdz(lista.liczba_elementow() == 0 && lista.wybrany_indeks() == -1);
+    bws_sprawdz(lista.dodaj_element("Zażółć gęślą jaźń", 0xA5));
+    bws_sprawdz(lista.liczba_elementow() == 1 && lista.znacznik_elementu(0) == 0xA5);
+    bws_sprawdz(lista.ustaw_wybrany_indeks(0));
+    bws_sprawdz(lista.wybrany_element() && lista.wybrany_element()[0] == 'Z');
+    lista.usun_element(0);
+    bws_sprawdz(lista.liczba_elementow() == 0 && lista.wybrany_indeks() == -1);
+
+    char numer_elementu[32];
+    for (int i = 0; i < 1200; ++i) {
+        size_t p = 0;
+        const char* pref = "Element ";
+        while (pref[p]) { numer_elementu[p] = pref[p]; ++p; }
+        int n = i;
+        char odwrotnie[12];
+        int cyfr = 0;
+        do { odwrotnie[cyfr++] = static_cast<char>('0' + n % 10); n /= 10; } while (n);
+        while (cyfr > 0 && p + 1 < sizeof(numer_elementu)) numer_elementu[p++] = odwrotnie[--cyfr];
+        numer_elementu[p] = '\0';
+        bws_sprawdz(lista.dodaj_element(numer_elementu, static_cast<uint64_t>(i)));
+    }
+    bws_sprawdz(lista.liczba_elementow() == 1200);
+    lista.rozmiesc(Prostokat(0, 0, 280, 180));
+    KontekstRysowania ctx_listy;
+    uint64_t lista_alokacje_przed = gui_liczba_alokacji_sterty();
+    lista.rysuj(ctx_listy, true);
+    uint64_t lista_alokacje_po = gui_liczba_alokacji_sterty();
+    bws_sprawdz(lista.liczba_ostatnio_narysowanych_wierszy() > 0);
+    bws_sprawdz(lista.liczba_ostatnio_narysowanych_wierszy() < 20);
+    bws_sprawdz(lista_alokacje_po == lista_alokacje_przed);
+
+    // Rzeczywista sciezka BWS -> Okno -> hit-test -> ListaWyboru. Nie
+    // wysylamy poprzedzajacego ruchu myszy: routing kola nie moze zalezec od
+    // zapamietanego hover ani od istnienia zaznaczenia.
+    Okno* okno_listy_ptr = new Okno("Test kola listy", 320, 230);
+    bws_sprawdz(okno_listy_ptr != nullptr);
+    Okno& okno_listy = *okno_listy_ptr;
+    okno_listy.ustaw_pozycje(40, 40);
+    okno_listy.ustaw_kontrolke_glowna(&lista);
+    okno_listy.przelicz_uklad();
+    lista.pasek_pionowy().ustaw_wartosc(0);
+    Prostokat uchwyt_na_gorze = lista.pasek_pionowy().prostokat_uchwytu();
+    Prostokat widok_listy = lista.prostokat_widoku();
+    Prostokat lista_ekran = lista.obszar_ekranu();
+    bws_zdarzenie kolo_listy{};
+    kolo_listy.typ = BWS_ZDARZENIE_MYSZ_KOLO;
+    kolo_listy.x = okno_listy.x() + lista_ekran.x + widok_listy.x + 8;
+    kolo_listy.y = okno_listy.y() + lista_ekran.y + widok_listy.y + 8;
+    kolo_listy.dy = -1; // USB HID: ujemne = kolo w dol
+    lista.wyczysc_brudny_obszar();
+    uint64_t lista_kolo_alok_przed = gui_liczba_alokacji_sterty();
+    okno_listy.obsluz_zdarzenie(kolo_listy);
+    uint64_t lista_kolo_alok_po = gui_liczba_alokacji_sterty();
+    bws_sprawdz(lista.pierwszy_widoczny_indeks() == 3);
+    bws_sprawdz(lista.wybrany_indeks() == -1 && lista.indeks_fokusu() == -1);
+    bws_sprawdz(lista_kolo_alok_po == lista_kolo_alok_przed);
+    Prostokat brudny_kola = lista.pobierz_brudny_obszar();
+    uint64_t pole_brudne_kola = static_cast<uint64_t>(brudny_kola.szerokosc) *
+                                static_cast<uint64_t>(brudny_kola.wysokosc);
+    bws_sprawdz(pole_brudne_kola > 0 &&
+                pole_brudne_kola < static_cast<uint64_t>(lista.szerokosc()) * lista.wysokosc());
+
+    for (int i = 0; i < 500; ++i) okno_listy.obsluz_zdarzenie(kolo_listy);
+    bws_sprawdz(lista.pierwszy_widoczny_indeks() == lista.pasek_pionowy().maksimum());
+    int64_t lista_dol = lista.pasek_pionowy().wartosc();
+    okno_listy.obsluz_zdarzenie(kolo_listy);
+    bws_sprawdz(lista.pasek_pionowy().wartosc() == lista_dol);
+    Prostokat uchwyt_na_dole = lista.pasek_pionowy().prostokat_uchwytu();
+    bws_sprawdz(uchwyt_na_dole.y > uchwyt_na_gorze.y);
+    kolo_listy.dy = 1;
+    for (int i = 0; i < 500; ++i) okno_listy.obsluz_zdarzenie(kolo_listy);
+    bws_sprawdz(lista.pierwszy_widoczny_indeks() == 0);
+    bws_sprawdz(lista.wybrany_indeks() == -1 && lista.indeks_fokusu() == -1);
+
+    lista.ustaw_wybrany_indeks(0);
+    ZdarzenieKlawiatury lk{};
+    lk.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x51U; // PageDown
+    lista.obsluz_wcisniecie_klawisza(lk);
+    bws_sprawdz(lista.wybrany_indeks() > 0);
+    lk = {};
+    lk.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x4FU; // End
+    lista.obsluz_wcisniecie_klawisza(lk);
+    bws_sprawdz(lista.wybrany_indeks() == 1199);
+    bws_sprawdz(lista.pasek_pionowy().wartosc() > 0);
+    ZdarzenieRolki lr{};
+    lr.delta_y = 1;
+    int64_t lista_scroll_przed = lista.pasek_pionowy().wartosc();
+    lista.obsluz_rolke(lr);
+    bws_sprawdz(lista.pasek_pionowy().wartosc() < lista_scroll_przed);
+    lista.ustaw_wlaczona(false);
+    int lista_wybor_przed = lista.wybrany_indeks();
+    lk = {};
+    lk.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x48U;
+    lista.obsluz_wcisniecie_klawisza(lk);
+    bws_sprawdz(lista.wybrany_indeks() == lista_wybor_przed);
+    bws_log_u64("[LISTA POMIAR] visible_rows=", lista.liczba_ostatnio_narysowanych_wierszy());
+    bws_log_u64("[LISTA POMIAR] heap_allocations_repaint=", lista_alokacje_po - lista_alokacje_przed);
+    bws_log_u64("[LISTA POMIAR] wheel_dirty_area_px=", pole_brudne_kola);
+    bws_log_u64("[LISTA POMIAR] heap_allocations_wheel=", lista_kolo_alok_po - lista_kolo_alok_przed);
+    bws_log("[BURSZTYNUI WYBOR] Grupy, klawiatura i 1200 elementow: OK\n");
+
+    // -------------------------------------------------------------------------
+    // 8. PoleWielowierszowe: UTF-8, nowe linie, historia i widoczny rendering
+    // -------------------------------------------------------------------------
+    bws_log("[BURSZTYNUI MEMO] UTF-8, edycja wielowierszowa i przewijanie...\n");
+    Okno okno_memo("Test memo", 430, 260);
+    okno_memo.ustaw_pozycje(150, 110);
+    auto& memo_root = okno_memo.dodaj<Kolumna>();
+    memo_root.ustaw_wypelnienie(Marginesy(8));
+    auto& memo = memo_root.dodaj<PoleWielowierszowe>("Tekst wielowierszowy...");
+    memo.ustaw_preferowany_rozmiar(Rozmiar(414, 216));
+    memo.ustaw_tekst("Zażółć\r\ngęślą\rjaźń\nkoniec");
+    bws_sprawdz(memo.liczba_wierszy() == 4);
+    const char* memo_t = memo.tekst();
+    bool ma_cr = false;
+    for (size_t i = 0; memo_t[i]; ++i) if (memo_t[i] == '\r') ma_cr = true;
+    bws_sprawdz(!ma_cr);
+    memo.ustaw_maksymalna_liczbe_znakow(2000);
+    memo.ustaw_odstep_linii(2);
+    okno_memo.przelicz_uklad();
+    KontekstRysowania ctx_memo;
+    okno_memo.rysuj(ctx_memo, true);
+    bws_sprawdz(memo.liczba_ostatnio_narysowanych_linii() == 4);
+
+    // Kursor nigdy nie moze znalezc sie wewnatrz sekwencji UTF-8.
+    memo.ustaw_zaznaczenie(8, 8); // granica po "Zażółć"
+    ZdarzenieKlawiatury mk{};
+    mk.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x4BU;
+    memo.obsluz_wcisniecie_klawisza(mk);
+    size_t memo_kursor = memo.pozycja_kursora();
+    bws_sprawdz((static_cast<uint8_t>(memo.tekst()[memo_kursor]) & 0xC0U) != 0x80U);
+
+    // Enter wstawia LF i generuje zatwierdzenie, po czym Undo/Redo odtwarza stan.
+    int zatwierdzenia_memo = 0;
+    memo.przy_zatwierdzeniu([](PoleWielowierszowe*, const char*, void* dane) {
+        ++*static_cast<int*>(dane);
+    }, &zatwierdzenia_memo);
+    size_t wiersze_przed_enter = memo.liczba_wierszy();
+    mk = {};
+    mk.kod_klawisza = 13;
+    memo.obsluz_wcisniecie_klawisza(mk);
+    bws_sprawdz(memo.liczba_wierszy() == wiersze_przed_enter + 1);
+    bws_sprawdz(zatwierdzenia_memo == 1);
+    bws_sprawdz(memo.cofnij());
+    bws_sprawdz(memo.liczba_wierszy() == wiersze_przed_enter);
+    bws_sprawdz(memo.ponow());
+    bws_sprawdz(memo.liczba_wierszy() == wiersze_przed_enter + 1);
+
+    // Zaznaczenie przecinajace linie, schowek text/plain, wytnij i wklej.
+    memo.ustaw_tekst("Pierwszy\nDrugi\nTrzeci");
+    memo.ustaw_zaznaczenie(4, 15);
+    mk = {};
+    mk.modyfikatory = BWS_MOD_CTRL;
+    mk.kod_klawisza = 'c';
+    memo.obsluz_wcisniecie_klawisza(mk);
+    mk = {};
+    mk.modyfikatory = BWS_MOD_CTRL;
+    mk.kod_klawisza = 'x';
+    memo.obsluz_wcisniecie_klawisza(mk);
+    size_t dl_po_wycieciu = 0; while (memo.tekst()[dl_po_wycieciu]) ++dl_po_wycieciu;
+    mk = {};
+    mk.modyfikatory = BWS_MOD_CTRL;
+    mk.kod_klawisza = 'v';
+    memo.obsluz_wcisniecie_klawisza(mk);
+    size_t dl_po_wklejeniu = 0; while (memo.tekst()[dl_po_wklejeniu]) ++dl_po_wklejeniu;
+    bws_sprawdz(dl_po_wklejeniu > dl_po_wycieciu);
+
+    memo.ustaw_tekst("Bardzo długi wiersz UTF-8: Zażółć gęślą jaźń, który wymusza zawijanie w małym widoku.\nDrugi wiersz.\nTrzeci wiersz.\nCzwarty wiersz.\nPiąty wiersz.\nSzósty wiersz.\nSiódmy wiersz.\nÓsmy wiersz.\nDziewiąty wiersz.\nDziesiąty wiersz.\nJedenasty wiersz.\nDwunasty wiersz.\nTrzynasty wiersz.\nCzternasty wiersz.");
+    memo.ustaw_zawijanie_wierszy(true);
+    size_t zawiniete = memo.liczba_linii_wizualnych();
+    memo.ustaw_zawijanie_wierszy(false);
+    bws_sprawdz(memo.liczba_linii_wizualnych() <= zawiniete);
+    bws_sprawdz(memo.pasek_poziomy().czy_widoczna());
+    memo.przejdz_do_wiersza(13);
+    memo.przewin_do_kursora();
+    bws_sprawdz(memo.pasek_pionowy().wartosc() > 0);
+
+    // Dokladny viewport: polska linia bez zawijania oraz wiele wierszy
+    // wymuszaja oba paski jednoczesnie.
+    static const char* linia_dluga =
+        "Zażółć gęślą jaźń — Pchnąć w tę łódź jeża lub ośm skrzyń fig. "
+        "Długi wiersz 0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ "
+        "Zażółć gęślą jaźń — Pchnąć w tę łódź jeża lub ośm skrzyń fig. "
+        "Długi wiersz 0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ "
+        "Zażółć gęślą jaźń — koniec bardzo długiego wiersza.";
+    PoleWielowierszowe* memo_clip_ptr = new PoleWielowierszowe();
+    bws_sprawdz(memo_clip_ptr != nullptr);
+    PoleWielowierszowe& memo_clip = *memo_clip_ptr;
+    memo_clip.ustaw_zawijanie_wierszy(false);
+    memo_clip.ustaw_tekst(
+        "Zażółć gęślą jaźń — Pchnąć w tę łódź jeża lub ośm skrzyń fig. Długi wiersz 0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ Zażółć gęślą jaźń — Pchnąć w tę łódź jeża lub ośm skrzyń fig. Długi wiersz 0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ Zażółć gęślą jaźń — koniec bardzo długiego wiersza.\n"
+        "wiersz 2\nwiersz 3\nwiersz 4\nwiersz 5\nwiersz 6\nwiersz 7\nwiersz 8");
+    memo_clip.rozmiesc(Prostokat(0, 0, 210, 110));
+    bws_sprawdz(memo_clip.pasek_poziomy().czy_widoczna());
+    bws_sprawdz(memo_clip.pasek_pionowy().czy_widoczna());
+    Prostokat vp = memo_clip.prostokat_widoku_tekstu();
+    Prostokat pp = memo_clip.prostokat_paska_pionowego();
+    Prostokat ph = memo_clip.prostokat_paska_poziomego();
+    Prostokat rog = memo_clip.prostokat_rogu_paskow();
+    bws_sprawdz(vp == Prostokat(7, 6, 178, 80));
+    bws_sprawdz(ph.prawy() == pp.x && pp.dolny() == ph.y);
+    bws_sprawdz(!rog.czy_pusty() && rog.x == pp.x && rog.y == ph.y);
+    bws_sprawdz(!vp.przecina(pp) && !vp.przecina(ph) && !vp.przecina(rog));
+    bws_sprawdz(memo_clip.pasek_poziomy().maksimum() + vp.szerokosc ==
+                CzcionkaUI::zmierz_tekst(linia_dluga));
+
+    KontekstRysowania ctx_clip;
+    memo_clip.pasek_poziomy().ustaw_wartosc(0);
+    memo_clip.pasek_pionowy().ustaw_wartosc(0);
+    ctx_clip.wyczysc_pomiar_tekstu();
+    memo_clip.rysuj(ctx_clip, true);
+    Prostokat tekst_clip = ctx_clip.obszar_narysowanego_tekstu();
+    bws_sprawdz(!tekst_clip.czy_pusty());
+    bws_sprawdz(tekst_clip.x >= vp.x && tekst_clip.y >= vp.y &&
+                tekst_clip.prawy() <= vp.prawy() && tekst_clip.dolny() <= vp.dolny());
+
+    int64_t polowa_x = memo_clip.pasek_poziomy().maksimum() / 2;
+    memo_clip.wyczysc_brudny_obszar();
+    uint64_t memo_scroll_alok_przed = gui_liczba_alokacji_sterty();
+    memo_clip.pasek_poziomy().ustaw_wartosc(polowa_x);
+    ctx_clip.wyczysc_pomiar_tekstu();
+    memo_clip.rysuj(ctx_clip, false);
+    uint64_t memo_scroll_alok_po = gui_liczba_alokacji_sterty();
+    tekst_clip = ctx_clip.obszar_narysowanego_tekstu();
+    bws_sprawdz(tekst_clip.x >= vp.x && tekst_clip.y >= vp.y &&
+                tekst_clip.prawy() <= vp.prawy() && tekst_clip.dolny() <= vp.dolny());
+    bws_sprawdz(memo_scroll_alok_po == memo_scroll_alok_przed);
+    Prostokat memo_scroll_dirty = memo_clip.pobierz_brudny_obszar();
+    uint64_t memo_scroll_dirty_px = static_cast<uint64_t>(memo_scroll_dirty.szerokosc) *
+                                    static_cast<uint64_t>(memo_scroll_dirty.wysokosc);
+    bws_sprawdz(memo_scroll_dirty_px > 0 && memo_scroll_dirty_px < 210ULL * 110ULL);
+
+    memo_clip.pasek_poziomy().ustaw_wartosc(memo_clip.pasek_poziomy().maksimum());
+    ctx_clip.wyczysc_pomiar_tekstu();
+    memo_clip.rysuj(ctx_clip, false);
+    tekst_clip = ctx_clip.obszar_narysowanego_tekstu();
+    bws_sprawdz(tekst_clip.x >= vp.x && tekst_clip.prawy() <= vp.prawy());
+
+    for (int i = 0; i < 4; ++i) {
+        memo_clip.rozmiesc(Prostokat(0, 0, 3600, 110));
+        bws_sprawdz(!memo_clip.pasek_poziomy().czy_widoczna());
+        memo_clip.rozmiesc(Prostokat(0, 0, 210, 110));
+        bws_sprawdz(memo_clip.pasek_poziomy().czy_widoczna() &&
+                    memo_clip.pasek_pionowy().czy_widoczna());
+        bws_sprawdz(memo_clip.prostokat_widoku_tekstu() == vp);
+    }
+
+    // Ramka istnieje przed hover/fokusem i po utracie fokusu. Fokus zmienia
+    // kolor/emfaze, ale nie grubosc geometrii kontrolki.
+    bws_sprawdz(txt_input.styl_stanu(StanWizualny::Normalny).ramka != 0);
+    bws_sprawdz(memo_clip.styl_stanu(StanWizualny::Normalny).ramka != 0);
+    bws_sprawdz(lista.styl_stanu(StanWizualny::Normalny).ramka != 0);
+    bws_sprawdz(suwak.styl_stanu(StanWizualny::Normalny).ramka != 0);
+    bws_sprawdz(pasek_model.styl_stanu(StanWizualny::Normalny).ramka != 0);
+    bws_sprawdz(chk_haslo.styl_stanu(StanWizualny::Normalny).ramka != 0);
+    bws_sprawdz(txt_input.styl_stanu(StanWizualny::Normalny).grubosc_ramki ==
+                txt_input.styl_stanu(StanWizualny::Fokus).grubosc_ramki);
+    bws_sprawdz(suwak.styl_stanu(StanWizualny::Normalny).grubosc_ramki ==
+                suwak.styl_stanu(StanWizualny::Fokus).grubosc_ramki);
+    txt_input.przy_fokusie();
+    bws_sprawdz(txt_input.czy_ma_fokus());
+    txt_input.przy_utracie_fokusu();
+    bws_sprawdz(!txt_input.czy_ma_fokus() &&
+                txt_input.styl_stanu(StanWizualny::Normalny).ramka != 0);
+
+    okno_memo.rysuj(ctx_memo, false);
+    uint64_t memo_alokacje_przed = gui_liczba_alokacji_sterty();
+    ZdarzenieWprowadzaniaTekstu mt{};
+    mt.punkt_kodowy = 0x0105; // ą
+    memo.obsluz_wprowadzenie_tekstu(mt);
+    okno_memo.rysuj(ctx_memo, false);
+    uint64_t memo_alokacje_po = gui_liczba_alokacji_sterty();
+    int memo_dirty = okno_memo.ostatnia_powierzchnia_odrysowania();
+    bws_sprawdz(mt.obsluzone);
+    bws_sprawdz(memo_alokacje_po == memo_alokacje_przed);
+    bws_sprawdz(memo_dirty > 0 && memo_dirty < okno_memo.szerokosc() * okno_memo.wysokosc());
+    bws_sprawdz(memo.liczba_ostatnio_narysowanych_linii() <=
+                static_cast<size_t>(memo.wysokosc() / 16 + 2));
+    memo.ustaw_tylko_do_odczytu(true);
+    const char* przed_ro = memo.tekst();
+    size_t dl_ro = 0; while (przed_ro[dl_ro]) ++dl_ro;
+    memo.obsluz_wprowadzenie_tekstu(mt);
+    size_t dl_ro_po = 0; while (memo.tekst()[dl_ro_po]) ++dl_ro_po;
+    bws_sprawdz(dl_ro == dl_ro_po);
+    bws_log_u64("[MEMO POMIAR] visible_lines=", memo.liczba_ostatnio_narysowanych_linii());
+    bws_log_u64("[MEMO POMIAR] dirty_area_px=", static_cast<uint64_t>(memo_dirty));
+    bws_log_u64("[MEMO POMIAR] heap_allocations_type_repaint=", memo_alokacje_po - memo_alokacje_przed);
+    bws_log_u64("[MEMO POMIAR] horizontal_scroll_dirty_area_px=", memo_scroll_dirty_px);
+    bws_log_u64("[MEMO POMIAR] horizontal_scroll_allocations=", memo_scroll_alok_po - memo_scroll_alok_przed);
+    delete memo_clip_ptr;
+    delete okno_listy_ptr;
+    delete lista_ptr;
+    bws_log("[BURSZTYNUI MEMO] Edycja, historia, schowek i rendering: OK\n");
     bws_log("=== WSZYSTKIE TESTY BURSZTYNUI ZAKONCZONE SUKCESEM (PASS) ===\n\n");
 }
 

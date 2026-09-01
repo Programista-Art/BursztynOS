@@ -5,6 +5,11 @@
 
 namespace BursztynUI {
 
+// GCC/Clang zapewniaja 128-bitowe typy calkowite na docelowym x86_64.
+// Uzywamy ich jawnie do geometrii duzych zakresow bez przepelnien.
+__extension__ typedef __int128 SzerokaLiczba;
+__extension__ typedef unsigned __int128 SzerokaLiczbaBezZnaku;
+
 struct Punkt {
     int x{0};
     int y{0};

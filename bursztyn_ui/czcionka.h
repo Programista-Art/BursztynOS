@@ -113,6 +113,14 @@ public:
         return w;
     }
 
+    // Kanoniczna bitmapa glifu uzywana przez renderer z przycinaniem.
+    // Dla nieobslugiwanego punktu kodowego zachowujemy ten sam znak
+    // zastepczy co pomiar, aby geometria i rysowanie nie rozjezdzaly sie.
+    static const uint16_t* bitmapa_znaku(uint32_t cp) {
+        if (cp < LICZBA_GLIFOW) return nowa_czcionka_16x16[cp];
+        return nowa_czcionka_16x16['?'];
+    }
+
     // Zwraca krok pozycji X dla znaku (szerokość + 1px odstępu * skala)
     static int postep_znaku(uint32_t cp, int skala = 1) {
         int s = (skala < 1) ? 1 : skala;
