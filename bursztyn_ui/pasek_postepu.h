@@ -114,13 +114,17 @@ public:
         predkosc_animacji_ = (predkosc < 1) ? 1 : predkosc;
     }
     int predkosc_animacji() const { return predkosc_animacji_; }
+    uint64_t liczba_krokow_animacji() const { return liczba_krokow_animacji_; }
 
     bool czy_wymaga_animacji() const override {
-        return nieokreslony_ && czy_widoczna();
+        return nieokreslony_ && czy_efektywnie_widoczna();
     }
 
     void krok_animacji(uint64_t teraz_ns = 0) override {
-        if (!nieokreslony_ || !czy_widoczna()) return;
+        if (!nieokreslony_ || !czy_efektywnie_widoczna()) {
+            ostatni_krok_ns_ = 0;
+            return;
+        }
         if (teraz_ns != 0) {
             if (ostatni_krok_ns_ != 0 && (teraz_ns - ostatni_krok_ns_ < 33000000ULL)) {
                 return;
@@ -136,6 +140,7 @@ public:
             pozycja_animacji_ = 0;
             kierunek_animacji_ = 1;
         }
+        ++liczba_krokow_animacji_;
         uniewaznij();
     }
 
@@ -298,6 +303,7 @@ private:
 
     FunkcjaPostepu cb_zmiana_{nullptr};
     void* dane_zmiany_{nullptr};
+    uint64_t liczba_krokow_animacji_{0};
 };
 
 } // namespace BursztynUI

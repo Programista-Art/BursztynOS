@@ -17,9 +17,9 @@
  * wyslaniu EOI Local APIC. Kod przerwania nastepnie ustawia RSP na wartosc
  * zwrocona przez scheduler i wykonuje iretq.
  *
- * Scheduler nie moze przelaczac procesu w srodku zwyklego SYSCALL, poniewaz
- * rama SYSCALL ma inny format niz RejestryStanowe z IRQ. Ta polityka jest
- * realizowana w idt.cpp.
+ * Scheduler nie przelacza procesu w srodku zwyklego SYSCALL. BWS38 jest
+ * jedynym jawnym wyjatkiem: czeka przez HLT, timer buduje standardowa rame
+ * RejestryStanowe na prywatnym stosie, a idt.cpp wznawia syscall po wakeup.
  */
 
 #include "scheduler.h"
@@ -81,6 +81,11 @@ static constexpr uint64_t TIMEOUT_MYSZY_TICKI = 20ULL;
 static uint64_t termin_wybudzenia_myszy[
     MAKS_PROCESOW
 ] = {};
+
+static uint64_t termin_wybudzenia_zdarzenia[
+    MAKS_PROCESOW
+] = {};
+static bool wygasl_timeout_zdarzenia[MAKS_PROCESOW] = {};
 
 namespace {
 /* Burst klawiatury nie moze konkurowac z gestem myszy o 31 slotow. Ruch i
@@ -402,30 +407,54 @@ static void obsluz_timeouty_myszy() {
 
         proces_t& proces =
             tablica_procesow[pid];
+        int stan = odczytaj_stan_procesu(proces);
 
-        if (odczytaj_stan_procesu(proces) !=
-            PROCES_ZABLOKOWANY_MYSZ) {
+        if (stan == PROCES_ZABLOKOWANY_MYSZ) {
+            const uint64_t termin =
+                __atomic_load_n(
+                    &termin_wybudzenia_myszy[pid],
+                    __ATOMIC_RELAXED
+                );
 
-            continue;
-        }
+            if (!tick_osiagnal_termin(
+                    licznik_tykniec_zegara,
+                    termin)) {
+                continue;
+            }
 
-        const uint64_t termin =
-            __atomic_load_n(
-                &termin_wybudzenia_myszy[pid],
+            ustaw_stan_procesu(
+                proces,
+                PROCES_GOTOWY
+            );
+        } else if (stan == PROCES_ZABLOKOWANY_ZDARZENIE) {
+            const uint64_t termin =
+                __atomic_load_n(
+                    &termin_wybudzenia_zdarzenia[pid],
+                    __ATOMIC_RELAXED
+                );
+
+            if (termin == 0 || !tick_osiagnal_termin(
+                    licznik_tykniec_zegara,
+                    termin)) {
+                continue;
+            }
+
+            __atomic_store_n(
+                &termin_wybudzenia_zdarzenia[pid],
+                0,
                 __ATOMIC_RELAXED
             );
+            __atomic_store_n(
+                &wygasl_timeout_zdarzenia[pid],
+                true,
+                __ATOMIC_RELEASE
+            );
 
-        if (!tick_osiagnal_termin(
-                licznik_tykniec_zegara,
-                termin)) {
-
-            continue;
+            ustaw_stan_procesu(
+                proces,
+                PROCES_GOTOWY
+            );
         }
-
-        ustaw_stan_procesu(
-            proces,
-            PROCES_GOTOWY
-        );
     }
 }
 
@@ -770,8 +799,13 @@ bool scheduler_dodaj_zdarzenie(
         if (znaleziono) {
             q.wpisy[szukaj] = *zdarzenie;
             if (odczytaj_stan_procesu(tablica_procesow[pid]) ==
-                PROCES_ZABLOKOWANY_ZDARZENIE)
+                PROCES_ZABLOKOWANY_ZDARZENIE) {
+                __atomic_store_n(&termin_wybudzenia_zdarzenia[pid], 0,
+                                 __ATOMIC_RELAXED);
+                __atomic_store_n(&wygasl_timeout_zdarzenia[pid], false,
+                                 __ATOMIC_RELEASE);
                 ustaw_stan_procesu(tablica_procesow[pid], PROCES_GOTOWY);
+            }
             przywroc_przerwania(irq);
             return true;
         }
@@ -808,6 +842,10 @@ bool scheduler_dodaj_zdarzenie(
     q.glowa = nastepna;
     if (odczytaj_stan_procesu(tablica_procesow[pid]) ==
         PROCES_ZABLOKOWANY_ZDARZENIE) {
+        __atomic_store_n(&termin_wybudzenia_zdarzenia[pid], 0,
+                         __ATOMIC_RELAXED);
+        __atomic_store_n(&wygasl_timeout_zdarzenia[pid], false,
+                         __ATOMIC_RELEASE);
         ustaw_stan_procesu(tablica_procesow[pid], PROCES_GOTOWY);
         __atomic_add_fetch(&licznik_wybudzen_event,1ULL,__ATOMIC_RELAXED);
     }
@@ -831,21 +869,48 @@ bool scheduler_pobierz_zdarzenie(
     return true;
 }
 
-void scheduler_czekaj_na_zdarzenie(int pid) {
+void scheduler_czekaj_na_zdarzenie(int pid, uint64_t timeout_ticki) {
     if (!pid_uzytkownika(pid)) return;
     const StanPrzerwan irq = zapisz_i_wylacz_przerwania();
     KolejkaZdarzen& q = kolejki_zdarzen[pid];
     if (q.ogon == q.glowa &&
-        odczytaj_stan_procesu(tablica_procesow[pid]) == PROCES_GOTOWY)
+        odczytaj_stan_procesu(tablica_procesow[pid]) == PROCES_GOTOWY) {
+        __atomic_store_n(&wygasl_timeout_zdarzenia[pid], false,
+                         __ATOMIC_RELEASE);
+        if (timeout_ticki > 0) {
+            __atomic_store_n(&termin_wybudzenia_zdarzenia[pid],
+                             licznik_tykniec_zegara + timeout_ticki,
+                             __ATOMIC_RELAXED);
+        } else {
+            __atomic_store_n(&termin_wybudzenia_zdarzenia[pid],
+                             0,
+                             __ATOMIC_RELAXED);
+        }
         ustaw_stan_procesu(tablica_procesow[pid],
                            PROCES_ZABLOKOWANY_ZDARZENIE);
+    }
     przywroc_przerwania(irq);
+}
+
+bool scheduler_zuzyj_wygasly_timeout_zdarzenia(int pid) {
+    if (!pid_uzytkownika(pid)) return false;
+    const StanPrzerwan irq = zapisz_i_wylacz_przerwania();
+    const bool wygasl = __atomic_load_n(&wygasl_timeout_zdarzenia[pid],
+                                        __ATOMIC_ACQUIRE);
+    if (wygasl) {
+        __atomic_store_n(&wygasl_timeout_zdarzenia[pid], false,
+                         __ATOMIC_RELEASE);
+    }
+    przywroc_przerwania(irq);
+    return wygasl;
 }
 
 void scheduler_usun_zdarzenia_procesu(int pid) {
     if (!pid_uzytkownika(pid)) return;
     const StanPrzerwan irq = zapisz_i_wylacz_przerwania();
     kolejki_zdarzen[pid] = {};
+    termin_wybudzenia_zdarzenia[pid] = 0;
+    wygasl_timeout_zdarzenia[pid] = false;
     przywroc_przerwania(irq);
 }
 

@@ -80,7 +80,13 @@ struct ZdarzenieKlawiatury {
 struct ZdarzenieWprowadzaniaTekstu {
     TypZdarzenia typ{TypZdarzenia::WprowadzenieTekstu};
     uint32_t punkt_kodowy{0}; // Unicode codepoint UTF-32
+    uint32_t modyfikatory{0};
     bool obsluzone{false};
+
+    constexpr bool czy_shift() const { return (modyfikatory & BWS_MOD_SHIFT) != 0; }
+    constexpr bool czy_ctrl() const { return (modyfikatory & BWS_MOD_CTRL) != 0; }
+    constexpr bool czy_alt() const { return (modyfikatory & BWS_MOD_ALT) != 0; }
+    constexpr bool czy_super() const { return (modyfikatory & BWS_MOD_SUPER) != 0; }
 };
 
 struct ZdarzenieRolki {

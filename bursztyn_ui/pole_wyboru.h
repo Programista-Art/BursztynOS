@@ -28,14 +28,17 @@ public:
 
     StanWyboru stan_wyboru() const { return stan_wyboru_; }
     void ustaw_stan_wyboru(StanWyboru nowy_stan) {
+        if (!czy_trojstanowe_ && nowy_stan == StanWyboru::Nieokreslone) {
+            nowy_stan = StanWyboru::Niezaznaczone;
+        }
         if (stan_wyboru_ != nowy_stan) {
             stan_wyboru_ = nowy_stan;
             uniewaznij();
-            if (cb_przelaczenia_) {
-                cb_przelaczenia_(this, czy_zaznaczone(), dane_przelaczenia_);
-            }
             if (cb_stanu_) {
                 cb_stanu_(this, stan_wyboru_, dane_stanu_);
+            }
+            if (cb_przelaczenia_) {
+                cb_przelaczenia_(this, czy_zaznaczone(), dane_przelaczenia_);
             }
             if (cb_zmiana_wartosci_) {
                 cb_zmiana_wartosci_(this, dane_zmiany_wartosci_);
@@ -44,7 +47,13 @@ public:
     }
 
     bool czy_trojstanowe() const { return czy_trojstanowe_; }
-    void ustaw_trojstanowe(bool t) { czy_trojstanowe_ = t; }
+    void ustaw_trojstanowe(bool t) {
+        if (czy_trojstanowe_ == t) return;
+        czy_trojstanowe_ = t;
+        if (!czy_trojstanowe_ && stan_wyboru_ == StanWyboru::Nieokreslone) {
+            ustaw_stan_wyboru(StanWyboru::Niezaznaczone);
+        }
+    }
 
     bool czy_nieokreslone() const { return stan_wyboru_ == StanWyboru::Nieokreslone; }
 
@@ -153,7 +162,7 @@ public:
         if (czy_wcisnieta_) {
             czy_wcisnieta_ = false;
             if (obszar_ekranu_.zawiera(e.x, e.y)) {
-                przelacz_kolejny_stan();
+                aktywuj();
             }
             uniewaznij();
             e.obsluzone = true;
@@ -163,8 +172,14 @@ public:
 
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
         if (!czy_wlaczona_) return;
-        if (e.kod_klawisza == 32 || e.kod_klawisza == 13 || e.kod_klawisza == 10) { // Spacja / Enter
-            przelacz_kolejny_stan();
+        const uint32_t kod = e.kod_klawisza;
+        const bool usb = (kod & BWS_KEY_SOURCE_USB) != 0;
+        const uint32_t baza = usb ? (kod & 0xFFU) : (kod & 0x7FU);
+        const bool spacja = kod == 32U || (usb ? baza == 44U : baza == 0x39U);
+        const bool enter = kod == 13U || kod == 10U ||
+                           (usb ? baza == 40U : baza == 0x1CU);
+        if (spacja || enter) {
+            aktywuj();
             e.obsluzone = true;
             return;
         }
@@ -172,18 +187,24 @@ public:
     }
 
 private:
-    void przelacz_kolejny_stan() {
+    // Jedyna sciezka aktywacji uzytkownika. Mysz, Spacja i zachowany dla
+    // zgodnosci Enter korzystaja z identycznej maszyny stanow.
+    void aktywuj() {
+        StanWyboru nastepny = StanWyboru::Niezaznaczone;
         if (czy_trojstanowe_) {
             if (stan_wyboru_ == StanWyboru::Niezaznaczone) {
-                ustaw_stan_wyboru(StanWyboru::Zaznaczone);
+                nastepny = StanWyboru::Zaznaczone;
             } else if (stan_wyboru_ == StanWyboru::Zaznaczone) {
-                ustaw_stan_wyboru(StanWyboru::Nieokreslone);
+                nastepny = StanWyboru::Nieokreslone;
             } else {
-                ustaw_stan_wyboru(StanWyboru::Niezaznaczone);
+                nastepny = StanWyboru::Niezaznaczone;
             }
         } else {
-            ustaw_stan_wyboru((stan_wyboru_ == StanWyboru::Zaznaczone) ? StanWyboru::Niezaznaczone : StanWyboru::Zaznaczone);
+            nastepny = stan_wyboru_ == StanWyboru::Zaznaczone
+                     ? StanWyboru::Niezaznaczone
+                     : StanWyboru::Zaznaczone;
         }
+        ustaw_stan_wyboru(nastepny);
     }
 
     StanWyboru stan_wyboru_{StanWyboru::Niezaznaczone};

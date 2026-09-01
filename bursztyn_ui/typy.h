@@ -24,12 +24,28 @@ struct Punkt {
 };
 
 struct Rozmiar {
+    static constexpr int NIEOKRESLONY = -1;
+
     int szerokosc{0};
     int wysokosc{0};
 
     constexpr Rozmiar() = default;
     constexpr Rozmiar(int sz, int wys)
-        : szerokosc(sz < 0 ? 0 : sz), wysokosc(wys < 0 ? 0 : wys) {}
+        : szerokosc(sz), wysokosc(wys) {}
+
+    static constexpr Rozmiar Nieokreslony() { return Rozmiar(NIEOKRESLONY, NIEOKRESLONY); }
+    static constexpr Rozmiar Zero() { return Rozmiar(0, 0); }
+
+    constexpr bool czy_okreslona_szerokosc() const { return szerokosc >= 0; }
+    constexpr bool czy_okreslona_wysokosc() const { return wysokosc >= 0; }
+    constexpr bool czy_nieokreslona_szerokosc() const { return szerokosc < 0; }
+    constexpr bool czy_nieokreslona_wysokosc() const { return wysokosc < 0; }
+    constexpr bool czy_nieokreslony() const { return szerokosc < 0 || wysokosc < 0; }
+    constexpr bool czy_calkowicie_nieokreslony() const { return szerokosc < 0 && wysokosc < 0; }
+
+    constexpr Rozmiar bezpieczny_fizyczny() const {
+        return Rozmiar(szerokosc < 0 ? 0 : szerokosc, wysokosc < 0 ? 0 : wysokosc);
+    }
 
     constexpr bool operator==(const Rozmiar& o) const {
         return szerokosc == o.szerokosc && wysokosc == o.wysokosc;
@@ -67,7 +83,7 @@ struct Prostokat {
     constexpr Prostokat(int _x, int _y, int _sz, int _wys)
         : x(_x), y(_y), szerokosc(_sz < 0 ? 0 : _sz), wysokosc(_wys < 0 ? 0 : _wys) {}
     constexpr Prostokat(Punkt pt, Rozmiar rz)
-        : x(pt.x), y(pt.y), szerokosc(rz.szerokosc), wysokosc(rz.wysokosc) {}
+        : x(pt.x), y(pt.y), szerokosc(rz.szerokosc < 0 ? 0 : rz.szerokosc), wysokosc(rz.wysokosc < 0 ? 0 : rz.wysokosc) {}
 
     constexpr bool operator==(const Prostokat& o) const {
         return x == o.x && y == o.y && szerokosc == o.szerokosc && wysokosc == o.wysokosc;

@@ -774,13 +774,16 @@ bool gui_pobierz_zdarzenie(bws_zdarzenie* zdarzenie) {
 
 bool gui_czekaj_na_zdarzenie(bws_zdarzenie* zdarzenie) {
     if (!zdarzenie) return false;
-    for (;;) {
-        if (bws_wywolaj(38,
-                reinterpret_cast<uint64_t>(zdarzenie), 0, 0, 0) == 1ULL)
-            return true;
-        /* Proces zostal oznaczony BLOCKED; timer przelaczy go z Ring 3. */
-        asm volatile("pause" ::: "memory");
-    }
+    return bws_wywolaj(38,
+        reinterpret_cast<uint64_t>(zdarzenie), 0, 0, 0) == 1ULL;
+}
+
+bool gui_czekaj_na_zdarzenie_z_timeoutem(bws_zdarzenie* zdarzenie, uint64_t timeout_ticki) {
+    if (!zdarzenie) return false;
+    if (timeout_ticki == 0) return gui_czekaj_na_zdarzenie(zdarzenie);
+    const uint64_t wynik = bws_wywolaj(
+        38, reinterpret_cast<uint64_t>(zdarzenie), timeout_ticki, 0, 0);
+    return wynik == 1ULL;
 }
 
 void gui_ustaw_capture_myszy(bool stan) {

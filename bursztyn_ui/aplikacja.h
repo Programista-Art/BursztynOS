@@ -8,6 +8,14 @@ namespace BursztynUI {
 
 class AplikacjaGUI {
 public:
+    struct StatystykiPetli {
+        uint64_t iteracje{0};
+        uint64_t odczyty_hpet{0};
+        uint64_t wywolania_animacji{0};
+        uint64_t odrysowania{0};
+        uint64_t odebrane_zdarzenia{0};
+    };
+
     AplikacjaGUI() = default;
     virtual ~AplikacjaGUI() = default;
 
@@ -21,6 +29,7 @@ public:
     }
 
     Okno* glowne_okno() const { return glowne_okno_; }
+    const StatystykiPetli& statystyki_petli() const { return statystyki_; }
 
     void zakoncz() {
         czy_dziala_ = false;
@@ -57,38 +66,41 @@ public:
 
         bws_zdarzenie ev{};
         while (czy_dziala_) {
+            ++statystyki_.iteracje;
             bool ma_animacje = glowne_okno_ && glowne_okno_->czy_wymaga_animacji();
             bool odebrano = false;
 
             if (ma_animacje) {
-                odebrano = gui_pobierz_zdarzenie(&ev);
-                if (!odebrano) {
-                    uint64_t teraz = gui_czas_monotoniczny_ns();
-                    glowne_okno_->krok_animacji(teraz);
-                    if (!glowne_okno_->czy_zminimalizowane()) {
-                        glowne_okno_->rysuj(ctx);
-                        gui_odswiez();
-                    }
-                    for (int p = 0; p < 2000; ++p) {
-                        asm volatile("pause" ::: "memory");
-                    }
+                ++statystyki_.odczyty_hpet;
+                uint64_t teraz = gui_czas_monotoniczny_ns();
+                glowne_okno_->krok_animacji(teraz);
+                ++statystyki_.wywolania_animacji;
+                if (!glowne_okno_->czy_zminimalizowane() && glowne_okno_->czy_wymaga_odrysowania()) {
+                    glowne_okno_->rysuj(ctx);
+                    gui_odswiez();
+                    ++statystyki_.odrysowania;
                 }
+                // Usypiamy proces w schedulerze na czas do klatki (8 tickow = ~32 ms przy 250 Hz)
+                odebrano = gui_czekaj_na_zdarzenie_z_timeoutem(&ev, 8);
             } else {
                 odebrano = gui_czekaj_na_zdarzenie(&ev);
             }
 
             if (odebrano) {
+                ++statystyki_.odebrane_zdarzenia;
                 glowne_okno_->obsluz_zdarzenie(ev);
 
                 // Sprawdź czy są dodatkowe zdarzenia w kolejce
                 while (gui_pobierz_zdarzenie(&ev)) {
+                    ++statystyki_.odebrane_zdarzenia;
                     glowne_okno_->obsluz_zdarzenie(ev);
                 }
 
                 // Odśwież widok
-                if (!glowne_okno_->czy_zminimalizowane()) {
+                if (!glowne_okno_->czy_zminimalizowane() && glowne_okno_->czy_wymaga_odrysowania()) {
                     glowne_okno_->rysuj(ctx);
                     gui_odswiez();
+                    ++statystyki_.odrysowania;
                 }
             }
         }
@@ -100,6 +112,7 @@ private:
     Okno* glowne_okno_{nullptr};
     bool czy_dziala_{false};
     int skala_dpi_{1};
+    StatystykiPetli statystyki_{};
 };
 
 } // namespace BursztynUI

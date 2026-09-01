@@ -26,10 +26,7 @@ public:
     using FunkcjaRysowania = void (*)(Kontrolka* nadawca, KontekstRysowania& ctx, void* dane_uzytkownika);
 
     Kontrolka() {
-        // -1 oznacza naturalny wymiar. Rozmiar(-1, -1) nie może być tu użyty,
-        // ponieważ publiczny typ Rozmiar normalizuje zwykłe rozmiary do zera.
-        preferowany_rozmiar_.szerokosc = -1;
-        preferowany_rozmiar_.wysokosc = -1;
+        preferowany_rozmiar_ = Rozmiar(-1, -1);
     }
     virtual ~Kontrolka() {
         wyczysc_kontrolki();
@@ -271,6 +268,14 @@ public:
     // =========================================================================
 
     bool czy_widoczna() const { return czy_widoczna_; }
+    bool czy_efektywnie_widoczna() const {
+        const Kontrolka* k = this;
+        while (k) {
+            if (!k->czy_widoczna_) return false;
+            k = k->rodzic_;
+        }
+        return true;
+    }
     void ustaw_widoczna(bool v) {
         if (czy_widoczna_ != v) {
             czy_widoczna_ = v;
@@ -563,7 +568,7 @@ public:
     virtual bool czy_wymaga_animacji() const {
         if (!czy_widoczna_) return false;
         for (size_t i = 0; i < liczba_dzieci_; ++i) {
-            if (dzieci_[i] && dzieci_[i]->czy_wymaga_animacji()) return true;
+            if (dzieci_[i] && dzieci_[i]->czy_widoczna() && dzieci_[i]->czy_wymaga_animacji()) return true;
         }
         return false;
     }
@@ -571,7 +576,7 @@ public:
     virtual void krok_animacji(uint64_t teraz_ns = 0) {
         if (!czy_widoczna_) return;
         for (size_t i = 0; i < liczba_dzieci_; ++i) {
-            if (dzieci_[i]) dzieci_[i]->krok_animacji(teraz_ns);
+            if (dzieci_[i] && dzieci_[i]->czy_widoczna()) dzieci_[i]->krok_animacji(teraz_ns);
         }
     }
 
@@ -582,20 +587,24 @@ public:
     virtual Rozmiar zmierz(Rozmiar dostepny_rozmiar) {
         (void)dostepny_rozmiar;
         Rozmiar naturalny = oblicz_naturalny_rozmiar();
-        int w = preferowany_rozmiar_.szerokosc >= 0 ? (preferowany_rozmiar_.szerokosc * skala_dpi_) : naturalny.szerokosc;
-        int h = preferowany_rozmiar_.wysokosc >= 0 ? (preferowany_rozmiar_.wysokosc * skala_dpi_) : naturalny.wysokosc;
+        int w = preferowany_rozmiar_.czy_okreslona_szerokosc() ? (preferowany_rozmiar_.szerokosc * skala_dpi_) : naturalny.szerokosc;
+        int h = preferowany_rozmiar_.czy_okreslona_wysokosc() ? (preferowany_rozmiar_.wysokosc * skala_dpi_) : naturalny.wysokosc;
 
-        w = przytnij(w, minimalny_rozmiar_.szerokosc * skala_dpi_, maksymalny_rozmiar_.szerokosc * skala_dpi_);
-        h = przytnij(h, minimalny_rozmiar_.wysokosc * skala_dpi_, maksymalny_rozmiar_.wysokosc * skala_dpi_);
-        return Rozmiar(w, h);
+        int min_w = minimalny_rozmiar_.szerokosc > 0 ? (minimalny_rozmiar_.szerokosc * skala_dpi_) : 0;
+        int min_h = minimalny_rozmiar_.wysokosc > 0 ? (minimalny_rozmiar_.wysokosc * skala_dpi_) : 0;
+        int max_w = maksymalny_rozmiar_.szerokosc > 0 ? (maksymalny_rozmiar_.szerokosc * skala_dpi_) : 100000;
+        int max_h = maksymalny_rozmiar_.wysokosc > 0 ? (maksymalny_rozmiar_.wysokosc * skala_dpi_) : 100000;
+
+        w = przytnij(w, min_w, max_w);
+        h = przytnij(h, min_h, max_h);
+        return Rozmiar(w < 0 ? 0 : w, h < 0 ? 0 : h);
     }
 
     virtual void rozmiesc(Prostokat docelowy_obszar) {
         bool rozmiar_zmieniony = (obszar_.szerokosc != docelowy_obszar.szerokosc || obszar_.wysokosc != docelowy_obszar.wysokosc);
         obszar_ = docelowy_obszar;
         Punkt rodzic_poz = rodzic_ ? rodzic_->obszar_ekranu().pozycja() : Punkt(0, 0);
-        obszar_ekranu_ = Prostokat(rodzic_poz.x + obszar_.x, rodzic_poz.y + obszar_.y,
-                                   obszar_.szerokosc, obszar_.wysokosc);
+        obszar_ekranu_ = Prostokat(rodzic_poz + obszar_.pozycja(), obszar_.rozmiar());
 
         Prostokat klient = Prostokat(wypelnienie_.lewy * skala_dpi_, wypelnienie_.gorny * skala_dpi_,
                                      obszar_.szerokosc - wypelnienie_.poziomo() * skala_dpi_ < 0 ? 0 : obszar_.szerokosc - wypelnienie_.poziomo() * skala_dpi_,
@@ -609,6 +618,16 @@ public:
 
         if (rozmiar_zmieniony) {
             obsluz_zmiane_rozmiaru();
+        }
+    }
+
+    virtual void zaktualizuj_pozycje_ekranowa() {
+        Punkt rodzic_poz = rodzic_ ? rodzic_->obszar_ekranu().pozycja() : Punkt(0, 0);
+        obszar_ekranu_ = Prostokat(rodzic_poz + obszar_.pozycja(), obszar_.rozmiar());
+        for (size_t i = 0; i < liczba_dzieci_; ++i) {
+            if (dzieci_[i]) {
+                dzieci_[i]->zaktualizuj_pozycje_ekranowa();
+            }
         }
     }
 
@@ -859,7 +878,7 @@ protected:
 
     Rozmiar minimalny_rozmiar_{0, 0};
     Rozmiar maksymalny_rozmiar_{10000, 10000};
-    Rozmiar preferowany_rozmiar_{};
+    Rozmiar preferowany_rozmiar_{-1, -1};
 
     Marginesy margines_{0, 0, 0, 0};
     Marginesy wypelnienie_{0, 0, 0, 0};

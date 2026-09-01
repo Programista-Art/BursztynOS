@@ -146,6 +146,9 @@ private:
 class ZarzadcaPodpowiedzi {
 public:
     ZarzadcaPodpowiedzi() = default;
+    ~ZarzadcaPodpowiedzi() {
+        ukryj();
+    }
 
     void ustaw_opoznienie_pokazania(uint64_t ms) { opoznienie_ms_ = ms; }
     uint64_t opoznienie_pokazania() const { return opoznienie_ms_; }
@@ -158,7 +161,7 @@ public:
 
     void obsluz_ruch(ZarzadcaPopupow& popupy, Kontrolka* najechana, int kursor_ekran_x, int kursor_ekran_y, uint64_t timestamp = 0) {
         if (najechana != ostatnia_kontrolka_) {
-            ukryj(popupy);
+            ukryj(&popupy);
             ostatnia_kontrolka_ = najechana;
             czas_wejscia_ = timestamp;
             kursor_x_ = kursor_ekran_x;
@@ -181,6 +184,7 @@ public:
 
     void pokaz(ZarzadcaPopupow& popupy, const char* tekst, int kursor_ekran_x, int kursor_ekran_y, const char* tytul = nullptr) {
         if (!tekst || tekst[0] == '\0') return;
+        ukryj(&popupy);
         podpowiedz_.ustaw_tytul(tytul);
         podpowiedz_.ustaw_tekst(tekst);
         Rozmiar sz = podpowiedz_.obliczony_rozmiar();
@@ -189,10 +193,28 @@ public:
         popupy.otworz(podpowiedz_, rect);
     }
 
-    void ukryj(ZarzadcaPopupow& popupy) {
+    void ukryj(ZarzadcaPopupow* popupy = nullptr) {
         if (podpowiedz_.czy_otwarta()) {
-            popupy.zamknij(PowodZamknieciaPopup::Anulowanie);
+            if (podpowiedz_.zarzadca()) {
+                podpowiedz_.zarzadca()->zamknij(PowodZamknieciaPopup::Anulowanie);
+            } else if (popupy) {
+                popupy->zamknij(PowodZamknieciaPopup::Anulowanie);
+            }
         }
+    }
+
+    void odrejestruj_kontrolke(Kontrolka* k) {
+        if (ostatnia_kontrolka_ == k) {
+            ukryj();
+            reset();
+        }
+    }
+
+    void odrejestruj_zarzadce(ZarzadcaPopupow& popupy) {
+        if (podpowiedz_.zarzadca() == &popupy) {
+            ukryj(&popupy);
+        }
+        reset();
     }
 
     void reset() {

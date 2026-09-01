@@ -3491,21 +3491,48 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
                     ? 1ULL
                     : 0ULL;
 
-        case 37:
-        case 38: {
+        case 37: {
             if (!proces_ma_prawo(proces, PRAWO_GUI) || arg1 == 0 ||
                 !czy_bezpieczny_zakres_uzytkownika_do_zapisu(
                     reinterpret_cast<void*>(arg1), sizeof(bws_zdarzenie)))
                 return 0;
             bws_zdarzenie zdarzenie{};
-            if (!scheduler_pobierz_zdarzenie(aktualny_pid, &zdarzenie)) {
-                if (nr_funkcji == 38)
-                    scheduler_czekaj_na_zdarzenie(aktualny_pid);
-                return 0;
-            }
+            if (!scheduler_pobierz_zdarzenie(aktualny_pid, &zdarzenie)) return 0;
             return skopiuj_do_przestrzeni_uzytkownika(
                        reinterpret_cast<void*>(arg1), &zdarzenie,
                        sizeof(zdarzenie)) ? 1ULL : 0ULL;
+        }
+
+        case 38: {
+            if (!proces_ma_prawo(proces, PRAWO_GUI) || arg1 == 0 ||
+                !czy_bezpieczny_zakres_uzytkownika_do_zapisu(
+                    reinterpret_cast<void*>(arg1), sizeof(bws_zdarzenie)))
+                return 0;
+
+            for (;;) {
+                bws_zdarzenie zdarzenie{};
+                if (scheduler_pobierz_zdarzenie(aktualny_pid, &zdarzenie)) {
+                    return skopiuj_do_przestrzeni_uzytkownika(
+                               reinterpret_cast<void*>(arg1), &zdarzenie,
+                               sizeof(zdarzenie)) ? 1ULL : 0ULL;
+                }
+                if (arg2 > 0 &&
+                    scheduler_zuzyj_wygasly_timeout_zdarzenia(aktualny_pid))
+                    return 2;
+
+                scheduler_czekaj_na_zdarzenie(aktualny_pid, arg2);
+
+                /* BWS38 jest istniejacym blokujacym waitem. Prywatny stos
+                   jadra zachowuje rame SYSCALL, a standardowa rama IRQ
+                   timera moze bezpiecznie zostac zapisana przez scheduler.
+                   Po wybudzeniu wracamy dokladnie za HLT i ponownie
+                   sprawdzamy kolejke/deadline. */
+                asm volatile(
+                    "sti\n\t"
+                    "hlt\n\t"
+                    "cli"
+                    : : : "memory", "cc");
+            }
         }
 
         case 39:

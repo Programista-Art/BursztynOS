@@ -284,8 +284,8 @@ private:
 
             s.prostokat_ = Prostokat(cur_x, 1, sw, h - 2);
             if (s.kontrolka()) {
-                s.kontrolka()->rozmiesc(Prostokat(obszar_ekranu_.x + cur_x + 2,
-                                                 obszar_ekranu_.y + 2,
+                s.kontrolka()->rozmiesc(Prostokat(cur_x + 2,
+                                                 2,
                                                  sw > 4 ? sw - 4 : sw,
                                                  h > 4 ? h - 4 : h));
                 s.kontrolka()->ustaw_widoczna(sw > 4);

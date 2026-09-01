@@ -53,7 +53,9 @@ public:
     Karty() {
         styl_ = Motyw::pobierz_domyslny().styl_panelu;
         czy_moze_miec_fokus_ = true;
-        preferowany_rozmiar_ = Rozmiar(300, 200);
+        preferowany_rozmiar_ = Rozmiar(-1, -1);
+        wyrownanie_poziome_ = WyrownaniePoziome::Rozciagnij;
+        wyrownanie_pionowe_ = WyrownaniePionowe::Rozciagnij;
 
         obszar_stron_ = new Panel();
         obszar_stron_->ustaw_kolor_tla(0);
@@ -217,6 +219,11 @@ public:
         dane_zamkniecia_ = dane;
     }
 
+    Rozmiar oblicz_naturalny_rozmiar() const override {
+        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        return Rozmiar(320 * s, 200 * s);
+    }
+
     void rozmiesc(Prostokat r) override {
         Kontrolka::rozmiesc(r);
         przelicz_naglowki();
@@ -280,16 +287,22 @@ public:
             }
         }
         if (nowy_hover != najechana_karta_) {
+            int stary_hover = najechana_karta_;
             najechana_karta_ = nowy_hover;
-            uniewaznij();
+            if (stary_hover >= 0 && stary_hover < liczba_kart_)
+                uniewaznij_obszar(strony_[stary_hover].prostokat_naglowka_);
+            if (nowy_hover >= 0 && nowy_hover < liczba_kart_)
+                uniewaznij_obszar(strony_[nowy_hover].prostokat_naglowka_);
         }
     }
 
     void obsluz_opuszczenie_myszy() override {
         Kontrolka::obsluz_opuszczenie_myszy();
         if (najechana_karta_ != -1) {
+            int stary_hover = najechana_karta_;
             najechana_karta_ = -1;
-            uniewaznij();
+            if (stary_hover >= 0 && stary_hover < liczba_kart_)
+                uniewaznij_obszar(strony_[stary_hover].prostokat_naglowka_);
         }
     }
 
@@ -408,7 +421,7 @@ public:
 
 private:
     void przelicz_naglowki() {
-        int w = obszar_ekranu_.szerokosc;
+        int w = obszar_.szerokosc;
         if (w <= 0) return;
 
         int tab_h = wysokosc_paska_kart_;
@@ -439,8 +452,8 @@ private:
 
     void rozmiesc_strone_aktywna() {
         if (!obszar_stron_) return;
-        int w = obszar_ekranu_.szerokosc;
-        int h = obszar_ekranu_.wysokosc;
+        int w = obszar_.szerokosc;
+        int h = obszar_.wysokosc;
         int strona_y = wysokosc_paska_kart_;
         int strona_h = (h > strona_y + 2) ? h - strona_y - 2 : 0;
         int strona_w = (w > 2) ? w - 2 : 0;
@@ -461,7 +474,7 @@ private:
     void dopasuj_przewiniecie_do_aktywnej() {
         if (aktywna_karta_ < 0 || aktywna_karta_ >= liczba_kart_ || !czy_przewijany_pasek_) return;
         Prostokat nr = strony_[aktywna_karta_].prostokat_naglowka_;
-        int avail_w = obszar_ekranu_.szerokosc - 38;
+        int avail_w = obszar_.szerokosc - 38;
         if (nr.x < 2) {
             przewin_pasek(nr.x - 2);
         } else if (nr.prawy() > avail_w) {

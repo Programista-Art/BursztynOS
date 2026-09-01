@@ -26,6 +26,7 @@ public:
         zawartosc_->ustaw_kolor_tla(0);
         zawartosc_->ustaw_grubosc_ramki(0);
         zawartosc_->ustaw_wypelnienie(Marginesy(0));
+        zawartosc_->ustaw_uklad_automatyczny(false);
         dodaj_kontrolke(zawartosc_);
 
         pasek_pionowy_ = new PasekPrzewijania();
@@ -165,32 +166,61 @@ public:
         }
     }
 
-    Kontrolka* sprawdz_trafienie(Punkt p) override {
-        if (!czy_widoczna_ || !obszar_ekranu_.zawiera(p.x, p.y)) return nullptr;
+    Kontrolka* sprawdz_trafienie(Punkt pt) override {
+        if (!czy_widoczna_ || !obszar_.zawiera(pt)) return nullptr;
 
-        if (pasek_pionowy_->czy_widoczna() && pasek_pionowy_->obszar_ekranu().zawiera(p.x, p.y)) {
-            return pasek_pionowy_->sprawdz_trafienie(p);
+        Punkt lokalny(pt.x - obszar_.x, pt.y - obszar_.y);
+
+        if (pasek_pionowy_->czy_widoczna() && pasek_pionowy_->obszar().zawiera(lokalny)) {
+            return pasek_pionowy_->sprawdz_trafienie(lokalny);
         }
-        if (pasek_poziomy_->czy_widoczna() && pasek_poziomy_->obszar_ekranu().zawiera(p.x, p.y)) {
-            return pasek_poziomy_->sprawdz_trafienie(p);
+        if (pasek_poziomy_->czy_widoczna() && pasek_poziomy_->obszar().zawiera(lokalny)) {
+            return pasek_poziomy_->sprawdz_trafienie(lokalny);
         }
 
-        if (widok_ekranu_.zawiera(p.x, p.y)) {
-            Kontrolka* k = zawartosc_->sprawdz_trafienie(p);
+        if (widok_.zawiera(lokalny)) {
+            Kontrolka* k = zawartosc_->sprawdz_trafienie(lokalny);
             return k ? k : this;
         }
         return this;
     }
 
+    void uniewaznij_dziecko(Kontrolka* child, Prostokat r_ekranu) override {
+        if (blokada_aktualizacji_ > 0) return;
+        if (child == zawartosc_) {
+            Prostokat r_widok = r_ekranu.przeciecie(widok_ekranu_);
+            if (r_widok.czy_pusty()) return;
+            czy_brudna_ = true;
+            brudny_obszar_ = brudny_obszar_.suma(r_widok);
+            if (rodzic_) {
+                rodzic_->uniewaznij_dziecko(this, r_widok);
+            }
+        } else {
+            Kontrolka::uniewaznij_dziecko(child, r_ekranu);
+        }
+    }
+
     void rysuj(KontekstRysowania& ctx, bool wymus = false) override {
         if (!czy_widoczna_) return;
 
+        Punkt przesuniecie_rodzica = ctx.pobierz_przesuniecie();
+        Prostokat obszar_renderowania(przesuniecie_rodzica.x + obszar_.x,
+                                      przesuniecie_rodzica.y + obszar_.y,
+                                      obszar_.szerokosc, obszar_.wysokosc);
+        Prostokat clip = ctx.pobierz_przyciecie();
+        if (!obszar_renderowania.przecina(clip) && !wymus) {
+            return;
+        }
+
+        ctx.dodaj_przesuniecie(Punkt(obszar_.x, obszar_.y));
+        ctx.dodaj_przyciecie(Prostokat(0, 0, obszar_.szerokosc, obszar_.wysokosc));
+
         // Rysuj tło i ramkę WidokuPrzewijanego
-        Prostokat b(0, 0, obszar_ekranu_.szerokosc, obszar_ekranu_.wysokosc);
+        Prostokat b(0, 0, obszar_.szerokosc, obszar_.wysokosc);
         uint32_t tlo = styl_.normalny.tlo;
         uint32_t ramka = styl_.normalny.ramka;
-        ctx.rysuj_prostokat(b, tlo);
-        ctx.rysuj_ramke(b, ramka, 1);
+        if (tlo != 0) ctx.rysuj_prostokat(b, tlo);
+        if (ramka != 0) ctx.rysuj_ramke(b, ramka, 1);
 
         // Ogranicz do widoku i narysuj zawartość
         ctx.dodaj_przyciecie(widok_);
@@ -212,13 +242,17 @@ public:
             ctx.rysuj_prostokat(rog, Kolory::PowierzchniaAlternatywna);
         }
 
+        ctx.zdejmij_przyciecie();
+        ctx.zdejmij_przesuniecie();
+
         wyczysc_brudny_obszar();
+        czy_brudna_ = false;
     }
 
 private:
     void przelicz_uklad() {
-        int w = obszar_ekranu_.szerokosc;
-        int h = obszar_ekranu_.wysokosc;
+        int w = obszar_.szerokosc;
+        int h = obszar_.wysokosc;
         if (w <= 2 || h <= 2) return;
 
         int ramka_gr = 1;
@@ -259,8 +293,8 @@ private:
 
         pasek_pionowy_->ustaw_widoczna(pion_wymagany);
         if (pion_wymagany) {
-            pasek_pionowy_->rozmiesc(Prostokat(obszar_ekranu_.x + ramka_gr + avail_w,
-                                              obszar_ekranu_.y + ramka_gr,
+            pasek_pionowy_->rozmiesc(Prostokat(ramka_gr + avail_w,
+                                              ramka_gr,
                                               szerokosc_paska_, avail_h));
             pasek_pionowy_->ustaw_zakres(0, rozmiar_zawartosci_.wysokosc > avail_h ? rozmiar_zawartosci_.wysokosc - avail_h : 0);
             pasek_pionowy_->ustaw_rozmiar_strony(avail_h);
@@ -268,8 +302,8 @@ private:
 
         pasek_poziomy_->ustaw_widoczna(poziom_wymagany);
         if (poziom_wymagany) {
-            pasek_poziomy_->rozmiesc(Prostokat(obszar_ekranu_.x + ramka_gr,
-                                              obszar_ekranu_.y + ramka_gr + avail_h,
+            pasek_poziomy_->rozmiesc(Prostokat(ramka_gr,
+                                              ramka_gr + avail_h,
                                               avail_w, szerokosc_paska_));
             pasek_poziomy_->ustaw_zakres(0, rozmiar_zawartosci_.szerokosc > avail_w ? rozmiar_zawartosci_.szerokosc - avail_w : 0);
             pasek_poziomy_->ustaw_rozmiar_strony(avail_w);
@@ -283,8 +317,8 @@ private:
         int ox = static_cast<int>(pasek_poziomy_->wartosc());
         int oy = static_cast<int>(pasek_pionowy_->wartosc());
 
-        int zx = widok_ekranu_.x - ox;
-        int zy = widok_ekranu_.y - oy;
+        int zx = widok_.x - ox;
+        int zy = widok_.y - oy;
         int zw = rozmiar_zawartosci_.szerokosc > widok_.szerokosc ? rozmiar_zawartosci_.szerokosc : widok_.szerokosc;
         int zh = rozmiar_zawartosci_.wysokosc > widok_.wysokosc ? rozmiar_zawartosci_.wysokosc : widok_.wysokosc;
 

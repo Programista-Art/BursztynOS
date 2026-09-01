@@ -153,9 +153,11 @@ public:
     void zaznacz_wszystko() { ustaw_zaznaczenie(0, dlugosc_); }
     void kopiuj_do_schowka() { kopiuj(); }
     void wytnij_do_schowka() {
-        if (!czy_tylko_do_odczytu_) { kopiuj(); usun_zaznaczenie(); }
+        kopiuj();
+        if (!czy_tylko_do_odczytu_) usun_zaznaczenie();
     }
     void wklej_ze_schowka() { if (!czy_tylko_do_odczytu_) wklej(); }
+    size_t dlugosc() const { return dlugosc_; }
     void usun_zaznaczony_tekst() { if (!czy_tylko_do_odczytu_) usun_zaznaczenie(); }
 
     bool cofnij() {
@@ -197,6 +199,9 @@ public:
         rysuj_tlo_i_ramke(ctx, styl);
         Geometria g = geometria();
         ostatnio_narysowane_ = 0;
+        if (!g.rog.czy_pusty()) {
+            ctx.rysuj_prostokat(g.rog, Kolory::PowierzchniaTlo);
+        }
         if (g.widok.czy_pusty()) return;
         ctx.dodaj_przyciecie(g.widok);
         int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
@@ -226,7 +231,8 @@ public:
     }
 
     void obsluz_wprowadzenie_tekstu(ZdarzenieWprowadzaniaTekstu& e) override {
-        if (!czy_wlaczona_ || czy_tylko_do_odczytu_ || e.punkt_kodowy < 32) return;
+        if (!czy_wlaczona_ || czy_tylko_do_odczytu_ || e.punkt_kodowy < 32 ||
+            (e.czy_ctrl() && !e.czy_alt()) || e.czy_super()) return;
         char znak[5];
         if (CzcionkaUI::zakoduj_utf8(e.punkt_kodowy, znak)) {
             wstaw_fragment(znak); e.obsluzone = true;
@@ -240,6 +246,7 @@ public:
             return;
         }
         if (!czy_wlaczona_ || !e.czy_lewy_przycisk()) return;
+
         size_t p = bajt_z_punktu(e.x - obszar_ekranu_.x, e.y - obszar_ekranu_.y);
         if (!e.czy_shift()) kotwica_ = p;
         kursor_ = p;
@@ -248,19 +255,65 @@ public:
         uniewaznij_obszar(geometria().widok);
         e.obsluzone = true;
     }
+
     void obsluz_ruch_myszy(ZdarzenieMyszki& e) override {
         if (zaznaczanie_) {
-            kursor_ = bajt_z_punktu(e.x - obszar_ekranu_.x, e.y - obszar_ekranu_.y);
-            przewin_do_kursora();
-            uniewaznij_obszar(geometria().widok);
+            Geometria g = geometria();
+            int local_x = e.x - obszar_ekranu_.x;
+            int local_y = e.y - obszar_ekranu_.y;
+
+            if (local_y < g.widok.y) {
+                pionowy_->przewin_o(-1);
+            } else if (local_y > g.widok.dolny()) {
+                pionowy_->przewin_o(1);
+            }
+
+            if (!zawijanie_) {
+                if (local_x < g.widok.x) {
+                    poziomy_->przewin_o(-16);
+                } else if (local_x > g.widok.prawy()) {
+                    poziomy_->przewin_o(16);
+                }
+            }
+
+            size_t p = bajt_z_punktu(local_x, local_y);
+            if (p != kursor_) {
+                kursor_ = p;
+                przewin_do_kursora();
+                uniewaznij_obszar(g.widok);
+            }
             e.obsluzone = true;
         }
     }
+
     void obsluz_zwolnienie_myszy(ZdarzenieMyszki& e) override {
         if (e.czy_lewy_przycisk() && zaznaczanie_) {
-            zaznaczanie_ = false; e.obsluzone = true;
+            zaznaczanie_ = false;
+            e.obsluzone = true;
         }
     }
+
+    void obsluz_podwojne_klikniecie(ZdarzenieMyszki& e) override {
+        if (!czy_wlaczona_ || !e.czy_lewy_przycisk()) return;
+        size_t p = bajt_z_punktu(e.x - obszar_ekranu_.x, e.y - obszar_ekranu_.y);
+        if (p > dlugosc_) p = dlugosc_;
+
+        size_t start = p;
+        while (start > 0 && bufor_[start - 1] != ' ' && bufor_[start - 1] != '\n' && bufor_[start - 1] != '\t') {
+            start = CzcionkaUI::poprzedni_znak(bufor_, start);
+        }
+        size_t end = p;
+        while (end < dlugosc_ && bufor_[end] != ' ' && bufor_[end] != '\n' && bufor_[end] != '\t') {
+            end = CzcionkaUI::nastepny_znak(bufor_, end, dlugosc_);
+        }
+
+        kotwica_ = start;
+        kursor_ = end;
+        przewin_do_kursora();
+        uniewaznij_obszar(geometria().widok);
+        e.obsluzone = true;
+    }
+
     void obsluz_rolke(ZdarzenieRolki& e) override {
         if (!czy_wlaczona_ || e.delta_y == 0) return;
         pionowy_->przewin_o(e.delta_y > 0 ? -3 : 3);
@@ -272,9 +325,17 @@ public:
         bool ctrl = e.czy_ctrl(), shift = e.czy_shift();
         uint32_t k = e.kod_klawisza;
         uint32_t b = (k & BWS_KEY_SOURCE_USB) ? k & 0xFFU : k & 0x7FU;
+        if (k == 27) { // Escape: unieważnij zaznaczenie
+            if (czy_ma_zaznaczenie()) {
+                kotwica_ = kursor_;
+                uniewaznij_obszar(geometria().widok);
+                e.obsluzone = true;
+                return;
+            }
+        }
         if (ctrl && klawisz_litery(e, 'a', 0x1E)) { zaznacz_wszystko(); e.obsluzone = true; return; }
         if (ctrl && klawisz_litery(e, 'c', 0x2E)) { kopiuj(); e.obsluzone = true; return; }
-        if (ctrl && klawisz_litery(e, 'x', 0x2D)) { if (!czy_tylko_do_odczytu_) { kopiuj(); usun_zaznaczenie(); } e.obsluzone = true; return; }
+        if (ctrl && klawisz_litery(e, 'x', 0x2D)) { kopiuj(); if (!czy_tylko_do_odczytu_) usun_zaznaczenie(); e.obsluzone = true; return; }
         if (ctrl && klawisz_litery(e, 'v', 0x2F)) { if (!czy_tylko_do_odczytu_) wklej(); e.obsluzone = true; return; }
         if (ctrl && !shift && klawisz_litery(e, 'z', 0x2C)) { if (!czy_tylko_do_odczytu_) cofnij(); e.obsluzone = true; return; }
         if (ctrl && (klawisz_litery(e, 'y', 0x15) || (shift && klawisz_litery(e, 'z', 0x2C)))) { if (!czy_tylko_do_odczytu_) ponow(); e.obsluzone = true; return; }
@@ -289,8 +350,20 @@ public:
         bool ruch = true;
         if (ctrl && ((k & BWS_KEY_SOURCE_USB && b == 74U) || (!(k & BWS_KEY_SOURCE_USB) && b == 0x47U))) kursor_ = 0;
         else if (ctrl && ((k & BWS_KEY_SOURCE_USB && b == 77U) || (!(k & BWS_KEY_SOURCE_USB) && b == 0x4FU))) kursor_ = dlugosc_;
-        else if ((k & BWS_KEY_SOURCE_USB && b == 80U) || (!(k & BWS_KEY_SOURCE_USB) && b == 0x4BU)) kursor_ = poprzedni_bajt(kursor_, ctrl);
-        else if ((k & BWS_KEY_SOURCE_USB && b == 79U) || (!(k & BWS_KEY_SOURCE_USB) && b == 0x4DU)) kursor_ = nastepny_bajt(kursor_, ctrl);
+        else if ((k & BWS_KEY_SOURCE_USB && b == 80U) || (!(k & BWS_KEY_SOURCE_USB) && b == 0x4BU)) {
+            if (!shift && czy_ma_zaznaczenie()) {
+                kursor_ = poczatek_zaznaczenia();
+            } else {
+                kursor_ = poprzedni_bajt(kursor_, ctrl);
+            }
+        }
+        else if ((k & BWS_KEY_SOURCE_USB && b == 79U) || (!(k & BWS_KEY_SOURCE_USB) && b == 0x4DU)) {
+            if (!shift && czy_ma_zaznaczenie()) {
+                kursor_ = koniec_zaznaczenia();
+            } else {
+                kursor_ = nastepny_bajt(kursor_, ctrl);
+            }
+        }
         else if ((k & BWS_KEY_SOURCE_USB && b == 82U) || (!(k & BWS_KEY_SOURCE_USB) && b == 0x48U)) przesun_pionowo(-1);
         else if ((k & BWS_KEY_SOURCE_USB && b == 81U) || (!(k & BWS_KEY_SOURCE_USB) && b == 0x50U)) przesun_pionowo(1);
         else if ((k & BWS_KEY_SOURCE_USB && b == 75U) || (!(k & BWS_KEY_SOURCE_USB) && b == 0x49U)) przesun_pionowo(-liczba_widocznych_linii());
@@ -334,8 +407,14 @@ private:
         dst[i] = '\0';
     }
     static bool klawisz_litery(const ZdarzenieKlawiatury& e, char l, uint32_t scan) {
-        return e.kod_klawisza == static_cast<uint32_t>(l) ||
-               e.kod_klawisza == static_cast<uint32_t>(l - 'a' + 'A') || e.kod_skanu == scan;
+        uint32_t kod = e.kod_klawisza;
+        if ((kod & BWS_KEY_SOURCE_USB) != 0) {
+            return (kod & 0xFFU) == static_cast<uint32_t>(4 + (l - 'a'));
+        }
+        uint32_t baza = kod & 0x7FU;
+        return kod == static_cast<uint32_t>(l) ||
+               kod == static_cast<uint32_t>(l - 'a' + 'A') ||
+               baza == scan || (e.kod_skanu & 0x7FU) == scan;
     }
     int wysokosc_linii() const { return CzcionkaUI::pobierz_wysokosc(skala_dpi_) + odstep_linii_ * skala_dpi_; }
     int grubosc_paska() const { return 18 * skala_dpi_; }
@@ -464,10 +543,21 @@ private:
         size_t p=linie_[li].start; int px=0;
         while(p<linie_[li].koniec){uint32_t cp=0;size_t z=CzcionkaUI::dekoduj_utf8(bufor_,p,&cp);int k=CzcionkaUI::postep_znaku(cp,skala_dpi_);if(x<px+k/2)return p;px+=k;p+=z;}return linie_[li].koniec;
     }
-    size_t bajt_z_punktu(int x,int y) const {
-        Geometria g=geometria(); int rel=(y-g.widok.y)/wysokosc_linii(); if(rel<0)rel=0;
-        size_t li=static_cast<size_t>(pionowy_->wartosc()+rel);if(li>=liczba_wizualnych_)li=liczba_wizualnych_-1;
-        return bajt_z_x(li,x-g.widok.x+static_cast<int>(poziomy_->wartosc()));
+    size_t bajt_z_punktu(int x, int y) const {
+        if (dlugosc_ == 0 || liczba_wizualnych_ == 0) return 0;
+        Geometria g = geometria();
+        if (y < g.widok.y) {
+            size_t li = static_cast<size_t>(pionowy_->wartosc());
+            if (li >= liczba_wizualnych_) li = liczba_wizualnych_ - 1;
+            return bajt_z_x(li, x - g.widok.x + static_cast<int>(poziomy_->wartosc()));
+        }
+        int rel = (y - g.widok.y) / wysokosc_linii();
+        if (rel < 0) rel = 0;
+        size_t li = static_cast<size_t>(pionowy_->wartosc()) + static_cast<size_t>(rel);
+        if (li >= liczba_wizualnych_) {
+            return dlugosc_;
+        }
+        return bajt_z_x(li, x - g.widok.x + static_cast<int>(poziomy_->wartosc()));
     }
     size_t granica_utf8(size_t b) const { if(b>=dlugosc_)return dlugosc_;while(b>0&&(static_cast<uint8_t>(bufor_[b])&0xC0U)==0x80U)--b;return b; }
     size_t poprzedni_bajt(size_t p,bool slowo) const { if(!p)return 0;p=CzcionkaUI::poprzedni_znak(bufor_,p);if(slowo){while(p>0&&bufor_[p]==' ')p=CzcionkaUI::poprzedni_znak(bufor_,p);while(p>0&&bufor_[CzcionkaUI::poprzedni_znak(bufor_,p)]!=' '&&bufor_[CzcionkaUI::poprzedni_znak(bufor_,p)]!='\n')p=CzcionkaUI::poprzedni_znak(bufor_,p);}return p; }
@@ -484,8 +574,46 @@ private:
         if(czy_ma_zaznaczenie()&&a<b){size_t m=b-a;if(m>=pojemnosc_)m=pojemnosc_-1;for(size_t i=0;i<m;++i)roboczy_[i]=bufor_[a+i];roboczy_[m]='\0';int x=g.widok.x-offx+szerokosc_fragmentu(ln.start,a);ctx.rysuj_tekst(Punkt(x,y),roboczy_,Kolory::ZaznaczenieTekst,skala_dpi_);}
     }
     void ustaw_tekst_bez_historii(const char* src){size_t j=0;for(size_t i=0;src[i]&&j+1<pojemnosc_;++i){if(src[i]=='\r'){if(src[i+1]=='\n')++i;bufor_[j++]='\n';}else bufor_[j++]=src[i];}bufor_[j]='\0';dlugosc_=j;kursor_=kotwica_=dlugosc_;przelicz_linie();aktualizuj_przewijanie();przewin_do_kursora();uniewaznij_obszar(geometria().widok);}
-    void wstaw_fragment(const char* src){if(!src)return;size_t znaki=CzcionkaUI::liczba_znakow(bufor_);size_t sel=poczatek_zaznaczenia(),end=koniec_zaznaczenia();size_t usun=end-sel,n=0;while(src[n])++n;
-        size_t src_zn=CzcionkaUI::liczba_znakow(src);size_t sel_zn=0;for(size_t p=sel;p<end;p=CzcionkaUI::nastepny_znak(bufor_,p,end))++sel_zn;if(maks_znakow_&&znaki-sel_zn+src_zn>maks_znakow_){while(src_zn&&znaki-sel_zn+src_zn>maks_znakow_){n=CzcionkaUI::poprzedni_znak(src,n);--src_zn;}}if(dlugosc_-usun+n>=pojemnosc_)n=pojemnosc_-1-(dlugosc_-usun);while(n>0&&(static_cast<uint8_t>(src[n])&0xC0U)==0x80U)--n;zapisz_historie();for(size_t i=dlugosc_+1;i>end;--i)bufor_[i-usun+n-1]=bufor_[i-1];for(size_t i=0;i<n;++i)bufor_[sel+i]=src[i];dlugosc_=dlugosc_-usun+n;bufor_[dlugosc_]='\0';kursor_=kotwica_=sel+n;po_edycji(sel);}
+    void wstaw_fragment(const char* src) {
+        if (!src) return;
+        size_t znaki = CzcionkaUI::liczba_znakow(bufor_);
+        size_t sel = poczatek_zaznaczenia();
+        size_t end = koniec_zaznaczenia();
+        size_t usun = end - sel;
+        size_t n = 0;
+        while (src[n]) ++n;
+        size_t src_zn = CzcionkaUI::liczba_znakow(src);
+        size_t sel_zn = 0;
+        for (size_t p = sel; p < end;
+             p = CzcionkaUI::nastepny_znak(bufor_, p, end)) ++sel_zn;
+        if (maks_znakow_ && znaki - sel_zn + src_zn > maks_znakow_) {
+            while (src_zn && znaki - sel_zn + src_zn > maks_znakow_) {
+                n = CzcionkaUI::poprzedni_znak(src, n);
+                --src_zn;
+            }
+        }
+        if (dlugosc_ - usun + n >= pojemnosc_)
+            n = pojemnosc_ - 1 - (dlugosc_ - usun);
+        while (n > 0 && (static_cast<uint8_t>(src[n]) & 0xC0U) == 0x80U) --n;
+
+        zapisz_historie();
+        if (n <= usun) {
+            // Przesuniecie w lewo ma nakladajace sie zrodlo i cel, dlatego
+            // kopiujemy od poczatku ogona (semantyka memmove).
+            for (size_t i = end; i <= dlugosc_; ++i)
+                bufor_[sel + n + (i - end)] = bufor_[i];
+        } else {
+            // Przy rozszerzaniu kopiujemy od NUL-a wstecz, aby nie
+            // nadpisac jeszcze nieprzeniesionego ogona.
+            for (size_t i = dlugosc_ + 1; i > end; --i)
+                bufor_[i - usun + n - 1] = bufor_[i - 1];
+        }
+        for (size_t i = 0; i < n; ++i) bufor_[sel + i] = src[i];
+        dlugosc_ = dlugosc_ - usun + n;
+        bufor_[dlugosc_] = '\0';
+        kursor_ = kotwica_ = sel + n;
+        po_edycji(sel);
+    }
     void usun_zaznaczenie(){if(!czy_ma_zaznaczenie())return;wstaw_fragment("");}
     void usun_wstecz(){if(czy_ma_zaznaczenie()){usun_zaznaczenie();return;}if(!kursor_)return;kotwica_=CzcionkaUI::poprzedni_znak(bufor_,kursor_);wstaw_fragment("");}
     void usun_w_przod(){if(czy_ma_zaznaczenie()){usun_zaznaczenie();return;}if(kursor_>=dlugosc_)return;kotwica_=CzcionkaUI::nastepny_znak(bufor_,kursor_,dlugosc_);wstaw_fragment("");}

@@ -568,11 +568,14 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
         aktualny_pid == 0;
 
     bool proces_juz_pusty = false;
+    bool proces_blokuje_w_bws38 = false;
 
     if (aktualny_pid > 0 &&
         aktualny_pid < MAKS_PROCESOW) {
         const int stan_procesu=tablica_procesow[aktualny_pid].stan;
         proces_juz_pusty=stan_procesu==PROCES_PUSTY||stan_procesu==PROCES_KONCZACY;
+        proces_blokuje_w_bws38 =
+            stan_procesu == PROCES_ZABLOKOWANY_ZDARZENIE;
     }
 
     /*
@@ -591,14 +594,16 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
 
     if (przerwano_ring3 ||
         pid_idle ||
-        proces_juz_pusty) {
+        proces_juz_pusty ||
+        proces_blokuje_w_bws38) {
         return PrzelaczKontekst(rsp);
     }
 
     /*
-     * Jezeli timer przerwal kod Ring 0, pozostajemy w tym samym
-     * kontekscie. Chroni to m.in. rame SYSCALL/SWAPGS przed
-     * przelaczeniem procesu w niekompatybilnym formacie stosu.
+     * Jezeli timer przerwal zwykly kod Ring 0, pozostajemy w tym samym
+     * kontekscie. Wyjatek BWS38 powyzej jest bezpieczny: scheduler zapisuje
+     * kompletna rame IRQ na prywatnym stosie procesu, a po wybudzeniu IRETQ
+     * wznawia ten sam SYSCALL za HLT.
      */
     return rsp;
 }

@@ -63,6 +63,8 @@ struct StanDemo {
     ListaWyboru* lista{nullptr};
     ListaRozwijana* combo{nullptr};
     Suwak* suwak{nullptr};
+    PoleWyboru* checkbox_dwustanowy{nullptr};
+    PoleWyboru* checkbox_trojstanowy{nullptr};
 };
 
 static StanDemo g_demo;
@@ -156,10 +158,13 @@ static PasekNarzedzi* zbuduj_pasek_narzedzi(Panel& panel_nadrzedny) {
 static void zbuduj_zakladke_podstawowe(Panel& strona) {
     Kolumna& glowna = strona.dodaj<Kolumna>();
     glowna.ustaw_odstep(8);
+    glowna.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+    glowna.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+    glowna.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
 
     // Sekcja postepu
     Wiersz& w_postep = glowna.dodaj<Wiersz>();
-    w_postep.ustaw_odstep(12);
+    w_postep.ustaw_odstep(16);
 
     Kolumna& col_prog = w_postep.dodaj<Kolumna>();
     col_prog.ustaw_odstep(4);
@@ -167,20 +172,22 @@ static void zbuduj_zakladke_podstawowe(Panel& strona) {
     PasekPostepu& pb1 = col_prog.dodaj<PasekPostepu>(0, 100);
     pb1.ustaw_wartosc(65);
     pb1.ustaw_pokazywanie_procentu(true);
+    pb1.ustaw_preferowany_rozmiar(Rozmiar(220, 24));
     pb1.ustaw_podpowiedz("Wskazuje postep operacji (65%)");
     g_demo.postep_deterministyczny = &pb1;
 
     Kolumna& col_prog_anim = w_postep.dodaj<Kolumna>();
     col_prog_anim.ustaw_odstep(4);
-    col_prog_anim.dodaj<Etykieta>("Pasek postepu (animowany/nieokreslony):");
+    col_prog_anim.dodaj<Etykieta>("Pasek postepu (animowany):");
     PasekPostepu& pb2 = col_prog_anim.dodaj<PasekPostepu>(0, 100);
     pb2.ustaw_tryb_nieokreslony(true);
+    pb2.ustaw_preferowany_rozmiar(Rozmiar(220, 24));
     pb2.ustaw_podpowiedz("Pasek w trybie ciaglej animacji oczekiwania");
     g_demo.postep_animowany = &pb2;
 
     // Sekcja pol numerycznych
     Wiersz& w_num = glowna.dodaj<Wiersz>();
-    w_num.ustaw_odstep(12);
+    w_num.ustaw_odstep(16);
 
     Kolumna& col_num1 = w_num.dodaj<Kolumna>();
     col_num1.ustaw_odstep(4);
@@ -188,6 +195,7 @@ static void zbuduj_zakladke_podstawowe(Panel& strona) {
     PoleNumeryczne& pn1 = col_num1.dodaj<PoleNumeryczne>(0, 100, 25);
     pn1.ustaw_krok(5);
     pn1.ustaw_duzy_krok(20);
+    pn1.ustaw_preferowany_rozmiar(Rozmiar(220, 24));
     pn1.ustaw_podpowiedz("Wartosc liczbowa z przyciskami zwieksz/zmniejsz");
     pn1.przy_zmianie_wartosci([](PoleNumeryczne*, int64_t w, void*) {
         if (g_demo.postep_deterministyczny) g_demo.postep_deterministyczny->ustaw_wartosc(w);
@@ -201,12 +209,13 @@ static void zbuduj_zakladke_podstawowe(Panel& strona) {
     pn2.ustaw_prefiks("Waga: ");
     pn2.ustaw_sufiks(" kg");
     pn2.ustaw_krok(1);
+    pn2.ustaw_preferowany_rozmiar(Rozmiar(220, 24));
     pn2.ustaw_podpowiedz("Sformatowana wartosc z prefiksem i sufiksem");
     g_demo.pole_waga = &pn2;
 
     // Sekcja suwaka i przyciskow
     Wiersz& w_controls = glowna.dodaj<Wiersz>();
-    w_controls.ustaw_odstep(12);
+    w_controls.ustaw_odstep(16);
 
     Kolumna& col_slider = w_controls.dodaj<Kolumna>();
     col_slider.ustaw_odstep(4);
@@ -214,7 +223,7 @@ static void zbuduj_zakladke_podstawowe(Panel& strona) {
     Suwak& swk = col_slider.dodaj<Suwak>();
     swk.ustaw_zakres(0, 100);
     swk.ustaw_wartosc(65);
-    swk.ustaw_preferowany_rozmiar(Rozmiar(160, 22));
+    swk.ustaw_preferowany_rozmiar(Rozmiar(220, 24));
     swk.ustaw_podpowiedz("Przeciagnij suwak, aby plynnie zmienic wartosc");
     swk.przy_zmianie_wartosci([](Suwak*, int val, void*) {
         if (g_demo.postep_deterministyczny) g_demo.postep_deterministyczny->ustaw_wartosc(val);
@@ -233,12 +242,27 @@ static void zbuduj_zakladke_podstawowe(Panel& strona) {
     // Pola wyboru i przyciski akcji
     Wiersz& w_checks = glowna.dodaj<Wiersz>();
     w_checks.ustaw_odstep(16);
-    w_checks.dodaj<PoleWyboru>("Wlacz akceleracje sprzetowa", true);
+
+    PoleWyboru& chk1 = w_checks.dodaj<PoleWyboru>("Akceleracja sprzetowa", true);
+    chk1.ustaw_podpowiedz("Wlacz akceleracje GPU");
+    chk1.przy_przelaczeniu([](PoleWyboru*, bool wlaczony, void*) {
+        aktualizuj_status(wlaczony ? "Checkbox: WL" : "Checkbox: WYL");
+    });
+    g_demo.checkbox_dwustanowy = &chk1;
+
     PoleWyboru& chk3 = w_checks.dodaj<PoleWyboru>("Stan nieokreslony", false);
     chk3.ustaw_trojstanowe(true);
     chk3.ustaw_stan_wyboru(StanWyboru::Nieokreslone);
+    chk3.ustaw_podpowiedz("Trzystanowe pole wyboru");
+    chk3.przy_zmianie_stanu([](PoleWyboru*, StanWyboru stan, void*) {
+        if (stan == StanWyboru::Zaznaczone) aktualizuj_status("Checkbox 3-state: WL");
+        else if (stan == StanWyboru::Nieokreslone) aktualizuj_status("Checkbox 3-state: NIEOKRESLONY");
+        else aktualizuj_status("Checkbox 3-state: WYL");
+    });
+    g_demo.checkbox_trojstanowy = &chk3;
 
     Przycisk& btn_test = w_checks.dodaj<Przycisk>("Zastosuj zmiany");
+    btn_test.ustaw_preferowany_rozmiar(Rozmiar(140, 26));
     btn_test.ustaw_podpowiedz("Zastosuj wprowadzone parametry konfiguracyjne");
     btn_test.przy_kliknieciu([](Przycisk*, void*) {
         aktualizuj_status("Zastosowano biezace ustawienia.");
@@ -248,23 +272,44 @@ static void zbuduj_zakladke_podstawowe(Panel& strona) {
 static void zbuduj_zakladke_tekst(Panel& strona) {
     Kolumna& glowna = strona.dodaj<Kolumna>();
     glowna.ustaw_odstep(8);
+    glowna.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+    glowna.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+    glowna.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
 
     glowna.dodaj<Etykieta>("Wielowierszowy edytor tekstu (PoleWielowierszowe / Memo):");
 
     PoleWielowierszowe& memo = glowna.dodaj<PoleWielowierszowe>();
+    memo.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+    memo.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+    memo.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+    memo.ustaw_zawijanie_wierszy(false);
     memo.ustaw_tekst(
-        "Bursztyn OS - Niezalezny 64-bitowy system operacyjny.\n"
-        "BursztynUI jest natywnym frameworkiem retained-mode w Ring 3.\n"
-        "Wszystkie kontrolki wspieraja UTF-8: Zazółć gęślą jaźń!\n"
+        "Bursztyn OS - Niezalezny 64-bitowy system operacyjny napisany od podstaw w C/C++/ASM.\n"
+        "BursztynUI jest natywnym frameworkiem retained-mode dzialajacym w Ring 3 z wlasnym buforem.\n"
+        "Wszystkie kontrolki wspieraja wielobajtowe kodowanie UTF-8: Zazółć gęślą jaźń!\n"
+        "\n"
+        "Cechy edytora wielowierszowego (PoleWielowierszowe):\n"
+        " - Wielowierszowa edycja, zawijanie tekstu lub dlugie wiersze z poziomym scrollem.\n"
+        " - Dwukierunkowe paski przewijania (PasekPrzewijania) synchronizowane z modelem.\n"
+        " - Zaznaczanie mysza i klawiatura, kopiowanie, wycinanie i wklejanie ze schowka systemowego.\n"
+        " - Historia operacji (Cofnij/Ponow) i wielopoziomowy bufor edycyjny.\n"
+        " - Przyjazna nawigacja klawiszowa oraz precyzyjny kursor tekstowy.\n"
         "\n"
         "Skroty klawiszowe w edytorze:\n"
-        " - Ctrl+A: Zaznacz calosc\n"
+        " - Ctrl+A: Zaznacz caly tekst dokumentu\n"
         " - Ctrl+C / Ctrl+X / Ctrl+V: Kopiuj / Wytnij / Wklej\n"
-        " - Ctrl+Z / Ctrl+Y: Cofnij / Ponow\n"
-        " - Shift + Strzalki: Zaznaczanie blokowe tekstu\n"
-        " - PageUp / PageDown / Home / End: Szybka nawigacja\n"
+        " - Ctrl+Z / Ctrl+Y: Cofnij / Ponow ostatnia operacje\n"
+        " - Shift + Strzalki (Gora/Dol/Lewo/Prawo): Zaznaczanie tekstu\n"
+        " - Shift + Home / End: Zaznaczanie do poczatku/konca biezacego wiersza\n"
+        " - PageUp / PageDown / Home / End: Szybkie przewijanie i skoki\n"
+        "\n"
+        "Bardzo dlugi wiersz tekstu do testowania zawijania oraz przewijania poziomego: Litwo! Ojczyzno moja! ty jestes jak zdrowie. Ile cie trzeba cenic, ten tylko sie dowie, kto cie stracil. Dzis pieknosc twa w calej ozdobie widze i opisuje, bo tesknie po tobie.\n"
+        "\n"
+        "Test stabilnosci i bezpieczenstwa:\n"
+        " - Klikniecie poza zaznaczeniem natychmiast zwija blok i ustawia kursor w zadanym punkcie.\n"
+        " - Klikniecie ponizej tresci automatycznie ustawia kursor na samym koncu dokumentu.\n"
+        " - Zero alokacji sterty na goracej sciezce renderowania, przewijania i wpisywania znakow.\n"
     );
-    memo.ustaw_preferowany_rozmiar(Rozmiar(-1, 220));
     memo.ustaw_podpowiedz("Pole wielowierszowe z obsluga schowka i historii edycji");
     g_demo.memo = &memo;
 
@@ -272,10 +317,20 @@ static void zbuduj_zakladke_tekst(Panel& strona) {
     w_input.ustaw_odstep(8);
     w_input.dodaj<Etykieta>("Jednowierszowe wejscie:");
     PoleTekstowe& txt = w_input.dodaj<PoleTekstowe>("Wpisz tekst do zatwierdzenia...");
-    txt.ustaw_preferowany_rozmiar(Rozmiar(240, 24));
+    txt.ustaw_preferowany_rozmiar(Rozmiar(240, 26));
     txt.ustaw_podpowiedz("Pojedyncza linia edycji tekstu UTF-8");
 
+    PoleWyboru& chk_wrap = w_input.dodaj<PoleWyboru>("Zawijaj wiersze", false);
+    chk_wrap.ustaw_podpowiedz("Przelacz zawijanie wierszy w edytorze");
+    chk_wrap.przy_przelaczeniu([](PoleWyboru*, bool stan, void*) {
+        if (g_demo.memo) {
+            g_demo.memo->ustaw_zawijanie_wierszy(stan);
+            aktualizuj_status(stan ? "Zawijanie wlaczone" : "Zawijanie wylaczone (aktywny poziomy scroll)");
+        }
+    });
+
     Przycisk& btn_dodaj = w_input.dodaj<Przycisk>("Wyslij do edytora");
+    btn_dodaj.ustaw_preferowany_rozmiar(Rozmiar(140, 26));
     btn_dodaj.przy_kliknieciu([](Przycisk*, void* dane) {
         PoleTekstowe* t = static_cast<PoleTekstowe*>(dane);
         if (t && g_demo.memo) {
@@ -288,15 +343,20 @@ static void zbuduj_zakladke_tekst(Panel& strona) {
 
 static void zbuduj_zakladke_listy_drzewo(Panel& strona) {
     Wiersz& glowna = strona.dodaj<Wiersz>();
-    glowna.ustaw_odstep(12);
+    glowna.ustaw_odstep(14);
+    glowna.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+    glowna.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+    glowna.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
 
     // Drzewo hierarchiczne
     Kolumna& col_tree = glowna.dodaj<Kolumna>();
     col_tree.ustaw_odstep(4);
+    col_tree.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
     col_tree.dodaj<Etykieta>("Struktura plikow (Drzewo):");
 
     Drzewo& tree = col_tree.dodaj<Drzewo>();
-    tree.ustaw_preferowany_rozmiar(Rozmiar(220, 260));
+    tree.ustaw_preferowany_rozmiar(Rozmiar(280, -1));
+    tree.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
     tree.ustaw_podpowiedz("Wirtualizowany widok drzewiasty (do 4096 wezlow)");
 
     UchwytWezlaDrzewa r_komp = tree.dodaj_korzen("Moj Komputer");
@@ -337,10 +397,12 @@ static void zbuduj_zakladke_listy_drzewo(Panel& strona) {
     // Prawa kolumna z lista wyboru i combo
     Kolumna& col_lists = glowna.dodaj<Kolumna>();
     col_lists.ustaw_odstep(6);
+    col_lists.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
 
     col_lists.dodaj<Etykieta>("Lista wyboru (ListaWyboru):");
     ListaWyboru& lst = col_lists.dodaj<ListaWyboru>();
-    lst.ustaw_preferowany_rozmiar(Rozmiar(200, 160));
+    lst.ustaw_preferowany_rozmiar(Rozmiar(280, 200));
+    lst.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
     lst.ustaw_podpowiedz("Wirtualizowana lista elementow z przewijaniem");
     for (int i = 1; i <= 50; ++i) {
         char item_buf[32] = "Element listy #";
@@ -353,7 +415,7 @@ static void zbuduj_zakladke_listy_drzewo(Panel& strona) {
 
     col_lists.dodaj<Etykieta>("Lista rozwijana (ListaRozwijana):");
     ListaRozwijana& combo = col_lists.dodaj<ListaRozwijana>();
-    combo.ustaw_preferowany_rozmiar(Rozmiar(200, 24));
+    combo.ustaw_preferowany_rozmiar(Rozmiar(280, 26));
     combo.ustaw_podpowiedz("Rozwijane menu wyboru pojedynczej pozycji");
     combo.dodaj_element("Motyw: Bursztynowy Klasyczny");
     combo.dodaj_element("Motyw: Ciemny Grafit");
@@ -371,25 +433,30 @@ static void zbuduj_zakladke_listy_drzewo(Panel& strona) {
 static void zbuduj_zakladke_kontenery(Panel& strona) {
     Kolumna& glowna = strona.dodaj<Kolumna>();
     glowna.ustaw_odstep(8);
+    glowna.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+    glowna.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+    glowna.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
 
     glowna.dodaj<Etykieta>("Widok przewijany z duza zawartoscia (WidokPrzewijany):");
 
     WidokPrzewijany& scroll_view = glowna.dodaj<WidokPrzewijany>();
-    scroll_view.ustaw_preferowany_rozmiar(Rozmiar(440, 220));
+    scroll_view.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+    scroll_view.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+    scroll_view.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
     scroll_view.ustaw_podpowiedz("Kontener przewijajacy z dwukierunkowym scrollem");
 
     // Dodaj wiele wierszy do wnetrza widoku przewijanego
-    for (int r = 1; r <= 15; ++r) {
+    for (int r = 1; r <= 20; ++r) {
         char label_buf[48] = "Wiersz zawartosci widoku przewijanego #";
         size_t p = 39;
         dopisz_liczbe(label_buf, p, sizeof(label_buf), r);
 
         Etykieta* lbl = new Etykieta(label_buf);
-        lbl->rozmiesc(Prostokat(10, (r - 1) * 28 + 6, 320, 22));
+        lbl->rozmiesc(Prostokat(10, (r - 1) * 28 + 6, 340, 22));
         scroll_view.dodaj_do_zawartosci(lbl);
 
         Przycisk* btn = new Przycisk("Akcja");
-        btn->rozmiesc(Prostokat(340, (r - 1) * 28 + 4, 70, 22));
+        btn->rozmiesc(Prostokat(370, (r - 1) * 28 + 4, 80, 22));
         btn->przy_kliknieciu([](Przycisk*, void* dane) {
             int nr = static_cast<int>(reinterpret_cast<intptr_t>(dane));
             char buf[64] = "Kliknieto przycisk w wierszu ";
@@ -399,17 +466,23 @@ static void zbuduj_zakladke_kontenery(Panel& strona) {
         }, reinterpret_cast<void*>(static_cast<intptr_t>(r)));
         scroll_view.dodaj_do_zawartosci(btn);
     }
-    scroll_view.ustaw_rozmiar_zawartosci(Rozmiar(460, 450));
+    scroll_view.ustaw_rozmiar_zawartosci(Rozmiar(500, 580));
 }
 
 static void zbuduj_zakladke_info(Panel& strona) {
     Kolumna& glowna = strona.dodaj<Kolumna>();
     glowna.ustaw_odstep(8);
+    glowna.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+    glowna.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+    glowna.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
 
     glowna.dodaj<Etykieta>("O architekturze BursztynUI:");
 
     PoleWielowierszowe& info_memo = glowna.dodaj<PoleWielowierszowe>();
     info_memo.ustaw_tylko_do_odczytu(true);
+    info_memo.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+    info_memo.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+    info_memo.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
     info_memo.ustaw_tekst(
         "BursztynUI Framework v2.0\n"
         "========================\n"
@@ -427,12 +500,12 @@ static void zbuduj_zakladke_info(Panel& strona) {
         "   - Podpowiedz: system tooltipow z precyzyjnym pozycjonowaniem\n"
         "   - MenuGlowne, MenuKontekstowe, ListaRozwijana\n"
     );
-    info_memo.ustaw_preferowany_rozmiar(Rozmiar(-1, 240));
 }
 
 static PasekStanu* zbuduj_pasek_stanu(Panel& panel_nadrzedny) {
     PasekStanu& sb = panel_nadrzedny.dodaj<PasekStanu>();
-    sb.ustaw_preferowany_rozmiar(Rozmiar(300, 24));
+    sb.ustaw_preferowany_rozmiar(Rozmiar(-1, 24));
+    sb.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
     sb.dodaj_sekcje("Gotowy", 100, RozmiarSekcjiStanu::Rozciagnij);
     sb.dodaj_sekcje("UTF-8", 60, RozmiarSekcjiStanu::DopasujDoTresci);
     sb.dodaj_sekcje("DPI: 100%", 70, RozmiarSekcjiStanu::Stala);
@@ -447,7 +520,7 @@ static PasekStanu* zbuduj_pasek_stanu(Panel& panel_nadrzedny) {
 extern "C" __attribute__((noreturn)) void _start() {
     AplikacjaGUI app;
 
-    Okno okno("BursztynUI - Pokaz Komponentow Retained-Mode", 720, 520);
+    Okno okno("BursztynUI - Pokaz Komponentow Retained-Mode", 760, 580);
     g_demo.okno = &okno;
 
     Panel* korzen = static_cast<Panel*>(okno.kontrolka_glowna());
@@ -468,6 +541,7 @@ extern "C" __attribute__((noreturn)) void _start() {
     Karty& karty = korzen->dodaj<Karty>();
     karty.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
     karty.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+    karty.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
 
     // Zakladka 1: Podstawowe
     Panel* strona_podstawowe = new Panel();

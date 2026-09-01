@@ -327,6 +327,7 @@ void gui_ustaw_przejecie_myszy(bool stan);
 void gui_ustaw_capture_myszy(bool stan);
 bool gui_pobierz_zdarzenie(bws_zdarzenie* zdarzenie);
 bool gui_czekaj_na_zdarzenie(bws_zdarzenie* zdarzenie);
+bool gui_czekaj_na_zdarzenie_z_timeoutem(bws_zdarzenie* zdarzenie, uint64_t timeout_ticki);
 
 void gui_pobierz_rozdzielczosc(int* w,
                                int* h);

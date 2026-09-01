@@ -58,6 +58,12 @@ public:
         return !czy_zminimalizowane_ && kontrolka_glowna_ && kontrolka_glowna_->czy_wymaga_animacji();
     }
 
+    bool czy_wymaga_odrysowania() const {
+        return czy_brudne_ || !brudny_obszar_klienta_.czy_pusty() ||
+               (kontrolka_glowna_ && kontrolka_glowna_->czy_brudna()) ||
+               popupy_.czy_brudny();
+    }
+
     void krok_animacji(uint64_t teraz_ns = 0) {
         if (czy_wymaga_animacji()) {
             kontrolka_glowna_->krok_animacji(teraz_ns);
@@ -143,7 +149,9 @@ public:
             if (kontrolka_z_fokusem_) {
                 kontrolka_z_fokusem_->przy_fokusie();
             }
-            czy_brudne_ = true;
+            // Obie kontrolki uniewazniaja swoje lokalne prostokaty w
+            // przy_fokusie/przy_utracie_fokusu. Zmiana fokusu nie jest
+            // zmiana geometrii i nie moze wymuszac pelnego repaintu okna.
         }
     }
 
@@ -169,6 +177,7 @@ public:
     }
 
     void przelicz_uklad() {
+        ++liczba_przejsc_ukladu_;
         popupy_.ustaw_geometrie_wlasciciela(Prostokat(x_, y_, szerokosc_, wysokosc_),
                                             pobierz_obszar_roboczy());
         if (!kontrolka_glowna_) return;
@@ -184,6 +193,11 @@ public:
 
     Prostokat ostatni_obszar_odrysowania() const { return ostatni_obszar_odrysowania_; }
     int ostatnia_powierzchnia_odrysowania() const { return ostatni_obszar_odrysowania_.szerokosc * ostatni_obszar_odrysowania_.wysokosc; }
+    uint64_t liczba_zdarzen_ruchu_myszy() const { return liczba_zdarzen_ruchu_myszy_; }
+    uint64_t liczba_przejsc_ukladu() const { return liczba_przejsc_ukladu_; }
+    uint64_t liczba_odrysowan() const { return liczba_odrysowan_; }
+    uint64_t liczba_pelnych_odrysowan() const { return liczba_pelnych_odrysowan_; }
+    uint64_t liczba_brudnych_pikseli() const { return liczba_brudnych_pikseli_; }
 
     void uniewaznij_obszar(Prostokat r) {
         brudny_obszar_klienta_ = brudny_obszar_klienta_.suma(r);
@@ -201,6 +215,9 @@ public:
 
         if (pelne_odrysowanie) {
             ostatni_obszar_odrysowania_ = Prostokat(0, 0, szerokosc_, wysokosc_);
+            ++liczba_odrysowan_;
+            ++liczba_pelnych_odrysowan_;
+            liczba_brudnych_pikseli_ += static_cast<uint64_t>(szerokosc_) * wysokosc_;
 
             // Narysuj standardową belkę tytułową na pozycji okna
             gui_rysuj_standardowa_belke(x_, y_, szerokosc_, tytul_, czy_zmaksymalizowane_);
@@ -238,6 +255,9 @@ public:
 
             if (!brudny.czy_pusty()) {
                 ostatni_obszar_odrysowania_ = brudny;
+                ++liczba_odrysowan_;
+                liczba_brudnych_pikseli_ +=
+                    static_cast<uint64_t>(brudny.szerokosc) * brudny.wysokosc;
 
                 ctx.dodaj_przesuniecie(Punkt(x_, y_));
                 ctx.dodaj_przyciecie(brudny);
@@ -318,6 +338,7 @@ public:
 
         switch (surowe_zdarzenie.typ) {
             case BWS_ZDARZENIE_MYSZ_RUCH: {
+                ++liczba_zdarzen_ruchu_myszy_;
                 if (popupy_.czy_otwarty()) {
                     ZdarzenieMyszki pe;
                     pe.typ = TypZdarzenia::RuchMyszy;
@@ -433,9 +454,15 @@ public:
                         int ddy = (my > ost_click_y_) ? (my - ost_click_y_) : (ost_click_y_ - my);
 
                         if (teraz > 0 && ost_click_czas_ > 0 && (teraz - ost_click_czas_ < 400000000ULL || (teraz - ost_click_czas_ < 400 && teraz < 1000000000ULL)) && ddx < 5 && ddy < 5) {
-                            me.typ = TypZdarzenia::PodwojneKlikniecie;
-                            me.liczba_klikniec = 2;
-                            hit->obsluz_podwojne_klikniecie(me);
+                            // Podwojne klikniecie jest dodatkowa semantyka
+                            // drugiego DOWN, a nie jego zamiennikiem. Kontrolki
+                            // aktywowane na DOWN/UP (np. PoleWyboru) musza byc
+                            // uzbrojone takze przy drugim kliknieciu.
+                            hit->obsluz_wcisniecie_myszy(me);
+                            ZdarzenieMyszki podwojne = me;
+                            podwojne.typ = TypZdarzenia::PodwojneKlikniecie;
+                            podwojne.liczba_klikniec = 2;
+                            hit->obsluz_podwojne_klikniecie(podwojne);
                             ost_click_czas_ = 0;
                         } else {
                             hit->obsluz_wcisniecie_myszy(me);
@@ -517,15 +544,26 @@ public:
             }
 
             case BWS_ZDARZENIE_TEXT_INPUT: {
+                // Sterownik publikuje TEXT_INPUT rowniez dla litery wcisnietej
+                // z Ctrl. Skrot zostal juz obsluzony przez zdarzenie fizyczne;
+                // nie wolno potem wstawic literalnego C/X/V/A/Z/Y. Ctrl+Alt
+                // pozostaje dozwolone dla ukladow uzywajacych AltGr.
+                if ((surowe_zdarzenie.przyciski & BWS_MOD_CTRL) != 0 &&
+                    (surowe_zdarzenie.przyciski & BWS_MOD_ALT) == 0) break;
                 if (popupy_.czy_otwarty()) {
                     ZdarzenieWprowadzaniaTekstu pe;
                     pe.punkt_kodowy = surowe_zdarzenie.kod;
+                    pe.modyfikatory = surowe_zdarzenie.przyciski;
                     if (popupy_.obsluz_tekst(pe)) break;
                 }
                 if (kontrolka_z_fokusem_) {
                     ZdarzenieWprowadzaniaTekstu te;
                     te.punkt_kodowy = surowe_zdarzenie.kod;
-                    kontrolka_z_fokusem_->obsluz_wprowadzenie_tekstu(te);
+                    te.modyfikatory = surowe_zdarzenie.przyciski;
+                    for (Kontrolka* k = kontrolka_z_fokusem_;
+                         k && !te.obsluzone; k = k->rodzic()) {
+                        k->obsluz_wprowadzenie_tekstu(te);
+                    }
                 }
                 break;
             }
@@ -543,8 +581,15 @@ public:
                     Kontrolka* cel_alt = kontrolka_glowna_->kontrolka_aktywacji_alt();
                     if (cel_alt) { ustaw_fokus(cel_alt); break; }
                 }
-                // Tab (9 lub scancode 0x0F) - nawigacja fokus
-                if (wcisniety && (surowe_zdarzenie.kod == 9 || surowe_zdarzenie.kod == 0x0F)) {
+                bool usb = (surowe_zdarzenie.kod & BWS_KEY_SOURCE_USB) != 0;
+                uint32_t baza = usb ? (surowe_zdarzenie.kod & 0xFFU)
+                                    : (surowe_zdarzenie.kod & 0x7FU);
+                bool tab = surowe_zdarzenie.kod == 9 ||
+                           (!usb && baza == 0x0FU) || (usb && baza == 43U);
+                // Ctrl+Tab nalezy do kontenera kart, nie do globalnej
+                // nawigacji fokusu.
+                if (wcisniety && tab &&
+                    (surowe_zdarzenie.przyciski & BWS_MOD_CTRL) == 0) {
                     bool shift = (surowe_zdarzenie.przyciski & BWS_MOD_SHIFT) != 0;
                     nastepny_fokus(shift);
                     break;
@@ -558,10 +603,16 @@ public:
                 if (wcisniety && popupy_.czy_otwarty() && popupy_.obsluz_klawisz(ke)) break;
                 if (kontrolka_z_fokusem_) {
                     if (wcisniety) {
-                        kontrolka_z_fokusem_->obsluz_wcisniecie_klawisza(ke);
+                        for (Kontrolka* k = kontrolka_z_fokusem_;
+                             k && !ke.obsluzone; k = k->rodzic()) {
+                            k->obsluz_wcisniecie_klawisza(ke);
+                        }
                     } else {
                         ke.typ = TypZdarzenia::KlawiszZwolniony;
-                        kontrolka_z_fokusem_->obsluz_zwolnienie_klawisza(ke);
+                        for (Kontrolka* k = kontrolka_z_fokusem_;
+                             k && !ke.obsluzone; k = k->rodzic()) {
+                            k->obsluz_zwolnienie_klawisza(ke);
+                        }
                     }
                 }
                 break;
@@ -668,6 +719,12 @@ private:
     uint64_t ost_click_czas_{0};
     int ost_click_x_{0};
     int ost_click_y_{0};
+
+    uint64_t liczba_zdarzen_ruchu_myszy_{0};
+    uint64_t liczba_przejsc_ukladu_{0};
+    uint64_t liczba_odrysowan_{0};
+    uint64_t liczba_pelnych_odrysowan_{0};
+    uint64_t liczba_brudnych_pikseli_{0};
 
     Kontrolka* kontrolka_glowna_{nullptr};
     Panel* domyslny_korzen_{nullptr};

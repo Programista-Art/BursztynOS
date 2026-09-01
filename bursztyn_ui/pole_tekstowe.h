@@ -359,7 +359,8 @@ public:
 
     // Obsługa Klawiatury
     void obsluz_wprowadzenie_tekstu(ZdarzenieWprowadzaniaTekstu& e) override {
-        if (!czy_wlaczona_ || czy_tylko_do_odczytu_) return;
+        if (!czy_wlaczona_ || czy_tylko_do_odczytu_ ||
+            (e.czy_ctrl() && !e.czy_alt()) || e.czy_super()) return;
         if (e.punkt_kodowy >= 32) {
             char utf8_bytes[5]{0};
             size_t bytes = CzcionkaUI::zakoduj_utf8(e.punkt_kodowy, utf8_bytes);
@@ -380,14 +381,14 @@ public:
         bool ctrl = e.czy_ctrl();
 
         // Ctrl + A (Select All)
-        if (ctrl && (e.kod_klawisza == 'a' || e.kod_klawisza == 'A' || e.kod_skanu == 0x1E)) {
+        if (ctrl && klawisz_litery(e, 'a', 0x1E)) {
             zaznacz_wszystko();
             e.obsluzone = true;
             return;
         }
 
         // Ctrl + C (Copy)
-        if (ctrl && (e.kod_klawisza == 'c' || e.kod_klawisza == 'C' || e.kod_skanu == 0x2E)) {
+        if (ctrl && klawisz_litery(e, 'c', 0x2E)) {
             if (czy_ma_zaznaczenie()) {
                 char temp[MAKS_BUFOR];
                 size_t len = pobierz_zaznaczony_tekst(temp, sizeof(temp));
@@ -400,13 +401,13 @@ public:
         }
 
         // Ctrl + X (Cut)
-        if (ctrl && (e.kod_klawisza == 'x' || e.kod_klawisza == 'X' || e.kod_skanu == 0x2D)) {
-            if (!czy_tylko_do_odczytu_ && czy_ma_zaznaczenie()) {
+        if (ctrl && klawisz_litery(e, 'x', 0x2D)) {
+            if (czy_ma_zaznaczenie()) {
                 char temp[MAKS_BUFOR];
                 size_t len = pobierz_zaznaczony_tekst(temp, sizeof(temp));
                 if (len > 0) {
                     clipboard_set("text/plain", temp, len + 1);
-                    usun_zaznaczenie();
+                    if (!czy_tylko_do_odczytu_) usun_zaznaczenie();
                 }
             }
             e.obsluzone = true;
@@ -414,7 +415,7 @@ public:
         }
 
         // Ctrl + V (Paste)
-        if (ctrl && (e.kod_klawisza == 'v' || e.kod_klawisza == 'V' || e.kod_skanu == 0x2F)) {
+        if (ctrl && klawisz_litery(e, 'v', 0x2F)) {
             if (!czy_tylko_do_odczytu_) {
                 char clip_buf[MAKS_BUFOR] = {0};
                 uint64_t odczytano = 0;
@@ -428,15 +429,15 @@ public:
         }
 
         // Ctrl + Z (Undo)
-        if (ctrl && !shift && (e.kod_klawisza == 'z' || e.kod_klawisza == 'Z' || e.kod_skanu == 0x2C)) {
+        if (ctrl && !shift && klawisz_litery(e, 'z', 0x2C)) {
             if (!czy_tylko_do_odczytu_) cofnij();
             e.obsluzone = true;
             return;
         }
 
         // Ctrl + Y lub Ctrl + Shift + Z (Redo)
-        if ((ctrl && (e.kod_klawisza == 'y' || e.kod_klawisza == 'Y' || e.kod_skanu == 0x15)) ||
-            (ctrl && shift && (e.kod_klawisza == 'z' || e.kod_klawisza == 'Z' || e.kod_skanu == 0x2C))) {
+        if ((ctrl && klawisz_litery(e, 'y', 0x15)) ||
+            (ctrl && shift && klawisz_litery(e, 'z', 0x2C))) {
             if (!czy_tylko_do_odczytu_) ponow();
             e.obsluzone = true;
             return;
@@ -539,6 +540,19 @@ public:
     }
 
 private:
+    static bool klawisz_litery(const ZdarzenieKlawiatury& e,
+                               char litera, uint32_t skan_ps2) {
+        const uint32_t kod = e.kod_klawisza;
+        if ((kod & BWS_KEY_SOURCE_USB) != 0) {
+            return (kod & 0xFFU) ==
+                   static_cast<uint32_t>(4 + (litera - 'a'));
+        }
+        return kod == static_cast<uint32_t>(litera) ||
+               kod == static_cast<uint32_t>(litera - 'a' + 'A') ||
+               (kod & 0x7FU) == skan_ps2 ||
+               (e.kod_skanu & 0x7FU) == skan_ps2;
+    }
+
     struct MigawkaStanu {
         char bufor[MAKS_BUFOR]{0};
         size_t dlugosc{0};

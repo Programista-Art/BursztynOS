@@ -360,7 +360,7 @@ private:
 
             el.prostokat_ = Prostokat(x, 3, item_w, item_h);
             if (el.typ() == TypElementuPaskaNarzedzi::KontrolkaWlasna && el.kontrolka()) {
-                el.kontrolka()->rozmiesc(Prostokat(obszar_ekranu_.x + x, obszar_ekranu_.y + 3, item_w, item_h));
+                el.kontrolka()->rozmiesc(Prostokat(x, 3, item_w, item_h));
                 el.kontrolka()->ustaw_widoczna(true);
             }
             x += item_w + 4;

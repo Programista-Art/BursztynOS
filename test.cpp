@@ -345,6 +345,147 @@ static void wykonaj_testy_bws_61_83() {
     }
 }
 
+__attribute__((noinline)) static void testy_interaktywne_bursztyn_ui() {
+    bws_log("[BURSZTYNUI INTERAKTYWNOSC] Testy WidokPrzewijany, Drzewo i Efektywna Widocznosc...\n");
+    // 1. WidokPrzewijany: 20 przyciskow "Akcja", transformacje, hit-test, scrolling i brak driftu
+    {
+        WidokPrzewijany* sv = new WidokPrzewijany();
+        sv->rozmiesc(Prostokat(20, 30, 400, 300));
+        sv->ustaw_rozmiar_zawartosci(Rozmiar(600, 700));
+
+        static int klikniecia_akcja[20] = {0};
+        for (int i = 0; i < 20; ++i) klikniecia_akcja[i] = 0;
+
+        for (int i = 0; i < 20; ++i) {
+            Przycisk* btn = new Przycisk("Akcja");
+            btn->rozmiesc(Prostokat(100, i * 30 + 10, 80, 24));
+            btn->przy_kliknieciu([](Przycisk*, void* dane) {
+                int idx = static_cast<int>(reinterpret_cast<intptr_t>(dane));
+                if (idx >= 0 && idx < 20) klikniecia_akcja[idx]++;
+            }, reinterpret_cast<void*>(static_cast<intptr_t>(i)));
+            sv->dodaj_do_zawartosci(btn);
+        }
+
+        // Test hit-testu przy offset 0: przycisk 0 jest na (100, 10) w zawartosci
+        Kontrolka* hit0 = sv->sprawdz_trafienie(Punkt(161, 53));
+        bws_sprawdz_msg(hit0 != nullptr, "SV HIT przycisk 0");
+
+        // Test przewiniecia w dol o 90px (3 wiersze)
+        sv->przewin_do(0, 90);
+        Kontrolka* hit3 = sv->sprawdz_trafienie(Punkt(161, 53));
+        bws_sprawdz_msg(hit3 != nullptr, "SV HIT przycisk 3 po scrollu");
+
+        if (hit3) {
+            ZdarzenieMyszki me_down{};
+            me_down.typ = TypZdarzenia::WcisniecieMyszy;
+            me_down.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
+            me_down.x = hit3->obszar_ekranu().x + 10;
+            me_down.y = hit3->obszar_ekranu().y + 10;
+            hit3->obsluz_wcisniecie_myszy(me_down);
+
+            ZdarzenieMyszki me_up = me_down;
+            me_up.typ = TypZdarzenia::ZwolnienieMyszy;
+            hit3->obsluz_zwolnienie_myszy(me_up);
+            bws_sprawdz_msg(klikniecia_akcja[3] == 1, "SV CALLBACK przycisk 3");
+            bws_sprawdz_msg(klikniecia_akcja[0] == 0, "SV BRAK false callback przycisk 0");
+        }
+
+        // Test 100 cykli scroll down/up - weryfikacja braku driftu geometrii
+        for (int c = 0; c < 100; ++c) {
+            sv->przewin_do(0, 150);
+            sv->przewin_do(0, 0);
+        }
+        bws_sprawdz_msg(sv->zawartosc().obszar().y == sv->prostokat_widoku().y, "SV 100 cykli BRAK DRIFTU");
+
+        delete sv;
+    }
+
+    // 2. Drzewo: Geometria lokalna, brak displacementu i stabilnosc projekcji
+    {
+        Drzewo* tr = new Drzewo();
+        tr->rozmiesc(Prostokat(50, 60, 240, 200));
+        UchwytWezlaDrzewa k1 = tr->dodaj_korzen("Moj Komputer");
+        UchwytWezlaDrzewa c1 = tr->dodaj_dziecko(k1, "Dysk C:");
+        tr->dodaj_dziecko(c1, "Plik.txt");
+        tr->ustaw_rozwiniety(k1, true);
+        tr->ustaw_rozwiniety(c1, true);
+
+        // Weryfikacja liczby wezlow i widocznych
+        bws_sprawdz_msg(tr->liczba_wezlow() == 3, "DRZEWO liczba wezlow");
+        bws_sprawdz_msg(tr->czy_uchwyt_poprawny(k1), "DRZEWO uchwyt k1");
+
+        // Symulacja klikniecia w pierwszy wiersz (y=5 w lokalnych)
+        ZdarzenieMyszki me_click{};
+        me_click.typ = TypZdarzenia::WcisniecieMyszy;
+        me_click.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
+        me_click.x = tr->obszar_ekranu().x + 20;
+        me_click.y = tr->obszar_ekranu().y + 5; // Pierwszy wiersz
+        tr->obsluz_wcisniecie_myszy(me_click);
+        bws_sprawdz_msg(tr->wybrany_wezel() == k1, "DRZEWO klikniecie pierwszego wiersza");
+
+        const uint64_t projekcje_przed = tr->liczba_przebudowan_widocznych();
+        uint64_t alok_przed = gui_liczba_alokacji_sterty();
+        for (int i = 0; i < 100; ++i) {
+            ZdarzenieMyszki move{};
+            move.typ = TypZdarzenia::RuchMyszy;
+            move.x = tr->obszar_ekranu().x + 200;
+            move.y = tr->obszar_ekranu().y + 180;
+            tr->obsluz_ruch_myszy(move);
+        }
+        uint64_t alok_po = gui_liczba_alokacji_sterty();
+        bws_sprawdz_msg(tr->liczba_przebudowan_widocznych() == projekcje_przed,
+                        "DRZEWO MouseMove nie przebudowuje projekcji");
+        bws_sprawdz_msg(alok_po == alok_przed,
+                        "DRZEWO MouseMove 0 heap allocations");
+
+        delete tr;
+    }
+
+    // 3. Efektywna widocznosc i animacja (czy_efektywnie_widoczna)
+    {
+        Panel* stronaA = new Panel();
+        Panel* stronaB = new Panel();
+        PasekPostepu* p_anim = new PasekPostepu();
+        p_anim->ustaw_tryb_nieokreslony(true);
+        stronaA->dodaj_kontrolke(p_anim);
+
+        Karty* k = new Karty();
+        k->dodaj_karte("Tab A", stronaA);
+        k->dodaj_karte("Tab B", stronaB);
+        k->rozmiesc(Prostokat(0, 0, 400, 300));
+
+        // Zakladka A jest aktywna -> animacja powinna dzialac
+        bws_sprawdz_msg(p_anim->czy_efektywnie_widoczna() == true, "ANIM Tab A widoczna");
+        bws_sprawdz_msg(k->czy_wymaga_animacji() == true, "ANIM Tab A wymaga animacji");
+        k->krok_animacji(1000000000ULL);
+        const uint64_t widoczne_kroki = p_anim->liczba_krokow_animacji();
+        bws_sprawdz_msg(widoczne_kroki == 1, "ANIM widoczny jeden tick");
+
+        // Przelacz na Zakladke B -> stronaA zostaje ukryta
+        k->ustaw_aktywna_karte(1);
+        bws_sprawdz_msg(stronaA->czy_widoczna() == false, "ANIM Tab A ukryta");
+        bws_sprawdz_msg(p_anim->czy_efektywnie_widoczna() == false, "ANIM p_anim nieefektywna");
+        bws_sprawdz_msg(p_anim->czy_wymaga_animacji() == false, "ANIM p_anim czy_wymaga false");
+        bws_sprawdz_msg(k->czy_wymaga_animacji() == false, "ANIM Karty czy_wymaga false na Tab B");
+        for (int i = 0; i < 100; ++i)
+            k->krok_animacji(2000000000ULL + static_cast<uint64_t>(i) * 35000000ULL);
+        bws_sprawdz_msg(p_anim->liczba_krokow_animacji() == widoczne_kroki,
+                        "ANIM ukryty tick counter == 0");
+
+        // Powrot na Zakladke A -> animacja wznawia sie bezpiecznie
+        k->ustaw_aktywna_karte(0);
+        bws_sprawdz_msg(p_anim->czy_efektywnie_widoczna() == true, "ANIM p_anim powrot Tab A");
+        bws_sprawdz_msg(k->czy_wymaga_animacji() == true, "ANIM Karty czy_wymaga true powrot Tab A");
+        k->krok_animacji(6000000000ULL);
+        bws_sprawdz_msg(p_anim->liczba_krokow_animacji() == widoczne_kroki + 1,
+                        "ANIM powrot bez catch-up");
+
+        delete k;
+    }
+
+    bws_log("[INTERAKTYWNOSC AUDYT] WidokPrzewijany, Drzewo i Efektywna Widocznosc: OK\n");
+}
+
 static void wykonaj_testy_bursztyn_ui() {
     const uint32_t bledy_bui_przed = bws_test_blad;
     bws_log("\n=== ROZPOCZECIE TESTOW BURSZTYNUI ===\n");
@@ -607,6 +748,41 @@ static void wykonaj_testy_bursztyn_ui() {
     bws_sprawdz_msg(liczniki_hover.checkbox == 200 && liczniki_hover.pion == 200,
                     "Hover 100x: niepelna liczba odrysowan kontrolek");
 
+    // Neutralny MouseMove przez rzeczywista trase Okno nie zmienia zadnego
+    // stanu wizualnego. Nie moze uruchamiac layoutu, odrysowania ani alokacji.
+    okno_hover.rysuj(ctx_hover, false);
+    const uint64_t neutral_layout_przed = okno_hover.liczba_przejsc_ukladu();
+    const uint64_t neutral_redraw_przed = okno_hover.liczba_odrysowan();
+    const uint64_t neutral_full_przed = okno_hover.liczba_pelnych_odrysowan();
+    const uint64_t neutral_px_przed = okno_hover.liczba_brudnych_pikseli();
+    const uint64_t neutral_mouse_przed = okno_hover.liczba_zdarzen_ruchu_myszy();
+    const uint64_t neutral_alloc_przed = gui_liczba_alokacji_sterty();
+    for (int i = 0; i < 100; ++i) {
+        bws_zdarzenie move{};
+        move.typ = BWS_ZDARZENIE_MYSZ_RUCH;
+        move.x = okno_hover.x() + 250;
+        move.y = okno_hover.y() + 240;
+        move.timestamp = 1000000000ULL + static_cast<uint64_t>(i) * 1000000ULL;
+        okno_hover.obsluz_zdarzenie(move);
+        okno_hover.rysuj(ctx_hover, false);
+    }
+    const uint64_t neutral_alloc_po = gui_liczba_alokacji_sterty();
+    bws_sprawdz_msg(okno_hover.liczba_zdarzen_ruchu_myszy() - neutral_mouse_przed == 100,
+                    "PERF neutral MouseMove events == 100");
+    bws_sprawdz_msg(okno_hover.liczba_przejsc_ukladu() == neutral_layout_przed,
+                    "PERF neutral MouseMove layout_pass == 0");
+    bws_sprawdz_msg(okno_hover.liczba_odrysowan() == neutral_redraw_przed &&
+                    okno_hover.liczba_pelnych_odrysowan() == neutral_full_przed &&
+                    okno_hover.liczba_brudnych_pikseli() == neutral_px_przed,
+                    "PERF neutral MouseMove redraw/dirty/full == 0");
+    bws_sprawdz_msg(neutral_alloc_po == neutral_alloc_przed,
+                    "PERF neutral MouseMove heap allocations == 0");
+    bws_log_u64("[MOUSE PERF] events=", okno_hover.liczba_zdarzen_ruchu_myszy() - neutral_mouse_przed);
+    bws_log_u64("[MOUSE PERF] layout_passes=", okno_hover.liczba_przejsc_ukladu() - neutral_layout_przed);
+    bws_log_u64("[MOUSE PERF] redraws=", okno_hover.liczba_odrysowan() - neutral_redraw_przed);
+    bws_log_u64("[MOUSE PERF] dirty_pixels=", okno_hover.liczba_brudnych_pikseli() - neutral_px_przed);
+    bws_log_u64("[MOUSE PERF] heap_allocations=", neutral_alloc_po - neutral_alloc_przed);
+
     bws_log("[BURSZTYNUI 3/4] Dirty Redraw + hover 100x: OK\n");
 
     // -------------------------------------------------------------------------
@@ -649,6 +825,90 @@ static void wykonaj_testy_bursztyn_ui() {
     bws_sprawdz(chk_trojstan.stan_wyboru() == StanWyboru::Zaznaczone);
     chk_trojstan.ustaw_stan_wyboru(StanWyboru::Nieokreslone);
     bws_sprawdz(chk_trojstan.czy_nieokreslone());
+
+    // PoleWyboru: pelna sciezka Okno MouseDown/MouseUp, wlacznie z szybkim
+    // drugim kliknieciem rozpoznawanym jako podwojne. Kazda aktywacja zmienia
+    // stan i wywoluje oba callbacki dokladnie raz.
+    struct LicznikiCheckbox {
+        int stan{0};
+        int przelaczenie{0};
+    } liczniki_checkbox;
+    chk_haslo.przy_zmianie_stanu([](PoleWyboru*, StanWyboru, void* dane) {
+        ++static_cast<LicznikiCheckbox*>(dane)->stan;
+    }, &liczniki_checkbox);
+    chk_haslo.przy_przelaczeniu([](PoleWyboru*, bool, void* dane) {
+        ++static_cast<LicznikiCheckbox*>(dane)->przelaczenie;
+    }, &liczniki_checkbox);
+    chk_haslo.ustaw_zaznaczone(false);
+    liczniki_checkbox = {};
+    const Prostokat r_chk = chk_haslo.obszar_ekranu();
+    const int chk_x = okno.x() + r_chk.x + r_chk.szerokosc / 2;
+    const int chk_y = okno.y() + r_chk.y + r_chk.wysokosc / 2;
+    uint64_t czas_chk = 1000000000ULL;
+    for (int cykl = 0; cykl < 100; ++cykl) {
+        for (int klik = 0; klik < 2; ++klik) {
+            bws_zdarzenie down{};
+            down.typ = BWS_ZDARZENIE_MYSZ_DOWN;
+            down.x = chk_x; down.y = chk_y;
+            down.przyciski = 1;
+            down.timestamp = czas_chk;
+            okno.obsluz_zdarzenie(down);
+            bws_zdarzenie up = down;
+            up.typ = BWS_ZDARZENIE_MYSZ_UP;
+            up.przyciski = 0;
+            okno.obsluz_zdarzenie(up);
+            const bool oczekiwany = klik == 0;
+            bws_sprawdz_msg(chk_haslo.czy_zaznaczone() == oczekiwany,
+                            "CHECKBOX mouse toggle 100x");
+            czas_chk += 100000000ULL;
+        }
+    }
+    bws_sprawdz_msg(liczniki_checkbox.stan == 200 &&
+                    liczniki_checkbox.przelaczenie == 200,
+                    "CHECKBOX mouse callbacks exactly once");
+
+    // Fizyczna Spacja PS/2 (0x39), ta sama trasa Okno -> fokus -> kontrolka.
+    okno.ustaw_fokus(&chk_haslo);
+    for (int i = 0; i < 100; ++i) {
+        bws_zdarzenie spacja{};
+        spacja.typ = BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;
+        spacja.x = 1;
+        spacja.kod = 0x39U;
+        okno.obsluz_zdarzenie(spacja);
+        bws_sprawdz_msg(chk_haslo.czy_zaznaczone() == ((i & 1) == 0),
+                        "CHECKBOX Space toggle 100x");
+        spacja.x = 0;
+        okno.obsluz_zdarzenie(spacja);
+    }
+    bws_sprawdz_msg(liczniki_checkbox.stan == 300 &&
+                    liczniki_checkbox.przelaczenie == 300,
+                    "CHECKBOX keyboard callbacks exactly once");
+
+    chk_trojstan.ustaw_stan_wyboru(StanWyboru::Niezaznaczone);
+    okno.ustaw_fokus(&chk_trojstan);
+    const StanWyboru cykl_3[4] = {StanWyboru::Zaznaczone,
+                                  StanWyboru::Nieokreslone,
+                                  StanWyboru::Niezaznaczone,
+                                  StanWyboru::Zaznaczone};
+    for (int i = 0; i < 4; ++i) {
+        bws_zdarzenie spacja{};
+        spacja.typ = BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;
+        spacja.x = 1; spacja.kod = 0x39U;
+        okno.obsluz_zdarzenie(spacja);
+        bws_sprawdz_msg(chk_trojstan.stan_wyboru() == cykl_3[i],
+                        "CHECKBOX 3-state cycle");
+    }
+
+    const int cb_przed_disabled = liczniki_checkbox.stan;
+    chk_haslo.ustaw_wlaczona(false);
+    okno.ustaw_fokus(&chk_haslo);
+    bws_zdarzenie disabled_space{};
+    disabled_space.typ = BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;
+    disabled_space.x = 1; disabled_space.kod = 0x39U;
+    okno.obsluz_zdarzenie(disabled_space);
+    bws_sprawdz(!chk_haslo.czy_zaznaczone() &&
+                liczniki_checkbox.stan == cb_przed_disabled);
+    chk_haslo.ustaw_wlaczona(true);
 
     // Cykl fokusu (Tab / Shift+Tab)
     okno.ustaw_fokus(&txt_input);
@@ -1262,6 +1522,166 @@ static void wykonaj_testy_bursztyn_ui() {
     size_t dl_po_wklejeniu = 0; while (memo.tekst()[dl_po_wklejeniu]) ++dl_po_wklejeniu;
     bws_sprawdz(dl_po_wklejeniu > dl_po_wycieciu);
 
+    // Rzeczywista trasa zdarzen aplikacji: Okno otrzymuje Ctrl down,
+    // fizyczny klawisz, TEXT_INPUT generowany przez sterownik, key up i Ctrl
+    // up. TEXT_INPUT z Ctrl nie moze przeciec po obsluzonym skrocie.
+    memo.ustaw_tekst("Bursztyn OS / żółć");
+    const Prostokat memo_r = memo.obszar_ekranu();
+    bws_zdarzenie memo_down{};
+    memo_down.typ = BWS_ZDARZENIE_MYSZ_DOWN;
+    memo_down.x = okno_memo.x() + memo_r.x + 20;
+    memo_down.y = okno_memo.y() + memo_r.y + 12;
+    memo_down.przyciski = 1;
+    okno_memo.obsluz_zdarzenie(memo_down);
+    bws_zdarzenie memo_up = memo_down;
+    memo_up.typ = BWS_ZDARZENIE_MYSZ_UP;
+    memo_up.przyciski = 0;
+    okno_memo.obsluz_zdarzenie(memo_up);
+    bws_sprawdz_msg(okno_memo.fokus() == &memo, "MEMO focus after text click");
+
+    // Drag-select i rolka zachowuja logiczny fokus edytora.
+    bws_zdarzenie memo_drag = memo_down;
+    memo_drag.x += 80;
+    memo_drag.typ = BWS_ZDARZENIE_MYSZ_RUCH;
+    okno_memo.obsluz_zdarzenie(memo_drag);
+    bws_zdarzenie memo_drag_up = memo_drag;
+    memo_drag_up.typ = BWS_ZDARZENIE_MYSZ_UP;
+    memo_drag_up.przyciski = 0;
+    okno_memo.obsluz_zdarzenie(memo_drag_up);
+    bws_sprawdz_msg(okno_memo.fokus() == &memo,
+                    "MEMO focus after drag selection and release");
+    bws_zdarzenie memo_wheel{};
+    memo_wheel.typ = BWS_ZDARZENIE_MYSZ_KOLO;
+    memo_wheel.x = memo_down.x; memo_wheel.y = memo_down.y;
+    memo_wheel.dy = -1;
+    okno_memo.obsluz_zdarzenie(memo_wheel);
+    bws_sprawdz_msg(okno_memo.fokus() == &memo, "MEMO focus after wheel");
+
+    auto wyslij_ctrl_ps2 = [&](uint32_t skan, uint32_t tekst_cp,
+                               bool shift = false) {
+        const uint32_t mods = BWS_MOD_CTRL | (shift ? BWS_MOD_SHIFT : 0U);
+        bws_zdarzenie ctrl{};
+        ctrl.typ = BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;
+        ctrl.x = 1; ctrl.kod = 0x1DU; ctrl.przyciski = BWS_MOD_CTRL;
+        okno_memo.obsluz_zdarzenie(ctrl);
+        bws_zdarzenie key = ctrl;
+        key.kod = skan; key.przyciski = mods;
+        okno_memo.obsluz_zdarzenie(key);
+        if (tekst_cp != 0) {
+            bws_zdarzenie text{};
+            text.typ = BWS_ZDARZENIE_TEXT_INPUT;
+            text.kod = tekst_cp; text.przyciski = mods;
+            okno_memo.obsluz_zdarzenie(text);
+        }
+        key.x = 0;
+        okno_memo.obsluz_zdarzenie(key);
+        ctrl.x = 0; ctrl.przyciski = 0;
+        okno_memo.obsluz_zdarzenie(ctrl);
+    };
+
+    memo.ustaw_zaznaczenie(0, 11); // "Bursztyn OS"
+    wyslij_ctrl_ps2(0x2EU, 'c');
+    bws_sprawdz_msg(memo.dlugosc() == 22 && memo.tekst()[0] == 'B',
+                    "MEMO Ctrl+C no TEXT_INPUT leak");
+    char memo_clipboard[64]{};
+    uint64_t memo_clipboard_n = 0;
+    bws_sprawdz(clipboard_read("text/plain", memo_clipboard,
+                              sizeof(memo_clipboard) - 1,
+                              &memo_clipboard_n));
+    const char oczekiwane_copy[] = "Bursztyn OS";
+    bool copy_rowne = true;
+    for (size_t i = 0; i < sizeof(oczekiwane_copy); ++i)
+        if (memo_clipboard[i] != oczekiwane_copy[i]) copy_rowne = false;
+    bws_sprawdz_msg(copy_rowne, "MEMO Ctrl+C clipboard exact");
+
+    memo.ustaw_zaznaczenie(0, 11);
+    wyslij_ctrl_ps2(0x2DU, 'x');
+    bws_sprawdz_msg(memo.dlugosc() == 11 && memo.tekst()[0] == ' ',
+                    "MEMO Ctrl+X exact document and no X leak");
+    bws_sprawdz_msg(memo.pozycja_kursora() == 0 && !memo.czy_ma_zaznaczenie(),
+                    "MEMO Ctrl+X caret and selection");
+    wyslij_ctrl_ps2(0x2CU, 'z');
+    bws_sprawdz_msg(memo.dlugosc() == 22 && memo.tekst()[0] == 'B',
+                    "MEMO Ctrl+Z after cut");
+    wyslij_ctrl_ps2(0x15U, 'y');
+    bws_sprawdz_msg(memo.dlugosc() == 11 && memo.tekst()[0] == ' ',
+                    "MEMO Ctrl+Y after cut");
+    wyslij_ctrl_ps2(0x2CU, 'z');
+    wyslij_ctrl_ps2(0x2CU, 'z', true);
+    bws_sprawdz_msg(memo.dlugosc() == 11 && memo.tekst()[0] == ' ',
+                    "MEMO Ctrl+Shift+Z redo");
+    wyslij_ctrl_ps2(0x2CU, 'z');
+    memo.ustaw_zaznaczenie(memo.dlugosc(), memo.dlugosc());
+    wyslij_ctrl_ps2(0x2FU, 'v');
+    bws_sprawdz_msg(memo.dlugosc() == 33 && memo.tekst()[22] == 'B',
+                    "MEMO Ctrl+V exact document and no V leak");
+    bws_sprawdz_msg(memo.pozycja_kursora() == 33 && !memo.czy_ma_zaznaczenie(),
+                    "MEMO Ctrl+V caret and selection");
+    wyslij_ctrl_ps2(0x1EU, 'a');
+    bws_sprawdz_msg(memo.poczatek_zaznaczenia() == 0 &&
+                    memo.koniec_zaznaczenia() == memo.dlugosc(),
+                    "MEMO Ctrl+A routed");
+
+    // Polska selekcja UTF-8 oraz USB HID Usage C=6.
+    memo.ustaw_tekst("Bursztyn OS / żółć");
+    memo.ustaw_zaznaczenie(14, 22);
+    bws_zdarzenie usb_ctrl{};
+    usb_ctrl.typ = BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;
+    usb_ctrl.x = 1;
+    usb_ctrl.kod = BWS_KEY_SOURCE_USB | 224U;
+    usb_ctrl.przyciski = BWS_MOD_CTRL;
+    okno_memo.obsluz_zdarzenie(usb_ctrl);
+    bws_zdarzenie usb_c = usb_ctrl;
+    usb_c.kod = BWS_KEY_SOURCE_USB | 6U;
+    okno_memo.obsluz_zdarzenie(usb_c);
+    usb_c.x = 0; okno_memo.obsluz_zdarzenie(usb_c);
+    usb_ctrl.x = 0; usb_ctrl.przyciski = 0;
+    okno_memo.obsluz_zdarzenie(usb_ctrl);
+    memo_clipboard_n = 0;
+    bws_sprawdz(clipboard_read("text/plain", memo_clipboard,
+                              sizeof(memo_clipboard) - 1,
+                              &memo_clipboard_n));
+    const char oczekiwane_utf8[] = "żółć";
+    bool utf8_rowne = true;
+    for (size_t i = 0; i < sizeof(oczekiwane_utf8); ++i)
+        if (memo_clipboard[i] != oczekiwane_utf8[i]) utf8_rowne = false;
+    bws_sprawdz_msg(utf8_rowne, "MEMO USB Ctrl+C Polish UTF-8");
+
+    // W read-only Ctrl+X zachowuje semantyke kopiowania, ale nie usuwa.
+    memo.ustaw_zaznaczenie(14, 22);
+    memo.ustaw_tylko_do_odczytu(true);
+    const size_t ro_len = memo.dlugosc();
+    wyslij_ctrl_ps2(0x2DU, 'x');
+    bws_sprawdz_msg(memo.dlugosc() == ro_len && memo.czy_ma_zaznaczenie(),
+                    "MEMO read-only Ctrl+X copies without delete");
+    memo.ustaw_tylko_do_odczytu(false);
+
+    // Wewnetrzny pasek moze miec fokus wizualny, ale nie odcina komend od
+    // logicznego rodzica Memo. Powrot kliknieciem tekstu przywraca fokus Memo.
+    memo.ustaw_tekst("Bursztyn OS\nL2\nL3\nL4\nL5\nL6\nL7\nL8\nL9\nL10\nL11\nL12\nL13\nL14\nL15\nL16");
+    const Prostokat memo_pp = memo.prostokat_paska_pionowego();
+    bws_sprawdz_msg(!memo_pp.czy_pusty(), "MEMO internal vertical scrollbar visible");
+    if (!memo_pp.czy_pusty()) {
+        bws_zdarzenie scroll_down{};
+        scroll_down.typ = BWS_ZDARZENIE_MYSZ_DOWN;
+        scroll_down.x = okno_memo.x() + memo_r.x + memo_pp.x + memo_pp.szerokosc / 2;
+        scroll_down.y = okno_memo.y() + memo_r.y + memo_pp.y + memo_pp.wysokosc / 2;
+        scroll_down.przyciski = 1;
+        okno_memo.obsluz_zdarzenie(scroll_down);
+        bws_zdarzenie scroll_up = scroll_down;
+        scroll_up.typ = BWS_ZDARZENIE_MYSZ_UP; scroll_up.przyciski = 0;
+        okno_memo.obsluz_zdarzenie(scroll_up);
+        memo.ustaw_zaznaczenie(0, 11);
+        const size_t dl_przed_scroll_copy = memo.dlugosc();
+        wyslij_ctrl_ps2(0x2EU, 'c');
+        bws_sprawdz_msg(memo.dlugosc() == dl_przed_scroll_copy,
+                        "MEMO scrollbar focus routes Ctrl+C to owner");
+        okno_memo.obsluz_zdarzenie(memo_down);
+        okno_memo.obsluz_zdarzenie(memo_up);
+        bws_sprawdz_msg(okno_memo.fokus() == &memo,
+                        "MEMO focus restored after scrollbar");
+    }
+
     memo.ustaw_tekst("Bardzo długi wiersz UTF-8: Zażółć gęślą jaźń, który wymusza zawijanie w małym widoku.\nDrugi wiersz.\nTrzeci wiersz.\nCzwarty wiersz.\nPiąty wiersz.\nSzósty wiersz.\nSiódmy wiersz.\nÓsmy wiersz.\nDziewiąty wiersz.\nDziesiąty wiersz.\nJedenasty wiersz.\nDwunasty wiersz.\nTrzynasty wiersz.\nCzternasty wiersz.");
     memo.ustaw_zawijanie_wierszy(true);
     size_t zawiniete = memo.liczba_linii_wizualnych();
@@ -1384,6 +1804,131 @@ static void wykonaj_testy_bursztyn_ui() {
     bws_log_u64("[MEMO POMIAR] heap_allocations_type_repaint=", memo_alokacje_po - memo_alokacje_przed);
     bws_log_u64("[MEMO POMIAR] horizontal_scroll_dirty_area_px=", memo_scroll_dirty_px);
     bws_log_u64("[MEMO POMIAR] horizontal_scroll_allocations=", memo_scroll_alok_po - memo_scroll_alok_przed);
+
+    // Testy A-J: PoleWielowierszowe scrollbar, klik w pusta przestrzen i zaznaczenia
+    // Test A: content height 3x viewport height -> pionowy pasek widoczny
+    PoleWielowierszowe* memo_a = new PoleWielowierszowe();
+    memo_a->ustaw_tekst("L1\nL2\nL3\nL4\nL5\nL6\nL7\nL8\nL9\nL10\nL11\nL12\nL13\nL14\nL15");
+    memo_a->rozmiesc(Prostokat(0, 0, 200, 100));
+    bws_sprawdz(memo_a->pasek_pionowy().czy_widoczna());
+
+    // Test B: content mieści się w całości -> pasek niewidoczny
+    PoleWielowierszowe* memo_b = new PoleWielowierszowe();
+    memo_b->ustaw_tekst("Linia 1\nLinia 2");
+    memo_b->rozmiesc(Prostokat(0, 0, 200, 100));
+    bws_sprawdz(!memo_b->pasek_pionowy().czy_widoczna());
+
+    // Test C: zmniejszenie wysokości -> pojawienie się paska
+    PoleWielowierszowe* memo_c = new PoleWielowierszowe();
+    memo_c->ustaw_tekst("Linia 1\nLinia 2\nLinia 3\nLinia 4");
+    memo_c->rozmiesc(Prostokat(0, 0, 200, 120));
+    bws_sprawdz(!memo_c->pasek_pionowy().czy_widoczna());
+    memo_c->rozmiesc(Prostokat(0, 0, 200, 50));
+    bws_sprawdz(memo_c->pasek_pionowy().czy_widoczna());
+
+    // Test D: zwiększenie wysokości -> zniknięcie paska
+    memo_c->rozmiesc(Prostokat(0, 0, 200, 300));
+    bws_sprawdz(!memo_c->pasek_pionowy().czy_widoczna());
+
+    // Test E: zaznacz tekst -> klik w pusta przestrzen -> zwijanie zaznaczenia
+    PoleWielowierszowe* memo_e = new PoleWielowierszowe();
+    memo_e->ustaw_tekst("Pierwszy wiersz tekstu\nDrugi wiersz tekstu\nTrzeci wiersz");
+    memo_e->rozmiesc(Prostokat(0, 0, 300, 150));
+    memo_e->ustaw_zaznaczenie(0, 10);
+    bws_sprawdz(memo_e->czy_ma_zaznaczenie());
+    ZdarzenieMyszki zm_e{};
+    zm_e.typ = TypZdarzenia::WcisniecieMyszy;
+    zm_e.x = 250;
+    zm_e.y = 30;
+    zm_e.przycisk = 1;
+    memo_e->obsluz_wcisniecie_myszy(zm_e);
+    bws_sprawdz(!memo_e->czy_ma_zaznaczenie());
+    bws_sprawdz(memo_e->poczatek_zaznaczenia() == memo_e->koniec_zaznaczenia());
+
+    // Test F: zaznaczenie wielowierszowe -> klik ponizej ostatniego wiersza -> kursor == koniec tekstu
+    PoleWielowierszowe* memo_f = new PoleWielowierszowe();
+    memo_f->ustaw_tekst("Linia A\nLinia B\nLinia C");
+    memo_f->rozmiesc(Prostokat(0, 0, 300, 200));
+    memo_f->ustaw_zaznaczenie(0, 15);
+    bws_sprawdz(memo_f->czy_ma_zaznaczenie());
+    ZdarzenieMyszki zm_f{};
+    zm_f.typ = TypZdarzenia::WcisniecieMyszy;
+    zm_f.x = 50;
+    zm_f.y = 180;
+    zm_f.przycisk = 1;
+    memo_f->obsluz_wcisniecie_myszy(zm_f);
+    bws_sprawdz(!memo_f->czy_ma_zaznaczenie());
+    bws_sprawdz(memo_f->pozycja_kursora() == memo_f->dlugosc());
+
+    // Test G: klik za koncem krotkiego wiersza -> kursor na koncu tego wiersza
+    PoleWielowierszowe* memo_g = new PoleWielowierszowe();
+    memo_g->ustaw_tekst("Krotka\nDruga dluzsza linia tekstu");
+    memo_g->rozmiesc(Prostokat(0, 0, 300, 100));
+    ZdarzenieMyszki zm_g{};
+    zm_g.typ = TypZdarzenia::WcisniecieMyszy;
+    zm_g.x = 250;
+    zm_g.y = 10;
+    zm_g.przycisk = 1;
+    memo_g->obsluz_wcisniecie_myszy(zm_g);
+    bws_sprawdz(memo_g->pozycja_kursora() == 6);
+
+    // Test H: klik w dlugim wierszu UTF-8 nigdy nie laduje w bajcie kontynuacji
+    PoleWielowierszowe* memo_h = new PoleWielowierszowe();
+    memo_h->ustaw_tekst("Zażółć gęślą jaźń — test UTF-8");
+    memo_h->rozmiesc(Prostokat(0, 0, 300, 100));
+    for (int x = 0; x < 200; x += 3) {
+        ZdarzenieMyszki zm_h{};
+        zm_h.typ = TypZdarzenia::WcisniecieMyszy;
+        zm_h.x = x;
+        zm_h.y = 10;
+        zm_h.przycisk = 1;
+        memo_h->obsluz_wcisniecie_myszy(zm_h);
+        size_t pos = memo_h->pozycja_kursora();
+        if (pos < memo_h->dlugosc()) {
+            uint8_t byte = static_cast<uint8_t>(memo_h->tekst()[pos]);
+            bws_sprawdz((byte & 0xC0U) != 0x80U);
+        }
+    }
+
+    // Test I: jednoczesne oba paski -> prawidlowa geometria, brak nakladania, rog
+    PoleWielowierszowe* memo_i = new PoleWielowierszowe();
+    memo_i->ustaw_zawijanie_wierszy(false);
+    memo_i->ustaw_tekst(
+        "Bardzo dlugi wiersz tekstu przekraczajacy szerokosc kontrolki memo...\n"
+        "L2\nL3\nL4\nL5\nL6\nL7\nL8\nL9\nL10\nL11\nL12\nL13\nL14\nL15");
+    memo_i->rozmiesc(Prostokat(0, 0, 200, 100));
+    bws_sprawdz(memo_i->pasek_pionowy().czy_widoczna());
+    bws_sprawdz(memo_i->pasek_poziomy().czy_widoczna());
+    Prostokat vp_i = memo_i->prostokat_widoku_tekstu();
+    Prostokat pp_i = memo_i->prostokat_paska_pionowego();
+    Prostokat ph_i = memo_i->prostokat_paska_poziomego();
+    Prostokat rog_i = memo_i->prostokat_rogu_paskow();
+    bws_sprawdz(!vp_i.przecina(pp_i) && !vp_i.przecina(ph_i) && !vp_i.przecina(rog_i));
+    bws_sprawdz(pp_i.dolny() == ph_i.y && ph_i.prawy() == pp_i.x);
+    bws_sprawdz(!rog_i.czy_pusty() && rog_i.x == pp_i.x && rog_i.y == ph_i.y);
+
+    // Test J: zwijanie zaznaczenia dirty-repaint -> brak alokacji, brudny obszar ograniczony
+    PoleWielowierszowe* memo_j = new PoleWielowierszowe();
+    memo_j->ustaw_tekst("Linia 1\nLinia 2\nLinia 3\nLinia 4");
+    memo_j->rozmiesc(Prostokat(0, 0, 200, 100));
+    memo_j->ustaw_zaznaczenie(0, 20);
+    bws_sprawdz(memo_j->czy_ma_zaznaczenie());
+    memo_j->wyczysc_brudny_obszar();
+    uint64_t alok_sel_przed = gui_liczba_alokacji_sterty();
+    ZdarzenieMyszki zm_j{};
+    zm_j.typ = TypZdarzenia::WcisniecieMyszy;
+    zm_j.x = 20;
+    zm_j.y = 10;
+    zm_j.przycisk = 1;
+    memo_j->obsluz_wcisniecie_myszy(zm_j);
+    uint64_t alok_sel_po = gui_liczba_alokacji_sterty();
+    bws_sprawdz(!memo_j->czy_ma_zaznaczenie());
+    bws_sprawdz(alok_sel_po == alok_sel_przed);
+    Prostokat dirty_j = memo_j->pobierz_brudny_obszar();
+    bws_sprawdz(!dirty_j.czy_pusty());
+
+    delete memo_a; delete memo_b; delete memo_c; delete memo_e;
+    delete memo_f; delete memo_g; delete memo_h; delete memo_i; delete memo_j;
 
     // ---------------------------------------------------------------------
     // 7-11. Jeden wspolny popup BWS56, ListaRozwijana oraz wspolny model menu
@@ -1927,6 +2472,14 @@ static void wykonaj_testy_bursztyn_ui() {
     bws_sprawdz(drzewo_ptr != nullptr);
     Drzewo& drzewo = *drzewo_ptr;
     drzewo.rozmiesc(Prostokat(0, 0, 240, 200));
+
+    // Pomiary sizeof i pamieci
+    uint64_t sz_drzewo = sizeof(Drzewo);
+    uint64_t sz_wezel = sizeof(Drzewo::MAKS_WEZLOW); // bazowy offset
+    (void)sz_wezel;
+    bws_log_u64("[DRZEWO AUDYT] sizeof_Drzewo_B=", sz_drzewo);
+    bws_log_u64("[DRZEWO AUDYT] wezly_total_limit=", Drzewo::MAKS_WEZLOW);
+
     UchwytWezlaDrzewa root1 = drzewo.dodaj_korzen("Katalog Glowny");
     UchwytWezlaDrzewa child1 = drzewo.dodaj_dziecko(root1, "Dokumenty");
     UchwytWezlaDrzewa child2 = drzewo.dodaj_dziecko(root1, "Zdjecia");
@@ -1935,12 +2488,61 @@ static void wykonaj_testy_bursztyn_ui() {
     bws_sprawdz(drzewo.liczba_wezlow() == 4);
     bws_sprawdz(drzewo.rodzic(child1) == root1 && drzewo.rodzic(subchild) == child1);
     bws_sprawdz(drzewo.liczba_dzieci(root1) == 2 && drzewo.liczba_dzieci(child1) == 1);
+    bws_sprawdz(drzewo.dziecko(root1, 0) == child1 && drzewo.dziecko(root1, 1) == child2);
 
     // Usuwanie i bezpieczenstwo uchwytu pokoleniowego
     drzewo.usun_wezel(child1);
-    bws_sprawdz(!child1.czy_poprawny() || drzewo.rodzic(child1).indeks == 0);
-    // Stary uchwyt child1 odrzucony
     bws_sprawdz(!drzewo.czy_uchwyt_poprawny(child1));
+
+    // Ponowna alokacja w tym samym slocie -> nowa generacja, stary uchwyt nadal odrzucony
+    UchwytWezlaDrzewa child1_nowy = drzewo.dodaj_dziecko(root1, "Nowe Dokumenty");
+    bws_sprawdz(child1_nowy.indeks == child1.indeks);
+    bws_sprawdz(child1_nowy.generacja != child1.generacja);
+    bws_sprawdz(!drzewo.czy_uchwyt_poprawny(child1));
+    bws_sprawdz(drzewo.czy_uchwyt_poprawny(child1_nowy));
+
+    // Stres test 1000 cykli alokuj/usun w jednym slocie -> inkrementacja generacji
+    UchwytWezlaDrzewa h_cur = child1_nowy;
+    for (int cykl = 0; cykl < 1000; ++cykl) {
+        uint32_t gen_przed = h_cur.generacja;
+        bws_sprawdz(drzewo.usun_wezel(h_cur));
+        bws_sprawdz(!drzewo.czy_uchwyt_poprawny(h_cur));
+        h_cur = drzewo.dodaj_dziecko(root1, "Tymczasowy");
+        bws_sprawdz(drzewo.czy_uchwyt_poprawny(h_cur));
+        bws_sprawdz(h_cur.generacja == gen_przed + 1);
+    }
+
+    // Test krancowy: generacja UINT32_MAX - 1 oraz UINT32_MAX -> trwala emerytura slotu
+    drzewo.wyczysc();
+    drzewo._ustaw_generacje_slotu_dla_testu(0, 0xFFFFFFFEU); // UINT32_MAX - 1
+    UchwytWezlaDrzewa w_max1 = drzewo.dodaj_korzen("Wezel Max-1");
+    bws_sprawdz(w_max1.indeks == 0);
+    bws_sprawdz(w_max1.generacja == 0xFFFFFFFEU);
+    bws_sprawdz(drzewo.czy_uchwyt_poprawny(w_max1));
+
+    // Usuniecie wezla -> generacja osiaga UINT32_MAX
+    bws_sprawdz(drzewo.usun_wezel(w_max1));
+    bws_sprawdz(!drzewo.czy_uchwyt_poprawny(w_max1));
+
+    // Ponowna alokacja -> slot 0 otrzymuje generacje UINT32_MAX
+    UchwytWezlaDrzewa w_max2 = drzewo.dodaj_korzen("Wezel Max");
+    bws_sprawdz(w_max2.indeks == 0);
+    bws_sprawdz(w_max2.generacja == 0xFFFFFFFFU);
+    bws_sprawdz(drzewo.czy_uchwyt_poprawny(w_max2));
+    bws_sprawdz(!drzewo.czy_uchwyt_poprawny(w_max1)); // stary nadal odrzucony
+
+    // Usuniecie wezla o generacji UINT32_MAX -> slot 0 zostaje trwale emerytowany
+    bws_sprawdz(drzewo.usun_wezel(w_max2));
+    bws_sprawdz(!drzewo.czy_uchwyt_poprawny(w_max2));
+    bws_sprawdz(!drzewo.czy_uchwyt_poprawny(w_max1));
+    bws_sprawdz(drzewo._czy_slot_emerytowany_dla_testu(0));
+
+    // Kolejna alokacja MUSI pominac emerytowany slot 0 i przydzielic slot 1
+    UchwytWezlaDrzewa w_next = drzewo.dodaj_korzen("Nowy wezel po emeryturze");
+    bws_sprawdz(w_next.indeks == 1);
+    bws_sprawdz(drzewo.czy_uchwyt_poprawny(w_next));
+    bws_sprawdz(!drzewo.czy_uchwyt_poprawny(w_max2)); // stary uchwyt slotu 0 nigdy nie zmartwychwstanie
+    bws_sprawdz(!drzewo.czy_uchwyt_poprawny(w_max1));
 
     // Wypelnienie drzewa do limitu 4096 wezlow (64 katalogi, po 63 pliki kazdy = 4096 wezlow)
     drzewo.wyczysc();
@@ -1956,7 +2558,7 @@ static void wykonaj_testy_bursztyn_ui() {
         }
     }
     drzewo.zakoncz_aktualizacje();
-    bws_sprawdz(drzewo.liczba_wezlow() == Drzewo::MAKS_WEZLOW);
+    bws_sprawdz(drzewo.liczba_wezlow() == Drzewo::MAKS_WEZLOW - 1);
     // Kolejny wezel 4097 -> bezpieczne odrzucenie i zwrot niepoprawnego uchwytu
     UchwytWezlaDrzewa h_nadmiar = drzewo.dodaj_korzen("nadmiar");
     bws_sprawdz(!h_nadmiar.czy_poprawny());
@@ -2029,7 +2631,7 @@ static void wykonaj_testy_bursztyn_ui() {
     }
     bws_log_u64("[BURSZTYNUI DIAG] bledy_po_statusbar=", bws_test_blad - bledy_adv_przed);
 
-    // 8. Podpowiedz (Tooltips) - Czas i brak alokacji
+    // 8. Podpowiedz (Tooltips) - Multi-window, cykl zycia i brak alokacji
     ZarzadcaPodpowiedzi* zarzadca_tip_ptr = new ZarzadcaPodpowiedzi();
     bws_sprawdz(zarzadca_tip_ptr != nullptr);
     ZarzadcaPodpowiedzi& zarzadca_tip = *zarzadca_tip_ptr;
@@ -2050,12 +2652,54 @@ static void wykonaj_testy_bursztyn_ui() {
     zarzadca_tip.obsluz_ruch(popupy, btn_tip_target_ptr, WIN_X + 41, WIN_Y + 35, 2550);
     bws_sprawdz(zarzadca_tip.czy_widoczna());
 
+    // Multi-window test: Okno A i Okno B
+    Okno* okno_a = new Okno("Okno A", 300, 200);
+    Okno* okno_b = new Okno("Okno B", 300, 200);
+    Przycisk* btn_a = new Przycisk("Przycisk A");
+    btn_a->ustaw_podpowiedz("Podpowiedz A");
+    Przycisk* btn_b = new Przycisk("Przycisk B");
+    btn_b->ustaw_podpowiedz("Podpowiedz B");
+
+    // 1) Tooltip w Okno A
+    zarzadca_tip.obsluz_ruch(okno_a->zarzadca_popupow(), btn_a, 50, 50, 10000);
+    zarzadca_tip.obsluz_ruch(okno_a->zarzadca_popupow(), btn_a, 50, 50, 10600);
+    bws_sprawdz(zarzadca_tip.czy_widoczna());
+    bws_sprawdz(okno_a->zarzadca_popupow().czy_otwarty());
+
+    // 2) Przelaczenie do Okno B -> popup w A zamkniety, popup w B otwarty
+    zarzadca_tip.obsluz_ruch(okno_b->zarzadca_popupow(), btn_b, 150, 150, 11000);
+    bws_sprawdz(!okno_a->zarzadca_popupow().czy_otwarty());
+    zarzadca_tip.obsluz_ruch(okno_b->zarzadca_popupow(), btn_b, 150, 150, 11600);
+    bws_sprawdz(zarzadca_tip.czy_widoczna());
+    bws_sprawdz(okno_b->zarzadca_popupow().czy_otwarty());
+
+    // 3) Zniszczenie Okno A -> Okno B nadal dziala stabilnie
+    delete okno_a;
+    zarzadca_tip.obsluz_ruch(okno_b->zarzadca_popupow(), btn_b, 150, 150, 12000);
+    bws_sprawdz(zarzadca_tip.czy_widoczna());
+
+    // 4) Usuniecie najechanej kontrolki przed uplywem opoznienia -> brak wiszacego wskaznika
+    zarzadca_tip.obsluz_ruch(okno_b->zarzadca_popupow(), nullptr, 0, 0, 13000);
+    zarzadca_tip.obsluz_ruch(okno_b->zarzadca_popupow(), btn_b, 150, 150, 14000);
+    zarzadca_tip.odrejestruj_kontrolke(btn_b);
+    delete btn_b;
+    // Czas uplywa po usunieciu -> nie pokazuje widmowego tooltipa
+    zarzadca_tip.obsluz_ruch(okno_b->zarzadca_popupow(), nullptr, 150, 150, 14600);
+    bws_sprawdz(!zarzadca_tip.czy_widoczna());
+
+    // 5) Zniszczenie wlasciciela gdy tooltip jest otwarty -> prawidlowe odlaczenie
+    zarzadca_tip.pokaz(okno_b->zarzadca_popupow(), "Testowy", 100, 100);
+    bws_sprawdz(zarzadca_tip.czy_widoczna());
+    delete okno_b; // destructor okna zamyka popupy i odlacza zarzadce
+    bws_sprawdz(!zarzadca_tip.czy_widoczna());
+    delete btn_a;
+
     // Stres test 100 cykli bez alokacji
     zarzadca_tip.ustaw_opoznienie_pokazania(0);
     uint64_t tip_alok_przed = gui_liczba_alokacji_sterty();
     for (int i = 0; i < 100; ++i) {
-        zarzadca_tip.obsluz_ruch(popupy, btn_tip_target_ptr, WIN_X + 40, WIN_Y + 35, 3000 + i * 10);
-        zarzadca_tip.obsluz_ruch(popupy, nullptr, WIN_X + 250, WIN_Y + 250, 3005 + i * 10);
+        zarzadca_tip.obsluz_ruch(popupy, btn_tip_target_ptr, WIN_X + 40, WIN_Y + 35, 20000 + i * 10);
+        zarzadca_tip.obsluz_ruch(popupy, nullptr, WIN_X + 250, WIN_Y + 250, 20005 + i * 10);
     }
     uint64_t tip_alok_po = gui_liczba_alokacji_sterty();
     bws_sprawdz(tip_alok_po == tip_alok_przed);
@@ -2080,6 +2724,492 @@ static void wykonaj_testy_bursztyn_ui() {
     delete num_ptr;
     delete postep_ptr;
     bws_log("[BURSZTYNUI ROZSZERZONE] Wszystkie 8 kontrolek przetestowane: OK\n");
+
+    // ---------------------------------------------------------------------
+    // 9. Kompletny test struktury i geometrii okna demonstracyjnego DemoUI
+    // ---------------------------------------------------------------------
+    {
+        Okno* demo_win = new Okno("BursztynUI - Pokaz Komponentow Retained-Mode", 720, 520);
+        bws_sprawdz(demo_win != nullptr);
+        Panel* d_root = static_cast<Panel*>(demo_win->kontrolka_glowna());
+        bws_sprawdz(d_root != nullptr);
+        d_root->ustaw_orientacje(Orientacja::Pionowa);
+        d_root->ustaw_wypelnienie(Marginesy(4, 4, 4, 4));
+
+        // 1) Menu glowne
+        MenuGlowne& d_menu = d_root->dodaj<MenuGlowne>();
+        d_menu.ustaw_preferowany_rozmiar(Rozmiar(-1, 26));
+        Menu& d_m_plik = d_menu.menu().dodaj_podmenu("Plik", 100);
+        d_m_plik.dodaj_element("Nowy", 101);
+        d_m_plik.dodaj_element("Zapisz", 102);
+        d_m_plik.dodaj_separator();
+        d_m_plik.dodaj_element("Zakoncz", 109);
+        Menu& d_m_edycja = d_menu.menu().dodaj_podmenu("Edycja", 200);
+        d_m_edycja.dodaj_element("Cofnij", 201);
+        d_m_edycja.dodaj_element("Ponow", 202);
+        d_menu.menu().dodaj_podmenu("Widok", 300);
+        d_menu.menu().dodaj_podmenu("Pomoc", 400);
+
+        // 2) Pasek narzedzi
+        PasekNarzedzi& d_tb = d_root->dodaj<PasekNarzedzi>();
+        d_tb.ustaw_preferowany_rozmiar(Rozmiar(-1, 32));
+        d_tb.ustaw_margines(Marginesy(0, 0, 0, 4));
+        d_tb.dodaj_przycisk("Nowy", 1);
+        d_tb.dodaj_przycisk("Otworz", 2);
+        d_tb.dodaj_przycisk("Zapisz", 3);
+        d_tb.dodaj_separator();
+        d_tb.dodaj_przelacznik("Siatka", true);
+        d_tb.dodaj_separator();
+        PoleTekstowe* d_tb_szukaj = new PoleTekstowe();
+        d_tb_szukaj->ustaw_preferowany_rozmiar(Rozmiar(120, 24));
+        d_tb.dodaj_kontrolke(d_tb_szukaj);
+
+        // 3) Karty
+        Karty& d_karty = d_root->dodaj<Karty>();
+        d_karty.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+        d_karty.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+        d_karty.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+
+        // Tab 0: Podstawowe
+        Panel* d_strona0 = new Panel();
+        d_strona0->ustaw_wypelnienie(Marginesy(8, 8, 8, 8));
+        Kolumna& d_col0 = d_strona0->dodaj<Kolumna>();
+        d_col0.ustaw_odstep(10);
+        d_col0.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+        d_col0.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+        d_col0.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+
+        Wiersz& d_w_postep = d_col0.dodaj<Wiersz>();
+        d_w_postep.ustaw_odstep(14);
+        Kolumna& d_cp1 = d_w_postep.dodaj<Kolumna>();
+        d_cp1.dodaj<Etykieta>("Pasek postepu (deterministyczny):");
+        PasekPostepu& d_pb1 = d_cp1.dodaj<PasekPostepu>(0, 100);
+        d_pb1.ustaw_wartosc(65);
+        d_pb1.ustaw_preferowany_rozmiar(Rozmiar(200, 24));
+        Kolumna& d_cp2 = d_w_postep.dodaj<Kolumna>();
+        d_cp2.dodaj<Etykieta>("Pasek postepu (animowany):");
+        PasekPostepu& d_pb2 = d_cp2.dodaj<PasekPostepu>(0, 100);
+        d_pb2.ustaw_tryb_nieokreslony(true);
+        d_pb2.ustaw_preferowany_rozmiar(Rozmiar(200, 24));
+        Kolumna& d_cp3 = d_w_postep.dodaj<Kolumna>();
+        d_cp3.dodaj<Etykieta>("Pionowy:");
+        PasekPostepu& d_pb_v = d_cp3.dodaj<PasekPostepu>(0, 100);
+        d_pb_v.ustaw_orientacje(Orientacja::Pionowa);
+        d_pb_v.ustaw_preferowany_rozmiar(Rozmiar(24, 24));
+
+        Wiersz& d_w_num = d_col0.dodaj<Wiersz>();
+        d_w_num.ustaw_odstep(16);
+        Kolumna& d_cn1 = d_w_num.dodaj<Kolumna>();
+        d_cn1.dodaj<Etykieta>("Pole numeryczne (0..100):");
+        PoleNumeryczne& d_pn1 = d_cn1.dodaj<PoleNumeryczne>(0, 100, 25);
+        d_pn1.ustaw_preferowany_rozmiar(Rozmiar(180, 24));
+        Kolumna& d_cn2 = d_w_num.dodaj<Kolumna>();
+        d_cn2.dodaj<Etykieta>("Z prefiksem:");
+        PoleNumeryczne& d_pn2 = d_cn2.dodaj<PoleNumeryczne>(10, 500, 75);
+        d_pn2.ustaw_prefiks("Waga: ");
+        d_pn2.ustaw_sufiks(" kg");
+        d_pn2.ustaw_preferowany_rozmiar(Rozmiar(180, 24));
+
+        Wiersz& d_w_ctrl = d_col0.dodaj<Wiersz>();
+        d_w_ctrl.ustaw_odstep(16);
+        Kolumna& d_cs = d_w_ctrl.dodaj<Kolumna>();
+        d_cs.dodaj<Etykieta>("Suwak (0..100):");
+        Suwak& d_swk = d_cs.dodaj<Suwak>();
+        d_swk.ustaw_zakres(0, 100);
+        d_swk.ustaw_wartosc(65);
+        d_swk.ustaw_preferowany_rozmiar(Rozmiar(200, 24));
+        RamkaGrupy& d_rg = d_w_ctrl.dodaj<RamkaGrupy>("Opcje");
+        Kolumna& d_co = d_rg.dodaj<Kolumna>();
+        PrzyciskOpcji& d_opc1 = d_co.dodaj<PrzyciskOpcji>("Normalna", 1);
+        d_opc1.ustaw_zaznaczony(true);
+        d_co.dodaj<PrzyciskOpcji>("Wysoka", 2);
+
+        Wiersz& d_w_chk = d_col0.dodaj<Wiersz>();
+        d_w_chk.ustaw_odstep(16);
+        d_w_chk.dodaj<PoleWyboru>("Akceleracja", true);
+        PoleWyboru& d_chk3 = d_w_chk.dodaj<PoleWyboru>("Trojstan", false);
+        d_chk3.ustaw_trojstanowe(true);
+        d_chk3.ustaw_stan_wyboru(StanWyboru::Nieokreslone);
+        d_w_chk.dodaj<Przycisk>("Zastosuj");
+
+        d_karty.dodaj_karte("Podstawowe", d_strona0);
+
+        // Tab 1: Tekst i Edycja
+        Panel* d_strona1 = new Panel();
+        d_strona1->ustaw_wypelnienie(Marginesy(8, 8, 8, 8));
+        Kolumna& d_col1 = d_strona1->dodaj<Kolumna>();
+        d_col1.ustaw_odstep(8);
+        d_col1.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+        d_col1.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+        d_col1.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+        d_col1.dodaj<Etykieta>("Edytor tekstowy:");
+        PoleWielowierszowe& d_memo = d_col1.dodaj<PoleWielowierszowe>();
+        d_memo.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+        d_memo.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+        d_memo.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+        d_memo.ustaw_tekst("Pierwszy wiersz\nDrugi wiersz: Zażółć gęślą jaźń\nBardzo dlugi wiersz tekstu do testowania poziomego paska przewijania w edytorze BursztynUI.\n");
+        Wiersz& d_w_inp = d_col1.dodaj<Wiersz>();
+        d_w_inp.ustaw_odstep(8);
+        d_w_inp.dodaj<Etykieta>("Wejscie:");
+        PoleTekstowe& d_txt = d_w_inp.dodaj<PoleTekstowe>("Tekst...");
+        d_txt.ustaw_preferowany_rozmiar(Rozmiar(240, 26));
+        d_w_inp.dodaj<PoleWyboru>("Zawijaj", false);
+        d_w_inp.dodaj<Przycisk>("Wyslij");
+        d_karty.dodaj_karte("Tekst i Edycja", d_strona1);
+
+        // Tab 2: Listy i Drzewo
+        Panel* d_strona2 = new Panel();
+        d_strona2->ustaw_wypelnienie(Marginesy(8, 8, 8, 8));
+        Wiersz& d_w_listy = d_strona2->dodaj<Wiersz>();
+        d_w_listy.ustaw_odstep(14);
+        d_w_listy.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+        d_w_listy.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+        d_w_listy.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+        Kolumna& d_c_tree = d_w_listy.dodaj<Kolumna>();
+        d_c_tree.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+        d_c_tree.dodaj<Etykieta>("Drzewo:");
+        Drzewo& d_tree = d_c_tree.dodaj<Drzewo>();
+        d_tree.ustaw_preferowany_rozmiar(Rozmiar(280, -1));
+        d_tree.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+        UchwytWezlaDrzewa d_r1 = d_tree.dodaj_korzen("Moj Komputer");
+        UchwytWezlaDrzewa d_d1 = d_tree.dodaj_dziecko(d_r1, "Dysk Systemowy (C:)");
+        d_tree.dodaj_dziecko(d_d1, "Dokumenty");
+        d_tree.dodaj_dziecko(d_d1, "System");
+        d_tree.ustaw_rozwiniety(d_r1, true);
+        d_tree.ustaw_rozwiniety(d_d1, true);
+
+        Kolumna& d_c_lst = d_w_listy.dodaj<Kolumna>();
+        d_c_lst.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+        d_c_lst.dodaj<Etykieta>("Lista:");
+        ListaWyboru& d_lst = d_c_lst.dodaj<ListaWyboru>();
+        d_lst.ustaw_preferowany_rozmiar(Rozmiar(280, 200));
+        d_lst.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+        for (int i = 1; i <= 50; ++i) d_lst.dodaj_element("Element");
+        d_c_lst.dodaj<Etykieta>("Combo:");
+        ListaRozwijana& d_combo = d_c_lst.dodaj<ListaRozwijana>();
+        d_combo.ustaw_preferowany_rozmiar(Rozmiar(280, 26));
+        d_combo.dodaj_element("Opcja 1");
+        d_combo.dodaj_element("Opcja 2");
+        d_karty.dodaj_karte("Listy i Drzewo", d_strona2);
+
+        // Tab 3: Kontenery
+        Panel* d_strona3 = new Panel();
+        d_strona3->ustaw_wypelnienie(Marginesy(8, 8, 8, 8));
+        Kolumna& d_col3 = d_strona3->dodaj<Kolumna>();
+        d_col3.ustaw_odstep(8);
+        d_col3.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+        d_col3.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+        d_col3.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+        d_col3.dodaj<Etykieta>("Widok przewijany:");
+        WidokPrzewijany& d_sv = d_col3.dodaj<WidokPrzewijany>();
+        d_sv.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+        d_sv.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+        d_sv.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+        for (int r = 1; r <= 20; ++r) {
+            Etykieta* l = new Etykieta("Wiersz");
+            l->rozmiesc(Prostokat(10, (r - 1) * 28 + 6, 300, 22));
+            d_sv.dodaj_do_zawartosci(l);
+            Przycisk* b = new Przycisk("Akcja");
+            b->rozmiesc(Prostokat(330, (r - 1) * 28 + 4, 80, 22));
+            d_sv.dodaj_do_zawartosci(b);
+        }
+        d_sv.ustaw_rozmiar_zawartosci(Rozmiar(500, 580));
+        d_karty.dodaj_karte("Kontenery", d_strona3);
+
+        // Tab 4: Informacje
+        Panel* d_strona4 = new Panel();
+        d_strona4->ustaw_wypelnienie(Marginesy(8, 8, 8, 8));
+        Kolumna& d_col4 = d_strona4->dodaj<Kolumna>();
+        d_col4.ustaw_odstep(8);
+        d_col4.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+        d_col4.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+        d_col4.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+        d_col4.dodaj<Etykieta>("O BursztynUI:");
+        PoleWielowierszowe& d_info = d_col4.dodaj<PoleWielowierszowe>();
+        d_info.ustaw_tylko_do_odczytu(true);
+        d_info.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+        d_info.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+        d_info.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+        d_info.ustaw_tekst("BursztynUI Framework v2.0 - Zaawansowane komponenty retained-mode.\n");
+        d_karty.dodaj_karte("Informacje", d_strona4);
+
+        // 4) Pasek stanu
+        PasekStanu& d_sb = d_root->dodaj<PasekStanu>();
+        d_sb.ustaw_preferowany_rozmiar(Rozmiar(-1, 24));
+        d_sb.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+        d_sb.dodaj_sekcje("Gotowy", 100, RozmiarSekcjiStanu::Rozciagnij);
+        d_sb.dodaj_sekcje("UTF-8", 60, RozmiarSekcjiStanu::DopasujDoTresci);
+        d_sb.dodaj_sekcje("DPI: 100%", 70, RozmiarSekcjiStanu::Stala);
+        d_sb.dodaj_sekcje("Bursztyn OS", 90, RozmiarSekcjiStanu::Stala);
+
+        // Walidacja ukladu i geometrii po przelicz_uklad()
+        demo_win->przelicz_uklad();
+
+        bws_log_u64("[DEMO AUDYT] karty_liczba=", d_karty.liczba_kart());
+        bws_log_u64("[DEMO AUDYT] karty_szer=", d_karty.obszar().szerokosc);
+        bws_log_u64("[DEMO AUDYT] karty_wys=", d_karty.obszar().wysokosc);
+        bws_log_u64("[DEMO AUDYT] sb_wys=", d_sb.obszar().wysokosc);
+        bws_log_u64("[DEMO AUDYT] sb_y=", d_sb.obszar().y);
+
+        bws_sprawdz(d_karty.liczba_kart() == 5);
+        bws_sprawdz(d_karty.aktywna_karta() == 0);
+        bws_sprawdz(d_karty.obszar().szerokosc >= 680);
+        bws_sprawdz(d_karty.obszar().wysokosc >= 300); // STRETCH - NIE MOZE BYC 0!
+        bws_sprawdz(d_menu.obszar().wysokosc == 26);
+        bws_sprawdz(d_tb.obszar().wysokosc == 32);
+        bws_sprawdz(d_sb.obszar().wysokosc == 24);
+        bws_sprawdz(d_karty.obszar().dolny() <= d_sb.obszar().y);
+
+        // Sprawdzenie przelaczania i widocznosci wszystkich 5 zakladek
+        for (int tab_idx = 0; tab_idx < 5; ++tab_idx) {
+            d_karty.ustaw_aktywna_karte(tab_idx);
+            bws_sprawdz(d_karty.aktywna_karta() == tab_idx);
+            bws_sprawdz(d_karty.strona(tab_idx) != nullptr);
+            bws_sprawdz(d_karty.strona(tab_idx)->zawartosc() != nullptr);
+            bws_sprawdz(d_karty.strona(tab_idx)->zawartosc()->czy_widoczna());
+            bws_sprawdz(d_karty.strona(tab_idx)->zawartosc()->obszar().wysokosc > 250);
+            bws_sprawdz(d_karty.strona(tab_idx)->zawartosc()->obszar().szerokosc > 600);
+        }
+
+        // Sprawdzenie zachowania przy zmianie rozmiaru / maksymalizacji
+        demo_win->ustaw_pozycje(0, 0);
+        demo_win->ustaw_rozmiar(780, 560);
+        bws_sprawdz(d_karty.obszar().szerokosc >= 760);
+        bws_sprawdz(d_karty.obszar().wysokosc >= 400);
+        bws_sprawdz(d_sb.obszar().dolny() <= 560 - Okno::WYSOKOSC_BELKI_TYTULOWEJ);
+
+        // Pelne odrysowanie bez wyciekow
+        KontekstRysowania* ctx_demo = new KontekstRysowania();
+        if (ctx_demo) {
+            demo_win->rysuj(*ctx_demo, true);
+            delete ctx_demo;
+        }
+
+        delete demo_win;
+        bws_log("[DEMO AUDYT] Architektura i geometria DemoUI 5 zakladek: OK\n");
+    }
+
+    // 10. Rozlegle testy mechanizmu STRETCH i obslugi sentinela Rozmiar(-1, -1)
+    {
+        // Test 1: Jeden element Stretch w Kolumnie
+        {
+            Kolumna* k1 = new Kolumna();
+            k1->ustaw_wypelnienie(Marginesy(0));
+            k1->ustaw_odstep(0);
+            Panel& c1 = k1->dodaj<Panel>();
+            c1.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+            c1.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+            k1->rozmiesc(Prostokat(0, 0, 300, 200));
+            bws_sprawdz_msg(c1.obszar().wysokosc == 200, "STRETCH T1 h");
+            bws_sprawdz_msg(c1.obszar().szerokosc == 300, "STRETCH T1 w");
+            delete k1;
+        }
+
+        // Test 2: Dwa elementy Stretch dzielace wysokosc
+        {
+            Kolumna* k2 = new Kolumna();
+            k2->ustaw_wypelnienie(Marginesy(0));
+            k2->ustaw_odstep(0);
+            Panel& k2_c1 = k2->dodaj<Panel>();
+            k2_c1.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+            k2_c1.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+            Panel& k2_c2 = k2->dodaj<Panel>();
+            k2_c2.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+            k2_c2.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+            k2->rozmiesc(Prostokat(0, 0, 300, 200));
+            bws_sprawdz_msg(k2_c1.obszar().wysokosc == 100, "STRETCH T2 c1_h");
+            bws_sprawdz_msg(k2_c2.obszar().wysokosc == 100, "STRETCH T2 c2_h");
+            bws_sprawdz_msg(k2_c1.obszar().dolny() <= k2_c2.obszar().y, "STRETCH T2 overlap");
+            delete k2;
+        }
+
+        // Test 3: Trzy elementy Stretch z deterministycznym podzialem reszty pikseli (100 px / 3 -> 34, 33, 33)
+        {
+            Kolumna* k3 = new Kolumna();
+            k3->ustaw_wypelnienie(Marginesy(0));
+            k3->ustaw_odstep(0);
+            Panel& k3_c1 = k3->dodaj<Panel>();
+            k3_c1.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+            k3_c1.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+            Panel& k3_c2 = k3->dodaj<Panel>();
+            k3_c2.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+            k3_c2.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+            Panel& k3_c3 = k3->dodaj<Panel>();
+            k3_c3.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+            k3_c3.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+            k3->rozmiesc(Prostokat(0, 0, 300, 100));
+            bws_sprawdz_msg(k3_c1.obszar().wysokosc == 34, "STRETCH T3 c1_h");
+            bws_sprawdz_msg(k3_c2.obszar().wysokosc == 33, "STRETCH T3 c2_h");
+            bws_sprawdz_msg(k3_c3.obszar().wysokosc == 33, "STRETCH T3 c3_h");
+            bws_sprawdz_msg(k3_c1.obszar().dolny() == k3_c2.obszar().y, "STRETCH T3 o1");
+            bws_sprawdz_msg(k3_c2.obszar().dolny() == k3_c3.obszar().y, "STRETCH T3 o2");
+            bws_sprawdz_msg(k3_c3.obszar().dolny() == 100, "STRETCH T3 end");
+            delete k3;
+        }
+
+        // Test 4: Fixed (50 px) + Stretch (w przestrzeni 200 px)
+        {
+            Kolumna* k4 = new Kolumna();
+            k4->ustaw_wypelnienie(Marginesy(0));
+            k4->ustaw_odstep(0);
+            Panel& k4_f = k4->dodaj<Panel>();
+            k4_f.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Poczatek);
+            k4_f.ustaw_preferowany_rozmiar(Rozmiar(-1, 50));
+            Panel& k4_s = k4->dodaj<Panel>();
+            k4_s.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+            k4_s.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+            k4->rozmiesc(Prostokat(0, 0, 300, 200));
+            bws_sprawdz_msg(k4_f.obszar().wysokosc == 50, "STRETCH T4 f");
+            bws_sprawdz_msg(k4_s.obszar().wysokosc == 150, "STRETCH T4 s");
+            bws_sprawdz_msg(k4_f.obszar().dolny() <= k4_s.obszar().y, "STRETCH T4 o");
+            delete k4;
+        }
+
+        // Test 5: Natural + Stretch
+        {
+            Kolumna* k5 = new Kolumna();
+            k5->ustaw_wypelnienie(Marginesy(0));
+            k5->ustaw_odstep(0);
+            Etykieta& k5_lbl = k5->dodaj<Etykieta>("Etykieta testowa");
+            k5_lbl.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Poczatek);
+            Panel& k5_s = k5->dodaj<Panel>();
+            k5_s.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+            k5_s.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+            k5->rozmiesc(Prostokat(0, 0, 300, 200));
+            int lbl_h = k5_lbl.obszar().wysokosc;
+            bws_sprawdz_msg(lbl_h > 0, "STRETCH T5 lbl_h > 0");
+            bws_sprawdz_msg(k5_s.obszar().wysokosc == 200 - lbl_h, "STRETCH T5 s_h");
+            bws_sprawdz_msg(k5_lbl.obszar().dolny() <= k5_s.obszar().y, "STRETCH T5 o");
+            delete k5;
+        }
+
+        // Test 6: Stretch z rozmiarem minimalnym
+        {
+            Kolumna* k6 = new Kolumna();
+            k6->ustaw_wypelnienie(Marginesy(0));
+            k6->ustaw_odstep(0);
+            Panel& k6_f = k6->dodaj<Panel>();
+            k6_f.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Poczatek);
+            k6_f.ustaw_preferowany_rozmiar(Rozmiar(-1, 180));
+            Panel& k6_s = k6->dodaj<Panel>();
+            k6_s.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+            k6_s.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+            k6_s.ustaw_minimalny_rozmiar(Rozmiar(0, 50));
+            k6->rozmiesc(Prostokat(0, 0, 300, 200));
+            bws_sprawdz_msg(k6_f.obszar().wysokosc == 180, "STRETCH T6 f");
+            bws_sprawdz_msg(k6_s.obszar().wysokosc == 50, "STRETCH T6 s");
+            delete k6;
+        }
+
+        // Test 7: Stretch z rozmiarem maksymalnym
+        {
+            Kolumna* k7 = new Kolumna();
+            k7->ustaw_wypelnienie(Marginesy(0));
+            k7->ustaw_odstep(0);
+            Panel& k7_s = k7->dodaj<Panel>();
+            k7_s.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+            k7_s.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+            k7_s.ustaw_maksymalny_rozmiar(Rozmiar(10000, 80));
+            k7->rozmiesc(Prostokat(0, 0, 300, 200));
+            bws_sprawdz_msg(k7_s.obszar().wysokosc == 80, "STRETCH T7 s");
+            delete k7;
+        }
+
+        // Test 8: Karty Stretch
+        {
+            Kolumna* k8 = new Kolumna();
+            k8->ustaw_wypelnienie(Marginesy(0));
+            k8->ustaw_odstep(0);
+            Karty& k8_k = k8->dodaj<Karty>();
+            k8_k.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+            k8_k.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+            Panel* p8_tab = new Panel();
+            k8_k.dodaj_karte("Karta 1", p8_tab);
+            k8->rozmiesc(Prostokat(0, 0, 400, 300));
+            bws_sprawdz_msg(k8_k.obszar().wysokosc == 300, "STRETCH T8 k");
+            bws_sprawdz_msg(p8_tab->obszar().wysokosc >= 260, "STRETCH T8 tab");
+            delete k8;
+        }
+
+        // Test 9: WidokPrzewijany Stretch
+        {
+            Kolumna* k9 = new Kolumna();
+            k9->ustaw_wypelnienie(Marginesy(0));
+            k9->ustaw_odstep(0);
+            WidokPrzewijany& k9_sv = k9->dodaj<WidokPrzewijany>();
+            k9_sv.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+            k9_sv.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+            k9_sv.ustaw_rozmiar_zawartosci(Rozmiar(600, 600));
+            k9->rozmiesc(Prostokat(0, 0, 300, 200));
+            bws_sprawdz_msg(k9_sv.obszar().wysokosc == 200, "STRETCH T9 h");
+            bws_sprawdz_msg(k9_sv.obszar().szerokosc == 300, "STRETCH T9 w");
+            delete k9;
+        }
+
+        // Test 10: Zagniezdzone panele (Kolumna -> Wiersz Stretch -> Kolumna Stretch)
+        {
+            Kolumna* k10 = new Kolumna();
+            k10->ustaw_wypelnienie(Marginesy(0));
+            k10->ustaw_odstep(0);
+            Wiersz& k10_w = k10->dodaj<Wiersz>();
+            k10_w.ustaw_wypelnienie(Marginesy(0));
+            k10_w.ustaw_odstep(0);
+            k10_w.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+            k10_w.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+            Kolumna& k10_inner = k10_w.dodaj<Kolumna>();
+            k10_inner.ustaw_wypelnienie(Marginesy(0));
+            k10_inner.ustaw_odstep(0);
+            k10_inner.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+            k10_inner.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+            k10_inner.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+            k10->rozmiesc(Prostokat(0, 0, 400, 300));
+            bws_sprawdz_msg(k10_w.obszar().wysokosc == 300, "STRETCH T10 w_h");
+            bws_sprawdz_msg(k10_inner.obszar().wysokosc == 300, "STRETCH T10 in_h");
+            bws_sprawdz_msg(k10_inner.obszar().szerokosc == 400, "STRETCH T10 in_w");
+            delete k10;
+        }
+
+        // Test 11: Zero wolnej przestrzeni
+        {
+            Kolumna* k11 = new Kolumna();
+            k11->ustaw_wypelnienie(Marginesy(0));
+            k11->ustaw_odstep(0);
+            Panel& k11_f = k11->dodaj<Panel>();
+            k11_f.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Poczatek);
+            k11_f.ustaw_preferowany_rozmiar(Rozmiar(-1, 100));
+            Panel& k11_s = k11->dodaj<Panel>();
+            k11_s.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+            k11_s.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+            k11->rozmiesc(Prostokat(0, 0, 200, 100));
+            bws_sprawdz_msg(k11_f.obszar().wysokosc == 100, "STRETCH T11 f");
+            bws_sprawdz_msg(k11_s.obszar().wysokosc == 0, "STRETCH T11 s");
+            bws_sprawdz_msg(k11_s.obszar().szerokosc >= 0, "STRETCH T11 w>=0");
+            delete k11;
+        }
+
+        // Test 12: Rodzic mniejszy niz suma minimow
+        {
+            Kolumna* k12 = new Kolumna();
+            k12->ustaw_wypelnienie(Marginesy(0));
+            k12->ustaw_odstep(0);
+            Panel& k12_1 = k12->dodaj<Panel>();
+            k12_1.ustaw_minimalny_rozmiar(Rozmiar(0, 40));
+            k12_1.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+            k12_1.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+            Panel& k12_2 = k12->dodaj<Panel>();
+            k12_2.ustaw_minimalny_rozmiar(Rozmiar(0, 40));
+            k12_2.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+            k12_2.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+            k12->rozmiesc(Prostokat(0, 0, 200, 50));
+            bws_sprawdz_msg(k12_1.obszar().wysokosc >= 40, "STRETCH T12 1>=40");
+            bws_sprawdz_msg(k12_2.obszar().wysokosc >= 40, "STRETCH T12 2>=40");
+            bws_sprawdz_msg(k12_1.obszar().szerokosc >= 0, "STRETCH T12 1w>=0");
+            bws_sprawdz_msg(k12_2.obszar().szerokosc >= 0, "STRETCH T12 2w>=0");
+            delete k12;
+        }
+
+        bws_log("[STRETCH AUDYT] Wszystkie 12 scenariuszy STRETCH i sentineli: OK\n");
+    }
 
     delete okno_popup_ptr;
     delete memo_clip_ptr;
@@ -2364,137 +3494,8 @@ extern "C" __attribute__((noreturn)) void _start() {
     wynik_bws_ok = bledy_po_bws == 0;
 
     wykonaj_testy_bursztyn_ui();
+    testy_interaktywne_bursztyn_ui();
     wynik_bursztyn_ui_ok = bws_test_blad == bledy_po_bws;
 
-    /*
-     * Testy BursztynUI celowo wywoluja BWS61 przez Okno::przelacz_maksymalizacje().
-     * Po ich zakonczeniu procesowa warstwa ma geometrie testowego Okna, a nie
-     * ponizszej prezentacji. Przywracamy ja przed pierwszym rysowaniem, aby
-     * wszystkie ekranowe wspolrzedne trafialy do wlasciwego bufora warstwy.
-     */
-    if (!gui_ustaw_geometrie_okna(WIN_X, WIN_Y, WIN_W, WIN_H)) {
-        gui_zakoncz_aplikacje();
-    }
-    if (!gui_ustaw_tytul_okna("Test BWS / BursztynUI")) {
-        gui_zakoncz_aplikacje();
-    }
-
-    bool wyjdz = false;
-    RysujInterfejs(true);
-
-    while (!wyjdz) {
-        bws_zdarzenie zdarzenie{};
-        if (!gui_czekaj_na_zdarzenie(&zdarzenie)) continue;
-
-        if (zdarzenie.typ == BWS_ZDARZENIE_FOCUS && aplikacja_zminimalizowana) {
-            aplikacja_zminimalizowana = false;
-            RysujInterfejs(true);
-            continue;
-        }
-
-        const int mx = zdarzenie.x;
-        const int my = zdarzenie.y;
-        const int lokalny_x = mx - WIN_X;
-        const int lokalny_y = my - WIN_Y;
-        const bool lewy = (zdarzenie.przyciski & 0x01U) != 0;
-        const bool klik_lewy = zdarzenie.typ == BWS_ZDARZENIE_MYSZ_DOWN;
-        const bool puszczenie_lewego = zdarzenie.typ == BWS_ZDARZENIE_MYSZ_UP;
-        bool redraw = false;
-        bool pelne_czyszczenie = false;
-
-        if (aplikacja_zminimalizowana) continue;
-
-        const TestUiLayout uklad = oblicz_uklad_prezentacji();
-        bool combo_klik_obsluzony = false;
-        if (klik_lewy && combo_otwarty_TComboBox_3_3) {
-            const TestUiRect lista = {
-                uklad.selector.x,
-                uklad.selector.y + uklad.selector.h,
-                uklad.selector.w,
-                3 * STATUS_H
-            };
-            if (punkt_w_obszarze(lokalny_x, lokalny_y, lista)) {
-                const int wybrany = (lokalny_y - lista.y) / STATUS_H;
-                if (wybrany >= 0 && wybrany < 3) {
-                    combo_wybor_TComboBox_3_3 = wybrany;
-                }
-                combo_klik_obsluzony = true;
-            } else if (punkt_w_obszarze(lokalny_x, lokalny_y,
-                                         uklad.selector)) {
-                combo_klik_obsluzony = true;
-            }
-            combo_otwarty_TComboBox_3_3 = false;
-            redraw = true;
-            pelne_czyszczenie = true;
-        }
-
-        if (!combo_klik_obsluzony && klik_lewy &&
-            punkt_w_prostokacie(lokalny_x, lokalny_y, 0, 0, WIN_W, WIN_H)) {
-            const gui_akcja_belki akcja = gui_hit_test_belki(mx, my, WIN_X, WIN_Y, WIN_W);
-            if (akcja == GUI_BELKA_MINIMALIZUJ) {
-                aplikacja_zminimalizowana = gui_minimalizuj_okno();
-                dragging = false;
-                gui_ustaw_capture_myszy(false);
-            } else if (akcja == GUI_BELKA_ZAMKNIJ) {
-                wyjdz = true;
-                dragging = false;
-                gui_ustaw_capture_myszy(false);
-            } else if (akcja == GUI_BELKA_MAKSYMALIZUJ) {
-                if (!przelacz_maksymalizacje_okna()) gui_zakoncz_aplikacje();
-                redraw = true;
-                pelne_czyszczenie = true;
-            } else if (akcja == GUI_BELKA_DRAG && !zmaksymalizowane) {
-                dragging = true;
-                gui_ustaw_capture_myszy(true);
-                drag_off_x = mx - WIN_X; drag_off_y = my - WIN_Y;
-            } else {
-                if (punkt_w_obszarze(lokalny_x, lokalny_y, uklad.toolbar[3])) {
-                    aplikacja_zminimalizowana = gui_minimalizuj_okno();
-                    dragging = false;
-                    gui_ustaw_capture_myszy(false);
-                } else if (punkt_w_obszarze(lokalny_x, lokalny_y,
-                                             uklad.toolbar[2])) {
-                    if (!przelacz_maksymalizacje_okna()) gui_zakoncz_aplikacje();
-                    redraw = true;
-                    pelne_czyszczenie = true;
-                } else if (punkt_w_obszarze(lokalny_x, lokalny_y,
-                                             uklad.toolbar[1])) {
-                    wyjdz = true;
-                } else if (punkt_w_obszarze(lokalny_x, lokalny_y,
-                                             uklad.selector)) {
-                    combo_otwarty_TComboBox_3_3 = !combo_otwarty_TComboBox_3_3;
-                    redraw = true;
-                    pelne_czyszczenie = true;
-                } else if (punkt_w_obszarze(lokalny_x, lokalny_y,
-                                             uklad.toolbar[0])) {
-                    komunikat_output = "Otworz: Bursztyn";
-                    redraw = true;
-                    pelne_czyszczenie = true;
-                } else if (punkt_w_obszarze(lokalny_x, lokalny_y,
-                                             uklad.output)) {
-                    komunikat_output = "Kliknieto obszar wynikow.";
-                    redraw = true;
-                    pelne_czyszczenie = true;
-                }
-            }
-        }
-
-        if (dragging && lewy) {
-            int nowy_x = mx - drag_off_x;
-            int nowy_y = my - drag_off_y;
-            ogranicz_pozycje_okna(&nowy_x, &nowy_y);
-            if (nowy_x != WIN_X || nowy_y != WIN_Y) {
-                WIN_X = nowy_x;
-                WIN_Y = nowy_y;
-                bws_przesun_warstwe(WIN_X, WIN_Y);
-                gui_odswiez();
-            }
-        }
-        if (puszczenie_lewego && dragging) {
-            dragging = false;
-            gui_ustaw_capture_myszy(false);
-        }
-        if (redraw && !wyjdz) RysujInterfejs(pelne_czyszczenie);
-    }
     gui_zakoncz_aplikacje();
 }

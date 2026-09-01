@@ -39,10 +39,10 @@
  *  3. Dopiero po przejsciu na poprawny stos Ring 0 i zapisaniu calego
  *     kontekstu mozemy wlaczyc maskowalne IRQ.
  *
- *  4. Timer moze przerwac syscall, ale obecny dispatcher IDT nie zmienia
- *     procesu podczas zwyklego wykonywania Ring 0. Wyjatek stanowi proces
- *     oznaczony jako PROCES_PUSTY podczas zakonczania - wtedy syscall juz
- *     nie wraca.
+ *  4. Timer nie zmienia procesu podczas zwyklego wykonywania Ring 0.
+ *     Wyjatkami sa zakonczenie oraz blokujacy BWS38. BWS38 zachowuje rame
+ *     SYSCALL na prywatnym stosie; scheduler przechowuje nad nia kompletna
+ *     rame IRQ i po wybudzeniu wznawia ten sam syscall.
  *
  *  5. Przed SYSRETQ ponownie blokujemy IRQ, sprawdzamy docelowy RIP/RSP,
  *     ustawiamy bezpieczne RFLAGS użytkownika i dopiero wtedy wykonujemy
