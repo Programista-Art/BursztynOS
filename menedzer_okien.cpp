@@ -35,12 +35,12 @@ constexpr int MENU_X = 10;
 constexpr int MENU_W = 260;
 constexpr int MENU_GORNY_MARGINES = 10;
 constexpr int MENU_ELEMENT_WYS = 25;
-constexpr int MENU_ELEMENTOW = 10;
+constexpr int MENU_ELEMENTOW = 11;
 constexpr int MENU_WYS =
     (MENU_GORNY_MARGINES * 2) + (MENU_ELEMENTOW * MENU_ELEMENT_WYS);
 
 // Pozycja "Gry ->" w glownym Menu Start.
-constexpr int MENU_GRY_INDEX = 7;
+constexpr int MENU_GRY_INDEX = 8;
 constexpr int MENU_GRY_W = 180;
 constexpr int MENU_GRY_ELEMENTOW = 1;
 constexpr int MENU_GRY_WYS =
@@ -74,10 +74,36 @@ const char* const SCIEZKA_NOTATNIK = "/programy/notatnik.cebula/notatnik.bur";
 const char* const SCIEZKA_KALKULATOR = "/programy/kalkulator.cebula/kalkulator.bur";
 const char* const SCIEZKA_HUSSAR = "/programy/przegladarka.cebula/przegladarka.bur";
 const char* const SCIEZKA_TEST = "/programy/test.cebula/test.bur";
+const char* const SCIEZKA_KONTROLKI2 =
+    "/programy/kontrolki2.cebula/kontrolki2.bur";
 const char* const SCIEZKA_SNAKE = "/gry/snake.cebula/snake.bur";
 const char* const SCIEZKA_PRZEGLADARKA_OBRAZOW =
     "/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur";
 const char* const SCIEZKA_PULPIT = "/uzytkownicy/Pulpit";
+
+// Kanoniczna tabela uruchamiania ikon wbudowanych. Obsluga klikniecia nie
+// zna poszczegolnych aplikacji; kazda ikona korzysta z tego samego mechanizmu
+// uruchom-lub-aktywuj i zachowuje systemowa polityke jednej instancji.
+struct AplikacjaPulpitu {
+    int x;
+    int y;
+    const char* sciezka;
+    const char* prefiks_tytulu;
+};
+
+const AplikacjaPulpitu APLIKACJE_PULPITU[] = {
+    {50,  50, SCIEZKA_NOTATNIK, "Notatnik"},
+    {130, 50, SCIEZKA_KALKULATOR, "Kalkulator"},
+    {210, 50, SCIEZKA_HUSSAR, "Husarz"},
+    {290, 50, SCIEZKA_TEST, "Test"},
+    {370, 50, SCIEZKA_SNAKE, "Snake"},
+    {460, 50, SCIEZKA_EKSPLORATOR, "Eksplorator Plików"},
+    {550, 50, SCIEZKA_PRZEGLADARKA_OBRAZOW, "Przeglądarka Obrazów"},
+    {640, 50, SCIEZKA_KONTROLKI2, "BursztynUI Kontrolki 2"}
+};
+
+constexpr size_t LICZBA_APLIKACJI_PULPITU =
+    sizeof(APLIKACJE_PULPITU) / sizeof(APLIKACJE_PULPITU[0]);
 
 struct WpisPulpitu {
     char nazwa[PULPIT_NAZWA_CAP];
@@ -1266,6 +1292,14 @@ rysuj_tekst_wysrodkowany(370, 104, IKONA_W, 16, 1, 0x0095E600, "Snake");
     rysuj_tekst_wysrodkowany(550, 104, IKONA_W, 16, 1, 0x00FFFFFF, "Przeglądarka");
     rysuj_tekst_wysrodkowany(550, 120, IKONA_W, 16, 1, 0x00FFFFFF, "Obrazów");
 
+    // Ikona Kontrolki 2.
+    gui_rysuj_prostokat(640, 50, IKONA_W, IKONA_H, 0x00301500);
+    gui_rysuj_prostokat(642, 52, 44, 44, 0x00E58A00);
+    gui_rysuj_prostokat(646, 56, 36, 12, 0x00FFBF00);
+    gui_rysuj_prostokat(646, 72, 16, 18, 0x00301500);
+    gui_rysuj_prostokat(666, 72, 16, 18, 0x00301500);
+    rysuj_tekst_wysrodkowany(640, 104, IKONA_W, 16, 1, 0x00FFFFFF, "Kontrolki 2");
+
     RysujWpisyPulpitu();
 
 
@@ -1287,6 +1321,7 @@ rysuj_tekst_wysrodkowany(370, 104, IKONA_W, 16, 1, 0x0095E600, "Snake");
             "> Kalkulator",
             "> Przegladarka Husarz",
             "> Przeglądarka Obrazów",
+            "> Kontrolki 2",
             "> Test",
             "> Gry ->",
             "> Uruchom ponownie",
@@ -1534,6 +1569,10 @@ void obsluz_element_menu(int item_index) {
                                 "Przeglądarka Obrazów");
             break;
         case 6:
+            uruchom_lub_aktywuj(SCIEZKA_KONTROLKI2,
+                                "BursztynUI Kontrolki 2");
+            break;
+        case 7:
             uruchom_lub_aktywuj(SCIEZKA_TEST, "Test");
             break;
         case MENU_GRY_INDEX:
@@ -1541,10 +1580,10 @@ void obsluz_element_menu(int item_index) {
             aktualizuj_overlay_menu();
             RysujPulpit(true);
             break;
-        case 8:
+        case 9:
             wykonaj_restart();
             break;
-        case 9:
+        case 10:
             wykonaj_zamkniecie();
             break;
         default:
@@ -1629,40 +1668,15 @@ void obsluz_klikniecie(int mx, int my) {
         return;
     }
 
-    // Ikony na pulpicie.
-    if (punkt_w_prostokacie(mx, my, 50, 50, IKONA_W, IKONA_H)) {
-        uruchom_lub_aktywuj(SCIEZKA_NOTATNIK, "Notatnik");
-        return;
-    }
-
-    if (punkt_w_prostokacie(mx, my, 130, 50, IKONA_W, IKONA_H)) {
-        uruchom_lub_aktywuj(SCIEZKA_KALKULATOR, "Kalkulator");
-        return;
-    }
-
-    if (punkt_w_prostokacie(mx, my, 210, 50, IKONA_W, IKONA_H)) {
-        uruchom_lub_aktywuj(SCIEZKA_HUSSAR, "Husarz");
-        return;
-    }
-
-    if (punkt_w_prostokacie(mx, my, 290, 50, IKONA_W, IKONA_H)) {
-        uruchom_lub_aktywuj(SCIEZKA_TEST, "Test");
-        return;
-    }
-
-    if (punkt_w_prostokacie(mx, my, 370, 50, IKONA_W, IKONA_H)) {
-        uruchom_lub_aktywuj(SCIEZKA_SNAKE, "Snake");
-        return;
-    }
-
-    if (punkt_w_prostokacie(mx, my, 460, 50, IKONA_W, IKONA_H)) {
-        uruchom_lub_aktywuj(SCIEZKA_EKSPLORATOR, "Eksplorator Plików");
-        return;
-    }
-
-    if (punkt_w_prostokacie(mx, my, 550, 50, IKONA_W, IKONA_H)) {
-        uruchom_lub_aktywuj(SCIEZKA_PRZEGLADARKA_OBRAZOW, "Przeglądarka Obrazów");
-        return;
+    // Wszystkie wbudowane ikony korzystaja z jednej tabeli deskryptorow.
+    for (size_t i = 0; i < LICZBA_APLIKACJI_PULPITU; ++i) {
+        const AplikacjaPulpitu& aplikacja = APLIKACJE_PULPITU[i];
+        if (punkt_w_prostokacie(mx, my, aplikacja.x, aplikacja.y,
+                                IKONA_W, IKONA_H)) {
+            uruchom_lub_aktywuj(aplikacja.sciezka,
+                                aplikacja.prefiks_tytulu);
+            return;
+        }
     }
 
     int task_x = TASK_BUTTON_X;

@@ -312,6 +312,15 @@ public:
         if (trzeba_odrysowac) uniewaznij();
     }
     bool czy_wcisnieta() const { return czy_wcisnieta_; }
+    virtual bool czy_reaguje_wizualnie_na_wcisniecie() const {
+        return czy_reaguje_wizualnie_na_wcisniecie_;
+    }
+    void ustaw_reagowanie_wizualne_na_wcisniecie(bool reaguje) {
+        if (czy_reaguje_wizualnie_na_wcisniecie_ == reaguje) return;
+        bool trzeba_odrysowac = czy_wcisnieta_ && czy_wlaczona_;
+        czy_reaguje_wizualnie_na_wcisniecie_ = reaguje;
+        if (trzeba_odrysowac) uniewaznij();
+    }
     bool czy_ma_fokus() const { return czy_ma_fokus_; }
     bool czy_ma_skupienie() const { return czy_ma_fokus_; }
 
@@ -414,7 +423,7 @@ public:
             s = styl_.wylaczony;
         } else if (czy_tylko_do_odczytu_) {
             s = styl_.tylko_do_odczytu;
-        } else if (czy_wcisnieta_) {
+        } else if (czy_wcisnieta_ && czy_reaguje_wizualnie_na_wcisniecie()) {
             s = styl_.wcisniety;
         } else if (czy_ma_fokus_) {
             s = styl_.fokus;
@@ -740,7 +749,7 @@ public:
 
     virtual void obsluz_opuszczenie_myszy() {
         bool zmiana_wizualna = czy_wlaczona_ &&
-                               (czy_wcisnieta_ ||
+                               ((czy_wcisnieta_ && czy_reaguje_wizualnie_na_wcisniecie()) ||
                                 (czy_najechana_ && czy_reaguje_wizualnie_na_najechanie()));
         czy_najechana_ = false;
         czy_wcisnieta_ = false;
@@ -751,14 +760,16 @@ public:
     virtual void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e) {
         if (!czy_wlaczona_) return;
         czy_wcisnieta_ = true;
-        uniewaznij();
+        if (czy_reaguje_wizualnie_na_wcisniecie()) uniewaznij();
         if (cb_wcisniecie_myszy_) cb_wcisniecie_myszy_(this, e, dane_wcisniecia_myszy_);
     }
 
     virtual void obsluz_zwolnienie_myszy(ZdarzenieMyszki& e) {
         if (!czy_wlaczona_) return;
+        bool zmiana_wizualna = czy_wcisnieta_ &&
+                               czy_reaguje_wizualnie_na_wcisniecie();
         czy_wcisnieta_ = false;
-        uniewaznij();
+        if (zmiana_wizualna) uniewaznij();
         if (cb_zwolnienie_myszy_) cb_zwolnienie_myszy_(this, e, dane_zwolnienia_myszy_);
     }
 
@@ -891,6 +902,7 @@ protected:
     bool czy_tylko_do_odczytu_{false};
     bool czy_najechana_{false};
     bool czy_reaguje_wizualnie_na_najechanie_{false};
+    bool czy_reaguje_wizualnie_na_wcisniecie_{true};
     bool czy_wcisnieta_{false};
     bool czy_ma_fokus_{false};
     bool czy_moze_miec_fokus_{false};

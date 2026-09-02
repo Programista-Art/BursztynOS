@@ -141,6 +141,9 @@ extern "C" uint8_t _binary_snake_bin_end[];
 extern "C" uint8_t _binary_demo_ui_bin_start[];
 extern "C" uint8_t _binary_demo_ui_bin_end[];
 
+extern "C" uint8_t _binary_kontrolki2_bin_start[];
+extern "C" uint8_t _binary_kontrolki2_bin_end[];
+
 extern "C" uint8_t _binary_przegladarka_obrazow_bin_start[];
 extern "C" uint8_t _binary_przegladarka_obrazow_bin_end[];
 
@@ -665,6 +668,7 @@ void utworz_drabine_katalogow() {
         "/programy/przegladarka.cebula",
         "/programy/przegladarka-obrazow.cebula",
         "/programy/demo_ui.cebula",
+        "/programy/kontrolki2.cebula",
         "/programy/test.cebula",
         "/gry",
         "/gry/snake.cebula",
@@ -940,6 +944,16 @@ void instaluj_wbudowane_programy() {
         "wersja = \"0.1\"\n"
         "poziom_zaufania = 4\n"
         "plik_startowy = \"demo_ui.bur\"\n"
+        "uprawnienia = [\n"
+        "    \"okna\"\n"
+        "]\n";
+
+    static const char MANIFEST_KONTROLKI2[] =
+        "nazwa = \"Kontrolki 2\"\n"
+        "autor = \"Programista Art\"\n"
+        "wersja = \"0.1\"\n"
+        "poziom_zaufania = 4\n"
+        "plik_startowy = \"kontrolki2.bur\"\n"
         "uprawnienia = [\n"
         "    \"okna\"\n"
         "]\n";
@@ -1325,6 +1339,19 @@ void instaluj_wbudowane_programy() {
     } else {
         wypisz_log(
             "[BSP] BursztynUI Demo zainstalowane jako .cebula.");
+    }
+
+    if (!instaluj_paczke(
+            "/programy/kontrolki2.cebula/opis.aplikacji",
+            MANIFEST_KONTROLKI2,
+            "/programy/kontrolki2.cebula/kontrolki2.bur",
+            _binary_kontrolki2_bin_start,
+            _binary_kontrolki2_bin_end)) {
+        wypisz_log(
+            "[BSP-BLAD] Nie mozna zainstalowac Kontrolek 2.");
+    } else {
+        wypisz_log(
+            "[BSP] Kontrolki 2 zainstalowane jako .cebula.");
     }
 
 

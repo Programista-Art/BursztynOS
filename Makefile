@@ -263,6 +263,7 @@ OBJS := \
 	bezpieczenstwo.o \
 	test_blob.o \
 	demo_ui_blob.o \
+	kontrolki2_blob.o \
 	repro_blob.o \
 	snake_blob.o \
 	przegladarka_obrazow_blob.o \
@@ -429,6 +430,16 @@ demo_ui_blob.o: demo_ui_tmp.o bursztyn_gui.o programy/demo_ui/demo_ui_linker.ld
 		demo_ui_tmp.o bursztyn_gui.o -o demo_ui.elf
 	$(OBJCOPY) -O binary demo_ui.elf demo_ui.bin
 	$(LD) -r -b binary demo_ui.bin -o demo_ui_blob.o
+
+# BursztynUI Kontrolki 2
+kontrolki2_tmp.o: programy/kontrolki2/kontrolki2.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -c $< -o $@
+
+kontrolki2_blob.o: kontrolki2_tmp.o bursztyn_gui.o programy/demo_ui/demo_ui_linker.ld
+	$(LD) --gc-sections -T programy/demo_ui/demo_ui_linker.ld $(RING3_LDFLAGS) \
+		kontrolki2_tmp.o bursztyn_gui.o -o kontrolki2.elf
+	$(OBJCOPY) -O binary kontrolki2.elf kontrolki2.bin
+	$(LD) -r -b binary kontrolki2.bin -o kontrolki2_blob.o
 
 # Obraz testowy test.bmp	
 test_bmp_blob.o: obrazy/test.bmp

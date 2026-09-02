@@ -61,6 +61,7 @@ public:
         obszar_stron_->ustaw_kolor_tla(0);
         obszar_stron_->ustaw_grubosc_ramki(0);
         obszar_stron_->ustaw_wypelnienie(Marginesy(0));
+        obszar_stron_->ustaw_uklad_automatyczny(false);
         dodaj_kontrolke(obszar_stron_);
     }
 
@@ -99,6 +100,7 @@ public:
         }
 
         przelicz_naglowki();
+        rozmiesc_strone(zawartosc);
         uniewaznij();
         return indeks;
     }
@@ -143,14 +145,21 @@ public:
 
     int liczba_kart() const { return liczba_kart_; }
     int aktywna_karta() const { return aktywna_karta_; }
+    Prostokat prostokat_obszaru_strony() const {
+        const int y = wysokosc_paska_kart_;
+        return Prostokat(1, y,
+                         obszar_.szerokosc > 2 ? obszar_.szerokosc - 2 : 0,
+                         obszar_.wysokosc > y + 2 ? obszar_.wysokosc - y - 2 : 0);
+    }
 
     bool ustaw_aktywna_karte(int indeks) {
         if (indeks < 0 || indeks >= liczba_kart_ || !strony_[indeks].czy_wlaczona()) return false;
         if (aktywna_karta_ == indeks) return true;
 
-        if (aktywna_karta_ >= 0 && aktywna_karta_ < liczba_kart_) {
-            if (strony_[aktywna_karta_].zawartosc()) {
-                strony_[aktywna_karta_].zawartosc()->ustaw_widoczna(false);
+        const int stara_karta = aktywna_karta_;
+        if (stara_karta >= 0 && stara_karta < liczba_kart_) {
+            if (strony_[stara_karta].zawartosc()) {
+                strony_[stara_karta].zawartosc()->ustaw_widoczna(false);
             }
         }
 
@@ -160,9 +169,9 @@ public:
         }
 
         dopasuj_przewiniecie_do_aktywnej();
-        przelicz_naglowki();
-        rozmiesc_strone_aktywna();
-        uniewaznij();
+        if (stara_karta >= 0 && stara_karta < liczba_kart_)
+            uniewaznij_obszar(strony_[stara_karta].prostokat_naglowka_);
+        uniewaznij_obszar(strony_[aktywna_karta_].prostokat_naglowka_);
 
         if (cb_zmiana_) {
             cb_zmiana_(this, aktywna_karta_, dane_zmiany_);
@@ -227,7 +236,7 @@ public:
     void rozmiesc(Prostokat r) override {
         Kontrolka::rozmiesc(r);
         przelicz_naglowki();
-        rozmiesc_strone_aktywna();
+        rozmiesc_wszystkie_strony();
     }
 
     void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e) override {
@@ -450,23 +459,22 @@ private:
         }
     }
 
-    void rozmiesc_strone_aktywna() {
-        if (!obszar_stron_) return;
-        int w = obszar_.szerokosc;
-        int h = obszar_.wysokosc;
-        int strona_y = wysokosc_paska_kart_;
-        int strona_h = (h > strona_y + 2) ? h - strona_y - 2 : 0;
-        int strona_w = (w > 2) ? w - 2 : 0;
+    void rozmiesc_strone(Kontrolka* k) {
+        if (!k) return;
+        Prostokat r = prostokat_obszaru_strony();
+        k->rozmiesc(Prostokat(0, 0, r.szerokosc, r.wysokosc));
+    }
 
-        obszar_stron_->rozmiesc(Prostokat(1, strona_y, strona_w, strona_h));
+    void rozmiesc_wszystkie_strony() {
+        if (!obszar_stron_) return;
+        Prostokat r = prostokat_obszaru_strony();
+        obszar_stron_->rozmiesc(r);
 
         for (int i = 0; i < liczba_kart_; ++i) {
             Kontrolka* k = strony_[i].zawartosc();
             if (k) {
                 k->ustaw_widoczna(i == aktywna_karta_);
-                if (i == aktywna_karta_) {
-                    k->rozmiesc(Prostokat(0, 0, strona_w, strona_h));
-                }
+                rozmiesc_strone(k);
             }
         }
     }
@@ -483,11 +491,14 @@ private:
     }
 
     void przewin_pasek(int delta) {
-        offset_paska_ += delta;
-        if (offset_paska_ < 0) offset_paska_ = 0;
-        if (offset_paska_ > maks_offset_paska_) offset_paska_ = maks_offset_paska_;
+        int nowy = offset_paska_ + delta;
+        if (nowy < 0) nowy = 0;
+        if (nowy > maks_offset_paska_) nowy = maks_offset_paska_;
+        if (nowy == offset_paska_) return;
+        offset_paska_ = nowy;
         przelicz_naglowki();
-        uniewaznij();
+        uniewaznij_obszar(Prostokat(0, 0, obszar_.szerokosc,
+                                    wysokosc_paska_kart_));
     }
 
     void przelacz_na_kolejna() {

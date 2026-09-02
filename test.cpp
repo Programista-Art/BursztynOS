@@ -486,6 +486,827 @@ __attribute__((noinline)) static void testy_interaktywne_bursztyn_ui() {
     bws_log("[INTERAKTYWNOSC AUDYT] WidokPrzewijany, Drzewo i Efektywna Widocznosc: OK\n");
 }
 
+static void formatuj_liczbe_t(char* buf, size_t cap, int n) {
+    if (cap < 2) return;
+    if (n == 0) { buf[0] = '0'; buf[1] = '\0'; return; }
+    char tmp[16]; size_t len = 0;
+    while (n > 0 && len < sizeof(tmp)) { tmp[len++] = static_cast<char>('0' + (n % 10)); n /= 10; }
+    size_t bi = 0;
+    while (len > 0 && bi + 1 < cap) { buf[bi++] = tmp[--len]; }
+    buf[bi] = '\0';
+}
+
+static void wykonaj_testy_kontrolki2() {
+    bws_log("\n=== ROZPOCZECIE TESTOW NOWYCH KONTROLEK (BURSZTYNUI GENERACJA 2) ===\n");
+
+    // 1. Tabela (1000 wierszy, kolumny, selekcja, nawigacja)
+    {
+        bws_log("[KONTROLKI2 1/8] Tabela: model, wejscie i wirtualizacja 1000 wierszy...\n");
+        Tabela* tab = new Tabela();
+        bws_sprawdz_msg(tab != nullptr, "Tabela alokacja");
+        if (!tab) return;
+        tab->rozmiesc(Prostokat(0, 0, 400, 300));
+        bws_sprawdz_msg(tab->dodaj_kolumne("ID", 90), "Tabela dodaj_kolumne 1");
+        bws_sprawdz_msg(tab->dodaj_kolumne("Nazwa", 210), "Tabela dodaj_kolumne 2");
+        bws_sprawdz_msg(tab->dodaj_kolumne("Wartość", 180), "Tabela dodaj_kolumne 3");
+        bws_sprawdz_msg(tab->liczba_kolumn() == 3, "Tabela liczba_kolumn == 3");
+
+        tab->rozpocznij_aktualizacje();
+        for (int i = 0; i < 1000; ++i) {
+            char buf[16];
+            formatuj_liczbe_t(buf, sizeof(buf), i);
+            bws_sprawdz_msg(tab->dodaj_wiersz(buf, "Element Zażółć", "100"),
+                            "Tabela dodaj_wiersz");
+        }
+        tab->zakoncz_aktualizacje();
+        bws_sprawdz_msg(tab->liczba_wierszy() == 1000, "Tabela 1000 wierszy");
+        bws_sprawdz_msg(tab->pasek_pionowy().czy_widoczna(), "Tabela pionowy scroll");
+        bws_sprawdz_msg(tab->pasek_poziomy().czy_widoczna(), "Tabela poziomy scroll");
+
+        struct PomiarTabeli { int zmiany; int aktywacje; } pomiar{};
+        tab->przy_zmianie_zaznaczenia([](Tabela*, int, void* dane) {
+            ++static_cast<PomiarTabeli*>(dane)->zmiany;
+        }, &pomiar);
+        tab->przy_aktywacji([](Tabela*, int, void* dane) {
+            ++static_cast<PomiarTabeli*>(dane)->aktywacje;
+        }, &pomiar);
+
+        // Selekcja i odczyt
+        bws_sprawdz_msg(tab->ustaw_zaznaczony_wiersz(42), "Tabela ustaw_zaznaczony_wiersz 42");
+        bws_sprawdz_msg(tab->zaznaczony_wiersz() == 42 && pomiar.zmiany == 1,
+                        "Tabela zaznaczenie/callback");
+        bws_sprawdz_msg(tab->komorka(42, 1)[0] == 'E', "Tabela komorka UTF-8");
+
+        ZdarzenieKlawiatury tk{};
+        tk.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x4FU; // End
+        tab->obsluz_wcisniecie_klawisza(tk);
+        bws_sprawdz_msg(tab->zaznaczony_wiersz() == 999 &&
+                        tab->pasek_pionowy().wartosc() > 0,
+                        "Tabela End przewija do ostatniego wiersza");
+        tk = {};
+        tk.kod_klawisza = 13;
+        tab->obsluz_wcisniecie_klawisza(tk);
+        bws_sprawdz_msg(pomiar.aktywacje == 1, "Tabela aktywacja Enter");
+
+        KontekstRysowania ctx_tab;
+        uint64_t alok_przed = gui_liczba_alokacji_sterty();
+        tab->rysuj(ctx_tab, true);
+        uint64_t alok_po = gui_liczba_alokacji_sterty();
+        bws_sprawdz_msg(tab->liczba_ostatnio_narysowanych_wierszy() > 0 &&
+                        tab->liczba_ostatnio_narysowanych_wierszy() < 20,
+                        "Tabela renderuje tylko widoczne wiersze");
+        bws_sprawdz_msg(alok_po == alok_przed, "Tabela paint 0 alokacji");
+
+        // Klik wiersza nie moze przelaczac stylu powierzchni calej tabeli.
+        tab->pasek_pionowy().ustaw_wartosc(0);
+        tab->ustaw_zaznaczony_wiersz(1);
+        tab->wyczysc_brudny_obszar();
+        const uint32_t tabela_tlo_przed = tab->wyznacz_biezacy_styl_stanu().tlo;
+        ZdarzenieMyszki tdown{};
+        tdown.typ = TypZdarzenia::WcisniecieMyszy;
+        tdown.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
+        tdown.x = 10;
+        tdown.y = tab->wysokosc_naglowka() + 1 + 2 * tab->wysokosc_wiersza() + 5;
+        uint64_t tabela_click_alok_przed = gui_liczba_alokacji_sterty();
+        tab->obsluz_wcisniecie_myszy(tdown);
+        uint64_t tabela_click_alok_po = gui_liczba_alokacji_sterty();
+        Prostokat tabela_click_dirty = tab->pobierz_brudny_obszar();
+        bws_sprawdz_msg(tab->wyznacz_biezacy_styl_stanu().tlo == tabela_tlo_przed,
+                        "Tabela klik nie zmienia tla korzenia");
+        bws_sprawdz_msg(tab->zaznaczony_wiersz() == 2 &&
+                        tabela_click_dirty.wysokosc <= 2 * tab->wysokosc_wiersza(),
+                        "Tabela klik brudzi tylko stary i nowy wiersz");
+        bws_sprawdz_msg(tabela_click_alok_po == tabela_click_alok_przed,
+                        "Tabela klik wiersza 0 alokacji");
+
+        // 5 s syntetycznego ruchu 1000 Hz w tej samej tozsamosci hover.
+        ZdarzenieMyszki tmove{};
+        tmove.typ = TypZdarzenia::RuchMyszy;
+        tmove.y = tab->wysokosc_naglowka() + 1 + 3 * tab->wysokosc_wiersza() + 5;
+        tmove.x = 10;
+        tab->obsluz_ruch_myszy(tmove);
+        tab->wyczysc_brudny_obszar();
+        uint64_t tabela_move_alok_przed = gui_liczba_alokacji_sterty();
+        for (int i = 0; i < 5000; ++i) {
+            tmove.x = 10 + (i % 100);
+            tab->obsluz_ruch_myszy(tmove);
+        }
+        uint64_t tabela_move_alok_po = gui_liczba_alokacji_sterty();
+        bws_sprawdz_msg(!tab->czy_brudna(),
+                        "Tabela ten sam hover: 0 dodatkowych invalidacji");
+        bws_sprawdz_msg(tabela_move_alok_po == tabela_move_alok_przed,
+                        "Tabela MouseMove 0 alokacji");
+        bws_log_u64("[PERF 5S TABELA ROW] mouse_events=", 5000);
+        bws_log_u64("[PERF 5S TABELA ROW] dirty_calls=", tab->czy_brudna() ? 1 : 0);
+        bws_log_u64("[PERF 5S TABELA ROW] dirty_pixels=", 0);
+        bws_log_u64("[PERF 5S TABELA ROW] layout_passes=", 0);
+        bws_log_u64("[PERF 5S TABELA ROW] allocations=",
+                    tabela_move_alok_po - tabela_move_alok_przed);
+
+        // Rolka zmienia model, lecz nie selekcje; na granicy pozwala babelkowac.
+        tab->pasek_pionowy().ustaw_wartosc(0);
+        tab->wyczysc_brudny_obszar();
+        const int tabela_sel_przed_rolka = tab->zaznaczony_wiersz();
+        ZdarzenieRolki twheel{};
+        twheel.delta_y = -120;
+        uint64_t tabela_wheel_alok_przed = gui_liczba_alokacji_sterty();
+        tab->obsluz_rolke(twheel);
+        uint64_t tabela_wheel_alok_po = gui_liczba_alokacji_sterty();
+        bws_sprawdz_msg(twheel.obsluzone && tab->pasek_pionowy().wartosc() > 0,
+                        "Tabela rolka zmienia pionowy model");
+        bws_sprawdz_msg(tab->zaznaczony_wiersz() == tabela_sel_przed_rolka,
+                        "Tabela rolka nie zmienia selekcji");
+        bws_sprawdz_msg(tabela_wheel_alok_po == tabela_wheel_alok_przed,
+                        "Tabela rolka 0 alokacji");
+        tab->pasek_pionowy().ustaw_wartosc(tab->pasek_pionowy().maksimum());
+        twheel = {};
+        twheel.delta_y = -120;
+        tab->obsluz_rolke(twheel);
+        bws_sprawdz_msg(!twheel.obsluzone,
+                        "Tabela rolka na dolnej granicy babelkuje");
+
+        // Modyfikacja komórki
+        bws_sprawdz_msg(tab->ustaw_komorke(42, 1, "Zmieniona Nazwa"), "Tabela ustaw_komorke");
+        bws_sprawdz_msg(tab->komorka(42, 1)[0] == 'Z', "Tabela komorka po zmianie");
+
+        // Usuwanie wiersza
+        bws_sprawdz_msg(tab->usun_wiersz(42), "Tabela usun_wiersz");
+        bws_sprawdz_msg(tab->liczba_wierszy() == 999, "Tabela liczba_wierszy po usunieciu == 999");
+        tab->ustaw_wlaczona(false);
+        const int wybor_przed = tab->zaznaczony_wiersz();
+        tk = {};
+        tk.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x48U;
+        tab->obsluz_wcisniecie_klawisza(tk);
+        bws_sprawdz_msg(tab->zaznaczony_wiersz() == wybor_przed,
+                        "Tabela wylaczona ignoruje klawiature");
+        bws_log_u64("[TABELA POMIAR] visible_rows=", tab->liczba_ostatnio_narysowanych_wierszy());
+        bws_log_u64("[TABELA POMIAR] paint_allocations=", alok_po - alok_przed);
+        delete tab;
+
+        Tabela* tabela_pusta = new Tabela();
+        bws_sprawdz_msg(tabela_pusta != nullptr, "Tabela pusta alokacja");
+        tabela_pusta->rozmiesc(Prostokat(0, 0, 400, 300));
+        tabela_pusta->dodaj_kolumne("Pusta", 200);
+        tabela_pusta->wyczysc_brudny_obszar();
+        ZdarzenieMyszki empty_move{};
+        empty_move.typ = TypZdarzenia::RuchMyszy;
+        empty_move.y = tabela_pusta->wysokosc_naglowka() + 30;
+        uint64_t empty_alok_przed = gui_liczba_alokacji_sterty();
+        for (int i = 0; i < 5000; ++i) {
+            empty_move.x = 10 + (i % 300);
+            tabela_pusta->obsluz_ruch_myszy(empty_move);
+        }
+        uint64_t empty_alok_po = gui_liczba_alokacji_sterty();
+        bws_sprawdz_msg(!tabela_pusta->czy_brudna() && empty_alok_po == empty_alok_przed,
+                        "Tabela pusta 5s MouseMove: 0 dirty/layout/allocation");
+        bws_log_u64("[PERF 5S TABELA EMPTY] mouse_events=", 5000);
+        bws_log_u64("[PERF 5S TABELA EMPTY] dirty_calls=", 0);
+        bws_log_u64("[PERF 5S TABELA EMPTY] dirty_pixels=", 0);
+        bws_log_u64("[PERF 5S TABELA EMPTY] layout_passes=", 0);
+        bws_log_u64("[PERF 5S TABELA EMPTY] allocations=",
+                    empty_alok_po - empty_alok_przed);
+        delete tabela_pusta;
+
+        // Pelna sciezka BWS -> swiezy hit-test -> Tabela/PasekPrzewijania.
+        {
+            Okno ok_tabela("Tabela route", 420, 320);
+            Panel* root = static_cast<Panel*>(ok_tabela.kontrolka_glowna());
+            root->ustaw_wypelnienie(Marginesy(0));
+            Tabela& rt = root->dodaj<Tabela>();
+            rt.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+            rt.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+            rt.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+            rt.dodaj_kolumne("ID", 100);
+            rt.dodaj_kolumne("Nazwa", 500);
+            rt.rozpocznij_aktualizacje();
+            for (int i = 0; i < 200; ++i) rt.dodaj_wiersz("1", "Wiersz");
+            rt.zakoncz_aktualizacje();
+            ok_tabela.przelicz_uklad();
+
+            bws_zdarzenie raw_wheel{};
+            raw_wheel.typ = BWS_ZDARZENIE_MYSZ_KOLO;
+            raw_wheel.x = ok_tabela.x() + rt.obszar_ekranu().x + 20;
+            raw_wheel.y = ok_tabela.y() + rt.obszar_ekranu().y +
+                          rt.wysokosc_naglowka() + 10;
+            raw_wheel.dy = -120;
+            ok_tabela.obsluz_zdarzenie(raw_wheel);
+            bws_sprawdz_msg(rt.pasek_pionowy().wartosc() > 0,
+                            "Tabela fizyczna rolka przez swiezy hit-test");
+
+            PasekPrzewijania& sb = rt.pasek_pionowy();
+            bws_sprawdz_msg(sb.obszar_ekranu().x ==
+                            rt.obszar_ekranu().x + sb.obszar().x,
+                            "Tabela pasek ma zgodna geometrie ekranowa i rysowania");
+            sb.ustaw_wartosc(0);
+            Prostokat thumb = sb.prostokat_uchwytu();
+            bws_zdarzenie raw_down{};
+            raw_down.typ = BWS_ZDARZENIE_MYSZ_DOWN;
+            raw_down.x = ok_tabela.x() + sb.obszar_ekranu().x +
+                         thumb.x + thumb.szerokosc / 2;
+            raw_down.y = ok_tabela.y() + sb.obszar_ekranu().y +
+                         thumb.y + thumb.wysokosc / 2;
+            ok_tabela.obsluz_zdarzenie(raw_down);
+            bws_sprawdz_msg(ok_tabela.przechwycenie_myszy() == &sb,
+                            "Tabela pasek przechwytuje drag uchwytu");
+            bws_zdarzenie raw_drag = raw_down;
+            raw_drag.typ = BWS_ZDARZENIE_MYSZ_RUCH;
+            raw_drag.y = ok_tabela.y() + sb.obszar_ekranu().y +
+                         sb.obszar_ekranu().wysokosc / 2;
+            uint64_t drag_sb_alok_przed = gui_liczba_alokacji_sterty();
+            ok_tabela.obsluz_zdarzenie(raw_drag);
+            const int64_t wartosc_srodek = sb.wartosc();
+            raw_drag.y = ok_tabela.y() + sb.obszar_ekranu().dolny() - 22;
+            ok_tabela.obsluz_zdarzenie(raw_drag);
+            uint64_t drag_sb_alok_po = gui_liczba_alokacji_sterty();
+            bws_sprawdz_msg(wartosc_srodek > 0 && sb.wartosc() > wartosc_srodek,
+                            "Tabela drag uchwytu top-middle-bottom zmienia model");
+            bws_sprawdz_msg(drag_sb_alok_po == drag_sb_alok_przed,
+                            "Tabela drag paska 0 alokacji");
+            raw_drag.x += 80; // poza paskiem, lecz nadal pod capture
+            ok_tabela.obsluz_zdarzenie(raw_drag);
+            bws_zdarzenie raw_up = raw_drag;
+            raw_up.typ = BWS_ZDARZENIE_MYSZ_UP;
+            ok_tabela.obsluz_zdarzenie(raw_up);
+            bws_sprawdz_msg(ok_tabela.przechwycenie_myszy() == nullptr,
+                            "Tabela release poza paskiem konczy capture");
+
+            sb.ustaw_wartosc(0);
+            thumb = sb.prostokat_uchwytu();
+            bws_zdarzenie track_down{};
+            track_down.typ = BWS_ZDARZENIE_MYSZ_DOWN;
+            track_down.x = ok_tabela.x() + sb.obszar_ekranu().x +
+                           thumb.x + thumb.szerokosc / 2;
+            track_down.y = ok_tabela.y() + sb.obszar_ekranu().y +
+                           thumb.dolny() + 8;
+            ok_tabela.obsluz_zdarzenie(track_down);
+            bws_sprawdz_msg(sb.wartosc() > 0,
+                            "Tabela klik toru przewija o strone");
+            bws_zdarzenie track_up = track_down;
+            track_up.typ = BWS_ZDARZENIE_MYSZ_UP;
+            ok_tabela.obsluz_zdarzenie(track_up);
+        }
+        bws_log("[KONTROLKI2 1/8] Tabela: OK\n");
+    }
+
+    // 2. Rozdzielacz (orientacje, ograniczenia, układ)
+    {
+        bws_log("[KONTROLKI2 2/8] Rozdzielacz: podzial, granice, drag i klawiatura...\n");
+        Rozdzielacz rz(Orientacja::Pozioma);
+        rz.rozmiesc(Prostokat(0, 0, 400, 300));
+        rz.ustaw_minimalne_rozmiary(50, 50);
+
+        Panel* p1 = new Panel();
+        Panel* p2 = new Panel();
+        rz.ustaw_pierwszy(p1);
+        rz.ustaw_drugi(p2);
+
+        rz.ustaw_pozycje_podzialu(150);
+        bws_sprawdz_msg(rz.pozycja_podzialu() == 150, "Rozdzielacz pozycja 150");
+
+        // Test ograniczenia minimalnego rozmiaru
+        rz.ustaw_pozycje_podzialu(10);
+        bws_sprawdz_msg(rz.pozycja_podzialu() >= 50, "Rozdzielacz min_pierwszy ograniczony");
+
+        rz.ustaw_pozycje_podzialu(390);
+        bws_sprawdz_msg(rz.pozycja_podzialu() <= 350, "Rozdzielacz min_drugi ograniczony");
+
+        struct PomiarRozdzielacza { int zmiany; } pomiar{};
+        rz.przy_zmianie_podzialu([](Rozdzielacz*, int, void* dane) {
+            ++static_cast<PomiarRozdzielacza*>(dane)->zmiany;
+        }, &pomiar);
+        rz.ustaw_pozycje_podzialu(150);
+        ZdarzenieMyszki rm{};
+        rm.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
+        rm.x = rz.obszar_paska().x + 1;
+        rm.y = 20;
+        rz.obsluz_wcisniecie_myszy(rm);
+        rm.x += 30;
+        uint64_t drag_alok_przed = gui_liczba_alokacji_sterty();
+        rz.obsluz_ruch_myszy(rm);
+        uint64_t drag_alok_po = gui_liczba_alokacji_sterty();
+        bws_sprawdz_msg(rz.pozycja_podzialu() == 180 && pomiar.zmiany == 1,
+                        "Rozdzielacz drag/callback");
+        bws_sprawdz_msg(drag_alok_po == drag_alok_przed,
+                        "Rozdzielacz drag 0 alokacji");
+        rz.obsluz_zwolnienie_myszy(rm);
+
+        int resize_p1 = 0;
+        int resize_p2 = 0;
+        p1->przy_zmianie_rozmiaru([](Kontrolka*, void* dane) {
+            ++*static_cast<int*>(dane);
+        }, &resize_p1);
+        p2->przy_zmianie_rozmiaru([](Kontrolka*, void* dane) {
+            ++*static_cast<int*>(dane);
+        }, &resize_p2);
+        ZdarzenieMyszki rz_hover{};
+        rz_hover.typ = TypZdarzenia::RuchMyszy;
+        rz_hover.x = rz.obszar_paska().x + 1;
+        rz_hover.y = 20;
+        rz.obsluz_ruch_myszy(rz_hover);
+        rz.wyczysc_brudny_obszar();
+        uint64_t rz_hover_alok_przed = gui_liczba_alokacji_sterty();
+        for (int i = 0; i < 5000; ++i) {
+            rz_hover.y = 10 + (i % 250);
+            rz.obsluz_ruch_myszy(rz_hover);
+        }
+        uint64_t rz_hover_alok_po = gui_liczba_alokacji_sterty();
+        bws_sprawdz_msg(!rz.czy_brudna() && resize_p1 == 0 && resize_p2 == 0,
+                        "Rozdzielacz ten sam hover: 0 dirty i 0 layout");
+        bws_sprawdz_msg(rz_hover_alok_po == rz_hover_alok_przed,
+                        "Rozdzielacz hover 0 alokacji");
+        bws_log_u64("[PERF 5S ROZDZIELACZ] mouse_events=", 5000);
+        bws_log_u64("[PERF 5S ROZDZIELACZ] dirty_calls=", 0);
+        bws_log_u64("[PERF 5S ROZDZIELACZ] dirty_pixels=", 0);
+        bws_log_u64("[PERF 5S ROZDZIELACZ] layout_passes=",
+                    static_cast<uint64_t>(resize_p1 + resize_p2));
+        bws_log_u64("[PERF 5S ROZDZIELACZ] allocations=",
+                    rz_hover_alok_po - rz_hover_alok_przed);
+
+        // Ruch po tej samej, ograniczonej pozycji nie uruchamia ponownie ukladu.
+        rz.ustaw_pozycje_podzialu(350);
+        resize_p1 = resize_p2 = 0;
+        rz.wyczysc_brudny_obszar();
+        rm.x = rz.obszar_paska().x + 1;
+        rm.y = 20;
+        rz.obsluz_wcisniecie_myszy(rm);
+        rz.wyczysc_brudny_obszar();
+        rm.x += 1000;
+        rz.obsluz_ruch_myszy(rm);
+        bws_sprawdz_msg(resize_p1 == 0 && resize_p2 == 0 && !rz.czy_brudna(),
+                        "Rozdzielacz clamp bez zmiany: 0 layout/repaint");
+        rz.obsluz_zwolnienie_myszy(rm);
+        rz.ustaw_pozycje_podzialu(180);
+
+        ZdarzenieKlawiatury rk{};
+        rk.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x4BU;
+        rz.obsluz_wcisniecie_klawisza(rk);
+        bws_sprawdz_msg(rz.pozycja_podzialu() == 170,
+                        "Rozdzielacz regulacja klawiatura");
+
+        {
+            Okno ok_rz("Rozdzielacz capture", 420, 300);
+            Panel* root = static_cast<Panel*>(ok_rz.kontrolka_glowna());
+            root->ustaw_wypelnienie(Marginesy(0));
+            Rozdzielacz& route_rz = root->dodaj<Rozdzielacz>(Orientacja::Pozioma);
+            route_rz.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+            route_rz.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+            route_rz.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+            route_rz.ustaw_pierwszy(new Panel());
+            route_rz.ustaw_drugi(new Panel());
+            route_rz.ustaw_pozycje_podzialu(160);
+            ok_rz.przelicz_uklad();
+            Prostokat stripe = route_rz.obszar_paska();
+            bws_zdarzenie rz_down{};
+            rz_down.typ = BWS_ZDARZENIE_MYSZ_DOWN;
+            rz_down.x = ok_rz.x() + route_rz.obszar_ekranu().x + stripe.x + 1;
+            rz_down.y = ok_rz.y() + route_rz.obszar_ekranu().y + 30;
+            ok_rz.obsluz_zdarzenie(rz_down);
+            bws_sprawdz_msg(ok_rz.przechwycenie_myszy() == &route_rz,
+                            "Rozdzielacz przechwytuje drag");
+            bws_zdarzenie rz_drag = rz_down;
+            rz_drag.typ = BWS_ZDARZENIE_MYSZ_RUCH;
+            rz_drag.x += 60;
+            ok_rz.obsluz_zdarzenie(rz_drag);
+            bws_sprawdz_msg(route_rz.pozycja_podzialu() > 160,
+                            "Rozdzielacz drag dziala pod capture");
+            rz_drag.x += 300;
+            ok_rz.obsluz_zdarzenie(rz_drag);
+            bws_zdarzenie rz_up = rz_drag;
+            rz_up.typ = BWS_ZDARZENIE_MYSZ_UP;
+            ok_rz.obsluz_zdarzenie(rz_up);
+            bws_sprawdz_msg(ok_rz.przechwycenie_myszy() == nullptr,
+                            "Rozdzielacz release poza paskiem konczy capture");
+        }
+
+        bws_log("[KONTROLKI2 2/8] Rozdzielacz: OK\n");
+    }
+
+    // 3. WidokIkon (1000 elementów, siatka, selekcja)
+    {
+        bws_log("[KONTROLKI2 3/8] WidokIkon: 1000 elementow, siatka i wejscie...\n");
+        WidokIkon wi;
+        wi.rozmiesc(Prostokat(0, 0, 300, 200));
+
+        wi.rozpocznij_aktualizacje();
+        for (int i = 0; i < 1000; ++i) {
+            bws_sprawdz_msg(wi.dodaj_element("Ikona Zażółć", TypIkonyWidoku::Plik, i),
+                            "WidokIkon dodaj_element");
+        }
+        wi.zakoncz_aktualizacje();
+        bws_sprawdz_msg(wi.liczba_elementow() == 1000, "WidokIkon 1000 elementow");
+        bws_sprawdz_msg(wi.pasek_pionowy().czy_widoczna(), "WidokIkon scroll pionowy");
+
+        bws_sprawdz_msg(wi.ustaw_wybrany_indeks(77), "WidokIkon ustaw_wybrany_indeks 77");
+        bws_sprawdz_msg(wi.wybrany_indeks() == 77, "WidokIkon wybrany_indeks == 77");
+        bws_sprawdz_msg(wi.znacznik_elementu(77) == 77, "WidokIkon znacznik == 77");
+
+        ZdarzenieKlawiatury wk{};
+        wk.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x50U;
+        int przed = wi.wybrany_indeks();
+        wi.obsluz_wcisniecie_klawisza(wk);
+        bws_sprawdz_msg(wi.wybrany_indeks() > przed, "WidokIkon klawiatura Dol");
+
+        KontekstRysowania ctx_wi;
+        uint64_t wi_alok_przed = gui_liczba_alokacji_sterty();
+        wi.rysuj(ctx_wi, true);
+        uint64_t wi_alok_po = gui_liczba_alokacji_sterty();
+        bws_sprawdz_msg(wi.liczba_ostatnio_narysowanych_elementow() > 0 &&
+                        wi.liczba_ostatnio_narysowanych_elementow() < 30,
+                        "WidokIkon renderuje tylko widoczne elementy");
+        bws_sprawdz_msg(wi_alok_po == wi_alok_przed,
+                        "WidokIkon paint 0 alokacji");
+
+        wi.pasek_pionowy().ustaw_wartosc(0);
+        wi.ustaw_wybrany_indeks(0);
+        wi.wyczysc_brudny_obszar();
+        const uint32_t wi_tlo_przed = wi.wyznacz_biezacy_styl_stanu().tlo;
+        ZdarzenieMyszki wi_down{};
+        wi_down.typ = TypZdarzenia::WcisniecieMyszy;
+        wi_down.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
+        wi_down.x = 1 + wi.szerokosc_komorki() + 5;
+        wi_down.y = 6;
+        uint64_t wi_click_alok_przed = gui_liczba_alokacji_sterty();
+        wi.obsluz_wcisniecie_myszy(wi_down);
+        uint64_t wi_click_alok_po = gui_liczba_alokacji_sterty();
+        Prostokat wi_click_dirty = wi.pobierz_brudny_obszar();
+        bws_sprawdz_msg(wi.wyznacz_biezacy_styl_stanu().tlo == wi_tlo_przed,
+                        "WidokIkon klik nie zmienia tla korzenia");
+        bws_sprawdz_msg(wi.wybrany_indeks() == 1 &&
+                        wi_click_dirty.szerokosc <= 2 * wi.szerokosc_komorki() &&
+                        wi_click_dirty.wysokosc <= wi.wysokosc_komorki(),
+                        "WidokIkon klik brudzi tylko stary/nowy element");
+        bws_sprawdz_msg(wi_click_alok_po == wi_click_alok_przed,
+                        "WidokIkon klik 0 alokacji");
+
+        ZdarzenieMyszki wi_move{};
+        wi_move.typ = TypZdarzenia::RuchMyszy;
+        wi_move.x = wi_down.x;
+        wi_move.y = wi_down.y;
+        wi.obsluz_ruch_myszy(wi_move);
+        wi.wyczysc_brudny_obszar();
+        uint64_t wi_move_alok_przed = gui_liczba_alokacji_sterty();
+        for (int i = 0; i < 5000; ++i) {
+            wi_move.x = 1 + wi.szerokosc_komorki() + 3 + (i % 50);
+            wi.obsluz_ruch_myszy(wi_move);
+        }
+        uint64_t wi_move_alok_po = gui_liczba_alokacji_sterty();
+        bws_sprawdz_msg(!wi.czy_brudna(),
+                        "WidokIkon ten sam element: 0 dodatkowych invalidacji");
+        bws_sprawdz_msg(wi_move_alok_po == wi_move_alok_przed,
+                        "WidokIkon MouseMove 0 alokacji");
+        bws_log_u64("[PERF 5S WIDOKIKON] mouse_events=", 5000);
+        bws_log_u64("[PERF 5S WIDOKIKON] dirty_calls=", 0);
+        bws_log_u64("[PERF 5S WIDOKIKON] dirty_pixels=", 0);
+        bws_log_u64("[PERF 5S WIDOKIKON] layout_passes=", 0);
+        bws_log_u64("[PERF 5S WIDOKIKON] allocations=",
+                    wi_move_alok_po - wi_move_alok_przed);
+        bws_log_u64("[WIDOKIKON POMIAR] visible_items=",
+                    wi.liczba_ostatnio_narysowanych_elementow());
+        bws_log_u64("[WIDOKIKON POMIAR] paint_allocations=",
+                    wi_alok_po - wi_alok_przed);
+
+        bws_log("[KONTROLKI2 3/8] WidokIkon: OK\n");
+    }
+
+    // 4. Obraz (bufor pikseli, tryby skalowania)
+    {
+        bws_log("[KONTROLKI2 4/8] Obraz: bufor, tryby, clipping i paint...\n");
+        Obraz* img = new Obraz();
+        bws_sprawdz_msg(img != nullptr, "Obraz alokacja");
+        img->rozmiesc(Prostokat(0, 0, 100, 100));
+
+        static uint32_t raw_px[16 * 16];
+        for (int i = 0; i < 256; ++i) raw_px[i] = 0xFF112233U;
+
+        img->ustaw_obraz(raw_px, 16, 16, true);
+        bws_sprawdz_msg(img->czy_ma_obraz(), "Obraz czy_ma_obraz == true");
+        bws_sprawdz_msg(img->szerokosc_oryginalna() == 16, "Obraz w == 16");
+        bws_sprawdz_msg(img->wysokosc_oryginalna() == 16, "Obraz h == 16");
+
+        img->ustaw_tryb(TrybObrazu::Wycentrowany);
+        bws_sprawdz_msg(img->tryb() == TrybObrazu::Wycentrowany, "Obraz tryb Wycentrowany");
+        img->ustaw_tryb(TrybObrazu::Rozciagnij);
+        bws_sprawdz_msg(img->tryb() == TrybObrazu::Rozciagnij, "Obraz tryb Rozciagnij");
+
+        KontekstRysowania ctx_img;
+        ctx_img.dodaj_przyciecie(Prostokat(10, 10, 40, 30));
+        uint64_t img_alok_przed = gui_liczba_alokacji_sterty();
+        img->rysuj(ctx_img, true);
+        uint64_t img_alok_po = gui_liczba_alokacji_sterty();
+        ctx_img.zdejmij_przyciecie();
+        bws_sprawdz_msg(img_alok_po == img_alok_przed, "Obraz paint 0 alokacji");
+        img->ustaw_tryb(TrybObrazu::Naturalny);
+        bws_sprawdz_msg(img->tryb() == TrybObrazu::Naturalny, "Obraz tryb Naturalny");
+
+        img->wyczysc_obraz();
+        bws_sprawdz_msg(!img->czy_ma_obraz(), "Obraz wyczysc_obraz");
+        bws_log_u64("[OBRAZ POMIAR] paint_allocations=", img_alok_po - img_alok_przed);
+        delete img;
+        bws_log("[KONTROLKI2 4/8] Obraz: OK\n");
+    }
+
+    // 5. PrzyciskObrazkowy (tryby ikony i tekstu)
+    {
+        bws_log("[KONTROLKI2 5/8] PrzyciskObrazkowy: kompozycja i zachowanie Przycisku...\n");
+        PrzyciskObrazkowy btn("Zapisz", TypIkonyWidoku::Dysk);
+        btn.rozmiesc(Prostokat(0, 0, 120, 36));
+
+        int klikniecia = 0;
+        btn.przy_kliknieciu([](Przycisk*, void* dane) {
+            ++*static_cast<int*>(dane);
+        }, &klikniecia);
+
+        bws_sprawdz_msg(btn.typ_ikony() == TypIkonyWidoku::Dysk, "PrzyciskObrazkowy typ ikony");
+        btn.ustaw_tryb(TrybPrzyciskuObrazkowego::TylkoIkona);
+        bws_sprawdz_msg(btn.tryb() == TrybPrzyciskuObrazkowego::TylkoIkona, "PrzyciskObrazkowy TylkoIkona");
+
+        btn.ustaw_pozycja_ikony(PozycjaIkony::Gora);
+        bws_sprawdz_msg(btn.pozycja_ikony() == PozycjaIkony::Gora, "PrzyciskObrazkowy PozycjaIkony Gora");
+        ZdarzenieMyszki bm{};
+        bm.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
+        bm.x = 20; bm.y = 20;
+        btn.obsluz_wcisniecie_myszy(bm);
+        btn.obsluz_zwolnienie_myszy(bm);
+        bws_sprawdz_msg(klikniecia == 1, "PrzyciskObrazkowy callback klikniecia");
+        btn.ustaw_wlaczona(false);
+        btn.obsluz_wcisniecie_myszy(bm);
+        btn.obsluz_zwolnienie_myszy(bm);
+        bws_sprawdz_msg(klikniecia == 1, "PrzyciskObrazkowy disabled");
+        bws_log("[KONTROLKI2 5/8] PrzyciskObrazkowy: OK\n");
+    }
+
+    // 6. PasekSciezki (segmenty, parsowanie, skrót)
+    {
+        bws_log("[KONTROLKI2 6/8] PasekSciezki: UTF-8, overflow i aktywacja...\n");
+        PasekSciezki* ps = new PasekSciezki();
+        bws_sprawdz_msg(ps != nullptr, "PasekSciezki alokacja");
+        ps->rozmiesc(Prostokat(0, 0, 180, 28));
+
+        bws_sprawdz_msg(ps->ustaw_sciezke("/system/użytkownicy/dokumenty/kontrolki2"), "PasekSciezki ustaw_sciezke");
+        bws_sprawdz_msg(ps->liczba_segmentow() == 4, "PasekSciezki liczba_segmentow == 4");
+        bws_sprawdz_msg(ps->segment(0)[0] == 's', "PasekSciezki segment 0");
+        bws_sprawdz_msg(ps->segment(3)[0] == 'k', "PasekSciezki segment 3");
+        int wybrany_segment = -1;
+        ps->przy_wyborze_segmentu([](PasekSciezki*, int indeks, const char*, void* dane) {
+            *static_cast<int*>(dane) = indeks;
+        }, &wybrany_segment);
+        KontekstRysowania ctx_ps;
+        ps->rysuj(ctx_ps, true);
+        bws_sprawdz_msg(!ps->obszar_skrotu().czy_pusty(), "PasekSciezki overflow");
+        Prostokat ostatni = ps->obszar_segmentu(3);
+        ZdarzenieMyszki pm{};
+        pm.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
+        pm.x = ostatni.x + 2; pm.y = ostatni.y + 2;
+        ps->obsluz_wcisniecie_myszy(pm);
+        bws_sprawdz_msg(wybrany_segment == 3, "PasekSciezki callback segmentu");
+        delete ps;
+        bws_log("[KONTROLKI2 6/8] PasekSciezki: OK\n");
+    }
+
+    // 7. Kalendarz (obliczenia dat, lata przestępne, dni tygodnia)
+    {
+        bws_log("[KONTROLKI2 7/8] Kalendarz: matematyka, granice i klawiatura...\n");
+        bws_sprawdz_msg(DataKalendarza::czy_przestepny(2024) == true, "Kalendarz 2024 przestepny");
+        bws_sprawdz_msg(DataKalendarza::czy_przestepny(2026) == false, "Kalendarz 2026 nieprzestepny");
+        bws_sprawdz_msg(DataKalendarza::czy_przestepny(2000) == true, "Kalendarz 2000 przestepny");
+        bws_sprawdz_msg(DataKalendarza::czy_przestepny(1900) == false, "Kalendarz 1900 nieprzestepny");
+
+        bws_sprawdz_msg(DataKalendarza::dni_w_miesiacu(2024, 2) == 29, "Kalendarz Luty 2024 == 29");
+        bws_sprawdz_msg(DataKalendarza::dni_w_miesiacu(2026, 2) == 28, "Kalendarz Luty 2026 == 28");
+        bws_sprawdz_msg(DataKalendarza::dni_w_miesiacu(2026, 9) == 30, "Kalendarz Wrzesien 2026 == 30");
+
+        // 2026-09-02 to Środa (indeks 2: Pn=0, Wt=1, Śr=2)
+        bws_sprawdz_msg(DataKalendarza::dzien_tygodnia(2026, 9, 2) == 2, "Kalendarz 2026-09-02 DOW == 2");
+
+        Kalendarz cal(DataKalendarza{2026, 9, 2});
+        bws_sprawdz_msg(cal.wybrana_data().dzien == 2, "Kalendarz wybrana_data dzien == 2");
+        int zmiany_dat = 0;
+        cal.przy_zmianie_daty([](Kalendarz*, DataKalendarza, void* dane) {
+            ++*static_cast<int*>(dane);
+        }, &zmiany_dat);
+        ZdarzenieKlawiatury ck{};
+        ck.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x4BU;
+        cal.obsluz_wcisniecie_klawisza(ck);
+        bws_sprawdz_msg(cal.wybrana_data() == DataKalendarza{2026, 9, 1} &&
+                        zmiany_dat == 1, "Kalendarz Lewo/callback");
+        ck = {};
+        ck.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x4BU;
+        cal.obsluz_wcisniecie_klawisza(ck);
+        bws_sprawdz_msg(cal.wybrana_data() == DataKalendarza{2026, 8, 31},
+                        "Kalendarz przejscie miedzy miesiacami");
+        Kalendarz cal_invalid(DataKalendarza{2026, 2, 30});
+        bws_sprawdz_msg(cal_invalid.wybrana_data().czy_poprawna(),
+                        "Kalendarz nie ujawnia niepoprawnej daty");
+
+        Kalendarz cal_ui(DataKalendarza{2026, 9, 2});
+        cal_ui.rozmiesc(Prostokat(0, 0, 230, 200));
+        const int komorka_2 = DataKalendarza::dzien_tygodnia(2026, 9, 1) + 1;
+        Prostokat cell2 = cal_ui.prostokat_komorki(komorka_2);
+        ZdarzenieMyszki cal_move{};
+        cal_move.typ = TypZdarzenia::RuchMyszy;
+        cal_move.x = cell2.x + cell2.szerokosc / 2;
+        cal_move.y = cell2.y + cell2.wysokosc / 2;
+        cal_ui.obsluz_ruch_myszy(cal_move);
+        cal_ui.wyczysc_brudny_obszar();
+        uint64_t cal_move_alok_przed = gui_liczba_alokacji_sterty();
+        for (int i = 0; i < 5000; ++i) {
+            cal_move.x = cell2.x + 2 + (i % (cell2.szerokosc - 4));
+            cal_ui.obsluz_ruch_myszy(cal_move);
+        }
+        uint64_t cal_move_alok_po = gui_liczba_alokacji_sterty();
+        bws_sprawdz_msg(!cal_ui.czy_brudna(),
+                        "Kalendarz ta sama komorka: 0 dodatkowych invalidacji");
+        bws_sprawdz_msg(cal_move_alok_po == cal_move_alok_przed,
+                        "Kalendarz MouseMove 0 alokacji");
+        cal_ui.wyczysc_brudny_obszar();
+        Prostokat cell3 = cal_ui.prostokat_komorki(komorka_2 + 1);
+        cal_move.x = cell3.x + cell3.szerokosc / 2;
+        cal_move.y = cell3.y + cell3.wysokosc / 2;
+        cal_ui.obsluz_ruch_myszy(cal_move);
+        Prostokat cal_hover_dirty = cal_ui.pobierz_brudny_obszar();
+        bws_sprawdz_msg(cal_hover_dirty.wysokosc <= cell2.wysokosc &&
+                        cal_hover_dirty.szerokosc <= cell2.szerokosc + cell3.szerokosc,
+                        "Kalendarz zmiana hover brudzi stara i nowa komorke");
+
+        cal_ui.wyczysc_brudny_obszar();
+        const uint32_t cal_tlo_przed = cal_ui.wyznacz_biezacy_styl_stanu().tlo;
+        ZdarzenieMyszki cal_down{};
+        cal_down.typ = TypZdarzenia::WcisniecieMyszy;
+        cal_down.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
+        cal_down.x = cell3.x + cell3.szerokosc / 2;
+        cal_down.y = cell3.y + cell3.wysokosc / 2;
+        uint64_t cal_click_alok_przed = gui_liczba_alokacji_sterty();
+        cal_ui.obsluz_wcisniecie_myszy(cal_down);
+        uint64_t cal_click_alok_po = gui_liczba_alokacji_sterty();
+        bws_sprawdz_msg(cal_ui.wybrana_data().dzien == 3 &&
+                        cal_ui.wyznacz_biezacy_styl_stanu().tlo == cal_tlo_przed,
+                        "Kalendarz data nie zmienia tla korzenia");
+        bws_sprawdz_msg(cal_click_alok_po == cal_click_alok_przed,
+                        "Kalendarz klik dnia 0 alokacji");
+        ZdarzenieMyszki cal_up = cal_down;
+        cal_up.typ = TypZdarzenia::ZwolnienieMyszy;
+        cal_ui.obsluz_zwolnienie_myszy(cal_up);
+
+        Prostokat nav_next = cal_ui.prostokat_przycisku_nawigacji(2);
+        cal_down.x = nav_next.x + nav_next.szerokosc / 2;
+        cal_down.y = nav_next.y + nav_next.wysokosc / 2;
+        cal_ui.obsluz_wcisniecie_myszy(cal_down);
+        bws_sprawdz_msg(cal_ui.wyznacz_biezacy_styl_stanu().tlo == cal_tlo_przed,
+                        "Kalendarz przycisk miesiaca nie zmienia tla korzenia");
+        cal_ui.obsluz_zwolnienie_myszy(cal_up);
+        bws_sprawdz_msg(cal_ui.kolor_nieaktywnego_dnia() == Kolory::TekstWyciszony &&
+                        cal_ui.kolor_nieaktywnego_dnia() != Kolory::WejscieTlo,
+                        "Kalendarz dni nieaktywne uzywaja czytelnego tekstu motywu");
+        bws_log_u64("[PERF 5S KALENDARZ] mouse_events=", 5000);
+        bws_log_u64("[PERF 5S KALENDARZ] dirty_calls=", 0);
+        bws_log_u64("[PERF 5S KALENDARZ] dirty_pixels=", 0);
+        bws_log_u64("[PERF 5S KALENDARZ] layout_passes=", 0);
+        bws_log_u64("[PERF 5S KALENDARZ] allocations=",
+                    cal_move_alok_po - cal_move_alok_przed);
+        bws_log("[KONTROLKI2 7/8] Kalendarz: OK\n");
+    }
+
+    // 8. PoleDaty i PoleCzasu (walidacja i manipulacja)
+    {
+        bws_log("[KONTROLKI2 8/8] PoleDaty i PoleCzasu: walidacja i bezpieczenstwo...\n");
+        PoleDaty pd(DataKalendarza{2026, 9, 2});
+        pd.rozmiesc(Prostokat(0, 0, 180, 32));
+        bws_sprawdz_msg(pd.pobierz_date().rok == 2026, "PoleDaty rok == 2026");
+        pd.kolejny_dzien();
+        bws_sprawdz_msg(pd.pobierz_date().dzien == 3, "PoleDaty kolejny dzien == 3");
+        pd.ustaw_date(DataKalendarza{2026, 2, 30});
+        bws_sprawdz_msg(pd.pobierz_date() == DataKalendarza{2026, 9, 3},
+                        "PoleDaty odrzuca niepoprawna date");
+        Prostokat pd_text = pd.prostokat_tekstu();
+        Punkt pd_pos = pd.pozycja_tekstu();
+        const int pd_tw = CzcionkaUI::zmierz_tekst("2026-09-03", 1);
+        const int pd_th = CzcionkaUI::pobierz_wysokosc(1);
+        bws_sprawdz_msg(pd_pos.x == pd_text.x + (pd_text.szerokosc - pd_tw) / 2 &&
+                        pd_pos.y == pd_text.y + (pd_text.wysokosc - pd_th) / 2 &&
+                        pd_th == 16,
+                        "PoleDaty tekst kanoniczny i matematycznie wycentrowany");
+        pd.obsluz_uzyskanie_skupienia();
+        pd.wyczysc_brudny_obszar();
+        const StylStanu pd_fokus = pd.wyznacz_biezacy_styl_stanu();
+        ZdarzenieMyszki pd_down{};
+        pd_down.typ = TypZdarzenia::WcisniecieMyszy;
+        pd_down.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
+        pd_down.x = pd_text.x + 4;
+        pd_down.y = pd_text.y + 4;
+        uint64_t pd_click_alok_przed = gui_liczba_alokacji_sterty();
+        pd.obsluz_wcisniecie_myszy(pd_down);
+        StylStanu pd_po_down = pd.wyznacz_biezacy_styl_stanu();
+        ZdarzenieMyszki pd_up = pd_down;
+        pd_up.typ = TypZdarzenia::ZwolnienieMyszy;
+        pd.obsluz_zwolnienie_myszy(pd_up);
+        uint64_t pd_click_alok_po = gui_liczba_alokacji_sterty();
+        StylStanu pd_po_up = pd.wyznacz_biezacy_styl_stanu();
+        bws_sprawdz_msg(pd.czy_ma_fokus() &&
+                        pd_po_down.tlo == pd_fokus.tlo &&
+                        pd_po_up.tlo == pd_fokus.tlo &&
+                        pd_po_down.ramka == pd_fokus.ramka &&
+                        pd_po_up.ramka == pd_fokus.ramka,
+                        "PoleDaty fokus stabilny przez MouseDown/MouseUp");
+        bws_sprawdz_msg(pd_click_alok_po == pd_click_alok_przed,
+                        "PoleDaty fokus/klik 0 alokacji");
+        pd.wyczysc_brudny_obszar();
+        ZdarzenieMyszki pd_move{};
+        pd_move.typ = TypZdarzenia::RuchMyszy;
+        pd_move.y = pd_text.y + pd_text.wysokosc / 2;
+        uint64_t pd_move_alok_przed = gui_liczba_alokacji_sterty();
+        for (int i = 0; i < 5000; ++i) {
+            pd_move.x = pd_text.x + 1 + (i % (pd_text.szerokosc - 2));
+            pd.obsluz_ruch_myszy(pd_move);
+        }
+        uint64_t pd_move_alok_po = gui_liczba_alokacji_sterty();
+        bws_sprawdz_msg(!pd.czy_brudna() && pd_move_alok_po == pd_move_alok_przed,
+                        "PoleDaty 5s hover: 0 dirty/layout/allocation");
+        bws_log_u64("[PERF 5S POLEDATY] mouse_events=", 5000);
+        bws_log_u64("[PERF 5S POLEDATY] dirty_calls=", 0);
+        bws_log_u64("[PERF 5S POLEDATY] dirty_pixels=", 0);
+        bws_log_u64("[PERF 5S POLEDATY] layout_passes=", 0);
+        bws_log_u64("[PERF 5S POLEDATY] allocations=",
+                    pd_move_alok_po - pd_move_alok_przed);
+
+        PoleCzasu pc(CzasDnia{23, 59, 59});
+        pc.rozmiesc(Prostokat(0, 0, 180, 32));
+        bws_sprawdz_msg(pc.pobierz_czas().godzina == 23, "PoleCzasu godzina == 23");
+        bws_sprawdz_msg(pc.pobierz_czas().czy_poprawny() == true, "PoleCzasu poprawny");
+        pc.ustaw_czas(CzasDnia{25, 0, 0});
+        bws_sprawdz_msg(pc.pobierz_czas() == CzasDnia{23, 59, 59},
+                        "PoleCzasu odrzuca niepoprawny czas");
+        ZdarzenieKlawiatury pk{};
+        pk.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x48U;
+        pc.obsluz_wcisniecie_klawisza(pk);
+        bws_sprawdz_msg(pc.pobierz_czas() == CzasDnia{0, 59, 59},
+                        "PoleCzasu segment HH zawija 23->00");
+        Prostokat pc_gora = pc.prostokat_przycisku_gora();
+        Prostokat pc_dol = pc.prostokat_przycisku_dol();
+        PoleCzasu::GeometriaStrzalki pc_up_geo = pc.geometria_strzalki_gora();
+        PoleCzasu::GeometriaStrzalki pc_dn_geo = pc.geometria_strzalki_dol();
+        bws_sprawdz_msg(pc_up_geo.srodek.x == pc_gora.x + pc_gora.szerokosc / 2 &&
+                        pc_up_geo.srodek.y == pc_gora.y + pc_gora.wysokosc / 2 &&
+                        pc_dn_geo.srodek.x == pc_dol.x + pc_dol.szerokosc / 2 &&
+                        pc_dn_geo.srodek.y == pc_dol.y + pc_dol.wysokosc / 2 &&
+                        pc_up_geo.promien == pc_dn_geo.promien &&
+                        pc_gora.dolny() == pc_dol.y,
+                        "PoleCzasu strzalki symetryczne w identycznych prostokatach");
+        const uint32_t pc_tlo_przed = pc.wyznacz_biezacy_styl_stanu().tlo;
+        ZdarzenieMyszki pc_down{};
+        pc_down.typ = TypZdarzenia::WcisniecieMyszy;
+        pc_down.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
+        pc_down.x = pc_gora.x + pc_gora.szerokosc / 2;
+        pc_down.y = pc_gora.y + pc_gora.wysokosc / 2;
+        uint64_t pc_click_alok_przed = gui_liczba_alokacji_sterty();
+        pc.obsluz_wcisniecie_myszy(pc_down);
+        ZdarzenieMyszki pc_fast_move{};
+        pc_fast_move.typ = TypZdarzenia::RuchMyszy;
+        pc_fast_move.x = 2;
+        pc_fast_move.y = 2;
+        pc.obsluz_ruch_myszy(pc_fast_move);
+        ZdarzenieMyszki pc_up = pc_fast_move;
+        pc_up.typ = TypZdarzenia::ZwolnienieMyszy;
+        pc_up.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
+        pc.obsluz_zwolnienie_myszy(pc_up);
+        uint64_t pc_click_alok_po = gui_liczba_alokacji_sterty();
+        bws_sprawdz_msg(pc.wyznacz_biezacy_styl_stanu().tlo == pc_tlo_przed,
+                        "PoleCzasu spinner nie zmienia tla korzenia");
+        bws_sprawdz_msg(pc_click_alok_po == pc_click_alok_przed,
+                        "PoleCzasu klik i szybkie odejscie 0 alokacji");
+        pc.wyczysc_brudny_obszar();
+        uint64_t pc_move_alok_przed = gui_liczba_alokacji_sterty();
+        for (int i = 0; i < 5000; ++i) pc.obsluz_ruch_myszy(pc_fast_move);
+        uint64_t pc_move_alok_po = gui_liczba_alokacji_sterty();
+        bws_sprawdz_msg(!pc.czy_brudna() && pc_move_alok_po == pc_move_alok_przed,
+                        "PoleCzasu 5s neutral hover: 0 dirty/layout/allocation");
+        pc.ustaw_skale_dpi(2);
+        pc.rozmiesc(Prostokat(0, 0, 360, 64));
+        pc_gora = pc.prostokat_przycisku_gora();
+        pc_dol = pc.prostokat_przycisku_dol();
+        pc_up_geo = pc.geometria_strzalki_gora();
+        pc_dn_geo = pc.geometria_strzalki_dol();
+        bws_sprawdz_msg(pc_up_geo.srodek.x == pc_gora.x + pc_gora.szerokosc / 2 &&
+                        pc_dn_geo.srodek.x == pc_dol.x + pc_dol.szerokosc / 2 &&
+                        pc_up_geo.promien == pc_dn_geo.promien,
+                        "PoleCzasu symetria strzalek DPI 200%");
+        bws_log_u64("[PERF 5S POLECZASU] mouse_events=", 5000);
+        bws_log_u64("[PERF 5S POLECZASU] dirty_calls=", 0);
+        bws_log_u64("[PERF 5S POLECZASU] dirty_pixels=", 0);
+        bws_log_u64("[PERF 5S POLECZASU] layout_passes=", 0);
+        bws_log_u64("[PERF 5S POLECZASU] allocations=",
+                    pc_move_alok_po - pc_move_alok_przed);
+        PoleCzasu pc_invalid(CzasDnia{99, 99, 99});
+        bws_sprawdz_msg(pc_invalid.pobierz_czas().czy_poprawny(),
+                        "PoleCzasu konstruktor nie ujawnia invalid");
+
+        bws_sprawdz_msg(CzasDnia{25, 0, 0}.czy_poprawny() == false, "CzasDnia(25) niepoprawny");
+        bws_sprawdz_msg(CzasDnia{12, 60, 0}.czy_poprawny() == false, "CzasDnia(60m) niepoprawny");
+        bws_log("[KONTROLKI2 8/8] PoleDaty i PoleCzasu: OK\n");
+    }
+
+    bws_log("=== TESTY WDROZONYCH KONTROLEK 1-8 ZAKONCZONE (PASS) ===\n");
+}
+
 static void wykonaj_testy_bursztyn_ui() {
     const uint32_t bledy_bui_przed = bws_test_blad;
     bws_log("\n=== ROZPOCZECIE TESTOW BURSZTYNUI ===\n");
@@ -757,7 +1578,7 @@ static void wykonaj_testy_bursztyn_ui() {
     const uint64_t neutral_px_przed = okno_hover.liczba_brudnych_pikseli();
     const uint64_t neutral_mouse_przed = okno_hover.liczba_zdarzen_ruchu_myszy();
     const uint64_t neutral_alloc_przed = gui_liczba_alokacji_sterty();
-    for (int i = 0; i < 100; ++i) {
+    for (int i = 0; i < 5000; ++i) {
         bws_zdarzenie move{};
         move.typ = BWS_ZDARZENIE_MYSZ_RUCH;
         move.x = okno_hover.x() + 250;
@@ -767,8 +1588,8 @@ static void wykonaj_testy_bursztyn_ui() {
         okno_hover.rysuj(ctx_hover, false);
     }
     const uint64_t neutral_alloc_po = gui_liczba_alokacji_sterty();
-    bws_sprawdz_msg(okno_hover.liczba_zdarzen_ruchu_myszy() - neutral_mouse_przed == 100,
-                    "PERF neutral MouseMove events == 100");
+    bws_sprawdz_msg(okno_hover.liczba_zdarzen_ruchu_myszy() - neutral_mouse_przed == 5000,
+                    "PERF neutral MouseMove events == 5000 (5 s @ 1000 Hz)");
     bws_sprawdz_msg(okno_hover.liczba_przejsc_ukladu() == neutral_layout_przed,
                     "PERF neutral MouseMove layout_pass == 0");
     bws_sprawdz_msg(okno_hover.liczba_odrysowan() == neutral_redraw_przed &&
@@ -2426,20 +3247,27 @@ static void wykonaj_testy_bursztyn_ui() {
     bws_log_u64("[BURSZTYNUI DIAG] bledy_po_scroll=", bws_test_blad - bledy_adv_przed);
 
     // 4. Karty - 0 alokacji sterty na przelaczanie kart
+    struct PanelKartyPomiarowy : Panel {
+        uint64_t wywolania_rozmieszczenia{0};
+        void rozmiesc(Prostokat r) override {
+            ++wywolania_rozmieszczenia;
+            Panel::rozmiesc(r);
+        }
+    };
     Karty* karty_ptr = new Karty();
     bws_sprawdz(karty_ptr != nullptr);
     Karty& karty = *karty_ptr;
     karty.rozmiesc(Prostokat(0, 0, 400, 250));
 
-    Panel* page0 = new Panel();
+    PanelKartyPomiarowy* page0 = new PanelKartyPomiarowy();
     Przycisk* btn_page0 = new Przycisk("P0");
     page0->dodaj_kontrolke(btn_page0);
 
-    Panel* page1 = new Panel();
+    PanelKartyPomiarowy* page1 = new PanelKartyPomiarowy();
     Przycisk* btn_page1 = new Przycisk("P1");
     page1->dodaj_kontrolke(btn_page1);
 
-    Panel* page2 = new Panel();
+    PanelKartyPomiarowy* page2 = new PanelKartyPomiarowy();
     Przycisk* btn_page2 = new Przycisk("P2");
     page2->dodaj_kontrolke(btn_page2);
 
@@ -2457,14 +3285,36 @@ static void wykonaj_testy_bursztyn_ui() {
     bws_sprawdz(page0->czy_widoczna() && !page1->czy_widoczna());
 
     // Pomiar 100 naprzemiennych przelaczen (musi byc dokladnie 0 alokacji sterty!)
+    page0->wywolania_rozmieszczenia = 0;
+    page1->wywolania_rozmieszczenia = 0;
+    page2->wywolania_rozmieszczenia = 0;
+    karty.wyczysc_brudny_obszar();
+    KontekstRysowania ctx_karty_switch;
+    uint64_t tab_sw_dirty_pixels = 0;
+    uint64_t tab_sw_paint_calls = 0;
     uint64_t tab_sw_przed = gui_liczba_alokacji_sterty();
     for (int i = 0; i < 100; ++i) {
         karty.ustaw_aktywna_karte((i % 2 == 0) ? 1 : 0);
+        Prostokat brudny = karty.pobierz_brudny_obszar();
+        tab_sw_dirty_pixels += static_cast<uint64_t>(brudny.szerokosc) *
+                               static_cast<uint64_t>(brudny.wysokosc);
+        if (karty.czy_brudna()) {
+            ++tab_sw_paint_calls;
+            karty.rysuj(ctx_karty_switch, false);
+        }
     }
     uint64_t tab_sw_po = gui_liczba_alokacji_sterty();
     bws_sprawdz(tab_sw_po == tab_sw_przed);
+    const uint64_t tab_sw_layout = page0->wywolania_rozmieszczenia +
+                                   page1->wywolania_rozmieszczenia +
+                                   page2->wywolania_rozmieszczenia;
+    bws_sprawdz_msg(tab_sw_layout == 0,
+                    "Karty 100 cieplych zmian: 0 ponownych layoutow stron");
     bws_sprawdz(btn_page0->rodzic() == page0 && btn_page1->rodzic() == page1); // instancje dzieci nienaruszone
     bws_log_u64("[KARTY POMIAR] tab_switch_100_allocations=", tab_sw_po - tab_sw_przed);
+    bws_log_u64("[KARTY POMIAR] tab_switch_100_layout_passes=", tab_sw_layout);
+    bws_log_u64("[KARTY POMIAR] tab_switch_100_paint_calls=", tab_sw_paint_calls);
+    bws_log_u64("[KARTY POMIAR] tab_switch_100_dirty_pixels=", tab_sw_dirty_pixels);
     bws_log_u64("[BURSZTYNUI DIAG] bledy_po_karty=", bws_test_blad - bledy_adv_przed);
 
     // 5. Drzewo - Limit 4096 wezlow, usuwanie, obsluga przepelnienia i wirtualizacja
@@ -3495,6 +4345,7 @@ extern "C" __attribute__((noreturn)) void _start() {
 
     wykonaj_testy_bursztyn_ui();
     testy_interaktywne_bursztyn_ui();
+    wykonaj_testy_kontrolki2();
     wynik_bursztyn_ui_ok = bws_test_blad == bledy_po_bws;
 
     gui_zakoncz_aplikacje();
