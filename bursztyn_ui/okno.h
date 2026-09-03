@@ -11,6 +11,7 @@ namespace BursztynUI {
 
 class Okno {
 public:
+    static inline bool g_tlum_operacje_systemowe = false;
     static constexpr int WYSOKOSC_BELKI_TYTULOWEJ = 28;
 
     Okno(const char* tytul_okna = "Okno BursztynUI", int szerokosc = 480, int wysokosc = 320)
@@ -41,7 +42,9 @@ public:
             tytul_[i] = nowy_tytul[i];
         }
         tytul_[i] = '\0';
-        gui_ustaw_tytul_okna(tytul_);
+        if (!g_tlum_operacje_systemowe) {
+            gui_ustaw_tytul_okna(tytul_);
+        }
         czy_brudne_ = true;
     }
 
@@ -199,6 +202,17 @@ public:
     uint64_t liczba_pelnych_odrysowan() const { return liczba_pelnych_odrysowan_; }
     uint64_t liczba_brudnych_pikseli() const { return liczba_brudnych_pikseli_; }
 
+    Prostokat obszar_klienta() const {
+        int belka_h = WYSOKOSC_BELKI_TYTULOWEJ * skala_dpi_;
+        int klient_h = wysokosc_ - belka_h;
+        if (klient_h < 0) klient_h = 0;
+        return Prostokat(0, belka_h, szerokosc_, klient_h);
+    }
+
+    Prostokat pobierz_brudny_obszar() const { return brudny_obszar_klienta_; }
+
+    void uniewaznij() { czy_brudne_ = true; }
+
     void uniewaznij_obszar(Prostokat r) {
         brudny_obszar_klienta_ = brudny_obszar_klienta_.suma(r);
     }
@@ -220,7 +234,9 @@ public:
             liczba_brudnych_pikseli_ += static_cast<uint64_t>(szerokosc_) * wysokosc_;
 
             // Narysuj standardową belkę tytułową na pozycji okna
-            gui_rysuj_standardowa_belke(x_, y_, szerokosc_, tytul_, czy_zmaksymalizowane_);
+            if (!KontekstRysowania::g_tlum_rysowanie_globalne) {
+                gui_rysuj_standardowa_belke(x_, y_, szerokosc_, tytul_, czy_zmaksymalizowane_);
+            }
 
             // Tło okna poniżej belki
             if (klient_h > 0) {
@@ -283,14 +299,20 @@ public:
     void minimalizuj() {
         popupy_.zamknij(PowodZamknieciaPopup::WlascicielZminimalizowany);
         czy_przeciagane_ = false;
-        gui_ustaw_capture_myszy(false);
-        czy_zminimalizowane_ = gui_minimalizuj_okno();
+        if (!g_tlum_operacje_systemowe) {
+            gui_ustaw_capture_myszy(false);
+            czy_zminimalizowane_ = gui_minimalizuj_okno();
+        } else {
+            czy_zminimalizowane_ = true;
+        }
     }
 
     void przelacz_maksymalizacje() {
         popupy_.zamknij(PowodZamknieciaPopup::ZmianaGeometrii);
         czy_przeciagane_ = false;
-        gui_ustaw_capture_myszy(false);
+        if (!g_tlum_operacje_systemowe) {
+            gui_ustaw_capture_myszy(false);
+        }
 
         if (!czy_zmaksymalizowane_) {
             zapisana_geometria_ = Prostokat(x_, y_, szerokosc_, wysokosc_);
@@ -310,7 +332,9 @@ public:
             dopasuj_do_obszaru_roboczego(true);
         }
 
-        gui_ustaw_geometrie_okna(x_, y_, szerokosc_, wysokosc_);
+        if (!g_tlum_operacje_systemowe) {
+            gui_ustaw_geometrie_okna(x_, y_, szerokosc_, wysokosc_);
+        }
 
         przelicz_uklad();
         czy_brudne_ = true;

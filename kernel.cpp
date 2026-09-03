@@ -756,6 +756,42 @@ bool znajdz_modul_mb2(uint64_t mbi, const char* nazwa_szukana, ModulMB2* wynik) 
     return false;
 }
 
+bool zadano_automatyczne_testy(uint64_t mbi) {
+    if (mbi == 0) return false;
+
+    const volatile uint32_t* info =
+        reinterpret_cast<const volatile uint32_t*>(mbi);
+    const uint32_t calosc = info[0];
+    if (calosc < 16 || mbi > UINT64_MAX - calosc) return false;
+
+    uint64_t off = 8;
+    while (off + sizeof(WpisTaguMB2) <= calosc) {
+        const WpisTaguMB2* tag =
+            reinterpret_cast<const WpisTaguMB2*>(mbi + off);
+        if (tag->rozmiar < sizeof(WpisTaguMB2) ||
+            off + tag->rozmiar > calosc) {
+            return false;
+        }
+
+        if (tag->typ == 1 /* MULTIBOOT_TAG_TYPE_CMDLINE */ &&
+            tag->rozmiar > sizeof(WpisTaguMB2)) {
+            const char* cmdline = reinterpret_cast<const char*>(mbi + off + 8);
+            const uint32_t pojemnosc = tag->rozmiar - 8;
+            for (uint32_t i = 0; i < pojemnosc; ++i) {
+                if (cmdline[i] == '\0') {
+                    return tekst_zawiera(
+                        cmdline, "bursztyn.test=automated");
+                }
+            }
+            return false;
+        }
+
+        if (tag->typ == MULTIBOOT_TAG_TYPE_END) break;
+        off = (off + tag->rozmiar + 7ULL) & ~7ULL;
+    }
+    return false;
+}
+
 void importuj_modul_test8k(uint64_t mbi) {
     if (mbi == 0) return;
 
@@ -908,7 +944,7 @@ void instaluj_wbudowane_programy() {
         "]\n";
 
     static const char MANIFEST_TEST[] =
-        "nazwa = \"Test\"\n"
+        "nazwa = \"Testy systemu\"\n"
         "autor = \"Programista Art\"\n"
         "wersja = \"1.0\"\n"
         "poziom_zaufania = 4\n"
@@ -1833,11 +1869,17 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
             "Loader nie utworzyl procesu Menedzera Okien.");
     }
 
-    (void)bws_uruchom_program_z_pliku(
-        "/programy/test.cebula/test.bur",
-        PZB_UZYTKOWNIK,
-        PRAWO_GUI,
-        false);
+    /* Zwykly start systemu uruchamia tylko Menedzera Okien. Test jest
+       aplikacja developerska uruchamiana recznie. Osobny obraz regresyjny
+       zadaje jawny tryb automatyczny w wierszu polecen Multiboot2. */
+    if (zadano_automatyczne_testy(g_multiboot_info_ptr)) {
+        (void)bws_uruchom_program_z_pliku_z_argumentem(
+            "/programy/test.cebula/test.bur",
+            PZB_UZYTKOWNIK,
+            PRAWO_GUI,
+            false,
+            "--automated");
+    }
 
     /*
      * Flaga musi zostac ustawiona PRZED STI.

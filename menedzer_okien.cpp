@@ -115,7 +115,7 @@ const AplikacjaPulpitu APLIKACJE_PULPITU[] = {
      TypIkonyAplikacji::Kalkulator},
     {210, 50, SCIEZKA_HUSSAR, "Husarz", "Husarz", nullptr,
      TypIkonyAplikacji::Husarz},
-    {290, 50, SCIEZKA_TEST, "Test", "Test", nullptr,
+    {290, 50, SCIEZKA_TEST, "Testy Bursztyn OS", "Testy", "systemu",
      TypIkonyAplikacji::Test},
     {370, 50, SCIEZKA_SNAKE, "Snake", "Snake", nullptr,
      TypIkonyAplikacji::Snake},
@@ -1346,7 +1346,7 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
             "> Przeglądarka Obrazów",
             "> Demo BursztynUI",
             "> Kontrolki 2",
-            "> Test",
+            "> Testy systemu",
             "> Gry ->",
             "> Uruchom ponownie",
             "> Zamknij"
@@ -1601,7 +1601,7 @@ void obsluz_element_menu(int item_index) {
                                 "BursztynUI Kontrolki 2");
             break;
         case 8:
-            uruchom_lub_aktywuj(SCIEZKA_TEST, "Test");
+            uruchom_lub_aktywuj(SCIEZKA_TEST, "Testy Bursztyn OS");
             break;
         case MENU_GRY_INDEX:
             menu_gry_otwarte = !menu_gry_otwarte;

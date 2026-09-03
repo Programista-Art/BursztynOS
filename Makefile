@@ -44,11 +44,14 @@ XORRISO       ?= xorriso
 KERNEL := system_operacyjny.bin
 ISO    := BursztynOS.iso
 ISO8K  := BursztynOS_8k.iso
+ISO_TEST := BursztynOS_test.iso
 
 ISO_DIR     := isodir
 ISO8K_DIR   := isodir_8k
+ISO_TEST_DIR := isodir_test
 GRUB_CFG    := $(ISO_DIR)/boot/grub/grub.cfg
 GRUB8K_CFG  := $(ISO8K_DIR)/boot/grub/grub.cfg
+GRUB_TEST_CFG := $(ISO_TEST_DIR)/boot/grub/grub.cfg
 VIRTUAL_DISK := wirtualny_dysk.img
 
 LARGE_TEST_BMP ?= $(firstword $(wildcard obrazy/test8k.bmp) $(wildcard obrazy/2test.bmp) obrazy/test8k.bmp)
@@ -276,7 +279,7 @@ OBJS := \
 # ============================================================================
 
 .PHONY: \
-	all kernel iso iso8k bios uefi run run8k runusb runusbkbd runusbmouse runusbhid runuefi \
+	all kernel iso iso8k iso-test bios uefi run run8k run-test runusb runusbkbd runusbmouse runusbhid runuefi \
 	check-kernel check-test8k check-tools check-ovmf \
 	prepare-disk clean clear distclean cdysk rm help
 
@@ -412,8 +415,8 @@ kalkulator_blob.o: kalkulator_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
 	$(LD) -r -b binary kalkulator.bin -o kalkulator_blob.o
 
 # Test
-test_tmp.o: test.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
-	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -c $< -o $@
+test_tmp.o: programy/test/test.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 test_blob.o: test_tmp.o bursztyn_gui.o programy/test/test_linker.ld
 	$(LD) --gc-sections -T programy/test/test_linker.ld $(RING3_LDFLAGS) \
@@ -560,6 +563,29 @@ $(ISO): check-kernel $(GRUB_CFG)
 
 iso: $(ISO)
 
+# Obraz developerski zachowujacy automatyczny przebieg test.bur. Zwykly ISO
+# nie zawiera tego parametru i nie uruchamia aplikacji Test podczas startu.
+$(GRUB_TEST_CFG): $(KERNEL)
+	@mkdir -p $(ISO_TEST_DIR)/boot/grub
+	@cp $(KERNEL) $(ISO_TEST_DIR)/boot/
+	@printf '%s\n' \
+		'set timeout=0' \
+		'set default=0' \
+		'' \
+		'menuentry "Bursztyn OS - testy automatyczne" {' \
+		'    insmod all_video' \
+		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxpayload=keep' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated' \
+		'    boot' \
+		'}' \
+		> $(GRUB_TEST_CFG)
+
+$(ISO_TEST): check-kernel $(GRUB_TEST_CFG)
+	$(GRUB_MKRESCUE) -o $@ $(ISO_TEST_DIR) --xorriso=$(XORRISO)
+
+iso-test: $(ISO_TEST)
+
 #
 # Developerskie ISO 8K (BursztynOS_8k.iso) - dolacza modul Multiboot2 test8k.bmp
 #
@@ -640,6 +666,11 @@ run8k: iso8k prepare-disk
 	$(QEMU) \
 		$(QEMU_COMMON_ARGS) \
 		-cdrom $(ISO8K)
+
+run-test: iso-test prepare-disk
+	$(QEMU) \
+		$(QEMU_COMMON_ARGS) \
+		-cdrom $(ISO_TEST)
 
 runusb: iso prepare-disk
 	$(QEMU) \
@@ -728,7 +759,7 @@ clean:
 	rm -f *.o *.bin *.elf *.iso
 	rm -f biblioteki/mbedtls/library/*.o
 	rm -f $(OVMF_VARS_RUNTIME)
-	rm -rf $(ISO_DIR) $(ISO8K_DIR)
+	rm -rf $(ISO_DIR) $(ISO8K_DIR) $(ISO_TEST_DIR)
 
 #
 # Zachowanie starej nazwy `clear`.
@@ -754,10 +785,12 @@ help:
 	@echo "  make all       - zbuduj kernel"
 	@echo "  make iso       - zbuduj standardowe hybrydowe ISO GRUB (bez modulu 8K)"
 	@echo "  make iso8k     - zbuduj developerskie ISO z modulem 8K BMP (~97 MiB)"
+	@echo "  make iso-test  - zbuduj ISO uruchamiajace test.bur w trybie automatycznym"
 	@echo "  make bios      - zbuduj ISO do startu BIOS"
 	@echo "  make uefi      - zbuduj ISO do startu UEFI"
 	@echo "  make run       - uruchom QEMU w trybie BIOS ze standardowym ISO"
 	@echo "  make run8k     - uruchom QEMU w trybie BIOS z ISO zawierajacym modul 8K"
+	@echo "  make run-test  - uruchom QEMU z automatyczna regresja BWS/BursztynUI"
 	@echo "  make runuefi   - uruchom QEMU z OVMF/UEFI"
 	@echo "  make check-tools - sprawdz wymagane narzedzia"
 	@echo "  make clean     - usun artefakty kompilacji"

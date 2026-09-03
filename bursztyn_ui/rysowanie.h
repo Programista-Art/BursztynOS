@@ -10,6 +10,8 @@ namespace BursztynUI {
 
 class KontekstRysowania {
 public:
+    static inline bool g_tlum_rysowanie_globalne = false;
+
     KontekstRysowania() {
         stos_przyciecia_[0] = Prostokat(0, 0, 4096, 4096);
         stos_przesuniecia_[0] = Punkt(0, 0);
@@ -59,8 +61,10 @@ public:
         Prostokat swiat_r(r.x + off.x, r.y + off.y, r.szerokosc, r.wysokosc);
         Prostokat przyciety = swiat_r.przeciecie(pobierz_przyciecie());
         if (!przyciety.czy_pusty()) {
-            gui_rysuj_prostokat(przyciety.x, przyciety.y,
-                                przyciety.szerokosc, przyciety.wysokosc, kolor);
+            if (!g_tlum_rysowanie_globalne) {
+                gui_rysuj_prostokat(przyciety.x, przyciety.y,
+                                    przyciety.szerokosc, przyciety.wysokosc, kolor);
+            }
         }
     }
 
@@ -166,7 +170,9 @@ public:
         // syscall renderera. Tylko tekst przecinajacy krawedz wymaga lokalnego
         // renderowania bitmapy; syscall 20 nie ma parametru przyciecia.
         if (widoczny == granice) {
-            gui_wypisz_tekst_kolor_skala(tx, ty, kolor, skala, tekst);
+            if (!g_tlum_rysowanie_globalne) {
+                gui_wypisz_tekst_kolor_skala(tx, ty, kolor, skala, tekst);
+            }
             dodaj_pomiar_tekstu(widoczny);
             return;
         }
@@ -198,9 +204,11 @@ public:
                                                   seria.wysokosc);
                             Prostokat seria_clip = seria_swiat.przeciecie(clip);
                             if (!seria_clip.czy_pusty()) {
-                                gui_rysuj_prostokat(seria_clip.x, seria_clip.y,
-                                                    seria_clip.szerokosc,
-                                                    seria_clip.wysokosc, kolor);
+                                if (!g_tlum_rysowanie_globalne) {
+                                    gui_rysuj_prostokat(seria_clip.x, seria_clip.y,
+                                                        seria_clip.szerokosc,
+                                                        seria_clip.wysokosc, kolor);
+                                }
                                 dodaj_pomiar_tekstu(seria_clip);
                             }
                             poczatek = -1;

@@ -1,0 +1,278 @@
+[HAL] Aktywacja sterownika VESA VBE.
+[SYSTEM] Bursztyn OS HAL gotowy!
+==================================================
+ Witamy w Bursztyn OS 64-bit 
+ Polski System Operacyjny
+ Github: Programista-Art/BursztynOS 
+ Autor: Dymitr Wygowski 
+==================================================
+[PMM] Skan pamieci fizycznej. Wykryto: 2047 MB RAM
+[VMM] Paging 4-poziomowy aktywowany.
+[HEAP] Sterta jadra 16 MiB gotowa.
+[ACPI] Multiboot2 ACPI old RSDP znaleziony.
+[ACPI] SDT FACP
+[ACPI] FADT bez obslugi RESET_REG.
+[ACPI] DSDT _S5 gotowy.
+[ACPI] SDT APIC
+[ACPI] SDT HPET
+[ACPI] SDT WAET
+[ACPI] Uzywam RSDT.
+[HPET] ACPI HPET znaleziony.
+[HPET] MMIO=0xFED00000
+[HPET] period=10000000 fs
+[HPET] frequency=100000000 Hz
+[HPET-TEST] 32-bit wrap monotonic: OK
+[SCHED] PID 0 (idle) przygotowany.
+[KRYPTO] Pula mbedTLS gotowa.
+[PCI] Rozpoczynam skanowanie PCI...
+[TIMER] LAPIC measured=67817200 Hz
+[TIMER] Scheduler=250 Hz
+[TIMER] LAPIC initial_count=271269
+[APIC] LAPIC/IOAPIC uruchomiony.
+[USB] Inicjalizacja podsystemu USB.
+[USB] Brak kontrolera xHCI; USB niedostepne.
+[I/O] PS/2 gotowe.
+[BWS] API Wywolan Systemowych gotowe.
+[AHCI] Szukam kontrolera SATA AHCI...
+[AHCI] Glowny dysk SATA gotowy na porcie 0.
+[GRAFIKA] Proba wczytania tapeta.bmp z dysku AHCI (LBA 10)...
+[GRAFIKA] Pulpit i tapeta gotowe!
+[E1000] Szukam Intel 82540EM (8086:100E)...
+[E1000] MAC: 52:54:00:12:34:56
+[E1000] Karta gotowa; link aktywny.
+[DHCP] Wysylam DHCPDISCOVER...
+[DHCP] DHCPOFFER odebrany, wysylam DHCPREQUEST...
+[DHCP] IPv4: 10.0.2.15
+[DHCP] Brama: 10.0.2.2
+[DHCP] Maska: 255.255.255.0
+[DHCP] DNS: 10.0.2.3
+[SIEC] Inicjalizacja stosu sieciowego zakonczona.
+[HDA] Szukam kontrolera High Definition Audio...
+[HDA] Kontroler i kodek QEMU HDA gotowe.
+[HDA] Karta HDA gotowa.
+[BSP] Sprawdzanie nosnika AHCI w poszukiwaniu BSP2...
+[BSP] Trwaly BSP2 pomyslnie zaladowany z nosnika SATA.
+[PCI] Rozpoczynam skanowanie PCI...
+[PCI] Skan zakonczony; raport zapisany do /logi/pci.txt.
+[BSP] Drzewiasty system plikow PSF gotowy.
+[BSP] Wbudowana Powloka zainstalowana.
+[BSP] /cytaty.txt zainstalowany.
+[BSP] Przegladarka Husarz zainstalowana jako .cebula.
+[BSP] Notatnik zainstalowany jako .cebula.
+[BSP] Eksplorator Plikow zainstalowany jako .cebula.
+[BSP] Aplikacja Testowa zainstalowana jako .cebula.
+[BSP] Gra snake zainstalowana jako .cebula.
+[BSP] Przegladarka Obrazow zainstalowana jako .cebula.
+[BSP] BursztynUI Demo zainstalowane jako .cebula.
+[BSP] Kontrolki 2 zainstalowane jako .cebula.
+[BSP] Kalkulator zainstalowany jako .cebula.
+[BSP] Menedzer Okien zainstalowany.
+[SCHED] Wielozadaniowosc Round-Robin aktywna.
+--------------------------------------------------
+System operacyjny gotowy!
+
+=== ROZPOCZECIE TESTOW BWS 61..83 ===
+[TEST 1/8] Monitory, work-area, HPET monotoniczny: OK
+[TEST 2/8] Geometria okna BWS 61 rollback & boundaries: OK
+[TEST 3/8] Stres-test SHM 30x cykl, 8 mapowan + stale handles: OK
+[TEST 4/8] Stres-test IPC 30x cykl + SHM transfer z zamknieciem nadawcy: OK
+[TEST 5/8] File watch boundary & handle checks: OK
+[TEST 6/8] MIME clipboard multi-format & PZB enforcement: OK
+[TEST 7/8] System & custom cursors bounds and formats: OK
+[TEST 8/8] Socket permission & ownership: OK
+=== WSZYSTKIE TESTY BWS 61..83 ZAKONCZONE SUKCESEM (PASS) ===
+
+
+=== ROZPOCZECIE TESTOW BURSZTYNUI ===
+[BURSZTYNUI 1/4] Bezpieczenstwo extronic16B_unicode.h i UTF-8...
+[BURSZTYNUI 1/4] extronic16B_unicode.h & UTF-8: OK
+[BURSZTYNUI 2/4] Audyt przestrzeni wspolrzednych i hit-testu...
+[BURSZTYNUI 2/4] Audyt wspolrzednych i 10x klikniec: OK
+[BURSZTYNUI 3/4] Dirty Redraw i pomiary powierzchni...
+[MOUSE PERF] events=5000
+[MOUSE PERF] layout_passes=0
+[MOUSE PERF] redraws=0
+[MOUSE PERF] dirty_pixels=0
+[MOUSE PERF] heap_allocations=0
+[BURSZTYNUI 3/4] Dirty Redraw + hover 100x: OK
+[BURSZTYNUI 4/4] Komponenty: PoleTekstowe, PoleWyboru, Fokus, Maximize...
+[BURSZTYNUI 4/4] Komponenty, Fokus i Geometria: OK
+[BURSZTYNUI SUWAK] Model i interakcje...
+[SUWAK POMIAR] callback_zmiana=1
+[SUWAK POMIAR] callback_zatwierdzenie=1
+[SUWAK POMIAR] redraw_count=1
+[SUWAK POMIAR] redraw_area_px=10890
+[SUWAK POMIAR] heap_allocations=0
+[BURSZTYNUI SUWAK] Model, wejscie, capture i pomiary: OK
+[BURSZTYNUI PASEK] Model int64, geometria i interakcje...
+[PASEK POMIAR] redraw_area_px=3894
+[PASEK POMIAR] heap_allocations_drag=0
+[BURSZTYNUI PASEK] Model, capture, dirty i alokacje: OK
+[BURSZTYNUI WYBOR] Grupy opcji i lista wirtualizowana...
+[LISTA POMIAR] visible_rows=8
+[LISTA POMIAR] heap_allocations_repaint=0
+[LISTA POMIAR] wheel_dirty_area_px=59712
+[LISTA POMIAR] heap_allocations_wheel=0
+[BURSZTYNUI WYBOR] Grupy, klawiatura i 1200 elementow: OK
+[BURSZTYNUI MEMO] UTF-8, edycja wielowierszowa i przewijanie...
+[MEMO POMIAR] visible_lines=10
+[MEMO POMIAR] dirty_area_px=58947
+[MEMO POMIAR] heap_allocations_type_repaint=0
+[MEMO POMIAR] horizontal_scroll_dirty_area_px=17622
+[MEMO POMIAR] horizontal_scroll_allocations=0
+[BURSZTYNUI POPUP] BWS56, ComboBox i menu wspoldzielone...
+[POPUP DIAG] bledy_po_open100=0
+[POPUP DIAG] bledy_po_lifecycle=0
+[POPUP DIAG] bledy_po_combo=0
+[POPUP DIAG] bledy_po_menu_akcji=0
+[PODMENU DIAG] pok_ok=1
+[PODMENU DIAG] count_przed=1
+[PODMENU DIAG] r_ok=1
+[PODMENU DIAG] count_po_r=2
+[PODMENU DIAG] l_ok=1
+[PODMENU DIAG] count_po_l=1
+[POPUP DIAG] bledy_po_podmenu=0
+[POPUP DIAG] bledy_po_menu_glownym=0
+[POPUP DIAG] bledy_po_hover=0
+[POPUP DIAG] bledy_po_minimalizacji=0
+[POPUP POMIAR] open_close_100_heap_allocations=0
+[POPUP POMIAR] close_dirty_area_px=16200
+[MENU POMIAR] hover_100_heap_allocations=0
+[MENU POMIAR] hover_dirty_area_px=7104
+[BURSZTYNUI POPUP] Popup, ListaRozwijana, MenuGlowne i MenuKontekstowe: OK
+[BURSZTYNUI ROZSZERZONE] Testy 8 zaawansowanych kontrolek...
+[POSTEP POMIAR] anim_100_allocations=0
+[BURSZTYNUI DIAG] bledy_po_postep=0
+[NUMERYCZNE POMIAR] spinner_allocations=0
+[BURSZTYNUI DIAG] bledy_po_num=0
+[SCROLL DIAG] s1_obs=1
+[SCROLL DIAG] s1_in_y=48
+[SCROLL DIAG] s1_out_y=0
+[SCROLL DIAG] s2_max_y=252
+[SCROLL DIAG] s2_in_y=252
+[SCROLL DIAG] s2_obs_in=0
+[SCROLL DIAG] s2_obs_out=1
+[SCROLL DIAG] s2_out_y=48
+[SCROLL DIAG] s3_obs_in=1
+[SCROLL DIAG] s3_in_y=204
+[SCROLL DIAG] s4_obs_out=1
+[SCROLL DIAG] s4_out_x=48
+[WIDOK_PRZEWIJANY POMIAR] scroll_allocations=0
+[BURSZTYNUI DIAG] bledy_po_scroll=0
+[KARTY POMIAR] tab_switch_100_allocations=0
+[KARTY POMIAR] tab_switch_100_layout_passes=0
+[KARTY POMIAR] tab_switch_100_paint_calls=100
+[KARTY POMIAR] tab_switch_100_dirty_pixels=9790800
+[BURSZTYNUI DIAG] bledy_po_karty=0
+[DRZEWO AUDYT] sizeof_Drzewo_B=509536
+[DRZEWO AUDYT] wezly_total_limit=4096
+[DRZEWO POMIAR] render_4096_allocations=0
+[BURSZTYNUI DIAG] bledy_po_drzewo=0
+[TOOLBAR POMIAR] overflow_allocations=0
+[BURSZTYNUI DIAG] bledy_po_toolbar=0
+[BURSZTYNUI DIAG] bledy_po_statusbar=0
+[PODPOWIEDZ POMIAR] tip_100_allocations=0
+[BURSZTYNUI DIAG] bledy_po_podpowiedz=0
+[BURSZTYNUI ROZSZERZONE] Wszystkie 8 kontrolek przetestowane: OK
+[DEMO AUDYT] karty_liczba=5
+[DEMO AUDYT] karty_szer=712
+[DEMO AUDYT] karty_wys=380
+[DEMO AUDYT] sb_wys=24
+[DEMO AUDYT] sb_y=464
+[DEMO AUDYT] Architektura i geometria DemoUI 5 zakladek: OK
+[STRETCH AUDYT] Wszystkie 12 scenariuszy STRETCH i sentineli: OK
+[BURSZTYNUI MEMO] Edycja, historia, schowek i rendering: OK
+=== WSZYSTKIE TESTY BURSZTYNUI ZAKONCZONE SUKCESEM (PASS) ===
+
+[BURSZTYNUI INTERAKTYWNOSC] Testy WidokPrzewijany, Drzewo i Efektywna Widocznosc...
+[INTERAKTYWNOSC AUDYT] WidokPrzewijany, Drzewo i Efektywna Widocznosc: OK
+
+=== ROZPOCZECIE TESTOW NOWYCH KONTROLEK (BURSZTYNUI GENERACJA 2) ===
+[KONTROLKI2 1/8] Tabela: model, wejscie i wirtualizacja 1000 wierszy...
+[PERF 5S TABELA ROW] mouse_events=5000
+[PERF 5S TABELA ROW] dirty_calls=0
+[PERF 5S TABELA ROW] dirty_pixels=0
+[PERF 5S TABELA ROW] layout_passes=0
+[PERF 5S TABELA ROW] allocations=0
+[TABELA POMIAR] visible_rows=13
+[TABELA POMIAR] paint_allocations=0
+[PERF 5S TABELA EMPTY] mouse_events=5000
+[PERF 5S TABELA EMPTY] dirty_calls=0
+[PERF 5S TABELA EMPTY] dirty_pixels=0
+[PERF 5S TABELA EMPTY] layout_passes=0
+[PERF 5S TABELA EMPTY] allocations=0
+[KONTROLKI2 1/8] Tabela: OK
+[KONTROLKI2 2/8] Rozdzielacz: podzial, granice, drag i klawiatura...
+[PERF 5S ROZDZIELACZ] mouse_events=5000
+[PERF 5S ROZDZIELACZ] dirty_calls=0
+[PERF 5S ROZDZIELACZ] dirty_pixels=0
+[PERF 5S ROZDZIELACZ] layout_passes=0
+[PERF 5S ROZDZIELACZ] allocations=0
+[KONTROLKI2 2/8] Rozdzielacz: OK
+[KONTROLKI2 3/8] WidokIkon: 1000 elementow, siatka i wejscie...
+[PERF 5S WIDOKIKON] mouse_events=5000
+[PERF 5S WIDOKIKON] dirty_calls=0
+[PERF 5S WIDOKIKON] dirty_pixels=0
+[PERF 5S WIDOKIKON] layout_passes=0
+[PERF 5S WIDOKIKON] allocations=0
+[WIDOKIKON POMIAR] visible_items=9
+[WIDOKIKON POMIAR] paint_allocations=0
+[PERF DRAG WIDOKIKON] mouse_events=1000
+[PERF DRAG WIDOKIKON] value_changes=192
+[PERF DRAG WIDOKIKON] content_paints=192
+[PERF DRAG WIDOKIKON] scrollbar_paints=192
+[PERF DRAG WIDOKIKON] layout_passes=0
+[PERF DRAG WIDOKIKON] allocations=0
+[PERF DRAG WIDOKIKON] viewport_dirty_pixels=14307840
+[PERF DRAG WIDOKIKON] scrollbar_dirty_pixels=52224
+[PERF DRAG WIDOKIKON] bounding_dirty_pixels=14970240
+[KONTROLKI2 3/8] WidokIkon: OK
+[KONTROLKI2 4/8] Obraz: bufor, tryby, clipping i paint...
+[OBRAZ POMIAR] paint_allocations=0
+[KONTROLKI2 4/8] Obraz: OK
+[KONTROLKI2 5/8] PrzyciskObrazkowy: kompozycja i zachowanie Przycisku...
+[KONTROLKI2 5/8] PrzyciskObrazkowy: OK
+[KONTROLKI2 6/8] PasekSciezki: UTF-8, overflow i aktywacja...
+[KONTROLKI2 6/8] PasekSciezki: OK
+[KONTROLKI2 7/8] Kalendarz: matematyka, granice i klawiatura...
+[PERF RAPID KALENDARZ] sequences=1000
+[PERF RAPID KALENDARZ] paints=1000
+[PERF RAPID KALENDARZ] callbacks=1000
+[PERF RAPID KALENDARZ] month_recalculations=0
+[PERF RAPID KALENDARZ] layout_passes=0
+[PERF RAPID KALENDARZ] allocations=0
+[PERF RAPID KALENDARZ] dirty_pixels=1488000
+[PERF 5S KALENDARZ] mouse_events=5000
+[PERF 5S KALENDARZ] dirty_calls=0
+[PERF 5S KALENDARZ] dirty_pixels=0
+[PERF 5S KALENDARZ] layout_passes=0
+[PERF 5S KALENDARZ] allocations=0
+[KONTROLKI2 7/8] Kalendarz: OK
+[KONTROLKI2 8/8] PoleDaty i PoleCzasu: walidacja i bezpieczenstwo...
+[PERF RAPID POLEDATY] sequences=1000
+[PERF RAPID POLEDATY] paints=1000
+[PERF RAPID POLEDATY] callbacks=1000
+[PERF RAPID POLEDATY] layout_passes=0
+[PERF RAPID POLEDATY] allocations=0
+[PERF RAPID POLEDATY] dirty_pixels=4144000
+[PERF 5S POLEDATY] mouse_events=5000
+[PERF 5S POLEDATY] dirty_calls=0
+[PERF 5S POLEDATY] dirty_pixels=0
+[PERF 5S POLEDATY] layout_passes=0
+[PERF 5S POLEDATY] allocations=0
+[PERF RAPID POLECZASU] sequences=1000
+[PERF RAPID POLECZASU] paints=1000
+[PERF RAPID POLECZASU] callbacks=1000
+[PERF RAPID POLECZASU] layout_passes=0
+[PERF RAPID POLECZASU] allocations=0
+[PERF RAPID POLECZASU] dirty_pixels=4816000
+[PERF 5S POLECZASU] mouse_events=5000
+[PERF 5S POLECZASU] dirty_calls=0
+[PERF 5S POLECZASU] dirty_pixels=0
+[PERF 5S POLECZASU] layout_passes=0
+[PERF 5S POLECZASU] allocations=0
+[KONTROLKI2 8/8] PoleDaty i PoleCzasu: OK
+=== TESTY WDROZONYCH KONTROLEK 1-8 ZAKONCZONE (PASS) ===
+[TEST PAMIECI] Aktywne alokacje po przebiegu: STABILNE (PASS)
+=== TESTY BURSZTYN OS: PASS ===
+[TEST MODE] AUTOMATED: zakonczono; proces test.bur konczy dzialanie.

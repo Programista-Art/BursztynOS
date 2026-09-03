@@ -85,6 +85,7 @@ constexpr uint64_t BAZA_STOSU_USER = RING3_STACK_TOP;
 constexpr uint64_t LICZBA_STRON_STOSU_USER = 4ULL;
 constexpr uint64_t ROZMIAR_STOSU_USER =
     LICZBA_STRON_STOSU_USER * ROZMIAR_STRONY;
+constexpr uint64_t LICZBA_STRON_STOSU_TEST = 16ULL;
 
 /*
  * Bezpiecznik przeciwko zlosliwemu/uszkodzonemu plikowi BUR, ktory
@@ -607,10 +608,11 @@ static bool mapuj_segment_z_pliku(
 }
 
 static bool mapuj_stos_uzytkownika(
-    uint32_t flagi
+    uint32_t flagi,
+    uint64_t liczba_stron
 ) {
     for (uint64_t i = 0;
-         i < LICZBA_STRON_STOSU_USER;
+         i < liczba_stron;
          ++i) {
         void* ramka = ZaalokujRamke();
         if (!ramka) return false;
@@ -746,6 +748,27 @@ static bool uruchom_program_z_pliku_impl(
 
     if (!kopiuj_argument_startowy(bezpieczny_argument, argument_startowy))
         return false;
+
+    bool aplikacja_testowa = true;
+    static const char SCIEZKA_TEST[] = "/programy/test.cebula/test.bur";
+    size_t indeks_sciezki = 0;
+    while (bezpieczna_sciezka[indeks_sciezki] != '\0' &&
+           SCIEZKA_TEST[indeks_sciezki] != '\0') {
+        if (bezpieczna_sciezka[indeks_sciezki] !=
+            SCIEZKA_TEST[indeks_sciezki]) {
+            aplikacja_testowa = false;
+            break;
+        }
+        ++indeks_sciezki;
+    }
+    if (bezpieczna_sciezka[indeks_sciezki] != '\0' ||
+        SCIEZKA_TEST[indeks_sciezki] != '\0') {
+        aplikacja_testowa = false;
+    }
+    const uint64_t liczba_stron_stosu = aplikacja_testowa
+        ? LICZBA_STRON_STOSU_TEST
+        : LICZBA_STRON_STOSU_USER;
+    const uint64_t rozmiar_stosu = liczba_stron_stosu * ROZMIAR_STRONY;
 
     /*
      * Rezerwacja i kontrola single-instance sa jedna operacja atomowa
@@ -934,11 +957,14 @@ static bool uruchom_program_z_pliku_impl(
     }
 
     /*
-     * 3. Stos Ring 3 - 16 KiB RW.
+     * 3. Stos Ring 3. Zwykle aplikacje zachowuja 16 KiB. Test dostaje
+     * 64 KiB, poniewaz pelna regresja BursztynUI ma duze lokalne obiekty,
+     * a tryb interaktywny musi bezpiecznie powtarzac ja z callbacku GUI.
      */
     if (mapowanie_ok &&
         !mapuj_stos_uzytkownika(
-            flagi_dane)) {
+            flagi_dane,
+            liczba_stron_stosu)) {
         wypisz_log("[LOADER-DBG] mapuj_stos_uzytkownika fail");
         mapowanie_ok = false;
     }
@@ -972,7 +998,7 @@ static bool uruchom_program_z_pliku_impl(
      */
     const uint64_t wirtualny_szczyt_stosu =
         BAZA_STOSU_USER +
-        ROZMIAR_STOSU_USER -
+        rozmiar_stosu -
         8ULL;
 
     /*

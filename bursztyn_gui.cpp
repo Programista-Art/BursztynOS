@@ -15,6 +15,7 @@
 namespace {
 
 uint64_t liczba_alokacji_sterty = 0;
+uint64_t liczba_aktywnych_alokacji_sterty = 0;
 
 constexpr unsigned long WYROWNANIE_STERTY = 16UL;
 constexpr unsigned long ROZMIAR_STRONY = 4096UL;
@@ -210,6 +211,7 @@ void* gui_malloc(unsigned long rozmiar) {
 
         blok->wolny = false;
         ++liczba_alokacji_sterty;
+        ++liczba_aktywnych_alokacji_sterty;
         return static_cast<void*>(blok + 1);
     }
 
@@ -280,11 +282,16 @@ void* gui_malloc(unsigned long rozmiar) {
     }
 
     ++liczba_alokacji_sterty;
+    ++liczba_aktywnych_alokacji_sterty;
     return static_cast<void*>(nowy + 1);
 }
 
 uint64_t gui_liczba_alokacji_sterty() {
     return liczba_alokacji_sterty;
+}
+
+uint64_t gui_liczba_aktywnych_alokacji_sterty() {
+    return liczba_aktywnych_alokacji_sterty;
 }
 
 void gui_free(void* ptr) {
@@ -304,6 +311,8 @@ void gui_free(void* ptr) {
         return;
 
     blok->wolny = true;
+    if (liczba_aktywnych_alokacji_sterty > 0)
+        --liczba_aktywnych_alokacji_sterty;
 
     polacz_z_nastepnym(blok);
 
