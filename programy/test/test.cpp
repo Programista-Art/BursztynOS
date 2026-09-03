@@ -84,6 +84,72 @@ static void bws_log_u64(const char* opis, uint64_t wartosc) {
     bws_log(bufor);
 }
 
+static void bws_dopisz_i32(char* buf, size_t cap, size_t* pos, int32_t val) {
+    if (!buf || !pos || *pos >= cap) return;
+    if (val < 0) {
+        if (*pos + 1 < cap) buf[(*pos)++] = '-';
+        val = -val;
+    }
+    char tmp[12];
+    size_t len = 0;
+    do {
+        tmp[len++] = static_cast<char>('0' + (val % 10));
+        val /= 10;
+    } while (val > 0 && len < sizeof(tmp));
+    while (len > 0 && *pos + 1 < cap) {
+        buf[(*pos)++] = tmp[--len];
+    }
+    buf[*pos] = '\0';
+}
+
+static void bws_dopisz_str(char* buf, size_t cap, size_t* pos, const char* str) {
+    if (!buf || !pos || !str) return;
+    while (*str && *pos + 1 < cap) {
+        buf[(*pos)++] = *str++;
+    }
+    buf[*pos] = '\0';
+}
+
+static void bws_dopisz_geom(char* buf, size_t cap, size_t* pos, int x, int y, int w, int h) {
+    bws_dopisz_str(buf, cap, pos, "(");
+    bws_dopisz_i32(buf, cap, pos, x);
+    bws_dopisz_str(buf, cap, pos, ",");
+    bws_dopisz_i32(buf, cap, pos, y);
+    bws_dopisz_str(buf, cap, pos, ",");
+    bws_dopisz_i32(buf, cap, pos, w);
+    bws_dopisz_str(buf, cap, pos, ",");
+    bws_dopisz_i32(buf, cap, pos, h);
+    bws_dopisz_str(buf, cap, pos, ")");
+}
+
+static void log_rerun_geom(int cykl,
+                           int bl_x, int bl_y, int bl_w, int bl_h,
+                           int bv_x, int bv_y, int bv_w, int bv_h,
+                           int bf_x, int bf_y, int bf_w, int bf_h,
+                           int af_x, int af_y, int af_w, int af_h,
+                           int wo_x, int wo_y, int wo_w, int wo_h,
+                           int ly_x, int ly_y, int ly_w, int ly_h) {
+    char buf[384];
+    size_t pos = 0;
+    buf[0] = '\0';
+    bws_dopisz_str(buf, sizeof(buf), &pos, "[RERUN-GEOM]\ncycle=");
+    bws_dopisz_i32(buf, sizeof(buf), &pos, cykl);
+    bws_dopisz_str(buf, sizeof(buf), &pos, "\nbaseline_logical=");
+    bws_dopisz_geom(buf, sizeof(buf), &pos, bl_x, bl_y, bl_w, bl_h);
+    bws_dopisz_str(buf, sizeof(buf), &pos, "\nbaseline_visible=");
+    bws_dopisz_geom(buf, sizeof(buf), &pos, bv_x, bv_y, bv_w, bv_h);
+    bws_dopisz_str(buf, sizeof(buf), &pos, "\nbefore=");
+    bws_dopisz_geom(buf, sizeof(buf), &pos, bf_x, bf_y, bf_w, bf_h);
+    bws_dopisz_str(buf, sizeof(buf), &pos, "\nafter=");
+    bws_dopisz_geom(buf, sizeof(buf), &pos, af_x, af_y, af_w, af_h);
+    bws_dopisz_str(buf, sizeof(buf), &pos, "\nwindow_object=");
+    bws_dopisz_geom(buf, sizeof(buf), &pos, wo_x, wo_y, wo_w, wo_h);
+    bws_dopisz_str(buf, sizeof(buf), &pos, "\nlayer=");
+    bws_dopisz_geom(buf, sizeof(buf), &pos, ly_x, ly_y, ly_w, ly_h);
+    bws_dopisz_str(buf, sizeof(buf), &pos, "\n");
+    bws_log(buf);
+}
+
 class IzolacjaPrezentacjiTestow {
 public:
     explicit IzolacjaPrezentacjiTestow(Okno* okno_rzeczywiste = nullptr)
@@ -4477,11 +4543,13 @@ static void wykonaj_testy_bursztyn_ui() {
     delete okno_listy_ptr;
     delete lista_ptr;
     bws_log("[BURSZTYNUI MEMO] Edycja, historia, schowek i rendering: OK\n");
+
     // ---------------------------------------------------------------------
     // 10. Test regresji 20 cykli rerun z zachowaniem chromu i geometrii
     // ---------------------------------------------------------------------
     {
         bws_log("[REGRESJA RERUN] Test 20 cykli rerun z zachowaniem chromu...\n");
+        const uint32_t bledy_rerun_przed = bws_test_blad;
         Okno* okno_rerun = new Okno("Okno Regresji Rerun", 600, 450);
         bws_sprawdz(okno_rerun != nullptr);
         if (okno_rerun) {
@@ -4492,9 +4560,19 @@ static void wykonaj_testy_bursztyn_ui() {
             const int expected_belka_h = Okno::WYSOKOSC_BELKI_TYTULOWEJ * okno_rerun->skala_dpi();
             bws_sprawdz_msg(expected_belka_h == 28, "Canonical titlebar height 28px");
 
+            // Wariant A: przechwycenie rzeczywistej geometrii widocznej przed regresja
+            int base_vx = 0, base_vy = 0, base_vw = 0, base_vh = 0;
+            gui_pobierz_widoczna_geometrie(&base_vx, &base_vy, &base_vw, &base_vh);
+
             for (int cykl = 1; cykl <= 20; ++cykl) {
                 const bool tlum_rys_przed = KontekstRysowania::g_tlum_rysowanie_globalne;
                 const bool tlum_sys_przed = Okno::g_tlum_operacje_systemowe;
+
+                const int bf_x = okno_rerun->x();
+                const int bf_y = okno_rerun->y();
+                const int bf_w = okno_rerun->szerokosc();
+                const int bf_h = okno_rerun->wysokosc();
+
                 {
                     IzolacjaPrezentacjiTestow izolacja(okno_rerun);
                     bws_sprawdz(KontekstRysowania::g_tlum_rysowanie_globalne);
@@ -4502,6 +4580,11 @@ static void wykonaj_testy_bursztyn_ui() {
                     okno_rerun->przelacz_maksymalizacje();
                     okno_rerun->przelacz_maksymalizacje();
                 }
+
+                const int af_x = okno_rerun->x();
+                const int af_y = okno_rerun->y();
+                const int af_w = okno_rerun->szerokosc();
+                const int af_h = okno_rerun->wysokosc();
 
                 bws_sprawdz(KontekstRysowania::g_tlum_rysowanie_globalne == tlum_rys_przed);
                 bws_sprawdz(Okno::g_tlum_operacje_systemowe == tlum_sys_przed);
@@ -4512,10 +4595,26 @@ static void wykonaj_testy_bursztyn_ui() {
 
                 int cur_vx = 0, cur_vy = 0, cur_vw = 0, cur_vh = 0;
                 gui_pobierz_widoczna_geometrie(&cur_vx, &cur_vy, &cur_vw, &cur_vh);
-                bws_sprawdz_msg(cur_vx == WIN_X, "Regresja rerun: visible_x drift");
-                bws_sprawdz_msg(cur_vy == WIN_Y, "Regresja rerun: visible_y drift");
-                bws_sprawdz_msg(cur_vw == WIN_W, "Regresja rerun: visible_w drift");
-                bws_sprawdz_msg(cur_vh == WIN_H, "Regresja rerun: visible_h drift");
+
+                const bool fail_vx = (cur_vx != base_vx);
+                const bool fail_vy = (cur_vy != base_vy);
+                const bool fail_vw = (cur_vw != base_vw);
+                const bool fail_vh = (cur_vh != base_vh);
+
+                if (fail_vx || fail_vy || fail_vw || fail_vh) {
+                    log_rerun_geom(cykl,
+                                   init_x, init_y, init_w, init_h,
+                                   base_vx, base_vy, base_vw, base_vh,
+                                   bf_x, bf_y, bf_w, bf_h,
+                                   af_x, af_y, af_w, af_h,
+                                   okno_rerun->x(), okno_rerun->y(), okno_rerun->szerokosc(), okno_rerun->wysokosc(),
+                                   cur_vx, cur_vy, cur_vw, cur_vh);
+                }
+
+                bws_sprawdz_msg(!fail_vx, "Regresja rerun: visible_x drift");
+                bws_sprawdz_msg(!fail_vy, "Regresja rerun: visible_y drift");
+                bws_sprawdz_msg(!fail_vw, "Regresja rerun: visible_w drift");
+                bws_sprawdz_msg(!fail_vh, "Regresja rerun: visible_h drift");
 
                 const int belka_h = Okno::WYSOKOSC_BELKI_TYTULOWEJ * okno_rerun->skala_dpi();
                 bws_sprawdz_msg(belka_h == 28, "Regresja rerun: zla wysokosc belki");
@@ -4535,7 +4634,50 @@ static void wykonaj_testy_bursztyn_ui() {
                 bws_sprawdz(brudny.czy_pusty() || brudny.y >= belka_h);
             }
             delete okno_rerun;
-            bws_log("[REGRESJA RERUN] 20 cykli zakonczonych sukcesem (PASS).\n");
+
+            // Wariant B: jawna zmiana pozycji okna przed regresja i sprawdzenie stabilnosci nowego baselinu
+            Okno* okno_rerun_moved = new Okno("Okno Regresji Rerun Moved", 520, 380);
+            bws_sprawdz(okno_rerun_moved != nullptr);
+            if (okno_rerun_moved) {
+                okno_rerun_moved->ustaw_pozycje(180, 120);
+                const int moved_init_x = okno_rerun_moved->x();
+                const int moved_init_y = okno_rerun_moved->y();
+                const int moved_init_w = okno_rerun_moved->szerokosc();
+                const int moved_init_h = okno_rerun_moved->wysokosc();
+
+                for (int cykl = 1; cykl <= 5; ++cykl) {
+                    {
+                        IzolacjaPrezentacjiTestow izolacja(okno_rerun_moved);
+                        okno_rerun_moved->przelacz_maksymalizacje();
+                        okno_rerun_moved->przelacz_maksymalizacje();
+                    }
+                    bws_sprawdz_msg(okno_rerun_moved->x() == moved_init_x, "Regresja rerun moved: drift x");
+                    bws_sprawdz_msg(okno_rerun_moved->y() == moved_init_y, "Regresja rerun moved: drift y");
+                    bws_sprawdz_msg(okno_rerun_moved->szerokosc() == moved_init_w, "Regresja rerun moved: drift w");
+                    bws_sprawdz_msg(okno_rerun_moved->wysokosc() == moved_init_h, "Regresja rerun moved: drift h");
+
+                    int cur_vx = 0, cur_vy = 0, cur_vw = 0, cur_vh = 0;
+                    gui_pobierz_widoczna_geometrie(&cur_vx, &cur_vy, &cur_vw, &cur_vh);
+                    bws_sprawdz_msg(cur_vx == base_vx, "Regresja rerun moved: visible_x drift");
+                    bws_sprawdz_msg(cur_vy == base_vy, "Regresja rerun moved: visible_y drift");
+                    bws_sprawdz_msg(cur_vw == base_vw, "Regresja rerun moved: visible_w drift");
+                    bws_sprawdz_msg(cur_vh == base_vh, "Regresja rerun moved: visible_h drift");
+                }
+                delete okno_rerun_moved;
+            }
+
+            const uint32_t bledy_rerun = bws_test_blad - bledy_rerun_przed;
+            if (bledy_rerun == 0) {
+                bws_log("[REGRESJA RERUN] 20 cykli zakonczonych sukcesem (PASS).\n");
+            } else {
+                char msg_fail[64];
+                size_t pos_fail = 0;
+                msg_fail[0] = '\0';
+                bws_dopisz_str(msg_fail, sizeof(msg_fail), &pos_fail, "[REGRESJA RERUN] FAIL ");
+                bws_dopisz_i32(msg_fail, sizeof(msg_fail), &pos_fail, static_cast<int32_t>(bledy_rerun));
+                bws_dopisz_str(msg_fail, sizeof(msg_fail), &pos_fail, " blednych asercji.\n");
+                bws_log(msg_fail);
+            }
         }
     }
 
