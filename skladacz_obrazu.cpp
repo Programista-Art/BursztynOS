@@ -275,13 +275,21 @@ bool rect_merge_ok(const GuiDirtyRect&a,const GuiDirtyRect&b){
 #ifndef BURSZTYN_DEBUG_GUI_PERF
 #define BURSZTYN_DEBUG_GUI_PERF 0
 #endif
+#if defined(BURSZTYNDIAGGEOMTRACE) && !defined(BURSZTYN_DIAG_GEOM_TRACE)
+#define BURSZTYN_DIAG_GEOM_TRACE BURSZTYNDIAGGEOMTRACE
+#endif
+#ifndef BURSZTYN_DIAG_GEOM_TRACE
+#define BURSZTYN_DIAG_GEOM_TRACE 0
+#endif
 
 #if BURSZTYN_DEBUG_GUI_PERF
 uint64_t cursor_reoverlay_after_dirty=0;
 #endif
 
+#if BURSZTYN_DEBUG_PERF || BURSZTYN_DEBUG_GUI_LAYERS || BURSZTYN_DEBUG_GUI_PERF || BURSZTYN_DIAG_GEOM_TRACE
 static void perf_num(char* b,size_t cap,size_t* n,uint64_t v){char t[24];size_t m=0;do{t[m++]=static_cast<char>('0'+v%10);v/=10;}while(v&&m<sizeof(t));while(m&&*n+1<cap)b[(*n)++]=t[--m];b[*n]='\0';}
 static void perf_txt(char*b,size_t cap,size_t*n,const char*s){while(s&&*s&&*n+1<cap)b[(*n)++]=*s++;b[*n]='\0';}
+#endif
 void perf_log(uint64_t teraz){
 #if BURSZTYN_DEBUG_PERF
     if(perf_deadline_ns==0){perf_deadline_ns=teraz+5000000000ULL;return;}
@@ -1246,6 +1254,7 @@ bool zmien_geometrie_warstwy(
     if (!warstwa || !wymiary_mieszcza_sie_na_ekranie(szer, wys))
         return false;
 
+#if BURSZTYN_DIAG_GEOM_TRACE
     char b[128]={}; size_t n=0;
     perf_txt(b,sizeof(b),&n,"[BWS61-KERNEL] pid="); perf_num(b,sizeof(b),&n,pid);
     perf_txt(b,sizeof(b),&n," old=("); perf_num(b,sizeof(b),&n,(uint32_t)warstwa->x);
@@ -1258,6 +1267,7 @@ bool zmien_geometrie_warstwy(
     perf_txt(b,sizeof(b),&n,","); perf_num(b,sizeof(b),&n,(uint32_t)wys);
     perf_txt(b,sizeof(b),&n,")\n");
     wypisz_log(b);
+#endif
 
     if (warstwa->szerokosc == szer && warstwa->wysokosc == wys) {
         zaktualizuj_pozycje_warstwy(pid, x, y);

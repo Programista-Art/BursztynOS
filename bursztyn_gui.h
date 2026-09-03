@@ -125,6 +125,14 @@ void gui_ustaw_izolacje_geometrii(bool wlaczona);
 bool gui_czy_izolacja_geometrii_wlaczona();
 void gui_pobierz_widoczna_geometrie(int* x, int* y, int* w, int* h);
 void gui_pobierz_izolowana_geometrie(int* x, int* y, int* w, int* h);
+#if defined(BURSZTYNDIAGGEOMTRACE) && !defined(BURSZTYN_DIAG_GEOM_TRACE)
+#define BURSZTYN_DIAG_GEOM_TRACE BURSZTYNDIAGGEOMTRACE
+#endif
+
+#ifndef BURSZTYN_DIAG_GEOM_TRACE
+#define BURSZTYN_DIAG_GEOM_TRACE 0
+#endif
+
 void gui_log_geom_trace(const char* caller, int old_x, int old_y, int old_w, int old_h,
                         int req_x, int req_y, int req_w, int req_h,
                         bool isolation, bool reaches_kernel,

@@ -164,6 +164,12 @@ RING3_FLAGS := \
 	-fno-rtti \
 	-fno-threadsafe-statics
 
+BURSZTYN_DIAG_GEOM_TRACE ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_GEOM_TRACE) $(GEOM_TRACE)),)
+RING3_FLAGS += -DBURSZTYN_DIAG_GEOM_TRACE=1
+KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_GEOM_TRACE=1
+endif
+
 #
 # Pliki .S kompilujemy przez GCC, nie bezposrednio przez `as`.
 # Dzieki temu zachowujemy prawidlowa obsluge assembler-with-cpp dla .S.
@@ -279,7 +285,7 @@ OBJS := \
 # ============================================================================
 
 .PHONY: \
-	all kernel iso iso8k bios uefi run run8k run-test runusb runusbkbd runusbmouse runusbhid runuefi \
+	all kernel iso iso8k bios uefi run run8k run-test run-geom-trace runusb runusbkbd runusbmouse runusbhid runuefi \
 	check-kernel check-test8k check-tools check-ovmf \
 	prepare-disk clean clear distclean cdysk rm help
 
@@ -681,6 +687,9 @@ run-test: $(CI_TEST_ISO) prepare-disk
 		$(QEMU_COMMON_ARGS) \
 		-cdrom $(CI_TEST_ISO)
 
+run-geom-trace: prepare-disk
+	$(MAKE) BURSZTYN_DIAG_GEOM_TRACE=1 run
+
 runusb: iso prepare-disk
 	$(QEMU) \
 		$(QEMU_COMMON_ARGS) \
@@ -799,6 +808,7 @@ help:
 	@echo "  make run       - uruchom QEMU w trybie BIOS ze standardowym ISO"
 	@echo "  make run8k     - uruchom QEMU w trybie BIOS z ISO zawierajacym modul 8K"
 	@echo "  make run-test  - uruchom QEMU z automatyczna regresja BWS/BursztynUI (bursztyn.test=automated)"
+	@echo "  make run-geom-trace - uruchom QEMU z diagnostycznym sledzeniem geometrii (BURSZTYN_DIAG_GEOM_TRACE=1)"
 	@echo "  make runuefi   - uruchom QEMU z OVMF/UEFI"
 	@echo "  make check-tools - sprawdz wymagane narzedzia"
 	@echo "  make clean     - usun artefakty kompilacji"

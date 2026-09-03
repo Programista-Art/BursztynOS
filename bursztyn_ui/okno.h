@@ -299,12 +299,14 @@ public:
     void minimalizuj() {
         popupy_.zamknij(PowodZamknieciaPopup::WlascicielZminimalizowany);
         czy_przeciagane_ = false;
+#if BURSZTYN_DIAG_GEOM_TRACE
         int vx = 0, vy = 0, vw = 0, vh = 0;
         gui_pobierz_widoczna_geometrie(&vx, &vy, &vw, &vh);
         gui_log_geom_trace("Okno::minimalizuj", vx, vy, vw, vh,
                            0, 0, 0, 0,
                            g_tlum_operacje_systemowe, !g_tlum_operacje_systemowe,
                            vx, vy, vw, vh);
+#endif
         if (!g_tlum_operacje_systemowe) {
             gui_ustaw_capture_myszy(false);
             czy_zminimalizowane_ = gui_minimalizuj_okno();
@@ -343,6 +345,7 @@ public:
             dopasuj_do_obszaru_roboczego(true);
         }
 
+#if BURSZTYN_DIAG_GEOM_TRACE
         int vx = 0, vy = 0, vw = 0, vh = 0;
         gui_pobierz_widoczna_geometrie(&vx, &vy, &vw, &vh);
         gui_log_geom_trace(czy_zmaksymalizowane_ ? "Okno::przelacz_maksymalizacje(max)" : "Okno::przelacz_maksymalizacje(restore)",
@@ -350,6 +353,9 @@ public:
                            x_, y_, szerokosc_, wysokosc_,
                            g_tlum_operacje_systemowe, !g_tlum_operacje_systemowe,
                            vx, vy, vw, vh);
+#else
+        (void)old_x; (void)old_y; (void)old_w; (void)old_h;
+#endif
 
         if (!g_tlum_operacje_systemowe) {
             gui_ustaw_geometrie_okna(x_, y_, szerokosc_, wysokosc_);

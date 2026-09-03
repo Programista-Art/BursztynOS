@@ -913,6 +913,7 @@ bool gui_ustaw_popup_aplikacji(bool otwarty,
 }
 
 namespace {
+#if BURSZTYN_DIAG_GEOM_TRACE
 static void trace_dopisz_str(char* buf, size_t cap, size_t* pos, const char* str) {
     if (!buf || !pos || !str || *pos >= cap) return;
     while (*str != '\0' && *pos + 1 < cap) {
@@ -939,6 +940,7 @@ static void trace_dopisz_i32(char* buf, size_t cap, size_t* pos, int val) {
     }
     buf[*pos] = '\0';
 }
+#endif
 }
 
 static bool g_izolacja_geometrii_wlaczona = false;
@@ -977,6 +979,7 @@ void gui_log_geom_trace(const char* caller, int old_x, int old_y, int old_w, int
                         int req_x, int req_y, int req_w, int req_h,
                         bool isolation, bool reaches_kernel,
                         int vis_x, int vis_y, int vis_w, int vis_h) {
+#if BURSZTYN_DIAG_GEOM_TRACE
     char buf[256];
     size_t pos = 0;
     buf[0] = '\0';
@@ -1012,13 +1015,32 @@ void gui_log_geom_trace(const char* caller, int old_x, int old_y, int old_w, int
     trace_dopisz_i32(buf, sizeof(buf), &pos, vis_h);
     trace_dopisz_str(buf, sizeof(buf), &pos, ")\n");
     bws_wywolaj(1, reinterpret_cast<uint64_t>(buf), 0, 0, 0);
+#else
+    (void)caller;
+    (void)old_x;
+    (void)old_y;
+    (void)old_w;
+    (void)old_h;
+    (void)req_x;
+    (void)req_y;
+    (void)req_w;
+    (void)req_h;
+    (void)isolation;
+    (void)reaches_kernel;
+    (void)vis_x;
+    (void)vis_y;
+    (void)vis_w;
+    (void)vis_h;
+#endif
 }
 
 bool gui_ustaw_geometrie_okna(int x, int y, int szer, int wys) {
+#if BURSZTYN_DIAG_GEOM_TRACE
     const int old_x = g_widoczna_geometria_x;
     const int old_y = g_widoczna_geometria_y;
     const int old_w = g_widoczna_geometria_w;
     const int old_h = g_widoczna_geometria_h;
+#endif
     const bool isolation = g_izolacja_geometrii_wlaczona;
 
     if (isolation) {
@@ -1038,18 +1060,22 @@ bool gui_ustaw_geometrie_okna(int x, int y, int szer, int wys) {
             g_izolowana_geometria_w = szer;
             g_izolowana_geometria_h = wys;
         }
+#if BURSZTYN_DIAG_GEOM_TRACE
         gui_log_geom_trace("gui_ustaw_geometrie_okna", old_x, old_y, old_w, old_h,
                            x, y, szer, wys, isolation, false,
                            g_widoczna_geometria_x, g_widoczna_geometria_y,
                            g_widoczna_geometria_w, g_widoczna_geometria_h);
+#endif
         return valid;
     }
 
     if (szer <= 0 || wys <= 0) {
+#if BURSZTYN_DIAG_GEOM_TRACE
         gui_log_geom_trace("gui_ustaw_geometrie_okna", old_x, old_y, old_w, old_h,
                            x, y, szer, wys, isolation, false,
                            g_widoczna_geometria_x, g_widoczna_geometria_y,
                            g_widoczna_geometria_w, g_widoczna_geometria_h);
+#endif
         return false;
     }
 
@@ -1062,10 +1088,12 @@ bool gui_ustaw_geometrie_okna(int x, int y, int szer, int wys) {
         g_widoczna_geometria_w = szer;
         g_widoczna_geometria_h = wys;
     }
+#if BURSZTYN_DIAG_GEOM_TRACE
     gui_log_geom_trace("gui_ustaw_geometrie_okna", old_x, old_y, old_w, old_h,
                        x, y, szer, wys, isolation, true,
                        g_widoczna_geometria_x, g_widoczna_geometria_y,
                        g_widoczna_geometria_w, g_widoczna_geometria_h);
+#endif
     return ok;
 }
 
@@ -1316,9 +1344,11 @@ int bws_utworz_warstwe(int x,
     g_widoczna_geometria_y = y;
     g_widoczna_geometria_w = szer;
     g_widoczna_geometria_h = wys;
+#if BURSZTYN_DIAG_GEOM_TRACE
     gui_log_geom_trace("bws_utworz_warstwe", 0, 0, 0, 0,
                        x, y, szer, wys, g_izolacja_geometrii_wlaczona, true,
                        x, y, szer, wys);
+#endif
 
     return static_cast<int>(
         wynik - 1ULL);
@@ -1326,8 +1356,10 @@ int bws_utworz_warstwe(int x,
 
 void bws_przesun_warstwe(int nowy_x,
                          int nowy_y) {
+#if BURSZTYN_DIAG_GEOM_TRACE
     const int old_x = g_widoczna_geometria_x;
     const int old_y = g_widoczna_geometria_y;
+#endif
     bws_wywolaj(
         34,
         i32_do_u64(nowy_x),
@@ -1335,10 +1367,12 @@ void bws_przesun_warstwe(int nowy_x,
         0, 0);
     g_widoczna_geometria_x = nowy_x;
     g_widoczna_geometria_y = nowy_y;
+#if BURSZTYN_DIAG_GEOM_TRACE
     gui_log_geom_trace("bws_przesun_warstwe", old_x, old_y, g_widoczna_geometria_w, g_widoczna_geometria_h,
                        nowy_x, nowy_y, g_widoczna_geometria_w, g_widoczna_geometria_h,
                        g_izolacja_geometrii_wlaczona, true,
                        nowy_x, nowy_y, g_widoczna_geometria_w, g_widoczna_geometria_h);
+#endif
 }
 
 /* =========================================================================
