@@ -28,11 +28,11 @@ struct NaglowekBur {
 
 extern "C" __attribute__((noreturn)) void _start();
 
-static constexpr uint64_t BUR_TEKST_ROZMIAR     = 0x49000ULL; // 292 KiB
+static constexpr uint64_t BUR_TEKST_ROZMIAR     = 0x60000ULL; // 384 KiB
 static constexpr uint64_t BUR_TEKST_PRZESUNIECIE = 0x1000ULL;
 static constexpr uint64_t BUR_TEKST_WIRTUALNY     = 0x1001000ULL;
-static constexpr uint64_t BUR_DANE_PRZESUNIECIE   = 0x4A000ULL;
-static constexpr uint64_t BUR_DANE_WIRTUALNY       = 0x104A000ULL;
+static constexpr uint64_t BUR_DANE_PRZESUNIECIE   = 0x61000ULL;
+static constexpr uint64_t BUR_DANE_WIRTUALNY       = 0x1061000ULL;
 static constexpr uint64_t BUR_DANE_ROZMIAR         = 131072ULL;
 
 extern "C" {
@@ -89,10 +89,12 @@ public:
     explicit IzolacjaPrezentacjiTestow(Okno* okno_rzeczywiste = nullptr)
         : okno_(okno_rzeczywiste),
           poprzednie_tlum_rysowania_(KontekstRysowania::g_tlum_rysowanie_globalne),
-          poprzednie_tlum_operacji_(Okno::g_tlum_operacje_systemowe) {
+          poprzednie_tlum_operacji_(Okno::g_tlum_operacje_systemowe),
+          poprzednia_izolacja_geometrii_(gui_czy_izolacja_geometrii_wlaczona()) {
 
         KontekstRysowania::g_tlum_rysowanie_globalne = true;
         Okno::g_tlum_operacje_systemowe = true;
+        gui_ustaw_izolacje_geometrii(true);
 
         if (okno_) {
             zapisane_x_ = okno_->x();
@@ -124,10 +126,10 @@ public:
 
         KontekstRysowania::g_tlum_rysowanie_globalne = poprzednie_tlum_rysowania_;
         Okno::g_tlum_operacje_systemowe = poprzednie_tlum_operacji_;
+        gui_ustaw_izolacje_geometrii(poprzednia_izolacja_geometrii_);
 
         if (okno_) {
             gui_ustaw_tytul_okna(zapisany_tytul_);
-            gui_ustaw_geometrie_okna(zapisane_x_, zapisane_y_, zapisana_szer_, zapisana_wys_);
             gui_ustaw_capture_myszy(false);
 
             okno_->ustaw_geometrie(zapisane_x_, zapisane_y_, zapisana_szer_, zapisana_wys_);
@@ -146,6 +148,7 @@ private:
     Okno* okno_{nullptr};
     bool poprzednie_tlum_rysowania_{false};
     bool poprzednie_tlum_operacji_{false};
+    bool poprzednia_izolacja_geometrii_{false};
     int zapisane_x_{60};
     int zapisane_y_{50};
     int zapisana_szer_{600};
@@ -4507,6 +4510,13 @@ static void wykonaj_testy_bursztyn_ui() {
                 bws_sprawdz_msg(okno_rerun->szerokosc() == init_w, "Regresja rerun: drift szerokosci");
                 bws_sprawdz_msg(okno_rerun->wysokosc() == init_h, "Regresja rerun: drift wysokosci");
 
+                int cur_vx = 0, cur_vy = 0, cur_vw = 0, cur_vh = 0;
+                gui_pobierz_widoczna_geometrie(&cur_vx, &cur_vy, &cur_vw, &cur_vh);
+                bws_sprawdz_msg(cur_vx == WIN_X, "Regresja rerun: visible_x drift");
+                bws_sprawdz_msg(cur_vy == WIN_Y, "Regresja rerun: visible_y drift");
+                bws_sprawdz_msg(cur_vw == WIN_W, "Regresja rerun: visible_w drift");
+                bws_sprawdz_msg(cur_vh == WIN_H, "Regresja rerun: visible_h drift");
+
                 const int belka_h = Okno::WYSOKOSC_BELKI_TYTULOWEJ * okno_rerun->skala_dpi();
                 bws_sprawdz_msg(belka_h == 28, "Regresja rerun: zla wysokosc belki");
                 bws_sprawdz_msg(okno_rerun->obszar_klienta().y == belka_h, "Regresja rerun: client.y != belka_h");
@@ -4611,6 +4621,13 @@ struct StanOknaWynikow {
     char tekst_licznikow[128]{};
     bool testy_zaplanowane{false};
     int klatki_opoznienia{0};
+    int krok_grupy{0};
+    int init_x{0};
+    int init_y{0};
+    int init_w{0};
+    int init_h{0};
+    uint32_t interactive_visible_geometry_changes{0};
+    uint64_t aktywne_przed{0};
 };
 
 static void dopisz_u32(char* bufor, size_t pojemnosc, size_t* pozycja, uint32_t wartosc) {
@@ -4634,64 +4651,6 @@ static void dopisz_tekst(char* bufor, size_t pojemnosc, size_t* pozycja, const c
     if (*pozycja < pojemnosc) bufor[*pozycja] = '\0';
 }
 
-static void wykonaj_przebieg_testow(StanOknaWynikow* stan) {
-    if (!stan || !stan->uruchom) return;
-
-    {
-        IzolacjaPrezentacjiTestow izolacja(stan->okno);
-        stan->wynik = (*stan->uruchom)();
-    }
-
-    stan->naglowek->ustaw_tekst(stan->wynik.niezaliczone_grupy == 0
-        ? "Diagnostyka systemu zakończona"
-        : "Diagnostyka systemu zakończona (wykryto błędy)");
-    stan->bws->ustaw_tekst(stan->wynik.bws_61_83
-        ? "BWS 61..83: PASS" : "BWS 61..83: FAIL");
-    stan->ui->ustaw_tekst(stan->wynik.bursztyn_ui
-        ? "BursztynUI: PASS" : "BursztynUI: FAIL");
-    stan->interakcje->ustaw_tekst(stan->wynik.interakcje
-        ? "WidokPrzewijany / Drzewo / widoczność: PASS"
-        : "WidokPrzewijany / Drzewo / widoczność: FAIL");
-    stan->kontrolki->ustaw_tekst(stan->wynik.kontrolki2
-        ? "Kontrolki 2 - 8 grup komponentów: PASS"
-        : "Kontrolki 2 - 8 grup komponentów: FAIL");
-    stan->pamiec->ustaw_tekst(stan->wynik.pamiec_stabilna
-        ? "Pamięć GUI po przebiegu: STABILNA (PASS)"
-        : "Pamięć GUI po przebiegu: WYCIEK (FAIL)");
-    stan->ogolny->ustaw_tekst(stan->wynik.niezaliczone_grupy == 0
-        ? "Wynik ogólny: PASS" : "Wynik ogólny: FAIL");
-
-    size_t pos = 0;
-    stan->tekst_licznikow[0] = '\0';
-    dopisz_tekst(stan->tekst_licznikow, sizeof(stan->tekst_licznikow), &pos,
-                 "Grupy: zaliczone ");
-    dopisz_u32(stan->tekst_licznikow, sizeof(stan->tekst_licznikow), &pos,
-               stan->wynik.zaliczone_grupy);
-    dopisz_tekst(stan->tekst_licznikow, sizeof(stan->tekst_licznikow), &pos,
-                 ", niezaliczone ");
-    dopisz_u32(stan->tekst_licznikow, sizeof(stan->tekst_licznikow), &pos,
-               stan->wynik.niezaliczone_grupy);
-    dopisz_tekst(stan->tekst_licznikow, sizeof(stan->tekst_licznikow), &pos,
-                 " | Asercje: PASS ");
-    dopisz_u32(stan->tekst_licznikow, sizeof(stan->tekst_licznikow), &pos,
-               stan->wynik.zaliczone_asercje);
-    dopisz_tekst(stan->tekst_licznikow, sizeof(stan->tekst_licznikow), &pos,
-                 ", FAIL ");
-    dopisz_u32(stan->tekst_licznikow, sizeof(stan->tekst_licznikow), &pos,
-               stan->wynik.niezaliczone_asercje);
-    stan->liczniki->ustaw_tekst(stan->tekst_licznikow);
-
-    if (stan->btn_start) stan->btn_start->ustaw_wlaczona(false);
-    if (stan->btn_ponow) stan->btn_ponow->ustaw_wlaczona(true);
-    if (stan->btn_zamknij) stan->btn_zamknij->ustaw_wlaczona(true);
-
-    if (stan->okno) {
-        stan->okno->przelicz_uklad();
-        stan->okno->uniewaznij();
-    }
-    bws_log("[INTERAKTYWNY PRZEBIEG] ZAKONCZONO\n");
-}
-
 class KontrolerDiagnostyki : public Kontrolka {
 public:
     explicit KontrolerDiagnostyki(StanOknaWynikow* stan) : stan_(stan) {}
@@ -4706,8 +4665,152 @@ public:
             --stan_->klatki_opoznienia;
             return;
         }
-        stan_->testy_zaplanowane = false;
-        wykonaj_przebieg_testow(stan_);
+
+        auto sprawdz_geometrie_grupy = [this](const char* nazwa_grupy) {
+            int cur_vx = 0, cur_vy = 0, cur_vw = 0, cur_vh = 0;
+            gui_pobierz_widoczna_geometrie(&cur_vx, &cur_vy, &cur_vw, &cur_vh);
+            if (cur_vx != stan_->init_x || cur_vy != stan_->init_y ||
+                cur_vw != stan_->init_w || cur_vh != stan_->init_h) {
+                stan_->interactive_visible_geometry_changes++;
+                bws_log("[BLAD GEOMETRII] Grupa ");
+                bws_log(nazwa_grupy);
+                bws_log(" zmienila widoczna geometrie!\n");
+            }
+            bws_sprawdz_msg(cur_vx == stan_->init_x, "visible_x mismatch");
+            bws_sprawdz_msg(cur_vy == stan_->init_y, "visible_y mismatch");
+            bws_sprawdz_msg(cur_vw == stan_->init_w, "visible_w mismatch");
+            bws_sprawdz_msg(cur_vh == stan_->init_h, "visible_h mismatch");
+        };
+
+        if (stan_->krok_grupy == 0) {
+            uint32_t bledy_przed = bws_test_blad;
+            {
+                IzolacjaPrezentacjiTestow izolacja(stan_->okno);
+                wykonaj_testy_bws_61_83();
+            }
+            stan_->wynik.bws_61_83 = (bws_test_blad == bledy_przed);
+            stan_->bws->ustaw_tekst(stan_->wynik.bws_61_83 ? "BWS 61..83: PASS" : "BWS 61..83: FAIL");
+            sprawdz_geometrie_grupy("BWS 61..83");
+            stan_->krok_grupy = 1;
+            if (stan_->okno) {
+                stan_->okno->przelicz_uklad();
+                stan_->okno->uniewaznij();
+            }
+            return;
+        }
+
+        if (stan_->krok_grupy == 1) {
+            uint32_t bledy_przed = bws_test_blad;
+            {
+                IzolacjaPrezentacjiTestow izolacja(stan_->okno);
+                wykonaj_testy_bursztyn_ui();
+            }
+            stan_->wynik.bursztyn_ui_podstawowe = (bws_test_blad == bledy_przed);
+            stan_->ui->ustaw_tekst(stan_->wynik.bursztyn_ui_podstawowe ? "BursztynUI: PASS" : "BursztynUI: FAIL");
+            sprawdz_geometrie_grupy("BursztynUI podstawowe");
+            stan_->krok_grupy = 2;
+            if (stan_->okno) {
+                stan_->okno->przelicz_uklad();
+                stan_->okno->uniewaznij();
+            }
+            return;
+        }
+
+        if (stan_->krok_grupy == 2) {
+            uint32_t bledy_przed = bws_test_blad;
+            {
+                IzolacjaPrezentacjiTestow izolacja(stan_->okno);
+                testy_interaktywne_bursztyn_ui();
+            }
+            stan_->wynik.interakcje = (bws_test_blad == bledy_przed);
+            stan_->interakcje->ustaw_tekst(stan_->wynik.interakcje
+                ? "WidokPrzewijany / Drzewo / widoczność: PASS"
+                : "WidokPrzewijany / Drzewo / widoczność: FAIL");
+            sprawdz_geometrie_grupy("BursztynUI interakcje");
+            stan_->krok_grupy = 3;
+            if (stan_->okno) {
+                stan_->okno->przelicz_uklad();
+                stan_->okno->uniewaznij();
+            }
+            return;
+        }
+
+        if (stan_->krok_grupy == 3) {
+            uint32_t bledy_przed = bws_test_blad;
+            {
+                IzolacjaPrezentacjiTestow izolacja(stan_->okno);
+                wykonaj_testy_kontrolki2();
+            }
+            stan_->wynik.kontrolki2 = (bws_test_blad == bledy_przed);
+            stan_->kontrolki->ustaw_tekst(stan_->wynik.kontrolki2
+                ? "Kontrolki 2 - 8 grup komponentów: PASS"
+                : "Kontrolki 2 - 8 grup komponentów: FAIL");
+            sprawdz_geometrie_grupy("Kontrolki 2");
+            stan_->krok_grupy = 4;
+            if (stan_->okno) {
+                stan_->okno->przelicz_uklad();
+                stan_->okno->uniewaznij();
+            }
+            return;
+        }
+
+        if (stan_->krok_grupy == 4) {
+            stan_->wynik.bursztyn_ui = stan_->wynik.bursztyn_ui_podstawowe &&
+                                      stan_->wynik.interakcje && stan_->wynik.kontrolki2;
+            const uint64_t aktywne_po = gui_liczba_aktywnych_alokacji_sterty();
+            stan_->wynik.pamiec_stabilna = (aktywne_po == stan_->aktywne_przed);
+            stan_->pamiec->ustaw_tekst(stan_->wynik.pamiec_stabilna
+                ? "Pamięć GUI po przebiegu: STABILNA (PASS)"
+                : "Pamięć GUI po przebiegu: WYCIEK (FAIL)");
+
+            sprawdz_geometrie_grupy("Finalizacja");
+
+            stan_->wynik.zaliczone_asercje = bws_test_ok;
+            stan_->wynik.niezaliczone_asercje = bws_test_blad;
+            stan_->wynik.zaliczone_grupy =
+                static_cast<uint32_t>(stan_->wynik.bws_61_83) +
+                static_cast<uint32_t>(stan_->wynik.bursztyn_ui_podstawowe) +
+                static_cast<uint32_t>(stan_->wynik.interakcje) +
+                static_cast<uint32_t>(stan_->wynik.kontrolki2) +
+                static_cast<uint32_t>(stan_->wynik.pamiec_stabilna);
+            stan_->wynik.niezaliczone_grupy = 5U - stan_->wynik.zaliczone_grupy;
+
+            stan_->naglowek->ustaw_tekst(stan_->wynik.niezaliczone_grupy == 0
+                ? "Diagnostyka systemu zakończona"
+                : "Diagnostyka systemu zakończona (wykryto błędy)");
+            stan_->ogolny->ustaw_tekst(stan_->wynik.niezaliczone_grupy == 0
+                ? "Wynik ogólny: PASS" : "Wynik ogólny: FAIL");
+
+            size_t pos = 0;
+            stan_->tekst_licznikow[0] = '\0';
+            dopisz_tekst(stan_->tekst_licznikow, sizeof(stan_->tekst_licznikow), &pos, "Grupy: zaliczone ");
+            dopisz_u32(stan_->tekst_licznikow, sizeof(stan_->tekst_licznikow), &pos, stan_->wynik.zaliczone_grupy);
+            dopisz_tekst(stan_->tekst_licznikow, sizeof(stan_->tekst_licznikow), &pos, ", niezaliczone ");
+            dopisz_u32(stan_->tekst_licznikow, sizeof(stan_->tekst_licznikow), &pos, stan_->wynik.niezaliczone_grupy);
+            dopisz_tekst(stan_->tekst_licznikow, sizeof(stan_->tekst_licznikow), &pos, " | Asercje: PASS ");
+            dopisz_u32(stan_->tekst_licznikow, sizeof(stan_->tekst_licznikow), &pos, stan_->wynik.zaliczone_asercje);
+            dopisz_tekst(stan_->tekst_licznikow, sizeof(stan_->tekst_licznikow), &pos, ", FAIL ");
+            dopisz_u32(stan_->tekst_licznikow, sizeof(stan_->tekst_licznikow), &pos, stan_->wynik.niezaliczone_asercje);
+            stan_->liczniki->ustaw_tekst(stan_->tekst_licznikow);
+
+            bws_sprawdz_msg(stan_->interactive_visible_geometry_changes == 0,
+                            "interactive_visible_geometry_changes != 0");
+
+            if (stan_->btn_start) stan_->btn_start->ustaw_wlaczona(false);
+            if (stan_->btn_ponow) stan_->btn_ponow->ustaw_wlaczona(true);
+            if (stan_->btn_zamknij) stan_->btn_zamknij->ustaw_wlaczona(true);
+
+            stan_->testy_zaplanowane = false;
+            stan_->krok_grupy = 0;
+
+            if (stan_->okno) {
+                stan_->okno->przelicz_uklad();
+                stan_->okno->uniewaznij();
+            }
+
+            bws_log("[INTERAKTYWNY PRZEBIEG] ZAKONCZONO\n");
+            return;
+        }
     }
 
     void rysuj_siebie(KontekstRysowania&) override {}
@@ -4718,7 +4821,7 @@ private:
 };
 
 static void rozpocznij_interaktywny_przebieg_testow(StanOknaWynikow* stan) {
-    if (!stan || !stan->uruchom || stan->testy_zaplanowane) return;
+    if (!stan || stan->testy_zaplanowane) return;
 
     stan->naglowek->ustaw_tekst("Trwa diagnostyka systemu...");
     stan->bws->ustaw_tekst("BWS 61..83: OCZEKUJE");
@@ -4733,7 +4836,23 @@ static void rozpocznij_interaktywny_przebieg_testow(StanOknaWynikow* stan) {
     if (stan->btn_ponow) stan->btn_ponow->ustaw_wlaczona(false);
     if (stan->btn_zamknij) stan->btn_zamknij->ustaw_wlaczona(true);
 
+    if (stan->okno) {
+        stan->init_x = stan->okno->x();
+        stan->init_y = stan->okno->y();
+        stan->init_w = stan->okno->szerokosc();
+        stan->init_h = stan->okno->wysokosc();
+    } else {
+        gui_pobierz_widoczna_geometrie(&stan->init_x, &stan->init_y, &stan->init_w, &stan->init_h);
+    }
+    stan->interactive_visible_geometry_changes = 0;
+    stan->aktywne_przed = gui_liczba_aktywnych_alokacji_sterty();
+
+    bws_test_ok = 0;
+    bws_test_blad = 0;
+    stan->wynik = WynikTestow{};
+
     stan->testy_zaplanowane = true;
+    stan->krok_grupy = 0;
     stan->klatki_opoznienia = 1;
 
     if (stan->okno) {
@@ -4789,6 +4908,7 @@ extern "C" __attribute__((noreturn)) void _start() {
     AplikacjaGUI* aplikacja = new AplikacjaGUI();
     Okno* okno = new Okno("Testy Bursztyn OS", WIN_W, WIN_H);
     if (!aplikacja || !okno) gui_zakoncz_aplikacje();
+    okno->ustaw_pozycje(WIN_X, WIN_Y);
     Panel* korzen = static_cast<Panel*>(okno->kontrolka_glowna());
     if (!korzen) gui_zakoncz_aplikacje();
     korzen->ustaw_orientacje(Orientacja::Pionowa);
@@ -4827,7 +4947,8 @@ extern "C" __attribute__((noreturn)) void _start() {
         {}, okno, &naglowek, &et_bws, &et_ui, &et_interakcje,
         &et_kontrolki, &et_pamiec, &et_ogolny, &et_liczniki,
         &start_btn, &ponow_btn, &zamknij_btn,
-        &uruchom_pelny_pakiet_testow, {}, false, 0
+        &uruchom_pelny_pakiet_testow, {}, false, 0, 0,
+        WIN_X, WIN_Y, WIN_W, WIN_H, 0, 0
     };
     if (!stan) gui_zakoncz_aplikacje();
 

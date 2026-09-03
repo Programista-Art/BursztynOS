@@ -121,6 +121,14 @@ bool gui_ustaw_popup_aplikacji(bool otwarty,
 
 /* BWS 61..83: addytywne fundamenty nowoczesnych aplikacji. */
 bool gui_ustaw_geometrie_okna(int x, int y, int szer, int wys);
+void gui_ustaw_izolacje_geometrii(bool wlaczona);
+bool gui_czy_izolacja_geometrii_wlaczona();
+void gui_pobierz_widoczna_geometrie(int* x, int* y, int* w, int* h);
+void gui_pobierz_izolowana_geometrie(int* x, int* y, int* w, int* h);
+void gui_log_geom_trace(const char* caller, int old_x, int old_y, int old_w, int old_h,
+                        int req_x, int req_y, int req_w, int req_h,
+                        bool isolation, bool reaches_kernel,
+                        int vis_x, int vis_y, int vis_w, int vis_h);
 uint32_t gui_liczba_monitorow();
 bool gui_pobierz_monitor(uint32_t indeks, GuiMonitorInfo* info);
 bool gui_ustaw_obszar_roboczy(int x, int y, int szer, int wys);

@@ -63,7 +63,7 @@ struct NaglowekBur {
 
 static_assert(
     sizeof(NaglowekBur) == 60,
-    "Naglowek BUR musi miec 60 bajtow"
+    "Nagłówek BUR musi miec 60 bajtow"
 );
 
 static_assert(
@@ -1787,6 +1787,8 @@ void wykonaj_polecenie(
 
         wypisz(
             "OS: Bursztyn OS x86_64\n"
+            "Autor: Dymitr Wygowski"
+            "E-mail: programista.art@gmail.com"
             "Jadro: autorskie, monolityczne, paging x86_64 4-level\n"
             "Procesy: Ring 3 + PZB/BZL + prywatne przestrzenie adresowe\n"
             "FS: BSP2 / Bursztynowy System Plikow\n"
@@ -2292,9 +2294,11 @@ void _start() {
         "\n"
         "==================================================\n"
         " Powłoka Bursztynowa bsh v2.3\n"
+        " Autor: Dymitr Wygowski"
+        " e-mail: programista.art@gmail.com"
         " Ring 3 / BWS / BSP2 / PZB\n"
         "==================================================\n"
-        "Wpisz 'pomoc', aby zobaczyc polecenia.\n"
+        "Wpisz 'pomoc', aby zobaczyć polecenia.\n"
     );
 
     char linia[SHELL_INPUT_CAPACITY] = {};

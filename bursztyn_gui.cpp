@@ -912,10 +912,161 @@ bool gui_ustaw_popup_aplikacji(bool otwarty,
                        spakuj_dwa_i32(szer, wys), 0) == 1ULL;
 }
 
+namespace {
+static void trace_dopisz_str(char* buf, size_t cap, size_t* pos, const char* str) {
+    if (!buf || !pos || !str || *pos >= cap) return;
+    while (*str != '\0' && *pos + 1 < cap) {
+        buf[(*pos)++] = *str++;
+    }
+    buf[*pos] = '\0';
+}
+
+static void trace_dopisz_i32(char* buf, size_t cap, size_t* pos, int val) {
+    if (!buf || !pos || *pos >= cap) return;
+    if (val < 0) {
+        if (*pos + 1 < cap) buf[(*pos)++] = '-';
+        val = -val;
+    }
+    char rev[16];
+    size_t ile = 0;
+    uint32_t uval = static_cast<uint32_t>(val);
+    do {
+        rev[ile++] = static_cast<char>('0' + (uval % 10));
+        uval /= 10;
+    } while (uval != 0 && ile < sizeof(rev));
+    while (ile > 0 && *pos + 1 < cap) {
+        buf[(*pos)++] = rev[--ile];
+    }
+    buf[*pos] = '\0';
+}
+}
+
+static bool g_izolacja_geometrii_wlaczona = false;
+static int g_widoczna_geometria_x = 0;
+static int g_widoczna_geometria_y = 0;
+static int g_widoczna_geometria_w = 0;
+static int g_widoczna_geometria_h = 0;
+static int g_izolowana_geometria_x = 0;
+static int g_izolowana_geometria_y = 0;
+static int g_izolowana_geometria_w = 0;
+static int g_izolowana_geometria_h = 0;
+
+void gui_ustaw_izolacje_geometrii(bool wlaczona) {
+    g_izolacja_geometrii_wlaczona = wlaczona;
+}
+
+bool gui_czy_izolacja_geometrii_wlaczona() {
+    return g_izolacja_geometrii_wlaczona;
+}
+
+void gui_pobierz_widoczna_geometrie(int* x, int* y, int* w, int* h) {
+    if (x) *x = g_widoczna_geometria_x;
+    if (y) *y = g_widoczna_geometria_y;
+    if (w) *w = g_widoczna_geometria_w;
+    if (h) *h = g_widoczna_geometria_h;
+}
+
+void gui_pobierz_izolowana_geometrie(int* x, int* y, int* w, int* h) {
+    if (x) *x = g_izolowana_geometria_x;
+    if (y) *y = g_izolowana_geometria_y;
+    if (w) *w = g_izolowana_geometria_w;
+    if (h) *h = g_izolowana_geometria_h;
+}
+
+void gui_log_geom_trace(const char* caller, int old_x, int old_y, int old_w, int old_h,
+                        int req_x, int req_y, int req_w, int req_h,
+                        bool isolation, bool reaches_kernel,
+                        int vis_x, int vis_y, int vis_w, int vis_h) {
+    char buf[256];
+    size_t pos = 0;
+    buf[0] = '\0';
+    trace_dopisz_str(buf, sizeof(buf), &pos, "[GEOM-TRACE] caller=\"");
+    trace_dopisz_str(buf, sizeof(buf), &pos, caller ? caller : "unknown");
+    trace_dopisz_str(buf, sizeof(buf), &pos, "\" old=(");
+    trace_dopisz_i32(buf, sizeof(buf), &pos, old_x);
+    trace_dopisz_str(buf, sizeof(buf), &pos, ",");
+    trace_dopisz_i32(buf, sizeof(buf), &pos, old_y);
+    trace_dopisz_str(buf, sizeof(buf), &pos, ",");
+    trace_dopisz_i32(buf, sizeof(buf), &pos, old_w);
+    trace_dopisz_str(buf, sizeof(buf), &pos, ",");
+    trace_dopisz_i32(buf, sizeof(buf), &pos, old_h);
+    trace_dopisz_str(buf, sizeof(buf), &pos, ") req=(");
+    trace_dopisz_i32(buf, sizeof(buf), &pos, req_x);
+    trace_dopisz_str(buf, sizeof(buf), &pos, ",");
+    trace_dopisz_i32(buf, sizeof(buf), &pos, req_y);
+    trace_dopisz_str(buf, sizeof(buf), &pos, ",");
+    trace_dopisz_i32(buf, sizeof(buf), &pos, req_w);
+    trace_dopisz_str(buf, sizeof(buf), &pos, ",");
+    trace_dopisz_i32(buf, sizeof(buf), &pos, req_h);
+    trace_dopisz_str(buf, sizeof(buf), &pos, ") isolation=");
+    trace_dopisz_i32(buf, sizeof(buf), &pos, isolation ? 1 : 0);
+    trace_dopisz_str(buf, sizeof(buf), &pos, " reaches_kernel=");
+    trace_dopisz_i32(buf, sizeof(buf), &pos, reaches_kernel ? 1 : 0);
+    trace_dopisz_str(buf, sizeof(buf), &pos, " visible=(");
+    trace_dopisz_i32(buf, sizeof(buf), &pos, vis_x);
+    trace_dopisz_str(buf, sizeof(buf), &pos, ",");
+    trace_dopisz_i32(buf, sizeof(buf), &pos, vis_y);
+    trace_dopisz_str(buf, sizeof(buf), &pos, ",");
+    trace_dopisz_i32(buf, sizeof(buf), &pos, vis_w);
+    trace_dopisz_str(buf, sizeof(buf), &pos, ",");
+    trace_dopisz_i32(buf, sizeof(buf), &pos, vis_h);
+    trace_dopisz_str(buf, sizeof(buf), &pos, ")\n");
+    bws_wywolaj(1, reinterpret_cast<uint64_t>(buf), 0, 0, 0);
+}
+
 bool gui_ustaw_geometrie_okna(int x, int y, int szer, int wys) {
-    if (szer <= 0 || wys <= 0) return false;
-    return bws_wywolaj(BWS_GUI_GEOMETRIA, spakuj_dwa_i32(x, y),
-                       spakuj_dwa_i32(szer, wys), 0, 0) == 1ULL;
+    const int old_x = g_widoczna_geometria_x;
+    const int old_y = g_widoczna_geometria_y;
+    const int old_w = g_widoczna_geometria_w;
+    const int old_h = g_widoczna_geometria_h;
+    const bool isolation = g_izolacja_geometrii_wlaczona;
+
+    if (isolation) {
+        bool valid = true;
+        if (szer <= 0 || wys <= 0) {
+            valid = false;
+        } else {
+            int sw = 1024, sh = 768;
+            gui_pobierz_rozdzielczosc(&sw, &sh);
+            if (sw <= 0) sw = 1024;
+            if (sh <= 0) sh = 768;
+            if (szer > sw || wys > sh) valid = false;
+        }
+        if (valid) {
+            g_izolowana_geometria_x = x;
+            g_izolowana_geometria_y = y;
+            g_izolowana_geometria_w = szer;
+            g_izolowana_geometria_h = wys;
+        }
+        gui_log_geom_trace("gui_ustaw_geometrie_okna", old_x, old_y, old_w, old_h,
+                           x, y, szer, wys, isolation, false,
+                           g_widoczna_geometria_x, g_widoczna_geometria_y,
+                           g_widoczna_geometria_w, g_widoczna_geometria_h);
+        return valid;
+    }
+
+    if (szer <= 0 || wys <= 0) {
+        gui_log_geom_trace("gui_ustaw_geometrie_okna", old_x, old_y, old_w, old_h,
+                           x, y, szer, wys, isolation, false,
+                           g_widoczna_geometria_x, g_widoczna_geometria_y,
+                           g_widoczna_geometria_w, g_widoczna_geometria_h);
+        return false;
+    }
+
+    const uint64_t res = bws_wywolaj(BWS_GUI_GEOMETRIA, spakuj_dwa_i32(x, y),
+                                     spakuj_dwa_i32(szer, wys), 0, 0);
+    const bool ok = (res == 1ULL);
+    if (ok) {
+        g_widoczna_geometria_x = x;
+        g_widoczna_geometria_y = y;
+        g_widoczna_geometria_w = szer;
+        g_widoczna_geometria_h = wys;
+    }
+    gui_log_geom_trace("gui_ustaw_geometrie_okna", old_x, old_y, old_w, old_h,
+                       x, y, szer, wys, isolation, true,
+                       g_widoczna_geometria_x, g_widoczna_geometria_y,
+                       g_widoczna_geometria_w, g_widoczna_geometria_h);
+    return ok;
 }
 
 uint32_t gui_liczba_monitorow() {
@@ -1161,17 +1312,33 @@ int bws_utworz_warstwe(int x,
         return -1;
     }
 
+    g_widoczna_geometria_x = x;
+    g_widoczna_geometria_y = y;
+    g_widoczna_geometria_w = szer;
+    g_widoczna_geometria_h = wys;
+    gui_log_geom_trace("bws_utworz_warstwe", 0, 0, 0, 0,
+                       x, y, szer, wys, g_izolacja_geometrii_wlaczona, true,
+                       x, y, szer, wys);
+
     return static_cast<int>(
         wynik - 1ULL);
 }
 
 void bws_przesun_warstwe(int nowy_x,
                          int nowy_y) {
+    const int old_x = g_widoczna_geometria_x;
+    const int old_y = g_widoczna_geometria_y;
     bws_wywolaj(
         34,
         i32_do_u64(nowy_x),
         i32_do_u64(nowy_y),
         0, 0);
+    g_widoczna_geometria_x = nowy_x;
+    g_widoczna_geometria_y = nowy_y;
+    gui_log_geom_trace("bws_przesun_warstwe", old_x, old_y, g_widoczna_geometria_w, g_widoczna_geometria_h,
+                       nowy_x, nowy_y, g_widoczna_geometria_w, g_widoczna_geometria_h,
+                       g_izolacja_geometrii_wlaczona, true,
+                       nowy_x, nowy_y, g_widoczna_geometria_w, g_widoczna_geometria_h);
 }
 
 /* =========================================================================

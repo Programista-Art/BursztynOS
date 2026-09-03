@@ -44,15 +44,15 @@ XORRISO       ?= xorriso
 KERNEL := system_operacyjny.bin
 ISO    := BursztynOS.iso
 ISO8K  := BursztynOS_8k.iso
-ISO_TEST := BursztynOS_test.iso
 
 ISO_DIR     := isodir
 ISO8K_DIR   := isodir_8k
-ISO_TEST_DIR := isodir_test
 GRUB_CFG    := $(ISO_DIR)/boot/grub/grub.cfg
 GRUB8K_CFG  := $(ISO8K_DIR)/boot/grub/grub.cfg
-GRUB_TEST_CFG := $(ISO_TEST_DIR)/boot/grub/grub.cfg
 VIRTUAL_DISK := wirtualny_dysk.img
+
+CI_TEST_DIR := .isodir_ci_test
+CI_TEST_ISO := .bursztyn_ci_test.iso
 
 LARGE_TEST_BMP ?= $(firstword $(wildcard obrazy/test8k.bmp) $(wildcard obrazy/2test.bmp) obrazy/test8k.bmp)
 
@@ -279,7 +279,7 @@ OBJS := \
 # ============================================================================
 
 .PHONY: \
-	all kernel iso iso8k iso-test bios uefi run run8k run-test runusb runusbkbd runusbmouse runusbhid runuefi \
+	all kernel iso iso8k bios uefi run run8k run-test runusb runusbkbd runusbmouse runusbhid runuefi \
 	check-kernel check-test8k check-tools check-ovmf \
 	prepare-disk clean clear distclean cdysk rm help
 
@@ -540,13 +540,16 @@ check-kernel: $(KERNEL)
 # ============================================================================
 
 #
-# Standardowe ISO (BursztynOS.iso) - czysty start bez ladowania 97 MiB do RAM
+# Standardowe i jedyne kanoniczne ISO (BursztynOS.iso)
+# Zawiera dwa wpisy GRUB:
+# 1. Bursztyn OS (domyslny, czysty start bez autostartu testow)
+# 2. Bursztyn OS - testy automatyczne (multiboot2 bursztyn.test=automated)
 #
 $(GRUB_CFG): $(KERNEL)
 	@mkdir -p $(ISO_DIR)/boot/grub
 	@cp $(KERNEL) $(ISO_DIR)/boot/
 	@printf '%s\n' \
-		'set timeout=0' \
+		'set timeout=3' \
 		'set default=0' \
 		'' \
 		'menuentry "Bursztyn OS" {' \
@@ -556,6 +559,14 @@ $(GRUB_CFG): $(KERNEL)
 		'    multiboot2 /boot/system_operacyjny.bin' \
 		'    boot' \
 		'}' \
+		'' \
+		'menuentry "Bursztyn OS - testy automatyczne" {' \
+		'    insmod all_video' \
+		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxpayload=keep' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated' \
+		'    boot' \
+		'}' \
 		> $(GRUB_CFG)
 
 $(ISO): check-kernel $(GRUB_CFG)
@@ -563,11 +574,12 @@ $(ISO): check-kernel $(GRUB_CFG)
 
 iso: $(ISO)
 
-# Obraz developerski zachowujacy automatyczny przebieg test.bur. Zwykly ISO
-# nie zawiera tego parametru i nie uruchamia aplikacji Test podczas startu.
-$(GRUB_TEST_CFG): $(KERNEL)
-	@mkdir -p $(ISO_TEST_DIR)/boot/grub
-	@cp $(KERNEL) $(ISO_TEST_DIR)/boot/
+# Tymczasowy artefakt developerski/CI sluzacy wylacznie do bezobslugowego
+# uruchomienia drugiego wpisu (bursztyn.test=automated) w QEMU bez oczekiwania na menu.
+# Wykorzystuje dokladnie ten sam plik jadra $(KERNEL) co kanoniczny $(ISO).
+$(CI_TEST_ISO): check-kernel $(GRUB_CFG)
+	@mkdir -p $(CI_TEST_DIR)/boot/grub
+	@cp $(KERNEL) $(CI_TEST_DIR)/boot/
 	@printf '%s\n' \
 		'set timeout=0' \
 		'set default=0' \
@@ -579,12 +591,9 @@ $(GRUB_TEST_CFG): $(KERNEL)
 		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated' \
 		'    boot' \
 		'}' \
-		> $(GRUB_TEST_CFG)
-
-$(ISO_TEST): check-kernel $(GRUB_TEST_CFG)
-	$(GRUB_MKRESCUE) -o $@ $(ISO_TEST_DIR) --xorriso=$(XORRISO)
-
-iso-test: $(ISO_TEST)
+		> $(CI_TEST_DIR)/boot/grub/grub.cfg
+	@$(GRUB_MKRESCUE) -o $@ $(CI_TEST_DIR) --xorriso=$(XORRISO) >/dev/null 2>&1
+	@rm -rf $(CI_TEST_DIR)
 
 #
 # Developerskie ISO 8K (BursztynOS_8k.iso) - dolacza modul Multiboot2 test8k.bmp
@@ -667,10 +676,10 @@ run8k: iso8k prepare-disk
 		$(QEMU_COMMON_ARGS) \
 		-cdrom $(ISO8K)
 
-run-test: iso-test prepare-disk
+run-test: $(CI_TEST_ISO) prepare-disk
 	$(QEMU) \
 		$(QEMU_COMMON_ARGS) \
-		-cdrom $(ISO_TEST)
+		-cdrom $(CI_TEST_ISO)
 
 runusb: iso prepare-disk
 	$(QEMU) \
@@ -756,10 +765,10 @@ check-tools:
 # ============================================================================
 
 clean:
-	rm -f *.o *.bin *.elf *.iso
+	rm -f *.o *.bin *.elf *.iso .*.iso
 	rm -f biblioteki/mbedtls/library/*.o
 	rm -f $(OVMF_VARS_RUNTIME)
-	rm -rf $(ISO_DIR) $(ISO8K_DIR) $(ISO_TEST_DIR)
+	rm -rf $(ISO_DIR) $(ISO8K_DIR) $(CI_TEST_DIR) isodir_test
 
 #
 # Zachowanie starej nazwy `clear`.
@@ -783,14 +792,13 @@ rm: distclean
 help:
 	@echo "Bursztyn OS - cele Makefile:"
 	@echo "  make all       - zbuduj kernel"
-	@echo "  make iso       - zbuduj standardowe hybrydowe ISO GRUB (bez modulu 8K)"
+	@echo "  make iso       - zbuduj kanoniczne hybrydowe ISO GRUB (BursztynOS.iso)"
 	@echo "  make iso8k     - zbuduj developerskie ISO z modulem 8K BMP (~97 MiB)"
-	@echo "  make iso-test  - zbuduj ISO uruchamiajace test.bur w trybie automatycznym"
 	@echo "  make bios      - zbuduj ISO do startu BIOS"
 	@echo "  make uefi      - zbuduj ISO do startu UEFI"
 	@echo "  make run       - uruchom QEMU w trybie BIOS ze standardowym ISO"
 	@echo "  make run8k     - uruchom QEMU w trybie BIOS z ISO zawierajacym modul 8K"
-	@echo "  make run-test  - uruchom QEMU z automatyczna regresja BWS/BursztynUI"
+	@echo "  make run-test  - uruchom QEMU z automatyczna regresja BWS/BursztynUI (bursztyn.test=automated)"
 	@echo "  make runuefi   - uruchom QEMU z OVMF/UEFI"
 	@echo "  make check-tools - sprawdz wymagane narzedzia"
 	@echo "  make clean     - usun artefakty kompilacji"
