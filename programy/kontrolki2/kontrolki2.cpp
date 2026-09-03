@@ -378,8 +378,9 @@ static void zbuduj_zakladke_data_czas(Panel& p) {
     cal.ustaw_preferowany_rozmiar(Rozmiar(250, 230));
 
     cal.przy_zmianie_daty([](Kalendarz*, DataKalendarza d, void*) {
-        if (g_k2.pole_daty) g_k2.pole_daty->ustaw_date(d);
-        aktualizuj_status("Kalendarz: Zmieniono wybraną datę");
+        // Odbicie wartosci do powiazanego pola nie jest drugim zdarzeniem
+        // uzytkownika i nie moze ponownie uruchamiac lancucha callbackow.
+        if (g_k2.pole_daty) g_k2.pole_daty->ustaw_date(d, false);
     });
 
     // Prawa strona: PoleDaty i PoleCzasu
@@ -395,8 +396,7 @@ static void zbuduj_zakladke_data_czas(Panel& p) {
     pdate.ustaw_preferowany_rozmiar(Rozmiar(180, 32));
 
     pdate.przy_zmianie_daty([](PoleDaty*, DataKalendarza d, void*) {
-        if (g_k2.kalendarz) g_k2.kalendarz->ustaw_wybrana_data(d);
-        aktualizuj_status("PoleDaty: Zmieniono datę");
+        if (g_k2.kalendarz) g_k2.kalendarz->ustaw_wybrana_data(d, false);
     });
 
     Etykieta& lbl_time = p_fields.dodaj<Etykieta>("Pole Czasu (HH:MM:SS):");
@@ -407,9 +407,8 @@ static void zbuduj_zakladke_data_czas(Panel& p) {
     g_k2.pole_czasu = &ptime;
     ptime.ustaw_preferowany_rozmiar(Rozmiar(180, 32));
 
-    ptime.przy_zmianie_czasu([](PoleCzasu*, CzasDnia, void*) {
-        aktualizuj_status("PoleCzasu: Zaktualizowano godzinę");
-    });
+    // PoleCzasu pokazuje wartosc bezposrednio. Brak odleglego callbacku
+    // statusu utrzymuje spinner jako lokalna operacje dirty-redraw.
 }
 
 // =============================================================================

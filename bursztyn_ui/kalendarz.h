@@ -53,6 +53,7 @@ public:
         wybrana_data_ = data_poczatkowa;
         widok_rok_ = data_poczatkowa.rok;
         widok_miesiac_ = data_poczatkowa.miesiac;
+        aktualizuj_model_miesiaca();
         styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
         styl_.normalny.tlo = Kolory::WejscieTlo;
         styl_.normalny.ramka = Kolory::RamkaDomyslna;
@@ -68,6 +69,9 @@ public:
 
     DataKalendarza wybrana_data() const { return wybrana_data_; }
     int najechana_komorka() const { return najechana_komorka_; }
+    uint64_t liczba_przeliczen_miesiaca() const {
+        return liczba_przeliczen_miesiaca_;
+    }
     uint32_t kolor_nieaktywnego_dnia() const {
         return Kolory::TekstWyciszony;
     }
@@ -83,7 +87,7 @@ public:
                                          : Prostokat();
     }
 
-    void ustaw_wybrana_data(DataKalendarza d) {
+    void ustaw_wybrana_data(DataKalendarza d, bool powiadom = true) {
         if (!d.czy_poprawna() || d == wybrana_data_) return;
         const int stary_rok = widok_rok_;
         const int stary_miesiac = widok_miesiac_;
@@ -95,10 +99,11 @@ public:
             uniewaznij_komorke(stara_komorka);
             uniewaznij_komorke(komorka_dnia(d.dzien));
         } else {
+            aktualizuj_model_miesiaca();
             najechana_komorka_ = -1;
             uniewaznij();
         }
-        if (cb_zmiana_daty_) {
+        if (powiadom && cb_zmiana_daty_) {
             cb_zmiana_daty_(this, wybrana_data_, dane_zmiany_daty_);
         }
     }
@@ -114,6 +119,7 @@ public:
             widok_miesiac_ = 12;
             --widok_rok_;
         }
+        aktualizuj_model_miesiaca();
         uniewaznij();
     }
 
@@ -123,18 +129,21 @@ public:
             widok_miesiac_ = 1;
             ++widok_rok_;
         }
+        aktualizuj_model_miesiaca();
         uniewaznij();
     }
 
     void poprzedni_rok() {
         if (widok_rok_ <= 1900) return;
         --widok_rok_;
+        aktualizuj_model_miesiaca();
         uniewaznij();
     }
 
     void nastepny_rok() {
         if (widok_rok_ >= 2100) return;
         ++widok_rok_;
+        aktualizuj_model_miesiaca();
         uniewaznij();
     }
 
@@ -198,12 +207,9 @@ public:
                             Kolory::RamkaDomyslna);
 
         // 3. Siatka dni
-        int pierwszy_dow = DataKalendarza::dzien_tygodnia(widok_rok_, widok_miesiac_, 1);
-        int ile_dni = DataKalendarza::dni_w_miesiacu(widok_rok_, widok_miesiac_);
-
-        int prev_m = widok_miesiac_ == 1 ? 12 : widok_miesiac_ - 1;
-        int prev_y = widok_miesiac_ == 1 ? widok_rok_ - 1 : widok_rok_;
-        int prev_dni = DataKalendarza::dni_w_miesiacu(prev_y, prev_m);
+        const int pierwszy_dow = pierwszy_dow_;
+        const int ile_dni = dni_w_widoku_;
+        const int prev_dni = dni_w_poprzednim_miesiacu_;
 
         Punkt off = ctx.pobierz_przesuniecie();
         Prostokat clip_swiat = ctx.pobierz_przyciecie();
@@ -368,6 +374,10 @@ private:
     int najechana_komorka_{-1};
     int najechany_przycisk_{-1};
     int wcisniety_przycisk_{-1};
+    int pierwszy_dow_{0};
+    int dni_w_widoku_{30};
+    int dni_w_poprzednim_miesiacu_{31};
+    uint64_t liczba_przeliczen_miesiaca_{0};
 
     Prostokat btn_prev_year_{};
     Prostokat btn_prev_month_{};
@@ -454,24 +464,18 @@ private:
         int row = (ly - g.grid_y) / g.cell_h;
         int cell_idx = row * 7 + col;
         if (!tylko_biezacy_miesiac) return cell_idx;
-        int pierwszy_dow = DataKalendarza::dzien_tygodnia(widok_rok_, widok_miesiac_, 1);
-        int ile_dni = DataKalendarza::dni_w_miesiacu(widok_rok_, widok_miesiac_);
-        int day_num = cell_idx - pierwszy_dow + 1;
-        return day_num >= 1 && day_num <= ile_dni ? cell_idx : -1;
+        int day_num = cell_idx - pierwszy_dow_ + 1;
+        return day_num >= 1 && day_num <= dni_w_widoku_ ? cell_idx : -1;
     }
 
     int dzien_pod_punktem(int lx, int ly) const {
         int komorka = komorka_pod_punktem(lx, ly, true);
-        return komorka < 0 ? -1 :
-            komorka - DataKalendarza::dzien_tygodnia(
-                widok_rok_, widok_miesiac_, 1) + 1;
+        return komorka < 0 ? -1 : komorka - pierwszy_dow_ + 1;
     }
 
     int komorka_dnia(int dzien) const {
-        if (dzien < 1 || dzien > DataKalendarza::dni_w_miesiacu(
-                widok_rok_, widok_miesiac_)) return -1;
-        return DataKalendarza::dzien_tygodnia(widok_rok_, widok_miesiac_, 1) +
-               dzien - 1;
+        if (dzien < 1 || dzien > dni_w_widoku_) return -1;
+        return pierwszy_dow_ + dzien - 1;
     }
 
     bool sel_dla_komorki(int komorka) const {
@@ -526,6 +530,20 @@ private:
         wcisniety_przycisk_ = nowy;
         uniewaznij_przycisk(stary);
         uniewaznij_przycisk(nowy);
+    }
+
+    void aktualizuj_model_miesiaca() {
+        pierwszy_dow_ = DataKalendarza::dzien_tygodnia(
+            widok_rok_, widok_miesiac_, 1);
+        dni_w_widoku_ = DataKalendarza::dni_w_miesiacu(
+            widok_rok_, widok_miesiac_);
+        const int poprzedni_miesiac = widok_miesiac_ == 1
+                                    ? 12 : widok_miesiac_ - 1;
+        const int poprzedni_rok = widok_miesiac_ == 1
+                                ? widok_rok_ - 1 : widok_rok_;
+        dni_w_poprzednim_miesiacu_ = DataKalendarza::dni_w_miesiacu(
+            poprzedni_rok, poprzedni_miesiac);
+        ++liczba_przeliczen_miesiaca_;
     }
 
     static void formatuj_liczbe(char* buf, size_t cap, int n) {

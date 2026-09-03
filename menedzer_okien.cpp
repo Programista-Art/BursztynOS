@@ -35,12 +35,12 @@ constexpr int MENU_X = 10;
 constexpr int MENU_W = 260;
 constexpr int MENU_GORNY_MARGINES = 10;
 constexpr int MENU_ELEMENT_WYS = 25;
-constexpr int MENU_ELEMENTOW = 11;
+constexpr int MENU_ELEMENTOW = 12;
 constexpr int MENU_WYS =
     (MENU_GORNY_MARGINES * 2) + (MENU_ELEMENTOW * MENU_ELEMENT_WYS);
 
 // Pozycja "Gry ->" w glownym Menu Start.
-constexpr int MENU_GRY_INDEX = 8;
+constexpr int MENU_GRY_INDEX = 9;
 constexpr int MENU_GRY_W = 180;
 constexpr int MENU_GRY_ELEMENTOW = 1;
 constexpr int MENU_GRY_WYS =
@@ -74,6 +74,8 @@ const char* const SCIEZKA_NOTATNIK = "/programy/notatnik.cebula/notatnik.bur";
 const char* const SCIEZKA_KALKULATOR = "/programy/kalkulator.cebula/kalkulator.bur";
 const char* const SCIEZKA_HUSSAR = "/programy/przegladarka.cebula/przegladarka.bur";
 const char* const SCIEZKA_TEST = "/programy/test.cebula/test.bur";
+const char* const SCIEZKA_DEMO_UI =
+    "/programy/demo_ui.cebula/demo_ui.bur";
 const char* const SCIEZKA_KONTROLKI2 =
     "/programy/kontrolki2.cebula/kontrolki2.bur";
 const char* const SCIEZKA_SNAKE = "/gry/snake.cebula/snake.bur";
@@ -84,22 +86,47 @@ const char* const SCIEZKA_PULPIT = "/uzytkownicy/Pulpit";
 // Kanoniczna tabela uruchamiania ikon wbudowanych. Obsluga klikniecia nie
 // zna poszczegolnych aplikacji; kazda ikona korzysta z tego samego mechanizmu
 // uruchom-lub-aktywuj i zachowuje systemowa polityke jednej instancji.
+enum class TypIkonyAplikacji : uint8_t {
+    Notatnik,
+    Kalkulator,
+    Husarz,
+    Test,
+    Snake,
+    Eksplorator,
+    Obrazy,
+    DemoUI,
+    Kontrolki2
+};
+
 struct AplikacjaPulpitu {
     int x;
     int y;
     const char* sciezka;
     const char* prefiks_tytulu;
+    const char* etykieta_1;
+    const char* etykieta_2;
+    TypIkonyAplikacji typ_ikony;
 };
 
 const AplikacjaPulpitu APLIKACJE_PULPITU[] = {
-    {50,  50, SCIEZKA_NOTATNIK, "Notatnik"},
-    {130, 50, SCIEZKA_KALKULATOR, "Kalkulator"},
-    {210, 50, SCIEZKA_HUSSAR, "Husarz"},
-    {290, 50, SCIEZKA_TEST, "Test"},
-    {370, 50, SCIEZKA_SNAKE, "Snake"},
-    {460, 50, SCIEZKA_EKSPLORATOR, "Eksplorator Plików"},
-    {550, 50, SCIEZKA_PRZEGLADARKA_OBRAZOW, "Przeglądarka Obrazów"},
-    {640, 50, SCIEZKA_KONTROLKI2, "BursztynUI Kontrolki 2"}
+    {50,  50, SCIEZKA_NOTATNIK, "Notatnik", "Notatnik", nullptr,
+     TypIkonyAplikacji::Notatnik},
+    {130, 50, SCIEZKA_KALKULATOR, "Kalkulator", "Kalkulator", nullptr,
+     TypIkonyAplikacji::Kalkulator},
+    {210, 50, SCIEZKA_HUSSAR, "Husarz", "Husarz", nullptr,
+     TypIkonyAplikacji::Husarz},
+    {290, 50, SCIEZKA_TEST, "Test", "Test", nullptr,
+     TypIkonyAplikacji::Test},
+    {370, 50, SCIEZKA_SNAKE, "Snake", "Snake", nullptr,
+     TypIkonyAplikacji::Snake},
+    {460, 50, SCIEZKA_EKSPLORATOR, "Eksplorator Plików", "Eksplorator", nullptr,
+     TypIkonyAplikacji::Eksplorator},
+    {550, 50, SCIEZKA_PRZEGLADARKA_OBRAZOW, "Przeglądarka Obrazów",
+     "Przeglądarka", "Obrazów", TypIkonyAplikacji::Obrazy},
+    {640, 50, SCIEZKA_DEMO_UI, "BursztynUI -", "Demo", "BursztynUI",
+     TypIkonyAplikacji::DemoUI},
+    {720, 50, SCIEZKA_KONTROLKI2, "BursztynUI Kontrolki 2", "Kontrolki 2", nullptr,
+     TypIkonyAplikacji::Kontrolki2}
 };
 
 constexpr size_t LICZBA_APLIKACJI_PULPITU =
@@ -1203,6 +1230,87 @@ void RysujMenuGry() {
     }
 }
 
+void rysuj_ikone_aplikacji(const AplikacjaPulpitu& aplikacja) {
+    const int x = aplikacja.x;
+    const int y = aplikacja.y;
+    switch (aplikacja.typ_ikony) {
+        case TypIkonyAplikacji::Notatnik:
+            gui_rysuj_prostokat(x, y, IKONA_W, IKONA_H, 0x00FFBF00);
+            gui_rysuj_prostokat(x + 2, y + 2, 44, 44, 0x00FFFFFF);
+            gui_rysuj_prostokat(x + 6, y + 8, 32, 2, 0x00000000);
+            gui_rysuj_prostokat(x + 6, y + 14, 32, 2, 0x00000000);
+            gui_rysuj_prostokat(x + 6, y + 20, 20, 2, 0x00000000);
+            gui_rysuj_prostokat(x + 6, y + 26, 32, 2, 0x00000000);
+            gui_rysuj_prostokat(x + 6, y + 32, 24, 2, 0x00000000);
+            break;
+        case TypIkonyAplikacji::Kalkulator:
+            gui_rysuj_prostokat(x, y, IKONA_W, IKONA_H, 0x008A5A00);
+            gui_rysuj_prostokat(x + 2, y + 2, 44, 44, 0x001A0B00);
+            rysuj_tekst_wysrodkowany(x, y + 10, IKONA_W, 16,
+                                     1, 0x00FFBF00, "+ -");
+            rysuj_tekst_wysrodkowany(x, y + 30, IKONA_W, 16,
+                                     1, 0x00FFBF00, "* =");
+            break;
+        case TypIkonyAplikacji::Husarz:
+            gui_rysuj_prostokat(x, y, IKONA_W, IKONA_H, 0x000078D7);
+            gui_rysuj_prostokat(x + 2, y + 2, 44, 44, 0x000055AA);
+            rysuj_tekst_wysrodkowany(x, y + 15, IKONA_W, 16,
+                                     1, 0x00FFFFFF, "WWW");
+            break;
+        case TypIkonyAplikacji::Test:
+            gui_rysuj_prostokat(x, y, IKONA_W, IKONA_H, 0x00CC33CC);
+            gui_rysuj_prostokat(x + 2, y + 2, 44, 44, 0x00881188);
+            rysuj_tekst_wysrodkowany(x, y + 15, IKONA_W, 16,
+                                     1, 0x00FFFFFF, "Test");
+            break;
+        case TypIkonyAplikacji::Snake:
+            rysuj_ikone_paleta(x, y, IKONA_SNAKE_PALETA,
+                               IKONA_SNAKE_KOLOROW,
+                               IKONA_SNAKE_FRAGMENTY,
+                               IKONA_SNAKE_FRAGMENTOW);
+            break;
+        case TypIkonyAplikacji::Eksplorator:
+            gui_rysuj_prostokat(x, y, IKONA_W, IKONA_H, 0x00FFBF00);
+            gui_rysuj_prostokat(x + 2, y + 8, 44, 38, 0x00D59600);
+            gui_rysuj_prostokat(x + 6, y + 2, 20, 10, 0x00FFBF00);
+            break;
+        case TypIkonyAplikacji::Obrazy:
+            gui_rysuj_prostokat(x, y, IKONA_W, IKONA_H, 0x00301500);
+            gui_rysuj_prostokat(x + 2, y + 2, 44, 44, 0x002080C0);
+            gui_rysuj_prostokat(x + 8, y + 24, 18, 12, 0x00808080);
+            gui_rysuj_prostokat(x + 22, y + 28, 14, 8, 0x00606060);
+            gui_rysuj_prostokat(x + 30, y + 8, 8, 8, 0x00FFD700);
+            break;
+        case TypIkonyAplikacji::DemoUI:
+            // Jedna duza karta + trzy kontrolki: odrebny znak DemoUI.
+            gui_rysuj_prostokat(x, y, IKONA_W, IKONA_H, 0x00402010);
+            gui_rysuj_prostokat(x + 3, y + 3, 42, 42, 0x00F2E2C4);
+            gui_rysuj_prostokat(x + 7, y + 8, 34, 5, 0x00E58A00);
+            gui_rysuj_prostokat(x + 7, y + 18, 22, 7, 0x008A5A00);
+            gui_rysuj_prostokat(x + 7, y + 30, 10, 10, 0x00FFBF00);
+            gui_rysuj_prostokat(x + 22, y + 30, 19, 10, 0x00301500);
+            break;
+        case TypIkonyAplikacji::Kontrolki2:
+            // Dwie kolumny kontrolek: zachowany, rozpoznawalny znak K2.
+            gui_rysuj_prostokat(x, y, IKONA_W, IKONA_H, 0x00301500);
+            gui_rysuj_prostokat(x + 2, y + 2, 44, 44, 0x00E58A00);
+            gui_rysuj_prostokat(x + 6, y + 6, 36, 12, 0x00FFBF00);
+            gui_rysuj_prostokat(x + 6, y + 22, 16, 18, 0x00301500);
+            gui_rysuj_prostokat(x + 26, y + 22, 16, 18, 0x00301500);
+            break;
+    }
+
+    const uint32_t kolor_etykiety =
+        aplikacja.typ_ikony == TypIkonyAplikacji::Snake
+            ? 0x0095E600 : 0x00FFFFFF;
+    rysuj_tekst_wysrodkowany(x, y + 54, IKONA_W, 16, 1,
+                             kolor_etykiety, aplikacja.etykieta_1);
+    if (aplikacja.etykieta_2) {
+        rysuj_tekst_wysrodkowany(x, y + 70, IKONA_W, 16, 1,
+                                 kolor_etykiety, aplikacja.etykieta_2);
+    }
+}
+
 void RysujPulpit(bool wymus_pelne_odswiezenie) {
     if (wymus_pelne_odswiezenie) {
         // Dla procesu warstwowego BWS 19 zeruje prywatna warstwe.
@@ -1211,94 +1319,9 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
 
     RysujTaskbar();
 
-    // Ikona Notatnika.
-    gui_rysuj_prostokat(50, 50, IKONA_W, IKONA_H, 0x00FFBF00);
-    gui_rysuj_prostokat(52, 52, 44, 44, 0x00FFFFFF);
-    gui_rysuj_prostokat(56, 58, 32, 2, 0x00000000);
-    gui_rysuj_prostokat(56, 64, 32, 2, 0x00000000);
-    gui_rysuj_prostokat(56, 70, 20, 2, 0x00000000);
-    gui_rysuj_prostokat(56, 76, 32, 2, 0x00000000);
-    gui_rysuj_prostokat(56, 82, 24, 2, 0x00000000);
-    rysuj_tekst_wysrodkowany(50, 104, IKONA_W, 16,
-                             1, 0x00FFFFFF, "Notatnik");
-
-    // Ikona Kalkulatora.
-    gui_rysuj_prostokat(130, 50, IKONA_W, IKONA_H, 0x008A5A00);
-    gui_rysuj_prostokat(132, 52, 44, 44, 0x001A0B00);
-    rysuj_tekst_wysrodkowany(130, 60, IKONA_W, 16,
-                             1, 0x00FFBF00, "+ -");
-    rysuj_tekst_wysrodkowany(130, 80, IKONA_W, 16,
-                             1, 0x00FFBF00, "* =");
-    rysuj_tekst_wysrodkowany(130, 104, IKONA_W, 16,
-                             1, 0x00FFFFFF, "Kalkulator");
-
-    // Ikona przegladarki Hussar.
-    gui_rysuj_prostokat(210, 50, IKONA_W, IKONA_H, 0x000078D7);
-    gui_rysuj_prostokat(212, 52, 44, 44, 0x000055AA);
-    rysuj_tekst_wysrodkowany(210, 65, IKONA_W, 16,
-                             1, 0x00FFFFFF, "WWW");
-    rysuj_tekst_wysrodkowany(210, 104, IKONA_W, 16,
-                             1, 0x00FFFFFF, "Husarz");
-    //Test apka
-    gui_rysuj_prostokat(290, 50, IKONA_W, IKONA_H, 0x00CC33CC);
-    gui_rysuj_prostokat(292, 52, 44, 44, 0x00881188);
-    rysuj_tekst_wysrodkowany(290, 65, IKONA_W, 16,
-                             1, 0x00FFFFFF, "Test");
-    rysuj_tekst_wysrodkowany(290, 104, IKONA_W, 16,
-                             1, 0x00FFFFFF, "Test");
-    // Ikona Snake — lokalny format paleta + fragmenty w .data.
-    // rysuj_ikone_paleta(
-    //     370,
-    //     50,
-    //     IKONA_SNAKE_PALETA,
-    //     IKONA_SNAKE_KOLOROW,
-    //     IKONA_SNAKE_FRAGMENTY,
-    //     IKONA_SNAKE_FRAGMENTOW);
-
-    // rysuj_tekst_wysrodkowany(
-    //     370,
-    //     104,
-    //     IKONA_W,
-    //     16,
-    //     1,
-    //     0x00FFFFFF,
-    //     "Snake");
-
-// Ikona Snake — lokalny format paleta + fragmenty w .data.
-rysuj_ikone_paleta(
-    370,
-    50,
-    IKONA_SNAKE_PALETA,
-    IKONA_SNAKE_KOLOROW,
-    IKONA_SNAKE_FRAGMENTY,
-    IKONA_SNAKE_FRAGMENTOW);
-
-rysuj_tekst_wysrodkowany(370, 104, IKONA_W, 16, 1, 0x0095E600, "Snake");
-
-
-    // Ikona Eksploratora Plikow.
-    gui_rysuj_prostokat(460, 50, IKONA_W, IKONA_H, 0x00FFBF00);
-    gui_rysuj_prostokat(462, 58, 44, 38, 0x00D59600);
-    gui_rysuj_prostokat(466, 52, 20, 10, 0x00FFBF00);
-    rysuj_tekst_wysrodkowany(460, 104, IKONA_W, 16,
-                             1, 0x00FFFFFF, "Eksplorator");
-
-    // Ikona Przeglądarki Obrazów.
-    gui_rysuj_prostokat(550, 50, IKONA_W, IKONA_H, 0x00301500);
-    gui_rysuj_prostokat(552, 52, 44, 44, 0x002080C0);
-    gui_rysuj_prostokat(558, 74, 18, 12, 0x00808080);
-    gui_rysuj_prostokat(572, 78, 14, 8, 0x00606060);
-    gui_rysuj_prostokat(580, 58, 8, 8, 0x00FFD700);
-    rysuj_tekst_wysrodkowany(550, 104, IKONA_W, 16, 1, 0x00FFFFFF, "Przeglądarka");
-    rysuj_tekst_wysrodkowany(550, 120, IKONA_W, 16, 1, 0x00FFFFFF, "Obrazów");
-
-    // Ikona Kontrolki 2.
-    gui_rysuj_prostokat(640, 50, IKONA_W, IKONA_H, 0x00301500);
-    gui_rysuj_prostokat(642, 52, 44, 44, 0x00E58A00);
-    gui_rysuj_prostokat(646, 56, 36, 12, 0x00FFBF00);
-    gui_rysuj_prostokat(646, 72, 16, 18, 0x00301500);
-    gui_rysuj_prostokat(666, 72, 16, 18, 0x00301500);
-    rysuj_tekst_wysrodkowany(640, 104, IKONA_W, 16, 1, 0x00FFFFFF, "Kontrolki 2");
+    for (size_t i = 0; i < LICZBA_APLIKACJI_PULPITU; ++i) {
+        rysuj_ikone_aplikacji(APLIKACJE_PULPITU[i]);
+    }
 
     RysujWpisyPulpitu();
 
@@ -1321,6 +1344,7 @@ rysuj_tekst_wysrodkowany(370, 104, IKONA_W, 16, 1, 0x0095E600, "Snake");
             "> Kalkulator",
             "> Przegladarka Husarz",
             "> Przeglądarka Obrazów",
+            "> Demo BursztynUI",
             "> Kontrolki 2",
             "> Test",
             "> Gry ->",
@@ -1569,10 +1593,14 @@ void obsluz_element_menu(int item_index) {
                                 "Przeglądarka Obrazów");
             break;
         case 6:
+            uruchom_lub_aktywuj(SCIEZKA_DEMO_UI,
+                                "BursztynUI -");
+            break;
+        case 7:
             uruchom_lub_aktywuj(SCIEZKA_KONTROLKI2,
                                 "BursztynUI Kontrolki 2");
             break;
-        case 7:
+        case 8:
             uruchom_lub_aktywuj(SCIEZKA_TEST, "Test");
             break;
         case MENU_GRY_INDEX:
@@ -1580,10 +1608,10 @@ void obsluz_element_menu(int item_index) {
             aktualizuj_overlay_menu();
             RysujPulpit(true);
             break;
-        case 9:
+        case 10:
             wykonaj_restart();
             break;
-        case 10:
+        case 11:
             wykonaj_zamkniecie();
             break;
         default:

@@ -83,6 +83,13 @@ public:
 
     // Ten sam prostokat jest zwracany testom i uzywany w rysowaniu/hit-test.
     Prostokat prostokat_uchwytu() const { return oblicz_geometrie().uchwyt; }
+    bool czy_przeciagany() const { return czy_przeciagany_; }
+    bool czy_uchwyt_wcisniety() const {
+        return czesc_wcisnieta_ == Czesc::Uchwyt;
+    }
+    bool czy_uchwyt_najechany() const {
+        return czesc_najechana_ == Czesc::Uchwyt;
+    }
 
     Rozmiar oblicz_naturalny_rozmiar() const override {
         int skala = skala_dpi_ < 1 ? 1 : skala_dpi_;
@@ -146,13 +153,23 @@ public:
         Punkt p(e.x - obszar_ekranu_.x, e.y - obszar_ekranu_.y);
         if (czy_przeciagany_) {
             ustaw_z_piksela(wspolrzedna_osi(p) - przesuniecie_przeciagania_, g);
+            // Capture utrzymuje jedna tozsamosc interakcji az do MouseUp.
+            // Uchwyt przesuwa sie pod nieruchomym kursorem, wiec zwykly
+            // hit-test po zmianie modelu potrafil na przemian wskazywac tor
+            // i uchwyt. Powodowalo to dodatkowe dirty recty oraz migotanie.
+            ustaw_czesc_najechana(Czesc::Uchwyt, oblicz_geometrie());
             e.obsluzone = true;
+            Kontrolka::obsluz_ruch_myszy(e);
+            return;
         }
         ustaw_czesc_najechana(czesc_w_punkcie(p, g), g);
         Kontrolka::obsluz_ruch_myszy(e);
     }
 
     void obsluz_opuszczenie_myszy() override {
+        // Fizyczne opuszczenie prostokata nie konczy drag po capture.
+        // Stan pressed/hover zwalnia dopiero MouseUp albo utrata fokusu.
+        if (czy_przeciagany_) return;
         Geometria g = oblicz_geometrie();
         ustaw_czesc_najechana(Czesc::Brak, g);
         Kontrolka::obsluz_opuszczenie_myszy();
@@ -164,6 +181,10 @@ public:
         Punkt p(e.x - obszar_ekranu_.x, e.y - obszar_ekranu_.y);
         Czesc trafiona = czesc_w_punkcie(p, g);
         if (trafiona == Czesc::Brak) return;
+        // MouseDown moze byc pierwszym zdarzeniem nad kontrolka (bez
+        // poprzedzajacego MouseMove). Ustalamy tozsamosc raz przed capture,
+        // aby pierwszy ruch nie tworzyl osobnego repaintu hover.
+        ustaw_czesc_najechana(trafiona, g);
         ustaw_czesc_wcisnieta(trafiona, g);
         czy_interakcja_myszy_ = true;
         if (trafiona == Czesc::Uchwyt) {

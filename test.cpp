@@ -965,6 +965,150 @@ static void wykonaj_testy_kontrolki2() {
         bws_log_u64("[WIDOKIKON POMIAR] paint_allocations=",
                     wi_alok_po - wi_alok_przed);
 
+        // Rzeczywista sciezka Nawigacja: WidokIkon posiada ten pionowy
+        // PasekPrzewijania. Mierzymy 1000 ruchow pod capture.
+        Okno* ok_nav = new Okno("WidokIkon drag", 340, 260);
+        bws_sprawdz_msg(ok_nav != nullptr, "WidokIkon drag okno alokacja");
+        Panel* nav_root = static_cast<Panel*>(ok_nav->kontrolka_glowna());
+        nav_root->ustaw_wypelnienie(Marginesy(0));
+        WidokIkon& nav_widok = nav_root->dodaj<WidokIkon>();
+        nav_widok.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+        nav_widok.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+        nav_widok.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+        nav_widok.rozpocznij_aktualizacje();
+        for (int i = 0; i < 1000; ++i)
+            nav_widok.dodaj_element("Plik", TypIkonyWidoku::Plik,
+                                    static_cast<uint64_t>(i));
+        nav_widok.zakoncz_aktualizacje();
+        ok_nav->przelicz_uklad();
+        KontekstRysowania ctx_nav;
+        ok_nav->rysuj(ctx_nav, true);
+
+        struct PomiarDragWidoku {
+            uint64_t content_paints{0};
+            uint64_t scrollbar_paints{0};
+        } pomiar_drag_widoku;
+        nav_widok.przy_wlasnym_rysowaniu([](Kontrolka*, KontekstRysowania&,
+                                             void* dane) {
+            ++static_cast<PomiarDragWidoku*>(dane)->content_paints;
+        }, &pomiar_drag_widoku);
+        PasekPrzewijania& nav_sb = nav_widok.pasek_pionowy();
+        nav_sb.przy_wlasnym_rysowaniu([](Kontrolka*, KontekstRysowania&,
+                                          void* dane) {
+            ++static_cast<PomiarDragWidoku*>(dane)->scrollbar_paints;
+        }, &pomiar_drag_widoku);
+        nav_sb.ustaw_wartosc(0);
+        ok_nav->rysuj(ctx_nav, false);
+        pomiar_drag_widoku = {};
+
+        Prostokat nav_thumb = nav_sb.prostokat_uchwytu();
+        bws_zdarzenie nav_down{};
+        nav_down.typ = BWS_ZDARZENIE_MYSZ_DOWN;
+        nav_down.przyciski = 1;
+        nav_down.x = ok_nav->x() + nav_sb.obszar_ekranu().x +
+                     nav_thumb.x + nav_thumb.szerokosc / 2;
+        nav_down.y = ok_nav->y() + nav_sb.obszar_ekranu().y +
+                     nav_thumb.y + nav_thumb.wysokosc / 2;
+        ok_nav->obsluz_zdarzenie(nav_down);
+        bws_sprawdz_msg(ok_nav->przechwycenie_myszy() == &nav_sb &&
+                        nav_sb.czy_przeciagany() &&
+                        nav_sb.czy_uchwyt_wcisniety(),
+                        "WidokIkon drag rozpoczyna stabilny capture/pressed");
+        ok_nav->rysuj(ctx_nav, false);
+        pomiar_drag_widoku = {};
+
+        const uint64_t nav_layout_przed = ok_nav->liczba_przejsc_ukladu();
+        const uint64_t nav_alloc_przed = gui_liczba_alokacji_sterty();
+        uint64_t nav_dirty_bounding_px = 0;
+        uint64_t nav_dirty_viewport_px = 0;
+        uint64_t nav_dirty_scrollbar_px = 0;
+        uint64_t nav_zmienione_ruchy = 0;
+        const int nav_droga = nav_sb.obszar().wysokosc + 80;
+        for (int i = 0; i < 1000; ++i) {
+            const int64_t stara_wartosc = nav_sb.wartosc();
+            const Prostokat stary_uchwyt = nav_sb.prostokat_uchwytu();
+            bws_zdarzenie nav_move = nav_down;
+            nav_move.typ = BWS_ZDARZENIE_MYSZ_RUCH;
+            nav_move.x += (i >= 500) ? 80 : 0;
+            nav_move.y = nav_down.y + (i * nav_droga) / 999;
+            ok_nav->obsluz_zdarzenie(nav_move);
+            const Prostokat nowy_uchwyt = nav_sb.prostokat_uchwytu();
+            const bool wartosc_zmieniona =
+                nav_sb.wartosc() != stara_wartosc;
+
+            bws_sprawdz_msg(nav_sb.czy_przeciagany() &&
+                            nav_sb.czy_uchwyt_wcisniety() &&
+                            nav_sb.czy_uchwyt_najechany(),
+                            "WidokIkon drag bez oscylacji pressed/hover");
+            if (wartosc_zmieniona) {
+                ++nav_zmienione_ruchy;
+                Prostokat sb_dirty = nav_sb.pobierz_brudny_obszar();
+                Prostokat expected = stary_uchwyt.suma(nowy_uchwyt)
+                    .powiekszony(Marginesy(2));
+                bws_sprawdz_msg(sb_dirty.szerokosc <= expected.szerokosc &&
+                                sb_dirty.wysokosc <= expected.wysokosc,
+                                "WidokIkon drag pasek dirty = old/new thumb");
+                nav_dirty_scrollbar_px +=
+                    static_cast<uint64_t>(sb_dirty.szerokosc) *
+                    static_cast<uint64_t>(sb_dirty.wysokosc);
+                Prostokat vp = nav_widok.prostokat_widoku();
+                nav_dirty_viewport_px +=
+                    static_cast<uint64_t>(vp.szerokosc) * vp.wysokosc;
+            }
+
+            if (ok_nav->czy_wymaga_odrysowania()) {
+                Prostokat dirty = nav_root->pobierz_brudny_obszar();
+                nav_dirty_bounding_px +=
+                    static_cast<uint64_t>(dirty.szerokosc) * dirty.wysokosc;
+                ok_nav->rysuj(ctx_nav, false);
+                if (wartosc_zmieniona) {
+                    bws_sprawdz_msg(
+                        nav_widok.liczba_ostatnio_narysowanych_elementow() > 0,
+                        "WidokIkon drag nie prezentuje pustego stanu");
+                }
+            }
+        }
+        const uint64_t nav_alloc_po = gui_liczba_alokacji_sterty();
+        const uint64_t nav_layout_po = ok_nav->liczba_przejsc_ukladu();
+        bws_zdarzenie nav_up = nav_down;
+        nav_up.typ = BWS_ZDARZENIE_MYSZ_UP;
+        nav_up.przyciski = 0;
+        nav_up.x += 80;
+        nav_up.y += nav_droga;
+        ok_nav->obsluz_zdarzenie(nav_up);
+        bws_sprawdz_msg(ok_nav->przechwycenie_myszy() == nullptr &&
+                        !nav_sb.czy_przeciagany() &&
+                        !nav_sb.czy_uchwyt_wcisniety(),
+                        "WidokIkon drag MouseUp zwalnia capture/pressed");
+        bws_sprawdz_msg(nav_sb.wartosc() == nav_sb.maksimum(),
+                        "WidokIkon drag przewija zawartosc do konca");
+        bws_sprawdz_msg(nav_layout_po == nav_layout_przed,
+                        "WidokIkon 1000 drag MouseMove: 0 layout");
+        bws_sprawdz_msg(nav_alloc_po == nav_alloc_przed,
+                        "WidokIkon 1000 drag MouseMove: 0 alokacji");
+        bws_sprawdz_msg(pomiar_drag_widoku.content_paints ==
+                            pomiar_drag_widoku.scrollbar_paints &&
+                        pomiar_drag_widoku.content_paints == nav_zmienione_ruchy,
+                        "WidokIkon jeden paint content/pasek na zmiane modelu");
+        bws_log_u64("[PERF DRAG WIDOKIKON] mouse_events=", 1000);
+        bws_log_u64("[PERF DRAG WIDOKIKON] value_changes=",
+                    nav_zmienione_ruchy);
+        bws_log_u64("[PERF DRAG WIDOKIKON] content_paints=",
+                    pomiar_drag_widoku.content_paints);
+        bws_log_u64("[PERF DRAG WIDOKIKON] scrollbar_paints=",
+                    pomiar_drag_widoku.scrollbar_paints);
+        bws_log_u64("[PERF DRAG WIDOKIKON] layout_passes=",
+                    nav_layout_po - nav_layout_przed);
+        bws_log_u64("[PERF DRAG WIDOKIKON] allocations=",
+                    nav_alloc_po - nav_alloc_przed);
+        bws_log_u64("[PERF DRAG WIDOKIKON] viewport_dirty_pixels=",
+                    nav_dirty_viewport_px);
+        bws_log_u64("[PERF DRAG WIDOKIKON] scrollbar_dirty_pixels=",
+                    nav_dirty_scrollbar_px);
+        bws_log_u64("[PERF DRAG WIDOKIKON] bounding_dirty_pixels=",
+                    nav_dirty_bounding_px);
+        delete ok_nav;
+
         bws_log("[KONTROLKI2 3/8] WidokIkon: OK\n");
     }
 
@@ -1157,6 +1301,88 @@ static void wykonaj_testy_kontrolki2() {
         bws_sprawdz_msg(cal_ui.kolor_nieaktywnego_dnia() == Kolory::TekstWyciszony &&
                         cal_ui.kolor_nieaktywnego_dnia() != Kolory::WejscieTlo,
                         "Kalendarz dni nieaktywne uzywaja czytelnego tekstu motywu");
+
+        Kalendarz* cal_perf = new Kalendarz(DataKalendarza{2026, 9, 2});
+        bws_sprawdz_msg(cal_perf != nullptr,
+                        "Kalendarz rapid click alokacja kontrolki");
+        cal_perf->rozmiesc(Prostokat(0, 0, 230, 200));
+        struct PomiarKalendarza {
+            uint64_t callbacks{0};
+            uint64_t paints{0};
+        } pomiar_cal_perf;
+        cal_perf->przy_zmianie_daty([](Kalendarz*, DataKalendarza, void* dane) {
+            ++static_cast<PomiarKalendarza*>(dane)->callbacks;
+        }, &pomiar_cal_perf);
+        cal_perf->przy_wlasnym_rysowaniu([](Kontrolka*, KontekstRysowania&,
+                                             void* dane) {
+            ++static_cast<PomiarKalendarza*>(dane)->paints;
+        }, &pomiar_cal_perf);
+        const uint64_t cal_model_przed =
+            cal_perf->liczba_przeliczen_miesiaca();
+        const uint64_t cal_perf_alloc_przed = gui_liczba_alokacji_sterty();
+        uint64_t cal_perf_dirty_px = 0;
+        KontekstRysowania ctx_cal_perf;
+        for (int i = 0; i < 1000; ++i) {
+            const int dzien = (i & 1) ? 2 : 3;
+            const int komorka = DataKalendarza::dzien_tygodnia(2026, 9, 1) +
+                                dzien - 1;
+            const Prostokat cell = cal_perf->prostokat_komorki(komorka);
+            ZdarzenieMyszki hover{};
+            hover.typ = TypZdarzenia::RuchMyszy;
+            hover.x = cell.x + cell.szerokosc / 2;
+            hover.y = cell.y + cell.wysokosc / 2;
+            cal_perf->obsluz_ruch_myszy(hover);
+            cal_perf->wyczysc_brudny_obszar();
+
+            ZdarzenieMyszki down = hover;
+            down.typ = TypZdarzenia::WcisniecieMyszy;
+            down.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
+            cal_perf->obsluz_wcisniecie_myszy(down);
+            ZdarzenieMyszki up = down;
+            up.typ = TypZdarzenia::ZwolnienieMyszy;
+            cal_perf->obsluz_zwolnienie_myszy(up);
+            ZdarzenieMyszki leave{};
+            leave.typ = TypZdarzenia::RuchMyszy;
+            leave.x = -100;
+            leave.y = -100;
+            cal_perf->obsluz_ruch_myszy(leave);
+
+            bws_sprawdz_msg(cal_perf->wybrana_data().dzien == dzien &&
+                            cal_perf->najechana_komorka() == -1,
+                            "Kalendarz click+fast-leave zachowuje wybor i czysci hover");
+            Prostokat dirty = cal_perf->pobierz_brudny_obszar();
+            bws_sprawdz_msg(dirty.wysokosc <= cell.wysokosc &&
+                            dirty.szerokosc <= 2 * cell.szerokosc,
+                            "Kalendarz click+fast-leave minimalny dirty");
+            cal_perf_dirty_px += static_cast<uint64_t>(dirty.szerokosc) *
+                                 dirty.wysokosc;
+            ctx_cal_perf.dodaj_przyciecie(dirty);
+            cal_perf->rysuj(ctx_cal_perf, false);
+            ctx_cal_perf.zdejmij_przyciecie();
+            cal_perf->wyczysc_brudny_obszar();
+        }
+        const uint64_t cal_perf_alloc_po = gui_liczba_alokacji_sterty();
+        bws_sprawdz_msg(pomiar_cal_perf.callbacks == 1000 &&
+                        pomiar_cal_perf.paints == 1000,
+                        "Kalendarz 1000 click+leave: callback/paint raz na sekwencje");
+        bws_sprawdz_msg(cal_perf->liczba_przeliczen_miesiaca() ==
+                            cal_model_przed,
+                        "Kalendarz wybor w miesiacu nie przelicza modelu 42 komorek");
+        bws_sprawdz_msg(cal_perf_alloc_po == cal_perf_alloc_przed,
+                        "Kalendarz 1000 click+leave: 0 alokacji");
+        bws_log_u64("[PERF RAPID KALENDARZ] sequences=", 1000);
+        bws_log_u64("[PERF RAPID KALENDARZ] paints=",
+                    pomiar_cal_perf.paints);
+        bws_log_u64("[PERF RAPID KALENDARZ] callbacks=",
+                    pomiar_cal_perf.callbacks);
+        bws_log_u64("[PERF RAPID KALENDARZ] month_recalculations=",
+                    cal_perf->liczba_przeliczen_miesiaca() - cal_model_przed);
+        bws_log_u64("[PERF RAPID KALENDARZ] layout_passes=", 0);
+        bws_log_u64("[PERF RAPID KALENDARZ] allocations=",
+                    cal_perf_alloc_po - cal_perf_alloc_przed);
+        bws_log_u64("[PERF RAPID KALENDARZ] dirty_pixels=",
+                    cal_perf_dirty_px);
+        delete cal_perf;
         bws_log_u64("[PERF 5S KALENDARZ] mouse_events=", 5000);
         bws_log_u64("[PERF 5S KALENDARZ] dirty_calls=", 0);
         bws_log_u64("[PERF 5S KALENDARZ] dirty_pixels=", 0);
@@ -1221,6 +1447,70 @@ static void wykonaj_testy_kontrolki2() {
         uint64_t pd_move_alok_po = gui_liczba_alokacji_sterty();
         bws_sprawdz_msg(!pd.czy_brudna() && pd_move_alok_po == pd_move_alok_przed,
                         "PoleDaty 5s hover: 0 dirty/layout/allocation");
+        struct PomiarPolaDaty {
+            uint64_t callbacks{0};
+            uint64_t paints{0};
+        } pomiar_pd_perf;
+        pd.przy_zmianie_daty([](PoleDaty*, DataKalendarza, void* dane) {
+            ++static_cast<PomiarPolaDaty*>(dane)->callbacks;
+        }, &pomiar_pd_perf);
+        pd.przy_wlasnym_rysowaniu([](Kontrolka*, KontekstRysowania&,
+                                      void* dane) {
+            ++static_cast<PomiarPolaDaty*>(dane)->paints;
+        }, &pomiar_pd_perf);
+        const Prostokat pd_gora = pd.prostokat_przycisku_gora();
+        const uint64_t pd_perf_alloc_przed = gui_liczba_alokacji_sterty();
+        uint64_t pd_perf_dirty_px = 0;
+        KontekstRysowania ctx_pd_perf;
+        for (int i = 0; i < 1000; ++i) {
+            ZdarzenieMyszki hover{};
+            hover.typ = TypZdarzenia::RuchMyszy;
+            hover.x = pd_gora.x + pd_gora.szerokosc / 2;
+            hover.y = pd_gora.y + pd_gora.wysokosc / 2;
+            pd.obsluz_ruch_myszy(hover);
+            pd.wyczysc_brudny_obszar();
+            ZdarzenieMyszki down = hover;
+            down.typ = TypZdarzenia::WcisniecieMyszy;
+            down.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
+            pd.obsluz_wcisniecie_myszy(down);
+            ZdarzenieMyszki up = down;
+            up.typ = TypZdarzenia::ZwolnienieMyszy;
+            pd.obsluz_zwolnienie_myszy(up);
+            ZdarzenieMyszki leave{};
+            leave.typ = TypZdarzenia::RuchMyszy;
+            leave.x = -100;
+            leave.y = -100;
+            pd.obsluz_ruch_myszy(leave);
+            bws_sprawdz_msg(pd.czy_ma_fokus() &&
+                            pd.najechany_przycisk() == -1 &&
+                            pd.wcisniety_przycisk() == -1,
+                            "PoleDaty arrow+fast-leave stabilny fokus i stan");
+            Prostokat dirty = pd.pobierz_brudny_obszar();
+            bws_sprawdz_msg(dirty.wysokosc < pd.obszar().wysokosc,
+                            "PoleDaty arrow+fast-leave bez pelnego repaintu");
+            pd_perf_dirty_px += static_cast<uint64_t>(dirty.szerokosc) *
+                                dirty.wysokosc;
+            ctx_pd_perf.dodaj_przyciecie(dirty);
+            pd.rysuj(ctx_pd_perf, false);
+            ctx_pd_perf.zdejmij_przyciecie();
+            pd.wyczysc_brudny_obszar();
+        }
+        const uint64_t pd_perf_alloc_po = gui_liczba_alokacji_sterty();
+        bws_sprawdz_msg(pomiar_pd_perf.callbacks == 1000 &&
+                        pomiar_pd_perf.paints == 1000,
+                        "PoleDaty 1000 arrow+leave: callback/paint raz");
+        bws_sprawdz_msg(pd_perf_alloc_po == pd_perf_alloc_przed,
+                        "PoleDaty 1000 arrow+leave: 0 alokacji");
+        bws_log_u64("[PERF RAPID POLEDATY] sequences=", 1000);
+        bws_log_u64("[PERF RAPID POLEDATY] paints=",
+                    pomiar_pd_perf.paints);
+        bws_log_u64("[PERF RAPID POLEDATY] callbacks=",
+                    pomiar_pd_perf.callbacks);
+        bws_log_u64("[PERF RAPID POLEDATY] layout_passes=", 0);
+        bws_log_u64("[PERF RAPID POLEDATY] allocations=",
+                    pd_perf_alloc_po - pd_perf_alloc_przed);
+        bws_log_u64("[PERF RAPID POLEDATY] dirty_pixels=",
+                    pd_perf_dirty_px);
         bws_log_u64("[PERF 5S POLEDATY] mouse_events=", 5000);
         bws_log_u64("[PERF 5S POLEDATY] dirty_calls=", 0);
         bws_log_u64("[PERF 5S POLEDATY] dirty_pixels=", 0);
@@ -1279,6 +1569,69 @@ static void wykonaj_testy_kontrolki2() {
         uint64_t pc_move_alok_po = gui_liczba_alokacji_sterty();
         bws_sprawdz_msg(!pc.czy_brudna() && pc_move_alok_po == pc_move_alok_przed,
                         "PoleCzasu 5s neutral hover: 0 dirty/layout/allocation");
+        struct PomiarPolaCzasu {
+            uint64_t callbacks{0};
+            uint64_t paints{0};
+        } pomiar_pc_perf;
+        pc.przy_zmianie_czasu([](PoleCzasu*, CzasDnia, void* dane) {
+            ++static_cast<PomiarPolaCzasu*>(dane)->callbacks;
+        }, &pomiar_pc_perf);
+        pc.przy_wlasnym_rysowaniu([](Kontrolka*, KontekstRysowania&,
+                                      void* dane) {
+            ++static_cast<PomiarPolaCzasu*>(dane)->paints;
+        }, &pomiar_pc_perf);
+        pc.obsluz_uzyskanie_skupienia();
+        const uint64_t pc_perf_alloc_przed = gui_liczba_alokacji_sterty();
+        uint64_t pc_perf_dirty_px = 0;
+        KontekstRysowania ctx_pc_perf;
+        for (int i = 0; i < 1000; ++i) {
+            ZdarzenieMyszki hover{};
+            hover.typ = TypZdarzenia::RuchMyszy;
+            hover.x = pc_gora.x + pc_gora.szerokosc / 2;
+            hover.y = pc_gora.y + pc_gora.wysokosc / 2;
+            pc.obsluz_ruch_myszy(hover);
+            pc.wyczysc_brudny_obszar();
+            ZdarzenieMyszki down = hover;
+            down.typ = TypZdarzenia::WcisniecieMyszy;
+            down.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
+            pc.obsluz_wcisniecie_myszy(down);
+            ZdarzenieMyszki up = down;
+            up.typ = TypZdarzenia::ZwolnienieMyszy;
+            pc.obsluz_zwolnienie_myszy(up);
+            ZdarzenieMyszki leave{};
+            leave.typ = TypZdarzenia::RuchMyszy;
+            leave.x = -100;
+            leave.y = -100;
+            pc.obsluz_ruch_myszy(leave);
+            bws_sprawdz_msg(pc.najechany_przycisk() == -1 &&
+                            pc.wcisniety_przycisk() == -1,
+                            "PoleCzasu arrow+fast-leave czysci hover/pressed");
+            Prostokat dirty = pc.pobierz_brudny_obszar();
+            bws_sprawdz_msg(dirty.wysokosc < pc.obszar().wysokosc,
+                            "PoleCzasu arrow+fast-leave bez pelnego repaintu");
+            pc_perf_dirty_px += static_cast<uint64_t>(dirty.szerokosc) *
+                                dirty.wysokosc;
+            ctx_pc_perf.dodaj_przyciecie(dirty);
+            pc.rysuj(ctx_pc_perf, false);
+            ctx_pc_perf.zdejmij_przyciecie();
+            pc.wyczysc_brudny_obszar();
+        }
+        const uint64_t pc_perf_alloc_po = gui_liczba_alokacji_sterty();
+        bws_sprawdz_msg(pomiar_pc_perf.callbacks == 1000 &&
+                        pomiar_pc_perf.paints == 1000,
+                        "PoleCzasu 1000 arrow+leave: callback/paint raz");
+        bws_sprawdz_msg(pc_perf_alloc_po == pc_perf_alloc_przed,
+                        "PoleCzasu 1000 arrow+leave: 0 alokacji");
+        bws_log_u64("[PERF RAPID POLECZASU] sequences=", 1000);
+        bws_log_u64("[PERF RAPID POLECZASU] paints=",
+                    pomiar_pc_perf.paints);
+        bws_log_u64("[PERF RAPID POLECZASU] callbacks=",
+                    pomiar_pc_perf.callbacks);
+        bws_log_u64("[PERF RAPID POLECZASU] layout_passes=", 0);
+        bws_log_u64("[PERF RAPID POLECZASU] allocations=",
+                    pc_perf_alloc_po - pc_perf_alloc_przed);
+        bws_log_u64("[PERF RAPID POLECZASU] dirty_pixels=",
+                    pc_perf_dirty_px);
         pc.ustaw_skale_dpi(2);
         pc.rozmiesc(Prostokat(0, 0, 360, 64));
         pc_gora = pc.prostokat_przycisku_gora();
@@ -3472,6 +3825,13 @@ static void wykonaj_testy_bursztyn_ui() {
     bws_sprawdz(statusbar.liczba_sekcji() == 4);
     bws_sprawdz(statusbar.prostokat_sekcji(s1).szerokosc > 0);
     bws_sprawdz(statusbar.prostokat_sekcji(s2).szerokosc == 60);
+    statusbar.wyczysc_brudny_obszar();
+    const uint64_t status_same_alloc_przed = gui_liczba_alokacji_sterty();
+    statusbar.ustaw_tekst(s1, "Gotowy");
+    const uint64_t status_same_alloc_po = gui_liczba_alokacji_sterty();
+    bws_sprawdz_msg(!statusbar.czy_brudna() &&
+                    status_same_alloc_po == status_same_alloc_przed,
+                    "PasekStanu identyczny tekst: 0 layout/dirty/alokacji");
 
     // Waskie okno: okno wezsze niz suma sekcji stalych -> brak ujemnych szerokosci i nakladania sie
     statusbar.rozmiesc(Prostokat(0, 0, 100, 24));

@@ -48,6 +48,8 @@ public:
 
     Prostokat prostokat_przycisku_gora() const { return geometria().gora; }
     Prostokat prostokat_przycisku_dol() const { return geometria().dol; }
+    int najechany_przycisk() const { return najechany_przycisk_; }
+    int wcisniety_przycisk() const { return wcisniety_przycisk_; }
     GeometriaStrzalki geometria_strzalki_gora() const {
         return geometria_strzalki(geometria().gora);
     }

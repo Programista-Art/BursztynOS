@@ -112,6 +112,12 @@ public:
 
     void ustaw_tekst(size_t indeks, const char* tekst) {
         if (indeks < liczba_sekcji_) {
+            const char* nowy = tekst ? tekst : "";
+            const char* stary = sekcje_[indeks].tekst();
+            size_t i = 0;
+            while (stary[i] != '\0' && nowy[i] != '\0' &&
+                   stary[i] == nowy[i]) ++i;
+            if (stary[i] == nowy[i]) return;
             sekcje_[indeks].ustaw_tekst(tekst);
             if (sekcje_[indeks].tryb_rozmiaru() == RozmiarSekcjiStanu::DopasujDoTresci) {
                 przelicz_sekcje();

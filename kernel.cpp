@@ -1839,11 +1839,6 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
         PRAWO_GUI,
         false);
 
-    (void)bws_uruchom_program_z_pliku(
-        "/programy/demo_ui.cebula/demo_ui.bur",
-        PZB_UZYTKOWNIK,
-        PRAWO_GUI,
-        false);
     /*
      * Flaga musi zostac ustawiona PRZED STI.
      * Pierwsze przerwanie timera moze od razu wykonac PrzelaczKontekst().

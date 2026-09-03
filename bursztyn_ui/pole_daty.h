@@ -25,11 +25,11 @@ public:
 
     DataKalendarza pobierz_date() const { return data_; }
 
-    void ustaw_date(DataKalendarza d) {
+    void ustaw_date(DataKalendarza d, bool powiadom = true) {
         if (!d.czy_poprawna() || d == data_) return;
         data_ = d;
         uniewaznij_obszar(prostokat_tekstu());
-        if (cb_zmiana_) {
+        if (powiadom && cb_zmiana_) {
             cb_zmiana_(this, data_, dane_zmiany_);
         }
     }
@@ -42,6 +42,8 @@ public:
     Prostokat prostokat_tekstu() const { return geometria().tekst; }
     Prostokat prostokat_przycisku_gora() const { return geometria().gora; }
     Prostokat prostokat_przycisku_dol() const { return geometria().dol; }
+    int najechany_przycisk() const { return najechany_przycisk_; }
+    int wcisniety_przycisk() const { return wcisniety_przycisk_; }
     Punkt pozycja_tekstu() const {
         char txt[16];
         formatuj_date(txt, sizeof(txt), data_);
