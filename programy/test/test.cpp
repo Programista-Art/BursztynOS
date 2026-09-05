@@ -5060,6 +5060,8 @@ static void wykonaj_testy_kontrolki3() {
         : "[TESTY KONTROLKI 3] Co najmniej jedna grupa FAIL\n");
 }
 
+#include "tapety_testy.h"
+
 struct WynikTestow {
     uint32_t zaliczone_asercje{0};
     uint32_t niezaliczone_asercje{0};
@@ -5071,6 +5073,7 @@ struct WynikTestow {
     bool interakcje{false};
     bool kontrolki2{false};
     bool kontrolki3{false};
+    bool tapety{false};
     bool pamiec_stabilna{false};
 };
 
@@ -5099,6 +5102,9 @@ static WynikTestow uruchom_pelny_pakiet_testow() {
     bledy_przed = bws_test_blad;
     wykonaj_testy_kontrolki3();
     wynik.kontrolki3 = bws_test_blad == bledy_przed;
+    bledy_przed = bws_test_blad;
+    wykonaj_testy_tapety();
+    wynik.tapety = bws_test_blad == bledy_przed;
     wynik.bursztyn_ui = wynik.bursztyn_ui_podstawowe &&
                         wynik.interakcje && wynik.kontrolki2 && wynik.kontrolki3;
     const uint64_t aktywne_po = gui_liczba_aktywnych_alokacji_sterty();
@@ -5107,6 +5113,8 @@ static WynikTestow uruchom_pelny_pakiet_testow() {
         ? "[TEST PAMIECI] Aktywne alokacje po przebiegu: STABILNE (PASS)\n"
         : "[TEST PAMIECI] Wykryto niezrownowazone alokacje (FAIL)\n");
 
+    bws_log_u64("[TESTY] PASS assertions=", bws_test_ok);
+    bws_log_u64("[TESTY] FAIL assertions=", bws_test_blad);
     wynik.zaliczone_asercje = bws_test_ok;
     wynik.niezaliczone_asercje = bws_test_blad;
     wynik.zaliczone_grupy =
@@ -5115,8 +5123,9 @@ static WynikTestow uruchom_pelny_pakiet_testow() {
         static_cast<uint32_t>(wynik.interakcje) +
         static_cast<uint32_t>(wynik.kontrolki2) +
         static_cast<uint32_t>(wynik.kontrolki3) +
+        static_cast<uint32_t>(wynik.tapety) +
         static_cast<uint32_t>(wynik.pamiec_stabilna);
-    wynik.niezaliczone_grupy = 6U - wynik.zaliczone_grupy;
+    wynik.niezaliczone_grupy = 7U - wynik.zaliczone_grupy;
 
     bws_log(wynik.niezaliczone_grupy == 0
         ? "=== TESTY BURSZTYN OS: PASS ===\n"
@@ -5133,6 +5142,7 @@ struct StanOknaWynikow {
     Etykieta* interakcje{nullptr};
     Etykieta* kontrolki{nullptr};
     Etykieta* kontrolki3{nullptr};
+    Etykieta* tapety{nullptr};
     Etykieta* pamiec{nullptr};
     Etykieta* ogolny{nullptr};
     Etykieta* liczniki{nullptr};
@@ -5296,6 +5306,16 @@ public:
         }
 
         if (stan_->krok_grupy == 5) {
+            uint32_t przed = bws_test_blad;
+            { IzolacjaPrezentacjiTestow izolacja(stan_->okno); wykonaj_testy_tapety(); }
+            sprawdz_geometrie_grupy("Tapety BTP");
+            stan_->wynik.tapety = bws_test_blad == przed;
+            stan_->tapety->ustaw_tekst(stan_->wynik.tapety ? "Tapety BTP: PASS" : "Tapety BTP: FAIL");
+            stan_->krok_grupy = 6;
+            if (stan_->okno) { stan_->okno->przelicz_uklad(); stan_->okno->uniewaznij(); }
+            return;
+        }
+        if (stan_->krok_grupy == 6) {
             stan_->wynik.bursztyn_ui = stan_->wynik.bursztyn_ui_podstawowe &&
                                       stan_->wynik.interakcje && stan_->wynik.kontrolki2 &&
                                       stan_->wynik.kontrolki3;
@@ -5315,8 +5335,9 @@ public:
                 static_cast<uint32_t>(stan_->wynik.interakcje) +
                 static_cast<uint32_t>(stan_->wynik.kontrolki2) +
                 static_cast<uint32_t>(stan_->wynik.kontrolki3) +
+                static_cast<uint32_t>(stan_->wynik.tapety) +
                 static_cast<uint32_t>(stan_->wynik.pamiec_stabilna);
-            stan_->wynik.niezaliczone_grupy = 6U - stan_->wynik.zaliczone_grupy;
+            stan_->wynik.niezaliczone_grupy = 7U - stan_->wynik.zaliczone_grupy;
 
             stan_->naglowek->ustaw_tekst(stan_->wynik.niezaliczone_grupy == 0
                 ? "Diagnostyka systemu zakończona"
@@ -5371,6 +5392,7 @@ static void rozpocznij_interaktywny_przebieg_testow(StanOknaWynikow* stan) {
     stan->ui->ustaw_tekst("BursztynUI: OCZEKUJE");
     stan->interakcje->ustaw_tekst("WidokPrzewijany / Drzewo / widoczność: OCZEKUJE");
     stan->kontrolki->ustaw_tekst("Kontrolki 2 - 8 grup komponentów: OCZEKUJE");
+    stan->tapety->ustaw_tekst("Tapety BTP: OCZEKUJE");
     stan->kontrolki3->ustaw_tekst("Kontrolki 3 - 8 grup komponentów: OCZEKUJE");
     stan->pamiec->ustaw_tekst("Pamięć GUI po przebiegu: OCZEKUJE");
     stan->ogolny->ustaw_tekst("Wynik ogólny: W toku...");
@@ -5465,6 +5487,7 @@ extern "C" __attribute__((noreturn)) void _start() {
     Etykieta& et_ui = korzen->dodaj<Etykieta>("BursztynUI: Testy nie zostały jeszcze uruchomione.");
     Etykieta& et_interakcje = korzen->dodaj<Etykieta>("WidokPrzewijany / Drzewo / widoczność: Testy nie zostały jeszcze uruchomione.");
     Etykieta& et_kontrolki = korzen->dodaj<Etykieta>("Kontrolki 2 - 8 grup komponentów: Testy nie zostały jeszcze uruchomione.");
+    Etykieta& et_tapety = korzen->dodaj<Etykieta>("Tapety BTP: Testy nie zostały jeszcze uruchomione.");
     Etykieta& et_kontrolki3 = korzen->dodaj<Etykieta>("Kontrolki 3 - 8 grup komponentów: Testy nie zostały jeszcze uruchomione.");
     Etykieta& et_pamiec = korzen->dodaj<Etykieta>("Pamięć GUI po przebiegu: Testy nie zostały jeszcze uruchomione.");
     Etykieta& et_ogolny = korzen->dodaj<Etykieta>("Wynik ogólny: Testy nie zostały jeszcze uruchomione.");
@@ -5490,7 +5513,7 @@ extern "C" __attribute__((noreturn)) void _start() {
 
     StanOknaWynikow* stan = new StanOknaWynikow{
         {}, okno, &naglowek, &et_bws, &et_ui, &et_interakcje,
-        &et_kontrolki, &et_kontrolki3, &et_pamiec, &et_ogolny, &et_liczniki,
+        &et_kontrolki, &et_kontrolki3, &et_tapety, &et_pamiec, &et_ogolny, &et_liczniki,
         &start_btn, &ponow_btn, &zamknij_btn,
         &uruchom_pelny_pakiet_testow, {}, false, 0, 0,
         WIN_X, WIN_Y, WIN_W, WIN_H, 0, 0

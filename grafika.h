@@ -14,6 +14,15 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+
+// Jedyny bufor tla skladacza i wspolny, bootowo mapowany scratch BMP/BTP.
+bool grafika_przygotuj_bufory_tapety();
+uint8_t* grafika_scratch_tapety(size_t* pojemnosc);
+uint32_t* grafika_bufor_tapety(size_t* pojemnosc);
+void grafika_publikuj_tapete();
+bool grafika_czy_tapeta();
+void grafika_tapeta_solid();
 
 /* =========================================================================
  * 1. INICJALIZACJA I LOGOWANIE

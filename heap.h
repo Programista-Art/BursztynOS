@@ -114,6 +114,9 @@ void* kmalloc(uint64_t rozmiar);
  */
 void kfree(void* wskaznik);
 
+// Diagnostyka bez alokacji; UINT64_MAX oznacza niepoprawna sterte.
+uint64_t heap_zajete_bajty();
+
 /* =========================================================================
  * GLOBALNE OPERATORY C++
  * ========================================================================= */

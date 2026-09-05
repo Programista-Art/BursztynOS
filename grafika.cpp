@@ -80,6 +80,27 @@ constexpr size_t MAX_TEKST_GUI_BWS = 1024;
 
 bool surowy_bufor_bmp_zmapowany = false;
 bool bufor_tapety_zmapowany = false;
+size_t tapeta_zmapowane_bajty = 0;
+size_t scratch_zmapowane_bajty = 0;
+
+// Mapowane PRZED utworzeniem procesow: VMM klonuje hierarchie jadra.
+// Licznik zachowuje poprawne czesciowe mapowanie po braku ramek; ponowna
+// proba nie nadpisuje PTE ani nie gubi juz przydzielonych ramek.
+bool mapuj_bufor_tapety(uint64_t adres, size_t potrzebne, size_t* zmapowane) {
+    if (!zmapowane || potrzebne > MAX_RAW_BMP || potrzebne > SIZE_MAX - 4095U) return false;
+    const size_t koniec = (potrzebne + 4095U) & ~size_t(4095U);
+    while (*zmapowane < koniec) {
+        void* ramka = ZaalokujRamke();
+        if (!ramka) return false;
+        void* va = reinterpret_cast<void*>(adres + *zmapowane);
+        if (!VmmMapujNowaStroneJadra(va, ramka)) {
+            ZwolnijRamke(ramka);
+            return false;
+        }
+        *zmapowane += 4096U;
+    }
+    return true;
+}
 
 bool dodaj_u64(uint64_t a, uint64_t b, uint64_t* wynik) {
     if (!wynik) return false;
@@ -2363,6 +2384,41 @@ extern "C" void obsluga_przerwania_zegara() {
 // TAPETA BMP
 // =========================================================================
 
+bool grafika_przygotuj_bufory_tapety() {
+    if (!aktywny_ekran || !backbuffer) return false;
+    const uint64_t w = aktywny_ekran->PobierzSzerokosc();
+    const uint64_t h = aktywny_ekran->PobierzWysokosc();
+    if (!w || !h || w > 8192 || h > 8192 || w * h > MAX_RAW_BMP / 4) return false;
+    if (!mapuj_bufor_tapety(VADDR_TAPETA, static_cast<size_t>(w * h * 4), &tapeta_zmapowane_bajty)) return false;
+    bufor_tapety = reinterpret_cast<uint32_t*>(VADDR_TAPETA);
+    bufor_tapety_zmapowany = true;
+    if (!mapuj_bufor_tapety(VADDR_RAW_BMP, MAX_RAW_BMP, &scratch_zmapowane_bajty)) return false;
+    surowy_bufor_bmp_zmapowany = true;
+    return true;
+}
+
+uint8_t* grafika_scratch_tapety(size_t* pojemnosc) {
+    if (pojemnosc) *pojemnosc = scratch_zmapowane_bajty;
+    return surowy_bufor_bmp_zmapowany ? reinterpret_cast<uint8_t*>(VADDR_RAW_BMP) : nullptr;
+}
+
+uint32_t* grafika_bufor_tapety(size_t* pojemnosc) {
+    if (pojemnosc) *pojemnosc = tapeta_zmapowane_bajty;
+    return bufor_tapety_zmapowany ? bufor_tapety : nullptr;
+}
+
+void grafika_publikuj_tapete() {
+    if (bufor_tapety_zmapowany && bufor_tapety) {
+        tapeta_zaladowana = true;
+        skladacz_obrazu_oznacz_dirty();
+    }
+}
+bool grafika_czy_tapeta() { return tapeta_zaladowana && bufor_tapety; }
+void grafika_tapeta_solid() {
+    tapeta_zaladowana = false;
+    skladacz_obrazu_oznacz_dirty();
+}
+
 extern "C" void wczytaj_tapete_z_dysku() {
     if (!aktywny_ekran || !backbuffer)
         return;
@@ -2371,10 +2427,10 @@ extern "C" void wczytaj_tapete_z_dysku() {
         "[GRAFIKA] Proba wczytania tapeta.bmp z dysku AHCI (LBA 10)...");
 
     if (!surowy_bufor_bmp_zmapowany) {
-        if (!zmapuj_nowe_strony(
+        if (!mapuj_bufor_tapety(
                 VADDR_RAW_BMP,
                 MAX_RAW_BMP,
-                0b11)) {
+                &scratch_zmapowane_bajty)) {
             wypisz_log(
                 "[GRAFIKA] BLAD: Nie mozna zmapowac bufora BMP.");
             return;
@@ -2527,10 +2583,10 @@ extern "C" void wczytaj_tapete_z_dysku() {
         sizeof(uint32_t);
 
     if (!bufor_tapety_zmapowany) {
-        if (!zmapuj_nowe_strony(
+        if (!mapuj_bufor_tapety(
                 VADDR_TAPETA,
                 waga_tapety_bajty,
-                0b11)) {
+                &tapeta_zmapowane_bajty)) {
             wypisz_log(
                 "[GRAFIKA] BLAD: Nie mozna przydzielic bufora tapety.");
             return;

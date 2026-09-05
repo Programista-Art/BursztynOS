@@ -589,6 +589,15 @@ void inicjalizuj_sterte_jadra(
  * KMALLOC
  * ========================================================================= */
 
+uint64_t heap_zajete_bajty() {
+    BlokadaSterty blokada;
+    if (!lista_sterty_poprawna()) return UINT64_MAX;
+    uint64_t suma = 0;
+    for (BlokSterty* b = pierwszy_blok; b; b = b->nastepny)
+        if (!b->czy_wolny) suma += b->rozmiar;
+    return suma;
+}
+
 void* kmalloc(uint64_t rozmiar) {
     if (rozmiar == 0) {
         return nullptr;

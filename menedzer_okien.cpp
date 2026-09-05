@@ -35,12 +35,12 @@ constexpr int MENU_X = 10;
 constexpr int MENU_W = 260;
 constexpr int MENU_GORNY_MARGINES = 10;
 constexpr int MENU_ELEMENT_WYS = 25;
-constexpr int MENU_ELEMENTOW = 13;
+constexpr int MENU_ELEMENTOW = 14;
 constexpr int MENU_WYS =
     (MENU_GORNY_MARGINES * 2) + (MENU_ELEMENTOW * MENU_ELEMENT_WYS);
 
 // Pozycja "Gry ->" w glownym Menu Start.
-constexpr int MENU_GRY_INDEX = 10;
+constexpr int MENU_GRY_INDEX = 11;
 constexpr int MENU_GRY_W = 180;
 constexpr int MENU_GRY_ELEMENTOW = 1;
 constexpr int MENU_GRY_WYS =
@@ -1364,6 +1364,7 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
             "> Kontrolki 2",
             "> Kontrolki 3",
             "> Testy systemu",
+            "> Tapety",
             "> Gry ->",
             "> Uruchom ponownie",
             "> Zamknij"
@@ -1624,15 +1625,18 @@ void obsluz_element_menu(int item_index) {
         case 9:
             uruchom_lub_aktywuj(SCIEZKA_TEST, "Testy Bursztyn OS");
             break;
+        case 10:
+            uruchom_lub_aktywuj("/programy/tapety.cebula/tapety.bur", "Tapety");
+            break;
         case MENU_GRY_INDEX:
             menu_gry_otwarte = !menu_gry_otwarte;
             aktualizuj_overlay_menu();
             RysujPulpit(true);
             break;
-        case 11:
+        case 12:
             wykonaj_restart();
             break;
-        case 12:
+        case 13:
             wykonaj_zamkniecie();
             break;
         default:

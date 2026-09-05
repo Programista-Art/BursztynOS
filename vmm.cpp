@@ -1778,6 +1778,17 @@ void ZmapujStrone(
     );
 }
 
+extern "C" bool VmmMapujNowaStroneJadra(void* va, void* pa) {
+    BlokadaVMM blokada;
+    if (!vmm_zainicjalizowany || !va || !pa ||
+        (reinterpret_cast<uint64_t>(va) & 4095U) ||
+        (reinterpret_cast<uint64_t>(pa) & 4095U)) return false;
+    uint64_t* pml4 = pml4_z_cr3();
+    if (!pml4 || sprawdz_mapowanie(pml4, reinterpret_cast<uint64_t>(va)).obecna) return false;
+    return mapuj_strone_wewnetrznie(pml4, reinterpret_cast<uint64_t>(va),
+        reinterpret_cast<uint64_t>(pa), VMM_FLAGA_OBECNA | VMM_FLAGA_ZAPIS);
+}
+
 extern "C" bool VmmMapujStroneWspoldzielona(
     void* adres_wirtualny,
     void* adres_fizyczny,

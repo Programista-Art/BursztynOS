@@ -10,38 +10,7 @@
  * Wiersze biegna od gory, piksele od lewej. Pakiet moze przecinac wiersz.
  */
 
-#include <stdint.h>
-#include <stddef.h>
-
-struct BtpNaglowek {
-    uint8_t magic[4];
-    uint32_t szerokosc;
-    uint32_t wysokosc;
-    uint8_t bpp;
-    uint8_t kompresja;
-} __attribute__((packed));
-
-static_assert(sizeof(BtpNaglowek) == 14, "BTP1: naglowek ma 14 bajtow");
-static_assert(alignof(BtpNaglowek) == 1, "BTP1: naglowek bez wyrownania");
-static_assert(offsetof(BtpNaglowek, magic) == 0, "BTP1: offset magic");
-static_assert(offsetof(BtpNaglowek, szerokosc) == 4, "BTP1: offset szerokosci");
-static_assert(offsetof(BtpNaglowek, wysokosc) == 8, "BTP1: offset wysokosci");
-static_assert(offsetof(BtpNaglowek, bpp) == 12, "BTP1: offset bpp");
-static_assert(offsetof(BtpNaglowek, kompresja) == 13, "BTP1: offset kompresji");
-
-enum BtpWynik : int32_t {
-    BTPOK = 0,
-    BTPBLADARGUMENTU = -1,       // Null, zle wyrownanie lub nakladanie buforow.
-    BTPBLADZAMALYPLIK = -2,     // Niepelny naglowek.
-    BTPBLADMAGIC = -3,
-    BTPBLADWYMIAROW = -4,       // Zero, limit lub obraz wiekszy od celu.
-    BTPBLADBPP = -5,
-    BTPBLADKOMPRESJI = -6,      // Obslugiwane tylko RAW (0) i RLE (1).
-    BTPBLADRLE = -7,            // Zly pakiet, niepelny obraz lub nadmiar danych.
-    BTPBLADPRZEPELNIENIA = -8,  // Rozmiar lub zakres adresow niereprezentowalny.
-    BTPBLADBUFORA = -9,         // Za maly stride lub pojemnosc celu.
-    BTPBLADRAW = -10            // Niepelny lub nadmiarowy payload RAW.
-};
+#include "tapetybtp.h"
 
 namespace {
 
@@ -126,6 +95,64 @@ BtpWynik btpdekodujrle(
 
 } // namespace
 
+BtpWynik btpnaglowek(const uint8_t* danepliku, size_t rozmiarpliku,
+                       BtpInfo* info) noexcept {
+    if (!danepliku || !info) return BTPBLADARGUMENTU;
+    if (rozmiarpliku < sizeof(BtpNaglowek))
+        return BTPBLADZAMALYPLIK;
+
+    const uintptr_t adrespliku = reinterpret_cast<uintptr_t>(danepliku);
+    if (rozmiarpliku - 1U > UINTPTR_MAX - adrespliku)
+        return BTPBLADPRZEPELNIENIA;
+
+    if (danepliku[0] != 'B' || danepliku[1] != 'T' ||
+        danepliku[2] != 'P' || danepliku[3] != '1')
+        return BTPBLADMAGIC;
+
+    const uint32_t szerokosc = btpczytaju32le(danepliku + 4U);
+    const uint32_t wysokosc = btpczytaju32le(danepliku + 8U);
+    if (szerokosc == 0 || wysokosc == 0)
+        return BTPBLADWYMIAROW;
+    if (danepliku[12] != 32U)
+        return BTPBLADBPP;
+    const uint8_t kompresja = danepliku[13];
+    if (kompresja != 0U && kompresja != 1U)
+        return BTPBLADKOMPRESJI;
+
+    if (static_cast<size_t>(szerokosc) > SIZE_MAX / wysokosc)
+        return BTPBLADPRZEPELNIENIA;
+    const size_t liczbapikseli = static_cast<size_t>(szerokosc) * wysokosc;
+    if (liczbapikseli > SIZE_MAX / sizeof(uint32_t))
+        return BTPBLADPRZEPELNIENIA;
+
+    if (szerokosc > BTPMAKSWYMIAR || wysokosc > BTPMAKSWYMIAR)
+        return BTPBLADWYMIAROW;
+    *info = BtpInfo{szerokosc, wysokosc, kompresja};
+    return BTPOK;
+}
+
+BtpWynik btpsprawdzplik(const uint8_t* danepliku, size_t rozmiarpliku, BtpInfo* info) noexcept {
+    BtpInfo h{};
+    const BtpWynik naglowek = btpnaglowek(danepliku, rozmiarpliku, &h);
+    if (naglowek != BTPOK) return naglowek;
+    if (!info) return BTPBLADARGUMENTU;
+    const uint32_t szerokosc=h.szerokosc, wysokosc=h.wysokosc;
+    const uint8_t kompresja=h.kompresja;
+    const size_t liczbapikseli=static_cast<size_t>(szerokosc)*wysokosc;
+    const size_t payload = rozmiarpliku - sizeof(BtpNaglowek);
+    if (kompresja == 0U) {
+        if (payload != liczbapikseli * sizeof(uint32_t)) return BTPBLADRAW;
+    } else {
+        if (payload % BTPROZMIARPAKIETU || payload / BTPROZMIARPAKIETU > liczbapikseli)
+            return BTPBLADRLE;
+        const BtpWynik wynik = btpdekodujrle(danepliku, rozmiarpliku, nullptr,
+            szerokosc, liczbapikseli, 0, false);
+        if (wynik != BTPOK) return wynik;
+    }
+    *info = BtpInfo{szerokosc, wysokosc, kompresja};
+    return BTPOK;
+}
+
 /*
  * Rysuje w (0, 0), bez skalowania, obcinania i czyszczenia reszty celu.
  * stridepikseli: odleglosc poczatkow wierszy w uint32_t, NIE w bajtach.
@@ -160,33 +187,14 @@ BtpWynik btpwczytajirysuj(
         return BTPBLADARGUMENTU;
     if (reinterpret_cast<uintptr_t>(framebuffer) % alignof(uint32_t) != 0)
         return BTPBLADARGUMENTU;
-    if (rozmiarpliku < sizeof(BtpNaglowek))
-        return BTPBLADZAMALYPLIK;
-
-    const uintptr_t adrespliku = reinterpret_cast<uintptr_t>(danepliku);
-    if (rozmiarpliku - 1U > UINTPTR_MAX - adrespliku)
-        return BTPBLADPRZEPELNIENIA;
-
-    if (danepliku[0] != 'B' || danepliku[1] != 'T' ||
-        danepliku[2] != 'P' || danepliku[3] != '1')
-        return BTPBLADMAGIC;
-
-    const uint32_t szerokosc = btpczytaju32le(danepliku + 4U);
-    const uint32_t wysokosc = btpczytaju32le(danepliku + 8U);
-    if (szerokosc == 0 || wysokosc == 0 ||
-        szerokoscfb == 0 || wysokoscfb == 0)
-        return BTPBLADWYMIAROW;
-    if (danepliku[12] != 32U)
-        return BTPBLADBPP;
-    const uint8_t kompresja = danepliku[13];
-    if (kompresja != 0U && kompresja != 1U)
-        return BTPBLADKOMPRESJI;
-
-    if (static_cast<size_t>(szerokosc) > SIZE_MAX / wysokosc)
-        return BTPBLADPRZEPELNIENIA;
+    BtpInfo info{};
+    const BtpWynik sprawdzony = btpnaglowek(danepliku, rozmiarpliku, &info);
+    if (sprawdzony != BTPOK) return sprawdzony;
+    if (szerokoscfb == 0 || wysokoscfb == 0) return BTPBLADWYMIAROW;
+    const uint32_t szerokosc = info.szerokosc, wysokosc = info.wysokosc;
+    const uint8_t kompresja = info.kompresja;
     const size_t liczbapikseli = static_cast<size_t>(szerokosc) * wysokosc;
-    if (liczbapikseli > SIZE_MAX / sizeof(uint32_t))
-        return BTPBLADPRZEPELNIENIA;
+    const uintptr_t adrespliku = reinterpret_cast<uintptr_t>(danepliku);
 
     if (szerokosc > BTPMAKSWYMIAR || wysokosc > BTPMAKSWYMIAR ||
         szerokosc > szerokoscfb || wysokosc > wysokoscfb)
@@ -211,6 +219,8 @@ BtpWynik btpwczytajirysuj(
     if (adrespliku <= koniecfb && adresfb <= koniecpliku)
         return BTPBLADARGUMENTU;
 
+    const BtpWynik payload = btpsprawdzplik(danepliku, rozmiarpliku, &info);
+    if (payload != BTPOK) return payload;
     const size_t rozmiardanych = rozmiarpliku - sizeof(BtpNaglowek);
     if (kompresja == 0U) {
         // Mnozenie zostalo sprawdzone powyzej. Wymagamy dokladnego rozmiaru
@@ -231,19 +241,6 @@ BtpWynik btpwczytajirysuj(
         }
         return BTPOK;
     }
-
-    // Kazdy pakiet daje co najmniej jeden piksel; liczba pakietow jest
-    // ograniczona liczba pikseli, a ta limitem wymiarow. Brak dlugich skanow
-    // nadmiarowego payloadu, nawet gdy wywolujacy dostarczy olbrzymi plik.
-    if (rozmiardanych % BTPROZMIARPAKIETU != 0 ||
-        rozmiardanych / BTPROZMIARPAKIETU > liczbapikseli)
-        return BTPBLADRLE;
-
-    const BtpWynik wynik = btpdekodujrle(
-        danepliku, rozmiarpliku, framebuffer, szerokosc,
-        liczbapikseli, stridepikseli, false);
-    if (wynik != BTPOK)
-        return wynik;
 
     return btpdekodujrle(
         danepliku, rozmiarpliku, framebuffer, szerokosc,

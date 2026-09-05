@@ -14,6 +14,7 @@
 #include "pamiec.h"
 #include "heap.h"
 #include "psf.h"
+#include "tapety.h"
 #include "sterowniki/czas/hpet.h"
 #include "sterowniki/siec/sockets.h"
 
@@ -396,6 +397,36 @@ uint64_t ipc_create() {
         return utworz_handle(i, gen);
     }
     return 0;
+}
+
+// Staly endpoint jadra korzysta z BWS 69; odpowiedz tylko do wlasciciela.
+uint64_t ipc_tapety(const proces_t& proces, uint64_t desc_user) {
+    BwsIpcWyslij desc{};
+    TapetyZadanie req{};
+    if (!skopiuj_z_przestrzeni_uzytkownika(&desc, reinterpret_cast<const void*>(desc_user), sizeof(desc)) ||
+        desc.wersja != BWS_NOWOCZESNE_ABI_WERSJA || desc.zarezerwowane || desc.flagi || desc.shm_handle ||
+        desc.rozmiar != sizeof(req) || !desc.dane ||
+        !skopiuj_z_przestrzeni_uzytkownika(&req, reinterpret_cast<const void*>(desc.dane), sizeof(req))) return 0;
+    IpcEndpoint* cel = endpoint_z_handle(req.odpowiedz);
+    if (!cel || cel->owner_pid != aktualny_pid || !cel->kolejka || cel->count >= IPC_KOLEJKA_MAX) return 0;
+    auto* odpowiedz = static_cast<TapetyOdpowiedz*>(kmalloc(sizeof(TapetyOdpowiedz)));
+    if (!odpowiedz) return 0;
+    bool ok;
+    { GuardEkranu guard; ok = tapety_obsluz(proces, req, odpowiedz); }
+    if (!ok) { kfree(odpowiedz); return 0; }
+    IpcWiadomosc msg{};
+    msg.rozmiar = sizeof(*odpowiedz);
+    msg.dane = reinterpret_cast<uint8_t*>(odpowiedz);
+    cel->kolejka[cel->head] = msg;
+    cel->head = (cel->head + 1U) % IPC_KOLEJKA_MAX;
+    ++cel->count;
+    bws_zdarzenie zd{};
+    zd.typ = BWS_ZDARZENIE_IPC_READY;
+    zd.x = static_cast<int32_t>(req.odpowiedz);
+    zd.y = static_cast<int32_t>(req.odpowiedz >> 32U);
+    zd.timestamp = timestamp();
+    (void)scheduler_dodaj_zdarzenie(aktualny_pid, &zd);
+    return 1;
 }
 
 uint64_t ipc_send(uint64_t endpoint_handle, uint64_t desc_user) {
@@ -802,6 +833,15 @@ uint64_t socket_close(proces_t& p, uint64_t handle) {
 
 } // namespace
 
+void bws_ipc_inicjalizuj_tapety() {
+    // Wywolanie jednorazowe przed uruchomieniem pierwszego procesu Ring 3.
+    endpoints[0] = {};
+    endpoints[0].aktywny = true;
+    endpoints[0].generacja = endpoint_generacje[0] = 1;
+    endpoints[0].owner_pid = 0;
+}
+
+
 /* Stary HTTP i nowe gniazdo korzystaja obecnie z tej samej pojedynczej
  * sesji stosu TCP. Dispatcher uzywa tego predykatu, aby nigdy nie pozwolic
  * im nadpisac sobie stanu protokolu. */
@@ -913,7 +953,7 @@ extern "C" uint64_t bws_nowoczesne_obsluz(
         case BWS_SHM_UNMAP: return shm_unmap(a1);
         case BWS_SHM_CLOSE: return shm_close(a1);
         case BWS_IPC_CREATE: return ipc_create();
-        case BWS_IPC_SEND: return ipc_send(a1, a2);
+        case BWS_IPC_SEND: return a1 == TAPETY_IPC ? ipc_tapety(*proces, a2) : ipc_send(a1, a2);
         case BWS_IPC_RECEIVE: return ipc_receive(a1, a2);
         case BWS_IPC_CLOSE: return ipc_close(a1);
         case BWS_FILE_WATCH: return watch_dispatch(*proces, a1, a2, a3);

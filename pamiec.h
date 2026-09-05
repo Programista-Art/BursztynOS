@@ -558,3 +558,6 @@ bool WirtualnyDoFizycznego(
     const void* adres_wirtualny,
     uint64_t* adres_fizyczny
 );
+
+// Mapowanie nowej strony jadra z wynikiem bledu (bez prawa USER).
+extern "C" bool VmmMapujNowaStroneJadra(void* va, void* pa);

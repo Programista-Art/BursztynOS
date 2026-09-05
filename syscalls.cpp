@@ -1778,6 +1778,8 @@ uint64_t bws_uruchom(
     else if (rowna_sciezka(sciezka,
                            "/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur"))
         wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ;
+    else if (rowna_sciezka(sciezka, "/programy/tapety.cebula/tapety.bur"))
+        wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ;
     else if (rowna_sciezka(sciezka,
                            "/programy/kalkulator.cebula/kalkulator.bur"))
         wymagane = PRAWO_GUI;

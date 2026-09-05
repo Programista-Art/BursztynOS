@@ -1,3 +1,5 @@
+#include "tapety.h"
+extern "C" uint8_t _binary_tapety_bin_start[], _binary_tapety_bin_end[];
 /*
  * Bursztyn OS - glowny punkt wejscia jadra x86_64.
  *
@@ -998,6 +1000,14 @@ void instaluj_wbudowane_programy() {
         "    \"okna\"\n"
         "]\n";
 
+    static const char MANIFEST_TAPETY[] =
+        "nazwa = \"Tapety\"\n"
+        "autor = \"Bursztyn OS\"\n"
+        "wersja = \"1.0\"\n"
+        "poziom_zaufania = 4\n"
+        "plik_startowy = \"tapety.bur\"\n"
+        "uprawnienia = [\n    \"okna\",\n    \"pliki_czytaj\"\n]\n";
+
     static const char MANIFEST_KONTROLKI3[] =
         "nazwa = \"Kontrolki 3\"\n"
         "autor = \"Programista Art\"\n"
@@ -1404,6 +1414,11 @@ void instaluj_wbudowane_programy() {
             "[BSP] Kontrolki 2 zainstalowane jako .cebula.");
     }
 
+    if (!zapewnij_katalog("/programy/tapety.cebula") || !instaluj_paczke(
+            "/programy/tapety.cebula/opis.aplikacji", MANIFEST_TAPETY,
+            TAPETY_PROGRAM, _binary_tapety_bin_start, _binary_tapety_bin_end))
+        wypisz_log("[TAPETA] BLAD instalacji aplikacji Tapety.");
+
     if (!instaluj_paczke(
             "/programy/kontrolki3.cebula/opis.aplikacji",
             MANIFEST_KONTROLKI3,
@@ -1795,7 +1810,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
 
     inicjalizuj_kontroler_ahci();
 
-    wczytaj_tapete_z_dysku();
+    /* BMP pozostaje fallbackiem po inicjalizacji BSP2. */
 
     /* ---------------------------------------------------------------------
      * Siec
@@ -1881,6 +1896,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
      * ------------------------------------------------------------------ */
 
     instaluj_wbudowane_programy();
+    tapety_inicjalizuj();
 
     /* ---------------------------------------------------------------------
      * Pierwszy proces Ring 3

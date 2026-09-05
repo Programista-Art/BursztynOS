@@ -1,6 +1,7 @@
 #pragma once
 
 #include "kontrolka.h"
+#include "../obrazy/skalowanie.h"
 
 namespace BursztynUI {
 
@@ -172,21 +173,11 @@ public:
                 dst_y = (obszar_.wysokosc - dst_h) / 2;
                 break;
             case TrybObrazu::Dopasuj: {
-                // Zachowaj proporcje (aspect ratio)
-                int src_w = img_w_;
-                int src_h = img_h_;
-                if (src_w > 0 && src_h > 0) {
-                    int w_fit = obszar_.szerokosc;
-                    int h_fit = (w_fit * src_h) / src_w;
-                    if (h_fit > obszar_.wysokosc) {
-                        h_fit = obszar_.wysokosc;
-                        w_fit = (h_fit * src_w) / src_h;
-                    }
-                    dst_w = w_fit;
-                    dst_h = h_fit;
-                    dst_x = (obszar_.szerokosc - dst_w) / 2;
-                    dst_y = (obszar_.wysokosc - dst_h) / 2;
-                }
+                GeometriaObrazu g{};
+                if (!geometria_obrazu(img_w_, img_h_, obszar_.szerokosc,
+                        obszar_.wysokosc, TrybSkalowaniaObrazu::Dopasuj, &g)) return;
+                dst_w = g.dst_w; dst_h = g.dst_h;
+                dst_x = g.dst_x; dst_y = g.dst_y;
                 break;
             }
             case TrybObrazu::Rozciagnij:
@@ -220,7 +211,7 @@ public:
         int render_w = render_x1 - render_x0;
         if (render_w > 2048) render_w = 2048;
         for (int py = render_y0; py < render_y1; ++py) {
-            int src_y = ((py - screen_dst_y) * img_h_) / dst_h;
+            int src_y = probka_obrazu(py - screen_dst_y, img_h_, dst_h);
             if (src_y < 0) src_y = 0;
             if (src_y >= img_h_) src_y = img_h_ - 1;
 
@@ -228,7 +219,7 @@ public:
 
             for (int dx = 0; dx < render_w; ++dx) {
                 int px = render_x0 + dx;
-                int src_x = ((px - screen_dst_x) * img_w_) / dst_w;
+                int src_x = probka_obrazu(px - screen_dst_x, img_w_, dst_w);
                 if (src_x < 0) src_x = 0;
                 if (src_x >= img_w_) src_x = img_w_ - 1;
 

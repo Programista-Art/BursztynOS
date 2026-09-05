@@ -224,7 +224,7 @@ MBEDTLS_OBJS := $(MBEDTLS_SRCS:.c=.o)
 # 7. OBIEKTY JADRA
 # ============================================================================
 
-OBJS := \
+OBJS := tapety_blob.o tapety.o btp.o tapety_zasoby.o \
 	boot.o \
 	gdt.o \
 	tss.o \
@@ -425,9 +425,9 @@ kalkulator_blob.o: kalkulator_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
 test_tmp.o: programy/test/test.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
-test_blob.o: test_tmp.o bursztyn_gui.o programy/test/test_linker.ld
+test_blob.o: test_tmp.o btp_ring3.o bursztyn_gui.o programy/test/test_linker.ld
 	$(LD) --gc-sections -T programy/test/test_linker.ld $(RING3_LDFLAGS) \
-		test_tmp.o bursztyn_gui.o -o test.elf
+		test_tmp.o btp_ring3.o bursztyn_gui.o -o test.elf
 	$(OBJCOPY) -O binary test.elf test.bin
 	$(LD) -r -b binary test.bin -o test_blob.o
 
@@ -827,3 +827,25 @@ help:
 	@echo "  make clean     - usun artefakty kompilacji"
 	@echo "  make cdysk     - usun wirtualny dysk"
 	@echo "  make distclean - clean + cdysk"
+
+# Finalne male zasoby BTP sa plikami zrodlowymi, nie wynikiem kazdego builda.
+TAPETY_ZASOBY := $(sort $(wildcard obrazy/tapety/bursztyn??.btp))
+tapety_zasoby.o: $(TAPETY_ZASOBY)
+	$(LD) -r -b binary $(TAPETY_ZASOBY) -o $@
+btp.o: narzedzia/tapety-btp/tapetybtp.cpp narzedzia/tapety-btp/tapetybtp.h
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+tapety.o: tapety.cpp tapety.h tapety_format.h obrazy/skalowanie.h narzedzia/tapety-btp/tapetybtp.h
+kernel.o bws_nowoczesne.o: tapety.h tapety_format.h obrazy/skalowanie.h
+
+btp_ring3.o: narzedzia/tapety-btp/tapetybtp.cpp narzedzia/tapety-btp/tapetybtp.h
+	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -c $< -o $@
+tapety_tmp.o: programy/tapety/tapety.cpp programy/tapety/klient.h programy/tapety/miniatury.h tapety_format.h obrazy/skalowanie.h narzedzia/tapety-btp/tapetybtp.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
+tapety_blob.o: tapety_tmp.o btp_ring3.o bursztyn_gui.o programy/kontrolki3/kontrolki3_linker.ld
+	$(LD) --gc-sections -T programy/kontrolki3/kontrolki3_linker.ld $(RING3_LDFLAGS) tapety_tmp.o btp_ring3.o bursztyn_gui.o -o tapety.elf
+	$(OBJCOPY) -O binary tapety.elf tapety.bin
+	$(LD) -r -b binary tapety.bin -o $@
+
+$(filter %tmp.o %_tmp.o,$(wildcard *.o)): obrazy/skalowanie.h
+
+test_tmp.o: programy/test/tapety_testy.h programy/tapety/klient.h programy/tapety/miniatury.h tapety_format.h narzedzia/tapety-btp/tapetybtp.h
