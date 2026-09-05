@@ -1,10 +1,11 @@
 /*
  * BTP - Bursztynowa TaPeta, rozszerzenie .btp. Samodzielny dekoder BTP1.
- * Etap 1: bez integracji z jadrem, systemem plikow lub wyborem tapety.
+ * Bez integracji z jadrem, systemem plikow lub wyborem tapety.
  *
  * Format pliku (little-endian):
  *   0: magic "BTP1" (4 bajty), 4: szerokosc u32, 8: wysokosc u32,
- *   12: bpp u8 (32), 13: kompresja u8 (1 = RLE).
+ *   12: bpp u8 (32), 13: kompresja u8 (0 = RAW, 1 = RLE).
+ * RAW: dokladnie szerokosc * wysokosc * 4 bajty B, G, R, A, bez paddingu.
  * Kazdy pakiet RLE ma dokladnie 5 bajtow: liczba (1..255), B, G, R, A.
  * Wiersze biegna od gory, piksele od lewej. Pakiet moze przecinac wiersz.
  */
@@ -35,10 +36,11 @@ enum BtpWynik : int32_t {
     BTPBLADMAGIC = -3,
     BTPBLADWYMIAROW = -4,       // Zero, limit lub obraz wiekszy od celu.
     BTPBLADBPP = -5,
-    BTPBLADKOMPRESJI = -6,      // Takze tryb surowy (0): nieobslugiwany.
+    BTPBLADKOMPRESJI = -6,      // Obslugiwane tylko RAW (0) i RLE (1).
     BTPBLADRLE = -7,            // Zly pakiet, niepelny obraz lub nadmiar danych.
     BTPBLADPRZEPELNIENIA = -8,  // Rozmiar lub zakres adresow niereprezentowalny.
-    BTPBLADBUFORA = -9          // Za maly stride lub pojemnosc celu.
+    BTPBLADBUFORA = -9,         // Za maly stride lub pojemnosc celu.
+    BTPBLADRAW = -10            // Niepelny lub nadmiarowy payload RAW.
 };
 
 namespace {
@@ -139,9 +141,10 @@ BtpWynik btpdekodujrle(
  * mapowania stron; nie jest interfejsem przyjmujacym wskazniki z Ring 3.
  * Nakladanie zakresow jest odrzucane, aby zapis nie mogl zmienic wejscia.
  *
- * Wszystkie pakiety sa sprawdzane przed pierwszym zapisem. Przy zachowaniu
- * kontraktu blad pozostawia cel bez zmian, a BTPOK oznacza caly poprawny obraz.
- * Drugi przebieg nadal kontroluje granice pakietow i liczbe pikseli.
+ * Pelny rozmiar RAW / wszystkie pakiety RLE sprawdzamy przed zapisem.
+ * Przy zachowaniu kontraktu blad pozostawia cel bez zmian, a BTPOK oznacza
+ * caly poprawny obraz. Drugi przebieg RLE nadal kontroluje granice pakietow
+ * i liczbe pikseli.
  * Bez alokacji, bufora dekompresji, rekurencji i zaleznosci od runtime.
  */
 BtpWynik btpwczytajirysuj(
@@ -175,7 +178,8 @@ BtpWynik btpwczytajirysuj(
         return BTPBLADWYMIAROW;
     if (danepliku[12] != 32U)
         return BTPBLADBPP;
-    if (danepliku[13] != 1U)
+    const uint8_t kompresja = danepliku[13];
+    if (kompresja != 0U && kompresja != 1U)
         return BTPBLADKOMPRESJI;
 
     if (static_cast<size_t>(szerokosc) > SIZE_MAX / wysokosc)
@@ -207,10 +211,30 @@ BtpWynik btpwczytajirysuj(
     if (adrespliku <= koniecfb && adresfb <= koniecpliku)
         return BTPBLADARGUMENTU;
 
+    const size_t rozmiardanych = rozmiarpliku - sizeof(BtpNaglowek);
+    if (kompresja == 0U) {
+        // Mnozenie zostalo sprawdzone powyzej. Wymagamy dokladnego rozmiaru
+        // przed pierwszym odczytem payloadu i przed jakimkolwiek zapisem.
+        if (rozmiardanych != liczbapikseli * sizeof(uint32_t))
+            return BTPBLADRAW;
+
+        size_t pozycja = sizeof(BtpNaglowek);
+        size_t wiersz = 0;
+        for (uint32_t y = 0; y < wysokosc; ++y) {
+            for (uint32_t x = 0; x < szerokosc; ++x) {
+                const uint32_t kolor = btpczytajkolor(danepliku + pozycja);
+                if (kolor != 0)
+                    framebuffer[wiersz + x] = kolor;
+                pozycja += sizeof(uint32_t);
+            }
+            wiersz += stridepikseli;
+        }
+        return BTPOK;
+    }
+
     // Kazdy pakiet daje co najmniej jeden piksel; liczba pakietow jest
     // ograniczona liczba pikseli, a ta limitem wymiarow. Brak dlugich skanow
     // nadmiarowego payloadu, nawet gdy wywolujacy dostarczy olbrzymi plik.
-    const size_t rozmiardanych = rozmiarpliku - sizeof(BtpNaglowek);
     if (rozmiardanych % BTPROZMIARPAKIETU != 0 ||
         rozmiardanych / BTPROZMIARPAKIETU > liczbapikseli)
         return BTPBLADRLE;
