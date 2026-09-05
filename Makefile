@@ -29,6 +29,8 @@ LD      := $(CROSS)ld
 OBJCOPY := $(CROSS)objcopy
 NM      := $(CROSS)nm
 READELF := $(CROSS)readelf
+AS      := $(CROSS)as
+PYTHON  ?= python3
 
 QEMU     ?= qemu-system-x86_64
 QEMU_IMG ?= qemu-img
@@ -788,6 +790,7 @@ check-tools:
 
 clean:
 	rm -f *.o *.bin *.elf *.iso .*.iso
+	rm -f tapety_manifest.h tapety_zasoby.rsp tapety_zasoby.d
 	rm -f biblioteki/mbedtls/library/*.o
 	rm -f $(OVMF_VARS_RUNTIME)
 	rm -rf $(ISO_DIR) $(ISO8K_DIR) $(CI_TEST_DIR) isodir_test
@@ -828,13 +831,23 @@ help:
 	@echo "  make cdysk     - usun wirtualny dysk"
 	@echo "  make distclean - clean + cdysk"
 
-# Finalne male zasoby BTP sa plikami zrodlowymi, nie wynikiem kazdego builda.
-TAPETY_ZASOBY := $(sort $(wildcard obrazy/tapety/bursztyn??.btp))
-tapety_zasoby.o: $(TAPETY_ZASOBY)
-	$(LD) -r -b binary $(TAPETY_ZASOBY) -o $@
+# Automatyczne odkrywanie i pakowanie tapet BTP
+tapety_manifest.h tapety_zasoby.rsp: obrazy/tapety narzedzia/tapety-btp/generujmanifest.py
+	$(PYTHON) narzedzia/tapety-btp/generujmanifest.py --katalog obrazy/tapety --manifest tapety_manifest.h --rsp tapety_zasoby.rsp --dep tapety_zasoby.d
+
+tapety_zasoby.o: tapety_manifest.h tapety_zasoby.rsp
+	@if [ -s tapety_zasoby.rsp ]; then \
+		$(LD) -r -b binary @tapety_zasoby.rsp -o $@; \
+	else \
+		echo "[TAPETA] Ostrzezenie: brak tapet .btp w obrazy/tapety, tworzenie pustego zasobu."; \
+		$(AS) -o $@ /dev/null; \
+	fi
+
+-include tapety_zasoby.d
+
 btp.o: narzedzia/tapety-btp/tapetybtp.cpp narzedzia/tapety-btp/tapetybtp.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
-tapety.o: tapety.cpp tapety.h tapety_format.h obrazy/skalowanie.h narzedzia/tapety-btp/tapetybtp.h
+tapety.o: tapety.cpp tapety.h tapety_format.h tapety_manifest.h obrazy/skalowanie.h narzedzia/tapety-btp/tapetybtp.h
 kernel.o bws_nowoczesne.o: tapety.h tapety_format.h obrazy/skalowanie.h
 
 btp_ring3.o: narzedzia/tapety-btp/tapetybtp.cpp narzedzia/tapety-btp/tapetybtp.h
