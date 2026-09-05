@@ -849,3 +849,5 @@ tapety_blob.o: tapety_tmp.o btp_ring3.o bursztyn_gui.o programy/kontrolki3/kontr
 $(filter %tmp.o %_tmp.o,$(wildcard *.o)): obrazy/skalowanie.h
 
 test_tmp.o: programy/test/tapety_testy.h programy/tapety/klient.h programy/tapety/miniatury.h tapety_format.h narzedzia/tapety-btp/tapetybtp.h
+
+test_tmp.o: programy/test/kontrolki3_stabilizacja.h

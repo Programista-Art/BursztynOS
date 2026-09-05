@@ -28,6 +28,11 @@ public:
         Prostokat gdzie = z.umiesc_przy_punkcie_ekranu(x_ekranu, y_ekranu, rz);
         return z.otworz(widoki_[0], gdzie, nullptr, &widoki_[0]);
     }
+    bool pokaz_pod_kontrolka(ZarzadcaPopupow& z, Kontrolka& owner) {
+        widoki_[0].ustaw(&menu_, this);
+        return z.otworz(widoki_[0], z.umiesc_pod_kotwica(owner.obszar_ekranu(),
+            widoki_[0].wymagany_rozmiar(owner.skala_dpi())), &owner, &widoki_[0]);
+    }
     void ukryj() {
         if (widoki_[0].zarzadca()) widoki_[0].zarzadca()->zamknij();
     }

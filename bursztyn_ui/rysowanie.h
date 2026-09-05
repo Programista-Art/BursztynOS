@@ -55,17 +55,45 @@ public:
         return stos_przyciecia_[glebokosc_przyciecia_];
     }
 
+    // A packed, owner-allocated dirty-region target. BWS57 submits it only
+    // after the complete subtree and its popup overlays have been painted.
+    void ustaw_cel(uint32_t* pixels, Prostokat bounds) { cel_ = pixels; granice_celu_ = bounds; }
+    bool przecina_klip(Prostokat r) const {
+        Punkt p = pobierz_przesuniecie();
+        return Prostokat(r.x+p.x, r.y+p.y, r.szerokosc, r.wysokosc).przecina(pobierz_przyciecie());
+    }
+    Prostokat lokalny_klip() const {
+        Prostokat r = pobierz_przyciecie(); Punkt p = pobierz_przesuniecie();
+        r.x -= p.x; r.y -= p.y; return r;
+    }
     void rysuj_prostokat(Prostokat r, uint32_t kolor) {
         if (r.czy_pusty()) return;
         Punkt off = pobierz_przesuniecie();
         Prostokat swiat_r(r.x + off.x, r.y + off.y, r.szerokosc, r.wysokosc);
         Prostokat przyciety = swiat_r.przeciecie(pobierz_przyciecie());
+        if (cel_) {
+            przyciety = przyciety.przeciecie(granice_celu_);
+            for (int y = przyciety.y; !przyciety.czy_pusty() && y < przyciety.dolny(); ++y) {
+                uint32_t* row = cel_ + static_cast<size_t>(y-granice_celu_.y)*granice_celu_.szerokosc;
+                for (int x = przyciety.x; x < przyciety.prawy(); ++x) row[x-granice_celu_.x] = kolor;
+            }
+            return;
+        }
         if (!przyciety.czy_pusty()) {
             if (!g_tlum_rysowanie_globalne) {
                 gui_rysuj_prostokat(przyciety.x, przyciety.y,
                                     przyciety.szerokosc, przyciety.wysokosc, kolor);
             }
         }
+    }
+
+    void rysuj_wiersz_ekranu(int x, int y, int w, const uint32_t* pixels) {
+        if (cel_) {
+            Prostokat r = Prostokat(x,y,w,1).przeciecie(granice_celu_).przeciecie(pobierz_przyciecie());
+            if (r.czy_pusty()) return;
+            uint32_t* out = cel_ + static_cast<size_t>(y-granice_celu_.y)*granice_celu_.szerokosc;
+            for (int px=r.x;px<r.prawy();++px) if (pixels[px-x]) out[px-granice_celu_.x]=pixels[px-x];
+        } else if (!g_tlum_rysowanie_globalne) gui_blit(x,y,w,1,pixels);
     }
 
     void rysuj_ramke(Prostokat r, uint32_t kolor, int grubosc = 1) {
@@ -169,7 +197,7 @@ public:
         // Zwykly tekst, ktory w calosci miesci sie w klipie, zachowuje szybki
         // syscall renderera. Tylko tekst przecinajacy krawedz wymaga lokalnego
         // renderowania bitmapy; syscall 20 nie ma parametru przyciecia.
-        if (widoczny == granice) {
+        if (widoczny == granice && !cel_) {
             if (!g_tlum_rysowanie_globalne) {
                 gui_wypisz_tekst_kolor_skala(tx, ty, kolor, skala, tekst);
             }
@@ -204,11 +232,7 @@ public:
                                                   seria.wysokosc);
                             Prostokat seria_clip = seria_swiat.przeciecie(clip);
                             if (!seria_clip.czy_pusty()) {
-                                if (!g_tlum_rysowanie_globalne) {
-                                    gui_rysuj_prostokat(seria_clip.x, seria_clip.y,
-                                                        seria_clip.szerokosc,
-                                                        seria_clip.wysokosc, kolor);
-                                }
+                                rysuj_prostokat(seria, kolor);
                                 dodaj_pomiar_tekstu(seria_clip);
                             }
                             poczatek = -1;
@@ -272,6 +296,8 @@ private:
     }
 
     static constexpr size_t MAKS_STOS = 16;
+    uint32_t* cel_{nullptr};
+    Prostokat granice_celu_{};
     Prostokat stos_przyciecia_[MAKS_STOS];
     Punkt stos_przesuniecia_[MAKS_STOS];
     size_t glebokosc_przyciecia_{0};

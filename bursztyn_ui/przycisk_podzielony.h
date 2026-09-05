@@ -82,7 +82,7 @@ public:
                 Kolory::AkcentFokus, s);
     }
 
-    void obsluz_ruch_myszy(ZdarzenieMyszki& e) override {
+    void obsluz_ruch_myszy(ZdarzenieMyszki& e) override { BUI_POMIAR(mouse_events, 1);
         CzescPrzyciskuPodzielonego nowa = czesc_w_punkcie(e.x, e.y);
         if (nowa != najechana_czesc_) {
             CzescPrzyciskuPodzielonego stara = najechana_czesc_;
@@ -155,8 +155,7 @@ private:
     void otworz_menu() {
         if (cb_menu_) cb_menu_(this, dane_menu_);
         if (!zarzadca_popupow_ || menu_.menu().liczba_elementow() == 0) return;
-        (void)menu_.pokaz(*zarzadca_popupow_, obszar_ekranu_.prawy(),
-                          obszar_ekranu_.dolny(), skala_dpi_);
+        (void)menu_.pokaz_pod_kontrolka(*zarzadca_popupow_, *this);
     }
 
     int szerokosc_strzalki_{28};

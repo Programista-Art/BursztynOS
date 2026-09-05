@@ -27,6 +27,7 @@ public:
     }
 
     virtual ~Okno() {
+        if (bufor_regionu_) gui_free(bufor_regionu_);
         popupy_.zamknij(PowodZamknieciaPopup::WlascicielZamkniety);
         if (domyslny_korzen_) {
             delete domyslny_korzen_;
@@ -181,6 +182,13 @@ public:
 
     void przelicz_uklad() {
         ++liczba_przejsc_ukladu_;
+        // Allocate only on geometry changes, never in input or paint.
+        size_t wymagane = szerokosc_ > 0 && wysokosc_ > 0 && szerokosc_ <= 2048 && wysokosc_ <= 2048
+            ? static_cast<size_t>(szerokosc_) * wysokosc_ : 0;
+        if (wymagane > pojemnosc_regionu_) {
+            uint32_t* nowy = static_cast<uint32_t*>(gui_malloc(wymagane * sizeof(uint32_t)));
+            if (nowy) { if (bufor_regionu_) gui_free(bufor_regionu_); bufor_regionu_ = nowy; pojemnosc_regionu_ = wymagane; }
+        }
         popupy_.ustaw_geometrie_wlasciciela(Prostokat(x_, y_, szerokosc_, wysokosc_),
                                             pobierz_obszar_roboczy());
         if (!kontrolka_glowna_) return;
@@ -219,81 +227,44 @@ public:
 
     void rysuj(KontekstRysowania& ctx, bool wymus = false) {
         if (czy_zminimalizowane_) return;
-
-        int belka_h = WYSOKOSC_BELKI_TYTULOWEJ * skala_dpi_;
-        int klient_h = wysokosc_ - belka_h;
-        if (klient_h < 0) klient_h = 0;
-        Prostokat obszar_klienta(0, belka_h, szerokosc_, klient_h);
-
-        bool pelne_odrysowanie = czy_brudne_ || wymus;
-
-        if (pelne_odrysowanie) {
-            ostatni_obszar_odrysowania_ = Prostokat(0, 0, szerokosc_, wysokosc_);
-            ++liczba_odrysowan_;
+        bool pelne = czy_brudne_ || wymus;
+        if (!pelne && !czy_wymaga_odrysowania()) return;
+        ObszaryBrudne regiony;
+        Prostokat klient = obszar_klienta();
+        if (pelne) {
             ++liczba_pelnych_odrysowan_;
-            liczba_brudnych_pikseli_ += static_cast<uint64_t>(szerokosc_) * wysokosc_;
-
-            // Narysuj standardową belkę tytułową na pozycji okna
-            if (!KontekstRysowania::g_tlum_rysowanie_globalne) {
+            if (!KontekstRysowania::g_tlum_rysowanie_globalne)
                 gui_rysuj_standardowa_belke(x_, y_, szerokosc_, tytul_, czy_zmaksymalizowane_);
+            regiony.dodaj(klient);
+        } else {
+            if (kontrolka_glowna_) {
+                const auto& r = kontrolka_glowna_->brudne_regiony_;
+                for (size_t i = 0; i < r.liczba; ++i) regiony.dodaj(r.prostokaty[i].przeciecie(klient));
             }
-
-            // Tło okna poniżej belki
-            if (klient_h > 0) {
-                ctx.dodaj_przesuniecie(Punkt(x_, y_));
-                ctx.dodaj_przyciecie(obszar_klienta);
-                ctx.rysuj_prostokat(obszar_klienta, Kolory::BursztynowyCiemnyTlo);
-
-                // Renderuj drzewo kontrolek na czystym tle
-                if (kontrolka_glowna_) {
-                    kontrolka_glowna_->rysuj(ctx, true);
-                    kontrolka_glowna_->wyczysc_brudny_obszar();
-                }
-                popupy_.rysuj(ctx, true);
-
-                ctx.zdejmij_przyciecie();
-                ctx.zdejmij_przesuniecie();
-            }
-
-            brudny_obszar_klienta_ = Prostokat(0, 0, 0, 0);
-            czy_brudne_ = false;
-        } else if ((kontrolka_glowna_ && kontrolka_glowna_->czy_brudna()) ||
-                   !brudny_obszar_klienta_.czy_pusty() || popupy_.czy_brudny()) {
-            // Częściowe odrysowanie wyłącznie w obrębie brudnego prostokąta
-            Prostokat brudny = brudny_obszar_klienta_;
-            if (kontrolka_glowna_)
-                brudny = brudny.suma(kontrolka_glowna_->pobierz_brudny_obszar());
-            brudny = brudny.suma(popupy_.brudny_obszar());
-            if (brudny.czy_pusty()) {
-                brudny = obszar_klienta;
-            }
-            brudny = brudny.przeciecie(obszar_klienta);
-
-            if (!brudny.czy_pusty()) {
-                ostatni_obszar_odrysowania_ = brudny;
-                ++liczba_odrysowan_;
-                liczba_brudnych_pikseli_ +=
-                    static_cast<uint64_t>(brudny.szerokosc) * brudny.wysokosc;
-
-                ctx.dodaj_przesuniecie(Punkt(x_, y_));
-                ctx.dodaj_przyciecie(brudny);
-
-                // Przywróć tło okna tylko w brudnym prostokącie
-                ctx.rysuj_prostokat(brudny, Kolory::BursztynowyCiemnyTlo);
-
-                // Narysuj kontrolki przecinające brudny prostokąt
-                if (kontrolka_glowna_) {
-                    kontrolka_glowna_->rysuj(ctx, false);
-                    kontrolka_glowna_->wyczysc_brudny_obszar();
-                }
-                popupy_.rysuj(ctx, false);
-
-                ctx.zdejmij_przyciecie();
-                ctx.zdejmij_przesuniecie();
-            }
-
-            brudny_obszar_klienta_ = Prostokat(0, 0, 0, 0);
+            regiony.dodaj(brudny_obszar_klienta_.przeciecie(klient));
+            regiony.dodaj(popupy_.brudny_obszar().przeciecie(klient));
         }
+        ostatni_obszar_odrysowania_ = pelne ? Prostokat(0, 0, szerokosc_, wysokosc_) : Prostokat();
+        ++liczba_odrysowan_;
+        if (pelne) liczba_brudnych_pikseli_ += static_cast<uint64_t>(szerokosc_)*WYSOKOSC_BELKI_TYTULOWEJ*skala_dpi_;
+        for (size_t i = 0; i < regiony.liczba; ++i) {
+            Prostokat r = regiony.prostokaty[i];
+            ostatni_obszar_odrysowania_ = ostatni_obszar_odrysowania_.suma(r);
+            size_t pixels = static_cast<size_t>(r.szerokosc)*r.wysokosc;
+            liczba_brudnych_pikseli_ += pixels;
+            Prostokat swiat(x_+r.x, y_+r.y, r.szerokosc, r.wysokosc);
+            bool buforowany = bufor_regionu_ && pixels <= pojemnosc_regionu_;
+            if (buforowany) ctx.ustaw_cel(bufor_regionu_, swiat);
+            ctx.dodaj_przesuniecie(Punkt(x_, y_)); ctx.dodaj_przyciecie(r);
+            ctx.rysuj_prostokat(r, Kolory::BursztynowyCiemnyTlo);
+            if (kontrolka_glowna_) kontrolka_glowna_->rysuj(ctx, false);
+            popupy_.rysuj(ctx, false);
+            ctx.zdejmij_przyciecie(); ctx.zdejmij_przesuniecie(); ctx.ustaw_cel(nullptr, Prostokat());
+            if (buforowany && !KontekstRysowania::g_tlum_rysowanie_globalne)
+                gui_blit(swiat.x, swiat.y, r.szerokosc, r.wysokosc, bufor_regionu_);
+        }
+        if (kontrolka_glowna_) kontrolka_glowna_->wyczysc_brudny_obszar();
+        brudny_obszar_klienta_ = Prostokat(); czy_brudne_ = false;
     }
 
     void minimalizuj() {
@@ -589,6 +560,11 @@ public:
                     !fokus_byl_na_sciezce) {
                     kontrolka_z_fokusem_->obsluz_rolke(re);
                 }
+                if (kontrolka_z_fokusem_ && !kontrolka_z_fokusem_->czy_efektywnie_widoczna()) {
+                    Kontrolka* k = kontrolka_z_fokusem_->rodzic();
+                    while (k && (!k->czy_efektywnie_widoczna() || !k->czy_moze_miec_fokus())) k = k->rodzic();
+                    ustaw_fokus(k);
+                }
                 break;
             }
 
@@ -760,6 +736,8 @@ private:
     bool czy_przeciagane_{false};
     int przesuniecie_ciagniecia_x_{0};
     int przesuniecie_ciagniecia_y_{0};
+    uint32_t* bufor_regionu_{nullptr};
+    size_t pojemnosc_regionu_{0};
     bool czy_brudne_{true};
     Prostokat brudny_obszar_klienta_{0, 0, 0, 0};
     Prostokat ostatni_obszar_odrysowania_{0, 0, 0, 0};

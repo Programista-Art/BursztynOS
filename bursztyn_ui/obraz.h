@@ -225,10 +225,10 @@ public:
 
                 uint32_t c = src_line[src_x];
                 wiersz[dx] = (c & 0xFF000000U) != 0
-                    ? (c & 0x00FFFFFFU)
+                    ? ((c & 0x00FFFFFFU) ? (c & 0x00FFFFFFU) : 0x01000000U)
                     : SKLADACZ_PIKSEL_PRZEZROCZYSTY;
             }
-            (void)gui_blit(render_x0, py, render_w, 1, wiersz);
+            ctx.rysuj_wiersz_ekranu(render_x0, py, render_w, wiersz);
         }
     }
 

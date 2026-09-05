@@ -1,3 +1,4 @@
+#define BURSZTYN_UI_DIAGNOSTYKA 1
 /*
  * Aplikacja Bursztyn OS (Zgodna z C++17, bursztyn_gui.h i ABI Linkera)
  * Wygenerowana przez: Bursztyn Builder RAD v3.1 Ultimate
@@ -4687,6 +4688,8 @@ static void wykonaj_testy_bursztyn_ui() {
         bws_log("=== WYKRYTO BLEDY W TESTACH BURSZTYNUI (FAIL) ===\n\n");
 }
 
+#include "kontrolki3_stabilizacja.h"
+
 static void wykonaj_testy_kontrolki3() {
     bws_log("\n=== ROZPOCZECIE TESTOW KONTROLKI 3 ===\n");
     uint32_t wszystkie_przed = bws_test_blad;
@@ -4983,21 +4986,14 @@ static void wykonaj_testy_kontrolki3() {
         uint32_t stary = s.pobierz_kolor(); bws_sprawdz(!s.ustaw_hex("#GG0000") && s.pobierz_kolor() == stary);
         bws_sprawdz(!s.ustaw_hex("#1234567") && !s.ustaw_hex("#FFFFFFFF") && s.pobierz_kolor() == stary);
         int cb = zmiany; s.ustaw_kolor(stary); bws_sprawdz(zmiany == cb); s.ustaw_kolor(0); bws_sprawdz(s.pobierz_kolor() == 0);
-        ZdarzenieKlawiatury right{}; right.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x4DU; s.obsluz_wcisniecie_klawisza(right); bws_sprawdz(s.wybrany_indeks_palety() >= 0);
-        ZdarzenieMyszki pal{}; pal.przycisk = 1; pal.x = 12; pal.y = 52;
-        s.obsluz_wcisniecie_myszy(pal); s.obsluz_zwolnienie_myszy(pal);
-        bws_sprawdz(s.pobierz_kolor() == SelektorKoloru::WIDOCZNA_CZERN);
-        int po_czerni = zmiany;
-        s.obsluz_wcisniecie_myszy(pal); s.obsluz_zwolnienie_myszy(pal);
-        bws_sprawdz(zmiany == po_czerni);
-        pal.x = 262; pal.y = 84;
-        s.obsluz_wcisniecie_myszy(pal); s.obsluz_zwolnienie_myszy(pal);
-        bws_sprawdz(s.pobierz_kolor() == 0 && zmiany == po_czerni + 1);
-        s.ustaw_kolor(0x00E67E22U);
-        s.obsluz_wcisniecie_klawisza(right);
-        ZdarzenieKlawiatury wybor{}; wybor.kod_klawisza = 13;
-        s.obsluz_wcisniecie_klawisza(wybor);
-        bws_sprawdz(s.pobierz_kolor() == 0x00FFBF00U);
+        ZarzadcaPopupow z;
+        z.ustaw_geometrie_wlasciciela(Prostokat(0,0,640,480),Prostokat(0,28,640,452));
+        s.ustaw_zarzadce_popupow(&z);
+        bws_sprawdz(s.otworz_popup() && s.czy_popup_otwarty());
+        bws_sprawdz(s.ustaw_hsv(0,255,255) && s.kolor_podgladu()==0x00FF0000);
+        bws_sprawdz(s.zatwierdz_popup() && !s.czy_popup_otwarty() && s.pobierz_kolor()==0x00FF0000);
+        bws_sprawdz(s.otworz_popup()); s.ustaw_rgb(0,255,0); s.anuluj_popup();
+        bws_sprawdz(s.pobierz_kolor()==0x00FF0000 && !s.czy_popup_otwarty());
         s.wyczysc_brudny_obszar(); ZdarzenieMyszki mv{}; mv.x = 12; mv.y = 55; s.obsluz_ruch_myszy(mv); s.wyczysc_brudny_obszar();
         uint64_t a0 = gui_liczba_alokacji_sterty(); for (int n = 0; n < 5000; ++n) s.obsluz_ruch_myszy(mv); uint64_t a1 = gui_liczba_alokacji_sterty();
         bws_sprawdz(a0 == a1 && !s.czy_brudna());
@@ -5013,6 +5009,36 @@ static void wykonaj_testy_kontrolki3() {
         for (int i = 0; i < 64; ++i) obraz[i] = (i & 1) ? 0x00FFBF00 : 0x00302010;
         for (int i = 0; i < 1000; ++i) bws_sprawdz(w.dodaj_element(static_cast<uint64_t>(i + 1), "Miniatura", obraz, 8, 8));
         bws_sprawdz(w.liczba_elementow() == 1000 && w.pasek_pionowy().czy_widoczna());
+        {
+            w.wyczysc_brudny_obszar(); w.zeruj_pomiary(); w.pasek_pionowy().zeruj_pomiary();
+            uint64_t alloc = gui_liczba_alokacji_sterty();
+            ZdarzenieRolki wheel{}; wheel.delta_y = -1; w.obsluz_rolke(wheel);
+            Prostokat dirty = w.pobierz_brudny_obszar();
+            KontekstRysowania paint; paint.dodaj_przyciecie(dirty); w.rysuj(paint);
+            bws_log_u64("[K3 FRAME] wheel_allocations=", gui_liczba_alokacji_sterty() - alloc);
+            bws_log_u64("[K3 FRAME] wheel_layout=", w.pomiary_.layout_passes + w.pasek_pionowy().pomiary_.layout_passes);
+            bws_log_u64("[K3 FRAME] wheel_paint_calls=", w.pomiary_.paint_calls + w.pasek_pionowy().pomiary_.paint_calls);
+            bws_log_u64("[K3 FRAME] wheel_items=", w.liczba_ostatnio_narysowanych_elementow());
+            bws_log_u64("[K3 FRAME] wheel_dirty_calls=", w.pomiary_.dirty_calls + w.pasek_pionowy().pomiary_.dirty_calls);
+            bws_log_u64("[K3 FRAME] wheel_dirty_pixels=", static_cast<uint64_t>(dirty.szerokosc)*dirty.wysokosc);
+            bws_log_u64("[K3 FRAME] wheel_scrollbar_paints=", w.pasek_pionowy().pomiary_.scrollbar_paints);
+            auto& bar = w.pasek_pionowy(); bar.ustaw_wartosc(0);
+            Prostokat thumb = bar.prostokat_uchwytu(); ZdarzenieMyszki d{}; d.przycisk = 1;
+            d.x = bar.obszar_ekranu().x + thumb.x + thumb.szerokosc/2;
+            d.y = bar.obszar_ekranu().y + thumb.y + thumb.wysokosc/2;
+            bar.obsluz_wcisniecie_myszy(d);
+            w.wyczysc_brudny_obszar(); w.zeruj_pomiary(); bar.zeruj_pomiary(); alloc = gui_liczba_alokacji_sterty();
+            d.y += 30; bar.obsluz_ruch_myszy(d); dirty = w.pobierz_brudny_obszar();
+            KontekstRysowania dragpaint; dragpaint.dodaj_przyciecie(dirty); w.rysuj(dragpaint);
+            bws_log_u64("[K3 FRAME] drag_allocations=", gui_liczba_alokacji_sterty() - alloc);
+            bws_log_u64("[K3 FRAME] drag_layout=", w.pomiary_.layout_passes + bar.pomiary_.layout_passes);
+            bws_log_u64("[K3 FRAME] drag_paint_calls=", w.pomiary_.paint_calls + bar.pomiary_.paint_calls);
+            bws_log_u64("[K3 FRAME] drag_items=", w.liczba_ostatnio_narysowanych_elementow());
+            bws_log_u64("[K3 FRAME] drag_dirty_calls=", w.pomiary_.dirty_calls + bar.pomiary_.dirty_calls);
+            bws_log_u64("[K3 FRAME] drag_dirty_pixels=", static_cast<uint64_t>(dirty.szerokosc)*dirty.wysokosc);
+            bws_log_u64("[K3 FRAME] drag_scrollbar_paints=", bar.pomiary_.scrollbar_paints);
+            bar.obsluz_zwolnienie_myszy(d); bar.ustaw_wartosc(0);
+        }
         struct P { int wybor; int aktywacja; } m{}; w.przy_zmianie_zaznaczenia([](WidokMiniatur*, int, uint64_t, void* d){ ++static_cast<P*>(d)->wybor; }, &m); w.przy_aktywacji([](WidokMiniatur*, int, uint64_t, void* d){ ++static_cast<P*>(d)->aktywacja; }, &m);
         w.ustaw_wybrany_indeks(10); w.ustaw_fokus_indeks(11); bws_sprawdz(w.wybrany_indeks() == 10 && w.fokus_indeks() == 11 && m.wybor == 1);
         w.pasek_pionowy().ustaw_wartosc(0);
@@ -5055,6 +5081,7 @@ static void wykonaj_testy_kontrolki3() {
         bws_log(bws_test_blad == przed ? "[KONTROLKI3 8/8] WidokMiniatur OK\n" : "[KONTROLKI3 8/8] WidokMiniatur FAIL\n");
     }
 
+    wykonaj_stabilizacje_k3();
     bws_log(bws_test_blad == wszystkie_przed
         ? "[TESTY KONTROLKI 3] Wszystkie 8 grup PASS\n"
         : "[TESTY KONTROLKI 3] Co najmniej jedna grupa FAIL\n");

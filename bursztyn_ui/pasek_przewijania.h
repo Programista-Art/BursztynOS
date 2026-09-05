@@ -99,6 +99,7 @@ public:
     }
 
     void rysuj_siebie(KontekstRysowania& ctx) override {
+        BUI_POMIAR(scrollbar_paints, 1);
         Geometria g = oblicz_geometrie();
         ostatni_uchwyt_ = g.uchwyt;
         int skala = skala_dpi_ < 1 ? 1 : skala_dpi_;

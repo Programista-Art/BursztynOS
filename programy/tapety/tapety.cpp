@@ -56,7 +56,7 @@ extern "C" __attribute__((noreturn)) void _start() {
     root->ustaw_wypelnienie(Marginesy(12)); root->ustaw_odstep(8);
     root->dodaj<Etykieta>("Tapeta pulpitu");
     galeria = &root->dodaj<WidokMiniatur>();
-    galeria->ustaw_rozmiar_elementu(172, 124);
+    galeria->ustaw_rozmiar_elementu(174, 124);
     galeria->ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
     galeria->ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
     unsigned poprawne = 0;

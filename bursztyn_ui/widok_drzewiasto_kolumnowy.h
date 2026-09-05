@@ -59,6 +59,9 @@ public:
         styl_.normalny.ramka = Kolory::RamkaDomyslna;
         styl_.normalny.grubosc_ramki = 1;
         czy_moze_miec_fokus_ = true;
+        czy_reaguje_wizualnie_na_najechanie_ = false;
+        czy_reaguje_wizualnie_na_wcisniecie_ = false;
+        styl_.fokus = styl_.normalny;
         preferowany_rozmiar_ = Rozmiar(360, 240);
 
         pionowy_ = new PasekPrzewijania();
@@ -72,12 +75,12 @@ public:
         dodaj_kontrolke(pionowy_);
         dodaj_kontrolke(poziomy_);
 
-        pionowy_->model().przy_zmianie([](ModelPrzewijania*, int64_t, void* dane) {
+        pionowy_->przy_przewijaniu([](PasekPrzewijania*, int64_t, void* dane) {
             WidokDrzewiastoKolumnowy* w = static_cast<WidokDrzewiastoKolumnowy*>(dane);
-            if (w) w->uniewaznij();
+            if (w) w->uniewaznij_obszar(Prostokat(1, 2 + w->wysokosc_naglowka_ * w->skala_dpi_, w->viewport_w(), w->viewport_h() - w->wysokosc_naglowka_ * w->skala_dpi_ - 1));
         }, this);
 
-        poziomy_->model().przy_zmianie([](ModelPrzewijania*, int64_t, void* dane) {
+        poziomy_->przy_przewijaniu([](PasekPrzewijania*, int64_t, void* dane) {
             WidokDrzewiastoKolumnowy* w = static_cast<WidokDrzewiastoKolumnowy*>(dane);
             if (w) w->uniewaznij();
         }, this);
@@ -202,11 +205,13 @@ public:
         if (wezel.czy_poprawny() && !czy_uchwyt_poprawny(wezel)) return false;
         if (wybrany_ == wezel) return true;
 
-        UchwytWezlaDrzewaKolumnowego stary = wybrany_;
+        UchwytWezlaDrzewaKolumnowego stary = wybrany_, stary_fokus = fokus_;
+        BUI_POMIAR(identity_changes, 1);
         wybrany_ = wezel;
         if (wezel.czy_poprawny()) fokus_ = wezel;
         uniewaznij_wezel(stary);
         uniewaznij_wezel(wybrany_);
+        if (stary_fokus != stary && stary_fokus != wybrany_) uniewaznij_wezel(stary_fokus);
         if (cb_zmiana_zaznaczenia_) {
             cb_zmiana_zaznaczenia_(this, wybrany_, dane_zmiany_zaznaczenia_);
         }
@@ -340,12 +345,14 @@ public:
         int col0_w = liczba_kolumn_ > 0 ? kolumny_[0].szerokosc * skala_dpi_ : 120;
 
         for (int r = start_row; r < end_row; ++r) {
-            ++ostatnio_narysowane_;
+
             int node_idx = widoczne_wezly_[r];
             const Wezel& w = wezly_[node_idx];
 
             int row_y = rect_danych.y + (r * h_wiersza) - scroll_y;
             Prostokat row_rect(1, row_y, vp_w, h_wiersza);
+            if (!ctx.przecina_klip(row_rect)) continue;
+            ++ostatnio_narysowane_;
 
             bool sel = (wybrany_.czy_poprawny() && wybrany_.indeks == static_cast<uint32_t>(node_idx));
             bool foc = (fokus_.czy_poprawny() && fokus_.indeks == static_cast<uint32_t>(node_idx));
@@ -438,8 +445,20 @@ public:
         int scroll_y = pionowy_ && pionowy_->czy_widoczna() ? static_cast<int>(pionowy_->wartosc()) : 0;
         int scroll_x = poziomy_ && poziomy_->czy_widoczna() ? static_cast<int>(poziomy_->wartosc()) : 0;
 
-        if (ly > h_naglowka && lx < viewport_w() && ly < viewport_h()) {
-            int rel_y = ly - h_naglowka - 1 + scroll_y;
+        if (ly >= 1 && ly <= h_naglowka && lx >= 1 && lx < viewport_w()) {
+            int edge = 1 - scroll_x;
+            for (size_t c = 0; c < liczba_kolumn_; ++c) {
+                edge += kolumny_[c].szerokosc * skala_dpi_;
+                if (lx >= edge - 4 * skala_dpi_ && lx <= edge + 4 * skala_dpi_) {
+                    zmieniana_kolumna_ = static_cast<int>(c);
+                    poczatek_zmiany_x_ = e.x; poczatek_szerokosci_ = kolumny_[c].szerokosc;
+                    e.obsluzone = true; return;
+                }
+            }
+        }
+
+        if (ly > h_naglowka + 1 && lx >= 1 && lx < viewport_w() && ly < viewport_h()) {
+            int rel_y = ly - h_naglowka - 2 + scroll_y;
             int r = rel_y / h_wiersza;
             if (r >= 0 && r < static_cast<int>(liczba_widocznych_)) {
                 int node_idx = widoczne_wezly_[r];
@@ -470,10 +489,21 @@ public:
         }
     }
 
-    void obsluz_ruch_myszy(ZdarzenieMyszki& e) override {
+    void obsluz_uzyskanie_skupienia() override { czy_ma_fokus_ = true; uniewaznij_wezel(fokus_); }
+    void obsluz_utrate_skupienia() override { czy_ma_fokus_ = false; uniewaznij_wezel(fokus_); }
+
+    void obsluz_ruch_myszy(ZdarzenieMyszki& e) override { BUI_POMIAR(mouse_events, 1);
         Kontrolka::obsluz_ruch_myszy(e);
         if (!czy_wlaczona_) return;
 
+        if (zmieniana_kolumna_ >= 0) {
+            Kolumna& k = kolumny_[zmieniana_kolumna_];
+            int width = przytnij(poczatek_szerokosci_ + (e.x - poczatek_zmiany_x_) / skala_dpi_, k.minimalna_szerokosc, 8192);
+            if (width != k.szerokosc) {
+                k.szerokosc = width; przelicz_calkowita_szerokosc(); aktualizuj_przewijanie(); uniewaznij();
+            }
+            e.obsluzone = true; return;
+        }
         int lx = e.x - obszar_ekranu_.x;
         int ly = e.y - obszar_ekranu_.y;
         int h_naglowka = wysokosc_naglowka_ * skala_dpi_;
@@ -481,8 +511,8 @@ public:
         int scroll_y = pionowy_ && pionowy_->czy_widoczna() ? static_cast<int>(pionowy_->wartosc()) : 0;
 
         int stary = najechany_wezel_;
-        if (ly > h_naglowka && lx < viewport_w() && ly < viewport_h()) {
-            int rel_y = ly - h_naglowka - 1 + scroll_y;
+        if (ly > h_naglowka + 1 && lx >= 1 && lx < viewport_w() && ly < viewport_h()) {
+            int rel_y = ly - h_naglowka - 2 + scroll_y;
             int r = rel_y / h_wiersza;
             najechany_wezel_ = (r >= 0 && r < static_cast<int>(liczba_widocznych_)) ? widoczne_wezly_[r] : -1;
         } else {
@@ -490,6 +520,7 @@ public:
         }
 
         if (stary != najechany_wezel_) {
+            BUI_POMIAR(identity_changes, 1);
             if (stary >= 0 && static_cast<size_t>(stary) < pojemnosc_wezlow_ && wezly_[stary].uzyty)
                 uniewaznij_wezel({static_cast<uint32_t>(stary), wezly_[stary].generacja});
             if (najechany_wezel_ >= 0 && static_cast<size_t>(najechany_wezel_) < pojemnosc_wezlow_ &&
@@ -499,6 +530,10 @@ public:
         }
     }
 
+    void obsluz_zwolnienie_myszy(ZdarzenieMyszki& e) override {
+        if (e.czy_lewy_przycisk()) { zmieniana_kolumna_ = -1; czy_wcisnieta_ = false; }
+        e.obsluzone = true;
+    }
     void obsluz_opuszczenie_myszy() override {
         Kontrolka::obsluz_opuszczenie_myszy();
         if (najechany_wezel_ != -1) {
@@ -580,6 +615,7 @@ private:
     UchwytWezlaDrzewaKolumnowego wybrany_{};
     UchwytWezlaDrzewaKolumnowego fokus_{};
     int najechany_wezel_{-1};
+    int zmieniana_kolumna_{-1}, poczatek_zmiany_x_{0}, poczatek_szerokosci_{0};
     size_t ostatnio_narysowane_{0};
 
     int wysokosc_naglowka_{24};
@@ -852,8 +888,8 @@ private:
         int sy = pionowy_ && pionowy_->czy_widoczna() ? static_cast<int>(pionowy_->wartosc()) : 0;
         int y = 1 + wysokosc_naglowka_ * skala_dpi_ + 1 + p * rh - sy;
         Prostokat r(1, y, viewport_w(), rh);
-        if (!r.przeciecie(Prostokat(1, 1, viewport_w(), viewport_h())).czy_pusty())
-            uniewaznij_obszar(r);
+        r = r.przeciecie(Prostokat(1, 2 + wysokosc_naglowka_ * skala_dpi_, viewport_w(), viewport_h() - wysokosc_naglowka_ * skala_dpi_ - 1));
+        if (!r.czy_pusty()) uniewaznij_obszar(r);
     }
 };
 

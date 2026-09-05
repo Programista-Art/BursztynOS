@@ -22,6 +22,7 @@ public:
     void ustaw_wartosc(bool wartosc, bool powiadom = true) {
         if (wartosc_ == wartosc) return;
         wartosc_ = wartosc;
+        BUI_POMIAR(identity_changes, 1);
         uniewaznij_obszar(Prostokat(0, 0, obszar_.szerokosc, obszar_.wysokosc));
         if (powiadom && cb_zmiana_) cb_zmiana_(this, wartosc_, dane_zmiany_);
     }
@@ -72,7 +73,7 @@ public:
         const bool aktywuj = czy_wcisnieta_ && obszar_ekranu_.zawiera(e.pozycja());
         if (czy_wcisnieta_) {
             czy_wcisnieta_ = false;
-            uniewaznij();
+            if (!aktywuj) uniewaznij();
         }
         if (aktywuj) ustaw_wartosc(!wartosc_);
         e.obsluzone = true;

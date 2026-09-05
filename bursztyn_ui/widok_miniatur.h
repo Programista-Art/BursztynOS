@@ -24,17 +24,22 @@ public:
         styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
         czy_moze_miec_fokus_ = true;
         czy_reaguje_wizualnie_na_najechanie_ = false;
+        czy_reaguje_wizualnie_na_wcisniecie_ = false;
+        styl_.fokus = styl_.normalny;
+        czy_reaguje_wizualnie_na_najechanie_ = false;
         pionowy_ = new PasekPrzewijania();
         pionowy_->ustaw_orientacje(Orientacja::Pionowa);
         pionowy_->pokaz_strzalki(true);
         pionowy_->przy_przewijaniu([](PasekPrzewijania*, int64_t, void* d) {
             WidokMiniatur* w = static_cast<WidokMiniatur*>(d);
-            if (w) w->uniewaznij_obszar(w->prostokat_widoku());
+            if (w) { w->przygotuj_widoczne(false); w->uniewaznij_obszar(w->prostokat_widoku()); }
         }, this);
         dodaj_kontrolke(pionowy_);
         preferowany_rozmiar_ = Rozmiar(400, 260);
     }
     ~WidokMiniatur() override {
+        if (cache_pixels_) gui_free(cache_pixels_);
+        cache_pixels_ = nullptr;
         wyczysc();
         delete[] elementy_; elementy_ = nullptr;
     }
@@ -55,6 +60,7 @@ public:
     }
     void wyczysc() {
         for (size_t i = 0; i < liczba_; ++i) { delete[] elementy_[i].etykieta; elementy_[i] = Element{}; }
+        for (auto& c : cache_) c = WpisCache{};
         liczba_ = 0; wybrany_ = fokus_ = najechany_ = -1;
         aktualizuj_przewijanie(); uniewaznij();
     }
@@ -70,9 +76,11 @@ public:
     bool ustaw_wybrany_indeks(int i, bool powiadom = true) {
         if (i < -1 || i >= static_cast<int>(liczba_)) return false;
         if (wybrany_ == i) return true;
-        int stary = wybrany_; wybrany_ = i;
+        int stary = wybrany_, stary_fokus = fokus_; wybrany_ = i;
+        BUI_POMIAR(identity_changes, 1);
         if (i >= 0) { fokus_ = i; przewin_do(i); }
         uniewaznij_element(stary); uniewaznij_element(i);
+        if (stary_fokus != stary && stary_fokus != i) uniewaznij_element(stary_fokus);
         if (powiadom && cb_wybor_) cb_wybor_(this, i, i >= 0 ? elementy_[i].identyfikator : 0, dane_wyboru_);
         return true;
     }
@@ -106,18 +114,20 @@ public:
         int cw = szerokosc_elementu_ * s, ch = wysokosc_elementu_ * s;
         int sy = pionowy_->czy_widoczna() ? static_cast<int>(pionowy_->wartosc()) : 0;
         int pierwszy_wiersz = sy / ch;
-        int ostatni_wiersz = (sy + vh + ch - 1) / ch;
+        int ostatni_wiersz = (sy + vh - 1) / ch;
         size_t start = static_cast<size_t>(pierwszy_wiersz) * static_cast<size_t>(cols);
         size_t koniec = static_cast<size_t>(ostatni_wiersz + 1) * static_cast<size_t>(cols);
         if (start > liczba_) start = liczba_;
         if (koniec > liczba_) koniec = liczba_;
         ctx.dodaj_przyciecie(Prostokat(1, 1, vw, vh));
         for (size_t i = start; i < koniec; ++i) {
-            ++ostatnio_narysowane_;
+
             int row = static_cast<int>(i / static_cast<size_t>(cols));
             int col = static_cast<int>(i % static_cast<size_t>(cols));
             Prostokat kom(1 + col * cw + 2 * s, 1 + row * ch - sy + 2 * s,
                           cw - 4 * s, ch - 4 * s);
+            if (!ctx.przecina_klip(kom)) continue;
+            ++ostatnio_narysowane_; BUI_POMIAR(thumbnail_paints, 1);
             if (static_cast<int>(i) == wybrany_) ctx.rysuj_zaokraglony_prostokat(kom, Kolory::ZaznaczenieTlo, 4 * s);
             else if (static_cast<int>(i) == najechany_) ctx.rysuj_zaokraglony_prostokat(kom, 0x004A2605, 4 * s);
             if (static_cast<int>(i) == fokus_ && czy_ma_fokus_) ctx.rysuj_zaokraglona_ramke(kom, Kolory::AkcentFokus, 4 * s, s);
@@ -125,7 +135,7 @@ public:
             Prostokat img(kom.x + 5 * s, kom.y + 5 * s, kom.szerokosc - 10 * s,
                           kom.wysokosc - tekst_h - 14 * s);
             if (renderer_) renderer_(this, ctx, elementy_[i], img, dane_renderera_);
-            else rysuj_obraz(ctx, elementy_[i], img);
+            else rysuj_obraz(ctx, obraz_do_rysowania(elementy_[i]), img);
             ctx.rysuj_tekst_obciety(Punkt(kom.x + 4 * s, kom.dolny() - tekst_h - 3 * s),
                                     elementy_[i].etykieta,
                                     static_cast<int>(i) == wybrany_ ? Kolory::ZaznaczenieTekst : Kolory::TekstBialy,
@@ -134,9 +144,12 @@ public:
         ctx.zdejmij_przyciecie();
     }
 
-    void obsluz_ruch_myszy(ZdarzenieMyszki& e) override {
+    void obsluz_uzyskanie_skupienia() override { czy_ma_fokus_ = true; uniewaznij_element(fokus_); }
+    void obsluz_utrate_skupienia() override { czy_ma_fokus_ = false; uniewaznij_element(fokus_); }
+
+    void obsluz_ruch_myszy(ZdarzenieMyszki& e) override { BUI_POMIAR(mouse_events, 1);
         int n = indeks_w_punkcie(e.x, e.y);
-        if (n != najechany_) { int st = najechany_; najechany_ = n; uniewaznij_element(st); uniewaznij_element(n); }
+        if (n != najechany_) { BUI_POMIAR(identity_changes, 1); int st = najechany_; najechany_ = n; uniewaznij_element(st); uniewaznij_element(n); }
     }
     void obsluz_opuszczenie_myszy() override {
         Kontrolka::obsluz_opuszczenie_myszy();
@@ -203,12 +216,19 @@ private:
     }
     void aktualizuj_przewijanie() {
         if (!pionowy_) return;
-        int cols = liczba_kolumn();
-        uint64_t rows = cols > 0 ? (liczba_ + static_cast<size_t>(cols) - 1) / static_cast<size_t>(cols) : 0;
-        uint64_t h64 = rows * static_cast<uint64_t>(wysokosc_elementu_) * static_cast<uint64_t>(skala_dpi_ < 1 ? 1 : skala_dpi_);
-        int h = h64 > static_cast<uint64_t>(INT32_MAX) ? INT32_MAX : static_cast<int>(h64);
-        pionowy_->ustaw_widoczna(h > viewport_h()); aktualizuj_geometrie();
+        int scale = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        int cw = szerokosc_elementu_ * scale;
+        int fullw = obszar_.szerokosc - 2;
+        int cols = przytnij(fullw / cw, 1, 1024);
+        uint64_t rows = (liczba_ + cols - 1) / cols;
+        bool widoczny = rows * static_cast<uint64_t>(wysokosc_elementu_ * scale) > static_cast<uint64_t>(viewport_h());
+        if (widoczny) cols = przytnij((fullw - 15 * scale) / cw, 1, 1024);
+        rows = (liczba_ + cols - 1) / cols;
+        uint64_t h64 = rows * static_cast<uint64_t>(wysokosc_elementu_ * scale);
+        int h = h64 > INT32_MAX ? INT32_MAX : static_cast<int>(h64);
+        pionowy_->ustaw_widoczna(widoczny); aktualizuj_geometrie();
         pionowy_->ustaw_zakres(0, h); pionowy_->ustaw_rozmiar_strony(viewport_h() > 0 ? viewport_h() : 1);
+        przygotuj_widoczne(true);
     }
     Prostokat rect_elementu(int i) const {
         if (i < 0 || i >= static_cast<int>(liczba_)) return Prostokat();
@@ -224,6 +244,7 @@ private:
         int s = skala_dpi_ < 1 ? 1 : skala_dpi_, cols = liczba_kolumn();
         int sy = pionowy_->czy_widoczna() ? static_cast<int>(pionowy_->wartosc()) : 0;
         int col = lx / (szerokosc_elementu_ * s), row = (ly + sy) / (wysokosc_elementu_ * s);
+        if (col >= cols) return -1;
         uint64_t idx = static_cast<uint64_t>(row) * static_cast<uint64_t>(cols) + static_cast<uint64_t>(col);
         return idx < liczba_ ? static_cast<int>(idx) : -1;
     }
@@ -239,16 +260,68 @@ private:
             ctx.rysuj_prostokat(dst, 0x00302010); ctx.rysuj_ramke(dst, 0x00806030); return;
         }
         int dw = dst.szerokosc, dh = dst.wysokosc;
+        if (dw > e.szerokosc_obrazu) dw = e.szerokosc_obrazu;
+        if (dh > e.wysokosc_obrazu) dh = e.wysokosc_obrazu;
         int fitw = dw, fith = static_cast<int>((static_cast<int64_t>(e.wysokosc_obrazu) * dw) / e.szerokosc_obrazu);
         if (fith > dh) { fith = dh; fitw = static_cast<int>((static_cast<int64_t>(e.szerokosc_obrazu) * dh) / e.wysokosc_obrazu); }
         if (fitw <= 0 || fith <= 0) return;
         int ox = dst.x + (dw - fitw) / 2, oy = dst.y + (dh - fith) / 2;
-        for (int y = 0; y < fith; ++y) for (int x = 0; x < fitw; ++x) {
+        Prostokat visible = Prostokat(ox, oy, fitw, fith).przeciecie(ctx.lokalny_klip());
+        for (int y = visible.y - oy; y < visible.dolny() - oy && !visible.czy_pusty(); ++y)
+            for (int x = visible.x - ox; x < visible.prawy() - ox; ++x) {
             int sx = static_cast<int>((static_cast<int64_t>(x) * e.szerokosc_obrazu) / fitw);
             int sy = static_cast<int>((static_cast<int64_t>(y) * e.wysokosc_obrazu) / fith);
             uint32_t c = e.piksele[static_cast<size_t>(sy) * static_cast<size_t>(e.szerokosc_obrazu) + static_cast<size_t>(sx)];
             if (c != 0) ctx.rysuj_prostokat(Prostokat(ox + x, oy + y, 1, 1), c);
         }
+    }
+
+    // 32 bounded thumbnails, at most 160x90 each. Original model images
+    // remain borrowed; the system wallpaper cache at exactly 160x90 is used directly.
+    struct WpisCache { const uint32_t* source{nullptr}; int sw{0},sh{0},w{0},h{0}; Element image{}; };
+    static constexpr int CACHE_SLOTS = 32, CACHE_PIXELS = 160*90;
+    WpisCache cache_[CACHE_SLOTS]{};
+    uint32_t* cache_pixels_{nullptr}; int nastepny_cache_{0};
+    void rozmiar_obrazu(const Element& e,int& w,int& h) const {
+        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        w = przytnij((szerokosc_elementu_-14)*s,1,160);
+        h = przytnij((wysokosc_elementu_-34)*s,1,90);
+        int fh = static_cast<int>(static_cast<int64_t>(e.wysokosc_obrazu)*w/e.szerokosc_obrazu);
+        if(fh>h) w=static_cast<int>(static_cast<int64_t>(e.szerokosc_obrazu)*h/e.wysokosc_obrazu);
+        else h=fh;
+        if(w<1)w=1;
+        if(h<1)h=1;
+    }
+    int znajdz_cache(const Element& e,int w,int h) const {
+        for(int i=0;i<CACHE_SLOTS;++i) if(cache_[i].source==e.piksele && cache_[i].sw==e.szerokosc_obrazu &&
+            cache_[i].sh==e.wysokosc_obrazu && cache_[i].w==w && cache_[i].h==h)return i;
+        return -1;
+    }
+    void przygotuj_widoczne(bool alokuj) {
+        if(renderer_||!liczba_)return;
+        int cols=liczba_kolumn(),ch=wysokosc_elementu_*(skala_dpi_<1?1:skala_dpi_);
+        int sy=static_cast<int>(pionowy_->wartosc());
+        size_t begin=static_cast<size_t>(sy/ch)*cols,end=static_cast<size_t>((sy+viewport_h()+ch-1)/ch)*cols;
+        if(end>liczba_)end=liczba_;
+        for(size_t i=begin;i<end;++i) {
+            const Element& e=elementy_[i];if(!e.piksele)continue;
+            int w,h;rozmiar_obrazu(e,w,h);
+            if((w==e.szerokosc_obrazu&&h==e.wysokosc_obrazu)||znajdz_cache(e,w,h)>=0)continue;
+            if(!cache_pixels_&&alokuj) cache_pixels_=static_cast<uint32_t*>(gui_malloc(CACHE_SLOTS*CACHE_PIXELS*sizeof(uint32_t)));
+            if(!cache_pixels_)continue;
+            int slot=nastepny_cache_;
+            nastepny_cache_=(nastepny_cache_+1)%CACHE_SLOTS;
+            auto& c=cache_[slot];c.source=e.piksele;c.sw=e.szerokosc_obrazu;c.sh=e.wysokosc_obrazu;c.w=w;c.h=h;
+            uint32_t* out=cache_pixels_+slot*CACHE_PIXELS;
+            for(int y=0;y<h;++y) for(int x=0;x<w;++x)
+                out[y*w+x]=e.piksele[static_cast<size_t>(y*e.wysokosc_obrazu/h)*e.szerokosc_obrazu+x*e.szerokosc_obrazu/w];
+            c.image=e;c.image.piksele=out;c.image.szerokosc_obrazu=w;c.image.wysokosc_obrazu=h;
+        }
+    }
+    const Element& obraz_do_rysowania(const Element& e) const {
+        if(!e.piksele)return e;
+        int w,h;rozmiar_obrazu(e,w,h);int i=znajdz_cache(e,w,h);
+        return i>=0?cache_[i].image:e;
     }
 
     Element* elementy_{nullptr}; size_t liczba_{0}, pojemnosc_{0};

@@ -118,9 +118,9 @@ void zbuduj_interakcje(Panel& p) {
 
 void zbuduj_grafike(Panel& p) {
     p.ustaw_orientacje(Orientacja::Pionowa); p.ustaw_odstep(6);
-    Etykieta& a = p.dodaj<Etykieta>("SelektorKoloru — paleta i zapis szesnastkowy"); a.ustaw_kolor_tekstu(Kolory::AkcentZloty);
+    Etykieta& a = p.dodaj<Etykieta>("SelektorKoloru — HSV, RGB i zapis szesnastkowy"); a.ustaw_kolor_tekstu(Kolory::AkcentZloty);
     SelektorKoloru& sk = p.dodaj<SelektorKoloru>(0x00FFBF00);
-    sk.ustaw_preferowany_rozmiar(Rozmiar(-1, 112));
+    sk.ustaw_preferowany_rozmiar(Rozmiar(260, 36));
     Panel& preview = p.dodaj<Panel>(); preview.ustaw_preferowany_rozmiar(Rozmiar(-1, 34));
     preview.ustaw_kolor_tla(0x00FFBF00); g.podglad_koloru = &preview;
     sk.przy_zmianie([](SelektorKoloru*, uint32_t c, void*) {

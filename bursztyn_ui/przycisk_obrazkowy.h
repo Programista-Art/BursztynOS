@@ -179,10 +179,10 @@ private:
                     int sx = ((px - sx0) * ikona_w_) / w;
                     uint32_t c = piksele_ikony_[sy * ikona_w_ + sx];
                     wiersz[dx] = (c & 0xFF000000U) != 0
-                        ? (c & 0x00FFFFFFU)
+                        ? ((c & 0x00FFFFFFU) ? (c & 0x00FFFFFFU) : 0x01000000U)
                         : SKLADACZ_PIKSEL_PRZEZROCZYSTY;
                 }
-                (void)gui_blit(rx0, py, rw, 1, wiersz);
+                ctx.rysuj_wiersz_ekranu(rx0, py, rw, wiersz);
             }
         } else {
             // Rysowanie wektorowej ikony systemowej

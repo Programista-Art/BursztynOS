@@ -1,4 +1,5 @@
 #pragma once
+#include "diagnostyka.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -68,6 +69,9 @@ public:
     virtual const char* tekst() const { return tekst_; }
     virtual void ustaw_tekst(const char* nowy_tekst) {
         if (!nowy_tekst) nowy_tekst = "";
+        size_t eq = 0;
+        while (tekst_[eq] && nowy_tekst[eq] && tekst_[eq] == nowy_tekst[eq]) ++eq;
+        if (tekst_[eq] == nowy_tekst[eq]) return;
         size_t i = 0;
         for (; i < MAKS_DLUGOSC_TEKSTU - 1 && nowy_tekst[i] != '\0'; ++i) {
             tekst_[i] = nowy_tekst[i];
@@ -441,10 +445,16 @@ public:
     // 6. Zarządzanie odrysowywaniem i grupowanie (begin_update / end_update)
     // =========================================================================
 
+#if BURSZTYN_UI_DIAGNOSTYKA
+    PomiaryKontrolki pomiary_{};
+    void zeruj_pomiary() { pomiary_ = {}; }
+#endif
+    ObszaryBrudne brudne_regiony_{};
     bool czy_brudna() const { return czy_brudna_; }
     Prostokat pobierz_brudny_obszar() const { return brudny_obszar_; }
     void wyczysc_brudny_obszar() {
         czy_brudna_ = false;
+        brudne_regiony_.wyczysc();
         brudny_obszar_ = Prostokat(0, 0, 0, 0);
         for (size_t i = 0; i < liczba_dzieci_; ++i) {
             if (dzieci_[i]) dzieci_[i]->wyczysc_brudny_obszar();
@@ -469,17 +479,25 @@ public:
     void uniewaznij() {
         if (blokada_aktualizacji_ > 0) return;
         czy_brudna_ = true;
+        BUI_POMIAR(dirty_calls, 1);
+        BUI_POMIAR(dirty_pixels, static_cast<uint64_t>(obszar_.szerokosc) * obszar_.wysokosc);
         brudny_obszar_ = obszar_ekranu_;
+        brudne_regiony_.wyczysc(); brudne_regiony_.dodaj(obszar_ekranu_);
         if (rodzic_) {
             rodzic_->uniewaznij_dziecko(this, obszar_ekranu_);
         }
     }
 
     void uniewaznij_obszar(Prostokat r) {
+        r = r.przeciecie(Prostokat(0, 0, obszar_.szerokosc, obszar_.wysokosc));
+        if (r.czy_pusty()) return;
+        BUI_POMIAR(dirty_calls, 1);
+        BUI_POMIAR(dirty_pixels, r.czy_pusty() ? 0 : static_cast<uint64_t>(r.szerokosc) * r.wysokosc);
         if (blokada_aktualizacji_ > 0) return;
         czy_brudna_ = true;
         Prostokat r_ekranu(obszar_ekranu_.x + r.x, obszar_ekranu_.y + r.y, r.szerokosc, r.wysokosc);
         brudny_obszar_ = brudny_obszar_.suma(r_ekranu);
+        brudne_regiony_.dodaj(r_ekranu);
         if (rodzic_) {
             rodzic_->uniewaznij_dziecko(this, r_ekranu);
         }
@@ -490,6 +508,7 @@ public:
         if (blokada_aktualizacji_ > 0) return;
         czy_brudna_ = true;
         brudny_obszar_ = brudny_obszar_.suma(r_ekranu);
+        brudne_regiony_.dodaj(r_ekranu);
         if (rodzic_) {
             rodzic_->uniewaznij_dziecko(this, r_ekranu);
         }
@@ -610,6 +629,7 @@ public:
     }
 
     virtual void rozmiesc(Prostokat docelowy_obszar) {
+        BUI_POMIAR(layout_passes, 1);
         bool rozmiar_zmieniony = (obszar_.szerokosc != docelowy_obszar.szerokosc || obszar_.wysokosc != docelowy_obszar.wysokosc);
         obszar_ = docelowy_obszar;
         Punkt rodzic_poz = rodzic_ ? rodzic_->obszar_ekranu().pozycja() : Punkt(0, 0);
@@ -665,6 +685,7 @@ public:
         ctx.dodaj_przyciecie(Prostokat(0, 0, obszar_.szerokosc, obszar_.wysokosc));
 
         if (nalezy_rysowac) {
+            BUI_POMIAR(paint_calls, 1);
             rysuj_siebie(ctx);
 
             if (cb_wlasne_rysowanie_) {

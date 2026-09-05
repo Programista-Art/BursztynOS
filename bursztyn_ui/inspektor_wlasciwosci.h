@@ -51,11 +51,14 @@ public:
         styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
         czy_moze_miec_fokus_ = true;
         czy_reaguje_wizualnie_na_najechanie_ = false;
+        czy_reaguje_wizualnie_na_wcisniecie_ = false;
+        styl_.fokus = styl_.normalny;
+        czy_reaguje_wizualnie_na_najechanie_ = false;
         pionowy_ = new PasekPrzewijania();
         pionowy_->ustaw_orientacje(Orientacja::Pionowa);
         pionowy_->przy_przewijaniu([](PasekPrzewijania*, int64_t, void* d) {
             InspektorWlasciwosci* w = static_cast<InspektorWlasciwosci*>(d);
-            if (w) { w->aktualizuj_edytor(); w->uniewaznij_obszar(w->prostokat_danych()); }
+            if (w) { w->anuluj_edycje(); w->uniewaznij_obszar(w->prostokat_danych()); }
         }, this);
         edytor_ = new Edytor(this); edytor_->ustaw_widoczna(false);
         dodaj_kontrolke(pionowy_); dodaj_kontrolke(edytor_);
@@ -164,8 +167,10 @@ public:
         int first = sy / rh, count = (obszar_.wysokosc - hh + rh - 1) / rh + 1;
         ctx.dodaj_przyciecie(prostokat_danych());
         for (int n = 0; n < count; ++n) {
-            int i = first + n; if (i >= static_cast<int>(liczba_)) break; ++ostatnio_narysowane_;
+            int i = first + n; if (i >= static_cast<int>(liczba_)) break;
             int y = 1 + hh + i * rh - sy; Prostokat rr(1, y, vw, rh);
+            if (!ctx.przecina_klip(rr)) continue;
+            ++ostatnio_narysowane_;
             if (i == wybrany_) ctx.rysuj_prostokat(rr, Kolory::ZaznaczenieTlo);
             else if (i == najechany_) ctx.rysuj_prostokat(rr, 0x004A2605);
             if (i == fokus_ && czy_ma_fokus_) ctx.rysuj_ramke(rr, Kolory::AkcentFokus, s);
@@ -186,7 +191,7 @@ public:
         }
         ctx.zdejmij_przyciecie();
     }
-    void obsluz_ruch_myszy(ZdarzenieMyszki& e) override { int n = indeks_w_punkcie(e.x, e.y); if (n != najechany_) { int st = najechany_; najechany_ = n; uniewaznij_wiersz(st); uniewaznij_wiersz(n); } }
+    void obsluz_ruch_myszy(ZdarzenieMyszki& e) override { BUI_POMIAR(mouse_events, 1); int n = indeks_w_punkcie(e.x, e.y); if (n != najechany_) { int st = najechany_; najechany_ = n; uniewaznij_wiersz(st); uniewaznij_wiersz(n); } }
     void obsluz_opuszczenie_myszy() override { Kontrolka::obsluz_opuszczenie_myszy(); if (najechany_ >= 0) { int st = najechany_; najechany_ = -1; uniewaznij_wiersz(st); } }
     void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e) override { if (!czy_wlaczona_ || !e.czy_lewy_przycisk()) return; int i = indeks_w_punkcie(e.x, e.y); if (i >= 0) { ustaw_wybrany_indeks(i); if (e.x - obszar_ekranu_.x >= (viewport_w() * 46) / 100) rozpocznij_edycje(i); e.obsluzone = true; } }
     void obsluz_rolke(ZdarzenieRolki& e) override { if (e.delta_y && pionowy_->czy_widoczna()) { pionowy_->przewin_o(e.delta_y > 0 ? -3 * wysokosc_wiersza_ : 3 * wysokosc_wiersza_); e.obsluzone = true; } }
@@ -222,7 +227,7 @@ private:
     int indeks_w_punkcie(int x, int y) const { int s = skala_dpi_ < 1 ? 1 : skala_dpi_, ly = y - obszar_ekranu_.y - 1 - wysokosc_naglowka_ * s; if (ly < 0 || x < obszar_ekranu_.x || x >= obszar_ekranu_.x + viewport_w()) return -1; int sy = pionowy_->czy_widoczna() ? static_cast<int>(pionowy_->wartosc()) : 0; int i = (ly + sy) / (wysokosc_wiersza_ * s); return i >= 0 && i < static_cast<int>(liczba_) ? i : -1; }
     void uniewaznij_wiersz(int i) { if (i < 0 || i >= static_cast<int>(liczba_)) return; int s = skala_dpi_ < 1 ? 1 : skala_dpi_, sy = pionowy_->czy_widoczna() ? static_cast<int>(pionowy_->wartosc()) : 0; Prostokat r(1, 1 + wysokosc_naglowka_ * s + i * wysokosc_wiersza_ * s - sy, viewport_w(), wysokosc_wiersza_ * s); r = r.przeciecie(prostokat_danych()); if (!r.czy_pusty()) uniewaznij_obszar(r); }
     void przewin_do(int i) { int s = skala_dpi_ < 1 ? 1 : skala_dpi_, rh = wysokosc_wiersza_ * s, y = i * rh, cur = static_cast<int>(pionowy_->wartosc()), vh = prostokat_danych().wysokosc; if (y < cur) pionowy_->ustaw_wartosc(y); else if (y + rh > cur + vh) pionowy_->ustaw_wartosc(y + rh - vh); }
-    void aktualizuj_edytor() { if (edytowany_ < 0 || !edytor_) return; int s = skala_dpi_ < 1 ? 1 : skala_dpi_, split = (viewport_w() * 46) / 100, sy = pionowy_->czy_widoczna() ? static_cast<int>(pionowy_->wartosc()) : 0; int y = 1 + wysokosc_naglowka_ * s + edytowany_ * wysokosc_wiersza_ * s - sy; edytor_->rozmiesc(Prostokat(split + 2 * s, y + s, viewport_w() - split - 3 * s, wysokosc_wiersza_ * s - 2 * s)); edytor_->ustaw_widoczna(y >= prostokat_danych().y && y < prostokat_danych().dolny()); }
+    void aktualizuj_edytor() { if (edytowany_ < 0 || !edytor_) return; int s = skala_dpi_ < 1 ? 1 : skala_dpi_, split = (viewport_w() * 46) / 100, sy = pionowy_->czy_widoczna() ? static_cast<int>(pionowy_->wartosc()) : 0; int y = 1 + wysokosc_naglowka_ * s + edytowany_ * wysokosc_wiersza_ * s - sy; edytor_->rozmiesc(Prostokat(split + 2 * s, y + s, viewport_w() - split - 3 * s, wysokosc_wiersza_ * s - 2 * s)); edytor_->ustaw_widoczna(y >= prostokat_danych().y && y + wysokosc_wiersza_ * s <= prostokat_danych().dolny()); }
     void powiadom(int i) { uniewaznij_wiersz(i); if (cb_zmiana_) cb_zmiana_(this, wlasciwosci_[i].identyfikator, wlasciwosci_[i], dane_zmiany_); }
     static void rysuj_wartosc(KontekstRysowania& ctx, const Wlasciwosc& w, Prostokat r, int s) { char b[128]{}; const char* t = b; if (w.rodzaj == RodzajWlasciwosci::Tekst) t = w.tekst; else if (w.rodzaj == RodzajWlasciwosci::Liczba) formatuj_i64(b, sizeof(b), w.liczba); else if (w.rodzaj == RodzajWlasciwosci::Logiczna) t = w.logiczna ? "Włączony" : "Wyłączony"; else if (w.rodzaj == RodzajWlasciwosci::Wybor) t = w.wybrany_wybor >= 0 && static_cast<size_t>(w.wybrany_wybor) < w.liczba_wyborow ? w.wybory[w.wybrany_wybor] : "Brak"; else { formatuj_kolor(b, sizeof(b), w.kolor); uint32_t c = w.kolor == 0 ? 0x01000000U : w.kolor; ctx.rysuj_prostokat(Prostokat(r.x + 5 * s, r.y + 5 * s, 22 * s, r.wysokosc - 10 * s), c); ctx.rysuj_ramke(Prostokat(r.x + 5 * s, r.y + 5 * s, 22 * s, r.wysokosc - 10 * s), 0x00A08060, s); r.x += 31 * s; r.szerokosc -= 31 * s; } ctx.rysuj_tekst_obciety(Punkt(r.x + 6 * s, r.y + (r.wysokosc - 16 * s) / 2), t, w.tylko_do_odczytu ? Kolory::TekstWyciszony : Kolory::TekstBialy, r.szerokosc - 12 * s, s); }
 

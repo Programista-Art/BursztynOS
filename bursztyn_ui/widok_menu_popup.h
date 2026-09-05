@@ -117,8 +117,9 @@ public:
     }
     void obsluz_zwolnienie_myszy(ZdarzenieMyszki& e) override {
         int i = indeks_z_punktu(e.x - obszar_ekranu_.x, e.y - obszar_ekranu_.y);
-        if (i >= 0 && i == wcisniety_) aktywuj(i);
+        bool wykonaj = i >= 0 && i == wcisniety_;
         wcisniety_ = -1; e.obsluzone = i >= 0;
+        if (wykonaj) aktywuj(i);
     }
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
         uint32_t k = e.kod_klawisza; bool usb = (k & BWS_KEY_SOURCE_USB) != 0;

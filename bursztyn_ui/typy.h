@@ -169,4 +169,34 @@ constexpr T przytnij(T wartosc, T min_wart, T max_wart) {
     return (wartosc < min_wart) ? min_wart : ((wartosc > max_wart) ? max_wart : wartosc);
 }
 
+// Bounded list. Adjacent viewport + scrollbar regions may add up to 5%
+// gutter pixels to avoid a second subtree traversal; separate rows stay separate.
+struct ObszaryBrudne {
+    static constexpr size_t MAKS = 32;
+    Prostokat prostokaty[MAKS]{};
+    size_t liczba{0};
+    void wyczysc() { liczba = 0; }
+    void dodaj(Prostokat r) {
+        if (r.czy_pusty()) return;
+        for (size_t i = 0; i < liczba;) {
+            Prostokat u = r.suma(prostokaty[i]);
+            Prostokat v = r.przeciecie(prostokaty[i]);
+            int64_t area = static_cast<int64_t>(r.szerokosc)*r.wysokosc +
+                static_cast<int64_t>(prostokaty[i].szerokosc)*prostokaty[i].wysokosc -
+                (v.czy_pusty() ? 0 : static_cast<int64_t>(v.szerokosc)*v.wysokosc);
+            int64_t union_area = static_cast<int64_t>(u.szerokosc)*u.wysokosc;
+            bool sasiedni_pasek = (r.prawy() == prostokaty[i].x || prostokaty[i].prawy() == r.x) &&
+                (r.y <= prostokaty[i].y ? r.dolny() >= prostokaty[i].dolny() : prostokaty[i].dolny() >= r.dolny());
+            if (union_area == area || (sasiedni_pasek && union_area * 100 <= area * 105)) {
+                r = u; prostokaty[i] = prostokaty[--liczba]; i = 0;
+            } else ++i;
+        }
+        if (liczba == MAKS) {
+            for (size_t i = 0; i < liczba; ++i) r = r.suma(prostokaty[i]);
+            liczba = 0;
+        }
+        prostokaty[liczba++] = r;
+    }
+};
+
 } // namespace BursztynUI
