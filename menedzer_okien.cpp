@@ -35,12 +35,12 @@ constexpr int MENU_X = 10;
 constexpr int MENU_W = 260;
 constexpr int MENU_GORNY_MARGINES = 10;
 constexpr int MENU_ELEMENT_WYS = 25;
-constexpr int MENU_ELEMENTOW = 12;
+constexpr int MENU_ELEMENTOW = 13;
 constexpr int MENU_WYS =
     (MENU_GORNY_MARGINES * 2) + (MENU_ELEMENTOW * MENU_ELEMENT_WYS);
 
 // Pozycja "Gry ->" w glownym Menu Start.
-constexpr int MENU_GRY_INDEX = 9;
+constexpr int MENU_GRY_INDEX = 10;
 constexpr int MENU_GRY_W = 180;
 constexpr int MENU_GRY_ELEMENTOW = 1;
 constexpr int MENU_GRY_WYS =
@@ -78,6 +78,8 @@ const char* const SCIEZKA_DEMO_UI =
     "/programy/demo_ui.cebula/demo_ui.bur";
 const char* const SCIEZKA_KONTROLKI2 =
     "/programy/kontrolki2.cebula/kontrolki2.bur";
+const char* const SCIEZKA_KONTROLKI3 =
+    "/programy/kontrolki3.cebula/kontrolki3.bur";
 const char* const SCIEZKA_SNAKE = "/gry/snake.cebula/snake.bur";
 const char* const SCIEZKA_PRZEGLADARKA_OBRAZOW =
     "/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur";
@@ -95,7 +97,8 @@ enum class TypIkonyAplikacji : uint8_t {
     Eksplorator,
     Obrazy,
     DemoUI,
-    Kontrolki2
+    Kontrolki2,
+    Kontrolki3
 };
 
 struct AplikacjaPulpitu {
@@ -126,7 +129,9 @@ const AplikacjaPulpitu APLIKACJE_PULPITU[] = {
     {640, 50, SCIEZKA_DEMO_UI, "BursztynUI -", "Demo", "BursztynUI",
      TypIkonyAplikacji::DemoUI},
     {720, 50, SCIEZKA_KONTROLKI2, "BursztynUI Kontrolki 2", "Kontrolki 2", nullptr,
-     TypIkonyAplikacji::Kontrolki2}
+     TypIkonyAplikacji::Kontrolki2},
+    {800, 50, SCIEZKA_KONTROLKI3, "Kontrolki 3", "Kontrolki 3", nullptr,
+     TypIkonyAplikacji::Kontrolki3}
 };
 
 constexpr size_t LICZBA_APLIKACJI_PULPITU =
@@ -1298,6 +1303,17 @@ void rysuj_ikone_aplikacji(const AplikacjaPulpitu& aplikacja) {
             gui_rysuj_prostokat(x + 6, y + 22, 16, 18, 0x00301500);
             gui_rysuj_prostokat(x + 26, y + 22, 16, 18, 0x00301500);
             break;
+        case TypIkonyAplikacji::Kontrolki3:
+            // Trzy bursztynowe suwaki na granatowej karcie: odrebny znak K3.
+            gui_rysuj_prostokat(x, y, IKONA_W, IKONA_H, 0x001C2940);
+            gui_rysuj_prostokat(x + 3, y + 3, 42, 42, 0x00305070);
+            gui_rysuj_prostokat(x + 8, y + 11, 32, 4, 0x00FFBF00);
+            gui_rysuj_prostokat(x + 26, y + 8, 7, 10, 0x00FFFFFF);
+            gui_rysuj_prostokat(x + 8, y + 23, 32, 4, 0x00E58A00);
+            gui_rysuj_prostokat(x + 14, y + 20, 7, 10, 0x00FFFFFF);
+            gui_rysuj_prostokat(x + 8, y + 35, 32, 4, 0x00CC33CC);
+            gui_rysuj_prostokat(x + 31, y + 32, 7, 10, 0x00FFFFFF);
+            break;
     }
 
     const uint32_t kolor_etykiety =
@@ -1346,6 +1362,7 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
             "> Przeglądarka Obrazów",
             "> Demo BursztynUI",
             "> Kontrolki 2",
+            "> Kontrolki 3",
             "> Testy systemu",
             "> Gry ->",
             "> Uruchom ponownie",
@@ -1601,6 +1618,10 @@ void obsluz_element_menu(int item_index) {
                                 "BursztynUI Kontrolki 2");
             break;
         case 8:
+            uruchom_lub_aktywuj(SCIEZKA_KONTROLKI3,
+                                "Kontrolki 3");
+            break;
+        case 9:
             uruchom_lub_aktywuj(SCIEZKA_TEST, "Testy Bursztyn OS");
             break;
         case MENU_GRY_INDEX:
@@ -1608,10 +1629,10 @@ void obsluz_element_menu(int item_index) {
             aktualizuj_overlay_menu();
             RysujPulpit(true);
             break;
-        case 10:
+        case 11:
             wykonaj_restart();
             break;
-        case 11:
+        case 12:
             wykonaj_zamkniecie();
             break;
         default:

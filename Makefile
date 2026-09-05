@@ -273,6 +273,7 @@ OBJS := \
 	test_blob.o \
 	demo_ui_blob.o \
 	kontrolki2_blob.o \
+	kontrolki3blob.o \
 	repro_blob.o \
 	snake_blob.o \
 	przegladarka_obrazow_blob.o \
@@ -449,6 +450,18 @@ kontrolki2_blob.o: kontrolki2_tmp.o bursztyn_gui.o programy/demo_ui/demo_ui_link
 		kontrolki2_tmp.o bursztyn_gui.o -o kontrolki2.elf
 	$(OBJCOPY) -O binary kontrolki2.elf kontrolki2.bin
 	$(LD) -r -b binary kontrolki2.bin -o kontrolki2_blob.o
+
+# BursztynUI Kontrolki 3. Zaleznosc wildcard wymusza przebudowe aplikacji
+# po zmianie dowolnej publicznej kontrolki; analogiczna zaleznosc test_tmp.o
+# znajduje sie powyzej.
+kontrolki3tmp.o: programy/kontrolki3/kontrolki3.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
+
+kontrolki3blob.o: kontrolki3tmp.o bursztyn_gui.o programy/kontrolki3/kontrolki3_linker.ld
+	$(LD) --gc-sections -T programy/kontrolki3/kontrolki3_linker.ld $(RING3_LDFLAGS) \
+		kontrolki3tmp.o bursztyn_gui.o -o kontrolki3.elf
+	$(OBJCOPY) -O binary kontrolki3.elf kontrolki3.bin
+	$(LD) -r -b binary kontrolki3.bin -o kontrolki3blob.o
 
 # Obraz testowy test.bmp	
 test_bmp_blob.o: obrazy/test.bmp

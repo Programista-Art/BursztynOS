@@ -144,6 +144,9 @@ extern "C" uint8_t _binary_demo_ui_bin_end[];
 extern "C" uint8_t _binary_kontrolki2_bin_start[];
 extern "C" uint8_t _binary_kontrolki2_bin_end[];
 
+extern "C" uint8_t _binary_kontrolki3_bin_start[];
+extern "C" uint8_t _binary_kontrolki3_bin_end[];
+
 extern "C" uint8_t _binary_przegladarka_obrazow_bin_start[];
 extern "C" uint8_t _binary_przegladarka_obrazow_bin_end[];
 
@@ -669,6 +672,7 @@ void utworz_drabine_katalogow() {
         "/programy/przegladarka-obrazow.cebula",
         "/programy/demo_ui.cebula",
         "/programy/kontrolki2.cebula",
+        "/programy/kontrolki3.cebula",
         "/programy/test.cebula",
         "/gry",
         "/gry/snake.cebula",
@@ -990,6 +994,16 @@ void instaluj_wbudowane_programy() {
         "wersja = \"0.1\"\n"
         "poziom_zaufania = 4\n"
         "plik_startowy = \"kontrolki2.bur\"\n"
+        "uprawnienia = [\n"
+        "    \"okna\"\n"
+        "]\n";
+
+    static const char MANIFEST_KONTROLKI3[] =
+        "nazwa = \"Kontrolki 3\"\n"
+        "autor = \"Programista Art\"\n"
+        "wersja = \"0.1\"\n"
+        "poziom_zaufania = 4\n"
+        "plik_startowy = \"kontrolki3.bur\"\n"
         "uprawnienia = [\n"
         "    \"okna\"\n"
         "]\n";
@@ -1388,6 +1402,19 @@ void instaluj_wbudowane_programy() {
     } else {
         wypisz_log(
             "[BSP] Kontrolki 2 zainstalowane jako .cebula.");
+    }
+
+    if (!instaluj_paczke(
+            "/programy/kontrolki3.cebula/opis.aplikacji",
+            MANIFEST_KONTROLKI3,
+            "/programy/kontrolki3.cebula/kontrolki3.bur",
+            _binary_kontrolki3_bin_start,
+            _binary_kontrolki3_bin_end)) {
+        wypisz_log(
+            "[BSP-BLAD] Nie mozna zainstalowac Kontrolek 3.");
+    } else {
+        wypisz_log(
+            "[BSP] Kontrolki 3 zainstalowane jako .cebula.");
     }
 
 

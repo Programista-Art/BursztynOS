@@ -4687,6 +4687,379 @@ static void wykonaj_testy_bursztyn_ui() {
         bws_log("=== WYKRYTO BLEDY W TESTACH BURSZTYNUI (FAIL) ===\n\n");
 }
 
+static void wykonaj_testy_kontrolki3() {
+    bws_log("\n=== ROZPOCZECIE TESTOW KONTROLKI 3 ===\n");
+    uint32_t wszystkie_przed = bws_test_blad;
+
+    {
+        uint32_t przed = bws_test_blad;
+        bws_log("[KONTROLKI3 1/8] WidokDrzewiastoKolumnowy...\n");
+        WidokDrzewiastoKolumnowy* w = new WidokDrzewiastoKolumnowy();
+        bws_sprawdz_msg(w != nullptr, "K3 drzewo alokacja");
+        if (w) {
+            bws_sprawdz_msg(sizeof(WidokDrzewiastoKolumnowy) < 32768U,
+                            "K3 drzewo pusta instancja bez statycznej puli setek KiB");
+            bws_log_u64("[K3 DRZEWO POMIAR] sizeof_control_B=", sizeof(WidokDrzewiastoKolumnowy));
+            w->rozmiesc(Prostokat(0, 0, 420, 240));
+            bws_sprawdz(w->dodaj_kolumne("Nazwa", 220));
+            bws_sprawdz(w->dodaj_kolumne("Typ", 160));
+            bws_sprawdz(w->dodaj_kolumne("Rozmiar", 120));
+            bws_sprawdz(w->liczba_kolumn() == 3 && w->kolumna(0) &&
+                        w->kolumna(0)->szerokosc == 220 && w->kolumna(3) == nullptr);
+            auto korzen = w->dodaj_korzen("programy", "Katalog", "—");
+            auto dziecko = w->dodaj_dziecko(korzen, "notatnik.cebula", "Aplikacja", "176 KiB");
+            bws_sprawdz(w->czy_uchwyt_poprawny(korzen) && w->czy_uchwyt_poprawny(dziecko));
+            bws_sprawdz(w->ustaw_ikone(dziecko, 7) && w->ikona(dziecko) == 7);
+            UchwytWezlaDrzewaKolumnowego zly{99999U, 1U};
+            bws_sprawdz(!w->czy_uchwyt_poprawny(zly) && !w->ustaw_fokus_wezel(zly));
+            bws_sprawdz(w->liczba_widocznych_wezlow() == 2);
+            w->zwin(korzen); bws_sprawdz(w->liczba_widocznych_wezlow() == 1);
+            w->rozwin(korzen); bws_sprawdz(w->liczba_widocznych_wezlow() == 2);
+            w->ustaw_wybrany_wezel(korzen); w->ustaw_fokus_wezel(dziecko);
+            bws_sprawdz(w->wybrany_wezel() != w->fokus_wezel());
+            // Bezposredni hit-test grotu rozwijania w pierwszym wierszu.
+            ZdarzenieMyszki grot{}; grot.przycisk = 1; grot.x = 8; grot.y = 30;
+            w->obsluz_wcisniecie_myszy(grot); bws_sprawdz(!w->czy_rozwiniety(korzen));
+            w->obsluz_wcisniecie_myszy(grot); bws_sprawdz(w->czy_rozwiniety(korzen));
+            ZdarzenieKlawiatury home{}; home.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x47U;
+            w->obsluz_wcisniecie_klawisza(home); bws_sprawdz(w->fokus_wezel() == korzen);
+            ZdarzenieKlawiatury right{}; right.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x4DU;
+            w->obsluz_wcisniecie_klawisza(right); bws_sprawdz(w->fokus_wezel() == dziecko);
+            ZdarzenieKlawiatury left{}; left.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x4BU;
+            w->obsluz_wcisniecie_klawisza(left); bws_sprawdz(w->fokus_wezel() == korzen);
+            w->obsluz_wcisniecie_klawisza(left); bws_sprawdz(!w->czy_rozwiniety(korzen));
+            w->obsluz_wcisniecie_klawisza(right); bws_sprawdz(w->czy_rozwiniety(korzen));
+            ZdarzenieKlawiatury end{}; end.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x4FU;
+            w->obsluz_wcisniecie_klawisza(end); bws_sprawdz(w->fokus_wezel() == dziecko);
+            ZdarzenieKlawiatury up{}; up.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x48U;
+            ZdarzenieKlawiatury down{}; down.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x50U;
+            w->obsluz_wcisniecie_klawisza(up); bws_sprawdz(w->fokus_wezel() == korzen);
+            ZdarzenieKlawiatury space{}; space.kod_klawisza = 32;
+            w->obsluz_wcisniecie_klawisza(space); bws_sprawdz(!w->czy_rozwiniety(korzen));
+            w->obsluz_wcisniecie_klawisza(space); bws_sprawdz(w->czy_rozwiniety(korzen));
+            w->obsluz_wcisniecie_klawisza(down); bws_sprawdz(w->fokus_wezel() == dziecko);
+            w->rozpocznij_aktualizacje();
+            auto gleboki = dziecko;
+            for (int i = 2; i < 2000; ++i) gleboki = w->dodaj_dziecko(gleboki, "węzeł", "Test", "1 KiB");
+            w->zakoncz_aktualizacje();
+            bws_sprawdz(w->liczba_wezlow() == 2000 && w->czy_uchwyt_poprawny(gleboki));
+            bws_sprawdz(w->pasek_pionowy().czy_widoczna() && w->pasek_poziomy().czy_widoczna());
+            ZdarzenieKlawiatury page_down{}; page_down.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x51U;
+            int64_t przed_page = w->pasek_pionowy().wartosc();
+            w->obsluz_wcisniecie_klawisza(page_down);
+            bws_sprawdz(w->pasek_pionowy().wartosc() >= przed_page);
+            w->pasek_pionowy().ustaw_wartosc(0);
+            ZdarzenieRolki rolka{}; rolka.delta_y = -1;
+            w->obsluz_rolke(rolka);
+            bws_sprawdz(rolka.obsluzone && w->pasek_pionowy().wartosc() > 0);
+            KontekstRysowania ctx; uint64_t a0 = gui_liczba_alokacji_sterty(); w->rysuj(ctx, true); uint64_t a1 = gui_liczba_alokacji_sterty();
+            const uint64_t alokacje_rysowania = a1 - a0;
+            bws_sprawdz_msg(a0 == a1, "K3 drzewo paint 0 alokacji");
+            bws_sprawdz(w->liczba_ostatnio_narysowanych_wierszy() < w->liczba_widocznych_wezlow());
+            bws_log_u64("[K3 DRZEWO POMIAR] visible_rows=", w->liczba_ostatnio_narysowanych_wierszy());
+            bws_log_u64("[K3 DRZEWO POMIAR] model_rows=", w->liczba_widocznych_wezlow());
+            bws_log_u64("[K3 DRZEWO POMIAR] paint_allocations=", alokacje_rysowania);
+            w->wyczysc_brudny_obszar();
+            ZdarzenieMyszki mv{}; mv.typ = TypZdarzenia::RuchMyszy; mv.x = 300; mv.y = 100;
+            w->obsluz_ruch_myszy(mv); w->wyczysc_brudny_obszar();
+            a0 = gui_liczba_alokacji_sterty(); for (int i = 0; i < 5000; ++i) w->obsluz_ruch_myszy(mv); a1 = gui_liczba_alokacji_sterty();
+            bws_sprawdz(a0 == a1 && !w->czy_brudna());
+            bws_log_u64("[K3 DRZEWO 5K] mouse_allocations=", a1 - a0);
+            bws_log_u64("[K3 DRZEWO 5K] dirty_calls=", w->czy_brudna() ? 1 : 0);
+            auto stary = korzen; w->wyczysc(); bws_sprawdz(!w->czy_uchwyt_poprawny(stary));
+            auto nowy = w->dodaj_korzen("nowy");
+            bws_sprawdz(w->czy_uchwyt_poprawny(nowy) && nowy != stary && !w->czy_uchwyt_poprawny(stary));
+            delete w;
+        }
+        bws_log(bws_test_blad == przed ? "[KONTROLKI3 1/8] WidokDrzewiastoKolumnowy OK\n" : "[KONTROLKI3 1/8] WidokDrzewiastoKolumnowy FAIL\n");
+    }
+
+    {
+        uint32_t przed = bws_test_blad;
+        bws_log("[KONTROLKI3 2/8] InspektorWlasciwosci...\n");
+        InspektorWlasciwosci i; i.rozmiesc(Prostokat(0, 0, 360, 220));
+        static const char* const wybory[] = {"Mały", "Średni", "Duży"};
+        bws_sprawdz(i.dodaj_tekst(1, "Nazwa", "Obiekt", "Geometria"));
+        bws_sprawdz(i.dodaj_liczbe(2, "Szerokość", 120, "Geometria"));
+        bws_sprawdz(i.dodaj_logiczna(3, "Widoczny", true, "Zachowanie"));
+        bws_sprawdz(i.dodaj_wybor(4, "Rozmiar", wybory, 3, 1, "Wygląd"));
+        bws_sprawdz(i.dodaj_kolor(5, "Kolor tła", 0x00FFBF00, "Wygląd"));
+        bws_sprawdz(i.dodaj_tekst(6, "Tylko odczyt", "Stała", "Zachowanie", true));
+        bws_sprawdz(!i.dodaj_tekst(1, "Duplikat", "Błąd"));
+        bws_sprawdz(!i.dodaj_wybor(7, "Błędny wybór", wybory, 3, 3));
+        struct P { int n; } p{}; i.przy_zmianie([](InspektorWlasciwosci*, uint32_t, const InspektorWlasciwosci::Wlasciwosc&, void* d) { ++static_cast<P*>(d)->n; }, &p);
+        bws_sprawdz(!i.rozpocznij_edycje(5));
+        bws_sprawdz(i.rozpocznij_edycje(0));
+        // Edytor jest jeden i korzysta z PoleTekstowe; commit i anulowanie.
+        bws_sprawdz(i.czy_edytuje() && i.aktywny_edytor() != nullptr);
+        i.aktywny_edytor()->ustaw_tekst("Nowa nazwa");
+        bws_sprawdz(i.zatwierdz_edycje() && p.n == 1);
+        bws_sprawdz(i.rozpocznij_edycje(1));
+        i.aktywny_edytor()->ustaw_tekst("999999999999999999999999999999");
+        bws_sprawdz(!i.zatwierdz_edycje() && i.czy_edytuje());
+        i.anuluj_edycje(); bws_sprawdz(!i.czy_edytuje());
+        i.rozpocznij_edycje(2); bws_sprawdz(!i.wlasciwosc(2)->logiczna && p.n == 2);
+        i.rozpocznij_edycje(3); bws_sprawdz(i.wlasciwosc(3)->wybrany_wybor == 2 && p.n == 3);
+        i.ustaw_wybrany_indeks(0);
+        ZdarzenieKlawiatury down{}; down.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x50U;
+        i.obsluz_wcisniecie_klawisza(down); bws_sprawdz(i.fokus_indeks() == 1);
+        ZdarzenieKlawiatury enter{}; enter.kod_klawisza = 13;
+        i.obsluz_wcisniecie_klawisza(enter); bws_sprawdz(i.czy_edytuje());
+        ZdarzenieKlawiatury esc{}; esc.kod_klawisza = 27;
+        i.obsluz_wcisniecie_klawisza(esc); bws_sprawdz(!i.czy_edytuje());
+        for (int n = 7; n < 307; ++n) i.dodaj_liczbe(static_cast<uint32_t>(n), "Pozycja", n, "Duża lista");
+        bws_sprawdz(i.pasek_pionowy().czy_widoczna());
+        i.pasek_pionowy().ustaw_wartosc(0);
+        ZdarzenieRolki rolka{}; rolka.delta_y = -1;
+        i.obsluz_rolke(rolka);
+        bws_sprawdz(rolka.obsluzone && i.pasek_pionowy().wartosc() > 0);
+        KontekstRysowania ctx; uint64_t a0 = gui_liczba_alokacji_sterty(); i.rysuj(ctx, true); uint64_t a1 = gui_liczba_alokacji_sterty();
+        bws_sprawdz(a0 == a1 && i.liczba_ostatnio_narysowanych() < i.liczba_wlasciwosci());
+        bws_log_u64("[K3 INSPEKTOR POMIAR] visible_rows=", i.liczba_ostatnio_narysowanych());
+        bws_log_u64("[K3 INSPEKTOR POMIAR] model_rows=", i.liczba_wlasciwosci());
+        bws_log_u64("[K3 INSPEKTOR POMIAR] paint_allocations=", a1 - a0);
+        ZdarzenieMyszki mv{}; mv.x = 40; mv.y = 80; i.obsluz_ruch_myszy(mv); i.wyczysc_brudny_obszar();
+        a0 = gui_liczba_alokacji_sterty(); for (int n = 0; n < 5000; ++n) i.obsluz_ruch_myszy(mv); a1 = gui_liczba_alokacji_sterty();
+        bws_sprawdz(a0 == a1 && !i.czy_brudna());
+        bws_log_u64("[K3 INSPEKTOR 5K] mouse_allocations=", a1 - a0);
+        bws_log_u64("[K3 INSPEKTOR 5K] dirty_calls=", i.czy_brudna() ? 1 : 0);
+        bws_log(bws_test_blad == przed ? "[KONTROLKI3 2/8] InspektorWlasciwosci OK\n" : "[KONTROLKI3 2/8] InspektorWlasciwosci FAIL\n");
+    }
+
+    {
+        uint32_t przed = bws_test_blad;
+        bws_log("[KONTROLKI3 3/8] PoleWyszukiwania...\n");
+        PoleWyszukiwania p("Szukaj…"); p.rozmiesc(Prostokat(0, 0, 300, 34));
+        struct P { int zmiany; int szukaj; } m{};
+        p.przy_zmianie([](PoleWyszukiwania*, const char*, void* d) { ++static_cast<P*>(d)->zmiany; }, &m);
+        p.przy_wyszukaniu([](PoleWyszukiwania*, const char*, void* d) { ++static_cast<P*>(d)->szukaj; }, &m);
+        bws_sprawdz(p.placeholder()[0] == 'S' && p.placeholder()[1] == 'z');
+        p.ustaw_tekst("Pamięć ą ć ę ł ń ó ś ź ż"); int z = m.zmiany;
+        p.wyczysc_brudny_obszar(); p.ustaw_tekst("Pamięć ą ć ę ł ń ó ś ź ż");
+        bws_sprawdz(m.zmiany == z && !p.czy_brudna() && p.czy_przycisk_czyszczenia_widoczny());
+        ZdarzenieMyszki clear{}; clear.przycisk = 1; clear.x = 290; clear.y = 17;
+        p.obsluz_wcisniecie_myszy(clear); p.obsluz_zwolnienie_myszy(clear);
+        bws_sprawdz(p.pobierz_tekst()[0] == '\0' && !p.czy_przycisk_czyszczenia_widoczny());
+        p.ustaw_tekst("Pamięć ą ć ę ł ń ó ś ź ż");
+        p.wyczysc_brudny_obszar(); ZdarzenieMyszki mv{}; mv.x = 285; mv.y = 16; p.obsluz_ruch_myszy(mv); p.wyczysc_brudny_obszar();
+        uint64_t a0 = gui_liczba_alokacji_sterty(); for (int n = 0; n < 5000; ++n) p.obsluz_ruch_myszy(mv); uint64_t a1 = gui_liczba_alokacji_sterty();
+        bws_sprawdz(a0 == a1 && !p.czy_brudna());
+        bws_log_u64("[K3 WYSZUKIWANIE 5K] mouse_allocations=", a1 - a0);
+        bws_log_u64("[K3 WYSZUKIWANIE 5K] dirty_calls=", p.czy_brudna() ? 1 : 0);
+        ZdarzenieKlawiatury enter{}; enter.kod_klawisza = 13; p.pole_tekstowe().obsluz_wcisniecie_klawisza(enter); bws_sprawdz(m.szukaj == 1);
+        ZdarzenieKlawiatury esc{}; esc.kod_klawisza = 27; p.pole_tekstowe().obsluz_wcisniecie_klawisza(esc); bws_sprawdz(p.pobierz_tekst()[0] == '\0');
+        p.pole_tekstowe().przy_fokusie(); bws_sprawdz(p.pole_tekstowe().czy_ma_fokus());
+        p.ustaw_tekst("Blokada"); p.ustaw_tylko_do_odczytu(true);
+        ZdarzenieWprowadzaniaTekstu te{}; te.punkt_kodowy = 0x104;
+        p.pole_tekstowe().obsluz_wprowadzenie_tekstu(te); bws_sprawdz(p.pobierz_tekst()[0] == 'B');
+        p.pole_tekstowe().obsluz_wcisniecie_klawisza(esc); bws_sprawdz(p.pobierz_tekst()[0] == 'B');
+        p.ustaw_tylko_do_odczytu(false); p.wyczysc(); p.ustaw_wlaczona(false);
+        p.pole_tekstowe().obsluz_wprowadzenie_tekstu(te); bws_sprawdz(p.pobierz_tekst()[0] == '\0');
+        const char* alfabet = "ą ć ę ł ń ó ś ź ż Ą Ć Ę Ł Ń Ó Ś Ź Ż";
+        bws_sprawdz(CzcionkaUI::zmierz_tekst(alfabet, 1) > 0);
+        KontekstRysowania font_ctx;
+        const bool tlumienie = KontekstRysowania::g_tlum_rysowanie_globalne;
+        KontekstRysowania::g_tlum_rysowanie_globalne = true;
+        a0 = gui_liczba_alokacji_sterty(); font_ctx.rysuj_tekst(Punkt(0, 0), alfabet, 0x00FFFFFFU, 1); a1 = gui_liczba_alokacji_sterty();
+        KontekstRysowania::g_tlum_rysowanie_globalne = tlumienie;
+        bws_sprawdz(a0 == a1);
+        bws_log(bws_test_blad == przed ? "[KONTROLKI3 3/8] PoleWyszukiwania OK\n" : "[KONTROLKI3 3/8] PoleWyszukiwania FAIL\n");
+    }
+
+    {
+        uint32_t przed = bws_test_blad;
+        bws_log("[KONTROLKI3 4/8] PoleSugestii...\n");
+        ZarzadcaPopupow z; z.ustaw_geometrie_wlasciciela(Prostokat(0,0,400,300), Prostokat(0,0,400,300));
+        PoleSugestii p; p.ustaw_zarzadce_popupow(&z); p.rozmiesc(Prostokat(10, 10, 280, 34));
+        static const char* const s[] = {"Bursztyn", "BursztynUI", "Pamięć", "Przeglądarka", "Ustawienia"};
+        bws_sprawdz(p.ustaw_sugestie(s, 5)); p.ustaw_maksymalna_liczbe_widocznych(3);
+        struct P { int wybor; int zmiana; } m{}; p.przy_wybraniu([](PoleSugestii*, int, const char*, void* d){ ++static_cast<P*>(d)->wybor; }, &m); p.przy_zmianie([](PoleSugestii*, const char*, void* d){ ++static_cast<P*>(d)->zmiana; }, &m);
+        p.ustaw_tekst("Bur"); bws_sprawdz(p.liczba_dopasowanych() == 2 && p.czy_popup_otwarty() && z.liczba_powierzchni() == 1);
+        bws_sprawdz(z.prostokat_zarejestrowany_ekranu().prawy() <= 400 && z.prostokat_zarejestrowany_ekranu().dolny() <= 300);
+        ZdarzenieKlawiatury down{}; down.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x50U; z.obsluz_klawisz(down);
+        KontekstRysowania ctx; uint64_t a0 = gui_liczba_alokacji_sterty(); z.rysuj(ctx, true); uint64_t a1 = gui_liczba_alokacji_sterty();
+        bws_sprawdz(a0 == a1 && p.liczba_ostatnio_narysowanych() <= 3);
+        bws_log_u64("[K3 SUGESTIE POMIAR] visible_rows=", p.liczba_ostatnio_narysowanych());
+        bws_log_u64("[K3 SUGESTIE POMIAR] paint_allocations=", a1 - a0);
+        Prostokat popup_hover = z.prostokat_zarejestrowany_ekranu();
+        ZdarzenieMyszki hover{}; hover.x = popup_hover.x + 5; hover.y = popup_hover.y + 5;
+        z.obsluz_ruch(hover); z.rysuj(ctx, false);
+        a0 = gui_liczba_alokacji_sterty();
+        for (int n = 0; n < 5000; ++n) z.obsluz_ruch(hover);
+        a1 = gui_liczba_alokacji_sterty();
+        bws_sprawdz(a0 == a1 && !z.czy_brudny());
+        bws_log_u64("[K3 SUGESTIE 5K] mouse_allocations=", a1 - a0);
+        bws_log_u64("[K3 SUGESTIE 5K] dirty_calls=", z.czy_brudny() ? 1 : 0);
+        ZdarzenieKlawiatury enter{}; enter.kod_klawisza = 13; z.obsluz_klawisz(enter);
+        bws_sprawdz(m.wybor == 1 && !p.czy_popup_otwarty());
+        p.ustaw_tekst("Pamię"); bws_sprawdz(p.czy_popup_otwarty());
+        ZdarzenieKlawiatury esc{}; esc.kod_klawisza = 27; z.obsluz_klawisz(esc);
+        bws_sprawdz(!p.czy_popup_otwarty() && p.pobierz_tekst()[0] != '\0');
+        p.ustaw_tekst("Prz"); bws_sprawdz(p.czy_popup_otwarty());
+        Prostokat popup = z.prostokat_zarejestrowany_ekranu();
+        ZdarzenieMyszki klik{}; klik.przycisk = 1; klik.x = popup.x + 5; klik.y = popup.y + 5;
+        z.obsluz_wcisniecie(klik);
+        bws_sprawdz(m.wybor == 2 && !p.czy_popup_otwarty());
+        p.ustaw_tekst("Pamię"); bws_sprawdz(p.czy_popup_otwarty());
+        z.zamknij(PowodZamknieciaPopup::WlascicielZminimalizowany);
+        bws_sprawdz(!p.czy_popup_otwarty() && z.liczba_powierzchni() == 0);
+
+        PoleSugestii ograniczone;
+        const char* wiele[PoleSugestii::MAKS_SUGESTII + 1]{};
+        for (size_t n = 0; n < PoleSugestii::MAKS_SUGESTII + 1; ++n) wiele[n] = "Sugestia";
+        bws_sprawdz(!ograniczone.ustaw_sugestie(wiele, PoleSugestii::MAKS_SUGESTII + 1));
+        bws_sprawdz(ograniczone.liczba_sugestii() == PoleSugestii::MAKS_SUGESTII);
+
+        ZarzadcaPopupow z2; z2.ustaw_geometrie_wlasciciela(Prostokat(0,0,400,300), Prostokat(0,0,400,300));
+        PoleSugestii* zycie = new PoleSugestii();
+        bws_sprawdz(zycie != nullptr);
+        if (zycie) {
+            zycie->ustaw_zarzadce_popupow(&z2); zycie->rozmiesc(Prostokat(10,10,280,34));
+            zycie->ustaw_sugestie(s, 5); zycie->ustaw_tekst("Bur");
+            bws_sprawdz(z2.liczba_powierzchni() == 1);
+            delete zycie;
+            bws_sprawdz(z2.liczba_powierzchni() == 0);
+        }
+        bws_log(bws_test_blad == przed ? "[KONTROLKI3 4/8] PoleSugestii OK\n" : "[KONTROLKI3 4/8] PoleSugestii FAIL\n");
+    }
+
+    {
+        uint32_t przed = bws_test_blad;
+        bws_log("[KONTROLKI3 5/8] PrzyciskPodzielony...\n");
+        PrzyciskPodzielony p("Wykonaj"); p.rozmiesc(Prostokat(10, 10, 180, 36));
+        struct P { int glowna; int menu; } m{}; p.przy_kliknieciu([](PrzyciskPodzielony*, void* d){ ++static_cast<P*>(d)->glowna; }, &m); p.przy_otwarciu_menu([](PrzyciskPodzielony*, void* d){ ++static_cast<P*>(d)->menu; }, &m);
+        ZdarzenieMyszki d{}; d.przycisk = 1; d.x = 30; d.y = 20; p.obsluz_wcisniecie_myszy(d);
+        bws_sprawdz(p.wcisnieta_czesc() == CzescPrzyciskuPodzielonego::Glowna);
+        p.obsluz_zwolnienie_myszy(d); bws_sprawdz(m.glowna == 1);
+        d.x = 180; p.obsluz_wcisniecie_myszy(d);
+        bws_sprawdz(p.wcisnieta_czesc() == CzescPrzyciskuPodzielonego::Strzalka);
+        p.obsluz_zwolnienie_myszy(d); bws_sprawdz(m.menu == 1);
+        ZdarzenieMyszki mv{}; mv.x = 30; mv.y = 20; p.obsluz_ruch_myszy(mv); bws_sprawdz(p.najechana_czesc() == CzescPrzyciskuPodzielonego::Glowna); p.wyczysc_brudny_obszar();
+        uint64_t a0 = gui_liczba_alokacji_sterty(); for (int i = 0; i < 5000; ++i) p.obsluz_ruch_myszy(mv); uint64_t a1 = gui_liczba_alokacji_sterty(); bws_sprawdz(a0 == a1 && !p.czy_brudna());
+        bws_log_u64("[K3 SPLIT 5K] mouse_allocations=", a1 - a0);
+        bws_log_u64("[K3 SPLIT 5K] dirty_calls=", p.czy_brudna() ? 1 : 0);
+        mv.x = 180; p.obsluz_ruch_myszy(mv); bws_sprawdz(p.najechana_czesc() == CzescPrzyciskuPodzielonego::Strzalka);
+        p.przy_fokusie(); bws_sprawdz(p.czy_ma_fokus());
+        ZdarzenieKlawiatury e{}; e.kod_klawisza = 13; p.obsluz_wcisniecie_klawisza(e); bws_sprawdz(m.glowna == 2);
+        ZdarzenieKlawiatury menu_key{}; menu_key.kod_klawisza = BWS_KEY_SOURCE_USB | 81U;
+        p.obsluz_wcisniecie_klawisza(menu_key); bws_sprawdz(m.menu == 2);
+        p.ustaw_skale_dpi(1); bws_sprawdz(p.szerokosc_czesci_strzalki() == 28); p.ustaw_skale_dpi(2); bws_sprawdz(p.szerokosc_czesci_strzalki() == 56);
+        p.ustaw_wlaczona(false); p.obsluz_wcisniecie_klawisza(e); p.obsluz_wcisniecie_klawisza(menu_key);
+        d.x = 30; p.obsluz_wcisniecie_myszy(d); p.obsluz_zwolnienie_myszy(d);
+        bws_sprawdz(m.glowna == 2 && m.menu == 2);
+        bws_log(bws_test_blad == przed ? "[KONTROLKI3 5/8] PrzyciskPodzielony OK\n" : "[KONTROLKI3 5/8] PrzyciskPodzielony FAIL\n");
+    }
+
+    {
+        uint32_t przed = bws_test_blad;
+        bws_log("[KONTROLKI3 6/8] Przelacznik...\n");
+        Przelacznik p(false); p.rozmiesc(Prostokat(0,0,52,28)); int zmiany = 0;
+        p.przy_zmianie([](Przelacznik*, bool, void* d){ ++*static_cast<int*>(d); }, &zmiany);
+        p.ustaw_wartosc(true); p.ustaw_wartosc(true); bws_sprawdz(p.pobierz_wartosc() && zmiany == 1);
+        p.wyczysc_brudny_obszar(); p.ustaw_wartosc(true);
+        bws_sprawdz(!p.czy_brudna() && zmiany == 1);
+        ZdarzenieKlawiatury sp{}; sp.kod_klawisza = 32; p.obsluz_wcisniecie_klawisza(sp); bws_sprawdz(!p.pobierz_wartosc() && zmiany == 2);
+        ZdarzenieMyszki d{}; d.przycisk = 1; d.x = 10; d.y = 10; p.obsluz_wcisniecie_myszy(d); p.obsluz_zwolnienie_myszy(d); bws_sprawdz(p.pobierz_wartosc() && zmiany == 3);
+        p.wyczysc_brudny_obszar(); ZdarzenieMyszki mv{}; mv.x = 10; mv.y = 10; uint64_t a0 = gui_liczba_alokacji_sterty(); for (int i = 0; i < 5000; ++i) p.obsluz_ruch_myszy(mv); uint64_t a1 = gui_liczba_alokacji_sterty(); bws_sprawdz(a0 == a1 && !p.czy_brudna());
+        bws_log_u64("[K3 PRZELACZNIK 5K] mouse_allocations=", a1 - a0);
+        bws_log_u64("[K3 PRZELACZNIK 5K] dirty_calls=", p.czy_brudna() ? 1 : 0);
+        p.ustaw_tylko_do_odczytu(true); p.obsluz_wcisniecie_klawisza(sp); bws_sprawdz(p.pobierz_wartosc());
+        p.ustaw_tylko_do_odczytu(false); p.przy_fokusie(); bws_sprawdz(p.czy_ma_fokus());
+        p.ustaw_wlaczona(false); p.obsluz_wcisniecie_klawisza(sp);
+        p.obsluz_wcisniecie_myszy(d); p.obsluz_zwolnienie_myszy(d);
+        bws_sprawdz(p.pobierz_wartosc() && zmiany == 3);
+        p.ustaw_skale_dpi(1); bws_sprawdz(p.oblicz_naturalny_rozmiar().szerokosc == 52);
+        p.ustaw_skale_dpi(2); bws_sprawdz(p.oblicz_naturalny_rozmiar().szerokosc == 104);
+        bws_log(bws_test_blad == przed ? "[KONTROLKI3 6/8] Przelacznik OK\n" : "[KONTROLKI3 6/8] Przelacznik FAIL\n");
+    }
+
+    {
+        uint32_t przed = bws_test_blad;
+        bws_log("[KONTROLKI3 7/8] SelektorKoloru...\n");
+        SelektorKoloru s; s.rozmiesc(Prostokat(0,0,300,112)); int zmiany = 0;
+        s.przy_zmianie([](SelektorKoloru*, uint32_t, void* d){ ++*static_cast<int*>(d); }, &zmiany);
+        bws_sprawdz(s.ustaw_hex("#000000") && s.pobierz_kolor() == SelektorKoloru::WIDOCZNA_CZERN);
+        bws_sprawdz(s.ustaw_hex("#12A0FE") && s.pobierz_kolor() == 0x0012A0FEU);
+        uint32_t stary = s.pobierz_kolor(); bws_sprawdz(!s.ustaw_hex("#GG0000") && s.pobierz_kolor() == stary);
+        bws_sprawdz(!s.ustaw_hex("#1234567") && !s.ustaw_hex("#FFFFFFFF") && s.pobierz_kolor() == stary);
+        int cb = zmiany; s.ustaw_kolor(stary); bws_sprawdz(zmiany == cb); s.ustaw_kolor(0); bws_sprawdz(s.pobierz_kolor() == 0);
+        ZdarzenieKlawiatury right{}; right.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x4DU; s.obsluz_wcisniecie_klawisza(right); bws_sprawdz(s.wybrany_indeks_palety() >= 0);
+        ZdarzenieMyszki pal{}; pal.przycisk = 1; pal.x = 12; pal.y = 52;
+        s.obsluz_wcisniecie_myszy(pal); s.obsluz_zwolnienie_myszy(pal);
+        bws_sprawdz(s.pobierz_kolor() == SelektorKoloru::WIDOCZNA_CZERN);
+        int po_czerni = zmiany;
+        s.obsluz_wcisniecie_myszy(pal); s.obsluz_zwolnienie_myszy(pal);
+        bws_sprawdz(zmiany == po_czerni);
+        pal.x = 262; pal.y = 84;
+        s.obsluz_wcisniecie_myszy(pal); s.obsluz_zwolnienie_myszy(pal);
+        bws_sprawdz(s.pobierz_kolor() == 0 && zmiany == po_czerni + 1);
+        s.ustaw_kolor(0x00E67E22U);
+        s.obsluz_wcisniecie_klawisza(right);
+        ZdarzenieKlawiatury wybor{}; wybor.kod_klawisza = 13;
+        s.obsluz_wcisniecie_klawisza(wybor);
+        bws_sprawdz(s.pobierz_kolor() == 0x00FFBF00U);
+        s.wyczysc_brudny_obszar(); ZdarzenieMyszki mv{}; mv.x = 12; mv.y = 55; s.obsluz_ruch_myszy(mv); s.wyczysc_brudny_obszar();
+        uint64_t a0 = gui_liczba_alokacji_sterty(); for (int n = 0; n < 5000; ++n) s.obsluz_ruch_myszy(mv); uint64_t a1 = gui_liczba_alokacji_sterty();
+        bws_sprawdz(a0 == a1 && !s.czy_brudna());
+        bws_log_u64("[K3 KOLOR 5K] mouse_allocations=", a1 - a0);
+        bws_log_u64("[K3 KOLOR 5K] dirty_calls=", s.czy_brudna() ? 1 : 0);
+        bws_log(bws_test_blad == przed ? "[KONTROLKI3 7/8] SelektorKoloru OK\n" : "[KONTROLKI3 7/8] SelektorKoloru FAIL\n");
+    }
+
+    {
+        uint32_t przed = bws_test_blad;
+        bws_log("[KONTROLKI3 8/8] WidokMiniatur...\n");
+        WidokMiniatur w; w.rozmiesc(Prostokat(0,0,420,240)); static uint32_t obraz[8*8];
+        for (int i = 0; i < 64; ++i) obraz[i] = (i & 1) ? 0x00FFBF00 : 0x00302010;
+        for (int i = 0; i < 1000; ++i) bws_sprawdz(w.dodaj_element(static_cast<uint64_t>(i + 1), "Miniatura", obraz, 8, 8));
+        bws_sprawdz(w.liczba_elementow() == 1000 && w.pasek_pionowy().czy_widoczna());
+        struct P { int wybor; int aktywacja; } m{}; w.przy_zmianie_zaznaczenia([](WidokMiniatur*, int, uint64_t, void* d){ ++static_cast<P*>(d)->wybor; }, &m); w.przy_aktywacji([](WidokMiniatur*, int, uint64_t, void* d){ ++static_cast<P*>(d)->aktywacja; }, &m);
+        w.ustaw_wybrany_indeks(10); w.ustaw_fokus_indeks(11); bws_sprawdz(w.wybrany_indeks() == 10 && w.fokus_indeks() == 11 && m.wybor == 1);
+        w.pasek_pionowy().ustaw_wartosc(0);
+        ZdarzenieMyszki klik{}; klik.przycisk = 1; klik.x = 10; klik.y = 10;
+        w.obsluz_wcisniecie_myszy(klik); bws_sprawdz(w.wybrany_indeks() == 0 && m.wybor == 2);
+        ZdarzenieKlawiatury right{}; right.kod_klawisza = BWS_KEY_SOURCE_E0 | 0x4DU;
+        w.obsluz_wcisniecie_klawisza(right); bws_sprawdz(w.fokus_indeks() == 1);
+        ZdarzenieKlawiatury enter{}; enter.kod_klawisza = 13; w.obsluz_wcisniecie_klawisza(enter); bws_sprawdz(w.wybrany_indeks() == 1);
+        bws_sprawdz(w.ustaw_fokus_indeks(11));
+        w.obsluz_wcisniecie_klawisza(enter); bws_sprawdz(w.wybrany_indeks() == 11);
+        KontekstRysowania ctx; uint64_t a0 = gui_liczba_alokacji_sterty(); w.rysuj(ctx, true); uint64_t a1 = gui_liczba_alokacji_sterty();
+        bws_sprawdz(a0 == a1 && w.liczba_ostatnio_narysowanych_elementow() < w.liczba_elementow());
+        bws_log_u64("[K3 MINIATURY POMIAR] visible_items=", w.liczba_ostatnio_narysowanych_elementow());
+        bws_log_u64("[K3 MINIATURY POMIAR] model_items=", w.liczba_elementow());
+        bws_log_u64("[K3 MINIATURY POMIAR] paint_allocations=", a1 - a0);
+        bws_sprawdz(w.element(0)->piksele == obraz);
+        struct R { int liczba; bool geometria; } render{};
+        w.ustaw_renderer([](WidokMiniatur*, KontekstRysowania&, const WidokMiniatur::Element&, Prostokat r, void* d) {
+            R* p = static_cast<R*>(d); ++p->liczba; p->geometria = p->geometria || (r.szerokosc > 0 && r.wysokosc > 0);
+        }, &render);
+        w.rysuj(ctx, true);
+        bws_sprawdz(render.liczba == static_cast<int>(w.liczba_ostatnio_narysowanych_elementow()) && render.geometria);
+        w.ustaw_renderer(nullptr);
+        ZdarzenieMyszki mv{}; mv.x = 10; mv.y = 10; w.obsluz_ruch_myszy(mv); w.wyczysc_brudny_obszar(); a0 = gui_liczba_alokacji_sterty(); for (int i = 0; i < 5000; ++i) w.obsluz_ruch_myszy(mv); a1 = gui_liczba_alokacji_sterty(); bws_sprawdz(a0 == a1 && !w.czy_brudna());
+        bws_log_u64("[K3 MINIATURY 5K] mouse_allocations=", a1 - a0);
+        bws_log_u64("[K3 MINIATURY 5K] dirty_calls=", w.czy_brudna() ? 1 : 0);
+        w.pasek_pionowy().ustaw_wartosc(0);
+        ZdarzenieRolki rolka{}; rolka.delta_y = -1; w.obsluz_rolke(rolka);
+        bws_sprawdz(rolka.obsluzone && w.pasek_pionowy().wartosc() > 0);
+        w.pasek_pionowy().ustaw_wartosc(0);
+        PasekPrzewijania& sb = w.pasek_pionowy(); Prostokat uchwyt = sb.prostokat_uchwytu();
+        ZdarzenieMyszki down{}; down.przycisk = 1;
+        down.x = sb.obszar_ekranu().x + uchwyt.x + uchwyt.szerokosc / 2;
+        down.y = sb.obszar_ekranu().y + uchwyt.y + uchwyt.wysokosc / 2;
+        sb.obsluz_wcisniecie_myszy(down); bws_sprawdz(sb.czy_przeciagany());
+        ZdarzenieMyszki drag = down; drag.y += sb.obszar().wysokosc / 2; sb.obsluz_ruch_myszy(drag);
+        int64_t po_drag = sb.wartosc(); sb.obsluz_zwolnienie_myszy(drag);
+        bws_sprawdz(po_drag > 0 && !sb.czy_przeciagany());
+        ZdarzenieMyszki dbl{}; dbl.x = 10; dbl.y = 10; w.obsluz_podwojne_klikniecie(dbl); bws_sprawdz(m.aktywacja == 1);
+        bws_log(bws_test_blad == przed ? "[KONTROLKI3 8/8] WidokMiniatur OK\n" : "[KONTROLKI3 8/8] WidokMiniatur FAIL\n");
+    }
+
+    bws_log(bws_test_blad == wszystkie_przed
+        ? "[TESTY KONTROLKI 3] Wszystkie 8 grup PASS\n"
+        : "[TESTY KONTROLKI 3] Co najmniej jedna grupa FAIL\n");
+}
+
 struct WynikTestow {
     uint32_t zaliczone_asercje{0};
     uint32_t niezaliczone_asercje{0};
@@ -4697,6 +5070,7 @@ struct WynikTestow {
     bool bursztyn_ui_podstawowe{false};
     bool interakcje{false};
     bool kontrolki2{false};
+    bool kontrolki3{false};
     bool pamiec_stabilna{false};
 };
 
@@ -4721,8 +5095,12 @@ static WynikTestow uruchom_pelny_pakiet_testow() {
     bledy_przed = bws_test_blad;
     wykonaj_testy_kontrolki2();
     wynik.kontrolki2 = bws_test_blad == bledy_przed;
+
+    bledy_przed = bws_test_blad;
+    wykonaj_testy_kontrolki3();
+    wynik.kontrolki3 = bws_test_blad == bledy_przed;
     wynik.bursztyn_ui = wynik.bursztyn_ui_podstawowe &&
-                        wynik.interakcje && wynik.kontrolki2;
+                        wynik.interakcje && wynik.kontrolki2 && wynik.kontrolki3;
     const uint64_t aktywne_po = gui_liczba_aktywnych_alokacji_sterty();
     wynik.pamiec_stabilna = aktywne_po == aktywne_przed;
     bws_log(wynik.pamiec_stabilna
@@ -4736,8 +5114,9 @@ static WynikTestow uruchom_pelny_pakiet_testow() {
         static_cast<uint32_t>(wynik.bursztyn_ui_podstawowe) +
         static_cast<uint32_t>(wynik.interakcje) +
         static_cast<uint32_t>(wynik.kontrolki2) +
+        static_cast<uint32_t>(wynik.kontrolki3) +
         static_cast<uint32_t>(wynik.pamiec_stabilna);
-    wynik.niezaliczone_grupy = 5U - wynik.zaliczone_grupy;
+    wynik.niezaliczone_grupy = 6U - wynik.zaliczone_grupy;
 
     bws_log(wynik.niezaliczone_grupy == 0
         ? "=== TESTY BURSZTYN OS: PASS ===\n"
@@ -4753,6 +5132,7 @@ struct StanOknaWynikow {
     Etykieta* ui{nullptr};
     Etykieta* interakcje{nullptr};
     Etykieta* kontrolki{nullptr};
+    Etykieta* kontrolki3{nullptr};
     Etykieta* pamiec{nullptr};
     Etykieta* ogolny{nullptr};
     Etykieta* liczniki{nullptr};
@@ -4897,8 +5277,28 @@ public:
         }
 
         if (stan_->krok_grupy == 4) {
+            uint32_t bledy_przed = bws_test_blad;
+            {
+                IzolacjaPrezentacjiTestow izolacja(stan_->okno);
+                wykonaj_testy_kontrolki3();
+            }
+            stan_->wynik.kontrolki3 = (bws_test_blad == bledy_przed);
+            stan_->kontrolki3->ustaw_tekst(stan_->wynik.kontrolki3
+                ? "Kontrolki 3 - 8 grup komponentów: PASS"
+                : "Kontrolki 3 - 8 grup komponentów: FAIL");
+            sprawdz_geometrie_grupy("Kontrolki 3");
+            stan_->krok_grupy = 5;
+            if (stan_->okno) {
+                stan_->okno->przelicz_uklad();
+                stan_->okno->uniewaznij();
+            }
+            return;
+        }
+
+        if (stan_->krok_grupy == 5) {
             stan_->wynik.bursztyn_ui = stan_->wynik.bursztyn_ui_podstawowe &&
-                                      stan_->wynik.interakcje && stan_->wynik.kontrolki2;
+                                      stan_->wynik.interakcje && stan_->wynik.kontrolki2 &&
+                                      stan_->wynik.kontrolki3;
             const uint64_t aktywne_po = gui_liczba_aktywnych_alokacji_sterty();
             stan_->wynik.pamiec_stabilna = (aktywne_po == stan_->aktywne_przed);
             stan_->pamiec->ustaw_tekst(stan_->wynik.pamiec_stabilna
@@ -4914,8 +5314,9 @@ public:
                 static_cast<uint32_t>(stan_->wynik.bursztyn_ui_podstawowe) +
                 static_cast<uint32_t>(stan_->wynik.interakcje) +
                 static_cast<uint32_t>(stan_->wynik.kontrolki2) +
+                static_cast<uint32_t>(stan_->wynik.kontrolki3) +
                 static_cast<uint32_t>(stan_->wynik.pamiec_stabilna);
-            stan_->wynik.niezaliczone_grupy = 5U - stan_->wynik.zaliczone_grupy;
+            stan_->wynik.niezaliczone_grupy = 6U - stan_->wynik.zaliczone_grupy;
 
             stan_->naglowek->ustaw_tekst(stan_->wynik.niezaliczone_grupy == 0
                 ? "Diagnostyka systemu zakończona"
@@ -4970,6 +5371,7 @@ static void rozpocznij_interaktywny_przebieg_testow(StanOknaWynikow* stan) {
     stan->ui->ustaw_tekst("BursztynUI: OCZEKUJE");
     stan->interakcje->ustaw_tekst("WidokPrzewijany / Drzewo / widoczność: OCZEKUJE");
     stan->kontrolki->ustaw_tekst("Kontrolki 2 - 8 grup komponentów: OCZEKUJE");
+    stan->kontrolki3->ustaw_tekst("Kontrolki 3 - 8 grup komponentów: OCZEKUJE");
     stan->pamiec->ustaw_tekst("Pamięć GUI po przebiegu: OCZEKUJE");
     stan->ogolny->ustaw_tekst("Wynik ogólny: W toku...");
     stan->liczniki->ustaw_tekst("Wykonywanie testów diagnostycznych...");
@@ -5063,6 +5465,7 @@ extern "C" __attribute__((noreturn)) void _start() {
     Etykieta& et_ui = korzen->dodaj<Etykieta>("BursztynUI: Testy nie zostały jeszcze uruchomione.");
     Etykieta& et_interakcje = korzen->dodaj<Etykieta>("WidokPrzewijany / Drzewo / widoczność: Testy nie zostały jeszcze uruchomione.");
     Etykieta& et_kontrolki = korzen->dodaj<Etykieta>("Kontrolki 2 - 8 grup komponentów: Testy nie zostały jeszcze uruchomione.");
+    Etykieta& et_kontrolki3 = korzen->dodaj<Etykieta>("Kontrolki 3 - 8 grup komponentów: Testy nie zostały jeszcze uruchomione.");
     Etykieta& et_pamiec = korzen->dodaj<Etykieta>("Pamięć GUI po przebiegu: Testy nie zostały jeszcze uruchomione.");
     Etykieta& et_ogolny = korzen->dodaj<Etykieta>("Wynik ogólny: Testy nie zostały jeszcze uruchomione.");
     Etykieta& et_liczniki = korzen->dodaj<Etykieta>("Oczekiwanie na uruchomienie testów diagnostycznych...");
@@ -5087,7 +5490,7 @@ extern "C" __attribute__((noreturn)) void _start() {
 
     StanOknaWynikow* stan = new StanOknaWynikow{
         {}, okno, &naglowek, &et_bws, &et_ui, &et_interakcje,
-        &et_kontrolki, &et_pamiec, &et_ogolny, &et_liczniki,
+        &et_kontrolki, &et_kontrolki3, &et_pamiec, &et_ogolny, &et_liczniki,
         &start_btn, &ponow_btn, &zamknij_btn,
         &uruchom_pelny_pakiet_testow, {}, false, 0, 0,
         WIN_X, WIN_Y, WIN_W, WIN_H, 0, 0

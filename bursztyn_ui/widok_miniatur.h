@@ -1,0 +1,263 @@
+#pragma once
+
+#include "kontrolka.h"
+#include "pasek_przewijania.h"
+#include "czcionka.h"
+
+namespace BursztynUI {
+
+class WidokMiniatur : public Kontrolka {
+public:
+    static constexpr size_t MAKS_ELEMENTOW = 16384;
+    struct Element {
+        uint64_t identyfikator{0};
+        char* etykieta{nullptr};
+        const uint32_t* piksele{nullptr};
+        int szerokosc_obrazu{0};
+        int wysokosc_obrazu{0};
+    };
+    using FunkcjaWidoku = void (*)(WidokMiniatur*, int, uint64_t, void*);
+    using FunkcjaRenderera = void (*)(WidokMiniatur*, KontekstRysowania&, const Element&,
+                                      Prostokat, void*);
+
+    WidokMiniatur() {
+        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
+        czy_moze_miec_fokus_ = true;
+        czy_reaguje_wizualnie_na_najechanie_ = false;
+        pionowy_ = new PasekPrzewijania();
+        pionowy_->ustaw_orientacje(Orientacja::Pionowa);
+        pionowy_->pokaz_strzalki(true);
+        pionowy_->przy_przewijaniu([](PasekPrzewijania*, int64_t, void* d) {
+            WidokMiniatur* w = static_cast<WidokMiniatur*>(d);
+            if (w) w->uniewaznij_obszar(w->prostokat_widoku());
+        }, this);
+        dodaj_kontrolke(pionowy_);
+        preferowany_rozmiar_ = Rozmiar(400, 260);
+    }
+    ~WidokMiniatur() override {
+        wyczysc();
+        delete[] elementy_; elementy_ = nullptr;
+    }
+
+    bool dodaj_element(uint64_t id, const char* etykieta, const uint32_t* piksele,
+                       int szerokosc, int wysokosc) {
+        if (liczba_ >= MAKS_ELEMENTOW || szerokosc < 0 || wysokosc < 0 ||
+            (piksele && (szerokosc <= 0 || wysokosc <= 0))) return false;
+        if (szerokosc > 8192 || wysokosc > 8192) return false;
+        if (szerokosc > 0 && static_cast<uint64_t>(szerokosc) * static_cast<uint64_t>(wysokosc) > UINT64_C(67108864)) return false;
+        if (!zapewnij_pojemnosc(liczba_ + 1)) return false;
+        char* kopia = kopiuj(etykieta ? etykieta : "");
+        if (!kopia) return false;
+        Element& e = elementy_[liczba_++];
+        e.identyfikator = id; e.etykieta = kopia; e.piksele = piksele;
+        e.szerokosc_obrazu = szerokosc; e.wysokosc_obrazu = wysokosc;
+        aktualizuj_przewijanie(); uniewaznij(); return true;
+    }
+    void wyczysc() {
+        for (size_t i = 0; i < liczba_; ++i) { delete[] elementy_[i].etykieta; elementy_[i] = Element{}; }
+        liczba_ = 0; wybrany_ = fokus_ = najechany_ = -1;
+        aktualizuj_przewijanie(); uniewaznij();
+    }
+    size_t liczba_elementow() const { return liczba_; }
+    const Element* element(size_t i) const { return i < liczba_ ? &elementy_[i] : nullptr; }
+    int wybrany_indeks() const { return wybrany_; }
+    int fokus_indeks() const { return fokus_; }
+    int najechany_indeks() const { return najechany_; }
+    size_t liczba_ostatnio_narysowanych_elementow() const { return ostatnio_narysowane_; }
+    PasekPrzewijania& pasek_pionowy() { return *pionowy_; }
+    Prostokat prostokat_widoku() const { return Prostokat(1, 1, viewport_w(), viewport_h()); }
+
+    bool ustaw_wybrany_indeks(int i, bool powiadom = true) {
+        if (i < -1 || i >= static_cast<int>(liczba_)) return false;
+        if (wybrany_ == i) return true;
+        int stary = wybrany_; wybrany_ = i;
+        if (i >= 0) { fokus_ = i; przewin_do(i); }
+        uniewaznij_element(stary); uniewaznij_element(i);
+        if (powiadom && cb_wybor_) cb_wybor_(this, i, i >= 0 ? elementy_[i].identyfikator : 0, dane_wyboru_);
+        return true;
+    }
+    bool ustaw_fokus_indeks(int i) {
+        if (i < -1 || i >= static_cast<int>(liczba_)) return false;
+        if (fokus_ == i) return true;
+        int stary = fokus_; fokus_ = i; if (i >= 0) przewin_do(i);
+        uniewaznij_element(stary); uniewaznij_element(i); return true;
+    }
+    void ustaw_rozmiar_elementu(int w, int h) {
+        w = przytnij(w, 48, 512); h = przytnij(h, 56, 512);
+        if (w == szerokosc_elementu_ && h == wysokosc_elementu_) return;
+        szerokosc_elementu_ = w; wysokosc_elementu_ = h;
+        aktualizuj_przewijanie(); uniewaznij();
+    }
+    void przy_zmianie_zaznaczenia(FunkcjaWidoku cb, void* d = nullptr) { cb_wybor_ = cb; dane_wyboru_ = d; }
+    void przy_aktywacji(FunkcjaWidoku cb, void* d = nullptr) { cb_aktywacja_ = cb; dane_aktywacji_ = d; }
+    void ustaw_renderer(FunkcjaRenderera cb, void* d = nullptr) { renderer_ = cb; dane_renderera_ = d; uniewaznij(); }
+
+    Rozmiar oblicz_naturalny_rozmiar() const override { return Rozmiar(400, 260); }
+    void rozmiesc(Prostokat r) override {
+        Kontrolka::rozmiesc(r); aktualizuj_geometrie(); aktualizuj_przewijanie();
+    }
+
+    void rysuj_siebie(KontekstRysowania& ctx) override {
+        ostatnio_narysowane_ = 0;
+        rysuj_tlo_i_ramke(ctx, wyznacz_biezacy_styl_stanu());
+        int vw = viewport_w(), vh = viewport_h(), cols = liczba_kolumn();
+        if (vw <= 0 || vh <= 0 || cols <= 0 || liczba_ == 0) return;
+        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        int cw = szerokosc_elementu_ * s, ch = wysokosc_elementu_ * s;
+        int sy = pionowy_->czy_widoczna() ? static_cast<int>(pionowy_->wartosc()) : 0;
+        int pierwszy_wiersz = sy / ch;
+        int ostatni_wiersz = (sy + vh + ch - 1) / ch;
+        size_t start = static_cast<size_t>(pierwszy_wiersz) * static_cast<size_t>(cols);
+        size_t koniec = static_cast<size_t>(ostatni_wiersz + 1) * static_cast<size_t>(cols);
+        if (start > liczba_) start = liczba_;
+        if (koniec > liczba_) koniec = liczba_;
+        ctx.dodaj_przyciecie(Prostokat(1, 1, vw, vh));
+        for (size_t i = start; i < koniec; ++i) {
+            ++ostatnio_narysowane_;
+            int row = static_cast<int>(i / static_cast<size_t>(cols));
+            int col = static_cast<int>(i % static_cast<size_t>(cols));
+            Prostokat kom(1 + col * cw + 2 * s, 1 + row * ch - sy + 2 * s,
+                          cw - 4 * s, ch - 4 * s);
+            if (static_cast<int>(i) == wybrany_) ctx.rysuj_zaokraglony_prostokat(kom, Kolory::ZaznaczenieTlo, 4 * s);
+            else if (static_cast<int>(i) == najechany_) ctx.rysuj_zaokraglony_prostokat(kom, 0x004A2605, 4 * s);
+            if (static_cast<int>(i) == fokus_ && czy_ma_fokus_) ctx.rysuj_zaokraglona_ramke(kom, Kolory::AkcentFokus, 4 * s, s);
+            int tekst_h = CzcionkaUI::pobierz_wysokosc(s);
+            Prostokat img(kom.x + 5 * s, kom.y + 5 * s, kom.szerokosc - 10 * s,
+                          kom.wysokosc - tekst_h - 14 * s);
+            if (renderer_) renderer_(this, ctx, elementy_[i], img, dane_renderera_);
+            else rysuj_obraz(ctx, elementy_[i], img);
+            ctx.rysuj_tekst_obciety(Punkt(kom.x + 4 * s, kom.dolny() - tekst_h - 3 * s),
+                                    elementy_[i].etykieta,
+                                    static_cast<int>(i) == wybrany_ ? Kolory::ZaznaczenieTekst : Kolory::TekstBialy,
+                                    kom.szerokosc - 8 * s, s);
+        }
+        ctx.zdejmij_przyciecie();
+    }
+
+    void obsluz_ruch_myszy(ZdarzenieMyszki& e) override {
+        int n = indeks_w_punkcie(e.x, e.y);
+        if (n != najechany_) { int st = najechany_; najechany_ = n; uniewaznij_element(st); uniewaznij_element(n); }
+    }
+    void obsluz_opuszczenie_myszy() override {
+        Kontrolka::obsluz_opuszczenie_myszy();
+        if (najechany_ >= 0) { int st = najechany_; najechany_ = -1; uniewaznij_element(st); }
+    }
+    void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e) override {
+        if (!czy_wlaczona_ || !e.czy_lewy_przycisk()) return;
+        int i = indeks_w_punkcie(e.x, e.y); if (i >= 0) { ustaw_wybrany_indeks(i); e.obsluzone = true; }
+    }
+    void obsluz_podwojne_klikniecie(ZdarzenieMyszki& e) override {
+        int i = indeks_w_punkcie(e.x, e.y); if (i < 0) i = wybrany_;
+        if (i >= 0 && cb_aktywacja_) cb_aktywacja_(this, i, elementy_[i].identyfikator, dane_aktywacji_);
+        e.obsluzone = i >= 0;
+    }
+    void obsluz_rolke(ZdarzenieRolki& e) override {
+        if (e.delta_y && pionowy_->czy_widoczna()) { pionowy_->przewin_o(e.delta_y > 0 ? -wysokosc_elementu_ : wysokosc_elementu_); e.obsluzone = true; }
+    }
+    void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
+        if (!czy_wlaczona_ || liczba_ == 0) return;
+        uint32_t k = e.kod_klawisza; bool usb = (k & BWS_KEY_SOURCE_USB) != 0;
+        bool e0 = (k & BWS_KEY_SOURCE_E0) != 0; uint32_t b = usb ? k & 0xFFU : k & 0x7FU;
+        int delta = 0, cols = liczba_kolumn();
+        if ((usb && b == 79U) || (e0 && b == 0x4DU)) delta = 1;
+        if ((usb && b == 80U) || (e0 && b == 0x4BU)) delta = -1;
+        if ((usb && b == 81U) || (e0 && b == 0x50U)) delta = cols;
+        if ((usb && b == 82U) || (e0 && b == 0x48U)) delta = -cols;
+        if (delta) {
+            int n = fokus_ < 0 ? 0 : przytnij(fokus_ + delta, 0, static_cast<int>(liczba_) - 1);
+            ustaw_fokus_indeks(n); e.obsluzone = true; return;
+        }
+        if (k == 13U || k == 32U || (usb && (b == 40U || b == 44U))) {
+            if (fokus_ >= 0) ustaw_wybrany_indeks(fokus_);
+            e.obsluzone = true;
+            return;
+        }
+        Kontrolka::obsluz_wcisniecie_klawisza(e);
+    }
+
+private:
+    static char* kopiuj(const char* s) {
+        size_t n = 0; while (s && s[n] && n < 255) ++n;
+        char* p = new char[n + 1]; if (!p) return nullptr;
+        for (size_t i = 0; i < n; ++i) p[i] = s[i];
+        p[n] = '\0';
+        return p;
+    }
+    bool zapewnij_pojemnosc(size_t n) {
+        if (n <= pojemnosc_) return true;
+        size_t nowa = pojemnosc_ ? pojemnosc_ * 2 : 32;
+        if (nowa < n) nowa = n;
+        if (nowa > MAKS_ELEMENTOW) nowa = MAKS_ELEMENTOW;
+        Element* p = new Element[nowa]; if (!p) return false;
+        for (size_t i = 0; i < liczba_; ++i) p[i] = elementy_[i];
+        delete[] elementy_; elementy_ = p; pojemnosc_ = nowa; return true;
+    }
+    int viewport_w() const { int w = obszar_.szerokosc - 2 - (pionowy_ && pionowy_->czy_widoczna() ? pionowy_->szerokosc() : 0); return w > 0 ? w : 0; }
+    int viewport_h() const { int h = obszar_.wysokosc - 2; return h > 0 ? h : 0; }
+    int liczba_kolumn() const { int cw = szerokosc_elementu_ * (skala_dpi_ < 1 ? 1 : skala_dpi_); return cw > 0 ? przytnij(viewport_w() / cw, 1, 1024) : 1; }
+    void aktualizuj_geometrie() {
+        if (!pionowy_) return;
+        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        int sw = 15 * s;
+        pionowy_->rozmiesc(Prostokat(obszar_.szerokosc - sw - 1, 1, sw, obszar_.wysokosc - 2));
+    }
+    void aktualizuj_przewijanie() {
+        if (!pionowy_) return;
+        int cols = liczba_kolumn();
+        uint64_t rows = cols > 0 ? (liczba_ + static_cast<size_t>(cols) - 1) / static_cast<size_t>(cols) : 0;
+        uint64_t h64 = rows * static_cast<uint64_t>(wysokosc_elementu_) * static_cast<uint64_t>(skala_dpi_ < 1 ? 1 : skala_dpi_);
+        int h = h64 > static_cast<uint64_t>(INT32_MAX) ? INT32_MAX : static_cast<int>(h64);
+        pionowy_->ustaw_widoczna(h > viewport_h()); aktualizuj_geometrie();
+        pionowy_->ustaw_zakres(0, h); pionowy_->ustaw_rozmiar_strony(viewport_h() > 0 ? viewport_h() : 1);
+    }
+    Prostokat rect_elementu(int i) const {
+        if (i < 0 || i >= static_cast<int>(liczba_)) return Prostokat();
+        int s = skala_dpi_ < 1 ? 1 : skala_dpi_, cols = liczba_kolumn();
+        int cw = szerokosc_elementu_ * s, ch = wysokosc_elementu_ * s;
+        int sy = pionowy_->czy_widoczna() ? static_cast<int>(pionowy_->wartosc()) : 0;
+        return Prostokat(1 + (i % cols) * cw, 1 + (i / cols) * ch - sy, cw, ch);
+    }
+    void uniewaznij_element(int i) { Prostokat r = rect_elementu(i); if (!r.czy_pusty()) uniewaznij_obszar(r.przeciecie(prostokat_widoku())); }
+    int indeks_w_punkcie(int x, int y) const {
+        int lx = x - obszar_ekranu_.x - 1, ly = y - obszar_ekranu_.y - 1;
+        if (lx < 0 || ly < 0 || lx >= viewport_w() || ly >= viewport_h()) return -1;
+        int s = skala_dpi_ < 1 ? 1 : skala_dpi_, cols = liczba_kolumn();
+        int sy = pionowy_->czy_widoczna() ? static_cast<int>(pionowy_->wartosc()) : 0;
+        int col = lx / (szerokosc_elementu_ * s), row = (ly + sy) / (wysokosc_elementu_ * s);
+        uint64_t idx = static_cast<uint64_t>(row) * static_cast<uint64_t>(cols) + static_cast<uint64_t>(col);
+        return idx < liczba_ ? static_cast<int>(idx) : -1;
+    }
+    void przewin_do(int i) {
+        if (i < 0 || !pionowy_) return;
+        int s = skala_dpi_ < 1 ? 1 : skala_dpi_, cols = liczba_kolumn();
+        int y = (i / cols) * wysokosc_elementu_ * s, h = wysokosc_elementu_ * s;
+        int cur = static_cast<int>(pionowy_->wartosc()), vh = viewport_h();
+        if (y < cur) pionowy_->ustaw_wartosc(y); else if (y + h > cur + vh) pionowy_->ustaw_wartosc(y + h - vh);
+    }
+    static void rysuj_obraz(KontekstRysowania& ctx, const Element& e, Prostokat dst) {
+        if (!e.piksele || e.szerokosc_obrazu <= 0 || e.wysokosc_obrazu <= 0 || dst.czy_pusty()) {
+            ctx.rysuj_prostokat(dst, 0x00302010); ctx.rysuj_ramke(dst, 0x00806030); return;
+        }
+        int dw = dst.szerokosc, dh = dst.wysokosc;
+        int fitw = dw, fith = static_cast<int>((static_cast<int64_t>(e.wysokosc_obrazu) * dw) / e.szerokosc_obrazu);
+        if (fith > dh) { fith = dh; fitw = static_cast<int>((static_cast<int64_t>(e.szerokosc_obrazu) * dh) / e.wysokosc_obrazu); }
+        if (fitw <= 0 || fith <= 0) return;
+        int ox = dst.x + (dw - fitw) / 2, oy = dst.y + (dh - fith) / 2;
+        for (int y = 0; y < fith; ++y) for (int x = 0; x < fitw; ++x) {
+            int sx = static_cast<int>((static_cast<int64_t>(x) * e.szerokosc_obrazu) / fitw);
+            int sy = static_cast<int>((static_cast<int64_t>(y) * e.wysokosc_obrazu) / fith);
+            uint32_t c = e.piksele[static_cast<size_t>(sy) * static_cast<size_t>(e.szerokosc_obrazu) + static_cast<size_t>(sx)];
+            if (c != 0) ctx.rysuj_prostokat(Prostokat(ox + x, oy + y, 1, 1), c);
+        }
+    }
+
+    Element* elementy_{nullptr}; size_t liczba_{0}, pojemnosc_{0};
+    int wybrany_{-1}, fokus_{-1}, najechany_{-1};
+    int szerokosc_elementu_{112}, wysokosc_elementu_{100};
+    PasekPrzewijania* pionowy_{nullptr}; size_t ostatnio_narysowane_{0};
+    FunkcjaWidoku cb_wybor_{nullptr}; void* dane_wyboru_{nullptr};
+    FunkcjaWidoku cb_aktywacja_{nullptr}; void* dane_aktywacji_{nullptr};
+    FunkcjaRenderera renderer_{nullptr}; void* dane_renderera_{nullptr};
+};
+
+} // namespace BursztynUI
