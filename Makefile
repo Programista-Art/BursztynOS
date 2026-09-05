@@ -46,6 +46,7 @@ XORRISO       ?= xorriso
 KERNEL := system_operacyjny.bin
 ISO    := BursztynOS.iso
 ISO8K  := BursztynOS_8k.iso
+TAPETY_PAK := tapety.pak
 
 ISO_DIR     := isodir
 ISO8K_DIR   := isodir_8k
@@ -226,7 +227,7 @@ MBEDTLS_OBJS := $(MBEDTLS_SRCS:.c=.o)
 # 7. OBIEKTY JADRA
 # ============================================================================
 
-OBJS := tapety_blob.o tapety.o btp.o tapetyzasoby.o \
+OBJS := tapety_blob.o tapety.o btp.o \
 	boot.o \
 	gdt.o \
 	tss.o \
@@ -566,9 +567,11 @@ check-kernel: $(KERNEL)
 # 1. Bursztyn OS (domyslny, czysty start bez autostartu testow)
 # 2. Bursztyn OS - testy automatyczne (multiboot2 bursztyn.test=automated)
 #
-$(GRUB_CFG): $(KERNEL)
+$(GRUB_CFG): $(KERNEL) $(TAPETY_PAK)
 	@mkdir -p $(ISO_DIR)/boot/grub
 	@cp $(KERNEL) $(ISO_DIR)/boot/
+	@echo "[ISO] Kopiuje $(TAPETY_PAK) jako /boot/tapety.pak (modul Multiboot2)."
+	@cp $(TAPETY_PAK) $(ISO_DIR)/boot/tapety.pak
 	@printf '%s\n' \
 		'set timeout=3' \
 		'set default=0' \
@@ -578,6 +581,7 @@ $(GRUB_CFG): $(KERNEL)
 		'    set gfxmode=1280x720x32,1024x768x32,auto' \
 		'    set gfxpayload=keep' \
 		'    multiboot2 /boot/system_operacyjny.bin' \
+		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
 		'' \
@@ -586,6 +590,7 @@ $(GRUB_CFG): $(KERNEL)
 		'    set gfxmode=1280x720x32,1024x768x32,auto' \
 		'    set gfxpayload=keep' \
 		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated' \
+		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
 		> $(GRUB_CFG)
@@ -598,9 +603,10 @@ iso: $(ISO)
 # Tymczasowy artefakt developerski/CI sluzacy wylacznie do bezobslugowego
 # uruchomienia drugiego wpisu (bursztyn.test=automated) w QEMU bez oczekiwania na menu.
 # Wykorzystuje dokladnie ten sam plik jadra $(KERNEL) co kanoniczny $(ISO).
-$(CI_TEST_ISO): check-kernel $(GRUB_CFG)
+$(CI_TEST_ISO): check-kernel $(GRUB_CFG) $(TAPETY_PAK)
 	@mkdir -p $(CI_TEST_DIR)/boot/grub
 	@cp $(KERNEL) $(CI_TEST_DIR)/boot/
+	@cp $(TAPETY_PAK) $(CI_TEST_DIR)/boot/tapety.pak
 	@printf '%s\n' \
 		'set timeout=0' \
 		'set default=0' \
@@ -610,6 +616,7 @@ $(CI_TEST_ISO): check-kernel $(GRUB_CFG)
 		'    set gfxmode=1280x720x32,1024x768x32,auto' \
 		'    set gfxpayload=keep' \
 		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated' \
+		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
 		> $(CI_TEST_DIR)/boot/grub/grub.cfg
@@ -617,7 +624,7 @@ $(CI_TEST_ISO): check-kernel $(GRUB_CFG)
 	@rm -rf $(CI_TEST_DIR)
 
 #
-# Developerskie ISO 8K (BursztynOS_8k.iso) - dolacza modul Multiboot2 test8k.bmp
+# Developerskie ISO 8K (BursztynOS_8k.iso) - dolacza modul Multiboot2 test8k.bmp oraz tapety.pak
 #
 check-test8k:
 	@if [ ! -f "$(LARGE_TEST_BMP)" ]; then \
@@ -626,11 +633,13 @@ check-test8k:
 		exit 1; \
 	fi
 
-$(GRUB8K_CFG): $(KERNEL) check-test8k
+$(GRUB8K_CFG): $(KERNEL) check-test8k $(TAPETY_PAK)
 	@mkdir -p $(ISO8K_DIR)/boot/grub
 	@cp $(KERNEL) $(ISO8K_DIR)/boot/
 	@echo "[ISO-8K] Kopiuje $(LARGE_TEST_BMP) jako /boot/test8k.bmp (modul Multiboot2)."
 	@cp "$(LARGE_TEST_BMP)" $(ISO8K_DIR)/boot/test8k.bmp
+	@echo "[ISO-8K] Kopiuje $(TAPETY_PAK) jako /boot/tapety.pak (modul Multiboot2)."
+	@cp $(TAPETY_PAK) $(ISO8K_DIR)/boot/tapety.pak
 	@printf '%s\n' \
 		'set timeout=0' \
 		'set default=0' \
@@ -640,6 +649,7 @@ $(GRUB8K_CFG): $(KERNEL) check-test8k
 		'    set gfxmode=1280x720x32,1024x768x32,auto' \
 		'    set gfxpayload=keep' \
 		'    multiboot2 /boot/system_operacyjny.bin' \
+		'    module2 /boot/tapety.pak tapety.pak' \
 		'    module2 /boot/test8k.bmp test8k.bmp' \
 		'    boot' \
 		'}' \
@@ -790,7 +800,7 @@ check-tools:
 
 clean:
 	rm -f *.o *.bin *.elf *.iso .*.iso
-	rm -f tapety_manifest.h tapetyzasoby.S tapetyzasoby.d tapety_zasoby.rsp tapety_zasoby.d tapety_zasoby.S tapety_zasoby.o
+	rm -f tapety.pak tapety.pak.d tapety_manifest.h tapetyzasoby.S tapetyzasoby.d tapety_zasoby.rsp tapety_zasoby.d tapety_zasoby.S tapety_zasoby.o
 	rm -f biblioteki/mbedtls/library/*.o
 	rm -f $(OVMF_VARS_RUNTIME)
 	rm -rf $(ISO_DIR) $(ISO8K_DIR) $(CI_TEST_DIR) isodir_test
@@ -831,18 +841,15 @@ help:
 	@echo "  make cdysk     - usun wirtualny dysk"
 	@echo "  make distclean - clean + cdysk"
 
-# Automatyczne odkrywanie i pakowanie tapet BTP
-tapety_manifest.h tapetyzasoby.S: obrazy/tapety narzedzia/tapety-btp/generujmanifest.py
-	$(PYTHON) narzedzia/tapety-btp/generujmanifest.py --katalog obrazy/tapety --manifest tapety_manifest.h --asm tapetyzasoby.S --dep tapetyzasoby.d
+# Automatyczne pakowanie tapet BTP w zewnetrznym module Multiboot2 (tapety.pak)
+$(TAPETY_PAK): obrazy/tapety narzedzia/tapety-btp/generujpakiet.py
+	$(PYTHON) narzedzia/tapety-btp/generujpakiet.py --katalog obrazy/tapety --wyjscie $(TAPETY_PAK) --dep tapety.pak.d
 
-tapetyzasoby.o: tapetyzasoby.S
-	$(CC) $(ASM_FLAGS) -c $< -o $@
-
--include tapetyzasoby.d
+-include tapety.pak.d
 
 btp.o: narzedzia/tapety-btp/tapetybtp.cpp narzedzia/tapety-btp/tapetybtp.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
-tapety.o: tapety.cpp tapety.h tapety_format.h tapety_manifest.h obrazy/skalowanie.h narzedzia/tapety-btp/tapetybtp.h
+tapety.o: tapety.cpp tapety.h tapety_format.h pamiec.h obrazy/skalowanie.h narzedzia/tapety-btp/tapetybtp.h
 kernel.o bws_nowoczesne.o: tapety.h tapety_format.h obrazy/skalowanie.h
 
 btp_ring3.o: narzedzia/tapety-btp/tapetybtp.cpp narzedzia/tapety-btp/tapetybtp.h

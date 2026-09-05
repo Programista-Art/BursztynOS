@@ -399,6 +399,17 @@ void OdblokujRamke(uint64_t adres_fizyczny);
 void OdblokujZakres(uint64_t adres_fizyczny, uint64_t dlugosc);
 
 /*
+ * Modul przekazany przez bootloader Multiboot2.
+ */
+struct ModulMB2 {
+    uint64_t start;
+    uint64_t koniec;
+    uint64_t rozmiar;
+    const char* cmdline;
+    bool poprawny;
+};
+
+/*
  * Rezerwuje jedna fizyczna ramke 4 KiB.
  *
  * Zwraca:

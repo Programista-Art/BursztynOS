@@ -167,6 +167,8 @@ extern "C" uint8_t _binary_obrazy_test1_bmp_end[];
  * STALE STARTOWE
  * ========================================================================= */
 
+uint64_t g_multiboot_info_ptr = 0;
+
 namespace {
 
 constexpr uint64_t MULTIBOOT2_BOOTLOADER_MAGIC = 0x36D76289ULL;
@@ -198,7 +200,6 @@ constexpr uint64_t PRAWA_MENEDZERA_OKIEN =
     PRAWO_PLIKI_CZYTAJ | PRAWO_PLIKI_ZAPISZ | PRAWO_SIEC;
 
 bool grafika_gotowa = false;
-uint64_t g_multiboot_info_ptr = 0;
 
 /* =========================================================================
  * NISKIE FUNKCJE STARTOWE
@@ -707,14 +708,6 @@ void utworz_drabine_katalogow() {
 /* =========================================================================
  * IMPORT MODULOW MULTIBOOT2 (test8k.bmp)
  * ========================================================================= */
-
-struct ModulMB2 {
-    uint64_t start;
-    uint64_t koniec;
-    uint64_t rozmiar;
-    const char* cmdline;
-    bool poprawny;
-};
 
 bool znajdz_modul_mb2(uint64_t mbi, const char* nazwa_szukana, ModulMB2* wynik) {
     if (!wynik || mbi == 0 || !nazwa_szukana) return false;
@@ -1896,7 +1889,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
      * ------------------------------------------------------------------ */
 
     instaluj_wbudowane_programy();
-    tapety_inicjalizuj();
+    tapety_inicjalizuj(g_multiboot_info_ptr);
 
     /* ---------------------------------------------------------------------
      * Pierwszy proces Ring 3
