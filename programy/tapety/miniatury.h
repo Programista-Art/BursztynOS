@@ -26,6 +26,18 @@ public:
     uint32_t* obraz(unsigned i) const {
         return piksele_ && i < pojemnosc_ ? piksele_ + i * TAPETY_MINI_W * TAPETY_MINI_H : nullptr;
     }
+    void ustaw_placeholder(unsigned i) {
+        uint32_t* dst = obraz(i);
+        if (!dst) return;
+        for (uint32_t y = 0; y < TAPETY_MINI_H; ++y) {
+            for (uint32_t x = 0; x < TAPETY_MINI_W; ++x) {
+                const bool ramka = (x == 0 || x == TAPETY_MINI_W - 1 || y == 0 || y == TAPETY_MINI_H - 1);
+                const bool krzyz = (x * TAPETY_MINI_H == y * TAPETY_MINI_W) ||
+                                   ((TAPETY_MINI_W - 1 - x) * TAPETY_MINI_H == y * TAPETY_MINI_W);
+                dst[y * TAPETY_MINI_W + x] = ramka ? 0xFF804020U : (krzyz ? 0xFF4A2010U : 0xFF2A1508U);
+            }
+        }
+    }
     bool wczytaj(unsigned i, const char* sciezka = nullptr) {
         if (!obraz(i)) return false;
         const char* path = sciezka ? sciezka : (i < TAPETY_LICZBA ? TAPETY_SCIEZKI[i] : nullptr);
@@ -41,15 +53,26 @@ public:
         if (count > TAPETY_PIKSELE_MAX) ok = false;
         auto* src = ok ? static_cast<uint32_t*>(gui_malloc(count * 4)) : nullptr;
         if (!src) ok = false;
+        bool dec_ok = false, scale_ok = false;
         if (ok) {
             for (size_t p = 0; p < count; ++p) src[p] = TAPETY_TLO;
-            ok = btpwczytajirysuj(plik, n, src, info.szerokosc, info.wysokosc, info.szerokosc, count * 4) == BTPOK &&
-                skaluj_obraz(src, info.szerokosc, info.wysokosc, count * 4,
+            dec_ok = (btpwczytajirysuj(plik, n, src, info.szerokosc, info.wysokosc, info.szerokosc, count * 4) == BTPOK);
+            if (dec_ok) {
+                scale_ok = skaluj_obraz(src, info.szerokosc, info.wysokosc, count * 4,
                     obraz(i), TAPETY_MINI_W, TAPETY_MINI_H, TAPETY_MINI_W,
                     TAPETY_MINI_W * TAPETY_MINI_H * 4, TrybSkalowaniaObrazu::Dopasuj, TAPETY_TLO);
+            }
+            ok = dec_ok && scale_ok;
         }
         if (src) gui_free(src);
         gui_free(plik);
+
+        bws_wywolaj(1, reinterpret_cast<uint64_t>("[TAPETY GUI] Miniatura plik="), 0, 0, 0);
+        bws_wywolaj(1, reinterpret_cast<uint64_t>(path), 0, 0, 0);
+        bws_wywolaj(1, reinterpret_cast<uint64_t>(info.kompresja == 0 ? " BTP mode=RAW" : " BTP mode=RLE"), 0, 0, 0);
+        bws_wywolaj(1, reinterpret_cast<uint64_t>(dec_ok ? " decode=OK" : " decode=FAIL"), 0, 0, 0);
+        bws_wywolaj(1, reinterpret_cast<uint64_t>(scale_ok ? " scale=OK\n" : " scale=FAIL\n"), 0, 0, 0);
+
         return ok;
     }
 };

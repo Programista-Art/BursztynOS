@@ -887,17 +887,41 @@ bool kopiuj_twor_uzytkownika(const char* sciezka,
 bool czytaj_fragment_pliku(const char* sciezka, uint64_t offset,
                            char* bufor, uint32_t dlugosc,
                            uint32_t* odczytano) {
-    if (!sciezka || !bufor || dlugosc==0) return false;
+    if (!sciezka || !bufor || dlugosc == 0) return false;
     if (odczytano) *odczytano = 0;
-    uint64_t res = bws_wywolaj(59,
-        reinterpret_cast<uint64_t>(sciezka),
-        offset,
-        reinterpret_cast<uint64_t>(bufor),
-        (uint64_t)dlugosc);
-    if (res==0 || res > (uint64_t)UINT32_MAX + 1ULL) return false;
-    uint32_t got = (uint32_t)(res - 1ULL);
-    if (got > dlugosc) return false;
-    if (odczytano) *odczytano = got;
+
+    constexpr uint32_t MAKS_CHUNK = 1024U * 1024U;
+    uint32_t calkowicie_odczytano = 0;
+
+    while (calkowicie_odczytano < dlugosc) {
+        uint32_t do_odczytu = dlugosc - calkowicie_odczytano;
+        if (do_odczytu > MAKS_CHUNK) do_odczytu = MAKS_CHUNK;
+
+        const uint64_t res = bws_wywolaj(
+            59,
+            reinterpret_cast<uint64_t>(sciezka),
+            offset + calkowicie_odczytano,
+            reinterpret_cast<uint64_t>(bufor + calkowicie_odczytano),
+            static_cast<uint64_t>(do_odczytu));
+
+        if (res == 0 || res > static_cast<uint64_t>(UINT32_MAX) + 1ULL) {
+            if (odczytano) *odczytano = calkowicie_odczytano;
+            return false;
+        }
+
+        const uint32_t got = static_cast<uint32_t>(res - 1ULL);
+        if (got > do_odczytu) {
+            if (odczytano) *odczytano = calkowicie_odczytano;
+            return false;
+        }
+
+        calkowicie_odczytano += got;
+        if (got < do_odczytu) {
+            break;
+        }
+    }
+
+    if (odczytano) *odczytano = calkowicie_odczytano;
     return true;
 }
 

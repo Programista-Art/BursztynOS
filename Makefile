@@ -226,7 +226,7 @@ MBEDTLS_OBJS := $(MBEDTLS_SRCS:.c=.o)
 # 7. OBIEKTY JADRA
 # ============================================================================
 
-OBJS := tapety_blob.o tapety.o btp.o tapety_zasoby.o \
+OBJS := tapety_blob.o tapety.o btp.o tapetyzasoby.o \
 	boot.o \
 	gdt.o \
 	tss.o \
@@ -790,7 +790,7 @@ check-tools:
 
 clean:
 	rm -f *.o *.bin *.elf *.iso .*.iso
-	rm -f tapety_manifest.h tapety_zasoby.rsp tapety_zasoby.d
+	rm -f tapety_manifest.h tapetyzasoby.S tapetyzasoby.d tapety_zasoby.rsp tapety_zasoby.d tapety_zasoby.S tapety_zasoby.o
 	rm -f biblioteki/mbedtls/library/*.o
 	rm -f $(OVMF_VARS_RUNTIME)
 	rm -rf $(ISO_DIR) $(ISO8K_DIR) $(CI_TEST_DIR) isodir_test
@@ -832,18 +832,13 @@ help:
 	@echo "  make distclean - clean + cdysk"
 
 # Automatyczne odkrywanie i pakowanie tapet BTP
-tapety_manifest.h tapety_zasoby.rsp: obrazy/tapety narzedzia/tapety-btp/generujmanifest.py
-	$(PYTHON) narzedzia/tapety-btp/generujmanifest.py --katalog obrazy/tapety --manifest tapety_manifest.h --rsp tapety_zasoby.rsp --dep tapety_zasoby.d
+tapety_manifest.h tapetyzasoby.S: obrazy/tapety narzedzia/tapety-btp/generujmanifest.py
+	$(PYTHON) narzedzia/tapety-btp/generujmanifest.py --katalog obrazy/tapety --manifest tapety_manifest.h --asm tapetyzasoby.S --dep tapetyzasoby.d
 
-tapety_zasoby.o: tapety_manifest.h tapety_zasoby.rsp
-	@if [ -s tapety_zasoby.rsp ]; then \
-		$(LD) -r -b binary @tapety_zasoby.rsp -o $@; \
-	else \
-		echo "[TAPETA] Ostrzezenie: brak tapet .btp w obrazy/tapety, tworzenie pustego zasobu."; \
-		$(AS) -o $@ /dev/null; \
-	fi
+tapetyzasoby.o: tapetyzasoby.S
+	$(CC) $(ASM_FLAGS) -c $< -o $@
 
--include tapety_zasoby.d
+-include tapetyzasoby.d
 
 btp.o: narzedzia/tapety-btp/tapetybtp.cpp narzedzia/tapety-btp/tapetybtp.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@

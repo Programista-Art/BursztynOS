@@ -101,7 +101,8 @@ void odkryj_tapety() {
             bufor[pos + 3] == 'I' && bufor[pos + 4] == 'K' && bufor[pos + 5] == ']' && bufor[pos + 6] == ' ') {
 
             const char* nazwa_pliku = bufor + pos + 7;
-            const size_t nazwa_len = end - (pos + 7);
+            size_t nazwa_len = end - (pos + 7);
+            if (nazwa_len > 0 && nazwa_pliku[nazwa_len - 1] == '\r') --nazwa_len;
 
             if (nazwa_len >= 5 && nazwa_len < TAPETY_SCIEZKA_MAX - 10) {
                 char plik[TAPETY_SCIEZKA_MAX]{};
@@ -190,7 +191,11 @@ extern "C" __attribute__((noreturn)) void _start() {
 
     unsigned poprawne = 0;
     for (int i = 0; i < liczba_tapet; ++i) {
-        if (mini.wczytaj(static_cast<unsigned>(i), lista_tapet[i].sciezka)) ++poprawne;
+        if (mini.wczytaj(static_cast<unsigned>(i), lista_tapet[i].sciezka)) {
+            ++poprawne;
+        } else {
+            mini.ustaw_placeholder(static_cast<unsigned>(i));
+        }
         galeria->dodaj_element(i, lista_tapet[i].nazwa, mini.obraz(static_cast<unsigned>(i)), TAPETY_MINI_W, TAPETY_MINI_H);
     }
     log(poprawne > 0 ? "[TAPETY APP] Miniatury gotowe.\n" : "[TAPETY APP] Brak poprawnych miniatur.\n");

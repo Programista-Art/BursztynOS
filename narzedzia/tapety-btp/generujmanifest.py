@@ -3,20 +3,20 @@
 generujmanifest.py - Automatyczne odkrywanie i generowanie manifestu tapet BTP dla Bursztyn OS.
 Odkrywa pliki .btp w katalogu zrodlowym (obrazy/tapety), waliduje je i tworzy:
   1. tapety_manifest.h - deklaracje symboli i tablice zasobow dla jadra
-  2. tapety_zasoby.rsp - liste plikow dla ld -r -b binary
-  3. tapety_zasoby.d   - zaleznosci dla Makefile
+  2. tapetyzasoby.S    - asemblerowe dyrektywy .incbin z deterministycznymi symbolami ASCII
+  3. tapetyzasoby.d    - zaleznosci dla Makefile
 """
 
 import argparse
+import binascii
 import os
-import re
 import struct
 import sys
 
 def bezpieczna_nazwa(nazwa: str) -> bool:
     if not nazwa or len(nazwa) > 120 or nazwa.startswith("."):
         return False
-    if "/" in nazwa or "\\" in nazwa or "\0" in nazwa or "\r" in nazwa or "\n" in nazwa or ".." in nazwa:
+    if "/" in nazwa or "\\" in nazwa or "\0" in nazwa or "\r" in nazwa or "\n" in nazwa or ".." in nazwa or '"' in nazwa:
         return False
     try:
         dane = nazwa.encode("utf-8")
@@ -67,11 +67,6 @@ def waliduj_btp(sciezka: str) -> bool:
     except (OSError, struct.error):
         return False
 
-def symbol_ld(sciezka: str) -> str:
-    # ld zastepuje dowolny znak poza [a-zA-Z0-9] podkresleniem
-    zastapione = re.sub(r"[^a-zA-Z0-9]", "_", sciezka)
-    return f"_binary_{zastapione}"
-
 def zapisz_jesli_zmieniono(sciezka: str, nowa_zawartosc: str):
     if os.path.isfile(sciezka):
         try:
@@ -88,8 +83,8 @@ def main():
     parser = argparse.ArgumentParser(description="Generuj manifest tapet BTP dla Bursztyn OS")
     parser.add_argument("--katalog", "-k", default="obrazy/tapety", help="Katalog zrodlowy tapet .btp")
     parser.add_argument("--manifest", "-m", default="tapety_manifest.h", help="Sciezka wyjsciowa naglowka C++")
-    parser.add_argument("--rsp", "-r", default="tapety_zasoby.rsp", help="Sciezka wyjsciowa pliku odpowiedzi dla ld")
-    parser.add_argument("--dep", "-d", default="tapety_zasoby.d", help="Sciezka wyjsciowa zaleznosci dla Make")
+    parser.add_argument("--asm", "-a", default="tapetyzasoby.S", help="Sciezka wyjsciowa pliku assemblera (.S)")
+    parser.add_argument("--dep", "-d", default="tapetyzasoby.d", help="Sciezka wyjsciowa zaleznosci dla Make")
     args = parser.parse_args()
 
     katalog = args.katalog
@@ -110,13 +105,34 @@ def main():
                 sys.stderr.write(f"[TAPETA GENERATOR] Ostrzezenie: pomijam uszkodzony plik BTP: {sciezka}\n")
                 continue
             rozmiar = os.path.getsize(sciezka)
-            sym = symbol_ld(sciezka)
-            tapety.append((nazwa, sciezka, rozmiar, sym))
+            with open(sciezka, "rb") as f:
+                zawartosc = f.read()
+            crc32 = binascii.crc32(zawartosc) & 0xFFFFFFFF
+            tapety.append((nazwa, sciezka, rozmiar, crc32))
 
     if not tapety:
         sys.stderr.write(f"[TAPETA GENERATOR] Ostrzezenie: brak poprawnych tapet .btp w {katalog}!\n")
 
-    # 1. Generowanie tapety_manifest.h
+    # 1. Generowanie pliku assemblera (.S) z .incbin
+    linie_asm = [
+        "// Automatycznie wygenerowany plik przez generujmanifest.py. Nie edytuj recznie.",
+        ".section .rodata.tapety,\"a\",@progbits",
+        ""
+    ]
+    for idx, (nazwa, sciezka, _, _) in enumerate(tapety):
+        sym_start = f"btpzasob{idx:03d}start"
+        sym_end = f"btpzasob{idx:03d}end"
+        linie_asm.append(".balign 16")
+        linie_asm.append(f".global {sym_start}")
+        linie_asm.append(f".global {sym_end}")
+        linie_asm.append(f"{sym_start}:")
+        linie_asm.append(f'.incbin "{sciezka}"')
+        linie_asm.append(f"{sym_end}:")
+        linie_asm.append("")
+
+    zapisz_jesli_zmieniono(args.asm, "\n".join(linie_asm))
+
+    # 2. Generowanie tapety_manifest.h
     linie_h = [
         "// Automatycznie wygenerowany plik przez generujmanifest.py. Nie edytuj recznie.",
         "#pragma once",
@@ -128,45 +144,45 @@ def main():
         "    const uint8_t* poczatek;",
         "    const uint8_t* koniec;",
         "    size_t rozmiar;",
+        "    uint32_t crc32;",
         "};",
         ""
     ]
 
     if tapety:
         linie_h.append("extern \"C\" {")
-        for _, _, _, sym in tapety:
-            linie_h.append(f"extern const uint8_t {sym}_start[];")
-            linie_h.append(f"extern const uint8_t {sym}_end[];")
+        for idx in range(len(tapety)):
+            sym_start = f"btpzasob{idx:03d}start"
+            sym_end = f"btpzasob{idx:03d}end"
+            linie_h.append(f"extern const uint8_t {sym_start}[];")
+            linie_h.append(f"extern const uint8_t {sym_end}[];")
         linie_h.append("}")
         linie_h.append("")
         linie_h.append("inline constexpr TapetaZasob SYSTEMOWE_TAPETY_ZASOBY[] = {")
-        for nazwa, _, rozmiar, sym in tapety:
-            linie_h.append(f"    {{ \"{nazwa}\", {sym}_start, {sym}_end, {rozmiar}U }},")
+        for idx, (nazwa, _, rozmiar, crc32) in enumerate(tapety):
+            sym_start = f"btpzasob{idx:03d}start"
+            sym_end = f"btpzasob{idx:03d}end"
+            linie_h.append(f"    {{ \"{nazwa}\", {sym_start}, {sym_end}, {rozmiar}U, 0x{crc32:08X}U }},")
         linie_h.append("};")
         linie_h.append("inline constexpr size_t SYSTEMOWE_TAPETY_LICZBA = sizeof(SYSTEMOWE_TAPETY_ZASOBY) / sizeof(SYSTEMOWE_TAPETY_ZASOBY[0]);")
     else:
         linie_h.append("inline constexpr TapetaZasob SYSTEMOWE_TAPETY_ZASOBY[1] = {")
-        linie_h.append("    { nullptr, nullptr, nullptr, 0U }")
+        linie_h.append("    { nullptr, nullptr, nullptr, 0U, 0U }")
         linie_h.append("};")
         linie_h.append("inline constexpr size_t SYSTEMOWE_TAPETY_LICZBA = 0;")
 
     linie_h.append("")
     zapisz_jesli_zmieniono(args.manifest, "\n".join(linie_h))
 
-    # 2. Generowanie tapety_zasoby.rsp
-    linie_rsp = []
-    for _, sciezka, _, _ in tapety:
-        linie_rsp.append(f"\"{sciezka}\"")
-    zapisz_jesli_zmieniono(args.rsp, "\n".join(linie_rsp) + ("\n" if linie_rsp else ""))
-
-    # 3. Generowanie tapety_zasoby.d
+    # 3. Generowanie pliku zaleznosci (.d)
     skrypt = "narzedzia/tapety-btp/generujmanifest.py"
     zaleznosci = [katalog, skrypt]
     for _, sciezka, _, _ in tapety:
         zaleznosci.append(sciezka.replace(" ", "\\ "))
 
+    obj_name = os.path.splitext(args.asm)[0] + ".o"
     linie_d = [
-        f"{args.manifest} tapety_zasoby.o: " + " ".join(zaleznosci),
+        f"{args.manifest} {args.asm} {obj_name}: " + " ".join(zaleznosci),
         ""
     ]
     for _, sciezka, _, _ in tapety:
