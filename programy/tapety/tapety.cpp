@@ -37,6 +37,23 @@ ElementTapety lista_tapet[TAPETY_MAX];
 int liczba_tapet = 0;
 
 void log(const char* t) { bws_wywolaj(1, reinterpret_cast<uint64_t>(t), 0, 0, 0); }
+void log_uint(unsigned v) {
+    char buf[16];
+    int pos = 0;
+    if (v == 0) {
+        buf[pos++] = '0';
+    } else {
+        char rev[16];
+        int rpos = 0;
+        while (v > 0) {
+            rev[rpos++] = static_cast<char>('0' + (v % 10));
+            v /= 10;
+        }
+        while (rpos > 0) buf[pos++] = rev[--rpos];
+    }
+    buf[pos] = '\0';
+    log(buf);
+}
 uint64_t endpoint;
 WidokMiniatur* galeria;
 Etykieta* komunikat;
@@ -198,7 +215,13 @@ extern "C" __attribute__((noreturn)) void _start() {
         }
         galeria->dodaj_element(i, lista_tapet[i].nazwa, mini.obraz(static_cast<unsigned>(i)), TAPETY_MINI_W, TAPETY_MINI_H);
     }
-    log(poprawne > 0 ? "[TAPETY APP] Miniatury gotowe.\n" : "[TAPETY APP] Brak poprawnych miniatur.\n");
+    if (poprawne > 0) {
+        log("[TAPETY APP] Miniatury gotowe ");
+        log_uint(poprawne);
+        log(".\n");
+    } else {
+        log("[TAPETY APP] Brak poprawnych miniatur.\n");
+    }
 
     TapetyZadanie req{}; req.operacja = TAPETY_STAN;
     TapetyOdpowiedz stan{};
@@ -211,9 +234,6 @@ extern "C" __attribute__((noreturn)) void _start() {
                 break;
             }
         }
-    }
-    if (liczba_tapet > 0) {
-        galeria->ustaw_wybrany_indeks(wybrana);
     }
     galeria->przy_zmianie_zaznaczenia([](WidokMiniatur*, int i, uint64_t, void*) {
         if (i >= 0 && i < liczba_tapet) {
@@ -228,6 +248,10 @@ extern "C" __attribute__((noreturn)) void _start() {
     row.dodaj<Przycisk>("Zastosuj").przy_kliknieciu(zastosuj);
     row.dodaj<Przycisk>("Anuluj").przy_kliknieciu([](Przycisk*, void* p) { static_cast<Okno*>(p)->zamknij(); }, &okno);
     komunikat = &root->dodaj<Etykieta>(liczba_tapet > 0 ? "Wybierz miniaturę i tryb, następnie naciśnij Zastosuj." : "Brak dostępnych tapet w /tapety.");
+    okno.przelicz_uklad();
+    if (liczba_tapet > 0) {
+        galeria->ustaw_wybrany_indeks(wybrana);
+    }
     (void)app.uruchom(okno);
     ipc_close(endpoint);
     bws_zakoncz_proces();

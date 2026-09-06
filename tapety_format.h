@@ -3,6 +3,13 @@
 #include <stddef.h>
 #include "obrazy/skalowanie.h"
 
+#if defined(BURSZTYNDIAGTAPETY) && !defined(BURSZTYN_DIAG_TAPETY)
+#define BURSZTYN_DIAG_TAPETY BURSZTYNDIAGTAPETY
+#endif
+#ifndef BURSZTYN_DIAG_TAPETY
+#define BURSZTYN_DIAG_TAPETY 0
+#endif
+
 constexpr uint32_t TAPETY_LICZBA = 10;
 constexpr uint32_t TAPETY_MINI_W = 160, TAPETY_MINI_H = 90;
 constexpr size_t TAPETY_SCIEZKA_MAX = 128, TAPETY_CFG_MAX = 512;

@@ -38,14 +38,25 @@ public:
             }
         }
     }
+    static void zglos_blad(const char* path) {
+        bws_wywolaj(1, reinterpret_cast<uint64_t>("[TAPETY APP] BLAD miniatury "), 0, 0, 0);
+        bws_wywolaj(1, reinterpret_cast<uint64_t>(path ? path : "(nieznany)"), 0, 0, 0);
+        bws_wywolaj(1, reinterpret_cast<uint64_t>("\n"), 0, 0, 0);
+    }
     bool wczytaj(unsigned i, const char* sciezka = nullptr) {
         if (!obraz(i)) return false;
         const char* path = sciezka ? sciezka : (i < TAPETY_LICZBA ? TAPETY_SCIEZKI[i] : nullptr);
         if (!path) return false;
         uint32_t n = 0, read = 0;
-        if (!pobierz_rozmiar_pliku(path, &n) || n < 14 || n > TAPETY_PLIK_MAX) return false;
+        if (!pobierz_rozmiar_pliku(path, &n) || n < 14 || n > TAPETY_PLIK_MAX) {
+            zglos_blad(path);
+            return false;
+        }
         auto* plik = static_cast<uint8_t*>(gui_malloc(n));
-        if (!plik) return false;
+        if (!plik) {
+            zglos_blad(path);
+            return false;
+        }
         BtpInfo info{};
         bool ok = czytaj_fragment_pliku(path, 0, reinterpret_cast<char*>(plik), n, &read) &&
             read == n && btpnaglowek(plik, n, &info) == BTPOK;
@@ -67,11 +78,17 @@ public:
         if (src) gui_free(src);
         gui_free(plik);
 
+#if BURSZTYN_DIAG_TAPETY
         bws_wywolaj(1, reinterpret_cast<uint64_t>("[TAPETY GUI] Miniatura plik="), 0, 0, 0);
-        bws_wywolaj(1, reinterpret_cast<uint64_t>(path), 0, 0, 0);
+        bws_wywolaj(1, reinterpret_cast<uint64_t>(path ? path : "(nieznany)"), 0, 0, 0);
         bws_wywolaj(1, reinterpret_cast<uint64_t>(info.kompresja == 0 ? " BTP mode=RAW" : " BTP mode=RLE"), 0, 0, 0);
         bws_wywolaj(1, reinterpret_cast<uint64_t>(dec_ok ? " decode=OK" : " decode=FAIL"), 0, 0, 0);
         bws_wywolaj(1, reinterpret_cast<uint64_t>(scale_ok ? " scale=OK\n" : " scale=FAIL\n"), 0, 0, 0);
+#endif
+
+        if (!ok) {
+            zglos_blad(path);
+        }
 
         return ok;
     }

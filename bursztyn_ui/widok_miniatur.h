@@ -104,6 +104,11 @@ public:
     void rozmiesc(Prostokat r) override {
         Kontrolka::rozmiesc(r); aktualizuj_geometrie(); aktualizuj_przewijanie();
     }
+    void ustaw_skale_dpi(int s) override {
+        Kontrolka::ustaw_skale_dpi(s);
+        aktualizuj_geometrie();
+        aktualizuj_przewijanie();
+    }
 
     void rysuj_siebie(KontekstRysowania& ctx) override {
         ostatnio_narysowane_ = 0;
@@ -112,7 +117,9 @@ public:
         if (vw <= 0 || vh <= 0 || cols <= 0 || liczba_ == 0) return;
         int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
         int cw = szerokosc_elementu_ * s, ch = wysokosc_elementu_ * s;
+        if (cw <= 0 || ch <= 0) return;
         int sy = pionowy_->czy_widoczna() ? static_cast<int>(pionowy_->wartosc()) : 0;
+        if (sy < 0) sy = 0;
         int pierwszy_wiersz = sy / ch;
         int ostatni_wiersz = (sy + vh - 1) / ch;
         size_t start = static_cast<size_t>(pierwszy_wiersz) * static_cast<size_t>(cols);
@@ -165,7 +172,12 @@ public:
         e.obsluzone = i >= 0;
     }
     void obsluz_rolke(ZdarzenieRolki& e) override {
-        if (e.delta_y && pionowy_->czy_widoczna()) { pionowy_->przewin_o(e.delta_y > 0 ? -wysokosc_elementu_ : wysokosc_elementu_); e.obsluzone = true; }
+        if (!pionowy_ || !pionowy_->czy_widoczna() || e.delta_y == 0) return;
+        int scale = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        int ch = wysokosc_elementu_ * scale;
+        int64_t krok = -static_cast<int64_t>(e.delta_y) * ch;
+        pionowy_->przewin_o(krok);
+        e.obsluzone = true;
     }
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
         if (!czy_wlaczona_ || liczba_ == 0) return;
@@ -178,6 +190,28 @@ public:
         if ((usb && b == 82U) || (e0 && b == 0x48U)) delta = -cols;
         if (delta) {
             int n = fokus_ < 0 ? 0 : przytnij(fokus_ + delta, 0, static_cast<int>(liczba_) - 1);
+            ustaw_fokus_indeks(n); e.obsluzone = true; return;
+        }
+        if ((usb && b == 74U) || (e0 && b == 0x47U)) { // Home
+            ustaw_fokus_indeks(0); e.obsluzone = true; return;
+        }
+        if ((usb && b == 77U) || (e0 && b == 0x4FU)) { // End
+            ustaw_fokus_indeks(static_cast<int>(liczba_ - 1)); e.obsluzone = true; return;
+        }
+        if ((usb && b == 78U) || (e0 && b == 0x51U)) { // Page Down
+            int ch = wysokosc_elementu_ * (skala_dpi_ < 1 ? 1 : skala_dpi_);
+            int rpp = ch > 0 ? (viewport_h() / ch) : 1;
+            if (rpp < 1) rpp = 1;
+            int cur = fokus_ < 0 ? 0 : fokus_;
+            int n = przytnij(cur + rpp * cols, 0, static_cast<int>(liczba_) - 1);
+            ustaw_fokus_indeks(n); e.obsluzone = true; return;
+        }
+        if ((usb && b == 75U) || (e0 && b == 0x49U)) { // Page Up
+            int ch = wysokosc_elementu_ * (skala_dpi_ < 1 ? 1 : skala_dpi_);
+            int rpp = ch > 0 ? (viewport_h() / ch) : 1;
+            if (rpp < 1) rpp = 1;
+            int cur = fokus_ < 0 ? 0 : fokus_;
+            int n = przytnij(cur - rpp * cols, 0, static_cast<int>(liczba_) - 1);
             ustaw_fokus_indeks(n); e.obsluzone = true; return;
         }
         if (k == 13U || k == 32U || (usb && (b == 40U || b == 44U))) {
@@ -205,34 +239,87 @@ private:
         for (size_t i = 0; i < liczba_; ++i) p[i] = elementy_[i];
         delete[] elementy_; elementy_ = p; pojemnosc_ = nowa; return true;
     }
-    int viewport_w() const { int w = obszar_.szerokosc - 2 - (pionowy_ && pionowy_->czy_widoczna() ? pionowy_->szerokosc() : 0); return w > 0 ? w : 0; }
+    int viewport_w() const {
+        int scale = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        int sw = (pionowy_ && pionowy_->czy_widoczna()) ? (15 * scale) : 0;
+        int w = obszar_.szerokosc - 2 - sw;
+        return w > 0 ? w : 0;
+    }
     int viewport_h() const { int h = obszar_.wysokosc - 2; return h > 0 ? h : 0; }
-    int liczba_kolumn() const { int cw = szerokosc_elementu_ * (skala_dpi_ < 1 ? 1 : skala_dpi_); return cw > 0 ? przytnij(viewport_w() / cw, 1, 1024) : 1; }
+    int liczba_kolumn() const {
+        int scale = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        int cw = szerokosc_elementu_ * scale;
+        return cw > 0 ? przytnij(viewport_w() / cw, 1, 1024) : 1;
+    }
     void aktualizuj_geometrie() {
         if (!pionowy_) return;
         int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
         int sw = 15 * s;
-        pionowy_->rozmiesc(Prostokat(obszar_.szerokosc - sw - 1, 1, sw, obszar_.wysokosc - 2));
+        int h = obszar_.wysokosc - 2;
+        int x = obszar_.szerokosc - sw - 1;
+        if (h < 0) h = 0;
+        if (x < 1) x = 1;
+        pionowy_->rozmiesc(Prostokat(x, 1, sw, h));
     }
     void aktualizuj_przewijanie() {
         if (!pionowy_) return;
         int scale = skala_dpi_ < 1 ? 1 : skala_dpi_;
         int cw = szerokosc_elementu_ * scale;
+        int ch = wysokosc_elementu_ * scale;
+        if (cw <= 0) cw = 1;
+        if (ch <= 0) ch = 1;
+
         int fullw = obszar_.szerokosc - 2;
-        int cols = przytnij(fullw / cw, 1, 1024);
-        uint64_t rows = (liczba_ + cols - 1) / cols;
-        bool widoczny = rows * static_cast<uint64_t>(wysokosc_elementu_ * scale) > static_cast<uint64_t>(viewport_h());
-        if (widoczny) cols = przytnij((fullw - 15 * scale) / cw, 1, 1024);
-        rows = (liczba_ + cols - 1) / cols;
-        uint64_t h64 = rows * static_cast<uint64_t>(wysokosc_elementu_ * scale);
-        int h = h64 > INT32_MAX ? INT32_MAX : static_cast<int>(h64);
-        pionowy_->ustaw_widoczna(widoczny); aktualizuj_geometrie();
-        pionowy_->ustaw_zakres(0, h); pionowy_->ustaw_rozmiar_strony(viewport_h() > 0 ? viewport_h() : 1);
+        int vh = obszar_.wysokosc - 2;
+        if (fullw <= 0 || vh <= 0) {
+            pionowy_->ustaw_widoczna(false);
+            pionowy_->ustaw_zakres(0, 0);
+            pionowy_->ustaw_wartosc(0);
+            return;
+        }
+
+        int sw = 15 * scale;
+        int cols_bez = przytnij(fullw / cw, 1, 1024);
+        uint64_t rows_bez = liczba_ > 0 ? (liczba_ + cols_bez - 1) / cols_bez : 0;
+        uint64_t total_h_bez = rows_bez * static_cast<uint64_t>(ch);
+        bool widoczny = total_h_bez > static_cast<uint64_t>(vh);
+
+        int cols = cols_bez;
+        uint64_t rows = rows_bez;
+        uint64_t total_h = total_h_bez;
+
+        if (widoczny) {
+            int w_ze_sb = fullw - sw;
+            if (w_ze_sb > 0) {
+                cols = przytnij(w_ze_sb / cw, 1, 1024);
+                rows = liczba_ > 0 ? (liczba_ + cols - 1) / cols : 0;
+                total_h = rows * static_cast<uint64_t>(ch);
+            }
+        }
+
+        pionowy_->ustaw_widoczna(widoczny);
+        aktualizuj_geometrie();
+
+        int total_h_int = total_h > INT32_MAX ? INT32_MAX : static_cast<int>(total_h);
+        int max_scroll = (widoczny && total_h_int > vh) ? (total_h_int - vh) : 0;
+
+        pionowy_->ustaw_zakres(0, max_scroll);
+        pionowy_->ustaw_rozmiar_strony(vh > 0 ? vh : 1);
+        pionowy_->ustaw_maly_krok(ch);
+        pionowy_->ustaw_duzy_krok(vh > 0 ? vh : ch);
+
+        if (!widoczny) {
+            pionowy_->ustaw_wartosc(0);
+        } else if (pionowy_->wartosc() > max_scroll) {
+            pionowy_->ustaw_wartosc(max_scroll);
+        }
+
         przygotuj_widoczne(true);
     }
     Prostokat rect_elementu(int i) const {
         if (i < 0 || i >= static_cast<int>(liczba_)) return Prostokat();
         int s = skala_dpi_ < 1 ? 1 : skala_dpi_, cols = liczba_kolumn();
+        if (cols <= 0) return Prostokat();
         int cw = szerokosc_elementu_ * s, ch = wysokosc_elementu_ * s;
         int sy = pionowy_->czy_widoczna() ? static_cast<int>(pionowy_->wartosc()) : 0;
         return Prostokat(1 + (i % cols) * cw, 1 + (i / cols) * ch - sy, cw, ch);
@@ -242,8 +329,11 @@ private:
         int lx = x - obszar_ekranu_.x - 1, ly = y - obszar_ekranu_.y - 1;
         if (lx < 0 || ly < 0 || lx >= viewport_w() || ly >= viewport_h()) return -1;
         int s = skala_dpi_ < 1 ? 1 : skala_dpi_, cols = liczba_kolumn();
+        if (cols <= 0) return -1;
+        int cw = szerokosc_elementu_ * s, ch = wysokosc_elementu_ * s;
+        if (cw <= 0 || ch <= 0) return -1;
         int sy = pionowy_->czy_widoczna() ? static_cast<int>(pionowy_->wartosc()) : 0;
-        int col = lx / (szerokosc_elementu_ * s), row = (ly + sy) / (wysokosc_elementu_ * s);
+        int col = lx / cw, row = (ly + sy) / ch;
         if (col >= cols) return -1;
         uint64_t idx = static_cast<uint64_t>(row) * static_cast<uint64_t>(cols) + static_cast<uint64_t>(col);
         return idx < liczba_ ? static_cast<int>(idx) : -1;
@@ -251,9 +341,13 @@ private:
     void przewin_do(int i) {
         if (i < 0 || !pionowy_) return;
         int s = skala_dpi_ < 1 ? 1 : skala_dpi_, cols = liczba_kolumn();
-        int y = (i / cols) * wysokosc_elementu_ * s, h = wysokosc_elementu_ * s;
+        if (cols <= 0) return;
+        int ch = wysokosc_elementu_ * s;
+        if (ch <= 0) return;
+        int y = (i / cols) * ch;
         int cur = static_cast<int>(pionowy_->wartosc()), vh = viewport_h();
-        if (y < cur) pionowy_->ustaw_wartosc(y); else if (y + h > cur + vh) pionowy_->ustaw_wartosc(y + h - vh);
+        if (vh <= 0) return;
+        if (y < cur) pionowy_->ustaw_wartosc(y); else if (y + ch > cur + vh) pionowy_->ustaw_wartosc(y + ch - vh);
     }
     static void rysuj_obraz(KontekstRysowania& ctx, const Element& e, Prostokat dst) {
         if (!e.piksele || e.szerokosc_obrazu <= 0 || e.wysokosc_obrazu <= 0 || dst.czy_pusty()) {
@@ -300,7 +394,8 @@ private:
     void przygotuj_widoczne(bool alokuj) {
         if(renderer_||!liczba_)return;
         int cols=liczba_kolumn(),ch=wysokosc_elementu_*(skala_dpi_<1?1:skala_dpi_);
-        int sy=static_cast<int>(pionowy_->wartosc());
+        if (cols <= 0 || ch <= 0) return;
+        int sy=pionowy_&&pionowy_->czy_widoczna()?static_cast<int>(pionowy_->wartosc()):0;
         size_t begin=static_cast<size_t>(sy/ch)*cols,end=static_cast<size_t>((sy+viewport_h()+ch-1)/ch)*cols;
         if(end>liczba_)end=liczba_;
         for(size_t i=begin;i<end;++i) {

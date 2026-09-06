@@ -490,13 +490,15 @@ bool zastosuj(const TapetyKonfiguracja& c, bool cicho) {
     grafika_publikuj_tapete();
     if (!cicho) {
         log_sciezka("[TAPETA] Wybrano ", c.sciezka);
+        log_sciezka("[TAPETA] Tryb ", tapety_nazwa_trybu(c.tryb));
+#if BURSZTYN_DIAG_TAPETY
         log_liczba("[TAPETA] BTP szerokosc ", info.szerokosc);
         log_liczba("[TAPETA] BTP wysokosc ", info.wysokosc);
         klog_serial(info.kompresja ? "[TAPETA] RLE" : "[TAPETA] RAW");
-        log_sciezka("[TAPETA] Tryb ", tapety_nazwa_trybu(c.tryb));
         log_liczba("[TAPETA] Odczyt us ", statystyki.odczyt_us);
         log_liczba("[TAPETA] Dekodowanie us ", statystyki.dekoduj_us);
         log_liczba("[TAPETA] Przygotowanie us ", statystyki.skaluj_us);
+#endif
         klog_serial("[TAPETA] Tapeta gotowa.");
     }
     return true;
@@ -635,8 +637,10 @@ void tapety_inicjalizuj(uint64_t mbi) {
         []() { klog_serial("[TAPETA] Fallback jednolity kolor."); grafika_tapeta_solid(); });
     if (statystyki.zrodlo != TAPETY_BTP) aktualna.sciezka[0] = 0;
     TapetyOdpowiedz s{}; snapshot(&s);
+#if BURSZTYN_DIAG_TAPETY
     log_liczba("[TAPETA] Bufor aktywny bajty ", s.bufor_bajty);
     log_liczba("[TAPETA] Scratch wspolny BMP/BTP bajty ", s.scratch_bajty);
+#endif
     bws_ipc_inicjalizuj_tapety();
 }
 
