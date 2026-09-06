@@ -100,6 +100,24 @@ public:
     void przy_aktywacji(FunkcjaWidoku cb, void* d = nullptr) { cb_aktywacja_ = cb; dane_aktywacji_ = d; }
     void ustaw_renderer(FunkcjaRenderera cb, void* d = nullptr) { renderer_ = cb; dane_renderera_ = d; uniewaznij(); }
 
+    void ustaw_pelne_wiersze(bool wlaczone = true) {
+        if (pelne_wiersze_ == wlaczone) return;
+        pelne_wiersze_ = wlaczone;
+        aktualizuj_geometrie();
+        aktualizuj_przewijanie();
+        uniewaznij();
+    }
+    bool czy_pelne_wiersze() const { return pelne_wiersze_; }
+
+    int wysokosc_wiersza() const {
+        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        return wysokosc_elementu_ * s;
+    }
+    int szerokosc_kolumny() const {
+        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        return szerokosc_elementu_ * s;
+    }
+
     Rozmiar oblicz_naturalny_rozmiar() const override { return Rozmiar(400, 260); }
     void rozmiesc(Prostokat r) override {
         Kontrolka::rozmiesc(r); aktualizuj_geometrie(); aktualizuj_przewijanie();
@@ -245,7 +263,18 @@ private:
         int w = obszar_.szerokosc - 2 - sw;
         return w > 0 ? w : 0;
     }
-    int viewport_h() const { int h = obszar_.wysokosc - 2; return h > 0 ? h : 0; }
+    int viewport_h() const {
+        int avail = obszar_.wysokosc - 2;
+        if (avail <= 0) return 0;
+        if (!pelne_wiersze_) return avail;
+        int scale = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        int ch = wysokosc_elementu_ * scale;
+        if (ch <= 0) return avail;
+        int full_rows = avail / ch;
+        if (full_rows < 1) full_rows = 1;
+        int vh = full_rows * ch;
+        return vh <= avail ? vh : avail;
+    }
     int liczba_kolumn() const {
         int scale = skala_dpi_ < 1 ? 1 : skala_dpi_;
         int cw = szerokosc_elementu_ * scale;
@@ -255,7 +284,8 @@ private:
         if (!pionowy_) return;
         int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
         int sw = 15 * s;
-        int h = obszar_.wysokosc - 2;
+        int vh = viewport_h();
+        int h = (pelne_wiersze_ && vh > 0) ? vh : (obszar_.wysokosc - 2);
         int x = obszar_.szerokosc - sw - 1;
         if (h < 0) h = 0;
         if (x < 1) x = 1;
@@ -270,7 +300,7 @@ private:
         if (ch <= 0) ch = 1;
 
         int fullw = obszar_.szerokosc - 2;
-        int vh = obszar_.wysokosc - 2;
+        int vh = viewport_h();
         if (fullw <= 0 || vh <= 0) {
             pionowy_->ustaw_widoczna(false);
             pionowy_->ustaw_zakres(0, 0);
@@ -422,6 +452,7 @@ private:
     Element* elementy_{nullptr}; size_t liczba_{0}, pojemnosc_{0};
     int wybrany_{-1}, fokus_{-1}, najechany_{-1};
     int szerokosc_elementu_{112}, wysokosc_elementu_{100};
+    bool pelne_wiersze_{false};
     PasekPrzewijania* pionowy_{nullptr}; size_t ostatnio_narysowane_{0};
     FunkcjaWidoku cb_wybor_{nullptr}; void* dane_wyboru_{nullptr};
     FunkcjaWidoku cb_aktywacja_{nullptr}; void* dane_aktywacji_{nullptr};

@@ -74,6 +74,28 @@ public:
         }
     }
 
+    static Prostokat pobierz_obszar_roboczy() {
+        GuiMonitorInfo mon{};
+        if (gui_pobierz_monitor(0, &mon) && mon.work_szer > 0 && mon.work_wys > 0) {
+            return Prostokat(mon.work_x, mon.work_y, mon.work_szer, mon.work_wys);
+        }
+
+        int sw = 800;
+        int sh = 600;
+        gui_pobierz_rozdzielczosc(&sw, &sh);
+        if (sw < 1) sw = 1;
+        if (sh < 1) sh = 1;
+        return Prostokat(0, 0, sw, sh);
+    }
+
+    void wysrodkuj() {
+        dopasuj_do_obszaru_roboczego(true);
+        Prostokat work = pobierz_obszar_roboczy();
+        int nx = work.x + (work.szerokosc - szerokosc_) / 2;
+        int ny = work.y + (work.wysokosc - wysokosc_) / 2;
+        ustaw_pozycje(nx, ny);
+    }
+
     void ustaw_pozycje(int x, int y) {
         x_ = x;
         y_ = y;
@@ -699,19 +721,6 @@ public:
     }
 
 private:
-    static Prostokat pobierz_obszar_roboczy() {
-        GuiMonitorInfo mon{};
-        if (gui_pobierz_monitor(0, &mon) && mon.work_szer > 0 && mon.work_wys > 0) {
-            return Prostokat(mon.work_x, mon.work_y, mon.work_szer, mon.work_wys);
-        }
-
-        int sw = 800;
-        int sh = 600;
-        gui_pobierz_rozdzielczosc(&sw, &sh);
-        if (sw < 1) sw = 1;
-        if (sh < 1) sh = 1;
-        return Prostokat(0, 0, sw, sh);
-    }
 
     static void zbierz_kontrolki_z_fokusem(Kontrolka* k, Kontrolka** out_lista, size_t& liczba) {
         if (!k || !k->czy_widoczna() || liczba >= 32) return;

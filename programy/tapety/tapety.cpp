@@ -182,7 +182,20 @@ void zastosuj(Przycisk*, void*) {
 extern "C" __attribute__((noreturn)) void _start() {
     log("[TAPETY APP] Start.\n");
     AplikacjaGUI app;
-    Okno okno("Tapety", 940, 610);
+    Prostokat work = Okno::pobierz_obszar_roboczy();
+    int scale = app.skala_dpi() < 1 ? 1 : app.skala_dpi();
+    int cw = 174 * scale;
+    int ch = 124 * scale;
+    int sw = 15 * scale;
+    int pad_h = 24 * scale;
+
+    int max_cols = (work.szerokosc - pad_h - sw - 2 - 40 * scale) / cw;
+    int target_cols = max_cols >= 5 ? 5 : przytnij(max_cols, 1, 5);
+    int win_w = target_cols * cw + sw + 2 + pad_h;
+
+    Okno okno("Tapety", win_w, 600 * scale);
+    app.ustaw_glowne_okno(&okno);
+
     endpoint = ipc_create();
     auto* root = static_cast<Panel*>(okno.kontrolka_glowna());
     if (!root || !endpoint) {
@@ -193,6 +206,7 @@ extern "C" __attribute__((noreturn)) void _start() {
     root->ustaw_wypelnienie(Marginesy(12)); root->ustaw_odstep(8);
     root->dodaj<Etykieta>("Tapeta pulpitu");
     galeria = &root->dodaj<WidokMiniatur>();
+    galeria->ustaw_pelne_wiersze(true);
     galeria->ustaw_rozmiar_elementu(174, 124);
     galeria->ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
     galeria->ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
@@ -248,6 +262,23 @@ extern "C" __attribute__((noreturn)) void _start() {
     row.dodaj<Przycisk>("Zastosuj").przy_kliknieciu(zastosuj);
     row.dodaj<Przycisk>("Anuluj").przy_kliknieciu([](Przycisk*, void* p) { static_cast<Okno*>(p)->zamknij(); }, &okno);
     komunikat = &root->dodaj<Etykieta>(liczba_tapet > 0 ? "Wybierz miniaturę i tryb, następnie naciśnij Zastosuj." : "Brak dostępnych tapet w /tapety.");
+
+    okno.przelicz_uklad();
+    int stale_h = okno.wysokosc() - galeria->obszar().wysokosc;
+    int avail_for_gallery = work.wysokosc - stale_h - 40 * scale;
+    int target_rows = 3;
+    if (avail_for_gallery >= 4 * ch + 2) {
+        target_rows = 4;
+    } else if (avail_for_gallery >= 3 * ch + 2) {
+        target_rows = 3;
+    } else if (avail_for_gallery >= 2 * ch + 2) {
+        target_rows = 2;
+    } else {
+        target_rows = 1;
+    }
+    int win_h = target_rows * ch + 2 + stale_h;
+    okno.ustaw_rozmiar(win_w, win_h);
+    okno.wysrodkuj();
     okno.przelicz_uklad();
     if (liczba_tapet > 0) {
         galeria->ustaw_wybrany_indeks(wybrana);
