@@ -8,6 +8,15 @@ constexpr int ui_skaluj(int baza, uint32_t procent) {
     const int64_t r=n>=0?(n+50)/100:(n-50)/100;
     return r>INT_MAX?INT_MAX:(r<INT_MIN?INT_MIN:int(r));
 }
+// Odwrotnosc ui_skaluj dla zapisywania logicznego rozmiaru podanego w
+// pikselach fizycznych. Stosuje to samo zaokraglenie do najblizszej wartosci.
+constexpr int ui_odskaluj(int fizyczne, uint32_t procent) {
+    if (procent == 0) return 0;
+    const int64_t n = int64_t(fizyczne) * 100;
+    const int64_t polowa = procent / 2;
+    const int64_t r = n >= 0 ? (n + polowa) / procent : (n - polowa) / procent;
+    return r > INT_MAX ? INT_MAX : (r < INT_MIN ? INT_MIN : int(r));
+}
 // Adapter zachowuje stare wywolania ustaw_skale_dpi(1/2).
 // Metryki mnozone przez SkalaUI zawsze uzywaja ui_skaluj.
 class SkalaUI {

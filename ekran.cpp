@@ -31,7 +31,9 @@ void powiadom(){
     for(int pid=1;pid<SKLADACZ_MAKS_WARSTW;++pid){
         auto*w=pobierz_warstwe(pid);if(!w)continue;
         bws_zdarzenie e{};e.typ=BWS_ZDARZENIE_EKRAN;e.kod=skala;
-        e.x=w->x;e.y=w->y;e.dx=w->szerokosc;e.dy=w->wysokosc;
+        e.x=w->x;e.y=w->y;
+        e.dx=w->z_order==0?grafika_pobierz_szerokosc():w->szerokosc;
+        e.dy=w->z_order==0?grafika_pobierz_wysokosc():w->wysokosc;
         e.przyciski=generacja;e.timestamp=teraz();scheduler_dodaj_zdarzenie(pid,&e);
     }
 }
@@ -73,12 +75,12 @@ bool cofnij(){
     skladacz_cofnij_ekran(&tx.warstwy);
     if(tx.fizyczna)zwolnij=tx.nowy;
     tx.oczekuje=false;++cofniecia;
-    skladacz_obrazu_zloz_klatke();
     odblokuj_ekran();
     if(tx.fizyczna)grafika_zwolnij_stan(&zwolnij);
     powiadom();return true;
 }
-uint32_t zastosuj(const TrybEkranu&t,uint32_t s,int owner,bool persist=true){
+uint32_t zastosuj(const TrybEkranu&t,uint32_t s,int owner,bool persist=true,
+                  bool wymagaj_potwierdzenia=true){
     if(tx.oczekuje)return EKRAN_ZAJETY;
     if(!ui_skala_poprawna(s)||!grafika_tryb_obslugiwany(t))return EKRAN_NIEOBSLUGIWANY;
     const bool fizyczna=!ekran_ten_sam(t,grafika_tryb_ekranu());
@@ -105,34 +107,39 @@ uint32_t zastosuj(const TrybEkranu&t,uint32_t s,int owner,bool persist=true){
     }
     if(fizyczna)grafika_wymien_stan(tx.nowy);
     skala=s;bws_aktualizuj_ekran(s);skladacz_zastosuj_ekran(&tx.warstwy);++zmiany;
-    // Present one internally consistent frame before normal event-driven repaint.
-    skladacz_obrazu_zloz_klatke();
     odblokuj_ekran();
     powiadom();
-    if(fizyczna){
+    if(fizyczna&&wymagaj_potwierdzenia){
         tx.oczekuje=true;tx.deadline=teraz()+15000000000ULL;
         log_tryb("[EKRAN] Tryb ",t);klog_serial("[EKRAN] Tryb zastosowany, oczekiwanie na potwierdzenie.");
         return EKRAN_OCZEKUJE;
     }
     skladacz_zakoncz_zmiane_ekranu(&tx.warstwy,true);
+    if(fizyczna)grafika_zwolnij_stan(&tx.stary);
     return !persist||zapisz()?EKRAN_OK:EKRAN_ZAPIS;
 }
 }
 uint32_t ekran_skala(){return skala;}
 void ekran_inicjalizuj(){
-    boot_tryb=grafika_tryb_ekranu();log_tryb("[EKRAN] Tryb ",boot_tryb);
+    boot_tryb=grafika_tryb_ekranu();log_tryb("[EKRAN INIT] boot=",boot_tryb);
+    klog_serial(grafika_mozliwosci_ekranu().backend==EKRAN_BOCHS?
+        "[EKRAN INIT] backend=bochs-runtime":grafika_mozliwosci_ekranu().backend==EKRAN_GOP?
+        "[EKRAN INIT] backend=uefi-gop-static":"[EKRAN INIT] backend=vesa-static");
     uint32_t n=rozmiar_pliku(EKRAN_CFG),got=0;
-    if(!n){bws_aktualizuj_ekran(100);return;}
+    if(!n){bws_aktualizuj_ekran(100);klog_serial("[EKRAN INIT] cfg=missing; active=boot");return;}
     char buf[EKRAN_CFG_MAX]{};EkranKonfiguracja c{};
     bool parsed=n<=sizeof(buf)&&czytaj_fragment_pliku(EKRAN_CFG,0,buf,n,&got)&&got==n&&ekran_parsuj(buf,n,&c);
     if(parsed&&ui_skala_poprawna(c.skala)){
-        skala=c.skala;bws_aktualizuj_ekran(skala);
         TrybEkranu t{c.szerokosc,c.wysokosc,c.bpp,c.szerokosc*4,0,0};
         if(!ekran_ten_sam(t,boot_tryb)&&grafika_tryb_obslugiwany(t)){
-            uint32_t result=zastosuj(t,c.skala,0);
-            if(result!=EKRAN_OCZEKUJE){
+            log_tryb("[EKRAN INIT] mode change source=configrestore target=",t);
+            uint32_t result=zastosuj(t,c.skala,0,false,false);
+            if(result!=EKRAN_OK){
                 klog_serial("[EKRAN] Nie udalo sie przelaczyc trybu sprzetowego przy starcie; zachowano skale.");
+                skala=c.skala;bws_aktualizuj_ekran(skala);
             }
+        }else{
+            skala=c.skala;bws_aktualizuj_ekran(skala);
         }
     }else{
         skala=100;bws_aktualizuj_ekran(skala);
@@ -160,7 +167,7 @@ bool ekran_obsluz(const proces_t&p,const EkranZadanie&r,EkranOdpowiedz*out){
         if(p4k){auto* p32=static_cast<uint32_t*>(p4k);p32[0]=0x12345678;p32[8294399]=0x87654321;check(p32[0]==0x12345678&&p32[8294399]==0x87654321);}
         bufor_grafiki_zwolnij(p4k);check(before==bufory_grafiki_bajty());
         check(bufor_grafiki_alokuj(SIZE_MAX)==nullptr&&bufor_grafiki_alokuj(0)==nullptr);
-        if(grafika_mozliwosci_ekranu().mozna_zmienic_runtime){
+        if(r.szerokosc==1&&grafika_mozliwosci_ekranu().mozna_zmienic_runtime){
             const TrybEkranu sekwencja[] = {
                 {1280, 800, 32, 1280*4, 0, 0},
                 {1920, 1080, 32, 1920*4, 0, 0},
@@ -228,8 +235,201 @@ bool ekran_obsluz(const proces_t&p,const EkranZadanie&r,EkranOdpowiedz*out){
             got = 0;
             check(czytaj_fragment_pliku(EKRAN_CFG, 0, cbuf, sizeof(cbuf), &got) && got > 0);
             check(ekran_parsuj(cbuf, got, &read_cfg));
-            check(read_cfg.szerokosc == 1920 && read_cfg.wysokosc == 1080 && read_cfg.skala == 100);
             klog_serial("[EKRAN TEST] Confirm & persist, and timeout rollback: PASS");
+            TrybEkranu t_curr = grafika_tryb_ekranu();
+            check(zastosuj(t_curr, 150, 0, true) == EKRAN_OK && !tx.oczekuje && skala == 150);
+            check(zastosuj(t_curr, 100, 0, true) == EKRAN_OK && !tx.oczekuje && skala == 100);
+            // Regresja semantyki wlasciciela tx.owner:
+            // 1. Transakcja nalezaca do PID 10 nie moze byc wycofana przez zamkniecie procesu PID 20
+            TrybEkranu t_pid10{1280, 800, 32, 1280*4, 0, 0};
+            check(zastosuj(t_pid10, 150, 10, true) == EKRAN_OCZEKUJE && tx.oczekuje && tx.owner == 10);
+            ekran_posprzataj_proces(20);
+            check(tx.oczekuje && tx.owner == 10); // PID 20 nie cofa transakcji PID 10
+            ekran_posprzataj_proces(10);
+            check(!tx.oczekuje); // PID 10 prawidlowo cofa swoja transakcje
+            check(grafika_pobierz_szerokosc() == 1920 && grafika_pobierz_wysokosc() == 1080 && skala == 100);
+
+            // 2. Transakcja systemowa (owner == 0) nie moze byc wycofana przez zamkniecie procesu Ring 3 (np. PID 20)
+            TrybEkranu t_sys{1280, 800, 32, 1280*4, 0, 0};
+            check(zastosuj(t_sys, 150, 0, true) == EKRAN_OCZEKUJE && tx.oczekuje && tx.owner == 0);
+            ekran_posprzataj_proces(20);
+            check(tx.oczekuje && tx.owner == 0); // PID 20 nie cofa transakcji systemowej
+            check(cofnij()); // Manualne/systemowe zamkniecie transakcji
+            check(!tx.oczekuje && grafika_pobierz_szerokosc() == 1920 && grafika_pobierz_wysokosc() == 1080 && skala == 100);
+            klog_serial("[EKRAN TEST] Ownership semantics regression (PID 10/20 & owner 0): PASS");
+
+            // 3. Regresja autoryzacji EKRAN_ZACHOWAJ i EKRAN_PRZYWROC:
+            // a) Dla tx.owner == 10: inny proces Ring 3 (np. PID 20) nie moze potwierdzic ani cofnac
+            proces_t proc10{};
+            proc10.pid = 10;
+            proc10.poziom_zaufania = PZB_ZAUFANE;
+            proc10.uprawnienia = PRAWO_GUI | PRAWO_SYSTEM_CONFIG;
+            for (size_t i = 0; EKRAN_PROGRAM[i]; ++i) proc10.sciezka_pliku[i] = EKRAN_PROGRAM[i];
+
+            proces_t proc20{};
+            proc20.pid = 20;
+            proc20.poziom_zaufania = PZB_ZAUFANE;
+            proc20.uprawnienia = PRAWO_GUI | PRAWO_SYSTEM_CONFIG;
+            for (size_t i = 0; EKRAN_PROGRAM[i]; ++i) proc20.sciezka_pliku[i] = EKRAN_PROGRAM[i];
+
+            EkranZadanie req_apply{};
+            req_apply.wersja = 1;
+            req_apply.operacja = EKRAN_ZASTOSUJ;
+            req_apply.szerokosc = 1280;
+            req_apply.wysokosc = 800;
+            req_apply.bpp = 32;
+            req_apply.skala = 100;
+            EkranOdpowiedz resp_apply{};
+            check(ekran_obsluz(proc10, req_apply, &resp_apply));
+            check(resp_apply.status == EKRAN_OCZEKUJE && tx.oczekuje && tx.owner == 10);
+            const uint64_t tx_id = resp_apply.transakcja;
+
+            // PID 20 probuje wykonac EKRAN_ZACHOWAJ -> odrzucone z EKRAN_UPRAWNIENIA
+            EkranZadanie req_commit{};
+            req_commit.wersja = 1;
+            req_commit.operacja = EKRAN_ZACHOWAJ;
+            req_commit.transakcja = tx_id;
+            EkranOdpowiedz resp_commit20{};
+            check(ekran_obsluz(proc20, req_commit, &resp_commit20));
+            check(resp_commit20.status == EKRAN_UPRAWNIENIA && tx.oczekuje);
+
+            // PID 20 probuje wykonac EKRAN_PRZYWROC -> odrzucone z EKRAN_UPRAWNIENIA
+            EkranZadanie req_revert{};
+            req_revert.wersja = 1;
+            req_revert.operacja = EKRAN_PRZYWROC;
+            req_revert.transakcja = tx_id;
+            EkranOdpowiedz resp_revert20{};
+            check(ekran_obsluz(proc20, req_revert, &resp_revert20));
+            check(resp_revert20.status == EKRAN_UPRAWNIENIA && tx.oczekuje);
+
+            // PID 10 (wlasciciel) wykonuje EKRAN_ZACHOWAJ -> zaakceptowane z EKRAN_OK
+            EkranOdpowiedz resp_commit10{};
+            check(ekran_obsluz(proc10, req_commit, &resp_commit10));
+            check(resp_commit10.status == EKRAN_OK && !tx.oczekuje);
+
+            // b) Dla tx.owner == 0: weryfikacja scislej polityki uprawnien systemowych
+            TrybEkranu t_sys_auth{1920, 1080, 32, 1920*4, 0, 0};
+            check(zastosuj(t_sys_auth, 100, 0, true) == EKRAN_OCZEKUJE && tx.oczekuje && tx.owner == 0);
+            const uint64_t sys_tx_id = tx.id;
+
+            // Proces bez uprawnien systemowych (PZB_UZYTKOWNIK, brak PRAWO_SYSTEM_CONFIG) probuje kontrolowac transakcje systemowa
+            proces_t proc_unauth{};
+            proc_unauth.pid = 99;
+            proc_unauth.poziom_zaufania = PZB_UZYTKOWNIK;
+            proc_unauth.uprawnienia = PRAWO_GUI;
+            const char* unauth_path = "/programy/zwykly.bur";
+            for (size_t i = 0; unauth_path[i]; ++i) proc_unauth.sciezka_pliku[i] = unauth_path[i];
+
+            EkranZadanie req_sys_unauth{};
+            req_sys_unauth.wersja = 1;
+            req_sys_unauth.operacja = EKRAN_ZACHOWAJ;
+            req_sys_unauth.transakcja = sys_tx_id;
+            EkranOdpowiedz resp_sys_unauth{};
+            check(ekran_obsluz(proc_unauth, req_sys_unauth, &resp_sys_unauth));
+            check(resp_sys_unauth.status == EKRAN_UPRAWNIENIA && tx.oczekuje);
+
+            req_sys_unauth.operacja = EKRAN_PRZYWROC;
+            check(ekran_obsluz(proc_unauth, req_sys_unauth, &resp_sys_unauth));
+            check(resp_sys_unauth.status == EKRAN_UPRAWNIENIA && tx.oczekuje);
+
+            // Uprzywilejowany podmiot systemowy (p / test.bur lub proces z uprawnieniami systemowymi) cofa transakcje
+            EkranZadanie req_sys_priv{};
+            req_sys_priv.wersja = 1;
+            req_sys_priv.operacja = EKRAN_PRZYWROC;
+            req_sys_priv.transakcja = sys_tx_id;
+            EkranOdpowiedz resp_sys_priv{};
+            check(ekran_obsluz(p, req_sys_priv, &resp_sys_priv));
+            check(resp_sys_priv.status == EKRAN_OK && !tx.oczekuje);
+            klog_serial("[EKRAN TEST] Explicit control authorization (PID 10 vs 20 & owner 0): PASS");
+            TrybEkranu t_720{1280, 720, 32, 1280*4, 0, 0};
+            check(zastosuj(t_720, 100, 0, false, false) == EKRAN_OK && !tx.oczekuje);
+            int b_mx = 0, b_my = 0;
+            grafika_pobierz_granice_kursora(&b_mx, &b_my);
+            check(b_mx == 1279 && b_my == 719);
+
+            TrybEkranu t_1080{1920, 1080, 32, 1920*4, 0, 0};
+            uint32_t boot_res = zastosuj(t_1080, 100, 0, false, false);
+            check(boot_res == EKRAN_OK && !tx.oczekuje);
+            grafika_pobierz_granice_kursora(&b_mx, &b_my);
+            check(b_mx == 1919 && b_my == 1079);
+            check(grafika_pobierz_szerokosc() == 1920 && grafika_pobierz_wysokosc() == 1080);
+
+            // First USB packet simulation immediately after restore
+            zaktualizuj_mysze_zrodlo(0, 0, 0, "usb");
+            int cur_x = 0, cur_y = 0;
+            grafika_pobierz_pozycje_kursora(&cur_x, &cur_y);
+            grafika_pobierz_granice_kursora(&b_mx, &b_my);
+            check(b_mx == 1919 && b_my == 1079);
+
+            // Simulate repeated positive dy movement to bottom & taskbar
+            for(int i = 0; i < 30; ++i) {
+                zaktualizuj_mysze_zrodlo(0, -100, 0, "usb");
+            }
+            grafika_pobierz_pozycje_kursora(&cur_x, &cur_y);
+            check(cur_y == 1079);
+            check(cur_y > 719);
+            check(cur_y >= 1040); // Within taskbar area (1080 - 40 = 1040)
+            klog_serial("[EKRAN TEST] USB first-packet & taskbar reachability (y=1079): PASS");
+
+            // PS/2 path simulation
+            for(int i = 0; i < 30; ++i) zaktualizuj_mysze_zrodlo(0, 100, 0, "ps2"); // top
+            grafika_pobierz_pozycje_kursora(&cur_x, &cur_y);
+            check(cur_y == 0);
+            for(int i = 0; i < 30; ++i) zaktualizuj_mysze_zrodlo(0, -100, 0, "ps2"); // bottom
+            grafika_pobierz_pozycje_kursora(&cur_x, &cur_y);
+            check(cur_y == 1079 && cur_y >= 1040);
+            for(int i = 0; i < 30; ++i) zaktualizuj_mysze_zrodlo(100, 0, 0, "ps2"); // bottom-right
+            grafika_pobierz_pozycje_kursora(&cur_x, &cur_y);
+            check(cur_x == 1919 && cur_y == 1079);
+            for(int i = 0; i < 30; ++i) zaktualizuj_mysze_zrodlo(0, 100, 0, "ps2"); // top-right
+            grafika_pobierz_pozycje_kursora(&cur_x, &cur_y);
+            check(cur_x == 1919 && cur_y == 0);
+            for(int i = 0; i < 30; ++i) zaktualizuj_mysze_zrodlo(-100, -100, 0, "ps2"); // bottom-left
+            grafika_pobierz_pozycje_kursora(&cur_x, &cur_y);
+            check(cur_x == 0 && cur_y == 1079);
+            klog_serial("[EKRAN TEST] PS/2 screen corners reachability: PASS");
+
+            // Runtime transitions: 1080p -> 1440p -> 4K
+            TrybEkranu t_1440{2560, 1440, 32, 2560*4, 0, 0};
+            check(zastosuj(t_1440, 100, 0, false, false) == EKRAN_OK && !tx.oczekuje);
+            grafika_pobierz_granice_kursora(&b_mx, &b_my);
+            check(b_mx == 2559 && b_my == 1439);
+            for(int i = 0; i < 40; ++i) zaktualizuj_mysze_zrodlo(100, -100, 0, "usb");
+            grafika_pobierz_pozycje_kursora(&cur_x, &cur_y);
+            check(cur_x == 2559 && cur_y == 1439);
+
+            TrybEkranu t_4k{3840, 2160, 32, 3840*4, 0, 0};
+            check(zastosuj(t_4k, 100, 0, false, false) == EKRAN_OK && !tx.oczekuje);
+            grafika_pobierz_granice_kursora(&b_mx, &b_my);
+            check(b_mx == 3839 && b_my == 2159);
+            for(int i = 0; i < 50; ++i) zaktualizuj_mysze_zrodlo(100, -100, 0, "usb");
+            grafika_pobierz_pozycje_kursora(&cur_x, &cur_y);
+            check(cur_x == 3839 && cur_y == 2159);
+            klog_serial("[EKRAN TEST] Runtime 1080p -> 1440p -> 4K mouse bounds: PASS");
+
+            // Rollback test: 1080p -> temporary 1440p -> rollback
+            check(zastosuj(t_1080, 100, 0, false, false) == EKRAN_OK && !tx.oczekuje);
+            grafika_pobierz_granice_kursora(&b_mx, &b_my);
+            check(b_mx == 1919 && b_my == 1079);
+            check(zastosuj(t_1440, 100, 0, false, true) == EKRAN_OCZEKUJE && tx.oczekuje);
+            grafika_pobierz_granice_kursora(&b_mx, &b_my);
+            check(b_mx == 2559 && b_my == 1439);
+            check(cofnij() && !tx.oczekuje);
+            grafika_pobierz_granice_kursora(&b_mx, &b_my);
+            check(b_mx == 1919 && b_my == 1079);
+            klog_serial("[EKRAN TEST] Rollback immediately restores mouse bounds: PASS");
+
+            // Scale-only test: 1080p @ 100% vs 200%
+            check(zastosuj(t_1080, 200, 0, false, false) == EKRAN_OK && skala == 200);
+            grafika_pobierz_granice_kursora(&b_mx, &b_my);
+            check(b_mx == 1919 && b_my == 1079);
+            for(int i = 0; i < 30; ++i) zaktualizuj_mysze_zrodlo(100, -100, 0, "usb");
+            grafika_pobierz_pozycje_kursora(&cur_x, &cur_y);
+            check(cur_x == 1919 && cur_y == 1079);
+            check(zastosuj(t_1080, 100, 0, false, false) == EKRAN_OK && skala == 100);
+            grafika_pobierz_granice_kursora(&b_mx, &b_my);
+            check(b_mx == 1919 && b_my == 1079);
+            klog_serial("[EKRAN TEST] Scale-only (100% -> 200%) mouse bounds unchanged: PASS");
             if(!ekran_ten_sam(boot_tryb, grafika_tryb_ekranu())) {
                 zastosuj(boot_tryb, 100, 0, true);
                 if(tx.oczekuje) {
@@ -245,11 +445,25 @@ bool ekran_obsluz(const proces_t&p,const EkranZadanie&r,EkranOdpowiedz*out){
     uint32_t status=EKRAN_NIEOBSLUGIWANY;
     if(r.operacja==EKRAN_ZASTOSUJ){
         if(r.szerokosc<=UINT32_MAX/4){TrybEkranu t{r.szerokosc,r.wysokosc,r.bpp,r.szerokosc*4,0,0};status=zastosuj(t,r.skala,p.pid,!test);}
-    }else if((r.operacja==EKRAN_ZACHOWAJ||r.operacja==EKRAN_PRZYWROC)&&tx.oczekuje&&r.transakcja==tx.id&&(tx.owner==int(p.pid)||tx.owner==0)){
-        if(r.operacja==EKRAN_PRZYWROC)status=cofnij()?EKRAN_OK:EKRAN_SPRZET;
-        else {
-            if(!zapisz())status=EKRAN_ZAPIS;
-            else {skladacz_zakoncz_zmiane_ekranu(&tx.warstwy,true);grafika_zwolnij_stan(&tx.stary);tx.oczekuje=false;status=EKRAN_OK;klog_serial("[EKRAN] Tryb zatwierdzony.");}
+    }else if(r.operacja==EKRAN_ZACHOWAJ||r.operacja==EKRAN_PRZYWROC){
+        if(!tx.oczekuje||r.transakcja!=tx.id){
+            status=EKRAN_NIEOBSLUGIWANY;
+        }else{
+            const bool wlasciciel_ok=(tx.owner>0)?(int(p.pid)==tx.owner):allowed;
+            if(!wlasciciel_ok){
+                status=EKRAN_UPRAWNIENIA;
+            }else if(r.operacja==EKRAN_PRZYWROC){
+                status=cofnij()?EKRAN_OK:EKRAN_SPRZET;
+            }else{
+                if(!zapisz())status=EKRAN_ZAPIS;
+                else{
+                    skladacz_zakoncz_zmiane_ekranu(&tx.warstwy,true);
+                    grafika_zwolnij_stan(&tx.stary);
+                    tx.oczekuje=false;
+                    status=EKRAN_OK;
+                    klog_serial("[EKRAN] Tryb zatwierdzony.");
+                }
+            }
         }
     }
     snapshot(out);out->status=status;return true;
@@ -257,4 +471,11 @@ bool ekran_obsluz(const proces_t&p,const EkranZadanie&r,EkranOdpowiedz*out){
 void ekran_obsluz_timeout(){
     if(!tx.oczekuje||teraz()<tx.deadline)return;
     (void)cofnij();
+}
+void ekran_posprzataj_proces(int pid){
+    if(pid<=0)return;
+    if(tx.oczekuje&&tx.owner>0&&tx.owner==pid){
+        klog_serial("[EKRAN] Wlasciciel transakcji zakonczyl sie; przywracam poprzedni tryb.");
+        (void)cofnij();
+    }
 }

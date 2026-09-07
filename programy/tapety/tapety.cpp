@@ -183,17 +183,17 @@ extern "C" __attribute__((noreturn)) void _start() {
     log("[TAPETY APP] Start.\n");
     AplikacjaGUI app;
     Prostokat work = Okno::pobierz_obszar_roboczy();
-    int scale = app.skala_dpi() < 1 ? 1 : app.skala_dpi();
-    int cw = 174 * scale;
-    int ch = 124 * scale;
-    int sw = 15 * scale;
-    int pad_h = 24 * scale;
+    const uint32_t procent = ui_skala_procent;
+    int cw = ui_skaluj(174, procent);
+    int ch = ui_skaluj(124, procent);
+    int sw = ui_skaluj(15, procent);
+    int pad_h = ui_skaluj(24, procent);
 
-    int max_cols = (work.szerokosc - pad_h - sw - 2 - 40 * scale) / cw;
+    int max_cols = (work.szerokosc - pad_h - sw - 2 - ui_skaluj(40, procent)) / cw;
     int target_cols = max_cols >= 5 ? 5 : przytnij(max_cols, 1, 5);
-    int win_w = target_cols * cw + sw + 2 + pad_h;
+    int win_w = target_cols * 174 + 15 + 2 + 24;
 
-    Okno okno("Tapety", win_w, 600 * scale);
+    Okno okno("Tapety", win_w, 600);
     app.ustaw_glowne_okno(&okno);
 
     endpoint = ipc_create();
@@ -265,7 +265,7 @@ extern "C" __attribute__((noreturn)) void _start() {
 
     okno.przelicz_uklad();
     int stale_h = okno.wysokosc() - galeria->obszar().wysokosc;
-    int avail_for_gallery = work.wysokosc - stale_h - 40 * scale;
+    int avail_for_gallery = work.wysokosc - stale_h;
     int target_rows = 3;
     if (avail_for_gallery >= 4 * ch + 2) {
         target_rows = 4;
@@ -277,7 +277,7 @@ extern "C" __attribute__((noreturn)) void _start() {
         target_rows = 1;
     }
     int win_h = target_rows * ch + 2 + stale_h;
-    okno.ustaw_rozmiar(win_w, win_h);
+    okno.ustaw_rozmiar(ui_skaluj(win_w, procent), win_h);
     okno.wysrodkuj();
     okno.przelicz_uklad();
     if (liczba_tapet > 0) {

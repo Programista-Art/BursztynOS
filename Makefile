@@ -518,7 +518,7 @@ repro_blob.o: repro_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
 # 16. MENEDZER OKIEN .bur
 # ============================================================================
 
-menedzer_okien_tmp.o: menedzer_okien.cpp bursztyn_gui.h
+menedzer_okien_tmp.o: menedzer_okien.cpp bursztyn_gui.h ui_skala.h pulpit_geometria.h
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
 
 menedzer_okien_blob.o: menedzer_okien_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
@@ -610,7 +610,7 @@ iso: $(ISO)
 # Tymczasowy artefakt developerski/CI sluzacy wylacznie do bezobslugowego
 # uruchomienia drugiego wpisu (bursztyn.test=automated) w QEMU bez oczekiwania na menu.
 # Wykorzystuje dokladnie ten sam plik jadra $(KERNEL) co kanoniczny $(ISO).
-$(CI_TEST_ISO): check-kernel $(GRUB_CFG) $(TAPETY_PAK)
+$(CI_TEST_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
 	@mkdir -p $(CI_TEST_DIR)/boot/grub
 	@cp $(KERNEL) $(CI_TEST_DIR)/boot/
 	@cp $(TAPETY_PAK) $(CI_TEST_DIR)/boot/tapety.pak
@@ -889,4 +889,4 @@ $(filter %_tmp.o,$(OBJS)) bursztyn_gui.o: ui_skala.h
 ekran_format_ring3.o: ekran_format.cpp ekran_format.h
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
 bws_nowoczesne.o ekran.o grafika.o kernel.o: ekran.h ekran_format.h bufory_grafiki.h
-test_tmp.o: programy/test/ekran_testy.h programy/ekran/klient.h ekran_format.h
+test_tmp.o: programy/test/ekran_testy.h programy/ekran/klient.h ekran_format.h pulpit_geometria.h

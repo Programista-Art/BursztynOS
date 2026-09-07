@@ -16,8 +16,13 @@ bool bochs_wykryj(uint64_t lfb,const TrybEkranu& boot,uint64_t* vram) {
         if(pci_odczytaj_dword(bus,slot,0,0)!=0x11111234U) continue;
         const uint32_t cls=pci_odczytaj_dword(bus,slot,0,8);
         const uint32_t bar=pci_odczytaj_dword(bus,slot,0,0x10);
-        if((cls>>16)!=0x0300U || (bar&7)!=0 || uint64_t(bar&~15U)!=lfb ||
-            !(pci_odczytaj_word(bus,slot,0,4)&1)) continue;
+        if((cls>>16)!=0x0300U || (bar&7)!=0 || uint64_t(bar&~15U)!=lfb) continue;
+        uint32_t cmd = pci_odczytaj_dword(bus,slot,0,4);
+        if(!(cmd & 1)) {
+            cmd |= 0x0003;
+            pci_zapisz_dword(bus,slot,0,4,cmd);
+        }
+        if(!(pci_odczytaj_word(bus,slot,0,4)&1)) continue;
         pci=true;
     }
     if(!pci) return false;

@@ -141,6 +141,12 @@ public:
 
     Prostokat prostokat_widoku() const { return widok_; }
 
+    void ustaw_skale_dpi(SkalaUI s) override {
+        szerokosc_paska_ = 14 * s;
+        Kontrolka::ustaw_skale_dpi(s);
+        przelicz_uklad();
+    }
+
     void rozmiesc(Prostokat r) override {
         Kontrolka::rozmiesc(r);
         przelicz_uklad();
@@ -192,6 +198,7 @@ public:
             if (r_widok.czy_pusty()) return;
             czy_brudna_ = true;
             brudny_obszar_ = brudny_obszar_.suma(r_widok);
+            brudne_regiony_.dodaj(r_widok);
             if (rodzic_) {
                 rodzic_->uniewaznij_dziecko(this, r_widok);
             }
@@ -220,7 +227,7 @@ public:
         uint32_t tlo = styl_.normalny.tlo;
         uint32_t ramka = styl_.normalny.ramka;
         if (tlo != 0) ctx.rysuj_prostokat(b, tlo);
-        if (ramka != 0) ctx.rysuj_ramke(b, ramka, 1);
+        if (ramka != 0 && styl_.normalny.grubosc_ramki > 0) ctx.rysuj_ramke(b, ramka, styl_.normalny.grubosc_ramki * skala_dpi_);
 
         // Ogranicz do widoku i narysuj zawartość
         ctx.dodaj_przyciecie(widok_);
@@ -255,12 +262,14 @@ private:
         int h = obszar_.wysokosc;
         if (w <= 2 || h <= 2) return;
 
-        int ramka_gr = 1;
+        int ramka_gr = styl_.normalny.grubosc_ramki > 0 ? styl_.normalny.grubosc_ramki * skala_dpi_ : 0;
         int max_w = w - 2 * ramka_gr;
         int max_h = h - 2 * ramka_gr;
 
         if (auto_rozmiar_ && zawartosc_) {
-            int cw = 0, ch = 0;
+            Rozmiar zm = zawartosc_->zmierz(Rozmiar(max_w, 0));
+            int cw = zm.szerokosc;
+            int ch = zm.wysokosc;
             for (size_t i = 0; i < zawartosc_->liczba_dzieci(); ++i) {
                 Kontrolka* d = zawartosc_->dziecko(i);
                 if (d && d->czy_widoczna()) {

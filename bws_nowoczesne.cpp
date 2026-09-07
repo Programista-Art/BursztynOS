@@ -906,6 +906,8 @@ extern "C" void bws_powiadom_zmiane_pliku(const char* sciezka,
 extern "C" void bws_nowoczesne_posprzataj_proces(int pid, bool aktywny_cr3) {
     if (pid <= 0 || pid >= static_cast<int>(PZB_MAKS_PROCESOW)) return;
 
+    ekran_posprzataj_proces(pid);
+
     for (uint32_t i = 0; i < IPC_ENDPOINTOW_MAX; ++i) {
         IpcEndpoint& e = endpoints[i];
         if (!e.aktywny || e.owner_pid != pid) continue;

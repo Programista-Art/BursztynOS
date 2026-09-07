@@ -416,6 +416,14 @@ static uint64_t ekran_lfb_va=0, ekran_vram=0;
 static MozliwosciEkranu ekran_caps{};
 static TrybEkranu ekran_tryby[EKRAN_MAX_TRYBOW]{};
 static uint32_t ekran_liczba_trybow=0;
+struct AktywnyStanEkranu {
+    uint32_t szerokosc, wysokosc, pitch, bpp;
+    uint64_t framebuffer;
+    uint64_t generacja;
+};
+// Publikowany wylacznie razem z wymiana buforow pod blokada ekranu.
+// Sterownik sprzetowy, compositor i wejscie nie utrzymuja osobnych granic.
+static AktywnyStanEkranu aktywny_stan{};
 static uint32_t* bufor_tapety = nullptr;
 static bool tapeta_zaladowana = false;
 
@@ -897,6 +905,8 @@ void PrzeniesFragmentNaEkran(int x,
 int grafika_pobierz_szerokosc() {
     if (!aktywny_ekran) return 0;
 
+    if (aktywny_stan.szerokosc) return static_cast<int>(aktywny_stan.szerokosc);
+
     const uint32_t szer =
         aktywny_ekran->PobierzSzerokosc();
 
@@ -908,6 +918,8 @@ int grafika_pobierz_szerokosc() {
 
 int grafika_pobierz_wysokosc() {
     if (!aktywny_ekran) return 0;
+
+    if (aktywny_stan.wysokosc) return static_cast<int>(aktywny_stan.wysokosc);
 
     const uint32_t wys =
         aktywny_ekran->PobierzWysokosc();
@@ -1216,8 +1228,8 @@ static bool PobierzObszarRysowania(ObszarRysowania* wynik) {
 
     wynik->min_x = 0;
     wynik->min_y = 0;
-    wynik->max_x = aktywny_ekran->PobierzSzerokosc();
-    wynik->max_y = aktywny_ekran->PobierzWysokosc();
+    wynik->max_x = grafika_pobierz_szerokosc();
+    wynik->max_y = grafika_pobierz_wysokosc();
 
     return true;
 }
@@ -1684,8 +1696,9 @@ void rysuj_zegar_rtc() {
     if (!aktywny_ekran)
         return;
 
-    if (aktywny_ekran->PobierzSzerokosc() < 150 ||
-        aktywny_ekran->PobierzWysokosc() < 40) {
+    const int cur_w = grafika_pobierz_szerokosc();
+    const int cur_h = grafika_pobierz_wysokosc();
+    if (cur_w < 150 || cur_h < 40) {
         return;
     }
 
@@ -1697,17 +1710,9 @@ void rysuj_zegar_rtc() {
         &czas,
         bufor_czasu);
 
-    const int zegar_x =
-        static_cast<int>(
-            aktywny_ekran->PobierzSzerokosc()) - 150;
-
-    const int pasek_y =
-        static_cast<int>(
-            aktywny_ekran->PobierzWysokosc()) - 40;
-
-    const int zegar_y =
-        static_cast<int>(
-            aktywny_ekran->PobierzWysokosc()) - 32;
+    const int zegar_x = cur_w - 150;
+    const int pasek_y = cur_h - 40;
+    const int zegar_y = cur_h - 32;
 
     RysujProstokat(
         zegar_x,
@@ -2054,9 +2059,43 @@ extern "C" void bws_gui_powiadom_lifecycle(uint32_t typ, int pid) {
     scheduler_dodaj_zdarzenie(manager, &e);
 }
 
-extern "C" void zaktualizuj_mysze(int dx,
-                                  int dy,
-                                  uint8_t przyciski) {
+static uint64_t mouse_last_gen = 0;
+static int mouse_last_max_x = -1;
+static int mouse_last_max_y = -1;
+static bool mouse_first_usb_logged = false;
+static bool mouse_first_ps2_logged = false;
+static bool mouse_first_mysz_logged = false;
+
+static void log_granice_kursora(const char* zrodlo, uint32_t sw, uint32_t sh, uint64_t gen) {
+    char s[140]{};
+    char* p = s;
+    char* e = s + sizeof(s);
+    auto app = [&](const char* str) { while (*str && p + 1 < e) *p++ = *str++; };
+    auto app_d = [&](uint64_t val) {
+        char buf[24]; int i = 0;
+        do { buf[i++] = static_cast<char>('0' + (val % 10)); val /= 10; } while (val > 0);
+        while (i > 0 && p + 1 < e) *p++ = buf[--i];
+    };
+    app("[MOUSE BOUNDS] source=");
+    app(zrodlo ? zrodlo : "cursor");
+    app(" screen=");
+    app_d(sw);
+    app("x");
+    app_d(sh);
+    app(" max=");
+    app_d(sw > 0 ? sw - 1 : 0);
+    app("x");
+    app_d(sh > 0 ? sh - 1 : 0);
+    app(" gen=");
+    app_d(gen);
+    *p = '\0';
+    klog_serial(s);
+}
+
+extern "C" void zaktualizuj_mysze_zrodlo(int dx,
+                                         int dy,
+                                         uint8_t przyciski,
+                                         const char* zrodlo) {
     if (!backbuffer || !aktywny_ekran)
         return;
 
@@ -2075,13 +2114,8 @@ extern "C" void zaktualizuj_mysze(int dx,
         static_cast<int64_t>(mysz_y) -
         static_cast<int64_t>(dy);
 
-    const int ekran_szer =
-        static_cast<int>(
-            aktywny_ekran->PobierzSzerokosc());
-
-    const int ekran_wys =
-        static_cast<int>(
-            aktywny_ekran->PobierzWysokosc());
+    const int ekran_szer = grafika_pobierz_szerokosc();
+    const int ekran_wys = grafika_pobierz_wysokosc();
 
     if (nowy_x < 0) nowy_x = 0;
     if (nowy_y < 0) nowy_y = 0;
@@ -2094,6 +2128,79 @@ extern "C" void zaktualizuj_mysze(int dx,
 
     mysz_x = static_cast<int>(nowy_x);
     mysz_y = static_cast<int>(nowy_y);
+
+    const uint64_t gen = grafika_generacja_ekranu();
+    const int max_x = ekran_szer > 0 ? ekran_szer - 1 : 0;
+    const int max_y = ekran_wys > 0 ? ekran_wys - 1 : 0;
+
+    const bool is_usb = zrodlo && (zrodlo[0] == 'u' || zrodlo[0] == 'U');
+    const bool is_ps2 = zrodlo && (zrodlo[0] == 'p' || zrodlo[0] == 'P');
+    bool first_for_source = false;
+    if (is_usb && !mouse_first_usb_logged) {
+        mouse_first_usb_logged = true;
+        first_for_source = true;
+    } else if (is_ps2 && !mouse_first_ps2_logged) {
+        mouse_first_ps2_logged = true;
+        first_for_source = true;
+    } else if (!is_usb && !is_ps2 && !mouse_first_mysz_logged) {
+        mouse_first_mysz_logged = true;
+        first_for_source = true;
+    }
+
+    const bool bounds_changed = (max_x != mouse_last_max_x || max_y != mouse_last_max_y);
+    const bool gen_changed = (gen != mouse_last_gen);
+
+    if (first_for_source || bounds_changed || gen_changed) {
+        mouse_last_gen = gen;
+        mouse_last_max_x = max_x;
+        mouse_last_max_y = max_y;
+
+        char s[200]{};
+        char* p = s;
+        char* e = s + sizeof(s);
+        auto app = [&](const char* str) {
+            while (*str && p + 1 < e) *p++ = *str++;
+        };
+        auto app_d = [&](int64_t val) {
+            if (val < 0) {
+                if (p + 1 < e) *p++ = '-';
+                val = -val;
+            }
+            char buf[24];
+            int i = 0;
+            do {
+                buf[i++] = static_cast<char>('0' + (val % 10));
+                val /= 10;
+            } while (val > 0);
+            while (i > 0 && p + 1 < e) *p++ = buf[--i];
+        };
+        app("[MOUSE BOUNDS] source=");
+        app(zrodlo ? zrodlo : "mysz");
+        app(" screen=");
+        app_d(ekran_szer);
+        app("x");
+        app_d(ekran_wys);
+        app(" max=");
+        app_d(max_x);
+        app("x");
+        app_d(max_y);
+        app(" cur=");
+        app_d(stary_mysz_x);
+        app(",");
+        app_d(stary_mysz_y);
+        app(" dx=");
+        app_d(dx);
+        app(" dy=");
+        app_d(dy);
+        app(" res=");
+        app_d(mysz_x);
+        app(",");
+        app_d(mysz_y);
+        app(" gen=");
+        app_d(static_cast<int64_t>(gen));
+        *p = '\0';
+        klog_serial(s);
+    }
 
     if (pid_przejmujacy_mysz != -1) {
         lewy_wcisniety =
@@ -2311,6 +2418,12 @@ extern "C" void zaktualizuj_mysze(int dx,
 
     skladacz_obrazu_oznacz_ruch_kursora(
         stary_mysz_x, stary_mysz_y, mysz_x, mysz_y);
+}
+
+extern "C" void zaktualizuj_mysze(int dx,
+                                  int dy,
+                                  uint8_t przyciski) {
+    zaktualizuj_mysze_zrodlo(dx, dy, przyciski, "mysz");
 }
 
 extern "C" void zaktualizuj_kolo_myszy(
@@ -2913,6 +3026,9 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
         while (true)
             asm volatile("cli; hlt");
     }
+
+    aktywny_stan={SZER,WYS,PITCH,BPP,framebuffer_wirtualny,1};
+    log_granice_kursora("cursor", SZER, WYS, 1);
 
     for (uint64_t i = 0; i < lfb_waga; ++i)
         backbuffer[i] = 0;
@@ -3577,11 +3693,24 @@ void grafika_wymien_stan(const StanBuforowEkranu&s){
     aktywny_ekran->Inicjalizuj(ekran_lfb_va,s.tryb.szerokosc,s.tryb.wysokosc,s.tryb.pitch,s.tryb.bpp);
     backbuffer=s.backbuffer;bufor_tapety=s.tapeta;backbuffer_bajty=s.bajty;
     tapeta_zmapowane_bajty=s.tapeta_bajty;bufor_tapety_zmapowany=bufor_tapety!=nullptr;tapeta_zaladowana=s.ma_tapete;
-    kursor_overlay_widoczny=false;
+    aktywny_stan.szerokosc=s.tryb.szerokosc;aktywny_stan.wysokosc=s.tryb.wysokosc;
+    aktywny_stan.pitch=s.tryb.pitch;aktywny_stan.bpp=s.tryb.bpp;
+    aktywny_stan.framebuffer=ekran_lfb_va;if(++aktywny_stan.generacja==0)++aktywny_stan.generacja;
+    if(mysz_x<0)mysz_x=0;
+    if(mysz_y<0)mysz_y=0;
     if(mysz_x>=int(s.tryb.szerokosc))mysz_x=s.tryb.szerokosc-1;
     if(mysz_y>=int(s.tryb.wysokosc))mysz_y=s.tryb.wysokosc-1;
+    kursor_overlay_widoczny=false;
+    kursor_overlay_x=0;
+    kursor_overlay_y=0;
     for(unsigned i=0;i<SKLADACZ_MAKS_WARSTW;++i)ma_oczekujacy_dirty[i]=false;
+    log_granice_kursora("cursor", s.tryb.szerokosc, s.tryb.wysokosc, aktywny_stan.generacja);
 }
+void grafika_pobierz_granice_kursora(int* max_x,int* max_y){
+    if(max_x)*max_x=grafika_pobierz_szerokosc()-1;
+    if(max_y)*max_y=grafika_pobierz_wysokosc()-1;
+}
+uint64_t grafika_generacja_ekranu(){return aktywny_stan.generacja;}
 void grafika_zwolnij_stan(StanBuforowEkranu*s){
     if(!s)return;
     bufor_grafiki_zwolnij(s->backbuffer);bufor_grafiki_zwolnij(s->tapeta);*s={};

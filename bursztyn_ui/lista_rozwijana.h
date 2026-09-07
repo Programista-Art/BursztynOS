@@ -98,6 +98,7 @@ public:
     bool ustaw_wybrany_indeks(int indeks) {
         if (!popup_.lista().ustaw_wybrany_indeks(indeks)) return false;
         synchronizuj_tekst();
+        uniewaznij();
         return true;
     }
     int wybrany_indeks() const { return popup_.lista().wybrany_indeks(); }
@@ -209,7 +210,8 @@ public:
         n += e.delta_y > 0 ? -1 : 1;
         if (n < 0) n = 0;
         if (n >= static_cast<int>(liczba_elementow())) n = static_cast<int>(liczba_elementow()) - 1;
-        ustaw_wybrany_indeks(n); e.obsluzone = true;
+        if (ustaw_wybrany_indeks(n) && cb_zmiana_) cb_zmiana_(this, n, dane_zmiany_);
+        e.obsluzone = true;
     }
 
 private:
@@ -232,7 +234,7 @@ private:
                 else n += dol ? 1 : -1;
                 if (n < 0) n = 0;
                 if (n >= static_cast<int>(liczba_elementow())) n = static_cast<int>(liczba_elementow()) - 1;
-                ustaw_wybrany_indeks(n);
+                if (ustaw_wybrany_indeks(n) && cb_zmiana_) cb_zmiana_(this, n, dane_zmiany_);
             }
             e.obsluzone = true; return true;
         }

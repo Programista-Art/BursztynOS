@@ -15,7 +15,8 @@ public:
     static constexpr int WYSOKOSC_BELKI_TYTULOWEJ = 28;
 
     Okno(const char* tytul_okna = "Okno BursztynUI", int szerokosc = 480, int wysokosc = 320)
-        : szerokosc_(szerokosc), wysokosc_(wysokosc) {
+        : szerokosc_(szerokosc), wysokosc_(wysokosc),
+          logiczna_szerokosc_(szerokosc), logiczna_wysokosc_(wysokosc) {
         ustaw_tytul(tytul_okna);
         dopasuj_do_obszaru_roboczego(true);
         zapisana_geometria_ = Prostokat(x_, y_, szerokosc_, wysokosc_);
@@ -97,29 +98,54 @@ public:
     }
 
     void ustaw_pozycje(int x, int y) {
+        const int stary_x = x_, stary_y = y_;
         x_ = x;
         y_ = y;
         dopasuj_do_obszaru_roboczego(true);
+        if ((x_ != stary_x || y_ != stary_y) && !g_tlum_operacje_systemowe) {
+            gui_ustaw_geometrie_okna(x_, y_, szerokosc_, wysokosc_,
+                                     czy_zmaksymalizowane_ ? 2 : 1);
+        }
     }
 
     void ustaw_rozmiar(int w, int h) {
         if (w < 100) w = 100;
         if (h < 60) h = 60;
-        bool zmiana = szerokosc_ != w || wysokosc_ != h;
+        logiczna_szerokosc_ = ui_odskaluj(w, skala_dpi_.procent());
+        logiczna_wysokosc_ = ui_odskaluj(h, skala_dpi_.procent());
+        const int stary_x = x_, stary_y = y_, stary_w = szerokosc_, stary_h = wysokosc_;
         szerokosc_ = w;
         wysokosc_ = h;
         dopasuj_do_obszaru_roboczego(true);
-        if (zmiana || szerokosc_ != w || wysokosc_ != h) {
+        if (szerokosc_ != stary_w || wysokosc_ != stary_h || x_ != stary_x || y_ != stary_y) {
             przelicz_uklad();
             czy_brudne_ = true;
+            if (!g_tlum_operacje_systemowe) {
+                gui_ustaw_geometrie_okna(x_, y_, szerokosc_, wysokosc_,
+                                         czy_zmaksymalizowane_ ? 2 : 1);
+            }
         }
     }
 
     void ustaw_geometrie(int x, int y, int w, int h) {
+        if (w < 100) w = 100;
+        if (h < 60) h = 60;
+        logiczna_szerokosc_ = ui_odskaluj(w, skala_dpi_.procent());
+        logiczna_wysokosc_ = ui_odskaluj(h, skala_dpi_.procent());
+        const int stary_x = x_, stary_y = y_, stary_w = szerokosc_, stary_h = wysokosc_;
         x_ = x;
         y_ = y;
-        ustaw_rozmiar(w, h);
+        szerokosc_ = w;
+        wysokosc_ = h;
         dopasuj_do_obszaru_roboczego(true);
+        if (szerokosc_ != stary_w || wysokosc_ != stary_h || x_ != stary_x || y_ != stary_y) {
+            przelicz_uklad();
+            czy_brudne_ = true;
+            if (!g_tlum_operacje_systemowe) {
+                gui_ustaw_geometrie_okna(x_, y_, szerokosc_, wysokosc_,
+                                         czy_zmaksymalizowane_ ? 2 : 1);
+            }
+        }
     }
 
     // Wywolywane przed utworzeniem warstwy oraz po programowej zmianie
@@ -192,14 +218,33 @@ public:
     }
 
     SkalaUI skala_dpi() const { return skala_dpi_; }
-    void ustaw_skale_dpi(SkalaUI skala) {
+    void ustaw_skale_dpi(SkalaUI skala, bool zglos_geometrie = false) {
+        const uint32_t stary_procent = skala_dpi_.procent();
+        const bool zmiana_skali = stary_procent != skala.procent();
         skala_dpi_ = skala;
+        if (zmiana_skali) {
+            if (!czy_zmaksymalizowane_) {
+                szerokosc_ = ui_skaluj(logiczna_szerokosc_, skala_dpi_.procent());
+                wysokosc_ = ui_skaluj(logiczna_wysokosc_, skala_dpi_.procent());
+                dopasuj_do_obszaru_roboczego(true);
+            } else {
+                Prostokat work = pobierz_obszar_roboczy();
+                x_ = work.x; y_ = work.y;
+                szerokosc_ = work.szerokosc; wysokosc_ = work.wysokosc;
+                zapisana_geometria_.szerokosc = ui_skaluj(logiczna_szerokosc_, skala_dpi_.procent());
+                zapisana_geometria_.wysokosc = ui_skaluj(logiczna_wysokosc_, skala_dpi_.procent());
+            }
+        }
         popupy_.ustaw_skale_dpi(skala_dpi_);
         if (kontrolka_glowna_) {
             kontrolka_glowna_->ustaw_skale_dpi(skala_dpi_);
         }
         przelicz_uklad();
         czy_brudne_ = true;
+        if (zglos_geometrie && zmiana_skali && !g_tlum_operacje_systemowe) {
+            gui_ustaw_geometrie_okna(x_, y_, szerokosc_, wysokosc_,
+                                     czy_zmaksymalizowane_ ? 2 : 1);
+        }
     }
 
     void przelicz_uklad() {
@@ -360,7 +405,7 @@ public:
         czy_brudne_ = true;
     }
 
-    void zamknij() {
+    virtual void zamknij() {
         popupy_.zamknij(PowodZamknieciaPopup::WlascicielZamkniety);
         czy_przeciagane_ = false;
         gui_ustaw_capture_myszy(false);
@@ -389,7 +434,16 @@ public:
                 x_=surowe_zdarzenie.x;y_=surowe_zdarzenie.y;
                 szerokosc_=surowe_zdarzenie.dx;wysokosc_=surowe_zdarzenie.dy;
                 // Restore geometry and minimized state deliberately remain owner state.
-                ustaw_skale_dpi(ui_skala());
+                ustaw_skale_dpi(ui_skala(), true);
+                const int stary_x = x_, stary_y = y_, stary_w = szerokosc_, stary_h = wysokosc_;
+                dopasuj_do_obszaru_roboczego(true);
+                if (x_ != stary_x || y_ != stary_y || szerokosc_ != stary_w || wysokosc_ != stary_h) {
+                    przelicz_uklad();
+                    czy_brudne_ = true;
+                    if (!g_tlum_operacje_systemowe) {
+                        gui_ustaw_geometrie_okna(x_, y_, szerokosc_, wysokosc_, czy_zmaksymalizowane_ ? 2 : 1);
+                    }
+                }
                 break;
             }
             case BWS_ZDARZENIE_MYSZ_RUCH: {
@@ -750,6 +804,8 @@ private:
     int y_{100};
     int szerokosc_{480};
     int wysokosc_{320};
+    int logiczna_szerokosc_{480};
+    int logiczna_wysokosc_{320};
     SkalaUI skala_dpi_{1};
 
     bool czy_aktywne_{true};

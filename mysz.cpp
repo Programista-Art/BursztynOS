@@ -372,10 +372,11 @@ void przetworz_pakiet() {
         static_cast<uint8_t>(
             flagi & MYSZ_MASKA_PRZYCISKOW);
 
-    zaktualizuj_mysze(
+    zaktualizuj_mysze_zrodlo(
         dx,
         dy,
-        przyciski
+        przyciski,
+        "ps2"
     );
 }
 

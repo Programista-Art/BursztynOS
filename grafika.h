@@ -83,6 +83,8 @@ void grafika_prezentuj_kursor_w(int x, int y);
 void grafika_zakoncz_scene();
 void grafika_naloz_kursor_regionu(int x, int y, int szer, int wys);
 void grafika_pobierz_pozycje_kursora(int* x, int* y);
+void grafika_pobierz_granice_kursora(int* max_x, int* max_y);
+uint64_t grafika_generacja_ekranu();
 void grafika_pobierz_overlay_kursora(int* x, int* y, bool* widoczny);
 
 /* Nakladka jadra rysowana przez compositor. */
@@ -140,6 +142,11 @@ bool zaktualizuj_klawiature_gui(char znak);
 void zaktualizuj_mysze(int dx,
                        int dy,
                        uint8_t przyciski);
+
+void zaktualizuj_mysze_zrodlo(int dx,
+                              int dy,
+                              uint8_t przyciski,
+                              const char* zrodlo);
 
 void obsluga_przerwania_zegara();
 

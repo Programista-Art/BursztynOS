@@ -1,5 +1,6 @@
 #include "ui_skala.h"
 #include "ekran_format.h"
+#include "pulpit_geometria.h"
 /*
  * Menedzer Okien (Pulpit i Pasek Zadan) dla Bursztyn OS
  * Wersja uporzadkowana: poprawne hitboxy, Menu Start i odswiezanie zegara.
@@ -50,8 +51,8 @@ int PRZYCISK_MENU_X = 10;
 int PRZYCISK_MENU_W = 80;
 int PRZYCISK_MENU_H = 30;
 
-int IKONA_W = 48;
-int IKONA_H = 48;
+int PULPIT_LINE_H = 16;
+int PULPIT_LINE_GAP = 2;
 int SKROT_W = 32;
 int SKROT_H = 32;
 
@@ -62,8 +63,8 @@ int TASK_BUTTON_GAP = 4;
 constexpr int PULPIT_MAX_WPISOW = 128;
 constexpr int PULPIT_LIST_CAP = 16384;
 constexpr int PULPIT_NAZWA_CAP = 56;
-int PULPIT_GRID_W = 82;
-int PULPIT_GRID_H = 82;
+int PULPIT_GRID_W = 120;
+int PULPIT_GRID_H = 100;
 int PULPIT_GRID_Y = 140;
 constexpr int PULPIT_REFRESH_TICKS = 3;
 
@@ -78,15 +79,16 @@ MENU_GRY_W=ui_skaluj(180,ui_skala_procent);
 PRZYCISK_MENU_X=ui_skaluj(10,ui_skala_procent);
 PRZYCISK_MENU_W=ui_skaluj(80,ui_skala_procent);
 PRZYCISK_MENU_H=ui_skaluj(30,ui_skala_procent);
-IKONA_W=ui_skaluj(48,ui_skala_procent);
-IKONA_H=ui_skaluj(48,ui_skala_procent);
+const PulpitMetryki pulpit=pulpit_metryki(ui_skala_procent);
+PULPIT_LINE_H=pulpit.wysokosc_linii;
+PULPIT_LINE_GAP=pulpit.odstep_linii;
 SKROT_W=ui_skaluj(32,ui_skala_procent);
 SKROT_H=ui_skaluj(32,ui_skala_procent);
 TASK_BUTTON_X=ui_skaluj(100,ui_skala_procent);
 TASK_BUTTON_W=ui_skaluj(112,ui_skala_procent);
 TASK_BUTTON_GAP=ui_skaluj(4,ui_skala_procent);
-PULPIT_GRID_W=ui_skaluj(82,ui_skala_procent);
-PULPIT_GRID_H=ui_skaluj(82,ui_skala_procent);
+PULPIT_GRID_W=pulpit.komorka_szer;
+PULPIT_GRID_H=pulpit.komorka_wys;
 PULPIT_GRID_Y=ui_skaluj(140,ui_skala_procent);
 MENU_WYS=2*MENU_GORNY_MARGINES+MENU_ELEMENTOW*MENU_ELEMENT_WYS;
 MENU_GRY_WYS=2*MENU_GORNY_MARGINES+MENU_GRY_ELEMENTOW*MENU_ELEMENT_WYS;
@@ -778,6 +780,59 @@ static constexpr uint32_t IKONA_SNAKE_FRAGMENTOW =
 
 // koniec ikony
 
+static void rysuj_fragment_ikony(int x, int y, int lx, int ly, int lw, int lh,
+                                 uint32_t kolor) {
+    const int x0 = ui_skaluj(lx, ui_skala_procent);
+    const int y0 = ui_skaluj(ly, ui_skala_procent);
+    const int x1 = ui_skaluj(lx + lw, ui_skala_procent);
+    const int y1 = ui_skaluj(ly + lh, ui_skala_procent);
+    if (x1 > x0 && y1 > y0)
+        gui_rysuj_prostokat(x + x0, y + y0, x1 - x0, y1 - y0, kolor);
+}
+
+static void rysuj_tekst_ikony(int x, int y, int lx, int ly, int lw, int lh,
+                              uint32_t kolor, const char* tekst) {
+    const int x0 = ui_skaluj(lx, ui_skala_procent);
+    const int y0 = ui_skaluj(ly, ui_skala_procent);
+    const int x1 = ui_skaluj(lx + lw, ui_skala_procent);
+    const int y1 = ui_skaluj(ly + lh, ui_skala_procent);
+    rysuj_tekst_wysrodkowany(x + x0, y + y0, x1 - x0, y1 - y0,
+                             int(ui_skala_procent), kolor, tekst);
+}
+
+static void podpis_do_szerokosci(const char* zrodlo, char* cel, size_t cap,
+                                 int maks_szer) {
+    if (!cel || !cap) return;
+    cel[0] = '\0';
+    if (!zrodlo) return;
+    size_t dl = 0;
+    while (zrodlo[dl] && dl + 1 < cap) { cel[dl] = zrodlo[dl]; ++dl; }
+    cel[dl] = '\0';
+    if (!zrodlo[dl] && oblicz_szerokosc_tekstu(cel, int(ui_skala_procent)) <= maks_szer)
+        return;
+
+    dl = 0;
+    cel[0] = '\0';
+    while (zrodlo[dl]) {
+        const uint8_t b = static_cast<uint8_t>(zrodlo[dl]);
+        const size_t znak = b < 0x80U ? 1U : ((b & 0xE0U) == 0xC0U ? 2U :
+                            ((b & 0xF0U) == 0xE0U ? 3U : 4U));
+        if (dl + znak + 4 > cap) break;
+        for (size_t i = 0; i < znak; ++i) cel[dl + i] = zrodlo[dl + i];
+        dl += znak;
+        cel[dl] = '.'; cel[dl + 1] = '.'; cel[dl + 2] = '.'; cel[dl + 3] = '\0';
+        if (oblicz_szerokosc_tekstu(cel, int(ui_skala_procent)) > maks_szer) {
+            dl -= znak;
+            break;
+        }
+        cel[dl] = '\0';
+    }
+    if (zrodlo[dl] && dl + 4 <= cap) {
+        cel[dl++] = '.'; cel[dl++] = '.'; cel[dl++] = '.';
+    }
+    cel[dl] = '\0';
+}
+
 
 __attribute__((noinline))
 static void rysuj_ikone_paleta(
@@ -800,12 +855,9 @@ static void rysuj_ikone_paleta(
         if (static_cast<uint32_t>(f.indeks_koloru) >= liczba_kolorow)
             continue;
 
-        gui_rysuj_prostokat(
-            x + static_cast<int>(f.x),
-            y + static_cast<int>(f.y),
-            static_cast<int>(f.szer),
-            static_cast<int>(f.wys),
-            paleta[f.indeks_koloru]);
+        rysuj_fragment_ikony(x, y, static_cast<int>(f.x), static_cast<int>(f.y),
+                             static_cast<int>(f.szer), static_cast<int>(f.wys),
+                             paleta[f.indeks_koloru]);
     }
 }
 
@@ -1014,9 +1066,9 @@ bool odswiez_wpisy_pulpitu() {
 }
 
 void prostokat_wpisu_pulpitu(int indeks, int* x, int* y) {
-    int kolumny = (screen_w - 40) / PULPIT_GRID_W;
+    int kolumny = (screen_w - ui_skaluj(40, ui_skala_procent)) / PULPIT_GRID_W;
     if (kolumny < 1) kolumny = 1;
-    if (x) *x = 30 + (indeks % kolumny) * PULPIT_GRID_W;
+    if (x) *x = ui_skaluj(20, ui_skala_procent) + (indeks % kolumny) * PULPIT_GRID_W;
     if (y) *y = PULPIT_GRID_Y + (indeks / kolumny) * PULPIT_GRID_H;
 }
 
@@ -1024,7 +1076,7 @@ int wpis_pulpitu_w_punkcie(int x, int y) {
     for (int i = 0; i < liczba_wpisow_pulpitu; ++i) {
         int px = 0, py = 0;
         prostokat_wpisu_pulpitu(i, &px, &py);
-        if (punkt_w_prostokacie(x, y, px, py, 68, 72)) return i;
+        if (punkt_w_prostokacie(x, y, px, py, PULPIT_GRID_W, PULPIT_GRID_H)) return i;
     }
     return -1;
 }
@@ -1150,7 +1202,7 @@ void zarejestruj_pulpit_jako_cel_drop() {
         int x = 0, y = 0;
         prostokat_wpisu_pulpitu(i, &x, &y);
         BwsCelDrop& cel = cele_drop_pulpitu[count];
-        cel.x = x; cel.y = y; cel.szer = 68; cel.wys = 72;
+        cel.x = x; cel.y = y; cel.szer = PULPIT_GRID_W; cel.wys = PULPIT_GRID_H;
         if (!sciezka_wpisu_pulpitu(i, cel.folder, sizeof(cel.folder))) continue;
         ++count;
     }
@@ -1167,19 +1219,23 @@ void RysujWpisyPulpitu() {
     for (int i = 0; i < liczba_wpisow_pulpitu; ++i) {
         int x = 0, y = 0;
         prostokat_wpisu_pulpitu(i, &x, &y);
-        if (y + 72 >= screen_h - PASEK_WYS) break;
+        if (y + PULPIT_GRID_H > screen_h - PASEK_WYS) break;
+        const PulpitGeometriaKomorki g = pulpit_geometria_komorki(x, y, ui_skala_procent);
         if (i == zaznaczony_wpis_pulpitu)
-            gui_rysuj_prostokat(x, y, 68, 72, 0x00603800);
+            gui_rysuj_prostokat(g.komorka_x, g.komorka_y, g.komorka_szer, g.komorka_wys, 0x00603800);
         uint32_t kolor = wpisy_pulpitu[i].folder ? 0x00FFBF00 : 0x00708090;
         if (konczy_sie(wpisy_pulpitu[i].nazwa, ".bur")) kolor = 0x0038B000;
         else if (konczy_sie(wpisy_pulpitu[i].nazwa, ".cebula")) kolor = 0x00D050A0;
         else if (konczy_sie(wpisy_pulpitu[i].nazwa, ".txt")) kolor = 0x004C9BE8;
-        gui_rysuj_prostokat(x + 14, y + 4, 40, 40, kolor);
+        rysuj_fragment_ikony(g.ikona_x, g.ikona_y, 4, 4, 40, 40, kolor);
         if (wpisy_pulpitu[i].folder)
-            gui_rysuj_prostokat(x + 18, y, 18, 8, kolor);
-        char podpis[40] = {};
-        podpis_wpisu(wpisy_pulpitu[i].nazwa, podpis, sizeof(podpis));
-        rysuj_tekst_wysrodkowany(x, y + 49, 68, 18, 1, 0x00FFFFFF, podpis);
+            rysuj_fragment_ikony(g.ikona_x, g.ikona_y, 8, 0, 18, 8, kolor);
+        char skrocony[40] = {}, podpis[40] = {};
+        podpis_wpisu(wpisy_pulpitu[i].nazwa, skrocony, sizeof(skrocony));
+        podpis_do_szerokosci(skrocony, podpis, sizeof(podpis), g.etykieta_szer);
+        rysuj_tekst_wysrodkowany(g.etykieta_x, g.etykieta_y,
+                                 g.etykieta_szer, PULPIT_LINE_H,
+                                 int(ui_skala_procent), 0x00FFFFFF, podpis);
     }
 }
 
@@ -1261,37 +1317,35 @@ void RysujMenuGry() {
 }
 
 void rysuj_ikone_aplikacji(const AplikacjaPulpitu& aplikacja) {
-    const int x = aplikacja.x;
-    const int y = aplikacja.y;
+    const PulpitGeometriaKomorki g =
+        pulpit_geometria_komorki(aplikacja.x, aplikacja.y, ui_skala_procent);
+    const int x = g.ikona_x;
+    const int y = g.ikona_y;
     switch (aplikacja.typ_ikony) {
         case TypIkonyAplikacji::Notatnik:
-            gui_rysuj_prostokat(x, y, IKONA_W, IKONA_H, 0x00FFBF00);
-            gui_rysuj_prostokat(x + 2, y + 2, 44, 44, 0x00FFFFFF);
-            gui_rysuj_prostokat(x + 6, y + 8, 32, 2, 0x00000000);
-            gui_rysuj_prostokat(x + 6, y + 14, 32, 2, 0x00000000);
-            gui_rysuj_prostokat(x + 6, y + 20, 20, 2, 0x00000000);
-            gui_rysuj_prostokat(x + 6, y + 26, 32, 2, 0x00000000);
-            gui_rysuj_prostokat(x + 6, y + 32, 24, 2, 0x00000000);
+            rysuj_fragment_ikony(x,y,0,0,48,48,0x00FFBF00);
+            rysuj_fragment_ikony(x,y,2,2,44,44,0x00FFFFFF);
+            rysuj_fragment_ikony(x,y,6,8,32,2,0x00000000);
+            rysuj_fragment_ikony(x,y,6,14,32,2,0x00000000);
+            rysuj_fragment_ikony(x,y,6,20,20,2,0x00000000);
+            rysuj_fragment_ikony(x,y,6,26,32,2,0x00000000);
+            rysuj_fragment_ikony(x,y,6,32,24,2,0x00000000);
             break;
         case TypIkonyAplikacji::Kalkulator:
-            gui_rysuj_prostokat(x, y, IKONA_W, IKONA_H, 0x008A5A00);
-            gui_rysuj_prostokat(x + 2, y + 2, 44, 44, 0x001A0B00);
-            rysuj_tekst_wysrodkowany(x, y + 10, IKONA_W, 16,
-                                     1, 0x00FFBF00, "+ -");
-            rysuj_tekst_wysrodkowany(x, y + 30, IKONA_W, 16,
-                                     1, 0x00FFBF00, "* =");
+            rysuj_fragment_ikony(x,y,0,0,48,48,0x008A5A00);
+            rysuj_fragment_ikony(x,y,2,2,44,44,0x001A0B00);
+            rysuj_tekst_ikony(x,y,0,10,48,16,0x00FFBF00,"+ -");
+            rysuj_tekst_ikony(x,y,0,30,48,16,0x00FFBF00,"* =");
             break;
         case TypIkonyAplikacji::Husarz:
-            gui_rysuj_prostokat(x, y, IKONA_W, IKONA_H, 0x000078D7);
-            gui_rysuj_prostokat(x + 2, y + 2, 44, 44, 0x000055AA);
-            rysuj_tekst_wysrodkowany(x, y + 15, IKONA_W, 16,
-                                     1, 0x00FFFFFF, "WWW");
+            rysuj_fragment_ikony(x,y,0,0,48,48,0x000078D7);
+            rysuj_fragment_ikony(x,y,2,2,44,44,0x000055AA);
+            rysuj_tekst_ikony(x,y,0,15,48,16,0x00FFFFFF,"WWW");
             break;
         case TypIkonyAplikacji::Test:
-            gui_rysuj_prostokat(x, y, IKONA_W, IKONA_H, 0x00CC33CC);
-            gui_rysuj_prostokat(x + 2, y + 2, 44, 44, 0x00881188);
-            rysuj_tekst_wysrodkowany(x, y + 15, IKONA_W, 16,
-                                     1, 0x00FFFFFF, "Test");
+            rysuj_fragment_ikony(x,y,0,0,48,48,0x00CC33CC);
+            rysuj_fragment_ikony(x,y,2,2,44,44,0x00881188);
+            rysuj_tekst_ikony(x,y,0,15,48,16,0x00FFFFFF,"Test");
             break;
         case TypIkonyAplikacji::Snake:
             rysuj_ikone_paleta(x, y, IKONA_SNAKE_PALETA,
@@ -1300,55 +1354,61 @@ void rysuj_ikone_aplikacji(const AplikacjaPulpitu& aplikacja) {
                                IKONA_SNAKE_FRAGMENTOW);
             break;
         case TypIkonyAplikacji::Eksplorator:
-            gui_rysuj_prostokat(x, y, IKONA_W, IKONA_H, 0x00FFBF00);
-            gui_rysuj_prostokat(x + 2, y + 8, 44, 38, 0x00D59600);
-            gui_rysuj_prostokat(x + 6, y + 2, 20, 10, 0x00FFBF00);
+            rysuj_fragment_ikony(x,y,0,0,48,48,0x00FFBF00);
+            rysuj_fragment_ikony(x,y,2,8,44,38,0x00D59600);
+            rysuj_fragment_ikony(x,y,6,2,20,10,0x00FFBF00);
             break;
         case TypIkonyAplikacji::Obrazy:
-            gui_rysuj_prostokat(x, y, IKONA_W, IKONA_H, 0x00301500);
-            gui_rysuj_prostokat(x + 2, y + 2, 44, 44, 0x002080C0);
-            gui_rysuj_prostokat(x + 8, y + 24, 18, 12, 0x00808080);
-            gui_rysuj_prostokat(x + 22, y + 28, 14, 8, 0x00606060);
-            gui_rysuj_prostokat(x + 30, y + 8, 8, 8, 0x00FFD700);
+            rysuj_fragment_ikony(x,y,0,0,48,48,0x00301500);
+            rysuj_fragment_ikony(x,y,2,2,44,44,0x002080C0);
+            rysuj_fragment_ikony(x,y,8,24,18,12,0x00808080);
+            rysuj_fragment_ikony(x,y,22,28,14,8,0x00606060);
+            rysuj_fragment_ikony(x,y,30,8,8,8,0x00FFD700);
             break;
         case TypIkonyAplikacji::DemoUI:
             // Jedna duza karta + trzy kontrolki: odrebny znak DemoUI.
-            gui_rysuj_prostokat(x, y, IKONA_W, IKONA_H, 0x00402010);
-            gui_rysuj_prostokat(x + 3, y + 3, 42, 42, 0x00F2E2C4);
-            gui_rysuj_prostokat(x + 7, y + 8, 34, 5, 0x00E58A00);
-            gui_rysuj_prostokat(x + 7, y + 18, 22, 7, 0x008A5A00);
-            gui_rysuj_prostokat(x + 7, y + 30, 10, 10, 0x00FFBF00);
-            gui_rysuj_prostokat(x + 22, y + 30, 19, 10, 0x00301500);
+            rysuj_fragment_ikony(x,y,0,0,48,48,0x00402010);
+            rysuj_fragment_ikony(x,y,3,3,42,42,0x00F2E2C4);
+            rysuj_fragment_ikony(x,y,7,8,34,5,0x00E58A00);
+            rysuj_fragment_ikony(x,y,7,18,22,7,0x008A5A00);
+            rysuj_fragment_ikony(x,y,7,30,10,10,0x00FFBF00);
+            rysuj_fragment_ikony(x,y,22,30,19,10,0x00301500);
             break;
         case TypIkonyAplikacji::Kontrolki2:
             // Dwie kolumny kontrolek: zachowany, rozpoznawalny znak K2.
-            gui_rysuj_prostokat(x, y, IKONA_W, IKONA_H, 0x00301500);
-            gui_rysuj_prostokat(x + 2, y + 2, 44, 44, 0x00E58A00);
-            gui_rysuj_prostokat(x + 6, y + 6, 36, 12, 0x00FFBF00);
-            gui_rysuj_prostokat(x + 6, y + 22, 16, 18, 0x00301500);
-            gui_rysuj_prostokat(x + 26, y + 22, 16, 18, 0x00301500);
+            rysuj_fragment_ikony(x,y,0,0,48,48,0x00301500);
+            rysuj_fragment_ikony(x,y,2,2,44,44,0x00E58A00);
+            rysuj_fragment_ikony(x,y,6,6,36,12,0x00FFBF00);
+            rysuj_fragment_ikony(x,y,6,22,16,18,0x00301500);
+            rysuj_fragment_ikony(x,y,26,22,16,18,0x00301500);
             break;
         case TypIkonyAplikacji::Kontrolki3:
             // Trzy bursztynowe suwaki na granatowej karcie: odrebny znak K3.
-            gui_rysuj_prostokat(x, y, IKONA_W, IKONA_H, 0x001C2940);
-            gui_rysuj_prostokat(x + 3, y + 3, 42, 42, 0x00305070);
-            gui_rysuj_prostokat(x + 8, y + 11, 32, 4, 0x00FFBF00);
-            gui_rysuj_prostokat(x + 26, y + 8, 7, 10, 0x00FFFFFF);
-            gui_rysuj_prostokat(x + 8, y + 23, 32, 4, 0x00E58A00);
-            gui_rysuj_prostokat(x + 14, y + 20, 7, 10, 0x00FFFFFF);
-            gui_rysuj_prostokat(x + 8, y + 35, 32, 4, 0x00CC33CC);
-            gui_rysuj_prostokat(x + 31, y + 32, 7, 10, 0x00FFFFFF);
+            rysuj_fragment_ikony(x,y,0,0,48,48,0x001C2940);
+            rysuj_fragment_ikony(x,y,3,3,42,42,0x00305070);
+            rysuj_fragment_ikony(x,y,8,11,32,4,0x00FFBF00);
+            rysuj_fragment_ikony(x,y,26,8,7,10,0x00FFFFFF);
+            rysuj_fragment_ikony(x,y,8,23,32,4,0x00E58A00);
+            rysuj_fragment_ikony(x,y,14,20,7,10,0x00FFFFFF);
+            rysuj_fragment_ikony(x,y,8,35,32,4,0x00CC33CC);
+            rysuj_fragment_ikony(x,y,31,32,7,10,0x00FFFFFF);
             break;
     }
 
     const uint32_t kolor_etykiety =
         aplikacja.typ_ikony == TypIkonyAplikacji::Snake
             ? 0x0095E600 : 0x00FFFFFF;
-    rysuj_tekst_wysrodkowany(x, y + 54, IKONA_W, 16, 1,
-                             kolor_etykiety, aplikacja.etykieta_1);
+    char linia[64]{};
+    podpis_do_szerokosci(aplikacja.etykieta_1, linia, sizeof(linia), g.etykieta_szer);
+    rysuj_tekst_wysrodkowany(g.etykieta_x, g.etykieta_y,
+                             g.etykieta_szer, PULPIT_LINE_H,
+                             int(ui_skala_procent), kolor_etykiety, linia);
     if (aplikacja.etykieta_2) {
-        rysuj_tekst_wysrodkowany(x, y + 70, IKONA_W, 16, 1,
-                                 kolor_etykiety, aplikacja.etykieta_2);
+        podpis_do_szerokosci(aplikacja.etykieta_2, linia, sizeof(linia), g.etykieta_szer);
+        rysuj_tekst_wysrodkowany(g.etykieta_x,
+                                 g.etykieta_y + PULPIT_LINE_H + PULPIT_LINE_GAP,
+                                 g.etykieta_szer, PULPIT_LINE_H,
+                                 int(ui_skala_procent), kolor_etykiety, linia);
     }
 }
 
@@ -1754,7 +1814,7 @@ void obsluz_klikniecie(int mx, int my) {
     for (size_t i = 0; i < LICZBA_APLIKACJI_PULPITU; ++i) {
         const AplikacjaPulpitu& aplikacja = APLIKACJE_PULPITU[i];
         if (punkt_w_prostokacie(mx, my, aplikacja.x, aplikacja.y,
-                                IKONA_W, IKONA_H)) {
+                                PULPIT_GRID_W, PULPIT_GRID_H)) {
             uruchom_lub_aktywuj(aplikacja.sciezka,
                                 aplikacja.prefiks_tytulu);
             return;
@@ -1775,12 +1835,12 @@ void obsluz_klikniecie(int mx, int my) {
 }
 
 void rozmiesc_ikony_ekranu(){
-    int cols=(screen_w-ui_skaluj(60,ui_skala_procent))/PULPIT_GRID_W;if(cols<1)cols=1;
+    int cols=(screen_w-ui_skaluj(40,ui_skala_procent))/PULPIT_GRID_W;if(cols<1)cols=1;
     for(size_t i=0;i<LICZBA_APLIKACJI_PULPITU;++i){
-        APLIKACJE_PULPITU[i].x=ui_skaluj(30,ui_skala_procent)+int(i%cols)*PULPIT_GRID_W;
-        APLIKACJE_PULPITU[i].y=ui_skaluj(30,ui_skala_procent)+int(i/cols)*PULPIT_GRID_H;
+        APLIKACJE_PULPITU[i].x=ui_skaluj(20,ui_skala_procent)+int(i%cols)*PULPIT_GRID_W;
+        APLIKACJE_PULPITU[i].y=ui_skaluj(20,ui_skala_procent)+int(i/cols)*PULPIT_GRID_H;
     }
-    PULPIT_GRID_Y=ui_skaluj(30,ui_skala_procent)+int((LICZBA_APLIKACJI_PULPITU+cols-1)/cols)*PULPIT_GRID_H;
+    PULPIT_GRID_Y=ui_skaluj(20,ui_skala_procent)+int((LICZBA_APLIKACJI_PULPITU+cols-1)/cols)*PULPIT_GRID_H;
 }
 
 
@@ -1836,7 +1896,8 @@ extern "C" __attribute__((noreturn)) void _start() {
             menu_start_otwarte=false;menu_gry_otwarte=false;dragging_file=false;drag_candidate=false;
             ui_skala_procent=zdarzenie.kod;metryki_ekranu();
             screen_w=zdarzenie.dx;screen_h=zdarzenie.dy;
-            rozmiesc_ikony_ekranu();aktualizuj_overlay_menu();RysujPulpit(true);continue;
+            gui_ustaw_obszar_roboczy(0, 0, screen_w, screen_h - PASEK_WYS);
+            rozmiesc_ikony_ekranu();zarejestruj_pulpit_jako_cel_drop();aktualizuj_overlay_menu();RysujPulpit(true);continue;
         }
         const uint64_t stara_sygnatura = sygnatura_okien();
         odswiez_snapshot_okien();

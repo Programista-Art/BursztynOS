@@ -1870,9 +1870,9 @@ void skladacz_obrazu_obsluz_dirty() {
     /* Faza B: prezentujemy dopiero gotowe wiersze, a kursor nakladamy raz,
        jako ostatni overlay. Scene backbuffer pozostaje bez kursora. */
     for(uint32_t ri=0;ri<count;++ri){const GuiDirtyRect&r=work[ri];grafika_prezentuj_region(r.x,r.y,r.width,r.height);}
-    int cursor_x=overlay_x,cursor_y=overlay_y;
+    int cursor_x=0,cursor_y=0;
     if(cursor_work){cursor_x=cur_x;cursor_y=cur_y;}
-    else if(!overlay_widoczny)grafika_pobierz_pozycje_kursora(&cursor_x,&cursor_y);
+    else{grafika_pobierz_pozycje_kursora(&cursor_x,&cursor_y);}
     /* Scene nigdy nie zawiera kursora. Bez ruchu myszy overlay pozostaje
        nietkniety, dopoki dirty faktycznie nie przecina jego 16x16. */
     if(cursor_work||dirty_przecina_kursor||!overlay_widoczny){
