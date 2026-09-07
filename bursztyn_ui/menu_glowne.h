@@ -35,7 +35,7 @@ public:
             Prostokat r = prostokat_glowny(i);
             if (i == aktywny_glowny_ && (czy_ma_fokus_ || czy_otwarte()))
                 ctx.rysuj_prostokat(r, Kolory::PowierzchniaNajechana);
-            int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+            SkalaUI s = skala_dpi_;
             ctx.rysuj_tekst(Punkt(r.x + 10 * s,
                 r.y + (r.wysokosc - CzcionkaUI::pobierz_wysokosc(s)) / 2),
                 e->tekst(), e->czy_wlaczony() ? Kolory::TekstBialy : Kolory::WylaczonyTekst, s);
@@ -68,7 +68,7 @@ public:
 
 private:
     Prostokat prostokat_glowny(int indeks) const {
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_, x = 0;
+        SkalaUI s = skala_dpi_; int x = 0;
         for (int i = 0; i < static_cast<int>(menu_.liczba_elementow()); ++i) {
             const ElementMenu* e = menu_.element(i); if (!e || !e->czy_widoczny()) continue;
             int w = CzcionkaUI::zmierz_tekst(e->tekst(), s) + 20 * s;

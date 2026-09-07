@@ -70,6 +70,26 @@
 
 volatile bool ekran_zajety = false;
 
+extern "C" void zablokuj_ekran() {
+    while (__atomic_test_and_set(
+               &ekran_zajety,
+               __ATOMIC_ACQUIRE)) {
+        asm volatile(
+            "pause"
+            :
+            :
+            : "memory"
+        );
+    }
+}
+
+extern "C" void odblokuj_ekran() {
+    __atomic_clear(
+        &ekran_zajety,
+        __ATOMIC_RELEASE
+    );
+}
+
 /*
  * Brama SYSCALL korzysta z kernelowego GS, ktorego baza wskazuje na adres
  * tej zmiennej. Scheduler aktualizuje jej wartosc przy zmianie procesu.
@@ -421,27 +441,6 @@ void powiadom_zmiane_systemu_plikow(
 /* =========================================================================
  * LOCK EKRANU
  * ========================================================================= */
-
-void zablokuj_ekran() {
-    while (__atomic_test_and_set(
-               &ekran_zajety,
-               __ATOMIC_ACQUIRE)) {
-
-        asm volatile(
-            "pause"
-            :
-            :
-            : "memory"
-        );
-    }
-}
-
-void odblokuj_ekran() {
-    __atomic_clear(
-        &ekran_zajety,
-        __ATOMIC_RELEASE
-    );
-}
 
 class BlokadaEkranu {
 public:
@@ -1792,6 +1791,12 @@ uint64_t bws_uruchom(
     else if (rowna_sciezka(sciezka, "/shell.bur"))
         wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ | PRAWO_PLIKI_ZAPISZ |
                    PRAWO_SIEC | PRAWO_URUCHOM_PROGRAM;
+    // Only the trusted system manager can grant display settings privileges.
+    if(rowna_sciezka(sciezka,"/programy/ekran.cebula/ekran.bur")) {
+        if(!pzb_ma_co_najmniej_poziom(&rodzic,PZB_ZAUFANE)||
+            !pzb_ma_prawa(&rodzic,PRAWO_SYSTEM_CONFIG))return 0;
+        poziom_dziecka=PZB_ZAUFANE;wymagane=PRAWO_GUI|PRAWO_SYSTEM_CONFIG;
+    }
     prawa_dziecka &= wymagane;
 
     /*

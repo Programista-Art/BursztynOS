@@ -73,7 +73,7 @@ public:
     }
 
     Rozmiar zmierz(Rozmiar) override {
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         int w = preferowany_rozmiar_.szerokosc >= 0 ? preferowany_rozmiar_.szerokosc * s : 240 * s;
         int h = preferowany_rozmiar_.wysokosc >= 0 ? preferowany_rozmiar_.wysokosc * s : 32 * s;
         return Rozmiar(w, h);
@@ -81,7 +81,7 @@ public:
 
     void rozmiesc(Prostokat r) override {
         Kontrolka::rozmiesc(r);
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         int ikona = 28 * s;
         int prawa = czy_przycisk_czyszczenia_widoczny() ? 28 * s : 5 * s;
         int w = r.szerokosc - ikona - prawa;
@@ -100,7 +100,7 @@ public:
     void rysuj_siebie(KontekstRysowania& ctx) override {
         StylStanu st = wyznacz_biezacy_styl_stanu();
         rysuj_tlo_i_ramke(ctx, st);
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         // Lupa rysowana geometrycznie.
         int cx = 11 * s, cy = obszar_.wysokosc / 2 - 2 * s, r = 5 * s;
         ctx.rysuj_zaokraglona_ramke(Prostokat(cx - r, cy - r, 2 * r, 2 * r),
@@ -184,7 +184,7 @@ private:
         if (w->cb_zmiana_) w->cb_zmiana_(w, tekst, w->dane_zmiany_);
     }
     Prostokat prostokat_czyszczenia() const {
-        int w = 28 * (skala_dpi_ < 1 ? 1 : skala_dpi_);
+        int w = 28 * (skala_dpi_);
         return Prostokat(obszar_.szerokosc - w, 0, w, obszar_.wysokosc);
     }
     Prostokat prostokat_czyszczenia_ekran() const {

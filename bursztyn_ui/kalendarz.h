@@ -148,7 +148,7 @@ public:
     }
 
     Rozmiar oblicz_naturalny_rozmiar() const override {
-        int skala = skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         return Rozmiar(230 * skala, 200 * skala);
     }
 
@@ -156,7 +156,7 @@ public:
         StylStanu s = wyznacz_biezacy_styl_stanu();
         rysuj_tlo_i_ramke(ctx, s);
 
-        int skala = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         Geometria g = geometria();
         int nav_h = g.nav_h;
         int dows_h = g.dows_h;
@@ -438,7 +438,7 @@ private:
     };
 
     Geometria geometria() const {
-        const int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        const SkalaUI s = skala_dpi_;
         Geometria g;
         g.nav_h = 24 * s;
         g.dows_h = 18 * s;

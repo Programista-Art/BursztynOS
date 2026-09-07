@@ -38,6 +38,8 @@
  */
 
 #include "skladacz_obrazu.h"
+#include "bufory_grafiki.h"
+#include "ekran_format.h"
 #include "sterowniki/czas/hpet.h"
 #include "scheduler.h"
 
@@ -72,14 +74,14 @@ constexpr int MAKS_WARSTW =
  * powinien zostac przeniesiony do konfiguracji pamieci.
  */
 constexpr uint64_t MAKS_PAMIEC_WARSTW =
-    12ULL * 1024ULL * 1024ULL;
+    256ULL * 1024ULL * 1024ULL;
 
 /*
  * Maksymalnie 8 MiB na pojedyncza powierzchnie.
  * 1920x1080x4 = 8 294 400 B, czyli nadal miesci sie w tym limicie.
  */
 constexpr uint64_t MAKS_PAMIEC_JEDNEJ_WARSTWY =
-    8ULL * 1024ULL * 1024ULL;
+    64ULL * 1024ULL * 1024ULL;
 
 /*
  * Absolutny bezpiecznik metadanych. Faktyczny rozmiar warstwy jest dodatkowo
@@ -501,14 +503,14 @@ void zwolnij_lub_odrocz(uint32_t* buffer,uint64_t bytes){
     if(!buffer)return;
     uint64_t f=irq_off();
     if(render_readers&&deferred_count<SKLADACZ_MAKS_DIRTY_RECT)deferred[deferred_count++]={buffer,bytes};
-    else { irq_restore(f);kfree(buffer);oddaj_bajty(bytes);return; }
+    else { irq_restore(f);bufor_grafiki_zwolnij(buffer);oddaj_bajty(bytes);return; }
     irq_restore(f);
 }
 
 void oproznij_odroczone(){
     DeferredBuffer local[SKLADACZ_MAKS_DIRTY_RECT];uint32_t n=0;uint64_t f=irq_off();
     if(!render_readers){n=deferred_count;for(uint32_t i=0;i<n;++i)local[i]=deferred[i];deferred_count=0;}
-    irq_restore(f);for(uint32_t i=0;i<n;++i){kfree(local[i].buffer);oddaj_bajty(local[i].bytes);}
+    irq_restore(f);for(uint32_t i=0;i<n;++i){bufor_grafiki_zwolnij(local[i].buffer);oddaj_bajty(local[i].bytes);}
 }
 
 /* =========================================================================
@@ -1115,7 +1117,7 @@ int utworz_warstwe(
 
     uint32_t* nowy_bufor =
         static_cast<uint32_t*>(
-            kmalloc(
+            bufor_grafiki_alokuj(
                 nowe_bajty
             )
         );
@@ -2076,7 +2078,7 @@ bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
                 }
             }
         }
-        if (stary.tlo) kfree(stary.tlo);
+        if (stary.tlo) bufor_grafiki_zwolnij(stary.tlo);
         application_popup = {
             false, -1, 0, {0, 0, 0, 0}, nullptr, 0};
         skladacz_obrazu_oznacz_dirty_rect(stary.rect.x, stary.rect.y,
@@ -2092,7 +2094,7 @@ bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
     const uint64_t piksele = static_cast<uint64_t>(static_cast<uint32_t>(szer)) *
                               static_cast<uint32_t>(wys);
     if (piksele == 0 || piksele > UINT64_MAX / sizeof(uint32_t)) return false;
-    uint32_t* tlo = static_cast<uint32_t*>(kmalloc(piksele * sizeof(uint32_t)));
+    uint32_t* tlo = static_cast<uint32_t*>(bufor_grafiki_alokuj(piksele * sizeof(uint32_t)));
     if (!tlo) return false;
     const int lokalny_x = x - w.x;
     const int lokalny_y = y - w.y;
@@ -2131,4 +2133,79 @@ void skladacz_obrazu_debug_warstwy(const char* powod) {
 #else
     (void)powod;
 #endif
+}
+
+void skladacz_stan_max(int pid,bool max){
+    if(pid_poprawny(pid)&&stan_okna[pid]!=GUI_OKNO_ZMINIMALIZOWANE)
+        stan_okna[pid]=max?GUI_OKNO_ZMAKSYMALIZOWANE:GUI_OKNO_NORMALNE;
+}
+bool skladacz_przygotuj_ekran(int sw,int sh,int work_h,ZmianaWarstwEkranu* z){
+    if(!z||sw<=0||sh<=0||work_h<=0)return false;
+    *z={};
+    apply_pending_geometry(-1);
+    uint64_t suma=0;
+    for(int pid=1;pid<MAKS_WARSTW;++pid){
+        auto* w=pobierz_warstwe(pid);if(!w)continue;
+        auto& p=z->warstwy[pid];p.generacja=generacja_okna[pid];p.stara=*w;p.nowa=*w;
+        p.stare_bajty=rozmiar_alokacji_warstwy[pid];
+        const bool pulpit=w->z_order==0;
+        int wmax=sw,hmax=pulpit?sh:work_h;
+        GeometriaEkranu g=ekran_dopasuj({w->x,w->y,w->szerokosc,w->wysokosc},wmax,hmax,
+            pulpit||stan_okna[pid]==GUI_OKNO_ZMAKSYMALIZOWANE);
+        p.nowa.x=g.x;p.nowa.y=g.y;p.nowa.szerokosc=g.szer;p.nowa.wysokosc=g.wys;
+        p.nowe_bajty=uint64_t(p.nowa.szerokosc)*p.nowa.wysokosc*4;
+        suma+=p.nowe_bajty;
+        if(suma>MAKS_PAMIEC_WARSTW) {skladacz_zakoncz_zmiane_ekranu(z,false);return false;}
+        p.zmiana_bufora=true; // Pin old surface through confirmation, including same-sized windows.
+        if(!p.zmiana_bufora)continue;
+        p.nowa.bufor_pikseli=static_cast<uint32_t*>(bufor_grafiki_alokuj(p.nowe_bajty));
+        if(!p.nowa.bufor_pikseli){skladacz_zakoncz_zmiane_ekranu(z,false);return false;}
+        for(int y=0;y<p.nowa.wysokosc;++y)for(int x=0;x<p.nowa.szerokosc;++x)
+            p.nowa.bufor_pikseli[size_t(y)*p.nowa.szerokosc+x]=x<w->szerokosc&&y<w->wysokosc?
+                w->bufor_pikseli[size_t(y)*w->szerokosc+x]:0;
+    }
+    return true;
+}
+void skladacz_reset_ekranu(){
+    if(application_popup.otwarty)skladacz_obrazu_ustaw_popup_aplikacji(application_popup.pid,false,0,0,0,0);
+    system_overlay={false,-1,{0,0,0,0}};drag_overlay={false,-1,0,0};pending_drag_overlay={};
+    uint64_t f=irq_off();dirty_count=0;cursor_pending=false;nastepna_klatka_ns=0;
+    for(auto& p:pending_geometry)p={};
+    irq_restore(f);skladacz_obrazu_oznacz_dirty();
+}
+void skladacz_zastosuj_ekran(ZmianaWarstwEkranu*z){
+    for(int pid=1;pid<MAKS_WARSTW;++pid){auto&p=z->warstwy[pid];if(!p.generacja)continue;
+        tablica_warstw[pid]=p.nowa;rozmiar_alokacji_warstwy[pid]=p.nowe_bajty;
+        zajete_bajty_warstw=zajete_bajty_warstw-p.stare_bajty+p.nowe_bajty;
+    }
+    skladacz_reset_ekranu();
+}
+void skladacz_cofnij_ekran(ZmianaWarstwEkranu*z){
+    for(int pid=1;pid<MAKS_WARSTW;++pid){auto&p=z->warstwy[pid];if(!p.generacja)continue;
+        auto*w=pobierz_warstwe(pid);
+        if(!w||generacja_okna[pid]!=p.generacja){if(p.zmiana_bufora)bufor_grafiki_zwolnij(p.stara.bufor_pikseli);p={};continue;}
+        // A window may have resized while confirmation was pending.
+        if(w->bufor_pikseli!=p.stara.bufor_pikseli)bufor_grafiki_zwolnij(w->bufor_pikseli);
+        else if(p.zmiana_bufora)bufor_grafiki_zwolnij(p.nowa.bufor_pikseli);
+        const int zorder=w->z_order;
+        zajete_bajty_warstw=zajete_bajty_warstw-rozmiar_alokacji_warstwy[pid]+p.stare_bajty;
+        *w=p.stara;w->z_order=zorder;rozmiar_alokacji_warstwy[pid]=p.stare_bajty;p={};
+    }
+    skladacz_reset_ekranu();
+}
+void skladacz_zakoncz_zmiane_ekranu(ZmianaWarstwEkranu* z, bool zastosowana) {
+    if (!z) return;
+    for (auto& p : z->warstwy) {
+        if (p.generacja && p.zmiana_bufora) {
+            bufor_grafiki_zwolnij(zastosowana ? p.stara.bufor_pikseli : p.nowa.bufor_pikseli);
+        }
+        p = {};
+    }
+}
+
+bool skladacz_test_reset_ekranu(){
+    skladacz_obrazu_oznacz_dirty_rect(8000,8000,500,500);
+    skladacz_reset_ekranu();
+    return dirty_count==1 && dirty_rects[0].x==0 && dirty_rects[0].y==0 &&
+        dirty_rects[0].width==grafika_pobierz_szerokosc() && dirty_rects[0].height==grafika_pobierz_wysokosc() && !cursor_pending;
 }

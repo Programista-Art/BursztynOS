@@ -623,7 +623,7 @@ private:
         }
     }
 
-    int wysokosc_wiersza() const { return 20 * (skala_dpi_ < 1 ? 1 : skala_dpi_); }
+    int wysokosc_wiersza() const { return 20 * (skala_dpi_); }
     int widoczne_wiersze() const {
         int h = obszar_.wysokosc - 2;
         int rh = wysokosc_wiersza();

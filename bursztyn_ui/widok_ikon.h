@@ -202,7 +202,7 @@ public:
         }
     }
 
-    void ustaw_skale_dpi(int s) override {
+    void ustaw_skale_dpi(SkalaUI s) override {
         Kontrolka::ustaw_skale_dpi(s);
         if (pionowy_) pionowy_->ustaw_maly_krok(wysokosc_komorki_ * skala_dpi_);
         aktualizuj_przewijanie();

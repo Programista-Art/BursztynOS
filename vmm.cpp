@@ -36,6 +36,18 @@ constexpr uint64_t ROZMIAR_STRONY_1G = 0x40000000ULL;
 
 constexpr uint64_t MASKA_INDEKSU = 0x1FFULL;
 
+/*
+ * x86_64 dzieli kanoniczna przestrzen adresowa na dwie polowy PML4.
+ * Poddrzewa 0..255 naleza do przestrzeni procesu, a 256..511 sa
+ * wspoldzielonymi mapowaniami jadra. Ta sama granica obowiazuje przy
+ * klonowaniu, zwijaniu nieudanego klonu i niszczeniu procesu.
+ */
+constexpr size_t PIERWSZY_WSPOLDZIELONY_PML4_JADRA = 256;
+
+static bool pml4_wpis_jadra(size_t indeks) {
+    return indeks >= PIERWSZY_WSPOLDZIELONY_PML4_JADRA;
+}
+
 constexpr uint64_t PTE_PRESENT   = 1ULL << 0;
 constexpr uint64_t PTE_WRITE     = 1ULL << 1;
 constexpr uint64_t PTE_USER      = 1ULL << 2;
@@ -1237,6 +1249,16 @@ static void zwolnij_sklonowane_tabele_bez_lisci(
              i < 512;
              ++i) {
 
+            /*
+             * sklonuj_hierarchie() kopiuje wysokie wpisy PML4 przez
+             * wartosc. Ich poddrzewa naleza do jadra i sa wspoldzielone
+             * przez wszystkie CR3. Zwijanie nieudanej kopii nie moze
+             * zwracac ich tablic do PMM.
+             */
+            if (poziom == 4 && pml4_wpis_jadra(i)) {
+                continue;
+            }
+
             const uint64_t wpis =
                 tabela[i];
 
@@ -1301,12 +1323,12 @@ static uint64_t* sklonuj_hierarchie(
         }
 
         /*
-         * Na poziomie PML4 (poziom 4), tylko indeks 0 (dolne 512 GiB)
-         * zawiera przestrzen uzytkownika i wymaga sklonowania hierarchii.
-         * Wszystkie wyzsze wpisy (w tym indeks 256 dla Direct-Map HHDM)
-         * sa wspoldzielonymi strukturami jadra i sa kopiowane bezposrednio.
+         * Na poziomie PML4 wpisy dolnej polowy kanonicznej (0..255) sa
+         * prywatne dla procesu i wymagaja sklonowania hierarchii. Wpisy
+         * gornej polowy (256..511) sa wspoldzielonymi strukturami jadra
+         * i sa kopiowane bezposrednio.
          */
-        if (poziom == 4 && i != 0) {
+        if (poziom == 4 && pml4_wpis_jadra(i)) {
             kopia[i] = wpis;
             continue;
         }
@@ -1462,6 +1484,15 @@ static void zniszcz_hierarchie_procesu(
     for (size_t i = 0;
          i < 512;
          ++i) {
+
+        /*
+         * Cala dolna polowa PML4[0..255] jest prywatna dla procesu.
+         * PML4[256..511] to wspoldzielone poddrzewa jadra (HHDM, heap,
+         * grafika itd.) i nigdy nie wolno po nich rekurencyjnie zwalniac.
+         */
+        if (poziom == 4 && pml4_wpis_jadra(i)) {
+            continue;
+        }
 
         const uint64_t wpis =
             tabela[i];
@@ -2116,6 +2147,133 @@ extern "C" bool bws_vmm_sprawdz_zakres_uzytkownika(
 
         strona +=
             ROZMIAR_STRONY_4K;
+    }
+
+    return true;
+}
+
+#include "bufory_grafiki.h"
+extern "C" void* VmmOdmapujBuforGrafiki(void* adres) {
+    const uint64_t va=reinterpret_cast<uint64_t>(adres);
+    if(va<BUFORY_GRAFIKI_BAZA || va>=BUFORY_GRAFIKI_BAZA+uint64_t(BUFORY_GRAFIKI_SLOTOW)*BUFORY_GRAFIKI_SLOT || (va&4095)) return nullptr;
+    BlokadaVMM guard;
+    uint64_t* tab=pml4_z_cr3();
+    const unsigned indeksy[4]={unsigned(indeks_pml4(va)),unsigned(indeks_pdp(va)),unsigned(indeks_pd(va)),unsigned(indeks_pt(va))};
+    for(unsigned i=0;i<3;++i) {
+        if(!tab) return nullptr;
+        const uint64_t e=tab[indeksy[i]];
+        if(!(e&PTE_PRESENT)||(e&(PTE_USER|PDE_PS))) return nullptr;
+        tab=tabela_z_wpisu(e);
+    }
+    if(!tab) return nullptr;
+    uint64_t& e=tab[indeksy[3]];
+    if(!(e&PTE_PRESENT)||(e&PTE_USER)) return nullptr;
+    void* pa=reinterpret_cast<void*>(e&MASKA_ADRESU_4K);
+    e=0; uniewaznij_tlb(va);
+    // Puste PT pozostaja wspolne; ich liczba jest ograniczona rozmiarem puli.
+    return pa;
+}
+
+extern "C" bool VmmTestujWspoldzieloneMapowanieJadra(const void* adres) {
+    const uint64_t va = reinterpret_cast<uint64_t>(adres);
+    if (!adres || !pml4_wpis_jadra(indeks_pml4(va))) return false;
+
+    BlokadaVMM guard;
+    if (!vmm_zainicjalizowany || !bazowe_pml4_jadra) return false;
+
+    const WynikWalkera przed = sprawdz_mapowanie(bazowe_pml4_jadra, va);
+    if (!przed.obecna || przed.user || !przed.zapisywalna) return false;
+
+    constexpr size_t LICZBA_MAPOWAN_TESTU = 8;
+    constexpr size_t INDEKS_SHM = LICZBA_MAPOWAN_TESTU - 1;
+    const uint64_t adresy[LICZBA_MAPOWAN_TESTU] = {
+        RING3_DEFAULT_TEXT_VA,
+        RING3_DEFAULT_DATA_VA,
+        RING3_HEAP_BASE,
+        RING3_STACK_TOP,
+        RING3_STACK_TOP + ROZMIAR_STRONY_4K,
+        RING3_STACK_TOP + 2 * ROZMIAR_STRONY_4K,
+        RING3_STACK_TOP + 3 * ROZMIAR_STRONY_4K,
+        RING3_SHM_BASE
+    };
+
+    if (indeks_pml4(RING3_DEFAULT_TEXT_VA) != 0 ||
+        indeks_pml4(RING3_DEFAULT_DATA_VA) != 0 ||
+        indeks_pml4(RING3_HEAP_BASE) != 0 ||
+        indeks_pml4(RING3_SHM_BASE) != 0 ||
+        indeks_pml4(RING3_STACK_TOP) != 255) {
+        return false;
+    }
+
+    const uint64_t wolne_stabilne = pmm_pobierz_wolne_ramki();
+
+    for (size_t proba = 0; proba < 100; ++proba) {
+        uint64_t* proces = sklonuj_hierarchie(bazowe_pml4_jadra, 4);
+        if (!proces) return false;
+
+        void* ramki[LICZBA_MAPOWAN_TESTU]{};
+        bool zmapowane[LICZBA_MAPOWAN_TESTU]{};
+        bool poprawne = true;
+
+        for (size_t i = 0; i < LICZBA_MAPOWAN_TESTU; ++i) {
+            ramki[i] = ZaalokujRamke();
+            if (!ramki[i]) {
+                poprawne = false;
+                break;
+            }
+
+            uint32_t flagi = VMM_FLAGA_OBECNA | VMM_FLAGA_USER;
+            if (i != 0) flagi |= VMM_FLAGA_ZAPIS;
+            if (i == INDEKS_SHM) flagi |= VMM_FLAGA_WSPOLDZIELONA;
+
+            zmapowane[i] = mapuj_strone_wewnetrznie(
+                proces,
+                adresy[i],
+                reinterpret_cast<uint64_t>(ramki[i]),
+                flagi
+            );
+            if (!zmapowane[i]) {
+                poprawne = false;
+                break;
+            }
+
+            const WynikWalkera wpis = sprawdz_mapowanie(proces, adresy[i]);
+            if (!wpis.obecna || !wpis.user ||
+                (i != 0 && !wpis.zapisywalna) ||
+                ((wpis.wpis & MASKA_ADRESU_4K) !=
+                 (reinterpret_cast<uint64_t>(ramki[i]) & MASKA_ADRESU_4K))) {
+                poprawne = false;
+                break;
+            }
+        }
+
+        const WynikWalkera kopia = sprawdz_mapowanie(proces, va);
+        if (!kopia.obecna || kopia.user || !kopia.zapisywalna ||
+            kopia.wpis != przed.wpis) {
+            poprawne = false;
+        }
+
+        zniszcz_hierarchie_procesu(proces, 4);
+
+        for (size_t i = 0; i < LICZBA_MAPOWAN_TESTU; ++i) {
+            if (!ramki[i]) continue;
+
+            /*
+             * Prywatne, zmapowane liscie zwolnil teardown. Ramka SHM
+             * nalezy do obiektu wspoldzielonego, a ramka bez mapowania
+             * nadal nalezy do tej funkcji testowej.
+             */
+            if (!zmapowane[i] || i == INDEKS_SHM) {
+                ZwolnijRamke(ramki[i]);
+            }
+        }
+
+        const WynikWalkera po = sprawdz_mapowanie(bazowe_pml4_jadra, va);
+        if (!poprawne || !po.obecna || po.user || !po.zapisywalna ||
+            po.wpis != przed.wpis ||
+            pmm_pobierz_wolne_ramki() != wolne_stabilne) {
+            return false;
+        }
     }
 
     return true;

@@ -23,7 +23,7 @@ private:
             PowierzchniaPopup::rysuj_siebie(ctx);
             if (!wlasciciel_) return;
             wlasciciel_->ostatnio_narysowane_ = 0;
-            int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+            SkalaUI s = skala_dpi_;
             int rh = wlasciciel_->wysokosc_wiersza_ * s;
             int ile = static_cast<int>(wlasciciel_->liczba_dopasowanych_);
             if (ile > wlasciciel_->maks_widocznych_) ile = wlasciciel_->maks_widocznych_;
@@ -45,7 +45,7 @@ private:
         }
         void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e) override {
             if (!wlasciciel_ || !e.czy_lewy_przycisk()) return;
-            int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+            SkalaUI s = skala_dpi_;
             int rh = wlasciciel_->wysokosc_wiersza_ * s;
             int lokalny_y = e.y - obszar_ekranu_.y - s;
             int wiersz = lokalny_y >= 0 ? lokalny_y / rh : -1;
@@ -58,7 +58,7 @@ private:
         }
         void obsluz_ruch_myszy(ZdarzenieMyszki& e) override {
             if (!wlasciciel_) return;
-            int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+            SkalaUI s = skala_dpi_;
             int rh = wlasciciel_->wysokosc_wiersza_ * s;
             int wiersz = (e.y - obszar_ekranu_.y - s) / rh;
             int wynik = wlasciciel_->pierwsza_widoczna_ + wiersz;
@@ -181,7 +181,7 @@ private:
     }
     void otworz_popup() {
         if (popup_.czy_otwarta() || !zarzadca_popupow_ || liczba_dopasowanych_ == 0) return;
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         int ile = static_cast<int>(liczba_dopasowanych_);
         if (ile > maks_widocznych_) ile = maks_widocznych_;
         Rozmiar rozmiar(obszar_.szerokosc, ile * wysokosc_wiersza_ * s + 2 * s);
@@ -240,7 +240,7 @@ private:
     void uniewaznij_wiersz_popupu(int wynik) {
         if (!popup_.czy_otwarta() || wynik < pierwsza_widoczna_ ||
             wynik >= pierwsza_widoczna_ + maks_widocznych_) return;
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         popup_.uniewaznij_obszar(Prostokat(s, s + (wynik - pierwsza_widoczna_) * wysokosc_wiersza_ * s,
                                            popup_.szerokosc() - 2 * s, wysokosc_wiersza_ * s));
     }

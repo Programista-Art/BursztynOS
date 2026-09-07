@@ -258,9 +258,9 @@ public:
         uniewaznij();
     }
 
-    int skala_dpi() const { return skala_dpi_; }
-    virtual void ustaw_skale_dpi(int s) {
-        skala_dpi_ = (s < 1) ? 1 : s;
+    SkalaUI skala_dpi() const { return skala_dpi_; }
+    virtual void ustaw_skale_dpi(SkalaUI s) {
+        skala_dpi_ = s;
         for (size_t i = 0; i < liczba_dzieci_; ++i) {
             if (dzieci_[i]) dzieci_[i]->ustaw_skale_dpi(skala_dpi_);
         }
@@ -928,7 +928,7 @@ protected:
     bool czy_ma_fokus_{false};
     bool czy_moze_miec_fokus_{false};
     int kolejnosc_tab_{0};
-    int skala_dpi_{1};
+    SkalaUI skala_dpi_{1};
 
     int blokada_aktualizacji_{0};
     bool czy_brudna_{true};

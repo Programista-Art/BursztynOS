@@ -547,7 +547,7 @@ public:
     void obsluz_rolke(ZdarzenieRolki& e) override {
         if (!czy_wlaczona_) return;
         if (pionowy_ && pionowy_->czy_widoczna() && e.delta_y != 0) {
-            const int krok = 3 * wysokosc_wiersza_ * (skala_dpi_ < 1 ? 1 : skala_dpi_);
+            const int krok = 3 * wysokosc_wiersza_ * (skala_dpi_);
             pionowy_->przewin_o(e.delta_y > 0 ? -krok : krok);
             e.obsluzone = true;
         } else if (poziomy_ && poziomy_->czy_widoczna() &&

@@ -1,3 +1,4 @@
+#include "ekran.h"
 /*
  * Addytywne fundamenty BWS 61+: geometria/monitory, natywne SHM, bounded
  * IPC, obserwatory plikow, schowek MIME, kursory i uchwyt TCP/IPv4.
@@ -413,6 +414,34 @@ uint64_t ipc_tapety(const proces_t& proces, uint64_t desc_user) {
     if (!odpowiedz) return 0;
     bool ok;
     { GuardEkranu guard; ok = tapety_obsluz(proces, req, odpowiedz); }
+    if (!ok) { kfree(odpowiedz); return 0; }
+    IpcWiadomosc msg{};
+    msg.rozmiar = sizeof(*odpowiedz);
+    msg.dane = reinterpret_cast<uint8_t*>(odpowiedz);
+    cel->kolejka[cel->head] = msg;
+    cel->head = (cel->head + 1U) % IPC_KOLEJKA_MAX;
+    ++cel->count;
+    bws_zdarzenie zd{};
+    zd.typ = BWS_ZDARZENIE_IPC_READY;
+    zd.x = static_cast<int32_t>(req.odpowiedz);
+    zd.y = static_cast<int32_t>(req.odpowiedz >> 32U);
+    zd.timestamp = timestamp();
+    (void)scheduler_dodaj_zdarzenie(aktualny_pid, &zd);
+    return 1;
+}
+
+uint64_t ipc_ekran(const proces_t& proces, uint64_t desc_user) {
+    BwsIpcWyslij desc{};
+    EkranZadanie req{};
+    if (!skopiuj_z_przestrzeni_uzytkownika(&desc, reinterpret_cast<const void*>(desc_user), sizeof(desc)) ||
+        desc.wersja != BWS_NOWOCZESNE_ABI_WERSJA || desc.zarezerwowane || desc.flagi || desc.shm_handle ||
+        desc.rozmiar != sizeof(req) || !desc.dane ||
+        !skopiuj_z_przestrzeni_uzytkownika(&req, reinterpret_cast<const void*>(desc.dane), sizeof(req))) return 0;
+    IpcEndpoint* cel = endpoint_z_handle(req.odpowiedz);
+    if (!cel || cel->owner_pid != aktualny_pid || !cel->kolejka || cel->count >= IPC_KOLEJKA_MAX) return 0;
+    auto* odpowiedz = static_cast<EkranOdpowiedz*>(kmalloc(sizeof(EkranOdpowiedz)));
+    if (!odpowiedz) return 0;
+    bool ok = ekran_obsluz(proces, req, odpowiedz);
     if (!ok) { kfree(odpowiedz); return 0; }
     IpcWiadomosc msg{};
     msg.rozmiar = sizeof(*odpowiedz);
@@ -940,7 +969,9 @@ extern "C" uint64_t bws_nowoczesne_obsluz(
             const int w = static_cast<int32_t>(a2 >> 32U);
             const int h = static_cast<int32_t>(a2);
             GuardEkranu guard;
-            return zmien_geometrie_warstwy(aktualny_pid, x, y, w, h) ? 1ULL : 0ULL;
+            bool ok=zmien_geometrie_warstwy(aktualny_pid,x,y,w,h);
+            if(ok&&(a3==1||a3==2))skladacz_stan_max(aktualny_pid,a3==2);
+            return ok?1:0;
         }
         case BWS_GUI_MONITOR_INFO:
             return monitor_info(*proces, a1, a2);
@@ -953,7 +984,7 @@ extern "C" uint64_t bws_nowoczesne_obsluz(
         case BWS_SHM_UNMAP: return shm_unmap(a1);
         case BWS_SHM_CLOSE: return shm_close(a1);
         case BWS_IPC_CREATE: return ipc_create();
-        case BWS_IPC_SEND: return a1 == TAPETY_IPC ? ipc_tapety(*proces, a2) : ipc_send(a1, a2);
+        case BWS_IPC_SEND: return a1 == EKRAN_IPC ? ipc_ekran(*proces,a2) : (a1 == TAPETY_IPC ? ipc_tapety(*proces, a2) : ipc_send(a1, a2));
         case BWS_IPC_RECEIVE: return ipc_receive(a1, a2);
         case BWS_IPC_CLOSE: return ipc_close(a1);
         case BWS_FILE_WATCH: return watch_dispatch(*proces, a1, a2, a3);
@@ -1003,4 +1034,10 @@ extern "C" uint64_t bws_nowoczesne_obsluz(
         case BWS_SOCKET_CLOSE: return socket_close(*proces, a1);
         default: return UINT64_MAX;
     }
+}
+
+void bws_aktualizuj_ekran(uint32_t skala){
+    work_x=work_y=0;work_w=grafika_pobierz_szerokosc();
+    work_h=grafika_pobierz_wysokosc()-ui_skaluj(40,skala);if(work_h<1)work_h=1;
+    monitor_scale=skala*10;
 }

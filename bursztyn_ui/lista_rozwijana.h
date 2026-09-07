@@ -38,7 +38,7 @@ private:
         const ListaWyboru& lista() const { return *lista_; }
         void rozmiesc(Prostokat r) override {
             PowierzchniaPopup::rozmiesc(r);
-            int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+            SkalaUI s = skala_dpi_;
             lista_->rozmiesc(Prostokat(s, s, r.szerokosc - 2 * s,
                                       r.wysokosc - 2 * s));
         }
@@ -129,7 +129,7 @@ public:
         if (!z || czy_rozwinieta()) return z != nullptr;
         int liczba = static_cast<int>(liczba_elementow());
         int wiersze = liczba < 1 ? 1 : (liczba < maks_widocznych_ ? liczba : maks_widocznych_);
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         int h = wiersze * (22 * s) + 2 * s;
         int w = obszar_.szerokosc < 120 * s ? 120 * s : obszar_.szerokosc;
         Prostokat gdzie = z->umiesc_pod_kotwica(obszar_ekranu_, Rozmiar(w, h), true);
@@ -155,12 +155,12 @@ public:
     }
 
     Rozmiar oblicz_naturalny_rozmiar() const override {
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         return Rozmiar(220 * s, 30 * s);
     }
     void rozmiesc(Prostokat r) override {
         Kontrolka::rozmiesc(r);
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         int przycisk = 28 * s;
         if (edytowalna_)
             edycja_->rozmiesc(Prostokat(1 * s, 1 * s,
@@ -169,7 +169,7 @@ public:
     void rysuj_siebie(KontekstRysowania& ctx) override {
         StylStanu st = wyznacz_biezacy_styl_stanu();
         rysuj_tlo_i_ramke(ctx, st);
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         int bw = 28 * s;
         Prostokat przycisk(obszar_.szerokosc - bw, s, bw - s, obszar_.wysokosc - 2 * s);
         ctx.rysuj_prostokat(przycisk, czy_rozwinieta() ? Kolory::AkcentWcisniety
@@ -193,7 +193,7 @@ public:
     void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e) override {
         if (!czy_wlaczona_ || !e.czy_lewy_przycisk()) return;
         int lokalny_x = e.x - obszar_ekranu_.x;
-        int bw = 28 * (skala_dpi_ < 1 ? 1 : skala_dpi_);
+        int bw = 28 * (skala_dpi_);
         if (!edytowalna_ || lokalny_x >= obszar_.szerokosc - bw) {
             czy_rozwinieta() ? zwin() : (void)rozwin();
             e.obsluzone = true;

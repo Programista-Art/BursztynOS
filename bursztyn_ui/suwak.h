@@ -129,7 +129,7 @@ public:
     }
 
     Rozmiar oblicz_naturalny_rozmiar() const override {
-        int skala = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         int uchwyt = rozmiar_uchwytu_ * skala;
         int tekst_h = czy_pokazuje_wartosc_ ? CzcionkaUI::pobierz_wysokosc(skala) : 0;
         int pad_h = wypelnienie_.poziomo() * skala;
@@ -157,7 +157,7 @@ public:
     Rozmiar zmierz(Rozmiar dostepny_rozmiar) override {
         (void)dostepny_rozmiar;
         Rozmiar zadany = oblicz_naturalny_rozmiar();
-        int skala = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         if (preferowany_rozmiar_.szerokosc >= 0) zadany.szerokosc = preferowany_rozmiar_.szerokosc * skala;
         if (preferowany_rozmiar_.wysokosc >= 0) zadany.wysokosc = preferowany_rozmiar_.wysokosc * skala;
         zadany.szerokosc = przytnij(zadany.szerokosc,
@@ -172,7 +172,7 @@ public:
     void rysuj_siebie(KontekstRysowania& ctx) override {
         StylStanu s = wyznacz_biezacy_styl_stanu();
         rysuj_tlo_i_ramke(ctx, s);
-        int gr = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        int gr = skala_dpi_;
         Prostokat zewnetrzny(0, 0, obszar_.szerokosc, obszar_.wysokosc);
         ctx.rysuj_ramke(zewnetrzny,
                         czy_wlaczona_ ? Kolory::RamkaDomyslna
@@ -200,7 +200,7 @@ public:
         }
         ctx.rysuj_zaokraglony_prostokat(g.uchwyt, uchwyt, 3 * skala_dpi_);
         ctx.rysuj_zaokraglona_ramke(g.uchwyt, s.ramka, 3 * skala_dpi_,
-                                   skala_dpi_ < 1 ? 1 : skala_dpi_);
+                                   skala_dpi_);
 
         if (czy_ma_fokus_ && czy_wlaczona_) {
             ctx.rysuj_ramke(zewnetrzny.zmniejszony(Marginesy(gr)),
@@ -420,7 +420,7 @@ private:
         bufor[pos] = '\0';
     }
 
-    int szerokosc_pola_wartosci(int skala) const {
+    int szerokosc_pola_wartosci(SkalaUI skala) const {
         if (!czy_pokazuje_wartosc_) return 0;
         char min_buf[16];
         char max_buf[16];
@@ -440,7 +440,7 @@ private:
 
     Geometria oblicz_geometrie(int wartosc) const {
         Geometria g;
-        int skala = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         int pad_l = wypelnienie_.lewy * skala;
         int pad_t = wypelnienie_.gorny * skala;
         int pad_r = wypelnienie_.prawy * skala;
@@ -521,7 +521,7 @@ private:
         Geometria b = oblicz_geometrie(nowa);
         Prostokat brudny = a.uchwyt.suma(b.uchwyt).suma(a.wypelnienie).suma(b.wypelnienie);
         if (czy_pokazuje_wartosc_) brudny = brudny.suma(a.wartosc).suma(b.wartosc);
-        int obwodka = (skala_dpi_ < 1 ? 1 : skala_dpi_) * 2;
+        int obwodka = (skala_dpi_) * 2;
         uniewaznij_obszar(brudny.powiekszony(Marginesy(obwodka)));
     }
 

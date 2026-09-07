@@ -37,7 +37,7 @@ public:
     }
 
     void rysuj_siebie(KontekstRysowania& ctx) override {
-        const int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        const SkalaUI s = skala_dpi_;
         Prostokat tor(1 * s, 4 * s, obszar_.szerokosc - 2 * s,
                       obszar_.wysokosc - 8 * s);
         if (tor.szerokosc < 8 * s || tor.wysokosc < 8 * s) return;
@@ -50,7 +50,7 @@ public:
         ctx.rysuj_zaokraglony_prostokat(tor, tlo, promien);
         ctx.rysuj_zaokraglona_ramke(tor,
             czy_ma_fokus_ ? Kolory::AkcentFokus : Kolory::RamkaDomyslna,
-            promien, czy_ma_fokus_ ? 2 * s : s);
+            promien, czy_ma_fokus_ ? 2 * s : 1 * s);
 
         const int margines = 3 * s;
         int d = tor.wysokosc - 2 * margines;

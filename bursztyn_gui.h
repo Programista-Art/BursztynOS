@@ -120,7 +120,7 @@ bool gui_ustaw_popup_aplikacji(bool otwarty,
                                int x, int y, int szer, int wys);
 
 /* BWS 61..83: addytywne fundamenty nowoczesnych aplikacji. */
-bool gui_ustaw_geometrie_okna(int x, int y, int szer, int wys);
+bool gui_ustaw_geometrie_okna(int x, int y, int szer, int wys, int stan = 0);
 void gui_ustaw_izolacje_geometrii(bool wlaczona);
 bool gui_czy_izolacja_geometrii_wlaczona();
 void gui_pobierz_widoczna_geometrie(int* x, int* y, int* w, int* h);

@@ -47,7 +47,7 @@ public:
         ctx.rysuj_prostokat(b, styl_.normalny.tlo);
         ctx.rysuj_ramke(b, styl_.normalny.ramka, 1);
 
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         int y = 4 * s;
 
         // Tytuł jeśli obecny
@@ -79,7 +79,7 @@ private:
     };
 
     void przelicz_rozmiar() {
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         liczba_linii_ = 0;
         int max_w = 0;
 

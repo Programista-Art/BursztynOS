@@ -74,7 +74,7 @@ public:
     }
 
     Rozmiar oblicz_naturalny_rozmiar() const override {
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         int znak = 18 * s;
         return Rozmiar(znak + 7 * s + CzcionkaUI::zmierz_tekst(tekst_, s) +
                        wypelnienie_.poziomo() * s,
@@ -161,7 +161,7 @@ protected:
     }
 
     Prostokat prostokat_znacznika() const {
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         int roz = 18 * s;
         int x = wypelnienie_.lewy * s;
         int y = (obszar_.wysokosc - roz) / 2;
@@ -172,7 +172,7 @@ protected:
 public:
     // Rysowanie zdefiniowane osobno, aby cala etykieta pozostala neutralna na hover.
     void rysuj_opcje(KontekstRysowania& ctx) {
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         Prostokat z = prostokat_znacznika();
         uint32_t ramka = !czy_wlaczona_ ? Kolory::WylaczonyRamka
                          : hover_znacznika_ ? Kolory::RamkaNajechana

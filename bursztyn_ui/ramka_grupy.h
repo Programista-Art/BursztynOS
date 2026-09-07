@@ -46,7 +46,7 @@ public:
     }
 
     void rysuj_siebie(KontekstRysowania& ctx) override {
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         Prostokat caly(0, 0, obszar_.szerokosc, obszar_.wysokosc);
         if (caly.czy_pusty()) return;
         StylStanu st = wyznacz_biezacy_styl_stanu();

@@ -234,7 +234,7 @@ MBEDTLS_OBJS := $(MBEDTLS_SRCS:.c=.o)
 # 7. OBIEKTY JADRA
 # ============================================================================
 
-OBJS := tapety_blob.o tapety.o btp.o \
+OBJS := ekran_blob.o ekran.o ekran_format.o bufory_grafiki.o bochs_vbe.o tapety_blob.o tapety.o btp.o \
 	boot.o \
 	gdt.o \
 	tss.o \
@@ -435,9 +435,9 @@ kalkulator_blob.o: kalkulator_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
 test_tmp.o: programy/test/test.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
-test_blob.o: test_tmp.o btp_ring3.o bursztyn_gui.o programy/test/test_linker.ld
+test_blob.o: test_tmp.o ekran_format_ring3.o btp_ring3.o bursztyn_gui.o programy/test/test_linker.ld
 	$(LD) --gc-sections -T programy/test/test_linker.ld $(RING3_LDFLAGS) \
-		test_tmp.o btp_ring3.o bursztyn_gui.o -o test.elf
+		test_tmp.o ekran_format_ring3.o btp_ring3.o bursztyn_gui.o -o test.elf
 	$(OBJCOPY) -O binary test.elf test.bin
 	$(LD) -r -b binary test.bin -o test_blob.o
 
@@ -698,6 +698,7 @@ QEMU_COMMON_ARGS := \
 	-device hda-output,audiodev=snd \
 	-m 2G \
 	-vga std \
+	-global VGA.vgamem_mb=64 \
 	-serial stdio
 
 # ============================================================================
@@ -873,3 +874,19 @@ $(filter %tmp.o %_tmp.o,$(wildcard *.o)): obrazy/skalowanie.h
 test_tmp.o: programy/test/tapety_testy.h programy/tapety/klient.h programy/tapety/miniatury.h tapety_format.h narzedzia/tapety-btp/tapetybtp.h
 
 test_tmp.o: programy/test/kontrolki3_stabilizacja.h
+
+bochs_vbe.o: sterowniki/grafika/bochs_vbe.cpp sterowniki/grafika/bochs_vbe.h ekran_format.h
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+
+ekran_tmp.o: programy/ekran/ekran.cpp programy/ekran/klient.h ekran_format.h ui_skala.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -c $< -o $@
+ekran_blob.o: ekran_tmp.o bursztyn_gui.o programy/kontrolki3/kontrolki3_linker.ld
+	$(LD) --gc-sections -T programy/kontrolki3/kontrolki3_linker.ld $(RING3_LDFLAGS) ekran_tmp.o bursztyn_gui.o -o ekran.elf
+	$(OBJCOPY) -O binary ekran.elf ekran.bin
+	$(LD) -r -b binary ekran.bin -o $@
+$(filter %_tmp.o,$(OBJS)) bursztyn_gui.o: ui_skala.h
+
+ekran_format_ring3.o: ekran_format.cpp ekran_format.h
+	$(CXX) $(RING3_FLAGS) -c $< -o $@
+bws_nowoczesne.o ekran.o grafika.o kernel.o: ekran.h ekran_format.h bufory_grafiki.h
+test_tmp.o: programy/test/ekran_testy.h programy/ekran/klient.h ekran_format.h

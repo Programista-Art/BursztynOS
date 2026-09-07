@@ -229,7 +229,7 @@ public:
     }
 
     Rozmiar oblicz_naturalny_rozmiar() const override {
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         return Rozmiar(320 * s, 200 * s);
     }
 

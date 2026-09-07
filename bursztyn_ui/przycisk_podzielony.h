@@ -37,7 +37,7 @@ public:
     }
 
     Rozmiar zmierz(Rozmiar) override {
-        const int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        const SkalaUI s = skala_dpi_;
         int w = CzcionkaUI::zmierz_tekst(tekst_, s) + 48 * s;
         if (w < 100 * s) w = 100 * s;
         int h = 32 * s;
@@ -49,7 +49,7 @@ public:
     void rysuj_siebie(KontekstRysowania& ctx) override {
         StylStanu baza = wyznacz_biezacy_styl_stanu();
         rysuj_tlo_i_ramke(ctx, baza);
-        const int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        const SkalaUI s = skala_dpi_;
         const int aw = szerokosc_czesci_strzalki();
         const int podzial = obszar_.szerokosc - aw;
         Prostokat glowna(1, 1, podzial - 1, obszar_.wysokosc - 2);

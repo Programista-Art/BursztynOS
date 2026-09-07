@@ -1,4 +1,6 @@
 #include "grafika.h"
+#include "bufory_grafiki.h"
+#include "sterowniki/grafika/bochs_vbe.h"
 #include "mysz_input.h"
 #include "pamiec.h"
 #include "zegar-rtc.h"
@@ -58,8 +60,6 @@ namespace {
 
 constexpr uint64_t ROZMIAR_STRONY = 4096ULL;
 
-constexpr uint64_t VADDR_BACKBUFFER   = 0x100000000ULL;
-constexpr uint64_t VADDR_TAPETA       = 0x110000000ULL;
 constexpr uint64_t VADDR_RAW_BMP      = 0x120000000ULL;
 constexpr uint64_t VADDR_FRAMEBUFFER  = 0x130000000ULL;
 
@@ -137,29 +137,6 @@ void przeladuj_cr3() {
         : "memory");
 }
 
-bool zmapuj_nowe_strony(uint64_t adres_wirtualny,
-                        uint64_t rozmiar,
-                        uint64_t flagi) {
-    if (rozmiar == 0) return true;
-
-    uint64_t rozmiar_mapowania = 0;
-    if (!wyrownaj_do_strony(rozmiar, &rozmiar_mapowania))
-        return false;
-
-    for (uint64_t i = 0; i < rozmiar_mapowania; i += ROZMIAR_STRONY) {
-        auto ramka = ZaalokujRamke();
-        if (!ramka) return false;
-
-        ZmapujStrone(
-            reinterpret_cast<void*>(adres_wirtualny + i),
-            ramka,
-            flagi);
-    }
-
-    przeladuj_cr3();
-    return true;
-}
-
 bool zmapuj_framebuffer(uint64_t adres_fizyczny,
                         uint64_t rozmiar,
                         uint64_t* adres_wirtualny_wynik) {
@@ -231,6 +208,7 @@ int32_t odczytaj_le_i32(const uint8_t* p) {
 }
 
 int ogranicz_skale(int skala) {
+    if(skala>=100&&skala<=400)return skala;
     if (skala < 1) return 1;
     if (skala > MAX_SKALA_TEKSTU) return MAX_SKALA_TEKSTU;
     return skala;
@@ -433,6 +411,11 @@ public:
 
 static SterownikEkranu* aktywny_ekran = nullptr;
 static uint8_t* backbuffer = nullptr;
+static size_t backbuffer_bajty=0;
+static uint64_t ekran_lfb_va=0, ekran_vram=0;
+static MozliwosciEkranu ekran_caps{};
+static TrybEkranu ekran_tryby[EKRAN_MAX_TRYBOW]{};
+static uint32_t ekran_liczba_trybow=0;
 static uint32_t* bufor_tapety = nullptr;
 static bool tapeta_zaladowana = false;
 
@@ -1294,7 +1277,7 @@ void RysujZnak(uint32_t unicode,
                uint32_t kolor_tla,
                bool przezroczyste_tlo,
                int skala) {
-    skala = ogranicz_skale(skala);
+    const uint32_t procent=ui_procent_legacy(skala);
 
     const uint16_t* glyph = nullptr;
 
@@ -1328,15 +1311,15 @@ void RysujZnak(uint32_t unicode,
             const uint32_t kolor =
                 zmaluj ? kolor_tekstu : kolor_tla;
 
-            for (int sy = 0; sy < skala; ++sy) {
-                for (int sx = 0; sx < skala; ++sx) {
+            for (int sy = ui_skaluj(y,procent); sy < ui_skaluj(y+1,procent); ++sy) {
+                for (int sx = ui_skaluj(x,procent); sx < ui_skaluj(x+1,procent); ++sx) {
                     const int64_t dx =
                         static_cast<int64_t>(px) +
-                        static_cast<int64_t>(x * skala + sx);
+                        static_cast<int64_t>(sx);
 
                     const int64_t dy =
                         static_cast<int64_t>(py) +
-                        static_cast<int64_t>(y * skala + sy);
+                        static_cast<int64_t>(sy);
 
                     if (dx < INT32_MIN || dx > INT32_MAX ||
                         dy < INT32_MIN || dy > INT32_MAX) {
@@ -1435,7 +1418,7 @@ int WypiszTekst(const char* tekst,
 
         pozycja_x +=
             static_cast<int64_t>(
-                (szerokosc_znaku + 1) * skala);
+                ui_skaluj(szerokosc_znaku+1,ui_procent_legacy(skala)));
 
         i += zuzyte;
     }
@@ -2389,8 +2372,11 @@ bool grafika_przygotuj_bufory_tapety() {
     const uint64_t w = aktywny_ekran->PobierzSzerokosc();
     const uint64_t h = aktywny_ekran->PobierzWysokosc();
     if (!w || !h || w > 8192 || h > 8192 || w * h > MAX_RAW_BMP / 4) return false;
-    if (!mapuj_bufor_tapety(VADDR_TAPETA, static_cast<size_t>(w * h * 4), &tapeta_zmapowane_bajty)) return false;
-    bufor_tapety = reinterpret_cast<uint32_t*>(VADDR_TAPETA);
+    if(!bufor_tapety) {
+        bufor_tapety=static_cast<uint32_t*>(bufor_grafiki_alokuj(size_t(w*h*4)));
+        if(!bufor_tapety)return false;
+        tapeta_zmapowane_bajty=size_t(w*h*4);
+    }
     bufor_tapety_zmapowany = true;
     if (!mapuj_bufor_tapety(VADDR_RAW_BMP, MAX_RAW_BMP, &scratch_zmapowane_bajty)) return false;
     surowy_bufor_bmp_zmapowany = true;
@@ -2582,21 +2568,8 @@ extern "C" void wczytaj_tapete_z_dysku() {
         ilosc_pikseli_ekranu *
         sizeof(uint32_t);
 
-    if (!bufor_tapety_zmapowany) {
-        if (!mapuj_bufor_tapety(
-                VADDR_TAPETA,
-                waga_tapety_bajty,
-                &tapeta_zmapowane_bajty)) {
-            wypisz_log(
-                "[GRAFIKA] BLAD: Nie mozna przydzielic bufora tapety.");
-            return;
-        }
-
-        bufor_tapety_zmapowany = true;
-    }
-
-    bufor_tapety =
-        reinterpret_cast<uint32_t*>(VADDR_TAPETA);
+    if(!bufor_tapety_zmapowany && !grafika_przygotuj_bufory_tapety())return;
+    if(waga_tapety_bajty>tapeta_zmapowane_bajty)return;
 
     for (uint64_t i = 0;
          i < ilosc_pikseli_ekranu;
@@ -2768,7 +2741,7 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
         if (tag->typ == 0)
             break;
 
-        if (tag->rozmiar < 8)
+        if (tag->rozmiar < 8 || tag->rozmiar > koniec-aktualny)
             break;
 
         if (tag->typ == 11 ||
@@ -2776,7 +2749,10 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
             mamy_efi = true;
         }
 
-        if (tag->typ == 8) {
+        if (tag->typ == 8 && tag->rozmiar >= sizeof(TagFramebufferMB2)+6 &&
+            tag->typ_bufora == MULTIBOOT_FRAMEBUFFER_TYPE_RGB) {
+            const uint8_t* kanaly=reinterpret_cast<const uint8_t*>(tag)+sizeof(TagFramebufferMB2);
+            if(kanaly[0]!=16||kanaly[1]!=8||kanaly[2]!=8||kanaly[3]!=8||kanaly[4]!=0||kanaly[5]!=8) { aktualny += (uint64_t(tag->rozmiar)+7)&~7ULL; continue; }
             LFB = tag->adres_fizyczny;
             PITCH = tag->pitch;
             SZER = tag->szerokosc;
@@ -2852,11 +2828,16 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
         static_cast<uint64_t>(PITCH) *
         static_cast<uint64_t>(WYS);
 
+    if(!bufory_grafiki_inicjalizuj()) { SerialLog("[EKRAN] BLAD puli PMM/VMM.\n"); while(true) asm volatile("cli; hlt"); }
+    TrybEkranu boot_tryb{SZER,WYS,BPP,PITCH,0,0};
+    ekran_vram=lfb_waga;
+    const bool bochs=bochs_wykryj(LFB,boot_tryb,&ekran_vram);
+    ekran_caps={bochs?1U:0U,bochs?1U:0U,0U,bochs?EKRAN_BOCHS:(mamy_efi?EKRAN_GOP:EKRAN_VESA)};
     uint64_t framebuffer_wirtualny = 0;
 
     if (!zmapuj_framebuffer(
             LFB,
-            lfb_waga,
+            ekran_vram,
             &framebuffer_wirtualny)) {
 
         SerialLog(
@@ -2866,21 +2847,10 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
             asm volatile("cli; hlt");
     }
 
-    if (!zmapuj_nowe_strony(
-            VADDR_BACKBUFFER,
-            lfb_waga,
-            0b11)) {
-
-        SerialLog(
-            "[GRAFIKA] BLAD KRYTYCZNY: Brak pamieci na backbuffer.\n");
-
-        while (true)
-            asm volatile("cli; hlt");
-    }
-
-    backbuffer =
-        reinterpret_cast<uint8_t*>(
-            VADDR_BACKBUFFER);
+    backbuffer=static_cast<uint8_t*>(bufor_grafiki_alokuj(lfb_waga));
+    if(!backbuffer) { SerialLog("[EKRAN] BLAD backbuffer PMM/VMM.\n"); while(true) asm volatile("cli; hlt"); }
+    backbuffer_bajty=lfb_waga;
+    ekran_lfb_va=framebuffer_wirtualny;
 
     if (mamy_efi) {
         aktywny_ekran =
@@ -2983,8 +2953,22 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
     if (mysz_y >= static_cast<int>(WYS))
         mysz_y = static_cast<int>(WYS) / 2;
 
-    wypisz_log(
-        "[SYSTEM] Bursztyn OS HAL gotowy!");
+    ekran_tryby[ekran_liczba_trybow++]=boot_tryb;
+    if(bochs) {
+        static constexpr uint32_t wymiary[][2]={{800,600},{1024,768},{1280,720},{1280,800},{1366,768},{1360,768},{1600,900},{1920,1080},{2560,1440},{3840,2160}};
+        for(const auto& wh:wymiary) {
+            TrybEkranu t{wh[0],wh[1],32,wh[0]*4,0,0};
+            if(ekran_ten_sam(t,boot_tryb)||!bochs_sprawdz_tryb(t))continue;
+            size_t n=0; if(!ekran_rozmiar(t,&n))continue;
+            void* probe[3]={}; bool ok=true;
+            for(auto& p:probe) { p=bufor_grafiki_alokuj(n); if(!p)ok=false; }
+            for(auto p:probe)bufor_grafiki_zwolnij(p);
+            if(ok&&ekran_liczba_trybow<EKRAN_MAX_TRYBOW)ekran_tryby[ekran_liczba_trybow++]=t;
+        }
+    }
+    klog_serial(bochs?"[EKRAN] Backend Bochs VBE (PCI/BAR/DISPI potwierdzone).":
+        (mamy_efi?"[EKRAN] Backend UEFI GOP (framebuffer).":"[EKRAN] Backend VESA (framebuffer)."));
+    wypisz_log("[SYSTEM] Bursztyn OS HAL gotowy!");
 }
 
 // =========================================================================
@@ -3214,8 +3198,7 @@ extern "C" void bws_gui_wypisz_tekst_kolor(
     if (skala == 0)
         skala = 1;
 
-    if (skala < 1 ||
-        skala > MAX_SKALA_TEKSTU) {
+    if ((skala < 1 || skala > MAX_SKALA_TEKSTU) && !(skala>=100&&skala<=400)) {
         return;
     }
 
@@ -3234,7 +3217,7 @@ extern "C" void bws_gui_wypisz_tekst_kolor(
         y,
         kolor,
         skala);
-    zapamietaj_dirty_rysowania(x, y, szer_px, 16 * skala);
+    zapamietaj_dirty_rysowania(x, y, szer_px, ui_skaluj(16,ui_procent_legacy(skala)));
 }
 
 extern "C" void bws_gui_rysuj_prostokat(
@@ -3557,4 +3540,49 @@ extern "C" int bws_gui_pobierz_szerokosc_znaku(
     }
 
     return 8;
+}
+
+const MozliwosciEkranu& grafika_mozliwosci_ekranu(){return ekran_caps;}
+TrybEkranu grafika_tryb_ekranu(){return {uint32_t(grafika_pobierz_szerokosc()),uint32_t(grafika_pobierz_wysokosc()),32,aktywny_ekran?aktywny_ekran->PobierzPitch():0,0,0};}
+uint32_t grafika_tryby_ekranu(TrybEkranu* out,uint32_t cap){
+    uint32_t n=ekran_liczba_trybow<cap?ekran_liczba_trybow:cap;
+    if(out)for(uint32_t i=0;i<n;++i)out[i]=ekran_tryby[i];
+    return n;
+}
+bool grafika_tryb_obslugiwany(const TrybEkranu&t){
+    size_t n=0;if(!ekran_rozmiar(t,&n)||n>ekran_vram||t.flagi||t.odswiezanie)return false;
+    if(ekran_ten_sam(t,grafika_tryb_ekranu()))return true;
+    return ekran_caps.mozna_zmienic_runtime&&bochs_sprawdz_tryb(t);
+}
+void grafika_pobierz_stan(StanBuforowEkranu* s){
+    if(s)*s={grafika_tryb_ekranu(),backbuffer,bufor_tapety,backbuffer_bajty,tapeta_zmapowane_bajty,tapeta_zaladowana};
+}
+bool grafika_przygotuj_ekran(const TrybEkranu&t,StanBuforowEkranu* s){
+    if(!s||!grafika_tryb_obslugiwany(t))return false;
+    *s={};s->tryb=t;
+    if(!ekran_rozmiar(t,&s->bajty))return false;
+    s->tapeta_bajty=size_t(t.szerokosc)*t.wysokosc*4;
+    s->backbuffer=static_cast<uint8_t*>(bufor_grafiki_alokuj(s->bajty));
+    s->tapeta=static_cast<uint32_t*>(bufor_grafiki_alokuj(s->tapeta_bajty));
+    if(!s->backbuffer||!s->tapeta){grafika_zwolnij_stan(s);return false;}
+    for(size_t i=0;i<s->bajty;++i)s->backbuffer[i]=0;
+    s->ma_tapete=tapeta_zaladowana;
+    return true;
+}
+bool grafika_zmien_sprzet(const TrybEkranu&t){
+    if(ekran_caps.mozna_zmienic_runtime)return bochs_ustaw_tryb(t);
+    return ekran_ten_sam(t,grafika_tryb_ekranu());
+}
+void grafika_wymien_stan(const StanBuforowEkranu&s){
+    aktywny_ekran->Inicjalizuj(ekran_lfb_va,s.tryb.szerokosc,s.tryb.wysokosc,s.tryb.pitch,s.tryb.bpp);
+    backbuffer=s.backbuffer;bufor_tapety=s.tapeta;backbuffer_bajty=s.bajty;
+    tapeta_zmapowane_bajty=s.tapeta_bajty;bufor_tapety_zmapowany=bufor_tapety!=nullptr;tapeta_zaladowana=s.ma_tapete;
+    kursor_overlay_widoczny=false;
+    if(mysz_x>=int(s.tryb.szerokosc))mysz_x=s.tryb.szerokosc-1;
+    if(mysz_y>=int(s.tryb.wysokosc))mysz_y=s.tryb.wysokosc-1;
+    for(unsigned i=0;i<SKLADACZ_MAKS_WARSTW;++i)ma_oczekujacy_dirty[i]=false;
+}
+void grafika_zwolnij_stan(StanBuforowEkranu*s){
+    if(!s)return;
+    bufor_grafiki_zwolnij(s->backbuffer);bufor_grafiki_zwolnij(s->tapeta);*s={};
 }

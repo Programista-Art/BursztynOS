@@ -67,8 +67,8 @@ public:
         obszar_roboczy_ = praca;
     }
 
-    void ustaw_skale_dpi(int skala) {
-        skala_dpi_ = (skala < 1) ? 1 : skala;
+    void ustaw_skale_dpi(SkalaUI skala) {
+        skala_dpi_ = skala;
     }
 
     bool czy_otwarty() const { return liczba_ > 0; }
@@ -358,7 +358,7 @@ private:
 
     PowierzchniaPopup* powierzchnie_[MAKS_GLEBOKOSC]{};
     int liczba_{0};
-    int skala_dpi_{1};
+    SkalaUI skala_dpi_{1};
     Prostokat wlasciciel_{};
     Prostokat obszar_roboczy_{};
     Prostokat zarejestrowany_ekran_{};

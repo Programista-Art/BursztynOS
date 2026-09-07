@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "../ui_skala.h"
 
 namespace BursztynUI {
 

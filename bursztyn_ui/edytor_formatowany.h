@@ -149,7 +149,7 @@ public:
     }
 
     Rozmiar oblicz_naturalny_rozmiar() const override {
-        int skala = skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         int h = static_cast<int>(liczba_akapitow_) * wysokosc_linii_ * skala + wypelnienie_.pionowo() * skala;
         return Rozmiar(280 * skala, h > 100 * skala ? h : 100 * skala);
     }
@@ -162,7 +162,7 @@ public:
         int vp_h = viewport_h();
         if (vp_w <= 0 || vp_h <= 0) return;
 
-        int skala = skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         int h_linii = wysokosc_linii_ * skala;
         int scroll_y = pionowy_ && pionowy_->czy_widoczna() ? static_cast<int>(pionowy_->wartosc()) : 0;
         int pad_l = wypelnienie_.lewy * skala;

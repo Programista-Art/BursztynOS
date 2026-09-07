@@ -1,0 +1,23 @@
+
+# Bursztyn OS - artefakty QEMU/testow
+.test_run/
+.testrun/
+wirtualny_dysk.img
+
+# Bursztyn OS - QEMU / testy / artefakty tymczasowe
+.qt/
+.test_run/
+.testrun/
+logi_qemu/
+
+# Dyski QEMU
+wirtualny_dysk.img
+*.img
+
+# Tymczasowe ISO testowe
+.bursztyn_ci_test.iso
+.isodir_ci_test/
+
+# Tymczasowe pliki QEMU
+*.pid
+*.log

@@ -182,7 +182,7 @@ public:
         }
     }
 
-    void rysuj_tekst(Punkt pt, const char* tekst, uint32_t kolor, int skala = 1) {
+    void rysuj_tekst(Punkt pt, const char* tekst, uint32_t kolor, SkalaUI skala = 1) {
         if (!tekst || tekst[0] == '\0') return;
         if (skala < 1) skala = 1;
         Punkt off = pobierz_przesuniecie();
@@ -197,7 +197,7 @@ public:
         // Zwykly tekst, ktory w calosci miesci sie w klipie, zachowuje szybki
         // syscall renderera. Tylko tekst przecinajacy krawedz wymaga lokalnego
         // renderowania bitmapy; syscall 20 nie ma parametru przyciecia.
-        if (widoczny == granice && !cel_) {
+        if (widoczny == granice && !cel_ && skala.procent()%100==0) {
             if (!g_tlum_rysowanie_globalne) {
                 gui_wypisz_tekst_kolor_skala(tx, ty, kolor, skala, tekst);
             }
@@ -225,7 +225,7 @@ public:
                         if (!piksel && poczatek >= 0) {
                             Prostokat seria(x_znaku + poczatek * skala,
                                              pt.y + y * skala,
-                                             (x - poczatek) * skala, skala);
+                                             x * skala - poczatek * skala, (y+1)*skala-y*skala);
                             Prostokat seria_swiat(seria.x + off.x,
                                                   seria.y + off.y,
                                                   seria.szerokosc,
@@ -251,7 +251,7 @@ public:
         return obszar_narysowanego_tekstu_;
     }
 
-    void rysuj_tekst_wysrodkowany(Prostokat r, const char* tekst, uint32_t kolor, int skala = 1) {
+    void rysuj_tekst_wysrodkowany(Prostokat r, const char* tekst, uint32_t kolor, SkalaUI skala = 1) {
         if (!tekst || tekst[0] == '\0' || r.czy_pusty()) return;
         Rozmiar rz = zmierz_tekst(tekst, skala);
         int tx = r.x + (r.szerokosc - rz.szerokosc) / 2;
@@ -275,18 +275,18 @@ public:
         rysuj_prostokat(r, kolor);
     }
 
-    void rysuj_tekst_obciety(Punkt pt, const char* tekst, uint32_t kolor, int max_szerokosc, int skala = 1) {
+    void rysuj_tekst_obciety(Punkt pt, const char* tekst, uint32_t kolor, int max_szerokosc, SkalaUI skala = 1) {
         if (!tekst || tekst[0] == '\0' || max_szerokosc <= 0) return;
         dodaj_przyciecie(Prostokat(pt.x, pt.y, max_szerokosc, pobierz_wysokosc_czcionki(skala) + 4));
         rysuj_tekst(pt, tekst, kolor, skala);
         zdejmij_przyciecie();
     }
 
-    Rozmiar zmierz_tekst(const char* tekst, int skala = 1) const {
+    Rozmiar zmierz_tekst(const char* tekst, SkalaUI skala = 1) const {
         return CzcionkaUI::zmierz_rozmiar(tekst, skala);
     }
 
-    int pobierz_wysokosc_czcionki(int skala = 1) const {
+    int pobierz_wysokosc_czcionki(SkalaUI skala = 1) const {
         return CzcionkaUI::pobierz_wysokosc(skala);
     }
 

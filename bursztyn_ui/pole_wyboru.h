@@ -69,7 +69,7 @@ public:
 
     Rozmiar zmierz(Rozmiar dostepny_rozmiar) override {
         (void)dostepny_rozmiar;
-        int skala = skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         int wymiar_kratki = 16 * skala;
         int txt_w = (tekst_[0] != '\0') ? (CzcionkaUI::zmierz_tekst(tekst_, skala) + 8 * skala) : 0;
         int txt_h = CzcionkaUI::pobierz_wysokosc(skala);
@@ -89,7 +89,7 @@ public:
     }
 
     void rysuj_siebie(KontekstRysowania& ctx) override {
-        int skala = skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         int wymiar_kratki = 16 * skala;
 
         int pad_l = wypelnienie_.lewy * skala;

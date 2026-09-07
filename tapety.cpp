@@ -686,3 +686,17 @@ bool tapety_obsluz(const proces_t& proces, const TapetyZadanie& req, TapetyOdpow
     klog_serial(zapis ? "[TAPETA] Wybor zapisany w BSP2." : "[TAPETA] BLAD zapisu wyboru; tapeta aktywna tylko w tej sesji.");
     return true;
 }
+
+bool tapety_przygotuj_ekran(uint32_t* dst,uint32_t w,uint32_t h,size_t cap) {
+    if(!dst||!w||!h||uint64_t(w)*h*4>cap)return false;
+    if(!grafika_czy_tapeta()) {
+        for(size_t i=0;i<size_t(w)*h;++i)dst[i]=TAPETY_TLO;
+        return true;
+    }
+    BtpInfo info{};uint32_t* src=nullptr;
+    if(!wczytaj(aktualna.sciezka,&info,&src,true))return false;
+    if(!skaluj_obraz(src,info.szerokosc,info.wysokosc,size_t(info.szerokosc)*info.wysokosc*4,
+        dst,w,h,w,cap,aktualna.tryb,TAPETY_TLO))return false;
+    ++statystyki.przygotowania;
+    return true;
+}

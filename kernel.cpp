@@ -1,5 +1,9 @@
 #include "tapety.h"
+#include "ekran.h"
+extern "C" uint8_t _binary_ekran_bin_start[], _binary_ekran_bin_end[];
 extern "C" uint8_t _binary_tapety_bin_start[], _binary_tapety_bin_end[];
+extern "C" void zablokuj_ekran();
+extern "C" void odblokuj_ekran();
 /*
  * Bursztyn OS - glowny punkt wejscia jadra x86_64.
  *
@@ -993,6 +997,14 @@ void instaluj_wbudowane_programy() {
         "    \"okna\"\n"
         "]\n";
 
+    static const char MANIFEST_EKRAN[] =
+        "nazwa = \"Ustawienia ekranu\"\n"
+        "autor = \"Bursztyn OS\"\n"
+        "wersja = \"1.0\"\n"
+        "poziom_zaufania = 3\n"
+        "plik_startowy = \"ekran.bur\"\n"
+        "uprawnienia = [\"okna\", \"system_config\"]\n";
+
     static const char MANIFEST_TAPETY[] =
         "nazwa = \"Tapety\"\n"
         "autor = \"Bursztyn OS\"\n"
@@ -1406,6 +1418,11 @@ void instaluj_wbudowane_programy() {
         wypisz_log(
             "[BSP] Kontrolki 2 zainstalowane jako .cebula.");
     }
+
+    if(!zapewnij_katalog("/programy/ekran.cebula")||!instaluj_paczke(
+        "/programy/ekran.cebula/opis.aplikacji",MANIFEST_EKRAN,
+        EKRAN_PROGRAM,_binary_ekran_bin_start,_binary_ekran_bin_end))
+        wypisz_log("[EKRAN] BLAD instalacji aplikacji.");
 
     if (!zapewnij_katalog("/programy/tapety.cebula") || !instaluj_paczke(
             "/programy/tapety.cebula/opis.aplikacji", MANIFEST_TAPETY,
@@ -1890,6 +1907,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
 
     instaluj_wbudowane_programy();
     tapety_inicjalizuj(g_multiboot_info_ptr);
+    ekran_inicjalizuj();
 
     /* ---------------------------------------------------------------------
      * Pierwszy proces Ring 3
@@ -1942,7 +1960,10 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
 
     while (true) {
         usb_obsluz();
+        ekran_obsluz_timeout();
+        zablokuj_ekran();
         skladacz_obrazu_obsluz_dirty();
+        odblokuj_ekran();
         /*
          * STI przed HLT chroni idle przed przypadkowym pozostawieniem IF=0
          * przez kod, ktory w przyszlosci moze wejsc do tej petli.

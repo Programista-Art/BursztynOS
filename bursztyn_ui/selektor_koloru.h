@@ -39,7 +39,7 @@ private:
         }
         void rozmiesc(Prostokat r) override {
             PowierzchniaPopup::rozmiesc(r);
-            int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+            SkalaUI s = skala_dpi_;
             int fieldw = (r.szerokosc - 32*s) / 3;
             int fieldh = r.wysokosc - 150*s; if (fieldh < 32) fieldh = 32;
             sv_ = Prostokat(12*s, 30*s, r.szerokosc - 112*s, fieldh);
@@ -53,7 +53,7 @@ private:
         }
         void rysuj_siebie(KontekstRysowania& ctx) override {
             rysuj_tlo_i_ramke(ctx, styl_.normalny);
-            int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+            SkalaUI s = skala_dpi_;
             ctx.rysuj_tekst(Punkt(12*s, 8*s), "Wybierz kolor", Kolory::TekstBialy, s);
             Prostokat clip = sv_.przeciecie(ctx.lokalny_klip());
             for (int y = clip.y; !clip.czy_pusty() && y < clip.dolny(); ++y)
@@ -182,7 +182,7 @@ public:
     bool otworz_popup() {
         if(!zarzadca_popupow_||!czy_wlaczona_||czy_tylko_do_odczytu_)return false;
         if(czy_popup_otwarty())return true;
-        int s=skala_dpi_<1?1:skala_dpi_;
+        SkalaUI s = skala_dpi_;
         return zarzadca_popupow_->otworz(picker_,zarzadca_popupow_->umiesc_pod_kotwica(obszar_ekranu_,Rozmiar(400*s,320*s)),this,&picker_);
     }
     bool ustaw_hsv(int h,int s,int v) { return picker_.ustaw_hsv(h,s,v); }
@@ -192,7 +192,7 @@ public:
     void anuluj_popup() { if(picker_.zarzadca())picker_.zarzadca()->zamknij(PowodZamknieciaPopup::Anulowanie); }
     Rozmiar oblicz_naturalny_rozmiar() const override { return Rozmiar(230,36); }
     void rysuj_siebie(KontekstRysowania& ctx) override {
-        rysuj_tlo_i_ramke(ctx,wyznacz_biezacy_styl_stanu());int s=skala_dpi_<1?1:skala_dpi_;
+        rysuj_tlo_i_ramke(ctx,wyznacz_biezacy_styl_stanu());SkalaUI s = skala_dpi_;
         Prostokat preview(7*s,6*s,32*s,obszar_.wysokosc-12*s);
         ctx.rysuj_prostokat(preview,kolor_?kolor_:WIDOCZNA_CZERN);ctx.rysuj_ramke(preview,Kolory::RamkaDomyslna,s);
         char hex[8];formatuj(kolor_,hex);ctx.rysuj_tekst(Punkt(48*s,(obszar_.wysokosc-16*s)/2),hex,Kolory::TekstBialy,s);

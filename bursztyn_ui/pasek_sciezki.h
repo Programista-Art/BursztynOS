@@ -116,7 +116,7 @@ public:
     }
 
     Rozmiar oblicz_naturalny_rozmiar() const override {
-        int skala = skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         int sep_w = CzcionkaUI::zmierz_tekst(separator_tekst_, skala) + 8 * skala;
         int total_w = wypelnienie_.poziomo() * skala;
 
@@ -136,7 +136,7 @@ public:
 
         if (liczba_segmentow_ == 0) return;
 
-        int skala = skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         int pad_l = wypelnienie_.lewy * skala;
         int sep_tw = CzcionkaUI::zmierz_tekst(separator_tekst_, skala);
         int sep_spacing = 6 * skala;
@@ -287,7 +287,7 @@ private:
     void* dane_wyboru_{nullptr};
 
     int segment_pod_punktem(int lx, int ly) const {
-        const int skala = skala_dpi_;
+        const SkalaUI skala = skala_dpi_;
         if (ly < 2 * skala || ly >= obszar_.wysokosc - 2 * skala) return -1;
         for (size_t i = 0; i < liczba_segmentow_; ++i) {
             if (segmenty_[i].szerokosc > 0) {

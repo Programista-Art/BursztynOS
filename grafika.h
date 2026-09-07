@@ -210,3 +210,21 @@ int bws_gui_pobierz_szerokosc_znaku(uint32_t unicode);
 #ifdef __cplusplus
 } // extern "C"
 #endif
+
+#include "ekran_format.h"
+struct StanBuforowEkranu {
+    TrybEkranu tryb;
+    uint8_t* backbuffer;
+    uint32_t* tapeta;
+    size_t bajty, tapeta_bajty;
+    bool ma_tapete;
+};
+const MozliwosciEkranu& grafika_mozliwosci_ekranu();
+TrybEkranu grafika_tryb_ekranu();
+uint32_t grafika_tryby_ekranu(TrybEkranu*,uint32_t);
+bool grafika_tryb_obslugiwany(const TrybEkranu&);
+bool grafika_przygotuj_ekran(const TrybEkranu&, StanBuforowEkranu*);
+void grafika_pobierz_stan(StanBuforowEkranu*);
+bool grafika_zmien_sprzet(const TrybEkranu&);
+void grafika_wymien_stan(const StanBuforowEkranu&);
+void grafika_zwolnij_stan(StanBuforowEkranu*);

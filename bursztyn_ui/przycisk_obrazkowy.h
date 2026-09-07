@@ -58,7 +58,7 @@ public:
 
     Rozmiar zmierz(Rozmiar dostepny_rozmiar) override {
         (void)dostepny_rozmiar;
-        int skala = skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         int txt_w = CzcionkaUI::zmierz_tekst(tekst_, skala);
         int txt_h = CzcionkaUI::pobierz_wysokosc(skala);
 
@@ -95,7 +95,7 @@ public:
     }
 
     void rysuj_siebie(KontekstRysowania& ctx) override {
-        int skala = skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         StylStanu s = wyznacz_biezacy_styl_stanu();
         rysuj_tlo_i_ramke(ctx, s);
 

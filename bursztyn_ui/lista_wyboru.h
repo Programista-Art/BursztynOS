@@ -162,7 +162,7 @@ public:
     PasekPrzewijania& pasek_poziomy() { return *poziomy_; }
 
     Rozmiar oblicz_naturalny_rozmiar() const override {
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         return Rozmiar(220 * s, 160 * s);
     }
 
@@ -178,7 +178,7 @@ public:
         ostatnio_narysowane_ = 0;
         if (g.widok.czy_pusty() || liczba_ == 0) return;
         ctx.dodaj_przyciecie(g.widok);
-        int skala = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         int wys = wysokosc_piks();
         int pierwszy = static_cast<int>(pionowy_->wartosc());
         int widoczne = g.widok.wysokosc / wys + 1;
@@ -293,18 +293,18 @@ private:
     }
 
     int wysokosc_piks() const {
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         int min = CzcionkaUI::pobierz_wysokosc(s) + 6 * s;
         int zad = wysokosc_wiersza_ * s;
         return zad > min ? zad : min;
     }
 
-    int grubosc_paska() const { return 18 * (skala_dpi_ < 1 ? 1 : skala_dpi_); }
+    int grubosc_paska() const { return 18 * (skala_dpi_); }
 
     Prostokat obszar_po_ramce_i_wypelnieniu() const {
         Prostokat r(0, 0, obszar_.szerokosc, obszar_.wysokosc);
         r = r.zmniejszony(Marginesy(grubosc_ramki_geometrii()));
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         return r.zmniejszony(Marginesy(wypelnienie_.lewy * s,
                                       wypelnienie_.gorny * s,
                                       wypelnienie_.prawy * s,
@@ -335,7 +335,7 @@ private:
     }
 
     void aktualizuj_przewijanie() {
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         Prostokat stary = geometria().widok;
         Prostokat baza = obszar_po_ramce_i_wypelnieniu();
         int gp = grubosc_paska();

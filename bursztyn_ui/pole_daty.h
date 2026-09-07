@@ -48,7 +48,7 @@ public:
         char txt[16];
         formatuj_date(txt, sizeof(txt), data_);
         Prostokat r = prostokat_tekstu();
-        const int skala = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        const SkalaUI skala = skala_dpi_;
         const int tw = CzcionkaUI::zmierz_tekst(txt, skala);
         const int th = CzcionkaUI::pobierz_wysokosc(skala);
         return Punkt(r.x + (r.szerokosc - tw) / 2,
@@ -56,7 +56,7 @@ public:
     }
 
     Rozmiar oblicz_naturalny_rozmiar() const override {
-        int skala = skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         return Rozmiar(150 * skala, 30 * skala);
     }
 
@@ -64,7 +64,7 @@ public:
         StylStanu s = wyznacz_biezacy_styl_stanu();
         rysuj_tlo_i_ramke(ctx, s);
 
-        int skala = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         Geometria g = geometria();
         btn_up_ = g.gora;
         btn_down_ = g.dol;
@@ -194,7 +194,7 @@ private:
     };
 
     Geometria geometria() const {
-        const int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        const SkalaUI s = skala_dpi_;
         const int btn_w = 22 * s;
         Geometria g;
         g.dol = Prostokat(obszar_.szerokosc - btn_w - 2 * s, 2 * s,

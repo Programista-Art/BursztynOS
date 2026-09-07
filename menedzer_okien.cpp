@@ -1,3 +1,5 @@
+#include "ui_skala.h"
+#include "ekran_format.h"
 /*
  * Menedzer Okien (Pulpit i Pasek Zadan) dla Bursztyn OS
  * Wersja uporzadkowana: poprawne hitboxy, Menu Start i odswiezanie zegara.
@@ -30,42 +32,65 @@ extern "C" {
 
 namespace {
 
-constexpr int PASEK_WYS = 40;
-constexpr int MENU_X = 10;
-constexpr int MENU_W = 260;
-constexpr int MENU_GORNY_MARGINES = 10;
-constexpr int MENU_ELEMENT_WYS = 25;
-constexpr int MENU_ELEMENTOW = 14;
-constexpr int MENU_WYS =
-    (MENU_GORNY_MARGINES * 2) + (MENU_ELEMENTOW * MENU_ELEMENT_WYS);
+int PASEK_WYS = 40;
+int MENU_X = 10;
+int MENU_W = 260;
+int MENU_GORNY_MARGINES = 10;
+int MENU_ELEMENT_WYS = 25;
+constexpr int MENU_ELEMENTOW = 15;
+int MENU_WYS = (10 * 2) + (MENU_ELEMENTOW * 25);
 
 // Pozycja "Gry ->" w glownym Menu Start.
-constexpr int MENU_GRY_INDEX = 11;
-constexpr int MENU_GRY_W = 180;
+constexpr int MENU_GRY_INDEX = 12;
+int MENU_GRY_W = 180;
 constexpr int MENU_GRY_ELEMENTOW = 1;
-constexpr int MENU_GRY_WYS =
-    (MENU_GORNY_MARGINES * 2) + (MENU_GRY_ELEMENTOW * MENU_ELEMENT_WYS);
+int MENU_GRY_WYS = (10 * 2) + (MENU_GRY_ELEMENTOW * 25);
 
-constexpr int PRZYCISK_MENU_X = 10;
-constexpr int PRZYCISK_MENU_W = 80;
-constexpr int PRZYCISK_MENU_H = 30;
+int PRZYCISK_MENU_X = 10;
+int PRZYCISK_MENU_W = 80;
+int PRZYCISK_MENU_H = 30;
 
-constexpr int IKONA_W = 48;
-constexpr int IKONA_H = 48;
-constexpr int SKROT_W = 32;
-constexpr int SKROT_H = 32;
+int IKONA_W = 48;
+int IKONA_H = 48;
+int SKROT_W = 32;
+int SKROT_H = 32;
 
 constexpr int BUFOR_CZASU = 32;
-constexpr int TASK_BUTTON_X = 100;
-constexpr int TASK_BUTTON_W = 112;
-constexpr int TASK_BUTTON_GAP = 4;
+int TASK_BUTTON_X = 100;
+int TASK_BUTTON_W = 112;
+int TASK_BUTTON_GAP = 4;
 constexpr int PULPIT_MAX_WPISOW = 128;
 constexpr int PULPIT_LIST_CAP = 16384;
 constexpr int PULPIT_NAZWA_CAP = 56;
-constexpr int PULPIT_GRID_W = 82;
-constexpr int PULPIT_GRID_H = 82;
-constexpr int PULPIT_GRID_Y = 140;
+int PULPIT_GRID_W = 82;
+int PULPIT_GRID_H = 82;
+int PULPIT_GRID_Y = 140;
 constexpr int PULPIT_REFRESH_TICKS = 3;
+
+
+void metryki_ekranu(){
+PASEK_WYS=ui_skaluj(40,ui_skala_procent);
+MENU_X=ui_skaluj(10,ui_skala_procent);
+MENU_W=ui_skaluj(260,ui_skala_procent);
+MENU_GORNY_MARGINES=ui_skaluj(10,ui_skala_procent);
+MENU_ELEMENT_WYS=ui_skaluj(25,ui_skala_procent);
+MENU_GRY_W=ui_skaluj(180,ui_skala_procent);
+PRZYCISK_MENU_X=ui_skaluj(10,ui_skala_procent);
+PRZYCISK_MENU_W=ui_skaluj(80,ui_skala_procent);
+PRZYCISK_MENU_H=ui_skaluj(30,ui_skala_procent);
+IKONA_W=ui_skaluj(48,ui_skala_procent);
+IKONA_H=ui_skaluj(48,ui_skala_procent);
+SKROT_W=ui_skaluj(32,ui_skala_procent);
+SKROT_H=ui_skaluj(32,ui_skala_procent);
+TASK_BUTTON_X=ui_skaluj(100,ui_skala_procent);
+TASK_BUTTON_W=ui_skaluj(112,ui_skala_procent);
+TASK_BUTTON_GAP=ui_skaluj(4,ui_skala_procent);
+PULPIT_GRID_W=ui_skaluj(82,ui_skala_procent);
+PULPIT_GRID_H=ui_skaluj(82,ui_skala_procent);
+PULPIT_GRID_Y=ui_skaluj(140,ui_skala_procent);
+MENU_WYS=2*MENU_GORNY_MARGINES+MENU_ELEMENTOW*MENU_ELEMENT_WYS;
+MENU_GRY_WYS=2*MENU_GORNY_MARGINES+MENU_GRY_ELEMENTOW*MENU_ELEMENT_WYS;
+}
 
 const char* const SCIEZKA_POWLOKA = "/shell.bur";
 const char* const SCIEZKA_EKSPLORATOR =
@@ -111,7 +136,7 @@ struct AplikacjaPulpitu {
     TypIkonyAplikacji typ_ikony;
 };
 
-const AplikacjaPulpitu APLIKACJE_PULPITU[] = {
+AplikacjaPulpitu APLIKACJE_PULPITU[] = {
     {50,  50, SCIEZKA_NOTATNIK, "Notatnik", "Notatnik", nullptr,
      TypIkonyAplikacji::Notatnik},
     {130, 50, SCIEZKA_KALKULATOR, "Kalkulator", "Kalkulator", nullptr,
@@ -1091,24 +1116,24 @@ void RysujTaskbar() {
                         screen_w, PASEK_WYS, 0x001A0B00);
     gui_rysuj_prostokat(0, screen_h - PASEK_WYS,
                         screen_w, 2, 0x00E58A00);
-    gui_rysuj_prostokat(PRZYCISK_MENU_X, screen_h - 35,
+    gui_rysuj_prostokat(PRZYCISK_MENU_X, screen_h - ui_skaluj(35,ui_skala_procent),
                         PRZYCISK_MENU_W, PRZYCISK_MENU_H, 0x00E58A00);
-    rysuj_tekst_wysrodkowany(PRZYCISK_MENU_X, screen_h - 35,
+    rysuj_tekst_wysrodkowany(PRZYCISK_MENU_X, screen_h - ui_skaluj(35,ui_skala_procent),
                              PRZYCISK_MENU_W, PRZYCISK_MENU_H,
                              1, 0x001A0B00, "Menu");
     int task_x = TASK_BUTTON_X;
     for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
         const GuiOknoInfo& o = okna_taskbara[i];
-        if (o.tytul[0] == '\0' || task_x + TASK_BUTTON_W > screen_w - 150)
+        if (o.tytul[0] == '\0' || task_x + TASK_BUTTON_W > screen_w - ui_skaluj(150,ui_skala_procent))
             continue;
         const uint32_t kolor = o.aktywne ? 0x00E58A00 :
             (o.stan == GUI_OKNO_ZMINIMALIZOWANE ? 0x00452B00 : 0x008A5A00);
-        gui_rysuj_prostokat(task_x, screen_h - 36,
+        gui_rysuj_prostokat(task_x, screen_h - ui_skaluj(36,ui_skala_procent),
                             TASK_BUTTON_W, SKROT_H, kolor);
         char podpis[15] = {};
         for (int c = 0; c < 14 && o.tytul[c] != '\0'; ++c)
             podpis[c] = o.tytul[c];
-        rysuj_tekst_wysrodkowany(task_x, screen_h - 36,
+        rysuj_tekst_wysrodkowany(task_x, screen_h - ui_skaluj(36,ui_skala_procent),
                                  TASK_BUTTON_W, SKROT_H, 1,
                                  0x00FFFFFF, podpis);
         task_x += TASK_BUTTON_W + TASK_BUTTON_GAP;
@@ -1365,6 +1390,7 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
             "> Kontrolki 3",
             "> Testy systemu",
             "> Tapety",
+            "> Ustawienia ekranu",
             "> Gry ->",
             "> Uruchom ponownie",
             "> Zamknij"
@@ -1628,15 +1654,18 @@ void obsluz_element_menu(int item_index) {
         case 10:
             uruchom_lub_aktywuj("/programy/tapety.cebula/tapety.bur", "Tapety");
             break;
+        case 11:
+            uruchom_lub_aktywuj(EKRAN_PROGRAM,"Ustawienia ekranu");
+            break;
         case MENU_GRY_INDEX:
             menu_gry_otwarte = !menu_gry_otwarte;
             aktualizuj_overlay_menu();
             RysujPulpit(true);
             break;
-        case 12:
+        case 13:
             wykonaj_restart();
             break;
-        case 13:
+        case 14:
             wykonaj_zamkniecie();
             break;
         default:
@@ -1661,7 +1690,7 @@ void obsluz_klikniecie(int mx, int my) {
 
     // Przycisk Menu ma pierwszenstwo niezaleznie od aktualnego stanu menu.
     if (punkt_w_prostokacie(mx, my,
-                            PRZYCISK_MENU_X, screen_h - 35,
+                            PRZYCISK_MENU_X, screen_h - ui_skaluj(35,ui_skala_procent),
                             PRZYCISK_MENU_W, PRZYCISK_MENU_H)) {
         if (menu_start_otwarte) {
             zamknij_menu_i_odtworz_pulpit();
@@ -1735,8 +1764,8 @@ void obsluz_klikniecie(int mx, int my) {
     int task_x = TASK_BUTTON_X;
     for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
         if (okna_taskbara[i].tytul[0] == '\0' ||
-            task_x + TASK_BUTTON_W > screen_w - 150) continue;
-        if (punkt_w_prostokacie(mx, my, task_x, screen_h - 36,
+            task_x + TASK_BUTTON_W > screen_w - ui_skaluj(150,ui_skala_procent)) continue;
+        if (punkt_w_prostokacie(mx, my, task_x, screen_h - ui_skaluj(36,ui_skala_procent),
                                 TASK_BUTTON_W, SKROT_H)) {
             (void)gui_aktywuj_okno(okna_taskbara[i].window_id);
             return;
@@ -1745,9 +1774,21 @@ void obsluz_klikniecie(int mx, int my) {
     }
 }
 
+void rozmiesc_ikony_ekranu(){
+    int cols=(screen_w-ui_skaluj(60,ui_skala_procent))/PULPIT_GRID_W;if(cols<1)cols=1;
+    for(size_t i=0;i<LICZBA_APLIKACJI_PULPITU;++i){
+        APLIKACJE_PULPITU[i].x=ui_skaluj(30,ui_skala_procent)+int(i%cols)*PULPIT_GRID_W;
+        APLIKACJE_PULPITU[i].y=ui_skaluj(30,ui_skala_procent)+int(i/cols)*PULPIT_GRID_H;
+    }
+    PULPIT_GRID_Y=ui_skaluj(30,ui_skala_procent)+int((LICZBA_APLIKACJI_PULPITU+cols-1)/cols)*PULPIT_GRID_H;
+}
+
+
 } // namespace
 
 extern "C" __attribute__((noreturn)) void _start() {
+    GuiMonitorInfo mon{};if(gui_pobierz_monitor(0,&mon))ui_skala_procent=mon.scale_x1000/10;
+    metryki_ekranu();
     gui_pobierz_rozdzielczosc(&screen_w, &screen_h);
 
     if (screen_w <= 0 || screen_h <= PASEK_WYS) {
@@ -1767,6 +1808,8 @@ extern "C" __attribute__((noreturn)) void _start() {
     }
 
     gui_ustaw_przejecie_myszy(true);
+
+    rozmiesc_ikony_ekranu();
 
     // Zasiej stan zegara, aby pierwsza iteracja nie wymuszala od razu
     // dodatkowej, niepotrzebnej kompozycji calej klatki.
@@ -1788,6 +1831,13 @@ extern "C" __attribute__((noreturn)) void _start() {
     while (true) {
         bws_zdarzenie zdarzenie{};
         if (!gui_czekaj_na_zdarzenie(&zdarzenie)) continue;
+        if(zdarzenie.typ==BWS_ZDARZENIE_EKRAN){
+            zamknij_pulpit_context();zamknij_pulpit_modal();
+            menu_start_otwarte=false;menu_gry_otwarte=false;dragging_file=false;drag_candidate=false;
+            ui_skala_procent=zdarzenie.kod;metryki_ekranu();
+            screen_w=zdarzenie.dx;screen_h=zdarzenie.dy;
+            rozmiesc_ikony_ekranu();aktualizuj_overlay_menu();RysujPulpit(true);continue;
+        }
         const uint64_t stara_sygnatura = sygnatura_okien();
         odswiez_snapshot_okien();
         const bool lifecycle =

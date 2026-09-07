@@ -49,14 +49,16 @@ def main():
     args=p.parse_args();d=args.directory.resolve();d.mkdir(parents=True,exist_ok=True)
     if args.action=='boot':
         disk=d/'wirtualny_dysk.img'
-        if args.fresh and disk.exists(): disk.unlink()
+        if args.fresh:
+            for f in [disk, d/'boot.log', d/'qemu.log', d/'qmp.sock']:
+                if f.exists(): f.unlink()
         if not disk.exists():
             with disk.open('wb') as f:f.truncate(512*1024*1024)
         cmd=['qemu-system-x86_64','-machine','pc,hpet=on','-cpu','max','-accel','tcg,thread=single',
              '-drive',f'id=disk,file={disk},format=raw,if=none','-device','ich9-ahci,id=ahci',
              '-device','ide-hd,drive=disk,bus=ahci.0,unit=0','-netdev','user,id=n1','-device','e1000,netdev=n1',
              '-audiodev','none,id=snd','-device','intel-hda','-device','hda-output,audiodev=snd',
-             '-m','2G','-vga','std','-display','none','-serial',f'file:{d / "boot.log"}',
+             '-m','2G','-vga','std','-global','VGA.vgamem_mb=64','-display','none','-serial',f'file:{d / "boot.log"}',
              '-qmp',f'unix:{d / "qmp.sock"},server=on,wait=off','-cdrom',str(ROOT/'.bursztyn_ci_test.iso'),'-boot','d']
         if args.uefi:
             firmware=Path('/usr/share/ovmf/OVMF.fd')
@@ -66,16 +68,24 @@ def main():
             proc=subprocess.Popen(cmd,stdout=log,stderr=log,start_new_session=True)
         (d/'pid').write_text(str(proc.pid))
         print(f'QEMU PID {proc.pid}; dysk {disk}',flush=True)
-        deadline=time.monotonic()+180
-        while time.monotonic()<deadline:
-            if proc.poll() is not None:raise RuntimeError((d/'qemu.log').read_text())
-            log=(d/'boot.log').read_text(errors='replace') if (d/'boot.log').exists() else ''
-            if '[TEST MODE] AUTOMATED: zakonczono' in log:
-                Qmp(d).capture(d/'desktop.png')
-                if '=== TESTY BURSZTYN OS: FAIL' in log:raise RuntimeError('Suite FAIL; sprawdz boot.log')
-                print('Suite PASS; NOT MANUALLY VERIFIED BY HUMAN');return
-            time.sleep(1)
-        raise TimeoutError('Boot/test timeout; QEMU pozostawiono do diagnostyki')
+        deadline=time.monotonic()+360
+        try:
+            while time.monotonic()<deadline:
+                if proc.poll() is not None:raise RuntimeError((d/'qemu.log').read_text())
+                log=(d/'boot.log').read_text(errors='replace') if (d/'boot.log').exists() else ''
+                if '[TEST MODE] AUTOMATED: zakonczono' in log:
+                    try: Qmp(d).capture(d/'desktop.png')
+                    except Exception: pass
+                    proc.terminate()
+                    if '=== TESTY BURSZTYN OS: FAIL' in log:raise RuntimeError('Suite FAIL; sprawdz boot.log')
+                    print('Suite PASS; NOT MANUALLY VERIFIED BY HUMAN');return
+                time.sleep(1)
+            proc.kill()
+            raise TimeoutError('Boot/test timeout')
+        except Exception:
+            try: proc.kill()
+            except Exception: pass
+            raise
     q=Qmp(d)
     if args.action=='selector':
         q.click(50,700);q.click(50,582);time.sleep(5);q.capture(d/'selector.png')

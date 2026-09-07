@@ -16,8 +16,18 @@ public:
         uint64_t odebrane_zdarzenia{0};
     };
 
-    AplikacjaGUI() = default;
-    virtual ~AplikacjaGUI() = default;
+    AplikacjaGUI() {
+        GuiMonitorInfo mon{};
+        if(gui_pobierz_monitor(0,&mon)&&ui_skala_poprawna(mon.scale_x1000/10))
+            ui_skala_procent=mon.scale_x1000/10;
+        skala_dpi_=ui_skala();
+    }
+    virtual ~AplikacjaGUI() {
+        GuiMonitorInfo mon{};
+        if(gui_pobierz_monitor(0,&mon)&&ui_skala_poprawna(mon.scale_x1000/10))
+            ui_skala_procent=mon.scale_x1000/10;
+        skala_dpi_=ui_skala();
+    }
 
     int skala_dpi() const { return skala_dpi_; }
 
@@ -111,7 +121,7 @@ public:
 private:
     Okno* glowne_okno_{nullptr};
     bool czy_dziala_{false};
-    int skala_dpi_{1};
+    SkalaUI skala_dpi_{1};
     StatystykiPetli statystyki_{};
 };
 

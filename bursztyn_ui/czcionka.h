@@ -122,21 +122,21 @@ public:
     }
 
     // Zwraca krok pozycji X dla znaku (szerokość + 1px odstępu * skala)
-    static int postep_znaku(uint32_t cp, int skala = 1) {
-        int s = (skala < 1) ? 1 : skala;
+    static int postep_znaku(uint32_t cp, SkalaUI skala = 1) {
+        SkalaUI s = skala;
         return (szerokosc_znaku(cp) + 1) * s;
     }
 
     // Zwraca wysokość linii czcionki (16px * skala)
-    static int pobierz_wysokosc(int skala = 1) {
-        int s = (skala < 1) ? 1 : skala;
+    static int pobierz_wysokosc(SkalaUI skala = 1) {
+        SkalaUI s = skala;
         return WYSOKOSC * s;
     }
 
     // Mierzy całkowitą szerokość tekstu w pikselach
-    static int zmierz_tekst(const char* tekst, int skala = 1) {
+    static int zmierz_tekst(const char* tekst, SkalaUI skala = 1) {
         if (!tekst || tekst[0] == '\0') return 0;
-        int s = (skala < 1) ? 1 : skala;
+        SkalaUI s = skala;
         int szer = 0;
         size_t i = 0;
         while (tekst[i] != '\0') {
@@ -150,14 +150,14 @@ public:
     }
 
     // Mierzy rozmiar tekstu (szerokość x wysokość)
-    static Rozmiar zmierz_rozmiar(const char* tekst, int skala = 1) {
+    static Rozmiar zmierz_rozmiar(const char* tekst, SkalaUI skala = 1) {
         return Rozmiar(zmierz_tekst(tekst, skala), pobierz_wysokosc(skala));
     }
 
     // Zwraca szerokość tekstu od początku do bajt_limit
-    static int pozycja_x_z_bajtu(const char* tekst, size_t bajt_limit, int skala = 1) {
+    static int pozycja_x_z_bajtu(const char* tekst, size_t bajt_limit, SkalaUI skala = 1) {
         if (!tekst || tekst[0] == '\0' || bajt_limit == 0) return 0;
-        int s = (skala < 1) ? 1 : skala;
+        SkalaUI s = skala;
         int szer = 0;
         size_t i = 0;
         while (tekst[i] != '\0' && i < bajt_limit) {
@@ -171,9 +171,9 @@ public:
     }
 
     // Zwraca przesunięcie w bajtach dla zadanej współrzędnej X wewnątrz tekstu
-    static size_t znak_z_pozycji_x(const char* tekst, int target_x, int skala = 1) {
+    static size_t znak_z_pozycji_x(const char* tekst, int target_x, SkalaUI skala = 1) {
         if (!tekst || tekst[0] == '\0' || target_x <= 0) return 0;
-        int s = (skala < 1) ? 1 : skala;
+        SkalaUI s = skala;
         size_t biezacy_bajt = 0;
         int poprz_x = 0;
 

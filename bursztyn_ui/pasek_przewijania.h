@@ -92,7 +92,7 @@ public:
     }
 
     Rozmiar oblicz_naturalny_rozmiar() const override {
-        int skala = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         return orientacja_ == Orientacja::Pozioma
              ? Rozmiar(160 * skala, 18 * skala)
              : Rozmiar(18 * skala, 160 * skala);
@@ -102,7 +102,7 @@ public:
         BUI_POMIAR(scrollbar_paints, 1);
         Geometria g = oblicz_geometrie();
         ostatni_uchwyt_ = g.uchwyt;
-        int skala = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         Prostokat zewnetrzny(0, 0, obszar_.szerokosc, obszar_.wysokosc);
         ctx.rysuj_prostokat(zewnetrzny,
                             czy_wlaczona_ ? Kolory::PowierzchniaTlo
@@ -343,7 +343,7 @@ private:
 
     Geometria oblicz_geometrie() const {
         Geometria g;
-        int skala = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         int pl = wypelnienie_.lewy * skala;
         int pg = wypelnienie_.gorny * skala;
         int pp = wypelnienie_.prawy * skala;

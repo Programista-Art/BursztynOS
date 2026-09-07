@@ -17,7 +17,7 @@ public:
 
     int skala_czcionki() const { return skala_czcionki_; }
     void ustaw_skale_czcionki(int s) {
-        skala_czcionki_ = (s < 1) ? 1 : s;
+        skala_czcionki_ = s;
         uniewaznij();
     }
 
@@ -59,7 +59,7 @@ public:
 
     Rozmiar zmierz(Rozmiar dostepny_rozmiar) override {
         (void)dostepny_rozmiar;
-        int skala = skala_czcionki_ * skala_dpi_;
+        SkalaUI skala = SkalaUI::procent(skala_dpi_.procent() * uint32_t(skala_czcionki_));
         int txt_w = CzcionkaUI::zmierz_tekst(tekst_, skala);
         int txt_h = CzcionkaUI::pobierz_wysokosc(skala);
 
@@ -87,7 +87,7 @@ public:
 
         if (tekst_[0] == '\0') return;
 
-        int skala = skala_czcionki_ * skala_dpi_;
+        SkalaUI skala = SkalaUI::procent(skala_dpi_.procent() * uint32_t(skala_czcionki_));
         uint32_t col = s.tekst;
 
         int txt_w = CzcionkaUI::zmierz_tekst(tekst_, skala);

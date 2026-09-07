@@ -191,9 +191,9 @@ public:
         gui_ustaw_capture_myszy(false);
     }
 
-    int skala_dpi() const { return skala_dpi_; }
-    void ustaw_skale_dpi(int skala) {
-        skala_dpi_ = (skala < 1) ? 1 : skala;
+    SkalaUI skala_dpi() const { return skala_dpi_; }
+    void ustaw_skale_dpi(SkalaUI skala) {
+        skala_dpi_ = skala;
         popupy_.ustaw_skale_dpi(skala_dpi_);
         if (kontrolka_glowna_) {
             kontrolka_glowna_->ustaw_skale_dpi(skala_dpi_);
@@ -205,8 +205,9 @@ public:
     void przelicz_uklad() {
         ++liczba_przejsc_ukladu_;
         // Allocate only on geometry changes, never in input or paint.
-        size_t wymagane = szerokosc_ > 0 && wysokosc_ > 0 && szerokosc_ <= 2048 && wysokosc_ <= 2048
+        size_t piksele = (szerokosc_ > 0 && wysokosc_ > 0 && szerokosc_ <= 8192 && wysokosc_ <= 8192)
             ? static_cast<size_t>(szerokosc_) * wysokosc_ : 0;
+        size_t wymagane = piksele <= 2048ULL * 2048ULL ? piksele : (2048ULL * 2048ULL);
         if (wymagane > pojemnosc_regionu_) {
             uint32_t* nowy = static_cast<uint32_t*>(gui_malloc(wymagane * sizeof(uint32_t)));
             if (nowy) { if (bufor_regionu_) gui_free(bufor_regionu_); bufor_regionu_ = nowy; pojemnosc_regionu_ = wymagane; }
@@ -285,6 +286,7 @@ public:
             if (buforowany && !KontekstRysowania::g_tlum_rysowanie_globalne)
                 gui_blit(swiat.x, swiat.y, r.szerokosc, r.wysokosc, bufor_regionu_);
         }
+
         if (kontrolka_glowna_) kontrolka_glowna_->wyczysc_brudny_obszar();
         brudny_obszar_klienta_ = Prostokat(); czy_brudne_ = false;
     }
@@ -351,7 +353,7 @@ public:
 #endif
 
         if (!g_tlum_operacje_systemowe) {
-            gui_ustaw_geometrie_okna(x_, y_, szerokosc_, wysokosc_);
+            gui_ustaw_geometrie_okna(x_, y_, szerokosc_, wysokosc_, czy_zmaksymalizowane_ ? 2 : 1);
         }
 
         przelicz_uklad();
@@ -371,7 +373,7 @@ public:
         gui_zakoncz_aplikacje();
     }
 
-    void obsluz_zdarzenie(const bws_zdarzenie& surowe_zdarzenie) {
+    virtual void obsluz_zdarzenie(const bws_zdarzenie& surowe_zdarzenie) {
         int belka_h = WYSOKOSC_BELKI_TYTULOWEJ * skala_dpi_;
         int mx = surowe_zdarzenie.x;
         int my = surowe_zdarzenie.y;
@@ -379,6 +381,17 @@ public:
         int lokalny_y = my - y_;
 
         switch (surowe_zdarzenie.typ) {
+            case BWS_ZDARZENIE_EKRAN: {
+                if(!ui_skala_poprawna(surowe_zdarzenie.kod))break;
+                popupy_.zamknij(PowodZamknieciaPopup::ZmianaGeometrii);
+                zwolnij_przechwycenie_myszy();czy_przeciagane_=false;kontrolka_najechana_=nullptr;
+                ui_skala_procent=surowe_zdarzenie.kod;
+                x_=surowe_zdarzenie.x;y_=surowe_zdarzenie.y;
+                szerokosc_=surowe_zdarzenie.dx;wysokosc_=surowe_zdarzenie.dy;
+                // Restore geometry and minimized state deliberately remain owner state.
+                ustaw_skale_dpi(ui_skala());
+                break;
+            }
             case BWS_ZDARZENIE_MYSZ_RUCH: {
                 ++liczba_zdarzen_ruchu_myszy_;
                 if (popupy_.czy_otwarty()) {
@@ -737,7 +750,7 @@ private:
     int y_{100};
     int szerokosc_{480};
     int wysokosc_{320};
-    int skala_dpi_{1};
+    SkalaUI skala_dpi_{1};
 
     bool czy_aktywne_{true};
     bool czy_zmaksymalizowane_{false};

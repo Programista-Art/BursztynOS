@@ -427,6 +427,7 @@ void* ZaalokujCiagleRamki(size_t liczba_ramek);
  */
 void ZwolnijRamke(void* adres_fizyczny);
 void ZwolnijCiagleRamki(void* adres_fizyczny, size_t liczba_ramek);
+extern "C" uint64_t pmm_pobierz_wolne_ramki();
 
 /*
  * Buduje stan PMM na podstawie tagu Memory Map z Multiboot2 i zabezpiecza
@@ -572,3 +573,7 @@ bool WirtualnyDoFizycznego(
 
 // Mapowanie nowej strony jadra z wynikiem bledu (bez prawa USER).
 extern "C" bool VmmMapujNowaStroneJadra(void* va, void* pa);
+// Tylko strony dedykowanej, wspoldzielonej puli grafiki; zwraca PA do PMM.
+extern "C" void* VmmOdmapujBuforGrafiki(void* va);
+// Regresja: utworzenie i zniszczenie CR3 nie moze zwolnic wysokich tablic jadra.
+extern "C" bool VmmTestujWspoldzieloneMapowanieJadra(const void* va);

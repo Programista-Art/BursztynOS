@@ -31,7 +31,7 @@ public:
         indeks_otwartego_podmenu_ = -1;
         uniewaznij_element(aktywny_); aktywny_ = i; uniewaznij_element(aktywny_);
     }
-    Rozmiar wymagany_rozmiar(int skala = 1) const {
+    Rozmiar wymagany_rozmiar(SkalaUI skala = 1) const {
         int w = 150 * skala, h = 2 * skala;
         if (!menu_) return Rozmiar(w, 28 * skala);
         for (size_t i = 0; i < menu_->liczba_elementow(); ++i) {
@@ -47,7 +47,7 @@ public:
     }
     Prostokat prostokat_elementu(int indeks) const {
         if (!menu_ || indeks < 0) return Prostokat();
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_, y = s;
+        SkalaUI s = skala_dpi_; int y = 1 * s;
         for (int i = 0; i < static_cast<int>(menu_->liczba_elementow()); ++i) {
             const ElementMenu* e = menu_->element(i); if (!e || !e->czy_widoczny()) continue;
             int h = e->czy_separator() ? 9 * s : 24 * s;
@@ -65,7 +65,7 @@ public:
     void rysuj_siebie(KontekstRysowania& ctx) override {
         rysuj_tlo_i_ramke(ctx, wyznacz_biezacy_styl_stanu());
         if (!menu_) return;
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         for (int i = 0; i < static_cast<int>(menu_->liczba_elementow()); ++i) {
             ElementMenu* e = menu_->element(i); if (!e || !e->czy_widoczny()) continue;
             Prostokat r = prostokat_elementu(i);

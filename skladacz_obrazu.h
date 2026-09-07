@@ -422,3 +422,18 @@ inline constexpr bool skladacz_wymiary_poprawne(
 }
 
 #endif /* __cplusplus */
+
+// Snapshoty transakcji sa przechowywane w trwalym obiekcie ekranu, nie na stosie.
+struct ZmianaWarstwyEkranu {
+    uint32_t generacja;
+    warstwa_obrazu stara, nowa;
+    uint64_t stare_bajty, nowe_bajty;
+    bool zmiana_bufora;
+};
+struct ZmianaWarstwEkranu { ZmianaWarstwyEkranu warstwy[SKLADACZ_MAKS_WARSTW]; };
+bool skladacz_przygotuj_ekran(int sw,int sh,int work_h,ZmianaWarstwEkranu*);
+void skladacz_zastosuj_ekran(ZmianaWarstwEkranu*);
+void skladacz_cofnij_ekran(ZmianaWarstwEkranu*);
+void skladacz_zakoncz_zmiane_ekranu(ZmianaWarstwEkranu*,bool zastosowana);
+void skladacz_reset_ekranu();
+void skladacz_stan_max(int pid,bool max);

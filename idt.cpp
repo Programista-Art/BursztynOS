@@ -564,8 +564,9 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
     const bool przerwano_ring3 =
         (stan->rejestr_cs & 3ULL) == 3ULL;
 
+    extern volatile bool ekran_zajety;
     const bool pid_idle =
-        aktualny_pid == 0;
+        aktualny_pid == 0 && !__atomic_load_n(&ekran_zajety, __ATOMIC_ACQUIRE);
 
     bool proces_juz_pusty = false;
     bool proces_blokuje_w_bws38 = false;

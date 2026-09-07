@@ -4,6 +4,7 @@
  */
 
 #include "bursztyn_gui.h"
+#include "ui_skala.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -122,6 +123,7 @@ uint64_t i32_do_u64(int wartosc) {
 }
 
 int popraw_skale(int skala) {
+    if(skala>=100&&skala<=400)return skala;
     if (skala < 1) return 1;
     if (skala > 4) return 4;
     return skala;
@@ -694,19 +696,8 @@ void gui_odswiez_pulpit() {
         19, 0, 0, 0, 0);
 }
 
-void gui_wypisz_tekst_kolor(int x,
-                            int y,
-                            uint32_t kolor,
-                            const char* tekst) {
-    if (!tekst)
-        return;
-
-    bws_wywolaj(
-        20,
-        i32_do_u64(x),
-        i32_do_u64(y),
-        static_cast<uint64_t>(kolor),
-        reinterpret_cast<uint64_t>(tekst));
+void gui_wypisz_tekst_kolor(int x,int y,uint32_t kolor,const char*tekst){
+    gui_wypisz_tekst_kolor_skala(x,y,kolor,ui_skala_procent,tekst);
 }
 
 void gui_wypisz_tekst_kolor_skala(int x,
@@ -1058,7 +1049,7 @@ void gui_log_geom_trace(const char* caller, int old_x, int old_y, int old_w, int
 #endif
 }
 
-bool gui_ustaw_geometrie_okna(int x, int y, int szer, int wys) {
+bool gui_ustaw_geometrie_okna(int x, int y, int szer, int wys, int stan) {
 #if BURSZTYN_DIAG_GEOM_TRACE
     const int old_x = g_widoczna_geometria_x;
     const int old_y = g_widoczna_geometria_y;
@@ -1281,26 +1272,26 @@ bool ustawienia_sciezka(const char* app_id, const char* klucz,
 
 void gui_rysuj_standardowa_belke(int x, int y, int szer,
                                  const char* tytul, bool zmaksymalizowane) {
-    if (!tytul || szer < 90) return;
-    gui_rysuj_prostokat(x, y, szer, 28, 0x00301500);
-    gui_rysuj_prostokat(x, y, szer, 2, 0x00E58A00);
-    gui_wypisz_tekst_kolor(x + 8, y + 7, 0x00FFFFFF, tytul);
-    RysujPrzycisk(x + szer - 74, y + 4, 20, 20,
+    if (!tytul || szer < ui_skaluj(90,ui_skala_procent)) return;
+    gui_rysuj_prostokat(x, y, szer, ui_skaluj(28,ui_skala_procent), 0x00301500);
+    gui_rysuj_prostokat(x, y, szer, ui_skaluj(2,ui_skala_procent), 0x00E58A00);
+    gui_wypisz_tekst_kolor(x + ui_skaluj(8,ui_skala_procent), y + ui_skaluj(7,ui_skala_procent), 0x00FFFFFF, tytul);
+    RysujPrzycisk(x + szer - ui_skaluj(74,ui_skala_procent), y + ui_skaluj(4,ui_skala_procent), ui_skaluj(20,ui_skala_procent), ui_skaluj(20,ui_skala_procent),
                   0x00E58A00, 0x001A0B00, "-");
-    RysujPrzycisk(x + szer - 50, y + 4, 20, 20,
+    RysujPrzycisk(x + szer - ui_skaluj(50,ui_skala_procent), y + ui_skaluj(4,ui_skala_procent), ui_skaluj(20,ui_skala_procent), ui_skaluj(20,ui_skala_procent),
                   0x00E58A00, 0x001A0B00,
                   zmaksymalizowane ? "v" : "^");
-    RysujPrzycisk(x + szer - 26, y + 4, 20, 20,
+    RysujPrzycisk(x + szer - ui_skaluj(26,ui_skala_procent), y + ui_skaluj(4,ui_skala_procent), ui_skaluj(20,ui_skala_procent), ui_skaluj(20,ui_skala_procent),
                   0x00AA0000, 0x00FFFFFF, "X");
 }
 
 gui_akcja_belki gui_hit_test_belki(int mx, int my,
                                    int x, int y, int szer) {
-    if (szer < 90 || mx < x || mx >= x + szer || my < y || my >= y + 28)
+    if (szer < ui_skaluj(90,ui_skala_procent) || mx < x || mx >= x + szer || my < y || my >= y + ui_skaluj(28,ui_skala_procent))
         return GUI_BELKA_BRAK;
-    if (mx >= x + szer - 26) return GUI_BELKA_ZAMKNIJ;
-    if (mx >= x + szer - 50) return GUI_BELKA_MAKSYMALIZUJ;
-    if (mx >= x + szer - 74) return GUI_BELKA_MINIMALIZUJ;
+    if (mx >= x + szer - ui_skaluj(26,ui_skala_procent)) return GUI_BELKA_ZAMKNIJ;
+    if (mx >= x + szer - ui_skaluj(50,ui_skala_procent)) return GUI_BELKA_MAKSYMALIZUJ;
+    if (mx >= x + szer - ui_skaluj(74,ui_skala_procent)) return GUI_BELKA_MINIMALIZUJ;
     return GUI_BELKA_DRAG;
 }
 
@@ -1424,8 +1415,7 @@ int oblicz_szerokosc_tekstu(const char* tekst,
     if (!tekst)
         return 0;
 
-    const int poprawna_skala =
-        popraw_skale(skala);
+    const uint32_t procent = skala>=100?uint32_t(popraw_skale(skala)):ui_skala_procent*popraw_skale(skala);
 
     int szerokosc = 0;
     size_t i = 0;
@@ -1443,8 +1433,7 @@ int oblicz_szerokosc_tekstu(const char* tekst,
         }
 
         const int przyrost =
-            (szerokosc_znaku + 1) *
-            poprawna_skala;
+            ui_skaluj(szerokosc_znaku + 1,procent);
 
         if (szerokosc >
             INT32_MAX - przyrost) {
@@ -1468,16 +1457,15 @@ void rysuj_tekst_wysrodkowany(int px,
     if (!tekst || w <= 0 || h <= 0)
         return;
 
-    const int poprawna_skala =
-        popraw_skale(skala);
+    const uint32_t procent = skala>=100?uint32_t(popraw_skale(skala)):ui_skala_procent*popraw_skale(skala);
 
     const int szer_tekstu =
         oblicz_szerokosc_tekstu(
             tekst,
-            poprawna_skala);
+            procent);
 
     const int wys_tekstu =
-        gui_pobierz_wysokosc_fontu() * poprawna_skala;
+        ui_skaluj(gui_pobierz_wysokosc_fontu(),procent);
 
     const int tx =
         px + (w - szer_tekstu) / 2;
@@ -1489,7 +1477,7 @@ void rysuj_tekst_wysrodkowany(int px,
         tx,
         ty,
         kolor,
-        poprawna_skala,
+        procent,
         tekst);
 }
 

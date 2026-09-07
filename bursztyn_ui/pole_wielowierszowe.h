@@ -185,7 +185,7 @@ public:
     Prostokat prostokat_rogu_paskow() const { return geometria().rog; }
 
     Rozmiar oblicz_naturalny_rozmiar() const override {
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         return Rozmiar(320 * s, 180 * s);
     }
 
@@ -204,7 +204,7 @@ public:
         }
         if (g.widok.czy_pusty()) return;
         ctx.dodaj_przyciecie(g.widok);
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         int wys = wysokosc_linii();
         size_t pierwszy = static_cast<size_t>(pionowy_->wartosc());
         size_t koniec = pierwszy + static_cast<size_t>(g.widok.wysokosc / wys + 1);
@@ -423,7 +423,7 @@ private:
         Prostokat r(0, 0, obszar_.szerokosc, obszar_.wysokosc);
         int gr = grubosc_ramki_geometrii();
         r = r.zmniejszony(Marginesy(gr));
-        int s = skala_dpi_ < 1 ? 1 : skala_dpi_;
+        SkalaUI s = skala_dpi_;
         return r.zmniejszony(Marginesy(wypelnienie_.lewy * s,
                                       wypelnienie_.gorny * s,
                                       wypelnienie_.prawy * s,

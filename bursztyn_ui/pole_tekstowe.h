@@ -208,7 +208,7 @@ public:
     // Wymiary
     Rozmiar zmierz(Rozmiar dostepny_rozmiar) override {
         (void)dostepny_rozmiar;
-        int skala = skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         int font_h = CzcionkaUI::pobierz_wysokosc(skala);
 
         char wyswietlany[MAKS_BUFOR];
@@ -236,7 +236,7 @@ public:
 
     // Rysowanie
     void rysuj_siebie(KontekstRysowania& ctx) override {
-        int skala = skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         Prostokat r(0, 0, obszar_.szerokosc, obszar_.wysokosc);
 
         StylStanu s = wyznacz_biezacy_styl_stanu();
@@ -672,7 +672,7 @@ private:
     }
 
     int szerokosc_tekstu_do(size_t bajt_limit) const {
-        int skala = skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         if (bajt_limit > dlugosc_) bajt_limit = dlugosc_;
         if (!czy_tryb_hasla_) {
             return CzcionkaUI::pozycja_x_z_bajtu(bufor_, bajt_limit, skala);
@@ -690,7 +690,7 @@ private:
     }
 
     size_t pozycja_z_x(int target_x) const {
-        int skala = skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         int pad_l = wypelnienie_.lewy * skala;
         int txt_rel_x = target_x - pad_l + przewiniecie_x_;
         if (txt_rel_x <= 0) return 0;
@@ -716,7 +716,7 @@ private:
     }
 
     void dopasuj_przewiniecie() {
-        int skala = skala_dpi_;
+        SkalaUI skala = skala_dpi_;
         int pad_l = wypelnienie_.lewy * skala;
         int pad_r = wypelnienie_.prawy * skala;
         int klient_w = obszar_.szerokosc - (pad_l + pad_r);
