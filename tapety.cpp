@@ -412,9 +412,10 @@ void instaluj(uint64_t mbi) {
         sciezka[sp] = '\0';
 
         psf_metadane meta{};
-        if (pobierz_metadane_tworu(sciezka, &meta)) {
+        if (pobierz_metadane_tworu(sciezka, &meta) && meta.rozmiar == s_pakiet_wpisy[i].rozmiar) {
             ++zachowane;
         } else {
+            if (meta.rozmiar != 0) (void)usun_twor(sciezka);
             if (!utworz_plik(sciezka)) {
                 log_sciezka("[TAPETA] BLAD tworzenia pliku ", sciezka);
                 continue;

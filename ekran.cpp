@@ -172,6 +172,7 @@ bool ekran_obsluz(const proces_t&p,const EkranZadanie&r,EkranOdpowiedz*out){
                 {1280, 800, 32, 1280*4, 0, 0},
                 {1920, 1080, 32, 1920*4, 0, 0},
                 {2560, 1440, 32, 2560*4, 0, 0},
+                {3440, 1440, 32, 3440*4, 0, 0},
                 {1920, 1080, 32, 1920*4, 0, 0},
                 {1280, 800, 32, 1280*4, 0, 0}
             };
@@ -389,7 +390,7 @@ bool ekran_obsluz(const proces_t&p,const EkranZadanie&r,EkranOdpowiedz*out){
             check(cur_x == 0 && cur_y == 1079);
             klog_serial("[EKRAN TEST] PS/2 screen corners reachability: PASS");
 
-            // Runtime transitions: 1080p -> 1440p -> 4K
+            // Runtime transitions: 1080p -> 1440p -> UWQHD (3440x1440) -> 4K
             TrybEkranu t_1440{2560, 1440, 32, 2560*4, 0, 0};
             check(zastosuj(t_1440, 100, 0, false, false) == EKRAN_OK && !tx.oczekuje);
             grafika_pobierz_granice_kursora(&b_mx, &b_my);
@@ -398,6 +399,25 @@ bool ekran_obsluz(const proces_t&p,const EkranZadanie&r,EkranOdpowiedz*out){
             grafika_pobierz_pozycje_kursora(&cur_x, &cur_y);
             check(cur_x == 2559 && cur_y == 1439);
 
+            TrybEkranu t_uwqhd{3440, 1440, 32, 3440*4, 0, 0};
+            check(zastosuj(t_uwqhd, 100, 0, false, false) == EKRAN_OK && !tx.oczekuje);
+            grafika_pobierz_granice_kursora(&b_mx, &b_my);
+            check(b_mx == 3439 && b_my == 1439);
+            // Corner reachability in 3440x1440
+            for(int i = 0; i < 60; ++i) zaktualizuj_mysze_zrodlo(-100, 100, 0, "usb"); // top-left
+            grafika_pobierz_pozycje_kursora(&cur_x, &cur_y);
+            check(cur_x == 0 && cur_y == 0);
+            for(int i = 0; i < 60; ++i) zaktualizuj_mysze_zrodlo(0, -100, 0, "usb"); // bottom-left
+            grafika_pobierz_pozycje_kursora(&cur_x, &cur_y);
+            check(cur_x == 0 && cur_y == 1439 && cur_y >= 1400);
+            for(int i = 0; i < 60; ++i) zaktualizuj_mysze_zrodlo(100, 0, 0, "usb"); // bottom-right
+            grafika_pobierz_pozycje_kursora(&cur_x, &cur_y);
+            check(cur_x == 3439 && cur_y == 1439);
+            for(int i = 0; i < 60; ++i) zaktualizuj_mysze_zrodlo(0, 100, 0, "usb"); // top-right
+            grafika_pobierz_pozycje_kursora(&cur_x, &cur_y);
+            check(cur_x == 3439 && cur_y == 0);
+            klog_serial("[EKRAN TEST] Ultrawide 3440x1440 corners reachability: PASS");
+
             TrybEkranu t_4k{3840, 2160, 32, 3840*4, 0, 0};
             check(zastosuj(t_4k, 100, 0, false, false) == EKRAN_OK && !tx.oczekuje);
             grafika_pobierz_granice_kursora(&b_mx, &b_my);
@@ -405,18 +425,56 @@ bool ekran_obsluz(const proces_t&p,const EkranZadanie&r,EkranOdpowiedz*out){
             for(int i = 0; i < 50; ++i) zaktualizuj_mysze_zrodlo(100, -100, 0, "usb");
             grafika_pobierz_pozycje_kursora(&cur_x, &cur_y);
             check(cur_x == 3839 && cur_y == 2159);
-            klog_serial("[EKRAN TEST] Runtime 1080p -> 1440p -> 4K mouse bounds: PASS");
+            klog_serial("[EKRAN TEST] Runtime 1080p -> 1440p -> UWQHD -> 4K mouse bounds: PASS");
 
-            // Rollback test: 1080p -> temporary 1440p -> rollback
+            // Live-window transition regressions:
+            // 3840x2160 -> 3440x1440 -> 2560x1440 -> 3440x1440 -> 1920x1080
+            // Keep the SAME open window(s) during transitions and verify layer & mouse state.
+            check(zastosuj(t_1080, 100, 0, false, false) == EKRAN_OK && !tx.oczekuje);
+            const uint64_t base_pmm = pmm_pobierz_wolne_ramki();
+            const uint64_t base_heap = heap_zajete_bajty();
+            const uint64_t base_buf = bufory_grafiki_bajty();
+
+            const TrybEkranu live_cycle[] = { t_4k, t_uwqhd, t_1440, t_uwqhd, t_1080 };
+            for(const auto& cel : live_cycle) {
+                check(zastosuj(cel, 100, 0, false, false) == EKRAN_OK && !tx.oczekuje);
+                check(grafika_pobierz_szerokosc() == int(cel.szerokosc) && grafika_pobierz_wysokosc() == int(cel.wysokosc));
+                grafika_pobierz_granice_kursora(&b_mx, &b_my);
+                check(b_mx == int(cel.szerokosc) - 1 && b_my == int(cel.wysokosc) - 1);
+                // Mouse reachability immediately
+                for(int i = 0; i < 50; ++i) zaktualizuj_mysze_zrodlo(-100, 100, 0, "usb");
+                grafika_pobierz_pozycje_kursora(&cur_x, &cur_y);
+                check(cur_x == 0 && cur_y == 0);
+                for(int i = 0; i < 50; ++i) zaktualizuj_mysze_zrodlo(100, -100, 0, "usb");
+                grafika_pobierz_pozycje_kursora(&cur_x, &cur_y);
+                check(cur_x == b_mx && cur_y == b_my);
+                // Verify presentation surfaces and window bounds for live layers
+                for(int pid = 1; pid < SKLADACZ_MAKS_WARSTW; ++pid) {
+                    auto* w = pobierz_warstwe(pid); if (!w) continue;
+                    check(w->x >= 0 && w->y >= 0);
+                    check(w->x + w->szerokosc <= int(cel.szerokosc));
+                    check(w->y + w->wysokosc <= int(cel.wysokosc));
+                    check(w->bufor_pikseli != nullptr);
+                }
+            }
+            check(base_pmm == pmm_pobierz_wolne_ramki());
+            check(base_heap == heap_zajete_bajty());
+            check(base_buf == bufory_grafiki_bajty());
+            klog_serial("[EKRAN TEST] Live-window transitions 4K->UWQHD->QHD->UWQHD->FHD: PASS");
+
+            // Rollback test: 1080p -> temporary UWQHD (3440x1440) -> rollback
             check(zastosuj(t_1080, 100, 0, false, false) == EKRAN_OK && !tx.oczekuje);
             grafika_pobierz_granice_kursora(&b_mx, &b_my);
             check(b_mx == 1919 && b_my == 1079);
-            check(zastosuj(t_1440, 100, 0, false, true) == EKRAN_OCZEKUJE && tx.oczekuje);
+            check(zastosuj(t_uwqhd, 100, 0, false, true) == EKRAN_OCZEKUJE && tx.oczekuje);
             grafika_pobierz_granice_kursora(&b_mx, &b_my);
-            check(b_mx == 2559 && b_my == 1439);
+            check(b_mx == 3439 && b_my == 1439);
             check(cofnij() && !tx.oczekuje);
             grafika_pobierz_granice_kursora(&b_mx, &b_my);
             check(b_mx == 1919 && b_my == 1079);
+            check(base_pmm == pmm_pobierz_wolne_ramki());
+            check(base_heap == heap_zajete_bajty());
+            check(base_buf == bufory_grafiki_bajty());
             klog_serial("[EKRAN TEST] Rollback immediately restores mouse bounds: PASS");
 
             // Scale-only test: 1080p @ 100% vs 200%
@@ -431,13 +489,7 @@ bool ekran_obsluz(const proces_t&p,const EkranZadanie&r,EkranOdpowiedz*out){
             check(b_mx == 1919 && b_my == 1079);
             klog_serial("[EKRAN TEST] Scale-only (100% -> 200%) mouse bounds unchanged: PASS");
             if(!ekran_ten_sam(boot_tryb, grafika_tryb_ekranu())) {
-                zastosuj(boot_tryb, 100, 0, true);
-                if(tx.oczekuje) {
-                    zapisz();
-                    skladacz_zakoncz_zmiane_ekranu(&tx.warstwy, true);
-                    grafika_zwolnij_stan(&tx.stary);
-                    tx.oczekuje = false;
-                }
+                zastosuj(boot_tryb, 100, 0, false, false);
             }
         }
         out->status=EKRAN_OK;return true;

@@ -3069,18 +3069,33 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
     if (mysz_y >= static_cast<int>(WYS))
         mysz_y = static_cast<int>(WYS) / 2;
 
-    ekran_tryby[ekran_liczba_trybow++]=boot_tryb;
     if(bochs) {
-        static constexpr uint32_t wymiary[][2]={{800,600},{1024,768},{1280,720},{1280,800},{1366,768},{1360,768},{1600,900},{1920,1080},{2560,1440},{3840,2160}};
+        static constexpr uint32_t wymiary[][2]={
+            {800,600},{1024,768},{1280,720},{1280,800},{1360,768},
+            {1600,900},{1920,1080},{2560,1440},{3440,1440},{3840,2160}
+        };
+        bool boot_dodany = false;
         for(const auto& wh:wymiary) {
             TrybEkranu t{wh[0],wh[1],32,wh[0]*4,0,0};
-            if(ekran_ten_sam(t,boot_tryb)||!bochs_sprawdz_tryb(t))continue;
+            if(ekran_ten_sam(t,boot_tryb)) {
+                if(ekran_liczba_trybow<EKRAN_MAX_TRYBOW) {
+                    ekran_tryby[ekran_liczba_trybow++]=boot_tryb;
+                    boot_dodany = true;
+                }
+                continue;
+            }
+            if(!bochs_sprawdz_tryb(t))continue;
             size_t n=0; if(!ekran_rozmiar(t,&n))continue;
             void* probe[3]={}; bool ok=true;
             for(auto& p:probe) { p=bufor_grafiki_alokuj(n); if(!p)ok=false; }
             for(auto p:probe)bufor_grafiki_zwolnij(p);
             if(ok&&ekran_liczba_trybow<EKRAN_MAX_TRYBOW)ekran_tryby[ekran_liczba_trybow++]=t;
         }
+        if(!boot_dodany && ekran_liczba_trybow<EKRAN_MAX_TRYBOW) {
+            ekran_tryby[ekran_liczba_trybow++]=boot_tryb;
+        }
+    } else {
+        ekran_tryby[ekran_liczba_trybow++]=boot_tryb;
     }
     klog_serial(bochs?"[EKRAN] Backend Bochs VBE (PCI/BAR/DISPI potwierdzone).":
         (mamy_efi?"[EKRAN] Backend UEFI GOP (framebuffer).":"[EKRAN] Backend VESA (framebuffer)."));

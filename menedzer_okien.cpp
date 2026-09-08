@@ -1894,9 +1894,24 @@ extern "C" __attribute__((noreturn)) void _start() {
         if(zdarzenie.typ==BWS_ZDARZENIE_EKRAN){
             zamknij_pulpit_context();zamknij_pulpit_modal();
             menu_start_otwarte=false;menu_gry_otwarte=false;dragging_file=false;drag_candidate=false;
-            ui_skala_procent=zdarzenie.kod;metryki_ekranu();
-            screen_w=zdarzenie.dx;screen_h=zdarzenie.dy;
-            gui_ustaw_obszar_roboczy(0, 0, screen_w, screen_h - PASEK_WYS);
+            // Pola zdarzenia (dx/dy/kod) pochodza z chwili wyslania i moga byc
+            // nieaktualne, gdy kolejka zdarzen jest przetwarzana z opoznieniem
+            // (np. szybkie sekwencje modesetow). Zapis obszaru roboczego ze
+            // starych wartosci nadpisywalby swiezy stan BWS62 opublikowany
+            // synchronicznie przez usluge ekranu i powodowalby clipping okien.
+            // Zrodlem prawdy jest biezacy stan jadra; zdarzenie to tylko budzik.
+            GuiMonitorInfo mon_now{};
+            if(gui_pobierz_monitor(0,&mon_now)&&mon_now.szer>0&&mon_now.wys>0){
+                if(ui_skala_poprawna(mon_now.scale_x1000/10))ui_skala_procent=mon_now.scale_x1000/10;
+                else if(ui_skala_poprawna(zdarzenie.kod))ui_skala_procent=zdarzenie.kod;
+                screen_w=mon_now.szer;screen_h=mon_now.wys;
+            }else{
+                if(ui_skala_poprawna(zdarzenie.kod))ui_skala_procent=zdarzenie.kod;
+                screen_w=zdarzenie.dx;screen_h=zdarzenie.dy;
+            }
+            metryki_ekranu();
+            if(screen_w>0&&screen_h>PASEK_WYS)
+                gui_ustaw_obszar_roboczy(0, 0, screen_w, screen_h - PASEK_WYS);
             rozmiesc_ikony_ekranu();zarejestruj_pulpit_jako_cel_drop();aktualizuj_overlay_menu();RysujPulpit(true);continue;
         }
         const uint64_t stara_sygnatura = sygnatura_okien();

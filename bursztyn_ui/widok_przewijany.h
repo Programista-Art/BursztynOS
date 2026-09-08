@@ -227,7 +227,8 @@ public:
         uint32_t tlo = styl_.normalny.tlo;
         uint32_t ramka = styl_.normalny.ramka;
         if (tlo != 0) ctx.rysuj_prostokat(b, tlo);
-        if (ramka != 0 && styl_.normalny.grubosc_ramki > 0) ctx.rysuj_ramke(b, ramka, styl_.normalny.grubosc_ramki * skala_dpi_);
+        int gr = grubosc_ramki_geometrii();
+        if (ramka != 0 && gr > 0) ctx.rysuj_ramke(b, ramka, gr);
 
         // Ogranicz do widoku i narysuj zawartość
         ctx.dodaj_przyciecie(widok_);
@@ -262,7 +263,7 @@ private:
         int h = obszar_.wysokosc;
         if (w <= 2 || h <= 2) return;
 
-        int ramka_gr = styl_.normalny.grubosc_ramki > 0 ? styl_.normalny.grubosc_ramki * skala_dpi_ : 0;
+        int ramka_gr = grubosc_ramki_geometrii();
         int max_w = w - 2 * ramka_gr;
         int max_h = h - 2 * ramka_gr;
 
@@ -305,8 +306,15 @@ private:
             pasek_pionowy_->rozmiesc(Prostokat(ramka_gr + avail_w,
                                               ramka_gr,
                                               szerokosc_paska_, avail_h));
-            pasek_pionowy_->ustaw_zakres(0, rozmiar_zawartosci_.wysokosc > avail_h ? rozmiar_zawartosci_.wysokosc - avail_h : 0);
+            int64_t max_scroll = rozmiar_zawartosci_.wysokosc > avail_h ? rozmiar_zawartosci_.wysokosc - avail_h : 0;
+            pasek_pionowy_->ustaw_zakres(0, max_scroll);
             pasek_pionowy_->ustaw_rozmiar_strony(avail_h);
+            if (pasek_pionowy_->wartosc() > max_scroll) {
+                pasek_pionowy_->ustaw_wartosc(max_scroll);
+            }
+        } else {
+            pasek_pionowy_->ustaw_wartosc(0);
+            pasek_pionowy_->ustaw_zakres(0, 0);
         }
 
         pasek_poziomy_->ustaw_widoczna(poziom_wymagany);
@@ -314,8 +322,15 @@ private:
             pasek_poziomy_->rozmiesc(Prostokat(ramka_gr,
                                               ramka_gr + avail_h,
                                               avail_w, szerokosc_paska_));
-            pasek_poziomy_->ustaw_zakres(0, rozmiar_zawartosci_.szerokosc > avail_w ? rozmiar_zawartosci_.szerokosc - avail_w : 0);
+            int64_t max_scroll = rozmiar_zawartosci_.szerokosc > avail_w ? rozmiar_zawartosci_.szerokosc - avail_w : 0;
+            pasek_poziomy_->ustaw_zakres(0, max_scroll);
             pasek_poziomy_->ustaw_rozmiar_strony(avail_w);
+            if (pasek_poziomy_->wartosc() > max_scroll) {
+                pasek_poziomy_->ustaw_wartosc(max_scroll);
+            }
+        } else {
+            pasek_poziomy_->ustaw_wartosc(0);
+            pasek_poziomy_->ustaw_zakres(0, 0);
         }
 
         zaktualizuj_pozycje_zawartosci();

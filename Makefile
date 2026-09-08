@@ -878,7 +878,7 @@ test_tmp.o: programy/test/kontrolki3_stabilizacja.h
 bochs_vbe.o: sterowniki/grafika/bochs_vbe.cpp sterowniki/grafika/bochs_vbe.h ekran_format.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
-ekran_tmp.o: programy/ekran/ekran.cpp programy/ekran/klient.h ekran_format.h ui_skala.h $(wildcard bursztyn_ui/*.h)
+ekran_tmp.o: programy/ekran/ekran.cpp programy/ekran/klient.h programy/ekran/ekran_okno.h ekran_format.h ui_skala.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
 ekran_blob.o: ekran_tmp.o bursztyn_gui.o programy/kontrolki3/kontrolki3_linker.ld
 	$(LD) --gc-sections -T programy/kontrolki3/kontrolki3_linker.ld $(RING3_LDFLAGS) ekran_tmp.o bursztyn_gui.o -o ekran.elf
@@ -889,4 +889,4 @@ $(filter %_tmp.o,$(OBJS)) bursztyn_gui.o: ui_skala.h
 ekran_format_ring3.o: ekran_format.cpp ekran_format.h
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
 bws_nowoczesne.o ekran.o grafika.o kernel.o: ekran.h ekran_format.h bufory_grafiki.h
-test_tmp.o: programy/test/ekran_testy.h programy/ekran/klient.h ekran_format.h pulpit_geometria.h
+test_tmp.o: programy/test/ekran_testy.h programy/ekran/klient.h programy/ekran/ekran_okno.h ekran_format.h pulpit_geometria.h

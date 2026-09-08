@@ -17,6 +17,7 @@ inline const char* ekran_przyjazna_nazwa(uint32_t szerokosc, uint32_t wysokosc) 
     if (szerokosc == 1280 && wysokosc == 720) return "HD";
     if (szerokosc == 1920 && wysokosc == 1080) return "Full HD";
     if (szerokosc == 2560 && wysokosc == 1440) return "QHD";
+    if (szerokosc == 3440 && wysokosc == 1440) return "UWQHD";
     if (szerokosc == 3840 && wysokosc == 2160) return "4K UHD";
     return nullptr;
 }

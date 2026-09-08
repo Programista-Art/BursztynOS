@@ -89,6 +89,11 @@ public:
         return Prostokat(0, 0, sw, sh);
     }
 
+    int logiczna_szerokosc() const { return logiczna_szerokosc_; }
+    int logiczna_wysokosc() const { return logiczna_wysokosc_; }
+    size_t pojemnosc_regionu() const { return pojemnosc_regionu_; }
+    const uint32_t* bufor_regionu() const { return bufor_regionu_; }
+
     void wysrodkuj() {
         dopasuj_do_obszaru_roboczego(true);
         Prostokat work = pobierz_obszar_roboczy();
@@ -101,50 +106,72 @@ public:
         const int stary_x = x_, stary_y = y_;
         x_ = x;
         y_ = y;
-        dopasuj_do_obszaru_roboczego(true);
+        dopasuj_do_obszaru_roboczego(false);
         if ((x_ != stary_x || y_ != stary_y) && !g_tlum_operacje_systemowe) {
             gui_ustaw_geometrie_okna(x_, y_, szerokosc_, wysokosc_,
                                      czy_zmaksymalizowane_ ? 2 : 1);
         }
     }
 
-    void ustaw_rozmiar(int w, int h) {
+    void ustaw_logiczny_rozmiar(int lw, int lh) {
+        if (lw < 100) lw = 100;
+        if (lh < 60) lh = 60;
+        logiczna_szerokosc_ = lw;
+        logiczna_wysokosc_ = lh;
+        szerokosc_ = ui_skaluj(logiczna_szerokosc_, skala_dpi_.procent());
+        wysokosc_ = ui_skaluj(logiczna_wysokosc_, skala_dpi_.procent());
+        dopasuj_do_obszaru_roboczego(false);
+        if (!g_tlum_operacje_systemowe) {
+            gui_ustaw_geometrie_okna(x_, y_, szerokosc_, wysokosc_, czy_zmaksymalizowane_ ? 2 : 1);
+        }
+        brudny_obszar_klienta_ = Prostokat();
+        przelicz_uklad();
+        czy_brudne_ = true;
+    }
+
+    void ustaw_rozmiar(int w, int h, bool aktualizuj_logiczny = true) {
         if (w < 100) w = 100;
         if (h < 60) h = 60;
-        logiczna_szerokosc_ = ui_odskaluj(w, skala_dpi_.procent());
-        logiczna_wysokosc_ = ui_odskaluj(h, skala_dpi_.procent());
+        if (aktualizuj_logiczny) {
+            logiczna_szerokosc_ = ui_odskaluj(w, skala_dpi_.procent());
+            logiczna_wysokosc_ = ui_odskaluj(h, skala_dpi_.procent());
+        }
         const int stary_x = x_, stary_y = y_, stary_w = szerokosc_, stary_h = wysokosc_;
         szerokosc_ = w;
         wysokosc_ = h;
-        dopasuj_do_obszaru_roboczego(true);
+        dopasuj_do_obszaru_roboczego(false);
         if (szerokosc_ != stary_w || wysokosc_ != stary_h || x_ != stary_x || y_ != stary_y) {
-            przelicz_uklad();
-            czy_brudne_ = true;
             if (!g_tlum_operacje_systemowe) {
                 gui_ustaw_geometrie_okna(x_, y_, szerokosc_, wysokosc_,
                                          czy_zmaksymalizowane_ ? 2 : 1);
             }
+            brudny_obszar_klienta_ = Prostokat();
+            przelicz_uklad();
+            czy_brudne_ = true;
         }
     }
 
-    void ustaw_geometrie(int x, int y, int w, int h) {
+    void ustaw_geometrie(int x, int y, int w, int h, bool aktualizuj_logiczny = true) {
         if (w < 100) w = 100;
         if (h < 60) h = 60;
-        logiczna_szerokosc_ = ui_odskaluj(w, skala_dpi_.procent());
-        logiczna_wysokosc_ = ui_odskaluj(h, skala_dpi_.procent());
+        if (aktualizuj_logiczny) {
+            logiczna_szerokosc_ = ui_odskaluj(w, skala_dpi_.procent());
+            logiczna_wysokosc_ = ui_odskaluj(h, skala_dpi_.procent());
+        }
         const int stary_x = x_, stary_y = y_, stary_w = szerokosc_, stary_h = wysokosc_;
         x_ = x;
         y_ = y;
         szerokosc_ = w;
         wysokosc_ = h;
-        dopasuj_do_obszaru_roboczego(true);
+        dopasuj_do_obszaru_roboczego(false);
         if (szerokosc_ != stary_w || wysokosc_ != stary_h || x_ != stary_x || y_ != stary_y) {
-            przelicz_uklad();
-            czy_brudne_ = true;
             if (!g_tlum_operacje_systemowe) {
                 gui_ustaw_geometrie_okna(x_, y_, szerokosc_, wysokosc_,
                                          czy_zmaksymalizowane_ ? 2 : 1);
             }
+            brudny_obszar_klienta_ = Prostokat();
+            przelicz_uklad();
+            czy_brudne_ = true;
         }
     }
 
@@ -152,10 +179,13 @@ public:
     // geometrii. BWS62 jest jedynym zrodlem rozmiaru obszaru roboczego.
     void dopasuj_do_obszaru_roboczego(bool dopasuj_rozmiar = true) {
         Prostokat work = pobierz_obszar_roboczy();
-        if (dopasuj_rozmiar || szerokosc_ > work.szerokosc) {
+        if (dopasuj_rozmiar) {
+            int target_w = ui_skaluj(logiczna_szerokosc_, skala_dpi_.procent());
+            int target_h = ui_skaluj(logiczna_wysokosc_, skala_dpi_.procent());
+            szerokosc_ = target_w > work.szerokosc ? work.szerokosc : target_w;
+            wysokosc_ = target_h > work.wysokosc ? work.wysokosc : target_h;
+        } else {
             if (szerokosc_ > work.szerokosc) szerokosc_ = work.szerokosc;
-        }
-        if (dopasuj_rozmiar || wysokosc_ > work.wysokosc) {
             if (wysokosc_ > work.wysokosc) wysokosc_ = work.wysokosc;
         }
         if (szerokosc_ < 1) szerokosc_ = 1;
@@ -226,7 +256,7 @@ public:
             if (!czy_zmaksymalizowane_) {
                 szerokosc_ = ui_skaluj(logiczna_szerokosc_, skala_dpi_.procent());
                 wysokosc_ = ui_skaluj(logiczna_wysokosc_, skala_dpi_.procent());
-                dopasuj_do_obszaru_roboczego(true);
+                dopasuj_do_obszaru_roboczego(false);
             } else {
                 Prostokat work = pobierz_obszar_roboczy();
                 x_ = work.x; y_ = work.y;
@@ -239,12 +269,13 @@ public:
         if (kontrolka_glowna_) {
             kontrolka_glowna_->ustaw_skale_dpi(skala_dpi_);
         }
-        przelicz_uklad();
-        czy_brudne_ = true;
         if (zglos_geometrie && zmiana_skali && !g_tlum_operacje_systemowe) {
             gui_ustaw_geometrie_okna(x_, y_, szerokosc_, wysokosc_,
                                      czy_zmaksymalizowane_ ? 2 : 1);
         }
+        brudny_obszar_klienta_ = Prostokat();
+        przelicz_uklad();
+        czy_brudne_ = true;
     }
 
     void przelicz_uklad() {
@@ -316,7 +347,8 @@ public:
         ++liczba_odrysowan_;
         if (pelne) liczba_brudnych_pikseli_ += static_cast<uint64_t>(szerokosc_)*WYSOKOSC_BELKI_TYTULOWEJ*skala_dpi_;
         for (size_t i = 0; i < regiony.liczba; ++i) {
-            Prostokat r = regiony.prostokaty[i];
+            Prostokat r = regiony.prostokaty[i].przeciecie(klient);
+            if (r.czy_pusty()) continue;
             ostatni_obszar_odrysowania_ = ostatni_obszar_odrysowania_.suma(r);
             size_t pixels = static_cast<size_t>(r.szerokosc)*r.wysokosc;
             liczba_brudnych_pikseli_ += pixels;
@@ -427,23 +459,31 @@ public:
 
         switch (surowe_zdarzenie.typ) {
             case BWS_ZDARZENIE_EKRAN: {
-                if(!ui_skala_poprawna(surowe_zdarzenie.kod))break;
+                if (!ui_skala_poprawna(surowe_zdarzenie.kod)) break;
                 popupy_.zamknij(PowodZamknieciaPopup::ZmianaGeometrii);
-                zwolnij_przechwycenie_myszy();czy_przeciagane_=false;kontrolka_najechana_=nullptr;
-                ui_skala_procent=surowe_zdarzenie.kod;
-                x_=surowe_zdarzenie.x;y_=surowe_zdarzenie.y;
-                szerokosc_=surowe_zdarzenie.dx;wysokosc_=surowe_zdarzenie.dy;
-                // Restore geometry and minimized state deliberately remain owner state.
-                ustaw_skale_dpi(ui_skala(), true);
-                const int stary_x = x_, stary_y = y_, stary_w = szerokosc_, stary_h = wysokosc_;
-                dopasuj_do_obszaru_roboczego(true);
-                if (x_ != stary_x || y_ != stary_y || szerokosc_ != stary_w || wysokosc_ != stary_h) {
-                    przelicz_uklad();
-                    czy_brudne_ = true;
-                    if (!g_tlum_operacje_systemowe) {
-                        gui_ustaw_geometrie_okna(x_, y_, szerokosc_, wysokosc_, czy_zmaksymalizowane_ ? 2 : 1);
-                    }
+                zwolnij_przechwycenie_myszy(); czy_przeciagane_ = false; kontrolka_najechana_ = nullptr;
+                ui_skala_procent = surowe_zdarzenie.kod;
+                skala_dpi_ = ui_skala();
+                if (czy_zmaksymalizowane_) {
+                    Prostokat work = pobierz_obszar_roboczy();
+                    x_ = work.x; y_ = work.y;
+                    szerokosc_ = work.szerokosc; wysokosc_ = work.wysokosc;
+                } else {
+                    szerokosc_ = ui_skaluj(logiczna_szerokosc_, skala_dpi_.procent());
+                    wysokosc_ = ui_skaluj(logiczna_wysokosc_, skala_dpi_.procent());
+                    dopasuj_do_obszaru_roboczego(false);
                 }
+                popupy_.ustaw_skale_dpi(skala_dpi_);
+                if (kontrolka_glowna_) {
+                    kontrolka_glowna_->ustaw_skale_dpi(skala_dpi_);
+                }
+                if (!g_tlum_operacje_systemowe) {
+                    gui_ustaw_geometrie_okna(x_, y_, szerokosc_, wysokosc_,
+                                             czy_zmaksymalizowane_ ? 2 : 1);
+                }
+                brudny_obszar_klienta_ = Prostokat();
+                przelicz_uklad();
+                czy_brudne_ = true;
                 break;
             }
             case BWS_ZDARZENIE_MYSZ_RUCH: {
@@ -799,6 +839,7 @@ private:
         }
     }
 
+protected:
     char tytul_[64]{0};
     int x_{100};
     int y_{100};
