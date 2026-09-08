@@ -203,11 +203,11 @@ public:
         const char* procenty[] = {"100%", "125%", "150%", "175%", "200%"};
         for (auto* s : procenty) skale_->dodaj_element(s);
         info_ = &root->dodaj<Etykieta>("");
-        auto& limit = root->dodaj<Etykieta>(
-            stan_.mozliwosci.mozna_zmienic_runtime
-                ? "Zmiana rozdzielczości dostępna bez restartu."
-                : "Bieżący sterownik nie obsługuje zmiany rozdzielczości podczas pracy systemu.");
-        limit.ustaw_zawijanie(true);
+        if (!stan_.mozliwosci.mozna_zmienic_runtime) {
+            auto& limit = root->dodaj<Etykieta>(
+                "Bieżący sterownik nie obsługuje zmiany rozdzielczości podczas pracy systemu.");
+            limit.ustaw_zawijanie(true);
+        }
 
         panel_akcji_ = new Panel(Orientacja::Pozioma);
         panel_akcji_->ustaw_uklad_automatyczny(true);
@@ -226,7 +226,7 @@ public:
             auto* o = static_cast<OknoEkranu*>(dane);
             if (o) o->anuluj_akcje();
         }, this);
-        domyslne_btn_ = &panel_akcji_->dodaj<Przycisk>("Przywróć domyślne");
+        domyslne_btn_ = &panel_akcji_->dodaj<Przycisk>("Przywróć");
         domyslne_btn_->przy_kliknieciu([](Przycisk*, void* dane) {
             auto* o = static_cast<OknoEkranu*>(dane);
             if (o) o->domyslne_akcje();

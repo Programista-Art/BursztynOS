@@ -17,6 +17,7 @@
 #include "bws_api.h"
 #include "bws_nowoczesne.h"
 #include "skladacz_obrazu.h"
+#include "legacy_ui.h"
 #include <stdbool.h>
 
 
@@ -38,6 +39,12 @@ struct GuiIkona {
     const GuiFragmentIkony* fragmenty;
     uint16_t liczba_fragmentow;
 };
+
+/* Jawny adapter dla aplikacji sprzed BursztynUI. Nie zmienia ABI BWS:
+ * konwersja logiczne 100% <-> piksele fizyczne odbywa sie w Ring 3. */
+void gui_legacy_wlacz();
+bool gui_legacy_czy_wlaczony();
+uint32_t gui_legacy_skala_procent();
 
 
 /* =========================================================================

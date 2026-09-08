@@ -46,6 +46,8 @@ def main():
     p.add_argument('--x', type=int, default=50);p.add_argument('--y', type=int, default=580)
     p.add_argument('--name', default='capture')
     p.add_argument('--wallpaper', type=int, choices=range(1,11), default=3)
+    p.add_argument('--timeout', type=int, default=360,
+                   help='Limit oczekiwania na suite boot w sekundach')
     args=p.parse_args();d=args.directory.resolve();d.mkdir(parents=True,exist_ok=True)
     if args.action=='boot':
         disk=d/'wirtualny_dysk.img'
@@ -68,7 +70,7 @@ def main():
             proc=subprocess.Popen(cmd,stdout=log,stderr=log,start_new_session=True)
         (d/'pid').write_text(str(proc.pid))
         print(f'QEMU PID {proc.pid}; dysk {disk}',flush=True)
-        deadline=time.monotonic()+360
+        deadline=time.monotonic()+args.timeout
         try:
             while time.monotonic()<deadline:
                 if proc.poll() is not None:raise RuntimeError((d/'qemu.log').read_text())

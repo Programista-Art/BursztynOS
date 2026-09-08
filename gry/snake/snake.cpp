@@ -554,6 +554,7 @@ static void obsluz_mysz_ruch(const bws_zdarzenie& zdarzenie) {
  * Punkt wejscia Ring 3
  * ======================================================================== */
 extern "C" __attribute__((noreturn)) void _start() {
+    gui_legacy_wlacz();
     gui_pobierz_rozdzielczosc(&ekran_w, &ekran_h);
     if (ekran_w <= 0 || ekran_h <= WYSOKOSC_PASKA_SYSTEMOWEGO) {
         gui_zakoncz_aplikacje();
@@ -577,6 +578,15 @@ extern "C" __attribute__((noreturn)) void _start() {
         bws_zdarzenie zdarzenie{};
 
         if (!gui_czekaj_na_zdarzenie(&zdarzenie)) continue;
+
+        if (zdarzenie.typ == BWS_ZDARZENIE_EKRAN) {
+            gui_pobierz_rozdzielczosc(&ekran_w,&ekran_h);
+            if (bws_utworz_warstwe(okno_x,okno_y,SZEROKOSC_OKNA,
+                                   WYSOKOSC_OKNA,OKNO_Z_ORDER)<0)
+                gui_zakoncz_aplikacje();
+            rysuj_gre();
+            continue;
+        }
 
         if (zdarzenie.typ == BWS_ZDARZENIE_ZAMKNIJ) {
             zakoncz_przeciaganie();

@@ -38,6 +38,8 @@
  */
 
 #include "skladacz_obrazu.h"
+#include "ekran.h"
+#include "zegar_ui.h"
 #include "bufory_grafiki.h"
 #include "ekran_format.h"
 #include "sterowniki/czas/hpet.h"
@@ -1846,7 +1848,10 @@ void skladacz_obrazu_obsluz_dirty() {
     /* Faza A: wszystkie regiony trafiaja w calosci do scene backbufferu.
        Framebuffer nie jest dotykany podczas kosztownego compositingu. */
     const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
-    const GuiDirtyRect rtc_rect{sw>150?sw-150:0,sh>40?sh-40:0,150,40};
+    uint32_t rtc_scale = ekran_skala();
+    if (!ui_skala_poprawna(rtc_scale)) rtc_scale = 100;
+    const ZegarUiGeometria rtc = zegar_ui_geometria(sw, sh, rtc_scale, 0);
+    const GuiDirtyRect rtc_rect{rtc.x, rtc.y, rtc.szer, rtc.wys};
     for(uint32_t ri=0;ri<count;++ri){
         const GuiDirtyRect&r=work[ri];
         pixels+=rect_area(r);

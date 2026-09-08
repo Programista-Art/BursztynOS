@@ -953,7 +953,8 @@ void instaluj_wbudowane_programy() {
         "poziom_zaufania = 4\n"
         "plik_startowy = \"test.bur\"\n"
         "uprawnienia = [\n"
-        "    \"okna\"\n"
+        "    \"okna\",\n"
+        "    \"uruchom_program\"\n"
         "]\n";
     
     static const char MANIFEST_SNAKE[] =
@@ -1930,7 +1931,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
         (void)bws_uruchom_program_z_pliku_z_argumentem(
             "/programy/test.cebula/test.bur",
             PZB_UZYTKOWNIK,
-            PRAWO_GUI,
+            PRAWO_GUI | PRAWO_URUCHOM_PROGRAM,
             false,
             "--automated");
     }

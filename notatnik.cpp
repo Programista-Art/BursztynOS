@@ -71,8 +71,8 @@ void _start();
  * Zachowujemy obecny layout Notatnika:
  *
  *   header  0x0000, VA 0x1000000
- *   text    file 0x1000, VA 0x1001000, 32 KiB
- *   data    file 0x9000, VA 0x1009000, 128 KiB
+ *   text    file 0x1000, VA 0x1001000, 60 KiB
+ *   data    file 0x10000, VA 0x1010000, 128 KiB
  *
  * Linker script Notatnika MUSI miec identyczny layout.
  */
@@ -86,12 +86,12 @@ NaglowekBur naglowek = {
     ),
 
     UINT64_C(0x1000),
-    UINT64_C(0x8000),
+    UINT64_C(0xF000),
     UINT64_C(0x1001000),
 
-    UINT64_C(0x9000),
+    UINT64_C(0x10000),
     UINT64_C(0x20000),
-    UINT64_C(0x1009000)
+    UINT64_C(0x1010000)
 };
 
 }
@@ -3251,6 +3251,7 @@ void aktualizuj_dragging(
 
 extern "C" __attribute__((noreturn))
 void _start() {
+    gui_legacy_wlacz();
     wyczysc_dokument();
 
     tryb =
@@ -3336,6 +3337,18 @@ void _start() {
     while (!wyjdz) {
         bws_zdarzenie zdarzenie{};
         if (!gui_czekaj_na_zdarzenie(&zdarzenie)) continue;
+        if (zdarzenie.typ == BWS_ZDARZENIE_EKRAN) {
+            gui_pobierz_rozdzielczosc(&screen_w,&screen_h);
+            if (zmaksymalizowane) {
+                WIN_X=0; WIN_Y=0; WIN_W=screen_w; WIN_H=screen_h-TASKBAR_H;
+            } else {
+                WIN_W=DOMYSLNY_WIN_W; WIN_H=DOMYSLNY_WIN_H;
+            }
+            ogranicz_geometrie_okna();
+            if (!utworz_lub_zmien_warstwe()) gui_zakoncz_aplikacje();
+            redraw=true; pelne=true;
+            continue;
+        }
         bool szybka_sciezka = false;
         bool szybki_edytor = false;
         ZakresRedraw szybki_zakres{};

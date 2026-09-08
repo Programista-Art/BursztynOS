@@ -6,6 +6,8 @@
 #include "zegar-rtc.h"
 #include "ahci.h"
 #include "scheduler.h"
+#include "ekran.h"
+#include "zegar_ui.h"
 #include "sterowniki/czas/hpet.h"
 #include "skladacz_obrazu.h"
 #include "bws_zdarzenia.h"
@@ -1698,7 +1700,11 @@ void rysuj_zegar_rtc() {
 
     const int cur_w = grafika_pobierz_szerokosc();
     const int cur_h = grafika_pobierz_wysokosc();
-    if (cur_w < 150 || cur_h < 40) {
+    uint32_t procent = ekran_skala();
+    if (!ui_skala_poprawna(procent)) procent = 100;
+    const int zegar_w = ui_skaluj(150, procent);
+    const int taskbar_h = ui_skaluj(40, procent);
+    if (cur_w < zegar_w || cur_h < taskbar_h) {
         return;
     }
 
@@ -1710,30 +1716,41 @@ void rysuj_zegar_rtc() {
         &czas,
         bufor_czasu);
 
-    const int zegar_x = cur_w - 150;
-    const int pasek_y = cur_h - 40;
-    const int zegar_y = cur_h - 32;
+    int tekst_szer = 0;
+    for (size_t i = 0; bufor_czasu[i] != '\0'; ++i) {
+        const uint32_t znak = static_cast<uint8_t>(bufor_czasu[i]);
+        int szer_znaku = 8;
+        if (znak < sizeof(nowa_czcionka_szerokosci) /
+                       sizeof(nowa_czcionka_szerokosci[0]))
+            szer_znaku = nowa_czcionka_szerokosci[znak];
+        if (szer_znaku < 1) szer_znaku = 1;
+        if (szer_znaku > 16) szer_znaku = 16;
+        tekst_szer += ui_skaluj(szer_znaku + 1,
+                                static_cast<uint32_t>(ui_skaluj(200, procent)));
+    }
+    const ZegarUiGeometria g =
+        zegar_ui_geometria(cur_w, cur_h, procent, tekst_szer);
 
     RysujProstokat(
-        zegar_x,
-        pasek_y,
-        150,
-        40,
+        g.x,
+        g.y,
+        g.szer,
+        g.wys,
         0x001A0B00);
 
     RysujProstokat(
-        zegar_x,
-        pasek_y,
-        150,
-        2,
+        g.x,
+        g.y,
+        g.szer,
+        ui_skaluj(2, procent),
         0x00E58A00);
 
     WypiszTekst(
         bufor_czasu,
-        zegar_x + 10,
-        zegar_y,
+        g.tekst_x,
+        g.tekst_y,
         0x00FFBF00,
-        2);
+        g.skala_fontu);
 }
 
 void OdswiezEkran() {
@@ -2461,9 +2478,12 @@ extern "C" void obsluga_przerwania_zegara() {
         fallback_ticki = 0; termin = true;
     }
     if (!termin) return;
-    skladacz_obrazu_oznacz_dirty_rect(
-        grafika_pobierz_szerokosc()-150,
-        grafika_pobierz_wysokosc()-40,150,40);
+    uint32_t rtc_scale = ekran_skala();
+    if (!ui_skala_poprawna(rtc_scale)) rtc_scale = 100;
+    const ZegarUiGeometria rtc = zegar_ui_geometria(
+        grafika_pobierz_szerokosc(), grafika_pobierz_wysokosc(),
+        rtc_scale, 0);
+    skladacz_obrazu_oznacz_dirty_rect(rtc.x, rtc.y, rtc.szer, rtc.wys);
     bws_zdarzenie e{};
     e.typ = BWS_ZDARZENIE_TIMER;
     e.timestamp = znacznik_zdarzenia();

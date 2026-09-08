@@ -556,6 +556,7 @@ static void RysujInterfejs(bool wyczysc_warstwe) {
 // -----------------------------------------------------------------------------
 
 extern "C" __attribute__((noreturn)) void _start() {
+    gui_legacy_wlacz();
     resetuj_kalkulator();
 
     dragging = false;
@@ -585,6 +586,20 @@ extern "C" __attribute__((noreturn)) void _start() {
     while (!wyjdz) {
         bws_zdarzenie zdarzenie{};
         if (!gui_czekaj_na_zdarzenie(&zdarzenie)) continue;
+        if (zdarzenie.typ == BWS_ZDARZENIE_EKRAN) {
+            gui_pobierz_rozdzielczosc(&screen_w, &screen_h);
+            if (zmaksymalizowane) {
+                WIN_X=0; WIN_Y=0; WIN_W=screen_w;
+                WIN_H=screen_h-PASEK_SYSTEMOWY_H;
+            } else {
+                WIN_W=restore_w; WIN_H=restore_h;
+                ogranicz_pozycje_okna(&WIN_X,&WIN_Y);
+            }
+            if (bws_utworz_warstwe(WIN_X,WIN_Y,WIN_W,WIN_H,Z_ORDER_OKNA)<0)
+                gui_zakoncz_aplikacje();
+            RysujInterfejs(true);
+            continue;
+        }
         if (zdarzenie.typ == BWS_ZDARZENIE_FOCUS && aplikacja_zminimalizowana)
             aplikacja_zminimalizowana = false;
         const int mx = zdarzenie.x;

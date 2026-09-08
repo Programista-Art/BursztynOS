@@ -29,11 +29,11 @@ struct NaglowekBur {
 
 extern "C" __attribute__((noreturn)) void _start();
 
-static constexpr uint64_t BUR_TEKST_ROZMIAR     = 0x68000ULL; // 416 KiB
+static constexpr uint64_t BUR_TEKST_ROZMIAR     = 0x69000ULL; // 420 KiB
 static constexpr uint64_t BUR_TEKST_PRZESUNIECIE = 0x1000ULL;
 static constexpr uint64_t BUR_TEKST_WIRTUALNY     = 0x1001000ULL;
-static constexpr uint64_t BUR_DANE_PRZESUNIECIE   = 0x69000ULL;
-static constexpr uint64_t BUR_DANE_WIRTUALNY       = 0x1069000ULL;
+static constexpr uint64_t BUR_DANE_PRZESUNIECIE   = 0x6A000ULL;
+static constexpr uint64_t BUR_DANE_WIRTUALNY       = 0x106A000ULL;
 static constexpr uint64_t BUR_DANE_ROZMIAR         = 131072ULL;
 
 extern "C" {

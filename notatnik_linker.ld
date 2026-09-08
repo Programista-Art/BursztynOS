@@ -52,12 +52,12 @@ BUR_HEADER_SIZE   = 0x1000;
 BUR_HEADER_VADDR  = 0x1000000;
 
 BUR_TEXT_OFFSET   = 0x1000;
-BUR_TEXT_SIZE     = 0x8000;
+BUR_TEXT_SIZE     = 0xF000;
 BUR_TEXT_VADDR    = 0x1001000;
 
-BUR_DATA_OFFSET   = 0x9000;
+BUR_DATA_OFFSET   = 0x10000;
 BUR_DATA_SIZE     = 0x20000;
-BUR_DATA_VADDR    = 0x1009000;
+BUR_DATA_VADDR    = 0x1010000;
 
 BUR_TEXT_END      = BUR_TEXT_VADDR + BUR_TEXT_SIZE;
 BUR_DATA_END      = BUR_DATA_VADDR + BUR_DATA_SIZE;
@@ -140,12 +140,12 @@ SECTIONS
 
         /*
          * Koniec rzeczywiscie wykorzystanego TEXT zapisujemy PRZED
-         * dopelnieniem, aby ASSERT wykryl przekroczenie 32 KiB.
+         * dopelnieniem, aby ASSERT wykryl przekroczenie 60 KiB.
          */
         __bur_text_used_end = .;
 
         /*
-         * Naglowek .bur deklaruje tekst_rozmiar == 0x8000.
+         * Naglowek .bur deklaruje tekst_rozmiar == 0xF000.
          * Loader wymaga, aby caly ten region fizycznie istnial w pliku.
          */
         . = BUR_TEXT_SIZE;
@@ -353,12 +353,12 @@ SECTIONS
 
     ASSERT(
         __bur_text_used_end <= BUR_TEXT_END,
-        "BURSZTYN NOTATNIK: kod + rodata przekraczaja 32 KiB segmentu TEXT"
+        "BURSZTYN NOTATNIK: kod + rodata przekraczaja 60 KiB segmentu TEXT"
     )
 
     ASSERT(
         SIZEOF(.text) == BUR_TEXT_SIZE,
-        "BURSZTYN NOTATNIK: TEXT musi miec dokladnie 0x8000 bajtow"
+        "BURSZTYN NOTATNIK: TEXT musi miec dokladnie 0xF000 bajtow"
     )
 
     ASSERT(

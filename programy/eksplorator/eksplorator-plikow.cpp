@@ -17,8 +17,8 @@ extern "C" __attribute__((noreturn)) void _start();
 extern "C" {
 __attribute__((section(".naglowek"), used)) NaglowekBur naglowek = {
     {'B', 'U', 'R', '\0'}, reinterpret_cast<uint64_t>(&_start),
-    UINT64_C(0x1000), UINT64_C(0xC000), UINT64_C(0x1001000),
-    UINT64_C(0xD000), UINT64_C(0x20000), UINT64_C(0x100D000)};
+    UINT64_C(0x1000), UINT64_C(0xD000), UINT64_C(0x1001000),
+    UINT64_C(0xE000), UINT64_C(0x20000), UINT64_C(0x100E000)};
 }
 #endif
 
@@ -2691,6 +2691,7 @@ void perform_context_action(AktowkaView& view, AktowkaModel& model,
 
 #ifndef AKTOWKA_HOST_TEST
 extern "C" __attribute__((noreturn)) void _start() {
+    gui_legacy_wlacz();
     AktowkaModel model;
     AktowkaWindow window;
     gui_pobierz_rozdzielczosc(&window.screen_w, &window.screen_h);
@@ -2722,6 +2723,20 @@ extern "C" __attribute__((noreturn)) void _start() {
     while (!quit) {
         bws_zdarzenie event{};
         if (!gui_czekaj_na_zdarzenie(&event)) continue;
+        if (event.typ == BWS_ZDARZENIE_EKRAN) {
+            gui_pobierz_rozdzielczosc(&window.screen_w,&window.screen_h);
+            if (window.maximized) {
+                window.x=0; window.y=0; window.w=window.screen_w;
+                window.h=window.screen_h-TASKBAR_H;
+            } else {
+                window.w=window.restore_w; window.h=window.restore_h;
+            }
+            window.clamp();
+            if (!window.create_layer()) gui_zakoncz_aplikacje();
+            model.clamp_scroll(view.visible_rows());
+            view.draw_full(true);
+            continue;
+        }
         if (event.typ == BWS_ZDARZENIE_ZAMKNIJ) {
             view.close_transient();
             quit = true;

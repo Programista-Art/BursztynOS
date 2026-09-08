@@ -17,6 +17,105 @@ namespace {
 
 uint64_t liczba_alokacji_sterty = 0;
 uint64_t liczba_aktywnych_alokacji_sterty = 0;
+uint64_t spakuj_dwa_i32(int a, int b);
+
+bool legacy_wlaczony = false;
+bool legacy_ma_warstwe = false;
+bool legacy_test_skali = false;
+bool legacy_test_widzial_skale = false;
+unsigned legacy_test_timer_do_wyjscia = 0;
+uint32_t legacy_skala = 100;
+GuiLegacyProstokat legacy_logiczne_okno{0, 0, 1, 1};
+GuiLegacyProstokat legacy_fizyczne_okno{0, 0, 1, 1};
+BwsCelDrop legacy_cele_drop[BWS_DROP_CELE_MAX] = {};
+
+bool legacy_monitor_raw(GuiMonitorInfo* info) {
+    return info && bws_wywolaj(BWS_GUI_MONITOR_INFO, 0,
+        reinterpret_cast<uint64_t>(info), 0, 0) == 1ULL;
+}
+
+void legacy_odswiez_skale() {
+    GuiMonitorInfo mon{};
+    if (legacy_monitor_raw(&mon) && ui_skala_poprawna(mon.scale_x1000 / 10U))
+        legacy_skala = mon.scale_x1000 / 10U;
+    ui_skala_procent = legacy_skala;
+}
+
+GuiLegacyProstokat legacy_work_area() {
+    GuiMonitorInfo mon{};
+    if (legacy_monitor_raw(&mon) && mon.work_szer > 0 && mon.work_wys > 0)
+        return {mon.work_x, mon.work_y, mon.work_szer, mon.work_wys};
+    int w = 1024, h = 768;
+    bws_wywolaj(23, reinterpret_cast<uint64_t>(&w),
+                reinterpret_cast<uint64_t>(&h), 0, 0);
+    const int tb = ui_skaluj(40, legacy_skala);
+    return {0, 0, w, h > tb ? h - tb : h};
+}
+
+GuiLegacyProstokat legacy_przelicz_okno(GuiLegacyProstokat r) {
+    return gui_legacy_geometria_fizyczna(r, legacy_work_area(), legacy_skala);
+}
+
+int legacy_x(int x) {
+    return legacy_wlaczony && legacy_ma_warstwe
+        ? legacy_fizyczne_okno.x + ui_skaluj(x - legacy_logiczne_okno.x, legacy_skala)
+        : x;
+}
+int legacy_y(int y) {
+    return legacy_wlaczony && legacy_ma_warstwe
+        ? legacy_fizyczne_okno.y + ui_skaluj(y - legacy_logiczne_okno.y, legacy_skala)
+        : y;
+}
+int legacy_w(int w) { return legacy_wlaczony ? ui_skaluj(w, legacy_skala) : w; }
+int legacy_h(int h) { return legacy_wlaczony ? ui_skaluj(h, legacy_skala) : h; }
+int legacy_odskaluj_x(int x) {
+    return legacy_wlaczony && legacy_ma_warstwe
+        ? legacy_logiczne_okno.x + ui_odskaluj(x - legacy_fizyczne_okno.x, legacy_skala)
+        : x;
+}
+int legacy_odskaluj_y(int y) {
+    return legacy_wlaczony && legacy_ma_warstwe
+        ? legacy_logiczne_okno.y + ui_odskaluj(y - legacy_fizyczne_okno.y, legacy_skala)
+        : y;
+}
+
+void legacy_przetworz_zdarzenie(bws_zdarzenie* e) {
+    if (!legacy_wlaczony || !e) return;
+    if (e->typ == BWS_ZDARZENIE_EKRAN) {
+        legacy_odswiez_skale();
+        if (legacy_test_skali) {
+            if (legacy_skala != 100) legacy_test_widzial_skale = true;
+            else if (legacy_test_widzial_skale)
+                legacy_test_timer_do_wyjscia = 20;
+        }
+        if (legacy_ma_warstwe) {
+            legacy_fizyczne_okno = legacy_przelicz_okno(legacy_logiczne_okno);
+            (void)bws_wywolaj(BWS_GUI_GEOMETRIA,
+                spakuj_dwa_i32(legacy_fizyczne_okno.x, legacy_fizyczne_okno.y),
+                spakuj_dwa_i32(legacy_fizyczne_okno.szer, legacy_fizyczne_okno.wys),
+                0, 0);
+        }
+    }
+    if (legacy_test_timer_do_wyjscia && e->typ == BWS_ZDARZENIE_TIMER &&
+        --legacy_test_timer_do_wyjscia == 0)
+        gui_zakoncz_aplikacje();
+    switch (e->typ) {
+        case BWS_ZDARZENIE_MYSZ_RUCH:
+        case BWS_ZDARZENIE_MYSZ_DOWN:
+        case BWS_ZDARZENIE_MYSZ_UP:
+        case BWS_ZDARZENIE_MYSZ_PRAWY_DOWN:
+        case BWS_ZDARZENIE_MYSZ_PRAWY_UP:
+        case BWS_ZDARZENIE_DRAG_HOVER:
+        case BWS_ZDARZENIE_DRAG_LEAVE:
+        case BWS_ZDARZENIE_DRAG_DROP:
+            e->x = legacy_odskaluj_x(e->x);
+            e->y = legacy_odskaluj_y(e->y);
+            e->dx = ui_odskaluj(e->dx, legacy_skala);
+            e->dy = ui_odskaluj(e->dy, legacy_skala);
+            break;
+        default: break;
+    }
+}
 
 constexpr unsigned long WYROWNANIE_STERTY = 16UL;
 constexpr unsigned long ROZMIAR_STRONY = 4096UL;
@@ -163,6 +262,21 @@ size_t dekoduj_utf8_gui(const char* tekst, size_t i, uint32_t* znak) {
 }
 
 } // namespace
+
+void gui_legacy_wlacz() {
+    legacy_wlaczony = true;
+    char argument[32] = {};
+    if (pobierz_argument_startowy(argument, sizeof(argument))) {
+        static constexpr char TEST_ARG[] = "--legacy-scale-test";
+        unsigned i = 0;
+        while (argument[i] && TEST_ARG[i] && argument[i] == TEST_ARG[i]) ++i;
+        legacy_test_skali = argument[i] == '\0' && TEST_ARG[i] == '\0';
+    }
+    legacy_odswiez_skale();
+}
+
+bool gui_legacy_czy_wlaczony() { return legacy_wlaczony; }
+uint32_t gui_legacy_skala_procent() { return legacy_skala; }
 
 void* gui_malloc(unsigned long rozmiar) {
     if (rozmiar == 0)
@@ -635,12 +749,14 @@ void gui_rysuj_okno(int x,
     if (w <= 0 || h <= 0 || !tytul)
         return;
 
-    bws_wywolaj(
-        14,
-        spakuj_dwa_i32(x, y),
-        spakuj_dwa_i32(w, h),
-        reinterpret_cast<uint64_t>(tytul),
-        0);
+    if (legacy_wlaczony) {
+        (void)gui_ustaw_tytul_okna(tytul);
+        gui_rysuj_prostokat(x, y, w, h, 0x008A5A00);
+        gui_rysuj_prostokat(x + 2, y + 28, w - 4, h - 30, 0x001A0B00);
+    } else {
+        bws_wywolaj(14, spakuj_dwa_i32(x, y), spakuj_dwa_i32(w, h),
+                    reinterpret_cast<uint64_t>(tytul), 0);
+    }
 }
 
 void gui_wypisz_tekst(int x,
@@ -649,10 +765,15 @@ void gui_wypisz_tekst(int x,
     if (!tekst)
         return;
 
+    if (legacy_wlaczony) {
+        gui_wypisz_tekst_kolor_skala(x, y, 0x00D1D5DB, 100, tekst);
+        return;
+    }
+
     bws_wywolaj(
         15,
-        i32_do_u64(x),
-        i32_do_u64(y),
+        i32_do_u64(legacy_x(x)),
+        i32_do_u64(legacy_y(y)),
         reinterpret_cast<uint64_t>(tekst),
         0);
 }
@@ -666,10 +787,10 @@ void gui_wyczyscz_obszar(int x,
 
     bws_wywolaj(
         16,
-        i32_do_u64(x),
-        i32_do_u64(y),
-        i32_do_u64(w),
-        i32_do_u64(h));
+        i32_do_u64(legacy_x(x)),
+        i32_do_u64(legacy_y(y)),
+        i32_do_u64(legacy_w(w)),
+        i32_do_u64(legacy_h(h)));
 }
 
 void gui_odswiez() {
@@ -689,6 +810,8 @@ void gui_pobierz_mysz(int* x,
         reinterpret_cast<uint64_t>(y),
         reinterpret_cast<uint64_t>(przyciski),
         0);
+    *x = legacy_odskaluj_x(*x);
+    *y = legacy_odskaluj_y(*y);
 }
 
 void gui_odswiez_pulpit() {
@@ -697,7 +820,8 @@ void gui_odswiez_pulpit() {
 }
 
 void gui_wypisz_tekst_kolor(int x,int y,uint32_t kolor,const char*tekst){
-    gui_wypisz_tekst_kolor_skala(x,y,kolor,ui_skala_procent,tekst);
+    gui_wypisz_tekst_kolor_skala(x,y,kolor,
+        legacy_wlaczony ? 100 : static_cast<int>(ui_skala_procent),tekst);
 }
 
 void gui_wypisz_tekst_kolor_skala(int x,
@@ -708,9 +832,14 @@ void gui_wypisz_tekst_kolor_skala(int x,
     if (!tekst)
         return;
 
-    const uint32_t poprawna_skala =
-        static_cast<uint32_t>(
-            popraw_skale(skala));
+    uint32_t poprawna_skala = static_cast<uint32_t>(popraw_skale(skala));
+    if (legacy_wlaczony) {
+        const uint32_t lokalna = skala >= 100 ? poprawna_skala
+                                              : 100U * poprawna_skala;
+        poprawna_skala = static_cast<uint32_t>(ui_skaluj(
+            static_cast<int>(lokalna), legacy_skala));
+        if (poprawna_skala > 400U) poprawna_skala = 400U;
+    }
 
     const uint64_t kolor_skala =
         (static_cast<uint64_t>(poprawna_skala) << 32) |
@@ -718,8 +847,8 @@ void gui_wypisz_tekst_kolor_skala(int x,
 
     bws_wywolaj(
         20,
-        i32_do_u64(x),
-        i32_do_u64(y),
+        i32_do_u64(legacy_x(x)),
+        i32_do_u64(legacy_y(y)),
         kolor_skala,
         reinterpret_cast<uint64_t>(tekst));
 }
@@ -734,8 +863,8 @@ void gui_rysuj_prostokat(int x,
 
     bws_wywolaj(
         21,
-        spakuj_dwa_i32(x, y),
-        spakuj_dwa_i32(w, h),
+        spakuj_dwa_i32(legacy_x(x), legacy_y(y)),
+        spakuj_dwa_i32(legacy_w(w), legacy_h(h)),
         static_cast<uint64_t>(kolor),
         0);
 }
@@ -744,8 +873,8 @@ bool gui_blit(int x, int y, int szer, int wys, const uint32_t* piksele) {
     if (!piksele || szer <= 0 || wys <= 0) return false;
     const uint64_t wynik = bws_wywolaj(
         57,
-        spakuj_dwa_i32(x, y),
-        spakuj_dwa_i32(szer, wys),
+        spakuj_dwa_i32(legacy_x(x), legacy_y(y)),
+        spakuj_dwa_i32(legacy_w(szer), legacy_h(wys)),
         reinterpret_cast<uint64_t>(piksele),
         0);
     return wynik == 1ULL;
@@ -768,14 +897,18 @@ void gui_ustaw_przejecie_myszy(bool stan) {
 
 bool gui_pobierz_zdarzenie(bws_zdarzenie* zdarzenie) {
     if (!zdarzenie) return false;
-    return bws_wywolaj(37,
+    const bool ok = bws_wywolaj(37,
         reinterpret_cast<uint64_t>(zdarzenie), 0, 0, 0) == 1ULL;
+    if (ok) legacy_przetworz_zdarzenie(zdarzenie);
+    return ok;
 }
 
 bool gui_czekaj_na_zdarzenie(bws_zdarzenie* zdarzenie) {
     if (!zdarzenie) return false;
-    return bws_wywolaj(38,
+    const bool ok = bws_wywolaj(38,
         reinterpret_cast<uint64_t>(zdarzenie), 0, 0, 0) == 1ULL;
+    if (ok) legacy_przetworz_zdarzenie(zdarzenie);
+    return ok;
 }
 
 bool gui_czekaj_na_zdarzenie_z_timeoutem(bws_zdarzenie* zdarzenie, uint64_t timeout_ticki) {
@@ -783,7 +916,9 @@ bool gui_czekaj_na_zdarzenie_z_timeoutem(bws_zdarzenie* zdarzenie, uint64_t time
     if (timeout_ticki == 0) return gui_czekaj_na_zdarzenie(zdarzenie);
     const uint64_t wynik = bws_wywolaj(
         38, reinterpret_cast<uint64_t>(zdarzenie), timeout_ticki, 0, 0);
-    return wynik == 1ULL;
+    const bool ok = wynik == 1ULL;
+    if (ok) legacy_przetworz_zdarzenie(zdarzenie);
+    return ok;
 }
 
 void gui_ustaw_capture_myszy(bool stan) {
@@ -793,7 +928,8 @@ void gui_ustaw_capture_myszy(bool stan) {
 void gui_ustaw_system_overlay(bool otwarty,
                               int x, int y, int szer, int wys) {
     bws_wywolaj(40, otwarty ? 1ULL : 0ULL,
-                spakuj_dwa_i32(x, y), spakuj_dwa_i32(szer, wys), 0);
+                spakuj_dwa_i32(legacy_x(x), legacy_y(y)),
+                spakuj_dwa_i32(legacy_w(szer), legacy_h(wys)), 0);
 }
 
 bool gui_minimalizuj_okno() {
@@ -836,13 +972,23 @@ bool przenies_twor_uzytkownika(const char* sciezka,
 
 bool gui_rejestruj_cele_drop(const BwsCelDrop* cele, uint32_t liczba) {
     if (liczba > BWS_DROP_CELE_MAX || (liczba != 0 && !cele)) return false;
+    if (legacy_wlaczony && cele) {
+        for (uint32_t i = 0; i < liczba; ++i) {
+            legacy_cele_drop[i] = cele[i];
+            legacy_cele_drop[i].x = legacy_x(cele[i].x);
+            legacy_cele_drop[i].y = legacy_y(cele[i].y);
+            legacy_cele_drop[i].szer = legacy_w(cele[i].szer);
+            legacy_cele_drop[i].wys = legacy_h(cele[i].wys);
+        }
+        cele = legacy_cele_drop;
+    }
     return bws_wywolaj(49, reinterpret_cast<uint64_t>(cele), liczba) == 1ULL;
 }
 
 BwsWynikDrop gui_aktualizuj_drag(const char* sciezka,
                                  int x, int y, bool wykonaj_drop) {
     if (!sciezka) return BWS_DROP_BLAD;
-    const uint64_t pozycja = spakuj_dwa_i32(x, y);
+    const uint64_t pozycja = spakuj_dwa_i32(legacy_x(x), legacy_y(y));
     const uint64_t wynik = bws_wywolaj(
         50, reinterpret_cast<uint64_t>(sciezka), pozycja,
         wykonaj_drop ? 1ULL : 0ULL);
@@ -923,8 +1069,8 @@ uint64_t gui_czas_monotoniczny_ns() {
 bool gui_ustaw_popup_aplikacji(bool otwarty,
                                int x, int y, int szer, int wys) {
     return bws_wywolaj(56, otwarty ? 1ULL : 0ULL,
-                       spakuj_dwa_i32(x, y),
-                       spakuj_dwa_i32(szer, wys), 0) == 1ULL;
+                       spakuj_dwa_i32(legacy_x(x), legacy_y(y)),
+                       spakuj_dwa_i32(legacy_w(szer), legacy_h(wys)), 0) == 1ULL;
 }
 
 namespace {
@@ -1057,6 +1203,12 @@ bool gui_ustaw_geometrie_okna(int x, int y, int szer, int wys, int stan) {
     const int old_h = g_widoczna_geometria_h;
 #endif
     const bool isolation = g_izolacja_geometrii_wlaczona;
+    if (legacy_wlaczony) {
+        legacy_logiczne_okno = {x, y, szer, wys};
+        legacy_fizyczne_okno = legacy_przelicz_okno(legacy_logiczne_okno);
+        x = legacy_fizyczne_okno.x; y = legacy_fizyczne_okno.y;
+        szer = legacy_fizyczne_okno.szer; wys = legacy_fizyczne_okno.wys;
+    }
 
     if (isolation) {
         bool valid = true;
@@ -1119,8 +1271,21 @@ uint32_t gui_liczba_monitorow() {
 
 bool gui_pobierz_monitor(uint32_t indeks, GuiMonitorInfo* info) {
     if (!info) return false;
-    return bws_wywolaj(BWS_GUI_MONITOR_INFO, indeks,
+    const bool ok = bws_wywolaj(BWS_GUI_MONITOR_INFO, indeks,
         reinterpret_cast<uint64_t>(info), 0, 0) == 1ULL;
+    if (ok && legacy_wlaczony) {
+        const uint32_t p = ui_skala_poprawna(info->scale_x1000 / 10U)
+            ? info->scale_x1000 / 10U : legacy_skala;
+        info->x = ui_odskaluj(info->x, p);
+        info->y = ui_odskaluj(info->y, p);
+        info->szer = ui_odskaluj(info->szer, p);
+        info->wys = ui_odskaluj(info->wys, p);
+        info->work_x = ui_odskaluj(info->work_x, p);
+        info->work_y = ui_odskaluj(info->work_y, p);
+        info->work_szer = ui_odskaluj(info->work_szer, p);
+        info->work_wys = ui_odskaluj(info->work_wys, p);
+    }
+    return ok;
 }
 
 bool gui_ustaw_obszar_roboczy(int x, int y, int szer, int wys) {
@@ -1272,26 +1437,28 @@ bool ustawienia_sciezka(const char* app_id, const char* klucz,
 
 void gui_rysuj_standardowa_belke(int x, int y, int szer,
                                  const char* tytul, bool zmaksymalizowane) {
-    if (!tytul || szer < ui_skaluj(90,ui_skala_procent)) return;
-    gui_rysuj_prostokat(x, y, szer, ui_skaluj(28,ui_skala_procent), 0x00301500);
-    gui_rysuj_prostokat(x, y, szer, ui_skaluj(2,ui_skala_procent), 0x00E58A00);
-    gui_wypisz_tekst_kolor(x + ui_skaluj(8,ui_skala_procent), y + ui_skaluj(7,ui_skala_procent), 0x00FFFFFF, tytul);
-    RysujPrzycisk(x + szer - ui_skaluj(74,ui_skala_procent), y + ui_skaluj(4,ui_skala_procent), ui_skaluj(20,ui_skala_procent), ui_skaluj(20,ui_skala_procent),
+    const uint32_t p = legacy_wlaczony ? 100U : ui_skala_procent;
+    if (!tytul || szer < ui_skaluj(90,p)) return;
+    gui_rysuj_prostokat(x, y, szer, ui_skaluj(28,p), 0x00301500);
+    gui_rysuj_prostokat(x, y, szer, ui_skaluj(2,p), 0x00E58A00);
+    gui_wypisz_tekst_kolor(x + ui_skaluj(8,p), y + ui_skaluj(7,p), 0x00FFFFFF, tytul);
+    RysujPrzycisk(x + szer - ui_skaluj(74,p), y + ui_skaluj(4,p), ui_skaluj(20,p), ui_skaluj(20,p),
                   0x00E58A00, 0x001A0B00, "-");
-    RysujPrzycisk(x + szer - ui_skaluj(50,ui_skala_procent), y + ui_skaluj(4,ui_skala_procent), ui_skaluj(20,ui_skala_procent), ui_skaluj(20,ui_skala_procent),
+    RysujPrzycisk(x + szer - ui_skaluj(50,p), y + ui_skaluj(4,p), ui_skaluj(20,p), ui_skaluj(20,p),
                   0x00E58A00, 0x001A0B00,
                   zmaksymalizowane ? "v" : "^");
-    RysujPrzycisk(x + szer - ui_skaluj(26,ui_skala_procent), y + ui_skaluj(4,ui_skala_procent), ui_skaluj(20,ui_skala_procent), ui_skaluj(20,ui_skala_procent),
+    RysujPrzycisk(x + szer - ui_skaluj(26,p), y + ui_skaluj(4,p), ui_skaluj(20,p), ui_skaluj(20,p),
                   0x00AA0000, 0x00FFFFFF, "X");
 }
 
 gui_akcja_belki gui_hit_test_belki(int mx, int my,
                                    int x, int y, int szer) {
-    if (szer < ui_skaluj(90,ui_skala_procent) || mx < x || mx >= x + szer || my < y || my >= y + ui_skaluj(28,ui_skala_procent))
+    const uint32_t p = legacy_wlaczony ? 100U : ui_skala_procent;
+    if (szer < ui_skaluj(90,p) || mx < x || mx >= x + szer || my < y || my >= y + ui_skaluj(28,p))
         return GUI_BELKA_BRAK;
-    if (mx >= x + szer - ui_skaluj(26,ui_skala_procent)) return GUI_BELKA_ZAMKNIJ;
-    if (mx >= x + szer - ui_skaluj(50,ui_skala_procent)) return GUI_BELKA_MAKSYMALIZUJ;
-    if (mx >= x + szer - ui_skaluj(74,ui_skala_procent)) return GUI_BELKA_MINIMALIZUJ;
+    if (mx >= x + szer - ui_skaluj(26,p)) return GUI_BELKA_ZAMKNIJ;
+    if (mx >= x + szer - ui_skaluj(50,p)) return GUI_BELKA_MAKSYMALIZUJ;
+    if (mx >= x + szer - ui_skaluj(74,p)) return GUI_BELKA_MINIMALIZUJ;
     return GUI_BELKA_DRAG;
 }
 
@@ -1305,6 +1472,10 @@ void gui_pobierz_rozdzielczosc(int* w,
         reinterpret_cast<uint64_t>(w),
         reinterpret_cast<uint64_t>(h),
         0, 0);
+    if (legacy_wlaczony) {
+        *w = ui_odskaluj(*w, legacy_skala);
+        *h = ui_odskaluj(*h, legacy_skala);
+    }
 }
 
 int gui_pobierz_szerokosc_znaku(uint32_t znak) {
@@ -1333,8 +1504,13 @@ int bws_utworz_warstwe(int x,
     if (szer <= 0 || wys <= 0)
         return -1;
 
-    const uint64_t pozycja =
-        spakuj_dwa_i32(x, y);
+    if (legacy_wlaczony) {
+        legacy_logiczne_okno = {x, y, szer, wys};
+        legacy_fizyczne_okno = legacy_przelicz_okno(legacy_logiczne_okno);
+        x = legacy_fizyczne_okno.x; y = legacy_fizyczne_okno.y;
+        szer = legacy_fizyczne_okno.szer; wys = legacy_fizyczne_okno.wys;
+    }
+    const uint64_t pozycja = spakuj_dwa_i32(x, y);
 
     const uint64_t rozmiar =
         spakuj_dwa_i32(szer, wys);
@@ -1349,6 +1525,7 @@ int bws_utworz_warstwe(int x,
 
     if (wynik == 0)
         return -1;
+    legacy_ma_warstwe = legacy_wlaczony;
 
     if (wynik - 1ULL >
         static_cast<uint64_t>(INT32_MAX)) {
@@ -1375,6 +1552,13 @@ void bws_przesun_warstwe(int nowy_x,
     const int old_x = g_widoczna_geometria_x;
     const int old_y = g_widoczna_geometria_y;
 #endif
+    if (legacy_wlaczony && legacy_ma_warstwe) {
+        legacy_logiczne_okno.x = nowy_x;
+        legacy_logiczne_okno.y = nowy_y;
+        legacy_fizyczne_okno = legacy_przelicz_okno(legacy_logiczne_okno);
+        nowy_x = legacy_fizyczne_okno.x;
+        nowy_y = legacy_fizyczne_okno.y;
+    }
     bws_wywolaj(
         34,
         i32_do_u64(nowy_x),
@@ -1415,7 +1599,10 @@ int oblicz_szerokosc_tekstu(const char* tekst,
     if (!tekst)
         return 0;
 
-    const uint32_t procent = skala>=100?uint32_t(popraw_skale(skala)):ui_skala_procent*popraw_skale(skala);
+    const uint32_t procent = legacy_wlaczony
+        ? (skala >= 100 ? uint32_t(popraw_skale(skala))
+                        : 100U * uint32_t(popraw_skale(skala)))
+        : (skala>=100?uint32_t(popraw_skale(skala)):ui_skala_procent*popraw_skale(skala));
 
     int szerokosc = 0;
     size_t i = 0;
@@ -1457,7 +1644,10 @@ void rysuj_tekst_wysrodkowany(int px,
     if (!tekst || w <= 0 || h <= 0)
         return;
 
-    const uint32_t procent = skala>=100?uint32_t(popraw_skale(skala)):ui_skala_procent*popraw_skale(skala);
+    const uint32_t procent = legacy_wlaczony
+        ? (skala >= 100 ? uint32_t(popraw_skale(skala))
+                        : 100U * uint32_t(popraw_skale(skala)))
+        : (skala>=100?uint32_t(popraw_skale(skala)):ui_skala_procent*popraw_skale(skala));
 
     const int szer_tekstu =
         oblicz_szerokosc_tekstu(

@@ -2,6 +2,8 @@
 #include "../ekran/klient.h"
 #include "../ekran/ekran_okno.h"
 #include "../../pulpit_geometria.h"
+#include "../../zegar_ui.h"
+#include "../../legacy_ui.h"
 // Tymczasowa diagnostyka regresji live-resize: taguje ktora asercja padla.
 // Nie zmienia semantyki PASS/FAIL, tylko dokleja [EKRAN LIVE FAIL] <tag>.
 static void bws_sprawdz_tag(bool warunek, const char* tag) {
@@ -31,6 +33,62 @@ static void wykonaj_testy_ekranu(bool runtime){
     char maly[8]={'Z','Z','Z','Z','Z','Z','Z','Z'};
     bws_sprawdz(!ekran_formatuj_tryb(maly,4,1920,1080,true)&&maly[0]=='\0'&&maly[4]=='Z'&&maly[7]=='Z');
     bws_sprawdz(!ekran_formatuj_tryb(nullptr,0,1920,1080,true));
+
+    /* Zegar: font, prostokat rysowania/dirty, margines i centrowanie sa
+       wyprowadzane z jednej geometrii dla wszystkich wspieranych skal. */
+    const int zegar_ekrany[][2]={{1280,720},{1920,1080},{2560,1440},
+                                  {3440,1440},{3840,2160}};
+    for (const auto& e : zegar_ekrany) for (uint32_t p=100;p<=200;p+=25) {
+        const int font=ui_skaluj(200,p);
+        const int tekst_w=oblicz_szerokosc_tekstu("--:--:--",font);
+        const ZegarUiGeometria z=zegar_ui_geometria(e[0],e[1],p,tekst_w);
+        bws_sprawdz(z.skala_fontu==font&&z.tekst_wys==ui_skaluj(16,font));
+        bws_sprawdz(z.x>=0&&z.y>=0&&z.x+z.szer==e[0]&&z.y+z.wys==e[1]);
+        bws_sprawdz(z.prawy_margines==ui_skaluj(10,p)&&
+                    z.tekst_x+z.tekst_szer+z.prawy_margines==e[0]);
+        bws_sprawdz(z.tekst_x>=z.x&&z.tekst_x+z.tekst_szer<=z.x+z.szer);
+        bws_sprawdz(2*(z.tekst_y-z.y)+z.tekst_wys==z.wys ||
+                    2*(z.tekst_y-z.y)+z.tekst_wys==z.wys-1);
+        const GuiLegacyProstokat dirty{z.x,z.y,z.szer,z.wys};
+        bws_sprawdz(dirty.x==z.x&&dirty.y==z.y&&dirty.szer==z.szer&&dirty.wys==z.wys);
+    }
+
+    /* Piec profili legacy korzysta z tego samego adaptera. Kontrolki sa
+       nadal logiczne, wiec prostokat paint jest zarazem prostokatem hit. */
+    struct LegacyAppTest { const char* nazwa; GuiLegacyProstokat okno; GuiLegacyProstokat kontrolka; };
+    const LegacyAppTest legacy_apps[]={
+        {"Powloka",{20,20,660,360},{28,54,620,288}},
+        {"Kalkulator",{300,150,320,380},{310,245,57,60}},
+        {"Notatnik",{150,90,780,560},{158,136,764,486}},
+        {"Snake",{150,150,400,328},{150,178,400,300}},
+        {"Eksplorator",{80,60,900,600},{90,100,880,520}}
+    };
+    const GuiLegacyProstokat legacy_work{0,0,2560,1400};
+    for(const auto& app:legacy_apps) {
+        GuiLegacyProstokat poprzedni{};
+        const uint32_t seq[]={100,125,150,175,200,100};
+        for(uint32_t p:seq) {
+            const GuiLegacyProstokat w=gui_legacy_geometria_fizyczna(app.okno,legacy_work,p);
+            bws_sprawdz(w.x>=legacy_work.x&&w.y>=legacy_work.y&&
+                        w.x+w.szer<=legacy_work.x+legacy_work.szer&&
+                        w.y+w.wys<=legacy_work.y+legacy_work.wys);
+            const GuiLegacyProstokat paint{
+                w.x+ui_skaluj(app.kontrolka.x-app.okno.x,p),
+                w.y+ui_skaluj(app.kontrolka.y-app.okno.y,p),
+                ui_skaluj(app.kontrolka.szer,p),ui_skaluj(app.kontrolka.wys,p)};
+            const GuiLegacyProstokat hit=paint;
+            bws_sprawdz(paint.x>=w.x&&paint.y>=w.y&&
+                        paint.x+paint.szer<=w.x+w.szer&&paint.y+paint.wys<=w.y+w.wys);
+            bws_sprawdz(hit.x==paint.x&&hit.y==paint.y&&
+                        hit.szer==paint.szer&&hit.wys==paint.wys);
+            bws_sprawdz(ui_skaluj(16,p)<=paint.wys);
+            if (p!=100 || poprzedni.szer==0)
+                bws_sprawdz(w.szer==ui_skaluj(app.okno.szer,p)&&
+                            w.wys==ui_skaluj(app.okno.wys,p));
+            else bws_sprawdz(w.szer==app.okno.szer&&w.wys==app.okno.wys);
+            poprzedni=w;
+        }
+    }
 
     for(uint32_t p=100;p<=200;p+=25){
         const PulpitMetryki m=pulpit_metryki(p);
@@ -514,7 +572,33 @@ static void wykonaj_testy_ekranu(bool runtime){
             r={};r.operacja=EKRAN_ZASTOSUJ;r.szerokosc=start.aktywny.szerokosc==1920?1280:1920;r.wysokosc=1080;r.bpp=32;r.skala=100;
             bws_sprawdz(ekran_zapytaj(ep,r,&out)&&out.status==EKRAN_NIEOBSLUGIWANY&&start.liczba_trybow==1);
         }
-        for(unsigned cycle=0;cycle<2;++cycle)for(uint32_t s=100;s<=200;s+=25){
+        /* Kazdy proces pozostaje zywy przez pelna sekwencje. Testujemy je
+           kolejno, aby nie zalezec od stalego limitu tablicy procesow. */
+        const char* legacy_paths[]={
+            "/shell.bur",
+            "/programy/kalkulator.cebula/kalkulator.bur",
+            "/programy/notatnik.cebula/notatnik.bur",
+            "/gry/snake.cebula/snake.bur",
+            "/programy/eksplorator.cebula/eksplorator-plikow.bur"};
+        const char* legacy_titles[]={"Powloka Bursztynowa","Kalkulator Systemowy",
+            "Notatnik","Snake","Eksplorator Plików"};
+        const int legacy_sizes[][2]={{660,360},{320,380},{780,560},{400,328},{900,600}};
+        const uint32_t legacy_skale[]={100,125,150,175,200,100};
+        for(unsigned a=0;a<5;++a){
+          r={};r.operacja=EKRAN_STAN;
+          bws_sprawdz(ekran_zapytaj(ep,r,&out)&&out.status==EKRAN_OK);
+          const uint64_t bufory_przed=out.bufory_bajty;
+          bws_sprawdz_tag(uruchom_program_z_argumentem_uzytkownika(
+              legacy_paths[a],"--legacy-scale-test"),legacy_titles[a]);
+          bool obecne=false;
+          for(int proba=0;proba<100&&!obecne;++proba){
+            GuiOknoInfo okna[SKLADACZ_MAKS_WARSTW]{};
+            const uint32_t n=gui_pobierz_okna(okna,SKLADACZ_MAKS_WARSTW);
+            for(uint32_t i=0;i<n;++i)if(ten_tekst(okna[i].tytul,legacy_titles[a])){obecne=true;break;}
+            if(!obecne){bws_zdarzenie ev{};gui_czekaj_na_zdarzenie_z_timeoutem(&ev,2);}
+          }
+          bws_sprawdz_tag(obecne,legacy_titles[a]);
+          for(uint32_t s:legacy_skale){
             r={};r.operacja=EKRAN_ZASTOSUJ;r.szerokosc=start.aktywny.szerokosc;r.wysokosc=start.aktywny.wysokosc;r.bpp=32;r.skala=s;
             bws_sprawdz(ekran_zapytaj(ep,r,&out)&&out.status==EKRAN_OK&&out.transakcja==0&&out.skala==s&&ekran_ten_sam(out.aktywny,start.aktywny));
             GuiMonitorInfo mon{};
@@ -531,9 +615,47 @@ static void wykonaj_testy_ekranu(bool runtime){
                 gui_czekaj_na_zdarzenie_z_timeoutem(&ev, 2);
             }
             bws_sprawdz(mon.scale_x1000==s*10&&mon.szer==int(start.aktywny.szerokosc)&&mon.wys==int(start.aktywny.wysokosc)&&mon.work_x==0&&mon.work_y==0&&mon.work_szer==mon.szer&&mon.work_wys==mon.wys-ui_skaluj(40,s));
+            GuiOknoInfo okna[SKLADACZ_MAKS_WARSTW]{};
+            uint32_t n=0;
+            for(int proba=0;proba<40;++proba){
+                n=gui_pobierz_okna(okna,SKLADACZ_MAKS_WARSTW);
+                bool poprawne=false;
+                for(uint32_t i=0;i<n;++i){
+                    if(!ten_tekst(okna[i].tytul,legacy_titles[a]))continue;
+                    const int ew=ui_skaluj(legacy_sizes[a][0],s)<mon.work_szer?
+                        ui_skaluj(legacy_sizes[a][0],s):mon.work_szer;
+                    const int eh=ui_skaluj(legacy_sizes[a][1],s)<mon.work_wys?
+                        ui_skaluj(legacy_sizes[a][1],s):mon.work_wys;
+                    if(okna[i].szerokosc==ew&&okna[i].wysokosc==eh&&
+                       okna[i].x>=mon.work_x&&okna[i].y>=mon.work_y&&
+                       okna[i].x+okna[i].szerokosc<=mon.work_x+mon.work_szer&&
+                       okna[i].y+okna[i].wysokosc<=mon.work_y+mon.work_wys)poprawne=true;
+                    break;
+                }
+                if(poprawne)break;
+                bws_zdarzenie ev{};gui_czekaj_na_zdarzenie_z_timeoutem(&ev,2);
+            }
+            bool poprawne=false;
+            for(uint32_t i=0;i<n;++i)if(ten_tekst(okna[i].tytul,legacy_titles[a])){
+                    const int ew=ui_skaluj(legacy_sizes[a][0],s)<mon.work_szer?ui_skaluj(legacy_sizes[a][0],s):mon.work_szer;
+                    const int eh=ui_skaluj(legacy_sizes[a][1],s)<mon.work_wys?ui_skaluj(legacy_sizes[a][1],s):mon.work_wys;
+                    poprawne=okna[i].szerokosc==ew&&okna[i].wysokosc==eh&&okna[i].x>=mon.work_x&&okna[i].y>=mon.work_y&&okna[i].x+okna[i].szerokosc<=mon.work_x+mon.work_szer&&okna[i].y+okna[i].wysokosc<=mon.work_y+mon.work_wys;
+                    break;
+            }
+            bws_sprawdz_tag(poprawne,legacy_titles[a]);
+          }
+          bool zamkniete=false;
+          for(int proba=0;proba<100&&!zamkniete;++proba){
+            GuiOknoInfo okna[SKLADACZ_MAKS_WARSTW]{};
+            const uint32_t n=gui_pobierz_okna(okna,SKLADACZ_MAKS_WARSTW);
+            zamkniete=true;
+            for(uint32_t i=0;i<n;++i)if(ten_tekst(okna[i].tytul,legacy_titles[a])){zamkniete=false;break;}
+            if(!zamkniete){bws_zdarzenie ev{};gui_czekaj_na_zdarzenie_z_timeoutem(&ev,2);}
+          }
+          bws_sprawdz_tag(zamkniete,legacy_titles[a]);
+          r={};r.operacja=EKRAN_STAN;
+          bws_sprawdz(ekran_zapytaj(ep,r,&out)&&out.status==EKRAN_OK&&out.bufory_bajty==bufory_przed);
         }
-        r.skala=start.skala;bws_sprawdz(ekran_zapytaj(ep,r,&out)&&out.skala==start.skala);
-        bws_sprawdz(out.bufory_bajty==start.bufory_bajty);
     }
     ipc_close(ep);
     bws_log(bws_test_blad==przed?"[EKRAN TEST] PASS\n":"[EKRAN TEST] FAIL\n");

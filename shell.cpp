@@ -653,6 +653,21 @@ char pobierz_znak_blokujaco() {
     for (;;) {
         bws_zdarzenie e{};
         if (!gui_czekaj_na_zdarzenie(&e)) continue;
+        if (e.typ == BWS_ZDARZENIE_EKRAN) {
+            gui_pobierz_rozdzielczosc(&shell_screen_w, &shell_screen_h);
+            GuiMonitorInfo monitor{};
+            if (gui_pobierz_monitor(0, &monitor)) {
+                shell_work_x=monitor.work_x; shell_work_y=monitor.work_y;
+                shell_work_w=monitor.work_szer; shell_work_h=monitor.work_wys;
+            }
+            if (shell_maximized) {
+                shell_x=shell_work_x; shell_y=shell_work_y;
+                shell_w=shell_work_w; shell_h=shell_work_h;
+                (void)gui_ustaw_geometrie_okna(shell_x,shell_y,shell_w,shell_h);
+            }
+            shell_rysuj_terminal();
+            continue;
+        }
         if (e.typ == BWS_ZDARZENIE_FOCUS && shell_minimized)
             shell_minimized = false;
         if (e.typ == BWS_ZDARZENIE_ZAMKNIJ) gui_zakoncz_aplikacje();
@@ -2274,6 +2289,7 @@ NaglowekBur naglowek = {
 extern "C"
 __attribute__((noreturn))
 void _start() {
+    gui_legacy_wlacz();
     gui_pobierz_rozdzielczosc(&shell_screen_w, &shell_screen_h);
     GuiMonitorInfo monitor{};
     if (gui_pobierz_monitor(0, &monitor)) {

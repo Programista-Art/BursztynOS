@@ -201,7 +201,8 @@ KERNEL_LDFLAGS := \
 
 RING3_LDFLAGS := \
 	-nostdlib \
-	-no-pie
+	-no-pie \
+	--gc-sections
 
 # ============================================================================
 # 5. LINKERY APLIKACJI .bur
