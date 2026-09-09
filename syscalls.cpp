@@ -61,6 +61,7 @@
 #include "loader.h"
 #include "heap.h"
 #include "psf.h"
+#include "instalator.h"
 #include "acpi.h"
 #include "sterowniki/czas/hpet.h"
 
@@ -572,6 +573,7 @@ bool proces_ma_prawo(
     const proces_t& proces,
     uint64_t wymagane
 ) {
+    if(instalator_tryb()&&(wymagane&PRAWO_PLIKI_ZAPISZ))return false;
     return
         (znane_prawa(proces) &
          wymagane) ==

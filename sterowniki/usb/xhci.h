@@ -6,6 +6,7 @@ constexpr uint32_t BURSZTYN_XHCI_MAX_SLOTS = 64U;
 constexpr uint32_t BURSZTYN_XHCI_MAX_PORTS = 255U;
 
 bool xhci_inicjalizuj_pierwszy();
+bool xhci_dostepny();
 size_t xhci_poll_events(size_t budget);
 void usb_obsluz();
 uint32_t xhci_read32(const volatile void* base, uint32_t offset);

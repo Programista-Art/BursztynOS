@@ -235,7 +235,7 @@ MBEDTLS_OBJS := $(MBEDTLS_SRCS:.c=.o)
 # 7. OBIEKTY JADRA
 # ============================================================================
 
-OBJS := ekran_blob.o ekran.o ekran_format.o bufory_grafiki.o bochs_vbe.o tapety_blob.o tapety.o btp.o \
+OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o ekran.o ekran_format.o bufory_grafiki.o bochs_vbe.o tapety_blob.o tapety.o btp.o \
 	boot.o \
 	gdt.o \
 	tss.o \
@@ -580,11 +580,13 @@ check-kernel: $(KERNEL)
 # 1. Bursztyn OS (domyslny, czysty start bez autostartu testow)
 # 2. Bursztyn OS - testy automatyczne (multiboot2 bursztyn.test=automated)
 #
-$(GRUB_CFG): $(KERNEL) $(TAPETY_PAK)
+$(GRUB_CFG): $(KERNEL) $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile
 	@mkdir -p $(ISO_DIR)/boot/grub
 	@cp $(KERNEL) $(ISO_DIR)/boot/
 	@echo "[ISO] Kopiuje $(TAPETY_PAK) jako /boot/tapety.pak (modul Multiboot2)."
 	@cp $(TAPETY_PAK) $(ISO_DIR)/boot/tapety.pak
+	@mkdir -p $(ISO_DIR)/boot/installer
+	@cp .installer-build/BOOTX64.EFI $(ISO_DIR)/boot/installer/BOOTX64.EFI
 	@printf '%s\n' \
 		'set timeout=3' \
 		'set default=0' \
@@ -606,7 +608,38 @@ $(GRUB_CFG): $(KERNEL) $(TAPETY_PAK)
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
+		'menuentry "Bursztyn OS Instalator" {' \
+		'    insmod all_video' \
+		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxpayload=keep' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.install=1' \
+		'    module2 /boot/tapety.pak tapety.pak' \
+		'    module2 /boot/installer/BOOTX64.EFI installer.efi' \
+		'    module2 /boot/system_operacyjny.bin installer.kernel' \
+		'    boot' \
+		'}' \
 		> $(GRUB_CFG)
+
+.installer-build/BOOTX64.EFI: narzedzia/instalator/grub-embedded.cfg
+	@mkdir -p .installer-build
+	grub-mkstandalone -O x86_64-efi --locales="" --fonts="" --modules="part_gpt fat normal multiboot2 configfile search search_fs_file all_video gfxterm" -o $@ "boot/grub/grub.cfg=$<"
+
+.PHONY: installer-unit-test installer-test run-installer
+installer-unit-test:
+	@mkdir -p .installertest
+	g++ -std=c++17 -O1 -g -Wall -Wextra -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined narzedzia/instalator/test_storage.cpp storage_format.cpp psf.cpp -o .installertest/test-storage
+	ASAN_OPTIONS=detect_leaks=0 .installertest/test-storage
+installer-test: iso installer-unit-test
+	$(PYTHON) narzedzia/instalator/qemu_install.py test
+run-installer: iso
+	$(PYTHON) narzedzia/instalator/qemu_install.py run
+
+instalator_tmp.o: programy/instalator/instalator.cpp instalator_format.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -c $< -o $@
+instalator_blob.o: instalator_tmp.o bursztyn_gui.o programy/kontrolki3/kontrolki3_linker.ld
+	$(LD) --gc-sections -T programy/kontrolki3/kontrolki3_linker.ld $(RING3_LDFLAGS) instalator_tmp.o bursztyn_gui.o -o instalator.elf
+	$(OBJCOPY) -O binary instalator.elf instalator.bin
+	$(LD) -r -b binary instalator.bin -o $@
 
 $(ISO): check-kernel $(GRUB_CFG)
 	$(GRUB_MKRESCUE) -o $@ $(ISO_DIR) --xorriso=$(XORRISO)
@@ -681,10 +714,7 @@ $(VIRTUAL_DISK):
 	$(QEMU_IMG) create -f raw $@ 512M
 
 prepare-disk: $(VIRTUAL_DISK)
-	@if [ -f tapeta.bmp ]; then \
-		echo "[QEMU] Kopiuje tapeta.bmp do sektora 10 dysku testowego."; \
-		dd if=tapeta.bmp of=$(VIRTUAL_DISK) bs=512 seek=10 conv=notrunc status=none; \
-	fi
+	@echo "[QEMU] Dysk przygotowany; bez zapisu zasobow pod surowe LBA."
 
 # ============================================================================
 # 22. QEMU - WSPOLNE OPCJE
@@ -774,12 +804,31 @@ check-ovmf:
 		exit 1; \
 	fi
 
+# runuefi: uefi prepare-disk check-ovmf
+# 	@if [ -n "$(OVMF_MONO)" ]; then \
+# 		echo "[QEMU] Start Bursztyn OS przez UEFI/OVMF (-bios)."; \
+# 		exec $(QEMU) \
+# 			-bios "$(OVMF_MONO)" \
+# 			$(QEMU_COMMON_ARGS) \
+# 			-cdrom $(ISO); \
+# 	else \
+# 		echo "[QEMU] Start Bursztyn OS przez UEFI/OVMF (pflash CODE+VARS)."; \
+# 		cp "$(OVMF_VARS)" "$(OVMF_VARS_RUNTIME)"; \
+# 		exec $(QEMU) \
+# 			-drive if=pflash,format=raw,readonly=on,file="$(OVMF_CODE)" \
+# 			-drive if=pflash,format=raw,file="$(OVMF_VARS_RUNTIME)" \
+# 			$(QEMU_COMMON_ARGS) \
+# 			-cdrom $(ISO); \
+# 	fi
 runuefi: uefi prepare-disk check-ovmf
 	@if [ -n "$(OVMF_MONO)" ]; then \
 		echo "[QEMU] Start Bursztyn OS przez UEFI/OVMF (-bios)."; \
 		exec $(QEMU) \
 			-bios "$(OVMF_MONO)" \
 			$(QEMU_COMMON_ARGS) \
+			-device qemu-xhci,id=xhci \
+			-device usb-kbd,id=usbkbd,bus=xhci.0 \
+			-device usb-mouse,id=usbmouse,bus=xhci.0 \
 			-cdrom $(ISO); \
 	else \
 		echo "[QEMU] Start Bursztyn OS przez UEFI/OVMF (pflash CODE+VARS)."; \
@@ -788,9 +837,11 @@ runuefi: uefi prepare-disk check-ovmf
 			-drive if=pflash,format=raw,readonly=on,file="$(OVMF_CODE)" \
 			-drive if=pflash,format=raw,file="$(OVMF_VARS_RUNTIME)" \
 			$(QEMU_COMMON_ARGS) \
+			-device qemu-xhci,id=xhci \
+			-device usb-kbd,id=usbkbd,bus=xhci.0 \
+			-device usb-mouse,id=usbmouse,bus=xhci.0 \
 			-cdrom $(ISO); \
 	fi
-
 # ============================================================================
 # 25. KONTROLA NARZEDZI
 # ============================================================================

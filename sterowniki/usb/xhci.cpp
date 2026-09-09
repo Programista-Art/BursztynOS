@@ -590,6 +590,7 @@ void xhci_write32(volatile void* base,uint32_t offset,uint32_t value){write32(st
 uint64_t xhci_read64(const volatile void* base,uint32_t offset){return read64(static_cast<const volatile uint8_t*>(base),offset);}
 void xhci_write64(volatile void* base,uint32_t offset,uint64_t value){write64(static_cast<volatile uint8_t*>(base),offset,value);}
 
+bool xhci_dostepny(){return xhc.ready;}
 bool xhci_inicjalizuj_pierwszy() {
     xhc=Controller{}; if(!hpet_dostepny()){wypisz_log("[xHCI-ERR] HPET niedostepny; bezpieczne timeouty niemozliwe.");return false;}
     if(!find_controller(&xhc.pci))return false;

@@ -31,6 +31,7 @@
 
 #include "psf.h"
 #include "ahci.h"
+#include "blokowy.h"
 #include "zegar-rtc.h"
 #include "heap.h"
 
@@ -257,15 +258,9 @@ bool zwolnij_wszystkie_bloki_wezla(wezel_indeksowy* w, uint64_t wezel_id) {
     return true;
 }
 
-/*
- * Zachowujemy dotychczasowe polozenie BSP2 na dysku.
- *
- * 40000 sektorow * 512 B = 20 480 000 B (~19.53 MiB).
- *
- * Poprzedni komentarz mowil o ~5 MiB, ale zmiana LBA bez migratora
- * uniemozliwilaby odczyt istniejacych instalacji BSP2.
- */
-constexpr uint64_t BSP_START_LBA = 40000ULL;
+/* Każde I/O BSP2 jest względne wobec jawnie zamontowanej partycji. */
+Storage::Partition bsp_partycja{};
+constexpr uint64_t BSP_START_LBA = 0; // LBA względne; translacja wyłącznie w Storage::read/write.
 
 constexpr uint32_t AHCI_MAX_SEKTOROW_NA_OPERACJE = 32U;
 
@@ -393,7 +388,7 @@ struct StanPrzerwan {
 
 static inline StanPrzerwan wylacz_przerwania() {
     StanPrzerwan stan{};
-
+#ifndef BURSZTYN_PSF_HOST_TEST
     asm volatile(
         "pushfq\n\t"
         "popq %0\n\t"
@@ -402,6 +397,7 @@ static inline StanPrzerwan wylacz_przerwania() {
         :
         : "memory", "cc"
     );
+#endif
 
     return stan;
 }
@@ -409,6 +405,9 @@ static inline StanPrzerwan wylacz_przerwania() {
 static inline void przywroc_przerwania(
     StanPrzerwan stan
 ) {
+#ifdef BURSZTYN_PSF_HOST_TEST
+    (void)stan;
+#else
     if ((stan.rflags & (1ULL << 9)) != 0) {
         asm volatile(
             "sti"
@@ -417,6 +416,7 @@ static inline void przywroc_przerwania(
             : "memory"
         );
     }
+#endif
 }
 
 static void zablokuj_psf() {
@@ -695,7 +695,7 @@ bool zapisz_sektory_porcjami(
     uint64_t liczba_sektorow,
     const uint8_t* dane
 ) {
-    if (!dane) {
+    if (!dane || !bsp_partycja.device || !Storage::range(lba,liczba_sektorow,bsp_partycja.count)) {
         return false;
     }
 
@@ -715,7 +715,8 @@ bool zapisz_sektory_porcjami(
                 : static_cast<uint32_t>(
                     pozostalo);
 
-        if (!zapisz_na_glowny_dysk_ahci(
+        if (!(blokowy_zapis_instalatora() ? Storage::write_verify : Storage::write)(
+                bsp_partycja,
                 lba + zapisano,
                 paczka,
                 const_cast<uint8_t*>(dane +
@@ -736,7 +737,7 @@ bool czytaj_sektory_porcjami(
     uint64_t liczba_sektorow,
     uint8_t* cel
 ) {
-    if (!cel) {
+    if (!cel || !bsp_partycja.device || !Storage::range(lba,liczba_sektorow,bsp_partycja.count)) {
         return false;
     }
 
@@ -756,7 +757,8 @@ bool czytaj_sektory_porcjami(
                 : static_cast<uint32_t>(
                     pozostalo);
 
-        if (!czytaj_z_glownego_dysku_ahci(
+        if (!Storage::read(
+                bsp_partycja,
                 lba + przeczytano,
                 paczka,
                 cel +
@@ -790,15 +792,15 @@ bool bsp_zapisz_zmiany() {
          * Obecne BSP2 nie obsluguje hot-plug/reconnect nosnika.
          */
         wyczysc_liste_brudnych();
-        ostatni_flush_ok = false;
-        return false;
+        ostatni_flush_ok = !nosnik_ahci_dostepny;
+        return ostatni_flush_ok;
     }
 
     if (!brudny_caly_system &&
         liczba_brudnych_blokow == 0) {
 
-        ostatni_flush_ok = true;
-        return true;
+        ostatni_flush_ok = Storage::flush(bsp_partycja);
+        return ostatni_flush_ok;
     }
 
     const uint64_t sektory_na_blok =
@@ -822,7 +824,7 @@ bool bsp_zapisz_zmiany() {
                 ram_dysk
             );
 
-        for (size_t i = 0; i < POJEMNOSC_CACHE_BLOKOW; ++i) {
+        for (size_t i = 0; sukces && i < POJEMNOSC_CACHE_BLOKOW; ++i) {
             if (wpisy_cache[i].brudny && wpisy_cache[i].nr_bloku != UINT64_MAX) {
                 uint64_t lba = BSP_START_LBA + wpisy_cache[i].nr_bloku * sektory_na_blok;
                 if (!zapisz_sektory_porcjami(lba, sektory_na_blok, wpisy_cache[i].dane)) {
@@ -894,6 +896,8 @@ bool bsp_zapisz_zmiany() {
         }
     }
 
+    if (sukces) sukces = Storage::flush(bsp_partycja);
+    if (!sukces) zapis_trwaly_dozwolony = false;
     if (sukces) {
         wyczysc_liste_brudnych();
         for (size_t i = 0; i < POJEMNOSC_CACHE_BLOKOW; ++i) {
@@ -926,7 +930,7 @@ uint8_t* pobierz_blok(
     }
 
     // Bloki metadanych (superblok, bitmapa, wezly indeksowe)
-    if (nr_bloku < dysk_superblok->start_danych) {
+    if (!nosnik_ahci_dostepny || nr_bloku < dysk_superblok->start_danych) {
         uint64_t offset = 0;
 
         if (!mnoz_u64(
@@ -999,7 +1003,9 @@ uint8_t* pobierz_blok(
     const uint64_t lba = BSP_START_LBA + nr_bloku * sektory_na_blok;
     if (wczytaj_z_dysku && nosnik_ahci_dostepny) {
         if (!czytaj_sektory_porcjami(lba, sektory_na_blok, wpisy_cache[victim].dane)) {
-            wyzeruj_pamiec(wpisy_cache[victim].dane, PSF_ROZMIAR_BLOKU);
+            wpisy_cache[victim].nr_bloku = UINT64_MAX;
+            zapis_trwaly_dozwolony = false;
+            return nullptr;
         }
     } else {
         wyzeruj_pamiec(wpisy_cache[victim].dane, PSF_ROZMIAR_BLOKU);
@@ -2277,9 +2283,8 @@ bool wylicz_geometrie(
         return false;
     }
 
-    const uint64_t bajty_metadanych =
-        static_cast<uint64_t>(sb->start_danych) *
-        static_cast<uint64_t>(PSF_ROZMIAR_BLOKU);
+    uint64_t bajty_metadanych = 0;
+    if (!mnoz_u64(sb->start_danych,PSF_ROZMIAR_BLOKU,&bajty_metadanych)) return false;
 
     if (bajty_metadanych > static_cast<uint64_t>(dostepny_ram)) {
         return false;
@@ -2377,7 +2382,7 @@ bool wylicz_geometrie(
         static_cast<uint64_t>(PSF_ROZMIAR_BLOKU) / ROZMIAR_SEKTORA;
 
     if (nosnik_ahci_dostepny) {
-        const uint64_t sektory_dysku = pobierz_liczbe_sektorow_glownego_dysku_ahci();
+        const uint64_t sektory_dysku = bsp_partycja.count;
         if (sektory_dysku > 0) {
             if (sb->ilosc_blokow == 0) {
                 return false;
@@ -2709,9 +2714,12 @@ bool sformatuj_ram_dysk(
             PSF_ROZMIAR_BLOKU);
 
     if (pozwol_na_zapis_fizyczny && nosnik_ahci_dostepny) {
-        const uint64_t sektory_dysku = pobierz_liczbe_sektorow_glownego_dysku_ahci();
+        const uint64_t sektory_dysku = bsp_partycja.count;
         if (sektory_dysku > BSP_START_LBA) {
-            const uint64_t dostepne_sektory = sektory_dysku - BSP_START_LBA;
+            // Ostatni blok 4 KiB partycji jest poza BSP2 i przechowuje
+            // dwie kopie znacznika instalacji (pozostałe sektory zerowe).
+            if (sektory_dysku <= 8) return false;
+            const uint64_t dostepne_sektory = sektory_dysku - 8 - BSP_START_LBA;
             const uint64_t sektory_na_blok =
                 static_cast<uint64_t>(PSF_ROZMIAR_BLOKU) / ROZMIAR_SEKTORA;
             const uint64_t max_blokow = dostepne_sektory / sektory_na_blok;
@@ -2813,10 +2821,7 @@ bool sformatuj_ram_dysk(
     dysk_superblok->
         sygnatura[3] = '2';
 
-    dysk_superblok->
-        calkowity_rozmiar =
-        static_cast<uint32_t>(
-            rozmiar_uzyteczny);
+    dysk_superblok->calkowity_rozmiar = rozmiar_uzyteczny;
 
     dysk_superblok->
         ilosc_blokow =
@@ -2916,7 +2921,7 @@ bool sformatuj_ram_dysk(
     }
 
     if (zapis_trwaly_dozwolony) {
-        (void)bsp_zapisz_zmiany();
+        return bsp_zapisz_zmiany();
     }
 
     return true;
@@ -2938,7 +2943,8 @@ bool wczytaj_istniejacy_bsp2() {
         sizeof(bufor_superbloku)
     );
 
-    if (!czytaj_z_glownego_dysku_ahci(
+    if (!Storage::read(
+            bsp_partycja,
             BSP_START_LBA,
             1,
             bufor_superbloku)) {
@@ -2964,7 +2970,7 @@ bool wczytaj_istniejacy_bsp2() {
          * Nosnik odpowiada, ale nie ma BSP2.
          * To bezpieczny przypadek do utworzenia nowego systemu plikow.
          */
-        zapis_trwaly_dozwolony = true;
+        zapis_trwaly_dozwolony = false;
         return false;
     }
 
@@ -3414,6 +3420,8 @@ extern "C" void inicjalizuj_psf(
             "[BSP-BLAD] Wykryto uszkodzony BSP2. Dysk NIE zostanie automatycznie sformatowany."
         );
 
+        nosnik_ahci_dostepny = false;
+        bsp_partycja = {};
         if (sformatuj_ram_dysk(false)) {
             wypisz_log(
                 "[BSP] Uruchomiono awaryjny system plikow tylko w RAM."
@@ -3423,18 +3431,12 @@ extern "C" void inicjalizuj_psf(
         return;
     }
 
-    if (nosnik_ahci_dostepny) {
-        wypisz_log(
-            "[BSP] Brak BSP2. Formatowanie nowego systemu plikow."
-        );
-    } else {
-        wypisz_log(
-            "[BSP] AHCI niedostepne. Tworzenie systemu plikow tylko w RAM."
-        );
-    }
+    nosnik_ahci_dostepny = false;
+    bsp_partycja = {};
+    wypisz_log("[BSP] Brak zamontowanej partycji. System plikow tylko w RAM; zero zapisow dysku.");
 
     if (!sformatuj_ram_dysk(
-            nosnik_ahci_dostepny)) {
+            false)) {
 
         wypisz_log(
             "[BSP-BLAD] Nie mozna utworzyc systemu plikow."
@@ -3453,6 +3455,34 @@ extern "C" void inicjalizuj_psf(
             "[BSP] BSP2 dziala w RAM, ale zapis poczatkowy na SATA nie powiodl sie."
         );
     }
+}
+
+void psf_ustaw_partycje(const Storage::Partition* p) { bsp_partycja=p?*p:Storage::Partition{}; }
+
+bool psf_formatuj_instalacje(const Storage::Partition& p) {
+    BlokadaPSF guard;
+    if(!blokowy_zapis_instalatora() || !p.device || !Storage::range(p.start,p.count,p.device->sectors) ||
+       p.device->sector_size!=512 || p.count>Storage::BspMaxBytes/512) return false;
+    bsp_partycja=p;nosnik_ahci_dostepny=true;zapis_trwaly_dozwolony=false;
+    psf_gotowy=false;wyczysc_liste_brudnych();wyczysc_cache_blokow();
+    return sformatuj_ram_dysk(true);
+}
+
+bool psf_znacznik_instalacji(const uint8_t uuid[16],bool complete) {
+    BlokadaPSF guard;
+    if(!blokowy_zapis_instalatora()||!dysk_superblok||!bsp_zapisz_zmiany())return false;
+    return Storage::marker(bsp_partycja,uuid,dysk_superblok->calkowity_rozmiar,complete);
+}
+
+bool psf_weryfikuj_dysk() {
+    BlokadaPSF guard;
+    if(!nosnik_ahci_dostepny||!dysk_superblok||!bsp_zapisz_zmiany())return false;
+    uint8_t check[4096];
+    for(uint64_t i=0;i<dysk_superblok->start_danych;++i){
+        if(!Storage::read(bsp_partycja,i*8,8,check)||!Storage::equal(check,ram_dysk+i*4096,4096))return false;
+    }
+    wyczysc_cache_blokow();
+    return waliduj_metadane();
 }
 
 /* =========================================================================

@@ -28,6 +28,8 @@ extern "C" void odblokuj_ekran();
 #include "grafika.h"
 #include "loader.h"
 #include "ahci.h"
+#include "instalator.h"
+#include "blokowy.h"
 #include "e1000.h"
 #include "siec.h"
 #include "heap.h"
@@ -198,7 +200,7 @@ constexpr uint64_t ROZMIAR_STERTY_JADRA =
  */
 constexpr uint64_t ADRES_RAM_DYSKU_PSF = 0x200000000ULL;
 constexpr uint32_t ROZMIAR_RAM_DYSKU_PSF =
-    16U * 1024U * 1024U;
+    128U * 1024U * 1024U;
 
 constexpr uint16_t PORT_COM1 = 0x3F8;
 
@@ -512,7 +514,11 @@ bool pobierz_rozmiar_bloba(
     return true;
 }
 
-bool zapisz_plik_od_nowa(const char* sciezka,
+bool scisla_instalacja=false,pliki_instalacja_ok=true;
+struct PlikKontrolny{char path[128];uint32_t size,crc;};
+PlikKontrolny pliki_kontrolne[96]{};
+unsigned liczba_plikow_kontrolnych=0;
+bool zapisz_plik_od_nowa_impl(const char* sciezka,
                          const char* dane,
                          uint32_t rozmiar) {
     if (!sciezka)
@@ -546,6 +552,19 @@ bool zapisz_plik_od_nowa(const char* sciezka,
     }
 
     return true;
+}
+
+bool zapisz_plik_od_nowa(const char*path,const char*data,uint32_t size){
+    if(scisla_instalacja&&!pliki_instalacja_ok)return false;
+    bool ok=zapisz_plik_od_nowa_impl(path,data,size);
+    if(scisla_instalacja){
+        if(!ok||liczba_plikow_kontrolnych>=96){pliki_instalacja_ok=false;return false;}
+        auto&e=pliki_kontrolne[liczba_plikow_kontrolnych++];unsigned i=0;
+        for(;i+1<sizeof(e.path)&&path[i];++i)e.path[i]=path[i];e.path[i]=0;
+        if(path[i]){pliki_instalacja_ok=false;return false;}
+        e.size=size;e.crc=Storage::crc32(data,size);
+    }
+    return ok;
 }
 
 bool zapisz_blob_bur(
@@ -702,6 +721,7 @@ void utworz_drabine_katalogow() {
          ++i) {
 
         if (!zapewnij_katalog(KATALOGI[i])) {
+            if(scisla_instalacja){pliki_instalacja_ok=false;return;}
             /*
              * Dopuszczamy katalogi odziedziczone z trwalego BSP2, ale nadal
              * zatrzymujemy start, jezeli wymaganej sciezki nie mozna ani
@@ -1041,7 +1061,7 @@ void instaluj_wbudowane_programy() {
             "/shell.bur",
             _binary_shell_bin_start,
             _binary_shell_bin_end)) {
-
+        if(scisla_instalacja){pliki_instalacja_ok=false;return;}
         zatrzymaj_start(
             "Nie mozna zainstalowac /shell.bur.");
     }
@@ -1485,7 +1505,7 @@ void instaluj_wbudowane_programy() {
             "/menedzer_okien.bur",
             _binary_menedzer_okien_bin_start,
             _binary_menedzer_okien_bin_end)) {
-
+        if(scisla_instalacja){pliki_instalacja_ok=false;return;}
         zatrzymaj_start(
             "Nie mozna zainstalowac Menedzera Okien.");
     }
@@ -1674,6 +1694,27 @@ void wypisz_ilosc_ram() {
 
 } // namespace
 
+bool kernel_instaluj_system(){
+    scisla_instalacja=true;pliki_instalacja_ok=true;liczba_plikow_kontrolnych=0;
+    utworz_drabine_katalogow();
+    if(pliki_instalacja_ok)instaluj_wbudowane_programy();
+    scisla_instalacja=false;
+    return pliki_instalacja_ok&&liczba_plikow_kontrolnych!=0&&psf_flush_cache();
+}
+bool kernel_weryfikuj_system(){
+    char buf[4096];
+    if(!pliki_instalacja_ok||liczba_plikow_kontrolnych==0)return false;
+    for(unsigned i=0;i<liczba_plikow_kontrolnych;++i){const auto&e=pliki_kontrolne[i];
+        if(rozmiar_pliku(e.path)!=e.size)return false;
+        uint32_t c=~0U;
+        for(uint32_t off=0;off<e.size;){uint32_t n=e.size-off>sizeof(buf)?sizeof(buf):e.size-off,got=0;
+            if(!czytaj_fragment_pliku(e.path,off,buf,n,&got)||got!=n)return false;
+            for(uint32_t j=0;j<n;++j){c^=uint8_t(buf[j]);for(unsigned k=0;k<8;++k)c=(c>>1)^(0xEDB88320U&(0U-(c&1)));}off+=n;}
+        if(~c!=e.crc)return false;
+    }
+    return true;
+}
+
 /* =========================================================================
  * KERNEL MAIN
  * ========================================================================= */
@@ -1701,6 +1742,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     }
 
     g_multiboot_info_ptr = multiboot_info_ptr;
+    instalator_boot(multiboot_info_ptr);
 
     /* ---------------------------------------------------------------------
      * Fundament CPU i pamieci
@@ -1841,6 +1883,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
      * ------------------------------------------------------------------ */
 
     inicjalizuj_kontroler_ahci();
+    blokowy_inicjalizuj();
 
     /* BMP pozostaje fallbackiem po inicjalizacji BSP2. */
 
@@ -1896,7 +1939,16 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
             ADRES_RAM_DYSKU_PSF),
         ROZMIAR_RAM_DYSKU_PSF);
 
-    inicjalizuj_psf(
+    Storage::Partition boot_partition{};
+    if(instalator_system_zainstalowany()){
+        bool found=false;
+        for(uint32_t i=0;blokowy_znajdz_bsp(i,&boot_partition);++i){
+            psf_ustaw_partycje(&boot_partition);
+            inicjalizuj_psf(reinterpret_cast<void*>(ADRES_RAM_DYSKU_PSF),ROZMIAR_RAM_DYSKU_PSF);
+            if(psf_weryfikuj_dysk()){found=true;break;}
+        }
+        if(!found)zatrzymaj_start("Brak kompletnej, poprawnej instalacji BSP2 GPT. Bez automatycznego formatowania.");
+    }else inicjalizuj_psf(
         reinterpret_cast<void*>(
             ADRES_RAM_DYSKU_PSF),
         ROZMIAR_RAM_DYSKU_PSF);
@@ -1928,6 +1980,12 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
      * ------------------------------------------------------------------ */
 
     instaluj_wbudowane_programy();
+    if(instalator_tryb()){
+        extern uint8_t _binary_instalator_bin_start[],_binary_instalator_bin_end[];
+        if(!::zapewnij_katalog("/programy/instalator.cebula")||
+           !zapisz_blob_bur(INSTALATOR_PROGRAM,_binary_instalator_bin_start,_binary_instalator_bin_end))
+            zatrzymaj_start("Nie mozna przygotowac aplikacji instalatora w RAM.");
+    }
     tapety_inicjalizuj(g_multiboot_info_ptr);
     ekran_inicjalizuj();
 
@@ -1955,6 +2013,15 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
             PRAWO_GUI | PRAWO_URUCHOM_PROGRAM | PRAWO_PLIKI_CZYTAJ,
             false,
             "--automated");
+    }
+
+    if(instalator_tryb()){
+        // Scheduler jeszcze nieaktywny: pierwszy wolny PID jest przydzielany tylko temu startowi.
+        int pid=1;while(pid<MAKS_PROCESOW&&tablica_procesow[pid].stan!=PROCES_PUSTY)++pid;
+        if(pid==MAKS_PROCESOW||!bws_uruchom_program_z_pliku(INSTALATOR_PROGRAM,PZB_ZAUFANE,PRAWO_GUI|PRAWO_SYSTEM_CONFIG,false))
+            zatrzymaj_start("Loader instalatora nie powiodl sie.");
+        instalator_autoryzuj(pid);
+        klog_serial("[INSTALL] Installer mode ready; disk sector writes before GUI = 0 (enforced live RAM filesystem).");
     }
 
     /*

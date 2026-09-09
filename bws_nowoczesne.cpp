@@ -1,4 +1,5 @@
 #include "ekran.h"
+#include "instalator.h"
 /*
  * Addytywne fundamenty BWS 61+: geometria/monitory, natywne SHM, bounded
  * IPC, obserwatory plikow, schowek MIME, kursory i uchwyt TCP/IPv4.
@@ -458,6 +459,20 @@ uint64_t ipc_ekran(const proces_t& proces, uint64_t desc_user) {
     return 1;
 }
 
+uint64_t ipc_instalator(const proces_t& proces,uint64_t user){
+    BwsIpcWyslij d{};InstalatorZadanie r{};
+    if(!skopiuj_z_przestrzeni_uzytkownika(&d,(const void*)user,sizeof(d))||d.wersja!=1||d.zarezerwowane||d.flagi||d.shm_handle||
+       d.rozmiar!=sizeof(r)||!d.dane||!skopiuj_z_przestrzeni_uzytkownika(&r,(const void*)d.dane,sizeof(r)))return 0;
+    auto*e=endpoint_z_handle(r.odpowiedz);
+    if(!e||e->owner_pid!=aktualny_pid||!e->kolejka||e->count>=IPC_KOLEJKA_MAX)return 0;
+    auto*out=(InstalatorOdpowiedz*)kmalloc(sizeof(InstalatorOdpowiedz));if(!out)return 0;
+    if(!instalator_obsluz(proces,r,out)){kfree(out);return 0;}
+    IpcWiadomosc m{};m.rozmiar=sizeof(*out);m.dane=(uint8_t*)out;e->kolejka[e->head]=m;
+    e->head=(e->head+1)%IPC_KOLEJKA_MAX;++e->count;
+    bws_zdarzenie zd{};zd.typ=BWS_ZDARZENIE_IPC_READY;zd.x=uint32_t(r.odpowiedz);zd.y=r.odpowiedz>>32;zd.timestamp=timestamp();
+    scheduler_dodaj_zdarzenie(aktualny_pid,&zd);return 1;
+}
+
 uint64_t ipc_send(uint64_t endpoint_handle, uint64_t desc_user) {
     IpcEndpoint* e = endpoint_z_handle(endpoint_handle);
     if (!e || !scheduler_pid_uzytkownika(e->owner_pid) || desc_user == 0 ||
@@ -907,6 +922,7 @@ extern "C" void bws_nowoczesne_posprzataj_proces(int pid, bool aktywny_cr3) {
     if (pid <= 0 || pid >= static_cast<int>(PZB_MAKS_PROCESOW)) return;
 
     ekran_posprzataj_proces(pid);
+    instalator_zamknij_proces(pid);
 
     for (uint32_t i = 0; i < IPC_ENDPOINTOW_MAX; ++i) {
         IpcEndpoint& e = endpoints[i];
@@ -986,7 +1002,7 @@ extern "C" uint64_t bws_nowoczesne_obsluz(
         case BWS_SHM_UNMAP: return shm_unmap(a1);
         case BWS_SHM_CLOSE: return shm_close(a1);
         case BWS_IPC_CREATE: return ipc_create();
-        case BWS_IPC_SEND: return a1 == EKRAN_IPC ? ipc_ekran(*proces,a2) : (a1 == TAPETY_IPC ? ipc_tapety(*proces, a2) : ipc_send(a1, a2));
+        case BWS_IPC_SEND: return a1==INSTALATOR_IPC ? ipc_instalator(*proces,a2) : (a1 == EKRAN_IPC ? ipc_ekran(*proces,a2) : (a1 == TAPETY_IPC ? ipc_tapety(*proces, a2) : ipc_send(a1, a2)));
         case BWS_IPC_RECEIVE: return ipc_receive(a1, a2);
         case BWS_IPC_CLOSE: return ipc_close(a1);
         case BWS_FILE_WATCH: return watch_dispatch(*proces, a1, a2, a3);

@@ -28,6 +28,13 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include "storage_format.h"
+
+// Wyłącznie Ring0. Brak formatowania w inicjalizuj_psf().
+void psf_ustaw_partycje(const Storage::Partition* partition);
+bool psf_formatuj_instalacje(const Storage::Partition& partition);
+bool psf_weryfikuj_dysk();
+bool psf_znacznik_instalacji(const uint8_t uuid[16],bool complete);
 
 /* =========================================================================
  * 1. STALE FORMATU BSP2

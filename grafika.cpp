@@ -5,6 +5,7 @@
 #include "pamiec.h"
 #include "zegar-rtc.h"
 #include "ahci.h"
+#include "psf.h"
 #include "scheduler.h"
 #include "ekran.h"
 #include "zegar_ui.h"
@@ -2526,7 +2527,7 @@ extern "C" void wczytaj_tapete_z_dysku() {
         return;
 
     wypisz_log(
-        "[GRAFIKA] Proba wczytania tapeta.bmp z dysku AHCI (LBA 10)...");
+        "[GRAFIKA] Proba wczytania /tapeta.bmp z BSP2...");
 
     if (!surowy_bufor_bmp_zmapowany) {
         if (!mapuj_bufor_tapety(
@@ -2544,8 +2545,8 @@ extern "C" void wczytaj_tapete_z_dysku() {
     uint8_t* raw_bmp =
         reinterpret_cast<uint8_t*>(VADDR_RAW_BMP);
 
-    if (!czytaj_z_glownego_dysku_ahci(
-            10, 1, raw_bmp)) {
+    uint32_t got=0;
+    if (!czytaj_fragment_pliku("/tapeta.bmp",0,reinterpret_cast<char*>(raw_bmp),54,&got) || got!=54) {
         wypisz_log(
             "[GRAFIKA] BLAD: Nie mozna odczytac naglowka BMP.");
         return;
@@ -2568,32 +2569,7 @@ extern "C" void wczytaj_tapete_z_dysku() {
         return;
     }
 
-    const uint32_t sektory_do_odczytu =
-        (rozmiar_pliku + 511U) / 512U;
-
-    uint32_t przeczytane = 1;
-    uint64_t lba = 11;
-
-    while (przeczytane < sektory_do_odczytu) {
-        uint32_t paczka =
-            sektory_do_odczytu - przeczytane;
-
-        if (paczka > 32)
-            paczka = 32;
-
-        if (!czytaj_z_glownego_dysku_ahci(
-                lba,
-                paczka,
-                raw_bmp +
-                    static_cast<uint64_t>(przeczytane) * 512ULL)) {
-            wypisz_log(
-                "[GRAFIKA] BLAD: Nie mozna odczytac calego BMP.");
-            return;
-        }
-
-        lba += paczka;
-        przeczytane += paczka;
-    }
+    if(!czytaj_fragment_pliku("/tapeta.bmp",0,reinterpret_cast<char*>(raw_bmp),rozmiar_pliku,&got)||got!=rozmiar_pliku)return;
 
     const uint32_t dib_size =
         odczytaj_le32(raw_bmp + 14);

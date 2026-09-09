@@ -21,3 +21,8 @@ wirtualny_dysk.img
 # Tymczasowe pliki QEMU
 *.pid
 *.log
+.installer-build/
+.installertest/
+.installer-run/
+instalator.bin
+instalator.elf

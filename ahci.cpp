@@ -464,6 +464,21 @@ bool ahci_gotowy =
 bool blokada_operacji =
     false;
 
+struct DyskKontekst { AhciDysk info; ZasobyDMA zasoby; bool blad; };
+DyskKontekst dyski[32]{};
+uint32_t liczba_dyskow = 0;
+AhciDysk ident_info{};
+uint64_t licznik_zapisow = 0;
+
+bool wybierz_dysk(uint32_t id) {
+    if (id >= liczba_dyskow || dyski[id].blad) return false;
+    dma = dyski[id].zasoby;
+    glowny_numer_portu = dyski[id].info.port;
+    glowny_port = &hba->ports[glowny_numer_portu];
+    liczba_sektorow_dysku = dyski[id].info.sektory;
+    return true;
+}
+
 /* =========================================================================
  * 6. PROSTE HELPERY
  * ========================================================================= */
@@ -2091,7 +2106,7 @@ bool wykonaj_identify(
             83
         );
 
-    if ((word83 &
+    if ((word83 & 0xC000U) != 0x4000U || (word83 &
          (1U << 10)) == 0) {
 
         wypisz_log(
@@ -2127,7 +2142,7 @@ bool wykonaj_identify(
              )
          ) << 48);
 
-    if (sektory == 0) {
+    if (sektory == 0 || sektory > (UINT64_C(1) << 48)) {
         return false;
     }
 
@@ -2176,15 +2191,25 @@ bool wykonaj_identify(
             2U;
     }
 
-    if (rozmiar_sektora !=
-        AHCI_SEKTOR_BAJTOW) {
-
-        wypisz_log(
-            "[AHCI] Dysk nie uzywa sektorow logicznych 512 B; brak zgodnosci BSP."
-        );
-
-        return false;
-    }
+    ident_info = {};
+    ident_info.sektory = sektory;
+    ident_info.sektor_bajty = rozmiar_sektora;
+    auto ata_string = [&](char* out, uint32_t word, uint32_t bytes) {
+        for (uint32_t i=0; i<bytes; ++i) {
+            uint8_t c = ident[word*2 + (i^1U)];
+            out[i] = c >= 32 && c <= 126 ? char(c) : ' ';
+        }
+        while (bytes && out[bytes-1]==' ') --bytes;
+        out[bytes]=0;
+        uint32_t first=0; while (out[first]==' ') ++first;
+        if (first) for (uint32_t i=0; i<=bytes-first; ++i) out[i]=out[i+first];
+    };
+    ata_string(ident_info.model,27,40);
+    ata_string(ident_info.serial,10,20);
+    ident_info.flush_komenda = (word83 & (1U<<13)) ? 0xEA : ((word83 & (1U<<12)) ? 0xE7 : 0);
+    ident_info.odczyt = rozmiar_sektora == AHCI_SEKTOR_BAJTOW;
+    ident_info.zapis = ident_info.odczyt && ident_info.flush_komenda != 0 &&
+        (ident_word(ident,128) & (1U<<2)) == 0; // ATA security locked
 
     liczba_sektorow_dysku =
         sektory;
@@ -2309,11 +2334,15 @@ bool kopiuj_z_dma(
  * ========================================================================= */
 
 bool operacja_dysku(
+    uint32_t id,
     uint64_t lba,
     uint32_t liczba_sektorow,
     void* bufor,
     bool zapis
 ) {
+    GuardAHCI guard;
+    if (!guard.aktywny() || !wybierz_dysk(id) || !dyski[id].info.odczyt ||
+        (zapis && !dyski[id].info.zapis)) return false;
     if (!ahci_gotowy ||
         !glowny_port ||
         !dma.gotowe ||
@@ -2339,16 +2368,6 @@ bool operacja_dysku(
     const uint32_t bajty =
         liczba_sektorow *
         AHCI_SEKTOR_BAJTOW;
-
-    GuardAHCI guard;
-
-    if (!guard.aktywny()) {
-        /*
-         * Inna operacja AHCI trwa. Bez kolejki asynchronicznej bezpieczniej
-         * zwrocic blad niz zakleszczyc kernel.
-         */
-        return false;
-    }
 
     NaglowekKomendyAHCI* naglowek =
         naglowek_slot0();
@@ -2511,9 +2530,11 @@ bool operacja_dysku(
 
     if (!uruchom_i_czekaj_na_komende(
             glowny_port)) {
-
+        dyski[id].blad = true; // DMA pozostaje przypisane; nigdy nie reuse po timeout.
         return false;
     }
+
+    if (zapis) licznik_zapisow += liczba_sektorow;
 
     if (!zapis) {
         if (!kopiuj_z_dma(
@@ -2646,62 +2667,25 @@ extern "C" void inicjalizuj_kontroler_ahci() {
     cap_hba =
         hba->cap;
 
-    const int port =
-        znajdz_glowny_port();
-
-    if (port < 0) {
-        wypisz_log(
-            "[AHCI] Kontroler istnieje, ale brak aktywnego dysku SATA."
-        );
-
-        anuluj_inicjalizacje();
-        return;
+    const uint32_t ports = (cap_hba & AHCI_CAP_NP_MASK) + 1;
+    for (uint32_t port=0; port<ports; ++port) {
+        if (!(hba->pi & (1U<<port)) || !port_ma_aktywne_ata(&hba->ports[port])) continue;
+        dma = {};
+        glowny_port = &hba->ports[port];
+        if (!zaalokuj_zasoby_dma()) break;
+        if (!skonfiguruj_port(glowny_port) || !wykonaj_identify(glowny_port)) {
+            // Nie zwalniaj ramek, jesli kontroler nie potwierdzil zatrzymania DMA.
+            if (zatrzymaj_silnik(glowny_port)) zwolnij_zasoby_dma();
+            continue;
+        }
+        ident_info.port = port;
+        dyski[liczba_dyskow++] = {ident_info,dma,false};
+        log_port("[AHCI] IDENTIFY SATA port ", port);
+        wypisz_log(ident_info.model);
+        if (!ident_info.zapis) wypisz_log("[AHCI] Dysk nie kwalifikuje sie do zapisu (sektor/FLUSH/security).");
     }
-
-    glowny_numer_portu =
-        port;
-
-    glowny_port =
-        &hba->ports[
-            port
-        ];
-
-    if (!zaalokuj_zasoby_dma()) {
-        wypisz_log(
-            "[AHCI] Brak ramek PMM na bufory DMA."
-        );
-
-        anuluj_inicjalizacje();
-        return;
-    }
-
-    if (!skonfiguruj_port(
-            glowny_port)) {
-
-        anuluj_inicjalizacje();
-        return;
-    }
-
-    if (!wykonaj_identify(
-            glowny_port)) {
-
-        wypisz_log(
-            "[AHCI] IDENTIFY DEVICE nie powiodlo sie."
-        );
-
-        anuluj_inicjalizacje();
-        return;
-    }
-
-    ahci_gotowy =
-        true;
-
-    log_port(
-        "[AHCI] Glowny dysk SATA gotowy na porcie ",
-        static_cast<uint32_t>(
-            port
-        )
-    );
+    ahci_gotowy = liczba_dyskow != 0;
+    if (ahci_gotowy) wybierz_dysk(0);
 }
 
 /* =========================================================================
@@ -2715,6 +2699,7 @@ extern "C" bool czytaj_z_glownego_dysku_ahci(
 ) {
     return
         operacja_dysku(
+            0,
             lba,
             ilosc_sektorow,
             bufor_docelowy,
@@ -2729,6 +2714,7 @@ extern "C" bool zapisz_na_glowny_dysk_ahci(
 ) {
     return
         operacja_dysku(
+            0,
             lba,
             ilosc_sektorow,
             dane_zrodlowe,
@@ -2737,5 +2723,41 @@ extern "C" bool zapisz_na_glowny_dysk_ahci(
 }
 
 extern "C" uint64_t pobierz_liczbe_sektorow_glownego_dysku_ahci() {
-    return liczba_sektorow_dysku;
+    return liczba_dyskow ? dyski[0].info.sektory : 0;
+}
+
+uint32_t ahci_liczba_dyskow() { return liczba_dyskow; }
+uint64_t ahci_licznik_zapisow() { return licznik_zapisow; }
+bool ahci_dysk(uint32_t id, AhciDysk* out) {
+    if (!out || id>=liczba_dyskow) return false;
+    *out = dyski[id].info;
+    if (dyski[id].blad) out->zapis = out->odczyt = false;
+    return true;
+}
+bool ahci_czytaj(uint32_t id,uint64_t lba,uint32_t n,void* buf) { return operacja_dysku(id,lba,n,buf,false); }
+bool ahci_zapisz(uint32_t id,uint64_t lba,uint32_t n,const void* buf) { return operacja_dysku(id,lba,n,const_cast<void*>(buf),true); }
+bool ahci_flush(uint32_t id) {
+    GuardAHCI guard;
+    if (!guard.aktywny() || !wybierz_dysk(id) || !dyski[id].info.zapis) return false;
+    auto* hdr = naglowek_slot0(); auto* tbl = tablica_slot0();
+    if (!hdr || !tbl) return false;
+    wyzeruj(tbl,sizeof(*tbl));
+    hdr->flagi = sizeof(FisRegH2D)/4; hdr->liczba_prdt=0; hdr->licznik_bajtow=0;
+    auto* fis = reinterpret_cast<FisRegH2D*>(tbl->cfis);
+    fis->typ=FIS_TYPE_REG_H2D; fis->pmport_c=FIS_COMMAND_BIT;
+    fis->komenda=dyski[id].info.flush_komenda;
+    if (!uruchom_i_czekaj_na_komende(glowny_port)) { dyski[id].blad=true; return false; }
+    return true;
+}
+bool ahci_sprawdz_tozsamosc(uint32_t id) {
+    GuardAHCI guard;
+    if (!guard.aktywny() || !wybierz_dysk(id)) return false;
+    if (!port_ma_aktywne_ata(glowny_port) || !wykonaj_identify(glowny_port)) { dyski[id].blad=true; return false; }
+    const auto& old=dyski[id].info;
+    bool ok=old.sektory==ident_info.sektory && old.sektor_bajty==ident_info.sektor_bajty &&
+        old.zapis==ident_info.zapis && old.flush_komenda==ident_info.flush_komenda;
+    for(unsigned i=0;i<sizeof(old.model);++i) ok &= old.model[i]==ident_info.model[i];
+    for(unsigned i=0;i<sizeof(old.serial);++i) ok &= old.serial[i]==ident_info.serial[i];
+    if(!ok) dyski[id].blad=true;
+    return ok;
 }

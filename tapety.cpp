@@ -1,4 +1,5 @@
 #include "tapety.h"
+#include "instalator.h"
 #include "grafika.h"
 #include "heap.h"
 #include "psf.h"
@@ -261,6 +262,7 @@ bool zapisz_inwentarz(const SystemowyWpisInwentarza* wpisy, size_t liczba) {
     return true;
 }
 
+uint32_t wymagane_tapety=0;
 void instaluj(uint64_t mbi) {
     if (!psf_czy_gotowy() || !zapewnij_katalog("/tapety")) {
         klog_serial("[TAPETA] BLAD utworzenia /tapety; start bedzie kontynuowany.");
@@ -289,6 +291,7 @@ void instaluj(uint64_t mbi) {
 
     const uint32_t wersja = odczytaj_u32_le(p + 8);
     const uint32_t liczba_plikow = odczytaj_u32_le(p + 12);
+    wymagane_tapety=liczba_plikow;
     const uint32_t hdr_sz = odczytaj_u32_le(p + 16);
     const uint32_t tbl_sz = odczytaj_u32_le(p + 20);
     const uint32_t dat_sz = odczytaj_u32_le(p + 24);
@@ -441,8 +444,10 @@ void instaluj(uint64_t mbi) {
     log_liczba("[TAPETA] Zachowano istniejacych: ", zachowane);
 
     // Krok 3: Zwolnienie pamieci fizycznej modulu tapety.pak
-    OdblokujZakres(mod.start, mod.rozmiar);
-    klog_serial("[PMM] Pamiec fizyczna modulu tapety.pak zwolniona do puli PMM.");
+    if (!instalator_tryb()) {
+        OdblokujZakres(mod.start, mod.rozmiar);
+        klog_serial("[PMM] Pamiec fizyczna modulu tapety.pak zwolniona do puli PMM.");
+    }
 }
 
 bool wczytaj(const char* path, BtpInfo* info, uint32_t** zrodlo, bool cicho) {
@@ -609,6 +614,19 @@ void diagnostyka(uint32_t grupa, TapetyOdpowiedz* out) {
 }
 } // namespace
 
+bool tapety_weryfikuj_instalacje(){
+    const size_t n=wczytaj_inwentarz(s_inwentarz_wpisy,TAPETY_INWENTARZ_MAX);
+    if(!n || (wymagane_tapety && n!=wymagane_tapety))return false;
+    for(size_t i=0;i<n;++i){char path[TAPETY_SCIEZKA_MAX]{};size_t k=0;const char*prefix="/tapety/";
+        while(prefix[k]){path[k]=prefix[k];++k;}
+        for(size_t j=0;s_inwentarz_wpisy[i].nazwa[j]&&k+1<sizeof(path);++j)path[k++]=s_inwentarz_wpisy[i].nazwa[j];
+        const auto&e=s_inwentarz_wpisy[i];
+        if(rozmiar_pliku(path)!=e.rozmiar||tapety_plik_crc32(path,e.rozmiar)!=e.crc32)return false;
+    }
+    return true;
+}
+bool tapety_instaluj_sprawdz(uint64_t mbi){instaluj(mbi);return tapety_weryfikuj_instalacje();}
+
 void tapety_inicjalizuj(uint64_t mbi) {
     if (mbi == 0) mbi = g_multiboot_info_ptr;
     aktualna = tapety_domyslna();
@@ -651,7 +669,7 @@ void tapety_inicjalizuj(uint64_t mbi) {
             }
             return false;
         },
-        []() { klog_serial("[TAPETA] Fallback BMP LBA 10."); wczytaj_tapete_z_dysku(); return grafika_czy_tapeta(); },
+        []() { klog_serial("[TAPETA] Fallback /tapeta.bmp w BSP2."); wczytaj_tapete_z_dysku(); return grafika_czy_tapeta(); },
         []() { klog_serial("[TAPETA] Fallback jednolity kolor."); grafika_tapeta_solid(); });
     if (statystyki.zrodlo != TAPETY_BTP) aktualna.sciezka[0] = 0;
     TapetyOdpowiedz s{}; snapshot(&s);
