@@ -2,6 +2,7 @@
 #include "../../storage_format.h"
 #include "../../psf.h"
 #include "../../zegar-rtc.h"
+#include "../../instalator_format.h"
 #include <array>
 #include <map>
 #include <vector>
@@ -33,6 +34,21 @@ struct Fake {
 unsigned checks=0;
 #define CHECK(x) do{++checks;if(!(x)){std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x);std::abort();}}while(0)
 int main(){
+    CHECK(!instalator_potwierdzenie_poprawne("",16));
+    CHECK(!instalator_potwierdzenie_poprawne("B",16));
+    CHECK(!instalator_potwierdzenie_poprawne("BU",16));
+    CHECK(!instalator_potwierdzenie_poprawne("BURSZT",16));
+    CHECK(instalator_potwierdzenie_poprawne("BURSZTYN",16));
+    CHECK(!instalator_potwierdzenie_poprawne("BURSZTY",16));
+    CHECK(!instalator_potwierdzenie_poprawne("bursztyn",16));
+    CHECK(!instalator_potwierdzenie_poprawne("BURSZTYNX",16));
+    CHECK(!instalator_mozna_zainstalowac(true,true,false,true,false));
+    CHECK(!instalator_mozna_zainstalowac(true,true,true,true,false));
+    CHECK(!instalator_mozna_zainstalowac(true,true,false,true,true));
+    CHECK(instalator_mozna_zainstalowac(true,true,true,true,true));
+    CHECK(!instalator_mozna_zainstalowac(false,true,true,true,true));
+    CHECK(!instalator_mozna_zainstalowac(true,false,true,true,true));
+    CHECK(instalator_mozna_zainstalowac(true,true,true,false,false));
     CHECK(crc32("123456789",9)==0xCBF43926);
     Fake disk(4ULL*1024*1024*1024/512);Layout l{};Table t{};uint8_t uuid[16]={1,2,3,4,5,6,7,0x40,0x80,10,11,12,13,14,15,16};
     CHECK(plan(&disk.dev,&l));CHECK(l.esp.start==2048&&l.esp.count==1048576&&l.bsp.start%2048==0&&l.bsp.count==BspMaxBytes/512);

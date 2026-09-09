@@ -601,7 +601,8 @@ uint64_t watch_dispatch(proces_t& proces, uint64_t op, uint64_t arg,
         if (static_cast<uint64_t>(mask) != mask64 || mask == 0 ||
             (mask & ~BWS_FILE_WATCH_WSZYSTKO) != 0) return 0;
         char path[SCIEZKA_MAX] = {};
-        if (!kopiuj_string_user(arg, path, sizeof(path)) || path[0] != '/')
+        if (!kopiuj_string_user(arg, path, sizeof(path)) || path[0] != '/' ||
+            (path[0] == '/' && path[1] == '\0'))
             return 0;
         psf_metadane meta{};
         if (!pobierz_metadane_tworu(path, &meta) ||

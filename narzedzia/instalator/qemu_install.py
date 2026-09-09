@@ -159,7 +159,7 @@ def install(g,target,sentinel,before_target,before_sentinel):
     g.q.screenshot(g.dir/'confirmation.png')
     g.q.click(255,430) # source warning acknowledgement
     g.q.click(380,480) # text field
-    for c in 'burstztyn':g.q.key('shift-'+c)
+    for c in 'bursztyn':g.q.key('shift-'+c)
     g.q.screenshot(g.dir/'typed.png')
     no_writes(g)
     assert target_fingerprint(target)==before_target,'Typing confirmation changed target'

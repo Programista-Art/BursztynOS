@@ -53,6 +53,29 @@ partycji, nie przesuwa ich i nie zmniejsza systemów plików.
   pustym dysku, start UEFI bez ISO, reinstalacja, ponowny start bez ISO,
   niezmieniony SHA-256 drugiego dysku oraz start hybrydowego ISO jako USB — PASS.
 
+- Secure Boot: `/EFI/BOOT/BOOTX64.EFI` nie jest podpisany kryptograficznie
+  (brak certyfikatu Authenticode/Microsoft/shim). Wymaganie w UI i dokumentacji:
+  „Secure Boot musi być wyłączony.”
+- Kontroler dysku: wymagany kontroler SATA AHCI. Intel RST, Intel VMD,
+  tryby RAID oraz NVMe nie są obsługiwane w pierwszym wydaniu instalatora.
+  W przypadku braku kontrolera SATA AHCI instalator bezpiecznie wstrzymuje
+  działanie z komunikatem: „Nie wykryto obsługiwanego kontrolera SATA AHCI.”
+  bez wykonywania jakichkolwiek zapisów.
+- Ekran bezpieczeństwa: przed ostatecznym potwierdzeniem prezentowane są
+  jawnie: tryb startu UEFI, wymóg wyłączenia Secure Boot, model dysku,
+  kontroler SATA AHCI, sektor logiczny 512 B / 512e, rozmiar instalacji
+  BSP2 2 GiB (2048 MiB) oraz informacja, że pozostałe miejsce na dysku
+  pozostaje nieprzydzielone.
+- Ponowna walidacja tożsamości: pomiędzy zatwierdzeniem przez użytkownika
+  a pierwszym zapisem na dysk, instalator ponownie odpytuje port ATA
+  i wykonuje IDENTIFY DEVICE, porównując port, model, numer seryjny,
+  liczbę sektorów, rozmiar logicznego sektora oraz fingerprint dysku.
+  Wszelka zmiana tożsamości skutkuje natychmiastowym przerwaniem instalacji.
+- Odporność na awarię zasilania: znacznik instalacji zapisywany na dysku
+  rozróżnia stan w toku (`in-progress`) od stanu zweryfikowanego (`complete`).
+  Niepełna instalacja nie jest akceptowana przez normalny start systemu,
+  a jądro w normalnym trybie nigdy nie wykonuje automatycznego formatowania.
+
 Referencje formatu:
 [UEFI GPT](https://uefi.org/specs/UEFI/2.10/05_GUID_Partition_Table_Format.html),
 [UEFI FAT/Media Access](https://uefi.org/specs/UEFI/2.10/13_Protocols_Media_Access.html),

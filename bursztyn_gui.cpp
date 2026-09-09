@@ -1255,8 +1255,11 @@ bool gui_ustaw_geometrie_okna(int x, int y, int szer, int wys, int stan) {
         return false;
     }
 
+    // BWS62 zachowuje stan okna w argumencie 3: 0=nieokreslony,
+    // 1=normalny, 2=zmaksymalizowany. Sygnatura i numer ABI pozostaja bez zmian.
     const uint64_t res = bws_wywolaj(BWS_GUI_GEOMETRIA, spakuj_dwa_i32(x, y),
-                                     spakuj_dwa_i32(szer, wys), 0, 0);
+                                     spakuj_dwa_i32(szer, wys),
+                                     static_cast<uint64_t>(static_cast<uint32_t>(stan)), 0);
     const bool ok = (res == 1ULL);
     if (ok) {
         g_widoczna_geometria_x = x;

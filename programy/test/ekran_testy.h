@@ -584,7 +584,10 @@ static void wykonaj_testy_ekranu(bool runtime){
             "Notatnik","Snake","Eksplorator Plików"};
         const int legacy_sizes[][2]={{660,360},{320,380},{600,400},{400,328},{900,600}};
         const uint32_t legacy_skale[]={100,125,150,175,200,100};
+        bws_zdarzenie ev_drain{};
+        while (gui_pobierz_zdarzenie(&ev_drain)) {}
         for(unsigned a=0;a<5;++a){
+          while (gui_pobierz_zdarzenie(&ev_drain)) {}
           r={};r.operacja=EKRAN_STAN;
           bws_sprawdz(ekran_zapytaj(ep,r,&out)&&out.status==EKRAN_OK);
           const uint64_t bufory_przed=out.bufory_bajty;

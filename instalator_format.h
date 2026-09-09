@@ -22,3 +22,21 @@ struct InstalatorOdpowiedz {
     char model[41],serial[21],blad[160];
 };
 static_assert(sizeof(InstalatorOdpowiedz)<=512,"IPC response limit");
+
+inline bool instalator_potwierdzenie_poprawne(const char* tekst, uint32_t pojemnosc) {
+    static constexpr char wymagane[] = "BURSZTYN";
+    if (!tekst || pojemnosc < sizeof(wymagane)) return false;
+    for (uint32_t i = 0; i < sizeof(wymagane); ++i) {
+        if (tekst[i] != wymagane[i]) return false;
+    }
+    return true;
+}
+
+inline bool instalator_mozna_zainstalowac(bool dysk_poprawny,
+                                          bool instalator_uprawniony,
+                                          bool tekst_poprawny,
+                                          bool potwierdzenie_zrodla_wymagane,
+                                          bool potwierdzenie_zrodla_zaznaczone) {
+    return dysk_poprawny && instalator_uprawniony && tekst_poprawny &&
+           (!potwierdzenie_zrodla_wymagane || potwierdzenie_zrodla_zaznaczone);
+}

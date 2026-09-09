@@ -560,7 +560,10 @@ bool zapisz_plik_od_nowa(const char*path,const char*data,uint32_t size){
     if(scisla_instalacja){
         if(!ok||liczba_plikow_kontrolnych>=96){pliki_instalacja_ok=false;return false;}
         auto&e=pliki_kontrolne[liczba_plikow_kontrolnych++];unsigned i=0;
-        for(;i+1<sizeof(e.path)&&path[i];++i)e.path[i]=path[i];e.path[i]=0;
+        for(;i+1<sizeof(e.path)&&path[i];++i){
+            e.path[i]=path[i];
+        }
+        e.path[i]=0;
         if(path[i]){pliki_instalacja_ok=false;return false;}
         e.size=size;e.crc=Storage::crc32(data,size);
     }

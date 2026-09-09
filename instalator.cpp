@@ -128,7 +128,8 @@ bool instalator_obsluz(const proces_t&p,const InstalatorZadanie&r,InstalatorOdpo
             disk_uuid[7]=(disk_uuid[7]&15)|0x40;disk_uuid[8]=(disk_uuid[8]&63)|0x80;}
     }else if(r.operacja==INST_POTWIERDZ && stage==INST_GOTOWY){
         uint32_t current=0;
-        if(!nonce||r.token!=nonce||r.dysk!=selected||!r.zgoda_zrodlo||!name(r.potwierdzenie,sizeof(r.potwierdzenie),"BURSTZTYN"))status=INST_POTWIERDZENIE;
+        if(!nonce||r.token!=nonce||r.dysk!=selected||!r.zgoda_zrodlo||
+           !instalator_potwierdzenie_poprawne(r.potwierdzenie,sizeof(r.potwierdzenie)))status=INST_POTWIERDZENIE;
         else if(!payloads()||Storage::source_iso(layout.bsp.device)||!ahci_sprawdz_tozsamosc(selected)||
                 !fingerprint_disk(layout.bsp.device,&current)||current!=fingerprint)status=INST_DYSK_BLAD;
         else {status=0;stage=INST_GPT;klog_serial("[INSTALL] Explicit final confirmation accepted. No disk sectors written before this point.");}

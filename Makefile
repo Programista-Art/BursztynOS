@@ -711,7 +711,7 @@ iso8k: $(ISO8K)
 # ============================================================================
 
 $(VIRTUAL_DISK):
-	$(QEMU_IMG) create -f raw $@ 512M
+	$(QEMU_IMG) create -f raw $@ 4G
 
 prepare-disk: $(VIRTUAL_DISK)
 	@echo "[QEMU] Dysk przygotowany; bez zapisu zasobow pod surowe LBA."
@@ -790,6 +790,31 @@ runusbhid: iso prepare-disk
 # ============================================================================
 # 24. RUNUEFI - UEFI / OVMF
 # ============================================================================
+
+.PHONY: run-installed
+
+run-installed: prepare-disk check-ovmf
+	@if [ -n "$(OVMF_MONO)" ]; then \
+		echo "[QEMU] Uruchamiam zainstalowany Bursztyn OS z dysku, bez ISO."; \
+		exec $(QEMU) \
+			-bios "$(OVMF_MONO)" \
+			$(QEMU_COMMON_ARGS) \
+			-device qemu-xhci,id=xhci \
+			-device usb-kbd,id=usbkbd,bus=xhci.0 \
+			-device usb-mouse,id=usbmouse,bus=xhci.0 \
+			-boot order=c; \
+	else \
+		echo "[QEMU] Uruchamiam zainstalowany Bursztyn OS przez OVMF pflash, bez ISO."; \
+		cp "$(OVMF_VARS)" "$(OVMF_VARS_RUNTIME)"; \
+		exec $(QEMU) \
+			-drive if=pflash,format=raw,readonly=on,file="$(OVMF_CODE)" \
+			-drive if=pflash,format=raw,file="$(OVMF_VARS_RUNTIME)" \
+			$(QEMU_COMMON_ARGS) \
+			-device qemu-xhci,id=xhci \
+			-device usb-kbd,id=usbkbd,bus=xhci.0 \
+			-device usb-mouse,id=usbmouse,bus=xhci.0 \
+			-boot order=c; \
+	fi
 
 check-ovmf:
 	@if [ -n "$(OVMF_MONO)" ]; then \

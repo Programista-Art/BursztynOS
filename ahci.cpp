@@ -1537,52 +1537,6 @@ bool port_ma_aktywne_ata(
     return false;
 }
 
-int znajdz_glowny_port() {
-    if (!hba) {
-        return -1;
-    }
-
-    const uint32_t pi =
-        hba->pi;
-
-    const uint32_t np =
-        (cap_hba &
-         AHCI_CAP_NP_MASK) +
-        1U;
-
-    const uint32_t maks_portow =
-        np < 32U
-            ? np
-            : 32U;
-
-    for (uint32_t i = 0;
-         i <
-            maks_portow;
-         ++i) {
-
-        if ((pi &
-             (1U << i)) == 0) {
-
-            continue;
-        }
-
-        volatile PortAHCI* port =
-            &hba->ports[i];
-
-        if (port_ma_aktywne_ata(
-                port)) {
-
-            return
-                static_cast<int>(
-                    i
-                );
-        }
-
-    }
-
-    return -1;
-}
-
 /* =========================================================================
  * 17. KONFIGURACJA DMA PORTU
  * ========================================================================= */
