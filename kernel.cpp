@@ -167,6 +167,9 @@ extern "C" uint8_t _binary_obrazy_test_bmp_end[];
 extern "C" uint8_t _binary_obrazy_test1_bmp_start[];
 extern "C" uint8_t _binary_obrazy_test1_bmp_end[];
 
+extern "C" uint8_t _binary_obrazy_logo_png_start[];
+extern "C" uint8_t _binary_obrazy_logo_png_end[];
+
 /* =========================================================================
  * STALE STARTOWE
  * ========================================================================= */
@@ -690,7 +693,8 @@ void utworz_drabine_katalogow() {
         "/ustawienia",
         "/logi",
         "/piaskownica",
-        "/tymczasowe"
+        "/tymczasowe",
+        "/obrazy"
     };
 
     for (size_t i = 0;
@@ -954,7 +958,8 @@ void instaluj_wbudowane_programy() {
         "plik_startowy = \"test.bur\"\n"
         "uprawnienia = [\n"
         "    \"okna\",\n"
-        "    \"uruchom_program\"\n"
+        "    \"uruchom_program\",\n"
+        "    \"pliki_czytaj\"\n"
         "]\n";
     
     static const char MANIFEST_SNAKE[] =
@@ -1175,6 +1180,22 @@ void instaluj_wbudowane_programy() {
     };
     instaluj_bmp("/uzytkownicy/Pulpit/test.bmp", _binary_obrazy_test_bmp_start, (uint32_t)test_bmp_rozmiar, "test");
     instaluj_bmp("/uzytkownicy/Pulpit/test1.bmp", _binary_obrazy_test1_bmp_start, (uint32_t)test1_bmp_rozmiar, "test1");
+
+    const uint64_t logo_png_rozmiar =
+        static_cast<uint64_t>(
+            _binary_obrazy_logo_png_end -
+            _binary_obrazy_logo_png_start);
+    if (logo_png_rozmiar > 0) {
+        if (rozmiar_pliku("/obrazy/logo.png") != logo_png_rozmiar) {
+            (void)usun_twor("/obrazy/logo.png");
+            if (utworz_plik("/obrazy/logo.png")) {
+                (void)zapisz_do_pliku("/obrazy/logo.png",
+                    reinterpret_cast<const char*>(_binary_obrazy_logo_png_start),
+                    static_cast<uint32_t>(logo_png_rozmiar));
+                wypisz_log("[BSP] /obrazy/logo.png zainstalowany.");
+            }
+        }
+    }
 
 #if BURSZTYN_TESTY_PSF
     auto generuj_bmp_strumieniowo = [](const char* sciezka, uint32_t w, uint32_t h, uint16_t bpp) -> bool {
@@ -1931,7 +1952,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
         (void)bws_uruchom_program_z_pliku_z_argumentem(
             "/programy/test.cebula/test.bur",
             PZB_UZYTKOWNIK,
-            PRAWO_GUI | PRAWO_URUCHOM_PROGRAM,
+            PRAWO_GUI | PRAWO_URUCHOM_PROGRAM | PRAWO_PLIKI_CZYTAJ,
             false,
             "--automated");
     }

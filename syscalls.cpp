@@ -1784,7 +1784,7 @@ uint64_t bws_uruchom(
         wymagane = PRAWO_GUI;
     else if (rowna_sciezka(sciezka,
                            "/programy/test.cebula/test.bur"))
-        wymagane = PRAWO_GUI;
+        wymagane = PRAWO_GUI | PRAWO_URUCHOM_PROGRAM | PRAWO_PLIKI_CZYTAJ;
     else if (rowna_sciezka(sciezka,
                            "/gry/snake.cebula/snake.bur"))
         wymagane = PRAWO_GUI;

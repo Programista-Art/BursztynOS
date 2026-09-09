@@ -1731,19 +1731,11 @@ void rysuj_zegar_rtc() {
     const ZegarUiGeometria g =
         zegar_ui_geometria(cur_w, cur_h, procent, tekst_szer);
 
-    RysujProstokat(
-        g.x,
-        g.y,
-        g.szer,
-        g.wys,
-        0x001A0B00);
-
-    RysujProstokat(
-        g.x,
-        g.y,
-        g.szer,
-        ui_skaluj(2, procent),
-        0x00E58A00);
+    for (int y = 0; y < g.wys; ++y) {
+        uint32_t gray = 108 - (56 * y) / (g.wys > 1 ? g.wys - 1 : 1);
+        uint32_t kolor = (gray << 16) | (gray << 8) | gray;
+        RysujProstokat(g.x, g.y + y, g.szer, 1, kolor);
+    }
 
     WypiszTekst(
         bufor_czasu,
@@ -1812,29 +1804,20 @@ void OdswiezEkran() {
             const int pasek_y =
                 static_cast<int>(
                     aktywny_ekran->PobierzWysokosc()) - 40;
+            const int pasek_w = static_cast<int>(aktywny_ekran->PobierzSzerokosc());
 
-            RysujProstokat(
-                0,
-                pasek_y,
-                static_cast<int>(
-                    aktywny_ekran->PobierzSzerokosc()),
-                40,
-                0x001A0B00);
-
-            RysujProstokat(
-                0,
-                pasek_y,
-                static_cast<int>(
-                    aktywny_ekran->PobierzSzerokosc()),
-                2,
-                0x00E58A00);
+            for (int y = 0; y < 40; ++y) {
+                uint32_t gray = 108 - (56 * y) / 39;
+                uint32_t kolor = (gray << 16) | (gray << 8) | gray;
+                RysujProstokat(0, pasek_y + y, pasek_w, 1, kolor);
+            }
 
             WypiszTekst(
                 "Bursztyn OS - Terminal",
                 20,
                 static_cast<int>(
                     aktywny_ekran->PobierzWysokosc()) - 28,
-                0x008A5A00,
+                0x00FFBF00,
                 1);
         }
 

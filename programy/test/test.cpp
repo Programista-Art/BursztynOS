@@ -29,11 +29,11 @@ struct NaglowekBur {
 
 extern "C" __attribute__((noreturn)) void _start();
 
-static constexpr uint64_t BUR_TEKST_ROZMIAR     = 0x69000ULL; // 420 KiB
+static constexpr uint64_t BUR_TEKST_ROZMIAR     = 0x70000ULL; // 448 KiB
 static constexpr uint64_t BUR_TEKST_PRZESUNIECIE = 0x1000ULL;
 static constexpr uint64_t BUR_TEKST_WIRTUALNY     = 0x1001000ULL;
-static constexpr uint64_t BUR_DANE_PRZESUNIECIE   = 0x6A000ULL;
-static constexpr uint64_t BUR_DANE_WIRTUALNY       = 0x106A000ULL;
+static constexpr uint64_t BUR_DANE_PRZESUNIECIE   = 0x71000ULL;
+static constexpr uint64_t BUR_DANE_WIRTUALNY       = 0x1071000ULL;
 static constexpr uint64_t BUR_DANE_ROZMIAR         = 131072ULL;
 
 extern "C" {
@@ -5089,6 +5089,7 @@ static void wykonaj_testy_kontrolki3() {
 
 #include "tapety_testy.h"
 #include "ekran_testy.h"
+#include "taskbar_testy.h"
 
 struct WynikTestow {
     uint32_t zaliczone_asercje{0};
@@ -5133,6 +5134,7 @@ static WynikTestow uruchom_pelny_pakiet_testow() {
     bledy_przed = bws_test_blad;
     wykonaj_testy_tapety();
     wykonaj_testy_ekranu(true);
+    wykonaj_testy_taskbara();
     wynik.tapety = bws_test_blad == bledy_przed;
     wynik.bursztyn_ui = wynik.bursztyn_ui_podstawowe &&
                         wynik.interakcje && wynik.kontrolki2 && wynik.kontrolki3;
@@ -5336,7 +5338,7 @@ public:
 
         if (stan_->krok_grupy == 5) {
             uint32_t przed = bws_test_blad;
-            { IzolacjaPrezentacjiTestow izolacja(stan_->okno); wykonaj_testy_tapety(); wykonaj_testy_ekranu(false); }
+            { IzolacjaPrezentacjiTestow izolacja(stan_->okno); wykonaj_testy_tapety(); wykonaj_testy_ekranu(false); wykonaj_testy_taskbara(); }
             sprawdz_geometrie_grupy("Tapety BTP");
             stan_->wynik.tapety = bws_test_blad == przed;
             stan_->tapety->ustaw_tekst(stan_->wynik.tapety ? "Tapety BTP: PASS" : "Tapety BTP: FAIL");

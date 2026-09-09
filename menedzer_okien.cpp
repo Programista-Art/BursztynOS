@@ -1,6 +1,7 @@
 #include "ui_skala.h"
 #include "ekran_format.h"
 #include "pulpit_geometria.h"
+#include "obrazy/png_dekoder.h"
 /*
  * Menedzer Okien (Pulpit i Pasek Zadan) dla Bursztyn OS
  * Wersja uporzadkowana: poprawne hitboxy, Menu Start i odswiezanie zegara.
@@ -33,6 +34,8 @@ extern "C" {
 
 namespace {
 
+int screen_w = 1024;
+int screen_h = 768;
 int PASEK_WYS = 40;
 int MENU_X = 10;
 int MENU_W = 260;
@@ -47,8 +50,14 @@ int MENU_GRY_W = 180;
 constexpr int MENU_GRY_ELEMENTOW = 1;
 int MENU_GRY_WYS = (10 * 2) + (MENU_GRY_ELEMENTOW * 25);
 
+constexpr int LOGO_LOGICZNA_SZER = 24;
+constexpr int LOGO_LOGICZNA_WYS = 26;
+constexpr int PRZYCISK_MENU_LOGICZNA_SZER = 48;
+constexpr int PRZYCISK_MENU_LOGICZNA_WYS = 30;
+constexpr int TASKBAR_LOGICZNA_WYS = 40;
+
 int PRZYCISK_MENU_X = 10;
-int PRZYCISK_MENU_W = 80;
+int PRZYCISK_MENU_W = 48;
 int PRZYCISK_MENU_H = 30;
 
 int PULPIT_LINE_H = 16;
@@ -57,7 +66,7 @@ int SKROT_W = 32;
 int SKROT_H = 32;
 
 constexpr int BUFOR_CZASU = 32;
-int TASK_BUTTON_X = 100;
+int TASK_BUTTON_X = 66;
 int TASK_BUTTON_W = 112;
 int TASK_BUTTON_GAP = 4;
 constexpr int PULPIT_MAX_WPISOW = 128;
@@ -70,21 +79,21 @@ constexpr int PULPIT_REFRESH_TICKS = 3;
 
 
 void metryki_ekranu(){
-PASEK_WYS=ui_skaluj(40,ui_skala_procent);
+PASEK_WYS=ui_skaluj(TASKBAR_LOGICZNA_WYS,ui_skala_procent);
 MENU_X=ui_skaluj(10,ui_skala_procent);
 MENU_W=ui_skaluj(260,ui_skala_procent);
 MENU_GORNY_MARGINES=ui_skaluj(10,ui_skala_procent);
 MENU_ELEMENT_WYS=ui_skaluj(25,ui_skala_procent);
 MENU_GRY_W=ui_skaluj(180,ui_skala_procent);
 PRZYCISK_MENU_X=ui_skaluj(10,ui_skala_procent);
-PRZYCISK_MENU_W=ui_skaluj(80,ui_skala_procent);
-PRZYCISK_MENU_H=ui_skaluj(30,ui_skala_procent);
+PRZYCISK_MENU_W=ui_skaluj(PRZYCISK_MENU_LOGICZNA_SZER,ui_skala_procent);
+PRZYCISK_MENU_H=ui_skaluj(PRZYCISK_MENU_LOGICZNA_WYS,ui_skala_procent);
 const PulpitMetryki pulpit=pulpit_metryki(ui_skala_procent);
 PULPIT_LINE_H=pulpit.wysokosc_linii;
 PULPIT_LINE_GAP=pulpit.odstep_linii;
 SKROT_W=ui_skaluj(32,ui_skala_procent);
 SKROT_H=ui_skaluj(32,ui_skala_procent);
-TASK_BUTTON_X=ui_skaluj(100,ui_skala_procent);
+TASK_BUTTON_X=ui_skaluj(66,ui_skala_procent);
 TASK_BUTTON_W=ui_skaluj(112,ui_skala_procent);
 TASK_BUTTON_GAP=ui_skaluj(4,ui_skala_procent);
 PULPIT_GRID_W=pulpit.komorka_szer;
@@ -92,6 +101,10 @@ PULPIT_GRID_H=pulpit.komorka_wys;
 PULPIT_GRID_Y=ui_skaluj(140,ui_skala_procent);
 MENU_WYS=2*MENU_GORNY_MARGINES+MENU_ELEMENTOW*MENU_ELEMENT_WYS;
 MENU_GRY_WYS=2*MENU_GORNY_MARGINES+MENU_GRY_ELEMENTOW*MENU_ELEMENT_WYS;
+}
+
+inline int przycisk_menu_y() {
+    return screen_h - PASEK_WYS + (PASEK_WYS - PRZYCISK_MENU_H) / 2;
 }
 
 const char* const SCIEZKA_POWLOKA = "/shell.bur";
@@ -864,8 +877,6 @@ static void rysuj_ikone_paleta(
 
 
 
-int screen_w = 1024;
-int screen_h = 768;
 bool menu_start_otwarte = false;
 bool menu_gry_otwarte = false;
 char ostatni_czas[BUFOR_CZASU] = {};
@@ -1163,16 +1174,218 @@ bool pobierz_i_zaktualizuj_czas() {
     return zmieniony;
 }
 
+enum class StanPrzyciskuMenu : uint8_t {
+    Normalny = 0,
+    Hover = 1,
+    Wcisniety = 2,
+    Aktywny = 3,
+    Liczba = 4
+};
+
+static uint32_t* g_master_logo_pixels = nullptr;
+static uint32_t g_master_logo_w = 0;
+static uint32_t g_master_logo_h = 0;
+static bool g_master_logo_probowano = false;
+
+static uint32_t* g_cached_przyciski[4] = {nullptr, nullptr, nullptr, nullptr};
+static uint32_t g_cached_skala = 0;
+static int g_cached_btn_w = 0;
+static int g_cached_btn_h = 0;
+
+static bool menu_przycisk_hover = false;
+static bool menu_przycisk_wcisniety = false;
+
+void wczytaj_master_logo() {
+    if (g_master_logo_probowano) return;
+    g_master_logo_probowano = true;
+
+    const char* const sciezka = "/obrazy/logo.png";
+    uint64_t ret = bws_wywolaj(44, (uint64_t)sciezka);
+    if (ret <= 1) return;
+    uint64_t rozmiar_pliku = ret - 1;
+
+    uint8_t* bufor_png = new uint8_t[rozmiar_pliku];
+    if (!bufor_png) return;
+
+    uint64_t czyt_ret = bws_wywolaj(5, (uint64_t)sciezka, (uint64_t)bufor_png, rozmiar_pliku);
+    if (czyt_ret == 1) {
+        uint32_t* pix = nullptr;
+        int w = 0, h = 0;
+        if (BursztynPNG::dekoduj_png(bufor_png, rozmiar_pliku, &pix, &w, &h)) {
+            if (pix && w > 0 && h > 0) {
+                g_master_logo_pixels = pix;
+                g_master_logo_w = static_cast<uint32_t>(w);
+                g_master_logo_h = static_cast<uint32_t>(h);
+            }
+        }
+    }
+    delete[] bufor_png;
+}
+
+void zaktualizuj_cache_przycisku(uint32_t skala) {
+    if (g_cached_skala == skala && g_cached_przyciski[0] != nullptr) return;
+
+    wczytaj_master_logo();
+
+    const int btn_w = ui_skaluj(PRZYCISK_MENU_LOGICZNA_SZER, skala);
+    const int btn_h = ui_skaluj(PRZYCISK_MENU_LOGICZNA_WYS, skala);
+    const int logo_w = ui_skaluj(LOGO_LOGICZNA_SZER, skala);
+    const int logo_h = ui_skaluj(LOGO_LOGICZNA_WYS, skala);
+    const int logo_x = (btn_w - logo_w) / 2;
+    const int logo_y = (btn_h - logo_h) / 2;
+    const int pasek_h = ui_skaluj(TASKBAR_LOGICZNA_WYS, skala);
+    const int btn_rel_y = (pasek_h - btn_h) / 2;
+
+    for (int s = 0; s < 4; ++s) {
+        if (g_cached_przyciski[s]) {
+            delete[] g_cached_przyciski[s];
+            g_cached_przyciski[s] = nullptr;
+        }
+    }
+
+    g_cached_skala = skala;
+    g_cached_btn_w = btn_w;
+    g_cached_btn_h = btn_h;
+
+    const size_t total_pix = (size_t)btn_w * (size_t)btn_h;
+    if (total_pix == 0) return;
+
+    for (int s = 0; s < 4; ++s) {
+        g_cached_przyciski[s] = new uint32_t[total_pix];
+        if (!g_cached_przyciski[s]) return;
+    }
+
+    uint32_t* scaled_logo = nullptr;
+    if (g_master_logo_pixels && logo_w > 0 && logo_h > 0) {
+        scaled_logo = new uint32_t[(size_t)logo_w * (size_t)logo_h];
+        if (scaled_logo) {
+            for (int dy = 0; dy < logo_h; ++dy) {
+                uint32_t sy0 = (uint32_t)((uint64_t)dy * g_master_logo_h / logo_h);
+                uint32_t sy1 = (uint32_t)((uint64_t)(dy + 1) * g_master_logo_h / logo_h);
+                if (sy1 <= sy0) sy1 = sy0 + 1;
+                if (sy1 > g_master_logo_h) sy1 = g_master_logo_h;
+
+                for (int dx = 0; dx < logo_w; ++dx) {
+                    uint32_t sx0 = (uint32_t)((uint64_t)dx * g_master_logo_w / logo_w);
+                    uint32_t sx1 = (uint32_t)((uint64_t)(dx + 1) * g_master_logo_w / logo_w);
+                    if (sx1 <= sx0) sx1 = sx0 + 1;
+                    if (sx1 > g_master_logo_w) sx1 = g_master_logo_w;
+
+                    uint64_t sum_a = 0, sum_r = 0, sum_g = 0, sum_b = 0;
+                    uint64_t cnt = 0;
+                    for (uint32_t sy = sy0; sy < sy1; ++sy) {
+                        for (uint32_t sx = sx0; sx < sx1; ++sx) {
+                            uint32_t p = g_master_logo_pixels[sy * g_master_logo_w + sx];
+                            uint32_t a = (p >> 24) & 0xFF;
+                            uint32_t r = (p >> 16) & 0xFF;
+                            uint32_t g = (p >> 8) & 0xFF;
+                            uint32_t b = p & 0xFF;
+                            sum_a += a;
+                            sum_r += (uint64_t)r * a;
+                            sum_g += (uint64_t)g * a;
+                            sum_b += (uint64_t)b * a;
+                            cnt++;
+                        }
+                    }
+                    if (cnt > 0 && sum_a > 0) {
+                        uint32_t fa = (uint32_t)(sum_a / cnt);
+                        uint32_t fr = (uint32_t)(sum_r / sum_a);
+                        uint32_t fg = (uint32_t)(sum_g / sum_a);
+                        uint32_t fb = (uint32_t)(sum_b / sum_a);
+                        scaled_logo[dy * logo_w + dx] = (fa << 24) | (fr << 16) | (fg << 8) | fb;
+                    } else {
+                        scaled_logo[dy * logo_w + dx] = 0;
+                    }
+                }
+            }
+        }
+    }
+
+    for (int s = 0; s < 4; ++s) {
+        uint32_t* buf = g_cached_przyciski[s];
+        for (int by = 0; by < btn_h; ++by) {
+            int ty = btn_rel_y + by;
+            int base_gray = (pasek_h > 1) ?
+                (108 - (56 * ty) / (pasek_h - 1)) : 108;
+            if (base_gray < 52) base_gray = 52;
+            if (base_gray > 108) base_gray = 108;
+
+            for (int bx = 0; bx < btn_w; ++bx) {
+                bool is_border = (bx == 0 || bx == btn_w - 1 || by == 0 || by == btn_h - 1);
+                int bg_val = base_gray;
+                if (s == 1) { // Hover
+                    bg_val = is_border ? (base_gray + 40) : (base_gray + 24);
+                } else if (s == 2) { // Wcisniety
+                    bg_val = is_border ? (base_gray - 20) : (base_gray - 30);
+                } else if (s == 3) { // Aktywny (menu otwarte)
+                    bg_val = is_border ? (base_gray + 18) : (base_gray - 16);
+                }
+                if (bg_val < 0) bg_val = 0;
+                if (bg_val > 255) bg_val = 255;
+
+                uint32_t pix = 0;
+                if (scaled_logo &&
+                    bx >= logo_x && bx < logo_x + logo_w &&
+                    by >= logo_y && by < logo_y + logo_h) {
+                    uint32_t lp = scaled_logo[(by - logo_y) * logo_w + (bx - logo_x)];
+                    uint32_t a = (lp >> 24) & 0xFF;
+                    uint32_t lr = (lp >> 16) & 0xFF;
+                    uint32_t lg = (lp >> 8) & 0xFF;
+                    uint32_t lb = lp & 0xFF;
+
+                    uint32_t out_r = (lr * a + (uint32_t)bg_val * (255 - a)) / 255;
+                    uint32_t out_g = (lg * a + (uint32_t)bg_val * (255 - a)) / 255;
+                    uint32_t out_b = (lb * a + (uint32_t)bg_val * (255 - a)) / 255;
+                    pix = 0xFF000000 | (out_r << 16) | (out_g << 8) | out_b;
+                } else if (!scaled_logo) {
+                    // Fallback: bursztynowy symbol (diament) na srodku
+                    int cx = btn_w / 2;
+                    int cy = btn_h / 2;
+                    int r_diag = (logo_h > 4) ? (logo_h / 3) : 4;
+                    int dist = (bx > cx ? bx - cx : cx - bx) + (by > cy ? by - cy : cy - by);
+                    if (dist <= r_diag) {
+                        pix = (dist == r_diag) ? 0xFFFFAA00 : 0xFFE58A00;
+                    } else {
+                        pix = 0xFF000000 | (bg_val << 16) | (bg_val << 8) | bg_val;
+                    }
+                } else {
+                    pix = 0xFF000000 | (bg_val << 16) | (bg_val << 8) | bg_val;
+                }
+                buf[by * btn_w + bx] = pix;
+            }
+        }
+    }
+
+    if (scaled_logo) {
+        delete[] scaled_logo;
+    }
+}
+
+void RysujPrzyciskMenu() {
+    zaktualizuj_cache_przycisku(ui_skala_procent);
+    StanPrzyciskuMenu stan = StanPrzyciskuMenu::Normalny;
+    if (menu_start_otwarte) {
+        stan = StanPrzyciskuMenu::Aktywny;
+    } else if (menu_przycisk_wcisniety) {
+        stan = StanPrzyciskuMenu::Wcisniety;
+    } else if (menu_przycisk_hover) {
+        stan = StanPrzyciskuMenu::Hover;
+    }
+    const uint32_t* buf = g_cached_przyciski[static_cast<size_t>(stan)];
+    if (buf && g_cached_btn_w > 0 && g_cached_btn_h > 0) {
+        gui_blit(PRZYCISK_MENU_X, przycisk_menu_y(),
+                 g_cached_btn_w, g_cached_btn_h, buf);
+    }
+}
+
 void RysujTaskbar() {
-    gui_rysuj_prostokat(0, screen_h - PASEK_WYS,
-                        screen_w, PASEK_WYS, 0x001A0B00);
-    gui_rysuj_prostokat(0, screen_h - PASEK_WYS,
-                        screen_w, 2, 0x00E58A00);
-    gui_rysuj_prostokat(PRZYCISK_MENU_X, screen_h - ui_skaluj(35,ui_skala_procent),
-                        PRZYCISK_MENU_W, PRZYCISK_MENU_H, 0x00E58A00);
-    rysuj_tekst_wysrodkowany(PRZYCISK_MENU_X, screen_h - ui_skaluj(35,ui_skala_procent),
-                             PRZYCISK_MENU_W, PRZYCISK_MENU_H,
-                             1, 0x001A0B00, "Menu");
+    for (int y = 0; y < PASEK_WYS; ++y) {
+        const uint32_t gray = (PASEK_WYS > 1) ?
+            (108 - (56 * y) / (PASEK_WYS - 1)) : 108;
+        const uint32_t kolor = 0x00000000 | (gray << 16) | (gray << 8) | gray;
+        gui_rysuj_prostokat(0, screen_h - PASEK_WYS + y, screen_w, 1, kolor);
+    }
+    RysujPrzyciskMenu();
     int task_x = TASK_BUTTON_X;
     for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
         const GuiOknoInfo& o = okna_taskbara[i];
@@ -1750,7 +1963,7 @@ void obsluz_klikniecie(int mx, int my) {
 
     // Przycisk Menu ma pierwszenstwo niezaleznie od aktualnego stanu menu.
     if (punkt_w_prostokacie(mx, my,
-                            PRZYCISK_MENU_X, screen_h - ui_skaluj(35,ui_skala_procent),
+                            PRZYCISK_MENU_X, przycisk_menu_y(),
                             PRZYCISK_MENU_W, PRZYCISK_MENU_H)) {
         if (menu_start_otwarte) {
             zamknij_menu_i_odtworz_pulpit();
@@ -1850,6 +2063,7 @@ extern "C" __attribute__((noreturn)) void _start() {
     GuiMonitorInfo mon{};if(gui_pobierz_monitor(0,&mon))ui_skala_procent=mon.scale_x1000/10;
     metryki_ekranu();
     gui_pobierz_rozdzielczosc(&screen_w, &screen_h);
+    zaktualizuj_cache_przycisku(ui_skala_procent);
 
     if (screen_w <= 0 || screen_h <= PASEK_WYS) {
         gui_zakoncz_aplikacje();
@@ -1910,6 +2124,7 @@ extern "C" __attribute__((noreturn)) void _start() {
                 screen_w=zdarzenie.dx;screen_h=zdarzenie.dy;
             }
             metryki_ekranu();
+            zaktualizuj_cache_przycisku(ui_skala_procent);
             if(screen_w>0&&screen_h>PASEK_WYS)
                 gui_ustaw_obszar_roboczy(0, 0, screen_w, screen_h - PASEK_WYS);
             rozmiesc_ikony_ekranu();zarejestruj_pulpit_jako_cel_drop();aktualizuj_overlay_menu();RysujPulpit(true);continue;
@@ -1926,6 +2141,33 @@ extern "C" __attribute__((noreturn)) void _start() {
         const int mx = zdarzenie.x;
         const int my = zdarzenie.y;
         const bool klik = zdarzenie.typ == BWS_ZDARZENIE_MYSZ_DOWN;
+
+        if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_RUCH) {
+            const bool hover_now = punkt_w_prostokacie(mx, my,
+                                                        PRZYCISK_MENU_X, przycisk_menu_y(),
+                                                        PRZYCISK_MENU_W, PRZYCISK_MENU_H);
+            if (hover_now != menu_przycisk_hover) {
+                menu_przycisk_hover = hover_now;
+                RysujPrzyciskMenu();
+                gui_odswiez();
+            }
+        } else if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_DOWN) {
+            if (punkt_w_prostokacie(mx, my,
+                                    PRZYCISK_MENU_X, przycisk_menu_y(),
+                                    PRZYCISK_MENU_W, PRZYCISK_MENU_H)) {
+                if (!menu_przycisk_wcisniety) {
+                    menu_przycisk_wcisniety = true;
+                    RysujPrzyciskMenu();
+                    gui_odswiez();
+                }
+            }
+        } else if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_UP) {
+            if (menu_przycisk_wcisniety) {
+                menu_przycisk_wcisniety = false;
+                RysujPrzyciskMenu();
+                gui_odswiez();
+            }
+        }
 
         if (zdarzenie.typ == BWS_ZDARZENIE_BLUR) {
             zamknij_pulpit_context();

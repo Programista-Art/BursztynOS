@@ -1661,20 +1661,10 @@ void ogranicz_geometrie_okna() {
             TASKBAR_H;
     }
 
-    WIN_W =
-        clamp_int(
-            WIN_W,
-            MIN_WIN_W,
-            screen_w
-        );
-
-    WIN_H =
-        clamp_int(
-            WIN_H,
-            MIN_WIN_H,
-            screen_h -
-                TASKBAR_H
-        );
+    if (!zmaksymalizowane) {
+        WIN_W = DOMYSLNY_WIN_W;
+        WIN_H = DOMYSLNY_WIN_H;
+    }
 
     WIN_X =
         clamp_int(
@@ -3346,7 +3336,8 @@ void _start() {
             }
             ogranicz_geometrie_okna();
             if (!utworz_lub_zmien_warstwe()) gui_zakoncz_aplikacje();
-            redraw=true; pelne=true;
+            rysuj_interfejs(true);
+            redraw = false; pelne = false;
             continue;
         }
         bool szybka_sciezka = false;

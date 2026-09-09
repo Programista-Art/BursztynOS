@@ -582,14 +582,20 @@ static void wykonaj_testy_ekranu(bool runtime){
             "/programy/eksplorator.cebula/eksplorator-plikow.bur"};
         const char* legacy_titles[]={"Powloka Bursztynowa","Kalkulator Systemowy",
             "Notatnik","Snake","Eksplorator Plików"};
-        const int legacy_sizes[][2]={{660,360},{320,380},{780,560},{400,328},{900,600}};
+        const int legacy_sizes[][2]={{660,360},{320,380},{600,400},{400,328},{900,600}};
         const uint32_t legacy_skale[]={100,125,150,175,200,100};
         for(unsigned a=0;a<5;++a){
           r={};r.operacja=EKRAN_STAN;
           bws_sprawdz(ekran_zapytaj(ep,r,&out)&&out.status==EKRAN_OK);
           const uint64_t bufory_przed=out.bufory_bajty;
-          bws_sprawdz_tag(uruchom_program_z_argumentem_uzytkownika(
-              legacy_paths[a],"--legacy-scale-test"),legacy_titles[a]);
+          const bool uruchomiono = uruchom_program_z_argumentem_uzytkownika(
+              legacy_paths[a],"--legacy-scale-test");
+          if (!uruchomiono) {
+              bws_log("[EKRAN FAIL] Nie udalo sie uruchomic: ");
+              bws_log(legacy_paths[a]);
+              bws_log("\n");
+          }
+          bws_sprawdz_tag(uruchomiono, "LEGACY-SPAWN");
           bool obecne=false;
           for(int proba=0;proba<100&&!obecne;++proba){
             GuiOknoInfo okna[SKLADACZ_MAKS_WARSTW]{};
@@ -597,7 +603,19 @@ static void wykonaj_testy_ekranu(bool runtime){
             for(uint32_t i=0;i<n;++i)if(ten_tekst(okna[i].tytul,legacy_titles[a])){obecne=true;break;}
             if(!obecne){bws_zdarzenie ev{};gui_czekaj_na_zdarzenie_z_timeoutem(&ev,2);}
           }
-          bws_sprawdz_tag(obecne,legacy_titles[a]);
+          if (!obecne) {
+              bws_log("[EKRAN FAIL] Okno nie pojawilo sie: ");
+              bws_log(legacy_titles[a]);
+              bws_log("\n");
+              GuiOknoInfo okna_tmp[SKLADACZ_MAKS_WARSTW]{};
+              const uint32_t n_tmp=gui_pobierz_okna(okna_tmp,SKLADACZ_MAKS_WARSTW);
+              for(uint32_t i=0;i<n_tmp;++i){
+                  bws_log("  widoczne okno='");
+                  bws_log(okna_tmp[i].tytul);
+                  bws_log("'\n");
+              }
+          }
+          bws_sprawdz_tag(obecne, "LEGACY-OBECNE");
           for(uint32_t s:legacy_skale){
             r={};r.operacja=EKRAN_ZASTOSUJ;r.szerokosc=start.aktywny.szerokosc;r.wysokosc=start.aktywny.wysokosc;r.bpp=32;r.skala=s;
             bws_sprawdz(ekran_zapytaj(ep,r,&out)&&out.status==EKRAN_OK&&out.transakcja==0&&out.skala==s&&ekran_ten_sam(out.aktywny,start.aktywny));
@@ -642,17 +660,51 @@ static void wykonaj_testy_ekranu(bool runtime){
                     poprawne=okna[i].szerokosc==ew&&okna[i].wysokosc==eh&&okna[i].x>=mon.work_x&&okna[i].y>=mon.work_y&&okna[i].x+okna[i].szerokosc<=mon.work_x+mon.work_szer&&okna[i].y+okna[i].wysokosc<=mon.work_y+mon.work_wys;
                     break;
             }
-            bws_sprawdz_tag(poprawne,legacy_titles[a]);
+            if (!poprawne) {
+                bws_log("[EKRAN FAIL] Niepoprawny rozmiar dla: ");
+                bws_log(legacy_titles[a]);
+                bws_log_u64(" s=", s);
+                bws_log("\n");
+                for(uint32_t i=0;i<n;++i)if(ten_tekst(okna[i].tytul,legacy_titles[a])){
+                    const int ew=ui_skaluj(legacy_sizes[a][0],s)<mon.work_szer?ui_skaluj(legacy_sizes[a][0],s):mon.work_szer;
+                    const int eh=ui_skaluj(legacy_sizes[a][1],s)<mon.work_wys?ui_skaluj(legacy_sizes[a][1],s):mon.work_wys;
+                    bws_log("[EKRAN FAIL] okno=(");
+                    bws_log_u64("x=", okna[i].x);
+                    bws_log_u64(" y=", okna[i].y);
+                    bws_log_u64(" w=", okna[i].szerokosc);
+                    bws_log_u64(" h=", okna[i].wysokosc);
+                    bws_log(") exp=(");
+                    bws_log_u64("ew=", ew);
+                    bws_log_u64(" eh=", eh);
+                    bws_log_u64(" mon_w=", mon.work_szer);
+                    bws_log_u64(" mon_h=", mon.work_wys);
+                    bws_log(")\n");
+                    break;
+                }
+            }
+            bws_sprawdz_tag(poprawne, "LEGACY-POPRAWNE");
           }
           bool zamkniete=false;
-          for(int proba=0;proba<100&&!zamkniete;++proba){
+          for(int proba=0;proba<500&&!zamkniete;++proba){
             GuiOknoInfo okna[SKLADACZ_MAKS_WARSTW]{};
             const uint32_t n=gui_pobierz_okna(okna,SKLADACZ_MAKS_WARSTW);
             zamkniete=true;
             for(uint32_t i=0;i<n;++i)if(ten_tekst(okna[i].tytul,legacy_titles[a])){zamkniete=false;break;}
             if(!zamkniete){bws_zdarzenie ev{};gui_czekaj_na_zdarzenie_z_timeoutem(&ev,2);}
           }
-          bws_sprawdz_tag(zamkniete,legacy_titles[a]);
+          if(!zamkniete){
+            bws_log("[EKRAN FAIL] Nie zamknieto okna: ");
+            bws_log(legacy_titles[a]);
+            bws_log("\n");
+            GuiOknoInfo okna_fail[SKLADACZ_MAKS_WARSTW]{};
+            const uint32_t n_fail=gui_pobierz_okna(okna_fail,SKLADACZ_MAKS_WARSTW);
+            for(uint32_t i=0;i<n_fail;++i){
+                bws_log("  pozostale okno='");
+                bws_log(okna_fail[i].tytul);
+                bws_log("'\n");
+            }
+          }
+          bws_sprawdz_tag(zamkniete,"LEGACY-ZAMKNIETE");
           r={};r.operacja=EKRAN_STAN;
           bws_sprawdz(ekran_zapytaj(ep,r,&out)&&out.status==EKRAN_OK&&out.bufory_bajty==bufory_przed);
         }

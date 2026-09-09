@@ -570,6 +570,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             OKNO_Z_ORDER) < 0) {
         gui_zakoncz_aplikacje();
     }
+    (void)gui_ustaw_tytul_okna("Snake");
 
     resetuj_gre();
     rysuj_gre();
@@ -584,6 +585,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             if (bws_utworz_warstwe(okno_x,okno_y,SZEROKOSC_OKNA,
                                    WYSOKOSC_OKNA,OKNO_Z_ORDER)<0)
                 gui_zakoncz_aplikacje();
+            (void)gui_ustaw_tytul_okna("Snake");
             rysuj_gre();
             continue;
         }

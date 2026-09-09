@@ -82,11 +82,13 @@ int legacy_odskaluj_y(int y) {
 void legacy_przetworz_zdarzenie(bws_zdarzenie* e) {
     if (!legacy_wlaczony || !e) return;
     if (e->typ == BWS_ZDARZENIE_EKRAN) {
-        legacy_odswiez_skale();
+        if (ui_skala_poprawna(e->kod)) legacy_skala = e->kod;
+        else legacy_odswiez_skale();
+        ui_skala_procent = legacy_skala;
         if (legacy_test_skali) {
             if (legacy_skala != 100) legacy_test_widzial_skale = true;
-            else if (legacy_test_widzial_skale)
-                legacy_test_timer_do_wyjscia = 20;
+            else if (legacy_test_widzial_skale && legacy_test_timer_do_wyjscia == 0)
+                legacy_test_timer_do_wyjscia = 1;
         }
         if (legacy_ma_warstwe) {
             legacy_fizyczne_okno = legacy_przelicz_okno(legacy_logiczne_okno);
@@ -96,9 +98,6 @@ void legacy_przetworz_zdarzenie(bws_zdarzenie* e) {
                 0, 0);
         }
     }
-    if (legacy_test_timer_do_wyjscia && e->typ == BWS_ZDARZENIE_TIMER &&
-        --legacy_test_timer_do_wyjscia == 0)
-        gui_zakoncz_aplikacje();
     switch (e->typ) {
         case BWS_ZDARZENIE_MYSZ_RUCH:
         case BWS_ZDARZENIE_MYSZ_DOWN:
@@ -905,8 +904,14 @@ bool gui_pobierz_zdarzenie(bws_zdarzenie* zdarzenie) {
 
 bool gui_czekaj_na_zdarzenie(bws_zdarzenie* zdarzenie) {
     if (!zdarzenie) return false;
-    const bool ok = bws_wywolaj(38,
-        reinterpret_cast<uint64_t>(zdarzenie), 0, 0, 0) == 1ULL;
+    uint64_t timeout = 0;
+    if (legacy_test_timer_do_wyjscia) timeout = 10;
+    const uint64_t res = bws_wywolaj(38,
+        reinterpret_cast<uint64_t>(zdarzenie), timeout, 0, 0);
+    if (legacy_test_timer_do_wyjscia && res == 2ULL) {
+        gui_zakoncz_aplikacje();
+    }
+    const bool ok = res == 1ULL;
     if (ok) legacy_przetworz_zdarzenie(zdarzenie);
     return ok;
 }
@@ -914,8 +919,12 @@ bool gui_czekaj_na_zdarzenie(bws_zdarzenie* zdarzenie) {
 bool gui_czekaj_na_zdarzenie_z_timeoutem(bws_zdarzenie* zdarzenie, uint64_t timeout_ticki) {
     if (!zdarzenie) return false;
     if (timeout_ticki == 0) return gui_czekaj_na_zdarzenie(zdarzenie);
+    const uint64_t to = legacy_test_timer_do_wyjscia ? 10 : timeout_ticki;
     const uint64_t wynik = bws_wywolaj(
-        38, reinterpret_cast<uint64_t>(zdarzenie), timeout_ticki, 0, 0);
+        38, reinterpret_cast<uint64_t>(zdarzenie), to, 0, 0);
+    if (legacy_test_timer_do_wyjscia && wynik == 2ULL) {
+        gui_zakoncz_aplikacje();
+    }
     const bool ok = wynik == 1ULL;
     if (ok) legacy_przetworz_zdarzenie(zdarzenie);
     return ok;
@@ -1439,6 +1448,7 @@ void gui_rysuj_standardowa_belke(int x, int y, int szer,
                                  const char* tytul, bool zmaksymalizowane) {
     const uint32_t p = legacy_wlaczony ? 100U : ui_skala_procent;
     if (!tytul || szer < ui_skaluj(90,p)) return;
+    if (legacy_wlaczony) (void)gui_ustaw_tytul_okna(tytul);
     gui_rysuj_prostokat(x, y, szer, ui_skaluj(28,p), 0x00301500);
     gui_rysuj_prostokat(x, y, szer, ui_skaluj(2,p), 0x00E58A00);
     gui_wypisz_tekst_kolor(x + ui_skaluj(8,p), y + ui_skaluj(7,p), 0x00FFFFFF, tytul);

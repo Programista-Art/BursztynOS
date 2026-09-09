@@ -664,6 +664,11 @@ char pobierz_znak_blokujaco() {
                 shell_x=shell_work_x; shell_y=shell_work_y;
                 shell_w=shell_work_w; shell_h=shell_work_h;
                 (void)gui_ustaw_geometrie_okna(shell_x,shell_y,shell_w,shell_h);
+            } else {
+                shell_w = 660; shell_h = 360;
+                if (bws_utworz_warstwe(shell_x, shell_y, shell_w, shell_h, 10) < 0)
+                    gui_zakoncz_aplikacje();
+                (void)gui_ustaw_tytul_okna("Powloka Bursztynowa");
             }
             shell_rysuj_terminal();
             continue;
@@ -2303,6 +2308,7 @@ void _start() {
     }
     if (bws_utworz_warstwe(shell_x, shell_y, shell_w, shell_h, 10) < 0)
         gui_zakoncz_aplikacje();
+    (void)gui_ustaw_tytul_okna("Powloka Bursztynowa");
     gui_ustaw_przejecie_myszy(true);
     shell_rysuj_terminal();
 

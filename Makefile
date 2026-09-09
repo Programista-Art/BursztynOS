@@ -290,6 +290,7 @@ OBJS := ekran_blob.o ekran.o ekran_format.o bufory_grafiki.o bochs_vbe.o tapety_
 	przegladarka_obrazow_blob.o \
 	test_bmp_blob.o \
 	test1_bmp_blob.o \
+	logo_png_blob.o \
 	$(MBEDTLS_OBJS)
 
 # ============================================================================
@@ -482,6 +483,10 @@ test_bmp_blob.o: obrazy/test.bmp
 test1_bmp_blob.o: obrazy/test1.bmp
 	$(LD) -r -b binary obrazy/test1.bmp -o test1_bmp_blob.o
 
+# Logo systemu logo.png
+logo_png_blob.o: obrazy/logo.png
+	$(LD) -r -b binary obrazy/logo.png -o logo_png_blob.o
+
 
 
 
@@ -519,8 +524,8 @@ repro_blob.o: repro_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
 # 16. MENEDZER OKIEN .bur
 # ============================================================================
 
-menedzer_okien_tmp.o: menedzer_okien.cpp bursztyn_gui.h ui_skala.h pulpit_geometria.h
-	$(CXX) $(RING3_FLAGS) -c $< -o $@
+menedzer_okien_tmp.o: menedzer_okien.cpp bursztyn_gui.h ui_skala.h pulpit_geometria.h obrazy/png_dekoder.h
+	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
 
 menedzer_okien_blob.o: menedzer_okien_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
 	$(LD) -T $(RING3_STD_LINKER) $(RING3_LDFLAGS) \
