@@ -117,6 +117,7 @@ def main():
     parser.add_argument("--katalog", "-k", default="obrazy/tapety", help="Katalog zrodlowy tapet .btp")
     parser.add_argument("--wyjscie", "-w", default="tapety.pak", help="Sciezka wyjsciowa pliku pakietu (.pak)")
     parser.add_argument("--dep", "-d", default="tapety.pak.d", help="Sciezka wyjsciowa zaleznosci dla Make (.d)")
+    parser.add_argument("--manifest-only", help="Zapisz tylko deterministyczna liste nazw zrodel i zakoncz")
     args = parser.parse_args()
 
     katalog = args.katalog
@@ -147,6 +148,11 @@ def main():
                 "rozmiar": rozmiar,
                 "crc32": crc32
             })
+
+    if args.manifest_only:
+        manifest = "".join(t["nazwa"] + "\n" for t in tapety)
+        zapisz_tekst_jesli_zmieniono(args.manifest_only, manifest)
+        return
 
     if not tapety:
         sys.stderr.write(f"[TAPETY PAK] Ostrzezenie: brak poprawnych tapet w {katalog}!\n")
@@ -211,6 +217,34 @@ def main():
     )
 
     pack_complete = bytes(header_bytes + rebuilt_table_bytes + payload_bytes)
+
+    # Niezalezny przebieg po gotowym strumieniu sprawdza granice tabeli,
+    # offsety oraz CRC kazdego payloadu, zamiast ufania samemu generatorowi.
+    magic, version, entries, header_size, packed_table_size, packed_data_size, packed_total = struct.unpack_from(
+        "<8sIIIIII", pack_complete, 0)
+    if magic != MAGIC or version != VERSION or entries != file_count or header_size != HEADER_SIZE or \
+       packed_table_size != table_size or packed_data_size != data_size or packed_total != len(pack_complete):
+        raise RuntimeError("walidacja naglowka BTPK1 nie powiodla sie")
+    verify_offset = header_size
+    verify_table_end = header_size + packed_table_size
+    verified_entries = 0
+    while verified_entries < entries:
+        if verify_offset + 16 > verify_table_end:
+            raise RuntimeError("wpis BTPK1 wychodzi poza tabele")
+        name_len, payload_size, expected_crc, payload_offset = struct.unpack_from("<IIII", pack_complete, verify_offset)
+        verify_offset += 16
+        name_pad = (4 - name_len % 4) % 4
+        if name_len == 0 or verify_offset + name_len + name_pad > verify_table_end:
+            raise RuntimeError("niepoprawna nazwa wpisu BTPK1")
+        verify_offset += name_len + name_pad
+        if payload_offset < verify_table_end or payload_offset + payload_size > len(pack_complete):
+            raise RuntimeError("payload BTPK1 wychodzi poza pakiet")
+        actual_crc = binascii.crc32(pack_complete[payload_offset:payload_offset + payload_size]) & 0xFFFFFFFF
+        if actual_crc != expected_crc:
+            raise RuntimeError("CRC payloadu BTPK1 nie zgadza sie")
+        verified_entries += 1
+    if verify_offset != verify_table_end:
+        raise RuntimeError("tabela BTPK1 ma nadmiarowe bajty")
     zapisz_jesli_zmieniono(args.wyjscie, pack_complete)
 
     # Generowanie zaleznosci Makefile (.d)
@@ -235,6 +269,7 @@ def main():
         sys.stdout.write(f"  [{idx:02d}] {t['nazwa']}: {t['rozmiar']} B (CRC32: 0x{t['crc32']:08X})\n")
     sys.stdout.write(f"[TAPETY PAK] Laczny rozmiar zrodlowych BTP: {total_btp_bytes} B ({total_btp_bytes / 1024 / 1024:.2f} MiB)\n")
     sys.stdout.write(f"[TAPETY PAK] Laczny rozmiar {args.wyjscie}: {len(pack_complete)} B ({len(pack_complete) / 1024 / 1024:.2f} MiB)\n")
+    sys.stdout.write(f"[TAPETY BUILD] sources={len(tapety)} entries={verified_entries} bytes={len(pack_complete)} crc=OK\n")
 
 if __name__ == "__main__":
     main()

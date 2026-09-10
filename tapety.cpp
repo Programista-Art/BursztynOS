@@ -106,7 +106,10 @@ bool znajdz_modul_tapet(uint64_t mbi, ModulMB2* wynik) {
         if (tag->typ == 3 /* MULTIBOOT_TAG_TYPE_MODULE */ && tag->rozmiar >= 16) {
             const uint32_t mod_start = *reinterpret_cast<const uint32_t*>(mbi + off + 8);
             const uint32_t mod_end   = *reinterpret_cast<const uint32_t*>(mbi + off + 12);
-            if (mod_end > mod_start && mod_start >= 0x100000U) {
+            const char* cmdline = reinterpret_cast<const char*>(mbi + off + 16);
+            // Multiboot2 nie wymaga adresu >= 1 MiB. Maly pakiet GRUB moze
+            // legalnie umiescic w niskiej pamieci; PMM rezerwuje zakres z tagu.
+            if (mod_start != 0 && mod_end > mod_start) {
                 const uint64_t start64 = static_cast<uint64_t>(mod_start);
                 const uint64_t end64 = static_cast<uint64_t>(mod_end);
                 const uint64_t sz = end64 - start64;
@@ -116,7 +119,7 @@ bool znajdz_modul_tapet(uint64_t mbi, ModulMB2* wynik) {
                         wynik->start = start64;
                         wynik->koniec = end64;
                         wynik->rozmiar = sz;
-                        wynik->cmdline = reinterpret_cast<const char*>(mbi + off + 16);
+                        wynik->cmdline = cmdline;
                         wynik->poprawny = true;
                         return true;
                     }
@@ -766,13 +769,6 @@ void tapety_inicjalizuj(uint64_t mbi) {
     statystyki.zrodlo = tapety_fallback(wybor,
         [](const TapetyKonfiguracja& c) {
             if (zastosuj(c, false)) return true;
-            constexpr const char* domyslny_plik = "/tapety/bursztyn01.btp";
-            if (!tapety_rowne(c.sciezka, domyslny_plik)) {
-                TapetyKonfiguracja dom{};
-                tapety_kopiuj(dom.sciezka, domyslny_plik, sizeof(dom.sciezka));
-                dom.tryb = c.tryb;
-                if (zastosuj(dom, false)) return true;
-            }
             for (size_t i = 0; i < TAPETY_INWENTARZ_MAX; ++i) s_inwentarz_wpisy[i] = {};
             const size_t ile = wczytaj_inwentarz(s_inwentarz_wpisy, TAPETY_INWENTARZ_MAX);
             for (size_t i = 0; i < ile; ++i) {
@@ -783,7 +779,7 @@ void tapety_inicjalizuj(uint64_t mbi) {
                 for (size_t k = 0; s_inwentarz_wpisy[i].nazwa[k] && p + 1 < sizeof(path); ++k)
                     path[p++] = s_inwentarz_wpisy[i].nazwa[k];
                 path[p] = '\0';
-                if (!tapety_rowne(path, c.sciezka) && !tapety_rowne(path, domyslny_plik)) {
+                if (!tapety_rowne(path, c.sciezka)) {
                     TapetyKonfiguracja alt{};
                     tapety_kopiuj(alt.sciezka, path, sizeof(alt.sciezka));
                     alt.tryb = c.tryb;

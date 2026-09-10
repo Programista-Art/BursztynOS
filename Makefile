@@ -47,6 +47,10 @@ KERNEL := system_operacyjny.bin
 ISO    := BursztynOS.iso
 ISO8K  := BursztynOS_8k.iso
 TAPETY_PAK := tapety.pak
+TAPETY_DIR := obrazy/tapety
+TAPETY_SOURCES_MANIFEST := .tapety-sources.manifest
+TAPETY_ISO_CHECK := .tapety-iso-check.pak
+GRUB_ISO_CHECK := .grub-iso-check.cfg
 
 ISO_DIR     := isodir
 ISO8K_DIR   := isodir_8k
@@ -302,7 +306,7 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	check-kernel check-test8k check-tools check-ovmf \
 	prepare-disk clean clear distclean cdysk rm help
 
-all: $(KERNEL)
+all: $(KERNEL) $(TAPETY_PAK)
 
 kernel: $(KERNEL)
 
@@ -641,8 +645,20 @@ instalator_blob.o: instalator_tmp.o bursztyn_gui.o programy/kontrolki3/kontrolki
 	$(OBJCOPY) -O binary instalator.elf instalator.bin
 	$(LD) -r -b binary instalator.bin -o $@
 
-$(ISO): check-kernel $(GRUB_CFG)
+$(ISO): check-kernel $(KERNEL) $(TAPETY_PAK) $(GRUB_CFG)
 	$(GRUB_MKRESCUE) -o $@ $(ISO_DIR) --xorriso=$(XORRISO)
+	@cmp -s $(TAPETY_PAK) $(ISO_DIR)/boot/tapety.pak || { echo "[TAPETY BUILD] BLAD: staging ISO nie jest identyczny z $(TAPETY_PAK)"; exit 1; }
+	@rm -f $(TAPETY_ISO_CHECK)
+	@$(XORRISO) -osirrox on -indev $@ -extract /boot/tapety.pak $(TAPETY_ISO_CHECK) >/dev/null 2>&1
+	@cmp -s $(TAPETY_PAK) $(TAPETY_ISO_CHECK) || { echo "[TAPETY BUILD] BLAD: pakiet w ISO nie jest identyczny z $(TAPETY_PAK)"; exit 1; }
+	@rm -f $(GRUB_ISO_CHECK)
+	@$(XORRISO) -osirrox on -indev $@ -extract /boot/grub/grub.cfg $(GRUB_ISO_CHECK) >/dev/null 2>&1
+	@cmp -s $(GRUB_CFG) $(GRUB_ISO_CHECK) || { echo "[TAPETY BUILD] BLAD: grub.cfg w ISO nie jest identyczny ze stagingiem"; exit 1; }
+	@echo "[TAPETY BUILD] SHA256 host/staged/ISO:"
+	@sha256sum $(TAPETY_PAK) $(ISO_DIR)/boot/tapety.pak $(TAPETY_ISO_CHECK)
+	@echo "[TAPETY BUILD] Wpisy GRUB Multiboot2:"
+	@grep -E 'multiboot2|module2.*tapety\.pak' $(GRUB_ISO_CHECK)
+	@rm -f $(TAPETY_ISO_CHECK) $(GRUB_ISO_CHECK)
 
 iso: $(ISO)
 
@@ -890,7 +906,7 @@ check-tools:
 
 clean:
 	rm -f *.o *.bin *.elf *.iso .*.iso
-	rm -f tapety.pak tapety.pak.d tapety_manifest.h tapetyzasoby.S tapetyzasoby.d tapety_zasoby.rsp tapety_zasoby.d tapety_zasoby.S tapety_zasoby.o
+	rm -f tapety.pak tapety.pak.d $(TAPETY_SOURCES_MANIFEST) $(TAPETY_ISO_CHECK) $(GRUB_ISO_CHECK) tapety_manifest.h tapetyzasoby.S tapetyzasoby.d tapety_zasoby.rsp tapety_zasoby.d tapety_zasoby.S tapety_zasoby.o
 	rm -f biblioteki/mbedtls/library/*.o
 	rm -f $(OVMF_VARS_RUNTIME)
 	rm -rf $(ISO_DIR) $(ISO8K_DIR) $(CI_TEST_DIR) isodir_test
@@ -931,9 +947,14 @@ help:
 	@echo "  make cdysk     - usun wirtualny dysk"
 	@echo "  make distclean - clean + cdysk"
 
-# Automatyczne pakowanie tapet BTP w zewnetrznym module Multiboot2 (tapety.pak)
-$(TAPETY_PAK): obrazy/tapety narzedzia/tapety-btp/generujpakiet.py
-	$(PYTHON) narzedzia/tapety-btp/generujpakiet.py --katalog obrazy/tapety --wyjscie $(TAPETY_PAK) --dep tapety.pak.d
+# Manifest zmienia timestamp tylko wtedy, gdy zmieni sie posortowany zestaw nazw.
+# Zaleznosc od katalogu wykrywa dodanie, usuniecie i zmiane nazwy pliku.
+$(TAPETY_SOURCES_MANIFEST): $(TAPETY_DIR) narzedzia/tapety-btp/generujpakiet.py
+	$(PYTHON) narzedzia/tapety-btp/generujpakiet.py --katalog $(TAPETY_DIR) --manifest-only $@
+
+# Automatyczne pakowanie tapet BTP w zewnetrznym module Multiboot2 (tapety.pak).
+$(TAPETY_PAK): $(TAPETY_SOURCES_MANIFEST) narzedzia/tapety-btp/generujpakiet.py
+	$(PYTHON) narzedzia/tapety-btp/generujpakiet.py --katalog $(TAPETY_DIR) --wyjscie $(TAPETY_PAK) --dep tapety.pak.d
 
 -include tapety.pak.d
 
