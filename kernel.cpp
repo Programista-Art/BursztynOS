@@ -518,6 +518,12 @@ bool scisla_instalacja=false,pliki_instalacja_ok=true;
 struct PlikKontrolny{char path[128];uint32_t size,crc;};
 PlikKontrolny pliki_kontrolne[96]{};
 unsigned liczba_plikow_kontrolnych=0;
+struct PlanowanyPlik{char path[128];const char*data;uint32_t size;};
+PlanowanyPlik planowane_pliki[96]{};
+unsigned planowane_liczba=0,planowane_indeks=0;
+uint32_t planowane_offset=0,planowane_crc=~0U;
+uint64_t planowane_bajty=0,planowane_bajty_razem=0;
+bool planowanie_instalacji=false,instalacja_krokowa=false;
 bool zapisz_plik_od_nowa_impl(const char* sciezka,
                          const char* dane,
                          uint32_t rozmiar) {
@@ -555,6 +561,17 @@ bool zapisz_plik_od_nowa_impl(const char* sciezka,
 }
 
 bool zapisz_plik_od_nowa(const char*path,const char*data,uint32_t size){
+    if(planowanie_instalacji){
+        if(!path||(size&&!data)||planowane_liczba>=96||planowane_bajty_razem>UINT64_MAX-size){
+            pliki_instalacja_ok=false;return false;
+        }
+        auto&e=planowane_pliki[planowane_liczba++];unsigned i=0;
+        for(;i+1<sizeof(e.path)&&path[i];++i){e.path[i]=path[i];}
+        e.path[i]=0;
+        if(path[i]){pliki_instalacja_ok=false;return false;}
+        e.data=data;e.size=size;planowane_bajty_razem+=size;
+        return true;
+    }
     if(scisla_instalacja&&!pliki_instalacja_ok)return false;
     bool ok=zapisz_plik_od_nowa_impl(path,data,size);
     if(scisla_instalacja){
@@ -1704,6 +1721,55 @@ bool kernel_instaluj_system(){
     scisla_instalacja=false;
     return pliki_instalacja_ok&&liczba_plikow_kontrolnych!=0&&psf_flush_cache();
 }
+bool kernel_instaluj_system_start(uint64_t* razem){
+    scisla_instalacja=true;pliki_instalacja_ok=true;liczba_plikow_kontrolnych=0;
+    planowane_liczba=planowane_indeks=0;planowane_offset=0;planowane_crc=~0U;
+    planowane_bajty=planowane_bajty_razem=0;instalacja_krokowa=false;
+    utworz_drabine_katalogow();
+    planowanie_instalacji=true;
+    if(pliki_instalacja_ok)instaluj_wbudowane_programy();
+    planowanie_instalacji=false;
+    instalacja_krokowa=pliki_instalacja_ok&&planowane_liczba!=0;
+    if(razem)*razem=planowane_bajty_razem;
+    return instalacja_krokowa;
+}
+bool kernel_instaluj_system_step(uint64_t* wykonane,uint32_t* pliki,uint32_t* wszystkie,bool* gotowe){
+    if(wykonane)*wykonane=planowane_bajty;
+    if(pliki)*pliki=planowane_indeks;
+    if(wszystkie)*wszystkie=planowane_liczba;
+    if(gotowe)*gotowe=false;
+    if(!instalacja_krokowa||!pliki_instalacja_ok)return false;
+    if(planowane_indeks==planowane_liczba){
+        const bool ok=psf_flush_cache();scisla_instalacja=false;instalacja_krokowa=false;
+        if(gotowe)*gotowe=ok;
+        return ok;
+    }
+    auto&e=planowane_pliki[planowane_indeks];
+    if(planowane_offset==0){
+        (void)usun_twor(e.path);
+        if(!utworz_plik(e.path)){pliki_instalacja_ok=false;return false;}
+    }
+    constexpr uint32_t PORCJA=64*1024;
+    uint32_t n=e.size-planowane_offset;if(n>PORCJA)n=PORCJA;
+    if(n&&!zapisz_fragment_pliku(e.path,planowane_offset,e.data+planowane_offset,n)){
+        (void)usun_twor(e.path);pliki_instalacja_ok=false;return false;
+    }
+    for(uint32_t i=0;i<n;++i){
+        planowane_crc^=uint8_t(e.data[planowane_offset+i]);
+        for(unsigned bit=0;bit<8;++bit)planowane_crc=(planowane_crc>>1)^(0xEDB88320U&(0U-(planowane_crc&1)));
+    }
+    planowane_offset+=n;planowane_bajty+=n;
+    if(planowane_offset==e.size){
+        if(liczba_plikow_kontrolnych>=96){pliki_instalacja_ok=false;return false;}
+        auto&k=pliki_kontrolne[liczba_plikow_kontrolnych++];
+        unsigned i=0;for(;i+1<sizeof(k.path)&&e.path[i];++i){k.path[i]=e.path[i];}k.path[i]=0;
+        k.size=e.size;k.crc=~planowane_crc;
+        ++planowane_indeks;planowane_offset=0;planowane_crc=~0U;
+    }
+    if(wykonane)*wykonane=planowane_bajty;
+    if(pliki)*pliki=planowane_indeks;
+    return true;
+}
 uint32_t kernel_liczba_plikow_instalacji(){return liczba_plikow_kontrolnych;}
 bool kernel_weryfikuj_system(){
     char buf[4096];
@@ -1716,6 +1782,34 @@ bool kernel_weryfikuj_system(){
             for(uint32_t j=0;j<n;++j){c^=uint8_t(buf[j]);for(unsigned k=0;k<8;++k)c=(c>>1)^(0xEDB88320U&(0U-(c&1)));}off+=n;}
         if(~c!=e.crc)return false;
     }
+    return true;
+}
+unsigned weryfikacja_indeks=0;
+uint32_t weryfikacja_offset=0,weryfikacja_crc=~0U;
+char weryfikacja_buf[64*1024];
+bool kernel_weryfikuj_system_start(uint64_t* razem){
+    if(!pliki_instalacja_ok||liczba_plikow_kontrolnych==0)return false;
+    uint64_t total=0;for(unsigned i=0;i<liczba_plikow_kontrolnych;++i){
+        if(total>UINT64_MAX-pliki_kontrolne[i].size)return false;
+        total+=pliki_kontrolne[i].size;
+    }
+    weryfikacja_indeks=0;weryfikacja_offset=0;weryfikacja_crc=~0U;if(razem)*razem=total;return true;
+}
+bool kernel_weryfikuj_system_step(uint64_t* wykonane,bool* gotowe){
+    static uint64_t verified=0;
+    if(weryfikacja_indeks==0&&weryfikacja_offset==0)verified=0;
+    if(wykonane)*wykonane=verified;
+    if(gotowe)*gotowe=false;
+    if(weryfikacja_indeks>=liczba_plikow_kontrolnych){if(gotowe)*gotowe=true;return true;}
+    const auto&e=pliki_kontrolne[weryfikacja_indeks];
+    if(weryfikacja_offset==0&&rozmiar_pliku(e.path)!=e.size)return false;
+    uint32_t n=e.size-weryfikacja_offset;if(n>sizeof(weryfikacja_buf))n=sizeof(weryfikacja_buf);uint32_t got=0;
+    if(n&&(!czytaj_fragment_pliku(e.path,weryfikacja_offset,weryfikacja_buf,n,&got)||got!=n))return false;
+    for(uint32_t i=0;i<n;++i){weryfikacja_crc^=uint8_t(weryfikacja_buf[i]);for(unsigned bit=0;bit<8;++bit)weryfikacja_crc=(weryfikacja_crc>>1)^(0xEDB88320U&(0U-(weryfikacja_crc&1)));}
+    weryfikacja_offset+=n;verified+=n;
+    if(weryfikacja_offset==e.size){if(~weryfikacja_crc!=e.crc)return false;++weryfikacja_indeks;weryfikacja_offset=0;weryfikacja_crc=~0U;}
+    if(wykonane)*wykonane=verified;
+    if(weryfikacja_indeks==liczba_plikow_kontrolnych&&gotowe)*gotowe=true;
     return true;
 }
 

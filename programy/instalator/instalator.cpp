@@ -224,15 +224,17 @@ public:
     void start(){render();}
     bool czy_wymaga_animacji()const override{return busy;}
     void krok_animacji(uint64_t now)override{
-        // Odejmowanie bez znaku zachowuje poprawny uplyw także po zawinieciu
-        // monotonicznego licznika nanosekund.
-        if(!busy||now-last<100000000ULL){
+        if(!busy){
             return;
         }
+        const uint32_t poprzedni_procent=state.procent;
+        const uint32_t poprzedni_etap=state.postep_etap;
         last=now;
         if(!query(INST_KROK,selected)||state.status||state.etap==INST_BLAD){busy=false;page=7;}
         else if(state.etap==INST_KONIEC){busy=false;page=6;}
-        render();
+        if(!busy||state.procent!=poprzedni_procent||state.postep_etap!=poprzedni_etap){
+            render();
+        }
     }
 };
 }

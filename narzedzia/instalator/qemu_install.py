@@ -169,7 +169,9 @@ def install(g,target,sentinel,before_target,before_sentinel):
     time.sleep(1);g.q.screenshot(g.dir/'complete.png')
     assert '[PF]' not in text and '[KERNEL-PANIC]' not in text
     observed=[int(v) for v in re.findall(r'\[INSTALL\] progress=(\d+) stage=',text)]
-    assert observed==[0,12,30,45,75,92,100],observed
+    assert observed and observed[0]==0 and observed[-1]==100,observed
+    assert all(a<=b<=100 for a,b in zip(observed,observed[1:])),observed
+    assert len(set(observed))>8,observed
     assert all(0<=v<=100 for v in observed)
     assert all(a<=b for a,b in zip(observed,observed[1:]))
     assert text.index('[INSTALL] progress=100 stage=COMPLETE') < text.index('[INSTALL] COMPLETE verified')

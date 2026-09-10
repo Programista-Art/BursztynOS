@@ -84,6 +84,16 @@ int main(){
     BootFile f{buf,4096};Partition missing=l.esp;missing.count=8192;
     CHECK(!fat_install(missing,f,f,f));CHECK(!fat_install(l.esp,{},f,f));CHECK(disk.calls==before);
     disk.fail_after=disk.calls;CHECK(!fat_install(l.esp,f,f,f));disk.fail_after=UINT64_MAX;
+    FatInstallState fat_state{};
+    CHECK(fat_install_start(l.esp,f,f,f,&fat_state));CHECK(fat_state.total_units>100);
+    uint32_t fat_poprzednio=0;
+    while(!fat_state.complete){
+        CHECK(fat_install_step(&fat_state));
+        CHECK(fat_state.completed_units==fat_poprzednio+1);
+        CHECK(fat_state.completed_units<=fat_state.total_units);
+        fat_poprzednio=fat_state.completed_units;
+    }
+    CHECK(fat_state.completed_units==fat_state.total_units);
     CHECK(fat_install(l.esp,f,f,f));CHECK(disk.data[l.esp.start][82]=='F');
     CHECK(gpt_write(&disk.dev,l,uuid));CHECK(gpt_read(&disk.dev,&t)); // reinstall GPT
     // Exact production BSP2 formatting, with sentinels immediately outside partition.

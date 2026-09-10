@@ -116,41 +116,63 @@ bool complete(const Partition&p,const uint8_t uuid[16]){
 
 // Installer-only FAT32: 512 MiB ESP, 4 KiB clusters, two FATs, bounded tree.
 // No runtime FAT mount, no allocation from untrusted existing FAT metadata.
-bool fat_install(const Partition&p,BootFile efi,BootFile kernel,BootFile config){
+bool fat_install_start(const Partition&p,BootFile efi,BootFile kernel,BootFile config,
+                       FatInstallState*state){
+    if(!state)return false;
+    *state={};
     if(!p.device||p.device->sector_size!=512||p.count!=EspBytes/512||p.start>UINT32_MAX||
        !efi.data||!efi.size||!kernel.data||!kernel.size||!config.data||!config.size)return false;
     const uint32_t total=uint32_t(p.count),fat=(total/8*4+511)/512;
     const uint32_t data_start=32+2*fat,clusters=(total-data_start)/8;
-    BootFile files[]={efi,kernel,config};uint32_t start[3],length[3],next=7;
+    BootFile files[]={efi,kernel,config};uint32_t start[3],length[3],next=7,total_file_clusters=0;
     for(unsigned i=0;i<3;++i){length[i]=(uint64_t(files[i].size)+4095)/4096;start[i]=next;
-        if(length[i]>clusters||next>clusters+2-length[i])return false;
-        next+=length[i];}
+        if(length[i]>clusters||next>clusters+2-length[i]||total_file_clusters>UINT32_MAX-length[i])return false;
+        total_file_clusters+=length[i];next+=length[i];}
     if(clusters<65525||uint64_t(clusters+2)*4>uint64_t(fat)*512)return false;
+    state->partition=p;state->files[0]=efi;state->files[1]=kernel;state->files[2]=config;
+    state->fat_sectors=fat;state->data_start=data_start;state->clusters=clusters;state->next_cluster=next;
+    for(unsigned i=0;i<3;++i){state->file_start[i]=start[i];state->file_clusters[i]=length[i];}
+    state->total_units=4+1+1+(fat+7)/8+5+total_file_clusters+1;
+    return true;
+}
+
+bool fat_install_step(FatInstallState*s){
+    if(!s||s->failed||s->complete)return false;
+    const Partition&p=s->partition;const uint32_t fat=s->fat_sectors;
+    const uint32_t data_start=s->data_start,clusters=s->clusters,next=s->next_cluster;
+    const BootFile*files=s->files;const uint32_t*start=s->file_start;const uint32_t*length=s->file_clusters;
     uint8_t b[4096]{};
-    for(unsigned i=0;i<32;i+=8)if(!write_verify(p,i,8,b))return false;
-    b[0]=0xEB;b[1]=0x58;b[2]=0x90;copy(b+3,"BURSZTYN",8);p16(b+11,512);b[13]=8;p16(b+14,32);b[16]=2;b[21]=0xF8;
-    p16(b+24,63);p16(b+26,255);p32(b+28,uint32_t(p.start));p32(b+32,total);p32(b+36,fat);p32(b+44,2);
-    p16(b+48,1);p16(b+50,6);b[64]=0x80;b[66]=0x29;p32(b+67,crc32(kernel.data,kernel.size));
+    bool ok=false;
+    if(s->phase==0){
+        ok=write_verify(p,uint64_t(s->index)*8,8,b);
+        if(++s->index==4){s->phase=1;s->index=0;}
+    }else if(s->phase==1){
+        b[0]=0xEB;b[1]=0x58;b[2]=0x90;copy(b+3,"BURSZTYN",8);p16(b+11,512);b[13]=8;p16(b+14,32);b[16]=2;b[21]=0xF8;
+    p16(b+24,63);p16(b+26,255);p32(b+28,uint32_t(p.start));p32(b+32,uint32_t(p.count));p32(b+36,fat);p32(b+44,2);
+        p16(b+48,1);p16(b+50,6);b[64]=0x80;b[66]=0x29;p32(b+67,crc32(files[1].data,files[1].size));
     copy(b+71,"BURSZTYNESP",11);copy(b+82,"FAT32   ",8);b[510]=0x55;b[511]=0xAA;
-    if(!write_verify(p,0,1,b)||!write_verify(p,6,1,b))return false;
-    zero(b,4096);p32(b,0x41615252);p32(b+484,0x61417272);p32(b+488,clusters-(next-2));p32(b+492,next);p32(b+508,0xAA550000);
-    if(!write_verify(p,1,1,b)||!write_verify(p,7,1,b))return false;
-    for(uint32_t off=0;off<fat;off+=8){zero(b,4096);
+        ok=write_verify(p,0,1,b)&&write_verify(p,6,1,b);s->phase=2;
+    }else if(s->phase==2){
+        p32(b,0x41615252);p32(b+484,0x61417272);p32(b+488,clusters-(next-2));p32(b+492,next);p32(b+508,0xAA550000);
+        ok=write_verify(p,1,1,b)&&write_verify(p,7,1,b);s->phase=3;s->index=0;
+    }else if(s->phase==3){
+        const uint32_t off=s->index;
         for(unsigned j=0;j<1024;++j){uint32_t cl=off*128+j,v=0;
             if(cl==0)v=0x0FFFFFF8;else if(cl==1|| (cl>=2&&cl<7))v=0x0FFFFFFF;
             else for(unsigned f=0;f<3;++f)if(cl>=start[f]&&cl<start[f]+length[f])v=cl+1==start[f]+length[f]?0x0FFFFFFF:cl+1;
             p32(b+4*j,v);}
         uint32_t n=fat-off<8?fat-off:8;
-        if(!write_verify(p,32+off,n,b)||!write_verify(p,32+fat+off,n,b))return false;
-    }
+        ok=write_verify(p,32+off,n,b)&&write_verify(p,32+fat+off,n,b);
+        s->index+=n;if(s->index>=fat){s->phase=4;s->index=0;}
+    }else if(s->phase==4){
     auto dirent=[&](unsigned index,const char*name,uint32_t cl,uint32_t size,bool dir){auto*e=b+32*index;
         copy(e,name,11);e[11]=dir?0x10:0x20;p16(e+20,cl>>16);p16(e+26,cl);p32(e+28,size);p16(e+24,0x5821);};
-    for(uint32_t cl=2;cl<=6;++cl){zero(b,4096);
+        const uint32_t cl=2+s->index;
         if(cl==2){dirent(0,"EFI        ",3,0,true);dirent(1,"BOOT       ",5,0,true);}
         else {
             dirent(0,".          ",cl,0,true);dirent(1,"..         ",cl==4?3:(cl==6?5:0),0,true);
             if(cl==3)dirent(2,"BOOT       ",4,0,true);
-            if(cl==4)dirent(2,"BOOTX64 EFI",start[0],efi.size,false);
+            if(cl==4)dirent(2,"BOOTX64 EFI",start[0],files[0].size,false);
             if(cl==5){
                 dirent(2,"GRUB       ",6,0,true);
                 const char*name="system_operacyjny.bin";const char*alias="SYSTEM~1BIN";
@@ -158,15 +180,31 @@ bool fat_install(const Partition&p,BootFile efi,BootFile kernel,BootFile config)
                 constexpr unsigned positions[]={1,3,5,7,9,14,16,18,20,22,24,28,30};
                 for(unsigned n=0;n<2;++n){auto*e=b+(3+n)*32;unsigned seq=2-n;e[0]=seq|(seq==2?0x40:0);e[11]=0x0F;e[13]=sum;
                     for(unsigned j=0;j<13;++j){unsigned pos=(seq-1)*13+j;p16(e+positions[j],pos<21?uint8_t(name[pos]):(pos==21?0:0xFFFF));}}
-                dirent(5,alias,start[1],kernel.size,false);
+                dirent(5,alias,start[1],files[1].size,false);
             }
-            if(cl==6)dirent(2,"GRUB    CFG",start[2],config.size,false);
+            if(cl==6)dirent(2,"GRUB    CFG",start[2],files[2].size,false);
         }
-        if(!write_verify(p,data_start+uint64_t(cl-2)*8,8,b))return false;
+        ok=write_verify(p,data_start+uint64_t(cl-2)*8,8,b);
+        if(++s->index==5){s->phase=5;s->index=0;s->file_index=0;}
+    }else if(s->phase==5){
+        const unsigned f=s->file_index;const uint32_t i=s->index;
+        const uint64_t off=uint64_t(i)*4096;
+        const uint32_t n=files[f].size-off>4096?4096:uint32_t(files[f].size-off);
+        copy(b,files[f].data+off,n);
+        ok=write_verify(p,data_start+uint64_t(start[f]+i-2)*8,8,b);
+        if(++s->index==length[f]){s->index=0;if(++s->file_index==3)s->phase=6;}
+    }else{
+        ok=flush(p);s->complete=ok;
     }
-    for(unsigned f=0;f<3;++f){for(uint32_t i=0;i<length[f];++i){zero(b,4096);
-            uint64_t off=uint64_t(i)*4096;uint32_t n=files[f].size-off>4096?4096:files[f].size-off;copy(b,files[f].data+off,n);
-            if(!write_verify(p,data_start+uint64_t(start[f]+i-2)*8,8,b))return false;}}
-    return flush(p);
+    if(!ok){s->failed=true;return false;}
+    ++s->completed_units;
+    return true;
+}
+
+bool fat_install(const Partition&p,BootFile efi,BootFile kernel,BootFile config){
+    FatInstallState state{};
+    if(!fat_install_start(p,efi,kernel,config,&state))return false;
+    while(!state.complete)if(!fat_install_step(&state))return false;
+    return true;
 }
 }

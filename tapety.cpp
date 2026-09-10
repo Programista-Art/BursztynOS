@@ -263,9 +263,17 @@ bool zapisz_inwentarz(const SystemowyWpisInwentarza* wpisy, size_t liczba) {
 }
 
 uint32_t wymagane_tapety=0, zainstalowane_tapety=0;
-void instaluj(uint64_t mbi) {
+size_t instalacja_pakiet_liczba=0,instalacja_indeks=0,instalacja_biezaca_liczba=0;
+uint32_t instalacja_offset=0;
+uint64_t instalacja_bajty=0,instalacja_bajty_razem=0;
+bool instalacja_przygotowana=false,instalacja_blad=false;
+void instaluj(uint64_t mbi,bool tylko_przygotuj=false) {
     wymagane_tapety=0;
     zainstalowane_tapety=0;
+    if(tylko_przygotuj){
+        instalacja_przygotowana=false;instalacja_blad=false;instalacja_pakiet_liczba=0;
+        instalacja_bajty=instalacja_bajty_razem=0;
+    }
     if (!psf_czy_gotowy() || !zapewnij_katalog("/tapety")) {
         klog_serial("[TAPETA] BLAD utworzenia /tapety; start bedzie kontynuowany.");
         return;
@@ -405,6 +413,17 @@ void instaluj(uint64_t mbi) {
                 }
             }
         }
+    }
+
+    if(tylko_przygotuj){
+        instalacja_pakiet_liczba=pakiet_liczba;instalacja_indeks=0;instalacja_biezaca_liczba=0;
+        instalacja_offset=0;instalacja_bajty=0;instalacja_bajty_razem=0;instalacja_blad=false;
+        for(size_t i=0;i<pakiet_liczba;++i){
+            if(instalacja_bajty_razem>UINT64_MAX-s_pakiet_wpisy[i].rozmiar){instalacja_blad=true;break;}
+            instalacja_bajty_razem+=s_pakiet_wpisy[i].rozmiar;
+        }
+        instalacja_przygotowana=!instalacja_blad&&pakiet_liczba==liczba_plikow&&pakiet_liczba!=0;
+        return;
     }
 
     // Krok 2: Instalacja brakujacych i zachowanie istniejacych tapet z biezacego pakietu
@@ -632,6 +651,86 @@ bool tapety_weryfikuj_instalacje(){
         const auto&e=s_inwentarz_wpisy[i];
         if(rozmiar_pliku(path)!=e.rozmiar||tapety_plik_crc32(path,e.rozmiar)!=e.crc32)return false;
     }
+    return true;
+}
+size_t weryfikacja_tapet_indeks=0,weryfikacja_tapet_liczba=0;
+uint32_t weryfikacja_tapet_offset=0,weryfikacja_tapet_crc=~0U;
+uint64_t weryfikacja_tapet_bajty=0;
+char weryfikacja_tapet_buf[64*1024];
+bool tapety_weryfikuj_start(uint64_t*razem){
+    weryfikacja_tapet_liczba=wczytaj_inwentarz(s_inwentarz_wpisy,TAPETY_INWENTARZ_MAX);
+    if(!weryfikacja_tapet_liczba||(wymagane_tapety&&weryfikacja_tapet_liczba!=wymagane_tapety))return false;
+    uint64_t total=0;for(size_t i=0;i<weryfikacja_tapet_liczba;++i){
+        if(total>UINT64_MAX-s_inwentarz_wpisy[i].rozmiar)return false;
+        total+=s_inwentarz_wpisy[i].rozmiar;
+    }
+    weryfikacja_tapet_indeks=0;weryfikacja_tapet_offset=0;weryfikacja_tapet_crc=~0U;weryfikacja_tapet_bajty=0;
+    if(razem)*razem=total;
+    return true;
+}
+bool tapety_weryfikuj_step(uint64_t*wykonane,bool*gotowe){
+    if(wykonane)*wykonane=weryfikacja_tapet_bajty;
+    if(gotowe)*gotowe=false;
+    if(weryfikacja_tapet_indeks>=weryfikacja_tapet_liczba){if(gotowe)*gotowe=true;return true;}
+    const auto&e=s_inwentarz_wpisy[weryfikacja_tapet_indeks];char path[TAPETY_SCIEZKA_MAX]{};size_t p=0;
+    constexpr char prefix[]="/tapety/";for(;prefix[p]&&p+1<sizeof(path);++p){path[p]=prefix[p];}
+    for(size_t i=0;e.nazwa[i]&&p+1<sizeof(path);++i){path[p++]=e.nazwa[i];}path[p]=0;
+    if(weryfikacja_tapet_offset==0&&rozmiar_pliku(path)!=e.rozmiar)return false;
+    uint32_t n=e.rozmiar-weryfikacja_tapet_offset;if(n>sizeof(weryfikacja_tapet_buf))n=sizeof(weryfikacja_tapet_buf);uint32_t got=0;
+    if(n&&(!czytaj_fragment_pliku(path,weryfikacja_tapet_offset,weryfikacja_tapet_buf,n,&got)||got!=n))return false;
+    for(uint32_t i=0;i<n;++i){weryfikacja_tapet_crc^=uint8_t(weryfikacja_tapet_buf[i]);for(unsigned bit=0;bit<8;++bit)weryfikacja_tapet_crc=(weryfikacja_tapet_crc>>1)^(0xEDB88320U&(0U-(weryfikacja_tapet_crc&1)));}
+    weryfikacja_tapet_offset+=n;weryfikacja_tapet_bajty+=n;
+    if(weryfikacja_tapet_offset==e.rozmiar){if(~weryfikacja_tapet_crc!=e.crc32)return false;++weryfikacja_tapet_indeks;weryfikacja_tapet_offset=0;weryfikacja_tapet_crc=~0U;}
+    if(wykonane)*wykonane=weryfikacja_tapet_bajty;
+    if(weryfikacja_tapet_indeks==weryfikacja_tapet_liczba&&gotowe)*gotowe=true;
+    return true;
+}
+bool tapety_instaluj_start(uint64_t mbi,uint64_t*razem){
+    instaluj(mbi,true);
+    if(razem)*razem=instalacja_bajty_razem;
+    return instalacja_przygotowana;
+}
+bool tapety_instaluj_step(uint64_t*wykonane,uint32_t*elementy,uint32_t*wszystkie,bool*gotowe){
+    if(wykonane)*wykonane=instalacja_bajty;
+    if(elementy)*elementy=static_cast<uint32_t>(instalacja_biezaca_liczba);
+    if(wszystkie)*wszystkie=static_cast<uint32_t>(instalacja_pakiet_liczba);
+    if(gotowe)*gotowe=false;
+    if(!instalacja_przygotowana||instalacja_blad)return false;
+    if(instalacja_indeks==instalacja_pakiet_liczba){
+        if(!zapisz_inwentarz(s_inwentarz_biezacy,instalacja_biezaca_liczba)){instalacja_blad=true;return false;}
+        instalacja_przygotowana=false;if(gotowe)*gotowe=true;return true;
+    }
+    const auto&e=s_pakiet_wpisy[instalacja_indeks];char path[TAPETY_SCIEZKA_MAX]{};size_t p=0;
+    constexpr char prefix[]="/tapety/";
+    for(;prefix[p]&&p+1<sizeof(path);++p){path[p]=prefix[p];}
+    for(size_t i=0;e.nazwa[i]&&p+1<sizeof(path);++i){path[p++]=e.nazwa[i];}
+    path[p]=0;
+    bool zachowany=false;
+    if(instalacja_offset==0){
+        psf_metadane meta{};
+        zachowany=pobierz_metadane_tworu(path,&meta)&&meta.rozmiar==e.rozmiar;
+        if(!zachowany){
+            (void)usun_twor(path);
+            if(!utworz_plik(path)){instalacja_blad=true;return false;}
+        }
+    }
+    constexpr uint32_t PORCJA=64*1024;
+    uint32_t n=zachowany?e.rozmiar:e.rozmiar-instalacja_offset;if(n>PORCJA&&!zachowany)n=PORCJA;
+    if(!zachowany&&!zapisz_fragment_pliku(path,instalacja_offset,reinterpret_cast<const char*>(e.payload+instalacja_offset),n)){
+        (void)usun_twor(path);instalacja_blad=true;return false;
+    }
+    instalacja_offset+=n;instalacja_bajty+=n;
+    if(instalacja_offset==e.rozmiar){
+        if(!psf_flush_cache()){instalacja_blad=true;return false;}
+        s_inwentarz_biezacy[instalacja_biezaca_liczba]={};
+        tapety_kopiuj(s_inwentarz_biezacy[instalacja_biezaca_liczba].nazwa,e.nazwa,sizeof(s_inwentarz_biezacy[0].nazwa));
+        s_inwentarz_biezacy[instalacja_biezaca_liczba].rozmiar=e.rozmiar;
+        s_inwentarz_biezacy[instalacja_biezaca_liczba].crc32=e.crc32;
+        ++instalacja_biezaca_liczba;zainstalowane_tapety=static_cast<uint32_t>(instalacja_biezaca_liczba);
+        ++instalacja_indeks;instalacja_offset=0;
+    }
+    if(wykonane)*wykonane=instalacja_bajty;
+    if(elementy)*elementy=static_cast<uint32_t>(instalacja_biezaca_liczba);
     return true;
 }
 bool tapety_instaluj_sprawdz(uint64_t mbi){instaluj(mbi);return tapety_weryfikuj_instalacje();}

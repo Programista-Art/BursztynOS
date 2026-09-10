@@ -6,6 +6,7 @@
 #include "scheduler.h"
 #include "tapety.h"
 #include "sterowniki/usb/xhci.h"
+#include "sterowniki/czas/hpet.h"
 
 namespace {
 bool mode=false,installed=false,uefi=false;
@@ -18,6 +19,15 @@ uint8_t disk_uuid[16]{};
 uint32_t selected=UINT32_MAX,stage=INST_GOTOWY,status=0,fingerprint=0;
 uint32_t progress=0,progress_stage=POSTEP_PRZYGOTOWANIE,progress_done=0,progress_total=0;
 uint32_t files_done=0,files_total=0,wallpapers_done=0,wallpapers_total=0;
+Storage::FatInstallState fat_state{};
+bool fat_started=false;
+bool wallpapers_started=false;
+uint64_t wallpaper_bytes_done=0,wallpaper_bytes_total=0;
+bool system_started=false;
+uint64_t system_bytes_done=0,system_bytes_total=0;
+uint32_t verify_phase=0;
+uint64_t verify_system_done=0,verify_system_total=0,verify_wall_done=0,verify_wall_total=0;
+uint64_t perf_stage_us=0,perf_longest_us=0,perf_irq=0,perf_switches=0;
 char error[160]{};
 const char config[]=
     "set default=0\nset gfxmode=auto\nset gfxpayload=keep\n"
@@ -42,10 +52,40 @@ bool fingerprint_disk(Storage::Device*d,uint32_t*out){
     *out=c;return true;
 }
 void fail(uint32_t code,const char*why){status=code;stage=INST_BLAD;text_copy(error,why,sizeof(error));klog_serial("[INSTALL] Instalacja nie powiodla sie:");klog_serial(why);}
+const char* progress_name(uint32_t value){
+    static const char* names[]={"PREPARE","GPT","ESP","BSP2FORMAT","SYSTEMFILES","WALLPAPERS","VERIFY","COMPLETE"};
+    return value<=POSTEP_COMPLETE?names[value]:"INVALID";
+}
+void log_progress(uint32_t percent,uint32_t progressStage){
+    char line[80]="[INSTALL] progress=";size_t p=sizeof("[INSTALL] progress=")-1;char digits[4];size_t n=0;
+    do{digits[n++]=char('0'+percent%10);percent/=10;}while(percent&&n<sizeof(digits));
+    while(n&&p+1<sizeof(line))line[p++]=digits[--n];
+    const char mid[]=" stage=";for(size_t i=0;mid[i]&&p+1<sizeof(line);++i)line[p++]=mid[i];
+    const char*name=progress_name(progressStage);for(size_t i=0;name[i]&&p+1<sizeof(line);++i)line[p++]=name[i];
+    line[p]=0;klog_serial(line);
+}
+void append_u64(char*line,size_t cap,size_t*p,uint64_t value){
+    char digits[24];size_t n=0;do{digits[n++]=char('0'+value%10);value/=10;}while(value&&n<sizeof(digits));
+    while(n&&*p+1<cap)line[(*p)++]=digits[--n];
+}
+void append_text(char*line,size_t cap,size_t*p,const char*value){
+    for(size_t i=0;value[i]&&*p+1<cap;++i)line[(*p)++]=value[i];
+}
+void log_perf(uint32_t progressStage,bool interrupts){
+    char line[192]="[INSTALL PERF] stage=";size_t p=sizeof("[INSTALL PERF] stage=")-1;append_text(line,sizeof(line),&p,progress_name(progressStage));
+    append_text(line,sizeof(line),&p," durationus=");append_u64(line,sizeof(line),&p,perf_stage_us);
+    append_text(line,sizeof(line),&p," longestblockus=");append_u64(line,sizeof(line),&p,perf_longest_us);
+    append_text(line,sizeof(line),&p," interrupts=");append_u64(line,sizeof(line),&p,interrupts?1:0);
+    append_text(line,sizeof(line),&p," timerirq=");append_u64(line,sizeof(line),&p,perf_irq);
+    append_text(line,sizeof(line),&p," switches=");append_u64(line,sizeof(line),&p,perf_switches);
+    line[p]=0;klog_serial(line);
+}
 void set_progress(uint32_t percent,uint32_t progressStage,uint32_t done=0,uint32_t total=0,bool complete=false){
     if(!instalator_etap_postepu_poprawny(progress_stage,progressStage))return;
+    const uint32_t old=progress;const uint32_t old_stage=progress_stage;
     progress=instalator_postep_nowy(progress,percent,complete);progress_stage=progressStage;
     progress_done=done;progress_total=total;
+    if(progress!=old||progress_stage!=old_stage)log_progress(progress,progress_stage);
 }
 void snapshot(InstalatorOdpowiedz*out,uint32_t id){
     *out={};out->wersja=1;out->status=status;out->etap=stage;out->liczba_dyskow=ahci_liczba_dyskow();out->dysk=id;
@@ -77,35 +117,67 @@ void perform(){
             fail(INST_IO,"GPT: zapis / FLUSH / odczyt kontrolny nie powiódł się.");return;}
         set_progress(12,POSTEP_ESP);stage=INST_ESP;
     }else if(stage==INST_ESP){
-        klog_serial("[INSTALL] progress=12 stage=ESP");
-        if(!Storage::fat_install(layout.esp,boot_efi,boot_kernel,{(const uint8_t*)config,sizeof(config)-1})){
+        if(!fat_started){
+            klog_serial("[INSTALL] progress=12 stage=ESP");
+            fat_started=Storage::fat_install_start(layout.esp,boot_efi,boot_kernel,
+                {(const uint8_t*)config,sizeof(config)-1},&fat_state);
+        }
+        if(!fat_started||!Storage::fat_install_step(&fat_state)){
             fail(INST_IO,"ESP FAT32 / pliki rozruchowe: zapis lub weryfikacja nie powiodła się.");return;}
-        set_progress(30,POSTEP_BSP2);stage=INST_BSP;
+        set_progress(instalator_podpostep(12,30,fat_state.completed_units,fat_state.total_units),
+                     POSTEP_ESP,fat_state.completed_units,fat_state.total_units);
+        if(fat_state.complete){set_progress(30,POSTEP_BSP2);stage=INST_BSP;}
     }else if(stage==INST_BSP){
         klog_serial("[INSTALL] progress=30 stage=BSP2FORMAT");
         if(!psf_formatuj_instalacje(layout.bsp)||!psf_znacznik_instalacji(disk_uuid,false)||!psf_weryfikuj_dysk()){
             fail(INST_FORMAT,"BSP2: format / znacznik w toku / odczyt kontrolny.");return;}
         set_progress(45,POSTEP_SYSTEM);stage=INST_SYSTEM;
     }else if(stage==INST_SYSTEM){
-        klog_serial("[INSTALL] progress=45 stage=SYSTEMFILES");
-        if(!kernel_instaluj_system()){
+        if(!system_started){
+            klog_serial("[INSTALL] progress=45 stage=SYSTEMFILES");
+            system_started=kernel_instaluj_system_start(&system_bytes_total);
+        }
+        bool done=false;
+        if(!system_started||system_bytes_total>UINT32_MAX||
+           !kernel_instaluj_system_step(&system_bytes_done,&files_done,&files_total,&done)){
             fail(INST_PLIKI,"Pliki systemowe: kopiowanie lub FLUSH nie powiodły się.");return;}
-        const uint32_t files=kernel_liczba_plikow_instalacji();
-        files_done=files_total=files;
-        set_progress(75,POSTEP_TAPETY,files,files);stage=INST_TAPETY;
+        set_progress(instalator_podpostep(45,75,uint32_t(system_bytes_done),uint32_t(system_bytes_total)),
+                     POSTEP_SYSTEM,uint32_t(system_bytes_done),uint32_t(system_bytes_total));
+        if(done){set_progress(75,POSTEP_TAPETY,files_done,files_total);stage=INST_TAPETY;}
     }else if(stage==INST_TAPETY){
-        klog_serial("[INSTALL] progress=75 stage=WALLPAPERS");
-        if(!tapety_instaluj_sprawdz(mbi_saved)){
-            fail(INST_PLIKI,"Tapety: synchronizacja lub CRC nie powiodły się.");return;}
-        wallpapers_done=tapety_liczba_zainstalowanych();
-        wallpapers_total=tapety_liczba_wymaganych();
-        set_progress(92,POSTEP_WERYFIKACJA,wallpapers_done,wallpapers_total);
-        stage=INST_WERYFIKACJA;
+        if(!wallpapers_started){
+            klog_serial("[INSTALL] progress=75 stage=WALLPAPERS");
+            wallpapers_started=tapety_instaluj_start(mbi_saved,&wallpaper_bytes_total);
+        }
+        bool done=false;
+        if(!wallpapers_started||wallpaper_bytes_total>UINT32_MAX||
+           !tapety_instaluj_step(&wallpaper_bytes_done,&wallpapers_done,&wallpapers_total,&done)){
+            fail(INST_PLIKI,"Tapety: synchronizacja lub zapis nie powiodły się.");return;}
+        set_progress(instalator_podpostep(75,92,uint32_t(wallpaper_bytes_done),uint32_t(wallpaper_bytes_total)),
+                     POSTEP_TAPETY,uint32_t(wallpaper_bytes_done),uint32_t(wallpaper_bytes_total));
+        if(done){set_progress(92,POSTEP_WERYFIKACJA,wallpapers_done,wallpapers_total);stage=INST_WERYFIKACJA;}
     }else if(stage==INST_WERYFIKACJA){
-        klog_serial("[INSTALL] progress=92 stage=VERIFY");
-        if(!psf_flush_cache()||!psf_weryfikuj_dysk()||!kernel_weryfikuj_system()||!tapety_weryfikuj_instalacje()){
-            fail(INST_IO,"Weryfikacja: metadane / pliki systemowe / inwentarz tapet.");return;}
-        set_progress(99,POSTEP_WERYFIKACJA);stage=INST_ZNACZNIK;
+        if(verify_phase==0){
+            klog_serial("[INSTALL] progress=92 stage=VERIFY");
+            if(!psf_flush_cache()||!psf_weryfikuj_dysk()||
+               !kernel_weryfikuj_system_start(&verify_system_total)||!tapety_weryfikuj_start(&verify_wall_total)){
+                fail(INST_IO,"Weryfikacja: metadane / przygotowanie odczytu kontrolnego.");return;}
+            verify_phase=1;
+        }else if(verify_phase==1){
+            bool done=false;if(!kernel_weryfikuj_system_step(&verify_system_done,&done)){
+                fail(INST_IO,"Weryfikacja: pliki systemowe.");return;}
+            if(done)verify_phase=2;
+        }else{
+            bool done=false;if(!tapety_weryfikuj_step(&verify_wall_done,&done)){
+                fail(INST_IO,"Weryfikacja: tapety / CRC.");return;}
+            if(done)verify_phase=3;
+        }
+        const uint64_t total=verify_system_total+verify_wall_total;
+        const uint64_t done=verify_system_done+verify_wall_done;
+        if(total>UINT32_MAX||done>UINT32_MAX){fail(INST_IO,"Weryfikacja: licznik bajtów poza zakresem.");return;}
+        set_progress(instalator_podpostep(92,99,uint32_t(done),uint32_t(total)),POSTEP_WERYFIKACJA,
+                     uint32_t(done),uint32_t(total));
+        if(verify_phase==3){set_progress(99,POSTEP_WERYFIKACJA);stage=INST_ZNACZNIK;}
     }else if(stage==INST_ZNACZNIK){
         if(!psf_znacznik_instalacji(disk_uuid,true)||!Storage::complete(layout.bsp,disk_uuid)){
             fail(INST_IO,"Znacznik ukończenia: FLUSH / CRC / odczyt kontrolny.");return;}
@@ -133,7 +205,14 @@ void instalator_boot(uint64_t mbi){
     if(mode)installed=false;
 }
 void instalator_autoryzuj(int pid){owner=pid;owner_cr3=pid>0?tablica_procesow[pid].cr3:0;}
-void instalator_zamknij_proces(int pid){if(pid==owner){owner=-1;owner_cr3=0;nonce=0;blokowy_zezwol_instalatorowi(0,false);}}
+void instalator_zamknij_proces(int pid){
+    if(pid!=owner)return;
+    if(stage>INST_GOTOWY&&stage<INST_KONIEC){
+        fail(INST_ZAJETY,"Proces instalatora zakonczyl sie podczas transakcji; dalsze zapisy zatrzymane.");
+    }
+    owner=-1;owner_cr3=0;nonce=0;
+    blokowy_zezwol_instalatorowi(0,false);
+}
 bool instalator_obsluz(const proces_t&p,const InstalatorZadanie&r,InstalatorOdpowiedz*out){
     if(!out||r.wersja!=1)return false;
     if(!mode||p.pid!=uint64_t(owner)||p.cr3!=owner_cr3||!pzb_ma_co_najmniej_poziom(&p,PZB_ZAUFANE)||!pzb_ma_prawa(&p,PRAWO_SYSTEM_CONFIG)){
@@ -142,6 +221,11 @@ bool instalator_obsluz(const proces_t&p,const InstalatorZadanie&r,InstalatorOdpo
     if(r.operacja==INST_PODGLAD && stage==INST_GOTOWY){
         status=0;error[0]=0;selected=UINT32_MAX;nonce=0;
         progress=0;progress_stage=POSTEP_PRZYGOTOWANIE;progress_done=progress_total=0;
+        fat_state={};fat_started=false;
+        wallpapers_started=false;wallpaper_bytes_done=wallpaper_bytes_total=0;
+        system_started=false;system_bytes_done=system_bytes_total=0;
+        verify_phase=0;verify_system_done=verify_system_total=verify_wall_done=verify_wall_total=0;
+        perf_stage_us=perf_longest_us=perf_irq=perf_switches=0;
         files_done=files_total=wallpapers_done=wallpapers_total=0;
         auto*d=blokowy_dysk(r.dysk);
         if(!uefi||!payloads())status=INST_BRAK_PLIKOW;
@@ -159,7 +243,22 @@ bool instalator_obsluz(const proces_t&p,const InstalatorZadanie&r,InstalatorOdpo
                 !fingerprint_disk(layout.bsp.device,&current)||current!=fingerprint)status=INST_DYSK_BLAD;
         else {status=0;set_progress(0,POSTEP_GPT);stage=INST_GPT;klog_serial("[INSTALL] Explicit final confirmation accepted. No disk sectors written before this point.");}
     }else if(r.operacja==INST_KROK&&stage>INST_GOTOWY&&stage<INST_KONIEC&&r.token==nonce&&r.dysk==selected){
-        blokowy_zezwol_instalatorowi(selected,true);perform();blokowy_zezwol_instalatorowi(selected,false);
+        if(layout.bsp.device!=blokowy_dysk(selected)){
+            fail(INST_DYSK_BLAD,"Transakcja utraciła powiązanie z wybranym dyskiem.");
+        }else{
+            const uint32_t old_stage=progress_stage;const uint64_t start=czas_monotoniczny_us();
+            const uint64_t irq_before=scheduler_liczba_irq_timera(),switch_before=scheduler_liczba_przelaczen();
+            uint64_t flags=0;asm volatile("pushfq; popq %0":"=r"(flags));
+            blokowy_zezwol_instalatorowi(selected,true);perform();blokowy_zezwol_instalatorowi(selected,false);
+            const uint64_t elapsed=czas_monotoniczny_us()-start;perf_stage_us+=elapsed;
+            if(elapsed>perf_longest_us)perf_longest_us=elapsed;
+            perf_irq+=scheduler_liczba_irq_timera()-irq_before;
+            perf_switches+=scheduler_liczba_przelaczen()-switch_before;
+            if(progress_stage!=old_stage){
+                log_perf(old_stage,(flags&(1ULL<<9))!=0);
+                perf_stage_us=perf_longest_us=perf_irq=perf_switches=0;
+            }
+        }
     }else status=INST_ZAJETY;
     snapshot(out,r.dysk);return true;
 }

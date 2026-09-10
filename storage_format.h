@@ -34,6 +34,26 @@ bool gpt_read(Device*,Table*);
 bool gpt_write(Device*,const Layout&,const uint8_t uuid[16]);
 bool source_iso(Device*); // konserwatywnie chroni każdy nośnik ISO9660
 struct BootFile { const uint8_t* data; uint32_t size; };
+struct FatInstallState {
+    Partition partition;
+    BootFile files[3];
+    uint32_t fat_sectors;
+    uint32_t data_start;
+    uint32_t clusters;
+    uint32_t file_start[3];
+    uint32_t file_clusters[3];
+    uint32_t next_cluster;
+    uint32_t phase;
+    uint32_t index;
+    uint32_t file_index;
+    uint32_t completed_units;
+    uint32_t total_units;
+    bool failed;
+    bool complete;
+};
+bool fat_install_start(const Partition&,BootFile efi,BootFile kernel,
+                       BootFile config,FatInstallState*);
+bool fat_install_step(FatInstallState*);
 bool fat_install(const Partition&,BootFile efi,BootFile kernel,BootFile config);
 bool marker(const Partition&,const uint8_t uuid[16],uint64_t fs_bytes,bool complete);
 bool complete(const Partition&,const uint8_t uuid[16]);
