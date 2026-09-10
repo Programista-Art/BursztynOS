@@ -73,6 +73,17 @@ int main(){
     CHECK(gpt_write(&large.dev,big,uuid));CHECK(gpt_read(&large.dev,&t));CHECK(large.data.count(large.dev.sectors-1)==1);
     disk.dev.sector_size=4096;CHECK(!plan(&disk.dev,&big));CHECK(!gpt_read(&disk.dev,&t));disk.dev.sector_size=512;
     CHECK(gpt_write(&disk.dev,l,uuid));CHECK(gpt_read(&disk.dev,&t));CHECK(t.count==2&&equal(t.entries[1].type,BspType,16));
+    GptInstallState gpt_state{};CHECK(gpt_install_start(&disk.dev,l,uuid,&gpt_state));
+    uint32_t gpt_poprzednio=0;
+    while(!gpt_state.complete){
+        const uint64_t calls_before=disk.calls;
+        CHECK(gpt_install_step(&gpt_state));
+        CHECK(disk.calls-calls_before<=1);
+        CHECK(gpt_state.completed_units==gpt_poprzednio+1||gpt_state.complete);
+        CHECK(gpt_state.completed_units<=gpt_state.total_units);
+        gpt_poprzednio=gpt_state.completed_units;
+    }
+    CHECK(gpt_state.completed_units==gpt_state.total_units);CHECK(gpt_read(&disk.dev,&t));
     const auto original=disk.data;uint64_t before=disk.calls;
     disk.data[1][16]^=1;CHECK(!gpt_read(&disk.dev,&t));CHECK(disk.calls==before);disk.data=original;
     disk.data[2][40]^=1;CHECK(!gpt_read(&disk.dev,&t));disk.data=original;

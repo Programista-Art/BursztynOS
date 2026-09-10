@@ -33,7 +33,11 @@
 // Wyłącznie Ring0. Brak formatowania w inicjalizuj_psf().
 void psf_ustaw_partycje(const Storage::Partition* partition);
 bool psf_formatuj_instalacje(const Storage::Partition& partition);
+bool psf_formatuj_instalacje_start(const Storage::Partition& partition,uint64_t* razem);
+bool psf_formatuj_instalacje_step(uint64_t* wykonane,bool* gotowe);
 bool psf_weryfikuj_dysk();
+bool psf_weryfikuj_dysk_start(uint64_t* razem);
+bool psf_weryfikuj_dysk_step(uint64_t* wykonane,bool* gotowe);
 bool psf_znacznik_instalacji(const uint8_t uuid[16],bool complete);
 
 /* =========================================================================

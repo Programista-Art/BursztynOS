@@ -20,6 +20,8 @@ uint32_t selected=UINT32_MAX,stage=INST_GOTOWY,status=0,fingerprint=0;
 uint32_t progress=0,progress_stage=POSTEP_PRZYGOTOWANIE,progress_done=0,progress_total=0;
 uint32_t files_done=0,files_total=0,wallpapers_done=0,wallpapers_total=0;
 Storage::FatInstallState fat_state{};
+Storage::GptInstallState gpt_state{};
+bool gpt_started=false;
 bool fat_started=false;
 bool wallpapers_started=false;
 uint64_t wallpaper_bytes_done=0,wallpaper_bytes_total=0;
@@ -27,7 +29,10 @@ bool system_started=false;
 uint64_t system_bytes_done=0,system_bytes_total=0;
 uint32_t verify_phase=0;
 uint64_t verify_system_done=0,verify_system_total=0,verify_wall_done=0,verify_wall_total=0;
+uint64_t verify_meta_done=0,verify_meta_total=0;
 uint64_t perf_stage_us=0,perf_longest_us=0,perf_irq=0,perf_switches=0;
+uint64_t perf_stage_irq_start=0,perf_stage_switch_start=0;
+uint32_t bsp_phase=0;uint64_t bsp_done=0,bsp_total=0;
 char error[160]{};
 const char config[]=
     "set default=0\nset gfxmode=auto\nset gfxpayload=keep\n"
@@ -85,7 +90,9 @@ void set_progress(uint32_t percent,uint32_t progressStage,uint32_t done=0,uint32
     const uint32_t old=progress;const uint32_t old_stage=progress_stage;
     progress=instalator_postep_nowy(progress,percent,complete);progress_stage=progressStage;
     progress_done=done;progress_total=total;
-    if(progress!=old||progress_stage!=old_stage)log_progress(progress,progress_stage);
+    const bool changed_stage=progress_stage!=old_stage;
+    const bool crossed_ten=progress/10!=old/10;
+    if(changed_stage||crossed_ten||progress==100)log_progress(progress,progress_stage);
 }
 void snapshot(InstalatorOdpowiedz*out,uint32_t id){
     *out={};out->wersja=1;out->status=status;out->etap=stage;out->liczba_dyskow=ahci_liczba_dyskow();out->dysk=id;
@@ -109,13 +116,15 @@ void perform(){
     auto*d=layout.bsp.device;
     if(stage==INST_GPT){
         klog_serial("[INSTALL] progress=0 stage=GPT");
-        if(!ahci_sprawdz_tozsamosc(selected)){fail(INST_DYSK_BLAD,"Walidacja: tożsamość dysku zmieniła się.");return;}
-        // Unpublish any stale complete superblock BEFORE new GPT references it.
-        uint8_t zero[4096]{};
-        if(!Storage::flush(layout.bsp)||!Storage::write_verify(layout.bsp,0,8,zero)||!Storage::flush(layout.bsp)||
-           !Storage::gpt_write(d,layout,disk_uuid)||!Storage::gpt_read(d,&table)||!Storage::equal(table.uuid,disk_uuid,16)){
+        if(!gpt_started){
+            if(!ahci_sprawdz_tozsamosc(selected)){fail(INST_DYSK_BLAD,"Walidacja: tożsamość dysku zmieniła się.");return;}
+            gpt_started=Storage::gpt_install_start(d,layout,disk_uuid,&gpt_state);
+        }
+        if(!gpt_started||!Storage::gpt_install_step(&gpt_state)){
             fail(INST_IO,"GPT: zapis / FLUSH / odczyt kontrolny nie powiódł się.");return;}
-        set_progress(12,POSTEP_ESP);stage=INST_ESP;
+        set_progress(instalator_podpostep(0,12,gpt_state.completed_units,gpt_state.total_units),POSTEP_GPT,
+                     gpt_state.completed_units,gpt_state.total_units);
+        if(gpt_state.complete){table={};for(unsigned i=0;i<16;++i)table.uuid[i]=disk_uuid[i];set_progress(12,POSTEP_ESP);stage=INST_ESP;}
     }else if(stage==INST_ESP){
         if(!fat_started){
             klog_serial("[INSTALL] progress=12 stage=ESP");
@@ -128,10 +137,26 @@ void perform(){
                      POSTEP_ESP,fat_state.completed_units,fat_state.total_units);
         if(fat_state.complete){set_progress(30,POSTEP_BSP2);stage=INST_BSP;}
     }else if(stage==INST_BSP){
-        klog_serial("[INSTALL] progress=30 stage=BSP2FORMAT");
-        if(!psf_formatuj_instalacje(layout.bsp)||!psf_znacznik_instalacji(disk_uuid,false)||!psf_weryfikuj_dysk()){
-            fail(INST_FORMAT,"BSP2: format / znacznik w toku / odczyt kontrolny.");return;}
-        set_progress(45,POSTEP_SYSTEM);stage=INST_SYSTEM;
+        if(bsp_phase==0){
+            klog_serial("[INSTALL] progress=30 stage=BSP2FORMAT");
+            if(!psf_formatuj_instalacje_start(layout.bsp,&bsp_total)){fail(INST_FORMAT,"BSP2: przygotowanie formatu.");return;}
+            bsp_phase=1;
+        }else if(bsp_phase==1){
+            bool done=false;if(!psf_formatuj_instalacje_step(&bsp_done,&done)){fail(INST_FORMAT,"BSP2: zapis metadanych.");return;}
+            if(done)bsp_phase=2;
+        }else if(bsp_phase==2){
+            if(!psf_znacznik_instalacji(disk_uuid,false)||!psf_weryfikuj_dysk_start(&bsp_total)){
+                fail(INST_FORMAT,"BSP2: znacznik w toku / przygotowanie odczytu kontrolnego.");return;}
+            bsp_done=0;bsp_phase=3;
+        }else{
+            bool done=false;if(!psf_weryfikuj_dysk_step(&bsp_done,&done)){fail(INST_FORMAT,"BSP2: odczyt kontrolny metadanych.");return;}
+            if(done)bsp_phase=4;
+        }
+        const uint32_t bsp_percent=bsp_phase<3
+            ?instalator_podpostep(30,42,uint32_t(bsp_done),uint32_t(bsp_total))
+            :instalator_podpostep(42,45,uint32_t(bsp_done),uint32_t(bsp_total));
+        set_progress(bsp_percent,POSTEP_BSP2,uint32_t(bsp_done),uint32_t(bsp_total));
+        if(bsp_phase==4){set_progress(45,POSTEP_SYSTEM);stage=INST_SYSTEM;}
     }else if(stage==INST_SYSTEM){
         if(!system_started){
             klog_serial("[INSTALL] progress=45 stage=SYSTEMFILES");
@@ -159,25 +184,29 @@ void perform(){
     }else if(stage==INST_WERYFIKACJA){
         if(verify_phase==0){
             klog_serial("[INSTALL] progress=92 stage=VERIFY");
-            if(!psf_flush_cache()||!psf_weryfikuj_dysk()||
+            if(!psf_flush_cache()||!psf_weryfikuj_dysk_start(&verify_meta_total)||
                !kernel_weryfikuj_system_start(&verify_system_total)||!tapety_weryfikuj_start(&verify_wall_total)){
                 fail(INST_IO,"Weryfikacja: metadane / przygotowanie odczytu kontrolnego.");return;}
             verify_phase=1;
         }else if(verify_phase==1){
+            bool done=false;if(!psf_weryfikuj_dysk_step(&verify_meta_done,&done)){
+                fail(INST_IO,"Weryfikacja: metadane BSP2.");return;}
+            if(done)verify_phase=2;
+        }else if(verify_phase==2){
             bool done=false;if(!kernel_weryfikuj_system_step(&verify_system_done,&done)){
                 fail(INST_IO,"Weryfikacja: pliki systemowe.");return;}
-            if(done)verify_phase=2;
+            if(done)verify_phase=3;
         }else{
             bool done=false;if(!tapety_weryfikuj_step(&verify_wall_done,&done)){
                 fail(INST_IO,"Weryfikacja: tapety / CRC.");return;}
-            if(done)verify_phase=3;
+            if(done)verify_phase=4;
         }
-        const uint64_t total=verify_system_total+verify_wall_total;
-        const uint64_t done=verify_system_done+verify_wall_done;
+        const uint64_t total=verify_meta_total*4096+verify_system_total+verify_wall_total;
+        const uint64_t done=verify_meta_done*4096+verify_system_done+verify_wall_done;
         if(total>UINT32_MAX||done>UINT32_MAX){fail(INST_IO,"Weryfikacja: licznik bajtów poza zakresem.");return;}
         set_progress(instalator_podpostep(92,99,uint32_t(done),uint32_t(total)),POSTEP_WERYFIKACJA,
                      uint32_t(done),uint32_t(total));
-        if(verify_phase==3){set_progress(99,POSTEP_WERYFIKACJA);stage=INST_ZNACZNIK;}
+        if(verify_phase==4){set_progress(99,POSTEP_WERYFIKACJA);stage=INST_ZNACZNIK;}
     }else if(stage==INST_ZNACZNIK){
         if(!psf_znacznik_instalacji(disk_uuid,true)||!Storage::complete(layout.bsp,disk_uuid)){
             fail(INST_IO,"Znacznik ukończenia: FLUSH / CRC / odczyt kontrolny.");return;}
@@ -221,11 +250,13 @@ bool instalator_obsluz(const proces_t&p,const InstalatorZadanie&r,InstalatorOdpo
     if(r.operacja==INST_PODGLAD && stage==INST_GOTOWY){
         status=0;error[0]=0;selected=UINT32_MAX;nonce=0;
         progress=0;progress_stage=POSTEP_PRZYGOTOWANIE;progress_done=progress_total=0;
-        fat_state={};fat_started=false;
+        gpt_state={};gpt_started=false;fat_state={};fat_started=false;
         wallpapers_started=false;wallpaper_bytes_done=wallpaper_bytes_total=0;
         system_started=false;system_bytes_done=system_bytes_total=0;
-        verify_phase=0;verify_system_done=verify_system_total=verify_wall_done=verify_wall_total=0;
+        verify_phase=0;verify_meta_done=verify_meta_total=0;
+        verify_system_done=verify_system_total=verify_wall_done=verify_wall_total=0;
         perf_stage_us=perf_longest_us=perf_irq=perf_switches=0;
+        bsp_phase=0;bsp_done=bsp_total=0;
         files_done=files_total=wallpapers_done=wallpapers_total=0;
         auto*d=blokowy_dysk(r.dysk);
         if(!uefi||!payloads())status=INST_BRAK_PLIKOW;
@@ -241,7 +272,10 @@ bool instalator_obsluz(const proces_t&p,const InstalatorZadanie&r,InstalatorOdpo
            !instalator_potwierdzenie_poprawne(r.potwierdzenie,sizeof(r.potwierdzenie)))status=INST_POTWIERDZENIE;
         else if(!payloads()||Storage::source_iso(layout.bsp.device)||!ahci_sprawdz_tozsamosc(selected)||
                 !fingerprint_disk(layout.bsp.device,&current)||current!=fingerprint)status=INST_DYSK_BLAD;
-        else {status=0;set_progress(0,POSTEP_GPT);stage=INST_GPT;klog_serial("[INSTALL] Explicit final confirmation accepted. No disk sectors written before this point.");}
+        else {status=0;set_progress(0,POSTEP_GPT);stage=INST_GPT;
+            perf_stage_irq_start=scheduler_liczba_irq_timera();
+            perf_stage_switch_start=scheduler_liczba_przelaczen();
+            klog_serial("[INSTALL] Explicit final confirmation accepted. No disk sectors written before this point.");}
     }else if(r.operacja==INST_KROK&&stage>INST_GOTOWY&&stage<INST_KONIEC&&r.token==nonce&&r.dysk==selected){
         if(layout.bsp.device!=blokowy_dysk(selected)){
             fail(INST_DYSK_BLAD,"Transakcja utraciła powiązanie z wybranym dyskiem.");
@@ -255,8 +289,12 @@ bool instalator_obsluz(const proces_t&p,const InstalatorZadanie&r,InstalatorOdpo
             perf_irq+=scheduler_liczba_irq_timera()-irq_before;
             perf_switches+=scheduler_liczba_przelaczen()-switch_before;
             if(progress_stage!=old_stage){
+                perf_irq=scheduler_liczba_irq_timera()-perf_stage_irq_start;
+                perf_switches=scheduler_liczba_przelaczen()-perf_stage_switch_start;
                 log_perf(old_stage,(flags&(1ULL<<9))!=0);
                 perf_stage_us=perf_longest_us=perf_irq=perf_switches=0;
+                perf_stage_irq_start=scheduler_liczba_irq_timera();
+                perf_stage_switch_start=scheduler_liczba_przelaczen();
             }
         }
     }else status=INST_ZAJETY;

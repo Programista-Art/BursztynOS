@@ -100,6 +100,64 @@ bool gpt_write(Device*d,const Layout&l,const uint8_t uuid[16]){
     }
     return flush(all);
 }
+
+static void gpt_entries(const Layout&l,const uint8_t uuid[16],uint8_t out[512]){
+    zero(out,512);
+    auto entry=[&](unsigned off,const uint8_t*type,const Partition&p,const char*name,uint8_t salt){
+        auto*e=out+off;copy(e,type,16);copy(e+16,uuid,16);e[16]^=salt;p64(e+32,p.start);p64(e+40,p.start+p.count-1);
+        for(unsigned i=0;name[i]&&i<36;++i)p16(e+56+2*i,uint8_t(name[i]));
+    };
+    entry(0,EspType,l.esp,"EFI System Partition",1);entry(128,BspType,l.bsp,"Bursztyn OS",2);
+}
+static void gpt_header_sector(const GptInstallState&s,bool primary,uint8_t out[512]){
+    zero(out,512);copy(out,"EFI PART",8);p32(out+8,0x10000);p32(out+12,92);
+    p64(out+24,primary?1:s.device->sectors-1);p64(out+32,primary?s.device->sectors-1:1);
+    p64(out+40,34);p64(out+48,s.device->sectors-34);copy(out+56,s.uuid,16);
+    p64(out+72,primary?2:s.device->sectors-33);p32(out+80,128);p32(out+84,128);
+    p32(out+88,s.entries_crc);p32(out+16,crc32(out,92));
+}
+bool gpt_install_start(Device*d,const Layout&l,const uint8_t uuid[16],GptInstallState*s){
+    if(!s){
+        return false;
+    }
+    *s={};
+    Layout expected{};
+    if(!uuid||!plan(d,&expected)||l.esp.device!=d||l.bsp.device!=d||l.esp.start!=expected.esp.start||
+       l.esp.count!=expected.esp.count||l.bsp.start!=expected.bsp.start||l.bsp.count!=expected.bsp.count)return false;
+    s->device=d;s->layout=l;copy(s->uuid,uuid,16);uint8_t entries[512]{};
+    gpt_entries(l,uuid,entries);uint32_t c=~0U;
+    for(unsigned i=0;i<16384;++i){c^=i<512?entries[i]:0;for(unsigned bit=0;bit<8;++bit)c=(c>>1)^(0xEDB88320U&(0U-(c&1)));}
+    s->entries_crc=~c;s->total_units=105;return true;
+}
+bool gpt_install_step(GptInstallState*s){
+    if(!s||s->failed||s->complete||!s->device)return false;
+    Partition all{s->device,0,s->device->sectors};uint8_t b[512]{},expected[512]{};bool ok=false;
+    if(s->phase==0){ok=flush(s->layout.bsp);s->phase=1;}
+    else if(s->phase==1){uint8_t z[4096]{};ok=write_verify(s->layout.bsp,0,8,z);s->phase=2;}
+    else if(s->phase==2){ok=flush(s->layout.bsp);s->phase=3;}
+    else if(s->phase==3){ok=flush(all);s->phase=4;}
+    else if(s->phase==4){b[450]=0xEE;b[447]=0;b[448]=2;b[451]=b[452]=b[453]=0xFF;p32(b+454,1);
+        p32(b+458,s->device->sectors-1>UINT32_MAX?UINT32_MAX:uint32_t(s->device->sectors-1));b[510]=0x55;b[511]=0xAA;
+        ok=write_verify(all,0,1,b);s->phase=5;s->index=0;}
+    else if(s->phase==5||s->phase==7){const bool primary=s->phase==7;const uint64_t base=primary?2:s->device->sectors-33;
+        if(s->index==0){
+            gpt_entries(s->layout,s->uuid,b);
+        }
+        ok=write_verify(all,base+s->index,1,b);
+        if(++s->index==32){s->phase+=1;s->index=0;}}
+    else if(s->phase==6||s->phase==8){gpt_header_sector(*s,s->phase==8,b);
+        ok=write_verify(all,s->phase==8?1:s->device->sectors-1,1,b);++s->phase;}
+    else if(s->phase==9){ok=flush(all);s->phase=10;s->index=0;}
+    else if(s->phase==10){const uint64_t a=2+s->index,c=s->device->sectors-33+s->index;
+        if(s->index==0)gpt_entries(s->layout,s->uuid,expected);
+        ok=read(all,a,1,b)&&equal(b,expected,512)&&read(all,c,1,b)&&equal(b,expected,512);
+        if(++s->index==32){s->phase=11;s->index=0;}}
+    else if(s->phase==11){uint8_t h[512],backup[512];gpt_header_sector(*s,true,expected);
+        ok=read(all,1,1,h)&&equal(h,expected,512);gpt_header_sector(*s,false,expected);
+        ok=ok&&read(all,s->device->sectors-1,1,backup)&&equal(backup,expected,512);s->phase=12;}
+    else {s->complete=true;return true;}
+    if(!ok){s->failed=true;return false;}++s->completed_units;return true;
+}
 bool source_iso(Device*d){uint8_t b[512];Partition p{d,0,d?d->sectors:0};return read(p,64,1,b)&&b[0]==1&&equal(b+1,"CD001",5);}
 
 bool marker(const Partition&p,const uint8_t uuid[16],uint64_t bytes,bool done){
@@ -132,7 +190,9 @@ bool fat_install_start(const Partition&p,BootFile efi,BootFile kernel,BootFile c
     state->partition=p;state->files[0]=efi;state->files[1]=kernel;state->files[2]=config;
     state->fat_sectors=fat;state->data_start=data_start;state->clusters=clusters;state->next_cluster=next;
     for(unsigned i=0;i<3;++i){state->file_start[i]=start[i];state->file_clusters[i]=length[i];}
-    state->total_units=4+1+1+(fat+7)/8+5+total_file_clusters+1;
+    const uint32_t crc_units=(kernel.size+16383U)/16384U;
+    state->boot_crc_state=~0U;
+    state->total_units=4+crc_units+1+1+(fat+7)/8+5+total_file_clusters+1;
     return true;
 }
 
@@ -147,15 +207,23 @@ bool fat_install_step(FatInstallState*s){
         ok=write_verify(p,uint64_t(s->index)*8,8,b);
         if(++s->index==4){s->phase=1;s->index=0;}
     }else if(s->phase==1){
+        const uint32_t left=files[1].size-s->boot_crc_offset;
+        const uint32_t n=left>16384U?16384U:left;
+        const uint8_t*src=files[1].data+s->boot_crc_offset;
+        uint32_t crc=s->boot_crc_state;
+        for(uint32_t i=0;i<n;++i){crc^=src[i];for(unsigned bit=0;bit<8;++bit)crc=(crc>>1)^(0xEDB88320U&uint32_t(-int32_t(crc&1)));}
+        s->boot_crc_state=crc;s->boot_crc_offset+=n;ok=true;
+        if(s->boot_crc_offset==files[1].size){s->boot_crc_state=~crc;s->phase=2;}
+    }else if(s->phase==2){
         b[0]=0xEB;b[1]=0x58;b[2]=0x90;copy(b+3,"BURSZTYN",8);p16(b+11,512);b[13]=8;p16(b+14,32);b[16]=2;b[21]=0xF8;
     p16(b+24,63);p16(b+26,255);p32(b+28,uint32_t(p.start));p32(b+32,uint32_t(p.count));p32(b+36,fat);p32(b+44,2);
-        p16(b+48,1);p16(b+50,6);b[64]=0x80;b[66]=0x29;p32(b+67,crc32(files[1].data,files[1].size));
-    copy(b+71,"BURSZTYNESP",11);copy(b+82,"FAT32   ",8);b[510]=0x55;b[511]=0xAA;
-        ok=write_verify(p,0,1,b)&&write_verify(p,6,1,b);s->phase=2;
-    }else if(s->phase==2){
-        p32(b,0x41615252);p32(b+484,0x61417272);p32(b+488,clusters-(next-2));p32(b+492,next);p32(b+508,0xAA550000);
-        ok=write_verify(p,1,1,b)&&write_verify(p,7,1,b);s->phase=3;s->index=0;
+        p16(b+48,1);p16(b+50,6);b[64]=0x80;b[66]=0x29;p32(b+67,s->boot_crc_state);
+        copy(b+71,"BURSZTYNESP",11);copy(b+82,"FAT32   ",8);b[510]=0x55;b[511]=0xAA;
+        ok=write_verify(p,0,1,b)&&write_verify(p,6,1,b);s->phase=3;
     }else if(s->phase==3){
+        p32(b,0x41615252);p32(b+484,0x61417272);p32(b+488,clusters-(next-2));p32(b+492,next);p32(b+508,0xAA550000);
+        ok=write_verify(p,1,1,b)&&write_verify(p,7,1,b);s->phase=4;s->index=0;
+    }else if(s->phase==4){
         const uint32_t off=s->index;
         for(unsigned j=0;j<1024;++j){uint32_t cl=off*128+j,v=0;
             if(cl==0)v=0x0FFFFFF8;else if(cl==1|| (cl>=2&&cl<7))v=0x0FFFFFFF;
@@ -163,8 +231,8 @@ bool fat_install_step(FatInstallState*s){
             p32(b+4*j,v);}
         uint32_t n=fat-off<8?fat-off:8;
         ok=write_verify(p,32+off,n,b)&&write_verify(p,32+fat+off,n,b);
-        s->index+=n;if(s->index>=fat){s->phase=4;s->index=0;}
-    }else if(s->phase==4){
+        s->index+=n;if(s->index>=fat){s->phase=5;s->index=0;}
+    }else if(s->phase==5){
     auto dirent=[&](unsigned index,const char*name,uint32_t cl,uint32_t size,bool dir){auto*e=b+32*index;
         copy(e,name,11);e[11]=dir?0x10:0x20;p16(e+20,cl>>16);p16(e+26,cl);p32(e+28,size);p16(e+24,0x5821);};
         const uint32_t cl=2+s->index;
@@ -185,14 +253,14 @@ bool fat_install_step(FatInstallState*s){
             if(cl==6)dirent(2,"GRUB    CFG",start[2],files[2].size,false);
         }
         ok=write_verify(p,data_start+uint64_t(cl-2)*8,8,b);
-        if(++s->index==5){s->phase=5;s->index=0;s->file_index=0;}
-    }else if(s->phase==5){
+        if(++s->index==5){s->phase=6;s->index=0;s->file_index=0;}
+    }else if(s->phase==6){
         const unsigned f=s->file_index;const uint32_t i=s->index;
         const uint64_t off=uint64_t(i)*4096;
         const uint32_t n=files[f].size-off>4096?4096:uint32_t(files[f].size-off);
         copy(b,files[f].data+off,n);
         ok=write_verify(p,data_start+uint64_t(start[f]+i-2)*8,8,b);
-        if(++s->index==length[f]){s->index=0;if(++s->file_index==3)s->phase=6;}
+        if(++s->index==length[f]){s->index=0;if(++s->file_index==3)s->phase=7;}
     }else{
         ok=flush(p);s->complete=ok;
     }

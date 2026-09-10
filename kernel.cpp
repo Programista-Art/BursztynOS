@@ -521,6 +521,7 @@ unsigned liczba_plikow_kontrolnych=0;
 struct PlanowanyPlik{char path[128];const char*data;uint32_t size;};
 PlanowanyPlik planowane_pliki[96]{};
 unsigned planowane_liczba=0,planowane_indeks=0;
+size_t planowane_katalog_indeks=0;
 uint32_t planowane_offset=0,planowane_crc=~0U;
 uint64_t planowane_bajty=0,planowane_bajty_razem=0;
 bool planowanie_instalacji=false,instalacja_krokowa=false;
@@ -691,7 +692,7 @@ bool katalog_istnieje(const char* sciezka) {
  * obiekt juz istnieje, dlatego nie wolno uzywac samego wyniku CREATE jako
  * testu poprawnosci startu.
  */
-bool zapewnij_katalog(const char* sciezka) {
+bool zapewnij_katalog_startowy(const char* sciezka) {
     if (!sciezka)
         return false;
 
@@ -709,8 +710,7 @@ bool zapewnij_katalog(const char* sciezka) {
     return katalog_istnieje(sciezka);
 }
 
-void utworz_drabine_katalogow() {
-    static const char* const KATALOGI[] = {
+static const char* const KATALOGI_SYSTEMOWE[] = {
         "/jadro",
         "/system",
         "/programy",
@@ -734,13 +734,15 @@ void utworz_drabine_katalogow() {
         "/piaskownica",
         "/tymczasowe",
         "/obrazy"
-    };
+};
+
+void utworz_drabine_katalogow() {
 
     for (size_t i = 0;
-         i < sizeof(KATALOGI) / sizeof(KATALOGI[0]);
+         i < sizeof(KATALOGI_SYSTEMOWE) / sizeof(KATALOGI_SYSTEMOWE[0]);
          ++i) {
 
-        if (!zapewnij_katalog(KATALOGI[i])) {
+        if (!zapewnij_katalog_startowy(KATALOGI_SYSTEMOWE[i])) {
             if(scisla_instalacja){pliki_instalacja_ok=false;return;}
             /*
              * Dopuszczamy katalogi odziedziczone z trwalego BSP2, ale nadal
@@ -1209,12 +1211,10 @@ void instaluj_wbudowane_programy() {
             }
         }
 #else
-        if (rozmiar_pliku(sciezka) == sz) {
-            return;
-        }
-        (void)usun_twor(sciezka);
-        if (!utworz_plik(sciezka)) return;
-        (void)zapisz_do_pliku(sciezka, reinterpret_cast<const char*>(blob), sz);
+        (void)zapisz_plik_od_nowa(
+            sciezka,
+            reinterpret_cast<const char*>(blob),
+            sz);
 #endif
         (void)tag;
     };
@@ -1225,15 +1225,11 @@ void instaluj_wbudowane_programy() {
         static_cast<uint64_t>(
             _binary_obrazy_logo_png_end -
             _binary_obrazy_logo_png_start);
-    if (logo_png_rozmiar > 0) {
-        if (rozmiar_pliku("/obrazy/logo.png") != logo_png_rozmiar) {
-            (void)usun_twor("/obrazy/logo.png");
-            if (utworz_plik("/obrazy/logo.png")) {
-                (void)zapisz_do_pliku("/obrazy/logo.png",
-                    reinterpret_cast<const char*>(_binary_obrazy_logo_png_start),
-                    static_cast<uint32_t>(logo_png_rozmiar));
-                wypisz_log("[BSP] /obrazy/logo.png zainstalowany.");
-            }
+    if (logo_png_rozmiar > 0 && logo_png_rozmiar <= UINT32_MAX) {
+        if (zapisz_plik_od_nowa("/obrazy/logo.png",
+                reinterpret_cast<const char*>(_binary_obrazy_logo_png_start),
+                static_cast<uint32_t>(logo_png_rozmiar))) {
+            wypisz_log("[BSP] /obrazy/logo.png dodany do planu instalacji.");
         }
     }
 
@@ -1723,9 +1719,8 @@ bool kernel_instaluj_system(){
 }
 bool kernel_instaluj_system_start(uint64_t* razem){
     scisla_instalacja=true;pliki_instalacja_ok=true;liczba_plikow_kontrolnych=0;
-    planowane_liczba=planowane_indeks=0;planowane_offset=0;planowane_crc=~0U;
+    planowane_liczba=planowane_indeks=0;planowane_katalog_indeks=0;planowane_offset=0;planowane_crc=~0U;
     planowane_bajty=planowane_bajty_razem=0;instalacja_krokowa=false;
-    utworz_drabine_katalogow();
     planowanie_instalacji=true;
     if(pliki_instalacja_ok)instaluj_wbudowane_programy();
     planowanie_instalacji=false;
@@ -1739,6 +1734,13 @@ bool kernel_instaluj_system_step(uint64_t* wykonane,uint32_t* pliki,uint32_t* ws
     if(wszystkie)*wszystkie=planowane_liczba;
     if(gotowe)*gotowe=false;
     if(!instalacja_krokowa||!pliki_instalacja_ok)return false;
+    if(planowane_indeks==0&&planowane_offset==0&&planowane_bajty==0&&planowane_katalog_indeks<sizeof(KATALOGI_SYSTEMOWE)/sizeof(KATALOGI_SYSTEMOWE[0])){
+        if(!zapewnij_katalog_startowy(KATALOGI_SYSTEMOWE[planowane_katalog_indeks])||!psf_flush_cache()){
+            planowane_katalog_indeks=0;pliki_instalacja_ok=false;return false;
+        }
+        ++planowane_katalog_indeks;
+        return true;
+    }
     if(planowane_indeks==planowane_liczba){
         const bool ok=psf_flush_cache();scisla_instalacja=false;instalacja_krokowa=false;
         if(gotowe)*gotowe=ok;
@@ -1749,9 +1751,12 @@ bool kernel_instaluj_system_step(uint64_t* wykonane,uint32_t* pliki,uint32_t* ws
         (void)usun_twor(e.path);
         if(!utworz_plik(e.path)){pliki_instalacja_ok=false;return false;}
     }
-    constexpr uint32_t PORCJA=64*1024;
+    constexpr uint32_t PORCJA=16*1024;
     uint32_t n=e.size-planowane_offset;if(n>PORCJA)n=PORCJA;
     if(n&&!zapisz_fragment_pliku(e.path,planowane_offset,e.data+planowane_offset,n)){
+        (void)usun_twor(e.path);pliki_instalacja_ok=false;return false;
+    }
+    if(!psf_flush_cache()){
         (void)usun_twor(e.path);pliki_instalacja_ok=false;return false;
     }
     for(uint32_t i=0;i<n;++i){
@@ -1786,7 +1791,7 @@ bool kernel_weryfikuj_system(){
 }
 unsigned weryfikacja_indeks=0;
 uint32_t weryfikacja_offset=0,weryfikacja_crc=~0U;
-char weryfikacja_buf[64*1024];
+char weryfikacja_buf[16*1024];
 bool kernel_weryfikuj_system_start(uint64_t* razem){
     if(!pliki_instalacja_ok||liczba_plikow_kontrolnych==0)return false;
     uint64_t total=0;for(unsigned i=0;i<liczba_plikow_kontrolnych;++i){

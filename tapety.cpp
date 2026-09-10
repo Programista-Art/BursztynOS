@@ -265,6 +265,7 @@ bool zapisz_inwentarz(const SystemowyWpisInwentarza* wpisy, size_t liczba) {
 uint32_t wymagane_tapety=0, zainstalowane_tapety=0;
 size_t instalacja_pakiet_liczba=0,instalacja_indeks=0,instalacja_biezaca_liczba=0;
 uint32_t instalacja_offset=0;
+uint32_t instalacja_crc_offset=0,instalacja_crc=~0U;
 uint64_t instalacja_bajty=0,instalacja_bajty_razem=0;
 bool instalacja_przygotowana=false,instalacja_blad=false;
 void instaluj(uint64_t mbi,bool tylko_przygotuj=false) {
@@ -365,7 +366,7 @@ void instaluj(uint64_t mbi,bool tylko_przygotuj=false) {
             continue;
         }
 
-        const uint32_t obl_crc = tapety_pamiec_crc32(p + poff, bsz);
+        const uint32_t obl_crc = tylko_przygotuj ? crc : tapety_pamiec_crc32(p + poff, bsz);
         if (obl_crc != crc) {
             log_sciezka("[TAPETA-BLAD] Niezgodnosc CRC32 w pakiecie dla: ", nazwa);
             continue;
@@ -417,7 +418,8 @@ void instaluj(uint64_t mbi,bool tylko_przygotuj=false) {
 
     if(tylko_przygotuj){
         instalacja_pakiet_liczba=pakiet_liczba;instalacja_indeks=0;instalacja_biezaca_liczba=0;
-        instalacja_offset=0;instalacja_bajty=0;instalacja_bajty_razem=0;instalacja_blad=false;
+        instalacja_offset=0;instalacja_crc_offset=0;instalacja_crc=~0U;
+        instalacja_bajty=0;instalacja_bajty_razem=0;instalacja_blad=false;
         for(size_t i=0;i<pakiet_liczba;++i){
             if(instalacja_bajty_razem>UINT64_MAX-s_pakiet_wpisy[i].rozmiar){instalacja_blad=true;break;}
             instalacja_bajty_razem+=s_pakiet_wpisy[i].rozmiar;
@@ -656,7 +658,7 @@ bool tapety_weryfikuj_instalacje(){
 size_t weryfikacja_tapet_indeks=0,weryfikacja_tapet_liczba=0;
 uint32_t weryfikacja_tapet_offset=0,weryfikacja_tapet_crc=~0U;
 uint64_t weryfikacja_tapet_bajty=0;
-char weryfikacja_tapet_buf[64*1024];
+char weryfikacja_tapet_buf[16*1024];
 bool tapety_weryfikuj_start(uint64_t*razem){
     weryfikacja_tapet_liczba=wczytaj_inwentarz(s_inwentarz_wpisy,TAPETY_INWENTARZ_MAX);
     if(!weryfikacja_tapet_liczba||(wymagane_tapety&&weryfikacja_tapet_liczba!=wymagane_tapety))return false;
@@ -705,6 +707,17 @@ bool tapety_instaluj_step(uint64_t*wykonane,uint32_t*elementy,uint32_t*wszystkie
     for(;prefix[p]&&p+1<sizeof(path);++p){path[p]=prefix[p];}
     for(size_t i=0;e.nazwa[i]&&p+1<sizeof(path);++i){path[p++]=e.nazwa[i];}
     path[p]=0;
+    constexpr uint32_t PORCJA=16*1024;
+    if(instalacja_crc_offset<e.rozmiar){
+        uint32_t n=e.rozmiar-instalacja_crc_offset;if(n>PORCJA)n=PORCJA;
+        for(uint32_t i=0;i<n;++i){
+            instalacja_crc^=e.payload[instalacja_crc_offset+i];
+            for(unsigned bit=0;bit<8;++bit)instalacja_crc=(instalacja_crc>>1)^(0xEDB88320U&(0U-(instalacja_crc&1)));
+        }
+        instalacja_crc_offset+=n;
+        if(instalacja_crc_offset==e.rozmiar&&~instalacja_crc!=e.crc32){instalacja_blad=true;return false;}
+        return true;
+    }
     bool zachowany=false;
     if(instalacja_offset==0){
         psf_metadane meta{};
@@ -714,9 +727,11 @@ bool tapety_instaluj_step(uint64_t*wykonane,uint32_t*elementy,uint32_t*wszystkie
             if(!utworz_plik(path)){instalacja_blad=true;return false;}
         }
     }
-    constexpr uint32_t PORCJA=64*1024;
     uint32_t n=zachowany?e.rozmiar:e.rozmiar-instalacja_offset;if(n>PORCJA&&!zachowany)n=PORCJA;
     if(!zachowany&&!zapisz_fragment_pliku(path,instalacja_offset,reinterpret_cast<const char*>(e.payload+instalacja_offset),n)){
+        (void)usun_twor(path);instalacja_blad=true;return false;
+    }
+    if(!zachowany&&!psf_flush_cache()){
         (void)usun_twor(path);instalacja_blad=true;return false;
     }
     instalacja_offset+=n;instalacja_bajty+=n;
@@ -727,7 +742,7 @@ bool tapety_instaluj_step(uint64_t*wykonane,uint32_t*elementy,uint32_t*wszystkie
         s_inwentarz_biezacy[instalacja_biezaca_liczba].rozmiar=e.rozmiar;
         s_inwentarz_biezacy[instalacja_biezaca_liczba].crc32=e.crc32;
         ++instalacja_biezaca_liczba;zainstalowane_tapety=static_cast<uint32_t>(instalacja_biezaca_liczba);
-        ++instalacja_indeks;instalacja_offset=0;
+        ++instalacja_indeks;instalacja_offset=0;instalacja_crc_offset=0;instalacja_crc=~0U;
     }
     if(wykonane)*wykonane=instalacja_bajty;
     if(elementy)*elementy=static_cast<uint32_t>(instalacja_biezaca_liczba);

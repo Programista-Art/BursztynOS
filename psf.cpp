@@ -2696,7 +2696,8 @@ bool waliduj_metadane() {
  * ========================================================================= */
 
 bool sformatuj_ram_dysk(
-    bool pozwol_na_zapis_fizyczny
+    bool pozwol_na_zapis_fizyczny,
+    bool uzyj_geometrii_partycji = false
 ) {
     if (!ram_dysk ||
         rozmiar_ram_dysku == 0 ||
@@ -2713,7 +2714,8 @@ bool sformatuj_ram_dysk(
         static_cast<uint64_t>(
             PSF_ROZMIAR_BLOKU);
 
-    if (pozwol_na_zapis_fizyczny && nosnik_ahci_dostepny) {
+    if ((pozwol_na_zapis_fizyczny || uzyj_geometrii_partycji) &&
+        nosnik_ahci_dostepny) {
         const uint64_t sektory_dysku = bsp_partycja.count;
         if (sektory_dysku > BSP_START_LBA) {
             // Ostatni blok 4 KiB partycji jest poza BSP2 i przechowuje
@@ -3468,6 +3470,41 @@ bool psf_formatuj_instalacje(const Storage::Partition& p) {
     return sformatuj_ram_dysk(true);
 }
 
+uint64_t format_instalacji_blok=0,format_instalacji_razem=0;
+bool format_instalacji_trwa=false;
+bool psf_formatuj_instalacje_start(const Storage::Partition& p,uint64_t* razem) {
+    BlokadaPSF guard;
+    if(!blokowy_zapis_instalatora() || !p.device || !Storage::range(p.start,p.count,p.device->sectors) ||
+       p.device->sector_size!=512 || p.count>Storage::BspMaxBytes/512)return false;
+    bsp_partycja=p;nosnik_ahci_dostepny=true;zapis_trwaly_dozwolony=false;
+    psf_gotowy=false;wyczysc_liste_brudnych();wyczysc_cache_blokow();
+    // Obraz metadanych powstaje w RAM, ale musi opisywac dokladnie te sama
+    // partycje co dawny, atomowy format. Zapis wykonaja kolejne STEP-y.
+    if(!sformatuj_ram_dysk(false,true)||!dysk_superblok)return false;
+    format_instalacji_blok=0;format_instalacji_razem=dysk_superblok->start_danych;
+    format_instalacji_trwa=format_instalacji_razem!=0;psf_gotowy=false;
+    zapis_trwaly_dozwolony=true;
+    if(razem)*razem=format_instalacji_razem;
+    return format_instalacji_trwa;
+}
+bool psf_formatuj_instalacje_step(uint64_t* wykonane,bool* gotowe) {
+    BlokadaPSF guard;
+    if(wykonane)*wykonane=format_instalacji_blok;
+    if(gotowe)*gotowe=false;
+    if(!format_instalacji_trwa||!dysk_superblok||!blokowy_zapis_instalatora())return false;
+    if(format_instalacji_blok<format_instalacji_razem){
+        const uint64_t block=format_instalacji_blok;
+        if(!Storage::write_verify(bsp_partycja,BSP_START_LBA+block*8,8,ram_dysk+block*PSF_ROZMIAR_BLOKU))return false;
+        ++format_instalacji_blok;
+        if(wykonane)*wykonane=format_instalacji_blok;
+        return true;
+    }
+    if(!Storage::flush(bsp_partycja))return false;
+    wyczysc_liste_brudnych();wyczysc_cache_blokow();ostatni_flush_ok=true;
+    psf_gotowy=true;format_instalacji_trwa=false;if(gotowe)*gotowe=true;
+    return true;
+}
+
 bool psf_znacznik_instalacji(const uint8_t uuid[16],bool complete) {
     BlokadaPSF guard;
     if(!blokowy_zapis_instalatora()||!dysk_superblok||!bsp_zapisz_zmiany())return false;
@@ -3483,6 +3520,28 @@ bool psf_weryfikuj_dysk() {
     }
     wyczysc_cache_blokow();
     return waliduj_metadane();
+}
+uint64_t weryfikacja_dysku_blok=0;
+bool weryfikacja_dysku_trwa=false;
+bool psf_weryfikuj_dysk_start(uint64_t* razem) {
+    BlokadaPSF guard;
+    if(!nosnik_ahci_dostepny||!dysk_superblok||!bsp_zapisz_zmiany())return false;
+    weryfikacja_dysku_blok=0;weryfikacja_dysku_trwa=true;
+    if(razem)*razem=dysk_superblok->start_danych;
+    return true;
+}
+bool psf_weryfikuj_dysk_step(uint64_t* wykonane,bool* gotowe) {
+    BlokadaPSF guard;
+    if(wykonane)*wykonane=weryfikacja_dysku_blok;
+    if(gotowe)*gotowe=false;
+    if(!weryfikacja_dysku_trwa||!dysk_superblok)return false;
+    if(weryfikacja_dysku_blok<dysk_superblok->start_danych){
+        uint8_t check[4096];const uint64_t block=weryfikacja_dysku_blok;
+        if(!Storage::read(bsp_partycja,block*8,8,check)||!Storage::equal(check,ram_dysk+block*4096,4096))return false;
+        ++weryfikacja_dysku_blok;if(wykonane)*wykonane=weryfikacja_dysku_blok;return true;
+    }
+    wyczysc_cache_blokow();if(!waliduj_metadane())return false;
+    weryfikacja_dysku_trwa=false;if(gotowe)*gotowe=true;return true;
 }
 
 /* =========================================================================

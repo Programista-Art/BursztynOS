@@ -32,6 +32,20 @@ bool equal(const void*,const void*,size_t);
 bool plan(Device*,Layout*);
 bool gpt_read(Device*,Table*);
 bool gpt_write(Device*,const Layout&,const uint8_t uuid[16]);
+struct GptInstallState {
+    Device* device;
+    Layout layout;
+    uint8_t uuid[16];
+    uint32_t phase;
+    uint32_t index;
+    uint32_t entries_crc;
+    uint32_t completed_units;
+    uint32_t total_units;
+    bool failed;
+    bool complete;
+};
+bool gpt_install_start(Device*,const Layout&,const uint8_t uuid[16],GptInstallState*);
+bool gpt_install_step(GptInstallState*);
 bool source_iso(Device*); // konserwatywnie chroni każdy nośnik ISO9660
 struct BootFile { const uint8_t* data; uint32_t size; };
 struct FatInstallState {
@@ -46,6 +60,8 @@ struct FatInstallState {
     uint32_t phase;
     uint32_t index;
     uint32_t file_index;
+    uint32_t boot_crc_offset;
+    uint32_t boot_crc_state;
     uint32_t completed_units;
     uint32_t total_units;
     bool failed;
