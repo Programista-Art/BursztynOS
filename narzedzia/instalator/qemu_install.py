@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import errno
+import re
 from pathlib import Path
 import shutil
 import socket
@@ -167,6 +168,11 @@ def install(g,target,sentinel,before_target,before_sentinel):
     text=g.wait('[INSTALL] COMPLETE verified',timeout=900)
     time.sleep(1);g.q.screenshot(g.dir/'complete.png')
     assert '[PF]' not in text and '[KERNEL-PANIC]' not in text
+    observed=[int(v) for v in re.findall(r'\[INSTALL\] progress=(\d+) stage=',text)]
+    assert observed==[0,12,30,45,75,92,100],observed
+    assert all(0<=v<=100 for v in observed)
+    assert all(a<=b for a,b in zip(observed,observed[1:]))
+    assert text.index('[INSTALL] progress=100 stage=COMPLETE') < text.index('[INSTALL] COMPLETE verified')
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('action',choices=['test','run','boot-debug']);args=ap.parse_args()

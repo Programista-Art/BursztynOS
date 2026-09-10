@@ -9,3 +9,4 @@ void instalator_zamknij_proces(int pid);
 bool instalator_obsluz(const proces_t&,const InstalatorZadanie&,InstalatorOdpowiedz*);
 bool kernel_instaluj_system();
 bool kernel_weryfikuj_system();
+uint32_t kernel_liczba_plikow_instalacji();

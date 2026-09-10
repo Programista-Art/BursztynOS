@@ -3,6 +3,7 @@
 #include "../../psf.h"
 #include "../../zegar-rtc.h"
 #include "../../instalator_format.h"
+#include "../../tapety.h"
 #include <array>
 #include <map>
 #include <vector>
@@ -49,6 +50,20 @@ int main(){
     CHECK(!instalator_mozna_zainstalowac(false,true,true,true,true));
     CHECK(!instalator_mozna_zainstalowac(true,false,true,true,true));
     CHECK(instalator_mozna_zainstalowac(true,true,true,false,false));
+    CHECK(instalator_postep_nowy(0,0,false)==0);
+    CHECK(instalator_postep_nowy(45,30,false)==45);
+    CHECK(instalator_postep_nowy(99,150,false)==99);
+    CHECK(instalator_postep_nowy(99,100,true)==100);
+    CHECK(instalator_postep_nowy(63,100,false)==99);
+    CHECK(instalator_etap_postepu_poprawny(POSTEP_GPT,POSTEP_ESP));
+    CHECK(!instalator_etap_postepu_poprawny(POSTEP_TAPETY,POSTEP_SYSTEM));
+    CHECK(instalator_podpostep(45,75,0,13)==45);
+    CHECK(instalator_podpostep(45,75,7,13)>=45&&instalator_podpostep(45,75,7,13)<=75);
+    CHECK(instalator_podpostep(75,92,12,18)>=75&&instalator_podpostep(75,92,12,18)<=92);
+    CHECK(instalator_podpostep(75,92,1,0)==75);
+    CHECK(std::strcmp(tapety_komunikat_braku_pakietu(true,true),
+        "[TAPETA] Brak tapety.pak w trybie zainstalowanym; uzywam zasobow BSP2.")==0);
+    CHECK(std::strstr(tapety_komunikat_braku_pakietu(false,true),"Ostrzezenie")!=nullptr);
     CHECK(crc32("123456789",9)==0xCBF43926);
     Fake disk(4ULL*1024*1024*1024/512);Layout l{};Table t{};uint8_t uuid[16]={1,2,3,4,5,6,7,0x40,0x80,10,11,12,13,14,15,16};
     CHECK(plan(&disk.dev,&l));CHECK(l.esp.start==2048&&l.esp.count==1048576&&l.bsp.start%2048==0&&l.bsp.count==BspMaxBytes/512);

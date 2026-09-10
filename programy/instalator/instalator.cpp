@@ -37,6 +37,7 @@ class Wizard : public Panel {
     bool diskvalid=false,installerauthorized=false,confirmationtextok=false;
     bool sourceackrequired=true,sourceackchecked=false,buttonenabled=false;
     Etykieta*lines[12]{};Przycisk*disks[4]{};Przycisk*next,*back,*more;
+    PasekPostepu*progressbar;
     PoleTekstowe*word;PoleWyboru*source;
     bool query(uint32_t op,uint32_t id=UINT32_MAX){
         InstalatorZadanie r{};r.wersja=1;r.operacja=op;r.odpowiedz=ep;r.dysk=id;r.token=confirmation;
@@ -57,6 +58,18 @@ class Wizard : public Panel {
         return state.wersja==1;
     }
     void line(unsigned i,const char*s){lines[i]->ustaw_tekst(s);lines[i]->pokaz();}
+    const char* progress_text()const{
+        switch(state.postep_etap){
+            case POSTEP_GPT:return "Tworzenie tablicy GPT...";
+            case POSTEP_ESP:return "Formatowanie partycji EFI i instalowanie plików rozruchowych...";
+            case POSTEP_BSP2:return "Formatowanie BSP2";
+            case POSTEP_SYSTEM:return "Instalowanie plików systemowych...";
+            case POSTEP_TAPETY:return "Instalowanie tapet...";
+            case POSTEP_WERYFIKACJA:return "Weryfikowanie instalacji...";
+            case POSTEP_COMPLETE:return "Instalacja zakończona.";
+            default:return "Przygotowywanie dysku...";
+        }
+    }
     void aktualizuj_mozliwosc_instalacji() {
         confirmationtextok = word && instalator_potwierdzenie_poprawne(word->tekst(), 16);
         sourceackchecked = source && source->czy_zaznaczone();
@@ -80,7 +93,7 @@ class Wizard : public Panel {
         for(auto*b:disks) {
             b->ukryj();
         }
-        word->ukryj();source->ukryj();more->ukryj();
+        word->ukryj();source->ukryj();more->ukryj();progressbar->ukryj();
         next->pokaz();back->ustaw_widoczna(page>0&&page<5);next->ustaw_wlaczona(true);next->ustaw_tekst("Dalej");
         char text[256]{};
         if(page==0){query(INST_STAN);line(0,"Witamy w instalatorze Bursztyn OS");
@@ -148,13 +161,23 @@ class Wizard : public Panel {
                 next->ustaw_tekst("Wymaż dysk i zainstaluj");aktualizuj_mozliwosc_instalacji();
             }
         }else if(page==5){line(0,"Instalowanie Bursztyn OS");
-            const char*stages[]={"Przygotowanie","GPT — zapis, FLUSH i weryfikacja","ESP FAT32 — GRUB i kernel","Formatowanie BSP2","Programy i tapety","Weryfikacja plików z dysku","Zapisywanie znacznika ukończenia"};
-            line(3,state.etap<7?stages[state.etap]:"Kończenie");line(6,"Nie wyłączaj komputera i nie odłączaj dysku.");next->ukryj();
-        }else if(page==6){line(0,"Gotowe — instalacja zweryfikowana");line(3,"Wyłącz komputer, odłącz nośnik instalacyjny i uruchom z dysku.");
+            progressbar->ustaw_wartosc(state.procent);progressbar->pokaz();
+            line(3,progress_text());line(4,"Nie wyłączaj komputera...");
+            if((state.postep_etap==POSTEP_SYSTEM||state.postep_etap==POSTEP_TAPETY)&&state.pliki_razem){
+                number(text,sizeof(text),"Pliki systemowe ",state.pliki_wykonane," / ");
+                unsigned p=0;while(text[p])++p;char total[24]{};number(total,sizeof(total),"",state.pliki_razem);append(text,sizeof(text),&p,total);line(5,text);
+            }else if((state.postep_etap==POSTEP_TAPETY||state.postep_etap==POSTEP_WERYFIKACJA)&&state.tapety_razem){
+                number(text,sizeof(text),"Tapety ",state.tapety_wykonane," / ");
+                unsigned p=0;while(text[p])++p;char total[24]{};number(total,sizeof(total),"",state.tapety_razem);append(text,sizeof(text),&p,total);line(5,text);
+            }
+            next->ukryj();
+        }else if(page==6){line(0,"Gotowe — instalacja zweryfikowana");progressbar->ustaw_wartosc(state.procent);progressbar->pokaz();
+            line(3,"Instalacja zakończona.");line(4,"Wyłącz komputer, odłącz nośnik instalacyjny i uruchom z dysku.");
             line(5,"Rozruch: UEFI / EFI/BOOT/BOOTX64.EFI (bez zmiany NVRAM).");
             line(8,"Testy QEMU nie stanowią ręcznej weryfikacji na fizycznym komputerze.");next->ustaw_tekst("Zamknij");
-        }else{line(0,"Instalacja nie powiodła się");line(3,state.blad[0]?state.blad:"Walidacja dysku, uprawnień lub plików instalacyjnych nie powiodła się.");
-            number(text,sizeof(text),"Kod błędu: ",state.status);line(5,text);line(7,"Dalsze zapisy zostały zatrzymane. Nie uruchamiaj niepełnej instalacji.");next->ustaw_tekst("Zamknij");}
+        }else{line(0,"Instalacja nie powiodła się.");progressbar->ustaw_wartosc(state.procent);progressbar->pokaz();
+            line(3,progress_text());line(4,state.blad[0]?state.blad:"Walidacja dysku, uprawnień lub plików instalacyjnych nie powiodła się.");
+            number(text,sizeof(text),"Kod błędu: ",state.status);line(5,text);line(6,"Dalsze zapisy zostały zatrzymane.");next->ustaw_tekst("Zamknij");}
         window->przelicz_uklad();uniewaznij();
     }
     void advance(){
@@ -175,6 +198,7 @@ public:
         for(unsigned i=0;i<4;++i){disks[i]=&dodaj<Przycisk>("");disks[i]->ustaw_pozycje(16,82+48*i);disks[i]->ustaw_preferowany_rozmiar(Rozmiar(780,38));
             disks[i]->przy_kliknieciu([](Przycisk*b,void*p){auto*s=(Wizard*)p;s->selected=b->znacznik();s->wyczysc_zgode();s->render();},this);}
         more=&dodaj<Przycisk>("Kolejne dyski");more->ustaw_pozycje(580,285);more->przy_kliknieciu([](Przycisk*,void*p){auto*s=(Wizard*)p;s->offset+=4;if(s->offset>=s->state.liczba_dyskow)s->offset=0;s->render();},this);
+        progressbar=&dodaj<PasekPostepu>(0,100);progressbar->ustaw_pokazywanie_procentu(true);progressbar->ustaw_preferowany_rozmiar(Rozmiar(760,30));
         word=&dodaj<PoleTekstowe>("BURSZTYN");word->ustaw_pozycje(16,370);word->ustaw_preferowany_rozmiar(Rozmiar(330,34));
         word->przy_zmianie([](PoleTekstowe*,const char*,void*p){((Wizard*)p)->aktualizuj_mozliwosc_instalacji();},this);
         source=&dodaj<PoleWyboru>("Potwierdzam: wybrany dysk nie jest nośnikiem instalacyjnym.");source->ustaw_pozycje(16,330);
@@ -191,6 +215,7 @@ public:
         for(unsigned i=0;i<12;++i)lines[i]->rozmiesc(Prostokat(16,12+32*i,r.szerokosc-32,28));
         for(unsigned i=0;i<4;++i)disks[i]->rozmiesc(Prostokat(16,82+48*i,r.szerokosc-32,38));
         more->rozmiesc(Prostokat(r.szerokosc-200,285,180,32));
+        progressbar->rozmiesc(Prostokat(16,58,r.szerokosc-32,30));
         source->rozmiesc(Prostokat(16,330,r.szerokosc-32,32));
         word->rozmiesc(Prostokat(16,370,330,34));
         back->rozmiesc(Prostokat(16,r.wysokosc-55,110,38));

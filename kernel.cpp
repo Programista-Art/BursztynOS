@@ -1704,6 +1704,7 @@ bool kernel_instaluj_system(){
     scisla_instalacja=false;
     return pliki_instalacja_ok&&liczba_plikow_kontrolnych!=0&&psf_flush_cache();
 }
+uint32_t kernel_liczba_plikow_instalacji(){return liczba_plikow_kontrolnych;}
 bool kernel_weryfikuj_system(){
     char buf[4096];
     if(!pliki_instalacja_ok||liczba_plikow_kontrolnych==0)return false;

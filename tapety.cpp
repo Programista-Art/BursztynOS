@@ -262,8 +262,10 @@ bool zapisz_inwentarz(const SystemowyWpisInwentarza* wpisy, size_t liczba) {
     return true;
 }
 
-uint32_t wymagane_tapety=0;
+uint32_t wymagane_tapety=0, zainstalowane_tapety=0;
 void instaluj(uint64_t mbi) {
+    wymagane_tapety=0;
+    zainstalowane_tapety=0;
     if (!psf_czy_gotowy() || !zapewnij_katalog("/tapety")) {
         klog_serial("[TAPETA] BLAD utworzenia /tapety; start bedzie kontynuowany.");
         return;
@@ -271,7 +273,10 @@ void instaluj(uint64_t mbi) {
 
     ModulMB2 mod{};
     if (!znajdz_modul_tapet(mbi, &mod) || !mod.poprawny) {
-        klog_serial("[TAPETA] Ostrzezenie: brak prawidlowego modulu Multiboot2 tapety.pak; zachowuje istniejace tapety.");
+        const bool installed_resources = instalator_system_zainstalowany() &&
+                                         tapety_weryfikuj_instalacje();
+        klog_serial(tapety_komunikat_braku_pakietu(
+            instalator_system_zainstalowany(),installed_resources));
         return;
     }
 
@@ -436,6 +441,7 @@ void instaluj(uint64_t mbi) {
             s_inwentarz_biezacy[biezaca_liczba].rozmiar = s_pakiet_wpisy[i].rozmiar;
             s_inwentarz_biezacy[biezaca_liczba].crc32 = s_pakiet_wpisy[i].crc32;
             ++biezaca_liczba;
+            zainstalowane_tapety=static_cast<uint32_t>(biezaca_liczba);
         }
     }
 
@@ -613,6 +619,9 @@ void diagnostyka(uint32_t grupa, TapetyOdpowiedz* out) {
     out->status = bledy ? TAPETY_BLAD : TAPETY_OK;
 }
 } // namespace
+
+uint32_t tapety_liczba_zainstalowanych(){return zainstalowane_tapety;}
+uint32_t tapety_liczba_wymaganych(){return wymagane_tapety;}
 
 bool tapety_weryfikuj_instalacje(){
     const size_t n=wczytaj_inwentarz(s_inwentarz_wpisy,TAPETY_INWENTARZ_MAX);
