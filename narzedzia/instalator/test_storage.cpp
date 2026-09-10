@@ -127,7 +127,18 @@ int main(){
     CHECK(left==outside.at(l.bsp.start-1));CHECK(right==outside.at(l.bsp.start+l.bsp.count));
     disk.data[l.bsp.start+l.bsp.count-1][100]^=1;CHECK(!complete(l.bsp,uuid));CHECK(psf_znacznik_instalacji(uuid,true));
     disk.flush_fail=true;CHECK(!psf_flush_cache());disk.flush_fail=false;
-    CHECK(psf_formatuj_instalacje(l.bsp));CHECK(rozmiar_pliku("/system")==0); // no stale metadata after reinstall
+    uint64_t format_done=0,format_total=0,format_previous=0;bool format_complete=false;
+    CHECK(psf_formatuj_instalacje_start(l.bsp,&format_total));CHECK(format_total>0);
+    while(!format_complete){
+        const uint64_t calls_before=disk.calls;
+        CHECK(psf_formatuj_instalacje_step(&format_done,&format_complete));
+        CHECK(disk.calls-calls_before<=1);
+        CHECK(format_done==format_previous+1);
+        CHECK(format_done<=format_total);
+        format_previous=format_done;
+    }
+    CHECK(format_done==format_total);CHECK(psf_czy_gotowy());
+    CHECK(rozmiar_pliku("/system")==0); // no stale metadata after reinstall
     CHECK(utworz_plik("/bad"));disk.fail_after=disk.calls;CHECK(!zapisz_do_pliku("/bad",bytes.data(),bytes.size()));disk.fail_after=UINT64_MAX;
     std::printf("Storage/BSP2 host: %u PASS, 0 FAIL (includes outside-partition sentinel, faults, >2 TiB GPT)\n",checks);
 }

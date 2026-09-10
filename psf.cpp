@@ -2697,7 +2697,8 @@ bool waliduj_metadane() {
 
 bool sformatuj_ram_dysk(
     bool pozwol_na_zapis_fizyczny,
-    bool uzyj_geometrii_partycji = false
+    bool uzyj_geometrii_partycji = false,
+    bool odrocz_inicjalizacje_wezlow = false
 ) {
     if (!ram_dysk ||
         rozmiar_ram_dysku == 0 ||
@@ -2849,6 +2850,18 @@ bool sformatuj_ram_dysk(
         calkowita_liczba_blokow_danych == 0) {
 
         return false;
+    }
+
+    /*
+     * Instalator inicjalizuje wezly w ograniczonych partiach kolejnych
+     * STEP-ow. Geometria i wyzerowany obraz metadanych sa juz stabilne,
+     * ale PSF pozostaje niedostepny az do utworzenia korzenia i zapisania
+     * calego obrazu. Zwykly start zachowuje dotychczasowa sciezke atomowa.
+     */
+    if (odrocz_inicjalizacje_wezlow) {
+        psf_gotowy = false;
+        zapis_trwaly_dozwolony = false;
+        return true;
     }
 
     /*
@@ -3470,7 +3483,13 @@ bool psf_formatuj_instalacje(const Storage::Partition& p) {
     return sformatuj_ram_dysk(true);
 }
 
+constexpr uint64_t FORMAT_WEZLOW_NA_KROK=32;
+static_assert(FORMAT_WEZLOW_NA_KROK<=32,
+              "BSP2FORMAT STEP musi miec ograniczona partie wezlow");
 uint64_t format_instalacji_blok=0,format_instalacji_razem=0;
+uint64_t format_instalacji_wezel=0,format_instalacji_wykonane=0;
+uint64_t format_instalacji_partie_wezlow=0;
+uint32_t format_instalacji_faza=0;
 bool format_instalacji_trwa=false;
 bool psf_formatuj_instalacje_start(const Storage::Partition& p,uint64_t* razem) {
     BlokadaPSF guard;
@@ -3480,8 +3499,14 @@ bool psf_formatuj_instalacje_start(const Storage::Partition& p,uint64_t* razem) 
     psf_gotowy=false;wyczysc_liste_brudnych();wyczysc_cache_blokow();
     // Obraz metadanych powstaje w RAM, ale musi opisywac dokladnie te sama
     // partycje co dawny, atomowy format. Zapis wykonaja kolejne STEP-y.
-    if(!sformatuj_ram_dysk(false,true)||!dysk_superblok)return false;
-    format_instalacji_blok=0;format_instalacji_razem=dysk_superblok->start_danych;
+    if(!sformatuj_ram_dysk(false,true,true)||!dysk_superblok)return false;
+    format_instalacji_blok=0;format_instalacji_wezel=1;format_instalacji_wykonane=0;
+    format_instalacji_partie_wezlow=
+        (calkowita_liczba_wezlow+FORMAT_WEZLOW_NA_KROK-1)/FORMAT_WEZLOW_NA_KROK;
+    if(dysk_superblok->start_danych>UINT64_MAX-format_instalacji_partie_wezlow-2)return false;
+    format_instalacji_razem=format_instalacji_partie_wezlow+
+        dysk_superblok->start_danych+2;
+    format_instalacji_faza=0;
     format_instalacji_trwa=format_instalacji_razem!=0;psf_gotowy=false;
     zapis_trwaly_dozwolony=true;
     if(razem)*razem=format_instalacji_razem;
@@ -3489,19 +3514,50 @@ bool psf_formatuj_instalacje_start(const Storage::Partition& p,uint64_t* razem) 
 }
 bool psf_formatuj_instalacje_step(uint64_t* wykonane,bool* gotowe) {
     BlokadaPSF guard;
-    if(wykonane)*wykonane=format_instalacji_blok;
+    if(wykonane)*wykonane=format_instalacji_wykonane;
     if(gotowe)*gotowe=false;
     if(!format_instalacji_trwa||!dysk_superblok||!blokowy_zapis_instalatora())return false;
-    if(format_instalacji_blok<format_instalacji_razem){
-        const uint64_t block=format_instalacji_blok;
-        if(!Storage::write_verify(bsp_partycja,BSP_START_LBA+block*8,8,ram_dysk+block*PSF_ROZMIAR_BLOKU))return false;
-        ++format_instalacji_blok;
-        if(wykonane)*wykonane=format_instalacji_blok;
+
+    if(format_instalacji_faza==0){
+        uint64_t pozostalo=FORMAT_WEZLOW_NA_KROK;
+        while(format_instalacji_wezel<=calkowita_liczba_wezlow&&pozostalo--){
+            wezel_indeksowy* w=pobierz_wezel(format_instalacji_wezel);
+            if(!w)return false;
+            wyzeruj_wezel(w,TYP_WOLNY);
+            ++format_instalacji_wezel;
+        }
+        ++format_instalacji_wykonane;
+        if(format_instalacji_wezel>calkowita_liczba_wezlow)format_instalacji_faza=1;
+        if(wykonane)*wykonane=format_instalacji_wykonane;
         return true;
     }
+
+    if(format_instalacji_faza==1){
+        const uint64_t korzen=zaalokuj_wolny_wezel(TYP_KATALOG);
+        if(korzen==0)return false;
+        dysk_superblok->id_korzenia=korzen;
+        ostatni_szukany_blok_danych=0;
+        oznacz_caly_system_jako_brudny();
+        ++format_instalacji_wykonane;
+        format_instalacji_faza=2;
+        if(wykonane)*wykonane=format_instalacji_wykonane;
+        return true;
+    }
+
+    if(format_instalacji_faza==2&&format_instalacji_blok<dysk_superblok->start_danych){
+        const uint64_t block=format_instalacji_blok;
+        if(!Storage::write_verify(bsp_partycja,BSP_START_LBA+block*8,8,ram_dysk+block*PSF_ROZMIAR_BLOKU))return false;
+        ++format_instalacji_blok;++format_instalacji_wykonane;
+        if(wykonane)*wykonane=format_instalacji_wykonane;
+        return true;
+    }
+
     if(!Storage::flush(bsp_partycja))return false;
+    ++format_instalacji_wykonane;
     wyczysc_liste_brudnych();wyczysc_cache_blokow();ostatni_flush_ok=true;
-    psf_gotowy=true;format_instalacji_trwa=false;if(gotowe)*gotowe=true;
+    psf_gotowy=true;format_instalacji_trwa=false;format_instalacji_faza=3;
+    if(wykonane)*wykonane=format_instalacji_wykonane;
+    if(gotowe)*gotowe=true;
     return true;
 }
 

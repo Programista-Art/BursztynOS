@@ -661,7 +661,7 @@ bool tapety_weryfikuj_instalacje(){
 size_t weryfikacja_tapet_indeks=0,weryfikacja_tapet_liczba=0;
 uint32_t weryfikacja_tapet_offset=0,weryfikacja_tapet_crc=~0U;
 uint64_t weryfikacja_tapet_bajty=0;
-char weryfikacja_tapet_buf[16*1024];
+char weryfikacja_tapet_buf[4*1024];
 bool tapety_weryfikuj_start(uint64_t*razem){
     weryfikacja_tapet_liczba=wczytaj_inwentarz(s_inwentarz_wpisy,TAPETY_INWENTARZ_MAX);
     if(!weryfikacja_tapet_liczba||(wymagane_tapety&&weryfikacja_tapet_liczba!=wymagane_tapety))return false;
@@ -710,7 +710,8 @@ bool tapety_instaluj_step(uint64_t*wykonane,uint32_t*elementy,uint32_t*wszystkie
     for(;prefix[p]&&p+1<sizeof(path);++p){path[p]=prefix[p];}
     for(size_t i=0;e.nazwa[i]&&p+1<sizeof(path);++i){path[p++]=e.nazwa[i];}
     path[p]=0;
-    constexpr uint32_t PORCJA=16*1024;
+    constexpr uint32_t PORCJA=4*1024;
+    static_assert(PORCJA<=4096,"WALLPAPERS STEP nie moze przekroczyc jednego bloku BSP2");
     if(instalacja_crc_offset<e.rozmiar){
         uint32_t n=e.rozmiar-instalacja_crc_offset;if(n>PORCJA)n=PORCJA;
         for(uint32_t i=0;i<n;++i){

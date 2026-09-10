@@ -515,6 +515,8 @@ bool pobierz_rozmiar_bloba(
 }
 
 bool scisla_instalacja=false,pliki_instalacja_ok=true;
+bool ekran_aplikacja_instalacja_ok=false;
+bool tapety_aplikacja_instalacja_ok=false;
 struct PlikKontrolny{char path[128];uint32_t size,crc;};
 PlikKontrolny pliki_kontrolne[96]{};
 unsigned liczba_plikow_kontrolnych=0;
@@ -525,6 +527,38 @@ size_t planowane_katalog_indeks=0;
 uint32_t planowane_offset=0,planowane_crc=~0U;
 uint64_t planowane_bajty=0,planowane_bajty_razem=0;
 bool planowanie_instalacji=false,instalacja_krokowa=false;
+
+bool sciezka_ma_poczatek(const char* sciezka,const char* poczatek){
+    if(!sciezka||!poczatek)return false;
+    size_t i=0;
+    while(poczatek[i]&&sciezka[i]==poczatek[i])++i;
+    return poczatek[i]=='\0';
+}
+
+void log_blad_pliku_instalacji(const char* sciezka,const char* operacja,
+                               uint32_t offset=0,uint32_t rozmiar=0){
+    const char* skladnik=nullptr;
+    if(sciezka_ma_poczatek(sciezka,"/programy/ekran.cebula"))skladnik="[EKRAN]";
+    else if(sciezka_ma_poczatek(sciezka,"/programy/tapety.cebula"))skladnik="[TAPETA]";
+    if(!skladnik)return;
+
+    char komunikat[256]={};
+    char liczba[32]={};
+    if(!dolacz_tekst(komunikat,sizeof(komunikat),skladnik)||
+       !dolacz_tekst(komunikat,sizeof(komunikat)," install failed ")||
+       !dolacz_tekst(komunikat,sizeof(komunikat),operacja)||
+       !dolacz_tekst(komunikat,sizeof(komunikat)," ")||
+       !dolacz_tekst(komunikat,sizeof(komunikat),sciezka))return;
+    if(rozmiar!=0){
+        if(!uint_do_str(offset,liczba,sizeof(liczba))||
+           !dolacz_tekst(komunikat,sizeof(komunikat)," offset=")||
+           !dolacz_tekst(komunikat,sizeof(komunikat),liczba)||
+           !uint_do_str(rozmiar,liczba,sizeof(liczba))||
+           !dolacz_tekst(komunikat,sizeof(komunikat)," size=")||
+           !dolacz_tekst(komunikat,sizeof(komunikat),liczba))return;
+    }
+    wypisz_log(komunikat);
+}
 bool zapisz_plik_od_nowa_impl(const char* sciezka,
                          const char* dane,
                          uint32_t rozmiar) {
@@ -723,6 +757,8 @@ static const char* const KATALOGI_SYSTEMOWE[] = {
         "/programy/kontrolki2.cebula",
         "/programy/kontrolki3.cebula",
         "/programy/test.cebula",
+        "/programy/ekran.cebula",
+        "/programy/tapety.cebula",
         "/gry",
         "/gry/snake.cebula",
         "/uslugi",
@@ -1477,15 +1513,29 @@ void instaluj_wbudowane_programy() {
             "[BSP] Kontrolki 2 zainstalowane jako .cebula.");
     }
 
-    if(!zapewnij_katalog("/programy/ekran.cebula")||!instaluj_paczke(
+    ekran_aplikacja_instalacja_ok=instaluj_paczke(
         "/programy/ekran.cebula/opis.aplikacji",MANIFEST_EKRAN,
-        EKRAN_PROGRAM,_binary_ekran_bin_start,_binary_ekran_bin_end))
-        wypisz_log("[EKRAN] BLAD instalacji aplikacji.");
+        EKRAN_PROGRAM,_binary_ekran_bin_start,_binary_ekran_bin_end);
+    if(!ekran_aplikacja_instalacja_ok){
+        log_blad_pliku_instalacji(EKRAN_PROGRAM,"plan/package");
+        if(scisla_instalacja)pliki_instalacja_ok=false;
+    }else{
+        wypisz_log(planowanie_instalacji
+            ? "[EKRAN] Aplikacja dodana do planu instalacji."
+            : "[EKRAN] Aplikacja zainstalowana.");
+    }
 
-    if (!zapewnij_katalog("/programy/tapety.cebula") || !instaluj_paczke(
-            "/programy/tapety.cebula/opis.aplikacji", MANIFEST_TAPETY,
-            TAPETY_PROGRAM, _binary_tapety_bin_start, _binary_tapety_bin_end))
-        wypisz_log("[TAPETA] BLAD instalacji aplikacji Tapety.");
+    tapety_aplikacja_instalacja_ok=instaluj_paczke(
+        "/programy/tapety.cebula/opis.aplikacji",MANIFEST_TAPETY,
+        TAPETY_PROGRAM,_binary_tapety_bin_start,_binary_tapety_bin_end);
+    if(!tapety_aplikacja_instalacja_ok){
+        log_blad_pliku_instalacji(TAPETY_PROGRAM,"plan/package");
+        if(scisla_instalacja)pliki_instalacja_ok=false;
+    }else{
+        wypisz_log(planowanie_instalacji
+            ? "[TAPETA] Aplikacja Tapety dodana do planu instalacji."
+            : "[TAPETA] Aplikacja Tapety zainstalowana.");
+    }
 
     if (!instaluj_paczke(
             "/programy/kontrolki3.cebula/opis.aplikacji",
@@ -1712,19 +1762,23 @@ void wypisz_ilosc_ram() {
 
 bool kernel_instaluj_system(){
     scisla_instalacja=true;pliki_instalacja_ok=true;liczba_plikow_kontrolnych=0;
+    ekran_aplikacja_instalacja_ok=tapety_aplikacja_instalacja_ok=false;
     utworz_drabine_katalogow();
     if(pliki_instalacja_ok)instaluj_wbudowane_programy();
     scisla_instalacja=false;
-    return pliki_instalacja_ok&&liczba_plikow_kontrolnych!=0&&psf_flush_cache();
+    return pliki_instalacja_ok&&ekran_aplikacja_instalacja_ok&&
+           tapety_aplikacja_instalacja_ok&&liczba_plikow_kontrolnych!=0&&psf_flush_cache();
 }
 bool kernel_instaluj_system_start(uint64_t* razem){
     scisla_instalacja=true;pliki_instalacja_ok=true;liczba_plikow_kontrolnych=0;
+    ekran_aplikacja_instalacja_ok=tapety_aplikacja_instalacja_ok=false;
     planowane_liczba=planowane_indeks=0;planowane_katalog_indeks=0;planowane_offset=0;planowane_crc=~0U;
     planowane_bajty=planowane_bajty_razem=0;instalacja_krokowa=false;
     planowanie_instalacji=true;
     if(pliki_instalacja_ok)instaluj_wbudowane_programy();
     planowanie_instalacji=false;
-    instalacja_krokowa=pliki_instalacja_ok&&planowane_liczba!=0;
+    instalacja_krokowa=pliki_instalacja_ok&&ekran_aplikacja_instalacja_ok&&
+        tapety_aplikacja_instalacja_ok&&planowane_liczba!=0;
     if(razem)*razem=planowane_bajty_razem;
     return instalacja_krokowa;
 }
@@ -1735,7 +1789,13 @@ bool kernel_instaluj_system_step(uint64_t* wykonane,uint32_t* pliki,uint32_t* ws
     if(gotowe)*gotowe=false;
     if(!instalacja_krokowa||!pliki_instalacja_ok)return false;
     if(planowane_indeks==0&&planowane_offset==0&&planowane_bajty==0&&planowane_katalog_indeks<sizeof(KATALOGI_SYSTEMOWE)/sizeof(KATALOGI_SYSTEMOWE[0])){
-        if(!zapewnij_katalog_startowy(KATALOGI_SYSTEMOWE[planowane_katalog_indeks])||!psf_flush_cache()){
+        const char* katalog=KATALOGI_SYSTEMOWE[planowane_katalog_indeks];
+        if(!zapewnij_katalog_startowy(katalog)){
+            log_blad_pliku_instalacji(katalog,"mkdir error=psf-create-or-verify");
+            planowane_katalog_indeks=0;pliki_instalacja_ok=false;return false;
+        }
+        if(!psf_flush_cache()){
+            log_blad_pliku_instalacji(katalog,"mkdir-flush error=psf-flush");
             planowane_katalog_indeks=0;pliki_instalacja_ok=false;return false;
         }
         ++planowane_katalog_indeks;
@@ -1749,14 +1809,20 @@ bool kernel_instaluj_system_step(uint64_t* wykonane,uint32_t* pliki,uint32_t* ws
     auto&e=planowane_pliki[planowane_indeks];
     if(planowane_offset==0){
         (void)usun_twor(e.path);
-        if(!utworz_plik(e.path)){pliki_instalacja_ok=false;return false;}
+        if(!utworz_plik(e.path)){
+            log_blad_pliku_instalacji(e.path,"create");
+            pliki_instalacja_ok=false;return false;
+        }
     }
-    constexpr uint32_t PORCJA=16*1024;
+    constexpr uint32_t PORCJA=4*1024;
+    static_assert(PORCJA<=4096,"SYSTEMFILES STEP nie moze przekroczyc jednego bloku BSP2");
     uint32_t n=e.size-planowane_offset;if(n>PORCJA)n=PORCJA;
     if(n&&!zapisz_fragment_pliku(e.path,planowane_offset,e.data+planowane_offset,n)){
+        log_blad_pliku_instalacji(e.path,"write",planowane_offset,n);
         (void)usun_twor(e.path);pliki_instalacja_ok=false;return false;
     }
     if(!psf_flush_cache()){
+        log_blad_pliku_instalacji(e.path,"flush",planowane_offset,n);
         (void)usun_twor(e.path);pliki_instalacja_ok=false;return false;
     }
     for(uint32_t i=0;i<n;++i){
@@ -1778,7 +1844,8 @@ bool kernel_instaluj_system_step(uint64_t* wykonane,uint32_t* pliki,uint32_t* ws
 uint32_t kernel_liczba_plikow_instalacji(){return liczba_plikow_kontrolnych;}
 bool kernel_weryfikuj_system(){
     char buf[4096];
-    if(!pliki_instalacja_ok||liczba_plikow_kontrolnych==0)return false;
+    if(!pliki_instalacja_ok||!ekran_aplikacja_instalacja_ok||
+       !tapety_aplikacja_instalacja_ok||liczba_plikow_kontrolnych==0)return false;
     for(unsigned i=0;i<liczba_plikow_kontrolnych;++i){const auto&e=pliki_kontrolne[i];
         if(rozmiar_pliku(e.path)!=e.size)return false;
         uint32_t c=~0U;
@@ -1791,9 +1858,10 @@ bool kernel_weryfikuj_system(){
 }
 unsigned weryfikacja_indeks=0;
 uint32_t weryfikacja_offset=0,weryfikacja_crc=~0U;
-char weryfikacja_buf[16*1024];
+char weryfikacja_buf[4*1024];
 bool kernel_weryfikuj_system_start(uint64_t* razem){
-    if(!pliki_instalacja_ok||liczba_plikow_kontrolnych==0)return false;
+    if(!pliki_instalacja_ok||!ekran_aplikacja_instalacja_ok||
+       !tapety_aplikacja_instalacja_ok||liczba_plikow_kontrolnych==0)return false;
     uint64_t total=0;for(unsigned i=0;i<liczba_plikow_kontrolnych;++i){
         if(total>UINT64_MAX-pliki_kontrolne[i].size)return false;
         total+=pliki_kontrolne[i].size;
@@ -1807,12 +1875,24 @@ bool kernel_weryfikuj_system_step(uint64_t* wykonane,bool* gotowe){
     if(gotowe)*gotowe=false;
     if(weryfikacja_indeks>=liczba_plikow_kontrolnych){if(gotowe)*gotowe=true;return true;}
     const auto&e=pliki_kontrolne[weryfikacja_indeks];
-    if(weryfikacja_offset==0&&rozmiar_pliku(e.path)!=e.size)return false;
+    if(weryfikacja_offset==0&&rozmiar_pliku(e.path)!=e.size){
+        log_blad_pliku_instalacji(e.path,"verify-size error=mismatch");
+        return false;
+    }
     uint32_t n=e.size-weryfikacja_offset;if(n>sizeof(weryfikacja_buf))n=sizeof(weryfikacja_buf);uint32_t got=0;
-    if(n&&(!czytaj_fragment_pliku(e.path,weryfikacja_offset,weryfikacja_buf,n,&got)||got!=n))return false;
+    if(n&&(!czytaj_fragment_pliku(e.path,weryfikacja_offset,weryfikacja_buf,n,&got)||got!=n)){
+        log_blad_pliku_instalacji(e.path,"verify-read",weryfikacja_offset,n);
+        return false;
+    }
     for(uint32_t i=0;i<n;++i){weryfikacja_crc^=uint8_t(weryfikacja_buf[i]);for(unsigned bit=0;bit<8;++bit)weryfikacja_crc=(weryfikacja_crc>>1)^(0xEDB88320U&(0U-(weryfikacja_crc&1)));}
     weryfikacja_offset+=n;verified+=n;
-    if(weryfikacja_offset==e.size){if(~weryfikacja_crc!=e.crc)return false;++weryfikacja_indeks;weryfikacja_offset=0;weryfikacja_crc=~0U;}
+    if(weryfikacja_offset==e.size){
+        if(~weryfikacja_crc!=e.crc){
+            log_blad_pliku_instalacji(e.path,"verify-crc error=mismatch");
+            return false;
+        }
+        ++weryfikacja_indeks;weryfikacja_offset=0;weryfikacja_crc=~0U;
+    }
     if(wykonane)*wykonane=verified;
     if(weryfikacja_indeks==liczba_plikow_kontrolnych&&gotowe)*gotowe=true;
     return true;

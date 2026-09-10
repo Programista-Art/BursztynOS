@@ -71,10 +71,13 @@ class Qmp:
             if 'return' in r: return r['return']
     def hmp(self, command): return self.call('human-monitor-command', {'command-line': command})
     def click(self, x, y):
-        for _ in range(16): self.hmp('mouse_move -100 -100'); time.sleep(.02)
+        # Kontroler wzgledny moze miec tylko jeden oczekujacy raport. Dajemy
+        # gosciowi czas na odebranie kazdego ruchu; szybka seria sama w sobie
+        # testowalaby przepełnienie kontrolera QEMU, a nie trafienie w GUI.
+        for _ in range(16): self.hmp('mouse_move -100 -100'); time.sleep(.15)
         while x or y:
             dx, dy = min(x,100), min(y,100)
-            self.hmp(f'mouse_move {dx} {dy}'); x-=dx; y-=dy; time.sleep(.05)
+            self.hmp(f'mouse_move {dx} {dy}'); x-=dx; y-=dy; time.sleep(.15)
         self.hmp('mouse_button 1');time.sleep(.12);self.hmp('mouse_button 0');time.sleep(.4)
     def key(self, text): self.hmp('sendkey '+text);time.sleep(.15)
     def screenshot(self, path): self.call('screendump', {'filename':str(path),'format':'png'})
@@ -144,8 +147,15 @@ def installer_iso(d):
     return iso
 
 def install(g,target,sentinel,before_target,before_sentinel):
-    g.wait('[INSTALL] Installer mode ready');time.sleep(2)
+    # Czysty start TCG obejmuje przygotowanie zasobow live w RAM i na
+    # wolniejszych hostach moze przekroczyc trzy minuty. To nie jest limit
+    # czasu samej transakcji instalatora.
+    g.wait('[INSTALL] Installer mode ready',timeout=300);time.sleep(2)
     g.q.screenshot(g.dir/'welcome.png')
+    # Powloka moze zakonczyc start ulamek chwili po instalatorze i znalezc
+    # sie nad nim. Pierwsze klikniecie jedynie aktywuje okno, wiec jawnie
+    # ustawiamy fokus na widocznej czesci paska tytulowego instalatora.
+    g.q.click(800,68)
     # Coordinates for 1280x720 framebuffer, centered 840x570 installer.
     g.q.click(860,590) # welcome -> disks
     g.q.screenshot(g.dir/'disks.png')
@@ -168,6 +178,8 @@ def install(g,target,sentinel,before_target,before_sentinel):
     text=g.wait('[INSTALL] COMPLETE verified',timeout=900)
     time.sleep(1);g.q.screenshot(g.dir/'complete.png')
     assert '[PF]' not in text and '[KERNEL-PANIC]' not in text
+    assert '[EKRAN] install failed' not in text
+    assert '[TAPETA] install failed' not in text
     observed=[int(v) for v in re.findall(r'\[INSTALL\] progress=(\d+) stage=',text)]
     assert observed and observed[0]==0 and observed[-1]==100,observed
     assert all(a<=b<=100 for a,b in zip(observed,observed[1:])),observed
@@ -175,6 +187,13 @@ def install(g,target,sentinel,before_target,before_sentinel):
     assert all(0<=v<=100 for v in observed)
     assert all(a<=b for a,b in zip(observed,observed[1:]))
     assert text.index('[INSTALL] progress=100 stage=COMPLETE') < text.index('[INSTALL] COMPLETE verified')
+    latency={name:int(value) for name,value in re.findall(
+        r'\[INSTALL LATENCY\] stage=([A-Z0-9]+) maxnonyieldus=(\d+)',text)}
+    for required in ('GPT','ESP','BSP2FORMAT','SYSTEMFILES','WALLPAPERS','VERIFY'):
+        assert required in latency,latency
+    print('installer max non-yield us: '+', '.join(
+        f'{name}={latency[name]}' for name in
+        ('GPT','ESP','BSP2FORMAT','SYSTEMFILES','WALLPAPERS','VERIFY')),flush=True)
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('action',choices=['test','run','boot-debug']);args=ap.parse_args()

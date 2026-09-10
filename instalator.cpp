@@ -84,6 +84,14 @@ void log_perf(uint32_t progressStage,bool interrupts){
     append_text(line,sizeof(line),&p," timerirq=");append_u64(line,sizeof(line),&p,perf_irq);
     append_text(line,sizeof(line),&p," switches=");append_u64(line,sizeof(line),&p,perf_switches);
     line[p]=0;klog_serial(line);
+
+    char latency[112]="[INSTALL LATENCY] stage=";
+    p=sizeof("[INSTALL LATENCY] stage=")-1;
+    append_text(latency,sizeof(latency),&p,progress_name(progressStage));
+    append_text(latency,sizeof(latency),&p," maxnonyieldus=");
+    append_u64(latency,sizeof(latency),&p,perf_longest_us);
+    latency[p]=0;
+    klog_serial(latency);
 }
 void set_progress(uint32_t percent,uint32_t progressStage,uint32_t done=0,uint32_t total=0,bool complete=false){
     if(!instalator_etap_postepu_poprawny(progress_stage,progressStage))return;
@@ -115,8 +123,8 @@ bool payloads(){return boot_efi.data&&boot_efi.size>512&&boot_efi.data[0]=='M'&&
 void perform(){
     auto*d=layout.bsp.device;
     if(stage==INST_GPT){
-        klog_serial("[INSTALL] progress=0 stage=GPT");
         if(!gpt_started){
+            klog_serial("[INSTALL] progress=0 stage=GPT");
             if(!ahci_sprawdz_tozsamosc(selected)){fail(INST_DYSK_BLAD,"Walidacja: tożsamość dysku zmieniła się.");return;}
             gpt_started=Storage::gpt_install_start(d,layout,disk_uuid,&gpt_state);
         }
