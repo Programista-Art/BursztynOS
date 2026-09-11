@@ -170,5 +170,10 @@ int main(){
     CHECK(rozruch_odczytaj_sektory(&disk.dev, &rread));
     CHECK(rread.slot_potwierdzony == BURSZTYN_SLOT_A && rread.generacja == 1);
 
+    // Weryfikacja zarezerwowanych sektorow stanu rozruchu i ukladu partycji
+    CHECK(rozruch_weryfikuj_uklad_dysku(&disk.dev));
+    CHECK(!rozruch_weryfikuj_uklad_dysku(nullptr));
+    CHECK(!rozruch_weryfikuj_uklad_dysku(&small.dev));
+
     std::printf("Storage/BSP2 host: %u PASS, 0 FAIL (includes outside-partition sentinel, faults, >2 TiB GPT, A/B ESP)\n",checks);
 }

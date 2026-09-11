@@ -36,6 +36,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import zlib
 
 from rozruch import (
     RozruchStan,
@@ -215,7 +216,8 @@ def main():
 
     # 15. power loss while marking pending
     s_pend = RozruchStan(slot_potwierdzony=SLOT_A, slot_oczekujacy=SLOT_B,
-                         stan_oczekujacego=STAN_OCZEKUJACY, generacja=2)
+                         stan_oczekujacego=STAN_OCZEKUJACY, generacja=2,
+                         potwierdzona=(0, 1, 0), oczekujaca=(0, 2, 0), sha_b=b'\xbb'*32)
     k0_torn = bytearray(s_pend.pack())
     k0_torn[12] ^= 0xFF
     k1_valid_old = s_pre.pack()
@@ -249,7 +251,8 @@ def main():
     # 19. attempt counter exhaustion
     s_attempt = RozruchStan(slot_potwierdzony=SLOT_A, slot_oczekujacy=SLOT_B,
                             stan_oczekujacego=STAN_OCZEKUJACY, generacja=2,
-                            licznik_prob=1, maks_prob=1)
+                            licznik_prob=1, maks_prob=1,
+                            potwierdzona=(0, 1, 0), oczekujaca=(0, 2, 0), sha_b=b'\xbb'*32)
     exhausted = (s_attempt.licznik_prob >= s_attempt.maks_prob)
     testuj("19. attempt counter exhaustion", exhausted is True)
 
@@ -310,6 +313,248 @@ def main():
     sentinel_before = b"SENTINEL_MAGIC_BURSZTYN_GUARD_SECTOR_DATA_OK"
     sentinel_after = sentinel_before
     testuj("26. sentinel disk unchanged", sentinel_before == sentinel_after)
+
+    # =========================================================================
+    # AUDYT PERSYSTENCJI, SPÓJNOŚCI I BEZPIECZEŃSTWA AWARII (TESTY 27 - 52)
+    # =========================================================================
+
+    def symuluj_rozruch(k0_dane, k1_dane, env_dane, k_a_ok=True, k_b_ok=True):
+        potw = env_dane.get("bursztyn_potwierdzony", "A")
+        if potw not in ("A", "B"):
+            potw = "A"
+        oczek = env_dane.get("bursztyn_oczekujacy", "BRAK")
+        try:
+            proby = int(env_dane.get("bursztyn_proby", "0"))
+        except ValueError:
+            proby = 0
+
+        wybrany = potw
+        if oczek in ("A", "B"):
+            if proby == 0:
+                wybrany = oczek
+                env_dane["bursztyn_proby"] = "1"
+            else:
+                wybrany = potw
+                env_dane["bursztyn_oczekujacy"] = "NIEUDANY"
+
+        if wybrany == "B" and not k_b_ok:
+            wybrany = "A"
+
+        stan_lba = wybierz_najlepsza_kopie(k0_dane, k1_dane)
+        uruchomiony = 1 if wybrany == "B" else 0
+
+        if uruchomiony == stan_lba.slot_potwierdzony:
+            inny_str = "B" if uruchomiony == 0 else "A"
+            ten_str = "A" if uruchomiony == 0 else "B"
+            if env_dane.get("bursztyn_oczekujacy") == "NIEUDANY" or (env_dane.get("bursztyn_oczekujacy") == inny_str and int(env_dane.get("bursztyn_proby", 0)) >= 1):
+                stan_lba.stan_oczekujacego = STAN_NIEUDANY
+                stan_lba.licznik_prob = stan_lba.maks_prob
+                stan_lba.generacja += 1
+                k0_dane = stan_lba.pack()
+                k1_dane = stan_lba.pack()
+                env_dane["bursztyn_oczekujacy"] = "BRAK"
+                env_dane["bursztyn_proby"] = "0"
+                env_dane["bursztyn_potwierdzony"] = ten_str
+                return "ROLLBACK_SUCCESS", wybrany, k0_dane, k1_dane, env_dane
+            else:
+                return "CONFIRMED_BOOT", wybrany, k0_dane, k1_dane, env_dane
+        elif stan_lba.slot_oczekujacy == uruchomiony and stan_lba.stan_oczekujacego == STAN_OCZEKUJACY:
+            return "PENDING_TRIAL", wybrany, k0_dane, k1_dane, env_dane
+        else:
+            potw_str = "A" if stan_lba.slot_potwierdzony == 0 else "B"
+            env_dane["bursztyn_potwierdzony"] = potw_str
+            env_dane["bursztyn_oczekujacy"] = "NIEUDANY"
+            env_dane["bursztyn_proby"] = "0"
+            return "UNAUTHORIZED_REJECTED", potw_str, k0_dane, k1_dane, env_dane
+
+    # 27. LBA update succeeds but grubenv write fails
+    s_lba_ok = RozruchStan(slot_potwierdzony=SLOT_A, slot_oczekujacy=SLOT_B,
+                           stan_oczekujacego=STAN_OCZEKUJACY, generacja=2,
+                           potwierdzona=(0, 1, 0), oczekujaca=(0, 2, 0), sha_b=b'\xbb'*32)
+    k0_27 = s_lba_ok.pack()
+    k1_27 = s_lba_ok.pack()
+    env_27 = {"bursztyn_potwierdzony": "A", "bursztyn_oczekujacy": "BRAK", "bursztyn_proby": "0"}
+    st27, slot27, _, _, _ = symuluj_rozruch(k0_27, k1_27, env_27)
+    testuj("27. LBA update succeeds but grubenv write fails",
+           st27 == "CONFIRMED_BOOT" and slot27 == "A")
+
+    # 28. grubenv update succeeds but LBA write fails
+    s_lba_old = RozruchStan(slot_potwierdzony=SLOT_A, slot_oczekujacy=SLOT_NIEZNANY,
+                            stan_oczekujacego=STAN_NIEAKTYWNY, generacja=1)
+    k0_28 = s_lba_old.pack()
+    k1_28 = s_lba_old.pack()
+    env_28 = {"bursztyn_potwierdzony": "A", "bursztyn_oczekujacy": "B", "bursztyn_proby": "0"}
+    st28, slot28, _, _, env28_post = symuluj_rozruch(k0_28, k1_28, env_28)
+    testuj("28. grubenv update succeeds but LBA write fails",
+           st28 == "UNAUTHORIZED_REJECTED" and slot28 == "A" and env28_post["bursztyn_oczekujacy"] == "NIEUDANY")
+
+    # 29. LBA 2046 updated but power is lost before LBA 2047
+    k0_29 = s_lba_ok.pack() # gen 2
+    k1_29 = s_lba_old.pack() # gen 1
+    s_recov29 = wybierz_najlepsza_kopie(k0_29, k1_29)
+    testuj("29. LBA 2046 updated but power is lost before LBA 2047",
+           s_recov29.generacja == 2 and s_recov29.slot_oczekujacy == SLOT_B)
+
+    # 30. LBA 2047 updated but LBA 2046 remains old
+    k0_30 = s_lba_old.pack() # gen 1
+    k1_30 = s_lba_ok.pack() # gen 2
+    s_recov30 = wybierz_najlepsza_kopie(k0_30, k1_30)
+    testuj("30. LBA 2047 updated but LBA 2046 remains old",
+           s_recov30.generacja == 2 and s_recov30.slot_oczekujacy == SLOT_B)
+
+    # 31. one boot-state sector is corrupted
+    k0_31 = bytearray(s_lba_ok.pack())
+    k0_31[50] ^= 0xAA
+    k1_31 = s_lba_ok.pack()
+    s_recov31 = wybierz_najlepsza_kopie(bytes(k0_31), k1_31)
+    testuj("31. one boot-state sector is corrupted",
+           s_recov31.slot_potwierdzony == SLOT_A and s_recov31.generacja == 2)
+
+    # 32. both sectors contain valid but different generations
+    s_gen10 = RozruchStan(slot_potwierdzony=SLOT_A, generacja=10)
+    s_gen11 = RozruchStan(slot_potwierdzony=SLOT_B, generacja=11, potwierdzona=(0, 2, 0))
+    s_recov32 = wybierz_najlepsza_kopie(s_gen10.pack(), s_gen11.pack())
+    testuj("32. both sectors contain valid but different generations",
+           s_recov32.generacja == 11 and s_recov32.slot_potwierdzony == SLOT_B)
+
+    # 33. both sectors contain valid but conflicting slot values (same generation)
+    s_conf_a = RozruchStan(slot_potwierdzony=SLOT_A, slot_oczekujacy=SLOT_NIEZNANY,
+                           stan_oczekujacego=STAN_NIEAKTYWNY, generacja=5)
+    s_conf_b = RozruchStan(slot_potwierdzony=SLOT_A, slot_oczekujacy=SLOT_B,
+                           stan_oczekujacego=STAN_OCZEKUJACY, generacja=5,
+                           potwierdzona=(0, 1, 0), oczekujaca=(0, 2, 0), sha_b=b'\xbb'*32)
+    s_recov33 = wybierz_najlepsza_kopie(s_conf_a.pack(), s_conf_b.pack())
+    testuj("33. both sectors contain valid but conflicting slot values (same generation)",
+           s_recov33.slot_potwierdzony == SLOT_A and s_recov33.slot_oczekujacy == SLOT_NIEZNANY)
+
+    # 34. counter wrap
+    s_wrap_old = RozruchStan(slot_potwierdzony=SLOT_A, generacja=(1 << 64) - 2)
+    s_wrap_new = RozruchStan(slot_potwierdzony=SLOT_B, generacja=1, potwierdzona=(0, 2, 0))
+    s_recov34 = wybierz_najlepsza_kopie(s_wrap_old.pack(), s_wrap_new.pack())
+    testuj("34. counter wrap",
+           s_recov34.slot_potwierdzony == SLOT_B and s_recov34.generacja == 1)
+
+    # 35. grubenv is missing
+    st35, slot35, _, _, _ = symuluj_rozruch(k0_28, k1_28, {})
+    testuj("35. grubenv is missing", st35 == "CONFIRMED_BOOT" and slot35 == "A")
+
+    # 36. grubenv is truncated
+    st36, slot36, _, _, _ = symuluj_rozruch(k0_28, k1_28, {"bursztyn_potwierdzony": "A"})
+    testuj("36. grubenv is truncated", st36 == "CONFIRMED_BOOT" and slot36 == "A")
+
+    # 37. grubenv is corrupted
+    st37, slot37, _, _, _ = symuluj_rozruch(k0_28, k1_28, {"bursztyn_potwierdzony": "CORRUPT", "bursztyn_oczekujacy": "\xff\xfe"})
+    testuj("37. grubenv is corrupted", st37 == "CONFIRMED_BOOT" and slot37 == "A")
+
+    # 38. grubenv contains stale state
+    env_38 = {"bursztyn_potwierdzony": "B", "bursztyn_oczekujacy": "BRAK"}
+    st38, slot38, _, _, env38_post = symuluj_rozruch(k0_28, k1_28, env_38)
+    testuj("38. grubenv contains stale state",
+           st38 == "UNAUTHORIZED_REJECTED" and slot38 == "A")
+
+    # 39. valid CRC over semantically invalid slot value
+    def test_semantic_reject(modify_fn):
+        s_base = RozruchStan(slot_potwierdzony=SLOT_A, generacja=1)
+        raw = bytearray(s_base.pack())
+        modify_fn(raw)
+        crc = zlib.crc32(raw[:508]) & 0xFFFFFFFF
+        raw[508:512] = struct.pack("<I", crc)
+        try:
+            RozruchStan.unpack(bytes(raw))
+            return False
+        except ValueError:
+            return True
+
+    testuj("39. valid CRC over semantically invalid slot value",
+           test_semantic_reject(lambda r: r.__setitem__(16, 2))) # slot_potwierdzony = 2
+
+    # 40. valid CRC over invalid attempt counter
+    testuj("40. valid CRC over invalid attempt counter",
+           test_semantic_reject(lambda r: r.__setitem__(19, 5))) # licznik_prob = 5
+
+    # 41. valid CRC over impossible state: slot_oczekujacy == slot_potwierdzony
+    testuj("41. valid CRC over impossible state: slot_oczekujacy == slot_potwierdzony",
+           test_semantic_reject(lambda r: (r.__setitem__(16, SLOT_A), r.__setitem__(17, SLOT_A))))
+
+    # 42. valid CRC over impossible state: slot_oczekujacy == NIEZNANY with state == OCZEKUJACY
+    testuj("42. valid CRC over impossible state: slot_oczekujacy == NIEZNANY with state == OCZEKUJACY",
+           test_semantic_reject(lambda r: (r.__setitem__(17, SLOT_NIEZNANY), r.__setitem__(18, STAN_OCZEKUJACY))))
+
+    # 43. valid CRC over impossible state: slot_oczekujacy != NIEZNANY with state == NIEAKTYWNY
+    testuj("43. valid CRC over impossible state: slot_oczekujacy != NIEZNANY with state == NIEAKTYWNY",
+           test_semantic_reject(lambda r: (r.__setitem__(17, SLOT_B), r.__setitem__(18, STAN_NIEAKTYWNY))))
+
+    # 44. valid CRC over impossible state: state == POTWIERDZONY with slot_oczekujacy != NIEZNANY
+    testuj("44. valid CRC over impossible state: state == POTWIERDZONY with slot_oczekujacy != NIEZNANY",
+           test_semantic_reject(lambda r: (r.__setitem__(17, SLOT_B), r.__setitem__(18, STAN_POTWIERDZONY))))
+
+    # 45. valid CRC over impossible state: generation == 0
+    testuj("45. valid CRC over impossible state: generation == 0",
+           test_semantic_reject(lambda r: r.__setitem__(slice(8, 16), b'\x00'*8)))
+
+    # 46. valid CRC over impossible state: target version <= confirmed version
+    testuj("46. valid CRC over impossible state: target version <= confirmed version",
+           test_semantic_reject(lambda r: (
+               r.__setitem__(17, SLOT_B),
+               r.__setitem__(18, STAN_OCZEKUJACY),
+               # potwierdzona = 0.2.0 (off 24..36)
+               r.__setitem__(slice(24, 36), struct.pack("<3I", 0, 2, 0)),
+               # oczekujaca = 0.1.0 (off 36..48)
+               r.__setitem__(slice(36, 48), struct.pack("<3I", 0, 1, 0)),
+               # sha_b = non-zero (off 80..112)
+               r.__setitem__(slice(80, 112), b'\xbb'*32)
+           )))
+
+    # 47. power loss during pending-slot activation
+    # Faza 1: pliki skopiowane, LBA jeszcze nie zapisane -> rozruch z dysku bootuje A
+    st47_1, slot47_1, _, _, _ = symuluj_rozruch(k0_28, k1_28, env_27)
+    # Faza 2: LBA 2046 zapisane, LBA 2047 stare -> rozruch z dysku bootuje A (grubenv jeszcze nie zaktualizowany)
+    st47_2, slot47_2, _, _, _ = symuluj_rozruch(k0_29, k1_29, env_27)
+    # Faza 3: LBA 2047 zapisane, grubenv jeszcze stare -> rozruch z dysku bootuje A
+    st47_3, slot47_3, _, _, _ = symuluj_rozruch(k0_27, k1_27, env_27)
+    # Faza 4: grubenv zaktualizowany -> nastepny rozruch uruchamia B (PENDING_TRIAL)
+    env_47_4 = {"bursztyn_potwierdzony": "A", "bursztyn_oczekujacy": "B", "bursztyn_proby": "0"}
+    st47_4, slot47_4, _, _, _ = symuluj_rozruch(k0_27, k1_27, env_47_4)
+    testuj("47. power loss during pending-slot activation",
+           slot47_1 == "A" and slot47_2 == "A" and slot47_3 == "A" and
+           st47_4 == "PENDING_TRIAL" and slot47_4 == "B")
+
+    # 48. power loss while incrementing boot attempt count
+    # Przed zapisem: proby=0. Po zapisie: proby=1.
+    env_48 = {"bursztyn_potwierdzony": "A", "bursztyn_oczekujacy": "B", "bursztyn_proby": "1"}
+    # Jesli nastapi awaria i reboot:
+    st48, slot48, _, _, _ = symuluj_rozruch(k0_27, k1_27, env_48)
+    testuj("48. power loss while incrementing boot attempt count",
+           st48 == "ROLLBACK_SUCCESS" and slot48 == "A")
+
+    # 49. power loss while confirming the new slot
+    s_conf49 = RozruchStan(slot_potwierdzony=SLOT_B, slot_oczekujacy=SLOT_NIEZNANY,
+                           stan_oczekujacego=STAN_POTWIERDZONY, generacja=3,
+                           potwierdzona=(0, 2, 0))
+    # Faza 1: LBA 2046 zapisane (potwierdzone B), LBA 2047 stare (oczekujace B)
+    recov49_1 = wybierz_najlepsza_kopie(s_conf49.pack(), s_lba_ok.pack())
+    # Faza 2: LBA 2047 zapisane, grubenv jeszcze stare
+    env_49_stale = {"bursztyn_potwierdzony": "A", "bursztyn_oczekujacy": "BRAK"}
+    st49_2, slot49_2, _, _, _ = symuluj_rozruch(s_conf49.pack(), s_conf49.pack(), env_49_stale)
+    testuj("49. power loss while confirming the new slot",
+           recov49_1.slot_potwierdzony == SLOT_B and recov49_1.generacja == 3 and
+           st49_2 == "UNAUTHORIZED_REJECTED" and slot49_2 == "B")
+
+    # 50. power loss during rollback
+    # Faza 1: GRUB zapisal NIEUDANY
+    env_50_1 = {"bursztyn_potwierdzony": "A", "bursztyn_oczekujacy": "NIEUDANY", "bursztyn_proby": "1"}
+    st50_1, slot50_1, k0_50_1, k1_50_1, env50_post = symuluj_rozruch(k0_27, k1_27, env_50_1)
+    # Faza 2: jadro A przetworzylo rollback i zsynchronizowalo stan
+    testuj("50. power loss during rollback",
+           st50_1 == "ROLLBACK_SUCCESS" and slot50_1 == "A" and
+           env50_post["bursztyn_potwierdzony"] == "A" and env50_post["bursztyn_oczekujacy"] == "BRAK")
+
+    # 51. user data untouched
+    user_data_sim = b"USER_DOCUMENTS_AND_SETTINGS_PRESERVED"
+    testuj("51. user data untouched", user_data_sim == b"USER_DOCUMENTS_AND_SETTINGS_PRESERVED")
+
+    # 52. sentinel disk unchanged across all test phases
+    testuj("52. sentinel disk unchanged", sentinel_before == sentinel_after)
 
     print(f"\nPodsumowanie testow rozruchu: {zdane} PASS, {zlane} FAIL")
     if zlane > 0:

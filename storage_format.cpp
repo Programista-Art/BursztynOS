@@ -528,7 +528,12 @@ bool rozruch_zapisz_sektory(Device* d, const bursztyn_rozruch_stan* s) {
 
     uint64_t pierwsza = ROZRUCH_SEKTOR_KOPIA_0;
     uint64_t druga    = ROZRUCH_SEKTOR_KOPIA_1;
-    if (v0 && v1 && k0.generacja > k1.generacja) {
+    if (v0 && !v1) {
+        /* Kopia 1 jest uszkodzona - nadpisujemy najpierw uszkodzona, chroniac wazna kopie 0 */
+        pierwsza = ROZRUCH_SEKTOR_KOPIA_1;
+        druga    = ROZRUCH_SEKTOR_KOPIA_0;
+    } else if (v0 && v1 && (int64_t)(k0.generacja - k1.generacja) > 0) {
+        /* Obie poprawne, kopia 0 jest nowsza - nadpisujemy starsza kopie 1 w pierwszej kolejnosci */
         pierwsza = ROZRUCH_SEKTOR_KOPIA_1;
         druga    = ROZRUCH_SEKTOR_KOPIA_0;
     }
@@ -548,6 +553,76 @@ bool rozruch_odczytaj_sektory(Device* d, bursztyn_rozruch_stan* s) {
     if (!r0 && !r1) return false;
 
     return rozruch_wybierz_poprawna_kopie(r0 ? &k0 : nullptr, r1 ? &k1 : nullptr, s);
+}
+
+bool rozruch_weryfikuj_uklad_dysku(Device* d) {
+    if (!d || d->sector_size != 512 || d->sectors <= ROZRUCH_SEKTOR_KOPIA_1) {
+        return false;
+    }
+
+    Table table{};
+    if (!gpt_read(d, &table)) {
+        return false;
+    }
+
+    /* 1. Weryfikacja, ze metadane podstawowego GPT nie nachodza na LBA 2046/2047 */
+    Partition all{d, 0, d->sectors};
+    uint8_t h[512]{};
+    if (!read(all, 1, 1, h) || !equal(h, "EFI PART", 8)) {
+        return false;
+    }
+    uint64_t arr_lba = u64(h + 72);
+    uint32_t num_entries = u32(h + 80);
+    uint32_t entry_size = u32(h + 84);
+    if (entry_size != 128 || num_entries == 0 || num_entries > 128) {
+        return false;
+    }
+    uint64_t arr_sectors = (uint64_t(num_entries) * entry_size + 511) / 512;
+    uint64_t arr_end_lba = arr_lba + arr_sectors - 1;
+
+    /* Metadane GPT (naglowek i tablica wpisow) musza konczyc sie scisle przed LBA 2046 */
+    if (arr_lba <= ROZRUCH_SEKTOR_KOPIA_1 && arr_end_lba >= ROZRUCH_SEKTOR_KOPIA_0) {
+        return false;
+    }
+    if (arr_end_lba >= ROZRUCH_SEKTOR_KOPIA_0) {
+        return false;
+    }
+
+    /* 2. Weryfikacja partycji: zadna partycja nie moze nachodzic na zarezerwowane sektory LBA 2046/2047 */
+    bool esp_znalezione = false;
+    bool bsp_znalezione = false;
+    uint64_t esp_start = 0;
+
+    for (uint32_t i = 0; i < table.count; ++i) {
+        const Entry& e = table.entries[i];
+        if (e.count == 0) continue;
+        uint64_t p_start = e.start;
+        uint64_t p_end = e.start + e.count - 1;
+
+        /* Zadna partycja nie moze nachodzic na zakres [2046, 2047] */
+        if (p_start <= ROZRUCH_SEKTOR_KOPIA_1 && p_end >= ROZRUCH_SEKTOR_KOPIA_0) {
+            return false;
+        }
+
+        if (equal(e.type, EspType, 16)) {
+            esp_znalezione = true;
+            esp_start = p_start;
+        } else if (equal(e.type, BspType, 16)) {
+            bsp_znalezione = true;
+        }
+    }
+
+    /* 3. ESP musi zaczynac sie na lub za LBA 2048 (granica 1 MiB) */
+    if (!esp_znalezione || esp_start < EspMinStartSector) {
+        return false;
+    }
+
+    /* 4. Oczekiwany uklad Bursztyn OS: obecna partycja ESP oraz partycja systemowa BSP */
+    if (!bsp_znalezione) {
+        return false;
+    }
+
+    return true;
 }
 }
 

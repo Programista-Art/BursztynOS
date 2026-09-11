@@ -132,7 +132,13 @@ void perform(){
             fail(INST_IO,"GPT: zapis / FLUSH / odczyt kontrolny nie powiódł się.");return;}
         set_progress(instalator_podpostep(0,12,gpt_state.completed_units,gpt_state.total_units),POSTEP_GPT,
                      gpt_state.completed_units,gpt_state.total_units);
-        if(gpt_state.complete){table={};for(unsigned i=0;i<16;++i)table.uuid[i]=disk_uuid[i];set_progress(12,POSTEP_ESP);stage=INST_ESP;}
+        if(gpt_state.complete){
+            if (!Storage::rozruch_weryfikuj_uklad_dysku(d)) {
+                fail(INST_DYSK_BLAD, "Układ GPT narusza zarezerwowane sektory stanu rozruchu (LBA 2046/2047).");
+                return;
+            }
+            table={};for(unsigned i=0;i<16;++i)table.uuid[i]=disk_uuid[i];set_progress(12,POSTEP_ESP);stage=INST_ESP;
+        }
     }else if(stage==INST_ESP){
         if(!fat_started){
             klog_serial("[INSTALL] progress=12 stage=ESP");
@@ -216,6 +222,11 @@ void perform(){
                      uint32_t(done),uint32_t(total));
         if(verify_phase==4){set_progress(99,POSTEP_WERYFIKACJA);stage=INST_ZNACZNIK;}
     }else if(stage==INST_ZNACZNIK){
+        if (!Storage::rozruch_weryfikuj_uklad_dysku(layout.bsp.device)) {
+            fail(INST_DYSK_BLAD, "Układ dysku niezgodny z wymaganiami zarezerwowanych sektorów stanu rozruchu (LBA 2046/2047).");
+            return;
+        }
+
         struct bursztyn_rozruch_stan stan_poczatkowy{};
         rozruch_stan_poczatkowy(&stan_poczatkowy, 0, 1, 0);
 

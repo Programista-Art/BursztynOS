@@ -23,8 +23,17 @@ extern "C" {
 #define ROZRUCH_MAGIC                0x5354414EU /* "STAN" */
 #define ROZRUCH_WERSJA_FORMATU       1U
 #define ROZRUCH_DOMYSLNY_LIMIT_PROB  1U
+
+/*
+ * Formalnie zarezerwowane sektory stanu rozruchu Bursztyn OS (Bursztyn Boot State reserved sectors).
+ * Sektory te nie sa zwykla wolna przestrzenia - stanowia autorytatywny, podwojny magazyn
+ * stanu rozruchu A/B, zabezpieczony przed kolizjami z metadanymi GPT oraz partycja ESP.
+ */
+#define ROZRUCH_SEKTORY_NAZWA        "Bursztyn Boot State reserved sectors"
 #define ROZRUCH_SEKTOR_KOPIA_0       2046ULL
 #define ROZRUCH_SEKTOR_KOPIA_1       2047ULL
+#define ROZRUCH_SEKTORY_LICZBA       2ULL
+#define ROZRUCH_ESP_MIN_START_LBA    2048ULL
 
 /* Identyfikator slotu systemu. */
 typedef enum bursztyn_slot {
@@ -111,20 +120,67 @@ static inline uint32_t rozruch_oblicz_crc32(const void* dane, size_t n) {
 }
 
 /*
- * Sprawdza poprawnosc strukturalna i integralnosc rekordu stanu.
+ * Sprawdza poprawnosc strukturalna, integralnosc CRC32 oraz semantyke pol rekordu stanu.
+ * Odrzuca czesciowe zapisy, niemozliwe kombinacje stanow, zawiniete/niepoprawne liczniki.
  */
 static inline bool rozruch_waliduj_rekord(const struct bursztyn_rozruch_stan* s) {
     if (!s) return false;
     if (s->magic != ROZRUCH_MAGIC) return false;
     if (s->wersja_formatu != ROZRUCH_WERSJA_FORMATU) return false;
+    if (s->generacja == 0) return false;
+
+    /* 1. Poprawnosc identyfikatorow slotow */
     if (s->slot_potwierdzony != BURSZTYN_SLOT_A && s->slot_potwierdzony != BURSZTYN_SLOT_B) return false;
     if (s->slot_oczekujacy != BURSZTYN_SLOT_A &&
         s->slot_oczekujacy != BURSZTYN_SLOT_B &&
         s->slot_oczekujacy != BURSZTYN_SLOT_NIEZNANY) return false;
-    if (s->stan_oczekujacego > BURSZTYN_STAN_NIEUDANY) return false;
-    if (s->maks_prob == 0 || s->maks_prob > 10) return false;
-    if (s->licznik_prob > s->maks_prob + 1) return false;
 
+    /* Niemozliwa kombinacja: slot oczekujacy nie moze byc tym samym slotem co potwierdzony */
+    if (s->slot_oczekujacy == s->slot_potwierdzony) return false;
+
+    /* 2. Poprawnosc stanu logicznego */
+    if (s->stan_oczekujacego > BURSZTYN_STAN_NIEUDANY) return false;
+
+    /* Gdy brak slotu oczekujacego (NIEZNANY), stan moze byc tylko NIEAKTYWNY lub POTWIERDZONY */
+    if (s->slot_oczekujacy == BURSZTYN_SLOT_NIEZNANY) {
+        if (s->stan_oczekujacego != BURSZTYN_STAN_NIEAKTYWNY &&
+            s->stan_oczekujacego != BURSZTYN_STAN_POTWIERDZONY) {
+            return false;
+        }
+    } else {
+        /* Gdy slot oczekujacy jest A lub B, stan musi byc OCZEKUJACY lub NIEUDANY */
+        if (s->stan_oczekujacego != BURSZTYN_STAN_OCZEKUJACY &&
+            s->stan_oczekujacego != BURSZTYN_STAN_NIEUDANY) {
+            return false;
+        }
+    }
+
+    /* 3. Limity prob rozruchu */
+    if (s->maks_prob != ROZRUCH_DOMYSLNY_LIMIT_PROB) return false;
+    if (s->licznik_prob > s->maks_prob) return false;
+
+    /* 4. Sprawdzenie wersji i sumy kontrolnej jadra dla slotu oczekujacego */
+    if (s->stan_oczekujacego == BURSZTYN_STAN_OCZEKUJACY) {
+        if (s->oczekujaca_major == 0 && s->oczekujaca_minor == 0 && s->oczekujaca_patch == 0) {
+            return false;
+        }
+        uint64_t v_potw = ((uint64_t)s->potwierdzona_major << 32) |
+                          ((uint64_t)s->potwierdzona_minor << 16) |
+                          (uint64_t)s->potwierdzona_patch;
+        uint64_t v_oczek = ((uint64_t)s->oczekujaca_major << 32) |
+                           ((uint64_t)s->oczekujaca_minor << 16) |
+                           (uint64_t)s->oczekujaca_patch;
+        if (v_oczek <= v_potw) return false;
+
+        const uint8_t* sha = (s->slot_oczekujacy == BURSZTYN_SLOT_A) ? s->sha256_jadro_a : s->sha256_jadro_b;
+        bool non_zero = false;
+        for (int i = 0; i < 32; ++i) {
+            if (sha[i] != 0) { non_zero = true; break; }
+        }
+        if (!non_zero) return false;
+    }
+
+    /* 5. Integralnosc fizyczna (CRC32) */
     uint32_t oczekiwane_crc = rozruch_oblicz_crc32(s, offsetof(struct bursztyn_rozruch_stan, crc32));
     return s->crc32 == oczekiwane_crc;
 }
@@ -168,7 +224,8 @@ static inline void rozruch_stan_poczatkowy(struct bursztyn_rozruch_stan* s,
 
 /*
  * Wybiera poprawna kopie sposrod dwoch kopii redundantnych.
- * W przypadku gdy obie sa poprawne, wybiera kopie z wyzsza generacja.
+ * W przypadku gdy obie sa poprawne, wybiera kopie z wyzsza generacja (z obsluga wrap-around).
+ * W przypadku identycznej generacji rozwiazuje konflikt deterministycznie na korzysc stanu bezpiecznego.
  * Zwraca false tylko gdy obie kopie sa uszkodzone.
  */
 static inline bool rozruch_wybierz_poprawna_kopie(const struct bursztyn_rozruch_stan* k0,
@@ -188,11 +245,55 @@ static inline bool rozruch_wybierz_poprawna_kopie(const struct bursztyn_rozruch_
         *wybrana = *k1;
         return true;
     }
-    /* Obie poprawne - wyzsza generacja wygrywa. */
-    if (k1->generacja > k0->generacja) {
+
+    /* Obie kopie poprawne pod wzgledem CRC i semantyki */
+    int64_t diff = (int64_t)(k1->generacja - k0->generacja);
+    if (diff > 0) {
         *wybrana = *k1;
-    } else {
+        return true;
+    }
+    if (diff < 0) {
         *wybrana = *k0;
+        return true;
+    }
+
+    /* Identyczna generacja (diff == 0). Sprawdz tozsamosc binarna. */
+    const uint8_t* b0 = (const uint8_t*)k0;
+    const uint8_t* b1 = (const uint8_t*)k1;
+    bool identyczne = true;
+    for (size_t i = 0; i < sizeof(*k0); ++i) {
+        if (b0[i] != b1[i]) { identyczne = false; break; }
+    }
+    if (identyczne) {
+        *wybrana = *k0;
+        return true;
+    }
+
+    /* Konflikt generacji (rowna generacja, rozna tresc).
+     * Wybieramy stan bezpieczny:
+     * 1. Stan NIEUDANY ma pierwszenstwo przed OCZEKUJACYM.
+     * 2. Stan bez slotu oczekujacego (stabilny) ma pierwszenstwo przed oczekujacym.
+     * 3. W razie sporu co do potwierdzonego slotu, preferowany jest Slot A. */
+    if (k0->stan_oczekujacego == BURSZTYN_STAN_NIEUDANY) {
+        *wybrana = *k0;
+        return true;
+    }
+    if (k1->stan_oczekujacego == BURSZTYN_STAN_NIEUDANY) {
+        *wybrana = *k1;
+        return true;
+    }
+    if (k0->slot_oczekujacy == BURSZTYN_SLOT_NIEZNANY && k1->slot_oczekujacy != BURSZTYN_SLOT_NIEZNANY) {
+        *wybrana = *k0;
+        return true;
+    }
+    if (k1->slot_oczekujacy == BURSZTYN_SLOT_NIEZNANY && k0->slot_oczekujacy != BURSZTYN_SLOT_NIEZNANY) {
+        *wybrana = *k1;
+        return true;
+    }
+    if (k0->slot_potwierdzony == BURSZTYN_SLOT_A) {
+        *wybrana = *k0;
+    } else {
+        *wybrana = *k1;
     }
     return true;
 }
@@ -266,6 +367,10 @@ static inline bool rozruch_potwierdz_sukces(struct bursztyn_rozruch_stan* s,
     s->potwierdzona_major = s->oczekujaca_major;
     s->potwierdzona_minor = s->oczekujaca_minor;
     s->potwierdzona_patch = s->oczekujaca_patch;
+
+    s->oczekujaca_major = 0;
+    s->oczekujaca_minor = 0;
+    s->oczekujaca_patch = 0;
 
     rozruch_podpisz_rekord(s);
     return true;

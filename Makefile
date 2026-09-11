@@ -645,13 +645,15 @@ $(GRUB_CFG): $(KERNEL) $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile
 	@mkdir -p .installer-build
 	grub-mkstandalone -O x86_64-efi --locales="" --fonts="" --modules="part_gpt fat loadenv test normal multiboot2 configfile search search_fs_file all_video gfxterm" -o $@ "boot/grub/grub.cfg=$<"
 
-.PHONY: installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-rozruch-qemu
+.PHONY: installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-aktualizacja-qemu test-rozruch-qemu test-ota
 test-aktualizacje:
 	$(PYTHON) narzedzia/aktualizacje/test_aktualizacje.py
 test-rozruch:
 	$(PYTHON) narzedzia/aktualizacje/test_rozruch.py
-test-rozruch-qemu: iso
-	$(PYTHON) narzedzia/aktualizacje/qemu_aktualizacja_test.py
+test-aktualizacja-qemu: iso
+	$(PYTHON) narzedzia/aktualizacje/qemu_aktualizacja_test.py $(QEMU_TEST_ARGS)
+test-rozruch-qemu: test-aktualizacja-qemu
+test-ota: test-aktualizacje test-rozruch test-aktualizacja-qemu
 installer-unit-test:
 	@mkdir -p .installertest
 	g++ -std=c++17 -O1 -g -Wall -Wextra -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined narzedzia/instalator/test_storage.cpp storage_format.cpp psf.cpp -o .installertest/test-storage

@@ -86,13 +86,41 @@ class RozruchStan:
             raise ValueError(f"Zly magic rekordu rozruchu: {hex(magic)}")
         if wersja != ROZRUCH_WERSJA_FORMATU:
             raise ValueError(f"Zla wersja formatu rozruchu: {wersja}")
+        if gen == 0:
+            raise ValueError("Nieprawidlowa generacja zerowa")
         if slot_potw not in (SLOT_A, SLOT_B):
             raise ValueError(f"Nieprawidlowy slot potwierdzony: {slot_potw}")
         if slot_oczek not in (SLOT_A, SLOT_B, SLOT_NIEZNANY):
             raise ValueError(f"Nieprawidlowy slot oczekujacy: {slot_oczek}")
+        if slot_oczek == slot_potw:
+            raise ValueError(f"Konflikt: slot oczekujacy jest identyczny z potwierdzonym ({slot_potw})")
+        if stan_oczek > STAN_NIEUDANY:
+            raise ValueError(f"Nieprawidlowy stan logiczny: {stan_oczek}")
+
+        if slot_oczek == SLOT_NIEZNANY:
+            if stan_oczek not in (STAN_NIEAKTYWNY, STAN_POTWIERDZONY):
+                raise ValueError(f"Niemozliwy stan dla slotu nieznanego: {stan_oczek}")
+        else:
+            if stan_oczek not in (STAN_OCZEKUJACY, STAN_NIEUDANY):
+                raise ValueError(f"Niemozliwy stan dla slotu docelowego: {stan_oczek}")
+
+        if maks_p != 1:
+            raise ValueError(f"Nieprawidlowy limit prob: {maks_p}")
+        if proby > maks_p:
+            raise ValueError(f"Licznik prob ({proby}) przekracza limit ({maks_p})")
+
         p_maj, p_min, p_pat = dane_pol[9:12]
         o_maj, o_min, o_pat = dane_pol[12:15]
         sha_a, sha_b = dane_pol[15], dane_pol[16]
+
+        if stan_oczek == STAN_OCZEKUJACY:
+            if (o_maj, o_min, o_pat) == (0, 0, 0):
+                raise ValueError("Pusta wersja oczekujaca")
+            if (o_maj, o_min, o_pat) <= (p_maj, p_min, p_pat):
+                raise ValueError(f"Downgrade w rekordzie stanu: {o_maj}.{o_min}.{o_pat} <= {p_maj}.{p_min}.{p_pat}")
+            target_sha = sha_a if slot_oczek == SLOT_A else sha_b
+            if target_sha == b'\x00' * 32:
+                raise ValueError("Wyzerowany hash oczekiwanego jadra")
 
         inst = cls(
             slot_potwierdzony=slot_potw,
@@ -107,6 +135,12 @@ class RozruchStan:
             sha_b=sha_b
         )
         return inst
+
+def signed_diff_64(a: int, b: int) -> int:
+    diff = (a - b) & 0xFFFFFFFFFFFFFFFF
+    if diff >= (1 << 63):
+        diff -= (1 << 64)
+    return diff
 
 def wybierz_najlepsza_kopie(k0_bytes: bytes, k1_bytes: bytes) -> RozruchStan:
     s0, s1 = None, None
@@ -125,6 +159,27 @@ def wybierz_najlepsza_kopie(k0_bytes: bytes, k1_bytes: bytes) -> RozruchStan:
         return s0
     if s0 is None and s1 is not None:
         return s1
-    if s1.generacja > s0.generacja:
+
+    diff = signed_diff_64(s1.generacja, s0.generacja)
+    if diff > 0:
         return s1
-    return s0
+    if diff < 0:
+        return s0
+
+    # Identyczna generacja
+    if k0_bytes == k1_bytes:
+        return s0
+
+    # Konflikt generacji (rowna generacja, rozna tresc)
+    # Wybor deterministyczny na korzysc stanu bezpiecznego:
+    if s0.stan_oczekujacego == STAN_NIEUDANY:
+        return s0
+    if s1.stan_oczekujacego == STAN_NIEUDANY:
+        return s1
+    if s0.slot_oczekujacy == SLOT_NIEZNANY and s1.slot_oczekujacy != SLOT_NIEZNANY:
+        return s0
+    if s1.slot_oczekujacy == SLOT_NIEZNANY and s0.slot_oczekujacy != SLOT_NIEZNANY:
+        return s1
+    if s0.slot_potwierdzony == SLOT_A:
+        return s0
+    return s1

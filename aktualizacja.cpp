@@ -386,7 +386,11 @@ void aktualizacja_sprawdz_rozruch(uint64_t mbi) {
     bool stan_odczytany = false;
     Storage::Device* dev = blokowy_dysk_systemowy();
     if (dev) {
-        stan_odczytany = Storage::rozruch_odczytaj_sektory(dev, &stan);
+        if (Storage::rozruch_weryfikuj_uklad_dysku(dev)) {
+            stan_odczytany = Storage::rozruch_odczytaj_sektory(dev, &stan);
+        } else {
+            akt_log("[ROZRUCH] BLAD: Uklad dysku narusza zarezerwowane sektory stanu rozruchu LBA 2046/2047.");
+        }
     }
     if (!stan_odczytany) {
         bursztyn_rozruch_stan k0{}, k1{};
@@ -404,37 +408,86 @@ void aktualizacja_sprawdz_rozruch(uint64_t mbi) {
     uint32_t grub_proby = 0;
     bool grub_ok = blokowy_esp_systemowy(&esp) && Storage::esp_odczytaj_grubenv(esp, grub_potw, grub_oczek, &grub_proby);
 
-    if (uruchomiony_slot == 1) {
-        akt_log("[ROZRUCH] Proba uruchomienia slotu B.");
-        if (awaria_testowa) {
-            akt_log("[TEST] Kontrolowana awaria przed potwierdzeniem slotu B.");
-            asm volatile("cli");
-            for (;;) {
-                asm volatile("outb %0, $0x64" : : "a"((uint8_t)0xFE));
-                asm volatile("hlt");
-            }
-        }
-    } else {
-        bool rollback_wykryty = false;
-        if (grub_ok && (akt_porownaj_bajty(grub_oczek, "NIEUDANY", 8) == 0 ||
-                        (grub_oczek[0] == 'B' && grub_proby >= 1))) {
-            rollback_wykryty = true;
-        } else if (stan_odczytany && stan.slot_oczekujacy == BURSZTYN_SLOT_B &&
-                   (stan.stan_oczekujacego == BURSZTYN_STAN_NIEUDANY || stan.licznik_prob >= stan.maks_prob)) {
-            rollback_wykryty = true;
-        }
+    if (stan_odczytany) {
+        akt_log("[ROZRUCH] Stan rozruchu odczytany pomyslnie.");
+        if (uruchomiony_slot == stan.slot_potwierdzony) {
+            /* Uruchomiony zostal slot potwierdzony */
+            uint8_t inny_slot = (uruchomiony_slot == 0) ? 1 : 0;
+            const char* inny_str = (inny_slot == 1) ? "B" : "A";
+            const char* ten_str  = (uruchomiony_slot == 0) ? "A" : "B";
 
-        if (rollback_wykryty) {
-            akt_log("[ROZRUCH] Nieudane uruchomienie slotu B.");
-            akt_log("[ROZRUCH] Powrot do slotu A.");
-            if (stan_odczytany) {
+            bool rollback_wykryty = false;
+            if (grub_ok && (akt_porownaj_bajty(grub_oczek, "NIEUDANY", 8) == 0 ||
+                            (grub_oczek[0] == inny_str[0] && grub_proby >= 1))) {
+                rollback_wykryty = true;
+            } else if (stan.slot_oczekujacy == inny_slot &&
+                       (stan.stan_oczekujacego == BURSZTYN_STAN_NIEUDANY || stan.licznik_prob >= stan.maks_prob)) {
+                rollback_wykryty = true;
+            }
+
+            if (rollback_wykryty) {
+                if (inny_slot == 1) {
+                    akt_log("[ROZRUCH] Nieudane uruchomienie slotu B.");
+                    akt_log("[ROZRUCH] Powrot do slotu A.");
+                } else {
+                    akt_log("[ROZRUCH] Nieudane uruchomienie slotu A.");
+                    akt_log("[ROZRUCH] Powrot do slotu B.");
+                }
                 rozruch_wykonaj_rollback(&stan);
                 if (dev) Storage::rozruch_zapisz_sektory(dev, &stan);
                 (void)zapisz_do_pliku("/aktualizacje/stan_rozruchu.k0", (const char*)&stan, sizeof(stan));
                 (void)zapisz_do_pliku("/aktualizacje/stan_rozruchu.k1", (const char*)&stan, sizeof(stan));
+                if (blokowy_esp_systemowy(&esp)) {
+                    Storage::esp_zapisz_grubenv(esp, ten_str, "BRAK", 0);
+                }
+            } else if (!grub_ok || akt_porownaj_bajty(grub_potw, ten_str, 1) != 0) {
+                /* Samonaprawa grubenv ze stanu autorytatywnego LBA */
+                akt_log("[ROZRUCH] Samonaprawa grubenv rozpoczeta.");
+                if (blokowy_esp_systemowy(&esp)) {
+                    bool wr_ok = Storage::esp_zapisz_grubenv(esp, ten_str, "BRAK", 0);
+                    if (wr_ok) {
+                        akt_log("[ROZRUCH] Samonaprawa grubenv zakonczona sukcesem.");
+                    } else {
+                        akt_log("[ROZRUCH] Blad zapisu esp_zapisz_grubenv!");
+                    }
+                } else {
+                    akt_log("[ROZRUCH] Brak partycji ESP dla samonaprawy grubenv!");
+                }
             }
-            if (grub_ok) {
-                Storage::esp_zapisz_grubenv(esp, "A", "BRAK", 0);
+        } else if (stan.slot_oczekujacy == uruchomiony_slot &&
+                   stan.stan_oczekujacego == BURSZTYN_STAN_OCZEKUJACY &&
+                   stan.licznik_prob < stan.maks_prob) {
+            /* Uruchomiony zostal autoryzowany slot oczekujacy */
+            if (uruchomiony_slot == 1) {
+                akt_log("[ROZRUCH] Proba uruchomienia slotu B.");
+            } else {
+                akt_log("[ROZRUCH] Proba uruchomienia slotu A.");
+            }
+            if (awaria_testowa) {
+                if (uruchomiony_slot == 1) {
+                    akt_log("[TEST] Kontrolowana awaria przed potwierdzeniem slotu B.");
+                } else {
+                    akt_log("[TEST] Kontrolowana awaria przed potwierdzeniem slotu A.");
+                }
+                asm volatile("cli");
+                for (;;) {
+                    asm volatile("outb %0, $0x64" : : "a"((uint8_t)0xFE));
+                    asm volatile("hlt");
+                }
+            }
+        } else {
+            /* KRYTYCZNA NIEZGODNOSC: uruchomiony slot NIE JEST autoryzowany w sektorach LBA! */
+            const char* potw_str = (stan.slot_potwierdzony == 1) ? "B" : "A";
+            akt_log("[ROZRUCH] BLAD KRYTYCZNY: Nieautoryzowany rozruch slotu!");
+            akt_log("[ROZRUCH] Odrzucenie na podstawie kanonicznych sektorow stanu rozruchu.");
+            akt_log("[ROZRUCH] Natychmiastowy powrot do potwierdzonego slotu.");
+            if (blokowy_esp_systemowy(&esp)) {
+                Storage::esp_zapisz_grubenv(esp, potw_str, "NIEUDANY", 0);
+            }
+            asm volatile("cli");
+            for (;;) {
+                asm volatile("outb %0, $0x64" : : "a"((uint8_t)0xFE));
+                asm volatile("hlt");
             }
         }
     }
@@ -446,7 +499,11 @@ bool aktualizacja_potwierdz_rozruch(void) {
     bool stan_odczytany = false;
     Storage::Device* dev = blokowy_dysk_systemowy();
     if (dev) {
-        stan_odczytany = Storage::rozruch_odczytaj_sektory(dev, &stan);
+        if (Storage::rozruch_weryfikuj_uklad_dysku(dev)) {
+            stan_odczytany = Storage::rozruch_odczytaj_sektory(dev, &stan);
+        } else {
+            akt_log("[ROZRUCH] BLAD: Uklad dysku narusza zarezerwowane sektory stanu rozruchu LBA 2046/2047.");
+        }
     }
     if (!stan_odczytany) {
         bursztyn_rozruch_stan k0{}, k1{};
@@ -467,7 +524,9 @@ bool aktualizacja_potwierdz_rozruch(void) {
             return false;
         }
         if (dev) {
-            Storage::rozruch_zapisz_sektory(dev, &stan);
+            if (Storage::rozruch_weryfikuj_uklad_dysku(dev)) {
+                Storage::rozruch_zapisz_sektory(dev, &stan);
+            }
         }
         (void)zapisz_do_pliku("/aktualizacje/stan_rozruchu.k0", (const char*)&stan, sizeof(stan));
         (void)zapisz_do_pliku("/aktualizacje/stan_rozruchu.k1", (const char*)&stan, sizeof(stan));
@@ -798,7 +857,13 @@ bool aktualizacja_zainstaluj_zweryfikowany(const uint8_t* dane, size_t len,
     bursztyn_rozruch_stan stan{};
     bool stan_ok = false;
     Storage::Device* dev = blokowy_dysk_systemowy();
-    if (dev) stan_ok = Storage::rozruch_odczytaj_sektory(dev, &stan);
+    if (dev) {
+        if (!Storage::rozruch_weryfikuj_uklad_dysku(dev)) {
+            akt_log("[AKTUALIZACJA] BLAD: Uklad dysku niezgodny z zarezerwowanymi sektorami stanu rozruchu LBA 2046/2047!");
+            return false;
+        }
+        stan_ok = Storage::rozruch_odczytaj_sektory(dev, &stan);
+    }
     if (!stan_ok) {
         bursztyn_rozruch_stan k0{}, k1{};
         uint32_t g0 = 0, g1 = 0;
@@ -818,6 +883,10 @@ bool aktualizacja_zainstaluj_zweryfikowany(const uint8_t* dane, size_t len,
     }
 
     if (dev) {
+        if (!Storage::rozruch_weryfikuj_uklad_dysku(dev)) {
+            akt_log("[AKTUALIZACJA] BLAD: Uklad dysku narusza zarezerwowane sektory LBA 2046/2047!");
+            return false;
+        }
         if (!Storage::rozruch_zapisz_sektory(dev, &stan)) {
             akt_log("[AKTUALIZACJA] BLAD zapisu sektorow stanu rozruchu.");
             return false;

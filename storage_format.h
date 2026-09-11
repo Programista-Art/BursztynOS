@@ -93,6 +93,12 @@ struct EspLayout {
     uint32_t dirent_jadro_b_offset;
 };
 
+// Formalnie zarezerwowane sektory stanu rozruchu Bursztyn OS (Bursztyn Boot State reserved sectors)
+constexpr uint64_t BootStateSector0 = ROZRUCH_SEKTOR_KOPIA_0;
+constexpr uint64_t BootStateSector1 = ROZRUCH_SEKTOR_KOPIA_1;
+constexpr uint64_t BootStateSectorCount = ROZRUCH_SEKTORY_LICZBA;
+constexpr uint64_t EspMinStartSector = ROZRUCH_ESP_MIN_START_LBA;
+
 bool esp_odczytaj_uklad(const Partition& esp, EspLayout* out);
 bool esp_zapisz_jadro_slotu(const Partition& esp, uint8_t slot, const uint8_t* dane, uint32_t rozmiar);
 bool esp_odczytaj_jadro_slotu(const Partition& esp, uint8_t slot, uint8_t* bufor, uint32_t maks_rozmiar, uint32_t* odczytano);
@@ -100,5 +106,6 @@ bool esp_zapisz_grubenv(const Partition& esp, const char* potwierdzony, const ch
 bool esp_odczytaj_grubenv(const Partition& esp, char* potwierdzony, char* oczekujacy, uint32_t* proby);
 bool rozruch_zapisz_sektory(Device* d, const bursztyn_rozruch_stan* s);
 bool rozruch_odczytaj_sektory(Device* d, bursztyn_rozruch_stan* s);
+bool rozruch_weryfikuj_uklad_dysku(Device* d);
 }
 

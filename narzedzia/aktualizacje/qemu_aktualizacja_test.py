@@ -21,6 +21,8 @@ Wymagany scenariusz:
 import hashlib
 import json
 import os
+import shutil
+import struct
 import sys
 import tempfile
 import time
@@ -60,25 +62,59 @@ def zapisz_sektory_rozruchu(target_path, stan: RozruchStan):
         f.seek(2047 * 512)
         f.write(b)
 
-def znajdz_offset_grubenv(target_path):
-    HEADER = b"# GRUB Environment Block\n"
+def pobierz_uklad_esp(target_path):
     with open(target_path, "rb") as f:
-        data = f.read(512 * 1024 * 1024)
-        p = 0
-        while True:
-            idx = data.find(HEADER, p)
-            if idx == -1:
-                raise RuntimeError("Nie znaleziono bloku grubenv na dysku ESP!")
-            chunk = data[idx:idx+1024]
-            if b"bursztyn_" in chunk:
-                return idx
-            p = idx + 1
+        f.seek(1048576) # ESP start (LBA 2048)
+        vbr = f.read(512)
+        bps = struct.unpack_from("<H", vbr, 11)[0]
+        spc = vbr[13]
+        rsvd = struct.unpack_from("<H", vbr, 14)[0]
+        fats = vbr[16]
+        spf = struct.unpack_from("<I", vbr, 36)[0]
+        data_start = 1048576 + (rsvd + fats * spf) * bps
+
+        f.seek(data_start + (5 - 2) * spc * bps)
+        boot_dir = f.read(4096)
+        sha_a = b"\x00" * 32
+        sha_b = b"\x00" * 32
+        for i in range(128):
+            e = boot_dir[i*32:(i+1)*32]
+            name = e[:11]
+            if name == b"JADRO_A BIN":
+                cl = struct.unpack_from("<H", e, 20)[0] << 16 | struct.unpack_from("<H", e, 26)[0]
+                sz = struct.unpack_from("<I", e, 28)[0]
+                f.seek(data_start + (cl - 2) * spc * bps)
+                sha_a = hashlib.sha256(f.read(sz)).digest()
+            elif name == b"JADRO_B BIN":
+                cl = struct.unpack_from("<H", e, 20)[0] << 16 | struct.unpack_from("<H", e, 26)[0]
+                sz = struct.unpack_from("<I", e, 28)[0]
+                f.seek(data_start + (cl - 2) * spc * bps)
+                sha_b = hashlib.sha256(f.read(sz)).digest()
+
+        f.seek(data_start + (6 - 2) * spc * bps)
+        grub_dir = f.read(4096)
+        grubenv_offset = None
+        for i in range(128):
+            e = grub_dir[i*32:(i+1)*32]
+            if e[:11] == b"GRUBENV    ":
+                cl = struct.unpack_from("<H", e, 20)[0] << 16 | struct.unpack_from("<H", e, 26)[0]
+                grubenv_offset = data_start + (cl - 2) * spc * bps
+                break
+        return grubenv_offset, sha_a, sha_b
+
+def znajdz_offset_grubenv(target_path):
+    off, _, _ = pobierz_uklad_esp(target_path)
+    if off is None:
+        raise RuntimeError("Nie znaleziono pliku GRUBENV w tablicy FAT32 ESP!")
+    return off
 
 def odczytaj_grubenv(target_path):
     offset = znajdz_offset_grubenv(target_path)
     with open(target_path, "rb") as f:
         f.seek(offset)
         raw = f.read(1024)
+    if not raw.startswith(b"# GRUB Environment Block\n"):
+        return {}
     lines = raw.split(b"\n")
     res = {}
     for line in lines:
@@ -128,6 +164,20 @@ def main():
         sentinel_hash_init = qemu_install.sha(sentinel)
         target_hash_init = qemu_install.target_fingerprint(target)
         pomin_instalacje = True
+        # Zresetuj sektory rozruchu i grubenv do czystego stanu poczatkowego:
+        _, sha_a, sha_b = pobierz_uklad_esp(target)
+        stan_poczatkowy = RozruchStan(
+            slot_potwierdzony=SLOT_A,
+            slot_oczekujacy=SLOT_NIEZNANY,
+            stan_oczekujacego=STAN_NIEAKTYWNY,
+            licznik_prob=0,
+            generacja=1,
+            potwierdzona=(0, 1, 0),
+            sha_a=sha_a,
+            sha_b=sha_b
+        )
+        zapisz_sektory_rozruchu(target, stan_poczatkowy)
+        zapisz_grubenv(target, potwierdzony="A", oczekujacy="BRAK", proby=0)
     else:
         d = Path(tempfile.mkdtemp(prefix="qemu-ab-", dir=parent))
         print(f"Katalog roboczy: {d}", flush=True)
@@ -177,6 +227,7 @@ def main():
     # Krok 2: Rozruch zainstalowanego systemu ze Slotu A
     # -------------------------------------------------------------
     print("\n[KROK 2] Rozruch zainstalowanego systemu ze Slotu A...", flush=True)
+    shutil.rmtree(d / "boot-a", ignore_errors=True)
     g_boot_a = qemu_install.Guest(d / "boot-a", target, sentinel)
     try:
         log_a = g_boot_a.wait("System operacyjny gotowy!", timeout=180)
@@ -192,12 +243,15 @@ def main():
     # Krok 3: Zastosowanie aktualizacji do Slotu B (oznaczenie jako oczekujacy)
     # -------------------------------------------------------------
     print("\n[KROK 3] Oznaczenie aktualizacji do Slotu B jako oczekujacej...", flush=True)
+    _, sha_a, sha_b = pobierz_uklad_esp(target)
     stan_upd = odczytaj_sektory_rozruchu(target)
     stan_upd.generacja += 1
     stan_upd.slot_oczekujacy = SLOT_B
     stan_upd.stan_oczekujacego = STAN_OCZEKUJACY
     stan_upd.licznik_prob = 0
     stan_upd.oczekujaca = (0, 2, 0)
+    stan_upd.sha_a = sha_a
+    stan_upd.sha_b = sha_b
     zapisz_sektory_rozruchu(target, stan_upd)
     zapisz_grubenv(target, potwierdzony="A", oczekujacy="B", proby=0)
     print("Slot B oznaczony jako oczekujacy na rozruch.", flush=True)
@@ -206,9 +260,10 @@ def main():
     # Krok 4: Rozruch zaktualizowanego systemu (Slot B) i potwierdzenie
     # -------------------------------------------------------------
     print("\n[KROK 4] Rozruch Slotu B i potwierdzenie sukcesu w punkcie kontrolnym...", flush=True)
+    shutil.rmtree(d / "boot-b", ignore_errors=True)
     g_boot_b = qemu_install.Guest(d / "boot-b", target, sentinel)
     try:
-        log_b = g_boot_b.wait("System operacyjny gotowy!", timeout=180)
+        log_b = g_boot_b.wait("[ROZRUCH] Slot B potwierdzony.", timeout=180)
         time.sleep(1)
         g_boot_b.q.screenshot(g_boot_b.dir / "desktop-b.png")
         assert "[ROZRUCH] Proba uruchomienia slotu B." in log_b, "Brak logu proby uruchomienia slotu B!"
@@ -234,6 +289,7 @@ def main():
     # Krok 5: Ponowny rozruch - weryfikacja trwalosci potwierdzonego Slotu B
     # -------------------------------------------------------------
     print("\n[KROK 5] Ponowny rozruch - Slot B pozostaje aktywny...", flush=True)
+    shutil.rmtree(d / "reboot-b", ignore_errors=True)
     g_reboot_b = qemu_install.Guest(d / "reboot-b", target, sentinel)
     try:
         log_reb = g_reboot_b.wait("System operacyjny gotowy!", timeout=180)
@@ -247,7 +303,7 @@ def main():
     # Krok 6: Test kontrolowanej awarii i automatycznego powrotu (Rollback)
     # -------------------------------------------------------------
     print("\n[KROK 6] Test kontrolowanej awarii aktualizacji i automatycznego powrotu...", flush=True)
-    # Przygotuj stan: Slot A jest potwierdzony, Slot B oczekujacy, z flaga kontrolowanej awarii
+    _, sha_a, sha_b = pobierz_uklad_esp(target)
     stan_fail = odczytaj_sektory_rozruchu(target)
     stan_fail.generacja += 1
     stan_fail.slot_potwierdzony = SLOT_A
@@ -255,11 +311,13 @@ def main():
     stan_fail.stan_oczekujacego = STAN_OCZEKUJACY
     stan_fail.licznik_prob = 0
     stan_fail.oczekujaca = (0, 3, 0)
+    stan_fail.sha_a = sha_a
+    stan_fail.sha_b = sha_b
     zapisz_sektory_rozruchu(target, stan_fail)
     zapisz_grubenv(target, potwierdzony="A", oczekujacy="B", proby=0, awaria="B")
 
-    # Pierwsza proba rozruchu B - zakonczenie kontrolowana awaria przed potwierdzeniem
     print("Pierwszy start Slotu B (z celowa awaria przed potwierdzeniem)...", flush=True)
+    shutil.rmtree(d / "fail-b", ignore_errors=True)
     g_fail_b = qemu_install.Guest(d / "fail-b", target, sentinel)
     try:
         log_fail = g_fail_b.wait("[TEST] Kontrolowana awaria przed potwierdzeniem slotu B.", timeout=120)
@@ -270,12 +328,11 @@ def main():
         g_fail_b.close()
     print("Awaria przed potwierdzeniem zarejestrowana prawidlowo.", flush=True)
 
-    # Sprawdz, ze GRUB zarejestrowal probe rozruchu
     env_mid_fail = odczytaj_grubenv(target)
     assert env_mid_fail.get("bursztyn_proby") == "1", f"GRUB nie zwiekszyl licznika prob: {env_mid_fail}"
 
-    # Drugi start - GRUB musi wykryc wyczerpanie prob i automatycznie cofnac do Slotu A!
     print("\nDrugi start: automatyczny powrot (rollback) do Slotu A...", flush=True)
+    shutil.rmtree(d / "rollback-a", ignore_errors=True)
     g_rollback_a = qemu_install.Guest(d / "rollback-a", target, sentinel)
     try:
         log_rb = g_rollback_a.wait("System operacyjny gotowy!", timeout=180)
@@ -288,10 +345,171 @@ def main():
         g_rollback_a.close()
     print("Automatyczny powrot do Slotu A: ZWERYFIKOWANY W QEMU.", flush=True)
 
-    # Weryfikacja stanu na dysku po rollbacku
     stan_post_rb = odczytaj_sektory_rozruchu(target)
     assert stan_post_rb.slot_potwierdzony == SLOT_A, f"Potwierdzony slot nie jest A: {stan_post_rb.slot_potwierdzony}"
     assert stan_post_rb.stan_oczekujacego == STAN_NIEUDANY, f"Stan oczekujacego nie jest nieudany: {stan_post_rb.stan_oczekujacego}"
+
+    # -------------------------------------------------------------
+    # Krok 7: Przerwany zapis aktywacji (split-write: LBA wskazuje B, grubenv wskazuje A)
+    # -------------------------------------------------------------
+    print("\n[KROK 7] Przerwany zapis aktywacji (LBA wskazuje B, grubenv wskazuje A)...", flush=True)
+    stan_split = odczytaj_sektory_rozruchu(target)
+    stan_split.generacja += 1
+    stan_split.slot_potwierdzony = SLOT_A
+    stan_split.slot_oczekujacy = SLOT_B
+    stan_split.stan_oczekujacego = STAN_OCZEKUJACY
+    stan_split.licznik_prob = 0
+    stan_split.oczekujaca = (0, 4, 0)
+    stan_split.sha_a = sha_a
+    stan_split.sha_b = sha_b
+    zapisz_sektory_rozruchu(target, stan_split)
+    # Symulacja: utrata zasilania przed zapisem grubenv - grubenv nadal wskazuje A
+    zapisz_grubenv(target, potwierdzony="A", oczekujacy="BRAK", proby=0)
+
+    shutil.rmtree(d / "split-write", ignore_errors=True)
+    g_split = qemu_install.Guest(d / "split-write", target, sentinel)
+    try:
+        log_split = g_split.wait("System operacyjny gotowy!", timeout=180)
+        time.sleep(1)
+        assert "System operacyjny gotowy!" in log_split
+    finally:
+        g_split.close()
+    print("Przerwany zapis aktywacji: bezpieczny rozruch potwierdzonego slotu A ZWERYFIKOWANY.", flush=True)
+
+    # -------------------------------------------------------------
+    # Krok 8: Samonaprawa uszkodzonego grubenv z autorytatywnych sektorow LBA
+    # -------------------------------------------------------------
+    print("\n[KROK 8] Samonaprawa uszkodzonego grubenv z autorytatywnych sektorow LBA...", flush=True)
+    # Po kroku 7 upewnijmy sie, ze LBA wskazuje stabilny potwierdzony Slot A:
+    stan_clean = RozruchStan(
+        slot_potwierdzony=SLOT_A,
+        slot_oczekujacy=SLOT_NIEZNANY,
+        stan_oczekujacego=STAN_POTWIERDZONY,
+        generacja=stan_split.generacja + 1,
+        potwierdzona=(0, 1, 0),
+        sha_a=sha_a,
+        sha_b=sha_b
+    )
+    zapisz_sektory_rozruchu(target, stan_clean)
+
+    offset_env = znajdz_offset_grubenv(target)
+    with open(target, "r+b") as f:
+        f.seek(offset_env)
+        f.write(b"\x00" * 1024)
+
+    # GRUB przy braku poprawnego grubenv laduje konfiguracje awaryjna (Slot A).
+    # Jadro Slotu A wykrywa brak grubenv i odtwarza go ze stanu sektorow LBA.
+    shutil.rmtree(d / "heal-grubenv", ignore_errors=True)
+    g_heal = qemu_install.Guest(d / "heal-grubenv", target, sentinel)
+    try:
+        log_heal = g_heal.wait("System operacyjny gotowy!", timeout=180)
+        time.sleep(1)
+        assert "[ROZRUCH] Samonaprawa grubenv zakonczona sukcesem." in log_heal
+        assert "System operacyjny gotowy!" in log_heal
+    finally:
+        g_heal.close()
+
+    env_healed = odczytaj_grubenv(target)
+    assert env_healed.get("bursztyn_potwierdzony") == "A", f"grubenv nie zostal naprawiony: {env_healed}"
+    assert env_healed.get("bursztyn_oczekujacy") == "BRAK"
+    assert env_healed.get("bursztyn_proby") == "0"
+    print("Samonaprawa grubenv przez jadro na podstawie LBA: ZWERYFIKOWANA.", flush=True)
+
+    # -------------------------------------------------------------
+    # Krok 9: Odrzucenie nieautoryzowanego rozruchu (stale grubenv -> B, ale LBA ma NIEUDANY)
+    # -------------------------------------------------------------
+    print("\n[KROK 9] Odrzucenie nieautoryzowanego rozruchu na podstawie LBA...", flush=True)
+    stan_unauth = odczytaj_sektory_rozruchu(target)
+    stan_unauth.generacja += 1
+    stan_unauth.slot_potwierdzony = SLOT_A
+    stan_unauth.slot_oczekujacy = SLOT_B
+    stan_unauth.stan_oczekujacego = STAN_NIEUDANY
+    stan_unauth.sha_a = sha_a
+    stan_unauth.sha_b = sha_b
+    zapisz_sektory_rozruchu(target, stan_unauth)
+    # Wstrzykujemy stale/zmanipulowane grubenv wymuszajace start slotu B:
+    zapisz_grubenv(target, potwierdzony="A", oczekujacy="B", proby=0)
+
+    # Start: GRUB odpala jadro B. Jadro B wykrywa brak autoryzacji w LBA, loguje blad krytyczny,
+    # zapisuje w grubenv bursztyn_oczekujacy=NIEUDANY i wymusza natychmiastowy sprzetowy reset!
+    shutil.rmtree(d / "unauth-boot", ignore_errors=True)
+    g_unauth = qemu_install.Guest(d / "unauth-boot", target, sentinel)
+    try:
+        log_unauth = g_unauth.wait("[ROZRUCH] BLAD KRYTYCZNY: Nieautoryzowany rozruch slotu!", timeout=120)
+        time.sleep(1)
+        assert "[ROZRUCH] Odrzucenie na podstawie kanonicznych sektorow stanu rozruchu." in log_unauth
+        assert "[ROZRUCH] Natychmiastowy powrot do potwierdzonego slotu." in log_unauth
+    finally:
+        g_unauth.close()
+    print("Odrzucenie nieautoryzowanego rozruchu przez jadro: ZWERYFIKOWANE.", flush=True)
+
+    env_unauth_post = odczytaj_grubenv(target)
+    assert env_unauth_post.get("bursztyn_potwierdzony") == "A"
+    assert env_unauth_post.get("bursztyn_oczekujacy") == "NIEUDANY"
+
+    # Kolejny start: GRUB po resecie automatycznie laduje bezpieczny Slot A
+    shutil.rmtree(d / "unauth-recov", ignore_errors=True)
+    g_recov = qemu_install.Guest(d / "unauth-recov", target, sentinel)
+    try:
+        log_recov = g_recov.wait("System operacyjny gotowy!", timeout=180)
+        time.sleep(1)
+        assert "[ROZRUCH] Nieudane uruchomienie slotu B." in log_recov
+        assert "[ROZRUCH] Powrot do slotu A." in log_recov
+        assert "System operacyjny gotowy!" in log_recov
+    finally:
+        g_recov.close()
+    print("Automatyczny powrot do Slotu A po odrzuceniu: ZWERYFIKOWANY.", flush=True)
+
+    # -------------------------------------------------------------
+    # Krok 10: Weryfikacja odrzucenia klucza testowego przez wydanie RELEASE
+    # -------------------------------------------------------------
+    print("\n[KROK 10] Weryfikacja odrzucenia aktualizacji z kluczem TEST przez wersje RELEASE...", flush=True)
+    import subprocess
+    tool_akt = [sys.executable, str(ROOT / "narzedzia" / "aktualizacje" / "podpisz_aktualizacje.py")]
+    priv_test = ROOT / "narzedzia" / "aktualizacje" / "klucz-testowy-prywatny.pem"
+    pub_release = ROOT / "narzedzia" / "aktualizacje" / "klucz-wydanie-publiczny.pem"
+    test_pkg = d / "bursztyn-0.5.0.akt"
+    test_wykaz = d / "test_wykaz.wykaz"
+    pkg_src = d / "pkg_src" / "jadro"
+    pkg_src.mkdir(parents=True, exist_ok=True)
+    with open(pkg_src / "test.bin", "wb") as f:
+        f.write(b"jadro-testowe")
+
+    subprocess.run(tool_akt + ["zbuduj-pakiet", "--zrodlo", str(d / "pkg_src"), "--wyjscie", str(test_pkg)], check=True, cwd=ROOT)
+    subprocess.run(tool_akt + ["podpisz-wykaz", "--pakiet", str(test_pkg), "--wersja", "0.5.0", "--minimalna", "0.1.0", "--kanal", "stabilny", "--prywatny", str(priv_test), "--wyjscie", str(test_wykaz)], check=True, cwd=ROOT)
+    res = subprocess.run(tool_akt + ["weryfikuj", "--wykaz", str(test_wykaz), "--publiczny", str(pub_release)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=ROOT)
+    assert res.returncode != 0, "Aktualizacja podpisana kluczem TEST zostala blednie zaakceptowana przez RELEASE!"
+    print("Odrzucenie pakietu podpisanego kluczem TEST przez klucz RELEASE: ZWERYFIKOWANE.", flush=True)
+
+    # -------------------------------------------------------------
+    # Krok 11: Formalna weryfikacja zarezerwowanych sektorow stanu rozruchu
+    # -------------------------------------------------------------
+    print("\n[KROK 11] Weryfikacja formalnej rezerwacji sektorow rozruchu (LBA 2046/2047)...", flush=True)
+    with open(target, "rb") as f:
+        f.seek(512)
+        gpt_h = f.read(512)
+        assert gpt_h.startswith(b"EFI PART"), "Brak prawidlowego naglowka GPT!"
+        arr_lba = struct.unpack_from("<Q", gpt_h, 72)[0]
+        entries_cnt = struct.unpack_from("<I", gpt_h, 80)[0]
+        entry_sz = struct.unpack_from("<I", gpt_h, 84)[0]
+        arr_end = arr_lba + (entries_cnt * entry_sz + 511) // 512 - 1
+        assert arr_end < 2046, f"Tablica partycji GPT ({arr_end}) nachodzi na LBA 2046!"
+
+        f.seek(arr_lba * 512)
+        esp_start = None
+        for _ in range(entries_cnt):
+            ent = f.read(entry_sz)
+            p_type = ent[:16]
+            if p_type == b"\x00" * 16:
+                continue
+            p_start = struct.unpack_from("<Q", ent, 32)[0]
+            p_end = struct.unpack_from("<Q", ent, 40)[0]
+            assert not (p_start <= 2047 and p_end >= 2046), f"Partycja [{p_start}, {p_end}] nachodzi na LBA 2046/2047!"
+            if p_type == bytes([0x28, 0x73, 0x2a, 0xc1, 0x1f, 0xf8, 0xd2, 0x11, 0xba, 0x4b, 0x00, 0xa0, 0xc9, 0x3e, 0xc9, 0x3b]):
+                esp_start = p_start
+
+        assert esp_start is not None and esp_start >= 2048, f"Partycja ESP rozpoczyna sie przed LBA 2048: {esp_start}"
+    print("Formalna rezerwacja LBA 2046/2047 (brak kolizji z GPT i ESP): ZWERYFIKOWANA.", flush=True)
 
     # Sprawdzenie niezmiennika dysku wartowniczego
     sentinel_hash_final = qemu_install.sha(sentinel)
