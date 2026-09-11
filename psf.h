@@ -30,8 +30,16 @@
 #include <stdbool.h>
 #include "storage_format.h"
 
-// Wyłącznie Ring0. Brak formatowania w inicjalizuj_psf().
 void psf_ustaw_partycje(const Storage::Partition* partition);
+#ifdef __cplusplus
+extern "C" {
+#endif
+void psf_ustaw_aktywny_slot(uint8_t slot);
+uint8_t psf_pobierz_aktywny_slot(void);
+void psf_wlacz_translacje_slotow(bool wlaczone);
+#ifdef __cplusplus
+}
+#endif
 bool psf_formatuj_instalacje(const Storage::Partition& partition);
 bool psf_formatuj_instalacje_start(const Storage::Partition& partition,uint64_t* razem);
 bool psf_formatuj_instalacje_step(uint64_t* wykonane,bool* gotowe);

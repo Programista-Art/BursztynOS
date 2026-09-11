@@ -39,6 +39,8 @@ extern "C" void odblokuj_ekran();
 #include "sterowniki/czas/hpet.h"
 #include "sterowniki/dzwiek/hda.h"
 #include "sterowniki/usb/usb.h"
+#include "aktualizacja.h"
+#include "wersja_systemu.h"
 
 #ifndef BURSZTYN_DEBUG_NET_SELFTEST
 #define BURSZTYN_DEBUG_NET_SELFTEST 0
@@ -745,6 +747,21 @@ bool zapewnij_katalog_startowy(const char* sciezka) {
 }
 
 static const char* const KATALOGI_SYSTEMOWE[] = {
+        "/sloty",
+        "/sloty/a",
+        "/sloty/a/programy",
+        "/sloty/a/system",
+        "/sloty/a/system/jadro",
+        "/sloty/a/system/biblioteki",
+        "/sloty/a/system/konfig",
+        "/sloty/a/system/boot",
+        "/sloty/b",
+        "/sloty/b/programy",
+        "/sloty/b/system",
+        "/sloty/b/system/jadro",
+        "/sloty/b/system/biblioteki",
+        "/sloty/b/system/konfig",
+        "/sloty/b/system/boot",
         "/jadro",
         "/system",
         "/programy",
@@ -769,7 +786,9 @@ static const char* const KATALOGI_SYSTEMOWE[] = {
         "/logi",
         "/piaskownica",
         "/tymczasowe",
-        "/obrazy"
+        "/obrazy",
+        "/aktualizacje",
+        "/aktualizacje/przygotowanie"
 };
 
 void utworz_drabine_katalogow() {
@@ -1760,10 +1779,11 @@ void wypisz_ilosc_ram() {
 
 } // namespace
 
-bool kernel_instaluj_system(){
+    bool kernel_instaluj_system(){
     scisla_instalacja=true;pliki_instalacja_ok=true;liczba_plikow_kontrolnych=0;
     ekran_aplikacja_instalacja_ok=tapety_aplikacja_instalacja_ok=false;
     utworz_drabine_katalogow();
+    aktualizacja_przygotuj_system_plikow();
     if(pliki_instalacja_ok)instaluj_wbudowane_programy();
     scisla_instalacja=false;
     return pliki_instalacja_ok&&ekran_aplikacja_instalacja_ok&&
@@ -2136,7 +2156,9 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
             ADRES_RAM_DYSKU_PSF),
         ROZMIAR_RAM_DYSKU_PSF);
 
+    aktualizacja_sprawdz_rozruch(g_multiboot_info_ptr);
     utworz_drabine_katalogow();
+    aktualizacja_przygotuj_system_plikow();
 
 #if BURSZTYN_TESTY_PSF
     wypisz_log("[PSF-BOOT-TEST] create start");
@@ -2190,6 +2212,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
        aplikacja developerska uruchamiana recznie. Osobny obraz regresyjny
        zadaje jawny tryb automatyczny w wierszu polecen Multiboot2. */
     if (zadano_automatyczne_testy(g_multiboot_info_ptr)) {
+        aktualizacja_samotest_automatyczny();
         (void)bws_uruchom_program_z_pliku_z_argumentem(
             "/programy/test.cebula/test.bur",
             PZB_UZYTKOWNIK,
@@ -2220,6 +2243,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
         "--------------------------------------------------");
     wypisz_log(
         "System operacyjny gotowy!");
+    aktualizacja_potwierdz_rozruch();
 
     /*
      * Dopiero teraz dopuszczamy IRQ:

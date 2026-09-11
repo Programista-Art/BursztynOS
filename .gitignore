@@ -26,3 +26,5 @@ wirtualny_dysk.img
 .installer-run/
 instalator.bin
 instalator.elf
+narzedzia/instalator/__pycache__/
+aktualizacja_klucz.h

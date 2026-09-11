@@ -216,6 +216,34 @@ void perform(){
                      uint32_t(done),uint32_t(total));
         if(verify_phase==4){set_progress(99,POSTEP_WERYFIKACJA);stage=INST_ZNACZNIK;}
     }else if(stage==INST_ZNACZNIK){
+        struct bursztyn_rozruch_stan stan_poczatkowy{};
+        rozruch_stan_poczatkowy(&stan_poczatkowy, 0, 1, 0);
+
+        if (!Storage::rozruch_zapisz_sektory(layout.bsp.device, &stan_poczatkowy)) {
+            fail(INST_IO, "Zapis sektorów stanu rozruchu (LBA 2046/2047) nie powiódł się."); return;
+        }
+        bursztyn_rozruch_stan stan_odczyt{};
+        if (!Storage::rozruch_odczytaj_sektory(layout.bsp.device, &stan_odczyt) ||
+            stan_odczyt.slot_potwierdzony != BURSZTYN_SLOT_A) {
+            fail(INST_IO, "Weryfikacja sektorów stanu rozruchu nie powiodła się."); return;
+        }
+
+        (void)zapewnij_katalog("/aktualizacje");
+        (void)usun_twor("/aktualizacje/stan_rozruchu.k0");
+        (void)usun_twor("/aktualizacje/stan_rozruchu.k1");
+        if (!utworz_plik("/aktualizacje/stan_rozruchu.k0") ||
+            !zapisz_do_pliku("/aktualizacje/stan_rozruchu.k0", (const char*)&stan_poczatkowy, sizeof(stan_poczatkowy)) ||
+            !utworz_plik("/aktualizacje/stan_rozruchu.k1") ||
+            !zapisz_do_pliku("/aktualizacje/stan_rozruchu.k1", (const char*)&stan_poczatkowy, sizeof(stan_poczatkowy))) {
+            fail(INST_IO, "Zapis kopii stanu rozruchu na BSP2 nie powiódł się."); return;
+        }
+
+        char p_potw[4]{}, p_oczek[16]{}; uint32_t p_prob = 99;
+        if (!Storage::esp_odczytaj_grubenv(layout.esp, p_potw, p_oczek, &p_prob) ||
+            p_potw[0] != 'A' || p_prob != 0) {
+            fail(INST_IO, "Weryfikacja bloku grubenv na ESP nie powiodła się."); return;
+        }
+
         if(!psf_znacznik_instalacji(disk_uuid,true)||!Storage::complete(layout.bsp,disk_uuid)){
             fail(INST_IO,"Znacznik ukończenia: FLUSH / CRC / odczyt kontrolny.");return;}
         set_progress(100,POSTEP_COMPLETE,0,0,true);stage=INST_KONIEC;

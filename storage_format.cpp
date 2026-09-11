@@ -7,6 +7,7 @@ const uint8_t EspType[16]={0x28,0x73,0x2a,0xc1,0x1f,0xf8,0xd2,0x11,0xba,0x4b,0x0
 static void zero(void* p,size_t n){auto*b=(uint8_t*)p;while(n--)*b++=0;}
 static void copy(void* d,const void*s,size_t n){auto*a=(uint8_t*)d;auto*b=(const uint8_t*)s;while(n--)*a++=*b++;}
 bool equal(const void*a,const void*b,size_t n){auto*x=(const uint8_t*)a;auto*y=(const uint8_t*)b;while(n--)if(*x++!=*y++)return false;return true;}
+static uint16_t u16(const uint8_t*p){return uint16_t(p[0])|uint16_t(p[1])<<8;}
 static uint32_t u32(const uint8_t*p){return uint32_t(p[0])|uint32_t(p[1])<<8|uint32_t(p[2])<<16|uint32_t(p[3])<<24;}
 static uint64_t u64(const uint8_t*p){return u32(p)|(uint64_t(u32(p+4))<<32);}
 static void p16(uint8_t*p,uint16_t v){p[0]=v;p[1]=v>>8;}
@@ -172,24 +173,44 @@ bool complete(const Partition&p,const uint8_t uuid[16]){
         equal(sb,"BSP2",4)&&u64(sb+4)==u64(a+32)&&u64(a+32)<=(p.count-8)*512;
 }
 
-// Installer-only FAT32: 512 MiB ESP, 4 KiB clusters, two FATs, bounded tree.
-// No runtime FAT mount, no allocation from untrusted existing FAT metadata.
+// Installer FAT32 z obsluga slotow A/B: 512 MiB ESP, 4 KiB klastry, dwa FAT-y.
+static uint8_t default_grubenv_bytes[1024];
+static bool default_grubenv_init = false;
+
+static void inicjalizuj_domyslny_grubenv(){
+    if (default_grubenv_init) return;
+    for (int i = 0; i < 1024; ++i) default_grubenv_bytes[i] = '#';
+    const char tekst[] =
+        "# GRUB Environment Block\n"
+        "bursztyn_potwierdzony=A\n"
+        "bursztyn_oczekujacy=BRAK\n"
+        "bursztyn_proby=0\n";
+    for (size_t i = 0; tekst[i]; ++i) default_grubenv_bytes[i] = (uint8_t)tekst[i];
+    default_grubenv_init = true;
+}
+
 bool fat_install_start(const Partition&p,BootFile efi,BootFile kernel,BootFile config,
                        FatInstallState*state){
     if(!state)return false;
     *state={};
+    inicjalizuj_domyslny_grubenv();
     if(!p.device||p.device->sector_size!=512||p.count!=EspBytes/512||p.start>UINT32_MAX||
        !efi.data||!efi.size||!kernel.data||!kernel.size||!config.data||!config.size)return false;
     const uint32_t total=uint32_t(p.count),fat=(total/8*4+511)/512;
     const uint32_t data_start=32+2*fat,clusters=(total-data_start)/8;
-    BootFile files[]={efi,kernel,config};uint32_t start[3],length[3],next=7,total_file_clusters=0;
-    for(unsigned i=0;i<3;++i){length[i]=(uint64_t(files[i].size)+4095)/4096;start[i]=next;
+    BootFile files[5]={efi,kernel,kernel,config,{default_grubenv_bytes,1024}};
+    uint32_t start[5],length[5],next=7,total_file_clusters=0;
+    for(unsigned i=0;i<5;++i){length[i]=(uint64_t(files[i].size)+4095)/4096;start[i]=next;
         if(length[i]>clusters||next>clusters+2-length[i]||total_file_clusters>UINT32_MAX-length[i])return false;
         total_file_clusters+=length[i];next+=length[i];}
     if(clusters<65525||uint64_t(clusters+2)*4>uint64_t(fat)*512)return false;
-    state->partition=p;state->files[0]=efi;state->files[1]=kernel;state->files[2]=config;
+    state->partition=p;
+    for(unsigned i=0;i<5;++i){
+        state->files[i]=files[i];
+        state->file_start[i]=start[i];
+        state->file_clusters[i]=length[i];
+    }
     state->fat_sectors=fat;state->data_start=data_start;state->clusters=clusters;state->next_cluster=next;
-    for(unsigned i=0;i<3;++i){state->file_start[i]=start[i];state->file_clusters[i]=length[i];}
     const uint32_t crc_units=(kernel.size+16383U)/16384U;
     state->boot_crc_state=~0U;
     state->total_units=4+crc_units+1+1+(fat+7)/8+5+total_file_clusters+1;
@@ -216,7 +237,7 @@ bool fat_install_step(FatInstallState*s){
         if(s->boot_crc_offset==files[1].size){s->boot_crc_state=~crc;s->phase=2;}
     }else if(s->phase==2){
         b[0]=0xEB;b[1]=0x58;b[2]=0x90;copy(b+3,"BURSZTYN",8);p16(b+11,512);b[13]=8;p16(b+14,32);b[16]=2;b[21]=0xF8;
-    p16(b+24,63);p16(b+26,255);p32(b+28,uint32_t(p.start));p32(b+32,uint32_t(p.count));p32(b+36,fat);p32(b+44,2);
+        p16(b+24,63);p16(b+26,255);p32(b+28,uint32_t(p.start));p32(b+32,uint32_t(p.count));p32(b+36,fat);p32(b+44,2);
         p16(b+48,1);p16(b+50,6);b[64]=0x80;b[66]=0x29;p32(b+67,s->boot_crc_state);
         copy(b+71,"BURSZTYNESP",11);copy(b+82,"FAT32   ",8);b[510]=0x55;b[511]=0xAA;
         ok=write_verify(p,0,1,b)&&write_verify(p,6,1,b);s->phase=3;
@@ -227,14 +248,14 @@ bool fat_install_step(FatInstallState*s){
         const uint32_t off=s->index;
         for(unsigned j=0;j<1024;++j){uint32_t cl=off*128+j,v=0;
             if(cl==0)v=0x0FFFFFF8;else if(cl==1|| (cl>=2&&cl<7))v=0x0FFFFFFF;
-            else for(unsigned f=0;f<3;++f)if(cl>=start[f]&&cl<start[f]+length[f])v=cl+1==start[f]+length[f]?0x0FFFFFFF:cl+1;
+            else for(unsigned f=0;f<5;++f)if(cl>=start[f]&&cl<start[f]+length[f])v=cl+1==start[f]+length[f]?0x0FFFFFFF:cl+1;
             p32(b+4*j,v);}
         uint32_t n=fat-off<8?fat-off:8;
         ok=write_verify(p,32+off,n,b)&&write_verify(p,32+fat+off,n,b);
         s->index+=n;if(s->index>=fat){s->phase=5;s->index=0;}
     }else if(s->phase==5){
-    auto dirent=[&](unsigned index,const char*name,uint32_t cl,uint32_t size,bool dir){auto*e=b+32*index;
-        copy(e,name,11);e[11]=dir?0x10:0x20;p16(e+20,cl>>16);p16(e+26,cl);p32(e+28,size);p16(e+24,0x5821);};
+        auto dirent=[&](unsigned index,const char*name,uint32_t cl,uint32_t size,bool dir){auto*e=b+32*index;
+            copy(e,name,11);e[11]=dir?0x10:0x20;p16(e+20,cl>>16);p16(e+26,cl);p32(e+28,size);p16(e+24,0x5821);};
         const uint32_t cl=2+s->index;
         if(cl==2){dirent(0,"EFI        ",3,0,true);dirent(1,"BOOT       ",5,0,true);}
         else {
@@ -249,8 +270,13 @@ bool fat_install_step(FatInstallState*s){
                 for(unsigned n=0;n<2;++n){auto*e=b+(3+n)*32;unsigned seq=2-n;e[0]=seq|(seq==2?0x40:0);e[11]=0x0F;e[13]=sum;
                     for(unsigned j=0;j<13;++j){unsigned pos=(seq-1)*13+j;p16(e+positions[j],pos<21?uint8_t(name[pos]):(pos==21?0:0xFFFF));}}
                 dirent(5,alias,start[1],files[1].size,false);
+                dirent(6,"JADRO_A BIN",start[1],files[1].size,false);
+                dirent(7,"JADRO_B BIN",start[2],files[2].size,false);
             }
-            if(cl==6)dirent(2,"GRUB    CFG",start[2],files[2].size,false);
+            if(cl==6){
+                dirent(2,"GRUB    CFG",start[3],files[3].size,false);
+                dirent(3,"GRUBENV    ",start[4],files[4].size,false);
+            }
         }
         ok=write_verify(p,data_start+uint64_t(cl-2)*8,8,b);
         if(++s->index==5){s->phase=6;s->index=0;s->file_index=0;}
@@ -260,7 +286,7 @@ bool fat_install_step(FatInstallState*s){
         const uint32_t n=files[f].size-off>4096?4096:uint32_t(files[f].size-off);
         copy(b,files[f].data+off,n);
         ok=write_verify(p,data_start+uint64_t(start[f]+i-2)*8,8,b);
-        if(++s->index==length[f]){s->index=0;if(++s->file_index==3)s->phase=7;}
+        if(++s->index==length[f]){s->index=0;if(++s->file_index==5)s->phase=7;}
     }else{
         ok=flush(p);s->complete=ok;
     }
@@ -275,4 +301,253 @@ bool fat_install(const Partition&p,BootFile efi,BootFile kernel,BootFile config)
     while(!state.complete)if(!fat_install_step(&state))return false;
     return true;
 }
+
+bool esp_odczytaj_uklad(const Partition& esp, EspLayout* out) {
+    if (!out || !esp.device || esp.device->sector_size != 512 || esp.count < 65536) return false;
+    uint8_t boot[512];
+    if (!read(esp, 0, 1, boot)) return false;
+    if (!equal(boot + 3, "BURSZTYN", 8) || !equal(boot + 82, "FAT32   ", 8)) return false;
+
+    uint32_t fat = u32(boot + 36);
+    uint32_t data_start = 32 + 2 * fat;
+    uint32_t spc = boot[13];
+    if (spc != 8 || fat == 0) return false;
+
+    uint8_t boot_dir[4096];
+    uint64_t cl5_lba = data_start + uint64_t(5 - 2) * spc;
+    if (!read(esp, cl5_lba, 8, boot_dir)) return false;
+
+    uint8_t grub_dir[4096];
+    uint64_t cl6_lba = data_start + uint64_t(6 - 2) * spc;
+    if (!read(esp, cl6_lba, 8, grub_dir)) return false;
+
+    uint32_t cl_a = 0, sz_a = 0, off_a = 0;
+    uint32_t cl_b = 0, sz_b = 0, off_b = 0;
+    bool found_a = false, found_b = false;
+
+    for (unsigned i = 0; i < 128; ++i) {
+        const uint8_t* e = boot_dir + 32 * i;
+        if (equal(e, "JADRO_A BIN", 11)) {
+            cl_a = uint32_t(u16(e + 20)) << 16 | uint32_t(u16(e + 26));
+            sz_a = u32(e + 28);
+            off_a = 32 * i;
+            found_a = true;
+        } else if (equal(e, "JADRO_B BIN", 11)) {
+            cl_b = uint32_t(u16(e + 20)) << 16 | uint32_t(u16(e + 26));
+            sz_b = u32(e + 28);
+            off_b = 32 * i;
+            found_b = true;
+        }
+    }
+
+    uint32_t cl_env = 0;
+    bool found_env = false;
+    for (unsigned i = 0; i < 128; ++i) {
+        const uint8_t* e = grub_dir + 32 * i;
+        if (equal(e, "GRUBENV    ", 11)) {
+            cl_env = uint32_t(u16(e + 20)) << 16 | uint32_t(u16(e + 26));
+            found_env = true;
+        }
+    }
+
+    if (!found_a || !found_b || !found_env) return false;
+    if (cl_a < 7 || cl_b <= cl_a || cl_env <= cl_b) return false;
+
+    uint32_t len_a = cl_b - cl_a;
+    uint32_t len_b = len_a;
+
+    out->data_start_lba = data_start;
+    out->cluster_size_sectors = spc;
+    out->jadro_a_lba = data_start + uint64_t(cl_a - 2) * spc;
+    out->jadro_a_clusters = len_a;
+    out->jadro_a_max_bytes = len_a * 4096;
+    out->jadro_a_size = sz_a;
+    out->jadro_b_lba = data_start + uint64_t(cl_b - 2) * spc;
+    out->jadro_b_clusters = len_b;
+    out->jadro_b_max_bytes = len_b * 4096;
+    out->jadro_b_size = sz_b;
+    out->grubenv_lba = data_start + uint64_t(cl_env - 2) * spc;
+    out->dirent_boot_lba = cl5_lba;
+    out->dirent_jadro_a_offset = off_a;
+    out->dirent_jadro_b_offset = off_b;
+
+    return range(out->jadro_a_lba, uint64_t(len_a) * spc, esp.count) &&
+           range(out->jadro_b_lba, uint64_t(len_b) * spc, esp.count) &&
+           range(out->grubenv_lba, 2, esp.count);
 }
+
+bool esp_zapisz_jadro_slotu(const Partition& esp, uint8_t slot, const uint8_t* dane, uint32_t rozmiar) {
+    if (!dane || rozmiar == 0) return false;
+    EspLayout l{};
+    if (!esp_odczytaj_uklad(esp, &l)) return false;
+
+    uint64_t target_lba = (slot == 0) ? l.jadro_a_lba : l.jadro_b_lba;
+    uint32_t max_bytes  = (slot == 0) ? l.jadro_a_max_bytes : l.jadro_b_max_bytes;
+    uint32_t dirent_off = (slot == 0) ? l.dirent_jadro_a_offset : l.dirent_jadro_b_offset;
+
+    if (rozmiar > max_bytes) return false;
+
+    uint8_t blk[4096];
+    uint32_t zapisano = 0;
+    while (zapisano < rozmiar) {
+        uint32_t porcja = (rozmiar - zapisano > 4096) ? 4096 : (rozmiar - zapisano);
+        copy(blk, dane + zapisano, porcja);
+        if (porcja < 4096) zero(blk + porcja, 4096 - porcja);
+        uint32_t sektory = (porcja + 511) / 512;
+        uint64_t lba = target_lba + uint64_t(zapisano / 512);
+        if (!write_verify(esp, lba, sektory, blk)) return false;
+        zapisano += porcja;
+    }
+
+    if (!flush(esp)) return false;
+
+    uint8_t boot_dir[4096];
+    if (!read(esp, l.dirent_boot_lba, 8, boot_dir)) return false;
+    p32(boot_dir + dirent_off + 28, rozmiar);
+    if (!write_verify(esp, l.dirent_boot_lba, 8, boot_dir)) return false;
+    return flush(esp);
+}
+
+bool esp_odczytaj_jadro_slotu(const Partition& esp, uint8_t slot, uint8_t* bufor, uint32_t maks_rozmiar, uint32_t* odczytano) {
+    if (!bufor || maks_rozmiar == 0) return false;
+    EspLayout l{};
+    if (!esp_odczytaj_uklad(esp, &l)) return false;
+
+    uint64_t target_lba = (slot == 0) ? l.jadro_a_lba : l.jadro_b_lba;
+    uint32_t target_size = (slot == 0) ? l.jadro_a_size : l.jadro_b_size;
+    if (target_size > maks_rozmiar) return false;
+
+    uint8_t sec[512];
+    uint32_t przeczytano = 0;
+    while (przeczytano < target_size) {
+        uint64_t lba = target_lba + (przeczytano / 512);
+        if (!read(esp, lba, 1, sec)) return false;
+        uint32_t porcja = (target_size - przeczytano > 512) ? 512 : (target_size - przeczytano);
+        copy(bufor + przeczytano, sec, porcja);
+        przeczytano += porcja;
+    }
+    if (odczytano) *odczytano = target_size;
+    return true;
+}
+
+bool esp_zapisz_grubenv(const Partition& esp, const char* potwierdzony, const char* oczekujacy, uint32_t proby) {
+    EspLayout l{};
+    if (!esp_odczytaj_uklad(esp, &l)) return false;
+
+    uint8_t env[1024];
+    for (int i = 0; i < 1024; ++i) env[i] = '#';
+
+    const char header[] = "# GRUB Environment Block\n";
+    size_t p = 0;
+    for (size_t i = 0; header[i]; ++i) env[p++] = (uint8_t)header[i];
+
+    auto dodaj_tekst = [&](const char* k, const char* v) {
+        for (size_t i = 0; k[i] && p < 1000; ++i) env[p++] = (uint8_t)k[i];
+        env[p++] = '=';
+        for (size_t i = 0; v[i] && p < 1000; ++i) env[p++] = (uint8_t)v[i];
+        env[p++] = '\n';
+    };
+
+    dodaj_tekst("bursztyn_potwierdzony", potwierdzony ? potwierdzony : "A");
+    dodaj_tekst("bursztyn_oczekujacy", oczekujacy ? oczekujacy : "BRAK");
+
+    char proby_str[16];
+    int pl = 0;
+    if (proby == 0) proby_str[pl++] = '0';
+    else {
+        char rev[16]; int rl = 0;
+        uint32_t v = proby;
+        while (v > 0) { rev[rl++] = char('0' + v % 10); v /= 10; }
+        while (rl > 0) proby_str[pl++] = rev[--rl];
+    }
+    proby_str[pl] = 0;
+    dodaj_tekst("bursztyn_proby", proby_str);
+
+    if (!write_verify(esp, l.grubenv_lba, 2, env)) return false;
+    return flush(esp);
+}
+
+bool esp_odczytaj_grubenv(const Partition& esp, char* potwierdzony, char* oczekujacy, uint32_t* proby) {
+    if (potwierdzony) { potwierdzony[0] = 'A'; potwierdzony[1] = 0; }
+    if (oczekujacy) { copy(oczekujacy, "BRAK", 5); }
+    if (proby) *proby = 0;
+
+    EspLayout l{};
+    if (!esp_odczytaj_uklad(esp, &l)) return false;
+
+    uint8_t env[1024];
+    if (!read(esp, l.grubenv_lba, 2, env)) return false;
+    if (!equal(env, "# GRUB Environment Block\n", 25)) return false;
+
+    size_t i = 25;
+    while (i < 1024 && env[i] != '#') {
+        size_t start = i;
+        while (i < 1024 && env[i] != '\n') ++i;
+        size_t line_len = i - start;
+        if (i < 1024) ++i;
+
+        size_t eq = 0;
+        while (eq < line_len && env[start + eq] != '=') ++eq;
+        if (eq >= line_len) continue;
+
+        const uint8_t* k = env + start;
+        const uint8_t* v = env + start + eq + 1;
+        size_t v_len = line_len - eq - 1;
+
+        if (eq == 21 && equal(k, "bursztyn_potwierdzony", 21)) {
+            if (potwierdzony && v_len > 0) {
+                potwierdzony[0] = (char)v[0];
+                potwierdzony[1] = 0;
+            }
+        } else if (eq == 19 && equal(k, "bursztyn_oczekujacy", 19)) {
+            if (oczekujacy && v_len < 16) {
+                for (size_t j = 0; j < v_len; ++j) oczekujacy[j] = (char)v[j];
+                oczekujacy[v_len] = 0;
+            }
+        } else if (eq == 14 && equal(k, "bursztyn_proby", 14)) {
+            if (proby) {
+                uint32_t num = 0;
+                for (size_t j = 0; j < v_len; ++j) {
+                    if (v[j] >= '0' && v[j] <= '9') num = num * 10 + (v[j] - '0');
+                }
+                *proby = num;
+            }
+        }
+    }
+    return true;
+}
+
+bool rozruch_zapisz_sektory(Device* d, const bursztyn_rozruch_stan* s) {
+    if (!d || !d->writable || !s || !rozruch_waliduj_rekord(s)) return false;
+    Partition all{d, 0, d->sectors};
+    if (d->sectors <= ROZRUCH_SEKTOR_KOPIA_1) return false;
+
+    bursztyn_rozruch_stan k0{}, k1{};
+    bool v0 = read(all, ROZRUCH_SEKTOR_KOPIA_0, 1, &k0) && rozruch_waliduj_rekord(&k0);
+    bool v1 = read(all, ROZRUCH_SEKTOR_KOPIA_1, 1, &k1) && rozruch_waliduj_rekord(&k1);
+
+    uint64_t pierwsza = ROZRUCH_SEKTOR_KOPIA_0;
+    uint64_t druga    = ROZRUCH_SEKTOR_KOPIA_1;
+    if (v0 && v1 && k0.generacja > k1.generacja) {
+        pierwsza = ROZRUCH_SEKTOR_KOPIA_1;
+        druga    = ROZRUCH_SEKTOR_KOPIA_0;
+    }
+
+    if (!write_verify(all, pierwsza, 1, s) || !flush(all)) return false;
+    if (!write_verify(all, druga, 1, s) || !flush(all)) return false;
+
+    return true;
+}
+
+bool rozruch_odczytaj_sektory(Device* d, bursztyn_rozruch_stan* s) {
+    if (!d || !s || d->sectors <= ROZRUCH_SEKTOR_KOPIA_1) return false;
+    Partition all{d, 0, d->sectors};
+    bursztyn_rozruch_stan k0{}, k1{};
+    bool r0 = read(all, ROZRUCH_SEKTOR_KOPIA_0, 1, &k0);
+    bool r1 = read(all, ROZRUCH_SEKTOR_KOPIA_1, 1, &k1);
+    if (!r0 && !r1) return false;
+
+    return rozruch_wybierz_poprawna_kopie(r0 ? &k0 : nullptr, r1 ? &k1 : nullptr, s);
+}
+}
+

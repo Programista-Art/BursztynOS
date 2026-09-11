@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include <stddef.h>
+#include "aktualizacja_rozruch.h"
 
 namespace Storage {
 constexpr uint32_t Sector = 512;
@@ -47,15 +48,16 @@ struct GptInstallState {
 bool gpt_install_start(Device*,const Layout&,const uint8_t uuid[16],GptInstallState*);
 bool gpt_install_step(GptInstallState*);
 bool source_iso(Device*); // konserwatywnie chroni każdy nośnik ISO9660
+
 struct BootFile { const uint8_t* data; uint32_t size; };
 struct FatInstallState {
     Partition partition;
-    BootFile files[3];
+    BootFile files[5];
     uint32_t fat_sectors;
     uint32_t data_start;
     uint32_t clusters;
-    uint32_t file_start[3];
-    uint32_t file_clusters[3];
+    uint32_t file_start[5];
+    uint32_t file_clusters[5];
     uint32_t next_cluster;
     uint32_t phase;
     uint32_t index;
@@ -73,4 +75,30 @@ bool fat_install_step(FatInstallState*);
 bool fat_install(const Partition&,BootFile efi,BootFile kernel,BootFile config);
 bool marker(const Partition&,const uint8_t uuid[16],uint64_t fs_bytes,bool complete);
 bool complete(const Partition&,const uint8_t uuid[16]);
+
+struct EspLayout {
+    uint64_t data_start_lba;
+    uint32_t cluster_size_sectors;
+    uint64_t jadro_a_lba;
+    uint32_t jadro_a_clusters;
+    uint32_t jadro_a_max_bytes;
+    uint32_t jadro_a_size;
+    uint64_t jadro_b_lba;
+    uint32_t jadro_b_clusters;
+    uint32_t jadro_b_max_bytes;
+    uint32_t jadro_b_size;
+    uint64_t grubenv_lba;
+    uint64_t dirent_boot_lba;
+    uint32_t dirent_jadro_a_offset;
+    uint32_t dirent_jadro_b_offset;
+};
+
+bool esp_odczytaj_uklad(const Partition& esp, EspLayout* out);
+bool esp_zapisz_jadro_slotu(const Partition& esp, uint8_t slot, const uint8_t* dane, uint32_t rozmiar);
+bool esp_odczytaj_jadro_slotu(const Partition& esp, uint8_t slot, uint8_t* bufor, uint32_t maks_rozmiar, uint32_t* odczytano);
+bool esp_zapisz_grubenv(const Partition& esp, const char* potwierdzony, const char* oczekujacy, uint32_t proby);
+bool esp_odczytaj_grubenv(const Partition& esp, char* potwierdzony, char* oczekujacy, uint32_t* proby);
+bool rozruch_zapisz_sektory(Device* d, const bursztyn_rozruch_stan* s);
+bool rozruch_odczytaj_sektory(Device* d, bursztyn_rozruch_stan* s);
 }
+

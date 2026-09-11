@@ -1078,6 +1078,8 @@ void wypisz_pomoc() {
         "  pulpit | wyjdz | exit         - konczy powloke\n"
         "  czas                          - pokazuje czas RTC\n"
         "  system                        - informacje o systemie\n"
+        "  wersja                        - pokazuje aktualna wersje systemu\n"
+        "  aktualizacja [sprawdz]        - pokazuje wersje i stan aktualizacji\n"
         "  pci                           - wyswietla /logi/pci.txt\n"
         "  ping <IPv4|domena>            - DNS + ICMP echo\n"
         "  pobierz <host> <url> <plik>   - pobiera tekst HTTP do BSP2\n"
@@ -2234,10 +2236,68 @@ void wykonaj_polecenie(
         return;
     }
 
+    if (tekst_rowny(cmd, "wersja")) {
+        if (a.liczba != 1) {
+            wypisz("Skladnia: wersja\n");
+            return;
+        }
+        char bufor[64] = {};
+        if (!czytaj_plik("/system/wersja", bufor, sizeof(bufor) - 1U)) {
+            wypisz("Aktualna wersja: 0.1.0 (wbudowana)\n");
+        } else {
+            bufor[sizeof(bufor) - 1U] = '\0';
+            wypisz("Aktualna wersja: ");
+            wypisz(bufor);
+            if (bufor[0] != '\0') {
+                size_t n = 0;
+                while (n < sizeof(bufor) && bufor[n] != '\0') ++n;
+                if (n == 0 || bufor[n - 1] != '\n') wypisz("\n");
+            }
+        }
+        return;
+    }
+
+    if (tekst_rowny(cmd, "aktualizacja")) {
+        if (a.liczba > 2) {
+            wypisz("Skladnia: aktualizacja [sprawdz]\n");
+            return;
+        }
+        char wersja[64] = {};
+        if (!czytaj_plik("/system/wersja", wersja, sizeof(wersja) - 1U)) {
+            wypisz("Aktualna wersja: 0.1.0 (wbudowana)\n");
+        } else {
+            wersja[sizeof(wersja) - 1U] = '\0';
+            wypisz("Aktualna wersja: ");
+            wypisz(wersja);
+            size_t n = 0;
+            while (n < sizeof(wersja) && wersja[n] != '\0') ++n;
+            if (n == 0 || wersja[n - 1] != '\n') wypisz("\n");
+        }
+        char wykaz[512] = {};
+        if (!czytaj_plik("/aktualizacje/wykazaktualizacji.wykaz", wykaz,
+                          sizeof(wykaz) - 1U)) {
+            wypisz("Dostepna wersja: brak danych (uzyj: pobierz <host> /aktualizacje/wykazaktualizacji.wykaz /aktualizacje/wykazaktualizacji.wykaz, potem Sprawdz aktualizacje).\n");
+        } else {
+            wykaz[sizeof(wykaz) - 1U] = '\0';
+            wypisz("Wykaz (poczatek):\n");
+            size_t i = 0;
+            int linie = 0;
+            while (wykaz[i] != '\0' && linie < 3) {
+                char znak[2] = {wykaz[i], '\0'};
+                wypisz(znak);
+                if (wykaz[i] == '\n') ++linie;
+                ++i;
+                if (i >= sizeof(wykaz) - 1U) break;
+            }
+        }
+        wypisz("Sprawdz aktualizacje | Pobierz | Zainstaluj | Uruchom ponownie\n");
+        wypisz("Instalacja wymaga potwierdzenia i nie nastepuje automatycznie.\n");
+        return;
+    }
+
     if (tekst_rowny(
             cmd,
             "pisz")) {
-
         if (a.liczba != 2) {
             wypisz(
                 "Skladnia: pisz <tekst>\n"

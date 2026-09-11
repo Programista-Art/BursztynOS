@@ -140,5 +140,35 @@ int main(){
     CHECK(format_done==format_total);CHECK(psf_czy_gotowy());
     CHECK(rozmiar_pliku("/system")==0); // no stale metadata after reinstall
     CHECK(utworz_plik("/bad"));disk.fail_after=disk.calls;CHECK(!zapisz_do_pliku("/bad",bytes.data(),bytes.size()));disk.fail_after=UINT64_MAX;
-    std::printf("Storage/BSP2 host: %u PASS, 0 FAIL (includes outside-partition sentinel, faults, >2 TiB GPT)\n",checks);
+
+    // Testy A/B: uklad ESP, jadro B, grubenv i sektory stanu rozruchu
+    disk.low=0; disk.high=UINT64_MAX;
+    EspLayout el{};
+    CHECK(esp_odczytaj_uklad(l.esp, &el));
+    CHECK(el.jadro_a_lba > l.esp.start && el.jadro_b_lba > el.jadro_a_lba);
+    CHECK(el.grubenv_lba > el.jadro_b_lba);
+
+    char potw[16]{}, oczek[16]{}; uint32_t proby = 99;
+    CHECK(esp_odczytaj_grubenv(l.esp, potw, oczek, &proby));
+    CHECK(potw[0] == 'A' && std::strcmp(oczek, "BRAK") == 0 && proby == 0);
+
+    CHECK(esp_zapisz_grubenv(l.esp, "A", "B", 1));
+    CHECK(esp_odczytaj_grubenv(l.esp, potw, oczek, &proby));
+    CHECK(potw[0] == 'A' && std::strcmp(oczek, "B") == 0 && proby == 1);
+
+    std::vector<uint8_t> new_kernel(4096, 0x5A);
+    CHECK(esp_zapisz_jadro_slotu(l.esp, 1, new_kernel.data(), uint32_t(new_kernel.size())));
+    std::vector<uint8_t> read_kernel(4096, 0);
+    uint32_t odczytano_k = 0;
+    CHECK(esp_odczytaj_jadro_slotu(l.esp, 1, read_kernel.data(), uint32_t(read_kernel.size()), &odczytano_k));
+    CHECK(odczytano_k == 4096 && read_kernel == new_kernel);
+
+    bursztyn_rozruch_stan rstate{};
+    rozruch_stan_poczatkowy(&rstate, 0, 1, 0);
+    CHECK(rozruch_zapisz_sektory(&disk.dev, &rstate));
+    bursztyn_rozruch_stan rread{};
+    CHECK(rozruch_odczytaj_sektory(&disk.dev, &rread));
+    CHECK(rread.slot_potwierdzony == BURSZTYN_SLOT_A && rread.generacja == 1);
+
+    std::printf("Storage/BSP2 host: %u PASS, 0 FAIL (includes outside-partition sentinel, faults, >2 TiB GPT, A/B ESP)\n",checks);
 }

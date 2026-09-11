@@ -282,9 +282,10 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	heap.o \
 	scheduler.o \
 	skladacz_obrazu.o \
-	mbedtls_port.o \
-	tls.o \
-	bezpieczenstwo.o \
+ mbedtls_port.o \
+ tls.o \
+ bezpieczenstwo.o \
+ aktualizacja.o \
 	test_blob.o \
 	demo_ui_blob.o \
 	kontrolki2_blob.o \
@@ -334,6 +335,22 @@ biblioteki/mbedtls/library/%.o: biblioteki/mbedtls/library/%.c
 # ============================================================================
 # 10. OBIEKTY ZE SPECJALNYMI SCIEZKAMI
 # ============================================================================
+
+# ============================================================================
+# KONFIGURACJA KLUCZA AKTUALIZACJI
+# ============================================================================
+# Domyslnie kompilujemy z kluczem wydania (release).
+# Opcje: release, test, dev (z BURSZTYN_AKT_KLUCZ_PUBLICZNY=<plik.pem>)
+BURSZTYN_AKT_TRUST_ROOT ?= release
+
+.PHONY: .aktualizacja_klucz_check
+.aktualizacja_klucz_check:
+	@$(PYTHON) narzedzia/aktualizacje/generuj_naglowek_klucza.py --tryb $(BURSZTYN_AKT_TRUST_ROOT) $(if $(BURSZTYN_AKT_KLUCZ_PUBLICZNY),--publiczny $(BURSZTYN_AKT_KLUCZ_PUBLICZNY),) --wyjscie aktualizacja_klucz.h
+
+aktualizacja_klucz.h: .aktualizacja_klucz_check
+
+aktualizacja.o: aktualizacja.cpp aktualizacja.h aktualizacja_format.h aktualizacja_klucz.h .aktualizacja_klucz_check
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
 mbedtls_port.o: biblioteki/mbedtls/mbedtls_port.cpp biblioteki/mbedtls/bursztyn_mbedtls_config.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
@@ -626,9 +643,15 @@ $(GRUB_CFG): $(KERNEL) $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile
 
 .installer-build/BOOTX64.EFI: narzedzia/instalator/grub-embedded.cfg
 	@mkdir -p .installer-build
-	grub-mkstandalone -O x86_64-efi --locales="" --fonts="" --modules="part_gpt fat normal multiboot2 configfile search search_fs_file all_video gfxterm" -o $@ "boot/grub/grub.cfg=$<"
+	grub-mkstandalone -O x86_64-efi --locales="" --fonts="" --modules="part_gpt fat loadenv test normal multiboot2 configfile search search_fs_file all_video gfxterm" -o $@ "boot/grub/grub.cfg=$<"
 
-.PHONY: installer-unit-test installer-test run-installer
+.PHONY: installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-rozruch-qemu
+test-aktualizacje:
+	$(PYTHON) narzedzia/aktualizacje/test_aktualizacje.py
+test-rozruch:
+	$(PYTHON) narzedzia/aktualizacje/test_rozruch.py
+test-rozruch-qemu: iso
+	$(PYTHON) narzedzia/aktualizacje/qemu_aktualizacja_test.py
 installer-unit-test:
 	@mkdir -p .installertest
 	g++ -std=c++17 -O1 -g -Wall -Wextra -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined narzedzia/instalator/test_storage.cpp storage_format.cpp psf.cpp -o .installertest/test-storage

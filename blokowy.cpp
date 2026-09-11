@@ -14,6 +14,7 @@ bool wr(void*ctx,uint64_t lba,uint32_t n,const void*b){
     return ahci_zapisz(uintptr_t(ctx),lba,n,b);
 }
 bool fl(void*ctx){return ahci_flush(uintptr_t(ctx));}
+Storage::Device* dysk_glowny = nullptr;
 }
 void blokowy_inicjalizuj(){
     for(uint32_t i=0;i<ahci_liczba_dyskow();++i){AhciDysk d{};if(ahci_dysk(i,&d))devices[i]={(void*)uintptr_t(i),d.sektory,d.sektor_bajty,d.zapis,rd,wr,fl};}
@@ -28,10 +29,44 @@ bool blokowy_znajdz_bsp(uint32_t ordinal,Storage::Partition*out){
             if(!Storage::equal(e.type,Storage::BspType,16))continue;
             Storage::Partition p{dev,e.start,e.count};
             if(!Storage::complete(p,table.uuid)){klog_serial("[BSP] Pomijam nieukonczona/uszkodzona instalacje.");continue;}
-            if(found++==ordinal){*out=p;klog_serial("[BSP] Wybrano kompletny wolumin GPT (kolejnosc HBA/port/wpis).");return true;}
+            if(found++==ordinal){
+                dysk_glowny = dev;
+                *out=p;
+                klog_serial("[BSP] Wybrano kompletny wolumin GPT (kolejnosc HBA/port/wpis).");
+                return true;
+            }
         }
     }
     return false;
+}
+bool blokowy_znajdz_esp(uint32_t ordinal, Storage::Partition* out) {
+    if(!out)return false;
+    uint32_t found=0;
+    for(uint32_t d=0;d<ahci_liczba_dyskow();++d){auto*dev=blokowy_dysk(d);
+        if(!Storage::gpt_read(dev,&table))continue;
+        for(uint32_t i=0;i<table.count;++i){const auto&e=table.entries[i];
+            if(!Storage::equal(e.type,Storage::EspType,16))continue;
+            Storage::Partition p{dev,e.start,e.count};
+            if(found++==ordinal){*out=p;return true;}
+        }
+    }
+    return false;
+}
+bool blokowy_esp_systemowy(Storage::Partition* out) {
+    if(!out)return false;
+    Storage::Device* dev = dysk_glowny ? dysk_glowny : blokowy_dysk(0);
+    if(!dev||!Storage::gpt_read(dev,&table))return false;
+    for(uint32_t i=0;i<table.count;++i){
+        const auto&e=table.entries[i];
+        if(Storage::equal(e.type,Storage::EspType,16)){
+            *out=Storage::Partition{dev,e.start,e.count};
+            return true;
+        }
+    }
+    return false;
+}
+Storage::Device* blokowy_dysk_systemowy() {
+    return dysk_glowny ? dysk_glowny : blokowy_dysk(0);
 }
 void blokowy_zezwol_instalatorowi(uint32_t id,bool enabled){installation_target=enabled?int(id):-1;}
 bool blokowy_zapis_instalatora(){return installation_target>=0;}

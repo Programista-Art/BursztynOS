@@ -2120,21 +2120,80 @@ bool pobierz_segment(
     return true;
 }
 
+static uint8_t psf_aktywny_slot = 0; // 0 = Slot A, 1 = Slot B
+static bool psf_sloty_wlaczone = true;
+
+extern "C" void psf_ustaw_aktywny_slot(uint8_t slot) {
+    psf_aktywny_slot = (slot == 1) ? 1 : 0;
+}
+
+extern "C" uint8_t psf_pobierz_aktywny_slot(void) {
+    return psf_aktywny_slot;
+}
+
+extern "C" void psf_wlacz_translacje_slotow(bool wlaczone) {
+    psf_sloty_wlaczone = wlaczone;
+}
+
+static bool psf_sprawdz_obecnosc_slotow() {
+    if (!psf_gotowy || !dysk_superblok) return false;
+    ZnalezionyWpis w = znajdz_wpis_w_katalogu(dysk_superblok->id_korzenia, "sloty");
+    return w.znaleziony;
+}
+
+static const char* psf_przetlumacz_sciezke_slotu(const char* s, char bufor[160]) {
+    if (!psf_sloty_wlaczone || !s || s[0] != '/' || !psf_sprawdz_obecnosc_slotow()) return s;
+
+    bool jest_programy = false;
+    bool jest_system = false;
+    size_t reszta = 0;
+
+    if (s[1] == 'p' && s[2] == 'r' && s[3] == 'o' && s[4] == 'g' &&
+        s[5] == 'r' && s[6] == 'a' && s[7] == 'm' && s[8] == 'y') {
+        if (s[9] == '\0' || s[9] == '/') {
+            jest_programy = true;
+            reszta = 9;
+        }
+    } else if (s[1] == 's' && s[2] == 'y' && s[3] == 's' && s[4] == 't' &&
+               s[5] == 'e' && s[6] == 'm') {
+        if (s[7] == '\0' || s[7] == '/') {
+            jest_system = true;
+            reszta = 7;
+        }
+    }
+
+    if (!jest_programy && !jest_system) return s;
+
+    const char* pref = (psf_aktywny_slot == 1) ? "/sloty/b" : "/sloty/a";
+    size_t p = 0;
+    while (pref[p] && p < 159) { bufor[p] = pref[p]; ++p; }
+
+    const char* kat = jest_programy ? "/programy" : "/system";
+    size_t k = 0;
+    while (kat[k] && p < 159) { bufor[p++] = kat[k++]; }
+
+    while (s[reszta] && p < 159) { bufor[p++] = s[reszta++]; }
+    bufor[p] = '\0';
+    return bufor;
+}
+
 uint64_t rozwiaz_sciezke(
     const char* sciezka,
     char* nazwa_docelowa,
     bool zwroc_rodzica
 ) {
+    char bufor_translacji[160];
+    const char* sciezka_rzeczywista = psf_przetlumacz_sciezke_slotu(sciezka, bufor_translacji);
     if (!psf_gotowy ||
         !dysk_superblok ||
         !bezpieczna_sciezka(
-            sciezka)) {
+            sciezka_rzeczywista)) {
 
         return 0;
     }
 
-    if (sciezka[0] == '/' &&
-        sciezka[1] == '\0') {
+    if (sciezka_rzeczywista[0] == '/' &&
+        sciezka_rzeczywista[1] == '\0') {
 
         /*
          * Korzen nie posiada rodzica/nazwy katalogowej.
@@ -2158,14 +2217,14 @@ uint64_t rozwiaz_sciezke(
 
     size_t indeks = 1;
 
-    while (sciezka[indeks] != '\0') {
+    while (sciezka_rzeczywista[indeks] != '\0') {
         char segment[
             PSF_MAX_NAZWA] = {};
 
         bool ostatni = false;
 
         if (!pobierz_segment(
-                sciezka,
+                sciezka_rzeczywista,
                 &indeks,
                 segment,
                 &ostatni)) {
