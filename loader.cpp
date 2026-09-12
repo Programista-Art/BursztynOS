@@ -1099,7 +1099,9 @@ static bool uruchom_program_z_pliku_impl(
     }
 
     if (takie_same_sciezki(sciezka_pliku, "/programy/aktualizacje.cebula/aktualizacje.bur")) {
+#if BURSZTYN_OTA_TRACE
         wypisz_log("[OTA TRACE] Loader mapped segments, entering Ring 3\n");
+#endif
     }
 
     /*

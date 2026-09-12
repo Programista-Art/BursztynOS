@@ -1803,7 +1803,9 @@ uint64_t bws_uruchom(
         poziom_dziecka=PZB_ZAUFANE;wymagane=PRAWO_GUI|PRAWO_SYSTEM_CONFIG;
     }
     if(rowna_sciezka(sciezka,"/programy/aktualizacje.cebula/aktualizacje.bur")) {
+#if BURSZTYN_OTA_TRACE
         SerialLog("[OTA TRACE] Launching aktualizacje app\n");
+#endif
         if(!pzb_ma_co_najmniej_poziom(&rodzic,PZB_ZAUFANE)||
             !pzb_ma_prawa(&rodzic,PRAWO_GUI))return 0;
         poziom_dziecka=PZB_USLUGI;
@@ -3759,7 +3761,8 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
 
     proces_t* proc = pobierz_proces_wywolujacy();
     if (proc) {
-        stos_probkuj_rsp(static_cast<int>(proc->pid), rsp_in);
+        stos_probkuj_rsp_kontekst(static_cast<int>(proc->pid), rsp_in,
+                                 nr_funkcji == 84 ? "BWS84" : "BWS");
     }
 
     // Kontrolowany test wywolania naruszenia guard page dla regresji
@@ -3772,7 +3775,8 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
     if (proc) {
         uint64_t rsp_out = 0;
         asm volatile("mov %%rsp, %0" : "=r"(rsp_out));
-        stos_probkuj_rsp(static_cast<int>(proc->pid), rsp_out);
+        stos_probkuj_rsp_kontekst(static_cast<int>(proc->pid), rsp_out,
+                                 nr_funkcji == 84 ? "BWS84" : "BWS");
 
         if (!stos_weryfikuj_kanarka(static_cast<int>(proc->pid))) {
             wypisz_log("\n[STACK] Wykryto uszkodzenie kanarka stosu jadra przy powrocie z BWS!\n");

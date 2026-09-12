@@ -228,13 +228,13 @@ bool stos_weryfikuj_kanarka(int pid) {
     return (*ptr == KERNEL_STACK_CANARY);
 }
 
-void stos_probkuj_rsp(int pid, uint64_t rsp) {
+void stos_probkuj_rsp_kontekst(int pid, uint64_t rsp, const char* kontekst) {
     if (pid < 0 || pid >= static_cast<int>(PZB_MAKS_PROCESOW)) return;
     if (g_metryki[pid].stack_base == 0) return;
     /*
      * Probkujemy wylacznie adresy wewnatrz zmapowanego stosu procesu.
-     * Adres IST, stosu startowego albo tresci stosu (nie wskaznika) nie
-     * moze zaktualizowac znaku wodnego procesu ani kanarka.
+     * Adres IST, stosu startowego albo tresci stosu nie moze zaktualizowac
+     * znaku wodnego procesu ani kanarka.
      */
     if (rsp < g_metryki[pid].stack_base ||
         rsp > g_metryki[pid].stack_top) {
@@ -243,7 +243,28 @@ void stos_probkuj_rsp(int pid, uint64_t rsp) {
     g_metryki[pid].current_rsp = rsp;
     if (rsp < g_metryki[pid].min_rsp) {
         g_metryki[pid].min_rsp = rsp;
+        g_metryki[pid].max_used = g_metryki[pid].stack_top - rsp;
+        g_metryki[pid].remaining_margin = (rsp > g_metryki[pid].stack_base) ?
+            (rsp - g_metryki[pid].stack_base) : 0;
+        if (kontekst) {
+            size_t k = 0;
+            while (kontekst[k] && k + 1 < sizeof(g_metryki[pid].deepest_context)) {
+                g_metryki[pid].deepest_context[k] = kontekst[k];
+                ++k;
+            }
+            g_metryki[pid].deepest_context[k] = '\0';
+        }
+#if BURSZTYN_STACK_TRACE
+        if (g_metryki[pid].max_used > g_metryki[pid].last_reported_max_used) {
+            g_metryki[pid].last_reported_max_used = g_metryki[pid].max_used;
+            stos_wymus_raport_metryk("NEW_PEAK", pid);
+        }
+#endif
     }
+}
+
+void stos_probkuj_rsp(int pid, uint64_t rsp) {
+    stos_probkuj_rsp_kontekst(pid, rsp, "BWS");
 }
 
 StosMetryki stos_zmierz_zuzycie(int pid) {
@@ -266,6 +287,13 @@ StosMetryki stos_zmierz_zuzycie(int pid) {
 
     if (lowest_written < g_metryki[pid].min_rsp) {
         g_metryki[pid].min_rsp = lowest_written;
+        if (g_metryki[pid].deepest_context[0] == '\0') {
+            const char* def_ctx = "WATERMARK";
+            for (size_t c = 0; def_ctx[c] && c + 1 < sizeof(g_metryki[pid].deepest_context); ++c) {
+                g_metryki[pid].deepest_context[c] = def_ctx[c];
+                g_metryki[pid].deepest_context[c + 1] = '\0';
+            }
+        }
     }
 
     if (g_metryki[pid].min_rsp < top) {
@@ -289,7 +317,7 @@ StosMetryki stos_zmierz_zuzycie(int pid) {
     return g_metryki[pid];
 }
 
-void stos_raportuj_sciezke(const char* nazwa_sciezki, int pid) {
+void stos_wymus_raport_metryk(const char* nazwa_sciezki, int pid) {
     if (!nazwa_sciezki || pid < 0 || pid >= static_cast<int>(PZB_MAKS_PROCESOW)) return;
     StosMetryki m = stos_zmierz_zuzycie(pid);
     if (m.stack_base == 0) return;
@@ -321,7 +349,26 @@ void stos_raportuj_sciezke(const char* nazwa_sciezki, int pid) {
     serial_wypisz(" B margin=");
     uint_do_dec_str(m.remaining_margin, buf, sizeof(buf));
     serial_wypisz(buf);
-    serial_wypisz(" B\n");
+    serial_wypisz(" B ctx=");
+    serial_wypisz(m.deepest_context[0] ? m.deepest_context : "NONE");
+    serial_wypisz("\n");
+}
+
+void stos_raportuj_sciezke(const char* nazwa_sciezki, int pid) {
+#if BURSZTYN_STACK_TRACE
+    if (!nazwa_sciezki || pid < 0 || pid >= static_cast<int>(PZB_MAKS_PROCESOW)) return;
+    StosMetryki m = stos_zmierz_zuzycie(pid);
+    if (m.stack_base == 0) return;
+
+    // Raportuj tylko gdy odnotowano nowy szczyt zuzycia
+    if (m.max_used > g_metryki[pid].last_reported_max_used) {
+        g_metryki[pid].last_reported_max_used = m.max_used;
+        stos_wymus_raport_metryk(nazwa_sciezki, pid);
+    }
+#else
+    (void)nazwa_sciezki;
+    (void)pid;
+#endif
 }
 
 StosMetryki stos_pobierz_metryki(int pid) {

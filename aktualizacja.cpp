@@ -67,6 +67,18 @@ static void ota_wykonaj_restart() {
 /* ---- pomocnicze ---- */
 static void akt_log(const char* tekst) { wypisz_log(tekst); }
 
+#ifndef BURSZTYN_OTA_TRACE
+#define BURSZTYN_OTA_TRACE 0
+#endif
+
+static void akt_trace_log(const char* tekst) {
+#if BURSZTYN_OTA_TRACE
+    wypisz_log(tekst);
+#else
+    (void)tekst;
+#endif
+}
+
 static size_t akt_strlen(const char* s, size_t limit) {
     if (!s) return 0;
     size_t n = 0;
@@ -1281,7 +1293,7 @@ const char* ota_blokada_miejsce() {
 
 BwsOtaDostepnosc aktualizacja_okresl_dostepnosc(void) {
     GuardOTA guard(__func__);
-    akt_log("[OTA TRACE] Determining OTA availability");
+    akt_trace_log("[OTA TRACE] Determining OTA availability");
     if (!instalator_system_zainstalowany() || instalator_tryb()) {
         return OTA_UNAVAILABLE_LIVE_ENVIRONMENT;
     }
@@ -1290,9 +1302,9 @@ BwsOtaDostepnosc aktualizacja_okresl_dostepnosc(void) {
     if (!dev) {
         return OTA_BACKEND_ERROR;
     }
-    akt_log("[OTA TRACE] Storage device resolved: SATA AHCI");
+    akt_trace_log("[OTA TRACE] Storage device resolved: SATA AHCI");
 
-    akt_log("[OTA TRACE] Reading bootstate / GPT");
+    akt_trace_log("[OTA TRACE] Reading bootstate / GPT");
     static Storage::Table s_aktualizacja_gpt_table;
     Storage::Table* table = &s_aktualizacja_gpt_table;
     *table = {};
@@ -1321,7 +1333,7 @@ BwsOtaDostepnosc aktualizacja_okresl_dostepnosc(void) {
 }
 
 uint64_t aktualizacja_bws_status(const proces_t* proces, uint64_t uzytkownik_bufor) {
-    akt_log("[OTA TRACE] Kernel entered BWS 84 handler");
+    akt_trace_log("[OTA TRACE] Kernel entered BWS 84 handler");
     if (!proces || !aktualizacja_czy_moze_sprawdzac(proces)) {
         return 0;
     }
@@ -1378,14 +1390,14 @@ uint64_t aktualizacja_bws_status(const proces_t* proces, uint64_t uzytkownik_buf
     } else {
         /* dost == OTA_AVAILABLE: normalny odczyt */
         /* Stan rozruchu ze stabilnych sektorow lub kopii zapasowych */
-        akt_log("[OTA TRACE] Reading bootstate / GPT");
+        akt_trace_log("[OTA TRACE] Reading bootstate / GPT");
         bursztyn_rozruch_stan rstan{};
         bool rstan_ok = false;
         Storage::Device* dev = blokowy_dysk_systemowy();
         if (dev && Storage::rozruch_weryfikuj_uklad_dysku(dev)) {
             rstan_ok = Storage::rozruch_odczytaj_sektory(dev, &rstan);
         }
-        akt_log("[OTA TRACE] Reading grubenv");
+        akt_trace_log("[OTA TRACE] Reading grubenv");
         Storage::Partition esp_part{};
         char g_potw[4]{'A', 0};
         char g_oczek[16]{'B', 'R', 'A', 'K', 0};
@@ -1483,11 +1495,11 @@ uint64_t aktualizacja_bws_status(const proces_t* proces, uint64_t uzytkownik_buf
         }
     }
 
-    akt_log("[OTA TRACE] Copying status to user space");
+    akt_trace_log("[OTA TRACE] Copying status to user space");
     if (!skopiuj_do_przestrzeni_uzytkownika(reinterpret_cast<void*>(uzytkownik_bufor), &out, sizeof(out))) {
         return 0;
     }
-    akt_log("[OTA TRACE] BWS 84 completed successfully");
+    akt_trace_log("[OTA TRACE] BWS 84 completed successfully");
     return 1;
 }
 

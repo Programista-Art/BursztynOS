@@ -1738,7 +1738,9 @@ void uruchom_program_gui(const char* sciezka) {
     if (!sciezka) return;
 
     if (tekst_rowny(sciezka, SCIEZKA_AKTUALIZACJE)) {
+#if BURSZTYN_OTA_TRACE
         bws_wywolaj(1, (uint64_t)"[OTA TRACE] Launching aktualizacje app\n", 0, 0, 0);
+#endif
     }
 
     zamknij_menu_i_odtworz_pulpit();

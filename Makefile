@@ -188,6 +188,18 @@ ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_STOS16K)),)
 KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_STOS16K=1
 endif
 
+# Opcjonalne verbose logi OTA trace i stack metrics (domyslnie wylaczone w wydaniu)
+BURSZTYN_OTA_TRACE ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_OTA_TRACE)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_OTA_TRACE=1
+RING3_FLAGS += -DBURSZTYN_OTA_TRACE=1
+endif
+
+BURSZTYN_STACK_TRACE ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_STACK_TRACE)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_STACK_TRACE=1
+endif
+
 BURSZTYN_DIAG_TAPETY ?= 0
 BURSZTYNDIAGTAPETY ?= $(BURSZTYN_DIAG_TAPETY)
 ifneq ($(filter 1 yes true,$(BURSZTYNDIAGTAPETY) $(BURSZTYN_DIAG_TAPETY)),)
@@ -670,7 +682,9 @@ $(GRUB_CFG): $(KERNEL) $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile
 	@mkdir -p .installer-build
 	grub-mkstandalone -O x86_64-efi --locales="" --fonts="" --modules="part_gpt fat loadenv test normal multiboot2 configfile search search_fs_file all_video gfxterm" -o $@ "boot/grub/grub.cfg=$<"
 
-.PHONY: installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-aktualizacje-gui test-bur-loader test-aktualizacja-qemu test-rozruch-qemu test-ota audit-stos-jadra test-stos-jadra test-wspolbieznosc test-guard-page
+.PHONY: installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-aktualizacje-gui test-bur-loader test-aktualizacja-qemu test-rozruch-qemu test-ota audit-stos-jadra test-stos-jadra test-wspolbieznosc test-guard-page test-16k-bws84
+test-16k-bws84:
+	$(PYTHON) narzedzia/aktualizacje/test_16k_bws84_irq.py
 test-bur-loader:
 	$(PYTHON) narzedzia/test_bur_loader.py
 test-aktualizacje:

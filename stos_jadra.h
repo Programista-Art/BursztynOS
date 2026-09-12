@@ -50,6 +50,8 @@ struct StosMetryki {
     uint64_t min_rsp;
     uint64_t max_used;
     uint64_t remaining_margin;
+    char deepest_context[16];
+    uint64_t last_reported_max_used;
 };
 
 /*
@@ -100,11 +102,17 @@ bool stos_weryfikuj_kanarka(int pid);
 // Dynamiczne probkowanie rejestru RSP.
 void stos_probkuj_rsp(int pid, uint64_t rsp);
 
+// Dynamiczne probkowanie rejestru RSP wraz z identyfikatorem kontekstu (np. BWS84, IRQTIMER).
+void stos_probkuj_rsp_kontekst(int pid, uint64_t rsp, const char* kontekst);
+
 // Oblicza rzeczywiste zuzycie stosu (watermark scan) oraz sprawdza prog 75%.
 StosMetryki stos_zmierz_zuzycie(int pid);
 
-// Raportuje biezace metryki stosu do portu szeregowego dla sciezki wywolania.
+// Raportuje biezace metryki stosu do portu szeregowego (w trybie diagnostycznym tylko przy nowym szczycie).
 void stos_raportuj_sciezke(const char* nazwa_sciezki, int pid);
+
+// Wymusza wypisanie metryk stosu do portu szeregowego (dla testow diagnostycznych).
+void stos_wymus_raport_metryk(const char* nazwa_sciezki, int pid);
 
 // Pobiera biezacy rekord metryk dla procesu.
 StosMetryki stos_pobierz_metryki(int pid);

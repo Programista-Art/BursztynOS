@@ -133,7 +133,9 @@ static void ustaw_przyciski_niedostepne() {
 }
 
 void odswiez_widok() {
+#if BURSZTYN_OTA_TRACE
     bws_wywolaj(1, reinterpret_cast<uint64_t>("[OTA TRACE] aktualizacje calling BWS 84\n"), 0, 0, 0);
+#endif
     BwsOtaStatus s{};
     if (!bws_ota_pobierz_status(&s)) {
         // Prawdziwy błąd BWS: zły wskaźnik Ring3, brak uprawnień PZB,
@@ -472,12 +474,19 @@ public:
     explicit PanelGlownyAktualizacji(Orientacja o = Orientacja::Pionowa) : Panel(o) {}
 
     bool czy_wymaga_animacji() const override {
-        return true;
+        // Ciągła animacja i pętla aktualizacji są aktywne WYŁĄCZNIE wtedy,
+        // gdy trwa operacja w toku (sprawdzanie, pobieranie, weryfikacja, instalacja).
+        // W stanie jałowym / bezczynnym animacja jest wyłączona (0 wywołań BWS 84/s).
+        uint8_t stan = g_stan.status.stan;
+        return (stan == BWS_OTA_STAN_SPRAWDZANIE ||
+                stan == BWS_OTA_STAN_POBIERANIE ||
+                stan == BWS_OTA_STAN_WERYFIKACJA ||
+                stan == BWS_OTA_STAN_INSTALACJA);
     }
 
     void krok_animacji(uint64_t teraz_ns) override {
         Panel::krok_animacji(teraz_ns);
-        if (teraz_ns - g_stan.ostatnie_odswiezenie_ns >= 150000000ULL || !g_stan.pobrano_poczatkowy_stan) {
+        if (teraz_ns - g_stan.ostatnie_odswiezenie_ns >= 250000000ULL || !g_stan.pobrano_poczatkowy_stan) {
             g_stan.ostatnie_odswiezenie_ns = teraz_ns;
             odswiez_widok();
         }
@@ -487,7 +496,9 @@ public:
 } // namespace
 
 extern "C" __attribute__((noreturn)) void _start() {
+#if BURSZTYN_OTA_TRACE
     bws_wywolaj(1, reinterpret_cast<uint64_t>("[OTA TRACE] aktualizacje Ring 3 main entered\n"), 0, 0, 0);
+#endif
     AplikacjaGUI app;
     // Okno zwymiarowane pod 1280x720: szerokie na pełne polskie etykiety,
     // wystarczająco wysokie na 2x4 + 5 wierszy statusu + operacje + pasek.

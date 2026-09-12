@@ -813,6 +813,17 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
     const uint8_t wektor =
         static_cast<uint8_t>(wektor64);
 
+    const bool przerwano_ring0 = ((stan->rejestr_cs & 3ULL) == 0ULL);
+    if (przerwano_ring0 && aktualny_pid > 0 && aktualny_pid < MAKS_PROCESOW) {
+        const char* irq_ctx = "IRQOTHER";
+        if (wektor == WEKTOR_TIMERA) irq_ctx = "IRQTIMER";
+        else if (wektor == WEKTOR_MYSZY) irq_ctx = "IRQXHCI";
+        stos_probkuj_rsp_kontekst(aktualny_pid, stan->stary_rsp, irq_ctx);
+        uint64_t handler_rsp = 0;
+        asm volatile("mov %%rsp, %0" : "=r"(handler_rsp));
+        stos_probkuj_rsp_kontekst(aktualny_pid, handler_rsp, irq_ctx);
+    }
+
     switch (wektor) {
         case WEKTOR_TIMERA:
             obsluga_przerwania_zegara();
