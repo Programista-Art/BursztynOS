@@ -115,11 +115,14 @@ pd_table_3:
     .skip 4096
 
 /*
- * Stos startowy kernela.
- * Symbol stack_top jest uzywany pozniej przez TSS/scheduler/syscalls.
+ * Stos startowy kernela (64 KiB).
+ * Oba symbole sa uzywane przez diagnostyke stosow (stos_jadra.cpp):
+ * identyfikacja BOOTSTACK w panic_wyjatek. Rozmiar musi zgadzac sie
+ * ze SKIP ponizej.
  */
 .balign 16
 
+.global stack_bottom
 stack_bottom:
     .skip 65536
 

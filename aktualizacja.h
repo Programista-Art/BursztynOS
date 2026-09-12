@@ -115,16 +115,27 @@ uint64_t aktualizacja_bws_polecenie(const proces_t* proces, uint32_t cmd, uint64
  *
  * Scisla hierarchia blokad jadra:
  *   GuardOTA (stan OTA) -> system plikow (PSF) -> GuardStorageFormatter (storage) -> warstwa blokowa -> GuardAHCI (sprzet).
+ *
+ * Diagnostyka wlascicielstwa (lekka, takze w release): reentrant-only
+ * licznik glebokosci, PID wlasciciela oraz wskaznik na literal miejsca
+ * akwizycji (zadnej alokacji, zadnego logowania na sciezce).
  */
 class GuardOTA {
 public:
-    GuardOTA();
+    explicit GuardOTA(const char* miejsce = nullptr);
     ~GuardOTA();
     bool aktywny() const { return aktywny_; }
+    const char* miejsce() const { return miejsce_; }
     GuardOTA(const GuardOTA&) = delete;
     GuardOTA& operator=(const GuardOTA&) = delete;
 private:
     bool aktywny_;
     bool pierwotny_;
+    const char* miejsce_;
 };
+
+// Diagnostyka blokady OTA do testow i logow (odczyt atomowy, bez blokowania).
+uint32_t ota_blokada_glebokosc();
+int ota_blokada_wlasciciel();
+const char* ota_blokada_miejsce();
 #endif

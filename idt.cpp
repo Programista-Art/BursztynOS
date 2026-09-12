@@ -181,6 +181,13 @@ void uint_do_hex_str(uint64_t wartosc,
 
 extern "C" uint64_t g_ostatni_bws;
 
+extern "C" uint64_t tss_pobierz_rsp0();
+extern "C" bool VmmDiagnostykaWpisu(uint64_t va, uint64_t* out_wpis);
+extern "C" uint8_t stack_bottom[];
+extern "C" uint8_t stack_top[];
+extern "C" uint64_t tss_ist_podstawa(uint32_t indeks);
+extern "C" uint64_t tss_ist_szczyt(uint32_t indeks);
+
 void uint_do_dec_str(uint64_t wartosc,
                      char* bufor,
                      size_t pojemnosc) {
@@ -392,11 +399,35 @@ void panic_wyjatek(const RejestryStanowe* stan) {
         zatrzymaj_system();
     }
 
+    /*
+     * Sprzetowa rama przerwania w x86-64 Long Mode (AMD64 / Intel 64):
+     * W przeciwienstwie do legacy 32-bit x86, architektura x86-64 ZAWSZE
+     * wypycha pelna 5-qwordowa rame:
+     *   [SS, RSP, RFLAGS, CS, RIP] (oraz opcjonalny kod bledu).
+     * Dzieje sie tak NIEZALEZNIE od zmiany CPL (zarowno Ring 3 -> Ring 0,
+     * jak i Ring 0 -> Ring 0) oraz niezaleznie od mechanizmu IST.
+     *
+     * Stuby w przerwania.S normalizuja wyjatki bez kodu bledu przez PUSH $0,
+     * a nastepnie PUSH_GPRS (15 rejestrow). Dzieki temu struktura
+     * RejestryStanowe ma dokladnie te same, niezmienne offsety dla wszystkich
+     * wyjatkow/przerwan:
+     *   stan->stary_rsp (offset 0xA0) to przerwany sprzetowy RSP,
+     *   stan->stary_ss  (offset 0xA8) to przerwany sprzetowy SS.
+     */
+    uint64_t handler_rsp = 0;
+    asm volatile("mov %%rsp, %0" : "=r"(handler_rsp));
+
+    const bool ist_aktywne =
+        (stan->wektor_przerwania == 8 ||
+         stan->wektor_przerwania == 2 ||
+         stan->wektor_przerwania == 18);
+    const uint64_t przerwany_rsp = stan->stary_rsp;
+
     const uint64_t cr2_check = (stan->wektor_przerwania == 14 || stan->wektor_przerwania == 8) ? odczytaj_cr2() : 0;
     uint64_t sbase = 0, stop = 0;
     if ((stan->wektor_przerwania == 14 || stan->wektor_przerwania == 8) &&
         (stos_czy_adres_w_guard_page(cr2_check, aktualny_pid, &sbase, &stop) ||
-         stos_czy_adres_w_guard_page(stan->stary_rsp, aktualny_pid, &sbase, &stop))) {
+         stos_czy_adres_w_guard_page(przerwany_rsp, aktualny_pid, &sbase, &stop))) {
         serial_wypisz("\n[STACK] KRYTYCZNE przekroczenie stosu jadra\n");
         wypisz_awaryjnie("\n[STACK] KRYTYCZNE przekroczenie stosu jadra\n");
 
@@ -420,7 +451,7 @@ void panic_wyjatek(const RejestryStanowe* stan) {
         }
 
         serial_wypisz("\n[STACK] rsp=0x");
-        uint_do_hex_str(stan->stary_rsp, hex_buf);
+        uint_do_hex_str(przerwany_rsp, hex_buf);
         serial_wypisz(hex_buf);
 
         serial_wypisz("\n[STACK] stackbase=0x");
@@ -431,10 +462,123 @@ void panic_wyjatek(const RejestryStanowe* stan) {
         uint_do_hex_str(stop, hex_buf);
         serial_wypisz(hex_buf);
 
-        uint64_t used = (stop > stan->stary_rsp) ? (stop - stan->stary_rsp) : (stop - sbase);
-        serial_wypisz("\n[STACK] used=");
-        uint_do_dec_str(used, dec_buf, sizeof(dec_buf));
-        serial_wypisz(dec_buf);
+        /*
+         * Metryke used liczymy WYLACZNIE, gdy przerwany RSP daje sie
+         * powiazac ze znanym slotem. Trzy przypadki:
+         *  - RSP w [stackbase, stacktop]: zwykle zuzycie stop - rsp.
+         *  - RSP w guard page slotu (ponizej stackbase): rzeczywiste
+         *    przepelnienie w dol; used = stop - rsp pokazuje glebokosc
+         *    wraz z wtargnieciem w guard (flaga rspwguard=1).
+         *  - RSP poza slotem (stos startowy, IST, tresc stosu odczytana
+         *    ze zlej ramki): brak miarodajnej metryki; used=UNKNOWN
+         *    z flaga rspoutsidemanagedstack=1 (zakaz unsigned underflow
+         *    i zatruwania znaku wodnego).
+         */
+        const bool rsp_w_zarzadzanym =
+            (sbase != 0) && (stop > sbase) &&
+            (przerwany_rsp >= sbase) && (przerwany_rsp <= stop);
+        const bool rsp_w_guardzie =
+            !rsp_w_zarzadzanym && (sbase != 0) && (stop > sbase) &&
+            (przerwany_rsp >= sbase - ROZMIAR_GUARD_PAGE_BAJTY) &&
+            (przerwany_rsp < sbase);
+        if (rsp_w_zarzadzanym || rsp_w_guardzie) {
+            uint64_t used = stop - przerwany_rsp;
+            serial_wypisz("\n[STACK] used=");
+            uint_do_dec_str(used, dec_buf, sizeof(dec_buf));
+            serial_wypisz(dec_buf);
+            if (rsp_w_guardzie) {
+                serial_wypisz("\n[STACK] rspwguard=1");
+            }
+        } else {
+            serial_wypisz("\n[STACK] used=UNKNOWN");
+            serial_wypisz("\n[STACK] rspoutsidemanagedstack=1");
+        }
+
+        {
+            int wlasciciel = -2;
+            uint64_t baza = 0, szczyt = 0;
+            const StosRodzaj rodzaj =
+                stos_klasyfikuj_rsp(przerwany_rsp, &wlasciciel,
+                                    &baza, &szczyt);
+            serial_wypisz("\n[STACK] stos=");
+            serial_wypisz(stos_nazwa_rodzaju(rodzaj));
+            if (rodzaj == STOS_PROCES_JADRA) {
+                serial_wypisz(" pid=");
+                uint_do_dec_str(static_cast<uint64_t>(wlasciciel),
+                                dec_buf, sizeof(dec_buf));
+                serial_wypisz(dec_buf);
+            }
+            serial_wypisz(" baza=0x");
+            uint_do_hex_str(baza, hex_buf);
+            serial_wypisz(hex_buf);
+            serial_wypisz(" szczyt=0x");
+            uint_do_hex_str(szczyt, hex_buf);
+            serial_wypisz(hex_buf);
+        }
+
+        serial_wypisz("\n[STACK] handler_rsp=0x");
+        uint_do_hex_str(handler_rsp, hex_buf);
+        serial_wypisz(hex_buf);
+
+        serial_wypisz("\n[STACK] rama=0x");
+        uint_do_hex_str(reinterpret_cast<uint64_t>(stan), hex_buf);
+        serial_wypisz(hex_buf);
+
+        serial_wypisz("\n[STACK] rip=0x");
+        uint_do_hex_str(stan->adres_powrotu, hex_buf);
+        serial_wypisz(hex_buf);
+
+        serial_wypisz("\n[STACK] cs=0x");
+        uint_do_hex_str(stan->rejestr_cs, hex_buf);
+        serial_wypisz(hex_buf);
+
+        serial_wypisz("\n[STACK] ss=0x");
+        uint_do_hex_str(stan->stary_ss, hex_buf);
+        serial_wypisz(hex_buf);
+
+        serial_wypisz("\n[STACK] tss_rsp0=0x");
+        uint_do_hex_str(tss_pobierz_rsp0(), hex_buf);
+        serial_wypisz(hex_buf);
+
+        serial_wypisz("\n[STACK] boot_baza=0x");
+        uint_do_hex_str(reinterpret_cast<uint64_t>(stack_bottom), hex_buf);
+        serial_wypisz(hex_buf);
+        serial_wypisz(" boot_szczyt=0x");
+        uint_do_hex_str(reinterpret_cast<uint64_t>(stack_top), hex_buf);
+        serial_wypisz(hex_buf);
+
+        if (ist_aktywne) {
+            uint32_t ist_idx = (stan->wektor_przerwania == 8) ? 1 :
+                               (stan->wektor_przerwania == 2) ? 2 : 3;
+            serial_wypisz("\n[STACK] ist_aktywne=");
+            uint_do_dec_str(ist_idx, dec_buf, sizeof(dec_buf));
+            serial_wypisz(dec_buf);
+            serial_wypisz(" ist_baza=0x");
+            uint_do_hex_str(tss_ist_podstawa(ist_idx), hex_buf);
+            serial_wypisz(hex_buf);
+            serial_wypisz(" ist_szczyt=0x");
+            uint_do_hex_str(tss_ist_szczyt(ist_idx), hex_buf);
+            serial_wypisz(hex_buf);
+        }
+
+        if (stan->wektor_przerwania == 14 || stan->wektor_przerwania == 8) {
+            uint64_t wpis = 0;
+            const bool obecna = VmmDiagnostykaWpisu(cr2_check, &wpis);
+            serial_wypisz("\n[STACK] cr2=0x");
+            uint_do_hex_str(cr2_check, hex_buf);
+            serial_wypisz(hex_buf);
+            serial_wypisz("\n[STACK] present=");
+            serial_wypisz(obecna ? "1" : "0");
+            serial_wypisz(" pfec_p=");
+            {
+                char bit[2] = {};
+                // Dla #DF kod bledu jest zawsze 0; bit P nie dotyczy
+                // bledu podwojnego, lecz pierwotnego #PF (CR2 aktualne).
+                bit[0] = (stan->wektor_przerwania == 14 &&
+                          (stan->kod_bledu & 1ULL)) ? '1' : '0';
+                serial_wypisz(bit);
+            }
+        }
 
         serial_wypisz("\n[STACK] lastbws=");
         uint_do_dec_str(g_ostatni_bws, dec_buf, sizeof(dec_buf));
@@ -514,14 +658,26 @@ void panic_wyjatek(const RejestryStanowe* stan) {
         serial_wypisz(hex_buf);
 
         serial_wypisz("\n[PF] rsp=0x");
-        uint_do_hex_str(stan->stary_rsp, hex_buf);
+        uint_do_hex_str(przerwany_rsp, hex_buf);
         serial_wypisz(hex_buf);
         serial_wypisz("\n");
 
-        wypisz_hex_awaryjnie("  RSP:          ", stan->stary_rsp);
+        wypisz_hex_awaryjnie("  RSP:          ", przerwany_rsp);
         wypisz_awaryjnie("  Stos [top 8]:\n");
-        const uint64_t* stos_ptr = reinterpret_cast<const uint64_t*>(stan->stary_rsp);
-        if (stan->stary_rsp >= 0x1000ULL && stan->stary_rsp < 0xFFFF800000000000ULL) {
+        /*
+         * Zrzucamy wylacznie znany, zmapowany stos. Luzna kontrola
+         * < 0xFFFF8000... przepuszczala tresci pamieci (np. 0x688F38),
+         * co dawalo mylace zrzuty spoza przerwanego kontekstu.
+         */
+        const uint64_t* stos_ptr = reinterpret_cast<const uint64_t*>(przerwany_rsp);
+        int wlasciciel_dump = -2;
+        uint64_t baza_dump = 0, szczyt_dump = 0;
+        const StosRodzaj rodzaj_dump =
+            stos_klasyfikuj_rsp(przerwany_rsp, &wlasciciel_dump,
+                                &baza_dump, &szczyt_dump);
+            if (rodzaj_dump != STOS_NIEZNANY &&
+                przerwany_rsp >= baza_dump &&
+                przerwany_rsp + 64 <= szczyt_dump) {
             for (int i = 0; i < 8; ++i) {
                 char prefix[20] = "    [+0x..]:    ";
                 prefix[8] = "0123456789ABCDEF"[(i * 8) >> 4];
@@ -535,6 +691,9 @@ void panic_wyjatek(const RejestryStanowe* stan) {
                 serial_wypisz(hex_buf);
                 serial_wypisz("\n");
             }
+        } else {
+            wypisz_awaryjnie("  Stos:         niedostepny (RSP poza znanym stosem)\n");
+            serial_wypisz("[PF] stos=niedostepny (RSP poza znanym stosem)\n");
         }
     }
 

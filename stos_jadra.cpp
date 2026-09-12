@@ -7,6 +7,15 @@
 #include "pzb.h"
 
 extern "C" uint8_t* tss_pobierz_ist_df_baza();
+extern "C" uint64_t tss_ist_podstawa(uint32_t indeks);
+extern "C" uint64_t tss_ist_szczyt(uint32_t indeks);
+
+/*
+ * Symbole stosu startowego z boot.S (.bss, 64 KiB).
+ * stack_bottom = dolna granica, stack_top = szczyt (adres za tablica).
+ */
+extern "C" uint8_t stack_bottom[];
+extern "C" uint8_t stack_top[];
 
 namespace {
 
@@ -222,8 +231,17 @@ bool stos_weryfikuj_kanarka(int pid) {
 void stos_probkuj_rsp(int pid, uint64_t rsp) {
     if (pid < 0 || pid >= static_cast<int>(PZB_MAKS_PROCESOW)) return;
     if (g_metryki[pid].stack_base == 0) return;
+    /*
+     * Probkujemy wylacznie adresy wewnatrz zmapowanego stosu procesu.
+     * Adres IST, stosu startowego albo tresci stosu (nie wskaznika) nie
+     * moze zaktualizowac znaku wodnego procesu ani kanarka.
+     */
+    if (rsp < g_metryki[pid].stack_base ||
+        rsp > g_metryki[pid].stack_top) {
+        return;
+    }
     g_metryki[pid].current_rsp = rsp;
-    if (rsp >= g_metryki[pid].stack_base && rsp < g_metryki[pid].min_rsp) {
+    if (rsp < g_metryki[pid].min_rsp) {
         g_metryki[pid].min_rsp = rsp;
     }
 }
@@ -313,6 +331,77 @@ StosMetryki stos_pobierz_metryki(int pid) {
     return {};
 }
 
+const char* stos_nazwa_rodzaju(StosRodzaj rodzaj) {
+    switch (rodzaj) {
+        case STOS_PROCES_JADRA: return "PROCESSKERNELSTACK";
+        case STOS_BOOT: return "BOOTSTACK";
+        case STOS_IST_DF: return "IST1DOUBLEFAULT";
+        case STOS_IST_NMI: return "IST2NMI";
+        case STOS_IST_MC: return "IST3MC";
+        case STOS_NIEZNANY:
+        default: return "UNKNOWNSTACK";
+    }
+}
+
+StosRodzaj stos_klasyfikuj_rsp(uint64_t rsp, int* out_pid,
+                               uint64_t* out_base, uint64_t* out_top) {
+    /*
+     * Kolejnosc ma znaczenie tylko dla rozlacznych zakresow; sloty PID,
+     * stos startowy i stosy IST nie zachodza na siebie.
+     *
+     * Dla slotow PID dopasowujemy rowniez dolna guard page
+     * [slot_va, stack_base): RSP w guardzie oznacza rzeczywiste
+     * przepelnienie w dol (straznik zadzialal przed korupcja).
+     * Zwracamy wtedy PROCESSKERNELSTACK z normalna baza/szczytem, aby
+     * diagnostyka mogla policzyc glebokosc (stop - rsp) i oflagowac
+     *halb rspwguard. Sama baza/szczyt dotycza zmapowanego stosu.
+     */
+    for (int p = 0; p < static_cast<int>(PZB_MAKS_PROCESOW); ++p) {
+        const uint64_t slot =
+            BAZA_STOSOW_JADRA +
+            static_cast<uint64_t>(p) * ROZMIAR_SLOTU_PROCESU_BAJTY;
+        const uint64_t baza = g_metryki[p].stack_base;
+        const uint64_t szczyt = g_metryki[p].stack_top;
+        if (baza == 0) {
+            continue;
+        }
+        if ((rsp >= baza && rsp <= szczyt) ||
+            (rsp >= slot && rsp < baza)) {
+            if (out_pid) *out_pid = p;
+            if (out_base) *out_base = baza;
+            if (out_top) *out_top = szczyt;
+            return STOS_PROCES_JADRA;
+        }
+    }
+
+    {
+        const uint64_t baza =
+            reinterpret_cast<uint64_t>(stack_bottom);
+        const uint64_t szczyt =
+            reinterpret_cast<uint64_t>(stack_top);
+        if (szczyt > baza && rsp >= baza && rsp <= szczyt) {
+            if (out_pid) *out_pid = -1;
+            if (out_base) *out_base = baza;
+            if (out_top) *out_top = szczyt;
+            return STOS_BOOT;
+        }
+    }
+
+    for (uint32_t i = 1; i <= 3; ++i) {
+        const uint64_t baza = tss_ist_podstawa(i);
+        const uint64_t szczyt = tss_ist_szczyt(i);
+        if (szczyt > baza && rsp >= baza && rsp <= szczyt) {
+            if (out_pid) *out_pid = -1;
+            if (out_base) *out_base = baza;
+            if (out_top) *out_top = szczyt;
+            return (i == 1) ? STOS_IST_DF :
+                   (i == 2) ? STOS_IST_NMI : STOS_IST_MC;
+        }
+    }
+
+    return STOS_NIEZNANY;
+}
+
 [[noreturn]] void stos_wykonaj_test_przepelnienia(int pid) {
     serial_wypisz("[STACK TEST] Rozpoczynam kontrolowany test przekroczenia guard page...\n");
     if (pid < 0 || pid >= static_cast<int>(PZB_MAKS_PROCESOW) || g_metryki[pid].stack_base == 0) {
@@ -320,8 +409,74 @@ StosMetryki stos_pobierz_metryki(int pid) {
         while (true) asm volatile("cli; hlt");
     }
 
-    // Dotykamy adresu wewnatrz unmapped guard page (stack_base - 8)
-    volatile uint64_t* guard_ptr = reinterpret_cast<volatile uint64_t*>(g_metryki[pid].stack_base - 8);
+    /*
+     * Dane dowodowe zbierane PRZED wywolaniem bledu (po zapisie handler
+     * zatrzymuje system i nic wiecej nie wykona):
+     *  - docelowy adres wewnatrz odmapowanego guard page,
+     *  - oczekiwany zakres guard page slotu PID,
+     *  - stan kanarka (musi byc nienaruszony: test nie pelza przez stos),
+     *  - charakter testu: BEZPOSREDNI zapis kontrolny pod adres guard page,
+     *    a nie rzeczywiste rekurencyjne przepelnienie w dol. Rozroznienie
+     *    jest jawne, aby nie nazywac testu pelna reprodukcja overflow.
+     */
+    const uint64_t slot_va =
+        BAZA_STOSOW_JADRA +
+        static_cast<uint64_t>(pid) * ROZMIAR_SLOTU_PROCESU_BAJTY;
+    const uint64_t guard_lo = slot_va;
+    const uint64_t guard_hi = g_metryki[pid].stack_base;
+    const uint64_t cel =
+        g_metryki[pid].stack_base - 8;
+
+    uint64_t biezacy_rsp = 0;
+    asm volatile("mov %%rsp, %0" : "=r"(biezacy_rsp));
+
+    char hex[17] = {};
+    char dec[32] = {};
+
+    serial_wypisz("[STACK TEST] pid=");
+    uint_do_dec_str(static_cast<uint64_t>(pid), dec, sizeof(dec));
+    serial_wypisz(dec);
+    serial_wypisz("\n[STACK TEST] cel=0x");
+    uint_do_hex_str(cel, hex);
+    serial_wypisz(hex);
+    serial_wypisz("\n[STACK TEST] guard_oczekiwany=0x");
+    uint_do_hex_str(guard_lo, hex);
+    serial_wypisz(hex);
+    serial_wypisz("..0x");
+    uint_do_hex_str(guard_hi, hex);
+    serial_wypisz(hex);
+    serial_wypisz("\n[STACK TEST] rsp_przed=0x");
+    uint_do_hex_str(biezacy_rsp, hex);
+    serial_wypisz(hex);
+
+    {
+        int wlasciciel = -2;
+        uint64_t baza = 0, szczyt = 0;
+        const StosRodzaj rodzaj =
+            stos_klasyfikuj_rsp(biezacy_rsp, &wlasciciel, &baza, &szczyt);
+        serial_wypisz("\n[STACK TEST] stos_aktywny=");
+        serial_wypisz(stos_nazwa_rodzaju(rodzaj));
+        if (rodzaj == STOS_PROCES_JADRA) {
+            serial_wypisz(" pid=");
+            uint_do_dec_str(static_cast<uint64_t>(wlasciciel), dec, sizeof(dec));
+            serial_wypisz(dec);
+        }
+        serial_wypisz(" baza=0x");
+        uint_do_hex_str(baza, hex);
+        serial_wypisz(hex);
+        serial_wypisz(" szczyt=0x");
+        uint_do_hex_str(szczyt, hex);
+        serial_wypisz(hex);
+    }
+
+    serial_wypisz("\n[STACK TEST] kanarek_przed=");
+    serial_wypisz(stos_weryfikuj_kanarka(pid) ? "OK" : "USZKODZONY");
+    serial_wypisz("\n[STACK TEST] present_oczekiwane=0 (strona odmapowana)");
+    serial_wypisz("\n[STACK TEST] tryb=dostep_bezposredni (kontrolowany zapis, nie rekurencyjne pelzanie)\n");
+
+    // Dotykamy adresu wewnatrz unmapped guard page (stack_base - 8).
+    // Sprzetowy #PF z CR2 == cel musi nastapic w nastepnej instrukcji.
+    volatile uint64_t* guard_ptr = reinterpret_cast<volatile uint64_t*>(cel);
     *guard_ptr = 0xDEADBEEFCAFEULL;
 
     while (true) asm volatile("cli; hlt");

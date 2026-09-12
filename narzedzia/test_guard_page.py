@@ -103,8 +103,12 @@ def main():
         test_completed = False
         full_log = ""
 
+        # Pelny rozruch TCG (OVMF + GRUB + kernel_main az do testu przy
+        # pid 0) potrafi zajac ponad 3 minuty na wolnym hoscie; limit
+        # uwzglednia margines, a postep jest raportowany co 10 s.
+        limit_czasu = int(os.environ.get("BURSZTYN_GUARD_TIMEOUT", "420"))
         last_print = start_time
-        while time.time() - start_time < 120:
+        while time.time() - start_time < limit_czasu:
             now = time.time()
             if now - last_print >= 10:
                 print(f"  ...oczekiwanie na rozruch UEFI/jadra ({int(now - start_time)}s)...", flush=True)
@@ -138,15 +142,37 @@ def main():
                 print(line)
         print("-" * 80)
 
+        # Dowod, ze blad dotyczy zamierzonej guard page, a nie przypadku:
+        # CR2 musi byc rowny celowi z fazy przed-bledem i lezec w oczekiwanym
+        # zakresie guard page slotu PID 0; Present musi wynosic 0.
+        import re
+        m_cel = re.search(r"\[STACK TEST\] cel=0x([0-9A-Fa-f]+)", full_log)
+        m_guard = re.search(r"\[STACK TEST\] guard_oczekiwany=0x([0-9A-Fa-f]+)\.\.0x([0-9A-Fa-f]+)", full_log)
+        m_cr2 = re.search(r"\[STACK\] cr2=0x([0-9A-Fa-f]+)", full_log)
+        assert m_cel and m_guard and m_cr2, "Brak trojki dowodowej cel/guard_oczekiwany/cr2 w logu!"
+        cel = int(m_cel.group(1), 16)
+        glo = int(m_guard.group(1), 16)
+        ghi = int(m_guard.group(2), 16)
+        cr2 = int(m_cr2.group(1), 16)
+        assert cr2 == cel, f"CR2 (0x{cr2:X}) != cel testu (0x{cel:X})!"
+        assert glo <= cr2 < ghi, f"CR2 (0x{cr2:X}) poza guard_oczekiwany [0x{glo:X}, 0x{ghi:X})!"
+        print(f"[DOWOD] CR2 == cel == 0x{cr2:X} w guard_oczekiwany [0x{glo:X}, 0x{ghi:X}), Present=0.")
+
         assert test_completed or "[STACK] KRYTYCZNE przekroczenie stosu jadra" in full_log, f"Brak wykrycia naruszenia guard page w logu! Otrzymano:\n{full_log[-1000:]}"
         assert "[STACK TEST] Rozpoczynam kontrolowany test przekroczenia guard page" in full_log, "Brak wejscia do stos_wykonaj_test_przepelnienia!"
+        assert "[STACK TEST] tryb=dostep_bezposredni" in full_log, "Brak jawnego oznaczenia testu jako dostep bezposredni (nie pelzanie)!"
+        assert "[STACK TEST] stos_aktywny=BOOTSTACK" in full_log, "Test powinien pracowac na stosie startowym (PID 0)!"
         assert "[STACK] KRYTYCZNE przekroczenie stosu jadra" in full_log, "Brak naglowka diagnostyki stosu!"
         assert "[STACK] pid=0" in full_log, "Brak raportu pid=0 w diagnostyce stosu!"
         assert "[STACK] program=" in full_log, "Brak raportu nazwy programu!"
         assert "[STACK] rsp=0x" in full_log, "Brak raportu RSP w diagnostyce stosu!"
         assert "[STACK] stackbase=0x" in full_log, "Brak raportu stackbase!"
         assert "[STACK] stacktop=0x" in full_log, "Brak raportu stacktop!"
-        assert "[STACK] used=" in full_log, "Brak raportu used (zuzycie stosu)!"
+        assert "[STACK] used=UNKNOWN" in full_log, "RSP spoza zarzadzanego stosu musi dac used=UNKNOWN (zakaz unsigned underflow)!"
+        assert "[STACK] rspoutsidemanagedstack=1" in full_log, "Brak flagi rspoutsidemanagedstack=1!"
+        assert "[STACK] stos=BOOTSTACK" in full_log, "Aktywny stos powinien zostac zidentyfikowany jako BOOTSTACK!"
+        assert "[STACK] tss_rsp0=0x" in full_log, "Brak raportu TSS RSP0!"
+        assert "[STACK] present=0" in full_log, "Guard page musi byc odmapowana (Present=0)!"
         assert "[STACK] lastbws=" in full_log, "Brak raportu lastbws!"
 
         # Upewnij sie, ze nie doszlo do bledu wykonania kodu pod adresem 0

@@ -28,7 +28,14 @@
 
 constexpr uint64_t BAZA_STOSOW_JADRA = 0xFFFF940000000000ULL;
 constexpr size_t ROZMIAR_STRONY_STOSU = 4096ULL;
+#ifdef BURSZTYN_DIAG_STOS16K
+// Diagnostyczna reprodukcja historycznego 16 KiB stosu (wylacznie do
+// kontrolowanych testow guard page / BWS84; slot wirtualny 128 KiB/PID
+// pozostaje bez zmian, mapowane sa tylko 4 strony).
+constexpr size_t ROZMIAR_STOSU_JADRA_STRONY = 4ULL;
+#else
 constexpr size_t ROZMIAR_STOSU_JADRA_STRONY = 16ULL;
+#endif
 constexpr size_t ROZMIAR_STOSU_JADRA_BAJTY = ROZMIAR_STOSU_JADRA_STRONY * ROZMIAR_STRONY_STOSU; // 64 KiB
 constexpr size_t ROZMIAR_GUARD_PAGE_BAJTY = 4096ULL;
 constexpr size_t ROZMIAR_SLOTU_PROCESU_BAJTY = 128ULL * 1024ULL; // 128 KiB
@@ -44,6 +51,36 @@ struct StosMetryki {
     uint64_t max_used;
     uint64_t remaining_margin;
 };
+
+/*
+ * Klasyfikacja aktywnego stosu w diagnostyce wyjatkow.
+ *
+ * Identyfikatory tekstowe uzywane w logu szeregowym:
+ *   PROCESSKERNELSTACK - zmapowany 64 KiB stos procesu (slot PID)
+ *   BOOTSTACK          - 64 KiB stos startowy z boot.S (PID 0 przed Ring 3)
+ *   IST1DOUBLEFAULT    - awaryjny stos #DF z TSS
+ *   IST2NMI / IST3MC   - awaryjne stosy NMI / Machine Check
+ *   UNKNOWNSTACK       - zaden znany zakres (RSP spoza zarzadzanych stosow)
+ */
+enum StosRodzaj : uint32_t {
+    STOS_NIEZNANY = 0,
+    STOS_PROCES_JADRA = 1,
+    STOS_BOOT = 2,
+    STOS_IST_DF = 3,
+    STOS_IST_NMI = 4,
+    STOS_IST_MC = 5,
+};
+
+const char* stos_nazwa_rodzaju(StosRodzaj rodzaj);
+
+/*
+ * Identyfikuje, do ktorego znanego stosu nalezy podany RSP.
+ * Zwraca rodzaj oraz (gdy znany) PID wlasciciela i zakres [baza, szczyt).
+ * Dla STOS_NIEZNANY out_pid/out_base/out_top pozostaja nietkniete.
+ * Funkcja nie dereferencjuje podanego wskaznika.
+ */
+StosRodzaj stos_klasyfikuj_rsp(uint64_t rsp, int* out_pid,
+                               uint64_t* out_base, uint64_t* out_top);
 
 // Inicjalizuje struktury PML4 dla stosow jadra oraz chroni stos IST dla Double Fault.
 bool stos_jadra_inicjalizuj();

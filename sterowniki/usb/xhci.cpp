@@ -592,7 +592,7 @@ void xhci_write64(volatile void* base,uint32_t offset,uint64_t value){write64(st
 
 bool xhci_dostepny(){return xhc.ready;}
 bool xhci_inicjalizuj_pierwszy() {
-    xhc=Controller{}; if(!hpet_dostepny()){wypisz_log("[xHCI-ERR] HPET niedostepny; bezpieczne timeouty niemozliwe.");return false;}
+    __builtin_memset(static_cast<void*>(&xhc), 0, sizeof(xhc)); xhc.event_cycle = true; if(!hpet_dostepny()){wypisz_log("[xHCI-ERR] HPET niedostepny; bezpieczne timeouty niemozliwe.");return false;}
     if(!find_controller(&xhc.pci))return false;
     wypisz_log("[xHCI] PCI controller znaleziony.");log_values("[xHCI] vendor=",xhc.pci.vendor," device=",xhc.pci.device,true);
     if(!get_bar(xhc)){wypisz_log("[xHCI-ERR] Niepoprawny Memory BAR.");return false;}

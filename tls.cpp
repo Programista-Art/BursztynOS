@@ -48,6 +48,7 @@
 #include "e1000.h"
 #include "grafika.h"
 #include "sterowniki/czas/hpet.h"
+#include "heap.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -1305,12 +1306,26 @@ extern "C" bool kernel_siec_pobierz_https(
 
     /*
      * Konteksty sa inicjalizowane przed pierwszym mozliwym cleanup.
+     * Alokowane na stercie, aby nie obciazac stosu jadra ramka > 7 KiB.
      */
-    mbedtls_ssl_context ssl;
-    mbedtls_ssl_config config;
-    mbedtls_ctr_drbg_context drbg;
-    mbedtls_entropy_context entropy;
-    mbedtls_x509_crt ca;
+    struct TlsWorkspace {
+        mbedtls_ssl_context ssl;
+        mbedtls_ssl_config config;
+        mbedtls_ctr_drbg_context drbg;
+        mbedtls_entropy_context entropy;
+        mbedtls_x509_crt ca;
+    };
+    TlsWorkspace* ws = static_cast<TlsWorkspace*>(kmalloc(sizeof(TlsWorkspace)));
+    if (!ws) {
+        wypisz_log("[TLS] Brak pamieci na konteksty TLS.");
+        return false;
+    }
+
+    mbedtls_ssl_context& ssl = ws->ssl;
+    mbedtls_ssl_config& config = ws->config;
+    mbedtls_ctr_drbg_context& drbg = ws->drbg;
+    mbedtls_entropy_context& entropy = ws->entropy;
+    mbedtls_x509_crt& ca = ws->ca;
 
     mbedtls_ssl_init(
         &ssl
@@ -1631,6 +1646,8 @@ extern "C" bool kernel_siec_pobierz_https(
     mbedtls_entropy_free(
         &entropy
     );
+
+    kfree(ws);
 
     if (tcp_polaczone) {
         tcp_gniazdo_zamknij();

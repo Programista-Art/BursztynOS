@@ -42,15 +42,22 @@ struct FormatterWorkspace {
 
 class GuardStorageFormatter {
 public:
-    GuardStorageFormatter();
+    explicit GuardStorageFormatter(const char* miejsce = nullptr);
     ~GuardStorageFormatter();
     bool aktywny() const { return aktywny_; }
+    const char* miejsce() const { return miejsce_; }
     GuardStorageFormatter(const GuardStorageFormatter&) = delete;
     GuardStorageFormatter& operator=(const GuardStorageFormatter&) = delete;
 private:
     bool aktywny_;
     bool pierwotny_;
+    const char* miejsce_;
 };
+
+// Diagnostyka blokady formattera (odczyt atomowy, bez blokowania).
+uint32_t formatter_blokada_glebokosc();
+int formatter_blokada_wlasciciel();
+const char* formatter_blokada_miejsce();
 
 extern const uint8_t BspType[16];
 extern const uint8_t EspType[16];

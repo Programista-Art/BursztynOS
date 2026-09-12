@@ -34,6 +34,11 @@ aktualizacja_klucz.h
 narzedzia/aktualizacje/__pycache__/qemu_aktualizacja_te
 narzedzia/aktualizacje/qemu_aktualizacja_test.py
 narzedzia/aktualizacje/test_gui_aktualizacje.py
+.test_run_16k/
+.test_run_16k2/
+.test_run_16k3/
+.test_run_live/
+
 
 
 

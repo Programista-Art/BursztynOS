@@ -158,6 +158,7 @@ MBEDTLS_CFLAGS := \
 	$(CPU_FLAGS) \
 	$(HARDEN_FLAGS) \
 	$(WARN_C) \
+	-fstack-usage \
 	$(MBEDTLS_CONFIG) \
 	$(MBEDTLS_INCLUDES)
 
@@ -178,6 +179,13 @@ BURSZTYN_DIAG_GEOM_TRACE ?= 0
 ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_GEOM_TRACE) $(GEOM_TRACE)),)
 RING3_FLAGS += -DBURSZTYN_DIAG_GEOM_TRACE=1
 KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_GEOM_TRACE=1
+endif
+
+# Diagnostyczny 16 KiB stos jadra (reprodukcja historycznego overflow).
+# Wylacznie do kontrolowanych testow: make iso BURSZTYN_DIAG_STOS16K=1
+BURSZTYN_DIAG_STOS16K ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_STOS16K)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_STOS16K=1
 endif
 
 BURSZTYN_DIAG_TAPETY ?= 0
@@ -662,7 +670,7 @@ $(GRUB_CFG): $(KERNEL) $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile
 	@mkdir -p .installer-build
 	grub-mkstandalone -O x86_64-efi --locales="" --fonts="" --modules="part_gpt fat loadenv test normal multiboot2 configfile search search_fs_file all_video gfxterm" -o $@ "boot/grub/grub.cfg=$<"
 
-.PHONY: installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-aktualizacje-gui test-bur-loader test-aktualizacja-qemu test-rozruch-qemu test-ota
+.PHONY: installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-aktualizacje-gui test-bur-loader test-aktualizacja-qemu test-rozruch-qemu test-ota audit-stos-jadra test-stos-jadra test-wspolbieznosc test-guard-page
 test-bur-loader:
 	$(PYTHON) narzedzia/test_bur_loader.py
 test-aktualizacje:
@@ -675,6 +683,22 @@ test-aktualizacja-qemu: iso
 	$(PYTHON) narzedzia/aktualizacje/qemu_aktualizacja_test.py $(QEMU_TEST_ARGS)
 test-rozruch-qemu: test-aktualizacja-qemu
 test-ota: test-bur-loader test-aktualizacje test-rozruch test-aktualizacje-gui test-aktualizacja-qemu
+test-guard-page: iso
+	$(PYTHON) narzedzia/test_guard_page.py
+# Audyt ramek stosu jadra: celowo NIE jest czescia normalnego `make`, poniewaz
+# wymaga czystej diagnostycznej przebudowy wszystkich obiektow jadra.
+# Sprawdza pelne pokrycie .su (w tym biblioteki/mbedtls), najwieksze ramki
+# oraz funkcje o dynamicznym/nieznanym zuzyciu (nigdy liczone jako zero).
+audit-stos-jadra:
+	rm -f *.su
+	rm -f biblioteki/mbedtls/library/*.su
+	rm -f *.o
+	rm -f biblioteki/mbedtls/library/*.o
+	$(MAKE) $(KERNEL)
+	$(PYTHON) narzedzia/analiza_stosu.py --dir . --makefile Makefile --fail-on-missing --max-frame 6144 --warn-frame 3072
+test-stos-jadra: audit-stos-jadra
+test-wspolbieznosc:
+	$(PYTHON) narzedzia/test_wspolbieznosc.py
 installer-unit-test:
 	@mkdir -p .installertest
 	g++ -std=c++17 -O1 -g -Wall -Wextra -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined narzedzia/instalator/test_storage.cpp storage_format.cpp psf.cpp -o .installertest/test-storage

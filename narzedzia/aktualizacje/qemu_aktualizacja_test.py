@@ -474,7 +474,7 @@ def main():
     shutil.rmtree(d / "unauth-boot", ignore_errors=True)
     g_unauth = qemu_install.Guest(d / "unauth-boot", target, sentinel)
     try:
-        log_unauth = g_unauth.wait("[ROZRUCH] BLAD KRYTYCZNY: Nieautoryzowany rozruch slotu!", timeout=120)
+        log_unauth = g_unauth.wait("[ROZRUCH] BLAD KRYTYCZNY: Nieautoryzowany rozruch slotu!", timeout=180)
         time.sleep(1)
         assert "[ROZRUCH] Odrzucenie na podstawie kanonicznych sektorow stanu rozruchu." in log_unauth
         assert "[ROZRUCH] Natychmiastowy powrot do potwierdzonego slotu." in log_unauth

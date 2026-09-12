@@ -637,3 +637,44 @@ extern "C" uint8_t* tss_pobierz_ist_df_baza() {
     return stos_ist_double_fault;
 }
 
+/* =========================================================================
+ * 10. DIAGNOSTYKA STOSOW (RSP0 / IST) DLA PANIC_WYJATEK
+ * ========================================================================= */
+
+/*
+ * Odczyt RSP0 oraz zakresow IST sluzy wylacznie diagnostyce wyjatkow.
+ * Funkcje nie modyfikuja TSS i sa bezpieczne do wywolania z handlera #PF,
+ * poniewaz nie pobieraja zadnych blokad ani nie dotykaja pamieci uzytkownika.
+ */
+extern "C" uint64_t tss_pobierz_rsp0() {
+    return globalny_tss.rsp0;
+}
+
+extern "C" uint64_t tss_ist_podstawa(uint32_t indeks) {
+    switch (indeks) {
+        case 1:
+            return reinterpret_cast<uint64_t>(
+                stos_ist_double_fault);
+        case 2:
+            return reinterpret_cast<uint64_t>(
+                stos_ist_nmi);
+        case 3:
+            return reinterpret_cast<uint64_t>(
+                stos_ist_machine_check);
+        default:
+            return 0;
+    }
+}
+
+extern "C" uint64_t tss_ist_szczyt(uint32_t indeks) {
+    const uint64_t podstawa =
+        tss_ist_podstawa(indeks);
+
+    if (podstawa == 0) {
+        return 0;
+    }
+
+    return podstawa +
+        ROZMIAR_STOSU_IST;
+}
+

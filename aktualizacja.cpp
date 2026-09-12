@@ -1223,12 +1223,23 @@ static BwsOtaStatus g_ota_stan{};
 static uint32_t s_ota_lock = 0;
 static uint32_t s_ota_depth = 0;
 static int s_ota_owner = -1;
+static const char* s_ota_site = nullptr;
 
-GuardOTA::GuardOTA() : aktywny_(false), pierwotny_(false) {
+GuardOTA::GuardOTA(const char* miejsce)
+    : aktywny_(false), pierwotny_(false), miejsce_(miejsce) {
     int my_id = aktualny_pid;
     if (s_ota_owner == my_id && s_ota_depth > 0) {
         s_ota_depth++;
         aktywny_ = true;
+        pierwotny_ = false;
+        return;
+    }
+    // Kontrola inwersji hierarchii blokad:
+    // GuardOTA (warstwa 4) nie moze byc pobierany, gdy biezacy kontekst trzyma
+    // juz GuardStorageFormatter (warstwa 2). Zapobiega zakleszczeniu (deadlock).
+    if (Storage::formatter_blokada_wlasciciel() == my_id &&
+        Storage::formatter_blokada_glebokosc() > 0) {
+        aktywny_ = false;
         pierwotny_ = false;
         return;
     }
@@ -1239,6 +1250,7 @@ GuardOTA::GuardOTA() : aktywny_(false), pierwotny_(false) {
     }
     s_ota_owner = my_id;
     s_ota_depth = 1;
+    s_ota_site = miejsce_;
     aktywny_ = true;
     pierwotny_ = true;
 }
@@ -1251,11 +1263,24 @@ GuardOTA::~GuardOTA() {
     }
     s_ota_depth = 0;
     s_ota_owner = -1;
+    s_ota_site = nullptr;
     __atomic_store_n(&s_ota_lock, 0U, __ATOMIC_RELEASE);
 }
 
+uint32_t ota_blokada_glebokosc() {
+    return __atomic_load_n(&s_ota_depth, __ATOMIC_ACQUIRE);
+}
+
+int ota_blokada_wlasciciel() {
+    return __atomic_load_n(&s_ota_owner, __ATOMIC_ACQUIRE);
+}
+
+const char* ota_blokada_miejsce() {
+    return __atomic_load_n(&s_ota_site, __ATOMIC_ACQUIRE);
+}
+
 BwsOtaDostepnosc aktualizacja_okresl_dostepnosc(void) {
-    GuardOTA guard;
+    GuardOTA guard(__func__);
     akt_log("[OTA TRACE] Determining OTA availability");
     if (!instalator_system_zainstalowany() || instalator_tryb()) {
         return OTA_UNAVAILABLE_LIVE_ENVIRONMENT;
@@ -1306,7 +1331,7 @@ uint64_t aktualizacja_bws_status(const proces_t* proces, uint64_t uzytkownik_buf
         return 0;
     }
 
-    GuardOTA guard;
+    GuardOTA guard(__func__);
     BwsOtaStatus out{};
     out.wersja_abi = BWS_OTA_ABI_WERSJA;
     out.aktywny_slot = aktualizacja_aktywny_slot();
@@ -1471,7 +1496,7 @@ uint64_t aktualizacja_bws_polecenie(const proces_t* proces, uint32_t cmd, uint64
         return BWS_OTA_BLAD_BRAK_UPRAWNIEN;
     }
 
-    GuardOTA guard;
+    GuardOTA guard(__func__);
     BwsOtaDostepnosc dost = aktualizacja_okresl_dostepnosc();
     if (dost != OTA_AVAILABLE) {
         if (cmd == BWS_OTA_CMD_SPRAWDZ || cmd == BWS_OTA_CMD_POBIERZ || cmd == BWS_OTA_CMD_INSTALUJ) {

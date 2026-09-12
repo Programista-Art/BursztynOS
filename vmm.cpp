@@ -2200,8 +2200,35 @@ extern "C" void* VmmOdmapujStroneJadra(void* adres) {
     return pa;
 }
 
-extern "C" bool VmmTestujWspoldzieloneMapowanieJadra(const void* adres) {
-    const uint64_t va = reinterpret_cast<uint64_t>(adres);
+/*
+ * Diagnostyczny, read-only odczyt wpisu tablicy stron dla obslugi #PF.
+ *
+ * Wywolywane wylacznie ze sciezki panic_wyjatek (IF=0, system bedzie
+ * zatrzymany). Celowo NIE pobiera BlokadaVMM: przerwany kontekst mogl
+ * trzymac te blokade (np. blad w mutatorze VMM), a zakleszczenie w
+ * diagnostyce byloby gorsze niz odczyt potencjalnie przejsciowego wpisu.
+ * Wynik sluzy wylacznie potwierdzeniu bitu Present; decyzje podejmuja
+ * zakres guard page (niezmiennik) oraz bit P kodu bledu #PF.
+ */
+extern "C" bool VmmDiagnostykaWpisu(uint64_t va, uint64_t* out_wpis) {
+    if (out_wpis) {
+        *out_wpis = 0;
+    }
+
+    uint64_t* pml4 = pml4_z_cr3();
+    if (!pml4) {
+        return false;
+    }
+
+    const WynikWalkera wynik = sprawdz_mapowanie(pml4, va);
+    if (out_wpis) {
+        *out_wpis = wynik.wpis;
+    }
+
+    return wynik.obecna;
+}
+
+extern "C" bool VmmTestujWspoldzieloneMapowanieJadra(const void* adres) {    const uint64_t va = reinterpret_cast<uint64_t>(adres);
     if (!adres || !pml4_wpis_jadra(indeks_pml4(va))) return false;
 
     BlokadaVMM guard;
