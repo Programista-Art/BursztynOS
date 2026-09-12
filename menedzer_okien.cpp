@@ -41,11 +41,11 @@ int MENU_X = 10;
 int MENU_W = 260;
 int MENU_GORNY_MARGINES = 10;
 int MENU_ELEMENT_WYS = 25;
-constexpr int MENU_ELEMENTOW = 15;
+constexpr int MENU_ELEMENTOW = 16;
 int MENU_WYS = (10 * 2) + (MENU_ELEMENTOW * 25);
 
 // Pozycja "Gry ->" w glownym Menu Start.
-constexpr int MENU_GRY_INDEX = 12;
+constexpr int MENU_GRY_INDEX = 13;
 int MENU_GRY_W = 180;
 constexpr int MENU_GRY_ELEMENTOW = 1;
 int MENU_GRY_WYS = (10 * 2) + (MENU_GRY_ELEMENTOW * 25);
@@ -123,6 +123,8 @@ const char* const SCIEZKA_KONTROLKI3 =
 const char* const SCIEZKA_SNAKE = "/gry/snake.cebula/snake.bur";
 const char* const SCIEZKA_PRZEGLADARKA_OBRAZOW =
     "/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur";
+const char* const SCIEZKA_AKTUALIZACJE =
+    "/programy/aktualizacje.cebula/aktualizacje.bur";
 const char* const SCIEZKA_PULPIT = "/uzytkownicy/Pulpit";
 
 // Kanoniczna tabela uruchamiania ikon wbudowanych. Obsluga klikniecia nie
@@ -138,7 +140,8 @@ enum class TypIkonyAplikacji : uint8_t {
     Obrazy,
     DemoUI,
     Kontrolki2,
-    Kontrolki3
+    Kontrolki3,
+    Aktualizacje
 };
 
 struct AplikacjaPulpitu {
@@ -171,7 +174,9 @@ AplikacjaPulpitu APLIKACJE_PULPITU[] = {
     {720, 50, SCIEZKA_KONTROLKI2, "BursztynUI Kontrolki 2", "Kontrolki 2", nullptr,
      TypIkonyAplikacji::Kontrolki2},
     {800, 50, SCIEZKA_KONTROLKI3, "Kontrolki 3", "Kontrolki 3", nullptr,
-     TypIkonyAplikacji::Kontrolki3}
+     TypIkonyAplikacji::Kontrolki3},
+    {880, 50, SCIEZKA_AKTUALIZACJE, "Aktualizacje Systemu", "Aktualizacje", nullptr,
+     TypIkonyAplikacji::Aktualizacje}
 };
 
 constexpr size_t LICZBA_APLIKACJI_PULPITU =
@@ -357,8 +362,14 @@ static_assert(sizeof(FragmentIkonyPulpitu) == 5,
 
 // Ikona Snake — 44×44, 48 kolorów (kwantyzacja 48), 372 fragmentów (1860B + 192B paleta) — .data (nie .text)
 // FragmentIkonyPulpitu: {x, y, szer, wys, idx_koloru} — współrzędne względne wewnątrz ikony (0..43)
+// UWAGA: celowo bez `const`. `const` sugeruje sekcję tylko-do-odczytu (.rodata),
+// natomiast jawne section(".data") wymaga sekcji zapisywalnej. Mieszanka
+// `static const ... section(".data")` powodowała ostrzeżenie asemblera
+// "ignoring changed section attributes for .data" (sekcja raz read-only,
+// raz writable). Deklaracja writable + section(".data") zachowuje wymagane
+// umieszczenie w segmencie DATA .bur (nie TEXT/.rodata, limit 32 KiB TEXT).
 __attribute__((section(".data"), used))
-static const uint32_t IKONA_SNAKE_PALETA[] = {
+static uint32_t IKONA_SNAKE_PALETA[] = {
     0x00AFD654,
     0x00AFD754,
     0x00AFD855,
@@ -410,7 +421,8 @@ static const uint32_t IKONA_SNAKE_PALETA[] = {
 };
 
 __attribute__((section(".data"), used))
-static const FragmentIkonyPulpitu IKONA_SNAKE_FRAGMENTY[] = {
+static FragmentIkonyPulpitu IKONA_SNAKE_FRAGMENTY[] = {
+    // (jw.: writable .data, nie const — patrz komentarz przy palecie).
     {11, 3, 1, 1, 0},
     {12, 3, 1, 1, 1},
     {13, 3, 1, 1, 2},
@@ -1116,6 +1128,13 @@ bool podwojny_klik(uint64_t previous, uint64_t current) {
         ? difference <= UINT64_C(500000000) : difference <= 50;
 }
 
+bool tekst_rowny(const char* a, const char* b) {
+    if (!a || !b) return false;
+    size_t i = 0;
+    while (a[i] && b[i] && a[i] == b[i]) ++i;
+    return a[i] == b[i];
+}
+
 bool tekst_zaczyna_sie(const char* tekst, const char* prefiks) {
     if (!tekst || !prefiks) return false;
     for (int i = 0; prefiks[i] != '\0'; ++i)
@@ -1606,6 +1625,16 @@ void rysuj_ikone_aplikacji(const AplikacjaPulpitu& aplikacja) {
             rysuj_fragment_ikony(x,y,8,35,32,4,0x00CC33CC);
             rysuj_fragment_ikony(x,y,31,32,7,10,0x00FFFFFF);
             break;
+        case TypIkonyAplikacji::Aktualizacje:
+            // Tarcza aktualizacji ze strzalka w dol i podstawka OTA.
+            rysuj_fragment_ikony(x,y,0,0,48,48,0x001B2838);
+            rysuj_fragment_ikony(x,y,2,2,44,44,0x002D4A6E);
+            rysuj_fragment_ikony(x,y,8,36,32,4,0x00E58A00);
+            rysuj_fragment_ikony(x,y,21,10,6,16,0x00FFBF00);
+            rysuj_fragment_ikony(x,y,15,22,18,4,0x00FFBF00);
+            rysuj_fragment_ikony(x,y,18,26,12,4,0x00FFBF00);
+            rysuj_fragment_ikony(x,y,21,30,6,4,0x00FFBF00);
+            break;
     }
 
     const uint32_t kolor_etykiety =
@@ -1664,6 +1693,7 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
             "> Testy systemu",
             "> Tapety",
             "> Ustawienia ekranu",
+            "> Aktualizacje Systemu",
             "> Gry ->",
             "> Uruchom ponownie",
             "> Zamknij"
@@ -1706,6 +1736,10 @@ bool aktywuj_istniejace(const char* prefiks_tytulu);
 
 void uruchom_program_gui(const char* sciezka) {
     if (!sciezka) return;
+
+    if (tekst_rowny(sciezka, SCIEZKA_AKTUALIZACJE)) {
+        bws_wywolaj(1, (uint64_t)"[OTA TRACE] Launching aktualizacje app\n", 0, 0, 0);
+    }
 
     zamknij_menu_i_odtworz_pulpit();
 
@@ -1930,15 +1964,18 @@ void obsluz_element_menu(int item_index) {
         case 11:
             uruchom_lub_aktywuj(EKRAN_PROGRAM,"Ustawienia ekranu");
             break;
+        case 12:
+            uruchom_lub_aktywuj(SCIEZKA_AKTUALIZACJE, "Aktualizacje Systemu");
+            break;
         case MENU_GRY_INDEX:
             menu_gry_otwarte = !menu_gry_otwarte;
             aktualizuj_overlay_menu();
             RysujPulpit(true);
             break;
-        case 13:
+        case 14:
             wykonaj_restart();
             break;
-        case 14:
+        case 15:
             wykonaj_zamkniecie();
             break;
         default:

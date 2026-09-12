@@ -1,4 +1,7 @@
 #include "storage_format.h"
+#ifndef BURSZTYN_PSF_HOST_TEST
+#include "scheduler.h"
+#endif
 
 namespace Storage {
 // ABI: b21fe73c-0414-4585-bd07-8ab4980f9c88 (UUIDv4 z systemowego generatora).
@@ -25,9 +28,49 @@ bool write(const Partition&p,uint64_t s,uint32_t n,const void*b){
     for(uint32_t i=0;i<n;){uint32_t k=n-i>32?32:n-i;if(!p.device->write(p.device->ctx,p.start+s+i,k,(const uint8_t*)b+size_t(i)*512))return false;i+=k;}return true;
 }
 bool flush(const Partition&p){return p.device&&p.device->flush&&p.device->flush(p.device->ctx);}
+static FormatterWorkspace g_workspace;
+static uint32_t s_formatter_lock = 0;
+static uint32_t s_formatter_depth = 0;
+static int s_formatter_owner = -1;
+
+GuardStorageFormatter::GuardStorageFormatter() : aktywny_(false), pierwotny_(false) {
+#ifndef BURSZTYN_PSF_HOST_TEST
+    int my_id = ::aktualny_pid;
+#else
+    int my_id = 1;
+#endif
+    if (s_formatter_owner == my_id && s_formatter_depth > 0) {
+        s_formatter_depth++;
+        aktywny_ = true;
+        pierwotny_ = false;
+        return;
+    }
+    while (__atomic_exchange_n(&s_formatter_lock, 1U, __ATOMIC_ACQUIRE) != 0U) {
+#if defined(__x86_64__) || defined(_M_X64)
+        asm volatile("pause");
+#endif
+    }
+    s_formatter_owner = my_id;
+    s_formatter_depth = 1;
+    aktywny_ = true;
+    pierwotny_ = true;
+}
+
+GuardStorageFormatter::~GuardStorageFormatter() {
+    if (!aktywny_) return;
+    if (s_formatter_depth > 1) {
+        s_formatter_depth--;
+        return;
+    }
+    s_formatter_depth = 0;
+    s_formatter_owner = -1;
+    __atomic_store_n(&s_formatter_lock, 0U, __ATOMIC_RELEASE);
+}
+
 bool write_verify(const Partition&p,uint64_t s,uint32_t n,const void*b){
     if(!valid(p,s,n,b))return false;
-    uint8_t check[4096];
+    GuardStorageFormatter guard;
+    uint8_t* check = g_workspace.write_verify_check;
     for(uint32_t i=0;i<n;){uint32_t k=n-i>8?8:n-i;const uint8_t*src=(const uint8_t*)b+size_t(i)*512;
         if(!write(p,s+i,k,src)||!read(p,s+i,k,check)||!equal(src,check,k*512))return false;
         i+=k;}
@@ -55,7 +98,11 @@ static bool header(Device*d,uint64_t where,uint8_t*h){
 }
 bool gpt_read(Device*d,Table*out){
     if(!d||!out||d->sector_size!=512||d->sectors<68)return false;
-    uint8_t h[512],b[512],sector[512],backup[512];
+    GuardStorageFormatter guard;
+    uint8_t* h = g_workspace.gpt_h;
+    uint8_t* b = g_workspace.gpt_b;
+    uint8_t* sector = g_workspace.gpt_sector;
+    uint8_t* backup = g_workspace.gpt_backup;
     if(!header(d,1,h)||!header(d,d->sectors-1,b)||!equal(h+40,b+40,32)||!equal(h+80,b+80,12))return false;
     Partition all{d,0,d->sectors};
     uint32_t entries=u32(h+80),c=~0U;out->count=0;copy(out->uuid,h+56,16);
@@ -134,7 +181,7 @@ bool gpt_install_step(GptInstallState*s){
     if(!s||s->failed||s->complete||!s->device)return false;
     Partition all{s->device,0,s->device->sectors};uint8_t b[512]{},expected[512]{};bool ok=false;
     if(s->phase==0){ok=flush(s->layout.bsp);s->phase=1;}
-    else if(s->phase==1){uint8_t z[4096]{};ok=write_verify(s->layout.bsp,0,8,z);s->phase=2;}
+    else if(s->phase==1){GuardStorageFormatter guard;uint8_t* z=g_workspace.gpt_install_z;zero(z,4096);ok=write_verify(s->layout.bsp,0,8,z);s->phase=2;}
     else if(s->phase==2){ok=flush(s->layout.bsp);s->phase=3;}
     else if(s->phase==3){ok=flush(all);s->phase=4;}
     else if(s->phase==4){b[450]=0xEE;b[447]=0;b[448]=2;b[451]=b[452]=b[453]=0xFF;p32(b+454,1);
@@ -219,10 +266,12 @@ bool fat_install_start(const Partition&p,BootFile efi,BootFile kernel,BootFile c
 
 bool fat_install_step(FatInstallState*s){
     if(!s||s->failed||s->complete)return false;
+    GuardStorageFormatter guard;
     const Partition&p=s->partition;const uint32_t fat=s->fat_sectors;
     const uint32_t data_start=s->data_start,clusters=s->clusters,next=s->next_cluster;
     const BootFile*files=s->files;const uint32_t*start=s->file_start;const uint32_t*length=s->file_clusters;
-    uint8_t b[4096]{};
+    uint8_t* b = g_workspace.fat_install_b;
+    zero(b, 4096);
     bool ok=false;
     if(s->phase==0){
         ok=write_verify(p,uint64_t(s->index)*8,8,b);
@@ -313,11 +362,12 @@ bool esp_odczytaj_uklad(const Partition& esp, EspLayout* out) {
     uint32_t spc = boot[13];
     if (spc != 8 || fat == 0) return false;
 
-    uint8_t boot_dir[4096];
+    GuardStorageFormatter guard;
+    uint8_t* boot_dir = g_workspace.esp_boot_dir;
     uint64_t cl5_lba = data_start + uint64_t(5 - 2) * spc;
     if (!read(esp, cl5_lba, 8, boot_dir)) return false;
 
-    uint8_t grub_dir[4096];
+    uint8_t* grub_dir = g_workspace.esp_grub_dir;
     uint64_t cl6_lba = data_start + uint64_t(6 - 2) * spc;
     if (!read(esp, cl6_lba, 8, grub_dir)) return false;
 
@@ -387,7 +437,8 @@ bool esp_zapisz_jadro_slotu(const Partition& esp, uint8_t slot, const uint8_t* d
 
     if (rozmiar > max_bytes) return false;
 
-    uint8_t blk[4096];
+    GuardStorageFormatter guard;
+    uint8_t* blk = g_workspace.esp_slot_blk;
     uint32_t zapisano = 0;
     while (zapisano < rozmiar) {
         uint32_t porcja = (rozmiar - zapisano > 4096) ? 4096 : (rozmiar - zapisano);
@@ -401,10 +452,10 @@ bool esp_zapisz_jadro_slotu(const Partition& esp, uint8_t slot, const uint8_t* d
 
     if (!flush(esp)) return false;
 
-    uint8_t boot_dir[4096];
-    if (!read(esp, l.dirent_boot_lba, 8, boot_dir)) return false;
-    p32(boot_dir + dirent_off + 28, rozmiar);
-    if (!write_verify(esp, l.dirent_boot_lba, 8, boot_dir)) return false;
+    uint8_t* s_boot_dir = g_workspace.esp_slot_boot_dir;
+    if (!read(esp, l.dirent_boot_lba, 8, s_boot_dir)) return false;
+    p32(s_boot_dir + dirent_off + 28, rozmiar);
+    if (!write_verify(esp, l.dirent_boot_lba, 8, s_boot_dir)) return false;
     return flush(esp);
 }
 
@@ -431,10 +482,11 @@ bool esp_odczytaj_jadro_slotu(const Partition& esp, uint8_t slot, uint8_t* bufor
 }
 
 bool esp_zapisz_grubenv(const Partition& esp, const char* potwierdzony, const char* oczekujacy, uint32_t proby) {
+    GuardStorageFormatter guard;
     EspLayout l{};
     if (!esp_odczytaj_uklad(esp, &l)) return false;
 
-    uint8_t env[1024];
+    uint8_t* env = g_workspace.esp_write_env;
     for (int i = 0; i < 1024; ++i) env[i] = '#';
 
     const char header[] = "# GRUB Environment Block\n";
@@ -472,10 +524,11 @@ bool esp_odczytaj_grubenv(const Partition& esp, char* potwierdzony, char* oczeku
     if (oczekujacy) { copy(oczekujacy, "BRAK", 5); }
     if (proby) *proby = 0;
 
+    GuardStorageFormatter guard;
     EspLayout l{};
     if (!esp_odczytaj_uklad(esp, &l)) return false;
 
-    uint8_t env[1024];
+    uint8_t* env = g_workspace.esp_read_env;
     if (!read(esp, l.grubenv_lba, 2, env)) return false;
     if (!equal(env, "# GRUB Environment Block\n", 25)) return false;
 
@@ -560,14 +613,17 @@ bool rozruch_weryfikuj_uklad_dysku(Device* d) {
         return false;
     }
 
-    Table table{};
-    if (!gpt_read(d, &table)) {
+    GuardStorageFormatter guard;
+    Table* table = &g_workspace.rozruch_table;
+    *table = {};
+    if (!gpt_read(d, table)) {
         return false;
     }
 
     /* 1. Weryfikacja, ze metadane podstawowego GPT nie nachodza na LBA 2046/2047 */
     Partition all{d, 0, d->sectors};
-    uint8_t h[512]{};
+    uint8_t* h = g_workspace.rozruch_h;
+    zero(h, 512);
     if (!read(all, 1, 1, h) || !equal(h, "EFI PART", 8)) {
         return false;
     }
@@ -593,8 +649,8 @@ bool rozruch_weryfikuj_uklad_dysku(Device* d) {
     bool bsp_znalezione = false;
     uint64_t esp_start = 0;
 
-    for (uint32_t i = 0; i < table.count; ++i) {
-        const Entry& e = table.entries[i];
+    for (uint32_t i = 0; i < table->count; ++i) {
+        const Entry& e = table->entries[i];
         if (e.count == 0) continue;
         uint64_t p_start = e.start;
         uint64_t p_end = e.start + e.count - 1;

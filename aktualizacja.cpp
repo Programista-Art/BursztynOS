@@ -8,9 +8,12 @@
 #include "blokowy.h"
 #include "wersja_systemu.h"
 #include "psf.h"
+#include "acpi.h"
 #include "siec.h"
 #include "heap.h"
 #include "grafika.h"
+#include "instalator.h"
+#include "scheduler.h"
 #include "mbedtls/sha256.h"
 #include "mbedtls/rsa.h"
 #include "mbedtls/md.h"
@@ -24,6 +27,42 @@ extern "C" bool czytaj_fragment_pliku(const char* sciezka, uint64_t offset,
                                       uint32_t* odczytano);
 extern "C" bool zapisz_fragment_pliku(const char* sciezka, uint64_t offset,
                                       const char* dane, uint32_t dlugosc);
+
+extern bool skopiuj_z_przestrzeni_uzytkownika(void*, const void*, size_t);
+extern bool skopiuj_do_przestrzeni_uzytkownika(void*, const void*, size_t);
+extern bool skopiuj_string_z_uzytkownika(char*, const char*, size_t);
+extern bool czy_bezpieczny_zakres_uzytkownika_do_odczytu(const void*, size_t);
+extern bool czy_bezpieczny_zakres_uzytkownika_do_zapisu(void*, size_t);
+
+static bool ota_operacja_systemowa_dozwolona(const proces_t& proces) {
+    return (proces.uprawnienia & PRAWO_SYSTEM_CONFIG) == PRAWO_SYSTEM_CONFIG &&
+           pzb_ma_co_najmniej_poziom(&proces, PZB_ZAUFANE);
+}
+
+static void ota_wykonaj_restart() {
+    wypisz_log("[POWER] Restart systemu przez OTA.");
+    psf_flush_cache();
+    asm volatile("cli" ::: "memory");
+    if (acpi_wykonaj_restart()) {
+        for (;;) asm volatile("hlt" ::: "memory");
+    }
+    wypisz_log("[POWER] Restart przez fallback 8042.");
+    bool gotowe = false;
+    for (uint32_t proby = 0; proby < 1000000U; ++proby) {
+        uint8_t stan = 0;
+        asm volatile("inb %1, %0" : "=a"(stan) : "Nd"(static_cast<uint16_t>(0x64)));
+        if ((stan & 0x02U) == 0) {
+            gotowe = true;
+            break;
+        }
+    }
+    if (gotowe) {
+        asm volatile("outb %0, %1" : : "a"(static_cast<uint8_t>(0xFE)), "Nd"(static_cast<uint16_t>(0x64)));
+    }
+    for (;;) {
+        asm volatile("hlt");
+    }
+}
 
 /* ---- pomocnicze ---- */
 static void akt_log(const char* tekst) { wypisz_log(tekst); }
@@ -45,6 +84,82 @@ static bool akt_napisz_tekst(const char* sciezka, const char* tekst, size_t len)
         return false;
     }
     return true;
+}
+
+static void akt_kopiuj_tekst(char* cel, const char* zrodlo, size_t max_len) {
+    if (!cel || max_len == 0) return;
+    size_t i = 0;
+    if (zrodlo) {
+        while (i + 1 < max_len && zrodlo[i] != '\0') {
+            cel[i] = zrodlo[i];
+            ++i;
+        }
+    }
+    cel[i] = '\0';
+}
+
+static void akt_wersja_na_tekst(const akt_wersja_t* w, char* out, size_t max_len) {
+    if (!w || !out || max_len < 6) {
+        if (out && max_len > 0) out[0] = '\0';
+        return;
+    }
+    size_t pos = 0;
+    uint32_t parts[3] = {w->major, w->minor, w->patch};
+    for (int p = 0; p < 3; ++p) {
+        uint32_t val = parts[p];
+        char tmp[12];
+        int tlen = 0;
+        if (val == 0) {
+            tmp[tlen++] = '0';
+        } else {
+            char rev[12];
+            int rlen = 0;
+            while (val > 0) {
+                rev[rlen++] = static_cast<char>('0' + (val % 10));
+                val /= 10;
+            }
+            while (rlen > 0) {
+                tmp[tlen++] = rev[--rlen];
+            }
+        }
+        for (int i = 0; i < tlen && pos + 1 < max_len; ++i) {
+            out[pos++] = tmp[i];
+        }
+        if (p < 2 && pos + 1 < max_len) {
+            out[pos++] = '.';
+        }
+    }
+    out[pos] = '\0';
+}
+
+static void akt_zlacz_sciezke(const char* dir, const char* plik, char* out, size_t max_len) {
+    if (!out || max_len == 0) return;
+    size_t pos = 0;
+    if (dir) {
+        while (pos + 1 < max_len && dir[pos] != '\0') {
+            out[pos] = dir[pos];
+            ++pos;
+        }
+    }
+    if (pos > 0 && out[pos - 1] != '/' && pos + 1 < max_len) {
+        out[pos++] = '/';
+    }
+    if (plik) {
+        size_t j = 0;
+        while (pos + 1 < max_len && plik[j] != '\0') {
+            out[pos++] = plik[j++];
+        }
+    }
+    out[pos] = '\0';
+}
+
+static const char* akt_nazwa_kanalu(uint8_t kanal) {
+    switch (kanal) {
+        case AKT_KANAL_TESTOWY: return "testowy";
+        case AKT_KANAL_ROZWOJOWY: return "rozwojowy";
+        case AKT_KANAL_STABILNY:
+        default: return "stabilny";
+    }
 }
 
 /* ---- SHA-256 ---- */
@@ -350,6 +465,7 @@ uint8_t aktualizacja_nieaktywny_slot(void) {
 void aktualizacja_sprawdz_rozruch(uint64_t mbi) {
     uint8_t uruchomiony_slot = 0; // 0 = A, 1 = B
     bool awaria_testowa = false;
+    bool wymus_zainstalowany = false;
 
     if (mbi != 0) {
         const volatile uint32_t* info = reinterpret_cast<const volatile uint32_t*>(mbi);
@@ -372,6 +488,9 @@ void aktualizacja_sprawdz_rozruch(uint64_t mbi) {
                         akt_tekst_zawiera(cmdline, "bursztyn.test_rollback=1")) {
                         awaria_testowa = true;
                     }
+                    if (akt_tekst_zawiera(cmdline, "bursztyn.installed=1")) {
+                        wymus_zainstalowany = true;
+                    }
                     break;
                 }
                 if (typ == 0) break;
@@ -381,6 +500,12 @@ void aktualizacja_sprawdz_rozruch(uint64_t mbi) {
     }
 
     psf_ustaw_aktywny_slot(uruchomiony_slot);
+
+    bool jest_zainstalowany = instalator_system_zainstalowany() || wymus_zainstalowany;
+    if (!jest_zainstalowany) {
+        akt_log("[ROZRUCH] Srodowisko instalacyjne / Live ISO. Pominiecie walidacji partycji A/B LBA 2046/2047.");
+        return;
+    }
 
     bursztyn_rozruch_stan stan{};
     bool stan_odczytany = false;
@@ -494,6 +619,9 @@ void aktualizacja_sprawdz_rozruch(uint64_t mbi) {
 }
 
 bool aktualizacja_potwierdz_rozruch(void) {
+    if (!instalator_system_zainstalowany()) {
+        return true;
+    }
     uint8_t running_slot = psf_pobierz_aktywny_slot();
     bursztyn_rozruch_stan stan{};
     bool stan_odczytany = false;
@@ -1084,5 +1212,536 @@ void aktualizacja_samotest_automatyczny(void) {
     {
         /* Zliczanie bez snprintf: log prosty. */
         (void)zdane; (void)zlane;
+    }
+}
+
+/* =========================================================================
+ * BWS OTA ABI - obsluga Ring 3 (BWS 84: status, BWS 85: polecenie)
+ * ========================================================================= */
+
+static BwsOtaStatus g_ota_stan{};
+static uint32_t s_ota_lock = 0;
+static uint32_t s_ota_depth = 0;
+static int s_ota_owner = -1;
+
+GuardOTA::GuardOTA() : aktywny_(false), pierwotny_(false) {
+    int my_id = aktualny_pid;
+    if (s_ota_owner == my_id && s_ota_depth > 0) {
+        s_ota_depth++;
+        aktywny_ = true;
+        pierwotny_ = false;
+        return;
+    }
+    while (__atomic_exchange_n(&s_ota_lock, 1U, __ATOMIC_ACQUIRE) != 0U) {
+#if defined(__x86_64__) || defined(_M_X64)
+        asm volatile("pause");
+#endif
+    }
+    s_ota_owner = my_id;
+    s_ota_depth = 1;
+    aktywny_ = true;
+    pierwotny_ = true;
+}
+
+GuardOTA::~GuardOTA() {
+    if (!aktywny_) return;
+    if (s_ota_depth > 1) {
+        s_ota_depth--;
+        return;
+    }
+    s_ota_depth = 0;
+    s_ota_owner = -1;
+    __atomic_store_n(&s_ota_lock, 0U, __ATOMIC_RELEASE);
+}
+
+BwsOtaDostepnosc aktualizacja_okresl_dostepnosc(void) {
+    GuardOTA guard;
+    akt_log("[OTA TRACE] Determining OTA availability");
+    if (!instalator_system_zainstalowany() || instalator_tryb()) {
+        return OTA_UNAVAILABLE_LIVE_ENVIRONMENT;
+    }
+
+    Storage::Device* dev = blokowy_dysk_systemowy();
+    if (!dev) {
+        return OTA_BACKEND_ERROR;
+    }
+    akt_log("[OTA TRACE] Storage device resolved: SATA AHCI");
+
+    akt_log("[OTA TRACE] Reading bootstate / GPT");
+    static Storage::Table s_aktualizacja_gpt_table;
+    Storage::Table* table = &s_aktualizacja_gpt_table;
+    *table = {};
+    if (!Storage::gpt_read(dev, table)) {
+        return OTA_UNAVAILABLE_LEGACY_LAYOUT;
+    }
+
+    bool esp_znalezione = false;
+    bool bsp_znalezione = false;
+    for (uint32_t i = 0; i < table->count; ++i) {
+        const auto& e = table->entries[i];
+        if (e.count == 0) continue;
+        if (Storage::equal(e.type, Storage::EspType, 16)) esp_znalezione = true;
+        if (Storage::equal(e.type, Storage::BspType, 16)) bsp_znalezione = true;
+    }
+
+    if (!esp_znalezione || !bsp_znalezione) {
+        return OTA_UNAVAILABLE_LEGACY_LAYOUT;
+    }
+
+    if (!Storage::rozruch_weryfikuj_uklad_dysku(dev)) {
+        return OTA_INVALID_DISK_LAYOUT;
+    }
+
+    return OTA_AVAILABLE;
+}
+
+uint64_t aktualizacja_bws_status(const proces_t* proces, uint64_t uzytkownik_bufor) {
+    akt_log("[OTA TRACE] Kernel entered BWS 84 handler");
+    if (!proces || !aktualizacja_czy_moze_sprawdzac(proces)) {
+        return 0;
+    }
+    if (uzytkownik_bufor == 0 ||
+        !czy_bezpieczny_zakres_uzytkownika_do_zapisu(
+            reinterpret_cast<void*>(uzytkownik_bufor), sizeof(BwsOtaStatus))) {
+        return 0;
+    }
+
+    GuardOTA guard;
+    BwsOtaStatus out{};
+    out.wersja_abi = BWS_OTA_ABI_WERSJA;
+    out.aktywny_slot = aktualizacja_aktywny_slot();
+    out.nieaktywny_slot = aktualizacja_nieaktywny_slot();
+    out.slot_oczekujacy = BURSZTYN_SLOT_NIEZNANY;
+    out.stan_oczekujacego = BURSZTYN_STAN_NIEAKTYWNY;
+
+    /* Biezaca wersja jadra / systemu */
+    akt_wersja_t cur_ver{};
+    if (aktualizacja_biezaca_wersja(&cur_ver)) {
+        akt_wersja_na_tekst(&cur_ver, out.biezaca_wersja, sizeof(out.biezaca_wersja));
+    } else {
+        akt_kopiuj_tekst(out.biezaca_wersja, BURSZTYN_WERSJA_TEKST, sizeof(out.biezaca_wersja));
+    }
+
+    BwsOtaDostepnosc dost = aktualizacja_okresl_dostepnosc();
+    out.dostepnosc = dost;
+
+    if (dost == OTA_UNAVAILABLE_LIVE_ENVIRONMENT) {
+        out.stan = BWS_OTA_STAN_BEZCZYNNA;
+        out.kod_bledu = BWS_OTA_BLAD_BRAK;
+        akt_kopiuj_tekst(out.komunikat,
+            "Aktualizacje systemu są niedostępne w środowisku instalacyjnym. "
+            "Zainstaluj Bursztyn OS na dysku, aby korzystać z aktualizacji.",
+            sizeof(out.komunikat));
+    } else if (dost == OTA_UNAVAILABLE_LEGACY_LAYOUT) {
+        out.stan = BWS_OTA_STAN_BEZCZYNNA;
+        out.kod_bledu = BWS_OTA_BLAD_BRAK;
+        akt_kopiuj_tekst(out.komunikat,
+            "Ta instalacja Bursztyn OS nie obsługuje bezpiecznych aktualizacji A/B.",
+            sizeof(out.komunikat));
+    } else if (dost == OTA_INVALID_DISK_LAYOUT) {
+        out.stan = BWS_OTA_STAN_BLAD;
+        out.kod_bledu = BWS_OTA_BLAD_UKLADU_DYSKU;
+        akt_kopiuj_tekst(out.komunikat,
+            "Układ dysku jest niezgodny z wymaganiami bezpiecznych aktualizacji A/B.",
+            sizeof(out.komunikat));
+    } else if (dost == OTA_BACKEND_ERROR) {
+        out.stan = BWS_OTA_STAN_BLAD;
+        out.kod_bledu = BWS_OTA_BLAD_STANU_ROZRUCHU;
+        akt_kopiuj_tekst(out.komunikat,
+            "Wewnętrzny błąd podsystemu aktualizacji (backend error).",
+            sizeof(out.komunikat));
+    } else {
+        /* dost == OTA_AVAILABLE: normalny odczyt */
+        /* Stan rozruchu ze stabilnych sektorow lub kopii zapasowych */
+        akt_log("[OTA TRACE] Reading bootstate / GPT");
+        bursztyn_rozruch_stan rstan{};
+        bool rstan_ok = false;
+        Storage::Device* dev = blokowy_dysk_systemowy();
+        if (dev && Storage::rozruch_weryfikuj_uklad_dysku(dev)) {
+            rstan_ok = Storage::rozruch_odczytaj_sektory(dev, &rstan);
+        }
+        akt_log("[OTA TRACE] Reading grubenv");
+        Storage::Partition esp_part{};
+        char g_potw[4]{'A', 0};
+        char g_oczek[16]{'B', 'R', 'A', 'K', 0};
+        uint32_t g_proby = 0;
+        if (blokowy_esp_systemowy(&esp_part)) {
+            Storage::esp_odczytaj_grubenv(esp_part, g_potw, g_oczek, &g_proby);
+        }
+        if (!rstan_ok) {
+            bursztyn_rozruch_stan k0{}, k1{};
+            uint32_t g0 = 0, g1 = 0;
+            bool r0 = czytaj_fragment_pliku("/aktualizacje/stan_rozruchu.k0", 0, (char*)&k0, sizeof(k0), &g0) && g0 == sizeof(k0);
+            bool r1 = czytaj_fragment_pliku("/aktualizacje/stan_rozruchu.k1", 0, (char*)&k1, sizeof(k1), &g1) && g1 == sizeof(k1);
+            if (r0 || r1) {
+                rstan_ok = rozruch_wybierz_poprawna_kopie(r0 ? &k0 : nullptr, r1 ? &k1 : nullptr, &rstan);
+            }
+        }
+        if (rstan_ok) {
+            out.slot_oczekujacy = rstan.slot_oczekujacy;
+            out.stan_oczekujacego = rstan.stan_oczekujacego;
+            if (rstan.stan_oczekujacego == BURSZTYN_STAN_NIEUDANY) {
+                out.rollback_wykryty = 1;
+            }
+            if (rstan.slot_oczekujacy == out.nieaktywny_slot &&
+                rstan.stan_oczekujacego == BURSZTYN_STAN_OCZEKUJACY) {
+                out.restart_wymagany = 1;
+            }
+        }
+
+        /* Wykaz aktualizacji na dysku */
+        uint32_t wsize = rozmiar_pliku(AKT_SCIEZKA_WYKAZ);
+        akt_wykaz_t wstruktura{};
+        bool wykaz_odczytany = false;
+        if (wsize > 0 && wsize <= 4096) {
+            char* wbuf = static_cast<char*>(kmalloc(wsize + 1));
+            if (wbuf) {
+                uint32_t wgot = 0;
+                if (czytaj_fragment_pliku(AKT_SCIEZKA_WYKAZ, 0, wbuf, wsize, &wgot) && wgot == wsize) {
+                    wbuf[wsize] = '\0';
+                    if (aktualizacja_weryfikuj_wykaz(wbuf, wsize, &wstruktura)) {
+                        wykaz_odczytany = true;
+                        out.podpis_ok = 1;
+                        akt_wersja_na_tekst(&wstruktura.wersjasystemu, out.dostepna_wersja, sizeof(out.dostepna_wersja));
+                        akt_kopiuj_tekst(out.kanal, akt_nazwa_kanalu(wstruktura.kanal), sizeof(out.kanal));
+                        akt_kopiuj_tekst(out.plik_pakietu, wstruktura.plik, sizeof(out.plik_pakietu));
+                        out.rozmiar_pakietu = wstruktura.rozmiar;
+
+                        char sciezka_pak[128] = {0};
+                        akt_zlacz_sciezke(AKT_SCIEZKA_KATALOG, wstruktura.plik, sciezka_pak, sizeof(sciezka_pak));
+                        uint32_t psize = rozmiar_pliku(AKT_SCIEZKA_POBIERANIE_TMP);
+                        if (psize == 0) psize = rozmiar_pliku(sciezka_pak);
+                        if (psize > 0) {
+                            out.pobrano_bajtow = psize;
+                            if (psize == wstruktura.rozmiar) {
+                                out.sha256_ok = 1;
+                            }
+                        }
+                    }
+                }
+                kfree(wbuf);
+            }
+        }
+
+        /* Konsolidacja biezacego stanu aplikacji z danymi w pamieci */
+        if (out.restart_wymagany || g_ota_stan.stan == BWS_OTA_STAN_WYMAGA_RESTARTU) {
+            out.stan = BWS_OTA_STAN_WYMAGA_RESTARTU;
+            out.restart_wymagany = 1;
+            out.postep_procent = 100;
+            akt_kopiuj_tekst(out.komunikat, "Aktualizacja zainstalowana. Wymagane ponowne uruchomienie systemu.", sizeof(out.komunikat));
+        } else if (out.rollback_wykryty && g_ota_stan.stan == BWS_OTA_STAN_BEZCZYNNA) {
+            out.stan = BWS_OTA_STAN_ROLLBACK_WYKRYTY;
+            akt_kopiuj_tekst(out.komunikat, "Poprzedni rozruch nie powiódł się. Nastąpił automatyczny powrót do bezpiecznego slotu.", sizeof(out.komunikat));
+        } else if (g_ota_stan.stan != BWS_OTA_STAN_BEZCZYNNA) {
+            out.stan = g_ota_stan.stan;
+            out.kod_bledu = g_ota_stan.kod_bledu;
+            out.postep_procent = g_ota_stan.postep_procent;
+            akt_kopiuj_tekst(out.komunikat, g_ota_stan.komunikat, sizeof(out.komunikat));
+        } else if (wykaz_odczytany) {
+            int comp = akt_porownaj_wersje(&wstruktura.wersjasystemu, &cur_ver);
+            if (comp > 0) {
+                if (out.sha256_ok) {
+                    out.stan = BWS_OTA_STAN_POBRANA;
+                    out.postep_procent = 100;
+                    akt_kopiuj_tekst(out.komunikat, "Pakiet aktualizacji jest pobrany i gotowy do instalacji.", sizeof(out.komunikat));
+                } else {
+                    out.stan = BWS_OTA_STAN_DOSTEPNA;
+                    akt_kopiuj_tekst(out.komunikat, "Dostępna nowa wersja systemu Bursztyn OS.", sizeof(out.komunikat));
+                }
+            } else {
+                out.stan = BWS_OTA_STAN_BEZCZYNNA;
+                akt_kopiuj_tekst(out.komunikat, "System jest w pełni zaktualizowany.", sizeof(out.komunikat));
+            }
+        } else {
+            out.stan = BWS_OTA_STAN_BEZCZYNNA;
+            akt_kopiuj_tekst(out.komunikat, "System gotowy do sprawdzenia aktualizacji.", sizeof(out.komunikat));
+        }
+    }
+
+    akt_log("[OTA TRACE] Copying status to user space");
+    if (!skopiuj_do_przestrzeni_uzytkownika(reinterpret_cast<void*>(uzytkownik_bufor), &out, sizeof(out))) {
+        return 0;
+    }
+    akt_log("[OTA TRACE] BWS 84 completed successfully");
+    return 1;
+}
+
+uint64_t aktualizacja_bws_polecenie(const proces_t* proces, uint32_t cmd, uint64_t uzytkownik_arg) {
+    if (!proces) {
+        return BWS_OTA_BLAD_BRAK_UPRAWNIEN;
+    }
+
+    GuardOTA guard;
+    BwsOtaDostepnosc dost = aktualizacja_okresl_dostepnosc();
+    if (dost != OTA_AVAILABLE) {
+        if (cmd == BWS_OTA_CMD_SPRAWDZ || cmd == BWS_OTA_CMD_POBIERZ || cmd == BWS_OTA_CMD_INSTALUJ) {
+            if (dost == OTA_INVALID_DISK_LAYOUT) {
+                return BWS_OTA_BLAD_UKLADU_DYSKU;
+            }
+            return BWS_OTA_BLAD_BRAK_UPRAWNIEN;
+        }
+    }
+
+    switch (cmd) {
+        case BWS_OTA_CMD_SPRAWDZ: {
+            if (!aktualizacja_czy_moze_sprawdzac(proces)) {
+                return BWS_OTA_BLAD_BRAK_UPRAWNIEN;
+            }
+
+            if (uzytkownik_arg != 0) {
+                char domena[128] = {0};
+                if (skopiuj_string_z_uzytkownika(domena, reinterpret_cast<const char*>(uzytkownik_arg), sizeof(domena))) {
+                    if (domena[0] != '\0') {
+                        if (aktualizacja_pobierz_do_tmp(domena, "/aktualizacje/wykazaktualizacji.wykaz", true, 4096)) {
+                            uint32_t tlen = rozmiar_pliku(AKT_SCIEZKA_POBIERANIE_TMP);
+                            if (tlen > 0 && tlen <= 4096) {
+                                char* tbuf = static_cast<char*>(kmalloc(tlen));
+                                uint32_t rgot = 0;
+                                if (tbuf && czytaj_fragment_pliku(AKT_SCIEZKA_POBIERANIE_TMP, 0, tbuf, tlen, &rgot) && rgot == tlen) {
+                                    (void)akt_napisz_tekst(AKT_SCIEZKA_WYKAZ, tbuf, tlen);
+                                }
+                                if (tbuf) kfree(tbuf);
+                            }
+                        }
+                    }
+                }
+            }
+
+            uint32_t wsize = rozmiar_pliku(AKT_SCIEZKA_WYKAZ);
+            if (wsize == 0 || wsize > 4096) {
+                g_ota_stan.stan = BWS_OTA_STAN_BLAD;
+                g_ota_stan.kod_bledu = BWS_OTA_BLAD_BRAK_WYKAZU;
+                akt_kopiuj_tekst(g_ota_stan.komunikat, "Brak pliku wykazu aktualizacji.", sizeof(g_ota_stan.komunikat));
+                return BWS_OTA_BLAD_BRAK_WYKAZU;
+            }
+
+            char* wbuf = static_cast<char*>(kmalloc(wsize + 1));
+            if (!wbuf) {
+                g_ota_stan.stan = BWS_OTA_STAN_BLAD;
+                g_ota_stan.kod_bledu = BWS_OTA_BLAD_BRAK_WYKAZU;
+                akt_kopiuj_tekst(g_ota_stan.komunikat, "Brak pamięci jądra.", sizeof(g_ota_stan.komunikat));
+                return BWS_OTA_BLAD_BRAK_WYKAZU;
+            }
+
+            uint32_t wgot = 0;
+            if (!czytaj_fragment_pliku(AKT_SCIEZKA_WYKAZ, 0, wbuf, wsize, &wgot) || wgot != wsize) {
+                kfree(wbuf);
+                g_ota_stan.stan = BWS_OTA_STAN_BLAD;
+                g_ota_stan.kod_bledu = BWS_OTA_BLAD_BRAK_WYKAZU;
+                akt_kopiuj_tekst(g_ota_stan.komunikat, "Błąd odczytu pliku wykazu.", sizeof(g_ota_stan.komunikat));
+                return BWS_OTA_BLAD_BRAK_WYKAZU;
+            }
+            wbuf[wsize] = '\0';
+
+            akt_wykaz_t wstruktura{};
+            if (!aktualizacja_weryfikuj_wykaz(wbuf, wsize, &wstruktura)) {
+                kfree(wbuf);
+                g_ota_stan.stan = BWS_OTA_STAN_BLAD;
+                g_ota_stan.kod_bledu = BWS_OTA_BLAD_PODPISU;
+                akt_kopiuj_tekst(g_ota_stan.komunikat, "Błąd weryfikacji podpisu cyfrowego wykazu.", sizeof(g_ota_stan.komunikat));
+                return BWS_OTA_BLAD_PODPISU;
+            }
+            kfree(wbuf);
+
+            akt_wersja_t cur_ver{};
+            (void)aktualizacja_biezaca_wersja(&cur_ver);
+
+            int comp = akt_porownaj_wersje(&wstruktura.wersjasystemu, &cur_ver);
+            if (comp > 0) {
+                g_ota_stan.stan = BWS_OTA_STAN_DOSTEPNA;
+                g_ota_stan.kod_bledu = BWS_OTA_BLAD_BRAK;
+                g_ota_stan.podpis_ok = 1;
+                akt_wersja_na_tekst(&wstruktura.wersjasystemu, g_ota_stan.dostepna_wersja, sizeof(g_ota_stan.dostepna_wersja));
+                akt_kopiuj_tekst(g_ota_stan.kanal, akt_nazwa_kanalu(wstruktura.kanal), sizeof(g_ota_stan.kanal));
+                akt_kopiuj_tekst(g_ota_stan.plik_pakietu, wstruktura.plik, sizeof(g_ota_stan.plik_pakietu));
+                g_ota_stan.rozmiar_pakietu = wstruktura.rozmiar;
+                akt_kopiuj_tekst(g_ota_stan.komunikat, "Dostępna nowa wersja systemu Bursztyn OS.", sizeof(g_ota_stan.komunikat));
+            } else {
+                g_ota_stan.stan = BWS_OTA_STAN_BEZCZYNNA;
+                g_ota_stan.kod_bledu = BWS_OTA_BLAD_BRAK;
+                akt_kopiuj_tekst(g_ota_stan.komunikat, "System jest w pełni zaktualizowany.", sizeof(g_ota_stan.komunikat));
+            }
+            return BWS_OTA_BLAD_BRAK;
+        }
+
+        case BWS_OTA_CMD_POBIERZ: {
+            if (!aktualizacja_czy_moze_pobierac(proces)) {
+                return BWS_OTA_BLAD_BRAK_UPRAWNIEN;
+            }
+
+            uint32_t wsize = rozmiar_pliku(AKT_SCIEZKA_WYKAZ);
+            if (wsize == 0 || wsize > 4096) {
+                g_ota_stan.stan = BWS_OTA_STAN_BLAD;
+                g_ota_stan.kod_bledu = BWS_OTA_BLAD_BRAK_WYKAZU;
+                akt_kopiuj_tekst(g_ota_stan.komunikat, "Brak zweryfikowanego wykazu.", sizeof(g_ota_stan.komunikat));
+                return BWS_OTA_BLAD_BRAK_WYKAZU;
+            }
+
+            char* wbuf = static_cast<char*>(kmalloc(wsize + 1));
+            if (!wbuf) return BWS_OTA_BLAD_BRAK_WYKAZU;
+            uint32_t wgot = 0;
+            if (!czytaj_fragment_pliku(AKT_SCIEZKA_WYKAZ, 0, wbuf, wsize, &wgot) || wgot != wsize) {
+                kfree(wbuf);
+                return BWS_OTA_BLAD_BRAK_WYKAZU;
+            }
+            wbuf[wsize] = '\0';
+            akt_wykaz_t wstruktura{};
+            if (!aktualizacja_weryfikuj_wykaz(wbuf, wsize, &wstruktura)) {
+                kfree(wbuf);
+                return BWS_OTA_BLAD_PODPISU;
+            }
+            kfree(wbuf);
+
+            char sciezka_pak[128] = {0};
+            akt_zlacz_sciezke(AKT_SCIEZKA_KATALOG, wstruktura.plik, sciezka_pak, sizeof(sciezka_pak));
+
+            /* Jesli pakiet jest juz w katalogu aktualizacji, kopiujemy do pobieranie.tmp */
+            uint32_t psize = rozmiar_pliku(sciezka_pak);
+            if (psize == 0) psize = rozmiar_pliku(AKT_SCIEZKA_POBIERANIE_TMP);
+
+            if (psize == 0 || psize != wstruktura.rozmiar) {
+                g_ota_stan.stan = BWS_OTA_STAN_BLAD;
+                g_ota_stan.kod_bledu = BWS_OTA_BLAD_BRAK_PAKIETU;
+                akt_kopiuj_tekst(g_ota_stan.komunikat, "Nie znaleziono poprawnego pliku pakietu aktualizacji.", sizeof(g_ota_stan.komunikat));
+                return BWS_OTA_BLAD_BRAK_PAKIETU;
+            }
+
+            /* Jezeli pakiet byl w sciezka_pak a nie w pobieranie.tmp, przepisz do pobieranie.tmp */
+            if (rozmiar_pliku(AKT_SCIEZKA_POBIERANIE_TMP) != wstruktura.rozmiar) {
+                uint8_t* pbuf = static_cast<uint8_t*>(kmalloc(psize));
+                if (pbuf) {
+                    uint32_t got = 0;
+                    if (czytaj_fragment_pliku(sciezka_pak, 0, reinterpret_cast<char*>(pbuf), psize, &got) && got == psize) {
+                        (void)usun_twor(AKT_SCIEZKA_POBIERANIE_TMP);
+                        if (utworz_plik(AKT_SCIEZKA_POBIERANIE_TMP)) {
+                            (void)zapisz_fragment_pliku(AKT_SCIEZKA_POBIERANIE_TMP, 0, reinterpret_cast<const char*>(pbuf), psize);
+                        }
+                    }
+                    kfree(pbuf);
+                }
+            }
+
+            g_ota_stan.stan = BWS_OTA_STAN_POBRANA;
+            g_ota_stan.postep_procent = 100;
+            g_ota_stan.pobrano_bajtow = wstruktura.rozmiar;
+            g_ota_stan.rozmiar_pakietu = wstruktura.rozmiar;
+            g_ota_stan.kod_bledu = BWS_OTA_BLAD_BRAK;
+            akt_kopiuj_tekst(g_ota_stan.komunikat, "Pakiet aktualizacji został pobrany i przygotowany.", sizeof(g_ota_stan.komunikat));
+            return BWS_OTA_BLAD_BRAK;
+        }
+
+        case BWS_OTA_CMD_INSTALUJ: {
+            if (!aktualizacja_czy_moze_instalowac(proces)) {
+                return BWS_OTA_BLAD_BRAK_UPRAWNIEN;
+            }
+
+            uint32_t wsize = rozmiar_pliku(AKT_SCIEZKA_WYKAZ);
+            if (wsize == 0 || wsize > 4096) {
+                g_ota_stan.stan = BWS_OTA_STAN_BLAD;
+                g_ota_stan.kod_bledu = BWS_OTA_BLAD_BRAK_WYKAZU;
+                akt_kopiuj_tekst(g_ota_stan.komunikat, "Brak wykazu aktualizacji.", sizeof(g_ota_stan.komunikat));
+                return BWS_OTA_BLAD_BRAK_WYKAZU;
+            }
+
+            char* wbuf = static_cast<char*>(kmalloc(wsize + 1));
+            if (!wbuf) return BWS_OTA_BLAD_INSTALACJI;
+            uint32_t wgot = 0;
+            if (!czytaj_fragment_pliku(AKT_SCIEZKA_WYKAZ, 0, wbuf, wsize, &wgot) || wgot != wsize) {
+                kfree(wbuf);
+                return BWS_OTA_BLAD_BRAK_WYKAZU;
+            }
+            wbuf[wsize] = '\0';
+            akt_wykaz_t wstruktura{};
+            if (!aktualizacja_weryfikuj_wykaz(wbuf, wsize, &wstruktura)) {
+                kfree(wbuf);
+                return BWS_OTA_BLAD_PODPISU;
+            }
+            kfree(wbuf);
+
+            char sciezka_pak[128] = {0};
+            akt_zlacz_sciezke(AKT_SCIEZKA_KATALOG, wstruktura.plik, sciezka_pak, sizeof(sciezka_pak));
+            const char* uzywana_sciezka = AKT_SCIEZKA_POBIERANIE_TMP;
+            uint32_t plen = rozmiar_pliku(uzywana_sciezka);
+            if (plen == 0 || plen != wstruktura.rozmiar) {
+                uzywana_sciezka = sciezka_pak;
+                plen = rozmiar_pliku(uzywana_sciezka);
+            }
+
+            if (plen == 0 || plen != wstruktura.rozmiar || plen > 16 * 1024 * 1024) {
+                g_ota_stan.stan = BWS_OTA_STAN_BLAD;
+                g_ota_stan.kod_bledu = BWS_OTA_BLAD_BRAK_PAKIETU;
+                akt_kopiuj_tekst(g_ota_stan.komunikat, "Nie odnaleziono poprawnego pakietu aktualizacji.", sizeof(g_ota_stan.komunikat));
+                return BWS_OTA_BLAD_BRAK_PAKIETU;
+            }
+
+            uint8_t* pbuf = static_cast<uint8_t*>(kmalloc(plen));
+            if (!pbuf) {
+                g_ota_stan.stan = BWS_OTA_STAN_BLAD;
+                g_ota_stan.kod_bledu = BWS_OTA_BLAD_INSTALACJI;
+                akt_kopiuj_tekst(g_ota_stan.komunikat, "Brak pamięci jądra do instalacji pakietu.", sizeof(g_ota_stan.komunikat));
+                return BWS_OTA_BLAD_INSTALACJI;
+            }
+
+            uint32_t pgot = 0;
+            if (!czytaj_fragment_pliku(uzywana_sciezka, 0, reinterpret_cast<char*>(pbuf), plen, &pgot) || pgot != plen) {
+                kfree(pbuf);
+                g_ota_stan.stan = BWS_OTA_STAN_BLAD;
+                g_ota_stan.kod_bledu = BWS_OTA_BLAD_BRAK_PAKIETU;
+                akt_kopiuj_tekst(g_ota_stan.komunikat, "Błąd odczytu pakietu z dysku.", sizeof(g_ota_stan.komunikat));
+                return BWS_OTA_BLAD_BRAK_PAKIETU;
+            }
+
+            if (!aktualizacja_weryfikuj_pakiet(pbuf, plen, &wstruktura)) {
+                kfree(pbuf);
+                g_ota_stan.stan = BWS_OTA_STAN_BLAD;
+                g_ota_stan.kod_bledu = BWS_OTA_BLAD_SHA256;
+                akt_kopiuj_tekst(g_ota_stan.komunikat, "Błąd integralności (SHA-256) pakietu aktualizacji.", sizeof(g_ota_stan.komunikat));
+                return BWS_OTA_BLAD_SHA256;
+            }
+
+            bool zainstalowano = aktualizacja_zainstaluj_zweryfikowany(pbuf, plen, &wstruktura);
+            kfree(pbuf);
+
+            if (!zainstalowano) {
+                g_ota_stan.stan = BWS_OTA_STAN_BLAD;
+                g_ota_stan.kod_bledu = BWS_OTA_BLAD_INSTALACJI;
+                akt_kopiuj_tekst(g_ota_stan.komunikat, "Błąd zapisu plików do slotu docelowego lub błąd stanu rozruchu.", sizeof(g_ota_stan.komunikat));
+                return BWS_OTA_BLAD_INSTALACJI;
+            }
+
+            g_ota_stan.stan = BWS_OTA_STAN_WYMAGA_RESTARTU;
+            g_ota_stan.restart_wymagany = 1;
+            g_ota_stan.postep_procent = 100;
+            g_ota_stan.kod_bledu = BWS_OTA_BLAD_BRAK;
+            akt_kopiuj_tekst(g_ota_stan.komunikat, "Aktualizacja zainstalowana pomyślnie. Wymagane ponowne uruchomienie.", sizeof(g_ota_stan.komunikat));
+            return BWS_OTA_BLAD_BRAK;
+        }
+
+        case BWS_OTA_CMD_REBOOT: {
+            if (!ota_operacja_systemowa_dozwolona(*proces)) {
+                return BWS_OTA_BLAD_BRAK_UPRAWNIEN;
+            }
+            ota_wykonaj_restart();
+            return BWS_OTA_BLAD_BRAK;
+        }
+
+        case BWS_OTA_CMD_POTWIERDZ_ROZRUCH: {
+            if (!aktualizacja_czy_moze_instalowac(proces)) {
+                return BWS_OTA_BLAD_BRAK_UPRAWNIEN;
+            }
+            aktualizacja_potwierdz_rozruch();
+            g_ota_stan = BwsOtaStatus{};
+            g_ota_stan.stan = BWS_OTA_STAN_BEZCZYNNA;
+            akt_kopiuj_tekst(g_ota_stan.komunikat, "Rozruch nowego slotu został pomyślnie potwierdzony.", sizeof(g_ota_stan.komunikat));
+            return BWS_OTA_BLAD_BRAK;
+        }
+
+        case BWS_OTA_CMD_RESETUJ_STAN: {
+            g_ota_stan = BwsOtaStatus{};
+            return BWS_OTA_BLAD_BRAK;
+        }
+
+        default:
+            return BWS_OTA_BLAD_ARGUMENT;
     }
 }

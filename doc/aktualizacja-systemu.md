@@ -463,7 +463,115 @@ Przebieg pełnego 9-etapowego testu akceptacyjnego:
 
 ---
 
-## 6. Status techniczny i zgodność
+## 6. Interfejs użytkownika: Aplikacja Aktualizacje Systemu (GUI)
+
+W systemie Bursztyn OS zaimplementowano dedykowaną, natywną aplikację graficzną Ring 3 o nazwie **Aktualizacje Systemu** (`/programy/aktualizacje.cebula/aktualizacje.bur`). Aplikacja prezentuje rzeczywisty stan mechanizmu A/B oraz umożliwia użytkownikowi pełną, kontrolowaną obsługę procesu aktualizacji.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ [▲] Aktualizacje Systemu                                            [_][X]  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Aktualizacje Systemu Bursztyn OS                                           │
+│ Bezpieczny podsystem aktualizacji A/B ze sprawdzaniem integralności i powrotem.│
+│                                                                             │
+│ ┌─ Stan bieżący systemu ──────────────────────────────────────────────────┐ │
+│ │ Bieżąca wersja jądra i systemu:   0.1.0 (stabilny)                      │ │
+│ │ Aktywny slot rozruchowy:          Slot A (potwierdzony i aktywny)       │ │
+│ │ Zapasowy slot aktualizacji:       Slot B (zapasowy / docelowy)          │ │
+│ │ Magazyn stanu rozruchu:           LBA 2046 i LBA 2047 (Boot State)      │ │
+│ └─────────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+│ ┌─ Dostępna aktualizacja ─────────────────────────────────────────────────┐ │
+│ │ Dostępna nowa wersja:             0.2.0                                 │ │
+│ │ Kanał aktualizacji:               stabilny                              │ │
+│ │ Rozmiar pakietu (.akt):           2.45 MiB (2571264 B)                  │ │
+│ │ Podpis cyfrowy RSA-2048:          Zweryfikowany (klucz zaufany)        │ │
+│ │ Integralność SHA-256:             Zgodna z wykazem                      │ │
+│ └─────────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+│ ┌─ Operacje i postęp ─────────────────────────────────────────────────────┐ │
+│ │ Gotowy do instalacji aktualizacji w slocie docelowym.                   │ │
+│ │ [██████████████████████████████████████████████████████] 100%           │ │
+│ │ [Sprawdź aktualizacje] [Pobierz aktualizację] [Zainstaluj] [Uruchom pon.]│ │
+│ └─────────────────────────────────────────────────────────────────────────┘ │
+│ [Gotowy]                                                  [Bursztyn OS A/B] │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.1. Ścisły przepływ operacji (Strict Button Flow)
+Aplikacja rygorystycznie wymusza sekwencyjny, świadomy przepływ czynności użytkownika. **System nigdy nie instaluje pakietu ani nie wykonuje restartu automatycznie bez wyraźnej akcji użytkownika:**
+1. **Sprawdź aktualizacje** (`BWS_OTA_CMD_SPRAWDZ`): pobiera i weryfikuje podpisany wykaz (`wykazaktualizacji.wykaz`), sprawdza wersję minimalną oraz obecność nowszego wydania.
+2. **Pobierz aktualizację** (`BWS_OTA_CMD_POBIERZ`): pobiera plik `.akt` do pamięci podręcznej `/aktualizacje/pobieranie.tmp` i sprawdza skrót SHA-256. Przycisk aktywny wyłącznie w stanie `BWS_OTA_STAN_DOSTEPNA`.
+3. **Zainstaluj aktualizację** (`BWS_OTA_CMD_INSTALUJ`): weryfikuje podpis pakietu kluczem RSA-2048, rozpakowuje pliki do nieaktywnego slotu (`/sloty/b/` lub `/sloty/a/`), aktualizuje jądro na ESP oraz zapisuje rekord rozruchu ze stanem oczekującym do LBA 2046/2047 i `grubenv`. Przycisk aktywny wyłącznie w stanie `BWS_OTA_STAN_POBRANA`.
+4. **Uruchom ponownie** (`BWS_OTA_CMD_REBOOT`): zrzuca bufory dyskowe (`psf_flush_cache`) i inicjuje bezpieczny restart sprzętowy (ACPI / 8042 reset). Przycisk staje się aktywny dopiero po zakończeniu instalacji w stanie `BWS_OTA_STAN_WYMAGA_RESTARTU`.
+
+### 6.2. Wycofanie zmian (Rollback Notice) i powiadomienia o awariach
+W przypadku wystąpienia nieudanego rozruchu i automatycznego powrotu przez GRUB do poprzedniego slotu:
+- Struktura stanu zwraca `rollback_wykryty = 1` oraz `nieudane_proby > 0`.
+- Interfejs natychmiast wyświetla czerwony baner ostrzegawczy na samej górze okna:
+  > **Ostrzeżenie: Wykryto automatyczny powrót (rollback) po nieudanym rozruchu!**
+  > Poprzednia próba uruchomienia slotu docelowego nie powiodła się. Przywrócono stabilną wersję.
+
+### 6.3. Zgodność typograficzna i obsługa języka polskiego
+- Interfejs w całości sporządzono w języku polskim z poprawną obsługą znaków diakrytycznych UTF-8: `ą`, `ć`, `ę`, `ł`, `ń`, `ó`, `ś`, `ź`, `ż`, `Ą`, `Ć`, `Ę`, `Ł`, `Ń`, `Ó`, `Ś`, `Ź`, `Ż`.
+- Aplikacja nie stosuje żadnych protez ASCII (np. słów typu „Biezaca”, „Kanal”, „wcisnieciu”).
+- Renderowanie tekstu korzysta bezpośrednio z silnika tekstowego Bursztyn UI oraz wbudowanej bitmapowej czcionki systemowej `czcionki/extronic16B_unicode.h` (1170 zdefiniowanych glifów Unicode, w tym pełny blok Latin Extended-A dla języka polskiego).
+
+### 6.4. Architektura wywołań systemowych BWS OTA (BWS 84 i 85)
+Komunikacja pomiędzy procesem GUI Ring 3 a podsystemem aktualizacji jądra odbywa się za pośrednictwem dedykowanych, binarnie zdefiniowanych wywołań systemowych z zachowaniem pełnej zgodności wstecznej (zamrożone ABI BWS 0..83):
+
+```c
+/* BWS 84: Pobranie biezacego stanu OTA. */
+#define BWS_OTA_STATUS    84
+
+/* BWS 85: Wykonanie zadanej akcji OTA. */
+#define BWS_OTA_POLECENIE 85
+```
+
+#### Struktura binarnego stanu OTA (`BwsOtaStatus`, 384 B, `__attribute__((packed))`)
+```c
+struct __attribute__((packed)) BwsOtaStatus {
+    uint16_t wersja_abi;       /* BWS_OTA_ABI_WERSJA = 1 */
+    uint8_t  stan;             /* BwsOtaStan */
+    uint8_t  kod_bledu;        /* BwsOtaBlad */
+    uint8_t  postep_procent;   /* 0..100 */
+    uint8_t  restart_wymagany; /* 0 lub 1 */
+    uint8_t  aktywny_slot;     /* 0 (A) lub 1 (B) */
+    uint8_t  nieaktywny_slot;  /* 0 (A) lub 1 (B) */
+    uint8_t  rollback_wykryty; /* 0 lub 1 */
+    uint8_t  podpis_ok;        /* 0 lub 1 */
+    uint8_t  sha256_ok;        /* 0 lub 1 */
+    uint8_t  rezerwa1[5];      /* Wyrownanie */
+    uint64_t rozmiar_pakietu;  /* Rozmiar w bajtach */
+    char     biezaca_wersja[32];
+    char     dostepna_wersja[32];
+    char     kanal[32];
+    char     odcisk_klucza[32];
+    char     komunikat[192];   /* Czytelny komunikat w jezyku polskim */
+    uint8_t  rezerwa2[36];
+    uint32_t suma_kontrolna;   /* CRC32 chroniace integralnosc rekordu */
+};
+static_assert(sizeof(BwsOtaStatus) == 384, "BwsOtaStatus musi miec 384 bajty");
+```
+
+#### Bezpieczeństwo i polityka zaufania PZB
+- Wywołania BWS 84 i BWS 85 podlegają ścisłej weryfikacji uprawnień PZB (Poziomy Zaufania Bursztyna).
+- Aplikacja Aktualizacje Systemu posiada poziom zaufania `PZB_USLUGI` (poziom 2) z maską uprawnień: `okna`, `pliki_czytaj`, `pliki_zapisz`, `system_config`, `siec`.
+- Wszystkie wskaźniki przekazywane z przestrzeni użytkownika są sprawdzane funkcją `czy_bezpieczny_zakres_uzytkownika()` przed jakimkolwiek odczytem lub zapisem.
+- Operacja resetu (`BWS_OTA_CMD_REBOOT`) wymaga uprawnienia `PRAWO_SYSTEM_CONFIG` oraz poziomu co najmniej `PZB_ZAUFANE`.
+
+### 6.5. Pakiet i integracja systemowa
+- **Pakiet aplikacji:** `/programy/aktualizacje.cebula/aktualizacje.bur` wraz z manifestem `/programy/aktualizacje.cebula/opis.aplikacji`.
+- **Menedżer okien (`menedzer_okien.cpp`):**
+  - Dedykowana ikona pulpitu w tablicy `APLIKACJE_PULPITU` z reprezentacją tarczy i strzałki OTA pobierania.
+  - Wpis w Menu Start (`> Aktualizacje Systemu`) w kategorii narzędzi systemowych.
+  - Jednoinstancyjny mechanizm `uruchom_lub_aktywuj(SCIEZKA_AKTUALIZACJE, "Aktualizacje Systemu")`.
+- **System plików jądra (`kernel.cpp`):** automatyczne wdrażanie pliku binarnego i manifestu do katalogu systemowego `/programy/aktualizacje.cebula/` podczas startu systemu.
+- **Uruchamianie z powłoki:** możliwość bezpośredniego startu z poziomu powłoki poleceniem `/programy/aktualizacje.cebula/aktualizacje.bur`.
+
+---
+
+## 7. Status techniczny i zgodność
 
 ```
 A/B UPDATE SLOTS IMPLEMENTED
@@ -475,6 +583,13 @@ TEST KEY REJECTED BY RELEASE BUILD
 LBA 2046/2047 AUTHORITATIVE STORE VERIFIED
 CONFLICT RESOLUTION AND SELF-HEALING VERIFIED IN QEMU
 UNAUTHORIZED BOOT REJECTION AND HARDWARE RESET VERIFIED
-52/52 UNIT TESTS PASSING
+POLISH GUI APPLICATION IMPLEMENTED (Aktualizacje Systemu)
+AUTHENTIC POLISH UNICODE TYPOGRAPHY VERIFIED (extronic16B_unicode.h)
+STRICT BUTTON FLOW ENFORCED (CHECK -> DOWNLOAD -> INSTALL -> REBOOT)
+BWS OTA SYSCALLS (84/85) VERIFIED (sizeof == 384 B)
+DESKTOP AND START MENU REGISTRATION COMPLETE
+140/140 HOST UNIT TESTS PASSING (make test-ota)
+ZERO COMPILER WARNINGS (-Wall -Wextra -Wpedantic)
 NOT MANUALLY VERIFIED ON REAL HARDWARE
 ```
+

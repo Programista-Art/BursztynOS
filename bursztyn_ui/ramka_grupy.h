@@ -14,7 +14,7 @@ public:
         styl_ = Motyw::pobierz_domyslny().styl_panelu;
         styl_.normalny.tlo = Kolory::PowierzchniaTlo;
         styl_.normalny.promien_zaokraglenia = 4;
-        ustaw_wypelnienie(Marginesy(10, 16, 10, 10));
+        ustaw_wypelnienie(Marginesy(12, 22, 12, 10));
         ustaw_tekst(tytul);
     }
 

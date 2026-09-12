@@ -224,7 +224,7 @@ def main():
     print("Stan poczatkowy na dysku (LBA 2046/2047 oraz grubenv): ZWERYFIKOWANY.", flush=True)
 
     # -------------------------------------------------------------
-    # Krok 2: Rozruch zainstalowanego systemu ze Slotu A
+    # Krok 2: Rozruch zainstalowanego systemu ze Slotu A i aplikacja Aktualizacje
     # -------------------------------------------------------------
     print("\n[KROK 2] Rozruch zainstalowanego systemu ze Slotu A...", flush=True)
     shutil.rmtree(d / "boot-a", ignore_errors=True)
@@ -235,9 +235,48 @@ def main():
         g_boot_a.q.screenshot(g_boot_a.dir / "desktop-a.png")
         assert "[BSP] Wybrano kompletny wolumin GPT" in log_a
         assert "System operacyjny gotowy!" in log_a
+
+        # Uruchomienie aplikacji Aktualizacje Systemu z ikony na pulpicie (x=80, y=170)
+        print("Uruchamianie aplikacji Aktualizacje Systemu (klikniecie ikony na pulpicie)...", flush=True)
+        g_boot_a.q.click(80, 170)
+        time.sleep(3)
+        g_boot_a.q.screenshot(g_boot_a.dir / "aktualizacje-window.png")
+
+        # Weryfikacja wymaganych znacznikow serial logu
+        serial_log = (g_boot_a.dir / "serial.log").read_text(errors="replace")
+        wymagane_znaczniki = [
+            "[OTA TRACE] Launching aktualizacje app",
+            "[OTA TRACE] Loader mapped segments, entering Ring 3",
+            "[OTA TRACE] aktualizacje Ring 3 main entered",
+            "[OTA TRACE] aktualizacje calling BWS 84",
+            "[OTA TRACE] Kernel entered BWS 84 handler",
+            "[OTA TRACE] Determining OTA availability",
+            "[OTA TRACE] Storage device resolved: SATA AHCI",
+            "[OTA TRACE] Reading bootstate / GPT",
+            "[OTA TRACE] Reading grubenv",
+            "[OTA TRACE] Copying status to user space",
+            "[OTA TRACE] BWS 84 completed successfully",
+        ]
+        for tag in wymagane_znaczniki:
+            assert tag in serial_log, f"Brak wymaganego znacznika: {tag}"
+
+        assert "#PF Page Fault" not in serial_log, "Wykryto #PF Page Fault!"
+        assert "RIP: 0x0000000000000000" not in serial_log, "Wykryto RIP=0!"
+        assert "KRYTYCZNY BLAD" not in serial_log, "Wykryto panikę jądra!"
+
+        # Klikniecie przycisku 'Sprawdz aktualizacje' (BWS 85)
+        print("Klikniecie przycisku 'Sprawdz aktualizacje'...", flush=True)
+        g_boot_a.q.click(180, 640)
+        time.sleep(2)
+        g_boot_a.q.screenshot(g_boot_a.dir / "aktualizacje-sprawdz.png")
+
+        serial_log_after = (g_boot_a.dir / "serial.log").read_text(errors="replace")
+        assert "#PF Page Fault" not in serial_log_after, "Wykryto #PF Page Fault po kliknieciu 'Sprawdz aktualizacje'!"
+        assert "RIP: 0x0000000000000000" not in serial_log_after, "Wykryto RIP=0 po kliknieciu 'Sprawdz aktualizacje'!"
+        assert "KRYTYCZNY BLAD" not in serial_log_after, "Wykryto panikę jądra po kliknieciu 'Sprawdz aktualizacje'!"
     finally:
         g_boot_a.close()
-    print("Rozruch ze Slotu A: ZWERYFIKOWANY.", flush=True)
+    print("Rozruch ze Slotu A i aplikacja Aktualizacje: ZWERYFIKOWANE.", flush=True)
 
     # -------------------------------------------------------------
     # Krok 3: Zastosowanie aktualizacji do Slotu B (oznaczenie jako oczekujacy)

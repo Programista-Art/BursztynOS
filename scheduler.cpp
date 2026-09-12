@@ -26,6 +26,7 @@
 #include "pzb.h"
 #include "pamiec.h"
 #include "heap.h"
+#include "stos_jadra.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -538,16 +539,10 @@ static void posprzataj_zakonczone_procesy(
         }
 
         /*
-         * Prywatny stos Ring 0 pochodzi z kmalloc().
+         * Prywatny stos Ring 0 zwalniany z galezi chronionych stosow jadra.
          */
-        if (zasoby.baza_stosu_jadra) {
-            kfree(
-                zasoby.baza_stosu_jadra
-            );
-
-            zasoby.baza_stosu_jadra =
-                nullptr;
-        }
+        stos_jadra_zwolnij(pid);
+        zasoby.baza_stosu_jadra = nullptr;
 
         /*
          * Gdy hook VMM nie istnieje, nie blokujemy ponownego uzycia PID.
@@ -1119,9 +1114,13 @@ extern "C" uint64_t PrzelaczKontekst(
      */
     const int stan_starego=odczytaj_stan_procesu(stary_proces);
     if (stan_starego != PROCES_PUSTY && stan_starego != PROCES_KONCZACY) {
-
         stary_proces.kernel_rsp =
             stary_rsp;
+        stos_probkuj_rsp(stary_pid, stary_rsp);
+        if (!stos_weryfikuj_kanarka(stary_pid)) {
+            while (true) asm volatile("cli; hlt");
+        }
+        (void)stos_zmierz_zuzycie(stary_pid);
     }
 
     /*

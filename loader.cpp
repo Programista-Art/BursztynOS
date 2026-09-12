@@ -13,14 +13,17 @@
  */
 
 #include "loader.h"
-#include "grafika.h"
 #include "pamiec.h"
-#include "heap.h"
-#include "scheduler.h"
 #include "pzb.h"
 
 #include <stdint.h>
 #include <stddef.h>
+
+#ifndef BURSZTYN_LOADER_HOST_TEST
+#include "grafika.h"
+#include "heap.h"
+#include "scheduler.h"
+#include "stos_jadra.h"
 
 extern "C" void* PobierzAktualnePML4();
 extern "C" uint8_t* bsp_wczytaj_plik_do_pamieci(
@@ -50,23 +53,46 @@ extern "C" void ZniszczPrzestrzenAdresowaProcesu(void* pml4)
     __attribute__((weak));
 
 proces_t aktywny_proces;
+#endif // !BURSZTYN_LOADER_HOST_TEST
 
-void KopiujPamiec(void* cel, const void* zrodlo, uint64_t rozmiar);
-bool PorownajPamiec(const void* ptr1, const void* ptr2, uint64_t rozmiar);
+void KopiujPamiec(void* cel, const void* zrodlo, uint64_t rozmiar) {
+    if (rozmiar == 0) return;
+    if (!cel || !zrodlo) return;
+    uint8_t* c = static_cast<uint8_t*>(cel);
+    const uint8_t* z = static_cast<const uint8_t*>(zrodlo);
+    for (uint64_t i = 0; i < rozmiar; ++i) {
+        c[i] = z[i];
+    }
+}
+
+bool PorownajPamiec(const void* ptr1, const void* ptr2, uint64_t rozmiar) {
+    if (rozmiar == 0) return true;
+    if (!ptr1 || !ptr2) return false;
+    const uint8_t* p1 = static_cast<const uint8_t*>(ptr1);
+    const uint8_t* p2 = static_cast<const uint8_t*>(ptr2);
+    for (uint64_t i = 0; i < rozmiar; ++i) {
+        if (p1[i] != p2[i]) {
+            return false;
+        }
+    }
+    return true;
+}
 
 namespace {
 
 constexpr uint64_t ROZMIAR_STRONY = 4096ULL;
 constexpr uint64_t MASKA_STRONY = ROZMIAR_STRONY - 1ULL;
 
+#ifndef BURSZTYN_LOADER_HOST_TEST
 constexpr size_t MAKS_DLUGOSC_SCIEZKI = 64;
 constexpr size_t MAKS_ARGUMENT_STARTOWY = 512;
 
 /* Argument nie jest czescia ABI proces_t. Prywatna, indeksowana PID-em
    skrzynka zachowuje ABI schedulera i jest czyszczona przy kazdej rezerwacji. */
 char argument_startowy_procesu[PZB_MAKS_PROCESOW][MAKS_ARGUMENT_STARTOWY] = {};
+#endif // !BURSZTYN_LOADER_HOST_TEST
 
-constexpr uint64_t MIN_ADRES_USER = 0x0000000000001000ULL;
+constexpr uint64_t MIN_ADRES_USER = RING3_BASE;
 constexpr uint64_t KONIEC_ADRESOW_USER = 0x0000800000000000ULL;
 
 /*
@@ -86,20 +112,65 @@ constexpr uint64_t LICZBA_STRON_STOSU_USER = 4ULL;
 constexpr uint64_t ROZMIAR_STOSU_USER =
     LICZBA_STRON_STOSU_USER * ROZMIAR_STRONY;
 constexpr uint64_t LICZBA_STRON_STOSU_TEST = 16ULL;
+constexpr uint64_t MAKS_ROZMIAR_STOSU_USER =
+    LICZBA_STRON_STOSU_TEST * ROZMIAR_STRONY;
 
 /*
- * Bezpiecznik przeciwko zlosliwemu/uszkodzonemu plikowi BUR, ktory
- * zadeklarowalby wielogigabajtowy segment i wyczerpal PMM.
- * Limit mozna pozniej podniesc razem ze specyfikacja formatu BUR.
+ * Ograniczenia rozmiarow segmentow pochodza z loader.h:
+ * BUR_MAKS_TEKST_ROZMIAR (64 MiB), BUR_MAKS_DANE_ROZMIAR (64 MiB),
+ * BUR_MAKS_BSS_ROZMIAR (64 MiB), BUR_MAKS_CALKOWITY_ROZMIAR (128 MiB).
  */
-constexpr uint64_t MAKS_ROZMIAR_SEGMENTU_BUR =
-    256ULL * 1024ULL * 1024ULL;
 
-constexpr uint64_t ROZMIAR_STOSU_JADRA = 16ULL * 1024ULL;
+constexpr uint64_t ROZMIAR_STOSU_JADRA = 64ULL * 1024ULL;
 
 static_assert(sizeof(NaglowekBur) == 60,
               "NaglowekBur zmienil rozmiar - zaktualizuj format .bur");
 
+static bool dodaj_bez_przepelnienia(
+    uint64_t a,
+    uint64_t b,
+    uint64_t* wynik
+) {
+    if (!wynik) return false;
+    if (a > UINT64_MAX - b) return false;
+
+    *wynik = a + b;
+    return true;
+}
+
+static bool zakres_w_przedziale(
+    uint64_t poczatek,
+    uint64_t rozmiar,
+    uint64_t dolna_granica,
+    uint64_t gorna_granica_wylaczna,
+    uint64_t* koniec_wyj
+) {
+    if (rozmiar == 0) return false;
+    if (poczatek < dolna_granica) return false;
+    if (poczatek >= gorna_granica_wylaczna) return false;
+
+    uint64_t koniec = 0;
+    if (!dodaj_bez_przepelnienia(poczatek, rozmiar, &koniec)) {
+        return false;
+    }
+
+    if (koniec > gorna_granica_wylaczna) return false;
+
+    if (koniec_wyj) *koniec_wyj = koniec;
+    return true;
+}
+
+static bool zakresy_nachodza(
+    uint64_t a_poczatek,
+    uint64_t a_koniec,
+    uint64_t b_poczatek,
+    uint64_t b_koniec
+) {
+    return a_poczatek < b_koniec &&
+           b_poczatek < a_koniec;
+}
+
+#ifndef BURSZTYN_LOADER_HOST_TEST
 /*
  * Prosty spinlock chroni tylko rezerwacje slotow i kontrole single-instance.
  * Nie jest trzymany podczas I/O ani alokacji pamieci.
@@ -154,50 +225,6 @@ static void odblokuj_loader() {
         0U,
         __ATOMIC_RELEASE
     );
-}
-
-static bool dodaj_bez_przepelnienia(
-    uint64_t a,
-    uint64_t b,
-    uint64_t* wynik
-) {
-    if (!wynik) return false;
-    if (a > UINT64_MAX - b) return false;
-
-    *wynik = a + b;
-    return true;
-}
-
-static bool zakres_w_przedziale(
-    uint64_t poczatek,
-    uint64_t rozmiar,
-    uint64_t dolna_granica,
-    uint64_t gorna_granica_wylaczna,
-    uint64_t* koniec_wyj
-) {
-    if (rozmiar == 0) return false;
-    if (poczatek < dolna_granica) return false;
-    if (poczatek >= gorna_granica_wylaczna) return false;
-
-    uint64_t koniec = 0;
-    if (!dodaj_bez_przepelnienia(poczatek, rozmiar, &koniec)) {
-        return false;
-    }
-
-    if (koniec > gorna_granica_wylaczna) return false;
-
-    if (koniec_wyj) *koniec_wyj = koniec;
-    return true;
-}
-
-static bool zakresy_nachodza(
-    uint64_t a_poczatek,
-    uint64_t a_koniec,
-    uint64_t b_poczatek,
-    uint64_t b_koniec
-) {
-    return a_poczatek < b_koniec &&
-           b_poczatek < a_koniec;
 }
 
 static bool takie_same_sciezki(
@@ -386,13 +413,21 @@ static void zwolnij_rezerwacje_procesu(
     odblokuj_loader();
     przywroc_przerwania(stan);
 }
+#endif // !BURSZTYN_LOADER_HOST_TEST
 
-static bool poprawny_naglowek_bur(
+} // namespace
+
+extern "C" bool bur_waliduj_naglowek(
     const NaglowekBur& naglowek,
     uint64_t rozmiar_pliku
 ) {
+    if (rozmiar_pliku < sizeof(NaglowekBur) ||
+        rozmiar_pliku > BUR_MAKS_ROZMIAR_PLIKU) {
+        return false;
+    }
+
     const uint8_t oczekiwana_magia[4] = {
-        'B', 'U', 'R', '\0'
+        BUR_MAGIA_0, BUR_MAGIA_1, BUR_MAGIA_2, BUR_MAGIA_3
     };
 
     if (!PorownajPamiec(
@@ -402,26 +437,23 @@ static bool poprawny_naglowek_bur(
         return false;
     }
 
-    if (naglowek.tekst_rozmiar == 0 ||
-        naglowek.tekst_rozmiar > MAKS_ROZMIAR_SEGMENTU_BUR ||
-        naglowek.dane_rozmiar > MAKS_ROZMIAR_SEGMENTU_BUR) {
-        return false;
-    }
-
-    if ((naglowek.tekst_wirtualny & MASKA_STRONY) != 0) {
-        return false;
-    }
-
-    if (naglowek.dane_rozmiar != 0 &&
-        (naglowek.dane_wirtualny & MASKA_STRONY) != 0) {
-        return false;
-    }
-
     /*
-     * Kod musi faktycznie znajdowac sie w calosci w pliku.
-     * Niedopuszczalne jest uruchamianie przycietego kodu i uzupelnianie
-     * jego konca zerami.
+     * 1. Segment TEXT (kod i stale rodata).
+     * Musi byc niepusty, nie przekraczac BUR_MAKS_TEKST_ROZMIAR (64 MiB),
+     * a jego rozmiar, offset w pliku i adres wirtualny musza byc wyrownane
+     * do pelnych stron 4 KiB.
      */
+    if (naglowek.tekst_rozmiar == 0 ||
+        naglowek.tekst_rozmiar > BUR_MAKS_TEKST_ROZMIAR) {
+        return false;
+    }
+
+    if ((naglowek.tekst_rozmiar & MASKA_STRONY) != 0 ||
+        (naglowek.tekst_przesuniecie & MASKA_STRONY) != 0 ||
+        (naglowek.tekst_wirtualny & MASKA_STRONY) != 0) {
+        return false;
+    }
+
     if (naglowek.tekst_przesuniecie < sizeof(NaglowekBur) ||
         naglowek.tekst_przesuniecie > rozmiar_pliku) {
         return false;
@@ -436,18 +468,6 @@ static bool poprawny_naglowek_bur(
         return false;
     }
 
-    /*
-     * Segment danych moze zawierac koncowa czesc zerowana (BSS),
-     * dlatego jego rozmiar w pamieci moze byc wiekszy niz liczba bajtow
-     * pozostajacych w pliku.
-     */
-    if (naglowek.dane_rozmiar != 0) {
-        if (naglowek.dane_przesuniecie < sizeof(NaglowekBur) ||
-            naglowek.dane_przesuniecie > rozmiar_pliku) {
-            return false;
-        }
-    }
-
     uint64_t koniec_tekstu_va = 0;
     if (!zakres_w_przedziale(
             naglowek.tekst_wirtualny,
@@ -458,9 +478,38 @@ static bool poprawny_naglowek_bur(
         return false;
     }
 
+    /*
+     * 2. Segment DATA (dane zainicjalizowane i BSS).
+     * Opcjonalny: jezeli rozmiar > 0, to podlega pelnej kontroli limitow,
+     * wyrownania stron, nienakladania sie i sumarycznego rozmiaru pamieci.
+     */
     uint64_t koniec_danych_va = naglowek.dane_wirtualny;
 
     if (naglowek.dane_rozmiar != 0) {
+        if (naglowek.dane_rozmiar > BUR_MAKS_DANE_ROZMIAR) {
+            return false;
+        }
+
+        if ((naglowek.dane_rozmiar & MASKA_STRONY) != 0 ||
+            (naglowek.dane_przesuniecie & MASKA_STRONY) != 0 ||
+            (naglowek.dane_wirtualny & MASKA_STRONY) != 0) {
+            return false;
+        }
+
+        uint64_t calkowity_rozmiar_va = 0;
+        if (!dodaj_bez_przepelnienia(
+                naglowek.tekst_rozmiar,
+                naglowek.dane_rozmiar,
+                &calkowity_rozmiar_va) ||
+            calkowity_rozmiar_va > BUR_MAKS_CALKOWITY_ROZMIAR) {
+            return false;
+        }
+
+        if (naglowek.dane_przesuniecie < sizeof(NaglowekBur) ||
+            naglowek.dane_przesuniecie > rozmiar_pliku) {
+            return false;
+        }
+
         if (!zakres_w_przedziale(
                 naglowek.dane_wirtualny,
                 naglowek.dane_rozmiar,
@@ -479,9 +528,7 @@ static bool poprawny_naglowek_bur(
         }
 
         /*
-         * Odrzucamy rowniez nakladajace sie fragmenty pliku.
-         * Zapobiega to nietypowym obrazom, w ktorych te same bajty
-         * stanowia jednoczesnie kod i inicjalizowane dane.
+         * Segment danych moze zawierac koncowa czesc zerowana (BSS).
          */
         const uint64_t pozostale_dane =
             rozmiar_pliku - naglowek.dane_przesuniecie;
@@ -490,6 +537,12 @@ static bool poprawny_naglowek_bur(
             naglowek.dane_rozmiar < pozostale_dane
                 ? naglowek.dane_rozmiar
                 : pozostale_dane;
+
+        const uint64_t bss_rozmiar =
+            naglowek.dane_rozmiar - dane_w_pliku;
+        if (bss_rozmiar > BUR_MAKS_BSS_ROZMIAR) {
+            return false;
+        }
 
         if (dane_w_pliku != 0) {
             uint64_t koniec_danych_w_pliku = 0;
@@ -512,7 +565,37 @@ static bool poprawny_naglowek_bur(
     }
 
     /*
-     * Punkt wejscia musi wskazywac na kod, a nie dane lub stos.
+     * 3. Sprawdzenie braku kolizji ze stosem Ring 3 oraz strona straznika.
+     */
+    const uint64_t stos_obszar_start = BAZA_STOSU_USER - ROZMIAR_STRONY;
+    uint64_t stos_obszar_koniec = 0;
+    if (!dodaj_bez_przepelnienia(
+            BAZA_STOSU_USER,
+            MAKS_ROZMIAR_STOSU_USER,
+            &stos_obszar_koniec)) {
+        return false;
+    }
+
+    if (zakresy_nachodza(
+            naglowek.tekst_wirtualny,
+            koniec_tekstu_va,
+            stos_obszar_start,
+            stos_obszar_koniec)) {
+        return false;
+    }
+
+    if (naglowek.dane_rozmiar != 0) {
+        if (zakresy_nachodza(
+                naglowek.dane_wirtualny,
+                koniec_danych_va,
+                stos_obszar_start,
+                stos_obszar_koniec)) {
+            return false;
+        }
+    }
+
+    /*
+     * 4. Punkt wejscia musi wskazywac na kod, a nie dane lub stos.
      */
     if (naglowek.punkt_wejscia < naglowek.tekst_wirtualny ||
         naglowek.punkt_wejscia >= koniec_tekstu_va) {
@@ -520,8 +603,8 @@ static bool poprawny_naglowek_bur(
     }
 
     /*
-     * Wszystkie adresy uzytkownika musza pozostac w kanonicznej,
-     * dolnej polowie przestrzeni x86_64.
+     * 5. Wszystkie adresy uzytkownika musza pozostac w kanonicznej,
+     *    dolnej polowie przestrzeni x86_64.
      */
     if (BAZA_STOSU_USER < MIN_ADRES_USER ||
         BAZA_STOSU_USER >= KONIEC_ADRESOW_USER) {
@@ -538,6 +621,15 @@ static bool poprawny_naglowek_bur(
     }
 
     return true;
+}
+
+#ifndef BURSZTYN_LOADER_HOST_TEST
+namespace {
+static inline bool poprawny_naglowek_bur(
+    const NaglowekBur& naglowek,
+    uint64_t rozmiar_pliku
+) {
+    return bur_waliduj_naglowek(naglowek, rozmiar_pliku);
 }
 
 static bool mapuj_segment_z_pliku(
@@ -679,48 +771,6 @@ static void posprzataj_przestrzen_po_bledzie(
 
 } // namespace
 
-void KopiujPamiec(
-    void* cel,
-    const void* zrodlo,
-    uint64_t rozmiar
-) {
-    if (rozmiar == 0) return;
-    if (!cel || !zrodlo) return;
-
-    uint8_t* c =
-        static_cast<uint8_t*>(cel);
-
-    const uint8_t* z =
-        static_cast<const uint8_t*>(zrodlo);
-
-    for (uint64_t i = 0; i < rozmiar; ++i) {
-        c[i] = z[i];
-    }
-}
-
-bool PorownajPamiec(
-    const void* ptr1,
-    const void* ptr2,
-    uint64_t rozmiar
-) {
-    if (rozmiar == 0) return true;
-    if (!ptr1 || !ptr2) return false;
-
-    const uint8_t* p1 =
-        static_cast<const uint8_t*>(ptr1);
-
-    const uint8_t* p2 =
-        static_cast<const uint8_t*>(ptr2);
-
-    for (uint64_t i = 0; i < rozmiar; ++i) {
-        if (p1[i] != p2[i]) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
 static bool uruchom_program_z_pliku_impl(
     const char* sciezka_pliku,
     uint8_t bzl_poziom,
@@ -817,42 +867,23 @@ static bool uruchom_program_z_pliku_impl(
         sizeof(naglowek)
     );
 
-    if (!poprawny_naglowek_bur(
+    if (!bur_waliduj_naglowek(
             naglowek,
             rozmiar_pliku)) {
-        wypisz_log("[LOADER-DBG] poprawny_naglowek_bur fail");
+        wypisz_log("[LOADER-DBG] bur_waliduj_naglowek fail");
         zwolnij_rezerwacje_procesu(pid);
         return false;
     }
 
     /*
-     * Prywatny stos Ring 0 alokujemy jeszcze na aktualnej przestrzeni
-     * jadra. Nie zalezymy wtedy od tego, czy nowa przestrzen procesu
-     * ma juz poprawnie skopiowane mapowania kernel-space.
+     * Prywatny stos Ring 0 alokujemy w dedykowanej galezi jadra z unmapped
+     * guard page bezposrednio ponizej oraz kanarkiem na dnie.
      */
-    uint8_t* baza_stosu_jadra =
-        static_cast<uint8_t*>(
-            kmalloc(ROZMIAR_STOSU_JADRA)
-        );
+    uint64_t baza_stosu_jadra = 0;
+    uint64_t szczyt_stosu_jadra = 0;
 
-    if (!baza_stosu_jadra) {
-        wypisz_log("[LOADER-DBG] kmalloc baza_stosu_jadra fail");
-        zwolnij_rezerwacje_procesu(pid);
-        return false;
-    }
-
-    const uint64_t szczyt_stosu_jadra =
-        reinterpret_cast<uint64_t>(
-            baza_stosu_jadra +
-            ROZMIAR_STOSU_JADRA
-        );
-
-    if (szczyt_stosu_jadra <
-        reinterpret_cast<uint64_t>(
-            baza_stosu_jadra) ||
-        ROZMIAR_STOSU_JADRA <
-            sizeof(RejestryStanowe)) {
-        kfree(baza_stosu_jadra);
+    if (!stos_jadra_przydziel(pid, &baza_stosu_jadra, &szczyt_stosu_jadra)) {
+        wypisz_log("[LOADER-DBG] stos_jadra_przydziel fail");
         zwolnij_rezerwacje_procesu(pid);
         return false;
     }
@@ -874,7 +905,7 @@ static bool uruchom_program_z_pliku_impl(
 
     if (!poprzednie_pml4) {
         wypisz_log("[LOADER-DBG] PobierzAktualnePML4 fail");
-        kfree(baza_stosu_jadra);
+        stos_jadra_zwolnij(pid);
         zwolnij_rezerwacje_procesu(pid);
         return false;
     }
@@ -884,7 +915,7 @@ static bool uruchom_program_z_pliku_impl(
 
     if (!pml4_procesu) {
         wypisz_log("[LOADER-DBG] UtworzPrzestrzenAdresowaProcesu fail");
-        kfree(baza_stosu_jadra);
+        stos_jadra_zwolnij(pid);
         zwolnij_rezerwacje_procesu(pid);
         return false;
     }
@@ -986,7 +1017,7 @@ static bool uruchom_program_z_pliku_impl(
             pml4_procesu
         );
 
-        kfree(baza_stosu_jadra);
+        stos_jadra_zwolnij(pid);
         zwolnij_rezerwacje_procesu(pid);
         return false;
     }
@@ -1028,7 +1059,7 @@ static bool uruchom_program_z_pliku_impl(
         posprzataj_przestrzen_po_bledzie(
             pml4_procesu
         );
-        kfree(baza_stosu_jadra);
+        stos_jadra_zwolnij(pid);
         zwolnij_rezerwacje_procesu(pid);
         return false;
     }
@@ -1053,9 +1084,7 @@ static bool uruchom_program_z_pliku_impl(
             rama
         );
     proces.baza_stosu_jadra =
-        reinterpret_cast<uint64_t>(
-            baza_stosu_jadra
-        );
+        baza_stosu_jadra;
     proces.szczyt_stosu_jadra =
         szczyt_stosu_jadra;
     proces.cr3 =
@@ -1067,6 +1096,10 @@ static bool uruchom_program_z_pliku_impl(
             argument_startowy_procesu[pid], bezpieczny_argument)) {
         przywroc_przerwania(stan_przerwan);
         return false;
+    }
+
+    if (takie_same_sciezki(sciezka_pliku, "/programy/aktualizacje.cebula/aktualizacje.bur")) {
+        wypisz_log("[OTA TRACE] Loader mapped segments, entering Ring 3\n");
     }
 
     /*
@@ -1154,3 +1187,4 @@ extern "C" int loader_przekaz_argument_uruchomionemu(
     przywroc_przerwania(stan);
     return znaleziony;
 }
+#endif // !BURSZTYN_LOADER_HOST_TEST

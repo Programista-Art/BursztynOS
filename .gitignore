@@ -28,3 +28,12 @@ instalator.bin
 instalator.elf
 narzedzia/instalator/__pycache__/
 aktualizacja_klucz.h
+.test_run_uefi/aktualizacje.png
+.test_run_uefi/desktop.png
+.test_run_uefi/desktop.png
+narzedzia/aktualizacje/__pycache__/qemu_aktualizacja_te
+narzedzia/aktualizacje/qemu_aktualizacja_test.py
+narzedzia/aktualizacje/test_gui_aktualizacje.py
+
+
+

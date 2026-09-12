@@ -19,6 +19,7 @@
 #include "tapety.h"
 #include "sterowniki/czas/hpet.h"
 #include "sterowniki/siec/sockets.h"
+#include "aktualizacja.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -1051,6 +1052,10 @@ extern "C" uint64_t bws_nowoczesne_obsluz(
         case BWS_SOCKET_SEND: return socket_send(*proces, a1, a2, a3, a4);
         case BWS_SOCKET_RECV: return socket_recv(*proces, a1, a2, a3, a4);
         case BWS_SOCKET_CLOSE: return socket_close(*proces, a1);
+        case BWS_OTA_STATUS:
+            return aktualizacja_bws_status(proces, a1);
+        case BWS_OTA_POLECENIE:
+            return aktualizacja_bws_polecenie(proces, static_cast<uint32_t>(a1), a2);
         default: return UINT64_MAX;
     }
 }

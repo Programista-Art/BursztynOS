@@ -64,6 +64,7 @@
 #include "instalator.h"
 #include "acpi.h"
 #include "sterowniki/czas/hpet.h"
+#include "stos_jadra.h"
 
 /* =========================================================================
  * PUBLICZNY STAN UZYWANY PRZEZ GUI / SYSCALL ASM
@@ -96,6 +97,8 @@ extern "C" void odblokuj_ekran() {
  * tej zmiennej. Scheduler aktualizuje jej wartosc przy zmianie procesu.
  */
 uint64_t bezpieczny_stos_jadra = 0;
+extern "C" uint64_t g_ostatni_bws;
+uint64_t g_ostatni_bws = 0;
 
 /* =========================================================================
  * ZEWNĘTRZNE API JADRA
@@ -265,7 +268,7 @@ extern "C" bool bws_vmm_sprawdz_zakres_uzytkownika(
     const void* adres,
     size_t rozmiar,
     bool zapis
-) __attribute__((weak));
+);
 
 void wypisz_log(
     const char* tekst
@@ -1799,6 +1802,13 @@ uint64_t bws_uruchom(
             !pzb_ma_prawa(&rodzic,PRAWO_SYSTEM_CONFIG))return 0;
         poziom_dziecka=PZB_ZAUFANE;wymagane=PRAWO_GUI|PRAWO_SYSTEM_CONFIG;
     }
+    if(rowna_sciezka(sciezka,"/programy/aktualizacje.cebula/aktualizacje.bur")) {
+        SerialLog("[OTA TRACE] Launching aktualizacje app\n");
+        if(!pzb_ma_co_najmniej_poziom(&rodzic,PZB_ZAUFANE)||
+            !pzb_ma_prawa(&rodzic,PRAWO_GUI))return 0;
+        poziom_dziecka=PZB_USLUGI;
+        wymagane=PRAWO_GUI|PRAWO_PLIKI_CZYTAJ|PRAWO_PLIKI_ZAPISZ|PRAWO_SYSTEM_CONFIG|PRAWO_SIEC;
+    }
     prawa_dziecka &= wymagane;
 
     /*
@@ -2485,11 +2495,7 @@ uint64_t bws_alokuj_sterte(
     /*
      * Bez statusu z ZmapujStrone() tylko walker VMM pozwala potwierdzic,
      * ze strona naprawde zostala opublikowana jako USER|WRITE.
-     * Starszy VMM bez hooka nie jest wystarczajaco bezpieczny dla BWS 35.
      */
-    if (!bws_vmm_sprawdz_zakres_uzytkownika) {
-        return 0;
-    }
 
     if (rozmiar == 0 ||
         rozmiar >
@@ -2573,8 +2579,7 @@ uint64_t bws_alokuj_sterte(
          * Istniejace mapowanie w obszarze "wolnej" sterty oznacza
          * niespojnosc deskryptora procesu.
          */
-        if (bws_vmm_sprawdz_zakres_uzytkownika &&
-            bws_vmm_sprawdz_zakres_uzytkownika(
+        if (bws_vmm_sprawdz_zakres_uzytkownika(
                 reinterpret_cast<void*>(
                     adres
                 ),
@@ -2622,25 +2627,22 @@ uint64_t bws_alokuj_sterte(
             VMM_FLAGA_USER
         );
 
-        if (bws_vmm_sprawdz_zakres_uzytkownika) {
-            if (!bws_vmm_sprawdz_zakres_uzytkownika(
-                    reinterpret_cast<void*>(
-                        adres
-                    ),
-                    ROZMIAR_STRONY,
-                    true)) {
+        if (!bws_vmm_sprawdz_zakres_uzytkownika(
+                reinterpret_cast<void*>(
+                    adres
+                ),
+                ROZMIAR_STRONY,
+                true)) {
 
-                /*
-                 * ZmapujStrone() nadal zwraca void i VMM nie ma publicznego
-                 * unmap(). Nie zwalniamy ramki po probie mapowania, bo
-                 * moglaby pozostac aktywnie zmapowana z blednymi flagami.
-                 *
-                 * Ten adres nie jest publikowany aplikacji i zostanie
-                 * pominiety przez przesuniecie granicy ponizej.
-                 */
-                ++poprawnie_zmapowane;
-                break;
-            }
+            /*
+             * ZmapujStrone() nadal zwraca void i VMM nie ma publicznego
+             * unmap(). Nie zwalniamy ramki po probie mapowania, bo
+             * moglaby pozostac aktywnie zmapowana z blednymi flagami.
+             *
+             * Ten adres nie jest publikowany aplikacji i zostanie
+             * pominiety przez przesuniecie granicy ponizej.
+             */
+            break;
         }
 
         ++poprawnie_zmapowane;
@@ -2822,13 +2824,14 @@ extern "C" void inicjalizuj_syscalls() {
  * GLOWNY DISPATCHER BWS
  * ========================================================================= */
 
-extern "C" uint64_t obsluga_wywolan_systemowych(
+static uint64_t obsluga_wywolan_systemowych_impl(
     uint64_t nr_funkcji,
     uint64_t arg1,
     uint64_t arg2,
     uint64_t arg3,
     uint64_t arg4
 ) {
+    g_ostatni_bws = nr_funkcji;
     proces_t* proces_ptr =
         pobierz_proces_wywolujacy();
 
@@ -3685,7 +3688,7 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
             if (bytes == 0 || bytes > 16ULL * 1024ULL * 1024ULL) return 0;
             if (arg3 == 0) return 0;
             if (!czy_bezpieczny_zakres_uzytkownika_do_odczytu(reinterpret_cast<const void*>(arg3), (size_t)bytes)) return 0;
-            if (bws_vmm_sprawdz_zakres_uzytkownika && !bws_vmm_sprawdz_zakres_uzytkownika(reinterpret_cast<const void*>(arg3), (size_t)bytes, false)) return 0;
+            if (!bws_vmm_sprawdz_zakres_uzytkownika(reinterpret_cast<const void*>(arg3), (size_t)bytes, false)) return 0;
             /*
              * Zakres Ring 3 zostal sprawdzony powyzej strona po stronie jako
              * obecny i tylko do odczytu. Proces nie moze zostac przelaczony
@@ -3715,7 +3718,7 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
             uint32_t len = static_cast<uint32_t>(len64);
             if ((uint64_t)len != len64) return 0;
             if (!czy_bezpieczny_zakres_uzytkownika_do_zapisu(reinterpret_cast<void*>(buf_u), len)) return 0;
-            if (bws_vmm_sprawdz_zakres_uzytkownika && !bws_vmm_sprawdz_zakres_uzytkownika(reinterpret_cast<void*>(buf_u), len, true)) return 0;
+            if (!bws_vmm_sprawdz_zakres_uzytkownika(reinterpret_cast<void*>(buf_u), len, true)) return 0;
             uint64_t end = 0;
             if (__builtin_add_overflow(offset, (uint64_t)len, &end)) return 0;
             /*
@@ -3743,3 +3746,46 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
             return UINT64_MAX;
     }
 }
+
+extern "C" uint64_t obsluga_wywolan_systemowych(
+    uint64_t nr_funkcji,
+    uint64_t arg1,
+    uint64_t arg2,
+    uint64_t arg3,
+    uint64_t arg4
+) {
+    uint64_t rsp_in = 0;
+    asm volatile("mov %%rsp, %0" : "=r"(rsp_in));
+
+    proces_t* proc = pobierz_proces_wywolujacy();
+    if (proc) {
+        stos_probkuj_rsp(static_cast<int>(proc->pid), rsp_in);
+    }
+
+    // Kontrolowany test wywolania naruszenia guard page dla regresji
+    if (nr_funkcji == 99 && arg1 == 0xDEADBEEFCAFEULL && proc) {
+        stos_wykonaj_test_przepelnienia(static_cast<int>(proc->pid));
+    }
+
+    uint64_t res = obsluga_wywolan_systemowych_impl(nr_funkcji, arg1, arg2, arg3, arg4);
+
+    if (proc) {
+        uint64_t rsp_out = 0;
+        asm volatile("mov %%rsp, %0" : "=r"(rsp_out));
+        stos_probkuj_rsp(static_cast<int>(proc->pid), rsp_out);
+
+        if (!stos_weryfikuj_kanarka(static_cast<int>(proc->pid))) {
+            wypisz_log("\n[STACK] Wykryto uszkodzenie kanarka stosu jadra przy powrocie z BWS!\n");
+            while (true) asm volatile("cli; hlt");
+        }
+
+        if (nr_funkcji == 84) {
+            stos_raportuj_sciezke("BWS 84 (OTA_STATUS)", static_cast<int>(proc->pid));
+        } else if (nr_funkcji == 85) {
+            stos_raportuj_sciezke("BWS 85 (OTA_POLECENIE)", static_cast<int>(proc->pid));
+        }
+    }
+
+    return res;
+}
+

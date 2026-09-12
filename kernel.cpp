@@ -41,6 +41,7 @@ extern "C" void odblokuj_ekran();
 #include "sterowniki/usb/usb.h"
 #include "aktualizacja.h"
 #include "wersja_systemu.h"
+#include "stos_jadra.h"
 
 #ifndef BURSZTYN_DEBUG_NET_SELFTEST
 #define BURSZTYN_DEBUG_NET_SELFTEST 0
@@ -156,6 +157,9 @@ extern "C" uint8_t _binary_kontrolki2_bin_end[];
 
 extern "C" uint8_t _binary_kontrolki3_bin_start[];
 extern "C" uint8_t _binary_kontrolki3_bin_end[];
+
+extern "C" uint8_t _binary_aktualizacje_bin_start[];
+extern "C" uint8_t _binary_aktualizacje_bin_end[];
 
 extern "C" uint8_t _binary_przegladarka_obrazow_bin_start[];
 extern "C" uint8_t _binary_przegladarka_obrazow_bin_end[];
@@ -773,6 +777,7 @@ static const char* const KATALOGI_SYSTEMOWE[] = {
         "/programy/demo_ui.cebula",
         "/programy/kontrolki2.cebula",
         "/programy/kontrolki3.cebula",
+        "/programy/aktualizacje.cebula",
         "/programy/test.cebula",
         "/programy/ekran.cebula",
         "/programy/tapety.cebula",
@@ -885,6 +890,42 @@ bool zadano_automatyczne_testy(uint64_t mbi) {
                 if (cmdline[i] == '\0') {
                     return tekst_zawiera(
                         cmdline, "bursztyn.test=automated");
+                }
+            }
+            return false;
+        }
+
+        if (tag->typ == MULTIBOOT_TAG_TYPE_END) break;
+        off = (off + tag->rozmiar + 7ULL) & ~7ULL;
+    }
+    return false;
+}
+
+bool zadano_test_stack_guard(uint64_t mbi) {
+    if (mbi == 0) return false;
+
+    const volatile uint32_t* info =
+        reinterpret_cast<const volatile uint32_t*>(mbi);
+    const uint32_t calosc = info[0];
+    if (calosc < 16 || mbi > UINT64_MAX - calosc) return false;
+
+    uint64_t off = 8;
+    while (off + sizeof(WpisTaguMB2) <= calosc) {
+        const WpisTaguMB2* tag =
+            reinterpret_cast<const WpisTaguMB2*>(mbi + off);
+        if (tag->rozmiar < sizeof(WpisTaguMB2) ||
+            off + tag->rozmiar > calosc) {
+            return false;
+        }
+
+        if (tag->typ == 1 /* MULTIBOOT_TAG_TYPE_CMDLINE */ &&
+            tag->rozmiar > sizeof(WpisTaguMB2)) {
+            const char* cmdline = reinterpret_cast<const char*>(mbi + off + 8);
+            const uint32_t pojemnosc = tag->rozmiar - 8;
+            for (uint32_t i = 0; i < pojemnosc; ++i) {
+                if (cmdline[i] == '\0') {
+                    return tekst_zawiera(
+                        cmdline, "bursztyn.test=stack_guard");
                 }
             }
             return false;
@@ -1124,6 +1165,20 @@ void instaluj_wbudowane_programy() {
         "plik_startowy = \"kontrolki3.bur\"\n"
         "uprawnienia = [\n"
         "    \"okna\"\n"
+        "]\n";
+
+    static const char MANIFEST_AKTUALIZACJE[] =
+        "nazwa = \"Aktualizacje Systemu\"\n"
+        "autor = \"Programista Art\"\n"
+        "wersja = \"0.1\"\n"
+        "poziom_zaufania = 2\n"
+        "plik_startowy = \"aktualizacje.bur\"\n"
+        "uprawnienia = [\n"
+        "    \"okna\",\n"
+        "    \"pliki_czytaj\",\n"
+        "    \"pliki_zapisz\",\n"
+        "    \"system_config\",\n"
+        "    \"siec\"\n"
         "]\n";
     
     /*
@@ -1567,6 +1622,19 @@ void instaluj_wbudowane_programy() {
     } else {
         wypisz_log(
             "[BSP] Kontrolki 3 zainstalowane jako .cebula.");
+    }
+
+    if (!instaluj_paczke(
+            "/programy/aktualizacje.cebula/opis.aplikacji",
+            MANIFEST_AKTUALIZACJE,
+            "/programy/aktualizacje.cebula/aktualizacje.bur",
+            _binary_aktualizacje_bin_start,
+            _binary_aktualizacje_bin_end)) {
+        wypisz_log(
+            "[BSP-BLAD] Nie mozna zainstalowac Aktualizacji Systemu.");
+    } else {
+        wypisz_log(
+            "[BSP] Aktualizacje Systemu zainstalowane jako .cebula.");
     }
 
 
@@ -2022,6 +2090,11 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     wypisz_log(
         "[HEAP] Sterta jadra 16 MiB gotowa.");
 
+    if (!stos_jadra_inicjalizuj()) {
+        zatrzymaj_start(
+            "Nie udalo sie zainicjalizowac podsystemu stosow jadra.");
+    }
+
     if (!acpi_inicjalizuj(multiboot_info_ptr))
         wypisz_log("[ACPI] Brak poprawnej tabeli HPET w RSDT/XSDT.");
     else
@@ -2206,6 +2279,11 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
 
         zatrzymaj_start(
             "Loader nie utworzyl procesu Menedzera Okien.");
+    }
+
+    if (zadano_test_stack_guard(g_multiboot_info_ptr)) {
+        wypisz_log("\n[TEST] Wywolanie kontrolowanego testu naruszenia guard page stosu jadra...\n");
+        stos_wykonaj_test_przepelnienia(0);
     }
 
     /* Zwykly start systemu uruchamia tylko Menedzera Okien. Test jest

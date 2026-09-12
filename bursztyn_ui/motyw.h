@@ -42,9 +42,9 @@ namespace Kolory {
     inline constexpr uint32_t CzerwonyZamknij         = 0x00AA0000U;
     inline constexpr uint32_t CzerwonyZamknijNajechany= 0x00CC2222U;
 
-    inline constexpr uint32_t WylaczonyTlo            = 0x00222222U;
-    inline constexpr uint32_t WylaczonyTekst          = 0x00666666U;
-    inline constexpr uint32_t WylaczonyRamka          = 0x00444444U;
+    inline constexpr uint32_t WylaczonyTlo            = 0x002A2420U;
+    inline constexpr uint32_t WylaczonyTekst          = 0x009E9E9EU;
+    inline constexpr uint32_t WylaczonyRamka          = 0x004D443CU;
 
     inline constexpr uint32_t ZaznaczenieTlo          = 0x008A5000U;
     inline constexpr uint32_t ZaznaczenieTekst        = 0x00FFFFFFU;

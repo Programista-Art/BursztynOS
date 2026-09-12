@@ -147,6 +147,7 @@ KERNEL_CXXFLAGS := \
 	$(WARN_CXX) \
 	-fno-exceptions \
 	-fno-rtti \
+	-fstack-usage \
 	$(MBEDTLS_CONFIG) \
 	$(MBEDTLS_INCLUDES)
 
@@ -167,6 +168,8 @@ RING3_FLAGS := \
 	$(CPU_FLAGS) \
 	$(HARDEN_FLAGS) \
 	$(WARN_CXX) \
+	-ffunction-sections \
+	-fdata-sections \
 	-fno-exceptions \
 	-fno-rtti \
 	-fno-threadsafe-statics
@@ -228,6 +231,8 @@ EKSPLORATOR_LINKER := programy/eksplorator/eksplorator_linker.ld
 
 PRZEGLADARKA_LINKER := programy/przegladarka_linker.ld
 
+AKTUALIZACJE_LINKER := programy/aktualizacje/aktualizacje_linker.ld
+
 # ============================================================================
 # 6. MBEDTLS
 # ============================================================================
@@ -269,6 +274,7 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	pci.o \
 	ahci.o \
 	ring3.o \
+	stos_jadra.o \
 	notatnik_blob.o \
 	eksplorator_blob.o \
 	kalkulator_blob.o \
@@ -293,6 +299,7 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	repro_blob.o \
 	snake_blob.o \
 	przegladarka_obrazow_blob.o \
+	aktualizacje_blob.o \
 	test_bmp_blob.o \
 	test1_bmp_blob.o \
 	logo_png_blob.o \
@@ -531,6 +538,16 @@ przegladarka_obrazow_blob.o: przegladarka_obrazow_tmp.o bursztyn_gui.o $(RING3_S
 	$(OBJCOPY) -O binary przegladarka_obrazow.elf przegladarka_obrazow.bin
 	$(LD) -r -b binary przegladarka_obrazow.bin -o przegladarka_obrazow_blob.o
 
+# Aktualizacje Systemu
+aktualizacje_tmp.o: programy/aktualizacje/aktualizacje.cpp bursztyn_gui.h bws_ota.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
+
+aktualizacje_blob.o: aktualizacje_tmp.o bursztyn_gui.o $(AKTUALIZACJE_LINKER)
+	$(LD) -T $(AKTUALIZACJE_LINKER) $(RING3_LDFLAGS) \
+		aktualizacje_tmp.o bursztyn_gui.o -o aktualizacje.elf
+	$(OBJCOPY) -O binary aktualizacje.elf aktualizacje.bin
+	$(LD) -r -b binary aktualizacje.bin -o aktualizacje_blob.o
+
 # REPRO (tylko diagnostyka BWS2/BWS46)
 repro_tmp.o: programy/repro/repro.cpp bursztyn_gui.h
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
@@ -645,15 +662,19 @@ $(GRUB_CFG): $(KERNEL) $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile
 	@mkdir -p .installer-build
 	grub-mkstandalone -O x86_64-efi --locales="" --fonts="" --modules="part_gpt fat loadenv test normal multiboot2 configfile search search_fs_file all_video gfxterm" -o $@ "boot/grub/grub.cfg=$<"
 
-.PHONY: installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-aktualizacja-qemu test-rozruch-qemu test-ota
+.PHONY: installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-aktualizacje-gui test-bur-loader test-aktualizacja-qemu test-rozruch-qemu test-ota
+test-bur-loader:
+	$(PYTHON) narzedzia/test_bur_loader.py
 test-aktualizacje:
 	$(PYTHON) narzedzia/aktualizacje/test_aktualizacje.py
 test-rozruch:
 	$(PYTHON) narzedzia/aktualizacje/test_rozruch.py
+test-aktualizacje-gui:
+	$(PYTHON) narzedzia/aktualizacje/test_gui_aktualizacje.py
 test-aktualizacja-qemu: iso
 	$(PYTHON) narzedzia/aktualizacje/qemu_aktualizacja_test.py $(QEMU_TEST_ARGS)
 test-rozruch-qemu: test-aktualizacja-qemu
-test-ota: test-aktualizacje test-rozruch test-aktualizacja-qemu
+test-ota: test-bur-loader test-aktualizacje test-rozruch test-aktualizacje-gui test-aktualizacja-qemu
 installer-unit-test:
 	@mkdir -p .installertest
 	g++ -std=c++17 -O1 -g -Wall -Wextra -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined narzedzia/instalator/test_storage.cpp storage_format.cpp psf.cpp -o .installertest/test-storage
@@ -930,9 +951,9 @@ check-tools:
 # ============================================================================
 
 clean:
-	rm -f *.o *.bin *.elf *.iso .*.iso
+	rm -f *.o *.bin *.elf *.iso .*.iso *.su
 	rm -f tapety.pak tapety.pak.d $(TAPETY_SOURCES_MANIFEST) $(TAPETY_ISO_CHECK) $(GRUB_ISO_CHECK) tapety_manifest.h tapetyzasoby.S tapetyzasoby.d tapety_zasoby.rsp tapety_zasoby.d tapety_zasoby.S tapety_zasoby.o
-	rm -f biblioteki/mbedtls/library/*.o
+	rm -f biblioteki/mbedtls/library/*.o biblioteki/mbedtls/library/*.su
 	rm -f $(OVMF_VARS_RUNTIME)
 	rm -rf $(ISO_DIR) $(ISO8K_DIR) $(CI_TEST_DIR) isodir_test
 

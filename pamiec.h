@@ -573,6 +573,8 @@ bool WirtualnyDoFizycznego(
 
 // Mapowanie nowej strony jadra z wynikiem bledu (bez prawa USER).
 extern "C" bool VmmMapujNowaStroneJadra(void* va, void* pa);
+// Odmapowanie strony jadra; zwraca PA do zwolnienia przez PMM.
+extern "C" void* VmmOdmapujStroneJadra(void* va);
 // Tylko strony dedykowanej, wspoldzielonej puli grafiki; zwraca PA do PMM.
 extern "C" void* VmmOdmapujBuforGrafiki(void* va);
 // Regresja: utworzenie i zniszczenie CR3 nie moze zwolnic wysokich tablic jadra.

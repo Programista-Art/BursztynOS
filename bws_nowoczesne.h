@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "bws_ota.h"
 
 #define BWS_NOWOCZESNE_ABI_WERSJA 1U
 

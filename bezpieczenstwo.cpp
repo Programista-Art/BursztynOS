@@ -66,7 +66,7 @@ extern "C" bool bws_vmm_sprawdz_zakres_uzytkownika(
     const void* adres,
     size_t rozmiar,
     bool zapis
-) __attribute__((weak));
+);
 
 /*
  * Sprawdza tylko matematyczna poprawnosc zakresu.
@@ -106,13 +106,10 @@ bool zakres_dostepny(const void* ptr, size_t rozmiar, bool zapis) {
     if (rozmiar == 0) return true;
 
     /*
-     * Jesli VMM dostarcza prawdziwa walidacje PTE, wymagamy jej sukcesu.
-     * Weak unresolved symbol ma adres 0.
+     * VMM dostarcza prawdziwa walidacje PTE, wymagamy jej sukcesu.
      */
-    if (bws_vmm_sprawdz_zakres_uzytkownika != nullptr) {
-        if (!bws_vmm_sprawdz_zakres_uzytkownika(ptr, rozmiar, zapis)) {
-            return false;
-        }
+    if (!bws_vmm_sprawdz_zakres_uzytkownika(ptr, rozmiar, zapis)) {
+        return false;
     }
 
     return true;

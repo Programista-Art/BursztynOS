@@ -21,6 +21,37 @@ struct Partition { Device* device; uint64_t start, count; };
 struct Layout { Partition esp, bsp; uint64_t unallocated; };
 struct Entry { uint8_t type[16],uuid[16]; uint64_t start,count; };
 struct Table { uint8_t uuid[16]; uint32_t count; Entry entries[128]; };
+
+struct FormatterWorkspace {
+    uint8_t write_verify_check[4096];
+    uint8_t gpt_h[512];
+    uint8_t gpt_b[512];
+    uint8_t gpt_sector[512];
+    uint8_t gpt_backup[512];
+    uint8_t gpt_install_z[4096];
+    uint8_t fat_install_b[4096];
+    uint8_t esp_boot_dir[4096];
+    uint8_t esp_grub_dir[4096];
+    uint8_t esp_slot_blk[4096];
+    uint8_t esp_slot_boot_dir[4096];
+    uint8_t esp_write_env[1024];
+    uint8_t esp_read_env[1024];
+    Table rozruch_table;
+    uint8_t rozruch_h[512];
+};
+
+class GuardStorageFormatter {
+public:
+    GuardStorageFormatter();
+    ~GuardStorageFormatter();
+    bool aktywny() const { return aktywny_; }
+    GuardStorageFormatter(const GuardStorageFormatter&) = delete;
+    GuardStorageFormatter& operator=(const GuardStorageFormatter&) = delete;
+private:
+    bool aktywny_;
+    bool pierwotny_;
+};
+
 extern const uint8_t BspType[16];
 extern const uint8_t EspType[16];
 bool range(uint64_t start,uint64_t count,uint64_t capacity);

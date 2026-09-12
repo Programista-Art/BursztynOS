@@ -2174,6 +2174,32 @@ extern "C" void* VmmOdmapujBuforGrafiki(void* adres) {
     return pa;
 }
 
+extern "C" void* VmmOdmapujStroneJadra(void* adres) {
+    const uint64_t va = reinterpret_cast<uint64_t>(adres);
+    if (!adres_strony_poprawny(va)) return nullptr;
+    BlokadaVMM guard;
+    uint64_t* tab = pml4_z_cr3();
+    const unsigned indeksy[4] = {
+        unsigned(indeks_pml4(va)),
+        unsigned(indeks_pdp(va)),
+        unsigned(indeks_pd(va)),
+        unsigned(indeks_pt(va))
+    };
+    for (unsigned i = 0; i < 3; ++i) {
+        if (!tab) return nullptr;
+        const uint64_t e = tab[indeksy[i]];
+        if (!(e & PTE_PRESENT) || (e & (PTE_USER | PDE_PS))) return nullptr;
+        tab = tabela_z_wpisu(e);
+    }
+    if (!tab) return nullptr;
+    uint64_t& e = tab[indeksy[3]];
+    if (!(e & PTE_PRESENT) || (e & PTE_USER)) return nullptr;
+    void* pa = reinterpret_cast<void*>(e & MASKA_ADRESU_4K);
+    e = 0;
+    uniewaznij_tlb(va);
+    return pa;
+}
+
 extern "C" bool VmmTestujWspoldzieloneMapowanieJadra(const void* adres) {
     const uint64_t va = reinterpret_cast<uint64_t>(adres);
     if (!adres || !pml4_wpis_jadra(indeks_pml4(va))) return false;

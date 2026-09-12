@@ -19,6 +19,7 @@
 
 #include "scheduler.h"
 #include "pzb.h"
+#include "stos_jadra.h"
 
 /* =========================================================================
  * POLACZENIA Z INNYMI MODULAMI
@@ -176,6 +177,30 @@ void uint_do_hex_str(uint64_t wartosc,
     }
 
     bufor[16] = '\0';
+}
+
+extern "C" uint64_t g_ostatni_bws;
+
+void uint_do_dec_str(uint64_t wartosc,
+                     char* bufor,
+                     size_t pojemnosc) {
+    if (!bufor || pojemnosc == 0) return;
+    if (wartosc == 0) {
+        if (pojemnosc > 1) { bufor[0] = '0'; bufor[1] = '\0'; }
+        else { bufor[0] = '\0'; }
+        return;
+    }
+    char tmp[24] = {};
+    size_t n = 0;
+    while (wartosc > 0 && n < sizeof(tmp)) {
+        tmp[n++] = static_cast<char>('0' + (wartosc % 10ULL));
+        wartosc /= 10ULL;
+    }
+    size_t out = 0;
+    while (n > 0 && out + 1 < pojemnosc) {
+        bufor[out++] = tmp[--n];
+    }
+    bufor[out] = '\0';
 }
 
 void zbuduj_linie_hex(const char* prefiks,
@@ -367,6 +392,58 @@ void panic_wyjatek(const RejestryStanowe* stan) {
         zatrzymaj_system();
     }
 
+    const uint64_t cr2_check = (stan->wektor_przerwania == 14 || stan->wektor_przerwania == 8) ? odczytaj_cr2() : 0;
+    uint64_t sbase = 0, stop = 0;
+    if ((stan->wektor_przerwania == 14 || stan->wektor_przerwania == 8) &&
+        (stos_czy_adres_w_guard_page(cr2_check, aktualny_pid, &sbase, &stop) ||
+         stos_czy_adres_w_guard_page(stan->stary_rsp, aktualny_pid, &sbase, &stop))) {
+        serial_wypisz("\n[STACK] KRYTYCZNE przekroczenie stosu jadra\n");
+        wypisz_awaryjnie("\n[STACK] KRYTYCZNE przekroczenie stosu jadra\n");
+
+        char dec_buf[32] = {};
+        char hex_buf[17] = {};
+
+        serial_wypisz("[STACK] pid=");
+        if (aktualny_pid >= 0) {
+            uint_do_dec_str(static_cast<uint64_t>(aktualny_pid), dec_buf, sizeof(dec_buf));
+            serial_wypisz(dec_buf);
+        } else {
+            serial_wypisz("-1");
+        }
+
+        serial_wypisz("\n[STACK] program=");
+        if (aktualny_pid >= 0 && aktualny_pid < static_cast<int>(MAKS_PROCESOW) &&
+            tablica_procesow[aktualny_pid].sciezka_pliku[0] != '\0') {
+            serial_wypisz(tablica_procesow[aktualny_pid].sciezka_pliku);
+        } else {
+            serial_wypisz("(brak/jadro)");
+        }
+
+        serial_wypisz("\n[STACK] rsp=0x");
+        uint_do_hex_str(stan->stary_rsp, hex_buf);
+        serial_wypisz(hex_buf);
+
+        serial_wypisz("\n[STACK] stackbase=0x");
+        uint_do_hex_str(sbase, hex_buf);
+        serial_wypisz(hex_buf);
+
+        serial_wypisz("\n[STACK] stacktop=0x");
+        uint_do_hex_str(stop, hex_buf);
+        serial_wypisz(hex_buf);
+
+        uint64_t used = (stop > stan->stary_rsp) ? (stop - stan->stary_rsp) : (stop - sbase);
+        serial_wypisz("\n[STACK] used=");
+        uint_do_dec_str(used, dec_buf, sizeof(dec_buf));
+        serial_wypisz(dec_buf);
+
+        serial_wypisz("\n[STACK] lastbws=");
+        uint_do_dec_str(g_ostatni_bws, dec_buf, sizeof(dec_buf));
+        serial_wypisz(dec_buf);
+        serial_wypisz("\n");
+
+        zatrzymaj_system();
+    }
+
     wypisz_awaryjnie(
         "\n========================================================\n");
 
@@ -403,9 +480,62 @@ void panic_wyjatek(const RejestryStanowe* stan) {
         stan->rflags);
 
     if (stan->wektor_przerwania == 14) {
+        const uint64_t cr2 = odczytaj_cr2();
         wypisz_hex_awaryjnie(
             "  CR2:          ",
-            odczytaj_cr2());
+            cr2);
+
+        char buf[32] = {};
+        serial_wypisz("[PF] pid=");
+        if (aktualny_pid >= 0) {
+            uint_do_dec_str(static_cast<uint64_t>(aktualny_pid), buf, sizeof(buf));
+            serial_wypisz(buf);
+        } else {
+            serial_wypisz("-1");
+        }
+        serial_wypisz("\n[PF] program=");
+        if (aktualny_pid >= 0 && aktualny_pid < static_cast<int>(MAKS_PROCESOW) &&
+            tablica_procesow[aktualny_pid].sciezka_pliku[0] != '\0') {
+            serial_wypisz(tablica_procesow[aktualny_pid].sciezka_pliku);
+        } else {
+            serial_wypisz("(brak/jadro)");
+        }
+        serial_wypisz("\n[PF] lastbws=");
+        uint_do_dec_str(g_ostatni_bws, buf, sizeof(buf));
+        serial_wypisz(buf);
+
+        serial_wypisz("\n[PF] rip=0x");
+        char hex_buf[17] = {};
+        uint_do_hex_str(stan->adres_powrotu, hex_buf);
+        serial_wypisz(hex_buf);
+
+        serial_wypisz("\n[PF] cr2=0x");
+        uint_do_hex_str(cr2, hex_buf);
+        serial_wypisz(hex_buf);
+
+        serial_wypisz("\n[PF] rsp=0x");
+        uint_do_hex_str(stan->stary_rsp, hex_buf);
+        serial_wypisz(hex_buf);
+        serial_wypisz("\n");
+
+        wypisz_hex_awaryjnie("  RSP:          ", stan->stary_rsp);
+        wypisz_awaryjnie("  Stos [top 8]:\n");
+        const uint64_t* stos_ptr = reinterpret_cast<const uint64_t*>(stan->stary_rsp);
+        if (stan->stary_rsp >= 0x1000ULL && stan->stary_rsp < 0xFFFF800000000000ULL) {
+            for (int i = 0; i < 8; ++i) {
+                char prefix[20] = "    [+0x..]:    ";
+                prefix[8] = "0123456789ABCDEF"[(i * 8) >> 4];
+                prefix[9] = "0123456789ABCDEF"[(i * 8) & 0xF];
+                wypisz_hex_awaryjnie(prefix, stos_ptr[i]);
+                serial_wypisz("[PF] stos[");
+                buf[0] = static_cast<char>('0' + i); buf[1] = '\0';
+                serial_wypisz(buf);
+                serial_wypisz("]=0x");
+                uint_do_hex_str(stos_ptr[i], hex_buf);
+                serial_wypisz(hex_buf);
+                serial_wypisz("\n");
+            }
+        }
     }
 
     /*
@@ -454,10 +584,20 @@ void UstawWpisIDT(uint8_t wektor,
         SELEKTOR_KODU_JADRA;
 
     /*
-     * IST = 0. Obecny TSS Bursztyna nie konfiguruje jeszcze
-     * osobnych stosow IST dla #DF/#NMI/#MC.
+     * Konfiguracja dedykowanych stosow IST w TSS:
+     *   #DF (wektor 8)  -> IST1 (awaryjny stos z wlasnym guard page)
+     *   NMI (wektor 2)  -> IST2
+     *   #MC (wektor 18) -> IST3
      */
-    wpis.interrupt_stack = 0;
+    if (wektor == 8) {
+        wpis.interrupt_stack = 1;
+    } else if (wektor == 2) {
+        wpis.interrupt_stack = 2;
+    } else if (wektor == 18) {
+        wpis.interrupt_stack = 3;
+    } else {
+        wpis.interrupt_stack = 0;
+    }
 
     wpis.typ_oraz_atrybuty =
         flagi;

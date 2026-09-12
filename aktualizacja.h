@@ -19,6 +19,7 @@
 
 #include "pzb.h"
 #include "aktualizacja_format.h"
+#include "bws_ota.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -100,6 +101,30 @@ uint8_t aktualizacja_nieaktywny_slot(void);
  * Uruchamiany w trybie testow automatycznych; nie modyfikuje systemu. */
 void aktualizacja_samotest_automatyczny(void);
 
+/* Obsluga wywolan BWS 84 (status) i BWS 85 (polecenie). */
+BwsOtaDostepnosc aktualizacja_okresl_dostepnosc(void);
+uint64_t aktualizacja_bws_status(const proces_t* proces, uint64_t uzytkownik_bufor);
+uint64_t aktualizacja_bws_polecenie(const proces_t* proces, uint32_t cmd, uint64_t uzytkownik_arg);
+
 #ifdef __cplusplus
 }
+
+/*
+ * Blokada OTA serializujaca dostep do stanu aktualizacji (g_ota_stan)
+ * oraz weryfikacji ukladu dysku (s_aktualizacja_gpt_table).
+ *
+ * Scisla hierarchia blokad jadra:
+ *   GuardOTA (stan OTA) -> system plikow (PSF) -> GuardStorageFormatter (storage) -> warstwa blokowa -> GuardAHCI (sprzet).
+ */
+class GuardOTA {
+public:
+    GuardOTA();
+    ~GuardOTA();
+    bool aktywny() const { return aktywny_; }
+    GuardOTA(const GuardOTA&) = delete;
+    GuardOTA& operator=(const GuardOTA&) = delete;
+private:
+    bool aktywny_;
+    bool pierwotny_;
+};
 #endif

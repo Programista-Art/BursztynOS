@@ -94,6 +94,9 @@ enum BwsNumer : uint64_t {
     BWS_SOCKET_RECV = 82,
     BWS_SOCKET_CLOSE = 83,
 
-    BWS_PIERWSZY_WOLNY = 84
+    BWS_OTA_STATUS = 84,
+    BWS_OTA_POLECENIE = 85,
+
+    BWS_PIERWSZY_WOLNY = 86
 };
 

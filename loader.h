@@ -16,6 +16,7 @@
 #include <stdbool.h>
 
 #include "pzb.h"
+#include "pamiec.h"
 
 /* =========================================================================
  * 1. FLAGI STRON x86_64 UZYWANE PRZEZ LOADER
@@ -134,7 +135,47 @@ static_assert(
 );
 
 /* =========================================================================
- * 4. PUBLICZNE API LOADERA
+ * 4. GRANICE I LIMITY FORMATU .BUR
+ * ========================================================================= */
+
+/*
+ * Kanoniczne ograniczenia segmentow programu .bur w Bursztyn OS.
+ * Pozwalaja na bezpieczne ladowanie zarowno malych programow (32 KiB tekstu),
+ * jak i rozbudowanych paneli graficznych (np. Aktualizacje Systemu),
+ * jednoczesnie uniemozliwiajac ataki wyczerpania pamieci oraz naruszenia
+ * ukladu przestrzeni adresowej Ring 3.
+ */
+inline constexpr uint64_t BUR_MAKS_TEKST_ROZMIAR     = 64ULL * 1024ULL * 1024ULL;  // 64 MiB
+inline constexpr uint64_t BUR_MAKS_DANE_ROZMIAR      = 64ULL * 1024ULL * 1024ULL;  // 64 MiB
+inline constexpr uint64_t BUR_MAKS_BSS_ROZMIAR       = 64ULL * 1024ULL * 1024ULL;  // 64 MiB
+inline constexpr uint64_t BUR_MAKS_CALKOWITY_ROZMIAR = 128ULL * 1024ULL * 1024ULL; // 128 MiB
+inline constexpr uint64_t BUR_MAKS_ROZMIAR_PLIKU     = 128ULL * 1024ULL * 1024ULL; // 128 MiB
+
+/*
+ * Rygorystyczna, deterministyczna walidacja naglowka i granic programu .bur.
+ *
+ * Sprawdza:
+ *  - minimalny i maksymalny rozmiar pliku,
+ *  - magie "BUR\0",
+ *  - niepustosc i dopuszczalne rozmiary segmentow,
+ *  - wyrownanie do granic stron (4 KiB) offsetow, rozmiarow i adresow wirtualnych,
+ *  - brak overflow arytmetycznego uint64_t przy dodawaniu,
+ *  - obecnosc pelnego segmentu kodu w pliku (brak sztucznego zerowania ucietego kodu),
+ *  - nienakladanie sie segmentow w pliku oraz w przestrzeni wirtualnej,
+ *  - nienakladanie sie segmentow na sterte (RING3_HEAP_BASE), SHM, stos i strone straznika,
+ *  - punkt wejscia wewnatrz segmentu TEXT.
+ *
+ * Zwraca:
+ *   true  - binarium w pelni poprawne i bezpieczne do zmapowania;
+ *   false - jakakolwiek nieprawidlowosc (fail-closed).
+ */
+extern "C" bool bur_waliduj_naglowek(
+    const NaglowekBur& naglowek,
+    uint64_t rozmiar_pliku
+);
+
+/* =========================================================================
+ * 5. PUBLICZNE API LOADERA
  * ========================================================================= */
 
 /*

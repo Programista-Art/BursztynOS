@@ -1,0 +1,12 @@
+nazwa = "Aktualizacje Systemu"
+autor = "Programista Art"
+wersja = "0.1"
+poziom_zaufania = 2
+plik_startowy = "aktualizacje.bur"
+uprawnienia = [
+    "okna",
+    "pliki_czytaj",
+    "pliki_zapisz",
+    "system_config",
+    "siec"
+]

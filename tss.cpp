@@ -632,3 +632,8 @@ extern "C" void zaladuj_tss(
         tss_zatrzymaj_cpu();
     }
 }
+
+extern "C" uint8_t* tss_pobierz_ist_df_baza() {
+    return stos_ist_double_fault;
+}
+
