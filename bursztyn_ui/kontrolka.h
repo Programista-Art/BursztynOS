@@ -267,6 +267,13 @@ public:
         uniewaznij();
     }
 
+    virtual void zaktualizuj_motyw() {
+        for (size_t i = 0; i < liczba_dzieci_; ++i) {
+            if (dzieci_[i]) dzieci_[i]->zaktualizuj_motyw();
+        }
+        uniewaznij();
+    }
+
     // =========================================================================
     // 4. Stany, widoczność, skupienie i kolejność Tab
     // =========================================================================

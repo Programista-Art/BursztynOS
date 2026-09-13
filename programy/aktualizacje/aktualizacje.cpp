@@ -169,19 +169,19 @@ void odswiez_widok() {
     if (g_stan.wartosc_slot_aktywny) {
         if (s.aktywny_slot == 0) {
             ustaw_wartosc_statusu(g_stan.wartosc_slot_aktywny,
-                "Slot A (potwierdzony i aktywny)", Kolory::TekstBialy);
+                "Slot A (potwierdzony i aktywny)", motyw_kolor(MOTYW_KOLOR_TEKST));
         } else {
             ustaw_wartosc_statusu(g_stan.wartosc_slot_aktywny,
-                "Slot B (potwierdzony i aktywny)", Kolory::TekstBialy);
+                "Slot B (potwierdzony i aktywny)", motyw_kolor(MOTYW_KOLOR_TEKST));
         }
     }
     if (g_stan.wartosc_slot_zapasowy) {
         if (s.nieaktywny_slot == 1) {
             ustaw_wartosc_statusu(g_stan.wartosc_slot_zapasowy,
-                "Slot B (zapasowy / docelowy)", Kolory::TekstBialy);
+                "Slot B (zapasowy / docelowy)", motyw_kolor(MOTYW_KOLOR_TEKST));
         } else {
             ustaw_wartosc_statusu(g_stan.wartosc_slot_zapasowy,
-                "Slot A (zapasowy / docelowy)", Kolory::TekstBialy);
+                "Slot A (zapasowy / docelowy)", motyw_kolor(MOTYW_KOLOR_TEKST));
         }
     }
     if (g_stan.wartosc_magazyn_stanu) {
@@ -190,7 +190,7 @@ void odswiez_widok() {
                 "Niedostępny (Live)", Kolory::TekstWyciszony);
         } else {
             ustaw_wartosc_statusu(g_stan.wartosc_magazyn_stanu,
-                "LBA 2046 i LBA 2047 (Bursztyn Boot State)", Kolory::TekstBialy);
+                "LBA 2046 i LBA 2047 (Bursztyn Boot State)", motyw_kolor(MOTYW_KOLOR_TEKST));
         }
     }
 
@@ -330,16 +330,16 @@ void odswiez_widok() {
                 bufor_kanalu[p++] = s.kanal[i];
             bufor_kanalu[p] = '\0';
             (void)bufor_kanalu;
-            ustaw_wartosc_statusu(g_stan.wartosc_kanal, s.kanal, Kolory::TekstBialy);
+            ustaw_wartosc_statusu(g_stan.wartosc_kanal, s.kanal, motyw_kolor(MOTYW_KOLOR_TEKST));
         } else {
-            ustaw_wartosc_statusu(g_stan.wartosc_kanal, "stabilny", Kolory::TekstBialy);
+            ustaw_wartosc_statusu(g_stan.wartosc_kanal, "stabilny", motyw_kolor(MOTYW_KOLOR_TEKST));
         }
     }
     if (g_stan.wartosc_rozmiar) {
         if (s.rozmiar_pakietu > 0) {
             char rz[32];
             formatuj_rozmiar(s.rozmiar_pakietu, rz, sizeof(rz));
-            ustaw_wartosc_statusu(g_stan.wartosc_rozmiar, rz, Kolory::TekstBialy);
+            ustaw_wartosc_statusu(g_stan.wartosc_rozmiar, rz, motyw_kolor(MOTYW_KOLOR_TEKST));
         } else {
             ustaw_wartosc_statusu(g_stan.wartosc_rozmiar, "—", Kolory::TekstWyciszony);
         }
@@ -384,7 +384,7 @@ void odswiez_widok() {
         } else if (s.stan == BWS_OTA_STAN_WYMAGA_RESTARTU) {
             g_stan.etykieta_komunikat->ustaw_kolor_tekstu(Kolory::AkcentZloty);
         } else {
-            g_stan.etykieta_komunikat->ustaw_kolor_tekstu(Kolory::TekstBialy);
+            g_stan.etykieta_komunikat->ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_TEKST));
         }
     }
     if (g_stan.etykieta_szczegoly) {
@@ -539,7 +539,7 @@ extern "C" __attribute__((noreturn)) void _start() {
     rb_t1.ustaw_grubosc_ramki(0);
     Etykieta& rb_t2 = baner_rb.dodaj<Etykieta>("Poprzednia próba uruchomienia slotu docelowego nie powiodła się. Przywrócono stabilną wersję.");
     rb_t2.ustaw_preferowany_rozmiar(Rozmiar(-1, 22));
-    rb_t2.ustaw_kolor_tekstu(Kolory::TekstBialy);
+    rb_t2.ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_TEKST));
     rb_t2.ustaw_grubosc_ramki(0);
     baner_rb.ustaw_widoczna(false);
     g_stan.baner_rollback = &baner_rb;
@@ -567,7 +567,7 @@ extern "C" __attribute__((noreturn)) void _start() {
         v.ustaw_preferowany_rozmiar(Rozmiar(-1, 22));
         v.ustaw_minimalny_rozmiar(Rozmiar(200, 22));
         v.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
-        v.ustaw_kolor_tekstu(Kolory::TekstBialy);
+        v.ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_TEKST));
         v.ustaw_grubosc_ramki(0);
         v.ustaw_kolor_tla(0);
         out_wartosc = &v;
@@ -599,7 +599,7 @@ extern "C" __attribute__((noreturn)) void _start() {
     Etykieta& lb_kom = g_akcje.dodaj<Etykieta>("Gotowy do sprawdzenia dostępności aktualizacji.");
     lb_kom.ustaw_preferowany_rozmiar(Rozmiar(-1, 24));
     lb_kom.ustaw_minimalny_rozmiar(Rozmiar(0, 24));
-    lb_kom.ustaw_kolor_tekstu(Kolory::TekstBialy);
+    lb_kom.ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_TEKST));
     lb_kom.ustaw_grubosc_ramki(0);
     g_stan.etykieta_komunikat = &lb_kom;
 

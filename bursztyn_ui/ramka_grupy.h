@@ -11,11 +11,16 @@ enum class WyrownanieTytuluGrupy { Poczatek, Srodek, Koniec };
 class RamkaGrupy : public Panel {
 public:
     explicit RamkaGrupy(const char* tytul = "") : Panel(Orientacja::Pionowa) {
-        styl_ = Motyw::pobierz_domyslny().styl_panelu;
-        styl_.normalny.tlo = Kolory::PowierzchniaTlo;
-        styl_.normalny.promien_zaokraglenia = 4;
+        zaktualizuj_motyw();
         ustaw_wypelnienie(Marginesy(12, 22, 12, 10));
         ustaw_tekst(tytul);
+    }
+
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_panelu;
+        styl_.normalny.tlo = motyw_kolor(MOTYW_KOLOR_OKNOTLO);
+        styl_.normalny.promien_zaokraglenia = 4;
+        Panel::zaktualizuj_motyw();
     }
 
     const char* tytul() const { return tekst_; }
@@ -70,9 +75,9 @@ public:
                 tx = caly.szerokosc - marg - szer;
             if (tx < marg) tx = marg;
             Prostokat przerwa(tx - 4 * s, 0, szer + 8 * s, font_h + 2 * s);
-            ctx.rysuj_prostokat(przerwa, st.tlo ? st.tlo : Kolory::PowierzchniaTlo);
+            ctx.rysuj_prostokat(przerwa, st.tlo ? st.tlo : motyw_kolor(MOTYW_KOLOR_OKNOTLO));
             ctx.rysuj_tekst(Punkt(tx, 0), tekst_,
-                            czy_wlaczona_ ? st.tekst : Kolory::WylaczonyTekst, s);
+                            czy_wlaczona_ ? st.tekst : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY), s);
         }
     }
 

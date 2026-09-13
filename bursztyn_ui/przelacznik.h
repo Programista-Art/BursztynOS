@@ -16,6 +16,11 @@ public:
         preferowany_rozmiar_ = Rozmiar(52, 28);
     }
 
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_przycisku;
+        uniewaznij();
+    }
+
     bool pobierz_wartosc() const { return wartosc_; }
     bool wartosc() const { return wartosc_; }
 
@@ -41,15 +46,15 @@ public:
         Prostokat tor(1 * s, 4 * s, obszar_.szerokosc - 2 * s,
                       obszar_.wysokosc - 8 * s);
         if (tor.szerokosc < 8 * s || tor.wysokosc < 8 * s) return;
-        uint32_t tlo = wartosc_ ? Kolory::AkcentZloty : 0x004A3A2A;
-        if (!czy_wlaczona_) tlo = 0x00352A20;
-        else if (czy_tylko_do_odczytu_) tlo = wartosc_ ? 0x00806A32 : 0x0040362C;
-        else if (czy_wcisnieta_) tlo = wartosc_ ? 0x00C47700 : 0x005A4632;
-        else if (czy_najechana_) tlo = wartosc_ ? 0x00FFBF00 : 0x00604A34;
+        uint32_t tlo = wartosc_ ? motyw_kolor(MOTYW_KOLOR_AKCENT) : motyw_kolor(MOTYW_KOLOR_PANEL);
+        if (!czy_wlaczona_) tlo = motyw_kolor(MOTYW_KOLOR_PANEL);
+        else if (czy_tylko_do_odczytu_) tlo = wartosc_ ? motyw_kolor(MOTYW_KOLOR_AKCENT) : motyw_kolor(MOTYW_KOLOR_PANEL);
+        else if (czy_wcisnieta_) tlo = wartosc_ ? motyw_kolor(MOTYW_KOLOR_AKCENT_AKTYWNY) : motyw_kolor(MOTYW_KOLOR_PODNIESIONY);
+        else if (czy_najechana_) tlo = wartosc_ ? motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY) : motyw_kolor(MOTYW_KOLOR_PODNIESIONY);
         const int promien = tor.wysokosc / 2;
         ctx.rysuj_zaokraglony_prostokat(tor, tlo, promien);
         ctx.rysuj_zaokraglona_ramke(tor,
-            czy_ma_fokus_ ? Kolory::AkcentFokus : Kolory::RamkaDomyslna,
+            czy_ma_fokus_ ? motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY) : motyw_kolor(MOTYW_KOLOR_RAMKA),
             promien, czy_ma_fokus_ ? 2 * s : 1 * s);
 
         const int margines = 3 * s;
@@ -57,7 +62,7 @@ public:
         if (d < 2 * s) d = 2 * s;
         int x = wartosc_ ? tor.prawy() - margines - d : tor.x + margines;
         ctx.rysuj_zaokraglony_prostokat(Prostokat(x, tor.y + margines, d, d),
-                                       czy_wlaczona_ ? 0x00FFFFFF : 0x00808080,
+                                       czy_wlaczona_ ? 0x00FFFFFF : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY),
                                        d / 2);
     }
 

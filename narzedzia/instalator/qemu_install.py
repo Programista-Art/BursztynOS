@@ -129,7 +129,10 @@ class Guest:
             if needle in text:return text
             if '[KERNEL-PANIC]' in text or '[INSTALL] Instalacja nie powiodla' in text:
                 self.q.screenshot(self.dir/'failure.png');raise RuntimeError(text[-3000:])
-            if self.proc.poll() is not None:raise RuntimeError('QEMU exited')
+            if self.proc.poll() is not None:
+                s_log = self.log.read_text(errors='replace') if self.log.exists() else ''
+                q_log = (self.dir/'qemu.log').read_text(errors='replace') if (self.dir/'qemu.log').exists() else ''
+                raise RuntimeError(f'QEMU exited: qemu.log={q_log}\nserial.log=\n{s_log[-2000:]}')
             time.sleep(.25)
         self.q.screenshot(self.dir/'timeout.png');raise TimeoutError(needle+'\n'+text[-2000:])
     def close(self):

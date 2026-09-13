@@ -1,0 +1,11 @@
+nazwa = "Motywy Systemowe"
+autor = "Programista Art"
+wersja = "1.0"
+poziom_zaufania = 3
+plik_startowy = "motywy.bur"
+uprawnienia = [
+    "okna",
+    "pliki_czytaj",
+    "pliki_zapisz",
+    "system_config"
+]

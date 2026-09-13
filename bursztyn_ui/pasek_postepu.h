@@ -12,13 +12,18 @@ public:
     explicit PasekPostepu(int64_t min = 0, int64_t max = 100)
         : minimum_(min), maksimum_(max), wartosc_(min) {
         normalizuj_zakres();
-        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
-        styl_.normalny.tlo = Kolory::WejscieTlo;
-        styl_.normalny.ramka = Kolory::RamkaDomyslna;
-        styl_.normalny.grubosc_ramki = 1;
-        styl_.normalny.promien_zaokraglenia = 2;
+        zaktualizuj_motyw();
         czy_moze_miec_fokus_ = false;
         preferowany_rozmiar_ = Rozmiar(160, 22);
+    }
+
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
+        styl_.normalny.tlo = motyw_kolor(MOTYW_KOLOR_POLETEKSTOWE);
+        styl_.normalny.ramka = motyw_kolor(MOTYW_KOLOR_RAMKA);
+        styl_.normalny.grubosc_ramki = 1;
+        styl_.normalny.promien_zaokraglenia = 2;
+        uniewaznij();
     }
 
     void ustaw_zakres(int64_t minimum, int64_t maksimum) {
@@ -166,10 +171,10 @@ public:
 
     void rysuj_siebie(KontekstRysowania& ctx) override {
         Prostokat b(0, 0, obszar_ekranu_.szerokosc, obszar_ekranu_.wysokosc);
-        uint32_t kolor_tla = Kolory::WejscieTlo;
-        uint32_t kolor_ramki = czy_wlaczona_ ? Kolory::RamkaDomyslna : Kolory::WylaczonyRamka;
-        uint32_t kolor_wypelnienia = czy_wlaczona_ ? Kolory::AkcentZloty : Kolory::WylaczonyTekst;
-        uint32_t kolor_tekstu = czy_wlaczona_ ? Kolory::TekstBialy : Kolory::WylaczonyTekst;
+        uint32_t kolor_tla = motyw_kolor(MOTYW_KOLOR_POLETEKSTOWE);
+        uint32_t kolor_ramki = czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_RAMKA) : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY);
+        uint32_t kolor_wypelnienia = czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_AKCENT) : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY);
+        uint32_t kolor_tekstu = czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_TEKST) : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY);
 
         // Tor
         ctx.rysuj_prostokat(b, kolor_tla);

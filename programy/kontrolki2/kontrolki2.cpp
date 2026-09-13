@@ -197,7 +197,7 @@ static void zbuduj_zakladke_nawigacja(Panel& p) {
     Panel* panel_lewy = new Panel(Orientacja::Pionowa);
     panel_lewy->ustaw_wypelnienie(Marginesy(4, 4, 4, 4));
     Etykieta& lbl_l = panel_lewy->dodaj<Etykieta>("Drzewo Folderów:");
-    lbl_l.ustaw_kolor_tekstu(Kolory::TekstBialy);
+    lbl_l.ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_TEKST));
 
     Drzewo& tree = panel_lewy->dodaj<Drzewo>();
     tree.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
@@ -216,7 +216,7 @@ static void zbuduj_zakladke_nawigacja(Panel& p) {
     Panel* panel_prawy = new Panel(Orientacja::Pionowa);
     panel_prawy->ustaw_wypelnienie(Marginesy(4, 4, 4, 4));
     Etykieta& lbl_r = panel_prawy->dodaj<Etykieta>("Zawartość (Widok Ikon):");
-    lbl_r.ustaw_kolor_tekstu(Kolory::TekstBialy);
+    lbl_r.ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_TEKST));
 
     WidokIkon& wi = panel_prawy->dodaj<WidokIkon>();
     g_k2.widok_ikon = &wi;

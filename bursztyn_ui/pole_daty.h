@@ -13,12 +13,17 @@ public:
     explicit PoleDaty(DataKalendarza data_poczatkowa = DataKalendarza{}) {
         data_ = data_poczatkowa.czy_poprawna()
             ? data_poczatkowa : DataKalendarza{};
-        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
+        zaktualizuj_motyw();
         czy_moze_miec_fokus_ = true;
         czy_reaguje_wizualnie_na_najechanie_ = false;
         czy_reaguje_wizualnie_na_wcisniecie_ = false;
         preferowany_rozmiar_ = Rozmiar(150, 30);
         wypelnienie_ = Marginesy(6, 4, 6, 4);
+    }
+
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
+        uniewaznij();
     }
 
     ~PoleDaty() override = default;
@@ -71,13 +76,13 @@ public:
 
         // Przycisk w górę (+)
         ctx.rysuj_zaokraglony_prostokat(btn_up_, kolor_przycisku(0), 2);
-        ctx.rysuj_zaokraglona_ramke(btn_up_, Kolory::RamkaDomyslna, 2, 1);
-        ctx.rysuj_tekst_wysrodkowany(btn_up_, "+", Kolory::TekstBialy, skala);
+        ctx.rysuj_zaokraglona_ramke(btn_up_, motyw_kolor(MOTYW_KOLOR_RAMKA), 2, 1);
+        ctx.rysuj_tekst_wysrodkowany(btn_up_, "+", czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_TEKST) : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY), skala);
 
         // Przycisk w dół (-)
         ctx.rysuj_zaokraglony_prostokat(btn_down_, kolor_przycisku(1), 2);
-        ctx.rysuj_zaokraglona_ramke(btn_down_, Kolory::RamkaDomyslna, 2, 1);
-        ctx.rysuj_tekst_wysrodkowany(btn_down_, "-", Kolory::TekstBialy, skala);
+        ctx.rysuj_zaokraglona_ramke(btn_down_, motyw_kolor(MOTYW_KOLOR_RAMKA), 2, 1);
+        ctx.rysuj_tekst_wysrodkowany(btn_down_, "-", czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_TEKST) : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY), skala);
 
         // Tekst daty
         char txt[16];
@@ -208,10 +213,10 @@ private:
     }
 
     uint32_t kolor_przycisku(int indeks) const {
-        if (!czy_wlaczona_) return Kolory::WylaczonyTlo;
-        if (indeks == wcisniety_przycisk_) return Kolory::PowierzchniaAktywna;
-        if (indeks == najechany_przycisk_) return Kolory::PowierzchniaNajechana;
-        return Kolory::PowierzchniaAlternatywna;
+        if (!czy_wlaczona_) return motyw_kolor(MOTYW_KOLOR_PANEL);
+        if (indeks == wcisniety_przycisk_) return motyw_kolor(MOTYW_KOLOR_AKCENT_AKTYWNY);
+        if (indeks == najechany_przycisk_) return motyw_kolor(MOTYW_KOLOR_PODNIESIONY);
+        return motyw_kolor(MOTYW_KOLOR_PANEL);
     }
 
     void uniewaznij_przycisk(int indeks) {

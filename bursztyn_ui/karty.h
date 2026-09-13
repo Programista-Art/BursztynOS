@@ -391,16 +391,16 @@ public:
             bool najechana = (i == najechana_karta_);
             bool wlaczona = strony_[i].czy_wlaczona();
 
-            uint32_t tlo_karty = aktywna ? Kolory::PowierzchniaTlo : (najechana ? Kolory::PowierzchniaNajechana : Kolory::PowierzchniaAlternatywna);
-            uint32_t tekst_karty = !wlaczona ? Kolory::WylaczonyTekst : (aktywna ? Kolory::AkcentZloty : Kolory::TekstBialy);
-            uint32_t ramka_karty = aktywna ? ramka : Kolory::RamkaDomyslna;
+            uint32_t tlo_karty = aktywna ? motyw_kolor(MOTYW_KOLOR_OKNOTLO) : (najechana ? motyw_kolor(MOTYW_KOLOR_PODNIESIONY) : motyw_kolor(MOTYW_KOLOR_PANEL));
+            uint32_t tekst_karty = !wlaczona ? motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY) : (aktywna ? motyw_kolor(MOTYW_KOLOR_AKCENT) : motyw_kolor(MOTYW_KOLOR_TEKST));
+            uint32_t ramka_karty = aktywna ? ramka : motyw_kolor(MOTYW_KOLOR_RAMKA);
 
             ctx.rysuj_prostokat(nr, tlo_karty);
             ctx.rysuj_ramke(nr, ramka_karty, 1);
 
             // Linia łącząca aktywną kartę ze stroną (usuwa dolną ramkę nagłówka)
             if (aktywna) {
-                ctx.rysuj_linie_pozioma(nr.x + 1, nr.dolny() - 1, nr.szerokosc - 2, Kolory::PowierzchniaTlo);
+                ctx.rysuj_linie_pozioma(nr.x + 1, nr.dolny() - 1, nr.szerokosc - 2, motyw_kolor(MOTYW_KOLOR_OKNOTLO));
             }
 
             // Tekst
@@ -411,20 +411,20 @@ public:
             // Przycisk 'x'
             if (strony_[i].czy_zamykalna()) {
                 Prostokat x_btn(nr.prawy() - 18, nr.y + (nr.wysokosc - 14) / 2, 14, 14);
-                ctx.rysuj_tekst(Punkt(x_btn.x + 3, x_btn.y - 1), "x", Kolory::TekstWyciszony, skala_dpi_);
+                ctx.rysuj_tekst(Punkt(x_btn.x + 3, x_btn.y - 1), "x", motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI), skala_dpi_);
             }
         }
         ctx.zdejmij_przyciecie();
 
         // Przyciski przewijania paska
         if (czy_przewijany_pasek_) {
-            ctx.rysuj_prostokat(przycisk_lewo_, Kolory::PowierzchniaAlternatywna);
-            ctx.rysuj_ramke(przycisk_lewo_, Kolory::RamkaDomyslna, 1);
-            ctx.rysuj_tekst(Punkt(przycisk_lewo_.x + 4, przycisk_lewo_.y + 4), "<", Kolory::TekstBialy, skala_dpi_);
+            ctx.rysuj_prostokat(przycisk_lewo_, motyw_kolor(MOTYW_KOLOR_PANEL));
+            ctx.rysuj_ramke(przycisk_lewo_, motyw_kolor(MOTYW_KOLOR_RAMKA), 1);
+            ctx.rysuj_tekst(Punkt(przycisk_lewo_.x + 4, przycisk_lewo_.y + 4), "<", motyw_kolor(MOTYW_KOLOR_TEKST), skala_dpi_);
 
-            ctx.rysuj_prostokat(przycisk_prawo_, Kolory::PowierzchniaAlternatywna);
-            ctx.rysuj_ramke(przycisk_prawo_, Kolory::RamkaDomyslna, 1);
-            ctx.rysuj_tekst(Punkt(przycisk_prawo_.x + 4, przycisk_prawo_.y + 4), ">", Kolory::TekstBialy, skala_dpi_);
+            ctx.rysuj_prostokat(przycisk_prawo_, motyw_kolor(MOTYW_KOLOR_PANEL));
+            ctx.rysuj_ramke(przycisk_prawo_, motyw_kolor(MOTYW_KOLOR_RAMKA), 1);
+            ctx.rysuj_tekst(Punkt(przycisk_prawo_.x + 4, przycisk_prawo_.y + 4), ">", motyw_kolor(MOTYW_KOLOR_TEKST), skala_dpi_);
         }
     }
 

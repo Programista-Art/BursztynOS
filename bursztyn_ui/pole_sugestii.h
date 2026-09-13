@@ -34,12 +34,12 @@ private:
                 int indeks = wlasciciel_->dopasowane_[indeks_wyniku];
                 Prostokat r(s, s + i * rh, obszar_.szerokosc - 2 * s, rh);
                 if (indeks_wyniku == wlasciciel_->podswietlona_)
-                    ctx.rysuj_prostokat(r, Kolory::ZaznaczenieTlo);
+                    ctx.rysuj_prostokat(r, motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));
                 ctx.rysuj_tekst_obciety(Punkt(r.x + 6 * s,
                     r.y + (rh - CzcionkaUI::pobierz_wysokosc(s)) / 2),
                     wlasciciel_->sugestie_[indeks],
                     indeks_wyniku == wlasciciel_->podswietlona_
-                        ? Kolory::ZaznaczenieTekst : Kolory::TekstBialy,
+                        ? motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU) : motyw_kolor(MOTYW_KOLOR_TEKST),
                     r.szerokosc - 12 * s, s);
             }
         }

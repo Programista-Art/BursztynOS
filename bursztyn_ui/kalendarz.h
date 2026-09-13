@@ -169,16 +169,16 @@ public:
         btn_next_year_ = g.przyciski[3];
 
         ctx.rysuj_zaokraglony_prostokat(btn_prev_year_, kolor_przycisku(0), 2);
-        ctx.rysuj_tekst_wysrodkowany(btn_prev_year_, "<<", Kolory::TekstBialy, skala);
+        ctx.rysuj_tekst_wysrodkowany(btn_prev_year_, "<<", motyw_kolor(MOTYW_KOLOR_TEKST), skala);
 
         ctx.rysuj_zaokraglony_prostokat(btn_prev_month_, kolor_przycisku(1), 2);
-        ctx.rysuj_tekst_wysrodkowany(btn_prev_month_, "<", Kolory::TekstBialy, skala);
+        ctx.rysuj_tekst_wysrodkowany(btn_prev_month_, "<", motyw_kolor(MOTYW_KOLOR_TEKST), skala);
 
         ctx.rysuj_zaokraglony_prostokat(btn_next_month_, kolor_przycisku(2), 2);
-        ctx.rysuj_tekst_wysrodkowany(btn_next_month_, ">", Kolory::TekstBialy, skala);
+        ctx.rysuj_tekst_wysrodkowany(btn_next_month_, ">", motyw_kolor(MOTYW_KOLOR_TEKST), skala);
 
         ctx.rysuj_zaokraglony_prostokat(btn_next_year_, kolor_przycisku(3), 2);
-        ctx.rysuj_tekst_wysrodkowany(btn_next_year_, ">>", Kolory::TekstBialy, skala);
+        ctx.rysuj_tekst_wysrodkowany(btn_next_year_, ">>", motyw_kolor(MOTYW_KOLOR_TEKST), skala);
 
         // Tytuł miesiąca i roku
         static const char* const NAZWY_MIESIECY[] = {
@@ -189,7 +189,7 @@ public:
         sformatuj_tytul(tytul, sizeof(tytul), NAZWY_MIESIECY[widok_miesiac_ - 1], widok_rok_);
 
         Prostokat rect_tytul(46 * skala, 4 * skala, obszar_.szerokosc - 92 * skala, 18 * skala);
-        ctx.rysuj_tekst_wysrodkowany(rect_tytul, tytul, 0x00FFD700, skala);
+        ctx.rysuj_tekst_wysrodkowany(rect_tytul, tytul, motyw_kolor(MOTYW_KOLOR_AKCENT), skala);
 
         // 2. Dni tygodnia (Pn .. Nd)
         static const char* const DNI_TYG[] = {"Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"};
@@ -199,12 +199,12 @@ public:
         for (int c = 0; c < 7; ++c) {
             int x = g.grid_x + c * cell_w;
             Prostokat rect_dow(x, nav_h + 2 * skala, cell_w, dows_h);
-            uint32_t col_dow = (c >= 5) ? 0x00FF9966 : Kolory::TekstWyciszony;
+            uint32_t col_dow = (c >= 5) ? motyw_kolor(MOTYW_KOLOR_AKCENT) : motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI);
             ctx.rysuj_tekst_wysrodkowany(rect_dow, DNI_TYG[c], col_dow, skala);
         }
 
         ctx.rysuj_prostokat(Prostokat(4 * skala, grid_y - 2 * skala, obszar_.szerokosc - 8 * skala, 1),
-                            Kolory::RamkaDomyslna);
+                            motyw_kolor(MOTYW_KOLOR_RAMKA));
 
         // 3. Siatka dni
         const int pierwszy_dow = pierwszy_dow_;
@@ -235,7 +235,7 @@ public:
                 if (!rect_cell.przecina(clip_lokalny)) continue;
 
                 char buf_dzien[8];
-                uint32_t col_txt = Kolory::TekstBialy;
+                uint32_t col_txt = motyw_kolor(MOTYW_KOLOR_TEKST);
                 const int day_num = cell_idx - pierwszy_dow + 1;
 
                 if (day_num < 1) {
@@ -251,14 +251,14 @@ public:
                     bool hov = (cell_idx == najechana_komorka_ && czy_wlaczona_);
 
                     if (sel) {
-                        ctx.rysuj_zaokraglony_prostokat(rect_cell, Kolory::ZaznaczenieTlo, 3);
-                        ctx.rysuj_zaokraglona_ramke(rect_cell, Kolory::AkcentFokus, 3, 1);
-                        col_txt = Kolory::TekstBialy;
+                        ctx.rysuj_zaokraglony_prostokat(rect_cell, motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE), 3);
+                        ctx.rysuj_zaokraglona_ramke(rect_cell, motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY), 3, 1);
+                        col_txt = motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU);
                     } else if (hov) {
-                        ctx.rysuj_zaokraglony_prostokat(rect_cell, 0x003A2814, 3);
-                        ctx.rysuj_zaokraglona_ramke(rect_cell, Kolory::RamkaDomyslna, 3, 1);
+                        ctx.rysuj_zaokraglony_prostokat(rect_cell, motyw_kolor(MOTYW_KOLOR_PODNIESIONY), 3);
+                        ctx.rysuj_zaokraglona_ramke(rect_cell, motyw_kolor(MOTYW_KOLOR_RAMKA), 3, 1);
                     } else if (c >= 5) {
-                        col_txt = 0x00FFBB88;
+                        col_txt = motyw_kolor(MOTYW_KOLOR_AKCENT);
                     }
                 } else {
                     formatuj_liczbe(buf_dzien, sizeof(buf_dzien), day_num - ile_dni);

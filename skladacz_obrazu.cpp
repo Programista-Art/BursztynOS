@@ -873,8 +873,6 @@ extern "C" void grafika_naloz_okno_terminala_region(int x, int y,
 extern int grafika_pobierz_szerokosc();
 extern int grafika_pobierz_wysokosc();
 
-extern void rysuj_zegar_rtc();
-
 namespace {
 
 bool wymiary_mieszcza_sie_na_ekranie(
@@ -1752,13 +1750,6 @@ void skladacz_obrazu_zloz_klatke() {
     grafika_naloz_okno_terminala_region(0, 0, ekran_szer, ekran_wys);
 
     /*
-     * Zegar jest nakladka kernela na pasek zadan - nie rysujemy go przed startem powloki GUI.
-     */
-    if (zlozone_warstwy > 0) {
-        rysuj_zegar_rtc();
-    }
-
-    /*
      * grafika_zakoncz_skladanie():
      *   - rysuje kursor,
      *   - przenosi backbuffer do framebufferu,
@@ -1852,10 +1843,6 @@ void skladacz_obrazu_obsluz_dirty() {
     /* Faza A: wszystkie regiony trafiaja w calosci do scene backbufferu.
        Framebuffer nie jest dotykany podczas kosztownego compositingu. */
     const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
-    uint32_t rtc_scale = ekran_skala();
-    if (!ui_skala_poprawna(rtc_scale)) rtc_scale = 100;
-    const ZegarUiGeometria rtc = zegar_ui_geometria(sw, sh, rtc_scale, 0);
-    const GuiDirtyRect rtc_rect{rtc.x, rtc.y, rtc.szer, rtc.wys};
     for(uint32_t ri=0;ri<count;++ri){
         const GuiDirtyRect&r=work[ri];
         pixels+=rect_area(r);
@@ -1873,7 +1860,6 @@ void skladacz_obrazu_obsluz_dirty() {
                 }
         }
         grafika_naloz_okno_terminala_region(r.x,r.y,r.width,r.height);
-        if(rect_przecina(r,rtc_rect) && layer_count > 0)rysuj_zegar_rtc();
     }
     const uint64_t compose_end=hpet_dostepny()?czas_monotoniczny_us():0;
     /* Faza B: prezentujemy dopiero gotowe wiersze, a kursor nakladamy raz,

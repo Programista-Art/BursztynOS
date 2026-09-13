@@ -54,14 +54,10 @@ public:
                                               void* dane_uzytkownika);
 
     WidokDrzewiastoKolumnowy() {
-        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
-        styl_.normalny.tlo = Kolory::WejscieTlo;
-        styl_.normalny.ramka = Kolory::RamkaDomyslna;
-        styl_.normalny.grubosc_ramki = 1;
+        zaktualizuj_motyw();
         czy_moze_miec_fokus_ = true;
         czy_reaguje_wizualnie_na_najechanie_ = false;
         czy_reaguje_wizualnie_na_wcisniecie_ = false;
-        styl_.fokus = styl_.normalny;
         preferowany_rozmiar_ = Rozmiar(360, 240);
 
         pionowy_ = new PasekPrzewijania();
@@ -84,6 +80,17 @@ public:
             WidokDrzewiastoKolumnowy* w = static_cast<WidokDrzewiastoKolumnowy*>(dane);
             if (w) w->uniewaznij();
         }, this);
+    }
+
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
+        styl_.normalny.tlo = motyw_kolor(MOTYW_KOLOR_POLETEKSTOWE);
+        styl_.normalny.ramka = motyw_kolor(MOTYW_KOLOR_RAMKA);
+        styl_.normalny.grubosc_ramki = 1;
+        styl_.fokus = styl_.normalny;
+        if (pionowy_) pionowy_->zaktualizuj_motyw();
+        if (poziomy_) poziomy_->zaktualizuj_motyw();
+        uniewaznij();
     }
 
     ~WidokDrzewiastoKolumnowy() override {
@@ -315,20 +322,20 @@ public:
         // 1. Nagłówek kolumn
         Prostokat rect_naglowka(1, 1, vp_w, h_naglowka);
         ctx.dodaj_przyciecie(rect_naglowka);
-        ctx.rysuj_prostokat(rect_naglowka, 0x002B1D0E);
+        ctx.rysuj_prostokat(rect_naglowka, motyw_kolor(MOTYW_KOLOR_PANEL));
 
         int cur_x = 1 - scroll_x;
         for (size_t c = 0; c < liczba_kolumn_; ++c) {
             int col_w = kolumny_[c].szerokosc * skala_dpi_;
-            ctx.rysuj_prostokat(Prostokat(cur_x + col_w - 1, 1, 1, h_naglowka), Kolory::RamkaDomyslna);
+            ctx.rysuj_prostokat(Prostokat(cur_x + col_w - 1, 1, 1, h_naglowka), motyw_kolor(MOTYW_KOLOR_RAMKA));
             ctx.rysuj_tekst_obciety(
                 Punkt(cur_x + 6 * skala_dpi_,
                       1 + (h_naglowka - 16 * skala_dpi_) / 2),
-                kolumny_[c].nazwa, 0x00FFD700,
+                kolumny_[c].nazwa, motyw_kolor(MOTYW_KOLOR_AKCENT),
                 col_w - 12 * skala_dpi_, skala_dpi_);
             cur_x += col_w;
         }
-        ctx.rysuj_prostokat(Prostokat(1, h_naglowka, vp_w, 1), Kolory::RamkaDomyslna);
+        ctx.rysuj_prostokat(Prostokat(1, h_naglowka, vp_w, 1), motyw_kolor(MOTYW_KOLOR_RAMKA));
         ctx.zdejmij_przyciecie();
 
         // 2. Wiersze drzewa (wirtualizowane)
@@ -359,16 +366,16 @@ public:
             bool hov = (node_idx == najechany_wezel_ && czy_wlaczona_);
 
             if (sel) {
-                ctx.rysuj_prostokat(row_rect, Kolory::ZaznaczenieTlo);
+                ctx.rysuj_prostokat(row_rect, motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));
             } else if (hov) {
-                ctx.rysuj_prostokat(row_rect, 0x003A2814);
+                ctx.rysuj_prostokat(row_rect, motyw_kolor(MOTYW_KOLOR_PODNIESIONY));
             } else if (r % 2 == 1) {
-                ctx.rysuj_prostokat(row_rect, 0x001F140A);
+                ctx.rysuj_prostokat(row_rect, motyw_kolor(MOTYW_KOLOR_PANEL));
             }
             if (foc && czy_ma_fokus_)
                 ctx.rysuj_ramke(Prostokat(row_rect.x + 1, row_rect.y + 1,
                                           row_rect.szerokosc - 2, row_rect.wysokosc - 2),
-                                Kolory::AkcentFokus, skala_dpi_);
+                                motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY), skala_dpi_);
 
             // Kolumna 0: Wcięcie + Uchwyt rozwijania + Tekst węzła
             int indent = w.glebokosc * 16 * skala_dpi_;
@@ -380,17 +387,17 @@ public:
                 if (w.rozwiniety) {
                     for (int q = 0; q < 4 * skala_dpi_; ++q)
                         ctx.rysuj_prostokat(Prostokat(tree_x + q, cy - 2 * skala_dpi_ + q,
-                                                     8 * skala_dpi_ - 2 * q, skala_dpi_), 0x00FFD700);
+                                                     8 * skala_dpi_ - 2 * q, skala_dpi_), motyw_kolor(MOTYW_KOLOR_AKCENT));
                 } else {
                     for (int q = 0; q < 4 * skala_dpi_; ++q)
                         ctx.rysuj_prostokat(Prostokat(tree_x + q, cy - 4 * skala_dpi_ + q,
-                                                     skala_dpi_, 8 * skala_dpi_ - 2 * q), 0x00FFD700);
+                                                     skala_dpi_, 8 * skala_dpi_ - 2 * q), motyw_kolor(MOTYW_KOLOR_AKCENT));
                 }
             }
             tree_x += 14 * skala_dpi_;
 
             const char* val0 = (w.liczba_komorek > 0 && w.komorki[0]) ? w.komorki[0] : "";
-            uint32_t col_txt = sel ? Kolory::ZaznaczenieTekst : s.tekst;
+            uint32_t col_txt = sel ? motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU) : s.tekst;
             int col0_text_max_w = (1 - scroll_x + col0_w) - tree_x - 4 * skala_dpi_;
             if (col0_text_max_w > 0) {
                 ctx.rysuj_tekst_obciety(
@@ -398,7 +405,7 @@ public:
                     col_txt, col0_text_max_w, skala_dpi_);
             }
 
-            ctx.rysuj_prostokat(Prostokat(1 - scroll_x + col0_w - 1, row_y, 1, h_wiersza), 0x002A1C0E);
+            ctx.rysuj_prostokat(Prostokat(1 - scroll_x + col0_w - 1, row_y, 1, h_wiersza), motyw_kolor(MOTYW_KOLOR_RAMKA));
 
             // Kolumny 1..N
             int cell_x = 1 - scroll_x + col0_w;
@@ -420,11 +427,11 @@ public:
 
                 ctx.rysuj_tekst_obciety(Punkt(txt_x, txt_y), val,
                                         col_txt, txt_max_w, skala_dpi_);
-                ctx.rysuj_prostokat(Prostokat(cell_x + col_w - 1, row_y, 1, h_wiersza), 0x002A1C0E);
+                ctx.rysuj_prostokat(Prostokat(cell_x + col_w - 1, row_y, 1, h_wiersza), motyw_kolor(MOTYW_KOLOR_RAMKA));
                 cell_x += col_w;
             }
 
-            ctx.rysuj_prostokat(Prostokat(1, row_y + h_wiersza - 1, vp_w, 1), 0x002A1C0E);
+            ctx.rysuj_prostokat(Prostokat(1, row_y + h_wiersza - 1, vp_w, 1), motyw_kolor(MOTYW_KOLOR_RAMKA));
         }
 
         ctx.zdejmij_przyciecie();

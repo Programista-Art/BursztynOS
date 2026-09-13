@@ -149,6 +149,7 @@ uint64_t ustaw_work_area(proces_t& proces, int32_t x, int32_t y,
     const int64_t y1 = static_cast<int64_t>(y) + h;
     if (x < 0 || y < 0 || x1 > sw || y1 > sh) return 0;
     work_x = x; work_y = y; work_w = w; work_h = h;
+    grafika_ustaw_pasek_zadan_gotowy(true);
     return 1;
 }
 

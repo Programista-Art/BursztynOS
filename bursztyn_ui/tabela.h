@@ -28,10 +28,7 @@ public:
     using FunkcjaTabeli = void (*)(Tabela* nadawca, int wiersz, void* dane_uzytkownika);
 
     Tabela() {
-        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
-        styl_.normalny.tlo = Kolory::WejscieTlo;
-        styl_.normalny.ramka = Kolory::RamkaDomyslna;
-        styl_.normalny.grubosc_ramki = 1;
+        zaktualizuj_motyw();
         wypelnienie_ = Marginesy(1, 1, 1, 1);
         czy_moze_miec_fokus_ = true;
         czy_reaguje_wizualnie_na_najechanie_ = false;
@@ -58,6 +55,16 @@ public:
             Tabela* t = static_cast<Tabela*>(dane);
             if (t) t->uniewaznij_obszar(t->prostokat_widoku());
         }, this);
+    }
+
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
+        styl_.normalny.tlo = motyw_kolor(MOTYW_KOLOR_POLETEKSTOWE);
+        styl_.normalny.ramka = motyw_kolor(MOTYW_KOLOR_RAMKA);
+        styl_.normalny.grubosc_ramki = 1;
+        if (pionowy_) pionowy_->zaktualizuj_motyw();
+        if (poziomy_) poziomy_->zaktualizuj_motyw();
+        uniewaznij();
     }
 
     ~Tabela() override {
@@ -328,12 +335,12 @@ public:
         Prostokat rect_naglowka(1, 1, vp_w, h_naglowka);
         if (rect_naglowka.przecina(clip_lokalny)) {
             ctx.dodaj_przyciecie(rect_naglowka);
-            ctx.rysuj_prostokat(rect_naglowka, 0x002B1D0E);
+            ctx.rysuj_prostokat(rect_naglowka, motyw_kolor(MOTYW_KOLOR_PANEL));
 
             int cur_x = 1 - scroll_x;
             for (size_t c = 0; c < liczba_kolumn_; ++c) {
                 int col_w = kolumny_[c].szerokosc * skala_dpi_;
-                ctx.rysuj_prostokat(Prostokat(cur_x + col_w - 1, 1, 1, h_naglowka), Kolory::RamkaDomyslna);
+                ctx.rysuj_prostokat(Prostokat(cur_x + col_w - 1, 1, 1, h_naglowka), motyw_kolor(MOTYW_KOLOR_RAMKA));
 
                 int txt_x = cur_x + 6;
                 int txt_y = 1 + (h_naglowka - 16) / 2;
@@ -348,10 +355,10 @@ public:
                 }
 
                 ctx.rysuj_tekst_obciety(Punkt(txt_x, txt_y), kolumny_[c].nazwa,
-                                        0x00FFD700, txt_max_w, 1);
+                                        motyw_kolor(MOTYW_KOLOR_AKCENT), txt_max_w, 1);
                 cur_x += col_w;
             }
-            ctx.rysuj_prostokat(Prostokat(1, h_naglowka, vp_w, 1), Kolory::RamkaDomyslna);
+            ctx.rysuj_prostokat(Prostokat(1, h_naglowka, vp_w, 1), motyw_kolor(MOTYW_KOLOR_RAMKA));
             ctx.zdejmij_przyciecie();
         }
 
@@ -377,16 +384,16 @@ public:
             bool hov = (r == najechany_wiersz_ && czy_wlaczona_);
 
             if (sel) {
-                ctx.rysuj_prostokat(row_rect, Kolory::ZaznaczenieTlo);
+                ctx.rysuj_prostokat(row_rect, motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));
             } else if (hov) {
-                ctx.rysuj_prostokat(row_rect, 0x003A2814);
+                ctx.rysuj_prostokat(row_rect, motyw_kolor(MOTYW_KOLOR_PODNIESIONY));
             } else if (r % 2 == 1) {
-                ctx.rysuj_prostokat(row_rect, 0x001F140A);
+                ctx.rysuj_prostokat(row_rect, motyw_kolor(MOTYW_KOLOR_PANEL));
             }
 
             const Wiersz& w = wiersze_[r];
             int cell_x = 1 - scroll_x;
-            uint32_t col_txt = sel ? Kolory::ZaznaczenieTekst : s.tekst;
+            uint32_t col_txt = sel ? motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU) : s.tekst;
 
             for (size_t c = 0; c < liczba_kolumn_; ++c) {
                 int col_w = kolumny_[c].szerokosc * skala_dpi_;
@@ -406,11 +413,11 @@ public:
 
                 ctx.rysuj_tekst_obciety(Punkt(txt_x, txt_y), val,
                                         col_txt, txt_max_w, 1);
-                ctx.rysuj_prostokat(Prostokat(cell_x + col_w - 1, row_y, 1, h_wiersza), 0x002A1C0E);
+                ctx.rysuj_prostokat(Prostokat(cell_x + col_w - 1, row_y, 1, h_wiersza), motyw_kolor(MOTYW_KOLOR_RAMKA));
                 cell_x += col_w;
             }
 
-            ctx.rysuj_prostokat(Prostokat(1, row_y + h_wiersza - 1, vp_w, 1), 0x002A1C0E);
+            ctx.rysuj_prostokat(Prostokat(1, row_y + h_wiersza - 1, vp_w, 1), motyw_kolor(MOTYW_KOLOR_RAMKA));
         }
 
         ctx.zdejmij_przyciecie();

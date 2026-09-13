@@ -21,12 +21,10 @@ public:
                                       Prostokat, void*);
 
     WidokMiniatur() {
-        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
+        zaktualizuj_motyw();
         czy_moze_miec_fokus_ = true;
         czy_reaguje_wizualnie_na_najechanie_ = false;
         czy_reaguje_wizualnie_na_wcisniecie_ = false;
-        styl_.fokus = styl_.normalny;
-        czy_reaguje_wizualnie_na_najechanie_ = false;
         pionowy_ = new PasekPrzewijania();
         pionowy_->ustaw_orientacje(Orientacja::Pionowa);
         pionowy_->pokaz_strzalki(true);
@@ -36,6 +34,12 @@ public:
         }, this);
         dodaj_kontrolke(pionowy_);
         preferowany_rozmiar_ = Rozmiar(400, 260);
+    }
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
+        styl_.fokus = styl_.normalny;
+        if (pionowy_) pionowy_->zaktualizuj_motyw();
+        uniewaznij();
     }
     ~WidokMiniatur() override {
         if (cache_pixels_) gui_free(cache_pixels_);
@@ -153,9 +157,9 @@ public:
                           cw - 4 * s, ch - 4 * s);
             if (!ctx.przecina_klip(kom)) continue;
             ++ostatnio_narysowane_; BUI_POMIAR(thumbnail_paints, 1);
-            if (static_cast<int>(i) == wybrany_) ctx.rysuj_zaokraglony_prostokat(kom, Kolory::ZaznaczenieTlo, 4 * s);
-            else if (static_cast<int>(i) == najechany_) ctx.rysuj_zaokraglony_prostokat(kom, 0x004A2605, 4 * s);
-            if (static_cast<int>(i) == fokus_ && czy_ma_fokus_) ctx.rysuj_zaokraglona_ramke(kom, Kolory::AkcentFokus, 4 * s, s);
+            if (static_cast<int>(i) == wybrany_) ctx.rysuj_zaokraglony_prostokat(kom, motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE), 4 * s);
+            else if (static_cast<int>(i) == najechany_) ctx.rysuj_zaokraglony_prostokat(kom, motyw_kolor(MOTYW_KOLOR_PODNIESIONY), 4 * s);
+            if (static_cast<int>(i) == fokus_ && czy_ma_fokus_) ctx.rysuj_zaokraglona_ramke(kom, motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY), 4 * s, s);
             int tekst_h = CzcionkaUI::pobierz_wysokosc(s);
             Prostokat img(kom.x + 5 * s, kom.y + 5 * s, kom.szerokosc - 10 * s,
                           kom.wysokosc - tekst_h - 14 * s);
@@ -163,7 +167,7 @@ public:
             else rysuj_obraz(ctx, obraz_do_rysowania(elementy_[i]), img);
             ctx.rysuj_tekst_obciety(Punkt(kom.x + 4 * s, kom.dolny() - tekst_h - 3 * s),
                                     elementy_[i].etykieta,
-                                    static_cast<int>(i) == wybrany_ ? Kolory::ZaznaczenieTekst : Kolory::TekstBialy,
+                                    static_cast<int>(i) == wybrany_ ? motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU) : motyw_kolor(MOTYW_KOLOR_TEKST),
                                     kom.szerokosc - 8 * s, s);
         }
         ctx.zdejmij_przyciecie();

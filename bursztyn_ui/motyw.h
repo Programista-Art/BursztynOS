@@ -127,6 +127,7 @@ public:
         uint32_t akcent_aktywny = motyw_kolor(MOTYW_KOLOR_AKCENT_AKTYWNY);
         uint32_t poletekstowe = motyw_kolor(MOTYW_KOLOR_POLETEKSTOWE);
         uint32_t zaznaczenie = motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE);
+        (void)zaznaczenie;
         uint32_t przycisk_tlo = motyw_kolor(MOTYW_KOLOR_PRZYCISK);
         uint32_t przycisk_najechany = motyw_kolor(MOTYW_KOLOR_PRZYCISK_NAJECHANY);
         uint32_t tekst_akcentu = motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU);

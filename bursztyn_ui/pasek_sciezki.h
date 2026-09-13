@@ -19,12 +19,17 @@ public:
     using FunkcjaSegmentu = void (*)(PasekSciezki* nadawca, int indeks, const char* nazwa, void* dane_uzytkownika);
 
     PasekSciezki() {
-        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
-        styl_.normalny.tlo = Kolory::WejscieTlo;
-        styl_.normalny.ramka = Kolory::RamkaDomyslna;
-        styl_.normalny.grubosc_ramki = 1;
+        zaktualizuj_motyw();
         preferowany_rozmiar_ = Rozmiar(260, 28);
         wypelnienie_ = Marginesy(4, 2, 4, 2);
+    }
+
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
+        styl_.normalny.tlo = motyw_kolor(MOTYW_KOLOR_POLETEKSTOWE);
+        styl_.normalny.ramka = motyw_kolor(MOTYW_KOLOR_RAMKA);
+        styl_.normalny.grubosc_ramki = 1;
+        uniewaznij();
     }
 
     ~PasekSciezki() override = default;
@@ -183,15 +188,15 @@ public:
         if (ma_skrot) {
             skrot_rect_ = Prostokat(cur_x, 2 * skala, skrot_w, obszar_.wysokosc - 4 * skala);
             if (najechany_skrot_) {
-                ctx.rysuj_zaokraglony_prostokat(skrot_rect_, 0x003A2814, 3);
-                ctx.rysuj_zaokraglona_ramke(skrot_rect_, Kolory::RamkaDomyslna, 3, 1);
+                ctx.rysuj_zaokraglony_prostokat(skrot_rect_, motyw_kolor(MOTYW_KOLOR_PODNIESIONY), 3);
+                ctx.rysuj_zaokraglona_ramke(skrot_rect_, motyw_kolor(MOTYW_KOLOR_RAMKA), 3, 1);
             }
             ctx.rysuj_tekst_wysrodkowany(skrot_rect_, "...",
-                                         najechany_skrot_ ? Kolory::AkcentNajechany : Kolory::TekstWyciszony, skala);
+                                         najechany_skrot_ ? motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY) : motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI), skala);
             cur_x += skrot_w + sep_spacing;
 
             ctx.rysuj_tekst_obciety(Punkt(cur_x, cy), separator_tekst_,
-                                    Kolory::TekstWyciszony, sep_tw, skala);
+                                    motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI), sep_tw, skala);
             cur_x += sep_tw + sep_spacing;
         }
 
@@ -206,20 +211,20 @@ public:
             bool hov = (static_cast<int>(i) == najechany_segment_);
 
             if (hov) {
-                ctx.rysuj_zaokraglony_prostokat(seg_rect, 0x003A2814, 3);
-                ctx.rysuj_zaokraglona_ramke(seg_rect, Kolory::RamkaDomyslna, 3, 1);
+                ctx.rysuj_zaokraglony_prostokat(seg_rect, motyw_kolor(MOTYW_KOLOR_PODNIESIONY), 3);
+                ctx.rysuj_zaokraglona_ramke(seg_rect, motyw_kolor(MOTYW_KOLOR_RAMKA), 3, 1);
             }
 
-            uint32_t col_txt = ostatni ? Kolory::AkcentZloty
-                                       : (hov ? Kolory::AkcentNajechany
-                                              : Kolory::TekstBialy);
+            uint32_t col_txt = ostatni ? motyw_kolor(MOTYW_KOLOR_AKCENT)
+                                       : (hov ? motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY)
+                                              : motyw_kolor(MOTYW_KOLOR_TEKST));
             ctx.rysuj_tekst_wysrodkowany(seg_rect, segmenty_[i].nazwa, col_txt, skala);
 
             cur_x += sw + sep_spacing;
 
             if (!ostatni) {
                 ctx.rysuj_tekst_obciety(Punkt(cur_x, cy), separator_tekst_,
-                                        Kolory::TekstWyciszony, sep_tw, skala);
+                                        motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI), sep_tw, skala);
                 cur_x += sep_tw + sep_spacing;
             }
         }

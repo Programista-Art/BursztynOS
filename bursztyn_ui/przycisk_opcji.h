@@ -32,14 +32,19 @@ public:
 
     explicit PrzyciskOpcji(const char* tekst = "", int64_t wartosc = 0)
         : wartosc_(wartosc) {
-        styl_ = Motyw::pobierz_domyslny().styl_pola_wyboru;
-        styl_.normalny.tlo = 0;
-        styl_.najechany.tlo = 0;
-        styl_.fokus.tlo = 0;
+        zaktualizuj_motyw();
         wypelnienie_ = Marginesy(2, 2, 2, 2);
         czy_moze_miec_fokus_ = true;
         czy_reaguje_wizualnie_na_najechanie_ = false;
         ustaw_tekst(tekst);
+    }
+
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_pola_wyboru;
+        styl_.normalny.tlo = 0;
+        styl_.najechany.tlo = 0;
+        styl_.fokus.tlo = 0;
+        uniewaznij();
     }
 
     ~PrzyciskOpcji() override {
@@ -174,26 +179,26 @@ public:
     void rysuj_opcje(KontekstRysowania& ctx) {
         SkalaUI s = skala_dpi_;
         Prostokat z = prostokat_znacznika();
-        uint32_t ramka = !czy_wlaczona_ ? Kolory::WylaczonyRamka
-                         : hover_znacznika_ ? Kolory::RamkaNajechana
-                                           : Kolory::RamkaDomyslna;
-        uint32_t tlo = !czy_wlaczona_ ? Kolory::WylaczonyTlo
-                     : czy_wcisnieta_ ? Kolory::PowierzchniaAktywna
-                                      : Kolory::WejscieTlo;
+        uint32_t ramka = !czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY)
+                         : hover_znacznika_ ? motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY)
+                                           : motyw_kolor(MOTYW_KOLOR_RAMKA);
+        uint32_t tlo = !czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_PANEL)
+                     : czy_wcisnieta_ ? motyw_kolor(MOTYW_KOLOR_AKCENT_AKTYWNY)
+                                      : motyw_kolor(MOTYW_KOLOR_POLETEKSTOWE);
         ctx.rysuj_zaokraglony_prostokat(z, tlo, z.szerokosc / 2);
         ctx.rysuj_zaokraglona_ramke(z, ramka, z.szerokosc / 2, s);
         if (zaznaczony_) {
             Prostokat k = z.zmniejszony(Marginesy(5 * s));
             ctx.rysuj_zaokraglony_prostokat(k,
-                czy_wlaczona_ ? Kolory::AkcentZloty : Kolory::WylaczonyTekst,
+                czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_AKCENT) : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY),
                 k.szerokosc / 2);
         }
         int tx = z.prawy() + 7 * s;
         int ty = (obszar_.wysokosc - CzcionkaUI::pobierz_wysokosc(s)) / 2;
         ctx.rysuj_tekst(Punkt(tx, ty), tekst_,
-                        czy_wlaczona_ ? Kolory::TekstBialy : Kolory::WylaczonyTekst, s);
+                        czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_TEKST) : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY), s);
         if (czy_ma_fokus_) ctx.rysuj_ramke(z.powiekszony(Marginesy(2 * s)),
-                                           Kolory::AkcentFokus, s);
+                                           motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY), s);
     }
 
 private:

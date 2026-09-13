@@ -18,6 +18,13 @@ public:
 
 class WidokMenuPopup : public PowierzchniaPopup {
 public:
+    WidokMenuPopup() {
+        zaktualizuj_motyw();
+    }
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_menu;
+        uniewaznij();
+    }
     void ustaw(Menu* menu, ObslugaWidokuMenu* host) {
         menu_ = menu; host_ = host; aktywny_ = pierwszy_aktywny(1); wcisniety_ = -1;
         indeks_otwartego_podmenu_ = -1;
@@ -71,27 +78,27 @@ public:
             Prostokat r = prostokat_elementu(i);
             if (e->czy_separator()) {
                 ctx.rysuj_linie_pozioma(r.x + 8 * s, r.y + r.wysokosc / 2,
-                                        r.szerokosc - 16 * s, Kolory::RamkaDomyslna);
+                                        r.szerokosc - 16 * s, motyw_kolor(MOTYW_KOLOR_RAMKA));
                 continue;
             }
             if (i == aktywny_ && e->czy_wlaczony())
-                ctx.rysuj_prostokat(r, Kolory::PowierzchniaNajechana);
-            uint32_t kolor = e->czy_wlaczony() ? Kolory::TekstBialy : Kolory::WylaczonyTekst;
+                ctx.rysuj_prostokat(r, motyw_kolor(MOTYW_KOLOR_PODNIESIONY));
+            uint32_t kolor = e->czy_wlaczony() ? motyw_kolor(MOTYW_KOLOR_TEKST) : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY);
             int ty = r.y + (r.wysokosc - CzcionkaUI::pobierz_wysokosc(s)) / 2;
             if (e->czy_zaznaczony()) {
                 if (e->typ_zaznaczenia() == TypZaznaczeniaMenu::Radio)
                     ctx.rysuj_zaokraglony_prostokat(Prostokat(r.x + 9 * s, ty + 5 * s, 6 * s, 6 * s),
-                                                    Kolory::AkcentZloty, 3 * s);
+                                                    motyw_kolor(MOTYW_KOLOR_AKCENT), 3 * s);
                 else {
-                    ctx.rysuj_linie_pozioma(r.x + 7 * s, ty + 8 * s, 5 * s, Kolory::AkcentZloty);
-                    ctx.rysuj_linie_pozioma(r.x + 10 * s, ty + 11 * s, 8 * s, Kolory::AkcentZloty);
+                    ctx.rysuj_linie_pozioma(r.x + 7 * s, ty + 8 * s, 5 * s, motyw_kolor(MOTYW_KOLOR_AKCENT));
+                    ctx.rysuj_linie_pozioma(r.x + 10 * s, ty + 11 * s, 8 * s, motyw_kolor(MOTYW_KOLOR_AKCENT));
                 }
             }
             ctx.rysuj_tekst(Punkt(r.x + 24 * s, ty), e->tekst(), kolor, s);
             if (e->skrot()[0]) {
                 int sw = CzcionkaUI::zmierz_tekst(e->skrot(), s);
                 ctx.rysuj_tekst(Punkt(r.prawy() - sw - 22 * s, ty), e->skrot(),
-                                e->czy_wlaczony() ? Kolory::TekstWyciszony : Kolory::WylaczonyTekst, s);
+                                e->czy_wlaczony() ? motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI) : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY), s);
             }
             if (e->podmenu()) ctx.rysuj_tekst(Punkt(r.prawy() - 15 * s, ty), ">", kolor, s);
         }

@@ -1740,6 +1740,16 @@ void rysuj_zegar_rtc() {
         g.skala_fontu);
 }
 
+static bool g_pasek_zadan_gotowy = false;
+
+void grafika_ustaw_pasek_zadan_gotowy(bool gotowy) {
+    g_pasek_zadan_gotowy = gotowy;
+}
+
+bool grafika_czy_pasek_zadan_gotowy(void) {
+    return g_pasek_zadan_gotowy;
+}
+
 void OdswiezEkran() {
     if (!backbuffer || !aktywny_ekran)
         return;

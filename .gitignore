@@ -43,6 +43,7 @@ narzedzia/aktualizacje/test_16k_bws84_irq.py
 narzedzia/test_motyw_host.cpp
 narzedzia/test_motywy_gui.py
 narzedzia/test_motywy_qemu.py
+narzedzia/aktualizacje/__pycache__/test_16k_bws84_irq.cpython-312.pyc
 
 
 

@@ -61,12 +61,17 @@ public:
     static constexpr size_t MAKS_SEKCJI = 16;
 
     PasekStanu() {
-        styl_ = Motyw::pobierz_domyslny().styl_panelu;
-        styl_.normalny.tlo = Kolory::PowierzchniaAlternatywna;
-        styl_.normalny.ramka = Kolory::RamkaDomyslna;
-        styl_.normalny.grubosc_ramki = 1;
+        zaktualizuj_motyw();
         czy_moze_miec_fokus_ = false;
         preferowany_rozmiar_ = Rozmiar(300, 24);
+    }
+
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_panelu;
+        styl_.normalny.tlo = motyw_kolor(MOTYW_KOLOR_PANEL);
+        styl_.normalny.ramka = motyw_kolor(MOTYW_KOLOR_RAMKA);
+        styl_.normalny.grubosc_ramki = 1;
+        uniewaznij();
     }
 
     size_t dodaj_sekcje(const char* tekst = "", int szerokosc = 100,
@@ -195,7 +200,7 @@ public:
             // Rysuj separator po prawej stronie (dla wszystkich poza ostatnią widoczną)
             if (i + 1 < liczba_sekcji_) {
                 int sep_x = s.prostokat_.prawy();
-                ctx.rysuj_linie_pionowa(sep_x, 3, b.wysokosc - 6, Kolory::RamkaDomyslna);
+                ctx.rysuj_linie_pionowa(sep_x, 3, b.wysokosc - 6, motyw_kolor(MOTYW_KOLOR_RAMKA));
             }
 
             if (s.kontrolka()) {
@@ -217,7 +222,7 @@ public:
                     tx = tekst_r.prawy() - tw;
                 }
 
-                ctx.rysuj_tekst(Punkt(tx, ty), s.tekst(), Kolory::TekstBialy, skala_dpi_);
+                ctx.rysuj_tekst(Punkt(tx, ty), s.tekst(), motyw_kolor(MOTYW_KOLOR_TEKST), skala_dpi_);
                 ctx.zdejmij_przyciecie();
             }
         }

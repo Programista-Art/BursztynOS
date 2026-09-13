@@ -110,7 +110,7 @@ public:
             Prostokat c = prostokat_czyszczenia();
             if (najechany_clear_ && czy_wlaczona_)
                 ctx.rysuj_zaokraglony_prostokat(c.zmniejszony(Marginesy(3 * s)),
-                                               0x00503A22, 4 * s);
+                                               motyw_kolor(MOTYW_KOLOR_PODNIESIONY), 4 * s);
             int mx = c.x + c.szerokosc / 2;
             int my = c.y + c.wysokosc / 2;
             for (int i = -3 * s; i <= 3 * s; ++i) {

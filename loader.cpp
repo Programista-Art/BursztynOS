@@ -1190,3 +1190,239 @@ extern "C" int loader_przekaz_argument_uruchomionemu(
     return znaleziony;
 }
 #endif // !BURSZTYN_LOADER_HOST_TEST
+
+/* =========================================================================
+ * MANIFEST PACZKI .CEBULA (opis.aplikacji)
+ * ========================================================================= */
+
+static bool manifest_czy_bialy_znak(char c) {
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
+
+static bool manifest_tekst_rowny(const char* a, const char* b) {
+    if (!a || !b) return false;
+    size_t i = 0;
+    while (a[i] && b[i] && a[i] == b[i]) ++i;
+    return a[i] == '\0' && b[i] == '\0';
+}
+
+extern "C" bool pakiet_parsuj_manifest_tekst(
+    const char* tekst,
+    size_t dlugosc,
+    PakietManifest* out_manifest
+) {
+    if (!tekst || !out_manifest || dlugosc == 0 || dlugosc > 4096) return false;
+
+    out_manifest->nazwa[0] = '\0';
+    out_manifest->autor[0] = '\0';
+    out_manifest->wersja[0] = '\0';
+    out_manifest->plik_startowy[0] = '\0';
+    out_manifest->poziom_zaufania = PZB_UZYTKOWNIK;
+    out_manifest->uprawnienia = PRAWA_BRAK;
+
+    size_t pos = 0;
+    while (pos < dlugosc) {
+        while (pos < dlugosc && manifest_czy_bialy_znak(tekst[pos])) ++pos;
+        if (pos >= dlugosc) break;
+
+        if (tekst[pos] == '#' || tekst[pos] == ';') {
+            while (pos < dlugosc && tekst[pos] != '\n') ++pos;
+            continue;
+        }
+
+        char klucz[40] = {};
+        size_t klucz_len = 0;
+        while (pos < dlugosc && tekst[pos] != '=' && tekst[pos] != ':' &&
+               !manifest_czy_bialy_znak(tekst[pos])) {
+            if (klucz_len + 1 < sizeof(klucz)) {
+                klucz[klucz_len++] = tekst[pos];
+            } else {
+                return false;
+            }
+            ++pos;
+        }
+        klucz[klucz_len] = '\0';
+
+        while (pos < dlugosc && manifest_czy_bialy_znak(tekst[pos]) && tekst[pos] != '\n') ++pos;
+        if (pos >= dlugosc || (tekst[pos] != '=' && tekst[pos] != ':')) return false;
+        ++pos;
+
+        while (pos < dlugosc && manifest_czy_bialy_znak(tekst[pos]) && tekst[pos] != '\n') ++pos;
+        if (pos >= dlugosc) break;
+
+        if (manifest_tekst_rowny(klucz, "poziom_zaufania")) {
+            while (pos < dlugosc && manifest_czy_bialy_znak(tekst[pos])) ++pos;
+            uint32_t val = 0;
+            bool got_digit = false;
+            while (pos < dlugosc && tekst[pos] >= '0' && tekst[pos] <= '9') {
+                val = val * 10 + static_cast<uint32_t>(tekst[pos] - '0');
+                got_digit = true;
+                ++pos;
+            }
+            if (got_digit && val <= PZB_MAX_POZIOM) {
+                out_manifest->poziom_zaufania = static_cast<uint8_t>(val);
+            }
+        } else if (manifest_tekst_rowny(klucz, "nazwa") ||
+                   manifest_tekst_rowny(klucz, "autor") ||
+                   manifest_tekst_rowny(klucz, "wersja") ||
+                   manifest_tekst_rowny(klucz, "plik_startowy")) {
+            while (pos < dlugosc && manifest_czy_bialy_znak(tekst[pos])) ++pos;
+            if (pos < dlugosc && tekst[pos] == '"') {
+                ++pos;
+                char str[64] = {};
+                size_t str_len = 0;
+                while (pos < dlugosc && tekst[pos] != '"' && tekst[pos] != '\n') {
+                    if (str_len + 1 < sizeof(str)) {
+                        str[str_len++] = tekst[pos];
+                    }
+                    ++pos;
+                }
+                if (pos < dlugosc && tekst[pos] == '"') ++pos;
+                str[str_len] = '\0';
+
+                if (manifest_tekst_rowny(klucz, "nazwa")) {
+                    for (size_t i = 0; i < sizeof(out_manifest->nazwa); ++i) out_manifest->nazwa[i] = str[i];
+                } else if (manifest_tekst_rowny(klucz, "autor")) {
+                    for (size_t i = 0; i < sizeof(out_manifest->autor); ++i) out_manifest->autor[i] = str[i];
+                } else if (manifest_tekst_rowny(klucz, "wersja")) {
+                    for (size_t i = 0; i < sizeof(out_manifest->wersja); ++i) out_manifest->wersja[i] = str[i];
+                } else if (manifest_tekst_rowny(klucz, "plik_startowy")) {
+                    for (size_t i = 0; i < sizeof(out_manifest->plik_startowy); ++i) out_manifest->plik_startowy[i] = str[i];
+                }
+            }
+        } else if (manifest_tekst_rowny(klucz, "uprawnienia")) {
+            while (pos < dlugosc && manifest_czy_bialy_znak(tekst[pos])) ++pos;
+            if (pos < dlugosc && tekst[pos] == '[') {
+                ++pos;
+                while (pos < dlugosc && tekst[pos] != ']') {
+                    while (pos < dlugosc && (manifest_czy_bialy_znak(tekst[pos]) || tekst[pos] == ',')) ++pos;
+                    if (pos < dlugosc && tekst[pos] == '#') {
+                        while (pos < dlugosc && tekst[pos] != '\n') ++pos;
+                        continue;
+                    }
+                    if (pos < dlugosc && tekst[pos] == '"') {
+                        ++pos;
+                        char prawo_nazwa[32] = {};
+                        size_t pn_len = 0;
+                        while (pos < dlugosc && tekst[pos] != '"' && tekst[pos] != '\n') {
+                            if (pn_len + 1 < sizeof(prawo_nazwa)) {
+                                prawo_nazwa[pn_len++] = tekst[pos];
+                            }
+                            ++pos;
+                        }
+                        if (pos < dlugosc && tekst[pos] == '"') ++pos;
+                        prawo_nazwa[pn_len] = '\0';
+
+                        if (manifest_tekst_rowny(prawo_nazwa, "okna")) {
+                            out_manifest->uprawnienia |= PRAWO_GUI;
+                        } else if (manifest_tekst_rowny(prawo_nazwa, "pliki_czytaj")) {
+                            out_manifest->uprawnienia |= PRAWO_PLIKI_CZYTAJ;
+                        } else if (manifest_tekst_rowny(prawo_nazwa, "pliki_zapisz")) {
+                            out_manifest->uprawnienia |= PRAWO_PLIKI_ZAPISZ;
+                        } else if (manifest_tekst_rowny(prawo_nazwa, "system_config")) {
+                            out_manifest->uprawnienia |= PRAWO_SYSTEM_CONFIG;
+                        } else if (manifest_tekst_rowny(prawo_nazwa, "siec")) {
+                            out_manifest->uprawnienia |= PRAWO_SIEC;
+                        } else if (manifest_tekst_rowny(prawo_nazwa, "uruchom_program")) {
+                            out_manifest->uprawnienia |= PRAWO_URUCHOM_PROGRAM;
+                        } else if (manifest_tekst_rowny(prawo_nazwa, "sterownik")) {
+                            out_manifest->uprawnienia |= PRAWO_STEROWNIK;
+                        } else if (manifest_tekst_rowny(prawo_nazwa, "debug")) {
+                            out_manifest->uprawnienia |= PRAWO_DEBUG;
+                        }
+                    } else {
+                        if (pos < dlugosc && tekst[pos] != ']') ++pos;
+                    }
+                }
+                if (pos < dlugosc && tekst[pos] == ']') ++pos;
+            }
+        } else {
+            while (pos < dlugosc && tekst[pos] != '\n') ++pos;
+        }
+    }
+
+    return (out_manifest->plik_startowy[0] != '\0');
+}
+
+#ifndef BURSZTYN_LOADER_HOST_TEST
+extern "C" bool czytaj_fragment_pliku(
+    const char* sciezka,
+    uint64_t offset,
+    char* bufor,
+    uint32_t dlugosc,
+    uint32_t* odczytano
+);
+#else
+#include <stdio.h>
+#endif
+
+extern "C" bool pakiet_wczytaj_manifest(
+    const char* sciezka_programu,
+    PakietManifest* out_manifest
+) {
+    if (!sciezka_programu || !out_manifest) return false;
+
+    const char* ceb = nullptr;
+    for (size_t i = 0; sciezka_programu[i] != '\0'; ++i) {
+        if (sciezka_programu[i] == '.' &&
+            sciezka_programu[i+1] == 'c' &&
+            sciezka_programu[i+2] == 'e' &&
+            sciezka_programu[i+3] == 'b' &&
+            sciezka_programu[i+4] == 'u' &&
+            sciezka_programu[i+5] == 'l' &&
+            sciezka_programu[i+6] == 'a' &&
+            sciezka_programu[i+7] == '/') {
+            ceb = &sciezka_programu[i + 8];
+            break;
+        }
+    }
+    if (!ceb) return false;
+
+    char manifest_sciezka[128] = {};
+    size_t prefix_len = static_cast<size_t>(ceb - sciezka_programu);
+    if (prefix_len + 16 >= sizeof(manifest_sciezka)) return false;
+
+    for (size_t i = 0; i < prefix_len; ++i) {
+        manifest_sciezka[i] = sciezka_programu[i];
+    }
+    const char opis_nazwa[] = "opis.aplikacji";
+    for (size_t i = 0; opis_nazwa[i] != '\0'; ++i) {
+        manifest_sciezka[prefix_len + i] = opis_nazwa[i];
+    }
+    manifest_sciezka[prefix_len + sizeof(opis_nazwa) - 1] = '\0';
+
+    char bufor[2048] = {};
+    uint32_t odczytano = 0;
+#ifndef BURSZTYN_LOADER_HOST_TEST
+    if (!czytaj_fragment_pliku(manifest_sciezka, 0, bufor, sizeof(bufor) - 1, &odczytano) || odczytano == 0) {
+        return false;
+    }
+#else
+    FILE* f = fopen(manifest_sciezka, "rb");
+    if (!f) {
+        const char* rel_sciezka = (manifest_sciezka[0] == '/') ? &manifest_sciezka[1] : manifest_sciezka;
+        f = fopen(rel_sciezka, "rb");
+    }
+    if (!f) return false;
+    odczytano = static_cast<uint32_t>(fread(bufor, 1, sizeof(bufor) - 1, f));
+    fclose(f);
+    if (odczytano == 0) return false;
+#endif
+    bufor[odczytano] = '\0';
+
+    if (!pakiet_parsuj_manifest_tekst(bufor, odczytano, out_manifest)) {
+        return false;
+    }
+
+    const char* base = sciezka_programu;
+    for (size_t i = 0; sciezka_programu[i] != '\0'; ++i) {
+        if (sciezka_programu[i] == '/') base = &sciezka_programu[i + 1];
+    }
+
+    if (!manifest_tekst_rowny(base, out_manifest->plik_startowy)) {
+        return false;
+    }
+
+    return true;
+}
+

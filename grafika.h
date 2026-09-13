@@ -90,6 +90,10 @@ void grafika_pobierz_overlay_kursora(int* x, int* y, bool* widoczny);
 /* Nakladka jadra rysowana przez compositor. */
 void rysuj_zegar_rtc();
 
+/* Stan gotowości powłoki i paska zadań */
+void grafika_ustaw_pasek_zadan_gotowy(bool gotowy);
+bool grafika_czy_pasek_zadan_gotowy(void);
+
 /* =========================================================================
  * 4. PODSTAWOWE PRYMITYWY RYSOWANIA
  * ========================================================================= */

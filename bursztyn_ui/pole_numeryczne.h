@@ -36,6 +36,12 @@ public:
         }, this);
     }
 
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
+        if (pole_edycji_) pole_edycji_->zaktualizuj_motyw();
+        uniewaznij();
+    }
+
     void ustaw_zakres(int64_t minimum, int64_t maksimum) {
         minimum_ = minimum;
         maksimum_ = maksimum;
@@ -178,22 +184,22 @@ public:
 
     void rysuj_siebie(KontekstRysowania& ctx) override {
         Prostokat b(0, 0, obszar_ekranu_.szerokosc, obszar_ekranu_.wysokosc);
-        uint32_t ramka = czy_wlaczona_ ? (czy_ma_fokus_ ? Kolory::RamkaFokus : Kolory::RamkaDomyslna)
-                                       : Kolory::WylaczonyRamka;
+        uint32_t ramka = czy_wlaczona_ ? (czy_ma_fokus_ ? motyw_kolor(MOTYW_KOLOR_AKCENT) : motyw_kolor(MOTYW_KOLOR_RAMKA))
+                                       : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY);
         ctx.rysuj_ramke(b, ramka, 1);
 
         if (pokazuj_przyciski_) {
-            uint32_t tlo_przyciskow = czy_wlaczona_ ? Kolory::PowierzchniaAlternatywna : Kolory::WylaczonyTlo;
-            uint32_t strzalka_kolor = czy_wlaczona_ ? Kolory::TekstBialy : Kolory::WylaczonyTekst;
+            uint32_t tlo_przyciskow = czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_PANEL) : motyw_kolor(MOTYW_KOLOR_PANEL);
+            uint32_t strzalka_kolor = czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_TEKST) : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY);
 
             // Przycisk w górę
-            uint32_t bg_g = wcisniety_gora_ ? Kolory::AkcentWcisniety : (najechany_gora_ ? Kolory::PowierzchniaNajechana : tlo_przyciskow);
+            uint32_t bg_g = wcisniety_gora_ ? motyw_kolor(MOTYW_KOLOR_AKCENT_AKTYWNY) : (najechany_gora_ ? motyw_kolor(MOTYW_KOLOR_PODNIESIONY) : tlo_przyciskow);
             ctx.rysuj_prostokat(przycisk_gora_, bg_g);
             ctx.rysuj_ramke(przycisk_gora_, ramka, 1);
             rysuj_trojkat_gora(ctx, przycisk_gora_, strzalka_kolor);
 
             // Przycisk w dół
-            uint32_t bg_d = wcisniety_dol_ ? Kolory::AkcentWcisniety : (najechany_dol_ ? Kolory::PowierzchniaNajechana : tlo_przyciskow);
+            uint32_t bg_d = wcisniety_dol_ ? motyw_kolor(MOTYW_KOLOR_AKCENT_AKTYWNY) : (najechany_dol_ ? motyw_kolor(MOTYW_KOLOR_PODNIESIONY) : tlo_przyciskow);
             ctx.rysuj_prostokat(przycisk_dol_, bg_d);
             ctx.rysuj_ramke(przycisk_dol_, ramka, 1);
             rysuj_trojkat_dol(ctx, przycisk_dol_, strzalka_kolor);

@@ -1802,12 +1802,18 @@ uint64_t bws_uruchom(
             !pzb_ma_prawa(&rodzic,PRAWO_SYSTEM_CONFIG))return 0;
         poziom_dziecka=PZB_ZAUFANE;wymagane=PRAWO_GUI|PRAWO_SYSTEM_CONFIG;
     }
-    if(rowna_sciezka(sciezka,"/programy/motywy.cebula/motywy.bur")) {
-        if(!pzb_ma_co_najmniej_poziom(&rodzic,PZB_ZAUFANE)||
-            !pzb_ma_prawa(&rodzic,PRAWO_SYSTEM_CONFIG))return 0;
-        poziom_dziecka=PZB_ZAUFANE;
-        wymagane=PRAWO_GUI|PRAWO_SYSTEM_CONFIG|PRAWO_PLIKI_CZYTAJ;
-        prawa_dziecka |= PRAWO_SYSTEM_CONFIG | PRAWO_PLIKI_CZYTAJ;
+    // Walidacja manifestu opis.aplikacji z paczki .cebula
+    PakietManifest manifest{};
+    if (pakiet_wczytaj_manifest(sciezka, &manifest)) {
+        if (manifest.poziom_zaufania < PZB_UZYTKOWNIK || (manifest.uprawnienia & PRAWO_SYSTEM_CONFIG)) {
+            if (!pzb_ma_co_najmniej_poziom(&rodzic, PZB_ZAUFANE) ||
+                !pzb_ma_prawa(&rodzic, PRAWO_SYSTEM_CONFIG)) {
+                return 0;
+            }
+        }
+        poziom_dziecka = manifest.poziom_zaufania;
+        wymagane = manifest.uprawnienia;
+        prawa_dziecka |= manifest.uprawnienia;
     }
     if(rowna_sciezka(sciezka,"/programy/aktualizacje.cebula/aktualizacje.bur")) {
 #if BURSZTYN_OTA_TRACE

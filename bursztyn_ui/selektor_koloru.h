@@ -32,6 +32,10 @@ private:
                 auto* p = static_cast<Picker*>(d); if (p->zarzadca()) p->zarzadca()->zamknij(PowodZamknieciaPopup::Anulowanie);
             }, this);
         }
+        void zaktualizuj_motyw() override {
+            styl_ = Motyw::pobierz_domyslny().styl_menu;
+            uniewaznij();
+        }
         void po_otwarciu() override { poprzedni_ = owner_->kolor_; ustaw_rgb(poprzedni_); synchronizuj(); }
         void po_zamknieciu(PowodZamknieciaPopup powod) override {
             ciagniecie_ = 0; czy_wcisnieta_ = false;
@@ -54,7 +58,7 @@ private:
         void rysuj_siebie(KontekstRysowania& ctx) override {
             rysuj_tlo_i_ramke(ctx, styl_.normalny);
             SkalaUI s = skala_dpi_;
-            ctx.rysuj_tekst(Punkt(12*s, 8*s), "Wybierz kolor", Kolory::TekstBialy, s);
+            ctx.rysuj_tekst(Punkt(12*s, 8*s), "Wybierz kolor", motyw_kolor(MOTYW_KOLOR_TEKST), s);
             Prostokat clip = sv_.przeciecie(ctx.lokalny_klip());
             for (int y = clip.y; !clip.czy_pusty() && y < clip.dolny(); ++y)
                 for (int x = clip.x; x < clip.prawy(); ++x)
@@ -69,13 +73,13 @@ private:
             int hy = hue_.y+h_*(hue_.wysokosc-1)/359;
             ctx.rysuj_ramke(Prostokat(hue_.x-2*s,hy-2*s,hue_.szerokosc+4*s,5*s),0x00FFFFFF,s);
             int x = hue_.prawy()+8*s, w = obszar_.szerokosc-x-10*s;
-            ctx.rysuj_tekst(Punkt(x,sv_.y),"Nowy",Kolory::TekstBialy,s);
+            ctx.rysuj_tekst(Punkt(x,sv_.y),"Nowy",motyw_kolor(MOTYW_KOLOR_TEKST),s);
             ctx.rysuj_prostokat(Prostokat(x,sv_.y+22*s,w,38*s),roboczy_);
-            ctx.rysuj_tekst(Punkt(x,sv_.y+70*s),"Stary",Kolory::TekstBialy,s);
+            ctx.rysuj_tekst(Punkt(x,sv_.y+70*s),"Stary",motyw_kolor(MOTYW_KOLOR_TEKST),s);
             ctx.rysuj_prostokat(Prostokat(x,sv_.y+92*s,w,38*s),poprzedni_ ? poprzedni_ : WIDOCZNA_CZERN);
             const char* labels[] = {"R", "G", "B"};
-            for (int i=0;i<3;++i) ctx.rysuj_tekst(Punkt(pola_[i]->obszar().x,sv_.dolny()+6*s),labels[i],Kolory::TekstBialy,s);
-            if (!poprawne()) ctx.rysuj_tekst(Punkt(12*s,obszar_.wysokosc-19*s),"Nieprawidłowa wartość",0x00FF8080,s);
+            for (int i=0;i<3;++i) ctx.rysuj_tekst(Punkt(pola_[i]->obszar().x,sv_.dolny()+6*s),labels[i],motyw_kolor(MOTYW_KOLOR_TEKST),s);
+            if (!poprawne()) ctx.rysuj_tekst(Punkt(12*s,obszar_.wysokosc-19*s),"Nieprawidłowa wartość",motyw_kolor(MOTYW_KOLOR_BLAD),s);
         }
         void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e) override {
             if (!e.czy_lewy_przycisk()) return;
@@ -190,14 +194,19 @@ public:
     uint32_t kolor_podgladu() const { return picker_.roboczy_; }
     bool zatwierdz_popup() { return picker_.zatwierdz(); }
     void anuluj_popup() { if(picker_.zarzadca())picker_.zarzadca()->zamknij(PowodZamknieciaPopup::Anulowanie); }
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
+        picker_.zaktualizuj_motyw();
+        uniewaznij();
+    }
     Rozmiar oblicz_naturalny_rozmiar() const override { return Rozmiar(230,36); }
     void rysuj_siebie(KontekstRysowania& ctx) override {
         rysuj_tlo_i_ramke(ctx,wyznacz_biezacy_styl_stanu());SkalaUI s = skala_dpi_;
         Prostokat preview(7*s,6*s,32*s,obszar_.wysokosc-12*s);
-        ctx.rysuj_prostokat(preview,kolor_?kolor_:WIDOCZNA_CZERN);ctx.rysuj_ramke(preview,Kolory::RamkaDomyslna,s);
-        char hex[8];formatuj(kolor_,hex);ctx.rysuj_tekst(Punkt(48*s,(obszar_.wysokosc-16*s)/2),hex,Kolory::TekstBialy,s);
+        ctx.rysuj_prostokat(preview,kolor_?kolor_:WIDOCZNA_CZERN);ctx.rysuj_ramke(preview,motyw_kolor(MOTYW_KOLOR_RAMKA),s);
+        char hex[8];formatuj(kolor_,hex);ctx.rysuj_tekst(Punkt(48*s,(obszar_.wysokosc-16*s)/2),hex,motyw_kolor(MOTYW_KOLOR_TEKST),s);
         int x=obszar_.szerokosc-18*s,y=obszar_.wysokosc/2;
-        for(int i=0;i<4;++i)ctx.rysuj_prostokat(Prostokat(x+i*s,y+i*s,(7-2*i)*s,s),Kolory::TekstBialy);
+        for(int i=0;i<4;++i)ctx.rysuj_prostokat(Prostokat(x+i*s,y+i*s,(7-2*i)*s,s),motyw_kolor(MOTYW_KOLOR_TEKST));
     }
     void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e) override { if(czy_wlaczona_&&!czy_tylko_do_odczytu_&&e.czy_lewy_przycisk()){czy_wcisnieta_=true;e.obsluzone=true;} }
     void obsluz_zwolnienie_myszy(ZdarzenieMyszki& e) override {

@@ -29,12 +29,17 @@ public:
     explicit PoleCzasu(CzasDnia czas_poczatkowy = CzasDnia{}) {
         czas_ = czas_poczatkowy.czy_poprawny()
             ? czas_poczatkowy : CzasDnia{};
-        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
+        zaktualizuj_motyw();
         czy_moze_miec_fokus_ = true;
         czy_reaguje_wizualnie_na_najechanie_ = false;
         czy_reaguje_wizualnie_na_wcisniecie_ = false;
         preferowany_rozmiar_ = Rozmiar(150, 30);
         wypelnienie_ = Marginesy(6, 4, 6, 4);
+    }
+
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
+        uniewaznij();
     }
 
     ~PoleCzasu() override = default;
@@ -90,14 +95,14 @@ public:
 
         // Spinner
         ctx.rysuj_zaokraglony_prostokat(btn_up_, kolor_przycisku(0), 2);
-        ctx.rysuj_zaokraglona_ramke(btn_up_, Kolory::RamkaDomyslna, 2, 1);
+        ctx.rysuj_zaokraglona_ramke(btn_up_, motyw_kolor(MOTYW_KOLOR_RAMKA), 2, 1);
         rysuj_strzalke(ctx, btn_up_, true,
-                       czy_wlaczona_ ? Kolory::TekstBialy : Kolory::WylaczonyTekst);
+                       czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_TEKST) : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY));
 
         ctx.rysuj_zaokraglony_prostokat(btn_down_, kolor_przycisku(1), 2);
-        ctx.rysuj_zaokraglona_ramke(btn_down_, Kolory::RamkaDomyslna, 2, 1);
+        ctx.rysuj_zaokraglona_ramke(btn_down_, motyw_kolor(MOTYW_KOLOR_RAMKA), 2, 1);
         rysuj_strzalke(ctx, btn_down_, false,
-                       czy_wlaczona_ ? Kolory::TekstBialy : Kolory::WylaczonyTekst);
+                       czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_TEKST) : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY));
 
         // Segmenty [HH] : [MM] : [SS]
         int cy = (obszar_.wysokosc - CzcionkaUI::pobierz_wysokosc(skala)) / 2;
@@ -110,34 +115,34 @@ public:
         // Godzina
         rect_hh_ = g.hh;
         if (aktywny_segment_ == 0 && czy_ma_fokus_) {
-            ctx.rysuj_zaokraglony_prostokat(rect_hh_, Kolory::ZaznaczenieTlo, 2);
-            ctx.rysuj_tekst_wysrodkowany(rect_hh_, buf_h, Kolory::TekstBialy, skala);
+            ctx.rysuj_zaokraglony_prostokat(rect_hh_, motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE), 2);
+            ctx.rysuj_tekst_wysrodkowany(rect_hh_, buf_h, motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU), skala);
         } else {
             ctx.rysuj_tekst_wysrodkowany(rect_hh_, buf_h, s.tekst, skala);
         }
         // :
         ctx.rysuj_tekst_obciety(Punkt(g.dwukropek1.x, cy), ":",
-                                Kolory::TekstWyciszony,
+                                motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI),
                                 g.dwukropek1.szerokosc, skala);
 
         // Minuta
         rect_mm_ = g.mm;
         if (aktywny_segment_ == 1 && czy_ma_fokus_) {
-            ctx.rysuj_zaokraglony_prostokat(rect_mm_, Kolory::ZaznaczenieTlo, 2);
-            ctx.rysuj_tekst_wysrodkowany(rect_mm_, buf_m, Kolory::TekstBialy, skala);
+            ctx.rysuj_zaokraglony_prostokat(rect_mm_, motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE), 2);
+            ctx.rysuj_tekst_wysrodkowany(rect_mm_, buf_m, motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU), skala);
         } else {
             ctx.rysuj_tekst_wysrodkowany(rect_mm_, buf_m, s.tekst, skala);
         }
         // :
         ctx.rysuj_tekst_obciety(Punkt(g.dwukropek2.x, cy), ":",
-                                Kolory::TekstWyciszony,
+                                motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI),
                                 g.dwukropek2.szerokosc, skala);
 
         // Sekunda
         rect_ss_ = g.ss;
         if (aktywny_segment_ == 2 && czy_ma_fokus_) {
-            ctx.rysuj_zaokraglony_prostokat(rect_ss_, Kolory::ZaznaczenieTlo, 2);
-            ctx.rysuj_tekst_wysrodkowany(rect_ss_, buf_s, Kolory::TekstBialy, skala);
+            ctx.rysuj_zaokraglony_prostokat(rect_ss_, motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE), 2);
+            ctx.rysuj_tekst_wysrodkowany(rect_ss_, buf_s, motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU), skala);
         } else {
             ctx.rysuj_tekst_wysrodkowany(rect_ss_, buf_s, s.tekst, skala);
         }
@@ -321,10 +326,10 @@ private:
     }
 
     uint32_t kolor_przycisku(int indeks) const {
-        if (!czy_wlaczona_) return Kolory::WylaczonyTlo;
-        if (indeks == wcisniety_przycisk_) return Kolory::PowierzchniaAktywna;
-        if (indeks == najechany_przycisk_) return Kolory::PowierzchniaNajechana;
-        return Kolory::PowierzchniaAlternatywna;
+        if (!czy_wlaczona_) return motyw_kolor(MOTYW_KOLOR_PANEL);
+        if (indeks == wcisniety_przycisk_) return motyw_kolor(MOTYW_KOLOR_AKCENT_AKTYWNY);
+        if (indeks == najechany_przycisk_) return motyw_kolor(MOTYW_KOLOR_PODNIESIONY);
+        return motyw_kolor(MOTYW_KOLOR_PANEL);
     }
 
     void uniewaznij_przycisk(int indeks) {

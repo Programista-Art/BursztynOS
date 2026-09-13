@@ -357,7 +357,7 @@ public:
             int arrow_x = client_rect.x + 4 + depth * wciecie_ - offset_x_;
             int arrow_y = y + (row_h - 10) / 2;
             if (wezly_[w.indeks].liczba_dzieci > 0) {
-                uint32_t strzalka_kolor = zaznaczony ? Kolory::TekstBialy : Kolory::AkcentZloty;
+                uint32_t strzalka_kolor = zaznaczony ? motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU) : motyw_kolor(MOTYW_KOLOR_AKCENT);
                 if (wezly_[w.indeks].rozwiniety) {
                     ctx.rysuj_linie_pozioma(arrow_x + 1, arrow_y + 2, 7, strzalka_kolor);
                     ctx.rysuj_linie_pozioma(arrow_x + 2, arrow_y + 3, 5, strzalka_kolor);
@@ -373,7 +373,7 @@ public:
 
             int text_x = arrow_x + 16;
             int text_y = y + (row_h - 16) / 2;
-            uint32_t text_color = zaznaczony ? Kolory::TekstBialy : (wezly_[w.indeks].liczba_dzieci > 0 ? Kolory::AkcentZloty : Kolory::TekstBialy);
+            uint32_t text_color = zaznaczony ? motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU) : (wezly_[w.indeks].liczba_dzieci > 0 ? motyw_kolor(MOTYW_KOLOR_AKCENT) : motyw_kolor(MOTYW_KOLOR_TEKST));
             ctx.rysuj_tekst(Punkt(text_x, text_y), wezly_[w.indeks].tekst, text_color, skala_dpi_);
         }
 

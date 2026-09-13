@@ -227,3 +227,27 @@ extern "C" int loader_przekaz_argument_uruchomionemu(
     const char* sciezka_pliku,
     const char* argument_startowy
 );
+
+/* =========================================================================
+ * 6. MANIFEST PACZKI .CEBULA (opis.aplikacji)
+ * ========================================================================= */
+
+struct PakietManifest {
+    char nazwa[64];
+    char autor[64];
+    char wersja[32];
+    char plik_startowy[64];
+    uint8_t poziom_zaufania;
+    uint64_t uprawnienia;
+};
+
+extern "C" bool pakiet_parsuj_manifest_tekst(
+    const char* tekst,
+    size_t dlugosc,
+    PakietManifest* out_manifest
+);
+
+extern "C" bool pakiet_wczytaj_manifest(
+    const char* sciezka_programu,
+    PakietManifest* out_manifest
+);

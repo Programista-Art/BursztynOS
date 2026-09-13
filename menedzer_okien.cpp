@@ -1258,7 +1258,7 @@ void zaktualizuj_cache_przycisku(uint32_t skala) {
     const int logo_x = (btn_w - logo_w) / 2;
     const int logo_y = (btn_h - logo_h) / 2;
     const int pasek_h = ui_skaluj(TASKBAR_LOGICZNA_WYS, skala);
-    const int btn_rel_y = (pasek_h - btn_h) / 2;
+    (void)pasek_h;
 
     for (int s = 0; s < 4; ++s) {
         if (g_cached_przyciski[s]) {
@@ -1325,7 +1325,6 @@ void zaktualizuj_cache_przycisku(uint32_t skala) {
         }
     }
 
-    const uint32_t c_panel = motyw_kolor(MOTYW_KOLOR_PANEL);
     const uint32_t c_podniesiony = motyw_kolor(MOTYW_KOLOR_PODNIESIONY);
     const uint32_t c_akcent = motyw_kolor(MOTYW_KOLOR_AKCENT);
     const uint32_t c_akcent_aktywny = motyw_kolor(MOTYW_KOLOR_AKCENT_AKTYWNY);
@@ -1333,8 +1332,8 @@ void zaktualizuj_cache_przycisku(uint32_t skala) {
 
     for (int s = 0; s < 4; ++s) {
         uint32_t* buf = g_cached_przyciski[s];
-        uint32_t fill_color = c_panel;
-        uint32_t border_color = c_panel;
+        uint32_t fill_color = c_podniesiony;
+        uint32_t border_color = c_ramka;
 
         if (s == 1) { // Hover
             fill_color = c_podniesiony;
@@ -1351,7 +1350,6 @@ void zaktualizuj_cache_przycisku(uint32_t skala) {
             for (int bx = 0; bx < btn_w; ++bx) {
                 bool is_border = (bx == 0 || bx == btn_w - 1 || by == 0 || by == btn_h - 1);
                 uint32_t bg_color = is_border ? border_color : fill_color;
-                if (s == 0 && by == 0) bg_color = c_ramka;
 
                 const uint32_t bg_r = (bg_color >> 16) & 0xFF;
                 const uint32_t bg_g = (bg_color >> 8) & 0xFF;
@@ -1442,6 +1440,24 @@ void RysujTaskbar() {
                                  TASK_BUTTON_W, SKROT_H, 1,
                                  kolor_tekst, podpis);
         task_x += TASK_BUTTON_W + TASK_BUTTON_GAP;
+    }
+
+    // Atomowe rysowanie zegara RTC na powierzchni paska zadań
+    if (ostatni_czas[0] == '\0') {
+        (void)pobierz_i_zaktualizuj_czas();
+    }
+    const int zegar_szer = ui_skaluj(150, ui_skala_procent);
+    const int zegar_wys = PASEK_WYS;
+    const int zegar_x = screen_w - zegar_szer;
+    const int zegar_y = screen_h - zegar_wys;
+    if (zegar_x >= 0 && zegar_y >= 0) {
+        gui_rysuj_prostokat(zegar_x, zegar_y, zegar_szer, zegar_wys, podniesiony);
+        gui_rysuj_prostokat(zegar_x, zegar_y, 1, zegar_wys, ramka_paska);
+        gui_rysuj_prostokat(zegar_x, zegar_y, zegar_szer, 1, ramka_paska);
+        if (ostatni_czas[0] != '\0') {
+            rysuj_tekst_wysrodkowany(zegar_x, zegar_y, zegar_szer, zegar_wys,
+                                     1, akcent, ostatni_czas);
+        }
     }
 }
 
@@ -2429,10 +2445,10 @@ extern "C" __attribute__((noreturn)) void _start() {
             }
         }
 
-        // Zegar jest nakladka jadra rysowana przez skladacz obrazu. Gdy czas
-        // sie zmieni, wystarczy zlozyc nowa klatke; nie trzeba ponownie
-        // rysowac wszystkich ikon i paska do warstwy pulpitu.
+        // Zegar jest rysowany bezpośrednio w RysujTaskbar(). Gdy czas
+        // się zmieni, odrysowujemy pasek zadań i odświeżamy klatkę.
         if (pobierz_i_zaktualizuj_czas()) {
+            RysujTaskbar();
             gui_odswiez();
         }
 

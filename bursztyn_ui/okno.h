@@ -212,6 +212,16 @@ public:
         }
     }
 
+    virtual void zaktualizuj_motyw() {
+        Motyw::pobierz_domyslny().zaktualizuj_z_systemu();
+        if (kontrolka_glowna_) {
+            kontrolka_glowna_->zaktualizuj_motyw();
+        }
+        brudny_obszar_klienta_ = Prostokat();
+        przelicz_uklad();
+        czy_brudne_ = true;
+    }
+
     template <typename T, typename... Args>
     T& dodaj(Args&&... args) {
         T* k = new T(args...);
@@ -500,10 +510,7 @@ public:
                 break;
             }
             case BWS_ZDARZENIE_MOTYW_ZMIENIONY: {
-                Motyw::pobierz_domyslny().zaktualizuj_z_systemu();
-                brudny_obszar_klienta_ = Prostokat();
-                przelicz_uklad();
-                czy_brudne_ = true;
+                zaktualizuj_motyw();
                 break;
             }
             case BWS_ZDARZENIE_MYSZ_RUCH: {

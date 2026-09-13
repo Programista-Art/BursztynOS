@@ -360,11 +360,10 @@ void stos_raportuj_sciezke(const char* nazwa_sciezki, int pid) {
     StosMetryki m = stos_zmierz_zuzycie(pid);
     if (m.stack_base == 0) return;
 
-    // Raportuj tylko gdy odnotowano nowy szczyt zuzycia
     if (m.max_used > g_metryki[pid].last_reported_max_used) {
         g_metryki[pid].last_reported_max_used = m.max_used;
-        stos_wymus_raport_metryk(nazwa_sciezki, pid);
     }
+    stos_wymus_raport_metryk(nazwa_sciezki, pid);
 #else
     (void)nazwa_sciezki;
     (void)pid;

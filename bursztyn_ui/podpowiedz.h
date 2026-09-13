@@ -11,12 +11,13 @@ public:
     static constexpr size_t MAKS_LINII = 16;
 
     Podpowiedz() {
-        styl_ = Motyw::pobierz_domyslny().styl_panelu;
-        styl_.normalny.tlo = Kolory::BursztynowyCiemnyTlo;
-        styl_.normalny.ramka = Kolory::AkcentZloty;
-        styl_.normalny.grubosc_ramki = 1;
-        styl_.normalny.promien_zaokraglenia = 2;
+        zaktualizuj_motyw();
         czy_moze_miec_fokus_ = false;
+    }
+
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_podpowiedzi;
+        uniewaznij();
     }
 
     void ustaw_tekst(const char* t) {
@@ -52,9 +53,9 @@ public:
 
         // Tytuł jeśli obecny
         if (tytul_[0] != '\0') {
-            ctx.rysuj_tekst(Punkt(6 * s, y), tytul_, Kolory::AkcentZloty, s);
+            ctx.rysuj_tekst(Punkt(6 * s, y), tytul_, motyw_kolor(MOTYW_KOLOR_AKCENT), s);
             y += 18 * s;
-            ctx.rysuj_linie_pozioma(4 * s, y - 2 * s, b.szerokosc - 8 * s, Kolory::RamkaDomyslna);
+            ctx.rysuj_linie_pozioma(4 * s, y - 2 * s, b.szerokosc - 8 * s, motyw_kolor(MOTYW_KOLOR_RAMKA));
         }
 
         // Linie tekstu
@@ -67,7 +68,7 @@ public:
             }
             linia_buf[len] = '\0';
 
-            ctx.rysuj_tekst(Punkt(6 * s, y), linia_buf, Kolory::TekstBialy, s);
+            ctx.rysuj_tekst(Punkt(6 * s, y), linia_buf, motyw_kolor(MOTYW_KOLOR_TEKST), s);
             y += 16 * s;
         }
     }

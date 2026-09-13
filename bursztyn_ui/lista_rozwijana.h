@@ -77,6 +77,13 @@ public:
         dodaj_kontrolke(edycja_);
     }
 
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
+        popup_.lista().zaktualizuj_motyw();
+        if (edycja_) edycja_->zaktualizuj_motyw();
+        uniewaznij();
+    }
+
     bool dodaj_element(const char* tekst, uint64_t znacznik = 0) {
         return popup_.lista().dodaj_element(tekst, znacznik);
     }
@@ -173,13 +180,15 @@ public:
         SkalaUI s = skala_dpi_;
         int bw = 28 * s;
         Prostokat przycisk(obszar_.szerokosc - bw, s, bw - s, obszar_.wysokosc - 2 * s);
-        ctx.rysuj_prostokat(przycisk, czy_rozwinieta() ? Kolory::AkcentWcisniety
-                                                       : Kolory::PowierzchniaAlternatywna);
-        ctx.rysuj_ramke(przycisk, Kolory::RamkaDomyslna, s);
+        ctx.rysuj_prostokat(przycisk, czy_rozwinieta() ? motyw_kolor(MOTYW_KOLOR_AKCENT_AKTYWNY)
+                                                       : motyw_kolor(MOTYW_KOLOR_PANEL));
+        ctx.rysuj_ramke(przycisk, motyw_kolor(MOTYW_KOLOR_RAMKA), s);
         int cx = przycisk.x + przycisk.szerokosc / 2;
         int cy = przycisk.y + przycisk.wysokosc / 2;
+        uint32_t arrow_col = czy_rozwinieta() ? motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU)
+                                              : (czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_TEKST) : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY));
         for (int i = 0; i < 4 * s; ++i)
-            ctx.rysuj_linie_pozioma(cx - i, cy - 2 * s + i, 2 * i + 1, Kolory::TekstBialy);
+            ctx.rysuj_linie_pozioma(cx - i, cy - 2 * s + i, 2 * i + 1, arrow_col);
         if (!edytowalna_) {
             const char* t = wybrany_tekst();
             ctx.dodaj_przyciecie(Prostokat(6 * s, 2 * s,
@@ -187,7 +196,7 @@ public:
                                            obszar_.wysokosc - 4 * s));
             ctx.rysuj_tekst(Punkt(6 * s,
                 (obszar_.wysokosc - CzcionkaUI::pobierz_wysokosc(s)) / 2),
-                t[0] ? t : "Wybierz...", t[0] ? st.tekst : Kolory::TekstZastepczy, s);
+                t[0] ? t : "Wybierz...", t[0] ? st.tekst : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY), s);
             ctx.zdejmij_przyciecie();
         }
     }

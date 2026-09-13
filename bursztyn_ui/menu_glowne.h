@@ -7,12 +7,19 @@ namespace BursztynUI {
 class MenuGlowne : public Kontrolka, private ObslugaWidokuMenu {
 public:
     MenuGlowne() {
-        styl_ = Motyw::pobierz_domyslny().styl_panelu;
-        styl_.normalny.grubosc_ramki = 0;
-        styl_.normalny.ramka = 0;
+        zaktualizuj_motyw();
         czy_moze_miec_fokus_ = true;
         for (int i = 0; i < ZarzadcaPopupow::MAKS_GLEBOKOSC; ++i)
             widoki_[i].ustaw(nullptr, this);
+    }
+
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_panelu;
+        styl_.normalny.grubosc_ramki = 0;
+        styl_.normalny.ramka = 0;
+        for (int i = 0; i < ZarzadcaPopupow::MAKS_GLEBOKOSC; ++i)
+            widoki_[i].zaktualizuj_motyw();
+        uniewaznij();
     }
     ~MenuGlowne() override {
         if (widoki_[0].zarzadca())
@@ -34,11 +41,11 @@ public:
             ElementMenu* e = menu_.element(i); if (!e || !e->czy_widoczny()) continue;
             Prostokat r = prostokat_glowny(i);
             if (i == aktywny_glowny_ && (czy_ma_fokus_ || czy_otwarte()))
-                ctx.rysuj_prostokat(r, Kolory::PowierzchniaNajechana);
+                ctx.rysuj_prostokat(r, motyw_kolor(MOTYW_KOLOR_PODNIESIONY));
             SkalaUI s = skala_dpi_;
             ctx.rysuj_tekst(Punkt(r.x + 10 * s,
                 r.y + (r.wysokosc - CzcionkaUI::pobierz_wysokosc(s)) / 2),
-                e->tekst(), e->czy_wlaczony() ? Kolory::TekstBialy : Kolory::WylaczonyTekst, s);
+                e->tekst(), e->czy_wlaczony() ? motyw_kolor(MOTYW_KOLOR_TEKST) : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY), s);
         }
     }
     void obsluz_ruch_myszy(ZdarzenieMyszki& e) override {

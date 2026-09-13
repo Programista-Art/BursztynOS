@@ -104,12 +104,17 @@ public:
     static constexpr size_t MAKS_ELEMENTOW = 32;
 
     PasekNarzedzi() {
-        styl_ = Motyw::pobierz_domyslny().styl_panelu;
-        styl_.normalny.tlo = Kolory::PowierzchniaAlternatywna;
-        styl_.normalny.ramka = Kolory::RamkaDomyslna;
-        styl_.normalny.grubosc_ramki = 1;
+        zaktualizuj_motyw();
         czy_moze_miec_fokus_ = false;
         preferowany_rozmiar_ = Rozmiar(300, 32);
+    }
+
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_panelu;
+        styl_.normalny.tlo = motyw_kolor(MOTYW_KOLOR_PANEL);
+        styl_.normalny.ramka = motyw_kolor(MOTYW_KOLOR_RAMKA);
+        styl_.normalny.grubosc_ramki = 1;
+        uniewaznij();
     }
 
     ElementPaskaNarzedzi& dodaj_przycisk(const char* tekst, uint32_t ikona = 0,
@@ -287,7 +292,7 @@ public:
 
             if (el.typ() == TypElementuPaskaNarzedzi::Separator) {
                 int cx = r.x + r.szerokosc / 2;
-                ctx.rysuj_linie_pionowa(cx, r.y + 4, r.wysokosc - 8, Kolory::RamkaDomyslna);
+                ctx.rysuj_linie_pionowa(cx, r.y + 4, r.wysokosc - 8, motyw_kolor(MOTYW_KOLOR_RAMKA));
             } else if (el.typ() == TypElementuPaskaNarzedzi::KontrolkaWlasna) {
                 // Kontrolka rysuje się sama
             } else {
@@ -296,12 +301,12 @@ public:
                 bool najechany = el.najechany_;
                 bool wlaczony = el.czy_wlaczony();
 
-                uint32_t tlo = (przelaczony || aktywne_wcisniecie) ? Kolory::AkcentWcisniety :
-                               (najechany ? Kolory::PowierzchniaNajechana : 0);
-                uint32_t ramka = najechany ? Kolory::RamkaNajechana :
-                                 (przelaczony ? Kolory::RamkaFokus : 0);
-                uint32_t tekst_k = !wlaczony ? Kolory::WylaczonyTekst :
-                                   ((przelaczony || aktywne_wcisniecie) ? Kolory::TekstCiemny : Kolory::TekstBialy);
+                uint32_t tlo = (przelaczony || aktywne_wcisniecie) ? motyw_kolor(MOTYW_KOLOR_AKCENT_AKTYWNY) :
+                               (najechany ? motyw_kolor(MOTYW_KOLOR_PODNIESIONY) : 0);
+                uint32_t ramka = najechany ? motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY) :
+                                 (przelaczony ? motyw_kolor(MOTYW_KOLOR_AKCENT) : 0);
+                uint32_t tekst_k = !wlaczony ? motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY) :
+                                   ((przelaczony || aktywne_wcisniecie) ? motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU) : motyw_kolor(MOTYW_KOLOR_TEKST));
 
                 if (tlo != 0) ctx.rysuj_prostokat(r, tlo);
                 if (ramka != 0) ctx.rysuj_ramke(r, ramka, 1);
@@ -311,10 +316,10 @@ public:
         }
 
         if (czy_jest_nadmiar_) {
-            uint32_t bg_ov = najechany_nadmiar_ ? Kolory::PowierzchniaNajechana : 0;
+            uint32_t bg_ov = najechany_nadmiar_ ? motyw_kolor(MOTYW_KOLOR_PODNIESIONY) : 0;
             if (bg_ov != 0) ctx.rysuj_prostokat(przycisk_nadmiaru_, bg_ov);
-            ctx.rysuj_ramke(przycisk_nadmiaru_, Kolory::RamkaDomyslna, 1);
-            ctx.rysuj_tekst_wysrodkowany(przycisk_nadmiaru_, ">>", Kolory::TekstBialy, skala_dpi_);
+            ctx.rysuj_ramke(przycisk_nadmiaru_, motyw_kolor(MOTYW_KOLOR_RAMKA), 1);
+            ctx.rysuj_tekst_wysrodkowany(przycisk_nadmiaru_, ">>", motyw_kolor(MOTYW_KOLOR_TEKST), skala_dpi_);
         }
     }
 

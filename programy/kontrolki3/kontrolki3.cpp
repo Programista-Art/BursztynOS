@@ -92,7 +92,7 @@ void zbuduj_wyszukiwanie(Panel& p) {
     ps.ustaw_sugestie(sugestie, sizeof(sugestie) / sizeof(sugestie[0]));
     ps.przy_wybraniu([](PoleSugestii*, int, const char*, void*) { status("Wybrano sugestię"); });
     Etykieta& utf = p.dodaj<Etykieta>("UTF-8: ą ć ę ł ń ó ś ź ż   Ą Ć Ę Ł Ń Ó Ś Ź Ż");
-    utf.ustaw_kolor_tekstu(Kolory::TekstBialy);
+    utf.ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_TEKST));
 }
 
 void zbuduj_interakcje(Panel& p) {

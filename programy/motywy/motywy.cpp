@@ -82,8 +82,8 @@ static const InformacjeOMotywie DOSTEPNE_MOTYWY[] = {
 static constexpr int LICZBA_MOTYWOW = static_cast<int>(sizeof(DOSTEPNE_MOTYWY) / sizeof(DOSTEPNE_MOTYWY[0]));
 
 static void formatuj_pozostaly_czas(uint32_t sek, char* buf, size_t cap) {
-    if (!buf || cap < 40) return;
-    const char* pref = "Tryb podglądu aktywny! Pozostało: ";
+    if (!buf || cap < 48) return;
+    const char* pref = "Czy zachować ten motyw? Pozostało: ";
     size_t p = 0;
     while (pref[p] && p + 1 < cap) { buf[p] = pref[p]; ++p; }
     if (sek >= 10) {
@@ -218,20 +218,26 @@ private:
 
 class OknoMotywow : public Okno {
 public:
-    OknoMotywow() : Okno("Motywy systemowe", 640, 480) {}
+    OknoMotywow() : Okno("Motywy systemowe", 700, 520) {}
 
     void inicjalizuj() {
         Panel& korzen = dodaj<Panel>(Orientacja::Pionowa);
-        korzen.ustaw_wypelnienie(Marginesy(12, 10, 12, 8));
-        korzen.ustaw_odstep(10);
+        korzen.ustaw_wypelnienie(Marginesy(16, 14, 16, 12));
+        korzen.ustaw_odstep(12);
 
-        // 1. Nagłówek okna
-        Etykieta& naglowek = korzen.dodaj<Etykieta>("Personalizacja Wyglądu Pulpitu");
+        // 1. Dedykowany nagłówek okna z odpowiednim odstępem (breathing room)
+        Panel& panel_naglowka = korzen.dodaj<Panel>(Orientacja::Pionowa);
+        panel_naglowka.ustaw_preferowany_rozmiar(Rozmiar(-1, 46));
+        panel_naglowka.ustaw_odstep(4);
+
+        Etykieta& naglowek = panel_naglowka.dodaj<Etykieta>("Personalizacja Wyglądu Pulpitu");
         naglowek.ustaw_skale_czcionki(1);
         naglowek.ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_AKCENT));
+        naglowek_ = &naglowek;
 
-        Etykieta& podtytul = korzen.dodaj<Etykieta>("Wybierz motyw wizualny dla całego systemu operacyjnego:");
+        Etykieta& podtytul = panel_naglowka.dodaj<Etykieta>("Wybierz motyw wizualny dla całego systemu operacyjnego:");
         podtytul.ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI));
+        podtytul_ = &podtytul;
 
         // 2. Obszar główny: lewa kolumna (lista + opis + przyciski), prawa kolumna (podgląd)
         Panel& glowny = korzen.dodaj<Panel>(Orientacja::Pozioma);
@@ -239,18 +245,19 @@ public:
         glowny.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
         glowny.ustaw_odstep(14);
 
-        // Lewa kolumna: szerokość 280 px
+        // Lewa kolumna: szerokość 290 px
         Panel& lewa = glowny.dodaj<Panel>(Orientacja::Pionowa);
-        lewa.ustaw_preferowany_rozmiar(Rozmiar(280, -1));
-        lewa.ustaw_minimalny_rozmiar(Rozmiar(260, 0));
+        lewa.ustaw_preferowany_rozmiar(Rozmiar(290, -1));
+        lewa.ustaw_minimalny_rozmiar(Rozmiar(270, 0));
         lewa.ustaw_odstep(8);
 
         Etykieta& naglowek_sekcji = lewa.dodaj<Etykieta>("Wygląd systemu");
-        naglowek_sekcji.ustaw_preferowany_rozmiar(Rozmiar(280, 24));
+        naglowek_sekcji.ustaw_preferowany_rozmiar(Rozmiar(290, 22));
         naglowek_sekcji.ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_AKCENT));
+        naglowek_sekcji_ = &naglowek_sekcji;
 
         ListaWyboru& lista = lewa.dodaj<ListaWyboru>();
-        lista.ustaw_preferowany_rozmiar(Rozmiar(280, 130));
+        lista.ustaw_preferowany_rozmiar(Rozmiar(290, 130));
         for (int i = 0; i < LICZBA_MOTYWOW; ++i) {
             lista.dodaj_element(DOSTEPNE_MOTYWY[i].etykieta, static_cast<uint64_t>(i));
         }
@@ -287,18 +294,18 @@ public:
 
         // Opis wybranego motywu
         Etykieta& opis = lewa.dodaj<Etykieta>(DOSTEPNE_MOTYWY[domyslny_indeks].opis);
-        opis.ustaw_preferowany_rozmiar(Rozmiar(280, 54));
+        opis.ustaw_preferowany_rozmiar(Rozmiar(290, 56));
         opis.ustaw_zawijanie(true);
         opis.ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_TEKST));
         opis_ = &opis;
 
-        // Przyciski akcji motywu
+        // Przyciski akcji motywu (wysokość >= 36 px)
         Panel& rzad_przyciskow = lewa.dodaj<Panel>(Orientacja::Pozioma);
-        rzad_przyciskow.ustaw_preferowany_rozmiar(Rozmiar(280, 36));
+        rzad_przyciskow.ustaw_preferowany_rozmiar(Rozmiar(290, 36));
         rzad_przyciskow.ustaw_odstep(8);
 
         Przycisk& btn_podglad = rzad_przyciskow.dodaj<Przycisk>("Podgląd (15 s)");
-        btn_podglad.ustaw_preferowany_rozmiar(Rozmiar(134, 34));
+        btn_podglad.ustaw_preferowany_rozmiar(Rozmiar(136, 36));
         btn_podglad.przy_kliknieciu([](Przycisk* k, void* dane) {
             (void)k;
             auto* okno = static_cast<OknoMotywow*>(dane);
@@ -307,7 +314,7 @@ public:
         btn_podglad_ = &btn_podglad;
 
         Przycisk& btn_ustaw = rzad_przyciskow.dodaj<Przycisk>("Zastosuj");
-        btn_ustaw.ustaw_preferowany_rozmiar(Rozmiar(134, 34));
+        btn_ustaw.ustaw_preferowany_rozmiar(Rozmiar(136, 36));
         btn_ustaw.przy_kliknieciu([](Przycisk* k, void* dane) {
             (void)k;
             auto* okno = static_cast<OknoMotywow*>(dane);
@@ -320,10 +327,10 @@ public:
         podglad_karta.ustaw_okno(this);
         podglad_karta_ = &podglad_karta;
 
-        // 3. Panel transakcji podglądu (odliczanie 15 s, Zachowaj, Przywróć)
+        // 3. Panel transakcji podglądu (odliczanie 15 s, Zachowaj, Przywróć - bez ścisku)
         Panel& panel_podgladu = korzen.dodaj<Panel>(Orientacja::Pozioma);
-        panel_podgladu.ustaw_preferowany_rozmiar(Rozmiar(-1, 36));
-        panel_podgladu.ustaw_wypelnienie(Marginesy(8, 4, 8, 4));
+        panel_podgladu.ustaw_preferowany_rozmiar(Rozmiar(-1, 46));
+        panel_podgladu.ustaw_wypelnienie(Marginesy(10, 6, 10, 6));
         panel_podgladu.ustaw_odstep(10);
         panel_podgladu.ustaw_kolor_tla(motyw_kolor(MOTYW_KOLOR_PANEL));
         panel_podgladu.ustaw_kolor_ramki(motyw_kolor(MOTYW_KOLOR_AKCENT));
@@ -332,12 +339,12 @@ public:
         panel_podgladu_ = &panel_podgladu;
 
         Etykieta& etykieta_podgladu = panel_podgladu.dodaj<Etykieta>("Czy zachować ten motyw? Pozostało: 15 s");
-        etykieta_podgladu.ustaw_preferowany_rozmiar(Rozmiar(320, 26));
+        etykieta_podgladu.ustaw_preferowany_rozmiar(Rozmiar(330, 32));
         etykieta_podgladu.ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_AKCENT));
         etykieta_podgladu_ = &etykieta_podgladu;
 
         Przycisk& btn_zatwierdz = panel_podgladu.dodaj<Przycisk>("Zachowaj");
-        btn_zatwierdz.ustaw_preferowany_rozmiar(Rozmiar(110, 28));
+        btn_zatwierdz.ustaw_preferowany_rozmiar(Rozmiar(115, 34));
         btn_zatwierdz.przy_kliknieciu([](Przycisk* k, void* dane) {
             (void)k;
             auto* okno = static_cast<OknoMotywow*>(dane);
@@ -345,17 +352,17 @@ public:
         }, this);
 
         Przycisk& btn_przywroc = panel_podgladu.dodaj<Przycisk>("Przywróć");
-        btn_przywroc.ustaw_preferowany_rozmiar(Rozmiar(110, 28));
+        btn_przywroc.ustaw_preferowany_rozmiar(Rozmiar(115, 34));
         btn_przywroc.przy_kliknieciu([](Przycisk* k, void* dane) {
             (void)k;
             auto* okno = static_cast<OknoMotywow*>(dane);
             if (okno) okno->przywroc_poprzedni();
         }, this);
 
-        // 4. Pasek stanu na dole
+        // 4. Pasek stanu na dole (wysokość 26 px, zero obcinania tekstu)
         PasekStanu& sb = korzen.dodaj<PasekStanu>();
-        sb.ustaw_preferowany_rozmiar(Rozmiar(-1, 24));
-        sb.dodaj_sekcje("Gotowy", 380, RozmiarSekcjiStanu::Rozciagnij);
+        sb.ustaw_preferowany_rozmiar(Rozmiar(-1, 26));
+        sb.dodaj_sekcje("Gotowy", 420, RozmiarSekcjiStanu::Rozciagnij);
         sb.dodaj_sekcje("Bursztyn OS", 140, RozmiarSekcjiStanu::Stala);
         pasek_stanu_ = &sb;
 
@@ -466,12 +473,29 @@ public:
         }
     }
 
+    void zaktualizuj_motyw() override {
+        Okno::zaktualizuj_motyw();
+        if (naglowek_) naglowek_->ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_AKCENT));
+        if (podtytul_) podtytul_->ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI));
+        if (naglowek_sekcji_) naglowek_sekcji_->ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_AKCENT));
+        if (opis_) opis_->ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_TEKST));
+        if (panel_podgladu_) {
+            panel_podgladu_->ustaw_kolor_tla(motyw_kolor(MOTYW_KOLOR_PANEL));
+            panel_podgladu_->ustaw_kolor_ramki(motyw_kolor(MOTYW_KOLOR_AKCENT));
+        }
+        if (etykieta_podgladu_) etykieta_podgladu_->ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_AKCENT));
+        zaktualizuj_status();
+    }
+
 private:
     int wybrany_indeks_{0};
     bool podglad_aktywny_{false};
     uint64_t podglad_start_ns_{0};
     uint32_t ostatnie_pozostalo_sek_{15};
 
+    Etykieta* naglowek_{nullptr};
+    Etykieta* podtytul_{nullptr};
+    Etykieta* naglowek_sekcji_{nullptr};
     ListaWyboru* lista_{nullptr};
     Etykieta* opis_{nullptr};
     Przycisk* btn_podglad_{nullptr};
