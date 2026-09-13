@@ -27,8 +27,8 @@ extern "C" {
     struct NaglowekBur naglowek = {
         {'B', 'U', 'R', '\0'},
         (uint64_t)&_start,
-        4096, 32768, 0x1001000,
-        36864, 131072, 0x1009000
+        4096, 65536, 0x1001000,
+        69632, 131072, 0x1011000
     };
 }
 
@@ -41,11 +41,11 @@ int MENU_X = 10;
 int MENU_W = 260;
 int MENU_GORNY_MARGINES = 10;
 int MENU_ELEMENT_WYS = 25;
-constexpr int MENU_ELEMENTOW = 16;
+constexpr int MENU_ELEMENTOW = 17;
 int MENU_WYS = (10 * 2) + (MENU_ELEMENTOW * 25);
 
 // Pozycja "Gry ->" w glownym Menu Start.
-constexpr int MENU_GRY_INDEX = 13;
+constexpr int MENU_GRY_INDEX = 14;
 int MENU_GRY_W = 180;
 constexpr int MENU_GRY_ELEMENTOW = 1;
 int MENU_GRY_WYS = (10 * 2) + (MENU_GRY_ELEMENTOW * 25);
@@ -125,6 +125,8 @@ const char* const SCIEZKA_PRZEGLADARKA_OBRAZOW =
     "/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur";
 const char* const SCIEZKA_AKTUALIZACJE =
     "/programy/aktualizacje.cebula/aktualizacje.bur";
+const char* const SCIEZKA_MOTYWY =
+    "/programy/motywy.cebula/motywy.bur";
 const char* const SCIEZKA_PULPIT = "/uzytkownicy/Pulpit";
 
 // Kanoniczna tabela uruchamiania ikon wbudowanych. Obsluga klikniecia nie
@@ -141,7 +143,8 @@ enum class TypIkonyAplikacji : uint8_t {
     DemoUI,
     Kontrolki2,
     Kontrolki3,
-    Aktualizacje
+    Aktualizacje,
+    Motywy
 };
 
 struct AplikacjaPulpitu {
@@ -176,7 +179,9 @@ AplikacjaPulpitu APLIKACJE_PULPITU[] = {
     {800, 50, SCIEZKA_KONTROLKI3, "Kontrolki 3", "Kontrolki 3", nullptr,
      TypIkonyAplikacji::Kontrolki3},
     {880, 50, SCIEZKA_AKTUALIZACJE, "Aktualizacje Systemu", "Aktualizacje", nullptr,
-     TypIkonyAplikacji::Aktualizacje}
+     TypIkonyAplikacji::Aktualizacje},
+    {960, 50, SCIEZKA_MOTYWY, "Motywy", "Motywy", nullptr,
+     TypIkonyAplikacji::Motywy}
 };
 
 constexpr size_t LICZBA_APLIKACJI_PULPITU =
@@ -1320,27 +1325,37 @@ void zaktualizuj_cache_przycisku(uint32_t skala) {
         }
     }
 
+    const uint32_t c_panel = motyw_kolor(MOTYW_KOLOR_PANEL);
+    const uint32_t c_podniesiony = motyw_kolor(MOTYW_KOLOR_PODNIESIONY);
+    const uint32_t c_akcent = motyw_kolor(MOTYW_KOLOR_AKCENT);
+    const uint32_t c_akcent_aktywny = motyw_kolor(MOTYW_KOLOR_AKCENT_AKTYWNY);
+    const uint32_t c_ramka = motyw_kolor(MOTYW_KOLOR_RAMKA);
+
     for (int s = 0; s < 4; ++s) {
         uint32_t* buf = g_cached_przyciski[s];
-        for (int by = 0; by < btn_h; ++by) {
-            int ty = btn_rel_y + by;
-            int base_gray = (pasek_h > 1) ?
-                (108 - (56 * ty) / (pasek_h - 1)) : 108;
-            if (base_gray < 52) base_gray = 52;
-            if (base_gray > 108) base_gray = 108;
+        uint32_t fill_color = c_panel;
+        uint32_t border_color = c_panel;
 
+        if (s == 1) { // Hover
+            fill_color = c_podniesiony;
+            border_color = c_akcent;
+        } else if (s == 2) { // Wcisniety
+            fill_color = c_akcent_aktywny;
+            border_color = c_akcent_aktywny;
+        } else if (s == 3) { // Aktywny (menu otwarte)
+            fill_color = c_podniesiony;
+            border_color = c_akcent;
+        }
+
+        for (int by = 0; by < btn_h; ++by) {
             for (int bx = 0; bx < btn_w; ++bx) {
                 bool is_border = (bx == 0 || bx == btn_w - 1 || by == 0 || by == btn_h - 1);
-                int bg_val = base_gray;
-                if (s == 1) { // Hover
-                    bg_val = is_border ? (base_gray + 40) : (base_gray + 24);
-                } else if (s == 2) { // Wcisniety
-                    bg_val = is_border ? (base_gray - 20) : (base_gray - 30);
-                } else if (s == 3) { // Aktywny (menu otwarte)
-                    bg_val = is_border ? (base_gray + 18) : (base_gray - 16);
-                }
-                if (bg_val < 0) bg_val = 0;
-                if (bg_val > 255) bg_val = 255;
+                uint32_t bg_color = is_border ? border_color : fill_color;
+                if (s == 0 && by == 0) bg_color = c_ramka;
+
+                const uint32_t bg_r = (bg_color >> 16) & 0xFF;
+                const uint32_t bg_g = (bg_color >> 8) & 0xFF;
+                const uint32_t bg_b = bg_color & 0xFF;
 
                 uint32_t pix = 0;
                 if (scaled_logo &&
@@ -1352,9 +1367,9 @@ void zaktualizuj_cache_przycisku(uint32_t skala) {
                     uint32_t lg = (lp >> 8) & 0xFF;
                     uint32_t lb = lp & 0xFF;
 
-                    uint32_t out_r = (lr * a + (uint32_t)bg_val * (255 - a)) / 255;
-                    uint32_t out_g = (lg * a + (uint32_t)bg_val * (255 - a)) / 255;
-                    uint32_t out_b = (lb * a + (uint32_t)bg_val * (255 - a)) / 255;
+                    uint32_t out_r = (lr * a + bg_r * (255 - a)) / 255;
+                    uint32_t out_g = (lg * a + bg_g * (255 - a)) / 255;
+                    uint32_t out_b = (lb * a + bg_b * (255 - a)) / 255;
                     pix = 0xFF000000 | (out_r << 16) | (out_g << 8) | out_b;
                 } else if (!scaled_logo) {
                     // Fallback: bursztynowy symbol (diament) na srodku
@@ -1363,12 +1378,12 @@ void zaktualizuj_cache_przycisku(uint32_t skala) {
                     int r_diag = (logo_h > 4) ? (logo_h / 3) : 4;
                     int dist = (bx > cx ? bx - cx : cx - bx) + (by > cy ? by - cy : cy - by);
                     if (dist <= r_diag) {
-                        pix = (dist == r_diag) ? 0xFFFFAA00 : 0xFFE58A00;
+                        pix = (dist == r_diag) ? (0xFF000000 | c_akcent) : (0xFF000000 | c_akcent_aktywny);
                     } else {
-                        pix = 0xFF000000 | (bg_val << 16) | (bg_val << 8) | bg_val;
+                        pix = 0xFF000000 | (bg_color & 0x00FFFFFF);
                     }
                 } else {
-                    pix = 0xFF000000 | (bg_val << 16) | (bg_val << 8) | bg_val;
+                    pix = 0xFF000000 | (bg_color & 0x00FFFFFF);
                 }
                 buf[by * btn_w + bx] = pix;
             }
@@ -1398,20 +1413,26 @@ void RysujPrzyciskMenu() {
 }
 
 void RysujTaskbar() {
-    for (int y = 0; y < PASEK_WYS; ++y) {
-        const uint32_t gray = (PASEK_WYS > 1) ?
-            (108 - (56 * y) / (PASEK_WYS - 1)) : 108;
-        const uint32_t kolor = 0x00000000 | (gray << 16) | (gray << 8) | gray;
-        gui_rysuj_prostokat(0, screen_h - PASEK_WYS + y, screen_w, 1, kolor);
-    }
+    const uint32_t tlo_paska = motyw_kolor(MOTYW_KOLOR_PANEL);
+    const uint32_t ramka_paska = motyw_kolor(MOTYW_KOLOR_RAMKA);
+    const uint32_t akcent = motyw_kolor(MOTYW_KOLOR_AKCENT);
+    const uint32_t podniesiony = motyw_kolor(MOTYW_KOLOR_PODNIESIONY);
+
+    gui_rysuj_prostokat(0, screen_h - PASEK_WYS, screen_w, PASEK_WYS, tlo_paska);
+    gui_rysuj_prostokat(0, screen_h - PASEK_WYS, screen_w, 1, ramka_paska);
+
     RysujPrzyciskMenu();
     int task_x = TASK_BUTTON_X;
     for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
         const GuiOknoInfo& o = okna_taskbara[i];
         if (o.tytul[0] == '\0' || task_x + TASK_BUTTON_W > screen_w - ui_skaluj(150,ui_skala_procent))
             continue;
-        const uint32_t kolor = o.aktywne ? 0x00E58A00 :
-            (o.stan == GUI_OKNO_ZMINIMALIZOWANE ? 0x00452B00 : 0x008A5A00);
+        const uint32_t kolor = o.aktywne ? akcent :
+            (o.stan == GUI_OKNO_ZMINIMALIZOWANE ? podniesiony : ramka_paska);
+        const uint32_t tlo_okna = motyw_kolor(MOTYW_KOLOR_OKNOTLO);
+        const uint32_t jasnosc = (299U * ((tlo_okna >> 16) & 0xFF) + 587U * ((tlo_okna >> 8) & 0xFF) + 114U * (tlo_okna & 0xFF)) / 1000U;
+        const uint32_t kolor_tekst = (o.aktywne && jasnosc > 160) ? 0x00202124 : 0x00FFFFFF;
+
         gui_rysuj_prostokat(task_x, screen_h - ui_skaluj(36,ui_skala_procent),
                             TASK_BUTTON_W, SKROT_H, kolor);
         char podpis[15] = {};
@@ -1419,7 +1440,7 @@ void RysujTaskbar() {
             podpis[c] = o.tytul[c];
         rysuj_tekst_wysrodkowany(task_x, screen_h - ui_skaluj(36,ui_skala_procent),
                                  TASK_BUTTON_W, SKROT_H, 1,
-                                 0x00FFFFFF, podpis);
+                                 kolor_tekst, podpis);
         task_x += TASK_BUTTON_W + TASK_BUTTON_GAP;
     }
 }
@@ -1528,13 +1549,13 @@ void RysujMenuGry() {
     const int x = menu_gry_x();
     const int y = menu_gry_y();
 
-    gui_rysuj_prostokat(x, y, MENU_GRY_W, MENU_GRY_WYS, 0x00301500);
-    gui_rysuj_prostokat(x, y, MENU_GRY_W, 1, 0x00E58A00);
-    gui_rysuj_prostokat(x, y, 1, MENU_GRY_WYS, 0x00E58A00);
+    gui_rysuj_prostokat(x, y, MENU_GRY_W, MENU_GRY_WYS, motyw_kolor(MOTYW_KOLOR_PANEL));
+    gui_rysuj_prostokat(x, y, MENU_GRY_W, 1, motyw_kolor(MOTYW_KOLOR_AKCENT));
+    gui_rysuj_prostokat(x, y, 1, MENU_GRY_WYS, motyw_kolor(MOTYW_KOLOR_AKCENT));
     gui_rysuj_prostokat(x + MENU_GRY_W - 1, y,
-                        1, MENU_GRY_WYS, 0x00794400);
+                        1, MENU_GRY_WYS, motyw_kolor(MOTYW_KOLOR_RAMKA));
     gui_rysuj_prostokat(x, y + MENU_GRY_WYS - 1,
-                        MENU_GRY_W, 1, 0x00794400);
+                        MENU_GRY_W, 1, motyw_kolor(MOTYW_KOLOR_RAMKA));
 
     const char* gry[MENU_GRY_ELEMENTOW] = {
         "> Snake"
@@ -1544,7 +1565,7 @@ void RysujMenuGry() {
         const int item_y = y + MENU_GORNY_MARGINES +
                            i * MENU_ELEMENT_WYS;
         gui_wypisz_tekst_kolor(x + 10, item_y + 5,
-                               0x00FFFFFF, gry[i]);
+                               motyw_kolor(MOTYW_KOLOR_TEKST), gry[i]);
     }
 }
 
@@ -1635,6 +1656,15 @@ void rysuj_ikone_aplikacji(const AplikacjaPulpitu& aplikacja) {
             rysuj_fragment_ikony(x,y,18,26,12,4,0x00FFBF00);
             rysuj_fragment_ikony(x,y,21,30,6,4,0x00FFBF00);
             break;
+        case TypIkonyAplikacji::Motywy:
+            // Paleta kolorow motywu (4 probniki barwne w ramce)
+            rysuj_fragment_ikony(x,y,0,0,48,48,0x0020242A);
+            rysuj_fragment_ikony(x,y,2,2,44,44,0x00262B31);
+            rysuj_fragment_ikony(x,y,6,6,16,16,0x00F2A900);
+            rysuj_fragment_ikony(x,y,26,6,16,16,0x0035B7C8);
+            rysuj_fragment_ikony(x,y,6,26,16,16,0x0051B87A);
+            rysuj_fragment_ikony(x,y,26,26,16,16,0x00E85D5D);
+            break;
     }
 
     const uint32_t kolor_etykiety =
@@ -1672,13 +1702,13 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
     if (menu_start_otwarte) {
         const int menu_y = menu_glowne_y();
 
-        gui_rysuj_prostokat(MENU_X, menu_y, MENU_W, MENU_WYS, 0x00301500);
-        gui_rysuj_prostokat(MENU_X, menu_y, MENU_W, 1, 0x00E58A00);
-        gui_rysuj_prostokat(MENU_X, menu_y, 1, MENU_WYS, 0x00E58A00);
+        gui_rysuj_prostokat(MENU_X, menu_y, MENU_W, MENU_WYS, motyw_kolor(MOTYW_KOLOR_PANEL));
+        gui_rysuj_prostokat(MENU_X, menu_y, MENU_W, 1, motyw_kolor(MOTYW_KOLOR_AKCENT));
+        gui_rysuj_prostokat(MENU_X, menu_y, 1, MENU_WYS, motyw_kolor(MOTYW_KOLOR_AKCENT));
         gui_rysuj_prostokat(MENU_X + MENU_W - 1, menu_y,
-                            1, MENU_WYS, 0x00794400);
+                            1, MENU_WYS, motyw_kolor(MOTYW_KOLOR_RAMKA));
         gui_rysuj_prostokat(MENU_X, menu_y + MENU_WYS - 1,
-                            MENU_W, 1, 0x00794400);
+                            MENU_W, 1, motyw_kolor(MOTYW_KOLOR_RAMKA));
 
         const char* menu_elementy[MENU_ELEMENTOW] = {
             "> Powloka Bursztyna",
@@ -1694,6 +1724,7 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
             "> Tapety",
             "> Ustawienia ekranu",
             "> Aktualizacje Systemu",
+            "> Motywy Systemowe",
             "> Gry ->",
             "> Uruchom ponownie",
             "> Zamknij"
@@ -1706,11 +1737,11 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
             if (i == MENU_GRY_INDEX && menu_gry_otwarte) {
                 gui_rysuj_prostokat(MENU_X + 2, item_y,
                                     MENU_W - 4, MENU_ELEMENT_WYS,
-                                    0x00603800);
+                                    motyw_kolor(MOTYW_KOLOR_PODNIESIONY));
             }
 
             gui_wypisz_tekst_kolor(MENU_X + 10, item_y + 5,
-                                   0x00FFFFFF, menu_elementy[i]);
+                                   motyw_kolor(MOTYW_KOLOR_TEKST), menu_elementy[i]);
         }
 
         RysujMenuGry();
@@ -1969,15 +2000,18 @@ void obsluz_element_menu(int item_index) {
         case 12:
             uruchom_lub_aktywuj(SCIEZKA_AKTUALIZACJE, "Aktualizacje Systemu");
             break;
+        case 13:
+            uruchom_lub_aktywuj(SCIEZKA_MOTYWY, "Motywy");
+            break;
         case MENU_GRY_INDEX:
             menu_gry_otwarte = !menu_gry_otwarte;
             aktualizuj_overlay_menu();
             RysujPulpit(true);
             break;
-        case 14:
+        case 15:
             wykonaj_restart();
             break;
-        case 15:
+        case 16:
             wykonaj_zamkniecie();
             break;
         default:
@@ -2167,6 +2201,14 @@ extern "C" __attribute__((noreturn)) void _start() {
             if(screen_w>0&&screen_h>PASEK_WYS)
                 gui_ustaw_obszar_roboczy(0, 0, screen_w, screen_h - PASEK_WYS);
             rozmiesc_ikony_ekranu();zarejestruj_pulpit_jako_cel_drop();aktualizuj_overlay_menu();RysujPulpit(true);continue;
+        }
+        if (zdarzenie.typ == BWS_ZDARZENIE_MOTYW_ZMIENIONY) {
+            g_cached_skala = 0;
+            zaktualizuj_cache_przycisku(ui_skala_procent);
+            RysujPulpit(true);
+            RysujTaskbar();
+            gui_odswiez();
+            continue;
         }
         const uint64_t stara_sygnatura = sygnatura_okien();
         odswiez_snapshot_okien();

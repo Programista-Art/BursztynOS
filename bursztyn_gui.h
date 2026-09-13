@@ -18,6 +18,7 @@
 #include "bws_nowoczesne.h"
 #include "skladacz_obrazu.h"
 #include "legacy_ui.h"
+#include "motyw.h"
 #include <stdbool.h>
 
 
@@ -416,6 +417,21 @@ void gui_rysuj_standardowa_belke(int x, int y, int szer,
                                  const char* tytul, bool zmaksymalizowane);
 gui_akcja_belki gui_hit_test_belki(int mx, int my,
                                    int x, int y, int szer);
+
+/* =========================================================================
+ * 5.1 CENTRALNY PODSYSTEM MOTYWOW (Ring 3)
+ * ========================================================================= */
+
+const BursztynMotyw* gui_pobierz_motyw();
+uint32_t motyw_kolor(uint32_t rola);
+uint16_t motyw_promien(uint32_t element);
+uint8_t motyw_grubosc_ramki();
+uint8_t motyw_cien_okna();
+void motyw_odswiez_lokalny();
+bool motyw_polecenie_ustaw(const char* id);
+bool motyw_polecenie_podglad(const char* id);
+bool motyw_polecenie_zatwierdz();
+bool motyw_polecenie_przywroc();
 
 /* =========================================================================
  * 6. DZWIEK

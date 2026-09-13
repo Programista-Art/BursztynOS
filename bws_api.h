@@ -97,6 +97,9 @@ enum BwsNumer : uint64_t {
     BWS_OTA_STATUS = 84,
     BWS_OTA_POLECENIE = 85,
 
-    BWS_PIERWSZY_WOLNY = 86
+    BWS_MOTYW_POBIERZ = 86,
+    BWS_MOTYW_POLECENIE = 87,
+
+    BWS_PIERWSZY_WOLNY = 88
 };
 

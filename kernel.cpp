@@ -42,6 +42,7 @@ extern "C" void odblokuj_ekran();
 #include "aktualizacja.h"
 #include "wersja_systemu.h"
 #include "stos_jadra.h"
+#include "motyw.h"
 
 #ifndef BURSZTYN_DEBUG_NET_SELFTEST
 #define BURSZTYN_DEBUG_NET_SELFTEST 0
@@ -160,6 +161,9 @@ extern "C" uint8_t _binary_kontrolki3_bin_end[];
 
 extern "C" uint8_t _binary_aktualizacje_bin_start[];
 extern "C" uint8_t _binary_aktualizacje_bin_end[];
+
+extern "C" uint8_t _binary_motywy_bin_start[];
+extern "C" uint8_t _binary_motywy_bin_end[];
 
 extern "C" uint8_t _binary_przegladarka_obrazow_bin_start[];
 extern "C" uint8_t _binary_przegladarka_obrazow_bin_end[];
@@ -758,6 +762,7 @@ static const char* const KATALOGI_SYSTEMOWE[] = {
         "/sloty/a/system/jadro",
         "/sloty/a/system/biblioteki",
         "/sloty/a/system/konfig",
+        "/sloty/a/system/motywy",
         "/sloty/a/system/boot",
         "/sloty/b",
         "/sloty/b/programy",
@@ -765,9 +770,12 @@ static const char* const KATALOGI_SYSTEMOWE[] = {
         "/sloty/b/system/jadro",
         "/sloty/b/system/biblioteki",
         "/sloty/b/system/konfig",
+        "/sloty/b/system/motywy",
         "/sloty/b/system/boot",
         "/jadro",
         "/system",
+        "/system/konfig",
+        "/system/motywy",
         "/programy",
         "/programy/notatnik.cebula",
         "/programy/eksplorator.cebula",
@@ -781,6 +789,7 @@ static const char* const KATALOGI_SYSTEMOWE[] = {
         "/programy/test.cebula",
         "/programy/ekran.cebula",
         "/programy/tapety.cebula",
+        "/programy/motywy.cebula",
         "/gry",
         "/gry/snake.cebula",
         "/uslugi",
@@ -1179,6 +1188,19 @@ void instaluj_wbudowane_programy() {
         "    \"pliki_zapisz\",\n"
         "    \"system_config\",\n"
         "    \"siec\"\n"
+        "]\n";
+
+    static const char MANIFEST_MOTYWY[] =
+        "nazwa = \"Motywy Systemowe\"\n"
+        "autor = \"Programista Art\"\n"
+        "wersja = \"1.0\"\n"
+        "poziom_zaufania = 3\n"
+        "plik_startowy = \"motywy.bur\"\n"
+        "uprawnienia = [\n"
+        "    \"okna\",\n"
+        "    \"pliki_czytaj\",\n"
+        "    \"pliki_zapisz\",\n"
+        "    \"system_config\"\n"
         "]\n";
     
     /*
@@ -1635,6 +1657,19 @@ void instaluj_wbudowane_programy() {
     } else {
         wypisz_log(
             "[BSP] Aktualizacje Systemu zainstalowane jako .cebula.");
+    }
+
+    if (!instaluj_paczke(
+            "/programy/motywy.cebula/opis.aplikacji",
+            MANIFEST_MOTYWY,
+            "/programy/motywy.cebula/motywy.bur",
+            _binary_motywy_bin_start,
+            _binary_motywy_bin_end)) {
+        wypisz_log(
+            "[BSP-BLAD] Nie mozna zainstalowac Motywow Systemowych.");
+    } else {
+        wypisz_log(
+            "[BSP] Motywy Systemowe zainstalowane jako .cebula.");
     }
 
 
@@ -2266,6 +2301,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     }
     tapety_inicjalizuj(g_multiboot_info_ptr);
     ekran_inicjalizuj();
+    motyw_inicjalizuj();
 
     /* ---------------------------------------------------------------------
      * Pierwszy proces Ring 3

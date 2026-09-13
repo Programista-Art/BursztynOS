@@ -356,12 +356,25 @@ public:
             bool buforowany = bufor_regionu_ && pixels <= pojemnosc_regionu_;
             if (buforowany) ctx.ustaw_cel(bufor_regionu_, swiat);
             ctx.dodaj_przesuniecie(Punkt(x_, y_)); ctx.dodaj_przyciecie(r);
-            ctx.rysuj_prostokat(r, Kolory::BursztynowyCiemnyTlo);
+            ctx.rysuj_prostokat(r, motyw_kolor(MOTYW_KOLOR_OKNOTLO));
             if (kontrolka_glowna_) kontrolka_glowna_->rysuj(ctx, false);
             popupy_.rysuj(ctx, false);
             ctx.zdejmij_przyciecie(); ctx.zdejmij_przesuniecie(); ctx.ustaw_cel(nullptr, Prostokat());
             if (buforowany && !KontekstRysowania::g_tlum_rysowanie_globalne)
                 gui_blit(swiat.x, swiat.y, r.szerokosc, r.wysokosc, bufor_regionu_);
+        }
+
+        if (pelne && !czy_zmaksymalizowane_) {
+            int r_okna = ui_skaluj(motyw_promien(MOTYW_ROG_OKNO), skala_dpi_.procent());
+            if (r_okna > 0 && !KontekstRysowania::g_tlum_rysowanie_globalne) {
+                for (int dy = 0; dy < r_okna; ++dy) {
+                    int inset = motyw_promien_inset(r_okna, dy);
+                    if (inset > 0) {
+                        gui_rysuj_prostokat(x_, y_ + wysokosc_ - 1 - dy, inset, 1, 0x00000000);
+                        gui_rysuj_prostokat(x_ + szerokosc_ - inset, y_ + wysokosc_ - 1 - dy, inset, 1, 0x00000000);
+                    }
+                }
+            }
         }
 
         if (kontrolka_glowna_) kontrolka_glowna_->wyczysc_brudny_obszar();
@@ -481,6 +494,13 @@ public:
                     gui_ustaw_geometrie_okna(x_, y_, szerokosc_, wysokosc_,
                                              czy_zmaksymalizowane_ ? 2 : 1);
                 }
+                brudny_obszar_klienta_ = Prostokat();
+                przelicz_uklad();
+                czy_brudne_ = true;
+                break;
+            }
+            case BWS_ZDARZENIE_MOTYW_ZMIENIONY: {
+                Motyw::pobierz_domyslny().zaktualizuj_z_systemu();
                 brudny_obszar_klienta_ = Prostokat();
                 przelicz_uklad();
                 czy_brudne_ = true;

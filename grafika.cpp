@@ -15,6 +15,7 @@
 #include "bws_nowoczesne.h"
 #include "heap.h"
 #include "scheduler.h"
+#include "motyw.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -1142,15 +1143,6 @@ void PostawPiksel(int x, int y, uint32_t kolor) {
                 lokalny_x < warstwa->szerokosc &&
                 lokalny_y < warstwa->wysokosc &&
                 warstwa->bufor_pikseli) {
-
-                /*
-                 * 0x00000000 jest maska przezroczystosci.
-                 * Dla czerni ustawiamy nieuzywany w XRGB bajt 24,
-                 * dzieki czemu wizualnie nadal jest czarna.
-                 */
-                if (kolor == 0x00000000)
-                    kolor = 0x01000000;
-
                 const uint64_t indeks =
                     static_cast<uint64_t>(lokalny_y) *
                         static_cast<uint64_t>(warstwa->szerokosc) +
@@ -1324,7 +1316,7 @@ void RysujZnak(uint32_t unicode,
                 continue;
 
             const uint32_t kolor =
-                zmaluj ? kolor_tekstu : kolor_tla;
+                zmaluj ? ((kolor_tekstu & 0x00FFFFFFU) == 0 ? 0x01000000U : kolor_tekstu) : kolor_tla;
 
             for (int sy = ui_skaluj(y,procent); sy < ui_skaluj(y+1,procent); ++sy) {
                 for (int sx = ui_skaluj(x,procent); sx < ui_skaluj(x+1,procent); ++sx) {
@@ -1732,17 +1724,19 @@ void rysuj_zegar_rtc() {
     const ZegarUiGeometria g =
         zegar_ui_geometria(cur_w, cur_h, procent, tekst_szer);
 
-    for (int y = 0; y < g.wys; ++y) {
-        uint32_t gray = 108 - (56 * y) / (g.wys > 1 ? g.wys - 1 : 1);
-        uint32_t kolor = (gray << 16) | (gray << 8) | gray;
-        RysujProstokat(g.x, g.y + y, g.szer, 1, kolor);
-    }
+    const BursztynMotyw* m = motyw_pobierz_aktywny();
+    const uint32_t tlo_kolor = m ? m->panel : 0x0020242AU;
+    const uint32_t ramka_kolor = m ? m->ramka : 0x00343A42U;
+    const uint32_t tekst_kolor = m ? m->akcent : 0x00F2A900U;
+
+    RysujProstokat(g.x, g.y, g.szer, g.wys, tlo_kolor);
+    RysujProstokat(g.x, g.y, g.szer, 1, ramka_kolor);
 
     WypiszTekst(
         bufor_czasu,
         g.tekst_x,
         g.tekst_y,
-        0x00FFBF00,
+        tekst_kolor,
         g.skala_fontu);
 }
 
@@ -2003,10 +1997,18 @@ static int znajdz_warstwe_pod_punktem(int x, int y) {
     int najlepsze_z = -2147483647 - 1;
     for (int pid = 1; pid < SKLADACZ_MAKS_WARSTW; ++pid) {
         warstwa_obrazu* w = pobierz_warstwe(pid);
-        if (!w || x < w->x || y < w->y ||
+        if (!w || !w->aktywna || x < w->x || y < w->y ||
             static_cast<int64_t>(x) >= static_cast<int64_t>(w->x) + w->szerokosc ||
             static_cast<int64_t>(y) >= static_cast<int64_t>(w->y) + w->wysokosc)
             continue;
+        if (w->bufor_pikseli) {
+            const int lx = x - w->x;
+            const int ly = y - w->y;
+            const uint64_t idx = static_cast<uint64_t>(ly) * static_cast<uint64_t>(w->szerokosc) + static_cast<uint64_t>(lx);
+            if (w->bufor_pikseli[idx] == 0x00000000U) {
+                continue; // Przezroczysty piksel (np. zaokrąglony róg) - przepuść kliknięcie
+            }
+        }
         if (wynik < 0 || w->z_order > najlepsze_z ||
             (w->z_order == najlepsze_z && pid > wynik)) {
             wynik = pid;
@@ -2749,14 +2751,7 @@ extern "C" void wczytaj_tapete_z_dysku() {
     wypisz_log(
         "[GRAFIKA] Pulpit i tapeta gotowe!");
 
-    if (pid_przejmujacy_mysz == -1 && aktualny_pid == 0) {
-        OdswiezEkran();
-        PrzeniesNaEkran();
-        kursor_overlay_widoczny=false;
-        PokazKursor();
-    } else {
-        skladacz_obrazu_oznacz_dirty();
-    }
+    skladacz_obrazu_oznacz_dirty();
 }
 
 // =========================================================================

@@ -145,7 +145,12 @@ void perform(){
             fat_started=Storage::fat_install_start(layout.esp,boot_efi,boot_kernel,
                 {(const uint8_t*)config,sizeof(config)-1},&fat_state);
         }
-        if(!fat_started||!Storage::fat_install_step(&fat_state)){
+        if(!fat_started){fail(INST_IO,"ESP FAT32 / pliki rozruchowe: start nie powiódł się.");return;}
+        bool ok=true;
+        for(int b=0;b<16&&!fat_state.complete;++b){
+            if(!Storage::fat_install_step(&fat_state)){ok=false;break;}
+        }
+        if(!ok){
             fail(INST_IO,"ESP FAT32 / pliki rozruchowe: zapis lub weryfikacja nie powiodła się.");return;}
         set_progress(instalator_podpostep(12,30,fat_state.completed_units,fat_state.total_units),
                      POSTEP_ESP,fat_state.completed_units,fat_state.total_units);
@@ -156,14 +161,20 @@ void perform(){
             if(!psf_formatuj_instalacje_start(layout.bsp,&bsp_total)){fail(INST_FORMAT,"BSP2: przygotowanie formatu.");return;}
             bsp_phase=1;
         }else if(bsp_phase==1){
-            bool done=false;if(!psf_formatuj_instalacje_step(&bsp_done,&done)){fail(INST_FORMAT,"BSP2: zapis metadanych.");return;}
+            bool done=false;
+            for(int b=0;b<16&&!done;++b){
+                if(!psf_formatuj_instalacje_step(&bsp_done,&done)){fail(INST_FORMAT,"BSP2: zapis metadanych.");return;}
+            }
             if(done)bsp_phase=2;
         }else if(bsp_phase==2){
             if(!psf_znacznik_instalacji(disk_uuid,false)||!psf_weryfikuj_dysk_start(&bsp_total)){
                 fail(INST_FORMAT,"BSP2: znacznik w toku / przygotowanie odczytu kontrolnego.");return;}
             bsp_done=0;bsp_phase=3;
         }else{
-            bool done=false;if(!psf_weryfikuj_dysk_step(&bsp_done,&done)){fail(INST_FORMAT,"BSP2: odczyt kontrolny metadanych.");return;}
+            bool done=false;
+            for(int b=0;b<32&&!done;++b){
+                if(!psf_weryfikuj_dysk_step(&bsp_done,&done)){fail(INST_FORMAT,"BSP2: odczyt kontrolny metadanych.");return;}
+            }
             if(done)bsp_phase=4;
         }
         const uint32_t bsp_percent=bsp_phase<3
@@ -177,9 +188,11 @@ void perform(){
             system_started=kernel_instaluj_system_start(&system_bytes_total);
         }
         bool done=false;
-        if(!system_started||system_bytes_total>UINT32_MAX||
-           !kernel_instaluj_system_step(&system_bytes_done,&files_done,&files_total,&done)){
-            fail(INST_PLIKI,"Pliki systemowe: kopiowanie lub FLUSH nie powiodły się.");return;}
+        for(int b=0;b<4&&!done;++b){
+            if(!system_started||system_bytes_total>UINT32_MAX||
+               !kernel_instaluj_system_step(&system_bytes_done,&files_done,&files_total,&done)){
+                fail(INST_PLIKI,"Pliki systemowe: kopiowanie lub FLUSH nie powiodły się.");return;}
+        }
         set_progress(instalator_podpostep(45,75,uint32_t(system_bytes_done),uint32_t(system_bytes_total)),
                      POSTEP_SYSTEM,uint32_t(system_bytes_done),uint32_t(system_bytes_total));
         if(done){set_progress(75,POSTEP_TAPETY,files_done,files_total);stage=INST_TAPETY;}
@@ -189,9 +202,11 @@ void perform(){
             wallpapers_started=tapety_instaluj_start(mbi_saved,&wallpaper_bytes_total);
         }
         bool done=false;
-        if(!wallpapers_started||wallpaper_bytes_total>UINT32_MAX||
-           !tapety_instaluj_step(&wallpaper_bytes_done,&wallpapers_done,&wallpapers_total,&done)){
-            fail(INST_PLIKI,"Tapety: synchronizacja lub zapis nie powiodły się.");return;}
+        for(int b=0;b<4&&!done;++b){
+            if(!wallpapers_started||wallpaper_bytes_total>UINT32_MAX||
+               !tapety_instaluj_step(&wallpaper_bytes_done,&wallpapers_done,&wallpapers_total,&done)){
+                fail(INST_PLIKI,"Tapety: synchronizacja lub zapis nie powiodły się.");return;}
+        }
         set_progress(instalator_podpostep(75,92,uint32_t(wallpaper_bytes_done),uint32_t(wallpaper_bytes_total)),
                      POSTEP_TAPETY,uint32_t(wallpaper_bytes_done),uint32_t(wallpaper_bytes_total));
         if(done){set_progress(92,POSTEP_WERYFIKACJA,wallpapers_done,wallpapers_total);stage=INST_WERYFIKACJA;}
@@ -203,16 +218,25 @@ void perform(){
                 fail(INST_IO,"Weryfikacja: metadane / przygotowanie odczytu kontrolnego.");return;}
             verify_phase=1;
         }else if(verify_phase==1){
-            bool done=false;if(!psf_weryfikuj_dysk_step(&verify_meta_done,&done)){
-                fail(INST_IO,"Weryfikacja: metadane BSP2.");return;}
+            bool done=false;
+            for(int b=0;b<32&&!done;++b){
+                if(!psf_weryfikuj_dysk_step(&verify_meta_done,&done)){
+                    fail(INST_IO,"Weryfikacja: metadane BSP2.");return;}
+            }
             if(done)verify_phase=2;
         }else if(verify_phase==2){
-            bool done=false;if(!kernel_weryfikuj_system_step(&verify_system_done,&done)){
-                fail(INST_IO,"Weryfikacja: pliki systemowe.");return;}
+            bool done=false;
+            for(int b=0;b<8&&!done;++b){
+                if(!kernel_weryfikuj_system_step(&verify_system_done,&done)){
+                    fail(INST_IO,"Weryfikacja: pliki systemowe.");return;}
+            }
             if(done)verify_phase=3;
         }else{
-            bool done=false;if(!tapety_weryfikuj_step(&verify_wall_done,&done)){
-                fail(INST_IO,"Weryfikacja: tapety / CRC.");return;}
+            bool done=false;
+            for(int b=0;b<8&&!done;++b){
+                if(!tapety_weryfikuj_step(&verify_wall_done,&done)){
+                    fail(INST_IO,"Weryfikacja: tapety / CRC.");return;}
+            }
             if(done)verify_phase=4;
         }
         const uint64_t total=verify_meta_total*4096+verify_system_total+verify_wall_total;

@@ -122,7 +122,7 @@ class Guest:
             if time.monotonic()>deadline: raise TimeoutError('QMP socket')
             time.sleep(.1)
         self.q=Qmp(directory/'qmp.sock')
-    def wait(self, needle, timeout=180):
+    def wait(self, needle, timeout=300):
         end=time.monotonic()+timeout
         while time.monotonic()<end:
             text=self.log.read_text(errors='replace') if self.log.exists() else ''

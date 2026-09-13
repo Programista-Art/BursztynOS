@@ -20,6 +20,7 @@
 #include "sterowniki/czas/hpet.h"
 #include "sterowniki/siec/sockets.h"
 #include "aktualizacja.h"
+#include "motyw.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -925,6 +926,7 @@ extern "C" void bws_nowoczesne_posprzataj_proces(int pid, bool aktywny_cr3) {
 
     ekran_posprzataj_proces(pid);
     instalator_zamknij_proces(pid);
+    motyw_posprzataj_proces(pid);
 
     for (uint32_t i = 0; i < IPC_ENDPOINTOW_MAX; ++i) {
         IpcEndpoint& e = endpoints[i];
@@ -1056,6 +1058,10 @@ extern "C" uint64_t bws_nowoczesne_obsluz(
             return aktualizacja_bws_status(proces, a1);
         case BWS_OTA_POLECENIE:
             return aktualizacja_bws_polecenie(proces, static_cast<uint32_t>(a1), a2);
+        case BWS_MOTYW_POBIERZ:
+            return motyw_bws_pobierz(proces, a1);
+        case BWS_MOTYW_POLECENIE:
+            return motyw_bws_polecenie(proces, static_cast<uint32_t>(a1), a2, a3);
         default: return UINT64_MAX;
     }
 }

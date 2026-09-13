@@ -37,6 +37,15 @@ constexpr size_t ROZMIAR_STOSU_JADRA_STRONY = 4ULL;
 constexpr size_t ROZMIAR_STOSU_JADRA_STRONY = 16ULL;
 #endif
 constexpr size_t ROZMIAR_STOSU_JADRA_BAJTY = ROZMIAR_STOSU_JADRA_STRONY * ROZMIAR_STRONY_STOSU; // 64 KiB
+constexpr size_t ROZMIAR_STOSU_JADRA = ROZMIAR_STOSU_JADRA_BAJTY;
+
+#ifndef BURSZTYN_DIAG_STOS16K
+static_assert(ROZMIAR_STOSU_JADRA == 65536ULL,
+              "Produkcyjny rozmiar stosu jadra musi wynosic dokladnie 64 KiB (65536 bajtow)");
+#else
+static_assert(ROZMIAR_STOSU_JADRA == 16384ULL,
+              "Diagnostyczny rozmiar stosu jadra 16K musi wynosic dokladnie 16 KiB (16384 bajtow)");
+#endif
 constexpr size_t ROZMIAR_GUARD_PAGE_BAJTY = 4096ULL;
 constexpr size_t ROZMIAR_SLOTU_PROCESU_BAJTY = 128ULL * 1024ULL; // 128 KiB
 

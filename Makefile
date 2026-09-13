@@ -253,6 +253,10 @@ PRZEGLADARKA_LINKER := programy/przegladarka_linker.ld
 
 AKTUALIZACJE_LINKER := programy/aktualizacje/aktualizacje_linker.ld
 
+MOTYWY_LINKER := programy/motywy/motywy_linker.ld
+
+MENEDZER_OKIEN_LINKER := menedzer_okien_linker.ld
+
 # ============================================================================
 # 6. MBEDTLS
 # ============================================================================
@@ -320,6 +324,8 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	snake_blob.o \
 	przegladarka_obrazow_blob.o \
 	aktualizacje_blob.o \
+	motyw.o \
+	motywy_blob.o \
 	test_bmp_blob.o \
 	test1_bmp_blob.o \
 	logo_png_blob.o \
@@ -568,6 +574,16 @@ aktualizacje_blob.o: aktualizacje_tmp.o bursztyn_gui.o $(AKTUALIZACJE_LINKER)
 	$(OBJCOPY) -O binary aktualizacje.elf aktualizacje.bin
 	$(LD) -r -b binary aktualizacje.bin -o aktualizacje_blob.o
 
+# Motywy Systemowe
+motywy_tmp.o: programy/motywy/motywy.cpp bursztyn_gui.h motyw.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
+
+motywy_blob.o: motywy_tmp.o bursztyn_gui.o $(MOTYWY_LINKER)
+	$(LD) -T $(MOTYWY_LINKER) $(RING3_LDFLAGS) \
+		motywy_tmp.o bursztyn_gui.o -o motywy.elf
+	$(OBJCOPY) -O binary motywy.elf motywy.bin
+	$(LD) -r -b binary motywy.bin -o motywy_blob.o
+
 # REPRO (tylko diagnostyka BWS2/BWS46)
 repro_tmp.o: programy/repro/repro.cpp bursztyn_gui.h
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
@@ -585,8 +601,8 @@ repro_blob.o: repro_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
 menedzer_okien_tmp.o: menedzer_okien.cpp bursztyn_gui.h ui_skala.h pulpit_geometria.h obrazy/png_dekoder.h
 	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
 
-menedzer_okien_blob.o: menedzer_okien_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
-	$(LD) -T $(RING3_STD_LINKER) $(RING3_LDFLAGS) \
+menedzer_okien_blob.o: menedzer_okien_tmp.o bursztyn_gui.o $(MENEDZER_OKIEN_LINKER)
+	$(LD) -T $(MENEDZER_OKIEN_LINKER) $(RING3_LDFLAGS) \
 		menedzer_okien_tmp.o bursztyn_gui.o -o menedzer_okien.elf
 	$(OBJCOPY) -O binary menedzer_okien.elf menedzer_okien.bin
 	$(LD) -r -b binary menedzer_okien.bin -o menedzer_okien_blob.o
@@ -682,7 +698,21 @@ $(GRUB_CFG): $(KERNEL) $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile
 	@mkdir -p .installer-build
 	grub-mkstandalone -O x86_64-efi --locales="" --fonts="" --modules="part_gpt fat loadenv test normal multiboot2 configfile search search_fs_file all_video gfxterm" -o $@ "boot/grub/grub.cfg=$<"
 
-.PHONY: installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-aktualizacje-gui test-bur-loader test-aktualizacja-qemu test-rozruch-qemu test-ota audit-stos-jadra test-stos-jadra test-wspolbieznosc test-guard-page test-16k-bws84
+.PHONY: installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-aktualizacje-gui test-bur-loader test-aktualizacja-qemu test-rozruch-qemu test-ota audit-stos-jadra test-stos-jadra test-wspolbieznosc test-guard-page test-16k-bws84 test-motywy test-motywy-unit test-motywy-gui test-motywy-qemu
+
+test-motywy-unit:
+	@mkdir -p .motywytest
+	g++ -std=c++17 -O2 -Wall -Wextra narzedzia/test_motyw_host.cpp -o .motywytest/test_motyw_host
+	.motywytest/test_motyw_host
+
+test-motywy-gui:
+	$(PYTHON) narzedzia/test_motywy_gui.py
+
+test-motywy: test-motywy-unit test-motywy-gui
+
+test-motywy-qemu: $(CI_TEST_ISO) prepare-disk
+	$(PYTHON) narzedzia/test_motywy_qemu.py
+
 test-16k-bws84:
 	$(PYTHON) narzedzia/aktualizacje/test_16k_bws84_irq.py
 test-bur-loader:

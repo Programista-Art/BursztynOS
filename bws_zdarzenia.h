@@ -35,7 +35,8 @@ enum bws_typ_zdarzenia : uint32_t {
     BWS_ZDARZENIE_WSKAZNIK_PRECYZYJNY = 26,
     BWS_ZDARZENIE_FILE_WATCH = 27,
     BWS_ZDARZENIE_IPC_READY = 28,
-    BWS_ZDARZENIE_EKRAN = 29
+    BWS_ZDARZENIE_EKRAN = 29,
+    BWS_ZDARZENIE_MOTYW_ZMIENIONY = 30
 };
 
 enum bws_modyfikatory : uint32_t {

@@ -133,10 +133,9 @@ public:
             rysuj_prostokat(Prostokat(r.x, r.y + promien, promien, mid_h), kolor);
             rysuj_prostokat(Prostokat(r.x + r.szerokosc - promien, r.y + promien, promien, mid_h), kolor);
         }
-        // Zaokrąglone narożniki / zaokrąglone kapsułki
+        // Zaokrąglone narożniki (kolista arytmetyka calkowitoliczbowa)
         for (int dy = 0; dy < promien; ++dy) {
-            int inset = promien - 1 - dy;
-            if (inset < 0) inset = 0;
+            int inset = motyw_promien_inset(promien, dy);
             int line_w = r.szerokosc - 2 * inset;
             if (line_w > 0) {
                 // Górna linia
@@ -171,8 +170,7 @@ public:
         }
         // Zaokrąglone narożniki
         for (int dy = 0; dy < promien; ++dy) {
-            int inset = promien - 1 - dy;
-            if (inset < 0) inset = 0;
+            int inset = motyw_promien_inset(promien, dy);
             // Lewy róg (góra/dół)
             rysuj_prostokat(Prostokat(r.x + inset, r.y + dy, grubosc, 1), kolor);
             rysuj_prostokat(Prostokat(r.x + inset, r.y + r.wysokosc - 1 - dy, grubosc, 1), kolor);

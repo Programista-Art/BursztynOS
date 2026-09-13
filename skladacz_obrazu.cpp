@@ -1684,6 +1684,7 @@ void skladacz_obrazu_zloz_klatke() {
         MAKS_WARSTW
     ] = {};
 
+    int zlozone_warstwy = 0;
     for (int numer = 0;
          numer < MAKS_WARSTW;
          ++numer) {
@@ -1724,6 +1725,7 @@ void skladacz_obrazu_zloz_klatke() {
             ekran_szer,
             ekran_wys
         );
+        ++zlozone_warstwy;
     }
 
     const GuiDirtyRect caly_ekran{0, 0, ekran_szer, ekran_wys};
@@ -1750,9 +1752,11 @@ void skladacz_obrazu_zloz_klatke() {
     grafika_naloz_okno_terminala_region(0, 0, ekran_szer, ekran_wys);
 
     /*
-     * Zegar jest nakladka kernela, nie powierzchnia dowolnego procesu.
+     * Zegar jest nakladka kernela na pasek zadan - nie rysujemy go przed startem powloki GUI.
      */
-    rysuj_zegar_rtc();
+    if (zlozone_warstwy > 0) {
+        rysuj_zegar_rtc();
+    }
 
     /*
      * grafika_zakoncz_skladanie():
@@ -1869,7 +1873,7 @@ void skladacz_obrazu_obsluz_dirty() {
                 }
         }
         grafika_naloz_okno_terminala_region(r.x,r.y,r.width,r.height);
-        if(rect_przecina(r,rtc_rect))rysuj_zegar_rtc();
+        if(rect_przecina(r,rtc_rect) && layer_count > 0)rysuj_zegar_rtc();
     }
     const uint64_t compose_end=hpet_dostepny()?czas_monotoniczny_us():0;
     /* Faza B: prezentujemy dopiero gotowe wiersze, a kursor nakladamy raz,

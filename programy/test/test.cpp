@@ -250,6 +250,15 @@ static void bws_sprawdz_msg(bool warunek, const char* msg) {
     }
 }
 
+static bool bws_tekst_rowny(const char* a, const char* b) {
+    if (!a || !b) return a == b;
+    while (*a && *b) {
+        if (*a != *b) return false;
+        ++a; ++b;
+    }
+    return *a == *b;
+}
+
 static void wykonaj_testy_bws_61_83() {
     bws_log("\n=== ROZPOCZECIE TESTOW BWS 61..83 ===\n");
 
@@ -445,12 +454,108 @@ static void wykonaj_testy_bws_61_83() {
     // 8. Socket (odrzucenie braku PRAWO_SIEC w manifeście)
     bws_sprawdz(socket_create() == 0);
     bws_sprawdz(socket_close(1) == false);
-    bws_log("[TEST 8/8] Socket permission & ownership: OK\n");
+    bws_log("[TEST 8/9] Socket permission & ownership: OK\n");
+
+    // 9. Podsystem motywów BWS 86..87, accessors, transakcja podglądu i 50x stres-test przełączeń
+    {
+        bws_log("[TEST 9/9] Podsystem motywów BWS 86..87 i 50x stres-test przełączeń...\n");
+        const BursztynMotyw* m_poczatkowy = gui_pobierz_motyw();
+        bws_sprawdz(m_poczatkowy != nullptr);
+        if (m_poczatkowy) {
+            bws_sprawdz(m_poczatkowy->wersja == 2);
+            bws_sprawdz(m_poczatkowy->rozmiar_struktury == 172);
+            bws_sprawdz(bws_tekst_rowny(m_poczatkowy->id, "bursztynnocny"));
+            bws_sprawdz(m_poczatkowy->pulpit == 0x00111315U);
+            bws_sprawdz(m_poczatkowy->oknotlo == 0x00191C20U);
+            bws_sprawdz(m_poczatkowy->panel == 0x0020242AU);
+            bws_sprawdz(m_poczatkowy->podniesiony == 0x00262B31U);
+            bws_sprawdz(m_poczatkowy->ramka == 0x00343A42U);
+            bws_sprawdz(m_poczatkowy->tekst == 0x00F2F3F5U);
+            bws_sprawdz(m_poczatkowy->tekstdrugorzedny == 0x00A7ADB5U);
+            bws_sprawdz(m_poczatkowy->wylaczony == 0x006F7680U);
+            bws_sprawdz(m_poczatkowy->akcent == 0x00F2A900U);
+            bws_sprawdz(m_poczatkowy->akcentnajechany == 0x00FFBC32U);
+            bws_sprawdz(m_poczatkowy->akcentaktywny == 0x00D99100U);
+            bws_sprawdz(m_poczatkowy->blad == 0x00E85D5DU);
+            bws_sprawdz(m_poczatkowy->sukces == 0x0051B87AU);
+            bws_sprawdz(m_poczatkowy->ostrzezenie == 0x00F2A900U);
+            bws_sprawdz(m_poczatkowy->informacja == 0x0058A6E7U);
+            bws_sprawdz(m_poczatkowy->poletekstowe == 0x0015181CU);
+            bws_sprawdz(m_poczatkowy->zaznaczenie == 0x00F2A900U);
+            bws_sprawdz(m_poczatkowy->przycisk == 0x00262B31U);
+            bws_sprawdz(m_poczatkowy->przycisknajechany == 0x00343A42U);
+            bws_sprawdz(m_poczatkowy->tekstakcentu == 0x00111315U);
+        }
+        bws_sprawdz(motyw_promien(MOTYW_ROG_OKNA) == 10);
+        bws_sprawdz(motyw_promien(MOTYW_ROG_PANELU) == 8);
+        bws_sprawdz(motyw_promien(MOTYW_ROG_PRZYCISKU) == 7);
+        bws_sprawdz(motyw_promien(MOTYW_ROG_POLA) == 6);
+        bws_sprawdz(motyw_promien(MOTYW_ROG_MENU) == 8);
+        bws_sprawdz(motyw_promien(MOTYW_ROG_PODPOWIEDZI) == 6);
+        bws_sprawdz(motyw_grubosc_ramki() == 1);
+        bws_sprawdz(motyw_cien_okna() == 1);
+        bws_sprawdz(motyw_kolor(MOTYW_KOLOR_PULPIT) == 0x00111315U);
+        bws_sprawdz(motyw_kolor(MOTYW_KOLOR_AKCENT) == 0x00F2A900U);
+
+        // BWS 86: Walidacja wskaźnika użytkownika (fail-closed)
+        bws_sprawdz(bws_wywolaj(BWS_MOTYW_POBIERZ, 1, 0, 0, 0) == 0);
+        bws_sprawdz(bws_wywolaj(BWS_MOTYW_POBIERZ, 0, 0, 0, 0) == 0);
+
+        // BWS 86: Odczyt do bufora ABI v2 (172 B)
+        BursztynMotyw m_buf{};
+        bws_sprawdz(bws_wywolaj(BWS_MOTYW_POBIERZ, reinterpret_cast<uint64_t>(&m_buf), 0, 0, 0) == 1);
+        bws_sprawdz(m_buf.wersja == 2);
+        bws_sprawdz(m_buf.rozmiar_struktury == 172);
+        bws_sprawdz(m_buf.pulpit == 0x00111315U);
+        bws_sprawdz(m_buf.akcent == 0x00F2A900U);
+
+        // BWS 86: Zgodność wsteczna odczytu ABI v1 (144 B) gdy wersja == 1
+        BursztynMotywV1 v1_buf{};
+        v1_buf.wersja = 1;
+        bws_sprawdz(bws_wywolaj(BWS_MOTYW_POBIERZ, reinterpret_cast<uint64_t>(&v1_buf), 0, 0, 0) == 1);
+        bws_sprawdz(v1_buf.wersja == 1);
+        bws_sprawdz(v1_buf.pulpit == 0x00111315U);
+        bws_sprawdz(v1_buf.akcent == 0x00F2A900U);
+        bws_sprawdz(bws_tekst_rowny(v1_buf.id, "bursztynnocny"));
+
+        // BWS 87: Wymóg autoryzacji (PZB <= PZB_ZAUFANE i PRAWO_SYSTEM_CONFIG).
+        // test.bur jest zwykłym procesem Ring 3 (PZB_UZYTKOWNIK) - wszystkie operacje mutujące muszą zawieść.
+        bws_sprawdz(bws_wywolaj(BWS_MOTYW_POLECENIE, MOTYW_CMD_USTAW, reinterpret_cast<uint64_t>("grafit"), 0, 0) == 0);
+        bws_sprawdz(bws_wywolaj(BWS_MOTYW_POLECENIE, MOTYW_CMD_PODGLAD, reinterpret_cast<uint64_t>("baltyckanoc"), 0, 0) == 0);
+        bws_sprawdz(bws_wywolaj(BWS_MOTYW_POLECENIE, MOTYW_CMD_ZATWIERDZ, 0, 0, 0) == 0);
+        bws_sprawdz(bws_wywolaj(BWS_MOTYW_POLECENIE, MOTYW_CMD_PRZYWROC, 0, 0, 0) == 0);
+
+        // BWS 87: MOTYW_CMD_LISTUJ jest bezpiecznym odczytem i zwraca liczbę dostępnych motywów
+        bws_sprawdz(bws_wywolaj(BWS_MOTYW_POLECENIE, MOTYW_CMD_LISTUJ, 0, 0, 0) == 5);
+
+        // BWS 87: Odrzucenie nieprawidłowych ID (ścieżki, wielkie litery, brak walidacji motyw_waliduj_id)
+        bws_sprawdz(bws_wywolaj(BWS_MOTYW_POLECENIE, MOTYW_CMD_USTAW, reinterpret_cast<uint64_t>("../etc/passwd"), 0, 0) == 0);
+        bws_sprawdz(bws_wywolaj(BWS_MOTYW_POLECENIE, MOTYW_CMD_PODGLAD, reinterpret_cast<uint64_t>("/system/motywy/grafit.motyw"), 0, 0) == 0);
+        bws_sprawdz(bws_wywolaj(BWS_MOTYW_POLECENIE, MOTYW_CMD_USTAW, reinterpret_cast<uint64_t>("GRAFIT"), 0, 0) == 0);
+        bws_sprawdz(bws_wywolaj(BWS_MOTYW_POLECENIE, MOTYW_CMD_USTAW, reinterpret_cast<uint64_t>("motyw ze spacja"), 0, 0) == 0);
+
+        // 50-krotny stres-test odczytu motywów, accessors i weryfikacji braku wycieków
+        const uint64_t alokacje_przed_50 = gui_liczba_aktywnych_alokacji_sterty();
+        for (int i = 0; i < 50; ++i) {
+            motyw_odswiez_lokalny();
+            const BursztynMotyw* m_biezacy = gui_pobierz_motyw();
+            bws_sprawdz(m_biezacy != nullptr && bws_tekst_rowny(m_biezacy->id, "bursztynnocny"));
+            bws_sprawdz(motyw_kolor(MOTYW_KOLOR_PULPIT) == 0x00111315U);
+            bws_sprawdz(motyw_kolor(MOTYW_KOLOR_AKCENT) == 0x00F2A900U);
+            bws_sprawdz(motyw_kolor(MOTYW_KOLOR_PANEL) == 0x0020242AU);
+            bws_sprawdz(motyw_kolor(MOTYW_KOLOR_RAMKA) == 0x00343A42U);
+            bws_sprawdz(motyw_promien(MOTYW_ROG_OKNA) == 10);
+            bws_sprawdz(motyw_promien(MOTYW_ROG_PANELU) == 8);
+        }
+        const uint64_t alokacje_po_50 = gui_liczba_aktywnych_alokacji_sterty();
+        bws_sprawdz(alokacje_przed_50 == alokacje_po_50);
+        bws_log("[TEST 9/9] Podsystem motywów BWS 86..87, accessors, 50x stres-test i brak wycieków: OK\n");
+    }
 
     if (bws_test_blad == 0) {
-        bws_log("=== WSZYSTKIE TESTY BWS 61..83 ZAKONCZONE SUKCESEM (PASS) ===\n\n");
+        bws_log("=== WSZYSTKIE TESTY BWS 61..87 ZAKONCZONE SUKCESEM (PASS) ===\n\n");
     } else {
-        bws_log("=== WYKRYTO BLEDY W TESTACH BWS 61..83 (FAIL) ===\n\n");
+        bws_log("=== WYKRYTO BLEDY W TESTACH BWS 61..87 (FAIL) ===\n\n");
     }
 }
 

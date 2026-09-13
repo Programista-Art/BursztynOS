@@ -39,6 +39,10 @@ narzedzia/aktualizacje/test_gui_aktualizacje.py
 .test_run_16k3/
 .test_run_live/
 narzedzia/aktualizacje/test_16k_bws84_irq.py
+.motywytest/
+narzedzia/test_motyw_host.cpp
+narzedzia/test_motywy_gui.py
+narzedzia/test_motywy_qemu.py
 
 
 

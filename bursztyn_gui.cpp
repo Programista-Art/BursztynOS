@@ -898,7 +898,10 @@ bool gui_pobierz_zdarzenie(bws_zdarzenie* zdarzenie) {
     if (!zdarzenie) return false;
     const bool ok = bws_wywolaj(37,
         reinterpret_cast<uint64_t>(zdarzenie), 0, 0, 0) == 1ULL;
-    if (ok) legacy_przetworz_zdarzenie(zdarzenie);
+    if (ok) {
+        if (zdarzenie->typ == BWS_ZDARZENIE_MOTYW_ZMIENIONY) motyw_odswiez_lokalny();
+        legacy_przetworz_zdarzenie(zdarzenie);
+    }
     return ok;
 }
 
@@ -912,7 +915,10 @@ bool gui_czekaj_na_zdarzenie(bws_zdarzenie* zdarzenie) {
         gui_zakoncz_aplikacje();
     }
     const bool ok = res == 1ULL;
-    if (ok) legacy_przetworz_zdarzenie(zdarzenie);
+    if (ok) {
+        if (zdarzenie->typ == BWS_ZDARZENIE_MOTYW_ZMIENIONY) motyw_odswiez_lokalny();
+        legacy_przetworz_zdarzenie(zdarzenie);
+    }
     return ok;
 }
 
@@ -926,7 +932,10 @@ bool gui_czekaj_na_zdarzenie_z_timeoutem(bws_zdarzenie* zdarzenie, uint64_t time
         gui_zakoncz_aplikacje();
     }
     const bool ok = wynik == 1ULL;
-    if (ok) legacy_przetworz_zdarzenie(zdarzenie);
+    if (ok) {
+        if (zdarzenie->typ == BWS_ZDARZENIE_MOTYW_ZMIENIONY) motyw_odswiez_lokalny();
+        legacy_przetworz_zdarzenie(zdarzenie);
+    }
     return ok;
 }
 
@@ -1447,21 +1456,160 @@ bool ustawienia_sciezka(const char* app_id, const char* klucz,
     return true;
 }
 
+/* =========================================================================
+ * 5.1 IMPLEMENTACJA PODSYSTEMU MOTYWOW (Ring 3)
+ * ========================================================================= */
+
+static BursztynMotyw g_lokalny_motyw = g_domyslny_motyw_fallback;
+static bool g_motyw_zainicjalizowany = false;
+
+void motyw_odswiez_lokalny() {
+    BursztynMotyw m{};
+    if (bws_wywolaj(BWS_MOTYW_POBIERZ, reinterpret_cast<uint64_t>(&m)) == 1) {
+        g_lokalny_motyw = m;
+        g_motyw_zainicjalizowany = true;
+    }
+}
+
+const BursztynMotyw* gui_pobierz_motyw() {
+    if (!g_motyw_zainicjalizowany) {
+        motyw_odswiez_lokalny();
+    }
+    return &g_lokalny_motyw;
+}
+
+uint32_t motyw_kolor(uint32_t rola) {
+    const BursztynMotyw* m = gui_pobierz_motyw();
+    switch (rola) {
+        case MOTYW_KOLOR_PULPIT: return m->pulpit;
+        case MOTYW_KOLOR_OKNOTLO: return m->oknotlo;
+        case MOTYW_KOLOR_PANEL: return m->panel;
+        case MOTYW_KOLOR_PODNIESIONY: return m->podniesiony;
+        case MOTYW_KOLOR_RAMKA: return m->ramka;
+        case MOTYW_KOLOR_TEKST: return m->tekst;
+        case MOTYW_KOLOR_TEKST_DRUGI: return m->tekstdrugorzedny;
+        case MOTYW_KOLOR_WYLACZONY: return m->wylaczony;
+        case MOTYW_KOLOR_AKCENT: return m->akcent;
+        case MOTYW_KOLOR_AKCENT_NAJECHANY: return m->akcentnajechany;
+        case MOTYW_KOLOR_AKCENT_AKTYWNY: return m->akcentaktywny;
+        case MOTYW_KOLOR_BLAD: return m->blad;
+        case MOTYW_KOLOR_SUKCES: return m->sukces;
+        case MOTYW_KOLOR_OSTRZEZENIE: return m->ostrzezenie;
+        case MOTYW_KOLOR_INFORMACJA: return m->informacja;
+        case MOTYW_KOLOR_POLETEKSTOWE: return m->poletekstowe;
+        case MOTYW_KOLOR_ZAZNACZENIE: return m->zaznaczenie;
+        case MOTYW_KOLOR_PRZYCISK: return m->przycisk;
+        case MOTYW_KOLOR_PRZYCISK_NAJECHANY: return m->przycisknajechany;
+        case MOTYW_KOLOR_TEKST_AKCENTU: return m->tekstakcentu;
+        default: return m->tekst;
+    }
+}
+
+uint16_t motyw_promien(uint32_t element) {
+    const BursztynMotyw* m = gui_pobierz_motyw();
+    switch (element) {
+        case MOTYW_ROG_OKNO: return m->rogokna;
+        case MOTYW_ROG_PANEL: return m->rogpanelu;
+        case MOTYW_ROG_PRZYCISK: return m->rogprzycisku;
+        case MOTYW_ROG_POLE: return m->rogpola;
+        case MOTYW_ROG_MENU: return m->rogmenu;
+        case MOTYW_ROG_PODPOWIEDZ: return m->rogpodpowiedzi;
+        default: return 0;
+    }
+}
+
+uint8_t motyw_grubosc_ramki() {
+    return gui_pobierz_motyw()->gruboscramki;
+}
+
+uint8_t motyw_cien_okna() {
+    return gui_pobierz_motyw()->cienokna;
+}
+
+static uint64_t g_lokalny_podglad_token = 0;
+
+bool motyw_polecenie_ustaw(const char* id) {
+    if (!id) return false;
+    return bws_wywolaj(BWS_MOTYW_POLECENIE, MOTYW_CMD_USTAW, reinterpret_cast<uint64_t>(id)) == 1;
+}
+
+bool motyw_polecenie_podglad(const char* id) {
+    if (!id) return false;
+    uint64_t res = bws_wywolaj(BWS_MOTYW_POLECENIE, MOTYW_CMD_PODGLAD, reinterpret_cast<uint64_t>(id));
+    if (res > 0) {
+        g_lokalny_podglad_token = res;
+        return true;
+    }
+    return false;
+}
+
+bool motyw_polecenie_zatwierdz() {
+    uint64_t res = bws_wywolaj(BWS_MOTYW_POLECENIE, MOTYW_CMD_ZATWIERDZ, g_lokalny_podglad_token);
+    g_lokalny_podglad_token = 0;
+    return res == 1;
+}
+
+bool motyw_polecenie_przywroc() {
+    uint64_t res = bws_wywolaj(BWS_MOTYW_POLECENIE, MOTYW_CMD_PRZYWROC, g_lokalny_podglad_token);
+    g_lokalny_podglad_token = 0;
+    return res == 1;
+}
+
 void gui_rysuj_standardowa_belke(int x, int y, int szer,
                                  const char* tytul, bool zmaksymalizowane) {
     const uint32_t p = legacy_wlaczony ? 100U : ui_skala_procent;
     if (!tytul || szer < ui_skaluj(90,p)) return;
     if (legacy_wlaczony) (void)gui_ustaw_tytul_okna(tytul);
-    gui_rysuj_prostokat(x, y, szer, ui_skaluj(28,p), 0x00301500);
-    gui_rysuj_prostokat(x, y, szer, ui_skaluj(2,p), 0x00E58A00);
-    gui_wypisz_tekst_kolor(x + ui_skaluj(8,p), y + ui_skaluj(7,p), 0x00FFFFFF, tytul);
+
+    const uint32_t kolor_belki = motyw_kolor(MOTYW_KOLOR_PANEL);
+    const uint32_t kolor_akcent = motyw_kolor(MOTYW_KOLOR_AKCENT);
+    const uint32_t kolor_tekst = motyw_kolor(MOTYW_KOLOR_TEKST);
+    const uint32_t kolor_zamknij = motyw_kolor(MOTYW_KOLOR_BLAD);
+    const uint32_t kolor_zamknij_tekst = 0x00FFFFFF;
+
+    const uint32_t tlo_okna = motyw_kolor(MOTYW_KOLOR_OKNOTLO);
+    const uint32_t r_tlo = (tlo_okna >> 16) & 0xFF;
+    const uint32_t g_tlo = (tlo_okna >> 8) & 0xFF;
+    const uint32_t b_tlo = tlo_okna & 0xFF;
+    const uint32_t jasnosc_tla = (299U * r_tlo + 587U * g_tlo + 114U * b_tlo) / 1000U;
+    const uint32_t kolor_przycisk_tekst = (jasnosc_tla > 160) ? 0x00202124 : 0x00FFFFFF;
+
+    const int belka_h = ui_skaluj(28, p);
+    const int akcent_h = ui_skaluj(2, p);
+    int r = zmaksymalizowane ? 0 : ui_skaluj(motyw_promien(MOTYW_ROG_OKNO), p);
+    if (r > belka_h) r = belka_h;
+    if (r > szer / 2) r = szer / 2;
+
+    if (r > 0) {
+        for (int dy = 0; dy < r; ++dy) {
+            int inset = motyw_promien_inset(r, dy);
+            if (inset > 0) {
+                // 0x00000000 = przezroczysty dla kompozytora
+                gui_rysuj_prostokat(x, y + dy, inset, 1, 0x00000000);
+                gui_rysuj_prostokat(x + szer - inset, y + dy, inset, 1, 0x00000000);
+            }
+            int row_w = szer - 2 * inset;
+            if (row_w > 0) {
+                uint32_t c = (dy < akcent_h) ? kolor_akcent : kolor_belki;
+                gui_rysuj_prostokat(x + inset, y + dy, row_w, 1, c);
+            }
+        }
+        if (belka_h > r) {
+            gui_rysuj_prostokat(x, y + r, szer, belka_h - r, kolor_belki);
+        }
+    } else {
+        gui_rysuj_prostokat(x, y, szer, belka_h, kolor_belki);
+        gui_rysuj_prostokat(x, y, szer, akcent_h, kolor_akcent);
+    }
+
+    gui_wypisz_tekst_kolor(x + ui_skaluj(8,p), y + ui_skaluj(7,p), kolor_tekst, tytul);
     RysujPrzycisk(x + szer - ui_skaluj(74,p), y + ui_skaluj(4,p), ui_skaluj(20,p), ui_skaluj(20,p),
-                  0x00E58A00, 0x001A0B00, "-");
+                  kolor_akcent, kolor_przycisk_tekst, "-");
     RysujPrzycisk(x + szer - ui_skaluj(50,p), y + ui_skaluj(4,p), ui_skaluj(20,p), ui_skaluj(20,p),
-                  0x00E58A00, 0x001A0B00,
+                  kolor_akcent, kolor_przycisk_tekst,
                   zmaksymalizowane ? "v" : "^");
     RysujPrzycisk(x + szer - ui_skaluj(26,p), y + ui_skaluj(4,p), ui_skaluj(20,p), ui_skaluj(20,p),
-                  0x00AA0000, 0x00FFFFFF, "X");
+                  kolor_zamknij, kolor_zamknij_tekst, "X");
 }
 
 gui_akcja_belki gui_hit_test_belki(int mx, int my,
@@ -1469,6 +1617,16 @@ gui_akcja_belki gui_hit_test_belki(int mx, int my,
     const uint32_t p = legacy_wlaczony ? 100U : ui_skala_procent;
     if (szer < ui_skaluj(90,p) || mx < x || mx >= x + szer || my < y || my >= y + ui_skaluj(28,p))
         return GUI_BELKA_BRAK;
+
+    int r = ui_skaluj(motyw_promien(MOTYW_ROG_OKNO), p);
+    int dy = my - y;
+    if (dy >= 0 && dy < r) {
+        int inset = motyw_promien_inset(r, dy);
+        if (mx < x + inset || mx >= x + szer - inset) {
+            return GUI_BELKA_BRAK;
+        }
+    }
+
     if (mx >= x + szer - ui_skaluj(26,p)) return GUI_BELKA_ZAMKNIJ;
     if (mx >= x + szer - ui_skaluj(50,p)) return GUI_BELKA_MAKSYMALIZUJ;
     if (mx >= x + szer - ui_skaluj(74,p)) return GUI_BELKA_MINIMALIZUJ;
@@ -1601,8 +1759,26 @@ void RysujPrzycisk(int x,
     if (w <= 0 || h <= 0 || !tekst)
         return;
 
-    gui_rysuj_prostokat(
-        x, y, w, h, kolor_bg);
+    const uint32_t p = legacy_wlaczony ? 100U : ui_skala_procent;
+    int r = ui_skaluj(motyw_promien(MOTYW_ROG_PRZYCISK), p);
+    if (r > w / 2) r = w / 2;
+    if (r > h / 2) r = h / 2;
+
+    if (r <= 1) {
+        gui_rysuj_prostokat(x, y, w, h, kolor_bg);
+    } else {
+        for (int dy = 0; dy < r; ++dy) {
+            int inset = motyw_promien_inset(r, dy);
+            int row_w = w - 2 * inset;
+            if (row_w > 0) {
+                gui_rysuj_prostokat(x + inset, y + dy, row_w, 1, kolor_bg);
+                gui_rysuj_prostokat(x + inset, y + h - 1 - dy, row_w, 1, kolor_bg);
+            }
+        }
+        if (h - 2 * r > 0) {
+            gui_rysuj_prostokat(x, y + r, w, h - 2 * r, kolor_bg);
+        }
+    }
 
     rysuj_tekst_wysrodkowany(x, y, w, h, 1, kolor_txt, tekst);
 }

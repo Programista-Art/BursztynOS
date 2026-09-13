@@ -1802,6 +1802,13 @@ uint64_t bws_uruchom(
             !pzb_ma_prawa(&rodzic,PRAWO_SYSTEM_CONFIG))return 0;
         poziom_dziecka=PZB_ZAUFANE;wymagane=PRAWO_GUI|PRAWO_SYSTEM_CONFIG;
     }
+    if(rowna_sciezka(sciezka,"/programy/motywy.cebula/motywy.bur")) {
+        if(!pzb_ma_co_najmniej_poziom(&rodzic,PZB_ZAUFANE)||
+            !pzb_ma_prawa(&rodzic,PRAWO_SYSTEM_CONFIG))return 0;
+        poziom_dziecka=PZB_ZAUFANE;
+        wymagane=PRAWO_GUI|PRAWO_SYSTEM_CONFIG|PRAWO_PLIKI_CZYTAJ;
+        prawa_dziecka |= PRAWO_SYSTEM_CONFIG | PRAWO_PLIKI_CZYTAJ;
+    }
     if(rowna_sciezka(sciezka,"/programy/aktualizacje.cebula/aktualizacje.bur")) {
 #if BURSZTYN_OTA_TRACE
         SerialLog("[OTA TRACE] Launching aktualizacje app\n");
