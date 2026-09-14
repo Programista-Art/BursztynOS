@@ -64,6 +64,8 @@ public:
         ctx.rysuj_zaokraglony_prostokat(Prostokat(x, tor.y + margines, d, d),
                                        czy_wlaczona_ ? 0x00FFFFFF : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY),
                                        d / 2);
+        ctx.rysuj_zaokraglona_ramke(Prostokat(x, tor.y + margines, d, d),
+                                    motyw_kolor(MOTYW_KOLOR_RAMKA), d / 2, 1);
     }
 
     void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e) override {

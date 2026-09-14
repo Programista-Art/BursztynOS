@@ -21,6 +21,18 @@ public:
         ustaw_tekst(etykieta);
     }
 
+    void zaktualizuj_motyw() override {
+        bool wlasne_tlo = styl_.normalny.wlasne_tlo;
+        bool wlasny_tekst = styl_.normalny.wlasny_tekst;
+        bool wlasna_ramka = styl_.normalny.wlasna_ramka;
+        StylKontrolki s = Motyw::pobierz_domyslny().styl_pola_wyboru;
+        if (wlasne_tlo) { s.normalny.tlo = styl_.normalny.tlo; s.normalny.wlasne_tlo = true; }
+        if (wlasny_tekst) { s.normalny.tekst = styl_.normalny.tekst; s.normalny.wlasny_tekst = true; }
+        if (wlasna_ramka) { s.normalny.ramka = styl_.normalny.ramka; s.normalny.wlasna_ramka = true; }
+        styl_ = s;
+        Kontrolka::zaktualizuj_motyw();
+    }
+
     bool czy_zaznaczone() const { return stan_wyboru_ == StanWyboru::Zaznaczone; }
     void ustaw_zaznaczone(bool z) {
         ustaw_stan_wyboru(z ? StanWyboru::Zaznaczone : StanWyboru::Niezaznaczone);
@@ -115,7 +127,7 @@ public:
             Prostokat znacznik_r(kratka_r.x + wewn_pad, kratka_r.y + wewn_pad,
                                  kratka_r.szerokosc - 2 * wewn_pad, kratka_r.wysokosc - 2 * wewn_pad);
             if (!znacznik_r.czy_pusty()) {
-                uint32_t check_col = czy_wlaczona_ ? Kolory::PoleWyboruZaznaczenie : Kolory::WylaczonyTekst;
+                uint32_t check_col = czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_AKCENT) : motyw_kolor(MOTYW_KOLOR_WYLACZONY);
                 ctx.rysuj_prostokat(znacznik_r, check_col);
             }
         } else if (stan_wyboru_ == StanWyboru::Nieokreslone) {
@@ -124,7 +136,7 @@ public:
             Prostokat belka_r(kratka_r.x + wewn_pad, kratka_r.y + (kratka_r.wysokosc - wysokosc_belki) / 2,
                               kratka_r.szerokosc - 2 * wewn_pad, wysokosc_belki);
             if (!belka_r.czy_pusty()) {
-                uint32_t indef_col = czy_wlaczona_ ? Kolory::NieokreslonyKolor : Kolory::WylaczonyTekst;
+                uint32_t indef_col = czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_AKCENT) : motyw_kolor(MOTYW_KOLOR_WYLACZONY);
                 ctx.rysuj_prostokat(belka_r, indef_col);
             }
         }
@@ -136,7 +148,7 @@ public:
             int txt_y = pad_t + (obszar_.wysokosc - pad_v - txt_h) / 2;
             if (txt_y < pad_t) txt_y = pad_t;
 
-            uint32_t fg = czy_wlaczona_ ? s.tekst : Kolory::WylaczonyTekst;
+            uint32_t fg = czy_wlaczona_ ? s.tekst : motyw_kolor(MOTYW_KOLOR_WYLACZONY);
             ctx.rysuj_tekst(Punkt(txt_x, txt_y), tekst_, fg, skala);
         }
     }

@@ -393,7 +393,7 @@ public:
 
             const Wiersz& w = wiersze_[r];
             int cell_x = 1 - scroll_x;
-            uint32_t col_txt = sel ? motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU) : s.tekst;
+            uint32_t col_txt = sel ? motyw_kolor_tekstu_zaznaczenia() : s.tekst;
 
             for (size_t c = 0; c < liczba_kolumn_; ++c) {
                 int col_w = kolumny_[c].szerokosc * skala_dpi_;

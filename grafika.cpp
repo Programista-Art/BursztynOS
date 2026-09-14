@@ -1002,6 +1002,8 @@ void grafika_odtworz_tlo_skladania() {
                 dst[x] = src[x];
         }
     } else {
+        const BursztynMotyw* m = motyw_pobierz_aktywny();
+        const uint32_t kolor_pulpitu = m ? m->pulpit : 0x001A0B00;
         for (int y = 0; y < wys; ++y) {
             uint32_t* dst =
                 reinterpret_cast<uint32_t*>(
@@ -1009,7 +1011,7 @@ void grafika_odtworz_tlo_skladania() {
                     static_cast<uint64_t>(y) * pitch);
 
             for (int x = 0; x < szer; ++x)
-                dst[x] = 0x001A0B00;
+                dst[x] = kolor_pulpitu;
         }
     }
 }
@@ -1024,6 +1026,8 @@ void grafika_odtworz_tlo_regionu(int x, int y, int szer, int wys) {
     if (y1 > ekran_wys) y1 = ekran_wys;
     if (x0 >= x1 || y0 >= y1) return;
     const uint32_t pitch = aktywny_ekran->PobierzPitch();
+    const BursztynMotyw* m = motyw_pobierz_aktywny();
+    const uint32_t kolor_pulpitu = m ? m->pulpit : 0x001A0B00;
     for (int py = y0; py < y1; ++py) {
         uint32_t* dst = reinterpret_cast<uint32_t*>(backbuffer +
             static_cast<uint64_t>(py) * pitch) + x0;
@@ -1032,7 +1036,7 @@ void grafika_odtworz_tlo_regionu(int x, int y, int szer, int wys) {
                 static_cast<uint64_t>(py) * ekran_szer + x0;
             for (int px = x0; px < x1; ++px) *dst++ = *src++;
         } else {
-            for (int px = x0; px < x1; ++px) *dst++ = 0x001A0B00;
+            for (int px = x0; px < x1; ++px) *dst++ = kolor_pulpitu;
         }
     }
 }

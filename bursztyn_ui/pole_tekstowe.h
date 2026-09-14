@@ -22,6 +22,18 @@ public:
         ustaw_tekst_zastepczy(tekst_zastepczy);
     }
 
+    void zaktualizuj_motyw() override {
+        bool wlasne_tlo = styl_.normalny.wlasne_tlo;
+        bool wlasny_tekst = styl_.normalny.wlasny_tekst;
+        bool wlasna_ramka = styl_.normalny.wlasna_ramka;
+        StylKontrolki s = Motyw::pobierz_domyslny().styl_pola_tekstowego;
+        if (wlasne_tlo) { s.normalny.tlo = styl_.normalny.tlo; s.normalny.wlasne_tlo = true; }
+        if (wlasny_tekst) { s.normalny.tekst = styl_.normalny.tekst; s.normalny.wlasny_tekst = true; }
+        if (wlasna_ramka) { s.normalny.ramka = styl_.normalny.ramka; s.normalny.wlasna_ramka = true; }
+        styl_ = s;
+        Kontrolka::zaktualizuj_motyw();
+    }
+
     const char* tekst() const override { return bufor_; }
     void ustaw_tekst(const char* nowy_tekst) override {
         zapisz_stan_undo();
@@ -259,7 +271,7 @@ public:
 
         if (dlugosc_ == 0) {
             if (tekst_zastepczy_[0] != '\0') {
-                uint32_t tz_kolor = czy_ma_fokus_ ? Kolory::TekstWyciszony : Kolory::TekstZastepczy;
+                uint32_t tz_kolor = czy_ma_fokus_ ? motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI) : motyw_kolor(MOTYW_KOLOR_WYLACZONY);
                 ctx.rysuj_tekst(Punkt(klient_x - przewiniecie_x_, klient_y), tekst_zastepczy_, tz_kolor, skala);
             }
         } else {
@@ -275,7 +287,7 @@ public:
 
                 // Zaznaczenie tła
                 Prostokat sel_rect(x_start, klient_y - 2 * skala, x_end - x_start, font_h + 4 * skala);
-                ctx.rysuj_zaznaczenie(sel_rect, Kolory::ZaznaczenieTlo);
+                ctx.rysuj_zaznaczenie(sel_rect, motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));
 
                 // Tekst przed zaznaczeniem
                 if (sel_od > 0) {
@@ -290,7 +302,7 @@ public:
                 size_t sel_len = sel_do - sel_od;
                 for (size_t i = 0; i < sel_len; ++i) sel_text[i] = wyswietlany[sel_od + i];
                 sel_text[sel_len] = '\0';
-                ctx.rysuj_tekst(Punkt(x_start, klient_y), sel_text, Kolory::ZaznaczenieTekst, skala);
+                ctx.rysuj_tekst(Punkt(x_start, klient_y), sel_text, motyw_kolor_tekstu_zaznaczenia(), skala);
 
                 // Tekst po zaznaczeniu
                 if (sel_do < dlugosc_) {
@@ -305,7 +317,7 @@ public:
         if (czy_ma_fokus_ && !czy_tylko_do_odczytu_) {
             int kx = klient_x - przewiniecie_x_ + szerokosc_tekstu_do(bajt_kursora_);
             Prostokat kursor_r(kx, klient_y - 1, 2 * skala, font_h + 2);
-            ctx.rysuj_prostokat(kursor_r, Kolory::AkcentFokus);
+            ctx.rysuj_prostokat(kursor_r, motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY));
         }
 
         ctx.zdejmij_przyciecie();

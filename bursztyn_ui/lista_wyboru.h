@@ -32,6 +32,21 @@ public:
         poziomy_->przy_przewijaniu(przewinieto, this);
     }
 
+    void zaktualizuj_motyw() override {
+        bool wlasne_tlo = styl_.normalny.wlasne_tlo;
+        bool wlasny_tekst = styl_.normalny.wlasny_tekst;
+        bool wlasna_ramka = styl_.normalny.wlasna_ramka;
+        StylKontrolki s = Motyw::pobierz_domyslny().styl_pola_tekstowego;
+        if (wlasne_tlo) { s.normalny.tlo = styl_.normalny.tlo; s.normalny.wlasne_tlo = true; }
+        if (wlasny_tekst) { s.normalny.tekst = styl_.normalny.tekst; s.normalny.wlasny_tekst = true; }
+        if (wlasna_ramka) { s.normalny.ramka = styl_.normalny.ramka; s.normalny.wlasna_ramka = true; }
+        styl_ = s;
+        if (pionowy_) pionowy_->zaktualizuj_motyw();
+        if (poziomy_) poziomy_->zaktualizuj_motyw();
+        uniewaznij();
+        Kontrolka::zaktualizuj_motyw();
+    }
+
     ~ListaWyboru() override {
         zwolnij_elementy();
     }
@@ -194,15 +209,15 @@ public:
                 cb_rysowanie_elementu_(this, ctx, i, r, zaz, fokus,
                                         dane_rysowania_elementu_);
             } else {
-                if (zaz) ctx.rysuj_prostokat(r, Kolory::ZaznaczenieTlo);
-                else if (fokus) ctx.rysuj_prostokat(r, Kolory::PowierzchniaNajechana);
+                if (zaz) ctx.rysuj_prostokat(r, motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));
+                else if (fokus) ctx.rysuj_prostokat(r, motyw_kolor(MOTYW_KOLOR_PRZYCISK_NAJECHANY));
                 ctx.rysuj_tekst(Punkt(r.x + 4 * skala - przes_x,
                                      r.y + (wys - CzcionkaUI::pobierz_wysokosc(skala)) / 2),
                                 elementy_[i].tekst,
-                                zaz ? Kolory::ZaznaczenieTekst
-                                    : (czy_wlaczona_ ? s.tekst : Kolory::WylaczonyTekst),
+                                zaz ? motyw_kolor_tekstu_zaznaczenia()
+                                    : (czy_wlaczona_ ? s.tekst : motyw_kolor(MOTYW_KOLOR_WYLACZONY)),
                                 skala);
-                if (fokus) ctx.rysuj_ramke(r, Kolory::AkcentFokus, skala);
+                if (fokus) ctx.rysuj_ramke(r, motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY), skala);
             }
             ++ostatnio_narysowane_;
         }

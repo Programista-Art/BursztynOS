@@ -20,6 +20,12 @@ public:
         model_.przy_zmianie_geometrii(obsluz_zmiane_geometrii_modelu, this);
     }
 
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_suwaka;
+        uniewaznij();
+        Kontrolka::zaktualizuj_motyw();
+    }
+
     ModelPrzewijania& model() { return model_; }
     const ModelPrzewijania& model() const { return model_; }
 
@@ -105,14 +111,14 @@ public:
         SkalaUI skala = skala_dpi_;
         Prostokat zewnetrzny(0, 0, obszar_.szerokosc, obszar_.wysokosc);
         ctx.rysuj_prostokat(zewnetrzny,
-                            czy_wlaczona_ ? Kolory::PowierzchniaTlo
-                                          : Kolory::WylaczonyTlo);
+                            czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_OKNOTLO)
+                                          : motyw_kolor(MOTYW_KOLOR_PANEL));
         ctx.rysuj_ramke(zewnetrzny,
-                        czy_wlaczona_ ? Kolory::RamkaDomyslna
-                                      : Kolory::WylaczonyRamka,
+                        czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_RAMKA)
+                                      : motyw_kolor(MOTYW_KOLOR_WYLACZONY),
                         skala);
-        uint32_t tor = czy_wlaczona_ ? Kolory::PowierzchniaAlternatywna
-                                     : Kolory::WylaczonyTlo;
+        uint32_t tor = czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_PANEL)
+                                     : motyw_kolor(MOTYW_KOLOR_PANEL);
         if (!g.tor.czy_pusty()) ctx.rysuj_prostokat(g.tor, tor);
 
         if (czy_pokazuje_strzalki_) {
@@ -124,28 +130,28 @@ public:
                                     czesc_wcisnieta_ == Czesc::Zwieksz);
         }
 
-        uint32_t kolor_uchwytu = czy_wlaczona_ ? Kolory::AkcentZloty
-                                               : Kolory::WylaczonyTekst;
+        uint32_t kolor_uchwytu = czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_AKCENT)
+                                               : motyw_kolor(MOTYW_KOLOR_WYLACZONY);
         if (czy_wlaczona_ && czesc_wcisnieta_ == Czesc::Uchwyt)
-            kolor_uchwytu = Kolory::AkcentWcisniety;
+            kolor_uchwytu = motyw_kolor(MOTYW_KOLOR_AKCENT_AKTYWNY);
         else if (czy_wlaczona_ && czesc_najechana_ == Czesc::Uchwyt)
-            kolor_uchwytu = Kolory::AkcentNajechany;
+            kolor_uchwytu = motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY);
         ctx.rysuj_zaokraglony_prostokat(g.uchwyt, kolor_uchwytu, 3 * skala_dpi_);
         ctx.rysuj_zaokraglona_ramke(g.uchwyt,
-                                   czy_wlaczona_ ? Kolory::AkcentRamka
-                                                 : Kolory::WylaczonyRamka,
+                                   czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_RAMKA)
+                                                 : motyw_kolor(MOTYW_KOLOR_WYLACZONY),
                                    3 * skala_dpi_, skala_dpi_);
 
         if (czy_podswietla_tor_ && czy_wlaczona_ &&
             (czesc_najechana_ == Czesc::TorPrzed ||
              czesc_najechana_ == Czesc::TorZa)) {
             Prostokat r = prostokat_czesci(czesc_najechana_, g);
-            ctx.rysuj_ramke(r, Kolory::RamkaNajechana, skala_dpi_);
+            ctx.rysuj_ramke(r, motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY), skala_dpi_);
         }
 
         if (czy_ma_fokus_ && czy_wlaczona_) {
             ctx.rysuj_ramke(zewnetrzny.zmniejszony(Marginesy(skala)),
-                            Kolory::AkcentFokus, skala);
+                            motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY), skala);
         }
     }
 
@@ -470,13 +476,13 @@ private:
     void rysuj_przycisk_strzalki(KontekstRysowania& ctx, Prostokat r,
                                   bool zmniejsz, bool hover, bool pressed) const {
         if (r.czy_pusty()) return;
-        uint32_t tlo = czy_wlaczona_ ? Kolory::PowierzchniaTlo : Kolory::WylaczonyTlo;
-        if (czy_wlaczona_ && pressed) tlo = Kolory::PowierzchniaAktywna;
-        else if (czy_wlaczona_ && hover) tlo = Kolory::PowierzchniaNajechana;
+        uint32_t tlo = czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_OKNOTLO) : motyw_kolor(MOTYW_KOLOR_PANEL);
+        if (czy_wlaczona_ && pressed) tlo = motyw_kolor(MOTYW_KOLOR_PODNIESIONY);
+        else if (czy_wlaczona_ && hover) tlo = motyw_kolor(MOTYW_KOLOR_PRZYCISK_NAJECHANY);
         ctx.rysuj_prostokat(r, tlo);
-        ctx.rysuj_ramke(r, czy_wlaczona_ ? Kolory::AkcentRamka : Kolory::WylaczonyRamka,
+        ctx.rysuj_ramke(r, czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_RAMKA) : motyw_kolor(MOTYW_KOLOR_WYLACZONY),
                         skala_dpi_);
-        uint32_t kolor = czy_wlaczona_ ? Kolory::AkcentZloty : Kolory::WylaczonyTekst;
+        uint32_t kolor = czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_AKCENT) : motyw_kolor(MOTYW_KOLOR_WYLACZONY);
         int roz = (orientacja_ == Orientacja::Pozioma ? r.wysokosc : r.szerokosc) / 4;
         if (roz < 2) roz = 2;
         int cx = r.x + r.szerokosc / 2;

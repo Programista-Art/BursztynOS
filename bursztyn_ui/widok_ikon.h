@@ -30,10 +30,7 @@ public:
     using FunkcjaWidokuIkon = void (*)(WidokIkon* nadawca, int indeks, void* dane_uzytkownika);
 
     WidokIkon() {
-        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
-        styl_.normalny.tlo = Kolory::WejscieTlo;
-        styl_.normalny.ramka = Kolory::RamkaDomyslna;
-        styl_.normalny.grubosc_ramki = 1;
+        zaktualizuj_motyw();
         wypelnienie_ = Marginesy(4, 4, 4, 4);
         czy_moze_miec_fokus_ = true;
         czy_reaguje_wizualnie_na_najechanie_ = false;
@@ -50,6 +47,15 @@ public:
             WidokIkon* w = static_cast<WidokIkon*>(dane);
             if (w) w->uniewaznij_obszar(w->prostokat_widoku());
         }, this);
+    }
+
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
+        styl_.normalny.tlo = motyw_kolor(MOTYW_KOLOR_POLETEKSTOWE);
+        styl_.normalny.ramka = motyw_kolor(MOTYW_KOLOR_RAMKA);
+        styl_.normalny.grubosc_ramki = 1;
+        if (pionowy_) pionowy_->zaktualizuj_motyw();
+        Kontrolka::zaktualizuj_motyw();
     }
 
     ~WidokIkon() override {
@@ -268,12 +274,12 @@ public:
             bool hov = (static_cast<int>(i) == najechany_indeks_ && czy_wlaczona_);
 
             if (sel) {
-                ctx.rysuj_zaokraglony_prostokat(item_rect, Kolory::ZaznaczenieTlo, 4 * skala_dpi_);
-                ctx.rysuj_zaokraglona_ramke(item_rect, Kolory::AkcentFokus,
+                ctx.rysuj_zaokraglony_prostokat(item_rect, motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE), 4 * skala_dpi_);
+                ctx.rysuj_zaokraglona_ramke(item_rect, motyw_kolor(MOTYW_KOLOR_AKCENT),
                                             4 * skala_dpi_, 1);
             } else if (hov) {
-                ctx.rysuj_zaokraglony_prostokat(item_rect, 0x003A2814, 4 * skala_dpi_);
-                ctx.rysuj_zaokraglona_ramke(item_rect, Kolory::RamkaDomyslna, 4 * skala_dpi_, 1);
+                ctx.rysuj_zaokraglony_prostokat(item_rect, motyw_kolor(MOTYW_KOLOR_PODNIESIONY), 4 * skala_dpi_);
+                ctx.rysuj_zaokraglona_ramke(item_rect, motyw_kolor(MOTYW_KOLOR_RAMKA), 4 * skala_dpi_, 1);
             }
 
             // Ikona
@@ -286,7 +292,7 @@ public:
             // Etykieta
             int txt_y = icon_y + icon_h + 2 * skala_dpi_;
             int txt_w = item_rect.szerokosc - 4;
-            uint32_t col_txt = sel ? Kolory::ZaznaczenieTekst : s.tekst;
+            uint32_t col_txt = sel ? motyw_kolor_tekstu_zaznaczenia() : s.tekst;
 
             ctx.rysuj_tekst_obciety(Punkt(item_rect.x + 2, txt_y),
                                     elementy_[i].tekst, col_txt, txt_w, 1);

@@ -1567,12 +1567,7 @@ void gui_rysuj_standardowa_belke(int x, int y, int szer,
     const uint32_t kolor_zamknij = motyw_kolor(MOTYW_KOLOR_BLAD);
     const uint32_t kolor_zamknij_tekst = 0x00FFFFFF;
 
-    const uint32_t tlo_okna = motyw_kolor(MOTYW_KOLOR_OKNOTLO);
-    const uint32_t r_tlo = (tlo_okna >> 16) & 0xFF;
-    const uint32_t g_tlo = (tlo_okna >> 8) & 0xFF;
-    const uint32_t b_tlo = tlo_okna & 0xFF;
-    const uint32_t jasnosc_tla = (299U * r_tlo + 587U * g_tlo + 114U * b_tlo) / 1000U;
-    const uint32_t kolor_przycisk_tekst = (jasnosc_tla > 160) ? 0x00202124 : 0x00FFFFFF;
+    const uint32_t kolor_przycisk_tekst = motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU);
 
     const int belka_h = ui_skaluj(28, p);
     const int akcent_h = ui_skaluj(2, p);

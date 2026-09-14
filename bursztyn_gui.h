@@ -427,6 +427,29 @@ uint32_t motyw_kolor(uint32_t rola);
 uint16_t motyw_promien(uint32_t element);
 uint8_t motyw_grubosc_ramki();
 uint8_t motyw_cien_okna();
+
+inline uint32_t motyw_kolor_jasnosc(uint32_t c) {
+    uint32_t r = (c >> 16) & 0xFF;
+    uint32_t g = (c >> 8) & 0xFF;
+    uint32_t b = c & 0xFF;
+    return (299U * r + 587U * g + 114U * b) / 1000U;
+}
+
+inline uint32_t motyw_kolor_tekstu_na_tle(uint32_t tlo) {
+    return (motyw_kolor_jasnosc(tlo) > 130) ? motyw_kolor(MOTYW_KOLOR_TEKST) : motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU);
+}
+
+inline uint32_t motyw_kolor_tekstu_zaznaczenia() {
+    uint32_t tlo_zaz = motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE);
+    uint32_t y_tlo = motyw_kolor_jasnosc(tlo_zaz);
+    uint32_t txt_akcent = motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU);
+    uint32_t y_akcent = motyw_kolor_jasnosc(txt_akcent);
+    if (y_tlo > 128 && y_akcent > 128) {
+        return motyw_kolor(MOTYW_KOLOR_TEKST);
+    }
+    return txt_akcent;
+}
+
 void motyw_odswiez_lokalny();
 bool motyw_polecenie_ustaw(const char* id);
 bool motyw_polecenie_podglad(const char* id);

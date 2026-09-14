@@ -384,20 +384,21 @@ public:
             if (w.liczba_dzieci > 0) {
                 // Grot z geometrii jest symetryczny przy kazdej skali DPI.
                 int cy = row_y + h_wiersza / 2;
+                uint32_t col_grot = sel ? motyw_kolor_tekstu_zaznaczenia() : motyw_kolor(MOTYW_KOLOR_AKCENT);
                 if (w.rozwiniety) {
                     for (int q = 0; q < 4 * skala_dpi_; ++q)
                         ctx.rysuj_prostokat(Prostokat(tree_x + q, cy - 2 * skala_dpi_ + q,
-                                                     8 * skala_dpi_ - 2 * q, skala_dpi_), motyw_kolor(MOTYW_KOLOR_AKCENT));
+                                                     8 * skala_dpi_ - 2 * q, skala_dpi_), col_grot);
                 } else {
                     for (int q = 0; q < 4 * skala_dpi_; ++q)
                         ctx.rysuj_prostokat(Prostokat(tree_x + q, cy - 4 * skala_dpi_ + q,
-                                                     skala_dpi_, 8 * skala_dpi_ - 2 * q), motyw_kolor(MOTYW_KOLOR_AKCENT));
+                                                     skala_dpi_, 8 * skala_dpi_ - 2 * q), col_grot);
                 }
             }
             tree_x += 14 * skala_dpi_;
 
             const char* val0 = (w.liczba_komorek > 0 && w.komorki[0]) ? w.komorki[0] : "";
-            uint32_t col_txt = sel ? motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU) : s.tekst;
+            uint32_t col_txt = sel ? motyw_kolor_tekstu_zaznaczenia() : s.tekst;
             int col0_text_max_w = (1 - scroll_x + col0_w) - tree_x - 4 * skala_dpi_;
             if (col0_text_max_w > 0) {
                 ctx.rysuj_tekst_obciety(

@@ -143,14 +143,18 @@ public:
         if (pasek.czy_pusty()) return;
 
         // Tło paska
-        uint32_t tlo_paska = przeciganie_ ? 0x00E58A00 : (najechany_pasek_ ? 0x00503010 : 0x002B1D0E);
+        uint32_t tlo_paska = przeciganie_ ? motyw_kolor(MOTYW_KOLOR_AKCENT_AKTYWNY)
+                           : (najechany_pasek_ ? motyw_kolor(MOTYW_KOLOR_PODNIESIONY)
+                                              : motyw_kolor(MOTYW_KOLOR_PANEL));
         ctx.rysuj_prostokat(pasek, tlo_paska);
-        ctx.rysuj_ramke(pasek, Kolory::RamkaDomyslna);
+        ctx.rysuj_ramke(pasek, motyw_kolor(MOTYW_KOLOR_RAMKA));
 
         // Uchwyt w centrum paska (3 punkty)
         int cx = pasek.x + pasek.szerokosc / 2;
         int cy = pasek.y + pasek.wysokosc / 2;
-        uint32_t kol_uchwytu = przeciganie_ ? 0x00FFFFFF : (najechany_pasek_ ? 0x00FFD700 : 0x008A5E2A);
+        uint32_t kol_uchwytu = przeciganie_ ? motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU)
+                             : (najechany_pasek_ ? motyw_kolor(MOTYW_KOLOR_AKCENT)
+                                                : motyw_kolor(MOTYW_KOLOR_RAMKA));
 
         if (orientacja_ == Orientacja::Pozioma) {
             for (int d = -6; d <= 6; d += 6) {

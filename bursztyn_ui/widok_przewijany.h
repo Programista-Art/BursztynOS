@@ -15,10 +15,7 @@ enum class TrybPaskaPrzewijania {
 class WidokPrzewijany : public Kontrolka {
 public:
     WidokPrzewijany() {
-        styl_ = Motyw::pobierz_domyslny().styl_panelu;
-        styl_.normalny.tlo = Kolory::PowierzchniaTlo;
-        styl_.normalny.ramka = Kolory::RamkaDomyslna;
-        styl_.normalny.grubosc_ramki = 1;
+        zaktualizuj_motyw();
         czy_moze_miec_fokus_ = false;
         preferowany_rozmiar_ = Rozmiar(200, 200);
 
@@ -48,6 +45,16 @@ public:
             WidokPrzewijany* w = static_cast<WidokPrzewijany*>(dane);
             if (w) w->zaktualizuj_pozycje_zawartosci();
         }, this);
+    }
+
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_panelu;
+        styl_.normalny.tlo = motyw_kolor(MOTYW_KOLOR_OKNOTLO);
+        styl_.normalny.ramka = motyw_kolor(MOTYW_KOLOR_RAMKA);
+        styl_.normalny.grubosc_ramki = 1;
+        if (pasek_pionowy_) pasek_pionowy_->zaktualizuj_motyw();
+        if (pasek_poziomy_) pasek_poziomy_->zaktualizuj_motyw();
+        Kontrolka::zaktualizuj_motyw();
     }
 
     template <typename T, typename... Args>
@@ -247,7 +254,7 @@ public:
         if (pasek_pionowy_->czy_widoczna() && pasek_poziomy_->czy_widoczna()) {
             Prostokat rog(widok_.prawy(), widok_.dolny(),
                           szerokosc_paska_, szerokosc_paska_);
-            ctx.rysuj_prostokat(rog, Kolory::PowierzchniaAlternatywna);
+            ctx.rysuj_prostokat(rog, motyw_kolor(MOTYW_KOLOR_PANEL));
         }
 
         ctx.zdejmij_przyciecie();

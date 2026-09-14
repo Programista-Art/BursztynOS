@@ -14,6 +14,18 @@ public:
         wyrownanie_pionowe_ = WyrownaniePionowe::Poczatek;
     }
 
+    void zaktualizuj_motyw() override {
+        bool wlasne_tlo = styl_.normalny.wlasne_tlo;
+        bool wlasny_tekst = styl_.normalny.wlasny_tekst;
+        bool wlasna_ramka = styl_.normalny.wlasna_ramka;
+        StylKontrolki s = Motyw::pobierz_domyslny().styl_panelu;
+        if (wlasne_tlo) { s.normalny.tlo = styl_.normalny.tlo; s.normalny.wlasne_tlo = true; }
+        if (wlasny_tekst) { s.normalny.tekst = styl_.normalny.tekst; s.normalny.wlasny_tekst = true; }
+        if (wlasna_ramka) { s.normalny.ramka = styl_.normalny.ramka; s.normalny.wlasna_ramka = true; }
+        styl_ = s;
+        Kontrolka::zaktualizuj_motyw();
+    }
+
     Orientacja orientacja() const { return orientacja_; }
     void ustaw_orientacje(Orientacja o) {
         if (orientacja_ != o) {

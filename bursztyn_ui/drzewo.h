@@ -26,10 +26,7 @@ public:
     using FunkcjaDrzewa = void (*)(Drzewo* nadawca, UchwytWezlaDrzewa wezel, void* dane_uzytkownika);
 
     Drzewo() {
-        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
-        styl_.normalny.tlo = Kolory::WejscieTlo;
-        styl_.normalny.ramka = Kolory::RamkaDomyslna;
-        styl_.normalny.grubosc_ramki = 1;
+        zaktualizuj_motyw();
         czy_moze_miec_fokus_ = true;
         preferowany_rozmiar_ = Rozmiar(220, 260);
 
@@ -42,6 +39,14 @@ public:
             Drzewo* d = static_cast<Drzewo*>(dane);
             if (d) d->uniewaznij();
         }, this);
+    }
+
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
+        styl_.normalny.tlo = motyw_kolor(MOTYW_KOLOR_POLETEKSTOWE);
+        styl_.normalny.ramka = motyw_kolor(MOTYW_KOLOR_RAMKA);
+        styl_.normalny.grubosc_ramki = 1;
+        Kontrolka::zaktualizuj_motyw();
     }
 
     UchwytWezlaDrzewa dodaj_korzen(const char* tekst, uint64_t tag = 0) {
@@ -351,13 +356,13 @@ public:
 
             if (zaznaczony) {
                 ctx.rysuj_prostokat(Prostokat(client_rect.x, y, client_rect.szerokosc, row_h),
-                                    czy_ma_fokus_ ? Kolory::ZaznaczenieTlo : Kolory::PowierzchniaAktywna);
+                                    czy_ma_fokus_ ? motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE) : motyw_kolor(MOTYW_KOLOR_PODNIESIONY));
             }
 
             int arrow_x = client_rect.x + 4 + depth * wciecie_ - offset_x_;
             int arrow_y = y + (row_h - 10) / 2;
             if (wezly_[w.indeks].liczba_dzieci > 0) {
-                uint32_t strzalka_kolor = zaznaczony ? motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU) : motyw_kolor(MOTYW_KOLOR_AKCENT);
+                uint32_t strzalka_kolor = zaznaczony ? motyw_kolor_tekstu_zaznaczenia() : motyw_kolor(MOTYW_KOLOR_AKCENT);
                 if (wezly_[w.indeks].rozwiniety) {
                     ctx.rysuj_linie_pozioma(arrow_x + 1, arrow_y + 2, 7, strzalka_kolor);
                     ctx.rysuj_linie_pozioma(arrow_x + 2, arrow_y + 3, 5, strzalka_kolor);
@@ -373,7 +378,7 @@ public:
 
             int text_x = arrow_x + 16;
             int text_y = y + (row_h - 16) / 2;
-            uint32_t text_color = zaznaczony ? motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU) : (wezly_[w.indeks].liczba_dzieci > 0 ? motyw_kolor(MOTYW_KOLOR_AKCENT) : motyw_kolor(MOTYW_KOLOR_TEKST));
+            uint32_t text_color = zaznaczony ? motyw_kolor_tekstu_zaznaczenia() : (wezly_[w.indeks].liczba_dzieci > 0 ? motyw_kolor(MOTYW_KOLOR_AKCENT) : motyw_kolor(MOTYW_KOLOR_TEKST));
             ctx.rysuj_tekst(Punkt(text_x, text_y), wezly_[w.indeks].tekst, text_color, skala_dpi_);
         }
 

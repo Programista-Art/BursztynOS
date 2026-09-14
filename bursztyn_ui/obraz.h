@@ -146,9 +146,9 @@ public:
             if (sz > 8) {
                 int cx = (obszar_.szerokosc - sz) / 2;
                 int cy = (obszar_.wysokosc - sz) / 2;
-                ctx.rysuj_zaokraglona_ramke(Prostokat(cx, cy, sz, sz), Kolory::RamkaDomyslna, 4, 1);
+                ctx.rysuj_zaokraglona_ramke(Prostokat(cx, cy, sz, sz), motyw_kolor(MOTYW_KOLOR_RAMKA), 4, 1);
                 ctx.rysuj_tekst_obciety(Punkt(cx, cy + sz / 2 - 8),
-                                        "Brak obrazu", Kolory::TekstWyciszony,
+                                        "Brak obrazu", motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI),
                                         sz, 1);
             }
             return;

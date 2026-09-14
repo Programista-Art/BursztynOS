@@ -23,11 +23,16 @@ public:
     using FunkcjaZamkniecia = void (*)(PowierzchniaPopup*, PowodZamknieciaPopup, void*);
 
     PowierzchniaPopup() {
-        styl_ = Motyw::pobierz_domyslny().styl_panelu;
-        styl_.normalny.tlo = Kolory::PowierzchniaTlo;
-        styl_.normalny.ramka = Kolory::RamkaDomyslna;
-        styl_.normalny.grubosc_ramki = 1;
+        zaktualizuj_motyw();
         czy_moze_miec_fokus_ = true;
+    }
+
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_panelu;
+        styl_.normalny.tlo = motyw_kolor(MOTYW_KOLOR_OKNOTLO);
+        styl_.normalny.ramka = motyw_kolor(MOTYW_KOLOR_RAMKA);
+        styl_.normalny.grubosc_ramki = 1;
+        Kontrolka::zaktualizuj_motyw();
     }
 
     ZarzadcaPopupow* zarzadca() const { return zarzadca_; }

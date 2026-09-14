@@ -52,12 +52,12 @@ BUR_HEADER_SIZE   = 0x1000;
 BUR_HEADER_VADDR  = 0x1000000;
 
 BUR_TEXT_OFFSET   = 0x1000;
-BUR_TEXT_SIZE     = 0xF000;
+BUR_TEXT_SIZE     = 0x30000;
 BUR_TEXT_VADDR    = 0x1001000;
 
-BUR_DATA_OFFSET   = 0x10000;
+BUR_DATA_OFFSET   = 0x31000;
 BUR_DATA_SIZE     = 0x20000;
-BUR_DATA_VADDR    = 0x1010000;
+BUR_DATA_VADDR    = 0x1031000;
 
 BUR_TEXT_END      = BUR_TEXT_VADDR + BUR_TEXT_SIZE;
 BUR_DATA_END      = BUR_DATA_VADDR + BUR_DATA_SIZE;
@@ -353,12 +353,12 @@ SECTIONS
 
     ASSERT(
         __bur_text_used_end <= BUR_TEXT_END,
-        "BURSZTYN NOTATNIK: kod + rodata przekraczaja 60 KiB segmentu TEXT"
+        "BURSZTYN NOTATNIK: kod + rodata przekraczaja segment TEXT"
     )
 
     ASSERT(
         SIZEOF(.text) == BUR_TEXT_SIZE,
-        "BURSZTYN NOTATNIK: TEXT musi miec dokladnie 0xF000 bajtow"
+        "BURSZTYN NOTATNIK: TEXT musi miec dokladnie BUR_TEXT_SIZE bajtow"
     )
 
     ASSERT(

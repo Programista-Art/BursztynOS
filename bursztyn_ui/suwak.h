@@ -18,6 +18,15 @@ public:
         wyrownanie_pionowe_ = WyrownaniePionowe::Poczatek;
     }
 
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_suwaka;
+        kolor_toru_ = motyw_kolor(MOTYW_KOLOR_PANEL);
+        kolor_wypelnienia_ = motyw_kolor(MOTYW_KOLOR_AKCENT_AKTYWNY);
+        kolor_uchwytu_ = motyw_kolor(MOTYW_KOLOR_AKCENT);
+        uniewaznij();
+        Kontrolka::zaktualizuj_motyw();
+    }
+
     void ustaw_zakres(int min, int max) {
         if (min > max) {
             int tmp = min;
@@ -175,14 +184,14 @@ public:
         int gr = skala_dpi_;
         Prostokat zewnetrzny(0, 0, obszar_.szerokosc, obszar_.wysokosc);
         ctx.rysuj_ramke(zewnetrzny,
-                        czy_wlaczona_ ? Kolory::RamkaDomyslna
-                                      : Kolory::WylaczonyRamka,
+                        czy_wlaczona_ ? motyw_kolor(MOTYW_KOLOR_RAMKA)
+                                      : motyw_kolor(MOTYW_KOLOR_WYLACZONY),
                         gr);
 
         Geometria g = oblicz_geometrie(wartosc_);
         if (!g.tor.czy_pusty()) {
-            uint32_t tor = czy_wlaczona_ ? kolor_toru_ : Kolory::WylaczonyTlo;
-            uint32_t wypelnienie = czy_wlaczona_ ? kolor_wypelnienia_ : Kolory::WylaczonyRamka;
+            uint32_t tor = czy_wlaczona_ ? kolor_toru_ : motyw_kolor(MOTYW_KOLOR_PANEL);
+            uint32_t wypelnienie = czy_wlaczona_ ? kolor_wypelnienia_ : motyw_kolor(MOTYW_KOLOR_WYLACZONY);
             ctx.rysuj_zaokraglony_prostokat(g.tor, tor, g.tor_grubosc / 2);
             if (!g.wypelnienie.czy_pusty()) {
                 ctx.rysuj_zaokraglony_prostokat(g.wypelnienie, wypelnienie,
@@ -192,11 +201,11 @@ public:
 
         uint32_t uchwyt = kolor_uchwytu_;
         if (!czy_wlaczona_) {
-            uchwyt = Kolory::WylaczonyTekst;
+            uchwyt = motyw_kolor(MOTYW_KOLOR_WYLACZONY);
         } else if (czy_wcisnieta_) {
-            uchwyt = Kolory::AkcentFokus;
+            uchwyt = motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY);
         } else if (czy_najechana_) {
-            uchwyt = Kolory::AkcentNajechany;
+            uchwyt = motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY);
         }
         ctx.rysuj_zaokraglony_prostokat(g.uchwyt, uchwyt, 3 * skala_dpi_);
         ctx.rysuj_zaokraglona_ramke(g.uchwyt, s.ramka, 3 * skala_dpi_,
@@ -204,13 +213,13 @@ public:
 
         if (czy_ma_fokus_ && czy_wlaczona_) {
             ctx.rysuj_ramke(zewnetrzny.zmniejszony(Marginesy(gr)),
-                            Kolory::AkcentFokus, gr);
+                            motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY), gr);
         }
 
         if (czy_pokazuje_wartosc_ && !g.wartosc.czy_pusty()) {
             char bufor[16];
             formatuj_liczbe(wartosc_, bufor, sizeof(bufor));
-            uint32_t tekst = czy_wlaczona_ ? s.tekst : Kolory::WylaczonyTekst;
+            uint32_t tekst = czy_wlaczona_ ? s.tekst : motyw_kolor(MOTYW_KOLOR_WYLACZONY);
             ctx.rysuj_tekst_wysrodkowany(g.wartosc, bufor, tekst, skala_dpi_);
         }
     }
@@ -567,9 +576,9 @@ private:
     int krok_{1};
     Orientacja orientacja_{Orientacja::Pozioma};
     bool czy_pokazuje_wartosc_{false};
-    uint32_t kolor_toru_{Kolory::PowierzchniaAlternatywna};
-    uint32_t kolor_wypelnienia_{Kolory::AkcentWcisniety};
-    uint32_t kolor_uchwytu_{Kolory::AkcentZloty};
+    uint32_t kolor_toru_{0};
+    uint32_t kolor_wypelnienia_{0};
+    uint32_t kolor_uchwytu_{0};
     int rozmiar_uchwytu_{18};
     bool czy_przeciagany_{false};
     bool czy_interakcja_myszy_{false};

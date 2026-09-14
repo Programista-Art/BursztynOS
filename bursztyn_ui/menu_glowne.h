@@ -40,7 +40,7 @@ public:
         for (int i = 0; i < static_cast<int>(menu_.liczba_elementow()); ++i) {
             ElementMenu* e = menu_.element(i); if (!e || !e->czy_widoczny()) continue;
             Prostokat r = prostokat_glowny(i);
-            if (i == aktywny_glowny_ && (czy_ma_fokus_ || czy_otwarte()))
+            if (i == aktywny_glowny_ && (czy_najechana_ || czy_ma_fokus_ || czy_otwarte()))
                 ctx.rysuj_prostokat(r, motyw_kolor(MOTYW_KOLOR_PODNIESIONY));
             SkalaUI s = skala_dpi_;
             ctx.rysuj_tekst(Punkt(r.x + 10 * s,
@@ -56,6 +56,14 @@ public:
             if (czy_otwarte()) otworz_glowny(i);
         }
         e.obsluzone = i >= 0;
+    }
+    void obsluz_opuszczenie_myszy() override {
+        Kontrolka::obsluz_opuszczenie_myszy();
+        if (!czy_otwarte() && aktywny_glowny_ >= 0) {
+            int stary = aktywny_glowny_;
+            aktywny_glowny_ = -1;
+            uniewaznij_obszar(prostokat_glowny(stary));
+        }
     }
     void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e) override {
         if (!e.czy_lewy_przycisk()) return;

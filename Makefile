@@ -247,6 +247,8 @@ RING3_STD_LINKER := shell_linker.ld
 
 NOTATNIK_LINKER := notatnik_linker.ld
 
+KALKULATOR_LINKER := kalkulator_linker.ld
+
 EKSPLORATOR_LINKER := programy/eksplorator/eksplorator_linker.ld
 
 PRZEGLADARKA_LINKER := programy/przegladarka_linker.ld
@@ -452,11 +454,11 @@ przegladarka_blob.o: przegladarka_tmp.o bursztyn_gui.o $(PRZEGLADARKA_LINKER)
 # 14. NOTATNIK .bur
 # ============================================================================
 
-notatnik_tmp.o: notatnik.cpp bursztyn_gui.h
-	$(CXX) $(RING3_FLAGS) -c $< -o $@
+notatnik_tmp.o: notatnik.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 notatnik_blob.o: notatnik_tmp.o bursztyn_gui.o $(NOTATNIK_LINKER)
-	$(LD) -T $(NOTATNIK_LINKER) $(RING3_LDFLAGS) \
+	$(LD) --gc-sections -T $(NOTATNIK_LINKER) $(RING3_LDFLAGS) \
 		notatnik_tmp.o bursztyn_gui.o -o notatnik.elf
 	$(OBJCOPY) -O binary notatnik.elf notatnik.bin
 	$(LD) -r -b binary notatnik.bin -o notatnik_blob.o
@@ -478,11 +480,11 @@ eksplorator_blob.o: eksplorator_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
 # 16. KALKULATOR .bur
 # ============================================================================
 
-kalkulator_tmp.o: kalkulator.cpp bursztyn_gui.h
-	$(CXX) $(RING3_FLAGS) -c $< -o $@
+kalkulator_tmp.o: kalkulator.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
-kalkulator_blob.o: kalkulator_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
-	$(LD) -T $(RING3_STD_LINKER) $(RING3_LDFLAGS) \
+kalkulator_blob.o: kalkulator_tmp.o bursztyn_gui.o $(KALKULATOR_LINKER)
+	$(LD) --gc-sections -T $(KALKULATOR_LINKER) $(RING3_LDFLAGS) \
 		kalkulator_tmp.o bursztyn_gui.o -o kalkulator.elf
 	$(OBJCOPY) -O binary kalkulator.elf kalkulator.bin
 	$(LD) -r -b binary kalkulator.bin -o kalkulator_blob.o
@@ -698,7 +700,7 @@ $(GRUB_CFG): $(KERNEL) $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile
 	@mkdir -p .installer-build
 	grub-mkstandalone -O x86_64-efi --locales="" --fonts="" --modules="part_gpt fat loadenv test normal multiboot2 configfile search search_fs_file all_video gfxterm" -o $@ "boot/grub/grub.cfg=$<"
 
-.PHONY: installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-aktualizacje-gui test-bur-loader test-aktualizacja-qemu test-rozruch-qemu test-ota audit-stos-jadra test-stos-jadra test-wspolbieznosc test-guard-page test-16k-bws84 test-motywy test-motywy-unit test-motywy-gui test-motywy-qemu
+.PHONY: installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-aktualizacje-gui test-bur-loader test-aktualizacja-qemu test-rozruch-qemu test-ota audit-stos-jadra test-stos-jadra test-wspolbieznosc test-guard-page test-16k-bws84 test-motywy test-motywy-unit test-motywy-gui test-motywy-qemu test-notatnik-gui test-kalkulator-gui
 
 test-motywy-unit:
 	@mkdir -p .motywytest
@@ -708,7 +710,13 @@ test-motywy-unit:
 test-motywy-gui:
 	$(PYTHON) narzedzia/test_motywy_gui.py
 
-test-motywy: test-motywy-unit test-motywy-gui
+test-notatnik-gui: notatnik_blob.o
+	$(PYTHON) narzedzia/test_notatnik_gui.py
+
+test-kalkulator-gui: kalkulator_blob.o
+	$(PYTHON) narzedzia/test_kalkulator_gui.py
+
+test-motywy: test-motywy-unit test-motywy-gui test-notatnik-gui test-kalkulator-gui
 
 test-motywy-qemu: $(CI_TEST_ISO) prepare-disk
 	$(PYTHON) narzedzia/test_motywy_qemu.py

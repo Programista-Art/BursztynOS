@@ -65,6 +65,12 @@ public:
         dodaj_kontrolke(obszar_stron_);
     }
 
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_panelu;
+        uniewaznij();
+        Kontrolka::zaktualizuj_motyw();
+    }
+
     int dodaj_karte(const char* tytul, Kontrolka* zawartosc = nullptr) {
         return wstaw_karte(liczba_kart_, tytul, zawartosc);
     }
@@ -369,15 +375,15 @@ public:
 
     void rysuj_siebie(KontekstRysowania& ctx) override {
         Prostokat b(0, 0, obszar_ekranu_.szerokosc, obszar_ekranu_.wysokosc);
-        uint32_t ramka = czy_ma_fokus_ ? Kolory::RamkaFokus : Kolory::RamkaDomyslna;
+        uint32_t ramka = czy_ma_fokus_ ? motyw_kolor(MOTYW_KOLOR_AKCENT) : motyw_kolor(MOTYW_KOLOR_RAMKA);
 
         // Pasek kart (tło)
         Prostokat pasek_r(0, 0, b.szerokosc, wysokosc_paska_kart_);
-        ctx.rysuj_prostokat(pasek_r, Kolory::PowierzchniaAlternatywna);
+        ctx.rysuj_prostokat(pasek_r, motyw_kolor(MOTYW_KOLOR_PANEL));
 
         // Obszar strony (tło i ramka)
         Prostokat strona_r(0, wysokosc_paska_kart_ - 1, b.szerokosc, b.wysokosc - wysokosc_paska_kart_ + 1);
-        ctx.rysuj_prostokat(strona_r, Kolory::PowierzchniaTlo);
+        ctx.rysuj_prostokat(strona_r, motyw_kolor(MOTYW_KOLOR_OKNOTLO));
         ctx.rysuj_ramke(strona_r, ramka, 1);
 
         // Rysuj nagłówki kart

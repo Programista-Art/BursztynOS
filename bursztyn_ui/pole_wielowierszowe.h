@@ -14,11 +14,11 @@ public:
     using FunkcjaTekstu = void (*)(PoleWielowierszowe*, const char*, void*);
     using FunkcjaMenuKontekstowego = void (*)(PoleWielowierszowe*, ZdarzenieMyszki&, void*);
 
-    explicit PoleWielowierszowe(const char* placeholder = "") {
+    explicit PoleWielowierszowe(const char* placeholder = "", size_t zadana_pojemnosc = DOMYSLNA_POJEMNOSC) {
         styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
         wypelnienie_ = Marginesy(6, 5, 6, 5);
         czy_moze_miec_fokus_ = true;
-        pojemnosc_ = DOMYSLNA_POJEMNOSC;
+        pojemnosc_ = (zadana_pojemnosc > 0) ? zadana_pojemnosc : DOMYSLNA_POJEMNOSC;
         bufor_ = new char[pojemnosc_];
         roboczy_ = new char[pojemnosc_];
         schowek_ = new char[pojemnosc_];
@@ -35,6 +35,21 @@ public:
         poziomy_->przy_przewijaniu(przewinieto, this);
         ustaw_placeholder(placeholder);
         przelicz_linie();
+    }
+
+    void zaktualizuj_motyw() override {
+        bool wlasne_tlo = styl_.normalny.wlasne_tlo;
+        bool wlasny_tekst = styl_.normalny.wlasny_tekst;
+        bool wlasna_ramka = styl_.normalny.wlasna_ramka;
+        StylKontrolki s = Motyw::pobierz_domyslny().styl_pola_tekstowego;
+        if (wlasne_tlo) { s.normalny.tlo = styl_.normalny.tlo; s.normalny.wlasne_tlo = true; }
+        if (wlasny_tekst) { s.normalny.tekst = styl_.normalny.tekst; s.normalny.wlasny_tekst = true; }
+        if (wlasna_ramka) { s.normalny.ramka = styl_.normalny.ramka; s.normalny.wlasna_ramka = true; }
+        styl_ = s;
+        if (pionowy_) pionowy_->zaktualizuj_motyw();
+        if (poziomy_) poziomy_->zaktualizuj_motyw();
+        uniewaznij();
+        Kontrolka::zaktualizuj_motyw();
     }
 
     ~PoleWielowierszowe() override {
@@ -200,7 +215,7 @@ public:
         Geometria g = geometria();
         ostatnio_narysowane_ = 0;
         if (!g.rog.czy_pusty()) {
-            ctx.rysuj_prostokat(g.rog, Kolory::PowierzchniaTlo);
+            ctx.rysuj_prostokat(g.rog, motyw_kolor(MOTYW_KOLOR_OKNOTLO));
         }
         if (g.widok.czy_pusty()) return;
         ctx.dodaj_przyciecie(g.widok);
@@ -211,7 +226,7 @@ public:
         if (koniec > liczba_wizualnych_) koniec = liczba_wizualnych_;
         if (dlugosc_ == 0 && placeholder_[0]) {
             ctx.rysuj_tekst(Punkt(g.widok.x, g.widok.y), placeholder_,
-                            Kolory::TekstZastepczy, s);
+                            motyw_kolor(MOTYW_KOLOR_WYLACZONY), s);
         }
         for (size_t i = pierwszy; i < koniec && dlugosc_ > 0; ++i) {
             int y = g.widok.y + static_cast<int>(i - pierwszy) * wys;
@@ -224,7 +239,7 @@ public:
                 int x = g.widok.x - static_cast<int>(poziomy_->wartosc()) + x_w_linii(li, kursor_);
                 int y = g.widok.y + static_cast<int>(li - pierwszy) * wys;
                 ctx.rysuj_prostokat(Prostokat(x, y, 2 * s, CzcionkaUI::pobierz_wysokosc(s)),
-                                    Kolory::AkcentFokus);
+                                    motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY));
             }
         }
         ctx.zdejmij_przyciecie();
@@ -568,10 +583,10 @@ private:
         Linia ln=linie_[li]; int offx=static_cast<int>(poziomy_->wartosc());
         size_t so=poczatek_zaznaczenia(), sd=koniec_zaznaczenia();
         size_t a=so>ln.start?so:ln.start,b=sd<ln.koniec?sd:ln.koniec;
-        if(czy_ma_zaznaczenie()&&a<b){int x1=g.widok.x-offx+szerokosc_fragmentu(ln.start,a);int x2=g.widok.x-offx+szerokosc_fragmentu(ln.start,b);ctx.rysuj_prostokat(Prostokat(x1,y,x2-x1,CzcionkaUI::pobierz_wysokosc(skala_dpi_)),Kolory::ZaznaczenieTlo);}
+        if(czy_ma_zaznaczenie()&&a<b){int x1=g.widok.x-offx+szerokosc_fragmentu(ln.start,a);int x2=g.widok.x-offx+szerokosc_fragmentu(ln.start,b);ctx.rysuj_prostokat(Prostokat(x1,y,x2-x1,CzcionkaUI::pobierz_wysokosc(skala_dpi_)),motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));}
         size_t n=ln.koniec-ln.start;if(n>=pojemnosc_)n=pojemnosc_-1;for(size_t i=0;i<n;++i)roboczy_[i]=bufor_[ln.start+i];roboczy_[n]='\0';
-        ctx.rysuj_tekst(Punkt(g.widok.x-offx,y),roboczy_,czy_wlaczona_?styl.tekst:Kolory::WylaczonyTekst,skala_dpi_);
-        if(czy_ma_zaznaczenie()&&a<b){size_t m=b-a;if(m>=pojemnosc_)m=pojemnosc_-1;for(size_t i=0;i<m;++i)roboczy_[i]=bufor_[a+i];roboczy_[m]='\0';int x=g.widok.x-offx+szerokosc_fragmentu(ln.start,a);ctx.rysuj_tekst(Punkt(x,y),roboczy_,Kolory::ZaznaczenieTekst,skala_dpi_);}
+        ctx.rysuj_tekst(Punkt(g.widok.x-offx,y),roboczy_,czy_wlaczona_?styl.tekst:motyw_kolor(MOTYW_KOLOR_WYLACZONY),skala_dpi_);
+        if(czy_ma_zaznaczenie()&&a<b){size_t m=b-a;if(m>=pojemnosc_)m=pojemnosc_-1;for(size_t i=0;i<m;++i)roboczy_[i]=bufor_[a+i];roboczy_[m]='\0';int x=g.widok.x-offx+szerokosc_fragmentu(ln.start,a);ctx.rysuj_tekst(Punkt(x,y),roboczy_,motyw_kolor_tekstu_zaznaczenia(),skala_dpi_);}
     }
     void ustaw_tekst_bez_historii(const char* src){size_t j=0;for(size_t i=0;src[i]&&j+1<pojemnosc_;++i){if(src[i]=='\r'){if(src[i+1]=='\n')++i;bufor_[j++]='\n';}else bufor_[j++]=src[i];}bufor_[j]='\0';dlugosc_=j;kursor_=kotwica_=dlugosc_;przelicz_linie();aktualizuj_przewijanie();przewin_do_kursora();uniewaznij_obszar(geometria().widok);}
     void wstaw_fragment(const char* src) {

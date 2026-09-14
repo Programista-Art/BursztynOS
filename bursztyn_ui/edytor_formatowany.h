@@ -38,10 +38,7 @@ public:
     };
 
     EdytorFormatowany() {
-        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
-        styl_.normalny.tlo = Kolory::WejscieTlo;
-        styl_.normalny.ramka = Kolory::RamkaDomyslna;
-        styl_.normalny.grubosc_ramki = 1;
+        zaktualizuj_motyw();
         czy_moze_miec_fokus_ = true;
         wypelnienie_ = Marginesy(6, 6, 6, 6);
         preferowany_rozmiar_ = Rozmiar(320, 220);
@@ -56,6 +53,15 @@ public:
             EdytorFormatowany* e = static_cast<EdytorFormatowany*>(dane);
             if (e) e->uniewaznij();
         }, this);
+    }
+
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
+        styl_.normalny.tlo = motyw_kolor(MOTYW_KOLOR_POLETEKSTOWE);
+        styl_.normalny.ramka = motyw_kolor(MOTYW_KOLOR_RAMKA);
+        styl_.normalny.grubosc_ramki = 1;
+        if (pionowy_) pionowy_->zaktualizuj_motyw();
+        Kontrolka::zaktualizuj_motyw();
     }
 
     ~EdytorFormatowany() override = default;

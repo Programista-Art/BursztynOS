@@ -65,7 +65,7 @@ public:
                 ctx.rysuj_prostokat(strzalka, styl_.wcisniety.tlo);
         }
         ctx.rysuj_prostokat(Prostokat(podzial, 2 * s, s,
-                            obszar_.wysokosc - 4 * s), Kolory::RamkaDomyslna);
+                            obszar_.wysokosc - 4 * s), motyw_kolor(MOTYW_KOLOR_RAMKA));
         ctx.rysuj_tekst_wysrodkowany(glowna, tekst_, baza.tekst, s);
 
         // Symetryczny grot z geometrii, bez glifu fontu.
@@ -79,7 +79,7 @@ public:
         if (czy_ma_fokus_)
             ctx.rysuj_ramke(Prostokat(2 * s, 2 * s,
                 obszar_.szerokosc - 4 * s, obszar_.wysokosc - 4 * s),
-                Kolory::AkcentFokus, s);
+                motyw_kolor(MOTYW_KOLOR_AKCENT), s);
     }
 
     void obsluz_ruch_myszy(ZdarzenieMyszki& e) override { BUI_POMIAR(mouse_events, 1);

@@ -167,7 +167,7 @@ public:
             else rysuj_obraz(ctx, obraz_do_rysowania(elementy_[i]), img);
             ctx.rysuj_tekst_obciety(Punkt(kom.x + 4 * s, kom.dolny() - tekst_h - 3 * s),
                                     elementy_[i].etykieta,
-                                    static_cast<int>(i) == wybrany_ ? motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU) : motyw_kolor(MOTYW_KOLOR_TEKST),
+                                    static_cast<int>(i) == wybrany_ ? motyw_kolor_tekstu_zaznaczenia() : motyw_kolor(MOTYW_KOLOR_TEKST),
                                     kom.szerokosc - 8 * s, s);
         }
         ctx.zdejmij_przyciecie();

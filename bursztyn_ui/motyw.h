@@ -15,62 +15,75 @@ enum class StanWizualny {
     TylkoDoOdczytu
 };
 
+using ::motyw_kolor_jasnosc;
+using ::motyw_kolor_tekstu_na_tle;
+using ::motyw_kolor_tekstu_zaznaczenia;
+
 namespace Kolory {
-    // Paleta autorytatywna Bursztyn Nocny (Bursztyn OS v2)
-    inline constexpr uint32_t Pulpit                = 0x00111315U;
-    inline constexpr uint32_t OknoTlo               = 0x00191C20U;
-    inline constexpr uint32_t Panel                 = 0x0020242AU;
-    inline constexpr uint32_t PanelPodniesiony      = 0x00262B31U;
-    inline constexpr uint32_t Ramka                 = 0x00343A42U;
-    inline constexpr uint32_t Tekst                 = 0x00F2F3F5U;
-    inline constexpr uint32_t TekstDrugorzedny      = 0x00A7ADB5U;
-    inline constexpr uint32_t TekstWylaczony        = 0x006F7680U;
-    inline constexpr uint32_t Akcent                = 0x00F2A900U;
-    inline constexpr uint32_t AkcentNajechany       = 0x00FFBC32U;
-    inline constexpr uint32_t AkcentAktywny         = 0x00D99100U;
-    inline constexpr uint32_t Blad                  = 0x00E85D5DU;
-    inline constexpr uint32_t Sukces                = 0x0051B87AU;
-    inline constexpr uint32_t Ostrzezenie           = 0x00F2A900U;
-    inline constexpr uint32_t Informacja            = 0x0058A6E7U;
-    inline constexpr uint32_t PoleTekstowe          = 0x0015181CU;
-    inline constexpr uint32_t Zaznaczenie           = 0x00F2A900U;
-    inline constexpr uint32_t Przycisk              = 0x00262B31U;
-    inline constexpr uint32_t PrzyciskNajechany     = 0x00343A42U;
-    inline constexpr uint32_t TekstAkcentu          = 0x00111315U;
+    struct DynamicznyKolor {
+        MotywKolorRola rola;
+        constexpr DynamicznyKolor(MotywKolorRola r) : rola(r) {}
+        inline operator uint32_t() const { return motyw_kolor(rola); }
+    };
+
+    struct DynamicznyTekstZaznaczenia {
+        inline operator uint32_t() const { return motyw_kolor_tekstu_zaznaczenia(); }
+    };
+
+    inline constexpr DynamicznyKolor Pulpit{MOTYW_KOLOR_PULPIT};
+    inline constexpr DynamicznyKolor OknoTlo{MOTYW_KOLOR_OKNOTLO};
+    inline constexpr DynamicznyKolor Panel{MOTYW_KOLOR_PANEL};
+    inline constexpr DynamicznyKolor PanelPodniesiony{MOTYW_KOLOR_PODNIESIONY};
+    inline constexpr DynamicznyKolor Ramka{MOTYW_KOLOR_RAMKA};
+    inline constexpr DynamicznyKolor Tekst{MOTYW_KOLOR_TEKST};
+    inline constexpr DynamicznyKolor TekstDrugorzedny{MOTYW_KOLOR_TEKST_DRUGI};
+    inline constexpr DynamicznyKolor TekstWylaczony{MOTYW_KOLOR_WYLACZONY};
+    inline constexpr DynamicznyKolor Akcent{MOTYW_KOLOR_AKCENT};
+    inline constexpr DynamicznyKolor AkcentNajechany{MOTYW_KOLOR_AKCENT_NAJECHANY};
+    inline constexpr DynamicznyKolor AkcentAktywny{MOTYW_KOLOR_AKCENT_AKTYWNY};
+    inline constexpr DynamicznyKolor Blad{MOTYW_KOLOR_BLAD};
+    inline constexpr DynamicznyKolor Sukces{MOTYW_KOLOR_SUKCES};
+    inline constexpr DynamicznyKolor Ostrzezenie{MOTYW_KOLOR_OSTRZEZENIE};
+    inline constexpr DynamicznyKolor Informacja{MOTYW_KOLOR_INFORMACJA};
+    inline constexpr DynamicznyKolor PoleTekstowe{MOTYW_KOLOR_POLETEKSTOWE};
+    inline constexpr DynamicznyKolor Zaznaczenie{MOTYW_KOLOR_ZAZNACZENIE};
+    inline constexpr DynamicznyKolor Przycisk{MOTYW_KOLOR_PRZYCISK};
+    inline constexpr DynamicznyKolor PrzyciskNajechany{MOTYW_KOLOR_PRZYCISK_NAJECHANY};
+    inline constexpr DynamicznyKolor TekstAkcentu{MOTYW_KOLOR_TEKST_AKCENTU};
 
     // Aliases wstecznej zgodności
-    inline constexpr uint32_t BursztynowyCiemnyTlo  = Pulpit;
-    inline constexpr uint32_t PowierzchniaTlo       = OknoTlo;
-    inline constexpr uint32_t PowierzchniaAlternatywna = Panel;
-    inline constexpr uint32_t PowierzchniaNajechana = PanelPodniesiony;
-    inline constexpr uint32_t PowierzchniaAktywna   = PanelPodniesiony;
-    inline constexpr uint32_t WejscieTlo            = PoleTekstowe;
-    inline constexpr uint32_t AkcentZloty           = Akcent;
-    inline constexpr uint32_t AkcentWcisniety       = AkcentAktywny;
-    inline constexpr uint32_t AkcentRamka           = Ramka;
-    inline constexpr uint32_t AkcentFokus           = AkcentNajechany;
-    inline constexpr uint32_t TekstBialy            = Tekst;
-    inline constexpr uint32_t TekstWyciszony        = TekstDrugorzedny;
-    inline constexpr uint32_t TekstCiemny           = Pulpit;
-    inline constexpr uint32_t TekstZastepczy        = TekstWylaczony;
-    inline constexpr uint32_t RamkaDomyslna         = Ramka;
-    inline constexpr uint32_t RamkaNajechana        = Akcent;
-    inline constexpr uint32_t RamkaFokus            = AkcentNajechany;
-    inline constexpr uint32_t PoleWyboruZaznaczenie = Zaznaczenie;
-    inline constexpr uint32_t CzerwonyZamknij       = Blad;
-    inline constexpr uint32_t CzerwonyZamknijNajechany = 0x00F07070U;
+    inline constexpr DynamicznyKolor BursztynowyCiemnyTlo  = Pulpit;
+    inline constexpr DynamicznyKolor PowierzchniaTlo       = OknoTlo;
+    inline constexpr DynamicznyKolor PowierzchniaAlternatywna = Panel;
+    inline constexpr DynamicznyKolor PowierzchniaNajechana = PanelPodniesiony;
+    inline constexpr DynamicznyKolor PowierzchniaAktywna   = PanelPodniesiony;
+    inline constexpr DynamicznyKolor WejscieTlo            = PoleTekstowe;
+    inline constexpr DynamicznyKolor AkcentZloty           = Akcent;
+    inline constexpr DynamicznyKolor AkcentWcisniety       = AkcentAktywny;
+    inline constexpr DynamicznyKolor AkcentRamka           = Ramka;
+    inline constexpr DynamicznyKolor AkcentFokus           = AkcentNajechany;
+    inline constexpr DynamicznyKolor TekstBialy            = Tekst;
+    inline constexpr DynamicznyKolor TekstWyciszony        = TekstDrugorzedny;
+    inline constexpr DynamicznyKolor TekstCiemny           = TekstAkcentu;
+    inline constexpr DynamicznyKolor TekstZastepczy        = TekstWylaczony;
+    inline constexpr DynamicznyKolor RamkaDomyslna         = Ramka;
+    inline constexpr DynamicznyKolor RamkaNajechana        = Akcent;
+    inline constexpr DynamicznyKolor RamkaFokus            = AkcentNajechany;
+    inline constexpr DynamicznyKolor PoleWyboruZaznaczenie = Zaznaczenie;
+    inline constexpr DynamicznyKolor CzerwonyZamknij       = Blad;
+    inline constexpr DynamicznyKolor CzerwonyZamknijNajechany = Blad;
     inline constexpr uint32_t WylaczonyTlo          = 0x0020242AU;
-    inline constexpr uint32_t WylaczonyTekst        = 0x009E9E9EU;
-    inline constexpr uint32_t WylaczonyRamka        = 0x00343A42U;
-    inline constexpr uint32_t ZaznaczenieTlo        = Zaznaczenie;
-    inline constexpr uint32_t ZaznaczenieTekst      = TekstAkcentu;
-    inline constexpr uint32_t NieokreslonyKolor     = Akcent;
+    inline constexpr uint32_t WylaczonyTekst        = 0x00F2F3F5U;
+    inline constexpr DynamicznyKolor WylaczonyRamka        = Ramka;
+    inline constexpr DynamicznyKolor ZaznaczenieTlo        = Zaznaczenie;
+    inline constexpr DynamicznyTekstZaznaczenia ZaznaczenieTekst{};
+    inline constexpr DynamicznyKolor NieokreslonyKolor     = Akcent;
 }
 
 struct StylStanu {
-    uint32_t tlo{Kolory::PowierzchniaTlo};
-    uint32_t tekst{Kolory::TekstBialy};
-    uint32_t ramka{Kolory::RamkaDomyslna};
+    uint32_t tlo{0};
+    uint32_t tekst{0};
+    uint32_t ramka{0};
     int grubosc_ramki{1};
     int promien_zaokraglenia{0};
     uint8_t przezroczystosc{255};
@@ -126,8 +139,6 @@ public:
         uint32_t akcent_najechany = motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY);
         uint32_t akcent_aktywny = motyw_kolor(MOTYW_KOLOR_AKCENT_AKTYWNY);
         uint32_t poletekstowe = motyw_kolor(MOTYW_KOLOR_POLETEKSTOWE);
-        uint32_t zaznaczenie = motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE);
-        (void)zaznaczenie;
         uint32_t przycisk_tlo = motyw_kolor(MOTYW_KOLOR_PRZYCISK);
         uint32_t przycisk_najechany = motyw_kolor(MOTYW_KOLOR_PRZYCISK_NAJECHANY);
         uint32_t tekst_akcentu = motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU);
@@ -138,6 +149,11 @@ public:
         styl_okna.normalny.ramka = ramka;
         styl_okna.normalny.grubosc_ramki = motyw_grubosc_ramki();
         styl_okna.normalny.promien_zaokraglenia = motyw_promien(MOTYW_ROG_OKNO);
+        styl_okna.najechany = styl_okna.normalny;
+        styl_okna.wcisniety = styl_okna.normalny;
+        styl_okna.fokus = styl_okna.normalny;
+        styl_okna.wylaczony = styl_okna.normalny;
+        styl_okna.tylko_do_odczytu = styl_okna.normalny;
 
         // Styl Panelu
         styl_panelu.normalny.tlo = tlo_panelu;
@@ -146,6 +162,11 @@ public:
         styl_panelu.normalny.grubosc_ramki = motyw_grubosc_ramki();
         styl_panelu.normalny.promien_zaokraglenia = motyw_promien(MOTYW_ROG_PANEL);
         styl_panelu.wypelnienie = Marginesy(8, 8, 8, 8);
+        styl_panelu.najechany = styl_panelu.normalny;
+        styl_panelu.wcisniety = styl_panelu.normalny;
+        styl_panelu.fokus = styl_panelu.normalny;
+        styl_panelu.wylaczony = styl_panelu.normalny;
+        styl_panelu.tylko_do_odczytu = styl_panelu.normalny;
 
         // Styl Etykiety
         styl_etykiety.normalny.tlo = 0;
@@ -153,92 +174,115 @@ public:
         styl_etykiety.normalny.ramka = 0;
         styl_etykiety.normalny.grubosc_ramki = 0;
         styl_etykiety.wypelnienie = Marginesy(2, 2, 2, 2);
+        styl_etykiety.najechany = styl_etykiety.normalny;
+        styl_etykiety.wcisniety = styl_etykiety.normalny;
+        styl_etykiety.fokus = styl_etykiety.normalny;
+        styl_etykiety.wylaczony = styl_etykiety.normalny;
+        styl_etykiety.wylaczony.tekst = wylaczony;
+        styl_etykiety.tylko_do_odczytu = styl_etykiety.normalny;
+        styl_etykiety.tylko_do_odczytu.tekst = tekst_drugi;
 
         // Styl Przycisku
         styl_przycisku.normalny.tlo = przycisk_tlo;
         styl_przycisku.normalny.tekst = tekst;
         styl_przycisku.normalny.ramka = ramka;
-        styl_przycisku.normalny.grubosc_ramki = m->gruboscramki;
-        styl_przycisku.normalny.promien_zaokraglenia = m->rogprzycisku;
+        styl_przycisku.normalny.grubosc_ramki = m ? m->gruboscramki : 1;
+        styl_przycisku.normalny.promien_zaokraglenia = m ? m->rogprzycisku : 7;
 
         styl_przycisku.najechany.tlo = przycisk_najechany;
         styl_przycisku.najechany.tekst = tekst;
         styl_przycisku.najechany.ramka = akcent_najechany;
-        styl_przycisku.najechany.grubosc_ramki = m->gruboscramki;
-        styl_przycisku.najechany.promien_zaokraglenia = m->rogprzycisku;
+        styl_przycisku.najechany.grubosc_ramki = m ? m->gruboscramki : 1;
+        styl_przycisku.najechany.promien_zaokraglenia = m ? m->rogprzycisku : 7;
 
         styl_przycisku.wcisniety.tlo = akcent_aktywny;
         styl_przycisku.wcisniety.tekst = tekst_akcentu;
         styl_przycisku.wcisniety.ramka = akcent_aktywny;
-        styl_przycisku.wcisniety.grubosc_ramki = m->gruboscramki;
-        styl_przycisku.wcisniety.promien_zaokraglenia = m->rogprzycisku;
+        styl_przycisku.wcisniety.grubosc_ramki = m ? m->gruboscramki : 1;
+        styl_przycisku.wcisniety.promien_zaokraglenia = m ? m->rogprzycisku : 7;
 
         styl_przycisku.fokus.tlo = przycisk_tlo;
         styl_przycisku.fokus.tekst = tekst;
         styl_przycisku.fokus.ramka = akcent;
-        styl_przycisku.fokus.grubosc_ramki = m->gruboscramki;
-        styl_przycisku.fokus.promien_zaokraglenia = m->rogprzycisku;
+        styl_przycisku.fokus.grubosc_ramki = m ? m->gruboscramki : 1;
+        styl_przycisku.fokus.promien_zaokraglenia = m ? m->rogprzycisku : 7;
 
-        styl_przycisku.wylaczony.tlo = tlo_panelu;
+        styl_przycisku.wylaczony.tlo = przycisk_tlo;
         styl_przycisku.wylaczony.tekst = wylaczony;
-        styl_przycisku.wylaczony.ramka = wylaczony;
+        styl_przycisku.wylaczony.ramka = ramka;
+        styl_przycisku.wylaczony.grubosc_ramki = m ? m->gruboscramki : 1;
+        styl_przycisku.wylaczony.promien_zaokraglenia = m ? m->rogprzycisku : 7;
+        styl_przycisku.tylko_do_odczytu = styl_przycisku.wylaczony;
         styl_przycisku.wypelnienie = Marginesy(10, 6, 10, 6);
 
         // Styl Pola Wyboru
         styl_pola_wyboru.normalny.tlo = poletekstowe;
         styl_pola_wyboru.normalny.tekst = tekst;
         styl_pola_wyboru.normalny.ramka = ramka;
-        styl_pola_wyboru.normalny.grubosc_ramki = m->gruboscramki;
-        styl_pola_wyboru.normalny.promien_zaokraglenia = m->rogpola;
+        styl_pola_wyboru.normalny.grubosc_ramki = m ? m->gruboscramki : 1;
+        styl_pola_wyboru.normalny.promien_zaokraglenia = m ? m->rogpola : 6;
 
         styl_pola_wyboru.najechany.tlo = tlo_podniesiony;
         styl_pola_wyboru.najechany.tekst = tekst;
         styl_pola_wyboru.najechany.ramka = akcent_najechany;
-        styl_pola_wyboru.najechany.grubosc_ramki = m->gruboscramki;
-        styl_pola_wyboru.najechany.promien_zaokraglenia = m->rogpola;
+        styl_pola_wyboru.najechany.grubosc_ramki = m ? m->gruboscramki : 1;
+        styl_pola_wyboru.najechany.promien_zaokraglenia = m ? m->rogpola : 6;
+
+        styl_pola_wyboru.wcisniety = styl_pola_wyboru.najechany;
 
         styl_pola_wyboru.fokus.tlo = poletekstowe;
         styl_pola_wyboru.fokus.tekst = tekst;
         styl_pola_wyboru.fokus.ramka = akcent;
-        styl_pola_wyboru.fokus.grubosc_ramki = m->gruboscramki;
-        styl_pola_wyboru.fokus.promien_zaokraglenia = m->rogpola;
+        styl_pola_wyboru.fokus.grubosc_ramki = m ? m->gruboscramki : 1;
+        styl_pola_wyboru.fokus.promien_zaokraglenia = m ? m->rogpola : 6;
+
+        styl_pola_wyboru.wylaczony.tlo = tlo_panelu;
+        styl_pola_wyboru.wylaczony.tekst = wylaczony;
+        styl_pola_wyboru.wylaczony.ramka = wylaczony;
+        styl_pola_wyboru.wylaczony.grubosc_ramki = m ? m->gruboscramki : 1;
+        styl_pola_wyboru.wylaczony.promien_zaokraglenia = m ? m->rogpola : 6;
+        styl_pola_wyboru.tylko_do_odczytu = styl_pola_wyboru.wylaczony;
         styl_pola_wyboru.wypelnienie = Marginesy(4, 4, 4, 4);
 
         // Styl Pola Tekstowego
         styl_pola_tekstowego.normalny.tlo = poletekstowe;
         styl_pola_tekstowego.normalny.tekst = tekst;
         styl_pola_tekstowego.normalny.ramka = ramka;
-        styl_pola_tekstowego.normalny.grubosc_ramki = m->gruboscramki;
-        styl_pola_tekstowego.normalny.promien_zaokraglenia = m->rogpola;
+        styl_pola_tekstowego.normalny.grubosc_ramki = m ? m->gruboscramki : 1;
+        styl_pola_tekstowego.normalny.promien_zaokraglenia = m ? m->rogpola : 6;
 
         styl_pola_tekstowego.najechany.tlo = poletekstowe;
         styl_pola_tekstowego.najechany.tekst = tekst;
         styl_pola_tekstowego.najechany.ramka = akcent_najechany;
-        styl_pola_tekstowego.najechany.grubosc_ramki = m->gruboscramki;
-        styl_pola_tekstowego.najechany.promien_zaokraglenia = m->rogpola;
+        styl_pola_tekstowego.najechany.grubosc_ramki = m ? m->gruboscramki : 1;
+        styl_pola_tekstowego.najechany.promien_zaokraglenia = m ? m->rogpola : 6;
+
+        styl_pola_tekstowego.wcisniety = styl_pola_tekstowego.najechany;
 
         styl_pola_tekstowego.fokus.tlo = poletekstowe;
         styl_pola_tekstowego.fokus.tekst = tekst;
         styl_pola_tekstowego.fokus.ramka = akcent;
-        styl_pola_tekstowego.fokus.grubosc_ramki = m->gruboscramki;
-        styl_pola_tekstowego.fokus.promien_zaokraglenia = m->rogpola;
+        styl_pola_tekstowego.fokus.grubosc_ramki = m ? m->gruboscramki : 1;
+        styl_pola_tekstowego.fokus.promien_zaokraglenia = m ? m->rogpola : 6;
 
         styl_pola_tekstowego.wylaczony.tlo = tlo_panelu;
         styl_pola_tekstowego.wylaczony.tekst = wylaczony;
         styl_pola_tekstowego.wylaczony.ramka = wylaczony;
-        styl_pola_tekstowego.wylaczony.grubosc_ramki = m->gruboscramki;
+        styl_pola_tekstowego.wylaczony.grubosc_ramki = m ? m->gruboscramki : 1;
+        styl_pola_tekstowego.wylaczony.promien_zaokraglenia = m ? m->rogpola : 6;
 
         styl_pola_tekstowego.tylko_do_odczytu.tlo = tlo_panelu;
         styl_pola_tekstowego.tylko_do_odczytu.tekst = tekst_drugi;
         styl_pola_tekstowego.tylko_do_odczytu.ramka = ramka;
-        styl_pola_tekstowego.tylko_do_odczytu.grubosc_ramki = m->gruboscramki;
+        styl_pola_tekstowego.tylko_do_odczytu.grubosc_ramki = m ? m->gruboscramki : 1;
+        styl_pola_tekstowego.tylko_do_odczytu.promien_zaokraglenia = m ? m->rogpola : 6;
         styl_pola_tekstowego.wypelnienie = Marginesy(6, 4, 6, 4);
 
         // Styl Suwaka
         styl_suwaka.normalny.tlo = 0;
         styl_suwaka.normalny.tekst = tekst;
         styl_suwaka.normalny.ramka = ramka;
-        styl_suwaka.normalny.grubosc_ramki = m->gruboscramki;
+        styl_suwaka.normalny.grubosc_ramki = m ? m->gruboscramki : 1;
         styl_suwaka.najechany = styl_suwaka.normalny;
         styl_suwaka.najechany.ramka = akcent_najechany;
         styl_suwaka.wcisniety = styl_suwaka.normalny;
@@ -255,19 +299,30 @@ public:
         styl_menu.normalny.tlo = tlo_panelu;
         styl_menu.normalny.tekst = tekst;
         styl_menu.normalny.ramka = ramka;
-        styl_menu.normalny.grubosc_ramki = m->gruboscramki;
-        styl_menu.normalny.promien_zaokraglenia = m->rogmenu;
+        styl_menu.normalny.grubosc_ramki = m ? m->gruboscramki : 1;
+        styl_menu.normalny.promien_zaokraglenia = m ? m->rogmenu : 8;
         styl_menu.najechany = styl_menu.normalny;
         styl_menu.najechany.tlo = tlo_podniesiony;
         styl_menu.najechany.tekst = akcent;
+        styl_menu.wcisniety = styl_menu.najechany;
+        styl_menu.fokus = styl_menu.najechany;
+        styl_menu.wylaczony = styl_menu.normalny;
+        styl_menu.wylaczony.tekst = wylaczony;
+        styl_menu.tylko_do_odczytu = styl_menu.wylaczony;
 
         // Styl Podpowiedzi (Tooltip)
         styl_podpowiedzi.normalny.tlo = tlo_podniesiony;
         styl_podpowiedzi.normalny.tekst = tekst;
         styl_podpowiedzi.normalny.ramka = ramka;
-        styl_podpowiedzi.normalny.grubosc_ramki = m->gruboscramki;
-        styl_podpowiedzi.normalny.promien_zaokraglenia = m->rogpodpowiedzi;
+        styl_podpowiedzi.normalny.grubosc_ramki = m ? m->gruboscramki : 1;
+        styl_podpowiedzi.normalny.promien_zaokraglenia = m ? m->rogpodpowiedzi : 6;
         styl_podpowiedzi.wypelnienie = Marginesy(6, 4, 6, 4);
+        styl_podpowiedzi.najechany = styl_podpowiedzi.normalny;
+        styl_podpowiedzi.wcisniety = styl_podpowiedzi.normalny;
+        styl_podpowiedzi.fokus = styl_podpowiedzi.normalny;
+        styl_podpowiedzi.wylaczony = styl_podpowiedzi.normalny;
+        styl_podpowiedzi.wylaczony.tekst = wylaczony;
+        styl_podpowiedzi.tylko_do_odczytu = styl_podpowiedzi.wylaczony;
     }
 };
 

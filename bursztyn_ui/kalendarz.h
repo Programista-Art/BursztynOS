@@ -54,15 +54,20 @@ public:
         widok_rok_ = data_poczatkowa.rok;
         widok_miesiac_ = data_poczatkowa.miesiac;
         aktualizuj_model_miesiaca();
-        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
-        styl_.normalny.tlo = Kolory::WejscieTlo;
-        styl_.normalny.ramka = Kolory::RamkaDomyslna;
-        styl_.normalny.grubosc_ramki = 1;
+        zaktualizuj_motyw();
         czy_moze_miec_fokus_ = true;
         czy_reaguje_wizualnie_na_najechanie_ = false;
         czy_reaguje_wizualnie_na_wcisniecie_ = false;
         preferowany_rozmiar_ = Rozmiar(230, 200);
         wypelnienie_ = Marginesy(4, 4, 4, 4);
+    }
+
+    void zaktualizuj_motyw() override {
+        styl_ = Motyw::pobierz_domyslny().styl_pola_tekstowego;
+        styl_.normalny.tlo = motyw_kolor(MOTYW_KOLOR_POLETEKSTOWE);
+        styl_.normalny.ramka = motyw_kolor(MOTYW_KOLOR_RAMKA);
+        styl_.normalny.grubosc_ramki = 1;
+        Kontrolka::zaktualizuj_motyw();
     }
 
     ~Kalendarz() override = default;
@@ -73,7 +78,7 @@ public:
         return liczba_przeliczen_miesiaca_;
     }
     uint32_t kolor_nieaktywnego_dnia() const {
-        return Kolory::TekstWyciszony;
+        return motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI);
     }
     Prostokat prostokat_komorki(int indeks) const {
         if (indeks < 0 || indeks >= 42) return Prostokat();
@@ -492,10 +497,10 @@ private:
     }
 
     uint32_t kolor_przycisku(int indeks) const {
-        if (!czy_wlaczona_) return Kolory::WylaczonyTlo;
-        if (indeks == wcisniety_przycisk_) return Kolory::PowierzchniaAktywna;
-        if (indeks == najechany_przycisk_) return Kolory::PowierzchniaNajechana;
-        return Kolory::PowierzchniaAlternatywna;
+        if (!czy_wlaczona_) return motyw_kolor(MOTYW_KOLOR_PANEL);
+        if (indeks == wcisniety_przycisk_) return motyw_kolor(MOTYW_KOLOR_AKCENT_AKTYWNY);
+        if (indeks == najechany_przycisk_) return motyw_kolor(MOTYW_KOLOR_PRZYCISK_NAJECHANY);
+        return motyw_kolor(MOTYW_KOLOR_PRZYCISK);
     }
 
     void uniewaznij_komorke(int indeks) {

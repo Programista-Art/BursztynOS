@@ -1426,13 +1426,17 @@ void RysujTaskbar() {
         if (o.tytul[0] == '\0' || task_x + TASK_BUTTON_W > screen_w - ui_skaluj(150,ui_skala_procent))
             continue;
         const uint32_t kolor = o.aktywne ? akcent :
-            (o.stan == GUI_OKNO_ZMINIMALIZOWANE ? podniesiony : ramka_paska);
-        const uint32_t tlo_okna = motyw_kolor(MOTYW_KOLOR_OKNOTLO);
-        const uint32_t jasnosc = (299U * ((tlo_okna >> 16) & 0xFF) + 587U * ((tlo_okna >> 8) & 0xFF) + 114U * (tlo_okna & 0xFF)) / 1000U;
-        const uint32_t kolor_tekst = (o.aktywne && jasnosc > 160) ? 0x00202124 : 0x00FFFFFF;
+            (o.stan == GUI_OKNO_ZMINIMALIZOWANE ? podniesiony : motyw_kolor(MOTYW_KOLOR_PRZYCISK));
+        const uint32_t kolor_tekst = o.aktywne ? motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU) : motyw_kolor(MOTYW_KOLOR_TEKST);
 
         gui_rysuj_prostokat(task_x, screen_h - ui_skaluj(36,ui_skala_procent),
                             TASK_BUTTON_W, SKROT_H, kolor);
+        if (!o.aktywne) {
+            gui_rysuj_prostokat(task_x, screen_h - ui_skaluj(36,ui_skala_procent), TASK_BUTTON_W, 1, ramka_paska);
+            gui_rysuj_prostokat(task_x, screen_h - ui_skaluj(36,ui_skala_procent) + SKROT_H - 1, TASK_BUTTON_W, 1, ramka_paska);
+            gui_rysuj_prostokat(task_x, screen_h - ui_skaluj(36,ui_skala_procent), 1, SKROT_H, ramka_paska);
+            gui_rysuj_prostokat(task_x + TASK_BUTTON_W - 1, screen_h - ui_skaluj(36,ui_skala_procent), 1, SKROT_H, ramka_paska);
+        }
         char podpis[15] = {};
         for (int c = 0; c < 14 && o.tytul[c] != '\0'; ++c)
             podpis[c] = o.tytul[c];
@@ -1502,9 +1506,10 @@ void RysujWpisyPulpitu() {
         char skrocony[40] = {}, podpis[40] = {};
         podpis_wpisu(wpisy_pulpitu[i].nazwa, skrocony, sizeof(skrocony));
         podpis_do_szerokosci(skrocony, podpis, sizeof(podpis), g.etykieta_szer);
+        const uint32_t kolor_etykiety_pliku = motyw_kolor_tekstu_na_tle(motyw_kolor(MOTYW_KOLOR_PULPIT));
         rysuj_tekst_wysrodkowany(g.etykieta_x, g.etykieta_y,
                                  g.etykieta_szer, PULPIT_LINE_H,
-                                 int(ui_skala_procent), 0x00FFFFFF, podpis);
+                                 int(ui_skala_procent), kolor_etykiety_pliku, podpis);
     }
 }
 
@@ -1683,9 +1688,10 @@ void rysuj_ikone_aplikacji(const AplikacjaPulpitu& aplikacja) {
             break;
     }
 
+    const uint32_t kolor_domyslny = motyw_kolor_tekstu_na_tle(motyw_kolor(MOTYW_KOLOR_PULPIT));
     const uint32_t kolor_etykiety =
-        aplikacja.typ_ikony == TypIkonyAplikacji::Snake
-            ? 0x0095E600 : 0x00FFFFFF;
+        (aplikacja.typ_ikony == TypIkonyAplikacji::Snake && kolor_domyslny == 0x00FFFFFF)
+            ? 0x0095E600 : kolor_domyslny;
     char linia[64]{};
     podpis_do_szerokosci(aplikacja.etykieta_1, linia, sizeof(linia), g.etykieta_szer);
     rysuj_tekst_wysrodkowany(g.etykieta_x, g.etykieta_y,
