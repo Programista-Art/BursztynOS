@@ -42,3 +42,10 @@ inline PulpitGeometriaKomorki pulpit_geometria_komorki(int x, int y, uint32_t pr
             lx, y + m.ikona_wys + m.odstep_etykiety,
             m.etykieta_szer, m.etykieta_wys};
 }
+
+// Etykiety ikon na pulpicie sa celowym wyjatkiem: zawsze biale z cieniem,
+// poniewaz sa renderowane bezposrednio nad tapetami, a nie powierzchniami okien aplikacji.
+// Kolor nie zalezy od aktywnego motywu (np. Bursztyn Jasny nie moze zamienic go na czarny).
+inline constexpr uint32_t KANONICZNY_KOLOR_ETYKIETY_PULPITU = 0x00FFFFFF;
+inline constexpr uint32_t KANONICZNY_KOLOR_CIENIA_PULPITU   = 0x00101010;
+

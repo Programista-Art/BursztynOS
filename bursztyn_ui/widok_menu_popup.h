@@ -31,7 +31,7 @@ public:
     }
     void ustaw(Menu* menu, ObslugaWidokuMenu* host) {
         if (menu_ && menu_ != menu) menu_->przy_zmianie(nullptr, nullptr);
-        menu_ = menu; host_ = host; aktywny_ = pierwszy_aktywny(1); wcisniety_ = -1;
+        menu_ = menu; host_ = host; aktywny_ = -1; wcisniety_ = -1;
         indeks_otwartego_podmenu_ = -1;
         if (menu_) menu_->przy_zmianie(&WidokMenuPopup::menu_zmienione, this);
         uniewaznij();
@@ -76,7 +76,9 @@ public:
     }
 
     void rysuj_siebie(KontekstRysowania& ctx) override {
-        rysuj_tlo_i_ramke(ctx, wyznacz_biezacy_styl_stanu());
+        // Stan fokusu dotyczy aktualnego wiersza, nie calej powierzchni popupu.
+        // Uzycie wyznacz_biezacy_styl_stanu() barwilo caly popup kolorem zaznaczenia.
+        rysuj_tlo_i_ramke(ctx, styl_.normalny);
         if (!menu_) return;
         SkalaUI s = skala_dpi_;
         for (int i = 0; i < static_cast<int>(menu_->liczba_elementow()); ++i) {
@@ -87,18 +89,25 @@ public:
                                         r.szerokosc - 16 * s, motyw_kolor(MOTYW_KOLOR_RAMKA));
                 continue;
             }
-            if (i == aktywny_ && e->czy_wlaczony())
-                ctx.rysuj_zaokraglony_prostokat(r, styl_.najechany.tlo,
-                                                styl_.normalny.promien_zaokraglenia * s / 2);
-            uint32_t kolor = e->czy_wlaczony() ? motyw_kolor(MOTYW_KOLOR_TEKST) : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY);
+            const bool jest_aktywny = (i == aktywny_ && e->czy_wlaczony());
+            const bool jest_wcisniety = (i == wcisniety_ && e->czy_wlaczony());
+            const StylStanu& stan_wiersza = jest_wcisniety ? styl_.wcisniety : styl_.najechany;
+            if (jest_aktywny || jest_wcisniety) {
+                int promien = styl_.normalny.promien_zaokraglenia * s / 2;
+                if (promien < 2 * s) promien = 2 * s;
+                ctx.rysuj_zaokraglony_prostokat(r, stan_wiersza.tlo, promien);
+            }
+            uint32_t kolor = e->czy_wlaczony() ? ((jest_aktywny || jest_wcisniety) ? stan_wiersza.tekst : styl_.normalny.tekst)
+                                               : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY);
             int ty = r.y + (r.wysokosc - CzcionkaUI::pobierz_wysokosc(s)) / 2;
             if (e->czy_zaznaczony()) {
+                uint32_t mark_col = (jest_aktywny || jest_wcisniety) ? stan_wiersza.tekst : motyw_kolor(MOTYW_KOLOR_AKCENT);
                 if (e->typ_zaznaczenia() == TypZaznaczeniaMenu::Radio)
                     ctx.rysuj_zaokraglony_prostokat(Prostokat(r.x + 9 * s, ty + 5 * s, 6 * s, 6 * s),
-                                                    motyw_kolor(MOTYW_KOLOR_AKCENT), 3 * s);
+                                                    mark_col, 3 * s);
                 else {
-                    ctx.rysuj_linie_pozioma(r.x + 7 * s, ty + 8 * s, 5 * s, motyw_kolor(MOTYW_KOLOR_AKCENT));
-                    ctx.rysuj_linie_pozioma(r.x + 10 * s, ty + 11 * s, 8 * s, motyw_kolor(MOTYW_KOLOR_AKCENT));
+                    ctx.rysuj_linie_pozioma(r.x + 7 * s, ty + 8 * s, 5 * s, mark_col);
+                    ctx.rysuj_linie_pozioma(r.x + 10 * s, ty + 11 * s, 8 * s, mark_col);
                 }
             }
             if (e->ikona() != 0) rysuj_ikone_ui(ctx, Prostokat(r.x + 25 * s, r.y + 5 * s,
@@ -107,8 +116,9 @@ public:
             ctx.rysuj_tekst(Punkt(r.x + 45 * s, ty), e->tekst(), kolor, s);
             if (e->skrot()[0]) {
                 int sw = CzcionkaUI::zmierz_tekst(e->skrot(), s);
-                ctx.rysuj_tekst(Punkt(r.prawy() - sw - 22 * s, ty), e->skrot(),
-                                e->czy_wlaczony() ? motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI) : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY), s);
+                uint32_t skrot_col = (jest_aktywny || jest_wcisniety) ? stan_wiersza.tekst
+                    : (e->czy_wlaczony() ? motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI) : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY));
+                ctx.rysuj_tekst(Punkt(r.prawy() - sw - 22 * s, ty), e->skrot(), skrot_col, s);
             }
             if (e->podmenu()) ctx.rysuj_tekst(Punkt(r.prawy() - 15 * s, ty), ">", kolor, s);
         }
@@ -127,36 +137,61 @@ public:
         }
         e.obsluzone = i >= 0;
     }
+    void obsluz_opuszczenie_myszy() override {
+        Kontrolka::obsluz_opuszczenie_myszy();
+        if (indeks_otwartego_podmenu_ < 0 && aktywny_ >= 0) {
+            int stary = aktywny_;
+            aktywny_ = -1;
+            uniewaznij_element(stary);
+        }
+    }
     void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e) override {
         if (!e.czy_lewy_przycisk()) return;
         wcisniety_ = indeks_z_punktu(e.x - obszar_ekranu_.x, e.y - obszar_ekranu_.y);
+        uniewaznij_element(wcisniety_);
         e.obsluzone = wcisniety_ >= 0;
     }
     void obsluz_zwolnienie_myszy(ZdarzenieMyszki& e) override {
         int i = indeks_z_punktu(e.x - obszar_ekranu_.x, e.y - obszar_ekranu_.y);
         bool wykonaj = i >= 0 && i == wcisniety_;
-        wcisniety_ = -1; e.obsluzone = i >= 0;
+        int stary_wcisniety = wcisniety_;
+        wcisniety_ = -1;
+        uniewaznij_element(stary_wcisniety);
+        e.obsluzone = i >= 0;
         if (wykonaj) aktywuj(i);
     }
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
         uint32_t k = e.kod_klawisza; bool usb = (k & BWS_KEY_SOURCE_USB) != 0;
         uint32_t b = usb ? k & 0xFFU : k & 0x7FU;
-        if ((usb && b == 82U) || (!usb && b == 0x48U)) ustaw_aktywny_indeks(nastepny_aktywny(aktywny_, -1));
-        else if ((usb && b == 81U) || (!usb && b == 0x50U)) ustaw_aktywny_indeks(nastepny_aktywny(aktywny_, 1));
-        else if ((usb && b == 79U) || (!usb && b == 0x4DU)) {
+        if ((usb && b == 82U) || (!usb && b == 0x48U)) { // Strzalka w gore
+            ustaw_aktywny_indeks(nastepny_aktywny(aktywny_, -1));
+        } else if ((usb && b == 81U) || (!usb && b == 0x50U)) { // Strzalka w dol
+            ustaw_aktywny_indeks(nastepny_aktywny(aktywny_, 1));
+        } else if ((usb && b == 74U) || (!usb && (b == 0x47U || k == 36U))) { // Home
+            ustaw_aktywny_indeks(pierwszy_aktywny(1));
+        } else if ((usb && b == 77U) || (!usb && (b == 0x4FU || k == 35U))) { // End
+            ustaw_aktywny_indeks(nastepny_aktywny(static_cast<int>(menu_ ? menu_->liczba_elementow() : 0), -1));
+        } else if ((usb && b == 79U) || (!usb && b == 0x4DU)) { // Strzalka w prawo
             int sel = (aktywny_ >= 0) ? aktywny_ : pierwszy_aktywny(1);
             ElementMenu* el = (sel >= 0 && menu_) ? menu_->element(sel) : nullptr;
-            if (el && el->podmenu() && host_) {
+            if (el && el->czy_wlaczony() && el->podmenu() && host_) {
                 ustaw_aktywny_indeks(sel);
                 indeks_otwartego_podmenu_ = sel;
                 host_->menu_otworz_podmenu(*this, *el, prostokat_elementu_klienta(sel));
             }
             else if (host_) host_->menu_kierunek_poziomy(*this, 1);
-        } else if ((usb && b == 80U) || (!usb && b == 0x4BU)) {
+        } else if ((usb && b == 80U) || (!usb && b == 0x4BU)) { // Strzalka w lewo
             if (host_) host_->menu_kierunek_poziomy(*this, -1);
-        } else if (k == 13U || k == 10U || b == 0x1CU) aktywuj(aktywny_);
-        else return;
+        } else if (k == 13U || k == 10U || b == 0x1CU) { // Enter
+            aktywuj(aktywny_);
+        } else return;
         e.obsluzone = true;
+    }
+    void po_zamknieciu(PowodZamknieciaPopup powod) override {
+        aktywny_ = -1;
+        wcisniety_ = -1;
+        indeks_otwartego_podmenu_ = -1;
+        PowierzchniaPopup::po_zamknieciu(powod);
     }
 
 private:

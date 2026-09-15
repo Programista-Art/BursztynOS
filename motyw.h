@@ -202,10 +202,10 @@ inline constexpr BursztynMotyw g_domyslny_motyw_fallback = {
     0x00D99100U, // akcentaktywny #D99100
     0x00E85D5DU, // blad #E85D5D
     0x0051B87AU, // sukces #51B87A
-    0x00F2A900U, // ostrzezenie #F2A900
+    0x00D97706U, // ostrzezenie #D97706
     0x0058A6E7U, // informacja #58A6E7
     0x0015181CU, // poletekstowe
-    0x00F2A900U, // zaznaczenie
+    0x00314A63U, // zaznaczenie #314A63
     0x00262B31U, // przycisk
     0x00343A42U, // przycisknajechany
     0x00111315U, // tekstakcentu
@@ -262,4 +262,3 @@ void motyw_zainstaluj_domyslne_pliki(void);
 #ifdef __cplusplus
 }
 #endif
-

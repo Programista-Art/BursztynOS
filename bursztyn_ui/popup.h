@@ -245,6 +245,13 @@ public:
         fokus_poprzedni_ = nullptr;
     }
 
+    void ustaw_fokus_popupu(Kontrolka* k) {
+        if (fokus_popupu_ == k) return;
+        if (fokus_popupu_) fokus_popupu_->przy_utracie_fokusu();
+        fokus_popupu_ = k;
+        if (fokus_popupu_) fokus_popupu_->przy_fokusie();
+    }
+
     bool obsluz_ruch(ZdarzenieMyszki& e) {
         if (!czy_otwarty()) return false;
         Kontrolka* hit = przechwycenie_ ? przechwycenie_ : trafienie(e.pozycja());
@@ -331,6 +338,16 @@ public:
 
     bool obsluz_klawisz(ZdarzenieKlawiatury& e) {
         if (!czy_otwarty()) return false;
+        Kontrolka* cel = fokus_popupu_ ? fokus_popupu_ : powierzchnie_[liczba_ - 1];
+        if (cel) {
+            cel->obsluz_wcisniecie_klawisza(e);
+            if (e.obsluzone) return true;
+        }
+        PowierzchniaPopup* surf = powierzchnie_[liczba_ - 1];
+        if (surf && cel != surf) {
+            surf->obsluz_wcisniecie_klawisza(e);
+            if (e.obsluzone) return true;
+        }
         uint32_t kod = e.kod_klawisza;
         bool usb = (kod & BWS_KEY_SOURCE_USB) != 0;
         uint32_t baza = usb ? (kod & 0xFFU) : (kod & 0x7FU);
@@ -343,8 +360,6 @@ public:
             e.obsluzone = true;
             return true;
         }
-        Kontrolka* cel = fokus_popupu_ ? fokus_popupu_ : powierzchnie_[liczba_ - 1];
-        if (cel) cel->obsluz_wcisniecie_klawisza(e);
         return e.obsluzone;
     }
 
@@ -442,12 +457,7 @@ private:
         return -1;
     }
 
-    void ustaw_fokus_popupu(Kontrolka* k) {
-        if (fokus_popupu_ == k) return;
-        if (fokus_popupu_) fokus_popupu_->przy_utracie_fokusu();
-        fokus_popupu_ = k;
-        if (fokus_popupu_) fokus_popupu_->przy_fokusie();
-    }
+
 
     Kontrolka* trafienie(Punkt klient) const {
         for (int i = liczba_ - 1; i >= 0; --i) {

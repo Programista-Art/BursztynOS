@@ -41,12 +41,22 @@ public:
         for (int i = 0; i < static_cast<int>(menu_.liczba_elementow()); ++i) {
             ElementMenu* e = menu_.element(i); if (!e || !e->czy_widoczny()) continue;
             Prostokat r = prostokat_glowny(i);
-            if (i == aktywny_glowny_ && (czy_najechana_ || czy_ma_fokus_ || czy_otwarte()))
-                ctx.rysuj_prostokat(r, motyw_kolor(MOTYW_KOLOR_PODNIESIONY));
+            bool aktywny = (i == aktywny_glowny_) && e->czy_wlaczony() && (czy_najechana_ || czy_ma_fokus_ || czy_otwarte());
+            if (aktywny) {
+                ctx.rysuj_prostokat(r, motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));
+            }
             SkalaUI s = skala_dpi_;
+            uint32_t kolor_tekstu;
+            if (!e->czy_wlaczony()) {
+                kolor_tekstu = motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY);
+            } else if (aktywny) {
+                kolor_tekstu = motyw_kolor_tekstu_zaznaczenia();
+            } else {
+                kolor_tekstu = motyw_kolor(MOTYW_KOLOR_TEKST);
+            }
             ctx.rysuj_tekst(Punkt(r.x + 10 * s,
                 r.y + (r.wysokosc - CzcionkaUI::pobierz_wysokosc(s)) / 2),
-                e->tekst(), e->czy_wlaczony() ? motyw_kolor(MOTYW_KOLOR_TEKST) : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY), s);
+                e->tekst(), kolor_tekstu, s);
         }
     }
     void obsluz_ruch_myszy(ZdarzenieMyszki& e) override {

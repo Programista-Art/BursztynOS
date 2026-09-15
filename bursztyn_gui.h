@@ -442,12 +442,13 @@ inline uint32_t motyw_kolor_tekstu_na_tle(uint32_t tlo) {
 inline uint32_t motyw_kolor_tekstu_zaznaczenia() {
     uint32_t tlo_zaz = motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE);
     uint32_t y_tlo = motyw_kolor_jasnosc(tlo_zaz);
+    uint32_t txt = motyw_kolor(MOTYW_KOLOR_TEKST);
     uint32_t txt_akcent = motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU);
+    uint32_t y_txt = motyw_kolor_jasnosc(txt);
     uint32_t y_akcent = motyw_kolor_jasnosc(txt_akcent);
-    if (y_tlo > 128 && y_akcent > 128) {
-        return motyw_kolor(MOTYW_KOLOR_TEKST);
-    }
-    return txt_akcent;
+    uint32_t roznica_txt = y_tlo > y_txt ? y_tlo - y_txt : y_txt - y_tlo;
+    uint32_t roznica_akcent = y_tlo > y_akcent ? y_tlo - y_akcent : y_akcent - y_tlo;
+    return roznica_txt >= roznica_akcent ? txt : txt_akcent;
 }
 
 void motyw_odswiez_lokalny();

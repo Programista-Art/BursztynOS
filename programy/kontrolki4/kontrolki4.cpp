@@ -398,6 +398,30 @@ void zbuduj_karte_polecenia(Panel& panel) {
     b_nadpisz.ustaw_menu_kontekstowe(menu_dziecka);
 }
 
+void zglos_wynik_dialogu(OknoDialogowe*, WynikDialogu w, void*) {
+    const char* res = "Brak";
+    switch (w) {
+        case WynikDialogu::OK: res = "OK"; break;
+        case WynikDialogu::Anuluj: res = "Anuluj"; break;
+        case WynikDialogu::Tak: res = "Tak"; break;
+        case WynikDialogu::Nie: res = "Nie"; break;
+        case WynikDialogu::Ponow: res = "Ponów"; break;
+        case WynikDialogu::Przerwij: res = "Przerwij"; break;
+        case WynikDialogu::Ignoruj: res = "Ignoruj"; break;
+        case WynikDialogu::Wlasny: res = "Własny"; break;
+        default: res = "Brak"; break;
+    }
+    char buf[128];
+    kopiuj_napis(buf, sizeof(buf), "Wynik ostatniego dialogu: ");
+    size_t len = 0;
+    while (buf[len]) ++len;
+    size_t oi = 0;
+    while (res[oi] && len + 1 < sizeof(buf)) buf[len++] = res[oi++];
+    buf[len] = '\0';
+    if (g.etykieta_wyniku_dialogu) g.etykieta_wyniku_dialogu->ustaw_tekst(buf);
+    status(res);
+}
+
 // -----------------------------------------------------------------------------
 // KARTA 3: KOMUNIKATY I DIALOGI (OknoDialogowe, PasekInformacyjny, Toast)
 // -----------------------------------------------------------------------------
@@ -410,39 +434,87 @@ void zbuduj_karte_komunikaty(Panel& panel) {
     Etykieta& t_dlg = panel.dodaj<Etykieta>("OknoDialogowe — modalne okna z blokowaniem rodzica i skrótami Enter/Escape:");
     t_dlg.ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_AKCENT));
 
-    Panel& row_dlg = panel.dodaj<Panel>(Orientacja::Pozioma);
-    row_dlg.ustaw_preferowany_rozmiar(Rozmiar(-1, 36));
-    row_dlg.ustaw_odstep(10);
+    Panel& row_dlg1 = panel.dodaj<Panel>(Orientacja::Pozioma);
+    row_dlg1.ustaw_preferowany_rozmiar(Rozmiar(-1, 34));
+    row_dlg1.ustaw_odstep(8);
 
-    Przycisk& b_dlg1 = row_dlg.dodaj<Przycisk>("Dialog OK / Anuluj");
+    Przycisk& b_dlg0 = row_dlg1.dodaj<Przycisk>("Tylko OK");
+    b_dlg0.przy_kliknieciu([](Przycisk*, void*) {
+        if (!g.okno) return;
+        OknoDialogowe* dlg = new OknoDialogowe("Informacja",
+                                               "Operacja zakończona pomyślnie. Pamięć podręczna odświeżona.",
+                                               PrzyciskiDialogu::TylkoOk, TypDialogu::Informacja);
+        dlg->przy_wyniku(zglos_wynik_dialogu, nullptr);
+        dlg->pokaz(g.okno->zarzadca_popupow(), g.okno->kontrolka_glowna());
+    });
+
+    Przycisk& b_dlg1 = row_dlg1.dodaj<Przycisk>("OK / Anuluj");
     b_dlg1.przy_kliknieciu([](Przycisk*, void*) {
         if (!g.okno) return;
         OknoDialogowe* dlg = new OknoDialogowe("Zapis dokumentu",
-                                               "Czy chcesz zapisać zmiany przed wyjściem?",
-                                               PrzyciskiDialogu::OkAnuluj);
-        dlg->przy_wyniku([](OknoDialogowe*, WynikDialogu w, void*) {
-            const char* res = (w == WynikDialogu::OK) ? "Zatwierdzono (OK)" : "Anulowano";
-            if (g.etykieta_wyniku_dialogu) g.etykieta_wyniku_dialogu->ustaw_tekst(res);
-            status(res);
-        });
+                                               "Czy chcesz zapisać zmiany w bieżącym dokumencie przed wyjściem?",
+                                               PrzyciskiDialogu::OkAnuluj, TypDialogu::Pytanie);
+        dlg->przy_wyniku(zglos_wynik_dialogu, nullptr);
         dlg->pokaz(g.okno->zarzadca_popupow(), g.okno->kontrolka_glowna());
     });
 
-    Przycisk& b_dlg2 = row_dlg.dodaj<Przycisk>("Dialog Tak / Nie");
+    Przycisk& b_dlg2 = row_dlg1.dodaj<Przycisk>("Tak / Nie");
     b_dlg2.przy_kliknieciu([](Przycisk*, void*) {
         if (!g.okno) return;
         OknoDialogowe* dlg = new OknoDialogowe("Potwierdzenie operacji",
-                                               "Czy na pewno usunąć wybrany plik z dysku?",
-                                               PrzyciskiDialogu::TakNie);
-        dlg->przy_wyniku([](OknoDialogowe*, WynikDialogu w, void*) {
-            const char* res = (w == WynikDialogu::Tak) ? "Wybrano: TAK" : "Wybrano: NIE";
-            if (g.etykieta_wyniku_dialogu) g.etykieta_wyniku_dialogu->ustaw_tekst(res);
-            status(res);
-        });
+                                               "Czy na pewno usunąć wybrany plik konfiguracyjny z dysku?",
+                                               PrzyciskiDialogu::TakNie, TypDialogu::Ostrzezenie);
+        dlg->przy_wyniku(zglos_wynik_dialogu, nullptr);
         dlg->pokaz(g.okno->zarzadca_popupow(), g.okno->kontrolka_glowna());
     });
 
-    Etykieta& res_lbl = row_dlg.dodaj<Etykieta>("Wynik ostatniego dialogu: (brak)");
+    Przycisk& b_dlg3 = row_dlg1.dodaj<Przycisk>("Tak / Nie / Anuluj");
+    b_dlg3.przy_kliknieciu([](Przycisk*, void*) {
+        if (!g.okno) return;
+        OknoDialogowe* dlg = new OknoDialogowe("Modyfikacja profilu",
+                                               "Wykryto niezapisane zmiany parametrów systemu.\nCzy chcesz zapisać modyfikacje profilu?",
+                                               PrzyciskiDialogu::TakNieAnuluj, TypDialogu::Pytanie);
+        dlg->przy_wyniku(zglos_wynik_dialogu, nullptr);
+        dlg->pokaz(g.okno->zarzadca_popupow(), g.okno->kontrolka_glowna());
+    });
+
+    Panel& row_dlg2 = panel.dodaj<Panel>(Orientacja::Pozioma);
+    row_dlg2.ustaw_preferowany_rozmiar(Rozmiar(-1, 34));
+    row_dlg2.ustaw_odstep(8);
+
+    Przycisk& b_dlg4 = row_dlg2.dodaj<Przycisk>("Ponów / Anuluj");
+    b_dlg4.przy_kliknieciu([](Przycisk*, void*) {
+        if (!g.okno) return;
+        OknoDialogowe* dlg = new OknoDialogowe("Błąd połączenia BTP",
+                                               "Nie udało się połączyć z serwerem usług systemowych.\nUpewnij się, że usługa działa poprawnie.",
+                                               PrzyciskiDialogu::PonowAnuluj, TypDialogu::Blad);
+        dlg->przy_wyniku(zglos_wynik_dialogu, nullptr);
+        dlg->pokaz(g.okno->zarzadca_popupow(), g.okno->kontrolka_glowna());
+    });
+
+    Przycisk& b_dlg5 = row_dlg2.dodaj<Przycisk>("Przerwij / Ponów / Ignoruj");
+    b_dlg5.przy_kliknieciu([](Przycisk*, void*) {
+        if (!g.okno) return;
+        OknoDialogowe* dlg = new OknoDialogowe("Krytyczny błąd nośnika",
+                                               "Wystąpił błąd sumy kontrolnej w sektorze 0x8F4A.\nWybierz akcję naprawczą:",
+                                               PrzyciskiDialogu::PrzerwijPonowIgnoruj, TypDialogu::Blad);
+        dlg->przy_wyniku(zglos_wynik_dialogu, nullptr);
+        dlg->pokaz(g.okno->zarzadca_popupow(), g.okno->kontrolka_glowna());
+    });
+
+    Przycisk& b_dlg6 = row_dlg2.dodaj<Przycisk>("Komunikat Sukces");
+    b_dlg6.przy_kliknieciu([](Przycisk*, void*) {
+        if (!g.okno) return;
+        Komunikat::sukces(g.okno->zarzadca_popupow(),
+                          "Zakończono pomyślnie",
+                          "Wszystkie komponenty BursztynUI zostały pomyślnie zweryfikowane.",
+                          zglos_wynik_dialogu, nullptr, g.okno->kontrolka_glowna());
+    });
+
+    Panel& row_dlg3 = panel.dodaj<Panel>(Orientacja::Pozioma);
+    row_dlg3.ustaw_preferowany_rozmiar(Rozmiar(-1, 28));
+
+    Etykieta& res_lbl = row_dlg3.dodaj<Etykieta>("Wynik ostatniego dialogu: (brak)");
     g.etykieta_wyniku_dialogu = &res_lbl;
 
     // Paski informacyjne w 4 stanach semantycznych
@@ -946,10 +1018,10 @@ extern "C" __attribute__((noreturn)) void _start() {
     Menu& m_pomoc = menu_gorne.menu().dodaj_podmenu("Pomoc");
     m_pomoc.dodaj_element("O programie...", 10, [](ElementMenu&, void*) {
         if (!g.okno) return;
-        OknoDialogowe* dlg = new OknoDialogowe("O programie Kontrolki 4",
-                                               "BursztynUI Kontrolki 4\nKompletny zestaw nowych komponentów dla Bursztyn OS.\nAutor: Programista Art",
-                                               PrzyciskiDialogu::TylkoOk);
-        dlg->pokaz(g.okno->zarzadca_popupow(), g.okno->kontrolka_glowna());
+        Komunikat::informacja(g.okno->zarzadca_popupow(),
+                              "O programie Kontrolki 4",
+                              "BursztynUI Kontrolki 4\nKompletny zestaw nowych komponentów dla Bursztyn OS.\nAutor: Programista Art",
+                              nullptr, nullptr, g.okno->kontrolka_glowna());
     });
 
     // 2. Pasek Narzędzi

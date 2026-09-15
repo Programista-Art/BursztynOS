@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "typy.h"
-#include "../czcionki/extronic16B_unicode.h"
+#include "../czcionki/extronic16Bunicode.h"
 
 namespace BursztynUI {
 
@@ -12,7 +12,12 @@ public:
     static constexpr int WYSOKOSC = 16;
     static constexpr uint32_t LICZBA_GLIFOW = sizeof(nowa_czcionka_16x16) / sizeof(nowa_czcionka_16x16[0]);
 
-    // Dekoduje jeden punkt kodowy UTF-8 z ciągu bajtów
+    // Dekoduje jeden punkt kodowy UTF-8 z ciągu bajtów.
+    // Zapewnia pełną odporność na sekwencje obcięte i zniekształcone:
+    // - Nigdy nie czyta poza znak null '\0'.
+    // - Odrzuca nadmiarowe kodowania (overlong: 0xC0, 0xC1, 0xE0 < 0xA0, 0xF0 < 0x90).
+    // - Odrzuca surogaty UTF-16 (0xD800..0xDFFF: 0xED 0xA0..0xBF) oraz kody > 0x10FFFF.
+    // - W przypadku błędu konsumuje bezpiecznie 1 bajt i zwraca glif zastępczy '?'.
     static size_t dekoduj_utf8(const char* tekst, size_t i, uint32_t* znak) {
         if (!tekst || !znak || tekst[i] == '\0') return 0;
         const uint8_t b0 = static_cast<uint8_t>(tekst[i]);
@@ -23,11 +28,21 @@ public:
             return 1;
         }
 
-        // 2 bajty (0xC0 .. 0xDF)
-        if ((b0 & 0xE0U) == 0xC0U) {
+        // Błędny bajt początkowy (bajt kontynuacji 0x80..0xBF lub niedozwolony > 0xF4, albo overlong 0xC0..0xC1)
+        if (b0 < 0xC2U || b0 > 0xF4U) {
+            *znak = '?';
+            return 1;
+        }
+
+        // 2 bajty (0xC2 .. 0xDF) -> U+0080 .. U+07FF
+        if (b0 <= 0xDFU) {
+            if (tekst[i + 1] == '\0') {
+                *znak = '?';
+                return 1;
+            }
             const uint8_t b1 = static_cast<uint8_t>(tekst[i + 1]);
             if ((b1 & 0xC0U) != 0x80U) {
-                *znak = b0;
+                *znak = '?';
                 return 1;
             }
             *znak = (static_cast<uint32_t>(b0 & 0x1FU) << 6) |
@@ -35,12 +50,29 @@ public:
             return 2;
         }
 
-        // 3 bajty (0xE0 .. 0xEF)
-        if ((b0 & 0xF0U) == 0xE0U) {
+        // 3 bajty (0xE0 .. 0xEF) -> U+0800 .. U+FFFF
+        if (b0 <= 0xEFU) {
+            if (tekst[i + 1] == '\0') {
+                *znak = '?';
+                return 1;
+            }
             const uint8_t b1 = static_cast<uint8_t>(tekst[i + 1]);
+            if ((b1 & 0xC0U) != 0x80U) {
+                *znak = '?';
+                return 1;
+            }
+            // Overlong (0xE0 < 0xA0) lub UTF-16 surrogate (0xED > 0x9F)
+            if ((b0 == 0xE0U && b1 < 0xA0U) || (b0 == 0xEDU && b1 > 0x9FU)) {
+                *znak = '?';
+                return 1;
+            }
+            if (tekst[i + 2] == '\0') {
+                *znak = '?';
+                return 1;
+            }
             const uint8_t b2 = static_cast<uint8_t>(tekst[i + 2]);
-            if ((b1 & 0xC0U) != 0x80U || (b2 & 0xC0U) != 0x80U) {
-                *znak = b0;
+            if ((b2 & 0xC0U) != 0x80U) {
+                *znak = '?';
                 return 1;
             }
             *znak = (static_cast<uint32_t>(b0 & 0x0FU) << 12) |
@@ -49,24 +81,49 @@ public:
             return 3;
         }
 
-        // 4 bajty (0xF0 .. 0xF7)
-        if ((b0 & 0xF8U) == 0xF0U) {
-            const uint8_t b1 = static_cast<uint8_t>(tekst[i + 1]);
-            const uint8_t b2 = static_cast<uint8_t>(tekst[i + 2]);
-            const uint8_t b3 = static_cast<uint8_t>(tekst[i + 3]);
-            if ((b1 & 0xC0U) != 0x80U || (b2 & 0xC0U) != 0x80U || (b3 & 0xC0U) != 0x80U) {
-                *znak = b0;
-                return 1;
-            }
-            *znak = (static_cast<uint32_t>(b0 & 0x07U) << 18) |
-                    (static_cast<uint32_t>(b1 & 0x3FU) << 12) |
-                    (static_cast<uint32_t>(b2 & 0x3FU) << 6) |
-                    static_cast<uint32_t>(b3 & 0x3FU);
-            return 4;
+        // 4 bajty (0xF0 .. 0xF4) -> U+10000 .. U+10FFFF
+        if (tekst[i + 1] == '\0') {
+            *znak = '?';
+            return 1;
         }
-
-        *znak = b0;
-        return 1;
+        const uint8_t b1 = static_cast<uint8_t>(tekst[i + 1]);
+        if ((b1 & 0xC0U) != 0x80U) {
+            *znak = '?';
+            return 1;
+        }
+        // Overlong (0xF0 < 0x90) lub poza Unicode (0xF4 > 0x8F)
+        if ((b0 == 0xF0U && b1 < 0x90U) || (b0 == 0xF4U && b1 > 0x8FU)) {
+            *znak = '?';
+            return 1;
+        }
+        if (tekst[i + 2] == '\0') {
+            *znak = '?';
+            return 1;
+        }
+        const uint8_t b2 = static_cast<uint8_t>(tekst[i + 2]);
+        if ((b2 & 0xC0U) != 0x80U) {
+            *znak = '?';
+            return 1;
+        }
+        if (tekst[i + 3] == '\0') {
+            *znak = '?';
+            return 1;
+        }
+        const uint8_t b3 = static_cast<uint8_t>(tekst[i + 3]);
+        if ((b3 & 0xC0U) != 0x80U) {
+            *znak = '?';
+            return 1;
+        }
+        uint32_t cp = (static_cast<uint32_t>(b0 & 0x07U) << 18) |
+                      (static_cast<uint32_t>(b1 & 0x3FU) << 12) |
+                      (static_cast<uint32_t>(b2 & 0x3FU) << 6) |
+                      static_cast<uint32_t>(b3 & 0x3FU);
+        if (cp > 0x10FFFFU) {
+            *znak = '?';
+            return 1;
+        }
+        *znak = cp;
+        return 4;
     }
 
     // Koduje punkt kodowy Unicode do ciągu bajtów UTF-8

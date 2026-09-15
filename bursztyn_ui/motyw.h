@@ -302,9 +302,12 @@ public:
         styl_menu.normalny.grubosc_ramki = m ? m->gruboscramki : 1;
         styl_menu.normalny.promien_zaokraglenia = m ? m->rogmenu : 8;
         styl_menu.najechany = styl_menu.normalny;
-        styl_menu.najechany.tlo = tlo_podniesiony;
-        styl_menu.najechany.tekst = akcent;
+        styl_menu.najechany.tlo = motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE);
+        styl_menu.najechany.tekst = motyw_kolor_tekstu_zaznaczenia();
+        styl_menu.najechany.ramka = akcent_najechany;
         styl_menu.wcisniety = styl_menu.najechany;
+        styl_menu.wcisniety.tlo = akcent_aktywny;
+        styl_menu.wcisniety.tekst = tekst_akcentu;
         styl_menu.fokus = styl_menu.najechany;
         styl_menu.wylaczony = styl_menu.normalny;
         styl_menu.wylaczony.tekst = wylaczony;

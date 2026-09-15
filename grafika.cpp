@@ -21,7 +21,7 @@
 #include <stddef.h>
 
 // Czcionka Unicode i sterownik GOP.
-#include "czcionki/extronic16B_unicode.h"
+#include "czcionki/extronic16Bunicode.h"
 #include "sterowniki/grafika/uefi_gop.h"
 
 // Bezpieczna komunikacja Ring 0 <-> Ring 3.

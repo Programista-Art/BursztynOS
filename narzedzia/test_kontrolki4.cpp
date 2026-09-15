@@ -11,6 +11,7 @@
 #include "../motyw.cpp"
 
 #include "../bursztyn_gui.h"
+#include "../pulpit_geometria.h"
 
 // Implementacje makiet funkcji GUI i BWS na potrzeby host test
 extern "C" {
@@ -42,8 +43,9 @@ void gui_pobierz_rozdzielczosc(int* w, int* h) {
     if (w) *w = 1280;
     if (h) *h = 720;
 }
+static const BursztynMotyw* g_aktywny_test_motyw = &g_domyslny_motyw_fallback;
 const BursztynMotyw* gui_pobierz_motyw() {
-    return &g_domyslny_motyw_fallback;
+    return g_aktywny_test_motyw;
 }
 
 uint32_t motyw_kolor(uint32_t rola) {
@@ -107,6 +109,11 @@ void gui_legacy_wlacz() {}
 #include "../bursztyn_ui/bursztyn_ui.h"
 
 using namespace BursztynUI;
+
+void test_ustaw_aktywny_motyw(const BursztynMotyw* m) {
+    g_aktywny_test_motyw = m ? m : &g_domyslny_motyw_fallback;
+    Motyw::pobierz_domyslny().zaktualizuj_z_systemu();
+}
 
 static int g_testy_razem = 0;
 static int g_testy_udane = 0;
@@ -293,21 +300,19 @@ static void cb_dialog_wynik(OknoDialogowe*, WynikDialogu wynik, void*) {
 }
 
 static void test_okno_dialogowe() {
-    printf("\n--- Test 4: OknoDialogowe (Buttons, Enter/Escape hotkeys, callbacks) ---\n");
+    printf("\n--- Test 4: OknoDialogowe & Komunikat (All button sets, hotkeys, Tab nav, wrapping) ---\n");
 
-    // OkAnuluj
-    OknoDialogowe d1("Pytanie", "Czy zapisac plik?", PrzyciskiDialogu::OkAnuluj);
-    TEST_ASSERT(strcmp(d1.wiadomosc(), "Czy zapisac plik?") == 0, "Wiadomosc dialogu OK");
+    // 1. OkAnuluj
+    OknoDialogowe d1("Pytanie", "Czy zapisać plik?", PrzyciskiDialogu::OkAnuluj);
+    TEST_ASSERT(strcmp(d1.wiadomosc(), "Czy zapisać plik?") == 0, "Wiadomosc dialogu OK");
     d1.przy_wyniku(cb_dialog_wynik, nullptr);
 
-    // Symulacja Enter (kod 13) -> OK
     ZdarzenieKlawiatury e_enter{};
     e_enter.kod_klawisza = 13;
     d1.obsluz_wcisniecie_klawisza(e_enter);
     TEST_ASSERT(e_enter.obsluzone, "Enter obsluzony przez dialog");
     TEST_ASSERT(g_odebrany_wynik == WynikDialogu::OK, "Wynik Enter w OkAnuluj to OK");
 
-    // Symulacja Escape (kod 27) -> Anuluj
     g_odebrany_wynik = WynikDialogu::Brak;
     ZdarzenieKlawiatury e_esc{};
     e_esc.kod_klawisza = 27;
@@ -315,8 +320,8 @@ static void test_okno_dialogowe() {
     TEST_ASSERT(e_esc.obsluzone, "Escape obsluzony przez dialog");
     TEST_ASSERT(g_odebrany_wynik == WynikDialogu::Anuluj, "Wynik Escape w OkAnuluj to Anuluj");
 
-    // TakNie
-    OknoDialogowe d2("Potwierdzenie", "Czy kontynuowac?", PrzyciskiDialogu::TakNie);
+    // 2. TakNie
+    OknoDialogowe d2("Potwierdzenie", "Czy kontynuować operację?", PrzyciskiDialogu::TakNie);
     d2.przy_wyniku(cb_dialog_wynik, nullptr);
 
     e_enter.obsluzone = false;
@@ -326,6 +331,107 @@ static void test_okno_dialogowe() {
     e_esc.obsluzone = false;
     d2.obsluz_wcisniecie_klawisza(e_esc);
     TEST_ASSERT(g_odebrany_wynik == WynikDialogu::Nie, "Wynik Escape w TakNie to Nie");
+
+    // 3. TylkoOk
+    OknoDialogowe d0("Informacja", "Operacja udana", PrzyciskiDialogu::TylkoOk);
+    d0.przy_wyniku(cb_dialog_wynik, nullptr);
+    e_enter.obsluzone = false;
+    d0.obsluz_wcisniecie_klawisza(e_enter);
+    TEST_ASSERT(g_odebrany_wynik == WynikDialogu::OK, "Wynik Enter w TylkoOk to OK");
+    g_odebrany_wynik = WynikDialogu::Brak;
+    e_esc.obsluzone = false;
+    d0.obsluz_wcisniecie_klawisza(e_esc);
+    TEST_ASSERT(g_odebrany_wynik == WynikDialogu::OK, "Wynik Escape w TylkoOk to OK");
+
+    // 4. TakNieAnuluj
+    OknoDialogowe d3("Zapis", "Zapisać przed wyjściem?", PrzyciskiDialogu::TakNieAnuluj);
+    d3.przy_wyniku(cb_dialog_wynik, nullptr);
+    TEST_ASSERT(d3.wynik_domyslny() == WynikDialogu::Tak, "TakNieAnuluj domyslny to Tak");
+    TEST_ASSERT(d3.wynik_anuluj() == WynikDialogu::Anuluj, "TakNieAnuluj anuluj to Anuluj");
+    e_enter.obsluzone = false;
+    d3.obsluz_wcisniecie_klawisza(e_enter);
+    TEST_ASSERT(g_odebrany_wynik == WynikDialogu::Tak, "Wynik Enter w TakNieAnuluj to Tak");
+    e_esc.obsluzone = false;
+    d3.obsluz_wcisniecie_klawisza(e_esc);
+    TEST_ASSERT(g_odebrany_wynik == WynikDialogu::Anuluj, "Wynik Escape w TakNieAnuluj to Anuluj");
+
+    // 5. PonowAnuluj
+    OknoDialogowe d4("Błąd sieci", "Ponowić próbę połączenia?", PrzyciskiDialogu::PonowAnuluj);
+    d4.przy_wyniku(cb_dialog_wynik, nullptr);
+    e_enter.obsluzone = false;
+    d4.obsluz_wcisniecie_klawisza(e_enter);
+    TEST_ASSERT(g_odebrany_wynik == WynikDialogu::Ponow, "Wynik Enter w PonowAnuluj to Ponow");
+    e_esc.obsluzone = false;
+    d4.obsluz_wcisniecie_klawisza(e_esc);
+    TEST_ASSERT(g_odebrany_wynik == WynikDialogu::Anuluj, "Wynik Escape w PonowAnuluj to Anuluj");
+
+    // 6. PrzerwijPonowIgnoruj
+    OknoDialogowe d5("Błąd wejścia/wyjścia", "Niespójność nośnika danych", PrzyciskiDialogu::PrzerwijPonowIgnoruj);
+    d5.przy_wyniku(cb_dialog_wynik, nullptr);
+    e_enter.obsluzone = false;
+    d5.obsluz_wcisniecie_klawisza(e_enter);
+    TEST_ASSERT(g_odebrany_wynik == WynikDialogu::Ponow, "Wynik Enter w PrzerwijPonowIgnoruj to Ponow (domyslny)");
+    e_esc.obsluzone = false;
+    d5.obsluz_wcisniecie_klawisza(e_esc);
+    TEST_ASSERT(g_odebrany_wynik == WynikDialogu::Ignoruj, "Wynik Escape w PrzerwijPonowIgnoruj to Ignoruj (anuluj)");
+
+    // 7. Wlasne przyciski
+    OknoDialogowe dw("Własne akcje", "Wybierz działanie:", PrzyciskiDialogu::Wlasne);
+    dw.przy_wyniku(cb_dialog_wynik, nullptr);
+    dw.dodaj_przycisk("Akcja A", WynikDialogu::Tak, false, false);
+    dw.dodaj_przycisk("Akcja B", WynikDialogu::Ponow, true, false);
+    dw.dodaj_przycisk("Zaniechaj", WynikDialogu::Ignoruj, false, true);
+    e_enter.obsluzone = false;
+    dw.obsluz_wcisniecie_klawisza(e_enter);
+    TEST_ASSERT(g_odebrany_wynik == WynikDialogu::Ponow, "Własny dialog Enter uruchamia Akcję B (domyślny)");
+    e_esc.obsluzone = false;
+    dw.obsluz_wcisniecie_klawisza(e_esc);
+    TEST_ASSERT(g_odebrany_wynik == WynikDialogu::Ignoruj, "Własny dialog Escape uruchamia Zaniechaj (anuluj)");
+
+    // 8. Nawigacja klawiszem Tab pomiedzy przyciskami
+    ZdarzenieKlawiatury e_tab{};
+    e_tab.kod_klawisza = 9; // Tab
+    dw.obsluz_wcisniecie_klawisza(e_tab);
+    TEST_ASSERT(e_tab.obsluzone, "Tab obsluzony przez dialog");
+    // Po Tabie skupienie przechodzi na przycisk 'Zaniechaj' (Ignoruj)
+    e_enter.obsluzone = false;
+    dw.obsluz_wcisniecie_klawisza(e_enter);
+    TEST_ASSERT(g_odebrany_wynik == WynikDialogu::Ignoruj, "Enter po Tab uruchamia nowo skupiony przycisk");
+
+    // 9. Dlugie wiadomosci i zawijanie wierszy
+    OknoDialogowe d_long("Długi komunikat",
+        "To jest bardzo długa wiadomość testowa weryfikująca automatyczne łamanie wierszy.\n"
+        "Drugi akapit tekstu z polskimi znakami: Zażółć gęślą jaźń.\n"
+        "Trzeci akapit wiadomości.",
+        PrzyciskiDialogu::OkAnuluj, TypDialogu::Informacja);
+    d_long.rozmiesc(Prostokat(0, 0, 420, 240));
+    TEST_ASSERT(d_long.typ_dialogu() == TypDialogu::Informacja, "Typ dialogu to Informacja");
+
+    // 10. Statyczne metody Komunikat API
+    ZarzadcaPopupow z_dlg;
+    z_dlg.ustaw_geometrie_wlasciciela(Prostokat(0, 0, 800, 600), Prostokat(0, 0, 800, 600));
+
+    OknoDialogowe* dlg_inf = Komunikat::informacja(z_dlg, "Info", "Tekst info", cb_dialog_wynik);
+    TEST_ASSERT(dlg_inf != nullptr, "Komunikat::informacja tworzy dialog");
+    TEST_ASSERT(dlg_inf->typ_dialogu() == TypDialogu::Informacja, "Typ to Informacja");
+    dlg_inf->zamknij_z_wynikiem(WynikDialogu::OK);
+    TEST_ASSERT(g_odebrany_wynik == WynikDialogu::OK, "Callback odebral OK");
+
+    OknoDialogowe* dlg_err = Komunikat::blad(z_dlg, "Błąd", "Treść błędu", cb_dialog_wynik);
+    TEST_ASSERT(dlg_err->typ_dialogu() == TypDialogu::Blad, "Komunikat::blad tworzy typ Blad");
+    dlg_err->zamknij_z_wynikiem(WynikDialogu::OK);
+
+    OknoDialogowe* dlg_war = Komunikat::ostrzezenie(z_dlg, "Ostrzeżenie", "Treść ostrzeżenia");
+    TEST_ASSERT(dlg_war->typ_dialogu() == TypDialogu::Ostrzezenie, "Komunikat::ostrzezenie tworzy typ Ostrzezenie");
+    dlg_war->zamknij_z_wynikiem(WynikDialogu::OK);
+
+    OknoDialogowe* dlg_pyt = Komunikat::pytanie(z_dlg, "Pytanie", "Czy zatwierdzić?");
+    TEST_ASSERT(dlg_pyt->typ_dialogu() == TypDialogu::Pytanie, "Komunikat::pytanie tworzy typ Pytanie");
+    dlg_pyt->zamknij_z_wynikiem(WynikDialogu::Tak);
+
+    OknoDialogowe* dlg_suk = Komunikat::sukces(z_dlg, "Sukces", "Operacja powiodła się pomyślnie");
+    TEST_ASSERT(dlg_suk->typ_dialogu() == TypDialogu::Sukces, "Komunikat::sukces tworzy typ Sukces");
+    dlg_suk->zamknij_z_wynikiem(WynikDialogu::OK);
 }
 
 // =========================================================================
@@ -605,6 +711,226 @@ static void test_powiadomienia() {
     }
 }
 
+// =========================================================================
+// 12. Test Motywy, kontrast pulpitu i kolory kontrolek
+// =========================================================================
+static void test_motywy_kolory_pulpit_i_kontrolki() {
+    printf("\n--- Test 12: Motywy, kontrast pulpitu i kolory kontrolek ---\n");
+
+    // 1. Kanoniczne kolory etykiety pulpitu sa stale i niezalezne od motywu
+    TEST_ASSERT(KANONICZNY_KOLOR_ETYKIETY_PULPITU == 0x00FFFFFF, "Etykieta pulpitu jest czysto biala 0x00FFFFFF");
+    TEST_ASSERT(KANONICZNY_KOLOR_CIENIA_PULPITU == 0x00101010, "Cien etykiety pulpitu to 0x00101010");
+
+    // 2. Weryfikacja wszystkich 5 oficjalnych motywow
+    const char* const MOTYWY_ID[] = {
+        "bursztynnocny", "baltyckanoc", "grafit", "bursztynklasyczny", "bursztynjasny"
+    };
+
+    for (size_t i = 0; i < 5; ++i) {
+        BursztynMotyw m{};
+        bool wczytano = motyw_zaladuj_z_pliku(MOTYWY_ID[i], &m);
+        TEST_ASSERT(wczytano, "Wczytano deklaracje motywu");
+
+        // Sprawdz czy etykieta pulpitu nie ulega wplywowi koloru tla pulpitu
+        TEST_ASSERT(KANONICZNY_KOLOR_ETYKIETY_PULPITU == 0x00FFFFFF, "Etykieta na pulpicie zachowuje biel");
+    }
+
+    // 3. Test motywu Bursztyn Jasny: ciemny tekst dla okien i kontrolek
+    static BursztynMotyw jasny{};
+    motyw_zaladuj_z_pliku("bursztynjasny", &jasny);
+    test_ustaw_aktywny_motyw(&jasny);
+
+    TEST_ASSERT(motyw_kolor(MOTYW_KOLOR_TEKST) == 0x00202124, "Bursztyn Jasny MOTYW_KOLOR_TEKST to ciemny #202124");
+    TEST_ASSERT(motyw_kolor(MOTYW_KOLOR_OKNOTLO) == 0x00F7F6F3, "Bursztyn Jasny MOTYW_KOLOR_OKNOTLO to jasny #F7F6F3");
+    TEST_ASSERT(motyw_kolor(MOTYW_KOLOR_PULPIT) == 0x00EDEBE7, "Bursztyn Jasny MOTYW_KOLOR_PULPIT to #EDEBE7");
+    TEST_ASSERT(motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE) == 0x00FFE082, "Bursztyn Jasny zaznaczenie to #FFE082");
+    TEST_ASSERT(motyw_kolor_tekstu_zaznaczenia() == 0x00202124, "Bursztyn Jasny tekst zaznaczenia to ciemny #202124");
+
+    // Etykieta i Przycisk w motywie jasnym uzywaja ciemnego tekstu
+    Etykieta etyk_jasna("Test tekstu jasnego");
+    TEST_ASSERT(etyk_jasna.kolor_tekstu() == 0x00202124, "Etykieta w motywie jasnym ma ciemny tekst #202124");
+    Przycisk przyc_jasny("Przycisk");
+    TEST_ASSERT(przyc_jasny.styl().normalny.tekst == 0x00202124, "Przycisk w motywie jasnym ma ciemny tekst #202124");
+
+    // 4. Test motywu Bursztyn Nocny: jasny tekst dla okien i kontrolek
+    static BursztynMotyw nocny{};
+    motyw_zaladuj_z_pliku("bursztynnocny", &nocny);
+    test_ustaw_aktywny_motyw(&nocny);
+
+    TEST_ASSERT(motyw_kolor(MOTYW_KOLOR_TEKST) == 0x00F2F3F5, "Bursztyn Nocny MOTYW_KOLOR_TEKST to jasny #F2F3F5");
+    TEST_ASSERT(motyw_kolor(MOTYW_KOLOR_OKNOTLO) == 0x00191C20, "Bursztyn Nocny MOTYW_KOLOR_OKNOTLO to ciemny #191C20");
+    TEST_ASSERT(motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE) == 0x00314A63, "Bursztyn Nocny zaznaczenie to odrebna powierzchnia #314A63");
+    TEST_ASSERT(motyw_kolor_tekstu_zaznaczenia() == 0x00F2F3F5, "Bursztyn Nocny tekst zaznaczenia to jasny #F2F3F5");
+
+    Etykieta etyk_nocna("Test tekstu ciemnego");
+    TEST_ASSERT(etyk_nocna.kolor_tekstu() == 0x00F2F3F5, "Etykieta w motywie nocnym ma jasny tekst #F2F3F5");
+
+    test_ustaw_aktywny_motyw(nullptr);
+}
+
+// =========================================================================
+// 13. Test Stany menu, hover zaznaczenia i izolacja stylow
+// =========================================================================
+static void test_menu_hover_i_izolacja() {
+    printf("\n--- Test 13: Stany menu, hover zaznaczenia i izolacja stylow ---\n");
+
+    // 1. WidokMenuPopup - zaznaczenie, kolor tekstu zaznaczenia, wylaczone elementy
+    Menu menu;
+    ElementMenu& el1 = menu.dodaj_element("Nowy", 1);
+    ElementMenu& el2 = menu.dodaj_element("Widok paska", 2);
+    el2.ustaw_typ_zaznaczenia(TypZaznaczeniaMenu::Pole).ustaw_zaznaczony(true);
+    ElementMenu& el3 = menu.dodaj_element("Wytnij", 3);
+    el3.ustaw_wlaczony(false);
+    Menu& sub = menu.dodaj_podmenu("Zaawansowane");
+    sub.dodaj_element("Opcja 1", 10);
+    (void)el1;
+
+    WidokMenuPopup widok;
+    widok.ustaw(&menu, nullptr);
+    widok.rozmiesc(Prostokat(0, 0, 180, 120));
+
+    TEST_ASSERT(widok.styl().najechany.tlo == motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE),
+                "WidokMenuPopup najechany uzywa MOTYW_KOLOR_ZAZNACZENIE");
+    TEST_ASSERT(widok.styl().najechany.tekst == motyw_kolor_tekstu_zaznaczenia(),
+                "WidokMenuPopup najechany uzywa motyw_kolor_tekstu_zaznaczenia()");
+
+    // Obsluga klawiatury: Strzalka w dol, Home, End
+    ZdarzenieKlawiatury e_down{}; e_down.kod_klawisza = 0x50; // Strzalka w dol
+    widok.obsluz_wcisniecie_klawisza(e_down);
+    TEST_ASSERT(e_down.obsluzone, "Strzalka w dol obsluzona przez menu");
+
+    // Opuszczenie myszy resetuje aktywny hover
+    widok.obsluz_opuszczenie_myszy();
+
+    // Element z zaznaczeniem typu pole wyboru zachowuje swoj stan
+    TEST_ASSERT(el2.czy_zaznaczony(), "Element menu zachowuje stan zaznaczenia");
+
+    // 2. MenuGlowne
+    MenuGlowne menu_glowne;
+    menu_glowne.menu().dodaj_podmenu("Plik");
+    menu_glowne.menu().dodaj_podmenu("Edycja");
+    menu_glowne.menu().dodaj_podmenu("Pomoc");
+    menu_glowne.rozmiesc(Prostokat(0, 0, 400, 28));
+
+    ZdarzenieMyszki me_hover{};
+    me_hover.typ = TypZdarzenia::RuchMyszy;
+    me_hover.x = 20; me_hover.y = 10;
+    menu_glowne.obsluz_ruch_myszy(me_hover);
+    TEST_ASSERT(me_hover.obsluzone, "MenuGlowne obsluguje ruch myszy nad elementem");
+
+    menu_glowne.obsluz_opuszczenie_myszy();
+
+    // 3. Izolacja: Panel i Etykieta nie moga przyjmowac stylow menu
+    Panel test_panel;
+    TEST_ASSERT(test_panel.kolor_tla() != motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE),
+                "Panel zachowuje wlasne tlo i nie przejmuje stylu menu");
+    Etykieta test_etykieta("Test");
+    TEST_ASSERT(test_etykieta.kolor_tekstu() != motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE),
+                "Etykieta zachowuje normalny kolor tekstu");
+}
+
+// =========================================================================
+// 14. Test Czcionka extronic16Bunicode i odpornosc UTF-8
+// =========================================================================
+static void test_czcionka_extronic16b_i_odpornosc_utf8() {
+    printf("\n--- Test 14: Czcionka extronic16Bunicode i odpornosc UTF-8 ---\n");
+
+    // 1. Parametry matrycy czcionki
+    TEST_ASSERT(CzcionkaUI::WYSOKOSC == 16, "Wysokosc matrycy czcionki to 16 px");
+    TEST_ASSERT(CzcionkaUI::LICZBA_GLIFOW >= 1170, "Czcionka posiada co najmniej 1170 zdefiniowanych glifow");
+
+    // 2. Weryfikacja pelnego zestawu polskich znakow diakrytycznych w UTF-8
+    const char* polski_tekst = "Zażółć gęślą jaźń ZAŻÓŁĆ GĘŚLĄ JAŹŃ";
+    size_t i = 0;
+    int liczba_zdekodowanych = 0;
+    while (polski_tekst[i]) {
+        uint32_t cp = 0;
+        size_t z = CzcionkaUI::dekoduj_utf8(polski_tekst, i, &cp);
+        TEST_ASSERT(z > 0, "Poprawne dekodowanie punktu kodowego");
+        TEST_ASSERT(cp != '?', "Polski znak nie jest dekodowany jako znak zapytania");
+        int szer = CzcionkaUI::szerokosc_znaku(cp);
+        TEST_ASSERT(szer > 0, "Polski znak posiada niezerowa szerokosc metryki");
+        const uint16_t* bmp = CzcionkaUI::bitmapa_znaku(cp);
+        TEST_ASSERT(bmp != nullptr, "Polski znak posiada bitmape w tablicy glifow");
+
+        if (cp != ' ') {
+            bool ma_piksele = false;
+            for (int r = 0; r < 16; ++r) {
+                if (bmp[r] != 0) { ma_piksele = true; break; }
+            }
+            TEST_ASSERT(ma_piksele, "Glif czcionki zawiera piksele w bitmapie");
+        }
+        i += z;
+        ++liczba_zdekodowanych;
+    }
+    TEST_ASSERT(liczba_zdekodowanych == 35, "Zdekodowano dokladnie 35 znakow frazy testowej");
+
+    // Punkty kodowe Unicode dla liter alfabetu polskiego
+    uint32_t cp_test = 0;
+    CzcionkaUI::dekoduj_utf8("ą", 0, &cp_test); TEST_ASSERT(cp_test == 261, "ą -> U+0105 (261)");
+    CzcionkaUI::dekoduj_utf8("ć", 0, &cp_test); TEST_ASSERT(cp_test == 263, "ć -> U+0107 (263)");
+    CzcionkaUI::dekoduj_utf8("ę", 0, &cp_test); TEST_ASSERT(cp_test == 281, "ę -> U+0119 (281)");
+    CzcionkaUI::dekoduj_utf8("ł", 0, &cp_test); TEST_ASSERT(cp_test == 322, "ł -> U+0142 (322)");
+    CzcionkaUI::dekoduj_utf8("ń", 0, &cp_test); TEST_ASSERT(cp_test == 324, "ń -> U+0144 (324)");
+    CzcionkaUI::dekoduj_utf8("ó", 0, &cp_test); TEST_ASSERT(cp_test == 243, "ó -> U+00F3 (243)");
+    CzcionkaUI::dekoduj_utf8("ś", 0, &cp_test); TEST_ASSERT(cp_test == 347, "ś -> U+015B (347)");
+    CzcionkaUI::dekoduj_utf8("ź", 0, &cp_test); TEST_ASSERT(cp_test == 378, "ź -> U+017A (378)");
+    CzcionkaUI::dekoduj_utf8("ż", 0, &cp_test); TEST_ASSERT(cp_test == 380, "ż -> U+017C (380)");
+
+    CzcionkaUI::dekoduj_utf8("Ą", 0, &cp_test); TEST_ASSERT(cp_test == 260, "Ą -> U+0104 (260)");
+    CzcionkaUI::dekoduj_utf8("Ć", 0, &cp_test); TEST_ASSERT(cp_test == 262, "Ć -> U+0106 (262)");
+    CzcionkaUI::dekoduj_utf8("Ę", 0, &cp_test); TEST_ASSERT(cp_test == 280, "Ę -> U+0118 (280)");
+    CzcionkaUI::dekoduj_utf8("Ł", 0, &cp_test); TEST_ASSERT(cp_test == 321, "Ł -> U+0141 (321)");
+    CzcionkaUI::dekoduj_utf8("Ń", 0, &cp_test); TEST_ASSERT(cp_test == 323, "Ń -> U+0143 (323)");
+    CzcionkaUI::dekoduj_utf8("Ó", 0, &cp_test); TEST_ASSERT(cp_test == 211, "Ó -> U+00D3 (211)");
+    CzcionkaUI::dekoduj_utf8("Ś", 0, &cp_test); TEST_ASSERT(cp_test == 346, "Ś -> U+015A (346)");
+    CzcionkaUI::dekoduj_utf8("Ź", 0, &cp_test); TEST_ASSERT(cp_test == 377, "Ź -> U+0179 (377)");
+    CzcionkaUI::dekoduj_utf8("Ż", 0, &cp_test); TEST_ASSERT(cp_test == 379, "Ż -> U+017B (379)");
+
+    // 3. Odpornosc dekodera UTF-8 na sekwencje znieksztalcone i obciete
+    uint32_t zly_znak = 0;
+
+    // Obciety 2-bajtowy
+    const char obciety2[] = { (char)0xC3, 0 };
+    size_t z2 = CzcionkaUI::dekoduj_utf8(obciety2, 0, &zly_znak);
+    TEST_ASSERT(z2 == 1 && zly_znak == '?', "Obciety 2-bajtowy UTF-8 zwraca '?' i zuzywa 1 bajt");
+
+    // Obciety 3-bajtowy
+    const char obciety3[] = { (char)0xE2, (char)0x82, 0 };
+    size_t z3 = CzcionkaUI::dekoduj_utf8(obciety3, 0, &zly_znak);
+    TEST_ASSERT(z3 == 1 && zly_znak == '?', "Obciety 3-bajtowy UTF-8 zwraca '?' i zuzywa 1 bajt");
+
+    // Obciety 4-bajtowy
+    const char obciety4[] = { (char)0xF0, (char)0x9F, (char)0x98, 0 };
+    size_t z4 = CzcionkaUI::dekoduj_utf8(obciety4, 0, &zly_znak);
+    TEST_ASSERT(z4 == 1 && zly_znak == '?', "Obciety 4-bajtowy UTF-8 zwraca '?' i zuzywa 1 bajt");
+
+    // Nadmiarowy (overlong) 2-bajtowy U+002F jako 0xC0 0xAF
+    const char overlong2[] = { (char)0xC0, (char)0xAF, 0 };
+    size_t z_ov2 = CzcionkaUI::dekoduj_utf8(overlong2, 0, &zly_znak);
+    TEST_ASSERT(z_ov2 == 1 && zly_znak == '?', "Odrzucenie overlong 2-bajtowego");
+
+    // Nadmiarowy (overlong) 3-bajtowy jako 0xE0 0x80 0xAF
+    const char overlong3[] = { (char)0xE0, (char)0x80, (char)0xAF, 0 };
+    size_t z_ov3 = CzcionkaUI::dekoduj_utf8(overlong3, 0, &zly_znak);
+    TEST_ASSERT(z_ov3 == 1 && zly_znak == '?', "Odrzucenie overlong 3-bajtowego");
+
+    // Surogat UTF-16: 0xED 0xA0 0x80 (U+D800)
+    const char surr[] = { (char)0xED, (char)0xA0, (char)0x80, 0 };
+    size_t z_surr = CzcionkaUI::dekoduj_utf8(surr, 0, &zly_znak);
+    TEST_ASSERT(z_surr == 1 && zly_znak == '?', "Odrzucenie surogatu UTF-16");
+
+    // Bajt niedozwolony 0xFF
+    const char zly_bajt[] = { (char)0xFF, 0 };
+    size_t z_ff = CzcionkaUI::dekoduj_utf8(zly_bajt, 0, &zly_znak);
+    TEST_ASSERT(z_ff == 1 && zly_znak == '?', "Odrzucenie bajtu 0xFF");
+
+    // Poza zakresem Unicode (> 0x10FFFF)
+    const char poza_uni[] = { (char)0xF5, (char)0x80, (char)0x80, (char)0x80, 0 };
+    size_t z_poza = CzcionkaUI::dekoduj_utf8(poza_uni, 0, &zly_znak);
+    TEST_ASSERT(z_poza == 1 && zly_znak == '?', "Odrzucenie punktu kodowego > 0x10FFFF");
+}
+
 int main() {
     printf("======================================================================\n");
     printf(" BURSZTYN OS - TESTY JEDNOSTKOWE NOWYCH KOMPONENTOW BURSZTYNUI\n");
@@ -621,6 +947,9 @@ int main() {
     test_lista_wirtualna();
     test_tabela_wirtualna();
     test_powiadomienia();
+    test_motywy_kolory_pulpit_i_kontrolki();
+    test_menu_hover_i_izolacja();
+    test_czcionka_extronic16b_i_odpornosc_utf8();
 
     printf("\n======================================================================\n");
     printf("Wyniki: %d / %d testow udanych (%.1f%%)\n",

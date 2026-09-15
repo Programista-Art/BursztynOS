@@ -835,6 +835,14 @@ static void rysuj_tekst_ikony(int x, int y, int lx, int ly, int lw, int lh,
                              int(ui_skala_procent), kolor, tekst);
 }
 
+static void rysuj_etykiete_pulpitu(int x, int y, int w, int h, int skala,
+                                   uint32_t kolor, const char* tekst) {
+    if (!tekst || !tekst[0] || w <= 0 || h <= 0) return;
+    // Subtelny cien pod glifami zapewnia doskonala czytelnosc na jasnych tapetach.
+    rysuj_tekst_wysrodkowany(x + 1, y + 1, w, h, skala, KANONICZNY_KOLOR_CIENIA_PULPITU, tekst);
+    rysuj_tekst_wysrodkowany(x, y, w, h, skala, kolor, tekst);
+}
+
 static void podpis_do_szerokosci(const char* zrodlo, char* cel, size_t cap,
                                  int maks_szer) {
     if (!cel || !cap) return;
@@ -1511,10 +1519,11 @@ void RysujWpisyPulpitu() {
         char skrocony[40] = {}, podpis[40] = {};
         podpis_wpisu(wpisy_pulpitu[i].nazwa, skrocony, sizeof(skrocony));
         podpis_do_szerokosci(skrocony, podpis, sizeof(podpis), g.etykieta_szer);
-        const uint32_t kolor_etykiety_pliku = motyw_kolor_tekstu_na_tle(motyw_kolor(MOTYW_KOLOR_PULPIT));
-        rysuj_tekst_wysrodkowany(g.etykieta_x, g.etykieta_y,
-                                 g.etykieta_szer, PULPIT_LINE_H,
-                                 int(ui_skala_procent), kolor_etykiety_pliku, podpis);
+        // Etykiety plikow na pulpicie sa zawsze biale z cieniem.
+        const uint32_t kolor_etykiety_pliku = KANONICZNY_KOLOR_ETYKIETY_PULPITU;
+        rysuj_etykiete_pulpitu(g.etykieta_x, g.etykieta_y,
+                               g.etykieta_szer, PULPIT_LINE_H,
+                               int(ui_skala_procent), kolor_etykiety_pliku, podpis);
     }
 }
 
@@ -1702,21 +1711,21 @@ void rysuj_ikone_aplikacji(const AplikacjaPulpitu& aplikacja) {
             break;
     }
 
-    const uint32_t kolor_domyslny = motyw_kolor_tekstu_na_tle(motyw_kolor(MOTYW_KOLOR_PULPIT));
-    const uint32_t kolor_etykiety =
-        (aplikacja.typ_ikony == TypIkonyAplikacji::Snake && kolor_domyslny == 0x00FFFFFF)
-            ? 0x0095E600 : kolor_domyslny;
+    // Etykiety ikon na pulpicie sa celowym wyjatkiem: zawsze biale z cieniem,
+    // poniewaz sa renderowane bezposrednio nad tapetami, a nie powierzchniami okien.
+    // Nie moga zmienic sie na czarne pod wplywem zadnego motywu (np. Bursztyn Jasny).
+    const uint32_t kolor_etykiety = KANONICZNY_KOLOR_ETYKIETY_PULPITU;
     char linia[64]{};
     podpis_do_szerokosci(aplikacja.etykieta_1, linia, sizeof(linia), g.etykieta_szer);
-    rysuj_tekst_wysrodkowany(g.etykieta_x, g.etykieta_y,
-                             g.etykieta_szer, PULPIT_LINE_H,
-                             int(ui_skala_procent), kolor_etykiety, linia);
+    rysuj_etykiete_pulpitu(g.etykieta_x, g.etykieta_y,
+                           g.etykieta_szer, PULPIT_LINE_H,
+                           int(ui_skala_procent), kolor_etykiety, linia);
     if (aplikacja.etykieta_2) {
         podpis_do_szerokosci(aplikacja.etykieta_2, linia, sizeof(linia), g.etykieta_szer);
-        rysuj_tekst_wysrodkowany(g.etykieta_x,
-                                 g.etykieta_y + PULPIT_LINE_H + PULPIT_LINE_GAP,
-                                 g.etykieta_szer, PULPIT_LINE_H,
-                                 int(ui_skala_procent), kolor_etykiety, linia);
+        rysuj_etykiete_pulpitu(g.etykieta_x,
+                               g.etykieta_y + PULPIT_LINE_H + PULPIT_LINE_GAP,
+                               g.etykieta_szer, PULPIT_LINE_H,
+                               int(ui_skala_procent), kolor_etykiety, linia);
     }
 }
 
