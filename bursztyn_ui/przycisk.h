@@ -2,6 +2,7 @@
 
 #include "kontrolka.h"
 #include "czcionka.h"
+#include "ikona_ui.h"
 
 namespace BursztynUI {
 
@@ -72,8 +73,18 @@ public:
 
         rysuj_tlo_i_ramke(ctx, s);
 
-        // Tekst
-        ctx.rysuj_tekst_wysrodkowany(r, tekst_, s.tekst, skala);
+        if (ikona_id_ == 0) {
+            ctx.rysuj_tekst_wysrodkowany(r, tekst_, s.tekst, skala);
+        } else {
+            int iw = 16 * skala;
+            int tw = CzcionkaUI::zmierz_tekst(tekst_, skala);
+            int calosc = iw + 6 * skala + tw;
+            int ix = (r.szerokosc - calosc) / 2;
+            int iy = (r.wysokosc - iw) / 2;
+            rysuj_ikone_ui(ctx, Prostokat(ix, iy, iw, iw), ikona_id_, czy_wlaczona_, skala);
+            ctx.rysuj_tekst(Punkt(ix + iw + 6 * skala,
+                (r.wysokosc - CzcionkaUI::pobierz_wysokosc(skala)) / 2), tekst_, s.tekst, skala);
+        }
     }
 
     void obsluz_wejscie_myszy() override {
@@ -140,15 +151,18 @@ public:
         e.obsluzone = true;
     }
 
+protected:
+    void zastosuj_ikone_polecenia(uint32_t id) override { ustaw_ikone(id); }
+
 private:
     void wykonaj_akcje_klikniecia(ZdarzenieMyszki& e) {
-        if (cb_klikniecie_przycisku_) {
-            cb_klikniecie_przycisku_(this, dane_klikniecia_przycisku_);
+        if (polecenie_) {
+            polecenie_->wykonaj();
+        } else {
+            if (cb_klikniecie_przycisku_)
+                cb_klikniecie_przycisku_(this, dane_klikniecia_przycisku_);
+            obsluz_klikniecie(e);
         }
-        if (cb_klikniecie_) {
-            cb_klikniecie_(this, dane_klikniecia_);
-        }
-        obsluz_klikniecie(e);
     }
 
     uint32_t ikona_id_{0};

@@ -185,6 +185,33 @@ public:
         }
     }
 
+    // Operacje edycyjne gotowe do uzycia jako callbacki PolecenieUI.
+    bool kopiuj_do_schowka() {
+        if (!czy_ma_zaznaczenie()) return false;
+        char temp[MAKS_BUFOR];
+        size_t len = pobierz_zaznaczony_tekst(temp, sizeof(temp));
+        return len > 0 && clipboard_set("text/plain", temp, len + 1);
+    }
+    bool wytnij_do_schowka() {
+        if (czy_tylko_do_odczytu_ || !kopiuj_do_schowka()) return false;
+        usun_zaznaczenie();
+        return true;
+    }
+    bool wklej_ze_schowka() {
+        if (czy_tylko_do_odczytu_) return false;
+        char temp[MAKS_BUFOR]{};
+        uint64_t odczytano = 0;
+        if (!clipboard_read("text/plain", temp, sizeof(temp) - 1, &odczytano) || odczytano == 0)
+            return false;
+        if (odczytano >= sizeof(temp)) odczytano = sizeof(temp) - 1;
+        temp[odczytano] = '\0';
+        zastap_zaznaczenie(temp);
+        return true;
+    }
+    void usun_zaznaczony_tekst() {
+        if (!czy_tylko_do_odczytu_) usun_zaznaczenie();
+    }
+
     // Funkcje zwrotne
     void przy_zmianie(FunkcjaZmianyTekstu cb, void* dane = nullptr) {
         cb_zmiana_tekstu_ = cb;
@@ -401,41 +428,21 @@ public:
 
         // Ctrl + C (Copy)
         if (ctrl && klawisz_litery(e, 'c', 0x2E)) {
-            if (czy_ma_zaznaczenie()) {
-                char temp[MAKS_BUFOR];
-                size_t len = pobierz_zaznaczony_tekst(temp, sizeof(temp));
-                if (len > 0) {
-                    clipboard_set("text/plain", temp, len + 1);
-                }
-            }
+            kopiuj_do_schowka();
             e.obsluzone = true;
             return;
         }
 
         // Ctrl + X (Cut)
         if (ctrl && klawisz_litery(e, 'x', 0x2D)) {
-            if (czy_ma_zaznaczenie()) {
-                char temp[MAKS_BUFOR];
-                size_t len = pobierz_zaznaczony_tekst(temp, sizeof(temp));
-                if (len > 0) {
-                    clipboard_set("text/plain", temp, len + 1);
-                    if (!czy_tylko_do_odczytu_) usun_zaznaczenie();
-                }
-            }
+            wytnij_do_schowka();
             e.obsluzone = true;
             return;
         }
 
         // Ctrl + V (Paste)
         if (ctrl && klawisz_litery(e, 'v', 0x2F)) {
-            if (!czy_tylko_do_odczytu_) {
-                char clip_buf[MAKS_BUFOR] = {0};
-                uint64_t odczytano = 0;
-                if (clipboard_read("text/plain", clip_buf, sizeof(clip_buf) - 1, &odczytano) && odczytano > 0) {
-                    clip_buf[odczytano] = '\0';
-                    zastap_zaznaczenie(clip_buf);
-                }
-            }
+            wklej_ze_schowka();
             e.obsluzone = true;
             return;
         }

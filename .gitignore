@@ -40,6 +40,7 @@ narzedzia/aktualizacje/test_gui_aktualizacje.py
 .test_run_live/
 narzedzia/aktualizacje/test_16k_bws84_irq.py
 .motywytest/
+.bursztyn-ui-test/
 narzedzia/test_motyw_host.cpp
 narzedzia/test_motywy_gui.py
 narzedzia/test_motywy_qemu.py
@@ -47,6 +48,8 @@ narzedzia/aktualizacje/__pycache__/test_16k_bws84_irq.cpython-312.pyc
 narzedzia/test_kalkulator_gui.py
 narzedzia/test_motywy_screenshot.py
 narzedzia/test_notatnik_gui.py
+.kontrolki4-test/
+test16k_screenshot.png
 
 
 

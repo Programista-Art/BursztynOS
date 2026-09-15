@@ -159,6 +159,10 @@ private:
     int ikona_h_{0};
 
     void rysuj_ikone(KontekstRysowania& ctx, int x, int y, int w, int h) {
+        if (ikona_id() != 0) {
+            rysuj_ikone_ui(ctx, Prostokat(x, y, w, h), ikona_id(), czy_wlaczona_, skala_dpi_);
+            return;
+        }
         if (piksele_ikony_ && ikona_w_ > 0 && ikona_h_ > 0) {
             // Rysowanie z bufora pikseli bez alokacji w paint.
             Punkt off = ctx.pobierz_przesuniecie();
@@ -186,45 +190,51 @@ private:
             }
         } else {
             // Rysowanie wektorowej ikony systemowej
+            uint32_t akcent = motyw_kolor(MOTYW_KOLOR_AKCENT);
+            uint32_t aktywny = motyw_kolor(MOTYW_KOLOR_AKCENT_AKTYWNY);
+            uint32_t panel = motyw_kolor(MOTYW_KOLOR_PANEL);
+            uint32_t podniesiony = motyw_kolor(MOTYW_KOLOR_PODNIESIONY);
+            uint32_t ramka = motyw_kolor(MOTYW_KOLOR_RAMKA);
+            uint32_t tekst_drugi = motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI);
             switch (typ_ikony_) {
                 case TypIkonyWidoku::Folder:
-                    ctx.rysuj_prostokat(Prostokat(x, y + 2, w, h - 2), 0x00FFBF00);
-                    ctx.rysuj_prostokat(Prostokat(x + 1, y + 5, w - 2, h - 6), 0x00D59600);
-                    ctx.rysuj_prostokat(Prostokat(x + 1, y + 1, w / 2, 3), 0x00FFBF00);
+                    ctx.rysuj_prostokat(Prostokat(x, y + 2, w, h - 2), akcent);
+                    ctx.rysuj_prostokat(Prostokat(x + 1, y + 5, w - 2, h - 6), aktywny);
+                    ctx.rysuj_prostokat(Prostokat(x + 1, y + 1, w / 2, 3), akcent);
                     break;
                 case TypIkonyWidoku::Aplikacja:
-                    ctx.rysuj_zaokraglony_prostokat(Prostokat(x, y, w, h), 0x00301500, 3);
-                    ctx.rysuj_zaokraglona_ramke(Prostokat(x, y, w, h), 0x00E58A00, 3, 1);
-                    ctx.rysuj_prostokat(Prostokat(x + 2, y + 2, w - 4, 3), 0x00E58A00);
+                    ctx.rysuj_zaokraglony_prostokat(Prostokat(x, y, w, h), panel, 3 * skala_dpi_);
+                    ctx.rysuj_zaokraglona_ramke(Prostokat(x, y, w, h), akcent, 3 * skala_dpi_, skala_dpi_);
+                    ctx.rysuj_prostokat(Prostokat(x + 2, y + 2, w - 4, 3), akcent);
                     break;
                 case TypIkonyWidoku::Obraz:
-                    ctx.rysuj_zaokraglony_prostokat(Prostokat(x, y, w, h), 0x002080C0, 2);
-                    ctx.rysuj_prostokat(Prostokat(x + 3, y + h - 6, 4, 4), 0x0020A040);
-                    ctx.rysuj_prostokat(Prostokat(x + 7, y + h - 8, 6, 6), 0x0030C060);
-                    ctx.rysuj_prostokat(Prostokat(x + w - 5, y + 3, 2, 2), 0x00FFD700);
+                    ctx.rysuj_zaokraglony_prostokat(Prostokat(x, y, w, h), motyw_kolor(MOTYW_KOLOR_INFORMACJA), 2 * skala_dpi_);
+                    ctx.rysuj_prostokat(Prostokat(x + 3, y + h - 6, 4, 4), motyw_kolor(MOTYW_KOLOR_SUKCES));
+                    ctx.rysuj_prostokat(Prostokat(x + 7, y + h - 8, 6, 6), akcent);
+                    ctx.rysuj_prostokat(Prostokat(x + w - 5, y + 3, 2, 2), motyw_kolor(MOTYW_KOLOR_OSTRZEZENIE));
                     break;
                 case TypIkonyWidoku::Dysk:
-                    ctx.rysuj_zaokraglony_prostokat(Prostokat(x, y + 3, w, h - 6), 0x00606060, 2);
-                    ctx.rysuj_prostokat(Prostokat(x + w - 4, y + h - 5, 2, 1), 0x0000FF00);
+                    ctx.rysuj_zaokraglony_prostokat(Prostokat(x, y + 3, w, h - 6), tekst_drugi, 2 * skala_dpi_);
+                    ctx.rysuj_prostokat(Prostokat(x + w - 4, y + h - 5, 2, 1), motyw_kolor(MOTYW_KOLOR_SUKCES));
                     break;
                 case TypIkonyWidoku::Gwiazda:
-                    ctx.rysuj_zaokraglony_prostokat(Prostokat(x + 2, y + 2, w - 4, h - 4), 0x00FFD700, 2);
-                    ctx.rysuj_prostokat(Prostokat(x + w / 2 - 1, y, 2, h), 0x00FFD700);
-                    ctx.rysuj_prostokat(Prostokat(x, y + h / 2 - 1, w, 2), 0x00FFD700);
+                    ctx.rysuj_zaokraglony_prostokat(Prostokat(x + 2, y + 2, w - 4, h - 4), akcent, 2 * skala_dpi_);
+                    ctx.rysuj_prostokat(Prostokat(x + w / 2 - 1, y, 2, h), akcent);
+                    ctx.rysuj_prostokat(Prostokat(x, y + h / 2 - 1, w, 2), akcent);
                     break;
                 case TypIkonyWidoku::Ustawienia:
-                    ctx.rysuj_zaokraglony_prostokat(Prostokat(x + 2, y + 2, w - 4, h - 4), 0x00808080, 3);
-                    ctx.rysuj_zaokraglona_ramke(Prostokat(x + 2, y + 2, w - 4, h - 4), 0x00C0C0C0, 3, 1);
-                    ctx.rysuj_prostokat(Prostokat(x + w / 2 - 1, y + h / 2 - 1, 2, 2), 0x002B1D0E);
+                    ctx.rysuj_zaokraglony_prostokat(Prostokat(x + 2, y + 2, w - 4, h - 4), tekst_drugi, 3 * skala_dpi_);
+                    ctx.rysuj_zaokraglona_ramke(Prostokat(x + 2, y + 2, w - 4, h - 4), ramka, 3 * skala_dpi_, skala_dpi_);
+                    ctx.rysuj_prostokat(Prostokat(x + w / 2 - 1, y + h / 2 - 1, 2, 2), panel);
                     break;
                 case TypIkonyWidoku::Dokument:
                 case TypIkonyWidoku::Plik:
                 default:
-                    ctx.rysuj_prostokat(Prostokat(x + 1, y, w - 2, h), 0x00E0E0E0);
-                    ctx.rysuj_ramke(Prostokat(x + 1, y, w - 2, h), 0x00707070);
-                    ctx.rysuj_prostokat(Prostokat(x + 3, y + 4, w - 6, 1), 0x00505050);
-                    ctx.rysuj_prostokat(Prostokat(x + 3, y + 8, w - 6, 1), 0x00505050);
-                    ctx.rysuj_prostokat(Prostokat(x + 3, y + 12, w - 8, 1), 0x00505050);
+                    ctx.rysuj_prostokat(Prostokat(x + 1, y, w - 2, h), podniesiony);
+                    ctx.rysuj_ramke(Prostokat(x + 1, y, w - 2, h), ramka);
+                    ctx.rysuj_prostokat(Prostokat(x + 3, y + 4, w - 6, 1), tekst_drugi);
+                    ctx.rysuj_prostokat(Prostokat(x + 3, y + 8, w - 6, 1), tekst_drugi);
+                    ctx.rysuj_prostokat(Prostokat(x + 3, y + 12, w - 8, 1), tekst_drugi);
                     break;
             }
         }

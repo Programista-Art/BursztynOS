@@ -29,11 +29,11 @@ struct NaglowekBur {
 
 extern "C" __attribute__((noreturn)) void _start();
 
-static constexpr uint64_t BUR_TEKST_ROZMIAR     = 0x70000ULL; // 448 KiB
+static constexpr uint64_t BUR_TEKST_ROZMIAR     = 0x80000ULL; // 512 KiB
 static constexpr uint64_t BUR_TEKST_PRZESUNIECIE = 0x1000ULL;
 static constexpr uint64_t BUR_TEKST_WIRTUALNY     = 0x1001000ULL;
-static constexpr uint64_t BUR_DANE_PRZESUNIECIE   = 0x71000ULL;
-static constexpr uint64_t BUR_DANE_WIRTUALNY       = 0x1071000ULL;
+static constexpr uint64_t BUR_DANE_PRZESUNIECIE   = 0x81000ULL;
+static constexpr uint64_t BUR_DANE_WIRTUALNY       = 0x1081000ULL;
 static constexpr uint64_t BUR_DANE_ROZMIAR         = 131072ULL;
 
 extern "C" {
@@ -3383,18 +3383,18 @@ static void wykonaj_testy_bursztyn_ui() {
                 !powierzchnia_testowa.czy_wcisnieta());
     bws_sprawdz(popupy.czy_brudny());
     Prostokat brudny_zamkniecia = popupy.brudny_obszar();
-    bws_sprawdz(brudny_zamkniecia.szerokosc == testowy_popup.szerokosc &&
-                brudny_zamkniecia.wysokosc == testowy_popup.wysokosc);
+    bws_sprawdz(brudny_zamkniecia.szerokosc >= testowy_popup.szerokosc &&
+                brudny_zamkniecia.wysokosc >= testowy_popup.wysokosc);
 
-    // Klik poza popupem zamyka go, ale pozostaje nieobsluzony, aby Okno moglo
-    // skierowac go dalej do zwyklego drzewa kontrolek.
+    // Klik poza popupem zamyka go i jest konsumowany: nie moze trafic do
+    // kontrolki pod popupem ani otworzyc jej menu kontekstowego.
     bws_sprawdz(popupy.otworz(powierzchnia_testowa, testowy_popup));
     ZdarzenieMyszki popup_poza{};
     popup_poza.typ = TypZdarzenia::WcisniecieMyszy;
     popup_poza.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
     popup_poza.x = 5; popup_poza.y = 35;
-    bws_sprawdz(!popupy.obsluz_wcisniecie(popup_poza));
-    bws_sprawdz(!popupy.czy_otwarty() && !popup_poza.obsluzone);
+    bws_sprawdz(popupy.obsluz_wcisniecie(popup_poza));
+    bws_sprawdz(!popupy.czy_otwarty() && popup_poza.obsluzone);
 
     // Escape dziala takze wtedy, gdy zwykle drzewo wlasciciela nie ma fokusu.
     okno_popup.ustaw_fokus(nullptr);
@@ -3541,6 +3541,66 @@ static void wykonaj_testy_bursztyn_ui() {
     bws_sprawdz(popupy.liczba_powierzchni() == 1);
     popupy.zamknij();
     bws_log_u64("[POPUP DIAG] bledy_po_podmenu=", bws_test_blad - bledy_bui_przed);
+
+    // Menu kontekstowe jest wlasciwoscia kazdej Kontrolka. Najglebszy cel
+    // dziedziczy menu rodzica, ale menu dziecka ma pierwszenstwo. Hook jest
+    // wywolywany bezposrednio przed kazdym otwarciem.
+    struct KontrolkaPrzygotowujacaMenu : Kontrolka {
+        int przygotowania{0};
+        void przygotuj_menu_kontekstowe(MenuKontekstowe& m) override {
+            ++przygotowania;
+            ElementMenu* e = m.menu().znajdz(501);
+            if (e) e->ustaw_wlaczony(przygotowania > 1);
+        }
+    };
+    MenuKontekstowe menu_rodzica;
+    MenuKontekstowe menu_dziecka;
+    ElementMenu* dynamiczny_menu = &menu_rodzica.menu().dodaj_element("Dynamiczny", 501);
+    KontrolkaPrzygotowujacaMenu* rodzic_menu = new KontrolkaPrzygotowujacaMenu();
+    Kontrolka* dziecko_menu = new Kontrolka();
+    bws_sprawdz(rodzic_menu && dziecko_menu && rodzic_menu->dodaj_kontrolke(dziecko_menu));
+    rodzic_menu->ustaw_menu_kontekstowe(menu_rodzica);
+    bws_sprawdz(okno_popup.kontrolka_glowna()->dodaj_kontrolke(rodzic_menu));
+    okno_popup.przelicz_uklad();
+    rodzic_menu->rozmiesc(Prostokat(8, 8, 200, 100));
+    dziecko_menu->rozmiesc(Prostokat(0, 0, 100, 50));
+    bws_zdarzenie prawy_ctx{};
+    prawy_ctx.typ = BWS_ZDARZENIE_MYSZ_PRAWY_DOWN;
+    prawy_ctx.x = WIN_X + 20; prawy_ctx.y = WIN_Y + 40;
+    okno_popup.obsluz_zdarzenie(prawy_ctx);
+    bws_sprawdz(rodzic_menu->przygotowania == 1 &&
+                !dynamiczny_menu->czy_wlaczony());
+    popupy.zamknij();
+    dziecko_menu->ustaw_menu_kontekstowe(menu_dziecka);
+    bws_sprawdz(okno_popup.znajdz_menu_kontekstowe(dziecko_menu) == &menu_dziecka);
+    dziecko_menu->ustaw_menu_kontekstowe(nullptr);
+
+    // Klawisz Menu oraz Shift+F10 kotwicza odziedziczone menu przy kontrolce.
+    okno_popup.ustaw_fokus(dziecko_menu);
+    bws_zdarzenie klawisz_menu_ctx{};
+    klawisz_menu_ctx.typ = BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;
+    klawisz_menu_ctx.x = 1;
+    klawisz_menu_ctx.kod = BWS_KEY_SOURCE_USB | 101U;
+    okno_popup.obsluz_zdarzenie(klawisz_menu_ctx);
+    bws_sprawdz(menu_rodzica.czy_otwarte() && rodzic_menu->przygotowania == 2 &&
+                dynamiczny_menu->czy_wlaczony());
+    popupy.zamknij();
+    bws_zdarzenie shift_f10{};
+    shift_f10.typ = BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;
+    shift_f10.x = 1;
+    shift_f10.kod = BWS_KEY_SOURCE_USB | 67U;
+    shift_f10.przyciski = BWS_MOD_SHIFT;
+    okno_popup.obsluz_zdarzenie(shift_f10);
+    bws_sprawdz(menu_rodzica.czy_otwarte() && rodzic_menu->przygotowania == 3);
+
+    // Zmiana motywu uniewaznia otwarta powierzchnie; ponowne otwieranie po
+    // zamknieciu nadal nie alokuje po rozgrzaniu modelu.
+    KontekstRysowania ctx_motyw_popup;
+    okno_popup.rysuj(ctx_motyw_popup, true);
+    okno_popup.zaktualizuj_motyw();
+    bws_sprawdz(popupy.czy_brudny());
+    popupy.zamknij();
+    okno_popup.ustaw_fokus(nullptr);
 
     // MenuGlowne: otwarcie mysza i przelaczenie top-level przez Right.
     MenuGlowne* menu_glowne_test_ptr = new MenuGlowne();

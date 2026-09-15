@@ -1,0 +1,8 @@
+nazwa = "Kontrolki 4"
+autor = "Programista Art"
+wersja = "0.1"
+poziom_zaufania = 4
+plik_startowy = "kontrolki4.bur"
+uprawnienia = [
+    "okna"
+]

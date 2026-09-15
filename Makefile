@@ -322,6 +322,7 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	demo_ui_blob.o \
 	kontrolki2_blob.o \
 	kontrolki3blob.o \
+	kontrolki4blob.o \
 	repro_blob.o \
 	snake_blob.o \
 	przegladarka_obrazow_blob.o \
@@ -531,6 +532,16 @@ kontrolki3blob.o: kontrolki3tmp.o bursztyn_gui.o programy/kontrolki3/kontrolki3_
 	$(OBJCOPY) -O binary kontrolki3.elf kontrolki3.bin
 	$(LD) -r -b binary kontrolki3.bin -o kontrolki3blob.o
 
+# BursztynUI Kontrolki 4 - Showroom nowych komponentow retained-mode.
+kontrolki4tmp.o: programy/kontrolki4/kontrolki4.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
+
+kontrolki4blob.o: kontrolki4tmp.o bursztyn_gui.o programy/kontrolki4/kontrolki4_linker.ld
+	$(LD) --gc-sections -T programy/kontrolki4/kontrolki4_linker.ld $(RING3_LDFLAGS) \
+		kontrolki4tmp.o bursztyn_gui.o -o kontrolki4.elf
+	$(OBJCOPY) -O binary kontrolki4.elf kontrolki4.bin
+	$(LD) -r -b binary kontrolki4.bin -o kontrolki4blob.o
+
 # Obraz testowy test.bmp	
 test_bmp_blob.o: obrazy/test.bmp
 	$(LD) -r -b binary obrazy/test.bmp -o test_bmp_blob.o
@@ -700,7 +711,17 @@ $(GRUB_CFG): $(KERNEL) $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile
 	@mkdir -p .installer-build
 	grub-mkstandalone -O x86_64-efi --locales="" --fonts="" --modules="part_gpt fat loadenv test normal multiboot2 configfile search search_fs_file all_video gfxterm" -o $@ "boot/grub/grub.cfg=$<"
 
-.PHONY: installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-aktualizacje-gui test-bur-loader test-aktualizacja-qemu test-rozruch-qemu test-ota audit-stos-jadra test-stos-jadra test-wspolbieznosc test-guard-page test-16k-bws84 test-motywy test-motywy-unit test-motywy-gui test-motywy-qemu test-notatnik-gui test-kalkulator-gui
+.PHONY: installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-aktualizacje-gui test-bur-loader test-aktualizacja-qemu test-rozruch-qemu test-ota audit-stos-jadra test-stos-jadra test-wspolbieznosc test-guard-page test-16k-bws84 test-motywy test-motywy-unit test-motywy-gui test-motywy-qemu test-notatnik-gui test-kalkulator-gui test-bursztyn-ui-polecenia test-kontrolki4
+
+test-kontrolki4:
+	@mkdir -p .kontrolki4-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined narzedzia/test_kontrolki4.cpp -o .kontrolki4-test/test-k4
+	ASAN_OPTIONS=detect_leaks=0 .kontrolki4-test/test-k4
+
+test-bursztyn-ui-polecenia:
+	@mkdir -p .bursztyn-ui-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined narzedzia/test_bursztyn_ui_polecenia.cpp -o .bursztyn-ui-test/test-polecenia
+	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-polecenia
 
 test-motywy-unit:
 	@mkdir -p .motywytest

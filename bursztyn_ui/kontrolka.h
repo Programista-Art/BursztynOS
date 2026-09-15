@@ -7,12 +7,14 @@
 #include "zdarzenia.h"
 #include "motyw.h"
 #include "rysowanie.h"
+#include "polecenie_ui.h"
 
 namespace BursztynUI {
 
 class ZarzadcaPopupow;
+class MenuKontekstowe;
 
-class Kontrolka {
+class Kontrolka : private OdbiorcaPolecenia {
 public:
     static constexpr size_t MAKS_DZIECI = 64;
     static constexpr size_t MAKS_DLUGOSC_TEKSTU = 256;
@@ -30,6 +32,7 @@ public:
         preferowany_rozmiar_ = Rozmiar(-1, -1);
     }
     virtual ~Kontrolka() {
+        ustaw_polecenie(nullptr);
         wyczysc_kontrolki();
     }
 
@@ -79,6 +82,27 @@ public:
         tekst_[i] = '\0';
         uniewaznij();
     }
+
+    // Polecenie nie jest wlasnoscia kontrolki. Dwukierunkowe odpiecie chroni
+    // oba porzadki niszczenia obiektow.
+    PolecenieUI* polecenie() const { return polecenie_; }
+    bool ustaw_polecenie(PolecenieUI* p) {
+        if (polecenie_ == p) return true;
+        if (polecenie_) polecenie_->odlacz(this);
+        polecenie_ = nullptr;
+        if (p && !p->dolacz(this)) return false;
+        polecenie_ = p;
+        return true;
+    }
+    bool ustaw_polecenie(PolecenieUI& p) { return ustaw_polecenie(&p); }
+    bool wykonaj_polecenie() { return polecenie_ && polecenie_->wykonaj(); }
+
+    // MenuKontekstowe jest wspoldzielona, nieposiadana referencja. Okno
+    // wyszukuje ja od najglebszej kontrolki ku rodzicom.
+    void ustaw_menu_kontekstowe(MenuKontekstowe* menu) { menu_kontekstowe_ = menu; }
+    void ustaw_menu_kontekstowe(MenuKontekstowe& menu) { ustaw_menu_kontekstowe(&menu); }
+    MenuKontekstowe* menu_kontekstowe() const { return menu_kontekstowe_; }
+    virtual void przygotuj_menu_kontekstowe(MenuKontekstowe&) {}
 
     // =========================================================================
     // 2. Drzewo kontrolek i kolejność Z-order
@@ -860,6 +884,23 @@ public:
     virtual void przy_utracie_fokusu() { obsluz_utrate_skupienia(); }
 
 protected:
+    virtual void zastosuj_ikone_polecenia(uint32_t) {}
+    virtual void zastosuj_zaznaczenie_polecenia(bool) {}
+
+private:
+    void odswiez_z_polecenia(PolecenieUI& p) override {
+        ustaw_tekst(p.tekst());
+        ustaw_wlaczona(p.czy_wlaczona());
+        ustaw_widoczna(p.czy_widoczna());
+        zastosuj_ikone_polecenia(p.ikona());
+        zastosuj_zaznaczenie_polecenia(p.czy_zaznaczona());
+        uniewaznij();
+    }
+    void polecenie_zniszczone(PolecenieUI& p) override {
+        if (polecenie_ == &p) polecenie_ = nullptr;
+    }
+
+protected:
     // Uklad nie moze zmieniac sie przy przejsciu normalny/fokus/hover.
     // Rezerwujemy najwieksza zadana grubosc sposrod stanow (albo jawne
     // nadpisanie kontrolki), a biezacy stan zmienia jedynie sposob rysowania.
@@ -902,6 +943,8 @@ protected:
 
     Kontrolka* rodzic_{nullptr};
     ZarzadcaPopupow* zarzadca_popupow_{nullptr};
+    MenuKontekstowe* menu_kontekstowe_{nullptr};
+    PolecenieUI* polecenie_{nullptr};
     Kontrolka* dzieci_[MAKS_DZIECI]{nullptr};
     size_t liczba_dzieci_{0};
 

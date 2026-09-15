@@ -41,11 +41,11 @@ int MENU_X = 10;
 int MENU_W = 260;
 int MENU_GORNY_MARGINES = 10;
 int MENU_ELEMENT_WYS = 25;
-constexpr int MENU_ELEMENTOW = 17;
+constexpr int MENU_ELEMENTOW = 18;
 int MENU_WYS = (10 * 2) + (MENU_ELEMENTOW * 25);
 
 // Pozycja "Gry ->" w glownym Menu Start.
-constexpr int MENU_GRY_INDEX = 14;
+constexpr int MENU_GRY_INDEX = 15;
 int MENU_GRY_W = 180;
 constexpr int MENU_GRY_ELEMENTOW = 1;
 int MENU_GRY_WYS = (10 * 2) + (MENU_GRY_ELEMENTOW * 25);
@@ -120,6 +120,8 @@ const char* const SCIEZKA_KONTROLKI2 =
     "/programy/kontrolki2.cebula/kontrolki2.bur";
 const char* const SCIEZKA_KONTROLKI3 =
     "/programy/kontrolki3.cebula/kontrolki3.bur";
+const char* const SCIEZKA_KONTROLKI4 =
+    "/programy/kontrolki4.cebula/kontrolki4.bur";
 const char* const SCIEZKA_SNAKE = "/gry/snake.cebula/snake.bur";
 const char* const SCIEZKA_PRZEGLADARKA_OBRAZOW =
     "/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur";
@@ -143,6 +145,7 @@ enum class TypIkonyAplikacji : uint8_t {
     DemoUI,
     Kontrolki2,
     Kontrolki3,
+    Kontrolki4,
     Aktualizacje,
     Motywy
 };
@@ -181,7 +184,9 @@ AplikacjaPulpitu APLIKACJE_PULPITU[] = {
     {880, 50, SCIEZKA_AKTUALIZACJE, "Aktualizacje Systemu", "Aktualizacje", nullptr,
      TypIkonyAplikacji::Aktualizacje},
     {960, 50, SCIEZKA_MOTYWY, "Motywy", "Motywy", nullptr,
-     TypIkonyAplikacji::Motywy}
+     TypIkonyAplikacji::Motywy},
+    {10, 140, SCIEZKA_KONTROLKI4, "Kontrolki 4", "Kontrolki 4", nullptr,
+     TypIkonyAplikacji::Kontrolki4}
 };
 
 constexpr size_t LICZBA_APLIKACJI_PULPITU =
@@ -1667,6 +1672,15 @@ void rysuj_ikone_aplikacji(const AplikacjaPulpitu& aplikacja) {
             rysuj_fragment_ikony(x,y,8,35,32,4,0x00CC33CC);
             rysuj_fragment_ikony(x,y,31,32,7,10,0x00FFFFFF);
             break;
+        case TypIkonyAplikacji::Kontrolki4:
+            // Cztery kolorowe kafle ukladu (siatka/panele): rozpoznawalny znak K4.
+            rysuj_fragment_ikony(x,y,0,0,48,48,0x001A243B);
+            rysuj_fragment_ikony(x,y,3,3,42,42,0x00273A5C);
+            rysuj_fragment_ikony(x,y,7,7,14,14,0x00FFBF00);
+            rysuj_fragment_ikony(x,y,27,7,14,14,0x0020A040);
+            rysuj_fragment_ikony(x,y,7,27,14,14,0x002070D0);
+            rysuj_fragment_ikony(x,y,27,27,14,14,0x00E58A00);
+            break;
         case TypIkonyAplikacji::Aktualizacje:
             // Tarcza aktualizacji ze strzalka w dol i podstawka OTA.
             rysuj_fragment_ikony(x,y,0,0,48,48,0x001B2838);
@@ -1742,6 +1756,7 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
             "> Demo BursztynUI",
             "> Kontrolki 2",
             "> Kontrolki 3",
+            "> Kontrolki 4",
             "> Testy systemu",
             "> Tapety",
             "> Ustawienia ekranu",
@@ -2011,18 +2026,22 @@ void obsluz_element_menu(int item_index) {
                                 "Kontrolki 3");
             break;
         case 9:
-            uruchom_lub_aktywuj(SCIEZKA_TEST, "Testy Bursztyn OS");
+            uruchom_lub_aktywuj(SCIEZKA_KONTROLKI4,
+                                "Kontrolki 4");
             break;
         case 10:
-            uruchom_lub_aktywuj("/programy/tapety.cebula/tapety.bur", "Tapety");
+            uruchom_lub_aktywuj(SCIEZKA_TEST, "Testy Bursztyn OS");
             break;
         case 11:
-            uruchom_lub_aktywuj(EKRAN_PROGRAM,"Ustawienia ekranu");
+            uruchom_lub_aktywuj("/programy/tapety.cebula/tapety.bur", "Tapety");
             break;
         case 12:
-            uruchom_lub_aktywuj(SCIEZKA_AKTUALIZACJE, "Aktualizacje Systemu");
+            uruchom_lub_aktywuj(EKRAN_PROGRAM,"Ustawienia ekranu");
             break;
         case 13:
+            uruchom_lub_aktywuj(SCIEZKA_AKTUALIZACJE, "Aktualizacje Systemu");
+            break;
+        case 14:
             uruchom_lub_aktywuj(SCIEZKA_MOTYWY, "Motywy");
             break;
         case MENU_GRY_INDEX:
@@ -2030,10 +2049,10 @@ void obsluz_element_menu(int item_index) {
             aktualizuj_overlay_menu();
             RysujPulpit(true);
             break;
-        case 15:
+        case 16:
             wykonaj_restart();
             break;
-        case 16:
+        case 17:
             wykonaj_zamkniecie();
             break;
         default:

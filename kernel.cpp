@@ -159,6 +159,9 @@ extern "C" uint8_t _binary_kontrolki2_bin_end[];
 extern "C" uint8_t _binary_kontrolki3_bin_start[];
 extern "C" uint8_t _binary_kontrolki3_bin_end[];
 
+extern "C" uint8_t _binary_kontrolki4_bin_start[];
+extern "C" uint8_t _binary_kontrolki4_bin_end[];
+
 extern "C" uint8_t _binary_aktualizacje_bin_start[];
 extern "C" uint8_t _binary_aktualizacje_bin_end[];
 
@@ -785,6 +788,7 @@ static const char* const KATALOGI_SYSTEMOWE[] = {
         "/programy/demo_ui.cebula",
         "/programy/kontrolki2.cebula",
         "/programy/kontrolki3.cebula",
+        "/programy/kontrolki4.cebula",
         "/programy/aktualizacje.cebula",
         "/programy/test.cebula",
         "/programy/ekran.cebula",
@@ -1172,6 +1176,16 @@ void instaluj_wbudowane_programy() {
         "wersja = \"0.1\"\n"
         "poziom_zaufania = 4\n"
         "plik_startowy = \"kontrolki3.bur\"\n"
+        "uprawnienia = [\n"
+        "    \"okna\"\n"
+        "]\n";
+
+    static const char MANIFEST_KONTROLKI4[] =
+        "nazwa = \"Kontrolki 4\"\n"
+        "autor = \"Programista Art\"\n"
+        "wersja = \"0.1\"\n"
+        "poziom_zaufania = 4\n"
+        "plik_startowy = \"kontrolki4.bur\"\n"
         "uprawnienia = [\n"
         "    \"okna\"\n"
         "]\n";
@@ -1644,6 +1658,19 @@ void instaluj_wbudowane_programy() {
     } else {
         wypisz_log(
             "[BSP] Kontrolki 3 zainstalowane jako .cebula.");
+    }
+
+    if (!instaluj_paczke(
+            "/programy/kontrolki4.cebula/opis.aplikacji",
+            MANIFEST_KONTROLKI4,
+            "/programy/kontrolki4.cebula/kontrolki4.bur",
+            _binary_kontrolki4_bin_start,
+            _binary_kontrolki4_bin_end)) {
+        wypisz_log(
+            "[BSP-BLAD] Nie mozna zainstalowac Kontrolek 4.");
+    } else {
+        wypisz_log(
+            "[BSP] Kontrolki 4 zainstalowane jako .cebula.");
     }
 
     if (!instaluj_paczke(

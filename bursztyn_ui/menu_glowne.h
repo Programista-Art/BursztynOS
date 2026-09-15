@@ -11,6 +11,7 @@ public:
         czy_moze_miec_fokus_ = true;
         for (int i = 0; i < ZarzadcaPopupow::MAKS_GLEBOKOSC; ++i)
             widoki_[i].ustaw(nullptr, this);
+        menu_.przy_zmianie(&MenuGlowne::menu_zmienione, this);
     }
 
     void zaktualizuj_motyw() override {
@@ -82,6 +83,10 @@ public:
     }
 
 private:
+    static void menu_zmienione(Menu&, void* dane) {
+        MenuGlowne* self = static_cast<MenuGlowne*>(dane);
+        if (self) self->uniewaznij();
+    }
     Prostokat prostokat_glowny(int indeks) const {
         SkalaUI s = skala_dpi_; int x = 0;
         for (int i = 0; i < static_cast<int>(menu_.liczba_elementow()); ++i) {
@@ -114,6 +119,7 @@ private:
         if (!e || !e->czy_wlaczony() || !z) return;
         aktywny_glowny_ = indeks;
         if (!e->podmenu()) { e->wykonaj(); return; }
+        widoki_[0].zaktualizuj_motyw();
         widoki_[0].ustaw(e->podmenu(), this);
         Prostokat kotwica = prostokat_glowny(indeks);
         kotwica.x += obszar_ekranu_.x; kotwica.y += obszar_ekranu_.y;
@@ -134,6 +140,7 @@ private:
         int poziom = widok.poziom_popupu() + 1;
         if (poziom >= ZarzadcaPopupow::MAKS_GLEBOKOSC) return;
         ZarzadcaPopupow* z = widok.zarzadca(); z->zamknij_od_poziomu(poziom);
+        widoki_[poziom].zaktualizuj_motyw();
         widoki_[poziom].ustaw(e.podmenu(), this);
         Prostokat gdzie = z->umiesc_podmenu(element,
             widoki_[poziom].wymagany_rozmiar(skala_dpi_));

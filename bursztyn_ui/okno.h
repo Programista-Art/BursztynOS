@@ -5,11 +5,13 @@
 #include "zdarzenia.h"
 #include "rysowanie.h"
 #include "popup.h"
+#include "menu_kontekstowe.h"
+#include "polecenie_ui.h"
 #include "../bursztyn_gui.h"
 
 namespace BursztynUI {
 
-class Okno {
+class Okno : private OdbiorcaListyPolecen {
 public:
     static inline bool g_tlum_operacje_systemowe = false;
     static constexpr int WYSOKOSC_BELKI_TYTULOWEJ = 28;
@@ -28,6 +30,7 @@ public:
     }
 
     virtual ~Okno() {
+        ustaw_liste_polecen(nullptr);
         if (bufor_regionu_) gui_free(bufor_regionu_);
         popupy_.zamknij(PowodZamknieciaPopup::WlascicielZamkniety);
         if (domyslny_korzen_) {
@@ -60,7 +63,8 @@ public:
     bool czy_przeciagane() const { return czy_przeciagane_; }
 
     bool czy_wymaga_animacji() const {
-        return !czy_zminimalizowane_ && kontrolka_glowna_ && kontrolka_glowna_->czy_wymaga_animacji();
+        return (!czy_zminimalizowane_ && kontrolka_glowna_ && kontrolka_glowna_->czy_wymaga_animacji()) ||
+               popupy_.czy_wymaga_animacji();
     }
 
     bool czy_wymaga_odrysowania() const {
@@ -70,8 +74,11 @@ public:
     }
 
     void krok_animacji(uint64_t teraz_ns = 0) {
-        if (czy_wymaga_animacji()) {
+        if (!czy_zminimalizowane_ && kontrolka_glowna_ && kontrolka_glowna_->czy_wymaga_animacji()) {
             kontrolka_glowna_->krok_animacji(teraz_ns);
+        }
+        if (popupy_.czy_wymaga_animacji()) {
+            popupy_.krok_animacji(teraz_ns);
         }
     }
 
@@ -217,6 +224,7 @@ public:
         if (kontrolka_glowna_) {
             kontrolka_glowna_->zaktualizuj_motyw();
         }
+        popupy_.zaktualizuj_motyw();
         brudny_obszar_klienta_ = Prostokat();
         przelicz_uklad();
         czy_brudne_ = true;
@@ -230,6 +238,15 @@ public:
     }
 
     Kontrolka* fokus() const { return kontrolka_z_fokusem_; }
+    bool ustaw_liste_polecen(ListaPolecen* lista) {
+        if (lista_polecen_ == lista) return true;
+        if (lista_polecen_) lista_polecen_->odlacz_odbiorce(this);
+        lista_polecen_ = nullptr;
+        if (lista && !lista->dolacz_odbiorce(this)) return false;
+        lista_polecen_ = lista; return true;
+    }
+    void ustaw_liste_polecen(ListaPolecen& lista) { ustaw_liste_polecen(&lista); }
+    ListaPolecen* lista_polecen() const { return lista_polecen_; }
     ZarzadcaPopupow& zarzadca_popupow() { return popupy_; }
     const ZarzadcaPopupow& zarzadca_popupow() const { return popupy_; }
     void ustaw_fokus(Kontrolka* k) {
@@ -245,6 +262,28 @@ public:
             // przy_fokusie/przy_utracie_fokusu. Zmiana fokusu nie jest
             // zmiana geometrii i nie moze wymuszac pelnego repaintu okna.
         }
+    }
+
+    MenuKontekstowe* znajdz_menu_kontekstowe(Kontrolka* od,
+                                               Kontrolka** wlasciciel = nullptr) const {
+        for (Kontrolka* k = od; k; k = k->rodzic()) {
+            if (k->menu_kontekstowe()) {
+                if (wlasciciel) *wlasciciel = k;
+                return k->menu_kontekstowe();
+            }
+        }
+        if (wlasciciel) *wlasciciel = nullptr;
+        return nullptr;
+    }
+
+    bool otworz_menu_kontekstowe(Kontrolka* od, int x_ekranu, int y_ekranu,
+                                 bool z_klawiatury = false) {
+        Kontrolka* wlasciciel = nullptr;
+        MenuKontekstowe* menu = znajdz_menu_kontekstowe(od, &wlasciciel);
+        if (!menu || !wlasciciel || !wlasciciel->czy_efektywnie_widoczna()) return false;
+        if (z_klawiatury)
+            return menu->pokaz_pod_kontrolka(popupy_, *wlasciciel, od);
+        return menu->pokaz_dla(*wlasciciel, x_ekranu, y_ekranu);
     }
 
     Kontrolka* przechwycenie_myszy() const { return kontrolka_przechwytujaca_; }
@@ -614,7 +653,6 @@ public:
                     }
 
                     if (hit) {
-                        ustaw_przechwycenie_myszy(hit);
                         ZdarzenieMyszki me;
                         me.typ = TypZdarzenia::WcisniecieMyszy;
                         me.x = lokalny_x;
@@ -624,6 +662,19 @@ public:
                             ? PrzyciskMyszy::Prawy : PrzyciskMyszy::Lewy);
                         me.modyfikatory = surowe_zdarzenie.przyciski;
                         me.timestamp = surowe_zdarzenie.timestamp;
+
+                        if (me.czy_prawy_przycisk()) {
+                            if (otworz_menu_kontekstowe(hit, mx, my, false)) {
+                                me.obsluzone = true;
+                                return;
+                            }
+                            // Kontrolowane babelkowanie prawego przycisku.
+                            for (Kontrolka* k = hit; k && !me.obsluzone; k = k->rodzic())
+                                k->obsluz_wcisniecie_myszy(me);
+                            return;
+                        }
+
+                        ustaw_przechwycenie_myszy(hit);
 
                         uint64_t teraz = surowe_zdarzenie.timestamp;
                         int ddx = (mx > ost_click_x_) ? (mx - ost_click_x_) : (ost_click_x_ - mx);
@@ -796,6 +847,16 @@ public:
                         }
                     }
                 }
+                if (wcisniety && !ke.obsluzone && czy_klawisz_menu_kontekstowego(ke)) {
+                    if (otworz_menu_kontekstowe(kontrolka_z_fokusem_, 0, 0, true))
+                        ke.obsluzone = true;
+                }
+                // Skroty aplikacji sa rozpatrywane dopiero po kontrolce z
+                // fokusem. Ctrl+C/V/X pozostaja dzieki temu w edytorze tekstu,
+                // jesli edytor potrafi je wykonac.
+                if (wcisniety && !ke.obsluzone && lista_polecen_ &&
+                    lista_polecen_->wykonaj_skrot(ke.kod_klawisza, ke.modyfikatory))
+                    ke.obsluzone = true;
                 break;
             }
 
@@ -856,6 +917,19 @@ public:
 
 private:
 
+    void lista_polecen_zniszczona(ListaPolecen& lista) override {
+        if (lista_polecen_ == &lista) lista_polecen_ = nullptr;
+    }
+
+    static bool czy_klawisz_menu_kontekstowego(const ZdarzenieKlawiatury& e) {
+        bool usb = (e.kod_klawisza & BWS_KEY_SOURCE_USB) != 0;
+        uint32_t baza = usb ? (e.kod_klawisza & 0xFFU) : (e.kod_klawisza & 0x7FU);
+        bool menu = (usb && baza == 101U) ||
+                    (!usb && (e.kod_klawisza & BWS_KEY_SOURCE_E0) != 0 && baza == 0x5DU);
+        bool f10 = (usb && baza == 67U) || (!usb && baza == 0x44U);
+        return menu || (f10 && e.czy_shift());
+    }
+
     static void zbierz_kontrolki_z_fokusem(Kontrolka* k, Kontrolka** out_lista, size_t& liczba) {
         if (!k || !k->czy_widoczna() || liczba >= 32) return;
         if (k->czy_moze_miec_fokus()) {
@@ -904,6 +978,7 @@ protected:
     Kontrolka* kontrolka_z_fokusem_{nullptr};
     Kontrolka* kontrolka_najechana_{nullptr};
     Kontrolka* kontrolka_przechwytujaca_{nullptr};
+    ListaPolecen* lista_polecen_{nullptr};
     ZarzadcaPopupow popupy_;
 };
 

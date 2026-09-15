@@ -3,6 +3,7 @@
 #include "popup.h"
 #include "menu.h"
 #include "czcionka.h"
+#include "ikona_ui.h"
 
 namespace BursztynUI {
 
@@ -21,13 +22,18 @@ public:
     WidokMenuPopup() {
         zaktualizuj_motyw();
     }
+    ~WidokMenuPopup() override {
+        if (menu_) menu_->przy_zmianie(nullptr, nullptr);
+    }
     void zaktualizuj_motyw() override {
         styl_ = Motyw::pobierz_domyslny().styl_menu;
         uniewaznij();
     }
     void ustaw(Menu* menu, ObslugaWidokuMenu* host) {
+        if (menu_ && menu_ != menu) menu_->przy_zmianie(nullptr, nullptr);
         menu_ = menu; host_ = host; aktywny_ = pierwszy_aktywny(1); wcisniety_ = -1;
         indeks_otwartego_podmenu_ = -1;
+        if (menu_) menu_->przy_zmianie(&WidokMenuPopup::menu_zmienione, this);
         uniewaznij();
     }
     Menu* menu() const { return menu_; }
@@ -46,7 +52,7 @@ public:
             h += e->czy_separator() ? 9 * skala : 24 * skala;
             if (!e->czy_separator()) {
                 int sw = CzcionkaUI::zmierz_tekst(e->tekst(), skala) +
-                         CzcionkaUI::zmierz_tekst(e->skrot(), skala) + 70 * skala;
+                         CzcionkaUI::zmierz_tekst(e->skrot(), skala) + 92 * skala;
                 if (sw > w) w = sw;
             }
         }
@@ -82,7 +88,8 @@ public:
                 continue;
             }
             if (i == aktywny_ && e->czy_wlaczony())
-                ctx.rysuj_prostokat(r, motyw_kolor(MOTYW_KOLOR_PODNIESIONY));
+                ctx.rysuj_zaokraglony_prostokat(r, styl_.najechany.tlo,
+                                                styl_.normalny.promien_zaokraglenia * s / 2);
             uint32_t kolor = e->czy_wlaczony() ? motyw_kolor(MOTYW_KOLOR_TEKST) : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY);
             int ty = r.y + (r.wysokosc - CzcionkaUI::pobierz_wysokosc(s)) / 2;
             if (e->czy_zaznaczony()) {
@@ -94,7 +101,10 @@ public:
                     ctx.rysuj_linie_pozioma(r.x + 10 * s, ty + 11 * s, 8 * s, motyw_kolor(MOTYW_KOLOR_AKCENT));
                 }
             }
-            ctx.rysuj_tekst(Punkt(r.x + 24 * s, ty), e->tekst(), kolor, s);
+            if (e->ikona() != 0) rysuj_ikone_ui(ctx, Prostokat(r.x + 25 * s, r.y + 5 * s,
+                                                               14 * s, 14 * s),
+                                                e->ikona(), e->czy_wlaczony(), s);
+            ctx.rysuj_tekst(Punkt(r.x + 45 * s, ty), e->tekst(), kolor, s);
             if (e->skrot()[0]) {
                 int sw = CzcionkaUI::zmierz_tekst(e->skrot(), s);
                 ctx.rysuj_tekst(Punkt(r.prawy() - sw - 22 * s, ty), e->skrot(),
@@ -150,6 +160,12 @@ public:
     }
 
 private:
+    static void menu_zmienione(Menu&, void* dane) {
+        WidokMenuPopup* self = static_cast<WidokMenuPopup*>(dane);
+        if (!self) return;
+        self->aktywny_ = self->pierwszy_aktywny(1);
+        self->uniewaznij();
+    }
     int indeks_z_punktu(int x, int y) const {
         (void)x;
         if (!menu_) return -1;

@@ -4,6 +4,7 @@
 #include "przycisk.h"
 #include "menu_kontekstowe.h"
 #include "czcionka.h"
+#include "ikona_ui.h"
 
 namespace BursztynUI {
 
@@ -16,12 +17,15 @@ enum class TypElementuPaskaNarzedzi {
 
 class PasekNarzedzi;
 
-class ElementPaskaNarzedzi {
+class ElementPaskaNarzedzi : private OdbiorcaPolecenia {
 public:
     using AkcjaPrzycisku = void (*)(ElementPaskaNarzedzi* nadawca, void* dane_uzytkownika);
     using AkcjaPrzelacznika = void (*)(ElementPaskaNarzedzi* nadawca, bool stan, void* dane_uzytkownika);
 
     ElementPaskaNarzedzi() = default;
+    ~ElementPaskaNarzedzi() override { if (polecenie_) polecenie_->odlacz(this); }
+    ElementPaskaNarzedzi(const ElementPaskaNarzedzi&) = delete;
+    ElementPaskaNarzedzi& operator=(const ElementPaskaNarzedzi&) = delete;
 
     TypElementuPaskaNarzedzi typ() const { return typ_; }
     const char* tekst() const { return tekst_; }
@@ -51,9 +55,15 @@ public:
 
     bool czy_wlaczony() const { return wlaczony_; }
     void ustaw_wlaczony(bool w) { wlaczony_ = w; }
+    bool czy_widoczny() const { return widoczny_; }
+    void ustaw_widoczny(bool w) {
+        if (polecenie_) polecenie_->ustaw_widoczna(w);
+        else { widoczny_ = w; powiadom(); }
+    }
 
     bool czy_wcisniety() const { return wcisniety_; }
     void ustaw_wcisniety(bool w) {
+        if (polecenie_) { polecenie_->ustaw_zaznaczona(w); return; }
         if (wcisniety_ != w) {
             wcisniety_ = w;
             if (cb_przelacznik_) cb_przelacznik_(this, wcisniety_, dane_przelacznika_);
@@ -72,8 +82,24 @@ public:
         cb_przelacznik_ = cb; dane_przelacznika_ = dane;
     }
 
+    PolecenieUI* polecenie() const { return polecenie_; }
+    bool ustaw_polecenie(PolecenieUI* p) {
+        if (polecenie_ == p) return true;
+        if (polecenie_) polecenie_->odlacz(this);
+        polecenie_ = nullptr;
+        if (p && !p->dolacz(this)) return false;
+        polecenie_ = p; return true;
+    }
+    bool ustaw_polecenie(PolecenieUI& p) { return ustaw_polecenie(&p); }
+
     void wykonaj() {
-        if (!wlaczony_) return;
+        if (!wlaczony_ || !widoczny_) return;
+        if (polecenie_) {
+            if (typ_ == TypElementuPaskaNarzedzi::Przelacznik)
+                polecenie_->ustaw_zaznaczona(!polecenie_->czy_zaznaczona());
+            polecenie_->wykonaj();
+            return;
+        }
         if (typ_ == TypElementuPaskaNarzedzi::Przelacznik) {
             ustaw_wcisniety(!wcisniety_);
         } else if (cb_akcja_) {
@@ -88,8 +114,10 @@ private:
     char podpowiedz_[64]{};
     uint32_t ikona_{0};
     bool wlaczony_{true};
+    bool widoczny_{true};
     bool wcisniety_{false};
     bool najechany_{false};
+    bool na_pasku_{false};
     Kontrolka* kontrolka_{nullptr};
     Prostokat prostokat_{};
 
@@ -97,6 +125,25 @@ private:
     void* dane_akcji_{nullptr};
     AkcjaPrzelacznika cb_przelacznik_{nullptr};
     void* dane_przelacznika_{nullptr};
+    PolecenieUI* polecenie_{nullptr};
+    void (*zmiana_)(void*){nullptr};
+    void* dane_zmiany_{nullptr};
+
+    void powiadom() { if (zmiana_) zmiana_(dane_zmiany_); }
+    void wyzeruj() {
+        if (polecenie_) polecenie_->odlacz(this);
+        polecenie_ = nullptr; typ_ = TypElementuPaskaNarzedzi::PrzyciskAkcji;
+        tekst_[0] = '\0'; podpowiedz_[0] = '\0'; ikona_ = 0;
+        wlaczony_ = true; widoczny_ = true; wcisniety_ = false;
+        najechany_ = false; na_pasku_ = false; kontrolka_ = nullptr; prostokat_ = Prostokat();
+        cb_akcja_ = nullptr; dane_akcji_ = nullptr; cb_przelacznik_ = nullptr;
+        dane_przelacznika_ = nullptr;
+    }
+    void odswiez_z_polecenia(PolecenieUI& p) override {
+        ustaw_tekst(p.tekst()); ikona_ = p.ikona(); wlaczony_ = p.czy_wlaczona();
+        widoczny_ = p.czy_widoczna(); wcisniety_ = p.czy_zaznaczona(); powiadom();
+    }
+    void polecenie_zniszczone(PolecenieUI& p) override { if (polecenie_ == &p) polecenie_ = nullptr; }
 };
 
 class PasekNarzedzi : public Kontrolka {
@@ -141,6 +188,14 @@ public:
         return el;
     }
 
+    ElementPaskaNarzedzi& dodaj_polecenie(PolecenieUI& polecenie, bool przelacznik = false) {
+        ElementPaskaNarzedzi& el = dodaj_pusty_element(przelacznik
+            ? TypElementuPaskaNarzedzi::Przelacznik
+            : TypElementuPaskaNarzedzi::PrzyciskAkcji);
+        (void)el.ustaw_polecenie(polecenie);
+        przelicz_elementy(); uniewaznij(); return el;
+    }
+
     ElementPaskaNarzedzi& dodaj_separator() {
         ElementPaskaNarzedzi& el = dodaj_pusty_element(TypElementuPaskaNarzedzi::Separator);
         przelicz_elementy();
@@ -178,8 +233,9 @@ public:
     void pokaz_menu_nadmiaru() {
         if (!zarzadca_popupow_) return;
         menu_nadmiaru_.menu().wyczysc();
-        for (size_t i = liczba_widocznych_elementow_; i < liczba_elementow_; ++i) {
+        for (size_t i = 0; i < liczba_elementow_; ++i) {
             ElementPaskaNarzedzi& el = elementy_[i];
+            if (!el.czy_widoczny() || el.na_pasku_) continue;
             if (el.typ() == TypElementuPaskaNarzedzi::Separator) {
                 menu_nadmiaru_.menu().dodaj_separator();
             } else if (el.typ() == TypElementuPaskaNarzedzi::KontrolkaWlasna) {
@@ -191,6 +247,7 @@ public:
                         if (pel) pel->wykonaj();
                     }, &el);
                 mi.ustaw_wlaczony(el.czy_wlaczony());
+                mi.ustaw_ikone(el.ikona());
                 if (el.typ() == TypElementuPaskaNarzedzi::Przelacznik) {
                     mi.ustaw_typ_zaznaczenia(TypZaznaczeniaMenu::Pole);
                     mi.ustaw_zaznaczony(el.czy_przelaczony());
@@ -218,8 +275,9 @@ public:
             return;
         }
 
-        for (size_t i = 0; i < liczba_widocznych_elementow_; ++i) {
+        for (size_t i = 0; i < liczba_elementow_; ++i) {
             ElementPaskaNarzedzi& el = elementy_[i];
+            if (!el.na_pasku_) continue;
             if (!el.czy_wlaczony()) continue;
             if (el.typ() == TypElementuPaskaNarzedzi::Separator ||
                 el.typ() == TypElementuPaskaNarzedzi::KontrolkaWlasna) continue;
@@ -248,8 +306,9 @@ public:
         int ly = e.y - obszar_ekranu_.y;
 
         bool zmieniono = false;
-        for (size_t i = 0; i < liczba_widocznych_elementow_; ++i) {
+        for (size_t i = 0; i < liczba_elementow_; ++i) {
             ElementPaskaNarzedzi& el = elementy_[i];
+            if (!el.na_pasku_) continue;
             if (el.typ() == TypElementuPaskaNarzedzi::Separator) continue;
             bool hit = el.prostokat_.zawiera(lx, ly);
             if (el.najechany_ != hit) {
@@ -286,8 +345,9 @@ public:
         ctx.rysuj_prostokat(b, styl_.normalny.tlo);
         ctx.rysuj_ramke(b, styl_.normalny.ramka, 1);
 
-        for (size_t i = 0; i < liczba_widocznych_elementow_; ++i) {
+        for (size_t i = 0; i < liczba_elementow_; ++i) {
             ElementPaskaNarzedzi& el = elementy_[i];
+            if (!el.na_pasku_) continue;
             Prostokat r = el.prostokat_;
 
             if (el.typ() == TypElementuPaskaNarzedzi::Separator) {
@@ -311,7 +371,19 @@ public:
                 if (tlo != 0) ctx.rysuj_prostokat(r, tlo);
                 if (ramka != 0) ctx.rysuj_ramke(r, ramka, 1);
 
-                ctx.rysuj_tekst_wysrodkowany(r, el.tekst(), tekst_k, skala_dpi_);
+                if (el.ikona() == 0) {
+                    ctx.rysuj_tekst_wysrodkowany(r, el.tekst(), tekst_k, skala_dpi_);
+                } else {
+                    int iw = 16 * skala_dpi_;
+                    int tw = pokazuj_tekst_ ? CzcionkaUI::zmierz_tekst(el.tekst(), skala_dpi_) : 0;
+                    int calosc = iw + (tw > 0 ? 5 * skala_dpi_ + tw : 0);
+                    int ix = r.x + (r.szerokosc - calosc) / 2;
+                    int iy = r.y + (r.wysokosc - iw) / 2;
+                    rysuj_ikone_ui(ctx, Prostokat(ix, iy, iw, iw), el.ikona(), wlaczony, skala_dpi_);
+                    if (tw > 0) ctx.rysuj_tekst(Punkt(ix + iw + 5 * skala_dpi_,
+                        r.y + (r.wysokosc - CzcionkaUI::pobierz_wysokosc(skala_dpi_)) / 2),
+                        el.tekst(), tekst_k, skala_dpi_);
+                }
             }
         }
 
@@ -327,9 +399,17 @@ private:
     ElementPaskaNarzedzi& dodaj_pusty_element(TypElementuPaskaNarzedzi typ) {
         if (liczba_elementow_ >= MAKS_ELEMENTOW) return elementy_[MAKS_ELEMENTOW - 1];
         ElementPaskaNarzedzi& el = elementy_[liczba_elementow_++];
-        el = ElementPaskaNarzedzi();
+        el.wyzeruj();
         el.typ_ = typ;
+        el.zmiana_ = &PasekNarzedzi::element_zmieniony;
+        el.dane_zmiany_ = this;
         return el;
+    }
+
+    static void element_zmieniony(void* dane) {
+        PasekNarzedzi* self = static_cast<PasekNarzedzi*>(dane);
+        if (!self) return;
+        self->przelicz_elementy(); self->uniewaznij();
     }
 
     void przelicz_elementy() {
@@ -347,6 +427,12 @@ private:
 
         for (size_t i = 0; i < liczba_elementow_; ++i) {
             ElementPaskaNarzedzi& el = elementy_[i];
+            el.na_pasku_ = false;
+            if (!el.czy_widoczny()) {
+                if (el.typ() == TypElementuPaskaNarzedzi::KontrolkaWlasna && el.kontrolka())
+                    el.kontrolka()->ustaw_widoczna(false);
+                continue;
+            }
             int item_w = 0;
 
             if (el.typ() == TypElementuPaskaNarzedzi::Separator) {
@@ -354,13 +440,15 @@ private:
             } else if (el.typ() == TypElementuPaskaNarzedzi::KontrolkaWlasna) {
                 item_w = el.kontrolka() ? el.kontrolka()->preferowany_rozmiar().szerokosc : 60;
             } else {
-                item_w = CzcionkaUI::zmierz_tekst(el.tekst(), skala_dpi_) + 16;
+                int tekst_w = pokazuj_tekst_ ? CzcionkaUI::zmierz_tekst(el.tekst(), skala_dpi_) : 0;
+                item_w = tekst_w + 16;
+                if (el.ikona() != 0) item_w += 16 * skala_dpi_ + (tekst_w > 0 ? 5 * skala_dpi_ : 0);
                 if (item_w < 28) item_w = 28;
             }
 
-            if (x + item_w > max_w && i + 1 < liczba_elementow_) {
+            if (x + item_w > max_w) {
                 czy_jest_nadmiar_ = true;
-                break;
+                continue;
             }
 
             el.prostokat_ = Prostokat(x, 3, item_w, item_h);
@@ -369,13 +457,14 @@ private:
                 el.kontrolka()->ustaw_widoczna(true);
             }
             x += item_w + 4;
+            el.na_pasku_ = true;
             ++liczba_widocznych_elementow_;
         }
 
         if (czy_jest_nadmiar_) {
             przycisk_nadmiaru_ = Prostokat(w - ov_w - 2, 3, ov_w, item_h);
-            for (size_t i = liczba_widocznych_elementow_; i < liczba_elementow_; ++i) {
-                if (elementy_[i].typ() == TypElementuPaskaNarzedzi::KontrolkaWlasna && elementy_[i].kontrolka()) {
+            for (size_t i = 0; i < liczba_elementow_; ++i) {
+                if (!elementy_[i].na_pasku_ && elementy_[i].typ() == TypElementuPaskaNarzedzi::KontrolkaWlasna && elementy_[i].kontrolka()) {
                     elementy_[i].kontrolka()->ustaw_widoczna(false);
                 }
             }

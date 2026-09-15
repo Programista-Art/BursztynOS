@@ -3,6 +3,7 @@
 #include "kontrolka.h"
 #include "menu_kontekstowe.h"
 #include "czcionka.h"
+#include "ikona_ui.h"
 
 namespace BursztynUI {
 
@@ -28,6 +29,8 @@ public:
     CzescPrzyciskuPodzielonego najechana_czesc() const { return najechana_czesc_; }
     CzescPrzyciskuPodzielonego wcisnieta_czesc() const { return wcisnieta_czesc_; }
     int szerokosc_czesci_strzalki() const { return szerokosc_strzalki_ * skala_dpi_; }
+    uint32_t ikona() const { return ikona_; }
+    void ustaw_ikone(uint32_t id) { if (ikona_ != id) { ikona_ = id; uniewaznij(); } }
 
     void przy_kliknieciu(FunkcjaAkcji cb, void* dane = nullptr) {
         cb_glowna_ = cb; dane_glownej_ = dane;
@@ -66,7 +69,18 @@ public:
         }
         ctx.rysuj_prostokat(Prostokat(podzial, 2 * s, s,
                             obszar_.wysokosc - 4 * s), motyw_kolor(MOTYW_KOLOR_RAMKA));
-        ctx.rysuj_tekst_wysrodkowany(glowna, tekst_, baza.tekst, s);
+        if (ikona_ == 0) {
+            ctx.rysuj_tekst_wysrodkowany(glowna, tekst_, baza.tekst, s);
+        } else {
+            int iw = 16 * s;
+            int tw = CzcionkaUI::zmierz_tekst(tekst_, s);
+            int start = glowna.x + (glowna.szerokosc - iw - 6 * s - tw) / 2;
+            rysuj_ikone_ui(ctx, Prostokat(start, glowna.y + (glowna.wysokosc - iw) / 2,
+                                          iw, iw), ikona_, czy_wlaczona_, s);
+            ctx.rysuj_tekst(Punkt(start + iw + 6 * s,
+                glowna.y + (glowna.wysokosc - CzcionkaUI::pobierz_wysokosc(s)) / 2),
+                tekst_, baza.tekst, s);
+        }
 
         // Symetryczny grot z geometrii, bez glifu fontu.
         const int cx = strzalka.x + strzalka.szerokosc / 2;
@@ -134,6 +148,9 @@ public:
         Kontrolka::obsluz_wcisniecie_klawisza(e);
     }
 
+protected:
+    void zastosuj_ikone_polecenia(uint32_t id) override { ustaw_ikone(id); }
+
 private:
     CzescPrzyciskuPodzielonego czesc_w_punkcie(int x, int y) const {
         if (!obszar_ekranu_.zawiera(x, y)) return CzescPrzyciskuPodzielonego::Brak;
@@ -150,7 +167,8 @@ private:
             uniewaznij_obszar(Prostokat(0, 0, obszar_.szerokosc - aw, obszar_.wysokosc));
     }
     void wykonaj_glowna() {
-        if (cb_glowna_) cb_glowna_(this, dane_glownej_);
+        if (polecenie_) polecenie_->wykonaj();
+        else if (cb_glowna_) cb_glowna_(this, dane_glownej_);
     }
     void otworz_menu() {
         if (cb_menu_) cb_menu_(this, dane_menu_);
@@ -159,6 +177,7 @@ private:
     }
 
     int szerokosc_strzalki_{28};
+    uint32_t ikona_{0};
     CzescPrzyciskuPodzielonego najechana_czesc_{CzescPrzyciskuPodzielonego::Brak};
     CzescPrzyciskuPodzielonego wcisnieta_czesc_{CzescPrzyciskuPodzielonego::Brak};
     MenuKontekstowe menu_{};
