@@ -10,6 +10,9 @@
 #define BWS_META_CZAS_DOSTEPNY    (1U << 1)
 #define BWS_META_PZB_DOSTEPNY     (1U << 2)
 
+#define BWS_TYP_PLIK              1U
+#define BWS_TYP_KATALOG           2U
+
 /* czas_utworzenia_rtc ma postac dziesietna YYYYMMDDhhmmss. */
 struct BwsMetadanePliku {
     uint16_t wersja;

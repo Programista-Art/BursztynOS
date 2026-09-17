@@ -12,11 +12,11 @@ using namespace BursztynUI;
 
 extern "C" void _start();
 static constexpr uint64_t BUR_TEKST_PRZESUNIECIE = 0x1000ULL;
-static constexpr uint64_t BUR_TEKST_ROZMIAR     = 0x40000ULL; // 256 KiB
+static constexpr uint64_t BUR_TEKST_ROZMIAR     = 0x50000ULL; // 320 KiB
 static constexpr uint64_t BUR_TEKST_WIRTUALNY     = 0x1001000ULL;
-static constexpr uint64_t BUR_DANE_PRZESUNIECIE   = 0x41000ULL;
+static constexpr uint64_t BUR_DANE_PRZESUNIECIE   = 0x51000ULL;
 static constexpr uint64_t BUR_DANE_ROZMIAR       = 0x20000ULL; // 128 KiB
-static constexpr uint64_t BUR_DANE_WIRTUALNY     = 0x1041000ULL;
+static constexpr uint64_t BUR_DANE_WIRTUALNY     = 0x1051000ULL;
 
 extern "C" {
 __attribute__((section(".naglowek"), used)) NaglowekBur naglowek = {
@@ -79,6 +79,12 @@ struct StanAplikacji {
     Wykres* wykres_demo{nullptr};
     Etykieta* diagnoza_listy{nullptr};
     Etykieta* diagnoza_tabeli{nullptr};
+
+    Etykieta* ety_plik_wynik{nullptr};
+    Etykieta* ety_katalog_wynik{nullptr};
+    Etykieta* ety_kolor_wynik{nullptr};
+    Kontrolka* probka_koloru{nullptr};
+    uint32_t wybrany_kolor_demo{0x00F2A900U};
 
     DostawcaDanychListy* dostawca_listy{nullptr};
     DostawcaDanychTabeli* dostawca_tabeli{nullptr};
@@ -964,6 +970,182 @@ void zbuduj_karte_motywy(Panel& panel) {
     t_info.ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_TEKST));
 }
 
+// -----------------------------------------------------------------------------
+// KARTA 8: DIALOGI SYSTEMOWE (DialogPliku i DialogKoloru)
+// -----------------------------------------------------------------------------
+class ProbkaKoloruDemo : public Kontrolka {
+public:
+    explicit ProbkaKoloruDemo(uint32_t kolor = 0x00F2A900U) : kolor_(kolor) {
+        preferowany_rozmiar_ = Rozmiar(70, 32);
+    }
+    void ustaw_kolor(uint32_t c) {
+        kolor_ = c & 0x00FFFFFFU;
+        uniewaznij();
+    }
+    uint32_t kolor() const { return kolor_; }
+    void rysuj_siebie(KontekstRysowania& ctx) override {
+        SkalaUI s = skala_dpi_;
+        Prostokat b(0, 0, obszar_.szerokosc, obszar_.wysokosc);
+        int r = motyw_promien(MOTYW_ROG_POLE) * s;
+        ctx.rysuj_zaokraglony_prostokat(b, kolor_, r);
+        ctx.rysuj_zaokraglona_ramke(b, motyw_kolor(MOTYW_KOLOR_RAMKA), r, 1 * s);
+    }
+private:
+    uint32_t kolor_{0x00F2A900U};
+};
+
+void zbuduj_karte_dialogi_systemowe(Panel& panel) {
+    panel.ustaw_orientacje(Orientacja::Pionowa);
+    panel.ustaw_odstep(12);
+    panel.ustaw_wypelnienie(Marginesy(12, 12, 12, 12));
+
+    Etykieta& t = panel.dodaj<Etykieta>("Natywne dialogi frameworka BursztynUI (DialogPliku i DialogKoloru):");
+    t.ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_AKCENT));
+
+    // Sekcja 1: DialogPliku
+    Etykieta& t_plik = panel.dodaj<Etykieta>("1. DialogPliku — obsługa trybów Otwórz, Zapisz oraz Wybierz katalog:");
+    t_plik.ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_TEKST));
+
+    Panel& r_plik = panel.dodaj<Panel>(Orientacja::Pozioma);
+    r_plik.ustaw_preferowany_rozmiar(Rozmiar(-1, 34));
+    r_plik.ustaw_odstep(10);
+
+    Przycisk& b_otworz = r_plik.dodaj<Przycisk>("Otwórz plik...");
+    b_otworz.ustaw_preferowany_rozmiar(Rozmiar(150, 32));
+    b_otworz.przy_kliknieciu([](Przycisk*, void*) {
+        if (!g.okno) return;
+        DialogPliku::otworz(g.okno->zarzadca_popupow(), "/uzytkownicy",
+            "Wszystkie pliki (*.*);;Dokumenty (*.txt;*.md;*.log);;Programy (*.bur);;Obrazy (*.bmp);;Projekty (*.bursztyn_projekt);;Modele 3D (*.mesh)",
+            [](DialogPliku*, WynikDialoguPliku w, const char* p, void*) {
+                if (w == WynikDialoguPliku::Wybrano) {
+                    if (g.ety_plik_wynik) {
+                        char buf[300];
+                        kopiuj_napis(buf, sizeof(buf), "Wybrany plik: ");
+                        size_t l = 14;
+                        for (size_t i = 0; p[i] && l + 1 < sizeof(buf); ++i) buf[l++] = p[i];
+                        buf[l] = '\0';
+                        g.ety_plik_wynik->ustaw_tekst(buf);
+                    }
+                    status(p);
+                } else {
+                    status("Anulowano wybór pliku");
+                }
+            }, nullptr, g.okno->kontrolka_glowna());
+    });
+
+    Przycisk& b_zapisz = r_plik.dodaj<Przycisk>("Zapisz plik...");
+    b_zapisz.ustaw_preferowany_rozmiar(Rozmiar(150, 32));
+    b_zapisz.przy_kliknieciu([](Przycisk*, void*) {
+        if (!g.okno) return;
+        DialogPliku::zapisz(g.okno->zarzadca_popupow(), "/uzytkownicy",
+            "Dokumenty (*.txt);;Projekty (*.bursztyn_projekt);;Wszystkie pliki (*.*)",
+            [](DialogPliku*, WynikDialoguPliku w, const char* p, void*) {
+                if (w == WynikDialoguPliku::Wybrano) {
+                    if (g.ety_plik_wynik) {
+                        char buf[300];
+                        kopiuj_napis(buf, sizeof(buf), "Zapis do pliku: ");
+                        size_t l = 16;
+                        for (size_t i = 0; p[i] && l + 1 < sizeof(buf); ++i) buf[l++] = p[i];
+                        buf[l] = '\0';
+                        g.ety_plik_wynik->ustaw_tekst(buf);
+                    }
+                    status(p);
+                } else {
+                    status("Anulowano zapis pliku");
+                }
+            }, nullptr, g.okno->kontrolka_glowna());
+    });
+
+    Przycisk& b_kat = r_plik.dodaj<Przycisk>("Wybierz katalog...");
+    b_kat.ustaw_preferowany_rozmiar(Rozmiar(160, 32));
+    b_kat.przy_kliknieciu([](Przycisk*, void*) {
+        if (!g.okno) return;
+        DialogPliku::wybierz_katalog(g.okno->zarzadca_popupow(), "/uzytkownicy",
+            [](DialogPliku*, WynikDialoguPliku w, const char* p, void*) {
+                if (w == WynikDialoguPliku::Wybrano) {
+                    if (g.ety_katalog_wynik) {
+                        char buf[300];
+                        kopiuj_napis(buf, sizeof(buf), "Wybrany katalog: ");
+                        size_t l = 17;
+                        for (size_t i = 0; p[i] && l + 1 < sizeof(buf); ++i) buf[l++] = p[i];
+                        buf[l] = '\0';
+                        g.ety_katalog_wynik->ustaw_tekst(buf);
+                    }
+                    status(p);
+                } else {
+                    status("Anulowano wybór katalogu");
+                }
+            }, nullptr, g.okno->kontrolka_glowna());
+    });
+
+    Etykieta& ep = panel.dodaj<Etykieta>("Wybrany plik: (brak wyboru)");
+    g.ety_plik_wynik = &ep;
+
+    Etykieta& ek = panel.dodaj<Etykieta>("Wybrany katalog: (brak wyboru)");
+    g.ety_katalog_wynik = &ek;
+
+    // Sekcja 2: DialogKoloru
+    Etykieta& t_kolor = panel.dodaj<Etykieta>("2. DialogKoloru — interaktywny selektor barwy, synchronizacja RGB/HEX i podgląd:");
+    t_kolor.ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_TEKST));
+
+    Panel& r_kolor = panel.dodaj<Panel>(Orientacja::Pozioma);
+    r_kolor.ustaw_preferowany_rozmiar(Rozmiar(-1, 36));
+    r_kolor.ustaw_odstep(12);
+
+    Przycisk& b_kolor = r_kolor.dodaj<Przycisk>("Wybierz kolor...");
+    b_kolor.ustaw_preferowany_rozmiar(Rozmiar(150, 32));
+
+    ProbkaKoloruDemo* probka = new ProbkaKoloruDemo(g.wybrany_kolor_demo);
+    r_kolor.dodaj_kontrolke(probka);
+    g.probka_koloru = probka;
+
+    Etykieta& ekolor = r_kolor.dodaj<Etykieta>("Wybrany kolor: #F2A900 (R: 242, G: 169, B: 0)");
+    g.ety_kolor_wynik = &ekolor;
+
+    b_kolor.przy_kliknieciu([](Przycisk*, void*) {
+        if (!g.okno) return;
+        DialogKoloru::wybierz_kolor(g.okno->zarzadca_popupow(), g.wybrany_kolor_demo,
+            [](DialogKoloru*, WynikDialoguKoloru w, uint32_t c, void*) {
+                if (w == WynikDialoguKoloru::Wybrano) {
+                    g.wybrany_kolor_demo = c;
+                    if (g.probka_koloru) {
+                        static_cast<ProbkaKoloruDemo*>(g.probka_koloru)->ustaw_kolor(c);
+                    }
+                    if (g.ety_kolor_wynik) {
+                        char buf[128];
+                        kopiuj_napis(buf, sizeof(buf), "Wybrany kolor: ");
+                        size_t l = 15;
+                        char hbuf[10];
+                        DialogKoloru::formatuj_hex(c, hbuf, true);
+                        for (size_t i = 0; hbuf[i] && l + 1 < sizeof(buf); ++i) buf[l++] = hbuf[i];
+
+                        char num[16];
+                        kopiuj_napis(buf + l, sizeof(buf) - l, " (R: ");
+                        while (buf[l]) ++l;
+                        formatuj_liczbe(num, sizeof(num), (c >> 16) & 0xFF);
+                        for (size_t i = 0; num[i] && l + 1 < sizeof(buf); ++i) buf[l++] = num[i];
+
+                        kopiuj_napis(buf + l, sizeof(buf) - l, ", G: ");
+                        while (buf[l]) ++l;
+                        formatuj_liczbe(num, sizeof(num), (c >> 8) & 0xFF);
+                        for (size_t i = 0; num[i] && l + 1 < sizeof(buf); ++i) buf[l++] = num[i];
+
+                        kopiuj_napis(buf + l, sizeof(buf) - l, ", B: ");
+                        while (buf[l]) ++l;
+                        formatuj_liczbe(num, sizeof(num), c & 0xFF);
+                        for (size_t i = 0; num[i] && l + 1 < sizeof(buf); ++i) buf[l++] = num[i];
+
+                        if (l + 2 < sizeof(buf)) { buf[l++] = ')'; buf[l] = '\0'; }
+                        g.ety_kolor_wynik->ustaw_tekst(buf);
+                    }
+                    status("Wybrano nowy kolor");
+                } else {
+                    status("Anulowano wybór koloru");
+                }
+            }, nullptr, g.okno->kontrolka_glowna());
+    });
+}
+
 } // namespace
 
 // -----------------------------------------------------------------------------
@@ -1036,12 +1218,46 @@ extern "C" __attribute__((noreturn)) void _start() {
 
     // Inicjalizacja reakcji poleceń
     g.cmd_nowy->przy_wykonaniu([](PolecenieUI&, void*) { status("Wykonano polecenie: Nowy"); });
-    g.cmd_otworz->przy_wykonaniu([](PolecenieUI&, void*) { status("Wykonano polecenie: Otwórz"); });
-    g.cmd_zapisz->przy_wykonaniu([](PolecenieUI&, void*) { status("Wykonano polecenie: Zapisz"); });
+    g.cmd_otworz->przy_wykonaniu([](PolecenieUI&, void*) {
+        if (!g.okno) return;
+        DialogPliku::otworz(g.okno->zarzadca_popupow(), "/uzytkownicy",
+            "Wszystkie pliki (*.*);;Dokumenty (*.txt)",
+            [](DialogPliku*, WynikDialoguPliku w, const char* p, void*) {
+                if (w == WynikDialoguPliku::Wybrano) {
+                    if (g.ety_plik_wynik) {
+                        char buf[300];
+                        kopiuj_napis(buf, sizeof(buf), "Wybrany plik: ");
+                        size_t l = 14;
+                        for (size_t i = 0; p[i] && l + 1 < sizeof(buf); ++i) buf[l++] = p[i];
+                        buf[l] = '\0';
+                        g.ety_plik_wynik->ustaw_tekst(buf);
+                    }
+                    status(p);
+                }
+            }, nullptr, g.okno->kontrolka_glowna());
+    });
+    g.cmd_zapisz->przy_wykonaniu([](PolecenieUI&, void*) {
+        if (!g.okno) return;
+        DialogPliku::zapisz(g.okno->zarzadca_popupow(), "/uzytkownicy",
+            "Dokumenty (*.txt);;Wszystkie pliki (*.*)",
+            [](DialogPliku*, WynikDialoguPliku w, const char* p, void*) {
+                if (w == WynikDialoguPliku::Wybrano) {
+                    if (g.ety_plik_wynik) {
+                        char buf[300];
+                        kopiuj_napis(buf, sizeof(buf), "Zapis do pliku: ");
+                        size_t l = 16;
+                        for (size_t i = 0; p[i] && l + 1 < sizeof(buf); ++i) buf[l++] = p[i];
+                        buf[l] = '\0';
+                        g.ety_plik_wynik->ustaw_tekst(buf);
+                    }
+                    status(p);
+                }
+            }, nullptr, g.okno->kontrolka_glowna());
+    });
     g.cmd_usun->przy_wykonaniu([](PolecenieUI&, void*) { status("Wykonano polecenie: Usuń"); });
     g.cmd_odswiez->przy_wykonaniu([](PolecenieUI&, void*) { status("Wykonano polecenie: Odśwież"); });
 
-    // 3. Karty (7 stron)
+    // 3. Karty (8 stron)
     Karty& karty = korzen->dodaj<Karty>();
     karty.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
     karty.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
@@ -1049,6 +1265,7 @@ extern "C" __attribute__((noreturn)) void _start() {
     Panel* p_uklady = new Panel(); zbuduj_karte_uklady(*p_uklady); karty.dodaj_karte("Układy", p_uklady);
     Panel* p_polecenia = new Panel(); zbuduj_karte_polecenia(*p_polecenia); karty.dodaj_karte("Polecenia i Menu", p_polecenia);
     Panel* p_komunikaty = new Panel(); zbuduj_karte_komunikaty(*p_komunikaty); karty.dodaj_karte("Komunikaty", p_komunikaty);
+    Panel* p_dialogi = new Panel(); zbuduj_karte_dialogi_systemowe(*p_dialogi); karty.dodaj_karte("Dialogi systemowe", p_dialogi);
     Panel* p_grafika = new Panel(); zbuduj_karte_grafika(*p_grafika); karty.dodaj_karte("Grafika i Wykres", p_grafika);
     Panel* p_dane = new Panel(); zbuduj_karte_duze_dane(*p_dane); karty.dodaj_karte("Duże dane", p_dane);
     Panel* p_postep = new Panel(); zbuduj_karte_postep(*p_postep); karty.dodaj_karte("Zajętość i Postęp", p_postep);

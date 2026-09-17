@@ -1187,7 +1187,9 @@ void instaluj_wbudowane_programy() {
         "poziom_zaufania = 4\n"
         "plik_startowy = \"kontrolki4.bur\"\n"
         "uprawnienia = [\n"
-        "    \"okna\"\n"
+        "    \"okna\",\n"
+        "    \"pliki_czytaj\",\n"
+        "    \"pliki_zapisz\"\n"
         "]\n";
 
     static const char MANIFEST_AKTUALIZACJE[] =

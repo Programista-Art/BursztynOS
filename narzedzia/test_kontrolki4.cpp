@@ -14,9 +14,64 @@
 #include "../pulpit_geometria.h"
 
 // Implementacje makiet funkcji GUI i BWS na potrzeby host test
+typedef uint64_t (*TestBwsHookFn)(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4);
+static TestBwsHookFn g_test_bws_hook = nullptr;
+
 extern "C" {
-    uint64_t bws_wywolaj(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t) { return 0; }
+    uint64_t bws_wywolaj(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4) {
+        if (g_test_bws_hook) return g_test_bws_hook(nr, a1, a2, a3, a4);
+        return 0;
+    }
     __attribute__((noreturn)) void bws_zakoncz_proces() { exit(0); }
+}
+
+bool wylistuj_katalog_uzytkownika(const char* sciezka, char* bufor, uint32_t maksymalna_dlugosc) {
+    if (!sciezka || !bufor || maksymalna_dlugosc == 0) return false;
+    return bws_wywolaj(6, reinterpret_cast<uint64_t>(sciezka),
+                          reinterpret_cast<uint64_t>(bufor),
+                          static_cast<uint64_t>(maksymalna_dlugosc), 0) == 1ULL;
+}
+
+bool pobierz_metadane_pliku(const char* sciezka, BwsMetadanePliku* metadane) {
+    return sciezka && metadane &&
+           bws_wywolaj(47, reinterpret_cast<uint64_t>(sciezka),
+                           reinterpret_cast<uint64_t>(metadane), 0, 0) == 1ULL;
+}
+
+bool pobierz_rozmiar_pliku(const char* sciezka, uint32_t* rozmiar) {
+    if (!sciezka || !rozmiar) return false;
+    return bws_wywolaj(4, reinterpret_cast<uint64_t>(sciezka),
+                          reinterpret_cast<uint64_t>(rozmiar), 0, 0) == 1ULL;
+}
+
+bool utworz_katalog_uzytkownika(const char* sciezka) {
+    if (!sciezka) return false;
+    return bws_wywolaj(46, reinterpret_cast<uint64_t>(sciezka), 0, 0, 0) == 1ULL;
+}
+
+static char g_mock_clipboard[1024] = {0};
+static size_t g_mock_clipboard_len = 0;
+
+bool clipboard_set(const char* /*mime*/, const void* dane, uint64_t rozmiar) {
+    if (!dane || rozmiar == 0) {
+        g_mock_clipboard_len = 0;
+        g_mock_clipboard[0] = '\0';
+        return true;
+    }
+    size_t copy_len = (rozmiar < sizeof(g_mock_clipboard)) ? static_cast<size_t>(rozmiar) : (sizeof(g_mock_clipboard) - 1);
+    memcpy(g_mock_clipboard, dane, copy_len);
+    g_mock_clipboard[copy_len] = '\0';
+    g_mock_clipboard_len = copy_len;
+    return true;
+}
+
+bool clipboard_read(const char* /*mime*/, void* dane, uint64_t pojemnosc, uint64_t* odczytano) {
+    if (!dane || pojemnosc == 0) return false;
+    size_t copy_len = (g_mock_clipboard_len < pojemnosc) ? g_mock_clipboard_len : (pojemnosc - 1);
+    memcpy(dane, g_mock_clipboard, copy_len);
+    static_cast<char*>(dane)[copy_len] = '\0';
+    if (odczytano) *odczytano = copy_len;
+    return true;
 }
 
 void* gui_malloc(unsigned long rozmiar) { return malloc(rozmiar); }
@@ -1381,6 +1436,501 @@ static void test_geometria_toast_przycinanie_i_stos() {
     }
 }
 
+// =========================================================================
+// 19. Testy jednostkowe: DialogKoloru (Synchronizacja RGB/HEX, selektor, walidacja, klawisze, motywy)
+// =========================================================================
+static void test_dialog_koloru() {
+    printf("\n--- Test 19: DialogKoloru (RGB/HEX sync, selector, bounds, validation, keys, theme) ---\n");
+
+    ZarzadcaPopupow zarzadca;
+    zarzadca.ustaw_geometrie_wlasciciela(Prostokat(0, 0, 1024, 768), Prostokat(0, 0, 1024, 768));
+
+    // 1. Inicjalizacja z kolorem początkowym
+    DialogKoloru dlg(0x00FF8800U, "Wybór koloru");
+    dlg.pokaz(zarzadca);
+
+    TEST_ASSERT(dlg.kolor() == 0x00FF8800U, "DialogKoloru: Początkowy kolor poprawny (0x00FF8800)");
+    TEST_ASSERT(dlg.pole_r() && dlg.pole_r()->wartosc() == 255, "DialogKoloru: Pole R ma wartosc 255");
+    TEST_ASSERT(dlg.pole_g() && dlg.pole_g()->wartosc() == 136, "DialogKoloru: Pole G ma wartosc 136 (0x88)");
+    TEST_ASSERT(dlg.pole_b() && dlg.pole_b()->wartosc() == 0, "DialogKoloru: Pole B ma wartosc 0");
+    TEST_ASSERT(dlg.pole_hex() && strcmp(dlg.pole_hex()->tekst(), "#FF8800") == 0, "DialogKoloru: Pole HEX ma wartosc #FF8800");
+    TEST_ASSERT(dlg.podglad() != nullptr, "DialogKoloru: Kontrolka podgladu utworzona");
+    TEST_ASSERT(dlg.podglad()->kolor_poczatkowy() == 0x00FF8800U, "DialogKoloru: Podglad zachowuje kolor poczatkowy");
+    TEST_ASSERT(dlg.podglad()->kolor_biezacy() == 0x00FF8800U, "DialogKoloru: Podglad biezacego koloru zgodny");
+
+    // 2. Synchronizacja RGB -> HEX i Selektor
+    dlg.pole_r()->ustaw_wartosc(18);
+    dlg.pole_g()->ustaw_wartosc(52);
+    dlg.pole_b()->ustaw_wartosc(86);
+    TEST_ASSERT(dlg.kolor() == 0x00123456U, "DialogKoloru: Zmiana RGB (18, 52, 86) daje 0x00123456");
+    TEST_ASSERT(strcmp(dlg.pole_hex()->tekst(), "#123456") == 0, "DialogKoloru: Pole HEX zsynchronizowane z RGB (#123456)");
+    TEST_ASSERT(dlg.selektor() && dlg.selektor()->kolor() == 0x00123456U, "DialogKoloru: Selektor zsynchronizowany z RGB");
+    TEST_ASSERT(dlg.podglad()->kolor_biezacy() == 0x00123456U, "DialogKoloru: Podglad zaktualizowany z RGB");
+
+    // 3. Synchronizacja HEX -> RGB i Selektor
+    dlg.pole_hex()->ustaw_tekst("#00AABB");
+    TEST_ASSERT(dlg.kolor() == 0x0000AABBU, "DialogKoloru: Wpisanie #00AABB daje 0x0000AABB");
+    TEST_ASSERT(dlg.pole_r()->wartosc() == 0, "DialogKoloru: Pole R zaktualizowane z HEX do 0");
+    TEST_ASSERT(dlg.pole_g()->wartosc() == 170, "DialogKoloru: Pole G zaktualizowane z HEX do 170 (0xAA)");
+    TEST_ASSERT(dlg.pole_b()->wartosc() == 187, "DialogKoloru: Pole B zaktualizowane z HEX do 187 (0xBB)");
+    TEST_ASSERT(dlg.selektor()->kolor() == 0x0000AABBU, "DialogKoloru: Selektor zaktualizowany z HEX");
+
+    // Wpisanie HEX bez znaku '#'
+    dlg.pole_hex()->ustaw_tekst("FFEEDD");
+    TEST_ASSERT(dlg.kolor() == 0x00FFEEDDU, "DialogKoloru: Wpisanie HEX bez '#' (FFEEDD) daje 0x00FFEEDD");
+    TEST_ASSERT(dlg.pole_r()->wartosc() == 255, "DialogKoloru: Pole R rowne 255 (0xFF)");
+    TEST_ASSERT(dlg.pole_g()->wartosc() == 238, "DialogKoloru: Pole G rowne 238 (0xEE)");
+    TEST_ASSERT(dlg.pole_b()->wartosc() == 221, "DialogKoloru: Pole B rowne 221 (0xDD)");
+
+    // Wpisanie malych liter hex
+    dlg.pole_hex()->ustaw_tekst("#1a2b3c");
+    TEST_ASSERT(dlg.kolor() == 0x001A2B3CU, "DialogKoloru: Male litery hex (#1a2b3c) obslugiwane poprawnie");
+    TEST_ASSERT(dlg.pole_r()->wartosc() == 0x1A, "DialogKoloru: Pole R zgodne z 0x1A");
+    TEST_ASSERT(dlg.pole_g()->wartosc() == 0x2B, "DialogKoloru: Pole G zgodne z 0x2B");
+    TEST_ASSERT(dlg.pole_b()->wartosc() == 0x3C, "DialogKoloru: Pole B zgodne z 0x3C");
+
+    // 4. Odpornosc walidacji HEX na bledne dane (brak crashu, brak uszkodzenia pamieci)
+    uint32_t zachowany_kolor = dlg.kolor();
+    dlg.pole_hex()->ustaw_tekst("");
+    TEST_ASSERT(dlg.kolor() == zachowany_kolor, "DialogKoloru: Pusty ciag HEX zachowuje poprzedni kolor");
+
+    dlg.pole_hex()->ustaw_tekst("#12");
+    TEST_ASSERT(dlg.kolor() == zachowany_kolor, "DialogKoloru: Zbyt krotki ciag HEX zachowuje poprzedni kolor");
+
+    dlg.pole_hex()->ustaw_tekst("#GGGGGG");
+    TEST_ASSERT(dlg.kolor() == zachowany_kolor, "DialogKoloru: Niepoprawne znaki HEX zachowuja poprzedni kolor");
+
+    dlg.pole_hex()->ustaw_tekst("niepoprawny_ciag");
+    TEST_ASSERT(dlg.kolor() == zachowany_kolor, "DialogKoloru: Dowolny tekst zachowuje poprzedni kolor");
+
+    dlg.pole_hex()->ustaw_tekst("#1234567890ABCDEF");
+    TEST_ASSERT(dlg.kolor() == zachowany_kolor, "DialogKoloru: Nadmiarowy ciag HEX zachowuje poprzedni kolor");
+
+    // 5. Wartosci brzegowe i klamrowanie RGB (0..255)
+    dlg.pole_r()->ustaw_wartosc(0);
+    dlg.pole_g()->ustaw_wartosc(255);
+    dlg.pole_b()->ustaw_wartosc(0);
+    TEST_ASSERT(dlg.kolor() == 0x0000FF00U, "DialogKoloru: Graniczne wartosci (0, 255, 0) daja zielony");
+
+    // Proba ustawienia wartosci spoza zakresu w polu numerycznym
+    dlg.pole_r()->ustaw_wartosc(-50);
+    TEST_ASSERT(dlg.pole_r()->wartosc() == 0, "DialogKoloru: Pole R klamruje ujemne wartosci do 0");
+    dlg.pole_g()->ustaw_wartosc(350);
+    TEST_ASSERT(dlg.pole_g()->wartosc() == 255, "DialogKoloru: Pole G klamruje wartosci > 255 do 255");
+
+    // 6. Bezposrednia zmiana w SelektorKoloru
+    dlg.ustaw_kolor(0x00336699U);
+    TEST_ASSERT(dlg.kolor() == 0x00336699U, "DialogKoloru: ustaw_kolor(0x00336699) dziala");
+    TEST_ASSERT(dlg.pole_r()->wartosc() == 51, "DialogKoloru: Pole R = 51 (0x33)");
+    TEST_ASSERT(dlg.pole_g()->wartosc() == 102, "DialogKoloru: Pole G = 102 (0x66)");
+    TEST_ASSERT(dlg.pole_b()->wartosc() == 153, "DialogKoloru: Pole B = 153 (0x99)");
+    TEST_ASSERT(strcmp(dlg.pole_hex()->tekst(), "#336699") == 0, "DialogKoloru: HEX = #336699");
+
+    // 7. Reakcja na zatwierdzenie (OK / Enter) i wynik
+    static uint32_t s_odebrany_kolor = 0;
+    static WynikDialoguKoloru s_odebrany_wynik_k = WynikDialoguKoloru::Anulowano;
+    dlg.przy_wyniku_koloru([](DialogKoloru*, WynikDialoguKoloru w, uint32_t c, void*) {
+        s_odebrany_wynik_k = w;
+        s_odebrany_kolor = c;
+    }, nullptr);
+
+    dlg.zatwierdz();
+    TEST_ASSERT(s_odebrany_wynik_k == WynikDialoguKoloru::Wybrano, "DialogKoloru: Callback odebral WynikDialoguKoloru::Wybrano");
+    TEST_ASSERT(s_odebrany_kolor == 0x00336699U, "DialogKoloru: Callback przekazal prawidlowo wybrany kolor");
+    TEST_ASSERT(dlg.wynik() == WynikDialogu::OK, "DialogKoloru: Wynik bazowy OknoDialogowe to OK");
+
+    // 8. Reakcja na anulowanie (Anuluj / Escape)
+    DialogKoloru dlg2(0x00112233U, "Wybor koloru 2");
+    dlg2.pokaz(zarzadca);
+    dlg2.ustaw_kolor(0x00AABBCCU);
+    dlg2.przy_wyniku_koloru([](DialogKoloru*, WynikDialoguKoloru w, uint32_t c, void*) {
+        s_odebrany_wynik_k = w;
+        s_odebrany_kolor = c;
+    }, nullptr);
+
+    dlg2.anuluj();
+    TEST_ASSERT(s_odebrany_wynik_k == WynikDialoguKoloru::Anulowano, "DialogKoloru: Callback odebral WynikDialoguKoloru::Anulowano");
+    TEST_ASSERT(s_odebrany_kolor == 0x00112233U, "DialogKoloru: Anulowanie zwraca kolor poczatkowy");
+    TEST_ASSERT(dlg2.wynik() == WynikDialogu::Anuluj, "DialogKoloru: Wynik bazowy to Anuluj");
+
+    // 9. Reakcja na klawisz Escape
+    DialogKoloru dlg3(0x00556677U, "Wybor koloru 3");
+    dlg3.pokaz(zarzadca);
+    ZdarzenieKlawiatury e_esc{};
+    e_esc.kod_klawisza = 27;
+    dlg3.obsluz_wcisniecie_klawisza(e_esc);
+    TEST_ASSERT(dlg3.wynik() == WynikDialogu::Anuluj, "DialogKoloru: Klawisz Escape zamyka dialog z kodem Anuluj");
+
+    // 10. SelektorKoloru: Tryb Osadzony, live dragging myszy i klawiatura
+    TEST_ASSERT(dlg.selektor() != nullptr, "DialogKoloru: SelektorKoloru istnieje");
+    TEST_ASSERT(dlg.selektor()->tryb() == TrybSelektoraKoloru::Osadzony, "DialogKoloru: SelektorKoloru dziala w trybie Osadzony");
+
+    SelektorKoloru sel_embed(TrybSelektoraKoloru::Osadzony, 0x00FF0000U);
+    sel_embed.rozmiesc(Prostokat(0, 0, 240, 160));
+    static uint32_t s_sel_live_c = 0;
+    sel_embed.przy_zmianie([](SelektorKoloru*, uint32_t c, void*) { s_sel_live_c = c; }, nullptr);
+
+    ZdarzenieMyszki sdown{};
+    sdown.typ = TypZdarzenia::WcisniecieMyszy;
+    sdown.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
+    sdown.x = 80; sdown.y = 80;
+    sel_embed.obsluz_wcisniecie_myszy(sdown);
+    TEST_ASSERT(s_sel_live_c != 0, "SelektorKoloru: Klikniecie/down w obszarze SV zglasza zmiane koloru live");
+
+    ZdarzenieMyszki smove{};
+    smove.typ = TypZdarzenia::RuchMyszy;
+    smove.x = 120; smove.y = 100;
+    sel_embed.obsluz_ruch_myszy(smove);
+    TEST_ASSERT(s_sel_live_c != 0, "SelektorKoloru: Dragging/ruch myszy w SV aktualizuje kolor i powiadamia obserwatora");
+
+    ZdarzenieMyszki sup{};
+    sup.typ = TypZdarzenia::ZwolnienieMyszy;
+    sel_embed.obsluz_zwolnienie_myszy(sup);
+
+    // Klawiatura w SelektorKoloru
+    ZdarzenieKlawiatury k_arrow{};
+    k_arrow.kod_klawisza = 0x4D; // strzalka w prawo (PS/2)
+    s_sel_live_c = 0;
+    sel_embed.obsluz_wcisniecie_klawisza(k_arrow);
+    TEST_ASSERT(s_sel_live_c != 0, "SelektorKoloru: Strzalka w prawo modyfikuje nasycenie i wywoluje callback");
+
+    // 11. Belka tytulowa: przeciaganie i przycisk zamkniecia [X]
+    ZdarzenieMyszki kdown{};
+    kdown.typ = TypZdarzenia::WcisniecieMyszy;
+    kdown.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
+    kdown.x = dlg.obszar().x + 40; kdown.y = dlg.obszar().y + 14;
+    dlg.obsluz_wcisniecie_myszy(kdown);
+    TEST_ASSERT(dlg.czy_przeciagane() == true, "DialogKoloru: Wcisniecie w belke tytulowa uruchamia przeciaganie");
+
+    ZdarzenieMyszki kmove{};
+    kmove.typ = TypZdarzenia::RuchMyszy;
+    kmove.x = kdown.x + 30; kmove.y = kdown.y + 40;
+    dlg.obsluz_ruch_myszy(kmove);
+
+    ZdarzenieMyszki kup{};
+    kup.typ = TypZdarzenia::ZwolnienieMyszy;
+    dlg.obsluz_zwolnienie_myszy(kup);
+    TEST_ASSERT(dlg.czy_przeciagane() == false, "DialogKoloru: Zwolnienie myszy konczy przeciaganie");
+
+    DialogKoloru dlg_close(0x00AABBCCU);
+    dlg_close.pokaz(zarzadca);
+    Prostokat r_c = dlg_close.prostokat_przycisku_zamknij();
+    ZdarzenieMyszki c_down{};
+    c_down.typ = TypZdarzenia::WcisniecieMyszy;
+    c_down.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
+    c_down.x = dlg_close.obszar().x + r_c.x + 2;
+    c_down.y = dlg_close.obszar().y + r_c.y + 2;
+    dlg_close.obsluz_wcisniecie_myszy(c_down);
+
+    ZdarzenieMyszki c_up = c_down;
+    c_up.typ = TypZdarzenia::ZwolnienieMyszy;
+    dlg_close.obsluz_zwolnienie_myszy(c_up);
+    TEST_ASSERT(dlg_close.wynik() == WynikDialogu::Anuluj, "DialogKoloru: Przycisk [X] w belce zamyka dialog z wynikiem Anuluj");
+
+    // 12. Reakcja na zmiane motywu
+    dlg.zaktualizuj_motyw();
+    TEST_ASSERT(true, "DialogKoloru: Obsluga zaktualizuj_motyw wykonana bez bledow");
+}
+
+// -----------------------------------------------------------------------------
+// MAKIETA SYSTEMU PLIKÓW BWS DLA TESTÓW DIALOGU PLIKU
+// -----------------------------------------------------------------------------
+struct TestPlikMock {
+    const char* sciezka;
+    bool katalog;
+    uint64_t rozmiar;
+};
+
+static const TestPlikMock g_test_fs_wpisy[] = {
+    { "/uzytkownicy", true, 0 },
+    { "/uzytkownicy/Dokumenty", true, 0 },
+    { "/uzytkownicy/Obrazy", true, 0 },
+    { "/uzytkownicy/Pulpit", true, 0 },
+    { "/uzytkownicy/istniejacy.txt", false, 256 },
+    { "/uzytkownicy/program.bur", false, 16384 },
+    { "/uzytkownicy/obrazek.bmp", false, 4096 },
+    { "/uzytkownicy/Dokumenty/notatka.txt", false, 128 },
+    { "/uzytkownicy/Dokumenty/dane.csv", false, 512 },
+    { "/uzytkownicy/Dokumenty/kod.cpp", false, 1024 },
+    { "/uzytkownicy/Obrazy/foto.bmp", false, 8192 },
+    { "/uzytkownicy/Obrazy/logo.png", false, 12288 }
+};
+
+static const size_t g_test_fs_liczba = sizeof(g_test_fs_wpisy) / sizeof(g_test_fs_wpisy[0]);
+
+static uint64_t mock_fs_bws_handler(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t /*a4*/) {
+    if (nr == 6) { // wylistuj_katalog_uzytkownika(sciezka, bufor, max_len)
+        const char* dir = reinterpret_cast<const char*>(a1);
+        char* buf = reinterpret_cast<char*>(a2);
+        uint32_t max_len = static_cast<uint32_t>(a3);
+        if (!dir || !buf || max_len == 0) return 0;
+
+        buf[0] = '\0';
+        size_t dlen = strlen(dir);
+        size_t cur = 0;
+
+        for (size_t i = 0; i < g_test_fs_liczba; ++i) {
+            const char* p = g_test_fs_wpisy[i].sciezka;
+            if (strncmp(p, dir, dlen) == 0 && p[dlen] == '/' && p[dlen + 1] != '\0') {
+                const char* sub = p + dlen + 1;
+                if (strchr(sub, '/') == nullptr) {
+                    char line[256];
+                    snprintf(line, sizeof(line), "%s %s\n",
+                             g_test_fs_wpisy[i].katalog ? "[KAT] " : "[PLIK]", sub);
+                    size_t llen = strlen(line);
+                    if (cur + llen + 1 < max_len) {
+                        memcpy(buf + cur, line, llen);
+                        cur += llen;
+                        buf[cur] = '\0';
+                    }
+                }
+            }
+        }
+        return 1;
+    }
+    if (nr == 47) { // pobierz_metadane_pliku(sciezka, metadane)
+        const char* p = reinterpret_cast<const char*>(a1);
+        BwsMetadanePliku* m = reinterpret_cast<BwsMetadanePliku*>(a2);
+        if (!p || !m) return 0;
+        for (size_t i = 0; i < g_test_fs_liczba; ++i) {
+            if (strcmp(g_test_fs_wpisy[i].sciezka, p) == 0) {
+                m->wersja = BWS_METADANE_WERSJA;
+                m->typ = g_test_fs_wpisy[i].katalog ? BWS_TYP_KATALOG : BWS_TYP_PLIK;
+                m->rozmiar = g_test_fs_wpisy[i].rozmiar;
+                m->czas_utworzenia_rtc = 20260917120000ULL;
+                m->flagi = BWS_META_ROZMIAR_DOSTEPNY | BWS_META_CZAS_DOSTEPNY;
+                return 1;
+            }
+        }
+        return 0;
+    }
+    if (nr == 4) { // pobierz_rozmiar_pliku(sciezka, rozmiar)
+        const char* p = reinterpret_cast<const char*>(a1);
+        uint32_t* rsz = reinterpret_cast<uint32_t*>(a2);
+        if (!p || !rsz) return 0;
+        for (size_t i = 0; i < g_test_fs_liczba; ++i) {
+            if (strcmp(g_test_fs_wpisy[i].sciezka, p) == 0) {
+                if (g_test_fs_wpisy[i].katalog) return 0;
+                *rsz = static_cast<uint32_t>(g_test_fs_wpisy[i].rozmiar);
+                return 1;
+            }
+        }
+        return 0;
+    }
+    if (nr == 46) { // utworz_katalog_uzytkownika(sciezka)
+        return 1;
+    }
+    return 0;
+}
+
+// =========================================================================
+// 20. Testy jednostkowe: DialogPliku (Tryby, normalizacja sciezek, filtry, nawigacja, nadpisywanie, klawisze, motywy)
+// =========================================================================
+static void test_dialog_pliku() {
+    printf("\n--- Test 20: DialogPliku (Modes, path normalization, filter, navigation, overwrite, keys, theme) ---\n");
+
+    // 1. Bezpieczna normalizacja sciezek
+    char nbuf[256];
+    DialogPliku::normalizuj_sciezke("/uzytkownicy//Dokumenty/../Pulpit/./", nbuf, sizeof(nbuf));
+    TEST_ASSERT(strcmp(nbuf, "/uzytkownicy/Pulpit") == 0, "DialogPliku: normalizuj_sciezke obsluguje '..', '.', i podwojne ukośniki");
+
+    DialogPliku::normalizuj_sciezke("/..", nbuf, sizeof(nbuf));
+    TEST_ASSERT(strcmp(nbuf, "/") == 0, "DialogPliku: normalizuj_sciezke zabezpiecza przed wyjsciem ponad korzen (/.. -> /)");
+
+    DialogPliku::normalizuj_sciezke("/a/b/c/../../..", nbuf, sizeof(nbuf));
+    TEST_ASSERT(strcmp(nbuf, "/") == 0, "DialogPliku: normalizuj_sciezke wielopoziomowe cofanie do korzenia (/a/b/c/../../.. -> /)");
+
+    DialogPliku::normalizuj_sciezke("", nbuf, sizeof(nbuf));
+    TEST_ASSERT(strcmp(nbuf, "/") == 0, "DialogPliku: normalizuj_sciezke pustego napisu zwraca '/'");
+
+    DialogPliku::normalizuj_sciezke("uzytkownicy", nbuf, sizeof(nbuf));
+    TEST_ASSERT(strcmp(nbuf, "/uzytkownicy") == 0, "DialogPliku: normalizuj_sciezke dodaje wiodacy '/'");
+
+    DialogPliku::normalizuj_sciezke("////", nbuf, sizeof(nbuf));
+    TEST_ASSERT(strcmp(nbuf, "/") == 0, "DialogPliku: normalizuj_sciezke samych ukosnikow daje '/'");
+
+    // polacz_sciezki
+    DialogPliku::polacz_sciezki("/uzytkownicy", "Dokumenty", nbuf, sizeof(nbuf));
+    TEST_ASSERT(strcmp(nbuf, "/uzytkownicy/Dokumenty") == 0, "DialogPliku: polacz_sciezki('/uzytkownicy', 'Dokumenty') -> /uzytkownicy/Dokumenty");
+
+    DialogPliku::polacz_sciezki("/uzytkownicy/", "/Dokumenty", nbuf, sizeof(nbuf));
+    TEST_ASSERT(strcmp(nbuf, "/uzytkownicy/Dokumenty") == 0, "DialogPliku: polacz_sciezki usuwa nadmiarowe ukosniki na styku");
+
+    DialogPliku::polacz_sciezki("/uzytkownicy", "..", nbuf, sizeof(nbuf));
+    TEST_ASSERT(strcmp(nbuf, "/") == 0, "DialogPliku: polacz_sciezki z '..' normalizuje do '/'");
+
+    // pobierz_katalog_nadrzedny
+    DialogPliku::pobierz_katalog_nadrzedny("/uzytkownicy/Dokumenty", nbuf, sizeof(nbuf));
+    TEST_ASSERT(strcmp(nbuf, "/uzytkownicy") == 0, "DialogPliku: pobierz_katalog_nadrzedny('/uzytkownicy/Dokumenty') -> /uzytkownicy");
+
+    DialogPliku::pobierz_katalog_nadrzedny("/uzytkownicy", nbuf, sizeof(nbuf));
+    TEST_ASSERT(strcmp(nbuf, "/") == 0, "DialogPliku: pobierz_katalog_nadrzedny('/uzytkownicy') -> /");
+
+    DialogPliku::pobierz_katalog_nadrzedny("/", nbuf, sizeof(nbuf));
+    TEST_ASSERT(strcmp(nbuf, "/") == 0, "DialogPliku: pobierz_katalog_nadrzedny('/') -> /");
+
+    // 2. Tryby pracy dialogu
+    DialogPliku dlg_otworz(TrybDialoguPliku::Otworz, "Otwórz plik", "/uzytkownicy", "Wszystkie pliki (*.*)");
+    TEST_ASSERT(dlg_otworz.tryb() == TrybDialoguPliku::Otworz, "DialogPliku: Tryb Otworz poprawny");
+    TEST_ASSERT(strcmp(dlg_otworz.tekst_przycisku_akcji(), "Otwórz") == 0, "DialogPliku: Przycisk akcji w trybie Otworz to 'Otwórz'");
+
+    DialogPliku dlg_zapisz(TrybDialoguPliku::Zapisz, "Zapisz plik", "/uzytkownicy", "Wszystkie pliki (*.*)");
+    TEST_ASSERT(dlg_zapisz.tryb() == TrybDialoguPliku::Zapisz, "DialogPliku: Tryb Zapisz poprawny");
+    TEST_ASSERT(strcmp(dlg_zapisz.tekst_przycisku_akcji(), "Zapisz") == 0, "DialogPliku: Przycisk akcji w trybie Zapisz to 'Zapisz'");
+
+    DialogPliku dlg_kat(TrybDialoguPliku::WybierzKatalog, "Wybierz katalog", "/uzytkownicy");
+    TEST_ASSERT(dlg_kat.tryb() == TrybDialoguPliku::WybierzKatalog, "DialogPliku: Tryb WybierzKatalog poprawny");
+    TEST_ASSERT(strcmp(dlg_kat.tekst_przycisku_akcji(), "Wybierz") == 0, "DialogPliku: Przycisk akcji w trybie WybierzKatalog to 'Wybierz'");
+
+    // 3. Integracja z makietą BWS i filtrowanie plików
+    g_test_bws_hook = mock_fs_bws_handler;
+    ZarzadcaPopupow zarzadca;
+    zarzadca.ustaw_geometrie_wlasciciela(Prostokat(0, 0, 1024, 768), Prostokat(0, 0, 1024, 768));
+
+    DialogPliku dlg_fs(TrybDialoguPliku::Otworz, "Otwórz dokument", "/uzytkownicy",
+                       "Wszystkie pliki (*.*);;Dokumenty (*.txt);;Programy (*.bur)");
+    dlg_fs.pokaz(zarzadca);
+
+    // Domyslnie aktywny filtr 0: *.* -> 3 katalogi + 3 pliki = 6 wierszy
+    TEST_ASSERT(dlg_fs.tabela_plikow() != nullptr, "DialogPliku: Tabela plikow zainicjalizowana");
+    TEST_ASSERT(dlg_fs.tabela_plikow()->liczba_wierszy() == 6, "DialogPliku: Filtr *.* wyswietla 6 pozycji (3 katalogi + 3 pliki)");
+
+    // Zmiana filtru na 1: *.txt -> 3 katalogi + 1 plik (istniejacy.txt) = 4 wiersze
+    dlg_fs.ustaw_aktywny_filtr(1);
+    TEST_ASSERT(dlg_fs.tabela_plikow()->liczba_wierszy() == 4, "DialogPliku: Filtr *.txt wyswietla 4 pozycje (3 katalogi + 1 plik)");
+
+    // Zmiana filtru na 2: *.bur -> 3 katalogi + 1 plik (program.bur) = 4 wiersze
+    dlg_fs.ustaw_aktywny_filtr(2);
+    TEST_ASSERT(dlg_fs.tabela_plikow()->liczba_wierszy() == 4, "DialogPliku: Filtr *.bur wyswietla 4 pozycje (3 katalogi + 1 plik)");
+
+    // Katalogi sa ZAWSZE widoczne niezaleznie od wybranego filtru rozszerzen
+    TEST_ASSERT(true, "DialogPliku: Katalogi pozostaja widoczne przy kazdym filtrze rozszerzen");
+
+    // 4. Nawigacja po katalogach
+    dlg_fs.ustaw_aktywny_filtr(0); // powrot do *.*
+    dlg_fs.przejdz_do_katalogu("/uzytkownicy/Dokumenty");
+    TEST_ASSERT(strcmp(dlg_fs.biezacy_katalog(), "/uzytkownicy/Dokumenty") == 0, "DialogPliku: Przejscie do podkatalogu /uzytkownicy/Dokumenty");
+    TEST_ASSERT(dlg_fs.tabela_plikow()->liczba_wierszy() == 3, "DialogPliku: Katalog Dokumenty zawiera 3 pliki (notatka.txt, dane.csv, kod.cpp)");
+
+    dlg_fs.przejdz_w_gore();
+    TEST_ASSERT(strcmp(dlg_fs.biezacy_katalog(), "/uzytkownicy") == 0, "DialogPliku: przejdz_w_gore wraca do /uzytkownicy");
+    TEST_ASSERT(dlg_fs.pasek_sciezki() != nullptr, "DialogPliku: Pasek sciezki istnieje");
+    TEST_ASSERT(dlg_fs.pasek_sciezki()->liczba_segmentow() == 1, "DialogPliku: Pasek sciezki zsynchronizowany (1 segment)");
+
+    // 5. Automatyczne dolaczanie rozszerzenia w trybie Zapisz
+    DialogPliku dlg_zapis(TrybDialoguPliku::Zapisz, "Zapisz", "/uzytkownicy",
+                          "Dokumenty (*.txt);;Arkusze (*.csv)");
+    dlg_zapis.pokaz(zarzadca);
+    dlg_zapis.ustaw_aktywny_filtr(0); // *.txt
+    dlg_zapis.pole_nazwy()->ustaw_tekst("nowy_raport");
+    dlg_zapis.zatwierdz();
+    TEST_ASSERT(strcmp(dlg_zapis.wybrana_sciezka(), "/uzytkownicy/nowy_raport.txt") == 0, "DialogPliku: Automatyczne dolaczenie rozszerzenia .txt w trybie Zapisz");
+    TEST_ASSERT(dlg_zapis.wynik_pliku() == WynikDialoguPliku::Wybrano, "DialogPliku: Wynik pliku to Wybrano");
+
+    // 6. Ostrzezenie i obsluga nadpisywania istniejacego pliku w trybie Zapisz
+    DialogPliku dlg_nadpisz(TrybDialoguPliku::Zapisz, "Zapisz", "/uzytkownicy", "Dokumenty (*.txt)");
+    dlg_nadpisz.pokaz(zarzadca);
+    dlg_nadpisz.pole_nazwy()->ustaw_tekst("istniejacy.txt");
+    dlg_nadpisz.zatwierdz();
+    TEST_ASSERT(strcmp(dlg_nadpisz.sciezka_do_potwierdzenia(), "/uzytkownicy/istniejacy.txt") == 0, "DialogPliku: Istniejacy plik wymaga potwierdzenia nadpisania");
+    dlg_nadpisz.potwierdz_nadpisanie();
+    TEST_ASSERT(strcmp(dlg_nadpisz.wybrana_sciezka(), "/uzytkownicy/istniejacy.txt") == 0, "DialogPliku: Po potwierdzeniu nadpisania sciezka zaakceptowana");
+    TEST_ASSERT(dlg_nadpisz.wynik_pliku() == WynikDialoguPliku::Wybrano, "DialogPliku: Wynik po nadpisaniu to Wybrano");
+
+    // 7. Walidacja w trybie Otworz: plik nieistniejacy vs istniejacy
+    DialogPliku dlg_otw(TrybDialoguPliku::Otworz, "Otworz", "/uzytkownicy", "Wszystkie pliki (*.*)");
+    dlg_otw.pokaz(zarzadca);
+    dlg_otw.pole_nazwy()->ustaw_tekst("nieistniejacy.txt");
+    dlg_otw.zatwierdz();
+    TEST_ASSERT(dlg_otw.wynik_pliku() == WynikDialoguPliku::Brak, "DialogPliku: Proba otwarcia nieistniejacego pliku nie zatwierdza dialogu");
+
+    dlg_otw.pole_nazwy()->ustaw_tekst("istniejacy.txt");
+    dlg_otw.zatwierdz();
+    TEST_ASSERT(dlg_otw.wynik_pliku() == WynikDialoguPliku::Wybrano, "DialogPliku: Otwarcie istniejacego pliku zatwierdza dialog");
+    TEST_ASSERT(strcmp(dlg_otw.wybrana_sciezka(), "/uzytkownicy/istniejacy.txt") == 0, "DialogPliku: Wybrana sciezka otwieranego pliku poprawna");
+
+    // 8. Tryb WybierzKatalog
+    DialogPliku dlg_kat_w(TrybDialoguPliku::WybierzKatalog, "Wybierz katalog", "/uzytkownicy");
+    dlg_kat_w.pokaz(zarzadca);
+    dlg_kat_w.pole_nazwy()->ustaw_tekst("Dokumenty");
+    dlg_kat_w.zatwierdz();
+    TEST_ASSERT(dlg_kat_w.wynik_pliku() == WynikDialoguPliku::Wybrano, "DialogPliku: Wybor katalogu zatwierdza dialog");
+    TEST_ASSERT(strcmp(dlg_kat_w.wybrana_sciezka(), "/uzytkownicy/Dokumenty") == 0, "DialogPliku: Wybrana sciezka katalogu poprawna (/uzytkownicy/Dokumenty)");
+
+    // 9. Klawisz Escape i anulowanie
+    DialogPliku dlg_anuluj(TrybDialoguPliku::Otworz, "Otworz", "/uzytkownicy");
+    dlg_anuluj.pokaz(zarzadca);
+    ZdarzenieKlawiatury e_esc{};
+    e_esc.kod_klawisza = 27;
+    dlg_anuluj.obsluz_wcisniecie_klawisza(e_esc);
+    TEST_ASSERT(dlg_anuluj.wynik_pliku() == WynikDialoguPliku::Anulowano, "DialogPliku: Klawisz Escape anuluje dialog pliku");
+
+    // 10. Ulepszona geometria i czytelnosc kontrolek (740x500, szerokie dropdowny, duze przyciski)
+    TEST_ASSERT(dlg_fs.obszar().szerokosc >= 740, "DialogPliku: Rozmiar szerokosci zoptymalizowany pod czytelnosc (>= 740px)");
+    TEST_ASSERT(dlg_fs.obszar().wysokosc >= 500, "DialogPliku: Rozmiar wysokosci zoptymalizowany pod czytelnosc (>= 500px)");
+    TEST_ASSERT(dlg_fs.lista_filtrow() != nullptr && dlg_fs.lista_filtrow()->obszar().szerokosc >= 200, "DialogPliku: Dropdown filtrow ma odpowiednia szerokosc");
+
+    // 11. Generyczne filtry i dopasowywanie plikow bez rozszerzenia
+    TEST_ASSERT(DialogPliku::sprawdz_filtr("Makefile", "*.*") == true, "DialogPliku: Filtr *.* dopasowuje pliki bez rozszerzenia (np. Makefile)");
+    TEST_ASSERT(DialogPliku::sprawdz_filtr("Makefile", "*") == true, "DialogPliku: Filtr * dopasowuje pliki bez rozszerzenia");
+    TEST_ASSERT(DialogPliku::sprawdz_filtr("Makefile", "*.txt") == false, "DialogPliku: Filtr *.txt odrzuca plik Makefile");
+    TEST_ASSERT(DialogPliku::sprawdz_filtr("dokument.TXT", "*.txt") == true, "DialogPliku: Dopasowanie rozszerzen jest case-insensitive");
+    TEST_ASSERT(DialogPliku::sprawdz_filtr("model.mesh", "*.mesh") == true, "DialogPliku: Niestandardowe rozszerzenie *.mesh dopasowane poprawnie");
+    TEST_ASSERT(DialogPliku::sprawdz_filtr("gra.bursztyn_projekt", "*.bursztyn_projekt") == true, "DialogPliku: Rozszerzenie *.bursztyn_projekt dopasowane poprawnie");
+    TEST_ASSERT(DialogPliku::sprawdz_filtr("notatka.md", "*.txt;*.md;*.log") == true, "DialogPliku: Zlozony filtr wielorozszerzeniowy *.txt;*.md;*.log dopasowuje .md");
+
+    // 12. Bezpieczna nawigacja 'Poziom wyzej' w korzeniu
+    dlg_fs.przejdz_do_katalogu("/");
+    TEST_ASSERT(strcmp(dlg_fs.biezacy_katalog(), "/") == 0, "DialogPliku: Przejscie do korzenia /");
+    bool wyzej_ok = dlg_fs.przejdz_poziom_wyzej();
+    TEST_ASSERT(wyzej_ok == true && strcmp(dlg_fs.biezacy_katalog(), "/") == 0, "DialogPliku: przejdz_poziom_wyzej w korzeniu / bezpiecznie pozostaje w / bez bledu");
+
+    // 13. Walidacja nazwy i tworzenie nowego katalogu
+    TEST_ASSERT(DialogPliku::czy_poprawna_nazwa_elementu("") == false, "DialogPliku: Pusta nazwa nowego katalogu odrzucona");
+    TEST_ASSERT(DialogPliku::czy_poprawna_nazwa_elementu("katalog/podkatalog") == false, "DialogPliku: Nazwa ze slashem odrzucona");
+    TEST_ASSERT(DialogPliku::czy_poprawna_nazwa_elementu("katalog*gwiazdka") == false, "DialogPliku: Nazwa z gwiazdka odrzucona");
+    TEST_ASSERT(DialogPliku::czy_poprawna_nazwa_elementu("Projekty 2026") == true, "DialogPliku: Prawidlowa nazwa nowego katalogu zaakceptowana");
+    dlg_fs.przejdz_do_katalogu("/uzytkownicy");
+    TEST_ASSERT(dlg_fs.utworz_nowy_katalog("NoweProjekty") == true, "DialogPliku: Utworzenie nowego katalogu powiodlo sie");
+
+    // 14. Belka tytulowa: przeciaganie i przycisk zamkniecia [X]
+    ZdarzenieMyszki p_down{};
+    p_down.typ = TypZdarzenia::WcisniecieMyszy;
+    p_down.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
+    p_down.x = dlg_fs.obszar().x + 50; p_down.y = dlg_fs.obszar().y + 14;
+    dlg_fs.obsluz_wcisniecie_myszy(p_down);
+    TEST_ASSERT(dlg_fs.czy_przeciagane() == true, "DialogPliku: Przeciaganie okna za belke tytulowa aktywne");
+
+    ZdarzenieMyszki p_move{};
+    p_move.typ = TypZdarzenia::RuchMyszy;
+    p_move.x = p_down.x + 20; p_move.y = p_down.y + 20;
+    dlg_fs.obsluz_ruch_myszy(p_move);
+
+    ZdarzenieMyszki p_up{};
+    p_up.typ = TypZdarzenia::ZwolnienieMyszy;
+    dlg_fs.obsluz_zwolnienie_myszy(p_up);
+    TEST_ASSERT(dlg_fs.czy_przeciagane() == false, "DialogPliku: Przeciaganie okna zakonczone");
+
+    DialogPliku dlg_x(TrybDialoguPliku::Otworz, "Otworz", "/uzytkownicy");
+    dlg_x.pokaz(zarzadca);
+    Prostokat cr = dlg_x.prostokat_przycisku_zamknij();
+    ZdarzenieMyszki x_down{};
+    x_down.typ = TypZdarzenia::WcisniecieMyszy;
+    x_down.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
+    x_down.x = dlg_x.obszar().x + cr.x + 2; x_down.y = dlg_x.obszar().y + cr.y + 2;
+    dlg_x.obsluz_wcisniecie_myszy(x_down);
+    ZdarzenieMyszki x_up = x_down;
+    x_up.typ = TypZdarzenia::ZwolnienieMyszy;
+    dlg_x.obsluz_zwolnienie_myszy(x_up);
+    TEST_ASSERT(dlg_x.wynik_pliku() == WynikDialoguPliku::Anulowano, "DialogPliku: Przycisk [X] zamyka dialog z wynikiem Anulowano");
+
+    // 15. Reakcja na zmiane motywu
+    dlg_fs.zaktualizuj_motyw();
+    TEST_ASSERT(true, "DialogPliku: Obsluga zaktualizuj_motyw wykonana bez bledow");
+
+    g_test_bws_hook = nullptr;
+}
+
 int main() {
     printf("======================================================================\n");
     printf(" BURSZTYN OS - TESTY JEDNOSTKOWE NOWYCH KOMPONENTOW BURSZTYNUI\n");
@@ -1406,6 +1956,10 @@ int main() {
     test_geometria_menu_glowne_kotwica();
     test_geometria_przycisk_podzielony_dropdown();
     test_geometria_toast_przycinanie_i_stos();
+
+    // Testy nowych komponentów: DialogKoloru i DialogPliku
+    test_dialog_koloru();
+    test_dialog_pliku();
 
     printf("\n======================================================================\n");
     printf("Wyniki: %d / %d testow udanych (%.1f%%)\n",

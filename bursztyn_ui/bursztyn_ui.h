@@ -59,6 +59,8 @@
 #include "panel_dokowany.h"
 #include "przeplyw.h"
 #include "okno_dialogowe.h"
+#include "dialog_pliku.h"
+#include "dialog_koloru.h"
 #include "pasek_informacyjny.h"
 #include "wskaznik_zajetosci.h"
 #include "powierzchnia_rysunkowa.h"

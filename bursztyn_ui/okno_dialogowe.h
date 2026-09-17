@@ -169,6 +169,10 @@ public:
     WynikDialogu wynik_przycisku(size_t i) const { return i < liczba_przyciskow_ ? sloty_[i].wynik : WynikDialogu::Brak; }
     Prostokat obszar_tresci() const { return obszar_tresci_; }
     Prostokat obszar_przyciskow() const { return obszar_przyciskow_; }
+    PanelDokowany* uklad() const { return uklad_; }
+    Kontrolka* panel_tresci() const { return panel_tresci_; }
+    Wiersz* panel_przyciskow() const { return panel_przyciskow_; }
+    void wyczysc_sloty_przyciskow() { liczba_przyciskow_ = 0; indeks_fokusu_przycisku_ = 0; }
 
     void rozmiesc(Prostokat docelowy) override {
         bool zmiana = obszar_.szerokosc != docelowy.szerokosc || obszar_.wysokosc != docelowy.wysokosc;
@@ -181,8 +185,20 @@ public:
                                       obszar_.wysokosc > belka ? obszar_.wysokosc - belka : 0));
             aktualizuj_obszary_ukladu();
         }
+        zaktualizuj_pozycje_ekranowa();
         if (zmiana) obsluz_zmiane_rozmiaru();
     }
+
+    Prostokat prostokat_przycisku_zamknij() const {
+        SkalaUI s = skala_dpi_;
+        int h_belki = 32 * s;
+        int btn_size = 20 * s;
+        int btn_x = obszar_.szerokosc - 26 * s;
+        int btn_y = (h_belki - btn_size) / 2;
+        return Prostokat(btn_x, btn_y, btn_size, btn_size);
+    }
+
+    bool czy_przeciagane() const { return przeciaganie_; }
 
     void ustaw_przycisk_domyslny(WynikDialogu w) {
         wynik_domyslny_ = w;
@@ -206,6 +222,31 @@ public:
         for (size_t i = 0; i < liczba_przyciskow_; ++i) {
             sloty_[i].anuluj = (sloty_[i].wynik == w);
         }
+    }
+
+    bool zarejestruj_przycisk_akcji(Przycisk* btn, WynikDialogu w, bool domyslny = false, bool anuluj = false) {
+        if (!btn || liczba_przyciskow_ >= MAKS_PRZYCISKOW) return false;
+        size_t idx = liczba_przyciskow_++;
+        sloty_[idx].dialog = this;
+        sloty_[idx].wynik = w;
+        sloty_[idx].domyslny = domyslny;
+        sloty_[idx].anuluj = anuluj;
+        sloty_[idx].przycisk = btn;
+        SzczegolyDialogu::kopiuj_napis(sloty_[idx].etykieta, sizeof(sloty_[idx].etykieta), btn->tekst());
+        if (domyslny) {
+            wynik_domyslny_ = w;
+            indeks_fokusu_przycisku_ = static_cast<int>(idx);
+            btn->ustaw_kolor_ramki_stanu(StanWizualny::Normalny, motyw_kolor(MOTYW_KOLOR_AKCENT));
+            btn->ustaw_grubosc_ramki(2);
+        }
+        if (anuluj) {
+            wynik_anuluj_ = w;
+        }
+        btn->przy_kliknieciu([](Przycisk*, void* d) {
+            PrzyciskSlot* slot = static_cast<PrzyciskSlot*>(d);
+            slot->dialog->zamknij_z_wynikiem(slot->wynik);
+        }, &sloty_[idx]);
+        return true;
     }
 
     void dodaj_przycisk(const char* etykieta, WynikDialogu w, bool domyslny = false, bool anuluj = false) {
@@ -256,11 +297,16 @@ public:
             fokus_startowy = sloty_[indeks_fokusu_przycisku_].przycisk;
         }
 
-        z.zamknij_od_poziomu(0);
+        int p_level = 0;
+        if (owner) {
+            int ow_p = z.powierzchnia_dla(owner);
+            if (ow_p >= 0) p_level = ow_p + 1;
+        }
+        z.zamknij_od_poziomu(p_level);
         return z.dodaj_powierzchnie(*this, gdzie, fokus_startowy ? static_cast<Kontrolka*>(fokus_startowy) : this);
     }
 
-    void zamknij_z_wynikiem(WynikDialogu w) {
+    virtual void zamknij_z_wynikiem(WynikDialogu w) {
         wynik_ = w;
         if (cb_wynik_) {
             cb_wynik_(this, wynik_, dane_wyniku_);
@@ -377,6 +423,19 @@ public:
         ctx.rysuj_tekst(Punkt(14 * s, (h_belki - CzcionkaUI::pobierz_wysokosc(s)) / 2),
                         tekst_, motyw_kolor(MOTYW_KOLOR_TEKST), s);
 
+        // Przycisk zamkniecia [X] w belce
+        Prostokat r_close = prostokat_przycisku_zamknij();
+        if (najechany_zamknij_) {
+            uint32_t close_bg = wcisniety_zamknij_ ? 0x00D32F2F : 0x00E53935;
+            ctx.rysuj_zaokraglony_prostokat(r_close, close_bg, 3 * s);
+        }
+        uint32_t close_kolor = najechany_zamknij_ ? 0x00FFFFFF : motyw_kolor(MOTYW_KOLOR_TEKST);
+        int cx = r_close.x + r_close.szerokosc / 2;
+        int cy = r_close.y + r_close.wysokosc / 2;
+        int d = 4 * s;
+        SzczegolyDialogu::rysuj_linie_wektorowa(ctx, cx - d, cy - d, cx + d, cy + d, 2 * s, close_kolor);
+        SzczegolyDialogu::rysuj_linie_wektorowa(ctx, cx - d, cy + d, cx + d, cy - d, 2 * s, close_kolor);
+
         // Renderowanie ikony semantycznej
         int start_x = obszar_tresci_.x + 16 * s;
         int txt_start_x = start_x;
@@ -404,8 +463,89 @@ public:
         ctx.rysuj_linie_pozioma(12 * s, sep_y, obszar_.szerokosc - 24 * s, motyw_kolor(MOTYW_KOLOR_RAMKA));
     }
 
-private:
-    static constexpr size_t MAKS_PRZYCISKOW = 4;
+    void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e) override {
+        if (!e.czy_lewy_przycisk()) {
+            PowierzchniaPopup::obsluz_wcisniecie_myszy(e);
+            return;
+        }
+        int lx = e.x - obszar_.x;
+        int ly = e.y - obszar_.y;
+        if (prostokat_przycisku_zamknij().zawiera(lx, ly)) {
+            wcisniety_zamknij_ = true;
+            najechany_zamknij_ = true;
+            uniewaznij();
+            e.obsluzone = true;
+            return;
+        }
+        if (ly >= 0 && ly < 32 * static_cast<int>(skala_dpi_)) {
+            przeciaganie_ = true;
+            offset_ciagniecia_x_ = lx;
+            offset_ciagniecia_y_ = ly;
+            e.obsluzone = true;
+            return;
+        }
+        PowierzchniaPopup::obsluz_wcisniecie_myszy(e);
+    }
+
+    void obsluz_ruch_myszy(ZdarzenieMyszki& e) override {
+        int lx = e.x - obszar_.x;
+        int ly = e.y - obszar_.y;
+        if (przeciaganie_ && zarzadca()) {
+            int nowy_x = e.x - offset_ciagniecia_x_;
+            int nowy_y = e.y - offset_ciagniecia_y_;
+            Prostokat work = zarzadca()->obszar_roboczy_ekranu();
+            Prostokat geom = zarzadca()->geometria_wlasciciela();
+            int min_x = work.x - geom.x;
+            int min_y = work.y - geom.y;
+            int max_x = (work.prawy() - geom.x) - 60 * static_cast<int>(skala_dpi_);
+            int max_y = (work.dolny() - geom.y) - 32 * static_cast<int>(skala_dpi_);
+            if (nowy_x < min_x) nowy_x = min_x;
+            if (nowy_x > max_x) nowy_x = max_x;
+            if (nowy_y < min_y) nowy_y = min_y;
+            if (nowy_y > max_y) nowy_y = max_y;
+            zarzadca()->przemiesc_powierzchnie(*this, Prostokat(nowy_x, nowy_y, obszar_.szerokosc, obszar_.wysokosc));
+            e.obsluzone = true;
+            return;
+        }
+        bool hover = prostokat_przycisku_zamknij().zawiera(lx, ly);
+        if (hover != najechany_zamknij_) {
+            najechany_zamknij_ = hover;
+            uniewaznij();
+        }
+        PowierzchniaPopup::obsluz_ruch_myszy(e);
+    }
+
+    void obsluz_zwolnienie_myszy(ZdarzenieMyszki& e) override {
+        int lx = e.x - obszar_.x;
+        int ly = e.y - obszar_.y;
+        if (przeciaganie_) {
+            przeciaganie_ = false;
+            e.obsluzone = true;
+            return;
+        }
+        if (wcisniety_zamknij_) {
+            wcisniety_zamknij_ = false;
+            uniewaznij();
+            if (prostokat_przycisku_zamknij().zawiera(lx, ly)) {
+                zamknij_z_wynikiem(wynik_anuluj_);
+            }
+            e.obsluzone = true;
+            return;
+        }
+        PowierzchniaPopup::obsluz_zwolnienie_myszy(e);
+    }
+
+    void obsluz_opuszczenie_myszy() override {
+        if (najechany_zamknij_ || wcisniety_zamknij_) {
+            najechany_zamknij_ = false;
+            wcisniety_zamknij_ = false;
+            uniewaznij();
+        }
+        PowierzchniaPopup::obsluz_opuszczenie_myszy();
+    }
+
+protected:
+    static constexpr size_t MAKS_PRZYCISKOW = 8;
     static constexpr size_t MAKS_LINII = 16;
 
     struct LiniaTekstu {
@@ -561,7 +701,7 @@ private:
         }
     }
 
-    void oblicz_geometrie_dialogu(int& szer, int& wys) {
+    virtual void oblicz_geometrie_dialogu(int& szer, int& wys) {
         SkalaUI s = skala_dpi_;
         int max_text_width = 460 * s;
         if (typ_ != TypDialogu::Zwykly) max_text_width -= (36 * s + 16 * s);
@@ -601,7 +741,7 @@ private:
         wys = h;
     }
 
-    void zbuduj_interfejs(int w, int h) {
+    virtual void zbuduj_interfejs(int w, int h) {
         wyczysc_kontrolki();
         SkalaUI s = skala_dpi_;
 
@@ -763,6 +903,12 @@ private:
     Wiersz* panel_przyciskow_{nullptr};
     Prostokat obszar_tresci_{};
     Prostokat obszar_przyciskow_{};
+
+    bool przeciaganie_{false};
+    int offset_ciagniecia_x_{0};
+    int offset_ciagniecia_y_{0};
+    bool najechany_zamknij_{false};
+    bool wcisniety_zamknij_{false};
 };
 
 class Komunikat {

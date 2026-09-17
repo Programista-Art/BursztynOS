@@ -106,6 +106,19 @@ public:
     Prostokat geometria_wlasciciela() const { return wlasciciel_; }
     Prostokat obszar_wlasciciela() const { return wlasciciel_; }
     SkalaUI skala_dpi() const { return skala_dpi_; }
+    static bool czy_potomkiem(Kontrolka* k, Kontrolka* korzen) {
+        for (; k; k = k->rodzic()) {
+            if (k == korzen) return true;
+        }
+        return false;
+    }
+
+    int powierzchnia_dla(Kontrolka* k) const {
+        for (int i = 0; i < liczba_; ++i) {
+            if (powierzchnie_[i] && czy_potomkiem(k, powierzchnie_[i])) return i;
+        }
+        return -1;
+    }
 
     Prostokat umiesc_pod_kotwica_ekranu(Prostokat kotwica_ekranu, Rozmiar rozmiar,
                                          bool preferuj_dol = true) const {
@@ -499,20 +512,6 @@ private:
         p->zarzadca_ = nullptr;
         p->poziom_ = -1;
         p->po_zamknieciu(powod);
-    }
-
-    static bool czy_potomkiem(Kontrolka* k, Kontrolka* korzen) {
-        for (; k; k = k->rodzic()) {
-            if (k == korzen) return true;
-        }
-        return false;
-    }
-
-    int powierzchnia_dla(Kontrolka* k) const {
-        for (int i = 0; i < liczba_; ++i) {
-            if (powierzchnie_[i] && czy_potomkiem(k, powierzchnie_[i])) return i;
-        }
-        return -1;
     }
 
 

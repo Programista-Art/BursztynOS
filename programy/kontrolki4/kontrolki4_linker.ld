@@ -1,4 +1,4 @@
-/* Kontrolki 4 Linker Script: 256 KiB TEXT, 128 KiB DATA. */
+/* Kontrolki 4 Linker Script: 320 KiB TEXT, 128 KiB DATA. */
 OUTPUT_FORMAT(elf64-x86-64)
 OUTPUT_ARCH(i386:x86-64)
 ENTRY(_start)
@@ -7,11 +7,11 @@ BUR_HEADER_OFFSET = 0x0000;
 BUR_HEADER_SIZE   = 0x1000;
 BUR_HEADER_VADDR  = 0x1000000;
 BUR_TEXT_OFFSET   = 0x1000;
-BUR_TEXT_SIZE     = 0x40000;
+BUR_TEXT_SIZE     = 0x50000;
 BUR_TEXT_VADDR    = 0x1001000;
-BUR_DATA_OFFSET   = 0x41000;
+BUR_DATA_OFFSET   = 0x51000;
 BUR_DATA_SIZE     = 0x20000;
-BUR_DATA_VADDR    = 0x1041000;
+BUR_DATA_VADDR    = 0x1051000;
 BUR_TEXT_END      = BUR_TEXT_VADDR + BUR_TEXT_SIZE;
 BUR_DATA_END      = BUR_DATA_VADDR + BUR_DATA_SIZE;
 
@@ -95,7 +95,7 @@ SECTIONS {
     ASSERT(SIZEOF(.naglowek) == BUR_HEADER_SIZE,
            "KONTROLKI4 BUR: nieprawidlowy obszar naglowka")
     ASSERT(__bur_text_used_end <= BUR_TEXT_END,
-           "KONTROLKI4 BUR: TEXT przekroczyl 256 KiB")
+           "KONTROLKI4 BUR: TEXT przekroczyl 320 KiB")
     ASSERT(SIZEOF(.text) == BUR_TEXT_SIZE,
            "KONTROLKI4 BUR: nieprawidlowy TEXT")
     ASSERT(__bur_data_file_end <= BUR_DATA_END,
