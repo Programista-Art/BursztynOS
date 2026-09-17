@@ -46,7 +46,9 @@ public:
         widoki_[0].zaktualizuj_motyw();
         widoki_[0].ustaw(&menu_, this);
         Kontrolka& kontrolka_kotwicy = kotwica ? *kotwica : owner;
-        return z.otworz(widoki_[0], z.umiesc_pod_kotwica(kontrolka_kotwicy.obszar_ekranu(),
+        Prostokat kotwica_ekranu = kontrolka_kotwicy.prostokat_do_ekranu(
+            Prostokat(0, 0, kontrolka_kotwicy.szerokosc(), kontrolka_kotwicy.wysokosc()));
+        return z.otworz(widoki_[0], z.umiesc_pod_kotwica_ekranu(kotwica_ekranu,
             widoki_[0].wymagany_rozmiar(owner.skala_dpi())), &owner, &widoki_[0]);
     }
     void ukryj() {

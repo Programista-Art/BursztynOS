@@ -36,6 +36,16 @@ public:
     Rozmiar oblicz_naturalny_rozmiar() const override {
         return Rozmiar(300 * skala_dpi_, 28 * skala_dpi_);
     }
+    Prostokat prostokat_glowny(int indeks) const {
+        SkalaUI s = skala_dpi_; int x = 0;
+        for (int i = 0; i < static_cast<int>(menu_.liczba_elementow()); ++i) {
+            const ElementMenu* e = menu_.element(i); if (!e || !e->czy_widoczny()) continue;
+            int w = CzcionkaUI::zmierz_tekst(e->tekst(), s) + 20 * s;
+            if (i == indeks) return Prostokat(x, 0, w, obszar_.wysokosc);
+            x += w;
+        }
+        return Prostokat();
+    }
     void rysuj_siebie(KontekstRysowania& ctx) override {
         rysuj_tlo_i_ramke(ctx, wyznacz_biezacy_styl_stanu());
         for (int i = 0; i < static_cast<int>(menu_.liczba_elementow()); ++i) {
@@ -97,16 +107,6 @@ private:
         MenuGlowne* self = static_cast<MenuGlowne*>(dane);
         if (self) self->uniewaznij();
     }
-    Prostokat prostokat_glowny(int indeks) const {
-        SkalaUI s = skala_dpi_; int x = 0;
-        for (int i = 0; i < static_cast<int>(menu_.liczba_elementow()); ++i) {
-            const ElementMenu* e = menu_.element(i); if (!e || !e->czy_widoczny()) continue;
-            int w = CzcionkaUI::zmierz_tekst(e->tekst(), s) + 20 * s;
-            if (i == indeks) return Prostokat(x, 0, w, obszar_.wysokosc);
-            x += w;
-        }
-        return Prostokat();
-    }
     int indeks_glowny_z_x(int x) const {
         for (int i = 0; i < static_cast<int>(menu_.liczba_elementow()); ++i) {
             const ElementMenu* e = menu_.element(i);
@@ -131,9 +131,8 @@ private:
         if (!e->podmenu()) { e->wykonaj(); return; }
         widoki_[0].zaktualizuj_motyw();
         widoki_[0].ustaw(e->podmenu(), this);
-        Prostokat kotwica = prostokat_glowny(indeks);
-        kotwica.x += obszar_ekranu_.x; kotwica.y += obszar_ekranu_.y;
-        Prostokat gdzie = z->umiesc_pod_kotwica(kotwica,
+        Prostokat kotwica_ekranu = prostokat_do_ekranu(prostokat_glowny(indeks));
+        Prostokat gdzie = z->umiesc_pod_kotwica_ekranu(kotwica_ekranu,
             widoki_[0].wymagany_rozmiar(skala_dpi_), true);
         (void)z->otworz(widoki_[0], gdzie, this, &widoki_[0]);
         uniewaznij_obszar(prostokat_glowny(indeks));

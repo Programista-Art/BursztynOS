@@ -50,6 +50,9 @@ narzedzia/test_motywy_screenshot.py
 narzedzia/test_notatnik_gui.py
 .kontrolki4-test/
 test16k_screenshot.png
+narzedzia/__pycache__/
+narzedzia/test_kontrolki4_qemu.py
+
 
 
 

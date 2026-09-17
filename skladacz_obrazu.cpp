@@ -1591,13 +1591,8 @@ bool popup_aplikacji_spojny() {
         application_popup.pid >= MAKS_WARSTW ||
         generacja_okna[application_popup.pid] != application_popup.generacja)
         return false;
-    /* Popup sklada sie z biezacego surface wlasciciela; gdy warstwa zniknela
-       albo oddalila sie od recta, kompozycja musi zostac pominienta. */
-    const warstwa_obrazu& w = tablica_warstw[application_popup.pid];
-    const GuiDirtyRect& p = application_popup.rect;
     return warstwa_ma_spojny_bufor(application_popup.pid) &&
-           p.x < w.x + w.szerokosc && p.y < w.y + w.wysokosc &&
-           p.x + p.width > w.x && p.y + p.height > w.y;
+           application_popup.tlo && application_popup.piksele != 0;
 }
 
 void zloz_popup_aplikacji(LayerRenderInfo* layers, int count,
@@ -1612,11 +1607,11 @@ void zloz_popup_aplikacji(LayerRenderInfo* layers, int count,
         ? p.y + p.height : region.y + region.height;
     if (x0 >= x1 || y0 >= y1) return;
     const GuiDirtyRect clip{x0, y0, x1 - x0, y1 - y0};
-    for (int i = 0; i < count; ++i)
-        if (layers[i].pid == application_popup.pid) {
-            zloz_snapshot_region(layers[i], clip);
-            return;
-        }
+    (void)layers; (void)count;
+    LayerRenderInfo popup{application_popup.tlo, p.x, p.y, p.width, p.height,
+                          0x7FFFFFFF, application_popup.pid,
+                          application_popup.piksele};
+    zloz_snapshot_region(popup, clip);
 }
 
 int snapshot_warstw(LayerRenderInfo* out) {
@@ -2044,35 +2039,6 @@ bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
     if (application_popup.otwarty) {
         if (application_popup.pid != pid) return false;
         const ApplicationPopupState stary = application_popup;
-        if (stary.tlo && stary.piksele != 0 &&
-            generacja_okna[pid] == stary.generacja &&
-            warstwa_ma_spojny_bufor(pid)) {
-            warstwa_obrazu& w = tablica_warstw[pid];
-            /* Odtwarzanie jest przycinane do AKTUALNYCH granic warstwy:
-               przesuniecie/zmiana rozmiaru miedzy otwarciem a zamknieciem
-               nie moze wyjsc poza bufor (pitch = szerokosc). */
-            const int sx0 = stary.rect.x > w.x ? stary.rect.x : w.x;
-            const int sy0 = stary.rect.y > w.y ? stary.rect.y : w.y;
-            const int sx1 =
-                stary.rect.x + stary.rect.width < w.x + w.szerokosc
-                    ? stary.rect.x + stary.rect.width : w.x + w.szerokosc;
-            const int sy1 =
-                stary.rect.y + stary.rect.height < w.y + w.wysokosc
-                    ? stary.rect.y + stary.rect.height : w.y + w.wysokosc;
-            if (sx0 < sx1 && sy0 < sy1) {
-                for (int py = sy0; py < sy1; ++py) {
-                    uint32_t* dst = w.bufor_pikseli +
-                        static_cast<uint64_t>(py - w.y) *
-                            static_cast<uint64_t>(w.szerokosc) +
-                        static_cast<uint64_t>(sx0 - w.x);
-                    const uint32_t* src = stary.tlo +
-                        static_cast<uint64_t>(py - stary.rect.y) *
-                            static_cast<uint64_t>(stary.rect.width) +
-                        static_cast<uint64_t>(sx0 - stary.rect.x);
-                    for (int px = 0; px < sx1 - sx0; ++px) dst[px] = src[px];
-                }
-            }
-        }
         if (stary.tlo) bufor_grafiki_zwolnij(stary.tlo);
         application_popup = {
             false, -1, 0, {0, 0, 0, 0}, nullptr, 0};
@@ -2084,24 +2050,35 @@ bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
     warstwa_obrazu& w = tablica_warstw[pid];
     const int64_t prawa = static_cast<int64_t>(x) + szer;
     const int64_t dol = static_cast<int64_t>(y) + wys;
-    if (x < w.x || y < w.y || prawa > static_cast<int64_t>(w.x) + w.szerokosc ||
-        dol > static_cast<int64_t>(w.y) + w.wysokosc) return false;
+    const int ekran_w = grafika_pobierz_szerokosc(), ekran_h = grafika_pobierz_wysokosc();
+    if (x < 0 || y < 0 || prawa > ekran_w || dol > ekran_h) return false;
     const uint64_t piksele = static_cast<uint64_t>(static_cast<uint32_t>(szer)) *
                               static_cast<uint32_t>(wys);
     if (piksele == 0 || piksele > UINT64_MAX / sizeof(uint32_t)) return false;
     uint32_t* tlo = static_cast<uint32_t*>(bufor_grafiki_alokuj(piksele * sizeof(uint32_t)));
     if (!tlo) return false;
-    const int lokalny_x = x - w.x;
-    const int lokalny_y = y - w.y;
-    for (int py = 0; py < wys; ++py) {
-        const uint32_t* src = w.bufor_pikseli +
-            static_cast<uint64_t>(lokalny_y + py) * w.szerokosc + lokalny_x;
-        uint32_t* dst = tlo + static_cast<uint64_t>(py) * szer;
-        for (int px = 0; px < szer; ++px) dst[px] = src[px];
-    }
+    (void)w;
+    for (uint64_t i = 0; i < piksele; ++i) tlo[i] = SKLADACZ_PIKSEL_PRZEZROCZYSTY;
     application_popup = {true, pid, generacja_okna[pid],
                          {x, y, szer, wys}, tlo, piksele};
     skladacz_obrazu_oznacz_dirty_rect(x, y, szer, wys);
+    return true;
+}
+
+bool skladacz_obrazu_blit_popup(int pid, int x, int y, int szer, int wys,
+                                const uint32_t* src) {
+    if (!src || !application_popup.otwarty || application_popup.pid != pid ||
+        !application_popup.tlo) return false;
+    const GuiDirtyRect& p = application_popup.rect;
+    int x0 = x > p.x ? x : p.x, y0 = y > p.y ? y : p.y;
+    int x1 = x + szer < p.x + p.width ? x + szer : p.x + p.width;
+    int y1 = y + wys < p.y + p.height ? y + wys : p.y + p.height;
+    if (x0 >= x1 || y0 >= y1) return false;
+    for (int py = y0; py < y1; ++py) for (int px = x0; px < x1; ++px) {
+        uint32_t v = src[static_cast<uint64_t>(py-y)*szer + (px-x)];
+        application_popup.tlo[static_cast<uint64_t>(py-p.y)*p.width + (px-p.x)] = v;
+    }
+    skladacz_obrazu_oznacz_dirty_rect(x0,y0,x1-x0,y1-y0);
     return true;
 }
 

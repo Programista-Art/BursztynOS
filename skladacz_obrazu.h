@@ -395,6 +395,8 @@ void skladacz_obrazu_ustaw_overlay(int pid, bool otwarty,
 int skladacz_obrazu_overlay_pod_punktem(int x, int y);
 bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
                                            int x, int y, int szer, int wys);
+bool skladacz_obrazu_blit_popup(int pid, int x, int y, int szer, int wys,
+                                const uint32_t* piksele);
 void skladacz_obrazu_ustaw_drag_overlay(int pid, bool aktywny, int x, int y);
 void skladacz_obrazu_debug_warstwy(const char* powod);
 

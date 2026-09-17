@@ -39,6 +39,7 @@ bool gui_czekaj_na_zdarzenie(bws_zdarzenie*) { return false; }
 bool gui_czekaj_na_zdarzenie_z_timeoutem(bws_zdarzenie*, uint64_t) { return false; }
 void gui_ustaw_capture_myszy(bool) {}
 bool gui_ustaw_geometrie_okna(int, int, int, int, int) { return true; }
+bool gui_ustaw_popup_aplikacji(bool, int, int, int, int) { return true; }
 void gui_pobierz_rozdzielczosc(int* w, int* h) {
     if (w) *w = 1280;
     if (h) *h = 720;
@@ -322,6 +323,16 @@ static void test_okno_dialogowe() {
 
     // 2. TakNie
     OknoDialogowe d2("Potwierdzenie", "Czy kontynuować operację?", PrzyciskiDialogu::TakNie);
+    d2.rozmiesc(Prostokat(0, 0, 400, 190));
+    TEST_ASSERT(d2.liczba_przyciskow() == 2, "Tak/Nie ma dokladnie dwa przyciski");
+    TEST_ASSERT(d2.przycisk(0) != d2.przycisk(1), "Tak/Nie ma unikalne obiekty Przycisk");
+    TEST_ASSERT(d2.wynik_przycisku(0) == WynikDialogu::Tak && d2.wynik_przycisku(1) == WynikDialogu::Nie,
+                "Tak/Nie zachowuje osobne wyniki");
+    TEST_ASSERT(d2.przycisk(0)->obszar_ekranu() != d2.przycisk(1)->obszar_ekranu() &&
+                d2.przycisk(0)->obszar_ekranu().przeciecie(d2.przycisk(1)->obszar_ekranu()).czy_pusty(),
+                "Tak/Nie ma rozlaczne prostokaty");
+    TEST_ASSERT(d2.obszar_tresci().dolny() <= d2.obszar_przyciskow().y,
+                "Tresć dialogu konczy sie nad panelem przyciskow");
     d2.przy_wyniku(cb_dialog_wynik, nullptr);
 
     e_enter.obsluzone = false;
@@ -345,6 +356,13 @@ static void test_okno_dialogowe() {
 
     // 4. TakNieAnuluj
     OknoDialogowe d3("Zapis", "Zapisać przed wyjściem?", PrzyciskiDialogu::TakNieAnuluj);
+    d3.rozmiesc(Prostokat(0, 0, 420, 190));
+    TEST_ASSERT(d3.liczba_przyciskow() == 3, "Tak/Nie/Anuluj ma dokladnie trzy przyciski");
+    TEST_ASSERT(d3.przycisk(0) != d3.przycisk(1) && d3.przycisk(1) != d3.przycisk(2),
+                "Tak/Nie/Anuluj ma unikalne obiekty");
+    TEST_ASSERT(d3.przycisk(0)->obszar_ekranu().przeciecie(d3.przycisk(1)->obszar_ekranu()).czy_pusty() &&
+                d3.przycisk(1)->obszar_ekranu().przeciecie(d3.przycisk(2)->obszar_ekranu()).czy_pusty(),
+                "Tak/Nie/Anuluj ma rozlaczne prostokaty");
     d3.przy_wyniku(cb_dialog_wynik, nullptr);
     TEST_ASSERT(d3.wynik_domyslny() == WynikDialogu::Tak, "TakNieAnuluj domyslny to Tak");
     TEST_ASSERT(d3.wynik_anuluj() == WynikDialogu::Anuluj, "TakNieAnuluj anuluj to Anuluj");
@@ -367,6 +385,10 @@ static void test_okno_dialogowe() {
 
     // 6. PrzerwijPonowIgnoruj
     OknoDialogowe d5("Błąd wejścia/wyjścia", "Niespójność nośnika danych", PrzyciskiDialogu::PrzerwijPonowIgnoruj);
+    d5.rozmiesc(Prostokat(0, 0, 460, 190));
+    TEST_ASSERT(d5.liczba_przyciskow() == 3, "Przerwij/Ponow/Ignoruj ma dokladnie trzy przyciski");
+    TEST_ASSERT(d5.wynik_przycisku(0) == WynikDialogu::Przerwij && d5.wynik_przycisku(1) == WynikDialogu::Ponow &&
+                d5.wynik_przycisku(2) == WynikDialogu::Ignoruj, "Przerwij/Ponow/Ignoruj zachowuje trzy wyniki");
     d5.przy_wyniku(cb_dialog_wynik, nullptr);
     e_enter.obsluzone = false;
     d5.obsluz_wcisniecie_klawisza(e_enter);
@@ -709,6 +731,35 @@ static void test_powiadomienia() {
             p.krok_animacji(0); // -50 ms
         }
     }
+
+    zarzadca.zamknij();
+    for (int i = 0; i < 100; ++i) {
+        TEST_ASSERT(menedzer.pokaz(zarzadca, TypPowiadomienia::Sukces, "Cykl",
+                    "Zażółć gęślą jaźń", 50), "Toast zostal przyjety w cyklu ponownego uzycia");
+        zarzadca.krok_animacji();
+        TEST_ASSERT(menedzer.liczba_aktywnych() == 0, "Slot wraca do puli po wygasnieciu");
+        TEST_ASSERT(zarzadca.liczba_powierzchni() == 0, "Wygasly popup zostal wyrejestrowany");
+    }
+
+    const Prostokat prace[] = { Prostokat(0,0,1024,720), Prostokat(0,0,1280,680),
+        Prostokat(0,0,1366,728), Prostokat(0,0,1920,1040), Prostokat(0,0,3840,2100) };
+    for (const Prostokat& work : prace) {
+        ZarzadcaPopupow zg;
+        Prostokat owner(100, 80, 800, 600);
+        zg.ustaw_geometrie_wlasciciela(owner, work);
+        MenedzerPowiadomien mg;
+        for (int i = 0; i < 4; ++i)
+            TEST_ASSERT(mg.pokaz(zg, TypPowiadomienia::Informacja, "Geometria",
+                "Długa treść mierzona kanoniczną czcionką interfejsu.", 5000), "Toast geometrii przyjety");
+        Prostokat poprzedni;
+        for (size_t i = 0; i < 4; ++i) {
+            Prostokat r = mg.powiadomienie(i).obszar_ekranu(); r.x += owner.x; r.y += owner.y;
+            TEST_ASSERT(r.x >= work.x && r.prawy() <= work.prawy() && r.y >= work.y && r.dolny() <= work.dolny(),
+                        "Toast miesci sie w obszarze roboczym");
+            if (!poprzedni.czy_pusty()) TEST_ASSERT(r.przeciecie(poprzedni).czy_pusty(), "Toasty nie nakladaja sie");
+            poprzedni = r;
+        }
+    }
 }
 
 // =========================================================================
@@ -931,6 +982,405 @@ static void test_czcionka_extronic16b_i_odpornosc_utf8() {
     TEST_ASSERT(z_poza == 1 && zly_znak == '?', "Odrzucenie punktu kodowego > 0x10FFFF");
 }
 
+// =========================================================================
+// 15. Testy geometrii: OknoDialogowe (zaokraglone rogi, przezroczyste wyciecia)
+// =========================================================================
+static void test_geometria_okno_dialogowe() {
+    printf("\n--- Test 15: OknoDialogowe Geometria (Rogi motywu, wyciecia, hit-test, zmiana motywu) ---\n");
+
+    const char* const MOTYWY_ID[] = {
+        "bursztynnocny", "baltyckanoc", "grafit", "bursztynklasyczny", "bursztynjasny"
+    };
+
+    for (size_t i = 0; i < 5; ++i) {
+        BursztynMotyw m{};
+        bool wczytano = motyw_zaladuj_z_pliku(MOTYWY_ID[i], &m);
+        TEST_ASSERT(wczytano, "Wczytano motyw dla testu geometrii OknoDialogowe");
+        test_ustaw_aktywny_motyw(&m);
+
+        int promien_motywu = motyw_promien(MOTYW_ROG_OKNO);
+        TEST_ASSERT(promien_motywu > 0, "Promien okna w motywie jest wiekszy od zera");
+
+        OknoDialogowe diag("Test Rogow", "Komunikat testowy z zaokraglonymi rogami",
+                          PrzyciskiDialogu::OkAnuluj, TypDialogu::Pytanie);
+        TEST_ASSERT(diag.promien_zaokraglenia() == promien_motywu,
+                    "Promien zaokraglenia OknoDialogowe odpowiada motyw_promien(MOTYW_ROG_OKNO)");
+
+        // 1. Rysowanie do bufora testowego i weryfikacja przezroczystosci pikseli w rogach
+        diag.rozmiesc(Prostokat(0, 0, 400, 200));
+        uint32_t piksele[400 * 200];
+        memset(piksele, 0, sizeof(piksele));
+        KontekstRysowania ctx;
+        ctx.ustaw_cel(piksele, Prostokat(0, 0, 400, 200));
+        diag.rysuj_siebie(ctx);
+
+        // Piksele w wierzcholkach (0,0), (399,0), (0,199), (399,199) musza pozostac 0x00000000 (wyciecia)
+        TEST_ASSERT(piksele[0] == 0x00000000, "Piksel (0,0) lewego-gornego rogu jest przezroczysty 0x0");
+        TEST_ASSERT(piksele[399] == 0x00000000, "Piksel (399,0) prawego-gornego rogu jest przezroczysty 0x0");
+        TEST_ASSERT(piksele[199 * 400] == 0x00000000, "Piksel (0,199) lewego-dolnego rogu jest przezroczysty 0x0");
+        TEST_ASSERT(piksele[199 * 400 + 399] == 0x00000000, "Piksel (399,199) prawego-dolnego rogu jest przezroczysty 0x0");
+        TEST_ASSERT(piksele[100 * 400 + 200] != 0x00000000, "Piksel wewnatrz bryly dialogu jest nieprzezroczysty");
+
+        // 2. Weryfikacja przezroczystych wycięć w rogach i testu trafień (hit test)
+        // Rozmieszczamy dialog na pozycji (100, 100, 400, 200)
+        diag.rozmiesc(Prostokat(100, 100, 400, 200));
+
+        // W samych narożnikach prostokąta otaczającego sprawdz_trafienie musi zwrócić nullptr
+        TEST_ASSERT(diag.sprawdz_trafienie(Punkt(100, 100)) == nullptr,
+                    "Lewy-gorny naroznik (wyciecie) nie przechwytuje myszy (nullptr)");
+        TEST_ASSERT(diag.sprawdz_trafienie(Punkt(100 + 400 - 1, 100)) == nullptr,
+                    "Prawy-gorny naroznik (wyciecie) nie przechwytuje myszy (nullptr)");
+        TEST_ASSERT(diag.sprawdz_trafienie(Punkt(100, 100 + 200 - 1)) == nullptr,
+                    "Lewy-dolny naroznik (wyciecie) nie przechwytuje myszy (nullptr)");
+        TEST_ASSERT(diag.sprawdz_trafienie(Punkt(100 + 400 - 1, 100 + 200 - 1)) == nullptr,
+                    "Prawy-dolny naroznik (wyciecie) nie przechwytuje myszy (nullptr)");
+
+        // Punkt wewnatrz bryly okna (np. srodek) musi byc trafiony
+        TEST_ASSERT(diag.sprawdz_trafienie(Punkt(100 + 200, 100 + 100)) != nullptr,
+                    "Punkt wewnatrz zaokraglonego dialogu trafia w kontrolke");
+        // Punkt wewnatrz zaokraglonego rogu po wcieciu
+        TEST_ASSERT(diag.sprawdz_trafienie(Punkt(100 + promien_motywu + 2, 100 + promien_motywu + 2)) != nullptr,
+                    "Punkt za zaokragleniem nalezy do dialogu");
+    }
+
+    // 3. Weryfikacja dynamicznej zmiany motywu
+    BursztynMotyw m_jasny{};
+    BursztynMotyw m_nocny{};
+    motyw_zaladuj_z_pliku("bursztynjasny", &m_jasny);
+    motyw_zaladuj_z_pliku("bursztynnocny", &m_nocny);
+
+    test_ustaw_aktywny_motyw(&m_jasny);
+    OknoDialogowe dynamic_diag("Dynamiczny", "Sprawdzanie zmiany motywu", PrzyciskiDialogu::TylkoOk);
+    int r1 = dynamic_diag.promien_zaokraglenia();
+    TEST_ASSERT(r1 == motyw_promien(MOTYW_ROG_OKNO), "Poczatkowy promien dialogu zgodny z motywem jasnym");
+
+    test_ustaw_aktywny_motyw(&m_nocny);
+    dynamic_diag.zaktualizuj_motyw();
+    int r2 = dynamic_diag.promien_zaokraglenia();
+    TEST_ASSERT(r2 == motyw_promien(MOTYW_ROG_OKNO), "Po zmianie motywu promien dialogu zostal zaktualizowany");
+
+    test_ustaw_aktywny_motyw(nullptr);
+}
+
+// =========================================================================
+// 16. Testy geometrii: MenuGlowne kotwica i brak nadmiarowego odstepu
+// =========================================================================
+static void test_geometria_menu_glowne_kotwica() {
+    printf("\n--- Test 16: MenuGlowne Geometria Kotwicy (odstep 0 px, dopasowanie X, skalowanie) ---\n");
+
+    const SkalaUI skale[] = { 1, 2 };
+    for (SkalaUI skala : skale) {
+        ZarzadcaPopupow zarzadca;
+        Prostokat work_area(0, 0, 1024 * skala, 768 * skala);
+        Prostokat window_client(80 * skala, 60 * skala, 800 * skala, 500 * skala);
+        zarzadca.ustaw_geometrie_wlasciciela(window_client, work_area);
+        zarzadca.ustaw_skale_dpi(skala);
+
+        MenuGlowne menu;
+        menu.ustaw_skale_dpi(skala);
+        menu.ustaw_zarzadce_popupow(&zarzadca);
+
+        Menu& menu_plik = menu.menu().dodaj_podmenu("Plik");
+        menu_plik.dodaj_element("Nowy", 1);
+        menu_plik.dodaj_element("Otwórz", 2);
+        menu_plik.dodaj_element("Zakończ", 3);
+
+        Menu& menu_edycja = menu.menu().dodaj_podmenu("Edycja");
+        menu_edycja.dodaj_element("Cofnij", 4);
+        menu_edycja.dodaj_element("Wytnij", 5);
+        menu_edycja.dodaj_element("Wklej", 6);
+
+        Menu& menu_pomoc = menu.menu().dodaj_podmenu("Pomoc");
+        menu_pomoc.dodaj_element("O programie", 7);
+
+        menu.rozmiesc(Prostokat(0, 0, window_client.szerokosc, 28 * skala));
+
+        for (int i = 0; i < 3; ++i) {
+            Prostokat item_local = menu.prostokat_glowny(i);
+            TEST_ASSERT(!item_local.czy_pusty(), "Element MenuGlowne ma niepusty prostokat");
+
+            Prostokat item_ekran = menu.prostokat_do_ekranu(item_local);
+            TEST_ASSERT(item_ekran.x == window_client.x + item_local.x,
+                        "Wspolrzedna X elementu menu w przestrzeni ekranu jest poprawna");
+            TEST_ASSERT(item_ekran.y == window_client.y + item_local.y,
+                        "Wspolrzedna Y elementu menu w przestrzeni ekranu jest poprawna");
+
+            ZdarzenieMyszki zm{};
+            zm.typ = TypZdarzenia::WcisniecieMyszy;
+            zm.przycisk = 1;
+            zm.x = item_local.x + 10 * skala;
+            zm.y = item_local.y + item_local.wysokosc / 2;
+            menu.obsluz_wcisniecie_myszy(zm);
+
+            TEST_ASSERT(menu.czy_otwarte(), "Menu popup otwarte po kliknieciu w element glowny");
+            TEST_ASSERT(zarzadca.liczba_powierzchni() > 0, "ZarzadcaPopupow zarejestrowal powierzchnie popupu");
+
+            Prostokat popup_ekran = zarzadca.prostokat_zarejestrowany_ekranu();
+
+            // 1. Popup zaczyna się dokładnie pod elementem (gap == 0 px)
+            int gap = popup_ekran.y - item_ekran.dolny();
+            TEST_ASSERT(gap == 0, "Odstęp pionowy miedzy elementem menu a popupem wynosi dokladnie 0 px");
+            TEST_ASSERT(gap < 5 * skala, "Brak nadmiarowego odstepu rownego wierszowi menu lub belce tytulu");
+
+            // 2. Krawedz lewa popupu pokrywa sie z lewa krawedzia elementu
+            TEST_ASSERT(popup_ekran.x == item_ekran.x,
+                        "Krawedz X popupu idealnie pokrywa sie z lewa krawedzia elementu menu");
+
+            // 3. Popup w calosci miesci sie w obszarze roboczym monitora
+            TEST_ASSERT(popup_ekran.x >= work_area.x && popup_ekran.prawy() <= work_area.prawy() &&
+                        popup_ekran.y >= work_area.y && popup_ekran.dolny() <= work_area.dolny(),
+                        "Popup miesci sie w granicach obszaru roboczego");
+
+            zarzadca.zamknij();
+            TEST_ASSERT(!menu.czy_otwarte(), "Menu zamkniete po zarzadca.zamknij()");
+        }
+    }
+}
+
+// =========================================================================
+// 17. Testy geometrii: PrzyciskPodzielony dropdown (brak przycinania, pozycjonowanie)
+// =========================================================================
+static void test_geometria_przycisk_podzielony_dropdown() {
+    printf("\n--- Test 17: PrzyciskPodzielony dropdown Geometria (brak przycinania przez panel, flip/shift) ---\n");
+
+    ZarzadcaPopupow zarzadca;
+    Prostokat work_area(0, 0, 1024, 768);
+    Prostokat window_client(100, 100, 600, 400);
+    zarzadca.ustaw_geometrie_wlasciciela(window_client, work_area);
+    zarzadca.ustaw_skale_dpi(1);
+
+    Panel panel;
+    panel.ustaw_zarzadce_popupow(&zarzadca);
+    panel.rozmiesc(Prostokat(0, 0, 600, 36));
+
+    PrzyciskPodzielony* przycisk = new PrzyciskPodzielony("Zapisz");
+    przycisk->ustaw_zarzadce_popupow(&zarzadca);
+    panel.dodaj_kontrolke(przycisk);
+    przycisk->rozmiesc(Prostokat(10, 2, 120, 32));
+
+    przycisk->menu().dodaj_element("Zapisz bieżący", 1);
+    przycisk->menu().dodaj_element("Zapisz jako nowy plik...", 2);
+    przycisk->menu().dodaj_element("Eksportuj do formatu tekstowego", 3);
+
+    Prostokat opener_screen = przycisk->prostokat_do_ekranu(
+        Prostokat(0, 0, przycisk->szerokosc(), przycisk->wysokosc()));
+    TEST_ASSERT(opener_screen.x == window_client.x + 10, "Opener X w przestrzeni ekranu");
+    TEST_ASSERT(opener_screen.y == window_client.y + 2, "Opener Y w przestrzeni ekranu");
+
+    int aw = przycisk->szerokosc_czesci_strzalki();
+    ZdarzenieMyszki zm_press{};
+    zm_press.typ = TypZdarzenia::WcisniecieMyszy;
+    zm_press.przycisk = 1;
+    zm_press.x = przycisk->obszar_ekranu().prawy() - aw / 2;
+    zm_press.y = przycisk->obszar_ekranu().y + przycisk->obszar_ekranu().wysokosc / 2;
+    przycisk->obsluz_wcisniecie_myszy(zm_press);
+
+    ZdarzenieMyszki zm_release = zm_press;
+    zm_release.typ = TypZdarzenia::ZwolnienieMyszy;
+    przycisk->obsluz_zwolnienie_myszy(zm_release);
+
+    TEST_ASSERT(przycisk->czy_menu_otwarte(), "Dropdown menu otwarte po kliknieciu w strzalke");
+    TEST_ASSERT(zarzadca.liczba_powierzchni() > 0, "Powierzchnia dropdown zarejestrowana w ZarzadcaPopupow");
+
+    Prostokat popup_screen = zarzadca.prostokat_zarejestrowany_ekranu();
+
+    // 1. Dropdown NIE jest obcinany przez toolbar ani panel rodzica
+    Prostokat panel_screen = panel.prostokat_do_ekranu(Prostokat(0, 0, panel.szerokosc(), panel.wysokosc()));
+    TEST_ASSERT(popup_screen.dolny() > panel_screen.dolny(),
+                "Dropdown rozciaga sie PONAD krawedz paska narzedzi/panelu (brak obciecia przez kontener)");
+    TEST_ASSERT(popup_screen.wysokosc >= 3 * 22,
+                "Wysokosc popupu obejmuje pelna tresc menu (wszystkie 3 elementy)");
+
+    // 2. Dropdown otwiera sie bezposrednio przy openerze (gap 0 px)
+    TEST_ASSERT(popup_screen.y == opener_screen.dolny(),
+                "Dropdown przylega bezposrednio do dolnej krawedzi przycisku (gap == 0 px)");
+
+    // 3. Popup w calosci widoczny w obszarze roboczym
+    TEST_ASSERT(popup_screen.x >= work_area.x && popup_screen.prawy() <= work_area.prawy() &&
+                popup_screen.y >= work_area.y && popup_screen.dolny() <= work_area.dolny(),
+                "Dropdown w calosci miesci sie w obszarze roboczym monitora");
+
+    zarzadca.zamknij();
+
+    // 4. Test repozycjonowania przy dolnej krawedzi ekranu (otwarcie w gore)
+    Prostokat window_near_bottom(100, work_area.dolny() - 60, 600, 50);
+    zarzadca.ustaw_geometrie_wlasciciela(window_near_bottom, work_area);
+    opener_screen = przycisk->prostokat_do_ekranu(Prostokat(0, 0, przycisk->szerokosc(), przycisk->wysokosc()));
+
+    zm_press.x = przycisk->obszar_ekranu().prawy() - aw / 2;
+    zm_press.y = przycisk->obszar_ekranu().y + przycisk->obszar_ekranu().wysokosc / 2;
+    zm_release = zm_press;
+    przycisk->obsluz_wcisniecie_myszy(zm_press);
+    przycisk->obsluz_zwolnienie_myszy(zm_release);
+
+    popup_screen = zarzadca.prostokat_zarejestrowany_ekranu();
+    TEST_ASSERT(popup_screen.dolny() <= opener_screen.y || popup_screen.dolny() <= work_area.dolny(),
+                "Blisko dolnej krawedzi dropdown otwiera sie w gore lub miesci sie w obszarze roboczym");
+    TEST_ASSERT(popup_screen.dolny() <= work_area.dolny() && popup_screen.y >= work_area.y,
+                "Dropdown blisko dolnej krawedzi nie wychodzi poza obszar roboczy");
+
+    zarzadca.zamknij();
+
+    // 5. Test repozycjonowania przy prawej krawedzi ekranu (przesuniecie w lewo)
+    Prostokat window_near_right(work_area.prawy() - 110, 200, 200, 200);
+    zarzadca.ustaw_geometrie_wlasciciela(window_near_right, work_area);
+    opener_screen = przycisk->prostokat_do_ekranu(Prostokat(0, 0, przycisk->szerokosc(), przycisk->wysokosc()));
+
+    zm_press.x = przycisk->obszar_ekranu().prawy() - aw / 2;
+    zm_press.y = przycisk->obszar_ekranu().y + przycisk->obszar_ekranu().wysokosc / 2;
+    zm_release = zm_press;
+    przycisk->obsluz_wcisniecie_myszy(zm_press);
+    przycisk->obsluz_zwolnienie_myszy(zm_release);
+
+    popup_screen = zarzadca.prostokat_zarejestrowany_ekranu();
+    TEST_ASSERT(popup_screen.prawy() <= work_area.prawy(),
+                "Przy prawej krawedzi dropdown przesuwa sie w lewo, nie wychodzac poza ekran");
+    TEST_ASSERT(popup_screen.x >= work_area.x, "Dropdown nie ucieka za lewa krawedz");
+
+    zarzadca.zamknij();
+}
+
+// =========================================================================
+// 18. Testy geometrii: Toast / Powiadomienie (brak przycinania, dynamiczna wysokosc, stos)
+// =========================================================================
+static void test_geometria_toast_przycinanie_i_stos() {
+    printf("\n--- Test 18: Toast / Powiadomienie Geometria (przycinanie, polskie znaki, zawijanie, stos) ---\n");
+
+    const SkalaUI skale[] = { 1, 2 };
+    const Prostokat rozdzielczosci[] = {
+        Prostokat(0, 0, 800, 600),
+        Prostokat(0, 0, 1024, 768),
+        Prostokat(0, 0, 1920, 1080)
+    };
+
+    struct PrzypadekTestowy {
+        TypPowiadomienia typ;
+        const char* tytul;
+        const char* tresc;
+        const char* akcja;
+    } przypadki[] = {
+        { TypPowiadomienia::Informacja, "Krótki", "Prosty komunikat", nullptr },
+        { TypPowiadomienia::Sukces, "Bardzo długi tytuł powiadomienia systemowego weryfikujący poprawność nagłówka", "Krótka treść", nullptr },
+        { TypPowiadomienia::Ostrzezenie, "Ostrzeżenie", "Zażółć gęślą jaźń! Ta wiadomość zawiera polskie znaki diakrytyczne oraz wielokrotnie złożony tekst mający na celu zweryfikowanie automatycznego zawijania wierszy i poprawnego wyliczania wysokości powiadomienia.", nullptr },
+        { TypPowiadomienia::Blad, "Błąd krytyczny", "Linia pierwsza komunikatu\nLinia druga z tekstem\nLinia trzecia z podsumowaniem\nLinia czwarta zakończenia", "Szczegóły" }
+    };
+
+    for (SkalaUI s : skale) {
+        for (const auto& res : rozdzielczosci) {
+            ZarzadcaPopupow zarzadca;
+            Prostokat work_area(0, 0, res.szerokosc, res.wysokosc - 40 * s);
+            Prostokat window_client(50 * s, 50 * s, 600 * s, 400 * s);
+            zarzadca.ustaw_geometrie_wlasciciela(window_client, work_area);
+            zarzadca.ustaw_skale_dpi(s);
+
+            for (const auto& przyp : przypadki) {
+                Powiadomienie p;
+                p.ustaw_skale_dpi(s);
+                p.ustaw_zarzadce_popupow(&zarzadca);
+                p.zaktualizuj_motyw();
+                p.ustaw_dane(przyp.typ, przyp.tytul, przyp.tresc, 5000, przyp.akcja);
+
+                Rozmiar wym = p.wymagany_rozmiar(s);
+                Prostokat r = zarzadca.umiesc_w_obszarze_roboczym_prawy_dol(wym, 16 * s, 16 * s);
+                bool dodano = zarzadca.dodaj_powierzchnie(p, r, nullptr);
+                TEST_ASSERT(dodano, "Toast pomyslnie dodany do zarzadcy popupow");
+
+                // Weryfikacja alokacji powierzchni
+                TEST_ASSERT(p.szerokosc() >= wym.szerokosc, "Szerokosc powierzchni >= wymaganego rozmiaru");
+                TEST_ASSERT(p.wysokosc() >= wym.wysokosc, "Wysokosc powierzchni >= wymaganego rozmiaru");
+
+                // Rysujemy do bufora
+                uint32_t* bufor = (uint32_t*)malloc(p.szerokosc() * p.wysokosc() * sizeof(uint32_t));
+                TEST_ASSERT(bufor != nullptr, "Alokacja bufora testowego powiadomienia udana");
+                memset(bufor, 0, p.szerokosc() * p.wysokosc() * sizeof(uint32_t));
+                KontekstRysowania ctx;
+                ctx.ustaw_cel(bufor, Prostokat(0, 0, p.szerokosc(), p.wysokosc()));
+                p.rysuj_siebie(ctx);
+
+                // Weryfikacja: zaden element nie wychodzi poza obszar powierzchni
+                TEST_ASSERT(p.obszar_tekstu().prawy() <= p.szerokosc(),
+                            "Obszar tekstu miesci sie w szerokosci powiadomienia");
+                TEST_ASSERT(p.obszar_tekstu().dolny() <= p.wysokosc(),
+                            "Obszar tekstu miesci sie w wysokosci powiadomienia");
+                TEST_ASSERT(p.przycisk_zamknij().prawy() <= p.szerokosc(),
+                            "Przycisk zamkniecia miesci sie w szerokosci powiadomienia");
+                TEST_ASSERT(p.przycisk_zamknij().dolny() <= p.wysokosc(),
+                            "Przycisk zamkniecia miesci sie w wysokosci powiadomienia");
+
+                if (przyp.akcja) {
+                    TEST_ASSERT(p.przycisk_akcji().prawy() <= p.szerokosc(),
+                                "Przycisk akcji miesci sie w szerokosci powiadomienia");
+                    TEST_ASSERT(p.przycisk_akcji().dolny() <= p.wysokosc(),
+                                "Przycisk akcji miesci sie w wysokosci powiadomienia");
+                    TEST_ASSERT(p.przycisk_akcji().y >= p.obszar_tekstu().dolny(),
+                                "Przycisk akcji znajduje sie ponizej tresci tekstu");
+                }
+
+                free(bufor);
+                zarzadca.zamknij();
+            }
+        }
+    }
+
+    // Weryfikacja stosu o zmiennych wysokosciach (upward stacking) i kompaktowania (compaction)
+    {
+        ZarzadcaPopupow zarzadca;
+        Prostokat work_area(0, 0, 1280, 720);
+        Prostokat window_client(100, 100, 800, 500);
+        zarzadca.ustaw_geometrie_wlasciciela(window_client, work_area);
+        zarzadca.ustaw_skale_dpi(1);
+
+        MenedzerPowiadomien mgr;
+
+        // 1. Krotki toast
+        mgr.pokaz(zarzadca, TypPowiadomienia::Sukces, "Zapisano", "Plik zostal pomyslnie zapisany na dysku.");
+        // 2. Dlugie polskie powiadomienie (wielowierszowe)
+        mgr.pokaz(zarzadca, TypPowiadomienia::Ostrzezenie, "Uwaga",
+                  "Zażółć gęślą jaźń! To jest dlugi tekst wymagajacy kilku wierszy do poprawnego wyswietlenia calosci.");
+        // 3. Toast z przyciskiem akcji
+        mgr.pokaz(zarzadca, TypPowiadomienia::Blad, "Blad polaczenia",
+                  "Nie udalo sie nawiazac polaczenia z serwerem zdalnym.", 4000, "Ponow");
+
+        TEST_ASSERT(mgr.liczba_aktywnych() == 3, "Wszystkie 3 toasty sa aktywne w menedzerze");
+
+        Powiadomienie& t1 = mgr.powiadomienie(0);
+        Powiadomienie& t2 = mgr.powiadomienie(1);
+        Powiadomienie& t3 = mgr.powiadomienie(2);
+
+        Prostokat r1_ekran = Prostokat(window_client.x + t1.obszar().x, window_client.y + t1.obszar().y,
+                                       t1.obszar().szerokosc, t1.obszar().wysokosc);
+        Prostokat r2_ekran = Prostokat(window_client.x + t2.obszar().x, window_client.y + t2.obszar().y,
+                                       t2.obszar().szerokosc, t2.obszar().wysokosc);
+        Prostokat r3_ekran = Prostokat(window_client.x + t3.obszar().x, window_client.y + t3.obszar().y,
+                                       t3.obszar().szerokosc, t3.obszar().wysokosc);
+
+        TEST_ASSERT(r3_ekran.dolny() == work_area.dolny() - 16,
+                    "Najnowszy toast t3 znajduje sie na dole stosu nad paskiem zadan (od_dolu = 16)");
+        TEST_ASSERT(r2_ekran.dolny() == r3_ekran.y - 8,
+                    "Toast t2 znajduje sie dokladnie 8 px nad toastem t3 (zgodnie z rzeczywista wysokoscia t3)");
+        TEST_ASSERT(r1_ekran.dolny() == r2_ekran.y - 8,
+                    "Toast t1 znajduje sie dokladnie 8 px nad toastem t2 (zgodnie z rzeczywista wysokoscia t2)");
+
+        TEST_ASSERT(t2.wysokosc() > t1.wysokosc() || t3.wysokosc() > t1.wysokosc(),
+                    "Toasty o roznej tresci maja rozne rzeczywiste wysokosci");
+
+        // Zamkniecie najnowszego toastu t3 (na samym dole)
+        t3.zamknij();
+        TEST_ASSERT(mgr.liczba_aktywnych() == 2, "Po zamknieciu t3 pozostaly 2 aktywne toasty");
+
+        // Kompaktowanie stosu: teraz t2 powinien zsunac sie na dol (od_dolu = 16)
+        r2_ekran = Prostokat(window_client.x + t2.obszar().x, window_client.y + t2.obszar().y,
+                             t2.obszar().szerokosc, t2.obszar().wysokosc);
+        r1_ekran = Prostokat(window_client.x + t1.obszar().x, window_client.y + t1.obszar().y,
+                             t1.obszar().szerokosc, t1.obszar().wysokosc);
+
+        TEST_ASSERT(r2_ekran.dolny() == work_area.dolny() - 16,
+                    "Po zamknieciu t3 toast t2 przemiescil sie na dol stosu (od_dolu = 16)");
+        TEST_ASSERT(r1_ekran.dolny() == r2_ekran.y - 8,
+                    "Toast t1 zachowal odstep 8 px nad t2 z uwzglednieniem rzeczywistej wysokosci t2");
+    }
+}
+
 int main() {
     printf("======================================================================\n");
     printf(" BURSZTYN OS - TESTY JEDNOSTKOWE NOWYCH KOMPONENTOW BURSZTYNUI\n");
@@ -950,6 +1400,12 @@ int main() {
     test_motywy_kolory_pulpit_i_kontrolki();
     test_menu_hover_i_izolacja();
     test_czcionka_extronic16b_i_odpornosc_utf8();
+
+    // Nowe testy geometrii BursztynUI
+    test_geometria_okno_dialogowe();
+    test_geometria_menu_glowne_kotwica();
+    test_geometria_przycisk_podzielony_dropdown();
+    test_geometria_toast_przycinanie_i_stos();
 
     printf("\n======================================================================\n");
     printf("Wyniki: %d / %d testow udanych (%.1f%%)\n",

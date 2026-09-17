@@ -384,19 +384,21 @@ public:
             if (!KontekstRysowania::g_tlum_rysowanie_globalne)
                 gui_rysuj_standardowa_belke(x_, y_, szerokosc_, tytul_, czy_zmaksymalizowane_);
             regiony.dodaj(klient);
+            regiony.dodaj(popupy_.brudny_obszar());
         } else {
             if (kontrolka_glowna_) {
                 const auto& r = kontrolka_glowna_->brudne_regiony_;
                 for (size_t i = 0; i < r.liczba; ++i) regiony.dodaj(r.prostokaty[i].przeciecie(klient));
             }
             regiony.dodaj(brudny_obszar_klienta_.przeciecie(klient));
-            regiony.dodaj(popupy_.brudny_obszar().przeciecie(klient));
+            // Popup globalny (toast) moze legalnie lezec poza klientem okna.
+            regiony.dodaj(popupy_.brudny_obszar());
         }
         ostatni_obszar_odrysowania_ = pelne ? Prostokat(0, 0, szerokosc_, wysokosc_) : Prostokat();
         ++liczba_odrysowan_;
         if (pelne) liczba_brudnych_pikseli_ += static_cast<uint64_t>(szerokosc_)*WYSOKOSC_BELKI_TYTULOWEJ*skala_dpi_;
         for (size_t i = 0; i < regiony.liczba; ++i) {
-            Prostokat r = regiony.prostokaty[i].przeciecie(klient);
+            Prostokat r = regiony.prostokaty[i];
             if (r.czy_pusty()) continue;
             ostatni_obszar_odrysowania_ = ostatni_obszar_odrysowania_.suma(r);
             size_t pixels = static_cast<size_t>(r.szerokosc)*r.wysokosc;
@@ -405,7 +407,9 @@ public:
             bool buforowany = bufor_regionu_ && pixels <= pojemnosc_regionu_;
             if (buforowany) ctx.ustaw_cel(bufor_regionu_, swiat);
             ctx.dodaj_przesuniecie(Punkt(x_, y_)); ctx.dodaj_przyciecie(r);
-            ctx.rysuj_prostokat(r, motyw_kolor(MOTYW_KOLOR_OKNOTLO));
+            Prostokat tlo_klienta = r.przeciecie(klient);
+            if (!tlo_klienta.czy_pusty())
+                ctx.rysuj_prostokat(tlo_klienta, motyw_kolor(MOTYW_KOLOR_OKNOTLO));
             if (kontrolka_glowna_) kontrolka_glowna_->rysuj(ctx, false);
             popupy_.rysuj(ctx, false);
             ctx.zdejmij_przyciecie(); ctx.zdejmij_przesuniecie(); ctx.ustaw_cel(nullptr, Prostokat());

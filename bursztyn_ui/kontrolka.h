@@ -212,6 +212,21 @@ public:
 
     Prostokat obszar_ekranu() const { return obszar_ekranu_; }
 
+    Punkt punkt_do_okna(Punkt p_lokalny) const {
+        return Punkt(obszar_ekranu_.x + p_lokalny.x, obszar_ekranu_.y + p_lokalny.y);
+    }
+    Prostokat prostokat_do_okna(Prostokat r_lokalny) const {
+        return Prostokat(obszar_ekranu_.x + r_lokalny.x, obszar_ekranu_.y + r_lokalny.y,
+                         r_lokalny.szerokosc, r_lokalny.wysokosc);
+    }
+    Punkt punkt_do_ekranu(Punkt p_lokalny) const;
+    Prostokat prostokat_do_ekranu(Prostokat r_lokalny) const;
+
+    Punkt punktdookna(Punkt p) const { return punkt_do_okna(p); }
+    Prostokat prostokatdookna(Prostokat r) const { return prostokat_do_okna(r); }
+    Punkt punktdoekranu(Punkt p) const { return punkt_do_ekranu(p); }
+    Prostokat prostokatdoekranu(Prostokat r) const { return prostokat_do_ekranu(r); }
+
     int x() const { return obszar_.x; }
     int y() const { return obszar_.y; }
     int szerokosc() const { return obszar_.szerokosc; }

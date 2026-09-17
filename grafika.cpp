@@ -3380,6 +3380,11 @@ extern "C" bool bws_gui_blit(
     // limit 4M pikseli (~16 MiB)
     if (cnt > 4ULL * 1024ULL * 1024ULL) return false;
 
+    // Zarejestrowana powierzchnia popupu ma własny bufor kompozytora i może
+    // wykraczać poza prostokąt głównej warstwy aplikacji.
+    if (skladacz_obrazu_blit_popup(aktualny_pid, x, y, szer, wys, piksele))
+        return true;
+
     warstwa_obrazu* warstwa = pobierz_warstwe(aktualny_pid);
     if (!warstwa || !warstwa->bufor_pikseli) return false;
 

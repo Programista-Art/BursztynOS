@@ -2,6 +2,8 @@
 
 #include "popup.h"
 #include "przycisk.h"
+#include "panel.h"
+#include "panel_dokowany.h"
 #include "motyw.h"
 
 namespace BursztynUI {
@@ -88,6 +90,45 @@ public:
 
     ~OknoDialogowe() override = default;
 
+    uint16_t promien_zaokraglenia() const override {
+        return motyw_promien(MOTYW_ROG_OKNO);
+    }
+
+    Kontrolka* sprawdz_trafienie(Punkt pt) override {
+        if (!czy_widoczna_ || !obszar_.zawiera(pt)) return nullptr;
+
+        int r = motyw_promien(MOTYW_ROG_OKNO) * skala_dpi_;
+        if (r > 0) {
+            int lx = pt.x - obszar_.x;
+            int ly = pt.y - obszar_.y;
+            // Lewy gorny
+            if (ly >= 0 && ly < r && lx >= 0 && lx < r) {
+                int inset = motyw_promien_inset(r, ly);
+                if (lx < inset) return nullptr;
+            }
+            // Prawy gorny
+            if (ly >= 0 && ly < r && lx >= obszar_.szerokosc - r && lx < obszar_.szerokosc) {
+                int inset = motyw_promien_inset(r, ly);
+                if (lx >= obszar_.szerokosc - inset) return nullptr;
+            }
+            // Lewy dolny
+            if (ly >= obszar_.wysokosc - r && ly < obszar_.wysokosc && lx >= 0 && lx < r) {
+                int dy = obszar_.wysokosc - 1 - ly;
+                int inset = motyw_promien_inset(r, dy);
+                if (lx < inset) return nullptr;
+            }
+            // Prawy dolny
+            if (ly >= obszar_.wysokosc - r && ly < obszar_.wysokosc &&
+                lx >= obszar_.szerokosc - r && lx < obszar_.szerokosc) {
+                int dy = obszar_.wysokosc - 1 - ly;
+                int inset = motyw_promien_inset(r, dy);
+                if (lx >= obszar_.szerokosc - inset) return nullptr;
+            }
+        }
+
+        return PowierzchniaPopup::sprawdz_trafienie(pt);
+    }
+
     void zaktualizuj_motyw() override {
         styl_ = Motyw::pobierz_domyslny().styl_okna;
         styl_.normalny.tlo = motyw_kolor(MOTYW_KOLOR_OKNOTLO);
@@ -95,6 +136,8 @@ public:
         styl_.normalny.grubosc_ramki = 2;
         styl_.normalny.promien_zaokraglenia = motyw_promien(MOTYW_ROG_OKNO);
         Kontrolka::zaktualizuj_motyw();
+        if (uklad_) wyzeruj_tlo(*uklad_);
+        if (panel_przyciskow_) wyzeruj_tlo(*panel_przyciskow_);
     }
 
     const char* wiadomosc() const { return wiadomosc_; }
@@ -121,6 +164,25 @@ public:
     WynikDialogu wynik() const { return wynik_; }
     WynikDialogu wynik_domyslny() const { return wynik_domyslny_; }
     WynikDialogu wynik_anuluj() const { return wynik_anuluj_; }
+    size_t liczba_przyciskow() const { return liczba_przyciskow_; }
+    Przycisk* przycisk(size_t i) const { return i < liczba_przyciskow_ ? sloty_[i].przycisk : nullptr; }
+    WynikDialogu wynik_przycisku(size_t i) const { return i < liczba_przyciskow_ ? sloty_[i].wynik : WynikDialogu::Brak; }
+    Prostokat obszar_tresci() const { return obszar_tresci_; }
+    Prostokat obszar_przyciskow() const { return obszar_przyciskow_; }
+
+    void rozmiesc(Prostokat docelowy) override {
+        bool zmiana = obszar_.szerokosc != docelowy.szerokosc || obszar_.wysokosc != docelowy.wysokosc;
+        obszar_ = docelowy;
+        Punkt rp = rodzic_ ? rodzic_->obszar_ekranu().pozycja() : Punkt(0, 0);
+        obszar_ekranu_ = Prostokat(rp + obszar_.pozycja(), obszar_.rozmiar());
+        if (uklad_) {
+            int belka = 32 * skala_dpi_;
+            uklad_->rozmiesc(Prostokat(0, belka, obszar_.szerokosc,
+                                      obszar_.wysokosc > belka ? obszar_.wysokosc - belka : 0));
+            aktualizuj_obszary_ukladu();
+        }
+        if (zmiana) obsluz_zmiane_rozmiaru();
+    }
 
     void ustaw_przycisk_domyslny(WynikDialogu w) {
         wynik_domyslny_ = w;
@@ -172,12 +234,16 @@ public:
         int dialog_h = 0;
         oblicz_geometrie_dialogu(dialog_w, dialog_h);
 
-        int cx = 200;
-        int cy = 150;
+        int cx = 0;
+        int cy = 0;
         if (owner) {
-            Prostokat oe = owner->obszar_ekranu();
+            Prostokat oe = owner->prostokat_do_ekranu(Prostokat(0, 0, owner->szerokosc(), owner->wysokosc()));
             cx = oe.x + (oe.szerokosc - dialog_w) / 2;
             cy = oe.y + (oe.wysokosc - dialog_h) / 2;
+        } else {
+            Prostokat work = z.obszar_roboczy_ekranu();
+            cx = work.x + (work.szerokosc - dialog_w) / 2;
+            cy = work.y + (work.wysokosc - dialog_h) / 2;
         }
 
         Prostokat gdzie = z.umiesc_przy_punkcie_ekranu(cx, cy, Rozmiar(dialog_w, dialog_h));
@@ -312,9 +378,9 @@ public:
                         tekst_, motyw_kolor(MOTYW_KOLOR_TEKST), s);
 
         // Renderowanie ikony semantycznej
-        int start_x = 20 * s;
+        int start_x = obszar_tresci_.x + 16 * s;
         int txt_start_x = start_x;
-        int txt_start_y = h_belki + 16 * s;
+        int txt_start_y = obszar_tresci_.y + 12 * s;
 
         if (typ_ != TypDialogu::Zwykly) {
             int ikona_rozm = 36 * s;
@@ -334,7 +400,7 @@ public:
         }
 
         // Subtelna linia oddzielajaca pasek przyciskow
-        int sep_y = obszar_.wysokosc - 46 * s;
+        int sep_y = obszar_przyciskow_.y;
         ctx.rysuj_linie_pozioma(12 * s, sep_y, obszar_.szerokosc - 24 * s, motyw_kolor(MOTYW_KOLOR_RAMKA));
     }
 
@@ -539,6 +605,29 @@ private:
         wyczysc_kontrolki();
         SkalaUI s = skala_dpi_;
 
+        uklad_ = new PanelDokowany();
+        uklad_->ustaw_wypelnienie(Marginesy(0, 0, 0, 0));
+        uklad_->ustaw_odstep(0);
+        wyzeruj_tlo(*uklad_);
+        dodaj_kontrolke(uklad_);
+
+        panel_przyciskow_ = new Wiersz();
+        panel_przyciskow_->ustaw_preferowany_rozmiar(Rozmiar(-1, 48));
+        panel_przyciskow_->ustaw_wypelnienie(Marginesy(18, 8, 18, 10));
+        panel_przyciskow_->ustaw_odstep(10);
+        panel_przyciskow_->ustaw_wyrownanie_poziome(WyrownaniePoziome::Koniec);
+        panel_przyciskow_->ustaw_wyrownanie_pionowe(WyrownaniePionowe::Srodek);
+        wyzeruj_tlo(*panel_przyciskow_);
+        uklad_->dodaj_dokowany(panel_przyciskow_, Dokowanie::Dol);
+
+        Kontrolka* wypychacz = new Kontrolka();
+        wypychacz->ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+        wypychacz->ustaw_mozliwosc_fokusu(false);
+        panel_przyciskow_->dodaj_kontrolke(wypychacz);
+
+        panel_tresci_ = new Kontrolka();
+        uklad_->dodaj_dokowany(panel_tresci_, Dokowanie::Wypelnij);
+
         int total_btn_w = 0;
         int btn_widths[MAKS_PRZYCISKOW]{};
         for (size_t i = 0; i < liczba_przyciskow_; ++i) {
@@ -550,8 +639,6 @@ private:
             if (i + 1 < liczba_przyciskow_) total_btn_w += 10 * s;
         }
 
-        int start_x = w - 18 * s - total_btn_w;
-        int btn_y = h - 42 * s;
         int btn_h = 30 * s;
 
         for (size_t i = 0; i < liczba_przyciskow_; ++i) {
@@ -569,10 +656,29 @@ private:
                 slot->dialog->zamknij_z_wynikiem(slot->wynik);
             }, &sloty_[i]);
 
-            btn->rozmiesc(Prostokat(start_x, btn_y, btn_widths[i], btn_h));
-            dodaj_kontrolke(btn);
-            start_x += btn_widths[i] + 10 * s;
+            btn->ustaw_wyrownanie_poziome(WyrownaniePoziome::Poczatek);
+            btn->ustaw_wyrownanie_pionowe(WyrownaniePionowe::Srodek);
+            panel_przyciskow_->dodaj_kontrolke(btn);
         }
+        (void)total_btn_w;
+        uklad_->rozmiesc(Prostokat(0, 32 * s, w, h > 32 * s ? h - 32 * s : 0));
+        aktualizuj_obszary_ukladu();
+    }
+
+    static void wyzeruj_tlo(Kontrolka& k) {
+        for (int i = 0; i <= static_cast<int>(StanWizualny::TylkoDoOdczytu); ++i) {
+            StylStanu& st = k.styl_stanu(static_cast<StanWizualny>(i));
+            st.tlo = 0; st.ramka = 0; st.grubosc_ramki = 0;
+        }
+    }
+
+    void aktualizuj_obszary_ukladu() {
+        if (!uklad_ || !panel_tresci_ || !panel_przyciskow_) return;
+        Prostokat ur = uklad_->obszar();
+        Prostokat tr = panel_tresci_->obszar();
+        Prostokat pr = panel_przyciskow_->obszar();
+        obszar_tresci_ = Prostokat(ur.x + tr.x, ur.y + tr.y, tr.szerokosc, tr.wysokosc);
+        obszar_przyciskow_ = Prostokat(ur.x + pr.x, ur.y + pr.y, pr.szerokosc, pr.wysokosc);
     }
 
     void dodaj_slot_przycisku(const char* etykieta, WynikDialogu w, bool domyslny = false, bool anuluj = false) {
@@ -652,6 +758,11 @@ private:
     LiniaTekstu linie_[MAKS_LINII]{};
     size_t liczba_linii_{0};
     int max_szerokosc_linii_{0};
+    PanelDokowany* uklad_{nullptr};
+    Kontrolka* panel_tresci_{nullptr};
+    Wiersz* panel_przyciskow_{nullptr};
+    Prostokat obszar_tresci_{};
+    Prostokat obszar_przyciskow_{};
 };
 
 class Komunikat {
