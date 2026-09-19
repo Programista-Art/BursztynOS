@@ -879,6 +879,17 @@ bool gui_blit(int x, int y, int szer, int wys, const uint32_t* piksele) {
     return wynik == 1ULL;
 }
 
+bool gui_blit_popup(int x, int y, int szer, int wys, const uint32_t* piksele) {
+    if (!piksele || szer <= 0 || wys <= 0) return false;
+    const uint64_t wynik = bws_wywolaj(
+        57,
+        spakuj_dwa_i32(legacy_x(x), legacy_y(y)),
+        spakuj_dwa_i32(legacy_w(szer), legacy_h(wys)),
+        reinterpret_cast<uint64_t>(piksele),
+        1);
+    return wynik == 1ULL;
+}
+
 bool gui_ustaw_tytul_okna(const char* tytul) {
     if (!tytul) return false;
     return bws_wywolaj(

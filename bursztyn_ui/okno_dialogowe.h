@@ -481,6 +481,7 @@ public:
             przeciaganie_ = true;
             offset_ciagniecia_x_ = lx;
             offset_ciagniecia_y_ = ly;
+            gui_ustaw_capture_myszy(true);
             e.obsluzone = true;
             return;
         }
@@ -494,11 +495,10 @@ public:
             int nowy_x = e.x - offset_ciagniecia_x_;
             int nowy_y = e.y - offset_ciagniecia_y_;
             Prostokat work = zarzadca()->obszar_roboczy_ekranu();
-            Prostokat geom = zarzadca()->geometria_wlasciciela();
-            int min_x = work.x - geom.x;
-            int min_y = work.y - geom.y;
-            int max_x = (work.prawy() - geom.x) - 60 * static_cast<int>(skala_dpi_);
-            int max_y = (work.dolny() - geom.y) - 32 * static_cast<int>(skala_dpi_);
+            int min_x = work.x;
+            int min_y = work.y;
+            int max_x = work.prawy() - 60 * static_cast<int>(skala_dpi_);
+            int max_y = work.dolny() - 32 * static_cast<int>(skala_dpi_);
             if (nowy_x < min_x) nowy_x = min_x;
             if (nowy_x > max_x) nowy_x = max_x;
             if (nowy_y < min_y) nowy_y = min_y;
@@ -520,6 +520,7 @@ public:
         int ly = e.y - obszar_.y;
         if (przeciaganie_) {
             przeciaganie_ = false;
+            gui_ustaw_capture_myszy(false);
             e.obsluzone = true;
             return;
         }

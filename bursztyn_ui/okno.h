@@ -384,15 +384,12 @@ public:
             if (!KontekstRysowania::g_tlum_rysowanie_globalne)
                 gui_rysuj_standardowa_belke(x_, y_, szerokosc_, tytul_, czy_zmaksymalizowane_);
             regiony.dodaj(klient);
-            regiony.dodaj(popupy_.brudny_obszar());
         } else {
             if (kontrolka_glowna_) {
                 const auto& r = kontrolka_glowna_->brudne_regiony_;
                 for (size_t i = 0; i < r.liczba; ++i) regiony.dodaj(r.prostokaty[i].przeciecie(klient));
             }
             regiony.dodaj(brudny_obszar_klienta_.przeciecie(klient));
-            // Popup globalny (toast) moze legalnie lezec poza klientem okna.
-            regiony.dodaj(popupy_.brudny_obszar());
         }
         ostatni_obszar_odrysowania_ = pelne ? Prostokat(0, 0, szerokosc_, wysokosc_) : Prostokat();
         ++liczba_odrysowan_;
@@ -411,7 +408,6 @@ public:
             if (!tlo_klienta.czy_pusty())
                 ctx.rysuj_prostokat(tlo_klienta, motyw_kolor(MOTYW_KOLOR_OKNOTLO));
             if (kontrolka_glowna_) kontrolka_glowna_->rysuj(ctx, false);
-            popupy_.rysuj(ctx, false);
             ctx.zdejmij_przyciecie(); ctx.zdejmij_przesuniecie(); ctx.ustaw_cel(nullptr, Prostokat());
             if (buforowany && !KontekstRysowania::g_tlum_rysowanie_globalne)
                 gui_blit(swiat.x, swiat.y, r.szerokosc, r.wysokosc, bufor_regionu_);
@@ -428,6 +424,10 @@ public:
                     }
                 }
             }
+        }
+
+        if (popupy_.czy_otwarty() && (popupy_.czy_brudny() || pelne)) {
+            popupy_.odrysuj_popupy(pelne);
         }
 
         if (kontrolka_glowna_) kontrolka_glowna_->wyczysc_brudny_obszar();
@@ -561,7 +561,7 @@ public:
                 if (popupy_.czy_otwarty()) {
                     ZdarzenieMyszki pe;
                     pe.typ = TypZdarzenia::RuchMyszy;
-                    pe.x = lokalny_x; pe.y = lokalny_y;
+                    pe.x = mx; pe.y = my;
                     pe.modyfikatory = surowe_zdarzenie.przyciski;
                     pe.timestamp = surowe_zdarzenie.timestamp;
                     if (popupy_.obsluz_ruch(pe)) return;
@@ -622,7 +622,7 @@ public:
                 if (popupy_.czy_otwarty()) {
                     ZdarzenieMyszki pe;
                     pe.typ = TypZdarzenia::WcisniecieMyszy;
-                    pe.x = lokalny_x; pe.y = lokalny_y;
+                    pe.x = mx; pe.y = my;
                     pe.przycisk = static_cast<int>(
                         surowe_zdarzenie.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN
                         ? PrzyciskMyszy::Prawy : PrzyciskMyszy::Lewy);
@@ -708,10 +708,10 @@ public:
 
             case BWS_ZDARZENIE_MYSZ_UP:
             case BWS_ZDARZENIE_MYSZ_PRAWY_UP: {
-                if (popupy_.czy_otwarty()) {
+                if (popupy_.czy_otwarty() || popupy_.czy_przechwytuje_mysz()) {
                     ZdarzenieMyszki pe;
                     pe.typ = TypZdarzenia::ZwolnienieMyszy;
-                    pe.x = lokalny_x; pe.y = lokalny_y;
+                    pe.x = mx; pe.y = my;
                     pe.przycisk = static_cast<int>(
                         surowe_zdarzenie.typ == BWS_ZDARZENIE_MYSZ_PRAWY_UP
                         ? PrzyciskMyszy::Prawy : PrzyciskMyszy::Lewy);
@@ -751,6 +751,16 @@ public:
                 // Zdarzenie kola niesie aktualne wspolrzedne BWS. Nie wolno
                 // kierowac go przez zapamietany hover: kolo moze przyjsc bez
                 // poprzedzajacego ruchu albo po zmianie ukladu pod kursorem.
+                if (popupy_.czy_otwarty()) {
+                    ZdarzenieRolki pre;
+                    pre.typ = TypZdarzenia::RolkaMyszy;
+                    pre.x = mx;
+                    pre.y = my;
+                    pre.delta_x = surowe_zdarzenie.dx;
+                    pre.delta_y = surowe_zdarzenie.dy;
+                    pre.modyfikatory = surowe_zdarzenie.kod;
+                    if (popupy_.obsluz_rolke(pre)) break;
+                }
                 Kontrolka* cel = kontrolka_glowna_
                     ? kontrolka_glowna_->sprawdz_trafienie(Punkt(lokalny_x, lokalny_y))
                     : nullptr;
@@ -761,7 +771,6 @@ public:
                 re.delta_x = surowe_zdarzenie.dx;
                 re.delta_y = surowe_zdarzenie.dy;
                 re.modyfikatory = surowe_zdarzenie.kod;
-                if (popupy_.obsluz_rolke(re)) break;
                 bool fokus_byl_na_sciezce = false;
                 for (Kontrolka* k = cel; k && !re.obsluzone; k = k->rodzic()) {
                     if (k == kontrolka_z_fokusem_) fokus_byl_na_sciezce = true;

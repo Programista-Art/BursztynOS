@@ -74,6 +74,11 @@ public:
 
     ~ZarzadcaPopupow() {
         zamknij(PowodZamknieciaPopup::WlascicielZamkniety);
+        if (bufor_popupu_) {
+            delete[] bufor_popupu_;
+            bufor_popupu_ = nullptr;
+            pojemnosc_popupu_ = 0;
+        }
     }
 
     void ustaw_geometrie_wlasciciela(Prostokat ekran, Prostokat praca) {
@@ -88,10 +93,11 @@ public:
     void zaktualizuj_motyw() {
         for (int i = 0; i < liczba_; ++i) {
             if (powierzchnie_[i]) {
-                brudny_po_zamknieciu_ = brudny_po_zamknieciu_.suma(
-                    obszar_z_cieniem(powierzchnie_[i]));
                 powierzchnie_[i]->zaktualizuj_motyw();
             }
+        }
+        if (czy_otwarty()) {
+            odrysuj_popupy(true);
         }
     }
 
@@ -126,7 +132,7 @@ public:
         Prostokat d = obszar_roboczy_;
         int w = rozmiar.szerokosc > d.szerokosc ? d.szerokosc : rozmiar.szerokosc;
         int h = rozmiar.wysokosc > d.wysokosc ? d.wysokosc : rozmiar.wysokosc;
-        int cien = motyw_cien_okna() ? 2 * skala_dpi_ : 0;
+        int cien = motyw_cien_okna() ? 2 * static_cast<int>(skala_dpi_) : 0;
         int dol = k.dolny();
         int gora = k.y - h;
         bool md = (dol + h + cien <= d.dolny());
@@ -136,7 +142,7 @@ public:
         int max_y = d.dolny() - h - cien; if (max_y < d.y) max_y = d.y;
         int x = przytnij(k.x, d.x, max_x);
         y = przytnij(y, d.y, max_y);
-        return Prostokat(x - wlasciciel_.x, y - wlasciciel_.y, w, h);
+        return Prostokat(x, y, w, h);
     }
 
     Prostokat umiesc_pod_kotwica(Prostokat kotwica_klienta, Rozmiar rozmiar,
@@ -152,63 +158,55 @@ public:
         Prostokat d = obszar_roboczy_;
         int w = rozmiar.szerokosc > d.szerokosc ? d.szerokosc : rozmiar.szerokosc;
         int h = rozmiar.wysokosc > d.wysokosc ? d.wysokosc : rozmiar.wysokosc;
-        int cien = motyw_cien_okna() ? 2 * skala_dpi_ : 0;
+        int cien = motyw_cien_okna() ? 2 * static_cast<int>(skala_dpi_) : 0;
         int max_x = d.prawy() - w - cien; if (max_x < d.x) max_x = d.x;
         int max_y = d.dolny() - h - cien; if (max_y < d.y) max_y = d.y;
         int x = (e.prawy() + w + cien <= d.prawy()) ? e.prawy() : (e.x - w - cien);
         x = przytnij(x, d.x, max_x);
         int y = przytnij(e.y, d.y, max_y);
-        return Prostokat(x - wlasciciel_.x, y - wlasciciel_.y, w, h);
+        return Prostokat(x, y, w, h);
     }
 
     Prostokat umiesc_podmenu(Prostokat element_klienta, Rozmiar rozmiar) const {
-        return umiesc_podmenu_ekranu(
-            Prostokat(wlasciciel_.x + element_klienta.x, wlasciciel_.y + element_klienta.y,
-                      element_klienta.szerokosc, element_klienta.wysokosc),
-            rozmiar);
+        return umiesc_podmenu_ekranu(element_klienta, rozmiar);
     }
 
     Prostokat umiesc_przy_punkcie_ekranu(int x, int y, Rozmiar rozmiar) const {
         Prostokat d = obszar_roboczy_;
         int w = rozmiar.szerokosc > d.szerokosc ? d.szerokosc : rozmiar.szerokosc;
         int h = rozmiar.wysokosc > d.wysokosc ? d.wysokosc : rozmiar.wysokosc;
-        int cien = motyw_cien_okna() ? 2 * skala_dpi_ : 0;
+        int cien = motyw_cien_okna() ? 2 * static_cast<int>(skala_dpi_) : 0;
         int max_x = d.prawy() - w - cien; if (max_x < d.x) max_x = d.x;
         int max_y = d.dolny() - h - cien; if (max_y < d.y) max_y = d.y;
         x = przytnij(x, d.x, max_x);
         y = przytnij(y, d.y, max_y);
-        return Prostokat(x - wlasciciel_.x, y - wlasciciel_.y, w, h);
+        return Prostokat(x, y, w, h);
     }
 
-    // Popup globalny (np. toast): wynik pozostaje lokalny wzgledem okna
-    // wlasciciela, lecz ograniczenie odbywa sie w przestrzeni monitora.
+    // Popup globalny (np. toast): wynik jest w przestrzeni monitora, z marginesami i uwzglednieniem cienia.
     Prostokat umiesc_w_obszarze_roboczym_prawy_dol(Rozmiar rozmiar,
                                                    int margines_prawy,
                                                    int margines_dolny) const {
         Prostokat d = obszar_roboczy_;
+        int cien = motyw_cien_okna() ? 2 * static_cast<int>(skala_dpi_) : 0;
         int w = rozmiar.szerokosc > d.szerokosc ? d.szerokosc : rozmiar.szerokosc;
         int h = rozmiar.wysokosc > d.wysokosc ? d.wysokosc : rozmiar.wysokosc;
-        int x = d.prawy() - margines_prawy - w;
-        int y = d.dolny() - margines_dolny - h;
+        int x = d.prawy() - margines_prawy - w - cien;
+        int y = d.dolny() - margines_dolny - h - cien;
         if (x < d.x) x = d.x;
         if (y < d.y) y = d.y;
-        return Prostokat(x - wlasciciel_.x, y - wlasciciel_.y, w, h);
+        return Prostokat(x, y, w, h);
     }
 
     bool przemiesc_powierzchnie(PowierzchniaPopup& p, Prostokat obszar,
                                 bool odswiez_rejestracje = true) {
         if (powierzchnia_dla(&p) < 0 || obszar.czy_pusty()) return false;
-        brudny_po_zamknieciu_ = brudny_po_zamknieciu_.suma(obszar_z_cieniem(&p));
+        if (p.obszar().pozycja() == obszar.pozycja() && p.obszar().rozmiar() == obszar.rozmiar()) return true;
         p.rozmiesc(obszar);
-        brudny_po_zamknieciu_ = brudny_po_zamknieciu_.suma(obszar_z_cieniem(&p));
         if (odswiez_rejestracje) aktualizuj_rejestracje();
-        p.uniewaznij();
         return true;
     }
 
-    // Przy zmianie polozenia kilku popupow rejestracja musi nastapic raz,
-    // po ustaleniu calej geometrii. Kazda rejestracja tworzy nowa globalna
-    // powierzchnie kompozytora, wiec aktualizacja posrednia tracilaby tresc.
     void odswiez_rejestracje_popupow() { aktualizuj_rejestracje(); }
 
     bool otworz(PowierzchniaPopup& p, Prostokat obszar, Kontrolka* poprzedni = nullptr,
@@ -233,7 +231,6 @@ public:
             if (powierzchnie_[i] == p) { idx = i; break; }
         }
         if (idx < 0) return false;
-        brudny_po_zamknieciu_ = brudny_po_zamknieciu_.suma(obszar_z_cieniem(powierzchnie_[idx]));
         if (przechwycenie_ && czy_potomkiem(przechwycenie_, p)) {
             przechwycenie_->obsluz_opuszczenie_myszy();
             przechwycenie_ = nullptr;
@@ -259,11 +256,6 @@ public:
     void zamknij_od_poziomu(int poziom, PowodZamknieciaPopup powod = PowodZamknieciaPopup::Anulowanie) {
         if (poziom < 0) poziom = 0;
         if (poziom >= liczba_) return;
-        for (int i = liczba_ - 1; i >= poziom; --i) {
-            if (powierzchnie_[i]) {
-                brudny_po_zamknieciu_ = brudny_po_zamknieciu_.suma(obszar_z_cieniem(powierzchnie_[i]));
-            }
-        }
         if (przechwycenie_ && powierzchnia_dla(przechwycenie_) >= poziom &&
             przechwycenie_ != najechana_) {
             przechwycenie_->obsluz_opuszczenie_myszy();
@@ -288,11 +280,6 @@ public:
 
     void zamknij(PowodZamknieciaPopup powod = PowodZamknieciaPopup::Anulowanie) {
         if (!czy_otwarty()) return;
-        for (int i = 0; i < liczba_; ++i) {
-            if (powierzchnie_[i]) {
-                brudny_po_zamknieciu_ = brudny_po_zamknieciu_.suma(obszar_z_cieniem(powierzchnie_[i]));
-            }
-        }
         if (przechwycenie_ && przechwycenie_ != najechana_) {
             przechwycenie_->obsluz_opuszczenie_myszy();
         }
@@ -440,7 +427,6 @@ public:
     }
 
     bool czy_brudny() const {
-        if (!brudny_po_zamknieciu_.czy_pusty()) return true;
         for (int i = 0; i < liczba_; ++i) {
             if (powierzchnie_[i] && powierzchnie_[i]->czy_brudna()) return true;
         }
@@ -448,7 +434,7 @@ public:
     }
 
     Prostokat brudny_obszar() const {
-        Prostokat r = brudny_po_zamknieciu_;
+        Prostokat r;
         for (int i = 0; i < liczba_; ++i) {
             if (powierzchnie_[i]) {
                 r = r.suma(powierzchnie_[i]->pobierz_brudny_obszar());
@@ -457,32 +443,56 @@ public:
         return r;
     }
 
-    void rysuj(KontekstRysowania& ctx, bool wymus = false) {
-        for (int i = 0; i < liczba_; ++i) {
-            if (powierzchnie_[i]) {
-                if (motyw_cien_okna()) {
-                    Prostokat r = powierzchnie_[i]->obszar_ekranu();
-                    int cien = 2 * skala_dpi_;
-                    int promien_cienia = powierzchnie_[i]->promien_zaokraglenia() * skala_dpi_;
-                    ctx.rysuj_zaokraglony_prostokat(
-                        Prostokat(r.x + cien, r.y + cien, r.szerokosc, r.wysokosc),
-                        motyw_kolor(MOTYW_KOLOR_RAMKA),
-                        promien_cienia);
-                }
-                powierzchnie_[i]->rysuj(ctx, wymus);
-                powierzchnie_[i]->wyczysc_brudny_obszar();
-            }
+    void odrysuj_popupy(bool wymus = false) {
+        if (liczba_ == 0 || zarejestrowany_ekran_.czy_pusty() || !bufor_popupu_) return;
+        const int reg_w = zarejestrowany_ekran_.szerokosc;
+        const int reg_h = zarejestrowany_ekran_.wysokosc;
+        const size_t piksele = static_cast<size_t>(reg_w) * reg_h;
+        if (piksele > pojemnosc_popupu_) return;
+
+        for (size_t i = 0; i < piksele; ++i) {
+            bufor_popupu_[i] = 0x00000000U;
         }
-        brudny_po_zamknieciu_ = Prostokat();
+
+        KontekstRysowania ctx;
+        ctx.ustaw_cel(bufor_popupu_, zarejestrowany_ekran_);
+
+        for (int i = 0; i < liczba_; ++i) {
+            if (!powierzchnie_[i]) continue;
+            PowierzchniaPopup* p = powierzchnie_[i];
+            Prostokat r = p->obszar();
+
+            if (motyw_cien_okna()) {
+                int cien = 2 * static_cast<int>(skala_dpi_);
+                int promien_cienia = p->promien_zaokraglenia() * static_cast<int>(skala_dpi_);
+                ctx.rysuj_zaokraglony_prostokat(
+                    Prostokat(r.x + cien, r.y + cien, r.szerokosc, r.wysokosc),
+                    motyw_kolor(MOTYW_KOLOR_RAMKA),
+                    promien_cienia);
+            }
+
+            p->rysuj(ctx, wymus);
+            p->wyczysc_brudny_obszar();
+        }
+
+        ctx.ustaw_cel(nullptr, Prostokat());
+
+        gui_blit_popup(zarejestrowany_ekran_.x, zarejestrowany_ekran_.y,
+                       zarejestrowany_ekran_.szerokosc, zarejestrowany_ekran_.wysokosc,
+                       bufor_popupu_);
+    }
+
+    void rysuj(KontekstRysowania& ctx, bool wymus = false) {
+        (void)ctx;
+        odrysuj_popupy(wymus);
     }
 
 private:
-    Prostokat obszar_z_cieniem(const PowierzchniaPopup* p) const {
+    Prostokat prostokat_wizualny_popupu(const PowierzchniaPopup* p) const {
         if (!p) return Prostokat();
-        Prostokat r = p->obszar_ekranu();
-        if (!motyw_cien_okna()) return r;
-        int cien = 2 * skala_dpi_;
-        return r.suma(Prostokat(r.x + cien, r.y + cien, r.szerokosc, r.wysokosc));
+        Prostokat r = p->obszar();
+        int cien = motyw_cien_okna() ? 2 * static_cast<int>(skala_dpi_) : 0;
+        return Prostokat(r.x, r.y, r.szerokosc + cien, r.wysokosc + cien);
     }
 
     bool dodaj_wewnetrznie(PowierzchniaPopup& p, Prostokat obszar, Kontrolka* fokus) {
@@ -493,7 +503,6 @@ private:
         p.ustaw_skale_dpi(skala_dpi_);
         p.rozmiesc(obszar);
         ++liczba_;
-        brudny_po_zamknieciu_ = brudny_po_zamknieciu_.suma(obszar_z_cieniem(&p));
         aktualizuj_rejestracje();
         ustaw_fokus_popupu(fokus ? fokus : &p);
         p.po_otwarciu();
@@ -514,12 +523,10 @@ private:
         p->po_zamknieciu(powod);
     }
 
-
-
-    Kontrolka* trafienie(Punkt klient) const {
+    Kontrolka* trafienie(Punkt pt) const {
         for (int i = liczba_ - 1; i >= 0; --i) {
             if (powierzchnie_[i]) {
-                Kontrolka* hit = powierzchnie_[i]->sprawdz_trafienie(klient);
+                Kontrolka* hit = powierzchnie_[i]->sprawdz_trafienie(pt);
                 if (hit) return hit;
             }
         }
@@ -535,20 +542,42 @@ private:
         Prostokat suma;
         for (int i = 0; i < liczba_; ++i) {
             if (powierzchnie_[i]) {
-                suma = suma.suma(obszar_z_cieniem(powierzchnie_[i]));
+                suma = suma.suma(prostokat_wizualny_popupu(powierzchnie_[i]));
             }
         }
-        zarejestrowany_ekran_ = Prostokat(wlasciciel_.x + suma.x, wlasciciel_.y + suma.y,
-                                          suma.szerokosc, suma.wysokosc);
-        int sw = 0, sh = 0;
-        gui_pobierz_rozdzielczosc(&sw, &sh);
-        if (sw > 0 && sh > 0) {
-            zarejestrowany_ekran_ = zarejestrowany_ekran_.przeciecie(Prostokat(0, 0, sw, sh));
+        if (suma.czy_pusty()) {
+            zarejestrowany_ekran_ = Prostokat();
+            (void)gui_ustaw_popup_aplikacji(false, 0, 0, 0, 0);
+            return;
         }
+
+        const bool rozmiar_zmieniony = (suma.szerokosc != zarejestrowany_ekran_.szerokosc ||
+                                       suma.wysokosc != zarejestrowany_ekran_.wysokosc);
+        const bool pozycja_zmieniona = (suma.x != zarejestrowany_ekran_.x ||
+                                       suma.y != zarejestrowany_ekran_.y);
+
+        if (!rozmiar_zmieniony && !pozycja_zmieniona) {
+            return;
+        }
+
+        zarejestrowany_ekran_ = suma;
+
+        size_t potrzebne = static_cast<size_t>(suma.szerokosc) * suma.wysokosc;
+        if (potrzebne > pojemnosc_popupu_) {
+            delete[] bufor_popupu_;
+            size_t nowa_poj = (potrzebne + 65535) & ~65535;
+            bufor_popupu_ = new uint32_t[nowa_poj];
+            pojemnosc_popupu_ = nowa_poj;
+        }
+
         (void)gui_ustaw_popup_aplikacji(true, zarejestrowany_ekran_.x,
                                         zarejestrowany_ekran_.y,
                                         zarejestrowany_ekran_.szerokosc,
                                         zarejestrowany_ekran_.wysokosc);
+
+        if (rozmiar_zmieniony) {
+            odrysuj_popupy(true);
+        }
     }
 
     PowierzchniaPopup* powierzchnie_[MAKS_GLEBOKOSC]{};
@@ -557,13 +586,14 @@ private:
     Prostokat wlasciciel_{};
     Prostokat obszar_roboczy_{};
     Prostokat zarejestrowany_ekran_{};
-    Prostokat brudny_po_zamknieciu_{};
+    uint32_t* bufor_popupu_{nullptr};
+    size_t pojemnosc_popupu_{0};
     Kontrolka* fokus_poprzedni_{nullptr};
     Kontrolka* fokus_popupu_{nullptr};
     Kontrolka* najechana_{nullptr};
     Kontrolka* przechwycenie_{nullptr};
 };
- 
+
 inline PowierzchniaPopup::~PowierzchniaPopup() {
     if (zarzadca_) {
         zarzadca_->zamknij_powierzchnie(this, PowodZamknieciaPopup::WlascicielZamkniety);
@@ -574,6 +604,9 @@ inline Punkt Kontrolka::punkt_do_ekranu(Punkt p_lokalny) const {
     Punkt w = punkt_do_okna(p_lokalny);
     ZarzadcaPopupow* z = zarzadca_popupow();
     if (z) {
+        if (z->powierzchnia_dla(const_cast<Kontrolka*>(this)) >= 0) {
+            return w;
+        }
         Prostokat geom = z->geometria_wlasciciela();
         return Punkt(geom.x + w.x, geom.y + w.y);
     }
@@ -584,6 +617,9 @@ inline Prostokat Kontrolka::prostokat_do_ekranu(Prostokat r_lokalny) const {
     Prostokat w = prostokat_do_okna(r_lokalny);
     ZarzadcaPopupow* z = zarzadca_popupow();
     if (z) {
+        if (z->powierzchnia_dla(const_cast<Kontrolka*>(this)) >= 0) {
+            return w;
+        }
         Prostokat geom = z->geometria_wlasciciela();
         return Prostokat(geom.x + w.x, geom.y + w.y, w.szerokosc, w.wysokosc);
     }

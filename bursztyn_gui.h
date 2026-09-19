@@ -344,6 +344,12 @@ bool gui_blit(int x,
               int wys,
               const uint32_t* piksele);
 
+bool gui_blit_popup(int x,
+                    int y,
+                    int szer,
+                    int wys,
+                    const uint32_t* piksele);
+
 /* BWS58: ustawia tytul warstwy biezacego procesu dla taskbara
    (GuiOknoInfo.tytul) i wysyla BWS_ZDARZENIE_OKNO_TYTUL. */
 bool gui_ustaw_tytul_okna(const char* tytul);

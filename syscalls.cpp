@@ -3712,6 +3712,11 @@ static uint64_t obsluga_wywolan_systemowych_impl(
              * wszystkie limity rozmiaru pozostaja bez zmian.
              */
             BlokadaEkranu blokada;
+            if (arg4 == 1) {
+                return skladacz_obrazu_blit_popup(
+                    aktualny_pid, x, y, szer, wys,
+                    reinterpret_cast<const uint32_t*>(arg3)) ? 1ULL : 0ULL;
+            }
             return bws_gui_blit(
                 x, y, szer, wys,
                 reinterpret_cast<const uint32_t*>(arg3)) ? 1ULL : 0ULL;

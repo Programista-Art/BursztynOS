@@ -1724,12 +1724,11 @@ void skladacz_obrazu_zloz_klatke() {
     const GuiDirtyRect caly_ekran{0, 0, ekran_szer, ekran_wys};
     rysuj_drag_overlay_region(caly_ekran);
     if (popup_aplikacji_spojny()) {
-        const warstwa_obrazu& pw = tablica_warstw[application_popup.pid];
-        LayerRenderInfo pi{pw.bufor_pikseli, pw.x, pw.y, pw.szerokosc,
-                           pw.wysokosc, pw.z_order, pw.pid,
-            __atomic_load_n(&rozmiar_alokacji_warstwy[application_popup.pid],
-                            __ATOMIC_RELAXED) / sizeof(uint32_t)};
-        zloz_snapshot_region(pi, application_popup.rect);
+        const GuiDirtyRect& p = application_popup.rect;
+        LayerRenderInfo popup{application_popup.tlo, p.x, p.y, p.width, p.height,
+                              0x7FFFFFFF, application_popup.pid,
+                              application_popup.piksele};
+        zloz_snapshot_region(popup, p);
     }
 
     if (system_overlay.otwarty &&
@@ -2036,8 +2035,54 @@ int skladacz_obrazu_overlay_pod_punktem(int x, int y) {
 bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
                                            int x, int y, int szer, int wys) {
     if (!pid_poprawny(pid)) return false;
+    if (!otwarty) {
+        if (application_popup.otwarty) {
+            if (application_popup.pid != pid) return false;
+            const ApplicationPopupState stary = application_popup;
+            if (stary.tlo) bufor_grafiki_zwolnij(stary.tlo);
+            application_popup = {
+                false, -1, 0, {0, 0, 0, 0}, nullptr, 0};
+            skladacz_obrazu_oznacz_dirty_rect(stary.rect.x, stary.rect.y,
+                                              stary.rect.width, stary.rect.height);
+            skladacz_obrazu_obsluz_dirty();
+        }
+        return true;
+    }
+
+    if (!warstwa_ma_spojny_bufor(pid) || szer <= 0 || wys <= 0) return false;
+    if (szer > 2048 || wys > 2048) return false;
+    const uint64_t piksele = static_cast<uint64_t>(static_cast<uint32_t>(szer)) *
+                              static_cast<uint32_t>(wys);
+    if (piksele == 0 || piksele > 4ULL * 1024ULL * 1024ULL) return false;
+
+    // Zezwalaj na czesciowe wykraczanie poza ekran podczas przesuwania dialogu
+    if (x < -2048 || y < -2048 || x > 4096 || y > 4096) return false;
+
     if (application_popup.otwarty) {
         if (application_popup.pid != pid) return false;
+
+        // Atomowe przemieszczenie: jesli rozmiar sie nie zmienil, zachowujemy bufor pikseli!
+        if (application_popup.rect.width == szer &&
+            application_popup.rect.height == wys &&
+            application_popup.tlo != nullptr) {
+
+            if (application_popup.rect.x == x && application_popup.rect.y == y) {
+                return true;
+            }
+
+            const GuiDirtyRect stary_rect = application_popup.rect;
+            application_popup.rect.x = x;
+            application_popup.rect.y = y;
+            application_popup.generacja = generacja_okna[pid];
+
+            skladacz_obrazu_oznacz_dirty_rect(stary_rect.x, stary_rect.y,
+                                              stary_rect.width, stary_rect.height);
+            skladacz_obrazu_oznacz_dirty_rect(x, y, szer, wys);
+            skladacz_obrazu_obsluz_dirty();
+            return true;
+        }
+
+        // Inny rozmiar: zwalniamy poprzedni bufor
         const ApplicationPopupState stary = application_popup;
         if (stary.tlo) bufor_grafiki_zwolnij(stary.tlo);
         application_popup = {
@@ -2045,23 +2090,14 @@ bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
         skladacz_obrazu_oznacz_dirty_rect(stary.rect.x, stary.rect.y,
                                           stary.rect.width, stary.rect.height);
     }
-    if (!otwarty) return true;
-    if (!warstwa_ma_spojny_bufor(pid) || szer <= 0 || wys <= 0) return false;
-    warstwa_obrazu& w = tablica_warstw[pid];
-    const int64_t prawa = static_cast<int64_t>(x) + szer;
-    const int64_t dol = static_cast<int64_t>(y) + wys;
-    const int ekran_w = grafika_pobierz_szerokosc(), ekran_h = grafika_pobierz_wysokosc();
-    if (x < 0 || y < 0 || prawa > ekran_w || dol > ekran_h) return false;
-    const uint64_t piksele = static_cast<uint64_t>(static_cast<uint32_t>(szer)) *
-                              static_cast<uint32_t>(wys);
-    if (piksele == 0 || piksele > UINT64_MAX / sizeof(uint32_t)) return false;
+
     uint32_t* tlo = static_cast<uint32_t*>(bufor_grafiki_alokuj(piksele * sizeof(uint32_t)));
     if (!tlo) return false;
-    (void)w;
     for (uint64_t i = 0; i < piksele; ++i) tlo[i] = SKLADACZ_PIKSEL_PRZEZROCZYSTY;
     application_popup = {true, pid, generacja_okna[pid],
                          {x, y, szer, wys}, tlo, piksele};
     skladacz_obrazu_oznacz_dirty_rect(x, y, szer, wys);
+    skladacz_obrazu_obsluz_dirty();
     return true;
 }
 
@@ -2078,7 +2114,8 @@ bool skladacz_obrazu_blit_popup(int pid, int x, int y, int szer, int wys,
         uint32_t v = src[static_cast<uint64_t>(py-y)*szer + (px-x)];
         application_popup.tlo[static_cast<uint64_t>(py-p.y)*p.width + (px-p.x)] = v;
     }
-    skladacz_obrazu_oznacz_dirty_rect(x0,y0,x1-x0,y1-y0);
+    skladacz_obrazu_oznacz_dirty_rect(x0, y0, x1 - x0, y1 - y0);
+    skladacz_obrazu_obsluz_dirty();
     return true;
 }
 

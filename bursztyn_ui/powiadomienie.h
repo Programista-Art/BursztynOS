@@ -34,6 +34,10 @@ public:
         Kontrolka::zaktualizuj_motyw();
     }
 
+    uint16_t promien_zaokraglenia() const override {
+        return motyw_promien(MOTYW_ROG_PANEL);
+    }
+
     TypPowiadomienia typ() const { return typ_; }
     const char* tytul() const { return tytul_; }
     const char* wiadomosc() const { return wiadomosc_; }
