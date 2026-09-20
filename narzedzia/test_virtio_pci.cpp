@@ -32,6 +32,7 @@
 #include "virtio_pci.h"
 #include "virtqueue.h"
 #include "virtio_rng.h"
+#include "virtio_blk.h"
 
 // ============================================================================
 // FAKE PCI I FAKE MMIO DLA SRODOWISKA TESTOWEGO HOST
@@ -96,6 +97,15 @@ struct MockDeviceState {
     int      bump_gen_on_read_count = 0;
     bool     always_bump_gen = false;
 
+    // Stan MMIO VirtIO-BLK:
+    bool     blk_auto_process = false;
+    bool     blk_skip_reply = false;
+    int32_t  blk_override_len = -1;
+    int32_t  blk_override_desc_id = -1;
+    int32_t  blk_override_status = -1;
+    uint32_t blk_processed_count = 0;
+    std::vector<uint8_t> blk_disk_data;
+
     void reset() {
         std::memset(pci_config, 0, sizeof(pci_config));
         for (int i = 0; i < 6; ++i) {
@@ -116,6 +126,13 @@ struct MockDeviceState {
         rng_fill_byte = 0x5A;
         rng_dynamic_bytes = false;
         rng_processed_count = 0;
+        blk_auto_process = false;
+        blk_skip_reply = false;
+        blk_override_len = -1;
+        blk_override_desc_id = -1;
+        blk_override_status = -1;
+        blk_processed_count = 0;
+        blk_disk_data.clear();
         isr_val = 0;
         notify_bar = 0xFF;
         notify_bar_off = 0;
@@ -362,6 +379,7 @@ void host_mmio_write8(volatile void* addr, uint8_t val) {
                         g_mock.queues[i].enable = 0;
                     }
                     g_mock.rng_processed_count = 0;
+                    g_mock.blk_processed_count = 0;
                     uint16_t zero16 = 0;
                     std::memcpy(&g_mock.bars[0].mem[0x1C], &zero16, 2);
                 }
@@ -426,6 +444,108 @@ void host_mmio_write16(volatile void* addr, uint16_t val) {
                                 asm volatile("mfence" ::: "memory");
                             }
                             g_mock.rng_processed_count++;
+                        }
+                    }
+                }
+
+                if (g_mock.blk_auto_process && val == 0 && !g_mock.blk_skip_reply) {
+                    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+                    if (drv && drv->vq && drv->vq->avail && drv->vq->used && drv->vq->desc) {
+                        VirtQueue* vq = drv->vq;
+                        while (g_mock.blk_processed_count != vq->avail->idx) {
+                            const uint16_t a_idx = g_mock.blk_processed_count & (vq->queue_size - 1U);
+                            const uint16_t head_id = vq->avail->ring[a_idx];
+                            if (head_id < vq->queue_size) {
+                                void* vhdr = host_phys_to_virt(vq->desc[head_id].addr);
+                                uint32_t type = 0;
+                                uint64_t sector_512 = 0;
+                                if (vhdr) {
+                                    const auto* hdr = static_cast<const VirtIOBlkReqHeader*>(vhdr);
+                                    type = hdr->type;
+                                    sector_512 = hdr->sector;
+                                }
+
+                                uint32_t used_len = 0;
+
+                                if (type == VIRTIO_BLK_T_FLUSH) {
+                                    const uint16_t status_id = vq->desc[head_id].next;
+                                    if (status_id < vq->queue_size) {
+                                        void* vst = host_phys_to_virt(vq->desc[status_id].addr);
+                                        if (vst) {
+                                            uint8_t* pst = static_cast<uint8_t*>(vst);
+                                            *pst = (g_mock.blk_override_status >= 0) ?
+                                                static_cast<uint8_t>(g_mock.blk_override_status) :
+                                                static_cast<uint8_t>(VIRTIO_BLK_S_OK);
+                                        }
+                                    }
+                                    used_len = 1;
+                                } else if (type == VIRTIO_BLK_T_IN) { // READ
+                                    const uint16_t data_id = vq->desc[head_id].next;
+                                    if (data_id < vq->queue_size) {
+                                        uint32_t data_len = vq->desc[data_id].len;
+                                        void* vdata = host_phys_to_virt(vq->desc[data_id].addr);
+                                        const uint16_t status_id = vq->desc[data_id].next;
+                                        uint8_t st = (g_mock.blk_override_status >= 0) ?
+                                            static_cast<uint8_t>(g_mock.blk_override_status) :
+                                            static_cast<uint8_t>(VIRTIO_BLK_S_OK);
+
+                                        if (status_id < vq->queue_size) {
+                                            void* vst = host_phys_to_virt(vq->desc[status_id].addr);
+                                            if (vst) {
+                                                *static_cast<uint8_t*>(vst) = st;
+                                            }
+                                        }
+
+                                        if (st == VIRTIO_BLK_S_OK && vdata) {
+                                            uint64_t disk_off = sector_512 * 512ULL;
+                                            if (disk_off + data_len <= g_mock.blk_disk_data.size()) {
+                                                std::memcpy(vdata, &g_mock.blk_disk_data[disk_off], data_len);
+                                            } else {
+                                                std::memset(vdata, 0, data_len);
+                                            }
+                                        }
+                                        used_len = data_len + 1U;
+                                    }
+                                } else if (type == VIRTIO_BLK_T_OUT) { // WRITE
+                                    const uint16_t data_id = vq->desc[head_id].next;
+                                    if (data_id < vq->queue_size) {
+                                        uint32_t data_len = vq->desc[data_id].len;
+                                        void* vdata = host_phys_to_virt(vq->desc[data_id].addr);
+                                        const uint16_t status_id = vq->desc[data_id].next;
+                                        uint8_t st = (g_mock.blk_override_status >= 0) ?
+                                            static_cast<uint8_t>(g_mock.blk_override_status) :
+                                            static_cast<uint8_t>(VIRTIO_BLK_S_OK);
+
+                                        if (status_id < vq->queue_size) {
+                                            void* vst = host_phys_to_virt(vq->desc[status_id].addr);
+                                            if (vst) {
+                                                *static_cast<uint8_t*>(vst) = st;
+                                            }
+                                        }
+
+                                        if (st == VIRTIO_BLK_S_OK && vdata) {
+                                            uint64_t disk_off = sector_512 * 512ULL;
+                                            if (disk_off + data_len <= g_mock.blk_disk_data.size()) {
+                                                std::memcpy(&g_mock.blk_disk_data[disk_off], vdata, data_len);
+                                            }
+                                        }
+                                        used_len = 1U;
+                                    }
+                                }
+
+                                const uint32_t rep_len = (g_mock.blk_override_len >= 0) ?
+                                    static_cast<uint32_t>(g_mock.blk_override_len) : used_len;
+                                const uint32_t rep_id = (g_mock.blk_override_desc_id >= 0) ?
+                                    static_cast<uint32_t>(g_mock.blk_override_desc_id) : head_id;
+
+                                const uint16_t u_idx = vq->used->idx & (vq->queue_size - 1U);
+                                vq->used->ring[u_idx].id = rep_id;
+                                vq->used->ring[u_idx].len = rep_len;
+                                asm volatile("" ::: "memory");
+                                vq->used->idx = static_cast<uint16_t>(vq->used->idx + 1U);
+                                asm volatile("mfence" ::: "memory");
+                            }
+                            g_mock.blk_processed_count++;
                         }
                     }
                 }
@@ -2322,6 +2442,393 @@ void test_virtio_rng_counter_saturation() {
 }
 
 // ============================================================================
+// TESTY STEROWNIKA VIRTIO-BLK
+// ============================================================================
+
+static bool setup_mock_blk_device(VirtioPciDevice* dev,
+                                  uint64_t capacity_sectors = 2048,
+                                  uint32_t blk_size = 512,
+                                  uint64_t extra_features = (VIRTIO_BLK_F_FLUSH | VIRTIO_BLK_F_SIZE_MAX | VIRTIO_BLK_F_SEG_MAX)) {
+    g_mock.reset();
+    setup_pci_hdr(0x1AF4, 0x1042, 0x1AF4, 0x0002);
+    std::vector<CapBuilderEntry> caps = {
+        {VIRTIO_PCI_CAP_COMMON_CFG, 0, 0x000, 56, 0},
+        {VIRTIO_PCI_CAP_NOTIFY_CFG, 0, 0x1000, 0x1000, 4},
+        {VIRTIO_PCI_CAP_ISR_CFG,    0, 0x080, 1,  0},
+        {VIRTIO_PCI_CAP_DEVICE_CFG, 0, 0x100, 64, 0}
+    };
+    build_cap_chain(caps);
+    wire_virtio_mmio(0, 0x000, 0x080);
+    g_mock.queues[0].size = 32;
+
+    uint64_t feat = VIRTIO_F_VERSION_1 | extra_features;
+    if (blk_size != 512) {
+        feat |= VIRTIO_BLK_F_BLK_SIZE;
+    }
+    g_mock.device_features = feat;
+
+    // Device config in BAR 0 at 0x100:
+    std::memcpy(&g_mock.bars[0].mem[0x100], &capacity_sectors, sizeof(capacity_sectors));
+    uint32_t size_max = 131072;
+    std::memcpy(&g_mock.bars[0].mem[0x108], &size_max, sizeof(size_max));
+    uint32_t seg_max = 64;
+    std::memcpy(&g_mock.bars[0].mem[0x10C], &seg_max, sizeof(seg_max));
+    std::memcpy(&g_mock.bars[0].mem[0x114], &blk_size, sizeof(blk_size));
+
+    uint64_t disk_bytes = capacity_sectors * 512ULL;
+    g_mock.blk_disk_data.assign(disk_bytes, 0);
+    g_mock.blk_auto_process = true;
+    g_mock.blk_skip_reply = false;
+    g_mock.blk_override_len = -1;
+    g_mock.blk_override_desc_id = -1;
+    g_mock.blk_override_status = -1;
+    g_mock.blk_processed_count = 0;
+
+    return virtio_pci_probe(0, 5, 0, dev, 0);
+}
+
+// ----------------------------------------------------------------------------
+// 51. VirtIO-BLK: Inicjalizacja i czyszczenie zasobow (init i reset)
+// ----------------------------------------------------------------------------
+void test_virtio_blk_init_and_cleanup() {
+    virtio_blk_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_blk_device(&dev), "Probe urzadzenia VirtIO-BLK");
+    TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja sterownika VirtIO-BLK");
+    TEST_ASSERT(virtio_blk_get_count() == 1, "Zarejestrowano dokladnie 1 dysk VirtIO-BLK");
+
+    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+    TEST_ASSERT(drv != nullptr, "Dostep do struktury sterownika");
+    TEST_ASSERT(drv->initialized, "Sterownik initialized == true");
+    TEST_ASSERT(!drv->has_error, "Sterownik has_error == false");
+    TEST_ASSERT(drv->total_sectors == 2048, "Liczba sektorow == 2048");
+    TEST_ASSERT(drv->logical_sector_size == 512, "Rozmiar sektora logicznego == 512");
+    TEST_ASSERT(drv->bdev.total_sectors == 2048, "BlockDevice total_sectors == 2048");
+    TEST_ASSERT(drv->bdev.device_type == BlockDeviceType::VirtIO, "Typ urzadzenia BlockDeviceType::VirtIO");
+    TEST_ASSERT((virtio_pci_get_status(&dev) & VIRTIO_STATUS_DRIVER_OK) != 0, "DRIVER_OK w urzadzeniu");
+    TEST_ASSERT(g_host_dma_allocs.size() == 3, "3 alokacje DMA (kolejka + ctrl + bounce data)");
+
+    TEST_ASSERT(virtio_blk_reset(drv), "Reset urzadzenia VirtIO-BLK");
+    TEST_ASSERT(!drv->initialized, "Sterownik nieaktywny po resecie");
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA po resecie dysku");
+    virtio_blk_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 52. VirtIO-BLK: Obsluga niestandardowego rozmiaru sektora (np. 4096 B)
+// ----------------------------------------------------------------------------
+void test_virtio_blk_custom_block_size() {
+    virtio_blk_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_blk_device(&dev, 2048, 4096), "Probe urzadzenia z sektorem 4096");
+    TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku 4096 B");
+
+    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+    TEST_ASSERT(drv != nullptr, "Dostep do sterownika");
+    TEST_ASSERT(drv->logical_sector_size == 4096, "Logiczny sektor 4096 B");
+    TEST_ASSERT(drv->total_sectors == 256, "total_sectors = (2048 * 512) / 4096 = 256");
+    TEST_ASSERT(drv->max_transfer_sectors == 32, "max_transfer_sectors = 128 KiB / 4096 = 32");
+
+    uint8_t write_buf[4096];
+    for (size_t i = 0; i < sizeof(write_buf); ++i) write_buf[i] = static_cast<uint8_t>((i + 0x33) & 0xFF);
+    TEST_ASSERT(drv->bdev.write(2, 1, write_buf) == BlockError::Ok, "Zapis 1 bloku 4096 B na LBA 2");
+
+    uint8_t read_buf[4096]{};
+    TEST_ASSERT(drv->bdev.read(2, 1, read_buf) == BlockError::Ok, "Odczyt 1 bloku 4096 B z LBA 2");
+    TEST_ASSERT(std::memcmp(write_buf, read_buf, sizeof(write_buf)) == 0, "Poprawnosc danych sektora 4096 B");
+
+    virtio_blk_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 53. VirtIO-BLK: Odczyt, zapis, flush i spojnosc danych
+// ----------------------------------------------------------------------------
+void test_virtio_blk_read_write_flush() {
+    virtio_blk_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_blk_device(&dev, 2048, 512), "Probe dysku");
+    TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku");
+
+    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+    uint8_t wbuf[1024];
+    for (size_t i = 0; i < sizeof(wbuf); ++i) wbuf[i] = static_cast<uint8_t>((i * 13 + 0x77) & 0xFF);
+
+    TEST_ASSERT(drv->bdev.write(10, 2, wbuf) == BlockError::Ok, "Zapis 2 sektorow na LBA 10");
+    TEST_ASSERT(drv->bdev.flush() == BlockError::Ok, "Wykonanie flush");
+
+    uint8_t rbuf[1024]{};
+    TEST_ASSERT(drv->bdev.read(10, 2, rbuf) == BlockError::Ok, "Odczyt 2 sektorow z LBA 10");
+    TEST_ASSERT(std::memcmp(wbuf, rbuf, sizeof(wbuf)) == 0, "Dane po readbacku identyczne");
+
+    TEST_ASSERT(drv->total_writes == 1, "total_writes == 1");
+    TEST_ASSERT(drv->total_reads == 1, "total_reads == 1");
+    TEST_ASSERT(drv->total_flushes == 1, "total_flushes == 1");
+    TEST_ASSERT(drv->total_sectors_written == 2, "total_sectors_written == 2");
+    TEST_ASSERT(drv->total_sectors_read == 2, "total_sectors_read == 2");
+
+    virtio_blk_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 54. VirtIO-BLK: Automatyczne dzielenie transferow (chunking) przez BlockDevice
+// ----------------------------------------------------------------------------
+void test_virtio_blk_chunking_large_transfer() {
+    virtio_blk_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_blk_device(&dev, 4096, 512), "Probe dysku 4096 sektorow");
+    TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku");
+
+    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+    std::vector<uint8_t> big_w(300 * 512);
+    for (size_t i = 0; i < big_w.size(); ++i) big_w[i] = static_cast<uint8_t>((i * 3 + 1) & 0xFF);
+
+    TEST_ASSERT(drv->bdev.write(0, 300, big_w.data()) == BlockError::Ok, "Zapis 300 sektorow (chunking)");
+    TEST_ASSERT(drv->total_writes == 2, "Zadanie 300 sektorow podzielone na 2 operacje sterownika (256 + 44)");
+
+    std::vector<uint8_t> big_r(300 * 512, 0);
+    TEST_ASSERT(drv->bdev.read(0, 300, big_r.data()) == BlockError::Ok, "Odczyt 300 sektorow (chunking)");
+    TEST_ASSERT(drv->total_reads == 2, "Odczyt podzielony na 2 operacje sterownika (256 + 44)");
+    TEST_ASSERT(std::memcmp(big_w.data(), big_r.data(), big_w.size()) == 0, "Spojnosc duzego transferu");
+
+    virtio_blk_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 55. VirtIO-BLK: Obsluga nosnika tylko do odczytu (VIRTIO_BLK_F_RO)
+// ----------------------------------------------------------------------------
+void test_virtio_blk_read_only_device() {
+    virtio_blk_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_blk_device(&dev, 2048, 512, VIRTIO_BLK_F_RO | VIRTIO_BLK_F_FLUSH), "Probe dysku R/O");
+    TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku R/O");
+
+    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+    TEST_ASSERT(drv->read_only, "Sterownik read_only == true");
+    TEST_ASSERT(drv->bdev.read_only, "BlockDevice read_only == true");
+    TEST_ASSERT(!drv->bdev.writable, "BlockDevice writable == false");
+
+    uint8_t buf[512]{};
+    TEST_ASSERT(drv->bdev.write(0, 1, buf) == BlockError::Unsupported, "Zapis odrzucony jako Unsupported dla dysku R/O");
+    TEST_ASSERT(drv->bdev.read(0, 1, buf) == BlockError::Ok, "Odczyt z dysku R/O dozwolony");
+
+    virtio_blk_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 56. VirtIO-BLK: Odrzucenie flush gdy VIRTIO_BLK_F_FLUSH nie zostalo wynegocjowane
+// ----------------------------------------------------------------------------
+void test_virtio_blk_unsupported_flush() {
+    virtio_blk_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_blk_device(&dev, 2048, 512, 0), "Probe dysku bez FLUSH");
+    TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku bez FLUSH");
+
+    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+    TEST_ASSERT(!drv->has_flush, "has_flush == false");
+    TEST_ASSERT(drv->bdev.flush() == BlockError::Unsupported, "flush() zwraca Unsupported");
+
+    virtio_blk_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 57. VirtIO-BLK: Obsluga bledu sprzetowego (VIRTIO_BLK_S_IOERR)
+// ----------------------------------------------------------------------------
+void test_virtio_blk_io_error_handling() {
+    virtio_blk_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_blk_device(&dev, 2048, 512), "Probe dysku");
+    TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku");
+
+    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+    g_mock.blk_override_status = VIRTIO_BLK_S_IOERR;
+
+    uint8_t buf[512];
+    std::memset(buf, 0xEE, sizeof(buf));
+    TEST_ASSERT(drv->bdev.read(0, 1, buf) == BlockError::IOError, "read zwraca IOError");
+    TEST_ASSERT(buf[0] == 0 && buf[511] == 0, "Bufor docelowy bezpiecznie wyzerowany po IOError");
+
+    TEST_ASSERT(drv->bdev.write(0, 1, buf) == BlockError::IOError, "write zwraca IOError");
+    TEST_ASSERT(drv->bdev.flush() == BlockError::IOError, "flush zwraca IOError");
+
+    virtio_blk_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 58. VirtIO-BLK: Obsluga kodu statusu VIRTIO_BLK_S_UNSUPP
+// ----------------------------------------------------------------------------
+void test_virtio_blk_unsupported_status() {
+    virtio_blk_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_blk_device(&dev, 2048, 512), "Probe dysku");
+    TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku");
+
+    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+    g_mock.blk_override_status = VIRTIO_BLK_S_UNSUPP;
+
+    uint8_t buf[512];
+    std::memset(buf, 0xDD, sizeof(buf));
+    TEST_ASSERT(drv->bdev.read(0, 1, buf) == BlockError::Unsupported, "read zwraca Unsupported");
+    TEST_ASSERT(buf[0] == 0 && buf[511] == 0, "Bufor wyzerowany po Unsupported read");
+
+    virtio_blk_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 59. VirtIO-BLK: Ochrona granic LBA i arytmetyka 64-bitowa bez overflow
+// ----------------------------------------------------------------------------
+void test_virtio_blk_bounds_and_overflow() {
+    virtio_blk_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_blk_device(&dev, 2048, 512), "Probe dysku 2048 sektorow");
+    TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku");
+
+    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+    uint8_t buf[512]{};
+
+    TEST_ASSERT(drv->bdev.read(2048, 1, buf) == BlockError::OutOfRange, "Odczyt poza pojemnoscia");
+    TEST_ASSERT(drv->bdev.read(2047, 2, buf) == BlockError::OutOfRange, "Odczyt przekraczajacy pojemnosc");
+    TEST_ASSERT(drv->bdev.read(UINT64_MAX, 1, buf) == BlockError::OutOfRange, "Odczyt UINT64_MAX");
+    TEST_ASSERT(drv->bdev.read(0, 0, buf) == BlockError::InvalidArgument, "Odczyt 0 sektorow");
+    TEST_ASSERT(drv->bdev.read(0, 1, nullptr) == BlockError::InvalidArgument, "Odczyt do nullptr");
+    TEST_ASSERT(drv->bdev.write(2048, 1, buf) == BlockError::OutOfRange, "Zapis poza pojemnoscia");
+
+    virtio_blk_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 60. VirtIO-BLK: Timeout oczekiwania na zakonczenie i reset urzadzenia
+// ----------------------------------------------------------------------------
+void test_virtio_blk_timeout_and_reset() {
+    virtio_blk_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_blk_device(&dev, 2048, 512), "Probe dysku");
+    TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku");
+
+    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+    g_mock.blk_skip_reply = true;
+
+    uint8_t buf[512]{};
+    TEST_ASSERT(drv->bdev.read(0, 1, buf) == BlockError::Timeout, "read zwraca Timeout");
+    TEST_ASSERT(!drv->initialized, "Sterownik oznaczony jako nieaktywny po timeout");
+
+    virtio_blk_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 61. VirtIO-BLK: Odrzucenie used.len > submitted buffer length jako korupcji
+// ----------------------------------------------------------------------------
+void test_virtio_blk_invalid_used_len_rejected() {
+    virtio_blk_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_blk_device(&dev, 2048, 512), "Probe dysku");
+    TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku");
+
+    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+    g_mock.blk_override_len = 514; // Wiecej niz zgloszony bufor 512 + 1 B
+
+    uint8_t buf[512]{};
+    TEST_ASSERT(drv->bdev.read(0, 1, buf) == BlockError::IOError, "Odrzucenie zgloszenia z used.len > buffer length");
+    TEST_ASSERT(!drv->initialized, "Sterownik zresetowany po wykryciu uszkodzenia dlugosci");
+
+    virtio_blk_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 62. VirtIO-BLK: Odrzucenie niezgodnego identyfikatora deskryptora
+// ----------------------------------------------------------------------------
+void test_virtio_blk_invalid_desc_id_rejected() {
+    virtio_blk_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_blk_device(&dev, 2048, 512), "Probe dysku");
+    TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku");
+
+    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+    g_mock.blk_override_desc_id = 99;
+
+    uint8_t buf[512]{};
+    TEST_ASSERT(drv->bdev.read(0, 1, buf) == BlockError::IOError, "Odrzucenie zgloszenia z falszywym desc_id");
+    TEST_ASSERT(!drv->initialized, "Sterownik zresetowany po wykryciu desc_id mismatch");
+
+    virtio_blk_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 63. VirtIO-BLK: Kwarantanna DMA przy braku potwierdzenia resetu sprzetowego
+// ----------------------------------------------------------------------------
+void test_virtio_blk_dma_quarantine_on_stuck_reset() {
+    virtio_blk_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_blk_device(&dev, 2048, 512), "Probe dysku");
+    TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku");
+
+    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+    g_mock.ignore_reset = true;
+
+    const size_t allocs_before = g_host_dma_allocs.size();
+    TEST_ASSERT(!virtio_blk_reset(drv), "Reset zwraca false gdy sprzet nie potwierdza statusu 0");
+    TEST_ASSERT(g_host_dma_allocs.size() == allocs_before, "Pamiec DMA poddana kwarantannie - nie zostala zwolniona!");
+
+    g_mock.ignore_reset = false;
+    g_host_dma_allocs.clear();
+    virtio_blk_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 64. VirtIO-BLK: Wielokrotne powtorzone zlecenia i brak wyciekow deskryptorow
+// ----------------------------------------------------------------------------
+void test_virtio_blk_repeated_requests_and_recycling() {
+    virtio_blk_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_blk_device(&dev, 2048, 512), "Probe dysku");
+    TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku");
+
+    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+    const uint16_t initial_free = virtqueue_get_num_free(drv->vq);
+
+    uint8_t buf[512]{};
+    for (int i = 0; i < 256; ++i) {
+        TEST_ASSERT(drv->bdev.read(0, 1, buf) == BlockError::Ok, "Odczyt powtarzany w petli");
+        TEST_ASSERT(virtqueue_get_num_free(drv->vq) == initial_free, "Brak wycieku deskryptorow");
+    }
+    TEST_ASSERT(drv->total_reads == 256, "total_reads == 256");
+
+    virtio_blk_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 65. VirtIO-BLK: Rewalidacja stanu nosnika (revalidate)
+// ----------------------------------------------------------------------------
+void test_virtio_blk_revalidate() {
+    virtio_blk_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_blk_device(&dev, 2048, 512), "Probe dysku");
+    TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku");
+
+    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+    TEST_ASSERT(drv->bdev.revalidate() == BlockError::Ok, "Rewalidacja sprawnego dysku");
+
+    virtio_pci_set_status(&dev, VIRTIO_STATUS_FAILED);
+    TEST_ASSERT(drv->bdev.revalidate() == BlockError::DeviceUnavailable, "Rewalidacja odrzuca uszkodzone urzadzenie");
+
+    virtio_blk_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 66. VirtIO-BLK: Test obciazeniowy (virtio_blk_stress_test)
+// ----------------------------------------------------------------------------
+void test_virtio_blk_stress_host() {
+    virtio_blk_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_blk_device(&dev, 2048, 512), "Probe dysku");
+    TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku");
+
+    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+    TEST_ASSERT(virtio_blk_stress_test(drv), "virtio_blk_stress_test zakonczony sukcesem");
+
+    virtio_blk_reset_all();
+}
+
+// ============================================================================
 // PUNKT WEJSCIA TESTOW
 // ============================================================================
 
@@ -2380,6 +2887,24 @@ int main() {
     RUN_TEST(test_virtio_rng_dma_not_freed_before_confirmed_reset);
     RUN_TEST(test_virtio_rng_concurrent_requests);
     RUN_TEST(test_virtio_rng_counter_saturation);
+
+    // Testy VirtIO-BLK
+    RUN_TEST(test_virtio_blk_init_and_cleanup);
+    RUN_TEST(test_virtio_blk_custom_block_size);
+    RUN_TEST(test_virtio_blk_read_write_flush);
+    RUN_TEST(test_virtio_blk_chunking_large_transfer);
+    RUN_TEST(test_virtio_blk_read_only_device);
+    RUN_TEST(test_virtio_blk_unsupported_flush);
+    RUN_TEST(test_virtio_blk_io_error_handling);
+    RUN_TEST(test_virtio_blk_unsupported_status);
+    RUN_TEST(test_virtio_blk_bounds_and_overflow);
+    RUN_TEST(test_virtio_blk_timeout_and_reset);
+    RUN_TEST(test_virtio_blk_invalid_used_len_rejected);
+    RUN_TEST(test_virtio_blk_invalid_desc_id_rejected);
+    RUN_TEST(test_virtio_blk_dma_quarantine_on_stuck_reset);
+    RUN_TEST(test_virtio_blk_repeated_requests_and_recycling);
+    RUN_TEST(test_virtio_blk_revalidate);
+    RUN_TEST(test_virtio_blk_stress_host);
 
     std::printf("========================================================\n");
     std::printf("PODSUMOWANIE: PASS=%d, FAIL=%d\n", g_pass_count, g_fail_count);

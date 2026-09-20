@@ -30,14 +30,6 @@ static inline uint64_t rng_monotonic_ns(void) {
     return host_czas_monotoniczny_ns();
 }
 
-static inline uint64_t rng_irq_save_disable(void) {
-    return 0;
-}
-
-static inline void rng_irq_restore(uint64_t flags) {
-    (void)flags;
-}
-
 #else
 #include "sterowniki/dma.h"
 #include "sterowniki/czas/hpet.h"
@@ -70,24 +62,6 @@ static inline uint64_t rng_monotonic_ns(void) {
         return czas_monotoniczny_ns();
     }
     return 0;
-}
-
-static inline uint64_t rng_irq_save_disable(void) {
-    uint64_t rflags = 0;
-    asm volatile(
-        "pushfq\n"
-        "popq %0\n"
-        "cli"
-        : "=r"(rflags)
-        :
-        : "memory");
-    return rflags;
-}
-
-static inline void rng_irq_restore(uint64_t rflags) {
-    if ((rflags & (1ULL << 9)) != 0) {
-        asm volatile("sti" ::: "memory");
-    }
 }
 #endif
 
@@ -149,10 +123,7 @@ static VirtioRngDriver g_virtio_rng{};
 static uint32_t g_rng_lock = 0;
 
 struct RngLockGuard {
-    uint64_t irq_flags;
-
-    RngLockGuard() : irq_flags(0) {
-        irq_flags = rng_irq_save_disable();
+    RngLockGuard() {
         while (__atomic_exchange_n(&g_rng_lock, 1U, __ATOMIC_ACQUIRE) != 0U) {
             asm volatile("pause" ::: "memory");
         }
@@ -160,7 +131,6 @@ struct RngLockGuard {
 
     ~RngLockGuard() {
         __atomic_store_n(&g_rng_lock, 0U, __ATOMIC_RELEASE);
-        rng_irq_restore(irq_flags);
     }
 
     RngLockGuard(const RngLockGuard&) = delete;
