@@ -43,6 +43,7 @@ extern "C" void odblokuj_ekran();
 #include "wersja_systemu.h"
 #include "stos_jadra.h"
 #include "motyw.h"
+#include "virtio_pci.h"
 
 #ifndef BURSZTYN_DEBUG_NET_SELFTEST
 #define BURSZTYN_DEBUG_NET_SELFTEST 0
@@ -2224,6 +2225,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
 
     blokowy_inicjalizuj();
     inicjalizuj_kontroler_ahci();
+    virtio_pci_inicjalizuj();
 
     /* BMP pozostaje fallbackiem po inicjalizacji BSP2. */
 
