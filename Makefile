@@ -303,6 +303,7 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	virtqueue.o \
 	virtio_rng.o \
 	virtio_blk.o \
+	virtio_net.o \
 	ahci.o \
 	ring3.o \
 	stos_jadra.o \
@@ -716,7 +717,7 @@ $(GRUB_CFG): $(KERNEL) $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile
 	@mkdir -p .installer-build
 	grub-mkstandalone -O x86_64-efi --locales="" --fonts="" --modules="part_gpt fat loadenv test normal multiboot2 configfile search search_fs_file all_video gfxterm" -o $@ "boot/grub/grub.cfg=$<"
 
-.PHONY: test-network-device test-e1000-qemu test-virtio-pci test-virtio-qemu test-virtio-blk-qemu installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-aktualizacje-gui test-bur-loader test-aktualizacja-qemu test-rozruch-qemu test-ota audit-stos-jadra test-stos-jadra test-wspolbieznosc test-guard-page test-16k-bws84 test-motywy test-motywy-unit test-motywy-gui test-motywy-qemu test-notatnik-gui test-kalkulator-gui test-bursztyn-ui-polecenia test-kontrolki4 test-kontrolki4-qemu
+.PHONY: test-network-device test-e1000-qemu test-virtio-pci test-virtio-qemu test-virtio-blk-qemu test-virtio-net-qemu installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-aktualizacje-gui test-bur-loader test-aktualizacja-qemu test-rozruch-qemu test-ota audit-stos-jadra test-stos-jadra test-wspolbieznosc test-guard-page test-16k-bws84 test-motywy test-motywy-unit test-motywy-gui test-motywy-qemu test-notatnik-gui test-kalkulator-gui test-bursztyn-ui-polecenia test-kontrolki4 test-kontrolki4-qemu
 
 test-network-device:
 	@mkdir -p .nettest
@@ -728,7 +729,7 @@ test-e1000-qemu: iso
 
 test-virtio-pci:
 	@mkdir -p .virtiotest
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -pthread pci.cpp virtio_pci.cpp virtqueue.cpp virtio_rng.cpp virtio_blk.cpp narzedzia/test_virtio_pci.cpp -o .virtiotest/test-virtio-pci
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -pthread pci.cpp virtio_pci.cpp virtqueue.cpp virtio_rng.cpp virtio_blk.cpp network_device.cpp virtio_net.cpp narzedzia/test_virtio_pci.cpp -o .virtiotest/test-virtio-pci
 	ASAN_OPTIONS=detect_leaks=1 .virtiotest/test-virtio-pci
 
 test-virtio-qemu: iso
@@ -736,6 +737,9 @@ test-virtio-qemu: iso
 
 test-virtio-blk-qemu: iso
 	$(PYTHON) narzedzia/test_virtio_blk_qemu.py
+
+test-virtio-net-qemu: iso
+	$(PYTHON) narzedzia/test_virtio_net_qemu.py
 
 test-kontrolki4:
 	@mkdir -p .kontrolki4-test

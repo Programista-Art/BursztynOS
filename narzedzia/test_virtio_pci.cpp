@@ -35,6 +35,7 @@
 #include "virtqueue.h"
 #include "virtio_rng.h"
 #include "virtio_blk.h"
+#include "virtio_net.h"
 
 // ============================================================================
 // MOCK IDT I APIC DLA SRODOWISKA TESTOWEGO HOST
@@ -174,6 +175,14 @@ struct MockDeviceState {
     uint32_t blk_processed_count = 0;
     std::vector<uint8_t> blk_disk_data;
 
+    // Stan MMIO VirtIO-NET:
+    bool     net_auto_process = false;
+    bool     net_skip_tx_reply = false;
+    int32_t  net_override_len = -1;
+    int32_t  net_override_desc_id = -1;
+    uint32_t net_tx_processed_count = 0;
+    std::vector<std::vector<uint8_t>> net_tx_frames;
+
     // Stan MSI-X:
     bool     msix_enabled = false;
     uint16_t msix_msg_ctrl = 0;
@@ -225,6 +234,12 @@ struct MockDeviceState {
         blk_override_status = -1;
         blk_processed_count = 0;
         blk_disk_data.clear();
+        net_auto_process = false;
+        net_skip_tx_reply = false;
+        net_override_len = -1;
+        net_override_desc_id = -1;
+        net_tx_processed_count = 0;
+        net_tx_frames.clear();
         isr_val = 0;
         notify_bar = 0xFF;
         notify_bar_off = 0;
@@ -705,6 +720,39 @@ void host_mmio_write16(volatile void* addr, uint16_t val) {
                                 asm volatile("mfence" ::: "memory");
                             }
                             g_mock.blk_processed_count++;
+                        }
+                        mock_check_and_trigger_msix(val);
+                    }
+                }
+
+                if (g_mock.net_auto_process && val == 1 && !g_mock.net_skip_tx_reply) {
+                    VirtioNetDriver* drv = virtio_net_get_driver(0);
+                    if (drv && drv->tx_vq && drv->tx_vq->avail && drv->tx_vq->used && drv->tx_vq->desc) {
+                        VirtQueue* vq = drv->tx_vq;
+                        while (g_mock.net_tx_processed_count != vq->avail->idx) {
+                            const uint16_t a_idx = g_mock.net_tx_processed_count & (vq->queue_size - 1U);
+                            const uint16_t head_id = vq->avail->ring[a_idx];
+                            if (head_id < vq->queue_size) {
+                                void* vhdr = host_phys_to_virt(vq->desc[head_id].addr);
+                                uint32_t len = vq->desc[head_id].len;
+                                if (vhdr && len >= sizeof(VirtioNetHdr)) {
+                                    const uint8_t* p = static_cast<const uint8_t*>(vhdr);
+                                    std::vector<uint8_t> frame_data(p + sizeof(VirtioNetHdr), p + len);
+                                    g_mock.net_tx_frames.push_back(frame_data);
+                                }
+                                const uint32_t rep_len = (g_mock.net_override_len >= 0) ?
+                                    static_cast<uint32_t>(g_mock.net_override_len) : 0;
+                                const uint32_t rep_id = (g_mock.net_override_desc_id >= 0) ?
+                                    static_cast<uint32_t>(g_mock.net_override_desc_id) : head_id;
+
+                                const uint16_t u_idx = vq->used->idx & (vq->queue_size - 1U);
+                                vq->used->ring[u_idx].id = rep_id;
+                                vq->used->ring[u_idx].len = rep_len;
+                                asm volatile("" ::: "memory");
+                                vq->used->idx = static_cast<uint16_t>(vq->used->idx + 1U);
+                                asm volatile("mfence" ::: "memory");
+                            }
+                            g_mock.net_tx_processed_count++;
                         }
                         mock_check_and_trigger_msix(val);
                     }
@@ -3526,6 +3574,505 @@ void test_virtio_msix_repeated_cycles_no_leak() {
 }
 
 // ============================================================================
+// TESTY STEROWNIKA VIRTIO-NET
+// ============================================================================
+
+static uint32_t g_mock_net_rx_delivered_count = 0;
+static std::vector<std::vector<uint8_t>> g_mock_net_rx_packets;
+
+void obsluz_pakiet_sieciowy(uint8_t* pakiet, uint16_t dlugosc) {
+    g_mock_net_rx_delivered_count++;
+    if (pakiet && dlugosc > 0) {
+        g_mock_net_rx_packets.push_back(std::vector<uint8_t>(pakiet, pakiet + dlugosc));
+    }
+}
+
+static bool setup_mock_net_device(VirtioPciDevice* dev,
+                                  const uint8_t mac[6] = nullptr,
+                                  uint16_t status = VIRTIO_NET_S_LINK_UP,
+                                  uint64_t extra_features = (VIRTIO_NET_F_MAC | VIRTIO_NET_F_STATUS)) {
+    g_mock.reset();
+    setup_pci_hdr(0x1AF4, 0x1041, 0x1AF4, 0x0001);
+    std::vector<CapBuilderEntry> caps = {
+        {VIRTIO_PCI_CAP_COMMON_CFG, 0, 0x000, 56, 0},
+        {VIRTIO_PCI_CAP_NOTIFY_CFG, 0, 0x1000, 0x1000, 4},
+        {VIRTIO_PCI_CAP_ISR_CFG,    0, 0x080, 1,  0},
+        {VIRTIO_PCI_CAP_DEVICE_CFG, 0, 0x100, 64, 0}
+    };
+    build_cap_chain(caps);
+    wire_virtio_mmio(0, 0x000, 0x080);
+    g_mock.queues[0].size = 32; // RX
+    g_mock.queues[1].size = 32; // TX
+
+    uint64_t feat = VIRTIO_F_VERSION_1 | extra_features;
+    g_mock.device_features = feat;
+
+    uint8_t default_mac[6] = {0x52, 0x54, 0x00, 0x12, 0x34, 0x56};
+    const uint8_t* use_mac = mac ? mac : default_mac;
+    std::memcpy(&g_mock.bars[0].mem[0x100], use_mac, 6);
+    std::memcpy(&g_mock.bars[0].mem[0x106], &status, sizeof(status));
+
+    g_mock.net_auto_process = true;
+    g_mock.net_skip_tx_reply = false;
+    g_mock.net_override_len = -1;
+    g_mock.net_override_desc_id = -1;
+    g_mock.net_tx_processed_count = 0;
+    g_mock.net_tx_frames.clear();
+
+    return virtio_pci_probe(0, 6, 0, dev, 0);
+}
+
+static bool setup_mock_net_device_msix(VirtioPciDevice* dev,
+                                       const uint8_t mac[6] = nullptr,
+                                       uint16_t status = VIRTIO_NET_S_LINK_UP,
+                                       uint16_t table_size = 4,
+                                       uint8_t table_bar = 1) {
+    g_mock.reset();
+    setup_pci_hdr(0x1AF4, 0x1041, 0x1AF4, 0x0001);
+    std::vector<CapBuilderEntry> caps = {
+        {VIRTIO_PCI_CAP_COMMON_CFG, 0, 0x000, 56, 0},
+        {VIRTIO_PCI_CAP_NOTIFY_CFG, 0, 0x1000, 0x1000, 4},
+        {VIRTIO_PCI_CAP_ISR_CFG,    0, 0x080, 1,  0},
+        {VIRTIO_PCI_CAP_DEVICE_CFG, 0, 0x100, 64, 0}
+    };
+    build_cap_chain(caps, 0xA0);
+    setup_msix_cap(0xA0, 0, table_size, table_bar, 0x000, table_bar, 0x800);
+    wire_virtio_mmio(0, 0x000, 0x080);
+    g_mock.queues[0].size = 32;
+    g_mock.queues[1].size = 32;
+
+    uint64_t feat = VIRTIO_F_VERSION_1 | VIRTIO_NET_F_MAC | VIRTIO_NET_F_STATUS;
+    g_mock.device_features = feat;
+
+    uint8_t default_mac[6] = {0x52, 0x54, 0x00, 0x12, 0x34, 0x56};
+    const uint8_t* use_mac = mac ? mac : default_mac;
+    std::memcpy(&g_mock.bars[0].mem[0x100], use_mac, 6);
+    std::memcpy(&g_mock.bars[0].mem[0x106], &status, sizeof(status));
+
+    g_mock.net_auto_process = true;
+    g_mock.net_skip_tx_reply = false;
+    g_mock.net_override_len = -1;
+    g_mock.net_override_desc_id = -1;
+    g_mock.net_tx_processed_count = 0;
+    g_mock.net_tx_frames.clear();
+
+    return virtio_pci_probe(0, 6, 0, dev, 0);
+}
+
+static bool mock_inject_net_rx_packet(const void* frame, size_t len, uint32_t override_len = 0) {
+    VirtioNetDriver* drv = virtio_net_get_driver(0);
+    if (!drv || !drv->rx_vq || !drv->rx_vq->avail || !drv->rx_vq->used || !drv->rx_vq->desc) {
+        return false;
+    }
+    VirtQueue* vq = drv->rx_vq;
+    if (vq->last_used_idx == vq->avail->idx) {
+        return false;
+    }
+    const uint16_t a_idx = vq->last_used_idx & (vq->queue_size - 1U);
+    const uint16_t desc_id = vq->avail->ring[a_idx];
+    if (desc_id >= vq->queue_size) return false;
+
+    void* vaddr = host_phys_to_virt(vq->desc[desc_id].addr);
+    if (!vaddr) return false;
+
+    auto* hdr = static_cast<VirtioNetHdr*>(vaddr);
+    std::memset(hdr, 0, sizeof(VirtioNetHdr));
+
+    uint8_t* payload = static_cast<uint8_t*>(vaddr) + sizeof(VirtioNetHdr);
+    std::memcpy(payload, frame, len);
+
+    const uint16_t u_idx = vq->used->idx & (vq->queue_size - 1U);
+    vq->used->ring[u_idx].id = desc_id;
+    vq->used->ring[u_idx].len = (override_len > 0) ? override_len : static_cast<uint32_t>(sizeof(VirtioNetHdr) + len);
+    asm volatile("" ::: "memory");
+    vq->used->idx = static_cast<uint16_t>(vq->used->idx + 1U);
+    asm volatile("mfence" ::: "memory");
+
+    mock_check_and_trigger_msix(0);
+    return true;
+}
+
+// ----------------------------------------------------------------------------
+// 77. VirtIO-NET: Inicjalizacja, rejestracja i czyszczenie zasobow (init i reset)
+// ----------------------------------------------------------------------------
+void test_virtio_net_init_and_cleanup() {
+    virtio_net_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_net_device(&dev), "Probe urzadzenia VirtIO-NET");
+    TEST_ASSERT(virtio_net_init(&dev), "Inicjalizacja sterownika VirtIO-NET");
+    TEST_ASSERT(virtio_net_get_count() == 1, "Zarejestrowano dokladnie 1 karte VirtIO-NET");
+
+    VirtioNetDriver* drv = virtio_net_get_driver(0);
+    TEST_ASSERT(drv != nullptr, "Dostep do struktury sterownika");
+    TEST_ASSERT(drv->initialized, "Sterownik initialized == true");
+    TEST_ASSERT(!drv->has_error, "Sterownik has_error == false");
+    TEST_ASSERT(drv->net_dev.active, "Karta aktywna w rejestrze NetworkDevice");
+    TEST_ASSERT(drv->net_dev.device_type == NetDeviceType::VirtIO, "Typ karty NetDeviceType::VirtIO");
+    TEST_ASSERT(drv->net_dev.mtu == 1500, "MTU domyslne == 1500");
+    uint8_t expected_mac[6] = {0x52, 0x54, 0x00, 0x12, 0x34, 0x56};
+    TEST_ASSERT(std::memcmp(drv->net_dev.mac, expected_mac, 6) == 0, "Adres MAC zgodny z odczytanym");
+    TEST_ASSERT((virtio_pci_get_status(&dev) & VIRTIO_STATUS_DRIVER_OK) != 0, "DRIVER_OK w urzadzeniu");
+    TEST_ASSERT(g_host_dma_allocs.size() == 4, "4 alokacje DMA (RX vq + TX vq + RX buf + TX buf)");
+
+    TEST_ASSERT(virtio_net_reset(drv), "Reset karty VirtIO-NET");
+    TEST_ASSERT(!drv->initialized, "Sterownik nieaktywny po resecie");
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA po resecie karty");
+    virtio_net_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 78. VirtIO-NET: Negocjacja cech i odczyt adresu MAC
+// ----------------------------------------------------------------------------
+void test_virtio_net_negotiation_and_mac() {
+    virtio_net_reset_all();
+
+    // 1. Sukces z cecha MAC
+    uint8_t custom_mac[6] = {0x02, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE};
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_net_device(&dev, custom_mac), "Probe z custom MAC");
+    TEST_ASSERT(virtio_net_init(&dev), "Init z custom MAC");
+    VirtioNetDriver* drv = virtio_net_get_driver(0);
+    TEST_ASSERT(std::memcmp(drv->net_dev.mac, custom_mac, 6) == 0, "Custom MAC przypisany prawidlowo");
+    virtio_net_reset_all();
+
+    // 2. Sukces bez cechy MAC (fallback do locally administered MAC)
+    VirtioPciDevice dev_nomac{};
+    TEST_ASSERT(setup_mock_net_device(&dev_nomac, nullptr, VIRTIO_NET_S_LINK_UP, VIRTIO_NET_F_STATUS), "Probe bez cechy MAC");
+    TEST_ASSERT(virtio_net_init(&dev_nomac), "Init bez cechy MAC powiodl sie");
+    drv = virtio_net_get_driver(0);
+    TEST_ASSERT(net_mac_valid(drv->net_dev.mac), "Wygenerowany fallback MAC jest poprawny");
+    virtio_net_reset_all();
+
+    // 3. Odrzucenie braku VIRTIO_F_VERSION_1
+    VirtioPciDevice dev_no_v1{};
+    setup_pci_hdr(0x1AF4, 0x1041, 0x1AF4, 0x0001);
+    std::vector<CapBuilderEntry> caps = {
+        {VIRTIO_PCI_CAP_COMMON_CFG, 0, 0x000, 56, 0},
+        {VIRTIO_PCI_CAP_NOTIFY_CFG, 0, 0x1000, 0x1000, 4},
+        {VIRTIO_PCI_CAP_ISR_CFG,    0, 0x080, 1,  0},
+        {VIRTIO_PCI_CAP_DEVICE_CFG, 0, 0x100, 64, 0}
+    };
+    build_cap_chain(caps);
+    wire_virtio_mmio(0, 0x000, 0x080);
+    g_mock.device_features = VIRTIO_NET_F_MAC;
+    virtio_pci_probe(0, 6, 0, &dev_no_v1, 0);
+    TEST_ASSERT(!virtio_net_init(&dev_no_v1), "Init odrzuca urzadzenie bez VERSION_1");
+    virtio_net_reset_all();
+
+    // 4. Odrzucenie gdy urzadzenie czysci FEATURES_OK
+    VirtioPciDevice dev_no_fok{};
+    TEST_ASSERT(setup_mock_net_device(&dev_no_fok), "Probe dla testu odrzucenia FEATURES_OK");
+    g_mock.accept_features = false;
+    TEST_ASSERT(!virtio_net_init(&dev_no_fok), "Init odrzuca urzadzenie gdy FEATURES_OK odrzucone");
+    virtio_net_reset_all();
+
+    // 5. Odrzucenie gdy urzadzenie odrzuca DRIVER_OK
+    VirtioPciDevice dev_no_dok{};
+    TEST_ASSERT(setup_mock_net_device(&dev_no_dok), "Probe dla testu odrzucenia DRIVER_OK");
+    g_mock.allow_driver_ok = false;
+    TEST_ASSERT(!virtio_net_init(&dev_no_dok), "Init odrzuca urzadzenie gdy DRIVER_OK odrzucone");
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Pamiec DMA zwolniona po odrzuceniu DRIVER_OK");
+    virtio_net_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 79. VirtIO-NET: Stan fizycznego lacza (link state Up / Down)
+// ----------------------------------------------------------------------------
+void test_virtio_net_link_state() {
+    virtio_net_reset_all();
+
+    // 1. Karta z link up
+    VirtioPciDevice dev_up{};
+    TEST_ASSERT(setup_mock_net_device(&dev_up, nullptr, VIRTIO_NET_S_LINK_UP), "Probe link up");
+    TEST_ASSERT(virtio_net_init(&dev_up), "Init link up");
+    VirtioNetDriver* drv = virtio_net_get_driver(0);
+    TEST_ASSERT(virtio_net_get_link_state(&drv->net_dev) == NetLinkState::Up, "get_link_state == Up");
+    TEST_ASSERT(drv->net_dev.is_up(), "NetworkDevice::is_up() == true");
+    virtio_net_reset_all();
+
+    // 2. Karta z link down
+    VirtioPciDevice dev_down{};
+    TEST_ASSERT(setup_mock_net_device(&dev_down, nullptr, 0), "Probe link down (status=0)");
+    TEST_ASSERT(virtio_net_init(&dev_down), "Init link down");
+    drv = virtio_net_get_driver(0);
+    TEST_ASSERT(virtio_net_get_link_state(&drv->net_dev) == NetLinkState::Down, "get_link_state == Down");
+    TEST_ASSERT(!drv->net_dev.is_up(), "NetworkDevice::is_up() == false");
+
+    uint8_t test_frame[64]{};
+    for (int i = 0; i < 6; ++i) test_frame[i] = 0xFF;
+    std::memcpy(&test_frame[6], drv->net_dev.mac, 6);
+    test_frame[12] = 0x08; test_frame[13] = 0x06;
+    TEST_ASSERT(drv->net_dev.transmit(test_frame, sizeof(test_frame)) == NetError::LinkDown, "transmit zwraca LinkDown przy braku lacza");
+    virtio_net_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 80. VirtIO-NET: Podstawowa transmisja pakietu i statystyki
+// ----------------------------------------------------------------------------
+void test_virtio_net_transmit_basic_and_stats() {
+    virtio_net_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_net_device(&dev), "Probe urzadzenia");
+    TEST_ASSERT(virtio_net_init(&dev), "Init urzadzenia");
+
+    VirtioNetDriver* drv = virtio_net_get_driver(0);
+    uint8_t frame[64];
+    for (size_t i = 0; i < sizeof(frame); ++i) {
+        frame[i] = static_cast<uint8_t>(0xA0 + (i % 16));
+    }
+    for (int i = 0; i < 6; ++i) frame[i] = 0xFF;
+    std::memcpy(&frame[6], drv->net_dev.mac, 6);
+
+    const NetError err = drv->net_dev.transmit(frame, sizeof(frame));
+    TEST_ASSERT(err == NetError::Ok, "transmit zwraca NetError::Ok");
+    TEST_ASSERT(g_mock.net_tx_frames.size() == 1, "Mock odebral dokladnie 1 ramke TX");
+    TEST_ASSERT(g_mock.net_tx_frames[0].size() == sizeof(frame), "Dlugosc odebranej ramki == 64");
+    TEST_ASSERT(std::memcmp(g_mock.net_tx_frames[0].data(), frame, sizeof(frame)) == 0, "Zawartosc ramki zgodna");
+
+    NetDeviceStats stats{};
+    drv->net_dev.get_stats(&stats);
+    TEST_ASSERT(stats.tx_packets == 1, "stats.tx_packets == 1");
+    TEST_ASSERT(stats.tx_bytes == sizeof(frame), "stats.tx_bytes == 64");
+    TEST_ASSERT(stats.tx_errors == 0, "stats.tx_errors == 0");
+    TEST_ASSERT(stats.tx_dropped == 0, "stats.tx_dropped == 0");
+
+    virtio_net_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 81. VirtIO-NET: Walidacja granic MTU i dlugosci bufora transmisji
+// ----------------------------------------------------------------------------
+void test_virtio_net_transmit_mtu_and_length_validation() {
+    virtio_net_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_net_device(&dev), "Probe urzadzenia");
+    TEST_ASSERT(virtio_net_init(&dev), "Init urzadzenia");
+
+    VirtioNetDriver* drv = virtio_net_get_driver(0);
+    uint8_t buf[1600]{};
+
+    TEST_ASSERT(drv->net_dev.transmit(nullptr, 64) == NetError::InvalidArgument, "transmit(nullptr) zwraca InvalidArgument");
+    TEST_ASSERT(drv->net_dev.transmit(buf, 13) == NetError::BufferTooSmall, "transmit(<14) zwraca BufferTooSmall");
+    TEST_ASSERT(drv->net_dev.transmit(buf, 1515) == NetError::BufferTooLarge, "transmit(>MTU+14) zwraca BufferTooLarge");
+
+    virtio_net_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 82. VirtIO-NET: Wyczerpanie kolejki TX (QueueFull) i prawidlowy odzysk
+// ----------------------------------------------------------------------------
+void test_virtio_net_transmit_queue_exhaustion() {
+    virtio_net_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_net_device(&dev), "Probe urzadzenia");
+    TEST_ASSERT(virtio_net_init(&dev), "Init urzadzenia");
+
+    VirtioNetDriver* drv = virtio_net_get_driver(0);
+    g_mock.net_skip_tx_reply = true; // Urzadzenie nie odsyla zakonczen natychmiast
+
+    uint8_t frame[60]{};
+    for (int i = 0; i < 6; ++i) frame[i] = 0xFF;
+    std::memcpy(&frame[6], drv->net_dev.mac, 6);
+
+    NetError last_err = NetError::Ok;
+    for (uint32_t i = 0; i < drv->tx_count + 5; ++i) {
+        last_err = drv->net_dev.transmit(frame, sizeof(frame));
+        if (last_err == NetError::QueueFull) {
+            break;
+        }
+    }
+
+    TEST_ASSERT(last_err == NetError::QueueFull, "Wyczerpanie kolejki TX zwraca QueueFull");
+    NetDeviceStats stats{};
+    drv->net_dev.get_stats(&stats);
+    TEST_ASSERT(stats.tx_ring_full > 0, "Licznik tx_ring_full zainkrementowany");
+    TEST_ASSERT(stats.tx_dropped > 0, "Licznik tx_dropped zainkrementowany");
+
+    // Re-enable zakonczenia w mocku i symuluj zakonczenie zaleglych zadan
+    g_mock.net_skip_tx_reply = false;
+    VirtQueue* vq = drv->tx_vq;
+    while (g_mock.net_tx_processed_count != vq->avail->idx) {
+        const uint16_t a_idx = g_mock.net_tx_processed_count & (vq->queue_size - 1U);
+        const uint16_t head_id = vq->avail->ring[a_idx];
+        const uint16_t u_idx = vq->used->idx & (vq->queue_size - 1U);
+        vq->used->ring[u_idx].id = head_id;
+        vq->used->ring[u_idx].len = 0;
+        vq->used->idx = static_cast<uint16_t>(vq->used->idx + 1U);
+        g_mock.net_tx_processed_count++;
+    }
+
+    // poll_rx odzyskuje deskryptory
+    virtio_net_poll_rx(&drv->net_dev);
+    TEST_ASSERT(drv->net_dev.transmit(frame, sizeof(frame)) == NetError::Ok, "Transmisja powiodla sie po odzyskaniu deskryptorow");
+
+    virtio_net_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 83. VirtIO-NET: Odbior ramek (RX) i uzupelnianie puli buforow (replenish)
+// ----------------------------------------------------------------------------
+void test_virtio_net_rx_receive_and_replenish() {
+    virtio_net_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_net_device(&dev), "Probe urzadzenia");
+    TEST_ASSERT(virtio_net_init(&dev), "Init urzadzenia");
+
+    VirtioNetDriver* drv = virtio_net_get_driver(0);
+    g_mock_net_rx_delivered_count = 0;
+    g_mock_net_rx_packets.clear();
+
+    uint8_t rx_frame[60];
+    for (size_t i = 0; i < sizeof(rx_frame); ++i) {
+        rx_frame[i] = static_cast<uint8_t>(0x30 + i);
+    }
+    for (int i = 0; i < 6; ++i) rx_frame[i] = 0xFF;
+    std::memcpy(&rx_frame[6], drv->net_dev.mac, 6);
+
+    TEST_ASSERT(mock_inject_net_rx_packet(rx_frame, sizeof(rx_frame)), "Wstrzykniecie pakietu RX");
+
+    virtio_net_poll_rx(&drv->net_dev);
+
+    TEST_ASSERT(g_mock_net_rx_delivered_count == 1, "Dostarczono dokladnie 1 pakiet do obsluz_pakiet_sieciowy");
+    TEST_ASSERT(g_mock_net_rx_packets.size() == 1, "Tablica odebranych pakietow zawiera 1 element");
+    TEST_ASSERT(g_mock_net_rx_packets[0].size() == sizeof(rx_frame), "Dlugosc odebranej ramki == 60");
+    TEST_ASSERT(std::memcmp(g_mock_net_rx_packets[0].data(), rx_frame, sizeof(rx_frame)) == 0, "Zawartosc odebranej ramki zgodna");
+
+    NetDeviceStats stats{};
+    drv->net_dev.get_stats(&stats);
+    TEST_ASSERT(stats.rx_packets == 1, "stats.rx_packets == 1");
+    TEST_ASSERT(stats.rx_bytes == sizeof(rx_frame), "stats.rx_bytes == 60");
+    TEST_ASSERT(stats.rx_errors == 0, "stats.rx_errors == 0");
+    TEST_ASSERT(virtqueue_get_num_free(drv->rx_vq) == 0, "Kolejka RX uzupelniona - 0 wolnych deskryptorow");
+
+    virtio_net_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 84. VirtIO-NET: Uszkodzone pakiety odbiorcze (used.len < 24)
+// ----------------------------------------------------------------------------
+void test_virtio_net_rx_malformed_packets() {
+    virtio_net_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_net_device(&dev), "Probe urzadzenia");
+    TEST_ASSERT(virtio_net_init(&dev), "Init urzadzenia");
+
+    VirtioNetDriver* drv = virtio_net_get_driver(0);
+    g_mock_net_rx_delivered_count = 0;
+    g_mock_net_rx_packets.clear();
+
+    uint8_t dummy[60]{};
+    TEST_ASSERT(mock_inject_net_rx_packet(dummy, sizeof(dummy), 15), "Wstrzykniecie uszkodzonego pakietu (len 15)");
+
+    virtio_net_poll_rx(&drv->net_dev);
+
+    TEST_ASSERT(g_mock_net_rx_delivered_count == 0, "Uszkodzony pakiet NIE zostal przekazany do obsluz_pakiet_sieciowy");
+    NetDeviceStats stats{};
+    drv->net_dev.get_stats(&stats);
+    TEST_ASSERT(stats.rx_errors == 1, "stats.rx_errors == 1");
+    TEST_ASSERT(stats.rx_dropped == 1, "stats.rx_dropped == 1");
+
+    virtio_net_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 85. VirtIO-NET: Konfiguracja i dostarczanie przerwan MSI-X dla RX i TX
+// ----------------------------------------------------------------------------
+void test_virtio_net_msix_operation() {
+    virtio_net_reset_all();
+    TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 0, "Brak wektorow IDT przed testem MSI-X");
+
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_net_device_msix(&dev), "Probe urzadzenia z MSI-X");
+    TEST_ASSERT(virtio_net_init(&dev), "Init z MSI-X");
+
+    VirtioNetDriver* drv = virtio_net_get_driver(0);
+    TEST_ASSERT(drv->use_msix, "drv->use_msix == true");
+    TEST_ASSERT(drv->rx_irq_vector >= 0, "Wektor RX zaalokowany");
+    TEST_ASSERT(drv->tx_irq_vector >= 0, "Wektor TX zaalokowany");
+    TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 2, "Dokladnie 2 wektory IDT zaalokowane (RX i TX)");
+
+    uint8_t frame[60]{};
+    for (int i = 0; i < 6; ++i) frame[i] = 0xFF;
+    std::memcpy(&frame[6], drv->net_dev.mac, 6);
+    TEST_ASSERT(drv->net_dev.transmit(frame, sizeof(frame)) == NetError::Ok, "Transmisja powiodla sie");
+    TEST_ASSERT(drv->tx_irq_count > 0, "TX IRQ zgloszone do sterownika");
+
+    TEST_ASSERT(mock_inject_net_rx_packet(frame, sizeof(frame)), "Wstrzykniecie pakietu RX");
+    TEST_ASSERT(drv->rx_irq_count > 0, "RX IRQ zgloszone do sterownika");
+    TEST_ASSERT(drv->rx_interrupt_pending, "rx_interrupt_pending == true");
+
+    virtio_net_poll_rx(&drv->net_dev);
+    TEST_ASSERT(!drv->rx_interrupt_pending, "rx_interrupt_pending zresetowane po poll_rx");
+
+    virtio_net_reset(drv);
+    TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 0, "Zero wyciekow wektorow IDT po resecie MSI-X");
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA po resecie MSI-X");
+    virtio_net_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 86. VirtIO-NET: Kwarantanna DMA przy braku potwierdzenia resetu sprzetowego
+// ----------------------------------------------------------------------------
+void test_virtio_net_reset_quarantine_on_stuck_device() {
+    virtio_net_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_net_device(&dev), "Probe urzadzenia");
+    TEST_ASSERT(virtio_net_init(&dev), "Init urzadzenia");
+
+    VirtioNetDriver* drv = virtio_net_get_driver(0);
+    g_mock.ignore_reset = true;
+
+    const size_t allocs_before = g_host_dma_allocs.size();
+    TEST_ASSERT(!virtio_net_reset(drv), "Reset zwraca false gdy urzadzenie nie zeruje statusu");
+    TEST_ASSERT(drv->has_error, "Sterownik oznaczony jako uszkodzony (has_error = true)");
+    TEST_ASSERT(g_host_dma_allocs.size() == allocs_before, "Pamiec DMA poddana kwarantannie - nie zostala zwolniona!");
+
+    g_mock.ignore_reset = false;
+    g_host_dma_allocs.clear();
+    virtio_net_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 87. VirtIO-NET: Test obciazeniowy i cykliczne zawijanie buforow (stress)
+// ----------------------------------------------------------------------------
+void test_virtio_net_stress_and_wraparound() {
+    virtio_net_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_net_device(&dev), "Probe urzadzenia");
+    TEST_ASSERT(virtio_net_init(&dev), "Init urzadzenia");
+
+    VirtioNetDriver* drv = virtio_net_get_driver(0);
+    g_mock_net_rx_delivered_count = 0;
+    g_mock_net_rx_packets.clear();
+
+    uint8_t frame[64];
+    for (size_t i = 0; i < sizeof(frame); ++i) frame[i] = static_cast<uint8_t>(i);
+    for (int i = 0; i < 6; ++i) frame[i] = 0xFF;
+    std::memcpy(&frame[6], drv->net_dev.mac, 6);
+
+    constexpr int ITERS = 200;
+    for (int i = 0; i < ITERS; ++i) {
+        TEST_ASSERT(drv->net_dev.transmit(frame, sizeof(frame)) == NetError::Ok, "Transmit w petli stress");
+        TEST_ASSERT(mock_inject_net_rx_packet(frame, sizeof(frame)), "Inject RX w petli stress");
+        virtio_net_poll_rx(&drv->net_dev);
+    }
+
+    NetDeviceStats stats{};
+    drv->net_dev.get_stats(&stats);
+    TEST_ASSERT(stats.tx_packets == ITERS, "Liczba wyslanych pakietow == ITERS");
+    TEST_ASSERT(stats.rx_packets == ITERS, "Liczba odebranych pakietow == ITERS");
+    TEST_ASSERT(stats.tx_errors == 0, "tx_errors == 0");
+    TEST_ASSERT(stats.rx_errors == 0, "rx_errors == 0");
+    TEST_ASSERT(g_mock_net_rx_delivered_count == ITERS, "Dostarczono wszystkie pakiety do obsluz_pakiet_sieciowy");
+
+    TEST_ASSERT(virtio_net_stress_test(drv), "virtio_net_stress_test zwrocilo true");
+
+    virtio_net_reset(drv);
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA po zakonczeniu testu stress");
+    virtio_net_reset_all();
+}
+
+// ============================================================================
 // PUNKT WEJSCIA TESTOW
 // ============================================================================
 
@@ -3614,6 +4161,19 @@ int main() {
     RUN_TEST(test_virtio_queue_msix_vector_assignment);
     RUN_TEST(test_virtio_msix_delivery_and_teardown_safety);
     RUN_TEST(test_virtio_msix_repeated_cycles_no_leak);
+
+    // Testy VirtIO-NET
+    RUN_TEST(test_virtio_net_init_and_cleanup);
+    RUN_TEST(test_virtio_net_negotiation_and_mac);
+    RUN_TEST(test_virtio_net_link_state);
+    RUN_TEST(test_virtio_net_transmit_basic_and_stats);
+    RUN_TEST(test_virtio_net_transmit_mtu_and_length_validation);
+    RUN_TEST(test_virtio_net_transmit_queue_exhaustion);
+    RUN_TEST(test_virtio_net_rx_receive_and_replenish);
+    RUN_TEST(test_virtio_net_rx_malformed_packets);
+    RUN_TEST(test_virtio_net_msix_operation);
+    RUN_TEST(test_virtio_net_reset_quarantine_on_stuck_device);
+    RUN_TEST(test_virtio_net_stress_and_wraparound);
 
     std::printf("========================================================\n");
     std::printf("PODSUMOWANIE: PASS=%d, FAIL=%d\n", g_pass_count, g_fail_count);

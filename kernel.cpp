@@ -31,6 +31,7 @@ extern "C" void odblokuj_ekran();
 #include "instalator.h"
 #include "blokowy.h"
 #include "e1000.h"
+#include "virtio_net.h"
 #include "network_device.h"
 #include "siec.h"
 #include "heap.h"
@@ -2251,6 +2252,13 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
      * ------------------------------------------------------------------ */
 
     inicjalizuj_e1000();
+    const uint32_t virtio_net_count = virtio_net_probe_and_init();
+    if (virtio_net_count > 0) {
+        VirtioNetDriver* net_drv = virtio_net_get_driver(0);
+        if (net_drv && net_drv->initialized) {
+            virtio_net_stress_test(net_drv);
+        }
+    }
 
     NetworkDevice* net_dev = net_get_primary_device();
     if (net_dev) {
