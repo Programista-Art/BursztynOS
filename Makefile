@@ -300,6 +300,7 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	pci.o \
 	virtio_pci.o \
 	virtqueue.o \
+	virtio_rng.o \
 	ahci.o \
 	ring3.o \
 	stos_jadra.o \
@@ -717,8 +718,8 @@ $(GRUB_CFG): $(KERNEL) $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile
 
 test-virtio-pci:
 	@mkdir -p .virtiotest
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined virtio_pci.cpp virtqueue.cpp narzedzia/test_virtio_pci.cpp -o .virtiotest/test-virtio-pci
-	ASAN_OPTIONS=detect_leaks=0 .virtiotest/test-virtio-pci
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -pthread virtio_pci.cpp virtqueue.cpp virtio_rng.cpp narzedzia/test_virtio_pci.cpp -o .virtiotest/test-virtio-pci
+	ASAN_OPTIONS=detect_leaks=1 .virtiotest/test-virtio-pci
 
 test-virtio-qemu: iso
 	$(PYTHON) narzedzia/test_virtio_qemu.py

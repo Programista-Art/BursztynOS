@@ -29,6 +29,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "virtio_rng.h"
 
 namespace {
 
@@ -217,25 +218,87 @@ bool skopiuj_z_przestrzeni_uzytkownika(
 }
 
 /* Kernelowy provider entropii. mbedTLS zna tylko ten kontrakt i nie posiada
- * polityki sprzetowej. Brak RDRAND jest dozwolony przy starcie systemu, ale
- * operacja kryptograficzna odmawia wtedy pracy (fail-closed). */
+ * polityki sprzetowej. Laczy sprzetowy RDRAND (jesli dostepny w CPU) oraz
+ * urzadzenie sprzetowe VirtIO-RNG (jesli dostepne). Brak obu zrodel
+ * odmawia pracy (fail-closed). */
 extern "C" bool bursztyn_krypto_wypelnij_losowe(uint8_t* bufor,
                                                  size_t dlugosc) {
     if (!bufor && dlugosc != 0) return false;
-    uint32_t a=0,b=0,c=0,d=0;
+    if (dlugosc == 0) return true;
+
+    bool has_rdrand = false;
+    uint32_t a = 0, b = 0, c = 0, d = 0;
     asm volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d)
                  : "a"(1U), "c"(0U));
     (void)a; (void)b; (void)d;
-    if ((c & (1U << 30)) == 0) return false;
-    size_t off=0;
-    while (off < dlugosc) {
-        uint64_t v=0; unsigned char ok=0;
-        for (unsigned proba=0; proba<16 && !ok; ++proba)
-            asm volatile("rdrand %0; setc %1" : "=r"(v), "=qm"(ok) :: "cc");
-        if (!ok) return false;
-        for (unsigned i=0; i<8 && off<dlugosc; ++i,++off)
-            bufor[off]=static_cast<uint8_t>(v>>(i*8));
+    if ((c & (1U << 30)) != 0) {
+        has_rdrand = true;
     }
+
+    const bool has_virtio = virtio_rng_is_ready();
+
+    if (!has_rdrand && !has_virtio) {
+        return false;
+    }
+
+    bool rdrand_ok = false;
+    if (has_rdrand) {
+        size_t off = 0;
+        rdrand_ok = true;
+        while (off < dlugosc) {
+            uint64_t v = 0;
+            unsigned char ok = 0;
+            for (unsigned proba = 0; proba < 16 && !ok; ++proba) {
+                asm volatile("rdrand %0; setc %1" : "=r"(v), "=qm"(ok) :: "cc");
+            }
+            if (!ok) {
+                rdrand_ok = false;
+                break;
+            }
+            for (unsigned i = 0; i < 8 && off < dlugosc; ++i, ++off) {
+                bufor[off] = static_cast<uint8_t>(v >> (i * 8));
+            }
+        }
+    }
+
+    if (!rdrand_ok) {
+        // Jezeli RDRAND jest niedostepny lub zawiodl, czerpiemy pelna entropie z VirtIO-RNG
+        if (!has_virtio) {
+            virtio_rng_secure_zero(bufor, dlugosc);
+            return false;
+        }
+        const size_t got = virtio_rng_read(bufor, dlugosc);
+        if (got < dlugosc) {
+            // Fail-closed: nie zwracamy niepelnego/niezainicjalizowanego bufora
+            virtio_rng_secure_zero(bufor, dlugosc);
+            return false;
+        }
+        return true;
+    }
+
+    // Gdy RDRAND zadzialal poprawnie, a dostepny jest takze VirtIO-RNG,
+    // mieszamy dodatkowa entropie sprzetowa do bufora poprzez XOR.
+    if (has_virtio) {
+        uint8_t mix_buf[64];
+        size_t off = 0;
+        while (off < dlugosc) {
+            size_t chunk = dlugosc - off;
+            if (chunk > sizeof(mix_buf)) {
+                chunk = sizeof(mix_buf);
+            }
+            const size_t got = virtio_rng_read(mix_buf, chunk);
+            for (size_t i = 0; i < got; ++i) {
+                bufor[off + i] ^= mix_buf[i];
+            }
+            // Prawdziwe, nieoptymalizowalne czyszczenie tymczasowego bufora na stosie
+            virtio_rng_secure_zero(mix_buf, sizeof(mix_buf));
+            if (got < chunk) {
+                break;
+            }
+            off += got;
+        }
+    }
+
     return true;
 }
 

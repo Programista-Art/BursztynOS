@@ -45,10 +45,11 @@ def main():
     )
 
     found_virtio = False
-    found_rng_tx = False
+    found_virtio_rng = False
+    found_rng_stress = False
     virtio_lines = []
     start_time = time.time()
-    timeout = 45 # sekund
+    timeout = 180 # sekund (uwzglednia powolna emulacje TCG single-thread podczas bootu AHCI i stress testu)
 
     try:
         while time.time() - start_time < timeout:
@@ -64,9 +65,12 @@ def main():
                 found_virtio = True
                 virtio_lines.append(line_str)
             if "[VIRTIO-RNG]" in line_str:
+                found_virtio_rng = True
                 virtio_lines.append(line_str)
-                if "transaction complete: DRIVER_OK verified" in line_str:
-                    found_rng_tx = True
+            if "[VIRTIO-RNG-STRESS]" in line_str:
+                virtio_lines.append(line_str)
+                if "SUCCESS: 3072 transactions across 3 cycles completed. PMM delta=0, no queue corruption." in line_str:
+                    found_rng_stress = True
             if "BSP] Drzewiasty system plikow PSF gotowy" in line_str:
                 # Kernel dotarl do pelnej inicjalizacji
                 break
@@ -78,19 +82,22 @@ def main():
             proc.kill()
 
     print("\n" + "=" * 60)
-    print("WYNIK TESTU QEMU VIRTIO-PCI I VIRTQUEUE:")
+    print("WYNIK TESTU QEMU VIRTIO-PCI I VIRTIO-RNG:")
     print("=" * 60)
     for l in virtio_lines:
         print(f"  {l}")
 
-    if found_virtio and found_rng_tx:
-        print("\n[SUKCES] Urzadzenie VirtIO Modern PCI zostalo wykryte oraz pomyslnie przeprowadzono transakcje Split VirtQueue (RNG) w QEMU!")
+    if found_virtio and found_virtio_rng and found_rng_stress:
+        print("\n[SUKCES] Urzadzenie VirtIO Modern PCI zostalo wykryte oraz test obciazeniowy VirtIO-RNG (3072 transakcje, 3 cykle, PMM delta=0) zakonczyl sie pelnym sukcesem!")
         sys.exit(0)
     elif not found_virtio:
         print("\n[BLAD] Nie znaleziono wpisow [VIRTIO-PCI] w logu portu szeregowego!", file=sys.stderr)
         sys.exit(1)
+    elif not found_virtio_rng:
+        print("\n[BLAD] Nie znaleziono wpisow inicjalizacji [VIRTIO-RNG] w logu portu szeregowego!", file=sys.stderr)
+        sys.exit(1)
     else:
-        print("\n[BLAD] Nie znaleziono udanej transakcji [VIRTIO-RNG] w logu portu szeregowego!", file=sys.stderr)
+        print("\n[BLAD] Nie znaleziono udanego zakonczenia testu obciazeniowego [VIRTIO-RNG-STRESS] w logu portu szeregowego!", file=sys.stderr)
         sys.exit(1)
 
 if __name__ == "__main__":

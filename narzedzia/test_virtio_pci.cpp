@@ -26,9 +26,12 @@
 #include <cassert>
 #include <vector>
 #include <string>
+#include <chrono>
+#include <thread>
 
 #include "virtio_pci.h"
 #include "virtqueue.h"
+#include "virtio_rng.h"
 
 // ============================================================================
 // FAKE PCI I FAKE MMIO DLA SRODOWISKA TESTOWEGO HOST
@@ -81,6 +84,15 @@ struct MockDeviceState {
     uint16_t selected_queue = 0;
     MockQueue queues[8];
     bool     allow_queue_enable = true;
+    bool     allow_driver_ok = true;
+    bool     ignore_reset = false;
+    bool     rng_auto_process = false;
+    bool     rng_skip_reply = false;
+    int32_t  rng_override_len = -1;
+    int32_t  rng_override_desc_id = -1;
+    uint8_t  rng_fill_byte = 0x5A;
+    bool     rng_dynamic_bytes = false;
+    uint32_t rng_processed_count = 0;
     int      bump_gen_on_read_count = 0;
     bool     always_bump_gen = false;
 
@@ -95,6 +107,15 @@ struct MockDeviceState {
         driver_features = 0;
         device_status = 0;
         accept_features = true;
+        allow_driver_ok = true;
+        ignore_reset = false;
+        rng_auto_process = false;
+        rng_skip_reply = false;
+        rng_override_len = -1;
+        rng_override_desc_id = -1;
+        rng_fill_byte = 0x5A;
+        rng_dynamic_bytes = false;
+        rng_processed_count = 0;
         isr_val = 0;
         notify_bar = 0xFF;
         notify_bar_off = 0;
@@ -126,10 +147,21 @@ struct HostDmaAllocEntry {
 static std::vector<HostDmaAllocEntry> g_host_dma_allocs;
 static uint64_t g_next_dma_phys = 0x10000000ULL;
 static bool g_mock_dma_alloc_fail = false;
+static uint32_t g_mock_dma_alloc_fail_at = 0;
+static uint32_t g_mock_dma_alloc_count = 0;
 
 static uint32_t g_virtqueue_mb_count = 0;
 static uint32_t g_virtqueue_rmb_count = 0;
 static uint32_t g_virtqueue_wmb_count = 0;
+
+static void* host_phys_to_virt(uint64_t paddr) {
+    for (const auto& entry : g_host_dma_allocs) {
+        if (paddr >= entry.paddr && paddr < entry.paddr + entry.pages * 4096) {
+            return static_cast<uint8_t*>(entry.vaddr) + (paddr - entry.paddr);
+        }
+    }
+    return nullptr;
+}
 
 } // namespace
 
@@ -152,7 +184,8 @@ static void reset_virtqueue_counters() {
 }
 
 bool host_dma_alloc(size_t size, size_t alignment, void** vaddr, uint64_t* paddr, size_t* pages) {
-    if (g_mock_dma_alloc_fail) {
+    g_mock_dma_alloc_count++;
+    if (g_mock_dma_alloc_fail || (g_mock_dma_alloc_fail_at > 0 && g_mock_dma_alloc_count == g_mock_dma_alloc_fail_at)) {
         return false;
     }
     if (size == 0) return false;
@@ -256,6 +289,19 @@ void host_klog(const char* msg) {
     }
 }
 
+static uint64_t g_host_mock_time_ns = 0;
+static bool g_host_use_mock_time = false;
+
+uint64_t host_czas_monotoniczny_ns(void) {
+    if (g_host_use_mock_time) {
+        return g_host_mock_time_ns;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count()
+    );
+}
+
 // Hooki MMIO
 uint8_t host_mmio_read8(volatile const void* addr) {
     const uintptr_t a = reinterpret_cast<uintptr_t>(addr);
@@ -307,8 +353,23 @@ void host_mmio_write8(volatile void* addr, uint8_t val) {
         if (a >= base && a < base + g_mock.bars[b].mem.size()) {
             const size_t off = a - base;
             if (b == 0 && off == 20) {
+                if (val == 0) {
+                    if (g_mock.ignore_reset) {
+                        // Sprzet symuluje zawieszenie resetu - ignoruje wpisanie 0
+                        return;
+                    }
+                    for (int i = 0; i < 8; ++i) {
+                        g_mock.queues[i].enable = 0;
+                    }
+                    g_mock.rng_processed_count = 0;
+                    uint16_t zero16 = 0;
+                    std::memcpy(&g_mock.bars[0].mem[0x1C], &zero16, 2);
+                }
                 if ((val & VIRTIO_STATUS_FEATURES_OK) != 0 && !g_mock.accept_features) {
                     val &= ~VIRTIO_STATUS_FEATURES_OK;
+                }
+                if ((val & VIRTIO_STATUS_DRIVER_OK) != 0 && !g_mock.allow_driver_ok) {
+                    val &= ~VIRTIO_STATUS_DRIVER_OK;
                 }
                 g_mock.device_status = val;
             }
@@ -329,6 +390,45 @@ void host_mmio_write16(volatile void* addr, uint16_t val) {
             if (b == g_mock.notify_bar && off >= g_mock.notify_bar_off && off + 2 <= g_mock.notify_bar_off + g_mock.notify_bar_len) {
                 g_mock.last_notified_queue = val;
                 g_mock.notify_count++;
+
+                if (g_mock.rng_auto_process && val == 0 && !g_mock.rng_skip_reply) {
+                    VirtioRngDriver* drv = virtio_rng_get_driver();
+                    if (drv && drv->vq && drv->vq->avail && drv->vq->used && drv->vq->desc) {
+                        VirtQueue* vq = drv->vq;
+                        while (g_mock.rng_processed_count != vq->avail->idx) {
+                            const uint16_t a_idx = g_mock.rng_processed_count & (vq->queue_size - 1U);
+                            const uint16_t desc_id = vq->avail->ring[a_idx];
+                            if (desc_id < vq->queue_size) {
+                                const uint64_t paddr = vq->desc[desc_id].addr;
+                                const uint32_t len = vq->desc[desc_id].len;
+                                void* vaddr = host_phys_to_virt(paddr);
+                                if (vaddr) {
+                                    uint8_t* p = static_cast<uint8_t*>(vaddr);
+                                    for (uint32_t i = 0; i < len; ++i) {
+                                        if (g_mock.rng_dynamic_bytes) {
+                                            uint8_t b_val = static_cast<uint8_t>((g_mock.rng_processed_count * 17 + i * 31 + 7) & 0xFF);
+                                            if (b_val == 0) b_val = 1;
+                                            p[i] = b_val;
+                                        } else {
+                                            p[i] = g_mock.rng_fill_byte;
+                                        }
+                                    }
+                                }
+                                const uint32_t rep_len = (g_mock.rng_override_len >= 0) ?
+                                    static_cast<uint32_t>(g_mock.rng_override_len) : len;
+                                const uint32_t rep_id = (g_mock.rng_override_desc_id >= 0) ?
+                                    static_cast<uint32_t>(g_mock.rng_override_desc_id) : desc_id;
+                                const uint16_t u_idx = vq->used->idx & (vq->queue_size - 1U);
+                                vq->used->ring[u_idx].id = rep_id;
+                                vq->used->ring[u_idx].len = rep_len;
+                                asm volatile("" ::: "memory");
+                                vq->used->idx = static_cast<uint16_t>(vq->used->idx + 1U);
+                                asm volatile("mfence" ::: "memory");
+                            }
+                            g_mock.rng_processed_count++;
+                        }
+                    }
+                }
             }
 
             // Obsluga rejestrow kolejki w common_cfg (BAR 0)
@@ -1650,6 +1750,578 @@ void test_virtqueue_destroy_cleanup() {
 }
 
 // ============================================================================
+// TESTY STEROWNIKA VIRTIO-RNG
+// ============================================================================
+
+static bool setup_mock_rng_device(VirtioPciDevice* dev) {
+    g_mock.reset();
+    setup_pci_hdr(0x1AF4, 0x1044, 0x1AF4, 0x0004);
+    std::vector<CapBuilderEntry> caps = {
+        {VIRTIO_PCI_CAP_COMMON_CFG, 0, 0x000, 56, 0},
+        {VIRTIO_PCI_CAP_NOTIFY_CFG, 0, 0x1000, 0x1000, 4},
+        {VIRTIO_PCI_CAP_ISR_CFG,    0, 0x080, 1,  0}
+    };
+    build_cap_chain(caps);
+    wire_virtio_mmio(0, 0x000, 0x080);
+    g_mock.queues[0].size = 16;
+    return virtio_pci_probe(0, 4, 0, dev, 0);
+}
+
+// ----------------------------------------------------------------------------
+// 31. VirtIO-RNG: Inicjalizacja i czyszczenie zasobow (init i cleanup)
+// ----------------------------------------------------------------------------
+void test_virtio_rng_init_and_cleanup() {
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_rng_device(&dev), "Probe urzadzenia VirtIO-RNG");
+
+    TEST_ASSERT(virtio_rng_init(&dev), "Inicjalizacja sterownika VirtIO-RNG");
+    TEST_ASSERT(virtio_rng_is_ready(), "Sterownik zgloszony jako gotowy");
+
+    VirtioRngDriver* drv = virtio_rng_get_driver();
+    TEST_ASSERT(drv != nullptr, "Dostep do struktury sterownika");
+    TEST_ASSERT(drv->initialized, "Flaga initialized == true");
+    TEST_ASSERT(!drv->has_error, "Flaga has_error == false");
+    TEST_ASSERT((virtio_pci_get_status(&dev) & VIRTIO_STATUS_DRIVER_OK) != 0, "DRIVER_OK ustawiony w kontrolerze");
+    TEST_ASSERT(g_host_dma_allocs.size() == 2, "Przydzielono 2 bufory DMA (kolejka + bufor entropii)");
+
+    virtio_rng_reset();
+    TEST_ASSERT(!virtio_rng_is_ready(), "Sterownik nieaktywny po resecie");
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Wszystkie bufory DMA zwolnione bez wyciekow");
+}
+
+// ----------------------------------------------------------------------------
+// 32. VirtIO-RNG: Pojedynczy udany odczyt bajtow
+// ----------------------------------------------------------------------------
+void test_virtio_rng_read_success() {
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_rng_device(&dev), "Probe urzadzenia VirtIO-RNG");
+    TEST_ASSERT(virtio_rng_init(&dev), "Inicjalizacja sterownika VirtIO-RNG");
+
+    g_mock.rng_auto_process = true;
+    g_mock.rng_fill_byte = 0x42;
+
+    uint8_t buf[16]{};
+    size_t n = virtio_rng_read(buf, sizeof(buf));
+    TEST_ASSERT(n == sizeof(buf), "Odczytano oczekiwana liczbe bajtow (16)");
+    for (size_t i = 0; i < sizeof(buf); ++i) {
+        TEST_ASSERT(buf[i] == 0x42, "Poprawna zawartosc bajtow entropii");
+    }
+
+    VirtioRngDriver* drv = virtio_rng_get_driver();
+    TEST_ASSERT(drv->total_bytes_read == 16, "Statystyka total_bytes_read == 16");
+    TEST_ASSERT(drv->total_requests == 1, "Statystyka total_requests == 1");
+
+    virtio_rng_reset();
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Brak wyciekow DMA po resecie");
+}
+
+// ----------------------------------------------------------------------------
+// 33. VirtIO-RNG: Wielokrotne powtorzone odczyty i brak wyciekow deskryptorow
+// ----------------------------------------------------------------------------
+void test_virtio_rng_read_repeated() {
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_rng_device(&dev), "Probe urzadzenia VirtIO-RNG");
+    TEST_ASSERT(virtio_rng_init(&dev), "Inicjalizacja sterownika VirtIO-RNG");
+
+    g_mock.rng_auto_process = true;
+    g_mock.rng_dynamic_bytes = true;
+
+    VirtioRngDriver* drv = virtio_rng_get_driver();
+    const uint16_t initial_free = virtqueue_get_num_free(drv->vq);
+
+    uint8_t prev_buf[16]{};
+    bool has_prev = false;
+
+    for (int iter = 0; iter < 64; ++iter) {
+        uint8_t buf[16]{};
+        size_t n = virtio_rng_read(buf, sizeof(buf));
+        TEST_ASSERT(n == sizeof(buf), "Kazdy odczyt zwraca pelny rozmiar");
+
+        if (has_prev) {
+            TEST_ASSERT(std::memcmp(buf, prev_buf, sizeof(buf)) != 0, "Kolejne bloki nie moga byc identyczne");
+        }
+        std::memcpy(prev_buf, buf, sizeof(buf));
+        has_prev = true;
+
+        TEST_ASSERT(virtqueue_get_num_free(drv->vq) == initial_free, "Brak wycieku deskryptorow w kolejce");
+    }
+
+    TEST_ASSERT(drv->total_bytes_read == 64 * 16, "Calkowita liczba odczytanych bajtow");
+    TEST_ASSERT(drv->total_requests == 64, "Liczba wykonanych zadan");
+
+    virtio_rng_reset();
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA");
+}
+
+// ----------------------------------------------------------------------------
+// 34. VirtIO-RNG: Czesciowa realizacja zadania (partial completion)
+// ----------------------------------------------------------------------------
+void test_virtio_rng_read_partial() {
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_rng_device(&dev), "Probe urzadzenia VirtIO-RNG");
+    TEST_ASSERT(virtio_rng_init(&dev), "Inicjalizacja sterownika VirtIO-RNG");
+
+    g_mock.rng_auto_process = true;
+    g_mock.rng_override_len = 10; // Urzadzenie zwraca tylko 10 bajtow z zadanych 32
+    g_mock.rng_fill_byte = 0x7E;
+
+    uint8_t buf[32];
+    std::memset(buf, 0xAA, sizeof(buf));
+
+    size_t n = virtio_rng_read_bytes(buf, sizeof(buf), 100);
+    TEST_ASSERT(n == 10, "Zwrócono dokladnie 10 bajtow");
+    for (size_t i = 0; i < 10; ++i) {
+        TEST_ASSERT(buf[i] == 0x7E, "Bajt odczytany z kontrolera poprawny");
+    }
+    for (size_t i = 10; i < 32; ++i) {
+        TEST_ASSERT(buf[i] == 0, "Nieodczytane bajty bufora docelowego wyzerowane (brak ekspozycji starych danych)");
+    }
+
+    TEST_ASSERT(virtio_rng_is_ready(), "Sterownik pozostaje gotowy po poprawnym odczycie czesciowym");
+
+    virtio_rng_reset();
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA");
+}
+
+// ----------------------------------------------------------------------------
+// 35. VirtIO-RNG: Niepoprawna dlugosc zgloszona przez urzadzenie (len > requested)
+// ----------------------------------------------------------------------------
+void test_virtio_rng_read_invalid_len() {
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_rng_device(&dev), "Probe urzadzenia VirtIO-RNG");
+    TEST_ASSERT(virtio_rng_init(&dev), "Inicjalizacja sterownika VirtIO-RNG");
+
+    g_mock.rng_auto_process = true;
+    g_mock.rng_override_len = 100; // Urzadzenie raportuje 100 bajtow (wiecej niz bufor 16 B)
+
+    uint8_t buf[16]{};
+    size_t n = virtio_rng_read_bytes(buf, sizeof(buf), 100000);
+    TEST_ASSERT(n == 0, "Naruszenie dlugosci musi zwrocic 0 bajtow");
+    TEST_ASSERT(!virtio_rng_is_ready(), "Sterownik przechodzi w stan bledu (fail-closed)");
+
+    virtio_rng_reset();
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA po bledzie naruszenia dlugosci");
+}
+
+// ----------------------------------------------------------------------------
+// 36. VirtIO-RNG: Timeout oczekiwania na urzadzenie (brak odpowiedzi sprzetu)
+// ----------------------------------------------------------------------------
+void test_virtio_rng_read_timeout() {
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_rng_device(&dev), "Probe urzadzenia VirtIO-RNG");
+    TEST_ASSERT(virtio_rng_init(&dev), "Inicjalizacja sterownika VirtIO-RNG");
+
+    g_mock.rng_auto_process = true;
+    g_mock.rng_skip_reply = true; // Mock ignoruje zadanie, symulujac zawieszenie urzadzenia
+
+    uint8_t buf[16]{};
+    size_t n = virtio_rng_read_bytes(buf, sizeof(buf), 100);
+    TEST_ASSERT(n == 0, "Timeout musi zwrocic 0 bajtow");
+    TEST_ASSERT(!virtio_rng_is_ready(), "Sterownik wykonuje fail-closed reset po timeoucie");
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA po timeoucie");
+}
+
+// ----------------------------------------------------------------------------
+// 37. VirtIO-RNG: Awaria urzadzenia przy ustawianiu DRIVER_OK (rollback)
+// ----------------------------------------------------------------------------
+void test_virtio_rng_device_failure_driver_ok() {
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_rng_device(&dev), "Probe urzadzenia VirtIO-RNG");
+
+    g_mock.allow_driver_ok = false; // Kontroler odrzuca bit DRIVER_OK
+
+    TEST_ASSERT(!virtio_rng_init(&dev), "Inicjalizacja musi zawiesc w przypadku odrzucenia DRIVER_OK");
+    TEST_ASSERT(!virtio_rng_is_ready(), "Sterownik nie moze byc gotowy");
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Wszystkie zaalokowane bufory wycofane (zero wyciekow)");
+}
+
+// ----------------------------------------------------------------------------
+// 38. VirtIO-RNG: Wyczerpanie deskryptorow kolejki
+// ----------------------------------------------------------------------------
+void test_virtio_rng_queue_exhaustion() {
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_rng_device(&dev), "Probe urzadzenia VirtIO-RNG");
+    TEST_ASSERT(virtio_rng_init(&dev), "Inicjalizacja sterownika VirtIO-RNG");
+
+    VirtioRngDriver* drv = virtio_rng_get_driver();
+    VirtqBuffer dummy_buf{};
+    dummy_buf.phys_addr = drv->dma_physical;
+    dummy_buf.len = 16;
+    dummy_buf.is_write = true;
+
+    while (virtqueue_get_num_free(drv->vq) > 0) {
+        int id = virtqueue_submit(drv->vq, &dummy_buf, 1, nullptr);
+        TEST_ASSERT(id >= 0, "Zgloszenie dummy deskryptora");
+    }
+
+    uint8_t buf[16]{};
+    size_t n = virtio_rng_read(buf, sizeof(buf));
+    TEST_ASSERT(n == 0, "Brak deskryptorow musi bezpiecznie zwrocic 0 bajtow");
+
+    virtio_rng_reset();
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA po wyczerpaniu kolejki");
+}
+
+// ----------------------------------------------------------------------------
+// 39. VirtIO-RNG: Reset i ponowna inicjalizacja na tym samym urzadzeniu
+// ----------------------------------------------------------------------------
+void test_virtio_rng_reset_and_reinit() {
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_rng_device(&dev), "Probe urzadzenia VirtIO-RNG");
+
+    g_mock.rng_auto_process = true;
+    g_mock.rng_dynamic_bytes = true;
+
+    // Cykl 1
+    TEST_ASSERT(virtio_rng_init(&dev), "Init 1");
+    uint8_t buf1[16]{};
+    TEST_ASSERT(virtio_rng_read(buf1, sizeof(buf1)) == sizeof(buf1), "Read 1");
+    virtio_rng_reset();
+    TEST_ASSERT(!virtio_rng_is_ready(), "Niegotowy po resecie 1");
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Brak wyciekow po resecie 1");
+
+    // Cykl 2
+    TEST_ASSERT(virtio_rng_init(&dev), "Init 2");
+    uint8_t buf2[16]{};
+    TEST_ASSERT(virtio_rng_read(buf2, sizeof(buf2)) == sizeof(buf2), "Read 2");
+    virtio_rng_reset();
+    TEST_ASSERT(!virtio_rng_is_ready(), "Niegotowy po resecie 2");
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Brak wyciekow po resecie 2");
+}
+
+// ----------------------------------------------------------------------------
+// 40. VirtIO-RNG: Test obciazeniowy (stress test) z 3 cyklami i 3072 transakcjami
+// ----------------------------------------------------------------------------
+void test_virtio_rng_stress_host() {
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_rng_device(&dev), "Probe urzadzenia VirtIO-RNG");
+
+    g_mock.rng_auto_process = true;
+    g_mock.rng_dynamic_bytes = true;
+
+    TEST_ASSERT(virtio_rng_stress_test(&dev), "virtio_rng_stress_test wykonany pomyslnie");
+    TEST_ASSERT(virtio_rng_is_ready(), "Sterownik pozostaje w stanie gotowosci po stress tescie");
+
+    virtio_rng_reset();
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA po zakonczeniu calego testu obciazeniowego");
+}
+
+// ----------------------------------------------------------------------------
+// 41. VirtIO-RNG: Niezgodnosc ID zwroconego deskryptora (descriptor ID mismatch)
+// ----------------------------------------------------------------------------
+void test_virtio_rng_descriptor_id_mismatch() {
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_rng_device(&dev), "Probe urzadzenia VirtIO-RNG");
+    TEST_ASSERT(virtio_rng_init(&dev), "Inicjalizacja sterownika VirtIO-RNG");
+
+    g_mock.rng_auto_process = true;
+    g_mock.rng_override_desc_id = 99; // Kontroler zwraca falszywe ID deskryptora
+
+    uint8_t buf[16]{};
+    size_t n = virtio_rng_read(buf, sizeof(buf));
+    TEST_ASSERT(n == 0, "Descriptor ID mismatch musi zwrocic 0 bajtow");
+    TEST_ASSERT(!virtio_rng_is_ready(), "Sterownik wykonuje fail-closed reset po niespojnosci deskryptora");
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA po bledzie niespojnosci deskryptora");
+}
+
+// ----------------------------------------------------------------------------
+// 42. VirtIO-RNG: Czyszczenie i rollback zasobow po awarii alokacji DMA podczas init
+// ----------------------------------------------------------------------------
+void test_virtio_rng_cleanup_after_init_failure() {
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_rng_device(&dev), "Probe urzadzenia VirtIO-RNG");
+
+    // Wymuszenie bledu podczas alokacji bufora DMA entropii (alokacja #2)
+    g_mock_dma_alloc_fail_at = 2;
+    g_mock_dma_alloc_count = 0;
+
+    TEST_ASSERT(!virtio_rng_init(&dev), "Inicjalizacja musi zwrocic false przy awarii DMA bufora");
+    TEST_ASSERT(!virtio_rng_is_ready(), "Sterownik nie moze byc aktywny");
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Wszystkie zaalokowane struktury VirtQueue zwolnione (zero wyciekow)");
+
+    g_mock_dma_alloc_fail_at = 0;
+    g_mock_dma_alloc_count = 0;
+}
+
+// ----------------------------------------------------------------------------
+// 43. VirtIO-RNG: Awaria urzadzenia w trakcie dzialania (runtime device failure)
+// ----------------------------------------------------------------------------
+void test_virtio_rng_device_failure_runtime() {
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_rng_device(&dev), "Probe urzadzenia VirtIO-RNG");
+    TEST_ASSERT(virtio_rng_init(&dev), "Inicjalizacja sterownika VirtIO-RNG");
+
+    // Symulacja zgloszenia bledu FAILED przez kontroler
+    virtio_pci_set_status(&dev, VIRTIO_STATUS_FAILED);
+
+    TEST_ASSERT(!virtio_rng_is_ready(), "virtio_rng_is_ready wykrywa stan FAILED kontrolera");
+    uint8_t buf[16]{};
+    size_t n = virtio_rng_read(buf, sizeof(buf));
+    TEST_ASSERT(n == 0, "Odczyt z urzadzenia w stanie bledu zwraca 0 bajtow");
+
+    virtio_rng_reset();
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA po awarii urzadzenia");
+}
+
+// ----------------------------------------------------------------------------
+// 44. VirtIO-RNG: Odrzucenie used.len > submitted buffer length jako korupcji
+// ----------------------------------------------------------------------------
+void test_virtio_rng_oversized_used_len_rejected() {
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_rng_device(&dev), "Probe urzadzenia VirtIO-RNG");
+    TEST_ASSERT(virtio_rng_init(&dev), "Inicjalizacja sterownika VirtIO-RNG");
+
+    g_mock.rng_auto_process = true;
+    // Przypadek 1: Zadanie na 16 B, urzadzenie raportuje 17 B (wiecej niz submitted chunk)
+    g_mock.rng_override_len = 17;
+
+    uint8_t buf[16];
+    std::memset(buf, 0xEE, sizeof(buf));
+
+    size_t n = virtio_rng_read_bytes(buf, sizeof(buf), 100);
+    TEST_ASSERT(n == 0, "Odrzucenie zgloszenia used.len > chunk zwraca 0 bajtow");
+    TEST_ASSERT(!virtio_rng_is_ready(), "Sterownik w stanie bledu (fail-closed) po korupcji dlugosci");
+    for (size_t i = 0; i < sizeof(buf); ++i) {
+        TEST_ASSERT(buf[i] == 0, "Bufor docelowy bezpiecznie wyzerowany po korupcji");
+    }
+
+    virtio_rng_reset();
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA po korupcji dlugosci");
+
+    // Przypadek 2: Zadanie na 64 B (pelny bufor), urzadzenie raportuje 65 B
+    TEST_ASSERT(virtio_rng_init(&dev), "Re-inicjalizacja po resecie");
+    g_mock.rng_override_len = 65;
+
+    uint8_t buf64[64];
+    std::memset(buf64, 0xCC, sizeof(buf64));
+    n = virtio_rng_read(buf64, sizeof(buf64));
+    TEST_ASSERT(n == 0, "used.len > 64 B odrzucone bez clampowania");
+    TEST_ASSERT(!virtio_rng_is_ready(), "Sterownik w stanie bledu");
+    for (size_t i = 0; i < sizeof(buf64); ++i) {
+        TEST_ASSERT(buf64[i] == 0, "Bufor docelowy 64 B bezpiecznie wyzerowany");
+    }
+
+    virtio_rng_reset();
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA");
+}
+
+// ----------------------------------------------------------------------------
+// 45. VirtIO-RNG: Prawdziwy pomocnik secure-zero (nieoptymalizowalny przez kompilator)
+// ----------------------------------------------------------------------------
+void test_virtio_rng_secure_zero_helper() {
+    // 1. Sprawdzenie z zerowym wskaznikiem i zerowa dlugoscia (brak crasha)
+    virtio_rng_secure_zero(nullptr, 128);
+    virtio_rng_secure_zero(nullptr, 0);
+
+    uint8_t dummy = 0x55;
+    virtio_rng_secure_zero(&dummy, 0);
+    TEST_ASSERT(dummy == 0x55, "Dlugosc 0 nie modyfikuje pamieci");
+
+    // 2. Zerowanie roznych rozmiarow (wyrownane i niewyrownane)
+    const size_t test_sizes[] = { 1, 2, 3, 7, 8, 15, 16, 31, 32, 63, 64, 127, 256 };
+    for (size_t sz : test_sizes) {
+        std::vector<uint8_t> mem(sz, 0xA5);
+        virtio_rng_secure_zero(mem.data(), sz);
+        bool all_zero = true;
+        for (size_t i = 0; i < sz; ++i) {
+            if (mem[i] != 0) {
+                all_zero = false;
+                break;
+            }
+        }
+        TEST_ASSERT(all_zero, "Wszystkie bajty bezpiecznie wyzerowane dla danego rozmiaru");
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 46. VirtIO-RNG: Wygaśnięcie deadline w czasie monotonicznym
+// ----------------------------------------------------------------------------
+void test_virtio_rng_timeout_deadline_expiry() {
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_rng_device(&dev), "Probe urzadzenia VirtIO-RNG");
+    TEST_ASSERT(virtio_rng_init(&dev), "Inicjalizacja sterownika VirtIO-RNG");
+
+    g_mock.rng_auto_process = true;
+    g_mock.rng_skip_reply = true; // Symulacja braku odpowiedzi kontrolera
+
+    // Wlaczenie symulowanego zegara monotonicznego
+    g_host_use_mock_time = true;
+    g_host_mock_time_ns = 1000000000ULL; // 1.0 s
+
+    // Zadanie z deadline 10 ms (10,000,000 ns).
+    // Gdy mock time zostanie przestawiony o 20 ms w przod, deadline monotoniczny natychmiast wygasa.
+    g_host_mock_time_ns += 20000000ULL; // 20 ms pozniej
+
+    uint8_t buf[16];
+    std::memset(buf, 0x55, sizeof(buf));
+    size_t n = virtio_rng_read_bytes(buf, sizeof(buf), 10); // 10 ms timeout
+    TEST_ASSERT(n == 0, "Przekroczenie deadline monotonicznego zwraca 0 bajtow");
+    TEST_ASSERT(!virtio_rng_is_ready(), "Fail-closed po przekroczeniu deadline monotonicznego");
+    for (size_t i = 0; i < sizeof(buf); ++i) {
+        TEST_ASSERT(buf[i] == 0, "Bufor docelowy wyzerowany po timeoucie");
+    }
+
+    g_host_use_mock_time = false;
+    virtio_rng_reset();
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA");
+}
+
+// ----------------------------------------------------------------------------
+// 47. VirtIO-RNG: Timeout procedury resetu sprzetowego (brak statusu 0)
+// ----------------------------------------------------------------------------
+void test_virtio_rng_reset_timeout() {
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_rng_device(&dev), "Probe urzadzenia VirtIO-RNG");
+    TEST_ASSERT(virtio_rng_init(&dev), "Inicjalizacja sterownika VirtIO-RNG");
+
+    // Kontroler symuluje zawieszenie: ignoruje wpisanie 0 do device_status
+    g_mock.ignore_reset = true;
+
+    // virtio_rng_reset wykonuje bounded wait z deadline 100 ms
+    bool ok = virtio_rng_reset();
+    TEST_ASSERT(!ok, "virtio_rng_reset musi zwrocic false w przypadku timeoutu resetu");
+    TEST_ASSERT(!virtio_rng_is_ready(), "Sterownik nie moze byc gotowy po nieudanym resecie");
+
+    VirtioRngDriver* drv = virtio_rng_get_driver();
+    TEST_ASSERT(drv->has_error, "Flaga has_error aktywna po nieudanym resecie");
+
+    // Przywrocenie normalnego zachowania resetu, aby zakonczyc test bez wyciekow
+    g_mock.ignore_reset = false;
+    TEST_ASSERT(virtio_rng_reset(), "virtio_rng_reset z potwierdzonym statusem 0 konczy sie sukcesem");
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Pamiec DMA zwolniona po potwierdzonym resecie");
+}
+
+// ----------------------------------------------------------------------------
+// 48. VirtIO-RNG: Pamiec DMA NIE jest zwalniana przed potwierdzonym resetem (kwarantanna)
+// ----------------------------------------------------------------------------
+void test_virtio_rng_dma_not_freed_before_confirmed_reset() {
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_rng_device(&dev), "Probe urzadzenia VirtIO-RNG");
+    TEST_ASSERT(virtio_rng_init(&dev), "Inicjalizacja sterownika VirtIO-RNG");
+
+    // Przed resetem bufor DMA kolejki i entropii sa aktywne
+    TEST_ASSERT(!g_host_dma_allocs.empty(), "Zaalokowane bufory DMA aktywne");
+    const size_t alloc_count_before = g_host_dma_allocs.size();
+
+    // Symulacja awarii resetu urzadzenia: status 0 nigdy sie nie pojawia
+    g_mock.ignore_reset = true;
+    bool reset_res = virtio_rng_reset();
+    TEST_ASSERT(!reset_res, "Reset nieudany ze wzgledu na brak odpowiedzi sprzetu");
+
+    // KWARANTANNA: Pamiec DMA NIE MOZE zostac zwolniona, poniewaz kontroler nie potwierdzil zatrzymania!
+    TEST_ASSERT(!g_host_dma_allocs.empty(), "Kwarantanna DMA: pamiec DMA NIE zostala zwolniona");
+    TEST_ASSERT(g_host_dma_allocs.size() == alloc_count_before, "Liczba alokacji nienaruszona (brak czesciowego uwolnienia)");
+
+    // Teraz sprzet potwierdza reset
+    g_mock.ignore_reset = false;
+    TEST_ASSERT(virtio_rng_reset(), "Ponowny reset z potwierdzeniem statusu 0");
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Wszystkie bufory DMA bezpiecznie zwolnione po potwierdzonym resecie");
+}
+
+// ----------------------------------------------------------------------------
+// 49. VirtIO-RNG: Wspolbiezne odczyty entropii (serializacja blokada sterownika)
+// ----------------------------------------------------------------------------
+void test_virtio_rng_concurrent_requests() {
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_rng_device(&dev), "Probe urzadzenia VirtIO-RNG");
+    TEST_ASSERT(virtio_rng_init(&dev), "Inicjalizacja sterownika VirtIO-RNG");
+
+    g_mock.rng_auto_process = true;
+    g_mock.rng_dynamic_bytes = true;
+
+    constexpr int NUM_THREADS = 4;
+    constexpr int REQS_PER_THREAD = 25;
+    constexpr size_t READ_SIZE = 32;
+
+    std::vector<std::thread> threads;
+    std::vector<bool> thread_success(NUM_THREADS, false);
+
+    for (int t = 0; t < NUM_THREADS; ++t) {
+        threads.emplace_back([t, &thread_success]() {
+            bool ok = true;
+            for (int r = 0; r < REQS_PER_THREAD; ++r) {
+                uint8_t buf[READ_SIZE];
+                std::memset(buf, 0, sizeof(buf));
+                size_t n = virtio_rng_read(buf, sizeof(buf));
+                if (n != READ_SIZE) {
+                    ok = false;
+                    break;
+                }
+                bool has_data = false;
+                for (size_t b = 0; b < READ_SIZE; ++b) {
+                    if (buf[b] != 0) {
+                        has_data = true;
+                        break;
+                    }
+                }
+                if (!has_data) {
+                    ok = false;
+                    break;
+                }
+            }
+            thread_success[t] = ok;
+        });
+    }
+
+    for (auto& th : threads) {
+        th.join();
+    }
+
+    for (int t = 0; t < NUM_THREADS; ++t) {
+        TEST_ASSERT(thread_success[t], "Watek zakonczyl wszystkie zlecenia entropii pomyslnie");
+    }
+
+    VirtioRngDriver* drv = virtio_rng_get_driver();
+    TEST_ASSERT(drv->total_requests == NUM_THREADS * REQS_PER_THREAD,
+                "Calkowita liczba zadan rowna sumie zadan ze wszystkich watkow");
+    TEST_ASSERT(drv->total_bytes_read == NUM_THREADS * REQS_PER_THREAD * READ_SIZE,
+                "Calkowita liczba bajtow rowna sumie pobranych bajtow ze wszystkich watkow");
+
+    virtio_rng_reset();
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA po wspolbieznych odczytach");
+}
+
+// ----------------------------------------------------------------------------
+// 50. VirtIO-RNG: Zachowanie licznikow 64-bitowych i saturacja przy UINT64_MAX
+// ----------------------------------------------------------------------------
+void test_virtio_rng_counter_saturation() {
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_rng_device(&dev), "Probe urzadzenia VirtIO-RNG");
+    TEST_ASSERT(virtio_rng_init(&dev), "Inicjalizacja sterownika VirtIO-RNG");
+
+    g_mock.rng_auto_process = true;
+    g_mock.rng_fill_byte = 0x33;
+
+    VirtioRngDriver* drv = virtio_rng_get_driver();
+    TEST_ASSERT(drv != nullptr, "Dostep do sterownika");
+
+    // 1. Sprawdzenie wartosci powyzej limitu 32-bit (0xFFFFFFFF)
+    drv->total_bytes_read = 0x100000000ULL; // 4 GiB
+    drv->total_requests = 0x200000000ULL;
+
+    uint8_t buf[16]{};
+    size_t n = virtio_rng_read(buf, sizeof(buf));
+    TEST_ASSERT(n == sizeof(buf), "Odczyt powiodl sie");
+    TEST_ASSERT(drv->total_bytes_read == 0x100000000ULL + 16, "Poprawna inkrementacja powyzej 32 bitow");
+    TEST_ASSERT(drv->total_requests == 0x200000000ULL + 1, "Poprawna inkrementacja zadan powyzej 32 bitow");
+
+    // 2. Saturacja total_bytes_read przy UINT64_MAX (brak cichego wrapa do zera)
+    drv->total_bytes_read = UINT64_MAX - 5;
+    n = virtio_rng_read(buf, sizeof(buf));
+    TEST_ASSERT(n == sizeof(buf), "Odczyt 16 bajtow przy granicy saturacji");
+    TEST_ASSERT(drv->total_bytes_read == UINT64_MAX, "total_bytes_read osiaga saturacje przy UINT64_MAX");
+
+    // 3. Saturacja total_requests przy UINT64_MAX
+    drv->total_requests = UINT64_MAX;
+    n = virtio_rng_read(buf, sizeof(buf));
+    TEST_ASSERT(n == sizeof(buf), "Odczyt przy saturacji requests");
+    TEST_ASSERT(drv->total_requests == UINT64_MAX, "total_requests pozostaje na UINT64_MAX bez overflow");
+
+    virtio_rng_reset();
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA");
+}
+
+// ============================================================================
 // PUNKT WEJSCIA TESTOW
 // ============================================================================
 
@@ -1688,6 +2360,26 @@ int main() {
     RUN_TEST(test_virtqueue_ring_index_wraparound);
     RUN_TEST(test_virtqueue_kick_and_suppression);
     RUN_TEST(test_virtqueue_destroy_cleanup);
+    RUN_TEST(test_virtio_rng_init_and_cleanup);
+    RUN_TEST(test_virtio_rng_read_success);
+    RUN_TEST(test_virtio_rng_read_repeated);
+    RUN_TEST(test_virtio_rng_read_partial);
+    RUN_TEST(test_virtio_rng_read_invalid_len);
+    RUN_TEST(test_virtio_rng_read_timeout);
+    RUN_TEST(test_virtio_rng_device_failure_driver_ok);
+    RUN_TEST(test_virtio_rng_descriptor_id_mismatch);
+    RUN_TEST(test_virtio_rng_cleanup_after_init_failure);
+    RUN_TEST(test_virtio_rng_device_failure_runtime);
+    RUN_TEST(test_virtio_rng_queue_exhaustion);
+    RUN_TEST(test_virtio_rng_reset_and_reinit);
+    RUN_TEST(test_virtio_rng_stress_host);
+    RUN_TEST(test_virtio_rng_oversized_used_len_rejected);
+    RUN_TEST(test_virtio_rng_secure_zero_helper);
+    RUN_TEST(test_virtio_rng_timeout_deadline_expiry);
+    RUN_TEST(test_virtio_rng_reset_timeout);
+    RUN_TEST(test_virtio_rng_dma_not_freed_before_confirmed_reset);
+    RUN_TEST(test_virtio_rng_concurrent_requests);
+    RUN_TEST(test_virtio_rng_counter_saturation);
 
     std::printf("========================================================\n");
     std::printf("PODSUMOWANIE: PASS=%d, FAIL=%d\n", g_pass_count, g_fail_count);

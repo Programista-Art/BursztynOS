@@ -216,10 +216,6 @@ int virtqueue_pop_used(VirtQueue* vq, void** out_cookie, uint32_t* out_len);
 uint16_t virtqueue_get_size(const VirtQueue* vq);
 uint16_t virtqueue_get_num_free(const VirtQueue* vq);
 
-/*
- * Testowa transakcja sprzetowa VirtIO-RNG (uzywana przez jadro w QEMU do walidacji):
- */
-bool virtqueue_test_rng(VirtioPciDevice* dev);
 
 /*
  * Polskie aliasy ABI zgodne ze stylem Bursztyn OS:

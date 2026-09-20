@@ -45,6 +45,7 @@ extern "C" void odblokuj_ekran();
 #include "motyw.h"
 #include "virtio_pci.h"
 #include "virtqueue.h"
+#include "virtio_rng.h"
 
 #ifndef BURSZTYN_DEBUG_NET_SELFTEST
 #define BURSZTYN_DEBUG_NET_SELFTEST 0
@@ -2227,10 +2228,10 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     blokowy_inicjalizuj();
     inicjalizuj_kontroler_ahci();
     virtio_pci_inicjalizuj();
-    for (uint32_t i = 0; i < virtio_pci_liczba_urzadzen(); ++i) {
-        VirtioPciDevice* vdev = virtio_pci_pobierz_urzadzenie(i);
-        if (vdev && vdev->virtio_id == VIRTIO_ID_RNG) {
-            virtqueue_test_rng(vdev);
+    if (virtio_rng_probe_and_init()) {
+        VirtioRngDriver* rng_drv = virtio_rng_get_driver();
+        if (rng_drv && rng_drv->dev) {
+            virtio_rng_stress_test(rng_drv->dev);
         }
     }
 
