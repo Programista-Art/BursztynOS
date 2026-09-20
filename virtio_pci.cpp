@@ -319,6 +319,14 @@ bool virtio_pci_negotiate_features(VirtioPciDevice* dev, uint64_t requested_feat
     dev->driver_features = (dev->device_features & requested_features) | VIRTIO_F_VERSION_1;
     virtio_pci_write_driver_features(dev, dev->driver_features);
 
+    if ((dev->driver_features & VIRTIO_F_NOTIFICATION_DATA) != 0) {
+        if (!virtio_pci_validate_notify_multiplier(dev->notify_multiplier, true)) {
+            klog_impl("[VIRTIO-PCI] initialization rejected: notify multiplier incompatible with VIRTIO_F_NOTIFICATION_DATA");
+            virtio_pci_set_status(dev, VIRTIO_STATUS_FAILED);
+            return false;
+        }
+    }
+
     // Ustawienie FEATURES_OK
     uint8_t status = virtio_pci_get_status(dev);
     status |= VIRTIO_STATUS_FEATURES_OK;
@@ -399,6 +407,33 @@ void virtio_pci_set_queue_device(VirtioPciDevice* dev, uint64_t device_phys) {
     virtio_write32(p + 1, static_cast<uint32_t>(device_phys >> 32));
 }
 
+uint64_t virtio_pci_get_queue_desc(const VirtioPciDevice* dev) {
+    if (!dev || !dev->common_cfg) return 0;
+    volatile const uint32_t* p = reinterpret_cast<volatile const uint32_t*>(
+        reinterpret_cast<volatile const uint8_t*>(dev->common_cfg) + 0x20);
+    const uint64_t low = virtio_read32(p);
+    const uint64_t high = virtio_read32(p + 1);
+    return low | (high << 32);
+}
+
+uint64_t virtio_pci_get_queue_driver(const VirtioPciDevice* dev) {
+    if (!dev || !dev->common_cfg) return 0;
+    volatile const uint32_t* p = reinterpret_cast<volatile const uint32_t*>(
+        reinterpret_cast<volatile const uint8_t*>(dev->common_cfg) + 0x28);
+    const uint64_t low = virtio_read32(p);
+    const uint64_t high = virtio_read32(p + 1);
+    return low | (high << 32);
+}
+
+uint64_t virtio_pci_get_queue_device(const VirtioPciDevice* dev) {
+    if (!dev || !dev->common_cfg) return 0;
+    volatile const uint32_t* p = reinterpret_cast<volatile const uint32_t*>(
+        reinterpret_cast<volatile const uint8_t*>(dev->common_cfg) + 0x30);
+    const uint64_t low = virtio_read32(p);
+    const uint64_t high = virtio_read32(p + 1);
+    return low | (high << 32);
+}
+
 volatile uint16_t* virtio_pci_notify_address(const VirtioPciDevice* dev, uint16_t queue_notify_off) {
     if (!dev || !dev->notify_base) return nullptr;
     const uint64_t rel = static_cast<uint64_t>(queue_notify_off) * dev->notify_multiplier;
@@ -460,6 +495,42 @@ void virtio_pci_write_device_config16(VirtioPciDevice* dev, uint32_t offset, uin
 void virtio_pci_write_device_config32(VirtioPciDevice* dev, uint32_t offset, uint32_t val) {
     if (!dev || !dev->device_cfg || offset > dev->device_cfg_len - sizeof(uint32_t)) return;
     virtio_write32(dev->device_cfg + offset, val);
+}
+
+bool virtio_pci_validate_notify_multiplier(uint32_t multiplier, bool has_notification_data) {
+    if (multiplier == 0) return true;
+    if (multiplier > 0x100000) return false;
+    if ((multiplier & (multiplier - 1U)) != 0) return false;
+    if (has_notification_data) {
+        return (multiplier % 4U == 0);
+    } else {
+        return (multiplier % 2U == 0);
+    }
+}
+
+bool virtio_pci_read_device_config_consistent(const VirtioPciDevice* dev,
+                                              uint32_t offset,
+                                              void* dst,
+                                              uint32_t length,
+                                              uint32_t max_retries) {
+    if (!dev || !dev->device_cfg || !dst || length == 0) return false;
+    if (offset > dev->device_cfg_len || length > dev->device_cfg_len - offset) return false;
+    if (max_retries == 0) max_retries = 16;
+
+    uint8_t* out = static_cast<uint8_t*>(dst);
+    for (uint32_t r = 0; r < max_retries; ++r) {
+        const uint8_t gen_before = virtio_pci_get_config_generation(dev);
+        asm volatile("" ::: "memory");
+        for (uint32_t i = 0; i < length; ++i) {
+            out[i] = virtio_pci_read_device_config8(dev, offset + i);
+        }
+        asm volatile("" ::: "memory");
+        const uint8_t gen_after = virtio_pci_get_config_generation(dev);
+        if (gen_before == gen_after) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void virtio_pci_cleanup(VirtioPciDevice* dev) {
@@ -586,13 +657,8 @@ bool virtio_pci_probe(uint8_t bus, uint8_t slot, uint8_t func,
                             return false;
                         }
                         const uint32_t multiplier = pci_read32(bus, slot, func, cap_ptr + 16);
-                        // Multiplier musi byc 0 lub potega dwojki (VirtIO 1.0 sec 4.1.4.4)
-                        if (multiplier != 0 && (multiplier & (multiplier - 1)) != 0) {
-                            klog_impl("[VIRTIO-PCI] initialization rejected: notify multiplier is not power of 2");
-                            return false;
-                        }
-                        if (multiplier > 0x100000) {
-                            klog_impl("[VIRTIO-PCI] initialization rejected: notify multiplier unreasonably large");
+                        if (!virtio_pci_validate_notify_multiplier(multiplier, false)) {
+                            klog_impl("[VIRTIO-PCI] initialization rejected: invalid notify multiplier");
                             return false;
                         }
                         cap_notify.cap.cap_vndr = cap_vndr;

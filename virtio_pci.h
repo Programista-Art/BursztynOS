@@ -244,6 +244,9 @@ uint16_t virtio_pci_get_queue_notify_off(const VirtioPciDevice* dev);
 void virtio_pci_set_queue_desc(VirtioPciDevice* dev, uint64_t desc_phys);
 void virtio_pci_set_queue_driver(VirtioPciDevice* dev, uint64_t driver_phys);
 void virtio_pci_set_queue_device(VirtioPciDevice* dev, uint64_t device_phys);
+uint64_t virtio_pci_get_queue_desc(const VirtioPciDevice* dev);
+uint64_t virtio_pci_get_queue_driver(const VirtioPciDevice* dev);
+uint64_t virtio_pci_get_queue_device(const VirtioPciDevice* dev);
 
 /*
  * Obliczanie adresu powiadomien i notyfikacja kolejki:
@@ -271,6 +274,23 @@ uint64_t virtio_pci_read_device_config64(const VirtioPciDevice* dev, uint32_t of
 void virtio_pci_write_device_config8(VirtioPciDevice* dev, uint32_t offset, uint8_t val);
 void virtio_pci_write_device_config16(VirtioPciDevice* dev, uint32_t offset, uint16_t val);
 void virtio_pci_write_device_config32(VirtioPciDevice* dev, uint32_t offset, uint32_t val);
+
+/*
+ * Odczytuje spojny blok konfiguracji specyficznej dla urzadzenia z uzyciem config_generation retry.
+ * Zwraca true jesli udalo sie odczytac bez zmian pokolenia w trakcie kopiowania.
+ */
+bool virtio_pci_read_device_config_consistent(const VirtioPciDevice* dev,
+                                              uint32_t offset,
+                                              void* dst,
+                                              uint32_t length,
+                                              uint32_t max_retries = 8);
+
+/*
+ * Walidacja mnoznika notify_off_multiplier wedlug specyfikacji VirtIO:
+ *  - bez VIRTIO_F_NOTIFICATION_DATA: 0 lub parzysta potega dwojki (2, 4, 8, ...)
+ *  - z VIRTIO_F_NOTIFICATION_DATA: 0 lub potega dwojki bedaca wielokrotnoscia 4 (4, 8, 16, ...)
+ */
+bool virtio_pci_validate_notify_multiplier(uint32_t multiplier, bool has_notification_data);
 
 /*
  * Czytelna nazwa urzadzenia VirtIO na podstawie identyfikatora:

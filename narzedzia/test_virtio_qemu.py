@@ -45,6 +45,7 @@ def main():
     )
 
     found_virtio = False
+    found_rng_tx = False
     virtio_lines = []
     start_time = time.time()
     timeout = 45 # sekund
@@ -62,6 +63,10 @@ def main():
             if "[VIRTIO-PCI]" in line_str:
                 found_virtio = True
                 virtio_lines.append(line_str)
+            if "[VIRTIO-RNG]" in line_str:
+                virtio_lines.append(line_str)
+                if "transaction complete: DRIVER_OK verified" in line_str:
+                    found_rng_tx = True
             if "BSP] Drzewiasty system plikow PSF gotowy" in line_str:
                 # Kernel dotarl do pelnej inicjalizacji
                 break
@@ -73,16 +78,19 @@ def main():
             proc.kill()
 
     print("\n" + "=" * 60)
-    print("WYNIK TESTU QEMU VIRTIO-PCI:")
+    print("WYNIK TESTU QEMU VIRTIO-PCI I VIRTQUEUE:")
     print("=" * 60)
     for l in virtio_lines:
         print(f"  {l}")
 
-    if found_virtio:
-        print("\n[SUKCES] Urzadzenie VirtIO Modern PCI zostalo poprawnie wykryte i zainicjalizowane przez jadro Bursztyn OS!")
+    if found_virtio and found_rng_tx:
+        print("\n[SUKCES] Urzadzenie VirtIO Modern PCI zostalo wykryte oraz pomyslnie przeprowadzono transakcje Split VirtQueue (RNG) w QEMU!")
         sys.exit(0)
-    else:
+    elif not found_virtio:
         print("\n[BLAD] Nie znaleziono wpisow [VIRTIO-PCI] w logu portu szeregowego!", file=sys.stderr)
+        sys.exit(1)
+    else:
+        print("\n[BLAD] Nie znaleziono udanej transakcji [VIRTIO-RNG] w logu portu szeregowego!", file=sys.stderr)
         sys.exit(1)
 
 if __name__ == "__main__":

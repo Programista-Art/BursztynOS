@@ -44,6 +44,7 @@ extern "C" void odblokuj_ekran();
 #include "stos_jadra.h"
 #include "motyw.h"
 #include "virtio_pci.h"
+#include "virtqueue.h"
 
 #ifndef BURSZTYN_DEBUG_NET_SELFTEST
 #define BURSZTYN_DEBUG_NET_SELFTEST 0
@@ -2226,6 +2227,12 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     blokowy_inicjalizuj();
     inicjalizuj_kontroler_ahci();
     virtio_pci_inicjalizuj();
+    for (uint32_t i = 0; i < virtio_pci_liczba_urzadzen(); ++i) {
+        VirtioPciDevice* vdev = virtio_pci_pobierz_urzadzenie(i);
+        if (vdev && vdev->virtio_id == VIRTIO_ID_RNG) {
+            virtqueue_test_rng(vdev);
+        }
+    }
 
     /* BMP pozostaje fallbackiem po inicjalizacji BSP2. */
 
