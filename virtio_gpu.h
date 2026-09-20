@@ -93,6 +93,15 @@ enum VirtioGpuFormat : uint32_t {
     VIRTIO_GPU_FORMAT_X8B8G8R8_UNORM = 68U
 };
 
+#ifdef __cplusplus
+static_assert(VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM == 1U, "VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM must be 1 per VirtIO spec");
+static_assert(VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM == 2U, "VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM must be 2 per VirtIO spec");
+static_assert(VIRTIO_GPU_FORMAT_A8R8G8B8_UNORM == 3U, "VIRTIO_GPU_FORMAT_A8R8G8B8_UNORM must be 3 per VirtIO spec");
+static_assert(VIRTIO_GPU_FORMAT_X8R8G8B8_UNORM == 4U, "VIRTIO_GPU_FORMAT_X8R8G8B8_UNORM must be 4 per VirtIO spec");
+static_assert(VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM == 67U, "VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM must be 67 per VirtIO spec");
+static_assert(VIRTIO_GPU_FORMAT_X8B8G8R8_UNORM == 68U, "VIRTIO_GPU_FORMAT_X8B8G8R8_UNORM must be 68 per VirtIO spec");
+#endif
+
 /* =========================================================================
  * 4. STRUKTURY PROTOKOLU VIRTIO-GPU
  * ========================================================================= */
@@ -314,6 +323,8 @@ bool virtio_gpu_cmd_resource_unref(VirtioGpuDriver* drv, uint32_t resource_id);
 bool virtio_gpu_transfer_and_flush(VirtioGpuDriver* drv, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
 bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t height);
 bool virtio_gpu_render_test_pattern(VirtioGpuDriver* drv);
+bool virtio_gpu_test_teardown_reinit(VirtioGpuDriver* drv);
+bool virtio_gpu_stress_dirty_rectangles(VirtioGpuDriver* drv);
 
 #ifdef __cplusplus
 }

@@ -193,6 +193,7 @@ struct MockDeviceState {
     uint32_t gpu_display_w = 1280;
     uint32_t gpu_display_h = 800;
     uint32_t gpu_processed_count = 0;
+    uint32_t gpu_last_nr_entries = 0;
     std::vector<uint32_t> gpu_commands_seen;
 
     // Stan MSI-X:
@@ -260,6 +261,7 @@ struct MockDeviceState {
         gpu_display_w = 1280;
         gpu_display_h = 800;
         gpu_processed_count = 0;
+        gpu_last_nr_entries = 0;
         gpu_commands_seen.clear();
         isr_val = 0;
         notify_bar = 0xFF;
@@ -295,6 +297,13 @@ static bool g_mock_dma_alloc_fail = false;
 static uint32_t g_mock_dma_alloc_fail_at = 0;
 static uint32_t g_mock_dma_alloc_count = 0;
 
+struct HostFbAllocEntry {
+    void* vaddr;
+    size_t page_count;
+    std::vector<uint64_t> phys_frames;
+};
+static std::vector<HostFbAllocEntry> g_host_fb_allocs;
+
 static uint32_t g_virtqueue_mb_count = 0;
 static uint32_t g_virtqueue_rmb_count = 0;
 static uint32_t g_virtqueue_wmb_count = 0;
@@ -303,6 +312,13 @@ static void* host_phys_to_virt(uint64_t paddr) {
     for (const auto& entry : g_host_dma_allocs) {
         if (paddr >= entry.paddr && paddr < entry.paddr + entry.pages * 4096) {
             return static_cast<uint8_t*>(entry.vaddr) + (paddr - entry.paddr);
+        }
+    }
+    for (const auto& entry : g_host_fb_allocs) {
+        for (size_t i = 0; i < entry.phys_frames.size(); ++i) {
+            if (paddr >= entry.phys_frames[i] && paddr < entry.phys_frames[i] + 4096) {
+                return static_cast<uint8_t*>(entry.vaddr) + (i * 4096) + (paddr - entry.phys_frames[i]);
+            }
         }
     }
     return nullptr;
@@ -361,6 +377,52 @@ void host_dma_free(void* vaddr, uint64_t paddr, size_t pages) {
         if (it->vaddr == vaddr) {
             std::free(vaddr);
             g_host_dma_allocs.erase(it);
+            return;
+        }
+    }
+    if (vaddr) {
+        std::free(vaddr);
+    }
+}
+
+bool host_fb_alloc(size_t total_bytes, void** out_vaddr, void** out_frames, size_t max_pages, size_t* out_page_count) {
+    if (!out_vaddr || !out_frames || !out_page_count || total_bytes == 0) return false;
+    const size_t num_pages = (total_bytes + 4095) / 4096;
+    if (num_pages > max_pages) return false;
+
+    void* ptr = nullptr;
+    if (posix_memalign(&ptr, 4096, num_pages * 4096) != 0) {
+        return false;
+    }
+    std::memset(ptr, 0, num_pages * 4096);
+
+    HostFbAllocEntry entry;
+    entry.vaddr = ptr;
+    entry.page_count = num_pages;
+
+    static uint64_t s_fb_phys = 0x20000000ULL;
+    for (size_t i = 0; i < num_pages; ++i) {
+        if (i > 0 && (i % 4) == 0) {
+            s_fb_phys += 0x10000ULL; // Celowa luka fizyczna co 4 strony dla weryfikacji scatter-gather
+        }
+        entry.phys_frames.push_back(s_fb_phys);
+        out_frames[i] = reinterpret_cast<void*>(s_fb_phys);
+        s_fb_phys += 4096;
+    }
+
+    g_host_fb_allocs.push_back(entry);
+    *out_vaddr = ptr;
+    *out_page_count = num_pages;
+    return true;
+}
+
+void host_fb_free(void* vaddr, void** frames, size_t page_count) {
+    (void)frames;
+    (void)page_count;
+    for (auto it = g_host_fb_allocs.begin(); it != g_host_fb_allocs.end(); ++it) {
+        if (it->vaddr == vaddr) {
+            std::free(vaddr);
+            g_host_fb_allocs.erase(it);
             return;
         }
     }
@@ -521,6 +583,8 @@ void host_mmio_write8(volatile void* addr, uint8_t val) {
                     }
                     g_mock.rng_processed_count = 0;
                     g_mock.blk_processed_count = 0;
+                    g_mock.net_tx_processed_count = 0;
+                    g_mock.gpu_processed_count = 0;
                     uint16_t zero16 = 0;
                     std::memcpy(&g_mock.bars[0].mem[0x1C], &zero16, 2);
                 }
@@ -810,6 +874,12 @@ void host_mmio_write16(volatile void* addr, uint16_t val) {
                                         dresp->pmodes[0].r.height = g_mock.gpu_display_h;
                                         used_len = sizeof(VirtioGpuRespDisplayInfo);
                                     } else {
+                                        if (req_hdr->type == VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING) {
+                                            if (req_len >= sizeof(VirtioGpuResourceAttachBacking)) {
+                                                const auto* att = static_cast<const VirtioGpuResourceAttachBacking*>(vreq);
+                                                g_mock.gpu_last_nr_entries = att->nr_entries;
+                                            }
+                                        }
                                         std::memset(resp_hdr, 0, sizeof(VirtioGpuCtrlHdr));
                                         resp_hdr->type = (g_mock.gpu_override_resp_type > 0) ? g_mock.gpu_override_resp_type : VIRTIO_GPU_RESP_OK_NODATA;
                                         used_len = sizeof(VirtioGpuCtrlHdr);
@@ -4239,6 +4309,7 @@ void test_virtio_gpu_init_and_cleanup() {
 
     TEST_ASSERT(virtio_gpu_reset(drv), "Reset i sprzatanie urzadzenia");
     TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA po resecie");
+    TEST_ASSERT(g_host_fb_allocs.empty(), "Zero wyciekow stron bufora ramki po resecie");
     virtio_gpu_reset_all();
 }
 
@@ -4550,6 +4621,131 @@ void test_virtio_gpu_msix_operation() {
     virtio_gpu_reset_all();
 }
 
+// ----------------------------------------------------------------------------
+// 104. VirtIO-GPU: Weryfikacja stalych formatow pikseli ze specyfikacja VirtIO
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_format_constants() {
+    TEST_ASSERT(VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM == 1U, "VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM == 1");
+    TEST_ASSERT(VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM == 2U, "VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM == 2");
+    TEST_ASSERT(VIRTIO_GPU_FORMAT_A8R8G8B8_UNORM == 3U, "VIRTIO_GPU_FORMAT_A8R8G8B8_UNORM == 3");
+    TEST_ASSERT(VIRTIO_GPU_FORMAT_X8R8G8B8_UNORM == 4U, "VIRTIO_GPU_FORMAT_X8R8G8B8_UNORM == 4");
+    TEST_ASSERT(VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM == 67U, "VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM == 67");
+    TEST_ASSERT(VIRTIO_GPU_FORMAT_X8B8G8R8_UNORM == 68U, "VIRTIO_GPU_FORMAT_X8B8G8R8_UNORM == 68");
+}
+
+// ----------------------------------------------------------------------------
+// 105. VirtIO-GPU: Bufor ramki z nieciaglych stron fizycznych i koalescencja SG
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_noncontiguous_backing() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_gpu_device(&dev, 1024, 768), "Probe GPU 1024x768");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(drv != nullptr, "drv != nullptr");
+    TEST_ASSERT(drv->fb_vaddr != nullptr, "fb_vaddr != nullptr");
+    TEST_ASSERT(drv->fb_pages == 768, "fb_pages == 768");
+    // W host_fb_alloc co 4 strony wystepuje luka fizyczna, wiec 768 / 4 = 192 wpisy SG
+    TEST_ASSERT(drv->nr_entries > 1, "nr_entries > 1 dla nieciaglych stron");
+    TEST_ASSERT(drv->nr_entries == 192, "nr_entries == 192 (skoki co 4 strony)");
+    TEST_ASSERT(drv->nr_entries == g_mock.gpu_last_nr_entries, "g_mock zarejestrowal poprawny nr_entries");
+    TEST_ASSERT(!drv->is_contiguous_dma, "is_contiguous_dma == false");
+
+    // Sprawdz renderowanie wzorca na nieciaglym buforze ramki
+    TEST_ASSERT(virtio_gpu_render_test_pattern(drv), "Render test pattern");
+
+    TEST_ASSERT(virtio_gpu_reset(drv), "Reset urzadzenia");
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA");
+    TEST_ASSERT(g_host_fb_allocs.empty(), "Zero wyciekow stron bufora ramki");
+    virtio_gpu_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 106. VirtIO-GPU: Rygorystyczna walidacja used_len odpowiedzi sprzetu
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_used_len_validation() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(drv != nullptr, "drv != nullptr");
+
+    // Przypadek 1: used_len = 0 (< sizeof(VirtioGpuCtrlHdr))
+    g_mock.gpu_override_len = 0;
+    TEST_ASSERT(!virtio_gpu_cmd_resource_flush(drv, 1, 0, 0, 100, 100), "Odrzucenie used_len == 0");
+    TEST_ASSERT(drv->has_error, "drv->has_error == true po znieksztalconym used_len");
+    g_mock.gpu_override_len = -1;
+
+    // Reset i reinit po bledzie
+    TEST_ASSERT(virtio_gpu_reset(drv), "Reset po bledzie used_len");
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Re-probe GPU");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Reinit GPU");
+    drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(!drv->has_error, "drv->has_error == false po reinit");
+
+    // Przypadek 2: used_len = 12 (< 24 bajty naglowka VirtioGpuCtrlHdr)
+    g_mock.gpu_override_len = 12;
+    TEST_ASSERT(!virtio_gpu_cmd_transfer_to_host_2d(drv, 1, 0, 0, 50, 50), "Odrzucenie used_len == 12 (< 24)");
+    TEST_ASSERT(drv->has_error, "drv->has_error == true po used_len < 24");
+    g_mock.gpu_override_len = -1;
+
+    // Reset i reinit
+    TEST_ASSERT(virtio_gpu_reset(drv), "Reset po used_len < 24");
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Re-probe GPU 2");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Reinit GPU");
+    drv = virtio_gpu_get_driver(0);
+
+    // Przypadek 3: used_len > resp_size (np. 1000 bajtow przy oczekiwanych 24 bajtach)
+    g_mock.gpu_override_len = 1000;
+    TEST_ASSERT(!virtio_gpu_cmd_resource_flush(drv, 1, 0, 0, 100, 100), "Odrzucenie used_len > resp_size");
+    TEST_ASSERT(drv->has_error, "drv->has_error == true po used_len > resp_size");
+    g_mock.gpu_override_len = -1;
+
+    virtio_gpu_reset(drv);
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA");
+    TEST_ASSERT(g_host_fb_allocs.empty(), "Zero wyciekow FB");
+    virtio_gpu_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 107. VirtIO-GPU: Propagacja i obsluga wszystkich kodow bledu urzadzenia
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_error_responses() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(drv != nullptr, "drv != nullptr");
+
+    const uint32_t error_codes[] = {
+        VIRTIO_GPU_RESP_ERR_UNSPEC,
+        VIRTIO_GPU_RESP_ERR_OUT_OF_MEMORY,
+        VIRTIO_GPU_RESP_ERR_INVALID_SCANOUT_ID,
+        VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID,
+        VIRTIO_GPU_RESP_ERR_INVALID_CONTEXT_ID,
+        VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER
+    };
+
+    for (uint32_t err : error_codes) {
+        g_mock.gpu_override_resp_type = err;
+        const uint64_t prev_err_cnt = drv->error_count;
+        bool ok = virtio_gpu_cmd_resource_flush(drv, 1, 0, 0, 10, 10);
+        TEST_ASSERT(!ok, "Polecenie odrzucone dla kodu bledu");
+        TEST_ASSERT(drv->error_count > prev_err_cnt, "Zwiekszony licznik bledow");
+    }
+
+    g_mock.gpu_override_resp_type = 0;
+    TEST_ASSERT(virtio_gpu_reset(drv), "Reset po testach kodow bledu");
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA");
+    TEST_ASSERT(g_host_fb_allocs.empty(), "Zero wyciekow FB");
+    virtio_gpu_reset_all();
+}
+
 // ============================================================================
 // PUNKT WEJSCIA TESTOW
 // ============================================================================
@@ -4670,6 +4866,10 @@ int main() {
     RUN_TEST(test_virtio_gpu_resource_teardown_ordering);
     RUN_TEST(test_virtio_gpu_repeated_init_reset);
     RUN_TEST(test_virtio_gpu_msix_operation);
+    RUN_TEST(test_virtio_gpu_format_constants);
+    RUN_TEST(test_virtio_gpu_noncontiguous_backing);
+    RUN_TEST(test_virtio_gpu_used_len_validation);
+    RUN_TEST(test_virtio_gpu_error_responses);
 
     std::printf("========================================================\n");
     std::printf("PODSUMOWANIE: PASS=%d, FAIL=%d\n", g_pass_count, g_fail_count);

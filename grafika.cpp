@@ -3752,26 +3752,6 @@ bool grafika_zmien_sprzet(const TrybEkranu&t){
         VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
         if(!drv)return false;
         if(drv->fb_width==t.szerokosc&&drv->fb_height==t.wysokosc)return true;
-        if(drv->scanout_set){
-            virtio_gpu_cmd_set_scanout(drv,drv->scanout_id,0,0,0,0,0);
-            drv->scanout_set=false;
-        }
-        if(drv->backing_attached){
-            virtio_gpu_cmd_resource_detach_backing(drv,drv->resource_id);
-            drv->backing_attached=false;
-        }
-        if(drv->resource_created){
-            virtio_gpu_cmd_resource_unref(drv,drv->resource_id);
-            drv->resource_created=false;
-        }
-        if(drv->fb_vaddr){
-            DmaBuffer dma{};
-            dma.virtual_address=drv->fb_vaddr;
-            dma.physical_address=drv->mem_entries?drv->mem_entries[0].addr:0;
-            dma.page_count=drv->fb_pages;
-            dma_release(&dma);
-            drv->fb_vaddr=nullptr;
-        }
         return virtio_gpu_setup_framebuffer(drv,t.szerokosc,t.wysokosc);
     }
     if(ekran_caps.mozna_zmienic_runtime)return bochs_ustaw_tryb(t);

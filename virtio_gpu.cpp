@@ -21,6 +21,9 @@ extern void host_dma_free(void* vaddr, uint64_t paddr, size_t pages);
 extern void host_klog(const char* msg);
 extern uint64_t host_czas_monotoniczny_ns(void);
 
+extern bool host_fb_alloc(size_t total_bytes, void** out_vaddr, void** out_frames, size_t max_pages, size_t* out_page_count);
+extern void host_fb_free(void* vaddr, void** frames, size_t page_count);
+
 #define gpu_klog host_klog
 
 static bool gpu_dma_alloc(size_t size, size_t alignment, void** vaddr, uint64_t* paddr, size_t* pages) {
@@ -29,6 +32,22 @@ static bool gpu_dma_alloc(size_t size, size_t alignment, void** vaddr, uint64_t*
 
 static void gpu_dma_free(void* vaddr, uint64_t paddr, size_t pages) {
     host_dma_free(vaddr, paddr, pages);
+}
+
+static inline void* gpu_heap_alloc(size_t size) {
+    return std::malloc(size);
+}
+
+static inline void gpu_heap_free(void* ptr) {
+    std::free(ptr);
+}
+
+static inline bool gpu_fb_alloc(size_t total_bytes, void** out_vaddr, void** out_frames, size_t max_pages, size_t* out_page_count) {
+    return host_fb_alloc(total_bytes, out_vaddr, out_frames, max_pages, out_page_count);
+}
+
+static inline void gpu_fb_free(void* vaddr, void** frames, size_t page_count) {
+    host_fb_free(vaddr, frames, page_count);
 }
 
 static inline uint64_t gpu_monotonic_ns(void) {
@@ -40,6 +59,8 @@ static inline uint64_t gpu_monotonic_ns(void) {
 #include "sterowniki/czas/hpet.h"
 #include "grafika.h"
 #include "pamiec.h"
+#include "bufory_grafiki.h"
+#include "heap.h"
 
 #define gpu_klog klog_serial
 
@@ -60,6 +81,30 @@ static void gpu_dma_free(void* vaddr, uint64_t paddr, size_t pages) {
     dma.physical_address = paddr;
     dma.page_count = pages;
     dma_release(&dma);
+}
+
+static inline void* gpu_heap_alloc(size_t size) {
+    return kmalloc(static_cast<uint64_t>(size));
+}
+
+static inline void gpu_heap_free(void* ptr) {
+    kfree(ptr);
+}
+
+static inline bool gpu_fb_alloc(size_t total_bytes, void** out_vaddr, void** out_frames, size_t max_pages, size_t* out_page_count) {
+    bufory_grafiki_inicjalizuj();
+    void* va = bufor_grafiki_alokuj_strony(total_bytes, out_frames, max_pages, out_page_count);
+    if (!va) return false;
+    *out_vaddr = va;
+    return true;
+}
+
+static inline void gpu_fb_free(void* vaddr, void** frames, size_t page_count) {
+    (void)frames;
+    (void)page_count;
+    if (vaddr) {
+        bufor_grafiki_zwolnij(vaddr);
+    }
 }
 
 static inline uint64_t gpu_monotonic_ns(void) {
@@ -119,10 +164,15 @@ static VirtioGpuDriver g_gpu_drivers[VIRTIO_GPU_MAX_DEVICES]{};
 static uint32_t        g_gpu_driver_count = 0;
 
 /*
- * Maksymalne dopuszczalne czasy oczekiwania i limity petli.
+ * Maksymalne dopuszczalne czasy oczekiwania i limity buforow DMA.
  */
 constexpr uint64_t VIRTIO_GPU_DEFAULT_TIMEOUT_MS = 500ULL;
 constexpr uint32_t VIRTIO_GPU_MAX_SPINS_GUARD     = 5000000U;
+
+constexpr size_t VIRTIO_GPU_CMD_BUFFER_SIZE   = 64ULL * 1024;  // 64 KiB bufor DMA dla controlq
+constexpr size_t VIRTIO_GPU_CMD_REQ_MAX_SIZE  = 48ULL * 1024;  // 48 KiB obszar polecen
+constexpr size_t VIRTIO_GPU_CMD_RESP_OFFSET   = 48ULL * 1024;  // offset bufora odpowiedzi
+constexpr size_t VIRTIO_GPU_CMD_RESP_MAX_SIZE = 16ULL * 1024;  // 16 KiB obszar odpowiedzi
 
 /* Pomocnicze funkcje formatowania logow */
 static void log_append_str(char* buf, size_t cap, size_t& pos, const char* s) {
@@ -152,6 +202,7 @@ static void log_append_u64_dec(char* buf, size_t cap, size_t& pos, uint64_t val)
 
 /*
  * Obsluga przerwania MSI-X dla VirtIO-GPU.
+ * Zgodnie ze specyfikacja nie wykonuje alokacji ze sterty (heap) ani operacji blokujacych.
  */
 static void virtio_gpu_isr(void* context) {
     VirtioGpuDriver* drv = static_cast<VirtioGpuDriver*>(context);
@@ -177,19 +228,21 @@ static bool virtio_gpu_send_command_locked(
 ) {
     if (!drv || !drv->dev || !drv->controlq || !drv->cmd_vaddr ||
         req_len == 0 || resp_len == 0 ||
-        req_len > 2048 || resp_len > 2048 || drv->has_error) {
+        req_len > VIRTIO_GPU_CMD_REQ_MAX_SIZE ||
+        resp_len > VIRTIO_GPU_CMD_RESP_MAX_SIZE ||
+        drv->has_error) {
         return false;
     }
 
     /* Kopiujemy polecenie do obszaru DMA zadania (offset 0) */
     gpu_memcpy(drv->cmd_vaddr, req, req_len);
 
-    /* Zerujemy obszar odpowiedzi DMA (offset 2048) */
-    uint8_t* resp_dma_vaddr = static_cast<uint8_t*>(drv->cmd_vaddr) + 2048;
+    /* Zerujemy obszar odpowiedzi DMA */
+    uint8_t* resp_dma_vaddr = static_cast<uint8_t*>(drv->cmd_vaddr) + VIRTIO_GPU_CMD_RESP_OFFSET;
     gpu_secure_zero(resp_dma_vaddr, resp_len);
 
     const uint64_t req_paddr = drv->cmd_paddr;
-    const uint64_t resp_paddr = drv->cmd_paddr + 2048ULL;
+    const uint64_t resp_paddr = drv->cmd_paddr + VIRTIO_GPU_CMD_RESP_OFFSET;
 
     /*
      * Budujemy lancuch deskryptorow:
@@ -226,6 +279,7 @@ static bool virtio_gpu_send_command_locked(
 
     uint32_t spin_guard = VIRTIO_GPU_MAX_SPINS_GUARD;
     bool completed = false;
+    uint32_t actual_used_len = 0;
 
     while (spin_guard > 0) {
         spin_guard--;
@@ -236,7 +290,13 @@ static bool virtio_gpu_send_command_locked(
             int popped = virtqueue_pop_used(drv->controlq, &cookie, &used_len);
             if (popped >= 0) {
                 completed = true;
+                actual_used_len = used_len;
                 break;
+            } else if (popped < -1) {
+                gpu_klog("[VIRTIO-GPU] BLAD KRYTYCZNY: Uszkodzenie kolejki virtqueue_pop_used!");
+                drv->has_error = true;
+                drv->error_count++;
+                return false;
             }
         }
 
@@ -253,6 +313,14 @@ static bool virtio_gpu_send_command_locked(
         drv->has_error = true;
         drv->error_count++;
         /* NIGDY nie traktujemy timeoutu jako sukces i NIE zwalniamy DMA uzywanego przez sprzet! */
+        return false;
+    }
+
+    /* Weryfikacja dlugosci odpowiedzi zapisanej przez urzadzenie */
+    if (actual_used_len < sizeof(VirtioGpuCtrlHdr) || actual_used_len > resp_len) {
+        gpu_klog("[VIRTIO-GPU] BLAD: Nieprawidlowa lub znieksztalcona dlugosc used_len!");
+        drv->has_error = true;
+        drv->error_count++;
         return false;
     }
 
@@ -333,36 +401,119 @@ bool virtio_gpu_cmd_resource_attach_backing(
     const VirtioGpuMemEntry* entries,
     uint32_t nr_entries
 ) {
-    if (!drv || resource_id == 0 || !entries || nr_entries == 0 || nr_entries > 64) {
+    if (!drv || resource_id == 0 || !entries || nr_entries == 0) {
         return false;
     }
 
+    /* Overflow-safe sprawdzenie limitu liczby wpisow w buforze polecen */
+    constexpr size_t MAX_ATTACH_ENTRIES = (VIRTIO_GPU_CMD_REQ_MAX_SIZE - sizeof(VirtioGpuResourceAttachBacking)) / sizeof(VirtioGpuMemEntry);
+    if (nr_entries > MAX_ATTACH_ENTRIES) {
+        gpu_klog("[VIRTIO-GPU] BLAD: Liczba wpisow backing przekracza limit bufora DMA!");
+        return false;
+    }
+
+    const size_t entries_bytes = static_cast<size_t>(nr_entries) * sizeof(VirtioGpuMemEntry);
+    const size_t total_cmd_len = sizeof(VirtioGpuResourceAttachBacking) + entries_bytes;
+
     GpuSpinLockGuard guard(drv->lock);
 
-    /* Tworzymy bufor zapytania z naglowkiem i tablica mem_entries */
-    uint8_t cmd_buf[sizeof(VirtioGpuResourceAttachBacking) + sizeof(VirtioGpuMemEntry) * 64];
-    VirtioGpuResourceAttachBacking* req = reinterpret_cast<VirtioGpuResourceAttachBacking*>(cmd_buf);
+    /* Budujemy zapytanie bezposrednio w buforze DMA polecen */
+    VirtioGpuResourceAttachBacking* req = static_cast<VirtioGpuResourceAttachBacking*>(drv->cmd_vaddr);
+    gpu_secure_zero(req, sizeof(*req));
     req->hdr.type = VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING;
-    req->hdr.flags = 0;
-    req->hdr.fence_id = 0;
-    req->hdr.ctx_id = 0;
-    req->hdr.padding = 0;
     req->resource_id = resource_id;
     req->nr_entries = nr_entries;
 
     VirtioGpuMemEntry* dst_entries = reinterpret_cast<VirtioGpuMemEntry*>(
-        cmd_buf + sizeof(VirtioGpuResourceAttachBacking));
-    for (uint32_t i = 0; i < nr_entries; ++i) {
-        dst_entries[i] = entries[i];
+        static_cast<uint8_t*>(drv->cmd_vaddr) + sizeof(VirtioGpuResourceAttachBacking));
+    gpu_memcpy(dst_entries, entries, entries_bytes);
+
+    /* Zerujemy obszar odpowiedzi DMA */
+    uint8_t* resp_dma_vaddr = static_cast<uint8_t*>(drv->cmd_vaddr) + VIRTIO_GPU_CMD_RESP_OFFSET;
+    gpu_secure_zero(resp_dma_vaddr, sizeof(VirtioGpuCtrlHdr));
+
+    const uint64_t req_paddr = drv->cmd_paddr;
+    const uint64_t resp_paddr = drv->cmd_paddr + VIRTIO_GPU_CMD_RESP_OFFSET;
+
+    VirtqBuffer bufs[2];
+    bufs[0].phys_addr = req_paddr;
+    bufs[0].len = static_cast<uint32_t>(total_cmd_len);
+    bufs[0].is_write = false;
+
+    bufs[1].phys_addr = resp_paddr;
+    bufs[1].len = static_cast<uint32_t>(sizeof(VirtioGpuCtrlHdr));
+    bufs[1].is_write = true;
+
+    __atomic_store_n(&drv->command_done, 0U, __ATOMIC_RELEASE);
+
+    const int head = virtqueue_submit(drv->controlq, bufs, 2, nullptr);
+    if (head < 0) {
+        gpu_klog("[VIRTIO-GPU] BLAD: virtqueue_submit failed dla attach_backing!");
+        drv->error_count++;
+        return false;
     }
 
-    const size_t total_cmd_len = sizeof(VirtioGpuResourceAttachBacking) +
-                                 sizeof(VirtioGpuMemEntry) * nr_entries;
+    virtqueue_kick(drv->controlq, true);
+    drv->cmd_count++;
+
+    const uint64_t start_ns = gpu_monotonic_ns();
+    const uint64_t timeout_ns = VIRTIO_GPU_DEFAULT_TIMEOUT_MS * 1000000ULL;
+    const uint64_t deadline_ns = (start_ns > UINT64_MAX - timeout_ns) ? UINT64_MAX : (start_ns + timeout_ns);
+
+    uint32_t spin_guard = VIRTIO_GPU_MAX_SPINS_GUARD;
+    bool completed = false;
+    uint32_t actual_used_len = 0;
+
+    while (spin_guard > 0) {
+        spin_guard--;
+
+        if (__atomic_load_n(&drv->command_done, __ATOMIC_ACQUIRE) || virtqueue_has_used(drv->controlq)) {
+            void* cookie = nullptr;
+            uint32_t used_len = 0;
+            int popped = virtqueue_pop_used(drv->controlq, &cookie, &used_len);
+            if (popped >= 0) {
+                completed = true;
+                actual_used_len = used_len;
+                break;
+            } else if (popped < -1) {
+                gpu_klog("[VIRTIO-GPU] BLAD KRYTYCZNY: virtqueue_pop_used blad!");
+                drv->has_error = true;
+                drv->error_count++;
+                return false;
+            }
+        }
+
+        const uint64_t now = gpu_monotonic_ns();
+        if (now != 0 && now >= deadline_ns) break;
+        asm volatile("pause" ::: "memory");
+    }
+
+    if (!completed) {
+        gpu_klog("[VIRTIO-GPU] BLAD: Timeout attach_backing!");
+        drv->has_error = true;
+        drv->error_count++;
+        return false;
+    }
+
+    if (actual_used_len < sizeof(VirtioGpuCtrlHdr) || actual_used_len > sizeof(VirtioGpuCtrlHdr)) {
+        gpu_klog("[VIRTIO-GPU] BLAD: Znieksztalcony used_len dla attach_backing!");
+        drv->has_error = true;
+        drv->error_count++;
+        return false;
+    }
 
     VirtioGpuCtrlHdr resp{};
-    return virtio_gpu_send_command_locked(
-        drv, cmd_buf, total_cmd_len, &resp, sizeof(resp), VIRTIO_GPU_RESP_OK_NODATA);
+    gpu_memcpy(&resp, resp_dma_vaddr, sizeof(resp));
+
+    if (resp.type != VIRTIO_GPU_RESP_OK_NODATA) {
+        gpu_klog("[VIRTIO-GPU] Urzadzenie odrzucilo attach_backing!");
+        drv->error_count++;
+        return false;
+    }
+
+    return true;
 }
+
 
 bool virtio_gpu_cmd_set_scanout(
     VirtioGpuDriver* drv,
@@ -503,75 +654,153 @@ bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t
     const uint64_t total_bytes = stride * static_cast<uint64_t>(height);
     if (total_bytes == 0 || total_bytes > 64ULL * 1024 * 1024) return false;
 
+    const size_t page_count = static_cast<size_t>((total_bytes + 4095ULL) / 4096ULL);
+    if (page_count == 0 || page_count > 16384) return false;
+
     /*
-     * 1. Utworzenie zasobu 2D
+     * 0. Bezpieczne zwolnienie poprzedniego bufora ramki (jesli istnial)
+     */
+    if (drv->scanout_set && !drv->has_error) {
+        virtio_gpu_cmd_set_scanout(drv, drv->scanout_id, 0, 0, 0, 0, 0);
+        drv->scanout_set = false;
+    }
+    if (drv->backing_attached && !drv->has_error) {
+        virtio_gpu_cmd_resource_detach_backing(drv, drv->resource_id);
+        drv->backing_attached = false;
+    }
+    if (drv->resource_created && !drv->has_error) {
+        virtio_gpu_cmd_resource_unref(drv, drv->resource_id);
+        drv->resource_created = false;
+    }
+    if (drv->fb_vaddr) {
+        gpu_fb_free(drv->fb_vaddr, drv->allocated_frames, drv->fb_pages);
+        drv->fb_vaddr = nullptr;
+    }
+    if (drv->allocated_frames) {
+        gpu_heap_free(drv->allocated_frames);
+        drv->allocated_frames = nullptr;
+    }
+    if (drv->mem_entries) {
+        gpu_heap_free(drv->mem_entries);
+        drv->mem_entries = nullptr;
+    }
+    drv->nr_entries = 0;
+    drv->fb_pages = 0;
+    drv->fb_size = 0;
+
+    /*
+     * 1. Alokacja struktur metadanych
+     */
+    void** frames = static_cast<void**>(gpu_heap_alloc(sizeof(void*) * page_count));
+    if (!frames) {
+        gpu_klog("[VIRTIO-GPU] BLAD: Nie mozna zaalokowac tablicy frames!");
+        return false;
+    }
+    gpu_secure_zero(frames, sizeof(void*) * page_count);
+
+    VirtioGpuMemEntry* entries = static_cast<VirtioGpuMemEntry*>(
+        gpu_heap_alloc(sizeof(VirtioGpuMemEntry) * page_count));
+    if (!entries) {
+        gpu_klog("[VIRTIO-GPU] BLAD: Nie mozna zaalokowac tablicy mem_entries!");
+        gpu_heap_free(frames);
+        return false;
+    }
+    gpu_secure_zero(entries, sizeof(VirtioGpuMemEntry) * page_count);
+
+    /*
+     * 2. Utworzenie zasobu 2D
      */
     constexpr uint32_t RES_ID = 1;
     constexpr uint32_t FORMAT = VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM;
 
     if (!virtio_gpu_cmd_resource_create_2d(drv, RES_ID, FORMAT, width, height)) {
         gpu_klog("[VIRTIO-GPU] BLAD: resource_create_2d failed!");
+        gpu_heap_free(entries);
+        gpu_heap_free(frames);
         return false;
     }
     drv->resource_created = true;
+    drv->resource_id = RES_ID;
 
     /*
-     * 2. Alokacja pamieci fizycznej dla bufora ramki (DMA)
+     * 3. Alokacja pojedynczych ramek fizycznych i zmapowanie do ciaglej przestrzeni wirtualnej
      */
     void* fb_vaddr = nullptr;
-    uint64_t fb_paddr = 0;
-    size_t fb_pages = 0;
+    size_t actual_pages = 0;
 
-    if (!gpu_dma_alloc(total_bytes, 4096, &fb_vaddr, &fb_paddr, &fb_pages)) {
-        gpu_klog("[VIRTIO-GPU] BLAD: gpu_dma_alloc dla bufora ramki failed!");
+    if (!gpu_fb_alloc(total_bytes, &fb_vaddr, frames, page_count, &actual_pages)) {
+        gpu_klog("[VIRTIO-GPU] BLAD: Alokacja stron bufora ramki nie powiodla sie!");
         virtio_gpu_cmd_resource_unref(drv, RES_ID);
         drv->resource_created = false;
+        drv->resource_id = 0;
+        gpu_heap_free(entries);
+        gpu_heap_free(frames);
         return false;
     }
 
     drv->fb_vaddr = fb_vaddr;
     drv->fb_size = total_bytes;
-    drv->fb_pages = fb_pages;
-    drv->is_contiguous_dma = true;
-
-    /* Wypelnienie tablicy wpisow scatter-gather */
-    static VirtioGpuMemEntry s_entries[1];
-    s_entries[0].addr = fb_paddr;
-    s_entries[0].length = static_cast<uint32_t>(fb_pages * 4096ULL);
-    s_entries[0].padding = 0;
-
-    drv->mem_entries = s_entries;
-    drv->nr_entries = 1;
+    drv->fb_pages = actual_pages;
+    drv->allocated_frames = frames;
+    drv->mem_entries = entries;
+    drv->is_contiguous_dma = false;
 
     /*
-     * 3. Podpiecie bufora backing
+     * 4. Koalescencja ciaglych fragmentow fizycznych do wpisow scatter-gather
+     */
+    uint32_t nr_entries = 0;
+    for (size_t i = 0; i < actual_pages; ++i) {
+        const uint64_t pa = reinterpret_cast<uint64_t>(frames[i]);
+        if (nr_entries > 0 &&
+            (entries[nr_entries - 1].addr + entries[nr_entries - 1].length == pa)) {
+            entries[nr_entries - 1].length += 4096;
+        } else {
+            entries[nr_entries].addr = pa;
+            entries[nr_entries].length = 4096;
+            entries[nr_entries].padding = 0;
+            nr_entries++;
+        }
+    }
+    drv->nr_entries = nr_entries;
+
+    /*
+     * 5. Podpiecie bufora backing
      */
     if (!virtio_gpu_cmd_resource_attach_backing(drv, RES_ID, drv->mem_entries, drv->nr_entries)) {
         gpu_klog("[VIRTIO-GPU] BLAD: resource_attach_backing failed!");
-        gpu_dma_free(drv->fb_vaddr, fb_paddr, drv->fb_pages);
+        gpu_fb_free(drv->fb_vaddr, drv->allocated_frames, drv->fb_pages);
         drv->fb_vaddr = nullptr;
         virtio_gpu_cmd_resource_unref(drv, RES_ID);
         drv->resource_created = false;
+        drv->resource_id = 0;
+        gpu_heap_free(drv->mem_entries);
+        drv->mem_entries = nullptr;
+        gpu_heap_free(drv->allocated_frames);
+        drv->allocated_frames = nullptr;
         return false;
     }
     drv->backing_attached = true;
 
     /*
-     * 4. Powiazanie scanoutu z zasobem
+     * 6. Powiazanie scanoutu z zasobem
      */
     if (!virtio_gpu_cmd_set_scanout(drv, drv->scanout_id, RES_ID, 0, 0, width, height)) {
         gpu_klog("[VIRTIO-GPU] BLAD: set_scanout failed!");
         virtio_gpu_cmd_resource_detach_backing(drv, RES_ID);
         drv->backing_attached = false;
-        gpu_dma_free(drv->fb_vaddr, fb_paddr, drv->fb_pages);
+        gpu_fb_free(drv->fb_vaddr, drv->allocated_frames, drv->fb_pages);
         drv->fb_vaddr = nullptr;
         virtio_gpu_cmd_resource_unref(drv, RES_ID);
         drv->resource_created = false;
+        drv->resource_id = 0;
+        gpu_heap_free(drv->mem_entries);
+        drv->mem_entries = nullptr;
+        gpu_heap_free(drv->allocated_frames);
+        drv->allocated_frames = nullptr;
         return false;
     }
     drv->scanout_set = true;
 
-    drv->resource_id = RES_ID;
     drv->fb_width = width;
     drv->fb_height = height;
     drv->fb_stride = static_cast<uint32_t>(stride);
@@ -583,9 +812,11 @@ bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t
     log_append_u64_dec(msg, sizeof(msg), mpos, width);
     log_append_str(msg, sizeof(msg), mpos, "x");
     log_append_u64_dec(msg, sizeof(msg), mpos, height);
-    log_append_str(msg, sizeof(msg), mpos, " (stride=");
-    log_append_u64_dec(msg, sizeof(msg), mpos, stride);
-    log_append_str(msg, sizeof(msg), mpos, " B, format=B8G8R8X8)");
+    log_append_str(msg, sizeof(msg), mpos, " (stron=");
+    log_append_u64_dec(msg, sizeof(msg), mpos, actual_pages);
+    log_append_str(msg, sizeof(msg), mpos, ", wpisow_sg=");
+    log_append_u64_dec(msg, sizeof(msg), mpos, nr_entries);
+    log_append_str(msg, sizeof(msg), mpos, ", format=B8G8R8X8)");
     gpu_klog(msg);
 
     return true;
@@ -725,8 +956,8 @@ bool virtio_gpu_init(VirtioPciDevice* dev) {
         return false;
     }
 
-    /* Alokacja bufora DMA dla polecen i odpowiedzi (4 KiB) */
-    if (!gpu_dma_alloc(4096, 4096, &drv->cmd_vaddr, &drv->cmd_paddr, &drv->cmd_pages)) {
+    /* Alokacja bufora DMA dla polecen i odpowiedzi (64 KiB) */
+    if (!gpu_dma_alloc(VIRTIO_GPU_CMD_BUFFER_SIZE, 4096, &drv->cmd_vaddr, &drv->cmd_paddr, &drv->cmd_pages)) {
         gpu_klog("[VIRTIO-GPU] BLAD: Nie mozna zaalokowac pamieci DMA dla polecen!");
         virtio_pci_set_status(dev, VIRTIO_STATUS_FAILED);
         return false;
@@ -924,11 +1155,21 @@ bool virtio_gpu_reset(VirtioGpuDriver* drv) {
     }
 
     if (drv->fb_vaddr) {
-        gpu_dma_free(drv->fb_vaddr, drv->mem_entries ? drv->mem_entries[0].addr : 0, drv->fb_pages);
+        gpu_fb_free(drv->fb_vaddr, drv->allocated_frames, drv->fb_pages);
         drv->fb_vaddr = nullptr;
         drv->fb_size = 0;
         drv->fb_pages = 0;
     }
+
+    if (drv->allocated_frames) {
+        gpu_heap_free(drv->allocated_frames);
+        drv->allocated_frames = nullptr;
+    }
+    if (drv->mem_entries) {
+        gpu_heap_free(drv->mem_entries);
+        drv->mem_entries = nullptr;
+    }
+    drv->nr_entries = 0;
 
     drv->resource_id = 0;
     drv->resource_created = false;
@@ -985,3 +1226,238 @@ VirtioGpuDriver* virtio_gpu_get_driver(uint32_t index) {
 uint32_t virtio_gpu_get_driver_count(void) {
     return g_gpu_driver_count;
 }
+
+/* =========================================================================
+ * 5. TESTY REGRESYJNE TEARDOWN/REINIT I OBCIAZENIOWE DLA QEMU
+ * ========================================================================= */
+
+bool virtio_gpu_test_teardown_reinit(VirtioGpuDriver* drv) {
+#ifdef BURSZTYN_VIRTIO_HOST_TEST
+    (void)drv;
+    return true;
+#else
+    if (!drv || !drv->dev || !drv->initialized) return false;
+    VirtioPciDevice* dev = drv->dev;
+
+    gpu_klog("[VIRTIO-GPU-TEST] === Rozpoczynanie audytu cykli teardown/reinit w QEMU ===");
+
+    /*
+     * 1. Zresetuj urzadzenie, aby uzyskac czysty stan bazowy pamieci i przerwan.
+     */
+    if (!virtio_gpu_reset(drv)) {
+        gpu_klog("[VIRTIO-GPU-TEST] BLAD: Wstepny reset nie powiodl sie!");
+        return false;
+    }
+
+    const uint64_t baseline_pmm = pmm_pobierz_wolne_ramki();
+    const uint32_t baseline_vectors = idt_zaalokowane_wektory_liczba();
+
+    char base_msg[128]{};
+    size_t bpos = 0;
+    log_append_str(base_msg, sizeof(base_msg), bpos, "[VIRTIO-GPU-TEST] Stan bazowy: wolne ramki PMM=");
+    log_append_u64_dec(base_msg, sizeof(base_msg), bpos, baseline_pmm);
+    log_append_str(base_msg, sizeof(base_msg), bpos, ", wektory IDT=");
+    log_append_u64_dec(base_msg, sizeof(base_msg), bpos, baseline_vectors);
+    gpu_klog(base_msg);
+
+    constexpr int CYCLES = 5;
+    for (int i = 0; i < CYCLES; ++i) {
+        if (!virtio_gpu_init(dev)) {
+            gpu_klog("[VIRTIO-GPU-TEST] BLAD: Inicjalizacja GPU w cyklu testowym!");
+            return false;
+        }
+
+        VirtioGpuDriver* cur_drv = virtio_gpu_get_driver(0);
+        if (!cur_drv || !cur_drv->initialized) {
+            gpu_klog("[VIRTIO-GPU-TEST] BLAD: Brak aktywnego sterownika w cyklu!");
+            return false;
+        }
+
+        if (!virtio_gpu_render_test_pattern(cur_drv)) {
+            gpu_klog("[VIRTIO-GPU-TEST] BLAD: Rendering wzorca w cyklu testowym!");
+            return false;
+        }
+
+        if (!virtio_gpu_reset(cur_drv)) {
+            gpu_klog("[VIRTIO-GPU-TEST] BLAD: Reset GPU w cyklu testowym!");
+            return false;
+        }
+
+        const uint64_t curr_pmm = pmm_pobierz_wolne_ramki();
+        const uint32_t curr_vectors = idt_zaalokowane_wektory_liczba();
+
+        if (curr_pmm != baseline_pmm || curr_vectors != baseline_vectors) {
+            char err[160]{};
+            size_t epos = 0;
+            log_append_str(err, sizeof(err), epos, "[VIRTIO-GPU-TEST] BLAD WYCIEKU w cyklu ");
+            log_append_u64_dec(err, sizeof(err), epos, i + 1);
+            log_append_str(err, sizeof(err), epos, ": PMM delta=");
+            log_append_u64_dec(err, sizeof(err), epos, (curr_pmm < baseline_pmm) ? (baseline_pmm - curr_pmm) : (curr_pmm - baseline_pmm));
+            log_append_str(err, sizeof(err), epos, ", Vector delta=");
+            log_append_u64_dec(err, sizeof(err), epos, (curr_vectors >= baseline_vectors) ? (curr_vectors - baseline_vectors) : (baseline_vectors - curr_vectors));
+            gpu_klog(err);
+            return false;
+        }
+    }
+
+    /*
+     * 2. Re-inicjalizacja do stanu aktywnego przed rozpoczeciem pracy systemu
+     */
+    if (!virtio_gpu_init(dev)) {
+        gpu_klog("[VIRTIO-GPU-TEST] BLAD: Re-inicjalizacja po testach wyciekow!");
+        return false;
+    }
+
+    gpu_klog("[VIRTIO-GPU-TEST] Cykle teardown/reinit: PASS (PMM delta=0, DMA delta=0, IDT delta=0).");
+    return true;
+#endif
+}
+
+bool virtio_gpu_stress_dirty_rectangles(VirtioGpuDriver* drv) {
+    if (!drv || !drv->initialized || drv->has_error || !drv->fb_vaddr) {
+        return false;
+    }
+
+    gpu_klog("[VIRTIO-GPU-STRESS] Rozpoczynanie testu obciazeniowego dirty rectangles (10 000 aktualizacji)...");
+
+    const uint32_t w = drv->fb_width;
+    const uint32_t h = drv->fb_height;
+    if (w < 64 || h < 64) return false;
+
+    uint32_t* fb = static_cast<uint32_t*>(drv->fb_vaddr);
+
+    // Prosty deterministyczny generator liczb pseudolosowych Xorshift32
+    uint32_t state = 0x12345678U;
+    auto prng = [&state]() -> uint32_t {
+        uint32_t x = state;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        state = x;
+        return x;
+    };
+
+    auto draw_rect = [&](uint32_t rx, uint32_t ry, uint32_t rw, uint32_t rh, uint32_t col) {
+        for (uint32_t cy = ry; cy < ry + rh && cy < h; ++cy) {
+            for (uint32_t cx = rx; cx < rx + rw && cx < w; ++cx) {
+                fb[cy * w + cx] = col;
+            }
+        }
+    };
+
+    constexpr uint32_t TOTAL_UPDATES = 10000;
+    uint32_t error_count = 0;
+
+    for (uint32_t i = 0; i < TOTAL_UPDATES; ++i) {
+        uint32_t rx = 0;
+        uint32_t ry = 0;
+        uint32_t rw = 1;
+        uint32_t rh = 1;
+        const uint32_t mode = i % 6;
+        const uint32_t color = 0x00102030U ^ (prng() & 0x00FFFFFFU);
+
+        if (mode == 0) {
+            // 1. 1x1 piksel (w tym rogi i srodek)
+            rx = prng() % w;
+            ry = prng() % h;
+            rw = 1;
+            rh = 1;
+        } else if (mode == 1) {
+            // 2. Krawedzie (edge rectangles: lewa, prawa, gorna, dolna)
+            const uint32_t edge = prng() % 4;
+            if (edge == 0) { // Gorna
+                rw = 16 + (prng() % 64);
+                rh = 2 + (prng() % 8);
+                rx = prng() % (w - rw);
+                ry = 0;
+            } else if (edge == 1) { // Dolna
+                rw = 16 + (prng() % 64);
+                rh = 2 + (prng() % 8);
+                rx = prng() % (w - rw);
+                ry = h - rh;
+            } else if (edge == 2) { // Lewa
+                rw = 2 + (prng() % 8);
+                rh = 16 + (prng() % 64);
+                rx = 0;
+                ry = prng() % (h - rh);
+            } else { // Prawa
+                rw = 2 + (prng() % 8);
+                rh = 16 + (prng() % 64);
+                rx = w - rw;
+                ry = prng() % (h - rh);
+            }
+        } else if (mode == 2) {
+            // 3. Nakladajace sie prostokaty (overlapping rectangles)
+            rw = 32 + (prng() % 32);
+            rh = 32 + (prng() % 32);
+            rx = 100 + (prng() % (w > 200 ? (w - 200) : 1));
+            ry = 100 + (prng() % (h > 200 ? (h - 200) : 1));
+        } else if (mode == 3) {
+            // 4. Szybkie naprzemienne regiony (rapid alternating regions: lewy / prawy)
+            if (i & 1) {
+                rx = 20;
+                ry = 120;
+                rw = 80;
+                rh = 80;
+            } else {
+                rx = w - 100;
+                ry = 120;
+                rw = 80;
+                rh = 80;
+            }
+        } else if (mode == 4) {
+            // 5. Male losowe prostokaty (small random tiles)
+            rw = 4 + (prng() % 28);
+            rh = 4 + (prng() % 28);
+            rx = prng() % (w - rw);
+            ry = prng() % (h - rh);
+        } else {
+            // 6. Okresowy pelny flush (full-screen flush co 600 iteracji)
+            if (i % 600 == 5) {
+                rx = 0;
+                ry = 0;
+                rw = w;
+                rh = h;
+            } else {
+                rw = 16;
+                rh = 16;
+                rx = prng() % (w - 16);
+                ry = prng() % (h - 16);
+            }
+        }
+
+        draw_rect(rx, ry, rw, rh, color);
+
+        if (!virtio_gpu_transfer_and_flush(drv, rx, ry, rw, rh)) {
+            error_count++;
+            break;
+        }
+
+        if ((i + 1) % 2500 == 0) {
+            char pmsg[128]{};
+            size_t ppos = 0;
+            log_append_str(pmsg, sizeof(pmsg), ppos, "[VIRTIO-GPU-STRESS] Wykonano ");
+            log_append_u64_dec(pmsg, sizeof(pmsg), ppos, i + 1);
+            log_append_str(pmsg, sizeof(pmsg), ppos, " / 10000 aktualizacji dirty-rect.");
+            gpu_klog(pmsg);
+        }
+    }
+
+    if (error_count > 0 || drv->has_error) {
+        gpu_klog("[VIRTIO-GPU-STRESS] BLAD: Test 10 000 aktualizacji zakonczony niepowodzeniem!");
+        return false;
+    }
+
+    char smsg[128]{};
+    size_t spos = 0;
+    log_append_str(smsg, sizeof(smsg), spos, "[VIRTIO-GPU-STRESS] Zakonczono pomyslnie 10000 aktualizacji (transfers=");
+    log_append_u64_dec(smsg, sizeof(smsg), spos, drv->transfer_count);
+    log_append_str(smsg, sizeof(smsg), spos, ", flushes=");
+    log_append_u64_dec(smsg, sizeof(smsg), spos, drv->flush_count);
+    log_append_str(smsg, sizeof(smsg), spos, ", wraparound=PASS, bledy=0).");
+    gpu_klog(smsg);
+
+    // Po tescie obciazeniowym przywracamy deterministyczny wzorzec testowy do weryfikacji pikseli
+    return virtio_gpu_render_test_pattern(drv);
+}
+

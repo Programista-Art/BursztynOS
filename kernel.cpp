@@ -2250,8 +2250,14 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     if (virtio_gpu_count > 0) {
         VirtioGpuDriver* gpu_drv = virtio_gpu_get_driver(0);
         if (gpu_drv && gpu_drv->initialized) {
-            virtio_gpu_render_test_pattern(gpu_drv);
-            grafika_aktywuj_virtio_gpu(gpu_drv);
+            virtio_gpu_test_teardown_reinit(gpu_drv);
+            gpu_drv = virtio_gpu_get_driver(0);
+            if (gpu_drv && gpu_drv->initialized) {
+                virtio_gpu_stress_dirty_rectangles(gpu_drv);
+                virtio_gpu_render_test_pattern(gpu_drv);
+                wypisz_log("[VIRTIO-GPU-FINAL] Finalny wzorzec testowy gotowy do weryfikacji pikseli.");
+                grafika_aktywuj_virtio_gpu(gpu_drv);
+            }
         }
     }
 

@@ -39,6 +39,37 @@ void* bufor_grafiki_alokuj(size_t n) {
     ++alokacje;
     return reinterpret_cast<void*>(va);
 }
+void* bufor_grafiki_alokuj_strony(size_t n, void** out_ramki, size_t max_ramek, size_t* out_liczba_ramek) {
+    if(!gotowe || !n || n > BUFORY_GRAFIKI_SLOT || n > SIZE_MAX - 4095 || !out_ramki || !out_liczba_ramek) return nullptr;
+    n = (n + 4095) & ~size_t(4095);
+    const size_t pages = n / 4096;
+    if(pages > max_ramek) return nullptr;
+    if(n > LIMIT - zajete) return nullptr;
+    unsigned i = 1;
+    for(; i < BUFORY_GRAFIKI_SLOTOW && rozmiary[i]; ++i) {}
+    if(i == BUFORY_GRAFIKI_SLOTOW) return nullptr;
+    const uint64_t va = BUFORY_GRAFIKI_BAZA + uint64_t(i) * BUFORY_GRAFIKI_SLOT;
+    rozmiary[i] = n; zajete += n;
+    size_t off = 0;
+    size_t page_idx = 0;
+    for(; off < n; off += 4096) {
+        void* pa = ZaalokujRamke();
+        if(!pa) break;
+        if(!VmmMapujNowaStroneJadra(reinterpret_cast<void*>(va + off), pa)) {
+            ZwolnijRamke(pa);
+            break;
+        }
+        out_ramki[page_idx++] = pa;
+    }
+    if(off != n) {
+        rozmiary[i] = off; zajete -= (n - off);
+        bufor_grafiki_zwolnij(reinterpret_cast<void*>(va));
+        return nullptr;
+    }
+    *out_liczba_ramek = page_idx;
+    ++alokacje;
+    return reinterpret_cast<void*>(va);
+}
 void bufor_grafiki_zwolnij(void* p) {
     const uint64_t va=reinterpret_cast<uint64_t>(p);
     if(va<=BUFORY_GRAFIKI_BAZA||va>=BUFORY_GRAFIKI_BAZA+uint64_t(BUFORY_GRAFIKI_SLOTOW)*BUFORY_GRAFIKI_SLOT||

@@ -37,7 +37,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-GLOBAL_TIMEOUT = 240      # Maksymalny globalny limit czasu w sekundach (dla TCG)
+GLOBAL_TIMEOUT = 300      # Maksymalny globalny limit czasu w sekundach (dla TCG)
 INACTIVITY_TIMEOUT = 120  # Limit braku nowych linii na porcie szeregowym w sekundach
 
 def parse_ppm(ppm_path):
@@ -164,6 +164,8 @@ def main():
     found_gpu_msix = False
     found_gpu_framebuffer = False
     found_gpu_ready = False
+    found_gpu_teardown_reinit = False
+    found_gpu_stress = False
     found_test_pattern = False
     found_hal_switch = False
     found_ekran_init = False
@@ -243,13 +245,20 @@ def main():
             if "[VIRTIO-GPU] Karta graficzna gotowa do pracy w trybie 2D." in line_str:
                 found_gpu_ready = True
                 gpu_lines.append(line_str)
+            if "[VIRTIO-GPU-TEST] Cykle teardown/reinit: PASS (PMM delta=0, DMA delta=0, IDT delta=0)." in line_str:
+                found_gpu_teardown_reinit = True
+                gpu_lines.append(line_str)
+            if "[VIRTIO-GPU-STRESS] Zakonczono pomyslnie 10000 aktualizacji" in line_str:
+                found_gpu_stress = True
+                gpu_lines.append(line_str)
             if "[VIRTIO-GPU] Test pattern rendered and flushed" in line_str:
                 found_test_pattern = True
                 gpu_lines.append(line_str)
-                # Wykonanie zrzutu ekranu wzorca testowego natychmiast po jego wyrenderowaniu i flushu
+            if "[VIRTIO-GPU-FINAL] Finalny wzorzec testowy gotowy do weryfikacji pikseli." in line_str:
+                # Wykonanie zrzutu ekranu wzorca testowego po zakonczeniu testu obciazeniowego
                 if not pattern_dump_ok and qmp_sock.exists():
                     try:
-                        time.sleep(0.5)
+                        time.sleep(0.1)
                         print(f"[INFO] Pobieranie zrzutu wzorca testowego przez QMP...")
                         qmp_resp = qmp_screendump(qmp_sock, pattern_dump_path)
                         print(f"[INFO] Odpowiedz QMP screendump (pattern): {qmp_resp.strip()}")
@@ -330,6 +339,8 @@ def main():
     print(f"  Konfiguracja wektora MSI-X:              {'PASS' if found_gpu_msix else 'FAIL'}")
     print(f"  Konfiguracja bufora ramki (2D FB):       {'PASS' if found_gpu_framebuffer else 'FAIL'}")
     print(f"  Karta gotowa w trybie 2D:                {'PASS' if found_gpu_ready else 'FAIL'}")
+    print(f"  Cykle teardown/reinit (PMM=0, DMA=0, IDT=0): {'PASS' if found_gpu_teardown_reinit else 'FAIL'}")
+    print(f"  Test obciazeniowy 10000 aktualizacji (stress): {'PASS' if found_gpu_stress else 'FAIL'}")
     print(f"  Wygenerowanie i flush wzorca testowego:  {'PASS' if found_test_pattern else 'FAIL'}")
     print(f"  Przelaczenie HAL na VirtIO-GPU:          {'PASS' if found_hal_switch else 'FAIL'}")
     print(f"  Rejestracja backendu virtio-gpu-runtime: {'PASS' if found_ekran_init else 'FAIL'}")
@@ -351,6 +362,7 @@ def main():
     all_ok = (found_virtio_pci_transport and found_gpu_features and
               found_gpu_pci_device and found_gpu_msix and
               found_gpu_framebuffer and found_gpu_ready and
+              found_gpu_teardown_reinit and found_gpu_stress and
               found_test_pattern and found_hal_switch and
               found_ekran_init and found_desktop_ready and
               pattern_dump_ok and pattern_pixel_checks_ok and
