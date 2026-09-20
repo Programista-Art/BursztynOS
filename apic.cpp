@@ -279,6 +279,13 @@ static uint8_t pobierz_lapic_id() {
         0xFFU);
 }
 
+extern "C" uint8_t apic_pobierz_lapic_id() {
+    if (!baza_lapic_wirtualna) {
+        return 0;
+    }
+    return pobierz_lapic_id();
+}
+
 /* =========================================================================
  * IOAPIC
  * ========================================================================= */

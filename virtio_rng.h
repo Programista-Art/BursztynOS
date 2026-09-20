@@ -46,6 +46,10 @@ struct VirtioRngDriver {
     size_t           buffer_size;
     bool             initialized;
     bool             has_error;
+    bool             use_msix;
+    int              irq_vector;
+    volatile uint32_t irq_count;
+    volatile bool    request_done;
     uint64_t         total_bytes_read;
     uint64_t         total_requests;
 };

@@ -29,10 +29,77 @@
 #include <chrono>
 #include <thread>
 
+#include "idt.h"
+#include "apic.h"
 #include "virtio_pci.h"
 #include "virtqueue.h"
 #include "virtio_rng.h"
 #include "virtio_blk.h"
+
+// ============================================================================
+// MOCK IDT I APIC DLA SRODOWISKA TESTOWEGO HOST
+// ============================================================================
+
+struct MockIdtEntry {
+    IrqHandlerFn handler = nullptr;
+    void* context = nullptr;
+    bool allocated = false;
+};
+
+static MockIdtEntry g_mock_idt[256];
+static uint32_t g_mock_idt_allocated_count = 0;
+
+extern "C" int idt_alokuj_wektor_irq(void) {
+    for (int i = IDT_PIERWSZY_WEKTOR_DYNAMICZNY; i <= IDT_OSTATNI_WEKTOR_DYNAMICZNY; ++i) {
+        if (!g_mock_idt[i].allocated) {
+            g_mock_idt[i].allocated = true;
+            g_mock_idt[i].handler = nullptr;
+            g_mock_idt[i].context = nullptr;
+            g_mock_idt_allocated_count++;
+            return i;
+        }
+    }
+    return -1;
+}
+
+extern "C" bool idt_zwolnij_wektor_irq(uint8_t vector) {
+    if (vector < IDT_PIERWSZY_WEKTOR_DYNAMICZNY || vector > IDT_OSTATNI_WEKTOR_DYNAMICZNY) return false;
+    if (!g_mock_idt[vector].allocated) return false;
+    g_mock_idt[vector].allocated = false;
+    g_mock_idt[vector].handler = nullptr;
+    g_mock_idt[vector].context = nullptr;
+    if (g_mock_idt_allocated_count > 0) g_mock_idt_allocated_count--;
+    return true;
+}
+
+extern "C" bool idt_zarejestruj_irq(uint8_t vector, IrqHandlerFn handler, void* context) {
+    if (vector < IDT_PIERWSZY_WEKTOR_DYNAMICZNY || vector > IDT_OSTATNI_WEKTOR_DYNAMICZNY || !handler) return false;
+    if (!g_mock_idt[vector].allocated) return false;
+    g_mock_idt[vector].handler = handler;
+    g_mock_idt[vector].context = context;
+    return true;
+}
+
+extern "C" bool idt_wyrejestruj_irq(uint8_t vector) {
+    if (vector < IDT_PIERWSZY_WEKTOR_DYNAMICZNY || vector > IDT_OSTATNI_WEKTOR_DYNAMICZNY) return false;
+    g_mock_idt[vector].handler = nullptr;
+    g_mock_idt[vector].context = nullptr;
+    return true;
+}
+
+extern "C" uint32_t idt_zaalokowane_wektory_liczba(void) {
+    return g_mock_idt_allocated_count;
+}
+
+extern "C" uint8_t apic_pobierz_lapic_id(void) {
+    return 0;
+}
+
+void mock_trigger_irq(uint8_t vector) {
+    if (g_mock_idt[vector].allocated && g_mock_idt[vector].handler) {
+        g_mock_idt[vector].handler(g_mock_idt[vector].context);
+    }
+}
 
 // ============================================================================
 // FAKE PCI I FAKE MMIO DLA SRODOWISKA TESTOWEGO HOST
@@ -62,6 +129,7 @@ struct MockQueue {
     uint16_t size = 16;
     uint16_t enable = 0;
     uint16_t notify_off = 0;
+    uint16_t msix_vector = 0xFFFF;
 };
 
 struct MockDeviceState {
@@ -106,8 +174,32 @@ struct MockDeviceState {
     uint32_t blk_processed_count = 0;
     std::vector<uint8_t> blk_disk_data;
 
+    // Stan MSI-X:
+    bool     msix_enabled = false;
+    uint16_t msix_msg_ctrl = 0;
+    uint8_t  msix_cap_offset = 0;
+    uint8_t  msix_table_bar = 1;
+    uint32_t msix_table_off = 0;
+    uint16_t msix_table_size = 4;
+    uint16_t config_msix_vector = 0xFFFF;
+
+    // Stan MSI:
+    bool     msi_enabled = false;
+    uint16_t msi_msg_ctrl = 0;
+    uint8_t  msi_cap_offset = 0;
+
     void reset() {
         std::memset(pci_config, 0, sizeof(pci_config));
+        msix_enabled = false;
+        msix_msg_ctrl = 0;
+        msix_cap_offset = 0;
+        msix_table_bar = 1;
+        msix_table_off = 0;
+        msix_table_size = 4;
+        config_msix_vector = 0xFFFF;
+        msi_enabled = false;
+        msi_msg_ctrl = 0;
+        msi_cap_offset = 0;
         for (int i = 0; i < 6; ++i) {
             bars[i] = MockBar();
             bars[i].phys_addr = 0xFEB00000ULL + i * 0x10000ULL;
@@ -292,6 +384,19 @@ void host_pci_write(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uin
     }
 
     std::memcpy(&g_mock.pci_config[offset], &val, sizeof(uint32_t));
+
+    if (g_mock.msix_cap_offset != 0 && offset == (g_mock.msix_cap_offset & ~3U)) {
+        uint16_t msg_ctrl = 0;
+        std::memcpy(&msg_ctrl, &g_mock.pci_config[g_mock.msix_cap_offset + 2], 2);
+        g_mock.msix_msg_ctrl = msg_ctrl;
+        g_mock.msix_enabled = (msg_ctrl & PCI_MSIX_CTRL_ENABLE) != 0;
+    }
+    if (g_mock.msi_cap_offset != 0 && offset == (g_mock.msi_cap_offset & ~3U)) {
+        uint16_t msg_ctrl = 0;
+        std::memcpy(&msg_ctrl, &g_mock.pci_config[g_mock.msi_cap_offset + 2], 2);
+        g_mock.msi_msg_ctrl = msg_ctrl;
+        g_mock.msi_enabled = (msg_ctrl & PCI_MSI_CTRL_ENABLE) != 0;
+    }
 }
 
 volatile uint8_t* host_bar_map(uint8_t bar, uint64_t phys_addr, uint64_t size) {
@@ -397,6 +502,59 @@ void host_mmio_write8(volatile void* addr, uint8_t val) {
     }
 }
 
+static void mock_check_and_trigger_msix(uint16_t queue_idx) {
+    if (g_mock.msix_enabled) {
+        if (queue_idx < 8) {
+            uint16_t entry_idx = g_mock.queues[queue_idx].msix_vector;
+            if (entry_idx != 0xFFFF && entry_idx < g_mock.msix_table_size) {
+                uint8_t bar_idx = g_mock.msix_table_bar;
+                if (bar_idx < 6) {
+                    size_t entry_offset = g_mock.msix_table_off + static_cast<size_t>(entry_idx) * sizeof(PciMsixTableEntry);
+                    if (entry_offset + sizeof(PciMsixTableEntry) <= g_mock.bars[bar_idx].mem.size()) {
+                        auto* entry = reinterpret_cast<const PciMsixTableEntry*>(&g_mock.bars[bar_idx].mem[entry_offset]);
+                        uint32_t ctrl = entry->vector_ctrl;
+                        if ((ctrl & PCI_MSIX_VECTOR_CTRL_MASK) == 0) { // unmasked
+                            uint8_t vector = static_cast<uint8_t>(entry->msg_data & 0xFF);
+                            mock_trigger_irq(vector);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    } else if (g_mock.msi_enabled) {
+        if (g_mock.msi_cap_offset != 0) {
+            uint16_t ctrl = 0;
+            std::memcpy(&ctrl, &g_mock.pci_config[g_mock.msi_cap_offset + 2], 2);
+            bool is_64 = (ctrl & PCI_MSI_CTRL_64BIT) != 0;
+            uint8_t data_off = g_mock.msi_cap_offset + (is_64 ? 12 : 8);
+            uint16_t data = 0;
+            std::memcpy(&data, &g_mock.pci_config[data_off], 2);
+            uint8_t vector = static_cast<uint8_t>(data & 0xFF);
+            mock_trigger_irq(vector);
+            return;
+        }
+    } else {
+        g_mock.isr_val |= 1;
+    }
+}
+
+[[maybe_unused]] static void mock_trigger_config_msix() {
+    if (g_mock.msix_enabled && g_mock.config_msix_vector != 0xFFFF && g_mock.config_msix_vector < g_mock.msix_table_size) {
+        uint8_t bar_idx = g_mock.msix_table_bar;
+        if (bar_idx < 6) {
+            size_t entry_offset = g_mock.msix_table_off + static_cast<size_t>(g_mock.config_msix_vector) * sizeof(PciMsixTableEntry);
+            if (entry_offset + sizeof(PciMsixTableEntry) <= g_mock.bars[bar_idx].mem.size()) {
+                auto* entry = reinterpret_cast<const PciMsixTableEntry*>(&g_mock.bars[bar_idx].mem[entry_offset]);
+                if ((entry->vector_ctrl & PCI_MSIX_VECTOR_CTRL_MASK) == 0) {
+                    uint8_t vector = static_cast<uint8_t>(entry->msg_data & 0xFF);
+                    mock_trigger_irq(vector);
+                }
+            }
+        }
+    }
+}
+
 void host_mmio_write16(volatile void* addr, uint16_t val) {
     const uintptr_t a = reinterpret_cast<uintptr_t>(addr);
     for (int b = 0; b < 6; ++b) {
@@ -445,6 +603,7 @@ void host_mmio_write16(volatile void* addr, uint16_t val) {
                             }
                             g_mock.rng_processed_count++;
                         }
+                        mock_check_and_trigger_msix(val);
                     }
                 }
 
@@ -547,25 +706,34 @@ void host_mmio_write16(volatile void* addr, uint16_t val) {
                             }
                             g_mock.blk_processed_count++;
                         }
+                        mock_check_and_trigger_msix(val);
                     }
                 }
             }
 
             // Obsluga rejestrow kolejki w common_cfg (BAR 0)
             if (b == 0) {
-                if (off == 0x16) { // queue_select
+                if (off == 0x10) { // config_msix_vector
+                    g_mock.config_msix_vector = val;
+                    std::memcpy(&g_mock.bars[b].mem[off], &val, 2);
+                    return;
+                } else if (off == 0x16) { // queue_select
                     g_mock.selected_queue = val;
                     std::memcpy(&g_mock.bars[b].mem[off], &val, 2);
                     if (val < 8) {
                         uint16_t qs = g_mock.queues[val].size;
+                        uint16_t qmv = g_mock.queues[val].msix_vector;
                         uint16_t qe = g_mock.queues[val].enable;
                         uint16_t qno = g_mock.queues[val].notify_off;
                         std::memcpy(&g_mock.bars[b].mem[0x18], &qs, 2);
+                        std::memcpy(&g_mock.bars[b].mem[0x1A], &qmv, 2);
                         std::memcpy(&g_mock.bars[b].mem[0x1C], &qe, 2);
                         std::memcpy(&g_mock.bars[b].mem[0x1E], &qno, 2);
                     } else {
                         uint16_t zero = 0;
+                        uint16_t no_vec = 0xFFFF;
                         std::memcpy(&g_mock.bars[b].mem[0x18], &zero, 2);
+                        std::memcpy(&g_mock.bars[b].mem[0x1A], &no_vec, 2);
                         std::memcpy(&g_mock.bars[b].mem[0x1C], &zero, 2);
                         std::memcpy(&g_mock.bars[b].mem[0x1E], &zero, 2);
                     }
@@ -574,6 +742,12 @@ void host_mmio_write16(volatile void* addr, uint16_t val) {
                     if (g_mock.selected_queue < 8) {
                         g_mock.queues[g_mock.selected_queue].size = val;
                     }
+                } else if (off == 0x1A) { // queue_msix_vector
+                    if (g_mock.selected_queue < 8) {
+                        g_mock.queues[g_mock.selected_queue].msix_vector = val;
+                    }
+                    std::memcpy(&g_mock.bars[b].mem[off], &val, 2);
+                    return;
                 } else if (off == 0x1C) { // queue_enable
                     if (!g_mock.allow_queue_enable) {
                         val = 0;
@@ -639,13 +813,13 @@ struct CapBuilderEntry {
     uint32_t multiplier; // tylko dla NOTIFY
 };
 
-uint8_t build_cap_chain(const std::vector<CapBuilderEntry>& entries) {
+uint8_t build_cap_chain(const std::vector<CapBuilderEntry>& entries, uint8_t tail_next = 0) {
     uint8_t current_ptr = 0x40;
     g_mock.pci_config[0x34] = current_ptr;
 
     for (size_t i = 0; i < entries.size(); ++i) {
         const auto& e = entries[i];
-        const uint8_t next_ptr = (i + 1 < entries.size()) ? static_cast<uint8_t>(current_ptr + 24) : 0;
+        const uint8_t next_ptr = (i + 1 < entries.size()) ? static_cast<uint8_t>(current_ptr + 24) : tail_next;
         const uint8_t cap_len = (e.cfg_type == VIRTIO_PCI_CAP_NOTIFY_CFG) ? 20 : 16;
 
         g_mock.pci_config[current_ptr + 0] = 0x09; // PCI_CAP_ID_VNDR
@@ -681,11 +855,117 @@ void wire_virtio_mmio(uint8_t bar_idx, uint32_t common_off, uint32_t isr_off) {
     common->config_generation = 1;
     common->device_status = 0;
     common->device_feature = static_cast<uint32_t>(g_mock.device_features & 0xFFFFFFFFU);
+    common->config_msix_vector = g_mock.config_msix_vector;
     common->queue_select = 0;
     common->queue_size = g_mock.queues[0].size;
+    common->queue_msix_vector = g_mock.queues[0].msix_vector;
     common->queue_enable = g_mock.queues[0].enable;
     common->queue_notify_off = g_mock.queues[0].notify_off;
     b.mem[isr_off] = g_mock.isr_val;
+}
+
+uint8_t setup_msix_cap(uint8_t cap_offset, uint8_t next_ptr, uint16_t table_size, uint8_t table_bir, uint32_t table_off, uint8_t pba_bir, uint32_t pba_off) {
+    g_mock.msix_cap_offset = cap_offset;
+    g_mock.msix_table_bar = table_bir;
+    g_mock.msix_table_off = table_off;
+    g_mock.msix_table_size = table_size;
+    g_mock.msix_enabled = false;
+
+    // Table size in msg_ctrl is (table_size - 1)
+    uint16_t msg_ctrl = (table_size > 0) ? static_cast<uint16_t>((table_size - 1) & PCI_MSIX_CTRL_TABLE_SIZE) : 0;
+    g_mock.msix_msg_ctrl = msg_ctrl;
+
+    g_mock.pci_config[cap_offset + 0] = PCI_CAP_ID_MSIX; // 0x11
+    g_mock.pci_config[cap_offset + 1] = next_ptr;
+    std::memcpy(&g_mock.pci_config[cap_offset + 2], &msg_ctrl, 2);
+
+    uint32_t table_reg = (table_off & PCI_MSIX_OFFSET_MASK) | (table_bir & PCI_MSIX_BIR_MASK);
+    std::memcpy(&g_mock.pci_config[cap_offset + 4], &table_reg, 4);
+
+    uint32_t pba_reg = (pba_off & PCI_MSIX_OFFSET_MASK) | (pba_bir & PCI_MSIX_BIR_MASK);
+    std::memcpy(&g_mock.pci_config[cap_offset + 8], &pba_reg, 4);
+
+    // Initialize table entries in BAR table_bir as masked
+    if (table_bir < 6) {
+        auto& bar = g_mock.bars[table_bir];
+        size_t total_table_bytes = static_cast<size_t>(table_size) * sizeof(PciMsixTableEntry);
+        if (table_off + total_table_bytes <= bar.mem.size()) {
+            for (uint16_t i = 0; i < table_size; ++i) {
+                auto* e = reinterpret_cast<PciMsixTableEntry*>(&bar.mem[table_off + i * sizeof(PciMsixTableEntry)]);
+                e->msg_addr_low = 0;
+                e->msg_addr_high = 0;
+                e->msg_data = 0;
+                e->vector_ctrl = 1; // Initially masked
+            }
+        }
+    }
+
+    return cap_offset;
+}
+
+uint8_t setup_msi_cap(uint8_t cap_offset, uint8_t next_ptr, bool is_64bit, bool has_pvm, uint8_t mmc_bits = 0) {
+    g_mock.msi_cap_offset = cap_offset;
+    g_mock.msi_enabled = false;
+
+    uint16_t msg_ctrl = static_cast<uint16_t>((mmc_bits & 0x7) << PCI_MSI_CTRL_MMC_SHIFT);
+    if (is_64bit) msg_ctrl |= PCI_MSI_CTRL_64BIT;
+    if (has_pvm) msg_ctrl |= PCI_MSI_CTRL_PVM;
+    g_mock.msi_msg_ctrl = msg_ctrl;
+
+    g_mock.pci_config[cap_offset + 0] = PCI_CAP_ID_MSI; // 0x05
+    g_mock.pci_config[cap_offset + 1] = next_ptr;
+    std::memcpy(&g_mock.pci_config[cap_offset + 2], &msg_ctrl, 2);
+
+    return cap_offset;
+}
+
+static bool setup_mock_rng_device_msix(VirtioPciDevice* dev, uint16_t table_size = 4, uint8_t table_bar = 1) {
+    g_mock.reset();
+    setup_pci_hdr(0x1AF4, 0x1044, 0x1AF4, 0x0004);
+    std::vector<CapBuilderEntry> caps = {
+        {VIRTIO_PCI_CAP_COMMON_CFG, 0, 0x000, 56, 0},
+        {VIRTIO_PCI_CAP_NOTIFY_CFG, 0, 0x1000, 0x1000, 4},
+        {VIRTIO_PCI_CAP_ISR_CFG,    0, 0x080, 1,  0}
+    };
+    build_cap_chain(caps, 0x88);
+    setup_msix_cap(0x88, 0, table_size, table_bar, 0x000, table_bar, 0x800);
+    wire_virtio_mmio(0, 0x000, 0x080);
+    g_mock.queues[0].size = 16;
+    return virtio_pci_probe(0, 4, 0, dev, 0);
+}
+
+static bool setup_mock_blk_device_msix(VirtioPciDevice* dev,
+                                       uint64_t capacity_sectors = 2048,
+                                       uint32_t blk_size = 512,
+                                       uint16_t table_size = 4,
+                                       uint8_t table_bar = 1) {
+    g_mock.reset();
+    setup_pci_hdr(0x1AF4, 0x1042, 0x1AF4, 0x0002);
+    std::vector<CapBuilderEntry> caps = {
+        {VIRTIO_PCI_CAP_COMMON_CFG, 0, 0x000, 56, 0},
+        {VIRTIO_PCI_CAP_NOTIFY_CFG, 0, 0x1000, 0x1000, 4},
+        {VIRTIO_PCI_CAP_ISR_CFG,    0, 0x080, 1,  0},
+        {VIRTIO_PCI_CAP_DEVICE_CFG, 0, 0x100, 64, 0}
+    };
+    build_cap_chain(caps, 0xA0);
+    setup_msix_cap(0xA0, 0, table_size, table_bar, 0x000, table_bar, 0x800);
+    wire_virtio_mmio(0, 0x000, 0x080);
+    g_mock.queues[0].size = 32;
+
+    uint64_t feat = VIRTIO_F_VERSION_1 | VIRTIO_BLK_F_FLUSH | VIRTIO_BLK_F_SIZE_MAX | VIRTIO_BLK_F_SEG_MAX;
+    if (blk_size != 512) {
+        feat |= VIRTIO_BLK_F_BLK_SIZE;
+    }
+    g_mock.device_features = feat;
+
+    std::memcpy(&g_mock.bars[0].mem[0x100], &capacity_sectors, sizeof(capacity_sectors));
+    uint32_t size_max = 131072;
+    std::memcpy(&g_mock.bars[0].mem[0x108], &size_max, sizeof(size_max));
+    uint32_t seg_max = 64;
+    std::memcpy(&g_mock.bars[0].mem[0x10C], &seg_max, sizeof(seg_max));
+    std::memcpy(&g_mock.bars[0].mem[0x114], &blk_size, sizeof(blk_size));
+
+    return virtio_pci_probe(0, 4, 0, dev, 0);
 }
 
 } // namespace
@@ -2829,6 +3109,423 @@ void test_virtio_blk_stress_host() {
 }
 
 // ============================================================================
+// NOWE TESTY GENERIC PCI MSI / MSI-X ORAZ INTEGRACJI Z VIRTIO
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+// 67. Poprawne MSI (parsowanie 32/64-bit, wlaczenie, PVM mask/unmask, wylaczenie)
+// ----------------------------------------------------------------------------
+void test_msi_parsing_and_enable() {
+    // 1. MSI 32-bit bez PVM
+    g_mock.reset();
+    setup_pci_hdr(0x1AF4, 0x1044, 0x1AF4, 0x0004);
+    g_mock.pci_config[0x34] = 0x40;
+    setup_msi_cap(0x40, 0, false, false, 2); // MMC = 4 messages (mmc_bits=2)
+
+    PciMsiCapability msi{};
+    TEST_ASSERT(pci_find_msi(0, 4, 0, &msi), "pci_find_msi dla 32-bit MSI");
+    TEST_ASSERT(msi.cap_offset == 0x40, "msi cap_offset == 0x40");
+    TEST_ASSERT(!msi.is_64bit, "msi !is_64bit");
+    TEST_ASSERT(!msi.has_pvm, "msi !has_pvm");
+    TEST_ASSERT(msi.multiple_msg_capable == 4, "msi MMC == 4");
+
+    TEST_ASSERT(pci_msi_enable(0, 4, 0, &msi, 1, 0x33), "pci_msi_enable dla 32-bit");
+    TEST_ASSERT(g_mock.msi_enabled, "g_mock.msi_enabled == true");
+    uint16_t cmd = 0;
+    std::memcpy(&cmd, &g_mock.pci_config[0x04], 2);
+    TEST_ASSERT((cmd & PCI_COMMAND_INT_DISABLE) != 0, "PCI INTx zablokowane po wlaczeniu MSI");
+
+    uint32_t addr_low = 0;
+    std::memcpy(&addr_low, &g_mock.pci_config[0x44], 4);
+    TEST_ASSERT(addr_low == (0xFEE00000U | (1U << 12)), "MSI msg_addr_low zaprogramowane z APIC ID 1");
+
+    uint16_t data = 0;
+    std::memcpy(&data, &g_mock.pci_config[0x48], 2);
+    TEST_ASSERT(data == 0x33, "MSI msg_data zaprogramowane z wektorem 0x33");
+
+    pci_msi_disable(0, 4, 0, &msi);
+    TEST_ASSERT(!g_mock.msi_enabled, "g_mock.msi_enabled == false po wylaczeniu");
+
+    // 2. MSI 64-bit z PVM
+    g_mock.reset();
+    setup_pci_hdr(0x1AF4, 0x1044, 0x1AF4, 0x0004);
+    g_mock.pci_config[0x34] = 0x40;
+    setup_msi_cap(0x40, 0, true, true, 0);
+
+    TEST_ASSERT(pci_find_msi(0, 4, 0, &msi), "pci_find_msi dla 64-bit z PVM");
+    TEST_ASSERT(msi.is_64bit, "msi is_64bit");
+    TEST_ASSERT(msi.has_pvm, "msi has_pvm");
+
+    TEST_ASSERT(pci_msi_enable(0, 4, 0, &msi, 2, 0x55), "pci_msi_enable dla 64-bit z PVM");
+    TEST_ASSERT(g_mock.msi_enabled, "g_mock.msi_enabled == true");
+
+    std::memcpy(&addr_low, &g_mock.pci_config[0x44], 4);
+    TEST_ASSERT(addr_low == (0xFEE00000U | (2U << 12)), "MSI 64-bit msg_addr_low poprawny");
+
+    uint32_t addr_high = 0;
+    std::memcpy(&addr_high, &g_mock.pci_config[0x48], 4);
+    TEST_ASSERT(addr_high == 0, "MSI 64-bit msg_addr_high == 0");
+
+    std::memcpy(&data, &g_mock.pci_config[0x4C], 2);
+    TEST_ASSERT(data == 0x55, "MSI 64-bit msg_data == 0x55");
+
+    uint32_t mask_reg = 0xFFFFFFFF;
+    std::memcpy(&mask_reg, &g_mock.pci_config[0x50], 4);
+    TEST_ASSERT(mask_reg == 0, "PVM mask odmaskowane na starcie");
+
+    pci_msi_set_mask(0, 4, 0, &msi, true);
+    std::memcpy(&mask_reg, &g_mock.pci_config[0x50], 4);
+    TEST_ASSERT(mask_reg == 0xFFFFFFFF, "PVM mask zamaskowane po pci_msi_set_mask(true)");
+
+    pci_msi_set_mask(0, 4, 0, &msi, false);
+    std::memcpy(&mask_reg, &g_mock.pci_config[0x50], 4);
+    TEST_ASSERT(mask_reg == 0, "PVM mask odmaskowane po pci_msi_set_mask(false)");
+
+    pci_msi_disable(0, 4, 0, &msi);
+    TEST_ASSERT(!g_mock.msi_enabled, "g_mock.msi_enabled == false");
+    std::memcpy(&mask_reg, &g_mock.pci_config[0x50], 4);
+    TEST_ASSERT(mask_reg == 0xFFFFFFFF, "PVM mask zamaskowane po pci_msi_disable");
+}
+
+// ----------------------------------------------------------------------------
+// 68. Poprawne MSI-X (parsowanie, granice tabeli, wlaczenie, wylaczenie)
+// ----------------------------------------------------------------------------
+void test_msix_parsing_and_bounds() {
+    g_mock.reset();
+    setup_pci_hdr(0x1AF4, 0x1044, 0x1AF4, 0x0004);
+    g_mock.pci_config[0x34] = 0x40;
+    setup_msix_cap(0x40, 0, 8, 1, 0x1000, 1, 0x2000);
+
+    PciMsixCapability msix{};
+    TEST_ASSERT(pci_find_msix(0, 4, 0, &msix), "pci_find_msix");
+    TEST_ASSERT(msix.cap_offset == 0x40, "cap_offset == 0x40");
+    TEST_ASSERT(msix.table_size == 8, "table_size == 8");
+    TEST_ASSERT(msix.table_bir == 1, "table_bir == 1");
+    TEST_ASSERT(msix.table_offset == 0x1000, "table_offset == 0x1000");
+    TEST_ASSERT(msix.pba_bir == 1, "pba_bir == 1");
+    TEST_ASSERT(msix.pba_offset == 0x2000, "pba_offset == 0x2000");
+
+    TEST_ASSERT(pci_msix_validate_bar_bounds(&msix, 0x4000, 0x4000), "validate_bar_bounds z 16 KiB BAR");
+
+    TEST_ASSERT(pci_msix_enable(0, 4, 0, &msix), "pci_msix_enable");
+    TEST_ASSERT(g_mock.msix_enabled, "g_mock.msix_enabled == true");
+    uint16_t cmd = 0;
+    std::memcpy(&cmd, &g_mock.pci_config[0x04], 2);
+    TEST_ASSERT((cmd & PCI_COMMAND_INT_DISABLE) != 0, "PCI INTx zablokowane po wlaczeniu MSI-X");
+    TEST_ASSERT((g_mock.msix_msg_ctrl & PCI_MSIX_CTRL_FUNC_MASK) == 0, "Function Mask wyczyszczone");
+
+    pci_msix_disable(0, 4, 0, &msix);
+    TEST_ASSERT(!g_mock.msix_enabled, "g_mock.msix_enabled == false po pci_msix_disable");
+    TEST_ASSERT((g_mock.msix_msg_ctrl & PCI_MSIX_CTRL_FUNC_MASK) != 0, "Function Mask ustawione po pci_msix_disable");
+}
+
+// ----------------------------------------------------------------------------
+// 69. Zdeformowane capabilities (wykrywanie petli, offset < 0x40, nieprawidlowe dopasowanie)
+// ----------------------------------------------------------------------------
+void test_malformed_capabilities() {
+    // a. Petla w lancuchu capabilities (0x40 -> 0x60 -> 0x40)
+    g_mock.reset();
+    setup_pci_hdr(0x1AF4, 0x1044, 0x1AF4, 0x0004);
+    g_mock.pci_config[0x34] = 0x40;
+
+    g_mock.pci_config[0x40] = 0x09; // VNDR
+    g_mock.pci_config[0x41] = 0x60; // points to 0x60
+
+    g_mock.pci_config[0x60] = 0x09; // VNDR
+    g_mock.pci_config[0x61] = 0x40; // loops back to 0x40!
+
+    TEST_ASSERT(pci_find_capability(0, 4, 0, PCI_CAP_ID_MSIX) == 0, "Wykrycie petli zwraca 0 bez zawieszenia");
+
+    // b. Offset < 0x40 (np. 0x20 w standardowym naglowku)
+    g_mock.reset();
+    setup_pci_hdr(0x1AF4, 0x1044, 0x1AF4, 0x0004);
+    g_mock.pci_config[0x34] = 0x20;
+    TEST_ASSERT(pci_find_capability(0, 4, 0, PCI_CAP_ID_MSIX) == 0, "Offset < 0x40 odrzucony");
+
+    // c. Niezaalokowane / niepelne capability na koncu przestrzeni (offset 0xF8 dla MSI-X wymagajacego 12 B)
+    g_mock.reset();
+    setup_pci_hdr(0x1AF4, 0x1044, 0x1AF4, 0x0004);
+    g_mock.pci_config[0x34] = 0xF8;
+    g_mock.pci_config[0xF8] = PCI_CAP_ID_MSIX;
+    g_mock.pci_config[0xF9] = 0x00;
+
+    PciMsixCapability msix{};
+    TEST_ASSERT(!pci_find_msix(0, 4, 0, &msix), "Uciete capability MSI-X (0xF8 + 12 > 256) odrzucone");
+
+    // d. Uciete capability MSI 64-bit z PVM na koncu (offset 0xF0 dla 24 B)
+    g_mock.reset();
+    setup_pci_hdr(0x1AF4, 0x1044, 0x1AF4, 0x0004);
+    g_mock.pci_config[0x34] = 0xF0;
+    setup_msi_cap(0xF0, 0, true, true, 0); // Wymaga 24 B (0xF0 + 24 = 0x108 > 256)
+    PciMsiCapability msi{};
+    TEST_ASSERT(!pci_find_msi(0, 4, 0, &msi), "Uciete capability MSI (0xF0 + 24 > 256) odrzucone");
+}
+
+// ----------------------------------------------------------------------------
+// 70. Nieprawidlowy BIR w MSI-X (fail-closed)
+// ----------------------------------------------------------------------------
+void test_msix_invalid_bir() {
+    g_mock.reset();
+    setup_pci_hdr(0x1AF4, 0x1044, 0x1AF4, 0x0004);
+    g_mock.pci_config[0x34] = 0x40;
+
+    // Table BIR = 6 (nieistniejacy BAR, dopuszczalne 0..5)
+    setup_msix_cap(0x40, 0, 4, 6, 0x000, 1, 0x800);
+    PciMsixCapability msix{};
+    TEST_ASSERT(!pci_find_msix(0, 4, 0, &msix), "MSI-X z table BIR == 6 odrzucone");
+
+    // PBA BIR = 7
+    setup_msix_cap(0x40, 0, 4, 1, 0x000, 7, 0x800);
+    TEST_ASSERT(!pci_find_msix(0, 4, 0, &msix), "MSI-X z PBA BIR == 7 odrzucone");
+
+    msix.table_bir = 6;
+    msix.pba_bir = 1;
+    msix.table_size = 4;
+    TEST_ASSERT(!pci_msix_validate_bar_bounds(&msix, 0x4000, 0x4000), "validate_bar_bounds odrzuca BIR >= 6");
+}
+
+// ----------------------------------------------------------------------------
+// 71. Przekroczenie granic BAR przez tabele MSI-X i ochrona arytmetyczna
+// ----------------------------------------------------------------------------
+void test_msix_table_bounds_overflow() {
+    PciMsixCapability msix{};
+    msix.table_bir = 1;
+    msix.pba_bir = 1;
+    msix.table_size = 4; // 4 * 16 = 64 B
+    msix.table_offset = 0x1000;
+    msix.pba_offset = 0x2000;
+
+    // 1. Rozmiar BAR za maly dla table_offset + table_size * 16
+    TEST_ASSERT(!pci_msix_validate_bar_bounds(&msix, 0x1020, 0x4000), "BAR za maly dla tabeli");
+
+    // 2. table_offset poza rozmiarem BAR
+    msix.table_offset = 0x5000;
+    TEST_ASSERT(!pci_msix_validate_bar_bounds(&msix, 0x4000, 0x4000), "table_offset > bar_size");
+
+    // 3. Rozmiar BAR = 0
+    msix.table_offset = 0;
+    TEST_ASSERT(!pci_msix_validate_bar_bounds(&msix, 0, 0x4000), "table_bar_size == 0");
+
+    // 4. Przepelnienie arytmetyczne offsetu (table_offset bliski UINT64_MAX)
+    msix.table_offset = 0xFFFFFFF8U;
+    TEST_ASSERT(!pci_msix_validate_bar_bounds(&msix, 0x4000, 0x4000), "Arithmetic overflow table_offset");
+
+    // 5. table_size == 0 lub > 2048
+    msix.table_offset = 0;
+    msix.table_size = 0;
+    TEST_ASSERT(!pci_msix_validate_bar_bounds(&msix, 0x4000, 0x4000), "table_size == 0 odrzucone");
+
+    msix.table_size = 2049;
+    TEST_ASSERT(!pci_msix_validate_bar_bounds(&msix, 0x100000, 0x100000), "table_size > 2048 odrzucone");
+}
+
+// ----------------------------------------------------------------------------
+// 72. Dynamiczny alokator wektorow IDT i bezpieczne zwalnianie
+// ----------------------------------------------------------------------------
+void test_idt_dynamic_vector_allocator() {
+    TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 0, "Poczatkowo 0 zaalokowanych wektorow IDT");
+
+    // 1. Pojedyncza alokacja i rejestracja
+    int v1 = idt_alokuj_wektor_irq();
+    TEST_ASSERT(v1 >= IDT_PIERWSZY_WEKTOR_DYNAMICZNY && v1 <= IDT_OSTATNI_WEKTOR_DYNAMICZNY,
+                "Wektor w dozwolonym zakresie dynamicznym (48..254)");
+    TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 1, "Zaalokowano 1 wektor");
+
+    bool handler_called = false;
+    auto mock_isr = [](void* ctx) {
+        *static_cast<bool*>(ctx) = true;
+    };
+    TEST_ASSERT(idt_zarejestruj_irq(static_cast<uint8_t>(v1), mock_isr, &handler_called), "Rejestracja handlera IRQ");
+
+    mock_trigger_irq(static_cast<uint8_t>(v1));
+    TEST_ASSERT(handler_called, "Handler poprawnie wywolany przez mock_trigger_irq");
+
+    // 2. Wyrejestrowanie i zwalnianie
+    TEST_ASSERT(idt_wyrejestruj_irq(static_cast<uint8_t>(v1)), "Wyrejestrowanie IRQ");
+    handler_called = false;
+    mock_trigger_irq(static_cast<uint8_t>(v1));
+    TEST_ASSERT(!handler_called, "Handler nie jest wywolywany po wyrejestrowaniu");
+
+    TEST_ASSERT(idt_zwolnij_wektor_irq(static_cast<uint8_t>(v1)), "Zwolnienie wektora IRQ");
+    TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 0, "Brak aktywnych wektorow po zwolnieniu");
+
+    // 3. Podwojne zwalnianie i niepoprawne wektory
+    TEST_ASSERT(!idt_zwolnij_wektor_irq(static_cast<uint8_t>(v1)), "Podwojne zwolnienie odrzucone");
+    TEST_ASSERT(!idt_zwolnij_wektor_irq(32), "Zwolnienie wektora statycznego < 48 odrzucone");
+    TEST_ASSERT(!idt_zwolnij_wektor_irq(255), "Zwolnienie wektora 255 odrzucone");
+
+    // 4. Test wyczerpania puli (wszystkie 207 wektorow 48..254)
+    std::vector<int> vecs;
+    for (int i = 0; i < 207; ++i) {
+        int v = idt_alokuj_wektor_irq();
+        TEST_ASSERT(v >= 0, "Alokacja wektora z puli");
+        vecs.push_back(v);
+    }
+    TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 207, "Zaalokowano wszystkie 207 wektorow");
+    TEST_ASSERT(idt_alokuj_wektor_irq() == -1, "Wyczerpana pula zwraca -1");
+
+    for (int v : vecs) {
+        TEST_ASSERT(idt_zwolnij_wektor_irq(static_cast<uint8_t>(v)), "Zwolnienie wektora z pelnej puli");
+    }
+    TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 0, "Pula calkowicie pusta po zwolnieniu");
+}
+
+// ----------------------------------------------------------------------------
+// 73. Indywidualne programowanie i maskowanie wpisow tabeli MSI-X
+// ----------------------------------------------------------------------------
+void test_msix_entry_programming_and_masking() {
+    PciMsixTableEntry table[4]{};
+    for (int i = 0; i < 4; ++i) {
+        table[i].vector_ctrl = 1; // domyslnie zamaskowane
+    }
+
+    // 1. Programowanie wpisu 0 z unmask
+    TEST_ASSERT(pci_msix_program_entry(table, 4, 0, 3, 0x48, false), "Programowanie wpisu 0");
+    TEST_ASSERT(table[0].msg_addr_low == (0xFEE00000U | (3U << 12)), "msg_addr_low z APIC ID 3");
+    TEST_ASSERT(table[0].msg_addr_high == 0, "msg_addr_high == 0");
+    TEST_ASSERT(table[0].msg_data == 0x48, "msg_data == 0x48");
+    TEST_ASSERT(!pci_msix_is_entry_masked(table, 4, 0), "Wpis 0 odmaskowany");
+
+    // 2. Maskowanie wpisu 0
+    TEST_ASSERT(pci_msix_mask_entry(table, 4, 0), "Maskowanie wpisu 0");
+    TEST_ASSERT(pci_msix_is_entry_masked(table, 4, 0), "Wpis 0 zamaskowany po pci_msix_mask_entry");
+
+    // 3. Odmaskowanie wpisu 0
+    TEST_ASSERT(pci_msix_unmask_entry(table, 4, 0), "Odmaskowanie wpisu 0");
+    TEST_ASSERT(!pci_msix_is_entry_masked(table, 4, 0), "Wpis 0 odmaskowany po pci_msix_unmask_entry");
+
+    // 4. Proba zapisu poza granice tabeli (indeks 4 przy rozmiarze 4)
+    TEST_ASSERT(!pci_msix_program_entry(table, 4, 4, 3, 0x48, false), "Odrzucenie zapisu poza tabela");
+    TEST_ASSERT(!pci_msix_mask_entry(table, 4, 4), "Odrzucenie maskowania poza tabela");
+    TEST_ASSERT(!pci_msix_unmask_entry(table, 4, 4), "Odrzucenie odmaskowania poza tabela");
+    TEST_ASSERT(pci_msix_is_entry_masked(table, 4, 4), "Odpytanie o indeks poza tabela zwraca masked (failsafe)");
+}
+
+// ----------------------------------------------------------------------------
+// 74. Przypisywanie i odlaczanie wektora MSI-X dla kolejek VirtIO
+// ----------------------------------------------------------------------------
+void test_virtio_queue_msix_vector_assignment() {
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_rng_device_msix(&dev), "Probe urzadzenia VirtIO z MSI-X");
+    TEST_ASSERT(dev.has_msix, "Urzadzenie obsluguje MSI-X");
+
+    // 1. Przypisanie wpisu MSI-X 1 do kolejki 0
+    TEST_ASSERT(virtio_pci_set_queue_msix_vector_checked(&dev, 0, 1), "Przypisanie wpisu 1 do kolejki 0");
+    TEST_ASSERT(virtio_pci_get_queue_msix_vector(&dev) == 1, "Potwierdzenie odczytu wpisu 1");
+
+    // 2. Odlaczenie wektora (VIRTIO_MSI_NO_VECTOR = 0xFFFF)
+    TEST_ASSERT(virtio_pci_set_queue_msix_vector_checked(&dev, 0, VIRTIO_MSI_NO_VECTOR), "Odlaczenie wektora kolejki 0");
+    TEST_ASSERT(virtio_pci_get_queue_msix_vector(&dev) == VIRTIO_MSI_NO_VECTOR, "Kolejka 0 potwierdza VIRTIO_MSI_NO_VECTOR");
+
+    // 3. Konfiguracja wektora konfiguracyjnego urzadzenia (config_msix_vector)
+    virtio_pci_set_config_msix_vector(&dev, 2);
+    TEST_ASSERT(virtio_pci_get_config_msix_vector(&dev) == 2, "config_msix_vector == 2");
+    virtio_pci_set_config_msix_vector(&dev, VIRTIO_MSI_NO_VECTOR);
+    TEST_ASSERT(virtio_pci_get_config_msix_vector(&dev) == VIRTIO_MSI_NO_VECTOR, "config_msix_vector == NO_VECTOR");
+
+    virtio_pci_cleanup(&dev);
+}
+
+// ----------------------------------------------------------------------------
+// 75. Dostarczanie przerwan MSI-X i bezpieczenstwo teardown (brak wyciekow)
+// ----------------------------------------------------------------------------
+void test_virtio_msix_delivery_and_teardown_safety() {
+    virtio_rng_reset();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_rng_device_msix(&dev), "Probe urzadzenia RNG z MSI-X");
+    TEST_ASSERT(virtio_rng_init(&dev), "Inicjalizacja sterownika VirtIO-RNG z MSI-X");
+
+    VirtioRngDriver* drv = virtio_rng_get_driver();
+    TEST_ASSERT(drv != nullptr, "Dostep do drv");
+    TEST_ASSERT(drv->use_msix, "drv->use_msix == true");
+    TEST_ASSERT(drv->irq_vector >= IDT_PIERWSZY_WEKTOR_DYNAMICZNY && drv->irq_vector <= IDT_OSTATNI_WEKTOR_DYNAMICZNY,
+                "Zaalokowany wektor IRQ w zakresie IDT");
+    TEST_ASSERT(drv->irq_count == 0, "Poczatkowa liczba zgloszonych IRQ == 0");
+    TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 1, "Dokladnie 1 wektor IDT zaalokowany");
+
+    // 1. Zlecenie losowych danych i weryfikacja obslugi przez ISR
+    g_mock.rng_auto_process = true;
+    g_mock.rng_fill_byte = 0x7E;
+
+    uint8_t buf[32]{};
+    size_t n = virtio_rng_read(buf, sizeof(buf));
+    TEST_ASSERT(n == sizeof(buf), "Odczyt 32 bajtow losowych");
+    TEST_ASSERT(buf[0] == 0x7E && buf[31] == 0x7E, "Poprawne dane w buforze");
+    TEST_ASSERT(drv->irq_count == 1, "Dokladnie 1 przerwanie MSI-X dostarczone do ISR");
+    TEST_ASSERT(drv->request_done, "Flaga request_done ustawiona w minimalnym ISR");
+
+    // 2. Bezpieczny teardown: maskowanie, wylaczenie MSI-X, reset dev, zwolnienie wektora
+    const uint8_t old_vector = drv->irq_vector;
+    virtio_rng_reset();
+
+    TEST_ASSERT(virtio_pci_is_entry_masked(&dev, 0), "Wpis 0 MSI-X zamaskowany podczas resetu");
+    TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 0, "Wektor IDT zwolniony po resecie");
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Pamiec DMA kolejki zwolniona po resecie");
+
+    // 3. Ewentualne spoznione przerwanie na stary wektor nie uszkadza pamieci
+    mock_trigger_irq(old_vector);
+    TEST_ASSERT(drv->irq_count == 1, "Spoznione przerwanie po wyrejestrowaniu zignorowane bezpiecznie");
+}
+
+// ----------------------------------------------------------------------------
+// 76. Wielokrotne cykle init/reset z MSI-X i weryfikacja braku wyciekow zasobow
+// ----------------------------------------------------------------------------
+void test_virtio_msix_repeated_cycles_no_leak() {
+    TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 0, "Brak wektorow na poczatku testu wielokrotnych cykli");
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Brak buforow DMA na poczatku testu");
+
+    // 20 pelnych cykli init/read/reset dla VirtIO-RNG z MSI-X
+    for (int cycle = 0; cycle < 20; ++cycle) {
+        VirtioPciDevice dev{};
+        TEST_ASSERT(setup_mock_rng_device_msix(&dev), "RNG probe w cyklu");
+        TEST_ASSERT(virtio_rng_init(&dev), "RNG init w cyklu");
+
+        VirtioRngDriver* drv = virtio_rng_get_driver();
+        TEST_ASSERT(drv->use_msix, "RNG uzywa MSI-X w cyklu");
+        TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 1, "Dokladnie 1 wektor zaalokowany");
+
+        g_mock.rng_auto_process = true;
+        uint8_t buf[16]{};
+        TEST_ASSERT(virtio_rng_read(buf, sizeof(buf)) == sizeof(buf), "RNG odczyt w cyklu");
+        TEST_ASSERT(drv->irq_count > 0, "RNG IRQ obsluzone w cyklu");
+
+        virtio_rng_reset();
+        TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 0, "Zero wyciekow wektorow IDT po RNG reset");
+        TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA po RNG reset");
+    }
+
+    // 20 pelnych cykli init/write/read/reset dla VirtIO-BLK z MSI-X
+    for (int cycle = 0; cycle < 20; ++cycle) {
+        virtio_blk_reset_all();
+        VirtioPciDevice bdev{};
+        TEST_ASSERT(setup_mock_blk_device_msix(&bdev), "BLK probe w cyklu");
+        TEST_ASSERT(virtio_blk_init(&bdev), "BLK init w cyklu");
+
+        VirtioBlkDriver* bdrv = virtio_blk_get_driver(0);
+        TEST_ASSERT(bdrv->use_msix, "BLK uzywa MSI-X w cyklu");
+        TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 1, "Dokladnie 1 wektor zaalokowany dla BLK");
+
+        g_mock.blk_auto_process = true;
+        g_mock.blk_disk_data.assign(2048 * 512, 0);
+
+        uint8_t write_buf[512];
+        std::memset(write_buf, 0xAB + cycle, sizeof(write_buf));
+        TEST_ASSERT(bdrv->bdev.write(10, 1, write_buf) == BlockError::Ok, "BLK write w cyklu");
+        TEST_ASSERT(bdrv->irq_count > 0, "BLK write IRQ dostarczone");
+
+        const uint32_t irqs_after_write = bdrv->irq_count;
+        uint8_t read_buf[512]{};
+        TEST_ASSERT(bdrv->bdev.read(10, 1, read_buf) == BlockError::Ok, "BLK read w cyklu");
+        TEST_ASSERT(bdrv->irq_count > irqs_after_write, "BLK read IRQ dostarczone");
+        TEST_ASSERT(std::memcmp(write_buf, read_buf, sizeof(write_buf)) == 0, "Spójność danych dysku");
+
+        virtio_blk_reset_all();
+        TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 0, "Zero wyciekow wektorow IDT po BLK reset");
+        TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA po BLK reset");
+    }
+}
+
+// ============================================================================
 // PUNKT WEJSCIA TESTOW
 // ============================================================================
 
@@ -2905,6 +3602,18 @@ int main() {
     RUN_TEST(test_virtio_blk_repeated_requests_and_recycling);
     RUN_TEST(test_virtio_blk_revalidate);
     RUN_TEST(test_virtio_blk_stress_host);
+
+    // Nowe testy Generic PCI MSI/MSI-X i VirtIO
+    RUN_TEST(test_msi_parsing_and_enable);
+    RUN_TEST(test_msix_parsing_and_bounds);
+    RUN_TEST(test_malformed_capabilities);
+    RUN_TEST(test_msix_invalid_bir);
+    RUN_TEST(test_msix_table_bounds_overflow);
+    RUN_TEST(test_idt_dynamic_vector_allocator);
+    RUN_TEST(test_msix_entry_programming_and_masking);
+    RUN_TEST(test_virtio_queue_msix_vector_assignment);
+    RUN_TEST(test_virtio_msix_delivery_and_teardown_safety);
+    RUN_TEST(test_virtio_msix_repeated_cycles_no_leak);
 
     std::printf("========================================================\n");
     std::printf("PODSUMOWANIE: PASS=%d, FAIL=%d\n", g_pass_count, g_fail_count);

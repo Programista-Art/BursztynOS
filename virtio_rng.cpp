@@ -5,6 +5,8 @@
  */
 
 #include "virtio_rng.h"
+#include "idt.h"
+#include "apic.h"
 
 #ifdef BURSZTYN_VIRTIO_HOST_TEST
 #include <cstdio>
@@ -153,6 +155,13 @@ static bool virtio_rng_is_ready_locked(void) {
     return true;
 }
 
+static void virtio_rng_isr(void* context) {
+    if (!context) return;
+    auto* drv = reinterpret_cast<VirtioRngDriver*>(context);
+    __atomic_add_fetch(&drv->irq_count, 1, __ATOMIC_RELAXED);
+    __atomic_store_n(&drv->request_done, true, __ATOMIC_RELEASE);
+}
+
 /*
  * Wykonuje reset sprzetowy urzadzenia i czysci zasoby sterownika.
  * Funkcja wywolywana pod zalozona blokada g_rng_lock.
@@ -162,6 +171,23 @@ static bool virtio_rng_is_ready_locked(void) {
  */
 static bool virtio_rng_reset_locked(void) {
     bool reset_confirmed = false;
+
+    // Bezpieczenstwo teardown: maskujemy i wylaczamy MSI-X przed zwalnianiem kolejek lub DMA
+    if (g_virtio_rng.use_msix) {
+        if (g_virtio_rng.dev && g_virtio_rng.dev->has_msix) {
+            virtio_pci_mask_msix_entry(g_virtio_rng.dev, 0);
+            pci_msix_disable(g_virtio_rng.dev->bus, g_virtio_rng.dev->slot, g_virtio_rng.dev->func, &g_virtio_rng.dev->msix_cap);
+            g_virtio_rng.dev->msix_enabled = false;
+            virtio_pci_select_queue(g_virtio_rng.dev, 0);
+            virtio_pci_set_queue_msix_vector(g_virtio_rng.dev, VIRTIO_MSI_NO_VECTOR);
+        }
+        if (g_virtio_rng.irq_vector >= 0) {
+            idt_wyrejestruj_irq(static_cast<uint8_t>(g_virtio_rng.irq_vector));
+            idt_zwolnij_wektor_irq(static_cast<uint8_t>(g_virtio_rng.irq_vector));
+            g_virtio_rng.irq_vector = -1;
+        }
+        g_virtio_rng.use_msix = false;
+    }
 
     if (g_virtio_rng.dev != nullptr) {
         // VirtIO 1.x sec 2.4.1: reset rozpoczyna sie od wpisania 0 do device_status
@@ -299,6 +325,31 @@ bool virtio_rng_init(VirtioPciDevice* dev) {
     }
     virtio_rng_secure_zero(dma_v, VIRTIO_RNG_BUFFER_SIZE);
 
+    // Konfiguracja MSI-X jesli urzadzenie obsluguje MSI-X
+    if (dev->has_msix) {
+        int vec = idt_alokuj_wektor_irq();
+        if (vec >= 0) {
+            uint8_t lapic_id = apic_pobierz_lapic_id();
+            if (idt_zarejestruj_irq(static_cast<uint8_t>(vec), virtio_rng_isr, &g_virtio_rng)) {
+                if (virtio_pci_program_msix_entry(dev, 0, lapic_id, static_cast<uint8_t>(vec), false)) {
+                    if (virtio_pci_set_queue_msix_vector_checked(dev, 0, 0)) {
+                        if (pci_msix_enable(dev->bus, dev->slot, dev->func, &dev->msix_cap)) {
+                            dev->msix_enabled = true;
+                            g_virtio_rng.use_msix = true;
+                            g_virtio_rng.irq_vector = vec;
+                            klog_impl("[VIRTIO-RNG] MSI-X configured successfully for queue 0");
+                        }
+                    }
+                }
+            }
+            if (!g_virtio_rng.use_msix) {
+                idt_wyrejestruj_irq(static_cast<uint8_t>(vec));
+                idt_zwolnij_wektor_irq(static_cast<uint8_t>(vec));
+                g_virtio_rng.irq_vector = -1;
+            }
+        }
+    }
+
     // VirtIO 1.0 sec 3.1.1 krok 8:
     // Ustawienie bitu DRIVER_OK dopiero po pelnym przygotowaniu kolejki i buforow sterownika
     status = virtio_pci_get_status(dev);
@@ -386,21 +437,44 @@ size_t virtio_rng_read_bytes(void* dst, size_t max_len, uint64_t timeout_ms) {
             return 0;
         }
 
+        __atomic_store_n(&g_virtio_rng.request_done, false, __ATOMIC_RELEASE);
         virtqueue_kick(vq, true);
 
-        // Oczekiwanie z ograniczeniem czasu monotonicznego i wtornym spin guardem
+        // Oczekiwanie z ograniczeniem czasu monotonicznego: obsluga przerwania MSI-X lub fallback polling
         uint32_t spin_guard = VIRTIO_RNG_MAX_SPINS_GUARD;
-        while (!virtqueue_has_used(vq)) {
-            if (spin_guard > 0) {
-                spin_guard--;
-            } else {
-                break;
+        if (g_virtio_rng.use_msix) {
+            while (!__atomic_load_n(&g_virtio_rng.request_done, __ATOMIC_ACQUIRE) && !virtqueue_has_used(vq)) {
+                if (spin_guard > 0) {
+                    spin_guard--;
+                } else {
+                    break;
+                }
+                const uint64_t now_ns = rng_monotonic_ns();
+                if (now_ns != 0 && now_ns >= deadline_ns) {
+                    break;
+                }
+                asm volatile("pause" ::: "memory");
             }
-            const uint64_t now_ns = rng_monotonic_ns();
-            if (now_ns != 0 && now_ns >= deadline_ns) {
-                break;
+            if (!virtqueue_has_used(vq)) {
+                uint32_t poll_guard = 100000U;
+                while (!virtqueue_has_used(vq) && poll_guard > 0) {
+                    poll_guard--;
+                    asm volatile("pause" ::: "memory");
+                }
             }
-            asm volatile("pause" ::: "memory");
+        } else {
+            while (!virtqueue_has_used(vq)) {
+                if (spin_guard > 0) {
+                    spin_guard--;
+                } else {
+                    break;
+                }
+                const uint64_t now_ns = rng_monotonic_ns();
+                if (now_ns != 0 && now_ns >= deadline_ns) {
+                    break;
+                }
+                asm volatile("pause" ::: "memory");
+            }
         }
 
         if (!virtqueue_has_used(vq)) {

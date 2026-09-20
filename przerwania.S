@@ -291,6 +291,22 @@ ISR_BEZ_KODU 46
 ISR_BEZ_KODU 47     /* Local APIC spurious vector */
 
 /* =========================================================================
+ * WEKTORY DYNAMICZNE IRQ / MSI / MSI-X 48..255
+ * ========================================================================= */
+
+.altmacro
+.macro gen_irq_stub nr
+ISR_BEZ_KODU \nr
+.endm
+
+.set irq_num, 48
+.rept 208
+gen_irq_stub %irq_num
+.set irq_num, irq_num + 1
+.endr
+.noaltmacro
+
+/* =========================================================================
  * ZAPIS / ODTWORZENIE GPR
  * ========================================================================= */
 
@@ -501,6 +517,18 @@ tablica_isr:
     .quad isr45
     .quad isr46
     .quad isr47
+
+.altmacro
+.macro gen_tablica_wpis nr
+    .quad isr\nr
+.endm
+
+.set irq_tab, 48
+.rept 208
+    gen_tablica_wpis %irq_tab
+    .set irq_tab, irq_tab + 1
+.endr
+.noaltmacro
 
 .size tablica_isr, .-tablica_isr
 

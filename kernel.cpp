@@ -31,6 +31,7 @@ extern "C" void odblokuj_ekran();
 #include "instalator.h"
 #include "blokowy.h"
 #include "e1000.h"
+#include "network_device.h"
 #include "siec.h"
 #include "heap.h"
 #include "scheduler.h"
@@ -2251,15 +2252,21 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
 
     inicjalizuj_e1000();
 
-    /*
-     * Obecny stos E1000/DHCP korzysta z dotychczasowego API void,
-     * wiec kernel.cpp nie ma jeszcze wiarygodnej funkcji statusowej
-     * informujacej, czy karta zostala odnaleziona.
-     */
-    uruchom_klienta_dhcp();
+    NetworkDevice* net_dev = net_get_primary_device();
+    if (net_dev) {
+        uruchom_klienta_dhcp();
+        if (brama_ip[0] != 0 || brama_ip[1] != 0 || brama_ip[2] != 0 || brama_ip[3] != 0) {
+            uint8_t brama_mac[6] = {};
+            if (rozwiaz_adres_mac(brama_ip, brama_mac)) {
+                wypisz_log("[SIEC] Brama domyslna (ARP) rozwiazana pomyslnie.");
+            }
+        }
 #if BURSZTYN_DEBUG_NET_SELFTEST
-    wykonaj_selftest_sieci();
+        wykonaj_selftest_sieci();
 #endif
+    } else {
+        wypisz_log("[SIEC] Brak zarejestrowanej karty sieciowej.");
+    }
 
     wypisz_log(
         "[SIEC] Inicjalizacja stosu sieciowego zakonczona.");

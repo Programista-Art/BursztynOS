@@ -1,5 +1,5 @@
 /*
- * Bursztyn OS - stos sieciowy IPv4 dla Intel E1000
+ * Bursztyn OS - stos sieciowy IPv4 (Generic Network Stack)
  *
  * Obslugiwane protokoly:
  *
@@ -42,7 +42,7 @@
  *   - brak pelnego congestion control / retransmission TCP,
  *   - jedna aktywna sesja TCP naraz,
  *   - brak zegarowego TTL ARP cache,
- *   - polling E1000 zamiast kolejki IRQ/worker,
+ *   - polling kart sieciowych zamiast kolejki IRQ/worker,
  *   - DHCP nie implementuje jeszcze renew/rebind lease.
  *
  * Te ograniczenia sa jawne i fail-closed zamiast probowac obslugiwac
@@ -50,7 +50,7 @@
  */
 
 #include "siec.h"
-#include "e1000.h"
+#include "network_device.h"
 #include "sterowniki/czas/hpet.h"
 
 #include <stdint.h>
@@ -68,8 +68,6 @@
 void wypisz_log(
     const char* tekst
 );
-
-extern "C" void e1000_obsluz_odbior();
 
 /* =========================================================================
  * 2. STALE PROTOKOLOW
@@ -1528,7 +1526,7 @@ bool wyslij_ethernet(
     }
 
     /*
-     * Ethernet wymaga min. 60 bajtow bez FCS. E1000 dopisuje FCS.
+     * Ethernet wymaga min. 60 bajtow bez FCS. Karta dopisuje FCS.
      */
     if (dlugosc < 60U) {
         for (size_t i = dlugosc;
@@ -1542,14 +1540,17 @@ bool wyslij_ethernet(
             60U;
     }
 
-    const bool wyslano = e1000_wyslij_pakiet(
+    NetworkDevice* dev = net_get_primary_device();
+    if (!dev) {
+        return false;
+    }
+
+    const NetError err = dev->transmit(
         ramka,
-        static_cast<uint16_t>(
-            dlugosc
-        )
+        dlugosc
     );
 
-    return wyslano;
+    return net_sukces(err);
 }
 
 /* =========================================================================
@@ -1681,7 +1682,7 @@ bool rozwiaz_adres_mac(
         return false;
     }
 
-    /* 127/8 jest przestrzenia loopback i nigdy nie moze trafic do E1000. */
+    /* 127/8 jest przestrzenia loopback i nigdy nie moze trafic na zewnatrz. */
     if (cel_ip[0] == 127U) {
         wypisz_log("[ROUTE] result=NET_ERR_LOOPBACK_UNSUPPORTED");
         return false;
@@ -1763,7 +1764,7 @@ bool rozwiaz_adres_mac(
     const uint64_t arp_deadline = deadline_ms(ARP_TIMEOUT_MS);
     while (czas_monotoniczny_ms() < arp_deadline) {
 
-        e1000_obsluz_odbior();
+        net_poll_rx();
 
         if (szukaj_w_cache_arp(
                 nastepny_hop,
@@ -2299,7 +2300,7 @@ extern "C" void uruchom_klienta_dhcp() {
     const uint64_t offer_deadline = deadline_ms(DHCP_TIMEOUT_MS);
     while (czas_monotoniczny_ms() < offer_deadline) {
 
-        e1000_obsluz_odbior();
+        net_poll_rx();
 
         if (__atomic_load_n(
                 &dhcp_otrzymano_offer,
@@ -2343,7 +2344,7 @@ extern "C" void uruchom_klienta_dhcp() {
     const uint64_t ack_deadline = deadline_ms(DHCP_TIMEOUT_MS);
     while (czas_monotoniczny_ms() < ack_deadline) {
 
-        e1000_obsluz_odbior();
+        net_poll_rx();
 
         if (__atomic_load_n(
                 &dhcp_otrzymano_ack,
@@ -2584,7 +2585,7 @@ extern "C" uint32_t bws_siec_ping(
             ramka,
             sizeof(ramka))) {
 
-        wypisz_log("[ICMP] result=NET_ERR_E1000_TX");
+        wypisz_log("[ICMP] result=NET_ERR_TX");
         return 0;
     }
     wypisz_ip_log("[IP] source=", nasz_ip);
@@ -2593,7 +2594,7 @@ extern "C" uint32_t bws_siec_ping(
     const uint64_t ping_deadline = deadline_ms(PING_TIMEOUT_MS);
     while (czas_monotoniczny_ms() < ping_deadline) {
 
-        e1000_obsluz_odbior();
+        net_poll_rx();
 
         if (__atomic_load_n(
                 &odebrano_pong,
@@ -3122,7 +3123,7 @@ extern "C" bool kernel_siec_dns(
     const uint64_t dns_deadline = deadline_ms(DNS_TIMEOUT_MS);
     while (czas_monotoniczny_ms() < dns_deadline) {
 
-        e1000_obsluz_odbior();
+        net_poll_rx();
 
         if (__atomic_load_n(
                 &dns_odebrano,
@@ -3563,7 +3564,7 @@ bool tcp_czekaj_na_polaczenie() {
     const uint64_t connect_deadline = deadline_ms(TCP_CONNECT_TIMEOUT_MS);
     while (czas_monotoniczny_ms() < connect_deadline) {
 
-        e1000_obsluz_odbior();
+        net_poll_rx();
 
         if (stan_tcp ==
             StanTCP::USTANOWIONY) {
@@ -3907,7 +3908,7 @@ extern "C" int tcp_gniazdo_wyslij(
         /*
          * Dajemy stosowi szanse przetworzyc ACK/RST pomiedzy segmentami.
          */
-        e1000_obsluz_odbior();
+        net_poll_rx();
 
         if (stan_tcp ==
                 StanTCP::ZAMKNIETY ||
@@ -3939,7 +3940,7 @@ extern "C" int tcp_gniazdo_odbierz(
         return -1;
     }
 
-    e1000_obsluz_odbior();
+    net_poll_rx();
 
     const uint32_t dostepne =
         tcp_gniazdo_dostepne();
@@ -4008,7 +4009,7 @@ extern "C" void tcp_gniazdo_zamknij() {
             100000U;
          ++proba) {
 
-        e1000_obsluz_odbior();
+        net_poll_rx();
 
         if (stan_tcp ==
             StanTCP::ZAMKNIETY) {
@@ -4275,7 +4276,7 @@ extern "C" bool kernel_siec_pobierz_http(
     const uint64_t http_deadline = deadline_ms(HTTP_TIMEOUT_MS);
     while (czas_monotoniczny_ms() < http_deadline) {
 
-        e1000_obsluz_odbior();
+        net_poll_rx();
 
         if (stan_tcp ==
                 StanTCP::ZAMKNIETY ||
@@ -5188,7 +5189,7 @@ void obsluz_icmp(
 
     /*
      * Echo Reply tworzymy w osobnym buforze. Nie mutujemy DMA RX bufora
-     * E1000, bo jego lifetime nalezy do sterownika.
+     * karty sieciowej, bo jego lifetime nalezy do sterownika.
      */
     const size_t icmp_len =
         widok.payload_len;

@@ -9,6 +9,8 @@
  */
 
 #include "virtio_blk.h"
+#include "idt.h"
+#include "apic.h"
 
 #ifdef BURSZTYN_VIRTIO_HOST_TEST
 #include <cstdio>
@@ -149,6 +151,13 @@ enum class BlkReqOp {
     Flush
 };
 
+static void virtio_blk_isr(void* context) {
+    if (!context) return;
+    auto* drv = reinterpret_cast<VirtioBlkDriver*>(context);
+    __atomic_add_fetch(&drv->irq_count, 1, __ATOMIC_RELAXED);
+    __atomic_store_n(&drv->request_done, true, __ATOMIC_RELEASE);
+}
+
 /*
  * Wykonuje reset sprzetowy urzadzenia i zwalnia zasoby (kolejke VirtQueue, bufory DMA).
  * W razie timeoutu resetu stosuje KWARANTANNE DMA (nie zwalnia pamieci, aby hypervisor nie uszkodzil pamieci).
@@ -157,6 +166,23 @@ enum class BlkReqOp {
 static bool virtio_blk_reset_locked(VirtioBlkDriver* drv) {
     if (!drv) return false;
     bool reset_confirmed = false;
+
+    // Bezpieczenstwo teardown: maskujemy i wylaczamy MSI-X przed zwalnianiem kolejek lub DMA
+    if (drv->use_msix) {
+        if (drv->dev && drv->dev->has_msix) {
+            virtio_pci_mask_msix_entry(drv->dev, 0);
+            pci_msix_disable(drv->dev->bus, drv->dev->slot, drv->dev->func, &drv->dev->msix_cap);
+            drv->dev->msix_enabled = false;
+            virtio_pci_select_queue(drv->dev, 0);
+            virtio_pci_set_queue_msix_vector(drv->dev, VIRTIO_MSI_NO_VECTOR);
+        }
+        if (drv->irq_vector >= 0) {
+            idt_wyrejestruj_irq(static_cast<uint8_t>(drv->irq_vector));
+            idt_zwolnij_wektor_irq(static_cast<uint8_t>(drv->irq_vector));
+            drv->irq_vector = -1;
+        }
+        drv->use_msix = false;
+    }
 
     if (drv->dev != nullptr) {
         // VirtIO 1.x sec 2.4.1: reset urzadzenia przez wpisanie 0 do device_status
@@ -332,7 +358,7 @@ static BlockError virtio_blk_submit_request_locked(VirtioBlkDriver* drv,
         return BlockError::ResourceFailure;
     }
 
-    // Wymuszenie przetworzenia przez kontroler
+    __atomic_store_n(&drv->request_done, false, __ATOMIC_RELEASE);
     virtqueue_kick(drv->vq, true);
 
     // Oczekiwanie na zakonczenie z ograniczeniem czasu monotonicznego i wtornym spin guardem
@@ -346,27 +372,64 @@ static BlockError virtio_blk_submit_request_locked(VirtioBlkDriver* drv,
     uint32_t completed_len = 0;
     int popped_id = -1;
 
-    while (spin_guard > 0) {
-        spin_guard--;
-        if (virtqueue_has_used(drv->vq)) {
-            popped_id = virtqueue_pop_used(drv->vq, &cookie, &completed_len);
-            if (popped_id >= 0) {
-                completed = true;
+    if (drv->use_msix) {
+        while (spin_guard > 0) {
+            spin_guard--;
+            if (__atomic_load_n(&drv->request_done, __ATOMIC_ACQUIRE) || virtqueue_has_used(drv->vq)) {
+                popped_id = virtqueue_pop_used(drv->vq, &cookie, &completed_len);
+                if (popped_id >= 0) {
+                    completed = true;
+                    break;
+                } else if (popped_id != -1) {
+                    blk_klog("[VIRTIO-BLK] ERROR: virtqueue_pop_used ring corruption");
+                    drv->has_error = true;
+                    virtio_blk_reset_locked(drv);
+                    if (op == BlkReqOp::Read && buf) blk_secure_zero(buf, data_bytes);
+                    return BlockError::IOError;
+                }
+            }
+            const uint64_t now_ns = blk_monotonic_ns();
+            if (now_ns != 0 && now_ns >= deadline_ns) {
                 break;
-            } else if (popped_id != -1) {
-                // Powazne uszkodzenie kolejki (-2, -3, -4)
-                blk_klog("[VIRTIO-BLK] ERROR: virtqueue_pop_used ring corruption");
-                drv->has_error = true;
-                virtio_blk_reset_locked(drv);
-                if (op == BlkReqOp::Read && buf) blk_secure_zero(buf, data_bytes);
-                return BlockError::IOError;
+            }
+            asm volatile("pause" ::: "memory");
+        }
+        if (!completed) {
+            uint32_t poll_guard = 100000U;
+            while (!completed && poll_guard > 0) {
+                poll_guard--;
+                if (virtqueue_has_used(drv->vq)) {
+                    popped_id = virtqueue_pop_used(drv->vq, &cookie, &completed_len);
+                    if (popped_id >= 0) {
+                        completed = true;
+                        break;
+                    }
+                }
+                asm volatile("pause" ::: "memory");
             }
         }
-        const uint64_t now_ns = blk_monotonic_ns();
-        if (now_ns != 0 && now_ns >= deadline_ns) {
-            break;
+    } else {
+        while (spin_guard > 0) {
+            spin_guard--;
+            if (virtqueue_has_used(drv->vq)) {
+                popped_id = virtqueue_pop_used(drv->vq, &cookie, &completed_len);
+                if (popped_id >= 0) {
+                    completed = true;
+                    break;
+                } else if (popped_id != -1) {
+                    blk_klog("[VIRTIO-BLK] ERROR: virtqueue_pop_used ring corruption");
+                    drv->has_error = true;
+                    virtio_blk_reset_locked(drv);
+                    if (op == BlkReqOp::Read && buf) blk_secure_zero(buf, data_bytes);
+                    return BlockError::IOError;
+                }
+            }
+            const uint64_t now_ns = blk_monotonic_ns();
+            if (now_ns != 0 && now_ns >= deadline_ns) {
+                break;
+            }
+            asm volatile("pause" ::: "memory");
         }
-        asm volatile("pause" ::: "memory");
     }
 
     if (!completed && virtqueue_has_used(drv->vq)) {
@@ -764,10 +827,48 @@ bool virtio_blk_init(VirtioPciDevice* dev) {
         return false;
     }
 
+    // Konfiguracja MSI-X dla dysku (jesli urzadzenie obsluguje MSI-X)
+    if (dev->has_msix) {
+        int vec = idt_alokuj_wektor_irq();
+        if (vec >= 0) {
+            uint8_t lapic_id = apic_pobierz_lapic_id();
+            if (idt_zarejestruj_irq(static_cast<uint8_t>(vec), virtio_blk_isr, drv)) {
+                if (virtio_pci_program_msix_entry(dev, 0, lapic_id, static_cast<uint8_t>(vec), false)) {
+                    if (virtio_pci_set_queue_msix_vector_checked(dev, 0, 0)) {
+                        if (pci_msix_enable(dev->bus, dev->slot, dev->func, &dev->msix_cap)) {
+                            dev->msix_enabled = true;
+                            drv->use_msix = true;
+                            drv->irq_vector = vec;
+                            blk_klog("[VIRTIO-BLK] MSI-X configured successfully (entry 0)");
+                        }
+                    }
+                }
+            }
+            if (!drv->use_msix) {
+                idt_wyrejestruj_irq(static_cast<uint8_t>(vec));
+                idt_zwolnij_wektor_irq(static_cast<uint8_t>(vec));
+                drv->irq_vector = -1;
+            }
+        }
+    }
+
     // Krok 5: Ustawienie DRIVER_OK wylacznie po pelnej gotowosci kolejki i struktur
     virtio_pci_set_status(dev, virtio_pci_get_status(dev) | VIRTIO_STATUS_DRIVER_OK);
     if ((virtio_pci_get_status(dev) & VIRTIO_STATUS_DRIVER_OK) == 0) {
         blk_klog("[VIRTIO-BLK] Device rejected DRIVER_OK");
+        if (drv->use_msix) {
+            virtio_pci_mask_msix_entry(dev, 0);
+            pci_msix_disable(dev->bus, dev->slot, dev->func, &dev->msix_cap);
+            dev->msix_enabled = false;
+            virtio_pci_select_queue(dev, 0);
+            virtio_pci_set_queue_msix_vector(dev, VIRTIO_MSI_NO_VECTOR);
+            if (drv->irq_vector >= 0) {
+                idt_wyrejestruj_irq(static_cast<uint8_t>(drv->irq_vector));
+                idt_zwolnij_wektor_irq(static_cast<uint8_t>(drv->irq_vector));
+                drv->irq_vector = -1;
+            }
+            drv->use_msix = false;
+        }
         virtqueue_destroy(drv->vq);
         drv->vq = nullptr;
         blk_dma_free(drv->data_vaddr, drv->data_paddr, drv->data_pages);

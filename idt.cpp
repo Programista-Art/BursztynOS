@@ -17,6 +17,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include "idt.h"
 #include "scheduler.h"
 #include "pzb.h"
 #include "stos_jadra.h"
@@ -58,7 +59,15 @@ constexpr uint16_t SELEKTOR_KODU_JADRA = 0x08;
 constexpr uint8_t FLAGA_INTERRUPT_GATE_RING0 = 0x8E;
 
 constexpr uint16_t LICZBA_WPISOW_IDT = 256;
-constexpr uint16_t LICZBA_AKTYWNYCH_ISR = 48;
+constexpr uint16_t LICZBA_AKTYWNYCH_ISR = 256;
+
+struct DynamicznyIrqWpis {
+    IrqHandlerFn handler;
+    void* context;
+};
+
+static DynamicznyIrqWpis dynamiczne_irq[LICZBA_WPISOW_IDT] = {};
+static uint8_t wektory_zaalokowane[(LICZBA_WPISOW_IDT + 7) / 8] = {};
 
 constexpr uint8_t WEKTOR_TIMERA = 32;
 constexpr uint8_t WEKTOR_KLAWIATURY = 33;
@@ -845,11 +854,12 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
             break;
 
         default:
-            /*
-             * Pozostale wektory 34..46 sa obecnie zarezerwowane.
-             * Jezeli Local APIC raportuje je jako in-service,
-             * nalezy je zakonczyc EOI, aby nie zablokowac APIC.
-             */
+            if (wektor >= IDT_PIERWSZY_WEKTOR_DYNAMICZNY && wektor <= IDT_OSTATNI_WEKTOR_DYNAMICZNY) {
+                DynamicznyIrqWpis wpis = dynamiczne_irq[wektor];
+                if (wpis.handler) {
+                    wpis.handler(wpis.context);
+                }
+            }
             break;
     }
 
@@ -988,3 +998,86 @@ extern "C" void InicjalizujIDT() {
     przywroc_przerwania(
         stare_rflags);
 }
+
+/* =========================================================================
+ * DYNAMICZNE ZARZADZANIE WEKTORAMI IRQ (MSI / MSI-X)
+ * ========================================================================= */
+
+extern "C" int idt_alokuj_wektor_irq(void) {
+    const uint64_t rflags = zapisz_i_wylacz_przerwania();
+    int zaalokowany = -1;
+    for (int v = IDT_PIERWSZY_WEKTOR_DYNAMICZNY; v <= IDT_OSTATNI_WEKTOR_DYNAMICZNY; ++v) {
+        const int bajt = v / 8;
+        const int bit = v % 8;
+        if ((wektory_zaalokowane[bajt] & (1U << bit)) == 0) {
+            wektory_zaalokowane[bajt] |= static_cast<uint8_t>(1U << bit);
+            dynamiczne_irq[v].handler = nullptr;
+            dynamiczne_irq[v].context = nullptr;
+            zaalokowany = v;
+            break;
+        }
+    }
+    przywroc_przerwania(rflags);
+    return zaalokowany;
+}
+
+extern "C" bool idt_zwolnij_wektor_irq(uint8_t vector) {
+    if (vector < IDT_PIERWSZY_WEKTOR_DYNAMICZNY || vector > IDT_OSTATNI_WEKTOR_DYNAMICZNY) {
+        return false;
+    }
+    const uint64_t rflags = zapisz_i_wylacz_przerwania();
+    const int bajt = vector / 8;
+    const int bit = vector % 8;
+    if ((wektory_zaalokowane[bajt] & (1U << bit)) == 0) {
+        przywroc_przerwania(rflags);
+        return false;
+    }
+    wektory_zaalokowane[bajt] &= static_cast<uint8_t>(~(1U << bit));
+    dynamiczne_irq[vector].handler = nullptr;
+    dynamiczne_irq[vector].context = nullptr;
+    przywroc_przerwania(rflags);
+    return true;
+}
+
+extern "C" bool idt_zarejestruj_irq(uint8_t vector, IrqHandlerFn handler, void* context) {
+    if (vector < IDT_PIERWSZY_WEKTOR_DYNAMICZNY || vector > IDT_OSTATNI_WEKTOR_DYNAMICZNY || !handler) {
+        return false;
+    }
+    const uint64_t rflags = zapisz_i_wylacz_przerwania();
+    const int bajt = vector / 8;
+    const int bit = vector % 8;
+    if ((wektory_zaalokowane[bajt] & (1U << bit)) == 0) {
+        przywroc_przerwania(rflags);
+        return false;
+    }
+    dynamiczne_irq[vector].handler = handler;
+    dynamiczne_irq[vector].context = context;
+    przywroc_przerwania(rflags);
+    return true;
+}
+
+extern "C" bool idt_wyrejestruj_irq(uint8_t vector) {
+    if (vector < IDT_PIERWSZY_WEKTOR_DYNAMICZNY || vector > IDT_OSTATNI_WEKTOR_DYNAMICZNY) {
+        return false;
+    }
+    const uint64_t rflags = zapisz_i_wylacz_przerwania();
+    dynamiczne_irq[vector].handler = nullptr;
+    dynamiczne_irq[vector].context = nullptr;
+    przywroc_przerwania(rflags);
+    return true;
+}
+
+extern "C" uint32_t idt_zaalokowane_wektory_liczba(void) {
+    const uint64_t rflags = zapisz_i_wylacz_przerwania();
+    uint32_t count = 0;
+    for (int v = IDT_PIERWSZY_WEKTOR_DYNAMICZNY; v <= IDT_OSTATNI_WEKTOR_DYNAMICZNY; ++v) {
+        const int bajt = v / 8;
+        const int bit = v % 8;
+        if ((wektory_zaalokowane[bajt] & (1U << bit)) != 0) {
+            ++count;
+        }
+    }
+    przywroc_przerwania(rflags);
+    return count;
+}
+

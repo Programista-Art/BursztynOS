@@ -108,6 +108,10 @@ struct VirtioBlkDriver {
     bool             has_error;
     bool             has_flush;
     bool             read_only;
+    bool             use_msix;
+    int              irq_vector;
+    volatile uint32_t irq_count;
+    volatile bool    request_done;
 
     uint32_t         lock;
 

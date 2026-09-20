@@ -78,6 +78,67 @@
 #define PCI_COMMAND_INT_DISABLE   UINT16_C(0x0400)
 
 /* =========================================================================
+ * 3.1 BITY STATUSU I CAPABILITIES
+ * ========================================================================= */
+
+#define PCI_STATUS_CAP_LIST       UINT16_C(0x0010)
+#define PCI_CAP_POINTER_OFFSET    UINT8_C(0x34)
+
+#define PCI_CAP_ID_MSI            UINT8_C(0x05)
+#define PCI_CAP_ID_VNDR           UINT8_C(0x09)
+#define PCI_CAP_ID_MSIX           UINT8_C(0x11)
+
+/* MSI Control bits */
+#define PCI_MSI_CTRL_ENABLE       UINT16_C(0x0001)
+#define PCI_MSI_CTRL_MMC_MASK     UINT16_C(0x000E)
+#define PCI_MSI_CTRL_MMC_SHIFT    1U
+#define PCI_MSI_CTRL_MME_MASK     UINT16_C(0x0070)
+#define PCI_MSI_CTRL_MME_SHIFT    4U
+#define PCI_MSI_CTRL_64BIT        UINT16_C(0x0080)
+#define PCI_MSI_CTRL_PVM          UINT16_C(0x0100)
+
+/* MSI-X Control bits */
+#define PCI_MSIX_CTRL_TABLE_SIZE  UINT16_C(0x07FF)
+#define PCI_MSIX_CTRL_FUNC_MASK   UINT16_C(0x4000)
+#define PCI_MSIX_CTRL_ENABLE      UINT16_C(0x8000)
+
+/* MSI-X Table / PBA offsets and BIR masks */
+#define PCI_MSIX_BIR_MASK         UINT32_C(0x00000007)
+#define PCI_MSIX_OFFSET_MASK      UINT32_C(0xFFFFFFF8)
+
+/* MSI-X Vector Control */
+#define PCI_MSIX_VECTOR_CTRL_MASK UINT32_C(0x00000001)
+
+#define VIRTIO_MSI_NO_VECTOR      UINT16_C(0xFFFF)
+
+#pragma pack(push, 1)
+struct PciMsixTableEntry {
+    volatile uint32_t msg_addr_low;
+    volatile uint32_t msg_addr_high;
+    volatile uint32_t msg_data;
+    volatile uint32_t vector_ctrl;
+};
+#pragma pack(pop)
+
+struct PciMsiCapability {
+    uint8_t  cap_offset;
+    uint16_t msg_control;
+    bool     is_64bit;
+    bool     has_pvm;
+    uint8_t  multiple_msg_capable;
+};
+
+struct PciMsixCapability {
+    uint8_t  cap_offset;
+    uint16_t msg_control;
+    uint16_t table_size; // 1..2048
+    uint8_t  table_bir;  // 0..5
+    uint32_t table_offset; // 8-byte aligned offset in BAR
+    uint8_t  pba_bir;    // 0..5
+    uint32_t pba_offset;   // 8-byte aligned offset in BAR
+};
+
+/* =========================================================================
  * 4. PUBLICZNE ABI
  * ========================================================================= */
 
@@ -137,6 +198,87 @@ void pci_zapisz_dword(
  *   /logi/pci.txt
  */
 void skanuj_magistrale_pci();
+
+/*
+ * Wyszukuje wpis w lancuchu PCI capabilities. Zwraca offset w config space (0x40..0xFC)
+ * lub 0 w przypadku braku / petli / uszkodzonego lancucha.
+ */
+uint8_t pci_find_capability(uint8_t bus, uint8_t slot, uint8_t func, uint8_t cap_id);
+
+/*
+ * Parsuje capability MSI (ID 0x05) z weryfikacja granic.
+ */
+bool pci_find_msi(uint8_t bus, uint8_t slot, uint8_t func, PciMsiCapability* out_msi);
+
+/*
+ * Parsuje capability MSI-X (ID 0x11) z weryfikacja granic, BIR i rozmiaru tabeli.
+ */
+bool pci_find_msix(uint8_t bus, uint8_t slot, uint8_t func, PciMsixCapability* out_msix);
+
+/*
+ * Weryfikuje czy tabela MSI-X miesci sie w zadeklarowanym BAR (ochrona przed overflow).
+ */
+bool pci_msix_validate_bar_bounds(const PciMsixCapability* msix, uint64_t table_bar_size, uint64_t pba_bar_size);
+
+/*
+ * Wlacza MSI dla funkcji PCI:
+ *  - blokuje INTx (Command bit 10),
+ *  - wylacza MSI-X,
+ *  - programuje adres (APIC ID) i wektor (32-bit lub 64-bit),
+ *  - odmaskowuje (jesli PVM obecne),
+ *  - ustawia bit MSI Enable.
+ */
+bool pci_msi_enable(uint8_t bus, uint8_t slot, uint8_t func,
+                    const PciMsiCapability* msi, uint8_t apic_id, uint8_t vector);
+
+/*
+ * Wylacza MSI.
+ */
+void pci_msi_disable(uint8_t bus, uint8_t slot, uint8_t func, const PciMsiCapability* msi);
+
+/*
+ * Maskuje/odmaskowuje wektor MSI (jesli PVM jest obslugiwane).
+ */
+void pci_msi_set_mask(uint8_t bus, uint8_t slot, uint8_t func, const PciMsiCapability* msi, bool mask);
+
+/*
+ * Wlacza MSI-X dla funkcji PCI:
+ *  - blokuje INTx,
+ *  - wylacza MSI,
+ *  - czysci Function Mask i wlacza MSI-X Enable.
+ */
+bool pci_msix_enable(uint8_t bus, uint8_t slot, uint8_t func, const PciMsixCapability* msix);
+
+/*
+ * Wylacza MSI-X dla funkcji PCI (ustawia Function Mask i czysci MSI-X Enable).
+ */
+void pci_msix_disable(uint8_t bus, uint8_t slot, uint8_t func, const PciMsixCapability* msix);
+
+/*
+ * Bezpiecznie programuje wpis w tabeli MSI-X:
+ *  - maskuje wpis (Vector Control bit 0 = 1),
+ *  - bariera pamieci,
+ *  - zapis adresu i wektora,
+ *  - bariera pamieci,
+ *  - unmask (jesli masked == false), bariera pamieci.
+ */
+bool pci_msix_program_entry(volatile PciMsixTableEntry* table, uint16_t table_size,
+                            uint16_t entry_index, uint8_t apic_id, uint8_t vector, bool masked);
+
+/*
+ * Maskuje wpis w tabeli MSI-X.
+ */
+bool pci_msix_mask_entry(volatile PciMsixTableEntry* table, uint16_t table_size, uint16_t entry_index);
+
+/*
+ * Odmaskowuje wpis w tabeli MSI-X.
+ */
+bool pci_msix_unmask_entry(volatile PciMsixTableEntry* table, uint16_t table_size, uint16_t entry_index);
+
+/*
+ * Sprawdza czy dany wpis w tabeli MSI-X jest zamaskowany.
+ */
+bool pci_msix_is_entry_masked(volatile const PciMsixTableEntry* table, uint16_t table_size, uint16_t entry_index);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -190,8 +190,9 @@ bool virtio_pci_map_bar(uint8_t bus, uint8_t slot, uint8_t func,
     }
 
     // Bezpieczne sprawdzanie rozmiaru BAR: wylaczamy dekodowanie pamieci
-    const uint16_t cmd = pci_read16(bus, slot, func, 0x04);
-    pci_write32(bus, slot, func, 0x04, cmd & ~0x0002U);
+    const uint32_t cmd_status = pci_read32(bus, slot, func, 0x04);
+    const uint16_t cmd = static_cast<uint16_t>(cmd_status & 0xFFFFU);
+    pci_write32(bus, slot, func, 0x04, (cmd_status & 0xFFFF0000U) | (cmd & ~0x0002U));
 
     pci_write32(bus, slot, func, bar_offset, 0xFFFFFFFFU);
     const uint32_t mask_low = pci_read32(bus, slot, func, bar_offset);
@@ -211,7 +212,7 @@ bool virtio_pci_map_bar(uint8_t bus, uint8_t slot, uint8_t func,
     }
 
     // Przywrocenie stanu rejestru Command
-    pci_write32(bus, slot, func, 0x04, cmd);
+    pci_write32(bus, slot, func, 0x04, cmd_status);
 
     if (mask64 == 0 || phys_addr == 0) return false;
     const uint64_t bar_size = ~mask64 + 1U;
@@ -535,6 +536,19 @@ bool virtio_pci_read_device_config_consistent(const VirtioPciDevice* dev,
 
 void virtio_pci_cleanup(VirtioPciDevice* dev) {
     if (!dev) return;
+    if (dev->msix_enabled && dev->has_msix) {
+        if (dev->msix_table) {
+            for (uint16_t i = 0; i < dev->msix_cap.table_size; ++i) {
+                pci_msix_mask_entry(dev->msix_table, dev->msix_cap.table_size, i);
+            }
+        }
+        pci_msix_disable(dev->bus, dev->slot, dev->func, &dev->msix_cap);
+        dev->msix_enabled = false;
+    }
+    if (dev->msi_enabled && dev->has_msi) {
+        pci_msi_disable(dev->bus, dev->slot, dev->func, &dev->msi_cap);
+        dev->msi_enabled = false;
+    }
     if (dev->common_cfg) {
         virtio_pci_reset(dev);
     }
@@ -778,10 +792,38 @@ bool virtio_pci_probe(uint8_t bus, uint8_t slot, uint8_t func,
         dev->has_device_cfg = true;
     }
 
+    // 5.5. Wykrycie i walidacja MSI-X oraz MSI dla urzadzenia
+    PciMsixCapability msix_info{};
+    if (pci_find_msix(bus, slot, func, &msix_info)) {
+        if (msix_info.table_bir < 6 && virtio_pci_map_bar(bus, slot, func, msix_info.table_bir, &dev->bars[msix_info.table_bir])) {
+            const auto& tbar = dev->bars[msix_info.table_bir];
+            if (tbar.is_mapped && tbar.vaddr && pci_msix_validate_bar_bounds(&msix_info, tbar.size, 0)) {
+                dev->has_msix = true;
+                dev->msix_cap = msix_info;
+                dev->msix_table = reinterpret_cast<volatile PciMsixTableEntry*>(tbar.vaddr + msix_info.table_offset);
+                dev->msix_table_bar = msix_info.table_bir;
+            } else {
+                dev->has_msix = false;
+            }
+        } else {
+            dev->has_msix = false;
+        }
+    } else {
+        dev->has_msix = false;
+    }
+
+    PciMsiCapability msi_info{};
+    if (pci_find_msi(bus, slot, func, &msi_info)) {
+        dev->has_msi = true;
+        dev->msi_cap = msi_info;
+    } else {
+        dev->has_msi = false;
+    }
+
     // 6. Aktywacja MMIO i Bus Mastering w PCI Command
-    uint16_t cmd = pci_read16(bus, slot, func, 0x04);
-    cmd |= (0x0002U | 0x0004U); // PCI_COMMAND_MEMORY_SPACE | PCI_COMMAND_BUS_MASTER
-    pci_write32(bus, slot, func, 0x04, cmd);
+    const uint32_t cmd_status_end = pci_read32(bus, slot, func, 0x04);
+    const uint16_t cmd_end = static_cast<uint16_t>(cmd_status_end & 0xFFFFU) | (0x0002U | 0x0004U); // PCI_COMMAND_MEMORY_SPACE | PCI_COMMAND_BUS_MASTER
+    pci_write32(bus, slot, func, 0x04, (cmd_status_end & 0xFFFF0000U) | cmd_end);
 
     // 7. Sekwencja inicjalizacji stanu VirtIO (VirtIO 1.0 sec 3.1.1):
     //    a. Reset urzadzenia (status = 0)
@@ -895,3 +937,43 @@ void virtio_pci_inicjalizuj() {
         }
     }
 }
+
+uint16_t virtio_pci_get_config_msix_vector(const VirtioPciDevice* dev) {
+    if (!dev || !dev->common_cfg) return VIRTIO_MSI_NO_VECTOR;
+    return virtio_read16(&dev->common_cfg->config_msix_vector);
+}
+
+void virtio_pci_set_config_msix_vector(VirtioPciDevice* dev, uint16_t vector) {
+    if (!dev || !dev->common_cfg) return;
+    virtio_write16(&dev->common_cfg->config_msix_vector, vector);
+}
+
+bool virtio_pci_set_queue_msix_vector_checked(VirtioPciDevice* dev, uint16_t queue_index, uint16_t entry_index) {
+    if (!dev || !dev->common_cfg) return false;
+    virtio_pci_select_queue(dev, queue_index);
+    virtio_pci_set_queue_msix_vector(dev, entry_index);
+    const uint16_t confirmed = virtio_pci_get_queue_msix_vector(dev);
+    return (confirmed == entry_index);
+}
+
+bool virtio_pci_program_msix_entry(VirtioPciDevice* dev, uint16_t entry_index, uint8_t apic_id, uint8_t vector, bool masked) {
+    if (!dev || !dev->has_msix || !dev->msix_table) return false;
+    return pci_msix_program_entry(dev->msix_table, dev->msix_cap.table_size, entry_index, apic_id, vector, masked);
+}
+
+bool virtio_pci_mask_msix_entry(VirtioPciDevice* dev, uint16_t entry_index) {
+    if (!dev || !dev->has_msix || !dev->msix_table) return false;
+    return pci_msix_mask_entry(dev->msix_table, dev->msix_cap.table_size, entry_index);
+}
+
+bool virtio_pci_unmask_msix_entry(VirtioPciDevice* dev, uint16_t entry_index) {
+    if (!dev || !dev->has_msix || !dev->msix_table) return false;
+    return pci_msix_unmask_entry(dev->msix_table, dev->msix_cap.table_size, entry_index);
+}
+
+bool virtio_pci_is_entry_masked(const VirtioPciDevice* dev, uint16_t entry_index) {
+    if (!dev || !dev->has_msix || !dev->msix_table) return true;
+    return pci_msix_is_entry_masked(dev->msix_table, dev->msix_cap.table_size, entry_index);
+}
+
+

@@ -36,6 +36,23 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include "pci.h"
+
+#ifdef BURSZTYN_VIRTIO_HOST_TEST
+extern uint32_t host_pci_read(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset);
+extern void host_pci_write(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t val);
+
+extern "C" uint32_t pci_odczytaj_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
+    return host_pci_read(bus, slot, func, offset);
+}
+
+extern "C" void pci_zapisz_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t data) {
+    host_pci_write(bus, slot, func, offset, data);
+}
+
+extern "C" void skanuj_magistrale_pci() {
+}
+#else
 
 /* =========================================================================
  * 1. API ZEWNĘTRZNE
@@ -71,29 +88,8 @@ constexpr uint16_t PCI_PORT_CONFIG_DATA =
 constexpr uint32_t PCI_CONFIG_ENABLE =
     UINT32_C(0x80000000);
 
-constexpr uint8_t PCI_MAKS_SLOT =
-    31U;
-
-constexpr uint8_t PCI_MAKS_FUNC =
-    7U;
-
-constexpr uint16_t PCI_VENDOR_BRAK =
-    0xFFFFU;
-
 constexpr uint8_t PCI_HEADER_MULTIFUNCTION =
     0x80U;
-
-constexpr uint8_t PCI_OFFSET_VENDOR_DEVICE =
-    0x00U;
-
-constexpr uint8_t PCI_OFFSET_COMMAND_STATUS =
-    0x04U;
-
-constexpr uint8_t PCI_OFFSET_CLASS_INFO =
-    0x08U;
-
-constexpr uint8_t PCI_OFFSET_HEADER_INFO =
-    0x0CU;
 
 /*
  * 32 KiB w BSS:
@@ -1288,3 +1284,285 @@ extern "C" void skanuj_magistrale_pci() {
         );
     }
 }
+#endif // !BURSZTYN_VIRTIO_HOST_TEST
+
+/* =========================================================================
+ * 6. OBSLUGA CAPABILITIES ORAZ GENERYCZNE MSI / MSI-X
+ * ========================================================================= */
+
+extern "C" uint8_t pci_find_capability(uint8_t bus, uint8_t slot, uint8_t func, uint8_t cap_id) {
+    if (!pci_funkcja_obecna(bus, slot, func)) {
+        return 0;
+    }
+    const uint16_t status = pci_odczytaj_word(bus, slot, func, static_cast<uint8_t>(PCI_OFFSET_COMMAND_STATUS + 2));
+    if ((status & PCI_STATUS_CAP_LIST) == 0) {
+        return 0;
+    }
+
+    uint8_t cap_ptr = pci_odczytaj_byte(bus, slot, func, PCI_CAP_POINTER_OFFSET) & ~0x03U;
+
+    uint64_t visited_mask = 0;
+    uint32_t hops = 0;
+
+    while (cap_ptr >= 0x40 && cap_ptr <= 0xFC && (cap_ptr & 0x03U) == 0 && hops < 48) {
+        const uint32_t bit_idx = cap_ptr >> 2;
+        if ((visited_mask & (UINT64_C(1) << bit_idx)) != 0) {
+            return 0; // Wykryto cykl / petle
+        }
+        visited_mask |= (UINT64_C(1) << bit_idx);
+        hops++;
+
+        const uint8_t id = pci_odczytaj_byte(bus, slot, func, cap_ptr);
+        if (id == cap_id) {
+            return cap_ptr;
+        }
+
+        const uint8_t next = pci_odczytaj_byte(bus, slot, func, static_cast<uint8_t>(cap_ptr + 1)) & ~0x03U;
+        if (next == 0) {
+            break;
+        }
+        cap_ptr = next;
+    }
+
+    return 0;
+}
+
+extern "C" bool pci_find_msi(uint8_t bus, uint8_t slot, uint8_t func, PciMsiCapability* out_msi) {
+    if (!out_msi) return false;
+    const uint8_t cap_off = pci_find_capability(bus, slot, func, PCI_CAP_ID_MSI);
+    if (cap_off == 0) return false;
+
+    const uint16_t msg_ctrl = pci_odczytaj_word(bus, slot, func, static_cast<uint8_t>(cap_off + 2));
+    const bool is_64bit = (msg_ctrl & PCI_MSI_CTRL_64BIT) != 0;
+    const bool has_pvm = (msg_ctrl & PCI_MSI_CTRL_PVM) != 0;
+
+    uint32_t required_size = 10;
+    if (is_64bit && !has_pvm) required_size = 14;
+    else if (!is_64bit && has_pvm) required_size = 16;
+    else if (is_64bit && has_pvm) required_size = 24;
+
+    if (static_cast<uint32_t>(cap_off) + required_size > 256) {
+        return false;
+    }
+
+    uint8_t mmc_bits = static_cast<uint8_t>((msg_ctrl & PCI_MSI_CTRL_MMC_MASK) >> PCI_MSI_CTRL_MMC_SHIFT);
+    if (mmc_bits > 5) mmc_bits = 5;
+
+    out_msi->cap_offset = cap_off;
+    out_msi->msg_control = msg_ctrl;
+    out_msi->is_64bit = is_64bit;
+    out_msi->has_pvm = has_pvm;
+    out_msi->multiple_msg_capable = static_cast<uint8_t>(1U << mmc_bits);
+    return true;
+}
+
+extern "C" bool pci_find_msix(uint8_t bus, uint8_t slot, uint8_t func, PciMsixCapability* out_msix) {
+    if (!out_msix) return false;
+    const uint8_t cap_off = pci_find_capability(bus, slot, func, PCI_CAP_ID_MSIX);
+    if (cap_off == 0) return false;
+
+    if (static_cast<uint32_t>(cap_off) + 12 > 256) {
+        return false;
+    }
+
+    const uint16_t msg_ctrl = pci_odczytaj_word(bus, slot, func, static_cast<uint8_t>(cap_off + 2));
+    const uint16_t table_size = static_cast<uint16_t>((msg_ctrl & PCI_MSIX_CTRL_TABLE_SIZE) + 1U);
+    if (table_size == 0 || table_size > 2048) {
+        return false;
+    }
+
+    const uint32_t table_reg = pci_odczytaj_dword(bus, slot, func, static_cast<uint8_t>(cap_off + 4));
+    const uint8_t table_bir = static_cast<uint8_t>(table_reg & PCI_MSIX_BIR_MASK);
+    const uint32_t table_off = table_reg & PCI_MSIX_OFFSET_MASK;
+
+    const uint32_t pba_reg = pci_odczytaj_dword(bus, slot, func, static_cast<uint8_t>(cap_off + 8));
+    const uint8_t pba_bir = static_cast<uint8_t>(pba_reg & PCI_MSIX_BIR_MASK);
+    const uint32_t pba_off = pba_reg & PCI_MSIX_OFFSET_MASK;
+
+    if (table_bir >= 6 || pba_bir >= 6) {
+        return false;
+    }
+
+    out_msix->cap_offset = cap_off;
+    out_msix->msg_control = msg_ctrl;
+    out_msix->table_size = table_size;
+    out_msix->table_bir = table_bir;
+    out_msix->table_offset = table_off;
+    out_msix->pba_bir = pba_bir;
+    out_msix->pba_offset = pba_off;
+    return true;
+}
+
+extern "C" bool pci_msix_validate_bar_bounds(const PciMsixCapability* msix, uint64_t table_bar_size, uint64_t pba_bar_size) {
+    if (!msix || msix->table_size == 0 || msix->table_size > 2048) {
+        return false;
+    }
+    if (msix->table_bir >= 6 || msix->pba_bir >= 6) {
+        return false;
+    }
+    if (table_bar_size == 0) {
+        return false;
+    }
+
+    const uint64_t entry_size = sizeof(PciMsixTableEntry);
+    const uint64_t table_bytes = static_cast<uint64_t>(msix->table_size) * entry_size;
+    if (table_bytes / entry_size != msix->table_size) {
+        return false;
+    }
+
+    const uint64_t table_offset = static_cast<uint64_t>(msix->table_offset);
+    if (table_offset > table_bar_size) {
+        return false;
+    }
+    if (table_bar_size - table_offset < table_bytes) {
+        return false;
+    }
+
+    if (pba_bar_size > 0) {
+        const uint64_t pba_bytes = ((static_cast<uint64_t>(msix->table_size) + 63ULL) / 64ULL) * 8ULL;
+        const uint64_t pba_offset = static_cast<uint64_t>(msix->pba_offset);
+        if (pba_offset > pba_bar_size) {
+            return false;
+        }
+        if (pba_bar_size - pba_offset < pba_bytes) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+extern "C" bool pci_msi_enable(uint8_t bus, uint8_t slot, uint8_t func,
+                               const PciMsiCapability* msi, uint8_t apic_id, uint8_t vector) {
+    if (!msi || msi->cap_offset == 0) return false;
+
+    const uint32_t cmd_status = pci_odczytaj_dword(bus, slot, func, PCI_OFFSET_COMMAND_STATUS);
+    const uint16_t cmd = static_cast<uint16_t>(cmd_status & 0xFFFFU) | PCI_COMMAND_INT_DISABLE;
+    pci_zapisz_dword(bus, slot, func, PCI_OFFSET_COMMAND_STATUS, (cmd_status & 0xFFFF0000U) | cmd);
+
+    PciMsixCapability msix{};
+    if (pci_find_msix(bus, slot, func, &msix)) {
+        pci_msix_disable(bus, slot, func, &msix);
+    }
+
+    const uint32_t addr_low = 0xFEE00000U | (static_cast<uint32_t>(apic_id) << 12);
+    pci_zapisz_dword(bus, slot, func, static_cast<uint8_t>(msi->cap_offset + 4), addr_low);
+
+    if (msi->is_64bit) {
+        pci_zapisz_dword(bus, slot, func, static_cast<uint8_t>(msi->cap_offset + 8), 0x00000000U);
+        const uint32_t cur = pci_odczytaj_dword(bus, slot, func, static_cast<uint8_t>(msi->cap_offset + 12));
+        pci_zapisz_dword(bus, slot, func, static_cast<uint8_t>(msi->cap_offset + 12),
+                         (cur & 0xFFFF0000U) | static_cast<uint32_t>(vector));
+
+        if (msi->has_pvm) {
+            pci_zapisz_dword(bus, slot, func, static_cast<uint8_t>(msi->cap_offset + 16), 0x00000000U);
+        }
+    } else {
+        const uint32_t cur = pci_odczytaj_dword(bus, slot, func, static_cast<uint8_t>(msi->cap_offset + 8));
+        pci_zapisz_dword(bus, slot, func, static_cast<uint8_t>(msi->cap_offset + 8),
+                         (cur & 0xFFFF0000U) | static_cast<uint32_t>(vector));
+
+        if (msi->has_pvm) {
+            pci_zapisz_dword(bus, slot, func, static_cast<uint8_t>(msi->cap_offset + 12), 0x00000000U);
+        }
+    }
+
+    const uint32_t dword0 = pci_odczytaj_dword(bus, slot, func, msi->cap_offset);
+    uint16_t ctrl = static_cast<uint16_t>((dword0 >> 16) & 0xFFFFU);
+    ctrl &= ~PCI_MSI_CTRL_MME_MASK;
+    ctrl |= PCI_MSI_CTRL_ENABLE;
+    pci_zapisz_dword(bus, slot, func, msi->cap_offset, (dword0 & 0x0000FFFFU) | (static_cast<uint32_t>(ctrl) << 16));
+
+    return true;
+}
+
+extern "C" void pci_msi_disable(uint8_t bus, uint8_t slot, uint8_t func, const PciMsiCapability* msi) {
+    if (!msi || msi->cap_offset == 0) return;
+
+    const uint32_t dword0 = pci_odczytaj_dword(bus, slot, func, msi->cap_offset);
+    uint16_t ctrl = static_cast<uint16_t>((dword0 >> 16) & 0xFFFFU);
+    ctrl &= ~PCI_MSI_CTRL_ENABLE;
+    pci_zapisz_dword(bus, slot, func, msi->cap_offset, (dword0 & 0x0000FFFFU) | (static_cast<uint32_t>(ctrl) << 16));
+
+    if (msi->has_pvm) {
+        pci_msi_set_mask(bus, slot, func, msi, true);
+    }
+}
+
+extern "C" void pci_msi_set_mask(uint8_t bus, uint8_t slot, uint8_t func, const PciMsiCapability* msi, bool mask) {
+    if (!msi || msi->cap_offset == 0 || !msi->has_pvm) return;
+    const uint8_t mask_off = msi->is_64bit ? static_cast<uint8_t>(msi->cap_offset + 16) : static_cast<uint8_t>(msi->cap_offset + 12);
+    pci_zapisz_dword(bus, slot, func, mask_off, mask ? 0xFFFFFFFFU : 0x00000000U);
+}
+
+extern "C" bool pci_msix_enable(uint8_t bus, uint8_t slot, uint8_t func, const PciMsixCapability* msix) {
+    if (!msix || msix->cap_offset == 0) return false;
+
+    const uint32_t cmd_status = pci_odczytaj_dword(bus, slot, func, PCI_OFFSET_COMMAND_STATUS);
+    const uint16_t cmd = static_cast<uint16_t>(cmd_status & 0xFFFFU) | PCI_COMMAND_INT_DISABLE;
+    pci_zapisz_dword(bus, slot, func, PCI_OFFSET_COMMAND_STATUS, (cmd_status & 0xFFFF0000U) | cmd);
+
+    PciMsiCapability msi{};
+    if (pci_find_msi(bus, slot, func, &msi)) {
+        pci_msi_disable(bus, slot, func, &msi);
+    }
+
+    const uint32_t dword0 = pci_odczytaj_dword(bus, slot, func, msix->cap_offset);
+    uint16_t ctrl = static_cast<uint16_t>((dword0 >> 16) & 0xFFFFU);
+    ctrl &= ~PCI_MSIX_CTRL_FUNC_MASK;
+    ctrl |= PCI_MSIX_CTRL_ENABLE;
+    pci_zapisz_dword(bus, slot, func, msix->cap_offset, (dword0 & 0x0000FFFFU) | (static_cast<uint32_t>(ctrl) << 16));
+
+    return true;
+}
+
+extern "C" void pci_msix_disable(uint8_t bus, uint8_t slot, uint8_t func, const PciMsixCapability* msix) {
+    if (!msix || msix->cap_offset == 0) return;
+
+    const uint32_t dword0 = pci_odczytaj_dword(bus, slot, func, msix->cap_offset);
+    uint16_t ctrl = static_cast<uint16_t>((dword0 >> 16) & 0xFFFFU);
+    ctrl |= PCI_MSIX_CTRL_FUNC_MASK;
+    ctrl &= ~PCI_MSIX_CTRL_ENABLE;
+    pci_zapisz_dword(bus, slot, func, msix->cap_offset, (dword0 & 0x0000FFFFU) | (static_cast<uint32_t>(ctrl) << 16));
+}
+
+extern "C" bool pci_msix_program_entry(volatile PciMsixTableEntry* table, uint16_t table_size,
+                                       uint16_t entry_index, uint8_t apic_id, uint8_t vector, bool masked) {
+    if (!table || entry_index >= table_size) return false;
+
+    volatile PciMsixTableEntry* entry = &table[entry_index];
+
+    entry->vector_ctrl = 1U;
+    asm volatile("mfence" ::: "memory");
+
+    const uint32_t addr_low = 0xFEE00000U | (static_cast<uint32_t>(apic_id) << 12);
+    entry->msg_addr_low = addr_low;
+    entry->msg_addr_high = 0x00000000U;
+    entry->msg_data = static_cast<uint32_t>(vector);
+    asm volatile("mfence" ::: "memory");
+
+    entry->vector_ctrl = masked ? 1U : 0U;
+    asm volatile("mfence" ::: "memory");
+
+    return true;
+}
+
+extern "C" bool pci_msix_mask_entry(volatile PciMsixTableEntry* table, uint16_t table_size, uint16_t entry_index) {
+    if (!table || entry_index >= table_size) return false;
+    table[entry_index].vector_ctrl = 1U;
+    asm volatile("mfence" ::: "memory");
+    return true;
+}
+
+extern "C" bool pci_msix_unmask_entry(volatile PciMsixTableEntry* table, uint16_t table_size, uint16_t entry_index) {
+    if (!table || entry_index >= table_size) return false;
+    table[entry_index].vector_ctrl = 0U;
+    asm volatile("mfence" ::: "memory");
+    return true;
+}
+
+extern "C" bool pci_msix_is_entry_masked(volatile const PciMsixTableEntry* table, uint16_t table_size, uint16_t entry_index) {
+    if (!table || entry_index >= table_size) return true;
+    return (table[entry_index].vector_ctrl & PCI_MSIX_VECTOR_CTRL_MASK) != 0;
+}
+

@@ -570,7 +570,7 @@ void wyslij_pakiet_tcp(
 );
 
 /*
- * Punkt wejscia z odbiornika E1000.
+ * Punkt wejscia z odbiornika kart sieciowych (NetworkDevice / net_receive_frame).
  *
  * pakiet musi wskazywac pelna ramke Ethernet bez FCS.
  */

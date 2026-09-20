@@ -45,7 +45,7 @@
  */
 
 #include "siec.h"
-#include "e1000.h"
+#include "network_device.h"
 #include "grafika.h"
 #include "sterowniki/czas/hpet.h"
 #include "heap.h"
@@ -565,7 +565,7 @@ namespace {
  * ========================================================================= */
 
 void tls_pompuj_siec() {
-    e1000_obsluz_odbior();
+    net_poll_rx();
 
     asm volatile(
         "pause"

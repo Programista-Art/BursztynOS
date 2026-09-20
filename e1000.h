@@ -144,7 +144,7 @@ void e1000_obsluz_odbior();
  *
  * Sygnatura pozostaje uint8_t* dla zgodnosci z obecnym ABI.
  */
-uint8_t* pobierz_mac_adres();
+uint8_t* e1000_pobierz_mac_adres();
 
 #ifdef __cplusplus
 } /* extern "C" */

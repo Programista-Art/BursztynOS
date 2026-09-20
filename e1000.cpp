@@ -38,6 +38,7 @@
  */
 
 #include "e1000.h"
+#include "network_device.h"
 #include "pamiec.h"
 #include "pci.h"
 #include "siec.h"
@@ -2094,9 +2095,72 @@ void anuluj_inicjalizacje() {
 
 } // namespace
 
-extern "C" uint8_t* pobierz_mac_adres() {
+extern "C" uint8_t* e1000_pobierz_mac_adres() {
     return mac_adres;
 }
+
+static bool e1000_link_up() {
+    if (!e1000_mmio_baza) return false;
+    return (czytaj_rejestr(REG_STATUS) & STATUS_LU) != 0;
+}
+
+static NetError e1000_wyslij_ramke_wewn(const void* dane, uint16_t dlugosc);
+
+static NetError e1000_netdev_transmit(NetworkDevice* dev, const void* frame, size_t length) {
+    (void)dev;
+    if (length > E1000_MAX_RAMKA_ETH) {
+        return NetError::BufferTooLarge;
+    }
+    NetError err = e1000_wyslij_ramke_wewn(frame, static_cast<uint16_t>(length));
+    if (dev) {
+        if (err == NetError::Ok) {
+            __atomic_add_fetch(&dev->stats.tx_packets, 1ULL, __ATOMIC_RELAXED);
+            __atomic_add_fetch(&dev->stats.tx_bytes, static_cast<uint64_t>(length), __ATOMIC_RELAXED);
+        } else {
+            __atomic_add_fetch(&dev->stats.tx_errors, 1ULL, __ATOMIC_RELAXED);
+            if (err == NetError::QueueFull) {
+                __atomic_add_fetch(&dev->stats.tx_ring_full, 1ULL, __ATOMIC_RELAXED);
+            } else if (err == NetError::Timeout) {
+                __atomic_add_fetch(&dev->stats.tx_timeouts, 1ULL, __ATOMIC_RELAXED);
+            }
+        }
+    }
+    return err;
+}
+
+static void e1000_netdev_poll_rx(NetworkDevice* dev) {
+    (void)dev;
+    e1000_obsluz_odbior();
+}
+
+static NetLinkState e1000_netdev_get_link_state(const NetworkDevice* dev) {
+    (void)dev;
+    if (!__atomic_load_n(&e1000_gotowy, __ATOMIC_ACQUIRE)) {
+        return NetLinkState::Down;
+    }
+    return e1000_link_up() ? NetLinkState::Up : NetLinkState::Down;
+}
+
+static void e1000_netdev_get_stats(const NetworkDevice* dev, NetDeviceStats* out_stats) {
+    if (!out_stats) return;
+    if (dev) {
+        *out_stats = dev->stats;
+    }
+    out_stats->rx_packets = e1000_rx_packets;
+    out_stats->tx_packets = e1000_tx_success;
+    out_stats->tx_errors = e1000_tx_errors;
+    out_stats->tx_timeouts = e1000_tx_timeout;
+    out_stats->tx_ring_full = e1000_tx_ring_full;
+}
+
+static const NetDeviceOps g_e1000_netdev_ops = {
+    e1000_netdev_transmit,
+    e1000_netdev_poll_rx,
+    e1000_netdev_get_link_state,
+    e1000_netdev_get_stats,
+};
+
+static NetworkDevice g_e1000_net_device;
 
 /* =========================================================================
  * 22. INICJALIZACJA
@@ -2331,6 +2395,24 @@ extern "C" void inicjalizuj_e1000() {
         );
     }
 
+    /*
+     * Rejestracja w warstwie NetworkDevice API.
+     */
+    g_e1000_net_device.ops = &g_e1000_netdev_ops;
+    g_e1000_net_device.driver_data = nullptr;
+    g_e1000_net_device.device_type = NetDeviceType::E1000;
+    g_e1000_net_device.mtu = 1500;
+    const char dev_name[] = "eth0";
+    for (size_t i = 0; i < sizeof(dev_name); ++i) {
+        g_e1000_net_device.name[i] = dev_name[i];
+    }
+    for (size_t i = 0; i < 6U; ++i) {
+        g_e1000_net_device.mac[i] = mac_adres[i];
+    }
+    if (net_register_device(&g_e1000_net_device)) {
+        wypisz_log("[E1000] Zarejestrowano jako NetworkDevice (eth0).");
+    }
+
     __atomic_store_n(
         &inicjalizacja_w_toku,
         false,
@@ -2342,31 +2424,28 @@ extern "C" void inicjalizuj_e1000() {
  * 23. TX
  * ========================================================================= */
 
-extern "C" bool e1000_wyslij_pakiet(
-    void* dane,
+static NetError e1000_wyslij_ramke_wewn(
+    const void* dane,
     uint16_t dlugosc
 ) {
     __atomic_add_fetch(&e1000_tx_attempts, 1ULL, __ATOMIC_RELAXED);
-    if (!dane ||
-        dlugosc <
-            E1000_MIN_RAMKA_ETH ||
-        dlugosc >
-            E1000_MAX_RAMKA_ETH ||
-        dlugosc >
-            E1000_TX_BUFOR_BAJTOW ||
-        !__atomic_load_n(
-            &e1000_gotowy,
-            __ATOMIC_ACQUIRE) ||
-        !tx_descs) {
-
+    if (!dane) {
         __atomic_add_fetch(&e1000_tx_errors, 1ULL, __ATOMIC_RELAXED);
-        return false;
+        return NetError::InvalidArgument;
+    }
+    if (dlugosc < E1000_MIN_RAMKA_ETH) {
+        __atomic_add_fetch(&e1000_tx_errors, 1ULL, __ATOMIC_RELAXED);
+        return NetError::BufferTooSmall;
+    }
+    if (dlugosc > E1000_MAX_RAMKA_ETH || dlugosc > E1000_TX_BUFOR_BAJTOW) {
+        __atomic_add_fetch(&e1000_tx_errors, 1ULL, __ATOMIC_RELAXED);
+        return NetError::BufferTooLarge;
+    }
+    if (!__atomic_load_n(&e1000_gotowy, __ATOMIC_ACQUIRE) || !tx_descs) {
+        __atomic_add_fetch(&e1000_tx_errors, 1ULL, __ATOMIC_RELAXED);
+        return NetError::NotReady;
     }
 
-    /*
-     * Ograniczony wait zamiast bezterminowego spinlocka.
-     * Chroni przed reentrancy i przyszlym SMP.
-     */
     GuardBlokady guard(
         &blokada_tx,
         TIMEOUT_TX_LOCK,
@@ -2374,12 +2453,9 @@ extern "C" bool e1000_wyslij_pakiet(
     );
 
     if (!guard.aktywny()) {
-        /*
-         * Ograniczony try-lock przekazuje blad do wspolnej sciezki TX.
-         */
         __atomic_add_fetch(&e1000_tx_ring_full, 1ULL, __ATOMIC_RELAXED);
         __atomic_add_fetch(&e1000_tx_errors, 1ULL, __ATOMIC_RELAXED);
-        return false;
+        return NetError::QueueFull;
     }
 
     const uint16_t slot =
@@ -2388,9 +2464,6 @@ extern "C" bool e1000_wyslij_pakiet(
     volatile E1000TxDesc& desc =
         tx_descs[slot];
 
-    /*
-     * Poczekaj az deskryptor po poprzednim obrocie ringu jest wolny.
-     */
     bool wolny =
         false;
 
@@ -2418,7 +2491,7 @@ extern "C" bool e1000_wyslij_pakiet(
 
         __atomic_add_fetch(&e1000_tx_ring_full, 1ULL, __ATOMIC_RELAXED);
         __atomic_add_fetch(&e1000_tx_errors, 1ULL, __ATOMIC_RELAXED);
-        return false;
+        return NetError::QueueFull;
     }
 
     void* bufor_phys =
@@ -2430,7 +2503,7 @@ extern "C" bool e1000_wyslij_pakiet(
             bufor_phys)) {
 
         __atomic_add_fetch(&e1000_tx_errors, 1ULL, __ATOMIC_RELAXED);
-        return false;
+        return NetError::IOError;
     }
 
     void* bufor =
@@ -2461,9 +2534,6 @@ extern "C" bool e1000_wyslij_pakiet(
     desc.specjalne =
         0;
 
-    /*
-     * Status zerujemy na koncu przygotowania deskryptora.
-     */
     desc.status =
         0;
 
@@ -2479,9 +2549,6 @@ extern "C" bool e1000_wyslij_pakiet(
     tx_aktualny =
         nastepny;
 
-    /*
-     * Doorbell TX.
-     */
     zapisz_rejestr(
         REG_TDT,
         nastepny
@@ -2510,19 +2577,22 @@ extern "C" bool e1000_wyslij_pakiet(
     }
 
     if (!zakonczony) {
-        /*
-         * Nie zwalniamy stalego bufora DMA - hardware nadal moze miec
-         * do niego referencje. Sterownik pozostaje z zasobami przypietymi.
-         */
         wypisz_log(
             "[E1000] Timeout transmisji TX."
         );
         __atomic_add_fetch(&e1000_tx_timeout, 1ULL, __ATOMIC_RELAXED);
         __atomic_add_fetch(&e1000_tx_errors, 1ULL, __ATOMIC_RELAXED);
-        return false;
+        return NetError::Timeout;
     }
     __atomic_add_fetch(&e1000_tx_success, 1ULL, __ATOMIC_RELAXED);
-    return true;
+    return NetError::Ok;
+}
+
+extern "C" bool e1000_wyslij_pakiet(
+    void* dane,
+    uint16_t dlugosc
+) {
+    return e1000_wyslij_ramke_wewn(dane, dlugosc) == NetError::Ok;
 }
 
 /* =========================================================================
@@ -2631,10 +2701,12 @@ extern "C" void e1000_obsluz_odbior() {
             __atomic_add_fetch(&e1000_rx_packets, 1ULL, __ATOMIC_RELAXED);
 
             /*
-             * siec.cpp ponownie wykonuje bounds-checking wszystkich
-             * naglowkow. Sterownik przekazuje tylko zweryfikowana dlugosc.
+             * Przekazanie ramki przez mostek NetworkDevice.
+             * net_receive_frame aktualizuje statystyki i przekazuje do
+             * obsluz_pakiet_sieciowy().
              */
-            obsluz_pakiet_sieciowy(
+            net_receive_frame(
+                &g_e1000_net_device,
                 bufor,
                 dlugosc
             );

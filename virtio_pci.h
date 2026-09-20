@@ -26,6 +26,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include "pci.h"
 
 /* =========================================================================
  * 1. IDENTYFIKATORY PCI I TYPY STRUKTUR VIRTIO
@@ -186,6 +187,16 @@ struct VirtioPciDevice {
     /* Bufor zmapowanych BARow (0..5): */
     VirtioPciBarInfo bars[6];
 
+    /* Generic PCI Interrupt (MSI-X / MSI): */
+    bool has_msix;
+    bool has_msi;
+    bool msix_enabled;
+    bool msi_enabled;
+    PciMsixCapability msix_cap;
+    PciMsiCapability  msi_cap;
+    volatile PciMsixTableEntry* msix_table;
+    uint8_t msix_table_bar;
+
     bool initialized;
 };
 
@@ -302,6 +313,17 @@ const char* virtio_pci_device_name(uint16_t virtio_id);
  */
 uint32_t virtio_pci_liczba_urzadzen();
 VirtioPciDevice* virtio_pci_pobierz_urzadzenie(uint32_t indeks);
+
+/*
+ * MSI-X VirtIO helpers:
+ */
+uint16_t virtio_pci_get_config_msix_vector(const VirtioPciDevice* dev);
+void virtio_pci_set_config_msix_vector(VirtioPciDevice* dev, uint16_t vector);
+bool virtio_pci_set_queue_msix_vector_checked(VirtioPciDevice* dev, uint16_t queue_index, uint16_t entry_index);
+bool virtio_pci_program_msix_entry(VirtioPciDevice* dev, uint16_t entry_index, uint8_t apic_id, uint8_t vector, bool masked);
+bool virtio_pci_mask_msix_entry(VirtioPciDevice* dev, uint16_t entry_index);
+bool virtio_pci_unmask_msix_entry(VirtioPciDevice* dev, uint16_t entry_index);
+bool virtio_pci_is_entry_masked(const VirtioPciDevice* dev, uint16_t entry_index);
 
 #ifdef __cplusplus
 }

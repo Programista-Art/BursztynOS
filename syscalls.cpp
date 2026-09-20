@@ -996,32 +996,38 @@ private:
  * FILE BWS
  * ========================================================================= */
 
-uint64_t bws_wypisz(
+__attribute__((noinline)) uint64_t bws_wypisz(
     uint64_t arg1
 ) {
-    char tekst[
-        MAX_TEKST_BWS] = {};
+    BuforKernelowy bufor(
+        MAX_TEKST_BWS,
+        true
+    );
+
+    if (!bufor) {
+        return 0;
+    }
 
     if (!pobierz_string_user(
             arg1,
-            tekst,
-            sizeof(tekst))) {
+            bufor.jako_char(),
+            MAX_TEKST_BWS)) {
 
         return 0;
     }
 
-    SerialLog(tekst);
+    SerialLog(bufor.jako_char());
 
     BlokadaEkranu blokada;
 
     wypisz_na_ekranie(
-        tekst
+        bufor.jako_char()
     );
 
     return 1;
 }
 
-uint64_t bws_utworz_plik(
+__attribute__((noinline)) uint64_t bws_utworz_plik(
     proces_t& proces,
     uint64_t arg1
 ) {
@@ -1049,7 +1055,7 @@ uint64_t bws_utworz_plik(
     return wynik ? 1ULL : 0ULL;
 }
 
-uint64_t bws_zapisz_plik(
+__attribute__((noinline)) uint64_t bws_zapisz_plik(
     proces_t& proces,
     uint64_t arg1,
     uint64_t arg2,
@@ -1134,7 +1140,7 @@ uint64_t bws_zapisz_plik(
     return wynik ? 1ULL : 0ULL;
 }
 
-uint64_t bws_czytaj_plik(
+__attribute__((noinline)) uint64_t bws_czytaj_plik(
     proces_t& proces,
     uint64_t arg1,
     uint64_t arg2,
@@ -1245,7 +1251,7 @@ uint64_t bws_czytaj_plik(
     return 1;
 }
 
-uint64_t bws_wylistuj_katalog(
+__attribute__((noinline)) uint64_t bws_wylistuj_katalog(
     proces_t& proces,
     uint64_t arg1,
     uint64_t arg2,
@@ -1332,7 +1338,7 @@ uint64_t bws_wylistuj_katalog(
     return 1;
 }
 
-uint64_t bws_usun_twor(
+__attribute__((noinline)) uint64_t bws_usun_twor(
     proces_t& proces,
     uint64_t arg1
 ) {
@@ -1358,7 +1364,7 @@ uint64_t bws_usun_twor(
     return wynik ? 1ULL : 0ULL;
 }
 
-uint64_t bws_zmien_nazwe(
+__attribute__((noinline)) uint64_t bws_zmien_nazwe(
     proces_t& proces,
     uint64_t arg1,
     uint64_t arg2
@@ -1391,7 +1397,7 @@ uint64_t bws_zmien_nazwe(
     return wynik ? 1ULL : 0ULL;
 }
 
-uint64_t bws_pobierz_metadane(
+__attribute__((noinline)) uint64_t bws_pobierz_metadane(
     proces_t& proces,
     uint64_t arg1,
     uint64_t arg2
@@ -1417,7 +1423,7 @@ uint64_t bws_pobierz_metadane(
         reinterpret_cast<void*>(arg2), &wynik, sizeof(wynik)) ? 1ULL : 0ULL;
 }
 
-uint64_t bws_przenies(
+__attribute__((noinline)) uint64_t bws_przenies(
     proces_t& proces,
     uint64_t arg1,
     uint64_t arg2
@@ -1467,7 +1473,7 @@ void wyslij_zdarzenie_drop(int pid, uint32_t typ, int32_t x, int32_t y,
     (void)scheduler_dodaj_zdarzenie(pid, &zdarzenie);
 }
 
-uint64_t bws_rejestruj_cele_drop(
+__attribute__((noinline)) uint64_t bws_rejestruj_cele_drop(
     proces_t& proces,
     uint64_t arg1,
     uint64_t arg2
@@ -1525,7 +1531,7 @@ bool znajdz_cel_drop(int32_t x, int32_t y, int* pid_wyj, int* indeks_wyj) {
     return najlepszy_pid > 0 && najlepszy >= 0;
 }
 
-uint64_t bws_aktualizuj_drag(
+__attribute__((noinline)) uint64_t bws_aktualizuj_drag(
     proces_t& proces,
     uint64_t arg1,
     uint64_t arg2,
@@ -1574,7 +1580,7 @@ uint64_t bws_aktualizuj_drag(
     return przeniesiono ? BWS_DROP_PRZENIESIONO : BWS_DROP_BLAD;
 }
 
-uint64_t bws_ustaw_schowek_plikow(proces_t& proces,
+__attribute__((noinline)) uint64_t bws_ustaw_schowek_plikow(proces_t& proces,
                                   uint64_t arg1, uint64_t arg2) {
     if (!proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ) ||
         (arg2 != BWS_SCHOWEK_COPY && arg2 != BWS_SCHOWEK_CUT)) return 0;
@@ -1605,7 +1611,7 @@ uint64_t bws_ustaw_schowek_plikow(proces_t& proces,
     return 1;
 }
 
-uint64_t bws_pobierz_schowek_plikow(proces_t& proces, uint64_t arg1) {
+__attribute__((noinline)) uint64_t bws_pobierz_schowek_plikow(proces_t& proces, uint64_t arg1) {
     if (!proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ) || arg1 == 0 ||
         !czy_bezpieczny_zakres_uzytkownika_do_zapisu(
             reinterpret_cast<void*>(arg1), sizeof(BwsSchowekPlikow))) return 0;
@@ -1619,7 +1625,7 @@ uint64_t bws_pobierz_schowek_plikow(proces_t& proces, uint64_t arg1) {
         reinterpret_cast<void*>(arg1), &kopia, sizeof(kopia)) ? 1ULL : 0ULL;
 }
 
-uint64_t bws_wyczysc_schowek_plikow(proces_t& proces, uint64_t generacja) {
+__attribute__((noinline)) uint64_t bws_wyczysc_schowek_plikow(proces_t& proces, uint64_t generacja) {
     if (!proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ) || generacja == 0)
         return 0;
     BlokadaSchowka blokada;
@@ -1631,7 +1637,7 @@ uint64_t bws_wyczysc_schowek_plikow(proces_t& proces, uint64_t generacja) {
     return 1;
 }
 
-uint64_t bws_kopiuj_twor(proces_t& proces, uint64_t arg1, uint64_t arg2) {
+__attribute__((noinline)) uint64_t bws_kopiuj_twor(proces_t& proces, uint64_t arg1, uint64_t arg2) {
     if (!proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ)) return 0;
     char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
     char folder[MAX_SCIEZKA_PLIKU_BWS] = {};
@@ -1655,7 +1661,7 @@ uint64_t bws_kopiuj_twor(proces_t& proces, uint64_t arg1, uint64_t arg2) {
  * RTC
  * ========================================================================= */
 
-uint64_t bws_rtc(
+__attribute__((noinline)) uint64_t bws_rtc(
     uint64_t arg1
 ) {
     if (arg1 == 0) {
@@ -1713,7 +1719,7 @@ uint64_t bws_rtc(
  * URUCHAMIANIE PROGRAMU
  * ========================================================================= */
 
-uint64_t bws_uruchom(
+__attribute__((noinline)) uint64_t bws_uruchom(
     proces_t& rodzic,
     uint64_t arg1,
     uint64_t arg2
@@ -1911,7 +1917,7 @@ bool pobierz_http_sciezka_user(
         );
 }
 
-uint64_t bws_dns(
+__attribute__((noinline)) uint64_t bws_dns(
     proces_t& proces,
     uint64_t arg1,
     uint64_t arg2
@@ -1997,7 +2003,7 @@ bool dekoduj_bufor_sieci(
     return true;
 }
 
-uint64_t bws_http_common(
+__attribute__((noinline)) uint64_t bws_http_common(
     proces_t& proces,
     bool https,
     uint64_t arg1,
@@ -2156,7 +2162,7 @@ uint64_t bws_http_common(
  * LEGACY BWS 13 - HTTP -> PLIK
  * ========================================================================= */
 
-uint64_t bws_legacy_http_do_pliku(
+__attribute__((noinline)) uint64_t bws_legacy_http_do_pliku(
     proces_t& proces,
     uint64_t arg1,
     uint64_t arg2,
@@ -2503,7 +2509,7 @@ bool dodawanie_bez_przepelnienia(
     return true;
 }
 
-uint64_t bws_alokuj_sterte(
+__attribute__((noinline)) uint64_t bws_alokuj_sterte(
     proces_t& proces,
     uint64_t rozmiar
 ) {
@@ -2763,6 +2769,117 @@ void bws_zakoncz_biezacy_proces() {
             "pause"
         );
     }
+}
+
+__attribute__((noinline)) uint64_t bws_snapshot_okien(
+    proces_t& proces,
+    uint64_t arg1,
+    uint64_t arg2
+) {
+    char test_arg[32] = {};
+    const char* test_path = "/programy/test.cebula/test.bur";
+    const char* automated = "--automated";
+    size_t tp = 0;
+    while (proces.sciezka_pliku[tp] && test_path[tp] &&
+           proces.sciezka_pliku[tp] == test_path[tp]) ++tp;
+    const bool test_path_ok = proces.sciezka_pliku[tp] == '\0' &&
+                              test_path[tp] == '\0';
+    bool test_automatyczny = test_path_ok &&
+        loader_pobierz_argument_startowy(aktualny_pid, test_arg, sizeof(test_arg));
+    size_t ta = 0;
+    while (test_automatyczny && test_arg[ta] && automated[ta] &&
+           test_arg[ta] == automated[ta]) ++ta;
+    test_automatyczny = test_automatyczny && test_arg[ta] == '\0' &&
+                        automated[ta] == '\0';
+    if ((!operacja_systemowa_dozwolona(proces) && !test_automatyczny) || arg1 == 0 ||
+        arg2 == 0 || arg2 > SKLADACZ_MAKS_WARSTW) return 0;
+    const uint32_t max = static_cast<uint32_t>(arg2);
+    const size_t bytes = static_cast<size_t>(max) * sizeof(GuiOknoInfo);
+    if (!czy_bezpieczny_zakres_uzytkownika_do_zapisu(
+            reinterpret_cast<void*>(arg1), bytes)) return 0;
+    GuiOknoInfo snapshot[SKLADACZ_MAKS_WARSTW] = {};
+    const uint32_t count = skladacz_obrazu_snapshot_okien(
+        snapshot, max, bws_gui_aktywny_pid());
+    return skopiuj_do_przestrzeni_uzytkownika(
+               reinterpret_cast<void*>(arg1), snapshot,
+               static_cast<size_t>(count) * sizeof(GuiOknoInfo))
+               ? count : 0ULL;
+}
+
+__attribute__((noinline)) uint64_t bws_rozmiar_pliku(
+    proces_t& proces,
+    uint64_t arg1
+) {
+    if (!proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ)) return 0;
+    char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
+    if (!pobierz_sciezke_pliku(arg1, sciezka)) return 0;
+    /* +1 zachowuje 0 jako blad i pozwala reprezentowac pusty plik. */
+    return static_cast<uint64_t>(rozmiar_pliku(sciezka)) + 1ULL;
+}
+
+__attribute__((noinline)) uint64_t bws_pobierz_argument(
+    uint64_t arg1,
+    uint64_t arg2
+) {
+    if (arg1 == 0 || arg2 == 0 || arg2 > MAX_SCIEZKA_PLIKU_BWS)
+        return 0;
+    if (!czy_bezpieczny_zakres_uzytkownika_do_zapisu(
+            reinterpret_cast<void*>(arg1), static_cast<size_t>(arg2)))
+        return 0;
+    char argument[MAX_SCIEZKA_PLIKU_BWS] = {};
+    if (!loader_pobierz_argument_startowy(
+            aktualny_pid, argument, sizeof(argument))) return 0;
+    const size_t len = dlugosc_stringa_limit(argument, sizeof(argument));
+    if (len >= sizeof(argument) || len + 1U > arg2) return 0;
+    return skopiuj_do_przestrzeni_uzytkownika(
+               reinterpret_cast<void*>(arg1), argument, len + 1U)
+        ? 1ULL : 0ULL;
+}
+
+__attribute__((noinline)) uint64_t bws_utworz_katalog(
+    proces_t& proces,
+    uint64_t arg1
+) {
+    char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
+    if (!pobierz_sciezke_pliku(arg1, sciezka)) return 0;
+    if (!proces_moze_utworzyc_w_sciezce(proces, sciezka)) {
+        wypisz_log("[PZB] directory_create=DENY");
+        return 0;
+    }
+    wypisz_log("[PZB] directory_create=ALLOW");
+    const uint8_t eff = efektywny_pzb_dla_nowego(proces, sciezka);
+    const bool wynik = utworz_katalog_z_pzb(sciezka, eff);
+    if (wynik)
+        powiadom_zmiane_systemu_plikow(sciezka, BWS_FILE_CREATE);
+    return wynik ? 1ULL : 0ULL;
+}
+
+__attribute__((noinline)) uint64_t bws_czytaj_fragment_pliku(
+    proces_t& proces,
+    uint64_t arg1,
+    uint64_t arg2,
+    uint64_t arg3,
+    uint64_t arg4
+) {
+    if (!proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ)) return 0;
+    char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
+    if (!pobierz_sciezke_pliku(arg1, sciezka)) return 0;
+    uint64_t offset = arg2;
+    uint64_t buf_u = arg3;
+    uint64_t len64 = arg4;
+    if (buf_u == 0 || len64 == 0 || len64 > (1ULL * 1024ULL * 1024ULL)) return 0;
+    uint32_t len = static_cast<uint32_t>(len64);
+    if ((uint64_t)len != len64) return 0;
+    if (!czy_bezpieczny_zakres_uzytkownika_do_zapisu(reinterpret_cast<void*>(buf_u), len)) return 0;
+    if (!bws_vmm_sprawdz_zakres_uzytkownika(reinterpret_cast<void*>(buf_u), len, true)) return 0;
+    uint64_t end = 0;
+    if (__builtin_add_overflow(offset, (uint64_t)len, &end)) return 0;
+    uint32_t got = 0;
+    if (!czytaj_fragment_pliku(
+            sciezka, offset, reinterpret_cast<char*>(buf_u), len,
+            &got)) return 0;
+    if (got > len) return 0;
+    return (uint64_t)got + 1ULL;
 }
 
 } // namespace
@@ -3579,79 +3696,21 @@ static uint64_t obsluga_wywolan_systemowych_impl(
             if (!proces_ma_prawo(proces, PRAWO_GUI)) return 0;
             return bws_gui_minimalizuj_warstwe(aktualny_pid) ? 1ULL : 0ULL;
 
-        case 42: {
-            char test_arg[32] = {};
-            const char* test_path = "/programy/test.cebula/test.bur";
-            const char* automated = "--automated";
-            size_t tp = 0;
-            while (proces.sciezka_pliku[tp] && test_path[tp] &&
-                   proces.sciezka_pliku[tp] == test_path[tp]) ++tp;
-            const bool test_path_ok = proces.sciezka_pliku[tp] == '\0' &&
-                                      test_path[tp] == '\0';
-            bool test_automatyczny = test_path_ok &&
-                loader_pobierz_argument_startowy(aktualny_pid,test_arg,sizeof(test_arg));
-            size_t ta = 0;
-            while (test_automatyczny && test_arg[ta] && automated[ta] &&
-                   test_arg[ta] == automated[ta]) ++ta;
-            test_automatyczny = test_automatyczny && test_arg[ta] == '\0' &&
-                                automated[ta] == '\0';
-            if ((!operacja_systemowa_dozwolona(proces) && !test_automatyczny) || arg1 == 0 ||
-                arg2 == 0 || arg2 > SKLADACZ_MAKS_WARSTW) return 0;
-            const uint32_t max = static_cast<uint32_t>(arg2);
-            const size_t bytes = static_cast<size_t>(max) * sizeof(GuiOknoInfo);
-            if (!czy_bezpieczny_zakres_uzytkownika_do_zapisu(
-                    reinterpret_cast<void*>(arg1), bytes)) return 0;
-            GuiOknoInfo snapshot[SKLADACZ_MAKS_WARSTW] = {};
-            const uint32_t count = skladacz_obrazu_snapshot_okien(
-                snapshot, max, bws_gui_aktywny_pid());
-            return skopiuj_do_przestrzeni_uzytkownika(
-                       reinterpret_cast<void*>(arg1), snapshot,
-                       static_cast<size_t>(count) * sizeof(GuiOknoInfo))
-                       ? count : 0ULL;
-        }
+        case 42:
+            return bws_snapshot_okien(proces, arg1, arg2);
 
         case 43:
             if (!operacja_systemowa_dozwolona(proces) || arg1 == 0) return 0;
             return bws_gui_aktywuj_okno(arg1) ? 1ULL : 0ULL;
 
-        case 44: {
-            if (!proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ)) return 0;
-            char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
-            if (!pobierz_sciezke_pliku(arg1, sciezka)) return 0;
-            /* +1 zachowuje 0 jako blad i pozwala reprezentowac pusty plik. */
-            return static_cast<uint64_t>(rozmiar_pliku(sciezka)) + 1ULL;
-        }
+        case 44:
+            return bws_rozmiar_pliku(proces, arg1);
 
-        case 45: {
-            if (arg1 == 0 || arg2 == 0 || arg2 > MAX_SCIEZKA_PLIKU_BWS)
-                return 0;
-            if (!czy_bezpieczny_zakres_uzytkownika_do_zapisu(
-                    reinterpret_cast<void*>(arg1), static_cast<size_t>(arg2)))
-                return 0;
-            char argument[MAX_SCIEZKA_PLIKU_BWS] = {};
-            if (!loader_pobierz_argument_startowy(
-                    aktualny_pid, argument, sizeof(argument))) return 0;
-            const size_t len = dlugosc_stringa_limit(argument, sizeof(argument));
-            if (len >= sizeof(argument) || len + 1U > arg2) return 0;
-            return skopiuj_do_przestrzeni_uzytkownika(
-                       reinterpret_cast<void*>(arg1), argument, len + 1U)
-                ? 1ULL : 0ULL;
-        }
+        case 45:
+            return bws_pobierz_argument(arg1, arg2);
 
-        case 46: {
-            char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
-            if (!pobierz_sciezke_pliku(arg1, sciezka)) return 0;
-            if (!proces_moze_utworzyc_w_sciezce(proces, sciezka)) {
-                wypisz_log("[PZB] directory_create=DENY");
-                return 0;
-            }
-            wypisz_log("[PZB] directory_create=ALLOW");
-            const uint8_t eff = efektywny_pzb_dla_nowego(proces, sciezka);
-            const bool wynik = utworz_katalog_z_pzb(sciezka, eff);
-            if (wynik)
-                powiadom_zmiane_systemu_plikow(sciezka, BWS_FILE_CREATE);
-            return wynik ? 1ULL : 0ULL;
-        }
+        case 46:
+            return bws_utworz_katalog(proces, arg1);
 
         case 47:
             return bws_pobierz_metadane(proces, arg1, arg2);
@@ -3727,33 +3786,8 @@ static uint64_t obsluga_wywolan_systemowych_impl(
             return bws_gui_ustaw_tytul_okna(reinterpret_cast<const char*>(arg1))
                 ? 1ULL : 0ULL;
 
-        case 59: {
-            if (!proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ)) return 0;
-            char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
-            if (!pobierz_sciezke_pliku(arg1, sciezka)) return 0;
-            uint64_t offset = arg2;
-            uint64_t buf_u = arg3;
-            uint64_t len64 = arg4;
-            if (buf_u == 0 || len64 == 0 || len64 > (1ULL*1024ULL*1024ULL)) return 0;
-            uint32_t len = static_cast<uint32_t>(len64);
-            if ((uint64_t)len != len64) return 0;
-            if (!czy_bezpieczny_zakres_uzytkownika_do_zapisu(reinterpret_cast<void*>(buf_u), len)) return 0;
-            if (!bws_vmm_sprawdz_zakres_uzytkownika(reinterpret_cast<void*>(buf_u), len, true)) return 0;
-            uint64_t end = 0;
-            if (__builtin_add_overflow(offset, (uint64_t)len, &end)) return 0;
-            /*
-             * Tak jak BWS57, zapisujemy bezposrednio do uprzednio
-             * zweryfikowanego, zapisywalnego zakresu aktywnego procesu.
-             * Usuwa to jedna alokacje i dodatkowa kopie na kazdy odczyt
-             * zakresowy, bez zmiany ABI BWS59 ani kodu PSF.
-             */
-            uint32_t got = 0;
-            if (!czytaj_fragment_pliku(
-                    sciezka, offset, reinterpret_cast<char*>(buf_u), len,
-                    &got)) return 0;
-            if (got > len) return 0;
-            return (uint64_t)got + 1ULL;
-        }
+        case 59:
+            return bws_czytaj_fragment_pliku(proces, arg1, arg2, arg3, arg4);
 
         case 60:
             /* Addytywny, bezstanowy odczyt zegara; BWS57 pozostaje bez zmian. */
