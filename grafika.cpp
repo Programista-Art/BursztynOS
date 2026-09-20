@@ -4,7 +4,6 @@
 #include "mysz_input.h"
 #include "pamiec.h"
 #include "zegar-rtc.h"
-#include "ahci.h"
 #include "psf.h"
 #include "scheduler.h"
 #include "ekran.h"

@@ -34,6 +34,257 @@ struct Fake {
 };
 unsigned checks=0;
 #define CHECK(x) do{++checks;if(!(x)){std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x);std::abort();}}while(0)
+
+struct MockBlockDriver {
+    std::map<uint64_t, std::vector<uint8_t>> storage;
+    std::vector<uint32_t> write_chunks;
+    std::vector<uint32_t> read_chunks;
+    uint32_t sector_bytes = 512;
+    uint64_t total_sectors = 1000;
+    BlockError inject_read_error = BlockError::Ok;
+    BlockError inject_write_error = BlockError::Ok;
+    BlockError inject_flush_error = BlockError::Ok;
+    BlockError inject_reval_error = BlockError::Ok;
+    bool flushed = false;
+    Device bdev;
+
+    MockBlockDriver(uint64_t sectors_count, uint32_t sec_size = 512, uint32_t max_transfer = 0)
+        : sector_bytes(sec_size), total_sectors(sectors_count) {
+        bdev.driver_data = this;
+        bdev.ops = &mock_ops;
+        bdev.total_sectors = sectors_count;
+        bdev.logical_sector_size = sec_size;
+        bdev.physical_sector_size = sec_size;
+        bdev.max_transfer_sectors = max_transfer;
+        bdev.read_only = false;
+        bdev.removable = false;
+        bdev.device_type = BlockDeviceType::AHCI;
+        std::strncpy(bdev.model, "MOCK_DISK_MODEL", sizeof(bdev.model) - 1);
+        std::strncpy(bdev.serial, "MOCK_DISK_SERIAL", sizeof(bdev.serial) - 1);
+        bdev.write_count = 0;
+    }
+
+    static BlockError do_read(BlockDevice* dev, uint64_t lba, uint32_t count, void* buf) {
+        auto* self = static_cast<MockBlockDriver*>(dev->driver_data);
+        if (self->inject_read_error != BlockError::Ok) {
+            return self->inject_read_error;
+        }
+        self->read_chunks.push_back(count);
+        uint8_t* dst = static_cast<uint8_t*>(buf);
+        for (uint32_t i = 0; i < count; ++i) {
+            uint64_t cur_lba = lba + i;
+            auto it = self->storage.find(cur_lba);
+            if (it != self->storage.end()) {
+                std::memcpy(dst + i * self->sector_bytes, it->second.data(), self->sector_bytes);
+            } else {
+                std::memset(dst + i * self->sector_bytes, 0, self->sector_bytes);
+            }
+        }
+        return BlockError::Ok;
+    }
+
+    static BlockError do_write(BlockDevice* dev, uint64_t lba, uint32_t count, const void* buf) {
+        auto* self = static_cast<MockBlockDriver*>(dev->driver_data);
+        if (self->inject_write_error != BlockError::Ok) {
+            return self->inject_write_error;
+        }
+        self->write_chunks.push_back(count);
+        const uint8_t* src = static_cast<const uint8_t*>(buf);
+        for (uint32_t i = 0; i < count; ++i) {
+            uint64_t cur_lba = lba + i;
+            std::vector<uint8_t> block(src + i * self->sector_bytes, src + (i + 1) * self->sector_bytes);
+            self->storage[cur_lba] = block;
+        }
+        return BlockError::Ok;
+    }
+
+    static BlockError do_flush(BlockDevice* dev) {
+        auto* self = static_cast<MockBlockDriver*>(dev->driver_data);
+        if (self->inject_flush_error != BlockError::Ok) {
+            return self->inject_flush_error;
+        }
+        self->flushed = true;
+        return BlockError::Ok;
+    }
+
+    static BlockError do_revalidate(BlockDevice* dev) {
+        auto* self = static_cast<MockBlockDriver*>(dev->driver_data);
+        return self->inject_reval_error;
+    }
+
+    static const BlockOperations mock_ops;
+};
+
+const BlockOperations MockBlockDriver::mock_ops = {
+    MockBlockDriver::do_read,
+    MockBlockDriver::do_write,
+    MockBlockDriver::do_flush,
+    MockBlockDriver::do_revalidate
+};
+
+static void test_block_device_abstraction() {
+    // Test block_range_valid and overflow safety
+    CHECK(block_range_valid(0, 100, 100));
+    CHECK(!block_range_valid(0, 101, 100));
+    CHECK(block_range_valid(99, 1, 100));
+    CHECK(!block_range_valid(100, 1, 100));
+    CHECK(!block_range_valid(0, 0, 100));
+    CHECK(!block_range_valid(UINT64_MAX, 1, 100));
+    CHECK(!block_range_valid(UINT64_MAX - 5, 10, 100));
+    CHECK(!block_range_valid(50, UINT32_MAX, 100));
+
+    // Test BlockError helpers
+    CHECK(block_sukces(BlockError::Ok));
+    CHECK(!block_sukces(BlockError::IOError));
+    CHECK(!block_sukces(BlockError::InvalidArgument));
+    CHECK(std::strcmp(block_error_str(BlockError::Ok), "OK") == 0);
+    CHECK(std::strcmp(block_error_str(BlockError::Timeout), "Przekroczenie limitu czasu (timeout)") == 0);
+
+    // Mock device with 1000 sectors of 512 bytes
+    MockBlockDriver mock(1000, 512, 0);
+    std::vector<uint8_t> wbuf(512 * 4, 0x42);
+    std::vector<uint8_t> rbuf(512 * 4, 0x00);
+
+    // 1. Valid write and read
+    CHECK(mock.bdev.write(10, 4, wbuf.data()) == BlockError::Ok);
+    CHECK(mock.bdev.write_count == 4);
+    CHECK(mock.bdev.read(10, 4, rbuf.data()) == BlockError::Ok);
+    CHECK(std::memcmp(wbuf.data(), rbuf.data(), 512 * 4) == 0);
+
+    // 2. Read unwritten area yields zeroes
+    std::vector<uint8_t> zero_buf(512, 0xFF);
+    CHECK(mock.bdev.read(20, 1, zero_buf.data()) == BlockError::Ok);
+    for (uint8_t b : zero_buf) CHECK(b == 0);
+
+    // 3. Boundary tests
+    // Last valid sector
+    CHECK(mock.bdev.write(999, 1, wbuf.data()) == BlockError::Ok);
+    CHECK(mock.bdev.read(999, 1, rbuf.data()) == BlockError::Ok);
+    // One past the end
+    CHECK(mock.bdev.write(1000, 1, wbuf.data()) == BlockError::OutOfRange);
+    CHECK(mock.bdev.read(1000, 1, rbuf.data()) == BlockError::OutOfRange);
+    // Spanning past the end
+    CHECK(mock.bdev.write(998, 3, wbuf.data()) == BlockError::OutOfRange);
+    CHECK(mock.bdev.read(998, 3, rbuf.data()) == BlockError::OutOfRange);
+
+    // 4. Overflow tests
+    CHECK(mock.bdev.write(UINT64_MAX, 1, wbuf.data()) == BlockError::OutOfRange);
+    CHECK(mock.bdev.read(UINT64_MAX, 1, rbuf.data()) == BlockError::OutOfRange);
+    CHECK(mock.bdev.write(UINT64_MAX - 2, 5, wbuf.data()) == BlockError::OutOfRange);
+    CHECK(mock.bdev.read(UINT64_MAX - 2, 5, rbuf.data()) == BlockError::OutOfRange);
+
+    // 5. Zero-length and null pointer tests
+    CHECK(mock.bdev.write(0, 0, wbuf.data()) == BlockError::InvalidArgument);
+    CHECK(mock.bdev.read(0, 0, rbuf.data()) == BlockError::InvalidArgument);
+    CHECK(mock.bdev.write(0, 1, nullptr) == BlockError::InvalidArgument);
+    CHECK(mock.bdev.read(0, 1, nullptr) == BlockError::InvalidArgument);
+
+    // 6. Read-only handling
+    mock.bdev.read_only = true;
+    CHECK(mock.bdev.write(10, 1, wbuf.data()) == BlockError::Unsupported);
+    CHECK(mock.bdev.read(10, 1, rbuf.data()) == BlockError::Ok);
+    mock.bdev.read_only = false;
+
+    // 7. Error propagation
+    mock.inject_read_error = BlockError::IOError;
+    std::memset(rbuf.data(), 0xAA, 512);
+    CHECK(mock.bdev.read(10, 1, rbuf.data()) == BlockError::IOError);
+    CHECK(rbuf[0] == 0xAA); // Not overwritten
+    mock.inject_read_error = BlockError::Ok;
+
+    mock.inject_write_error = BlockError::Timeout;
+    CHECK(mock.bdev.write(10, 1, wbuf.data()) == BlockError::Timeout);
+    mock.inject_write_error = BlockError::Ok;
+
+    mock.inject_flush_error = BlockError::DeviceUnavailable;
+    CHECK(mock.bdev.flush() == BlockError::DeviceUnavailable);
+    mock.inject_flush_error = BlockError::Ok;
+    CHECK(mock.bdev.flush() == BlockError::Ok);
+    CHECK(mock.flushed);
+
+    // 8. Revalidation
+    CHECK(mock.bdev.revalidate() == BlockError::Ok);
+    mock.inject_reval_error = BlockError::DeviceUnavailable;
+    CHECK(mock.bdev.revalidate() == BlockError::DeviceUnavailable);
+    mock.inject_reval_error = BlockError::Ok;
+
+    // 9. Chunking / max_transfer_sectors
+    MockBlockDriver chunk_mock(100, 512, 4);
+    std::vector<uint8_t> chunk_buf(512 * 10, 0x77);
+    CHECK(chunk_mock.bdev.write(0, 10, chunk_buf.data()) == BlockError::Ok);
+    CHECK(chunk_mock.write_chunks.size() == 3);
+    CHECK(chunk_mock.write_chunks[0] == 4);
+    CHECK(chunk_mock.write_chunks[1] == 4);
+    CHECK(chunk_mock.write_chunks[2] == 2);
+    std::vector<uint8_t> chunk_read(512 * 10, 0);
+    CHECK(chunk_mock.bdev.read(0, 10, chunk_read.data()) == BlockError::Ok);
+    CHECK(chunk_mock.read_chunks.size() == 3);
+    CHECK(chunk_mock.read_chunks[0] == 4);
+    CHECK(chunk_mock.read_chunks[1] == 4);
+    CHECK(chunk_mock.read_chunks[2] == 2);
+    CHECK(std::memcmp(chunk_buf.data(), chunk_read.data(), 512 * 10) == 0);
+
+    // 10. Partition relative LBA translation and bounds
+    Partition part{&mock.bdev, 200, 50};
+    std::vector<uint8_t> p_wbuf(512 * 2, 0x33);
+    std::vector<uint8_t> p_rbuf(512 * 2, 0x00);
+
+    // Relative LBA 5 -> physical LBA 205
+    CHECK(partition_write(part, 5, 2, p_wbuf.data()) == BlockError::Ok);
+    CHECK(mock.storage.count(205) == 1);
+    CHECK(mock.storage.count(206) == 1);
+    CHECK(mock.storage.count(5) == 0); // Not written at relative address!
+    CHECK(partition_read(part, 5, 2, p_rbuf.data()) == BlockError::Ok);
+    CHECK(std::memcmp(p_wbuf.data(), p_rbuf.data(), 512 * 2) == 0);
+
+    // Partition boundary checks
+    CHECK(partition_write(part, 49, 1, p_wbuf.data()) == BlockError::Ok); // Last sector
+    CHECK(partition_write(part, 50, 1, p_wbuf.data()) == BlockError::OutOfRange); // Past end
+    CHECK(partition_write(part, 49, 2, p_wbuf.data()) == BlockError::OutOfRange); // Crosses end
+    CHECK(partition_read(part, 49, 1, p_rbuf.data()) == BlockError::Ok);
+    CHECK(partition_read(part, 50, 1, p_rbuf.data()) == BlockError::OutOfRange);
+
+    // Partition invalid args
+    CHECK(partition_write(part, 0, 0, p_wbuf.data()) == BlockError::InvalidArgument);
+    CHECK(partition_read(part, 0, 0, p_rbuf.data()) == BlockError::InvalidArgument);
+    CHECK(partition_write(part, 0, 1, nullptr) == BlockError::InvalidArgument);
+    CHECK(partition_read(part, 0, 1, nullptr) == BlockError::InvalidArgument);
+
+    // Partition overflow protection
+    Partition p_ovf{&mock.bdev, UINT64_MAX - 10, 20};
+    CHECK(partition_write(p_ovf, 0, 1, p_wbuf.data()) == BlockError::OutOfRange);
+    CHECK(partition_read(p_ovf, 0, 1, p_rbuf.data()) == BlockError::OutOfRange);
+
+    // Partition flush error propagation
+    mock.flushed = false;
+    CHECK(partition_flush(part) == BlockError::Ok);
+    CHECK(mock.flushed);
+    mock.inject_flush_error = BlockError::IOError;
+    CHECK(partition_flush(part) == BlockError::IOError);
+    mock.inject_flush_error = BlockError::Ok;
+
+    // 11. Non-512-byte sectors (4096-byte 4Kn)
+    MockBlockDriver mock_4kn(200, 4096, 2);
+    std::vector<uint8_t> buf_4k(4096 * 3, 0x99);
+    CHECK(mock_4kn.bdev.write(10, 3, buf_4k.data()) == BlockError::Ok);
+    CHECK(mock_4kn.write_chunks.size() == 2);
+    CHECK(mock_4kn.write_chunks[0] == 2);
+    CHECK(mock_4kn.write_chunks[1] == 1);
+    std::vector<uint8_t> read_4k(4096 * 3, 0x00);
+    CHECK(mock_4kn.bdev.read(10, 3, read_4k.data()) == BlockError::Ok);
+    CHECK(std::memcmp(buf_4k.data(), read_4k.data(), 4096 * 3) == 0);
+
+    // 4Kn partition translation
+    Partition part_4k{&mock_4kn.bdev, 20, 10};
+    std::vector<uint8_t> p_buf_4k(4096, 0x88);
+    CHECK(partition_write(part_4k, 2, 1, p_buf_4k.data()) == BlockError::Ok);
+    CHECK(mock_4kn.storage.count(22) == 1); // 20 + 2
+    CHECK(mock_4kn.storage[22].size() == 4096);
+    std::vector<uint8_t> p_read_4k(4096, 0);
+    CHECK(partition_read(part_4k, 2, 1, p_read_4k.data()) == BlockError::Ok);
+    CHECK(std::memcmp(p_buf_4k.data(), p_read_4k.data(), 4096) == 0);
+}
+
 int main(){
     CHECK(!instalator_potwierdzenie_poprawne("",16));
     CHECK(!instalator_potwierdzenie_poprawne("B",16));
@@ -175,5 +426,8 @@ int main(){
     CHECK(!rozruch_weryfikuj_uklad_dysku(nullptr));
     CHECK(!rozruch_weryfikuj_uklad_dysku(&small.dev));
 
-    std::printf("Storage/BSP2 host: %u PASS, 0 FAIL (includes outside-partition sentinel, faults, >2 TiB GPT, A/B ESP)\n",checks);
+    test_block_device_abstraction();
+
+    std::printf("Storage/BSP2 host: %u PASS, 0 FAIL (includes outside-partition sentinel, faults, >2 TiB GPT, A/B ESP, BlockDevice abstraction)\n",checks);
 }
+

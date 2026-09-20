@@ -17,17 +17,61 @@ static void p16(uint8_t*p,uint16_t v){p[0]=v;p[1]=v>>8;}
 static void p32(uint8_t*p,uint32_t v){for(unsigned i=0;i<4;++i)p[i]=v>>(8*i);}
 static void p64(uint8_t*p,uint64_t v){for(unsigned i=0;i<8;++i)p[i]=v>>(8*i);}
 uint32_t crc32(const void*p,size_t n){uint32_t c=~0U;auto*b=(const uint8_t*)p;while(n--){c^=*b++;for(unsigned i=0;i<8;++i)c=(c>>1)^(0xEDB88320U & (0U-(c&1)));}return ~c;}
-bool range(uint64_t s,uint64_t n,uint64_t cap){return n && s<cap && n<=cap-s;}
-static bool valid(const Partition&p,uint64_t s,uint32_t n,const void*b){return b&&p.device&&p.device->sector_size==512&&range(p.start,p.count,p.device->sectors)&&range(s,n,p.count);}
+bool range(uint64_t s,uint64_t n,uint64_t cap){return block_range_valid(s, n, cap);}
+
+static bool valid(const Partition&p,uint64_t s,uint32_t n,const void*b){
+    if(!b||!p.device)return false;
+    p.device->sync_state();
+    uint64_t cap = p.device->total_sectors ? p.device->total_sectors : p.device->sectors;
+    uint32_t sz = p.device->logical_sector_size ? p.device->logical_sector_size : p.device->sector_size;
+    return sz==512 && range(p.start,p.count,cap) && range(s,n,p.count);
+}
+
+BlockError partition_read(const Partition& p, uint64_t s, uint32_t n, void* b) {
+    if (!b || n == 0) return BlockError::InvalidArgument;
+    if (!p.device) return BlockError::DeviceUnavailable;
+    p.device->sync_state();
+    uint64_t cap = p.device->total_sectors ? p.device->total_sectors : p.device->sectors;
+    if (!range(p.start, p.count, cap)) return BlockError::OutOfRange;
+    if (!range(s, n, p.count)) return BlockError::OutOfRange;
+    if (p.start > UINT64_MAX - s) return BlockError::OutOfRange;
+    uint64_t physical_lba = p.start + s;
+    return p.device->read(physical_lba, n, b);
+}
+
+BlockError partition_write(const Partition& p, uint64_t s, uint32_t n, const void* b) {
+    if (!b || n == 0) return BlockError::InvalidArgument;
+    if (!p.device) return BlockError::DeviceUnavailable;
+    p.device->sync_state();
+    if (p.device->read_only || !p.device->writable) return BlockError::Unsupported;
+    uint64_t cap = p.device->total_sectors ? p.device->total_sectors : p.device->sectors;
+    if (!range(p.start, p.count, cap)) return BlockError::OutOfRange;
+    if (!range(s, n, p.count)) return BlockError::OutOfRange;
+    if (p.start > UINT64_MAX - s) return BlockError::OutOfRange;
+    uint64_t physical_lba = p.start + s;
+    return p.device->write(physical_lba, n, b);
+}
+
+BlockError partition_flush(const Partition& p) {
+    if (!p.device) return BlockError::DeviceUnavailable;
+    p.device->sync_state();
+    return p.device->flush();
+}
+
 bool read(const Partition&p,uint64_t s,uint32_t n,void*b){
-    if(!valid(p,s,n,b)||!p.device->read)return false;
-    for(uint32_t i=0;i<n;){uint32_t k=n-i>32?32:n-i;if(!p.device->read(p.device->ctx,p.start+s+i,k,(uint8_t*)b+size_t(i)*512))return false;i+=k;}return true;
+    if(!valid(p,s,n,b))return false;
+    return partition_read(p,s,n,b) == BlockError::Ok;
 }
+
 bool write(const Partition&p,uint64_t s,uint32_t n,const void*b){
-    if(!valid(p,s,n,b)||!p.device->writable||!p.device->write)return false;
-    for(uint32_t i=0;i<n;){uint32_t k=n-i>32?32:n-i;if(!p.device->write(p.device->ctx,p.start+s+i,k,(const uint8_t*)b+size_t(i)*512))return false;i+=k;}return true;
+    if(!valid(p,s,n,b))return false;
+    return partition_write(p,s,n,b) == BlockError::Ok;
 }
-bool flush(const Partition&p){return p.device&&p.device->flush&&p.device->flush(p.device->ctx);}
+
+bool flush(const Partition&p){
+    if(!p.device)return false;
+    return partition_flush(p) == BlockError::Ok;
+}
 static FormatterWorkspace g_workspace;
 static uint32_t s_formatter_lock = 0;
 static uint32_t s_formatter_depth = 0;
@@ -93,34 +137,46 @@ bool write_verify(const Partition&p,uint64_t s,uint32_t n,const void*b){
     return true;
 }
 bool plan(Device*d,Layout*out){
-    if(!d||!out||!d->writable||d->sector_size!=512||d->sectors>(1ULL<<48))return false;
-    const uint64_t a=MiB/d->sector_size,esp=EspBytes/d->sector_size,start=a+esp;
-    if(d->sectors<=start+33)return false;
-    uint64_t available=(d->sectors-33-start)/a*a;
-    if(available<128*MiB/d->sector_size)return false;
-    uint64_t n=available<BspMaxBytes/d->sector_size?available:BspMaxBytes/d->sector_size;
+    if(!d||!out)return false;
+    d->sync_state();
+    uint64_t cap = d->total_sectors ? d->total_sectors : d->sectors;
+    uint32_t sz = d->logical_sector_size ? d->logical_sector_size : d->sector_size;
+    bool w = !d->read_only && d->writable;
+    if(!w||sz!=512||cap>(1ULL<<48))return false;
+    const uint64_t a=MiB/sz,esp=EspBytes/sz,start=a+esp;
+    if(cap<=start+33)return false;
+    uint64_t available=(cap-33-start)/a*a;
+    if(available<128*MiB/sz)return false;
+    uint64_t n=available<BspMaxBytes/sz?available:BspMaxBytes/sz;
     *out={{d,a,esp},{d,start,n},available-n};return true;
 }
 static bool header(Device*d,uint64_t where,uint8_t*h){
-    Partition all{d,0,d->sectors};
+    if(!d)return false;
+    d->sync_state();
+    uint64_t cap = d->total_sectors ? d->total_sectors : d->sectors;
+    Partition all{d,0,cap};
     if(!read(all,where,1,h)||!equal(h,"EFI PART",8)||u32(h+8)!=0x10000||u32(h+12)!=92||u32(h+20))return false;
     uint32_t c=u32(h+16);p32(h+16,0);bool ok=crc32(h,92)==c;p32(h+16,c);
     uint64_t first=u64(h+40),last=u64(h+48),arr=u64(h+72);
     uint32_t n=u32(h+80),sz=u32(h+84);
-    return ok&&u64(h+24)==where&&u64(h+32)==(where==1?d->sectors-1:1)&&
-        first>=34&&last>=first&&last<d->sectors-33&&n&&n<=128&&sz==128&&
-        range(arr,(uint64_t(n)*128+511)/512,d->sectors)&&
+    return ok&&u64(h+24)==where&&u64(h+32)==(where==1?cap-1:1)&&
+        first>=34&&last>=first&&last<cap-33&&n&&n<=128&&sz==128&&
+        range(arr,(uint64_t(n)*128+511)/512,cap)&&
         (where==1?(arr>=2&&arr+(uint64_t(n)*128+511)/512<=first):(arr>last&&arr+(uint64_t(n)*128+511)/512<=where));
 }
 bool gpt_read(Device*d,Table*out){
-    if(!d||!out||d->sector_size!=512||d->sectors<68)return false;
+    if(!d||!out)return false;
+    d->sync_state();
+    uint64_t cap = d->total_sectors ? d->total_sectors : d->sectors;
+    uint32_t sz = d->logical_sector_size ? d->logical_sector_size : d->sector_size;
+    if(sz!=512||cap<68)return false;
     GuardStorageFormatter guard(__func__);
     uint8_t* h = g_workspace.gpt_h;
     uint8_t* b = g_workspace.gpt_b;
     uint8_t* sector = g_workspace.gpt_sector;
     uint8_t* backup = g_workspace.gpt_backup;
-    if(!header(d,1,h)||!header(d,d->sectors-1,b)||!equal(h+40,b+40,32)||!equal(h+80,b+80,12))return false;
-    Partition all{d,0,d->sectors};
+    if(!header(d,1,h)||!header(d,cap-1,b)||!equal(h+40,b+40,32)||!equal(h+80,b+80,12))return false;
+    Partition all{d,0,cap};
     uint32_t entries=u32(h+80),c=~0U;out->count=0;copy(out->uuid,h+56,16);
     for(uint32_t i=0;i<entries;i+=4){
         if(!read(all,u64(h+72)+i/4,1,sector)||!read(all,u64(b+72)+i/4,1,backup))return false;
@@ -139,7 +195,10 @@ bool gpt_read(Device*d,Table*out){
 }
 bool gpt_write(Device*d,const Layout&l,const uint8_t uuid[16]){
     Layout expected{};
-    if(!uuid||!plan(d,&expected)||l.esp.device!=d||l.bsp.device!=d||l.esp.start!=expected.esp.start||
+    if(!uuid||!d)return false;
+    d->sync_state();
+    uint64_t cap = d->total_sectors ? d->total_sectors : d->sectors;
+    if(!plan(d,&expected)||l.esp.device!=d||l.bsp.device!=d||l.esp.start!=expected.esp.start||
        l.esp.count!=expected.esp.count||l.bsp.start!=expected.bsp.start||l.bsp.count!=expected.bsp.count)return false;
     // Bounded scratch on stack (kernel stack is 16 KiB).
     uint8_t entries[512]{},h[512]{},zeroes[512]{},mbr[512]{};
@@ -149,18 +208,18 @@ bool gpt_write(Device*d,const Layout&l,const uint8_t uuid[16]){
     };
     entry(0,EspType,l.esp,"EFI System Partition",1);entry(128,BspType,l.bsp,"Bursztyn OS",2);
     uint32_t c=~0U;for(unsigned i=0;i<16384;++i){c^=i<512?entries[i]:0;for(unsigned k=0;k<8;++k)c=(c>>1)^(0xEDB88320U & (0U-(c&1)));}c=~c;
-    Partition all{d,0,d->sectors};
+    Partition all{d,0,cap};
     mbr[446+4]=0xEE;mbr[447]=0;mbr[448]=2;mbr[449]=0;mbr[451]=mbr[452]=mbr[453]=0xFF;
-    p32(mbr+454,1);p32(mbr+458,d->sectors-1>UINT32_MAX?UINT32_MAX:uint32_t(d->sectors-1));mbr[510]=0x55;mbr[511]=0xAA;
+    p32(mbr+454,1);p32(mbr+458,cap-1>UINT32_MAX?UINT32_MAX:uint32_t(cap-1));mbr[510]=0x55;mbr[511]=0xAA;
     if(!flush(all)||!write_verify(all,0,1,mbr))return false;
     // Backup first: primary header is published only after both arrays exist.
-    for(unsigned pass=0;pass<2;++pass){uint64_t arr=pass?2:d->sectors-33;
+    for(unsigned pass=0;pass<2;++pass){uint64_t arr=pass?2:cap-33;
         if(!write_verify(all,arr,1,entries))return false;
         for(unsigned i=1;i<32;++i)if(!write_verify(all,arr+i,1,zeroes))return false;
         zero(h,512);copy(h,"EFI PART",8);p32(h+8,0x10000);p32(h+12,92);
-        p64(h+24,pass?1:d->sectors-1);p64(h+32,pass?d->sectors-1:1);p64(h+40,34);p64(h+48,d->sectors-34);
+        p64(h+24,pass?1:cap-1);p64(h+32,pass?cap-1:1);p64(h+40,34);p64(h+48,cap-34);
         copy(h+56,uuid,16);p64(h+72,arr);p32(h+80,128);p32(h+84,128);p32(h+88,c);p32(h+16,crc32(h,92));
-        if(!write_verify(all,pass?1:d->sectors-1,1,h))return false;
+        if(!write_verify(all,pass?1:cap-1,1,h))return false;
     }
     return flush(all);
 }
@@ -174,10 +233,11 @@ static void gpt_entries(const Layout&l,const uint8_t uuid[16],uint8_t out[512]){
     entry(0,EspType,l.esp,"EFI System Partition",1);entry(128,BspType,l.bsp,"Bursztyn OS",2);
 }
 static void gpt_header_sector(const GptInstallState&s,bool primary,uint8_t out[512]){
+    uint64_t cap = s.device->total_sectors ? s.device->total_sectors : s.device->sectors;
     zero(out,512);copy(out,"EFI PART",8);p32(out+8,0x10000);p32(out+12,92);
-    p64(out+24,primary?1:s.device->sectors-1);p64(out+32,primary?s.device->sectors-1:1);
-    p64(out+40,34);p64(out+48,s.device->sectors-34);copy(out+56,s.uuid,16);
-    p64(out+72,primary?2:s.device->sectors-33);p32(out+80,128);p32(out+84,128);
+    p64(out+24,primary?1:cap-1);p64(out+32,primary?cap-1:1);
+    p64(out+40,34);p64(out+48,cap-34);copy(out+56,s.uuid,16);
+    p64(out+72,primary?2:cap-33);p32(out+80,128);p32(out+84,128);
     p32(out+88,s.entries_crc);p32(out+16,crc32(out,92));
 }
 bool gpt_install_start(Device*d,const Layout&l,const uint8_t uuid[16],GptInstallState*s){
@@ -186,7 +246,9 @@ bool gpt_install_start(Device*d,const Layout&l,const uint8_t uuid[16],GptInstall
     }
     *s={};
     Layout expected{};
-    if(!uuid||!plan(d,&expected)||l.esp.device!=d||l.bsp.device!=d||l.esp.start!=expected.esp.start||
+    if(!uuid||!d)return false;
+    d->sync_state();
+    if(!plan(d,&expected)||l.esp.device!=d||l.bsp.device!=d||l.esp.start!=expected.esp.start||
        l.esp.count!=expected.esp.count||l.bsp.start!=expected.bsp.start||l.bsp.count!=expected.bsp.count)return false;
     s->device=d;s->layout=l;copy(s->uuid,uuid,16);uint8_t entries[512]{};
     gpt_entries(l,uuid,entries);uint32_t c=~0U;
@@ -195,34 +257,43 @@ bool gpt_install_start(Device*d,const Layout&l,const uint8_t uuid[16],GptInstall
 }
 bool gpt_install_step(GptInstallState*s){
     if(!s||s->failed||s->complete||!s->device)return false;
-    Partition all{s->device,0,s->device->sectors};uint8_t b[512]{},expected[512]{};bool ok=false;
+    s->device->sync_state();
+    uint64_t cap = s->device->total_sectors ? s->device->total_sectors : s->device->sectors;
+    Partition all{s->device,0,cap};uint8_t b[512]{},expected[512]{};bool ok=false;
     if(s->phase==0){ok=flush(s->layout.bsp);s->phase=1;}
     else if(s->phase==1){GuardStorageFormatter guard(__func__);uint8_t* z=g_workspace.gpt_install_z;zero(z,4096);ok=write_verify(s->layout.bsp,0,8,z);s->phase=2;}
     else if(s->phase==2){ok=flush(s->layout.bsp);s->phase=3;}
     else if(s->phase==3){ok=flush(all);s->phase=4;}
     else if(s->phase==4){b[450]=0xEE;b[447]=0;b[448]=2;b[451]=b[452]=b[453]=0xFF;p32(b+454,1);
-        p32(b+458,s->device->sectors-1>UINT32_MAX?UINT32_MAX:uint32_t(s->device->sectors-1));b[510]=0x55;b[511]=0xAA;
+        p32(b+458,cap-1>UINT32_MAX?UINT32_MAX:uint32_t(cap-1));b[510]=0x55;b[511]=0xAA;
         ok=write_verify(all,0,1,b);s->phase=5;s->index=0;}
-    else if(s->phase==5||s->phase==7){const bool primary=s->phase==7;const uint64_t base=primary?2:s->device->sectors-33;
+    else if(s->phase==5||s->phase==7){const bool primary=s->phase==7;const uint64_t base=primary?2:cap-33;
         if(s->index==0){
             gpt_entries(s->layout,s->uuid,b);
         }
         ok=write_verify(all,base+s->index,1,b);
         if(++s->index==32){s->phase+=1;s->index=0;}}
     else if(s->phase==6||s->phase==8){gpt_header_sector(*s,s->phase==8,b);
-        ok=write_verify(all,s->phase==8?1:s->device->sectors-1,1,b);++s->phase;}
+        ok=write_verify(all,s->phase==8?1:cap-1,1,b);++s->phase;}
     else if(s->phase==9){ok=flush(all);s->phase=10;s->index=0;}
-    else if(s->phase==10){const uint64_t a=2+s->index,c=s->device->sectors-33+s->index;
+    else if(s->phase==10){const uint64_t a=2+s->index,c=cap-33+s->index;
         if(s->index==0)gpt_entries(s->layout,s->uuid,expected);
         ok=read(all,a,1,b)&&equal(b,expected,512)&&read(all,c,1,b)&&equal(b,expected,512);
         if(++s->index==32){s->phase=11;s->index=0;}}
     else if(s->phase==11){uint8_t h[512],backup[512];gpt_header_sector(*s,true,expected);
         ok=read(all,1,1,h)&&equal(h,expected,512);gpt_header_sector(*s,false,expected);
-        ok=ok&&read(all,s->device->sectors-1,1,backup)&&equal(backup,expected,512);s->phase=12;}
+        ok=ok&&read(all,cap-1,1,backup)&&equal(backup,expected,512);s->phase=12;}
     else {s->complete=true;return true;}
     if(!ok){s->failed=true;return false;}++s->completed_units;return true;
 }
-bool source_iso(Device*d){uint8_t b[512];Partition p{d,0,d?d->sectors:0};return read(p,64,1,b)&&b[0]==1&&equal(b+1,"CD001",5);}
+bool source_iso(Device*d){
+    if(!d)return false;
+    d->sync_state();
+    uint64_t cap = d->total_sectors ? d->total_sectors : d->sectors;
+    uint8_t b[512];
+    Partition p{d,0,cap};
+    return read(p,64,1,b)&&b[0]==1&&equal(b+1,"CD001",5);
+}
 
 bool marker(const Partition&p,const uint8_t uuid[16],uint64_t bytes,bool done){
     uint8_t b[512]{};if(!uuid||p.count<10||!bytes||bytes>(p.count-8)*512)return false;
@@ -587,9 +658,12 @@ bool esp_odczytaj_grubenv(const Partition& esp, char* potwierdzony, char* oczeku
 }
 
 bool rozruch_zapisz_sektory(Device* d, const bursztyn_rozruch_stan* s) {
-    if (!d || !d->writable || !s || !rozruch_waliduj_rekord(s)) return false;
-    Partition all{d, 0, d->sectors};
-    if (d->sectors <= ROZRUCH_SEKTOR_KOPIA_1) return false;
+    if (!d || !s || !rozruch_waliduj_rekord(s)) return false;
+    d->sync_state();
+    if (d->read_only || !d->writable) return false;
+    uint64_t cap = d->total_sectors ? d->total_sectors : d->sectors;
+    if (cap <= ROZRUCH_SEKTOR_KOPIA_1) return false;
+    Partition all{d, 0, cap};
 
     bursztyn_rozruch_stan k0{}, k1{};
     bool v0 = read(all, ROZRUCH_SEKTOR_KOPIA_0, 1, &k0) && rozruch_waliduj_rekord(&k0);
@@ -614,8 +688,11 @@ bool rozruch_zapisz_sektory(Device* d, const bursztyn_rozruch_stan* s) {
 }
 
 bool rozruch_odczytaj_sektory(Device* d, bursztyn_rozruch_stan* s) {
-    if (!d || !s || d->sectors <= ROZRUCH_SEKTOR_KOPIA_1) return false;
-    Partition all{d, 0, d->sectors};
+    if (!d || !s) return false;
+    d->sync_state();
+    uint64_t cap = d->total_sectors ? d->total_sectors : d->sectors;
+    if (cap <= ROZRUCH_SEKTOR_KOPIA_1) return false;
+    Partition all{d, 0, cap};
     bursztyn_rozruch_stan k0{}, k1{};
     bool r0 = read(all, ROZRUCH_SEKTOR_KOPIA_0, 1, &k0);
     bool r1 = read(all, ROZRUCH_SEKTOR_KOPIA_1, 1, &k1);
@@ -625,7 +702,11 @@ bool rozruch_odczytaj_sektory(Device* d, bursztyn_rozruch_stan* s) {
 }
 
 bool rozruch_weryfikuj_uklad_dysku(Device* d) {
-    if (!d || d->sector_size != 512 || d->sectors <= ROZRUCH_SEKTOR_KOPIA_1) {
+    if (!d) return false;
+    d->sync_state();
+    uint64_t cap = d->total_sectors ? d->total_sectors : d->sectors;
+    uint32_t sz = d->logical_sector_size ? d->logical_sector_size : d->sector_size;
+    if (sz != 512 || cap <= ROZRUCH_SEKTOR_KOPIA_1) {
         return false;
     }
 
@@ -637,7 +718,7 @@ bool rozruch_weryfikuj_uklad_dysku(Device* d) {
     }
 
     /* 1. Weryfikacja, ze metadane podstawowego GPT nie nachodza na LBA 2046/2047 */
-    Partition all{d, 0, d->sectors};
+    Partition all{d, 0, cap};
     uint8_t* h = g_workspace.rozruch_h;
     zero(h, 512);
     if (!read(all, 1, 1, h) || !equal(h, "EFI PART", 8)) {

@@ -1479,6 +1479,11 @@ void InicjalizujPMM(
         return;
     }
 
+    dodaj_dostepny_zakres(
+        jadro_start,
+        jadro_koniec - jadro_start
+    );
+
     zarezerwuj_zakres_na_stale(
         jadro_start,
         jadro_koniec - jadro_start

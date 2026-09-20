@@ -390,7 +390,7 @@ extern "C" {
  * Inicjalizuje system plikow w dostarczonym ramdysku.
  *
  * Implementacja:
- *   - probuje zamontowac prawidlowy BSP2 z glownego nosnika AHCI,
+ *   - probuje zamontowac prawidlowy BSP2 z glownego nosnika blokowego,
  *   - przy braku BSP2 tworzy nowy system,
  *   - przy wykryciu uszkodzonego istniejacego BSP2 nie nadpisuje
  *     automatycznie fizycznego nosnika.
@@ -542,7 +542,7 @@ bool kopiuj_twor_z_pzb(const char* sciezka, const char* folder_docelowy,
 bool pobierz_metadane_tworu(const char* sciezka, psf_metadane* metadane);
 
 /*
- * Zapisuje wszystkie brudne bloki metadanych oraz danych z cache na nosnik AHCI.
+ * Zapisuje wszystkie brudne bloki metadanych oraz danych z cache na nosnik blokowy.
  * Zwraca true w przypadku sukcesu. W razie bledu I/O brudne bloki pozostaja
  * w cache do ponownej proby zapisu i funkcja zwraca false.
  */

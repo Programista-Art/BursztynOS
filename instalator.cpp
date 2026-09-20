@@ -1,6 +1,5 @@
 #include "instalator.h"
 #include "blokowy.h"
-#include "ahci.h"
 #include "psf.h"
 #include "grafika.h"
 #include "scheduler.h"
@@ -103,18 +102,19 @@ void set_progress(uint32_t percent,uint32_t progressStage,uint32_t done=0,uint32
     if(changed_stage||crossed_ten||progress==100)log_progress(progress,progress_stage);
 }
 void snapshot(InstalatorOdpowiedz*out,uint32_t id){
-    *out={};out->wersja=1;out->status=status;out->etap=stage;out->liczba_dyskow=ahci_liczba_dyskow();out->dysk=id;
+    *out={};out->wersja=1;out->status=status;out->etap=stage;out->liczba_dyskow=blokowy_liczba_dyskow();out->dysk=id;
     out->uefi=uefi;out->gop=grafika_mozliwosci_ekranu().backend==EKRAN_GOP;
-    out->xhci=xhci_dostepny();out->token=nonce;out->zapisy=ahci_licznik_zapisow();
+    out->xhci=xhci_dostepny();out->token=nonce;out->zapisy=blokowy_licznik_zapisow();
     out->procent=progress;out->postep_etap=progress_stage;
     out->wykonane=progress_done;out->razem=progress_total;
     out->pliki_wykonane=files_done;out->pliki_razem=files_total;
     out->tapety_wykonane=wallpapers_done;out->tapety_razem=wallpapers_total;
     text_copy(out->blad,error,sizeof(out->blad));
-    AhciDysk d{};if(!ahci_dysk(id,&d))return;
-    out->sektory=d.sektory;out->sektor=d.sektor_bajty;out->odczyt=d.odczyt;out->zapis=d.zapis;
-    text_copy(out->model,d.model,sizeof(out->model));text_copy(out->serial,d.serial,sizeof(out->serial));
-    auto*dev=blokowy_dysk(id);out->nosnik_instalacyjny=Storage::source_iso(dev);
+    auto*dev=blokowy_dysk(id);
+    if(!dev)return;
+    out->sektory=dev->total_sectors;out->sektor=dev->logical_sector_size;out->odczyt=dev->can_read();out->zapis=dev->can_write();
+    text_copy(out->model,dev->model,sizeof(out->model));text_copy(out->serial,dev->serial,sizeof(out->serial));
+    out->nosnik_instalacyjny=Storage::source_iso(dev);
     Storage::Layout l{};if(Storage::plan(dev,&l)){out->esp_mib=Storage::EspBytes/Storage::MiB;out->bsp_mib=l.bsp.count/2048;out->nieprzydzielone_mib=l.unallocated/2048;}
     if(Storage::gpt_read(dev,&table))for(uint32_t i=0;i<table.count;++i)if(Storage::equal(table.entries[i].type,Storage::BspType,16))out->bursztyn=1;
 }
@@ -125,7 +125,9 @@ void perform(){
     if(stage==INST_GPT){
         if(!gpt_started){
             klog_serial("[INSTALL] progress=0 stage=GPT");
-            if(!ahci_sprawdz_tozsamosc(selected)){fail(INST_DYSK_BLAD,"Walidacja: tożsamość dysku zmieniła się.");return;}
+            if(!d || d->device_type != BlockDeviceType::AHCI || d->logical_sector_size != 512 || d->revalidate() != BlockError::Ok){
+                fail(INST_DYSK_BLAD,"Walidacja: tożsamość dysku zmieniła się lub nieobsługiwany nośnik.");return;
+            }
             gpt_started=Storage::gpt_install_start(d,layout,disk_uuid,&gpt_state);
         }
         if(!gpt_started||!Storage::gpt_install_step(&gpt_state)){
@@ -332,8 +334,9 @@ bool instalator_obsluz(const proces_t&p,const InstalatorZadanie&r,InstalatorOdpo
         auto*d=blokowy_dysk(r.dysk);
         if(!uefi||!payloads())status=INST_BRAK_PLIKOW;
         else if(!d||!Storage::plan(d,&layout))status=INST_ZA_MALY;
+        else if(d->device_type != BlockDeviceType::AHCI || d->logical_sector_size != 512)status=INST_DYSK_BLAD;
         else if(Storage::source_iso(d))status=INST_ZRODLO;
-        else if(!fingerprint_disk(d,&fingerprint)||!ahci_sprawdz_tozsamosc(r.dysk))status=INST_DYSK_BLAD;
+        else if(!fingerprint_disk(d,&fingerprint)||!blokowy_sprawdz_tozsamosc(r.dysk))status=INST_DYSK_BLAD;
         else {selected=r.dysk;uint32_t lo,hi;asm volatile("rdtsc":"=a"(lo),"=d"(hi));nonce=(uint64_t(hi)<<32|lo)|1;
             for(unsigned i=0;i<16;++i)disk_uuid[i]=uint8_t((nonce>>(i%8*8))^(fingerprint>>(i%4*8))^(i*37));
             disk_uuid[7]=(disk_uuid[7]&15)|0x40;disk_uuid[8]=(disk_uuid[8]&63)|0x80;}
@@ -341,7 +344,10 @@ bool instalator_obsluz(const proces_t&p,const InstalatorZadanie&r,InstalatorOdpo
         uint32_t current=0;
         if(!nonce||r.token!=nonce||r.dysk!=selected||!r.zgoda_zrodlo||
            !instalator_potwierdzenie_poprawne(r.potwierdzenie,sizeof(r.potwierdzenie)))status=INST_POTWIERDZENIE;
-        else if(!payloads()||Storage::source_iso(layout.bsp.device)||!ahci_sprawdz_tozsamosc(selected)||
+        else if(!payloads()||!layout.bsp.device||Storage::source_iso(layout.bsp.device)||
+                layout.bsp.device->device_type != BlockDeviceType::AHCI ||
+                layout.bsp.device->logical_sector_size != 512 ||
+                !blokowy_sprawdz_tozsamosc(selected)||
                 !fingerprint_disk(layout.bsp.device,&current)||current!=fingerprint)status=INST_DYSK_BLAD;
         else {status=0;set_progress(0,POSTEP_GPT);stage=INST_GPT;
             perf_stage_irq_start=scheduler_liczba_irq_timera();

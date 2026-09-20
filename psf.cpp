@@ -2,7 +2,7 @@
  * Bursztyn OS - Polski System Plikow BSP2 / PSF
  *
  * Menedzer systemu plikow dzialajacy na ramdysku z opcjonalnym
- * write-through do glownego dysku AHCI.
+ * write-through do glownego nosnika blokowego.
  *
  * Najwazniejsze zalozenia:
  *  - format BSP2 pozostaje zgodny z obecnym psf.h,
@@ -30,7 +30,6 @@
  */
 
 #include "psf.h"
-#include "ahci.h"
 #include "blokowy.h"
 #include "zegar-rtc.h"
 #include "heap.h"
@@ -262,7 +261,7 @@ bool zwolnij_wszystkie_bloki_wezla(wezel_indeksowy* w, uint64_t wezel_id) {
 Storage::Partition bsp_partycja{};
 constexpr uint64_t BSP_START_LBA = 0; // LBA względne; translacja wyłącznie w Storage::read/write.
 
-constexpr uint32_t AHCI_MAX_SEKTOROW_NA_OPERACJE = 32U;
+constexpr uint32_t DOMYSLNY_LIMIT_SEKTOROW_OPERACJI = 32U;
 
 constexpr uint64_t MAX_LOADER_BUF =
     512ULL * 1024ULL;
@@ -331,13 +330,13 @@ uint64_t ostatni_szukany_blok_danych = 0;
 bool psf_gotowy = false;
 
 /*
- * AHCI moze byc niedostepne. BSP2 nadal dziala wtedy jako ramdysk.
+ * Nosnik blokowy moze byc niedostepny. BSP2 nadal dziala wtedy jako ramdysk.
  *
  * zapis_trwaly_dozwolony jest celowo ustawiany na false po wykryciu
  * uszkodzonego istniejacego BSP2. Chroni to dane na dysku przed
  * automatycznym nadpisaniem nowym formatem.
  */
-bool nosnik_ahci_dostepny = false;
+bool nosnik_blokowy_dostepny = false;
 bool zapis_trwaly_dozwolony = false;
 bool ostatni_flush_ok = true;
 
@@ -371,11 +370,11 @@ uint8_t bufor_superbloku[ROZMIAR_SEKTORA] = {};
 
 /*
  * Obecny scheduler Bursztyna jest jednordzeniowy i wywlaszczajacy przez IRQ
- * timera. Sam spinlock nie wystarcza: proces moglby zostac wywlaszczony
+ * timera. Sam spinlock nie wystracza: proces moglby zostac wywlaszczony
  * trzymajac blokade, a drugi proces zapetlilby sie na tym samym CPU.
  *
  * Dlatego cala operacja PSF jest wykonywana z lokalnie wylaczonym IF.
- * To jest bezpieczne funkcjonalnie, ale write-through AHCI wydluza sekcje
+ * To jest bezpieczne funkcjonalnie, ale write-through do nosnika blokowego wydluza sekcje
  * krytyczna. Gdy pojawi sie scheduler z mutexami/usypianiem, blokade nalezy
  * zastapic mutexem PSF i przeniesc fizyczny flush do osobnego workera.
  */
@@ -700,6 +699,9 @@ bool zapisz_sektory_porcjami(
     }
 
     uint64_t zapisano = 0;
+    uint32_t limit = (bsp_partycja.device && bsp_partycja.device->max_transfer_sectors > 0)
+                         ? bsp_partycja.device->max_transfer_sectors
+                         : DOMYSLNY_LIMIT_SEKTOROW_OPERACJI;
 
     while (zapisano <
            liczba_sektorow) {
@@ -709,9 +711,8 @@ bool zapisz_sektory_porcjami(
             zapisano;
 
         uint32_t paczka =
-            pozostalo >
-                    AHCI_MAX_SEKTOROW_NA_OPERACJE
-                ? AHCI_MAX_SEKTOROW_NA_OPERACJE
+            pozostalo > limit
+                ? limit
                 : static_cast<uint32_t>(
                     pozostalo);
 
@@ -742,6 +743,9 @@ bool czytaj_sektory_porcjami(
     }
 
     uint64_t przeczytano = 0;
+    uint32_t limit = (bsp_partycja.device && bsp_partycja.device->max_transfer_sectors > 0)
+                         ? bsp_partycja.device->max_transfer_sectors
+                         : DOMYSLNY_LIMIT_SEKTOROW_OPERACJI;
 
     while (przeczytano <
            liczba_sektorow) {
@@ -751,9 +755,8 @@ bool czytaj_sektory_porcjami(
             przeczytano;
 
         uint32_t paczka =
-            pozostalo >
-                    AHCI_MAX_SEKTOROW_NA_OPERACJE
-                ? AHCI_MAX_SEKTOROW_NA_OPERACJE
+            pozostalo > limit
+                ? limit
                 : static_cast<uint32_t>(
                     pozostalo);
 
@@ -784,7 +787,7 @@ bool bsp_zapisz_zmiany() {
     /*
      * Brak dysku nie psuje semantyki ramdysku.
      */
-    if (!nosnik_ahci_dostepny ||
+    if (!nosnik_blokowy_dostepny ||
         !zapis_trwaly_dozwolony) {
 
         /*
@@ -792,7 +795,7 @@ bool bsp_zapisz_zmiany() {
          * Obecne BSP2 nie obsluguje hot-plug/reconnect nosnika.
          */
         wyczysc_liste_brudnych();
-        ostatni_flush_ok = !nosnik_ahci_dostepny;
+        ostatni_flush_ok = !nosnik_blokowy_dostepny;
         return ostatni_flush_ok;
     }
 
@@ -930,7 +933,7 @@ uint8_t* pobierz_blok(
     }
 
     // Bloki metadanych (superblok, bitmapa, wezly indeksowe)
-    if (!nosnik_ahci_dostepny || nr_bloku < dysk_superblok->start_danych) {
+    if (!nosnik_blokowy_dostepny || nr_bloku < dysk_superblok->start_danych) {
         uint64_t offset = 0;
 
         if (!mnoz_u64(
@@ -985,7 +988,7 @@ uint8_t* pobierz_blok(
     }
 
     if (wpisy_cache[victim].brudny && wpisy_cache[victim].nr_bloku != UINT64_MAX) {
-        if (nosnik_ahci_dostepny && zapis_trwaly_dozwolony) {
+        if (nosnik_blokowy_dostepny && zapis_trwaly_dozwolony) {
             const uint64_t sektory_na_blok = static_cast<uint64_t>(PSF_ROZMIAR_BLOKU) / ROZMIAR_SEKTORA;
             const uint64_t lba = BSP_START_LBA + wpisy_cache[victim].nr_bloku * sektory_na_blok;
             if (!zapisz_sektory_porcjami(lba, sektory_na_blok, wpisy_cache[victim].dane)) {
@@ -1001,7 +1004,7 @@ uint8_t* pobierz_blok(
 
     const uint64_t sektory_na_blok = static_cast<uint64_t>(PSF_ROZMIAR_BLOKU) / ROZMIAR_SEKTORA;
     const uint64_t lba = BSP_START_LBA + nr_bloku * sektory_na_blok;
-    if (wczytaj_z_dysku && nosnik_ahci_dostepny) {
+    if (wczytaj_z_dysku && nosnik_blokowy_dostepny) {
         if (!czytaj_sektory_porcjami(lba, sektory_na_blok, wpisy_cache[victim].dane)) {
             wpisy_cache[victim].nr_bloku = UINT64_MAX;
             zapis_trwaly_dozwolony = false;
@@ -2440,7 +2443,7 @@ bool wylicz_geometrie(
     const uint64_t sektory_na_blok =
         static_cast<uint64_t>(PSF_ROZMIAR_BLOKU) / ROZMIAR_SEKTORA;
 
-    if (nosnik_ahci_dostepny) {
+    if (nosnik_blokowy_dostepny) {
         const uint64_t sektory_dysku = bsp_partycja.count;
         if (sektory_dysku > 0) {
             if (sb->ilosc_blokow == 0) {
@@ -2455,7 +2458,7 @@ bool wylicz_geometrie(
                 return false;
             }
             if (ostatnie_lba >= sektory_dysku) {
-                wypisz_log("[BSP-BLAD] Superblok deklaruje geometrie wychodzaca poza fizyczny dysk AHCI.");
+                wypisz_log("[BSP-BLAD] Superblok deklaruje geometrie wychodzaca poza fizyczny dysk.");
                 return false;
             }
         }
@@ -2775,7 +2778,7 @@ bool sformatuj_ram_dysk(
             PSF_ROZMIAR_BLOKU);
 
     if ((pozwol_na_zapis_fizyczny || uzyj_geometrii_partycji) &&
-        nosnik_ahci_dostepny) {
+        nosnik_blokowy_dostepny) {
         const uint64_t sektory_dysku = bsp_partycja.count;
         if (sektory_dysku > BSP_START_LBA) {
             // Ostatni blok 4 KiB partycji jest poza BSP2 i przechowuje
@@ -2966,7 +2969,7 @@ bool sformatuj_ram_dysk(
 
     zapis_trwaly_dozwolony =
         pozwol_na_zapis_fizyczny &&
-        nosnik_ahci_dostepny;
+        nosnik_blokowy_dostepny;
 
     // Log geometrii
     {
@@ -3023,11 +3026,11 @@ bool wczytaj_istniejacy_bsp2() {
             1,
             bufor_superbloku)) {
 
-        nosnik_ahci_dostepny = false;
+        nosnik_blokowy_dostepny = false;
         return false;
     }
 
-    nosnik_ahci_dostepny = true;
+    nosnik_blokowy_dostepny = true;
 
     superblok kandydat{};
 
@@ -3443,7 +3446,7 @@ extern "C" void inicjalizuj_psf(
     ostatni_szukany_blok_danych = 0;
 
     psf_gotowy = false;
-    nosnik_ahci_dostepny = false;
+    nosnik_blokowy_dostepny = false;
     zapis_trwaly_dozwolony = false;
     ostatni_flush_ok = true;
 
@@ -3463,7 +3466,7 @@ extern "C" void inicjalizuj_psf(
     }
 
     wypisz_log(
-        "[BSP] Sprawdzanie nosnika AHCI w poszukiwaniu BSP2..."
+        "[BSP] Sprawdzanie nosnika blokowego w poszukiwaniu BSP2..."
     );
 
     /*
@@ -3471,18 +3474,18 @@ extern "C" void inicjalizuj_psf(
      */
     if (wczytaj_istniejacy_bsp2()) {
         wypisz_log(
-            "[BSP] Trwaly BSP2 pomyslnie zaladowany z nosnika SATA."
+            "[BSP] Trwaly BSP2 pomyslnie zaladowany z nosnika blokowego."
         );
         return;
     }
 
     /*
      * Jesli znaleziono sygnature BSP2, ale zapis_trwaly_dozwolony == false
-     * przy dostepnym AHCI, traktujemy dysk jako potencjalnie uszkodzony.
+     * przy dostepnym nosniku blokowym, traktujemy dysk jako potencjalnie uszkodzony.
      * Tworzymy tylko awaryjny RAM FS - bez nadpisania fizycznego nosnika.
      */
     const bool uszkodzony_istniejacy_bsp2 =
-        nosnik_ahci_dostepny &&
+        nosnik_blokowy_dostepny &&
         !zapis_trwaly_dozwolony &&
         bufor_superbloku[0] == 'B' &&
         bufor_superbloku[1] == 'S' &&
@@ -3494,7 +3497,7 @@ extern "C" void inicjalizuj_psf(
             "[BSP-BLAD] Wykryto uszkodzony BSP2. Dysk NIE zostanie automatycznie sformatowany."
         );
 
-        nosnik_ahci_dostepny = false;
+        nosnik_blokowy_dostepny = false;
         bsp_partycja = {};
         if (sformatuj_ram_dysk(false)) {
             wypisz_log(
@@ -3505,7 +3508,7 @@ extern "C" void inicjalizuj_psf(
         return;
     }
 
-    nosnik_ahci_dostepny = false;
+    nosnik_blokowy_dostepny = false;
     bsp_partycja = {};
     wypisz_log("[BSP] Brak zamontowanej partycji. System plikow tylko w RAM; zero zapisow dysku.");
 
@@ -3518,15 +3521,15 @@ extern "C" void inicjalizuj_psf(
         return;
     }
 
-    if (nosnik_ahci_dostepny &&
+    if (nosnik_blokowy_dostepny &&
         ostatni_flush_ok) {
 
         wypisz_log(
-            "[BSP] Format BSP2 zapisany na nosniku SATA."
+            "[BSP] Format BSP2 zapisany na nosniku blokowym."
         );
-    } else if (nosnik_ahci_dostepny) {
+    } else if (nosnik_blokowy_dostepny) {
         wypisz_log(
-            "[BSP] BSP2 dziala w RAM, ale zapis poczatkowy na SATA nie powiodl sie."
+            "[BSP] BSP2 dziala w RAM, ale zapis poczatkowy na nosniku blokowym nie powiodl sie."
         );
     }
 }
@@ -3537,7 +3540,7 @@ bool psf_formatuj_instalacje(const Storage::Partition& p) {
     BlokadaPSF guard;
     if(!blokowy_zapis_instalatora() || !p.device || !Storage::range(p.start,p.count,p.device->sectors) ||
        p.device->sector_size!=512 || p.count>Storage::BspMaxBytes/512) return false;
-    bsp_partycja=p;nosnik_ahci_dostepny=true;zapis_trwaly_dozwolony=false;
+    bsp_partycja=p;nosnik_blokowy_dostepny=true;zapis_trwaly_dozwolony=false;
     psf_gotowy=false;wyczysc_liste_brudnych();wyczysc_cache_blokow();
     return sformatuj_ram_dysk(true);
 }
@@ -3554,7 +3557,7 @@ bool psf_formatuj_instalacje_start(const Storage::Partition& p,uint64_t* razem) 
     BlokadaPSF guard;
     if(!blokowy_zapis_instalatora() || !p.device || !Storage::range(p.start,p.count,p.device->sectors) ||
        p.device->sector_size!=512 || p.count>Storage::BspMaxBytes/512)return false;
-    bsp_partycja=p;nosnik_ahci_dostepny=true;zapis_trwaly_dozwolony=false;
+    bsp_partycja=p;nosnik_blokowy_dostepny=true;zapis_trwaly_dozwolony=false;
     psf_gotowy=false;wyczysc_liste_brudnych();wyczysc_cache_blokow();
     // Obraz metadanych powstaje w RAM, ale musi opisywac dokladnie te sama
     // partycje co dawny, atomowy format. Zapis wykonaja kolejne STEP-y.
@@ -3628,7 +3631,7 @@ bool psf_znacznik_instalacji(const uint8_t uuid[16],bool complete) {
 
 bool psf_weryfikuj_dysk() {
     BlokadaPSF guard;
-    if(!nosnik_ahci_dostepny||!dysk_superblok||!bsp_zapisz_zmiany())return false;
+    if(!nosnik_blokowy_dostepny||!dysk_superblok||!bsp_zapisz_zmiany())return false;
     uint8_t check[4096];
     for(uint64_t i=0;i<dysk_superblok->start_danych;++i){
         if(!Storage::read(bsp_partycja,i*8,8,check)||!Storage::equal(check,ram_dysk+i*4096,4096))return false;
@@ -3640,7 +3643,7 @@ uint64_t weryfikacja_dysku_blok=0;
 bool weryfikacja_dysku_trwa=false;
 bool psf_weryfikuj_dysk_start(uint64_t* razem) {
     BlokadaPSF guard;
-    if(!nosnik_ahci_dostepny||!dysk_superblok||!bsp_zapisz_zmiany())return false;
+    if(!nosnik_blokowy_dostepny||!dysk_superblok||!bsp_zapisz_zmiany())return false;
     weryfikacja_dysku_blok=0;weryfikacja_dysku_trwa=true;
     if(razem)*razem=dysk_superblok->start_danych;
     return true;

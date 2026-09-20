@@ -2,21 +2,14 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "aktualizacja_rozruch.h"
+#include "block_device.h"
 
 namespace Storage {
 constexpr uint32_t Sector = 512;
 constexpr uint64_t MiB = 1024*1024;
 constexpr uint64_t BspMaxBytes = 2ULL*1024*MiB; // konserwatywny limit pierwszego wydania
 constexpr uint64_t EspBytes = 512*MiB;
-struct Device {
-    void* ctx;
-    uint64_t sectors;
-    uint32_t sector_size;
-    bool writable;
-    bool (*read)(void*,uint64_t,uint32_t,void*);
-    bool (*write)(void*,uint64_t,uint32_t,const void*);
-    bool (*flush)(void*);
-};
+using Device = BlockDevice;
 struct Partition { Device* device; uint64_t start, count; };
 struct Layout { Partition esp, bsp; uint64_t unallocated; };
 struct Entry { uint8_t type[16],uuid[16]; uint64_t start,count; };
@@ -62,6 +55,9 @@ const char* formatter_blokada_miejsce();
 extern const uint8_t BspType[16];
 extern const uint8_t EspType[16];
 bool range(uint64_t start,uint64_t count,uint64_t capacity);
+BlockError partition_read(const Partition&,uint64_t,uint32_t,void*);
+BlockError partition_write(const Partition&,uint64_t,uint32_t,const void*);
+BlockError partition_flush(const Partition&);
 bool read(const Partition&,uint64_t,uint32_t,void*);
 bool write(const Partition&,uint64_t,uint32_t,const void*);
 bool flush(const Partition&);

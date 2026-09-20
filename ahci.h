@@ -25,11 +25,13 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "block_device.h"
 
 /* Dyski pierwszego wykrytego HBA. ID stabilne do restartu, brak hot-plug. */
 struct AhciDysk {
     uint64_t sektory;
     uint32_t sektor_bajty;
+    uint32_t fizyczny_sektor_bajty;
     uint32_t port;
     char model[41];
     char serial[21];
@@ -39,6 +41,7 @@ struct AhciDysk {
 };
 uint32_t ahci_liczba_dyskow();
 bool ahci_dysk(uint32_t id, AhciDysk* out);
+BlockDevice* ahci_pobierz_urzadzenie_blokowe(uint32_t id);
 bool ahci_czytaj(uint32_t id, uint64_t lba, uint32_t count, void* buf);
 bool ahci_zapisz(uint32_t id, uint64_t lba, uint32_t count, const void* buf);
 bool ahci_flush(uint32_t id);

@@ -464,7 +464,7 @@ bool ahci_gotowy =
 bool blokada_operacji =
     false;
 
-struct DyskKontekst { AhciDysk info; ZasobyDMA zasoby; bool blad; };
+struct DyskKontekst { AhciDysk info; ZasobyDMA zasoby; bool blad; BlockDevice bdev; };
 DyskKontekst dyski[32]{};
 uint32_t liczba_dyskow = 0;
 AhciDysk ident_info{};
@@ -1844,11 +1844,11 @@ bool czekaj_az_port_gotowy(
  * 20. ISSUE / WAIT
  * ========================================================================= */
 
-bool uruchom_i_czekaj_na_komende(
+BlockError uruchom_i_czekaj_na_komende(
     volatile PortAHCI* port
 ) {
     if (!port) {
-        return false;
+        return BlockError::DeviceUnavailable;
     }
 
     if ((port->ci &
@@ -1856,7 +1856,7 @@ bool uruchom_i_czekaj_na_komende(
         (port->sact &
          AHCI_SLOT_BIT) != 0) {
 
-        return false;
+        return BlockError::DeviceUnavailable;
     }
 
     if (!czekaj_az_port_gotowy(
@@ -1866,7 +1866,7 @@ bool uruchom_i_czekaj_na_komende(
             "[AHCI] Port pozostaje BSY/DRQ."
         );
 
-        return false;
+        return BlockError::DeviceUnavailable;
     }
 
     port->is =
@@ -1898,7 +1898,7 @@ bool uruchom_i_czekaj_na_komende(
             port->is =
                 UINT32_MAX;
 
-            return false;
+            return BlockError::IOError;
         }
 
         if ((port->ci &
@@ -1932,10 +1932,10 @@ bool uruchom_i_czekaj_na_komende(
                     "[AHCI] Komenda zakonczyla sie bledem TFD/SERR."
                 );
 
-                return false;
+                return BlockError::IOError;
             }
 
-            return true;
+            return BlockError::Ok;
         }
 
         pause_cpu();
@@ -1945,7 +1945,7 @@ bool uruchom_i_czekaj_na_komende(
         "[AHCI] Timeout oczekiwania na zakonczenie komendy."
     );
 
-    return false;
+    return BlockError::Timeout;
 }
 
 /* =========================================================================
@@ -2041,9 +2041,7 @@ bool wykonaj_identify(
         AHCI_SEKTOR_BAJTOW
     );
 
-    if (!uruchom_i_czekaj_na_komende(
-            port)) {
-
+    if (uruchom_i_czekaj_na_komende(port) != BlockError::Ok) {
         return false;
     }
 
@@ -2145,9 +2143,18 @@ bool wykonaj_identify(
             2U;
     }
 
+    uint32_t fizyczny_sektor = rozmiar_sektora;
+    if (word106_valid && (word106 & (1U << 13)) != 0) {
+        uint32_t potega = word106 & 0x0FU;
+        if (potega <= 8) {
+            fizyczny_sektor = rozmiar_sektora << potega;
+        }
+    }
+
     ident_info = {};
     ident_info.sektory = sektory;
     ident_info.sektor_bajty = rozmiar_sektora;
+    ident_info.fizyczny_sektor_bajty = fizyczny_sektor;
     auto ata_string = [&](char* out, uint32_t word, uint32_t bytes) {
         for (uint32_t i=0; i<bytes; ++i) {
             uint8_t c = ident[word*2 + (i^1U)];
@@ -2161,7 +2168,7 @@ bool wykonaj_identify(
     ata_string(ident_info.model,27,40);
     ata_string(ident_info.serial,10,20);
     ident_info.flush_komenda = (word83 & (1U<<13)) ? 0xEA : ((word83 & (1U<<12)) ? 0xE7 : 0);
-    ident_info.odczyt = rozmiar_sektora == AHCI_SEKTOR_BAJTOW;
+    ident_info.odczyt = (rozmiar_sektora == AHCI_SEKTOR_BAJTOW || rozmiar_sektora == 4096);
     ident_info.zapis = ident_info.odczyt && ident_info.flush_komenda != 0 &&
         (ident_word(ident,128) & (1U<<2)) == 0; // ATA security locked
 
@@ -2287,7 +2294,7 @@ bool kopiuj_z_dma(
  * 23. READ/WRITE DMA EXT
  * ========================================================================= */
 
-bool operacja_dysku(
+BlockError ahci_operacja_dysku(
     uint32_t id,
     uint64_t lba,
     uint32_t liczba_sektorow,
@@ -2295,212 +2302,165 @@ bool operacja_dysku(
     bool zapis
 ) {
     GuardAHCI guard;
-    if (!guard.aktywny() || !wybierz_dysk(id) || !dyski[id].info.odczyt ||
-        (zapis && !dyski[id].info.zapis)) return false;
-    if (!ahci_gotowy ||
-        !glowny_port ||
-        !dma.gotowe ||
-        !bufor ||
-        liczba_sektorow == 0 ||
-        liczba_sektorow >
-            AHCI_MAKS_SEKTOROW_OPERACJI) {
-
-        return false;
-    }
+    if (!guard.aktywny()) return BlockError::DeviceUnavailable;
+    if (!wybierz_dysk(id)) return BlockError::DeviceUnavailable;
+    if (!dyski[id].info.odczyt) return BlockError::Unsupported;
+    if (zapis && !dyski[id].info.zapis) return BlockError::Unsupported;
+    if (!ahci_gotowy || !glowny_port || !dma.gotowe) return BlockError::DeviceUnavailable;
+    if (!bufor || liczba_sektorow == 0) return BlockError::InvalidArgument;
+    if (liczba_sektorow > AHCI_MAKS_SEKTOROW_OPERACJI) return BlockError::InvalidArgument;
 
     if (liczba_sektorow_dysku == 0 ||
-        lba >=
-            liczba_sektorow_dysku ||
-        static_cast<uint64_t>(
-            liczba_sektorow) >
-            liczba_sektorow_dysku -
-                lba) {
-
-        return false;
+        lba >= liczba_sektorow_dysku ||
+        static_cast<uint64_t>(liczba_sektorow) > liczba_sektorow_dysku - lba) {
+        return BlockError::OutOfRange;
     }
 
-    const uint32_t bajty =
-        liczba_sektorow *
-        AHCI_SEKTOR_BAJTOW;
+    const uint32_t sec_size = dyski[id].info.sektor_bajty ? dyski[id].info.sektor_bajty : AHCI_SEKTOR_BAJTOW;
+    if (liczba_sektorow > AHCI_MAKS_BAJTOW_OPERACJI / sec_size) {
+        return BlockError::InvalidArgument;
+    }
+    const uint32_t bajty = liczba_sektorow * sec_size;
 
-    NaglowekKomendyAHCI* naglowek =
-        naglowek_slot0();
-
-    TablicaKomendyAHCI* tablica =
-        tablica_slot0();
-
-    if (!naglowek ||
-        !tablica) {
-
-        return false;
+    NaglowekKomendyAHCI* naglowek = naglowek_slot0();
+    TablicaKomendyAHCI* tablica = tablica_slot0();
+    if (!naglowek || !tablica) {
+        return BlockError::ResourceFailure;
     }
 
-    if (zapis &&
-        !kopiuj_do_dma(
-            bufor,
-            bajty)) {
-
-        return false;
+    if (zapis && !kopiuj_do_dma(bufor, bajty)) {
+        return BlockError::ResourceFailure;
     }
 
     if (!zapis) {
-        /*
-         * Nie jest wymagane przez DMA, ale usuwa stare dane w razie
-         * diagnostyki niepelnego transferu.
-         */
-        uint32_t pozostalo =
-            bajty;
-
-        for (uint32_t i = 0;
-             i <
-                AHCI_LICZBA_STRON_DANYCH &&
-             pozostalo != 0;
-             ++i) {
-
-            const uint32_t fragment =
-                pozostalo >
-                        AHCI_DMA_STRONA
-                    ? AHCI_DMA_STRONA
-                    : pozostalo;
-
-            wyzeruj(
-                dma_wirtualny_z_fizycznego(
-                    dma.dane_phys[i]
-                ),
-                fragment
-            );
-
-            pozostalo -=
-                fragment;
+        uint32_t pozostalo = bajty;
+        for (uint32_t i = 0; i < AHCI_LICZBA_STRON_DANYCH && pozostalo != 0; ++i) {
+            const uint32_t fragment = pozostalo > AHCI_DMA_STRONA ? AHCI_DMA_STRONA : pozostalo;
+            wyzeruj(dma_wirtualny_z_fizycznego(dma.dane_phys[i]), fragment);
+            pozostalo -= fragment;
         }
     }
 
-    wyzeruj(
-        tablica,
-        sizeof(*tablica)
-    );
-
-    uint16_t liczba_prdt =
-        0;
-
-    if (!wypelnij_prdt(
-            tablica,
-            bajty,
-            &liczba_prdt)) {
-
-        return false;
+    wyzeruj(tablica, sizeof(*tablica));
+    uint16_t liczba_prdt = 0;
+    if (!wypelnij_prdt(tablica, bajty, &liczba_prdt)) {
+        return BlockError::ResourceFailure;
     }
 
-    uint16_t flagi =
-        static_cast<uint16_t>(
-            (sizeof(FisRegH2D) /
-             sizeof(uint32_t)) &
-            AHCI_CMDHDR_CFL_MASK
-        );
+    uint16_t flagi = static_cast<uint16_t>((sizeof(FisRegH2D) / sizeof(uint32_t)) & AHCI_CMDHDR_CFL_MASK);
+    if (zapis) {
+        flagi = static_cast<uint16_t>(flagi | AHCI_CMDHDR_W);
+    }
+    naglowek->flagi = flagi;
+    naglowek->liczba_prdt = liczba_prdt;
+    naglowek->licznik_bajtow = 0;
+
+    FisRegH2D* fis = reinterpret_cast<FisRegH2D*>(tablica->cfis);
+    fis->typ = FIS_TYPE_REG_H2D;
+    fis->pmport_c = FIS_COMMAND_BIT;
+    fis->komenda = zapis ? ATA_CMD_WRITE_DMA_EXT : ATA_CMD_READ_DMA_EXT;
+    fis->lba0 = static_cast<uint8_t>(lba & 0xFFU);
+    fis->lba1 = static_cast<uint8_t>((lba >> 8) & 0xFFU);
+    fis->lba2 = static_cast<uint8_t>((lba >> 16) & 0xFFU);
+    fis->device = ATA_DEVICE_LBA;
+    fis->lba3 = static_cast<uint8_t>((lba >> 24) & 0xFFU);
+    fis->lba4 = static_cast<uint8_t>((lba >> 32) & 0xFFU);
+    fis->lba5 = static_cast<uint8_t>((lba >> 40) & 0xFFU);
+    fis->count_low = static_cast<uint8_t>(liczba_sektorow & 0xFFU);
+    fis->count_high = static_cast<uint8_t>((liczba_sektorow >> 8) & 0xFFU);
+
+    BlockError cmd_res = uruchom_i_czekaj_na_komende(glowny_port);
+    if (cmd_res != BlockError::Ok) {
+        dyski[id].blad = true; // DMA pozostaje przypisane; nigdy nie reuse po timeout.
+        return cmd_res;
+    }
 
     if (zapis) {
-        flagi =
-            static_cast<uint16_t>(
-                flagi |
-                AHCI_CMDHDR_W
-            );
+        licznik_zapisow += liczba_sektorow;
+        dyski[id].bdev.write_count += liczba_sektorow;
     }
-
-    naglowek->flagi =
-        flagi;
-
-    naglowek->liczba_prdt =
-        liczba_prdt;
-
-    naglowek->licznik_bajtow =
-        0;
-
-    FisRegH2D* fis =
-        reinterpret_cast<FisRegH2D*>(
-            tablica->cfis
-        );
-
-    fis->typ =
-        FIS_TYPE_REG_H2D;
-
-    fis->pmport_c =
-        FIS_COMMAND_BIT;
-
-    fis->komenda =
-        zapis
-            ? ATA_CMD_WRITE_DMA_EXT
-            : ATA_CMD_READ_DMA_EXT;
-
-    fis->lba0 =
-        static_cast<uint8_t>(
-            lba &
-            0xFFU
-        );
-
-    fis->lba1 =
-        static_cast<uint8_t>(
-            (lba >> 8) &
-            0xFFU
-        );
-
-    fis->lba2 =
-        static_cast<uint8_t>(
-            (lba >> 16) &
-            0xFFU
-        );
-
-    fis->device =
-        ATA_DEVICE_LBA;
-
-    fis->lba3 =
-        static_cast<uint8_t>(
-            (lba >> 24) &
-            0xFFU
-        );
-
-    fis->lba4 =
-        static_cast<uint8_t>(
-            (lba >> 32) &
-            0xFFU
-        );
-
-    fis->lba5 =
-        static_cast<uint8_t>(
-            (lba >> 40) &
-            0xFFU
-        );
-
-    fis->count_low =
-        static_cast<uint8_t>(
-            liczba_sektorow &
-            0xFFU
-        );
-
-    fis->count_high =
-        static_cast<uint8_t>(
-            (liczba_sektorow >> 8) &
-            0xFFU
-        );
-
-    if (!uruchom_i_czekaj_na_komende(
-            glowny_port)) {
-        dyski[id].blad = true; // DMA pozostaje przypisane; nigdy nie reuse po timeout.
-        return false;
-    }
-
-    if (zapis) licznik_zapisow += liczba_sektorow;
 
     if (!zapis) {
-        if (!kopiuj_z_dma(
-                bufor,
-                bajty)) {
-
-            return false;
+        if (!kopiuj_z_dma(bufor, bajty)) {
+            return BlockError::ResourceFailure;
         }
     }
 
-    return true;
+    return BlockError::Ok;
 }
+
+bool operacja_dysku(
+    uint32_t id,
+    uint64_t lba,
+    uint32_t liczba_sektorow,
+    void* bufor,
+    bool zapis
+) {
+    return ahci_operacja_dysku(id, lba, liczba_sektorow, bufor, zapis) == BlockError::Ok;
+}
+
+static BlockError ahci_bdev_flush_impl(uint32_t id) {
+    GuardAHCI guard;
+    if (!guard.aktywny()) return BlockError::DeviceUnavailable;
+    if (!wybierz_dysk(id)) return BlockError::DeviceUnavailable;
+    if (!dyski[id].info.zapis || dyski[id].info.flush_komenda == 0) return BlockError::Unsupported;
+    auto* hdr = naglowek_slot0(); auto* tbl = tablica_slot0();
+    if (!hdr || !tbl) return BlockError::ResourceFailure;
+    wyzeruj(tbl,sizeof(*tbl));
+    hdr->flagi = sizeof(FisRegH2D)/4; hdr->liczba_prdt=0; hdr->licznik_bajtow=0;
+    auto* fis = reinterpret_cast<FisRegH2D*>(tbl->cfis);
+    fis->typ=FIS_TYPE_REG_H2D; fis->pmport_c=FIS_COMMAND_BIT;
+    fis->komenda=dyski[id].info.flush_komenda;
+    BlockError err = uruchom_i_czekaj_na_komende(glowny_port);
+    if (err != BlockError::Ok) { dyski[id].blad=true; return err; }
+    return BlockError::Ok;
+}
+
+static BlockError ahci_sprawdz_tozsamosc_impl(uint32_t id) {
+    GuardAHCI guard;
+    if (!guard.aktywny()) return BlockError::DeviceUnavailable;
+    if (!wybierz_dysk(id)) return BlockError::DeviceUnavailable;
+    if (!port_ma_aktywne_ata(glowny_port) || !wykonaj_identify(glowny_port)) { dyski[id].blad=true; return BlockError::DeviceUnavailable; }
+    const auto& old=dyski[id].info;
+    bool ok=old.sektory==ident_info.sektory && old.sektor_bajty==ident_info.sektor_bajty &&
+        old.zapis==ident_info.zapis && old.flush_komenda==ident_info.flush_komenda;
+    for(unsigned i=0;i<sizeof(old.model);++i) ok &= old.model[i]==ident_info.model[i];
+    for(unsigned i=0;i<sizeof(old.serial);++i) ok &= old.serial[i]==ident_info.serial[i];
+    if(!ok) { dyski[id].blad=true; return BlockError::DeviceUnavailable; }
+    return BlockError::Ok;
+}
+
+static BlockError ahci_ops_read(BlockDevice* dev, uint64_t lba, uint32_t count, void* buf) {
+    if (!dev) return BlockError::InvalidArgument;
+    uint32_t id = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(dev->driver_data));
+    return ahci_operacja_dysku(id, lba, count, buf, false);
+}
+
+static BlockError ahci_ops_write(BlockDevice* dev, uint64_t lba, uint32_t count, const void* buf) {
+    if (!dev) return BlockError::InvalidArgument;
+    uint32_t id = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(dev->driver_data));
+    return ahci_operacja_dysku(id, lba, count, const_cast<void*>(buf), true);
+}
+
+static BlockError ahci_ops_flush(BlockDevice* dev) {
+    if (!dev) return BlockError::InvalidArgument;
+    uint32_t id = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(dev->driver_data));
+    return ahci_bdev_flush_impl(id);
+}
+
+static BlockError ahci_ops_revalidate(BlockDevice* dev) {
+    if (!dev) return BlockError::InvalidArgument;
+    uint32_t id = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(dev->driver_data));
+    return ahci_sprawdz_tozsamosc_impl(id);
+}
+
+static const BlockOperations ahci_block_operations = {
+    ahci_ops_read,
+    ahci_ops_write,
+    ahci_ops_flush,
+    ahci_ops_revalidate
+};
+
 
 /* =========================================================================
  * 24. CLEANUP NIEUDANEJ INICJALIZACJI
@@ -2633,7 +2593,28 @@ extern "C" void inicjalizuj_kontroler_ahci() {
             continue;
         }
         ident_info.port = port;
-        dyski[liczba_dyskow++] = {ident_info,dma,false};
+        uint32_t id = liczba_dyskow++;
+        auto& d = dyski[id];
+        d.info = ident_info;
+        d.zasoby = dma;
+        d.blad = false;
+        d.bdev = BlockDevice{};
+        d.bdev.driver_data = reinterpret_cast<void*>(static_cast<uintptr_t>(id));
+        d.bdev.ops = &ahci_block_operations;
+        d.bdev.total_sectors = ident_info.sektory;
+        d.bdev.logical_sector_size = ident_info.sektor_bajty;
+        d.bdev.physical_sector_size = ident_info.fizyczny_sektor_bajty ? ident_info.fizyczny_sektor_bajty : ident_info.sektor_bajty;
+        d.bdev.max_transfer_sectors = AHCI_MAKS_SEKTOROW_OPERACJI;
+        d.bdev.read_only = !ident_info.zapis;
+        d.bdev.removable = false;
+        d.bdev.device_type = BlockDeviceType::AHCI;
+        for (size_t i = 0; i < sizeof(d.bdev.model) - 1 && ident_info.model[i]; ++i) d.bdev.model[i] = ident_info.model[i];
+        d.bdev.model[sizeof(d.bdev.model) - 1] = 0;
+        for (size_t i = 0; i < sizeof(d.bdev.serial) - 1 && ident_info.serial[i]; ++i) d.bdev.serial[i] = ident_info.serial[i];
+        d.bdev.serial[sizeof(d.bdev.serial) - 1] = 0;
+        d.bdev.write_count = 0;
+        d.bdev.sync_state();
+
         log_port("[AHCI] IDENTIFY SATA port ", port);
         wypisz_log(ident_info.model);
         if (!ident_info.zapis) wypisz_log("[AHCI] Dysk nie kwalifikuje sie do zapisu (sektor/FLUSH/security).");
@@ -2690,28 +2671,16 @@ bool ahci_dysk(uint32_t id, AhciDysk* out) {
 }
 bool ahci_czytaj(uint32_t id,uint64_t lba,uint32_t n,void* buf) { return operacja_dysku(id,lba,n,buf,false); }
 bool ahci_zapisz(uint32_t id,uint64_t lba,uint32_t n,const void* buf) { return operacja_dysku(id,lba,n,const_cast<void*>(buf),true); }
+
 bool ahci_flush(uint32_t id) {
-    GuardAHCI guard;
-    if (!guard.aktywny() || !wybierz_dysk(id) || !dyski[id].info.zapis) return false;
-    auto* hdr = naglowek_slot0(); auto* tbl = tablica_slot0();
-    if (!hdr || !tbl) return false;
-    wyzeruj(tbl,sizeof(*tbl));
-    hdr->flagi = sizeof(FisRegH2D)/4; hdr->liczba_prdt=0; hdr->licznik_bajtow=0;
-    auto* fis = reinterpret_cast<FisRegH2D*>(tbl->cfis);
-    fis->typ=FIS_TYPE_REG_H2D; fis->pmport_c=FIS_COMMAND_BIT;
-    fis->komenda=dyski[id].info.flush_komenda;
-    if (!uruchom_i_czekaj_na_komende(glowny_port)) { dyski[id].blad=true; return false; }
-    return true;
+    return ahci_bdev_flush_impl(id) == BlockError::Ok;
 }
+
 bool ahci_sprawdz_tozsamosc(uint32_t id) {
-    GuardAHCI guard;
-    if (!guard.aktywny() || !wybierz_dysk(id)) return false;
-    if (!port_ma_aktywne_ata(glowny_port) || !wykonaj_identify(glowny_port)) { dyski[id].blad=true; return false; }
-    const auto& old=dyski[id].info;
-    bool ok=old.sektory==ident_info.sektory && old.sektor_bajty==ident_info.sektor_bajty &&
-        old.zapis==ident_info.zapis && old.flush_komenda==ident_info.flush_komenda;
-    for(unsigned i=0;i<sizeof(old.model);++i) ok &= old.model[i]==ident_info.model[i];
-    for(unsigned i=0;i<sizeof(old.serial);++i) ok &= old.serial[i]==ident_info.serial[i];
-    if(!ok) dyski[id].blad=true;
-    return ok;
+    return ahci_sprawdz_tozsamosc_impl(id) == BlockError::Ok;
+}
+
+BlockDevice* ahci_pobierz_urzadzenie_blokowe(uint32_t id) {
+    if (id >= liczba_dyskow || dyski[id].blad) return nullptr;
+    return &dyski[id].bdev;
 }

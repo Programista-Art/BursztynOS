@@ -1809,6 +1809,7 @@ void ZmapujStrone(
     );
 }
 
+extern "C" void SerialLog(const char*);
 extern "C" bool VmmMapujNowaStroneJadra(void* va, void* pa) {
     BlokadaVMM blokada;
     if (!vmm_zainicjalizowany || !va || !pa ||
