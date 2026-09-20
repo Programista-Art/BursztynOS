@@ -57,7 +57,7 @@ struct TrybEkranu { uint32_t szerokosc, wysokosc, bpp, pitch, odswiezanie, flagi
 struct MozliwosciEkranu {
     uint32_t mozna_wyliczyc_tryby, mozna_zmienic_runtime, wymagany_restart, backend;
 };
-enum : uint32_t { EKRAN_VESA=1, EKRAN_GOP=2, EKRAN_BOCHS=3 };
+enum : uint32_t { EKRAN_VESA=1, EKRAN_GOP=2, EKRAN_BOCHS=3, EKRAN_VIRTIO_GPU=4 };
 enum : uint32_t { EKRAN_STAN=1, EKRAN_ZASTOSUJ, EKRAN_ZACHOWAJ, EKRAN_PRZYWROC, EKRAN_TEST };
 enum : uint32_t { EKRAN_OK=0, EKRAN_NIEOBSLUGIWANY, EKRAN_PAMIEC, EKRAN_SPRZET,
     EKRAN_ZAJETY, EKRAN_ZAPIS, EKRAN_OCZEKUJE, EKRAN_UPRAWNIENIA };

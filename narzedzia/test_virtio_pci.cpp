@@ -36,6 +36,7 @@
 #include "virtio_rng.h"
 #include "virtio_blk.h"
 #include "virtio_net.h"
+#include "virtio_gpu.h"
 
 // ============================================================================
 // MOCK IDT I APIC DLA SRODOWISKA TESTOWEGO HOST
@@ -183,6 +184,17 @@ struct MockDeviceState {
     uint32_t net_tx_processed_count = 0;
     std::vector<std::vector<uint8_t>> net_tx_frames;
 
+    // Stan MMIO VirtIO-GPU:
+    bool     gpu_auto_process = false;
+    bool     gpu_skip_reply = false;
+    int32_t  gpu_override_len = -1;
+    int32_t  gpu_override_desc_id = -1;
+    uint32_t gpu_override_resp_type = 0;
+    uint32_t gpu_display_w = 1280;
+    uint32_t gpu_display_h = 800;
+    uint32_t gpu_processed_count = 0;
+    std::vector<uint32_t> gpu_commands_seen;
+
     // Stan MSI-X:
     bool     msix_enabled = false;
     uint16_t msix_msg_ctrl = 0;
@@ -240,6 +252,15 @@ struct MockDeviceState {
         net_override_desc_id = -1;
         net_tx_processed_count = 0;
         net_tx_frames.clear();
+        gpu_auto_process = false;
+        gpu_skip_reply = false;
+        gpu_override_len = -1;
+        gpu_override_desc_id = -1;
+        gpu_override_resp_type = 0;
+        gpu_display_w = 1280;
+        gpu_display_h = 800;
+        gpu_processed_count = 0;
+        gpu_commands_seen.clear();
         isr_val = 0;
         notify_bar = 0xFF;
         notify_bar_off = 0;
@@ -753,6 +774,61 @@ void host_mmio_write16(volatile void* addr, uint16_t val) {
                                 asm volatile("mfence" ::: "memory");
                             }
                             g_mock.net_tx_processed_count++;
+                        }
+                        mock_check_and_trigger_msix(val);
+                    }
+                }
+
+                if (g_mock.gpu_auto_process && val == 0 && !g_mock.gpu_skip_reply) {
+                    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+                    if (drv && drv->controlq && drv->controlq->avail && drv->controlq->used && drv->controlq->desc) {
+                        VirtQueue* vq = drv->controlq;
+                        while (g_mock.gpu_processed_count != vq->avail->idx) {
+                            const uint16_t a_idx = g_mock.gpu_processed_count & (vq->queue_size - 1U);
+                            const uint16_t head_id = vq->avail->ring[a_idx];
+                            if (head_id < vq->queue_size) {
+                                void* vreq = host_phys_to_virt(vq->desc[head_id].addr);
+                                uint32_t req_len = vq->desc[head_id].len;
+                                uint16_t resp_id = vq->desc[head_id].next;
+                                void* vresp = (resp_id < vq->queue_size) ? host_phys_to_virt(vq->desc[resp_id].addr) : nullptr;
+                                uint32_t resp_len = (resp_id < vq->queue_size) ? vq->desc[resp_id].len : 0;
+
+                                uint32_t used_len = 0;
+                                if (vreq && req_len >= sizeof(VirtioGpuCtrlHdr) && vresp && resp_len >= sizeof(VirtioGpuCtrlHdr)) {
+                                    const auto* req_hdr = static_cast<const VirtioGpuCtrlHdr*>(vreq);
+                                    auto* resp_hdr = static_cast<VirtioGpuCtrlHdr*>(vresp);
+                                    g_mock.gpu_commands_seen.push_back(req_hdr->type);
+
+                                    if (req_hdr->type == VIRTIO_GPU_CMD_GET_DISPLAY_INFO) {
+                                        auto* dresp = static_cast<VirtioGpuRespDisplayInfo*>(vresp);
+                                        std::memset(dresp, 0, sizeof(VirtioGpuRespDisplayInfo));
+                                        dresp->hdr.type = (g_mock.gpu_override_resp_type > 0) ? g_mock.gpu_override_resp_type : VIRTIO_GPU_RESP_OK_DISPLAY_INFO;
+                                        dresp->pmodes[0].enabled = 1;
+                                        dresp->pmodes[0].r.x = 0;
+                                        dresp->pmodes[0].r.y = 0;
+                                        dresp->pmodes[0].r.width = g_mock.gpu_display_w;
+                                        dresp->pmodes[0].r.height = g_mock.gpu_display_h;
+                                        used_len = sizeof(VirtioGpuRespDisplayInfo);
+                                    } else {
+                                        std::memset(resp_hdr, 0, sizeof(VirtioGpuCtrlHdr));
+                                        resp_hdr->type = (g_mock.gpu_override_resp_type > 0) ? g_mock.gpu_override_resp_type : VIRTIO_GPU_RESP_OK_NODATA;
+                                        used_len = sizeof(VirtioGpuCtrlHdr);
+                                    }
+                                }
+
+                                const uint32_t rep_len = (g_mock.gpu_override_len >= 0) ?
+                                    static_cast<uint32_t>(g_mock.gpu_override_len) : used_len;
+                                const uint32_t rep_id = (g_mock.gpu_override_desc_id >= 0) ?
+                                    static_cast<uint32_t>(g_mock.gpu_override_desc_id) : head_id;
+
+                                const uint16_t u_idx = vq->used->idx & (vq->queue_size - 1U);
+                                vq->used->ring[u_idx].id = rep_id;
+                                vq->used->ring[u_idx].len = rep_len;
+                                asm volatile("" ::: "memory");
+                                vq->used->idx = static_cast<uint16_t>(vq->used->idx + 1U);
+                                asm volatile("mfence" ::: "memory");
+                            }
+                            g_mock.gpu_processed_count++;
                         }
                         mock_check_and_trigger_msix(val);
                     }
@@ -4073,6 +4149,408 @@ void test_virtio_net_stress_and_wraparound() {
 }
 
 // ============================================================================
+// MOCKI I TESTY VIRTIO-GPU
+// ============================================================================
+
+static bool setup_mock_gpu_device(VirtioPciDevice* dev,
+                                  uint32_t disp_w = 1280,
+                                  uint32_t disp_h = 800,
+                                  uint64_t extra_features = 0) {
+    g_mock.reset();
+    setup_pci_hdr(0x1AF4, 0x1050, 0x1AF4, 0x0010);
+    std::vector<CapBuilderEntry> caps = {
+        {VIRTIO_PCI_CAP_COMMON_CFG, 0, 0x000, 56, 0},
+        {VIRTIO_PCI_CAP_NOTIFY_CFG, 0, 0x1000, 0x1000, 4},
+        {VIRTIO_PCI_CAP_ISR_CFG,    0, 0x080, 1,  0},
+        {VIRTIO_PCI_CAP_DEVICE_CFG, 0, 0x100, 64, 0}
+    };
+    build_cap_chain(caps);
+    wire_virtio_mmio(0, 0x000, 0x080);
+    g_mock.queues[0].size = 32; // controlq
+    g_mock.queues[1].size = 32; // cursorq
+
+    uint64_t feat = VIRTIO_F_VERSION_1 | extra_features;
+    g_mock.device_features = feat;
+
+    g_mock.gpu_auto_process = true;
+    g_mock.gpu_skip_reply = false;
+    g_mock.gpu_override_len = -1;
+    g_mock.gpu_override_desc_id = -1;
+    g_mock.gpu_override_resp_type = 0;
+    g_mock.gpu_display_w = disp_w;
+    g_mock.gpu_display_h = disp_h;
+    g_mock.gpu_processed_count = 0;
+    g_mock.gpu_commands_seen.clear();
+
+    return virtio_pci_probe(0, 7, 0, dev, 0);
+}
+
+static bool setup_mock_gpu_device_msix(VirtioPciDevice* dev,
+                                       uint32_t disp_w = 1280,
+                                       uint32_t disp_h = 800,
+                                       uint16_t table_size = 4,
+                                       uint8_t table_bar = 1) {
+    g_mock.reset();
+    setup_pci_hdr(0x1AF4, 0x1050, 0x1AF4, 0x0010);
+    std::vector<CapBuilderEntry> caps = {
+        {VIRTIO_PCI_CAP_COMMON_CFG, 0, 0x000, 56, 0},
+        {VIRTIO_PCI_CAP_NOTIFY_CFG, 0, 0x1000, 0x1000, 4},
+        {VIRTIO_PCI_CAP_ISR_CFG,    0, 0x080, 1,  0},
+        {VIRTIO_PCI_CAP_DEVICE_CFG, 0, 0x100, 64, 0}
+    };
+    build_cap_chain(caps, 0xA0);
+    setup_msix_cap(0xA0, 0, table_size, table_bar, 0x000, table_bar, 0x800);
+    wire_virtio_mmio(0, 0x000, 0x080);
+    g_mock.queues[0].size = 32;
+    g_mock.queues[1].size = 32;
+
+    uint64_t feat = VIRTIO_F_VERSION_1;
+    g_mock.device_features = feat;
+
+    g_mock.gpu_auto_process = true;
+    g_mock.gpu_skip_reply = false;
+    g_mock.gpu_override_len = -1;
+    g_mock.gpu_override_desc_id = -1;
+    g_mock.gpu_override_resp_type = 0;
+    g_mock.gpu_display_w = disp_w;
+    g_mock.gpu_display_h = disp_h;
+    g_mock.gpu_processed_count = 0;
+    g_mock.gpu_commands_seen.clear();
+
+    return virtio_pci_probe(0, 7, 0, dev, 0);
+}
+
+// ----------------------------------------------------------------------------
+// 88. VirtIO-GPU: Inicjalizacja i zwalnianie zasobow
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_init_and_cleanup() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe urzadzenia GPU");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Inicjalizacja VirtIO-GPU");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(drv != nullptr, "Pobranie instancji drv != nullptr");
+    TEST_ASSERT(drv->initialized, "drv->initialized == true");
+    TEST_ASSERT(drv->display_width == 1280, "display_width == 1280");
+    TEST_ASSERT(drv->display_height == 800, "display_height == 800");
+    TEST_ASSERT(drv->resource_id == 1, "resource_id == 1");
+    TEST_ASSERT(drv->fb_vaddr != nullptr, "fb_vaddr != nullptr");
+
+    TEST_ASSERT(virtio_gpu_reset(drv), "Reset i sprzatanie urzadzenia");
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA po resecie");
+    virtio_gpu_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 89. VirtIO-GPU: Pobranie i walidacja informacji o wyswietlaczu (display info)
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_get_display_info() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_gpu_device(&dev, 1920, 1080), "Probe GPU 1920x1080");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    VirtioGpuRespDisplayInfo info{};
+    TEST_ASSERT(virtio_gpu_cmd_get_display_info(drv, &info), "get_display_info");
+    TEST_ASSERT(info.hdr.type == VIRTIO_GPU_RESP_OK_DISPLAY_INFO, "Typ odpowiedzi OK_DISPLAY_INFO");
+    TEST_ASSERT(info.pmodes[0].enabled == 1, "Scanout 0 aktywny");
+    TEST_ASSERT(info.pmodes[0].r.width == 1920, "Scanout 0 width == 1920");
+    TEST_ASSERT(info.pmodes[0].r.height == 1080, "Scanout 0 height == 1080");
+
+    virtio_gpu_reset(drv);
+    virtio_gpu_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 90. VirtIO-GPU: Tworzenie zasobu 2D (resource create 2d)
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_resource_create_2d() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(virtio_gpu_cmd_resource_create_2d(drv, 2, VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM, 800, 600), "resource_create_2d");
+    TEST_ASSERT(virtio_gpu_cmd_resource_unref(drv, 2), "resource_unref");
+
+    virtio_gpu_reset(drv);
+    virtio_gpu_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 91. VirtIO-GPU: Podpinanie pamieci fizycznej scatter-gather (attach backing)
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_attach_backing() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    VirtioGpuMemEntry entries[2]{};
+    entries[0].addr = 0x100000; entries[0].length = 4096;
+    entries[1].addr = 0x101000; entries[1].length = 4096;
+
+    TEST_ASSERT(virtio_gpu_cmd_resource_create_2d(drv, 3, VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM, 64, 64), "create_2d");
+    TEST_ASSERT(virtio_gpu_cmd_resource_attach_backing(drv, 3, entries, 2), "attach_backing 2 wpisy");
+    TEST_ASSERT(virtio_gpu_cmd_resource_detach_backing(drv, 3), "detach_backing");
+    TEST_ASSERT(virtio_gpu_cmd_resource_unref(drv, 3), "resource_unref");
+
+    virtio_gpu_reset(drv);
+    virtio_gpu_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 92. VirtIO-GPU: Konfiguracja powiazania ze scanoutem (set scanout)
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_set_scanout() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(virtio_gpu_cmd_set_scanout(drv, 0, 1, 0, 0, 1280, 800), "set_scanout");
+
+    virtio_gpu_reset(drv);
+    virtio_gpu_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 93. VirtIO-GPU: Przesylanie bufora do hosta (transfer to host 2d)
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_transfer_to_host_2d() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    const uint64_t transfers_before = drv->transfer_count;
+    TEST_ASSERT(virtio_gpu_cmd_transfer_to_host_2d(drv, 1, 10, 20, 100, 50), "transfer_to_host_2d dirty rect");
+    TEST_ASSERT(drv->transfer_count == transfers_before + 1, "transfer_count zwiekszony o 1");
+
+    virtio_gpu_reset(drv);
+    virtio_gpu_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 94. VirtIO-GPU: Wymuszenie wyswietlenia ramki (resource flush)
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_resource_flush() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    const uint64_t flushes_before = drv->flush_count;
+    TEST_ASSERT(virtio_gpu_cmd_resource_flush(drv, 1, 10, 20, 100, 50), "resource_flush dirty rect");
+    TEST_ASSERT(drv->flush_count == flushes_before + 1, "flush_count zwiekszony o 1");
+
+    virtio_gpu_reset(drv);
+    virtio_gpu_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 95. VirtIO-GPU: Obsluga nieprawidlowej/blednej odpowiedzi urzadzenia
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_malformed_response() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    g_mock.gpu_override_resp_type = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
+    TEST_ASSERT(!virtio_gpu_cmd_resource_create_2d(drv, 5, VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM, 100, 100), "Odrzucenie bledu urzadzenia");
+    TEST_ASSERT(drv->error_count > 0, "error_count zarejestrowany");
+
+    g_mock.gpu_override_resp_type = 0;
+    virtio_gpu_reset(drv);
+    virtio_gpu_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 96. VirtIO-GPU: Timeout polecenia kontrolnego
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_command_timeout() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    g_mock.gpu_skip_reply = true;
+    TEST_ASSERT(!virtio_gpu_cmd_resource_flush(drv, 1, 0, 0, 100, 100), "Timeout zwraca false");
+    TEST_ASSERT(drv->has_error, "drv->has_error == true po timeoucie");
+
+    g_mock.gpu_skip_reply = false;
+    virtio_gpu_reset(drv);
+    virtio_gpu_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 97. VirtIO-GPU: Ochrona przed przepelnieniem arytmetycznym (overflow safety)
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_arithmetic_overflow() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(!virtio_gpu_cmd_resource_create_2d(drv, 10, VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM, 0x80000000U, 100), "Odrzucenie szerokosci overflow");
+    TEST_ASSERT(!virtio_gpu_cmd_resource_create_2d(drv, 10, VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM, 5000, 5000), "Odrzucenie rozmiaru > 64 MiB");
+
+    virtio_gpu_reset(drv);
+    virtio_gpu_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 98. VirtIO-GPU: Odrzucanie nieprawidlowych wymiarow i granic
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_invalid_dimensions() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(!virtio_gpu_cmd_resource_create_2d(drv, 11, VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM, 0, 100), "Odrzucenie width=0");
+    TEST_ASSERT(!virtio_gpu_cmd_resource_create_2d(drv, 11, VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM, 100, 0), "Odrzucenie height=0");
+    TEST_ASSERT(!virtio_gpu_cmd_transfer_to_host_2d(drv, 1, 1000, 700, 500, 200), "Transfer poza zakresem odrzucony");
+    TEST_ASSERT(!virtio_gpu_cmd_resource_flush(drv, 1, 1000, 700, 500, 200), "Flush poza zakresem odrzucony");
+
+    virtio_gpu_reset(drv);
+    virtio_gpu_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 99. VirtIO-GPU: Odpornosc na wyczerpanie deskryptorow kolejki controlq
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_queue_corruption() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    VirtqBuffer dummy_buf{};
+    dummy_buf.phys_addr = drv->cmd_paddr;
+    dummy_buf.len = 16;
+    dummy_buf.is_write = true;
+    while (virtqueue_submit(drv->controlq, &dummy_buf, 1, nullptr) >= 0) {}
+    TEST_ASSERT(virtqueue_get_num_free(drv->controlq) == 0, "Kolejka wyczerpana");
+    TEST_ASSERT(!virtio_gpu_cmd_resource_flush(drv, 1, 0, 0, 10, 10), "Polecenie odrzucone przy braku deskryptorow");
+
+    virtio_gpu_reset(drv);
+    virtio_gpu_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 100. VirtIO-GPU: Kwarantanna DMA przy niepotwierdzonym resecie sprzetu
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_reset_failure_quarantine() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    const size_t allocs_before = g_host_dma_allocs.size();
+    g_mock.ignore_reset = true;
+
+    TEST_ASSERT(!virtio_gpu_reset(drv), "Reset zwraca false gdy sprzet ignoruje reset");
+    TEST_ASSERT(drv->has_error, "drv->has_error == true");
+    TEST_ASSERT(g_host_dma_allocs.size() == allocs_before, "Pamiec DMA poddana kwarantannie (niezwolniona)");
+
+    g_mock.ignore_reset = false;
+    g_host_dma_allocs.clear();
+    virtio_gpu_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 101. VirtIO-GPU: Prawidlowa kolejnosc niszczenia zasobow (teardown ordering)
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_resource_teardown_ordering() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    g_mock.gpu_commands_seen.clear();
+    TEST_ASSERT(virtio_gpu_reset(drv), "Reset driver");
+
+    bool seen_scanout = false;
+    bool seen_detach = false;
+    bool seen_unref = false;
+    bool order_ok = true;
+
+    for (uint32_t cmd : g_mock.gpu_commands_seen) {
+        if (cmd == VIRTIO_GPU_CMD_SET_SCANOUT) {
+            seen_scanout = true;
+        } else if (cmd == VIRTIO_GPU_CMD_RESOURCE_DETACH_BACKING) {
+            if (!seen_scanout) order_ok = false;
+            seen_detach = true;
+        } else if (cmd == VIRTIO_GPU_CMD_RESOURCE_UNREF) {
+            if (!seen_detach) order_ok = false;
+            seen_unref = true;
+        }
+    }
+    TEST_ASSERT(order_ok && seen_scanout && seen_detach && seen_unref,
+                "Kolejnosc teardown: scanout=0 -> detach_backing -> unref");
+
+    virtio_gpu_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 102. VirtIO-GPU: Powtarzalne cykle init -> test pattern -> reset (stress/leaks)
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_repeated_init_reset() {
+    virtio_gpu_reset_all();
+    constexpr int ITERS = 20;
+
+    for (int i = 0; i < ITERS; ++i) {
+        VirtioPciDevice dev{};
+        TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe w petli");
+        TEST_ASSERT(virtio_gpu_init(&dev), "Init w petli");
+        VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+        TEST_ASSERT(virtio_gpu_render_test_pattern(drv), "Render test pattern w petli");
+        TEST_ASSERT(virtio_gpu_reset(drv), "Reset w petli");
+        TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA w petli");
+        virtio_gpu_reset_all();
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 103. VirtIO-GPU: Operacja z przerwaniami MSI-X
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_msix_operation() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_gpu_device_msix(&dev), "Probe GPU z MSI-X");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init z MSI-X");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(drv->use_msix, "drv->use_msix == true");
+    TEST_ASSERT(drv->irq_vector >= 0, "Wektor IRQ przydzielony");
+    TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 1, "1 wektor IDT zaalokowany");
+
+    TEST_ASSERT(virtio_gpu_render_test_pattern(drv), "Render pattern z MSI-X");
+    TEST_ASSERT(drv->irq_count > 0, "Licznik przerwan MSI-X > 0");
+
+    virtio_gpu_reset(drv);
+    TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 0, "Zero wyciekow wektorow IDT po resecie MSI-X");
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA");
+    virtio_gpu_reset_all();
+}
+
+// ============================================================================
 // PUNKT WEJSCIA TESTOW
 // ============================================================================
 
@@ -4174,6 +4652,24 @@ int main() {
     RUN_TEST(test_virtio_net_msix_operation);
     RUN_TEST(test_virtio_net_reset_quarantine_on_stuck_device);
     RUN_TEST(test_virtio_net_stress_and_wraparound);
+
+    // Testy VirtIO-GPU (2D)
+    RUN_TEST(test_virtio_gpu_init_and_cleanup);
+    RUN_TEST(test_virtio_gpu_get_display_info);
+    RUN_TEST(test_virtio_gpu_resource_create_2d);
+    RUN_TEST(test_virtio_gpu_attach_backing);
+    RUN_TEST(test_virtio_gpu_set_scanout);
+    RUN_TEST(test_virtio_gpu_transfer_to_host_2d);
+    RUN_TEST(test_virtio_gpu_resource_flush);
+    RUN_TEST(test_virtio_gpu_malformed_response);
+    RUN_TEST(test_virtio_gpu_command_timeout);
+    RUN_TEST(test_virtio_gpu_arithmetic_overflow);
+    RUN_TEST(test_virtio_gpu_invalid_dimensions);
+    RUN_TEST(test_virtio_gpu_queue_corruption);
+    RUN_TEST(test_virtio_gpu_reset_failure_quarantine);
+    RUN_TEST(test_virtio_gpu_resource_teardown_ordering);
+    RUN_TEST(test_virtio_gpu_repeated_init_reset);
+    RUN_TEST(test_virtio_gpu_msix_operation);
 
     std::printf("========================================================\n");
     std::printf("PODSUMOWANIE: PASS=%d, FAIL=%d\n", g_pass_count, g_fail_count);

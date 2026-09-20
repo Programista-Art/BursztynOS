@@ -124,7 +124,8 @@ void ekran_inicjalizuj(){
     boot_tryb=grafika_tryb_ekranu();log_tryb("[EKRAN INIT] boot=",boot_tryb);
     klog_serial(grafika_mozliwosci_ekranu().backend==EKRAN_BOCHS?
         "[EKRAN INIT] backend=bochs-runtime":grafika_mozliwosci_ekranu().backend==EKRAN_GOP?
-        "[EKRAN INIT] backend=uefi-gop-static":"[EKRAN INIT] backend=vesa-static");
+        "[EKRAN INIT] backend=uefi-gop-static":grafika_mozliwosci_ekranu().backend==EKRAN_VIRTIO_GPU?
+        "[EKRAN INIT] backend=virtio-gpu-runtime":"[EKRAN INIT] backend=vesa-static");
     uint32_t n=rozmiar_pliku(EKRAN_CFG),got=0;
     if(!n){bws_aktualizuj_ekran(100);klog_serial("[EKRAN INIT] cfg=missing; active=boot");return;}
     char buf[EKRAN_CFG_MAX]{};EkranKonfiguracja c{};

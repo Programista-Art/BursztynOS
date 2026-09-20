@@ -1,6 +1,7 @@
 #include "grafika.h"
 #include "bufory_grafiki.h"
 #include "sterowniki/grafika/bochs_vbe.h"
+#include "virtio_gpu.h"
 #include "mysz_input.h"
 #include "pamiec.h"
 #include "zegar-rtc.h"
@@ -411,6 +412,60 @@ public:
         KopiujFragment32(bufor, x, y, szer, wys);
     }
 };
+
+class SterownikVirtioGPU final : public SterownikEkranu {
+private:
+    VirtioGpuDriver* drv = nullptr;
+
+public:
+    bool InicjalizujGPU(VirtioGpuDriver* gdrv) {
+        if (!gdrv || !gdrv->fb_vaddr || gdrv->fb_width == 0 || gdrv->fb_height == 0) {
+            return false;
+        }
+        drv = gdrv;
+        if (!SterownikEkranu::Inicjalizuj(
+                reinterpret_cast<uint64_t>(gdrv->fb_vaddr),
+                gdrv->fb_width,
+                gdrv->fb_height,
+                gdrv->fb_stride,
+                32)) {
+            return false;
+        }
+        return true;
+    }
+
+    void KopiujNaEkran(uint8_t* bufor) override {
+        if (!drv || !drv->initialized || drv->has_error) return;
+        if (static_cast<const void*>(bufor) != static_cast<const void*>(const_cast<const uint8_t*>(framebuffer_fizyczny))) {
+            KopiujCalyBufor32(bufor);
+        }
+        virtio_gpu_transfer_and_flush(drv, 0, 0, szerokosc, wysokosc);
+    }
+
+    void KopiujFragmentNaEkran(uint8_t* bufor,
+                               int x,
+                               int y,
+                               int szer,
+                               int wys) override {
+        if (!drv || !drv->initialized || drv->has_error) return;
+        if (szer <= 0 || wys <= 0) return;
+
+        int rx = x < 0 ? 0 : x;
+        int ry = y < 0 ? 0 : y;
+        if (rx >= static_cast<int>(szerokosc) || ry >= static_cast<int>(wysokosc)) return;
+        int rw = (rx + szer > static_cast<int>(szerokosc)) ? (static_cast<int>(szerokosc) - rx) : szer;
+        int rh = (ry + wys > static_cast<int>(wysokosc)) ? (static_cast<int>(wysokosc) - ry) : wys;
+        if (rw <= 0 || rh <= 0) return;
+
+        if (static_cast<const void*>(bufor) != static_cast<const void*>(const_cast<const uint8_t*>(framebuffer_fizyczny))) {
+            KopiujFragment32(bufor, rx, ry, rw, rh);
+        }
+        virtio_gpu_transfer_and_flush(drv, static_cast<uint32_t>(rx), static_cast<uint32_t>(ry),
+                                      static_cast<uint32_t>(rw), static_cast<uint32_t>(rh));
+    }
+};
+
+alignas(SterownikVirtioGPU) static uint8_t st_virtio_gpu_pamiec[sizeof(SterownikVirtioGPU)];
 
 static SterownikEkranu* aktywny_ekran = nullptr;
 static uint8_t* backbuffer = nullptr;
@@ -2504,7 +2559,10 @@ bool grafika_przygotuj_bufory_tapety() {
     const uint64_t w = aktywny_ekran->PobierzSzerokosc();
     const uint64_t h = aktywny_ekran->PobierzWysokosc();
     if (!w || !h || w > 8192 || h > 8192 || w * h > MAX_RAW_BMP / 4) return false;
-    if(!bufor_tapety) {
+    if(!bufor_tapety || tapeta_zmapowane_bajty < size_t(w*h*4)) {
+        if (bufor_tapety) {
+            bufor_grafiki_zwolnij(bufor_tapety);
+        }
         bufor_tapety=static_cast<uint32_t*>(bufor_grafiki_alokuj(size_t(w*h*4)));
         if(!bufor_tapety)return false;
         tapeta_zmapowane_bajty=size_t(w*h*4);
@@ -3668,8 +3726,10 @@ uint32_t grafika_tryby_ekranu(TrybEkranu* out,uint32_t cap){
     return n;
 }
 bool grafika_tryb_obslugiwany(const TrybEkranu&t){
-    size_t n=0;if(!ekran_rozmiar(t,&n)||n>ekran_vram||t.flagi||t.odswiezanie)return false;
+    size_t n=0;if(!ekran_rozmiar(t,&n)||t.flagi||t.odswiezanie)return false;
     if(ekran_ten_sam(t,grafika_tryb_ekranu()))return true;
+    if(ekran_caps.backend==EKRAN_VIRTIO_GPU)return t.szerokosc<=4096&&t.wysokosc<=4096&&t.bpp==32;
+    if(n>ekran_vram)return false;
     return ekran_caps.mozna_zmienic_runtime&&bochs_sprawdz_tryb(t);
 }
 void grafika_pobierz_stan(StanBuforowEkranu* s){
@@ -3688,8 +3748,83 @@ bool grafika_przygotuj_ekran(const TrybEkranu&t,StanBuforowEkranu* s){
     return true;
 }
 bool grafika_zmien_sprzet(const TrybEkranu&t){
+    if(ekran_caps.backend==EKRAN_VIRTIO_GPU){
+        VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+        if(!drv)return false;
+        if(drv->fb_width==t.szerokosc&&drv->fb_height==t.wysokosc)return true;
+        if(drv->scanout_set){
+            virtio_gpu_cmd_set_scanout(drv,drv->scanout_id,0,0,0,0,0);
+            drv->scanout_set=false;
+        }
+        if(drv->backing_attached){
+            virtio_gpu_cmd_resource_detach_backing(drv,drv->resource_id);
+            drv->backing_attached=false;
+        }
+        if(drv->resource_created){
+            virtio_gpu_cmd_resource_unref(drv,drv->resource_id);
+            drv->resource_created=false;
+        }
+        if(drv->fb_vaddr){
+            DmaBuffer dma{};
+            dma.virtual_address=drv->fb_vaddr;
+            dma.physical_address=drv->mem_entries?drv->mem_entries[0].addr:0;
+            dma.page_count=drv->fb_pages;
+            dma_release(&dma);
+            drv->fb_vaddr=nullptr;
+        }
+        return virtio_gpu_setup_framebuffer(drv,t.szerokosc,t.wysokosc);
+    }
     if(ekran_caps.mozna_zmienic_runtime)return bochs_ustaw_tryb(t);
     return ekran_ten_sam(t,grafika_tryb_ekranu());
+}
+bool grafika_aktywuj_virtio_gpu(VirtioGpuDriver* drv) {
+    if (!drv || !drv->initialized || !drv->fb_vaddr) return false;
+
+    SterownikVirtioGPU* st = new (st_virtio_gpu_pamiec) SterownikVirtioGPU();
+    if (!st->InicjalizujGPU(drv)) {
+        return false;
+    }
+
+    aktywny_ekran = st;
+    ekran_caps.backend = EKRAN_VIRTIO_GPU;
+    ekran_caps.mozna_zmienic_runtime = 1;
+    ekran_caps.mozna_wyliczyc_tryby = 1;
+
+    aktywny_stan.szerokosc = drv->fb_width;
+    aktywny_stan.wysokosc = drv->fb_height;
+    aktywny_stan.pitch = drv->fb_stride;
+    aktywny_stan.bpp = 32;
+    aktywny_stan.framebuffer = reinterpret_cast<uint64_t>(drv->fb_vaddr);
+    if (++aktywny_stan.generacja == 0) ++aktywny_stan.generacja;
+
+    const size_t wymagane_bajty = size_t(drv->fb_width) * drv->fb_height * 4;
+    if (backbuffer_bajty < wymagane_bajty) {
+        uint8_t* nowy_bb = static_cast<uint8_t*>(bufor_grafiki_alokuj(wymagane_bajty));
+        if (nowy_bb) {
+            if (backbuffer) {
+                bufor_grafiki_zwolnij(backbuffer);
+            }
+            backbuffer = nowy_bb;
+            backbuffer_bajty = wymagane_bajty;
+            for (size_t i = 0; i < wymagane_bajty; ++i) {
+                backbuffer[i] = static_cast<uint8_t*>(drv->fb_vaddr)[i];
+            }
+        }
+    }
+    if (bufor_tapety && tapeta_zmapowane_bajty < wymagane_bajty) {
+        uint32_t* nowa_tapeta = static_cast<uint32_t*>(bufor_grafiki_alokuj(wymagane_bajty));
+        if (nowa_tapeta) {
+            bufor_grafiki_zwolnij(bufor_tapety);
+            bufor_tapety = nowa_tapeta;
+            tapeta_zmapowane_bajty = wymagane_bajty;
+        }
+    }
+
+    if (mysz_x >= int(drv->fb_width)) mysz_x = drv->fb_width - 1;
+    if (mysz_y >= int(drv->fb_height)) mysz_y = drv->fb_height - 1;
+
+    SerialLog("[HAL] Aktywacja sterownika VirtIO-GPU 2D jako backend graficzny.\n");
+    return true;
 }
 void grafika_wymien_stan(const StanBuforowEkranu&s){
     aktywny_ekran->Inicjalizuj(ekran_lfb_va,s.tryb.szerokosc,s.tryb.wysokosc,s.tryb.pitch,s.tryb.bpp);

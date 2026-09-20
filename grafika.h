@@ -239,3 +239,5 @@ void grafika_pobierz_stan(StanBuforowEkranu*);
 bool grafika_zmien_sprzet(const TrybEkranu&);
 void grafika_wymien_stan(const StanBuforowEkranu&);
 void grafika_zwolnij_stan(StanBuforowEkranu*);
+struct VirtioGpuDriver;
+bool grafika_aktywuj_virtio_gpu(VirtioGpuDriver* drv);

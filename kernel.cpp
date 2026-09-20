@@ -49,6 +49,7 @@ extern "C" void odblokuj_ekran();
 #include "virtqueue.h"
 #include "virtio_rng.h"
 #include "virtio_blk.h"
+#include "virtio_gpu.h"
 
 #ifndef BURSZTYN_DEBUG_NET_SELFTEST
 #define BURSZTYN_DEBUG_NET_SELFTEST 0
@@ -2242,6 +2243,15 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
         VirtioBlkDriver* blk_drv = virtio_blk_get_driver(0);
         if (blk_drv && blk_drv->initialized) {
             virtio_blk_stress_test(blk_drv);
+        }
+    }
+
+    const uint32_t virtio_gpu_count = virtio_gpu_probe_and_init();
+    if (virtio_gpu_count > 0) {
+        VirtioGpuDriver* gpu_drv = virtio_gpu_get_driver(0);
+        if (gpu_drv && gpu_drv->initialized) {
+            virtio_gpu_render_test_pattern(gpu_drv);
+            grafika_aktywuj_virtio_gpu(gpu_drv);
         }
     }
 
