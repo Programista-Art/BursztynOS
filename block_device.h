@@ -166,17 +166,30 @@ inline BlockError BlockDevice::read(uint64_t lba, uint32_t count, void* buf) {
     if (total_sectors == 0 || lba >= total_sectors || static_cast<uint64_t>(count) > total_sectors - lba) {
         return BlockError::OutOfRange;
     }
+    uint32_t sec_sz = logical_sector_size ? logical_sector_size : 512;
+    if (sec_sz < 512 || (sec_sz & (sec_sz - 1)) != 0 || sec_sz > 65536) {
+        return BlockError::InvalidArgument;
+    }
+    if (static_cast<uint64_t>(count) > (static_cast<uint64_t>(SIZE_MAX) / sec_sz)) {
+        return BlockError::InvalidArgument;
+    }
+    const size_t total_bytes = static_cast<size_t>(count) * sec_sz;
+    const uintptr_t buf_addr = reinterpret_cast<uintptr_t>(buf);
+    if (buf_addr > UINTPTR_MAX - total_bytes) {
+        return BlockError::InvalidArgument;
+    }
+
     if (ops && ops->read) {
         uint32_t limit = max_transfer_sectors;
         if (limit == 0 || count <= limit) {
             return ops->read(this, lba, count, buf);
         }
         uint8_t* ptr = static_cast<uint8_t*>(buf);
-        uint32_t sec_sz = logical_sector_size ? logical_sector_size : 512;
         uint32_t done = 0;
         while (done < count) {
             uint32_t chunk = (count - done > limit) ? limit : (count - done);
-            BlockError err = ops->read(this, lba + done, chunk, ptr + static_cast<size_t>(done) * sec_sz);
+            size_t byte_offset = static_cast<size_t>(done) * sec_sz;
+            BlockError err = ops->read(this, lba + done, chunk, ptr + byte_offset);
             if (err != BlockError::Ok) return err;
             done += chunk;
         }
@@ -194,28 +207,48 @@ inline BlockError BlockDevice::write(uint64_t lba, uint32_t count, const void* b
     if (total_sectors == 0 || lba >= total_sectors || static_cast<uint64_t>(count) > total_sectors - lba) {
         return BlockError::OutOfRange;
     }
+    uint32_t sec_sz = logical_sector_size ? logical_sector_size : 512;
+    if (sec_sz < 512 || (sec_sz & (sec_sz - 1)) != 0 || sec_sz > 65536) {
+        return BlockError::InvalidArgument;
+    }
+    if (static_cast<uint64_t>(count) > (static_cast<uint64_t>(SIZE_MAX) / sec_sz)) {
+        return BlockError::InvalidArgument;
+    }
+    const size_t total_bytes = static_cast<size_t>(count) * sec_sz;
+    const uintptr_t buf_addr = reinterpret_cast<uintptr_t>(buf);
+    if (buf_addr > UINTPTR_MAX - total_bytes) {
+        return BlockError::InvalidArgument;
+    }
+
     if (ops && ops->write) {
         uint32_t limit = max_transfer_sectors;
         if (limit == 0 || count <= limit) {
             BlockError err = ops->write(this, lba, count, buf);
-            if (err == BlockError::Ok) write_count += count;
+            if (err == BlockError::Ok) {
+                if (write_count <= UINT64_MAX - count) write_count += count;
+                else write_count = UINT64_MAX;
+            }
             return err;
         }
         const uint8_t* ptr = static_cast<const uint8_t*>(buf);
-        uint32_t sec_sz = logical_sector_size ? logical_sector_size : 512;
         uint32_t done = 0;
         while (done < count) {
             uint32_t chunk = (count - done > limit) ? limit : (count - done);
-            BlockError err = ops->write(this, lba + done, chunk, ptr + static_cast<size_t>(done) * sec_sz);
+            size_t byte_offset = static_cast<size_t>(done) * sec_sz;
+            BlockError err = ops->write(this, lba + done, chunk, ptr + byte_offset);
             if (err != BlockError::Ok) return err;
-            write_count += chunk;
+            if (write_count <= UINT64_MAX - chunk) write_count += chunk;
+            else write_count = UINT64_MAX;
             done += chunk;
         }
         return BlockError::Ok;
     }
     if (legacy_write) {
         bool ok = legacy_write(driver_data, lba, count, buf);
-        if (ok) write_count += count;
+        if (ok) {
+            if (write_count <= UINT64_MAX - count) write_count += count;
+            else write_count = UINT64_MAX;
+        }
         return ok ? BlockError::Ok : BlockError::IOError;
     }
     return BlockError::Unsupported;

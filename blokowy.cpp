@@ -1,5 +1,4 @@
 #include "blokowy.h"
-#include "ahci.h"
 #include "pamiec.h"
 #include "grafika.h"
 #include "instalator.h"
@@ -64,9 +63,11 @@ static BlockError filter_revalidate(BlockDevice* dev) {
         for (size_t k = 0; k < sizeof(dev->model) && k < sizeof(fc->underlying->model); ++k) {
             dev->model[k] = fc->underlying->model[k];
         }
+        dev->model[sizeof(dev->model) - 1] = '\0';
         for (size_t k = 0; k < sizeof(dev->serial) && k < sizeof(fc->underlying->serial); ++k) {
             dev->serial[k] = fc->underlying->serial[k];
         }
+        dev->serial[sizeof(dev->serial) - 1] = '\0';
         dev->sync_state();
     }
     return err;
@@ -105,6 +106,10 @@ static bool filter_legacy_flush(void* ctx) {
 
 bool blokowy_zarejestruj_dysk(Storage::Device* dev) {
     if (!dev || registered_device_count >= 32) return false;
+    // Odrzucamy urządzenia uszkodzone, częściowo zainicjalizowane lub o zerowej pojemności/sektorze:
+    if (dev->total_sectors == 0 || dev->logical_sector_size == 0 || !dev->can_read()) {
+        return false;
+    }
     uint32_t id = registered_device_count;
     filter_contexts[id].underlying = dev;
     filter_contexts[id].id = id;
@@ -124,9 +129,11 @@ bool blokowy_zarejestruj_dysk(Storage::Device* dev) {
     for (size_t k = 0; k < sizeof(d.model) && k < sizeof(dev->model); ++k) {
         d.model[k] = dev->model[k];
     }
+    d.model[sizeof(d.model) - 1] = '\0';
     for (size_t k = 0; k < sizeof(d.serial) && k < sizeof(dev->serial); ++k) {
         d.serial[k] = dev->serial[k];
     }
+    d.serial[sizeof(d.serial) - 1] = '\0';
     d.ctx = &filter_contexts[id];
     d.sectors = dev->total_sectors;
     d.sector_size = dev->logical_sector_size;
@@ -144,12 +151,6 @@ void blokowy_inicjalizuj() {
     registered_device_count = 0;
     dysk_glowny = nullptr;
     installation_target = -1;
-    for (uint32_t i = 0; i < ahci_liczba_dyskow(); ++i) {
-        Storage::Device* dev = ahci_pobierz_urzadzenie_blokowe(i);
-        if (dev) {
-            blokowy_zarejestruj_dysk(dev);
-        }
-    }
 }
 
 uint32_t blokowy_liczba_dyskow() {
@@ -170,7 +171,9 @@ uint64_t blokowy_licznik_zapisow(uint32_t id) {
     if (id == UINT32_MAX) {
         uint64_t sum = 0;
         for (uint32_t i = 0; i < registered_device_count; ++i) {
-            sum += filter_contexts[i].underlying ? filter_contexts[i].underlying->write_count : devices[i].write_count;
+            uint64_t w = filter_contexts[i].underlying ? filter_contexts[i].underlying->write_count : devices[i].write_count;
+            if (sum <= UINT64_MAX - w) sum += w;
+            else sum = UINT64_MAX;
         }
         return sum;
     }

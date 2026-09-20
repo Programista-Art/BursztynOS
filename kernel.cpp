@@ -2219,11 +2219,11 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
         "[BWS] API Wywolan Systemowych gotowe.");
 
     /* ---------------------------------------------------------------------
-     * Dysk AHCI i tapeta
+     * Podsystem blokowy i dyski pamieci masowej (AHCI)
      * ------------------------------------------------------------------ */
 
-    inicjalizuj_kontroler_ahci();
     blokowy_inicjalizuj();
+    inicjalizuj_kontroler_ahci();
 
     /* BMP pozostaje fallbackiem po inicjalizacji BSP2. */
 

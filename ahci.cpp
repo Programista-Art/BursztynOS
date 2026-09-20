@@ -38,6 +38,7 @@
  */
 
 #include "ahci.h"
+#include "blokowy.h"
 #include "pamiec.h"
 #include "pci.h"
 
@@ -2618,6 +2619,10 @@ extern "C" void inicjalizuj_kontroler_ahci() {
         log_port("[AHCI] IDENTIFY SATA port ", port);
         wypisz_log(ident_info.model);
         if (!ident_info.zapis) wypisz_log("[AHCI] Dysk nie kwalifikuje sie do zapisu (sektor/FLUSH/security).");
+
+        // Rejestracja w podsystemie blokowym nastepuje wylacznie po pelnej,
+        // prawidlowo zweryfikowanej inicjalizacji urzadzenia:
+        blokowy_zarejestruj_dysk(&d.bdev);
     }
     ahci_gotowy = liczba_dyskow != 0;
     if (ahci_gotowy) wybierz_dysk(0);

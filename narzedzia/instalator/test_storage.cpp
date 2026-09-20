@@ -283,6 +283,27 @@ static void test_block_device_abstraction() {
     std::vector<uint8_t> p_read_4k(4096, 0);
     CHECK(partition_read(part_4k, 2, 1, p_read_4k.data()) == BlockError::Ok);
     CHECK(std::memcmp(p_buf_4k.data(), p_read_4k.data(), 4096) == 0);
+
+    // 12. Chunking overflow and validation audits
+    // Invalid logical sector sizes
+    mock.bdev.logical_sector_size = 256; // < 512
+    CHECK(mock.bdev.read(0, 1, rbuf.data()) == BlockError::InvalidArgument);
+    CHECK(mock.bdev.write(0, 1, wbuf.data()) == BlockError::InvalidArgument);
+    mock.bdev.logical_sector_size = 513; // Not power of 2
+    CHECK(mock.bdev.read(0, 1, rbuf.data()) == BlockError::InvalidArgument);
+    mock.bdev.logical_sector_size = 131072; // > 65536
+    CHECK(mock.bdev.read(0, 1, rbuf.data()) == BlockError::InvalidArgument);
+    mock.bdev.logical_sector_size = 512; // Restore valid
+
+    // Buffer address wrap-around check
+    void* high_buf = reinterpret_cast<void*>(UINTPTR_MAX - 100);
+    CHECK(mock.bdev.read(0, 1, high_buf) == BlockError::InvalidArgument);
+    CHECK(mock.bdev.write(0, 1, high_buf) == BlockError::InvalidArgument);
+
+    // Saturating write_count
+    mock.bdev.write_count = UINT64_MAX - 1;
+    CHECK(mock.bdev.write(0, 2, wbuf.data()) == BlockError::Ok);
+    CHECK(mock.bdev.write_count == UINT64_MAX); // Saturated, no wrap to 0
 }
 
 int main(){
