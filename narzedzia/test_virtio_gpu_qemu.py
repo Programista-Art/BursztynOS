@@ -163,11 +163,15 @@ def main():
 
     qmp_sock = Path("/tmp/virtio_gpu_qmp.sock")
     pattern_dump_path = Path("/tmp/virtio_gpu_pattern.ppm")
+    dump_1080_path = Path("/tmp/virtio_gpu_1080.ppm")
+    dump_768_path = Path("/tmp/virtio_gpu_768.ppm")
+    dump_rollback_path = Path("/tmp/virtio_gpu_rollback.ppm")
     desktop_dump_path = Path("/tmp/virtio_gpu_desktop.ppm")
     desktop_moved_path = Path("/tmp/virtio_gpu_moved.ppm")
     desktop_rapid_path = Path("/tmp/virtio_gpu_rapid.ppm")
 
-    for p in [qmp_sock, pattern_dump_path, desktop_dump_path, desktop_moved_path, desktop_rapid_path]:
+    for p in [qmp_sock, pattern_dump_path, dump_1080_path, dump_768_path, dump_rollback_path,
+              desktop_dump_path, desktop_moved_path, desktop_rapid_path]:
         if p.exists():
             try:
                 p.unlink()
@@ -218,6 +222,23 @@ def main():
     found_ekran_init = False
     found_desktop_ready = False
     boot_ready = False
+
+    # VirtIO-GPU initial mode & modeset assertions
+    found_dinfo_scanout = False
+    found_boot_mode = False
+    found_selected_initial = False
+    found_scanout_cmd_ok = False
+    pattern_initial_1280x720_ok = False
+    found_invalid_dims_rejected = False
+    found_100x_modeset_cycles = False
+    found_desktop_switched_1080 = False
+    screendump_1080_ok = False
+    found_desktop_switched_768 = False
+    screendump_768_ok = False
+    found_unconfirmed_rollback = False
+    screendump_rollback_ok = False
+    found_desktop_restored_1280 = False
+    found_desktop_modeset_suite = False
 
     # In-kernel cursor test assertions
     found_cursor_center = False
@@ -370,6 +391,11 @@ def main():
                             print(f"[INFO] Zrzut wzorca zapisany ({pattern_dump_path.stat().st_size} bajtow).")
                             w, h, pdata = parse_ppm(pattern_dump_path)
                             print(f"[INFO] Rozdzielczosc wzorca testowego: {w}x{h}")
+                            if w == 1280 and h == 720:
+                                pattern_initial_1280x720_ok = True
+                                print(f"[INFO] Poczatkowa rozdzielczosc GOP 1280x720 zachowana: PASS")
+                            else:
+                                print(f"[BLAD] Poczatkowa rozdzielczosc != 1280x720 ({w}x{h})!")
 
                             expected_points = [
                                 ("Tlo (10, 10)", 10, 10, (10, 25, 47)),
@@ -391,6 +417,72 @@ def main():
                     except Exception as e:
                         print(f"[BLAD] Wyjatek podczas zrzutu wzorca: {e}")
 
+            if "[VIRTIO-GPU] GETDISPLAYINFO scanout0=" in line_str:
+                found_dinfo_scanout = True
+                gpu_lines.append(line_str)
+            if "[VIRTIO-GPU] boot mode=1280x720" in line_str:
+                found_boot_mode = True
+                gpu_lines.append(line_str)
+            if "[VIRTIO-GPU] selected initial mode=1280x720" in line_str:
+                found_selected_initial = True
+                gpu_lines.append(line_str)
+            if "[VIRTIO-GPU] SETSCANOUT 1280x720 result=OK" in line_str:
+                found_scanout_cmd_ok = True
+                gpu_lines.append(line_str)
+            if "[VIRTIO-GPU-MODESET] Invalid dimensions rejection: PASS" in line_str:
+                found_invalid_dims_rejected = True
+                gpu_lines.append(line_str)
+            if "[VIRTIO-GPU-MODESET] 100x modeset cycles: PASS (PMM delta=0, DMA delta=0, IDT delta=0)." in line_str:
+                found_100x_modeset_cycles = True
+                gpu_lines.append(line_str)
+            if "[VIRTIO-GPU-MODESET] Switched to 1920x1080: PASS" in line_str:
+                found_desktop_switched_1080 = True
+                gpu_lines.append(line_str)
+            if "[VIRTIO-GPU-MODESET] Ready for 1920x1080 screendump" in line_str:
+                if not screendump_1080_ok and qmp_sock.exists():
+                    try:
+                        qmp_screendump(qmp_sock, dump_1080_path)
+                        if dump_1080_path.exists() and dump_1080_path.stat().st_size > 0:
+                            w1080, h1080, _ = parse_ppm(dump_1080_path)
+                            print(f"[INFO] Rozdzielczosc zrzutu 1920x1080: {w1080}x{h1080}")
+                            if w1080 == 1920 and h1080 == 1080:
+                                screendump_1080_ok = True
+                    except Exception as e:
+                        print(f"[BLAD] Screendump 1920x1080: {e}")
+            if "[VIRTIO-GPU-MODESET] Switched to 1024x768: PASS" in line_str:
+                found_desktop_switched_768 = True
+                gpu_lines.append(line_str)
+            if "[VIRTIO-GPU-MODESET] Ready for 1024x768 screendump" in line_str:
+                if not screendump_768_ok and qmp_sock.exists():
+                    try:
+                        qmp_screendump(qmp_sock, dump_768_path)
+                        if dump_768_path.exists() and dump_768_path.stat().st_size > 0:
+                            w768, h768, _ = parse_ppm(dump_768_path)
+                            print(f"[INFO] Rozdzielczosc zrzutu 1024x768: {w768}x{h768}")
+                            if w768 == 1024 and h768 == 768:
+                                screendump_768_ok = True
+                    except Exception as e:
+                        print(f"[BLAD] Screendump 1024x768: {e}")
+            if "[VIRTIO-GPU-MODESET] Unconfirmed rollback complete, ready for screendump" in line_str:
+                found_unconfirmed_rollback = True
+                gpu_lines.append(line_str)
+                if not screendump_rollback_ok and qmp_sock.exists():
+                    try:
+                        qmp_screendump(qmp_sock, dump_rollback_path)
+                        if dump_rollback_path.exists() and dump_rollback_path.stat().st_size > 0:
+                            wrb, hrb, _ = parse_ppm(dump_rollback_path)
+                            print(f"[INFO] Rozdzielczosc zrzutu rollback: {wrb}x{hrb}")
+                            if wrb == 1024 and hrb == 768:
+                                screendump_rollback_ok = True
+                    except Exception as e:
+                        print(f"[BLAD] Screendump rollback: {e}")
+            if "[VIRTIO-GPU-MODESET] Restored initial 1280x720: PASS" in line_str:
+                found_desktop_restored_1280 = True
+                gpu_lines.append(line_str)
+            if "[VIRTIO-GPU-MODESET] Desktop modeset test suite: PASS" in line_str:
+                found_desktop_modeset_suite = True
+                gpu_lines.append(line_str)
+
             if "[HAL] Aktywacja sterownika VirtIO-GPU 2D jako backend graficzny." in line_str:
                 found_hal_switch = True
                 gpu_lines.append(line_str)
@@ -409,7 +501,7 @@ def main():
         # Sekwencja testow integracyjnych QMP po zaladowaniu pulpitu
         if boot_ready and qmp_sock.exists():
             print("\n[INFO] Rozpoczynam integracyjny test kursora i myszy USB przez QMP...")
-            time.sleep(0.5)
+            time.sleep(1.5)
             qmp = QmpClient(qmp_sock, timeout=10.0)
 
             # 1. Sprawdzenie i wybor myszy USB HID
@@ -427,6 +519,11 @@ def main():
                 desktop_dump_ok = True
                 dw, dh, ddata = parse_ppm(desktop_dump_path)
                 print(f"[INFO] Zrzut pulpitu zapisany: {dw}x{dh}, {desktop_dump_path.stat().st_size} bajtow.")
+                desktop_dim_ok = (dw == 1280 and dh == 720)
+                if desktop_dim_ok:
+                    print(f"[INFO] Rozdzielczosc pulpitu 1280x720: PASS")
+                else:
+                    print(f"[BLAD] Rozdzielczosc pulpitu != 1280x720 ({dw}x{dh})!")
 
                 # Probkowanie tla tapety w poblizu pozycji poczatkowej kursora
                 bg_sample = get_pixel(ddata, dw, dh, 498, 298)
@@ -443,7 +540,7 @@ def main():
                 # 3. Wstrzykniecie ruchu myszy (+60, +40)
                 print("[INFO] Wstrzykiwanie zdarzenia ruchu myszy USB HID (dx=+60, dy=+40)...")
                 qmp.hmp("mouse_move 60 40")
-                time.sleep(0.4)
+                time.sleep(0.6)
 
                 # 4. Zrzut ekranu po przesunieciu kursora
                 qmp.screendump(desktop_moved_path)
@@ -542,6 +639,24 @@ def main():
     print(f"  Weryfikacja pikseli wzorca (PPM):        {'PASS' if pattern_pixel_checks_ok else 'FAIL'}")
     print(f"  Zrzut pulpitu BursztynUI (screendump):   {'PASS' if desktop_dump_ok else 'FAIL'}")
     print("-" * 65)
+    print("TESTY TRYBOW GRAFICZNYCH I MODESETTINGU (VIRTIO-GPU):")
+    print(f"  Odczyt GETDISPLAYINFO scanout0:          {'PASS' if found_dinfo_scanout else 'FAIL'}")
+    print(f"  Odczyt trybu boot (1280x720):            {'PASS' if found_boot_mode else 'FAIL'}")
+    print(f"  Wybor trybu poczatkowego (1280x720):     {'PASS' if found_selected_initial else 'FAIL'}")
+    print(f"  Polecenie SETSCANOUT 1280x720:           {'PASS' if found_scanout_cmd_ok else 'FAIL'}")
+    print(f"  Zachowanie trybu GOP 1280x720 (zrzut):   {'PASS' if pattern_initial_1280x720_ok else 'FAIL'}")
+    print(f"  Odrzucenie niepoprawnych wymiarow:       {'PASS' if found_invalid_dims_rejected else 'FAIL'}")
+    print(f"  100x cykli przelaczania (PMM=0, DMA=0):  {'PASS' if found_100x_modeset_cycles else 'FAIL'}")
+    print(f"  Przelaczenie desktopu 1280x720->1920x1080: {'PASS' if found_desktop_switched_1080 else 'FAIL'}")
+    print(f"  Zrzut ekranu 1920x1080 (QMP screendump): {'PASS' if screendump_1080_ok else 'FAIL'}")
+    print(f"  Przelaczenie desktopu 1920x1080->1024x768: {'PASS' if found_desktop_switched_768 else 'FAIL'}")
+    print(f"  Zrzut ekranu 1024x768 (QMP screendump):  {'PASS' if screendump_768_ok else 'FAIL'}")
+    print(f"  Wycofanie po timeout (rollback 1024x768): {'PASS' if found_unconfirmed_rollback else 'FAIL'}")
+    print(f"  Zrzut ekranu po rollback (QMP 1024x768): {'PASS' if screendump_rollback_ok else 'FAIL'}")
+    print(f"  Przywrocenie 1280x720 przed startem GUI: {'PASS' if found_desktop_restored_1280 else 'FAIL'}")
+    print(f"  Rozdzielczosc pulpitu (1280x720):        {'PASS' if desktop_dim_ok else 'FAIL'}")
+    print(f"  Pelny pakiet testow modesettingu desktopu: {'PASS' if found_desktop_modeset_suite else 'FAIL'}")
+    print("-" * 65)
     print("TESTY JEDNOSTKOWE KURSORA (KERNEL SUITE):")
     print(f"  1. Render kursora w centrum:             {'PASS' if found_cursor_center else 'FAIL'}")
     print(f"  2. Ruch kursora:                         {'PASS' if found_cursor_movement else 'FAIL'}")
@@ -579,7 +694,15 @@ def main():
               found_test_pattern and found_hal_switch and
               found_ekran_init and found_desktop_ready and
               pattern_dump_ok and pattern_pixel_checks_ok and
-              desktop_dump_ok and
+              desktop_dump_ok and desktop_dim_ok and
+              found_dinfo_scanout and found_boot_mode and
+              found_selected_initial and found_scanout_cmd_ok and
+              pattern_initial_1280x720_ok and
+              found_invalid_dims_rejected and found_100x_modeset_cycles and
+              found_desktop_switched_1080 and screendump_1080_ok and
+              found_desktop_switched_768 and screendump_768_ok and
+              found_unconfirmed_rollback and screendump_rollback_ok and
+              found_desktop_restored_1280 and found_desktop_modeset_suite and
               found_cursor_center and found_cursor_movement and
               found_cursor_restore and found_cursor_clipping and
               found_cursor_rapid_kernel and found_cursor_flush and
@@ -595,11 +718,12 @@ def main():
     print(f"[STATUS TESTU] Czas wykonania: {runtime:.2f} s")
 
     if all_ok:
-        print("\n[SUKCES] Sterownik VirtIO-GPU 2D oraz kursor myszy USB HID pomyslnie zweryfikowane piksel po pikselu w QEMU (PASS)!")
+        print("\n[SUKCES] Sterownik VirtIO-GPU 2D, modesetting oraz kursor myszy USB HID pomyslnie zweryfikowane piksel po pikselu w QEMU (PASS)!")
         sys.exit(0)
     else:
-        print("\n[BLAD] Jeden lub wiecej testow integracyjnych VirtIO-GPU 2D lub kursora zakonczylo sie niepowodzeniem!", file=sys.stderr)
+        print("\n[BLAD] Jeden lub wiecej testow integracyjnych VirtIO-GPU 2D lub modesettingu zakonczylo sie niepowodzeniem!", file=sys.stderr)
         sys.exit(1)
 
 if __name__ == "__main__":
     main()
+

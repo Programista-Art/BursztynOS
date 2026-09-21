@@ -2318,6 +2318,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
                     virtio_gpu_stress_dirty_rectangles(gpu_drv);
                     virtio_gpu_render_test_pattern(gpu_drv);
                     wypisz_log("[VIRTIO-GPU-FINAL] Finalny wzorzec testowy gotowy do weryfikacji pikseli.");
+                    hpet_czekaj_ns_boot(300000000ULL);
+                    virtio_gpu_test_runtime_modeset(gpu_drv);
                     grafika_aktywuj_virtio_gpu(gpu_drv);
                     grafika_test_kursor_suite(gpu_drv);
                 }
@@ -2457,6 +2459,10 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     tapety_inicjalizuj(g_multiboot_info_ptr);
     ekran_inicjalizuj();
     motyw_inicjalizuj();
+
+    if (tryb_testowy) {
+        ekran_test_virtio_gpu_modeset();
+    }
 
     /* ---------------------------------------------------------------------
      * Pierwszy proces Ring 3

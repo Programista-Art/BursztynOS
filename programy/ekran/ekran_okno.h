@@ -179,7 +179,8 @@ public:
         root->dodaj<Etykieta>("Monitor główny");
         backend_ = &root->dodaj<Etykieta>(
             stan_.mozliwosci.backend == EKRAN_BOCHS ? "Sterownik: Bochs VBE" :
-            stan_.mozliwosci.backend == EKRAN_GOP ? "Sterownik: UEFI GOP" : "Sterownik: VESA");
+            stan_.mozliwosci.backend == EKRAN_GOP ? "Sterownik: UEFI GOP" :
+            stan_.mozliwosci.backend == EKRAN_VIRTIO_GPU ? "Sterownik: VirtIO-GPU (runtime)" : "Sterownik: VESA");
         root->dodaj<Etykieta>("Rozdzielczość");
         tryby_ = &root->dodaj<ListaRozwijana>();
         tryby_->ustaw_preferowany_rozmiar(Rozmiar(-1, 28));

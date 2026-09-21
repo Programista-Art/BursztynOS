@@ -3914,6 +3914,39 @@ bool grafika_zmien_sprzet(const TrybEkranu&t){
     if(ekran_caps.mozna_zmienic_runtime)return bochs_ustaw_tryb(t);
     return ekran_ten_sam(t,grafika_tryb_ekranu());
 }
+void grafika_pobierz_boot_rozmiar(uint32_t* out_w, uint32_t* out_h) {
+    if (out_w) *out_w = boot_szer;
+    if (out_h) *out_h = boot_wys;
+}
+
+void grafika_ustaw_tryby_virtio_gpu() {
+    static constexpr uint32_t vg_wymiary[][2] = {
+        {800, 600},
+        {1024, 768},
+        {1280, 720},
+        {1280, 800},
+        {1366, 768},
+        {1600, 900},
+        {1920, 1080},
+        {2560, 1440}
+    };
+    ekran_liczba_trybow = 0;
+    bool boot_znaleziony = false;
+    for (const auto& wh : vg_wymiary) {
+        TrybEkranu t{wh[0], wh[1], 32, wh[0] * 4, 0, 0};
+        if (boot_szer == wh[0] && boot_wys == wh[1]) {
+            boot_znaleziony = true;
+        }
+        if (ekran_liczba_trybow < EKRAN_MAX_TRYBOW) {
+            ekran_tryby[ekran_liczba_trybow++] = t;
+        }
+    }
+    if (!boot_znaleziony && boot_szer > 0 && boot_wys > 0 && ekran_liczba_trybow < EKRAN_MAX_TRYBOW) {
+        TrybEkranu t{boot_szer, boot_wys, 32, boot_szer * 4, 0, 0};
+        ekran_tryby[ekran_liczba_trybow++] = t;
+    }
+}
+
 bool grafika_aktywuj_virtio_gpu(VirtioGpuDriver* drv) {
     if (!drv || !drv->initialized || !drv->fb_vaddr) return false;
 
@@ -3926,6 +3959,8 @@ bool grafika_aktywuj_virtio_gpu(VirtioGpuDriver* drv) {
     ekran_caps.backend = EKRAN_VIRTIO_GPU;
     ekran_caps.mozna_zmienic_runtime = 1;
     ekran_caps.mozna_wyliczyc_tryby = 1;
+
+    grafika_ustaw_tryby_virtio_gpu();
 
     aktywny_stan.szerokosc = drv->fb_width;
     aktywny_stan.wysokosc = drv->fb_height;

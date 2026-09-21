@@ -201,6 +201,7 @@ struct MockDeviceState {
     int32_t  gpu_override_len = -1;
     int32_t  gpu_override_desc_id = -1;
     uint32_t gpu_override_resp_type = 0;
+    uint32_t gpu_fail_cmd_type = 0;
     uint32_t gpu_display_w = 1280;
     uint32_t gpu_display_h = 800;
     uint32_t gpu_processed_count = 0;
@@ -269,6 +270,7 @@ struct MockDeviceState {
         gpu_override_len = -1;
         gpu_override_desc_id = -1;
         gpu_override_resp_type = 0;
+        gpu_fail_cmd_type = 0;
         gpu_display_w = 1280;
         gpu_display_h = 800;
         gpu_processed_count = 0;
@@ -892,7 +894,11 @@ void host_mmio_write16(volatile void* addr, uint16_t val) {
                                             }
                                         }
                                         std::memset(resp_hdr, 0, sizeof(VirtioGpuCtrlHdr));
-                                        resp_hdr->type = (g_mock.gpu_override_resp_type > 0) ? g_mock.gpu_override_resp_type : VIRTIO_GPU_RESP_OK_NODATA;
+                                        if (g_mock.gpu_fail_cmd_type > 0 && req_hdr->type == g_mock.gpu_fail_cmd_type) {
+                                            resp_hdr->type = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
+                                        } else {
+                                            resp_hdr->type = (g_mock.gpu_override_resp_type > 0) ? g_mock.gpu_override_resp_type : VIRTIO_GPU_RESP_OK_NODATA;
+                                        }
                                         used_len = sizeof(VirtioGpuCtrlHdr);
                                     }
                                 }
@@ -4845,6 +4851,246 @@ void test_virtio_gpu_error_responses() {
     virtio_gpu_reset_all();
 }
 
+static uint32_t g_mock_boot_w = 0;
+static uint32_t g_mock_boot_h = 0;
+
+void grafika_pobierz_boot_rozmiar(uint32_t* out_w, uint32_t* out_h) {
+    if (out_w) *out_w = g_mock_boot_w;
+    if (out_h) *out_h = g_mock_boot_h;
+}
+
+// ----------------------------------------------------------------------------
+// 108. VirtIO-GPU: Zachowanie trybu rozruchowego UEFI GOP (1280x720 zamiast 640x480)
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_boot_mode_preservation() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_gpu_device(&dev, 640, 480), "Setup mock GPU z dinfo=640x480");
+
+    // Przypadek 1: Boot mode 1280x720 (UEFI GOP) jest zachowywany zamiast 640x480
+    g_mock_boot_w = 1280;
+    g_mock_boot_h = 720;
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU z poprawnym boot mode");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(drv != nullptr, "drv != nullptr");
+    TEST_ASSERT(drv->fb_width == 1280, "fb_width == 1280 (zachowano GOP)");
+    TEST_ASSERT(drv->fb_height == 720, "fb_height == 720 (zachowano GOP)");
+    TEST_ASSERT(drv->display_width == 1280, "display_width == 1280");
+    TEST_ASSERT(drv->display_height == 720, "display_height == 720");
+
+    virtio_gpu_reset(drv);
+    virtio_gpu_reset_all();
+
+    // Przypadek 2: Boot mode niepoprawny (0x0) -> fallback do dinfo
+    g_mock_boot_w = 0;
+    g_mock_boot_h = 0;
+    TEST_ASSERT(setup_mock_gpu_device(&dev, 640, 480), "Setup mock GPU 640x480");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU z pustym boot mode");
+    drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(drv->fb_width == 640, "fb_width == 640 fallback do dinfo");
+    TEST_ASSERT(drv->fb_height == 480, "fb_height == 480 fallback do dinfo");
+
+    virtio_gpu_reset(drv);
+    virtio_gpu_reset_all();
+
+    // Przypadek 3: Boot mode za duzy (> 64 MiB) -> fallback do dinfo
+    g_mock_boot_w = 50000;
+    g_mock_boot_h = 50000;
+    TEST_ASSERT(setup_mock_gpu_device(&dev, 1024, 768), "Setup mock GPU 1024x768");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU z niepoprawnym boot mode");
+    drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(drv->fb_width == 1024, "fb_width == 1024 fallback do dinfo");
+    TEST_ASSERT(drv->fb_height == 768, "fb_height == 768 fallback do dinfo");
+
+    virtio_gpu_reset(drv);
+    virtio_gpu_reset_all();
+    g_mock_boot_w = 0;
+    g_mock_boot_h = 0;
+}
+
+// ----------------------------------------------------------------------------
+// 109. VirtIO-GPU: Dynamiczna zmiana rozdzielczosci i wycofanie zmian (rollback)
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_runtime_modeset_and_rollback() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    g_mock_boot_w = 1280;
+    g_mock_boot_h = 720;
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU z 1280x720");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(drv != nullptr, "drv != nullptr");
+    const uint32_t initial_res_id = drv->resource_id;
+
+    // Krok 1: Zmiana 1280x720 -> 1920x1080
+    TEST_ASSERT(virtio_gpu_setup_framebuffer(drv, 1920, 1080), "Zmiana na 1920x1080");
+    TEST_ASSERT(drv->fb_width == 1920 && drv->fb_height == 1080, "Geometria 1920x1080");
+    TEST_ASSERT(drv->resource_id != initial_res_id, "Nowy identyfikator zasobu");
+    TEST_ASSERT(drv->old_resource_id == initial_res_id, "Poprzedni zasob w old_resource_id");
+    TEST_ASSERT(drv->old_display_width == 1280 && drv->old_display_height == 720, "Stara geometria zachowana");
+
+    // Symulacja udanego render/flush i zwolnienia starego zasobu
+    virtio_gpu_free_stale_resource(drv);
+    TEST_ASSERT(drv->old_resource_id == 0, "old_resource_id wyzerowany po zwolnieniu");
+    TEST_ASSERT(drv->old_fb_vaddr == nullptr, "old_fb_vaddr wyzerowany");
+
+    // Krok 2: Zmiana 1920x1080 -> 1024x768
+    const uint32_t prev_id = drv->resource_id;
+    TEST_ASSERT(virtio_gpu_setup_framebuffer(drv, 1024, 768), "Zmiana na 1024x768");
+    TEST_ASSERT(drv->fb_width == 1024 && drv->fb_height == 768, "Geometria 1024x768");
+    TEST_ASSERT(drv->old_resource_id == prev_id, "Poprzedni zasob 1920x1080 w old_resource_id");
+
+    // Krok 3: Symulacja wycofania zmian (rollback) - powrot do 1920x1080
+    TEST_ASSERT(virtio_gpu_rollback_modeset(drv), "Rollback modeset");
+    TEST_ASSERT(drv->fb_width == 1920 && drv->fb_height == 1080, "Przywrocona geometria 1920x1080");
+    TEST_ASSERT(drv->resource_id == prev_id, "Przywrocony identyfikator zasobu");
+    TEST_ASSERT(drv->old_resource_id == 0, "old_resource_id wyczyszczony");
+    TEST_ASSERT(!drv->has_error, "drv->has_error == false");
+
+    // Krok 4: Odrzucenie niepoprawnych wymiarow
+    TEST_ASSERT(!virtio_gpu_setup_framebuffer(drv, 0, 0), "Odrzucenie 0x0");
+    TEST_ASSERT(!virtio_gpu_setup_framebuffer(drv, 50000, 50000), "Odrzucenie 50000x50000");
+    TEST_ASSERT(drv->fb_width == 1920 && drv->fb_height == 1080, "Stan nienaruszony");
+
+    // Krok 5: Wykonanie pelnego pakietu virtio_gpu_test_runtime_modeset
+    g_mock_boot_w = 1920;
+    g_mock_boot_h = 1080;
+    TEST_ASSERT(virtio_gpu_test_runtime_modeset(drv), "virtio_gpu_test_runtime_modeset");
+
+    TEST_ASSERT(virtio_gpu_reset(drv), "Reset urzadzenia");
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA");
+    TEST_ASSERT(g_host_fb_allocs.empty(), "Zero wyciekow FB");
+    virtio_gpu_reset_all();
+    g_mock_boot_w = 0;
+    g_mock_boot_h = 0;
+}
+
+// ----------------------------------------------------------------------------
+// 110. VirtIO-GPU: Audyt cyklu 15-sekundowego potwierdzenia, wstrzykiwania bledow i zarzadzania pamiecia
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_confirmation_lifecycle_and_injected_failures() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    g_mock_boot_w = 1280;
+    g_mock_boot_h = 720;
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU z 1280x720");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(drv != nullptr, "drv != nullptr");
+    TEST_ASSERT(drv->fb_width == 1280 && drv->fb_height == 720, "Poczatkowa geometria 1280x720");
+    TEST_ASSERT(drv->resource_id == 1, "Poczatkowy resource_id == 1");
+    TEST_ASSERT(drv->old_resource_id == 0, "Brak starego zasobu na starcie");
+    TEST_ASSERT(g_host_fb_allocs.size() == 1, "Dokladnie 1 aktywny bufor ramki");
+
+    // ------------------------------------------------------------------------
+    // SCENARIUSZ 1: Przelaczenie 1280x720 -> 1920x1080 z zatwierdzeniem (Confirm)
+    // ------------------------------------------------------------------------
+    // Krok 1a: Zmiana trybu w sterowniku (setup_framebuffer)
+    TEST_ASSERT(virtio_gpu_setup_framebuffer(drv, 1920, 1080), "Modeset 1280x720 -> 1920x1080");
+    // W trakcie zmiany (przed pierwszym renderem/flushem):
+    TEST_ASSERT(drv->resource_id == 2, "Aktywny nowy zasob 2 (1920x1080)");
+    TEST_ASSERT(drv->old_resource_id == 1, "Poprzedni zasob 1 (1280x720) w buforze przejsciowym");
+    TEST_ASSERT(g_host_fb_allocs.size() == 2, "Tymczasowo 2 aktywne bufory ramki w trakcie atomowej zmiany");
+
+    // Krok 1b: Po pierwszym renderze i flushu nastepuje zwolnienie starego zasobu
+    virtio_gpu_free_stale_resource(drv);
+    TEST_ASSERT(drv->old_resource_id == 0, "old_resource_id wyczyszczony do 0");
+    TEST_ASSERT(drv->old_fb_vaddr == nullptr, "old_fb_vaddr == nullptr");
+    TEST_ASSERT(g_host_fb_allocs.size() == 1, "W stanie 15s oczekiwania istnieje dokladnie 1 bufor VirtIO-GPU");
+
+    // Krok 1c: Uzytkownik klika 'Zachowaj' (potwierdzenie):
+    // Sprawdzenie odpornosci na podwojne zwolnienie (idempotentnosc free_stale_resource)
+    virtio_gpu_free_stale_resource(drv);
+    TEST_ASSERT(drv->old_resource_id == 0, "Brak double-free po potwierdzeniu");
+    TEST_ASSERT(g_host_fb_allocs.size() == 1, "Nadal dokladnie 1 aktywny bufor ramki");
+
+    // ------------------------------------------------------------------------
+    // SCENARIUSZ 2: Przelaczenie 1920x1080 -> 1024x768 z wycofaniem po timeout (Rollback)
+    // ------------------------------------------------------------------------
+    // Krok 2a: Przelaczenie na 1024x768
+    TEST_ASSERT(virtio_gpu_setup_framebuffer(drv, 1024, 768), "Modeset 1920x1080 -> 1024x768");
+    TEST_ASSERT(drv->resource_id == 1, "Nowy zasob 1 (1024x768)");
+    TEST_ASSERT(drv->old_resource_id == 2, "Stary zasob 2 (1920x1080)");
+    virtio_gpu_free_stale_resource(drv);
+    TEST_ASSERT(g_host_fb_allocs.size() == 1, "W stanie 15s oczekiwania: dokladnie 1 bufor");
+
+    // Krok 2b: Uplywa 15 sekund bez potwierdzenia -> sciezka rollback w ekran.cpp odtwarza poprzedni tryb
+    // Odtwarzanie 1920x1080:
+    TEST_ASSERT(virtio_gpu_setup_framebuffer(drv, 1920, 1080), "Rollback: ponowne utworzenie 1920x1080");
+    TEST_ASSERT(drv->resource_id == 2, "Przywrocony zasob 2 (1920x1080)");
+    TEST_ASSERT(drv->old_resource_id == 1, "Tymczasowy niepotwierdzony zasob 1 (1024x768) do zwolnienia");
+    virtio_gpu_free_stale_resource(drv);
+    TEST_ASSERT(drv->old_resource_id == 0, "old_resource_id wyzerowany");
+    TEST_ASSERT(g_host_fb_allocs.size() == 1, "Po rollbacku powrot do dokladnie 1 aktywnego bufora");
+    TEST_ASSERT(drv->fb_width == 1920 && drv->fb_height == 1080, "Geometria 1920x1080 poprawnie odzyskana");
+
+    // ------------------------------------------------------------------------
+    // SCENARIUSZ 3: Powtarzalne cykle Confirm oraz Rollback (20 iteracji)
+    // ------------------------------------------------------------------------
+    for (int i = 0; i < 20; ++i) {
+        if (i % 2 == 0) {
+            // Cykl confirm
+            TEST_ASSERT(virtio_gpu_setup_framebuffer(drv, 1280, 720), "Cykl confirm: switch 1280x720");
+            virtio_gpu_free_stale_resource(drv);
+            TEST_ASSERT(g_host_fb_allocs.size() == 1, "Cykl confirm: 1 bufor");
+        } else {
+            // Cykl rollback
+            TEST_ASSERT(virtio_gpu_setup_framebuffer(drv, 1024, 768), "Cykl rollback: switch 1024x768");
+            virtio_gpu_free_stale_resource(drv);
+            TEST_ASSERT(g_host_fb_allocs.size() == 1, "Cykl rollback: 1 bufor");
+            // Wycofanie powrotne do 1280x720
+            TEST_ASSERT(virtio_gpu_setup_framebuffer(drv, 1280, 720), "Cykl rollback: revert 1280x720");
+            virtio_gpu_free_stale_resource(drv);
+            TEST_ASSERT(g_host_fb_allocs.size() == 1, "Cykl rollback: 1 bufor po revert");
+        }
+    }
+    TEST_ASSERT(g_host_fb_allocs.size() == 1, "Po 20 cyklach dokladnie 1 bufor ramki");
+
+    // ------------------------------------------------------------------------
+    // SCENARIUSZ 4: Wstrzykiwanie bledow w trakcie procedury modesettingu
+    // ------------------------------------------------------------------------
+    const uint32_t baseline_res = drv->resource_id;
+
+    // 4a. Blad w trakcie RESOURCE_CREATE_2D
+    g_mock.gpu_fail_cmd_type = VIRTIO_GPU_CMD_RESOURCE_CREATE_2D;
+    TEST_ASSERT(!virtio_gpu_setup_framebuffer(drv, 2560, 1440), "Odrzucenie przy bledzie RESOURCE_CREATE_2D");
+    g_mock.gpu_fail_cmd_type = 0;
+    TEST_ASSERT(drv->resource_id == baseline_res, "Zasob poczatkowy nienaruszony");
+    TEST_ASSERT(drv->old_resource_id == 0, "Brak starego zasobu w buforze przejsciowym");
+    TEST_ASSERT(g_host_fb_allocs.size() == 1, "Zero wyciekow FB po odrzuceniu create_2d");
+
+    // 4b. Blad w trakcie RESOURCE_ATTACH_BACKING
+    g_mock.gpu_fail_cmd_type = VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING;
+    TEST_ASSERT(!virtio_gpu_setup_framebuffer(drv, 2560, 1440), "Odrzucenie przy bledzie ATTACH_BACKING");
+    g_mock.gpu_fail_cmd_type = 0;
+    TEST_ASSERT(drv->resource_id == baseline_res, "Zasob poczatkowy nienaruszony");
+    TEST_ASSERT(drv->old_resource_id == 0, "Brak starego zasobu w buforze przejsciowym");
+    TEST_ASSERT(g_host_fb_allocs.size() == 1, "Zero wyciekow FB po odrzuceniu attach_backing");
+
+    // 4c. Blad w trakcie SETSCANOUT (mid-transition)
+    g_mock.gpu_fail_cmd_type = VIRTIO_GPU_CMD_SET_SCANOUT;
+    TEST_ASSERT(!virtio_gpu_setup_framebuffer(drv, 2560, 1440), "Odrzucenie przy bledzie SETSCANOUT");
+    g_mock.gpu_fail_cmd_type = 0;
+    TEST_ASSERT(drv->resource_id == baseline_res, "Zasob poczatkowy nienaruszony po nieudanym scanout");
+    TEST_ASSERT(drv->old_resource_id == 0, "Brak starego zasobu w buforze przejsciowym");
+    TEST_ASSERT(g_host_fb_allocs.size() == 1, "Zero wyciekow FB po nieudanym SETSCANOUT");
+
+    // Weryfikacja ze istniejacy bufor nadal dziala poprawnie po odrzuconych probach
+    TEST_ASSERT(virtio_gpu_cmd_transfer_to_host_2d(drv, drv->resource_id, 0, 0, 10, 10), "Transfer po awarii OK");
+    TEST_ASSERT(virtio_gpu_cmd_resource_flush(drv, drv->resource_id, 0, 0, 10, 10), "Flush po awarii OK");
+
+    TEST_ASSERT(virtio_gpu_reset(drv), "Reset urzadzenia");
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA po pelnym audycie");
+    TEST_ASSERT(g_host_fb_allocs.empty(), "Zero wyciekow FB po pelnym audycie");
+    virtio_gpu_reset_all();
+    g_mock_boot_w = 0;
+    g_mock_boot_h = 0;
+}
+
+
 
 // ============================================================================
 // MOCK PODSYSTEMOW GRAFIKI, KLAWIATURY I INPUT DLA VIRTIO-INPUT
@@ -6472,6 +6718,9 @@ int main() {
     RUN_TEST(test_virtio_gpu_noncontiguous_backing);
     RUN_TEST(test_virtio_gpu_used_len_validation);
     RUN_TEST(test_virtio_gpu_error_responses);
+    RUN_TEST(test_virtio_gpu_boot_mode_preservation);
+    RUN_TEST(test_virtio_gpu_runtime_modeset_and_rollback);
+    RUN_TEST(test_virtio_gpu_confirmation_lifecycle_and_injected_failures);
 
     // Testy VirtIO-INPUT i InputDevice
     RUN_TEST(test_virtio_input_config_discovery);

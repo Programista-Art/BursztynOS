@@ -251,4 +251,6 @@ struct VirtioGpuDriver;
 bool grafika_aktywuj_virtio_gpu(VirtioGpuDriver* drv);
 bool grafika_przywroc_boot_backend();
 bool grafika_test_kursor_suite(VirtioGpuDriver* gpu_drv);
+void grafika_pobierz_boot_rozmiar(uint32_t* out_w, uint32_t* out_h);
+void grafika_ustaw_tryby_virtio_gpu();
 

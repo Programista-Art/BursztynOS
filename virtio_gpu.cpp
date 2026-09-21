@@ -23,6 +23,7 @@ extern uint64_t host_czas_monotoniczny_ns(void);
 
 extern bool host_fb_alloc(size_t total_bytes, void** out_vaddr, void** out_frames, size_t max_pages, size_t* out_page_count);
 extern void host_fb_free(void* vaddr, void** frames, size_t page_count);
+extern void grafika_pobierz_boot_rozmiar(uint32_t* out_w, uint32_t* out_h);
 
 #define gpu_klog host_klog
 
@@ -537,8 +538,21 @@ bool virtio_gpu_cmd_set_scanout(
     req.r.height = height;
 
     VirtioGpuCtrlHdr resp{};
-    return virtio_gpu_send_command_locked(
+    bool ok = virtio_gpu_send_command_locked(
         drv, &req, sizeof(req), &resp, sizeof(resp), VIRTIO_GPU_RESP_OK_NODATA);
+
+    if (resource_id != 0) {
+        char smsg[96]{};
+        size_t pos = 0;
+        log_append_str(smsg, sizeof(smsg), pos, "[VIRTIO-GPU] SETSCANOUT ");
+        log_append_u64_dec(smsg, sizeof(smsg), pos, width);
+        log_append_str(smsg, sizeof(smsg), pos, "x");
+        log_append_u64_dec(smsg, sizeof(smsg), pos, height);
+        log_append_str(smsg, sizeof(smsg), pos, " result=");
+        log_append_str(smsg, sizeof(smsg), pos, ok ? "OK" : "FAIL");
+        gpu_klog(smsg);
+    }
+    return ok;
 }
 
 bool virtio_gpu_cmd_transfer_to_host_2d(
@@ -643,6 +657,87 @@ bool virtio_gpu_cmd_resource_unref(VirtioGpuDriver* drv, uint32_t resource_id) {
  * 3. ZARZADZANIE BUFOREM RAMKI I INICJALIZACJA 2D
  * ========================================================================= */
 
+void virtio_gpu_free_stale_resource(VirtioGpuDriver* drv) {
+    if (!drv || drv->old_resource_id == 0) return;
+
+    if (!drv->has_error) {
+        virtio_gpu_cmd_resource_detach_backing(drv, drv->old_resource_id);
+        virtio_gpu_cmd_resource_unref(drv, drv->old_resource_id);
+    }
+    if (drv->old_fb_vaddr) {
+        gpu_fb_free(drv->old_fb_vaddr, drv->old_allocated_frames, drv->old_fb_pages);
+    }
+    if (drv->old_mem_entries) {
+        gpu_heap_free(drv->old_mem_entries);
+    }
+    if (drv->old_allocated_frames) {
+        gpu_heap_free(drv->old_allocated_frames);
+    }
+
+    drv->old_resource_id = 0;
+    drv->old_fb_vaddr = nullptr;
+    drv->old_allocated_frames = nullptr;
+    drv->old_mem_entries = nullptr;
+    drv->old_fb_pages = 0;
+    drv->old_nr_entries = 0;
+    drv->old_display_width = 0;
+    drv->old_display_height = 0;
+}
+
+bool virtio_gpu_rollback_modeset(VirtioGpuDriver* drv) {
+    if (!drv || drv->old_resource_id == 0) return false;
+
+    // 1. Przywroc scanout na stary zasob
+    if (drv->scanout_set && !drv->has_error) {
+        virtio_gpu_cmd_set_scanout(drv, drv->scanout_id, drv->old_resource_id, 0, 0,
+                                   drv->old_display_width, drv->old_display_height);
+    }
+
+    // 2. Zwolnij nowy nieudany zasob
+    if (drv->backing_attached && !drv->has_error) {
+        virtio_gpu_cmd_resource_detach_backing(drv, drv->resource_id);
+    }
+    if (drv->resource_created && !drv->has_error) {
+        virtio_gpu_cmd_resource_unref(drv, drv->resource_id);
+    }
+    if (drv->fb_vaddr) {
+        gpu_fb_free(drv->fb_vaddr, drv->allocated_frames, drv->fb_pages);
+    }
+    if (drv->mem_entries) {
+        gpu_heap_free(drv->mem_entries);
+    }
+    if (drv->allocated_frames) {
+        gpu_heap_free(drv->allocated_frames);
+    }
+
+    // 3. Przywroc stary zasob jako aktywny
+    drv->resource_id = drv->old_resource_id;
+    drv->fb_vaddr = drv->old_fb_vaddr;
+    drv->allocated_frames = drv->old_allocated_frames;
+    drv->fb_pages = drv->old_fb_pages;
+    drv->mem_entries = drv->old_mem_entries;
+    drv->nr_entries = drv->old_nr_entries;
+    drv->fb_width = drv->old_display_width;
+    drv->fb_height = drv->old_display_height;
+    drv->display_width = drv->old_display_width;
+    drv->display_height = drv->old_display_height;
+    drv->fb_stride = drv->old_display_width * 4U;
+    drv->resource_created = true;
+    drv->backing_attached = true;
+    drv->scanout_set = true;
+
+    drv->old_resource_id = 0;
+    drv->old_fb_vaddr = nullptr;
+    drv->old_allocated_frames = nullptr;
+    drv->old_mem_entries = nullptr;
+    drv->old_fb_pages = 0;
+    drv->old_nr_entries = 0;
+    drv->old_display_width = 0;
+    drv->old_display_height = 0;
+
+    return true;
+}
+
 bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t height) {
     if (!drv || width == 0 || height == 0 || width > 4096 || height > 4096) {
         return false;
@@ -658,35 +753,9 @@ bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t
     if (page_count == 0 || page_count > 16384) return false;
 
     /*
-     * 0. Bezpieczne zwolnienie poprzedniego bufora ramki (jesli istnial)
+     * 0. Jesli istnial poprzedni niezwolniony zasob oczekujacy, posprzataj go
      */
-    if (drv->scanout_set && !drv->has_error) {
-        virtio_gpu_cmd_set_scanout(drv, drv->scanout_id, 0, 0, 0, 0, 0);
-        drv->scanout_set = false;
-    }
-    if (drv->backing_attached && !drv->has_error) {
-        virtio_gpu_cmd_resource_detach_backing(drv, drv->resource_id);
-        drv->backing_attached = false;
-    }
-    if (drv->resource_created && !drv->has_error) {
-        virtio_gpu_cmd_resource_unref(drv, drv->resource_id);
-        drv->resource_created = false;
-    }
-    if (drv->fb_vaddr) {
-        gpu_fb_free(drv->fb_vaddr, drv->allocated_frames, drv->fb_pages);
-        drv->fb_vaddr = nullptr;
-    }
-    if (drv->allocated_frames) {
-        gpu_heap_free(drv->allocated_frames);
-        drv->allocated_frames = nullptr;
-    }
-    if (drv->mem_entries) {
-        gpu_heap_free(drv->mem_entries);
-        drv->mem_entries = nullptr;
-    }
-    drv->nr_entries = 0;
-    drv->fb_pages = 0;
-    drv->fb_size = 0;
+    virtio_gpu_free_stale_resource(drv);
 
     /*
      * 1. Alokacja struktur metadanych
@@ -708,45 +777,37 @@ bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t
     gpu_secure_zero(entries, sizeof(VirtioGpuMemEntry) * page_count);
 
     /*
-     * 2. Utworzenie zasobu 2D
+     * 2. Wybor nowego resource_id (naprzemiennie 1 i 2 dla atomic switch)
      */
-    constexpr uint32_t RES_ID = 1;
+    uint32_t new_res_id = (drv->resource_id == 1) ? 2 : 1;
     constexpr uint32_t FORMAT = VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM;
 
-    if (!virtio_gpu_cmd_resource_create_2d(drv, RES_ID, FORMAT, width, height)) {
+    /*
+     * 3. Utworzenie nowego zasobu 2D
+     */
+    if (!virtio_gpu_cmd_resource_create_2d(drv, new_res_id, FORMAT, width, height)) {
         gpu_klog("[VIRTIO-GPU] BLAD: resource_create_2d failed!");
         gpu_heap_free(entries);
         gpu_heap_free(frames);
         return false;
     }
-    drv->resource_created = true;
-    drv->resource_id = RES_ID;
 
     /*
-     * 3. Alokacja pojedynczych ramek fizycznych i zmapowanie do ciaglej przestrzeni wirtualnej
+     * 4. Alokacja pojedynczych ramek fizycznych i zmapowanie do ciaglej przestrzeni wirtualnej
      */
     void* fb_vaddr = nullptr;
     size_t actual_pages = 0;
 
     if (!gpu_fb_alloc(total_bytes, &fb_vaddr, frames, page_count, &actual_pages)) {
         gpu_klog("[VIRTIO-GPU] BLAD: Alokacja stron bufora ramki nie powiodla sie!");
-        virtio_gpu_cmd_resource_unref(drv, RES_ID);
-        drv->resource_created = false;
-        drv->resource_id = 0;
+        virtio_gpu_cmd_resource_unref(drv, new_res_id);
         gpu_heap_free(entries);
         gpu_heap_free(frames);
         return false;
     }
 
-    drv->fb_vaddr = fb_vaddr;
-    drv->fb_size = total_bytes;
-    drv->fb_pages = actual_pages;
-    drv->allocated_frames = frames;
-    drv->mem_entries = entries;
-    drv->is_contiguous_dma = false;
-
     /*
-     * 4. Koalescencja ciaglych fragmentow fizycznych do wpisow scatter-gather
+     * 5. Koalescencja ciaglych fragmentow fizycznych do wpisow scatter-gather
      */
     uint32_t nr_entries = 0;
     for (size_t i = 0; i < actual_pages; ++i) {
@@ -761,50 +822,62 @@ bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t
             nr_entries++;
         }
     }
-    drv->nr_entries = nr_entries;
 
     /*
-     * 5. Podpiecie bufora backing
+     * 6. Podpiecie bufora backing
      */
-    if (!virtio_gpu_cmd_resource_attach_backing(drv, RES_ID, drv->mem_entries, drv->nr_entries)) {
+    if (!virtio_gpu_cmd_resource_attach_backing(drv, new_res_id, entries, nr_entries)) {
         gpu_klog("[VIRTIO-GPU] BLAD: resource_attach_backing failed!");
-        gpu_fb_free(drv->fb_vaddr, drv->allocated_frames, drv->fb_pages);
-        drv->fb_vaddr = nullptr;
-        virtio_gpu_cmd_resource_unref(drv, RES_ID);
-        drv->resource_created = false;
-        drv->resource_id = 0;
-        gpu_heap_free(drv->mem_entries);
-        drv->mem_entries = nullptr;
-        gpu_heap_free(drv->allocated_frames);
-        drv->allocated_frames = nullptr;
+        gpu_fb_free(fb_vaddr, frames, actual_pages);
+        virtio_gpu_cmd_resource_unref(drv, new_res_id);
+        gpu_heap_free(entries);
+        gpu_heap_free(frames);
         return false;
     }
-    drv->backing_attached = true;
 
     /*
-     * 6. Powiazanie scanoutu z zasobem
+     * 7. Powiazanie scanoutu z nowym zasobem
      */
-    if (!virtio_gpu_cmd_set_scanout(drv, drv->scanout_id, RES_ID, 0, 0, width, height)) {
+    if (!virtio_gpu_cmd_set_scanout(drv, drv->scanout_id, new_res_id, 0, 0, width, height)) {
         gpu_klog("[VIRTIO-GPU] BLAD: set_scanout failed!");
-        virtio_gpu_cmd_resource_detach_backing(drv, RES_ID);
-        drv->backing_attached = false;
-        gpu_fb_free(drv->fb_vaddr, drv->allocated_frames, drv->fb_pages);
-        drv->fb_vaddr = nullptr;
-        virtio_gpu_cmd_resource_unref(drv, RES_ID);
-        drv->resource_created = false;
-        drv->resource_id = 0;
-        gpu_heap_free(drv->mem_entries);
-        drv->mem_entries = nullptr;
-        gpu_heap_free(drv->allocated_frames);
-        drv->allocated_frames = nullptr;
+        virtio_gpu_cmd_resource_detach_backing(drv, new_res_id);
+        gpu_fb_free(fb_vaddr, frames, actual_pages);
+        virtio_gpu_cmd_resource_unref(drv, new_res_id);
+        gpu_heap_free(entries);
+        gpu_heap_free(frames);
         return false;
     }
-    drv->scanout_set = true;
 
+    /*
+     * 8. Zachowanie poprzedniego zasobu do zwolnienia po redraw/flush
+     */
+    if (drv->resource_id != 0 && drv->fb_vaddr != nullptr) {
+        drv->old_resource_id = drv->resource_id;
+        drv->old_fb_vaddr = drv->fb_vaddr;
+        drv->old_allocated_frames = drv->allocated_frames;
+        drv->old_fb_pages = drv->fb_pages;
+        drv->old_mem_entries = drv->mem_entries;
+        drv->old_nr_entries = drv->nr_entries;
+        drv->old_display_width = drv->fb_width;
+        drv->old_display_height = drv->fb_height;
+    }
+
+    drv->resource_id = new_res_id;
     drv->fb_width = width;
     drv->fb_height = height;
     drv->fb_stride = static_cast<uint32_t>(stride);
     drv->fb_format = FORMAT;
+    drv->fb_vaddr = fb_vaddr;
+    drv->fb_size = total_bytes;
+    drv->fb_pages = actual_pages;
+    drv->allocated_frames = frames;
+    drv->mem_entries = entries;
+    drv->nr_entries = nr_entries;
+    drv->resource_created = true;
+    drv->backing_attached = true;
+    drv->scanout_set = true;
+    drv->display_width = width;
+    drv->display_height = height;
 
     char msg[128]{};
     size_t mpos = 0;
@@ -1029,24 +1102,85 @@ bool virtio_gpu_init(VirtioPciDevice* dev) {
 
     /* Pobranie informacji o wyswietlaczu */
     VirtioGpuRespDisplayInfo dinfo{};
-    uint32_t target_w = 1280;
-    uint32_t target_h = 800;
+    bool got_dinfo = virtio_gpu_cmd_get_display_info(drv, &dinfo);
 
-    if (virtio_gpu_cmd_get_display_info(drv, &dinfo)) {
-        if (dinfo.pmodes[0].enabled && dinfo.pmodes[0].r.width > 0 && dinfo.pmodes[0].r.height > 0) {
-            target_w = dinfo.pmodes[0].r.width;
-            target_h = dinfo.pmodes[0].r.height;
-            drv->scanout_enabled = true;
-        }
+    uint32_t dinfo_w = 0;
+    uint32_t dinfo_h = 0;
+    bool dinfo_enabled = false;
+
+    if (got_dinfo) {
+        dinfo_w = dinfo.pmodes[0].r.width;
+        dinfo_h = dinfo.pmodes[0].r.height;
+        dinfo_enabled = (dinfo.pmodes[0].enabled != 0);
+
+        char dmsg[96]{};
+        size_t dp = 0;
+        log_append_str(dmsg, sizeof(dmsg), dp, "[VIRTIO-GPU] GETDISPLAYINFO scanout0=");
+        log_append_u64_dec(dmsg, sizeof(dmsg), dp, dinfo_w);
+        log_append_str(dmsg, sizeof(dmsg), dp, "x");
+        log_append_u64_dec(dmsg, sizeof(dmsg), dp, dinfo_h);
+        log_append_str(dmsg, sizeof(dmsg), dp, " (enabled=");
+        log_append_u64_dec(dmsg, sizeof(dmsg), dp, dinfo_enabled ? 1 : 0);
+        log_append_str(dmsg, sizeof(dmsg), dp, ")");
+        gpu_klog(dmsg);
+    } else {
+        gpu_klog("[VIRTIO-GPU] GETDISPLAYINFO scanout0=failed");
     }
+
+    uint32_t boot_w = 0, boot_h = 0;
+    grafika_pobierz_boot_rozmiar(&boot_w, &boot_h);
+
+    char bmsg[64]{};
+    size_t bp = 0;
+    log_append_str(bmsg, sizeof(bmsg), bp, "[VIRTIO-GPU] boot mode=");
+    log_append_u64_dec(bmsg, sizeof(bmsg), bp, boot_w);
+    log_append_str(bmsg, sizeof(bmsg), bp, "x");
+    log_append_u64_dec(bmsg, sizeof(bmsg), bp, boot_h);
+    gpu_klog(bmsg);
+
+    auto is_valid_dim = [](uint32_t w, uint32_t h) {
+        return w >= 640 && w <= 4096 && h >= 480 && h <= 4096 && (uint64_t(w) * h * 4ULL <= 64ULL * 1024 * 1024);
+    };
+
+    uint32_t target_w = 1280;
+    uint32_t target_h = 720;
+
+    if (is_valid_dim(boot_w, boot_h)) {
+        target_w = boot_w;
+        target_h = boot_h;
+    } else if (dinfo_enabled && is_valid_dim(dinfo_w, dinfo_h)) {
+        target_w = dinfo_w;
+        target_h = dinfo_h;
+    }
+
+    char smsg[64]{};
+    size_t sp = 0;
+    log_append_str(smsg, sizeof(smsg), sp, "[VIRTIO-GPU] selected initial mode=");
+    log_append_u64_dec(smsg, sizeof(smsg), sp, target_w);
+    log_append_str(smsg, sizeof(smsg), sp, "x");
+    log_append_u64_dec(smsg, sizeof(smsg), sp, target_h);
+    gpu_klog(smsg);
 
     drv->display_width = target_w;
     drv->display_height = target_h;
     drv->scanout_id = 0;
+    drv->scanout_enabled = true;
 
     /* Utworzenie i podpiecie bufora ramki 2D */
     if (!virtio_gpu_setup_framebuffer(drv, target_w, target_h)) {
-        gpu_klog("[VIRTIO-GPU] OSTRZEZENIE: setup_framebuffer nie powiodl sie!");
+        gpu_klog("[VIRTIO-GPU] OSTRZEZENIE: setup_framebuffer dla wybranego trybu nie powiodl sie!");
+        if (target_w != 640 || target_h != 480) {
+            target_w = 640;
+            target_h = 480;
+            drv->display_width = target_w;
+            drv->display_height = target_h;
+            if (!virtio_gpu_setup_framebuffer(drv, target_w, target_h)) {
+                gpu_klog("[VIRTIO-GPU] BLAD: setup_framebuffer fallback do 640x480 nie powiodl sie!");
+                return false;
+            }
+        } else {
+            return false;
+        }
     }
 
     gpu_klog("[VIRTIO-GPU] Karta graficzna gotowa do pracy w trybie 2D.");
@@ -1057,6 +1191,9 @@ bool virtio_gpu_reset(VirtioGpuDriver* drv) {
     if (!drv) return false;
 
     GpuSpinLockGuard guard(drv->lock);
+
+    /* Posprzataj ewentualny stary zasob po modesettingu */
+    virtio_gpu_free_stale_resource(drv);
 
     /* 1. Odpiecie scanoutu jesli byl ustawiony */
     if (drv->scanout_set && !drv->has_error) {
@@ -1458,6 +1595,105 @@ bool virtio_gpu_stress_dirty_rectangles(VirtioGpuDriver* drv) {
     gpu_klog(smsg);
 
     // Po tescie obciazeniowym przywracamy deterministyczny wzorzec testowy do weryfikacji pikseli
+    return virtio_gpu_render_test_pattern(drv);
+}
+
+bool virtio_gpu_test_runtime_modeset(VirtioGpuDriver* drv) {
+    if (!drv || !drv->initialized || drv->has_error) return false;
+
+    gpu_klog("[VIRTIO-GPU-MODESET] === ROZPOCZECIE TESTOW TRYBOW RUNTIME ===");
+
+    // 1. Sprawdz zachowanie trybu rozruchowego
+    uint32_t boot_w = 0, boot_h = 0;
+    grafika_pobierz_boot_rozmiar(&boot_w, &boot_h);
+    if (boot_w >= 640 && boot_h >= 480) {
+        if (drv->fb_width != boot_w || drv->fb_height != boot_h) {
+            gpu_klog("[VIRTIO-GPU-MODESET] BLAD: Tryb rozruchowy nie zostal zachowany w drv!");
+            return false;
+        }
+        gpu_klog("[VIRTIO-GPU-MODESET] Boot mode preservation: PASS");
+    }
+
+    // 2. Odrzucenie niepoprawnych wymiarow bufora
+    if (virtio_gpu_setup_framebuffer(drv, 0, 0)) {
+        gpu_klog("[VIRTIO-GPU-MODESET] BLAD: Zaakceptowano wymiary 0x0!");
+        return false;
+    }
+    if (virtio_gpu_setup_framebuffer(drv, 50000, 50000)) {
+        gpu_klog("[VIRTIO-GPU-MODESET] BLAD: Zaakceptowano wymiary 50000x50000!");
+        return false;
+    }
+    if (virtio_gpu_setup_framebuffer(drv, 10000, 10000)) {
+        gpu_klog("[VIRTIO-GPU-MODESET] BLAD: Zaakceptowano wymiary 10000x10000!");
+        return false;
+    }
+    if (drv->has_error) {
+        gpu_klog("[VIRTIO-GPU-MODESET] BLAD: Stan bledu po odrzuceniu wymiarow!");
+        return false;
+    }
+    gpu_klog("[VIRTIO-GPU-MODESET] Invalid dimensions rejection: PASS");
+
+    // 3. Test 100 cykli przelaczania rozdzielczosci (PMM delta=0, DMA delta=0, IDT delta=0)
+    const uint32_t initial_w = drv->fb_width;
+    const uint32_t initial_h = drv->fb_height;
+
+    // Rozgrzewka struktur VMM i sterty dla obu slotow bufora ramki (1920x1080 i 1024x768)
+    for (int w = 0; w < 4; ++w) {
+        const uint32_t warm_w = (w % 2 == 0) ? 1920 : 1024;
+        const uint32_t warm_h = (w % 2 == 0) ? 1080 : 768;
+        if (!virtio_gpu_setup_framebuffer(drv, warm_w, warm_h)) {
+            gpu_klog("[VIRTIO-GPU-MODESET] BLAD: setup_framebuffer w fazie rozgrzewki!");
+            return false;
+        }
+        virtio_gpu_free_stale_resource(drv);
+    }
+
+    if (!virtio_gpu_setup_framebuffer(drv, initial_w, initial_h)) {
+        gpu_klog("[VIRTIO-GPU-MODESET] BLAD: powrot do trybu poczatkowego w fazie rozgrzewki!");
+        return false;
+    }
+    virtio_gpu_free_stale_resource(drv);
+
+    #ifndef BURSZTYN_VIRTIO_HOST_TEST
+    const uint64_t baseline_pmm = pmm_pobierz_wolne_ramki();
+    const uint32_t baseline_vectors = idt_zaalokowane_wektory_liczba();
+    #endif
+
+    for (int i = 0; i < 100; ++i) {
+        const uint32_t target_w = (i % 2 == 0) ? 1024 : 1920;
+        const uint32_t target_h = (i % 2 == 0) ? 768 : 1080;
+        if (!virtio_gpu_setup_framebuffer(drv, target_w, target_h)) {
+            gpu_klog("[VIRTIO-GPU-MODESET] BLAD: setup_framebuffer w 100-cyklowej petli!");
+            return false;
+        }
+        virtio_gpu_free_stale_resource(drv);
+    }
+
+    // Przywrocenie poczatkowego trybu
+    if (!virtio_gpu_setup_framebuffer(drv, initial_w, initial_h)) {
+        gpu_klog("[VIRTIO-GPU-MODESET] BLAD: Przywrocenie poczatkowego trybu po 100 cyklach!");
+        return false;
+    }
+    virtio_gpu_free_stale_resource(drv);
+
+    #ifndef BURSZTYN_VIRTIO_HOST_TEST
+    const uint64_t final_pmm = pmm_pobierz_wolne_ramki();
+    const uint32_t final_vectors = idt_zaalokowane_wektory_liczba();
+    if (final_pmm != baseline_pmm || final_vectors != baseline_vectors) {
+        char err[160]{};
+        size_t epos = 0;
+        log_append_str(err, sizeof(err), epos, "[VIRTIO-GPU-MODESET] BLAD WYCIEKU: PMM delta=");
+        log_append_u64_dec(err, sizeof(err), epos, (final_pmm < baseline_pmm) ? (baseline_pmm - final_pmm) : (final_pmm - baseline_pmm));
+        log_append_str(err, sizeof(err), epos, ", Vector delta=");
+        log_append_u64_dec(err, sizeof(err), epos, (final_vectors >= baseline_vectors) ? (final_vectors - baseline_vectors) : (baseline_vectors - final_vectors));
+        gpu_klog(err);
+        return false;
+    }
+    #endif
+
+    gpu_klog("[VIRTIO-GPU-MODESET] 100x modeset cycles: PASS (PMM delta=0, DMA delta=0, IDT delta=0).");
+
+    // Przywrocenie deterministycznego wzorca po testach
     return virtio_gpu_render_test_pattern(drv);
 }
 

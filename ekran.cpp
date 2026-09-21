@@ -9,6 +9,7 @@
 #include "pamiec.h"
 #include "heap.h"
 #include "sterowniki/czas/hpet.h"
+#include "virtio_gpu.h"
 extern "C" void zablokuj_ekran();
 extern "C" void odblokuj_ekran();
 namespace {
@@ -77,7 +78,15 @@ bool cofnij(){
     tx.oczekuje=false;++cofniecia;
     odblokuj_ekran();
     if(tx.fizyczna)grafika_zwolnij_stan(&zwolnij);
-    powiadom();return true;
+    powiadom();
+    zablokuj_ekran();
+    skladacz_obrazu_zloz_klatke();
+    odblokuj_ekran();
+    if(grafika_mozliwosci_ekranu().backend==EKRAN_VIRTIO_GPU){
+        VirtioGpuDriver* gdrv = virtio_gpu_get_driver(0);
+        if(gdrv) virtio_gpu_free_stale_resource(gdrv);
+    }
+    return true;
 }
 uint32_t zastosuj(const TrybEkranu&t,uint32_t s,int owner,bool persist=true,
                   bool wymagaj_potwierdzenia=true){
@@ -99,6 +108,10 @@ uint32_t zastosuj(const TrybEkranu&t,uint32_t s,int owner,bool persist=true,
     }
     zablokuj_ekran();
     if(fizyczna&&!grafika_zmien_sprzet(t)){
+        if(grafika_mozliwosci_ekranu().backend==EKRAN_VIRTIO_GPU){
+            VirtioGpuDriver* gdrv = virtio_gpu_get_driver(0);
+            if(gdrv) virtio_gpu_rollback_modeset(gdrv);
+        }
         const bool restored=grafika_zmien_sprzet(tx.stary.tryb);
         skladacz_zakoncz_zmiane_ekranu(&tx.warstwy,false);
         odblokuj_ekran();
@@ -109,6 +122,13 @@ uint32_t zastosuj(const TrybEkranu&t,uint32_t s,int owner,bool persist=true,
     skala=s;bws_aktualizuj_ekran(s);skladacz_zastosuj_ekran(&tx.warstwy);++zmiany;
     odblokuj_ekran();
     powiadom();
+    zablokuj_ekran();
+    skladacz_obrazu_zloz_klatke();
+    odblokuj_ekran();
+    if(grafika_mozliwosci_ekranu().backend==EKRAN_VIRTIO_GPU){
+        VirtioGpuDriver* gdrv = virtio_gpu_get_driver(0);
+        if(gdrv) virtio_gpu_free_stale_resource(gdrv);
+    }
     if(fizyczna&&wymagaj_potwierdzenia){
         tx.oczekuje=true;tx.deadline=teraz()+15000000000ULL;
         log_tryb("[EKRAN] Tryb ",t);klog_serial("[EKRAN] Tryb zastosowany, oczekiwanie na potwierdzenie.");
@@ -552,3 +572,80 @@ void ekran_posprzataj_proces(int pid){
         (void)cofnij();
     }
 }
+
+bool ekran_test_virtio_gpu_modeset() {
+    if (grafika_mozliwosci_ekranu().backend != EKRAN_VIRTIO_GPU) return true;
+    klog_serial("[VIRTIO-GPU-MODESET] Rozpoczynam desktopowy test przelaczania trybow w locie...");
+
+    // 1. Sprawdz zachowanie trybu rozruchowego
+    uint32_t bw = 0, bh = 0;
+    grafika_pobierz_boot_rozmiar(&bw, &bh);
+    if (bw >= 640 && bh >= 480) {
+        if (grafika_pobierz_szerokosc() != int(bw) || grafika_pobierz_wysokosc() != int(bh)) {
+            klog_serial("[VIRTIO-GPU-MODESET] BLAD: Tryb rozruchowy nie zostal zachowany na pulpicie!");
+            return false;
+        }
+        klog_serial("[VIRTIO-GPU-MODESET] Boot mode 1280x720 preserved: PASS");
+    }
+
+    // 2. Przelaczenie 1280x720 -> 1920x1080 (natychmiastowe)
+    TrybEkranu t_1080{1920, 1080, 32, 1920 * 4, 0, 0};
+    uint32_t r1080 = zastosuj(t_1080, 100, 0, false, false);
+    if (r1080 != EKRAN_OK || grafika_pobierz_szerokosc() != 1920 || grafika_pobierz_wysokosc() != 1080) {
+        klog_serial("[VIRTIO-GPU-MODESET] BLAD: Przelaczenie na 1920x1080 nie powiodlo sie!");
+        return false;
+    }
+    klog_serial("[VIRTIO-GPU-MODESET] Switched to 1920x1080: PASS");
+    klog_serial("[VIRTIO-GPU-MODESET] Ready for 1920x1080 screendump");
+    {
+        const uint64_t t0 = hpet_dostepny() ? czas_monotoniczny_ns() : 0;
+        while (hpet_dostepny() && czas_monotoniczny_ns() - t0 < 300000000ULL) asm volatile("pause");
+    }
+
+    // 3. Przelaczenie 1920x1080 -> 1024x768 (natychmiastowe)
+    TrybEkranu t_768{1024, 768, 32, 1024 * 4, 0, 0};
+    uint32_t r768 = zastosuj(t_768, 100, 0, false, false);
+    if (r768 != EKRAN_OK || grafika_pobierz_szerokosc() != 1024 || grafika_pobierz_wysokosc() != 768) {
+        klog_serial("[VIRTIO-GPU-MODESET] BLAD: Przelaczenie na 1024x768 nie powiodlo sie!");
+        return false;
+    }
+    klog_serial("[VIRTIO-GPU-MODESET] Switched to 1024x768: PASS");
+    klog_serial("[VIRTIO-GPU-MODESET] Ready for 1024x768 screendump");
+    {
+        const uint64_t t0 = hpet_dostepny() ? czas_monotoniczny_ns() : 0;
+        while (hpet_dostepny() && czas_monotoniczny_ns() - t0 < 300000000ULL) asm volatile("pause");
+    }
+
+    // 4. Test niepotwierdzonego trybu z wycofaniem po timeout (rollback)
+    // Zastosuj 800x600 z wymagaj_potwierdzenia=true
+    TrybEkranu t_rollback{800, 600, 32, 800 * 4, 0, 0};
+    uint32_t r_rb = zastosuj(t_rollback, 100, 0, false, true);
+    if (r_rb != EKRAN_OCZEKUJE || !tx.oczekuje) {
+        klog_serial("[VIRTIO-GPU-MODESET] BLAD: Oczekiwanie na potwierdzenie nie zostalo aktywowane!");
+        return false;
+    }
+    // Wymus uplyw czasu timeout
+    tx.deadline = teraz() - 1;
+    ekran_obsluz_timeout();
+    if (tx.oczekuje || grafika_pobierz_szerokosc() != 1024 || grafika_pobierz_wysokosc() != 768) {
+        klog_serial("[VIRTIO-GPU-MODESET] BLAD: Wycofanie po timeout (rollback) nie przywrocilo 1024x768!");
+        return false;
+    }
+    klog_serial("[VIRTIO-GPU-MODESET] Unconfirmed rollback complete, ready for screendump");
+    {
+        const uint64_t t0 = hpet_dostepny() ? czas_monotoniczny_ns() : 0;
+        while (hpet_dostepny() && czas_monotoniczny_ns() - t0 < 300000000ULL) asm volatile("pause");
+    }
+
+    // 5. Przywrocenie poczatkowego trybu 1280x720 przed startem srodowiska
+    TrybEkranu t_init{bw ? bw : 1280, bh ? bh : 720, 32, (bw ? bw : 1280) * 4, 0, 0};
+    uint32_t r_init = zastosuj(t_init, 100, 0, false, false);
+    if (r_init != EKRAN_OK || grafika_pobierz_szerokosc() != int(bw ? bw : 1280)) {
+        klog_serial("[VIRTIO-GPU-MODESET] BLAD: Przywrocenie trybu poczatkowego 1280x720 nie powiodlo sie!");
+        return false;
+    }
+    klog_serial("[VIRTIO-GPU-MODESET] Restored initial 1280x720: PASS");
+    klog_serial("[VIRTIO-GPU-MODESET] Desktop modeset test suite: PASS");
+    return true;
+}
+

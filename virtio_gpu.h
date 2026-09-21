@@ -282,6 +282,16 @@ struct VirtioGpuDriver {
     DmaBuffer          fb_dma;
     void**             allocated_frames;
 
+    /* Stary zasob oczekujacy na zwolnienie lub wycofanie (atomic modesetting) */
+    uint32_t old_resource_id;
+    void*    old_fb_vaddr;
+    void**   old_allocated_frames;
+    size_t   old_fb_pages;
+    VirtioGpuMemEntry* old_mem_entries;
+    uint32_t old_nr_entries;
+    uint32_t old_display_width;
+    uint32_t old_display_height;
+
     /* Flagi stanu */
     bool initialized;
     bool has_error;
@@ -322,6 +332,9 @@ bool virtio_gpu_cmd_resource_unref(VirtioGpuDriver* drv, uint32_t resource_id);
 
 bool virtio_gpu_transfer_and_flush(VirtioGpuDriver* drv, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
 bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t height);
+void virtio_gpu_free_stale_resource(VirtioGpuDriver* drv);
+bool virtio_gpu_rollback_modeset(VirtioGpuDriver* drv);
+bool virtio_gpu_test_runtime_modeset(VirtioGpuDriver* drv);
 bool virtio_gpu_render_test_pattern(VirtioGpuDriver* drv);
 bool virtio_gpu_test_teardown_reinit(VirtioGpuDriver* drv);
 bool virtio_gpu_stress_dirty_rectangles(VirtioGpuDriver* drv);
