@@ -50,6 +50,8 @@ extern "C" void odblokuj_ekran();
 #include "virtio_rng.h"
 #include "virtio_blk.h"
 #include "virtio_gpu.h"
+#include "input_device.h"
+#include "virtio_input.h"
 
 #ifndef BURSZTYN_DEBUG_NET_SELFTEST
 #define BURSZTYN_DEBUG_NET_SELFTEST 0
@@ -2342,6 +2344,15 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
         }
     }
 
+    const uint32_t virtio_input_count = virtio_input_probe_and_init();
+    if (virtio_input_count > 0) {
+        if (tryb_testowy) {
+            virtio_input_stress_test_all();
+        } else {
+            wypisz_log("[VIRTIO-INPUT] Sanity check: OK (devices initialized and registered).");
+        }
+    }
+
     NetworkDevice* net_dev = net_get_primary_device();
     if (net_dev) {
         uruchom_klienta_dhcp();
@@ -2514,6 +2525,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
 
     while (true) {
         usb_obsluz();
+        virtio_input_obsluz();
         ekran_obsluz_timeout();
         zablokuj_ekran();
         skladacz_obrazu_obsluz_dirty();

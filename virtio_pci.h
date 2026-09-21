@@ -65,7 +65,7 @@
 #define VIRTIO_F_NOTIFICATION_DATA   (UINT64_C(1) << 38)
 
 /*
- * Identyfikatory podsystemu urzadzen VirtIO (Subsystem Device ID):
+ * Identyfikatory typu urzadzenia VirtIO (VirtIO Device Type ID):
  */
 #define VIRTIO_ID_NET     1U
 #define VIRTIO_ID_BLOCK   2U

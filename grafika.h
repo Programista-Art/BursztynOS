@@ -152,6 +152,14 @@ void zaktualizuj_mysze_zrodlo(int dx,
                               uint8_t przyciski,
                               const char* zrodlo);
 
+void zaktualizuj_mysze_pozycja_zrodlo(int x,
+                                      int y,
+                                      uint8_t przyciski,
+                                      const char* zrodlo);
+
+int grafika_pobierz_mysz_x();
+int grafika_pobierz_mysz_y();
+
 void obsluga_przerwania_zegara();
 
 void wczytaj_tapete_z_dysku();

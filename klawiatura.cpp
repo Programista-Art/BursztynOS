@@ -17,6 +17,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "bws_zdarzenia.h"
+#include "input_device.h"
 
 /* =========================================================================
  * PORTY PS/2
@@ -104,6 +105,18 @@ uint32_t usb_modyfikatory = 0;
 
 bool klawisz_rozszerzony_e0 = false;
 uint8_t pozostalo_e1 = 0;
+bool s_ps2_keys_down[256] = {};
+static InputDevice s_ps2_keyboard_device{};
+
+static void ps2_klawiatura_inicjalizuj_urzadzenie(void) {
+    if (!s_ps2_keyboard_device.registered) {
+        for (size_t i = 0; i < sizeof(s_ps2_keyboard_device.name) - 1 && "ps2-keyboard"[i]; ++i) {
+            s_ps2_keyboard_device.name[i] = "ps2-keyboard"[i];
+        }
+        s_ps2_keyboard_device.kinds = INPUT_DEVICE_KIND_KEYBOARD;
+        input_register_device(&s_ps2_keyboard_device);
+    }
+}
 
 /* =========================================================================
  * MAPOWANIE KLAWISZY
@@ -166,6 +179,10 @@ const char kbd_us_shift[128] = {
  * ========================================================================= */
 
 static inline uint8_t wejscie_port_bajt(uint16_t port) {
+#ifdef BURSZTYN_VIRTIO_HOST_TEST
+    (void)port;
+    return 0;
+#else
     uint8_t wartosc = 0;
 
     asm volatile(
@@ -174,6 +191,7 @@ static inline uint8_t wejscie_port_bajt(uint16_t port) {
         : "Nd"(port));
 
     return wartosc;
+#endif
 }
 
 /* =========================================================================
@@ -494,6 +512,13 @@ void obsluz_e0(uint8_t scancode) {
             zglos_bajt_do_systemu('D');
             break;
 
+        case 0x52: // Insert
+            zglos_bajt_do_systemu(0x1B);
+            zglos_bajt_do_systemu('[');
+            zglos_bajt_do_systemu('2');
+            zglos_bajt_do_systemu('~');
+            break;
+
         case 0x53: // Delete
             zglos_bajt_do_systemu(0x1B);
             zglos_bajt_do_systemu('[');
@@ -546,23 +571,7 @@ void obsluz_e0(uint8_t scancode) {
 
 } // namespace
 
-extern "C" void obsluga_przerwania_klawiatury() {
-    /*
-     * Przy poprawnym IRQ1 bit OBF powinien byc ustawiony. Kontrola chroni
-     * przed odczytem pustego portu przy nietypowym/spurious wywolaniu.
-     */
-    const uint8_t status =
-        wejscie_port_bajt(
-            PORT_PS2_STATUS);
-
-    if ((status & PS2_STATUS_OUTPUT_FULL) == 0) {
-        return;
-    }
-
-    const uint8_t scancode =
-        wejscie_port_bajt(
-            PORT_PS2_DANE);
-
+extern "C" void ps2_klawiatura_przetworz_scancode(uint8_t scancode) {
     /*
      * Kontynuacja sekwencji Pause/Break.
      */
@@ -572,96 +581,80 @@ extern "C" void obsluga_przerwania_klawiatury() {
     }
 
     if (scancode == SC_E1) {
-        pozostalo_e1 =
-            E1_BAJTY_DO_POMINIECIA;
-
+        pozostalo_e1 = E1_BAJTY_DO_POMINIECIA;
         klawisz_rozszerzony_e0 = false;
         return;
     }
 
     /*
      * E0 nie jest samodzielnym klawiszem.
-     * IDT wysle EOI po wyjsciu z handlera.
      */
     if (scancode == SC_E0) {
         klawisz_rozszerzony_e0 = true;
         return;
     }
 
-    if (klawisz_rozszerzony_e0) {
-        klawisz_rozszerzony_e0 = false;
-        obsluz_e0(scancode);
+    const bool is_e0 = klawisz_rozszerzony_e0;
+    klawisz_rozszerzony_e0 = false;
+
+    const bool down = (scancode & SC_RELEASE_BIT) == 0;
+    const uint16_t linux_kc = input_ps2_scancode_to_linux(is_e0, scancode);
+    if (linux_kc == 0) {
         return;
     }
 
-    /*
-     * Modyfikatory standardowego zestawu Scan Code Set 1.
-     */
-    switch (scancode) {
-        case SC_LSHIFT_DOWN:
-            lewy_shift = true;
-            zglos_fizyczny(SC_LSHIFT_DOWN, true);
-            return;
-
-        case SC_LSHIFT_UP:
-            lewy_shift = false;
-            zglos_fizyczny(SC_LSHIFT_DOWN, false);
-            return;
-
-        case SC_RSHIFT_DOWN:
-            prawy_shift = true;
-            zglos_fizyczny(SC_RSHIFT_DOWN, true);
-            return;
-
-        case SC_RSHIFT_UP:
-            prawy_shift = false;
-            zglos_fizyczny(SC_RSHIFT_DOWN, false);
-            return;
-
-        case SC_CAPSLOCK:
-            caps_lock = !caps_lock;
-            zglos_fizyczny(SC_CAPSLOCK, true);
-            return;
-
-        case SC_NUMLOCK:
-            num_lock = !num_lock;
-            zglos_fizyczny(SC_NUMLOCK, true);
-            return;
-
-        case SC_LCTRL_DOWN:
-            lewy_ctrl = true;
-            zglos_fizyczny(SC_LCTRL_DOWN, true);
-            return;
-
-        case SC_LCTRL_UP:
-            lewy_ctrl = false;
-            zglos_fizyczny(SC_LCTRL_DOWN, false);
-            return;
-
-        case SC_LALT_DOWN:
-            lewy_alt = true;
-            zglos_fizyczny(SC_LALT_DOWN, true);
-            return;
-
-        case SC_LALT_UP:
-            lewy_alt = false;
-            zglos_fizyczny(SC_LALT_DOWN, false);
-            return;
-
-        default:
-            break;
+    uint32_t val = 0;
+    if (down) {
+        if (linux_kc < 256 && s_ps2_keys_down[linux_kc]) {
+            val = 2; // Klawisz wcisniety ponownie bez zwolnienia = repeat
+        } else {
+            if (linux_kc < 256) s_ps2_keys_down[linux_kc] = true;
+            val = 1; // Nowe wcisniecie = press
+        }
+    } else {
+        if (linux_kc < 256) {
+            if (!s_ps2_keys_down[linux_kc]) {
+                return; // Brak duplikatu zwolnienia
+            }
+            s_ps2_keys_down[linux_kc] = false;
+        }
+        val = 0; // Zwolnienie = release
     }
 
+    ps2_klawiatura_inicjalizuj_urzadzenie();
+
+    InputEvent evs[2] = {
+        { INPUT_EV_KEY, linux_kc, val },
+        { INPUT_EV_SYN, INPUT_SYN_REPORT, 0 }
+    };
+    input_dispatch_events(&s_ps2_keyboard_device, evs, 2);
+}
+
+extern "C" void ps2_klawiatura_zresetuj_stan(void) {
+    klawisz_rozszerzony_e0 = false;
+    pozostalo_e1 = 0;
+    for (size_t i = 0; i < 256; ++i) {
+        s_ps2_keys_down[i] = false;
+    }
+}
+
+extern "C" InputDevice* ps2_klawiatura_pobierz_urzadzenie(void) {
+    ps2_klawiatura_inicjalizuj_urzadzenie();
+    return &s_ps2_keyboard_device;
+}
+
+extern "C" void obsluga_przerwania_klawiatury() {
     /*
-     * Break code zwyklego klawisza.
+     * Przy poprawnym IRQ1 bit OBF powinien byc ustawiony. Kontrola chroni
+     * przed odczytem pustego portu przy nietypowym/spurious wywolaniu.
      */
-    zglos_fizyczny(scancode & 0x7FU, (scancode & SC_RELEASE_BIT) == 0);
-    if ((scancode & SC_RELEASE_BIT) != 0)
+    const uint8_t status = wejscie_port_bajt(PORT_PS2_STATUS);
+    if ((status & PS2_STATUS_OUTPUT_FULL) == 0) {
         return;
+    }
 
-    obsluz_zwykly_make_code(
-        scancode);
-
+    const uint8_t scancode = wejscie_port_bajt(PORT_PS2_DANE);
+    ps2_klawiatura_przetworz_scancode(scancode);
     /*
      * Brak EOI tutaj.
      * WspolnaObslugaPrzerwan() w idt.cpp wykonuje je centralnie
@@ -708,61 +701,126 @@ extern "C" char pobierz_znak_klawiatury() {
     return znak;
 }
 
-/* Wspolny punkt wejscia dla USB HID Boot Keyboard. USB przekazuje Usage ID,
- * nigdy skan-kod PS/2; tutaj oba zrodla koncza w tej samej kolejce znakow. */
+/*
+ * Wspolny punkt wejscia dla USB HID Boot Keyboard (dla zachowania kompatybilnosci).
+ * Faktyczne parsowanie raportu USB odbywa sie w sterowniku xHCI/HID (usb_hid.cpp),
+ * ktory nastepnie przekazuje zdarzenia klawiszy przez jednolita abstrakcje InputDevice.
+ */
+extern "C" void usb_hid_przetworz_raport(const uint8_t* raport);
+
 extern "C" void usb_wprowadz_raport_klawiatury(const uint8_t* raport) {
-    if (!raport) return;
-    static uint8_t poprzedni_raport[8]={};
-    static bool usb_caps = false;
-    const uint8_t raw_mod = raport[0];
-    uint32_t mods = usb_caps ? BWS_MOD_CAPS : 0U;
-    if (raw_mod & 0x22U) mods |= BWS_MOD_SHIFT;
-    if (raw_mod & 0x11U) mods |= BWS_MOD_CTRL;
-    if (raw_mod & 0x44U) mods |= BWS_MOD_ALT;
-    if (raw_mod & 0x88U) mods |= BWS_MOD_SUPER;
-    usb_modyfikatory = mods;
-    for (uint8_t bit=0; bit<8; ++bit) {
-        const bool was=(poprzedni_raport[0]&(1U<<bit))!=0;
-        const bool now=(raw_mod&(1U<<bit))!=0;
-        if(was!=now)(void)zaktualizuj_klawisz_fizyczny_gui(
-            BWS_KEY_SOURCE_USB | static_cast<uint32_t>(224U+bit), now, mods);
+    usb_hid_przetworz_raport(raport);
+}
+
+extern "C" void klawiatura_zresetuj_stan(void) {
+    lewy_shift = false;
+    prawy_shift = false;
+    prawy_alt = false;
+    caps_lock = false;
+    lewy_ctrl = false;
+    prawy_ctrl = false;
+    lewy_alt = false;
+    lewy_super = false;
+    prawy_super = false;
+    num_lock = false;
+    usb_modyfikatory = 0;
+    klawisz_rozszerzony_e0 = false;
+    pozostalo_e1 = 0;
+    __atomic_store_n(&bufor_glowa, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&bufor_ogon, 0, __ATOMIC_RELEASE);
+    ps2_klawiatura_zresetuj_stan();
+}
+
+#ifdef BURSZTYN_VIRTIO_HOST_TEST
+extern "C" void klawiatura_test_hook(uint16_t keycode, uint32_t value) __attribute__((weak));
+#endif
+
+extern "C" void klawiatura_obsluz_klawisz(uint16_t keycode, uint32_t value) {
+#ifdef BURSZTYN_VIRTIO_HOST_TEST
+    if (klawiatura_test_hook) {
+        klawiatura_test_hook(keycode, value);
     }
-    for (uint8_t i=0;i<6;++i) {
-        const uint8_t old=poprzedni_raport[2+i]; if(!old||old==1U)continue;
-        bool nadal=false;for(uint8_t j=0;j<6;++j)if(raport[2+j]==old)nadal=true;
-        if(!nadal)(void)zaktualizuj_klawisz_fizyczny_gui(
-            BWS_KEY_SOURCE_USB|old,false,mods);
+#endif
+    const bool down = (value != 0);
+
+    // 1. Klawisze modyfikatorow
+    switch (keycode) {
+        case INPUT_KEY_LEFTSHIFT: // 42
+            lewy_shift = down;
+            zglos_fizyczny(SC_LSHIFT_DOWN, down);
+            return;
+        case INPUT_KEY_RIGHTSHIFT: // 54
+            prawy_shift = down;
+            zglos_fizyczny(SC_RSHIFT_DOWN, down);
+            return;
+        case INPUT_KEY_LEFTCTRL: // 29
+            lewy_ctrl = down;
+            zglos_fizyczny(SC_LCTRL_DOWN, down);
+            return;
+        case INPUT_KEY_RIGHTCTRL: // 97
+            prawy_ctrl = down;
+            zglos_fizyczny(BWS_KEY_SOURCE_E0 | 0x1DU, down);
+            return;
+        case INPUT_KEY_LEFTALT: // 56
+            lewy_alt = down;
+            zglos_fizyczny(SC_LALT_DOWN, down);
+            return;
+        case INPUT_KEY_RIGHTALT: // 100 (AltGr)
+            prawy_alt = down;
+            zglos_fizyczny(BWS_KEY_SOURCE_E0 | 0x38U, down);
+            return;
+        case INPUT_KEY_LEFTMETA: // 125
+            lewy_super = down;
+            zglos_fizyczny(BWS_KEY_SOURCE_E0 | 0x5BU, down);
+            return;
+        case INPUT_KEY_RIGHTMETA: // 126
+            prawy_super = down;
+            zglos_fizyczny(BWS_KEY_SOURCE_E0 | 0x5CU, down);
+            return;
+        case INPUT_KEY_CAPSLOCK: // 58
+            if (value == 1) caps_lock = !caps_lock;
+            zglos_fizyczny(SC_CAPSLOCK, down);
+            return;
+        case INPUT_KEY_NUMLOCK: // 69
+            if (value == 1) num_lock = !num_lock;
+            zglos_fizyczny(SC_NUMLOCK, down);
+            return;
+        case INPUT_KEY_SCROLLLOCK: // 70
+            zglos_fizyczny(0x46, down);
+            return;
+        default:
+            break;
     }
-    for (uint8_t i=0;i<6;++i) {
-        const uint8_t u=raport[2+i]; if (!u||u==1U) continue;
-        bool poprzedni=false;
-        for (uint8_t j=0;j<6;++j) if (poprzedni_raport[2+j]==u) poprzedni=true;
-        if (poprzedni) continue;
-        (void)zaktualizuj_klawisz_fizyczny_gui(
-            BWS_KEY_SOURCE_USB|u,true,mods);
-        if (u == 57U) {
-            usb_caps = !usb_caps;
-            if (usb_caps)
-                mods |= BWS_MOD_CAPS;
-            else
-                mods &= ~BWS_MOD_CAPS;
-            usb_modyfikatory = mods;
-            continue;
+
+    // 2. Klawisze rozszerzone (E0 w protokole PS/2)
+    uint8_t e0_scancode = 0;
+    switch (keycode) {
+        case INPUT_KEY_UP:       e0_scancode = 0x48; break;
+        case INPUT_KEY_DOWN:     e0_scancode = 0x50; break;
+        case INPUT_KEY_LEFT:     e0_scancode = 0x4B; break;
+        case INPUT_KEY_RIGHT:    e0_scancode = 0x4D; break;
+        case INPUT_KEY_HOME:     e0_scancode = 0x47; break;
+        case INPUT_KEY_END:      e0_scancode = 0x4F; break;
+        case INPUT_KEY_PAGEUP:   e0_scancode = 0x49; break;
+        case INPUT_KEY_PAGEDOWN: e0_scancode = 0x51; break;
+        case INPUT_KEY_INSERT:   e0_scancode = 0x52; break;
+        case INPUT_KEY_DELETE:   e0_scancode = 0x53; break;
+        case INPUT_KEY_KPENTER:  e0_scancode = 0x1C; break;
+        case INPUT_KEY_KPSLASH:  e0_scancode = 0x35; break;
+        default: break;
+    }
+
+    if (e0_scancode != 0) {
+        obsluz_e0(down ? e0_scancode : static_cast<uint8_t>(e0_scancode | SC_RELEASE_BIT));
+        return;
+    }
+
+    // 3. Standardowe klawisze Scan Code Set 1 (kody 1..88)
+    if (keycode > 0 && keycode < 128) {
+        const uint8_t scancode = static_cast<uint8_t>(keycode);
+        zglos_fizyczny(scancode, down);
+        if (down) {
+            obsluz_zwykly_make_code(scancode);
         }
-        const bool przesuniecie=(mods&BWS_MOD_SHIFT)!=0;
-        char znak=0;
-        if(u>=4U&&u<=29U){const bool upper=przesuniecie^usb_caps;
-            znak=static_cast<char>((upper?'A':'a')+(u-4U));}
-        else if(u>=30U&&u<=39U){static const char zwykle[]="1234567890";static const char sz[]="!@#$%^&*()";znak=(przesuniecie?sz:zwykle)[u-30U];}
-        else if(u==40U)znak='\n'; else if(u==41U)znak=27; else if(u==42U)znak='\b';
-        else if(u==43U)znak='\t'; else if(u==44U)znak=' ';
-        else if(u==45U)znak=przesuniecie?'_':'-'; else if(u==46U)znak=przesuniecie?'+':'=';
-        else if(u==51U)znak=przesuniecie?':':';'; else if(u==52U)znak=przesuniecie?'"':'\'';
-        else if(u==53U)znak=przesuniecie?'~':'`'; else if(u==54U)znak=przesuniecie?'<':',';
-        else if(u==55U)znak=przesuniecie?'>':'.'; else if(u==56U)znak=przesuniecie?'?':'/';
-        if(znak){(void)zaktualizuj_tekst_gui(
-            static_cast<uint8_t>(znak),mods);
-            zglos_bajt_do_systemu(static_cast<uint8_t>(znak));}
     }
-    for(uint8_t i=0;i<8;++i)poprzedni_raport[i]=raport[i];
 }

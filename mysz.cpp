@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "mysz_input.h"
+#include "input_device.h"
 
 /* =========================================================================
  * POLACZENIE Z PODSYSTEMEM GRAFIKI
@@ -372,12 +373,30 @@ void przetworz_pakiet() {
         static_cast<uint8_t>(
             flagi & MYSZ_MASKA_PRZYCISKOW);
 
-    zaktualizuj_mysze_zrodlo(
-        dx,
-        dy,
-        przyciski,
-        "ps2"
-    );
+    static InputDevice s_ps2_mouse_device{};
+    if (!s_ps2_mouse_device.registered) {
+        for (size_t i = 0; i < sizeof(s_ps2_mouse_device.name) - 1 && "ps2-mouse"[i]; ++i) {
+            s_ps2_mouse_device.name[i] = "ps2-mouse"[i];
+        }
+        s_ps2_mouse_device.kinds = INPUT_DEVICE_KIND_MOUSE;
+        input_register_device(&s_ps2_mouse_device);
+    }
+
+    InputEvent evs[5];
+    size_t n = 0;
+    if (dx != 0) {
+        evs[n++] = { INPUT_EV_REL, INPUT_REL_X, static_cast<uint32_t>(dx) };
+    }
+    if (dy != 0) {
+        // W standardzie PS/2 dy>0 oznacza ruch w gore. W standardzie Linux Input REL_Y:
+        // wartosci dodatnie oznaczaja ruch w dol ekranu (stad -dy).
+        evs[n++] = { INPUT_EV_REL, INPUT_REL_Y, static_cast<uint32_t>(-dy) };
+    }
+    evs[n++] = { INPUT_EV_KEY, INPUT_BTN_LEFT, (przyciski & MYSZ_PRZYCISK_LEWY) ? 1U : 0U };
+    evs[n++] = { INPUT_EV_KEY, INPUT_BTN_RIGHT, (przyciski & MYSZ_PRZYCISK_PRAWY) ? 1U : 0U };
+    evs[n++] = { INPUT_EV_KEY, INPUT_BTN_MIDDLE, (przyciski & MYSZ_PRZYCISK_SRODKOWY) ? 1U : 0U };
+    evs[n++] = { INPUT_EV_SYN, INPUT_SYN_REPORT, 0 };
+    input_dispatch_events(&s_ps2_mouse_device, evs, n);
 }
 
 void przyjmij_bajt_pakietu(

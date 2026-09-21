@@ -578,7 +578,9 @@ bool virtio_pci_probe(uint8_t bus, uint8_t slot, uint8_t func,
     dev->subsystem_vendor_id = pci_read16(bus, slot, func, 0x2C);
     dev->subsystem_device_id = pci_read16(bus, slot, func, 0x2E);
 
-    // Ustalenie VirtIO Subsystem Device ID:
+    // Ustalenie typu urzadzenia VirtIO (VirtIO Device Type ID):
+    // Dla Modern PCI (0x1040..0x107F): Device ID = 0x1040 + VirtIO Device Type ID
+    // Dla Transitional PCI (0x1000..0x103F): VirtIO Device Type ID z Subsystem Device ID
     if (dev->pci_device_id >= 0x1040U && dev->pci_device_id <= 0x107FU) {
         dev->virtio_id = static_cast<uint16_t>(dev->pci_device_id - 0x1040U);
     } else if (dev->pci_device_id >= 0x1000U && dev->pci_device_id <= 0x103FU) {

@@ -2629,6 +2629,24 @@ extern "C" void zaktualizuj_mysze(int dx,
     zaktualizuj_mysze_zrodlo(dx, dy, przyciski, "mysz");
 }
 
+extern "C" int grafika_pobierz_mysz_x() {
+    return mysz_x;
+}
+
+extern "C" int grafika_pobierz_mysz_y() {
+    return mysz_y;
+}
+
+extern "C" void zaktualizuj_mysze_pozycja_zrodlo(int x,
+                                                 int y,
+                                                 uint8_t przyciski,
+                                                 const char* zrodlo) {
+    if (!backbuffer || !aktywny_ekran) return;
+    const int dx = x - mysz_x;
+    const int dy = mysz_y - y;
+    zaktualizuj_mysze_zrodlo(dx, dy, przyciski, zrodlo);
+}
+
 extern "C" void zaktualizuj_kolo_myszy(
     int pion,
     int poziom,
