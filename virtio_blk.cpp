@@ -42,6 +42,8 @@ static inline uint64_t blk_monotonic_ns(void) {
 #include "grafika.h"
 #include "pamiec.h"
 #include "blokowy.h"
+#include "storage_format.h"
+#include "instalator.h"
 
 #define blk_klog klog_serial
 
@@ -975,7 +977,128 @@ void virtio_blk_reset_all(void) {
     g_blk_driver_count = 0;
 }
 
-bool virtio_blk_stress_test(VirtioBlkDriver* drv) {
+static bool virtio_blk_validate_scratch_disk(VirtioBlkDriver* drv, uint64_t* out_scratch_lba) {
+    if (!drv || !drv->initialized || !drv->vq || !drv->dev) {
+        blk_klog("[VIRTIO-BLK-STRESS] Step 3 skipped: driver not initialized.");
+        return false;
+    }
+    if (drv->read_only) {
+        blk_klog("[VIRTIO-BLK-STRESS] Step 3 skipped: device is read-only.");
+        return false;
+    }
+    if (drv->total_sectors < 4) {
+        blk_klog("[VIRTIO-BLK-STRESS] Step 3 skipped: capacity too small for test scratch disk (< 4 sectors).");
+        return false;
+    }
+
+#ifndef BURSZTYN_VIRTIO_HOST_TEST
+    // 1. Walidacja czy urzadzenie to nosnik ISO9660
+    if (Storage::source_iso(&drv->bdev)) {
+        blk_klog("[VIRTIO-BLK-STRESS] Step 3 skipped: target device is ISO9660 media.");
+        return false;
+    }
+
+    // 2. Walidacja trybu instalatora lub wyznaczonego celu instalacji
+    if (instalator_tryb() || blokowy_zapis_instalatora()) {
+        blk_klog("[VIRTIO-BLK-STRESS] Step 3 skipped: installer mode or installer write target active.");
+        return false;
+    }
+
+    // 3. Walidacja czy urzadzenie jest glownym zarejestrowanym dyskiem systemowym
+    if (&drv->bdev == blokowy_dysk_systemowy()) {
+        blk_klog("[VIRTIO-BLK-STRESS] Step 3 skipped: device is registered system disk.");
+        return false;
+    }
+#endif
+
+    // 4. Odczyt znacznika testowego z LBA 1
+    VirtioBlkTestMarker marker{};
+    BlockError err = drv->bdev.read(VIRTIO_BLK_TEST_MARKER_LBA, 1, &marker);
+    if (err != BlockError::Ok) {
+        blk_klog("[VIRTIO-BLK-STRESS] Step 3 skipped: failed to read test-disk marker from LBA 1.");
+        return false;
+    }
+
+    // 5. Walidacja pol znacznika
+    if (blk_memcmp(marker.magic, VIRTIO_BLK_TEST_MARKER_MAGIC, sizeof(VIRTIO_BLK_TEST_MARKER_MAGIC) - 1) != 0) {
+        blk_klog("[VIRTIO-BLK-STRESS] Step 3 skipped: missing or invalid test-disk magic.");
+        return false;
+    }
+    if (marker.signature != VIRTIO_BLK_TEST_SIGNATURE) {
+        blk_klog("[VIRTIO-BLK-STRESS] Step 3 skipped: invalid test-disk signature.");
+        return false;
+    }
+    if (marker.version != VIRTIO_BLK_TEST_VERSION) {
+        blk_klog("[VIRTIO-BLK-STRESS] Step 3 skipped: unsupported test-disk marker version.");
+        return false;
+    }
+    if ((marker.flags & VIRTIO_BLK_TEST_FLAG_DESTRUCTIVE) == 0) {
+        blk_klog("[VIRTIO-BLK-STRESS] Step 3 skipped: test-disk marker flags do not permit destructive writes.");
+        return false;
+    }
+
+    const uint32_t expected_crc = rozruch_oblicz_crc32(&marker, offsetof(VirtioBlkTestMarker, crc32));
+    if (marker.crc32 != expected_crc) {
+        blk_klog("[VIRTIO-BLK-STRESS] Step 3 skipped: test-disk marker CRC32 checksum mismatch.");
+        return false;
+    }
+
+    // 6. Wyznaczenie sektora testowego
+    uint64_t test_lba = (marker.scratch_lba != 0) ? marker.scratch_lba : (drv->total_sectors - 1);
+    if (test_lba == 0) {
+        blk_klog("[VIRTIO-BLK-STRESS] Step 3 skipped: test sector cannot be LBA 0.");
+        return false;
+    }
+    if (test_lba == VIRTIO_BLK_TEST_MARKER_LBA) {
+        blk_klog("[VIRTIO-BLK-STRESS] Step 3 skipped: test sector cannot overwrite marker LBA 1.");
+        return false;
+    }
+    if (test_lba == ROZRUCH_SEKTOR_KOPIA_0 || test_lba == ROZRUCH_SEKTOR_KOPIA_1) {
+        blk_klog("[VIRTIO-BLK-STRESS] Step 3 skipped: test sector collides with A/B boot-state sectors 2046/2047.");
+        return false;
+    }
+    if (test_lba >= drv->total_sectors) {
+        blk_klog("[VIRTIO-BLK-STRESS] Step 3 skipped: test sector is out of bounds.");
+        return false;
+    }
+
+#ifndef BURSZTYN_VIRTIO_HOST_TEST
+    // 7. Weryfikacja ze LBA 2046/2047 nie zawieraja autorytatywnego stanu rozruchu
+    if (drv->total_sectors > ROZRUCH_SEKTOR_KOPIA_1) {
+        uint8_t boot_sec[512]{};
+        if (drv->bdev.read(ROZRUCH_SEKTOR_KOPIA_0, 1, boot_sec) == BlockError::Ok) {
+            auto* s = reinterpret_cast<const struct bursztyn_rozruch_stan*>(boot_sec);
+            if (s->magic == ROZRUCH_MAGIC) {
+                blk_klog("[VIRTIO-BLK-STRESS] Step 3 skipped: disk contains active A/B boot-state metadata.");
+                return false;
+            }
+        }
+    }
+
+    // 8. Weryfikacja ze dysk nie zawiera aktywnej tablicy GPT ani partycji BSP2/ESP
+    Storage::Table tbl{};
+    if (Storage::gpt_read(&drv->bdev, &tbl)) {
+        blk_klog("[VIRTIO-BLK-STRESS] Step 3 skipped: disk contains valid GPT partition table.");
+        return false;
+    }
+
+    // 9. Weryfikacja ze LBA 0 nie zawiera naglowka systemu plikow BSP2
+    uint8_t sec0[512]{};
+    if (drv->bdev.read(0, 1, sec0) == BlockError::Ok) {
+        if (sec0[0] == 'B' && sec0[1] == 'S' && sec0[2] == 'P' && sec0[3] == '2') {
+            blk_klog("[VIRTIO-BLK-STRESS] Step 3 skipped: sector 0 contains BSP2 superblock.");
+            return false;
+        }
+    }
+#endif
+
+    if (out_scratch_lba) {
+        *out_scratch_lba = test_lba;
+    }
+    return true;
+}
+
+bool virtio_blk_stress_test(VirtioBlkDriver* drv, bool allow_destructive) {
     if (!drv || !drv->initialized || !drv->vq || !drv->dev) {
         blk_klog("[VIRTIO-BLK-STRESS] ERROR: driver not initialized");
         return false;
@@ -1004,37 +1127,44 @@ bool virtio_blk_stress_test(VirtioBlkDriver* drv) {
         return false;
     }
 
-    // 3. Raw Write and Flush test na ostatnim sektorze nosnika
-    if (!drv->read_only) {
-        blk_klog("[VIRTIO-BLK-STRESS] Step 3: write, flush, readback verification");
-        const uint64_t test_lba = drv->total_sectors - 1;
-        uint8_t write_pat[512];
-        uint8_t read_pat[512]{};
-        for (size_t i = 0; i < 512; ++i) {
-            write_pat[i] = static_cast<uint8_t>((i * 7 + 0xA5) & 0xFF);
-        }
+    // 3. Raw Write and Flush test na dedykowanym sektorze nosnika testowego
+    bool destructive_tested = false;
+    if (!allow_destructive) {
+        blk_klog("[VIRTIO-BLK-STRESS] Step 3 skipped: destructive disk test flag not set (requires bursztyn.test.diskdestructive=1).");
+    } else {
+        uint64_t test_lba = 0;
+        if (virtio_blk_validate_scratch_disk(drv, &test_lba)) {
+            blk_klog("[VIRTIO-BLK-STRESS] Test-disk identity verified (dedicated scratch disk). Executing write, flush, readback...");
+            blk_klog("[VIRTIO-BLK-STRESS] Step 3: write, flush, readback verification");
+            uint8_t write_pat[512];
+            uint8_t read_pat[512]{};
+            for (size_t i = 0; i < 512; ++i) {
+                write_pat[i] = static_cast<uint8_t>((i * 7 + 0xA5) & 0xFF);
+            }
 
-        err = drv->bdev.write(test_lba, 1, write_pat);
-        if (err != BlockError::Ok) {
-            blk_klog("[VIRTIO-BLK-STRESS] ERROR: write to test sector failed");
-            return false;
-        }
+            err = drv->bdev.write(test_lba, 1, write_pat);
+            if (err != BlockError::Ok) {
+                blk_klog("[VIRTIO-BLK-STRESS] ERROR: write to test sector failed");
+                return false;
+            }
 
-        err = drv->bdev.flush();
-        if (err != BlockError::Ok && err != BlockError::Unsupported) {
-            blk_klog("[VIRTIO-BLK-STRESS] ERROR: flush failed");
-            return false;
-        }
+            err = drv->bdev.flush();
+            if (err != BlockError::Ok && err != BlockError::Unsupported) {
+                blk_klog("[VIRTIO-BLK-STRESS] ERROR: flush failed");
+                return false;
+            }
 
-        err = drv->bdev.read(test_lba, 1, read_pat);
-        if (err != BlockError::Ok) {
-            blk_klog("[VIRTIO-BLK-STRESS] ERROR: read-back of test sector failed");
-            return false;
-        }
+            err = drv->bdev.read(test_lba, 1, read_pat);
+            if (err != BlockError::Ok) {
+                blk_klog("[VIRTIO-BLK-STRESS] ERROR: read-back of test sector failed");
+                return false;
+            }
 
-        if (blk_memcmp(write_pat, read_pat, 512) != 0) {
-            blk_klog("[VIRTIO-BLK-STRESS] ERROR: read-back pattern mismatch");
-            return false;
+            if (blk_memcmp(write_pat, read_pat, 512) != 0) {
+                blk_klog("[VIRTIO-BLK-STRESS] ERROR: read-back pattern mismatch");
+                return false;
+            }
+            destructive_tested = true;
         }
     }
 
@@ -1107,6 +1237,10 @@ bool virtio_blk_stress_test(VirtioBlkDriver* drv) {
         return false;
     }
 
-    blk_klog("[VIRTIO-BLK-STRESS] SUCCESS: raw I/O, flush, ring wraparound, reset and PMM delta=0 verified.");
+    if (destructive_tested) {
+        blk_klog("[VIRTIO-BLK-STRESS] SUCCESS: raw I/O, flush, ring wraparound, reset and PMM delta=0 verified.");
+    } else {
+        blk_klog("[VIRTIO-BLK-STRESS] SUCCESS: read I/O, ring wraparound, reset and PMM delta=0 verified (destructive write skipped).");
+    }
     return true;
 }

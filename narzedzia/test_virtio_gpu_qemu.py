@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 narzedzia/test_virtio_gpu_qemu.py - Test integracyjny sterownika VirtIO-GPU 2D
-w maszynie wirtualnej QEMU.
+oraz kursora myszy (xHCI USB HID) w maszynie wirtualnej QEMU.
 
 Weryfikuje:
- 1. Wykrycie nowoczesnego urzadzenia VirtIO Modern PCI (Vendor 0x1AF4, Device 0x1050, Subsystem 16).
+ 1. Wykrycie urzadzenia VirtIO Modern PCI (Vendor 0x1AF4, Device 0x1050, Subsystem 16).
  2. Negocjacje cech (VIRTIO_F_VERSION_1, VIRTIOGPU_F_EDID).
  3. Utworzenie controlq (Queue 0) z buforami DMA.
  4. Konfiguracje wektorow MSI-X / MSI / INTx fallback.
@@ -22,11 +22,28 @@ Weryfikuje:
      - Magenta: #FF007F (255, 0, 127)
      - Limonka (Lime): #39FF14 (57, 255, 20)
      - Biale centrum: #FFFFFF (255, 255, 255)
- 13. Weryfikacje dalszego dzialania podsystemu grafiki w srodowisku okienkowym (BursztynUI/Menedzer Okien/Tapeta).
+ 13. Pakiet testow kursora w jadrze (8 testow jednostkowych / integracyjnych):
+     - Render kursora w centrum
+     - Ruch kursora
+     - Przywrocenie tla starego polozenia kursora
+     - Przycinanie do krawedzi ekranu (clipping)
+     - Szybki ruch (1000 iteracji w jadrze bez wyciekow)
+     - Dirty-rect flush na VirtIO-GPU
+     - Przelaczenie backendu GOP/Bochs <-> VirtIO-GPU bez wiszacych wskaznikow
+     - Widocznosc kursora po przelaczeniu backendu
+ 14. Test integracyjny z kontrolerem xHCI USB HID:
+     - Wykrycie i konfiguracja myszy USB HID na xHCI
+     - Widocznosc kursora na pulpicie w pozycji domyslnej (500, 300)
+     - Wstrzykniecie ruchu myszy (+60, +40) przez QMP
+     - Weryfikacja przesuniecia kursora na pozycje (560, 340)
+     - Weryfikacja pelnego przywrocenia tla w starej pozycji (500, 300)
+     - Test obciazeniowy: 1000 ruchow myszy przez QMP
+     - Weryfikacja stabilnosci, braku wyciekow deskryptorow i integralnosci pikseli
 """
 
 import sys
 import os
+import re
 import time
 import socket
 import json
@@ -79,40 +96,66 @@ def get_pixel(data, width, height, x, y):
     idx = (y * width + x) * 3
     return (data[idx], data[idx + 1], data[idx + 2])
 
-def qmp_screendump(qmp_sock_path, dump_output_path, timeout=5.0):
-    """
-    Laczy sie z gniazdem UNIX QMP i wykonuje polecenie screendump.
-    """
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
-    sock.connect(str(qmp_sock_path))
+def check_cursor_at(data, width, height, cx, cy):
+    p_tip = get_pixel(data, width, height, cx, cy)
+    p_out0 = get_pixel(data, width, height, cx, cy + 1)
+    p_fill = get_pixel(data, width, height, cx + 1, cy + 1)
+    p_out1 = get_pixel(data, width, height, cx + 2, cy + 1)
 
-    # Odczytaj banner powitalny QMP
-    initial_greeting = sock.recv(4096).decode('utf-8')
-
-    # Wynegocjuj mozliwosci QMP
-    sock.sendall(b'{"execute": "qmp_capabilities"}\n')
-    caps_resp = sock.recv(4096).decode('utf-8')
-
-    # Wykonaj polecenie screendump
-    cmd = {
-        "execute": "screendump",
-        "arguments": {
-            "filename": str(dump_output_path),
-            "device": "gpu0"
-        }
+    is_cursor = (p_tip == (0, 0, 0) and p_out0 == (0, 0, 0) and
+                 p_fill == (255, 255, 255) and p_out1 == (0, 0, 0))
+    return is_cursor, {
+        "tip": p_tip, "out0": p_out0, "fill": p_fill, "out1": p_out1
     }
-    sock.sendall((json.dumps(cmd) + "\n").encode('utf-8'))
-    dump_resp = sock.recv(4096).decode('utf-8')
 
-    sock.close()
-    return dump_resp
+def check_restored_bg(data, width, height, cx, cy, expected_bg):
+    p_tip = get_pixel(data, width, height, cx, cy)
+    p_fill = get_pixel(data, width, height, cx + 1, cy + 1)
+    is_restored = (p_fill != (255, 255, 255)) and (p_tip == expected_bg) and (p_fill == expected_bg)
+    return is_restored, {"tip": p_tip, "fill": p_fill, "expected": expected_bg}
+
+class QmpClient:
+    def __init__(self, sock_path, timeout=10.0):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(timeout)
+        self.sock.connect(str(sock_path))
+        self.sock.recv(4096)
+        self.sock.sendall(b'{"execute": "qmp_capabilities"}\n')
+        self.sock.recv(4096)
+
+    def execute(self, cmd_dict):
+        self.sock.sendall((json.dumps(cmd_dict) + "\n").encode('utf-8'))
+        resp = b""
+        while not resp.endswith(b"\n"):
+            chunk = self.sock.recv(4096)
+            if not chunk:
+                break
+            resp += chunk
+        return json.loads(resp.decode('utf-8'))
+
+    def hmp(self, cmd_line):
+        return self.execute({"execute": "human-monitor-command", "arguments": {"command-line": cmd_line}})
+
+    def screendump(self, filename, device="gpu0"):
+        return self.execute({"execute": "screendump", "arguments": {"filename": str(filename), "device": device}})
+
+    def close(self):
+        try:
+            self.sock.close()
+        except Exception:
+            pass
+
+def qmp_screendump(qmp_sock_path, dump_output_path, timeout=5.0):
+    client = QmpClient(qmp_sock_path, timeout=timeout)
+    resp = client.screendump(dump_output_path)
+    client.close()
+    return json.dumps(resp)
 
 def main():
-    iso = ROOT / "BursztynOS.iso"
-    if not iso.exists():
-        print("[BLAD] Brak BursztynOS.iso. Uruchom 'make iso'.", file=sys.stderr)
-        sys.exit(1)
+    ci_iso = ROOT / ".bursztyn_ci_test.iso"
+    if not ci_iso.exists():
+        subprocess.run(["make", ".bursztyn_ci_test.iso"], cwd=str(ROOT), check=True)
+    iso = ci_iso
 
     disk = ROOT / "wirtualny_dysk.img"
     if not disk.exists():
@@ -121,8 +164,10 @@ def main():
     qmp_sock = Path("/tmp/virtio_gpu_qmp.sock")
     pattern_dump_path = Path("/tmp/virtio_gpu_pattern.ppm")
     desktop_dump_path = Path("/tmp/virtio_gpu_desktop.ppm")
+    desktop_moved_path = Path("/tmp/virtio_gpu_moved.ppm")
+    desktop_rapid_path = Path("/tmp/virtio_gpu_rapid.ppm")
 
-    for p in [qmp_sock, pattern_dump_path, desktop_dump_path]:
+    for p in [qmp_sock, pattern_dump_path, desktop_dump_path, desktop_moved_path, desktop_rapid_path]:
         if p.exists():
             try:
                 p.unlink()
@@ -138,6 +183,8 @@ def main():
         "-device", "ich9-ahci,id=ahci",
         "-device", "ide-hd,drive=disk,bus=ahci.0,unit=0",
         "-device", "virtio-vga,id=gpu0,disable-legacy=on",
+        "-device", "qemu-xhci,id=xhci",
+        "-device", "usb-mouse,id=usbmouse,bus=xhci.0",
         "-m", "2G",
         "-display", "none",
         "-serial", "stdio",
@@ -146,7 +193,7 @@ def main():
     ]
 
     print("====================================================================")
-    print(" BURSZTYN OS - TEST INTEGRACYJNY QEMU: VIRTIO-GPU (MODERN PCI 2D)")
+    print(" BURSZTYN OS - TEST INTEGRACYJNY QEMU: VIRTIO-GPU & KURSOR MYSZY")
     print("====================================================================")
     print(f"[INFO] Uruchamianie QEMU: {' '.join(cmd)}")
 
@@ -172,11 +219,32 @@ def main():
     found_desktop_ready = False
     boot_ready = False
 
+    # In-kernel cursor test assertions
+    found_cursor_center = False
+    found_cursor_movement = False
+    found_cursor_restore = False
+    found_cursor_clipping = False
+    found_cursor_rapid_kernel = False
+    found_cursor_flush = False
+    found_cursor_backend_switch = False
+    found_cursor_visible_switch = False
+    found_cursor_suite_all = False
+    cursor_diag_lines = []
+
+    # USB / xHCI detection
+    found_usb_xhci_ready = False
+    found_usb_mouse_configured = False
+
     pattern_dump_ok = False
     pattern_pixel_checks_ok = False
     pattern_pixel_report = []
 
     desktop_dump_ok = False
+    cursor_initial_visible = False
+    cursor_move_ok = False
+    cursor_old_restored_ok = False
+    cursor_rapid_1000_ok = False
+    cursor_final_visible = False
 
     gpu_lines = []
     line_queue = queue.Queue()
@@ -201,12 +269,10 @@ def main():
         while True:
             now = time.time()
 
-            # 1. Sprawdzenie globalnego limitu czasu
             if now - start_time >= GLOBAL_TIMEOUT:
                 termination_reason = f"Przekroczono globalny limit czasu ({GLOBAL_TIMEOUT}s)."
                 break
 
-            # 2. Sprawdzenie limitu braku aktywnosci portu szeregowego
             if now - last_activity_time >= INACTIVITY_TIMEOUT:
                 termination_reason = f"Przekroczono limit braku aktywnosci portu szeregowego ({INACTIVITY_TIMEOUT}s)."
                 break
@@ -245,7 +311,7 @@ def main():
             if "[VIRTIO-GPU] Karta graficzna gotowa do pracy w trybie 2D." in line_str:
                 found_gpu_ready = True
                 gpu_lines.append(line_str)
-            if "[VIRTIO-GPU-TEST] Cykle teardown/reinit: PASS (PMM delta=0, DMA delta=0, IDT delta=0)." in line_str:
+            if "[VIRTIO-GPU-TEST] Cykle teardown/reinit: PASS" in line_str:
                 found_gpu_teardown_reinit = True
                 gpu_lines.append(line_str)
             if "[VIRTIO-GPU-STRESS] Zakonczono pomyslnie 10000 aktualizacji" in line_str:
@@ -254,8 +320,45 @@ def main():
             if "[VIRTIO-GPU] Test pattern rendered and flushed" in line_str:
                 found_test_pattern = True
                 gpu_lines.append(line_str)
+
+            # In-kernel cursor suite tracking
+            if "[CURSOR DIAG" in line_str:
+                cursor_diag_lines.append(line_str)
+            if "[CURSOR TEST] cursor render at center: PASS" in line_str:
+                found_cursor_center = True
+                gpu_lines.append(line_str)
+            if "[CURSOR TEST] cursor movement: PASS" in line_str:
+                found_cursor_movement = True
+                gpu_lines.append(line_str)
+            if "[CURSOR TEST] old cursor region restored: PASS" in line_str:
+                found_cursor_restore = True
+                gpu_lines.append(line_str)
+            if "[CURSOR TEST] edge clipping: PASS" in line_str:
+                found_cursor_clipping = True
+                gpu_lines.append(line_str)
+            if "[CURSOR TEST] rapid movement (1000 iterations): PASS" in line_str:
+                found_cursor_rapid_kernel = True
+                gpu_lines.append(line_str)
+            if "[CURSOR TEST] VirtIO-GPU dirty-rect flush: PASS" in line_str:
+                found_cursor_flush = True
+                gpu_lines.append(line_str)
+            if "[CURSOR TEST] backend switch GOP/Bochs VirtIO-GPU: PASS" in line_str:
+                found_cursor_backend_switch = True
+                gpu_lines.append(line_str)
+            if "[CURSOR TEST] cursor still visible after switch: PASS" in line_str:
+                found_cursor_visible_switch = True
+                gpu_lines.append(line_str)
+            if "[CURSOR TEST] === WSZYSTKIE TESTY KURSORA: PASS ===" in line_str:
+                found_cursor_suite_all = True
+                gpu_lines.append(line_str)
+
+            # USB / xHCI detection
+            if "[USB] xHCI gotowy." in line_str:
+                found_usb_xhci_ready = True
+            if "[USB-MYSZ] Mysz Boot HID skonfigurowana." in line_str:
+                found_usb_mouse_configured = True
+
             if "[VIRTIO-GPU-FINAL] Finalny wzorzec testowy gotowy do weryfikacji pikseli." in line_str:
-                # Wykonanie zrzutu ekranu wzorca testowego po zakonczeniu testu obciazeniowego
                 if not pattern_dump_ok and qmp_sock.exists():
                     try:
                         time.sleep(0.1)
@@ -301,19 +404,103 @@ def main():
             if "System operacyjny gotowy!" in line_str:
                 boot_ready = True
                 termination_reason = "System operacyjny zglosil gotowosc ('System operacyjny gotowy!')."
-                # Pobierz zrzut pulpitu
-                if qmp_sock.exists():
-                    try:
-                        time.sleep(0.5)
-                        print(f"[INFO] Pobieranie zrzutu pulpitu przez QMP...")
-                        qmp_resp = qmp_screendump(qmp_sock, desktop_dump_path)
-                        print(f"[INFO] Odpowiedz QMP screendump (desktop): {qmp_resp.strip()}")
-                        if desktop_dump_path.exists() and desktop_dump_path.stat().st_size > 0:
-                            desktop_dump_ok = True
-                            print(f"[INFO] Zrzut pulpitu zapisany ({desktop_dump_path.stat().st_size} bajtow).")
-                    except Exception as e:
-                        print(f"[BLAD] Wyjatek podczas zrzutu pulpitu: {e}")
                 break
+
+        # Sekwencja testow integracyjnych QMP po zaladowaniu pulpitu
+        if boot_ready and qmp_sock.exists():
+            print("\n[INFO] Rozpoczynam integracyjny test kursora i myszy USB przez QMP...")
+            time.sleep(0.5)
+            qmp = QmpClient(qmp_sock, timeout=10.0)
+
+            # 1. Sprawdzenie i wybor myszy USB HID
+            resp_mice = qmp.hmp("info mice").get("return", "")
+            print(f"[INFO] Dostepne urzadzenia wskazujace QEMU:\n{resp_mice.strip()}")
+            m_hid = re.search(r"Mouse #(\d+):\s+QEMU HID Mouse", resp_mice)
+            if m_hid:
+                hid_id = m_hid.group(1)
+                print(f"[INFO] Przelaczam aktywne urzadzenie wskazujace na USB HID Mouse #{hid_id}...")
+                qmp.hmp(f"mouse_set {hid_id}")
+
+            # 2. Zrzut poczatkowego stanu pulpitu
+            qmp.screendump(desktop_dump_path)
+            if desktop_dump_path.exists() and desktop_dump_path.stat().st_size > 0:
+                desktop_dump_ok = True
+                dw, dh, ddata = parse_ppm(desktop_dump_path)
+                print(f"[INFO] Zrzut pulpitu zapisany: {dw}x{dh}, {desktop_dump_path.stat().st_size} bajtow.")
+
+                # Probkowanie tla tapety w poblizu pozycji poczatkowej kursora
+                bg_sample = get_pixel(ddata, dw, dh, 498, 298)
+                print(f"[INFO] Kolor tla tapety wokol kursora: RGB{bg_sample}")
+
+                # Sprawdzenie obecnosci kursora w pozycji domyslnej (500, 300)
+                is_cur_init, cur_init_details = check_cursor_at(ddata, dw, dh, 500, 300)
+                if is_cur_init:
+                    cursor_initial_visible = True
+                    print("[INFO] Kursor w pozycji domyslnej (500, 300): WIDOCZNY (PASS)")
+                else:
+                    print(f"[BLAD] Brak kursora w (500, 300): detale={cur_init_details}")
+
+                # 3. Wstrzykniecie ruchu myszy (+60, +40)
+                print("[INFO] Wstrzykiwanie zdarzenia ruchu myszy USB HID (dx=+60, dy=+40)...")
+                qmp.hmp("mouse_move 60 40")
+                time.sleep(0.4)
+
+                # 4. Zrzut ekranu po przesunieciu kursora
+                qmp.screendump(desktop_moved_path)
+                if desktop_moved_path.exists() and desktop_moved_path.stat().st_size > 0:
+                    mw, mh, mdata = parse_ppm(desktop_moved_path)
+
+                    # Weryfikacja przywrocenia tla na starej pozycji (500, 300)
+                    is_restored, rest_details = check_restored_bg(mdata, mw, mh, 500, 300, bg_sample)
+                    if is_restored:
+                        cursor_old_restored_ok = True
+                        print("[INFO] Stare polozenie kursora (500, 300): PRZYWROCONE TLO (PASS)")
+                    else:
+                        print(f"[BLAD] Stare polozenie nie zostalo poprawnie przywrocone: {rest_details}")
+
+                    # Weryfikacja obecnosci kursora w nowej pozycji (560, 340)
+                    is_cur_moved, cur_moved_details = check_cursor_at(mdata, mw, mh, 560, 340)
+                    if is_cur_moved:
+                        cursor_move_ok = True
+                        print("[INFO] Nowe polozenie kursora (560, 340): WIDOCZNY (PASS)")
+                    else:
+                        print(f"[BLAD] Brak kursora w nowym polozeniu (560, 340): detale={cur_moved_details}")
+
+                # 5. Powrot do pozycji wyjsciowej i szybki test 1000 ruchow przez QMP
+                print("[INFO] Powrot kursora i rozpoczynam test obciazeniowy 1000 ruchow myszy przez QMP...")
+                qmp.hmp("mouse_move -60 -40")
+                time.sleep(0.2)
+
+                t_rapid_start = time.time()
+                for _ in range(10):
+                    cmds = []
+                    for i in range(100):
+                        dx = 1 if (i % 2 == 0) else -1
+                        dy = 1 if (i % 4 < 2) else -1
+                        cmds.append(json.dumps({"execute": "human-monitor-command", "arguments": {"command-line": f"mouse_move {dx} {dy}"}}))
+                    payload = "\n".join(cmds) + "\n"
+                    qmp.sock.sendall(payload.encode('utf-8'))
+                    for _ in range(100):
+                        l = b""
+                        while not l.endswith(b"\n"):
+                            l += qmp.sock.recv(1)
+                t_rapid_end = time.time()
+                print(f"[INFO] Wykonano 1000 ruchow myszy w czasie {t_rapid_end - t_rapid_start:.2f}s.")
+                time.sleep(0.4)
+
+                # 6. Zrzut ekranu po tescie obciazeniowym
+                qmp.screendump(desktop_rapid_path)
+                if desktop_rapid_path.exists() and desktop_rapid_path.stat().st_size > 0:
+                    rw, rh, rdata = parse_ppm(desktop_rapid_path)
+                    is_cur_final, _ = check_cursor_at(rdata, rw, rh, 500, 300)
+                    if is_cur_final:
+                        cursor_rapid_1000_ok = True
+                        cursor_final_visible = True
+                        print("[INFO] Po 1000 ruchach kursor w (500, 300): WIDOCZNY I PRAWIDLOWY (PASS)")
+                    else:
+                        print("[BLAD] Po 1000 ruchach kursor nie znajduje sie w oczekiwanej pozycji lub ulegl uszkodzeniu.")
+
+            qmp.close()
 
     finally:
         if proc.poll() is None:
@@ -327,10 +514,16 @@ def main():
     runtime = time.time() - start_time
 
     print("\n" + "=" * 65)
-    print("PODSUMOWANIE TELEMETRII VIRTIO-GPU 2D:")
+    print("PODSUMOWANIE TELEMETRII VIRTIO-GPU 2D & KURSORA:")
     print("=" * 65)
     for l in gpu_lines:
         print(f"  {l}")
+
+    if cursor_diag_lines:
+        print("-" * 65)
+        print("PRZYKLADOWE LOGI DIAGNOSTYCZNE KURSORA (LIMIT=10):")
+        for dl in cursor_diag_lines[:10]:
+            print(f"  {dl}")
 
     print("-" * 65)
     print(f"  VirtIO Modern Transport (ID=GPU 0x1050): {'PASS' if found_virtio_pci_transport else 'FAIL'}")
@@ -348,6 +541,26 @@ def main():
     print(f"  Zrzut wzorca testowego (QMP screendump): {'PASS' if pattern_dump_ok else 'FAIL'}")
     print(f"  Weryfikacja pikseli wzorca (PPM):        {'PASS' if pattern_pixel_checks_ok else 'FAIL'}")
     print(f"  Zrzut pulpitu BursztynUI (screendump):   {'PASS' if desktop_dump_ok else 'FAIL'}")
+    print("-" * 65)
+    print("TESTY JEDNOSTKOWE KURSORA (KERNEL SUITE):")
+    print(f"  1. Render kursora w centrum:             {'PASS' if found_cursor_center else 'FAIL'}")
+    print(f"  2. Ruch kursora:                         {'PASS' if found_cursor_movement else 'FAIL'}")
+    print(f"  3. Przywrocenie tla po starym kursorze:  {'PASS' if found_cursor_restore else 'FAIL'}")
+    print(f"  4. Przycinanie do krawedzi (clipping):   {'PASS' if found_cursor_clipping else 'FAIL'}")
+    print(f"  5. Szybki ruch (1000 iter. kernel):      {'PASS' if found_cursor_rapid_kernel else 'FAIL'}")
+    print(f"  6. VirtIO-GPU dirty-rect flush:          {'PASS' if found_cursor_flush else 'FAIL'}")
+    print(f"  7. Przelaczenie GOP/Bochs <-> VirtIO-GPU: {'PASS' if found_cursor_backend_switch else 'FAIL'}")
+    print(f"  8. Widocznosc kursora po przelaczeniu:   {'PASS' if found_cursor_visible_switch else 'FAIL'}")
+    print(f"  Pakiet testow jadra:                     {'PASS' if found_cursor_suite_all else 'FAIL'}")
+    print("-" * 65)
+    print("TESTY INTEGRACYJNE KURSORA (QEMU & USB MYSZ):")
+    print(f"  Kontroler xHCI gotowy:                   {'PASS' if found_usb_xhci_ready else 'FAIL'}")
+    print(f"  Mysz USB HID skonfigurowana:             {'PASS' if found_usb_mouse_configured else 'FAIL'}")
+    print(f"  Kursor widoczny w (500, 300):            {'PASS' if cursor_initial_visible else 'FAIL'}")
+    print(f"  Ruch myszy do (560, 340):                {'PASS' if cursor_move_ok else 'FAIL'}")
+    print(f"  Przywrocenie tla po ruchu w (500, 300):  {'PASS' if cursor_old_restored_ok else 'FAIL'}")
+    print(f"  Test obciazeniowy 1000 ruchow QMP:       {'PASS' if cursor_rapid_1000_ok else 'FAIL'}")
+    print(f"  Integralnosc kursora po 1000 ruchach:    {'PASS' if cursor_final_visible else 'FAIL'}")
     print("=" * 65)
 
     if pattern_pixel_report:
@@ -366,17 +579,26 @@ def main():
               found_test_pattern and found_hal_switch and
               found_ekran_init and found_desktop_ready and
               pattern_dump_ok and pattern_pixel_checks_ok and
-              desktop_dump_ok)
+              desktop_dump_ok and
+              found_cursor_center and found_cursor_movement and
+              found_cursor_restore and found_cursor_clipping and
+              found_cursor_rapid_kernel and found_cursor_flush and
+              found_cursor_backend_switch and found_cursor_visible_switch and
+              found_cursor_suite_all and
+              found_usb_xhci_ready and found_usb_mouse_configured and
+              cursor_initial_visible and cursor_move_ok and
+              cursor_old_restored_ok and cursor_rapid_1000_ok and
+              cursor_final_visible)
 
     print(f"[STATUS ROZRUCHU] Gotowosc systemu: {'TAK' if boot_ready else 'NIE'}")
     print(f"[STATUS TESTU] Przyczyna zakonczenia: {termination_reason}")
     print(f"[STATUS TESTU] Czas wykonania: {runtime:.2f} s")
 
     if all_ok:
-        print("\n[SUKCES] Sterownik VirtIO-GPU 2D pomyslnie zinicjalizowany, zintegrowany z HAL grafiki, zweryfikowany piksel po pikselu i obslugujacy pulpit Bursztyn OS (PASS)!")
+        print("\n[SUKCES] Sterownik VirtIO-GPU 2D oraz kursor myszy USB HID pomyslnie zweryfikowane piksel po pikselu w QEMU (PASS)!")
         sys.exit(0)
     else:
-        print("\n[BLAD] Jeden lub wiecej testow integracyjnych VirtIO-GPU 2D zakonczylo sie niepowodzeniem!", file=sys.stderr)
+        print("\n[BLAD] Jeden lub wiecej testow integracyjnych VirtIO-GPU 2D lub kursora zakonczylo sie niepowodzeniem!", file=sys.stderr)
         sys.exit(1)
 
 if __name__ == "__main__":

@@ -3297,7 +3297,95 @@ void test_virtio_blk_stress_host() {
     TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku");
 
     VirtioBlkDriver* drv = virtio_blk_get_driver(0);
-    TEST_ASSERT(virtio_blk_stress_test(drv), "virtio_blk_stress_test zakonczony sukcesem");
+    // Domyslnie allow_destructive=false: krok zapisu 3 jest pomijany, test konczy sie sukcesem bez zapisu
+    TEST_ASSERT(virtio_blk_stress_test(drv, false), "virtio_blk_stress_test (non-destructive) zakonczony sukcesem");
+    // Weryfikacja ze zaden bajt w sektorze 2047 nie zostal zmodyfikowany
+    TEST_ASSERT(g_mock.blk_disk_data[2047 * 512] == 0, "Sektor 2047 nie zostal zmodyfikowany w trybie bezpiecznym");
+
+    virtio_blk_reset_all();
+}
+
+void test_virtio_blk_stress_destructive_no_marker() {
+    virtio_blk_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_blk_device(&dev, 4096, 512), "Probe dysku");
+    TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku");
+
+    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+    // allow_destructive=true, ale brak znacznika na dysku: krok zapisu 3 musi zostac pominiety!
+    TEST_ASSERT(virtio_blk_stress_test(drv, true), "virtio_blk_stress_test kontynuuje bezpiecznie");
+    // Weryfikacja ze sektor 4095 nie zostal zapisany
+    TEST_ASSERT(g_mock.blk_disk_data[4095 * 512] == 0, "Brak zapisu przy braku znacznika testowego");
+
+    virtio_blk_reset_all();
+}
+
+void test_virtio_blk_stress_destructive_bad_crc() {
+    virtio_blk_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_blk_device(&dev, 4096, 512), "Probe dysku");
+    TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku");
+
+    VirtioBlkTestMarker marker{};
+    std::memcpy(marker.magic, VIRTIO_BLK_TEST_MARKER_MAGIC, sizeof(VIRTIO_BLK_TEST_MARKER_MAGIC));
+    marker.signature = VIRTIO_BLK_TEST_SIGNATURE;
+    marker.version = VIRTIO_BLK_TEST_VERSION;
+    marker.flags = VIRTIO_BLK_TEST_FLAG_DESTRUCTIVE;
+    marker.scratch_lba = 100;
+    marker.scratch_sectors = 1;
+    marker.crc32 = 0xDEADBEEF; // Celowo bledny CRC
+    std::memcpy(&g_mock.blk_disk_data[1 * 512], &marker, sizeof(marker));
+
+    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+    TEST_ASSERT(virtio_blk_stress_test(drv, true), "virtio_blk_stress_test kontynuuje bezpiecznie przy bad CRC");
+    TEST_ASSERT(g_mock.blk_disk_data[100 * 512] == 0, "Brak zapisu przy uszkodzonym CRC znacznika");
+
+    virtio_blk_reset_all();
+}
+
+void test_virtio_blk_stress_destructive_boot_state_collision() {
+    virtio_blk_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_blk_device(&dev, 4096, 512), "Probe dysku");
+    TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku");
+
+    VirtioBlkTestMarker marker{};
+    std::memcpy(marker.magic, VIRTIO_BLK_TEST_MARKER_MAGIC, sizeof(VIRTIO_BLK_TEST_MARKER_MAGIC));
+    marker.signature = VIRTIO_BLK_TEST_SIGNATURE;
+    marker.version = VIRTIO_BLK_TEST_VERSION;
+    marker.flags = VIRTIO_BLK_TEST_FLAG_DESTRUCTIVE;
+    marker.scratch_lba = 2046; // Celowa kolizja z A/B boot-state!
+    marker.scratch_sectors = 1;
+    marker.crc32 = rozruch_oblicz_crc32(&marker, offsetof(VirtioBlkTestMarker, crc32));
+    std::memcpy(&g_mock.blk_disk_data[1 * 512], &marker, sizeof(marker));
+
+    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+    TEST_ASSERT(virtio_blk_stress_test(drv, true), "virtio_blk_stress_test odrzuca kolizje z LBA 2046");
+    TEST_ASSERT(g_mock.blk_disk_data[2046 * 512] == 0, "Brak zapisu w sektorze rozruchu 2046");
+
+    virtio_blk_reset_all();
+}
+
+void test_virtio_blk_stress_destructive_valid_marker() {
+    virtio_blk_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_blk_device(&dev, 4096, 512), "Probe dysku");
+    TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku");
+
+    VirtioBlkTestMarker marker{};
+    std::memcpy(marker.magic, VIRTIO_BLK_TEST_MARKER_MAGIC, sizeof(VIRTIO_BLK_TEST_MARKER_MAGIC));
+    marker.signature = VIRTIO_BLK_TEST_SIGNATURE;
+    marker.version = VIRTIO_BLK_TEST_VERSION;
+    marker.flags = VIRTIO_BLK_TEST_FLAG_DESTRUCTIVE;
+    marker.scratch_lba = 100;
+    marker.scratch_sectors = 1;
+    marker.crc32 = rozruch_oblicz_crc32(&marker, offsetof(VirtioBlkTestMarker, crc32));
+    std::memcpy(&g_mock.blk_disk_data[1 * 512], &marker, sizeof(marker));
+
+    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+    TEST_ASSERT(virtio_blk_stress_test(drv, true), "virtio_blk_stress_test (destructive) zakonczony pelnym sukcesem");
+    // Weryfikacja ze wzorzec testowy (pierwszy bajt 0xA5) zostal poprawnie zapisany w sektorze 100
+    TEST_ASSERT(g_mock.blk_disk_data[100 * 512] == 0xA5, "Sektor 100 zawiera wzorzec testowy 0xA5");
 
     virtio_blk_reset_all();
 }
@@ -4823,6 +4911,10 @@ int main() {
     RUN_TEST(test_virtio_blk_repeated_requests_and_recycling);
     RUN_TEST(test_virtio_blk_revalidate);
     RUN_TEST(test_virtio_blk_stress_host);
+    RUN_TEST(test_virtio_blk_stress_destructive_no_marker);
+    RUN_TEST(test_virtio_blk_stress_destructive_bad_crc);
+    RUN_TEST(test_virtio_blk_stress_destructive_boot_state_collision);
+    RUN_TEST(test_virtio_blk_stress_destructive_valid_marker);
 
     // Nowe testy Generic PCI MSI/MSI-X i VirtIO
     RUN_TEST(test_msi_parsing_and_enable);

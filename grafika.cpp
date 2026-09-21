@@ -358,15 +358,7 @@ public:
     uint32_t PobierzPitch() const { return pitch; }
     uint8_t PobierzBpp() const { return bpp; }
 
-    void ZapiszPikselFramebuffer(int x, int y, uint32_t kolor) {
-        if (!framebuffer_fizyczny || bpp != 32 || x < 0 || y < 0 ||
-            x >= static_cast<int>(szerokosc) || y >= static_cast<int>(wysokosc))
-            return;
-        volatile uint32_t* dst = reinterpret_cast<volatile uint32_t*>(
-            framebuffer_fizyczny + static_cast<uint64_t>(y) * pitch +
-            static_cast<uint64_t>(x) * 4ULL);
-        *dst = kolor;
-    }
+    volatile uint8_t* PobierzBuforFizyczny() const { return framebuffer_fizyczny; }
 };
 
 class SterownikVESA final : public SterownikEkranu {
@@ -434,6 +426,23 @@ public:
         return true;
     }
 
+    bool Inicjalizuj(uint64_t adres_lfb,
+                     uint32_t w,
+                     uint32_t h,
+                     uint32_t p,
+                     uint8_t b) override {
+        if (drv && drv->fb_vaddr) {
+            adres_lfb = reinterpret_cast<uint64_t>(drv->fb_vaddr);
+            w = drv->fb_width;
+            h = drv->fb_height;
+            p = drv->fb_stride;
+            b = 32;
+        }
+        return SterownikEkranu::Inicjalizuj(adres_lfb, w, h, p, b);
+    }
+
+    VirtioGpuDriver* PobierzSterownikGPU() const { return drv; }
+
     void KopiujNaEkran(uint8_t* bufor) override {
         if (!drv || !drv->initialized || drv->has_error) return;
         if (static_cast<const void*>(bufor) != static_cast<const void*>(const_cast<const uint8_t*>(framebuffer_fizyczny))) {
@@ -450,12 +459,18 @@ public:
         if (!drv || !drv->initialized || drv->has_error) return;
         if (szer <= 0 || wys <= 0) return;
 
-        int rx = x < 0 ? 0 : x;
-        int ry = y < 0 ? 0 : y;
-        if (rx >= static_cast<int>(szerokosc) || ry >= static_cast<int>(wysokosc)) return;
-        int rw = (rx + szer > static_cast<int>(szerokosc)) ? (static_cast<int>(szerokosc) - rx) : szer;
-        int rh = (ry + wys > static_cast<int>(wysokosc)) ? (static_cast<int>(wysokosc) - ry) : wys;
-        if (rw <= 0 || rh <= 0) return;
+        int x0 = x < 0 ? 0 : x;
+        int y0 = y < 0 ? 0 : y;
+        int x1 = x + szer;
+        int y1 = y + wys;
+        if (x1 > static_cast<int>(szerokosc)) x1 = static_cast<int>(szerokosc);
+        if (y1 > static_cast<int>(wysokosc)) y1 = static_cast<int>(wysokosc);
+        if (x0 >= x1 || y0 >= y1) return;
+
+        int rx = x0;
+        int ry = y0;
+        int rw = x1 - x0;
+        int rh = y1 - y0;
 
         if (static_cast<const void*>(bufor) != static_cast<const void*>(const_cast<const uint8_t*>(framebuffer_fizyczny))) {
             KopiujFragment32(bufor, rx, ry, rw, rh);
@@ -471,6 +486,10 @@ static SterownikEkranu* aktywny_ekran = nullptr;
 static uint8_t* backbuffer = nullptr;
 static size_t backbuffer_bajty=0;
 static uint64_t ekran_lfb_va=0, ekran_vram=0;
+static uint64_t boot_lfb_va = 0;
+static uint32_t boot_szer = 0, boot_wys = 0, boot_pitch = 0, boot_bpp = 0;
+static MozliwosciEkranu boot_ekran_caps{};
+static SterownikEkranu* boot_sterownik = nullptr;
 static MozliwosciEkranu ekran_caps{};
 static TrybEkranu ekran_tryby[EKRAN_MAX_TRYBOW]{};
 static uint32_t ekran_liczba_trybow=0;
@@ -1117,18 +1136,50 @@ void grafika_zakoncz_skladanie() {
     tryb_skladania_obrazu = false;
 }
 
-void grafika_naloz_kursor_regionu(int x, int y, int szer, int wys) {
-    if (!aktywny_ekran || szer <= 0 || wys <= 0) return;
-    const int x1=x+szer, y1=y+wys;
-    const StanKursoraProcesu* stan=aktywny_stan_kursora();
-    int kw=16,kh=16,hx=0,hy=0;parametry_kursora(stan,&kw,&kh,&hx,&hy);
-    const int left=mysz_x-hx,top=mysz_y-hy;
-    for (int cy=0;cy<kh;++cy) for(int cx=0;cx<kw;++cx) {
-        const int px=left+cx, py=top+cy;
-        if(px<x||py<y||px>=x1||py>=y1) continue;
-        uint32_t kolor=0;if(piksel_kursora(stan,cx,cy,&kolor))
-            aktywny_ekran->ZapiszPikselFramebuffer(px,py,kolor);
+static uint32_t kursor_tlo_kopia[64 * 64];
+static uint32_t g_cursor_diag_logged = 0;
+static constexpr uint32_t CURSOR_DIAG_MAX = 10;
+
+static void log_cursor_diag(int old_x, int old_y, int new_x, int new_y,
+                            int old_rx, int old_ry, int old_rw, int old_rh, bool had_old,
+                            int new_rx, int new_ry, int new_rw, int new_rh, bool has_new) {
+    if (g_cursor_diag_logged >= CURSOR_DIAG_MAX) return;
+    ++g_cursor_diag_logged;
+
+    char buf[256]{};
+    char* p = buf;
+    char* end = buf + sizeof(buf);
+    auto app = [&](const char* s) { while (*s && p + 1 < end) *p++ = *s++; };
+    auto app_i = [&](int val) {
+        if (val < 0) { if (p + 1 < end) *p++ = '-'; val = -val; }
+        char b[16]; int idx = 0;
+        do { b[idx++] = '0' + (val % 10); val /= 10; } while (val > 0);
+        while (idx > 0 && p + 1 < end) *p++ = b[--idx];
+    };
+    app("[CURSOR DIAG #"); app_i(g_cursor_diag_logged);
+    app("] old=("); app_i(old_x); app(","); app_i(old_y);
+    app(") new=("); app_i(new_x); app(","); app_i(new_y);
+    app(") backend=");
+    app(ekran_caps.backend == EKRAN_VIRTIO_GPU ? "virtio-gpu" :
+        (ekran_caps.backend == EKRAN_BOCHS ? "bochs" :
+        (ekran_caps.backend == EKRAN_GOP ? "uefi-gop" : "vesa")));
+    app(" called=PrzeniesFragmentNaEkran");
+    if (had_old) {
+        app(" old_dirty=["); app_i(old_rx); app(","); app_i(old_ry);
+        app(" "); app_i(old_rw); app("x"); app_i(old_rh); app("]");
     }
+    if (has_new) {
+        app(" new_dirty=["); app_i(new_rx); app(","); app_i(new_ry);
+        app(" "); app_i(new_rw); app("x"); app_i(new_rh); app("]");
+    }
+    app("\n");
+    *p = '\0';
+    klog_serial(buf);
+}
+
+void grafika_naloz_kursor_regionu(int x, int y, int szer, int wys) {
+    (void)x; (void)y; (void)szer; (void)wys;
+    grafika_prezentuj_kursor_w(mysz_x, mysz_y);
 }
 
 void grafika_zakoncz_skladanie_regionu(int x,int y,int szer,int wys) {
@@ -1140,24 +1191,105 @@ void grafika_zakoncz_skladanie_regionu(int x,int y,int szer,int wys) {
 
 void grafika_prezentuj_region(int x,int y,int szer,int wys){PrzeniesFragmentNaEkran(x,y,szer,wys);}
 
-void grafika_prezentuj_kursor_w(int cursor_x,int cursor_y){
-    if(!aktywny_ekran||!backbuffer)return;
-    if(kursor_overlay_widoczny){
-        PrzeniesFragmentNaEkran(kursor_overlay_x,kursor_overlay_y,
-                                kursor_overlay_w,kursor_overlay_h);
-        kursor_overlay_widoczny=false;
+void grafika_prezentuj_kursor_w(int cursor_x, int cursor_y) {
+    if (!aktywny_ekran || !backbuffer) return;
+
+    const int sw = grafika_pobierz_szerokosc();
+    const int sh = grafika_pobierz_wysokosc();
+    if (sw <= 0 || sh <= 0) return;
+
+    const int stary_x = kursor_overlay_x;
+    const int stary_y = kursor_overlay_y;
+    const int stary_w = kursor_overlay_w;
+    const int stary_h = kursor_overlay_h;
+    const bool byl_widoczny = kursor_overlay_widoczny;
+
+    // 1. Odtworz obszar w starej pozycji kursora ze scene backbufferu
+    if (byl_widoczny && stary_w > 0 && stary_h > 0) {
+        PrzeniesFragmentNaEkran(stary_x, stary_y, stary_w, stary_h);
+        kursor_overlay_widoczny = false;
     }
-    /* Call barrier wystarcza sprzetowo dla UC-. Jawna bariera kompilatora
-       utrzymuje jednak niezalezna od optymalizatora kolejnosc restore->draw,
-       takze gdy stary i nowy prostokat sie przecinaja. */
+
     asm volatile("" ::: "memory");
-    const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
-    const StanKursoraProcesu* stan=aktywny_stan_kursora();
-    int kw=16,kh=16,hx=0,hy=0;parametry_kursora(stan,&kw,&kh,&hx,&hy);
-    const int left=cursor_x-hx,top=cursor_y-hy;
-    for(int cy=0;cy<kh;++cy)for(int cx=0;cx<kw;++cx){int px=left+cx,py=top+cy;if(px<0||py<0||px>=sw||py>=sh)continue;uint32_t kolor=0;if(!piksel_kursora(stan,cx,cy,&kolor))continue;aktywny_ekran->ZapiszPikselFramebuffer(px,py,kolor);}
-    kursor_overlay_x=left;kursor_overlay_y=top;kursor_overlay_w=kw;
-    kursor_overlay_h=kh;kursor_overlay_widoczny=true;
+
+    // 2. Zaktualizuj wspolrzedne i wylicz obciecie
+    const StanKursoraProcesu* stan = aktywny_stan_kursora();
+    int kw = 16, kh = 16, hx = 0, hy = 0;
+    parametry_kursora(stan, &kw, &kh, &hx, &hy);
+    if (kw > 64) kw = 64;
+    if (kh > 64) kh = 64;
+
+    const int left = cursor_x - hx;
+    const int top = cursor_y - hy;
+
+    int x0 = left < 0 ? 0 : left;
+    int y0 = top < 0 ? 0 : top;
+    int x1 = left + kw;
+    int y1 = top + kh;
+    if (x1 > sw) x1 = sw;
+    if (y1 > sh) y1 = sh;
+
+    if (x0 < x1 && y0 < y1) {
+        const int clip_w = x1 - x0;
+        const int clip_h = y1 - y0;
+        const uint32_t pitch = aktywny_ekran->PobierzPitch();
+
+        // 3. Zapisz piksele ze scene backbufferu pod nowy kursor
+        for (int y = 0; y < clip_h; ++y) {
+            const uint32_t* src = reinterpret_cast<const uint32_t*>(
+                backbuffer + static_cast<uint64_t>(y0 + y) * pitch + static_cast<uint64_t>(x0) * 4ULL);
+            uint32_t* dst = &kursor_tlo_kopia[y * clip_w];
+            for (int x = 0; x < clip_w; ++x) {
+                dst[x] = src[x];
+            }
+        }
+
+        // 4. Skomponuj kursor do backbufferu
+        for (int cy = 0; cy < kh; ++cy) {
+            const int py = top + cy;
+            if (py < y0 || py >= y1) continue;
+            for (int cx = 0; cx < kw; ++cx) {
+                const int px = left + cx;
+                if (px < x0 || px >= x1) continue;
+                uint32_t kolor = 0;
+                if (!piksel_kursora(stan, cx, cy, &kolor)) continue;
+                uint32_t* dst = reinterpret_cast<uint32_t*>(
+                    backbuffer + static_cast<uint64_t>(py) * pitch + static_cast<uint64_t>(px) * 4ULL);
+                *dst = kolor;
+            }
+        }
+
+        // 5. Przeslij nowy region dirty przez aktywny backend graficzny
+        PrzeniesFragmentNaEkran(x0, y0, clip_w, clip_h);
+
+        // 6. Natychmiast odtworz czysty scene backbuffer
+        for (int y = 0; y < clip_h; ++y) {
+            const uint32_t* src = &kursor_tlo_kopia[y * clip_w];
+            uint32_t* dst = reinterpret_cast<uint32_t*>(
+                backbuffer + static_cast<uint64_t>(y0 + y) * pitch + static_cast<uint64_t>(x0) * 4ULL);
+            for (int x = 0; x < clip_w; ++x) {
+                dst[x] = src[x];
+            }
+        }
+
+        kursor_overlay_x = x0;
+        kursor_overlay_y = y0;
+        kursor_overlay_w = clip_w;
+        kursor_overlay_h = clip_h;
+        kursor_overlay_widoczny = true;
+        mysz_x = cursor_x;
+        mysz_y = cursor_y;
+
+        if (g_cursor_diag_logged < CURSOR_DIAG_MAX) {
+            log_cursor_diag(stary_x, stary_y, cursor_x, cursor_y,
+                            stary_x, stary_y, stary_w, stary_h, byl_widoczny,
+                            x0, y0, clip_w, clip_h, true);
+        }
+    } else {
+        kursor_overlay_widoczny = false;
+        mysz_x = cursor_x;
+        mysz_y = cursor_y;
+    }
 }
 void grafika_prezentuj_kursor(){grafika_prezentuj_kursor_w(mysz_x,mysz_y);}
 
@@ -3073,6 +3205,13 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
     }
 
     aktywny_stan={SZER,WYS,PITCH,BPP,framebuffer_wirtualny,1};
+    boot_lfb_va = framebuffer_wirtualny;
+    boot_szer = SZER;
+    boot_wys = WYS;
+    boot_pitch = PITCH;
+    boot_bpp = BPP;
+    boot_sterownik = aktywny_ekran;
+    boot_ekran_caps = ekran_caps;
     log_granice_kursora("cursor", SZER, WYS, 1);
 
     for (uint64_t i = 0; i < lfb_waga; ++i)
@@ -3803,10 +3942,54 @@ bool grafika_aktywuj_virtio_gpu(VirtioGpuDriver* drv) {
     if (mysz_x >= int(drv->fb_width)) mysz_x = drv->fb_width - 1;
     if (mysz_y >= int(drv->fb_height)) mysz_y = drv->fb_height - 1;
 
+    ekran_lfb_va = reinterpret_cast<uint64_t>(drv->fb_vaddr);
+    kursor_overlay_widoczny = false;
+    kursor_overlay_x = 0;
+    kursor_overlay_y = 0;
+
+    PrzeniesNaEkran();
+    PokazKursor();
+
     SerialLog("[HAL] Aktywacja sterownika VirtIO-GPU 2D jako backend graficzny.\n");
     return true;
 }
+
+bool grafika_przywroc_boot_backend() {
+    if (!boot_sterownik || boot_lfb_va == 0) return false;
+
+    aktywny_ekran = boot_sterownik;
+    ekran_caps = boot_ekran_caps;
+    ekran_lfb_va = boot_lfb_va;
+
+    if (!aktywny_ekran->Inicjalizuj(boot_lfb_va, boot_szer, boot_wys, boot_pitch, boot_bpp)) {
+        return false;
+    }
+
+    aktywny_stan.szerokosc = boot_szer;
+    aktywny_stan.wysokosc = boot_wys;
+    aktywny_stan.pitch = boot_pitch;
+    aktywny_stan.bpp = boot_bpp;
+    aktywny_stan.framebuffer = boot_lfb_va;
+    if (++aktywny_stan.generacja == 0) ++aktywny_stan.generacja;
+
+    kursor_overlay_widoczny = false;
+    kursor_overlay_x = 0;
+    kursor_overlay_y = 0;
+
+    PrzeniesNaEkran();
+    PokazKursor();
+
+    SerialLog("[HAL] Przywrocono boot backend graficzny.\n");
+    return true;
+}
+
 void grafika_wymien_stan(const StanBuforowEkranu&s){
+    if (ekran_caps.backend == EKRAN_VIRTIO_GPU) {
+        VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+        if (drv && drv->fb_vaddr) {
+            ekran_lfb_va = reinterpret_cast<uint64_t>(drv->fb_vaddr);
+        }
+    }
     aktywny_ekran->Inicjalizuj(ekran_lfb_va,s.tryb.szerokosc,s.tryb.wysokosc,s.tryb.pitch,s.tryb.bpp);
     backbuffer=s.backbuffer;bufor_tapety=s.tapeta;backbuffer_bajty=s.bajty;
     tapeta_zmapowane_bajty=s.tapeta_bajty;bufor_tapety_zmapowany=bufor_tapety!=nullptr;tapeta_zaladowana=s.ma_tapete;
@@ -3832,3 +4015,196 @@ void grafika_zwolnij_stan(StanBuforowEkranu*s){
     if(!s)return;
     bufor_grafiki_zwolnij(s->backbuffer);bufor_grafiki_zwolnij(s->tapeta);*s={};
 }
+
+bool grafika_test_kursor_suite(VirtioGpuDriver* gpu_drv) {
+    wypisz_log("[CURSOR TEST] === ROZPOCZECIE PAKIETU TESTOW KURSORA ===");
+
+    const int sw = grafika_pobierz_szerokosc();
+    const int sh = grafika_pobierz_wysokosc();
+    if (sw <= 0 || sh <= 0 || !aktywny_ekran || !backbuffer) {
+        wypisz_log("[CURSOR TEST] BLAD: Niepoprawne srodowisko graficzne.");
+        return false;
+    }
+
+    const uint32_t pitch = aktywny_ekran->PobierzPitch();
+
+    // 1. Test: cursor render at center
+    const int cx = sw / 2;
+    const int cy = sh / 2;
+
+    for (int dy = -16; dy < 32; ++dy) {
+        for (int dx = -16; dx < 32; ++dx) {
+            int px = cx + dx, py = cy + dy;
+            if (px >= 0 && px < sw && py >= 0 && py < sh) {
+                reinterpret_cast<uint32_t*>(backbuffer + static_cast<uint64_t>(py) * pitch + static_cast<uint64_t>(px) * 4ULL)[0] = 0x00112233;
+            }
+        }
+    }
+    PrzeniesFragmentNaEkran(cx - 16, cy - 16, 48, 48);
+
+    grafika_prezentuj_kursor_w(cx, cy);
+
+    bool test1_pass = kursor_overlay_widoczny && (kursor_overlay_x == cx) && (kursor_overlay_y == cy);
+    volatile uint32_t* fb32 = reinterpret_cast<volatile uint32_t*>(aktywny_stan.framebuffer);
+    if (fb32) {
+        uint32_t p0 = fb32[static_cast<uint64_t>(cy) * (pitch / 4) + static_cast<uint64_t>(cx)];
+        uint32_t p1 = fb32[static_cast<uint64_t>(cy + 1) * (pitch / 4) + static_cast<uint64_t>(cx + 1)];
+        if ((p0 & 0x00FFFFFFU) != 0x00000000U || (p1 & 0x00FFFFFFU) != 0x00FFFFFFU) {
+            test1_pass = false;
+        }
+    }
+    uint32_t bb_clean = *reinterpret_cast<const uint32_t*>(backbuffer + static_cast<uint64_t>(cy) * pitch + static_cast<uint64_t>(cx) * 4ULL);
+    if (bb_clean != 0x00112233) test1_pass = false;
+
+    if (test1_pass) {
+        wypisz_log("[CURSOR TEST] cursor render at center: PASS");
+    } else {
+        wypisz_log("[CURSOR TEST] cursor render at center: FAIL");
+        return false;
+    }
+
+    // 2. Test: cursor movement
+    const int new_x = cx + 40;
+    const int new_y = cy + 30;
+    grafika_prezentuj_kursor_w(new_x, new_y);
+
+    bool test2_pass = kursor_overlay_widoczny && (kursor_overlay_x == new_x) && (kursor_overlay_y == new_y);
+    if (fb32) {
+        uint32_t np0 = fb32[static_cast<uint64_t>(new_y) * (pitch / 4) + static_cast<uint64_t>(new_x)];
+        uint32_t np1 = fb32[static_cast<uint64_t>(new_y + 1) * (pitch / 4) + static_cast<uint64_t>(new_x + 1)];
+        if ((np0 & 0x00FFFFFFU) != 0x00000000U || (np1 & 0x00FFFFFFU) != 0x00FFFFFFU) {
+            test2_pass = false;
+        }
+    }
+    if (test2_pass) {
+        wypisz_log("[CURSOR TEST] cursor movement: PASS");
+    } else {
+        wypisz_log("[CURSOR TEST] cursor movement: FAIL");
+        return false;
+    }
+
+    // 3. Test: old cursor region restored
+    bool test3_pass = true;
+    if (fb32) {
+        uint32_t old_restored_0 = fb32[static_cast<uint64_t>(cy) * (pitch / 4) + static_cast<uint64_t>(cx)];
+        uint32_t old_restored_1 = fb32[static_cast<uint64_t>(cy + 1) * (pitch / 4) + static_cast<uint64_t>(cx + 1)];
+        if ((old_restored_0 & 0x00FFFFFFU) != 0x00112233 || (old_restored_1 & 0x00FFFFFFU) != 0x00112233) {
+            test3_pass = false;
+        }
+    }
+    if (test3_pass) {
+        wypisz_log("[CURSOR TEST] old cursor region restored: PASS");
+    } else {
+        wypisz_log("[CURSOR TEST] old cursor region restored: FAIL");
+        return false;
+    }
+
+    // 4. Test: edge clipping
+    bool test4_pass = true;
+    grafika_prezentuj_kursor_w(-5, -5);
+    if (!kursor_overlay_widoczny || kursor_overlay_x != 0 || kursor_overlay_y != 0 ||
+        kursor_overlay_w != 11 || kursor_overlay_h != 11) {
+        test4_pass = false;
+    }
+    grafika_prezentuj_kursor_w(sw - 5, sh - 5);
+    if (!kursor_overlay_widoczny || kursor_overlay_x != sw - 5 || kursor_overlay_y != sh - 5 ||
+        kursor_overlay_w != 5 || kursor_overlay_h != 5) {
+        test4_pass = false;
+    }
+    grafika_prezentuj_kursor_w(-100, -100);
+    if (kursor_overlay_widoczny) {
+        test4_pass = false;
+    }
+    if (test4_pass) {
+        wypisz_log("[CURSOR TEST] edge clipping: PASS");
+    } else {
+        wypisz_log("[CURSOR TEST] edge clipping: FAIL");
+        return false;
+    }
+
+    // 5. Test: rapid movement (1000 iterations)
+    bool test5_pass = true;
+    for (int i = 0; i < 1000; ++i) {
+        int rx = 100 + (i * 7) % 300;
+        int ry = 100 + (i * 11) % 200;
+        grafika_prezentuj_kursor_w(rx, ry);
+        if (gpu_drv && gpu_drv->has_error) {
+            test5_pass = false;
+            break;
+        }
+    }
+    if (test5_pass) {
+        wypisz_log("[CURSOR TEST] rapid movement (1000 iterations): PASS");
+    } else {
+        wypisz_log("[CURSOR TEST] rapid movement (1000 iterations): FAIL");
+        return false;
+    }
+
+    // 6. Test: VirtIO-GPU dirty-rect flush
+    bool test6_pass = true;
+    if (gpu_drv) {
+        uint64_t before_m = gpu_drv->flush_count;
+        grafika_prezentuj_kursor_w(200, 200);
+        grafika_prezentuj_kursor_w(250, 250);
+        uint64_t after_m = gpu_drv->flush_count;
+        if (after_m <= before_m + 2) {
+            test6_pass = false;
+        }
+    }
+    if (test6_pass) {
+        wypisz_log("[CURSOR TEST] VirtIO-GPU dirty-rect flush: PASS");
+    } else {
+        wypisz_log("[CURSOR TEST] VirtIO-GPU dirty-rect flush: FAIL");
+        return false;
+    }
+
+    // 7. Test: backend switch GOP/Bochs VirtIO-GPU
+    bool test7_pass = true;
+    if (gpu_drv) {
+        bool sw_boot = grafika_przywroc_boot_backend();
+        if (!sw_boot || ekran_caps.backend == EKRAN_VIRTIO_GPU) {
+            test7_pass = false;
+        }
+        bool sw_gpu = grafika_aktywuj_virtio_gpu(gpu_drv);
+        if (!sw_gpu || ekran_caps.backend != EKRAN_VIRTIO_GPU) {
+            test7_pass = false;
+        }
+        if (aktywny_stan.framebuffer != reinterpret_cast<uint64_t>(gpu_drv->fb_vaddr)) {
+            test7_pass = false;
+        }
+    }
+    if (test7_pass) {
+        wypisz_log("[CURSOR TEST] backend switch GOP/Bochs VirtIO-GPU: PASS");
+    } else {
+        wypisz_log("[CURSOR TEST] backend switch GOP/Bochs VirtIO-GPU: FAIL");
+        return false;
+    }
+
+    // 8. Test: cursor still visible after switch
+    bool test8_pass = true;
+    grafika_prezentuj_kursor_w(500, 300);
+    if (!kursor_overlay_widoczny || kursor_overlay_x != 500 || kursor_overlay_y != 300) {
+        test8_pass = false;
+    }
+    if (fb32) {
+        uint32_t sp0 = fb32[300ULL * (pitch / 4) + 500ULL];
+        uint32_t sp1 = fb32[301ULL * (pitch / 4) + 501ULL];
+        if ((sp0 & 0x00FFFFFFU) != 0x00000000U || (sp1 & 0x00FFFFFFU) != 0x00FFFFFFU) {
+            test8_pass = false;
+        }
+    }
+    if (test8_pass) {
+        wypisz_log("[CURSOR TEST] cursor still visible after switch: PASS");
+    } else {
+        wypisz_log("[CURSOR TEST] cursor still visible after switch: FAIL");
+        return false;
+    }
+
+    wypisz_log("[CURSOR TEST] === WSZYSTKIE TESTY KURSORA: PASS ===");
+
+    mysz_x = 500;
+    mysz_y = 300;
+    grafika_prezentuj_kursor_w(500, 300);
+    return true;
+}
+

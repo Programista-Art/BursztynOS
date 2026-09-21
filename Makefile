@@ -60,6 +60,10 @@ VIRTUAL_DISK := wirtualny_dysk.img
 
 CI_TEST_DIR := .isodir_ci_test
 CI_TEST_ISO := .bursztyn_ci_test.iso
+CI_BLK_DIR  := .isodir_ci_blk_destructive
+CI_BLK_DESTRUCTIVE_ISO := .bursztyn_ci_blk_destructive.iso
+CI_DEST_ONLY_DIR := .isodir_ci_dest_only
+CI_DESTRUCTIVE_ONLY_ISO := .bursztyn_ci_destructive_only.iso
 
 LARGE_TEST_BMP ?= $(firstword $(wildcard obrazy/test8k.bmp) $(wildcard obrazy/2test.bmp) obrazy/test8k.bmp)
 
@@ -702,6 +706,14 @@ $(GRUB_CFG): $(KERNEL) $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
+		'menuentry "Bursztyn OS - testy automatyczne (niszczacy test dysku)" {' \
+		'    insmod all_video' \
+		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxpayload=keep' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.test.diskdestructive=1' \
+		'    module2 /boot/tapety.pak tapety.pak' \
+		'    boot' \
+		'}' \
 		'menuentry "Bursztyn OS Instalator" {' \
 		'    insmod all_video' \
 		'    set gfxmode=1280x720x32,1024x768x32,auto' \
@@ -718,7 +730,7 @@ $(GRUB_CFG): $(KERNEL) $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile
 	@mkdir -p .installer-build
 	grub-mkstandalone -O x86_64-efi --locales="" --fonts="" --modules="part_gpt fat loadenv test normal multiboot2 configfile search search_fs_file all_video gfxterm" -o $@ "boot/grub/grub.cfg=$<"
 
-.PHONY: test-network-device test-e1000-qemu test-virtio-pci test-virtio-qemu test-virtio-blk-qemu test-virtio-net-qemu test-virtio-gpu-qemu installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-aktualizacje-gui test-bur-loader test-aktualizacja-qemu test-rozruch-qemu test-ota audit-stos-jadra test-stos-jadra test-wspolbieznosc test-guard-page test-16k-bws84 test-motywy test-motywy-unit test-motywy-gui test-motywy-qemu test-notatnik-gui test-kalkulator-gui test-bursztyn-ui-polecenia test-kontrolki4 test-kontrolki4-qemu
+.PHONY: test-network-device test-e1000-qemu test-virtio-pci test-virtio-qemu test-virtio-blk-qemu test-virtio-net-qemu test-virtio-gpu-qemu test-normal-boot installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-aktualizacje-gui test-bur-loader test-aktualizacja-qemu test-rozruch-qemu test-ota audit-stos-jadra test-stos-jadra test-wspolbieznosc test-guard-page test-16k-bws84 test-motywy test-motywy-unit test-motywy-gui test-motywy-qemu test-notatnik-gui test-kalkulator-gui test-bursztyn-ui-polecenia test-kontrolki4 test-kontrolki4-qemu
 
 test-network-device:
 	@mkdir -p .nettest
@@ -733,17 +745,20 @@ test-virtio-pci:
 	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -pthread pci.cpp virtio_pci.cpp virtqueue.cpp virtio_rng.cpp virtio_blk.cpp network_device.cpp virtio_net.cpp virtio_gpu.cpp narzedzia/test_virtio_pci.cpp -o .virtiotest/test-virtio-pci
 	ASAN_OPTIONS=detect_leaks=1 .virtiotest/test-virtio-pci
 
-test-virtio-qemu: iso
+test-virtio-qemu: $(CI_TEST_ISO)
 	$(PYTHON) narzedzia/test_virtio_qemu.py
 
-test-virtio-blk-qemu: iso
+test-virtio-blk-qemu: $(CI_TEST_ISO)
 	$(PYTHON) narzedzia/test_virtio_blk_qemu.py
 
-test-virtio-net-qemu: iso
+test-virtio-net-qemu: $(CI_TEST_ISO)
 	$(PYTHON) narzedzia/test_virtio_net_qemu.py
 
-test-virtio-gpu-qemu: iso
+test-virtio-gpu-qemu: $(CI_TEST_ISO)
 	$(PYTHON) narzedzia/test_virtio_gpu_qemu.py
+
+test-normal-boot: iso
+	$(PYTHON) narzedzia/test_normal_boot_qemu.py
 
 test-kontrolki4:
 	@mkdir -p .kontrolki4-test
@@ -862,6 +877,46 @@ $(CI_TEST_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
 		> $(CI_TEST_DIR)/boot/grub/grub.cfg
 	@$(GRUB_MKRESCUE) -o $@ $(CI_TEST_DIR) --xorriso=$(XORRISO) >/dev/null 2>&1
 	@rm -rf $(CI_TEST_DIR)
+
+$(CI_BLK_DESTRUCTIVE_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
+	@mkdir -p $(CI_BLK_DIR)/boot/grub
+	@cp $(KERNEL) $(CI_BLK_DIR)/boot/
+	@cp $(TAPETY_PAK) $(CI_BLK_DIR)/boot/tapety.pak
+	@printf '%s\n' \
+		'set timeout=0' \
+		'set default=0' \
+		'' \
+		'menuentry "Bursztyn OS - testy automatyczne (niszczacy test dysku)" {' \
+		'    insmod all_video' \
+		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxpayload=keep' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.test.diskdestructive=1' \
+		'    module2 /boot/tapety.pak tapety.pak' \
+		'    boot' \
+		'}' \
+		> $(CI_BLK_DIR)/boot/grub/grub.cfg
+	@$(GRUB_MKRESCUE) -o $@ $(CI_BLK_DIR) --xorriso=$(XORRISO) >/dev/null 2>&1
+	@rm -rf $(CI_BLK_DIR)
+
+$(CI_DESTRUCTIVE_ONLY_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
+	@mkdir -p $(CI_DEST_ONLY_DIR)/boot/grub
+	@cp $(KERNEL) $(CI_DEST_ONLY_DIR)/boot/
+	@cp $(TAPETY_PAK) $(CI_DEST_ONLY_DIR)/boot/tapety.pak
+	@printf '%s\n' \
+		'set timeout=0' \
+		'set default=0' \
+		'' \
+		'menuentry "Bursztyn OS - flaga niszczaca bez trybu automatycznego" {' \
+		'    insmod all_video' \
+		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxpayload=keep' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test.diskdestructive=1' \
+		'    module2 /boot/tapety.pak tapety.pak' \
+		'    boot' \
+		'}' \
+		> $(CI_DEST_ONLY_DIR)/boot/grub/grub.cfg
+	@$(GRUB_MKRESCUE) -o $@ $(CI_DEST_ONLY_DIR) --xorriso=$(XORRISO) >/dev/null 2>&1
+	@rm -rf $(CI_DEST_ONLY_DIR)
 
 #
 # Developerskie ISO 8K (BursztynOS_8k.iso) - dolacza modul Multiboot2 test8k.bmp oraz tapety.pak
@@ -1087,7 +1142,7 @@ clean:
 	rm -f tapety.pak tapety.pak.d $(TAPETY_SOURCES_MANIFEST) $(TAPETY_ISO_CHECK) $(GRUB_ISO_CHECK) tapety_manifest.h tapetyzasoby.S tapetyzasoby.d tapety_zasoby.rsp tapety_zasoby.d tapety_zasoby.S tapety_zasoby.o
 	rm -f biblioteki/mbedtls/library/*.o biblioteki/mbedtls/library/*.su
 	rm -f $(OVMF_VARS_RUNTIME)
-	rm -rf $(ISO_DIR) $(ISO8K_DIR) $(CI_TEST_DIR) isodir_test
+	rm -rf $(ISO_DIR) $(ISO8K_DIR) $(CI_TEST_DIR) $(CI_BLK_DIR) $(CI_DEST_ONLY_DIR) isodir_test
 
 #
 # Zachowanie starej nazwy `clear`.

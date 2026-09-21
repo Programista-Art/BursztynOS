@@ -13,6 +13,32 @@
 #include "virtio_pci.h"
 #include "virtqueue.h"
 #include "block_device.h"
+#include "aktualizacja_rozruch.h"
+
+/*
+ * Sygnatura i struktura znacznika dedykowanego dysku testowego (scratch disk).
+ * Wymagana do autoryzacji niszczacych testow zapisu VirtIO-BLK (LBA 1).
+ */
+#define VIRTIO_BLK_TEST_MARKER_LBA       1ULL
+#define VIRTIO_BLK_TEST_MARKER_MAGIC     "BURSZTYN_TEST_SCRATCH_DISK_V1"
+#define VIRTIO_BLK_TEST_SIGNATURE        0x425552535A54594EULL /* "BURSZTYN" */
+#define VIRTIO_BLK_TEST_VERSION          1U
+#define VIRTIO_BLK_TEST_FLAG_DESTRUCTIVE 0x00000001U
+
+#pragma pack(push, 1)
+struct VirtioBlkTestMarker {
+    char     magic[32];
+    uint64_t signature;
+    uint32_t version;
+    uint32_t flags;
+    uint64_t scratch_lba;
+    uint32_t scratch_sectors;
+    uint8_t  reserved[448];
+    uint32_t crc32;
+};
+#pragma pack(pop)
+
+static_assert(sizeof(VirtioBlkTestMarker) == 512, "VirtioBlkTestMarker rozmiar != 512 B");
 
 #ifdef __cplusplus
 extern "C" {
@@ -160,8 +186,10 @@ void virtio_blk_reset_all(void);
 /*
  * Test obciazeniowy / integracyjny dla wskazanego dysku VirtIO-BLK:
  * weryfikuje zapis, odczyt, flush, zawijanie pierscienia i spojnosc danych.
+ * Niszczace operacje zapisu (Krok 3) sa dozwolone wylacznie gdy allow_destructive=true
+ * ORAZ nosnik zostanie pozytywnie zweryfikowany jako dedykowany dysk testowy (znacznik LBA 1).
  */
-bool virtio_blk_stress_test(VirtioBlkDriver* drv);
+bool virtio_blk_stress_test(VirtioBlkDriver* drv, bool allow_destructive = false);
 
 /*
  * Polskie aliasy ABI zgodne ze stylem Bursztyn OS:

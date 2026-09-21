@@ -957,6 +957,42 @@ bool zadano_test_stack_guard(uint64_t mbi) {
     return false;
 }
 
+bool zadano_destrukcyjne_testy_dysku(uint64_t mbi) {
+    if (mbi == 0) return false;
+
+    const volatile uint32_t* info =
+        reinterpret_cast<const volatile uint32_t*>(mbi);
+    const uint32_t calosc = info[0];
+    if (calosc < 16 || mbi > UINT64_MAX - calosc) return false;
+
+    uint64_t off = 8;
+    while (off + sizeof(WpisTaguMB2) <= calosc) {
+        const WpisTaguMB2* tag =
+            reinterpret_cast<const WpisTaguMB2*>(mbi + off);
+        if (tag->rozmiar < sizeof(WpisTaguMB2) ||
+            off + tag->rozmiar > calosc) {
+            return false;
+        }
+
+        if (tag->typ == 1 /* MULTIBOOT_TAG_TYPE_CMDLINE */ &&
+            tag->rozmiar > sizeof(WpisTaguMB2)) {
+            const char* cmdline = reinterpret_cast<const char*>(mbi + off + 8);
+            const uint32_t pojemnosc = tag->rozmiar - 8;
+            for (uint32_t i = 0; i < pojemnosc; ++i) {
+                if (cmdline[i] == '\0') {
+                    return tekst_zawiera(
+                        cmdline, "bursztyn.test.diskdestructive=1");
+                }
+            }
+            return false;
+        }
+
+        if (tag->typ == MULTIBOOT_TAG_TYPE_END) break;
+        off = (off + tag->rozmiar + 7ULL) & ~7ULL;
+    }
+    return false;
+}
+
 void importuj_modul_test8k(uint64_t mbi) {
     if (mbi == 0) return;
 
@@ -2232,17 +2268,40 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     blokowy_inicjalizuj();
     inicjalizuj_kontroler_ahci();
     virtio_pci_inicjalizuj();
+
+    const bool tryb_testowy = zadano_automatyczne_testy(g_multiboot_info_ptr);
+    const bool tryb_destrukcyjny_dysk = tryb_testowy && zadano_destrukcyjne_testy_dysku(g_multiboot_info_ptr);
+    if (!tryb_testowy) {
+        wypisz_log("[NORMAL BOOT] VirtIO self-tests skipped.");
+    }
+
     if (virtio_rng_probe_and_init()) {
         VirtioRngDriver* rng_drv = virtio_rng_get_driver();
         if (rng_drv && rng_drv->dev) {
-            virtio_rng_stress_test(rng_drv->dev);
+            if (tryb_testowy) {
+                virtio_rng_stress_test(rng_drv->dev);
+            } else {
+                uint8_t entropy_check[16]{};
+                size_t n = virtio_rng_read(entropy_check, sizeof(entropy_check));
+                if (n == sizeof(entropy_check)) {
+                    wypisz_log("[VIRTIO-RNG] Sanity check: OK (16B entropy read).");
+                }
+            }
         }
     }
     const uint32_t virtio_blk_count = virtio_blk_probe_and_init();
     if (virtio_blk_count > 0) {
         VirtioBlkDriver* blk_drv = virtio_blk_get_driver(0);
         if (blk_drv && blk_drv->initialized) {
-            virtio_blk_stress_test(blk_drv);
+            if (tryb_testowy) {
+                virtio_blk_stress_test(blk_drv, tryb_destrukcyjny_dysk);
+            } else {
+                uint8_t sec0[512]{};
+                BlockError err = blk_drv->bdev.read(0, 1, sec0);
+                if (err == BlockError::Ok) {
+                    wypisz_log("[VIRTIO-BLK] Sanity check: OK (read LBA 0).");
+                }
+            }
         }
     }
 
@@ -2250,12 +2309,17 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     if (virtio_gpu_count > 0) {
         VirtioGpuDriver* gpu_drv = virtio_gpu_get_driver(0);
         if (gpu_drv && gpu_drv->initialized) {
-            virtio_gpu_test_teardown_reinit(gpu_drv);
-            gpu_drv = virtio_gpu_get_driver(0);
-            if (gpu_drv && gpu_drv->initialized) {
-                virtio_gpu_stress_dirty_rectangles(gpu_drv);
-                virtio_gpu_render_test_pattern(gpu_drv);
-                wypisz_log("[VIRTIO-GPU-FINAL] Finalny wzorzec testowy gotowy do weryfikacji pikseli.");
+            if (tryb_testowy) {
+                virtio_gpu_test_teardown_reinit(gpu_drv);
+                gpu_drv = virtio_gpu_get_driver(0);
+                if (gpu_drv && gpu_drv->initialized) {
+                    virtio_gpu_stress_dirty_rectangles(gpu_drv);
+                    virtio_gpu_render_test_pattern(gpu_drv);
+                    wypisz_log("[VIRTIO-GPU-FINAL] Finalny wzorzec testowy gotowy do weryfikacji pikseli.");
+                    grafika_aktywuj_virtio_gpu(gpu_drv);
+                    grafika_test_kursor_suite(gpu_drv);
+                }
+            } else {
                 grafika_aktywuj_virtio_gpu(gpu_drv);
             }
         }
@@ -2272,7 +2336,9 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     if (virtio_net_count > 0) {
         VirtioNetDriver* net_drv = virtio_net_get_driver(0);
         if (net_drv && net_drv->initialized) {
-            virtio_net_stress_test(net_drv);
+            if (tryb_testowy) {
+                virtio_net_stress_test(net_drv);
+            }
         }
     }
 

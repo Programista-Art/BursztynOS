@@ -241,3 +241,6 @@ void grafika_wymien_stan(const StanBuforowEkranu&);
 void grafika_zwolnij_stan(StanBuforowEkranu*);
 struct VirtioGpuDriver;
 bool grafika_aktywuj_virtio_gpu(VirtioGpuDriver* drv);
+bool grafika_przywroc_boot_backend();
+bool grafika_test_kursor_suite(VirtioGpuDriver* gpu_drv);
+

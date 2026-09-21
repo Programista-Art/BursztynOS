@@ -10,10 +10,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 def main():
-    iso = ROOT / "BursztynOS.iso"
-    if not iso.exists():
-        print("[BLAD] Brak BursztynOS.iso. Uruchom 'make iso'.", file=sys.stderr)
-        sys.exit(1)
+    ci_iso = ROOT / ".bursztyn_ci_test.iso"
+    if not ci_iso.exists():
+        subprocess.run(["make", ".bursztyn_ci_test.iso"], cwd=str(ROOT), check=True)
+    iso = ci_iso
 
     disk = ROOT / "wirtualny_dysk.img"
     if not disk.exists():
