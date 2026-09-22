@@ -979,6 +979,29 @@ extern "C" void bws_nowoczesne_posprzataj_proces(int pid, bool aktywny_cr3) {
     }
 }
 
+constexpr uint64_t SYSTEM_IPC = 0x53595354454D0001ULL;
+
+extern "C" bool system_potwierdz_gotowosc_pulpitu(int pid);
+
+static bool czy_sciezka_menedzera_okien(const char* sciezka) {
+    if (!sciezka) return false;
+    constexpr const char DOCELOWA[] = "/menedzer_okien.bur";
+    size_t i = 0;
+    while (DOCELOWA[i] != '\0' && i < PZB_DLUGOSC_SCIEZKI_PROCESU) {
+        if (sciezka[i] != DOCELOWA[i]) return false;
+        ++i;
+    }
+    return DOCELOWA[i] == '\0' && (i >= PZB_DLUGOSC_SCIEZKI_PROCESU || sciezka[i] == '\0');
+}
+
+uint64_t bws_potwierdz_pulpit_gotowy(const proces_t& proces) {
+    if (proces.pid <= 0 || proces.pid >= MAKS_PROCESOW) return 0;
+    if (proces.poziom_zaufania > PZB_USLUGI) return 0;
+    if (!ma_prawo(proces, PRAWO_GUI | PRAWO_SYSTEM_CONFIG)) return 0;
+    if (!czy_sciezka_menedzera_okien(proces.sciezka_pliku)) return 0;
+    return system_potwierdz_gotowosc_pulpitu(static_cast<int>(proces.pid)) ? 1ULL : 0ULL;
+}
+
 extern "C" uint64_t bws_nowoczesne_obsluz(
     uint64_t nr, proces_t* proces, uint64_t a1, uint64_t a2,
     uint64_t a3, uint64_t a4
@@ -1007,7 +1030,12 @@ extern "C" uint64_t bws_nowoczesne_obsluz(
         case BWS_SHM_UNMAP: return shm_unmap(a1);
         case BWS_SHM_CLOSE: return shm_close(a1);
         case BWS_IPC_CREATE: return ipc_create();
-        case BWS_IPC_SEND: return a1==INSTALATOR_IPC ? ipc_instalator(*proces,a2) : (a1 == EKRAN_IPC ? ipc_ekran(*proces,a2) : (a1 == TAPETY_IPC ? ipc_tapety(*proces, a2) : ipc_send(a1, a2)));
+        case BWS_IPC_SEND:
+            return a1 == SYSTEM_IPC ? bws_potwierdz_pulpit_gotowy(*proces)
+                 : (a1 == INSTALATOR_IPC ? ipc_instalator(*proces, a2)
+                 : (a1 == EKRAN_IPC ? ipc_ekran(*proces, a2)
+                 : (a1 == TAPETY_IPC ? ipc_tapety(*proces, a2)
+                 : ipc_send(a1, a2))));
         case BWS_IPC_RECEIVE: return ipc_receive(a1, a2);
         case BWS_IPC_CLOSE: return ipc_close(a1);
         case BWS_FILE_WATCH: return watch_dispatch(*proces, a1, a2, a3);
@@ -1063,6 +1091,8 @@ extern "C" uint64_t bws_nowoczesne_obsluz(
             return motyw_bws_pobierz(proces, a1);
         case BWS_MOTYW_POLECENIE:
             return motyw_bws_polecenie(proces, static_cast<uint32_t>(a1), a2, a3);
+        case BWS_PULPIT_GOTOWY:
+            return bws_potwierdz_pulpit_gotowy(*proces);
         default: return UINT64_MAX;
     }
 }

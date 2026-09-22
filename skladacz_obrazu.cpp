@@ -290,10 +290,21 @@ bool rect_merge_ok(const GuiDirtyRect&a,const GuiDirtyRect&b){
 uint64_t cursor_reoverlay_after_dirty=0;
 #endif
 
-#if BURSZTYN_DEBUG_PERF || BURSZTYN_DEBUG_GUI_LAYERS || BURSZTYN_DEBUG_GUI_PERF || BURSZTYN_DIAG_GEOM_TRACE
 static void perf_num(char* b,size_t cap,size_t* n,uint64_t v){char t[24];size_t m=0;do{t[m++]=static_cast<char>('0'+v%10);v/=10;}while(v&&m<sizeof(t));while(m&&*n+1<cap)b[(*n)++]=t[--m];b[*n]='\0';}
 static void perf_txt(char*b,size_t cap,size_t*n,const char*s){while(s&&*s&&*n+1<cap)b[(*n)++]=*s++;b[*n]='\0';}
-#endif
+static void perf_hex(char* b, size_t cap, size_t* n, uint64_t v) {
+    perf_txt(b, cap, n, "0x");
+    static constexpr char HEX[] = "0123456789ABCDEF";
+    bool leading = true;
+    for (int i = 15; i >= 0; --i) {
+        uint8_t d = (v >> (i * 4)) & 0xFU;
+        if (d != 0 || !leading || i == 0) {
+            leading = false;
+            char s[2] = {HEX[d], '\0'};
+            perf_txt(b, cap, n, s);
+        }
+    }
+}
 void perf_log(uint64_t teraz){
 #if BURSZTYN_DEBUG_PERF
     if(perf_deadline_ns==0){perf_deadline_ns=teraz+5000000000ULL;return;}
@@ -1210,6 +1221,33 @@ int utworz_warstwe(
     if(stary_bufor&&stary_szer>0&&stary_wys>0)
         skladacz_obrazu_oznacz_dirty_rect(stary_x,stary_y,stary_szer,stary_wys);
     skladacz_obrazu_oznacz_dirty_rect(x,y,szer,wys);
+
+    if (z_order == 0) {
+        char tmsg[128]{}; size_t tp = 0;
+        perf_txt(tmsg, sizeof(tmsg), &tp, "[BOOT-TELEMETRY] bws_root_surface=0x");
+        perf_hex(tmsg, sizeof(tmsg), &tp, reinterpret_cast<uint64_t>(nowy_bufor));
+        perf_txt(tmsg, sizeof(tmsg), &tp, " ");
+        perf_num(tmsg, sizeof(tmsg), &tp, static_cast<uint32_t>(szer));
+        perf_txt(tmsg, sizeof(tmsg), &tp, "x");
+        perf_num(tmsg, sizeof(tmsg), &tp, static_cast<uint32_t>(wys));
+        wypisz_log(tmsg);
+
+        tp = 0; tmsg[0] = '\0';
+        perf_txt(tmsg, sizeof(tmsg), &tp, "[BOOT-TELEMETRY] taskbar_surface=0x");
+        perf_hex(tmsg, sizeof(tmsg), &tp, reinterpret_cast<uint64_t>(nowy_bufor ? (nowy_bufor + (wys > 40 ? size_t(wys - 40) * szer : 0)) : 0));
+        perf_txt(tmsg, sizeof(tmsg), &tp, " ");
+        perf_num(tmsg, sizeof(tmsg), &tp, static_cast<uint32_t>(szer));
+        perf_txt(tmsg, sizeof(tmsg), &tp, "x40");
+        wypisz_log(tmsg);
+
+        tp = 0; tmsg[0] = '\0';
+        perf_txt(tmsg, sizeof(tmsg), &tp, "[BOOT-TELEMETRY] root_layer_creation_time_us=");
+        perf_num(tmsg, sizeof(tmsg), &tp, static_cast<uint32_t>(hpet_dostepny() ? czas_monotoniczny_us() : 0));
+        perf_txt(tmsg, sizeof(tmsg), &tp, " geometry_generation=");
+        perf_num(tmsg, sizeof(tmsg), &tp, generacja_okna[pid]);
+        wypisz_log(tmsg);
+    }
+
     skladacz_obrazu_debug_warstwy("create");
     return pid;
 }
@@ -1873,6 +1911,18 @@ void skladacz_obrazu_obsluz_dirty() {
     grafika_zakoncz_scene();
     if(drag_frame_work)++drag_frames_presented;
     const uint64_t present_end=hpet_dostepny()?czas_monotoniczny_us():0;
+    static bool logged_first_compose = false;
+    if (!logged_first_compose && count > 0) {
+        logged_first_compose = true;
+        char cmsg[128]{}; size_t cp = 0;
+        perf_txt(cmsg, sizeof(cmsg), &cp, "[BOOT-TELEMETRY] first_full_compose_time_us=");
+        perf_num(cmsg, sizeof(cmsg), &cp, static_cast<uint32_t>(compose_end));
+        perf_txt(cmsg, sizeof(cmsg), &cp, " first_full_flush_time_us=");
+        perf_num(cmsg, sizeof(cmsg), &cp, static_cast<uint32_t>(present_end));
+        perf_txt(cmsg, sizeof(cmsg), &cp, " framebuffer_generation=");
+        perf_num(cmsg, sizeof(cmsg), &cp, dirty_generation);
+        wypisz_log(cmsg);
+    }
     if(count) zakoncz_snapshot();
     ++licznik_klatek;
     suma_dirty_px+=pixels;
@@ -2135,6 +2185,20 @@ void skladacz_obrazu_ustaw_drag_overlay(int pid, bool aktywny, int x, int y) {
 }
 
 void skladacz_obrazu_debug_warstwy(const char* powod) {
+    int total = 0, visible = 0;
+    for (int i = 0; i < MAKS_WARSTW; ++i) {
+        if (warstwa_ma_spojny_bufor(i)) {
+            ++total;
+            if (widocznosc_warstwy[i]) ++visible;
+        }
+    }
+    char lb[64]{}; size_t ln = 0;
+    perf_txt(lb, sizeof(lb), &ln, "[BWS] layers total=");
+    perf_num(lb, sizeof(lb), &ln, static_cast<uint32_t>(total));
+    perf_txt(lb, sizeof(lb), &ln, " visible=");
+    perf_num(lb, sizeof(lb), &ln, static_cast<uint32_t>(visible));
+    wypisz_log(lb);
+
 #if BURSZTYN_DEBUG_GUI_LAYERS
     char b[192];size_t n=0;perf_txt(b,sizeof(b),&n,"[GUI-LAYERS] ");perf_txt(b,sizeof(b),&n,powod?powod:"");wypisz_log(b);
     for(int i=0;i<MAKS_WARSTW;++i){warstwa_obrazu*w=pobierz_warstwe(i);if(!w)continue;n=0;b[0]='\0';

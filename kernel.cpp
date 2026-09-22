@@ -2095,6 +2095,65 @@ bool kernel_weryfikuj_system_step(uint64_t* wykonane,bool* gotowe){
     return true;
 }
 
+static uint64_t t_kernel_ready_us = 0;
+static bool system_pulpit_gotowy = false;
+
+extern "C" bool system_potwierdz_gotowosc_pulpitu(int pid) {
+    if (pid <= 0 || pid >= static_cast<int>(MAKS_PROCESOW)) {
+        return false;
+    }
+
+    // Walidacja aktywnej, widocznej warstwy bazowej pulpitu nalezacej do procesu
+    warstwa_obrazu* w = pobierz_warstwe(pid);
+    if (!w) return false;
+    if (w->pid != pid) return false;
+    if (!w->aktywna) return false;
+    if (w->z_order != 0) return false;
+    if (w->x != 0 || w->y != 0) return false;
+    if (w->bufor_pikseli == nullptr) return false;
+
+    const int screen_w = grafika_pobierz_szerokosc();
+    const int screen_h = grafika_pobierz_wysokosc();
+    if (screen_w <= 0 || screen_h <= 0) return false;
+    if (w->szerokosc < screen_w || w->wysokosc < screen_h) return false;
+
+    // Idempotentny rygiel: CAS zapewnia, ze przejscie w stan gotowosci nastapi dokladnie raz
+    bool oczekiwana = false;
+    if (!__atomic_compare_exchange_n(&system_pulpit_gotowy, &oczekiwana, true,
+                                      false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        // Pulpit zostal juz potwierdzony; powtorne wywolanie przez uprawniony proces to idempotentny no-op.
+        return true;
+    }
+
+    // Dokoncz pierwsze pelne zlozenie i flush pulpitu na scanout
+    zablokuj_ekran();
+    skladacz_obrazu_obsluz_dirty();
+    odblokuj_ekran();
+
+    const uint64_t t_desktop_ready_us = hpet_dostepny() ? czas_monotoniczny_us() : 0;
+    const uint64_t delta_us = (t_desktop_ready_us >= t_kernel_ready_us && t_kernel_ready_us > 0)
+                                  ? (t_desktop_ready_us - t_kernel_ready_us)
+                                  : 0;
+
+    char tel[128] = "[BOOT-TELEMETRY] kernel_ready_time_us=";
+    char num[32] = {};
+    uint_do_str(t_kernel_ready_us, num, sizeof(num));
+    dolacz_tekst(tel, sizeof(tel), num);
+    dolacz_tekst(tel, sizeof(tel), " desktop_ready_time_us=");
+    uint_do_str(t_desktop_ready_us, num, sizeof(num));
+    dolacz_tekst(tel, sizeof(tel), num);
+    dolacz_tekst(tel, sizeof(tel), " delta_us=");
+    uint_do_str(delta_us, num, sizeof(num));
+    dolacz_tekst(tel, sizeof(tel), num);
+    wypisz_log(tel);
+
+    wypisz_log("[SYSTEM] Pulpit gotowy.");
+    wypisz_log("System operacyjny gotowy!");
+    aktualizacja_potwierdz_rozruch();
+
+    return true;
+}
+
 /* =========================================================================
  * KERNEL MAIN
  * ========================================================================= */
@@ -2509,6 +2568,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
      * Flaga musi zostac ustawiona PRZED STI.
      * Pierwsze przerwanie timera moze od razu wykonac PrzelaczKontekst().
      */
+    t_kernel_ready_us = hpet_dostepny() ? czas_monotoniczny_us() : 0;
+
     wielozadaniowosc_aktywna = true;
 
     wypisz_log(
@@ -2517,8 +2578,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     wypisz_log(
         "--------------------------------------------------");
     wypisz_log(
-        "System operacyjny gotowy!");
-    aktualizacja_potwierdz_rozruch();
+        "[KERNEL] Jadro i scheduler gotowe.");
 
     /*
      * Dopiero teraz dopuszczamy IRQ:

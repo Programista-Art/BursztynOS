@@ -99,7 +99,8 @@ enum BwsNumer : uint64_t {
 
     BWS_MOTYW_POBIERZ = 86,
     BWS_MOTYW_POLECENIE = 87,
+    BWS_PULPIT_GOTOWY = 88,
 
-    BWS_PIERWSZY_WOLNY = 88
+    BWS_PIERWSZY_WOLNY = 89
 };
 

@@ -818,6 +818,10 @@ void gui_odswiez_pulpit() {
         19, 0, 0, 0, 0);
 }
 
+bool gui_potwierdz_gotowosc_pulpitu() {
+    return bws_wywolaj(BWS_PULPIT_GOTOWY, 0, 0, 0, 0) == 1ULL;
+}
+
 void gui_wypisz_tekst_kolor(int x,int y,uint32_t kolor,const char*tekst){
     gui_wypisz_tekst_kolor_skala(x,y,kolor,
         legacy_wlaczony ? 100 : static_cast<int>(ui_skala_procent),tekst);

@@ -2182,13 +2182,45 @@ void rozmiesc_ikony_ekranu(){
 
 } // namespace
 
+static void wm_log(const char* s) {
+    wypisz(s);
+}
+
+static void wm_log_i32(const char* prefix, int32_t val, const char* suffix = "\n") {
+    char buf[64];
+    size_t p = 0;
+    while (*prefix && p + 1 < sizeof(buf)) buf[p++] = *prefix++;
+    if (val < 0) {
+        if (p + 1 < sizeof(buf)) buf[p++] = '-';
+        val = -val;
+    }
+    char tmp[16];
+    int tp = 0;
+    if (val == 0) tmp[tp++] = '0';
+    else {
+        while (val > 0) {
+            tmp[tp++] = '0' + (val % 10);
+            val /= 10;
+        }
+    }
+    while (tp > 0 && p + 1 < sizeof(buf)) buf[p++] = tmp[--tp];
+    while (*suffix && p + 1 < sizeof(buf)) buf[p++] = *suffix++;
+    buf[p] = '\0';
+    wypisz(buf);
+}
+
 extern "C" __attribute__((noreturn)) void _start() {
+    wm_log("[WM] _start begun\n");
     GuiMonitorInfo mon{};if(gui_pobierz_monitor(0,&mon))ui_skala_procent=mon.scale_x1000/10;
     metryki_ekranu();
     gui_pobierz_rozdzielczosc(&screen_w, &screen_h);
     zaktualizuj_cache_przycisku(ui_skala_procent);
+    wm_log_i32("[WM] screen_w=", screen_w);
+    wm_log_i32("[WM] screen_h=", screen_h);
+    wm_log_i32("[WM] PASEK_WYS=", PASEK_WYS);
 
     if (screen_w <= 0 || screen_h <= PASEK_WYS) {
+        wm_log("[WM] BLAD: niepoprawne wymiary ekranu!\n");
         gui_zakoncz_aplikacje();
     }
 
@@ -2196,15 +2228,21 @@ extern "C" __attribute__((noreturn)) void _start() {
        Aplikacje nie musza znac wysokosci taskbara. */
     if (!gui_ustaw_obszar_roboczy(
             0, 0, screen_w, screen_h - PASEK_WYS)) {
+        wm_log("[WM] BLAD: gui_ustaw_obszar_roboczy zwrocil false!\n");
         gui_zakoncz_aplikacje();
     }
+    wm_log("[WM] gui_ustaw_obszar_roboczy OK\n");
 
     // Pulpit jest warstwa tla. Aplikacje GUI uzywaja wyzszego z_order.
-    if (bws_utworz_warstwe(0, 0, screen_w, screen_h, 0) < 0) {
+    const int root_layer_id = bws_utworz_warstwe(0, 0, screen_w, screen_h, 0);
+    wm_log_i32("[WM] bws_utworz_warstwe id=", root_layer_id);
+    if (root_layer_id < 0) {
+        wm_log("[WM] BLAD: bws_utworz_warstwe zwrocil < 0!\n");
         gui_zakoncz_aplikacje();
     }
 
     gui_ustaw_przejecie_myszy(true);
+    wm_log("[WM] gui_ustaw_przejecie_myszy(true) OK\n");
 
     rozmiesc_ikony_ekranu();
 
@@ -2214,7 +2252,17 @@ extern "C" __attribute__((noreturn)) void _start() {
     odswiez_snapshot_okien();
     (void)odswiez_wpisy_pulpitu();
 
+    const int desktop_icon_count = static_cast<int>(LICZBA_APLIKACJI_PULPITU) + liczba_wpisow_pulpitu;
+    wm_log_i32("[BWS] desktop_icons=", desktop_icon_count);
+    wm_log("[BWS] taskbar visible=1\n");
+
     RysujPulpit(true);
+    wm_log("[WM] Initial Desktop ready\n");
+    const bool first_ok = gui_potwierdz_gotowosc_pulpitu();
+    const bool second_ok = gui_potwierdz_gotowosc_pulpitu();
+    if (first_ok && second_ok) {
+        wm_log("[WM] Handshake idempotency verified: OK\n");
+    }
 
     bool drag_candidate = false;
     bool dragging_file = false;

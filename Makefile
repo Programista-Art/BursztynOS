@@ -411,6 +411,9 @@ mbedtls_port.o: biblioteki/mbedtls/mbedtls_port.cpp biblioteki/mbedtls/bursztyn_
 bws_nowoczesne.o: bws_nowoczesne.cpp bws_nowoczesne.h bws_api.h
 	$(CXX) $(KERNEL_CXXFLAGS) -Os -c $< -o $@
 
+syscalls.o: syscalls.cpp bws_api.h
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+
 hda.o: sterowniki/dzwiek/hda.cpp sterowniki/dzwiek/hda.h pamiec.h pci.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 

@@ -316,10 +316,9 @@ def main():
                 termination_reason = "System operacyjny zglosil gotowosc ('System operacyjny gotowy!')."
                 break
 
-        # Weryfikacja QMP: zrzut pulpitu i kursor
+        # Weryfikacja QMP: zrzut pulpitu i kursor natychmiast po gotowosci pulpitu
         if boot_ready and qmp_sock.exists():
             print("\n[INFO] Weryfikacja wizualna pulpitu i kursora w trybie normalnym przez QMP...")
-            time.sleep(1.5)
             qmp = QmpClient(qmp_sock, timeout=10.0)
 
             # Wybierz mysz USB

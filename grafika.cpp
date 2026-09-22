@@ -762,7 +762,6 @@ extern "C" void SerialLog(const char* str) {
 #define BURSZTYN_DEBUG_GFX 0
 #endif
 
-#if BURSZTYN_DEBUG_GFX
 void SerialU64(uint64_t v) {
     char cyfry[24] = {};
     int n = 0;
@@ -785,7 +784,6 @@ void LogGfxU64(const char* key, uint64_t value, bool hex = false) {
     if (hex) SerialHex64(value); else SerialU64(value);
     SerialLog("\n");
 }
-#endif
 
 #if BURSZTYN_DEBUG_GUI_INPUT
 static void SerialLiczba(int v) {
@@ -3232,6 +3230,28 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
     boot_ekran_caps = ekran_caps;
     log_granice_kursora("cursor", SZER, WYS, 1);
 
+    SerialLog("[BOOT-TELEMETRY] boot_framebuffer_phys=");
+    SerialHex64(LFB);
+    SerialLog("\n[BOOT-TELEMETRY] boot_framebuffer_virt=");
+    SerialHex64(framebuffer_wirtualny);
+    SerialLog("\n[BOOT-TELEMETRY] boot_geometry=");
+    SerialU64(SZER);
+    SerialLog("x");
+    SerialU64(WYS);
+    SerialLog(" pitch=");
+    SerialU64(PITCH);
+    SerialLog(" bpp=");
+    SerialU64(BPP);
+    SerialLog("\n[BOOT-TELEMETRY] active_backend_before_virtio=");
+    SerialLog(mamy_efi ? "UEFI GOP" : (bochs ? "Bochs VBE" : "VESA VBE"));
+    SerialLog("\n[BOOT-TELEMETRY] compositor_backbuffer=");
+    SerialHex64(reinterpret_cast<uint64_t>(backbuffer));
+    SerialLog(" ");
+    SerialU64(SZER);
+    SerialLog("x");
+    SerialU64(WYS);
+    SerialLog("\n");
+
     for (uint64_t i = 0; i < lfb_waga; ++i)
         backbuffer[i] = 0;
 
@@ -4004,6 +4024,23 @@ bool grafika_aktywuj_virtio_gpu(VirtioGpuDriver* drv) {
     PokazKursor();
 
     SerialLog("[HAL] Aktywacja sterownika VirtIO-GPU 2D jako backend graficzny.\n");
+    SerialLog("[BOOT-TELEMETRY] virtio_gpu_framebuffer=");
+    SerialHex64(reinterpret_cast<uint64_t>(drv->fb_vaddr));
+    SerialLog(" ");
+    SerialU64(drv->fb_width);
+    SerialLog("x");
+    SerialU64(drv->fb_height);
+    SerialLog(" stride=");
+    SerialU64(drv->fb_stride);
+    SerialLog("\n[BOOT-TELEMETRY] compositor_backbuffer_after_virtio=");
+    SerialHex64(reinterpret_cast<uint64_t>(backbuffer));
+    SerialLog(" ");
+    SerialU64(drv->fb_width);
+    SerialLog("x");
+    SerialU64(drv->fb_height);
+    SerialLog(" framebuffer_generation=");
+    SerialU64(aktywny_stan.generacja);
+    SerialLog("\n");
     return true;
 }
 

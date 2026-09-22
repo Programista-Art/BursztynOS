@@ -387,6 +387,7 @@ void gui_ustaw_system_overlay(bool otwarty,
 bool gui_minimalizuj_okno();
 uint32_t gui_pobierz_okna(GuiOknoInfo* okna, uint32_t max);
 bool gui_aktywuj_okno(uint64_t window_id);
+bool gui_potwierdz_gotowosc_pulpitu();
 
 /* =========================================================================
  * 5. WIDGETY I FUNKCJE POMOCNICZE
