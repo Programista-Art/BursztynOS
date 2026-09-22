@@ -79,6 +79,7 @@ void gui_free(void* ptr) { free(ptr); }
 void* gui_realloc(void* ptr, size_t size) { return realloc(ptr, size); }
 void gui_rysuj_prostokat(int, int, int, int, uint32_t) {}
 bool gui_blit(int, int, int, int, const uint32_t*) { return true; }
+bool gui_blit_popup(int, int, int, int, const uint32_t*) { return true; }
 void gui_wypisz_tekst_kolor_skala(int, int, uint32_t, int, const char*) {}
 void motyw_odswiez_lokalny() {}
 bool gui_ustaw_tytul_okna(const char*) { return true; }
@@ -94,6 +95,8 @@ bool gui_czekaj_na_zdarzenie(bws_zdarzenie*) { return false; }
 bool gui_czekaj_na_zdarzenie_z_timeoutem(bws_zdarzenie*, uint64_t) { return false; }
 void gui_ustaw_capture_myszy(bool) {}
 bool gui_ustaw_geometrie_okna(int, int, int, int, int) { return true; }
+bool gui_pobierz_monitor(uint32_t, GuiMonitorInfo*) { return false; }
+void bws_przesun_warstwe(int, int) {}
 bool gui_ustaw_popup_aplikacji(bool, int, int, int, int) { return true; }
 void gui_pobierz_rozdzielczosc(int* w, int* h) {
     if (w) *w = 1280;
@@ -808,7 +811,7 @@ static void test_powiadomienia() {
                 "Długa treść mierzona kanoniczną czcionką interfejsu.", 5000), "Toast geometrii przyjety");
         Prostokat poprzedni;
         for (size_t i = 0; i < 4; ++i) {
-            Prostokat r = mg.powiadomienie(i).obszar_ekranu(); r.x += owner.x; r.y += owner.y;
+            Prostokat r = mg.powiadomienie(i).obszar_ekranu();
             TEST_ASSERT(r.x >= work.x && r.prawy() <= work.prawy() && r.y >= work.y && r.dolny() <= work.dolny(),
                         "Toast miesci sie w obszarze roboczym");
             if (!poprzedni.czy_pusty()) TEST_ASSERT(r.przeciecie(poprzedni).czy_pusty(), "Toasty nie nakladaja sie");
@@ -1402,14 +1405,12 @@ static void test_geometria_toast_przycinanie_i_stos() {
         Powiadomienie& t2 = mgr.powiadomienie(1);
         Powiadomienie& t3 = mgr.powiadomienie(2);
 
-        Prostokat r1_ekran = Prostokat(window_client.x + t1.obszar().x, window_client.y + t1.obszar().y,
-                                       t1.obszar().szerokosc, t1.obszar().wysokosc);
-        Prostokat r2_ekran = Prostokat(window_client.x + t2.obszar().x, window_client.y + t2.obszar().y,
-                                       t2.obszar().szerokosc, t2.obszar().wysokosc);
-        Prostokat r3_ekran = Prostokat(window_client.x + t3.obszar().x, window_client.y + t3.obszar().y,
-                                       t3.obszar().szerokosc, t3.obszar().wysokosc);
+        Prostokat r1_ekran = t1.obszar_ekranu();
+        Prostokat r2_ekran = t2.obszar_ekranu();
+        Prostokat r3_ekran = t3.obszar_ekranu();
 
-        TEST_ASSERT(r3_ekran.dolny() == work_area.dolny() - 16,
+        const int cien = motyw_cien_okna() ? 2 : 0;
+        TEST_ASSERT(r3_ekran.dolny() + cien == work_area.dolny() - 16,
                     "Najnowszy toast t3 znajduje sie na dole stosu nad paskiem zadan (od_dolu = 16)");
         TEST_ASSERT(r2_ekran.dolny() == r3_ekran.y - 8,
                     "Toast t2 znajduje sie dokladnie 8 px nad toastem t3 (zgodnie z rzeczywista wysokoscia t3)");
@@ -1424,12 +1425,10 @@ static void test_geometria_toast_przycinanie_i_stos() {
         TEST_ASSERT(mgr.liczba_aktywnych() == 2, "Po zamknieciu t3 pozostaly 2 aktywne toasty");
 
         // Kompaktowanie stosu: teraz t2 powinien zsunac sie na dol (od_dolu = 16)
-        r2_ekran = Prostokat(window_client.x + t2.obszar().x, window_client.y + t2.obszar().y,
-                             t2.obszar().szerokosc, t2.obszar().wysokosc);
-        r1_ekran = Prostokat(window_client.x + t1.obszar().x, window_client.y + t1.obszar().y,
-                             t1.obszar().szerokosc, t1.obszar().wysokosc);
+        r2_ekran = t2.obszar_ekranu();
+        r1_ekran = t1.obszar_ekranu();
 
-        TEST_ASSERT(r2_ekran.dolny() == work_area.dolny() - 16,
+        TEST_ASSERT(r2_ekran.dolny() + cien == work_area.dolny() - 16,
                     "Po zamknieciu t3 toast t2 przemiescil sie na dol stosu (od_dolu = 16)");
         TEST_ASSERT(r1_ekran.dolny() == r2_ekran.y - 8,
                     "Toast t1 zachowal odstep 8 px nad t2 z uwzglednieniem rzeczywistej wysokosci t2");
@@ -1931,11 +1930,66 @@ static void test_dialog_pliku() {
     g_test_bws_hook = nullptr;
 }
 
+static void test_combo_after_window_move() {
+    Okno okno("Combo position", 300, 220);
+    auto* combo = new ListaRozwijana();
+    okno.ustaw_kontrolke_glowna(combo);
+    combo->dodaj_element("Pierwszy");
+    combo->dodaj_element("Drugi");
+    okno.przelicz_uklad();
+    okno.ustaw_pozycje(400, 200);
+    TEST_ASSERT(combo->rozwin(), "Combo opens after parent move");
+    Prostokat local = combo->obszar_ekranu();
+    Prostokat popup = combo->prostokat_popupu();
+    printf("[COMBO MEASURE] parent=(%d,%d) field-local=(%d,%d,%d,%d) popup=(%d,%d)\n",
+           okno.x(), okno.y(), local.x, local.y, local.szerokosc, local.wysokosc,
+           popup.x, popup.y);
+    TEST_ASSERT(popup.x == okno.x() + local.x, "Combo X follows moved parent");
+    TEST_ASSERT(popup.y == okno.y() + local.dolny(), "Combo opens below moved field");
+    combo->zwin();
+    const int modes[][2] = {{800,600},{1024,768},{1280,720},{1920,1080},
+                            {2560,1440},{3440,1440},{3840,2160}};
+    for (const auto& mode : modes) {
+        const int positions[][2] = {{0,0},{mode[0]/2,mode[1]/2},
+                                    {mode[0]-200,mode[1]-100},{mode[0]-80,-20}};
+        for (const auto& pos : positions) {
+            ZarzadcaPopupow manager;
+            ListaRozwijana field;
+            manager.ustaw_geometrie_wlasciciela(Prostokat(pos[0],pos[1],200,100),
+                                               Prostokat(0,0,mode[0],mode[1]-40));
+            field.ustaw_zarzadce_popupow(&manager);
+            field.rozmiesc(Prostokat(10,30,160,28));
+            for (int i=0;i<20;++i) field.dodaj_element("Element");
+            TEST_ASSERT(field.rozwin(), "Combo matrix opens");
+            Prostokat r=field.prostokat_popupu();
+            TEST_ASSERT(r.x>=0 && r.y>=0 && r.prawy()<=mode[0] &&
+                        r.dolny()<=mode[1]-40, "Combo matrix inside work area");
+            TEST_ASSERT(r.szerokosc==160, "Combo matrix width matches field");
+            if (pos[0]+170<=mode[0]-2)
+                TEST_ASSERT(r.x==pos[0]+10, "Combo matrix aligned X");
+            if (pos[1]+58+r.wysokosc+2<=mode[1]-40)
+                TEST_ASSERT(r.y==pos[1]+58, "Combo matrix below anchor");
+            else if (pos[1]+30-r.wysokosc>=0)
+                TEST_ASSERT(r.dolny()==pos[1]+30, "Combo matrix above anchor");
+            field.zwin();
+            bool cycles=true;
+            for (int i=0;i<1000;++i) {
+                cycles &= field.rozwin();
+                cycles &= field.prostokat_popupu()==r;
+                field.zwin();
+                cycles &= !manager.czy_otwarty();
+            }
+            TEST_ASSERT(cycles, "Combo 1000 open/close cycles preserve position");
+        }
+    }
+}
+
 int main() {
     printf("======================================================================\n");
     printf(" BURSZTYN OS - TESTY JEDNOSTKOWE NOWYCH KOMPONENTOW BURSZTYNUI\n");
     printf("======================================================================\n");
 
+    test_combo_after_window_move();
     test_siatka();
     test_panel_dokowany();
     test_przeplyw();

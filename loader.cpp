@@ -24,6 +24,9 @@
 #include "heap.h"
 #include "scheduler.h"
 #include "stos_jadra.h"
+#ifndef BURSZTYN_DIAG_BOOT
+#define BURSZTYN_DIAG_BOOT 0
+#endif
 
 extern "C" void* PobierzAktualnePML4();
 extern "C" uint8_t* bsp_wczytaj_plik_do_pamieci(
@@ -1114,6 +1117,20 @@ static bool uruchom_program_z_pliku_impl(
         __ATOMIC_RELEASE
     );
 
+#if BURSZTYN_DIAG_BOOT
+    if (takie_same_sciezki(sciezka_pliku, "/menedzer_okien.bur")) {
+        char msg[64] = "[WM-BOOT] process-created pid=";
+        size_t n = 0;
+        // PID is bounded by MAKS_PROCESOW; avoid allocation during boot.
+        while (msg[n]) ++n;
+        char digits[12]; unsigned count = 0, value = static_cast<unsigned>(pid);
+        do { digits[count++] = '0' + value % 10; value /= 10; } while (value);
+        while (count) msg[n++] = digits[--count];
+        msg[n] = 0;
+        wypisz_log(msg);
+    }
+#endif
+
     przywroc_przerwania(
         stan_przerwan
     );
@@ -1425,4 +1442,3 @@ extern "C" bool pakiet_wczytaj_manifest(
 
     return true;
 }
-

@@ -4475,6 +4475,39 @@ void test_virtio_gpu_attach_backing() {
     TEST_ASSERT(virtio_gpu_cmd_resource_detach_backing(drv, 3), "detach_backing");
     TEST_ASSERT(virtio_gpu_cmd_resource_unref(drv, 3), "resource_unref");
 
+    std::vector<VirtioGpuMemEntry> fragmented(8100);
+    for (size_t i = 0; i < fragmented.size(); ++i) {
+        fragmented[i].addr = 0x200000ULL + i * 8192;
+        fragmented[i].length = 4096;
+    }
+    TEST_ASSERT(virtio_gpu_cmd_resource_create_2d(drv, 4, VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM,
+                                                3840, 2160), "4K create_2d");
+    TEST_ASSERT(virtio_gpu_cmd_resource_attach_backing(drv, 4, fragmented.data(), fragmented.size()),
+                "4K backing: 8100 physically separate pages fit request DMA");
+    TEST_ASSERT(virtio_gpu_cmd_resource_detach_backing(drv, 4), "4K detach");
+    TEST_ASSERT(virtio_gpu_cmd_resource_unref(drv, 4), "4K unref");
+
+    // Testy brzegowe limitu wpisow DMA attach_backing
+    std::vector<VirtioGpuMemEntry> max_entries(8190);
+    for (size_t i = 0; i < max_entries.size(); ++i) {
+        max_entries[i].addr = 0x300000ULL + i * 4096;
+        max_entries[i].length = 4096;
+    }
+    TEST_ASSERT(virtio_gpu_cmd_resource_create_2d(drv, 5, VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM, 1024, 768), "res 5 create_2d");
+    TEST_ASSERT(virtio_gpu_cmd_resource_attach_backing(drv, 5, max_entries.data(), 8190),
+                "Maximum fitting entry count (8190) PASS");
+
+    std::vector<VirtioGpuMemEntry> overflow_entries(8191);
+    for (size_t i = 0; i < overflow_entries.size(); ++i) {
+        overflow_entries[i].addr = 0x300000ULL + i * 4096;
+        overflow_entries[i].length = 4096;
+    }
+    TEST_ASSERT(!virtio_gpu_cmd_resource_attach_backing(drv, 5, overflow_entries.data(), 8191),
+                "Maximum + 1 entry count (8191) rejected");
+
+    TEST_ASSERT(virtio_gpu_cmd_resource_detach_backing(drv, 5), "detach res 5");
+    TEST_ASSERT(virtio_gpu_cmd_resource_unref(drv, 5), "unref res 5");
+
     virtio_gpu_reset(drv);
     virtio_gpu_reset_all();
 }

@@ -9,6 +9,10 @@
 
 #include "bursztyn_gui.h"
 
+#ifndef BURSZTYN_DIAG_BOOT
+#define BURSZTYN_DIAG_BOOT 0
+#endif
+
 struct NaglowekBur {
     uint8_t  magia[4];
     uint64_t punkt_wejscia;
@@ -2210,6 +2214,9 @@ static void wm_log_i32(const char* prefix, int32_t val, const char* suffix = "\n
 }
 
 extern "C" __attribute__((noreturn)) void _start() {
+#if BURSZTYN_DIAG_BOOT
+    wm_log("[WM-BOOT] entered-ring3\n");
+#endif
     wm_log("[WM] _start begun\n");
     GuiMonitorInfo mon{};if(gui_pobierz_monitor(0,&mon))ui_skala_procent=mon.scale_x1000/10;
     metryki_ekranu();
@@ -2240,6 +2247,9 @@ extern "C" __attribute__((noreturn)) void _start() {
         wm_log("[WM] BLAD: bws_utworz_warstwe zwrocil < 0!\n");
         gui_zakoncz_aplikacje();
     }
+#if BURSZTYN_DIAG_BOOT
+    wm_log("[WM-BOOT] root-layer-created\n");
+#endif
 
     gui_ustaw_przejecie_myszy(true);
     wm_log("[WM] gui_ustaw_przejecie_myszy(true) OK\n");
@@ -2256,9 +2266,19 @@ extern "C" __attribute__((noreturn)) void _start() {
     wm_log_i32("[BWS] desktop_icons=", desktop_icon_count);
     wm_log("[BWS] taskbar visible=1\n");
 
+#if BURSZTYN_DIAG_BOOT
+    wm_log("[WM-BOOT] desktop-render-start\n");
+#endif
     RysujPulpit(true);
+#if BURSZTYN_DIAG_BOOT
+    wm_log("[WM-BOOT] desktop-render-complete\n");
+#endif
     wm_log("[WM] Initial Desktop ready\n");
+#if BURSZTYN_DIAG_BOOT
+    wm_log_i32("[WM-BOOT] handshake-result=", gui_potwierdz_gotowosc_pulpitu());
+#else
     gui_potwierdz_gotowosc_pulpitu();
+#endif
 
     bool drag_candidate = false;
     bool dragging_file = false;

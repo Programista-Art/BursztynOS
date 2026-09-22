@@ -1135,6 +1135,14 @@ void grafika_zakoncz_skladanie() {
 }
 
 static uint32_t kursor_tlo_kopia[64 * 64];
+#ifndef BURSZTYN_DIAG_GEOM_TRACE
+#define BURSZTYN_DIAG_GEOM_TRACE 0
+#endif
+#ifndef BURSZTYN_DIAG_BOOT
+#define BURSZTYN_DIAG_BOOT 0
+#endif
+
+#if BURSZTYN_DIAG_GEOM_TRACE
 static uint32_t g_cursor_diag_logged = 0;
 static constexpr uint32_t CURSOR_DIAG_MAX = 10;
 
@@ -1174,6 +1182,7 @@ static void log_cursor_diag(int old_x, int old_y, int new_x, int new_y,
     *p = '\0';
     klog_serial(buf);
 }
+#endif
 
 void grafika_naloz_kursor_regionu(int x, int y, int szer, int wys) {
     (void)x; (void)y; (void)szer; (void)wys;
@@ -1278,11 +1287,13 @@ void grafika_prezentuj_kursor_w(int cursor_x, int cursor_y) {
         mysz_x = cursor_x;
         mysz_y = cursor_y;
 
+#if BURSZTYN_DIAG_GEOM_TRACE
         if (g_cursor_diag_logged < CURSOR_DIAG_MAX) {
             log_cursor_diag(stary_x, stary_y, cursor_x, cursor_y,
                             stary_x, stary_y, stary_w, stary_h, byl_widoczny,
                             x0, y0, clip_w, clip_h, true);
         }
+#endif
     } else {
         kursor_overlay_widoczny = false;
         mysz_x = cursor_x;
@@ -3230,6 +3241,7 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
     boot_ekran_caps = ekran_caps;
     log_granice_kursora("cursor", SZER, WYS, 1);
 
+#if BURSZTYN_DIAG_BOOT
     SerialLog("[BOOT-TELEMETRY] boot_framebuffer_phys=");
     SerialHex64(LFB);
     SerialLog("\n[BOOT-TELEMETRY] boot_framebuffer_virt=");
@@ -3251,6 +3263,7 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
     SerialLog("x");
     SerialU64(WYS);
     SerialLog("\n");
+#endif
 
     for (uint64_t i = 0; i < lfb_waga; ++i)
         backbuffer[i] = 0;
@@ -3948,12 +3961,25 @@ void grafika_ustaw_tryby_virtio_gpu() {
         {1366, 768},
         {1600, 900},
         {1920, 1080},
-        {2560, 1440}
+        {2560, 1440},
+        {3440, 1440},
+        {3840, 2160}
     };
     ekran_liczba_trybow = 0;
     bool boot_znaleziony = false;
     for (const auto& wh : vg_wymiary) {
         TrybEkranu t{wh[0], wh[1], 32, wh[0] * 4, 0, 0};
+        size_t n = 0;
+        if (!ekran_rozmiar(t, &n)) continue;
+        void* probe[3] = {};
+        bool ok = true;
+        for (auto& p : probe) {
+            p = bufor_grafiki_alokuj(n);
+            if (!p) ok = false;
+        }
+        for (auto p : probe) bufor_grafiki_zwolnij(p);
+        if (!ok) continue;
+
         if (boot_szer == wh[0] && boot_wys == wh[1]) {
             boot_znaleziony = true;
         }
@@ -4024,6 +4050,7 @@ bool grafika_aktywuj_virtio_gpu(VirtioGpuDriver* drv) {
     PokazKursor();
 
     SerialLog("[HAL] Aktywacja sterownika VirtIO-GPU 2D jako backend graficzny.\n");
+#if BURSZTYN_DIAG_BOOT
     SerialLog("[BOOT-TELEMETRY] virtio_gpu_framebuffer=");
     SerialHex64(reinterpret_cast<uint64_t>(drv->fb_vaddr));
     SerialLog(" ");
@@ -4041,6 +4068,7 @@ bool grafika_aktywuj_virtio_gpu(VirtioGpuDriver* drv) {
     SerialLog(" framebuffer_generation=");
     SerialU64(aktywny_stan.generacja);
     SerialLog("\n");
+#endif
     return true;
 }
 

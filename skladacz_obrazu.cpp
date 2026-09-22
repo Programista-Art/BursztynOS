@@ -1222,6 +1222,7 @@ int utworz_warstwe(
         skladacz_obrazu_oznacz_dirty_rect(stary_x,stary_y,stary_szer,stary_wys);
     skladacz_obrazu_oznacz_dirty_rect(x,y,szer,wys);
 
+#if BURSZTYN_DIAG_BOOT
     if (z_order == 0) {
         char tmsg[128]{}; size_t tp = 0;
         perf_txt(tmsg, sizeof(tmsg), &tp, "[BOOT-TELEMETRY] bws_root_surface=0x");
@@ -1247,6 +1248,7 @@ int utworz_warstwe(
         perf_num(tmsg, sizeof(tmsg), &tp, generacja_okna[pid]);
         wypisz_log(tmsg);
     }
+#endif
 
     skladacz_obrazu_debug_warstwy("create");
     return pid;
@@ -1911,6 +1913,7 @@ void skladacz_obrazu_obsluz_dirty() {
     grafika_zakoncz_scene();
     if(drag_frame_work)++drag_frames_presented;
     const uint64_t present_end=hpet_dostepny()?czas_monotoniczny_us():0;
+#if BURSZTYN_DIAG_BOOT
     static bool logged_first_compose = false;
     if (!logged_first_compose && count > 0) {
         logged_first_compose = true;
@@ -1923,6 +1926,7 @@ void skladacz_obrazu_obsluz_dirty() {
         perf_num(cmsg, sizeof(cmsg), &cp, dirty_generation);
         wypisz_log(cmsg);
     }
+#endif
     if(count) zakoncz_snapshot();
     ++licznik_klatek;
     suma_dirty_px+=pixels;
@@ -2185,6 +2189,7 @@ void skladacz_obrazu_ustaw_drag_overlay(int pid, bool aktywny, int x, int y) {
 }
 
 void skladacz_obrazu_debug_warstwy(const char* powod) {
+#if BURSZTYN_DEBUG_GUI_LAYERS
     int total = 0, visible = 0;
     for (int i = 0; i < MAKS_WARSTW; ++i) {
         if (warstwa_ma_spojny_bufor(i)) {
@@ -2199,7 +2204,6 @@ void skladacz_obrazu_debug_warstwy(const char* powod) {
     perf_num(lb, sizeof(lb), &ln, static_cast<uint32_t>(visible));
     wypisz_log(lb);
 
-#if BURSZTYN_DEBUG_GUI_LAYERS
     char b[192];size_t n=0;perf_txt(b,sizeof(b),&n,"[GUI-LAYERS] ");perf_txt(b,sizeof(b),&n,powod?powod:"");wypisz_log(b);
     for(int i=0;i<MAKS_WARSTW;++i){warstwa_obrazu*w=pobierz_warstwe(i);if(!w)continue;n=0;b[0]='\0';
         perf_txt(b,sizeof(b),&n,"pid=");perf_num(b,sizeof(b),&n,w->pid);perf_txt(b,sizeof(b),&n," x=");perf_num(b,sizeof(b),&n,(uint32_t)w->x);perf_txt(b,sizeof(b),&n," y=");perf_num(b,sizeof(b),&n,(uint32_t)w->y);perf_txt(b,sizeof(b),&n," w=");perf_num(b,sizeof(b),&n,w->szerokosc);perf_txt(b,sizeof(b),&n," h=");perf_num(b,sizeof(b),&n,w->wysokosc);perf_txt(b,sizeof(b),&n," z=");perf_num(b,sizeof(b),&n,(uint32_t)w->z_order);perf_txt(b,sizeof(b),&n," visible=1");wypisz_log(b);}

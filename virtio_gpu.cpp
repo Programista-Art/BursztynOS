@@ -170,9 +170,11 @@ static uint32_t        g_gpu_driver_count = 0;
 constexpr uint64_t VIRTIO_GPU_DEFAULT_TIMEOUT_MS = 500ULL;
 constexpr uint32_t VIRTIO_GPU_MAX_SPINS_GUARD     = 5000000U;
 
-constexpr size_t VIRTIO_GPU_CMD_BUFFER_SIZE   = 64ULL * 1024;  // 64 KiB bufor DMA dla controlq
-constexpr size_t VIRTIO_GPU_CMD_REQ_MAX_SIZE  = 48ULL * 1024;  // 48 KiB obszar polecen
-constexpr size_t VIRTIO_GPU_CMD_RESP_OFFSET   = 48ULL * 1024;  // offset bufora odpowiedzi
+// 4K backing may contain 8100 noncontiguous pages: 32 + 8100 * 16 bytes.
+// Reserve enough request space without relying on physical coalescing.
+constexpr size_t VIRTIO_GPU_CMD_REQ_MAX_SIZE  = 128ULL * 1024;
+constexpr size_t VIRTIO_GPU_CMD_RESP_OFFSET   = VIRTIO_GPU_CMD_REQ_MAX_SIZE;
+constexpr size_t VIRTIO_GPU_CMD_BUFFER_SIZE   = VIRTIO_GPU_CMD_REQ_MAX_SIZE + 16ULL * 1024;
 constexpr size_t VIRTIO_GPU_CMD_RESP_MAX_SIZE = 16ULL * 1024;  // 16 KiB obszar odpowiedzi
 
 /* Pomocnicze funkcje formatowania logow */
@@ -310,6 +312,12 @@ static bool virtio_gpu_send_command_locked(
     }
 
     if (!completed) {
+        char timing[160]{}; size_t pos = 0;
+        log_append_str(timing, sizeof(timing), pos, "[VIRTIO-GPU] timeout elapsed_ns=");
+        log_append_u64_dec(timing, sizeof(timing), pos, gpu_monotonic_ns() - start_ns);
+        log_append_str(timing, sizeof(timing), pos, " spins_left=");
+        log_append_u64_dec(timing, sizeof(timing), pos, spin_guard);
+        gpu_klog(timing);
         gpu_klog("[VIRTIO-GPU] BLAD KRYTYCZNY: Timeout polecenia kontrolnego!");
         drv->has_error = true;
         drv->error_count++;
@@ -565,7 +573,7 @@ bool virtio_gpu_cmd_transfer_to_host_2d(
 ) {
     if (!drv || resource_id == 0 || width == 0 || height == 0) return false;
     if (x > drv->fb_width || y > drv->fb_height) return false;
-    if (x + width > drv->fb_width || y + height > drv->fb_height) return false;
+    if (width > drv->fb_width - x || height > drv->fb_height - y) return false;
 
     const uint64_t offset = (static_cast<uint64_t>(y) * static_cast<uint64_t>(drv->fb_stride)) +
                             (static_cast<uint64_t>(x) * 4ULL);
@@ -602,7 +610,7 @@ bool virtio_gpu_cmd_resource_flush(
 ) {
     if (!drv || resource_id == 0 || width == 0 || height == 0) return false;
     if (x > drv->fb_width || y > drv->fb_height) return false;
-    if (x + width > drv->fb_width || y + height > drv->fb_height) return false;
+    if (width > drv->fb_width - x || height > drv->fb_height - y) return false;
 
     GpuSpinLockGuard guard(drv->lock);
 
@@ -1696,4 +1704,3 @@ bool virtio_gpu_test_runtime_modeset(VirtioGpuDriver* drv) {
     // Przywrocenie deterministycznego wzorca po testach
     return virtio_gpu_render_test_pattern(drv);
 }
-

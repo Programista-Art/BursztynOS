@@ -48,6 +48,7 @@ public:
     void ustaw_zamykanie_na_klik_poza(bool z) { czy_zamyka_na_klik_poza_ = z; }
 
     virtual void po_otwarciu() {}
+    virtual bool czy_podaza_za_wlascicielem() const { return false; }
     virtual void po_zamknieciu(PowodZamknieciaPopup powod) {
         if (cb_zamkniecia_) {
             cb_zamkniecia_(this, powod, dane_zamkniecia_);
@@ -82,8 +83,26 @@ public:
     }
 
     void ustaw_geometrie_wlasciciela(Prostokat ekran, Prostokat praca) {
+        const int dx = ekran.x - wlasciciel_.x;
+        const int dy = ekran.y - wlasciciel_.y;
         wlasciciel_ = ekran;
         obszar_roboczy_ = praca;
+        if ((dx || dy) && liczba_) {
+            const int cien = motyw_cien_okna() ? 2 * static_cast<int>(skala_dpi_) : 0;
+            for (int i = 0; i < liczba_; ++i) {
+                if (!powierzchnie_[i]->czy_podaza_za_wlascicielem()) continue;
+                Prostokat r = powierzchnie_[i]->obszar();
+                int max_x = praca.prawy() - r.szerokosc - cien;
+                int max_y = praca.dolny() - r.wysokosc - cien;
+                if (max_x < praca.x) max_x = praca.x;
+                if (max_y < praca.y) max_y = praca.y;
+                r.x = przytnij(r.x + dx, praca.x, max_x);
+                r.y = przytnij(r.y + dy, praca.y, max_y);
+                powierzchnie_[i]->rozmiesc(r);
+            }
+            aktualizuj_rejestracje(); // BWS damages both old and new rectangles.
+            odrysuj_popupy(true);
+        }
     }
 
     void ustaw_skale_dpi(SkalaUI skala) {

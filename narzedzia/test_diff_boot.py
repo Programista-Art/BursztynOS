@@ -194,7 +194,49 @@ def reader_worker(pipe, line_queue):
         line_queue.put(line)
     line_queue.put(None)
 
-def run_scenario(scenario_label, is_uefi=False, res=(1280, 720), iso_path=None):
+def build_qemu_cmd(scenario_label, is_uefi, res, iso_path, qmp_sock, virtio):
+    w, h = res
+    cmd = [
+        "qemu-system-x86_64",
+        "-machine", "pc,hpet=on",
+        "-cpu", "max",
+        "-accel", "tcg,thread=single",
+        "-m", "2G",
+        "-display", "none",
+        "-serial", "stdio",
+        "-cdrom", str(iso_path),
+        "-qmp", f"unix:{qmp_sock},server,nowait",
+    ]
+    if is_uefi:
+        cmd.extend(["-bios", OVMF])
+
+    if virtio:
+        cmd.extend([
+            "-drive", f"id=disk,file={ROOT}/wirtualny_dysk.img,format=raw,if=none,snapshot=on",
+            "-device", "virtio-blk-pci,drive=disk,disable-legacy=on",
+            "-vga", "none",
+            "-device", "virtio-rng-pci,disable-legacy=on",
+            "-device", f"virtio-vga,id=gpu0,disable-legacy=on,xres={w},yres={h}",
+            "-device", "virtio-keyboard-pci,id=kbd0,disable-legacy=on",
+            "-device", "virtio-mouse-pci,id=mouse0,disable-legacy=on",
+            "-device", "virtio-tablet-pci,id=tablet0,disable-legacy=on",
+            "-netdev", "user,id=n1",
+            "-device", "virtio-net-pci,disable-legacy=on,netdev=n1",
+        ])
+    else:
+        # Legacy/No-VirtIO: AHCI, std VGA / Bochs, E1000
+        cmd.extend([
+            "-drive", f"id=disk,file={ROOT}/wirtualny_dysk.img,format=raw,if=none,snapshot=on",
+            "-device", "ich9-ahci,id=ahci",
+            "-device", "ide-hd,drive=disk,bus=ahci.0,unit=0",
+            "-vga", "std",
+            "-global", "VGA.vgamem_mb=64",
+            "-netdev", "user,id=n1",
+            "-device", "e1000,netdev=n1",
+        ])
+    return cmd
+
+def run_scenario(scenario_label, is_uefi=False, res=(1280, 720), iso_path=None, virtio=True):
     OUT_DIR.mkdir(exist_ok=True)
     slug = scenario_label.lower().replace(" ", "_")
     qmp_sock = OUT_DIR / f"qmp_{slug}.sock"
@@ -208,30 +250,7 @@ def run_scenario(scenario_label, is_uefi=False, res=(1280, 720), iso_path=None):
     if iso_path is None:
         iso_path = OUT_DIR / "BursztynOS_diff.iso"
 
-    w, h = res
-    cmd = [
-        "qemu-system-x86_64",
-        "-machine", "pc,hpet=on",
-        "-cpu", "max",
-        "-accel", "tcg,thread=single",
-        "-drive", f"id=disk,file={ROOT}/wirtualny_dysk.img,format=raw,if=none",
-        "-device", "ich9-ahci,id=ahci",
-        "-device", "ide-hd,drive=disk,bus=ahci.0,unit=0",
-        "-device", "virtio-rng-pci,disable-legacy=on",
-        "-device", f"virtio-vga,id=gpu0,disable-legacy=on,xres={w},yres={h}",
-        "-device", "virtio-keyboard-pci,id=kbd0,disable-legacy=on",
-        "-device", "virtio-mouse-pci,id=mouse0,disable-legacy=on",
-        "-device", "virtio-tablet-pci,id=tablet0,disable-legacy=on",
-        "-netdev", "user,id=n1",
-        "-device", "virtio-net-pci,disable-legacy=on,netdev=n1",
-        "-m", "2G",
-        "-display", "none",
-        "-serial", "stdio",
-        "-cdrom", str(iso_path),
-        "-qmp", f"unix:{qmp_sock},server,nowait"
-    ]
-    if is_uefi:
-        cmd.extend(["-bios", OVMF])
+    cmd = build_qemu_cmd(scenario_label, is_uefi, res, iso_path, qmp_sock, virtio)
 
     print(f"\n[TEST] START {scenario_label}", flush=True)
 
@@ -289,7 +308,7 @@ def run_scenario(scenario_label, is_uefi=False, res=(1280, 720), iso_path=None):
         if booted and qmp_sock.exists():
             try:
                 client = QmpClient(qmp_sock, timeout=5.0)
-                client.screendump(dump_ppm, device="gpu0")
+                client.screendump(dump_ppm, device="gpu0" if virtio else None)
                 client.close()
                 if dump_ppm.exists():
                     im = Image.open(dump_ppm)
@@ -358,17 +377,21 @@ def main():
     results = []
 
     print("[SETUP] Preparing automated differential boot images...", flush=True)
+    if not (ROOT / 'wirtualny_dysk.img').exists():
+        subprocess.run(['make', 'prepare-disk'], cwd=ROOT, check=True)
     iso_diff = ensure_diff_iso()
     iso_640 = ensure_iso_640()
     print("[SETUP] Ready.", flush=True)
 
     scenarios = [
-        ("BIOS VirtIO", False, (1280, 720), iso_diff),
-        ("UEFI VirtIO", True, (1280, 720), iso_diff),
-        ("UEFI VirtIO 640", True, (640, 480), iso_640),
+        ("BIOS VirtIO", False, (1280, 720), iso_diff, True),
+        ("UEFI VirtIO", True, (1280, 720), iso_diff, True),
+        ("UEFI VirtIO 640", True, (640, 480), iso_640, True),
+        ("BIOS no-VirtIO", False, (1280, 720), iso_diff, False),
+        ("UEFI no-VirtIO", True, (1280, 720), iso_diff, False),
     ]
 
-    for label, is_uefi, res, iso in scenarios:
+    for label, is_uefi, res, iso, virtio in scenarios:
         if time.time() - suite_start >= SUITE_TIMEOUT:
             print(f"[TEST] FAIL {label} (Global suite timeout exceeded)", flush=True)
             results.append({
@@ -377,7 +400,7 @@ def main():
             })
             continue
 
-        res_dict = run_scenario(label, is_uefi=is_uefi, res=res, iso_path=iso)
+        res_dict = run_scenario(label, is_uefi=is_uefi, res=res, iso_path=iso, virtio=virtio)
         results.append(res_dict)
 
     total_suite_duration = time.time() - suite_start

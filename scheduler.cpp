@@ -27,10 +27,15 @@
 #include "pamiec.h"
 #include "heap.h"
 #include "stos_jadra.h"
+#include "grafika.h"
 
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+
+#ifndef BURSZTYN_DIAG_BOOT
+#define BURSZTYN_DIAG_BOOT 0
+#endif
 
 /* =========================================================================
  * ZGODNOSC KONFIGURACJI
@@ -1250,6 +1255,13 @@ extern "C" uint64_t PrzelaczKontekst(
      * Publikacja aktualnego procesu jest ostatnim krokiem po udanej
      * walidacji i zmianie CR3.
      */
+#if BURSZTYN_DIAG_BOOT
+    static bool wm_scheduled = false;
+    if (nastepny_pid == 1 && !wm_scheduled) {
+        wm_scheduled = true;
+        klog_serial("[WM-BOOT] scheduled");
+    }
+#endif
     aktualny_pid =
         nastepny_pid;
 

@@ -8,8 +8,10 @@
 #   make iso            - buduje hybrydowe ISO GRUB
 #   make bios           - alias do budowania ISO dla uruchomienia BIOS
 #   make uefi           - alias do budowania ISO dla uruchomienia UEFI
-#   make run            - QEMU w trybie BIOS
-#   make runuefi        - QEMU w trybie UEFI/OVMF
+#   make run            - QEMU BIOS + VirtIO Full (domyslnie)
+#   make runuefi        - QEMU UEFI/OVMF + VirtIO Full (domyslnie)
+#   make run-legacy     - QEMU BIOS bez VirtIO (AHCI/E1000/STD VGA/PS2)
+#   make runuefi-legacy - QEMU UEFI bez VirtIO (AHCI/E1000/GOP-STD VGA/PS2)
 #
 # Ten sam kernel Multiboot2 jest ladowany przez GRUB zarowno po starcie
 # legacy BIOS, jak i po starcie GRUB-a z firmware UEFI.
@@ -185,6 +187,19 @@ RING3_FLAGS += -DBURSZTYN_DIAG_GEOM_TRACE=1
 KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_GEOM_TRACE=1
 endif
 
+# Telemetria startu / WM-BOOT / BOOT-TELEMETRY. Domyslnie wylaczona.
+BURSZTYN_DIAG_BOOT ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_BOOT)),)
+RING3_FLAGS += -DBURSZTYN_DIAG_BOOT=1
+KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_BOOT=1
+endif
+
+# Szczegolowe logi warstw kompozytora BWS. Domyslnie wylaczone.
+BURSZTYN_DEBUG_GUI_LAYERS ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DEBUG_GUI_LAYERS)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_DEBUG_GUI_LAYERS=1
+endif
+
 # Diagnostyczny 16 KiB stos jadra (reprodukcja historycznego overflow).
 # Wylacznie do kontrolowanych testow: make iso BURSZTYN_DIAG_STOS16K=1
 BURSZTYN_DIAG_STOS16K ?= 0
@@ -353,7 +368,9 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 # ============================================================================
 
 .PHONY: \
-	all kernel iso iso8k bios uefi run run8k run-test run-geom-trace runusb runusbkbd runusbmouse runusbhid runuefi \
+	all kernel iso iso8k bios uefi \
+	run runuefi run-legacy runuefi-legacy run-installed run-installed-legacy \
+	run8k run-test run-geom-trace runusb runusbkbd runusbmouse runusbhid \
 	check-kernel check-test8k check-tools check-ovmf \
 	prepare-disk clean clear distclean cdysk rm help
 
@@ -981,104 +998,157 @@ prepare-disk: $(VIRTUAL_DISK)
 	@echo "[QEMU] Dysk przygotowany; bez zapisu zasobow pod surowe LBA."
 
 # ============================================================================
-# 22. QEMU - WSPOLNE OPCJE
+# 22. QEMU - PROFILE URUCHOMIENIOWE
 # ============================================================================
+#
+# Domyslne cele `make run` i `make runuefi` uruchamiaja pelny, aktualny stos
+# VirtIO Bursztyn OS:
+#   - VirtIO-BLK
+#   - VirtIO-NET
+#   - VirtIO-RNG
+#   - VirtIO-GPU 2D / virtio-vga
+#   - VirtIO-INPUT (klawiatura + mysz)
+#
+# Cele *-legacy uruchamiaja system bez VirtIO:
+#   - SATA AHCI
+#   - Intel E1000
+#   - STD VGA / Bochs VBE (oraz GOP podczas startu UEFI)
+#   - domyslne PS/2 QEMU
+#
+# QEMU_DISPLAY_ARGS pozostaje puste domyslnie, aby Makefile nie wymagal GTK.
+# Przydatny wariant developerski:
+#   make runuefi QEMU_DISPLAY_ARGS="-display gtk,zoom-to-fit=off"
+#
 
-QEMU_COMMON_ARGS := \
+QEMU_RAM ?= 2G
+QEMU_SMP ?= 1
+QEMU_DISPLAY_ARGS ?=
+QEMU_VIRTIO_XRES ?= 1280
+QEMU_VIRTIO_YRES ?= 720
+
+QEMU_BASE_ARGS := \
 	-machine pc,hpet=on \
 	-cpu max \
 	-accel tcg,thread=single \
+	-smp $(QEMU_SMP) \
+	-m $(QEMU_RAM) \
+	-audiodev alsa,id=snd \
+	-device intel-hda \
+	-device hda-output,audiodev=snd \
+	-serial stdio \
+	$(QEMU_DISPLAY_ARGS)
+
+# Produkcyjny profil VirtIO 1.x Modern PCI.
+# xres/yres sa jedynie poczatkowa wskazowka scanoutu QEMU; sterownik
+# VirtIO-GPU Bursztyna zachowuje kontrole nad runtime modesettingiem.
+QEMU_VIRTIO_ARGS := \
+	-drive id=disk,file=$(VIRTUAL_DISK),format=raw,if=none \
+	-device virtio-blk-pci,drive=disk,disable-legacy=on \
+	-netdev user,id=n1 \
+	-device virtio-net-pci,netdev=n1,disable-legacy=on \
+	-object rng-random,id=rng0,filename=/dev/urandom \
+	-device virtio-rng-pci,rng=rng0,disable-legacy=on \
+	-vga none \
+	-device virtio-vga,disable-legacy=on,xres=$(QEMU_VIRTIO_XRES),yres=$(QEMU_VIRTIO_YRES) \
+	-device virtio-keyboard-pci \
+	-device virtio-mouse-pci
+
+# Profil bez VirtIO. Celowo nie dodajemy xHCI/USB HID do zwyklego fallbacku,
+# aby nie dublowac wejscia z domyslnym PS/2 QEMU. Osobne cele runusb* ponizej
+# sluza do testowania sterownika xHCI/USB HID.
+QEMU_LEGACY_ARGS := \
 	-drive id=disk,file=$(VIRTUAL_DISK),format=raw,if=none \
 	-device ich9-ahci,id=ahci \
 	-device ide-hd,drive=disk,bus=ahci.0,unit=0 \
 	-netdev user,id=n1 \
 	-device e1000,netdev=n1 \
-	-audiodev alsa,id=snd \
-	-device intel-hda \
-	-device hda-output,audiodev=snd \
-	-m 2G \
 	-vga std \
-	-global VGA.vgamem_mb=64 \
-	-serial stdio
+	-global VGA.vgamem_mb=64
+
+QEMU_USB_HID_ARGS := \
+	-device qemu-xhci,id=xhci \
+	-device usb-kbd,id=usbkbd,bus=xhci.0 \
+	-device usb-mouse,id=usbmouse,bus=xhci.0
 
 # ============================================================================
-# 23. RUN - LEGACY BIOS
+# 23. RUN - BIOS
 # ============================================================================
 
+# Domyslny start BIOS: pelny aktualny profil VirtIO.
 run: iso prepare-disk
+	@echo "[QEMU] Start BIOS / VirtIO Full: GPU+BLK+NET+RNG+INPUT."
 	$(QEMU) \
-		$(QEMU_COMMON_ARGS) \
+		$(QEMU_BASE_ARGS) \
+		$(QEMU_VIRTIO_ARGS) \
+		-boot order=d \
+		-cdrom $(ISO)
+
+# Start BIOS bez VirtIO: AHCI + E1000 + STD VGA/Bochs + PS/2.
+run-legacy: iso prepare-disk
+	@echo "[QEMU] Start BIOS bez VirtIO: AHCI + E1000 + STD VGA + PS/2."
+	$(QEMU) \
+		$(QEMU_BASE_ARGS) \
+		$(QEMU_LEGACY_ARGS) \
+		-boot order=d \
 		-cdrom $(ISO)
 
 run8k: iso8k prepare-disk
 	$(QEMU) \
-		$(QEMU_COMMON_ARGS) \
+		$(QEMU_BASE_ARGS) \
+		$(QEMU_VIRTIO_ARGS) \
+		-boot order=d \
 		-cdrom $(ISO8K)
 
 run-test: $(CI_TEST_ISO) prepare-disk
 	$(QEMU) \
-		$(QEMU_COMMON_ARGS) \
+		$(QEMU_BASE_ARGS) \
+		$(QEMU_VIRTIO_ARGS) \
+		-boot order=d \
 		-cdrom $(CI_TEST_ISO)
 
 run-geom-trace: prepare-disk
+	@echo "[QEMU] UWAGA: zmiana flag kompilacji wymaga przebudowy obiektow."
+	$(MAKE) clean
 	$(MAKE) BURSZTYN_DIAG_GEOM_TRACE=1 run
 
+# Testy fallbacku USB korzystaja z profilu bez VirtIO-INPUT.
 runusb: iso prepare-disk
 	$(QEMU) \
-		$(QEMU_COMMON_ARGS) \
+		$(QEMU_BASE_ARGS) \
+		$(QEMU_LEGACY_ARGS) \
 		-device qemu-xhci,id=xhci \
+		-boot order=d \
 		-cdrom $(ISO)
 
 runusbkbd: iso prepare-disk
 	$(QEMU) \
-		$(QEMU_COMMON_ARGS) \
+		$(QEMU_BASE_ARGS) \
+		$(QEMU_LEGACY_ARGS) \
 		-device qemu-xhci,id=xhci \
 		-device usb-kbd,id=usbkbd,bus=xhci.0 \
+		-boot order=d \
 		-cdrom $(ISO)
 
 runusbmouse: iso prepare-disk
 	$(QEMU) \
-		$(QEMU_COMMON_ARGS) \
+		$(QEMU_BASE_ARGS) \
+		$(QEMU_LEGACY_ARGS) \
 		-device qemu-xhci,id=xhci \
 		-device usb-mouse,id=usbmouse,bus=xhci.0 \
+		-boot order=d \
 		-cdrom $(ISO)
 
 runusbhid: iso prepare-disk
 	$(QEMU) \
-		$(QEMU_COMMON_ARGS) \
-		-device qemu-xhci,id=xhci \
-		-device usb-kbd,id=usbkbd,bus=xhci.0 \
-		-device usb-mouse,id=usbmouse,bus=xhci.0 \
+		$(QEMU_BASE_ARGS) \
+		$(QEMU_LEGACY_ARGS) \
+		$(QEMU_USB_HID_ARGS) \
+		-boot order=d \
 		-cdrom $(ISO)
 
 # ============================================================================
 # 24. RUNUEFI - UEFI / OVMF
 # ============================================================================
-
-.PHONY: run-installed
-
-run-installed: prepare-disk check-ovmf
-	@if [ -n "$(OVMF_MONO)" ]; then \
-		echo "[QEMU] Uruchamiam zainstalowany Bursztyn OS z dysku, bez ISO."; \
-		exec $(QEMU) \
-			-bios "$(OVMF_MONO)" \
-			$(QEMU_COMMON_ARGS) \
-			-device qemu-xhci,id=xhci \
-			-device usb-kbd,id=usbkbd,bus=xhci.0 \
-			-device usb-mouse,id=usbmouse,bus=xhci.0 \
-			-boot order=c; \
-	else \
-		echo "[QEMU] Uruchamiam zainstalowany Bursztyn OS przez OVMF pflash, bez ISO."; \
-		cp "$(OVMF_VARS)" "$(OVMF_VARS_RUNTIME)"; \
-		exec $(QEMU) \
-			-drive if=pflash,format=raw,readonly=on,file="$(OVMF_CODE)" \
-			-drive if=pflash,format=raw,file="$(OVMF_VARS_RUNTIME)" \
-			$(QEMU_COMMON_ARGS) \
-			-device qemu-xhci,id=xhci \
-			-device usb-kbd,id=usbkbd,bus=xhci.0 \
-			-device usb-mouse,id=usbmouse,bus=xhci.0 \
-			-boot order=c; \
-	fi
 
 check-ovmf:
 	@if [ -n "$(OVMF_MONO)" ]; then \
@@ -1093,44 +1163,90 @@ check-ovmf:
 		exit 1; \
 	fi
 
-# runuefi: uefi prepare-disk check-ovmf
-# 	@if [ -n "$(OVMF_MONO)" ]; then \
-# 		echo "[QEMU] Start Bursztyn OS przez UEFI/OVMF (-bios)."; \
-# 		exec $(QEMU) \
-# 			-bios "$(OVMF_MONO)" \
-# 			$(QEMU_COMMON_ARGS) \
-# 			-cdrom $(ISO); \
-# 	else \
-# 		echo "[QEMU] Start Bursztyn OS przez UEFI/OVMF (pflash CODE+VARS)."; \
-# 		cp "$(OVMF_VARS)" "$(OVMF_VARS_RUNTIME)"; \
-# 		exec $(QEMU) \
-# 			-drive if=pflash,format=raw,readonly=on,file="$(OVMF_CODE)" \
-# 			-drive if=pflash,format=raw,file="$(OVMF_VARS_RUNTIME)" \
-# 			$(QEMU_COMMON_ARGS) \
-# 			-cdrom $(ISO); \
-# 	fi
+# Domyslny start UEFI: pelny aktualny profil VirtIO.
 runuefi: uefi prepare-disk check-ovmf
 	@if [ -n "$(OVMF_MONO)" ]; then \
-		echo "[QEMU] Start Bursztyn OS przez UEFI/OVMF (-bios)."; \
+		echo "[QEMU] Start UEFI/OVMF / VirtIO Full (-bios)."; \
 		exec $(QEMU) \
 			-bios "$(OVMF_MONO)" \
-			$(QEMU_COMMON_ARGS) \
-			-device qemu-xhci,id=xhci \
-			-device usb-kbd,id=usbkbd,bus=xhci.0 \
-			-device usb-mouse,id=usbmouse,bus=xhci.0 \
+			$(QEMU_BASE_ARGS) \
+			$(QEMU_VIRTIO_ARGS) \
+			-boot order=d \
 			-cdrom $(ISO); \
 	else \
-		echo "[QEMU] Start Bursztyn OS przez UEFI/OVMF (pflash CODE+VARS)."; \
+		echo "[QEMU] Start UEFI/OVMF / VirtIO Full (pflash CODE+VARS)."; \
 		cp "$(OVMF_VARS)" "$(OVMF_VARS_RUNTIME)"; \
 		exec $(QEMU) \
 			-drive if=pflash,format=raw,readonly=on,file="$(OVMF_CODE)" \
 			-drive if=pflash,format=raw,file="$(OVMF_VARS_RUNTIME)" \
-			$(QEMU_COMMON_ARGS) \
-			-device qemu-xhci,id=xhci \
-			-device usb-kbd,id=usbkbd,bus=xhci.0 \
-			-device usb-mouse,id=usbmouse,bus=xhci.0 \
+			$(QEMU_BASE_ARGS) \
+			$(QEMU_VIRTIO_ARGS) \
+			-boot order=d \
 			-cdrom $(ISO); \
 	fi
+
+# UEFI bez VirtIO: AHCI + E1000 + GOP/STD VGA + PS/2.
+runuefi-legacy: uefi prepare-disk check-ovmf
+	@if [ -n "$(OVMF_MONO)" ]; then \
+		echo "[QEMU] Start UEFI/OVMF bez VirtIO (-bios)."; \
+		exec $(QEMU) \
+			-bios "$(OVMF_MONO)" \
+			$(QEMU_BASE_ARGS) \
+			$(QEMU_LEGACY_ARGS) \
+			-boot order=d \
+			-cdrom $(ISO); \
+	else \
+		echo "[QEMU] Start UEFI/OVMF bez VirtIO (pflash CODE+VARS)."; \
+		cp "$(OVMF_VARS)" "$(OVMF_VARS_RUNTIME)"; \
+		exec $(QEMU) \
+			-drive if=pflash,format=raw,readonly=on,file="$(OVMF_CODE)" \
+			-drive if=pflash,format=raw,file="$(OVMF_VARS_RUNTIME)" \
+			$(QEMU_BASE_ARGS) \
+			$(QEMU_LEGACY_ARGS) \
+			-boot order=d \
+			-cdrom $(ISO); \
+	fi
+
+# Zainstalowany system z dysku, domyslnie przez VirtIO Full.
+run-installed: prepare-disk check-ovmf
+	@if [ -n "$(OVMF_MONO)" ]; then \
+		echo "[QEMU] Start zainstalowanego Bursztyn OS / UEFI / VirtIO Full."; \
+		exec $(QEMU) \
+			-bios "$(OVMF_MONO)" \
+			$(QEMU_BASE_ARGS) \
+			$(QEMU_VIRTIO_ARGS) \
+			-boot order=c; \
+	else \
+		echo "[QEMU] Start zainstalowanego Bursztyn OS / UEFI / VirtIO Full (pflash)."; \
+		cp "$(OVMF_VARS)" "$(OVMF_VARS_RUNTIME)"; \
+		exec $(QEMU) \
+			-drive if=pflash,format=raw,readonly=on,file="$(OVMF_CODE)" \
+			-drive if=pflash,format=raw,file="$(OVMF_VARS_RUNTIME)" \
+			$(QEMU_BASE_ARGS) \
+			$(QEMU_VIRTIO_ARGS) \
+			-boot order=c; \
+	fi
+
+# Zainstalowany system z dysku przez stary profil AHCI/E1000/STD VGA.
+run-installed-legacy: prepare-disk check-ovmf
+	@if [ -n "$(OVMF_MONO)" ]; then \
+		echo "[QEMU] Start zainstalowanego Bursztyn OS / UEFI bez VirtIO."; \
+		exec $(QEMU) \
+			-bios "$(OVMF_MONO)" \
+			$(QEMU_BASE_ARGS) \
+			$(QEMU_LEGACY_ARGS) \
+			-boot order=c; \
+	else \
+		echo "[QEMU] Start zainstalowanego Bursztyn OS / UEFI bez VirtIO (pflash)."; \
+		cp "$(OVMF_VARS)" "$(OVMF_VARS_RUNTIME)"; \
+		exec $(QEMU) \
+			-drive if=pflash,format=raw,readonly=on,file="$(OVMF_CODE)" \
+			-drive if=pflash,format=raw,file="$(OVMF_VARS_RUNTIME)" \
+			$(QEMU_BASE_ARGS) \
+			$(QEMU_LEGACY_ARGS) \
+			-boot order=c; \
+	fi
+
 # ============================================================================
 # 25. KONTROLA NARZEDZI
 # ============================================================================
@@ -1185,11 +1301,17 @@ help:
 	@echo "  make iso8k     - zbuduj developerskie ISO z modulem 8K BMP (~97 MiB)"
 	@echo "  make bios      - zbuduj ISO do startu BIOS"
 	@echo "  make uefi      - zbuduj ISO do startu UEFI"
-	@echo "  make run       - uruchom QEMU w trybie BIOS ze standardowym ISO"
-	@echo "  make run8k     - uruchom QEMU w trybie BIOS z ISO zawierajacym modul 8K"
-	@echo "  make run-test  - uruchom QEMU z automatyczna regresja BWS/BursztynUI (bursztyn.test=automated)"
-	@echo "  make run-geom-trace - uruchom QEMU z diagnostycznym sledzeniem geometrii (BURSZTYN_DIAG_GEOM_TRACE=1)"
-	@echo "  make runuefi   - uruchom QEMU z OVMF/UEFI"
+	@echo "  make run       - BIOS + VirtIO Full (GPU/BLK/NET/RNG/INPUT)"
+	@echo "  make runuefi   - UEFI/OVMF + VirtIO Full (GPU/BLK/NET/RNG/INPUT)"
+	@echo "  make run-legacy - BIOS bez VirtIO (AHCI/E1000/STD VGA/PS2)"
+	@echo "  make runuefi-legacy - UEFI bez VirtIO (AHCI/E1000/GOP-STD VGA/PS2)"
+	@echo "  make run-installed - zainstalowany system UEFI z dysku przez VirtIO Full"
+	@echo "  make run-installed-legacy - zainstalowany system UEFI z dysku bez VirtIO"
+	@echo "  make run8k     - BIOS + VirtIO Full z ISO zawierajacym modul 8K"
+	@echo "  make run-test  - BIOS + VirtIO Full z automatyczna regresja (bursztyn.test=automated)"
+	@echo "  make run-geom-trace - czysta przebudowa + BIOS VirtIO z BURSZTYN_DIAG_GEOM_TRACE=1"
+	@echo "  make iso BURSZTYN_DIAG_BOOT=1 - build z telemetria BOOT/WM"
+	@echo "  make iso BURSZTYN_DEBUG_GUI_LAYERS=1 - build z diagnostyka warstw BWS"
 	@echo "  make check-tools - sprawdz wymagane narzedzia"
 	@echo "  make clean     - usun artefakty kompilacji"
 	@echo "  make cdysk     - usun wirtualny dysk"

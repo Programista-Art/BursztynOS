@@ -573,7 +573,7 @@ void ekran_posprzataj_proces(int pid){
     }
 }
 
-bool ekran_test_virtio_gpu_modeset() {
+bool ekran_test_virtio_gpu_modeset(bool capture_modes) {
     if (grafika_mozliwosci_ekranu().backend != EKRAN_VIRTIO_GPU) return true;
     klog_serial("[VIRTIO-GPU-MODESET] Rozpoczynam desktopowy test przelaczania trybow w locie...");
 
@@ -586,6 +586,38 @@ bool ekran_test_virtio_gpu_modeset() {
             return false;
         }
         klog_serial("[VIRTIO-GPU-MODESET] Boot mode 1280x720 preserved: PASS");
+    }
+
+    // Host acknowledges each captured scanout over COM1. This is a bounded
+    // test-only handshake, not a delay in production boot.
+    auto capture = [](const char* marker) {
+        klog_serial(marker);
+        const uint64_t start = czas_monotoniczny_ns();
+        while (czas_monotoniczny_ns() - start < 10000000000ULL) {
+            uint8_t status;
+            asm volatile("inb %1, %0" : "=a"(status) : "Nd"(uint16_t(0x3FD)));
+            if (status & 1) {
+                uint8_t c;
+                asm volatile("inb %1, %0" : "=a"(c) : "Nd"(uint16_t(0x3F8)));
+                if (c == 'C') return true;
+            }
+            asm volatile("pause");
+        }
+        klog_serial("[VIRTIO-GPU-MODESET] capture acknowledgement timeout: FAIL");
+        return false;
+    };
+    const TrybEkranu high_modes[] = {
+        {3440,1440,32,3440*4,0,0}, {3840,2160,32,3840*4,0,0},
+        {1280,720,32,1280*4,0,0}
+    };
+    const char* markers[] = {
+        "[VIRTIO-GPU-MODESET] Capture 3440x1440",
+        "[VIRTIO-GPU-MODESET] Capture 3840x2160",
+        "[VIRTIO-GPU-MODESET] Capture 1280x720"
+    };
+    for (unsigned i = 0; capture_modes && i < 3; ++i) {
+        if (zastosuj(high_modes[i], 100, 0, false, false) != EKRAN_OK ||
+            !capture(markers[i])) return false;
     }
 
     // 2. Przelaczenie 1280x720 -> 1920x1080 (natychmiastowe)
@@ -648,4 +680,3 @@ bool ekran_test_virtio_gpu_modeset() {
     klog_serial("[VIRTIO-GPU-MODESET] Desktop modeset test suite: PASS");
     return true;
 }
-

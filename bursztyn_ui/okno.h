@@ -118,6 +118,8 @@ public:
             gui_ustaw_geometrie_okna(x_, y_, szerokosc_, wysokosc_,
                                      czy_zmaksymalizowane_ ? 2 : 1);
         }
+        popupy_.ustaw_geometrie_wlasciciela(Prostokat(x_, y_, szerokosc_, wysokosc_),
+                                            pobierz_obszar_roboczy());
     }
 
     void ustaw_logiczny_rozmiar(int lw, int lh) {
@@ -581,6 +583,8 @@ public:
                     if (nx != x_ || ny != y_) {
                         x_ = nx;
                         y_ = ny;
+                        popupy_.ustaw_geometrie_wlasciciela(
+                            Prostokat(x_, y_, szerokosc_, wysokosc_), work);
                         bws_przesun_warstwe(x_, y_);
                         gui_odswiez();
                     }

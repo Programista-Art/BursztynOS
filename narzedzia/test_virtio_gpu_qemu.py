@@ -50,6 +50,8 @@ import json
 import subprocess
 import threading
 import queue
+import tempfile
+import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -155,7 +157,20 @@ def main():
     ci_iso = ROOT / ".bursztyn_ci_test.iso"
     if not ci_iso.exists():
         subprocess.run(["make", ".bursztyn_ci_test.iso"], cwd=str(ROOT), check=True)
-    iso = ci_iso
+    # Dedicated opt-in image: other CI runners do not speak the capture ACK
+    # protocol and must retain their usual modeset sequence.
+    capture_dir = Path(tempfile.mkdtemp(prefix='bursztyn-gpu-capture-'))
+    stage = capture_dir / 'iso'
+    subprocess.run(['xorriso', '-osirrox', 'on', '-indev', str(ci_iso),
+                    '-extract', '/', str(stage)], stdout=subprocess.DEVNULL,
+                   stderr=subprocess.DEVNULL, check=True)
+    cfg = stage / 'boot/grub/grub.cfg'
+    cfg.chmod(0o600)
+    cfg.write_text(cfg.read_text().replace('bursztyn.test=automated',
+                   'bursztyn.test=automated bursztyn.test.gpu-capture=1'))
+    iso = capture_dir / 'capture.iso'
+    subprocess.run(['grub-mkrescue', '-o', str(iso), str(stage)],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
 
     disk = ROOT / "wirtualny_dysk.img"
     if not disk.exists():
@@ -203,6 +218,7 @@ def main():
 
     proc = subprocess.Popen(
         cmd,
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -261,6 +277,8 @@ def main():
     pattern_pixel_report = []
 
     desktop_dump_ok = False
+    desktop_dim_ok = False
+    high_modes_ok = set()
     cursor_initial_visible = False
     cursor_move_ok = False
     cursor_old_restored_ok = False
@@ -438,6 +456,18 @@ def main():
             if "[VIRTIO-GPU-MODESET] Switched to 1920x1080: PASS" in line_str:
                 found_desktop_switched_1080 = True
                 gpu_lines.append(line_str)
+            if "[VIRTIO-GPU-MODESET] Capture " in line_str:
+                mode = line_str.rsplit(" ", 1)[1]
+                path = Path('/tmp') / ('virtio_gpu_' + mode + '.ppm')
+                try:
+                    qmp_screendump(qmp_sock, path)
+                    w, h, _ = parse_ppm(path)
+                    if f'{w}x{h}' == mode:
+                        high_modes_ok.add(mode)
+                    print(f'[MODE CAPTURE] expected={mode} actual={w}x{h}')
+                finally:
+                    proc.stdin.write('C')
+                    proc.stdin.flush()
             if "[VIRTIO-GPU-MODESET] Ready for 1920x1080 screendump" in line_str:
                 if not screendump_1080_ok and qmp_sock.exists():
                     try:
@@ -607,6 +637,8 @@ def main():
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()
+        if capture_dir.exists():
+            shutil.rmtree(capture_dir, ignore_errors=True)
 
     runtime = time.time() - start_time
 
@@ -703,6 +735,7 @@ def main():
               found_desktop_switched_768 and screendump_768_ok and
               found_unconfirmed_rollback and screendump_rollback_ok and
               found_desktop_restored_1280 and found_desktop_modeset_suite and
+              high_modes_ok == {'3440x1440', '3840x2160', '1280x720'} and
               found_cursor_center and found_cursor_movement and
               found_cursor_restore and found_cursor_clipping and
               found_cursor_rapid_kernel and found_cursor_flush and
@@ -726,4 +759,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

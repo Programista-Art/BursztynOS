@@ -887,7 +887,7 @@ bool znajdz_modul_mb2(uint64_t mbi, const char* nazwa_szukana, ModulMB2* wynik) 
     return false;
 }
 
-bool zadano_automatyczne_testy(uint64_t mbi) {
+bool zadano_automatyczne_testy(uint64_t mbi, const char* token = "bursztyn.test=automated") {
     if (mbi == 0) return false;
 
     const volatile uint32_t* info =
@@ -911,7 +911,7 @@ bool zadano_automatyczne_testy(uint64_t mbi) {
             for (uint32_t i = 0; i < pojemnosc; ++i) {
                 if (cmdline[i] == '\0') {
                     return tekst_zawiera(
-                        cmdline, "bursztyn.test=automated");
+                        cmdline, token);
                 }
             }
             return false;
@@ -2520,7 +2520,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     motyw_inicjalizuj();
 
     if (tryb_testowy) {
-        ekran_test_virtio_gpu_modeset();
+        ekran_test_virtio_gpu_modeset(zadano_automatyczne_testy(
+            g_multiboot_info_ptr, "bursztyn.test.gpu-capture=1"));
     }
 
     /* ---------------------------------------------------------------------

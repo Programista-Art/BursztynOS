@@ -35,6 +35,7 @@ private:
             przy_zamknieciu(zamknieto, this);
         }
         ListaWyboru& lista() { return *lista_; }
+        bool czy_podaza_za_wlascicielem() const override { return true; }
         const ListaWyboru& lista() const { return *lista_; }
         void rozmiesc(Prostokat r) override {
             PowierzchniaPopup::rozmiesc(r);
@@ -140,7 +141,9 @@ public:
         SkalaUI s = skala_dpi_;
         int h = wiersze * (22 * s) + 2 * s;
         int w = obszar_.szerokosc < 120 * s ? 120 * s : obszar_.szerokosc;
-        Prostokat gdzie = z->umiesc_pod_kotwica(obszar_ekranu_, Rozmiar(w, h), true);
+        Prostokat kotwica = prostokat_do_ekranu(
+            Prostokat(0, 0, obszar_.szerokosc, obszar_.wysokosc));
+        Prostokat gdzie = z->umiesc_pod_kotwica_ekranu(kotwica, Rozmiar(w, h), true);
         wybor_przed_otwarciem_ = wybrany_indeks();
         anulowanie_ = false;
         if (!z->otworz(popup_, gdzie, edytowalna_ ? static_cast<Kontrolka*>(edycja_)
