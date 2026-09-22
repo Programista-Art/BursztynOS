@@ -290,9 +290,9 @@ bool rect_merge_ok(const GuiDirtyRect&a,const GuiDirtyRect&b){
 uint64_t cursor_reoverlay_after_dirty=0;
 #endif
 
-static void perf_num(char* b,size_t cap,size_t* n,uint64_t v){char t[24];size_t m=0;do{t[m++]=static_cast<char>('0'+v%10);v/=10;}while(v&&m<sizeof(t));while(m&&*n+1<cap)b[(*n)++]=t[--m];b[*n]='\0';}
+[[maybe_unused]] static void perf_num(char* b,size_t cap,size_t* n,uint64_t v){char t[24];size_t m=0;do{t[m++]=static_cast<char>('0'+v%10);v/=10;}while(v&&m<sizeof(t));while(m&&*n+1<cap)b[(*n)++]=t[--m];b[*n]='\0';}
 static void perf_txt(char*b,size_t cap,size_t*n,const char*s){while(s&&*s&&*n+1<cap)b[(*n)++]=*s++;b[*n]='\0';}
-static void perf_hex(char* b, size_t cap, size_t* n, uint64_t v) {
+[[maybe_unused]] static void perf_hex(char* b, size_t cap, size_t* n, uint64_t v) {
     perf_txt(b, cap, n, "0x");
     static constexpr char HEX[] = "0123456789ABCDEF";
     bool leading = true;

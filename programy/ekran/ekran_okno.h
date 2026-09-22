@@ -4,6 +4,10 @@
 #include "../../bursztyn_ui/bursztyn_ui.h"
 #include "klient.h"
 
+#ifndef BURSZTYN_DIAG_BOOT
+#define BURSZTYN_DIAG_BOOT 0
+#endif
+
 namespace BursztynUI {
 
 inline void tekst_liczba(char* out, size_t cap, const char* prefix, uint32_t a, const char* suffix = "") {
@@ -407,6 +411,7 @@ public:
     }
 
     void log_diagnostyka(const char* phase) {
+#if BURSZTYN_DIAG_BOOT
         char buf[340]{};
         size_t pos = 0;
         auto str = [&](const char* s) {
@@ -457,6 +462,9 @@ public:
         str("\n");
         buf[pos] = '\0';
         bws_wywolaj(1, reinterpret_cast<uint64_t>(buf), 0, 0, 0);
+#else
+        (void)phase;
+#endif
     }
 
     void obsluz_zdarzenie(const bws_zdarzenie& e) override {
