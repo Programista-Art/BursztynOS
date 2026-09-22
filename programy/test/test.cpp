@@ -527,6 +527,8 @@ static void wykonaj_testy_bws_61_83() {
 
         // BWS 88: Wymog autoryzacji BWS_PULPIT_GOTOWY (tylko zaufany Menedzer Okien /menedzer_okien.bur).
         // test.bur (PZB_UZYTKOWNIK) nie ma PRAWO_SYSTEM_CONFIG i nie jest Menedzerem Okien -> odrzucenie i wynik 0.
+        // Idempotencja: wielokrotne wywołania nie zmieniają stanu systemu i są bezpiecznie odrzucane.
+        bws_sprawdz(bws_wywolaj(BWS_PULPIT_GOTOWY, 0, 0, 0, 0) == 0);
         bws_sprawdz(bws_wywolaj(BWS_PULPIT_GOTOWY, 0, 0, 0, 0) == 0);
 
         // BWS 87: MOTYW_CMD_LISTUJ jest bezpiecznym odczytem i zwraca liczbę dostępnych motywów

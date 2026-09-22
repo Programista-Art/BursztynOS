@@ -739,7 +739,7 @@ $(GRUB_CFG): $(KERNEL) $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile
 	@mkdir -p .installer-build
 	grub-mkstandalone -O x86_64-efi --locales="" --fonts="" --modules="part_gpt fat loadenv test normal multiboot2 configfile search search_fs_file all_video gfxterm" -o $@ "boot/grub/grub.cfg=$<"
 
-.PHONY: test-network-device test-e1000-qemu test-virtio-pci test-virtio-qemu test-virtio-blk-qemu test-virtio-net-qemu test-virtio-gpu-qemu test-virtio-input-qemu test-normal-boot installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-aktualizacje-gui test-bur-loader test-aktualizacja-qemu test-rozruch-qemu test-ota audit-stos-jadra test-stos-jadra test-wspolbieznosc test-guard-page test-16k-bws84 test-motywy test-motywy-unit test-motywy-gui test-motywy-qemu test-notatnik-gui test-kalkulator-gui test-bursztyn-ui-polecenia test-kontrolki4 test-kontrolki4-qemu
+.PHONY: test-network-device test-e1000-qemu test-virtio-pci test-virtio-qemu test-virtio-blk-qemu test-virtio-net-qemu test-virtio-gpu-qemu test-virtio-input-qemu test-normal-boot test-diff-boot installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-aktualizacje-gui test-bur-loader test-aktualizacja-qemu test-rozruch-qemu test-ota audit-stos-jadra test-stos-jadra test-wspolbieznosc test-guard-page test-16k-bws84 test-motywy test-motywy-unit test-motywy-gui test-motywy-qemu test-notatnik-gui test-kalkulator-gui test-bursztyn-ui-polecenia test-kontrolki4 test-kontrolki4-qemu
 
 test-network-device:
 	@mkdir -p .nettest
@@ -771,6 +771,9 @@ test-virtio-input-qemu: $(CI_TEST_ISO)
 
 test-normal-boot: iso
 	$(PYTHON) narzedzia/test_normal_boot_qemu.py
+
+test-diff-boot: iso
+	$(PYTHON) narzedzia/test_diff_boot.py
 
 test-kontrolki4:
 	@mkdir -p .kontrolki4-test

@@ -2258,11 +2258,7 @@ extern "C" __attribute__((noreturn)) void _start() {
 
     RysujPulpit(true);
     wm_log("[WM] Initial Desktop ready\n");
-    const bool first_ok = gui_potwierdz_gotowosc_pulpitu();
-    const bool second_ok = gui_potwierdz_gotowosc_pulpitu();
-    if (first_ok && second_ok) {
-        wm_log("[WM] Handshake idempotency verified: OK\n");
-    }
+    gui_potwierdz_gotowosc_pulpitu();
 
     bool drag_candidate = false;
     bool dragging_file = false;
