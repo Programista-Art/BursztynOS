@@ -137,7 +137,7 @@ public:
     static constexpr size_t MAKS_NAZWY = 64;
     static constexpr size_t MAKS_FILTROW = 16;
     static constexpr size_t MAKS_WPISOW = 512;
-    static constexpr size_t ROZMIAR_LISTINGU = 32768;
+    static constexpr size_t ROZMIAR_LISTINGU = 64U * 1024U;
     static constexpr size_t MAKS_HISTORII = 16;
 
     using FunkcjaWynikuPliku = void (*)(DialogPliku* dialog, WynikDialoguPliku wynik,
@@ -238,7 +238,7 @@ public:
         FiltrPliku& f = filtry_[liczba_filtrow_++];
         kopiuj_str(f.nazwa, sizeof(f.nazwa), nazwa);
         kopiuj_str(f.rozszerzenia, sizeof(f.rozszerzenia), rozszerzenia);
-        f.czy_wszystkie = (!rozszerzenia[0] || rowne_str(rozszerzenia, "*.*") || rowne_str(rozszerzenia, "*"));
+        f.czy_wszystkie = czy_filtr_wszystkie(rozszerzenia);
         if (filtr_combo_) {
             filtr_combo_->dodaj_element(nazwa);
             if (liczba_filtrow_ == 1) filtr_combo_->ustaw_wybrany_indeks(0);
@@ -325,6 +325,7 @@ public:
     const char* wybrana_nazwa() const { return wybrana_nazwa_; }
     const char* biezacy_katalog() const { return biezacy_katalog_; }
     WynikDialoguPliku wynik_pliku() const { return wynik_pliku_; }
+    bool czy_listing_niepelny() const { return listing_niepelny_; }
 
     void przy_wyniku_pliku(FunkcjaWynikuPliku cb, void* dane = nullptr) {
         cb_wynik_pliku_ = cb;
@@ -454,6 +455,17 @@ public:
                 c == '?' || c == '"' || c == '<' || c == '>' || c == '|') {
                 return false;
             }
+        }
+        return true;
+    }
+
+    static bool czy_poprawna_sciezka_dialogu(const char* s) {
+        if (!s || !s[0] || s[0] != '/') return false;
+        if (!czy_poprawny_utf8(s)) return false;
+        if (dlugosc_str(s) >= MAKS_SCIEZKI) return false;
+        for (size_t i = 0; s[i]; ++i) {
+            char c = s[i];
+            if (c == '\\' || c == '"' || c == '<' || c == '>' || c == '|') return false;
         }
         return true;
     }
@@ -618,7 +630,7 @@ public:
 
     static bool sprawdz_filtr(const char* nazwa, const char* rozszerzenia) {
         if (!nazwa || !rozszerzenia) return true;
-        if (!rozszerzenia[0] || rowne_str(rozszerzenia, "*.*") || rowne_str(rozszerzenia, "*")) return true;
+        if (czy_filtr_wszystkie(rozszerzenia)) return true;
 
         size_t nlen = dlugosc_str(nazwa);
         const char* p = rozszerzenia;
@@ -727,6 +739,14 @@ public:
                     return;
                 }
             }
+            if (!czy_poprawna_sciezka_dialogu(target)) {
+                if (zarzadca()) {
+                    Komunikat::blad(*zarzadca(), "Błąd wyboru",
+                                    "Wybrana ścieżka jest nieprawidłowa albo zbyt długa.",
+                                    nullptr, nullptr, this);
+                }
+                return;
+            }
             kopiuj_str(wybrana_sciezka_, sizeof(wybrana_sciezka_), target);
             wynik_pliku_ = WynikDialoguPliku::Wybrano;
             if (cb_wynik_pliku_) {
@@ -747,6 +767,14 @@ public:
 
         char pelna_nazwa[MAKS_NAZWY]{};
         kopiuj_str(pelna_nazwa, sizeof(pelna_nazwa), name_txt);
+        if (!czy_poprawna_nazwa_elementu(pelna_nazwa)) {
+            if (zarzadca()) {
+                Komunikat::blad(*zarzadca(), "Nieprawidłowa nazwa",
+                                "Nazwa pliku zawiera niedozwolone znaki, jest zbyt długa albo nie jest poprawnym UTF-8.",
+                                nullptr, nullptr, this);
+            }
+            return;
+        }
 
         if (tryb_ == TrybDialoguPliku::Zapisz && !ma_rozszerzenie(pelna_nazwa)) {
             const char* ext = pobierz_domyslne_rozszerzenie_filtru();
@@ -764,6 +792,14 @@ public:
         if (!polacz_sciezki(biezacy_katalog_, pelna_nazwa, pelna_sciezka, sizeof(pelna_sciezka))) {
             if (zarzadca()) {
                 Komunikat::blad(*zarzadca(), "Błąd ścieżki", "Ścieżka pliku jest zbyt długa.",
+                                nullptr, nullptr, this);
+            }
+            return;
+        }
+        if (!czy_poprawna_sciezka_dialogu(pelna_sciezka)) {
+            if (zarzadca()) {
+                Komunikat::blad(*zarzadca(), "Błąd ścieżki",
+                                "Ścieżka pliku jest nieprawidłowa albo zbyt długa.",
                                 nullptr, nullptr, this);
             }
             return;
@@ -826,6 +862,58 @@ public:
     }
 
     void zatwierdz_koncowo(const char* sciezka) {
+        if (!czy_poprawna_sciezka_dialogu(sciezka)) {
+            if (zarzadca()) {
+                Komunikat::blad(*zarzadca(), "Błąd ścieżki",
+                                "Ścieżka pliku jest nieprawidłowa albo zbyt długa.",
+                                nullptr, nullptr, this);
+            }
+            return;
+        }
+        BwsMetadanePliku meta{};
+        if (tryb_ == TrybDialoguPliku::Otworz) {
+            if (!pobierz_metadane_pliku(sciezka, &meta) || meta.typ != BWS_TYP_PLIK) {
+                if (zarzadca()) {
+                    Komunikat::blad(*zarzadca(), "Plik niedostępny",
+                                    "Wybrany plik zmienił się, nie istnieje albo nie można go odczytać.",
+                                    nullptr, nullptr, this);
+                }
+                return;
+            }
+        } else if (tryb_ == TrybDialoguPliku::WybierzKatalog) {
+            if (!pobierz_metadane_pliku(sciezka, &meta) || meta.typ != BWS_TYP_KATALOG) {
+                if (zarzadca()) {
+                    Komunikat::blad(*zarzadca(), "Katalog niedostępny",
+                                    "Wybrany katalog zmienił się, nie istnieje albo nie można go odczytać.",
+                                    nullptr, nullptr, this);
+                }
+                return;
+            }
+        } else if (tryb_ == TrybDialoguPliku::Zapisz) {
+            if (pobierz_metadane_pliku(sciezka, &meta)) {
+                if (meta.typ == BWS_TYP_KATALOG) {
+                    if (zarzadca()) {
+                        Komunikat::blad(*zarzadca(), "Błąd zapisu",
+                                        "Wybrana ścieżka wskazuje katalog, a nie plik.",
+                                        nullptr, nullptr, this);
+                    }
+                    return;
+                }
+            } else {
+                char rodzic[MAKS_SCIEZKI]{};
+                pobierz_katalog_nadrzedny(sciezka, rodzic, sizeof(rodzic));
+                BwsMetadanePliku meta_rodzic{};
+                if (!pobierz_metadane_pliku(rodzic, &meta_rodzic) ||
+                    meta_rodzic.typ != BWS_TYP_KATALOG) {
+                    if (zarzadca()) {
+                        Komunikat::blad(*zarzadca(), "Błąd zapisu",
+                                        "Katalog docelowy nie istnieje albo nie jest dostępny.",
+                                        nullptr, nullptr, this);
+                    }
+                    return;
+                }
+            }
+        }
         kopiuj_str(wybrana_sciezka_, sizeof(wybrana_sciezka_), sciezka);
         const char* p = sciezka;
         size_t l = dlugosc_str(sciezka);
@@ -942,7 +1030,13 @@ public:
 protected:
     void oblicz_geometrie_dialogu(int& szer, int& wys) override {
         SkalaUI s = skala_dpi_;
-        szer = 740 * s;
+        int label_w = szerokosc_etykiety_dolnej(s);
+        int filter_w = szerokosc_combo_filtra(s);
+        int btn_w = szerokosc_przycisku(tekst_przycisku_akcji(), s) +
+                    szerokosc_przycisku("Anuluj", s) + 10 * s;
+        int needed_w = 28 * s + label_w + 8 * s + filter_w + 16 * s + btn_w + 28 * s;
+        int base_w = 740 * s;
+        szer = needed_w > base_w ? needed_w : base_w;
         wys = 500 * s;
     }
 
@@ -1003,31 +1097,41 @@ protected:
         uklad_->dodaj_dokowany(pasek_sciezki_, Dokowanie::Gora);
 
         // 3. Dolny panel: wpis nazwy, filtry oraz przyciski akcji
+        int wysokosc_pola = wysokosc_kontrolki_pola(s);
+        int wysokosc_przycisku = wysokosc_przycisku_akcji(s);
+        int wysokosc_wiersza = wysokosc_pola > wysokosc_przycisku ? wysokosc_pola : wysokosc_przycisku;
+        int wysokosc_panelu = ui_odskaluj(8 * s + wysokosc_pola + 8 * s + wysokosc_wiersza + 10 * s, s.procent());
+
         panel_przyciskow_ = new Wiersz();
-        panel_przyciskow_->ustaw_preferowany_rozmiar(Rozmiar(-1, 84));
+        panel_przyciskow_->ustaw_preferowany_rozmiar(Rozmiar(-1, wysokosc_panelu));
         panel_przyciskow_->ustaw_wypelnienie(Marginesy(14, 8, 14, 10));
-        panel_przyciskow_->ustaw_odstep(6);
+        panel_przyciskow_->ustaw_odstep(0);
         wyzeruj_tlo(*panel_przyciskow_);
         uklad_->dodaj_dokowany(panel_przyciskow_, Dokowanie::Dol);
 
         Kolumna* dol_kolumna = new Kolumna();
+        dol_kolumna->ustaw_wypelnienie(Marginesy(0, 0, 0, 0));
         dol_kolumna->ustaw_odstep(8);
         dol_kolumna->ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+        dol_kolumna->ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
         panel_przyciskow_->dodaj_kontrolke(dol_kolumna);
 
-        // Rzad 1: Etykieta + PoleTekstowe + Etykieta filtrow + ListaRozwijana filtrow
+        const int etykieta_w = ui_odskaluj(szerokosc_etykiety_dolnej(s), s.procent());
+
+        // Rzad 1: Etykieta + PoleTekstowe
         Wiersz* wiersz_wpisu = new Wiersz();
-        wiersz_wpisu->ustaw_preferowany_rozmiar(Rozmiar(-1, 28));
+        wiersz_wpisu->ustaw_wypelnienie(Marginesy(0, 0, 0, 0));
+        wiersz_wpisu->ustaw_preferowany_rozmiar(Rozmiar(-1, ui_odskaluj(wysokosc_pola, s.procent())));
         wiersz_wpisu->ustaw_odstep(8);
         wiersz_wpisu->ustaw_wyrownanie_pionowe(WyrownaniePionowe::Srodek);
         dol_kolumna->dodaj_kontrolke(wiersz_wpisu);
 
         Etykieta* ety_nazwa = new Etykieta(tryb_ == TrybDialoguPliku::WybierzKatalog ? "Katalog:" : "Nazwa pliku:");
-        ety_nazwa->ustaw_preferowany_rozmiar(Rozmiar(95, 26));
+        ety_nazwa->ustaw_preferowany_rozmiar(Rozmiar(etykieta_w, ui_odskaluj(wysokosc_pola, s.procent())));
         wiersz_wpisu->dodaj_kontrolke(ety_nazwa);
 
         pole_nazwy_ = new PoleTekstowe(tryb_ == TrybDialoguPliku::WybierzKatalog ? "(bieżący katalog)" : "Nazwa pliku...");
-        pole_nazwy_->ustaw_preferowany_rozmiar(Rozmiar(-1, 28));
+        pole_nazwy_->ustaw_preferowany_rozmiar(Rozmiar(-1, ui_odskaluj(wysokosc_pola, s.procent())));
         pole_nazwy_->ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
         if (wybrana_nazwa_[0]) pole_nazwy_->ustaw_tekst(wybrana_nazwa_);
         pole_nazwy_->przy_zatwierdzeniu([](PoleTekstowe*, const char*, void* d) {
@@ -1035,12 +1139,23 @@ protected:
         }, this);
         wiersz_wpisu->dodaj_kontrolke(pole_nazwy_);
 
-        Etykieta* ety_filtr = new Etykieta("Typ:");
-        ety_filtr->ustaw_preferowany_rozmiar(Rozmiar(32, 26));
-        wiersz_wpisu->dodaj_kontrolke(ety_filtr);
+        // Rzad 2: Etykieta filtrow + ListaRozwijana + Wypychacz + Przyciski akcji
+        Wiersz* wiersz_akcji = new Wiersz();
+        wiersz_akcji->ustaw_wypelnienie(Marginesy(0, 0, 0, 0));
+        wiersz_akcji->ustaw_preferowany_rozmiar(Rozmiar(-1, ui_odskaluj(wysokosc_wiersza, s.procent())));
+        wiersz_akcji->ustaw_odstep(10);
+        wiersz_akcji->ustaw_wyrownanie_poziome(WyrownaniePoziome::Koniec);
+        wiersz_akcji->ustaw_wyrownanie_pionowe(WyrownaniePionowe::Srodek);
+        dol_kolumna->dodaj_kontrolke(wiersz_akcji);
+
+        Etykieta* ety_filtr = new Etykieta("Typ pliku:");
+        ety_filtr->ustaw_preferowany_rozmiar(Rozmiar(etykieta_w, ui_odskaluj(wysokosc_pola, s.procent())));
+        wiersz_akcji->dodaj_kontrolke(ety_filtr);
 
         filtr_combo_ = new ListaRozwijana();
-        filtr_combo_->ustaw_preferowany_rozmiar(Rozmiar(260, 28));
+        filtr_combo_->ustaw_preferowany_rozmiar(Rozmiar(ui_odskaluj(szerokosc_combo_filtra(s), s.procent()),
+                                                       ui_odskaluj(wysokosc_pola, s.procent())));
+        filtr_combo_->ustaw_minimalny_rozmiar(Rozmiar(180, ui_odskaluj(wysokosc_pola, s.procent())));
         for (size_t i = 0; i < liczba_filtrow_; ++i) {
             filtr_combo_->dodaj_element(filtry_[i].nazwa);
         }
@@ -1058,15 +1173,7 @@ protected:
             ety_filtr->ustaw_widoczna(false);
             filtr_combo_->ustaw_widoczna(false);
         }
-        wiersz_wpisu->dodaj_kontrolke(filtr_combo_);
-
-        // Rzad 2: Wypychacz + Przyciski akcji
-        Wiersz* wiersz_akcji = new Wiersz();
-        wiersz_akcji->ustaw_preferowany_rozmiar(Rozmiar(-1, 32));
-        wiersz_akcji->ustaw_odstep(10);
-        wiersz_akcji->ustaw_wyrownanie_poziome(WyrownaniePoziome::Koniec);
-        wiersz_akcji->ustaw_wyrownanie_pionowe(WyrownaniePionowe::Srodek);
-        dol_kolumna->dodaj_kontrolke(wiersz_akcji);
+        wiersz_akcji->dodaj_kontrolke(filtr_combo_);
 
         Kontrolka* wyp = new Kontrolka();
         wyp->ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
@@ -1074,19 +1181,19 @@ protected:
         wiersz_akcji->dodaj_kontrolke(wyp);
 
         const char* txt_akcja = tekst_przycisku_akcji();
-        int btn_akcja_w = CzcionkaUI::zmierz_tekst(txt_akcja, s) + 32 * s;
-        if (btn_akcja_w < 95 * s) btn_akcja_w = 95 * s;
+        int btn_akcja_w = szerokosc_przycisku(txt_akcja, s);
 
         btn_akcja_ = new Przycisk(txt_akcja);
-        btn_akcja_->ustaw_preferowany_rozmiar(Rozmiar(btn_akcja_w / s, 30));
+        btn_akcja_->ustaw_preferowany_rozmiar(Rozmiar(ui_odskaluj(btn_akcja_w, s.procent()),
+                                                     ui_odskaluj(wysokosc_przycisku, s.procent())));
         wiersz_akcji->dodaj_kontrolke(btn_akcja_);
         zarejestruj_przycisk_akcji(btn_akcja_, WynikDialogu::OK, true, false);
 
-        int btn_anuluj_w = CzcionkaUI::zmierz_tekst("Anuluj", s) + 32 * s;
-        if (btn_anuluj_w < 95 * s) btn_anuluj_w = 95 * s;
+        int btn_anuluj_w = szerokosc_przycisku("Anuluj", s);
 
         btn_anuluj_ = new Przycisk("Anuluj");
-        btn_anuluj_->ustaw_preferowany_rozmiar(Rozmiar(btn_anuluj_w / s, 30));
+        btn_anuluj_->ustaw_preferowany_rozmiar(Rozmiar(ui_odskaluj(btn_anuluj_w, s.procent()),
+                                                       ui_odskaluj(wysokosc_przycisku, s.procent())));
         wiersz_akcji->dodaj_kontrolke(btn_anuluj_);
         zarejestruj_przycisk_akcji(btn_anuluj_, WynikDialogu::Anuluj, false, true);
 
@@ -1190,6 +1297,7 @@ private:
 
     bool odswiez_katalog() {
         liczba_wpisow_ = 0;
+        listing_niepelny_ = false;
         char* bufor = static_cast<char*>(gui_malloc(ROZMIAR_LISTINGU));
         if (!bufor) return false;
 
@@ -1197,6 +1305,19 @@ private:
         if (!wynik) {
             gui_free(bufor);
             odswiez_widok_tabeli();
+            return false;
+        }
+
+        size_t dl = dlugosc_str_limit(bufor, ROZMIAR_LISTINGU);
+        if (dl >= ROZMIAR_LISTINGU || (dl > 0 && bufor[dl - 1] != '\n')) {
+            listing_niepelny_ = true;
+            gui_free(bufor);
+            odswiez_widok_tabeli();
+            if (zarzadca()) {
+                Komunikat::blad(*zarzadca(), "Lista katalogu niepełna",
+                                "BWS zwrócił niepełną listę katalogu. Zawartość nie zostanie pokazana jako kompletna.",
+                                nullptr, nullptr, this);
+            }
             return false;
         }
 
@@ -1236,6 +1357,57 @@ private:
         gui_free(bufor);
         odswiez_widok_tabeli();
         return true;
+    }
+
+    static size_t dlugosc_str_limit(const char* s, size_t limit) {
+        if (!s) return 0;
+        size_t i = 0;
+        while (i < limit && s[i]) ++i;
+        return i;
+    }
+
+    static int wysokosc_kontrolki_pola(SkalaUI s) {
+        int h = CzcionkaUI::pobierz_wysokosc(s) + 14 * s;
+        if (h < 30 * s) h = 30 * s;
+        return h;
+    }
+
+    static int wysokosc_przycisku_akcji(SkalaUI s) {
+        int h = CzcionkaUI::pobierz_wysokosc(s) + 16 * s;
+        if (h < 30 * s) h = 30 * s;
+        return h;
+    }
+
+    static int szerokosc_przycisku(const char* tekst, SkalaUI s) {
+        int w = CzcionkaUI::zmierz_tekst(tekst ? tekst : "", s) + 32 * s;
+        if (w < 95 * s) w = 95 * s;
+        return w;
+    }
+
+    static bool czy_filtr_wszystkie(const char* rozszerzenia) {
+        return !rozszerzenia || !rozszerzenia[0] ||
+               rowne_str(rozszerzenia, "*.*") ||
+               rowne_str(rozszerzenia, "*") ||
+               rowne_str(rozszerzenia, ".");
+    }
+
+    int szerokosc_etykiety_dolnej(SkalaUI s) const {
+        int w1 = CzcionkaUI::zmierz_tekst(tryb_ == TrybDialoguPliku::WybierzKatalog ? "Katalog:" : "Nazwa pliku:", s);
+        int w2 = CzcionkaUI::zmierz_tekst("Typ pliku:", s);
+        int w = (w1 > w2 ? w1 : w2) + 6 * s;
+        if (w < 92 * s) w = 92 * s;
+        return w;
+    }
+
+    int szerokosc_combo_filtra(SkalaUI s) const {
+        int max_w = CzcionkaUI::zmierz_tekst("Wszystkie pliki (*.*)", s);
+        for (size_t i = 0; i < liczba_filtrow_; ++i) {
+            int w = CzcionkaUI::zmierz_tekst(filtry_[i].nazwa, s);
+            if (w > max_w) max_w = w;
+        }
+        max_w += 44 * s;
+        if (max_w < 260 * s) max_w = 260 * s;
+        return max_w;
     }
 
     void odswiez_widok_tabeli() {
@@ -1333,7 +1505,7 @@ private:
         if (aktywny_filtr_ >= liczba_filtrow_) return "";
         if (filtry_[aktywny_filtr_].czy_wszystkie) return "";
         const char* f = filtry_[aktywny_filtr_].rozszerzenia;
-        if (rowne_str(f, "*.*") || rowne_str(f, "*")) return "";
+        if (czy_filtr_wszystkie(f)) return "";
         if (f[0] == '*' && f[1] == '.') return f + 1; // np. ".txt"
         if (f[0] == '.') return f;
         return "";
@@ -1386,6 +1558,7 @@ private:
     size_t liczba_wpisow_{0};
     WpisKatalogu wyswietlane_[MAKS_WPISOW]{};
     size_t liczba_wyswietlanych_{0};
+    bool listing_niepelny_{false};
 
     FunkcjaWynikuPliku cb_wynik_pliku_{nullptr};
     void* dane_wyniku_pliku_{nullptr};

@@ -1656,6 +1656,7 @@ static const TestPlikMock g_test_fs_wpisy[] = {
 };
 
 static const size_t g_test_fs_liczba = sizeof(g_test_fs_wpisy) / sizeof(g_test_fs_wpisy[0]);
+static bool g_test_fs_listing_uciety = false;
 
 static uint64_t mock_fs_bws_handler(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t /*a4*/) {
     if (nr == 6) { // wylistuj_katalog_uzytkownika(sciezka, bufor, max_len)
@@ -1665,6 +1666,10 @@ static uint64_t mock_fs_bws_handler(uint64_t nr, uint64_t a1, uint64_t a2, uint6
         if (!dir || !buf || max_len == 0) return 0;
 
         buf[0] = '\0';
+        if (g_test_fs_listing_uciety) {
+            snprintf(buf, max_len, "[PLIK] niedokonczony");
+            return 1;
+        }
         size_t dlen = strlen(dir);
         size_t cur = 0;
 
@@ -1720,6 +1725,16 @@ static uint64_t mock_fs_bws_handler(uint64_t nr, uint64_t a1, uint64_t a2, uint6
         return 1;
     }
     return 0;
+}
+
+static Kontrolka* znajdz_kontrolke_z_tekstem(Kontrolka* root, const char* tekst) {
+    if (!root || !tekst) return nullptr;
+    if (strcmp(root->tekst(), tekst) == 0) return root;
+    for (size_t i = 0; i < root->liczba_dzieci(); ++i) {
+        Kontrolka* znalezione = znajdz_kontrolke_z_tekstem(root->dziecko(i), tekst);
+        if (znalezione) return znalezione;
+    }
+    return nullptr;
 }
 
 // =========================================================================
@@ -1869,6 +1884,29 @@ static void test_dialog_pliku() {
     TEST_ASSERT(dlg_fs.obszar().wysokosc >= 500, "DialogPliku: Rozmiar wysokosci zoptymalizowany pod czytelnosc (>= 500px)");
     TEST_ASSERT(dlg_fs.lista_filtrow() != nullptr && dlg_fs.lista_filtrow()->obszar().szerokosc >= 200, "DialogPliku: Dropdown filtrow ma odpowiednia szerokosc");
 
+    SkalaUI skala_dialogu = dlg_fs.skala_dpi();
+    int min_wys_pola = CzcionkaUI::pobierz_wysokosc(skala_dialogu) + 14 * skala_dialogu;
+    if (min_wys_pola < 30 * skala_dialogu) min_wys_pola = 30 * skala_dialogu;
+    Kontrolka* ety_nazwa = znajdz_kontrolke_z_tekstem(&dlg_fs, "Nazwa pliku:");
+    TEST_ASSERT(ety_nazwa != nullptr, "DialogPliku: Etykieta 'Nazwa pliku:' istnieje w kontrolce wspoldzielonej");
+    TEST_ASSERT(ety_nazwa->obszar().szerokosc >= CzcionkaUI::zmierz_tekst("Nazwa pliku:", skala_dialogu),
+                "DialogPliku: Etykieta 'Nazwa pliku:' ma szerokosc mierzona tekstem i nie jest obcieta");
+    TEST_ASSERT(dlg_fs.pole_nazwy()->obszar().wysokosc >= min_wys_pola,
+                "DialogPliku: Pole nazwy ma wysokosc wynikajaca z metryk tekstu");
+    TEST_ASSERT(dlg_fs.lista_filtrow()->obszar().wysokosc >= min_wys_pola,
+                "DialogPliku: ComboBox typu pliku ma wysokosc wynikajaca z metryk tekstu");
+    TEST_ASSERT(dlg_fs.pole_nazwy()->obszar().szerokosc > dlg_fs.lista_filtrow()->obszar().szerokosc,
+                "DialogPliku: Pole nazwy rozszerza sie na dostepna szerokosc");
+    int combo_min = CzcionkaUI::zmierz_tekst(dlg_fs.lista_filtrow()->wybrany_tekst(), skala_dialogu) + 44 * skala_dialogu;
+    TEST_ASSERT(dlg_fs.lista_filtrow()->obszar().szerokosc >= combo_min,
+                "DialogPliku: ComboBox miesci caly wybrany tekst filtra");
+    TEST_ASSERT(dlg_fs.przycisk_zatwierdz()->obszar_ekranu().wysokosc >= 30 * skala_dialogu &&
+                dlg_fs.przycisk_anuluj()->obszar_ekranu().wysokosc >= 30 * skala_dialogu,
+                "DialogPliku: Przyciski Otworz/Anuluj sa w pelnej wysokosci");
+    TEST_ASSERT(dlg_fs.przycisk_zatwierdz()->obszar_ekranu().y == dlg_fs.przycisk_anuluj()->obszar_ekranu().y &&
+                dlg_fs.przycisk_zatwierdz()->obszar_ekranu().dolny() == dlg_fs.przycisk_anuluj()->obszar_ekranu().dolny(),
+                "DialogPliku: Przyciski Otworz/Anuluj sa wyrownane w dolnym panelu");
+
     // 11. Generyczne filtry i dopasowywanie plikow bez rozszerzenia
     TEST_ASSERT(DialogPliku::sprawdz_filtr("Makefile", "*.*") == true, "DialogPliku: Filtr *.* dopasowuje pliki bez rozszerzenia (np. Makefile)");
     TEST_ASSERT(DialogPliku::sprawdz_filtr("Makefile", "*") == true, "DialogPliku: Filtr * dopasowuje pliki bez rozszerzenia");
@@ -1877,6 +1915,11 @@ static void test_dialog_pliku() {
     TEST_ASSERT(DialogPliku::sprawdz_filtr("model.mesh", "*.mesh") == true, "DialogPliku: Niestandardowe rozszerzenie *.mesh dopasowane poprawnie");
     TEST_ASSERT(DialogPliku::sprawdz_filtr("gra.bursztyn_projekt", "*.bursztyn_projekt") == true, "DialogPliku: Rozszerzenie *.bursztyn_projekt dopasowane poprawnie");
     TEST_ASSERT(DialogPliku::sprawdz_filtr("notatka.md", "*.txt;*.md;*.log") == true, "DialogPliku: Zlozony filtr wielorozszerzeniowy *.txt;*.md;*.log dopasowuje .md");
+
+    DialogPliku dlg_kropka(TrybDialoguPliku::Otworz, "Otworz", "/uzytkownicy", "Wszystkie pliki (.)");
+    dlg_kropka.pokaz(zarzadca);
+    TEST_ASSERT(dlg_kropka.tabela_plikow()->liczba_wierszy() == 6,
+                "DialogPliku: Filtr 'Wszystkie pliki (.)' pokazuje wszystkie pliki i nie ukrywa katalogow");
 
     // 12. Bezpieczna nawigacja 'Poziom wyzej' w korzeniu
     dlg_fs.przejdz_do_katalogu("/");
@@ -1926,6 +1969,32 @@ static void test_dialog_pliku() {
     // 15. Reakcja na zmiane motywu
     dlg_fs.zaktualizuj_motyw();
     TEST_ASSERT(true, "DialogPliku: Obsluga zaktualizuj_motyw wykonana bez bledow");
+
+    // 16. Nie wolno pokazywac ucietej listy BWS6 jako kompletnej
+    g_test_fs_listing_uciety = true;
+    DialogPliku dlg_uciety(TrybDialoguPliku::Otworz, "Otworz", "/uzytkownicy", "Wszystkie pliki (*.*)");
+    dlg_uciety.pokaz(zarzadca);
+    TEST_ASSERT(dlg_uciety.czy_listing_niepelny() == true,
+                "DialogPliku: Wykrywa udane, ale uciete listowanie BWS6 bez zmiany ABI");
+    TEST_ASSERT(dlg_uciety.tabela_plikow()->liczba_wierszy() == 0,
+                "DialogPliku: Nie wyswietla niepelnego katalogu jako kompletnego");
+    g_test_fs_listing_uciety = false;
+
+    // 17. Skalowanie UI i mniejszy obszar roboczy nie moga obcinac dolnego panelu
+    ZarzadcaPopupow maly_zarzadca;
+    maly_zarzadca.ustaw_geometrie_wlasciciela(Prostokat(0, 0, 800, 560), Prostokat(0, 0, 800, 560));
+    DialogPliku dlg_skala(TrybDialoguPliku::Otworz, "Otworz", "/uzytkownicy", "Wszystkie pliki (*.*)");
+    dlg_skala.ustaw_skale_dpi(SkalaUI::procent(200));
+    dlg_skala.pokaz(maly_zarzadca);
+    SkalaUI skala_200 = dlg_skala.skala_dpi();
+    int min_wys_200 = CzcionkaUI::pobierz_wysokosc(skala_200) + 14 * skala_200;
+    if (min_wys_200 < 30 * skala_200) min_wys_200 = 30 * skala_200;
+    TEST_ASSERT(dlg_skala.pole_nazwy()->obszar_ekranu().wysokosc >= min_wys_200,
+                "DialogPliku: Pole nazwy zachowuje wysokosc przy skalowaniu 200%");
+    TEST_ASSERT(dlg_skala.lista_filtrow()->obszar_ekranu().wysokosc >= min_wys_200,
+                "DialogPliku: ComboBox zachowuje wysokosc przy skalowaniu 200%");
+    TEST_ASSERT(dlg_skala.tabela_plikow()->obszar_ekranu().dolny() <= dlg_skala.panel_przyciskow()->obszar_ekranu().y,
+                "DialogPliku: Lista plikow uzywa pozostalej wysokosci i nie nachodzi na dolny panel");
 
     g_test_bws_hook = nullptr;
 }
