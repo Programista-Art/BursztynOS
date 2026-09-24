@@ -1737,6 +1737,60 @@ static Kontrolka* znajdz_kontrolke_z_tekstem(Kontrolka* root, const char* tekst)
     return nullptr;
 }
 
+static void test_popup_key(ZarzadcaPopupow& z, uint32_t kod, uint32_t mod = 0) {
+    ZdarzenieKlawiatury e{};
+    e.typ = TypZdarzenia::KlawiszWcisniety;
+    e.kod_klawisza = kod;
+    e.kod_skanu = kod;
+    e.modyfikatory = mod;
+    (void)z.obsluz_klawisz(e);
+}
+
+static void test_popup_text(ZarzadcaPopupow& z, uint32_t cp) {
+    ZdarzenieWprowadzaniaTekstu e{};
+    e.punkt_kodowy = cp;
+    (void)z.obsluz_tekst(e);
+}
+
+static void test_type_ascii_key_text(ZarzadcaPopupow& z, uint32_t cp) {
+    if (cp >= 32U && cp < 127U) test_popup_key(z, cp);
+    test_popup_text(z, cp);
+}
+
+static void test_click_popup(ZarzadcaPopupow& z, int x, int y) {
+    ZdarzenieMyszki down{};
+    down.typ = TypZdarzenia::WcisniecieMyszy;
+    down.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
+    down.x = x;
+    down.y = y;
+    (void)z.obsluz_wcisniecie(down);
+
+    ZdarzenieMyszki up = down;
+    up.typ = TypZdarzenia::ZwolnienieMyszy;
+    (void)z.obsluz_zwolnienie(up);
+}
+
+static void test_drag_popup(ZarzadcaPopupow& z, int x1, int y1, int x2, int y2) {
+    ZdarzenieMyszki down{};
+    down.typ = TypZdarzenia::WcisniecieMyszy;
+    down.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
+    down.x = x1;
+    down.y = y1;
+    (void)z.obsluz_wcisniecie(down);
+
+    ZdarzenieMyszki move{};
+    move.typ = TypZdarzenia::RuchMyszy;
+    move.x = x2;
+    move.y = y2;
+    (void)z.obsluz_ruch(move);
+
+    ZdarzenieMyszki up = down;
+    up.typ = TypZdarzenia::ZwolnienieMyszy;
+    up.x = x2;
+    up.y = y2;
+    (void)z.obsluz_zwolnienie(up);
+}
+
 // =========================================================================
 // 20. Testy jednostkowe: DialogPliku (Tryby, normalizacja sciezek, filtry, nawigacja, nadpisywanie, klawisze, motywy)
 // =========================================================================
@@ -1879,6 +1933,54 @@ static void test_dialog_pliku() {
     dlg_anuluj.obsluz_wcisniecie_klawisza(e_esc);
     TEST_ASSERT(dlg_anuluj.wynik_pliku() == WynikDialoguPliku::Anulowano, "DialogPliku: Klawisz Escape anuluje dialog pliku");
 
+    // 9b. Propagacja klawiatury przez popup: tekst ma pierwszenstwo przed przyciskiem domyslnym.
+    DialogPliku dlg_spacje(TrybDialoguPliku::Zapisz, "Zapisz", "/uzytkownicy", "Dokumenty (*.txt)");
+    dlg_spacje.pokaz(zarzadca);
+    zarzadca.ustaw_fokus_popupu(dlg_spacje.pole_nazwy());
+    dlg_spacje.pole_nazwy()->ustaw_tekst("");
+    const uint32_t moj_plik[] = {'M', 0x00F3U, 'j', ' ', 'p', 'l', 'i', 'k', ' ',
+                                 't', 'e', 's', 't', 'o', 'w', 'y', '.', 't', 'x', 't'};
+    for (size_t i = 0; i < sizeof(moj_plik) / sizeof(moj_plik[0]); ++i) {
+        test_type_ascii_key_text(zarzadca, moj_plik[i]);
+        TEST_ASSERT(dlg_spacje.czy_otwarta(), "DialogPliku: wpisywanie nazwy ze spacjami nie zamyka popupu");
+    }
+    TEST_ASSERT(strcmp(dlg_spacje.pole_nazwy()->tekst(), "Mój plik testowy.txt") == 0,
+                "DialogPliku: Pole nazwy przyjmuje UTF-8 i spacje w nazwie pliku");
+
+    dlg_spacje.pole_nazwy()->ustaw_tekst("");
+    test_type_ascii_key_text(zarzadca, ' ');
+    test_type_ascii_key_text(zarzadca, ' ');
+    test_type_ascii_key_text(zarzadca, ' ');
+    TEST_ASSERT(dlg_spacje.czy_otwarta() && strcmp(dlg_spacje.pole_nazwy()->tekst(), "   ") == 0,
+                "DialogPliku: wielokrotne spacje w polu nazwy nie aktywuja przycisku domyslnego");
+
+    test_popup_key(zarzadca, 9);
+    TEST_ASSERT(zarzadca.fokus_popupu() == dlg_spacje.lista_filtrow(),
+                "DialogPliku: Tab przechodzi z pola nazwy do ComboBox typu pliku");
+    test_popup_key(zarzadca, 9, BWS_MOD_SHIFT);
+    TEST_ASSERT(zarzadca.fokus_popupu() == dlg_spacje.pole_nazwy(),
+                "DialogPliku: Shift+Tab wraca z ComboBox do pola nazwy");
+
+    zarzadca.ustaw_fokus_popupu(dlg_spacje.przycisk_anuluj());
+    test_popup_key(zarzadca, 32);
+    TEST_ASSERT(!dlg_spacje.czy_otwarta() && dlg_spacje.wynik_pliku() == WynikDialoguPliku::Anulowano,
+                "DialogPliku: Spacja nadal aktywuje przycisk z fokusem");
+
+    DialogPliku dlg_enter(TrybDialoguPliku::Otworz, "Otworz", "/uzytkownicy", "Wszystkie pliki (*.*)");
+    dlg_enter.pokaz(zarzadca);
+    zarzadca.ustaw_fokus_popupu(dlg_enter.pole_nazwy());
+    dlg_enter.pole_nazwy()->ustaw_tekst("istniejacy.txt");
+    test_popup_key(zarzadca, 13);
+    TEST_ASSERT(!dlg_enter.czy_otwarta() && dlg_enter.wynik_pliku() == WynikDialoguPliku::Wybrano,
+                "DialogPliku: Enter w polu nazwy zatwierdza istniejacy plik");
+
+    DialogPliku dlg_escape(TrybDialoguPliku::Otworz, "Otworz", "/uzytkownicy", "Wszystkie pliki (*.*)");
+    dlg_escape.pokaz(zarzadca);
+    zarzadca.ustaw_fokus_popupu(dlg_escape.pole_nazwy());
+    test_popup_key(zarzadca, 27);
+    TEST_ASSERT(!dlg_escape.czy_otwarta() && dlg_escape.wynik_pliku() == WynikDialoguPliku::Anulowano,
+                "DialogPliku: Escape przez popup anuluje dialog pliku");
+
     // 10. Ulepszona geometria i czytelnosc kontrolek (740x500, szerokie dropdowny, duze przyciski)
     TEST_ASSERT(dlg_fs.obszar().szerokosc >= 740, "DialogPliku: Rozmiar szerokosci zoptymalizowany pod czytelnosc (>= 740px)");
     TEST_ASSERT(dlg_fs.obszar().wysokosc >= 500, "DialogPliku: Rozmiar wysokosci zoptymalizowany pod czytelnosc (>= 500px)");
@@ -1935,36 +2037,50 @@ static void test_dialog_pliku() {
     dlg_fs.przejdz_do_katalogu("/uzytkownicy");
     TEST_ASSERT(dlg_fs.utworz_nowy_katalog("NoweProjekty") == true, "DialogPliku: Utworzenie nowego katalogu powiodlo sie");
 
-    // 14. Belka tytulowa: przeciaganie i przycisk zamkniecia [X]
-    ZdarzenieMyszki p_down{};
-    p_down.typ = TypZdarzenia::WcisniecieMyszy;
-    p_down.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
-    p_down.x = dlg_fs.obszar().x + 50; p_down.y = dlg_fs.obszar().y + 14;
-    dlg_fs.obsluz_wcisniecie_myszy(p_down);
-    TEST_ASSERT(dlg_fs.czy_przeciagane() == true, "DialogPliku: Przeciaganie okna za belke tytulowa aktywne");
+    // 14. Belka tytulowa, hit-test przez ZarzadcaPopupow i przycisk zamkniecia [X]
+    DialogPliku dlg_mysz(TrybDialoguPliku::Otworz, "Otworz", "/uzytkownicy", "Wszystkie pliki (*.*)");
+    dlg_mysz.pokaz(zarzadca);
+    Prostokat r_mysz = dlg_mysz.obszar();
+    Prostokat cr = dlg_mysz.prostokat_przycisku_zamknij();
+    const int header_y = r_mysz.y + 14 * dlg_mysz.skala_dpi();
+    const int punkty_belki[] = {
+        r_mysz.x + 12 * dlg_mysz.skala_dpi(),
+        r_mysz.x + r_mysz.szerokosc / 2,
+        r_mysz.x + cr.x - 8 * dlg_mysz.skala_dpi()
+    };
+    for (size_t i = 0; i < sizeof(punkty_belki) / sizeof(punkty_belki[0]); ++i) {
+        test_click_popup(zarzadca, punkty_belki[i], header_y);
+        TEST_ASSERT(dlg_mysz.czy_otwarta(), "DialogPliku: klikniecie belki tytulowej nie zamyka dialogu");
+    }
 
-    ZdarzenieMyszki p_move{};
-    p_move.typ = TypZdarzenia::RuchMyszy;
-    p_move.x = p_down.x + 20; p_move.y = p_down.y + 20;
-    dlg_fs.obsluz_ruch_myszy(p_move);
+    test_drag_popup(zarzadca, r_mysz.x + 50 * dlg_mysz.skala_dpi(), header_y,
+                    r_mysz.x + 90 * dlg_mysz.skala_dpi(), header_y + 30 * dlg_mysz.skala_dpi());
+    TEST_ASSERT(dlg_mysz.czy_otwarta() && dlg_mysz.czy_przeciagane() == false,
+                "DialogPliku: przeciaganie belki tytulowej nie zamyka dialogu i zwalnia capture");
 
-    ZdarzenieMyszki p_up{};
-    p_up.typ = TypZdarzenia::ZwolnienieMyszy;
-    dlg_fs.obsluz_zwolnienie_myszy(p_up);
-    TEST_ASSERT(dlg_fs.czy_przeciagane() == false, "DialogPliku: Przeciaganie okna zakonczone");
+    DialogPliku dlg_obszary(TrybDialoguPliku::Otworz, "Otworz", "/uzytkownicy", "Wszystkie pliki (*.*)");
+    dlg_obszary.pokaz(zarzadca);
+    Prostokat toolbar_r = dlg_obszary.pasek_narzedzi()->obszar_ekranu();
+    test_click_popup(zarzadca, toolbar_r.x + 8, toolbar_r.y + toolbar_r.wysokosc / 2);
+    TEST_ASSERT(dlg_obszary.czy_otwarta(), "DialogPliku: klik w pasek narzedzi nie jest traktowany jako klik poza dialogiem");
+    Prostokat tabela_r = dlg_obszary.tabela_plikow()->obszar_ekranu();
+    test_click_popup(zarzadca, tabela_r.x + 10, tabela_r.y + 10);
+    TEST_ASSERT(dlg_obszary.czy_otwarta(), "DialogPliku: klik w tabele plikow nie jest traktowany jako klik poza dialogiem");
+    Prostokat pole_r = dlg_obszary.pole_nazwy()->obszar_ekranu();
+    test_click_popup(zarzadca, pole_r.x + 8, pole_r.y + pole_r.wysokosc / 2);
+    TEST_ASSERT(dlg_obszary.czy_otwarta() && zarzadca.fokus_popupu() == dlg_obszary.pole_nazwy(),
+                "DialogPliku: klik w dolny panel ustawia fokus pola nazwy i nie zamyka dialogu");
+    Prostokat combo_r = dlg_obszary.lista_filtrow()->obszar_ekranu();
+    test_click_popup(zarzadca, combo_r.x + 8, combo_r.y + combo_r.wysokosc / 2);
+    TEST_ASSERT(dlg_obszary.czy_otwarta(), "DialogPliku: klik w ComboBox typu pliku nie zamyka dialogu");
 
     DialogPliku dlg_x(TrybDialoguPliku::Otworz, "Otworz", "/uzytkownicy");
     dlg_x.pokaz(zarzadca);
-    Prostokat cr = dlg_x.prostokat_przycisku_zamknij();
-    ZdarzenieMyszki x_down{};
-    x_down.typ = TypZdarzenia::WcisniecieMyszy;
-    x_down.przycisk = static_cast<int>(PrzyciskMyszy::Lewy);
-    x_down.x = dlg_x.obszar().x + cr.x + 2; x_down.y = dlg_x.obszar().y + cr.y + 2;
-    dlg_x.obsluz_wcisniecie_myszy(x_down);
-    ZdarzenieMyszki x_up = x_down;
-    x_up.typ = TypZdarzenia::ZwolnienieMyszy;
-    dlg_x.obsluz_zwolnienie_myszy(x_up);
-    TEST_ASSERT(dlg_x.wynik_pliku() == WynikDialoguPliku::Anulowano, "DialogPliku: Przycisk [X] zamyka dialog z wynikiem Anulowano");
+    Prostokat xr = dlg_x.obszar();
+    Prostokat xcr = dlg_x.prostokat_przycisku_zamknij();
+    test_click_popup(zarzadca, xr.x + xcr.x + xcr.szerokosc / 2, xr.y + xcr.y + xcr.wysokosc / 2);
+    TEST_ASSERT(!dlg_x.czy_otwarta() && dlg_x.wynik_pliku() == WynikDialoguPliku::Anulowano,
+                "DialogPliku: Przycisk [X] zamyka dialog z wynikiem Anulowano");
 
     // 15. Reakcja na zmiane motywu
     dlg_fs.zaktualizuj_motyw();

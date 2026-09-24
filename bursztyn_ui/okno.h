@@ -837,7 +837,7 @@ public:
                            (!usb && baza == 0x0FU) || (usb && baza == 43U);
                 // Ctrl+Tab nalezy do kontenera kart, nie do globalnej
                 // nawigacji fokusu.
-                if (wcisniety && tab &&
+                if (wcisniety && tab && !popupy_.czy_otwarty() &&
                     (surowe_zdarzenie.przyciski & BWS_MOD_CTRL) == 0) {
                     bool shift = (surowe_zdarzenie.przyciski & BWS_MOD_SHIFT) != 0;
                     nastepny_fokus(shift);

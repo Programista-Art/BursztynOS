@@ -415,12 +415,17 @@ public:
     bool obsluz_klawisz(ZdarzenieKlawiatury& e) {
         if (!czy_otwarty()) return false;
         Kontrolka* cel = fokus_popupu_ ? fokus_popupu_ : powierzchnie_[liczba_ - 1];
-        if (cel) {
-            cel->obsluz_wcisniecie_klawisza(e);
-            if (e.obsluzone) return true;
-        }
         PowierzchniaPopup* surf = powierzchnie_[liczba_ - 1];
-        if (surf && cel != surf) {
+        bool dotarto_do_powierzchni = false;
+        for (Kontrolka* k = cel; k; k = k->rodzic()) {
+            k->obsluz_wcisniecie_klawisza(e);
+            if (e.obsluzone) return true;
+            if (k == surf) {
+                dotarto_do_powierzchni = true;
+                break;
+            }
+        }
+        if (surf && !dotarto_do_powierzchni) {
             surf->obsluz_wcisniecie_klawisza(e);
             if (e.obsluzone) return true;
         }

@@ -555,10 +555,33 @@ public:
             return;
         }
 
+        if (czy_klawisz_tekstu_do_skonsumowania(e)) {
+            e.obsluzone = true;
+            return;
+        }
+
         if (cb_klawisz_wcisniety_) cb_klawisz_wcisniety_(this, e, dane_klawisza_wcisnietego_);
     }
 
 private:
+    static bool czy_klawisz_tekstu_do_skonsumowania(const ZdarzenieKlawiatury& e) {
+        if (e.czy_ctrl() && !e.czy_alt()) return false;
+        if ((e.modyfikatory & BWS_MOD_SUPER) != 0) return false;
+
+        const uint32_t kod = e.kod_klawisza;
+        const bool usb = (kod & BWS_KEY_SOURCE_USB) != 0;
+        const uint32_t baza = usb ? (kod & 0xFFU) : (kod & 0x7FU);
+
+        if (usb) {
+            return (baza >= 4U && baza <= 39U) ||
+                   baza == 44U ||
+                   (baza >= 45U && baza <= 56U) ||
+                   (baza >= 84U && baza <= 103U);
+        }
+
+        return kod >= 32U && kod < 127U;
+    }
+
     static bool klawisz_litery(const ZdarzenieKlawiatury& e,
                                char litera, uint32_t skan_ps2) {
         const uint32_t kod = e.kod_klawisza;

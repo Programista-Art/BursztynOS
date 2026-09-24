@@ -2078,12 +2078,13 @@ void skladacz_obrazu_ustaw_overlay(int pid, bool otwarty,
 }
 
 int skladacz_obrazu_overlay_pod_punktem(int x, int y) {
-    if (!system_overlay.otwarty) return -1;
     (void)x;
     (void)y;
     /* Otwarty popup jest modalny dla pierwszego MOUSE_DOWN. Dzieki temu
        klik poza nim zamyka popup i nie jest dostarczany drugi raz aplikacji. */
-    return system_overlay.pid;
+    if (system_overlay.otwarty) return system_overlay.pid;
+    if (popup_aplikacji_spojny()) return application_popup.pid;
+    return -1;
 }
 
 bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,

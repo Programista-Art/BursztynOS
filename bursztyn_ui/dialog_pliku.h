@@ -706,6 +706,7 @@ public:
         // Tab / Shift+Tab
         const bool tab = kod == 9U || (usb && baza == 43U) || (!usb && baza == 0x0FU);
         if (tab) {
+            if (zarzadca()) synchronizuj_indeks_fokusu(zarzadca()->fokus_popupu());
             nawiguj_fokus(!e.czy_shift());
             e.obsluzone = true;
             return;
@@ -1535,6 +1536,16 @@ private:
                 k->przy_fokusie();
             }
             k->uniewaznij();
+        }
+    }
+
+    void synchronizuj_indeks_fokusu(Kontrolka* fokus) {
+        if (!fokus) return;
+        for (size_t i = 0; i < liczba_kontrolek_fokusu_; ++i) {
+            if (kontrolki_fokusu_[i] == fokus) {
+                indeks_fokusu_ = i;
+                return;
+            }
         }
     }
 

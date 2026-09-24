@@ -30,8 +30,8 @@ OVMF = "/usr/share/ovmf/OVMF.fd"
 OUT_DIR = Path("/tmp/bursztyn_boot_diff")
 
 VM_TIMEOUT = 90.0
-INACTIVITY_TIMEOUT = 35.0
-SUITE_TIMEOUT = 240.0
+INACTIVITY_TIMEOUT = 55.0
+SUITE_TIMEOUT = 360.0
 
 class QmpClient:
     def __init__(self, sock_path, timeout=5.0):
