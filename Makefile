@@ -1323,7 +1323,7 @@ $(TAPETY_SOURCES_MANIFEST): $(TAPETY_DIR) narzedzia/tapety-btp/generujpakiet.py
 	$(PYTHON) narzedzia/tapety-btp/generujpakiet.py --katalog $(TAPETY_DIR) --manifest-only $@
 
 # Automatyczne pakowanie tapet BTP w zewnetrznym module Multiboot2 (tapety.pak).
-$(TAPETY_PAK): $(TAPETY_SOURCES_MANIFEST) narzedzia/tapety-btp/generujpakiet.py
+$(TAPETY_PAK): $(TAPETY_SOURCES_MANIFEST) narzedzia/tapety-btp/generujpakiet.py narzedzia/tapety-btp/btpcodec.py
 	$(PYTHON) narzedzia/tapety-btp/generujpakiet.py --katalog $(TAPETY_DIR) --wyjscie $(TAPETY_PAK) --dep tapety.pak.d
 
 -include tapety.pak.d

@@ -480,11 +480,23 @@ void instaluj(uint64_t mbi,bool tylko_przygotuj=false) {
     }
 }
 
-bool wczytaj(const char* path, BtpInfo* info, uint32_t** zrodlo, bool cicho) {
+bool wczytaj(const char* path, BtpInfo* info, uint32_t** zrodlo, bool cicho, bool use_cache = false) {
     if (!bufory_gotowe || !info || !zrodlo || !tapety_sciezka(path)) return false;
-    const uint32_t rozmiar = rozmiar_pliku(path);
     size_t cap = 0;
     uint8_t* scratch = grafika_scratch_tapety(&cap);
+    // Retain the selected decoded source in the shared scratch arena. A mode
+    // change can rebuild its scaled surface without filesystem I/O.
+    static char cache_path[TAPETY_SCIEZKA_MAX]{};
+    static BtpInfo cache_info{};
+    static uint32_t* cache_pixels = nullptr;
+    if (use_cache && cache_pixels && tapety_rowne(cache_path, path)) {
+        *info = cache_info;
+        *zrodlo = cache_pixels;
+        return true;
+    }
+    const uint32_t rozmiar = rozmiar_pliku(path);
+    cache_pixels = nullptr;
+    cache_path[0] = 0;
     if (!scratch || rozmiar < sizeof(BtpNaglowek) || rozmiar > TAPETY_PLIK_MAX || rozmiar > cap) {
         if (!cicho) log_sciezka("[TAPETA] BLAD brak lub za duzy plik ", path);
         return false;
@@ -510,6 +522,9 @@ bool wczytaj(const char* path, BtpInfo* info, uint32_t** zrodlo, bool cicho) {
     if (btpwczytajirysuj(scratch, rozmiar, piksele, info->szerokosc, info->wysokosc,
                          info->szerokosc, static_cast<size_t>(count * 4)) != BTPOK) return false;
     statystyki.dekoduj_us = czas_monotoniczny_us() - t;
+    tapety_kopiuj(cache_path, path, sizeof(cache_path));
+    cache_info = *info;
+    cache_pixels = piksele;
     *zrodlo = piksele;
     return true;
 }
@@ -539,7 +554,8 @@ bool zastosuj(const TapetyKonfiguracja& c, bool cicho, bool publikuj = true) {
 #if BURSZTYN_DIAG_TAPETY
         log_liczba("[TAPETA] BTP szerokosc ", info.szerokosc);
         log_liczba("[TAPETA] BTP wysokosc ", info.wysokosc);
-        klog_serial(info.kompresja ? "[TAPETA] RLE" : "[TAPETA] RAW");
+        klog_serial(info.kompresja == 2 ? "[TAPETA] BTP2 LZ/RLE" :
+                    info.kompresja ? "[TAPETA] RLE" : "[TAPETA] RAW");
         log_liczba("[TAPETA] Odczyt us ", statystyki.odczyt_us);
         log_liczba("[TAPETA] Dekodowanie us ", statystyki.dekoduj_us);
         log_liczba("[TAPETA] Przygotowanie us ", statystyki.skaluj_us);
@@ -833,7 +849,7 @@ bool tapety_przygotuj_ekran(uint32_t* dst,uint32_t w,uint32_t h,size_t cap) {
         return true;
     }
     BtpInfo info{};uint32_t* src=nullptr;
-    if(!wczytaj(aktualna.sciezka,&info,&src,true))return false;
+    if(!wczytaj(aktualna.sciezka,&info,&src,true,true))return false;
     if(!skaluj_obraz(src,info.szerokosc,info.wysokosc,size_t(info.szerokosc)*info.wysokosc*4,
         dst,w,h,w,cap,aktualna.tryb,TAPETY_TLO))return false;
     ++statystyki.przygotowania;

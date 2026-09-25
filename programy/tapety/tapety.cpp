@@ -137,12 +137,24 @@ void odkryj_tapety() {
                     if (tapety_sciezka(pelna)) {
                         uint32_t rozmiar = 0;
                         if (pobierz_rozmiar_pliku(pelna, &rozmiar) && rozmiar >= 14 && rozmiar <= TAPETY_PLIK_MAX) {
-                            uint8_t naglowek[14]{};
+                            uint8_t naglowek[72]{};
                             uint32_t przeczytano = 0;
                             if (czytaj_fragment_pliku(pelna, 0, reinterpret_cast<char*>(naglowek), 14, &przeczytano) &&
                                 przeczytano == 14) {
                                 BtpInfo info{};
-                                if (btpnaglowek(naglowek, 14, &info) == BTPOK) {
+                                size_t rozmiar_naglowka = 14;
+                                bool pelny_naglowek = true;
+                                if (naglowek[0] == 'B' && naglowek[1] == 'T' &&
+                                    naglowek[2] == 'P' && naglowek[3] == '2') {
+                                    uint32_t przeczytano_v2 = 0;
+                                    pelny_naglowek = rozmiar >= sizeof(naglowek) &&
+                                        czytaj_fragment_pliku(pelna, 0, reinterpret_cast<char*>(naglowek),
+                                                              sizeof(naglowek), &przeczytano_v2) &&
+                                        przeczytano_v2 == sizeof(naglowek);
+                                    rozmiar_naglowka = sizeof(naglowek);
+                                }
+                                if (pelny_naglowek &&
+                                    btpnaglowek(naglowek, rozmiar_naglowka, &info) == BTPOK) {
                                     if (liczba_tapet < static_cast<int>(TAPETY_MAX)) {
                                         tapety_kopiuj(lista_tapet[liczba_tapet].sciezka, pelna, sizeof(lista_tapet[0].sciezka));
                                         pobierz_nazwe_wyswietlana(pelna, plik, lista_tapet[liczba_tapet].nazwa, sizeof(lista_tapet[0].nazwa));

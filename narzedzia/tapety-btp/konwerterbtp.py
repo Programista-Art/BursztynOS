@@ -13,6 +13,8 @@ import sys
 import tempfile
 import threading
 import warnings
+import time
+import btpcodec
 
 
 NAGLOWEK = struct.Struct("<4sIIBB")
@@ -225,15 +227,103 @@ def zapiszbtp(sciezka, dane: DaneBtp) -> Path:
 
 
 def konwertuj(wejscie, wyjscie=None, *, max_width=1920, max_height=1080,
-              optymalizuj=False, zachowajalfa=False, tryb="auto"):
+              optymalizuj=False, zachowajalfa=False, tryb="auto", verify=False):
     wejscie = Path(wejscie)
     with wczytajobraz(wejscie, max_width, max_height) as obraz:
         szerokosc, wysokosc = obraz.size
         piksele = przygotujpiksele(obraz, optymalizuj, zachowajalfa)
     dane = kodujbtp(piksele, szerokosc, wysokosc, tryb)
+    if verify and btpcodec.decode_v1(dane.naglowek + dane.payload) != (szerokosc, wysokosc, piksele):
+        raise BladKonwersji('BTP1 round-trip mismatch')
     if wyjscie is None:
         wyjscie = Path("konwertowane") / wejscie.with_suffix(".btp").name
     return zapiszbtp(wyjscie, dane), dane
+
+
+@dataclass(frozen=True)
+class DaneBtp2:
+    szerokosc: int
+    wysokosc: int
+    blob: bytes
+    zrodlo: tuple[int, int]
+    czas_kodowania: float
+
+    @property
+    def naglowek(self):
+        return self.blob[:btpcodec.HEADER.size]
+
+    @property
+    def payload(self):
+        return self.blob[btpcodec.HEADER.size:]
+
+    @property
+    def rozmiarpliku(self):
+        return len(self.blob)
+
+
+def konwertuj_v2(wejscie, wyjscie=None, *, width=None, height=None,
+                 max_width=None, max_height=None, fit='contain',
+                 compression='auto', chunk_size=65536, verify=False,
+                 preserve_alpha=True, image_filter='none', window=65535):
+    Image, ImageOps = pillow()
+    wejscie = Path(wejscie)
+    with wczytajobraz(wejscie, 8192, 8192) as source:
+        source_size = source.size
+        sw, sh = source_size
+        if width is not None and (width < 1 or width > 8192):
+            raise BladKonwersji('width must be 1..8192')
+        if height is not None and (height < 1 or height > 8192):
+            raise BladKonwersji('height must be 1..8192')
+        if max_width is not None and (max_width < 1 or max_width > 8192):
+            raise BladKonwersji('max-width must be 1..8192')
+        if max_height is not None and (max_height < 1 or max_height > 8192):
+            raise BladKonwersji('max-height must be 1..8192')
+        if width and height:
+            target = (width, height)
+        elif width:
+            target = (width, max(1, round(sh * width / sw)))
+        elif height:
+            target = (max(1, round(sw * height / sh)), height)
+        else:
+            scale = min(1.0, (max_width or sw) / sw, (max_height or sh) / sh)
+            target = (max(1, round(sw * scale)), max(1, round(sh * scale)))
+        try:
+            btpcodec._dimensions(*target)
+        except btpcodec.BtpError as error:
+            raise BladKonwersji(str(error)) from error
+        # The present kernel scratch layout bounds loaded images to 4M pixels.
+        if target[0] * target[1] > 4 * 1024 * 1024:
+            raise BladKonwersji('Image exceeds current runtime limit of 4194304 pixels.')
+        if fit == 'cover' and width and height:
+            resized = ImageOps.fit(source, target, method=Image.Resampling.LANCZOS)
+        elif fit == 'contain' and width and height:
+            resized = ImageOps.contain(source, target, method=Image.Resampling.LANCZOS)
+            if resized.size != target:
+                canvas = Image.new('RGBA', target, (0, 0, 0, 255))
+                canvas.paste(resized, ((width - resized.width) // 2, (height - resized.height) // 2))
+                resized.close()
+                resized = canvas
+        elif fit == 'stretch' or target != source.size:
+            resized = source.resize(target, Image.Resampling.LANCZOS)
+        else:
+            resized = source.copy()
+        with resized:
+            pixels = przygotujpiksele(resized, zachowajalfa=preserve_alpha)
+    start = time.perf_counter()
+    filters = {'none': (0,), 'horizontal': (1,), 'vertical': (2,),
+               'auto': (0, 1, 2)}[image_filter]
+    blob = btpcodec.encode(pixels, *target, method=compression, chunk_size=chunk_size,
+                           filters=filters, window=window)
+    elapsed = time.perf_counter() - start
+    mapped = (len(blob) + 4095) & ~4095
+    if len(blob) > 16 * 1024 * 1024 or mapped + len(pixels) > 32 * 1024 * 1024:
+        raise BladKonwersji('BTP2 exceeds current runtime file/scratch limit; use a smaller image.')
+    if verify and btpcodec.decode(blob) != (*target, pixels):
+        raise BladKonwersji('BTP2 round-trip mismatch')
+    data = DaneBtp2(*target, blob, source_size, elapsed)
+    if wyjscie is None:
+        wyjscie = Path('konwertowane') / wejscie.with_suffix('.btp').name
+    return zapiszbtp(wyjscie, data), data
 
 
 def raport(wejscie, wyjscie, dane: DaneBtp) -> str:
@@ -281,13 +371,13 @@ class KonwerterGui:
         self.lista.pack(fill="both", expand=True)
         ustawienia = ttk.LabelFrame(ramka, text="Docelowy ekran", padding=8)
         ustawienia.grid(row=3, column=0, sticky="ew", pady=8)
-        self.preset = tk.StringVar(value="1920x1080")
-        wybor = ttk.Combobox(ustawienia, textvariable=self.preset, values=PRESETY,
+        self.preset = tk.StringVar(value="Native")
+        wybor = ttk.Combobox(ustawienia, textvariable=self.preset, values=("Native",) + PRESETY,
                              state="readonly", width=14)
         wybor.grid(row=0, column=0)
         wybor.bind("<<ComboboxSelected>>", self.ustawpreset)
-        self.szerokosc = tk.StringVar(value="1920")
-        self.wysokosc = tk.StringVar(value="1080")
+        self.szerokosc = tk.StringVar(value="8192")
+        self.wysokosc = tk.StringVar(value="8192")
         ttk.Label(ustawienia, text="Maks. szerokość").grid(row=0, column=1, padx=(12, 4))
         ttk.Entry(ustawienia, textvariable=self.szerokosc, width=7).grid(row=0, column=2)
         ttk.Label(ustawienia, text="Maks. wysokość").grid(row=0, column=3, padx=(12, 4))
@@ -297,7 +387,7 @@ class KonwerterGui:
         opcje = ttk.Frame(ramka)
         opcje.grid(row=4, column=0, sticky="w")
         self.optymalizuj = tk.BooleanVar(value=False)
-        self.alfa = tk.BooleanVar(value=False)
+        self.alfa = tk.BooleanVar(value=True)
         ttk.Checkbutton(opcje, text="Optymalizuj kolory (stratnie: RGB do 5 bitów)",
                         variable=self.optymalizuj).pack(anchor="w")
         ttk.Checkbutton(opcje, text="Zachowaj kanał alfa", variable=self.alfa).pack(anchor="w")
@@ -322,7 +412,7 @@ class KonwerterGui:
         root.after(100, self.odczytajkolejke)
 
     def ustawpreset(self, _zdarzenie=None):
-        szerokosc, wysokosc = self.preset.get().split("x")
+        szerokosc, wysokosc = ("8192", "8192") if self.preset.get() == "Native" else self.preset.get().split("x")
         self.szerokosc.set(szerokosc)
         self.wysokosc.set(wysokosc)
 
@@ -372,9 +462,12 @@ class KonwerterGui:
         for numer, wejscie in enumerate(pliki, 1):
             self.kolejka.put(("status", f"{numer}/{len(pliki)}: {Path(wejscie).name}"))
             try:
-                wyjscie, dane = konwertuj(wejscie, folder / Path(wejscie).with_suffix(".btp").name,
-                                         **ustawienia)
-                self.kolejka.put(("log", raport(wejscie, wyjscie, dane)))
+                if ustawienia['optymalizuj']:
+                    raise BladKonwersji('BTP2 is lossless; disable lossy color optimization.')
+                wyjscie, dane = konwertuj_v2(wejscie, folder / Path(wejscie).with_suffix(".btp").name,
+                    max_width=ustawienia['max_width'], max_height=ustawienia['max_height'],
+                    preserve_alpha=ustawienia['zachowajalfa'], verify=True)
+                self.kolejka.put(("log", f'{wejscie} -> {wyjscie}: BTP2 {dane.szerokosc}x{dane.wysokosc}, {dane.rozmiarpliku} B'))
                 del dane  # Zwolnij payload przed dekodowaniem kolejnego pliku.
                 sukcesy += 1
             except Exception as blad:
@@ -427,10 +520,20 @@ def main(argv=None) -> int:
     parser.add_argument("input", nargs="?", help="obraz PNG, JPG, JPEG lub BMP")
     parser.add_argument("output", nargs="?", help="plik .btp; kolizje dostają numer _1, _2, …")
     parser.add_argument("--output-dir", default="konwertowane", help="folder, gdy pominięto output")
-    parser.add_argument("--max-width", type=int, default=1920, help="maksymalna szerokość, 1–8192")
-    parser.add_argument("--max-height", type=int, default=1080, help="maksymalna wysokość, 1–8192")
+    parser.add_argument("--max-width", type=int, help="maksymalna szerokość, 1–8192")
+    parser.add_argument("--max-height", type=int, help="maksymalna wysokość, 1–8192")
     parser.add_argument("--optimize", action="store_true", help="stratne RGB & 0xF8; bez kwantyzacji alfa")
     parser.add_argument("--preserve-alpha", action="store_true", help="zachowaj alfa zamiast wymuszać 255")
+    parser.add_argument('--btp-version', type=int, choices=(1, 2), default=2)
+    parser.add_argument('--compression', choices=('auto', 'raw', 'rle', 'lz', 'hybrid'), default='auto')
+    parser.add_argument('--chunk-size', type=int, default=65536)
+    parser.add_argument('--window', type=int, default=65535)
+    parser.add_argument('--filter', choices=('none', 'horizontal', 'vertical', 'auto'), default='none')
+    parser.add_argument('--width', type=int)
+    parser.add_argument('--height', type=int)
+    parser.add_argument('--fit', choices=('contain', 'cover', 'stretch'), default='contain')
+    parser.add_argument('--verify', action='store_true')
+    parser.add_argument('--benchmark', action='store_true')
     tryby = parser.add_mutually_exclusive_group()
     tryby.add_argument("--force-raw", action="store_true", help="wymuś RAW (domyślnie AUTO)")
     tryby.add_argument("--force-rle", action="store_true", help="wymuś RLE, nawet jeśli jest większy")
@@ -441,12 +544,52 @@ def main(argv=None) -> int:
     try:
         if args.input is None:
             return uruchomgui()
-        sprawdz_wymiary(args.max_width, args.max_height)
-        tryb = "raw" if args.force_raw else "rle" if args.force_rle else "auto"
+        if args.btp_version == 2:
+            if args.optimize:
+                raise BladKonwersji('BTP2 is lossless; --optimize is a legacy lossy BTP1 option.')
+            if args.force_raw or args.force_rle:
+                args.compression = 'raw' if args.force_raw else 'rle'
+            wyjscie = args.output or Path(args.output_dir) / Path(args.input).with_suffix('.btp').name
+            cel, dane = konwertuj_v2(args.input, wyjscie, width=args.width, height=args.height,
+                max_width=args.max_width, max_height=args.max_height,
+                fit=args.fit, compression=args.compression, chunk_size=args.chunk_size,
+                verify=args.verify, preserve_alpha=True, image_filter=args.filter,
+                window=args.window)
+            raw = dane.szerokosc * dane.wysokosc * 4
+            compressed = (len(dane.blob) - btpcodec.HEADER.size -
+                ((raw + args.chunk_size - 1) // args.chunk_size) * btpcodec.CHUNK.size)
+            crc = btpcodec.HEADER.unpack_from(dane.blob)[-3]
+            modes = {}
+            filters = {}
+            count = (raw + args.chunk_size - 1) // args.chunk_size
+            for index in range(count):
+                entry = btpcodec.CHUNK.unpack_from(dane.blob, btpcodec.HEADER.size + index * btpcodec.CHUNK.size)
+                modes[entry[3]] = modes.get(entry[3], 0) + 1
+                filters[entry[4]] = filters.get(entry[4], 0) + 1
+            print(f'{Path(args.input).name} {dane.zrodlo[0]}x{dane.zrodlo[1]} -> {cel} '
+                  f'{dane.szerokosc}x{dane.wysokosc}; BGRA8888 BTP2 {args.compression}; '
+                  f'raw={raw} payload={compressed} file={len(dane.blob)} '
+                  f'ratio={len(dane.blob)/raw:.3f} CRC32={crc:08x} '
+                  f'encode={dane.czas_kodowania:.3f}s chunks={modes} filters={filters}')
+            if args.benchmark:
+                begin = time.perf_counter()
+                w, h, decoded = btpcodec.decode(dane.blob)
+                decode_seconds = time.perf_counter() - begin
+                v1 = kodujbtp(decoded, w, h)
+                print(f'benchmark source={Path(args.input).stat().st_size} B '
+                      f'v1={v1.rozmiarpliku} B v2/v1={len(dane.blob)/v1.rozmiarpliku:.3f} '
+                      f'decode={decode_seconds:.3f}s modes={modes} filters={filters}')
+            return 0
+        max_width = args.max_width if args.max_width is not None else 1920
+        max_height = args.max_height if args.max_height is not None else 1080
+        if args.compression not in ('auto', 'raw', 'rle'):
+            raise BladKonwersji('BTP1 supports only RAW or RLE compression.')
+        sprawdz_wymiary(max_width, max_height)
+        tryb = "raw" if args.force_raw else "rle" if args.force_rle else args.compression
         wyjscie = args.output or Path(args.output_dir) / Path(args.input).with_suffix(".btp").name
-        cel, dane = konwertuj(args.input, wyjscie, max_width=args.max_width,
-                             max_height=args.max_height, optymalizuj=args.optimize,
-                             zachowajalfa=args.preserve_alpha, tryb=tryb)
+        cel, dane = konwertuj(args.input, wyjscie, max_width=max_width,
+                             max_height=max_height, optymalizuj=args.optimize,
+                             zachowajalfa=args.preserve_alpha, tryb=tryb, verify=args.verify)
         print(raport(args.input, cel, dane))
         return 0
     except (BladKonwersji, OSError, MemoryError) as blad:

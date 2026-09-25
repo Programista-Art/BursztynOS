@@ -81,7 +81,8 @@ public:
 #if BURSZTYN_DIAG_TAPETY
         bws_wywolaj(1, reinterpret_cast<uint64_t>("[TAPETY GUI] Miniatura plik="), 0, 0, 0);
         bws_wywolaj(1, reinterpret_cast<uint64_t>(path ? path : "(nieznany)"), 0, 0, 0);
-        bws_wywolaj(1, reinterpret_cast<uint64_t>(info.kompresja == 0 ? " BTP mode=RAW" : " BTP mode=RLE"), 0, 0, 0);
+        bws_wywolaj(1, reinterpret_cast<uint64_t>(info.kompresja == 2 ? " BTP mode=V2" :
+            info.kompresja == 0 ? " BTP mode=RAW" : " BTP mode=RLE"), 0, 0, 0);
         bws_wywolaj(1, reinterpret_cast<uint64_t>(dec_ok ? " decode=OK" : " decode=FAIL"), 0, 0, 0);
         bws_wywolaj(1, reinterpret_cast<uint64_t>(scale_ok ? " scale=OK\n" : " scale=FAIL\n"), 0, 0, 0);
 #endif

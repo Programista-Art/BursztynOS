@@ -7,11 +7,11 @@ BUR_HEADER_OFFSET = 0x0000;
 BUR_HEADER_SIZE   = 0x1000;
 BUR_HEADER_VADDR  = 0x1000000;
 BUR_TEXT_OFFSET   = 0x1000;
-BUR_TEXT_SIZE     = 0x80000;
+BUR_TEXT_SIZE     = 0x78000;
 BUR_TEXT_VADDR    = 0x1001000;
-BUR_DATA_OFFSET   = 0x81000;
+BUR_DATA_OFFSET   = 0x79000;
 BUR_DATA_SIZE     = 0x20000;
-BUR_DATA_VADDR    = 0x1081000;
+BUR_DATA_VADDR    = 0x1079000;
 BUR_TEXT_END      = BUR_TEXT_VADDR + BUR_TEXT_SIZE;
 BUR_DATA_END      = BUR_DATA_VADDR + BUR_DATA_SIZE;
 
@@ -95,7 +95,7 @@ SECTIONS {
     ASSERT(SIZEOF(.naglowek) == BUR_HEADER_SIZE,
            "TEST BUR: nieprawidlowy obszar naglowka")
     ASSERT(__bur_text_used_end <= BUR_TEXT_END,
-           "TEST BUR: przekroczono 512 KiB TEXT")
+           "TEST BUR: przekroczono 480 KiB TEXT")
     ASSERT(SIZEOF(.text) == BUR_TEXT_SIZE,
            "TEST BUR: nieprawidlowy TEXT")
     ASSERT(__bur_data_file_end <= BUR_DATA_END,

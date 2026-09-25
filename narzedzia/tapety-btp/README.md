@@ -1,7 +1,12 @@
 # BTP — Bursztynowa TaPeta
 
+Preferred format for new wallpapers: BTP2. See [BTP2.md](BTP2.md) for the complete
+binary layout, codec, validation rules and CLI, and
+[BTP2_BENCHMARK.md](BTP2_BENCHMARK.md) for measured compression. The BTP1 details below are
+retained for legacy tools and reference assets.
+
 Narzędzie **hostowe** do przygotowania plików `.btp` oraz samodzielny,
-freestandingowy dekoder C++. Ten etap nie podłącza plików BTP do pulpitu OS.
+freestandingowy dekoder C++ używany przez pulpit OS.
 
 ## Uruchomienie konwertera
 
@@ -16,24 +21,28 @@ Uruchamiaj z głównego katalogu repozytorium:
 # GUI: wielokrotny wybór PNG/JPG/JPEG/BMP, ustawienia i raport dla każdego pliku.
 python3 narzedzia/tapety-btp/konwerterbtp.py
 
-# CLI: pojedynczy plik, AUTO, maksymalnie 1920x1080.
+# CLI: pojedynczy plik, BTP2, rozdzielczość natywna.
 python3 narzedzia/tapety-btp/konwerterbtp.py tapeta.png tapeta.btp
 
 # Bez drugiej ścieżki: konwertowane/zdjęcie.btp, względem bieżącego katalogu.
 python3 narzedzia/tapety-btp/konwerterbtp.py zdjęcie.jpg
 
-# Własny folder i maksymalny rozmiar, stratna optymalizacja RGB.
+# Własny folder i maksymalny rozmiar, z zachowaniem proporcji.
 python3 narzedzia/tapety-btp/konwerterbtp.py obraz.bmp \
-    --output-dir wynik --max-width 1280 --max-height 720 --optimize
+    --output-dir wynik --max-width 1280 --max-height 720
 
-# Zachowanie bajtu alfa lub wymuszenie trybu dla diagnostyki.
-python3 narzedzia/tapety-btp/konwerterbtp.py obraz.png alfa.btp --preserve-alpha
+# Wymuszenie trybu dla diagnostyki.
 python3 narzedzia/tapety-btp/konwerterbtp.py obraz.png raw.btp --force-raw
 python3 narzedzia/tapety-btp/konwerterbtp.py obraz.png rle.btp --force-rle
+
+# Starszy BTP1 i jego opcjonalna stratna kwantyzacja.
+python3 narzedzia/tapety-btp/konwerterbtp.py obraz.png legacy.btp --btp-version 1 --optimize
 ```
 
 CLI zwraca 0 po sukcesie, 1 po błędzie konwersji, 2 po błędzie składni CLI,
-130 po przerwaniu przez użytkownika. Tryb AUTO zawsze porównuje **payloady**:
+130 po przerwaniu przez użytkownika. Poniższy opis trybu AUTO dotyczy BTP1;
+BTP2 porównuje RAW, RLE, LZ i hybrydę osobno dla każdego bloku.
+Tryb AUTO BTP1 zawsze porównuje **payloady**:
 RLE wygrywa wyłącznie, gdy `rle_size < raw_size`. Przy remisie wybierany jest RAW.
 Oba tryby mają ten sam 14-bajtowy nagłówek. `--force-rle` może dać większy plik.
 
@@ -54,8 +63,8 @@ sprzątają plik tymczasowy. Awaria procesu/systemu może pozostawić `.btp-*.tm
 ## Kolory, alfa i rozmiary
 
 Obraz jest przetwarzany jako RGBA w Pillow, a payload zawsze zawiera **BGRA**.
-Domyślnie alfa jest wymuszana na 255, bez mieszania RGB z kolorem tła.
-`--preserve-alpha` / „Zachowaj kanał alfa” zachowuje bajt alfa; nie dodaje
+BTP2 domyślnie zachowuje bajt alfa; BTP1 domyślnie wymusza 255.
+`--preserve-alpha` w BTP1 / „Zachowaj kanał alfa” zachowuje bajt alfa; nie dodaje
 obsługi mieszania alfa w OS. Bursztyn traktuje tylko dokładne `0x00000000` jako
 przezroczystość. `A=0` z niezerowym RGB nadal oznacza widoczny kolor.
 Nieprzezroczysta czerń ma bajty `00 00 00 FF` i pozostaje widoczna.
@@ -165,5 +174,5 @@ wynik jest jawnie oznaczony jako pominięty, nie jako sukces runtime.
 LeakSanitizer nie działa pod ptrace; w takim sandboxie zgłaszany jest błąd testu
 i zestaw należy uruchomić w środowisku pozwalającym na jego wykonanie.
 
-Ładowanie BTP w OS, instalacja tapet, wybór tapety i zapamiętywanie wyboru
-pozostają poza tym etapem. Obsługa `tapeta.bmp` pozostaje nienaruszona.
+BTP jest ładowany przez usługę tapet; szczegóły aktualnego formatu i limitów
+runtime opisuje BTP2.md. Obsługa `tapeta.bmp` pozostaje nienaruszona.

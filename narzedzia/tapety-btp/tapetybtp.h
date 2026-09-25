@@ -1,6 +1,6 @@
 #pragma once
 
-// Jedyny publiczny ABI dekodera BTP1: jadro, aplikacje i testy hostowe.
+// Publiczny ABI dekodera BTP1/BTP2: jadro, aplikacje i testy hostowe.
 #include <stdint.h>
 #include <stddef.h>
 
@@ -31,7 +31,8 @@ enum BtpWynik : int32_t {
     BTPBLADRLE = -7,            // Zly pakiet, niepelny obraz lub nadmiar danych.
     BTPBLADPRZEPELNIENIA = -8,  // Rozmiar lub zakres adresow niereprezentowalny.
     BTPBLADBUFORA = -9,         // Za maly stride lub pojemnosc celu.
-    BTPBLADRAW = -10            // Niepelny lub nadmiarowy payload RAW.
+    BTPBLADRAW = -10,           // Niepelny lub nadmiarowy payload RAW.
+    BTPBLADV2 = -11,            // Niepoprawny naglowek, chunk, token lub CRC BTP2.
 };
 
 
@@ -44,7 +45,7 @@ struct BtpInfo {
 // Tylko naglowek: do ustalenia bounded rozmiaru celu; payload pozostaje niezaufany.
 BtpWynik btpnaglowek(const uint8_t*, size_t, BtpInfo*) noexcept;
 
-// Walidacja CALEGO pliku bez alokacji i bez bufora docelowego.
+// Walidacja struktury i payload CRC BTP2; decoded CRC jest weryfikowany przy dekodowaniu.
 BtpWynik btpsprawdzplik(const uint8_t*, size_t, BtpInfo*) noexcept;
 BtpWynik btpwczytajirysuj(const uint8_t*, size_t, uint32_t*, uint32_t,
                          uint32_t, uint32_t, size_t) noexcept;

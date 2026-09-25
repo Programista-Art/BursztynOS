@@ -33,6 +33,14 @@ import os
 import struct
 import sys
 from pathlib import Path
+import btpcodec
+
+U32_MAX = (1 << 32) - 1
+
+def u32(value: int, name: str) -> int:
+    if not 0 <= value <= U32_MAX:
+        raise ValueError(f'{name} exceeds BTPK1 uint32 limit')
+    return value
 
 def bezpieczna_nazwa(nazwa: str) -> bool:
     if not nazwa or len(nazwa) > 120 or nazwa.startswith("."):
@@ -69,13 +77,24 @@ def bezpieczna_nazwa(nazwa: str) -> bool:
 def waliduj_btp(sciezka: str) -> bool:
     try:
         rozmiar = os.path.getsize(sciezka)
+        if rozmiar > 16 * 1024 * 1024:
+            return False
         if rozmiar < 14:
             return False
         with open(sciezka, "rb") as f:
-            naglowek = f.read(14)
+            naglowek = f.read(btpcodec.HEADER.size)
+        if naglowek[:4] == b'BTP2':
+            if len(naglowek) < btpcodec.HEADER.size:
+                return False
+            width, height = struct.unpack_from('<II', naglowek, 8)
+            if width == 0 or height == 0 or width * height > 4 * 1024 * 1024:
+                return False
+            with open(sciezka, 'rb') as f:
+                btpcodec.decode(f.read())
+            return True
         if len(naglowek) < 14:
             return False
-        magic, w, h, bpp, kompresja = struct.unpack("<4sIIBB", naglowek)
+        magic, w, h, bpp, kompresja = struct.unpack("<4sIIBB", naglowek[:14])
         if magic != b"BTP1":
             return False
         if w == 0 or h == 0 or w > 8192 or h > 8192:
@@ -85,7 +104,7 @@ def waliduj_btp(sciezka: str) -> bool:
         if kompresja not in (0, 1):
             return False
         return True
-    except (OSError, struct.error):
+    except (OSError, struct.error, btpcodec.BtpError):
         return False
 
 def zapisz_jesli_zmieniono(sciezka: str, nowe_dane: bytes):
@@ -157,6 +176,14 @@ def main():
     if not tapety:
         sys.stderr.write(f"[TAPETY PAK] Ostrzezenie: brak poprawnych tapet w {katalog}!\n")
 
+    if len(tapety) > 64:
+        raise ValueError('BTPK1 runtime accepts at most 64 wallpapers')
+    planned_bytes = 32 + sum(16 + ((len(t['nazwa'].encode('utf-8')) + 3) & ~3) +
+                             ((t['rozmiar'] + 3) & ~3) for t in tapety)
+    u32(planned_bytes, 'total_pack_size')
+    if planned_bytes > 256 * 1024 * 1024:
+        raise ValueError('wallpaper package exceeds 256 MiB runtime/build budget')
+
     # Obliczenie rozmiaru tabeli wpisow
     HEADER_SIZE = 32
     MAGIC = b"BTPK1\x00\x00\x00"
@@ -179,6 +206,9 @@ def main():
 
     table_size = len(table_entries_bytes)
     data_start = HEADER_SIZE + table_size
+    u32(file_count, 'file_count')
+    u32(table_size, 'table_size')
+    u32(data_start, 'data_start')
 
     # Drugi przebieg: wyznaczenie wlasciwych payload_offset i zlaczenie danych
     current_payload_offset = data_start
@@ -190,6 +220,8 @@ def main():
         nazwa_len = len(nazwa_bytes)
         pad_len = (4 - (nazwa_len % 4)) % 4
 
+        u32(t['rozmiar'], 'BTP size')
+        u32(current_payload_offset, 'payload offset')
         entry_head = struct.pack("<IIII", nazwa_len, t["rozmiar"], t["crc32"], current_payload_offset)
         rebuilt_table_bytes += entry_head
         rebuilt_table_bytes += nazwa_bytes
@@ -204,6 +236,8 @@ def main():
 
     data_size = len(payload_bytes)
     total_pack_size = HEADER_SIZE + table_size + data_size
+    u32(data_size, 'data_size')
+    u32(total_pack_size, 'total_pack_size')
 
     header_bytes = struct.pack(
         "<8sIIIIII",
@@ -249,7 +283,7 @@ def main():
 
     # Generowanie zaleznosci Makefile (.d)
     if args.dep:
-        zaleznosci = [katalog, "narzedzia/tapety-btp/generujpakiet.py"]
+        zaleznosci = [katalog, "narzedzia/tapety-btp/generujpakiet.py", "narzedzia/tapety-btp/btpcodec.py"]
         for t in tapety:
             zaleznosci.append(t["sciezka"].replace(" ", "\\ "))
         linie_d = [

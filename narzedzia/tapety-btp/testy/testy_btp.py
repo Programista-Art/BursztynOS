@@ -272,8 +272,8 @@ class TestEncoder(unittest.TestCase):
         wynik = subprocess.run([sys.executable, "-B", str(skrypt), str(plik)],
                                 cwd=self.tmp, text=True, capture_output=True)
         self.assertEqual(wynik.returncode, 0, wynik.stderr)
-        self.assertIn("Tryb RAW", wynik.stdout)
-        self.assertIn("BTP 18 B", wynik.stdout)
+        self.assertIn("BGRA8888 BTP2", wynik.stdout)
+        self.assertEqual((self.tmp / "konwertowane/czarny.btp").read_bytes()[:4], b"BTP2")
         self.assertTrue((self.tmp / "konwertowane/czarny.btp").is_file())
         for flagi in (("--max-width", "0"), ("--max-height", "8193"), ("--force-raw", "--force-rle")):
             wynik = subprocess.run([sys.executable, "-B", str(skrypt), str(plik), *flagi],
@@ -290,7 +290,7 @@ def no_tk(name, *args, **kwargs):
     return original(name, *args, **kwargs)
 builtins.__import__ = no_tk
 import konwerterbtp
-sys.exit(konwerterbtp.main([sys.argv[2], sys.argv[3], '--force-rle']))
+sys.exit(konwerterbtp.main([sys.argv[2], sys.argv[3], '--force-rle', '--btp-version', '1']))
 """
         wynik = subprocess.run([sys.executable, "-B", "-c", kod, str(KATALOG.parent), str(plik), str(self.tmp / "bez-tk.btp")],
                                 text=True, capture_output=True)
@@ -388,7 +388,7 @@ class TestGui(unittest.TestCase):
         self.addCleanup(root.destroy)
         root.withdraw()
         gui = btp.KonwerterGui(root)
-        self.assertFalse(gui.alfa.get())
+        self.assertTrue(gui.alfa.get())
         self.assertFalse(gui.optymalizuj.get())
         gui.preset.set("800x600")
         gui.ustawpreset()
@@ -409,7 +409,7 @@ class TestGui(unittest.TestCase):
                 time.sleep(0.01)
             self.assertFalse(gui.zajety, "GUI worker did not finish")
             self.assertIn("Zapisano: 2, błędy: 0", gui.status.get())
-            self.assertIn("RAW 400 B | RLE 5 B | BTP 19 B", gui.log.get("1.0", "end"))
+            self.assertIn("BTP2 10x10", gui.log.get("1.0", "end"))
             self.assertEqual(sorted(p.name for p in (tmp / "wyniki").iterdir()), ["żółć.btp", "żółć_1.btp"])
 
 
