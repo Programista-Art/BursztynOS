@@ -7,13 +7,18 @@
 #include "sterowniki/czas/hpet.h"
 
 #include "pamiec.h"
+#include "bufory_grafiki.h"
 
 extern uint64_t g_multiboot_info_ptr;
+extern bool skopiuj_z_przestrzeni_uzytkownika(void*, const void*, size_t);
+extern bool czy_bezpieczny_zakres_uzytkownika_do_odczytu(const void*, size_t);
 
 namespace {
 TapetyKonfiguracja aktualna{};
 TapetyOdpowiedz statystyki{};
 bool bufory_gotowe = false;
+uint32_t jpeg_w = 0, jpeg_h = 0;
+TapetyKonfiguracja jpeg_do_przywrocenia{};
 
 void log_sciezka(const char* opis, const char* sciezka) {
     char buf[224]{};
@@ -358,14 +363,31 @@ void instaluj(uint64_t mbi,bool tylko_przygotuj=false) {
             continue;
         }
 
-        if (poff < tend || poff > mod.rozmiar || bsz > mod.rozmiar - poff || bsz < 14 || bsz > TAPETY_PLIK_MAX) {
+        if (poff < tend || poff > mod.rozmiar || bsz > mod.rozmiar - poff || bsz < 4 || bsz > TAPETY_PLIK_MAX) {
             log_sciezka("[TAPETA-BLAD] Nieprawidlowy zakres payloadu dla: ", nazwa);
             continue;
         }
 
-        BtpInfo info{};
-        if (btpsprawdzplik(p + poff, bsz, &info) != BTPOK) {
-            log_sciezka("[TAPETA-BLAD] Niepoprawny plik BTP1 w pakiecie: ", nazwa);
+        const bool is_btp = tapety_koncowka(nazwa, ".btp");
+        const bool is_jpeg = tapety_koncowka(nazwa, ".jpg") || tapety_koncowka(nazwa, ".jpeg");
+
+        if (is_btp) {
+            if (bsz < 14) {
+                log_sciezka("[TAPETA-BLAD] Zbyt maly plik BTP1 w pakiecie: ", nazwa);
+                continue;
+            }
+            BtpInfo info{};
+            if (btpsprawdzplik(p + poff, bsz, &info) != BTPOK) {
+                log_sciezka("[TAPETA-BLAD] Niepoprawny plik BTP1 w pakiecie: ", nazwa);
+                continue;
+            }
+        } else if (is_jpeg) {
+            if (bsz < 4 || p[poff] != 0xFF || p[poff + 1] != 0xD8) {
+                log_sciezka("[TAPETA-BLAD] Niepoprawny plik JPEG w pakiecie: ", nazwa);
+                continue;
+            }
+        } else {
+            log_sciezka("[TAPETA-BLAD] Nieznany format pliku w pakiecie: ", nazwa);
             continue;
         }
 
@@ -530,7 +552,7 @@ bool wczytaj(const char* path, BtpInfo* info, uint32_t** zrodlo, bool cicho, boo
 }
 
 bool zastosuj(const TapetyKonfiguracja& c, bool cicho, bool publikuj = true) {
-    if (static_cast<uint32_t>(c.tryb) > 2) return false;
+    if (static_cast<uint32_t>(c.tryb) > 3) return false;
     BtpInfo info{}; uint32_t* src = nullptr;
     if (!wczytaj(c.sciezka, &info, &src, cicho)) return false;
     size_t cap = 0;
@@ -547,6 +569,8 @@ bool zastosuj(const TapetyKonfiguracja& c, bool cicho, bool publikuj = true) {
     ++statystyki.zmiany;
     statystyki.zrodlo = TAPETY_BTP;
     aktualna = c;
+    jpeg_w = jpeg_h = 0;
+    jpeg_do_przywrocenia.sciezka[0] = 0;
     if (publikuj) grafika_publikuj_tapete();
     if (!cicho) {
         log_sciezka("[TAPETA] Wybrano ", c.sciezka);
@@ -586,7 +610,7 @@ void snapshot(TapetyOdpowiedz* out) {
     out->tryb = static_cast<uint32_t>(aktualna.tryb);
     tapety_kopiuj(out->sciezka, aktualna.sciezka, sizeof(out->sciezka));
     size_t cap = 0;
-    out->adres_bufora = reinterpret_cast<uint64_t>(grafika_bufor_tapety(&cap));
+    out->adres_bufora = 0;
     out->bufor_bajty = cap;
     (void)grafika_scratch_tapety(&cap);
     out->scratch_bajty = cap;
@@ -610,6 +634,11 @@ void diagnostyka(uint32_t grupa, TapetyOdpowiedz* out) {
             for (size_t k = 0; s_inwentarz_wpisy[i].nazwa[k] && p + 1 < sizeof(path); ++k)
                 path[p++] = s_inwentarz_wpisy[i].nazwa[k];
             path[p] = '\0';
+            if (tapety_koncowka(path, ".jpg") || tapety_koncowka(path, ".jpeg")) {
+                if (rozmiar_pliku(path) >= 4) ++ok;
+                else ++bledy;
+                continue;
+            }
             BtpInfo info{}; uint32_t* src = nullptr;
             if (wczytaj(path, &info, &src, true)) ++ok;
             else ++bledy;
@@ -623,11 +652,18 @@ void diagnostyka(uint32_t grupa, TapetyOdpowiedz* out) {
         size_t cap = 0;
         const uint32_t* adres = grafika_bufor_tapety(&cap);
         const size_t stare_bajty = cap;
+        size_t btp_indeksy[TAPETY_INWENTARZ_MAX]{};
+        size_t btp_liczba = 0;
+        for (size_t i = 0; i < ile; ++i) {
+            if (tapety_koncowka(s_inwentarz_wpisy[i].nazwa, ".btp")) {
+                btp_indeksy[btp_liczba++] = i;
+            }
+        }
         przed = heap_zajete_bajty();
         for (uint32_t i = 0; i < 100; ++i) {
             TapetyKonfiguracja c = tapety_domyslna();
-            if (ile > 0) {
-                const auto& z = s_inwentarz_wpisy[i % ile];
+            if (btp_liczba > 0) {
+                const auto& z = s_inwentarz_wpisy[btp_indeksy[i % btp_liczba]];
                 size_t p = 0;
                 constexpr char prefix[] = "/tapety/";
                 for (; prefix[p] && p + 1 < sizeof(c.sciezka); ++p) c.sciezka[p] = prefix[p];
@@ -796,7 +832,7 @@ void tapety_inicjalizuj(uint64_t mbi) {
                 for (size_t k = 0; s_inwentarz_wpisy[i].nazwa[k] && p + 1 < sizeof(path); ++k)
                     path[p++] = s_inwentarz_wpisy[i].nazwa[k];
                 path[p] = '\0';
-                if (!tapety_rowne(path, c.sciezka)) {
+                if (!tapety_rowne(path, c.sciezka) && tapety_sciezka(path)) {
                     TapetyKonfiguracja alt{};
                     tapety_kopiuj(alt.sciezka, path, sizeof(alt.sciezka));
                     alt.tryb = c.tryb;
@@ -808,6 +844,7 @@ void tapety_inicjalizuj(uint64_t mbi) {
         []() { klog_serial("[TAPETA] Fallback /tapeta.bmp w BSP2."); wczytaj_tapete_z_dysku(); return grafika_czy_tapeta(); },
         []() { klog_serial("[TAPETA] Fallback jednolity kolor."); grafika_tapeta_solid(); });
     if (statystyki.zrodlo != TAPETY_BTP) aktualna.sciezka[0] = 0;
+    if (tapety_sciezka_powierzchni(wybor.sciezka)) jpeg_do_przywrocenia = wybor;
     TapetyOdpowiedz s{}; snapshot(&s);
 #if BURSZTYN_DIAG_TAPETY
     log_liczba("[TAPETA] Bufor aktywny bajty ", s.bufor_bajty);
@@ -825,12 +862,18 @@ bool tapety_obsluz(const proces_t& proces, const TapetyZadanie& req, TapetyOdpow
     if ((!app && !test) || (app && !pzb_ma_prawa(&proces, PRAWO_PLIKI_CZYTAJ))) return false;
     snapshot(out);
     out->status = TAPETY_BLAD;
-    if (req.operacja == TAPETY_STAN) { out->status = TAPETY_OK; return true; }
+    if (req.operacja == TAPETY_STAN) {
+        if (jpeg_do_przywrocenia.sciezka[0]) {
+            out->tryb = static_cast<uint32_t>(jpeg_do_przywrocenia.tryb);
+            tapety_kopiuj(out->sciezka, jpeg_do_przywrocenia.sciezka, sizeof(out->sciezka));
+        }
+        out->status = TAPETY_OK; return true;
+    }
     if (req.operacja == TAPETY_DIAGNOSTYKA && test && (req.grupa == 3 || req.grupa == 6)) {
         diagnostyka(req.grupa, out);
         return true;
     }
-    if (req.operacja != TAPETY_ZASTOSUJ || req.grupa != 0 || req.tryb > 2 || !tapety_sciezka(req.sciezka)) return false;
+    if (req.operacja != TAPETY_ZASTOSUJ || req.grupa != 0 || req.tryb > 3 || !tapety_sciezka(req.sciezka)) return false;
     TapetyKonfiguracja c{};
     tapety_kopiuj(c.sciezka, req.sciezka, sizeof(c.sciezka));
     c.tryb = static_cast<TrybSkalowaniaObrazu>(req.tryb);
@@ -842,11 +885,81 @@ bool tapety_obsluz(const proces_t& proces, const TapetyZadanie& req, TapetyOdpow
     return true;
 }
 
+bool tapety_czy_jpeg_do_przywrocenia() { return jpeg_do_przywrocenia.sciezka[0] != 0; }
+
+// Surface submission: the JPEG file and its entropy stream are never parsed in Ring 0.
+bool tapety_obsluz_obraz(const proces_t& proces, const TapetyObrazZadanie& req, TapetyOdpowiedz* out) {
+    const TapetyZadanie& base = req.podstawowe;
+    if (!out || base.wersja != 2 || base.operacja != TAPETY_ZASTOSUJ_OBRAZ || base.grupa != 0 ||
+        base.tryb > 3 || !tapety_sciezka_powierzchni(base.sciezka) ||
+        !tapety_rowne(proces.sciezka_pliku, TAPETY_PROGRAM, sizeof(proces.sciezka_pliku)) ||
+        !pzb_ma_co_najmniej_poziom(&proces, PZB_UZYTKOWNIK) ||
+        !pzb_ma_prawa(&proces, PRAWO_GUI | PRAWO_PLIKI_CZYTAJ)) return false;
+    snapshot(out);
+    out->status = TAPETY_BLAD;
+    const uint64_t w = req.szerokosc, h = req.wysokosc;
+    uint64_t pixels = 0, bytes = 0, stride = 0;
+    if (!w || !h || w > 8192 || h > 8192 ||
+        __builtin_mul_overflow(w, h, &pixels) ||
+        __builtin_mul_overflow(pixels, 4ULL, &bytes) ||
+        __builtin_mul_overflow(w, 4ULL, &stride) ||
+        pixels > TAPETY_PIKSELE_MAX * 2ULL ||
+        req.format_pikseli != 1 || req.stride != stride || req.bajty != bytes ||
+        req.bajty > 32ULL * 1024 * 1024 || !req.piksele || !rozmiar_pliku(base.sciezka)) return true;
+    const void* user = reinterpret_cast<const void*>(req.piksele);
+    if (!czy_bezpieczny_zakres_uzytkownika_do_odczytu(user, static_cast<size_t>(req.bajty))) return true;
+    size_t scratch_cap = 0, dst_cap = 0;
+    uint8_t* scratch = grafika_scratch_tapety(&scratch_cap);
+    uint32_t* dst = grafika_bufor_tapety(&dst_cap);
+    const int screen_w = grafika_pobierz_szerokosc(), screen_h = grafika_pobierz_wysokosc();
+    GeometriaObrazu geom{};
+    if (!scratch || !dst || req.bajty > scratch_cap || screen_w <= 0 || screen_h <= 0 ||
+        !geometria_obrazu(req.szerokosc, req.wysokosc, static_cast<uint32_t>(screen_w),
+                          static_cast<uint32_t>(screen_h), static_cast<TrybSkalowaniaObrazu>(base.tryb), &geom) ||
+        static_cast<uint64_t>(screen_w) * screen_h * 4 > dst_cap) return true;
+    const uint64_t apply_start = czas_monotoniczny_us();
+    uint8_t* stage = static_cast<uint8_t*>(bufor_grafiki_alokuj(static_cast<size_t>(req.bajty)));
+    if (!stage) return true;
+    const bool copied = skopiuj_z_przestrzeni_uzytkownika(stage, user, static_cast<size_t>(req.bajty));
+    bool opaque = copied;
+    if (opaque) for (size_t i = 3; i < req.bajty; i += 4) if (stage[i] != 255) { opaque = false; break; }
+    if (!opaque) { bufor_grafiki_zwolnij(stage); return true; }
+    for (size_t i = 0; i < req.bajty; ++i) scratch[i] = stage[i];
+    bufor_grafiki_zwolnij(stage);
+    const uint64_t t = czas_monotoniczny_us();
+    if (!skaluj_obraz(reinterpret_cast<const uint32_t*>(scratch), req.szerokosc, req.wysokosc,
+        static_cast<size_t>(req.bajty), dst, static_cast<uint32_t>(screen_w), static_cast<uint32_t>(screen_h),
+        static_cast<uint32_t>(screen_w), dst_cap, static_cast<TrybSkalowaniaObrazu>(base.tryb), TAPETY_TLO)) return true;
+    statystyki.skaluj_us = czas_monotoniczny_us() - t;
+    jpeg_w = req.szerokosc; jpeg_h = req.wysokosc;
+    aktualna = {};
+    tapety_kopiuj(aktualna.sciezka, base.sciezka, sizeof(aktualna.sciezka));
+    aktualna.tryb = static_cast<TrybSkalowaniaObrazu>(base.tryb);
+    jpeg_do_przywrocenia.sciezka[0] = 0;
+    statystyki.zrodlo = tapety_sciezka_jpeg(base.sciezka) ? TAPETY_JPEG : TAPETY_BTP;
+    ++statystyki.zmiany;
+    ++statystyki.przygotowania;
+    grafika_publikuj_tapete();
+    const bool saved = zapisz_wybor();
+    snapshot(out);
+    out->status = saved ? TAPETY_OK : TAPETY_BLAD_ZAPISU;
+    log_sciezka(tapety_sciezka_jpeg(base.sciezka) ? "[TAPETA] JPEG wybrano " : "[TAPETA] BTP wybrano ", base.sciezka);
+    log_liczba(tapety_sciezka_jpeg(base.sciezka) ? "[TAPETA] JPEG zastosowanie us " :
+        "[TAPETA] BTP zastosowanie us ", czas_monotoniczny_us() - apply_start);
+    return true;
+}
+
 bool tapety_przygotuj_ekran(uint32_t* dst,uint32_t w,uint32_t h,size_t cap) {
     if(!dst||!w||!h||uint64_t(w)*h*4>cap)return false;
     if(!grafika_czy_tapeta()) {
         for(size_t i=0;i<size_t(w)*h;++i)dst[i]=TAPETY_TLO;
         return true;
+    }
+    if (jpeg_w && jpeg_h && tapety_sciezka_powierzchni(aktualna.sciezka)) {
+        size_t source_cap = 0;
+        auto* source = reinterpret_cast<const uint32_t*>(grafika_scratch_tapety(&source_cap));
+        if (!source || static_cast<uint64_t>(jpeg_w) * jpeg_h * 4 > source_cap) return false;
+        return skaluj_obraz(source, jpeg_w, jpeg_h, source_cap, dst, w, h, w, cap, aktualna.tryb, TAPETY_TLO);
     }
     BtpInfo info{};uint32_t* src=nullptr;
     if(!wczytaj(aktualna.sciezka,&info,&src,true,true))return false;

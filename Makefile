@@ -1330,15 +1330,24 @@ $(TAPETY_PAK): $(TAPETY_SOURCES_MANIFEST) narzedzia/tapety-btp/generujpakiet.py 
 
 btp.o: narzedzia/tapety-btp/tapetybtp.cpp narzedzia/tapety-btp/tapetybtp.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
-tapety.o: tapety.cpp tapety.h tapety_format.h pamiec.h obrazy/skalowanie.h narzedzia/tapety-btp/tapetybtp.h
+tapety.o: tapety.cpp tapety.h tapety_format.h pamiec.h bufory_grafiki.h obrazy/skalowanie.h narzedzia/tapety-btp/tapetybtp.h
 kernel.o bws_nowoczesne.o: tapety.h tapety_format.h obrazy/skalowanie.h
+syscalls.o: tapety_format.h
 
 btp_ring3.o: narzedzia/tapety-btp/tapetybtp.cpp narzedzia/tapety-btp/tapetybtp.h
 	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -c $< -o $@
-tapety_tmp.o: programy/tapety/tapety.cpp programy/tapety/klient.h programy/tapety/miniatury.h tapety_format.h obrazy/skalowanie.h narzedzia/tapety-btp/tapetybtp.h $(wildcard bursztyn_ui/*.h)
+image_ring3.o: obrazy/dekoder_obrazu.cpp obrazy/dekoder_obrazu.h obrazy/vendor/stb_image.h narzedzia/tapety-btp/tapetybtp.h
+	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -Wno-unused-function -Wno-unused-parameter -c $< -o $@
+
+.PHONY: test-image
+test-image:
+	$(PYTHON) obrazy/testy/test_jpeg.py
+	$(CXX) -std=c++17 -O1 -g -fsanitize=address,undefined obrazy/test_tapety_jpeg.cpp -o /tmp/bursztyn-test-tapety-jpeg
+	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 /tmp/bursztyn-test-tapety-jpeg
+tapety_tmp.o: programy/tapety/tapety.cpp programy/tapety/klient.h programy/tapety/miniatury.h tapety_format.h obrazy/skalowanie.h obrazy/dekoder_obrazu.h narzedzia/tapety-btp/tapetybtp.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
-tapety_blob.o: tapety_tmp.o btp_ring3.o bursztyn_gui.o programy/kontrolki3/kontrolki3_linker.ld
-	$(LD) --gc-sections -T programy/kontrolki3/kontrolki3_linker.ld $(RING3_LDFLAGS) tapety_tmp.o btp_ring3.o bursztyn_gui.o -o tapety.elf
+tapety_blob.o: tapety_tmp.o btp_ring3.o image_ring3.o bursztyn_gui.o programy/tapety/tapety_linker.ld
+	$(LD) --gc-sections -T programy/tapety/tapety_linker.ld $(RING3_LDFLAGS) tapety_tmp.o btp_ring3.o image_ring3.o bursztyn_gui.o -o tapety.elf
 	$(OBJCOPY) -O binary tapety.elf tapety.bin
 	$(LD) -r -b binary tapety.bin -o $@
 

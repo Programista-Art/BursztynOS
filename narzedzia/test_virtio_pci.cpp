@@ -5195,6 +5195,10 @@ extern "C" void zaktualizuj_kolo_myszy(int pion, int poziom, uint8_t przyciski) 
     g_mock_input_capture.wheel_calls++;
 }
 
+extern "C" int grafika_pobierz_mysz_x() { return g_mock_input_capture.abs_x; }
+extern "C" int grafika_pobierz_mysz_y() { return g_mock_input_capture.abs_y; }
+void klog_serial(const char* msg) { (void)msg; }
+
 extern "C" void klawiatura_test_hook(uint16_t keycode, uint32_t value) {
     g_mock_input_capture.last_key_code = keycode;
     g_mock_input_capture.last_key_val = value;
@@ -6623,6 +6627,65 @@ void test_bursztyn_keyboard_layout_preserved() {
     TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA");
 }
 
+// 29. Generyczne wejscie: Arbitraż priorytetów wskaźnika (PS/2 vs VirtIO) i brak duplikacji ruchu
+void test_input_pointer_ownership_and_no_duplicate_motion() {
+    input_reset_all();
+    g_mock_input_capture.reset();
+
+    // 1. Zarejestruj mysz PS/2 (niski priorytet = 10)
+    InputDevice ps2_dev{};
+    std::strcpy(ps2_dev.name, "ps2-mouse");
+    ps2_dev.kinds = INPUT_DEVICE_KIND_MOUSE;
+    ps2_dev.bus_type = INPUT_BUS_PS2;
+    ps2_dev.device_id = 0;
+    TEST_ASSERT(input_register_device(&ps2_dev), "Rejestracja myszy PS/2");
+    TEST_ASSERT(input_get_pointer_owner() == &ps2_dev, "Mysz PS/2 staje sie aktywnym wlascicielem kursora");
+
+    // Ruch z PS/2 przy braku VirtIO jest akceptowany
+    InputEvent ev_ps2_rel[2] = {
+        { INPUT_EV_REL, INPUT_REL_X, 10 },
+        { INPUT_EV_SYN, INPUT_SYN_REPORT, 0 }
+    };
+    input_dispatch_events(&ps2_dev, ev_ps2_rel, 2);
+    TEST_ASSERT(g_mock_input_capture.rel_calls == 1, "Ruch PS/2 zaakceptowany, rel_calls == 1");
+    TEST_ASSERT(g_mock_input_capture.rel_dx == 10, "dx == 10 z PS/2");
+
+    // 2. Podlacz mysz VirtIO (wysoki priorytet = 30)
+    VirtioPciDevice dev_mouse{};
+    VirtioInputDriver drv_mouse{};
+    TEST_ASSERT(setup_mock_input_device_msix(&dev_mouse, 1), "Probe VirtIO mouse");
+    TEST_ASSERT(virtio_input_init(&drv_mouse, &dev_mouse), "Init VirtIO mouse");
+    TEST_ASSERT(input_get_pointer_owner() == &drv_mouse.input_dev, "VirtIO przejmuje wlasnosc kursora od PS/2");
+
+    // 3. Sprawdz brak duplikacji: nadeslanie ruchu z PS/2 podczas gdy VirtIO jest wlascicielem
+    g_mock_input_capture.reset();
+    input_dispatch_events(&ps2_dev, ev_ps2_rel, 2);
+    TEST_ASSERT(g_mock_input_capture.rel_calls == 0, "Ruch z PS/2 ZIGNOROWANY (brak duplikacji kursora)");
+
+    // 4. Ruch z VirtIO jest normalnie akceptowany
+    mock_inject_input_event(&drv_mouse, INPUT_EV_REL, INPUT_REL_X, 25);
+    mock_inject_input_event(&drv_mouse, INPUT_EV_SYN, INPUT_SYN_REPORT, 0);
+    virtio_input_poll_events(&drv_mouse, 10);
+    TEST_ASSERT(g_mock_input_capture.rel_calls == 1, "Ruch z VirtIO zaakceptowany, rel_calls == 1");
+    TEST_ASSERT(g_mock_input_capture.rel_dx == 25, "dx == 25 z VirtIO");
+
+    // 5. Odlaczenie/reset urzadzenia VirtIO -> fallback z powrotem do PS/2
+    TEST_ASSERT(virtio_input_reset(&drv_mouse), "Reset VirtIO mouse");
+    TEST_ASSERT(input_get_pointer_owner() == &ps2_dev, "Po wyrejestrowaniu VirtIO wlasnosc wraca do PS/2");
+
+    // 6. PS/2 znowu steruje kursorem
+    g_mock_input_capture.reset();
+    input_dispatch_events(&ps2_dev, ev_ps2_rel, 2);
+    TEST_ASSERT(g_mock_input_capture.rel_calls == 1, "Po fallbacku PS/2 znowu aktywne, rel_calls == 1");
+    TEST_ASSERT(g_mock_input_capture.rel_dx == 10, "dx == 10 z PS/2");
+
+    TEST_ASSERT(input_unregister_device(&ps2_dev), "Wyrejestrowanie myszy PS/2");
+    TEST_ASSERT(input_get_pointer_owner() == nullptr, "Brak wlasciciela kursora");
+    input_reset_all();
+    TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA");
+}
+
+
 // ============================================================================
 // PUNKT WEJSCIA TESTOW
 // ============================================================================
@@ -6786,6 +6849,7 @@ int main() {
     RUN_TEST(test_input_no_duplicate_key_events);
     RUN_TEST(test_input_usb_and_ps2_fallback);
     RUN_TEST(test_bursztyn_keyboard_layout_preserved);
+    RUN_TEST(test_input_pointer_ownership_and_no_duplicate_motion);
 
     std::printf("========================================================\n");
     std::printf("PODSUMOWANIE: PASS=%d, FAIL=%d\n", g_pass_count, g_fail_count);

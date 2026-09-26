@@ -107,6 +107,44 @@ def waliduj_btp(sciezka: str) -> bool:
     except (OSError, struct.error, btpcodec.BtpError):
         return False
 
+def waliduj_jpeg(sciezka: str) -> bool:
+    try:
+        rozmiar = os.path.getsize(sciezka)
+        if rozmiar < 4 or rozmiar > 16 * 1024 * 1024:
+            return False
+        with open(sciezka, "rb") as f:
+            dane = f.read()
+        if len(dane) < 4 or dane[:2] != b"\xff\xd8":
+            return False
+        i = 2
+        n = len(dane)
+        has_sof = False
+        while i < n - 1:
+            if dane[i] != 0xFF:
+                i += 1
+                continue
+            marker = dane[i + 1]
+            if marker == 0xD9:
+                break
+            if marker in (0xD8, 0x00, 0x01) or (0xD0 <= marker <= 0xD7):
+                i += 2
+                continue
+            if i + 4 > n:
+                break
+            seg_len = struct.unpack(">H", dane[i + 2:i + 4])[0]
+            if seg_len < 2 or i + 2 + seg_len > n:
+                break
+            if marker in (0xC0, 0xC1, 0xC2):
+                if seg_len >= 7:
+                    h, w = struct.unpack(">HH", dane[i + 5:i + 9])
+                    if w == 0 or h == 0 or w > 8192 or h > 8192 or w * h > 8 * 1024 * 1024:
+                        return False
+                    has_sof = True
+            i += 2 + seg_len
+        return has_sof or dane.endswith(b"\xff\xd9")
+    except (OSError, struct.error):
+        return False
+
 def zapisz_jesli_zmieniono(sciezka: str, nowe_dane: bytes):
     if os.path.isfile(sciezka):
         try:
@@ -133,7 +171,7 @@ def zapisz_tekst_jesli_zmieniono(sciezka: str, nowy_tekst: str):
 
 def main():
     parser = argparse.ArgumentParser(description="Generuj deterministyczny pakiet tapet tapety.pak dla Bursztyn OS")
-    parser.add_argument("--katalog", "-k", default="obrazy/tapety", help="Katalog zrodlowy tapet .btp")
+    parser.add_argument("--katalog", "-k", default="obrazy/tapety", help="Katalog zrodlowy tapet .btp, .jpg, .jpeg")
     parser.add_argument("--wyjscie", "-w", default="tapety.pak", help="Sciezka wyjsciowa pliku pakietu (.pak)")
     parser.add_argument("--dep", "-d", default="tapety.pak.d", help="Sciezka wyjsciowa zaleznosci dla Make (.d)")
     parser.add_argument("--manifest-only", help="Zapisz tylko deterministyczna liste nazw zrodel i zakoncz")
@@ -145,7 +183,10 @@ def main():
     if os.path.isdir(katalog):
         wpisy = sorted(os.listdir(katalog))
         for nazwa in wpisy:
-            if not nazwa.endswith(".btp"):
+            nazwa_lower = nazwa.lower()
+            is_btp = nazwa_lower.endswith(".btp")
+            is_jpeg = nazwa_lower.endswith(".jpg") or nazwa_lower.endswith(".jpeg")
+            if not is_btp and not is_jpeg:
                 continue
             if not bezpieczna_nazwa(nazwa):
                 sys.stderr.write(f"[TAPETY PAK] Ostrzezenie: pomijam niebezpieczna nazwe pliku: {nazwa}\n")
@@ -153,8 +194,11 @@ def main():
             sciezka = os.path.join(katalog, nazwa)
             if not os.path.isfile(sciezka):
                 continue
-            if not waliduj_btp(sciezka):
+            if is_btp and not waliduj_btp(sciezka):
                 sys.stderr.write(f"[TAPETY PAK] Ostrzezenie: pomijam niepoprawny plik BTP: {sciezka}\n")
+                continue
+            if is_jpeg and not waliduj_jpeg(sciezka):
+                sys.stderr.write(f"[TAPETY PAK] Ostrzezenie: pomijam niepoprawny plik JPEG: {sciezka}\n")
                 continue
             with open(sciezka, "rb") as f:
                 zawartosc = f.read()

@@ -48,6 +48,7 @@
 #include <stdbool.h>
 
 #include "pzb.h"
+#include "tapety_format.h"
 #include "zegar-rtc.h"
 #include "grafika.h"
 #include "siec.h"
@@ -401,8 +402,10 @@ constexpr uint64_t KONIEC_STERTY_USER =
  * Ogranicza to dlugosc petli z wylaczonym/preempcja zabroniona kontekstem
  * syscalls oraz blast radius blednego programu.
  */
+// One validated BGRA wallpaper at 3840x2160 needs 31.7 MiB plus allocator
+// metadata and page rounding. The per-process 256 MiB ceiling still applies.
 constexpr uint64_t MAX_ALOKACJA_STERTY_NA_BWS =
-    16ULL * 1024ULL * 1024ULL;
+    40ULL * 1024ULL * 1024ULL;
 
 struct StanDropProcesu {
     BwsCelDrop cele[BWS_DROP_CELE_MAX];
@@ -2524,6 +2527,9 @@ __attribute__((noinline)) uint64_t bws_alokuj_sterte(
 
         return 0;
     }
+    if (rozmiar > 16ULL * 1024ULL * 1024ULL &&
+        (!tapety_rowne(proces.sciezka_pliku, TAPETY_PROGRAM, sizeof(proces.sciezka_pliku)) ||
+         !pzb_ma_prawa(&proces, PRAWO_GUI | PRAWO_PLIKI_CZYTAJ))) return 0;
 
     if (rozmiar >
         UINT64_MAX -
@@ -3844,4 +3850,3 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
 
     return res;
 }
-

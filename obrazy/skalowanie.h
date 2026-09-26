@@ -4,7 +4,7 @@
 
 // Wspolna geometria i nearest-neighbor dla obrazow XRGB. Bez alokacji/float.
 // Wszystkie osie <=8192; iloczyny posrednie liczone w uint64_t.
-enum class TrybSkalowaniaObrazu : uint32_t { Dopasuj = 0, Wypelnij = 1, Wysrodkuj = 2 };
+enum class TrybSkalowaniaObrazu : uint32_t { Dopasuj = 0, Wypelnij = 1, Wysrodkuj = 2, Rozciagnij = 3 };
 struct GeometriaObrazu {
     uint32_t src_x, src_y, src_w, src_h;
     uint32_t dst_x, dst_y, dst_w, dst_h;
@@ -12,7 +12,7 @@ struct GeometriaObrazu {
 inline bool geometria_obrazu(uint32_t sw, uint32_t sh, uint32_t dw, uint32_t dh,
                              TrybSkalowaniaObrazu tryb, GeometriaObrazu* out) {
     if (!out || !sw || !sh || !dw || !dh || sw > 8192 || sh > 8192 ||
-        dw > 8192 || dh > 8192 || static_cast<uint32_t>(tryb) > 2) return false;
+        dw > 8192 || dh > 8192 || static_cast<uint32_t>(tryb) > 3) return false;
     GeometriaObrazu g{0, 0, sw, sh, 0, 0, dw, dh};
     if (tryb == TrybSkalowaniaObrazu::Dopasuj) {
         if (static_cast<uint64_t>(sw) * dh > static_cast<uint64_t>(sh) * dw)
@@ -30,7 +30,7 @@ inline bool geometria_obrazu(uint32_t sw, uint32_t sh, uint32_t dw, uint32_t dh,
         if (!g.src_h) g.src_h = 1;
         g.src_x = (sw - g.src_w) / 2;
         g.src_y = (sh - g.src_h) / 2;
-    } else {
+    } else if (tryb == TrybSkalowaniaObrazu::Wysrodkuj) {
         g.src_w = g.dst_w = sw < dw ? sw : dw;
         g.src_h = g.dst_h = sh < dh ? sh : dh;
         g.src_x = (sw - g.src_w) / 2; g.src_y = (sh - g.src_h) / 2;

@@ -12,7 +12,7 @@
 
 constexpr uint32_t TAPETY_LICZBA = 10;
 constexpr uint32_t TAPETY_MINI_W = 160, TAPETY_MINI_H = 90;
-constexpr size_t TAPETY_SCIEZKA_MAX = 128, TAPETY_CFG_MAX = 512;
+constexpr size_t TAPETY_SCIEZKA_MAX = 256, TAPETY_CFG_MAX = 512;
 constexpr uint32_t TAPETY_PLIK_MAX = 16U * 1024U * 1024U;
 constexpr uint32_t TAPETY_PIKSELE_MAX = 4U * 1024U * 1024U;
 constexpr uint32_t TAPETY_TLO = 0xFF1A0B00U;
@@ -78,6 +78,48 @@ inline bool tapety_sciezka(const char* s) {
     }
     return true;
 }
+inline bool tapety_sciezka_plik_uzytkownika(const char* s) {
+    if (!s || s[0] != '/') return false;
+    size_t n = 0;
+    while (n < TAPETY_SCIEZKA_MAX && s[n]) ++n;
+    if (n >= TAPETY_SCIEZKA_MAX || n < 6) return false;
+    if (s[1] == '/' || s[1] == '.') return false;
+    for (size_t i = 1; i < n; ++i) {
+        const uint8_t c = static_cast<uint8_t>(s[i]);
+        if (c < 32 || c == 127 || c == '\\' || (c == '/' && (s[i-1] == '/' || s[i-1] == '.')) ||
+            (c == '.' && s[i-1] == '.' && (i+1 == n || s[i+1] == '/'))) return false;
+    }
+    return true;
+}
+inline bool tapety_koncowka(const char* s, const char* ext) {
+    if (!s || !ext) return false;
+    size_t n = 0, m = 0;
+    while (n < TAPETY_SCIEZKA_MAX && s[n]) ++n;
+    while (ext[m]) ++m;
+    if (n >= TAPETY_SCIEZKA_MAX || n < m) return false;
+    for (size_t i = 0; i < m; ++i) {
+        char a = s[n - m + i], b = ext[i];
+        if (a >= 'A' && a <= 'Z') a = static_cast<char>(a + ('a' - 'A'));
+        if (a != b) return false;
+    }
+    return true;
+}
+inline bool tapety_sciezka_jpeg(const char* s) {
+    return tapety_sciezka_plik_uzytkownika(s) &&
+        (tapety_koncowka(s, ".jpg") || tapety_koncowka(s, ".jpeg"));
+}
+inline bool tapety_sciezka_btp_uzytkownika(const char* s) {
+    constexpr char prefix[] = "/uzytkownicy/";
+    if (!s) return false;
+    for (size_t i = 0; i < sizeof(prefix) - 1; ++i) if (s[i] != prefix[i]) return false;
+    return tapety_sciezka_plik_uzytkownika(s) && tapety_koncowka(s, ".btp");
+}
+inline bool tapety_sciezka_powierzchni(const char* s) {
+    return tapety_sciezka_jpeg(s) || (tapety_sciezka_btp_uzytkownika(s) && !tapety_sciezka(s));
+}
+inline bool tapety_sciezka_obrazu(const char* s) {
+    return tapety_sciezka(s) || tapety_sciezka_powierzchni(s);
+}
 struct TapetyKonfiguracja { char sciezka[TAPETY_SCIEZKA_MAX]; TrybSkalowaniaObrazu tryb; };
 inline TapetyKonfiguracja tapety_domyslna() {
     TapetyKonfiguracja c{};
@@ -88,7 +130,8 @@ inline TapetyKonfiguracja tapety_domyslna() {
 inline const char* tapety_nazwa_trybu(TrybSkalowaniaObrazu t) {
     return t == TrybSkalowaniaObrazu::Dopasuj ? "dopasuj" :
            t == TrybSkalowaniaObrazu::Wypelnij ? "wypelnij" :
-           t == TrybSkalowaniaObrazu::Wysrodkuj ? "wysrodkuj" : "";
+           t == TrybSkalowaniaObrazu::Wysrodkuj ? "wysrodkuj" :
+           t == TrybSkalowaniaObrazu::Rozciagnij ? "rozciagnij" : "";
 }
 inline bool tapety_parsuj(const char* buf, size_t n, TapetyKonfiguracja* out) {
     if (!out) return false;
@@ -101,7 +144,7 @@ inline bool tapety_parsuj(const char* buf, size_t n, TapetyKonfiguracja* out) {
     size_t i = 7, p = 0;
     TapetyKonfiguracja c{};
     while (i < n && buf[i] != '\n' && p + 1 < sizeof(c.sciezka)) c.sciezka[p++] = buf[i++];
-    if (i >= n || buf[i++] != '\n' || !tapety_sciezka(c.sciezka) || n - i < 6) return false;
+    if (i >= n || buf[i++] != '\n' || !tapety_sciezka_obrazu(c.sciezka) || n - i < 6) return false;
     constexpr char klucz[] = "tryb=";
     for (size_t j = 0; j < 5; ++j) if (buf[i++] != klucz[j]) return false;
     char tryb[16]{};
@@ -111,12 +154,13 @@ inline bool tapety_parsuj(const char* buf, size_t n, TapetyKonfiguracja* out) {
     if (tapety_rowne(tryb, "dopasuj", sizeof(tryb))) c.tryb = TrybSkalowaniaObrazu::Dopasuj;
     else if (tapety_rowne(tryb, "wypelnij", sizeof(tryb))) c.tryb = TrybSkalowaniaObrazu::Wypelnij;
     else if (tapety_rowne(tryb, "wysrodkuj", sizeof(tryb))) c.tryb = TrybSkalowaniaObrazu::Wysrodkuj;
+    else if (tapety_rowne(tryb, "rozciagnij", sizeof(tryb))) c.tryb = TrybSkalowaniaObrazu::Rozciagnij;
     else return false;
     *out = c;
     return true;
 }
 inline size_t tapety_serializuj(const TapetyKonfiguracja& c, char* buf, size_t cap) {
-    if (!buf || !tapety_sciezka(c.sciezka) || static_cast<uint32_t>(c.tryb) > 2) return 0;
+    if (!buf || !tapety_sciezka_obrazu(c.sciezka) || static_cast<uint32_t>(c.tryb) > 3) return 0;
     const char* czesci[] = {"tapeta=", c.sciezka, "\ntryb=", tapety_nazwa_trybu(c.tryb), "\n"};
     size_t n = 0;
     for (const char* s : czesci) for (size_t i = 0; s[i]; ++i) {
@@ -129,9 +173,9 @@ inline size_t tapety_serializuj(const TapetyKonfiguracja& c, char* buf, size_t c
 // Protokol wewnetrznej uslugi przez NIEZMIENIONE BWS 68..71.
 // Slot 0/generacja 1 jest rezerwowany przez jadro przed pierwszym procesem.
 constexpr uint64_t TAPETY_IPC = UINT64_C(0x100000001);
-enum TapetyOperacja : uint32_t { TAPETY_STAN = 1, TAPETY_ZASTOSUJ = 2, TAPETY_DIAGNOSTYKA = 3 };
+enum TapetyOperacja : uint32_t { TAPETY_STAN = 1, TAPETY_ZASTOSUJ = 2, TAPETY_DIAGNOSTYKA = 3, TAPETY_ZASTOSUJ_OBRAZ = 4 };
 enum TapetyStatus : uint32_t { TAPETY_OK = 0, TAPETY_BLAD = 1, TAPETY_BLAD_ZAPISU = 2 };
-enum TapetyZrodlo : uint32_t { TAPETY_SOLID = 0, TAPETY_BTP = 1, TAPETY_BMP = 2 };
+enum TapetyZrodlo : uint32_t { TAPETY_SOLID = 0, TAPETY_BTP = 1, TAPETY_BMP = 2, TAPETY_JPEG = 3 };
 
 // Wspolna, testowalna kolejnosc boot fallback; callbacki wykonuja realna walidacje.
 template<class Btp, class Bmp, class Solid>
@@ -150,6 +194,12 @@ struct TapetyZadanie {
     uint64_t odpowiedz;
     char sciezka[TAPETY_SCIEZKA_MAX];
 };
+struct TapetyObrazZadanie {
+    TapetyZadanie podstawowe;
+    uint64_t piksele;
+    uint64_t bajty;
+    uint32_t szerokosc, wysokosc, stride, format_pikseli;
+};
 struct TapetyOdpowiedz {
     uint32_t wersja, status, tryb, zrodlo;
     uint32_t szerokosc, wysokosc, poprawne, bledy;
@@ -157,5 +207,6 @@ struct TapetyOdpowiedz {
     uint64_t odczyt_us, dekoduj_us, skaluj_us, heap_przed, heap_po, adres_bufora;
     char sciezka[TAPETY_SCIEZKA_MAX];
 };
-static_assert(sizeof(TapetyZadanie) == 152, "Wewnetrzny protokol Tapety");
+static_assert(sizeof(TapetyZadanie) == 280, "Wewnetrzny protokol Tapety");
+static_assert(sizeof(TapetyObrazZadanie) <= 512, "Obraz musi zmiescic sie w IPC");
 static_assert(sizeof(TapetyOdpowiedz) <= 512, "Odpowiedz musi zmiescic sie w BWS IPC");

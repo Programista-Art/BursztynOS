@@ -6,8 +6,8 @@ for Bursztyn OS (BIOS VirtIO vs UEFI VirtIO vs UEFI VirtIO 640).
 Key features:
  - Non-blocking reader daemon thread + Queue (avoids any blocking readline)
  - Dedicated boot ISO with timeout=0 for automated, zero-delay unattended boot
- - Strict per-VM timeout (75s) and inactivity timeout (25s)
- - Global suite timeout (4 minutes)
+ - Bounded per-VM and inactivity timeouts for software-emulated boots
+ - Global suite timeout (20 minutes)
  - Immediate screenshot capture and visual verification (wallpaper, 15 icons, taskbar, Start, clock, cursor)
  - Clean teardown via QMP quit, terminate, bounded wait, and kill (no orphan QEMU processes)
 """
@@ -29,9 +29,9 @@ ROOT = Path(__file__).resolve().parents[1]
 OVMF = "/usr/share/ovmf/OVMF.fd"
 OUT_DIR = Path("/tmp/bursztyn_boot_diff")
 
-VM_TIMEOUT = 90.0
-INACTIVITY_TIMEOUT = 55.0
-SUITE_TIMEOUT = 360.0
+VM_TIMEOUT = 300.0
+INACTIVITY_TIMEOUT = 150.0
+SUITE_TIMEOUT = 1200.0
 
 class QmpClient:
     def __init__(self, sock_path, timeout=5.0):

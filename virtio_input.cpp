@@ -360,6 +360,8 @@ bool virtio_input_init(VirtioInputDriver* drv, VirtioPciDevice* dev) {
     drv->initialized = true;
 
     // 10. Rejestracja w dyspozytorze InputDevice
+    drv->input_dev.bus_type = INPUT_BUS_VIRTIO;
+    drv->input_dev.device_id = drv->dev ? ((static_cast<uint32_t>(drv->dev->bus) << 16) | (static_cast<uint32_t>(drv->dev->slot) << 8) | drv->dev->func) : 1;
     drv->input_dev.driver_data = drv;
     drv->input_dev.poll_fn = virtio_input_device_poll;
     input_register_device(&drv->input_dev);

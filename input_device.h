@@ -176,6 +176,14 @@ enum InputDeviceKind : uint32_t {
     INPUT_DEVICE_KIND_TABLET   = 1U << 2,
 };
 
+/* Typ magistrali / backendu urzadzenia wejsciowego */
+enum InputBusType : uint32_t {
+    INPUT_BUS_UNKNOWN = 0U,
+    INPUT_BUS_PS2     = 1U,
+    INPUT_BUS_USB     = 2U,
+    INPUT_BUS_VIRTIO  = 3U,
+};
+
 /* =========================================================================
  * 2. STRUKTURY DANYCH WEJSCIA
  * ========================================================================= */
@@ -200,6 +208,8 @@ struct InputAbsInfo {
 struct InputDevice {
     char         name[64];
     uint32_t     kinds;
+    uint32_t     bus_type;
+    uint32_t     device_id;
     InputAbsInfo abs_x;
     InputAbsInfo abs_y;
     void*        driver_data;
@@ -227,6 +237,8 @@ bool input_unregister_device(InputDevice* dev);
 size_t input_get_device_count(void);
 InputDevice* input_get_device(size_t index);
 InputDevice* input_find_device_by_name(const char* name);
+InputDevice* input_get_pointer_owner(void);
+const char* input_bus_name(uint32_t bus_type);
 
 /* Dyspozycja pojedynczego lub serii zdarzen z urzadzenia wejsciowego */
 void input_dispatch_event(InputDevice* dev, const InputEvent* ev);

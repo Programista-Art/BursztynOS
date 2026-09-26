@@ -28,6 +28,8 @@ static void usb_klawiatura_inicjalizuj_urzadzenie(void) {
             s_usb_keyboard_dev.name[i] = "usb-keyboard"[i];
         }
         s_usb_keyboard_dev.kinds = INPUT_DEVICE_KIND_KEYBOARD;
+        s_usb_keyboard_dev.bus_type = INPUT_BUS_USB;
+        s_usb_keyboard_dev.device_id = 0;
         input_register_device(&s_usb_keyboard_dev);
     }
 }

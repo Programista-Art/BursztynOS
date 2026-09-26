@@ -2538,6 +2538,13 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
             "Loader nie utworzyl procesu Menedzera Okien.");
     }
 
+    // Persisted JPEG is decoded by the Ring 3 Tapety process after boot.
+    if (tapety_czy_jpeg_do_przywrocenia()) {
+        (void)bws_uruchom_program_z_pliku_z_argumentem(
+            TAPETY_PROGRAM, PZB_UZYTKOWNIK,
+            PRAWO_GUI | PRAWO_PLIKI_CZYTAJ, false, "--restore");
+    }
+
     if (zadano_test_stack_guard(g_multiboot_info_ptr)) {
         wypisz_log("\n[TEST] Wywolanie kontrolowanego testu naruszenia guard page stosu jadra...\n");
         stos_wykonaj_test_przepelnienia(0);

@@ -18,6 +18,8 @@ bool tapety_weryfikuj_instalacje();
 bool tapety_weryfikuj_start(uint64_t* razem);
 bool tapety_weryfikuj_step(uint64_t* wykonane,bool* gotowe);
 bool tapety_obsluz(const proces_t&, const TapetyZadanie&, TapetyOdpowiedz*);
+bool tapety_obsluz_obraz(const proces_t&, const TapetyObrazZadanie&, TapetyOdpowiedz*);
+bool tapety_czy_jpeg_do_przywrocenia();
 void bws_ipc_inicjalizuj_tapety();
 // Przygotowanie nowego rozmiaru do prywatnego bufora transakcji; bez publikacji.
 bool tapety_przygotuj_ekran(uint32_t* dst,uint32_t w,uint32_t h,size_t cap);

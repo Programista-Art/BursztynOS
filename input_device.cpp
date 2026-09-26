@@ -16,6 +16,8 @@ extern "C" int strcmp(const char* s1, const char* s2);
 extern "C" size_t strlen(const char* s);
 #endif
 
+void klog_serial(const char* msg);
+
 /* Interfejsy z podsystemu grafiki i klawiatury Bursztyn OS */
 extern "C" void zaktualizuj_mysze_zrodlo(int dx, int dy, uint8_t przyciski, const char* zrodlo);
 extern "C" void zaktualizuj_kolo_myszy(int pion, int poziom, uint8_t przyciski);
@@ -29,6 +31,7 @@ namespace {
 constexpr size_t MAX_INPUT_DEVICES = 16;
 static InputDevice* s_devices[MAX_INPUT_DEVICES] = {};
 static size_t s_device_count = 0;
+static InputDevice* s_pointer_owner = nullptr;
 
 static inline bool str_rowne(const char* a, const char* b) {
     if (!a || !b) return false;
@@ -38,9 +41,139 @@ static inline bool str_rowne(const char* a, const char* b) {
     return (*a == '\0' && *b == '\0');
 }
 
+static uint32_t input_calc_priority(const InputDevice* dev) {
+    if (!dev) return 0;
+    if (dev->bus_type == INPUT_BUS_VIRTIO) return 30;
+    if (dev->bus_type == INPUT_BUS_USB) return 20;
+    if (dev->bus_type == INPUT_BUS_PS2) return 10;
+    return 0;
+}
+
+static inline bool input_is_pointer_device(const InputDevice* dev) {
+    if (!dev) return false;
+    return (dev->kinds & (INPUT_DEVICE_KIND_MOUSE | INPUT_DEVICE_KIND_TABLET)) != 0;
+}
+
+static void input_recalc_pointer_owner(void) {
+    InputDevice* best = nullptr;
+    uint32_t best_prio = 0;
+    for (size_t i = 0; i < MAX_INPUT_DEVICES; ++i) {
+        InputDevice* d = s_devices[i];
+        if (d && d->registered && input_is_pointer_device(d)) {
+            uint32_t prio = input_calc_priority(d);
+            if (prio > best_prio || best == nullptr) {
+                best = d;
+                best_prio = prio;
+            }
+        }
+    }
+    if (s_pointer_owner != best) {
+        s_pointer_owner = best;
+        char buf[160]{};
+        char* p = buf;
+        char* e = buf + sizeof(buf);
+        auto app = [&](const char* s) { while (*s && p + 1 < e) *p++ = *s++; };
+        auto app_d = [&](uint32_t v) {
+            char b[12]; int idx = 0;
+            do { b[idx++] = static_cast<char>('0' + (v % 10)); v /= 10; } while (v);
+            while (idx > 0 && p + 1 < e) *p++ = b[--idx];
+        };
+        app("[INPUT OWNER] Active pointer owner: '");
+        app(best ? best->name : "none");
+        app("' bus=");
+        app(best ? input_bus_name(best->bus_type) : "none");
+        app(" id=");
+        app_d(best ? best->device_id : 0);
+        app(" prio=");
+        app_d(best_prio);
+        *p = '\0';
+        klog_serial(buf);
+    }
+}
+
+static void log_pointer_event(const InputDevice* dev, int dx, int dy, int res_x, int res_y, bool accepted) {
+    static uint32_t s_log_count = 0;
+    static uint32_t s_ignored_log_count = 0;
+
+    const int sw = grafika_pobierz_szerokosc();
+    const int sh = grafika_pobierz_wysokosc();
+    const bool is_corner_or_edge = (res_x <= 0 || res_y <= 0 ||
+        (sw > 0 && res_x >= (sw - 1)) ||
+        (sh > 0 && res_y >= (sh - 1)));
+
+    if (accepted) {
+        if (s_log_count >= 5000 && !is_corner_or_edge && (s_log_count % 100 != 0)) {
+            ++s_log_count;
+            return;
+        }
+        ++s_log_count;
+    } else {
+        if (s_ignored_log_count >= 50 && (s_ignored_log_count % 50 != 0)) {
+            ++s_ignored_log_count;
+            return;
+        }
+        ++s_ignored_log_count;
+    }
+
+    char buf[180]{};
+    char* p = buf;
+    char* e = buf + sizeof(buf);
+    auto app = [&](const char* s) { while (*s && p + 1 < e) *p++ = *s++; };
+    auto app_i = [&](int v) {
+        if (v < 0) {
+            if (p + 1 < e) *p++ = '-';
+            v = -v;
+        }
+        char b[12]; int idx = 0;
+        do { b[idx++] = static_cast<char>('0' + (v % 10)); v /= 10; } while (v);
+        while (idx > 0 && p + 1 < e) *p++ = b[--idx];
+    };
+
+    app("[INPUT POINTER] dev='");
+    app(dev ? dev->name : "null");
+    app("' bus=");
+    app(dev ? input_bus_name(dev->bus_type) : "UNKNOWN");
+    app(" id=");
+    app_i(dev ? static_cast<int>(dev->device_id) : 0);
+    app(" dx=");
+    app_i(dx);
+    app(" dy=");
+    app_i(dy);
+    app(" res=");
+    app_i(res_x);
+    app(",");
+    app_i(res_y);
+    app(" state=");
+    if (accepted) {
+        app("ACCEPTED");
+    } else {
+        app("IGNORED (owner='");
+        app(s_pointer_owner ? s_pointer_owner->name : "none");
+        app("')");
+    }
+    *p = '\0';
+    klog_serial(buf);
+}
+
 } // namespace
 
 extern "C" {
+
+InputDevice* input_get_pointer_owner(void) {
+    if (!s_pointer_owner) {
+        input_recalc_pointer_owner();
+    }
+    return s_pointer_owner;
+}
+
+const char* input_bus_name(uint32_t bus_type) {
+    switch (bus_type) {
+        case INPUT_BUS_PS2:    return "PS2";
+        case INPUT_BUS_USB:    return "USB";
+        case INPUT_BUS_VIRTIO: return "VIRTIO";
+        default:               return "UNKNOWN";
+    }
+}
 
 bool input_register_device(InputDevice* dev) {
     if (!dev || dev->registered) return false;
@@ -60,6 +193,30 @@ bool input_register_device(InputDevice* dev) {
             dev->buttons_state = 0;
             dev->prev_buttons_state = 0;
             s_device_count++;
+
+            char buf[160]{};
+            char* p = buf;
+            char* e = buf + sizeof(buf);
+            auto app = [&](const char* s) { while (*s && p + 1 < e) *p++ = *s++; };
+            auto app_d = [&](uint32_t v) {
+                char b[12]; int idx = 0;
+                do { b[idx++] = static_cast<char>('0' + (v % 10)); v /= 10; } while (v);
+                while (idx > 0 && p + 1 < e) *p++ = b[--idx];
+            };
+            app("[INPUT REGISTER] dev='");
+            app(dev->name);
+            app("' bus=");
+            app(input_bus_name(dev->bus_type));
+            app(" id=");
+            app_d(dev->device_id);
+            app(" kinds=0x");
+            app_d(dev->kinds);
+            app(" prio=");
+            app_d(input_calc_priority(dev));
+            *p = '\0';
+            klog_serial(buf);
+
+            input_recalc_pointer_owner();
             return true;
         }
     }
@@ -73,6 +230,7 @@ bool input_unregister_device(InputDevice* dev) {
             s_devices[i] = nullptr;
             dev->registered = false;
             if (s_device_count > 0) s_device_count--;
+            input_recalc_pointer_owner();
             return true;
         }
     }
@@ -167,63 +325,89 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
             if (ev->code == INPUT_SYN_REPORT) {
                 const char* src_name = (dev->name[0] != '\0') ? dev->name : "input";
 
-                // 1. Zdarzenia myszy wzglednej (ruch lub zmiana przyciskow)
-                if (dev->rel_x != 0 || dev->rel_y != 0) {
-                    /*
-                     * W grafika.cpp kursor uaktualniany jest:
-                     * nowy_x = mysz_x + dx;
-                     * nowy_y = mysz_y - dy;
-                     *
-                     * Standard Linux EV_REL REL_Y ma wartosci dodatnie w dol ekranu.
-                     * Aby ruch w dol zwiekszal wspolrzedna Y na ekranie, podajemy dy = -dev->rel_y.
-                     */
-                    zaktualizuj_mysze_zrodlo(dev->rel_x, -dev->rel_y, dev->buttons_state, src_name);
-                    dev->rel_x = 0;
-                    dev->rel_y = 0;
-                } else if (dev->buttons_state != dev->prev_buttons_state) {
-                    zaktualizuj_mysze_zrodlo(0, 0, dev->buttons_state, src_name);
-                }
+                const bool has_pointer_activity = (dev->rel_x != 0 || dev->rel_y != 0 ||
+                    dev->rel_wheel != 0 || dev->has_abs_x || dev->has_abs_y ||
+                    dev->buttons_state != dev->prev_buttons_state);
 
-                // 2. Kolo myszy
-                if (dev->rel_wheel != 0) {
-                    zaktualizuj_kolo_myszy(dev->rel_wheel, 0, dev->buttons_state);
-                    dev->rel_wheel = 0;
-                }
-
-                // 3. Pozycjonowanie bezwzgledne (tablet / ekran dotykowy)
-                if (dev->has_abs_x || dev->has_abs_y) {
-                    const int screen_w = grafika_pobierz_szerokosc();
-                    const int screen_h = grafika_pobierz_wysokosc();
-
-                    if (screen_w > 0 && screen_h > 0) {
-                        int target_x = dev->abs_val_x;
-                        int target_y = dev->abs_val_y;
-
-                        // Skalowanie osi X z pelna ochrona przed overflow
-                        if (dev->abs_x.max > dev->abs_x.min) {
-                            if (target_x < dev->abs_x.min) target_x = dev->abs_x.min;
-                            if (target_x > dev->abs_x.max) target_x = dev->abs_x.max;
-                            const int64_t span_in = static_cast<int64_t>(dev->abs_x.max) - dev->abs_x.min;
-                            const int64_t val_rel = static_cast<int64_t>(target_x) - dev->abs_x.min;
-                            const int64_t max_out = screen_w - 1;
-                            target_x = static_cast<int>((val_rel * max_out) / span_in);
-                        }
-
-                        // Skalowanie osi Y z pelna ochrona przed overflow
-                        if (dev->abs_y.max > dev->abs_y.min) {
-                            if (target_y < dev->abs_y.min) target_y = dev->abs_y.min;
-                            if (target_y > dev->abs_y.max) target_y = dev->abs_y.max;
-                            const int64_t span_in = static_cast<int64_t>(dev->abs_y.max) - dev->abs_y.min;
-                            const int64_t val_rel = static_cast<int64_t>(target_y) - dev->abs_y.min;
-                            const int64_t max_out = screen_h - 1;
-                            target_y = static_cast<int>((val_rel * max_out) / span_in);
-                        }
-
-                        zaktualizuj_mysze_pozycja_zrodlo(target_x, target_y, dev->buttons_state, src_name);
+                if (has_pointer_activity) {
+                    if (!s_pointer_owner) {
+                        input_recalc_pointer_owner();
                     }
+                    const bool is_owner = (s_pointer_owner == nullptr || s_pointer_owner == dev);
 
-                    dev->has_abs_x = false;
-                    dev->has_abs_y = false;
+                    if (is_owner) {
+                        // 1. Zdarzenia myszy wzglednej (ruch lub zmiana przyciskow)
+                        if (dev->rel_x != 0 || dev->rel_y != 0) {
+                            const int dx = dev->rel_x;
+                            const int dy = dev->rel_y;
+                            zaktualizuj_mysze_zrodlo(dev->rel_x, -dev->rel_y, dev->buttons_state, src_name);
+                            dev->rel_x = 0;
+                            dev->rel_y = 0;
+                            const int rx = grafika_pobierz_mysz_x();
+                            const int ry = grafika_pobierz_mysz_y();
+                            log_pointer_event(dev, dx, dy, rx, ry, true);
+                        } else if (dev->buttons_state != dev->prev_buttons_state) {
+                            zaktualizuj_mysze_zrodlo(0, 0, dev->buttons_state, src_name);
+                        }
+
+                        // 2. Kolo myszy
+                        if (dev->rel_wheel != 0) {
+                            zaktualizuj_kolo_myszy(dev->rel_wheel, 0, dev->buttons_state);
+                            dev->rel_wheel = 0;
+                        }
+
+                        // 3. Pozycjonowanie bezwzgledne (tablet / ekran dotykowy)
+                        if (dev->has_abs_x || dev->has_abs_y) {
+                            const int screen_w = grafika_pobierz_szerokosc();
+                            const int screen_h = grafika_pobierz_wysokosc();
+
+                            if (screen_w > 0 && screen_h > 0) {
+                                int target_x = dev->abs_val_x;
+                                int target_y = dev->abs_val_y;
+
+                                // Skalowanie osi X z pelna ochrona przed overflow
+                                if (dev->abs_x.max > dev->abs_x.min) {
+                                    if (target_x < dev->abs_x.min) target_x = dev->abs_x.min;
+                                    if (target_x > dev->abs_x.max) target_x = dev->abs_x.max;
+                                    const int64_t span_in = static_cast<int64_t>(dev->abs_x.max) - dev->abs_x.min;
+                                    const int64_t val_rel = static_cast<int64_t>(target_x) - dev->abs_x.min;
+                                    const int64_t max_out = screen_w - 1;
+                                    target_x = static_cast<int>((val_rel * max_out) / span_in);
+                                }
+
+                                // Skalowanie osi Y z pelna ochrona przed overflow
+                                if (dev->abs_y.max > dev->abs_y.min) {
+                                    if (target_y < dev->abs_y.min) target_y = dev->abs_y.min;
+                                    if (target_y > dev->abs_y.max) target_y = dev->abs_y.max;
+                                    const int64_t span_in = static_cast<int64_t>(dev->abs_y.max) - dev->abs_y.min;
+                                    const int64_t val_rel = static_cast<int64_t>(target_y) - dev->abs_y.min;
+                                    const int64_t max_out = screen_h - 1;
+                                    target_y = static_cast<int>((val_rel * max_out) / span_in);
+                                }
+
+                                zaktualizuj_mysze_pozycja_zrodlo(target_x, target_y, dev->buttons_state, src_name);
+                                const int rx = grafika_pobierz_mysz_x();
+                                const int ry = grafika_pobierz_mysz_y();
+                                log_pointer_event(dev, 0, 0, rx, ry, true);
+                            }
+
+                            dev->has_abs_x = false;
+                            dev->has_abs_y = false;
+                        }
+                    } else {
+                        // IGNORED: Urzadzenie o nizszym priorytecie nie wplywa na logiczny kursor
+                        const int dx = dev->rel_x;
+                        const int dy = dev->rel_y;
+                        const int rx = grafika_pobierz_mysz_x();
+                        const int ry = grafika_pobierz_mysz_y();
+                        log_pointer_event(dev, dx, dy, rx, ry, false);
+
+                        dev->rel_x = 0;
+                        dev->rel_y = 0;
+                        dev->rel_wheel = 0;
+                        dev->has_abs_x = false;
+                        dev->has_abs_y = false;
+                    }
                 }
 
                 dev->prev_buttons_state = dev->buttons_state;
@@ -260,6 +444,7 @@ void input_reset_all(void) {
         }
     }
     s_device_count = 0;
+    s_pointer_owner = nullptr;
 }
 
 uint16_t input_ps2_scancode_to_linux(bool is_e0, uint8_t scancode) {

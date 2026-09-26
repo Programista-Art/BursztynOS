@@ -114,6 +114,8 @@ static void ps2_klawiatura_inicjalizuj_urzadzenie(void) {
             s_ps2_keyboard_device.name[i] = "ps2-keyboard"[i];
         }
         s_ps2_keyboard_device.kinds = INPUT_DEVICE_KIND_KEYBOARD;
+        s_ps2_keyboard_device.bus_type = INPUT_BUS_PS2;
+        s_ps2_keyboard_device.device_id = 0;
         input_register_device(&s_ps2_keyboard_device);
     }
 }

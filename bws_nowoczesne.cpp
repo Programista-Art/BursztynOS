@@ -410,14 +410,25 @@ uint64_t ipc_tapety(const proces_t& proces, uint64_t desc_user) {
     TapetyZadanie req{};
     if (!skopiuj_z_przestrzeni_uzytkownika(&desc, reinterpret_cast<const void*>(desc_user), sizeof(desc)) ||
         desc.wersja != BWS_NOWOCZESNE_ABI_WERSJA || desc.zarezerwowane || desc.flagi || desc.shm_handle ||
-        desc.rozmiar != sizeof(req) || !desc.dane ||
+        (desc.rozmiar != sizeof(req) && desc.rozmiar != sizeof(TapetyObrazZadanie)) || !desc.dane ||
         !skopiuj_z_przestrzeni_uzytkownika(&req, reinterpret_cast<const void*>(desc.dane), sizeof(req))) return 0;
     IpcEndpoint* cel = endpoint_z_handle(req.odpowiedz);
     if (!cel || cel->owner_pid != aktualny_pid || !cel->kolejka || cel->count >= IPC_KOLEJKA_MAX) return 0;
     auto* odpowiedz = static_cast<TapetyOdpowiedz*>(kmalloc(sizeof(TapetyOdpowiedz)));
     if (!odpowiedz) return 0;
     bool ok;
-    { GuardEkranu guard; ok = tapety_obsluz(proces, req, odpowiedz); }
+    if (desc.rozmiar == sizeof(TapetyObrazZadanie)) {
+        TapetyObrazZadanie image{};
+        if (!skopiuj_z_przestrzeni_uzytkownika(&image,
+                reinterpret_cast<const void*>(desc.dane), sizeof(image))) {
+            kfree(odpowiedz); return 0;
+        }
+        GuardEkranu guard;
+        ok = tapety_obsluz_obraz(proces, image, odpowiedz);
+    } else {
+        GuardEkranu guard;
+        ok = tapety_obsluz(proces, req, odpowiedz);
+    }
     if (!ok) { kfree(odpowiedz); return 0; }
     IpcWiadomosc msg{};
     msg.rozmiar = sizeof(*odpowiedz);

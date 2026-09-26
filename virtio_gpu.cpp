@@ -524,7 +524,7 @@ bool virtio_gpu_cmd_resource_attach_backing(
 }
 
 
-bool virtio_gpu_cmd_set_scanout(
+static bool virtio_gpu_cmd_set_scanout_locked(
     VirtioGpuDriver* drv,
     uint32_t scanout_id,
     uint32_t resource_id,
@@ -534,7 +534,6 @@ bool virtio_gpu_cmd_set_scanout(
     uint32_t height
 ) {
     if (!drv || scanout_id >= VIRTIO_GPU_MAX_SCANOUTS) return false;
-    GpuSpinLockGuard guard(drv->lock);
 
     VirtioGpuSetScanout req{};
     req.hdr.type = VIRTIO_GPU_CMD_SET_SCANOUT;
@@ -561,6 +560,20 @@ bool virtio_gpu_cmd_set_scanout(
         gpu_klog(smsg);
     }
     return ok;
+}
+
+bool virtio_gpu_cmd_set_scanout(
+    VirtioGpuDriver* drv,
+    uint32_t scanout_id,
+    uint32_t resource_id,
+    uint32_t x,
+    uint32_t y,
+    uint32_t width,
+    uint32_t height
+) {
+    if (!drv) return false;
+    GpuSpinLockGuard guard(drv->lock);
+    return virtio_gpu_cmd_set_scanout_locked(drv, scanout_id, resource_id, x, y, width, height);
 }
 
 bool virtio_gpu_cmd_transfer_to_host_2d(
@@ -633,9 +646,8 @@ bool virtio_gpu_cmd_resource_flush(
     return true;
 }
 
-bool virtio_gpu_cmd_resource_detach_backing(VirtioGpuDriver* drv, uint32_t resource_id) {
+static bool virtio_gpu_cmd_resource_detach_backing_locked(VirtioGpuDriver* drv, uint32_t resource_id) {
     if (!drv || resource_id == 0) return false;
-    GpuSpinLockGuard guard(drv->lock);
 
     VirtioGpuResourceDetachBacking req{};
     req.hdr.type = VIRTIO_GPU_CMD_RESOURCE_DETACH_BACKING;
@@ -647,9 +659,14 @@ bool virtio_gpu_cmd_resource_detach_backing(VirtioGpuDriver* drv, uint32_t resou
         drv, &req, sizeof(req), &resp, sizeof(resp), VIRTIO_GPU_RESP_OK_NODATA);
 }
 
-bool virtio_gpu_cmd_resource_unref(VirtioGpuDriver* drv, uint32_t resource_id) {
+bool virtio_gpu_cmd_resource_detach_backing(VirtioGpuDriver* drv, uint32_t resource_id) {
     if (!drv || resource_id == 0) return false;
     GpuSpinLockGuard guard(drv->lock);
+    return virtio_gpu_cmd_resource_detach_backing_locked(drv, resource_id);
+}
+
+static bool virtio_gpu_cmd_resource_unref_locked(VirtioGpuDriver* drv, uint32_t resource_id) {
+    if (!drv || resource_id == 0) return false;
 
     VirtioGpuResourceUnref req{};
     req.hdr.type = VIRTIO_GPU_CMD_RESOURCE_UNREF;
@@ -661,16 +678,22 @@ bool virtio_gpu_cmd_resource_unref(VirtioGpuDriver* drv, uint32_t resource_id) {
         drv, &req, sizeof(req), &resp, sizeof(resp), VIRTIO_GPU_RESP_OK_NODATA);
 }
 
+bool virtio_gpu_cmd_resource_unref(VirtioGpuDriver* drv, uint32_t resource_id) {
+    if (!drv || resource_id == 0) return false;
+    GpuSpinLockGuard guard(drv->lock);
+    return virtio_gpu_cmd_resource_unref_locked(drv, resource_id);
+}
+
 /* =========================================================================
  * 3. ZARZADZANIE BUFOREM RAMKI I INICJALIZACJA 2D
  * ========================================================================= */
 
-void virtio_gpu_free_stale_resource(VirtioGpuDriver* drv) {
+static void virtio_gpu_free_stale_resource_locked(VirtioGpuDriver* drv) {
     if (!drv || drv->old_resource_id == 0) return;
 
     if (!drv->has_error) {
-        virtio_gpu_cmd_resource_detach_backing(drv, drv->old_resource_id);
-        virtio_gpu_cmd_resource_unref(drv, drv->old_resource_id);
+        virtio_gpu_cmd_resource_detach_backing_locked(drv, drv->old_resource_id);
+        virtio_gpu_cmd_resource_unref_locked(drv, drv->old_resource_id);
     }
     if (drv->old_fb_vaddr) {
         gpu_fb_free(drv->old_fb_vaddr, drv->old_allocated_frames, drv->old_fb_pages);
@@ -692,21 +715,27 @@ void virtio_gpu_free_stale_resource(VirtioGpuDriver* drv) {
     drv->old_display_height = 0;
 }
 
-bool virtio_gpu_rollback_modeset(VirtioGpuDriver* drv) {
+void virtio_gpu_free_stale_resource(VirtioGpuDriver* drv) {
+    if (!drv || drv->old_resource_id == 0) return;
+    GpuSpinLockGuard guard(drv->lock);
+    virtio_gpu_free_stale_resource_locked(drv);
+}
+
+static bool virtio_gpu_rollback_modeset_locked(VirtioGpuDriver* drv) {
     if (!drv || drv->old_resource_id == 0) return false;
 
     // 1. Przywroc scanout na stary zasob
     if (drv->scanout_set && !drv->has_error) {
-        virtio_gpu_cmd_set_scanout(drv, drv->scanout_id, drv->old_resource_id, 0, 0,
-                                   drv->old_display_width, drv->old_display_height);
+        virtio_gpu_cmd_set_scanout_locked(drv, drv->scanout_id, drv->old_resource_id, 0, 0,
+                                           drv->old_display_width, drv->old_display_height);
     }
 
     // 2. Zwolnij nowy nieudany zasob
     if (drv->backing_attached && !drv->has_error) {
-        virtio_gpu_cmd_resource_detach_backing(drv, drv->resource_id);
+        virtio_gpu_cmd_resource_detach_backing_locked(drv, drv->resource_id);
     }
     if (drv->resource_created && !drv->has_error) {
-        virtio_gpu_cmd_resource_unref(drv, drv->resource_id);
+        virtio_gpu_cmd_resource_unref_locked(drv, drv->resource_id);
     }
     if (drv->fb_vaddr) {
         gpu_fb_free(drv->fb_vaddr, drv->allocated_frames, drv->fb_pages);
@@ -744,6 +773,12 @@ bool virtio_gpu_rollback_modeset(VirtioGpuDriver* drv) {
     drv->old_display_height = 0;
 
     return true;
+}
+
+bool virtio_gpu_rollback_modeset(VirtioGpuDriver* drv) {
+    if (!drv || drv->old_resource_id == 0) return false;
+    GpuSpinLockGuard guard(drv->lock);
+    return virtio_gpu_rollback_modeset_locked(drv);
 }
 
 bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t height) {
@@ -1200,37 +1235,24 @@ bool virtio_gpu_reset(VirtioGpuDriver* drv) {
 
     GpuSpinLockGuard guard(drv->lock);
 
-    /* Posprzataj ewentualny stary zasob po modesettingu */
-    virtio_gpu_free_stale_resource(drv);
+    /* Posprzataj ewentualny stary zasob po modesettingu wewnatrz blokady */
+    virtio_gpu_free_stale_resource_locked(drv);
 
     /* 1. Odpiecie scanoutu jesli byl ustawiony */
     if (drv->scanout_set && !drv->has_error) {
-        VirtioGpuSetScanout req{};
-        req.hdr.type = VIRTIO_GPU_CMD_SET_SCANOUT;
-        req.scanout_id = drv->scanout_id;
-        req.resource_id = 0; /* 0 = wylacz scanout */
-        VirtioGpuCtrlHdr resp{};
-        virtio_gpu_send_command_locked(drv, &req, sizeof(req), &resp, sizeof(resp), VIRTIO_GPU_RESP_OK_NODATA);
+        virtio_gpu_cmd_set_scanout_locked(drv, drv->scanout_id, 0, 0, 0, 0, 0);
         drv->scanout_set = false;
     }
 
     /* 2. Odlaczenie pamieci backing jesli byla podpieta */
     if (drv->backing_attached && !drv->has_error) {
-        VirtioGpuResourceDetachBacking req{};
-        req.hdr.type = VIRTIO_GPU_CMD_RESOURCE_DETACH_BACKING;
-        req.resource_id = drv->resource_id;
-        VirtioGpuCtrlHdr resp{};
-        virtio_gpu_send_command_locked(drv, &req, sizeof(req), &resp, sizeof(resp), VIRTIO_GPU_RESP_OK_NODATA);
+        virtio_gpu_cmd_resource_detach_backing_locked(drv, drv->resource_id);
         drv->backing_attached = false;
     }
 
     /* 3. Zniszczenie zasobu 2D */
     if (drv->resource_created && !drv->has_error) {
-        VirtioGpuResourceUnref req{};
-        req.hdr.type = VIRTIO_GPU_CMD_RESOURCE_UNREF;
-        req.resource_id = drv->resource_id;
-        VirtioGpuCtrlHdr resp{};
-        virtio_gpu_send_command_locked(drv, &req, sizeof(req), &resp, sizeof(resp), VIRTIO_GPU_RESP_OK_NODATA);
+        virtio_gpu_cmd_resource_unref_locked(drv, drv->resource_id);
         drv->resource_created = false;
     }
 
@@ -1317,6 +1339,16 @@ bool virtio_gpu_reset(VirtioGpuDriver* drv) {
     drv->nr_entries = 0;
 
     drv->resource_id = 0;
+    drv->fb_width = 0;
+    drv->fb_height = 0;
+    drv->fb_stride = 0;
+    drv->fb_format = 0;
+    drv->display_width = 0;
+    drv->display_height = 0;
+    drv->old_display_width = 0;
+    drv->old_display_height = 0;
+    drv->scanout_id = 0;
+    drv->scanout_enabled = false;
     drv->resource_created = false;
     drv->backing_attached = false;
     drv->scanout_set = false;

@@ -64,16 +64,18 @@ constexpr uint8_t PAKIET_Y_OVERFLOW            = 1U << 7;
 constexpr uint32_t LIMIT_OCZEKIWANIA           = 100000U;
 constexpr uint32_t LIMIT_PROB_RESEND            = 3U;
 
-constexpr uint8_t ROZMIAR_PAKIETU               = 3U;
+constexpr uint8_t MAKS_ROZMIAR_PAKIETU         = 4U;
+static uint8_t s_rozmiar_pakietu               = 3U;
 
 /* =========================================================================
  * STAN STEROWNIKA
  * ========================================================================= */
 
-uint8_t pakiet[ROZMIAR_PAKIETU] = {};
+uint8_t pakiet[MAKS_ROZMIAR_PAKIETU] = {};
 uint8_t indeks_pakietu = 0;
 
 bool mysz_zainicjalizowana = false;
+static InputDevice s_ps2_mouse_device{};
 
 /*
  * Liczniki diagnostyczne. Nie sa obecnie eksportowane przez BWS,
@@ -358,31 +360,40 @@ void przetworz_pakiet() {
     }
 
     /*
-     * Drugi i trzeci bajt sa 8-bitowymi wartosciami ze znakiem
-     * w kodzie uzupelnien do dwoch.
+     * Prawidlowe dekodowanie 9-bitowych delty ze znakiem w standardzie PS/2:
+     * Bajty 1 i 2 to mlodsze 8 bitow delty.
+     * Bity 4 i 5 bajtu 0 to bity znaku (bit 8) odpowiednio dla X i Y.
      */
-    const int dx =
-        static_cast<int>(
-            static_cast<int8_t>(pakiet[1]));
+    int dx = static_cast<int>(pakiet[1]);
+    if ((flagi & (1U << 4)) != 0) {
+        dx -= 256;
+    }
 
-    const int dy =
-        static_cast<int>(
-            static_cast<int8_t>(pakiet[2]));
+    int dy = static_cast<int>(pakiet[2]);
+    if ((flagi & (1U << 5)) != 0) {
+        dy -= 256;
+    }
+
+    int dz = 0;
+    if (s_rozmiar_pakietu == 4U) {
+        dz = static_cast<int>(static_cast<int8_t>(pakiet[3]));
+    }
 
     const uint8_t przyciski =
         static_cast<uint8_t>(
             flagi & MYSZ_MASKA_PRZYCISKOW);
 
-    static InputDevice s_ps2_mouse_device{};
     if (!s_ps2_mouse_device.registered) {
         for (size_t i = 0; i < sizeof(s_ps2_mouse_device.name) - 1 && "ps2-mouse"[i]; ++i) {
             s_ps2_mouse_device.name[i] = "ps2-mouse"[i];
         }
         s_ps2_mouse_device.kinds = INPUT_DEVICE_KIND_MOUSE;
+        s_ps2_mouse_device.bus_type = INPUT_BUS_PS2;
+        s_ps2_mouse_device.device_id = 0;
         input_register_device(&s_ps2_mouse_device);
     }
 
-    InputEvent evs[5];
+    InputEvent evs[6];
     size_t n = 0;
     if (dx != 0) {
         evs[n++] = { INPUT_EV_REL, INPUT_REL_X, static_cast<uint32_t>(dx) };
@@ -391,6 +402,9 @@ void przetworz_pakiet() {
         // W standardzie PS/2 dy>0 oznacza ruch w gore. W standardzie Linux Input REL_Y:
         // wartosci dodatnie oznaczaja ruch w dol ekranu (stad -dy).
         evs[n++] = { INPUT_EV_REL, INPUT_REL_Y, static_cast<uint32_t>(-dy) };
+    }
+    if (dz != 0) {
+        evs[n++] = { INPUT_EV_REL, INPUT_REL_WHEEL, static_cast<uint32_t>(dz) };
     }
     evs[n++] = { INPUT_EV_KEY, INPUT_BTN_LEFT, (przyciski & MYSZ_PRZYCISK_LEWY) ? 1U : 0U };
     evs[n++] = { INPUT_EV_KEY, INPUT_BTN_RIGHT, (przyciski & MYSZ_PRZYCISK_PRAWY) ? 1U : 0U };
@@ -417,7 +431,7 @@ void przyjmij_bajt_pakietu(
         return;
     }
 
-    if (indeks_pakietu >= ROZMIAR_PAKIETU) {
+    if (indeks_pakietu >= s_rozmiar_pakietu) {
         ++licznik_blednych_pakietow;
         zresetuj_synchronizacje_pakietu();
         return;
@@ -425,7 +439,7 @@ void przyjmij_bajt_pakietu(
 
     pakiet[indeks_pakietu++] = bajt;
 
-    if (indeks_pakietu == ROZMIAR_PAKIETU) {
+    if (indeks_pakietu == s_rozmiar_pakietu) {
         przetworz_pakiet();
         zresetuj_synchronizacje_pakietu();
     }
@@ -488,6 +502,33 @@ extern "C" void InicjalizujMyszPS2() {
     }
 
     /*
+     * Proba negocjacji IntelliMouse (obsluga 4-bajtowych pakietow z rolka):
+     * Sekwencja probkowania magic knock: 200, 100, 80.
+     */
+    s_rozmiar_pakietu = 3U;
+    (void)wyslij_komende_myszy(0xF3);
+    (void)wyslij_komende_myszy(200);
+    (void)wyslij_komende_myszy(0xF3);
+    (void)wyslij_komende_myszy(100);
+    (void)wyslij_komende_myszy(0xF3);
+    (void)wyslij_komende_myszy(80);
+
+    /*
+     * Odczyt identyfikatora urzadzenia (0xF2):
+     * 0x00 - mysz standardowa (3-bajtowa)
+     * 0x03 - IntelliMouse z rolka (4-bajtowa)
+     * 0x04 - IntelliMouse Explorer (4-bajtowa z przyciskami bocznymi)
+     */
+    if (wyslij_komende_myszy(0xF2)) {
+        uint8_t dev_id = 0;
+        if (czekaj_na_dane(true, &dev_id)) {
+            if (dev_id >= 3U) {
+                s_rozmiar_pakietu = 4U;
+            }
+        }
+    }
+
+    /*
      * 0xF4 uruchamia stream mode.
      */
     if (!wyslij_komende_myszy(
@@ -496,6 +537,16 @@ extern "C" void InicjalizujMyszPS2() {
     }
 
     mysz_zainicjalizowana = true;
+
+    if (!s_ps2_mouse_device.registered) {
+        for (size_t i = 0; i < sizeof(s_ps2_mouse_device.name) - 1 && "ps2-mouse"[i]; ++i) {
+            s_ps2_mouse_device.name[i] = "ps2-mouse"[i];
+        }
+        s_ps2_mouse_device.kinds = INPUT_DEVICE_KIND_MOUSE;
+        s_ps2_mouse_device.bus_type = INPUT_BUS_PS2;
+        s_ps2_mouse_device.device_id = 0;
+        input_register_device(&s_ps2_mouse_device);
+    }
 }
 
 /* =========================================================================
@@ -503,34 +554,43 @@ extern "C" void InicjalizujMyszPS2() {
  * ========================================================================= */
 
 extern "C" void obsluga_przerwania_myszy() {
-    const uint8_t status =
-        wejscie_port_bajt(
-            PORT_PS2_STATUS);
-
     /*
-     * IRQ12 powinno wskazywac bajt myszy. Nie odczytujemy portu 0x60,
-     * jesli bufor jest pusty albo zawiera bajt klawiatury.
-     *
-     * Jest to wazne, bo klawiatura i mysz dziela ten sam port danych.
+     * Audyt petli zrzutu bufora IRQ12:
+     * 1. Bounded iteration count: scisle ograniczona do maks 64 iteracji, brak nieskonczonej petli
+     * 2. Consumes only AUX bytes: odczyt portu 0x60 nastepuje wylacznie, gdy STATUS_AUX_DATA == 1
+     * 3. Never consumes keyboard bytes: jesli bit AUX jest 0, petla natychmiast wychodzi bez czytania portu 0x60
+     * 4. No unbounded ISR loop, no heap/sleep/blocking in ISR
      */
-    if ((status & STATUS_OUTPUT_FULL) == 0) {
-        return;
+    for (uint32_t drain = 0; drain < 64U; ++drain) {
+        const uint8_t status =
+            wejscie_port_bajt(
+                PORT_PS2_STATUS);
+
+        /*
+         * IRQ12 powinno wskazywac bajt myszy. Nie odczytujemy portu 0x60,
+         * jesli bufor jest pusty albo zawiera bajt klawiatury.
+         *
+         * Jest to wazne, bo klawiatura i mysz dziela ten sam port danych.
+         */
+        if ((status & STATUS_OUTPUT_FULL) == 0) {
+            break;
+        }
+
+        if ((status & STATUS_AUX_DATA) == 0) {
+            break;
+        }
+
+        const uint8_t bajt =
+            wejscie_port_bajt(
+                PORT_PS2_DANE);
+
+        if (!mysz_zainicjalizowana) {
+            break;
+        }
+
+        przyjmij_bajt_pakietu(
+            bajt);
     }
-
-    if ((status & STATUS_AUX_DATA) == 0) {
-        return;
-    }
-
-    const uint8_t bajt =
-        wejscie_port_bajt(
-            PORT_PS2_DANE);
-
-    if (!mysz_zainicjalizowana) {
-        return;
-    }
-
-    przyjmij_bajt_pakietu(
-        bajt);
 
     /*
      * Brak EOI tutaj.
