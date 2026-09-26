@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "obrazy/skalowanie.h"
+#include "tapety_nazwy.h"
 
 #if defined(BURSZTYNDIAGTAPETY) && !defined(BURSZTYN_DIAG_TAPETY)
 #define BURSZTYN_DIAG_TAPETY BURSZTYNDIAGTAPETY
@@ -120,11 +121,16 @@ inline bool tapety_sciezka_powierzchni(const char* s) {
 inline bool tapety_sciezka_obrazu(const char* s) {
     return tapety_sciezka(s) || tapety_sciezka_powierzchni(s);
 }
-struct TapetyKonfiguracja { char sciezka[TAPETY_SCIEZKA_MAX]; TrybSkalowaniaObrazu tryb; };
+struct TapetyKonfiguracja {
+    char sciezka[TAPETY_SCIEZKA_MAX];
+    TrybSkalowaniaObrazu tryb;
+    char wyswietlana[TAPETY_SCIEZKA_MAX];
+};
 inline TapetyKonfiguracja tapety_domyslna() {
     TapetyKonfiguracja c{};
     tapety_kopiuj(c.sciezka, TAPETY_SCIEZKI[0], sizeof(c.sciezka));
     c.tryb = TrybSkalowaniaObrazu::Wypelnij;
+    tapety_kopiuj(c.wyswietlana, TAPETY_NAZWY[0], sizeof(c.wyswietlana));
     return c;
 }
 inline const char* tapety_nazwa_trybu(TrybSkalowaniaObrazu t) {
@@ -144,18 +150,44 @@ inline bool tapety_parsuj(const char* buf, size_t n, TapetyKonfiguracja* out) {
     size_t i = 7, p = 0;
     TapetyKonfiguracja c{};
     while (i < n && buf[i] != '\n' && p + 1 < sizeof(c.sciezka)) c.sciezka[p++] = buf[i++];
+    if (p > 0 && c.sciezka[p - 1] == '\r') --p;
+    c.sciezka[p] = '\0';
     if (i >= n || buf[i++] != '\n' || !tapety_sciezka_obrazu(c.sciezka) || n - i < 6) return false;
     constexpr char klucz[] = "tryb=";
     for (size_t j = 0; j < 5; ++j) if (buf[i++] != klucz[j]) return false;
     char tryb[16]{};
     p = 0;
     while (i < n && buf[i] != '\n' && p + 1 < sizeof(tryb)) tryb[p++] = buf[i++];
-    if (i >= n || buf[i++] != '\n' || i != n) return false;
+    if (p > 0 && tryb[p - 1] == '\r') --p;
+    tryb[p] = '\0';
+    if (i < n && buf[i] == '\n') ++i;
     if (tapety_rowne(tryb, "dopasuj", sizeof(tryb))) c.tryb = TrybSkalowaniaObrazu::Dopasuj;
     else if (tapety_rowne(tryb, "wypelnij", sizeof(tryb))) c.tryb = TrybSkalowaniaObrazu::Wypelnij;
     else if (tapety_rowne(tryb, "wysrodkuj", sizeof(tryb))) c.tryb = TrybSkalowaniaObrazu::Wysrodkuj;
     else if (tapety_rowne(tryb, "rozciagnij", sizeof(tryb))) c.tryb = TrybSkalowaniaObrazu::Rozciagnij;
     else return false;
+
+    // Opcjonalna linia nazwa=
+    while (i < n && (buf[i] == '\r' || buf[i] == '\n' || buf[i] == ' ' || buf[i] == '\t')) ++i;
+    constexpr char nazwa_prefix[] = "nazwa=";
+    if (i + 6 <= n) {
+        bool ma_nazwe = true;
+        for (size_t j = 0; j < 6; ++j) {
+            if (buf[i + j] != nazwa_prefix[j]) { ma_nazwe = false; break; }
+        }
+        if (ma_nazwe) {
+            i += 6;
+            p = 0;
+            while (i < n && buf[i] != '\n' && p + 1 < sizeof(c.wyswietlana)) {
+                c.wyswietlana[p++] = buf[i++];
+            }
+            if (p > 0 && c.wyswietlana[p - 1] == '\r') --p;
+            c.wyswietlana[p] = '\0';
+            if (i < n && buf[i] == '\n') ++i;
+        }
+    }
+    while (i < n && (buf[i] == '\r' || buf[i] == '\n' || buf[i] == ' ' || buf[i] == '\t')) ++i;
+    if (i != n) return false;
     *out = c;
     return true;
 }
@@ -166,6 +198,13 @@ inline size_t tapety_serializuj(const TapetyKonfiguracja& c, char* buf, size_t c
     for (const char* s : czesci) for (size_t i = 0; s[i]; ++i) {
         if (n >= cap) return 0;
         buf[n++] = s[i];
+    }
+    if (c.wyswietlana[0]) {
+        const char* czesci_nazwa[] = {"nazwa=", c.wyswietlana, "\n"};
+        for (const char* s : czesci_nazwa) for (size_t i = 0; s[i]; ++i) {
+            if (n >= cap) return 0;
+            buf[n++] = s[i];
+        }
     }
     return n;
 }

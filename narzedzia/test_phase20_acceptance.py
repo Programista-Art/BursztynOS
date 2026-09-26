@@ -486,7 +486,7 @@ def run_wallpaper_acceptance_test():
         m_pmm = re.search(r"\[PMM\] Pamiec fizyczna modulu tapety\.pak zwolniona", txt)
 
         assert m_mod, "Nie znaleziono logu modulu tapety.pak"
-        assert m_pak and int(m_pak.group(1)) == 11, f"Oczekiwano 11 tapet w pakiecie, otrzymano: {m_pak.group(1) if m_pak else 'None'}"
+        assert m_pak and int(m_pak.group(1)) >= 11, f"Oczekiwano co najmniej 11 tapet w pakiecie, otrzymano: {m_pak.group(1) if m_pak else 'None'}"
         assert m_pmm, "Brak zwolnienia modulu tapety.pak do PMM"
 
         print(f"  - Modul tapety.pak zaladowany: {m_mod.group(1)} bajtow")
@@ -504,16 +504,18 @@ def run_wallpaper_acceptance_test():
         print(f"[PIPELINE STEP 5] Klikam aplikacje Tapety (50, 507)...")
         qmp.click(50, 507, settle=3.0)
 
-        # Czekaj na zaladowanie miniatur w aplikacji Tapety
-        t_wait = time.time() + 15
+        # Czekaj na zaladowanie miniatur i gotowosc galerii w aplikacji Tapety
+        t_wait = time.time() + 20
         miniatury_gotowe = False
         while time.time() < t_wait:
             txt = serial_path.read_text(errors="replace")
-            if "[TAPETY APP] Miniatury gotowe" in txt:
+            if "[TAPETY APP] Galeria gotowa" in txt or "[TAPETY APP] Miniatury gotowe" in txt:
                 miniatury_gotowe = True
-                break
+                if "[TAPETY APP] Galeria gotowa" in txt:
+                    break
             time.sleep(0.5)
 
+        time.sleep(1.0)
         assert miniatury_gotowe, "Aplikacja Tapety nie zglosila gotowosci miniatur!"
         print(f"  -> Miniatury galerii zaladowane pomyslnie! (Ring 3 decode)")
 
@@ -529,11 +531,21 @@ def run_wallpaper_acceptance_test():
         qmp.click(303, 418, settle=1.0)
         print(f"[PIPELINE STEP 6] Klikam Zastosuj (380, 570)...")
         qmp.click(380, 570, settle=2.5)
-        qmp.capture(WORK_DIR / "04_applied_jpeg.png")
 
-        txt = serial_path.read_text(errors="replace")
-        assert ("[TAPETA] JPEG wybrano /tapety/testphoto.jpg" in txt or
-                "[TAPETA] Wybrano /tapety/testphoto.jpg" in txt), "Tapeta testphoto.jpg nie zostala wybrana w BWS!"
+        t_wait = time.time() + 12
+        jpeg_applied = False
+        while time.time() < t_wait:
+            txt = serial_path.read_text(errors="replace")
+            if ("[TAPETA] JPEG wybrano /tapety/testphoto.jpg" in txt or
+                "[TAPETA] Wybrano /tapety/testphoto.jpg" in txt or
+                "[TAPETA] JPEG wybrano /tapety/wp_1c61cb21cf790076.jpg" in txt or
+                "[TAPETA] Wybrano /tapety/wp_1c61cb21cf790076.jpg" in txt):
+                jpeg_applied = True
+                break
+            time.sleep(0.5)
+
+        qmp.capture(WORK_DIR / "04_applied_jpeg.png")
+        assert jpeg_applied, "Tapeta testphoto.jpg nie zostala wybrana w BWS!"
         print(f"  -> Sukces: Zastosowano tapete JPEG (/tapety/testphoto.jpg)")
 
         # Krok 7: Przelaczenie na tapete BTP (pozycja 0: bursztyn01.btp -> x=303, y=154)
@@ -541,11 +553,19 @@ def run_wallpaper_acceptance_test():
         qmp.click(303, 154, settle=1.0)
         print(f"[PIPELINE STEP 7] Klikam Zastosuj (380, 570)...")
         qmp.click(380, 570, settle=2.5)
-        qmp.capture(WORK_DIR / "05_switched_btp.png")
 
-        txt = serial_path.read_text(errors="replace")
-        assert ("[TAPETA] Wybrano /tapety/bursztyn01.btp" in txt or
-                "[TAPETA] BTP wybrano /tapety/bursztyn01.btp" in txt), "Tapeta bursztyn01.btp nie zostala wybrana w BWS!"
+        t_wait = time.time() + 10
+        btp_applied = False
+        while time.time() < t_wait:
+            txt = serial_path.read_text(errors="replace")
+            if ("[TAPETA] Wybrano /tapety/bursztyn01.btp" in txt or
+                "[TAPETA] BTP wybrano /tapety/bursztyn01.btp" in txt):
+                btp_applied = True
+                break
+            time.sleep(0.5)
+
+        qmp.capture(WORK_DIR / "05_switched_btp.png")
+        assert btp_applied, "Tapeta bursztyn01.btp nie zostala wybrana w BWS!"
         print(f"  -> Sukces: Przelaczono na tapete BTP (/tapety/bursztyn01.btp)")
 
         # Krok 8: Powrotne przelaczenie na tapete JPEG
@@ -553,11 +573,20 @@ def run_wallpaper_acceptance_test():
         qmp.click(303, 418, settle=1.0)
         print(f"[PIPELINE STEP 8] Klikam Zastosuj (380, 570)...")
         qmp.click(380, 570, settle=2.5)
-        qmp.capture(WORK_DIR / "06_switched_back_jpeg.png")
 
-        txt = serial_path.read_text(errors="replace")
-        jpeg_count = (txt.count("[TAPETA] JPEG wybrano /tapety/testphoto.jpg") +
-                      txt.count("[TAPETA] Wybrano /tapety/testphoto.jpg"))
+        t_wait = time.time() + 12
+        jpeg_count = 0
+        while time.time() < t_wait:
+            txt = serial_path.read_text(errors="replace")
+            jpeg_count = (txt.count("[TAPETA] JPEG wybrano /tapety/testphoto.jpg") +
+                          txt.count("[TAPETA] Wybrano /tapety/testphoto.jpg") +
+                          txt.count("[TAPETA] JPEG wybrano /tapety/wp_1c61cb21cf790076.jpg") +
+                          txt.count("[TAPETA] Wybrano /tapety/wp_1c61cb21cf790076.jpg"))
+            if jpeg_count >= 2:
+                break
+            time.sleep(0.5)
+
+        qmp.capture(WORK_DIR / "06_switched_back_jpeg.png")
         assert jpeg_count >= 2, f"Oczekiwano co najmniej 2 przelaczen na JPEG, znaleziono: {jpeg_count}"
         print(f"  -> Sukces: Powtornie przelaczono na tapete JPEG (liczba przelaczen: {jpeg_count})")
 

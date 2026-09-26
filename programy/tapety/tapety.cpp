@@ -112,8 +112,12 @@ void pobierz_nazwe_wyswietlana(const char* sciezka, const char* plik, char* dst,
             return;
         }
     }
+    if (plik && plik[0]) {
+        tapety_kopiuj(dst, plik, cap);
+        return;
+    }
     size_t len = 0;
-    while (plik[len]) ++len;
+    while (plik && plik[len]) ++len;
     if (len >= 4 && tapety_koncowka(plik, ".btp")) {
         len -= 4;
     } else if (len >= 4 && tapety_koncowka(plik, ".jpg")) {
@@ -140,12 +144,97 @@ void sortuj_tapety() {
 
 void odkryj_tapety() {
     liczba_tapet = 0;
+
+    // 1. Wczytaj metadane z manifestu /tapety/manifest.cfg
+    uint32_t man_sz = 0;
+    if (pobierz_rozmiar_pliku("/tapety/manifest.cfg", &man_sz) && man_sz > 0 && man_sz < 65536) {
+        char* mbuf = static_cast<char*>(gui_malloc(man_sz + 1));
+        if (mbuf) {
+            uint32_t read = 0;
+            if (czytaj_fragment_pliku("/tapety/manifest.cfg", 0, mbuf, man_sz, &read) && read == man_sz) {
+                mbuf[man_sz] = '\0';
+                size_t pos = 0;
+                while (pos < man_sz && liczba_tapet < static_cast<int>(TAPETY_MAX - 1)) {
+                    size_t end = pos;
+                    while (end < man_sz && mbuf[end] != '\n') ++end;
+                    constexpr char prefix[] = "wpis=";
+                    constexpr size_t plen = sizeof(prefix) - 1;
+                    if (end - pos > plen) {
+                        bool match = true;
+                        for (size_t k = 0; k < plen; ++k) {
+                            if (mbuf[pos + k] != prefix[k]) { match = false; break; }
+                        }
+                        if (match) {
+                            size_t cur = pos + plen;
+                            // 1. kanoniczna
+                            size_t p1 = cur;
+                            while (p1 < end && mbuf[p1] != '|') ++p1;
+                            if (p1 < end) {
+                                size_t klen = p1 - cur;
+                                // 2. rozmiar
+                                size_t p2 = p1 + 1;
+                                size_t p3 = p2;
+                                while (p3 < end && mbuf[p3] != '|') ++p3;
+                                if (p3 < end) {
+                                    // 3. crc32
+                                    size_t p4 = p3 + 1;
+                                    size_t p5 = p4;
+                                    while (p5 < end && mbuf[p5] != '|') ++p5;
+
+                                    char kanon[TAPETY_SCIEZKA_MAX]{};
+                                    for (size_t k = 0; k < klen && k + 1 < sizeof(kanon); ++k) kanon[k] = mbuf[cur + k];
+                                    kanon[klen] = '\0';
+
+                                    char wyswietlana[TAPETY_SCIEZKA_MAX]{};
+                                    size_t wlen = 0;
+                                    if (p5 < end && mbuf[p5] == '|') {
+                                        size_t w_start = p5 + 1;
+                                        size_t w_end = end;
+                                        if (w_end > w_start && mbuf[w_end - 1] == '\r') --w_end;
+                                        wlen = w_end - w_start;
+                                        if (wlen >= sizeof(wyswietlana)) wlen = sizeof(wyswietlana) - 1;
+                                        for (size_t k = 0; k < wlen; ++k) wyswietlana[k] = mbuf[w_start + k];
+                                        wyswietlana[wlen] = '\0';
+                                    }
+                                    if (wlen == 0) {
+                                        tapety_kopiuj(wyswietlana, kanon, sizeof(wyswietlana));
+                                    }
+
+                                    char pelna[TAPETY_SCIEZKA_MAX]{};
+                                    size_t sp = 0;
+                                    constexpr char t_pref[] = "/tapety/";
+                                    for (; t_pref[sp] && sp + 1 < sizeof(pelna); ++sp) pelna[sp] = t_pref[sp];
+                                    for (size_t k = 0; kanon[k] && sp + 1 < sizeof(pelna); ++k) pelna[sp++] = kanon[k];
+                                    pelna[sp] = '\0';
+
+                                    uint32_t fsz = 0;
+                                    if (pobierz_rozmiar_pliku(pelna, &fsz) && fsz >= 4) {
+                                        tapety_kopiuj(lista_tapet[liczba_tapet].sciezka, pelna, sizeof(lista_tapet[0].sciezka));
+                                        pobierz_nazwe_wyswietlana(pelna, wyswietlana, lista_tapet[liczba_tapet].nazwa, sizeof(lista_tapet[0].nazwa));
+                                        ++liczba_tapet;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    pos = end + 1;
+                }
+            }
+            gui_free(mbuf);
+        }
+    }
+
+    // 2. Dodatkowe pliki w katalogu /tapety (nieujete w manifescie)
     char* bufor = static_cast<char*>(gui_malloc(KATALOG_BUFOR_MAX));
-    if (!bufor) return;
+    if (!bufor) {
+        sortuj_tapety();
+        return;
+    }
     for (size_t i = 0; i < KATALOG_BUFOR_MAX; ++i) bufor[i] = 0;
 
     if (!wylistuj_katalog_uzytkownika("/tapety", bufor, KATALOG_BUFOR_MAX)) {
         gui_free(bufor);
+        sortuj_tapety();
         return;
     }
 
@@ -178,50 +267,31 @@ void odkryj_tapety() {
                     for (size_t i = 0; plik[i] && p + 1 < sizeof(pelna); ++i) pelna[p++] = plik[i];
                     pelna[p] = '\0';
 
-                    if (is_btp && tapety_sciezka(pelna)) {
-                        uint32_t rozmiar = 0;
-                        if (pobierz_rozmiar_pliku(pelna, &rozmiar) && rozmiar >= 14 && rozmiar <= TAPETY_PLIK_MAX) {
-                            uint8_t naglowek[72]{};
-                            uint32_t przeczytano = 0;
-                            if (czytaj_fragment_pliku(pelna, 0, reinterpret_cast<char*>(naglowek), 14, &przeczytano) &&
-                                przeczytano == 14) {
-                                BtpInfo info{};
-                                size_t rozmiar_naglowka = 14;
-                                bool pelny_naglowek = true;
-                                if (naglowek[0] == 'B' && naglowek[1] == 'T' &&
-                                    naglowek[2] == 'P' && naglowek[3] == '2') {
-                                    uint32_t przeczytano_v2 = 0;
-                                    pelny_naglowek = rozmiar >= sizeof(naglowek) &&
-                                        czytaj_fragment_pliku(pelna, 0, reinterpret_cast<char*>(naglowek),
-                                                              sizeof(naglowek), &przeczytano_v2) &&
-                                        przeczytano_v2 == sizeof(naglowek);
-                                    rozmiar_naglowka = sizeof(naglowek);
-                                }
-                                if (pelny_naglowek &&
-                                    btpnaglowek(naglowek, rozmiar_naglowka, &info) == BTPOK) {
-                                    if (liczba_tapet < static_cast<int>(TAPETY_MAX - 1)) {
-                                        tapety_kopiuj(lista_tapet[liczba_tapet].sciezka, pelna, sizeof(lista_tapet[0].sciezka));
-                                        pobierz_nazwe_wyswietlana(pelna, plik, lista_tapet[liczba_tapet].nazwa, sizeof(lista_tapet[0].nazwa));
-                                        ++liczba_tapet;
-                                    } else {
-                                        log("[TAPETY APP] Osiagnieto limit 64 tapet; pomijam kolejne pliki.\n");
-                                    }
-                                }
-                            }
+                    bool already = false;
+                    for (int k = 0; k < liczba_tapet; ++k) {
+                        if (tapety_rowne(lista_tapet[k].sciezka, pelna)) {
+                            already = true;
+                            break;
                         }
-                    } else if (is_jpeg && tapety_sciezka_jpeg(pelna)) {
-                        uint32_t rozmiar = 0;
-                        if (pobierz_rozmiar_pliku(pelna, &rozmiar) && rozmiar >= 4 && rozmiar <= TAPETY_PLIK_MAX) {
-                            uint8_t soi[2]{};
-                            uint32_t przeczytano = 0;
-                            if (czytaj_fragment_pliku(pelna, 0, reinterpret_cast<char*>(soi), 2, &przeczytano) &&
-                                przeczytano == 2 && soi[0] == 0xFF && soi[1] == 0xD8) {
+                    }
+
+                    if (!already) {
+                        if (is_btp && tapety_sciezka(pelna)) {
+                            uint32_t rozmiar = 0;
+                            if (pobierz_rozmiar_pliku(pelna, &rozmiar) && rozmiar >= 14 && rozmiar <= TAPETY_PLIK_MAX) {
                                 if (liczba_tapet < static_cast<int>(TAPETY_MAX - 1)) {
                                     tapety_kopiuj(lista_tapet[liczba_tapet].sciezka, pelna, sizeof(lista_tapet[0].sciezka));
                                     pobierz_nazwe_wyswietlana(pelna, plik, lista_tapet[liczba_tapet].nazwa, sizeof(lista_tapet[0].nazwa));
                                     ++liczba_tapet;
-                                } else {
-                                    log("[TAPETY APP] Osiagnieto limit 64 tapet; pomijam kolejne pliki.\n");
+                                }
+                            }
+                        } else if (is_jpeg && tapety_sciezka_jpeg(pelna)) {
+                            uint32_t rozmiar = 0;
+                            if (pobierz_rozmiar_pliku(pelna, &rozmiar) && rozmiar >= 4 && rozmiar <= TAPETY_PLIK_MAX) {
+                                if (liczba_tapet < static_cast<int>(TAPETY_MAX - 1)) {
+                                    tapety_kopiuj(lista_tapet[liczba_tapet].sciezka, pelna, sizeof(lista_tapet[0].sciezka));
+                                    pobierz_nazwe_wyswietlana(pelna, plik, lista_tapet[liczba_tapet].nazwa, sizeof(lista_tapet[0].nazwa));
+                                    ++liczba_tapet;
                                 }
                             }
                         }
@@ -257,14 +327,17 @@ void zastosuj(Przycisk*, void*) {
 
 bool pokaz_obraz(const char* path) {
     if (!miniatury || !tapety_sciezka_powierzchni(path)) return false;
+    for (int i = 0; i < liczba_tapet; ++i) {
+        if (tapety_rowne(lista_tapet[i].sciezka, path)) {
+            galeria->ustaw_wybrany_indeks(i);
+            wybrana = i;
+            return true;
+        }
+    }
     DekodowanyObraz image{};
     if (!wczytaj_plik_obrazu(path, &image)) return false;
     int slot = liczba_tapet;
-    for (int i = 0; i < liczba_tapet; ++i) {
-        if (tapety_rowne(lista_tapet[i].sciezka, path)) { slot = i; break; }
-    }
     if (slot >= static_cast<int>(TAPETY_MAX)) { gui_free(image.piksele); return false; }
-    const bool nowy = slot == liczba_tapet;
     tapety_kopiuj(lista_tapet[slot].sciezka, path, sizeof(lista_tapet[slot].sciezka));
     const char* name = path;
     for (const char* p = path; *p; ++p) if (*p == '/') name = p + 1;
@@ -276,10 +349,8 @@ bool pokaz_obraz(const char* path) {
         TAPETY_MINI_W * TAPETY_MINI_H * 4, TrybSkalowaniaObrazu::Dopasuj, TAPETY_TLO);
     gui_free(image.piksele);
     if (!scaled) return false;
-    if (nowy) {
-        ++liczba_tapet;
-        galeria->dodaj_element(slot, lista_tapet[slot].nazwa, preview, TAPETY_MINI_W, TAPETY_MINI_H);
-    }
+    ++liczba_tapet;
+    galeria->dodaj_element(slot, lista_tapet[slot].nazwa, preview, TAPETY_MINI_W, TAPETY_MINI_H);
     galeria->ustaw_wybrany_indeks(slot);
     wybrana = slot;
     return true;
@@ -467,6 +538,7 @@ extern "C" __attribute__((noreturn)) void _start() {
     if (liczba_tapet > 0) {
         galeria->ustaw_wybrany_indeks(wybrana);
     }
+    log("[TAPETY APP] Galeria gotowa.\n");
     (void)app.uruchom(okno);
     ipc_close(endpoint);
     bws_zakoncz_proces();

@@ -43,7 +43,7 @@ def u32(value: int, name: str) -> int:
     return value
 
 def bezpieczna_nazwa(nazwa: str) -> bool:
-    if not nazwa or len(nazwa) > 120 or nazwa.startswith("."):
+    if not nazwa or len(nazwa) > 120 or len(nazwa) < 5 or nazwa.startswith("."):
         return False
     if "/" in nazwa or "\\" in nazwa or "\0" in nazwa or "\r" in nazwa or "\n" in nazwa or ".." in nazwa or '"' in nazwa:
         return False
@@ -56,23 +56,58 @@ def bezpieczna_nazwa(nazwa: str) -> bool:
     while i < n:
         c = dane[i]
         if c < 128:
-            ch = chr(c)
-            if not (ch.isalnum() or ch in "_- ."):
+            if c < 0x20 or c == 0x7F:
                 return False
             i += 1
         else:
             if 0xC2 <= c <= 0xDF:
+                cp = c & 31
                 ile = 2
+                minimum = 0x80
             elif 0xE0 <= c <= 0xEF:
+                cp = c & 15
                 ile = 3
+                minimum = 0x800
             elif 0xF0 <= c <= 0xF4:
+                cp = c & 7
                 ile = 4
+                minimum = 0x10000
             else:
                 return False
             if i + ile > n:
                 return False
+            for j in range(1, ile):
+                d = dane[i + j]
+                if (d & 0xC0) != 0x80:
+                    return False
+                cp = (cp << 6) | (d & 63)
+            if cp < minimum or cp > 0x10FFFF or (0xD800 <= cp <= 0xDFFF):
+                return False
             i += ile
-    return True
+    ext = nazwa.rsplit(".", 1)[-1].lower() if "." in nazwa else ""
+    return ext in ("btp", "jpg", "jpeg")
+
+def tapeta_czy_bursztyn_systemowa(nazwa: str) -> bool:
+    nl = nazwa.lower()
+    if len(nl) == 14 and nl.startswith("bursztyn") and nl.endswith(".btp"):
+        num = nl[8:10]
+        return num.isdigit() and 1 <= int(num) <= 10
+    return False
+
+def tapeta_fnv1a64(dane: bytes) -> int:
+    h = 0xcbf29ce484222325
+    for b in dane:
+        h ^= b
+        h = (h * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF
+    return h
+
+def tapeta_kanoniczna_nazwa(display_name: str) -> str:
+    if tapeta_czy_bursztyn_systemowa(display_name):
+        return display_name.lower()
+    dane = display_name.encode("utf-8")
+    h = tapeta_fnv1a64(dane)
+    ext = display_name.rsplit(".", 1)[-1].lower()
+    return f"wp_{h:016x}.{ext}"
 
 def waliduj_btp(sciezka: str) -> bool:
     try:
@@ -179,6 +214,7 @@ def main():
 
     katalog = args.katalog
     tapety = []
+    kanoniczne_nazwy = {}
 
     if os.path.isdir(katalog):
         wpisy = sorted(os.listdir(katalog))
@@ -194,6 +230,12 @@ def main():
             sciezka = os.path.join(katalog, nazwa)
             if not os.path.isfile(sciezka):
                 continue
+            canon = tapeta_kanoniczna_nazwa(nazwa)
+            if canon in kanoniczne_nazwy:
+                raise ValueError(
+                    f"Kolizja kanonicznej nazwy: '{nazwa}' i '{kanoniczne_nazwy[canon]}' mapuja sie do '{canon}'"
+                )
+            kanoniczne_nazwy[canon] = nazwa
             if is_btp and not waliduj_btp(sciezka):
                 sys.stderr.write(f"[TAPETY PAK] Ostrzezenie: pomijam niepoprawny plik BTP: {sciezka}\n")
                 continue
@@ -206,6 +248,7 @@ def main():
             crc32 = binascii.crc32(zawartosc) & 0xFFFFFFFF
             tapety.append({
                 "nazwa": nazwa,
+                "kanoniczna": canon,
                 "sciezka": sciezka,
                 "dane": zawartosc,
                 "rozmiar": rozmiar,
@@ -344,7 +387,7 @@ def main():
     sys.stdout.write(f"[TAPETY PAK] Zbudowano pakiet tapet: {args.wyjscie}\n")
     sys.stdout.write(f"[TAPETY PAK] Liczba tapet: {file_count}\n")
     for idx, t in enumerate(tapety):
-        sys.stdout.write(f"  [{idx:02d}] {t['nazwa']}: {t['rozmiar']} B (CRC32: 0x{t['crc32']:08X})\n")
+        sys.stdout.write(f"  [{idx:02d}] {t['nazwa']} (canon: {t['kanoniczna']}): {t['rozmiar']} B (CRC32: 0x{t['crc32']:08X})\n")
     sys.stdout.write(f"[TAPETY PAK] Laczny rozmiar zrodlowych BTP: {total_btp_bytes} B ({total_btp_bytes / 1024 / 1024:.2f} MiB)\n")
     sys.stdout.write(f"[TAPETY PAK] Laczny rozmiar {args.wyjscie}: {len(pack_complete)} B ({len(pack_complete) / 1024 / 1024:.2f} MiB)\n")
     sys.stdout.write(f"[TAPETY BUILD] sources={len(tapety)} entries={verified_entries} bytes={len(pack_complete)} crc=OK\n")
