@@ -86,14 +86,16 @@ class Guest:
     def __init__(self, directory, target, sentinel, iso=None, usb=False, visible=False):
         self.dir=directory;directory.mkdir()
         self.log=directory/'serial.log'
-        args=['qemu-system-x86_64','-machine','pc,hpet=on','-cpu','max','-accel','tcg,thread=single',
+        self.qmp_path=Path('/tmp')/f'bursztyn-inst-{os.getpid()}-{directory.name}.sock'
+        if self.qmp_path.exists(): self.qmp_path.unlink()
+        args=['qemu-system-x86_64','-machine','pc,hpet=on','-cpu','max','-accel','tcg,thread=multi',
               '-m','2G','-vga','std','-global','VGA.vgamem_mb=64','-audiodev','none,id=snd',
               '-device','intel-hda','-device','hda-output,audiodev=snd','-netdev','user,id=n1','-device','e1000,netdev=n1',
-              '-device','ich9-ahci,id=ahci','-drive',f'if=none,id=sentinel,format=raw,file={sentinel}',
-              '-device','ide-hd,drive=sentinel,bus=ahci.0,model=SENTINEL DO NOT ERASE,serial=SENTINEL0001',
+              '-drive',f'if=none,id=sentinel,format=raw,file={sentinel}',
+              '-device','virtio-blk-pci,drive=sentinel,disable-legacy=on',
               '-drive',f'if=none,id=target,format=raw,file={target}',
-              '-device','ide-hd,drive=target,bus=ahci.1,model=Bursztyn Installer Target,serial=INSTALLTARGET0001'+(',bootindex=1' if iso is None else ''),
-              '-serial',f'file:{self.log}','-qmp',f'unix:{directory/"qmp.sock"},server=on,wait=off']
+              '-device','virtio-blk-pci,drive=target,disable-legacy=on'+(',bootindex=1' if iso is None else ''),
+              '-serial',f'file:{self.log}','-qmp',f'unix:{self.qmp_path},server=on,wait=off']
         if not visible: args+=['-display','none']
         ovmf=Path('/usr/share/ovmf/OVMF.fd')
         if not ovmf.is_file(): raise RuntimeError('OVMF.fd is required')
@@ -117,11 +119,11 @@ class Guest:
         with (directory/'qemu.log').open('wb') as out: self.proc=subprocess.Popen(args,stdout=out,stderr=out)
         (directory/'pid').write_text(str(self.proc.pid))
         deadline=time.monotonic()+30
-        while not (directory/'qmp.sock').exists():
+        while not self.qmp_path.exists():
             if self.proc.poll() is not None: raise RuntimeError((directory/'qemu.log').read_text())
             if time.monotonic()>deadline: raise TimeoutError('QMP socket')
             time.sleep(.1)
-        self.q=Qmp(directory/'qmp.sock')
+        self.q=Qmp(self.qmp_path)
     def wait(self, needle, timeout=300):
         end=time.monotonic()+timeout
         while time.monotonic()<end:
@@ -139,11 +141,12 @@ class Guest:
         if self.proc.poll() is None:
             try:self.q.call('quit');self.proc.wait(timeout=10)
             except Exception:self.proc.terminate();self.proc.wait(timeout=10)
+        if self.qmp_path.exists(): self.qmp_path.unlink()
 
 def installer_iso(d):
     tree=d/'iso';shutil.copytree(ROOT/'isodir',tree)
     cfg=tree/'boot/grub/grub.cfg';text=cfg.read_text()
-    text=text.replace('set default=0','set default=2').replace('set timeout=3','set timeout=0')
+    text=text.replace('set default=0','set default=3').replace('set timeout=3','set timeout=0')
     cfg.write_text(text)
     iso=d/'installer.iso'
     with (d/'mkrescue.log').open('wb') as log:subprocess.run(['grub-mkrescue','-o',str(iso),str(tree)],stdout=log,stderr=log,check=True)
@@ -162,7 +165,7 @@ def install(g,target,sentinel,before_target,before_sentinel):
     # Coordinates for 1280x720 framebuffer, centered 840x570 installer.
     g.q.click(860,590) # welcome -> disks
     g.q.screenshot(g.dir/'disks.png')
-    g.q.click(550,230) # target, second actual SATA device
+    g.q.click(550,230) # target, second registered block device (VirtIO-BLK)
     g.q.click(860,590) # options
     g.q.click(860,590) # whole disk / preview
     g.q.screenshot(g.dir/'summary.png')

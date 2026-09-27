@@ -226,6 +226,13 @@ RING3_FLAGS += -DBURSZTYNDIAGTAPETY=1 -DBURSZTYN_DIAG_TAPETY=1
 KERNEL_CXXFLAGS += -DBURSZTYNDIAGTAPETY=1 -DBURSZTYN_DIAG_TAPETY=1
 endif
 
+# Szczegolowe logi kazdego zdarzenia wskaznika. Domyslnie wylaczone;
+# jednorazowe logi rejestracji urzadzenia i zmiany wlasciciela pozostaja aktywne.
+BURSZTYNDIAGINPUTPOINTER ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYNDIAGINPUTPOINTER)),)
+KERNEL_CXXFLAGS += -DBURSZTYNDIAGINPUTPOINTER=1
+endif
+
 #
 # Pliki .S kompilujemy przez GCC, nie bezposrednio przez `as`.
 # Dzieki temu zachowujemy prawidlowa obsluge assembler-with-cpp dla .S.
@@ -752,7 +759,7 @@ $(GRUB_CFG): $(KERNEL) $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile
 		'}' \
 		> $(GRUB_CFG)
 
-.installer-build/BOOTX64.EFI: narzedzia/instalator/grub-embedded.cfg
+.installer-build/BOOTX64.EFI: narzedzia/instalator/grub-embedded.cfg Makefile
 	@mkdir -p .installer-build
 	grub-mkstandalone -O x86_64-efi --locales="" --fonts="" --modules="part_gpt fat loadenv test normal multiboot2 configfile search search_fs_file all_video gfxterm" -o $@ "boot/grub/grub.cfg=$<"
 

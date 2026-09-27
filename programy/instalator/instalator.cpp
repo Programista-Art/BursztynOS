@@ -57,6 +57,11 @@ class Wizard : public Panel {
         }
         return state.wersja==1;
     }
+    const char* backend()const{
+        if(state.backend==INST_BACKEND_AHCI)return "SATA / AHCI";
+        if(state.backend==INST_BACKEND_VIRTIO_BLK)return "VirtIO-BLK";
+        return "nieobsługiwany";
+    }
     void line(unsigned i,const char*s){lines[i]->ustaw_tekst(s);lines[i]->pokaz();}
     const char* progress_text()const{
         switch(state.postep_etap){
@@ -99,8 +104,8 @@ class Wizard : public Panel {
         if(page==0){query(INST_STAN);line(0,"Witamy w instalatorze Bursztyn OS");
             line(1,state.uefi?"Tryb startu: UEFI x86-64":"Start BIOS — instalacja wymaga uruchomienia w UEFI");
             line(2,"Wymaganie: Secure Boot musi być wyłączony.");
-            if(state.liczba_dyskow==0){line(3,"Nie wykryto obsługiwanego kontrolera SATA AHCI.");}
-            else{number(text,sizeof(text),"Kontroler SATA AHCI: wykryto dysków: ",state.liczba_dyskow);line(3,text);}
+            if(state.liczba_dyskow==0){line(3,"Nie wykryto obsługiwanego urządzenia blokowego.");}
+            else{number(text,sizeof(text),"Obsługiwane dyski blokowe: ",state.liczba_dyskow);line(3,text);}
             line(4,state.gop?"Grafika: UEFI GOP":"Grafika: bieżący framebuffer (np. Bochs VBE)");
             line(5,state.xhci?"USB xHCI: aktywny, urządzenia HID":"USB xHCI: brak aktywnego sterownika; sprawdź klawiaturę i mysz");
             line(7,"Kontrolery Intel RST, Intel VMD, RAID oraz NVMe nie są obsługiwane.");
@@ -111,12 +116,14 @@ class Wizard : public Panel {
                 unsigned k=0;
                 append(prefix,sizeof(prefix),&k,state.model);
                 append(prefix,sizeof(prefix),&k," | ");
-                number(text,sizeof(text),prefix,state.sektor==512?state.sektory/2048:0," MiB | SATA / AHCI");
+                number(text,sizeof(text),prefix,state.sektor==512?state.sektory/2048:0," MiB");
+                unsigned tp=0;while(text[tp])++tp;append(text,sizeof(text),&tp," | ");append(text,sizeof(text),&tp,backend());
                 disks[i]->ustaw_tekst(state.nosnik_instalacyjny?"Nośnik instalacyjny — chroniony":text);
                 disks[i]->ustaw_wlaczona(state.zapis&&!state.nosnik_instalacyjny);disks[i]->ustaw_znacznik(offset+i);disks[i]->pokaz();}
             more->ustaw_widoczna(state.liczba_dyskow>4);
             if(selected!=UINT32_MAX){query(INST_DYSK,selected);line(8,state.model);
-                number(text,sizeof(text),"Sektor logiczny: ",state.sektor," B / 512e | SATA AHCI | ATA FLUSH");line(9,text);
+                number(text,sizeof(text),"Sektor logiczny: ",state.sektor," B | ");
+                unsigned tp=0;while(text[tp])++tp;append(text,sizeof(text),&tp,backend());append(text,sizeof(text),&tp," | FLUSH");line(9,text);
                 line(10,state.bursztyn?"Wykryto partycję Bursztyn OS (zostanie usunięta).":"Brak rozpoznanej partycji Bursztyn OS.");}
             next->ustaw_wlaczona(selected!=UINT32_MAX);
         }else if(page==2){line(0,"Sposób instalacji");line(2,"Użyj całego dysku — usuń istniejący podział i utwórz nowy GPT.");
@@ -136,8 +143,7 @@ class Wizard : public Panel {
                 char mtext[120]{"Dysk model: "};
                 unsigned mk=12;
                 append(mtext,sizeof(mtext),&mk,state.model);
-                const char* ctext=" | Kontroler SATA AHCI";
-                append(mtext,sizeof(mtext),&mk,ctext);
+                append(mtext,sizeof(mtext),&mk," | ");append(mtext,sizeof(mtext),&mk,backend());
                 line(2,mtext);
                 line(3,"Sektor logiczny 512 B / 512e | Wymagany ATA FLUSH");
                 number(text,sizeof(text),"Partycja rozruchowa ESP: ",state.esp_mib," MiB (FAT32, /EFI/BOOT/BOOTX64.EFI)");line(4,text);
@@ -147,7 +153,8 @@ class Wizard : public Panel {
                 next->ustaw_tekst("Potwierdź wymazanie");
             }else{
                 line(0,"OSTATECZNE POTWIERDZENIE — bezpowrotne zniszczenie danych");
-                line(1,"Tryb startu: UEFI | Secure Boot musi być wyłączony | Kontroler SATA AHCI");
+                char bootline[120]{"Tryb startu: UEFI | Secure Boot wyłączony | "};
+                unsigned bp=0;while(bootline[bp])++bp;append(bootline,sizeof(bootline),&bp,backend());line(1,bootline);
                 char mtext[120]{"Dysk model: "};
                 unsigned mk=12;
                 append(mtext,sizeof(mtext),&mk,state.model);

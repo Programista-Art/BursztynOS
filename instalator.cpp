@@ -40,6 +40,23 @@ const char config[]=
     "menuentry 'Bursztyn OS testy automatyczne' {\n multiboot2 /boot/system_operacyjny.bin bursztyn.installed=1 bursztyn.test=automated\n boot\n}\n"
     "set timeout_style=hidden\nset timeout=0\n";
 void text_copy(char*d,const char*s,size_t n){size_t i=0;for(;i+1<n&&s[i];++i)d[i]=s[i];d[i]=0;}
+uint32_t backend_id(const Storage::Device*d){
+    if(!d)return INST_BACKEND_NIEZNANY;
+    if(d->device_type==BlockDeviceType::AHCI)return INST_BACKEND_AHCI;
+    if(d->device_type==BlockDeviceType::VirtIO)return INST_BACKEND_VIRTIO_BLK;
+    return INST_BACKEND_NIEZNANY;
+}
+bool installer_backend_supported(const Storage::Device*d){
+    if(!d||d->logical_sector_size!=512||!d->can_read()||!d->can_write())return false;
+    if(!d->ops||!d->ops->flush||!d->ops->revalidate)return false;
+    return d->device_type==BlockDeviceType::AHCI||d->device_type==BlockDeviceType::VirtIO;
+}
+void validation_error(uint32_t code,const char*why){
+    status=code;
+    error[0]=0;
+    klog_serial("[INSTALL VALIDATION] rejected before writes:");
+    klog_serial(why);
+}
 bool token(const char*s,size_t n,const char*t){
     size_t len=0;while(t[len])++len;
     for(size_t i=0;i<n&&s[i];){size_t end=i;while(end<n&&s[end]&&s[end]!=' ')++end;
@@ -112,6 +129,7 @@ void snapshot(InstalatorOdpowiedz*out,uint32_t id){
     text_copy(out->blad,error,sizeof(out->blad));
     auto*dev=blokowy_dysk(id);
     if(!dev)return;
+    out->backend=backend_id(dev);
     out->sektory=dev->total_sectors;out->sektor=dev->logical_sector_size;out->odczyt=dev->can_read();out->zapis=dev->can_write();
     text_copy(out->model,dev->model,sizeof(out->model));text_copy(out->serial,dev->serial,sizeof(out->serial));
     out->nosnik_instalacyjny=Storage::source_iso(dev);
@@ -125,7 +143,7 @@ void perform(){
     if(stage==INST_GPT){
         if(!gpt_started){
             klog_serial("[INSTALL] progress=0 stage=GPT");
-            if(!d || d->device_type != BlockDeviceType::AHCI || d->logical_sector_size != 512 || d->revalidate() != BlockError::Ok){
+            if(!installer_backend_supported(d) || d->revalidate() != BlockError::Ok){
                 fail(INST_DYSK_BLAD,"Walidacja: tożsamość dysku zmieniła się lub nieobsługiwany nośnik.");return;
             }
             gpt_started=Storage::gpt_install_start(d,layout,disk_uuid,&gpt_state);
@@ -332,11 +350,14 @@ bool instalator_obsluz(const proces_t&p,const InstalatorZadanie&r,InstalatorOdpo
         bsp_phase=0;bsp_done=bsp_total=0;
         files_done=files_total=wallpapers_done=wallpapers_total=0;
         auto*d=blokowy_dysk(r.dysk);
-        if(!uefi||!payloads())status=INST_BRAK_PLIKOW;
-        else if(!d||!Storage::plan(d,&layout))status=INST_ZA_MALY;
-        else if(d->device_type != BlockDeviceType::AHCI || d->logical_sector_size != 512)status=INST_DYSK_BLAD;
-        else if(Storage::source_iso(d))status=INST_ZRODLO;
-        else if(!fingerprint_disk(d,&fingerprint)||!blokowy_sprawdz_tozsamosc(r.dysk))status=INST_DYSK_BLAD;
+        if(!uefi)validation_error(INST_BRAK_PLIKOW,"boot is not UEFI");
+        else if(!payloads())validation_error(INST_BRAK_PLIKOW,"installer.efi or installer.kernel missing/invalid");
+        else if(!d)validation_error(INST_DYSK_BLAD,"target disk not found");
+        else if(!installer_backend_supported(d))validation_error(INST_DYSK_BLAD,"unsupported block backend, sector size, write, FLUSH, or revalidate capability");
+        else if(!Storage::plan(d,&layout))validation_error(INST_ZA_MALY,"target disk too small or layout invalid");
+        else if(Storage::source_iso(d))validation_error(INST_ZRODLO,"target is installation source media");
+        else if(!fingerprint_disk(d,&fingerprint))validation_error(INST_DYSK_BLAD,"target fingerprint read failed");
+        else if(!blokowy_sprawdz_tozsamosc(r.dysk))validation_error(INST_DYSK_BLAD,"target revalidation failed");
         else {selected=r.dysk;uint32_t lo,hi;asm volatile("rdtsc":"=a"(lo),"=d"(hi));nonce=(uint64_t(hi)<<32|lo)|1;
             for(unsigned i=0;i<16;++i)disk_uuid[i]=uint8_t((nonce>>(i%8*8))^(fingerprint>>(i%4*8))^(i*37));
             disk_uuid[7]=(disk_uuid[7]&15)|0x40;disk_uuid[8]=(disk_uuid[8]&63)|0x80;}
@@ -344,11 +365,13 @@ bool instalator_obsluz(const proces_t&p,const InstalatorZadanie&r,InstalatorOdpo
         uint32_t current=0;
         if(!nonce||r.token!=nonce||r.dysk!=selected||!r.zgoda_zrodlo||
            !instalator_potwierdzenie_poprawne(r.potwierdzenie,sizeof(r.potwierdzenie)))status=INST_POTWIERDZENIE;
-        else if(!payloads()||!layout.bsp.device||Storage::source_iso(layout.bsp.device)||
-                layout.bsp.device->device_type != BlockDeviceType::AHCI ||
-                layout.bsp.device->logical_sector_size != 512 ||
-                !blokowy_sprawdz_tozsamosc(selected)||
-                !fingerprint_disk(layout.bsp.device,&current)||current!=fingerprint)status=INST_DYSK_BLAD;
+        else if(!payloads())validation_error(INST_BRAK_PLIKOW,"installer payload changed or became invalid before confirmation");
+        else if(!layout.bsp.device)validation_error(INST_DYSK_BLAD,"target disk disappeared before confirmation");
+        else if(Storage::source_iso(layout.bsp.device))validation_error(INST_ZRODLO,"target became installation source media");
+        else if(!installer_backend_supported(layout.bsp.device))validation_error(INST_DYSK_BLAD,"target block backend or required capability changed");
+        else if(!blokowy_sprawdz_tozsamosc(selected))validation_error(INST_DYSK_BLAD,"target revalidation failed before confirmation");
+        else if(!fingerprint_disk(layout.bsp.device,&current))validation_error(INST_DYSK_BLAD,"target fingerprint read failed before confirmation");
+        else if(current!=fingerprint)validation_error(INST_DYSK_BLAD,"target identity changed before confirmation");
         else {status=0;set_progress(0,POSTEP_GPT);stage=INST_GPT;
             perf_stage_irq_start=scheduler_liczba_irq_timera();
             perf_stage_switch_start=scheduler_liczba_przelaczen();

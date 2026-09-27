@@ -91,6 +91,7 @@ static void input_recalc_pointer_owner(void) {
     }
 }
 
+#if defined(BURSZTYNDIAGINPUTPOINTER) && BURSZTYNDIAGINPUTPOINTER
 static void log_pointer_event(const InputDevice* dev, int dx, int dy, int res_x, int res_y, bool accepted) {
     static uint32_t s_log_count = 0;
     static uint32_t s_ignored_log_count = 0;
@@ -154,6 +155,9 @@ static void log_pointer_event(const InputDevice* dev, int dx, int dy, int res_x,
     *p = '\0';
     klog_serial(buf);
 }
+#else
+static inline void log_pointer_event(const InputDevice*, int, int, int, int, bool) {}
+#endif
 
 } // namespace
 
@@ -569,4 +573,3 @@ uint16_t input_usb_hid_usage_to_linux(uint8_t usage) {
 }
 
 } // extern "C"
-
