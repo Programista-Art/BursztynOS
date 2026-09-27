@@ -58,7 +58,7 @@ ISO_DIR     := isodir
 ISO8K_DIR   := isodir_8k
 GRUB_CFG    := $(ISO_DIR)/boot/grub/grub.cfg
 GRUB8K_CFG  := $(ISO8K_DIR)/boot/grub/grub.cfg
-VIRTUAL_DISK := wirtualny_dysk.img
+VIRTUAL_DISK ?= $(if $(VIRTUALDISK),$(if $(wildcard $(VIRTUALDISK)),$(VIRTUALDISK),$(if $(wildcard $(subst wirtualnydysk,wirtualny_dysk,$(VIRTUALDISK))),$(subst wirtualnydysk,wirtualny_dysk,$(VIRTUALDISK)),$(VIRTUALDISK))),wirtualny_dysk.img)
 
 CI_TEST_DIR := .isodir_ci_test
 CI_TEST_ISO := .bursztyn_ci_test.iso
@@ -217,6 +217,12 @@ endif
 BURSZTYN_STACK_TRACE ?= 0
 ifneq ($(filter 1 yes true,$(BURSZTYN_STACK_TRACE)),)
 KERNEL_CXXFLAGS += -DBURSZTYN_STACK_TRACE=1
+endif
+
+# Bounded early PCI/VirtIO probe tracing. Disabled in production builds.
+BURSZTYN_DIAG_PCI_TRACE ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_PCI_TRACE)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_PCI_TRACE=1
 endif
 
 BURSZTYN_DIAG_TAPETY ?= 0
@@ -1045,12 +1051,16 @@ QEMU_BASE_ARGS := \
 	-serial stdio \
 	$(QEMU_DISPLAY_ARGS)
 
-# Produkcyjny profil VirtIO 1.x Modern PCI.
-# xres/yres sa jedynie poczatkowa wskazowka scanoutu QEMU; sterownik
-# VirtIO-GPU Bursztyna zachowuje kontrole nad runtime modesettingiem.
-QEMU_VIRTIO_ARGS := \
-	-drive id=disk,file=$(VIRTUAL_DISK),format=raw,if=none \
-	-device virtio-blk-pci,drive=disk,disable-legacy=on \
+# Podsystem pamieci masowej QEMU
+QEMU_DISK_DRIVE := -drive id=disk,file=$(VIRTUAL_DISK),format=raw,if=none
+QEMU_VIRTIO_BLK := -device virtio-blk-pci,drive=disk,disable-legacy=on
+QEMU_VIRTIO_BLK_BOOT := -device virtio-blk-pci,drive=disk,disable-legacy=on,bootindex=1
+
+QEMU_AHCI_DISK := -device ich9-ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0,unit=0
+QEMU_AHCI_DISK_BOOT := -device ich9-ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0,unit=0,bootindex=1
+
+# Wspolne urzadzenia VirtIO (poza dyskiem)
+QEMU_VIRTIO_COMMON_ARGS := \
 	-netdev user,id=n1 \
 	-device virtio-net-pci,netdev=n1,disable-legacy=on \
 	-object rng-random,id=rng0,filename=/dev/urandom \
@@ -1060,17 +1070,40 @@ QEMU_VIRTIO_ARGS := \
 	-device virtio-keyboard-pci \
 	-device virtio-mouse-pci
 
-# Profil bez VirtIO. Celowo nie dodajemy xHCI/USB HID do zwyklego fallbacku,
-# aby nie dublowac wejscia z domyslnym PS/2 QEMU. Osobne cele runusb* ponizej
-# sluza do testowania sterownika xHCI/USB HID.
-QEMU_LEGACY_ARGS := \
-	-drive id=disk,file=$(VIRTUAL_DISK),format=raw,if=none \
-	-device ich9-ahci,id=ahci \
-	-device ide-hd,drive=disk,bus=ahci.0,unit=0 \
+# Produkcyjny profil VirtIO 1.x Modern PCI (Live / CD / instalator).
+# xres/yres sa jedynie poczatkowa wskazowka scanoutu QEMU; sterownik
+# VirtIO-GPU Bursztyna zachowuje kontrole nad runtime modesettingiem.
+QEMU_VIRTIO_ARGS := \
+	$(QEMU_DISK_DRIVE) \
+	$(QEMU_VIRTIO_BLK) \
+	$(QEMU_VIRTIO_COMMON_ARGS)
+
+# Profil VirtIO dla zainstalowanego systemu (rozruch z dysku z bootindex=1 dla firmware UEFI).
+QEMU_VIRTIO_INSTALLED_ARGS := \
+	$(QEMU_DISK_DRIVE) \
+	$(QEMU_VIRTIO_BLK_BOOT) \
+	$(QEMU_VIRTIO_COMMON_ARGS)
+
+# Wspolne urzadzenia legacy (poza dyskiem)
+QEMU_LEGACY_COMMON_ARGS := \
 	-netdev user,id=n1 \
 	-device e1000,netdev=n1 \
 	-vga std \
 	-global VGA.vgamem_mb=64
+
+# Profil bez VirtIO (Live / CD). Celowo nie dodajemy xHCI/USB HID do zwyklego fallbacku,
+# aby nie dublowac wejscia z domyslnym PS/2 QEMU. Osobne cele runusb* ponizej
+# sluza do testowania sterownika xHCI/USB HID.
+QEMU_LEGACY_ARGS := \
+	$(QEMU_DISK_DRIVE) \
+	$(QEMU_AHCI_DISK) \
+	$(QEMU_LEGACY_COMMON_ARGS)
+
+# Profil bez VirtIO dla zainstalowanego systemu (rozruch z dysku z bootindex=1 dla firmware UEFI).
+QEMU_LEGACY_INSTALLED_ARGS := \
+	$(QEMU_DISK_DRIVE) \
+	$(QEMU_AHCI_DISK_BOOT) \
+	$(QEMU_LEGACY_COMMON_ARGS)
 
 QEMU_USB_HID_ARGS := \
 	-device qemu-xhci,id=xhci \
@@ -1221,7 +1254,7 @@ run-installed: prepare-disk check-ovmf
 		exec $(QEMU) \
 			-bios "$(OVMF_MONO)" \
 			$(QEMU_BASE_ARGS) \
-			$(QEMU_VIRTIO_ARGS) \
+			$(QEMU_VIRTIO_INSTALLED_ARGS) \
 			-boot order=c; \
 	else \
 		echo "[QEMU] Start zainstalowanego Bursztyn OS / UEFI / VirtIO Full (pflash)."; \
@@ -1230,7 +1263,7 @@ run-installed: prepare-disk check-ovmf
 			-drive if=pflash,format=raw,readonly=on,file="$(OVMF_CODE)" \
 			-drive if=pflash,format=raw,file="$(OVMF_VARS_RUNTIME)" \
 			$(QEMU_BASE_ARGS) \
-			$(QEMU_VIRTIO_ARGS) \
+			$(QEMU_VIRTIO_INSTALLED_ARGS) \
 			-boot order=c; \
 	fi
 
@@ -1241,7 +1274,7 @@ run-installed-legacy: prepare-disk check-ovmf
 		exec $(QEMU) \
 			-bios "$(OVMF_MONO)" \
 			$(QEMU_BASE_ARGS) \
-			$(QEMU_LEGACY_ARGS) \
+			$(QEMU_LEGACY_INSTALLED_ARGS) \
 			-boot order=c; \
 	else \
 		echo "[QEMU] Start zainstalowanego Bursztyn OS / UEFI bez VirtIO (pflash)."; \
@@ -1250,7 +1283,7 @@ run-installed-legacy: prepare-disk check-ovmf
 			-drive if=pflash,format=raw,readonly=on,file="$(OVMF_CODE)" \
 			-drive if=pflash,format=raw,file="$(OVMF_VARS_RUNTIME)" \
 			$(QEMU_BASE_ARGS) \
-			$(QEMU_LEGACY_ARGS) \
+			$(QEMU_LEGACY_INSTALLED_ARGS) \
 			-boot order=c; \
 	fi
 

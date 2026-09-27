@@ -140,6 +140,24 @@ void log_append_u64_hex(char* buf, size_t max_len, size_t& pos, uint64_t val, in
     buf[pos] = '\0';
 }
 
+#if defined(BURSZTYN_DIAG_PCI_TRACE) && BURSZTYN_DIAG_PCI_TRACE
+void pci_trace_bdf(uint8_t bus, uint8_t slot, uint8_t func, const char* phase) {
+    char msg[128]{};
+    size_t pos = 0;
+    log_append_str(msg, sizeof(msg), pos, "[PCI TRACE] ");
+    log_append_u64_hex(msg, sizeof(msg), pos, bus, 2);
+    log_append_str(msg, sizeof(msg), pos, ":");
+    log_append_u64_hex(msg, sizeof(msg), pos, slot, 2);
+    log_append_str(msg, sizeof(msg), pos, ".");
+    log_append_u64_dec(msg, sizeof(msg), pos, func);
+    log_append_str(msg, sizeof(msg), pos, " ");
+    log_append_str(msg, sizeof(msg), pos, phase);
+    klog_impl(msg);
+}
+#else
+inline void pci_trace_bdf(uint8_t, uint8_t, uint8_t, const char*) {}
+#endif
+
 /* =========================================================================
  * POMOCNICZY DOSTEP DO PCI CONFIG SPACE
  * ========================================================================= */
@@ -561,6 +579,7 @@ void virtio_pci_cleanup(VirtioPciDevice* dev) {
 
 bool virtio_pci_probe(uint8_t bus, uint8_t slot, uint8_t func,
                       VirtioPciDevice* dev, uint64_t requested_features) {
+    pci_trace_bdf(bus, slot, func, "virtio probe entered");
     if (!dev) return false;
     *dev = {};
     dev->bus = bus;
@@ -610,6 +629,7 @@ bool virtio_pci_probe(uint8_t bus, uint8_t slot, uint8_t func,
     bool has_device = false;
 
     // 3. Bezpieczne parsowanie lancucha capabilities
+    pci_trace_bdf(bus, slot, func, "capability walk begin");
     while (cap_ptr != 0 && hops < MAX_CAP_HOPS) {
         if (cap_ptr < 0x40 || cap_ptr > 0xFC) {
             klog_impl("[VIRTIO-PCI] initialization rejected: malformed capability pointer offset");
@@ -734,6 +754,7 @@ bool virtio_pci_probe(uint8_t bus, uint8_t slot, uint8_t func,
         klog_impl("[VIRTIO-PCI] initialization rejected: capability chain exceeded max hops");
         return false;
     }
+    pci_trace_bdf(bus, slot, func, "capability walk end");
 
     // 4. Wymog obecnosci obowiazkowych capabilities (common, notify, isr)
     if (!has_common || !has_notify || !has_isr) {
@@ -766,6 +787,7 @@ bool virtio_pci_probe(uint8_t bus, uint8_t slot, uint8_t func,
         return true;
     };
 
+    pci_trace_bdf(bus, slot, func, "BAR mapping begin");
     volatile uint8_t* ptr_common = nullptr;
     if (!validate_and_resolve(cap_common, &ptr_common)) return false;
     dev->common_cfg = reinterpret_cast<volatile VirtioPciCommonCfgRegs*>(ptr_common);
@@ -793,8 +815,10 @@ bool virtio_pci_probe(uint8_t bus, uint8_t slot, uint8_t func,
         dev->device_cfg_bar = cap_device.bar;
         dev->has_device_cfg = true;
     }
+    pci_trace_bdf(bus, slot, func, "BAR mapping end");
 
     // 5.5. Wykrycie i walidacja MSI-X oraz MSI dla urzadzenia
+    pci_trace_bdf(bus, slot, func, "MSI-X/MSI discovery begin");
     PciMsixCapability msix_info{};
     if (pci_find_msix(bus, slot, func, &msix_info)) {
         if (msix_info.table_bir < 6 && virtio_pci_map_bar(bus, slot, func, msix_info.table_bir, &dev->bars[msix_info.table_bir])) {
@@ -821,6 +845,7 @@ bool virtio_pci_probe(uint8_t bus, uint8_t slot, uint8_t func,
     } else {
         dev->has_msi = false;
     }
+    pci_trace_bdf(bus, slot, func, "MSI-X/MSI discovery end");
 
     // 6. Aktywacja MMIO i Bus Mastering w PCI Command
     const uint32_t cmd_status_end = pci_read32(bus, slot, func, 0x04);
@@ -829,6 +854,7 @@ bool virtio_pci_probe(uint8_t bus, uint8_t slot, uint8_t func,
 
     // 7. Sekwencja inicjalizacji stanu VirtIO (VirtIO 1.0 sec 3.1.1):
     //    a. Reset urzadzenia (status = 0)
+    pci_trace_bdf(bus, slot, func, "reset/features begin");
     if (!virtio_pci_reset(dev)) {
         klog_impl("[VIRTIO-PCI] initialization rejected: device reset timed out");
         return false;
@@ -844,6 +870,7 @@ bool virtio_pci_probe(uint8_t bus, uint8_t slot, uint8_t func,
     if (!virtio_pci_negotiate_features(dev, requested_features)) {
         return false;
     }
+    pci_trace_bdf(bus, slot, func, "reset/features end");
 
     dev->initialized = true;
 
@@ -890,6 +917,7 @@ bool virtio_pci_probe(uint8_t bus, uint8_t slot, uint8_t func,
         klog_impl(msg);
     }
 
+    pci_trace_bdf(bus, slot, func, "virtio probe return");
     return true;
 }
 
@@ -930,10 +958,14 @@ void virtio_pci_inicjalizuj() {
                 }
 
                 if (g_virtio_device_count < MAX_VIRTIO_DEVICES) {
+                    pci_trace_bdf(bus, slot, func, "probe begin");
                     VirtioPciDevice& dev = g_virtio_devices[g_virtio_device_count];
+                    pci_trace_bdf(bus, slot, func, "virtio probe call");
                     if (virtio_pci_probe(bus, slot, func, &dev, 0)) {
                         g_virtio_device_count++;
                     }
+                    pci_trace_bdf(bus, slot, func, "virtio probe returned");
+                    pci_trace_bdf(bus, slot, func, "probe end");
                 }
             }
         }
@@ -977,5 +1009,4 @@ bool virtio_pci_is_entry_masked(const VirtioPciDevice* dev, uint16_t entry_index
     if (!dev || !dev->has_msix || !dev->msix_table) return true;
     return pci_msix_is_entry_masked(dev->msix_table, dev->msix_cap.table_size, entry_index);
 }
-
 

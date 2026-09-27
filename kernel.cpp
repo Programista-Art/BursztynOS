@@ -2181,6 +2181,30 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     }
 
     g_multiboot_info_ptr = multiboot_info_ptr;
+#if defined(BURSZTYN_DIAG_PCI_TRACE) && BURSZTYN_DIAG_PCI_TRACE
+    {
+        const volatile uint32_t* info =
+            reinterpret_cast<const volatile uint32_t*>(multiboot_info_ptr);
+        const uint32_t total = info[0];
+        uint64_t off = 8;
+        bool logged = false;
+        while (off + sizeof(WpisTaguMB2) <= total) {
+            const WpisTaguMB2* tag =
+                reinterpret_cast<const WpisTaguMB2*>(multiboot_info_ptr + off);
+            if (tag->rozmiar < sizeof(WpisTaguMB2) || off + tag->rozmiar > total)
+                break;
+            if (tag->typ == 1 && tag->rozmiar > 8) {
+                klog_serial("[BOOT TRACE] Multiboot2 command line:");
+                klog_serial(reinterpret_cast<const char*>(multiboot_info_ptr + off + 8));
+                logged = true;
+                break;
+            }
+            if (tag->typ == MULTIBOOT_TAG_TYPE_END) break;
+            off = (off + tag->rozmiar + 7ULL) & ~7ULL;
+        }
+        if (!logged) klog_serial("[BOOT TRACE] Multiboot2 command line: <none>");
+    }
+#endif
     instalator_boot(multiboot_info_ptr);
 
     /* ---------------------------------------------------------------------
