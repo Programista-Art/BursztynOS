@@ -162,8 +162,6 @@ int grafika_pobierz_mysz_y();
 
 void obsluga_przerwania_zegara();
 
-void wczytaj_tapete_z_dysku();
-
 bool gui_czy_zamknieto_powloke();
 
 /* =========================================================================

@@ -62,14 +62,16 @@ static void wykonaj_testy_tapety() {
             bws_sprawdz(!tapety_parsuj(buf,sizeof(buf),&out));
             bws_sprawdz(!tapety_sciezka("/tapety/\xc0\xaf.btp"));
         } else if (grupa == 7) {
-            auto c=tapety_domyslna();tapety_kopiuj(c.sciezka,TAPETY_SCIEZKI[2],sizeof(c.sciezka));
-            for(unsigned mask=0;mask<8;++mask) {
-                bool solid=false;
-                auto z=tapety_fallback(c,[&](const TapetyKonfiguracja& p) {
-                    return tapety_rowne(p.sciezka,c.sciezka) ? (mask&1)!=0 : (mask&2)!=0;
-                },[&](){return (mask&4)!=0;},[&](){solid=true;});
-                bws_sprawdz(z==((mask&3)?TAPETY_BTP:(mask&4)?TAPETY_BMP:TAPETY_SOLID));
-                bws_sprawdz(solid==(mask==0));
+            for (unsigned mask = 0; mask < 8; ++mask) {
+                bool solid = false;
+                auto z = tapety_fallback(
+                    [&]() { return (mask & 1) ? TAPETY_BTP : TAPETY_SOLID; },
+                    [&]() { return (mask & 2) ? TAPETY_BTP : TAPETY_SOLID; },
+                    [&]() { return (mask & 4) ? TAPETY_BTP : TAPETY_SOLID; },
+                    [&]() { solid = true; }
+                );
+                bws_sprawdz(z == ((mask & 1) ? TAPETY_BTP : (mask & 2) ? TAPETY_BTP : (mask & 4) ? TAPETY_BTP : TAPETY_SOLID));
+                bws_sprawdz(solid == (mask == 0));
             }
         } else {
             MiniaturyTapet mini; bws_sprawdz(mini.przygotuj());

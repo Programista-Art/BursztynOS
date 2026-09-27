@@ -112,7 +112,6 @@ extern "C" uint8_t stack_top[];
 extern uint64_t najwyzsza_znaleziona_ramka;
 
 extern "C" void skanuj_magistrale_pci();
-extern "C" void wczytaj_tapete_z_dysku();
 
 extern "C" bool usun_twor(const char* sciezka);
 extern "C" bool utworz_plik(const char* sciezka);

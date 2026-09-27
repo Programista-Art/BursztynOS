@@ -49,7 +49,8 @@ KERNEL := system_operacyjny.bin
 ISO    := BursztynOS.iso
 ISO8K  := BursztynOS_8k.iso
 TAPETY_PAK := tapety.pak
-TAPETY_DIR := obrazy/tapety
+TAPETY_DIR ?= obrazy/tapety
+BURSZTYN_TAPETA_DOMYSLNA ?=
 TAPETY_SOURCES_MANIFEST := .tapety-sources.manifest
 TAPETY_ISO_CHECK := .tapety-iso-check.pak
 GRUB_ISO_CHECK := .grub-iso-check.cfg
@@ -1360,11 +1361,11 @@ help:
 # Manifest zmienia timestamp tylko wtedy, gdy zmieni sie posortowany zestaw nazw.
 # Zaleznosc od katalogu wykrywa dodanie, usuniecie i zmiane nazwy pliku.
 $(TAPETY_SOURCES_MANIFEST): $(TAPETY_DIR) narzedzia/tapety-btp/generujpakiet.py
-	$(PYTHON) narzedzia/tapety-btp/generujpakiet.py --katalog $(TAPETY_DIR) --manifest-only $@
+	$(PYTHON) narzedzia/tapety-btp/generujpakiet.py --katalog $(TAPETY_DIR) $(if $(BURSZTYN_TAPETA_DOMYSLNA),--domyslna "$(BURSZTYN_TAPETA_DOMYSLNA)") --manifest-only $@
 
 # Automatyczne pakowanie tapet BTP w zewnetrznym module Multiboot2 (tapety.pak).
 $(TAPETY_PAK): $(TAPETY_SOURCES_MANIFEST) narzedzia/tapety-btp/generujpakiet.py narzedzia/tapety-btp/btpcodec.py
-	$(PYTHON) narzedzia/tapety-btp/generujpakiet.py --katalog $(TAPETY_DIR) --wyjscie $(TAPETY_PAK) --dep tapety.pak.d
+	$(PYTHON) narzedzia/tapety-btp/generujpakiet.py --katalog $(TAPETY_DIR) $(if $(BURSZTYN_TAPETA_DOMYSLNA),--domyslna "$(BURSZTYN_TAPETA_DOMYSLNA)") --wyjscie $(TAPETY_PAK) --dep tapety.pak.d
 
 -include tapety.pak.d
 
@@ -1384,6 +1385,8 @@ test-image:
 	$(PYTHON) obrazy/testy/test_jpeg.py
 	$(CXX) -std=c++17 -O1 -g -fsanitize=address,undefined obrazy/test_tapety_jpeg.cpp -o /tmp/bursztyn-test-tapety-jpeg
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 /tmp/bursztyn-test-tapety-jpeg
+	$(CXX) -std=c++17 -O1 -g -fsanitize=address,undefined obrazy/test_tapety_manifest.cpp -o /tmp/bursztyn-test-tapety-manifest
+	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 /tmp/bursztyn-test-tapety-manifest
 tapety_tmp.o: programy/tapety/tapety.cpp programy/tapety/klient.h programy/tapety/miniatury.h tapety_format.h obrazy/skalowanie.h obrazy/dekoder_obrazu.h narzedzia/tapety-btp/tapetybtp.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 tapety_blob.o: tapety_tmp.o btp_ring3.o image_ring3.o bursztyn_gui.o programy/tapety/tapety_linker.ld

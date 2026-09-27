@@ -126,11 +126,19 @@ struct TapetyKonfiguracja {
     TrybSkalowaniaObrazu tryb;
     char wyswietlana[TAPETY_SCIEZKA_MAX];
 };
-inline TapetyKonfiguracja tapety_domyslna() {
+inline TapetyKonfiguracja tapety_domyslna(const char* sciezka = nullptr, const char* wyswietlana = nullptr) {
     TapetyKonfiguracja c{};
-    tapety_kopiuj(c.sciezka, TAPETY_SCIEZKI[0], sizeof(c.sciezka));
+    if (sciezka && sciezka[0]) {
+        tapety_kopiuj(c.sciezka, sciezka, sizeof(c.sciezka));
+    } else {
+        tapety_kopiuj(c.sciezka, TAPETY_SCIEZKI[0], sizeof(c.sciezka));
+    }
     c.tryb = TrybSkalowaniaObrazu::Wypelnij;
-    tapety_kopiuj(c.wyswietlana, TAPETY_NAZWY[0], sizeof(c.wyswietlana));
+    if (wyswietlana && wyswietlana[0]) {
+        tapety_kopiuj(c.wyswietlana, wyswietlana, sizeof(c.wyswietlana));
+    } else {
+        tapety_kopiuj(c.wyswietlana, TAPETY_NAZWY[0], sizeof(c.wyswietlana));
+    }
     return c;
 }
 inline const char* tapety_nazwa_trybu(TrybSkalowaniaObrazu t) {
@@ -216,16 +224,20 @@ enum TapetyOperacja : uint32_t { TAPETY_STAN = 1, TAPETY_ZASTOSUJ = 2, TAPETY_DI
 enum TapetyStatus : uint32_t { TAPETY_OK = 0, TAPETY_BLAD = 1, TAPETY_BLAD_ZAPISU = 2 };
 enum TapetyZrodlo : uint32_t { TAPETY_SOLID = 0, TAPETY_BTP = 1, TAPETY_BMP = 2, TAPETY_JPEG = 3 };
 
-// Wspolna, testowalna kolejnosc boot fallback; callbacki wykonuja realna walidacje.
-template<class Btp, class Bmp, class Solid>
-TapetyZrodlo tapety_fallback(const TapetyKonfiguracja& wybrana, Btp btp, Bmp bmp, Solid solid) {
-    if (tapety_sciezka(wybrana.sciezka) && static_cast<uint32_t>(wybrana.tryb) <= 2 && btp(wybrana))
-        return TAPETY_BTP;
-    const TapetyKonfiguracja dom = tapety_domyslna();
-    if ((!tapety_rowne(wybrana.sciezka, dom.sciezka) || wybrana.tryb != dom.tryb) && btp(dom))
-        return TAPETY_BTP;
-    if (bmp()) return TAPETY_BMP;
-    solid();
+// Wspolna, testowalna kolejnosc boot fallback oparta o manifest (bez BMP):
+// 1. Zapisana konfiguracja (jesli istnieje i jest poprawna)
+// 2. Domyslna z manifestu
+// 3. Pierwsza poprawna z manifestu
+// 4. Awaryjny jednolity kolor (solid)
+template<class WybranaFn, class DomyslnaFn, class PierwszaFn, class SolidFn>
+TapetyZrodlo tapety_fallback(WybranaFn fn_wybrana, DomyslnaFn fn_domyslna, PierwszaFn fn_pierwsza, SolidFn fn_solid) {
+    TapetyZrodlo z = fn_wybrana();
+    if (z != TAPETY_SOLID) return z;
+    z = fn_domyslna();
+    if (z != TAPETY_SOLID) return z;
+    z = fn_pierwsza();
+    if (z != TAPETY_SOLID) return z;
+    fn_solid();
     return TAPETY_SOLID;
 }
 struct TapetyZadanie {

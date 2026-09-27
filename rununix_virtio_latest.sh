@@ -277,49 +277,33 @@ append_optional_cli_args() {
 
 build_virtio_args() {
     local iso="${1:-}"
-    local blk_dev net_dev rng_dev gpu_dev kbd_dev mouse_dev
+    local installed_boot="${2:-false}"
+    local blk_dev="virtio-blk-pci,drive=disk,disable-legacy=on"
+    local net_dev="virtio-net-pci,netdev=n1,disable-legacy=on"
+    local rng_dev="virtio-rng-pci,rng=rng0,disable-legacy=on"
+    local gpu_dev="virtio-vga,disable-legacy=on,xres=1280,yres=720"
+    local kbd_dev="virtio-keyboard-pci"
+    local mouse_dev="virtio-mouse-pci"
 
     QEMU_ARGS=()
     append_common_machine_args
 
-    # Dysk: nowoczesny VirtIO-BLK -> wspolne BlockDevice API.
-    blk_dev="$(append_disable_legacy_if_supported \
-        "virtio-blk-pci" \
-        "virtio-blk-pci,drive=disk")"
+    # Dokladna kolejnosc jak w Makefile/QEMU_BASE_ARGS:
+    # Intel HDA musi zostac dodany PRZED urzadzeniami VirtIO.
+    # Kanoniczny uklad PCI na obecnym profilu:
+    #   00:02 HDA, 00:03 BLK, 00:04 NET, 00:05 RNG,
+    #   00:06 GPU, 00:07 keyboard, 00:08 mouse.
+    # Poprzednia wersja launchera dodawala HDA dopiero po VirtIO i przez to
+    # przesuwala wszystkie BDF o jeden slot (BLK=00:02, NET=00:03, RNG=00:04).
+    append_audio_args
 
-    # Siec: VirtIO-NET -> NetworkDevice.
-    net_dev="$(append_disable_legacy_if_supported \
-        "virtio-net-pci" \
-        "virtio-net-pci,netdev=n1")"
-
-    # RNG: entropy dla CSPRNG/TLS.
-    rng_dev="$(append_disable_legacy_if_supported \
-        "virtio-rng-pci" \
-        "virtio-rng-pci,rng=rng0")"
-
-    # GPU: zachowujemy virtio-vga, poniewaz BIOS/GRUB potrzebuje
-    # kompatybilnego VGA podczas wczesnego rozruchu.
-    gpu_dev="virtio-vga"
-    if qemu_device_supports_property "virtio-vga" "disable-legacy"; then
-        gpu_dev+=",disable-legacy=on"
-    fi
-    if qemu_device_supports_property "virtio-vga" "xres"; then
-        gpu_dev+=",xres=1280"
-    fi
-    if qemu_device_supports_property "virtio-vga" "yres"; then
-        gpu_dev+=",yres=720"
+    # UEFI/OVMF: dysk zainstalowanego systemu musi miec jawny priorytet.
+    if [[ "$installed_boot" == "true" ]]; then
+        blk_dev+=",bootindex=1"
     fi
 
-    # VirtIO-INPUT. Jesli dana wersja QEMU wspiera disable-legacy,
-    # wymuszamy nowoczesny transport.
-    kbd_dev="$(append_disable_legacy_if_supported \
-        "virtio-keyboard-pci" \
-        "virtio-keyboard-pci")"
-
-    mouse_dev="$(append_disable_legacy_if_supported \
-        "virtio-mouse-pci" \
-        "virtio-mouse-pci")"
-
+    # Ten blok celowo odpowiada QEMU_VIRTIO_INSTALLED_ARGS z Makefile,
+    # bez dynamicznego zmieniania transportu INPUT zależnie od wersji QEMU.
     QEMU_ARGS+=(
         -drive "id=disk,file=$DISK,format=raw,if=none"
         -device "$blk_dev"
@@ -337,7 +321,6 @@ build_virtio_args() {
         -device "$mouse_dev"
     )
 
-    append_audio_args
     append_optional_cli_args
 
     if [[ -n "$iso" ]]; then
@@ -347,14 +330,25 @@ build_virtio_args() {
 
 build_legacy_args() {
     local iso="${1:-}"
+    local installed_boot="${2:-false}"
+    local ahci_disk="ide-hd,drive=disk,bus=ahci.0,unit=0"
 
     QEMU_ARGS=()
     append_common_machine_args
 
+    # Jak w Makefile: HDA jest czescia bazowego profilu i pojawia sie przed
+    # kontrolerem dysku / karta sieciowa. Zachowuje to identyczna topologie PCI.
+    append_audio_args
+
+    # Jak wyzej: dla zainstalowanego systemu ustawiamy jawny priorytet UEFI.
+    if [[ "$installed_boot" == "true" ]]; then
+        ahci_disk+=",bootindex=1"
+    fi
+
     QEMU_ARGS+=(
         -drive "id=disk,file=$DISK,format=raw,if=none"
         -device ich9-ahci,id=ahci
-        -device ide-hd,drive=disk,bus=ahci.0,unit=0
+        -device "$ahci_disk"
 
         -netdev user,id=n1
         -device e1000,netdev=n1
@@ -367,7 +361,6 @@ build_legacy_args() {
         -device usb-mouse,id=usbmouse,bus=xhci.0
     )
 
-    append_audio_args
     append_optional_cli_args
 
     if [[ -n "$iso" ]]; then
@@ -533,9 +526,9 @@ run_installed() {
 
     if [[ "$profile" == "virtio" ]]; then
         validate_virtio_environment
-        build_virtio_args ""
+        build_virtio_args "" "true"
     else
-        build_legacy_args ""
+        build_legacy_args "" "true"
     fi
 
     uefi_args
@@ -556,6 +549,7 @@ run_installed() {
     echo "ISO:          BRAK - start tylko z dysku"
     echo "Dysk:         $(basename "$DISK")"
     echo "Boot:         UEFI / EFI/BOOT/BOOTX64.EFI"
+    echo "Boot priority: bootindex=1"
 
     if [[ "$profile" == "virtio" ]]; then
         echo "Storage:      VirtIO-BLK"

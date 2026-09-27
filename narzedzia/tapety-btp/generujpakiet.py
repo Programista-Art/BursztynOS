@@ -209,6 +209,8 @@ def main():
     parser.add_argument("--katalog", "-k", default="obrazy/tapety", help="Katalog zrodlowy tapet .btp, .jpg, .jpeg")
     parser.add_argument("--wyjscie", "-w", default="tapety.pak", help="Sciezka wyjsciowa pliku pakietu (.pak)")
     parser.add_argument("--dep", "-d", default="tapety.pak.d", help="Sciezka wyjsciowa zaleznosci dla Make (.d)")
+    parser.add_argument("--domyslna", "--default", dest="domyslna", default=None, help="Domyslna tapeta (kanoniczna lub nazwa zrodlowa)")
+    parser.add_argument("--manifest", default=None, help="Sciezka wyjsciowa wygenerowanego manifestu tekstowego")
     parser.add_argument("--manifest-only", help="Zapisz tylko deterministyczna liste nazw zrodel i zakoncz")
     args = parser.parse_args()
 
@@ -255,8 +257,36 @@ def main():
                 "crc32": crc32
             })
 
+    # Wybor i walidacja domyslnej tapety
+    domyslna_wpis = None
+    if args.domyslna:
+        for t in tapety:
+            if t["kanoniczna"].lower() == args.domyslna.lower() or t["nazwa"].lower() == args.domyslna.lower():
+                domyslna_wpis = t
+                break
+        if not domyslna_wpis:
+            raise ValueError(
+                f"[TAPETY PAK] Zadeklarowana domyslna tapeta '{args.domyslna}' nie istnieje w {katalog}!"
+            )
+    elif tapety:
+        # Deterministyczna domyslna: pierwszy poprawny wpis w posortowanym porzadku
+        domyslna_wpis = tapety[0]
+
+    # Ustawienie domyslnej tapety na indeksie 0 pakietu
+    if domyslna_wpis and tapety and tapety[0] != domyslna_wpis:
+        tapety.remove(domyslna_wpis)
+        tapety.insert(0, domyslna_wpis)
+
+    if args.manifest:
+        linie_m = []
+        if domyslna_wpis:
+            linie_m.append(f"default={domyslna_wpis['kanoniczna']}")
+        for t in tapety:
+            linie_m.append(f"wpis={t['kanoniczna']}|{t['rozmiar']}|{t['crc32']:08X}|{t['nazwa']}")
+        zapisz_tekst_jesli_zmieniono(args.manifest, "\n".join(linie_m) + "\n")
+
     if args.manifest_only:
-        manifest = "".join(t["nazwa"] + "\n" for t in tapety)
+        manifest = ("default=" + domyslna_wpis["kanoniczna"] + "\n" if domyslna_wpis else "") + "".join(t["nazwa"] + "\n" for t in tapety)
         zapisz_tekst_jesli_zmieniono(args.manifest_only, manifest)
         return
 
@@ -387,7 +417,8 @@ def main():
     sys.stdout.write(f"[TAPETY PAK] Zbudowano pakiet tapet: {args.wyjscie}\n")
     sys.stdout.write(f"[TAPETY PAK] Liczba tapet: {file_count}\n")
     for idx, t in enumerate(tapety):
-        sys.stdout.write(f"  [{idx:02d}] {t['nazwa']} (canon: {t['kanoniczna']}): {t['rozmiar']} B (CRC32: 0x{t['crc32']:08X})\n")
+        def_mark = " [DEFAULT]" if t == domyslna_wpis else ""
+        sys.stdout.write(f"  [{idx:02d}] {t['nazwa']} (canon: {t['kanoniczna']}){def_mark}: {t['rozmiar']} B (CRC32: 0x{t['crc32']:08X})\n")
     sys.stdout.write(f"[TAPETY PAK] Laczny rozmiar zrodlowych BTP: {total_btp_bytes} B ({total_btp_bytes / 1024 / 1024:.2f} MiB)\n")
     sys.stdout.write(f"[TAPETY PAK] Laczny rozmiar {args.wyjscie}: {len(pack_complete)} B ({len(pack_complete) / 1024 / 1024:.2f} MiB)\n")
     sys.stdout.write(f"[TAPETY BUILD] sources={len(tapety)} entries={verified_entries} bytes={len(pack_complete)} crc=OK\n")

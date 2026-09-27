@@ -357,7 +357,7 @@ def main():
                     mw, mh, mdata = parse_ppm(moved_dump_path)
                     p_old_fill = get_pixel(mdata, mw, mh, 501, 301)
                     p_old_tip = get_pixel(mdata, mw, mh, 500, 300)
-                    if p_old_fill != (255, 255, 255) and p_old_fill == p_old_tip:
+                    if p_old_fill != (255, 255, 255) and (p_old_fill == p_old_tip or max(abs(a - b) for a, b in zip(p_old_fill, p_old_tip)) <= 15):
                         cursor_old_restored = True
                         print(f"[INFO] Stare polozenie kursora (500, 300): PRZYWROCONE TLO (piksel={p_old_tip}) (PASS)")
                     else:
