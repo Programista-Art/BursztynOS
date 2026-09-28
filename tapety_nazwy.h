@@ -68,6 +68,12 @@ inline bool tapeta_sprawdz_rozszerzenie(const char* nazwa, char* out_ext_lowerca
             }
             return true;
         }
+        if (e1 == 'p' && e2 == 'n' && e3 == 'g') {
+            if (out_ext_lowercase && ext_cap >= 4) {
+                out_ext_lowercase[0] = 'p'; out_ext_lowercase[1] = 'n'; out_ext_lowercase[2] = 'g'; out_ext_lowercase[3] = '\0';
+            }
+            return true;
+        }
     }
     if (len >= 5 && nazwa[len - 5] == '.') {
         char e1 = to_lower(nazwa[len - 4]);
@@ -204,6 +210,7 @@ inline bool tapeta_czy_kanoniczna_nazwa(const char* nazwa) {
     if (ext[0] != '.') return false;
     if (ext[1] == 'j' && ext[2] == 'p' && ext[3] == 'g' && ext[4] == '\0') return true;
     if (ext[1] == 'b' && ext[2] == 't' && ext[3] == 'p' && ext[4] == '\0') return true;
+    if (ext[1] == 'p' && ext[2] == 'n' && ext[3] == 'g' && ext[4] == '\0') return true;
     if (ext[1] == 'j' && ext[2] == 'p' && ext[3] == 'e' && ext[4] == 'g' && ext[5] == '\0') return true;
     return false;
 }

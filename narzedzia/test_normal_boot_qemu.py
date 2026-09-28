@@ -45,6 +45,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 GLOBAL_TIMEOUT = 120
 INACTIVITY_TIMEOUT = 60
+WALLPAPER_GRACE_TIMEOUT = 15.0
 
 def parse_ppm(ppm_path):
     with open(ppm_path, "rb") as f:
@@ -220,6 +221,12 @@ def main():
     found_ekran_init = False
     found_desktop_ready = False
     boot_ready = False
+    t_kernel_ready = None
+    t_system_ready = None
+    t_wallpaper_start = None
+    t_decode_complete = None
+    t_wallpaper_applied = None
+    boot_ready_time = None
 
     # Audyt zabronionych znacznikow testow obciazeniowych
     stress_markers_found = []
@@ -273,6 +280,10 @@ def main():
                 if proc.poll() is not None:
                     termination_reason = "Proces QEMU zakonczyl sie."
                     break
+                if boot_ready and not found_desktop_ready and boot_ready_time is not None:
+                    if time.time() - boot_ready_time > WALLPAPER_GRACE_TIMEOUT:
+                        termination_reason = f"Przekroczono limit czasu oczekiwania na gotowosc tapety ({WALLPAPER_GRACE_TIMEOUT}s po starcie systemu)."
+                        break
                 continue
 
             if line is None:
@@ -309,12 +320,34 @@ def main():
                 found_net_init = True
             if "[EKRAN INIT] backend=virtio-gpu-runtime" in line_str:
                 found_ekran_init = True
+
+            # Pomiar czasu i zdarzen powiazanych z rozruchem oraz tapeta
+            if "[KERNEL] Jadro i scheduler gotowe." in line_str and t_kernel_ready is None:
+                t_kernel_ready = time.time() - start_time
+            if "[TAPETY APP] Start." in line_str and t_wallpaper_start is None:
+                t_wallpaper_start = time.time() - start_time
+            if ("[TAPETY APP] PNG odczyt+decode" in line_str or "[TAPETY APP] JPEG odczyt+decode" in line_str) and t_decode_complete is None:
+                t_decode_complete = time.time() - start_time
             if "[TAPETA] Tapeta gotowa." in line_str:
                 found_desktop_ready = True
+                if t_wallpaper_applied is None:
+                    t_wallpaper_applied = time.time() - start_time
             if "System operacyjny gotowy!" in line_str:
                 boot_ready = True
-                termination_reason = "System operacyjny zglosil gotowosc ('System operacyjny gotowy!')."
+                if t_system_ready is None:
+                    t_system_ready = time.time() - start_time
+                if boot_ready_time is None:
+                    boot_ready_time = time.time()
+
+            if boot_ready and found_desktop_ready:
+                termination_reason = "System operacyjny i tapeta zglosily pelna gotowosc."
                 break
+
+            if boot_ready and not found_desktop_ready and boot_ready_time is not None:
+                if time.time() - boot_ready_time > WALLPAPER_GRACE_TIMEOUT:
+                    termination_reason = f"Przekroczono limit czasu oczekiwania na gotowosc tapety ({WALLPAPER_GRACE_TIMEOUT}s po starcie systemu)."
+                    break
+
 
         # Weryfikacja QMP: zrzut pulpitu i kursor natychmiast po gotowosci pulpitu
         if boot_ready and qmp_sock.exists():
@@ -357,7 +390,8 @@ def main():
                     mw, mh, mdata = parse_ppm(moved_dump_path)
                     p_old_fill = get_pixel(mdata, mw, mh, 501, 301)
                     p_old_tip = get_pixel(mdata, mw, mh, 500, 300)
-                    if p_old_fill != (255, 255, 255) and (p_old_fill == p_old_tip or max(abs(a - b) for a, b in zip(p_old_fill, p_old_tip)) <= 15):
+                    is_old_cursor, _ = check_cursor_at(mdata, mw, mh, 500, 300)
+                    if p_old_fill != (255, 255, 255) and not is_old_cursor:
                         cursor_old_restored = True
                         print(f"[INFO] Stare polozenie kursora (500, 300): PRZYWROCONE TLO (piksel={p_old_tip}) (PASS)")
                     else:
@@ -396,6 +430,16 @@ def main():
             test_blk_path.unlink()
         except Exception:
             pass
+
+    print("\n" + "=" * 65)
+    print("CZASY OPERACJI ROZRUCHU I PRZYWRACANIA TAPETY:")
+    print("=" * 65)
+    print(f"  Kernel/system gotowy:           {t_system_ready:.3f} s" if t_system_ready is not None else "  Kernel/system gotowy:           BRAK")
+    print(f"  Start przywracania tapety:      {t_wallpaper_start:.3f} s" if t_wallpaper_start is not None else "  Start przywracania tapety:      BRAK")
+    print(f"  Dekodowanie obrazu zakonczone:  {t_decode_complete:.3f} s" if t_decode_complete is not None else "  Dekodowanie obrazu zakonczone:  BRAK")
+    print(f"  Tapeta zastosowana w jadrze:    {t_wallpaper_applied:.3f} s" if t_wallpaper_applied is not None else "  Tapeta zastosowana w jadrze:    BRAK")
+    print(f"  Zakonczenie procesu testu:      {runtime:.3f} s")
+    print("=" * 65)
 
     print("\n" + "=" * 65)
     print("PODSUMOWANIE AUDYTU ROZRUCHU PRODUKCYJNEGO (NORMAL BOOT):")

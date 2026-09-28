@@ -118,6 +118,32 @@ static void append_str(char* buf, size_t cap, size_t& pos, const char* s) {
 }
 #endif
 
+#if defined(BURSZTYN_DIAG_VIRTIO_BOOT) && BURSZTYN_DIAG_VIRTIO_BOOT && !defined(BURSZTYN_VIRTIO_HOST_TEST)
+static void rng_boot_trace(const char* phase, const VirtioPciDevice* dev = nullptr,
+                           const VirtQueue* vq = nullptr) {
+    char msg[192]{};
+    size_t pos = 0;
+    append_str(msg, sizeof(msg), pos, "[VIRTIO-RNG TRACE] ");
+    append_str(msg, sizeof(msg), pos, phase ? phase : "?");
+    if (dev) {
+        append_str(msg, sizeof(msg), pos, " status=");
+        append_u64(msg, sizeof(msg), pos, virtio_pci_get_status(dev));
+    }
+    if (vq) {
+        append_str(msg, sizeof(msg), pos, " qsize=");
+        append_u64(msg, sizeof(msg), pos, vq->queue_size);
+        append_str(msg, sizeof(msg), pos, " avail=");
+        append_u64(msg, sizeof(msg), pos, vq->avail ? vq->avail->idx : 0);
+        append_str(msg, sizeof(msg), pos, " used=");
+        append_u64(msg, sizeof(msg), pos, vq->used ? vq->used->idx : 0);
+    }
+    klog_impl(msg);
+}
+#else
+static inline void rng_boot_trace(const char*, const VirtioPciDevice* = nullptr,
+                                  const VirtQueue* = nullptr) {}
+#endif
+
 // Glowny stan sterownika
 static VirtioRngDriver g_virtio_rng{};
 
@@ -280,9 +306,11 @@ bool virtio_rng_init(VirtioPciDevice* dev) {
         return false;
     }
 
+    rng_boot_trace("probe enter", dev);
     RngLockGuard guard;
 
     // Pelny reset i audyt stanu urzadzenia przed konfiguracja
+    rng_boot_trace("transport init enter", dev);
     if (!virtio_rng_reset_locked()) {
         klog_impl("[VIRTIO-RNG] ERROR: failed to reset device before init");
         return false;
@@ -306,13 +334,16 @@ bool virtio_rng_init(VirtioPciDevice* dev) {
             return false;
         }
     }
+    rng_boot_trace("transport init leave", dev);
 
     // Tworzenie kolejki Split VirtQueue 0
+    rng_boot_trace("queue init enter", dev);
     VirtQueue* vq = virtqueue_create(dev, 0);
     if (!vq) {
         klog_impl("[VIRTIO-RNG] ERROR: virtqueue_create failed for queue 0");
         return false;
     }
+    rng_boot_trace("queue init leave", dev, vq);
 
     // Alokacja bufora DMA dla transakcji entropii
     void* dma_v = nullptr;
@@ -374,6 +405,7 @@ bool virtio_rng_init(VirtioPciDevice* dev) {
     g_virtio_rng.total_bytes_read = 0;
     g_virtio_rng.total_requests = 0;
 
+    rng_boot_trace("probe leave", dev, vq);
     klog_impl("[VIRTIO-RNG] Device initialized successfully (queue 0, DRIVER_OK)");
     return true;
 }
@@ -428,6 +460,11 @@ size_t virtio_rng_read_bytes(void* dst, size_t max_len, uint64_t timeout_ms) {
         vbuf.len = static_cast<uint32_t>(chunk);
         vbuf.is_write = true; // bufor przeznaczony do zapisu przez urzadzenie
 
+        if (g_virtio_rng.total_requests == 0) {
+            rng_boot_trace("first request enter", g_virtio_rng.dev, vq);
+        }
+        rng_boot_trace("descriptor publication", g_virtio_rng.dev, vq);
+        rng_boot_trace("avail idx before", g_virtio_rng.dev, vq);
         int head = virtqueue_submit(vq, &vbuf, 1, g_virtio_rng.dma_virtual);
         if (head < 0) {
             klog_impl("[VIRTIO-RNG] virtqueue_submit failed");
@@ -436,12 +473,15 @@ size_t virtio_rng_read_bytes(void* dst, size_t max_len, uint64_t timeout_ms) {
             virtio_rng_secure_zero(dst, max_len);
             return 0;
         }
+        rng_boot_trace("avail idx after", g_virtio_rng.dev, vq);
 
         __atomic_store_n(&g_virtio_rng.request_done, false, __ATOMIC_RELEASE);
         virtqueue_kick(vq, true);
+        rng_boot_trace("notify", g_virtio_rng.dev, vq);
 
         // Oczekiwanie z ograniczeniem czasu monotonicznego: obsluga przerwania MSI-X lub fallback polling
         uint32_t spin_guard = VIRTIO_RNG_MAX_SPINS_GUARD;
+        rng_boot_trace("wait enter", g_virtio_rng.dev, vq);
         if (g_virtio_rng.use_msix) {
             while (!__atomic_load_n(&g_virtio_rng.request_done, __ATOMIC_ACQUIRE) && !virtqueue_has_used(vq)) {
                 if (spin_guard > 0) {
@@ -484,6 +524,7 @@ size_t virtio_rng_read_bytes(void* dst, size_t max_len, uint64_t timeout_ms) {
             virtio_rng_secure_zero(dst, max_len);
             return 0;
         }
+        rng_boot_trace("used idx observation", g_virtio_rng.dev, vq);
 
         void* cookie = nullptr;
         uint32_t bytes_written = 0;
@@ -495,6 +536,7 @@ size_t virtio_rng_read_bytes(void* dst, size_t max_len, uint64_t timeout_ms) {
             virtio_rng_secure_zero(dst, max_len);
             return 0;
         }
+        rng_boot_trace("completion", g_virtio_rng.dev, vq);
 
         if (pop_id != head) {
             klog_impl("[VIRTIO-RNG] ERROR: descriptor ID mismatch");

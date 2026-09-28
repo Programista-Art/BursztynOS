@@ -2166,6 +2166,9 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
      */
     asm volatile("cli" ::: "memory");
     serial_inicjalizuj();
+#if defined(BURSZTYN_DIAG_VIRTIO_BOOT) && BURSZTYN_DIAG_VIRTIO_BOOT
+    klog_serial("[VIRTIO RESET TRACE] kernel entry");
+#endif
 
     if (multiboot_magic !=
         MULTIBOOT2_BOOTLOADER_MAGIC) {
@@ -2359,6 +2362,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
         wypisz_log("[NORMAL BOOT] VirtIO self-tests skipped.");
     }
 
+    virtio_pci_diag_trace_type(VIRTIO_ID_RNG, "driver probe begin");
     if (virtio_rng_probe_and_init()) {
         VirtioRngDriver* rng_drv = virtio_rng_get_driver();
         if (rng_drv && rng_drv->dev) {
@@ -2373,6 +2377,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
             }
         }
     }
+    virtio_pci_diag_trace_type(VIRTIO_ID_RNG, "driver probe end");
+    virtio_pci_diag_trace_type(VIRTIO_ID_BLOCK, "driver probe begin");
     const uint32_t virtio_blk_count = virtio_blk_probe_and_init();
     if (virtio_blk_count > 0) {
         VirtioBlkDriver* blk_drv = virtio_blk_get_driver(0);
@@ -2388,7 +2394,9 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
             }
         }
     }
+    virtio_pci_diag_trace_type(VIRTIO_ID_BLOCK, "driver probe end");
 
+    virtio_pci_diag_trace_type(VIRTIO_ID_GPU, "driver probe begin");
     const uint32_t virtio_gpu_count = virtio_gpu_probe_and_init();
     if (virtio_gpu_count > 0) {
         VirtioGpuDriver* gpu_drv = virtio_gpu_get_driver(0);
@@ -2410,6 +2418,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
             }
         }
     }
+    virtio_pci_diag_trace_type(VIRTIO_ID_GPU, "driver probe end");
 
     /* BMP pozostaje fallbackiem po inicjalizacji BSP2. */
 
@@ -2418,6 +2427,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
      * ------------------------------------------------------------------ */
 
     inicjalizuj_e1000();
+    virtio_pci_diag_trace_type(VIRTIO_ID_NET, "driver probe begin");
     const uint32_t virtio_net_count = virtio_net_probe_and_init();
     if (virtio_net_count > 0) {
         VirtioNetDriver* net_drv = virtio_net_get_driver(0);
@@ -2427,7 +2437,9 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
             }
         }
     }
+    virtio_pci_diag_trace_type(VIRTIO_ID_NET, "driver probe end");
 
+    virtio_pci_diag_trace_type(VIRTIO_ID_INPUT, "driver probe begin");
     const uint32_t virtio_input_count = virtio_input_probe_and_init();
     if (virtio_input_count > 0) {
         if (tryb_testowy) {
@@ -2436,6 +2448,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
             wypisz_log("[VIRTIO-INPUT] Sanity check: OK (devices initialized and registered).");
         }
     }
+    virtio_pci_diag_trace_type(VIRTIO_ID_INPUT, "driver probe end");
 
     NetworkDevice* net_dev = net_get_primary_device();
     if (net_dev) {

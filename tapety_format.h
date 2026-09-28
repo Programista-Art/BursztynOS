@@ -109,6 +109,9 @@ inline bool tapety_sciezka_jpeg(const char* s) {
     return tapety_sciezka_plik_uzytkownika(s) &&
         (tapety_koncowka(s, ".jpg") || tapety_koncowka(s, ".jpeg"));
 }
+inline bool tapety_sciezka_png(const char* s) {
+    return tapety_sciezka_plik_uzytkownika(s) && tapety_koncowka(s, ".png");
+}
 inline bool tapety_sciezka_btp_uzytkownika(const char* s) {
     constexpr char prefix[] = "/uzytkownicy/";
     if (!s) return false;
@@ -116,7 +119,7 @@ inline bool tapety_sciezka_btp_uzytkownika(const char* s) {
     return tapety_sciezka_plik_uzytkownika(s) && tapety_koncowka(s, ".btp");
 }
 inline bool tapety_sciezka_powierzchni(const char* s) {
-    return tapety_sciezka_jpeg(s) || (tapety_sciezka_btp_uzytkownika(s) && !tapety_sciezka(s));
+    return tapety_sciezka_jpeg(s) || tapety_sciezka_png(s) || (tapety_sciezka_btp_uzytkownika(s) && !tapety_sciezka(s));
 }
 inline bool tapety_sciezka_obrazu(const char* s) {
     return tapety_sciezka(s) || tapety_sciezka_powierzchni(s);
@@ -222,7 +225,7 @@ inline size_t tapety_serializuj(const TapetyKonfiguracja& c, char* buf, size_t c
 constexpr uint64_t TAPETY_IPC = UINT64_C(0x100000001);
 enum TapetyOperacja : uint32_t { TAPETY_STAN = 1, TAPETY_ZASTOSUJ = 2, TAPETY_DIAGNOSTYKA = 3, TAPETY_ZASTOSUJ_OBRAZ = 4 };
 enum TapetyStatus : uint32_t { TAPETY_OK = 0, TAPETY_BLAD = 1, TAPETY_BLAD_ZAPISU = 2 };
-enum TapetyZrodlo : uint32_t { TAPETY_SOLID = 0, TAPETY_BTP = 1, TAPETY_BMP = 2, TAPETY_JPEG = 3 };
+enum TapetyZrodlo : uint32_t { TAPETY_SOLID = 0, TAPETY_BTP = 1, TAPETY_BMP = 2, TAPETY_JPEG = 3, TAPETY_PNG = 4 };
 
 // Wspolna, testowalna kolejnosc boot fallback oparta o manifest (bez BMP):
 // 1. Zapisana konfiguracja (jesli istnieje i jest poprawna)

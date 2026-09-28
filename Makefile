@@ -226,6 +226,13 @@ ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_PCI_TRACE)),)
 KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_PCI_TRACE=1
 endif
 
+# Dokladne znaczniki diagnostyczne wczesnego bootu VirtIO/PCI.  Tryb jest
+# wylaczony w obrazie produkcyjnym i sluzy wylacznie do odtworzenia zawieszen.
+BURSZTYN_DIAG_VIRTIO_BOOT ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_VIRTIO_BOOT)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_VIRTIO_BOOT=1
+endif
+
 BURSZTYN_DIAG_TAPETY ?= 0
 BURSZTYNDIAGTAPETY ?= $(BURSZTYN_DIAG_TAPETY)
 ifneq ($(filter 1 yes true,$(BURSZTYNDIAGTAPETY) $(BURSZTYN_DIAG_TAPETY)),)
@@ -758,10 +765,13 @@ $(GRUB_CFG): $(KERNEL) $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile
 		'    insmod all_video' \
 		'    set gfxmode=1280x720x32,1024x768x32,auto' \
 		'    set gfxpayload=keep' \
+		'    echo "Ladowanie jadra..."' \
 		'    multiboot2 /boot/system_operacyjny.bin bursztyn.install=1' \
+		'    echo "Ladowanie zasobow instalatora..."' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    module2 /boot/installer/BOOTX64.EFI installer.efi' \
 		'    module2 /boot/system_operacyjny.bin installer.kernel' \
+		'    echo "Uruchamianie instalatora..."' \
 		'    boot' \
 		'}' \
 		> $(GRUB_CFG)
@@ -1034,16 +1044,18 @@ prepare-disk: $(VIRTUAL_DISK)
 #   make runuefi QEMU_DISPLAY_ARGS="-display gtk,zoom-to-fit=off"
 #
 
+QEMUACCEL ?= tcg,thread=multi
+QEMU_ACCEL ?= $(QEMUACCEL)
 QEMU_RAM ?= 2G
 QEMU_SMP ?= 1
 QEMU_DISPLAY_ARGS ?=
 QEMU_VIRTIO_XRES ?= 1280
 QEMU_VIRTIO_YRES ?= 720
 
-QEMU_BASE_ARGS := \
+QEMUBASEARGS ?= \
 	-machine pc,hpet=on \
 	-cpu max \
-	-accel tcg,thread=single \
+	-accel $(QEMUACCEL) \
 	-smp $(QEMU_SMP) \
 	-m $(QEMU_RAM) \
 	-audiodev alsa,id=snd \
@@ -1051,6 +1063,8 @@ QEMU_BASE_ARGS := \
 	-device hda-output,audiodev=snd \
 	-serial stdio \
 	$(QEMU_DISPLAY_ARGS)
+
+QEMU_BASE_ARGS := $(QEMUBASEARGS)
 
 # Podsystem pamieci masowej QEMU
 QEMU_DISK_DRIVE := -drive id=disk,file=$(VIRTUAL_DISK),format=raw,if=none
@@ -1371,18 +1385,31 @@ $(TAPETY_PAK): $(TAPETY_SOURCES_MANIFEST) narzedzia/tapety-btp/generujpakiet.py 
 
 btp.o: narzedzia/tapety-btp/tapetybtp.cpp narzedzia/tapety-btp/tapetybtp.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
-tapety.o: tapety.cpp tapety.h tapety_format.h pamiec.h bufory_grafiki.h obrazy/skalowanie.h narzedzia/tapety-btp/tapetybtp.h
-kernel.o bws_nowoczesne.o: tapety.h tapety_format.h obrazy/skalowanie.h
-syscalls.o: tapety_format.h
+tapety_format.h: tapety_nazwy.h
+tapety.o: tapety.cpp tapety.h tapety_format.h tapety_nazwy.h pamiec.h bufory_grafiki.h obrazy/skalowanie.h narzedzia/tapety-btp/tapetybtp.h
+kernel.o bws_nowoczesne.o: tapety.h tapety_format.h tapety_nazwy.h obrazy/skalowanie.h
+syscalls.o: tapety_format.h tapety_nazwy.h
+instalator.o ekran.o: tapety.h tapety_format.h tapety_nazwy.h
+
+pci.o: pci.cpp pci.h
+virtio_pci.o: virtio_pci.cpp virtio_pci.h virtqueue.h pci.h
+virtio_gpu.o: virtio_gpu.cpp virtio_gpu.h virtio_pci.h virtqueue.h pci.h idt.h apic.h grafika.h ekran.h ekran_format.h
+virtio_rng.o: virtio_rng.cpp virtio_rng.h virtio_pci.h virtqueue.h pci.h
+virtio_blk.o: virtio_blk.cpp virtio_blk.h virtio_pci.h virtqueue.h pci.h blokowy.h
+virtio_net.o: virtio_net.cpp virtio_net.h virtio_pci.h virtqueue.h pci.h network_device.h
+virtio_input.o: virtio_input.cpp virtio_input.h virtio_pci.h virtqueue.h pci.h input_device.h
+kernel.o: virtio_pci.h virtio_blk.h virtio_net.h virtio_gpu.h virtio_rng.h virtio_input.h
+
 
 btp_ring3.o: narzedzia/tapety-btp/tapetybtp.cpp narzedzia/tapety-btp/tapetybtp.h
 	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -c $< -o $@
 image_ring3.o: obrazy/dekoder_obrazu.cpp obrazy/dekoder_obrazu.h obrazy/vendor/stb_image.h narzedzia/tapety-btp/tapetybtp.h
-	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -Wno-unused-function -Wno-unused-parameter -c $< -o $@
+	$(CXX) $(RING3_FLAGS) -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Os -ffunction-sections -fdata-sections -Wno-unused-function -Wno-unused-parameter -c $< -o $@
 
 .PHONY: test-image
 test-image:
 	$(PYTHON) obrazy/testy/test_jpeg.py
+	$(PYTHON) obrazy/testy/test_png.py
 	$(CXX) -std=c++17 -O1 -g -fsanitize=address,undefined obrazy/test_tapety_jpeg.cpp -o /tmp/bursztyn-test-tapety-jpeg
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 /tmp/bursztyn-test-tapety-jpeg
 	$(CXX) -std=c++17 -O1 -g -fsanitize=address,undefined obrazy/test_tapety_manifest.cpp -o /tmp/bursztyn-test-tapety-manifest

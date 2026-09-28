@@ -136,6 +136,10 @@ struct VirtioPciCommonCfgRegs {
 static_assert(sizeof(VirtioPciCapHeader) == 16, "VirtioPciCapHeader rozmiar != 16");
 static_assert(sizeof(VirtioPciNotifyCapHeader) == 20, "VirtioPciNotifyCapHeader rozmiar != 20");
 static_assert(sizeof(VirtioPciCommonCfgRegs) == 56, "VirtioPciCommonCfgRegs rozmiar != 56");
+static_assert(offsetof(VirtioPciCommonCfgRegs, device_status) == 0x14,
+              "VirtIO device_status must be at common config offset 0x14");
+static_assert(sizeof(VirtioPciCommonCfgRegs::device_status) == 1,
+              "VirtIO device_status must use an 8-bit access");
 
 /* =========================================================================
  * 3. STRUKTURA REPREZENTACJI URZADZENIA VIRTIO PCI
@@ -313,6 +317,12 @@ const char* virtio_pci_device_name(uint16_t virtio_id);
  */
 uint32_t virtio_pci_liczba_urzadzen();
 VirtioPciDevice* virtio_pci_pobierz_urzadzenie(uint32_t indeks);
+
+/* Wylaczona domyslnie telemetria kontrolnego przebiegu bootu.  Implementacja
+ * jest no-op, jezeli BURSZTYN_DIAG_VIRTIO_BOOT nie zostalo ustawione. */
+void virtio_pci_diag_trace_device(const VirtioPciDevice* dev, const char* phase);
+void virtio_pci_diag_trace_type(uint16_t virtio_id, const char* phase);
+void virtio_pci_diag_trace_queue(const VirtioPciDevice* dev, uint16_t queue_index, const char* phase);
 
 /*
  * MSI-X VirtIO helpers:

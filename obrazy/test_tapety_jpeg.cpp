@@ -67,7 +67,7 @@ int main() {
         "plik\r\n.jpg",
         "\"cudzyslow\".jpg",
         "brak_rozszerzenia",
-        "zly_format.png",
+        "zly_format.gif",
         "zly_format.bmp",
         ".jpg",
         "a.j",

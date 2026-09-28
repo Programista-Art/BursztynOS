@@ -467,6 +467,7 @@ void instaluj(uint64_t mbi,bool tylko_przygotuj=false) {
 
         const bool is_btp = tapety_koncowka(canon, ".btp");
         const bool is_jpeg = tapety_koncowka(canon, ".jpg") || tapety_koncowka(canon, ".jpeg");
+        const bool is_png = tapety_koncowka(canon, ".png");
 
         if (is_btp) {
             if (bsz < 14) {
@@ -481,6 +482,12 @@ void instaluj(uint64_t mbi,bool tylko_przygotuj=false) {
         } else if (is_jpeg) {
             if (bsz < 4 || p[poff] != 0xFF || p[poff + 1] != 0xD8) {
                 log_sciezka("[TAPETA-BLAD] Niepoprawny plik JPEG w pakiecie: ", raw_nazwa);
+                continue;
+            }
+        } else if (is_png) {
+            if (bsz < 8 || p[poff] != 0x89 || p[poff + 1] != 'P' || p[poff + 2] != 'N' || p[poff + 3] != 'G' ||
+                p[poff + 4] != 0x0D || p[poff + 5] != 0x0A || p[poff + 6] != 0x1A || p[poff + 7] != 0x0A) {
+                log_sciezka("[TAPETA-BLAD] Niepoprawny plik PNG w pakiecie: ", raw_nazwa);
                 continue;
             }
         } else {
@@ -752,6 +759,11 @@ void diagnostyka(uint32_t grupa, TapetyOdpowiedz* out) {
                 else ++bledy;
                 continue;
             }
+            if (tapety_koncowka(path, ".png")) {
+                if (rozmiar_pliku(path) >= 8) ++ok;
+                else ++bledy;
+                continue;
+            }
             BtpInfo info{}; uint32_t* src = nullptr;
             if (wczytaj(path, &info, &src, true)) ++ok;
             else ++bledy;
@@ -938,6 +950,16 @@ static bool czy_plik_tapety_poprawny(const char* path) {
         }
         return false;
     }
+    if (tapety_koncowka(path, ".png")) {
+        char mag[8]{};
+        uint32_t got = 0;
+        if (!czytaj_fragment_pliku(path, 0, mag, 8, &got) || got != 8) return false;
+        if (static_cast<uint8_t>(mag[0]) == 0x89 && mag[1] == 'P' && mag[2] == 'N' && mag[3] == 'G' &&
+            mag[4] == 0x0D && mag[5] == 0x0A && mag[6] == 0x1A && mag[7] == 0x0A) {
+            return true;
+        }
+        return false;
+    }
     return false;
 }
 
@@ -949,7 +971,7 @@ static TapetyZrodlo zastosuj_lub_zaplanuj(const TapetyKonfiguracja& c) {
         }
         return TAPETY_SOLID;
     }
-    if (tapety_koncowka(c.sciezka, ".jpg") || tapety_koncowka(c.sciezka, ".jpeg")) {
+    if (tapety_koncowka(c.sciezka, ".jpg") || tapety_koncowka(c.sciezka, ".jpeg") || tapety_koncowka(c.sciezka, ".png")) {
         grafika_tapeta_solid();
         aktualna = c;
         if (!aktualna.wyswietlana[0]) {
@@ -968,9 +990,10 @@ static TapetyZrodlo zastosuj_lub_zaplanuj(const TapetyKonfiguracja& c) {
             }
         }
         jpeg_do_przywrocenia = aktualna;
-        statystyki.zrodlo = TAPETY_JPEG;
-        log_sciezka("[TAPETA] Wybrano (JPEG) ", c.sciezka);
-        return TAPETY_JPEG;
+        const bool is_png = tapety_koncowka(c.sciezka, ".png");
+        statystyki.zrodlo = is_png ? TAPETY_PNG : TAPETY_JPEG;
+        log_sciezka(is_png ? "[TAPETA] Wybrano (PNG) " : "[TAPETA] Wybrano (JPEG) ", c.sciezka);
+        return is_png ? TAPETY_PNG : TAPETY_JPEG;
     }
     return TAPETY_SOLID;
 }
@@ -1171,16 +1194,22 @@ bool tapety_obsluz_obraz(const proces_t& proces, const TapetyObrazZadanie& req, 
         }
     }
     jpeg_do_przywrocenia.sciezka[0] = 0;
-    statystyki.zrodlo = tapety_sciezka_jpeg(base.sciezka) ? TAPETY_JPEG : TAPETY_BTP;
+    statystyki.zrodlo = tapety_sciezka_png(base.sciezka) ? TAPETY_PNG :
+                        tapety_sciezka_jpeg(base.sciezka) ? TAPETY_JPEG : TAPETY_BTP;
     ++statystyki.zmiany;
     ++statystyki.przygotowania;
     grafika_publikuj_tapete();
     const bool saved = zapisz_wybor();
     snapshot(out);
     out->status = saved ? TAPETY_OK : TAPETY_BLAD_ZAPISU;
-    log_sciezka(tapety_sciezka_jpeg(base.sciezka) ? "[TAPETA] JPEG wybrano " : "[TAPETA] BTP wybrano ", base.sciezka);
-    log_liczba(tapety_sciezka_jpeg(base.sciezka) ? "[TAPETA] JPEG zastosowanie us " :
-        "[TAPETA] BTP zastosowanie us ", czas_monotoniczny_us() - apply_start);
+    const char* zrodlo_tag = tapety_sciezka_png(base.sciezka) ? "[TAPETA] PNG wybrano " :
+                             tapety_sciezka_jpeg(base.sciezka) ? "[TAPETA] JPEG wybrano " :
+                             "[TAPETA] BTP wybrano ";
+    log_sciezka(zrodlo_tag, base.sciezka);
+    const char* us_tag = tapety_sciezka_png(base.sciezka) ? "[TAPETA] PNG zastosowanie us " :
+                         tapety_sciezka_jpeg(base.sciezka) ? "[TAPETA] JPEG zastosowanie us " :
+                         "[TAPETA] BTP zastosowanie us ";
+    log_liczba(us_tag, czas_monotoniczny_us() - apply_start);
     klog_serial("[TAPETA] Tapeta gotowa.");
     return true;
 }

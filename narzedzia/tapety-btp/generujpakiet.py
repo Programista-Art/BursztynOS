@@ -85,7 +85,7 @@ def bezpieczna_nazwa(nazwa: str) -> bool:
                 return False
             i += ile
     ext = nazwa.rsplit(".", 1)[-1].lower() if "." in nazwa else ""
-    return ext in ("btp", "jpg", "jpeg")
+    return ext in ("btp", "jpg", "jpeg", "png")
 
 def tapeta_czy_bursztyn_systemowa(nazwa: str) -> bool:
     nl = nazwa.lower()
@@ -180,6 +180,45 @@ def waliduj_jpeg(sciezka: str) -> bool:
     except (OSError, struct.error):
         return False
 
+def waliduj_png(sciezka: str) -> bool:
+    try:
+        rozmiar = os.path.getsize(sciezka)
+        if rozmiar < 8 + 12 + 13 + 12 or rozmiar > 16 * 1024 * 1024:
+            return False
+        with open(sciezka, "rb") as f:
+            dane = f.read()
+        if len(dane) < 8 or dane[:8] != b"\x89PNG\r\n\x1a\n":
+            return False
+        offset = 8
+        if len(dane) < offset + 8:
+            return False
+        ihdr_len, ihdr_type = struct.unpack(">I4s", dane[offset:offset + 8])
+        if ihdr_type != b"IHDR" or ihdr_len != 13:
+            return False
+        offset += 8
+        w, h, bit_depth, color_type, comp, filt, interlace = struct.unpack(">IIBBBBB", dane[offset:offset + 13])
+        if w == 0 or h == 0 or w > 8192 or h > 8192 or w * h > 8 * 1024 * 1024:
+            return False
+        if comp != 0 or filt != 0:
+            return False
+        offset += 13 + 4
+        has_idat = False
+        has_iend = False
+        while offset + 8 <= len(dane):
+            chunk_len, chunk_type = struct.unpack(">I4s", dane[offset:offset + 8])
+            offset += 8
+            if offset + chunk_len + 4 > len(dane):
+                break
+            if chunk_type == b"IDAT":
+                has_idat = True
+            elif chunk_type == b"IEND":
+                has_iend = True
+                break
+            offset += chunk_len + 4
+        return has_idat and has_iend
+    except (OSError, struct.error):
+        return False
+
 def zapisz_jesli_zmieniono(sciezka: str, nowe_dane: bytes):
     if os.path.isfile(sciezka):
         try:
@@ -206,7 +245,7 @@ def zapisz_tekst_jesli_zmieniono(sciezka: str, nowy_tekst: str):
 
 def main():
     parser = argparse.ArgumentParser(description="Generuj deterministyczny pakiet tapet tapety.pak dla Bursztyn OS")
-    parser.add_argument("--katalog", "-k", default="obrazy/tapety", help="Katalog zrodlowy tapet .btp, .jpg, .jpeg")
+    parser.add_argument("--katalog", "-k", default="obrazy/tapety", help="Katalog zrodlowy tapet .btp, .jpg, .jpeg, .png")
     parser.add_argument("--wyjscie", "-w", default="tapety.pak", help="Sciezka wyjsciowa pliku pakietu (.pak)")
     parser.add_argument("--dep", "-d", default="tapety.pak.d", help="Sciezka wyjsciowa zaleznosci dla Make (.d)")
     parser.add_argument("--domyslna", "--default", dest="domyslna", default=None, help="Domyslna tapeta (kanoniczna lub nazwa zrodlowa)")
@@ -224,7 +263,8 @@ def main():
             nazwa_lower = nazwa.lower()
             is_btp = nazwa_lower.endswith(".btp")
             is_jpeg = nazwa_lower.endswith(".jpg") or nazwa_lower.endswith(".jpeg")
-            if not is_btp and not is_jpeg:
+            is_png = nazwa_lower.endswith(".png")
+            if not is_btp and not is_jpeg and not is_png:
                 continue
             if not bezpieczna_nazwa(nazwa):
                 sys.stderr.write(f"[TAPETY PAK] Ostrzezenie: pomijam niebezpieczna nazwe pliku: {nazwa}\n")
@@ -243,6 +283,9 @@ def main():
                 continue
             if is_jpeg and not waliduj_jpeg(sciezka):
                 sys.stderr.write(f"[TAPETY PAK] Ostrzezenie: pomijam niepoprawny plik JPEG: {sciezka}\n")
+                continue
+            if is_png and not waliduj_png(sciezka):
+                sys.stderr.write(f"[TAPETY PAK] Ostrzezenie: pomijam niepoprawny plik PNG: {sciezka}\n")
                 continue
             with open(sciezka, "rb") as f:
                 zawartosc = f.read()

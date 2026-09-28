@@ -75,7 +75,8 @@ bool wczytaj_plik_obrazu(const char* path, DekodowanyObraz* out) {
             [](void* ptr) { gui_free(ptr); }) == BladObrazu::OK;
     gui_free(file);
     if (ok) {
-        log(tapety_sciezka_jpeg(path) ? "[TAPETY APP] JPEG odczyt+decode us " :
+        log(tapety_sciezka_png(path) ? "[TAPETY APP] PNG odczyt+decode us " :
+            tapety_sciezka_jpeg(path) ? "[TAPETY APP] JPEG odczyt+decode us " :
             "[TAPETY APP] BTP odczyt+decode us ");
         log_uint(static_cast<unsigned>((gui_czas_monotoniczny_ns() - start) / 1000U));
         log("\n");
@@ -121,6 +122,8 @@ void pobierz_nazwe_wyswietlana(const char* sciezka, const char* plik, char* dst,
     if (len >= 4 && tapety_koncowka(plik, ".btp")) {
         len -= 4;
     } else if (len >= 4 && tapety_koncowka(plik, ".jpg")) {
+        len -= 4;
+    } else if (len >= 4 && tapety_koncowka(plik, ".png")) {
         len -= 4;
     } else if (len >= 5 && tapety_koncowka(plik, ".jpeg")) {
         len -= 5;
@@ -258,8 +261,9 @@ void odkryj_tapety() {
 
                 const bool is_btp = tapety_koncowka(plik, ".btp");
                 const bool is_jpeg = tapety_koncowka(plik, ".jpg") || tapety_koncowka(plik, ".jpeg");
+                const bool is_png = tapety_koncowka(plik, ".png");
 
-                if (is_btp || is_jpeg) {
+                if (is_btp || is_jpeg || is_png) {
                     char pelna[TAPETY_SCIEZKA_MAX]{};
                     size_t p = 0;
                     constexpr char prefix[] = "/tapety/";
@@ -288,6 +292,15 @@ void odkryj_tapety() {
                         } else if (is_jpeg && tapety_sciezka_jpeg(pelna)) {
                             uint32_t rozmiar = 0;
                             if (pobierz_rozmiar_pliku(pelna, &rozmiar) && rozmiar >= 4 && rozmiar <= TAPETY_PLIK_MAX) {
+                                if (liczba_tapet < static_cast<int>(TAPETY_MAX - 1)) {
+                                    tapety_kopiuj(lista_tapet[liczba_tapet].sciezka, pelna, sizeof(lista_tapet[0].sciezka));
+                                    pobierz_nazwe_wyswietlana(pelna, plik, lista_tapet[liczba_tapet].nazwa, sizeof(lista_tapet[0].nazwa));
+                                    ++liczba_tapet;
+                                }
+                            }
+                        } else if (is_png && tapety_sciezka_png(pelna)) {
+                            uint32_t rozmiar = 0;
+                            if (pobierz_rozmiar_pliku(pelna, &rozmiar) && rozmiar >= 8 && rozmiar <= TAPETY_PLIK_MAX) {
                                 if (liczba_tapet < static_cast<int>(TAPETY_MAX - 1)) {
                                     tapety_kopiuj(lista_tapet[liczba_tapet].sciezka, pelna, sizeof(lista_tapet[0].sciezka));
                                     pobierz_nazwe_wyswietlana(pelna, plik, lista_tapet[liczba_tapet].nazwa, sizeof(lista_tapet[0].nazwa));
@@ -383,7 +396,7 @@ void wybierz_plik(Przycisk*, void* data) {
     auto* okno = static_cast<Okno*>(data);
     if (!okno) return;
     DialogPliku::otworz(okno->zarzadca_popupow(), "/uzytkownicy/Pulpit",
-        "Wszystkie obsługiwane obrazy|*.jpg;*.jpeg;*.btp;;JPEG|*.jpg;*.jpeg;;BTP|*.btp",
+        "Wszystkie obsługiwane obrazy|*.jpg;*.jpeg;*.png;*.btp;;PNG|*.png;;JPEG|*.jpg;*.jpeg;;BTP|*.btp",
         [](DialogPliku*, WynikDialoguPliku result, const char* path, void*) {
             if (result != WynikDialoguPliku::Wybrano || !path || !miniatury) return;
             if (tapety_sciezka(path)) {

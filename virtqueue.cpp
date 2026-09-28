@@ -105,6 +105,7 @@ VirtQueue* virtqueue_create(VirtioPciDevice* dev, uint16_t queue_index) {
     if (!dev || !dev->common_cfg) return nullptr;
 
     // 1. Wybor kolejki w kontrolerze transportu
+    virtio_pci_diag_trace_queue(dev, queue_index, "queue discovery");
     virtio_pci_select_queue(dev, queue_index);
 
     // 2. Weryfikacja, czy kolejka nie jest juz wlaczona
@@ -137,6 +138,7 @@ VirtQueue* virtqueue_create(VirtioPciDevice* dev, uint16_t queue_index) {
     if (!virtq_dma_alloc(total_dma_size, 4096, &dma_virt, &dma_phys, &dma_pages)) {
         return nullptr;
     }
+    virtio_pci_diag_trace_queue(dev, queue_index, "queue allocation");
 
     // 6. Alokacja obiektu zarzadzania i tablic sledzenia
     VirtQueue* vq = static_cast<VirtQueue*>(kernel_kmalloc(sizeof(VirtQueue)));
@@ -203,11 +205,13 @@ VirtQueue* virtqueue_create(VirtioPciDevice* dev, uint16_t queue_index) {
 
     // 8. Programowanie rejestrow transportu PCI
     virtio_pci_set_queue_size(dev, qsize);
+    virtio_pci_diag_trace_queue(dev, queue_index, "queue physical addresses");
     virtio_pci_set_queue_desc(dev, vq->desc_phys);
     virtio_pci_set_queue_driver(dev, vq->driver_phys);
     virtio_pci_set_queue_device(dev, vq->device_phys);
 
     // 9. Wlaczenie kolejki i weryfikacja
+    virtio_pci_diag_trace_queue(dev, queue_index, "queue enable");
     virtio_pci_set_queue_enable(dev, 1);
     if (virtio_pci_get_queue_enable(dev) != 1) {
         // Rollback w razie odmowy wlaczenia (VirtIO 1.0 sec 4.1.4.3: MUST NOT write 0 to queue_enable)
@@ -440,4 +444,3 @@ uint16_t virtqueue_get_num_free(const VirtQueue* vq) {
     if (!vq) return 0;
     return vq->num_free;
 }
-

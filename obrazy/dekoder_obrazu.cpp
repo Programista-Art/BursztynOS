@@ -20,7 +20,24 @@ void* obraz_realloc(void* p, size_t old_n, size_t new_n) {
 }
 }
 
+#if defined(__STDC_HOSTED__) && !__STDC_HOSTED__
+extern "C" {
+void* memcpy(void* dst, const void* src, size_t n) {
+    auto* d = static_cast<uint8_t*>(dst);
+    const auto* s = static_cast<const uint8_t*>(src);
+    for (size_t i = 0; i < n; ++i) d[i] = s[i];
+    return dst;
+}
+void* memset(void* dst, int v, size_t n) {
+    auto* d = static_cast<uint8_t*>(dst);
+    for (size_t i = 0; i < n; ++i) d[i] = static_cast<uint8_t>(v);
+    return dst;
+}
+}
+#endif
+
 #define STBI_ONLY_JPEG
+#define STBI_ONLY_PNG
 #define STBI_STRICT_JPEG_ENTROPY
 #define STBI_NO_STDIO
 #define STBI_NO_SIMD
@@ -37,6 +54,12 @@ void* obraz_realloc(void* p, size_t old_n, size_t new_n) {
 
 namespace {
 uint16_t be16(const uint8_t* p) { return static_cast<uint16_t>((p[0] << 8) | p[1]); }
+uint32_t be32(const uint8_t* p) {
+    return (static_cast<uint32_t>(p[0]) << 24) |
+           (static_cast<uint32_t>(p[1]) << 16) |
+           (static_cast<uint32_t>(p[2]) << 8)  |
+            static_cast<uint32_t>(p[3]);
+}
 bool limit(uint32_t w, uint32_t h) {
     return w && h && w <= OBRAZ_MAX_BOK && h <= OBRAZ_MAX_BOK &&
            static_cast<uint64_t>(w) * h <= OBRAZ_MAX_PIKSELE;
@@ -218,6 +241,65 @@ BladObrazu sprawdz_jpeg(const uint8_t* p, size_t n, uint32_t* ow, uint32_t* oh) 
     return BladObrazu::Uszkodzony;
 }
 
+BladObrazu sprawdz_png(const uint8_t* p, size_t n, uint32_t* ow, uint32_t* oh) {
+    if (ow) *ow = 0;
+    if (oh) *oh = 0;
+    if (!p || n < 8 + 12 + 13 + 12 || n > OBRAZ_MAX_PLIK)
+        return BladObrazu::Format;
+    if (p[0] != 0x89 || p[1] != 'P' || p[2] != 'N' || p[3] != 'G' ||
+        p[4] != 0x0d || p[5] != 0x0a || p[6] != 0x1a || p[7] != 0x0a)
+        return BladObrazu::Format;
+
+    const uint32_t ihdr_len = be32(p + 8);
+    if (ihdr_len != 13) return BladObrazu::Uszkodzony;
+    if (p[12] != 'I' || p[13] != 'H' || p[14] != 'D' || p[15] != 'R') return BladObrazu::Uszkodzony;
+
+    const uint32_t w = be32(p + 16);
+    const uint32_t h = be32(p + 20);
+    if (!limit(w, h)) return BladObrazu::ZaDuzy;
+
+    const uint8_t bit_depth = p[24];
+    const uint8_t color_type = p[25];
+    const uint8_t comp = p[26];
+    const uint8_t filt = p[27];
+    const uint8_t interlace = p[28];
+
+    if (comp != 0 || filt != 0 || interlace > 1) return BladObrazu::Uszkodzony;
+
+    bool valid_combo = false;
+    if (color_type == 0 && (bit_depth == 1 || bit_depth == 2 || bit_depth == 4 || bit_depth == 8 || bit_depth == 16)) valid_combo = true;
+    else if (color_type == 2 && (bit_depth == 8 || bit_depth == 16)) valid_combo = true;
+    else if (color_type == 3 && (bit_depth == 1 || bit_depth == 2 || bit_depth == 4 || bit_depth == 8)) valid_combo = true;
+    else if (color_type == 4 && (bit_depth == 8 || bit_depth == 16)) valid_combo = true;
+    else if (color_type == 6 && (bit_depth == 8 || bit_depth == 16)) valid_combo = true;
+
+    if (!valid_combo) return BladObrazu::Uszkodzony;
+
+    size_t offset = 8 + 12 + 13;
+    bool has_idat = false;
+    bool has_iend = false;
+
+    while (offset + 12 <= n) {
+        const uint32_t chunk_len = be32(p + offset);
+        const uint8_t* type = p + offset + 4;
+        if (chunk_len > n - (offset + 12)) {
+            return BladObrazu::Uszkodzony;
+        }
+        if (type[0] == 'I' && type[1] == 'D' && type[2] == 'A' && type[3] == 'T') {
+            has_idat = true;
+        } else if (type[0] == 'I' && type[1] == 'E' && type[2] == 'N' && type[3] == 'D') {
+            has_iend = true;
+            break;
+        }
+        offset += 12 + chunk_len;
+    }
+
+    if (!has_idat || !has_iend) return BladObrazu::Uszkodzony;
+    if (ow) *ow = w;
+    if (oh) *oh = h;
+    return BladObrazu::OK;
+}
+
 BladObrazu dekoduj_obraz(const uint8_t* dane, size_t n, DekodowanyObraz* out,
                          AlokujObraz alokuj, ZwolnijObraz zwolnij) {
     if (!out || !alokuj || !zwolnij) return BladObrazu::Argument;
@@ -242,6 +324,50 @@ BladObrazu dekoduj_obraz(const uint8_t* dane, size_t n, DekodowanyObraz* out,
         for (size_t i = 0; i < count; ++i) {
             uint8_t r = rgba[4*i], g = rgba[4*i+1], b = rgba[4*i+2];
             rgba[4*i] = b; rgba[4*i+1] = g; rgba[4*i+2] = r; rgba[4*i+3] = 255;
+        }
+        *out = {w, h, w * 4, OBRAZ_BGRA8888, rgba, count * 4};
+        return BladObrazu::OK;
+    }
+    if (f == FormatObrazu::PNG) {
+        const BladObrazu valid = sprawdz_png(dane, n, &w, &h);
+        if (valid != BladObrazu::OK) return valid;
+        if (n > 0x7fffffffU) return BladObrazu::ZaDuzy;
+        g_alokuj = alokuj; g_zwolnij = zwolnij;
+        int x = 0, y = 0, comps = 0;
+        stbi_uc* rgba = stbi_load_from_memory(dane, static_cast<int>(n), &x, &y, &comps, 4);
+        g_alokuj = nullptr; g_zwolnij = nullptr;
+        if (!rgba || x != static_cast<int>(w) || y != static_cast<int>(h)) {
+            if (rgba) zwolnij(rgba);
+            return BladObrazu::Uszkodzony;
+        }
+        const size_t count = static_cast<size_t>(w) * h;
+        constexpr uint8_t bg_r = 0x1A;
+        constexpr uint8_t bg_g = 0x0B;
+        constexpr uint8_t bg_b = 0x00;
+        for (size_t i = 0; i < count; ++i) {
+            uint8_t r = rgba[4 * i];
+            uint8_t g = rgba[4 * i + 1];
+            uint8_t b = rgba[4 * i + 2];
+            uint8_t a = rgba[4 * i + 3];
+            if (a == 255) {
+                rgba[4 * i] = b;
+                rgba[4 * i + 1] = g;
+                rgba[4 * i + 2] = r;
+                rgba[4 * i + 3] = 255;
+            } else if (a == 0) {
+                rgba[4 * i] = bg_b;
+                rgba[4 * i + 1] = bg_g;
+                rgba[4 * i + 2] = bg_r;
+                rgba[4 * i + 3] = 255;
+            } else {
+                uint32_t out_r = (static_cast<uint32_t>(r) * a + static_cast<uint32_t>(bg_r) * (255 - a) + 127) / 255;
+                uint32_t out_g = (static_cast<uint32_t>(g) * a + static_cast<uint32_t>(bg_g) * (255 - a) + 127) / 255;
+                uint32_t out_b = (static_cast<uint32_t>(b) * a + static_cast<uint32_t>(bg_b) * (255 - a) + 127) / 255;
+                rgba[4 * i] = static_cast<uint8_t>(out_b);
+                rgba[4 * i + 1] = static_cast<uint8_t>(out_g);
+                rgba[4 * i + 2] = static_cast<uint8_t>(out_r);
+                rgba[4 * i + 3] = 255;
+            }
         }
         *out = {w, h, w * 4, OBRAZ_BGRA8888, rgba, count * 4};
         return BladObrazu::OK;
@@ -274,13 +400,22 @@ BladObrazu dekoduj_jpeg(const uint8_t* dane, size_t n, DekodowanyObraz* out,
     return dekoduj_obraz(dane, n, out, alokuj, zwolnij);
 }
 
+BladObrazu dekoduj_png(const uint8_t* dane, size_t n, DekodowanyObraz* out,
+                       AlokujObraz alokuj, ZwolnijObraz zwolnij) {
+    if (!out || !alokuj || !zwolnij) return BladObrazu::Argument;
+    *out = {};
+    if (!dane || !n || n > OBRAZ_MAX_PLIK) return BladObrazu::ZaDuzy;
+    if (rozpoznaj_obraz(dane, n) != FormatObrazu::PNG) return BladObrazu::Format;
+    return dekoduj_obraz(dane, n, out, alokuj, zwolnij);
+}
+
 const char* blad_obrazu_komunikat(BladObrazu b) {
     switch (b) {
         case BladObrazu::OK: return "Obraz poprawny.";
         case BladObrazu::Argument: return "Niepoprawne argumenty dekodera obrazu.";
-        case BladObrazu::Format: return "Nie można odczytać pliku JPEG.";
-        case BladObrazu::Nieobslugiwany: return "JPEG progresywny nie jest jeszcze obsługiwany.";
-        case BladObrazu::Uszkodzony: return "Uszkodzony plik JPEG.";
+        case BladObrazu::Format: return "Nie można odczytać pliku obrazu.";
+        case BladObrazu::Nieobslugiwany: return "Format obrazu nie jest jeszcze obsługiwany.";
+        case BladObrazu::Uszkodzony: return "Uszkodzony plik obrazu.";
         case BladObrazu::ZaDuzy: return "Obraz ma zbyt duże wymiary.";
         case BladObrazu::Pamiec: return "Brak pamięci do dekodowania obrazu.";
         default: return "Błąd dekodowania obrazu.";

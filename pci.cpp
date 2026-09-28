@@ -1299,8 +1299,12 @@ extern "C" uint8_t pci_find_capability(uint8_t bus, uint8_t slot, uint8_t func, 
         return 0;
     }
 
-    uint8_t cap_ptr = pci_odczytaj_byte(bus, slot, func, PCI_CAP_POINTER_OFFSET) & ~0x03U;
+    const uint8_t raw_cap_ptr = pci_odczytaj_byte(bus, slot, func, PCI_CAP_POINTER_OFFSET);
+    if ((raw_cap_ptr & 0x03U) != 0 || raw_cap_ptr < 0x40 || raw_cap_ptr > 0xFC) {
+        return 0;
+    }
 
+    uint8_t cap_ptr = raw_cap_ptr;
     uint64_t visited_mask = 0;
     uint32_t hops = 0;
 
@@ -1317,11 +1321,14 @@ extern "C" uint8_t pci_find_capability(uint8_t bus, uint8_t slot, uint8_t func, 
             return cap_ptr;
         }
 
-        const uint8_t next = pci_odczytaj_byte(bus, slot, func, static_cast<uint8_t>(cap_ptr + 1)) & ~0x03U;
-        if (next == 0) {
+        const uint8_t raw_next = pci_odczytaj_byte(bus, slot, func, static_cast<uint8_t>(cap_ptr + 1));
+        if (raw_next == 0) {
             break;
         }
-        cap_ptr = next;
+        if ((raw_next & 0x03U) != 0 || raw_next < 0x40 || raw_next > 0xFC) {
+            return 0; // Nieprawidlowy wskaznik nastepnej capability
+        }
+        cap_ptr = raw_next;
     }
 
     return 0;

@@ -29,6 +29,10 @@ BladObrazu dekoduj_jpeg(const uint8_t* dane, size_t n, DekodowanyObraz* out,
                         AlokujObraz alokuj, ZwolnijObraz zwolnij);
 BladObrazu sprawdz_jpeg(const uint8_t* dane, size_t n,
                         uint32_t* szerokosc, uint32_t* wysokosc);
+BladObrazu dekoduj_png(const uint8_t* dane, size_t n, DekodowanyObraz* out,
+                       AlokujObraz alokuj, ZwolnijObraz zwolnij);
+BladObrazu sprawdz_png(const uint8_t* dane, size_t n,
+                       uint32_t* szerokosc, uint32_t* wysokosc);
 const char* blad_obrazu_komunikat(BladObrazu b);
 
 inline bool dekoduj_obraz(const uint8_t* dane, size_t n, DekodowanyObraz* out,
@@ -44,3 +48,11 @@ inline bool dekoduj_jpeg(const uint8_t* dane, size_t n, DekodowanyObraz* out,
     if (blad) *blad = err;
     return err == BladObrazu::OK;
 }
+
+inline bool dekoduj_png(const uint8_t* dane, size_t n, DekodowanyObraz* out,
+                        AlokujObraz alokuj, ZwolnijObraz zwolnij, BladObrazu* blad) {
+    BladObrazu err = dekoduj_png(dane, n, out, alokuj, zwolnij);
+    if (blad) *blad = err;
+    return err == BladObrazu::OK;
+}
+

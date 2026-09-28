@@ -31,6 +31,8 @@ class TestTapetyNazwy(unittest.TestCase):
             "łąka zachód słońca.jpg",
             "Tapeta (nowa) 2026.jpg",
             "a.jpg",
+            "nowa_tapeta.png",
+            "góry-zima.png",
             "bursztyn01.btp",
             "BURSZTYN10.BTP",
         ]
@@ -49,7 +51,7 @@ class TestTapetyNazwy(unittest.TestCase):
             "plik\r\n.jpg",
             'cudzyslow"plik.jpg',
             "brak_rozszerzenia",
-            "zly_format.png",
+            "zly_format.gif",
             "zly_format.bmp",
             ".jpg",
             "a.j",
