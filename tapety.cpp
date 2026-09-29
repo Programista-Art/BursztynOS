@@ -9,6 +9,10 @@
 #include "pamiec.h"
 #include "bufory_grafiki.h"
 
+#ifndef BURSZTYNDIAGTAPETYPERF
+#define BURSZTYNDIAGTAPETYPERF 0
+#endif
+
 extern uint64_t g_multiboot_info_ptr;
 extern bool skopiuj_z_przestrzeni_uzytkownika(void*, const void*, size_t);
 extern bool czy_bezpieczny_zakres_uzytkownika_do_odczytu(const void*, size_t);
@@ -129,6 +133,9 @@ bool znajdz_modul_tapet(uint64_t mbi, ModulMB2* wynik) {
 constexpr const char* TAPETY_INWENTARZ_CFG = "/ustawienia/tapetysystemowe.cfg";
 constexpr const char* TAPETY_MANIFEST_CFG = "/tapety/manifest.cfg";
 constexpr size_t TAPETY_INWENTARZ_MAX = 64;
+constexpr size_t TAPETY_PAKIET_MAX = TAPETY_INWENTARZ_MAX * 2;
+constexpr uint32_t TAPETY_MINIATURA_W = TAPETY_MINI_W;
+constexpr uint32_t TAPETY_MINIATURA_H = TAPETY_MINI_H;
 
 struct SystemowyWpisInwentarza {
     char nazwa[TAPETY_SCIEZKA_MAX];       // Kanoniczna nazwa (np. bursztyn01.btp, wp_...jpg)
@@ -143,6 +150,7 @@ struct WpisPakietu {
     uint32_t rozmiar;
     uint32_t crc32;
     const uint8_t* payload;
+    bool miniatura;
 };
 
 // Statyczne bufory w sekcji .bss zapobiegaja przepelnieniu 16 KiB stosu jadra.
@@ -150,7 +158,71 @@ char s_inwentarz_io_buf[16384];
 SystemowyWpisInwentarza s_inwentarz_wpisy[TAPETY_INWENTARZ_MAX];
 SystemowyWpisInwentarza s_inwentarz_poprzedni[TAPETY_INWENTARZ_MAX];
 SystemowyWpisInwentarza s_inwentarz_biezacy[TAPETY_INWENTARZ_MAX];
-WpisPakietu s_pakiet_wpisy[TAPETY_INWENTARZ_MAX];
+WpisPakietu s_pakiet_wpisy[TAPETY_PAKIET_MAX];
+
+bool tapety_czy_nazwa_miniatury(const char* nazwa) {
+    if (!nazwa) return false;
+    constexpr char prefix[] = "miniatury/";
+    size_t p = 0;
+    for (; prefix[p]; ++p) if (nazwa[p] != prefix[p]) return false;
+    const char* leaf = nazwa + p;
+    return tapeta_sprawdz_nazwe_utf8(leaf) && tapety_koncowka(leaf, ".btp");
+}
+
+bool tapety_miniatura_dla_nazwy(const char* kanoniczna, char* out, size_t cap) {
+    if (!kanoniczna || !out || cap == 0) return false;
+    constexpr char prefix[] = "miniatury/";
+    size_t p = 0;
+    for (; prefix[p] && p + 1 < cap; ++p) out[p] = prefix[p];
+    size_t dot = 0;
+    while (kanoniczna[dot] && kanoniczna[dot] != '.') ++dot;
+    if (!dot || !kanoniczna[dot]) return false;
+    for (size_t i = 0; i < dot && p + 1 < cap; ++i) out[p++] = kanoniczna[i];
+    constexpr char ext[] = ".btp";
+    for (size_t i = 0; ext[i] && p + 1 < cap; ++i) out[p++] = ext[i];
+    out[p] = '\0';
+    return tapety_czy_nazwa_miniatury(out);
+}
+
+bool tapety_sciezka_z_pakietu(const WpisPakietu& e, char* out, size_t cap) {
+    if (!out || cap == 0 || !e.nazwa[0]) return false;
+    size_t p = 0;
+    constexpr char prefix[] = "/tapety/";
+    for (; prefix[p] && p + 1 < cap; ++p) out[p] = prefix[p];
+    for (size_t i = 0; e.nazwa[i] && p + 1 < cap; ++i) out[p++] = e.nazwa[i];
+    out[p] = 0;
+    return true;
+}
+
+bool tapety_sciezka_miniatury_dla_tapety(const char* kanoniczna, char* out, size_t cap) {
+    char mini[TAPETY_SCIEZKA_MAX]{};
+    if (!tapety_miniatura_dla_nazwy(kanoniczna, mini, sizeof(mini))) return false;
+    size_t p = 0;
+    constexpr char prefix[] = "/tapety/";
+    for (; prefix[p] && p + 1 < cap; ++p) out[p] = prefix[p];
+    for (size_t i = 0; mini[i] && p + 1 < cap; ++i) out[p++] = mini[i];
+    out[p] = 0;
+    return true;
+}
+
+bool tapety_miniatura_btp_poprawna(const uint8_t* dane, uint32_t rozmiar) {
+    if (!dane || rozmiar < 14 || rozmiar > TAPETY_PLIK_MAX) return false;
+    BtpInfo info{};
+    if (btpsprawdzplik(dane, rozmiar, &info) != BTPOK) return false;
+    return info.szerokosc == TAPETY_MINIATURA_W && info.wysokosc == TAPETY_MINIATURA_H;
+}
+
+bool tapety_miniatura_plik_poprawny(const char* path) {
+    const uint32_t n = rozmiar_pliku(path);
+    if (n < 14 || n > TAPETY_PLIK_MAX) return false;
+    uint8_t header[128]{};
+    uint32_t got = 0;
+    const uint32_t ile = n < sizeof(header) ? n : static_cast<uint32_t>(sizeof(header));
+    if (!czytaj_fragment_pliku(path, 0, reinterpret_cast<char*>(header), ile, &got) || got != ile) return false;
+    BtpInfo info{};
+    if (btpnaglowek(header, ile, &info) != BTPOK) return false;
+    return info.szerokosc == TAPETY_MINIATURA_W && info.wysokosc == TAPETY_MINIATURA_H;
+}
 
 size_t wczytaj_inwentarz(SystemowyWpisInwentarza* wpisy, size_t max_wpisow, char* domyslna_out = nullptr, size_t domyslna_cap = 0) {
     if (!wpisy || !max_wpisow) return 0;
@@ -362,7 +434,7 @@ void instaluj(uint64_t mbi,bool tylko_przygotuj=false) {
         instalacja_przygotowana=false;instalacja_blad=false;instalacja_pakiet_liczba=0;
         instalacja_bajty=instalacja_bajty_razem=0;
     }
-    if (!psf_czy_gotowy() || !zapewnij_katalog("/tapety")) {
+    if (!psf_czy_gotowy() || !zapewnij_katalog("/tapety") || !zapewnij_katalog("/tapety/miniatury")) {
         klog_serial("[TAPETA] BLAD utworzenia /tapety; start bedzie kontynuowany.");
         return;
     }
@@ -392,7 +464,7 @@ void instaluj(uint64_t mbi,bool tylko_przygotuj=false) {
 
     const uint32_t wersja = odczytaj_u32_le(p + 8);
     const uint32_t liczba_plikow = odczytaj_u32_le(p + 12);
-    wymagane_tapety=liczba_plikow;
+    wymagane_tapety=0;
     const uint32_t hdr_sz = odczytaj_u32_le(p + 16);
     const uint32_t tbl_sz = odczytaj_u32_le(p + 20);
     const uint32_t dat_sz = odczytaj_u32_le(p + 24);
@@ -402,7 +474,7 @@ void instaluj(uint64_t mbi,bool tylko_przygotuj=false) {
         tbl_sz > mod.rozmiar - hdr_sz ||
         dat_sz > mod.rozmiar - hdr_sz - tbl_sz ||
         tot_sz > mod.rozmiar ||
-        liczba_plikow > TAPETY_INWENTARZ_MAX) {
+        liczba_plikow > TAPETY_PAKIET_MAX) {
         klog_serial("[TAPETA-BLAD] Uszkodzona struktura naglowka tapety.pak.");
         OdblokujZakres(mod.start, mod.rozmiar);
         return;
@@ -410,8 +482,10 @@ void instaluj(uint64_t mbi,bool tylko_przygotuj=false) {
 
     log_liczba("[TAPETA] Pakiet tapety.pak, liczba plikow: ", liczba_plikow);
 
-    for (size_t i = 0; i < TAPETY_INWENTARZ_MAX; ++i) {
+    for (size_t i = 0; i < TAPETY_PAKIET_MAX; ++i) {
         s_pakiet_wpisy[i] = {};
+    }
+    for (size_t i = 0; i < TAPETY_INWENTARZ_MAX; ++i) {
         s_inwentarz_poprzedni[i] = {};
         s_inwentarz_biezacy[i] = {};
     }
@@ -437,15 +511,20 @@ void instaluj(uint64_t mbi,bool tylko_przygotuj=false) {
         raw_nazwa[nlen] = '\0';
         toff += nlen + npad;
 
-        if (!tapeta_sprawdz_nazwe_utf8(raw_nazwa)) {
-            log_sciezka("[TAPETA-BLAD] Niepoprawna nazwa pliku w pakiecie: ", raw_nazwa);
-            continue;
-        }
-
         char canon[TAPETY_SCIEZKA_MAX]{};
-        if (!tapeta_kanoniczna_nazwa(raw_nazwa, canon, sizeof(canon))) {
-            log_sciezka("[TAPETA-BLAD] Blad kanonizacji nazwy: ", raw_nazwa);
-            continue;
+        bool jest_miniatura = false;
+        if (tapety_czy_nazwa_miniatury(raw_nazwa)) {
+            tapety_kopiuj(canon, raw_nazwa, sizeof(canon));
+            jest_miniatura = true;
+        } else {
+            if (!tapeta_sprawdz_nazwe_utf8(raw_nazwa)) {
+                log_sciezka("[TAPETA-BLAD] Niepoprawna nazwa pliku w pakiecie: ", raw_nazwa);
+                continue;
+            }
+            if (!tapeta_kanoniczna_nazwa(raw_nazwa, canon, sizeof(canon))) {
+                log_sciezka("[TAPETA-BLAD] Blad kanonizacji nazwy: ", raw_nazwa);
+                continue;
+            }
         }
 
         bool duplikat = false;
@@ -469,7 +548,12 @@ void instaluj(uint64_t mbi,bool tylko_przygotuj=false) {
         const bool is_jpeg = tapety_koncowka(canon, ".jpg") || tapety_koncowka(canon, ".jpeg");
         const bool is_png = tapety_koncowka(canon, ".png");
 
-        if (is_btp) {
+        if (jest_miniatura) {
+            if (!tapety_miniatura_btp_poprawna(p + poff, bsz)) {
+                log_sciezka("[TAPETA-BLAD] Niepoprawna miniatura BTP w pakiecie: ", raw_nazwa);
+                continue;
+            }
+        } else if (is_btp) {
             if (bsz < 14) {
                 log_sciezka("[TAPETA-BLAD] Zbyt maly plik BTP1 w pakiecie: ", raw_nazwa);
                 continue;
@@ -506,7 +590,23 @@ void instaluj(uint64_t mbi,bool tylko_przygotuj=false) {
         s_pakiet_wpisy[pakiet_liczba].rozmiar = bsz;
         s_pakiet_wpisy[pakiet_liczba].crc32 = crc;
         s_pakiet_wpisy[pakiet_liczba].payload = p + poff;
+        s_pakiet_wpisy[pakiet_liczba].miniatura = jest_miniatura;
+        if (!jest_miniatura) ++wymagane_tapety;
         ++pakiet_liczba;
+    }
+
+    for (size_t i = 0; i < pakiet_liczba; ++i) {
+        if (s_pakiet_wpisy[i].miniatura) continue;
+        char oczekiwana[TAPETY_SCIEZKA_MAX]{};
+        bool znaleziona = false;
+        if (!tapety_miniatura_dla_nazwy(s_pakiet_wpisy[i].nazwa, oczekiwana, sizeof(oczekiwana))) continue;
+        for (size_t j = 0; j < pakiet_liczba; ++j) {
+            if (s_pakiet_wpisy[j].miniatura && tapety_rowne(s_pakiet_wpisy[j].nazwa, oczekiwana)) {
+                znaleziona = true;
+                break;
+            }
+        }
+        if (!znaleziona) log_sciezka("[TAPETA-BLAD] Brak miniatury w pakiecie dla: ", s_pakiet_wpisy[i].nazwa);
     }
 
     const size_t poprzednia_liczba = wczytaj_inwentarz(s_inwentarz_poprzedni, TAPETY_INWENTARZ_MAX);
@@ -564,11 +664,7 @@ void instaluj(uint64_t mbi,bool tylko_przygotuj=false) {
 
     for (size_t i = 0; i < pakiet_liczba; ++i) {
         char sciezka[TAPETY_SCIEZKA_MAX]{};
-        size_t sp = 0;
-        constexpr char prefix[] = "/tapety/";
-        for (; prefix[sp] && sp + 1 < sizeof(sciezka); ++sp) sciezka[sp] = prefix[sp];
-        for (size_t k = 0; s_pakiet_wpisy[i].nazwa[k] && sp + 1 < sizeof(sciezka); ++k) sciezka[sp++] = s_pakiet_wpisy[i].nazwa[k];
-        sciezka[sp] = '\0';
+        if (!tapety_sciezka_z_pakietu(s_pakiet_wpisy[i], sciezka, sizeof(sciezka))) continue;
 
         psf_metadane meta{};
         if (pobierz_metadane_tworu(sciezka, &meta) && meta.rozmiar == s_pakiet_wpisy[i].rozmiar) {
@@ -587,7 +683,7 @@ void instaluj(uint64_t mbi,bool tylko_przygotuj=false) {
             ++nowe;
         }
 
-        if (biezaca_liczba < TAPETY_INWENTARZ_MAX) {
+        if (!s_pakiet_wpisy[i].miniatura && biezaca_liczba < TAPETY_INWENTARZ_MAX) {
             tapety_kopiuj(s_inwentarz_biezacy[biezaca_liczba].nazwa, s_pakiet_wpisy[i].nazwa, sizeof(s_inwentarz_biezacy[0].nazwa));
             tapety_kopiuj(s_inwentarz_biezacy[biezaca_liczba].wyswietlana, s_pakiet_wpisy[i].wyswietlana, sizeof(s_inwentarz_biezacy[0].wyswietlana));
             s_inwentarz_biezacy[biezaca_liczba].rozmiar = s_pakiet_wpisy[i].rozmiar;
@@ -693,6 +789,7 @@ bool zastosuj(const TapetyKonfiguracja& c, bool cicho, bool publikuj = true) {
     jpeg_do_przywrocenia.sciezka[0] = 0;
     if (publikuj) grafika_publikuj_tapete();
     if (!cicho) {
+#if BURSZTYNDIAGTAPETYPERF
         log_sciezka("[TAPETA] Wybrano ", c.sciezka);
         log_sciezka("[TAPETA] Tryb ", tapety_nazwa_trybu(c.tryb));
 #if BURSZTYN_DIAG_TAPETY
@@ -703,6 +800,7 @@ bool zastosuj(const TapetyKonfiguracja& c, bool cicho, bool publikuj = true) {
         log_liczba("[TAPETA] Odczyt us ", statystyki.odczyt_us);
         log_liczba("[TAPETA] Dekodowanie us ", statystyki.dekoduj_us);
         log_liczba("[TAPETA] Przygotowanie us ", statystyki.skaluj_us);
+#endif
 #endif
         klog_serial("[TAPETA] Tapeta gotowa.");
     }
@@ -824,6 +922,8 @@ bool tapety_weryfikuj_instalacje(){
         for(size_t j=0;s_inwentarz_wpisy[i].nazwa[j]&&k+1<sizeof(path);++j)path[k++]=s_inwentarz_wpisy[i].nazwa[j];
         const auto&e=s_inwentarz_wpisy[i];
         if(rozmiar_pliku(path)!=e.rozmiar||tapety_plik_crc32(path,e.rozmiar)!=e.crc32)return false;
+        char mini[TAPETY_SCIEZKA_MAX]{};
+        if(!tapety_sciezka_miniatury_dla_tapety(e.nazwa,mini,sizeof(mini))||!tapety_miniatura_plik_poprawny(mini))return false;
     }
     return true;
 }
@@ -874,11 +974,8 @@ bool tapety_instaluj_step(uint64_t*wykonane,uint32_t*elementy,uint32_t*wszystkie
         if(!zapisz_inwentarz(s_inwentarz_biezacy,instalacja_biezaca_liczba)){instalacja_blad=true;return false;}
         instalacja_przygotowana=false;if(gotowe)*gotowe=true;return true;
     }
-    const auto&e=s_pakiet_wpisy[instalacja_indeks];char path[TAPETY_SCIEZKA_MAX]{};size_t p=0;
-    constexpr char prefix[]="/tapety/";
-    for(;prefix[p]&&p+1<sizeof(path);++p){path[p]=prefix[p];}
-    for(size_t i=0;e.nazwa[i]&&p+1<sizeof(path);++i){path[p++]=e.nazwa[i];}
-    path[p]=0;
+    const auto&e=s_pakiet_wpisy[instalacja_indeks];char path[TAPETY_SCIEZKA_MAX]{};
+    if(!tapety_sciezka_z_pakietu(e,path,sizeof(path))){instalacja_blad=true;return false;}
     constexpr uint32_t PORCJA=4*1024;
     static_assert(PORCJA<=4096,"WALLPAPERS STEP nie moze przekroczyc jednego bloku BSP2");
     if(instalacja_crc_offset<e.rozmiar){
@@ -910,12 +1007,14 @@ bool tapety_instaluj_step(uint64_t*wykonane,uint32_t*elementy,uint32_t*wszystkie
     instalacja_offset+=n;instalacja_bajty+=n;
     if(instalacja_offset==e.rozmiar){
         if(!psf_flush_cache()){instalacja_blad=true;return false;}
-        s_inwentarz_biezacy[instalacja_biezaca_liczba]={};
-        tapety_kopiuj(s_inwentarz_biezacy[instalacja_biezaca_liczba].nazwa,e.nazwa,sizeof(s_inwentarz_biezacy[0].nazwa));
-        tapety_kopiuj(s_inwentarz_biezacy[instalacja_biezaca_liczba].wyswietlana,e.wyswietlana,sizeof(s_inwentarz_biezacy[0].wyswietlana));
-        s_inwentarz_biezacy[instalacja_biezaca_liczba].rozmiar=e.rozmiar;
-        s_inwentarz_biezacy[instalacja_biezaca_liczba].crc32=e.crc32;
-        ++instalacja_biezaca_liczba;zainstalowane_tapety=static_cast<uint32_t>(instalacja_biezaca_liczba);
+        if(!e.miniatura&&instalacja_biezaca_liczba<TAPETY_INWENTARZ_MAX){
+            s_inwentarz_biezacy[instalacja_biezaca_liczba]={};
+            tapety_kopiuj(s_inwentarz_biezacy[instalacja_biezaca_liczba].nazwa,e.nazwa,sizeof(s_inwentarz_biezacy[0].nazwa));
+            tapety_kopiuj(s_inwentarz_biezacy[instalacja_biezaca_liczba].wyswietlana,e.wyswietlana,sizeof(s_inwentarz_biezacy[0].wyswietlana));
+            s_inwentarz_biezacy[instalacja_biezaca_liczba].rozmiar=e.rozmiar;
+            s_inwentarz_biezacy[instalacja_biezaca_liczba].crc32=e.crc32;
+            ++instalacja_biezaca_liczba;zainstalowane_tapety=static_cast<uint32_t>(instalacja_biezaca_liczba);
+        }
         ++instalacja_indeks;instalacja_offset=0;instalacja_crc_offset=0;instalacja_crc=~0U;
     }
     if(wykonane)*wykonane=instalacja_bajty;
@@ -992,7 +1091,9 @@ static TapetyZrodlo zastosuj_lub_zaplanuj(const TapetyKonfiguracja& c) {
         jpeg_do_przywrocenia = aktualna;
         const bool is_png = tapety_koncowka(c.sciezka, ".png");
         statystyki.zrodlo = is_png ? TAPETY_PNG : TAPETY_JPEG;
+#if BURSZTYNDIAGTAPETYPERF
         log_sciezka(is_png ? "[TAPETA] Wybrano (PNG) " : "[TAPETA] Wybrano (JPEG) ", c.sciezka);
+#endif
         return is_png ? TAPETY_PNG : TAPETY_JPEG;
     }
     return TAPETY_SOLID;
@@ -1126,7 +1227,13 @@ bool tapety_obsluz(const proces_t& proces, const TapetyZadanie& req, TapetyOdpow
     const bool zapis = zapisz_wybor();
     snapshot(out);
     out->status = zapis ? TAPETY_OK : TAPETY_BLAD_ZAPISU;
-    klog_serial(zapis ? "[TAPETA] Wybor zapisany w BSP2." : "[TAPETA] BLAD zapisu wyboru; tapeta aktywna tylko w tej sesji.");
+    if (zapis) {
+#if BURSZTYNDIAGTAPETYPERF
+        klog_serial("[TAPETA] Wybor zapisany w BSP2.");
+#endif
+    } else {
+        klog_serial("[TAPETA] BLAD zapisu wyboru; tapeta aktywna tylko w tej sesji.");
+    }
     return true;
 }
 
@@ -1162,7 +1269,7 @@ bool tapety_obsluz_obraz(const proces_t& proces, const TapetyObrazZadanie& req, 
         !geometria_obrazu(req.szerokosc, req.wysokosc, static_cast<uint32_t>(screen_w),
                           static_cast<uint32_t>(screen_h), static_cast<TrybSkalowaniaObrazu>(base.tryb), &geom) ||
         static_cast<uint64_t>(screen_w) * screen_h * 4 > dst_cap) return true;
-    const uint64_t apply_start = czas_monotoniczny_us();
+    [[maybe_unused]] const uint64_t apply_start = czas_monotoniczny_us();
     uint8_t* stage = static_cast<uint8_t*>(bufor_grafiki_alokuj(static_cast<size_t>(req.bajty)));
     if (!stage) return true;
     const bool copied = skopiuj_z_przestrzeni_uzytkownika(stage, user, static_cast<size_t>(req.bajty));
@@ -1202,6 +1309,7 @@ bool tapety_obsluz_obraz(const proces_t& proces, const TapetyObrazZadanie& req, 
     const bool saved = zapisz_wybor();
     snapshot(out);
     out->status = saved ? TAPETY_OK : TAPETY_BLAD_ZAPISU;
+#if BURSZTYNDIAGTAPETYPERF
     const char* zrodlo_tag = tapety_sciezka_png(base.sciezka) ? "[TAPETA] PNG wybrano " :
                              tapety_sciezka_jpeg(base.sciezka) ? "[TAPETA] JPEG wybrano " :
                              "[TAPETA] BTP wybrano ";
@@ -1210,7 +1318,11 @@ bool tapety_obsluz_obraz(const proces_t& proces, const TapetyObrazZadanie& req, 
                          tapety_sciezka_jpeg(base.sciezka) ? "[TAPETA] JPEG zastosowanie us " :
                          "[TAPETA] BTP zastosowanie us ";
     log_liczba(us_tag, czas_monotoniczny_us() - apply_start);
+#endif
     klog_serial("[TAPETA] Tapeta gotowa.");
+    if (!saved) {
+        klog_serial("[TAPETA] BLAD zapisu wyboru; tapeta aktywna tylko w tej sesji.");
+    }
     return true;
 }
 

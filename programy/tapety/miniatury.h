@@ -32,9 +32,16 @@ public:
         for (uint32_t y = 0; y < TAPETY_MINI_H; ++y) {
             for (uint32_t x = 0; x < TAPETY_MINI_W; ++x) {
                 const bool ramka = (x == 0 || x == TAPETY_MINI_W - 1 || y == 0 || y == TAPETY_MINI_H - 1);
-                const bool krzyz = (x * TAPETY_MINI_H == y * TAPETY_MINI_W) ||
-                                   ((TAPETY_MINI_W - 1 - x) * TAPETY_MINI_H == y * TAPETY_MINI_W);
-                dst[y * TAPETY_MINI_W + x] = ramka ? 0xFF804020U : (krzyz ? 0xFF4A2010U : 0xFF2A1508U);
+                const bool ikona = (x > TAPETY_MINI_W / 2 - 16 && x < TAPETY_MINI_W / 2 + 16 &&
+                                    y > TAPETY_MINI_H / 2 - 12 && y < TAPETY_MINI_H / 2 + 12);
+                const bool ikona_ramka = ikona && (x == TAPETY_MINI_W / 2 - 15 || x == TAPETY_MINI_W / 2 + 15 ||
+                                                   y == TAPETY_MINI_H / 2 - 11 || y == TAPETY_MINI_H / 2 + 11);
+                const bool gora = ikona &&
+                    ((y > TAPETY_MINI_H / 2 + 2 && y < TAPETY_MINI_H / 2 + 9) &&
+                     (x > TAPETY_MINI_W / 2 - 12 + (y - (TAPETY_MINI_H / 2 + 2)) &&
+                      x < TAPETY_MINI_W / 2 - 2 + (y - (TAPETY_MINI_H / 2 + 2)))) ;
+                dst[y * TAPETY_MINI_W + x] = ramka ? 0xFF3A424DU :
+                    (ikona_ramka || gora ? 0xFF7F8B99U : 0xFF1F242BU);
             }
         }
     }
@@ -43,18 +50,18 @@ public:
         bws_wywolaj(1, reinterpret_cast<uint64_t>(path ? path : "(nieznany)"), 0, 0, 0);
         bws_wywolaj(1, reinterpret_cast<uint64_t>("\n"), 0, 0, 0);
     }
-    bool wczytaj(unsigned i, const char* sciezka = nullptr) {
+    bool wczytaj(unsigned i, const char* sciezka = nullptr, bool cicho = false) {
         if (!obraz(i)) return false;
         const char* path = sciezka ? sciezka : (i < TAPETY_LICZBA ? TAPETY_SCIEZKI[i] : nullptr);
         if (!path) return false;
         uint32_t n = 0, read = 0;
         if (!pobierz_rozmiar_pliku(path, &n) || n < 14 || n > TAPETY_PLIK_MAX) {
-            zglos_blad(path);
+            if (!cicho) zglos_blad(path);
             return false;
         }
         auto* plik = static_cast<uint8_t*>(gui_malloc(n));
         if (!plik) {
-            zglos_blad(path);
+            if (!cicho) zglos_blad(path);
             return false;
         }
         BtpInfo info{};
@@ -69,9 +76,15 @@ public:
             for (size_t p = 0; p < count; ++p) src[p] = TAPETY_TLO;
             dec_ok = (btpwczytajirysuj(plik, n, src, info.szerokosc, info.wysokosc, info.szerokosc, count * 4) == BTPOK);
             if (dec_ok) {
-                scale_ok = skaluj_obraz(src, info.szerokosc, info.wysokosc, count * 4,
-                    obraz(i), TAPETY_MINI_W, TAPETY_MINI_H, TAPETY_MINI_W,
-                    TAPETY_MINI_W * TAPETY_MINI_H * 4, TrybSkalowaniaObrazu::Dopasuj, TAPETY_TLO);
+                if (info.szerokosc == TAPETY_MINI_W && info.wysokosc == TAPETY_MINI_H) {
+                    uint32_t* dst = obraz(i);
+                    for (size_t p = 0; dst && p < count; ++p) dst[p] = src[p];
+                    scale_ok = dst != nullptr;
+                } else {
+                    scale_ok = skaluj_obraz(src, info.szerokosc, info.wysokosc, count * 4,
+                        obraz(i), TAPETY_MINI_W, TAPETY_MINI_H, TAPETY_MINI_W,
+                        TAPETY_MINI_W * TAPETY_MINI_H * 4, TrybSkalowaniaObrazu::Dopasuj, TAPETY_TLO);
+                }
             }
             ok = dec_ok && scale_ok;
         }
@@ -88,7 +101,7 @@ public:
 #endif
 
         if (!ok) {
-            zglos_blad(path);
+            if (!cicho) zglos_blad(path);
         }
 
         return ok;

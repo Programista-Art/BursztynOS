@@ -103,6 +103,16 @@ public:
     void przy_zmianie_zaznaczenia(FunkcjaWidoku cb, void* d = nullptr) { cb_wybor_ = cb; dane_wyboru_ = d; }
     void przy_aktywacji(FunkcjaWidoku cb, void* d = nullptr) { cb_aktywacja_ = cb; dane_aktywacji_ = d; }
     void ustaw_renderer(FunkcjaRenderera cb, void* d = nullptr) { renderer_ = cb; dane_renderera_ = d; uniewaznij(); }
+    void odswiez_element(int i) {
+        if (i < 0 || i >= static_cast<int>(liczba_)) return;
+        const uint32_t* source = elementy_[i].piksele;
+        if (source) {
+            for (auto& c : cache_) {
+                if (c.source == source) c = WpisCache{};
+            }
+        }
+        uniewaznij_element(i);
+    }
 
     void ustaw_pelne_wiersze(bool wlaczone = true) {
         if (pelne_wiersze_ == wlaczone) return;

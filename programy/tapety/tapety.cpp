@@ -26,6 +26,10 @@ static_assert(sizeof(NaglowekBur) == 60U, "Naglowek .bur musi miec 60 bajtow");
 #include "../../obrazy/dekoder_obrazu.h"
 
 namespace {
+#ifndef BURSZTYNDIAGTAPETYPERF
+#define BURSZTYNDIAGTAPETYPERF 0
+#endif
+
 constexpr uint32_t TAPETY_MAX = 65;
 constexpr size_t KATALOG_BUFOR_MAX = 16384;
 
@@ -38,48 +42,85 @@ ElementTapety lista_tapet[TAPETY_MAX];
 int liczba_tapet = 0;
 
 void log(const char* t) { bws_wywolaj(1, reinterpret_cast<uint64_t>(t), 0, 0, 0); }
-void log_uint(unsigned v) {
-    char buf[16];
-    int pos = 0;
-    if (v == 0) {
-        buf[pos++] = '0';
-    } else {
-        char rev[16];
-        int rpos = 0;
-        while (v > 0) {
-            rev[rpos++] = static_cast<char>('0' + (v % 10));
-            v /= 10;
-        }
-        while (rpos > 0) buf[pos++] = rev[--rpos];
-    }
-    buf[pos] = '\0';
-    log(buf);
-}
 uint64_t endpoint;
 WidokMiniatur* galeria;
 Etykieta* komunikat;
 MiniaturyTapet* miniatury = nullptr;
 uint32_t tryb = 1;
 int wybrana = 0;
+uint64_t start_ns = 0;
+uint32_t miniatury_btp_wczytane = 0;
+uint32_t miniatury_fallback_pelny = 0;
+uint64_t miniatury_pamiec_bajty = 0;
+
+[[maybe_unused]] void log_perf_uint64(uint64_t v) {
+    char buf[24];
+    int pos = 0;
+    if (v == 0) {
+        buf[pos++] = '0';
+    } else {
+        char rev[24];
+        int rpos = 0;
+        while (v > 0 && rpos < static_cast<int>(sizeof(rev))) {
+            rev[rpos++] = static_cast<char>('0' + (v % 10));
+            v /= 10;
+        }
+        while (rpos > 0 && pos + 1 < static_cast<int>(sizeof(buf))) buf[pos++] = rev[--rpos];
+    }
+    buf[pos] = '\0';
+    log(buf);
+}
+
+void log_blad_obrazu(const char* opis, const char* path) {
+    log("[TAPETY APP] BLAD ");
+    log(opis ? opis : "obrazu");
+    log(" ");
+    log(path ? path : "(nieznany)");
+    log("\n");
+}
+
+void log_perf(const char* opis, uint64_t us) {
+#if BURSZTYNDIAGTAPETYPERF
+    log("[TAPETY PERF] ");
+    log(opis);
+    log(" ");
+    log_perf_uint64(us);
+    log(" us\n");
+#else
+    (void)opis;
+    (void)us;
+#endif
+}
 
 bool wczytaj_plik_obrazu(const char* path, DekodowanyObraz* out) {
     if (!out || !tapety_sciezka_powierzchni(path)) return false;
     uint32_t n = 0, read = 0;
-    if (!pobierz_rozmiar_pliku(path, &n) || n < 4 || n > OBRAZ_MAX_PLIK) return false;
+    if (!pobierz_rozmiar_pliku(path, &n) || n < 4 || n > OBRAZ_MAX_PLIK) {
+        log_blad_obrazu("rozmiaru/formatu", path);
+        return false;
+    }
     auto* file = static_cast<uint8_t*>(gui_malloc(n));
-    if (!file) return false;
+    if (!file) {
+        log_blad_obrazu("alokacji pliku", path);
+        return false;
+    }
     const uint64_t start = gui_czas_monotoniczny_ns();
-    bool ok = czytaj_fragment_pliku(path, 0, reinterpret_cast<char*>(file), n, &read) && read == n &&
+    const bool read_ok = czytaj_fragment_pliku(path, 0, reinterpret_cast<char*>(file), n, &read) && read == n;
+    BladObrazu blad = BladObrazu::OK;
+    bool ok = read_ok &&
         dekoduj_obraz(file, n, out,
             [](size_t bytes) -> void* { return gui_malloc(bytes); },
-            [](void* ptr) { gui_free(ptr); }) == BladObrazu::OK;
+            [](void* ptr) { gui_free(ptr); }, &blad);
     gui_free(file);
     if (ok) {
-        log(tapety_sciezka_png(path) ? "[TAPETY APP] PNG odczyt+decode us " :
-            tapety_sciezka_jpeg(path) ? "[TAPETY APP] JPEG odczyt+decode us " :
-            "[TAPETY APP] BTP odczyt+decode us ");
-        log_uint(static_cast<unsigned>((gui_czas_monotoniczny_ns() - start) / 1000U));
-        log("\n");
+        log_perf(tapety_sciezka_png(path) ? "PNG odczyt+decode" :
+                 tapety_sciezka_jpeg(path) ? "JPEG odczyt+decode" :
+                 "BTP odczyt+decode",
+                 (gui_czas_monotoniczny_ns() - start) / 1000U);
+    } else if (!read_ok) {
+        log_blad_obrazu("odczytu pliku", path);
+    } else {
+        log_blad_obrazu(blad_obrazu_komunikat(blad), path);
     }
     return ok;
 }
@@ -412,10 +453,148 @@ void wybierz_plik(Przycisk*, void* data) {
             komunikat->ustaw_tekst("Podgląd gotowy. Wybierz tryb i naciśnij Zastosuj.");
         }, nullptr, okno->kontrolka_glowna(), "Wybierz tapetę");
 }
+
+int znajdz_tapete(const char* path) {
+    if (!path) return -1;
+    for (int i = 0; i < liczba_tapet; ++i) {
+        if (tapety_rowne(lista_tapet[i].sciezka, path)) return i;
+    }
+    return -1;
+}
+
+bool dodaj_placeholder_tapety(const char* path) {
+    if (!path || !miniatury || !galeria || liczba_tapet >= static_cast<int>(TAPETY_MAX)) return false;
+    const int istnieje = znajdz_tapete(path);
+    if (istnieje >= 0) return true;
+    if (!tapety_sciezka_powierzchni(path) && !tapety_sciezka(path)) return false;
+    uint32_t rozmiar = 0;
+    if (!pobierz_rozmiar_pliku(path, &rozmiar) || rozmiar < 4 || rozmiar > TAPETY_PLIK_MAX) return false;
+    const int slot = liczba_tapet;
+    tapety_kopiuj(lista_tapet[slot].sciezka, path, sizeof(lista_tapet[slot].sciezka));
+    const char* name = path;
+    for (const char* p = path; *p; ++p) if (*p == '/') name = p + 1;
+    pobierz_nazwe_wyswietlana(path, name, lista_tapet[slot].nazwa, sizeof(lista_tapet[slot].nazwa));
+    miniatury->ustaw_placeholder(static_cast<unsigned>(slot));
+    if (!galeria->dodaj_element(slot, lista_tapet[slot].nazwa, miniatury->obraz(static_cast<unsigned>(slot)),
+                                TAPETY_MINI_W, TAPETY_MINI_H)) {
+        lista_tapet[slot] = {};
+        return false;
+    }
+    ++liczba_tapet;
+    return true;
+}
+
+bool sciezka_miniatury_systemowej(const char* path, char* out, size_t cap) {
+    if (!path || !out || cap == 0) return false;
+    constexpr char prefix[] = "/tapety/";
+    size_t p = 0;
+    for (; prefix[p]; ++p) if (path[p] != prefix[p]) return false;
+    const char* name = path + p;
+    if (!name[0]) return false;
+    size_t dot = 0;
+    while (name[dot] && name[dot] != '/') {
+        if (name[dot] == '.') break;
+        ++dot;
+    }
+    if (!dot || name[dot] != '.') return false;
+    for (size_t i = dot; name[i]; ++i) if (name[i] == '/') return false;
+    size_t o = 0;
+    constexpr char mini_prefix[] = "/tapety/miniatury/";
+    for (; mini_prefix[o] && o + 1 < cap; ++o) out[o] = mini_prefix[o];
+    for (size_t i = 0; i < dot && o + 1 < cap; ++i) out[o++] = name[i];
+    constexpr char ext[] = ".btp";
+    for (size_t i = 0; ext[i] && o + 1 < cap; ++i) out[o++] = ext[i];
+    out[o] = '\0';
+    return true;
+}
+
+bool wczytaj_miniature(int i) {
+    if (!miniatury || i < 0 || i >= liczba_tapet) return false;
+    bool ok = false;
+    char mini_path[TAPETY_SCIEZKA_MAX]{};
+    if (sciezka_miniatury_systemowej(lista_tapet[i].sciezka, mini_path, sizeof(mini_path))) {
+        ok = miniatury->wczytaj(static_cast<unsigned>(i), mini_path, true);
+        if (ok) {
+            ++miniatury_btp_wczytane;
+        }
+    }
+    if (tapety_sciezka_powierzchni(lista_tapet[i].sciezka)) {
+        DekodowanyObraz img{};
+        if (!ok) {
+            ++miniatury_fallback_pelny;
+        }
+        if (!ok && wczytaj_plik_obrazu(lista_tapet[i].sciezka, &img)) {
+            uint32_t* preview = miniatury->obraz(static_cast<unsigned>(i));
+            ok = preview && skaluj_obraz(reinterpret_cast<uint32_t*>(img.piksele),
+                img.szerokosc, img.wysokosc, img.bajty,
+                preview, TAPETY_MINI_W, TAPETY_MINI_H, TAPETY_MINI_W,
+                TAPETY_MINI_W * TAPETY_MINI_H * 4, TrybSkalowaniaObrazu::Dopasuj, TAPETY_TLO);
+            gui_free(img.piksele);
+        }
+    } else {
+        if (!ok) {
+            ++miniatury_fallback_pelny;
+            ok = miniatury->wczytaj(static_cast<unsigned>(i), lista_tapet[i].sciezka);
+        }
+    }
+    if (!ok) {
+        miniatury->ustaw_placeholder(static_cast<unsigned>(i));
+    }
+    if (galeria) galeria->odswiez_element(i);
+    return ok;
+}
+
+class PanelTapet : public Panel {
+public:
+    bool czy_wymaga_animacji() const override {
+        return nastepna_miniatura_ < liczba_tapet || Panel::czy_wymaga_animacji();
+    }
+
+    void krok_animacji(uint64_t teraz_ns = 0) override {
+        Panel::krok_animacji(teraz_ns);
+        if (nastepna_miniatura_ >= liczba_tapet) return;
+        const int i = nastepna_miniatura_++;
+        const uint64_t start = gui_czas_monotoniczny_ns();
+        if (wczytaj_miniature(i)) ++poprawne_;
+        ++proby_;
+        log_perf("miniatura krok", (gui_czas_monotoniczny_ns() - start) / 1000U);
+#if BURSZTYNDIAGTAPETYPERF
+        if (proby_ == 1) {
+            log_perf("pierwsza miniatura od startu", (gui_czas_monotoniczny_ns() - start_ns) / 1000U);
+        }
+        if (nastepna_miniatura_ >= liczba_tapet) {
+            log("[TAPETY PERF] miniatury gotowe ");
+            log_perf_uint64(poprawne_);
+            log("/");
+            log_perf_uint64(proby_);
+            log(" w ");
+            log_perf_uint64((gui_czas_monotoniczny_ns() - start_ns) / 1000U);
+            log(" us\n");
+            log("[TAPETY PERF] miniatury BTP ");
+            log_perf_uint64(miniatury_btp_wczytane);
+            log(" fallback pelny ");
+            log_perf_uint64(miniatury_fallback_pelny);
+            // miniatury_pamiec_bajty to calkowita pojemnosc alokacji dla wszystkich TAPETY_MAX (65) elementow, 
+            // a nie tylko rozmiar uzytych miniatur (czyli 65 * 160 * 90 * 4 = 3744000 bajtow).
+            log(" cache capacity bajty ");
+            log_perf_uint64(miniatury_pamiec_bajty);
+            log("\n");
+        }
+#endif
+    }
+
+private:
+    int nastepna_miniatura_{0};
+    unsigned poprawne_{0};
+    unsigned proby_{0};
+};
 } // namespace
 
 extern "C" __attribute__((noreturn)) void _start() {
-    log("[TAPETY APP] Start.\n");
+    start_ns = gui_czas_monotoniczny_ns();
+#if BURSZTYNDIAGTAPETYPERF
+    log("[TAPETY PERF] Start.\n");
+#endif
     char argument[24]{};
     if (pobierz_argument_startowy(argument, sizeof(argument)) &&
         tapety_rowne(argument, "--restore", sizeof(argument))) {
@@ -442,19 +621,20 @@ extern "C" __attribute__((noreturn)) void _start() {
     int target_cols = max_cols >= 5 ? 5 : przytnij(max_cols, 1, 5);
     int win_w = target_cols * 174 + 15 + 2 + 24;
 
+    PanelTapet root;
     Okno okno("Tapety", win_w, 600);
+    okno.ustaw_kontrolke_glowna(&root);
     app.ustaw_glowne_okno(&okno);
 
     endpoint = ipc_create();
-    auto* root = static_cast<Panel*>(okno.kontrolka_glowna());
-    if (!root || !endpoint) {
+    if (!endpoint) {
         log("[TAPETY APP] BLAD inicjalizacji okna lub IPC.\n");
         gui_zakoncz_aplikacje();
     }
-    root->ustaw_orientacje(Orientacja::Pionowa);
-    root->ustaw_wypelnienie(Marginesy(12)); root->ustaw_odstep(8);
-    root->dodaj<Etykieta>("Tapeta pulpitu");
-    galeria = &root->dodaj<WidokMiniatur>();
+    root.ustaw_orientacje(Orientacja::Pionowa);
+    root.ustaw_wypelnienie(Marginesy(12)); root.ustaw_odstep(8);
+    root.dodaj<Etykieta>("Tapeta pulpitu");
+    galeria = &root.dodaj<WidokMiniatur>();
     galeria->ustaw_pelne_wiersze(true);
     galeria->ustaw_rozmiar_elementu(174, 124);
     galeria->ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
@@ -469,38 +649,11 @@ extern "C" __attribute__((noreturn)) void _start() {
         gui_zakoncz_aplikacje();
     }
     miniatury = &mini;
+    miniatury_pamiec_bajty = static_cast<uint64_t>(poj) * TAPETY_MINI_W * TAPETY_MINI_H * sizeof(uint32_t);
 
-    unsigned poprawne = 0;
     for (int i = 0; i < liczba_tapet; ++i) {
-        if (tapety_sciezka_powierzchni(lista_tapet[i].sciezka)) {
-            DekodowanyObraz img{};
-            if (wczytaj_plik_obrazu(lista_tapet[i].sciezka, &img)) {
-                uint32_t* preview = mini.obraz(static_cast<unsigned>(i));
-                if (preview && skaluj_obraz(reinterpret_cast<uint32_t*>(img.piksele),
-                    img.szerokosc, img.wysokosc, img.bajty,
-                    preview, TAPETY_MINI_W, TAPETY_MINI_H, TAPETY_MINI_W,
-                    TAPETY_MINI_W * TAPETY_MINI_H * 4, TrybSkalowaniaObrazu::Dopasuj, TAPETY_TLO)) {
-                    ++poprawne;
-                } else {
-                    mini.ustaw_placeholder(static_cast<unsigned>(i));
-                }
-                gui_free(img.piksele);
-            } else {
-                mini.ustaw_placeholder(static_cast<unsigned>(i));
-            }
-        } else if (mini.wczytaj(static_cast<unsigned>(i), lista_tapet[i].sciezka)) {
-            ++poprawne;
-        } else {
-            mini.ustaw_placeholder(static_cast<unsigned>(i));
-        }
+        mini.ustaw_placeholder(static_cast<unsigned>(i));
         galeria->dodaj_element(i, lista_tapet[i].nazwa, mini.obraz(static_cast<unsigned>(i)), TAPETY_MINI_W, TAPETY_MINI_H);
-    }
-    if (poprawne > 0) {
-        log("[TAPETY APP] Miniatury gotowe ");
-        log_uint(poprawne);
-        log(".\n");
-    } else {
-        log("[TAPETY APP] Brak poprawnych miniatur.\n");
     }
 
     TapetyZadanie req{}; req.operacja = TAPETY_STAN;
@@ -508,7 +661,9 @@ extern "C" __attribute__((noreturn)) void _start() {
     wybrana = 0;
     if (tapety_zapytaj(endpoint, req, &stan) && stan.status == TAPETY_OK) {
         tryb = stan.tryb <= 3 ? stan.tryb : 1;
-        if (tapety_sciezka_powierzchni(stan.sciezka)) (void)pokaz_obraz(stan.sciezka);
+        if (stan.sciezka[0] && znajdz_tapete(stan.sciezka) < 0) {
+            (void)dodaj_placeholder_tapety(stan.sciezka);
+        }
         for (int i = 0; i < liczba_tapet; ++i) {
             if (tapety_rowne(stan.sciezka, lista_tapet[i].sciezka)) {
                 wybrana = i;
@@ -521,15 +676,15 @@ extern "C" __attribute__((noreturn)) void _start() {
             wybrana = i; komunikat->ustaw_tekst("Wybór oczekuje na Zastosuj.");
         }
     });
-    auto& lista = root->dodaj<ListaRozwijana>();
+    auto& lista = root.dodaj<ListaRozwijana>();
     lista.dodaj_element("Dopasuj"); lista.dodaj_element("Wypełnij"); lista.dodaj_element("Wyśrodkuj"); lista.dodaj_element("Rozciągnij");
     lista.ustaw_wybrany_indeks(tryb);
     lista.przy_zmianie_wyboru([](ListaRozwijana*, int i, void*) { if (i >= 0 && i <= 3) tryb = i; });
-    auto& row = root->dodaj<Panel>(); row.ustaw_orientacje(Orientacja::Pozioma); row.ustaw_odstep(12);
+    auto& row = root.dodaj<Panel>(); row.ustaw_orientacje(Orientacja::Pozioma); row.ustaw_odstep(12);
     row.dodaj<Przycisk>("Wybierz plik...").przy_kliknieciu(wybierz_plik, &okno);
     row.dodaj<Przycisk>("Zastosuj").przy_kliknieciu(zastosuj);
     row.dodaj<Przycisk>("Anuluj").przy_kliknieciu([](Przycisk*, void* p) { static_cast<Okno*>(p)->zamknij(); }, &okno);
-    komunikat = &root->dodaj<Etykieta>(liczba_tapet > 0 ? "Wybierz miniaturę i tryb, następnie naciśnij Zastosuj." : "Brak dostępnych tapet w /tapety.");
+    komunikat = &root.dodaj<Etykieta>(liczba_tapet > 0 ? "Wczytywanie miniatur..." : "Brak dostępnych tapet w /tapety.");
 
     okno.przelicz_uklad();
     int stale_h = okno.wysokosc() - galeria->obszar().wysokosc;
@@ -551,7 +706,7 @@ extern "C" __attribute__((noreturn)) void _start() {
     if (liczba_tapet > 0) {
         galeria->ustaw_wybrany_indeks(wybrana);
     }
-    log("[TAPETY APP] Galeria gotowa.\n");
+    log_perf("gotowe do pierwszego rysowania", (gui_czas_monotoniczny_ns() - start_ns) / 1000U);
     (void)app.uruchom(okno);
     ipc_close(endpoint);
     bws_zakoncz_proces();

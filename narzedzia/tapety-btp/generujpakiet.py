@@ -36,6 +36,10 @@ from pathlib import Path
 import btpcodec
 
 U32_MAX = (1 << 32) - 1
+MINIATURA_W = 160
+MINIATURA_H = 90
+MAX_TAPET = 64
+MAX_WPISOW_PAKIETU = MAX_TAPET * 2
 
 def u32(value: int, name: str) -> int:
     if not 0 <= value <= U32_MAX:
@@ -87,6 +91,14 @@ def bezpieczna_nazwa(nazwa: str) -> bool:
     ext = nazwa.rsplit(".", 1)[-1].lower() if "." in nazwa else ""
     return ext in ("btp", "jpg", "jpeg", "png")
 
+def bezpieczna_nazwa_w_pakiecie(nazwa: str) -> bool:
+    if bezpieczna_nazwa(nazwa):
+        return True
+    prefix = "miniatury/"
+    if not nazwa.startswith(prefix):
+        return False
+    return bezpieczna_nazwa(nazwa[len(prefix):]) and nazwa.lower().endswith(".btp")
+
 def tapeta_czy_bursztyn_systemowa(nazwa: str) -> bool:
     nl = nazwa.lower()
     if len(nl) == 14 and nl.startswith("bursztyn") and nl.endswith(".btp"):
@@ -108,6 +120,10 @@ def tapeta_kanoniczna_nazwa(display_name: str) -> str:
     h = tapeta_fnv1a64(dane)
     ext = display_name.rsplit(".", 1)[-1].lower()
     return f"wp_{h:016x}.{ext}"
+
+def nazwa_miniatury(kanoniczna: str) -> str:
+    stem = kanoniczna.rsplit(".", 1)[0]
+    return f"miniatury/{stem}.btp"
 
 def waliduj_btp(sciezka: str) -> bool:
     try:
@@ -141,6 +157,48 @@ def waliduj_btp(sciezka: str) -> bool:
         return True
     except (OSError, struct.error, btpcodec.BtpError):
         return False
+
+def wczytaj_obraz_host(sciezka: str, rozszerzenie: str):
+    try:
+        from PIL import Image, ImageOps
+    except ImportError as exc:
+        raise RuntimeError("Pillow jest wymagany do generowania miniatur tapet") from exc
+
+    ext = rozszerzenie.lower()
+    if ext == ".btp":
+        dane = Path(sciezka).read_bytes()
+        if dane[:4] == b"BTP1":
+            w, h, pixels = btpcodec.decode_v1(dane)
+        else:
+            w, h, pixels = btpcodec.decode(dane)
+        return Image.frombytes("RGBA", (w, h), pixels, "raw", "BGRA")
+
+    with Image.open(sciezka) as img:
+        img = ImageOps.exif_transpose(img)
+        return img.convert("RGBA")
+
+def generuj_miniature_btp(sciezka: str, rozszerzenie: str) -> bytes:
+    from PIL import Image, ImageOps
+    obraz = wczytaj_obraz_host(sciezka, rozszerzenie)
+    try:
+        resample = Image.Resampling.LANCZOS
+    except AttributeError:
+        resample = Image.LANCZOS
+    # Miniatura uzywa trybu cover/center-crop, aby wypelnic kafelek 16:9 bez
+    # rozciagania obrazu. Oryginalny plik pozostaje zrodlem dla tapety pulpitu.
+    mini = ImageOps.fit(obraz, (MINIATURA_W, MINIATURA_H), method=resample, centering=(0.5, 0.5))
+    raw_bgra = mini.tobytes("raw", "BGRA")
+    blob = btpcodec.encode(raw_bgra, MINIATURA_W, MINIATURA_H)
+    if not waliduj_miniature_blob(blob):
+        raise RuntimeError("wygenerowana miniatura ma niepoprawne wymiary")
+    return blob
+
+def waliduj_miniature_blob(blob: bytes) -> bool:
+    try:
+        w, h, pixels = btpcodec.decode(blob)
+    except btpcodec.BtpError:
+        return False
+    return (w, h) == (MINIATURA_W, MINIATURA_H) and len(pixels) == MINIATURA_W * MINIATURA_H * 4
 
 def waliduj_jpeg(sciezka: str) -> bool:
     try:
@@ -291,14 +349,26 @@ def main():
                 zawartosc = f.read()
             rozmiar = len(zawartosc)
             crc32 = binascii.crc32(zawartosc) & 0xFFFFFFFF
-            tapety.append({
+            wpis = {
                 "nazwa": nazwa,
                 "kanoniczna": canon,
                 "sciezka": sciezka,
                 "dane": zawartosc,
                 "rozmiar": rozmiar,
                 "crc32": crc32
-            })
+            }
+            if not args.manifest_only:
+                ext = os.path.splitext(nazwa)[1].lower()
+                mini_nazwa = nazwa_miniatury(canon)
+                mini_dane = generuj_miniature_btp(sciezka, ext)
+                mini_crc32 = binascii.crc32(mini_dane) & 0xFFFFFFFF
+                wpis.update({
+                    "miniatura": mini_nazwa,
+                    "miniatura_dane": mini_dane,
+                    "miniatura_rozmiar": len(mini_dane),
+                    "miniatura_crc32": mini_crc32,
+                })
+            tapety.append(wpis)
 
     # Wybor i walidacja domyslnej tapety
     domyslna_wpis = None
@@ -336,10 +406,48 @@ def main():
     if not tapety:
         sys.stderr.write(f"[TAPETY PAK] Ostrzezenie: brak poprawnych tapet w {katalog}!\n")
 
-    if len(tapety) > 64:
+    if len(tapety) > MAX_TAPET:
         raise ValueError('BTPK1 runtime accepts at most 64 wallpapers')
+
+    miniatury = []
+    seen_mini = set()
+    for t in tapety:
+        m = t["miniatura"]
+        if m in seen_mini:
+            raise ValueError(f"zduplikowana sciezka miniatury: {m}")
+        seen_mini.add(m)
+        if not waliduj_miniature_blob(t["miniatura_dane"]):
+            raise RuntimeError(f"niepoprawna miniatura dla {t['kanoniczna']}")
+        miniatury.append({
+            "nazwa": m,
+            "kanoniczna": m,
+            "wyswietlana": m,
+            "sciezka": t["sciezka"],
+            "dane": t["miniatura_dane"],
+            "rozmiar": t["miniatura_rozmiar"],
+            "crc32": t["miniatura_crc32"],
+            "miniatura_cache": True,
+            "dla": t["kanoniczna"],
+        })
+
+    wpisy_pakietu = []
+    for t in tapety:
+        wpisy_pakietu.append({
+            "nazwa": t["nazwa"],
+            "kanoniczna": t["kanoniczna"],
+            "wyswietlana": t["nazwa"],
+            "sciezka": t["sciezka"],
+            "dane": t["dane"],
+            "rozmiar": t["rozmiar"],
+            "crc32": t["crc32"],
+            "miniatura_cache": False,
+        })
+        wpisy_pakietu.append(next(m for m in miniatury if m["dla"] == t["kanoniczna"]))
+
+    if len(wpisy_pakietu) > MAX_WPISOW_PAKIETU:
+        raise ValueError('BTPK1 runtime accepts at most 128 package entries')
     planned_bytes = 32 + sum(16 + ((len(t['nazwa'].encode('utf-8')) + 3) & ~3) +
-                             ((t['rozmiar'] + 3) & ~3) for t in tapety)
+                             ((t['rozmiar'] + 3) & ~3) for t in wpisy_pakietu)
     u32(planned_bytes, 'total_pack_size')
     if planned_bytes > 256 * 1024 * 1024:
         raise ValueError('wallpaper package exceeds 256 MiB runtime/build budget')
@@ -348,11 +456,11 @@ def main():
     HEADER_SIZE = 32
     MAGIC = b"BTPK1\x00\x00\x00"
     VERSION = 1
-    file_count = len(tapety)
+    file_count = len(wpisy_pakietu)
 
     table_entries_bytes = bytearray()
     # Pierwszy przebieg: budowa wpisow tabeli (tymczasowe offsety)
-    for t in tapety:
+    for t in wpisy_pakietu:
         nazwa_bytes = t["nazwa"].encode("utf-8")
         nazwa_len = len(nazwa_bytes)
         pad_len = (4 - (nazwa_len % 4)) % 4
@@ -375,7 +483,7 @@ def main():
     rebuilt_table_bytes = bytearray()
     payload_bytes = bytearray()
 
-    for t in tapety:
+    for t in wpisy_pakietu:
         nazwa_bytes = t["nazwa"].encode("utf-8")
         nazwa_len = len(nazwa_bytes)
         pad_len = (4 - (nazwa_len % 4)) % 4
@@ -430,6 +538,9 @@ def main():
         name_pad = (4 - name_len % 4) % 4
         if name_len == 0 or verify_offset + name_len + name_pad > verify_table_end:
             raise RuntimeError("niepoprawna nazwa wpisu BTPK1")
+        name = pack_complete[verify_offset:verify_offset + name_len].decode("utf-8", "strict")
+        if not bezpieczna_nazwa_w_pakiecie(name):
+            raise RuntimeError("niebezpieczna nazwa wpisu BTPK1")
         verify_offset += name_len + name_pad
         if payload_offset < verify_table_end or payload_offset + payload_size > len(pack_complete):
             raise RuntimeError("payload BTPK1 wychodzi poza pakiet")
@@ -440,6 +551,11 @@ def main():
     if verify_offset != verify_table_end:
         raise RuntimeError("tabela BTPK1 ma nadmiarowe bajty")
     zapisz_jesli_zmieniono(args.wyjscie, pack_complete)
+
+    expected_previews = {nazwa_miniatury(t["kanoniczna"]) for t in tapety}
+    actual_previews = {m["nazwa"] for m in miniatury}
+    if expected_previews != actual_previews:
+        raise RuntimeError("niespojny zestaw miniatur w pakiecie")
 
     # Generowanie zaleznosci Makefile (.d)
     if args.dep:
@@ -457,12 +573,15 @@ def main():
 
     # Raport statystyk
     total_btp_bytes = sum(t["rozmiar"] for t in tapety)
+    total_thumb_bytes = sum(t["rozmiar"] for t in miniatury)
     sys.stdout.write(f"[TAPETY PAK] Zbudowano pakiet tapet: {args.wyjscie}\n")
-    sys.stdout.write(f"[TAPETY PAK] Liczba tapet: {file_count}\n")
+    sys.stdout.write(f"[TAPETY PAK] Liczba tapet: {len(tapety)}\n")
+    sys.stdout.write(f"[TAPETY PAK] Liczba miniatur: {len(miniatury)} ({MINIATURA_W}x{MINIATURA_H}, BTP2, cover)\n")
     for idx, t in enumerate(tapety):
         def_mark = " [DEFAULT]" if t == domyslna_wpis else ""
-        sys.stdout.write(f"  [{idx:02d}] {t['nazwa']} (canon: {t['kanoniczna']}){def_mark}: {t['rozmiar']} B (CRC32: 0x{t['crc32']:08X})\n")
+        sys.stdout.write(f"  [{idx:02d}] {t['nazwa']} (canon: {t['kanoniczna']}, miniatura: {t['miniatura']}){def_mark}: {t['rozmiar']} B (CRC32: 0x{t['crc32']:08X})\n")
     sys.stdout.write(f"[TAPETY PAK] Laczny rozmiar zrodlowych BTP: {total_btp_bytes} B ({total_btp_bytes / 1024 / 1024:.2f} MiB)\n")
+    sys.stdout.write(f"[TAPETY PAK] Laczny rozmiar miniatur: {total_thumb_bytes} B ({total_thumb_bytes / 1024 / 1024:.2f} MiB)\n")
     sys.stdout.write(f"[TAPETY PAK] Laczny rozmiar {args.wyjscie}: {len(pack_complete)} B ({len(pack_complete) / 1024 / 1024:.2f} MiB)\n")
     sys.stdout.write(f"[TAPETY BUILD] sources={len(tapety)} entries={verified_entries} bytes={len(pack_complete)} crc=OK\n")
 

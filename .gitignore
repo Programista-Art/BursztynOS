@@ -52,6 +52,10 @@ narzedzia/test_notatnik_gui.py
 test16k_screenshot.png
 narzedzia/__pycache__/
 narzedzia/test_kontrolki4_qemu.py
+loop_log_1.txt
+loop_log_2.txt
+loop_test.sh
+
 
 
 

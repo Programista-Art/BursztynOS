@@ -425,7 +425,7 @@ public:
     VirtioGpuDriver* PobierzSterownikGPU() const { return drv; }
 
     void KopiujNaEkran(uint8_t* bufor) override {
-        if (!drv || !drv->initialized || drv->has_error) return;
+        if (virtio_gpu_is_quiescing() || !drv || !drv->initialized || drv->has_error) return;
         if (static_cast<const void*>(bufor) != static_cast<const void*>(const_cast<const uint8_t*>(framebuffer_fizyczny))) {
             KopiujCalyBufor32(bufor);
         }
@@ -437,7 +437,7 @@ public:
                                int y,
                                int szer,
                                int wys) override {
-        if (!drv || !drv->initialized || drv->has_error) return;
+        if (virtio_gpu_is_quiescing() || !drv || !drv->initialized || drv->has_error) return;
         if (szer <= 0 || wys <= 0) return;
 
         int x0 = x < 0 ? 0 : x;

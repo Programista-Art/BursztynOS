@@ -13,6 +13,35 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import btpcodec
 import konwerterbtp
+import generujpakiet
+
+def parse_package(data):
+    magic, version, count, hsize, table_size, payload_size, total = struct.unpack_from('<8sIIIIII', data)
+    entries = []
+    cursor = hsize
+    for _ in range(count):
+        name_len, size, crc, offset = struct.unpack_from('<IIII', data, cursor)
+        cursor += 16
+        name = data[cursor:cursor + name_len].decode('utf-8')
+        cursor += (name_len + 3) & ~3
+        entries.append((name, size, crc, offset, data[offset:offset + size]))
+    return magic, version, count, hsize, table_size, payload_size, total, entries
+
+def canonical_wallpaper_name(display_name):
+    lower = display_name.lower()
+    if len(lower) == 14 and lower.startswith('bursztyn') and lower.endswith('.btp'):
+        num = lower[8:10]
+        if num.isdigit() and 1 <= int(num) <= 10:
+            return lower
+    h = 0xcbf29ce484222325
+    for b in display_name.encode('utf-8'):
+        h ^= b
+        h = (h * 0x100000001b3) & 0xffffffffffffffff
+    ext = display_name.rsplit('.', 1)[-1].lower()
+    return f'wp_{h:016x}.{ext}'
+
+def thumbnail_name_for(display_name):
+    return 'miniatury/' + canonical_wallpaper_name(display_name).rsplit('.', 1)[0] + '.btp'
 
 
 class Btp2Tests(unittest.TestCase):
@@ -115,14 +144,78 @@ class Btp2Tests(unittest.TestCase):
                             '--katalog', str(assets), '--wyjscie', str(target),
                             '--dep', str(place / 'tapety.pak.d')], check=True, capture_output=True)
             data = target.read_bytes()
-            magic, version, count, hsize, table_size, payload_size, total = struct.unpack_from('<8sIIIIII', data)
-            self.assertEqual((magic, version, count, hsize, total), (b'BTPK1\0\0\0', 1, 2, 32, len(data)))
+            magic, version, count, hsize, table_size, payload_size, total, entries = parse_package(data)
+            self.assertEqual((magic, version, count, hsize, total), (b'BTPK1\0\0\0', 1, 4, 32, len(data)))
             self.assertEqual(hsize + table_size + payload_size, total)
-            cursor = hsize
-            for _ in range(count):
-                name_len, size, crc, offset = struct.unpack_from('<IIII', data, cursor)
-                cursor += 16 + (name_len + 3 & ~3)
-                self.assertEqual(zlib.crc32(data[offset:offset + size]), crc)
+            names = [entry[0] for entry in entries]
+            self.assertEqual(names, ['legacy.btp', thumbnail_name_for('legacy.btp'),
+                                     'modern.btp', thumbnail_name_for('modern.btp')])
+            for name, size, crc, offset, payload in entries:
+                self.assertEqual(zlib.crc32(payload), crc)
+                if name.startswith('miniatury/'):
+                    self.assertEqual(btpcodec.decode(payload)[:2], (generujpakiet.MINIATURA_W, generujpakiet.MINIATURA_H))
+
+    def test_package_generates_jpg_png_btp_thumbnails(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as directory:
+            place = Path(directory)
+            assets = place / 'assets'
+            assets.mkdir()
+            with Image.new('RGB', (400, 200), (10, 40, 90)) as image:
+                image.save(assets / 'wall.jpg')
+            with Image.new('RGBA', (120, 300), (90, 40, 10, 255)) as image:
+                image.save(assets / 'wall.png')
+            (assets / 'bursztyn01.btp').write_bytes(btpcodec.encode(b'\x09\x08\x07\xff' * (64 * 36), 64, 36))
+
+            target = place / 'tapety.pak'
+            subprocess.run([sys.executable, '-B', str(ROOT / 'generujpakiet.py'),
+                            '--katalog', str(assets), '--wyjscie', str(target),
+                            '--dep', str(place / 'tapety.pak.d')], check=True, capture_output=True)
+            *_, entries = parse_package(target.read_bytes())
+            names = [entry[0] for entry in entries]
+            originals = [name for name in names if not name.startswith('miniatury/')]
+            previews = [name for name in names if name.startswith('miniatury/')]
+            self.assertEqual(len(originals), 3)
+            self.assertEqual(len(previews), 3)
+            self.assertIn('miniatury/bursztyn01.btp', previews)
+            expected_previews = {thumbnail_name_for(name) for name in originals}
+            self.assertEqual(set(previews), expected_previews)
+            for name, _, _, _, payload in entries:
+                if name.startswith('miniatury/'):
+                    w, h, pixels = btpcodec.decode(payload)
+                    self.assertEqual((w, h), (generujpakiet.MINIATURA_W, generujpakiet.MINIATURA_H))
+                    self.assertEqual(len(pixels), generujpakiet.MINIATURA_W * generujpakiet.MINIATURA_H * 4)
+
+    def test_thumbnail_cover_has_no_letterbox_for_wide_source(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as directory:
+            place = Path(directory)
+            assets = place / 'assets'
+            assets.mkdir()
+            # Very wide source; cover crop must fill the 16:9 thumbnail with source color,
+            # not add transparent/black bars.
+            with Image.new('RGBA', (800, 100), (25, 50, 75, 255)) as image:
+                image.save(assets / 'wide.png')
+            target = place / 'tapety.pak'
+            subprocess.run([sys.executable, '-B', str(ROOT / 'generujpakiet.py'),
+                            '--katalog', str(assets), '--wyjscie', str(target),
+                            '--dep', str(place / 'tapety.pak.d')], check=True, capture_output=True)
+            *_, entries = parse_package(target.read_bytes())
+            preview = next(payload for name, _, _, _, payload in entries if name.startswith('miniatury/'))
+            w, h, pixels = btpcodec.decode(preview)
+            self.assertEqual((w, h), (generujpakiet.MINIATURA_W, generujpakiet.MINIATURA_H))
+            self.assertNotEqual(pixels[:4], b'\0\0\0\0')
+            self.assertNotEqual(pixels[(w * (h - 1)) * 4:(w * (h - 1)) * 4 + 4], b'\0\0\0\0')
+
+    def test_thumbnail_validator_rejects_corrupt_and_wrong_dimensions(self):
+        good = btpcodec.encode(b'\x01\x02\x03\xff' * (generujpakiet.MINIATURA_W * generujpakiet.MINIATURA_H),
+                               generujpakiet.MINIATURA_W, generujpakiet.MINIATURA_H)
+        wrong_size = btpcodec.encode(b'\x01\x02\x03\xff' * (128 * 72), 128, 72)
+        corrupt = bytearray(good)
+        corrupt[-1] ^= 0x55
+        self.assertTrue(generujpakiet.waliduj_miniature_blob(good))
+        self.assertFalse(generujpakiet.waliduj_miniature_blob(wrong_size))
+        self.assertFalse(generujpakiet.waliduj_miniature_blob(bytes(corrupt)))
 
     def test_converter_native_and_resize(self):
         from PIL import Image

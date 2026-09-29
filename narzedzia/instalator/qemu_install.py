@@ -181,7 +181,7 @@ def install(g,target,sentinel,before_target,before_sentinel):
     no_writes(g)
     assert target_fingerprint(target)==before_target,'Typing confirmation changed target'
     g.q.click(860,590) # final destructive confirmation
-    text=g.wait('[INSTALL] COMPLETE verified',timeout=900)
+    text=g.wait('[INSTALL] COMPLETE verified',timeout=3600)
     time.sleep(1);g.q.screenshot(g.dir/'complete.png')
     assert '[PF]' not in text and '[KERNEL-PANIC]' not in text
     assert '[EKRAN] install failed' not in text

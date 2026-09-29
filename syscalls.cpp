@@ -66,6 +66,7 @@
 #include "acpi.h"
 #include "sterowniki/czas/hpet.h"
 #include "stos_jadra.h"
+#include "virtio_gpu.h"
 
 /* =========================================================================
  * PUBLICZNY STAN UZYWANY PRZEZ GUI / SYSCALL ASM
@@ -2351,12 +2352,51 @@ bool operacja_systemowa_dozwolona(
 }
 
 uint64_t reset_ps2() {
-    wypisz_log("[POWER] Restart systemu.");
+#if BURSZTYNDIAGREBOOT
+    wypisz_log("[REBOOT TRACE] begin");
+    wypisz_log("[REBOOT TRACE] stop new GPU submissions");
+#endif
+    virtio_gpu_stop_submissions();
+
+#if BURSZTYNDIAGREBOOT
+    virtio_gpu_log_reboot_state();
+    wypisz_log("[REBOOT TRACE] gpu quiesce begin");
+#endif
+    virtio_gpu_quiesce_for_reboot();
+
+#if BURSZTYNDIAGREBOOT
+    wypisz_log("[REBOOT TRACE] gpu quiesce done");
+    wypisz_log("[REBOOT TRACE] filesystem flush begin");
+#endif
+
+    /*
+     * FAZA 2: Zapis BSP2 / filesystem - po GPU quiesce, przed cli.
+     */
     psf_flush_cache();
+
+#if BURSZTYNDIAGREBOOT
+    wypisz_log("[REBOOT TRACE] filesystem flush done");
+    wypisz_log("[REBOOT TRACE] cli");
+#endif
+
+    /*
+     * FAZA 3: Wylaczenie przerwan. GPU jest juz spokojny.
+     */
     asm volatile("cli" ::: "memory");
+
+    /*
+     * FAZA 4: Reset przez ACPI ResetReg (FADT), jesli dostepny.
+     */
+#if BURSZTYNDIAGREBOOT
+    wypisz_log("[REBOOT TRACE] ACPI reset begin");
+#endif
     if (acpi_wykonaj_restart()) {
         for (;;) asm volatile("hlt" ::: "memory");
     }
+
+    /*
+     * FAZA 5: Fallback przez kontroler klawiatury PS/2 (port 0x64, puls 0xFE).
+     */
     wypisz_log("[POWER] Restart przez fallback 8042.");
     bool gotowe = false;
 
@@ -2390,6 +2430,10 @@ uint64_t reset_ps2() {
         return 0;
     }
 
+#if BURSZTYNDIAGREBOOT
+    wypisz_log("[REBOOT TRACE] 8042 reset begin");
+#endif
+
     asm volatile(
         "outb %0, %1"
         :
@@ -2421,6 +2465,8 @@ uint64_t reset_ps2() {
 [[noreturn]]
 void wylacz_qemu() {
     wypisz_log("[POWER] Wylaczanie systemu.");
+    virtio_gpu_stop_submissions();
+    virtio_gpu_quiesce_for_reboot();
     psf_flush_cache();
     asm volatile("cli" ::: "memory");
     if (acpi_wykonaj_shutdown()) {

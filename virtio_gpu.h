@@ -313,6 +313,14 @@ struct VirtioGpuDriver {
  * 6. PUBLICZNY INTERFEJS STEROWNIKA VIRTIO-GPU
  * ========================================================================= */
 
+/* =========================================================================
+ * BURSZTYNDIAGREBOOT - diagnostyka sciezki restartu / shutdown.
+ * Domyslnie 0 (wylaczone w produkcji). Wlacz przez -DBURSZTYNDIAGREBOOT=1.
+ * ========================================================================= */
+#ifndef BURSZTYNDIAGREBOOT
+#define BURSZTYNDIAGREBOOT 0
+#endif
+
 bool virtio_gpu_init(VirtioPciDevice* dev);
 bool virtio_gpu_reset(VirtioGpuDriver* drv);
 void virtio_gpu_reset_all(void);
@@ -338,6 +346,25 @@ bool virtio_gpu_test_runtime_modeset(VirtioGpuDriver* drv);
 bool virtio_gpu_render_test_pattern(VirtioGpuDriver* drv);
 bool virtio_gpu_test_teardown_reinit(VirtioGpuDriver* drv);
 bool virtio_gpu_stress_dirty_rectangles(VirtioGpuDriver* drv);
+
+/*
+ * Funkcje przygotowania GPU do restartu/shutdown systemu.
+ *
+ * virtio_gpu_quiesce_for_reboot():
+ *   Czeka (z ograniczonym timeoutem) na zakonczenie ewentualnie trwajacego
+ *   polecenia controlq. NIE wykonuje pelnego resetu urzadzenia VirtIO
+ *   (nie zapisuje device_status = 0), aby uniknac wczesniej zaobserwowanego
+ *   deadlocka QEMU w virtiogpureset() podczas resetu sprzetowego.
+ *   Wywolywac przed psf_flush_cache() i przed wylaczeniem przerwan.
+ *
+ * virtio_gpu_log_reboot_state():
+ *   Loguje na port szeregowy aktualny stan sterownika GPU (resource_id,
+ *   old_resource_id, kolejka avail/used, flagi). Wywolywac pod BURSZTYNDIAGREBOOT.
+ */
+void virtio_gpu_quiesce_for_reboot(void);
+void virtio_gpu_log_reboot_state(void);
+void virtio_gpu_stop_submissions(void);
+bool virtio_gpu_is_quiescing(void);
 
 #ifdef __cplusplus
 }

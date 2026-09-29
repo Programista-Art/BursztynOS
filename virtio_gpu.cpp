@@ -217,6 +217,21 @@ static void virtio_gpu_isr(void* context) {
 
 } // namespace
 
+/*
+ * Flaga globalna blokujaca nowe polecenia GPU podczas restartu/shutdown.
+ * Zapewnia, ze zaden kompozytor ani zadanie w tle nie przesle nowej
+ * klatki na controlq podczas procedury restartu.
+ */
+static volatile uint32_t g_gpu_reboot_quiescing = 0U;
+
+void virtio_gpu_stop_submissions(void) {
+    __atomic_store_n(&g_gpu_reboot_quiescing, 1U, __ATOMIC_RELEASE);
+}
+
+bool virtio_gpu_is_quiescing(void) {
+    return __atomic_load_n(&g_gpu_reboot_quiescing, __ATOMIC_ACQUIRE) != 0U;
+}
+
 /* =========================================================================
  * 1. WYSLANIE I WYKONANIE POLECENIA KONTROLNEGO NA CONTROLQ
  * ========================================================================= */
@@ -229,6 +244,10 @@ static bool virtio_gpu_send_command_locked(
     size_t resp_len,
     uint32_t expected_resp_type
 ) {
+    if (virtio_gpu_is_quiescing()) {
+        return false;
+    }
+
     if (!drv || !drv->dev || !drv->controlq || !drv->cmd_vaddr ||
         req_len == 0 || resp_len == 0 ||
         req_len > VIRTIO_GPU_CMD_REQ_MAX_SIZE ||
@@ -410,7 +429,7 @@ bool virtio_gpu_cmd_resource_attach_backing(
     const VirtioGpuMemEntry* entries,
     uint32_t nr_entries
 ) {
-    if (!drv || resource_id == 0 || !entries || nr_entries == 0) {
+    if (!drv || resource_id == 0 || !entries || nr_entries == 0 || virtio_gpu_is_quiescing()) {
         return false;
     }
 
@@ -571,7 +590,7 @@ bool virtio_gpu_cmd_set_scanout(
     uint32_t width,
     uint32_t height
 ) {
-    if (!drv) return false;
+    if (!drv || virtio_gpu_is_quiescing()) return false;
     GpuSpinLockGuard guard(drv->lock);
     return virtio_gpu_cmd_set_scanout_locked(drv, scanout_id, resource_id, x, y, width, height);
 }
@@ -584,7 +603,7 @@ bool virtio_gpu_cmd_transfer_to_host_2d(
     uint32_t width,
     uint32_t height
 ) {
-    if (!drv || resource_id == 0 || width == 0 || height == 0) return false;
+    if (!drv || resource_id == 0 || width == 0 || height == 0 || virtio_gpu_is_quiescing()) return false;
     if (x > drv->fb_width || y > drv->fb_height) return false;
     if (width > drv->fb_width - x || height > drv->fb_height - y) return false;
 
@@ -621,7 +640,7 @@ bool virtio_gpu_cmd_resource_flush(
     uint32_t width,
     uint32_t height
 ) {
-    if (!drv || resource_id == 0 || width == 0 || height == 0) return false;
+    if (!drv || resource_id == 0 || width == 0 || height == 0 || virtio_gpu_is_quiescing()) return false;
     if (x > drv->fb_width || y > drv->fb_height) return false;
     if (width > drv->fb_width - x || height > drv->fb_height - y) return false;
 
@@ -716,7 +735,7 @@ static void virtio_gpu_free_stale_resource_locked(VirtioGpuDriver* drv) {
 }
 
 void virtio_gpu_free_stale_resource(VirtioGpuDriver* drv) {
-    if (!drv || drv->old_resource_id == 0) return;
+    if (!drv || drv->old_resource_id == 0 || virtio_gpu_is_quiescing()) return;
     GpuSpinLockGuard guard(drv->lock);
     virtio_gpu_free_stale_resource_locked(drv);
 }
@@ -776,13 +795,13 @@ static bool virtio_gpu_rollback_modeset_locked(VirtioGpuDriver* drv) {
 }
 
 bool virtio_gpu_rollback_modeset(VirtioGpuDriver* drv) {
-    if (!drv || drv->old_resource_id == 0) return false;
+    if (!drv || drv->old_resource_id == 0 || virtio_gpu_is_quiescing()) return false;
     GpuSpinLockGuard guard(drv->lock);
     return virtio_gpu_rollback_modeset_locked(drv);
 }
 
 bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t height) {
-    if (!drv || width == 0 || height == 0 || width > 4096 || height > 4096) {
+    if (!drv || width == 0 || height == 0 || width > 4096 || height > 4096 || virtio_gpu_is_quiescing()) {
         return false;
     }
 
@@ -939,7 +958,7 @@ bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t
 }
 
 bool virtio_gpu_transfer_and_flush(VirtioGpuDriver* drv, uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
-    if (!drv || !drv->initialized || drv->has_error || drv->resource_id == 0) return false;
+    if (virtio_gpu_is_quiescing() || !drv || !drv->initialized || drv->has_error || drv->resource_id == 0) return false;
 
     if (!virtio_gpu_cmd_transfer_to_host_2d(drv, drv->resource_id, x, y, width, height)) {
         return false;
@@ -961,7 +980,7 @@ bool virtio_gpu_transfer_and_flush(VirtioGpuDriver* drv, uint32_t x, uint32_t y,
  * - Srodkowy prostokat: biel (#FFFFFF) w [srodek_x-100, srodek_y-50, 200, 100]
  */
 bool virtio_gpu_render_test_pattern(VirtioGpuDriver* drv) {
-    if (!drv || !drv->fb_vaddr || drv->fb_width < 320 || drv->fb_height < 240) {
+    if (virtio_gpu_is_quiescing() || !drv || !drv->fb_vaddr || drv->fb_width < 320 || drv->fb_height < 240) {
         return false;
     }
 
@@ -1015,6 +1034,8 @@ bool virtio_gpu_render_test_pattern(VirtioGpuDriver* drv) {
 
 bool virtio_gpu_init(VirtioPciDevice* dev) {
     if (!dev) return false;
+
+    __atomic_store_n(&g_gpu_reboot_quiescing, 0U, __ATOMIC_RELEASE);
 
     /* Znajdz wolny slot lub przydziel nowy */
     VirtioGpuDriver* drv = nullptr;
@@ -1230,8 +1251,209 @@ bool virtio_gpu_init(VirtioPciDevice* dev) {
     return true;
 }
 
+/* =========================================================================
+ * PRZYGOTOWANIE GPU DO RESTARTU / SHUTDOWN
+ * =========================================================================
+ *
+ * Sciezka restartu w Bursztyn OS:
+ *   GUI klik "Uruchom ponownie"
+ *    -> bws_wywolaj(25)
+ *    -> syscall 25 -> reset_ps2()
+ *       1. virtio_gpu_quiesce_for_reboot()  [NOWE - czeka na GPU, bez device reset]
+ *       2. psf_flush_cache()                [zapis BSP2]
+ *       3. cli                              [wylacza przerwania - po GPU quiesce!]
+ *       4. acpi_wykonaj_restart() lub 8042 puls 0xFE
+ *
+ * UWAGA: NIE wolno wywolywac virtio_gpu_reset() podczas restartu.
+ * Poprzednia analiza GDB pokazala, ze QEMU moze zawisnac wewnatrz
+ * virtiogpureset() przy zapisie device_status=0 przez guest.
+ * Zamiast tego uzywamy bezpiecznego quiesce bez pelnego resetu.
+ * ========================================================================= */
+
+/*
+ * Loguje aktualny stan kazdego sterownika GPU do portu szeregowego.
+ * Wywolywac pod BURSZTYNDIAGREBOOT lub w razie freeze przed rebootem.
+ */
+void virtio_gpu_log_reboot_state(void) {
+    for (uint32_t i = 0; i < g_gpu_driver_count; ++i) {
+        const VirtioGpuDriver* drv = &g_gpu_drivers[i];
+        char buf[256]{};
+        size_t pos = 0;
+        log_append_str(buf, sizeof(buf), pos, "[REBOOT TRACE] GPU[");
+        log_append_u64_dec(buf, sizeof(buf), pos, i);
+        log_append_str(buf, sizeof(buf), pos, "] init=");
+        buf[pos++] = drv->initialized ? '1' : '0';
+        log_append_str(buf, sizeof(buf), pos, " err=");
+        buf[pos++] = drv->has_error ? '1' : '0';
+        log_append_str(buf, sizeof(buf), pos, " res=");
+        log_append_u64_dec(buf, sizeof(buf), pos, drv->resource_id);
+        log_append_str(buf, sizeof(buf), pos, " oldres=");
+        log_append_u64_dec(buf, sizeof(buf), pos, drv->old_resource_id);
+        log_append_str(buf, sizeof(buf), pos, " scan=");
+        buf[pos++] = drv->scanout_set ? '1' : '0';
+        log_append_str(buf, sizeof(buf), pos, " back=");
+        buf[pos++] = drv->backing_attached ? '1' : '0';
+        log_append_str(buf, sizeof(buf), pos, " cmds=");
+        log_append_u64_dec(buf, sizeof(buf), pos, drv->cmd_count);
+        log_append_str(buf, sizeof(buf), pos, " errs=");
+        log_append_u64_dec(buf, sizeof(buf), pos, drv->error_count);
+        log_append_str(buf, sizeof(buf), pos, " w=");
+        log_append_u64_dec(buf, sizeof(buf), pos, drv->fb_width);
+        log_append_str(buf, sizeof(buf), pos, " h=");
+        log_append_u64_dec(buf, sizeof(buf), pos, drv->fb_height);
+        buf[pos] = '\0';
+        gpu_klog(buf);
+
+        /* Loguj producer/consumer indeksy kolejki */
+        if (drv->controlq) {
+            char qbuf[128]{};
+            size_t qpos = 0;
+            log_append_str(qbuf, sizeof(qbuf), qpos, "[REBOOT TRACE] GPU[");
+            log_append_u64_dec(qbuf, sizeof(qbuf), qpos, i);
+            log_append_str(qbuf, sizeof(qbuf), qpos, "] controlq_has_used=");
+            qbuf[qpos++] = virtqueue_has_used(drv->controlq) ? '1' : '0';
+            log_append_str(qbuf, sizeof(qbuf), qpos, " cmd_done=");
+            log_append_u64_dec(qbuf, sizeof(qbuf), qpos,
+                               __atomic_load_n(&drv->command_done, __ATOMIC_ACQUIRE));
+            qbuf[qpos] = '\0';
+            gpu_klog(qbuf);
+        }
+    }
+    if (g_gpu_driver_count == 0) {
+        gpu_klog("[REBOOT TRACE] Brak zainicjowanych sterownikow GPU.");
+    }
+}
+
+/*
+ * Czeka (z ograniczonym timeoutem) na zakonczenie ewentualnie trwajacego
+ * polecenia GPU controlq, aby nie wchodzic w 8042/ACPI reset ze stanem
+ * "komenda w locie" na virt-queue.
+ *
+ * WAZNE: NIE wykonuje virtio_pci_set_status(dev, VIRTIO_STATUS_RESET),
+ * poniewaz zapis device_status=0 moze zawiesic QEMU (virtiogpureset deadlock).
+ * Jedynym celem jest oproznienie avail/used ring przed przerwaniem przerwan.
+ *
+ * Timeout: 200 ms - wystarczajaco dlugi dla wolnego TCG, ale nie za dlugi
+ * aby nie blokac restartu przy zamrozonej GPU.
+ */
+void virtio_gpu_quiesce_for_reboot(void) {
+    constexpr uint64_t QUIESCE_TIMEOUT_NS = 200ULL * 1000000ULL; /* 200 ms */
+
+    /* Upewnij sie, ze nowe zgloszenia GPU sa bezwzglednie zablokowane */
+    virtio_gpu_stop_submissions();
+
+    for (uint32_t i = 0; i < g_gpu_driver_count; ++i) {
+        VirtioGpuDriver* drv = &g_gpu_drivers[i];
+        if (!drv->initialized || drv->has_error || !drv->controlq) continue;
+
+        const uint64_t start_ns = gpu_monotonic_ns();
+        const uint64_t deadline_ns =
+            (start_ns > UINT64_MAX - QUIESCE_TIMEOUT_NS)
+                ? UINT64_MAX
+                : (start_ns + QUIESCE_TIMEOUT_NS);
+
+        bool locked = false;
+        while (true) {
+            if (__atomic_test_and_set(&drv->lock, __ATOMIC_ACQUIRE) == 0) {
+                locked = true;
+                break;
+            }
+            const uint64_t now = gpu_monotonic_ns();
+            if (now != 0 && now >= deadline_ns) break;
+            asm volatile("pause" ::: "memory");
+        }
+
+        if (!locked) {
+            gpu_klog("[REBOOT TRACE] gpu quiesce lock TIMEOUT - przerywam quiesce urzadzenia");
+            drv->has_error = true;
+            continue; /* NIE dotykaj controlq, inna zablokowana petla moze go uzywac! */
+        }
+
+        /* 2. Sprawdz czy jest oczekujace polecenie lub nieodebrane zakonczenia */
+        const bool has_pending =
+            virtqueue_has_used(drv->controlq) ||
+            (__atomic_load_n(&drv->command_done, __ATOMIC_ACQUIRE) == 0 &&
+             drv->controlq->avail->idx != drv->controlq->last_used_idx);
+
+        if (has_pending) {
+            bool quiesced = false;
+            for (uint32_t spin = 0; spin < 10000000U; ++spin) {
+                if (__atomic_load_n(&drv->command_done, __ATOMIC_ACQUIRE) ||
+                    virtqueue_has_used(drv->controlq)) {
+                    while (virtqueue_has_used(drv->controlq)) {
+                        void* cookie = nullptr;
+                        uint32_t used_len = 0;
+                        if (virtqueue_pop_used(drv->controlq, &cookie, &used_len) < 0) break;
+                    }
+                    __atomic_store_n(&drv->command_done, 0U, __ATOMIC_RELEASE);
+                    quiesced = true;
+                    break;
+                }
+                const uint64_t now = gpu_monotonic_ns();
+                if (now != 0 && now >= deadline_ns) break;
+                asm volatile("pause" ::: "memory");
+            }
+            if (!quiesced) {
+                gpu_klog("[REBOOT TRACE] gpu quiesce pop TIMEOUT");
+                drv->has_error = true;
+                __atomic_clear(&drv->lock, __ATOMIC_RELEASE);
+                continue;
+            }
+        }
+
+        /* 3. Wylacz scanout aby QEMU nie probowalo czytac pamieci podczas resetu maszyny */
+        if (drv->scanout_set && drv->cmd_vaddr) {
+            VirtioGpuSetScanout req{};
+            req.hdr.type = VIRTIO_GPU_CMD_SET_SCANOUT;
+            req.scanout_id = 0;
+            req.resource_id = 0; /* 0 = disable */
+            req.r.x = 0; req.r.y = 0; req.r.width = 0; req.r.height = 0;
+            
+            VirtioGpuCtrlHdr resp{};
+            
+            gpu_memcpy(drv->cmd_vaddr, &req, sizeof(req));
+            uint8_t* resp_dma_vaddr = static_cast<uint8_t*>(drv->cmd_vaddr) + VIRTIO_GPU_CMD_RESP_OFFSET;
+            gpu_secure_zero(resp_dma_vaddr, sizeof(resp));
+
+            const uint64_t req_paddr = drv->cmd_paddr;
+            const uint64_t resp_paddr = drv->cmd_paddr + VIRTIO_GPU_CMD_RESP_OFFSET;
+
+            VirtqBuffer bufs[2];
+            bufs[0].phys_addr = req_paddr;
+            bufs[0].len = static_cast<uint32_t>(sizeof(req));
+            bufs[0].is_write = false;
+
+            bufs[1].phys_addr = resp_paddr;
+            bufs[1].len = static_cast<uint32_t>(sizeof(resp));
+            bufs[1].is_write = true;
+
+            __atomic_store_n(&drv->command_done, 0U, __ATOMIC_RELEASE);
+            
+            const int head = virtqueue_submit(drv->controlq, bufs, 2, nullptr);
+            if (head >= 0) {
+                virtqueue_kick(drv->controlq, true);
+                
+                for (uint32_t spin = 0; spin < 10000000U; ++spin) {
+                    if (__atomic_load_n(&drv->command_done, __ATOMIC_ACQUIRE) || virtqueue_has_used(drv->controlq)) {
+                        while (virtqueue_has_used(drv->controlq)) {
+                            void* cookie = nullptr;
+                            uint32_t used_len = 0;
+                            virtqueue_pop_used(drv->controlq, &cookie, &used_len);
+                        }
+                        __atomic_store_n(&drv->command_done, 0U, __ATOMIC_RELEASE);
+                        break;
+                    }
+                    asm volatile("pause" ::: "memory");
+                }
+            }
+        }
+
+        __atomic_clear(&drv->lock, __ATOMIC_RELEASE);
+    }
+}
+
 bool virtio_gpu_reset(VirtioGpuDriver* drv) {
-    if (!drv) return false;
+    if (!drv || virtio_gpu_is_quiescing()) return false;
 
     GpuSpinLockGuard guard(drv->lock);
 
