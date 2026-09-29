@@ -1059,7 +1059,7 @@ QEMUACCEL ?= tcg,thread=multi
 QEMU_ACCEL ?= $(QEMUACCEL)
 QEMU_RAM ?= 2G
 QEMU_SMP ?= 1
-QEMU_DISPLAY_ARGS ?=
+QEMUDISPLAYARGS ?= -display sdl
 QEMU_VIRTIO_XRES ?= 1280
 QEMU_VIRTIO_YRES ?= 720
 
@@ -1073,7 +1073,7 @@ QEMUBASEARGS ?= \
 	-device intel-hda \
 	-device hda-output,audiodev=snd \
 	-serial stdio \
-	$(QEMU_DISPLAY_ARGS)
+	$(QEMUDISPLAYARGS)
 
 QEMU_BASE_ARGS := $(QEMUBASEARGS)
 
