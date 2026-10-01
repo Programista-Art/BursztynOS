@@ -1094,7 +1094,7 @@ QEMU_VIRTIO_COMMON_ARGS := \
 	-vga none \
 	-device virtio-vga,disable-legacy=on,xres=$(QEMU_VIRTIO_XRES),yres=$(QEMU_VIRTIO_YRES) \
 	-device virtio-keyboard-pci \
-	-device virtio-mouse-pci
+	-device virtio-tablet-pci
 
 # Produkcyjny profil VirtIO 1.x Modern PCI (Live / CD / instalator).
 # xres/yres sa jedynie poczatkowa wskazowka scanoutu QEMU; sterownik

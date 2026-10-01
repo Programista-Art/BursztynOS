@@ -1,0 +1,1254 @@
+
+Discarded input sections
+
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000       0x14 shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000       0x14 shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000       0x14 shell_tmp.o
+ .group         0x0000000000000000       0x14 shell_tmp.o
+ .group         0x0000000000000000       0x14 shell_tmp.o
+ .group         0x0000000000000000       0x14 shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000       0x14 shell_tmp.o
+ .group         0x0000000000000000       0x14 shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0xc shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .group         0x0000000000000000        0x8 shell_tmp.o
+ .text          0x0000000000000000        0x0 shell_tmp.o
+ .data          0x0000000000000000        0x0 shell_tmp.o
+ .bss           0x0000000000000000        0x0 shell_tmp.o
+ .comment       0x0000000000000000       0x2e shell_tmp.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 shell_tmp.o
+ .group         0x0000000000000000        0x8 bursztyn_gui.o
+ .group         0x0000000000000000        0x8 bursztyn_gui.o
+ .group         0x0000000000000000        0x8 bursztyn_gui.o
+ .group         0x0000000000000000        0x8 bursztyn_gui.o
+ .text          0x0000000000000000        0x0 bursztyn_gui.o
+ .data          0x0000000000000000        0x0 bursztyn_gui.o
+ .bss           0x0000000000000000        0x0 bursztyn_gui.o
+ .text._ZZ18ustawienia_sciezkaPKcS0_PcjENKUlS0_E_clES0_
+                0x0000000000000000       0x6d bursztyn_gui.o
+ .text._ZN12_GLOBAL__N_115modal_poprzedniEPKcm
+                0x0000000000000000       0x21 bursztyn_gui.o
+ .text._ZN12_GLOBAL__N_111modal_punktERK17GuiModalProstokatii
+                0x0000000000000000       0x24 bursztyn_gui.o
+ .text._ZN12_GLOBAL__N_119tekst_konczy_sie_ciEPKcS1_.part.0
+                0x0000000000000000       0x7e bursztyn_gui.o
+ .text._ZN12_GLOBAL__N_114modal_nastepnyEPKcmm
+                0x0000000000000000       0x68 bursztyn_gui.o
+ .text._ZN12_GLOBAL__N_113modal_dlugoscEPKcm
+                0x0000000000000000       0x16 bursztyn_gui.o
+ .text._ZN12_GLOBAL__N_112modal_kopiujEPcmPKc
+                0x0000000000000000       0x38 bursztyn_gui.o
+ .text._ZN12_GLOBAL__N_121modal_kopiuj_przytnijEPcmPKc
+                0x0000000000000000       0x3d bursztyn_gui.o
+ .text._Z23gui_legacy_czy_wlaczonyv
+                0x0000000000000000        0xa bursztyn_gui.o
+ .text._Z24gui_legacy_skala_procentv
+                0x0000000000000000        0xa bursztyn_gui.o
+ .text._Z26gui_liczba_alokacji_stertyv
+                0x0000000000000000        0xb bursztyn_gui.o
+ .text._Z36gui_liczba_aktywnych_alokacji_stertyv
+                0x0000000000000000        0xb bursztyn_gui.o
+ .text._Znam    0x0000000000000000        0xc bursztyn_gui.o
+ .text._ZdlPv   0x0000000000000000        0xc bursztyn_gui.o
+ .text._ZdaPv   0x0000000000000000        0xc bursztyn_gui.o
+ .text._ZdaPvm  0x0000000000000000        0xc bursztyn_gui.o
+ .text._Z6wypiszPKc
+                0x0000000000000000       0x21 bursztyn_gui.o
+ .text._Z26utworz_katalog_uzytkownikaPKc
+                0x0000000000000000       0x2b bursztyn_gui.o
+ .text._Z12pobierz_znakv
+                0x0000000000000000       0x1d bursztyn_gui.o
+ .text._Z28wylistuj_katalog_uzytkownikaPKcPcj
+                0x0000000000000000       0x3a bursztyn_gui.o
+ .text._Z27uruchom_program_uzytkownikaPKc
+                0x0000000000000000       0x2b bursztyn_gui.o
+ .text._Z40uruchom_program_z_argumentem_uzytkownikaPKcS0_
+                0x0000000000000000       0x30 bursztyn_gui.o
+ .text._Z25pobierz_argument_startowyPcj
+                0x0000000000000000       0x2f bursztyn_gui.o
+ .rodata._Z22otworz_plik_skojarzonyPKc.str1.1
+                0x0000000000000000       0x70 bursztyn_gui.o
+ .text._Z22otworz_plik_skojarzonyPKc
+                0x0000000000000000       0x77 bursztyn_gui.o
+ .text._Z21pobierz_rozmiar_plikuPKcPj
+                0x0000000000000000       0x42 bursztyn_gui.o
+ .text.bws_siec_pobierz_https
+                0x0000000000000000       0x53 bursztyn_gui.o
+ .text.bws_tls_certyfikat_zaufany
+                0x0000000000000000       0x23 bursztyn_gui.o
+ .text._Z19gui_wyczyscz_obszariiii
+                0x0000000000000000       0x8b bursztyn_gui.o
+ .text._Z11gui_odswiezv
+                0x0000000000000000       0x1a bursztyn_gui.o
+ .text._Z16gui_pobierz_myszPiS_Ph
+                0x0000000000000000       0x62 bursztyn_gui.o
+ .text._Z18gui_odswiez_pulpitv
+                0x0000000000000000       0x1a bursztyn_gui.o
+ .text._Z30gui_potwierdz_gotowosc_pulpituv
+                0x0000000000000000       0x23 bursztyn_gui.o
+ .text._Z16gui_wypisz_tekstiiPKc
+                0x0000000000000000       0x7c bursztyn_gui.o
+ .text._Z22gui_wypisz_tekst_koloriijPKc
+                0x0000000000000000       0x2f bursztyn_gui.o
+ .text._Z8gui_blitiiiiPKj
+                0x0000000000000000       0xa7 bursztyn_gui.o
+ .text._Z14gui_blit_popupiiiiPKj
+                0x0000000000000000       0xaa bursztyn_gui.o
+ .text._Z14gui_rysuj_oknoiiiiPKc
+                0x0000000000000000       0xc7 bursztyn_gui.o
+ .text._Z24gui_ustaw_system_overlaybiiii
+                0x0000000000000000       0x89 bursztyn_gui.o
+ .text._Z16gui_pobierz_oknaP11GuiOknoInfoj
+                0x0000000000000000       0x29 bursztyn_gui.o
+ .text._Z16gui_aktywuj_oknom
+                0x0000000000000000       0x2b bursztyn_gui.o
+ .text._Z21usun_twor_uzytkownikaPKc
+                0x0000000000000000       0x2b bursztyn_gui.o
+ .text._Z23zmien_nazwe_uzytkownikaPKcS0_
+                0x0000000000000000       0x34 bursztyn_gui.o
+ .text._Z22pobierz_metadane_plikuPKcP16BwsMetadanePliku
+                0x0000000000000000       0x34 bursztyn_gui.o
+ .text._Z25przenies_twor_uzytkownikaPKcS0_
+                0x0000000000000000       0x34 bursztyn_gui.o
+ .text._Z23gui_rejestruj_cele_dropPK10BwsCelDropj
+                0x0000000000000000      0x126 bursztyn_gui.o
+ .text._Z19gui_aktualizuj_dragPKciib
+                0x0000000000000000       0x74 bursztyn_gui.o
+ .text._Z20ustaw_schowek_plikowPKc18BwsOperacjaSchowka
+                0x0000000000000000       0x34 bursztyn_gui.o
+ .text._Z22pobierz_schowek_plikowP16BwsSchowekPlikow
+                0x0000000000000000       0x2b bursztyn_gui.o
+ .text._Z22wyczysc_schowek_plikowm
+                0x0000000000000000       0x2b bursztyn_gui.o
+ .text._Z23kopiuj_twor_uzytkownikaPKcS0_
+                0x0000000000000000       0x34 bursztyn_gui.o
+ .text._Z21czytaj_fragment_plikuPKcmPcjPj
+                0x0000000000000000       0x9e bursztyn_gui.o
+ .text._Z24gui_czas_monotoniczny_nsv
+                0x0000000000000000       0x1d bursztyn_gui.o
+ .text._Z25gui_ustaw_popup_aplikacjibiiii
+                0x0000000000000000       0x85 bursztyn_gui.o
+ .text._Z28gui_ustaw_izolacje_geometriib
+                0x0000000000000000        0xc bursztyn_gui.o
+ .text._Z35gui_czy_izolacja_geometrii_wlaczonav
+                0x0000000000000000        0xa bursztyn_gui.o
+ .text._Z30gui_pobierz_widoczna_geometriePiS_S_S_
+                0x0000000000000000       0x41 bursztyn_gui.o
+ .text._Z31gui_pobierz_izolowana_geometriePiS_S_S_
+                0x0000000000000000       0x41 bursztyn_gui.o
+ .text._Z18gui_log_geom_tracePKciiiiiiiibbiiii
+                0x0000000000000000        0x1 bursztyn_gui.o
+ .text._Z20gui_liczba_monitorowv
+                0x0000000000000000       0x29 bursztyn_gui.o
+ .text._Z24gui_ustaw_obszar_roboczyiiii
+                0x0000000000000000       0x41 bursztyn_gui.o
+ .text._Z10shm_createmj
+                0x0000000000000000       0x25 bursztyn_gui.o
+ .text._Z7shm_mapmj
+                0x0000000000000000       0x31 bursztyn_gui.o
+ .text._Z9shm_unmapPv
+                0x0000000000000000       0x2b bursztyn_gui.o
+ .text._Z9shm_closem
+                0x0000000000000000       0x2b bursztyn_gui.o
+ .text._Z10ipc_createv
+                0x0000000000000000       0x25 bursztyn_gui.o
+ .text._Z8ipc_sendmPK12BwsIpcWyslij
+                0x0000000000000000       0x34 bursztyn_gui.o
+ .text._Z11ipc_receivemP13BwsIpcOdbierz
+                0x0000000000000000       0x34 bursztyn_gui.o
+ .text._Z9ipc_closem
+                0x0000000000000000       0x2b bursztyn_gui.o
+ .text._Z10file_watchPKcj
+                0x0000000000000000       0x34 bursztyn_gui.o
+ .text._Z12file_unwatchm
+                0x0000000000000000       0x2e bursztyn_gui.o
+ .text._Z16clipboard_formatjPcj
+                0x0000000000000000       0x33 bursztyn_gui.o
+ .text._Z14clipboard_sizePKcPm
+                0x0000000000000000       0x34 bursztyn_gui.o
+ .text._Z14clipboard_readPKcPvmPm
+                0x0000000000000000       0x43 bursztyn_gui.o
+ .text._Z13clipboard_setPKcPKvm
+                0x0000000000000000       0x3b bursztyn_gui.o
+ .text._Z16gui_ustaw_kursorj
+                0x0000000000000000       0x23 bursztyn_gui.o
+ .text._Z23gui_ustaw_kursor_customPK19GuiCustomCursorInfo
+                0x0000000000000000       0x2b bursztyn_gui.o
+ .text._Z13socket_createj
+                0x0000000000000000       0x25 bursztyn_gui.o
+ .text._Z14socket_connectmPKht
+                0x0000000000000000       0x3d bursztyn_gui.o
+ .text._Z11socket_sendmPKvjP11BwsIoResult
+                0x0000000000000000       0x42 bursztyn_gui.o
+ .text._Z11socket_recvmPvjP11BwsIoResult
+                0x0000000000000000       0x42 bursztyn_gui.o
+ .text._Z12socket_closem
+                0x0000000000000000       0x2b bursztyn_gui.o
+ .rodata._Z18ustawienia_sciezkaPKcS0_Pcj.str1.1
+                0x0000000000000000       0x22 bursztyn_gui.o
+ .text._Z18ustawienia_sciezkaPKcS0_Pcj
+                0x0000000000000000       0xf8 bursztyn_gui.o
+ .text._Z21gui_pobierz_zdarzenieP13bws_zdarzenie
+                0x0000000000000000       0x5f bursztyn_gui.o
+ .text._Z35gui_czekaj_na_zdarzenie_z_timeoutemP13bws_zdarzeniem
+                0x0000000000000000       0x9f bursztyn_gui.o
+ .text._Z15motyw_cien_oknav
+                0x0000000000000000       0x10 bursztyn_gui.o
+ .text._Z21motyw_polecenie_ustawPKc
+                0x0000000000000000       0x2e bursztyn_gui.o
+ .text._Z23motyw_polecenie_podgladPKc
+                0x0000000000000000       0x3d bursztyn_gui.o
+ .text._Z25motyw_polecenie_zatwierdzv
+                0x0000000000000000       0x35 bursztyn_gui.o
+ .text._Z24motyw_polecenie_przywrocv
+                0x0000000000000000       0x35 bursztyn_gui.o
+ .text._Z27gui_pobierz_szerokosc_znakuj
+                0x0000000000000000       0x28 bursztyn_gui.o
+ .text._Z26gui_pobierz_wysokosc_fontuv
+                0x0000000000000000       0x2e bursztyn_gui.o
+ .text._Z19bws_przesun_warstweii
+                0x0000000000000000       0xa1 bursztyn_gui.o
+ .text._Z23oblicz_szerokosc_tekstuPKci
+                0x0000000000000000      0x1ce bursztyn_gui.o
+ .text._ZN12_GLOBAL__N_117modal_przytnij_pxEPKcPcmi
+                0x0000000000000000      0x10f bursztyn_gui.o
+ .text._Z24rysuj_tekst_wysrodkowanyiiiiijPKc
+                0x0000000000000000      0x102 bursztyn_gui.o
+ .text._Z13RysujPrzyciskiiiijjPKc
+                0x0000000000000000      0x191 bursztyn_gui.o
+ .rodata._Z27gui_rysuj_standardowa_belkeiiiPKcb.str1.1
+                0x0000000000000000        0x8 bursztyn_gui.o
+ .text._Z27gui_rysuj_standardowa_belkeiiiPKcb
+                0x0000000000000000      0x34d bursztyn_gui.o
+ .text._Z27gui_modal_ustaw_przycisk_okP14GuiModalDialogPKcj
+                0x0000000000000000       0x3e bursztyn_gui.o
+ .text._Z17gui_modal_zamknijP14GuiModalDialog
+                0x0000000000000000       0x48 bursztyn_gui.o
+ .text._Z17gui_modal_otwartyPK14GuiModalDialog
+                0x0000000000000000        0xa bursztyn_gui.o
+ .rodata._Z15gui_modal_tekstPK14GuiModalDialog.str1.1
+                0x0000000000000000        0x1 bursztyn_gui.o
+ .text._Z15gui_modal_tekstPK14GuiModalDialog
+                0x0000000000000000       0x14 bursztyn_gui.o
+ .text._Z14gui_modal_polePK14GuiModalDialog
+                0x0000000000000000        0xf bursztyn_gui.o
+ .text._Z15gui_modal_ramkaPK14GuiModalDialog
+                0x0000000000000000        0xf bursztyn_gui.o
+ .text._Z14gui_modal_klikP14GuiModalDialogii
+                0x0000000000000000       0x3e bursztyn_gui.o
+ .text._Z23gui_modal_pole_trafionePK14GuiModalDialogii
+                0x0000000000000000       0x26 bursztyn_gui.o
+ .text._Z26gui_modal_karetka_za_myszaP14GuiModalDialogi
+                0x0000000000000000       0xd0 bursztyn_gui.o
+ .text._Z16gui_modal_dopiszP14GuiModalDialogc
+                0x0000000000000000       0x70 bursztyn_gui.o
+ .text._Z21gui_modal_usun_wsteczP14GuiModalDialog
+                0x0000000000000000       0x8b bursztyn_gui.o
+ .text._Z17gui_modal_klawiszP14GuiModalDialogc
+                0x0000000000000000       0x5a bursztyn_gui.o
+ .text._Z20gui_modal_usun_przedP14GuiModalDialog
+                0x0000000000000000       0x76 bursztyn_gui.o
+ .text._Z25gui_modal_przesun_karetkeP14GuiModalDialogi
+                0x0000000000000000       0x80 bursztyn_gui.o
+ .rodata._Z15gui_modal_rysujP14GuiModalDialog.str1.1
+                0x0000000000000000        0x9 bursztyn_gui.o
+ .text._Z15gui_modal_rysujP14GuiModalDialog
+                0x0000000000000000      0x462 bursztyn_gui.o
+ .rodata._Z16gui_modal_otworzP14GuiModalDialogPKcS2_S2_PK17GuiModalProstokatj.str1.1
+                0x0000000000000000        0x3 bursztyn_gui.o
+ .text._Z16gui_modal_otworzP14GuiModalDialogPKcS2_S2_PK17GuiModalProstokatj
+                0x0000000000000000      0x322 bursztyn_gui.o
+ .bss._ZN12_GLOBAL__N_113modal_aktywnyE
+                0x0000000000000000        0x8 bursztyn_gui.o
+ .bss._ZL23g_lokalny_podglad_token
+                0x0000000000000000        0x8 bursztyn_gui.o
+ .bss._ZN12_GLOBAL__N_116legacy_cele_dropE
+                0x0000000000000000     0x4200 bursztyn_gui.o
+ .comment       0x0000000000000000       0x2e bursztyn_gui.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 bursztyn_gui.o
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x0000000000000000 0xffffffffffffffff
+
+Linker script and memory map
+
+                0x0000000000000000                BUR_HEADER_OFFSET = 0x0
+                0x0000000000001000                BUR_HEADER_SIZE = 0x1000
+                0x0000000001000000                BUR_HEADER_VADDR = 0x1000000
+                0x0000000000001000                BUR_TEXT_OFFSET = 0x1000
+                0x0000000000020000                BUR_TEXT_SIZE = 0x20000
+                0x0000000001001000                BUR_TEXT_VADDR = 0x1001000
+                0x0000000000021000                BUR_DATA_OFFSET = 0x21000
+                0x0000000000040000                BUR_DATA_SIZE = 0x40000
+                0x0000000001021000                BUR_DATA_VADDR = 0x1021000
+                0x0000000001021000                BUR_TEXT_END = (BUR_TEXT_VADDR + BUR_TEXT_SIZE)
+                0x0000000001061000                BUR_DATA_END = (BUR_DATA_VADDR + BUR_DATA_SIZE)
+
+.naglowek       0x0000000001000000     0x1000 load address 0x0000000000000000
+                0x0000000001000000                __bur_header_start = .
+ *(.naglowek)
+ .naglowek      0x0000000001000000       0x3c shell_tmp.o
+                0x0000000001000000                naglowek
+ *(.naglowek.*)
+                0x000000000100003c                __bur_header_payload_end = .
+                0x0000000000001000                . = BUR_HEADER_SIZE
+ *fill*         0x000000000100003c      0xfc4 00
+                0x0000000001001000                __bur_header_end = .
+
+.text           0x0000000001001000    0x20000 load address 0x0000000000001000
+                0x0000000001001000                __bur_text_start = .
+ *(.text._start)
+ .text._start   0x0000000001001000     0x2b20 shell_tmp.o
+                0x0000000001001000                _start
+ *(.text._start.*)
+ *(.text)
+ *(.text.*)
+ .text._ZNK10BursztynUI9Kontrolka5tekstEv
+                0x0000000001003b20        0x8 shell_tmp.o
+                0x0000000001003b20                BursztynUI::Kontrolka::tekst() const
+ *fill*         0x0000000001003b28        0x8 00
+ .text._ZN10BursztynUI9Kontrolka26przygotuj_menu_kontekstoweERNS_15MenuKontekstoweE
+                0x0000000001003b30        0x1 shell_tmp.o
+                0x0000000001003b30                BursztynUI::Kontrolka::przygotuj_menu_kontekstowe(BursztynUI::MenuKontekstowe&)
+ *fill*         0x0000000001003b31        0xf 00
+ .text._ZNK10BursztynUI9Kontrolka35czy_reaguje_wizualnie_na_najechanieEv
+                0x0000000001003b40        0x8 shell_tmp.o
+                0x0000000001003b40                BursztynUI::Kontrolka::czy_reaguje_wizualnie_na_najechanie() const
+ *fill*         0x0000000001003b48        0x8 00
+ .text._ZNK10BursztynUI9Kontrolka35czy_reaguje_wizualnie_na_wcisniecieEv
+                0x0000000001003b50        0x8 shell_tmp.o
+                0x0000000001003b50                BursztynUI::Kontrolka::czy_reaguje_wizualnie_na_wcisniecie() const
+ *fill*         0x0000000001003b58        0x8 00
+ .text._ZNK10BursztynUI9Kontrolka24oblicz_naturalny_rozmiarEv
+                0x0000000001003b60        0x3 shell_tmp.o
+                0x0000000001003b60                BursztynUI::Kontrolka::oblicz_naturalny_rozmiar() const
+ *fill*         0x0000000001003b63        0xd 00
+ .text._ZN10BursztynUI9Kontrolka17obsluz_klikniecieERNS_15ZdarzenieMyszkiE
+                0x0000000001003b70       0x19 shell_tmp.o
+                0x0000000001003b70                BursztynUI::Kontrolka::obsluz_klikniecie(BursztynUI::ZdarzenieMyszki&)
+ *fill*         0x0000000001003b89        0x7 00
+ .text._ZN10BursztynUI9Kontrolka26obsluz_podwojne_klikniecieERNS_15ZdarzenieMyszkiE
+                0x0000000001003b90       0x19 shell_tmp.o
+                0x0000000001003b90                BursztynUI::Kontrolka::obsluz_podwojne_klikniecie(BursztynUI::ZdarzenieMyszki&)
+ *fill*         0x0000000001003ba9        0x7 00
+ .text._ZN10BursztynUI9Kontrolka17obsluz_ruch_myszyERNS_15ZdarzenieMyszkiE
+                0x0000000001003bb0       0x19 shell_tmp.o
+                0x0000000001003bb0                BursztynUI::Kontrolka::obsluz_ruch_myszy(BursztynUI::ZdarzenieMyszki&)
+ *fill*         0x0000000001003bc9        0x7 00
+ .text._ZN10BursztynUI9Kontrolka12obsluz_rolkeERNS_14ZdarzenieRolkiE
+                0x0000000001003bd0       0x19 shell_tmp.o
+                0x0000000001003bd0                BursztynUI::Kontrolka::obsluz_rolke(BursztynUI::ZdarzenieRolki&)
+ *fill*         0x0000000001003be9        0x7 00
+ .text._ZN10BursztynUI9Kontrolka26obsluz_wcisniecie_klawiszaERNS_19ZdarzenieKlawiaturyE
+                0x0000000001003bf0       0x19 shell_tmp.o
+                0x0000000001003bf0                BursztynUI::Kontrolka::obsluz_wcisniecie_klawisza(BursztynUI::ZdarzenieKlawiatury&)
+ *fill*         0x0000000001003c09        0x7 00
+ .text._ZN10BursztynUI9Kontrolka26obsluz_zwolnienie_klawiszaERNS_19ZdarzenieKlawiaturyE
+                0x0000000001003c10       0x19 shell_tmp.o
+                0x0000000001003c10                BursztynUI::Kontrolka::obsluz_zwolnienie_klawisza(BursztynUI::ZdarzenieKlawiatury&)
+ *fill*         0x0000000001003c29        0x7 00
+ .text._ZN10BursztynUI9Kontrolka26obsluz_wprowadzenie_tekstuERNS_27ZdarzenieWprowadzaniaTekstuE
+                0x0000000001003c30        0x1 shell_tmp.o
+                0x0000000001003c30                BursztynUI::Kontrolka::obsluz_wprowadzenie_tekstu(BursztynUI::ZdarzenieWprowadzaniaTekstu&)
+ *fill*         0x0000000001003c31        0xf 00
+ .text._ZN10BursztynUI9Kontrolka22obsluz_zmiane_rozmiaruEv
+                0x0000000001003c40       0x19 shell_tmp.o
+                0x0000000001003c40                BursztynUI::Kontrolka::obsluz_zmiane_rozmiaru()
+ *fill*         0x0000000001003c59        0x7 00
+ .text._ZN10BursztynUI9Kontrolka16przy_opuszczeniuEv
+                0x0000000001003c60        0x9 shell_tmp.o
+                0x0000000001003c60                BursztynUI::Kontrolka::przy_opuszczeniu()
+ *fill*         0x0000000001003c69        0x7 00
+ .text._ZN10BursztynUI9Kontrolka21przy_wcisnieciu_myszyERNS_15ZdarzenieMyszkiE
+                0x0000000001003c70        0x9 shell_tmp.o
+                0x0000000001003c70                BursztynUI::Kontrolka::przy_wcisnieciu_myszy(BursztynUI::ZdarzenieMyszki&)
+ *fill*         0x0000000001003c79        0x7 00
+ .text._ZN10BursztynUI9Kontrolka21przy_zwolnieniu_myszyERNS_15ZdarzenieMyszkiE
+                0x0000000001003c80        0x9 shell_tmp.o
+                0x0000000001003c80                BursztynUI::Kontrolka::przy_zwolnieniu_myszy(BursztynUI::ZdarzenieMyszki&)
+ *fill*         0x0000000001003c89        0x7 00
+ .text._ZN10BursztynUI9Kontrolka16przy_ruchu_myszyERNS_15ZdarzenieMyszkiE
+                0x0000000001003c90        0x9 shell_tmp.o
+                0x0000000001003c90                BursztynUI::Kontrolka::przy_ruchu_myszy(BursztynUI::ZdarzenieMyszki&)
+ *fill*         0x0000000001003c99        0x7 00
+ .text._ZN10BursztynUI9Kontrolka24przy_wcisnieciu_klawiszaERNS_19ZdarzenieKlawiaturyE
+                0x0000000001003ca0        0x9 shell_tmp.o
+                0x0000000001003ca0                BursztynUI::Kontrolka::przy_wcisnieciu_klawisza(BursztynUI::ZdarzenieKlawiatury&)
+ *fill*         0x0000000001003ca9        0x7 00
+ .text._ZN10BursztynUI9Kontrolka19przy_utracie_fokusuEv
+                0x0000000001003cb0        0x9 shell_tmp.o
+                0x0000000001003cb0                BursztynUI::Kontrolka::przy_utracie_fokusu()
+ *fill*         0x0000000001003cb9        0x7 00
+ .text._ZN10BursztynUI9Kontrolka24zastosuj_ikone_poleceniaEj
+                0x0000000001003cc0        0x1 shell_tmp.o
+                0x0000000001003cc0                BursztynUI::Kontrolka::zastosuj_ikone_polecenia(unsigned int)
+ *fill*         0x0000000001003cc1        0xf 00
+ .text._ZN10BursztynUI9Kontrolka30zastosuj_zaznaczenie_poleceniaEb
+                0x0000000001003cd0        0x1 shell_tmp.o
+                0x0000000001003cd0                BursztynUI::Kontrolka::zastosuj_zaznaczenie_polecenia(bool)
+ *fill*         0x0000000001003cd1        0xf 00
+ .text._ZN10BursztynUI9Kontrolka20polecenie_zniszczoneERNS_11PolecenieUIE
+                0x0000000001003ce0       0x1c shell_tmp.o
+                0x0000000001003ce0                BursztynUI::Kontrolka::polecenie_zniszczone(BursztynUI::PolecenieUI&)
+ *fill*         0x0000000001003cfc        0x4 00
+ .text._ZN12_GLOBAL__N_116dodaj_nowa_linieEv
+                0x0000000001003d00       0x78 shell_tmp.o
+ *fill*         0x0000000001003d78        0x8 00
+ .text._ZN12_GLOBAL__N_111tekst_rownyEPKcS1_
+                0x0000000001003d80       0x3b shell_tmp.o
+ *fill*         0x0000000001003dbb        0x5 00
+ .text._ZN12_GLOBAL__N_111uint_do_strEmPcm
+                0x0000000001003dc0       0xd9 shell_tmp.o
+ *fill*         0x0000000001003e99        0x7 00
+ .text._ZN10BursztynUI9Kontrolka24przy_wprowadzeniu_tekstuERNS_27ZdarzenieWprowadzaniaTekstuE
+                0x0000000001003ea0       0x22 shell_tmp.o
+                0x0000000001003ea0                BursztynUI::Kontrolka::przy_wprowadzeniu_tekstu(BursztynUI::ZdarzenieWprowadzaniaTekstu&)
+ *fill*         0x0000000001003ec2        0xe 00
+ .text._ZN10BursztynUI9Kontrolka24przy_zwolnieniu_klawiszaERNS_19ZdarzenieKlawiaturyE
+                0x0000000001003ed0       0x3a shell_tmp.o
+                0x0000000001003ed0                BursztynUI::Kontrolka::przy_zwolnieniu_klawisza(BursztynUI::ZdarzenieKlawiatury&)
+ *fill*         0x0000000001003f0a        0x6 00
+ .text._ZN10BursztynUI9Kontrolka13krok_animacjiEm
+                0x0000000001003f10      0x2bf shell_tmp.o
+                0x0000000001003f10                BursztynUI::Kontrolka::krok_animacji(unsigned long)
+ *fill*         0x00000000010041cf        0x1 00
+ .text._ZN10BursztynUI9Kontrolka22ustaw_zarzadce_popupowEPNS_15ZarzadcaPopupowE
+                0x00000000010041d0      0x47e shell_tmp.o
+                0x00000000010041d0                BursztynUI::Kontrolka::ustaw_zarzadce_popupow(BursztynUI::ZarzadcaPopupow*)
+ *fill*         0x000000000100464e        0x2 00
+ .text._ZN12_GLOBAL__N_112kopiuj_tekstEPcmPKc
+                0x0000000001004650       0x4e shell_tmp.o
+ *fill*         0x000000000100469e        0x2 00
+ .text._ZN12_GLOBAL__N_124utworz_sciezke_absolutnaEPKcPcm.constprop.0
+                0x00000000010046a0       0x79 shell_tmp.o
+ *fill*         0x0000000001004719        0x7 00
+ .text._ZN10BursztynUI9Kontrolka23kontrolka_aktywacji_altEv
+                0x0000000001004720      0x47b shell_tmp.o
+                0x0000000001004720                BursztynUI::Kontrolka::kontrolka_aktywacji_alt()
+ *fill*         0x0000000001004b9b        0x5 00
+ .text._ZNK10BursztynUI16PasekPrzewijania15czesc_w_punkcieENS_5PunktERKNS0_9GeometriaE.isra.0
+                0x0000000001004ba0       0xff shell_tmp.o
+ *fill*         0x0000000001004c9f        0x1 00
+ .text._ZNK10BursztynUI9Kontrolka19czy_wymaga_animacjiEv
+                0x0000000001004ca0      0x49f shell_tmp.o
+                0x0000000001004ca0                BursztynUI::Kontrolka::czy_wymaga_animacji() const
+ *fill*         0x000000000100513f        0x1 00
+ .text._ZN10BursztynUI9Kontrolka28zaktualizuj_pozycje_ekranowaEv
+                0x0000000001005140      0x7f9 shell_tmp.o
+                0x0000000001005140                BursztynUI::Kontrolka::zaktualizuj_pozycje_ekranowa()
+ *fill*         0x0000000001005939        0x7 00
+ .text._ZN10BursztynUI16PasekPrzewijania12obsluz_rolkeERNS_14ZdarzenieRolkiE
+                0x0000000001005940      0x150 shell_tmp.o
+                0x0000000001005940                BursztynUI::PasekPrzewijania::obsluz_rolke(BursztynUI::ZdarzenieRolki&)
+ .text._ZN10BursztynUI9Kontrolka5rysujERNS_17KontekstRysowaniaEb
+                0x0000000001005a90      0x2d1 shell_tmp.o
+                0x0000000001005a90                BursztynUI::Kontrolka::rysuj(BursztynUI::KontekstRysowania&, bool)
+ *fill*         0x0000000001005d61        0xf 00
+ .text._ZN10BursztynUI9Kontrolka17sprawdz_trafienieENS_5PunktE
+                0x0000000001005d70      0x5d7 shell_tmp.o
+                0x0000000001005d70                BursztynUI::Kontrolka::sprawdz_trafienie(BursztynUI::Punkt)
+ *fill*         0x0000000001006347        0x9 00
+ .text._ZNK10BursztynUI16PasekPrzewijania24oblicz_naturalny_rozmiarEv
+                0x0000000001006350       0x7a shell_tmp.o
+                0x0000000001006350                BursztynUI::PasekPrzewijania::oblicz_naturalny_rozmiar() const
+ *fill*         0x00000000010063ca        0x6 00
+ .text._ZN10BursztynUI9Kontrolka8rozmiescENS_9ProstokatE
+                0x00000000010063d0      0x39d shell_tmp.o
+                0x00000000010063d0                BursztynUI::Kontrolka::rozmiesc(BursztynUI::Prostokat)
+ *fill*         0x000000000100676d        0x3 00
+ .text._ZN10BursztynUI9Kontrolka6zmierzENS_7RozmiarE
+                0x0000000001006770      0x1eb shell_tmp.o
+                0x0000000001006770                BursztynUI::Kontrolka::zmierz(BursztynUI::Rozmiar)
+ *fill*         0x000000000100695b        0x5 00
+ .text._ZN10BursztynUI16PasekPrzewijania26obsluz_wcisniecie_klawiszaERNS_19ZdarzenieKlawiaturyE
+                0x0000000001006960      0x293 shell_tmp.o
+                0x0000000001006960                BursztynUI::PasekPrzewijania::obsluz_wcisniecie_klawisza(BursztynUI::ZdarzenieKlawiatury&)
+ *fill*         0x0000000001006bf3        0xd 00
+ .text._ZN10BursztynUI13ObszaryBrudne5dodajENS_9ProstokatE
+                0x0000000001006c00      0x41e shell_tmp.o
+                0x0000000001006c00                BursztynUI::ObszaryBrudne::dodaj(BursztynUI::Prostokat)
+ *fill*         0x000000000100701e        0x2 00
+ .text._ZN10BursztynUI9Kontrolka10uniewaznijEv.part.0
+                0x0000000001007020      0x46c shell_tmp.o
+ *fill*         0x000000000100748c        0x4 00
+ .text._ZN10BursztynUI9Kontrolka23obsluz_utrate_skupieniaEv
+                0x0000000001007490       0x42 shell_tmp.o
+                0x0000000001007490                BursztynUI::Kontrolka::obsluz_utrate_skupienia()
+ *fill*         0x00000000010074d2        0xe 00
+ .text._ZN10BursztynUI9Kontrolka23obsluz_zwolnienie_myszyERNS_15ZdarzenieMyszkiE
+                0x00000000010074e0       0xd9 shell_tmp.o
+                0x00000000010074e0                BursztynUI::Kontrolka::obsluz_zwolnienie_myszy(BursztynUI::ZdarzenieMyszki&)
+ *fill*         0x00000000010075b9        0x7 00
+ .text._ZN10BursztynUI9Kontrolka23obsluz_wcisniecie_myszyERNS_15ZdarzenieMyszkiE
+                0x00000000010075c0       0xb9 shell_tmp.o
+                0x00000000010075c0                BursztynUI::Kontrolka::obsluz_wcisniecie_myszy(BursztynUI::ZdarzenieMyszki&)
+ *fill*         0x0000000001007679        0x7 00
+ .text._ZN10BursztynUI9Kontrolka24obsluz_opuszczenie_myszyEv
+                0x0000000001007680      0x12e shell_tmp.o
+                0x0000000001007680                BursztynUI::Kontrolka::obsluz_opuszczenie_myszy()
+ *fill*         0x00000000010077ae        0x2 00
+ .text._ZN10BursztynUI9Kontrolka26obsluz_uzyskanie_skupieniaEv
+                0x00000000010077b0       0x42 shell_tmp.o
+                0x00000000010077b0                BursztynUI::Kontrolka::obsluz_uzyskanie_skupienia()
+ *fill*         0x00000000010077f2        0xe 00
+ .text._ZN10BursztynUI9Kontrolka20obsluz_wejscie_myszyEv
+                0x0000000001007800       0xc6 shell_tmp.o
+                0x0000000001007800                BursztynUI::Kontrolka::obsluz_wejscie_myszy()
+ *fill*         0x00000000010078c6        0xa 00
+ .text._ZN10BursztynUI9Kontrolka17zaktualizuj_motywEv
+                0x00000000010078d0       0x65 shell_tmp.o
+                0x00000000010078d0                BursztynUI::Kontrolka::zaktualizuj_motyw()
+ *fill*         0x0000000001007935        0xb 00
+ .text._ZN10BursztynUI9Kontrolka11ustaw_tekstEPKc
+                0x0000000001007940       0x91 shell_tmp.o
+                0x0000000001007940                BursztynUI::Kontrolka::ustaw_tekst(char const*)
+ *fill*         0x00000000010079d1        0xf 00
+ .text._ZN10BursztynUI9KontrolkaD2Ev
+                0x00000000010079e0      0x128 shell_tmp.o
+                0x00000000010079e0                BursztynUI::Kontrolka::~Kontrolka()
+                0x00000000010079e0                BursztynUI::Kontrolka::~Kontrolka()
+ *fill*         0x0000000001007b08        0x8 00
+ .text._ZN10BursztynUI9Kontrolka12przy_fokusieEv
+                0x0000000001007b10       0x8d shell_tmp.o
+                0x0000000001007b10                BursztynUI::Kontrolka::przy_fokusie()
+ *fill*         0x0000000001007b9d        0x3 00
+ .text._ZN10BursztynUI16PasekPrzewijaniaD2Ev
+                0x0000000001007ba0      0x125 shell_tmp.o
+                0x0000000001007ba0                BursztynUI::PasekPrzewijania::~PasekPrzewijania()
+                0x0000000001007ba0                BursztynUI::PasekPrzewijania::~PasekPrzewijania()
+ *fill*         0x0000000001007cc5        0xb 00
+ .text._ZN10BursztynUI9KontrolkaD0Ev
+                0x0000000001007cd0      0x138 shell_tmp.o
+                0x0000000001007cd0                BursztynUI::Kontrolka::~Kontrolka()
+ *fill*         0x0000000001007e08        0x8 00
+ .text._ZN10BursztynUI16PasekPrzewijaniaD0Ev
+                0x0000000001007e10      0x13b shell_tmp.o
+                0x0000000001007e10                BursztynUI::PasekPrzewijania::~PasekPrzewijania()
+ *fill*         0x0000000001007f4b        0x5 00
+ .text._ZN10BursztynUI9Kontrolka15przy_najechaniuEv
+                0x0000000001007f50       0xee shell_tmp.o
+                0x0000000001007f50                BursztynUI::Kontrolka::przy_najechaniu()
+ *fill*         0x000000000100803e        0x2 00
+ .text._ZN10BursztynUI9Kontrolka19odswiez_z_poleceniaERNS_11PolecenieUIE
+                0x0000000001008040      0x1d8 shell_tmp.o
+                0x0000000001008040                BursztynUI::Kontrolka::odswiez_z_polecenia(BursztynUI::PolecenieUI&)
+ *fill*         0x0000000001008218        0x8 00
+ .text._ZN10BursztynUI9Kontrolka15ustaw_skale_dpiE7SkalaUI
+                0x0000000001008220     0x315b shell_tmp.o
+                0x0000000001008220                BursztynUI::Kontrolka::ustaw_skale_dpi(SkalaUI)
+ *fill*         0x000000000100b37b        0x5 00
+ .text._ZN10BursztynUI9Kontrolka18uniewaznij_dzieckoEPS0_NS_9ProstokatE
+                0x000000000100b380      0x293 shell_tmp.o
+                0x000000000100b380                BursztynUI::Kontrolka::uniewaznij_dziecko(BursztynUI::Kontrolka*, BursztynUI::Prostokat)
+ *fill*         0x000000000100b613        0xd 00
+ .text._ZN10BursztynUI10CzcionkaUI12dekoduj_utf8EPKcmPj
+                0x000000000100b620      0x1aa shell_tmp.o
+                0x000000000100b620                BursztynUI::CzcionkaUI::dekoduj_utf8(char const*, unsigned long, unsigned int*)
+ *fill*         0x000000000100b7ca        0x6 00
+ .text._ZN10BursztynUI17KontekstRysowania15rysuj_prostokatENS_9ProstokatEj
+                0x000000000100b7d0      0x1cd shell_tmp.o
+                0x000000000100b7d0                BursztynUI::KontekstRysowania::rysuj_prostokat(BursztynUI::Prostokat, unsigned int)
+ *fill*         0x000000000100b99d        0x3 00
+ .text._ZN10BursztynUI17KontekstRysowania27rysuj_zaokraglony_prostokatENS_9ProstokatEji
+                0x000000000100b9a0      0x297 shell_tmp.o
+                0x000000000100b9a0                BursztynUI::KontekstRysowania::rysuj_zaokraglony_prostokat(BursztynUI::Prostokat, unsigned int, int)
+ *fill*         0x000000000100bc37        0x9 00
+ .text._ZN10BursztynUI17KontekstRysowania23rysuj_zaokraglona_ramkeENS_9ProstokatEjii
+                0x000000000100bc40      0x416 shell_tmp.o
+                0x000000000100bc40                BursztynUI::KontekstRysowania::rysuj_zaokraglona_ramke(BursztynUI::Prostokat, unsigned int, int, int)
+ *fill*         0x000000000100c056        0xa 00
+ .text._ZN10BursztynUI9Kontrolka17rysuj_tlo_i_ramkeERNS_17KontekstRysowaniaERKNS_9StylStanuE
+                0x000000000100c060      0x254 shell_tmp.o
+                0x000000000100c060                BursztynUI::Kontrolka::rysuj_tlo_i_ramke(BursztynUI::KontekstRysowania&, BursztynUI::StylStanu const&)
+ *fill*         0x000000000100c2b4        0xc 00
+ .text._ZN10BursztynUI9Kontrolka12rysuj_siebieERNS_17KontekstRysowaniaE
+                0x000000000100c2c0      0x439 shell_tmp.o
+                0x000000000100c2c0                BursztynUI::Kontrolka::rysuj_siebie(BursztynUI::KontekstRysowania&)
+ *fill*         0x000000000100c6f9        0x7 00
+ .text._ZN10BursztynUI5Motyw21zaktualizuj_z_systemuEv
+                0x000000000100c700      0xcbf shell_tmp.o
+                0x000000000100c700                BursztynUI::Motyw::zaktualizuj_z_systemu()
+ *fill*         0x000000000100d3bf        0x1 00
+ .text._ZN10BursztynUI16PasekPrzewijania17zaktualizuj_motywEv
+                0x000000000100d3c0      0x954 shell_tmp.o
+                0x000000000100d3c0                BursztynUI::PasekPrzewijania::zaktualizuj_motyw()
+ *fill*         0x000000000100dd14        0xc 00
+ .text._ZN10BursztynUI9Kontrolka17uniewaznij_obszarENS_9ProstokatE
+                0x000000000100dd20      0x31f shell_tmp.o
+                0x000000000100dd20                BursztynUI::Kontrolka::uniewaznij_obszar(BursztynUI::Prostokat)
+ *fill*         0x000000000100e03f        0x1 00
+ .text._ZN10BursztynUI16PasekPrzewijaniaC2Ev
+                0x000000000100e040      0xe10 shell_tmp.o
+                0x000000000100e040                BursztynUI::PasekPrzewijania::PasekPrzewijania()
+                0x000000000100e040                BursztynUI::PasekPrzewijania::PasekPrzewijania()
+ .text._ZNK10BursztynUI16PasekPrzewijania16oblicz_geometrieEv
+                0x000000000100ee50      0x78d shell_tmp.o
+                0x000000000100ee50                BursztynUI::PasekPrzewijania::oblicz_geometrie() const
+ *fill*         0x000000000100f5dd        0x3 00
+ .text._ZN10BursztynUI16PasekPrzewijania30obsluz_zmiane_geometrii_modeluEPNS_16ModelPrzewijaniaElPv
+                0x000000000100f5e0      0x179 shell_tmp.o
+                0x000000000100f5e0                BursztynUI::PasekPrzewijania::obsluz_zmiane_geometrii_modelu(BursztynUI::ModelPrzewijania*, long, void*)
+ *fill*         0x000000000100f759        0x7 00
+ .text._ZN10BursztynUI16PasekPrzewijania20obsluz_zmiane_modeluEPNS_16ModelPrzewijaniaElPv
+                0x000000000100f760      0x171 shell_tmp.o
+                0x000000000100f760                BursztynUI::PasekPrzewijania::obsluz_zmiane_modelu(BursztynUI::ModelPrzewijania*, long, void*)
+ *fill*         0x000000000100f8d1        0xf 00
+ .text._ZN10BursztynUI16PasekPrzewijania24obsluz_opuszczenie_myszyEv
+                0x000000000100f8e0      0x1ca shell_tmp.o
+                0x000000000100f8e0                BursztynUI::PasekPrzewijania::obsluz_opuszczenie_myszy()
+ *fill*         0x000000000100faaa        0x6 00
+ .text._ZN10BursztynUI16PasekPrzewijania23obsluz_utrate_skupieniaEv
+                0x000000000100fab0      0x11e shell_tmp.o
+                0x000000000100fab0                BursztynUI::PasekPrzewijania::obsluz_utrate_skupienia()
+ *fill*         0x000000000100fbce        0x2 00
+ .text._ZN12_GLOBAL__N_120shell_rysuj_terminalEv.part.0
+                0x000000000100fbd0      0xb81 shell_tmp.o
+ *fill*         0x0000000001010751        0xf 00
+ .text._ZN12_GLOBAL__N_112shell_wypiszEPKc.part.0
+                0x0000000001010760      0x413 shell_tmp.o
+ *fill*         0x0000000001010b73        0xd 00
+ .text._ZN12_GLOBAL__N_117polecenie_uruchomEPKc
+                0x0000000001010b80       0xb7 shell_tmp.o
+ *fill*         0x0000000001010c37        0x9 00
+ .text._ZN10BursztynUI16PasekPrzewijania21ustaw_czesc_najechanaENS0_5CzescERKNS0_9GeometriaE
+                0x0000000001010c40      0x21e shell_tmp.o
+                0x0000000001010c40                BursztynUI::PasekPrzewijania::ustaw_czesc_najechana(BursztynUI::PasekPrzewijania::Czesc, BursztynUI::PasekPrzewijania::Geometria const&)
+ *fill*         0x0000000001010e5e        0x2 00
+ .text._ZN10BursztynUI16PasekPrzewijania23obsluz_zwolnienie_myszyERNS_15ZdarzenieMyszkiE
+                0x0000000001010e60      0x19e shell_tmp.o
+                0x0000000001010e60                BursztynUI::PasekPrzewijania::obsluz_zwolnienie_myszy(BursztynUI::ZdarzenieMyszki&)
+ *fill*         0x0000000001010ffe        0x2 00
+ .text._ZN10BursztynUI16PasekPrzewijania17obsluz_ruch_myszyERNS_15ZdarzenieMyszkiE
+                0x0000000001011000      0x42f shell_tmp.o
+                0x0000000001011000                BursztynUI::PasekPrzewijania::obsluz_ruch_myszy(BursztynUI::ZdarzenieMyszki&)
+ *fill*         0x000000000101142f        0x1 00
+ .text._ZN10BursztynUI16PasekPrzewijania21ustaw_czesc_wcisnietaENS0_5CzescERKNS0_9GeometriaE
+                0x0000000001011430      0x21e shell_tmp.o
+                0x0000000001011430                BursztynUI::PasekPrzewijania::ustaw_czesc_wcisnieta(BursztynUI::PasekPrzewijania::Czesc, BursztynUI::PasekPrzewijania::Geometria const&)
+ *fill*         0x000000000101164e        0x2 00
+ .text._ZN10BursztynUI16PasekPrzewijania23obsluz_wcisniecie_myszyERNS_15ZdarzenieMyszkiE
+                0x0000000001011650      0x298 shell_tmp.o
+                0x0000000001011650                BursztynUI::PasekPrzewijania::obsluz_wcisniecie_myszy(BursztynUI::ZdarzenieMyszki&)
+ *fill*         0x00000000010118e8        0x8 00
+ .text._ZNK10BursztynUI16PasekPrzewijania23rysuj_przycisk_strzalkiERNS_17KontekstRysowaniaENS_9ProstokatEbbb
+                0x00000000010118f0      0x41d shell_tmp.o
+                0x00000000010118f0                BursztynUI::PasekPrzewijania::rysuj_przycisk_strzalki(BursztynUI::KontekstRysowania&, BursztynUI::Prostokat, bool, bool, bool) const
+ *fill*         0x0000000001011d0d        0x3 00
+ .text._ZN10BursztynUI16PasekPrzewijania12rysuj_siebieERNS_17KontekstRysowaniaE
+                0x0000000001011d10      0x7db shell_tmp.o
+                0x0000000001011d10                BursztynUI::PasekPrzewijania::rysuj_siebie(BursztynUI::KontekstRysowania&)
+ .text._ZN12_GLOBAL__N_118polacz_z_nastepnymEPNS_11BlokPamieciE
+                0x00000000010124eb       0x46 bursztyn_gui.o
+ .text._ZN12_GLOBAL__N_112popraw_skaleEi
+                0x0000000001012531       0x22 bursztyn_gui.o
+ .text._ZL19motyw_promien_insetii
+                0x0000000001012553       0x4e bursztyn_gui.o
+ .text._Z17ui_skala_poprawnaj
+                0x00000000010125a1       0x1d bursztyn_gui.o
+                0x00000000010125a1                ui_skala_poprawna(unsigned int)
+ .text._ZN12_GLOBAL__N_120legacy_odswiez_skaleEv
+                0x00000000010125be       0x74 bursztyn_gui.o
+ .text._Z9ui_skalujij
+                0x0000000001012632       0x59 bursztyn_gui.o
+                0x0000000001012632                ui_skaluj(int, unsigned int)
+ .text._ZN12_GLOBAL__N_18legacy_yEi
+                0x000000000101268b       0x58 bursztyn_gui.o
+ .text._ZN12_GLOBAL__N_18legacy_xEi
+                0x00000000010126e3       0x57 bursztyn_gui.o
+ .text._ZN12_GLOBAL__N_18legacy_wEi
+                0x000000000101273a       0x2a bursztyn_gui.o
+ .text._Z11ui_odskalujij
+                0x0000000001012764       0x49 bursztyn_gui.o
+                0x0000000001012764                ui_odskaluj(int, unsigned int)
+ .text._ZN12_GLOBAL__N_117legacy_odskaluj_xEi
+                0x00000000010127ad       0x57 bursztyn_gui.o
+ .text._ZN12_GLOBAL__N_117legacy_odskaluj_yEi
+                0x0000000001012804       0x58 bursztyn_gui.o
+ .text._Z16gui_legacy_wlaczv
+                0x000000000101285c       0x92 bursztyn_gui.o
+                0x000000000101285c                gui_legacy_wlacz()
+ .text._Z10gui_mallocm
+                0x00000000010128ee      0x141 bursztyn_gui.o
+                0x00000000010128ee                gui_malloc(unsigned long)
+ .text._Z8gui_freePv
+                0x0000000001012a2f       0x7d bursztyn_gui.o
+                0x0000000001012a2f                gui_free(void*)
+ .text._Znwm    0x0000000001012aac       0x18 bursztyn_gui.o
+                0x0000000001012aac                operator new(unsigned long)
+ .text._ZdlPvm  0x0000000001012ac4        0xc bursztyn_gui.o
+                0x0000000001012ac4                operator delete(void*, unsigned long)
+ .text.bws_wywolaj
+                0x0000000001012ad0       0x1a bursztyn_gui.o
+                0x0000000001012ad0                bws_wywolaj
+ .text._ZN12_GLOBAL__N_120legacy_przelicz_oknoE18GuiLegacyProstokat
+                0x0000000001012aea      0x18e bursztyn_gui.o
+ .text._ZN12_GLOBAL__N_126legacy_przetworz_zdarzenieEP13bws_zdarzenie
+                0x0000000001012c78      0x17c bursztyn_gui.o
+ .text._Z6utworzPKc
+                0x0000000001012df4       0x2b bursztyn_gui.o
+                0x0000000001012df4                utworz(char const*)
+ .text._Z11zapisz_plikPKcS0_j
+                0x0000000001012e1f       0x34 bursztyn_gui.o
+                0x0000000001012e1f                zapisz_plik(char const*, char const*, unsigned int)
+ .text._Z11czytaj_plikPKcPcj
+                0x0000000001012e53       0x34 bursztyn_gui.o
+                0x0000000001012e53                czytaj_plik(char const*, char*, unsigned int)
+ .text._Z15bws_dzwiek_testjj
+                0x0000000001012e87       0x1a bursztyn_gui.o
+                0x0000000001012e87                bws_dzwiek_test(unsigned int, unsigned int)
+ .text.bws_siec_dns
+                0x0000000001012ea1       0x30 bursztyn_gui.o
+                0x0000000001012ea1                bws_siec_dns
+ .text.bws_siec_pobierz_http
+                0x0000000001012ed1       0x53 bursztyn_gui.o
+                0x0000000001012ed1                bws_siec_pobierz_http
+ .text.bws_zakoncz_proces
+                0x0000000001012f24       0x1e bursztyn_gui.o
+                0x0000000001012f24                bws_zakoncz_proces
+ .text.gui_zakoncz_aplikacje
+                0x0000000001012f42        0xc bursztyn_gui.o
+                0x0000000001012f42                gui_zakoncz_aplikacje
+ .text._Z28gui_wypisz_tekst_kolor_skalaiijiPKc
+                0x0000000001012f4e       0xb8 bursztyn_gui.o
+                0x0000000001012f4e                gui_wypisz_tekst_kolor_skala(int, int, unsigned int, int, char const*)
+ .text._Z19gui_rysuj_prostokatiiiij
+                0x0000000001013006       0x9e bursztyn_gui.o
+                0x0000000001013006                gui_rysuj_prostokat(int, int, int, int, unsigned int)
+ .text._Z20gui_ustaw_tytul_oknaPKc
+                0x00000000010130a4       0x2b bursztyn_gui.o
+                0x00000000010130a4                gui_ustaw_tytul_okna(char const*)
+ .text._Z25gui_ustaw_przejecie_myszyb
+                0x00000000010130cf       0x1c bursztyn_gui.o
+                0x00000000010130cf                gui_ustaw_przejecie_myszy(bool)
+ .text._Z23gui_ustaw_capture_myszyb
+                0x00000000010130eb       0x1c bursztyn_gui.o
+                0x00000000010130eb                gui_ustaw_capture_myszy(bool)
+ .text._Z20gui_minimalizuj_oknov
+                0x0000000001013107       0x23 bursztyn_gui.o
+                0x0000000001013107                gui_minimalizuj_okno()
+ .text._Z19gui_pobierz_monitorjP14GuiMonitorInfo
+                0x000000000101312a       0xe2 bursztyn_gui.o
+                0x000000000101312a                gui_pobierz_monitor(unsigned int, GuiMonitorInfo*)
+ .text._Z21motyw_odswiez_lokalnyv
+                0x000000000101320c       0x64 bursztyn_gui.o
+                0x000000000101320c                motyw_odswiez_lokalny()
+ .text._Z23gui_czekaj_na_zdarzenieP13bws_zdarzenie
+                0x0000000001013270       0x8c bursztyn_gui.o
+                0x0000000001013270                gui_czekaj_na_zdarzenie(bws_zdarzenie*)
+ .text._Z17gui_pobierz_motywv
+                0x00000000010132fc       0x26 bursztyn_gui.o
+                0x00000000010132fc                gui_pobierz_motyw()
+ .text._Z11motyw_kolorj
+                0x0000000001013322       0x70 bursztyn_gui.o
+                0x0000000001013322                motyw_kolor(unsigned int)
+ .text._Z13motyw_promienj
+                0x0000000001013392       0x46 bursztyn_gui.o
+                0x0000000001013392                motyw_promien(unsigned int)
+ .text._Z19motyw_grubosc_ramkiv
+                0x00000000010133d8       0x10 bursztyn_gui.o
+                0x00000000010133d8                motyw_grubosc_ramki()
+ .text._Z18gui_hit_test_belkiiiiii
+                0x00000000010133e8      0x11d bursztyn_gui.o
+                0x00000000010133e8                gui_hit_test_belki(int, int, int, int, int)
+ .text._Z25gui_pobierz_rozdzielczoscPiS_
+                0x0000000001013505       0x76 bursztyn_gui.o
+                0x0000000001013505                gui_pobierz_rozdzielczosc(int*, int*)
+ .text._Z24gui_ustaw_geometrie_oknaiiiii
+                0x000000000101357b      0x1aa bursztyn_gui.o
+                0x000000000101357b                gui_ustaw_geometrie_okna(int, int, int, int, int)
+ .text._Z18bws_utworz_warstweiiiii
+                0x0000000001013725      0x124 bursztyn_gui.o
+                0x0000000001013725                bws_utworz_warstwe(int, int, int, int, int)
+ *(.gnu.linkonce.t.*)
+                0x0000000001013850                . = ALIGN (0x10)
+ *fill*         0x0000000001013849        0x7 00
+ *(.rodata)
+ *(.rodata.*)
+ .rodata._ZN10BursztynUI9Kontrolka11ustaw_tekstEPKc.str1.1
+                0x0000000001013850      0x4bb shell_tmp.o
+                                          0x1 (size before relaxing)
+ *fill*         0x0000000001013d0b        0x5 00
+ .rodata._ZN10BursztynUI16PasekPrzewijania24obsluz_opuszczenie_myszyEv
+                0x0000000001013d10       0x30 shell_tmp.o
+ .rodata._ZN10BursztynUI16PasekPrzewijania23obsluz_utrate_skupieniaEv
+                0x0000000001013d40       0x30 shell_tmp.o
+ .rodata._ZN12_GLOBAL__N_120shell_rysuj_terminalEv.part.0.str1.1
+                0x0000000001013d70        0xb shell_tmp.o
+ .rodata._ZN12_GLOBAL__N_117polecenie_uruchomEPKc.str1.8
+                0x0000000001013d70     0x1341 shell_tmp.o
+                                         0x8c (size before relaxing)
+ .rodata._ZN12_GLOBAL__N_117polecenie_uruchomEPKc.str1.1
+                0x00000000010150b1       0x1c shell_tmp.o
+ .rodata._start.str1.1
+                0x00000000010150b1      0x4ad shell_tmp.o
+ .rodata._start.str1.8
+                0x00000000010150b1     0x12b1 shell_tmp.o
+ *fill*         0x00000000010150b1        0x7 00
+ .rodata._ZN10BursztynUI16PasekPrzewijania21ustaw_czesc_najechanaENS0_5CzescERKNS0_9GeometriaE
+                0x00000000010150b8       0x60 shell_tmp.o
+ .rodata._ZN10BursztynUI16PasekPrzewijania23obsluz_zwolnienie_myszyERNS_15ZdarzenieMyszkiE
+                0x0000000001015118       0x30 shell_tmp.o
+ .rodata._ZN10BursztynUI16PasekPrzewijania21ustaw_czesc_wcisnietaENS0_5CzescERKNS0_9GeometriaE
+                0x0000000001015148       0x60 shell_tmp.o
+ .rodata._ZN10BursztynUI16PasekPrzewijania23obsluz_wcisniecie_myszyERNS_15ZdarzenieMyszkiE
+                0x00000000010151a8       0x30 shell_tmp.o
+ .rodata._ZTVN10BursztynUI9KontrolkaE
+                0x00000000010151d8      0x1a0 shell_tmp.o
+                0x00000000010151d8                vtable for BursztynUI::Kontrolka
+ .rodata._ZTVN10BursztynUI16PasekPrzewijaniaE
+                0x0000000001015378      0x1a0 shell_tmp.o
+                0x0000000001015378                vtable for BursztynUI::PasekPrzewijania
+ *fill*         0x0000000001015518        0x8 00
+ .rodata._ZL24nowa_czcionka_szerokosci
+                0x0000000001015520      0x492 shell_tmp.o
+ .rodata.cst2   0x00000000010159b2        0x2 shell_tmp.o
+ *fill*         0x00000000010159b4        0x4 00
+ .rodata._Z11motyw_kolorj
+                0x00000000010159b8       0xa0 bursztyn_gui.o
+ .rodata._Z13motyw_promienj
+                0x0000000001015a58       0x30 bursztyn_gui.o
+ *fill*         0x0000000001015a88        0x8 00
+ .rodata._ZZ16gui_legacy_wlaczvE8TEST_ARG
+                0x0000000001015a90       0x14 bursztyn_gui.o
+ *(.srodata)
+ *(.srodata.*)
+ *(.gnu.linkonce.r.*)
+                0x0000000001015ab0                . = ALIGN (0x10)
+ *fill*         0x0000000001015aa4        0xc 00
+                0x0000000001015ab0                __bur_text_used_end = .
+                0x0000000000020000                . = BUR_TEXT_SIZE
+ *fill*         0x0000000001015ab0     0xb550 00
+                0x0000000001021000                __bur_text_end = .
+
+.iplt           0x0000000001021000        0x0 load address 0x0000000000021000
+ .iplt          0x0000000001021000        0x0 shell_tmp.o
+
+.rela.dyn       0x0000000001021000        0x0 load address 0x0000000000021000
+ .rela.got      0x0000000001021000        0x0 shell_tmp.o
+ .rela.iplt     0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9Kontrolka24przy_wprowadzeniu_tekstuERNS_27ZdarzenieWprowadzaniaTekstuE
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9Kontrolka24przy_zwolnieniu_klawiszaERNS_19ZdarzenieKlawiaturyE
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9Kontrolka13krok_animacjiEm
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9Kontrolka22ustaw_zarzadce_popupowEPNS_15ZarzadcaPopupowE
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9Kontrolka23kontrolka_aktywacji_altEv
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZNK10BursztynUI9Kontrolka19czy_wymaga_animacjiEv
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9Kontrolka28zaktualizuj_pozycje_ekranowaEv
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9Kontrolka17sprawdz_trafienieENS_5PunktE
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9Kontrolka8rozmiescENS_9ProstokatE
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9Kontrolka10uniewaznijEv.part.0
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9Kontrolka23obsluz_zwolnienie_myszyERNS_15ZdarzenieMyszkiE
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9Kontrolka23obsluz_wcisniecie_myszyERNS_15ZdarzenieMyszkiE
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9Kontrolka24obsluz_opuszczenie_myszyEv
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9Kontrolka20obsluz_wejscie_myszyEv
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9KontrolkaD2Ev
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9Kontrolka12przy_fokusieEv
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI16PasekPrzewijaniaD2Ev
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9KontrolkaD0Ev
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI16PasekPrzewijaniaD0Ev
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9Kontrolka15przy_najechaniuEv
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9Kontrolka19odswiez_z_poleceniaERNS_11PolecenieUIE
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9Kontrolka15ustaw_skale_dpiE7SkalaUI
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9Kontrolka18uniewaznij_dzieckoEPS0_NS_9ProstokatE
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI17KontekstRysowania27rysuj_zaokraglony_prostokatENS_9ProstokatEji
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI17KontekstRysowania23rysuj_zaokraglona_ramkeENS_9ProstokatEjii
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9Kontrolka17rysuj_tlo_i_ramkeERNS_17KontekstRysowaniaERKNS_9StylStanuE
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9Kontrolka12rysuj_siebieERNS_17KontekstRysowaniaE
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI16PasekPrzewijania17zaktualizuj_motywEv
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI9Kontrolka17uniewaznij_obszarENS_9ProstokatE
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI16PasekPrzewijaniaC2Ev
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI16PasekPrzewijania30obsluz_zmiane_geometrii_modeluEPNS_16ModelPrzewijaniaElPv
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI16PasekPrzewijania20obsluz_zmiane_modeluEPNS_16ModelPrzewijaniaElPv
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI16PasekPrzewijania24obsluz_opuszczenie_myszyEv
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI16PasekPrzewijania23obsluz_utrate_skupieniaEv
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN12_GLOBAL__N_120shell_rysuj_terminalEv.part.0
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._start
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI16PasekPrzewijania21ustaw_czesc_najechanaENS0_5CzescERKNS0_9GeometriaE
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI16PasekPrzewijania23obsluz_zwolnienie_myszyERNS_15ZdarzenieMyszkiE
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI16PasekPrzewijania17obsluz_ruch_myszyERNS_15ZdarzenieMyszkiE
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI16PasekPrzewijania21ustaw_czesc_wcisnietaENS0_5CzescERKNS0_9GeometriaE
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI16PasekPrzewijania23obsluz_wcisniecie_myszyERNS_15ZdarzenieMyszkiE
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZNK10BursztynUI16PasekPrzewijania23rysuj_przycisk_strzalkiERNS_17KontekstRysowaniaENS_9ProstokatEbbb
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN10BursztynUI16PasekPrzewijania12rysuj_siebieERNS_17KontekstRysowaniaE
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.rodata._ZTVN10BursztynUI9KontrolkaE
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.rodata._ZTVN10BursztynUI16PasekPrzewijaniaE
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN12_GLOBAL__N_120legacy_odswiez_skaleEv
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN12_GLOBAL__N_18legacy_yEi
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN12_GLOBAL__N_18legacy_xEi
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN12_GLOBAL__N_18legacy_wEi
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN12_GLOBAL__N_117legacy_odskaluj_xEi
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN12_GLOBAL__N_117legacy_odskaluj_yEi
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN12_GLOBAL__N_120legacy_przelicz_oknoE18GuiLegacyProstokat
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._ZN12_GLOBAL__N_126legacy_przetworz_zdarzenieEP13bws_zdarzenie
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._Z28gui_wypisz_tekst_kolor_skalaiijiPKc
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._Z19gui_pobierz_monitorjP14GuiMonitorInfo
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._Z18gui_hit_test_belkiiiiii
+                0x0000000001021000        0x0 shell_tmp.o
+ .rela.text._Z25gui_pobierz_rozdzielczoscPiS_
+                0x0000000001021000        0x0 shell_tmp.o
+
+.data           0x0000000001021000      0x120 load address 0x0000000000021000
+                0x0000000001021000                __bur_data_start = .
+ *(.data)
+ *(.data.*)
+ .data._ZZN12_GLOBAL__N_115polecenie_cytatEvE4stan
+                0x0000000001021000        0x4 shell_tmp.o
+ .data._ZN12_GLOBAL__N_115shell_restore_hE
+                0x0000000001021004        0x4 shell_tmp.o
+ .data._ZN12_GLOBAL__N_115shell_restore_wE
+                0x0000000001021008        0x4 shell_tmp.o
+ .data._ZN12_GLOBAL__N_115shell_restore_yE
+                0x000000000102100c        0x4 shell_tmp.o
+ .data._ZN12_GLOBAL__N_115shell_restore_xE
+                0x0000000001021010        0x4 shell_tmp.o
+ .data._ZN12_GLOBAL__N_114shell_screen_hE
+                0x0000000001021014        0x4 shell_tmp.o
+ .data._ZN12_GLOBAL__N_114shell_screen_wE
+                0x0000000001021018        0x4 shell_tmp.o
+ .data._ZN12_GLOBAL__N_112shell_work_hE
+                0x000000000102101c        0x4 shell_tmp.o
+ .data._ZN12_GLOBAL__N_112shell_work_wE
+                0x0000000001021020        0x4 shell_tmp.o
+ .data._ZN12_GLOBAL__N_17shell_hE
+                0x0000000001021024        0x4 shell_tmp.o
+ .data._ZN12_GLOBAL__N_17shell_wE
+                0x0000000001021028        0x4 shell_tmp.o
+ .data._ZN12_GLOBAL__N_17shell_yE
+                0x000000000102102c        0x4 shell_tmp.o
+ .data._ZN12_GLOBAL__N_17shell_xE
+                0x0000000001021030        0x4 shell_tmp.o
+ .data._ZN12_GLOBAL__N_114g_liczba_liniiE
+                0x0000000001021034        0x4 shell_tmp.o
+ *fill*         0x0000000001021038        0x8 
+ .data._ZL15g_lokalny_motyw
+                0x0000000001021040       0xac bursztyn_gui.o
+ *fill*         0x00000000010210ec        0x4 
+ .data._ZN12_GLOBAL__N_120legacy_fizyczne_oknoE
+                0x00000000010210f0       0x10 bursztyn_gui.o
+ .data._ZN12_GLOBAL__N_120legacy_logiczne_oknoE
+                0x0000000001021100       0x10 bursztyn_gui.o
+ .data._ZN12_GLOBAL__N_112legacy_skalaE
+                0x0000000001021110        0x4 bursztyn_gui.o
+ .data.ui_skala_procent
+                0x0000000001021114        0x4 bursztyn_gui.o
+                0x0000000001021114                ui_skala_procent
+ *(.sdata)
+ *(.sdata.*)
+ *(.gnu.linkonce.d.*)
+ *(.gnu.linkonce.s.*)
+ *(.got)
+ .got           0x0000000001021118        0x0 shell_tmp.o
+ *(.got.*)
+ .got.plt       0x0000000001021118        0x0 shell_tmp.o
+                0x0000000001021120                . = ALIGN (0x10)
+ *fill*         0x0000000001021118        0x8 
+                0x0000000001021120                __bur_data_file_end = .
+
+.igot.plt       0x0000000001021120        0x0 load address 0x0000000000021120
+ .igot.plt      0x0000000001021120        0x0 shell_tmp.o
+
+.bss            0x0000000001021120    0x4c700 load address 0x0000000000021120
+                0x0000000001021120                . = ALIGN (0x10)
+                0x0000000001021120                __bur_bss_start = .
+ *(.bss)
+ *(.bss.*)
+ .bss._ZN12_GLOBAL__N_114historia_iloscE
+                0x0000000001021120        0x8 shell_tmp.o
+ *fill*         0x0000000001021128       0x18 
+ .bss._ZN12_GLOBAL__N_120komenda_dla_historiiE
+                0x0000000001021140      0x800 shell_tmp.o
+ .bss._ZN12_GLOBAL__N_18historiaE
+                0x0000000001021940     0x2800 shell_tmp.o
+ .bss._ZN12_GLOBAL__N_110bufor_httpE
+                0x0000000001024140     0x8000 shell_tmp.o
+ .bss._ZN12_GLOBAL__N_115shell_minimizedE
+                0x000000000102c140        0x1 shell_tmp.o
+ .bss._ZN12_GLOBAL__N_115shell_maximizedE
+                0x000000000102c141        0x1 shell_tmp.o
+ *fill*         0x000000000102c142        0x2 
+ .bss._ZN12_GLOBAL__N_112shell_work_yE
+                0x000000000102c144        0x4 shell_tmp.o
+ .bss._ZN12_GLOBAL__N_112shell_work_xE
+                0x000000000102c148        0x4 shell_tmp.o
+ *fill*         0x000000000102c14c        0x4 
+ .bss._ZN12_GLOBAL__N_119g_pasek_przewijaniaE
+                0x000000000102c150        0x8 shell_tmp.o
+ .bss._ZN12_GLOBAL__N_122g_obecny_bufor_wejsciaE
+                0x000000000102c158        0x8 shell_tmp.o
+ .bss._ZN12_GLOBAL__N_111g_scrollingE
+                0x000000000102c160        0x1 shell_tmp.o
+ *fill*         0x000000000102c161        0x3 
+ .bss._ZN12_GLOBAL__N_115g_scroll_offsetE
+                0x000000000102c164        0x4 shell_tmp.o
+ .bss._ZN12_GLOBAL__N_116g_pierwsza_liniaE
+                0x000000000102c168        0x4 shell_tmp.o
+ *fill*         0x000000000102c16c       0x14 
+ .bss._ZN12_GLOBAL__N_17g_linieE
+                0x000000000102c180    0x41000 shell_tmp.o
+ .bss._ZGVZN10BursztynUI5Motyw16pobierz_domyslnyEvE9instancja
+                0x000000000106d180        0x8 shell_tmp.o
+                0x000000000106d180                guard variable for BursztynUI::Motyw::pobierz_domyslny()::instancja
+ *fill*         0x000000000106d188       0x18 
+ .bss._ZZN10BursztynUI5Motyw16pobierz_domyslnyEvE9instancja
+                0x000000000106d1a0      0x630 shell_tmp.o
+                0x000000000106d1a0                BursztynUI::Motyw::pobierz_domyslny()::instancja
+ .bss._ZN10BursztynUI17KontekstRysowania25g_tlum_rysowanie_globalneE
+                0x000000000106d7d0        0x1 shell_tmp.o
+                0x000000000106d7d0                BursztynUI::KontekstRysowania::g_tlum_rysowanie_globalne
+ .bss._ZL24g_motyw_zainicjalizowany
+                0x000000000106d7d1        0x1 bursztyn_gui.o
+ *fill*         0x000000000106d7d2        0x2 
+ .bss._ZL23g_izolowana_geometria_h
+                0x000000000106d7d4        0x4 bursztyn_gui.o
+ .bss._ZL23g_izolowana_geometria_w
+                0x000000000106d7d8        0x4 bursztyn_gui.o
+ .bss._ZL23g_izolowana_geometria_y
+                0x000000000106d7dc        0x4 bursztyn_gui.o
+ .bss._ZL23g_izolowana_geometria_x
+                0x000000000106d7e0        0x4 bursztyn_gui.o
+ .bss._ZL22g_widoczna_geometria_h
+                0x000000000106d7e4        0x4 bursztyn_gui.o
+ .bss._ZL22g_widoczna_geometria_w
+                0x000000000106d7e8        0x4 bursztyn_gui.o
+ .bss._ZL22g_widoczna_geometria_y
+                0x000000000106d7ec        0x4 bursztyn_gui.o
+ .bss._ZL22g_widoczna_geometria_x
+                0x000000000106d7f0        0x4 bursztyn_gui.o
+ .bss._ZL29g_izolacja_geometrii_wlaczona
+                0x000000000106d7f4        0x1 bursztyn_gui.o
+ *fill*         0x000000000106d7f5        0x3 
+ .bss._ZN12_GLOBAL__N_115poczatek_stertyE
+                0x000000000106d7f8        0x8 bursztyn_gui.o
+ .bss._ZN12_GLOBAL__N_128legacy_test_timer_do_wyjsciaE
+                0x000000000106d800        0x4 bursztyn_gui.o
+ .bss._ZN12_GLOBAL__N_125legacy_test_widzial_skaleE
+                0x000000000106d804        0x1 bursztyn_gui.o
+ .bss._ZN12_GLOBAL__N_117legacy_test_skaliE
+                0x000000000106d805        0x1 bursztyn_gui.o
+ .bss._ZN12_GLOBAL__N_117legacy_ma_warstweE
+                0x000000000106d806        0x1 bursztyn_gui.o
+ .bss._ZN12_GLOBAL__N_115legacy_wlaczonyE
+                0x000000000106d807        0x1 bursztyn_gui.o
+ .bss._ZN12_GLOBAL__N_132liczba_aktywnych_alokacji_stertyE
+                0x000000000106d808        0x8 bursztyn_gui.o
+ .bss._ZN12_GLOBAL__N_122liczba_alokacji_stertyE
+                0x000000000106d810        0x8 bursztyn_gui.o
+ *(.sbss)
+ *(.sbss.*)
+ *(.gnu.linkonce.b.*)
+ *(.gnu.linkonce.sb.*)
+ *(COMMON)
+                0x000000000106d820                . = ALIGN (0x10)
+ *fill*         0x000000000106d818        0x8 
+                0x000000000106d820                __bur_bss_end = .
+                0x000000000106d820                __bur_data_memory_end = .
+
+.bur_konstruktory
+                0x000000000106d820        0x0
+                0x000000000106d820                __bur_ctor_start = .
+ *(.preinit_array)
+ *(.preinit_array.*)
+ *(.init_array)
+ *(.init_array.*)
+ *(.fini_array)
+ *(.fini_array.*)
+ *(.ctors)
+ *(.ctors.*)
+ *(.dtors)
+ *(.dtors.*)
+                0x000000000106d820                __bur_ctor_end = .
+
+.bur_tls        0x000000000106d820        0x0
+                0x000000000106d820                __bur_tls_start = .
+ *(.tdata)
+ *(.tdata.*)
+ *(.tbss)
+ *(.tbss.*)
+                0x000000000106d820                __bur_tls_end = .
+
+.bur_dynamiczne
+                0x000000000106d820        0x0
+                0x000000000106d820                __bur_dynamic_start = .
+ *(.dynamic)
+ *(.dynsym)
+ *(.dynstr)
+ *(.hash)
+ *(.gnu.hash)
+ *(.plt)
+ *(.plt.*)
+ *(.interp)
+                0x000000000106d820                __bur_dynamic_end = .
+
+/DISCARD/
+ *(.eh_frame)
+ *(.eh_frame.*)
+ *(.eh_frame_hdr)
+ *(.gcc_except_table)
+ *(.gcc_except_table.*)
+ *(.comment)
+ *(.note)
+ *(.note.*)
+ *(.debug)
+ *(.debug_*)
+ *(.line)
+ *(.stab)
+ *(.stabstr)
+ *(.gnu_debuglink)
+ *(.gnu_debugdata)
+ *(.gnu.lto_*)
+                0x0000000000000001                ASSERT (DEFINED (_start), BURSZTYN BUR: brak symbolu _start)
+                0x0000000000000001                ASSERT (DEFINED (naglowek), BURSZTYN BUR: brak symbolu naglowek)
+                0x0000000000000001                ASSERT ((__bur_header_payload_end <= (BUR_HEADER_VADDR + BUR_HEADER_SIZE)), BURSZTYN BUR: NaglowekBur przekroczyl 4096 bajtow)
+                0x0000000000000001                ASSERT ((SIZEOF (.naglowek) == BUR_HEADER_SIZE), BURSZTYN BUR: obszar naglowka musi miec dokladnie 0x1000 bajtow)
+                0x0000000000000001                ASSERT ((ADDR (.naglowek) == BUR_HEADER_VADDR), BURSZTYN BUR: nieprawidlowy VA naglowka)
+                0x0000000000000001                ASSERT ((LOADADDR (.naglowek) == BUR_HEADER_OFFSET), BURSZTYN BUR: nieprawidlowy offset pliku naglowka)
+                0x0000000000000001                ASSERT (((naglowek >= BUR_HEADER_VADDR) && (naglowek < (BUR_HEADER_VADDR + BUR_HEADER_SIZE))), BURSZTYN BUR: symbol naglowek musi lezec w pierwszych 4096 bajtach)
+                0x0000000000000001                ASSERT ((ADDR (.text) == BUR_TEXT_VADDR), BURSZTYN BUR: nieprawidlowy VA TEXT)
+                0x0000000000000001                ASSERT ((LOADADDR (.text) == BUR_TEXT_OFFSET), BURSZTYN BUR: nieprawidlowy offset pliku TEXT)
+                0x0000000000000001                ASSERT ((__bur_text_used_end <= BUR_TEXT_END), BURSZTYN BUR: shell przekroczyl 32 KiB segmentu TEXT)
+                0x0000000000000001                ASSERT ((SIZEOF (.text) == BUR_TEXT_SIZE), BURSZTYN BUR: TEXT musi miec dokladnie 0x8000 bajtow po dopelnieniu)
+                0x0000000000000001                ASSERT (((_start >= BUR_TEXT_VADDR) && (_start < BUR_TEXT_END)), BURSZTYN BUR: _start musi znajdowac sie w TEXT)
+                0x0000000000000001                ASSERT ((ADDR (.data) == BUR_DATA_VADDR), BURSZTYN BUR: nieprawidlowy VA DATA)
+                0x0000000000000001                ASSERT ((LOADADDR (.data) == BUR_DATA_OFFSET), BURSZTYN BUR: nieprawidlowy offset pliku DATA)
+                0x0000000000000001                ASSERT ((__bur_data_file_end <= BUR_DATA_END), BURSZTYN BUR: zainicjalizowane DATA przekroczylo 128 KiB)
+                0x0000000000000000                ASSERT ((__bur_data_memory_end <= BUR_DATA_END), BURSZTYN BUR: DATA+BSS przekroczyly 128 KiB)
+                0x0000000000000001                ASSERT ((__bur_ctor_start == __bur_ctor_end), BURSZTYN BUR: wykryto konstruktory/destruktory C++, ale runtime .bur ich jeszcze nie uruchamia)
+                0x0000000000000001                ASSERT ((__bur_tls_start == __bur_tls_end), BURSZTYN BUR: wykryto TLS (.tdata/.tbss), ale runtime Ring 3 go jeszcze nie obsluguje)
+                0x0000000000000001                ASSERT ((__bur_dynamic_start == __bur_dynamic_end), BURSZTYN BUR: wykryto dynamic linking/PLT - .bur musi byc statyczny)
+                0x0000000000000001                ASSERT (((BUR_TEXT_OFFSET + BUR_TEXT_SIZE) == BUR_DATA_OFFSET), BURSZTYN BUR: TEXT i DATA nie sa sasiednimi regionami pliku)
+                0x0000000000000001                ASSERT (((BUR_TEXT_VADDR + BUR_TEXT_SIZE) == BUR_DATA_VADDR), BURSZTYN BUR: TEXT i DATA nie sa sasiednimi regionami VA)
+                [!provide]                        PROVIDE (__bur_text_file_offset = BUR_TEXT_OFFSET)
+                [!provide]                        PROVIDE (__bur_text_segment_size = BUR_TEXT_SIZE)
+                [!provide]                        PROVIDE (__bur_text_virtual = BUR_TEXT_VADDR)
+                [!provide]                        PROVIDE (__bur_data_file_offset = BUR_DATA_OFFSET)
+                [!provide]                        PROVIDE (__bur_data_segment_size = BUR_DATA_SIZE)
+                [!provide]                        PROVIDE (__bur_data_virtual = BUR_DATA_VADDR)
+LOAD shell_tmp.o
+LOAD bursztyn_gui.o
+OUTPUT(shell.elf elf64-x86-64)

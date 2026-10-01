@@ -34,8 +34,8 @@ __attribute__((section(".naglowek"), used))
 NaglowekBur naglowek = {
     {'B','U','R','\0'},
     reinterpret_cast<uint64_t>(&_start),
-    UINT64_C(0x1000), UINT64_C(0x8000), UINT64_C(0x1001000),
-    UINT64_C(0x9000), UINT64_C(0x20000), UINT64_C(0x1009000)
+    UINT64_C(0x1000), UINT64_C(0x20000), UINT64_C(0x1001000),
+    UINT64_C(0x21000), UINT64_C(0x40000), UINT64_C(0x1021000)
 };
 }
 

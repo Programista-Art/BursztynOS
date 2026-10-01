@@ -30,6 +30,13 @@
  */
 
 #include "bursztyn_gui.h"
+#include "bws_nowoczesne.h"
+#include "motyw.h"
+#include "bursztyn_ui/czcionka.h"
+#include "bursztyn_ui/rysowanie.h"
+#include "bursztyn_ui/pasek_przewijania.h"
+using namespace BursztynUI;
+
 
 #include <stdint.h>
 #include <stddef.h>
@@ -115,189 +122,168 @@ constexpr int SHELL_COLS = 70;
 constexpr int SHELL_ROWS = 19;
 constexpr size_t VISUAL_COLUMNS = static_cast<size_t>(SHELL_COLS);
 
-char shell_ekran[SHELL_ROWS][SHELL_COLS + 1] = {};
-int shell_wiersz = 0;
-int shell_kolumna = 0;
-int shell_x = SHELL_X_START;
-int shell_y = SHELL_Y_START;
-int shell_w = SHELL_W;
-int shell_h = SHELL_H;
-int shell_screen_w = 1024;
-int shell_screen_h = 768;
-int shell_work_x = 0;
-int shell_work_y = 0;
-int shell_work_w = 1024;
-int shell_work_h = 768;
-int shell_restore_x = SHELL_X_START;
-int shell_restore_y = SHELL_Y_START;
-int shell_restore_w = SHELL_W;
-int shell_restore_h = SHELL_H;
+constexpr int MAXSCROLLBACKLINES = 512;
+constexpr int SCROLLBAR_WIDTH = 12;
+constexpr int INPUT_LINE_HEIGHT = 30;
+
+struct ShellLine {
+    char tekst[256];
+    int len;
+};
+
+ShellLine g_linie[MAXSCROLLBACKLINES];
+int g_liczba_linii = 1;
+int g_pierwsza_linia = 0;
+int g_scroll_offset = 0;
+bool g_scrolling = false;
+
+char* g_obecny_bufor_wejscia = nullptr;
+PasekPrzewijania* g_pasek_przewijania = nullptr;
+
+int shell_x = 20, shell_y = 20, shell_w = 700, shell_h = 450;
+int shell_work_x = 0, shell_work_y = 0, shell_work_w = 1024, shell_work_h = 768;
+int shell_screen_w = 1024, shell_screen_h = 768;
 bool shell_maximized = false;
 bool shell_minimized = false;
+int shell_restore_x = 20, shell_restore_y = 20, shell_restore_w = 700, shell_restore_h = 450;
+
 bool shell_drag = false;
 int shell_drag_mouse_x = 0;
 int shell_drag_mouse_y = 0;
 int shell_drag_window_x = 0;
 int shell_drag_window_y = 0;
 
-struct ShellPerf {
-    uint64_t key_count, full_redraw_count, partial_redraw_count;
-    uint64_t dirty_area, compose_requests, allocations_key;
-} shell_perf{};
-
-void shell_dopisz_znak(char c);
-
-int shell_caret_advance(int row,int column) {
-    int advance=0;
-    for(int c=0;c<column;++c){int a=gui_pobierz_szerokosc_znaku(
-        static_cast<uint8_t>(shell_ekran[row][c]));if(a<1)a=1;advance+=a+1;}
-    return advance;
+void dodaj_nowa_linie() {
+    if (g_liczba_linii < MAXSCROLLBACKLINES) {
+        g_liczba_linii++;
+    } else {
+        g_pierwsza_linia = (g_pierwsza_linia + 1) % MAXSCROLLBACKLINES;
+    }
+    int act = (g_pierwsza_linia + g_liczba_linii - 1) % MAXSCROLLBACKLINES;
+    g_linie[act].len = 0;
+    g_linie[act].tekst[0] = '\0';
 }
 
-void shell_rysuj_wiersz(int row,bool caret) {
-    if(row<0||row>=SHELL_ROWS)return;
-    const int x=shell_x+SHELL_TEXT_X,y=shell_y+SHELL_TEXT_Y+row*SHELL_LINE_H;
-    const int width=shell_w-2*SHELL_TEXT_X;
-    gui_rysuj_prostokat(x,y,width,SHELL_LINE_H,0x001A0B00);
-    shell_ekran[row][SHELL_COLS]='\0';
-    gui_wypisz_tekst_kolor(x,y,0x00E58A00,shell_ekran[row]);
-    if(caret)gui_rysuj_prostokat(x+shell_caret_advance(row,shell_kolumna),y+14,8,2,0x00FFBF00);
-    ++shell_perf.partial_redraw_count;shell_perf.dirty_area+=static_cast<uint64_t>(width)*SHELL_LINE_H;
-}
-
-void shell_rysuj_zmiane_wejscia(int old_row) {
-    if(old_row!=shell_wiersz)shell_rysuj_wiersz(old_row,false);
-    shell_rysuj_wiersz(shell_wiersz,true);
-    gui_odswiez();++shell_perf.compose_requests;
+void wpisz_do_bufora(uint32_t cp) {
+    if (cp == '\n' || cp == '\r') {
+        if (cp == '\n') dodaj_nowa_linie();
+        return;
+    }
+    char buf[5];
+    size_t bajty = CzcionkaUI::zakoduj_utf8(cp, buf);
+    
+    int act = (g_pierwsza_linia + g_liczba_linii - 1) % MAXSCROLLBACKLINES;
+    if (g_linie[act].len + bajty > 250) {
+        dodaj_nowa_linie();
+        act = (g_pierwsza_linia + g_liczba_linii - 1) % MAXSCROLLBACKLINES;
+    }
+    for (size_t i = 0; i < bajty; ++i) {
+        g_linie[act].tekst[g_linie[act].len++] = buf[i];
+    }
+    g_linie[act].tekst[g_linie[act].len] = '\0';
 }
 
 void shell_rysuj_terminal() {
-    ++shell_perf.full_redraw_count;
-    gui_rysuj_okno(shell_x, shell_y, shell_w, shell_h, "Powloka Bursztynowa");
-    gui_rysuj_standardowa_belke(shell_x, shell_y, shell_w,
-                                "Powloka Bursztynowa", shell_maximized);
+    gui_rysuj_okno(shell_x, shell_y, shell_w, shell_h, "Powłoka Bursztynowa");
+    gui_rysuj_standardowa_belke(shell_x, shell_y, shell_w, "Powłoka Bursztynowa", shell_maximized);
+
     if (shell_minimized) { gui_odswiez(); return; }
-    gui_rysuj_prostokat(shell_x + 4, shell_y + SHELL_TITLE_H, shell_w - 8,
-                        shell_h - SHELL_TITLE_H - 4, 0x001A0B00);
-    for (int r = 0; r < SHELL_ROWS; ++r) {
-        shell_ekran[r][SHELL_COLS] = '\0';
-        gui_wypisz_tekst_kolor(shell_x + SHELL_TEXT_X,
-                               shell_y + SHELL_TEXT_Y + r * SHELL_LINE_H,
-                               0x00E58A00, shell_ekran[r]);
-    }
-    /* Kursor tekstowy jest zwyklym fragmentem powierzchni Shella. */
-    int caret_advance = 0;
-    for (int c = 0; c < shell_kolumna; ++c) {
-        int a = gui_pobierz_szerokosc_znaku(
-            static_cast<uint8_t>(shell_ekran[shell_wiersz][c]));
-        if (a < 1) a = 1;
-        caret_advance += a + 1;
-    }
-    gui_rysuj_prostokat(shell_x + SHELL_TEXT_X + caret_advance,
-                        shell_y + SHELL_TEXT_Y + shell_wiersz * SHELL_LINE_H + 14,
-                        8, 2, 0x00FFBF00);
-    gui_odswiez();
-}
 
-void shell_przewin() {
-    for (int r = 1; r < SHELL_ROWS; ++r)
-        for (int c = 0; c <= SHELL_COLS; ++c)
-            shell_ekran[r - 1][c] = shell_ekran[r][c];
-    for (int c = 0; c <= SHELL_COLS; ++c)
-        shell_ekran[SHELL_ROWS - 1][c] = '\0';
-    shell_wiersz = SHELL_ROWS - 1;
-}
+    const BursztynMotyw* motyw = gui_pobierz_motyw();
+    if (!motyw) motyw = &g_domyslny_motyw_fallback;
 
-void shell_dopisz_znak(char c) {
-    if (c == '\r') { shell_kolumna = 0; return; }
-    if (c == '\n') {
-        shell_kolumna = 0;
-        if (++shell_wiersz >= SHELL_ROWS) shell_przewin();
-        return;
-    }
-    if (c == '\b') {
-        if (shell_kolumna > 0) {
-            shell_ekran[shell_wiersz][--shell_kolumna] = '\0';
+    uint32_t tlo = motyw->oknotlo;
+    uint32_t ramka = motyw->ramka;
+    uint32_t tekst_kolor = motyw->tekst;
+    uint32_t akcent = motyw->akcent;
+
+    int client_x = shell_x + 4;
+    int client_y = shell_y + 28;
+    int client_w = shell_w - 8;
+    int client_h = shell_h - 32;
+
+    KontekstRysowania ctx;
+    ctx.dodaj_przyciecie(Prostokat(client_x, client_y, client_w, client_h));
+
+    ctx.rysuj_prostokat(Prostokat(client_x, client_y, client_w, client_h), tlo);
+
+    int input_y = client_y + client_h - INPUT_LINE_HEIGHT;
+    ctx.rysuj_linie_pozioma(client_x, input_y, client_w, ramka);
+
+    int max_linii = (client_h - INPUT_LINE_HEIGHT - 8) / 16;
+    if (max_linii < 1) max_linii = 1;
+
+    if (g_pasek_przewijania) {
+        g_pasek_przewijania->ustaw_geometrie(client_w - SCROLLBAR_WIDTH - 2, 4, SCROLLBAR_WIDTH, client_h - INPUT_LINE_HEIGHT - 8);
+        g_pasek_przewijania->ustaw_rozmiar_strony(max_linii);
+        int max_scroll = g_liczba_linii - max_linii;
+        if (max_scroll < 0) max_scroll = 0;
+        g_pasek_przewijania->ustaw_zakres(0, max_scroll);
+        
+        if (!g_scrolling) {
+            g_pasek_przewijania->ustaw_wartosc(max_scroll);
         }
-        return;
+        
+        ctx.dodaj_przesuniecie(Punkt(client_x, client_y));
+        g_pasek_przewijania->rysuj(ctx);
+        ctx.zdejmij_przesuniecie();
+        
+        g_scroll_offset = max_scroll - g_pasek_przewijania->wartosc();
     }
-    if (shell_kolumna >= SHELL_COLS) {
-        shell_kolumna = 0;
-        if (++shell_wiersz >= SHELL_ROWS) shell_przewin();
+
+    int pierwsza_do_rysowania = g_liczba_linii - max_linii - g_scroll_offset;
+    if (pierwsza_do_rysowania < 0) pierwsza_do_rysowania = 0;
+
+    int text_x = client_x + 8;
+    int cur_y = client_y + 4;
+    
+    for (int i = 0; i < max_linii; ++i) {
+        int idx = pierwsza_do_rysowania + i;
+        if (idx >= g_liczba_linii) break;
+        int real_idx = (g_pierwsza_linia + idx) % MAXSCROLLBACKLINES;
+        
+        if (g_linie[real_idx].len > 0) {
+            gui_wypisz_tekst_kolor_skala(text_x, cur_y, tekst_kolor, 100, g_linie[real_idx].tekst);
+        }
+        cur_y += 16;
     }
-    shell_ekran[shell_wiersz][shell_kolumna++] = c;
-    shell_ekran[shell_wiersz][shell_kolumna] = '\0';
-    if (shell_kolumna >= SHELL_COLS) {
-        shell_kolumna = 0;
-        if (++shell_wiersz >= SHELL_ROWS) shell_przewin();
+
+    int input_text_x = client_x + 8;
+    int input_text_y = input_y + 7;
+    gui_wypisz_tekst_kolor_skala(input_text_x, input_text_y, akcent, 100, "powłoka> ");
+    int p_szer = CzcionkaUI::zmierz_tekst("powłoka> ");
+    input_text_x += p_szer;
+
+    if (g_obecny_bufor_wejscia) {
+        gui_wypisz_tekst_kolor_skala(input_text_x, input_text_y, tekst_kolor, 100, g_obecny_bufor_wejscia);
+        int wej_szer = CzcionkaUI::zmierz_tekst(g_obecny_bufor_wejscia);
+        ctx.rysuj_prostokat(Prostokat(input_text_x + wej_szer + 2, input_text_y, 2, 16), tekst_kolor);
     }
+    
+    ctx.zdejmij_przyciecie();
 }
 
 void shell_wypisz(const char* tekst) {
     if (!tekst) return;
-    for (size_t i = 0; tekst[i] != '\0'; ++i) shell_dopisz_znak(tekst[i]);
+    size_t i = 0;
+    while (tekst[i] != '\0') {
+        uint32_t cp = 0;
+        size_t zuzyte = CzcionkaUI::dekoduj_utf8(tekst, i, &cp);
+        if (zuzyte == 0) { i++; continue; }
+        wpisz_do_bufora(cp);
+        i += zuzyte;
+    }
     shell_rysuj_terminal();
 }
 
-void shell_obsluz_mysz(const bws_zdarzenie& e) {
-    if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN) {
-        const gui_akcja_belki akcja =
-            gui_hit_test_belki(e.x, e.y, shell_x, shell_y, shell_w);
-        if (akcja == GUI_BELKA_ZAMKNIJ) gui_zakoncz_aplikacje();
-        if (akcja == GUI_BELKA_MINIMALIZUJ) {
-            shell_minimized = gui_minimalizuj_okno();
-            shell_drag = false;
-            gui_ustaw_capture_myszy(false);
-            return;
-        }
-        if (akcja == GUI_BELKA_MAKSYMALIZUJ) {
-            if (!shell_maximized) {
-                shell_restore_x=shell_x; shell_restore_y=shell_y;
-                shell_restore_w=shell_w; shell_restore_h=shell_h;
-                shell_x=shell_work_x; shell_y=shell_work_y;
-                shell_w=shell_work_w; shell_h=shell_work_h;
-                shell_maximized=true;
-            } else {
-                shell_x=shell_restore_x; shell_y=shell_restore_y;
-                shell_w=shell_restore_w; shell_h=shell_restore_h;
-                shell_maximized=false;
-            }
-            if (!gui_ustaw_geometrie_okna(
-                    shell_x, shell_y, shell_w, shell_h))
-                gui_zakoncz_aplikacje();
-            shell_rysuj_terminal();
-            return;
-        }
-        if (akcja == GUI_BELKA_DRAG && !shell_maximized) {
-            shell_drag = true;
-            shell_drag_mouse_x = e.x;
-            shell_drag_mouse_y = e.y;
-            shell_drag_window_x = shell_x;
-            shell_drag_window_y = shell_y;
-            gui_ustaw_capture_myszy(true);
-        }
-    } else if (e.typ == BWS_ZDARZENIE_MYSZ_RUCH && shell_drag) {
-        const int nx = shell_drag_window_x + (e.x - shell_drag_mouse_x);
-        const int ny = shell_drag_window_y + (e.y - shell_drag_mouse_y);
-        if (nx != shell_x || ny != shell_y) {
-            shell_x = nx;
-            shell_y = ny;
-            /* Przesuwamy metadane warstwy. Bufor pikseli pozostaje nietkniety. */
-            bws_przesun_warstwe(shell_x, shell_y);
-        }
-    } else if (e.typ == BWS_ZDARZENIE_MYSZ_UP && shell_drag) {
-        shell_drag = false;
-        gui_ustaw_capture_myszy(false);
-    }
-}
 
 constexpr uint64_t BUR_TEXT_OFFSET = 0x1000ULL;
-constexpr uint64_t BUR_TEXT_SIZE   = 0x8000ULL;
+constexpr uint64_t BUR_TEXT_SIZE   = 0x20000ULL;
 constexpr uint64_t BUR_TEXT_VADDR  = 0x1001000ULL;
 
-constexpr uint64_t BUR_DATA_OFFSET = 0x9000ULL;
-constexpr uint64_t BUR_DATA_SIZE   = 0x20000ULL;
-constexpr uint64_t BUR_DATA_VADDR  = 0x1009000ULL;
+constexpr uint64_t BUR_DATA_OFFSET = 0x21000ULL;
+constexpr uint64_t BUR_DATA_SIZE   = 0x40000ULL;
+constexpr uint64_t BUR_DATA_VADDR  = 0x1021000ULL;
 
 constexpr size_t SHELL_INPUT_CAPACITY = 2048;
 constexpr size_t SHELL_HISTORY_ENTRY_CAPACITY = 2048;
@@ -565,35 +551,6 @@ bool jest_biala_spacja(
         c == '\t';
 }
 
-void wypisz_znak(
-    char c
-) {
-    const int old_row=shell_wiersz;
-    shell_dopisz_znak(c);
-    shell_rysuj_zmiane_wejscia(old_row);
-}
-
-void usun_znak_wejscia_wizualnie() {
-    const int old_row=shell_wiersz;
-    if(shell_kolumna>0){
-        shell_ekran[shell_wiersz][--shell_kolumna]='\0';
-    }else if(shell_wiersz>0){
-        --shell_wiersz;shell_kolumna=static_cast<int>(VISUAL_COLUMNS);
-        shell_ekran[shell_wiersz][--shell_kolumna]='\0';
-    }else return;
-    if(old_row!=shell_wiersz)shell_rysuj_wiersz(old_row,false);
-    shell_rysuj_wiersz(shell_wiersz,true);gui_odswiez();++shell_perf.compose_requests;
-}
-
-void odtworz_widoczny_ogon_wejscia(const char* tekst,size_t len){
-    if(!tekst)return;
-    for(int r=0;r<SHELL_ROWS;++r)for(int c=0;c<=SHELL_COLS;++c)shell_ekran[r][c]='\0';
-    const size_t cap=static_cast<size_t>(SHELL_ROWS)*VISUAL_COLUMNS;
-    size_t start=len>cap?len-cap:0;shell_wiersz=0;shell_kolumna=0;
-    for(size_t i=start;i<len;++i)shell_dopisz_znak(tekst[i]);
-    shell_rysuj_terminal();
-}
-
 void uint_do_str(
     uint64_t wartosc,
     char* bufor,
@@ -653,6 +610,7 @@ char pobierz_znak_blokujaco() {
     for (;;) {
         bws_zdarzenie e{};
         if (!gui_czekaj_na_zdarzenie(&e)) continue;
+        
         if (e.typ == BWS_ZDARZENIE_EKRAN) {
             gui_pobierz_rozdzielczosc(&shell_screen_w, &shell_screen_h);
             GuiMonitorInfo monitor{};
@@ -663,120 +621,166 @@ char pobierz_znak_blokujaco() {
             if (shell_maximized) {
                 shell_x=shell_work_x; shell_y=shell_work_y;
                 shell_w=shell_work_w; shell_h=shell_work_h;
-                (void)gui_ustaw_geometrie_okna(shell_x,shell_y,shell_w,shell_h);
-            } else {
-                shell_w = 660; shell_h = 360;
-                if (bws_utworz_warstwe(shell_x, shell_y, shell_w, shell_h, 10) < 0)
-                    gui_zakoncz_aplikacje();
-                (void)gui_ustaw_tytul_okna("Powloka Bursztynowa");
+                gui_ustaw_geometrie_okna(shell_x,shell_y,shell_w,shell_h);
             }
             shell_rysuj_terminal();
             continue;
         }
-        if (e.typ == BWS_ZDARZENIE_FOCUS && shell_minimized)
-            shell_minimized = false;
+        if (e.typ == BWS_ZDARZENIE_FOCUS && shell_minimized) shell_minimized = false;
         if (e.typ == BWS_ZDARZENIE_ZAMKNIJ) gui_zakoncz_aplikacje();
-        if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN ||
-            e.typ == BWS_ZDARZENIE_MYSZ_RUCH ||
-            e.typ == BWS_ZDARZENIE_MYSZ_UP) {
-            shell_obsluz_mysz(e);
+        
+        if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN || e.typ == BWS_ZDARZENIE_MYSZ_RUCH || e.typ == BWS_ZDARZENIE_MYSZ_UP) {
+            int client_x = shell_x + 4;
+            int client_y = shell_y + 28;
+            int client_w = shell_w - 8;
+            int client_h = shell_h - 32;
+
+            if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN) {
+                gui_akcja_belki akcja = gui_hit_test_belki(e.x, e.y, shell_x, shell_y, shell_w);
+                if (akcja == GUI_BELKA_ZAMKNIJ) gui_zakoncz_aplikacje();
+                if (akcja == GUI_BELKA_MINIMALIZUJ) {
+                    shell_minimized = gui_minimalizuj_okno();
+                    shell_drag = false;
+                    gui_ustaw_capture_myszy(false);
+                    continue;
+                }
+                if (akcja == GUI_BELKA_MAKSYMALIZUJ) {
+                    if (!shell_maximized) {
+                        shell_restore_x=shell_x; shell_restore_y=shell_y;
+                        shell_restore_w=shell_w; shell_restore_h=shell_h;
+                        shell_x=shell_work_x; shell_y=shell_work_y;
+                        shell_w=shell_work_w; shell_h=shell_work_h;
+                        shell_maximized=true;
+                    } else {
+                        shell_x=shell_restore_x; shell_y=shell_restore_y;
+                        shell_w=shell_restore_w; shell_h=shell_restore_h;
+                        shell_maximized=false;
+                    }
+                    if (!gui_ustaw_geometrie_okna(shell_x, shell_y, shell_w, shell_h)) gui_zakoncz_aplikacje();
+                    shell_rysuj_terminal();
+                    continue;
+                }
+                if (akcja == GUI_BELKA_DRAG && !shell_maximized) {
+                    shell_drag = true;
+                    shell_drag_mouse_x = e.x;
+                    shell_drag_mouse_y = e.y;
+                    shell_drag_window_x = shell_x;
+                    shell_drag_window_y = shell_y;
+                    gui_ustaw_capture_myszy(true);
+                }
+            } else if (e.typ == BWS_ZDARZENIE_MYSZ_RUCH && shell_drag) {
+                const int nx = shell_drag_window_x + (e.x - shell_drag_mouse_x);
+                const int ny = shell_drag_window_y + (e.y - shell_drag_mouse_y);
+                if (nx != shell_x || ny != shell_y) {
+                    shell_x = nx;
+                    shell_y = ny;
+                    bws_przesun_warstwe(shell_x, shell_y);
+                }
+            } else if (e.typ == BWS_ZDARZENIE_MYSZ_UP && shell_drag) {
+                shell_drag = false;
+                gui_ustaw_capture_myszy(false);
+            }
+
+            if (g_pasek_przewijania && e.x >= client_x && e.x < client_x + client_w && e.y >= client_y && e.y < client_y + client_h) {
+                ZdarzenieMyszki mz{};
+                mz.typ = e.typ == BWS_ZDARZENIE_MYSZ_DOWN ? TypZdarzenia::WcisniecieMyszy :
+                         e.typ == BWS_ZDARZENIE_MYSZ_UP ? TypZdarzenia::ZwolnienieMyszy : TypZdarzenia::RuchMyszy;
+                mz.x = e.x - client_x;
+                mz.y = e.y - client_y;
+                mz.przycisk = (e.kod == 1) ? 1 : 0;
+                
+                if (mz.typ == TypZdarzenia::WcisniecieMyszy) g_pasek_przewijania->przy_wcisnieciu_myszy(mz);
+                else if (mz.typ == TypZdarzenia::ZwolnienieMyszy) g_pasek_przewijania->przy_zwolnieniu_myszy(mz);
+                else if (mz.typ == TypZdarzenia::RuchMyszy) g_pasek_przewijania->przy_ruchu_myszy(mz);
+                
+                if (g_pasek_przewijania->czy_brudna()) {
+                    g_scrolling = true;
+                    shell_rysuj_terminal();
+                    g_pasek_przewijania->uniewaznij();
+                }
+            }
             continue;
         }
-        if (e.typ == BWS_ZDARZENIE_KLAWISZ && e.kod != 0)
+
+        if (e.typ == 10 /*BWS_ZDARZENIE_MYSZ_KOLO*/ && g_pasek_przewijania) {
+            ZdarzenieRolki zr{};
+            zr.typ = TypZdarzenia::RolkaMyszy;
+            zr.delta_y = (e.kod > 0) ? 1 : -1;
+            g_pasek_przewijania->obsluz_rolke(zr);
+            g_scrolling = true;
+            shell_rysuj_terminal();
+            continue;
+        }
+
+        if (e.typ == BWS_ZDARZENIE_KLAWISZ && e.kod != 0) {
+            if (g_pasek_przewijania) {
+                ZdarzenieKlawiatury zk{};
+                zk.typ = TypZdarzenia::KlawiszWcisniety;
+                zk.kod_klawisza = e.kod;
+                g_pasek_przewijania->przy_wcisnieciu_klawisza(zk);
+                if (g_pasek_przewijania->czy_brudna()) {
+                    g_scrolling = true;
+                    shell_rysuj_terminal();
+                    g_pasek_przewijania->uniewaznij();
+                    if (zk.obsluzone) continue;
+                }
+                if (zk.obsluzone) {
+                    g_scrolling = true;
+                    shell_rysuj_terminal();
+                    continue;
+                }
+            }
+
+            if ((e.kod & 0xFF000000) == 0) {
+                return static_cast<char>(e.kod & 0xFF);
+            }
             return static_cast<char>(e.kod);
+        }
     }
 }
 
-/*
- * Zwraca true, jezeli cala linia zmiescila sie w buforze.
- * Po przekroczeniu limitu reszta wejscia jest konsumowana, ale nie zapisywana.
- */
-bool pobierz_linie(
-    char* bufor,
-    size_t pojemnosc
-) {
-    if (!bufor ||
-        pojemnosc < 2) {
-        return false;
-    }
-
+bool pobierz_linie(char* bufor, size_t pojemnosc) {
+    if (!bufor || pojemnosc < 2) return false;
     size_t pozycja = 0;
     bool przepelnienie = false;
-
     bufor[0] = '\0';
-
+    g_scrolling = false;
+    
     for (;;) {
-        char c =
-            pobierz_znak_blokujaco();
-
-        if (c == '\n' ||
-            c == '\r') {
-
+        g_obecny_bufor_wejscia = bufor;
+        shell_rysuj_terminal();
+        
+        char c = pobierz_znak_blokujaco();
+        
+        if (c == '\n' || c == '\r') {
             bufor[pozycja] = '\0';
+            g_obecny_bufor_wejscia = nullptr;
+            wypisz("powłoka> ");
+            wypisz(bufor);
+            wypisz("\n");
+            g_scrolling = false;
             return !przepelnienie;
         }
-
-        /*
-         * Backspace lub DEL.
-         */
-        if (c == '\b' ||
-            static_cast<uint8_t>(c) == 0x7FU) {
-
-            if (!przepelnienie &&
-                pozycja > 0) {
-                size_t usunieto=1U;--pozycja;
-                while(pozycja>0&&
-                      (static_cast<uint8_t>(bufor[pozycja])&0xC0U)==0x80U){
-                    --pozycja;++usunieto;
+        
+        if (c == '\b' || static_cast<uint8_t>(c) == 0x7FU) {
+            if (!przepelnienie && pozycja > 0) {
+                --pozycja;
+                while (pozycja > 0 && (static_cast<uint8_t>(bufor[pozycja]) & 0xC0U) == 0x80U) {
+                    --pozycja;
                 }
                 bufor[pozycja] = '\0';
-
-                if(shell_wiersz==0&&shell_kolumna==0)
-                    odtworz_widoczny_ogon_wejscia(bufor,pozycja);
-                else for(size_t i=0;i<usunieto;++i)usun_znak_wejscia_wizualnie();
-                ++shell_perf.key_count;
             }
-
             continue;
         }
-
-        /*
-         * Klawiatura moze emitowac sekwencje ANSI dla klawiszy specjalnych.
-         * Nie wprowadzamy surowego ESC do komendy.
-         *
-         * Aktualny byte-stream BWS nie pozwala niezawodnie rozpoznac calego
-         * zdarzenia klawisza, wiec po prostu pomijamy sam ESC.
-         */
-        if (static_cast<uint8_t>(c) ==
-            0x1BU) {
-            continue;
+        
+        if (!przepelnienie) {
+            if (pozycja + 1 < pojemnosc) {
+                bufor[pozycja++] = c;
+                bufor[pozycja] = '\0';
+            } else {
+                przepelnienie = true;
+            }
         }
-
-        /*
-         * Pomijamy pozostale znaki sterujace poza TAB.
-         */
-        if (static_cast<uint8_t>(c) <
-                0x20U &&
-            c != '\t') {
-            continue;
-        }
-
-        if (przepelnienie) {
-            continue;
-        }
-
-        if (pozycja + 1 >=
-            pojemnosc) {
-
-            przepelnienie = true;
-            continue;
-        }
-
-        bufor[pozycja++] = c;
-        bufor[pozycja] = '\0';
-
-        ++shell_perf.key_count;
-        wypisz_znak(c);
     }
 }
 
@@ -1069,35 +1073,39 @@ uint64_t pobierz_cykle() {
 
 void wypisz_pomoc() {
     wypisz(
-        "Polecenia Powłoki Bursztynowej:\n"
-        "  pomoc                         - pokazuje pomoc\n"
-        "  notatnik                      - uruchamia Notatnik\n"
-        "  kalkulator                    - uruchamia Kalkulator\n"
-        "  przegladarka                  - uruchamia przegladarke Husarz\n"
-        "  uruchom <plik.bur>            - uruchamia program .bur\n"
-        "  pulpit | wyjdz | exit         - konczy powloke\n"
-        "  czas                          - pokazuje czas RTC\n"
-        "  system                        - informacje o systemie\n"
-        "  wersja                        - pokazuje aktualna wersje systemu\n"
-        "  aktualizacja [sprawdz]        - pokazuje wersje i stan aktualizacji\n"
-        "  pci                           - wyswietla /logi/pci.txt\n"
-        "  ping <IPv4|domena>            - DNS + ICMP echo\n"
-        "  pobierz <host> <url> <plik>   - pobiera tekst HTTP do BSP2\n"
-        "  utworz <plik>                 - tworzy pusty plik\n"
-        "  zapisz <plik> <tekst>         - nadpisuje plik tekstem\n"
-        "  czytaj <plik>                 - wyswietla plik tekstowy\n"
-        "  pliki [katalog]               - listuje katalog\n"
-        "  usun <sciezka>                - usuwa plik/pusty katalog\n"
-        "  zmien_nazwe <sciezka> <nazwa> - zmienia nazwe\n"
-        "  gdzie                         - pokazuje katalog roboczy\n"
-        "  historia                      - ostatnie polecenia\n"
-        "  cytat                         - pokazuje /cytaty.txt\n"
-        "  dzwiek                        - test HDA 880 Hz\n"
-        "  czysc                         - wizualnie czysci terminal\n"
-        "  losuj                         - rzut kostka (nie kryptograficzny)\n"
-        "  pisz <tekst>                  - wypisuje tekst\n"
+        "Dostępne polecenia:\n\n"
+        "  Sieć\n"
+        "    ping <IPv4|domena>           Sprawdza dostępność hosta przez ICMP.\n"
+        "    pobierz <host> <url> <plik>  Pobiera plik HTTP i zapisuje go w BSP2.\n"
         "\n"
-        "Argument zawierajacy spacje mozna zapisac w cudzyslowie.\n"
+        "  Pliki i katalogi\n"
+        "    utworz <plik>                Tworzy pusty plik.\n"
+        "    zapisz <plik> <tekst>        Zapisuje tekst do pliku.\n"
+        "    czytaj <plik>                Wyświetla zawartość pliku.\n"
+        "    pliki [katalog]              Wyświetla zawartość katalogu.\n"
+        "    usun <ścieżka>               Usuwa plik lub pusty katalog.\n"
+        "    zmiennazwe <ścieżka> <nazwa> Zmienia nazwę pliku lub katalogu.\n"
+        "\n"
+        "  Powłoka\n"
+        "    gdzie                        Wyświetla bieżący katalog.\n"
+        "    historia                     Wyświetla historię poleceń.\n"
+        "    czysc                        Czyści terminal.\n"
+        "    dzwiek                       Odtwarza test HDA 880 Hz.\n"
+        "    losuj                        Losuje liczbę.\n"
+        "    pisz <tekst>                 Wyświetla tekst.\n"
+        "\n"
+        "  System\n"
+        "    notatnik                     Uruchamia Notatnik.\n"
+        "    kalkulator                   Uruchamia Kalkulator.\n"
+        "    przegladarka                 Uruchamia przeglądarkę Husarz.\n"
+        "    uruchom <plik.bur>           Uruchamia program .bur.\n"
+        "    pulpit | wyjdz | exit        Kończy powłokę.\n"
+        "    czas                         Pokazuje czas RTC.\n"
+        "    system                       Informacje o systemie.\n"
+        "    wersja                       Pokazuje aktualną wersję systemu.\n"
+        "    aktualizacja [sprawdz]       Pokazuje wersję i stan aktualizacji.\n"
+        "    pci                          Wyświetla /logi/pci.txt.\n"
+        "    pomoc                        Pokazuje ten ekran pomocy.\n"
     );
 }
 
@@ -1142,7 +1150,7 @@ void polecenie_ping(
         cel[0] == '\0') {
 
         wypisz(
-            "Skladnia: ping <adres IPv4 lub domena>\n"
+            "Składnia: ping <adres IPv4 lub domena>\n"
         );
         return;
     }
@@ -1264,7 +1272,7 @@ void polecenie_pobierz(
         !sciezka_pliku) {
 
         wypisz(
-            "Skladnia: pobierz <domena> <sciezka_HTTP> <plik_docelowy>\n"
+            "Składnia: pobierz <domena> <sciezka_HTTP> <plik_docelowy>\n"
         );
         return;
     }
@@ -1459,7 +1467,7 @@ void polecenie_czytaj(
             BUF_CZYTAJ_PLIK - 1U)) {
 
         wypisz(
-            "Blad odczytu pliku.\n"
+            "Błąd odczytu pliku.\n"
         );
         return;
     }
@@ -1633,7 +1641,7 @@ void wykonaj_polecenie(
 
         if (a.liczba != 1) {
             wypisz(
-                "Skladnia: pomoc\n"
+                "Składnia: pomoc\n"
             );
             return;
         }
@@ -1648,7 +1656,7 @@ void wykonaj_polecenie(
 
         if (a.liczba != 1) {
             wypisz(
-                "Skladnia: notatnik\n"
+                "Składnia: notatnik\n"
             );
             return;
         }
@@ -1665,7 +1673,7 @@ void wykonaj_polecenie(
 
         if (a.liczba != 1) {
             wypisz(
-                "Skladnia: kalkulator\n"
+                "Składnia: kalkulator\n"
             );
             return;
         }
@@ -1682,7 +1690,7 @@ void wykonaj_polecenie(
 
         if (a.liczba != 1) {
             wypisz(
-                "Skladnia: przegladarka\n"
+                "Składnia: przegladarka\n"
             );
             return;
         }
@@ -1699,7 +1707,7 @@ void wykonaj_polecenie(
 
         if (a.liczba != 1) {
             wypisz(
-                "Skladnia: wyjdz\n"
+                "Składnia: wyjdz\n"
             );
             return;
         }
@@ -1717,7 +1725,7 @@ void wykonaj_polecenie(
 
         if (a.liczba != 2) {
             wypisz(
-                "Skladnia: uruchom <plik.bur>\n"
+                "Składnia: uruchom <plik.bur>\n"
             );
             return;
         }
@@ -1734,7 +1742,7 @@ void wykonaj_polecenie(
 
         if (a.liczba != 2) {
             wypisz(
-                "Skladnia: ping <IPv4 lub domena>\n"
+                "Składnia: ping <IPv4 lub domena>\n"
             );
             return;
         }
@@ -1751,7 +1759,7 @@ void wykonaj_polecenie(
 
         if (a.liczba != 4) {
             wypisz(
-                "Skladnia: pobierz <domena> <sciezka_HTTP> <plik_docelowy>\n"
+                "Składnia: pobierz <domena> <sciezka_HTTP> <plik_docelowy>\n"
             );
             return;
         }
@@ -1770,7 +1778,7 @@ void wykonaj_polecenie(
 
         if (a.liczba != 1) {
             wypisz(
-                "Skladnia: czas\n"
+                "Składnia: czas\n"
             );
             return;
         }
@@ -1802,7 +1810,7 @@ void wykonaj_polecenie(
 
         if (a.liczba != 1) {
             wypisz(
-                "Skladnia: system\n"
+                "Składnia: system\n"
             );
             return;
         }
@@ -1826,7 +1834,7 @@ void wykonaj_polecenie(
 
         if (a.liczba != 1) {
             wypisz(
-                "Skladnia: pci\n"
+                "Składnia: pci\n"
             );
             return;
         }
@@ -1841,7 +1849,7 @@ void wykonaj_polecenie(
 
         if (a.liczba != 1) {
             wypisz(
-                "Skladnia: gdzie\n"
+                "Składnia: gdzie\n"
             );
             return;
         }
@@ -1861,7 +1869,7 @@ void wykonaj_polecenie(
 
         if (a.liczba != 1) {
             wypisz(
-                "Skladnia: historia\n"
+                "Składnia: historia\n"
             );
             return;
         }
@@ -1896,11 +1904,11 @@ void wykonaj_polecenie(
 
     if (tekst_rowny(
             cmd,
-            "czysc")) {
+            "czysc") || tekst_rowny(cmd, "czyść")) {
 
         if (a.liczba != 1) {
             wypisz(
-                "Skladnia: czysc\n"
+                "Składnia: czysc\n"
             );
             return;
         }
@@ -1923,7 +1931,7 @@ void wykonaj_polecenie(
 
         if (a.liczba != 1) {
             wypisz(
-                "Skladnia: losuj\n"
+                "Składnia: losuj\n"
             );
             return;
         }
@@ -1957,7 +1965,7 @@ void wykonaj_polecenie(
 
         if (a.liczba != 1) {
             wypisz(
-                "Skladnia: cytat\n"
+                "Składnia: cytat\n"
             );
             return;
         }
@@ -1972,7 +1980,7 @@ void wykonaj_polecenie(
 
         if (a.liczba > 2) {
             wypisz(
-                "Skladnia: pliki [katalog]\n"
+                "Składnia: pliki [katalog]\n"
             );
             return;
         }
@@ -1991,7 +1999,7 @@ void wykonaj_polecenie(
 
         if (a.liczba != 2) {
             wypisz(
-                "Skladnia: czytaj <plik>\n"
+                "Składnia: czytaj <plik>\n"
             );
             return;
         }
@@ -2008,7 +2016,7 @@ void wykonaj_polecenie(
 
         if (a.liczba != 2) {
             wypisz(
-                "Skladnia: utworz <plik>\n"
+                "Składnia: utworz <plik>\n"
             );
             return;
         }
@@ -2045,7 +2053,7 @@ void wykonaj_polecenie(
 
         if (a.liczba != 3) {
             wypisz(
-                "Skladnia: zapisz <plik> <tekst>\n"
+                "Składnia: zapisz <plik> <tekst>\n"
                 "Dla tekstu ze spacjami uzyj cudzyslowu.\n"
             );
             return;
@@ -2101,11 +2109,11 @@ void wykonaj_polecenie(
 
     if (tekst_rowny(
             cmd,
-            "usun")) {
+            "usun") || tekst_rowny(cmd, "usuń")) {
 
         if (a.liczba != 2) {
             wypisz(
-                "Skladnia: usun <sciezka>\n"
+                "Składnia: usun <sciezka>\n"
             );
             return;
         }
@@ -2150,11 +2158,11 @@ void wykonaj_polecenie(
 
     if (tekst_rowny(
             cmd,
-            "zmien_nazwe")) {
+            "zmien_nazwe") || tekst_rowny(cmd, "zmiennazwe") || tekst_rowny(cmd, "zmieńnazwę")) {
 
         if (a.liczba != 3) {
             wypisz(
-                "Skladnia: zmien_nazwe <sciezka> <nowa_nazwa>\n"
+                "Składnia: zmien_nazwe <sciezka> <nowa_nazwa>\n"
             );
             return;
         }
@@ -2219,7 +2227,7 @@ void wykonaj_polecenie(
 
         if (a.liczba != 1) {
             wypisz(
-                "Skladnia: dzwiek\n"
+                "Składnia: dzwiek\n"
             );
             return;
         }
@@ -2238,7 +2246,7 @@ void wykonaj_polecenie(
 
     if (tekst_rowny(cmd, "wersja")) {
         if (a.liczba != 1) {
-            wypisz("Skladnia: wersja\n");
+            wypisz("Składnia: wersja\n");
             return;
         }
         char bufor[64] = {};
@@ -2259,7 +2267,7 @@ void wykonaj_polecenie(
 
     if (tekst_rowny(cmd, "aktualizacja")) {
         if (a.liczba > 2) {
-            wypisz("Skladnia: aktualizacja [sprawdz]\n");
+            wypisz("Składnia: aktualizacja [sprawdz]\n");
             return;
         }
         char wersja[64] = {};
@@ -2300,7 +2308,7 @@ void wykonaj_polecenie(
             "pisz")) {
         if (a.liczba != 2) {
             wypisz(
-                "Skladnia: pisz <tekst>\n"
+                "Składnia: pisz <tekst>\n"
                 "Dla tekstu ze spacjami uzyj cudzyslowu.\n"
             );
             return;
@@ -2366,18 +2374,20 @@ void _start() {
         shell_work_w = shell_screen_w;
         shell_work_h = shell_screen_h;
     }
+    
     if (bws_utworz_warstwe(shell_x, shell_y, shell_w, shell_h, 10) < 0)
         gui_zakoncz_aplikacje();
-    (void)gui_ustaw_tytul_okna("Powloka Bursztynowa");
-    gui_ustaw_przejecie_myszy(true);
-    shell_rysuj_terminal();
+    gui_ustaw_tytul_okna("Powłoka Bursztynowa");
+    
+    
+    g_pasek_przewijania = new PasekPrzewijania();
+    g_pasek_przewijania->ustaw_orientacje(Orientacja::Pionowa);
 
     wypisz(
         "\n"
         "==================================================\n"
-        " Powłoka Bursztynowa bsh v2.3\n"
-        " Autor: Dymitr Wygowski"
-        " e-mail: programista.art@gmail.com"
+        " Powłoka Bursztynowa bsh v3.0 (Unicode)\n"
+        " Autor: Dymitr Wygowski\n"
         " Ring 3 / BWS / BSP2 / PZB\n"
         "==================================================\n"
         "Wpisz 'pomoc', aby zobaczyć polecenia.\n"
@@ -2386,54 +2396,29 @@ void _start() {
     char linia[SHELL_INPUT_CAPACITY] = {};
 
     for (;;) {
-        wypisz("\npowloka> ");
-
-        const bool cala_linia =
-            pobierz_linie(
-                linia,
-                sizeof(linia)
-            );
-
-        wypisz("\n");
+        const bool cala_linia = pobierz_linie(linia, sizeof(linia));
 
         if (!cala_linia) {
-            wypisz(
-                "Blad: polecenie przekracza limit 2047 bajtow i zostalo odrzucone.\n"
-            );
+            wypisz("Błąd: polecenie przekracza limit 2047 bajtów i zostało odrzucone.\n");
             continue;
         }
-
         if (linia[0] == '\0') {
             continue;
         }
 
         Argumenty argumenty{};
-
-        if(!kopiuj_tekst(komenda_dla_historii,sizeof(komenda_dla_historii),linia)){
-            wypisz("Blad: nie mozna zapisac komendy w bounded historii.\n");
+        if(!kopiuj_tekst(komenda_dla_historii, sizeof(komenda_dla_historii), linia)){
+            wypisz("Błąd: nie można zapisać komendy w historii.\n");
             continue;
         }
 
-        if (!parse_argumenty(
-                linia,
-                &argumenty)) {
-
-            wypisz(
-                "Blad skladni: za duzo argumentow lub brakuje zamykajacego cudzyslowu.\n"
-            );
+        if (!parse_argumenty(linia, &argumenty)) {
+            wypisz("Błąd składni: za dużo argumentów lub brakuje zamykającego cudzysłowu.\n");
             continue;
         }
+        if (argumenty.liczba == 0) continue;
 
-        if (argumenty.liczba == 0) {
-            continue;
-        }
-
-        dodaj_do_historii(
-            komenda_dla_historii
-        );
-
-        wykonaj_polecenie(
-            argumenty
-        );
+        dodaj_do_historii(komenda_dla_historii);
+        wykonaj_polecenie(argumenty);
     }
 }

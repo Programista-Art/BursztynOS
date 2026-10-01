@@ -159,6 +159,141 @@ static void log_pointer_event(const InputDevice* dev, int dx, int dy, int res_x,
 static inline void log_pointer_event(const InputDevice*, int, int, int, int, bool) {}
 #endif
 
+#if defined(BURSZTYN_DIAG_RAW_VIRTIO_INPUT) && BURSZTYN_DIAG_RAW_VIRTIO_INPUT
+static void log_raw_virtio_rel(const InputDevice* dev, const InputEvent* ev, int32_t delta) {
+    if (!dev || dev->bus_type != INPUT_BUS_VIRTIO) return;
+    static uint32_t s_rel_log_count = 0;
+    const bool is_large = (delta < -200 || delta > 200);
+    if (s_rel_log_count >= 50 && !is_large) return;
+    ++s_rel_log_count;
+
+    char buf[180]{};
+    char* p = buf;
+    char* e = buf + sizeof(buf);
+    auto app = [&](const char* s) { while (*s && p + 1 < e) *p++ = *s++; };
+    auto app_hex = [&](uint32_t v) {
+        app("0x");
+        for (int i = 7; i >= 0; --i) {
+            uint8_t nib = (v >> (i * 4)) & 0xFU;
+            if (p + 1 < e) *p++ = (nib < 10) ? static_cast<char>('0' + nib) : static_cast<char>('A' + (nib - 10));
+        }
+    };
+    auto app_u = [&](uint32_t v) {
+        char b[12]; int idx = 0;
+        do { b[idx++] = static_cast<char>('0' + (v % 10)); v /= 10; } while (v);
+        while (idx > 0 && p + 1 < e) *p++ = b[--idx];
+    };
+    auto app_i = [&](int32_t v) {
+        if (v < 0) {
+            if (p + 1 < e) *p++ = '-';
+            v = -v;
+        }
+        char b[12]; int idx = 0;
+        do { b[idx++] = static_cast<char>('0' + (v % 10)); v /= 10; } while (v);
+        while (idx > 0 && p + 1 < e) *p++ = b[--idx];
+    };
+
+    app("[VIRTIO RAW REL] dev='");
+    app(dev->name);
+    app("' type=");
+    app_u(ev->type);
+    app(" code=");
+    app_u(ev->code);
+    if (ev->code == INPUT_REL_X) app("(REL_X)");
+    else if (ev->code == INPUT_REL_Y) app("(REL_Y)");
+    else if (ev->code == INPUT_REL_WHEEL) app("(REL_WHEEL)");
+    app(" hex=");
+    app_hex(ev->value);
+    app(" u32=");
+    app_u(ev->value);
+    app(" i32=");
+    app_i(delta);
+    app(" acc_x=");
+    app_i(dev->rel_x);
+    app(" acc_y=");
+    app_i(dev->rel_y);
+    *p = '\0';
+    klog_serial(buf);
+}
+
+static void log_raw_virtio_syn(const InputDevice* dev, int32_t commit_dx, int32_t commit_dy) {
+    if (!dev || dev->bus_type != INPUT_BUS_VIRTIO) return;
+    static uint32_t s_syn_log_count = 0;
+    const bool is_large = (commit_dx < -200 || commit_dx > 200 || commit_dy < -200 || commit_dy > 200);
+    if (s_syn_log_count >= 50 && !is_large) return;
+    ++s_syn_log_count;
+
+    char buf[160]{};
+    char* p = buf;
+    char* e = buf + sizeof(buf);
+    auto app = [&](const char* s) { while (*s && p + 1 < e) *p++ = *s++; };
+    auto app_i = [&](int32_t v) {
+        if (v < 0) {
+            if (p + 1 < e) *p++ = '-';
+            v = -v;
+        }
+        char b[12]; int idx = 0;
+        do { b[idx++] = static_cast<char>('0' + (v % 10)); v /= 10; } while (v);
+        while (idx > 0 && p + 1 < e) *p++ = b[--idx];
+    };
+
+    app("[VIRTIO RAW SYN] dev='");
+    app(dev->name);
+    app("' SYN_REPORT commit dx=");
+    app_i(commit_dx);
+    app(" dy=");
+    app_i(commit_dy);
+    app(" -> acc reset to 0,0");
+    *p = '\0';
+    klog_serial(buf);
+}
+
+static void log_raw_virtio_abs(const InputDevice* dev, const InputEvent* ev, int32_t coord) {
+    if (!dev || dev->bus_type != INPUT_BUS_VIRTIO) return;
+    static uint32_t s_abs_log_count = 0;
+    if (s_abs_log_count >= 30) return;
+    ++s_abs_log_count;
+
+    char buf[160]{};
+    char* p = buf;
+    char* e = buf + sizeof(buf);
+    auto app = [&](const char* s) { while (*s && p + 1 < e) *p++ = *s++; };
+    auto app_u = [&](uint32_t v) {
+        char b[12]; int idx = 0;
+        do { b[idx++] = static_cast<char>('0' + (v % 10)); v /= 10; } while (v);
+        while (idx > 0 && p + 1 < e) *p++ = b[--idx];
+    };
+    auto app_i = [&](int32_t v) {
+        if (v < 0) {
+            if (p + 1 < e) *p++ = '-';
+            v = -v;
+        }
+        char b[12]; int idx = 0;
+        do { b[idx++] = static_cast<char>('0' + (v % 10)); v /= 10; } while (v);
+        while (idx > 0 && p + 1 < e) *p++ = b[--idx];
+    };
+
+    app("[VIRTIO RAW ABS] dev='");
+    app(dev->name);
+    app("' axis=");
+    if (ev->code == INPUT_ABS_X) app("ABS_X");
+    else if (ev->code == INPUT_ABS_Y) app("ABS_Y");
+    else app_u(ev->code);
+    app(" raw=");
+    app_i(coord);
+    app(" min=");
+    app_i(ev->code == INPUT_ABS_X ? dev->abs_x.min : dev->abs_y.min);
+    app(" max=");
+    app_i(ev->code == INPUT_ABS_X ? dev->abs_x.max : dev->abs_y.max);
+    *p = '\0';
+    klog_serial(buf);
+}
+#else
+static inline void log_raw_virtio_rel(const InputDevice*, const InputEvent*, int32_t) {}
+static inline void log_raw_virtio_syn(const InputDevice*, int32_t, int32_t) {}
+static inline void log_raw_virtio_abs(const InputDevice*, const InputEvent*, int32_t) {}
+#endif
+
 } // namespace
 
 extern "C" {
@@ -310,6 +445,7 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
             } else if (ev->code == INPUT_REL_WHEEL) {
                 dev->rel_wheel += delta;
             }
+            log_raw_virtio_rel(dev, ev, delta);
             break;
         }
 
@@ -322,6 +458,7 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
                 dev->abs_val_y = coord;
                 dev->has_abs_y = true;
             }
+            log_raw_virtio_abs(dev, ev, coord);
             break;
         }
 
@@ -344,6 +481,7 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
                         if (dev->rel_x != 0 || dev->rel_y != 0) {
                             const int dx = dev->rel_x;
                             const int dy = dev->rel_y;
+                            log_raw_virtio_syn(dev, dx, dy);
                             zaktualizuj_mysze_zrodlo(dev->rel_x, -dev->rel_y, dev->buttons_state, src_name);
                             dev->rel_x = 0;
                             dev->rel_y = 0;
@@ -366,11 +504,11 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
                             const int screen_h = grafika_pobierz_wysokosc();
 
                             if (screen_w > 0 && screen_h > 0) {
-                                int target_x = dev->abs_val_x;
-                                int target_y = dev->abs_val_y;
+                                int target_x = dev->has_abs_x ? dev->abs_val_x : grafika_pobierz_mysz_x();
+                                int target_y = dev->has_abs_y ? dev->abs_val_y : grafika_pobierz_mysz_y();
 
                                 // Skalowanie osi X z pelna ochrona przed overflow
-                                if (dev->abs_x.max > dev->abs_x.min) {
+                                if (dev->has_abs_x && dev->abs_x.max > dev->abs_x.min) {
                                     if (target_x < dev->abs_x.min) target_x = dev->abs_x.min;
                                     if (target_x > dev->abs_x.max) target_x = dev->abs_x.max;
                                     const int64_t span_in = static_cast<int64_t>(dev->abs_x.max) - dev->abs_x.min;
@@ -380,7 +518,7 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
                                 }
 
                                 // Skalowanie osi Y z pelna ochrona przed overflow
-                                if (dev->abs_y.max > dev->abs_y.min) {
+                                if (dev->has_abs_y && dev->abs_y.max > dev->abs_y.min) {
                                     if (target_y < dev->abs_y.min) target_y = dev->abs_y.min;
                                     if (target_y > dev->abs_y.max) target_y = dev->abs_y.max;
                                     const int64_t span_in = static_cast<int64_t>(dev->abs_y.max) - dev->abs_y.min;
@@ -389,10 +527,14 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
                                     target_y = static_cast<int>((val_rel * max_out) / span_in);
                                 }
 
-                                zaktualizuj_mysze_pozycja_zrodlo(target_x, target_y, dev->buttons_state, src_name);
-                                const int rx = grafika_pobierz_mysz_x();
-                                const int ry = grafika_pobierz_mysz_y();
-                                log_pointer_event(dev, 0, 0, rx, ry, true);
+                                const bool can_abs_x = dev->has_abs_x && (dev->abs_x.max > dev->abs_x.min);
+                                const bool can_abs_y = dev->has_abs_y && (dev->abs_y.max > dev->abs_y.min);
+                                if ((dev->kinds & INPUT_DEVICE_KIND_TABLET) != 0 || can_abs_x || can_abs_y) {
+                                    zaktualizuj_mysze_pozycja_zrodlo(target_x, target_y, dev->buttons_state, src_name);
+                                    const int rx = grafika_pobierz_mysz_x();
+                                    const int ry = grafika_pobierz_mysz_y();
+                                    log_pointer_event(dev, 0, 0, rx, ry, true);
+                                }
                             }
 
                             dev->has_abs_x = false;
