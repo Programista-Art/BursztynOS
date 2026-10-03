@@ -19,6 +19,14 @@ if SERIAL_LOG.exists():
 if QMP_SOCK.exists():
     QMP_SOCK.unlink()
 
+res_arg = "1280x720"
+for arg in sys.argv[1:]:
+    if arg.startswith("--res="):
+        res_arg = arg.split("=")[1]
+    elif arg == "--1080p":
+        res_arg = "1920x1080"
+screen_w, screen_h = map(int, res_arg.split("x"))
+
 cmd = [
     "qemu-system-x86_64",
     "-bios", str(OVMF),
@@ -40,14 +48,14 @@ cmd = [
     "-object", "rng-random,id=rng0,filename=/dev/urandom",
     "-device", "virtio-rng-pci,rng=rng0,disable-legacy=on",
     "-vga", "none",
-    "-device", "virtio-vga,disable-legacy=on,xres=1280,yres=720",
+    "-device", f"virtio-vga,disable-legacy=on,xres={screen_w},yres={screen_h}",
     "-device", "virtio-keyboard-pci",
-    "-device", "virtio-mouse-pci",
+    "-device", "virtio-tablet-pci",
     "-boot", "order=d",
     "-cdrom", str(ISO),
 ]
 
-print("[TEST RUNNER] Starting single QEMU SDL run...")
+print(f"[TEST RUNNER] Starting single QEMU SDL run at {screen_w}x{screen_h}...")
 proc = subprocess.Popen(cmd)
 
 start_time = time.time()
@@ -127,24 +135,61 @@ try:
                         send_qmp_command(s, "qmp_capabilities")
                         print("[TEST RUNNER] Connected to QMP at desktop.")
                         # Check mice
-                        mice_resp = send_qmp_command(s, "human-monitor-command", {"command-line": "info mice"})
-                        print(f"[TEST RUNNER] QEMU info mice:\n{mice_resp.get('return', '')}")
-                        # Send relative mouse motion: dx=47, dy=0
-                        move_resp = send_qmp_command(s, "human-monitor-command", {"command-line": "mouse_move 47 0"})
-                        print(f"[TEST RUNNER] Sent mouse_move 47 0: {move_resp}")
+                        def qmp_move(sock, px, py):
+                            vx = int(px * 32767 / screen_w)
+                            vy = int(py * 32767 / screen_h)
+                            send_qmp_command(sock, "input-send-event", {
+                                "events": [
+                                    {"type": "abs", "data": {"axis": "x", "value": vx}},
+                                    {"type": "abs", "data": {"axis": "y", "value": vy}}
+                                ]
+                            })
+
+                        def qmp_click(sock):
+                            send_qmp_command(sock, "input-send-event", {
+                                "events": [{"type": "btn", "data": {"button": "left", "down": True}}]
+                            })
+                            time.sleep(0.1)
+                            send_qmp_command(sock, "input-send-event", {
+                                "events": [{"type": "btn", "data": {"button": "left", "down": False}}]
+                            })
+
+                        # Move to Start button: x=35, y=screen_h - 20
+                        start_y = screen_h - 20
+                        qmp_move(s, 35, start_y)
+                        time.sleep(0.5)
+                        qmp_click(s)
+                        print(f"[TEST RUNNER] Clicked Start button at (35, {start_y}).")
                         time.sleep(1.0)
-                        # Send second relative mouse motion: dx=20, dy=30
-                        move_resp2 = send_qmp_command(s, "human-monitor-command", {"command-line": "mouse_move 20 30"})
-                        print(f"[TEST RUNNER] Sent mouse_move 20 30: {move_resp2}")
-                        time.sleep(1.0)
-                        # Take screendump
+
+                        # Move to "Powłoka Bursztyna": x=100, y=(screen_h - 40 - 470) + 10 + 12
+                        menu_y = screen_h - 40 - 470
+                        item0_y = menu_y + 10 + 12
+                        qmp_move(s, 100, item0_y)
+                        time.sleep(0.5)
+                        qmp_click(s)
+                        print(f"[TEST RUNNER] Clicked Powłoka Bursztyna at (100, {item0_y}).")
+                        time.sleep(2.0)
+
+                        # Take screendump of opened shell
                         dump_resp = send_qmp_command(s, "screendump", {"filename": "/tmp/sdl_mouse_dump.ppm"})
                         print(f"[TEST RUNNER] Screendump saved: {dump_resp}")
+
+                        # Type "pomoc" + Enter into shell
+                        print("[TEST RUNNER] Typing 'pomoc' into shell...")
+                        for k in ["p", "o", "m", "o", "c", "ret"]:
+                            send_qmp_command(s, "human-monitor-command", {"command-line": f"sendkey {k}"})
+                            time.sleep(0.1)
+
+                        time.sleep(1.0)
+                        # Take screendump after typing
+                        dump_resp2 = send_qmp_command(s, "screendump", {"filename": "/tmp/sdl_shell_type_dump.ppm"})
+                        print(f"[TEST RUNNER] Screendump 2 saved: {dump_resp2}")
                         s.close()
                     except Exception as ex:
                         print(f"[TEST RUNNER] QMP error: {ex}")
 
-                if desktop_seen_time is not None and (time.time() - desktop_seen_time > 8.0):
+                if desktop_seen_time is not None and (time.time() - desktop_seen_time > 12.0):
                     print("[TEST RUNNER] Observation period completed. Ending test cleanly.")
                     break
 

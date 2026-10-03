@@ -49,6 +49,14 @@ static uint32_t input_calc_priority(const InputDevice* dev) {
     return 0;
 }
 
+static int32_t s_last_tablet_raw_x = -1;
+static int32_t s_last_tablet_raw_y = -1;
+
+extern "C" void input_device_pobierz_ostatnie_abs(int32_t* rx, int32_t* ry) {
+    if (rx) *rx = s_last_tablet_raw_x;
+    if (ry) *ry = s_last_tablet_raw_y;
+}
+
 static inline bool input_is_pointer_device(const InputDevice* dev) {
     if (!dev) return false;
     return (dev->kinds & (INPUT_DEVICE_KIND_MOUSE | INPUT_DEVICE_KIND_TABLET)) != 0;
@@ -454,9 +462,11 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
             if (ev->code == INPUT_ABS_X) {
                 dev->abs_val_x = coord;
                 dev->has_abs_x = true;
+                s_last_tablet_raw_x = coord;
             } else if (ev->code == INPUT_ABS_Y) {
                 dev->abs_val_y = coord;
                 dev->has_abs_y = true;
+                s_last_tablet_raw_y = coord;
             }
             log_raw_virtio_abs(dev, ev, coord);
             break;
@@ -488,7 +498,7 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
                             const int rx = grafika_pobierz_mysz_x();
                             const int ry = grafika_pobierz_mysz_y();
                             log_pointer_event(dev, dx, dy, rx, ry, true);
-                        } else if (dev->buttons_state != dev->prev_buttons_state) {
+                        } else if (!dev->has_abs_x && !dev->has_abs_y && dev->buttons_state != dev->prev_buttons_state) {
                             zaktualizuj_mysze_zrodlo(0, 0, dev->buttons_state, src_name);
                         }
 

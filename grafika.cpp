@@ -2285,6 +2285,8 @@ static void log_granice_kursora(const char* zrodlo, uint32_t sw, uint32_t sh, ui
     klog_serial(s);
 }
 
+extern "C" void input_device_pobierz_ostatnie_abs(int32_t* rx, int32_t* ry);
+
 extern "C" void zaktualizuj_mysze_zrodlo(int dx,
                                          int dy,
                                          uint8_t przyciski,
@@ -2418,6 +2420,44 @@ extern "C" void zaktualizuj_mysze_zrodlo(int dx,
             ustaw_focus_gui(trafiony);
         }
         const int cel = capture_pid_gui > 0 ? capture_pid_gui : aktywny_pid_gui;
+        if (klik) {
+            static uint32_t s_click_trace_cnt = 0;
+            if (s_click_trace_cnt < 30) {
+                ++s_click_trace_cnt;
+                int32_t raw_x = -1, raw_y = -1;
+                input_device_pobierz_ostatnie_abs(&raw_x, &raw_y);
+                const int sw = grafika_pobierz_szerokosc();
+                const int sh = grafika_pobierz_wysokosc();
+                char cbuf[256]{};
+                char* cp = cbuf;
+                char* cep = cbuf + sizeof(cbuf);
+                auto capp = [&](const char* str) { while (*str && cp + 1 < cep) *cp++ = *str++; };
+                auto capp_i = [&](int64_t v) {
+                    if (v < 0) { if (cp + 1 < cep) *cp++ = '-'; v = -v; }
+                    char b[24]; int idx = 0;
+                    do { b[idx++] = static_cast<char>('0' + (v % 10)); v /= 10; } while (v);
+                    while (idx > 0 && cp + 1 < cep) *cp++ = b[--idx];
+                };
+                capp("[CLICK TRACE]\n  rawabs=");
+                capp_i(raw_x); capp(","); capp_i(raw_y);
+                capp("\n  logical="); capp_i(mysz_x); capp(","); capp_i(mysz_y);
+                capp("\n  cursor="); capp_i(mysz_x); capp(","); capp_i(mysz_y);
+                capp("\n  wmevent="); capp_i(mysz_x); capp(","); capp_i(mysz_y);
+                capp("\n  framebuffer="); capp_i(sw); capp("x"); capp_i(sh);
+                capp("\n  compositor="); capp_i(sw); capp("x"); capp_i(sh);
+                capp("\n  desktop="); capp_i(sw); capp("x"); capp_i(sh);
+                capp("\n  target PID="); capp_i(cel);
+                warstwa_obrazu* w = (cel > 0 && cel < SKLADACZ_MAKS_WARSTW) ? pobierz_warstwe(cel) : nullptr;
+                if (w) {
+                    capp(" bounds=("); capp_i(w->x); capp(","); capp_i(w->y);
+                    capp(")-("); capp_i(w->x + w->szerokosc); capp(","); capp_i(w->y + w->wysokosc);
+                    capp(")");
+                }
+                capp(" coords=("); capp_i(mysz_x); capp(","); capp_i(mysz_y); capp(")\n");
+                *cp = '\0';
+                klog_serial(cbuf);
+            }
+        }
         if (cel > 0) {
             if (klik || pusc || dx != 0 || dy != 0) {
                 bws_zdarzenie e{};

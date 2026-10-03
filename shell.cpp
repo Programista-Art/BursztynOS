@@ -31,6 +31,7 @@
 
 #include "bursztyn_gui.h"
 #include "bws_nowoczesne.h"
+#include "bws_zdarzenia.h"
 #include "motyw.h"
 #include "bursztyn_ui/czcionka.h"
 #include "bursztyn_ui/rysowanie.h"
@@ -123,22 +124,27 @@ constexpr int SHELL_ROWS = 19;
 constexpr size_t VISUAL_COLUMNS = static_cast<size_t>(SHELL_COLS);
 
 constexpr int MAXSCROLLBACKLINES = 512;
-constexpr int SCROLLBAR_WIDTH = 12;
-constexpr int INPUT_LINE_HEIGHT = 30;
 
 struct ShellLine {
-    char tekst[256];
+    char tekst[160];
+    char opis[160];
     int len;
+    int opis_x; // 0 = jedna linia, >0 = offset kolumny opisu w px
 };
 
 ShellLine g_linie[MAXSCROLLBACKLINES];
 int g_liczba_linii = 1;
 int g_pierwsza_linia = 0;
-int g_scroll_offset = 0;
-bool g_scrolling = false;
+int g_scroll_linia = 0;
+bool g_auto_scroll = true;
 
 char* g_obecny_bufor_wejscia = nullptr;
 PasekPrzewijania* g_pasek_przewijania = nullptr;
+
+constexpr int SHELL_LOGICAL_W = 700;
+constexpr int SHELL_LOGICAL_H = 450;
+int shell_logical_w = SHELL_LOGICAL_W;
+int shell_logical_h = SHELL_LOGICAL_H;
 
 int shell_x = 20, shell_y = 20, shell_w = 700, shell_h = 450;
 int shell_work_x = 0, shell_work_y = 0, shell_work_w = 1024, shell_work_h = 768;
@@ -152,6 +158,17 @@ int shell_drag_mouse_x = 0;
 int shell_drag_mouse_y = 0;
 int shell_drag_window_x = 0;
 int shell_drag_window_y = 0;
+bool shell_sb_dragging = false;
+
+static constexpr int WYSOKOSC_BELKI_TYTULOWEJ = 28;
+
+inline Prostokat shell_obszar_klienta() {
+    const SkalaUI skala = ui_skala();
+    const int belka_h = WYSOKOSC_BELKI_TYTULOWEJ * skala;
+    int klient_h = shell_h - belka_h;
+    if (klient_h < 0) klient_h = 0;
+    return Prostokat(shell_x, shell_y + belka_h, shell_w, klient_h);
+}
 
 void dodaj_nowa_linie() {
     if (g_liczba_linii < MAXSCROLLBACKLINES) {
@@ -162,6 +179,8 @@ void dodaj_nowa_linie() {
     int act = (g_pierwsza_linia + g_liczba_linii - 1) % MAXSCROLLBACKLINES;
     g_linie[act].len = 0;
     g_linie[act].tekst[0] = '\0';
+    g_linie[act].opis[0] = '\0';
+    g_linie[act].opis_x = 0;
 }
 
 void wpisz_do_bufora(uint32_t cp) {
@@ -171,9 +190,9 @@ void wpisz_do_bufora(uint32_t cp) {
     }
     char buf[5];
     size_t bajty = CzcionkaUI::zakoduj_utf8(cp, buf);
-    
+
     int act = (g_pierwsza_linia + g_liczba_linii - 1) % MAXSCROLLBACKLINES;
-    if (g_linie[act].len + bajty > 250) {
+    if (g_linie[act].len + bajty > 150) {
         dodaj_nowa_linie();
         act = (g_pierwsza_linia + g_liczba_linii - 1) % MAXSCROLLBACKLINES;
     }
@@ -183,8 +202,72 @@ void wpisz_do_bufora(uint32_t cp) {
     g_linie[act].tekst[g_linie[act].len] = '\0';
 }
 
+void shell_wypisz_wiersz_pomocy(const char* komenda, const char* opis) {
+    if (!komenda) return;
+    dodaj_nowa_linie();
+    int act = (g_pierwsza_linia + g_liczba_linii - 1) % MAXSCROLLBACKLINES;
+
+    size_t k_len = 0;
+    while (komenda[k_len] && k_len + 1 < sizeof(g_linie[act].tekst)) {
+        g_linie[act].tekst[k_len] = komenda[k_len];
+        k_len++;
+    }
+    g_linie[act].tekst[k_len] = '\0';
+    g_linie[act].len = static_cast<int>(k_len);
+
+    if (!opis || opis[0] == '\0') {
+        g_linie[act].opis[0] = '\0';
+        g_linie[act].opis_x = 0;
+        return;
+    }
+
+    const uint32_t p = ui_skala_procent;
+    const SkalaUI skala = ui_skala();
+    const int cmd_col_w = ui_skaluj(270, p);
+    const int cmd_w = CzcionkaUI::zmierz_tekst(g_linie[act].tekst, skala);
+
+    if (cmd_w > cmd_col_w - ui_skaluj(10, p)) {
+        int dyn_x = cmd_w + ui_skaluj(16, p);
+        int opis_w = CzcionkaUI::zmierz_tekst(opis, skala);
+        int client_w = shell_obszar_klienta().szerokosc;
+        if (dyn_x + opis_w > client_w - ui_skaluj(30, p)) {
+            dodaj_nowa_linie();
+            act = (g_pierwsza_linia + g_liczba_linii - 1) % MAXSCROLLBACKLINES;
+            g_linie[act].tekst[0] = ' ';
+            g_linie[act].tekst[1] = ' ';
+            g_linie[act].tekst[2] = ' ';
+            g_linie[act].tekst[3] = ' ';
+            g_linie[act].tekst[4] = '\0';
+            g_linie[act].len = 4;
+
+            size_t o_len = 0;
+            while (opis[o_len] && o_len + 1 < sizeof(g_linie[act].opis)) {
+                g_linie[act].opis[o_len] = opis[o_len];
+                o_len++;
+            }
+            g_linie[act].opis[o_len] = '\0';
+            g_linie[act].opis_x = cmd_col_w;
+        } else {
+            size_t o_len = 0;
+            while (opis[o_len] && o_len + 1 < sizeof(g_linie[act].opis)) {
+                g_linie[act].opis[o_len] = opis[o_len];
+                o_len++;
+            }
+            g_linie[act].opis[o_len] = '\0';
+            g_linie[act].opis_x = dyn_x;
+        }
+    } else {
+        size_t o_len = 0;
+        while (opis[o_len] && o_len + 1 < sizeof(g_linie[act].opis)) {
+            g_linie[act].opis[o_len] = opis[o_len];
+            o_len++;
+        }
+        g_linie[act].opis[o_len] = '\0';
+        g_linie[act].opis_x = cmd_col_w;
+    }
+}
+
 void shell_rysuj_terminal() {
-    gui_rysuj_okno(shell_x, shell_y, shell_w, shell_h, "Powłoka Bursztynowa");
     gui_rysuj_standardowa_belke(shell_x, shell_y, shell_w, "Powłoka Bursztynowa", shell_maximized);
 
     if (shell_minimized) { gui_odswiez(); return; }
@@ -197,70 +280,158 @@ void shell_rysuj_terminal() {
     uint32_t tekst_kolor = motyw->tekst;
     uint32_t akcent = motyw->akcent;
 
-    int client_x = shell_x + 4;
-    int client_y = shell_y + 28;
-    int client_w = shell_w - 8;
-    int client_h = shell_h - 32;
+    const uint32_t p = ui_skala_procent;
+    const SkalaUI skala = ui_skala();
+
+    const Prostokat client = shell_obszar_klienta();
+    const int client_x = client.x;
+    const int client_y = client.y;
+    const int client_w = client.szerokosc;
+    const int client_h = client.wysokosc;
 
     KontekstRysowania ctx;
-    ctx.dodaj_przyciecie(Prostokat(client_x, client_y, client_w, client_h));
+    ctx.dodaj_przyciecie(client);
+    ctx.rysuj_prostokat(client, tlo);
 
-    ctx.rysuj_prostokat(Prostokat(client_x, client_y, client_w, client_h), tlo);
+    // Zaokrąglenie dolnych rogów, jeśli okno nie jest zmaksymalizowane
+    if (!shell_maximized) {
+        int r_okna = ui_skaluj(motyw_promien(MOTYW_ROG_OKNO), p);
+        if (r_okna > 0) {
+            for (int dy = 0; dy < r_okna; ++dy) {
+                int inset = motyw_promien_inset(r_okna, dy);
+                if (inset > 0) {
+                    gui_rysuj_prostokat(shell_x, shell_y + shell_h - 1 - dy, inset, 1, 0x00000000);
+                    gui_rysuj_prostokat(shell_x + shell_w - inset, shell_y + shell_h - 1 - dy, inset, 1, 0x00000000);
+                }
+            }
+        }
+    }
 
-    int input_y = client_y + client_h - INPUT_LINE_HEIGHT;
+    const int input_h = ui_skaluj(30, p);
+    const int input_y = client_y + client_h - input_h;
     ctx.rysuj_linie_pozioma(client_x, input_y, client_w, ramka);
 
-    int max_linii = (client_h - INPUT_LINE_HEIGHT - 8) / 16;
+    const int line_h = ui_skaluj(16, p);
+    int max_linii = (client_h - input_h - ui_skaluj(8, p)) / line_h;
     if (max_linii < 1) max_linii = 1;
 
+    int max_scroll = g_liczba_linii > max_linii ? g_liczba_linii - max_linii : 0;
+    if (g_auto_scroll || g_scroll_linia > max_scroll) {
+        g_scroll_linia = max_scroll;
+    }
+    if (g_scroll_linia < 0) g_scroll_linia = 0;
+
     if (g_pasek_przewijania) {
-        g_pasek_przewijania->ustaw_geometrie(client_w - SCROLLBAR_WIDTH - 2, 4, SCROLLBAR_WIDTH, client_h - INPUT_LINE_HEIGHT - 8);
+        const int sb_w = ui_skaluj(12, p);
+        const int sb_x = client_w - sb_w - ui_skaluj(2, p);
+        const int sb_y = ui_skaluj(4, p);
+        const int sb_h = client_h - input_h - ui_skaluj(8, p) > line_h ? client_h - input_h - ui_skaluj(8, p) : line_h;
+
+        g_pasek_przewijania->ustaw_skale_dpi(skala);
+        g_pasek_przewijania->rozmiesc(Prostokat(sb_x, sb_y, sb_w, sb_h));
         g_pasek_przewijania->ustaw_rozmiar_strony(max_linii);
-        int max_scroll = g_liczba_linii - max_linii;
-        if (max_scroll < 0) max_scroll = 0;
         g_pasek_przewijania->ustaw_zakres(0, max_scroll);
-        
-        if (!g_scrolling) {
-            g_pasek_przewijania->ustaw_wartosc(max_scroll);
-        }
-        
+        g_pasek_przewijania->ustaw_wartosc(g_scroll_linia);
+
         ctx.dodaj_przesuniecie(Punkt(client_x, client_y));
         g_pasek_przewijania->rysuj(ctx);
         ctx.zdejmij_przesuniecie();
-        
-        g_scroll_offset = max_scroll - g_pasek_przewijania->wartosc();
     }
 
-    int pierwsza_do_rysowania = g_liczba_linii - max_linii - g_scroll_offset;
-    if (pierwsza_do_rysowania < 0) pierwsza_do_rysowania = 0;
+    int text_x = client_x + ui_skaluj(8, p);
+    int cur_y = client_y + ui_skaluj(4, p);
 
-    int text_x = client_x + 8;
-    int cur_y = client_y + 4;
-    
     for (int i = 0; i < max_linii; ++i) {
-        int idx = pierwsza_do_rysowania + i;
+        int idx = g_scroll_linia + i;
         if (idx >= g_liczba_linii) break;
         int real_idx = (g_pierwsza_linia + idx) % MAXSCROLLBACKLINES;
-        
-        if (g_linie[real_idx].len > 0) {
-            gui_wypisz_tekst_kolor_skala(text_x, cur_y, tekst_kolor, 100, g_linie[real_idx].tekst);
+
+        if (g_linie[real_idx].len > 0 || g_linie[real_idx].opis_x > 0) {
+            if (g_linie[real_idx].tekst[0] != '\0') {
+                gui_wypisz_tekst_kolor_skala(text_x, cur_y, tekst_kolor, p, g_linie[real_idx].tekst);
+            }
+            if (g_linie[real_idx].opis_x > 0 && g_linie[real_idx].opis[0] != '\0') {
+                gui_wypisz_tekst_kolor_skala(text_x + g_linie[real_idx].opis_x, cur_y, tekst_kolor, p, g_linie[real_idx].opis);
+            }
         }
-        cur_y += 16;
+        cur_y += line_h;
     }
 
-    int input_text_x = client_x + 8;
-    int input_text_y = input_y + 7;
-    gui_wypisz_tekst_kolor_skala(input_text_x, input_text_y, akcent, 100, "powłoka> ");
-    int p_szer = CzcionkaUI::zmierz_tekst("powłoka> ");
+    int input_text_x = client_x + ui_skaluj(8, p);
+    int input_text_y = input_y + (input_h - ui_skaluj(16, p)) / 2;
+    gui_wypisz_tekst_kolor_skala(input_text_x, input_text_y, akcent, p, "powłoka> ");
+    int p_szer = CzcionkaUI::zmierz_tekst("powłoka> ", skala);
     input_text_x += p_szer;
 
     if (g_obecny_bufor_wejscia) {
-        gui_wypisz_tekst_kolor_skala(input_text_x, input_text_y, tekst_kolor, 100, g_obecny_bufor_wejscia);
-        int wej_szer = CzcionkaUI::zmierz_tekst(g_obecny_bufor_wejscia);
-        ctx.rysuj_prostokat(Prostokat(input_text_x + wej_szer + 2, input_text_y, 2, 16), tekst_kolor);
+        gui_wypisz_tekst_kolor_skala(input_text_x, input_text_y, tekst_kolor, p, g_obecny_bufor_wejscia);
+        int wej_szer = CzcionkaUI::zmierz_tekst(g_obecny_bufor_wejscia, skala);
+        ctx.rysuj_prostokat(Prostokat(input_text_x + wej_szer + ui_skaluj(2, p), input_text_y, ui_skaluj(2, p), ui_skaluj(16, p)), tekst_kolor);
+    } else {
+        ctx.rysuj_prostokat(Prostokat(input_text_x + ui_skaluj(2, p), input_text_y, ui_skaluj(2, p), ui_skaluj(16, p)), tekst_kolor);
     }
-    
+
     ctx.zdejmij_przyciecie();
+    gui_odswiez();
+}
+
+void shell_odswiez_linie_wejsciowa() {
+    if (shell_minimized) return;
+
+    const BursztynMotyw* motyw = gui_pobierz_motyw();
+    if (!motyw) motyw = &g_domyslny_motyw_fallback;
+
+    uint32_t tlo = motyw->oknotlo;
+    uint32_t tekst_kolor = motyw->tekst;
+    uint32_t akcent = motyw->akcent;
+
+    const uint32_t p = ui_skala_procent;
+    const SkalaUI skala = ui_skala();
+
+    const Prostokat client = shell_obszar_klienta();
+    const int client_x = client.x;
+    const int client_y = client.y;
+    const int client_w = client.szerokosc;
+    const int client_h = client.wysokosc;
+
+    const int input_h = ui_skaluj(30, p);
+    const int input_y = client_y + client_h - input_h;
+    const int input_bg_y = input_y + 1;
+    const int input_bg_h = input_h - 1;
+
+    KontekstRysowania ctx;
+    ctx.dodaj_przyciecie(Prostokat(client_x, input_bg_y, client_w, input_bg_h));
+    ctx.rysuj_prostokat(Prostokat(client_x, input_bg_y, client_w, input_bg_h), tlo);
+
+    if (!shell_maximized) {
+        int r_okna = ui_skaluj(motyw_promien(MOTYW_ROG_OKNO), p);
+        if (r_okna > 0) {
+            for (int dy = 0; dy < r_okna; ++dy) {
+                int inset = motyw_promien_inset(r_okna, dy);
+                if (inset > 0) {
+                    gui_rysuj_prostokat(shell_x, shell_y + shell_h - 1 - dy, inset, 1, 0x00000000);
+                    gui_rysuj_prostokat(shell_x + shell_w - inset, shell_y + shell_h - 1 - dy, inset, 1, 0x00000000);
+                }
+            }
+        }
+    }
+
+    int input_text_x = client_x + ui_skaluj(8, p);
+    int input_text_y = input_y + (input_h - ui_skaluj(16, p)) / 2;
+    gui_wypisz_tekst_kolor_skala(input_text_x, input_text_y, akcent, p, "powłoka> ");
+    int p_szer = CzcionkaUI::zmierz_tekst("powłoka> ", skala);
+    input_text_x += p_szer;
+
+    if (g_obecny_bufor_wejscia) {
+        gui_wypisz_tekst_kolor_skala(input_text_x, input_text_y, tekst_kolor, p, g_obecny_bufor_wejscia);
+        int wej_szer = CzcionkaUI::zmierz_tekst(g_obecny_bufor_wejscia, skala);
+        ctx.rysuj_prostokat(Prostokat(input_text_x + wej_szer + ui_skaluj(2, p), input_text_y, ui_skaluj(2, p), ui_skaluj(16, p)), tekst_kolor);
+    } else {
+        ctx.rysuj_prostokat(Prostokat(input_text_x + ui_skaluj(2, p), input_text_y, ui_skaluj(2, p), ui_skaluj(16, p)), tekst_kolor);
+    }
+
+    ctx.zdejmij_przyciecie();
+    gui_odswiez();
 }
 
 void shell_wypisz(const char* tekst) {
@@ -272,6 +443,16 @@ void shell_wypisz(const char* tekst) {
         if (zuzyte == 0) { i++; continue; }
         wpisz_do_bufora(cp);
         i += zuzyte;
+    }
+    const uint32_t p = ui_skala_procent;
+    const Prostokat client = shell_obszar_klienta();
+    const int client_h = client.wysokosc;
+    const int input_h = ui_skaluj(30, p);
+    const int line_h = ui_skaluj(16, p);
+    const int max_linii = (client_h - input_h - ui_skaluj(8, p)) > 0 ? (client_h - input_h - ui_skaluj(8, p)) / line_h : 1;
+    const int max_scroll = g_liczba_linii > max_linii ? g_liczba_linii - max_linii : 0;
+    if (g_auto_scroll) {
+        g_scroll_linia = max_scroll;
     }
     shell_rysuj_terminal();
 }
@@ -606,69 +787,129 @@ void uint_do_str(
  * 4. WEJSCIE TERMINALA
  * ========================================================================= */
 
+static inline int utf8_sekwencja_dlugosc(uint8_t b) {
+    if (b < 0x80) return 1;
+    if ((b & 0xE0) == 0xC0) return 2;
+    if ((b & 0xF0) == 0xE0) return 3;
+    if ((b & 0xF8) == 0xF0) return 4;
+    return 1;
+}
+
 char pobierz_znak_blokujaco() {
     for (;;) {
         bws_zdarzenie e{};
         if (!gui_czekaj_na_zdarzenie(&e)) continue;
-        
+
         if (e.typ == BWS_ZDARZENIE_EKRAN) {
+            if (ui_skala_poprawna(e.kod)) {
+                ui_skala_procent = e.kod;
+            }
             gui_pobierz_rozdzielczosc(&shell_screen_w, &shell_screen_h);
             GuiMonitorInfo monitor{};
             if (gui_pobierz_monitor(0, &monitor)) {
-                shell_work_x=monitor.work_x; shell_work_y=monitor.work_y;
-                shell_work_w=monitor.work_szer; shell_work_h=monitor.work_wys;
+                shell_work_x = monitor.work_x; shell_work_y = monitor.work_y;
+                shell_work_w = monitor.work_szer; shell_work_h = monitor.work_wys;
+            } else {
+                shell_work_w = shell_screen_w;
+                shell_work_h = shell_screen_h;
             }
             if (shell_maximized) {
-                shell_x=shell_work_x; shell_y=shell_work_y;
-                shell_w=shell_work_w; shell_h=shell_work_h;
-                gui_ustaw_geometrie_okna(shell_x,shell_y,shell_w,shell_h);
+                shell_x = shell_work_x; shell_y = shell_work_y;
+                shell_w = shell_work_w; shell_h = shell_work_h;
+            } else {
+                shell_w = ui_skaluj(shell_logical_w, ui_skala_procent);
+                shell_h = ui_skaluj(shell_logical_h, ui_skala_procent);
+                if (shell_x + shell_w > shell_work_x + shell_work_w) {
+                    shell_x = shell_work_x + shell_work_w - shell_w;
+                }
+                if (shell_y + shell_h > shell_work_y + shell_work_h) {
+                    shell_y = shell_work_y + shell_work_h - shell_h;
+                }
+                if (shell_x < shell_work_x) shell_x = shell_work_x;
+                if (shell_y < shell_work_y) shell_y = shell_work_y;
             }
+            gui_ustaw_geometrie_okna(shell_x, shell_y, shell_w, shell_h);
             shell_rysuj_terminal();
             continue;
         }
-        if (e.typ == BWS_ZDARZENIE_FOCUS && shell_minimized) shell_minimized = false;
-        if (e.typ == BWS_ZDARZENIE_ZAMKNIJ) gui_zakoncz_aplikacje();
-        
-        if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN || e.typ == BWS_ZDARZENIE_MYSZ_RUCH || e.typ == BWS_ZDARZENIE_MYSZ_UP) {
-            int client_x = shell_x + 4;
-            int client_y = shell_y + 28;
-            int client_w = shell_w - 8;
-            int client_h = shell_h - 32;
 
-            if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN) {
-                gui_akcja_belki akcja = gui_hit_test_belki(e.x, e.y, shell_x, shell_y, shell_w);
-                if (akcja == GUI_BELKA_ZAMKNIJ) gui_zakoncz_aplikacje();
-                if (akcja == GUI_BELKA_MINIMALIZUJ) {
-                    shell_minimized = gui_minimalizuj_okno();
-                    shell_drag = false;
-                    gui_ustaw_capture_myszy(false);
-                    continue;
+        if (e.typ == BWS_ZDARZENIE_FOCUS && shell_minimized) {
+            shell_minimized = false;
+            shell_rysuj_terminal();
+            continue;
+        }
+        if (e.typ == BWS_ZDARZENIE_ZAMKNIJ) gui_zakoncz_aplikacje();
+
+        const uint32_t p = ui_skala_procent;
+        const Prostokat client = shell_obszar_klienta();
+        const int client_x = client.x;
+        const int client_y = client.y;
+        const int client_w = client.szerokosc;
+        (void)client_w;
+        const int client_h = client.wysokosc;
+        const int input_h = ui_skaluj(30, p);
+        const int line_h = ui_skaluj(16, p);
+        const int max_linii = (client_h - input_h - ui_skaluj(8, p)) > 0 ? (client_h - input_h - ui_skaluj(8, p)) / line_h : 1;
+        const int max_scroll = g_liczba_linii > max_linii ? g_liczba_linii - max_linii : 0;
+
+        if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN) {
+            gui_akcja_belki akcja = gui_hit_test_belki(e.x, e.y, shell_x, shell_y, shell_w);
+            if (akcja == GUI_BELKA_ZAMKNIJ) gui_zakoncz_aplikacje();
+            if (akcja == GUI_BELKA_MINIMALIZUJ) {
+                shell_minimized = gui_minimalizuj_okno();
+                shell_drag = false;
+                gui_ustaw_capture_myszy(false);
+                continue;
+            }
+            if (akcja == GUI_BELKA_MAKSYMALIZUJ) {
+                if (!shell_maximized) {
+                    shell_restore_x = shell_x; shell_restore_y = shell_y;
+                    shell_restore_w = shell_w; shell_restore_h = shell_h;
+                    shell_x = shell_work_x; shell_y = shell_work_y;
+                    shell_w = shell_work_w; shell_h = shell_work_h;
+                    shell_maximized = true;
+                } else {
+                    shell_x = shell_restore_x; shell_y = shell_restore_y;
+                    shell_w = shell_restore_w; shell_h = shell_restore_h;
+                    shell_maximized = false;
                 }
-                if (akcja == GUI_BELKA_MAKSYMALIZUJ) {
-                    if (!shell_maximized) {
-                        shell_restore_x=shell_x; shell_restore_y=shell_y;
-                        shell_restore_w=shell_w; shell_restore_h=shell_h;
-                        shell_x=shell_work_x; shell_y=shell_work_y;
-                        shell_w=shell_work_w; shell_h=shell_work_h;
-                        shell_maximized=true;
-                    } else {
-                        shell_x=shell_restore_x; shell_y=shell_restore_y;
-                        shell_w=shell_restore_w; shell_h=shell_restore_h;
-                        shell_maximized=false;
-                    }
-                    if (!gui_ustaw_geometrie_okna(shell_x, shell_y, shell_w, shell_h)) gui_zakoncz_aplikacje();
+                if (!gui_ustaw_geometrie_okna(shell_x, shell_y, shell_w, shell_h)) gui_zakoncz_aplikacje();
+                shell_rysuj_terminal();
+                continue;
+            }
+            if (akcja == GUI_BELKA_DRAG && !shell_maximized) {
+                shell_drag = true;
+                shell_drag_mouse_x = e.x;
+                shell_drag_mouse_y = e.y;
+                shell_drag_window_x = shell_x;
+                shell_drag_window_y = shell_y;
+                gui_ustaw_capture_myszy(true);
+                continue;
+            }
+
+            // Obsługa kliknięcia w pasek przewijania
+            if (g_pasek_przewijania && max_scroll > 0) {
+                int lx = e.x - client_x;
+                int ly = e.y - client_y;
+                ZdarzenieMyszki mz{};
+                mz.typ = TypZdarzenia::WcisniecieMyszy;
+                mz.x = lx;
+                mz.y = ly;
+                mz.przycisk = 1;
+                g_pasek_przewijania->obsluz_wcisniecie_myszy(mz);
+                if (mz.obsluzone || g_pasek_przewijania->czy_przeciagany()) {
+                    shell_sb_dragging = true;
+                    gui_ustaw_capture_myszy(true);
+                    g_scroll_linia = static_cast<int>(g_pasek_przewijania->wartosc());
+                    if (g_scroll_linia < 0) g_scroll_linia = 0;
+                    if (g_scroll_linia > max_scroll) g_scroll_linia = max_scroll;
+                    g_auto_scroll = (g_scroll_linia >= max_scroll);
                     shell_rysuj_terminal();
                     continue;
                 }
-                if (akcja == GUI_BELKA_DRAG && !shell_maximized) {
-                    shell_drag = true;
-                    shell_drag_mouse_x = e.x;
-                    shell_drag_mouse_y = e.y;
-                    shell_drag_window_x = shell_x;
-                    shell_drag_window_y = shell_y;
-                    gui_ustaw_capture_myszy(true);
-                }
-            } else if (e.typ == BWS_ZDARZENIE_MYSZ_RUCH && shell_drag) {
+            }
+        } else if (e.typ == BWS_ZDARZENIE_MYSZ_RUCH) {
+            if (shell_drag) {
                 const int nx = shell_drag_window_x + (e.x - shell_drag_mouse_x);
                 const int ny = shell_drag_window_y + (e.y - shell_drag_mouse_y);
                 if (nx != shell_x || ny != shell_y) {
@@ -676,61 +917,118 @@ char pobierz_znak_blokujaco() {
                     shell_y = ny;
                     bws_przesun_warstwe(shell_x, shell_y);
                 }
-            } else if (e.typ == BWS_ZDARZENIE_MYSZ_UP && shell_drag) {
+                continue;
+            }
+            if (shell_sb_dragging && g_pasek_przewijania) {
+                int lx = e.x - client_x;
+                int ly = e.y - client_y;
+                ZdarzenieMyszki mz{};
+                mz.typ = TypZdarzenia::RuchMyszy;
+                mz.x = lx;
+                mz.y = ly;
+                mz.przycisk = 1;
+                g_pasek_przewijania->obsluz_ruch_myszy(mz);
+                g_scroll_linia = static_cast<int>(g_pasek_przewijania->wartosc());
+                if (g_scroll_linia < 0) g_scroll_linia = 0;
+                if (g_scroll_linia > max_scroll) g_scroll_linia = max_scroll;
+                g_auto_scroll = (g_scroll_linia >= max_scroll);
+                shell_rysuj_terminal();
+                continue;
+            }
+        } else if (e.typ == BWS_ZDARZENIE_MYSZ_UP) {
+            if (shell_drag) {
                 shell_drag = false;
                 gui_ustaw_capture_myszy(false);
+                gui_ustaw_geometrie_okna(shell_x, shell_y, shell_w, shell_h, shell_maximized ? 2 : 1);
+                continue;
             }
-
-            if (g_pasek_przewijania && e.x >= client_x && e.x < client_x + client_w && e.y >= client_y && e.y < client_y + client_h) {
+            if (shell_sb_dragging && g_pasek_przewijania) {
+                shell_sb_dragging = false;
+                gui_ustaw_capture_myszy(false);
+                int lx = e.x - client_x;
+                int ly = e.y - client_y;
                 ZdarzenieMyszki mz{};
-                mz.typ = e.typ == BWS_ZDARZENIE_MYSZ_DOWN ? TypZdarzenia::WcisniecieMyszy :
-                         e.typ == BWS_ZDARZENIE_MYSZ_UP ? TypZdarzenia::ZwolnienieMyszy : TypZdarzenia::RuchMyszy;
-                mz.x = e.x - client_x;
-                mz.y = e.y - client_y;
-                mz.przycisk = (e.kod == 1) ? 1 : 0;
-                
-                if (mz.typ == TypZdarzenia::WcisniecieMyszy) g_pasek_przewijania->przy_wcisnieciu_myszy(mz);
-                else if (mz.typ == TypZdarzenia::ZwolnienieMyszy) g_pasek_przewijania->przy_zwolnieniu_myszy(mz);
-                else if (mz.typ == TypZdarzenia::RuchMyszy) g_pasek_przewijania->przy_ruchu_myszy(mz);
-                
-                if (g_pasek_przewijania->czy_brudna()) {
-                    g_scrolling = true;
-                    shell_rysuj_terminal();
-                    g_pasek_przewijania->uniewaznij();
+                mz.typ = TypZdarzenia::ZwolnienieMyszy;
+                mz.x = lx;
+                mz.y = ly;
+                mz.przycisk = 1;
+                g_pasek_przewijania->obsluz_zwolnienie_myszy(mz);
+                g_scroll_linia = static_cast<int>(g_pasek_przewijania->wartosc());
+                if (g_scroll_linia < 0) g_scroll_linia = 0;
+                if (g_scroll_linia > max_scroll) g_scroll_linia = max_scroll;
+                g_auto_scroll = (g_scroll_linia >= max_scroll);
+                shell_rysuj_terminal();
+                continue;
+            }
+        }
+
+        if (e.typ == BWS_ZDARZENIE_MYSZ_KOLO /*25*/) {
+            int delta = e.dy;
+            if (delta == 0 && e.dx != 0) delta = e.dx;
+            if (delta != 0) {
+                int step = 3;
+                if (delta > 0) {
+                    g_scroll_linia -= step;
+                    if (g_scroll_linia < 0) g_scroll_linia = 0;
+                    g_auto_scroll = false;
+                } else {
+                    g_scroll_linia += step;
+                    if (g_scroll_linia >= max_scroll) {
+                        g_scroll_linia = max_scroll;
+                        g_auto_scroll = true;
+                    }
                 }
+                if (g_pasek_przewijania) {
+                    g_pasek_przewijania->ustaw_wartosc(g_scroll_linia);
+                }
+                shell_rysuj_terminal();
             }
             continue;
         }
 
-        if (e.typ == 10 /*BWS_ZDARZENIE_MYSZ_KOLO*/ && g_pasek_przewijania) {
-            ZdarzenieRolki zr{};
-            zr.typ = TypZdarzenia::RolkaMyszy;
-            zr.delta_y = (e.kod > 0) ? 1 : -1;
-            g_pasek_przewijania->obsluz_rolke(zr);
-            g_scrolling = true;
-            shell_rysuj_terminal();
-            continue;
+        if (e.typ == BWS_ZDARZENIE_KLAWISZ_FIZYCZNY && e.x != 0 /*wcisniety*/) {
+            bool usb = (e.kod & BWS_KEY_SOURCE_USB) != 0;
+            uint32_t baza = usb ? (e.kod & 0xFFU) : (e.kod & 0x7FU);
+            bool page_up = (usb && baza == 75U) || (!usb && baza == 0x49U);
+            bool page_down = (usb && baza == 78U) || (!usb && baza == 0x51U);
+            bool home = (usb && baza == 74U) || (!usb && baza == 0x47U);
+            bool end = (usb && baza == 77U) || (!usb && baza == 0x4FU);
+
+            if (page_up) {
+                g_scroll_linia -= max_linii;
+                if (g_scroll_linia < 0) g_scroll_linia = 0;
+                g_auto_scroll = false;
+                if (g_pasek_przewijania) g_pasek_przewijania->ustaw_wartosc(g_scroll_linia);
+                shell_rysuj_terminal();
+                continue;
+            }
+            if (page_down) {
+                g_scroll_linia += max_linii;
+                if (g_scroll_linia >= max_scroll) {
+                    g_scroll_linia = max_scroll;
+                    g_auto_scroll = true;
+                }
+                if (g_pasek_przewijania) g_pasek_przewijania->ustaw_wartosc(g_scroll_linia);
+                shell_rysuj_terminal();
+                continue;
+            }
+            if (home) {
+                g_scroll_linia = 0;
+                g_auto_scroll = false;
+                if (g_pasek_przewijania) g_pasek_przewijania->ustaw_wartosc(g_scroll_linia);
+                shell_rysuj_terminal();
+                continue;
+            }
+            if (end) {
+                g_scroll_linia = max_scroll;
+                g_auto_scroll = true;
+                if (g_pasek_przewijania) g_pasek_przewijania->ustaw_wartosc(g_scroll_linia);
+                shell_rysuj_terminal();
+                continue;
+            }
         }
 
         if (e.typ == BWS_ZDARZENIE_KLAWISZ && e.kod != 0) {
-            if (g_pasek_przewijania) {
-                ZdarzenieKlawiatury zk{};
-                zk.typ = TypZdarzenia::KlawiszWcisniety;
-                zk.kod_klawisza = e.kod;
-                g_pasek_przewijania->przy_wcisnieciu_klawisza(zk);
-                if (g_pasek_przewijania->czy_brudna()) {
-                    g_scrolling = true;
-                    shell_rysuj_terminal();
-                    g_pasek_przewijania->uniewaznij();
-                    if (zk.obsluzone) continue;
-                }
-                if (zk.obsluzone) {
-                    g_scrolling = true;
-                    shell_rysuj_terminal();
-                    continue;
-                }
-            }
-
             if ((e.kod & 0xFF000000) == 0) {
                 return static_cast<char>(e.kod & 0xFF);
             }
@@ -744,24 +1042,24 @@ bool pobierz_linie(char* bufor, size_t pojemnosc) {
     size_t pozycja = 0;
     bool przepelnienie = false;
     bufor[0] = '\0';
-    g_scrolling = false;
-    
+    g_auto_scroll = true;
+
+    g_obecny_bufor_wejscia = bufor;
+    shell_odswiez_linie_wejsciowa();
+
     for (;;) {
-        g_obecny_bufor_wejscia = bufor;
-        shell_rysuj_terminal();
-        
         char c = pobierz_znak_blokujaco();
-        
+
         if (c == '\n' || c == '\r') {
             bufor[pozycja] = '\0';
             g_obecny_bufor_wejscia = nullptr;
             wypisz("powłoka> ");
             wypisz(bufor);
             wypisz("\n");
-            g_scrolling = false;
+            g_auto_scroll = true;
             return !przepelnienie;
         }
-        
+
         if (c == '\b' || static_cast<uint8_t>(c) == 0x7FU) {
             if (!przepelnienie && pozycja > 0) {
                 --pozycja;
@@ -769,14 +1067,22 @@ bool pobierz_linie(char* bufor, size_t pojemnosc) {
                     --pozycja;
                 }
                 bufor[pozycja] = '\0';
+                shell_odswiez_linie_wejsciowa();
             }
             continue;
         }
-        
+
         if (!przepelnienie) {
-            if (pozycja + 1 < pojemnosc) {
+            uint8_t b0 = static_cast<uint8_t>(c);
+            int oczekiwane = utf8_sekwencja_dlugosc(b0);
+            if (pozycja + oczekiwane < pojemnosc) {
                 bufor[pozycja++] = c;
+                for (int k = 1; k < oczekiwane; ++k) {
+                    char nastepny = pobierz_znak_blokujaco();
+                    bufor[pozycja++] = nastepny;
+                }
                 bufor[pozycja] = '\0';
+                shell_odswiez_linie_wejsciowa();
             } else {
                 przepelnienie = true;
             }
@@ -1072,41 +1378,56 @@ uint64_t pobierz_cykle() {
  * ========================================================================= */
 
 void wypisz_pomoc() {
-    wypisz(
-        "Dostępne polecenia:\n\n"
-        "  Sieć\n"
-        "    ping <IPv4|domena>           Sprawdza dostępność hosta przez ICMP.\n"
-        "    pobierz <host> <url> <plik>  Pobiera plik HTTP i zapisuje go w BSP2.\n"
-        "\n"
-        "  Pliki i katalogi\n"
-        "    utworz <plik>                Tworzy pusty plik.\n"
-        "    zapisz <plik> <tekst>        Zapisuje tekst do pliku.\n"
-        "    czytaj <plik>                Wyświetla zawartość pliku.\n"
-        "    pliki [katalog]              Wyświetla zawartość katalogu.\n"
-        "    usun <ścieżka>               Usuwa plik lub pusty katalog.\n"
-        "    zmiennazwe <ścieżka> <nazwa> Zmienia nazwę pliku lub katalogu.\n"
-        "\n"
-        "  Powłoka\n"
-        "    gdzie                        Wyświetla bieżący katalog.\n"
-        "    historia                     Wyświetla historię poleceń.\n"
-        "    czysc                        Czyści terminal.\n"
-        "    dzwiek                       Odtwarza test HDA 880 Hz.\n"
-        "    losuj                        Losuje liczbę.\n"
-        "    pisz <tekst>                 Wyświetla tekst.\n"
-        "\n"
-        "  System\n"
-        "    notatnik                     Uruchamia Notatnik.\n"
-        "    kalkulator                   Uruchamia Kalkulator.\n"
-        "    przegladarka                 Uruchamia przeglądarkę Husarz.\n"
-        "    uruchom <plik.bur>           Uruchamia program .bur.\n"
-        "    pulpit | wyjdz | exit        Kończy powłokę.\n"
-        "    czas                         Pokazuje czas RTC.\n"
-        "    system                       Informacje o systemie.\n"
-        "    wersja                       Pokazuje aktualną wersję systemu.\n"
-        "    aktualizacja [sprawdz]       Pokazuje wersję i stan aktualizacji.\n"
-        "    pci                          Wyświetla /logi/pci.txt.\n"
-        "    pomoc                        Pokazuje ten ekran pomocy.\n"
-    );
+    shell_wypisz_wiersz_pomocy("Dostępne polecenia:", nullptr);
+    shell_wypisz_wiersz_pomocy("", nullptr);
+
+    shell_wypisz_wiersz_pomocy("  Sieć", nullptr);
+    shell_wypisz_wiersz_pomocy("    ping <IPv4|domena>", "Sprawdza dostępność hosta przez ICMP.");
+    shell_wypisz_wiersz_pomocy("    pobierz <host> <url> <plik>", "Pobiera plik HTTP i zapisuje go w BSP2.");
+    shell_wypisz_wiersz_pomocy("", nullptr);
+
+    shell_wypisz_wiersz_pomocy("  Pliki i katalogi", nullptr);
+    shell_wypisz_wiersz_pomocy("    utworz <plik>", "Tworzy pusty plik.");
+    shell_wypisz_wiersz_pomocy("    zapisz <plik> <tekst>", "Zapisuje tekst do pliku.");
+    shell_wypisz_wiersz_pomocy("    czytaj <plik>", "Wyświetla zawartość pliku.");
+    shell_wypisz_wiersz_pomocy("    pliki [katalog]", "Wyświetla zawartość katalogu.");
+    shell_wypisz_wiersz_pomocy("    usun <ścieżka>", "Usuwa plik lub pusty katalog.");
+    shell_wypisz_wiersz_pomocy("    zmiennazwe <ścieżka> <nazwa>", "Zmienia nazwę pliku lub katalogu.");
+    shell_wypisz_wiersz_pomocy("", nullptr);
+
+    shell_wypisz_wiersz_pomocy("  Powłoka", nullptr);
+    shell_wypisz_wiersz_pomocy("    gdzie", "Wyświetla bieżący katalog.");
+    shell_wypisz_wiersz_pomocy("    historia", "Wyświetla historię poleceń.");
+    shell_wypisz_wiersz_pomocy("    czysc", "Czyści terminal.");
+    shell_wypisz_wiersz_pomocy("    dzwiek", "Odtwarza test HDA 880 Hz.");
+    shell_wypisz_wiersz_pomocy("    losuj", "Losuje liczbę.");
+    shell_wypisz_wiersz_pomocy("    pisz <tekst>", "Wyświetla tekst.");
+    shell_wypisz_wiersz_pomocy("", nullptr);
+
+    shell_wypisz_wiersz_pomocy("  System", nullptr);
+    shell_wypisz_wiersz_pomocy("    notatnik", "Uruchamia Notatnik.");
+    shell_wypisz_wiersz_pomocy("    kalkulator", "Uruchamia Kalkulator.");
+    shell_wypisz_wiersz_pomocy("    przegladarka", "Uruchamia przeglądarkę Husarz.");
+    shell_wypisz_wiersz_pomocy("    uruchom <plik.bur>", "Uruchamia program .bur.");
+    shell_wypisz_wiersz_pomocy("    pulpit | wyjdz | exit", "Kończy powłokę.");
+    shell_wypisz_wiersz_pomocy("    czas", "Pokazuje czas RTC.");
+    shell_wypisz_wiersz_pomocy("    system", "Informacje o systemie.");
+    shell_wypisz_wiersz_pomocy("    wersja", "Pokazuje aktualną wersję systemu.");
+    shell_wypisz_wiersz_pomocy("    aktualizacja [sprawdz]", "Pokazuje wersję i stan aktualizacji.");
+    shell_wypisz_wiersz_pomocy("    pci", "Wyświetla /logi/pci.txt.");
+    shell_wypisz_wiersz_pomocy("    pomoc", "Pokazuje ten ekran pomocy.");
+
+    const uint32_t p = ui_skala_procent;
+    const Prostokat client = shell_obszar_klienta();
+    const int client_h = client.wysokosc;
+    const int input_h = ui_skaluj(30, p);
+    const int line_h = ui_skaluj(16, p);
+    const int max_linii = (client_h - input_h - ui_skaluj(8, p)) > 0 ? (client_h - input_h - ui_skaluj(8, p)) / line_h : 1;
+    const int max_scroll = g_liczba_linii > max_linii ? g_liczba_linii - max_linii : 0;
+    if (g_auto_scroll) {
+        g_scroll_linia = max_scroll;
+    }
+    shell_rysuj_terminal();
 }
 
 /* =========================================================================
@@ -1124,7 +1445,7 @@ void polecenie_uruchom(
             sizeof(sciezka))) {
 
         wypisz(
-            "Blad: sciezka jest pusta lub zbyt dluga.\n"
+            "Błąd: ścieżka jest pusta lub zbyt długa.\n"
         );
         return;
     }
@@ -1137,8 +1458,8 @@ void polecenie_uruchom(
             sciezka)) {
 
         wypisz(
-            "Blad: nie udalo sie uruchomic programu. "
-            "Sprawdz plik, prawa PZB i blokade wielu instancji.\n"
+            "Błąd: nie udało się uruchomić programu. "
+            "Sprawdź plik, prawa PZB i blokadę wielu instancji.\n"
         );
     }
 }
@@ -1167,7 +1488,7 @@ void polecenie_ping(
 
         if (!bsh_ping_ipv4(ip)) {
             wypisz(
-                "Blad: wyslanie ICMP nie powiodlo sie.\n"
+                "Błąd: wysłanie ICMP nie powiodło się.\n"
             );
         }
 
@@ -1197,8 +1518,8 @@ void polecenie_ping(
 
     if (tylko_ipv4_znaki) {
         wypisz(
-            "Blad: nieprawidlowy adres IPv4. "
-            "Wymagane sa 4 oktety 0..255.\n"
+            "Błąd: nieprawidłowy adres IPv4. "
+            "Wymagane są 4 oktety 0..255.\n"
         );
         return;
     }
@@ -1212,7 +1533,7 @@ void polecenie_ping(
         dlugosc_hosta == 0) {
 
         wypisz(
-            "Blad: nazwa domeny jest zbyt dluga.\n"
+            "Błąd: nazwa domeny jest zbyt długa.\n"
         );
         return;
     }
@@ -1226,7 +1547,7 @@ void polecenie_ping(
             ip)) {
 
         wypisz(
-            "Blad: nie udalo sie rozwiazac domeny DNS.\n"
+            "Błąd: nie udało się rozwiązać domeny DNS.\n"
         );
         return;
     }
@@ -1237,7 +1558,7 @@ void polecenie_ping(
 
     if (!bsh_ping_ipv4(ip)) {
         wypisz(
-            "Blad: wyslanie ICMP nie powiodlo sie.\n"
+            "Błąd: wysłanie ICMP nie powiodło się.\n"
         );
     }
 }
@@ -1287,7 +1608,7 @@ void polecenie_pobierz(
         host_len == 0) {
 
         wypisz(
-            "Blad: nieprawidlowa lub zbyt dluga domena.\n"
+            "Błąd: nieprawidłowa lub zbyt długa domena.\n"
         );
         return;
     }
@@ -1300,7 +1621,7 @@ void polecenie_pobierz(
         sciezka_http[0] != '/') {
 
         wypisz(
-            "Blad: sciezka HTTP musi zaczynac sie od '/' i miescic w limicie.\n"
+            "Błąd: ścieżka HTTP musi zaczynać się od '/' i mieścić w limicie.\n"
         );
         return;
     }
@@ -1313,7 +1634,7 @@ void polecenie_pobierz(
             sizeof(cel))) {
 
         wypisz(
-            "Blad: nieprawidlowa sciezka pliku docelowego.\n"
+            "Błąd: nieprawidłowa ścieżka pliku docelowego.\n"
         );
         return;
     }
@@ -1329,7 +1650,7 @@ void polecenie_pobierz(
             ip)) {
 
         wypisz(
-            "Blad: DNS nie zwrocil adresu.\n"
+            "Błąd: DNS nie zwrócił adresu.\n"
         );
         return;
     }
@@ -1352,8 +1673,8 @@ void polecenie_pobierz(
         UINT32_MAX) {
 
         wypisz(
-            "Blad ABI: bufor HTTP lezy powyzej 4 GiB. "
-            "BWS 29 wymaga jeszcze poprawy sposobu przekazywania wskaznika.\n"
+            "Błąd ABI: bufor HTTP leży powyżej 4 GiB. "
+            "BWS 29 wymaga jeszcze poprawy sposobu przekazywania wskaźnika.\n"
         );
         return;
     }
@@ -1375,7 +1696,7 @@ void polecenie_pobierz(
             HTTP_BUF_SIZE - 1U)) {
 
         wypisz(
-            "Blad: pobieranie HTTP nie powiodlo sie.\n"
+            "Błąd: pobieranie HTTP nie powiodło się.\n"
         );
         return;
     }
@@ -1392,7 +1713,7 @@ void polecenie_pobierz(
 
     if (odebrano == 0) {
         wypisz(
-            "Blad: serwer zwrocil pusty bufor lub aktualne ABI nie przekazuje dlugosci odpowiedzi.\n"
+            "Błąd: serwer zwrócił pusty bufor lub aktualne ABI nie przekazuje długości odpowiedzi.\n"
         );
         return;
     }
@@ -1401,7 +1722,7 @@ void polecenie_pobierz(
         HTTP_BUF_SIZE) {
 
         wypisz(
-            "Blad: odpowiedz HTTP nie jest poprawnym tekstem NUL-terminated.\n"
+            "Błąd: odpowiedź HTTP nie jest poprawnym tekstem NUL-terminated.\n"
         );
         return;
     }
@@ -1419,7 +1740,7 @@ void polecenie_pobierz(
                 odebrano))) {
 
         wypisz(
-            "Blad: odpowiedz pobrano, ale nie udalo sie zapisac jej w BSP2.\n"
+            "Błąd: odpowiedź pobrano, ale nie udało się zapisać jej w BSP2.\n"
         );
         return;
     }
@@ -1434,7 +1755,7 @@ void polecenie_pobierz(
     );
 
     wypisz(liczba);
-    wypisz(" bajtow do ");
+    wypisz(" bajtów do ");
     wypisz(cel);
     wypisz(".\n");
 }
@@ -1450,7 +1771,7 @@ void polecenie_czytaj(
             sizeof(sciezka))) {
 
         wypisz(
-            "Blad: nieprawidlowa sciezka.\n"
+            "Błąd: nieprawidłowa ścieżka.\n"
         );
         return;
     }
@@ -1499,7 +1820,7 @@ void polecenie_pliki(
                    sizeof(sciezka))) {
 
         wypisz(
-            "Blad: nieprawidlowa sciezka katalogu.\n"
+            "Błąd: nieprawidłowa ścieżka katalogu.\n"
         );
         return;
     }
@@ -1512,7 +1833,7 @@ void polecenie_pliki(
             BUF_LISTA)) {
 
         wypisz(
-            "Blad: katalog nie istnieje lub brak uprawnien.\n"
+            "Błąd: katalog nie istnieje lub brak uprawnień.\n"
         );
         return;
     }
@@ -1521,7 +1842,7 @@ void polecenie_pliki(
         BUF_LISTA - 1U] =
         '\0';
 
-    wypisz("Zawartosc ");
+    wypisz("Zawartość ");
     wypisz(sciezka);
     wypisz(":\n");
 
@@ -1589,7 +1910,7 @@ void polecenie_cytat() {
         if (bufor[i] == '\0') break;
         start = i + 1U;
     }
-    wypisz("Nie mozna odczytac cytatow.\n");
+    wypisz("Nie można odczytać cytatów.\n");
 }
 
 void polecenie_pci() {
@@ -1601,7 +1922,7 @@ void polecenie_pci() {
             BUF_PCI - 1U)) {
 
         wypisz(
-            "Blad: brak raportu /logi/pci.txt lub brak uprawnien.\n"
+            "Błąd: brak raportu /logi/pci.txt lub brak uprawnień.\n"
         );
         return;
     }
@@ -1789,7 +2110,7 @@ void wykonaj_polecenie(
                 bufor)) {
 
             wypisz(
-                "Blad: RTC/BWS nie zwrocil czasu.\n"
+                "Błąd: RTC/BWS nie zwrócił czasu.\n"
             );
             return;
         }
@@ -1913,15 +2234,15 @@ void wykonaj_polecenie(
             return;
         }
 
-        /*
-         * Terminal BWS nie ma jeszcze dedykowanego clear-screen.
-         */
-        for (size_t i = 0;
-             i < 40;
-             ++i) {
-            wypisz("\n");
-        }
-
+        g_liczba_linii = 1;
+        g_pierwsza_linia = 0;
+        g_scroll_linia = 0;
+        g_auto_scroll = true;
+        g_linie[0].len = 0;
+        g_linie[0].tekst[0] = '\0';
+        g_linie[0].opis[0] = '\0';
+        g_linie[0].opis_x = 0;
+        shell_rysuj_terminal();
         return;
     }
 
@@ -2029,7 +2350,7 @@ void wykonaj_polecenie(
                 sizeof(sciezka))) {
 
             wypisz(
-                "Blad: nieprawidlowa lub zbyt dluga sciezka.\n"
+                "Błąd: nieprawidłowa lub zbyt długa ścieżka.\n"
             );
             return;
         }
@@ -2040,7 +2361,7 @@ void wykonaj_polecenie(
             wypisz("\n");
         } else {
             wypisz(
-                "Blad: plik istnieje, sciezka jest bledna lub brak uprawnien.\n"
+                "Błąd: plik istnieje, ścieżka jest błędna lub brak uprawnień.\n"
             );
         }
 
@@ -2054,7 +2375,7 @@ void wykonaj_polecenie(
         if (a.liczba != 3) {
             wypisz(
                 "Składnia: zapisz <plik> <tekst>\n"
-                "Dla tekstu ze spacjami uzyj cudzyslowu.\n"
+                "Dla tekstu ze spacjami użyj cudzysłowu.\n"
             );
             return;
         }
@@ -2067,7 +2388,7 @@ void wykonaj_polecenie(
                 sizeof(sciezka))) {
 
             wypisz(
-                "Blad: nieprawidlowa sciezka.\n"
+                "Błąd: nieprawidłowa ścieżka.\n"
             );
             return;
         }
@@ -2080,7 +2401,7 @@ void wykonaj_polecenie(
                 &dlugosc)) {
 
             wypisz(
-                "Blad: tekst jest za dlugi.\n"
+                "Błąd: tekst jest za długi.\n"
             );
             return;
         }
@@ -2100,7 +2421,7 @@ void wykonaj_polecenie(
             wypisz("Zapisano.\n");
         } else {
             wypisz(
-                "Blad zapisu lub brak PRAWO_PLIKI_ZAPISZ.\n"
+                "Błąd zapisu lub brak PRAWO_PLIKI_ZAPISZ.\n"
             );
         }
 
@@ -2113,7 +2434,7 @@ void wykonaj_polecenie(
 
         if (a.liczba != 2) {
             wypisz(
-                "Składnia: usun <sciezka>\n"
+                "Składnia: usun <ścieżka>\n"
             );
             return;
         }
@@ -2126,7 +2447,7 @@ void wykonaj_polecenie(
                 sizeof(sciezka))) {
 
             wypisz(
-                "Blad: nieprawidlowa sciezka.\n"
+                "Błąd: nieprawidłowa ścieżka.\n"
             );
             return;
         }
@@ -2136,7 +2457,7 @@ void wykonaj_polecenie(
                 "/")) {
 
             wypisz(
-                "Blad: nie mozna usunac korzenia '/'.\n"
+                "Błąd: nie można usunąć korzenia '/'.\n"
             );
             return;
         }
@@ -2144,12 +2465,12 @@ void wykonaj_polecenie(
         if (bsh_usun_twor(
                 sciezka)) {
 
-            wypisz("Usunieto: ");
+            wypisz("Usunięto: ");
             wypisz(sciezka);
             wypisz("\n");
         } else {
             wypisz(
-                "Blad: obiekt nie istnieje, katalog nie jest pusty lub brak uprawnien.\n"
+                "Błąd: obiekt nie istnieje, katalog nie jest pusty lub brak uprawnień.\n"
             );
         }
 
@@ -2162,7 +2483,7 @@ void wykonaj_polecenie(
 
         if (a.liczba != 3) {
             wypisz(
-                "Składnia: zmien_nazwe <sciezka> <nowa_nazwa>\n"
+                "Składnia: zmiennazwe <ścieżka> <nowa_nazwa>\n"
             );
             return;
         }
@@ -2175,7 +2496,7 @@ void wykonaj_polecenie(
                 sizeof(sciezka))) {
 
             wypisz(
-                "Blad: nieprawidlowa sciezka.\n"
+                "Błąd: nieprawidłowa ścieżka.\n"
             );
             return;
         }
@@ -2186,7 +2507,7 @@ void wykonaj_polecenie(
          */
         if (a.dane[2][0] == '\0') {
             wypisz(
-                "Blad: pusta nazwa.\n"
+                "Błąd: pusta nazwa.\n"
             );
             return;
         }
@@ -2199,7 +2520,7 @@ void wykonaj_polecenie(
                 a.dane[2][i] == '\\') {
 
                 wypisz(
-                    "Blad: nowa nazwa nie moze zawierac '/' ani '\\\\'.\n"
+                    "Błąd: nowa nazwa nie może zawierać '/' ani '\\\\'.\n"
                 );
                 return;
             }
@@ -2210,11 +2531,11 @@ void wykonaj_polecenie(
                 a.dane[2])) {
 
             wypisz(
-                "Zmieniono nazwe.\n"
+                "Zmieniono nazwę.\n"
             );
         } else {
             wypisz(
-                "Blad: zmiana nazwy nie powiodla sie.\n"
+                "Błąd: zmiana nazwy nie powiodła się.\n"
             );
         }
 
@@ -2284,10 +2605,10 @@ void wykonaj_polecenie(
         char wykaz[512] = {};
         if (!czytaj_plik("/aktualizacje/wykazaktualizacji.wykaz", wykaz,
                           sizeof(wykaz) - 1U)) {
-            wypisz("Dostepna wersja: brak danych (uzyj: pobierz <host> /aktualizacje/wykazaktualizacji.wykaz /aktualizacje/wykazaktualizacji.wykaz, potem Sprawdz aktualizacje).\n");
+            wypisz("Dostępna wersja: brak danych (użyj: pobierz <host> /aktualizacje/wykazaktualizacji.wykaz /aktualizacje/wykazaktualizacji.wykaz, potem Sprawdź aktualizacje).\n");
         } else {
             wykaz[sizeof(wykaz) - 1U] = '\0';
-            wypisz("Wykaz (poczatek):\n");
+            wypisz("Wykaz (początek):\n");
             size_t i = 0;
             int linie = 0;
             while (wykaz[i] != '\0' && linie < 3) {
@@ -2298,8 +2619,8 @@ void wykonaj_polecenie(
                 if (i >= sizeof(wykaz) - 1U) break;
             }
         }
-        wypisz("Sprawdz aktualizacje | Pobierz | Zainstaluj | Uruchom ponownie\n");
-        wypisz("Instalacja wymaga potwierdzenia i nie nastepuje automatycznie.\n");
+        wypisz("Sprawdź aktualizacje | Pobierz | Zainstaluj | Uruchom ponownie\n");
+        wypisz("Instalacja wymaga potwierdzenia i nie następuje automatycznie.\n");
         return;
     }
 
@@ -2309,7 +2630,7 @@ void wykonaj_polecenie(
         if (a.liczba != 2) {
             wypisz(
                 "Składnia: pisz <tekst>\n"
-                "Dla tekstu ze spacjami uzyj cudzyslowu.\n"
+                "Dla tekstu ze spacjami użyj cudzysłowu.\n"
             );
             return;
         }
@@ -2362,24 +2683,36 @@ NaglowekBur naglowek = {
 extern "C"
 __attribute__((noreturn))
 void _start() {
-    gui_legacy_wlacz();
-    gui_pobierz_rozdzielczosc(&shell_screen_w, &shell_screen_h);
     GuiMonitorInfo monitor{};
     if (gui_pobierz_monitor(0, &monitor)) {
+        if (ui_skala_poprawna(monitor.scale_x1000 / 10U)) {
+            ui_skala_procent = monitor.scale_x1000 / 10U;
+        }
         shell_work_x = monitor.work_x;
         shell_work_y = monitor.work_y;
         shell_work_w = monitor.work_szer;
         shell_work_h = monitor.work_wys;
     } else {
+        gui_pobierz_rozdzielczosc(&shell_screen_w, &shell_screen_h);
         shell_work_w = shell_screen_w;
         shell_work_h = shell_screen_h;
     }
-    
+
+    shell_w = ui_skaluj(shell_logical_w, ui_skala_procent);
+    shell_h = ui_skaluj(shell_logical_h, ui_skala_procent);
+    if (shell_w > shell_work_w) shell_w = shell_work_w;
+    if (shell_h > shell_work_h) shell_h = shell_work_h;
+
+    shell_x = shell_work_x + (shell_work_w - shell_w) / 2;
+    shell_y = shell_work_y + (shell_work_h - shell_h) / 2;
+    if (shell_x < shell_work_x) shell_x = shell_work_x;
+    if (shell_y < shell_work_y) shell_y = shell_work_y;
+
     if (bws_utworz_warstwe(shell_x, shell_y, shell_w, shell_h, 10) < 0)
         gui_zakoncz_aplikacje();
     gui_ustaw_tytul_okna("Powłoka Bursztynowa");
-    
-    
+    gui_ustaw_geometrie_okna(shell_x, shell_y, shell_w, shell_h);
+
     g_pasek_przewijania = new PasekPrzewijania();
     g_pasek_przewijania->ustaw_orientacje(Orientacja::Pionowa);
 

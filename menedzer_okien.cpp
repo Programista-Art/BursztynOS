@@ -1537,6 +1537,15 @@ int menu_glowne_y() {
     return y;
 }
 
+inline bool prostokat_elementu_menu(int index, int* x, int* y, int* w, int* h) {
+    if (index < 0 || index >= MENU_ELEMENTOW) return false;
+    if (x) *x = MENU_X;
+    if (y) *y = menu_glowne_y() + MENU_GORNY_MARGINES + index * MENU_ELEMENT_WYS;
+    if (w) *w = MENU_W;
+    if (h) *h = MENU_ELEMENT_WYS;
+    return true;
+}
+
 int menu_gry_x() {
     // Preferuj podmenu po prawej stronie. Na bardzo malej rozdzielczosci
     // sproboj pokazac je po lewej stronie glownego menu.
@@ -1781,16 +1790,16 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
         };
 
         for (int i = 0; i < MENU_ELEMENTOW; ++i) {
-            const int item_y = menu_y + MENU_GORNY_MARGINES +
-                               i * MENU_ELEMENT_WYS;
+            int item_x = 0, item_y = 0, item_w = 0, item_h = 0;
+            prostokat_elementu_menu(i, &item_x, &item_y, &item_w, &item_h);
 
             if (i == MENU_GRY_INDEX && menu_gry_otwarte) {
-                gui_rysuj_prostokat(MENU_X + 2, item_y,
-                                    MENU_W - 4, MENU_ELEMENT_WYS,
+                gui_rysuj_prostokat(item_x + 2, item_y,
+                                    item_w - 4, item_h,
                                     motyw_kolor(MOTYW_KOLOR_PODNIESIONY));
             }
 
-            gui_wypisz_tekst_kolor(MENU_X + 10, item_y + 5,
+            gui_wypisz_tekst_kolor(item_x + 10, item_y + 5,
                                    motyw_kolor(MOTYW_KOLOR_TEKST), menu_elementy[i]);
         }
 
@@ -1991,7 +2000,7 @@ void uruchom_lub_aktywuj(const char* sciezka, const char* prefiks_tytulu) {
 }
 
 void uruchom_powloke() {
-    uruchom_lub_aktywuj(SCIEZKA_POWLOKA, "Powloka Bursztynowa");
+    uruchom_lub_aktywuj(SCIEZKA_POWLOKA, "Powłoka Bursztynowa");
 }
 
 void wykonaj_restart() {
@@ -2104,6 +2113,37 @@ void obsluz_klikniecie(int mx, int my) {
     }
 
     if (menu_start_otwarte) {
+        static uint32_t s_menu_hit_log_cnt = 0;
+        if (s_menu_hit_log_cnt < 30) {
+            ++s_menu_hit_log_cnt;
+            int it0_x = 0, it0_y = 0, it0_w = 0, it0_h = 0;
+            prostokat_elementu_menu(0, &it0_x, &it0_y, &it0_w, &it0_h);
+            const bool in_item0 = punkt_w_prostokacie(mx, my, it0_x, it0_y, it0_w, it0_h);
+            const bool in_menu = punkt_w_prostokacie(mx, my, MENU_X, menu_y, MENU_W, MENU_WYS);
+            char hbuf[256]{};
+            char* hp = hbuf;
+            char* hep = hbuf + sizeof(hbuf);
+            auto happ = [&](const char* s) { while (*s && hp + 1 < hep) *hp++ = *s++; };
+            auto happ_i = [&](int64_t v) {
+                if (v < 0) { if (hp + 1 < hep) *hp++ = '-'; v = -v; }
+                char b[24]; int idx = 0;
+                do { b[idx++] = static_cast<char>('0' + (v % 10)); v /= 10; } while (v);
+                while (idx > 0 && hp + 1 < hep) *hp++ = b[--idx];
+            };
+            happ("[MENU HIT]\n  menu=("); happ_i(MENU_X); happ(","); happ_i(menu_y);
+            happ(")-("); happ_i(MENU_X + MENU_W); happ(","); happ_i(menu_y + MENU_WYS);
+            happ(")\n  item=\"Powłoka Bursztyna\"\n  itemrect=(");
+            happ_i(it0_x); happ(","); happ_i(it0_y);
+            happ(")-("); happ_i(it0_x + it0_w); happ(","); happ_i(it0_y + it0_h);
+            happ(")\n  click=("); happ_i(mx); happ(","); happ_i(my);
+            happ(")\n  hit=");
+            if (in_item0) happ("YES\n");
+            else if (in_menu) happ("NO (inside menu, other item)\n");
+            else happ("NO (outside menu)\n");
+            *hp = '\0';
+            wypisz(hbuf);
+        }
+
         // Najpierw podmenu Gry, bo lezy poza prostokatem glownej listy.
         if (menu_gry_otwarte) {
             const int gry_x = menu_gry_x();
@@ -2561,6 +2601,14 @@ extern "C" __attribute__((noreturn)) void _start() {
         }
 
         if (klik) {
+            if (menu_start_otwarte || punkt_w_prostokacie(mx, my,
+                                    PRZYCISK_MENU_X, przycisk_menu_y(),
+                                    PRZYCISK_MENU_W, PRZYCISK_MENU_H)) {
+                last_desktop_click = -1;
+                last_desktop_click_time = 0;
+                obsluz_klikniecie(mx, my);
+                continue;
+            }
             const int desktop_entry = wpis_pulpitu_w_punkcie(mx, my);
             if (desktop_entry >= 0) {
                 const bool double_click = desktop_entry == last_desktop_click &&
