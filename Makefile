@@ -498,7 +498,7 @@ bursztyn_gui.o: bursztyn_gui.cpp bursztyn_gui.h
 # 12. SHELL .bur
 # ============================================================================
 
-shell_tmp.o: shell.cpp bursztyn_gui.h
+shell_tmp.o: shell.cpp shell_terminal.h bursztyn_gui.h bursztyn_ui/czcionka.h bursztyn_ui/rysowanie.h bursztyn_ui/pasek_przewijania.h
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
 
 shell_blob.o: shell_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)

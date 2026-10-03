@@ -126,13 +126,14 @@ constexpr size_t VISUAL_COLUMNS = static_cast<size_t>(SHELL_COLS);
 constexpr int MAXSCROLLBACKLINES = 512;
 
 struct ShellLine {
-    char tekst[160];
+    char tekst[4096];
     char opis[160];
     int len;
-    int opis_x; // 0 = jedna linia, >0 = offset kolumny opisu w px
+    int tekst_x; // logiczne wcięcie wiersza pomocy, niezależne od tekstu
+    int opis_x; // 0 = jedna linia, >0 = logiczny offset kolumny opisu (100%)
 };
 
-ShellLine g_linie[MAXSCROLLBACKLINES];
+ShellLine* g_linie = nullptr;
 int g_liczba_linii = 1;
 int g_pierwsza_linia = 0;
 int g_scroll_linia = 0;
@@ -170,292 +171,8 @@ inline Prostokat shell_obszar_klienta() {
     return Prostokat(shell_x, shell_y + belka_h, shell_w, klient_h);
 }
 
-void dodaj_nowa_linie() {
-    if (g_liczba_linii < MAXSCROLLBACKLINES) {
-        g_liczba_linii++;
-    } else {
-        g_pierwsza_linia = (g_pierwsza_linia + 1) % MAXSCROLLBACKLINES;
-    }
-    int act = (g_pierwsza_linia + g_liczba_linii - 1) % MAXSCROLLBACKLINES;
-    g_linie[act].len = 0;
-    g_linie[act].tekst[0] = '\0';
-    g_linie[act].opis[0] = '\0';
-    g_linie[act].opis_x = 0;
-}
+#include "shell_terminal.h"
 
-void wpisz_do_bufora(uint32_t cp) {
-    if (cp == '\n' || cp == '\r') {
-        if (cp == '\n') dodaj_nowa_linie();
-        return;
-    }
-    char buf[5];
-    size_t bajty = CzcionkaUI::zakoduj_utf8(cp, buf);
-
-    int act = (g_pierwsza_linia + g_liczba_linii - 1) % MAXSCROLLBACKLINES;
-    if (g_linie[act].len + bajty > 150) {
-        dodaj_nowa_linie();
-        act = (g_pierwsza_linia + g_liczba_linii - 1) % MAXSCROLLBACKLINES;
-    }
-    for (size_t i = 0; i < bajty; ++i) {
-        g_linie[act].tekst[g_linie[act].len++] = buf[i];
-    }
-    g_linie[act].tekst[g_linie[act].len] = '\0';
-}
-
-void shell_wypisz_wiersz_pomocy(const char* komenda, const char* opis) {
-    if (!komenda) return;
-    dodaj_nowa_linie();
-    int act = (g_pierwsza_linia + g_liczba_linii - 1) % MAXSCROLLBACKLINES;
-
-    size_t k_len = 0;
-    while (komenda[k_len] && k_len + 1 < sizeof(g_linie[act].tekst)) {
-        g_linie[act].tekst[k_len] = komenda[k_len];
-        k_len++;
-    }
-    g_linie[act].tekst[k_len] = '\0';
-    g_linie[act].len = static_cast<int>(k_len);
-
-    if (!opis || opis[0] == '\0') {
-        g_linie[act].opis[0] = '\0';
-        g_linie[act].opis_x = 0;
-        return;
-    }
-
-    const uint32_t p = ui_skala_procent;
-    const SkalaUI skala = ui_skala();
-    const int cmd_col_w = ui_skaluj(270, p);
-    const int cmd_w = CzcionkaUI::zmierz_tekst(g_linie[act].tekst, skala);
-
-    if (cmd_w > cmd_col_w - ui_skaluj(10, p)) {
-        int dyn_x = cmd_w + ui_skaluj(16, p);
-        int opis_w = CzcionkaUI::zmierz_tekst(opis, skala);
-        int client_w = shell_obszar_klienta().szerokosc;
-        if (dyn_x + opis_w > client_w - ui_skaluj(30, p)) {
-            dodaj_nowa_linie();
-            act = (g_pierwsza_linia + g_liczba_linii - 1) % MAXSCROLLBACKLINES;
-            g_linie[act].tekst[0] = ' ';
-            g_linie[act].tekst[1] = ' ';
-            g_linie[act].tekst[2] = ' ';
-            g_linie[act].tekst[3] = ' ';
-            g_linie[act].tekst[4] = '\0';
-            g_linie[act].len = 4;
-
-            size_t o_len = 0;
-            while (opis[o_len] && o_len + 1 < sizeof(g_linie[act].opis)) {
-                g_linie[act].opis[o_len] = opis[o_len];
-                o_len++;
-            }
-            g_linie[act].opis[o_len] = '\0';
-            g_linie[act].opis_x = cmd_col_w;
-        } else {
-            size_t o_len = 0;
-            while (opis[o_len] && o_len + 1 < sizeof(g_linie[act].opis)) {
-                g_linie[act].opis[o_len] = opis[o_len];
-                o_len++;
-            }
-            g_linie[act].opis[o_len] = '\0';
-            g_linie[act].opis_x = dyn_x;
-        }
-    } else {
-        size_t o_len = 0;
-        while (opis[o_len] && o_len + 1 < sizeof(g_linie[act].opis)) {
-            g_linie[act].opis[o_len] = opis[o_len];
-            o_len++;
-        }
-        g_linie[act].opis[o_len] = '\0';
-        g_linie[act].opis_x = cmd_col_w;
-    }
-}
-
-void shell_rysuj_terminal() {
-    gui_rysuj_standardowa_belke(shell_x, shell_y, shell_w, "Powłoka Bursztynowa", shell_maximized);
-
-    if (shell_minimized) { gui_odswiez(); return; }
-
-    const BursztynMotyw* motyw = gui_pobierz_motyw();
-    if (!motyw) motyw = &g_domyslny_motyw_fallback;
-
-    uint32_t tlo = motyw->oknotlo;
-    uint32_t ramka = motyw->ramka;
-    uint32_t tekst_kolor = motyw->tekst;
-    uint32_t akcent = motyw->akcent;
-
-    const uint32_t p = ui_skala_procent;
-    const SkalaUI skala = ui_skala();
-
-    const Prostokat client = shell_obszar_klienta();
-    const int client_x = client.x;
-    const int client_y = client.y;
-    const int client_w = client.szerokosc;
-    const int client_h = client.wysokosc;
-
-    KontekstRysowania ctx;
-    ctx.dodaj_przyciecie(client);
-    ctx.rysuj_prostokat(client, tlo);
-
-    // Zaokrąglenie dolnych rogów, jeśli okno nie jest zmaksymalizowane
-    if (!shell_maximized) {
-        int r_okna = ui_skaluj(motyw_promien(MOTYW_ROG_OKNO), p);
-        if (r_okna > 0) {
-            for (int dy = 0; dy < r_okna; ++dy) {
-                int inset = motyw_promien_inset(r_okna, dy);
-                if (inset > 0) {
-                    gui_rysuj_prostokat(shell_x, shell_y + shell_h - 1 - dy, inset, 1, 0x00000000);
-                    gui_rysuj_prostokat(shell_x + shell_w - inset, shell_y + shell_h - 1 - dy, inset, 1, 0x00000000);
-                }
-            }
-        }
-    }
-
-    const int input_h = ui_skaluj(30, p);
-    const int input_y = client_y + client_h - input_h;
-    ctx.rysuj_linie_pozioma(client_x, input_y, client_w, ramka);
-
-    const int line_h = ui_skaluj(16, p);
-    int max_linii = (client_h - input_h - ui_skaluj(8, p)) / line_h;
-    if (max_linii < 1) max_linii = 1;
-
-    int max_scroll = g_liczba_linii > max_linii ? g_liczba_linii - max_linii : 0;
-    if (g_auto_scroll || g_scroll_linia > max_scroll) {
-        g_scroll_linia = max_scroll;
-    }
-    if (g_scroll_linia < 0) g_scroll_linia = 0;
-
-    if (g_pasek_przewijania) {
-        const int sb_w = ui_skaluj(12, p);
-        const int sb_x = client_w - sb_w - ui_skaluj(2, p);
-        const int sb_y = ui_skaluj(4, p);
-        const int sb_h = client_h - input_h - ui_skaluj(8, p) > line_h ? client_h - input_h - ui_skaluj(8, p) : line_h;
-
-        g_pasek_przewijania->ustaw_skale_dpi(skala);
-        g_pasek_przewijania->rozmiesc(Prostokat(sb_x, sb_y, sb_w, sb_h));
-        g_pasek_przewijania->ustaw_rozmiar_strony(max_linii);
-        g_pasek_przewijania->ustaw_zakres(0, max_scroll);
-        g_pasek_przewijania->ustaw_wartosc(g_scroll_linia);
-
-        ctx.dodaj_przesuniecie(Punkt(client_x, client_y));
-        g_pasek_przewijania->rysuj(ctx);
-        ctx.zdejmij_przesuniecie();
-    }
-
-    int text_x = client_x + ui_skaluj(8, p);
-    int cur_y = client_y + ui_skaluj(4, p);
-
-    for (int i = 0; i < max_linii; ++i) {
-        int idx = g_scroll_linia + i;
-        if (idx >= g_liczba_linii) break;
-        int real_idx = (g_pierwsza_linia + idx) % MAXSCROLLBACKLINES;
-
-        if (g_linie[real_idx].len > 0 || g_linie[real_idx].opis_x > 0) {
-            if (g_linie[real_idx].tekst[0] != '\0') {
-                gui_wypisz_tekst_kolor_skala(text_x, cur_y, tekst_kolor, p, g_linie[real_idx].tekst);
-            }
-            if (g_linie[real_idx].opis_x > 0 && g_linie[real_idx].opis[0] != '\0') {
-                gui_wypisz_tekst_kolor_skala(text_x + g_linie[real_idx].opis_x, cur_y, tekst_kolor, p, g_linie[real_idx].opis);
-            }
-        }
-        cur_y += line_h;
-    }
-
-    int input_text_x = client_x + ui_skaluj(8, p);
-    int input_text_y = input_y + (input_h - ui_skaluj(16, p)) / 2;
-    gui_wypisz_tekst_kolor_skala(input_text_x, input_text_y, akcent, p, "powłoka> ");
-    int p_szer = CzcionkaUI::zmierz_tekst("powłoka> ", skala);
-    input_text_x += p_szer;
-
-    if (g_obecny_bufor_wejscia) {
-        gui_wypisz_tekst_kolor_skala(input_text_x, input_text_y, tekst_kolor, p, g_obecny_bufor_wejscia);
-        int wej_szer = CzcionkaUI::zmierz_tekst(g_obecny_bufor_wejscia, skala);
-        ctx.rysuj_prostokat(Prostokat(input_text_x + wej_szer + ui_skaluj(2, p), input_text_y, ui_skaluj(2, p), ui_skaluj(16, p)), tekst_kolor);
-    } else {
-        ctx.rysuj_prostokat(Prostokat(input_text_x + ui_skaluj(2, p), input_text_y, ui_skaluj(2, p), ui_skaluj(16, p)), tekst_kolor);
-    }
-
-    ctx.zdejmij_przyciecie();
-    gui_odswiez();
-}
-
-void shell_odswiez_linie_wejsciowa() {
-    if (shell_minimized) return;
-
-    const BursztynMotyw* motyw = gui_pobierz_motyw();
-    if (!motyw) motyw = &g_domyslny_motyw_fallback;
-
-    uint32_t tlo = motyw->oknotlo;
-    uint32_t tekst_kolor = motyw->tekst;
-    uint32_t akcent = motyw->akcent;
-
-    const uint32_t p = ui_skala_procent;
-    const SkalaUI skala = ui_skala();
-
-    const Prostokat client = shell_obszar_klienta();
-    const int client_x = client.x;
-    const int client_y = client.y;
-    const int client_w = client.szerokosc;
-    const int client_h = client.wysokosc;
-
-    const int input_h = ui_skaluj(30, p);
-    const int input_y = client_y + client_h - input_h;
-    const int input_bg_y = input_y + 1;
-    const int input_bg_h = input_h - 1;
-
-    KontekstRysowania ctx;
-    ctx.dodaj_przyciecie(Prostokat(client_x, input_bg_y, client_w, input_bg_h));
-    ctx.rysuj_prostokat(Prostokat(client_x, input_bg_y, client_w, input_bg_h), tlo);
-
-    if (!shell_maximized) {
-        int r_okna = ui_skaluj(motyw_promien(MOTYW_ROG_OKNO), p);
-        if (r_okna > 0) {
-            for (int dy = 0; dy < r_okna; ++dy) {
-                int inset = motyw_promien_inset(r_okna, dy);
-                if (inset > 0) {
-                    gui_rysuj_prostokat(shell_x, shell_y + shell_h - 1 - dy, inset, 1, 0x00000000);
-                    gui_rysuj_prostokat(shell_x + shell_w - inset, shell_y + shell_h - 1 - dy, inset, 1, 0x00000000);
-                }
-            }
-        }
-    }
-
-    int input_text_x = client_x + ui_skaluj(8, p);
-    int input_text_y = input_y + (input_h - ui_skaluj(16, p)) / 2;
-    gui_wypisz_tekst_kolor_skala(input_text_x, input_text_y, akcent, p, "powłoka> ");
-    int p_szer = CzcionkaUI::zmierz_tekst("powłoka> ", skala);
-    input_text_x += p_szer;
-
-    if (g_obecny_bufor_wejscia) {
-        gui_wypisz_tekst_kolor_skala(input_text_x, input_text_y, tekst_kolor, p, g_obecny_bufor_wejscia);
-        int wej_szer = CzcionkaUI::zmierz_tekst(g_obecny_bufor_wejscia, skala);
-        ctx.rysuj_prostokat(Prostokat(input_text_x + wej_szer + ui_skaluj(2, p), input_text_y, ui_skaluj(2, p), ui_skaluj(16, p)), tekst_kolor);
-    } else {
-        ctx.rysuj_prostokat(Prostokat(input_text_x + ui_skaluj(2, p), input_text_y, ui_skaluj(2, p), ui_skaluj(16, p)), tekst_kolor);
-    }
-
-    ctx.zdejmij_przyciecie();
-    gui_odswiez();
-}
-
-void shell_wypisz(const char* tekst) {
-    if (!tekst) return;
-    size_t i = 0;
-    while (tekst[i] != '\0') {
-        uint32_t cp = 0;
-        size_t zuzyte = CzcionkaUI::dekoduj_utf8(tekst, i, &cp);
-        if (zuzyte == 0) { i++; continue; }
-        wpisz_do_bufora(cp);
-        i += zuzyte;
-    }
-    const uint32_t p = ui_skala_procent;
-    const Prostokat client = shell_obszar_klienta();
-    const int client_h = client.wysokosc;
-    const int input_h = ui_skaluj(30, p);
-    const int line_h = ui_skaluj(16, p);
-    const int max_linii = (client_h - input_h - ui_skaluj(8, p)) > 0 ? (client_h - input_h - ui_skaluj(8, p)) / line_h : 1;
-    const int max_scroll = g_liczba_linii > max_linii ? g_liczba_linii - max_linii : 0;
-    if (g_auto_scroll) {
-        g_scroll_linia = max_scroll;
-    }
-    shell_rysuj_terminal();
-}
 
 
 constexpr uint64_t BUR_TEXT_OFFSET = 0x1000ULL;
@@ -795,10 +512,14 @@ static inline int utf8_sekwencja_dlugosc(uint8_t b) {
     return 1;
 }
 
-char pobierz_znak_blokujaco() {
+enum ShellKey { SHELL_LEFT=256, SHELL_RIGHT, SHELL_UP, SHELL_DOWN, SHELL_DELETE };
+
+int pobierz_znak_blokujaco() {
+    static uint32_t key_modifiers = 0;
     for (;;) {
         bws_zdarzenie e{};
         if (!gui_czekaj_na_zdarzenie(&e)) continue;
+        if (e.typ == BWS_ZDARZENIE_KLAWISZ_FIZYCZNY) key_modifiers = e.przyciski;
 
         if (e.typ == BWS_ZDARZENIE_EKRAN) {
             if (ui_skala_poprawna(e.kod)) {
@@ -840,17 +561,11 @@ char pobierz_znak_blokujaco() {
         }
         if (e.typ == BWS_ZDARZENIE_ZAMKNIJ) gui_zakoncz_aplikacje();
 
-        const uint32_t p = ui_skala_procent;
         const Prostokat client = shell_obszar_klienta();
         const int client_x = client.x;
         const int client_y = client.y;
-        const int client_w = client.szerokosc;
-        (void)client_w;
-        const int client_h = client.wysokosc;
-        const int input_h = ui_skaluj(30, p);
-        const int line_h = ui_skaluj(16, p);
-        const int max_linii = (client_h - input_h - ui_skaluj(8, p)) > 0 ? (client_h - input_h - ui_skaluj(8, p)) / line_h : 1;
-        const int max_scroll = g_liczba_linii > max_linii ? g_liczba_linii - max_linii : 0;
+        const int max_linii = shell_page_rows();
+        const int max_scroll = shell_max_scroll();
 
         if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN) {
             gui_akcja_belki akcja = gui_hit_test_belki(e.x, e.y, shell_x, shell_y, shell_w);
@@ -900,15 +615,31 @@ char pobierz_znak_blokujaco() {
                 if (mz.obsluzone || g_pasek_przewijania->czy_przeciagany()) {
                     shell_sb_dragging = true;
                     gui_ustaw_capture_myszy(true);
-                    g_scroll_linia = static_cast<int>(g_pasek_przewijania->wartosc());
-                    if (g_scroll_linia < 0) g_scroll_linia = 0;
-                    if (g_scroll_linia > max_scroll) g_scroll_linia = max_scroll;
-                    g_auto_scroll = (g_scroll_linia >= max_scroll);
+                    shell_set_scroll(static_cast<int>(g_pasek_przewijania->wartosc()));
                     shell_rysuj_terminal();
                     continue;
                 }
             }
+            if (shell_input_rect().zawiera(Punkt(e.x,e.y)) && g_obecny_bufor_wejscia) {
+                bool had_output=g_output_selection;g_output_selection=false;
+                g_select_input=true;g_select_drag=true;
+                g_caret=g_input_anchor=shell_hit_input(e.x);
+                gui_ustaw_capture_myszy(true);
+                if(had_output) shell_rysuj_terminal(); else shell_odswiez_linie_wejsciowa();
+                continue;
+            }
+            if (shell_output_rect().zawiera(Punkt(e.x,e.y))) {
+                g_input_anchor=g_caret;g_select_input=false;g_select_drag=true;
+                g_output_selection=true;
+                g_selection_anchor=g_selection_end=shell_hit_output(e.x,e.y);
+                gui_ustaw_capture_myszy(true);shell_rysuj_terminal();continue;
+            }
         } else if (e.typ == BWS_ZDARZENIE_MYSZ_RUCH) {
+            if(g_select_drag) {
+                if(g_select_input) { g_caret=shell_hit_input(e.x);shell_odswiez_linie_wejsciowa(); }
+                else { g_selection_end=shell_hit_output(e.x,e.y);shell_rysuj_terminal(); }
+                continue;
+            }
             if (shell_drag) {
                 const int nx = shell_drag_window_x + (e.x - shell_drag_mouse_x);
                 const int ny = shell_drag_window_y + (e.y - shell_drag_mouse_y);
@@ -928,14 +659,14 @@ char pobierz_znak_blokujaco() {
                 mz.y = ly;
                 mz.przycisk = 1;
                 g_pasek_przewijania->obsluz_ruch_myszy(mz);
-                g_scroll_linia = static_cast<int>(g_pasek_przewijania->wartosc());
-                if (g_scroll_linia < 0) g_scroll_linia = 0;
-                if (g_scroll_linia > max_scroll) g_scroll_linia = max_scroll;
-                g_auto_scroll = (g_scroll_linia >= max_scroll);
+                shell_set_scroll(static_cast<int>(g_pasek_przewijania->wartosc()));
                 shell_rysuj_terminal();
                 continue;
             }
         } else if (e.typ == BWS_ZDARZENIE_MYSZ_UP) {
+            if(g_select_drag) {
+                g_select_drag=false;gui_ustaw_capture_myszy(false);continue;
+            }
             if (shell_drag) {
                 shell_drag = false;
                 gui_ustaw_capture_myszy(false);
@@ -953,10 +684,7 @@ char pobierz_znak_blokujaco() {
                 mz.y = ly;
                 mz.przycisk = 1;
                 g_pasek_przewijania->obsluz_zwolnienie_myszy(mz);
-                g_scroll_linia = static_cast<int>(g_pasek_przewijania->wartosc());
-                if (g_scroll_linia < 0) g_scroll_linia = 0;
-                if (g_scroll_linia > max_scroll) g_scroll_linia = max_scroll;
-                g_auto_scroll = (g_scroll_linia >= max_scroll);
+                shell_set_scroll(static_cast<int>(g_pasek_przewijania->wartosc()));
                 shell_rysuj_terminal();
                 continue;
             }
@@ -966,21 +694,7 @@ char pobierz_znak_blokujaco() {
             int delta = e.dy;
             if (delta == 0 && e.dx != 0) delta = e.dx;
             if (delta != 0) {
-                int step = 3;
-                if (delta > 0) {
-                    g_scroll_linia -= step;
-                    if (g_scroll_linia < 0) g_scroll_linia = 0;
-                    g_auto_scroll = false;
-                } else {
-                    g_scroll_linia += step;
-                    if (g_scroll_linia >= max_scroll) {
-                        g_scroll_linia = max_scroll;
-                        g_auto_scroll = true;
-                    }
-                }
-                if (g_pasek_przewijania) {
-                    g_pasek_przewijania->ustaw_wartosc(g_scroll_linia);
-                }
+                shell_set_scroll(g_scroll_linia + (delta>0?-3:3));
                 shell_rysuj_terminal();
             }
             continue;
@@ -994,99 +708,98 @@ char pobierz_znak_blokujaco() {
             bool home = (usb && baza == 74U) || (!usb && baza == 0x47U);
             bool end = (usb && baza == 77U) || (!usb && baza == 0x4FU);
 
-            if (page_up) {
-                g_scroll_linia -= max_linii;
-                if (g_scroll_linia < 0) g_scroll_linia = 0;
-                g_auto_scroll = false;
-                if (g_pasek_przewijania) g_pasek_przewijania->ustaw_wartosc(g_scroll_linia);
-                shell_rysuj_terminal();
-                continue;
+            if (page_up || page_down || home || end) {
+                shell_set_scroll(home?0:(end?max_scroll:g_scroll_linia+(page_up?-max_linii:max_linii)));
+                shell_rysuj_terminal();continue;
             }
-            if (page_down) {
-                g_scroll_linia += max_linii;
-                if (g_scroll_linia >= max_scroll) {
-                    g_scroll_linia = max_scroll;
-                    g_auto_scroll = true;
-                }
-                if (g_pasek_przewijania) g_pasek_przewijania->ustaw_wartosc(g_scroll_linia);
-                shell_rysuj_terminal();
-                continue;
+            if ((e.przyciski & BWS_MOD_CTRL) && ((usb && baza==6U) || (!usb && baza==0x2EU))) {
+                shell_copy_selection();continue;
             }
-            if (home) {
-                g_scroll_linia = 0;
-                g_auto_scroll = false;
-                if (g_pasek_przewijania) g_pasek_przewijania->ustaw_wartosc(g_scroll_linia);
-                shell_rysuj_terminal();
-                continue;
-            }
-            if (end) {
-                g_scroll_linia = max_scroll;
-                g_auto_scroll = true;
-                if (g_pasek_przewijania) g_pasek_przewijania->ustaw_wartosc(g_scroll_linia);
-                shell_rysuj_terminal();
-                continue;
-            }
+            // Physical keys are authoritative; their following ANSI byte stream is discarded.
+            if ((usb && baza==80U) || (!usb && (e.kod&BWS_KEY_SOURCE_E0) && baza==0x4BU)) return SHELL_LEFT;
+            if ((usb && baza==79U) || (!usb && (e.kod&BWS_KEY_SOURCE_E0) && baza==0x4DU)) return SHELL_RIGHT;
+            if ((usb && baza==82U) || (!usb && (e.kod&BWS_KEY_SOURCE_E0) && baza==0x48U)) return SHELL_UP;
+            if ((usb && baza==81U) || (!usb && (e.kod&BWS_KEY_SOURCE_E0) && baza==0x50U)) return SHELL_DOWN;
+            if ((usb && baza==76U) || (!usb && (e.kod&BWS_KEY_SOURCE_E0) && baza==0x53U)) return SHELL_DELETE;
         }
 
         if (e.typ == BWS_ZDARZENIE_KLAWISZ && e.kod != 0) {
-            if ((e.kod & 0xFF000000) == 0) {
-                return static_cast<char>(e.kod & 0xFF);
-            }
-            return static_cast<char>(e.kod);
+            static int ansi=0;
+            unsigned char c=static_cast<unsigned char>(e.kod);
+            if(c==27) { ansi=1;continue; }
+            if(ansi==1) { ansi=c=='['?2:0;if(ansi) continue; }
+            if(ansi==2) { if(c>=0x40 && c<=0x7e) ansi=0;continue; }
+            if(c==3) { shell_copy_selection();continue; }
+            // The keyboard also emits the printable letter for Ctrl+C.
+            if(key_modifiers & BWS_MOD_CTRL) continue;
+            // TEXT_INPUT is the parallel codepoint notification; consume the UTF-8 byte stream once.
+            if(c<32 && c!='\n' && c!='\r' && c!='\b' && c!='\t') continue;
+            return c;
         }
     }
 }
 
 bool pobierz_linie(char* bufor, size_t pojemnosc) {
     if (!bufor || pojemnosc < 2) return false;
-    size_t pozycja = 0;
-    bool przepelnienie = false;
-    bufor[0] = '\0';
-    g_auto_scroll = true;
-
-    g_obecny_bufor_wejscia = bufor;
+    bool przepelnienie=false;
+    bufor[0]=0;g_caret=g_input_anchor=0;g_input_scroll_px=0;
+    g_obecny_bufor_wejscia=bufor;
+    int history_index=-1;char unfinished[SHELL_INPUT_CAPACITY]={};
     shell_odswiez_linie_wejsciowa();
-
     for (;;) {
-        char c = pobierz_znak_blokujaco();
-
-        if (c == '\n' || c == '\r') {
-            bufor[pozycja] = '\0';
-            g_obecny_bufor_wejscia = nullptr;
-            wypisz("powłoka> ");
-            wypisz(bufor);
-            wypisz("\n");
-            g_auto_scroll = true;
+        int c=pobierz_znak_blokujaco();
+        size_t length=shell_length(bufor);
+        if(c=='\n' || c=='\r') {
+            bool nonwhite=false;
+            for(size_t i=0;i<length;++i) if(!jest_biala_spacja(bufor[i])) nonwhite=true;
+            if(!nonwhite) {
+                bufor[0]=0;g_caret=g_input_anchor=0;g_input_scroll_px=0;
+                history_index=-1;przepelnienie=false;shell_odswiez_linie_wejsciowa();continue;
+            }
+            g_obecny_bufor_wejscia=nullptr;g_caret=g_input_anchor=0;
+            g_auto_scroll=true;g_output_selection=false;
+            wypisz("powłoka> ");wypisz(bufor);wypisz("\n");
             return !przepelnienie;
         }
-
-        if (c == '\b' || static_cast<uint8_t>(c) == 0x7FU) {
-            if (!przepelnienie && pozycja > 0) {
-                --pozycja;
-                while (pozycja > 0 && (static_cast<uint8_t>(bufor[pozycja]) & 0xC0U) == 0x80U) {
-                    --pozycja;
-                }
-                bufor[pozycja] = '\0';
-                shell_odswiez_linie_wejsciowa();
-            }
-            continue;
+        if(c==SHELL_LEFT || c==SHELL_RIGHT) {
+            if(g_caret!=g_input_anchor) {
+                if(c==SHELL_LEFT) g_caret=g_caret<g_input_anchor?g_caret:g_input_anchor;
+                else g_caret=g_caret>g_input_anchor?g_caret:g_input_anchor;
+            } else g_caret=c==SHELL_LEFT?shell_previous(bufor,g_caret):shell_next(bufor,g_caret);
+            g_input_anchor=g_caret;shell_odswiez_linie_wejsciowa();continue;
         }
-
-        if (!przepelnienie) {
-            uint8_t b0 = static_cast<uint8_t>(c);
-            int oczekiwane = utf8_sekwencja_dlugosc(b0);
-            if (pozycja + oczekiwane < pojemnosc) {
-                bufor[pozycja++] = c;
-                for (int k = 1; k < oczekiwane; ++k) {
-                    char nastepny = pobierz_znak_blokujaco();
-                    bufor[pozycja++] = nastepny;
-                }
-                bufor[pozycja] = '\0';
-                shell_odswiez_linie_wejsciowa();
-            } else {
-                przepelnienie = true;
-            }
+        if(c==SHELL_UP || c==SHELL_DOWN) {
+            if(c==SHELL_UP && historia_ilosc) {
+                if(history_index<0) kopiuj_tekst(unfinished,sizeof(unfinished),bufor);
+                if(history_index+1<static_cast<int>(historia_ilosc)) ++history_index;
+            } else if(c==SHELL_DOWN && history_index>=0) --history_index;
+            else continue;
+            kopiuj_tekst(bufor,pojemnosc,history_index<0?unfinished:historia[history_index]);
+            g_caret=g_input_anchor=shell_length(bufor);g_input_scroll_px=0;przepelnienie=false;
+            shell_odswiez_linie_wejsciowa();continue;
         }
+        if(c=='\b' || c==127 || c==SHELL_DELETE) {
+            if(g_caret!=g_input_anchor) shell_delete_input_selection(bufor);
+            else if(c==SHELL_DELETE) shell_delete_range(bufor,g_caret,shell_next(bufor,g_caret));
+            else if(g_caret) shell_delete_range(bufor,shell_previous(bufor,g_caret),g_caret);
+            shell_odswiez_linie_wejsciowa();continue;
+        }
+        char bytes[5]={static_cast<char>(c),0,0,0,0};
+        int count=utf8_sekwencja_dlugosc(static_cast<uint8_t>(c));
+        for(int i=1;i<count;++i) {
+            int next=pobierz_znak_blokujaco();
+            if(next>255 || (next&0xc0)!=0x80) { count=0;break; }
+            bytes[i]=static_cast<char>(next);
+        }
+        if(!count) continue;
+        uint32_t cp; if(CzcionkaUI::dekoduj_utf8(bytes,0,&cp)!=static_cast<size_t>(count)) continue;
+        size_t selected=g_caret>g_input_anchor?g_caret-g_input_anchor:g_input_anchor-g_caret;
+        if(length-selected+count>=pojemnosc) { przepelnienie=true;continue; }
+        shell_delete_input_selection(bufor);length=shell_length(bufor);
+        for(size_t i=length+1;i>g_caret;--i) bufor[i+count-1]=bufor[i-1];
+        for(int i=0;i<count;++i) bufor[g_caret+i]=bytes[i];
+        g_caret+=count;g_input_anchor=g_caret;
+        shell_odswiez_linie_wejsciowa();
     }
 }
 
@@ -1407,7 +1120,7 @@ void wypisz_pomoc() {
     shell_wypisz_wiersz_pomocy("  System", nullptr);
     shell_wypisz_wiersz_pomocy("    notatnik", "Uruchamia Notatnik.");
     shell_wypisz_wiersz_pomocy("    kalkulator", "Uruchamia Kalkulator.");
-    shell_wypisz_wiersz_pomocy("    przegladarka", "Uruchamia przeglądarkę Husarz.");
+    shell_wypisz_wiersz_pomocy("    przegladarka", "Uruchamia Przeglądarkę Husarz.");
     shell_wypisz_wiersz_pomocy("    uruchom <plik.bur>", "Uruchamia program .bur.");
     shell_wypisz_wiersz_pomocy("    pulpit | wyjdz | exit", "Kończy powłokę.");
     shell_wypisz_wiersz_pomocy("    czas", "Pokazuje czas RTC.");
@@ -1417,16 +1130,7 @@ void wypisz_pomoc() {
     shell_wypisz_wiersz_pomocy("    pci", "Wyświetla /logi/pci.txt.");
     shell_wypisz_wiersz_pomocy("    pomoc", "Pokazuje ten ekran pomocy.");
 
-    const uint32_t p = ui_skala_procent;
-    const Prostokat client = shell_obszar_klienta();
-    const int client_h = client.wysokosc;
-    const int input_h = ui_skaluj(30, p);
-    const int line_h = ui_skaluj(16, p);
-    const int max_linii = (client_h - input_h - ui_skaluj(8, p)) > 0 ? (client_h - input_h - ui_skaluj(8, p)) / line_h : 1;
-    const int max_scroll = g_liczba_linii > max_linii ? g_liczba_linii - max_linii : 0;
-    if (g_auto_scroll) {
-        g_scroll_linia = max_scroll;
-    }
+    dodaj_nowa_linie();
     shell_rysuj_terminal();
 }
 
@@ -2138,13 +1842,13 @@ void wykonaj_polecenie(
 
         wypisz(
             "OS: Bursztyn OS x86_64\n"
-            "Autor: Dymitr Wygowski"
-            "E-mail: programista.art@gmail.com"
-            "Jadro: autorskie, monolityczne, paging x86_64 4-level\n"
+            "Autor: Dymitr Wygowski\n"
+            "E-mail: programista.art@gmail.com\n"
+            "Jądro: autorskie, monolityczne, paging x86_64 4-level\n"
             "Procesy: Ring 3 + PZB/BZL + prywatne przestrzenie adresowe\n"
-            "FS: BSP2 / Bursztynowy System Plikow\n"
+            "FS: BSP2 / Bursztynowy System Plików\n"
             "GUI: autorski kompozytor warstw\n"
-            "Siec: E1000, DHCP, ARP, ICMP, DNS, TCP/HTTP\n"
+            "Sieć: E1000, DHCP, ARP, ICMP, DNS, TCP/HTTP\n"
         );
         return;
     }
@@ -2235,10 +1939,13 @@ void wykonaj_polecenie(
         }
 
         g_liczba_linii = 1;
+        g_rows_dirty = true;
+        g_output_selection = false;
         g_pierwsza_linia = 0;
         g_scroll_linia = 0;
         g_auto_scroll = true;
         g_linie[0].len = 0;
+        g_linie[0].tekst_x = 0;
         g_linie[0].tekst[0] = '\0';
         g_linie[0].opis[0] = '\0';
         g_linie[0].opis_x = 0;
@@ -2612,12 +2319,12 @@ void wykonaj_polecenie(
             size_t i = 0;
             int linie = 0;
             while (wykaz[i] != '\0' && linie < 3) {
-                char znak[2] = {wykaz[i], '\0'};
-                wypisz(znak);
                 if (wykaz[i] == '\n') ++linie;
                 ++i;
                 if (i >= sizeof(wykaz) - 1U) break;
             }
+            wykaz[i] = '\0';
+            wypisz(wykaz);
         }
         wypisz("Sprawdź aktualizacje | Pobierz | Zainstaluj | Uruchom ponownie\n");
         wypisz("Instalacja wymaga potwierdzenia i nie następuje automatycznie.\n");
@@ -2683,6 +2390,8 @@ NaglowekBur naglowek = {
 extern "C"
 __attribute__((noreturn))
 void _start() {
+    g_linie = new ShellLine[MAXSCROLLBACKLINES]{};
+    if (!g_linie) gui_zakoncz_aplikacje();
     GuiMonitorInfo monitor{};
     if (gui_pobierz_monitor(0, &monitor)) {
         if (ui_skala_poprawna(monitor.scale_x1000 / 10U)) {
