@@ -23,7 +23,7 @@ public:
     bool pokaz(TOkno& okno, int x_ekranu, int y_ekranu) {
         return pokaz(okno.zarzadca_popupow(), x_ekranu, y_ekranu, okno.skala_dpi());
     }
-    bool pokaz(ZarzadcaPopupow& z, int x_ekranu, int y_ekranu, int skala_dpi = 1,
+    bool pokaz(ZarzadcaPopupow& z, int x_ekranu, int y_ekranu, SkalaUI skala_dpi = 1,
                Kontrolka* wywolujaca = nullptr) {
         kontrolka_wywolujaca_ = wywolujaca;
         widoki_[0].zaktualizuj_motyw();

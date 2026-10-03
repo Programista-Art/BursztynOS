@@ -372,6 +372,7 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	uefi_gop.o \
 	dzwiek_blob.o \
 	cytaty_blob.o \
+	sponsorzy_blob.o \
 	heap.o \
 	scheduler.o \
 	skladacz_obrazu.o \
@@ -498,8 +499,11 @@ bursztyn_gui.o: bursztyn_gui.cpp bursztyn_gui.h
 # 12. SHELL .bur
 # ============================================================================
 
-shell_tmp.o: shell.cpp shell_terminal.h bursztyn_gui.h bursztyn_ui/czcionka.h bursztyn_ui/rysowanie.h bursztyn_ui/pasek_przewijania.h
-	$(CXX) $(RING3_FLAGS) -c $< -o $@
+shell_tmp.o: shell.cpp shell_terminal.h shell_context.h shell_sponsors.h wersja_systemu.h bursztyn_gui.h bursztyn_ui/czcionka.h bursztyn_ui/rysowanie.h bursztyn_ui/pasek_przewijania.h bursztyn_ui/menu_kontekstowe.h
+	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
+
+.PHONY: shellblob.o
+shellblob.o: shell_blob.o
 
 shell_blob.o: shell_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
 	$(LD) -T $(RING3_STD_LINKER) $(RING3_LDFLAGS) \
@@ -702,6 +706,11 @@ dzwiek_blob.o: dzwiek.wav
 
 cytaty_blob.o: cytaty.txt
 	$(LD) -r -b binary $< -o $@
+
+sponsorzy_blob.o: dane/sponsorze/sponsorzy
+	$(LD) -r -b binary $< -o $@
+
+kernel.o aktualizacja.o: wersja_systemu.h
 
 # ============================================================================
 # 18. LINKOWANIE JADRA

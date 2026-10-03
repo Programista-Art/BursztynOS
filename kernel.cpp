@@ -136,6 +136,8 @@ extern "C" uint8_t _binary_shell_bin_start[];
 extern "C" uint8_t _binary_shell_bin_end[];
 extern "C" uint8_t _binary_cytaty_txt_start[];
 extern "C" uint8_t _binary_cytaty_txt_end[];
+extern "C" uint8_t _binary_dane_sponsorze_sponsorzy_start[];
+extern "C" uint8_t _binary_dane_sponsorze_sponsorzy_end[];
 
 extern "C" uint8_t _binary_notatnik_bin_start[];
 extern "C" uint8_t _binary_notatnik_bin_end[];
@@ -785,6 +787,8 @@ static const char* const KATALOGI_SYSTEMOWE[] = {
         "/sloty/b/system/boot",
         "/jadro",
         "/system",
+        "/dane",
+        "/dane/sponsorze",
         "/system/konfig",
         "/system/motywy",
         "/programy",
@@ -1292,6 +1296,15 @@ void instaluj_wbudowane_programy() {
         wypisz_log("[BSP-BLAD] Nie mozna zainstalowac /cytaty.txt.");
     } else {
         wypisz_log("[BSP] /cytaty.txt zainstalowany.");
+    }
+
+    uint32_t sponsorzy_rozmiar=0;
+    if(!pobierz_rozmiar_bloba(_binary_dane_sponsorze_sponsorzy_start,
+        _binary_dane_sponsorze_sponsorzy_end,&sponsorzy_rozmiar) ||
+       !zapisz_plik_od_nowa("/dane/sponsorze/sponsorzy",
+        reinterpret_cast<const char*>(_binary_dane_sponsorze_sponsorzy_start),sponsorzy_rozmiar)) {
+        wypisz_log("[BSP-BLAD] Nie mozna zainstalowac listy sponsorow.");
+        if(scisla_instalacja) pliki_instalacja_ok=false;
     }
 
     //testowy obrazek test.bmp + test1.bmp - diagnostyka i atomowość

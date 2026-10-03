@@ -47,7 +47,7 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
             ]})
             time.sleep(0.03)
         elif kind == "button":
-            command("input-send-event", {"events": [{"type": "btn", "data": {"button": "left", "down": bool(action[1])}}]})
+            command("input-send-event", {"events": [{"type": "btn", "data": {"button": action[2] if len(action)>2 else "left", "down": bool(action[1])}}]})
             time.sleep(0.03)
         elif kind == "wheel":
             for _ in range(action[2]):

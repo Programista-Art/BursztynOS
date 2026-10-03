@@ -36,6 +36,8 @@
 #include "bursztyn_ui/czcionka.h"
 #include "bursztyn_ui/rysowanie.h"
 #include "bursztyn_ui/pasek_przewijania.h"
+#include "bursztyn_ui/menu_kontekstowe.h"
+#include "wersja_systemu.h"
 using namespace BursztynUI;
 
 
@@ -184,6 +186,8 @@ constexpr uint64_t BUR_DATA_SIZE   = 0x40000ULL;
 constexpr uint64_t BUR_DATA_VADDR  = 0x1021000ULL;
 
 constexpr size_t SHELL_INPUT_CAPACITY = 2048;
+#include "shell_context.h"
+#include "shell_sponsors.h"
 constexpr size_t SHELL_HISTORY_ENTRY_CAPACITY = 2048;
 constexpr size_t MAX_SCIEZKA = 512;
 constexpr size_t MAX_NAZWA_HOSTA = 254;
@@ -520,6 +524,7 @@ int pobierz_znak_blokujaco() {
         bws_zdarzenie e{};
         if (!gui_czekaj_na_zdarzenie(&e)) continue;
         if (e.typ == BWS_ZDARZENIE_KLAWISZ_FIZYCZNY) key_modifiers = e.przyciski;
+        if (shell_context_event(e)) continue;
 
         if (e.typ == BWS_ZDARZENIE_EKRAN) {
             if (ui_skala_poprawna(e.kod)) {
@@ -744,6 +749,7 @@ bool pobierz_linie(char* bufor, size_t pojemnosc) {
     bool przepelnienie=false;
     bufor[0]=0;g_caret=g_input_anchor=0;g_input_scroll_px=0;
     g_obecny_bufor_wejscia=bufor;
+    g_input_capacity=pojemnosc;
     int history_index=-1;char unfinished[SHELL_INPUT_CAPACITY]={};
     shell_odswiez_linie_wejsciowa();
     for (;;) {
@@ -1125,6 +1131,7 @@ void wypisz_pomoc() {
     shell_wypisz_wiersz_pomocy("    pulpit | wyjdz | exit", "Kończy powłokę.");
     shell_wypisz_wiersz_pomocy("    czas", "Pokazuje czas RTC.");
     shell_wypisz_wiersz_pomocy("    system", "Informacje o systemie.");
+    shell_wypisz_wiersz_pomocy("    wsparcie", "Wyświetla listę wspierających Bursztyn OS.");
     shell_wypisz_wiersz_pomocy("    wersja", "Pokazuje aktualną wersję systemu.");
     shell_wypisz_wiersz_pomocy("    aktualizacja [sprawdz]", "Pokazuje wersję i stan aktualizacji.");
     shell_wypisz_wiersz_pomocy("    pci", "Wyświetla /logi/pci.txt.");
@@ -1841,7 +1848,7 @@ void wykonaj_polecenie(
         }
 
         wypisz(
-            "OS: Bursztyn OS x86_64\n"
+            "OS: " BURSZTYN_NAZWA_WERSJI "\n"
             "Autor: Dymitr Wygowski\n"
             "E-mail: programista.art@gmail.com\n"
             "Jądro: autorskie, monolityczne, paging x86_64 4-level\n"
@@ -2277,19 +2284,13 @@ void wykonaj_polecenie(
             wypisz("Składnia: wersja\n");
             return;
         }
-        char bufor[64] = {};
-        if (!czytaj_plik("/system/wersja", bufor, sizeof(bufor) - 1U)) {
-            wypisz("Aktualna wersja: 0.1.0 (wbudowana)\n");
-        } else {
-            bufor[sizeof(bufor) - 1U] = '\0';
-            wypisz("Aktualna wersja: ");
-            wypisz(bufor);
-            if (bufor[0] != '\0') {
-                size_t n = 0;
-                while (n < sizeof(bufor) && bufor[n] != '\0') ++n;
-                if (n == 0 || bufor[n - 1] != '\n') wypisz("\n");
-            }
-        }
+        wypisz(BURSZTYN_NAZWA_WERSJI "\n");
+        return;
+    }
+
+    if (tekst_rowny(cmd, "wsparcie")) {
+        if(a.liczba!=1) wypisz("Składnia: wsparcie\n");
+        else shell_sponsors();
         return;
     }
 
@@ -2298,17 +2299,7 @@ void wykonaj_polecenie(
             wypisz("Składnia: aktualizacja [sprawdz]\n");
             return;
         }
-        char wersja[64] = {};
-        if (!czytaj_plik("/system/wersja", wersja, sizeof(wersja) - 1U)) {
-            wypisz("Aktualna wersja: 0.1.0 (wbudowana)\n");
-        } else {
-            wersja[sizeof(wersja) - 1U] = '\0';
-            wypisz("Aktualna wersja: ");
-            wypisz(wersja);
-            size_t n = 0;
-            while (n < sizeof(wersja) && wersja[n] != '\0') ++n;
-            if (n == 0 || wersja[n - 1] != '\n') wypisz("\n");
-        }
+        wypisz("Aktualna wersja: " BURSZTYN_NAZWA_WERSJI "\n");
         char wykaz[512] = {};
         if (!czytaj_plik("/aktualizacje/wykazaktualizacji.wykaz", wykaz,
                           sizeof(wykaz) - 1U)) {
@@ -2429,6 +2420,7 @@ void _start() {
         "\n"
         "==================================================\n"
         " Powłoka Bursztynowa bsh v3.0 (Unicode)\n"
+        " " BURSZTYN_NAZWA_WERSJI "\n"
         " Autor: Dymitr Wygowski\n"
         " Ring 3 / BWS / BSP2 / PZB\n"
         "==================================================\n"

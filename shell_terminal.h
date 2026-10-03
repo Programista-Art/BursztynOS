@@ -301,27 +301,31 @@ ShellPosition shell_hit_output(int mouse_x,int mouse_y) {
     }
     return {row.line,i};
 }
-void shell_copy_selection() {
+bool shell_copy_selection() {
     // Same MIME and NUL-terminated convention as PoleTekstowe::kopiuj_do_schowka.
     size_t capacity=g_output_selection?static_cast<size_t>(MAXSCROLLBACKLINES)*4261:2048;
-    char* text=new char[capacity];if(!text) return;size_t n=0;
+    char* text=new char[capacity];if(!text) return false;size_t n=0;
     if(g_output_selection) {
         ShellPosition a=g_selection_anchor,b=g_selection_end;
         if(shell_before(b,a)) { ShellPosition t=a;a=b;b=t; }
+        if(a.line<0 || b.line<0) { delete[] text;return false; }
         for(int l=a.line;l<=b.line && l<g_liczba_linii;++l) {
             char* line=g_copy_text;shell_line_text(l,line);size_t length=shell_length(line);
             size_t begin=l==a.line?a.byte:0,end=l==b.line?b.byte:length;
-            for(size_t i=begin;i<end && i<length;++i) text[n++]=line[i];
-            if(l<b.line) text[n++]='\n';
+            for(size_t i=begin;i<end && i<length && n+1<capacity;++i) text[n++]=line[i];
+            if(l<b.line && n+1<capacity) text[n++]='\n';
         }
     } else if(g_obecny_bufor_wejscia) {
         size_t a=g_caret<g_input_anchor?g_caret:g_input_anchor,b=g_caret>g_input_anchor?g_caret:g_input_anchor;
+        size_t length=shell_length(g_obecny_bufor_wejscia);
+        if(b>length || b-a>=capacity) { delete[] text;return false; }
         for(size_t i=a;i<b;++i) text[n++]=g_obecny_bufor_wejscia[i];
     }
-    text[n]=0;if(n) clipboard_set("text/plain",text,n+1);delete[] text;
+    text[n]=0;bool ok=n && clipboard_set("text/plain",text,n+1);delete[] text;return ok;
 }
 void shell_delete_range(char* text,size_t begin,size_t end) {
     size_t length=shell_length(text);
+    if(begin>end || end>length) return;
     for(size_t i=end;i<=length;++i) text[begin+i-end]=text[i];
     g_caret=g_input_anchor=begin;
 }

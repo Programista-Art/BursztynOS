@@ -16,11 +16,14 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define BURSZTYN_WERSJA_MAJOR 0U
-#define BURSZTYN_WERSJA_MINOR 1U
-#define BURSZTYN_WERSJA_PATCH 0U
+#define BURSZTYN_WERSJA_MAJOR 1U
+#define BURSZTYN_WERSJA_MINOR 0U
+#define BURSZTYN_WERSJA_PATCH 1U
+/* Rewizja prezentacji; trzyczęściowa struktura aktualizacji pozostaje bez zmian. */
+#define BURSZTYN_WERSJA_REWIZJA 6U
 
-#define BURSZTYN_WERSJA_TEKST "0.1.0"
+#define BURSZTYN_WERSJA_TEKST "1.0.1.6"
+#define BURSZTYN_NAZWA_WERSJI "Bursztyn OS v" BURSZTYN_WERSJA_TEKST
 
 /* Kanal domyslny dla wykazu aktualizacji. */
 #define BURSZTYN_KANAL_DOMYSLNY "stabilny"
