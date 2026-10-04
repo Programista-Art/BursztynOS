@@ -4573,69 +4573,94 @@ extern "C" bool pobierz_metadane_tworu(
     return true;
 }
 
-extern "C" bool przenies_twor(
-    const char* sciezka,
-    const char* folder_docelowy
-) {
+#ifdef BURSZTYN_PSF_HOST_TEST
+static unsigned move_failure_stage = 0;
+extern "C" void psf_test_move_failure(unsigned stage) { move_failure_stage=stage; }
+extern "C" bool psf_test_lock_held() { return __atomic_load_n(&blokada_psf,__ATOMIC_RELAXED)!=0; }
+#endif
+
+extern "C" PsfMoveWynik psf_przenies_twor_wynik(const char* sciezka,const char* folder_docelowy) {
     BlokadaPSF blokada;
-    if (!psf_gotowy || !bezpieczna_sciezka(sciezka) ||
-        !bezpieczna_sciezka(folder_docelowy)) return false;
-    if ((sciezka[0] == '/' && sciezka[1] == '\0') ||
-        (folder_docelowy[0] == '/' && folder_docelowy[1] == '\0' &&
-         sciezka[0] == '/' && sciezka[1] == '\0')) return false;
-
-    char nazwa[PSF_MAX_NAZWA] = {};
-    const uint64_t stary_rodzic_id =
-        rozwiaz_sciezke(sciezka, nazwa, true);
-    const uint64_t cel_id =
-        rozwiaz_sciezke(sciezka, nullptr, false);
-    const uint64_t nowy_rodzic_id =
-        rozwiaz_sciezke(folder_docelowy, nullptr, false);
-    if (stary_rodzic_id == 0 || cel_id == 0 || nowy_rodzic_id == 0 ||
-        stary_rodzic_id == nowy_rodzic_id || !poprawna_nazwa(nazwa))
-        return false;
-
-    wezel_indeksowy* cel = pobierz_wezel(cel_id);
-    wezel_indeksowy* stary_rodzic = pobierz_wezel(stary_rodzic_id);
-    wezel_indeksowy* nowy_rodzic = pobierz_wezel(nowy_rodzic_id);
-    if (!cel || !stary_rodzic || !nowy_rodzic ||
-        stary_rodzic->typ != TYP_KATALOG || nowy_rodzic->typ != TYP_KATALOG)
-        return false;
-
-    /* Bez dowiazan/symlinkow kanoniczny prefiks komponentu jednoznacznie
-     * wykrywa probe przeniesienia folderu do jego wlasnego poddrzewa. */
-    if (cel->typ == TYP_KATALOG) {
-        size_t i = 0;
-        while (sciezka[i] != '\0' && folder_docelowy[i] == sciezka[i]) ++i;
-        if (sciezka[i] == '\0' &&
-            (folder_docelowy[i] == '\0' || folder_docelowy[i] == '/'))
-            return false;
+    if(!psf_gotowy || !bezpieczna_sciezka(sciezka) || !bezpieczna_sciezka(folder_docelowy))return PSF_MOVE_BAD_PATH;
+    char nazwa[PSF_MAX_NAZWA]{};
+    const uint64_t cel_id=rozwiaz_sciezke(sciezka,nullptr,false);
+    if(!cel_id)return PSF_MOVE_MISSING_SOURCE;
+    if(cel_id==dysk_superblok->id_korzenia)return PSF_MOVE_ROOT;
+    const uint64_t stary_id=rozwiaz_sciezke(sciezka,nazwa,true);
+    const uint64_t nowy_id=rozwiaz_sciezke(folder_docelowy,nullptr,false);
+    auto* cel=pobierz_wezel(cel_id);
+    auto* stary=pobierz_wezel(stary_id);
+    auto* nowy=pobierz_wezel(nowy_id);
+    if(!stary || !nowy || nowy->typ!=TYP_KATALOG || stary->typ!=TYP_KATALOG || !cel || !poprawna_nazwa(nazwa))
+        return PSF_MOVE_BAD_DESTINATION;
+    if(cel->typ!=TYP_PLIK && cel->typ!=TYP_KATALOG)return PSF_MOVE_MISSING_SOURCE;
+    // Walk resolved destination inodes, not textual prefixes (slot aliases can differ).
+    if(cel->typ==TYP_KATALOG) {
+        char translation[160];
+        const char* destination=psf_przetlumacz_sciezke_slotu(folder_docelowy,translation);
+        uint64_t ancestor=dysk_superblok->id_korzenia;size_t pos=1;
+        while(destination[pos]) {
+            char segment[PSF_MAX_NAZWA]{};bool last=false;
+            if(!pobierz_segment(destination,&pos,segment,&last))return PSF_MOVE_BAD_DESTINATION;
+            auto step=znajdz_wpis_w_katalogu(ancestor,segment);
+            if(!step.znaleziony)return PSF_MOVE_BAD_DESTINATION;
+            ancestor=step.id_wezla;
+            if(ancestor==cel_id)return PSF_MOVE_SELF_DESCENDANT;
+        }
     }
+    const auto old_slot=znajdz_wpis_w_katalogu(stary_id,nazwa);
+    if(!old_slot.znaleziony || old_slot.id_wezla!=cel_id)return PSF_MOVE_MISSING_SOURCE;
+    // Confirming the current parent is a safe no-op, not a spurious error.
+    if(stary_id==nowy_id)return PSF_MOVE_OK;
+    if(znajdz_wpis_w_katalogu(nowy_id,nazwa).znaleziony)return PSF_MOVE_COLLISION;
+    auto* old_entries=pobierz_wpisy_katalogowe(old_slot.id_bloku_danych);
+    if(!old_entries || old_slot.indeks_wpisu>=wpisow_katalogowych_na_blok())return PSF_MOVE_PREPARE_FAILED;
+    const wpis_katalogowy saved_entry=old_entries[old_slot.indeks_wpisu];
+    const wezel_indeksowy saved_old=*stary,saved_new=*nowy;
+#ifdef BURSZTYN_PSF_HOST_TEST
+    if(move_failure_stage==1)return PSF_MOVE_PREPARE_FAILED;
+#endif
+    if(!dodaj_wpis_do_katalogu(nowy_id,cel_id,nazwa))return PSF_MOVE_PREPARE_FAILED;
+    const auto new_slot=znajdz_wpis_w_katalogu(nowy_id,nazwa);
+    auto rollback=[&]() {
+        if(new_slot.znaleziony) {
+            auto* entries=pobierz_wpisy_katalogowe(new_slot.id_bloku_danych);
+            if(entries) {
+                entries[new_slot.indeks_wpisu]={};
+                oznacz_blok_jako_brudny(absolutny_blok_danych(new_slot.id_bloku_danych));
+            }
+        }
+        // Return blocks allocated exclusively to prepare this directory entry.
+        for(size_t i=0;i<PSF_MAX_BLOKOW_W_WEZLE;++i)
+            if(saved_new.wskazniki_blokow[i]==BARK_BLOKU && nowy->wskazniki_blokow[i]!=BARK_BLOKU)
+                (void)zwolnij_blok_danych(nowy->wskazniki_blokow[i]);
+        *nowy=saved_new;*stary=saved_old;
+        old_entries[old_slot.indeks_wpisu]=saved_entry;
+        oznacz_wezel_jako_brudny(stary_id);oznacz_wezel_jako_brudny(nowy_id);
+        oznacz_blok_jako_brudny(absolutny_blok_danych(old_slot.id_bloku_danych));
+    };
+    if(!new_slot.znaleziony) {rollback();return PSF_MOVE_PREPARE_FAILED;}
+#ifdef BURSZTYN_PSF_HOST_TEST
+    if(move_failure_stage==2) {rollback();return PSF_MOVE_PREPARE_FAILED;}
+#endif
+    old_entries[old_slot.indeks_wpisu]={};
+    if(stary->rozmiar_w_bajtach)--stary->rozmiar_w_bajtach;
+    oznacz_wezel_jako_brudny(stary_id);
+    oznacz_blok_jako_brudny(absolutny_blok_danych(old_slot.id_bloku_danych));
+#ifdef BURSZTYN_PSF_HOST_TEST
+    if(move_failure_stage==3) {rollback();return PSF_MOVE_COMMIT_FAILED;}
+#endif
+    if(!bsp_zapisz_zmiany()) {
+        rollback();
+        // Best effort restore on media too. Dirty cache remains if I/O is still failing.
+        (void)bsp_zapisz_zmiany();
+        return PSF_MOVE_COMMIT_FAILED;
+    }
+    return PSF_MOVE_OK;
+}
 
-    if (znajdz_wpis_w_katalogu(nowy_rodzic_id, nazwa).znaleziony)
-        return false; /* nigdy nie nadpisujemy celu */
-
-    const ZnalezionyWpis stary =
-        znajdz_wpis_w_katalogu(stary_rodzic_id, nazwa);
-    if (!stary.znaleziony || stary.id_wezla != cel_id) return false;
-
-    wpis_katalogowy* wpisy = pobierz_wpisy_katalogowe(stary.id_bloku_danych);
-    if (!wpisy || stary.indeks_wpisu >= wpisow_katalogowych_na_blok())
-        return false;
-
-    /* Najpierw publikujemy nowy wpis. Po pomyslnym dodaniu usuniecie
-     * zweryfikowanego starego slotu nie wymaga juz alokacji. */
-    if (!dodaj_wpis_do_katalogu(nowy_rodzic_id, cel_id, nazwa))
-        return false;
-    wpisy[stary.indeks_wpisu].id_wezla = 0;
-    wyzeruj_pamiec(wpisy[stary.indeks_wpisu].nazwa, PSF_MAX_NAZWA);
-    const uint64_t absolutny = absolutny_blok_danych(stary.id_bloku_danych);
-    if (absolutny != UINT64_MAX) oznacz_blok_jako_brudny(absolutny);
-    if (stary_rodzic->rozmiar_w_bajtach > 0)
-        --stary_rodzic->rozmiar_w_bajtach;
-    oznacz_wezel_jako_brudny(stary_rodzic_id);
-    (void)bsp_zapisz_zmiany();
-    return true;
+extern "C" bool przenies_twor(const char* sciezka,const char* folder_docelowy) {
+    return psf_przenies_twor_wynik(sciezka,folder_docelowy)==PSF_MOVE_OK;
 }
 
 extern "C" bool kopiuj_twor_z_pzb(

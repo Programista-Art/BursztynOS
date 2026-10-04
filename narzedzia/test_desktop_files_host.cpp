@@ -77,6 +77,29 @@ int main() {
             test_ustaw_aktywny_motyw(nullptr);
         }
     }
+    // Failed directory move opens one notice; idle timers do not republish it.
+    snprintf(pulpit_cel,sizeof(pulpit_cel),"%s/target.txt",SCIEZKA_PULPIT);
+    files[pulpit_cel]=true;CHECK(otworz_pulpit_modal(PulpitModalTyp::MOVE));CHECK(pulpit_wybor->przejdz_do_katalogu("/dest"));
+    deny_operation=true;zatwierdz_pulpit_modal();deny_operation=false;
+    CHECK(pulpit_modal_typ==PulpitModalTyp::NOTICE);CHECK(files.count(pulpit_cel));CHECK(!files.count("/dest/target.txt"));
+    bws_zdarzenie timer{};timer.typ=BWS_ZDARZENIE_TIMER;obsluz_popupy_pulpitu(timer);
+    int blits=test_popup_blits,refresh=test_refreshes;
+    for(int i=0;i<100;++i)CHECK(obsluz_popupy_pulpitu(timer));
+    CHECK(test_popup_blits==blits);CHECK(test_refreshes==refresh);zatwierdz_pulpit_modal();
+    CHECK(test_refreshes==refresh);CHECK(files.count(pulpit_cel));
+    auto base=*gui_pobierz_motyw();
+    for(bool folder:{false,true}) {
+        files[pulpit_cel]=folder;hash_pulpitu_wazny=false;odswiez_wpisy_pulpitu();
+        int selected=-1;for(int i=0;i<liczba_wpisow_pulpitu;++i)if(!strcmp(wpisy_pulpitu[i].nazwa,"target.txt"))selected=i;
+        CHECK(selected>=0);zaznaczony_wpis_pulpitu=selected;
+        for(uint32_t color:{0x112233U,0xabcdefU,0x456789U}) {
+            auto theme=base;theme.zaznaczenie=color;theme.akcent=color^0x555555;test_ustaw_aktywny_motyw(&theme);
+            test_paint_rects.clear();test_capture_paints=true;RysujWpisyPulpitu();test_capture_paints=false;
+            bool background=false,border=false;for(auto r:test_paint_rects){background|=r.color==theme.zaznaczenie;border|=r.color==theme.akcent;}
+            CHECK(background);CHECK(border);CHECK(zaznaczony_wpis_pulpitu==selected);CHECK(wpisy_pulpitu[selected].folder==folder);
+        }
+    }
+    test_ustaw_aktywny_motyw(nullptr);
     delete pulpit_menu;delete pulpit_dialog;delete pulpit_wybor;
     printf("Desktop production file actions: %d/%d PASS (RAM filesystem)\n",checks,checks);
 }

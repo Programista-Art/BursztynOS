@@ -1,3 +1,4 @@
+#include "move_trace.h"
 /*
  * Bursztyn OS - Skladacz Obrazu
  *
@@ -1839,6 +1840,11 @@ void skladacz_obrazu_oznacz_dirty() {
 void skladacz_obrazu_oznacz_dirty_rect(int x,int y,int width,int height){
     GuiDirtyRect r{x,y,width,height};const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
     if(!rect_clip(&r,sw,sh))return;
+#if BURSZTYNDIAGMOVE
+    MoveTrace::invalidate(pid_poprawny(aktualny_pid) && tablica_warstw[aktualny_pid].z_order==0,
+        pid_poprawny(aktualny_pid) && tytul_okna[aktualny_pid][0]=='E' &&
+        tytul_okna[aktualny_pid][1]=='k');
+#endif
     gui_perf_add(aktualny_pid,GP_DIRTY);
     uint64_t f=irq_off();++licznik_dirty;++dirty_generation;
     /* Scalaj przechodnio tylko regiony, dla ktorych bounding box jest
@@ -1870,6 +1876,7 @@ void skladacz_obrazu_oznacz_ruch_kursora(int old_x,int old_y,int new_x,int new_y
 }
 
 void skladacz_obrazu_obsluz_dirty() {
+    MoveTrace::report();
     gui_perf_report();
 #if BURSZTYNDIAGGUIRUNTIME
     extern void grafika_runtime_diag_snapshot();
@@ -1961,6 +1968,7 @@ void skladacz_obrazu_obsluz_dirty() {
     else for(uint32_t ri=0;ri<count;++ri){const auto& r=work[ri];grafika_prezentuj_region(r.x,r.y,r.width,r.height);}
     grafika_zakoncz_scene();
     if(drag_frame_work)++drag_frames_presented;
+    MoveTrace::compose();
     const uint64_t present_end=hpet_dostepny()?czas_monotoniczny_us():0;
 #if BURSZTYN_DIAG_BOOT
     static bool logged_first_compose = false;

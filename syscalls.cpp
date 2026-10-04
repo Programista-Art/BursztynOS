@@ -1,3 +1,4 @@
+#include "move_trace.h"
 #include "gui_runtime_diag.h"
 /*
  * Bursztyn OS - Bursztynowe Wywolania Systemowe (BWS)
@@ -1452,13 +1453,28 @@ __attribute__((noinline)) uint64_t bws_przenies(
     char folder[MAX_SCIEZKA_PLIKU_BWS] = {};
     if (!pobierz_sciezke_pliku(arg1, sciezka) ||
         !pobierz_sciezke_pliku(arg2, folder)) return 0;
+    MoveTrace::begin(sciezka,folder);
     if (!proces_moze_modyfikowac_obiekt(proces, sciezka) ||
         !proces_moze_modyfikowac_sciezke(proces, folder) ||
         !poziom_pliku_pozwala_modyfikowac(proces, folder)) {
+        MoveTrace::text("pzb","DENY");
         wypisz_log("[PZB] file_move=DENY");
         return 0;
     }
-    const bool wynik = przenies_twor(sciezka, folder);
+    MoveTrace::text("pzb","ALLOW");
+#if BURSZTYNDIAGMOVE
+    psf_metadane source_meta{};
+    if(pobierz_metadane_tworu(sciezka,&source_meta))MoveTrace::text("sourcetype",source_meta.typ==TYP_KATALOG?"directory":"file");
+#endif
+    MoveTrace::text("stage","fsbegin");
+    const auto result = psf_przenies_twor_wynik(sciezka, folder);
+    const bool wynik = result==PSF_MOVE_OK;
+#if BURSZTYNDIAGMOVE
+    const char* reasons[]={"OK","BAD_PATH","MISSING_SOURCE","BAD_DESTINATION","ROOT","SELF_DESCENDANT","COLLISION","PREPARE_FAILED","COMMIT_FAILED"};
+    MoveTrace::text("fsresult",reasons[result]);
+    MoveTrace::text("locksreleased","yes"); // PSF RAII guard has returned before any logging/GUI work.
+    MoveTrace::text("rollback",result==PSF_MOVE_COMMIT_FAILED?"RAM_restored_media_best_effort":"no_partial_entry");
+#endif
     wypisz_log(wynik ? "[PZB] file_move=ALLOW" : "[PSF] file_move=ERROR");
     if (wynik) powiadom_zmiane_systemu_plikow(sciezka, BWS_FILE_MOVE);
     return wynik ? 1ULL : 0ULL;

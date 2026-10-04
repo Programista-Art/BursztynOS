@@ -1,3 +1,4 @@
+#include <map>
 #pragma once
 #include <stdio.h>
 #include <stdlib.h>
@@ -79,22 +80,27 @@ bool clipboard_read(const char* /*mime*/, void* dane, uint64_t pojemnosc, uint64
 void* gui_malloc(unsigned long rozmiar) { return malloc(rozmiar); }
 void gui_free(void* ptr) { free(ptr); }
 void* gui_realloc(void* ptr, size_t size) { return realloc(ptr, size); }
-struct TestPaintRect {int x,y,w,h;};
+struct TestPaintRect {int x,y,w,h;uint32_t color=0;};
+static int test_popup_blits=0,test_refreshes=0;
+static bool test_capture_pixels=false;
+static std::map<std::pair<int,int>,uint32_t> test_pixels;
 static bool test_capture_paints=false;
 static std::vector<TestPaintRect> test_paint_rects;
-void gui_rysuj_prostokat(int x,int y,int w,int h,uint32_t) {
-    if(test_capture_paints)test_paint_rects.push_back({x,y,w,h});
+void gui_rysuj_prostokat(int x,int y,int w,int h,uint32_t color) {
+    if(test_capture_paints)test_paint_rects.push_back({x,y,w,h,color});
+    if(test_capture_pixels)for(int j=0;j<h;++j)for(int i=0;i<w;++i)test_pixels[{x+i,y+j}]=color;
 }
-bool gui_blit(int x,int y,int w,int h,const uint32_t*) {
+bool gui_blit(int x,int y,int w,int h,const uint32_t* data) {
     if(test_capture_paints)test_paint_rects.push_back({x,y,w,h});
+    if(test_capture_pixels)for(int j=0;j<h;++j)for(int i=0;i<w;++i)test_pixels[{x+i,y+j}]=data[j*w+i];
     return true;
 }
-bool gui_blit_popup(int, int, int, int, const uint32_t*) { return true; }
+bool gui_blit_popup(int, int, int, int, const uint32_t*) { ++test_popup_blits;return true; }
 void gui_wypisz_tekst_kolor_skala(int, int, uint32_t, int, const char*) {}
 void motyw_odswiez_lokalny() {}
 bool gui_ustaw_tytul_okna(const char*) { return true; }
 uint32_t gui_skala_procent() { return 100; }
-void gui_odswiez() {}
+void gui_odswiez() {++test_refreshes;}
 gui_akcja_belki gui_hit_test_belki(int, int, int, int, int) { return GUI_BELKA_BRAK; }
 void gui_rysuj_standardowa_belke(int, int, int, const char*, bool) {}
 bool gui_minimalizuj_okno() { return true; }

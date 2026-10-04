@@ -1552,3 +1552,16 @@ test-desktop-files-host:
 	@mkdir -p .bursztyn-ui-test
 	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined narzedzia/test_desktop_files_host.cpp -o .bursztyn-ui-test/test-desktop-files
 	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-desktop-files
+
+# Opt-in aggregate move diagnostics; no normal-build logging or GPU behavior changes.
+BURSZTYNDIAGMOVE ?= 0
+ifeq ($(BURSZTYNDIAGMOVE),1)
+KERNEL_CXXFLAGS += -DBURSZTYNDIAGMOVE=1
+endif
+syscalls.o grafika.o skladacz_obrazu.o: move_trace.h
+
+.PHONY: test-filesystem-move-host
+test-filesystem-move-host: installer-unit-test
+	@mkdir -p .installertest
+	g++ -std=c++17 -O0 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined narzedzia/test_move_authorization.cpp storage_format.cpp psf.cpp -o .installertest/test-move-authorization
+	ASAN_OPTIONS=detect_leaks=0 .installertest/test-move-authorization

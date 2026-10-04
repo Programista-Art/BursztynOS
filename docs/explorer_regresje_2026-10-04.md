@@ -89,3 +89,40 @@ To rozmiary pojedynczych ramek, nie pomiar łącznego szczytu zagnieżdżonego s
 W katalogu projektu nie ma `wirtualnydysk.img` ani `wirtualny_dysk.img`. Znaleziony `/home/programista/Pulpit/wirtualny_dysk.img` ma 4 GiB, zerowe pierwsze 1024 bajty, sygnaturę MBR `0000` i brak sygnatury GPT. Nie został zidentyfikowany jako dysk używany w ostatnim teście użytkownika. Poproszono o jego właściwą ścieżkę. Nie tworzono ani nie formatowano obrazu, nie instalowano systemu i nie modyfikowano jego zawartości.
 
 Po wskazaniu właściwego obrazu pozostaje jedna dozwolona sesja QEMU z SDL, `virtio-tablet-pci`, `virtio-keyboard-pci` i `tcg,thread=multi`. Mutacje muszą ograniczać się do nowego dedykowanego katalogu testowego na tym dysku. Do obserwacji pozostają: otwarcie Explorera; natychmiastowe create/rename/move; edycja Backspace/Delete; chooser; brak zbędnego scrolla i poprawne przewijanie; nawigacja bez flash; brak starej brązowej ramki; `Usuń` w menu; prawy klik pustego pulpitu; tworzenie na pulpicie; brak click-through; przełączanie motywu. Nie wykonywać reinstalacji, formatowania, testów destrukcyjnych istniejących danych, reboot loopów ani GDB.
+
+
+## Ponowne wznowienie sesji 01a10575 — aktualny worktree
+
+Powyższe wyniki i lista zmian opisują poprzedni etap. Przy wznowieniu zastano dalsze, niecommitowane zmiany; zachowano je. Bieżąca weryfikacja:
+
+| Zestaw | Wynik |
+|---|---|
+| Explorer | 11 965/11 965 PASS |
+| Operacje pulpitu | 241/241 PASS |
+| BursztynUI | 1379/1379 PASS |
+| Command bindings | 23/23 PASS |
+| Routing WM | 152/152 PASS |
+| Dekoracje WM | PASS, 100% i 125% |
+| Motywy unit | 155/155 PASS, również ASan/UBSan |
+| Motywy GUI | 25/25 PASS |
+| Storage/BSP2 | 10 493 PASS, 0 FAIL |
+| Autoryzacja przenoszenia BWS | 27 asercji PASS |
+| Diagnostyka przenoszenia w kompozytorze, BURSZTYNDIAGMOVE=1 | Kompilacja PASS |
+| Końcowe make -j2 all iso | PASS, exit 0 |
+| git diff --check | PASS |
+
+W tym wznowieniu poprawiono dwa pliki kodu/testów:
+
+- `skladacz_obrazu.cpp`: diagnostyka odwoływała się do nieistniejącego `warstwa_obrazu::tytul`, blokując budowę. Używa teraz istniejącej `tytul_okna` z walidacją indeksu PID. Odczyt jest kompilowany wyłącznie przy włączonym `BURSZTYNDIAGMOVE`; normalna budowa nie wykonuje diagnostycznej klasyfikacji.
+- `narzedzia/instalator/test_storage.cpp`: nowy test oczekiwał automatycznego powrotu trwałego zapisu po błędzie flush. Istniejące BSP2 celowo blokuje trwały zapis po błędzie I/O. Przeniesiono fault test po sprawdzeniach wymagających zdrowego backendu; test sprawdza zachowanie źródła, brak publikacji celu, zwolnienie blokady oraz utrzymanie odmowy flush po ustąpieniu awarii mocka. Nie zmieniano produkcyjnej polityki I/O. Pierwszy przebieg zatrzymał się na tym oczekiwaniu; osobny końcowy przebieg filesystemu przeszedł.
+- `docs/explorer_regresje_2026-10-04.md`: niniejsze uzupełnienie wyników.
+
+Pozostałe zastane zmiany worktree obejmowały `Makefile`, `bursztyn_ui/popup.h`, `bursztyn_ui/rysowanie.h`, `grafika.cpp`, `menedzer_okien.cpp`, `narzedzia/bursztyn_ui_host_fixture.h`, `narzedzia/test_desktop_files_host.cpp`, `narzedzia/test_explorer_host.cpp`, `plik_popup_ui.h`, `programy/eksplorator/eksplorator-plikow.cpp`, `psf.cpp`, `psf.h`, `syscalls.cpp` oraz nowe `move_trace.h` i `narzedzia/test_move_authorization.cpp`. Nie cofano ich ani nie przypisywano ich temu wznowieniu.
+
+Brak zgłoszeń ASan/UBSan w końcowych testach C++; leak detection wyłączone. Początkowy błąd testu był nieudaną asercją, nie raportem sanitizera. Testy filesystemu używają RAM/mocka, nie dysku użytkownika.
+
+Aktualne ramki Ring 3: Explorer `_start` 2400 B, `submit_path` 640 B, maksymalna ramka jednostki Explorera `DialogPliku::normalizuj_sciezke` 2624 B; WM `_start` 1376 B, `odswiez_wpisy_pulpitu` 7344 B, `normalizuj_sciezke` 2624 B. Pomiar pojedynczych ramek, bez pomiaru szczytu stosu.
+
+Logi: `/tmp/resume-01a10575-tests.log`, `/tmp/resume-01a10575-filesystem.log`, `/tmp/resume-01a10575-bindings.log`, `/tmp/resume-01a10575-theme.log`, `/tmp/resume-01a10575-build-final.log`.
+
+**Runtime nadal niepotwierdzony.** Historyczna sekcja „QEMU: 0 sesji” powyżej poprzedza późniejszą próbę opisaną w `docs/explorer_live_runtime_2026-10-04.md`: jedna sesja Live ISO bez persistent disk zatrzymała się przed pulpitem. Nie spełniła warunku testowania obecnego `wirtualnydysk.img`. W tym wznowieniu nie uruchomiono QEMU ponownie, nie formatowano ani nie modyfikowano obrazów dysku. Żaden punkt checklisty Explorera w runtime nie otrzymuje PASS. Kolejna sesja wymaga zmiany wcześniej ustalonego limitu jednej próby i identyfikacji właściwego obrazu przez użytkownika.

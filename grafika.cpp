@@ -1,3 +1,4 @@
+#include "move_trace.h"
 #include "wm_input.h"
 #include "gui_runtime_diag.h"
 #include "kursor_prezentacja.h"
@@ -433,6 +434,7 @@ public:
         if (static_cast<const void*>(bufor) != static_cast<const void*>(const_cast<const uint8_t*>(framebuffer_fizyczny))) {
             KopiujCalyBufor32(bufor);
         }
+        MoveTrace::flush_request();
         virtio_gpu_transfer_and_flush(drv, 0, 0, szerokosc, wysokosc);
     }
 
@@ -463,6 +465,7 @@ public:
         }
         gui_perf_add(0,GP_COPY_NS,gui_perf_now()-copy_start);
         const auto gpu_start=gui_perf_now();
+        MoveTrace::flush_request();
         virtio_gpu_transfer_and_flush(drv, static_cast<uint32_t>(rx), static_cast<uint32_t>(ry),
                                       static_cast<uint32_t>(rw), static_cast<uint32_t>(rh));
         const auto gpu_elapsed=gui_perf_now()-gpu_start;
@@ -965,6 +968,7 @@ void PrzeniesFragmentNaEkran(int x,
         return;
 
     const auto start=gui_perf_now();
+    MoveTrace::present();
     gui_perf_add(0,GP_PRESENT);gui_perf_add(0,GP_COPY);
     aktywny_ekran->KopiujFragmentNaEkran(
         backbuffer, x, y, szer, wys);

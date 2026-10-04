@@ -531,7 +531,17 @@ bool zmien_nazwe_tworu(
 );
 
 /* Przenosi do istniejacego folderu, zachowujac nazwe. Nie nadpisuje. */
+enum PsfMoveWynik {
+    PSF_MOVE_OK, PSF_MOVE_BAD_PATH, PSF_MOVE_MISSING_SOURCE, PSF_MOVE_BAD_DESTINATION,
+    PSF_MOVE_ROOT, PSF_MOVE_SELF_DESCENDANT, PSF_MOVE_COLLISION,
+    PSF_MOVE_PREPARE_FAILED, PSF_MOVE_COMMIT_FAILED
+};
+enum PsfMoveWynik psf_przenies_twor_wynik(const char* sciezka, const char* folder_docelowy);
 bool przenies_twor(const char* sciezka, const char* folder_docelowy);
+#ifdef BURSZTYN_PSF_HOST_TEST
+void psf_test_move_failure(unsigned stage);
+bool psf_test_lock_held();
+#endif
 
 /* Kopia bez nadpisywania. Pliki sa kopiowane blokami 4 KiB, foldery
  * rekurencyjnie z limitem glebokosci; nowe wezly otrzymuja poziom tworzacego. */

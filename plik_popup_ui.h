@@ -51,7 +51,9 @@ public:
         default:return (e.kod&BWS_KEY_SOURCE_E0)?code:e.kod;
         }
     }
+    bool wymaga_odswiezenia() const {return needs_refresh_;}
     bool zdarzenie(const bws_zdarzenie& e) {
+        needs_refresh_=e.typ!=BWS_ZDARZENIE_TIMER;
         if(e.typ==BWS_ZDARZENIE_MYSZ_PRAWY_UP && consume_right_up_) {consume_right_up_=false;return true;}
         if(e.typ==BWS_ZDARZENIE_MYSZ_UP && consume_up_) {consume_up_=false;return true;}
         if(e.typ==BWS_ZDARZENIE_KLAWISZ && skip_pos_<skip_count_) {
@@ -103,13 +105,15 @@ public:
             }
             break;
         }
-        case BWS_ZDARZENIE_TIMER:if(ansi_==1) {ansi_=0;send_key(27);}break;
+        case BWS_ZDARZENIE_TIMER:if(ansi_==1) {ansi_=0;send_key(27);needs_refresh_=true;}break;
         default:break;
         }
-        if(popups.czy_otwarty())popups.odrysuj_popupy();
+        if(popups.czy_otwarty())needs_refresh_ |= popups.odrysuj_popupy();
+        else needs_refresh_=true;
         return true;
     }
 private:
+    bool needs_refresh_{false};
     bool consume_up_{false},consume_right_up_{false};
     char skip_[5]{},bytes_[5]{};
     unsigned skip_count_{0},skip_pos_{0},byte_count_{0};int ansi_{0};

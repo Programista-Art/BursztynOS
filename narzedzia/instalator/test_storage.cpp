@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cassert>
+#include <string>
 using namespace Storage;
 void* kmalloc(size_t n){return std::malloc(n);}
 void wypisz_log(const char*){}
@@ -306,6 +307,34 @@ static void test_block_device_abstraction() {
     CHECK(mock.bdev.write_count == UINT64_MAX); // Saturated, no wrap to 0
 }
 
+static bool exists(const char* path) {psf_metadane m{};return pobierz_metadane_tworu(path,&m);}
+static void native_move_cases() {
+    unsigned start=checks;
+    CHECK(utworz_katalog("/desktop"));CHECK(utworz_katalog("/dest"));
+    for(const char* name:{"empty","one","nested","żółć"}) {
+        std::string src=std::string("/desktop/")+name,dst=std::string("/dest/")+name;
+        CHECK(utworz_katalog(src.c_str()));
+        if(strcmp(name,"empty")) {CHECK(utworz_katalog((src+"/sub").c_str()));CHECK(utworz_plik((src+"/sub/źródło.txt").c_str()));CHECK(zapisz_do_pliku((src+"/sub/źródło.txt").c_str(),"payload",7));}
+        CHECK(przenies_twor(src.c_str(),"/dest"));CHECK(!exists(src.c_str()));CHECK(exists(dst.c_str()));
+        if(strcmp(name,"empty")) {char b[8]{};uint32_t got=0;CHECK(czytaj_fragment_pliku((dst+"/sub/źródło.txt").c_str(),0,b,7,&got));CHECK(got==7 && !memcmp(b,"payload",7));}
+        CHECK(przenies_twor(dst.c_str(),"/desktop"));CHECK(exists(src.c_str()));CHECK(!exists(dst.c_str()));CHECK(!psf_test_lock_held());
+    }
+    CHECK(utworz_plik("/desktop/file"));CHECK(przenies_twor("/desktop/file","/dest"));CHECK(!exists("/desktop/file"));CHECK(exists("/dest/file"));
+    CHECK(przenies_twor("/desktop/nested","/desktop"));CHECK(exists("/desktop/nested/sub/źródło.txt"));
+    CHECK(zmien_nazwe_tworu("/desktop/nested","renamed"));CHECK(exists("/desktop/renamed/sub/źródło.txt"));
+    CHECK(utworz_katalog("/dest/one"));
+    struct Case {const char* src;const char* dst;PsfMoveWynik result;};
+    for(auto c:{Case{"/desktop/one","/dest",PSF_MOVE_COLLISION},Case{"/desktop/one","/desktop/one",PSF_MOVE_SELF_DESCENDANT},Case{"/desktop/one","/desktop/one/sub",PSF_MOVE_SELF_DESCENDANT},Case{"/desktop/empty","/missing",PSF_MOVE_BAD_DESTINATION},Case{"/desktop/empty","/dest/file",PSF_MOVE_BAD_DESTINATION},Case{"/missing","/dest",PSF_MOVE_MISSING_SOURCE},Case{"/","/dest",PSF_MOVE_ROOT},Case{"relative","/dest",PSF_MOVE_BAD_PATH}}) {
+        CHECK(psf_przenies_twor_wynik(c.src,c.dst)==c.result);CHECK(!psf_test_lock_held());CHECK(exists("/desktop/one/sub/źródło.txt"));CHECK(exists("/desktop/empty"));CHECK(!exists("/dest/empty"));CHECK(utworz_plik("/probe"));CHECK(usun_twor("/probe"));
+    }
+    for(unsigned stage:{1U,2U,3U}) {
+        psf_test_move_failure(stage);CHECK(!przenies_twor("/desktop/empty","/dest"));psf_test_move_failure(0);
+        CHECK(exists("/desktop/empty"));CHECK(!exists("/dest/empty"));CHECK(!psf_test_lock_held());CHECK(utworz_plik("/probe"));CHECK(usun_twor("/probe"));
+        CHECK(przenies_twor("/desktop/empty","/dest"));CHECK(przenies_twor("/dest/empty","/desktop"));
+    }
+    printf("Native directory/file move: %u assertions PASS (RAM)\n",checks-start);
+}
+
 int main(){
     CHECK(!instalator_potwierdzenie_poprawne("",16));
     CHECK(!instalator_potwierdzenie_poprawne("B",16));
@@ -384,7 +413,7 @@ int main(){
     const auto outside=disk.data;
     disk.low=l.bsp.start;disk.high=l.bsp.start+l.bsp.count;
     std::vector<uint8_t> ram(16*1024*1024);psf_ustaw_partycje(nullptr);before=disk.calls;
-    inicjalizuj_psf(ram.data(),ram.size());CHECK(disk.calls==before);CHECK(psf_czy_gotowy());
+    inicjalizuj_psf(ram.data(),ram.size());CHECK(disk.calls==before);CHECK(psf_czy_gotowy());native_move_cases();
     CHECK(utworz_plik("/ram"));std::vector<char> bytes(2*1024*1024,'R');
     CHECK(zapisz_do_pliku("/ram",bytes.data(),bytes.size()));char first=0;uint32_t got=0;
     CHECK(czytaj_fragment_pliku("/ram",0,&first,1,&got)&&first=='R');CHECK(disk.calls==before);
@@ -398,6 +427,15 @@ int main(){
     for(const auto&item:disk.data)if(item.first<l.bsp.start||item.first>=l.bsp.start+l.bsp.count){CHECK(outside.count(item.first));CHECK(outside.at(item.first)==item.second);}
     CHECK(left==outside.at(l.bsp.start-1));CHECK(right==outside.at(l.bsp.start+l.bsp.count));
     disk.data[l.bsp.start+l.bsp.count-1][100]^=1;CHECK(!complete(l.bsp,uuid));CHECK(psf_znacznik_instalacji(uuid,true));
+    // Media commit failure preserves the source and latches persistent writes off.
+    // A recovered backend alone must not bypass BSP2 fail-closed policy.
+    CHECK(utworz_katalog("/move-src"));CHECK(utworz_katalog("/move-dst"));CHECK(utworz_katalog("/move-src/tree"));
+    CHECK(utworz_plik("/move-src/tree/leaf"));CHECK(zapisz_do_pliku("/move-src/tree/leaf","ok",2));
+    disk.flush_fail=true;CHECK(psf_przenies_twor_wynik("/move-src/tree","/move-dst")==PSF_MOVE_COMMIT_FAILED);
+    CHECK(exists("/move-src/tree/leaf"));CHECK(!exists("/move-dst/tree"));CHECK(!psf_test_lock_held());
+    disk.flush_fail=false;CHECK(!psf_flush_cache());
+    CHECK(exists("/move-src/tree/leaf"));CHECK(!exists("/move-dst/tree"));
+
     disk.flush_fail=true;CHECK(!psf_flush_cache());disk.flush_fail=false;
     uint64_t format_done=0,format_total=0,format_previous=0;bool format_complete=false;
     CHECK(psf_formatuj_instalacje_start(l.bsp,&format_total));CHECK(format_total>0);

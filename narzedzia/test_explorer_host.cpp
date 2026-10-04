@@ -21,6 +21,38 @@ static void input(PlikiUI::DialogPlikowy& d,const char* text) {
     for(const unsigned char* c=reinterpret_cast<const unsigned char*>(text);*c;++c)d.zdarzenie(event(BWS_ZDARZENIE_KLAWISZ,0,0,*c));
 }
 #include "explorer_regression_cases.h"
+static void remaining_regressions() {
+    files={{"/",true},{"/test",true},{"/test/nested",true},{"/test/żółć",true},{"/test/file.txt",false}};
+    auto* m=new AktowkaModel();CHECK(m->initialize());CHECK(m->navigate("/test")!=Change::ERROR);
+    AktowkaWindow w;auto* v=new AktowkaView(*m,w);v->draw_workspace();
+    for(const char* path:{"/","/test","/test/nested","/test/żółć","/test/nested/","/test/./nested/../żółć"}) {
+        v->begin_edit(EditMode::PATH);v->active_field().ustaw_tekst(path);
+        CHECK(v->field_event(event(BWS_ZDARZENIE_KLAWISZ_FIZYCZNY,1,0,28)));
+        char canonical[PATH_CAP];CHECK(BursztynUI::DialogPliku::normalizuj_sciezke(path,canonical,sizeof(canonical)));
+        CHECK(!strcmp(m->path(),canonical));CHECK(v->edit_mode()==EditMode::NONE);
+        CHECK(v->field_event(event(BWS_ZDARZENIE_KLAWISZ,0,0,10)));CHECK(!v->dialog_open());
+        v->begin_edit(EditMode::PATH);CHECK(!strcmp(v->edit_text(),canonical));v->end_edit();
+    }
+    for(const char* path:{"/missing","/test/file.txt","relative"}) {
+        std::string before=m->path();v->begin_edit(EditMode::PATH);v->active_field().ustaw_tekst(path);
+        CHECK(v->field_event(event(BWS_ZDARZENIE_KLAWISZ,0,0,10)));CHECK(v->dialog_open());CHECK(before==m->path());v->close_modal();
+    }
+    v->begin_edit(EditMode::PATH);v->active_field().ustaw_tekst("/test/żółćXY");
+    CHECK(v->erase_input());CHECK(v->move_caret_left());CHECK(v->delete_input());
+    CHECK(!strcmp(v->edit_text(),"/test/żółć"));CHECK(v->field_event(event(BWS_ZDARZENIE_KLAWISZ,0,0,13)));CHECK(!strcmp(m->path(),"/test/żółć"));
+    v->begin_edit(EditMode::PATH);v->active_field().ustaw_tekst("/test/żółć");CHECK(v->erase_input());v->append_input(0xc4);CHECK(v->append_input(0x87));CHECK(v->submit_path());
+    auto base=*gui_pobierz_motyw();
+    for(bool black:{false,true}) {
+        auto theme=base;theme.oknotlo=black?0:0x123456;theme.panel=black?0:0x234567;theme.poletekstowe=black?0:0x345678;
+        test_ustaw_aktywny_motyw(&theme);test_capture_pixels=true;test_pixels.clear();v->theme_refresh();
+        CHECK(test_pixels.at({w.x,w.y+TITLE_H})==(theme.oknotlo|0xff000000U));
+        CHECK(test_pixels.at({w.x+w.w-1,w.y+w.h-1})==(theme.oknotlo|0xff000000U));
+        bool panel=false,field=false,opaque=true;
+        for(auto& pixel:test_pixels) {opaque &= (pixel.second>>24)==255;panel|=pixel.second==(theme.panel|0xff000000U);field|=pixel.second==(theme.poletekstowe|0xff000000U);}
+        CHECK(opaque);CHECK(panel);CHECK(field);test_capture_pixels=false;
+    }
+    test_pixels.clear();test_ustaw_aktywny_motyw(nullptr);delete v;delete m;
+}
 int main() {
     g_test_bws_hook=explorer_bws;
     files={{"/",true},{"/test",true},{"/dest",true},{"/test/żółć.txt",false},{"/test/program.bur",false},{"/test/folder",true}};
@@ -90,5 +122,5 @@ int main() {
     CHECK(menu->events.zdarzenie(event(BWS_ZDARZENIE_KLAWISZ,0,0,'[')));
     CHECK(menu->events.zdarzenie(event(BWS_ZDARZENIE_KLAWISZ,0,0,'B')));CHECK(menu->menu.czy_otwarte());
     menu->events.zdarzenie(event(BWS_ZDARZENIE_KLAWISZ,0,0,27));menu->events.zdarzenie(event(BWS_ZDARZENIE_TIMER));CHECK(!menu->menu.czy_otwarte());delete menu;
-    delete view;delete model;regression_cases();printf("Explorer/desktop shared behavior: %d/%d PASS (RAM filesystem)\n",checks,checks);
+    delete view;delete model;regression_cases();remaining_regressions();printf("Explorer/desktop shared behavior: %d/%d PASS (RAM filesystem)\n",checks,checks);
 }

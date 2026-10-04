@@ -982,6 +982,7 @@ void zatwierdz_pulpit_modal() {
     else if(type==PulpitModalTyp::OPEN_WITH)ok=PlikiUI::notatnik(pulpit_cel,pulpit_cel_folder);
     else ok=true;
     zamknij_pulpit_modal();
+    if(type==PulpitModalTyp::NOTICE)return;
     if(ok)odswiez_pulpit_natychmiast();
     else (void)otworz_pulpit_modal(PulpitModalTyp::NOTICE,"Nie wykonano: konflikt nazwy, nieprawidłowa nazwa lub brak uprawnień.");
 }
@@ -1472,7 +1473,14 @@ void RysujWpisyPulpitu() {
         if (y + PULPIT_GRID_H > screen_h - PASEK_WYS) break;
         const PulpitGeometriaKomorki g = pulpit_geometria_komorki(x, y, ui_skala_procent);
         if (i == zaznaczony_wpis_pulpitu)
-            gui_rysuj_prostokat(g.komorka_x, g.komorka_y, g.komorka_szer, g.komorka_wys, 0x00603800);
+            gui_rysuj_prostokat(g.komorka_x, g.komorka_y, g.komorka_szer, g.komorka_wys, motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));
+        if(i==zaznaczony_wpis_pulpitu) {
+            const uint32_t border=motyw_kolor(MOTYW_KOLOR_AKCENT);
+            gui_rysuj_prostokat(g.komorka_x,g.komorka_y,g.komorka_szer,1,border);
+            gui_rysuj_prostokat(g.komorka_x,g.komorka_y+g.komorka_wys-1,g.komorka_szer,1,border);
+            gui_rysuj_prostokat(g.komorka_x,g.komorka_y,1,g.komorka_wys,border);
+            gui_rysuj_prostokat(g.komorka_x+g.komorka_szer-1,g.komorka_y,1,g.komorka_wys,border);
+        }
         uint32_t kolor = wpisy_pulpitu[i].folder ? 0x00FFBF00 : 0x00708090;
         if (konczy_sie(wpisy_pulpitu[i].nazwa, ".bur")) kolor = 0x0038B000;
         else if (konczy_sie(wpisy_pulpitu[i].nazwa, ".cebula")) kolor = 0x00D050A0;
@@ -1484,7 +1492,7 @@ void RysujWpisyPulpitu() {
         podpis_wpisu(wpisy_pulpitu[i].nazwa, skrocony, sizeof(skrocony));
         podpis_do_szerokosci(skrocony, podpis, sizeof(podpis), g.etykieta_szer);
         // Etykiety plikow na pulpicie sa zawsze biale z cieniem.
-        const uint32_t kolor_etykiety_pliku = KANONICZNY_KOLOR_ETYKIETY_PULPITU;
+        const uint32_t kolor_etykiety_pliku = i==zaznaczony_wpis_pulpitu?motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU):KANONICZNY_KOLOR_ETYKIETY_PULPITU;
         rysuj_etykiete_pulpitu(g.etykieta_x, g.etykieta_y,
                                g.etykieta_szer, PULPIT_LINE_H,
                                int(ui_skala_procent), kolor_etykiety_pliku, podpis);
@@ -1876,18 +1884,18 @@ bool obsluz_popupy_pulpitu(const bws_zdarzenie& zdarzenie) {
     if(pulpit_modal_typ==PulpitModalTyp::MOVE && pulpit_wybor->events.zdarzenie(zdarzenie)) {
         if(pulpit_wybor->wynik_pliku()==BursztynUI::WynikDialoguPliku::Wybrano)zatwierdz_pulpit_modal();
         else if(!pulpit_wybor->czy_otwarta())zamknij_pulpit_modal();
-        gui_odswiez();return true;
+        if(pulpit_wybor->events.wymaga_odswiezenia())gui_odswiez();return true;
     }
     if(pulpit_dialog->zdarzenie(zdarzenie)) {
         if(pulpit_dialog->wynik()==1)zatwierdz_pulpit_modal();
         else if(pulpit_dialog->wynik()==2 || !pulpit_dialog->czy_otwarta())zamknij_pulpit_modal();
-        gui_odswiez();return true;
+        if(pulpit_dialog->events.wymaga_odswiezenia())gui_odswiez();return true;
     }
     if(pulpit_menu->events.zdarzenie(zdarzenie)) {
         auto action=pulpit_menu->pobierz_akcje();pulpit_context_open=pulpit_menu->menu.czy_otwarte();
         if(action!=PulpitContextAction::NONE)wykonaj_pulpit_context(action);
         if(!pulpit_context_open)zarejestruj_pulpit_jako_cel_drop();
-        gui_odswiez();return true;
+        if(pulpit_menu->events.wymaga_odswiezenia())gui_odswiez();return true;
     }
     return false;
 }

@@ -69,23 +69,23 @@ constexpr int Z_ORDER = 10;
 #define SCROLL_W ui_skaluj(18, ui_skala_procent)
 #define ICON ui_skaluj(13, ui_skala_procent)
 
-#define COLOR_BG motyw_kolor(MOTYW_KOLOR_OKNOTLO)
-#define COLOR_PANEL motyw_kolor(MOTYW_KOLOR_PANEL)
-#define COLOR_PANEL_ALT motyw_kolor(MOTYW_KOLOR_PODNIESIONY)
-#define COLOR_BORDER motyw_kolor(MOTYW_KOLOR_RAMKA)
-#define COLOR_BORDER_DARK motyw_kolor(MOTYW_KOLOR_RAMKA)
-#define COLOR_TEXT motyw_kolor(MOTYW_KOLOR_TEKST)
-#define COLOR_TEXT2 motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI)
-#define COLOR_MUTED motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI)
-#define COLOR_DISABLED motyw_kolor(MOTYW_KOLOR_WYLACZONY)
-#define COLOR_SELECT motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE)
-#define COLOR_DROP_TARGET motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY)
-#define COLOR_FOLDER motyw_kolor(MOTYW_KOLOR_OSTRZEZENIE)
-#define COLOR_BUR motyw_kolor(MOTYW_KOLOR_SUKCES)
-#define COLOR_CEBULA motyw_kolor(MOTYW_KOLOR_AKCENT)
-#define COLOR_TXT motyw_kolor(MOTYW_KOLOR_INFORMACJA)
-#define COLOR_BMP motyw_kolor(MOTYW_KOLOR_AKCENT)
-#define COLOR_FILE_COLOR motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI)
+#define COLOR_BG (motyw_kolor(MOTYW_KOLOR_OKNOTLO) | 0xFF000000U)
+#define COLOR_PANEL (motyw_kolor(MOTYW_KOLOR_PANEL) | 0xFF000000U)
+#define COLOR_PANEL_ALT (motyw_kolor(MOTYW_KOLOR_PODNIESIONY) | 0xFF000000U)
+#define COLOR_BORDER (motyw_kolor(MOTYW_KOLOR_RAMKA) | 0xFF000000U)
+#define COLOR_BORDER_DARK (motyw_kolor(MOTYW_KOLOR_RAMKA) | 0xFF000000U)
+#define COLOR_TEXT (motyw_kolor(MOTYW_KOLOR_TEKST) | 0xFF000000U)
+#define COLOR_TEXT2 (motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI) | 0xFF000000U)
+#define COLOR_MUTED (motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI) | 0xFF000000U)
+#define COLOR_DISABLED (motyw_kolor(MOTYW_KOLOR_WYLACZONY) | 0xFF000000U)
+#define COLOR_SELECT (motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE) | 0xFF000000U)
+#define COLOR_DROP_TARGET (motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY) | 0xFF000000U)
+#define COLOR_FOLDER (motyw_kolor(MOTYW_KOLOR_OSTRZEZENIE) | 0xFF000000U)
+#define COLOR_BUR (motyw_kolor(MOTYW_KOLOR_SUKCES) | 0xFF000000U)
+#define COLOR_CEBULA (motyw_kolor(MOTYW_KOLOR_AKCENT) | 0xFF000000U)
+#define COLOR_TXT (motyw_kolor(MOTYW_KOLOR_INFORMACJA) | 0xFF000000U)
+#define COLOR_BMP (motyw_kolor(MOTYW_KOLOR_AKCENT) | 0xFF000000U)
+#define COLOR_FILE_COLOR (motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI) | 0xFF000000U)
 
 struct Rect {
     int x;
@@ -1717,6 +1717,10 @@ public:
         : model_(model), window_(window), edit_mode_(EditMode::NONE),
           drop_target_entry_(-1), drop_target_body_(false),
           hover_entry_(-1) {
+        drawing_.ustaw_nieprzezroczyste_kolory(true);
+        path_field_.przy_zatwierdzeniu([](BursztynUI::PoleTekstowe*,const char*,void* data) {
+            static_cast<AktowkaView*>(data)->path_submit_pending_=true;
+        },this);
         table_.ustaw_dostawce(this);
         scrollbar_.ustaw_orientacje(BursztynUI::Orientacja::Pionowa);
     }
@@ -1801,10 +1805,12 @@ public:
     bool dialog_open() const {return edit_mode_==EditMode::MOVE?chooser_.czy_otwarta():dialog_.czy_otwarta();}
     int modal_result() const { return edit_mode_==EditMode::MOVE?static_cast<int>(chooser_.wynik_pliku()):dialog_.wynik(); }
     bool popup_event(const bws_zdarzenie& e) {
-        if(modal_open()) return edit_mode_==EditMode::MOVE?chooser_.events.zdarzenie(e):dialog_.zdarzenie(e);
-        if(dialog_.zdarzenie(e) || chooser_.events.zdarzenie(e))return true;
-        return menu_.events.zdarzenie(e);
+        auto send=[&](PlikiUI::ObslugaPopup& events,bool used) {if(used)popup_needs_refresh_=events.wymaga_odswiezenia();return used;};
+        popup_needs_refresh_=false;
+        if(modal_open()) return edit_mode_==EditMode::MOVE?send(chooser_.events,chooser_.events.zdarzenie(e)):send(dialog_.events,dialog_.zdarzenie(e));
+        return send(dialog_.events,dialog_.zdarzenie(e)) || send(chooser_.events,chooser_.events.zdarzenie(e)) || send(menu_.events,menu_.events.zdarzenie(e));
     }
+    bool popup_needs_refresh() const {return popup_needs_refresh_;}
     ContextAction pending_action() { return menu_.pobierz_akcje(); }
     void theme_refresh() {
         BursztynUI::Motyw::pobierz_domyslny().zaktualizuj_z_systemu();
@@ -1895,10 +1901,14 @@ public:
         BursztynUI::ZdarzenieKlawiatury e{};e.kod_klawisza=code;e.modyfikatory=mods;e.kod_skanu=scan;active_field().obsluz_wcisniecie_klawisza(e);return e.obsluzone;
     }
     bool field_event(const bws_zdarzenie& e) {
-        if(edit_mode_!=EditMode::PATH && edit_mode_!=EditMode::SEARCH)return false;
         if(e.typ==BWS_ZDARZENIE_KLAWISZ && field_skip_pos_<field_skip_count_) {
             if(e.kod==static_cast<unsigned char>(field_skip_[field_skip_pos_])) {++field_skip_pos_;return true;}
             field_skip_count_=field_skip_pos_=0;
+        }
+        if(edit_mode_!=EditMode::PATH && edit_mode_!=EditMode::SEARCH)return false;
+        if(e.typ==BWS_ZDARZENIE_KLAWISZ && (e.kod==10 || e.kod==13)) {
+            edit_key(13);if(edit_mode_==EditMode::PATH && path_submit_pending_)submit_path();
+            else {end_edit();draw_search_field();}gui_odswiez();return true;
         }
         if(e.typ==BWS_ZDARZENIE_TEXT_INPUT) {
             BursztynUI::ZdarzenieWprowadzaniaTekstu t{};t.punkt_kodowy=e.kod;t.modyfikatory=e.przyciski;
@@ -1907,7 +1917,14 @@ public:
         } else if(e.typ==BWS_ZDARZENIE_KLAWISZ_FIZYCZNY) {
             if(!e.x)return true;
             uint32_t key=PlikiUI::ObslugaPopup::klawisz(e);
-            if(key==13 || key==27)return false; // existing confirm/cancel byte path
+            if(key==27)return false;
+            if(key==13) {
+                edit_key(key,e.przyciski,e.kod);
+                if(edit_mode_==EditMode::PATH && path_submit_pending_)submit_path();
+                else if(edit_mode_==EditMode::SEARCH) {end_edit();draw_search_field();}
+                field_skip_[0]='\n';field_skip_count_=1;field_skip_pos_=0;
+                gui_odswiez();return true;
+            }
             edit_key(key,e.przyciski,e.kod);
             const char* legacy=key==8?"\b":key==9?"\t":key==0x4b?"\x1b[D":key==0x4d?"\x1b[C":
                 key==0x53?"\x1b[3~":key==0x47?"\x1b[H":key==0x4f?"\x1b[F":nullptr;
@@ -1916,6 +1933,32 @@ public:
         if(edit_mode_==EditMode::PATH)draw_path_field();
         else {model_.set_filter(active_field().tekst());draw_search_field();draw_list_only();draw_details_panel();draw_status();}
         gui_odswiez();return true;
+    }
+    bool submit_path() {
+        path_submit_pending_=false;
+        char canonical[PATH_CAP]{};
+        const char* text=path_field_.tekst();
+        unsigned depth=0;
+        bool ok=text[0]=='/' && len_limit(text,PATH_CAP)<PATH_CAP;
+        for(size_t pos=1;ok && text[pos];) {
+            while(text[pos]=='/')++pos;
+            size_t start=pos;while(text[pos] && text[pos]!='/')++pos;
+            size_t n=pos-start;
+            if(!n)break;
+            char part[NAME_CAP]{};
+            if(n>=NAME_CAP) {ok=false;break;}
+            for(size_t i=0;i<n;++i)part[i]=text[start+i];
+            if(equal_text(part,"..")) {if(depth)--depth;}
+            else if(!equal_text(part,".")) {if(!valid_name(part) || ++depth>32)ok=false;}
+        }
+        if(ok)ok=BursztynUI::DialogPliku::normalizuj_sciezke(text,canonical,sizeof(canonical)) && valid_path(canonical);
+        Change change=ok?model_.navigate(canonical):Change::ERROR;
+        end_edit();
+        if(change==Change::ERROR) {
+            model_.set_status("Nieprawidłowa ścieżka, brak katalogu lub brak uprawnień.");
+            draw_path_field();draw_status();open_modal(EditMode::NOTICE);return false;
+        }
+        draw_directory_change();return true;
     }
     bool erase_input() {input_bytes_=0;return edit_key(8);}
     bool delete_input() {return edit_key(0x53);}
@@ -2050,11 +2093,10 @@ public:
     }
     void draw_workspace() {
         const AktowkaLayout value = layout();
-        const int client_h = window_.h - TITLE_H - 3;
+        const int client_h = window_.h - TITLE_H;
         if (client_h > 0)
-            gui_rysuj_prostokat(window_.x + 2, window_.y + TITLE_H,
-                                window_.w > 4 ? window_.w - 4 : 0,
-                                client_h, COLOR_BG);
+            gui_rysuj_prostokat(window_.x, window_.y + TITLE_H,
+                                window_.w, client_h, COLOR_BG);
         hover_entry_=-1;
         draw_toolbar();
         draw_left_panel();
@@ -2260,6 +2302,8 @@ private:
     PlikiUI::MenuPlikowe menu_;
     BursztynUI::TabelaWirtualna table_;
     BursztynUI::PasekPrzewijania scrollbar_;
+    bool path_submit_pending_{false};
+    bool popup_needs_refresh_{false};
     bool quick_active_[QUICK_MAX]{};
     char field_skip_[5]{};unsigned field_skip_count_{0},field_skip_pos_{0};
     BursztynUI::PoleTekstowe path_field_, search_field_;
@@ -2604,13 +2648,14 @@ extern "C" __attribute__((noreturn)) void _start() {
             present_workspace_change(view, model.refresh());
             continue;
         }
+        if(view.edit_mode()!=EditMode::PATH && view.edit_mode()!=EditMode::SEARCH && view.field_event(event))continue;
         if(view.popup_event(event)) {
             ContextAction action=view.pending_action();
             if(action!=ContextAction::NONE) perform_context_action(view,model,action);
             if(view.modal_open() && view.modal_result()==1)submit_modal(view,model);
             else if(view.modal_open() && (view.modal_result()==2 || !view.dialog_open()))view.close_modal();
             if(refresh_pending && !view.modal_open() && !view.context_open()) {refresh_pending=false;present_workspace_change(view,model.refresh());}
-            view.register_drop_targets();gui_odswiez();continue;
+            view.register_drop_targets();if(view.popup_needs_refresh())gui_odswiez();continue;
         }
         if (event.typ == BWS_ZDARZENIE_TIMER) {
             if (view.edit_mode() != EditMode::NONE && ansi == AnsiState::ESC) {

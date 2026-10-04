@@ -467,12 +467,17 @@ public:
         return r;
     }
 
-    void odrysuj_popupy(bool wymus = false) {
-        if (liczba_ == 0 || zarejestrowany_ekran_.czy_pusty() || !bufor_popupu_) return;
+    bool odrysuj_popupy(bool wymus = false) {
+        if (liczba_ == 0 || zarejestrowany_ekran_.czy_pusty() || !bufor_popupu_) return false;
+        if(!wymus) {
+            bool dirty=false;
+            for(int i=0;i<liczba_;++i)dirty |= powierzchnie_[i] && powierzchnie_[i]->czy_brudna();
+            if(!dirty)return false;
+        }
         const int reg_w = zarejestrowany_ekran_.szerokosc;
         const int reg_h = zarejestrowany_ekran_.wysokosc;
         const size_t piksele = static_cast<size_t>(reg_w) * reg_h;
-        if (piksele > pojemnosc_popupu_) return;
+        if (piksele > pojemnosc_popupu_) return false;
 
         for (size_t i = 0; i < piksele; ++i) {
             bufor_popupu_[i] = 0x00000000U;
@@ -504,6 +509,7 @@ public:
         gui_blit_popup(zarejestrowany_ekran_.x, zarejestrowany_ekran_.y,
                        zarejestrowany_ekran_.szerokosc, zarejestrowany_ekran_.wysokosc,
                        bufor_popupu_);
+        return true;
     }
 
     void rysuj(KontekstRysowania& ctx, bool wymus = false) {

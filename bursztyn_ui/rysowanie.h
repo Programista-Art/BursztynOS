@@ -66,7 +66,10 @@ public:
         Prostokat r = pobierz_przyciecie(); Punkt p = pobierz_przesuniecie();
         r.x -= p.x; r.y -= p.y; return r;
     }
+    // Opt-in for opaque app surfaces; popup cutouts retain their zero-pixel contract.
+    void ustaw_nieprzezroczyste_kolory(bool enabled) { nieprzezroczyste_kolory_ = enabled; }
     void rysuj_prostokat(Prostokat r, uint32_t kolor) {
+        if (nieprzezroczyste_kolory_) kolor |= 0xFF000000U;
         if (r.czy_pusty()) return;
         Punkt off = pobierz_przesuniecie();
         Prostokat swiat_r(r.x + off.x, r.y + off.y, r.szerokosc, r.wysokosc);
@@ -294,6 +297,7 @@ private:
     }
 
     static constexpr size_t MAKS_STOS = 16;
+    bool nieprzezroczyste_kolory_{false};
     uint32_t* cel_{nullptr};
     Prostokat granice_celu_{};
     Prostokat stos_przyciecia_[MAKS_STOS];
