@@ -121,6 +121,10 @@ public:
     }
 
     bool czy_otwarty() const { return liczba_ > 0; }
+    bool czy_ma_modalna() const {
+        for(int i=0;i<liczba_;++i)if(powierzchnie_[i] && powierzchnie_[i]->czy_modalna())return true;
+        return false;
+    }
     int liczba_powierzchni() const { return liczba_; }
     bool czy_ma_wpis_paska_zadan() const { return false; }
     bool czy_przechwytuje_mysz() const { return przechwycenie_ != nullptr; }

@@ -33,6 +33,12 @@ inline bool utworz_element(const char* directory,const char* name,bool folder) {
     path[n]=0;
     return folder?utworz_katalog_uzytkownika(path):utworz(path);
 }
+// Paths supplied by desktop listings are absolute, normalized paths.
+inline bool cel_przeniesienia_poprawny(const char* source,const char* target) {
+    if(!source || !target || source[0]!='/' || target[0]!='/')return false;
+    size_t n=0;while(source[n] && source[n]==target[n])++n;
+    return source[n]!=0 || (target[n]!=0 && target[n]!='/');
+}
 inline bool tekstowy(const char* path, bool directory) {
     if (!path || directory) return false;
     size_t n = 0; while (n < 512 && path[n]) ++n;

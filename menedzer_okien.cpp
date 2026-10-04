@@ -77,7 +77,7 @@ int TASK_BUTTON_W = 112;
 int TASK_BUTTON_GAP = 4;
 constexpr int PULPIT_MAX_WPISOW = 128;
 constexpr int PULPIT_LIST_CAP = 16384;
-constexpr int PULPIT_NAZWA_CAP = 56;
+constexpr int PULPIT_NAZWA_CAP = BWS_DROP_SCIEZKA_MAX; // display capacity; PSF validates mutations
 int PULPIT_GRID_W = 120;
 int PULPIT_GRID_H = 100;
 int PULPIT_GRID_Y = 140;
@@ -918,7 +918,7 @@ bool menu_gry_otwarte = false;
 char ostatni_czas[BUFOR_CZASU] = {};
 GuiOknoInfo okna_taskbara[SKLADACZ_MAKS_WARSTW] = {};
 uint32_t liczba_okien_taskbara = 0;
-WpisPulpitu wpisy_pulpitu[PULPIT_MAX_WPISOW] = {};
+WpisPulpitu* wpisy_pulpitu = nullptr;
 char lista_pulpitu[PULPIT_LIST_CAP] = {};
 int liczba_wpisow_pulpitu = 0;
 int zaznaczony_wpis_pulpitu = -1; // context anchor, selection lives in desktop_layout
@@ -930,6 +930,7 @@ void odrysuj_zaznaczenie_pulpitu();
 uint64_t hash_pulpitu = 0;
 bool hash_pulpitu_wazny = false;
 bool pulpit_drop_hover = false;
+int pulpit_hover_folder = -1;
 int pulpit_refresh_ticks = 0;
 BwsCelDrop cele_drop_pulpitu[BWS_DROP_CELE_MAX] = {};
 
@@ -1076,6 +1077,10 @@ uint64_t hash_listy(const char* tekst, int n) {
 
 bool teksty_rowne(const char* a,const char* b) {while(*a && *a==*b){++a;++b;}return *a==*b;}
 bool odswiez_wpisy_pulpitu() {
+    // Keep display buffers off the Ring 3 stack and within BUR's static data
+    // budget. They are allocated once, never from the pointer-motion path.
+    if(!wpisy_pulpitu)wpisy_pulpitu=new WpisPulpitu[PULPIT_MAX_WPISOW]{};
+    if(!wpisy_pulpitu)return false;
     wyzeruj_bufor(lista_pulpitu, PULPIT_LIST_CAP);
     if (!wylistuj_katalog_uzytkownika(
             SCIEZKA_PULPIT, lista_pulpitu, PULPIT_LIST_CAP)) return false;
@@ -1085,8 +1090,10 @@ bool odswiez_wpisy_pulpitu() {
     const uint64_t nowy_hash = hash_listy(lista_pulpitu, length);
     if (hash_pulpitu_wazny && nowy_hash == hash_pulpitu) return false;
 
-    static WpisPulpitu nowe[PULPIT_MAX_WPISOW];
-    for(auto& entry:nowe)entry=WpisPulpitu{};
+    static WpisPulpitu* nowe=nullptr;
+    if(!nowe)nowe=new WpisPulpitu[PULPIT_MAX_WPISOW]{};
+    if(!nowe)return false;
+    for(int i=0;i<PULPIT_MAX_WPISOW;++i)nowe[i]=WpisPulpitu{};
     int count = 0;
     int pos = 0;
     while (pos < length) {
@@ -1503,7 +1510,8 @@ void zarejestruj_pulpit_jako_cel_drop() {
         int x = 0, y = 0;
         prostokat_wpisu_pulpitu(i, &x, &y);
         BwsCelDrop& cel = cele_drop_pulpitu[count];
-        cel.x = x; cel.y = y; cel.szer = PULPIT_GRID_W; cel.wys = PULPIT_GRID_H;
+        auto r=desktop_layout.cell(i);
+        cel.x = x; cel.y = y; cel.szer = r.szerokosc; cel.wys = r.wysokosc;
         if (!sciezka_wpisu_pulpitu(i, cel.folder, sizeof(cel.folder))) continue;
         ++count;
     }
@@ -1529,22 +1537,39 @@ void RysujWpisPulpitu(int i) {
     int x,y;prostokat_wpisu_pulpitu(i,&x,&y);
     const auto g=pulpit_geometria_komorki(x,y,ui_skala_procent);
     const auto& p=desktop_layout.items[i];
-    if(p.selected) {
+    if(p.selected || pulpit_hover_folder==i) {
         auto r=wizualny_wpis_pulpitu(i);
         gui_rysuj_prostokat(r.x,r.y,r.szerokosc,r.wysokosc,motyw_kolor(MOTYW_KOLOR_PULPIT_ZAZNACZENIE));
         rysuj_ramke_pulpitu(r,motyw_kolor(MOTYW_KOLOR_PULPIT_RAMKA));
     }
-    uint32_t color=wpisy_pulpitu[i].folder?0x00FFBF00:0x00708090;
-    if(konczy_sie(wpisy_pulpitu[i].nazwa,".bur"))color=0x0038B000;
-    else if(konczy_sie(wpisy_pulpitu[i].nazwa,".cebula"))color=0x00D050A0;
-    else if(konczy_sie(wpisy_pulpitu[i].nazwa,".txt"))color=0x004C9BE8;
-    rysuj_fragment_ikony(g.ikona_x,g.ikona_y,4,4,40,40,color);
-    if(wpisy_pulpitu[i].folder)rysuj_fragment_ikony(g.ikona_x,g.ikona_y,8,0,18,8,color);
+    if(PlikiUI::tekstowy(wpisy_pulpitu[i].nazwa,wpisy_pulpitu[i].folder)) {
+        // Native document silhouette, folded corner and text strokes, using
+        // the same scaled fragments as the existing desktop icon renderer.
+        uint32_t paper=motyw_kolor(MOTYW_KOLOR_PANEL);
+        uint32_t ink=motyw_kolor(MOTYW_KOLOR_TEKST);
+        if(!paper)paper=0x01000000U;
+        if(!ink)ink=0x01000000U;
+        rysuj_fragment_ikony(g.ikona_x,g.ikona_y,9,2,25,42,ink);
+        rysuj_fragment_ikony(g.ikona_x,g.ikona_y,10,3,23,40,paper);
+        rysuj_fragment_ikony(g.ikona_x,g.ikona_y,34,10,6,34,ink);
+        rysuj_fragment_ikony(g.ikona_x,g.ikona_y,34,11,5,32,paper);
+        for(int n=0;n<7;++n)rysuj_fragment_ikony(g.ikona_x,g.ikona_y,33,3+n,1+n,1,ink);
+        for(int n=0;n<4;++n)rysuj_fragment_ikony(g.ikona_x,g.ikona_y,15,18+n*5,n==3?14:19,2,ink);
+    } else {
+        uint32_t color=wpisy_pulpitu[i].folder?0x00FFBF00:0x00708090;
+        if(konczy_sie(wpisy_pulpitu[i].nazwa,".bur"))color=0x0038B000;
+        else if(konczy_sie(wpisy_pulpitu[i].nazwa,".cebula"))color=0x00D050A0;
+        rysuj_fragment_ikony(g.ikona_x,g.ikona_y,4,4,40,40,color);
+        if(wpisy_pulpitu[i].folder)rysuj_fragment_ikony(g.ikona_x,g.ikona_y,8,0,18,8,color);
+    }
     auto m=pulpit_metryki(ui_skala_procent);
     for(int line=0;line<p.label.count;++line) {
-        char text[PULPIT_NAZWA_CAP]{};
+        char text[PULPIT_NAZWA_CAP+4]{};
         int size=p.label.ends[line]-p.label.starts[line];
         for(int b=0;b<size;++b)text[b]=wpisy_pulpitu[i].nazwa[p.label.starts[line]+b];
+        if(!p.label.complete && line==p.label.count-1) {
+            text[size]=char(0xe2);text[size+1]=char(0x80);text[size+2]=char(0xa6);
+        }
         rysuj_etykiete_pulpitu(g.etykieta_x,g.etykieta_y+line*(m.wysokosc_linii+m.odstep_linii),
             g.etykieta_szer,m.wysokosc_linii,int(ui_skala_procent),
             p.selected?motyw_kolor(MOTYW_KOLOR_PULPIT_TEKST):KANONICZNY_KOLOR_ETYKIETY_PULPITU,text);
@@ -1565,6 +1590,40 @@ void odrysuj_zaznaczenie_pulpitu() {
         odrysuj_obszar_pulpitu(wizualny_wpis_pulpitu(i));
 }
 void zapamietaj_zaznaczenie_pulpitu() {for(int i=0;i<desktop_layout.count;++i)desktop_previous[i]=desktop_layout.items[i];}
+
+// No filesystem calls on MouseMove. Authoritative permissions/collisions
+// remain in the existing BWS move operation, invoked once per source on drop.
+static char pulpit_drop_target[BWS_DROP_SCIEZKA_MAX]{};
+bool poprawny_cel_drop_pulpitu(int target) {
+    if(target<0 || target>=desktop_layout.count || !wpisy_pulpitu[target].folder ||
+       desktop_layout.items[target].selected)return false;
+    if(!sciezka_wpisu_pulpitu(target,pulpit_drop_target,sizeof(pulpit_drop_target)))return false;
+    for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].selected) {
+        char source[BWS_DROP_SCIEZKA_MAX]{};
+        if(!sciezka_wpisu_pulpitu(i,source,sizeof(source)) ||
+           !PlikiUI::cel_przeniesienia_poprawny(source,pulpit_drop_target))return false;
+    }
+    return desktop_layout.selected_count()>0;
+}
+void ustaw_hover_drop_pulpitu(int target) {
+    int old=pulpit_hover_folder;pulpit_hover_folder=target;
+    if(old>=0 && old<desktop_layout.count)odrysuj_obszar_pulpitu(wizualny_wpis_pulpitu(old));
+    if(target>=0)odrysuj_obszar_pulpitu(wizualny_wpis_pulpitu(target));
+}
+bool wykonaj_drop_pulpitu(int target) {
+    if(!poprawny_cel_drop_pulpitu(target) || !zapisz_batch_pulpitu()) {
+        (void)otworz_pulpit_modal(PulpitModalTyp::NOTICE,"Nieprawidłowy cel przeniesienia.");return false;
+    }
+    unsigned done=0;
+    for(;done<pulpit_batch_count;++done)
+        if(!przenies_twor_uzytkownika(pulpit_batch[done],pulpit_drop_target))break;
+    bool ok=done==pulpit_batch_count;
+    if(!ok)opis_batch("Przeniesiono ",done,pulpit_batch_count,pulpit_batch[done]);
+    pulpit_batch_count=0;
+    odswiez_pulpit_natychmiast();
+    if(!ok)(void)otworz_pulpit_modal(PulpitModalTyp::NOTICE,pulpit_batch_message);
+    return ok;
+}
 
 struct GestPulpitu {
     bool candidate=false,dragging=false,rubber=false,ctrl=false;
@@ -1588,6 +1647,7 @@ void obrysy_grupy(bool erase) {
 }
 void anuluj_gest_pulpitu() {
     if(desktop_gesture.dragging){if(desktop_gesture.rubber)odtworz_obrys(desktop_gesture.band);else obrysy_grupy(true);}
+    ustaw_hover_drop_pulpitu(-1);
     desktop_gesture=GestPulpitu{};gui_ustaw_capture_myszy(false);
 }
 // One production handler is also exercised by host tests.
@@ -1624,7 +1684,10 @@ bool obsluz_gest_pulpitu(const bws_zdarzenie& e) {
         int dx=e.x-g.x,dy=e.y-g.y,threshold=ui_skaluj(4,ui_skala_procent);
         if(!g.dragging && dx<=threshold && dx>=-threshold && dy<=threshold && dy>=-threshold)return true;
         if(!g.rubber)desktop_layout.clamp_delta(dx,dy);
-        if(g.dragging && dx==g.dx && dy==g.dy)return true;
+        int target=g.rubber?-1:wpis_pulpitu_w_punkcie(e.x,e.y);
+        if(!poprawny_cel_drop_pulpitu(target))target=-1;
+        if(g.dragging && dx==g.dx && dy==g.dy && target==pulpit_hover_folder)return true;
+        if(target!=pulpit_hover_folder)ustaw_hover_drop_pulpitu(target);
         if(g.dragging){if(g.rubber)odtworz_obrys(g.band);else obrysy_grupy(true);}
         g.dragging=true;g.dx=dx;g.dy=dy;
         if(g.rubber) {
@@ -1643,7 +1706,15 @@ bool obsluz_gest_pulpitu(const bws_zdarzenie& e) {
     if(e.typ==BWS_ZDARZENIE_MYSZ_UP && g.candidate) {
         if(g.dragging && g.rubber)odtworz_obrys(g.band);
         else if(g.dragging) {
-            obrysy_grupy(true);zapamietaj_zaznaczenie_pulpitu();
+            obrysy_grupy(true);
+            int target=wpis_pulpitu_w_punkcie(e.x,e.y);
+            ustaw_hover_drop_pulpitu(-1);
+            if(target>=0 && wpisy_pulpitu[target].folder) {
+                // Release capture and finish the gesture before entering BWS.
+                g=GestPulpitu{};gui_ustaw_capture_myszy(false);
+                (void)wykonaj_drop_pulpitu(target);gui_odswiez();return true;
+            }
+            zapamietaj_zaznaczenie_pulpitu();
             int dc=(g.dx+(g.dx>=0?desktop_layout.cw/2:-desktop_layout.cw/2))/desktop_layout.cw;
             int dr=(g.dy+(g.dy>=0?desktop_layout.ch/2:-desktop_layout.ch/2))/desktop_layout.ch;
             desktop_layout.move_group(dc,dr);

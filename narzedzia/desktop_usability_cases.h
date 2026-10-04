@@ -72,7 +72,7 @@ static void desktop_usability_cases() {
         CHECK(!files.count(std::string(SCIEZKA_PULPIT)+"/a.txt"));CHECK(!files.count(std::string(SCIEZKA_PULPIT)+"/b folder"));
         hash_pulpitu_wazny=false;CHECK(odswiez_wpisy_pulpitu());
         desktop_layout.click(0,false);desktop_layout.items[1].selected=true;
-        snprintf(pulpit_cel,sizeof(pulpit_cel),"%s/%s",SCIEZKA_PULPIT,wpisy_pulpitu[0].nazwa);
+        CHECK(sciezka_wpisu_pulpitu(0,pulpit_cel,sizeof(pulpit_cel)));
         int oldDeletes=deletes;wykonaj_pulpit_context(PulpitContextAction::REMOVE);
         CHECK(pulpit_modal_typ==PulpitModalTyp::REMOVE);CHECK(deletes==oldDeletes);CHECK(pulpit_batch_count==2);
         zatwierdz_pulpit_modal();CHECK(deletes==oldDeletes+2);CHECK(desktop_layout.count==0);

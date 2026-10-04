@@ -44,6 +44,17 @@ int main(){
     for(auto dpi:{100U,125U}){
         scale=dpi;sw=1280;sh=720;overlay={};
         assert(utworz_warstwe(1,0,0,sw,sh,0)==1);
+        auto* desktop=pobierz_warstwe(1);
+        for(uint32_t pixel:{0x20000000U,0x70ffffffU,0x01000000U,0x00abcdefU}) {
+            desktop->bufor_pikseli[0]=pixel;scene[0]=0x123456;
+            zloz_snapshot_region({desktop->bufor_pikseli,0,0,sw,sh,0,1,uint64_t(sw)*sh},{0,0,1,1});
+            uint32_t expected=motyw_pulpit_skladaj(0x123456,pixel,true);assert(scene[0]==expected);
+            scene[0]=0x123456;zloz_warstwe(1,sw,sh);assert(scene[0]==expected);
+            scene[0]=0x123456;
+            zloz_snapshot_region({desktop->bufor_pikseli,0,0,sw,sh,10,1,uint64_t(sw)*sh},{0,0,1,1});
+            assert(scene[0]==(pixel&0xffffff)); // alpha tags are desktop-only
+        }
+        desktop->bufor_pikseli[0]=0;
         lx=1279;ly=719;skladacz_obrazu_oznacz_ruch_kursora(0,0,lx,ly);skladacz_obrazu_obsluz_dirty();
         sw=1920;sh=1080;++generation;skladacz_reset_ekranu();
         assert(dirty_count==1&&dirty_rects[0].width==1920&&dirty_rects[0].height==1080);

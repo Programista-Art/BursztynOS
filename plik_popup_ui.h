@@ -66,7 +66,11 @@ public:
         case BWS_ZDARZENIE_MYSZ_RUCH:popups.obsluz_ruch(m);break;
         case BWS_ZDARZENIE_MYSZ_DOWN:popups.obsluz_wcisniecie(m);consume_up_=!popups.czy_otwarty();break;
         case BWS_ZDARZENIE_MYSZ_UP:popups.obsluz_zwolnienie(m);break;
-        case BWS_ZDARZENIE_MYSZ_PRAWY_DOWN:popups.zamknij();consume_right_up_=true;break;
+        case BWS_ZDARZENIE_MYSZ_PRAWY_DOWN:
+            // Modal right clicks are consumed without changing focus, caret or
+            // selection. Context menus keep their existing dismissal policy.
+            if(!popups.czy_ma_modalna())popups.zamknij();
+            consume_right_up_=true;break;
         case BWS_ZDARZENIE_MYSZ_KOLO: {
             ZdarzenieRolki r{};r.x=e.x;r.y=e.y;r.delta_y=e.dy;r.delta_x=e.dx;popups.obsluz_rolke(r);break;
         }

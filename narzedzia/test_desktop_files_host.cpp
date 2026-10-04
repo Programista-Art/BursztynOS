@@ -13,6 +13,7 @@ bool gui_aktywuj_okno(uint64_t) {return true;}
 int bws_utworz_warstwe(int,int,int,int,int) {return 1;}
 
 #include "desktop_usability_cases.h"
+#include "desktop_remaining_cases.h"
 
 int main() {
     g_test_bws_hook=explorer_bws;
@@ -103,6 +104,7 @@ int main() {
     }
     test_ustaw_aktywny_motyw(nullptr);
     desktop_usability_cases();
+    desktop_remaining_cases();
     delete pulpit_menu;delete pulpit_dialog;delete pulpit_wybor;
     printf("Desktop production file actions: %d/%d PASS (RAM filesystem)\n",checks,checks);
 }

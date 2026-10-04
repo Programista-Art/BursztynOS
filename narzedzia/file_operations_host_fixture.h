@@ -56,7 +56,7 @@ bool kopiuj_twor_uzytkownika(const char* path,const char* dir) {
     auto target=destination(path,dir);if(files.count(target))return false;files[target]=files[path];return true;
 }
 bool przenies_twor_uzytkownika(const char* path,const char* dir) {
-    if(!kopiuj_twor_uzytkownika(path,dir))return false;files.erase(path);return true;
+    if(deny_path==path || !kopiuj_twor_uzytkownika(path,dir))return false;files.erase(path);return true;
 }
 bool pobierz_schowek_plikow(BwsSchowekPlikow* out) {*out=file_clip;return file_clip.operacja!=BWS_SCHOWEK_PUSTY;}
 bool ustaw_schowek_plikow(const char* path,BwsOperacjaSchowka operation) {

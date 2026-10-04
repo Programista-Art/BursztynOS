@@ -165,13 +165,19 @@ inline uint32_t motyw_mieszaj(uint32_t base, uint32_t overlay, unsigned weight) 
         result |= (((base>>shift&255)*(255-weight)+(overlay>>shift&255)*weight)/255)<<shift;
     return result;
 }
-// Opaque RGB computed blending. The desktop surface uses zero as a transparent
-// hole and does not support partial alpha. No accent-button role is involved.
+// Only the root desktop interprets these two alpha tags. Other surfaces and
+// the existing 0x01000000 visible-black marker retain their RGB contract.
 inline uint32_t motyw_pulpit_zaznaczenie(const BursztynMotyw& m) {
-    return motyw_mieszaj(m.panel,m.tekst,24);
+    return 0x20000000U | (m.tekst & 0x00ffffffU);
 }
 inline uint32_t motyw_pulpit_ramka(const BursztynMotyw& m) {
-    return motyw_mieszaj(m.panel,m.tekst,80);
+    return 0x70000000U | (m.tekst & 0x00ffffffU);
+}
+inline uint32_t motyw_pulpit_skladaj(uint32_t background,uint32_t pixel,bool desktop) {
+    unsigned alpha=pixel>>24;
+    if(desktop && (alpha==32 || alpha==112))
+        return motyw_mieszaj(background,pixel,alpha);
+    return pixel & 0x00ffffffU;
 }
 
 /* Zwraca obliczony wciecie (inset) od brzegu dla cwiartki kola o promieniu r na wierszu dy */

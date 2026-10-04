@@ -8,6 +8,7 @@
  *
  *   - tablica_warstw[pid] przechowuje najwyzej jedna warstwe procesu,
  *   - bufor warstwy ma format 32-bit 0x00RRGGBB,
+ *   - tylko root desktop (z_order==0) miesza tagi 0x20/0x70 z tapeta,
  *   - wartosc DOKLADNIE 0x00000000 oznacza przezroczystosc,
  *   - grafika.cpp moze uzyc gornego bajtu jako technicznego znacznika,
  *     aby narysowac wizualnie czarny piksel; kompozytor usuwa ten znacznik
@@ -1609,10 +1610,11 @@ void zloz_warstwe(
              *   0x00000000 = przezroczysty
              *   0x01000000 = widoczna czern
              *
-             * Framebuffer Bursztyna uzywa 0x00RRGGBB, wiec marker usuwamy.
+             * Root desktop supports the two selection alpha tags; all other
+             * surfaces retain RGB marker semantics.
              */
-            kolor &=
-                0x00FFFFFFU;
+            kolor = motyw_pulpit_skladaj(grafika_pobierz_wiersz_backbuffer(dst_y)[clip.dst_x+x],
+                kolor,w.z_order==0);
 
             grafika_zapisz_surowy_piksel(
                 clip.dst_x + x,
@@ -1635,7 +1637,7 @@ void zloz_snapshot_region(const LayerRenderInfo& w,const GuiDirtyRect& r) {
         uint64_t first=(uint64_t)(py-w.y)*(uint32_t)w.width+(uint32_t)(x0-w.x);
         uint64_t len=(uint32_t)(x1-x0);if(first>w.pixels||len>w.pixels-first)return;
         const uint32_t* src=w.buffer+first;uint32_t* dst=grafika_pobierz_wiersz_backbuffer(py)+x0;
-        for(int px=x0;px<x1;++px){uint32_t c=*src++;if(c)*dst=c&SKLADACZ_MASKA_KOLORU_RGB;++dst;}
+        for(int px=x0;px<x1;++px){uint32_t c=*src++;if(c)*dst=motyw_pulpit_skladaj(*dst,c,w.z==0);++dst;}
     }
     if(decorated) zloz_dekoracje(w.pid,r);
 }

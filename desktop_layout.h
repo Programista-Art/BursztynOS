@@ -14,12 +14,12 @@ struct Label {
 // The caller supplies the current system Unicode font measurement.
 inline Label wrap(const char* text,int width,int lineHeight,int gap,int maxLines,
                   int scale,int (*measure)(const char*,int)) {
-    Label l;char line[256]{};int start=0,pos=0,n=0;
+    Label l;char line[516]{};int start=0,pos=0,n=0;
     if(maxLines>MaxLines)maxLines=MaxLines;
     while(text && text[pos] && l.count<maxLines) {
         uint32_t cp=0;int bytes=int(BursztynUI::CzcionkaUI::dekoduj_utf8(text,pos,&cp));
         if(!bytes)break;
-        if(n+bytes>=int(sizeof(line)))break;
+        if(n+bytes>=512)break;
         for(int b=0;b<bytes;++b)line[n+b]=text[pos+b];
         line[n+bytes]=0;
         int measured=measure(line,scale);
@@ -33,6 +33,17 @@ inline Label wrap(const char* text,int width,int lineHeight,int gap,int maxLines
     }
     if(n && l.count<maxLines) {l.starts[l.count]=start;l.ends[l.count]=pos;l.widths[l.count]=measure(line,scale);++l.count;}
     l.complete=!text || !text[pos];
+    if(!l.complete && l.count) {
+        int last=l.count-1,start=l.starts[last],end=l.ends[last];
+        for(;;) {
+            int n=end-start;
+            for(int i=0;i<n;++i)line[i]=text[start+i];
+            line[n]=char(0xe2);line[n+1]=char(0x80);line[n+2]=char(0xa6);line[n+3]=0;
+            if(measure(line,scale)<=width || end==start)break;
+            --end;while(end>start && (static_cast<unsigned char>(text[end])&192)==128)--end;
+        }
+        l.ends[last]=end;l.widths[last]=measure(line,scale);
+    }
     for(int i=0;i<l.count;++i)if(l.widths[i]>l.width)l.width=l.widths[i];
     l.height=l.count?l.count*(lineHeight+gap)-gap:0;return l;
 }
@@ -51,7 +62,7 @@ inline bool intersects(Prostokat a,Prostokat b) {
 inline Prostokat visual(int x,int y,const Label& l,uint32_t scale) {
     auto g=pulpit_geometria_komorki(x,y,scale);int pad=ui_skaluj(3,scale);
     auto r=unite({g.ikona_x,g.ikona_y,g.ikona_szer,g.ikona_wys},
-        {x+(g.komorka_szer-l.width)/2,g.etykieta_y,l.width,l.height});
+        {g.etykieta_x,g.etykieta_y,g.etykieta_szer,l.height});
     return {r.x-pad,r.y-pad,r.szerokosc+2*pad,r.wysokosc+2*pad};
 }
 struct Position {int col=0,row=0,span=1;bool placed=false,selected=false,custom=false;Label label;};
