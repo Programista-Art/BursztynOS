@@ -173,6 +173,7 @@ inline Prostokat shell_obszar_klienta() {
     return Prostokat(shell_x, shell_y + belka_h, shell_w, klient_h);
 }
 
+#include "shell_runtime_diag.h"
 #include "shell_terminal.h"
 
 
@@ -522,7 +523,12 @@ int pobierz_znak_blokujaco() {
     static uint32_t key_modifiers = 0;
     for (;;) {
         bws_zdarzenie e{};
+        SHELL_PERF(waits);
         if (!gui_czekaj_na_zdarzenie(&e)) continue;
+        SHELL_PERF(events);
+        if(e.typ==BWS_ZDARZENIE_MYSZ_RUCH)SHELL_PERF(move);
+        if(e.typ==BWS_ZDARZENIE_WSKAZNIK_PRECYZYJNY)SHELL_PERF(precise);
+        if(e.typ==BWS_ZDARZENIE_TIMER){SHELL_PERF(timer);shell_perf_report();}
         // Handle before popup dispatch: an open menu consumes other events.
         // GUI has refreshed its local theme; refresh the UI styles as Okno does.
         if (e.typ == BWS_ZDARZENIE_MOTYW_ZMIENIONY) {

@@ -1,4 +1,7 @@
 #include "wm_input.h"
+#include "gui_runtime_diag.h"
+#include "kursor_prezentacja.h"
+#include "kursor_diag.h"
 #include "grafika.h"
 #include "bufory_grafiki.h"
 #include "sterowniki/grafika/bochs_vbe.h"
@@ -454,11 +457,16 @@ public:
         int rw = x1 - x0;
         int rh = y1 - y0;
 
+        const auto copy_start=gui_perf_now();
         if (static_cast<const void*>(bufor) != static_cast<const void*>(const_cast<const uint8_t*>(framebuffer_fizyczny))) {
             KopiujFragment32(bufor, rx, ry, rw, rh);
         }
+        gui_perf_add(0,GP_COPY_NS,gui_perf_now()-copy_start);
+        const auto gpu_start=gui_perf_now();
         virtio_gpu_transfer_and_flush(drv, static_cast<uint32_t>(rx), static_cast<uint32_t>(ry),
                                       static_cast<uint32_t>(rw), static_cast<uint32_t>(rh));
+        const auto gpu_elapsed=gui_perf_now()-gpu_start;
+        gui_perf_add(0,GP_GPU_NS,gpu_elapsed);gui_perf_max(0,GP_GPU_MAX_NS,gpu_elapsed);
     }
 };
 
@@ -593,6 +601,7 @@ static bool terminal_przewinieto = false;
 // =========================================================================
 
 static int mysz_x = 500;
+static int motion_hover_pid_gui = -1;
 static int mysz_y = 300;
 
 /* Pozycja faktycznie narysowanego overlayu w fizycznym framebufferze. */
@@ -955,8 +964,12 @@ void PrzeniesFragmentNaEkran(int x,
     if (!backbuffer || !aktywny_ekran)
         return;
 
+    const auto start=gui_perf_now();
+    gui_perf_add(0,GP_PRESENT);gui_perf_add(0,GP_COPY);
     aktywny_ekran->KopiujFragmentNaEkran(
         backbuffer, x, y, szer, wys);
+    const auto elapsed=gui_perf_now()-start;
+    gui_perf_add(0,GP_PRESENT_NS,elapsed);gui_perf_max(0,GP_PRESENT_MAX_NS,elapsed);
 }
 
 int grafika_pobierz_szerokosc() {
@@ -1110,9 +1123,9 @@ void grafika_zakoncz_skladanie() {
         return;
     }
 
-    PrzeniesNaEkran();
-    kursor_overlay_widoczny = false;
-    PokazKursor();
+    const GuiDirtyRect dirty{0,0,grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc()};
+    int cx=0,cy=0;grafika_pobierz_pozycje_kursora(&cx,&cy);
+    grafika_prezentuj_scene_z_kursorem(&dirty,1,cx,cy);
     tryb_skladania_obrazu = false;
 }
 
@@ -1168,127 +1181,89 @@ static void log_cursor_diag(int old_x, int old_y, int new_x, int new_y,
 
 void grafika_naloz_kursor_regionu(int x, int y, int szer, int wys) {
     (void)x; (void)y; (void)szer; (void)wys;
-    grafika_prezentuj_kursor_w(mysz_x, mysz_y);
+    grafika_prezentuj_kursor();
 }
 
 void grafika_zakoncz_skladanie_regionu(int x,int y,int szer,int wys) {
     if (!backbuffer || !aktywny_ekran) { tryb_skladania_obrazu=false; return; }
-    PrzeniesFragmentNaEkran(x,y,szer,wys);
-    grafika_prezentuj_kursor_w(mysz_x,mysz_y);
+    const GuiDirtyRect dirty{x,y,szer,wys};
+    int cx=0,cy=0;grafika_pobierz_pozycje_kursora(&cx,&cy);
+    grafika_prezentuj_scene_z_kursorem(&dirty,1,cx,cy);
     tryb_skladania_obrazu=false;
 }
 
 void grafika_prezentuj_region(int x,int y,int szer,int wys){PrzeniesFragmentNaEkran(x,y,szer,wys);}
 
-void grafika_prezentuj_kursor_w(int cursor_x, int cursor_y) {
+void grafika_prezentuj_scene_z_kursorem(const GuiDirtyRect* dirty, uint32_t count,
+                                      int cursor_x, int cursor_y) {
     if (!aktywny_ekran || !backbuffer) return;
-
-    const int sw = grafika_pobierz_szerokosc();
-    const int sh = grafika_pobierz_wysokosc();
-    if (sw <= 0 || sh <= 0) return;
-
-    const int stary_x = kursor_overlay_x;
-    const int stary_y = kursor_overlay_y;
-    const int stary_w = kursor_overlay_w;
-    const int stary_h = kursor_overlay_h;
-    const bool byl_widoczny = kursor_overlay_widoczny;
-
-    // 1. Odtworz obszar w starej pozycji kursora ze scene backbufferu
-    if (byl_widoczny && stary_w > 0 && stary_h > 0) {
-        PrzeniesFragmentNaEkran(stary_x, stary_y, stary_w, stary_h);
-        kursor_overlay_widoczny = false;
-    }
-
-    asm volatile("" ::: "memory");
-
-    // 2. Zaktualizuj wspolrzedne i wylicz obciecie
-    const StanKursoraProcesu* stan = aktywny_stan_kursora();
-    int kw = 16, kh = 16, hx = 0, hy = 0;
-    parametry_kursora(stan, &kw, &kh, &hx, &hy);
-    if (kw > 64) kw = 64;
-    if (kh > 64) kh = 64;
-
-    const int left = cursor_x - hx;
-    const int top = cursor_y - hy;
-
-    int x0 = left < 0 ? 0 : left;
-    int y0 = top < 0 ? 0 : top;
-    int x1 = left + kw;
-    int y1 = top + kh;
-    if (x1 > sw) x1 = sw;
-    if (y1 > sh) y1 = sh;
-
-    if (x0 < x1 && y0 < y1) {
-        const int clip_w = x1 - x0;
-        const int clip_h = y1 - y0;
-        const uint32_t pitch = aktywny_ekran->PobierzPitch();
-
-        // 3. Zapisz piksele ze scene backbufferu pod nowy kursor
-        for (int y = 0; y < clip_h; ++y) {
-            const uint32_t* src = reinterpret_cast<const uint32_t*>(
-                backbuffer + static_cast<uint64_t>(y0 + y) * pitch + static_cast<uint64_t>(x0) * 4ULL);
-            uint32_t* dst = &kursor_tlo_kopia[y * clip_w];
-            for (int x = 0; x < clip_w; ++x) {
-                dst[x] = src[x];
-            }
-        }
-
-        // 4. Skomponuj kursor do backbufferu
-        for (int cy = 0; cy < kh; ++cy) {
-            const int py = top + cy;
-            if (py < y0 || py >= y1) continue;
-            for (int cx = 0; cx < kw; ++cx) {
-                const int px = left + cx;
-                if (px < x0 || px >= x1) continue;
-                uint32_t kolor = 0;
-                if (!piksel_kursora(stan, cx, cy, &kolor)) continue;
-                uint32_t* dst = reinterpret_cast<uint32_t*>(
-                    backbuffer + static_cast<uint64_t>(py) * pitch + static_cast<uint64_t>(px) * 4ULL);
-                *dst = kolor;
-            }
-        }
-
-        // 5. Przeslij nowy region dirty przez aktywny backend graficzny
-        PrzeniesFragmentNaEkran(x0, y0, clip_w, clip_h);
-
-        // 6. Natychmiast odtworz czysty scene backbuffer
-        for (int y = 0; y < clip_h; ++y) {
-            const uint32_t* src = &kursor_tlo_kopia[y * clip_w];
-            uint32_t* dst = reinterpret_cast<uint32_t*>(
-                backbuffer + static_cast<uint64_t>(y0 + y) * pitch + static_cast<uint64_t>(x0) * 4ULL);
-            for (int x = 0; x < clip_w; ++x) {
-                dst[x] = src[x];
-            }
-        }
-
-        kursor_overlay_x = x0;
-        kursor_overlay_y = y0;
-        kursor_overlay_w = clip_w;
-        kursor_overlay_h = clip_h;
-        kursor_overlay_widoczny = true;
-        mysz_x = cursor_x;
-        mysz_y = cursor_y;
-
+    const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
+    if(sw<=0||sh<=0||count>SKLADACZ_MAKS_DIRTY_RECT)return;
+    // Snapshot shape too: input can change focus while presentation runs.
+    StanKursoraProcesu shape{};
+    const auto* active=aktywny_stan_kursora();
+    if(active)shape=*active;
+    const auto* stan=active?&shape:nullptr;
+    int kw=16,kh=16,hx=0,hy=0;
+    parametry_kursora(stan,&kw,&kh,&hx,&hy);
+    if(kw>64)kw=64;
+    if(kh>64)kh=64;
+    const GuiDirtyRect old=kursor_overlay_widoczny?
+        GuiDirtyRect{kursor_overlay_x,kursor_overlay_y,kursor_overlay_w,kursor_overlay_h}:GuiDirtyRect{};
+    gui_perf_add(0,GP_CURSOR);
+    const auto next=kursor_prezentuj_transakcje(
+        reinterpret_cast<uint32_t*>(backbuffer),aktywny_ekran->PobierzPitch()/4,
+        sw,sh,old,cursor_x-hx,cursor_y-hy,kw,kh,kursor_tlo_kopia,dirty,count,
+        [&](int x,int y,uint32_t& c){return piksel_kursora(stan,x,y,&c);},
+        [&](GuiDirtyRect r){kursor_diag_present(r);PrzeniesFragmentNaEkran(r.x,r.y,r.width,r.height);},
+        [&](int stage){kursor_diag_stage(stage);});
+    kursor_overlay_x=next.x;kursor_overlay_y=next.y;
+    kursor_overlay_w=next.width;kursor_overlay_h=next.height;
+    kursor_overlay_widoczny=next.width>0;
 #if BURSZTYN_DIAG_GEOM_TRACE
-        if (g_cursor_diag_logged < CURSOR_DIAG_MAX) {
-            log_cursor_diag(stary_x, stary_y, cursor_x, cursor_y,
-                            stary_x, stary_y, stary_w, stary_h, byl_widoczny,
-                            x0, y0, clip_w, clip_h, true);
-        }
+    log_cursor_diag(old.x,old.y,cursor_x,cursor_y,
+        old.x,old.y,old.width,old.height,old.width>0,
+        next.x,next.y,next.width,next.height,next.width>0);
 #endif
-    } else {
-        kursor_overlay_widoczny = false;
-        mysz_x = cursor_x;
-        mysz_y = cursor_y;
-    }
+    // Logical position is input-owned. Never commit an older consumed sample.
+    kursor_diag_finish();
 }
-void grafika_prezentuj_kursor(){grafika_prezentuj_kursor_w(mysz_x,mysz_y);}
+#if BURSZTYNDIAGGUIRUNTIME
+void grafika_runtime_diag_snapshot() {
+    static uint64_t previous=0;const auto now=gui_perf_now();
+    if(previous&&now-previous<1000000000ULL)return;
+    previous=now;
+    int x=0,y=0;grafika_pobierz_pozycje_kursora(&x,&y);
+    int kw=0,kh=0,hx=0,hy=0;parametry_kursora(aktywny_stan_kursora(),&kw,&kh,&hx,&hy);
+    char buf[512]{};unsigned n=0;
+    auto text=[&](const char* p){while(*p&&n+1<sizeof(buf))buf[n++]=*p++;};
+    auto num=[&](int64_t v){if(v<0){text("-");v=-v;}char tmp[24];unsigned i=0;do{tmp[i++]=char('0'+v%10);v/=10;}while(v);while(i&&n+1<sizeof(buf))buf[n++]=tmp[--i];};
+    auto field=[&](const char* key,int64_t value){text(key);num(value);text(" ");};
+    text("[CURSOR GEOM] ");field("screen_w=",grafika_pobierz_szerokosc());field("screen_h=",grafika_pobierz_wysokosc());
+    field("driver_w=",aktywny_ekran->PobierzSzerokosc());field("driver_h=",aktywny_ekran->PobierzWysokosc());
+    if(ekran_caps.backend==EKRAN_VIRTIO_GPU){auto* drv=virtio_gpu_get_driver(0);if(drv){field("gpu_w=",drv->fb_width);field("gpu_h=",drv->fb_height);}}
+    auto* desktop=pobierz_warstwe(1);if(desktop){field("desktop_w=",desktop->szerokosc);field("desktop_h=",desktop->wysokosc);}
+    field("logical_x=",x);field("logical_y=",y);field("min_x=",0);field("min_y=",0);
+    field("max_x=",grafika_pobierz_szerokosc()-1);field("max_y=",grafika_pobierz_wysokosc()-1);
+    field("hotspot_x=",hx);field("hotspot_y=",hy);field("bitmap_w=",kw);field("bitmap_h=",kh);
+    field("scale=",ekran_skala());field("generation=",grafika_generacja_ekranu());text("\n");klog_serial(buf);
+}
+#endif
+
+void grafika_prezentuj_kursor_w(int x,int y) {
+    grafika_prezentuj_scene_z_kursorem(nullptr,0,x,y);
+}
+
+void grafika_prezentuj_kursor(){int x=0,y=0;grafika_pobierz_pozycje_kursora(&x,&y);grafika_prezentuj_kursor_w(x,y);}
 
 void grafika_zakoncz_scene(){tryb_skladania_obrazu=false;}
 
 void grafika_pobierz_pozycje_kursora(int* x,int* y) {
+    uint64_t flags;
+    asm volatile("pushfq; popq %0; cli":"=r"(flags)::"memory","cc");
     if(x) *x=mysz_x;
     if(y) *y=mysz_y;
+    if(flags&(1ULL<<9))asm volatile("sti":::"memory");
 }
 
 void grafika_pobierz_overlay_kursora(int* x,int* y,int* w,int* h,bool* widoczny) {
@@ -2118,7 +2093,7 @@ void UkryjKursor() {
 }
 
 void PokazKursor() {
-    grafika_prezentuj_kursor_w(mysz_x,mysz_y);
+    grafika_prezentuj_kursor();
 }
 
 // =========================================================================
@@ -2303,6 +2278,7 @@ extern "C" void zaktualizuj_mysze_zrodlo(int dx,
 
     mysz_x = static_cast<int>(nowy_x);
     mysz_y = static_cast<int>(nowy_y);
+    kursor_diag_logical();
 
     const uint64_t gen = grafika_generacja_ekranu();
     const int max_x = ekran_szer > 0 ? ekran_szer - 1 : 0;
@@ -2399,7 +2375,20 @@ extern "C" void zaktualizuj_mysze_zrodlo(int dx,
             skladacz_obrazu_podnies_warstwe(trafiony);
             ustaw_focus_gui(trafiony);
         }
-        const int cel = capture_pid_gui > 0 ? capture_pid_gui : aktywny_pid_gui;
+        const bool motion_only=(dx!=0 || dy!=0) && !klik && !pusc && !prawy_klik && !prawy_pusc;
+        const int cel=wm_cel_ruchu(aktywny_pid_gui,capture_pid_gui,
+            motion_only?znajdz_warstwe_pod_punktem(mysz_x,mysz_y):-1,motion_only);
+        // One boundary event clears hover in the previous owner. Further
+        // unrelated motion wakes only the currently hit window.
+        if(motion_only) {
+            const int leave=wm_opuszczony_cel_ruchu(motion_hover_pid_gui,cel,capture_pid_gui);
+            if(leave>0 && pobierz_warstwe(leave)) {
+                bws_zdarzenie out{};out.typ=BWS_ZDARZENIE_MYSZ_RUCH;
+                out.x=mysz_x;out.y=mysz_y;out.dx=dx;out.dy=-dy;
+                out.przyciski=przyciski;out.kod=klawiatura_modyfikatory();out.timestamp=znacznik_zdarzenia();
+                scheduler_dodaj_zdarzenie(leave,&out);
+            }
+        }
         if (klik) {
 #if BURSZTYN_DEBUG_GUI_INPUT
             static uint32_t s_click_trace_cnt = 0;
@@ -2469,6 +2458,7 @@ extern "C" void zaktualizuj_mysze_zrodlo(int dx,
         if (pusc) capture_pid_gui = -1;
         poprzednie_przyciski_gui = przyciski;
 
+        kursor_diag_wm();
         skladacz_obrazu_oznacz_ruch_kursora(
             stary_mysz_x, stary_mysz_y, mysz_x, mysz_y);
         WybudzProcesyOczekujaceNaMysz();
@@ -3499,6 +3489,7 @@ extern "C" void bws_gui_usun_stan_procesu(int pid) {
         if (stare) kfree(stare);
     }
     if (capture_pid_gui == pid) capture_pid_gui = -1;
+    if (motion_hover_pid_gui == pid) motion_hover_pid_gui = -1;
     if (aktywny_pid_gui == pid) {
         aktywny_pid_gui = -1;
         int best=-1,best_z=-2147483647;
@@ -3571,6 +3562,7 @@ extern "C" void bws_gui_aktywuj_warstwe(int pid) {
 extern "C" bool bws_gui_minimalizuj_warstwe(int pid) {
     if (pid <= 0 || !skladacz_obrazu_minimalizuj(pid)) return false;
     if (capture_pid_gui == pid) capture_pid_gui = -1;
+    if (motion_hover_pid_gui == pid) motion_hover_pid_gui = -1;
     if (aktywny_pid_gui == pid) {
         ustaw_focus_gui(-1);
         int best = -1, best_z = -2147483647;
@@ -4038,7 +4030,7 @@ bool grafika_test_kursor_suite(VirtioGpuDriver* gpu_drv) {
         grafika_prezentuj_kursor_w(200, 200);
         grafika_prezentuj_kursor_w(250, 250);
         uint64_t after_m = gpu_drv->flush_count;
-        if (after_m <= before_m + 2) {
+        if (after_m != before_m + 2) {
             test6_pass = false;
         }
     }

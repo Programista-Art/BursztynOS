@@ -21,3 +21,14 @@ int wm_warstwa_pod_punktem(int x, int y, int overlay, Layer layer, Decoration de
     }
     return result;
 }
+
+// Motion follows the hit window; capture keeps selection/scrollbar/window drags.
+inline int wm_cel_ruchu(int focus,int capture,int hit,bool motion_only) {
+    return capture>0?capture:(motion_only?hit:focus);
+}
+
+inline int wm_opuszczony_cel_ruchu(int& previous,int current,int capture) {
+    if(capture>0)return -1;
+    const int old=previous;previous=current;
+    return old>0&&old!=current?old:-1;
+}

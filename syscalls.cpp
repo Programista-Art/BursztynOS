@@ -1,3 +1,4 @@
+#include "gui_runtime_diag.h"
 /*
  * Bursztyn OS - Bursztynowe Wywolania Systemowe (BWS)
  *
@@ -75,9 +76,12 @@
 volatile bool ekran_zajety = false;
 
 extern "C" void zablokuj_ekran() {
+    const auto start=gui_perf_now();
+    bool contended=false;
     while (__atomic_test_and_set(
                &ekran_zajety,
                __ATOMIC_ACQUIRE)) {
+        contended=true;
         asm volatile(
             "pause"
             :
@@ -85,6 +89,8 @@ extern "C" void zablokuj_ekran() {
             : "memory"
         );
     }
+    const auto elapsed=contended?gui_perf_now()-start:0;
+    gui_perf_add(aktualny_pid,GP_LOCK_NS,elapsed);gui_perf_max(aktualny_pid,GP_LOCK_MAX_NS,elapsed);
 }
 
 extern "C" void odblokuj_ekran() {
@@ -1021,7 +1027,12 @@ __attribute__((noinline)) uint64_t bws_wypisz(
     }
 
     SerialLog(bufor.jako_char());
-
+#if BURSZTYNDIAGGUIRUNTIME
+    // Serial-only diagnostic output must not create the GPU traffic it measures.
+    const char* prefix="[SHELL PERF] ";unsigned prefix_len=0;
+    while(prefix[prefix_len]&&bufor.jako_char()[prefix_len]==prefix[prefix_len])++prefix_len;
+    if(!prefix[prefix_len])return 1;
+#endif
     BlokadaEkranu blokada;
 
     wypisz_na_ekranie(
@@ -3016,6 +3027,11 @@ static uint64_t obsluga_wywolan_systemowych_impl(
     uint64_t arg4
 ) {
     g_ostatni_bws = nr_funkcji;
+    if((nr_funkcji>=14&&nr_funkcji<=24)||nr_funkcji==33||nr_funkcji==34||
+       (nr_funkcji>=36&&nr_funkcji<=43)||(nr_funkcji>=49&&nr_funkcji<=51)||
+       (nr_funkcji>=56&&nr_funkcji<=58)||(nr_funkcji>=61&&nr_funkcji<=63)||
+       (nr_funkcji>=73&&nr_funkcji<=78)||(nr_funkcji>=86&&nr_funkcji<=88))
+        gui_perf_add(aktualny_pid,GP_BWS);
     proces_t* proces_ptr =
         pobierz_proces_wywolujacy();
 

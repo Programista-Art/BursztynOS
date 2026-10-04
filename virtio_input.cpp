@@ -1,3 +1,5 @@
+#include "kursor_diag.h"
+#include "gui_runtime_diag.h"
 /*
  * Bursztyn OS - Implementacja Sterownika Urzadzen Wejsciowych VirtIO-INPUT
  *
@@ -207,6 +209,17 @@ static void virtio_input_classify_device(VirtioInputDriver* drv) {
             }
         }
     }
+
+#if BURSZTYNDIAGGUIRUNTIME
+    char caps[256]{};unsigned pos=0;
+    auto txt=[&](const char* p){while(*p&&pos+1<sizeof(caps))caps[pos++]=*p++;};
+    auto num=[&](int64_t v){if(v<0){txt("-");v=-v;}char t[24];unsigned i=0;do{t[i++]=char('0'+v%10);v/=10;}while(v);while(i&&pos+1<sizeof(caps))caps[pos++]=t[--i];};
+    txt("[INPUT CAPS] rel_size=");num(rel_bits_size);txt(" rel_byte0=");num(rel_bits[0]);
+    txt(" abs_size=");num(abs_bits_size);txt(" abs_byte0=");num(abs_bits[0]);
+    txt(" rel_xy=");num(drv->has_rel_mouse);txt(" abs_xy=");num(drv->has_abs_tablet);
+    txt(" abs_x_min=");num(drv->input_dev.abs_x.min);txt(" abs_x_max=");num(drv->input_dev.abs_x.max);
+    txt(" abs_y_min=");num(drv->input_dev.abs_y.min);txt(" abs_y_max=");num(drv->input_dev.abs_y.max);txt("\n");input_klog(caps);
+#endif
 
     if (has_kbd_keys) {
         drv->has_keyboard = true;
@@ -422,6 +435,9 @@ size_t virtio_input_poll_events(VirtioInputDriver* drv, size_t max_events) {
 
         // Kopiowanie odebranego zdarzenia
         VirtioInputEvent raw_ev = drv->dma_events[buf_idx];
+        if ((raw_ev.type==INPUT_EV_ABS && (raw_ev.code==INPUT_ABS_X || raw_ev.code==INPUT_ABS_Y)) ||
+            (raw_ev.type==INPUT_EV_REL && (raw_ev.code==INPUT_REL_X || raw_ev.code==INPUT_REL_Y)))
+            kursor_diag_input();
 
         // Natychmiastowy recycling bufora DMA i re-submit do eventq
         VirtqBuffer buf{};

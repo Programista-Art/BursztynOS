@@ -5710,6 +5710,27 @@ void test_virtio_input_abs_scaling() {
     virtio_input_poll_events(&drv, 10);
     TEST_ASSERT(g_mock_input_capture.abs_x == 1919 && g_mock_input_capture.abs_y == 1079, "Narożnik 1919,1079");
 
+    // The same registered tablet must use fresh framebuffer geometry, without
+    // reset/re-registration or any DPI/work-area margin after a mode change.
+    for(unsigned scale:{100U,125U}) {
+        (void)scale; // input has physical pixels, deliberately no DPI argument
+        for(auto mode:std::vector<std::pair<int,int>>{{1280,720},{1920,1080}}) {
+            g_mock_screen_w=mode.first;g_mock_screen_h=mode.second;
+            for(int i=0;i<=16;++i)for(int edge=0;edge<4;++edge) {
+                int along=i*32767/16;
+                int raw_x=edge==0?0:(edge==1?32767:along);
+                int raw_y=edge==2?0:(edge==3?32767:along);
+                mock_inject_input_event(&drv,INPUT_EV_ABS,INPUT_ABS_X,raw_x);
+                mock_inject_input_event(&drv,INPUT_EV_ABS,INPUT_ABS_Y,raw_y);
+                mock_inject_input_event(&drv,INPUT_EV_SYN,INPUT_SYN_REPORT,0);
+                virtio_input_poll_events(&drv,10);
+                TEST_ASSERT(g_mock_input_capture.abs_x==int(int64_t(raw_x)*(mode.first-1)/32767) &&
+                            g_mock_input_capture.abs_y==int(int64_t(raw_y)*(mode.second-1)/32767),
+                            "Runtime modeset: tablet reaches every physical edge without margin");
+            }
+        }
+    }
+
     g_mock_screen_w = 1024;
     g_mock_screen_h = 768;
     TEST_ASSERT(virtio_input_reset(&drv), "Reset");

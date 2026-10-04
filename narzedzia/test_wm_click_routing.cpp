@@ -29,6 +29,16 @@ void gui_odswiez_pulpit() {}
 void gui_wypisz_tekst_kolor(int,int,uint32_t,const char*) {}
 void wypisz(const char*) {}
 int main() {
+    assert(wm_cel_ruchu(2,-1,1,true)==1); // outside focused Shell -> desktop
+    assert(wm_cel_ruchu(2,-1,3,true)==3); // another hovered window
+    assert(wm_cel_ruchu(2,2,1,true)==2); // selection/scrollbar capture
+    assert(wm_cel_ruchu(2,-1,1,false)==2); // focus/button edge semantics
+    int previous=2;
+    assert(wm_opuszczony_cel_ruchu(previous,1,-1)==2);
+    for(int i=0;i<100;++i)assert(wm_opuszczony_cel_ruchu(previous,1,-1)==-1);
+    assert(wm_opuszczony_cel_ruchu(previous,2,2)==-1&&previous==1);
+    assert(wm_cel_ruchu(2,-1,-1,true)==-1); // no hit -> no app wakeup
+
     screen_w=1280;screen_h=720;metryki_ekranu();
     obsluz_klikniecie(35,699); assert(menu_start_otwarte);
     obsluz_klikniecie(100,232); assert(launched==SCIEZKA_POWLOKA);assert(!menu_start_otwarte);

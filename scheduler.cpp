@@ -23,6 +23,7 @@
  */
 
 #include "scheduler.h"
+#include "gui_runtime_diag.h"
 #include "pzb.h"
 #include "pamiec.h"
 #include "heap.h"
@@ -213,6 +214,10 @@ static inline void ustaw_stan_procesu(
     proces_t& proces,
     int stan
 ) {
+#if BURSZTYNDIAGGUIRUNTIME
+    if(stan!=PROCES_GOTOWY && aktualny_pid>=0 && aktualny_pid<int(MAKS_PROCESOW) &&
+       &proces==&tablica_procesow[aktualny_pid])gui_perf_block(aktualny_pid);
+#endif
     __atomic_store_n(
         &proces.stan,
         stan,
@@ -772,6 +777,9 @@ bool scheduler_dodaj_zdarzenie(
 
     KolejkaZdarzen& q = kolejki_zdarzen[pid];
     const StanPrzerwan irq = zapisz_i_wylacz_przerwania();
+    if(zdarzenie->typ==BWS_ZDARZENIE_MYSZ_RUCH)gui_perf_add(pid,GP_MOVE);
+    if(zdarzenie->typ==BWS_ZDARZENIE_WSKAZNIK_PRECYZYJNY)gui_perf_add(pid,GP_PRECISE);
+    if(zdarzenie->typ==BWS_ZDARZENIE_TIMER)gui_perf_add(pid,GP_TIMER);
     uint32_t glowa = q.glowa;
     const uint32_t ogon = q.ogon;
 
@@ -804,6 +812,7 @@ bool scheduler_dodaj_zdarzenie(
                                  __ATOMIC_RELAXED);
                 __atomic_store_n(&wygasl_timeout_zdarzenia[pid], false,
                                  __ATOMIC_RELEASE);
+                gui_perf_add(pid,GP_WAKE);
                 ustaw_stan_procesu(tablica_procesow[pid], PROCES_GOTOWY);
             }
             przywroc_przerwania(irq);
@@ -847,6 +856,7 @@ bool scheduler_dodaj_zdarzenie(
         __atomic_store_n(&wygasl_timeout_zdarzenia[pid], false,
                          __ATOMIC_RELEASE);
         ustaw_stan_procesu(tablica_procesow[pid], PROCES_GOTOWY);
+        gui_perf_add(pid,GP_WAKE);
         __atomic_add_fetch(&licznik_wybudzen_event,1ULL,__ATOMIC_RELAXED);
     }
     przywroc_przerwania(irq);
@@ -871,6 +881,7 @@ bool scheduler_pobierz_zdarzenie(
 
 void scheduler_czekaj_na_zdarzenie(int pid, uint64_t timeout_ticki) {
     if (!pid_uzytkownika(pid)) return;
+    gui_perf_add(pid,GP_WAIT);
     const StanPrzerwan irq = zapisz_i_wylacz_przerwania();
     KolejkaZdarzen& q = kolejki_zdarzen[pid];
     if (q.ogon == q.glowa &&
@@ -1262,6 +1273,7 @@ extern "C" uint64_t PrzelaczKontekst(
         klog_serial("[WM-BOOT] scheduled");
     }
 #endif
+    gui_perf_switch(nastepny_pid);
     aktualny_pid =
         nastepny_pid;
 

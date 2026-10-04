@@ -38,8 +38,11 @@
  */
 
 #include "skladacz_obrazu.h"
+#include "gui_runtime_diag.h"
 #include "ekran.h"
 #include "wm_dekoracje.h"
+#include "kursor_prezentacja.h"
+#include "kursor_diag.h"
 #include "zegar_ui.h"
 #include "bufory_grafiki.h"
 #include "ekran_format.h"
@@ -166,8 +169,10 @@ bool skladanie_w_toku =
     false;
 GuiDirtyRect dirty_rects[SKLADACZ_MAKS_DIRTY_RECT] = {};
 uint32_t dirty_count = 0;
-bool cursor_pending = false;
-int cursor_new_x = 0, cursor_new_y = 0;
+KursorLatest cursor_latest;
+bool& cursor_pending=cursor_latest.pending;
+int& cursor_new_x=cursor_latest.x;
+int& cursor_new_y=cursor_latest.y;
 struct PendingGeometry { bool pending; int x,y,old_x,old_y,width,height; };
 PendingGeometry pending_geometry[MAKS_WARSTW]{};
 uint64_t drag_moves_received=0,drag_moves_coalesced=0,drag_frames_presented=0;
@@ -189,8 +194,13 @@ DeferredBuffer deferred[SKLADACZ_MAKS_DIRTY_RECT] = {};
 uint32_t deferred_count=0;
 uint32_t render_readers=0;
 
+#ifdef BURSZTYN_COMPOSITOR_HOST_TEST
+uint64_t irq_off(){return 0;}
+void irq_restore(uint64_t){}
+#else
 uint64_t irq_off(){uint64_t f;asm volatile("pushfq; popq %0; cli":"=r"(f)::"memory","cc");return f;}
 void irq_restore(uint64_t f){if(f&(1ULL<<9))asm volatile("sti":::"memory");}
+#endif
 
 void apply_pending_geometry(int only_pid){
     for(int pid=1;pid<MAKS_WARSTW;++pid){if(only_pid>0&&pid!=only_pid)continue;
@@ -876,6 +886,7 @@ extern void grafika_zakoncz_skladanie_regionu(int,int,int,int);
 extern void grafika_prezentuj_region(int,int,int,int);
 extern void grafika_prezentuj_kursor();
 extern void grafika_prezentuj_kursor_w(int,int);
+extern void grafika_prezentuj_scene_z_kursorem(const GuiDirtyRect*,uint32_t,int,int);
 extern void grafika_pobierz_pozycje_kursora(int*,int*);
 extern void grafika_pobierz_overlay_kursora(int*,int*,int*,int*,bool*);
 extern void grafika_zakoncz_scene();
@@ -1474,6 +1485,7 @@ void zloz_dekoracje(int pid,const GuiDirtyRect& clip) {
        clip.x+clip.width<=w.x+int(w.szerokosc)-edge &&
        clip.y+clip.height<=w.y+int(w.wysokosc)-edge) return;
     const BursztynMotyw* theme=motyw_pobierz_aktywny();
+    kursor_diag_decor();
     wm_rysuj_dekoracje(w.szerokosc,w.wysokosc,tytul_okna[pid],
         stan_okna[pid]==GUI_OKNO_ZMAKSYMALIZOWANE,ekran_skala(),*theme,
         [&](int x,int y,uint32_t color) {
@@ -1827,6 +1839,7 @@ void skladacz_obrazu_oznacz_dirty() {
 void skladacz_obrazu_oznacz_dirty_rect(int x,int y,int width,int height){
     GuiDirtyRect r{x,y,width,height};const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
     if(!rect_clip(&r,sw,sh))return;
+    gui_perf_add(aktualny_pid,GP_DIRTY);
     uint64_t f=irq_off();++licznik_dirty;++dirty_generation;
     /* Scalaj przechodnio tylko regiony, dla ktorych bounding box jest
        rzeczywiscie oplacalny. Usuniecie przez swap nie pomija wpisu. */
@@ -1848,14 +1861,20 @@ void skladacz_obrazu_oznacz_dirty_warstwy(int pid){warstwa_obrazu*w=pobierz_wars
 void skladacz_obrazu_oznacz_ruch_kursora(int old_x,int old_y,int new_x,int new_y){
     (void)old_x; (void)old_y;
     const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
-    if(sw<=0||sh<=0)return;
-    if(new_x<-64||new_y<-64||new_x>=sw+64||new_y>=sh+64)return;
+    if(sw<=0||sh<=0){kursor_diag_drop();return;}
+    if(new_x<-64||new_y<-64||new_x>=sw+64||new_y>=sh+64){kursor_diag_drop();return;}
     uint64_t f=irq_off();++licznik_dirty;++dirty_generation;
-    cursor_new_x=new_x;cursor_new_y=new_y;cursor_pending=true;
+    kursor_diag_queue(cursor_pending);
+    cursor_latest.queue(new_x,new_y);
     irq_restore(f);
 }
 
 void skladacz_obrazu_obsluz_dirty() {
+    gui_perf_report();
+#if BURSZTYNDIAGGUIRUNTIME
+    extern void grafika_runtime_diag_snapshot();
+    grafika_runtime_diag_snapshot();
+#endif
     uint64_t f=irq_off();bool ma_dirty=dirty_count!=0,ma_cursor=cursor_pending;irq_restore(f);
     const bool ma_geometrie=ma_pending_geometry();
     const bool ma_drag=ma_pending_drag_overlay();
@@ -1867,14 +1886,14 @@ void skladacz_obrazu_obsluz_dirty() {
         /* Kursor nie czeka na pacing duzych warstw. Restore i overlay nadal
            wykonuje petla PID 0, nigdy IRQ myszy. */
         int cx=0,cy=0;bool ruch=false;
-        f=irq_off();if(cursor_pending){cx=cursor_new_x;cy=cursor_new_y;cursor_pending=false;ruch=true;}irq_restore(f);
+        f=irq_off();if(cursor_pending){ruch=cursor_latest.take(cx,cy);kursor_diag_consume(dirty_rects,dirty_count);}irq_restore(f);
         if(ruch){grafika_prezentuj_kursor_w(cx,cy);++cursor_fast_present_count;}
         if(hpet_dostepny())perf_log(now);
         return;
     }
     if(!klatka_potrzebna){
         int cx=0,cy=0;bool ruch=false;
-        f=irq_off();if(cursor_pending){cx=cursor_new_x;cy=cursor_new_y;cursor_pending=false;ruch=true;}irq_restore(f);
+        f=irq_off();if(cursor_pending){ruch=cursor_latest.take(cx,cy);kursor_diag_consume(dirty_rects,dirty_count);}irq_restore(f);
         if(ruch){grafika_prezentuj_kursor_w(cx,cy);++cursor_fast_present_count;}
         if(hpet_dostepny())perf_log(now);
         return;
@@ -1888,8 +1907,8 @@ void skladacz_obrazu_obsluz_dirty() {
     bool drag_frame_work=false;
     f=irq_off();drag_frame_work=drag_frame_waiting;drag_frame_waiting=false;irq_restore(f);
     GuiDirtyRect work[SKLADACZ_MAKS_DIRTY_RECT];uint32_t count=0;uint64_t generation_start;bool cursor_work=false;int cur_x=0,cur_y=0;
-    f=irq_off();count=dirty_count;for(uint32_t i=0;i<count;++i)work[i]=dirty_rects[i];dirty_count=0;cursor_work=cursor_pending;cur_x=cursor_new_x;cur_y=cursor_new_y;cursor_pending=false;generation_start=dirty_generation;irq_restore(f);
-    GuardSkladania guard;if(!guard.aktywny()){for(uint32_t i=0;i<count;++i)skladacz_obrazu_oznacz_dirty_rect(work[i].x,work[i].y,work[i].width,work[i].height);if(cursor_work)skladacz_obrazu_oznacz_ruch_kursora(cur_x,cur_y,cur_x,cur_y);if(drag_frame_work){f=irq_off();drag_frame_waiting=true;irq_restore(f);}return;}
+    f=irq_off();count=dirty_count;for(uint32_t i=0;i<count;++i)work[i]=dirty_rects[i];dirty_count=0;cursor_work=cursor_pending;cur_x=cursor_new_x;cur_y=cursor_new_y;cursor_pending=false;kursor_diag_consume(work,count);generation_start=dirty_generation;irq_restore(f);
+    GuardSkladania guard;if(!guard.aktywny()){for(uint32_t i=0;i<count;++i)skladacz_obrazu_oznacz_dirty_rect(work[i].x,work[i].y,work[i].width,work[i].height);if(cursor_work){f=irq_off();if(!cursor_pending){cursor_latest.retry(cur_x,cur_y);kursor_diag_retry();}irq_restore(f);}if(drag_frame_work){f=irq_off();drag_frame_waiting=true;irq_restore(f);}return;}
     const uint64_t start=hpet_dostepny()?czas_monotoniczny_us():0;LayerRenderInfo layers[MAKS_WARSTW];int layer_count=0;
     if(count)layer_count=snapshot_warstw(layers);
     int overlay_x=0,overlay_y=0,overlay_w=16,overlay_h=16;
@@ -1901,6 +1920,7 @@ void skladacz_obrazu_obsluz_dirty() {
     if(overlay_widoczny)for(uint32_t ri=0;ri<count;++ri){
         if(rect_przecina(work[ri],overlay_rect)){dirty_przecina_kursor=true;break;}
     }
+    kursor_diag_compose();
     grafika_rozpocznij_skladanie();uint64_t pixels=0;
     /* Faza A: wszystkie regiony trafiaja w calosci do scene backbufferu.
        Framebuffer nie jest dotykany podczas kosztownego compositingu. */
@@ -1924,20 +1944,21 @@ void skladacz_obrazu_obsluz_dirty() {
         grafika_naloz_okno_terminala_region(r.x,r.y,r.width,r.height);
     }
     const uint64_t compose_end=hpet_dostepny()?czas_monotoniczny_us():0;
+    gui_perf_add(0,GP_COMPOSE_NS,(compose_end>=start?compose_end-start:0)*1000);
     /* Faza B: prezentujemy dopiero gotowe wiersze, a kursor nakladamy raz,
        jako ostatni overlay. Scene backbuffer pozostaje bez kursora. */
-    for(uint32_t ri=0;ri<count;++ri){const GuiDirtyRect&r=work[ri];grafika_prezentuj_region(r.x,r.y,r.width,r.height);}
     int cursor_x=0,cursor_y=0;
     if(cursor_work){cursor_x=cur_x;cursor_y=cur_y;}
     else{grafika_pobierz_pozycje_kursora(&cursor_x,&cursor_y);}
     /* Scene nigdy nie zawiera kursora. Bez ruchu myszy overlay pozostaje
        nietkniety, dopoki dirty faktycznie nie przecina jego 16x16. */
     if(cursor_work||dirty_przecina_kursor||!overlay_widoczny){
-        grafika_prezentuj_kursor_w(cursor_x,cursor_y);++cursor_fast_present_count;
+        grafika_prezentuj_scene_z_kursorem(work,count,cursor_x,cursor_y);++cursor_fast_present_count;
 #if BURSZTYN_DEBUG_GUI_PERF
         if(dirty_przecina_kursor)++cursor_reoverlay_after_dirty;
 #endif
     }
+    else for(uint32_t ri=0;ri<count;++ri){const auto& r=work[ri];grafika_prezentuj_region(r.x,r.y,r.width,r.height);}
     grafika_zakoncz_scene();
     if(drag_frame_work)++drag_frames_presented;
     const uint64_t present_end=hpet_dostepny()?czas_monotoniczny_us():0;

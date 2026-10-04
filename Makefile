@@ -1485,3 +1485,45 @@ test-shell-host:
 	@mkdir -p .wm-test
 	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_shell_terminal.cpp -Wl,--gc-sections -o .wm-test/shell
 	ASAN_OPTIONS=detect_leaks=0 .wm-test/shell
+
+BURSZTYNDIAGCURSORPERF ?= 0
+ifeq ($(BURSZTYNDIAGCURSORPERF),1)
+KERNEL_CXXFLAGS += -DBURSZTYNDIAGCURSORPERF=1
+endif
+
+.PHONY: test-cursor-host
+test-cursor-host:
+	mkdir -p .wm-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined narzedzia/test_cursor_host.cpp -o .wm-test/cursor
+	ASAN_OPTIONS=detect_leaks=0 .wm-test/cursor
+
+grafika.o skladacz_obrazu.o: kursor_prezentacja.h kursor_diag.h
+virtio_input.o: kursor_diag.h
+
+.PHONY: test-cursor-hover
+test-cursor-hover:
+	mkdir -p .wm-test
+	g++ -std=c++17 -O0 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_cursor_hover.cpp -Wl,--gc-sections -o .wm-test/cursor-hover
+	ASAN_OPTIONS=detect_leaks=0 .wm-test/cursor-hover
+
+BURSZTYNDIAGGUIRUNTIME ?= 0
+ifeq ($(BURSZTYNDIAGGUIRUNTIME),1)
+KERNEL_CXXFLAGS += -DBURSZTYNDIAGGUIRUNTIME=1
+RING3_FLAGS += -DBURSZTYNDIAGGUIRUNTIME=1
+endif
+scheduler.o syscalls.o grafika.o skladacz_obrazu.o: gui_runtime_diag.h
+shell_tmp.o: shell_runtime_diag.h
+
+virtio_input.o: gui_runtime_diag.h
+
+.PHONY: test-gui-runtime-diag
+test-gui-runtime-diag:
+	mkdir -p .wm-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined narzedzia/test_gui_runtime_diag.cpp -o .wm-test/gui-runtime-diag
+	ASAN_OPTIONS=detect_leaks=0 .wm-test/gui-runtime-diag
+
+.PHONY: test-compositor-cursor
+test-compositor-cursor:
+	mkdir -p .wm-test
+	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_compositor_cursor.cpp -Wl,--gc-sections -o .wm-test/compositor-cursor
+	ASAN_OPTIONS=detect_leaks=1 .wm-test/compositor-cursor

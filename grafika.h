@@ -252,3 +252,6 @@ bool grafika_test_kursor_suite(VirtioGpuDriver* gpu_drv);
 void grafika_pobierz_boot_rozmiar(uint32_t* out_w, uint32_t* out_h);
 void grafika_ustaw_tryby_virtio_gpu();
 
+
+struct GuiDirtyRect;
+void grafika_prezentuj_scene_z_kursorem(const GuiDirtyRect*, uint32_t, int, int);

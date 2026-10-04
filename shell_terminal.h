@@ -180,6 +180,7 @@ bool shell_begin_paint(KontekstRysowania& ctx,Prostokat r) {
     ctx.rysuj_prostokat(r,motyw_kolor(MOTYW_KOLOR_OKNOTLO));return true;
 }
 void shell_publish(Prostokat r) {
+    SHELL_PERF(publish);
     // BWS57 reserves zero for transparency; opaque black must remain paintable.
     size_t count=static_cast<size_t>(r.szerokosc)*r.wysokosc;
     for(size_t i=0;i<count;++i) if(!g_paint_pixels[i]) g_paint_pixels[i]=0x01000000;
@@ -207,6 +208,7 @@ void shell_publish(Prostokat r) {
     gui_odswiez();
 }
 void shell_draw_input(KontekstRysowania& ctx) {
+    SHELL_PERF(caret);
     Prostokat row=shell_input_rect(),edit=shell_edit_rect();
     const char* text=g_obecny_bufor_wejscia?g_obecny_bufor_wejscia:"";
     int caret=shell_prefix_width(text,g_caret),cw=ui_skaluj(2,ui_skala_procent);
@@ -238,6 +240,7 @@ void shell_draw_input(KontekstRysowania& ctx) {
 }
 void shell_odswiez_linie_wejsciowa() {
     if(shell_minimized) return;
+    SHELL_PERF(row);
     Prostokat r=shell_input_rect();KontekstRysowania ctx;
     if(!shell_begin_paint(ctx,r)) return;
     shell_draw_input(ctx);
@@ -245,6 +248,7 @@ void shell_odswiez_linie_wejsciowa() {
 }
 void shell_rysuj_terminal() {
     if(shell_minimized) return;
+    SHELL_PERF(full);
     static int last_x=-1,last_y=-1,last_w=-1,last_h=-1;static uint32_t last_scale=0;
     if(last_x!=shell_x || last_y!=shell_y || last_w!=shell_w || last_h!=shell_h || last_scale!=ui_skala_procent) {
         gui_rysuj_standardowa_belke(shell_x,shell_y,shell_w,"Powłoka Bursztynowa",shell_maximized);
@@ -257,6 +261,7 @@ void shell_rysuj_terminal() {
     if(!shell_begin_paint(ctx,c)) return;
     Prostokat area=shell_output_rect();ctx.dodaj_przyciecie(area);shell_layout_rows(&ctx);ctx.zdejmij_przyciecie();
     if(g_pasek_przewijania) {
+        SHELL_PERF(scrollbar);
         Prostokat sb=shell_scrollbar_rect();sb.x-=c.x;sb.y-=c.y;
         g_pasek_przewijania->ustaw_skale_dpi(ui_skala());g_pasek_przewijania->rozmiesc(sb);
         g_pasek_przewijania->ustaw_rozmiar_strony(shell_page_rows());g_pasek_przewijania->ustaw_zakres(0,max);

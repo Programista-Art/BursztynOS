@@ -18,7 +18,7 @@ static std::string sponsor_file;
 static bool sponsor_exists=true, popup_open=false;
 static Prostokat popup_rect;
 static uint32_t theme_background=0x102030;
-static unsigned popup_paints=0;
+static unsigned popup_paints=0,client_paints=0,refreshes=0;
 static bool expect_live_theme=false;
 static std::vector<uint32_t> popup_pixels;
 uint8_t motyw_cien_okna() { return 1; }
@@ -35,7 +35,7 @@ bool gui_czekaj_na_zdarzenie(bws_zdarzenie* e) {
     }
     *e=events[event_index++];return true;
 }
-void gui_odswiez() {}
+void gui_odswiez() {++refreshes;}
 uint32_t motyw_kolor(uint32_t id) { return id==MOTYW_KOLOR_OKNOTLO?theme_background:(0xeeddcc ^ (theme_background ^ 0x102030)); }
 uint16_t motyw_promien(uint32_t) { return 0; }
 uint8_t motyw_grubosc_ramki() { return 1; }
@@ -45,6 +45,7 @@ void gui_rysuj_prostokat(int,int,int,int,uint32_t) { assert(false); }
 void gui_wypisz_tekst_kolor_skala(int,int,uint32_t,int,const char*) { assert(false); }
 void gui_rysuj_standardowa_belke(int,int,int,const char*,bool) {}
 bool gui_blit(int x,int y,int w,int h,const uint32_t* data) {
+    ++client_paints;
     submitted_rect=Prostokat(x,y,w,h);submitted.assign(data,data+w*h);return true;
 }
 bool clipboard_set(const char* mime,const void* data,uint64_t n) {
@@ -79,6 +80,22 @@ static void reset() {
 int main() {
     g_linie=new ShellLine[MAXSCROLLBACKLINES]{};g_pasek_przewijania=new PasekPrzewijania();
     char input[SHELL_INPUT_CAPACITY];
+    // Feed the real blocking event loop 250 ticks and 100 irrelevant outside
+    // moves, then return one key without editor-side repaint.
+    for(unsigned scale:{100U,125U}) {
+        ui_skala_procent=scale;reset();
+        bws_zdarzenie idle{};idle.typ=BWS_ZDARZENIE_TIMER;
+        for(int i=0;i<250;++i)events.push_back(idle);
+        idle.typ=BWS_ZDARZENIE_MYSZ_RUCH;idle.x=1919;idle.y=0;
+        for(int i=0;i<100;++i)events.push_back(idle);
+        idle.typ=BWS_ZDARZENIE_KLAWISZ;idle.kod='a';events.push_back(idle);
+        unsigned paints_before=client_paints,refresh_before=refreshes,popup_before=popup_paints;
+        int sx=shell_x,sy=shell_y,sw=shell_w,sh=shell_h;
+        assert(pobierz_znak_blokujaco()=='a');
+        assert(client_paints==paints_before&&refreshes==refresh_before&&popup_paints==popup_before);
+        assert(shell_x==sx&&shell_y==sy&&shell_w==sw&&shell_h==sh);
+    }
+    ui_skala_procent=100;
     reset();bytes("\n\n \t\nabcąę");key(80,"\x1b[D");bytes("X");bytes("\b");key(80,"\x1b[D");key(76,"\x1b[3~");bytes("\n");
     assert(pobierz_linie(input,sizeof(input)));assert(!strcmp(input,"abcę"));assert(g_liczba_linii==2);assert(historia_ilosc==0);
     reset();dodaj_do_historii("pisz stary");dodaj_do_historii("system");bytes("roboczeą");key(82,"\x1b[A");key(82,"\x1b[A");key(81,"\x1b[B");key(81,"\x1b[B");bytes("\n");
