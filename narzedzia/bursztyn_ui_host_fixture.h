@@ -54,8 +54,10 @@ bool utworz_katalog_uzytkownika(const char* sciezka) {
 
 static char g_mock_clipboard[1024] = {0};
 static size_t g_mock_clipboard_len = 0;
+static char g_mock_clipboard_mime[64]{};
 
-bool clipboard_set(const char* /*mime*/, const void* dane, uint64_t rozmiar) {
+bool clipboard_set(const char* mime, const void* dane, uint64_t rozmiar) {
+    snprintf(g_mock_clipboard_mime,sizeof(g_mock_clipboard_mime),"%s",mime?mime:"");
     if (!dane || rozmiar == 0) {
         g_mock_clipboard_len = 0;
         g_mock_clipboard[0] = '\0';
@@ -68,8 +70,10 @@ bool clipboard_set(const char* /*mime*/, const void* dane, uint64_t rozmiar) {
     return true;
 }
 
-bool clipboard_read(const char* /*mime*/, void* dane, uint64_t pojemnosc, uint64_t* odczytano) {
-    if (!dane || pojemnosc == 0) return false;
+bool clipboard_size(const char* mime,uint64_t* size) {*size=strcmp(mime,g_mock_clipboard_mime)?0:g_mock_clipboard_len;return *size>0;}
+
+bool clipboard_read(const char* mime, void* dane, uint64_t pojemnosc, uint64_t* odczytano) {
+    if (!dane || pojemnosc == 0 || strcmp(mime,g_mock_clipboard_mime)) return false;
     size_t copy_len = (g_mock_clipboard_len < pojemnosc) ? g_mock_clipboard_len : (pojemnosc - 1);
     memcpy(dane, g_mock_clipboard, copy_len);
     static_cast<char*>(dane)[copy_len] = '\0';
@@ -109,7 +113,8 @@ uint64_t gui_czas_monotoniczny_ns() { return 1000000000ULL; }
 bool gui_pobierz_zdarzenie(bws_zdarzenie*) { return false; }
 bool gui_czekaj_na_zdarzenie(bws_zdarzenie*) { return false; }
 bool gui_czekaj_na_zdarzenie_z_timeoutem(bws_zdarzenie*, uint64_t) { return false; }
-void gui_ustaw_capture_myszy(bool) {}
+static bool test_mouse_capture=false;
+void gui_ustaw_capture_myszy(bool value) {test_mouse_capture=value;}
 bool gui_ustaw_geometrie_okna(int, int, int, int, int) { return true; }
 bool gui_pobierz_monitor(uint32_t, GuiMonitorInfo*) { return false; }
 void bws_przesun_warstwe(int, int) {}
@@ -146,6 +151,9 @@ uint32_t motyw_kolor(uint32_t rola) {
         case MOTYW_KOLOR_PRZYCISK: return m->przycisk;
         case MOTYW_KOLOR_PRZYCISK_NAJECHANY: return m->przycisknajechany;
         case MOTYW_KOLOR_TEKST_AKCENTU: return m->tekstakcentu;
+        case MOTYW_KOLOR_PULPIT_ZAZNACZENIE: return motyw_pulpit_zaznaczenie(*m);
+        case MOTYW_KOLOR_PULPIT_RAMKA: return motyw_pulpit_ramka(*m);
+        case MOTYW_KOLOR_PULPIT_TEKST: return m->tekst;
         default: return m->tekst;
     }
 }

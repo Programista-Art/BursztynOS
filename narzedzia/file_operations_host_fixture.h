@@ -4,7 +4,10 @@
 #include <string>
 static std::map<std::string,bool> files;
 static BwsSchowekPlikow file_clip{};
+static BwsSchowekPlikow file_clip_items[BWS_SCHOWEK_MAX_PLIKOW]{};
+static uint64_t fixture_clip_generation=7;
 static bool deny_operation=false;
+static std::string deny_path;
 static int deletes=0, launches=0, checks=0;
 static std::string launched_app,launched_file;
 #define CHECK(x) do {++checks;if(!(x)){fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x);exit(1);}} while(0)
@@ -39,7 +42,7 @@ static uint64_t explorer_bws(uint64_t nr,uint64_t a1,uint64_t a2,uint64_t a3,uin
 }
 bool utworz(const char* path) {return add_file(path,false);}
 bool usun_twor_uzytkownika(const char* path) {
-    if(deny_operation || !files.count(path))return false;
+    if(deny_operation || deny_path==path || !files.count(path))return false;
     files.erase(path);++deletes;return true;
 }
 bool zmien_nazwe_uzytkownika(const char* path,const char* name) {
@@ -57,17 +60,37 @@ bool przenies_twor_uzytkownika(const char* path,const char* dir) {
 }
 bool pobierz_schowek_plikow(BwsSchowekPlikow* out) {*out=file_clip;return file_clip.operacja!=BWS_SCHOWEK_PUSTY;}
 bool ustaw_schowek_plikow(const char* path,BwsOperacjaSchowka operation) {
-    if(!files.count(path))return false;file_clip={};file_clip.wersja=BWS_SCHOWEK_WERSJA;file_clip.generacja=7;
-    file_clip.operacja=operation;snprintf(file_clip.sciezka,sizeof(file_clip.sciezka),"%s",path);return true;
+    if(!files.count(path))return false;file_clip={};file_clip.wersja=BWS_SCHOWEK_WERSJA;file_clip.generacja=++fixture_clip_generation;file_clip.zarezerwowane=1;
+    file_clip.operacja=operation;snprintf(file_clip.sciezka,sizeof(file_clip.sciezka),"%s",path);file_clip_items[0]=file_clip;return true;
 }
 bool wyczysc_schowek_plikow(uint64_t generation) {if(file_clip.generacja!=generation)return false;file_clip={};return true;}
+bool ustaw_schowek_wielu_plikow(const char (*paths)[BWS_DROP_SCIEZKA_MAX],uint32_t count,BwsOperacjaSchowka op) {
+    if(!count || count>BWS_SCHOWEK_MAX_PLIKOW || deny_operation)return false;
+    for(uint32_t i=0;i<count;++i)if(!files.count(paths[i]))return false;
+    ++fixture_clip_generation;
+    for(uint32_t i=0;i<count;++i) {
+        auto& r=file_clip_items[i];r={};r.wersja=BWS_SCHOWEK_WERSJA;r.operacja=op;r.generacja=fixture_clip_generation;r.zarezerwowane=count;
+        snprintf(r.sciezka,sizeof(r.sciezka),"%s",paths[i]);
+    }
+    file_clip=file_clip_items[0];return true;
+}
+bool pobierz_element_schowka_plikow(BwsSchowekPlikow* out,uint32_t i,uint64_t gen) {
+    if(gen!=file_clip.generacja || i>=file_clip.zarezerwowane)return false;*out=file_clip_items[i];return true;
+}
+bool usun_prefiks_schowka_plikow(uint64_t gen,uint32_t count) {
+    if(gen!=file_clip.generacja || count>file_clip.zarezerwowane)return false;
+    unsigned left=file_clip.zarezerwowane-count;if(!left)return wyczysc_schowek_plikow(gen);
+    ++fixture_clip_generation;
+    for(unsigned i=0;i<left;++i){file_clip_items[i]=file_clip_items[i+count];file_clip_items[i].zarezerwowane=left;file_clip_items[i].generacja=fixture_clip_generation;}
+    file_clip=file_clip_items[0];return true;
+}
 bool uruchom_program_z_argumentem_uzytkownika(const char* app,const char* path) {++launches;launched_app=app;launched_file=path;return true;}
 bool uruchom_program_uzytkownika(const char*) {return true;}
 wynik_otwarcia_skojarzonego otworz_plik_skojarzony(const char*) {return OTWORZ_PLIK_URUCHOMIONO;}
 bool czytaj(const char*,void*,uint32_t,uint32_t*) {return false;}
 bool czytaj_plik(const char*,char*,uint32_t) {return false;}
 bool gui_rejestruj_cele_drop(const BwsCelDrop*,uint32_t) {return true;}
-int oblicz_szerokosc_tekstu(const char* t,int) {return CzcionkaUI::zmierz_tekst(t,1);}
+int oblicz_szerokosc_tekstu(const char* t,int scale) {return CzcionkaUI::zmierz_tekst(t,SkalaUI::procent(scale));}
 void gui_rysuj_okno(int,int,int,int,const char*) {}
 void gui_wypisz_tekst_kolor(int,int,uint32_t,const char*) {}
 

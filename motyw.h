@@ -32,7 +32,12 @@ enum MotywKolorRola : uint32_t {
     MOTYW_KOLOR_PRZYCISK = 17,
     MOTYW_KOLOR_PRZYCISK_NAJECHANY = 18,
     MOTYW_KOLOR_TEKST_AKCENTU = 19,
-    MOTYW_KOLOR_LICZBA = 20
+    MOTYW_KOLOR_LICZBA = 20, // number of stored v2 palette entries
+    // Derived central roles: keep the v2 wire structure unchanged.
+    MOTYW_KOLOR_PULPIT_ZAZNACZENIE = 20,
+    MOTYW_KOLOR_PULPIT_RAMKA = 21,
+    MOTYW_KOLOR_PULPIT_TEKST = 22,
+    MOTYW_KOLOR_ROL_LICZBA = 23
 };
 
 // Aliases ról kolorystycznych
@@ -153,6 +158,21 @@ struct BursztynMotyw {
 };
 
 static_assert(sizeof(BursztynMotyw) == 172, "BursztynMotyw ABI v2 musi miec dokladnie 172 bajty");
+
+inline uint32_t motyw_mieszaj(uint32_t base, uint32_t overlay, unsigned weight) {
+    uint32_t result=0;
+    for(unsigned shift=0;shift<24;shift+=8)
+        result |= (((base>>shift&255)*(255-weight)+(overlay>>shift&255)*weight)/255)<<shift;
+    return result;
+}
+// Opaque RGB computed blending. The desktop surface uses zero as a transparent
+// hole and does not support partial alpha. No accent-button role is involved.
+inline uint32_t motyw_pulpit_zaznaczenie(const BursztynMotyw& m) {
+    return motyw_mieszaj(m.panel,m.tekst,24);
+}
+inline uint32_t motyw_pulpit_ramka(const BursztynMotyw& m) {
+    return motyw_mieszaj(m.panel,m.tekst,80);
+}
 
 /* Zwraca obliczony wciecie (inset) od brzegu dla cwiartki kola o promieniu r na wierszu dy */
 static inline int motyw_promien_inset(int r, int dy) {

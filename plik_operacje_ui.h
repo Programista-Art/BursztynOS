@@ -54,15 +54,27 @@ inline bool schowek_gotowy(BwsSchowekPlikow* record) {
         (record->operacja == BWS_SCHOWEK_COPY || record->operacja == BWS_SCHOWEK_CUT);
 }
 enum class WynikWklejenia { OK, Pusty, Blad };
-inline WynikWklejenia wklej(const char* directory) {
+struct RaportWklejenia {uint32_t wykonane=0,wszystkie=0;char blad[512]{};};
+inline WynikWklejenia wklej(const char* directory,RaportWklejenia* report=nullptr) {
+    if(report)*report={};
     BwsSchowekPlikow record{};
-    if (!schowek_gotowy(&record)) return WynikWklejenia::Pusty;
-    bool ok = record.operacja == BWS_SCHOWEK_COPY
-        ? kopiuj_twor_uzytkownika(record.sciezka, directory)
-        : przenies_twor_uzytkownika(record.sciezka, directory);
-    // BWS48 moves atomically without overwrite. Never delete after failed paste.
-    if (!ok) return WynikWklejenia::Blad;
-    if (record.operacja == BWS_SCHOWEK_CUT) (void)wyczysc_schowek_plikow(record.generacja);
+    if(!schowek_gotowy(&record))return WynikWklejenia::Pusty;
+    uint32_t count=record.zarezerwowane?record.zarezerwowane:1;
+    if(count>BWS_SCHOWEK_MAX_PLIKOW)return WynikWklejenia::Blad;
+    if(report)report->wszystkie=count;
+    uint64_t generation=record.generacja;auto operation=record.operacja;uint32_t done=0;
+    for(uint32_t n=0;n<count;++n) {
+        bool read=n==0 || pobierz_element_schowka_plikow(&record,n,generation);
+        bool ok=read && (operation==BWS_SCHOWEK_COPY?kopiuj_twor_uzytkownika(record.sciezka,directory):przenies_twor_uzytkownika(record.sciezka,directory));
+        if(!ok) {
+            if(report)for(size_t i=0;i<sizeof(report->blad)-1 && record.sciezka[i];++i)report->blad[i]=record.sciezka[i];
+            if(operation==BWS_SCHOWEK_CUT && done)usun_prefiks_schowka_plikow(generation,done);
+            return WynikWklejenia::Blad;
+        }
+        ++done;if(report)report->wykonane=done;
+    }
+    if(operation==BWS_SCHOWEK_CUT)(void)wyczysc_schowek_plikow(generation);
     return WynikWklejenia::OK;
 }
+
 } // namespace PlikiUI

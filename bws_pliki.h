@@ -44,6 +44,11 @@ enum BwsWynikDrop : uint32_t {
 
 /* Wspoldzielony, bezplikowy schowek operacji na plikach (BWS 52..55). */
 #define BWS_SCHOWEK_WERSJA 1U
+#define BWS_SCHOWEK_MAX_PLIKOW 128U
+// Additive BWS52 arg3: count of contiguous 512-byte paths (0 = legacy one).
+// BWS53 arg2: item index, arg3: expected generation (0 = any).
+// zarezerwowane reports total item count; legacy readers must reject >1.
+// BWS54 arg2: remove successful CUT prefix (0 = clear all).
 
 enum BwsOperacjaSchowka : uint8_t {
     BWS_SCHOWEK_PUSTY = 0,

@@ -12,13 +12,13 @@ enum class Akcja : uint8_t {
     NONE, OPEN, RUN, COPY, CUT, RENAME, REMOVE, PROPERTIES,
     PASTE, NEW_FILE, NEW_FOLDER, REFRESH, OPEN_WITH, NOTEPAD, MOVE
 };
-struct CelMenu { bool selected{false}, directory{false}, text{false}, program{false}, paste{false}; };
+struct CelMenu { bool selected{false}, directory{false}, text{false}, program{false}, paste{false}; unsigned count{1}; };
 inline bool dostepna(Akcja a, CelMenu t) {
     switch (a) {
-    case Akcja::OPEN: case Akcja::COPY: case Akcja::CUT: case Akcja::RENAME:
-    case Akcja::REMOVE: case Akcja::MOVE: case Akcja::PROPERTIES: return t.selected;
-    case Akcja::OPEN_WITH: case Akcja::NOTEPAD: return t.selected && !t.directory && t.text;
-    case Akcja::RUN: return t.selected && t.program;
+    case Akcja::COPY: case Akcja::CUT: case Akcja::REMOVE: return t.selected;
+    case Akcja::OPEN: case Akcja::RENAME: case Akcja::MOVE: case Akcja::PROPERTIES: return t.selected && t.count==1;
+    case Akcja::OPEN_WITH: case Akcja::NOTEPAD: return t.selected && t.count==1 && !t.directory && t.text;
+    case Akcja::RUN: return t.selected && t.count==1 && t.program;
     case Akcja::PASTE: return t.paste;
     default: return true;
     }

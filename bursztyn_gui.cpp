@@ -1030,6 +1030,16 @@ BwsWynikDrop gui_aktualizuj_drag(const char* sciezka,
         ? static_cast<BwsWynikDrop>(wynik) : BWS_DROP_BLAD;
 }
 
+bool ustaw_schowek_wielu_plikow(const char (*paths)[BWS_DROP_SCIEZKA_MAX],uint32_t count,BwsOperacjaSchowka operation) {
+    return paths && count>0 && count<=BWS_SCHOWEK_MAX_PLIKOW &&
+        bws_wywolaj(52,reinterpret_cast<uint64_t>(paths),operation,count,0)==1;
+}
+bool pobierz_element_schowka_plikow(BwsSchowekPlikow* out,uint32_t index,uint64_t generation) {
+    return out && bws_wywolaj(53,reinterpret_cast<uint64_t>(out),index,generation,0)==1;
+}
+bool usun_prefiks_schowka_plikow(uint64_t generation,uint32_t count) {
+    return count && bws_wywolaj(54,generation,count,0,0)==1;
+}
 bool ustaw_schowek_plikow(const char* sciezka,
                           BwsOperacjaSchowka operacja) {
     if (!sciezka || (operacja != BWS_SCHOWEK_COPY &&
@@ -1517,6 +1527,9 @@ uint32_t motyw_kolor(uint32_t rola) {
         case MOTYW_KOLOR_PRZYCISK: return m->przycisk;
         case MOTYW_KOLOR_PRZYCISK_NAJECHANY: return m->przycisknajechany;
         case MOTYW_KOLOR_TEKST_AKCENTU: return m->tekstakcentu;
+        case MOTYW_KOLOR_PULPIT_ZAZNACZENIE: return motyw_pulpit_zaznaczenie(*m);
+        case MOTYW_KOLOR_PULPIT_RAMKA: return motyw_pulpit_ramka(*m);
+        case MOTYW_KOLOR_PULPIT_TEKST: return m->tekst;
         default: return m->tekst;
     }
 }

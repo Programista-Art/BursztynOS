@@ -1,6 +1,7 @@
 /* Bursztyn OS - Eksplorator Plikow. Ring 3 korzysta tylko z GUI/BWS. */
 #include "../../bursztyn_gui.h"
 #include "../../plik_popup_ui.h"
+#include "../../bursztyn_ui/menu_tekstowe.h"
 #include "../../bursztyn_ui/pasek_przewijania.h"
 #include "../../bursztyn_ui/tabela_wirtualna.h"
 #include <stdint.h>
@@ -842,9 +843,14 @@ public:
     }
 
     bool paste_clipboard() {
-        auto result = PlikiUI::wklej(path_);
+        PlikiUI::RaportWklejenia report;
+        auto result = PlikiUI::wklej(path_,&report);
         if (result != PlikiUI::WynikWklejenia::OK) {
-            set_status("Nie wklejono: konflikt nazwy, brak uprawnień lub pusty schowek.");
+            refresh_after_mutation();
+            char message[768]{};append_text(message,sizeof(message),"Wklejono ");append_unsigned(message,sizeof(message),report.wykonane);
+            append_text(message,sizeof(message)," / ");append_unsigned(message,sizeof(message),report.wszystkie);
+            append_text(message,sizeof(message),". Zatrzymano: ");append_text(message,sizeof(message),report.blad);
+            set_status(message);
             return false;
         }
         refresh_after_mutation();
@@ -1742,7 +1748,11 @@ public:
     PlikiUI::WyborKatalogu& test_chooser() {return chooser_;}
     bool toolbar_enabled(size_t i) const {return i<12 && buttons_[i].czy_wlaczona();}
 #endif
-    bool context_open() const { return menu_.menu.czy_otwarte(); }
+    bool context_open() const { return menu_.menu.czy_otwarte() || text_menu_.menu.czy_otwarte(); }
+    bool open_path_context(int x,int y) {
+        if(edit_mode_!=EditMode::PATH)begin_edit(EditMode::PATH);
+        draw_path_field();return text_menu_.otworz(path_field_,x,y,owner(),work());
+    }
 
     void begin_edit(EditMode mode) {
         const char* initial = "";
@@ -1759,7 +1769,7 @@ public:
     }
 
     void end_edit() {
-        dialog_.zamknij();chooser_.zamknij();
+        text_menu_.zamknij();dialog_.zamknij();chooser_.zamknij();
         edit_mode_ = EditMode::NONE;
         input_bytes_=0;
     }
@@ -1807,6 +1817,11 @@ public:
     bool popup_event(const bws_zdarzenie& e) {
         auto send=[&](PlikiUI::ObslugaPopup& events,bool used) {if(used)popup_needs_refresh_=events.wymaga_odswiezenia();return used;};
         popup_needs_refresh_=false;
+        if(text_menu_.zdarzenie(e)) {
+            popup_needs_refresh_=text_menu_.events.wymaga_odswiezenia();
+            if(text_menu_.pobierz_zmiane())draw_path_field();
+            return true;
+        }
         if(modal_open()) return edit_mode_==EditMode::MOVE?send(chooser_.events,chooser_.events.zdarzenie(e)):send(dialog_.events,dialog_.zdarzenie(e));
         return send(dialog_.events,dialog_.zdarzenie(e)) || send(chooser_.events,chooser_.events.zdarzenie(e)) || send(menu_.events,menu_.events.zdarzenie(e));
     }
@@ -1818,7 +1833,7 @@ public:
         path_field_.zaktualizuj_motyw(); search_field_.zaktualizuj_motyw();
         for(auto& b:buttons_) b.zaktualizuj_motyw();
         draw_workspace();
-        menu_.events.popups.zaktualizuj_motyw(); dialog_.events.popups.zaktualizuj_motyw(); chooser_.events.popups.zaktualizuj_motyw();gui_odswiez();
+        text_menu_.events.popups.zaktualizuj_motyw(); menu_.events.popups.zaktualizuj_motyw(); dialog_.events.popups.zaktualizuj_motyw(); chooser_.events.popups.zaktualizuj_motyw();gui_odswiez();
     }
     void pointer_hover(int x,int y) {
         for(auto& b:buttons_) {
@@ -2307,6 +2322,7 @@ private:
     bool quick_active_[QUICK_MAX]{};
     char field_skip_[5]{};unsigned field_skip_count_{0},field_skip_pos_{0};
     BursztynUI::PoleTekstowe path_field_, search_field_;
+    BursztynUI::MenuTekstowe text_menu_;
     BursztynUI::Przycisk buttons_[12];
     BursztynUI::KontekstRysowania drawing_;
     EditMode edit_mode_;
@@ -2520,7 +2536,7 @@ void perform_context_action(AktowkaView& view, AktowkaModel& model,
         case ContextAction::PASTE:
             if (model.paste_clipboard())
                 present_workspace_change(view, model.refresh());
-            else { view.draw_status(); view.open_modal(EditMode::NOTICE); gui_odswiez(); }
+            else { present_workspace_change(view,model.refresh());view.draw_status(); view.open_modal(EditMode::NOTICE); gui_odswiez(); }
             break;
         case ContextAction::NEW_FILE:
             (void)view.open_modal(EditMode::CREATE_FILE);
@@ -2686,6 +2702,7 @@ extern "C" __attribute__((noreturn)) void _start() {
 
         if (event.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN) {
             last_entry=-1;last_click_time=0;item_drag_candidate=false;item_dragging=false;gui_ustaw_capture_myszy(false);
+            if(hit(mx,my,view.layout().path)) {view.open_path_context(mx,my);gui_odswiez();continue;}
             const int visual_index = view.row_at(mx, my);
             if (visual_index >= 0) {
                 const int old_entry = model.selected();
@@ -2883,6 +2900,7 @@ extern "C" __attribute__((noreturn)) void _start() {
                 else view.draw_search_field();
                 gui_odswiez();
             }
+            if(hit(mx,my,view.layout().path)) {view.open_path_context(mx,my);gui_odswiez();continue;}
             const int visual_index = view.row_at(mx, my);
             if (visual_index >= 0) {
                 const int old_entry = model.selected();

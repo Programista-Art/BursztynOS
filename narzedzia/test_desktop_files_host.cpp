@@ -12,6 +12,8 @@ uint32_t gui_pobierz_okna(GuiOknoInfo*,uint32_t) {return 0;}
 bool gui_aktywuj_okno(uint64_t) {return true;}
 int bws_utworz_warstwe(int,int,int,int,int) {return 1;}
 
+#include "desktop_usability_cases.h"
+
 int main() {
     g_test_bws_hook=explorer_bws;
     files={{"/",true},{"/uzytkownicy",true},{SCIEZKA_PULPIT,true}};
@@ -91,15 +93,16 @@ int main() {
     for(bool folder:{false,true}) {
         files[pulpit_cel]=folder;hash_pulpitu_wazny=false;odswiez_wpisy_pulpitu();
         int selected=-1;for(int i=0;i<liczba_wpisow_pulpitu;++i)if(!strcmp(wpisy_pulpitu[i].nazwa,"target.txt"))selected=i;
-        CHECK(selected>=0);zaznaczony_wpis_pulpitu=selected;
+        CHECK(selected>=0);zaznaczony_wpis_pulpitu=selected;desktop_layout.click(selected,false);
         for(uint32_t color:{0x112233U,0xabcdefU,0x456789U}) {
             auto theme=base;theme.zaznaczenie=color;theme.akcent=color^0x555555;test_ustaw_aktywny_motyw(&theme);
             test_paint_rects.clear();test_capture_paints=true;RysujWpisyPulpitu();test_capture_paints=false;
-            bool background=false,border=false;for(auto r:test_paint_rects){background|=r.color==theme.zaznaczenie;border|=r.color==theme.akcent;}
+            bool background=false,border=false;for(auto r:test_paint_rects){background|=r.color==motyw_pulpit_zaznaczenie(theme);border|=r.color==motyw_pulpit_ramka(theme);}
             CHECK(background);CHECK(border);CHECK(zaznaczony_wpis_pulpitu==selected);CHECK(wpisy_pulpitu[selected].folder==folder);
         }
     }
     test_ustaw_aktywny_motyw(nullptr);
+    desktop_usability_cases();
     delete pulpit_menu;delete pulpit_dialog;delete pulpit_wybor;
     printf("Desktop production file actions: %d/%d PASS (RAM filesystem)\n",checks,checks);
 }

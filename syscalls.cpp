@@ -427,6 +427,8 @@ StanDropProcesu cele_drop[PZB_MAKS_PROCESOW] = {};
 constexpr uint64_t DROP_WYGASA_PO_TICKACH = 1000ULL;
 
 BwsSchowekPlikow schowek_plikow = {};
+static BwsSchowekPlikow schowek_elementy[BWS_SCHOWEK_MAX_PLIKOW]{};
+static BwsSchowekPlikow schowek_pending[BWS_SCHOWEK_MAX_PLIKOW]{};
 uint64_t schowek_generacja = 0;
 bool schowek_blokada = false;
 
@@ -1616,61 +1618,62 @@ __attribute__((noinline)) uint64_t bws_aktualizuj_drag(
     return przeniesiono ? BWS_DROP_PRZENIESIONO : BWS_DROP_BLAD;
 }
 
+static bool sciezki_rowne_schowka(const char* a,const char* b) {while(*a && *a==*b){++a;++b;}return *a==*b;}
 __attribute__((noinline)) uint64_t bws_ustaw_schowek_plikow(proces_t& proces,
-                                  uint64_t arg1, uint64_t arg2) {
+                                  uint64_t arg1, uint64_t arg2,uint64_t requested_count) {
     if (!proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ) ||
         (arg2 != BWS_SCHOWEK_COPY && arg2 != BWS_SCHOWEK_CUT)) return 0;
-    char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
-    if (!pobierz_sciezke_pliku(arg1, sciezka)) return 0;
-    psf_metadane meta{};
-    if (!pobierz_metadane_tworu(sciezka, &meta)) return 0;
-    if (arg2 == BWS_SCHOWEK_CUT &&
-        !proces_moze_modyfikowac_obiekt(proces, sciezka)) {
-        wypisz_log("[PZB] clipboard_cut=DENY");
-        return 0;
+    uint64_t count=requested_count?requested_count:1;
+    if(count>BWS_SCHOWEK_MAX_PLIKOW)return 0;
+    // Static staging is protected by the existing clipboard lock. Publication
+    // happens only after every path passes metadata and per-object CUT policy.
+    BlokadaSchowka lock;
+    for(uint32_t n=0;n<count;++n) {
+        auto& item=schowek_pending[n];item={};
+        uint64_t ptr=arg1;
+        if(__builtin_add_overflow(arg1,uint64_t(n)*BWS_DROP_SCIEZKA_MAX,&ptr) ||
+            !pobierz_sciezke_pliku(ptr,item.sciezka))return 0;
+        psf_metadane meta{};
+        if(!pobierz_metadane_tworu(item.sciezka,&meta))return 0;
+        if(arg2==BWS_SCHOWEK_CUT && !proces_moze_modyfikowac_obiekt(proces,item.sciezka))return 0;
+        for(uint32_t j=0;j<n;++j)if(sciezki_rowne_schowka(schowek_pending[j].sciezka,item.sciezka))return 0;
+        item.wersja=BWS_SCHOWEK_WERSJA;item.operacja=static_cast<uint8_t>(arg2);item.typ=meta.typ;
+        item.zarezerwowane=static_cast<uint32_t>(count);
     }
-
-    BlokadaSchowka blokada;
-    BwsSchowekPlikow nowy{};
-    nowy.wersja = BWS_SCHOWEK_WERSJA;
-    nowy.operacja = static_cast<uint8_t>(arg2);
-    nowy.typ = meta.typ;
-    ++schowek_generacja;
-    if (schowek_generacja == 0) ++schowek_generacja;
-    nowy.generacja = schowek_generacja;
-    size_t i = 0;
-    for (; i + 1U < sizeof(nowy.sciezka) && sciezka[i] != '\0'; ++i)
-        nowy.sciezka[i] = sciezka[i];
-    if (sciezka[i] != '\0') return 0;
-    nowy.sciezka[i] = '\0';
-    schowek_plikow = nowy;
-    return 1;
+    ++schowek_generacja;if(!schowek_generacja)++schowek_generacja;
+    for(uint32_t n=0;n<count;++n){schowek_pending[n].generacja=schowek_generacja;schowek_elementy[n]=schowek_pending[n];}
+    schowek_plikow=schowek_elementy[0];return 1;
 }
-
-__attribute__((noinline)) uint64_t bws_pobierz_schowek_plikow(proces_t& proces, uint64_t arg1) {
-    if (!proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ) || arg1 == 0 ||
-        !czy_bezpieczny_zakres_uzytkownika_do_zapisu(
-            reinterpret_cast<void*>(arg1), sizeof(BwsSchowekPlikow))) return 0;
-    BwsSchowekPlikow kopia{};
+__attribute__((noinline)) uint64_t bws_pobierz_schowek_plikow(proces_t& proces,uint64_t arg1,uint64_t index,uint64_t generation) {
+    if (!proces_ma_prawo(proces,PRAWO_PLIKI_CZYTAJ) || !arg1 ||
+        !czy_bezpieczny_zakres_uzytkownika_do_zapisu(reinterpret_cast<void*>(arg1),sizeof(BwsSchowekPlikow)))return 0;
+    BwsSchowekPlikow copy{};
     {
-        BlokadaSchowka blokada;
-        kopia = schowek_plikow;
-        if (kopia.wersja == 0) kopia.wersja = BWS_SCHOWEK_WERSJA;
+        BlokadaSchowka lock;
+        if(generation && generation!=schowek_plikow.generacja)return 0;
+        if(schowek_plikow.operacja!=BWS_SCHOWEK_PUSTY) {
+            if(index>=schowek_plikow.zarezerwowane)return 0;
+            copy=schowek_elementy[index];
+        } else {if(index)return 0;copy=schowek_plikow;copy.wersja=BWS_SCHOWEK_WERSJA;}
     }
-    return skopiuj_do_przestrzeni_uzytkownika(
-        reinterpret_cast<void*>(arg1), &kopia, sizeof(kopia)) ? 1ULL : 0ULL;
+    return skopiuj_do_przestrzeni_uzytkownika(reinterpret_cast<void*>(arg1),&copy,sizeof(copy))?1ULL:0ULL;
 }
-
-__attribute__((noinline)) uint64_t bws_wyczysc_schowek_plikow(proces_t& proces, uint64_t generacja) {
-    if (!proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ) || generacja == 0)
-        return 0;
-    BlokadaSchowka blokada;
-    if (schowek_plikow.operacja == BWS_SCHOWEK_PUSTY ||
-        schowek_plikow.generacja != generacja) return 0;
-    schowek_plikow = {};
-    schowek_plikow.wersja = BWS_SCHOWEK_WERSJA;
-    schowek_plikow.generacja = generacja;
-    return 1;
+__attribute__((noinline)) uint64_t bws_wyczysc_schowek_plikow(proces_t& proces,uint64_t generation,uint64_t prefix) {
+    if(!proces_ma_prawo(proces,PRAWO_PLIKI_CZYTAJ) || !generation)return 0;
+    BlokadaSchowka lock;
+    if(schowek_plikow.operacja==BWS_SCHOWEK_PUSTY || schowek_plikow.generacja!=generation)return 0;
+    uint32_t count=schowek_plikow.zarezerwowane;
+    if(prefix && (schowek_plikow.operacja!=BWS_SCHOWEK_CUT || prefix>count))return 0;
+    if(prefix && prefix<count) {
+        count-=static_cast<uint32_t>(prefix);
+        ++schowek_generacja;if(!schowek_generacja)++schowek_generacja;
+        for(uint32_t n=0;n<count;++n) {
+            schowek_elementy[n]=schowek_elementy[n+prefix];
+            schowek_elementy[n].generacja=schowek_generacja;schowek_elementy[n].zarezerwowane=count;
+        }
+        schowek_plikow=schowek_elementy[0];return 1;
+    }
+    schowek_plikow={};schowek_plikow.wersja=BWS_SCHOWEK_WERSJA;schowek_plikow.generacja=generation;return 1;
 }
 
 __attribute__((noinline)) uint64_t bws_kopiuj_twor(proces_t& proces, uint64_t arg1, uint64_t arg2) {
@@ -3818,13 +3821,13 @@ static uint64_t obsluga_wywolan_systemowych_impl(
             return proces_ma_prawo(proces, PRAWO_GUI) ? 16ULL : 0ULL;
 
         case 52:
-            return bws_ustaw_schowek_plikow(proces, arg1, arg2);
+            return bws_ustaw_schowek_plikow(proces, arg1, arg2,arg3);
 
         case 53:
-            return bws_pobierz_schowek_plikow(proces, arg1);
+            return bws_pobierz_schowek_plikow(proces, arg1,arg2,arg3);
 
         case 54:
-            return bws_wyczysc_schowek_plikow(proces, arg1);
+            return bws_wyczysc_schowek_plikow(proces, arg1,arg2);
 
         case 55:
             return bws_kopiuj_twor(proces, arg1, arg2);

@@ -21,6 +21,7 @@ static void input(PlikiUI::DialogPlikowy& d,const char* text) {
     for(const unsigned char* c=reinterpret_cast<const unsigned char*>(text);*c;++c)d.zdarzenie(event(BWS_ZDARZENIE_KLAWISZ,0,0,*c));
 }
 #include "explorer_regression_cases.h"
+#include "text_context_cases.h"
 static void remaining_regressions() {
     files={{"/",true},{"/test",true},{"/test/nested",true},{"/test/żółć",true},{"/test/file.txt",false}};
     auto* m=new AktowkaModel();CHECK(m->initialize());CHECK(m->navigate("/test")!=Change::ERROR);
@@ -41,6 +42,11 @@ static void remaining_regressions() {
     CHECK(v->erase_input());CHECK(v->move_caret_left());CHECK(v->delete_input());
     CHECK(!strcmp(v->edit_text(),"/test/żółć"));CHECK(v->field_event(event(BWS_ZDARZENIE_KLAWISZ,0,0,13)));CHECK(!strcmp(m->path(),"/test/żółć"));
     v->begin_edit(EditMode::PATH);v->active_field().ustaw_tekst("/test/żółć");CHECK(v->erase_input());v->append_input(0xc4);CHECK(v->append_input(0x87));CHECK(v->submit_path());
+    v->begin_edit(EditMode::PATH);v->active_field().ustaw_tekst("/test/żółć");v->active_field().ustaw_zaznaczenie(6,10);
+    CHECK(v->open_path_context(v->layout().path.x+10,v->layout().path.y+10));CHECK(v->active_field().czy_ma_zaznaczenie());
+    CHECK(v->context_open());CHECK(v->popup_event(event(BWS_ZDARZENIE_KLAWISZ_FIZYCZNY,1,0,1)));CHECK(!v->context_open());
+    CHECK(v->edit_mode()==EditMode::PATH);v->active_field().ustaw_pozycje_kursora(strlen(v->edit_text()));
+    CHECK(v->erase_input());v->append_input(0xc4);CHECK(v->append_input(0x87));CHECK(v->submit_path());CHECK(!strcmp(m->path(),"/test/żółć"));
     auto base=*gui_pobierz_motyw();
     for(bool black:{false,true}) {
         auto theme=base;theme.oknotlo=black?0:0x123456;theme.panel=black?0:0x234567;theme.poletekstowe=black?0:0x345678;
@@ -122,5 +128,5 @@ int main() {
     CHECK(menu->events.zdarzenie(event(BWS_ZDARZENIE_KLAWISZ,0,0,'[')));
     CHECK(menu->events.zdarzenie(event(BWS_ZDARZENIE_KLAWISZ,0,0,'B')));CHECK(menu->menu.czy_otwarte());
     menu->events.zdarzenie(event(BWS_ZDARZENIE_KLAWISZ,0,0,27));menu->events.zdarzenie(event(BWS_ZDARZENIE_TIMER));CHECK(!menu->menu.czy_otwarte());delete menu;
-    delete view;delete model;regression_cases();remaining_regressions();printf("Explorer/desktop shared behavior: %d/%d PASS (RAM filesystem)\n",checks,checks);
+    delete view;delete model;regression_cases();remaining_regressions();text_context_cases();printf("Explorer/desktop shared behavior: %d/%d PASS (RAM filesystem)\n",checks,checks);
 }

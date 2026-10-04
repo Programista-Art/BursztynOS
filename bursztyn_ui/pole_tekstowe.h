@@ -42,6 +42,7 @@ public:
         for (; i < MAKS_BUFOR - 1 && nowy_tekst[i] != '\0'; ++i) {
             bufor_[i] = nowy_tekst[i];
         }
+        while(i>0 && (static_cast<uint8_t>(nowy_tekst[i])&0xC0U)==0x80U)--i;
         bufor_[i] = '\0';
         dlugosc_ = i;
         bajt_kursora_ = dlugosc_;
@@ -127,6 +128,7 @@ public:
         size_t od = poczatek_zaznaczenia();
         size_t ile = dlugosc_zaznaczenia();
         if (ile >= pojemnosc) ile = pojemnosc - 1;
+        while(ile>0 && (static_cast<uint8_t>(bufor_[od+ile])&0xC0U)==0x80U)--ile;
 
         for (size_t i = 0; i < ile; ++i) {
             out_bufor[i] = bufor_[od + i];
@@ -151,6 +153,8 @@ public:
         if (dlugosc_ - stary_rozmiar + nowy_rozmiar >= MAKS_BUFOR) {
             nowy_rozmiar = MAKS_BUFOR - 1 - (dlugosc_ - stary_rozmiar);
         }
+
+        while(nowy_fragment && nowy_rozmiar>0 && (static_cast<uint8_t>(nowy_fragment[nowy_rozmiar])&0xC0U)==0x80U)--nowy_rozmiar;
 
         if (nowy_rozmiar > stary_rozmiar) {
             size_t roznica = nowy_rozmiar - stary_rozmiar;
@@ -204,6 +208,11 @@ public:
         if (!clipboard_read("text/plain", temp, sizeof(temp) - 1, &odczytano) || odczytano == 0)
             return false;
         if (odczytano >= sizeof(temp)) odczytano = sizeof(temp) - 1;
+        while(odczytano>0 && (static_cast<uint8_t>(temp[odczytano])&0xC0U)==0x80U)--odczytano;
+        // A short read can end inside a codepoint; omit that final character.
+        if(odczytano>0) {size_t start=odczytano-1;while(start>0 && (static_cast<uint8_t>(temp[start])&0xC0U)==0x80U)--start;
+            unsigned b=static_cast<uint8_t>(temp[start]);size_t expected=b<128?1:b<224?2:b<240?3:4;
+            if(start+expected>odczytano)odczytano=start;}
         temp[odczytano] = '\0';
         zastap_zaznaczenie(temp);
         return true;

@@ -116,6 +116,9 @@ BwsWynikDrop gui_aktualizuj_drag(const char* sciezka,
 bool ustaw_schowek_plikow(const char* sciezka, BwsOperacjaSchowka operacja);
 bool pobierz_schowek_plikow(BwsSchowekPlikow* schowek);
 bool wyczysc_schowek_plikow(uint64_t oczekiwana_generacja);
+bool ustaw_schowek_wielu_plikow(const char (*sciezki)[BWS_DROP_SCIEZKA_MAX],uint32_t liczba,BwsOperacjaSchowka operacja);
+bool pobierz_element_schowka_plikow(BwsSchowekPlikow* wynik,uint32_t indeks,uint64_t generacja);
+bool usun_prefiks_schowka_plikow(uint64_t generacja,uint32_t liczba);
 bool kopiuj_twor_uzytkownika(const char* sciezka,
                              const char* folder_docelowy);
 bool czytaj_fragment_pliku(const char* sciezka, uint64_t offset,

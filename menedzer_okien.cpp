@@ -1,6 +1,7 @@
 #include "ui_skala.h"
 #include "ekran_format.h"
 #include "pulpit_geometria.h"
+#include "desktop_layout.h"
 #include "obrazy/png_dekoder.h"
 /*
  * Menedzer Okien (Pulpit i Pasek Zadan) dla Bursztyn OS
@@ -920,7 +921,12 @@ uint32_t liczba_okien_taskbara = 0;
 WpisPulpitu wpisy_pulpitu[PULPIT_MAX_WPISOW] = {};
 char lista_pulpitu[PULPIT_LIST_CAP] = {};
 int liczba_wpisow_pulpitu = 0;
-int zaznaczony_wpis_pulpitu = -1;
+int zaznaczony_wpis_pulpitu = -1; // context anchor, selection lives in desktop_layout
+Desktop::Layout<PULPIT_MAX_WPISOW> desktop_layout;
+static Desktop::Position desktop_previous[PULPIT_MAX_WPISOW];
+void aktualizuj_layout_pulpitu();
+void odrysuj_obszar_pulpitu(Desktop::Prostokat r);
+void odrysuj_zaznaczenie_pulpitu();
 uint64_t hash_pulpitu = 0;
 bool hash_pulpitu_wazny = false;
 bool pulpit_drop_hover = false;
@@ -938,6 +944,28 @@ enum class PulpitModalTyp : uint8_t { BRAK, PLIK, FOLDER, REMOVE, RENAME, MOVE, 
 PulpitModalTyp pulpit_modal_typ = PulpitModalTyp::BRAK;
 char pulpit_cel[512]{};
 bool pulpit_cel_folder = false;
+static char (*pulpit_batch)[BWS_DROP_SCIEZKA_MAX]=nullptr;
+static unsigned pulpit_batch_count=0;
+static char pulpit_batch_message[768]{};
+bool sciezka_wpisu_pulpitu(int,char*,int);
+void liczba_do_tekstu(char* out,unsigned n) {char rev[12];int len=0;do{rev[len++]=char('0'+n%10);n/=10;}while(n);for(int i=0;i<len;++i)out[i]=rev[len-1-i];out[len]=0;}
+void opis_batch(const char* action,unsigned done,unsigned total,const char* failed=nullptr) {
+    char a[12],b[12];liczba_do_tekstu(a,done);liczba_do_tekstu(b,total);
+    const char* parts[]={action,a," / ",b,failed?". Zatrzymano na: ":"",failed?failed:""};int n=0;
+    for(auto part:parts)for(int i=0;part[i] && n<int(sizeof(pulpit_batch_message))-1;++i)pulpit_batch_message[n++]=part[i];
+    pulpit_batch_message[n]=0;
+}
+bool zapisz_batch_pulpitu() {
+    pulpit_batch_count=0;
+    if(!pulpit_batch)pulpit_batch=new char[PULPIT_MAX_WPISOW][BWS_DROP_SCIEZKA_MAX]{};
+    if(!pulpit_batch)return false;
+    for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].selected) {
+        if(!sciezka_wpisu_pulpitu(i,pulpit_batch[pulpit_batch_count],BWS_DROP_SCIEZKA_MAX))return false;
+        ++pulpit_batch_count;
+    }
+    return pulpit_batch_count>0;
+}
+
 
 void zamknij_pulpit_modal() {
     if(pulpit_dialog)pulpit_dialog->zamknij();
@@ -976,7 +1004,14 @@ void zatwierdz_pulpit_modal() {
     bool ok=false;
     if(type==PulpitModalTyp::PLIK || type==PulpitModalTyp::FOLDER)
         ok=PlikiUI::utworz_element(SCIEZKA_PULPIT,text,type==PulpitModalTyp::FOLDER);
-    else if(type==PulpitModalTyp::REMOVE)ok=usun_twor_uzytkownika(pulpit_cel);
+    else if(type==PulpitModalTyp::REMOVE) {
+        if(pulpit_batch_count) {
+            unsigned done=0;
+            for(;done<pulpit_batch_count;++done)if(!usun_twor_uzytkownika(pulpit_batch[done]))break;
+            ok=done==pulpit_batch_count;
+            if(!ok)opis_batch("Usunięto ",done,pulpit_batch_count,pulpit_batch[done]);
+        } else ok=usun_twor_uzytkownika(pulpit_cel);
+    }
     else if(type==PulpitModalTyp::RENAME)ok=PlikiUI::nazwa_poprawna(text) && zmien_nazwe_uzytkownika(pulpit_cel,text);
     else if(type==PulpitModalTyp::MOVE)ok=przenies_twor_uzytkownika(pulpit_cel,text);
     else if(type==PulpitModalTyp::OPEN_WITH)ok=PlikiUI::notatnik(pulpit_cel,pulpit_cel_folder);
@@ -984,7 +1019,11 @@ void zatwierdz_pulpit_modal() {
     zamknij_pulpit_modal();
     if(type==PulpitModalTyp::NOTICE)return;
     if(ok)odswiez_pulpit_natychmiast();
-    else (void)otworz_pulpit_modal(PulpitModalTyp::NOTICE,"Nie wykonano: konflikt nazwy, nieprawidłowa nazwa lub brak uprawnień.");
+    else {
+        odswiez_pulpit_natychmiast();
+        (void)otworz_pulpit_modal(PulpitModalTyp::NOTICE,type==PulpitModalTyp::REMOVE && pulpit_batch_count?pulpit_batch_message:"Nie wykonano: konflikt nazwy, nieprawidłowa nazwa lub brak uprawnień.");
+    }
+    pulpit_batch_count=0;
 }
 
 bool punkt_w_prostokacie(int px, int py, int x, int y, int w, int h);
@@ -1035,6 +1074,7 @@ uint64_t hash_listy(const char* tekst, int n) {
     return hash ^ static_cast<uint64_t>(n);
 }
 
+bool teksty_rowne(const char* a,const char* b) {while(*a && *a==*b){++a;++b;}return *a==*b;}
 bool odswiez_wpisy_pulpitu() {
     wyzeruj_bufor(lista_pulpitu, PULPIT_LIST_CAP);
     if (!wylistuj_katalog_uzytkownika(
@@ -1045,7 +1085,8 @@ bool odswiez_wpisy_pulpitu() {
     const uint64_t nowy_hash = hash_listy(lista_pulpitu, length);
     if (hash_pulpitu_wazny && nowy_hash == hash_pulpitu) return false;
 
-    WpisPulpitu nowe[PULPIT_MAX_WPISOW] = {};
+    static WpisPulpitu nowe[PULPIT_MAX_WPISOW];
+    for(auto& entry:nowe)entry=WpisPulpitu{};
     int count = 0;
     int pos = 0;
     while (pos < length) {
@@ -1063,46 +1104,55 @@ bool odswiez_wpisy_pulpitu() {
         ++count;
         pos = end + 1;
     }
+    for(int i=0;i<desktop_layout.count;++i)desktop_previous[i]=desktop_layout.items[i];
+    for(int i=0;i<count;++i) {
+        Desktop::Position saved{};
+        for(int j=0;j<liczba_wpisow_pulpitu;++j)if(wpisy_pulpitu[j].folder==nowe[i].folder &&
+            teksty_rowne(wpisy_pulpitu[j].nazwa,nowe[i].nazwa)) {saved=desktop_previous[j];break;}
+        desktop_layout.items[i]=saved;
+    }
     for (int i = 0; i < count; ++i) wpisy_pulpitu[i] = nowe[i];
-    liczba_wpisow_pulpitu = count;
+    liczba_wpisow_pulpitu = count;desktop_layout.count=count;aktualizuj_layout_pulpitu();
     if (zaznaczony_wpis_pulpitu >= count) zaznaczony_wpis_pulpitu = -1;
     hash_pulpitu = nowy_hash;
     hash_pulpitu_wazny = true;
     return true;
 }
 
-void prostokat_wpisu_pulpitu(int indeks, int* x, int* y) {
-    int kolumny = (screen_w - ui_skaluj(40, ui_skala_procent)) / PULPIT_GRID_W;
-    if (kolumny < 1) kolumny = 1;
-    if (x) *x = ui_skaluj(20, ui_skala_procent) + (indeks % kolumny) * PULPIT_GRID_W;
-    if (y) *y = PULPIT_GRID_Y + (indeks / kolumny) * PULPIT_GRID_H;
-}
-
-int wpis_pulpitu_w_punkcie(int x, int y) {
-    for (int i = 0; i < liczba_wpisow_pulpitu; ++i) {
-        int px = 0, py = 0;
-        prostokat_wpisu_pulpitu(i, &px, &py);
-        if (punkt_w_prostokacie(x, y, px, py, PULPIT_GRID_W, PULPIT_GRID_H)) return i;
+void aktualizuj_layout_pulpitu() {
+    desktop_layout.geometry(screen_w,screen_h-PASEK_WYS,PULPIT_GRID_Y,ui_skala_procent);
+    auto m=pulpit_metryki(ui_skala_procent);
+    int maxLines=(desktop_layout.rows*desktop_layout.ch-m.ikona_wys-m.odstep_etykiety-ui_skaluj(6,ui_skala_procent))/(m.wysokosc_linii+m.odstep_linii);
+    for(int i=0;i<desktop_layout.count;++i) {
+        auto& p=desktop_layout.items[i];
+        p.label=Desktop::wrap(wpisy_pulpitu[i].nazwa,m.etykieta_szer,m.wysokosc_linii,m.odstep_linii,maxLines,int(ui_skala_procent),oblicz_szerokosc_tekstu);
+        int height=m.ikona_wys+m.odstep_etykiety+p.label.height+ui_skaluj(6,ui_skala_procent);
+        p.span=(height+desktop_layout.ch-1)/desktop_layout.ch;
     }
+    // Existing positions win. Newly discovered entries use the original row-major
+    // grid where it fits; tall labels reserve extra rows rather than overlapping.
+    for(int i=0;i<desktop_layout.count;++i) {
+        auto& p=desktop_layout.items[i];
+        if(p.placed && !desktop_layout.fits(i,p.col,p.row))p.placed=false;
+    }
+    for(int i=0;i<desktop_layout.count;++i)if(!desktop_layout.items[i].placed)
+        desktop_layout.place(i,i%desktop_layout.cols,i/desktop_layout.cols);
+}
+void prostokat_wpisu_pulpitu(int indeks, int* x, int* y) {
+    auto r=desktop_layout.cell(indeks);
+    if(x)*x=r.x;
+    if(y)*y=r.y;
+}
+Desktop::Prostokat wizualny_wpis_pulpitu(int i) {
+    int x,y;prostokat_wpisu_pulpitu(i,&x,&y);
+    return Desktop::visual(x,y,desktop_layout.items[i].label,ui_skala_procent);
+}
+int wpis_pulpitu_w_punkcie(int x, int y) {
+    for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].placed && desktop_layout.cell(i).zawiera(x,y))return i;
     return -1;
 }
 
-void podpis_wpisu(const char* nazwa, char* wynik, int pojemnosc) {
-    if (!wynik || pojemnosc < 5) return;
-    int src = 0, out = 0, znaki = 0;
-    while (nazwa[src] && znaki < 9 && out + 4 < pojemnosc) {
-        const uint8_t first = static_cast<uint8_t>(nazwa[src]);
-        int bytes = first < 0x80U ? 1 : ((first & 0xE0U) == 0xC0U ? 2 :
-                    ((first & 0xF0U) == 0xE0U ? 3 : 4));
-        for (int b = 0; b < bytes && nazwa[src] && out + 1 < pojemnosc; ++b)
-            wynik[out++] = nazwa[src++];
-        ++znaki;
-    }
-    if (nazwa[src] && out + 4 <= pojemnosc) {
-        wynik[out++] = '.'; wynik[out++] = '.'; wynik[out++] = '.';
-    }
-    wynik[out] = '\0';
-}
+
 
 bool podwojny_klik(uint64_t previous, uint64_t current) {
     if (!previous || current < previous) return false;
@@ -1449,7 +1499,7 @@ void zarejestruj_pulpit_jako_cel_drop() {
     uint32_t count = 0;
     for (int i = 0; i < liczba_wpisow_pulpitu &&
          count + 1U < BWS_DROP_CELE_MAX; ++i) {
-        if (!wpisy_pulpitu[i].folder) continue;
+        if (!wpisy_pulpitu[i].folder || !desktop_layout.items[i].placed) continue;
         int x = 0, y = 0;
         prostokat_wpisu_pulpitu(i, &x, &y);
         BwsCelDrop& cel = cele_drop_pulpitu[count];
@@ -1466,37 +1516,155 @@ void zarejestruj_pulpit_jako_cel_drop() {
     (void)gui_rejestruj_cele_drop(cele_drop_pulpitu, count);
 }
 
-void RysujWpisyPulpitu() {
-    for (int i = 0; i < liczba_wpisow_pulpitu; ++i) {
-        int x = 0, y = 0;
-        prostokat_wpisu_pulpitu(i, &x, &y);
-        if (y + PULPIT_GRID_H > screen_h - PASEK_WYS) break;
-        const PulpitGeometriaKomorki g = pulpit_geometria_komorki(x, y, ui_skala_procent);
-        if (i == zaznaczony_wpis_pulpitu)
-            gui_rysuj_prostokat(g.komorka_x, g.komorka_y, g.komorka_szer, g.komorka_wys, motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));
-        if(i==zaznaczony_wpis_pulpitu) {
-            const uint32_t border=motyw_kolor(MOTYW_KOLOR_AKCENT);
-            gui_rysuj_prostokat(g.komorka_x,g.komorka_y,g.komorka_szer,1,border);
-            gui_rysuj_prostokat(g.komorka_x,g.komorka_y+g.komorka_wys-1,g.komorka_szer,1,border);
-            gui_rysuj_prostokat(g.komorka_x,g.komorka_y,1,g.komorka_wys,border);
-            gui_rysuj_prostokat(g.komorka_x+g.komorka_szer-1,g.komorka_y,1,g.komorka_wys,border);
-        }
-        uint32_t kolor = wpisy_pulpitu[i].folder ? 0x00FFBF00 : 0x00708090;
-        if (konczy_sie(wpisy_pulpitu[i].nazwa, ".bur")) kolor = 0x0038B000;
-        else if (konczy_sie(wpisy_pulpitu[i].nazwa, ".cebula")) kolor = 0x00D050A0;
-        else if (konczy_sie(wpisy_pulpitu[i].nazwa, ".txt")) kolor = 0x004C9BE8;
-        rysuj_fragment_ikony(g.ikona_x, g.ikona_y, 4, 4, 40, 40, kolor);
-        if (wpisy_pulpitu[i].folder)
-            rysuj_fragment_ikony(g.ikona_x, g.ikona_y, 8, 0, 18, 8, kolor);
-        char skrocony[40] = {}, podpis[40] = {};
-        podpis_wpisu(wpisy_pulpitu[i].nazwa, skrocony, sizeof(skrocony));
-        podpis_do_szerokosci(skrocony, podpis, sizeof(podpis), g.etykieta_szer);
-        // Etykiety plikow na pulpicie sa zawsze biale z cieniem.
-        const uint32_t kolor_etykiety_pliku = i==zaznaczony_wpis_pulpitu?motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU):KANONICZNY_KOLOR_ETYKIETY_PULPITU;
-        rysuj_etykiete_pulpitu(g.etykieta_x, g.etykieta_y,
-                               g.etykieta_szer, PULPIT_LINE_H,
-                               int(ui_skala_procent), kolor_etykiety_pliku, podpis);
+void rysuj_ramke_pulpitu(Desktop::Prostokat r,uint32_t color) {
+    int t=ui_skaluj(1,ui_skala_procent);
+    if(r.szerokosc<=0 || r.wysokosc<=0)return;
+    gui_rysuj_prostokat(r.x,r.y,r.szerokosc,t,color);
+    gui_rysuj_prostokat(r.x,r.y+r.wysokosc-t,r.szerokosc,t,color);
+    gui_rysuj_prostokat(r.x,r.y,t,r.wysokosc,color);
+    gui_rysuj_prostokat(r.x+r.szerokosc-t,r.y,t,r.wysokosc,color);
+}
+void RysujWpisPulpitu(int i) {
+    if(!desktop_layout.items[i].placed)return;
+    int x,y;prostokat_wpisu_pulpitu(i,&x,&y);
+    const auto g=pulpit_geometria_komorki(x,y,ui_skala_procent);
+    const auto& p=desktop_layout.items[i];
+    if(p.selected) {
+        auto r=wizualny_wpis_pulpitu(i);
+        gui_rysuj_prostokat(r.x,r.y,r.szerokosc,r.wysokosc,motyw_kolor(MOTYW_KOLOR_PULPIT_ZAZNACZENIE));
+        rysuj_ramke_pulpitu(r,motyw_kolor(MOTYW_KOLOR_PULPIT_RAMKA));
     }
+    uint32_t color=wpisy_pulpitu[i].folder?0x00FFBF00:0x00708090;
+    if(konczy_sie(wpisy_pulpitu[i].nazwa,".bur"))color=0x0038B000;
+    else if(konczy_sie(wpisy_pulpitu[i].nazwa,".cebula"))color=0x00D050A0;
+    else if(konczy_sie(wpisy_pulpitu[i].nazwa,".txt"))color=0x004C9BE8;
+    rysuj_fragment_ikony(g.ikona_x,g.ikona_y,4,4,40,40,color);
+    if(wpisy_pulpitu[i].folder)rysuj_fragment_ikony(g.ikona_x,g.ikona_y,8,0,18,8,color);
+    auto m=pulpit_metryki(ui_skala_procent);
+    for(int line=0;line<p.label.count;++line) {
+        char text[PULPIT_NAZWA_CAP]{};
+        int size=p.label.ends[line]-p.label.starts[line];
+        for(int b=0;b<size;++b)text[b]=wpisy_pulpitu[i].nazwa[p.label.starts[line]+b];
+        rysuj_etykiete_pulpitu(g.etykieta_x,g.etykieta_y+line*(m.wysokosc_linii+m.odstep_linii),
+            g.etykieta_szer,m.wysokosc_linii,int(ui_skala_procent),
+            p.selected?motyw_kolor(MOTYW_KOLOR_PULPIT_TEKST):KANONICZNY_KOLOR_ETYKIETY_PULPITU,text);
+    }
+}
+void RysujWpisyPulpitu() {for(int i=0;i<desktop_layout.count;++i)RysujWpisPulpitu(i);}
+void rysuj_ikone_aplikacji(const AplikacjaPulpitu& aplikacja);
+void odrysuj_obszar_pulpitu(Desktop::Prostokat r) {
+    if(r.szerokosc<=0 || r.wysokosc<=0)return;
+    // Zero removes pixels from this transparent desktop surface. The compositor
+    // restores its cached wallpaper; no wallpaper decode or full-layer clear.
+    gui_rysuj_prostokat(r.x,r.y,r.szerokosc,r.wysokosc,0);
+    for(const auto& app:APLIKACJE_PULPITU)if(Desktop::intersects(r,{app.x,app.y,PULPIT_GRID_W,PULPIT_GRID_H}))rysuj_ikone_aplikacji(app);
+    for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].placed && Desktop::intersects(r,wizualny_wpis_pulpitu(i)))RysujWpisPulpitu(i);
+}
+void odrysuj_zaznaczenie_pulpitu() {
+    for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].placed && desktop_previous[i].selected!=desktop_layout.items[i].selected)
+        odrysuj_obszar_pulpitu(wizualny_wpis_pulpitu(i));
+}
+void zapamietaj_zaznaczenie_pulpitu() {for(int i=0;i<desktop_layout.count;++i)desktop_previous[i]=desktop_layout.items[i];}
+
+struct GestPulpitu {
+    bool candidate=false,dragging=false,rubber=false,ctrl=false;
+    int item=-1,x=0,y=0,dx=0,dy=0;
+    bool base[PULPIT_MAX_WPISOW]{};
+    Desktop::Prostokat band;
+} desktop_gesture;
+static uint32_t desktop_modifiers=0;
+void odtworz_obrys(Desktop::Prostokat r) {
+    int t=ui_skaluj(1,ui_skala_procent);
+    odrysuj_obszar_pulpitu({r.x,r.y,r.szerokosc,t});
+    odrysuj_obszar_pulpitu({r.x,r.y+r.wysokosc-t,r.szerokosc,t});
+    odrysuj_obszar_pulpitu({r.x,r.y,t,r.wysokosc});
+    odrysuj_obszar_pulpitu({r.x+r.szerokosc-t,r.y,t,r.wysokosc});
+}
+void obrysy_grupy(bool erase) {
+    for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].selected && desktop_layout.items[i].placed) {
+        auto r=wizualny_wpis_pulpitu(i);r.x+=desktop_gesture.dx;r.y+=desktop_gesture.dy;
+        if(erase)odtworz_obrys(r);else rysuj_ramke_pulpitu(r,motyw_kolor(MOTYW_KOLOR_PULPIT_RAMKA));
+    }
+}
+void anuluj_gest_pulpitu() {
+    if(desktop_gesture.dragging){if(desktop_gesture.rubber)odtworz_obrys(desktop_gesture.band);else obrysy_grupy(true);}
+    desktop_gesture=GestPulpitu{};gui_ustaw_capture_myszy(false);
+}
+// One production handler is also exercised by host tests.
+bool obsluz_gest_pulpitu(const bws_zdarzenie& e) {
+    auto& g=desktop_gesture;
+    if(e.typ==BWS_ZDARZENIE_KLAWISZ_FIZYCZNY) {
+        desktop_modifiers=e.przyciski;
+        bool a=(e.kod&BWS_KEY_SOURCE_USB)?(e.kod&255)==4:(e.kod&127)==0x1e;
+        if(e.x && a && (desktop_modifiers&BWS_MOD_CTRL)) {
+            zapamietaj_zaznaczenie_pulpitu();
+            for(int i=0;i<desktop_layout.count;++i)desktop_layout.items[i].selected=true;
+            odrysuj_zaznaczenie_pulpitu();gui_odswiez();return true;
+        }
+        return false;
+    }
+    if(e.typ==BWS_ZDARZENIE_BLUR || e.typ==BWS_ZDARZENIE_EKRAN || e.typ==BWS_ZDARZENIE_MYSZ_PRAWY_DOWN) {
+        if(g.candidate)anuluj_gest_pulpitu();
+        if(e.typ==BWS_ZDARZENIE_BLUR)desktop_modifiers=0;
+        return false;
+    }
+    if(e.typ==BWS_ZDARZENIE_MYSZ_DOWN) {
+        int i=wpis_pulpitu_w_punkcie(e.x,e.y);
+        if(e.y<0 || e.y>=screen_h-PASEK_WYS || e.x<0 || e.x>=screen_w)return false;
+        if(i<0)for(const auto& app:APLIKACJE_PULPITU)
+            if(punkt_w_prostokacie(e.x,e.y,app.x,app.y,PULPIT_GRID_W,PULPIT_GRID_H))return false;
+        anuluj_gest_pulpitu();zapamietaj_zaznaczenie_pulpitu();
+        g.item=i;g.ctrl=(desktop_modifiers&BWS_MOD_CTRL)!=0;g.rubber=i<0;
+        for(int k=0;k<desktop_layout.count;++k)g.base[k]=desktop_layout.items[k].selected;
+        desktop_layout.drag_click(i,g.ctrl);zaznaczony_wpis_pulpitu=i;
+        odrysuj_zaznaczenie_pulpitu();
+        g.candidate=true;g.x=e.x;g.y=e.y;gui_ustaw_capture_myszy(true);gui_odswiez();return true;
+    }
+    if(e.typ==BWS_ZDARZENIE_MYSZ_RUCH && g.candidate) {
+        int dx=e.x-g.x,dy=e.y-g.y,threshold=ui_skaluj(4,ui_skala_procent);
+        if(!g.dragging && dx<=threshold && dx>=-threshold && dy<=threshold && dy>=-threshold)return true;
+        if(!g.rubber)desktop_layout.clamp_delta(dx,dy);
+        if(g.dragging && dx==g.dx && dy==g.dy)return true;
+        if(g.dragging){if(g.rubber)odtworz_obrys(g.band);else obrysy_grupy(true);}
+        g.dragging=true;g.dx=dx;g.dy=dy;
+        if(g.rubber) {
+            int x=e.x<0?0:e.x>=screen_w?screen_w-1:e.x;
+            int y=e.y<0?0:e.y>=screen_h-PASEK_WYS?screen_h-PASEK_WYS-1:e.y;
+            g.band={x<g.x?x:g.x,y<g.y?y:g.y,(x<g.x?g.x-x:x-g.x)+1,(y<g.y?g.y-y:y-g.y)+1};
+            zapamietaj_zaznaczenie_pulpitu();
+            for(int i=0;i<desktop_layout.count;++i)desktop_layout.items[i].selected=
+                (g.ctrl && g.base[i]) || (desktop_layout.items[i].placed && Desktop::intersects(g.band,wizualny_wpis_pulpitu(i)));
+            odrysuj_zaznaczenie_pulpitu();rysuj_ramke_pulpitu(g.band,motyw_kolor(MOTYW_KOLOR_PULPIT_RAMKA));
+        } else {
+            desktop_layout.clamp_delta(dx,dy);g.dx=dx;g.dy=dy;obrysy_grupy(false);
+        }
+        gui_odswiez();return true;
+    }
+    if(e.typ==BWS_ZDARZENIE_MYSZ_UP && g.candidate) {
+        if(g.dragging && g.rubber)odtworz_obrys(g.band);
+        else if(g.dragging) {
+            obrysy_grupy(true);zapamietaj_zaznaczenie_pulpitu();
+            int dc=(g.dx+(g.dx>=0?desktop_layout.cw/2:-desktop_layout.cw/2))/desktop_layout.cw;
+            int dr=(g.dy+(g.dy>=0?desktop_layout.ch/2:-desktop_layout.ch/2))/desktop_layout.ch;
+            desktop_layout.move_group(dc,dr);
+            // Clear every old location before drawing any new location.
+            for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].selected && desktop_layout.items[i].placed) {
+                const auto& old=desktop_previous[i];
+                auto r=Desktop::visual(desktop_layout.x0+old.col*desktop_layout.cw,desktop_layout.y0+old.row*desktop_layout.ch,old.label,ui_skala_procent);
+                gui_rysuj_prostokat(r.x,r.y,r.szerokosc,r.wysokosc,0);
+            }
+            for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].selected && desktop_layout.items[i].placed) {
+                const auto& old=desktop_previous[i];
+                odrysuj_obszar_pulpitu(Desktop::visual(desktop_layout.x0+old.col*desktop_layout.cw,desktop_layout.y0+old.row*desktop_layout.ch,old.label,ui_skala_procent));
+                RysujWpisPulpitu(i);
+            }
+            zarejestruj_pulpit_jako_cel_drop();
+        } else if(g.item>=0 && !g.ctrl) {
+            zapamietaj_zaznaczenie_pulpitu();desktop_layout.click(g.item,false);odrysuj_zaznaczenie_pulpitu();
+        }
+        g=GestPulpitu{};gui_ustaw_capture_myszy(false);gui_odswiez();return true;
+    }
+    return false;
 }
 
 int menu_glowne_y() {
@@ -1836,12 +2004,14 @@ bool otworz_pulpit_context(int x,int y,int wpis) {
     zamknij_pulpit_context();pulpit_cel[0]=0;pulpit_cel_folder=false;
     bool selected=wpis>=0 && wpis<liczba_wpisow_pulpitu;
     if(selected) {
+        if(!desktop_layout.items[wpis].selected)desktop_layout.click(wpis,false);
+        zaznaczony_wpis_pulpitu=wpis;
         selected=sciezka_wpisu_pulpitu(wpis,pulpit_cel,sizeof(pulpit_cel));
         pulpit_cel_folder=wpisy_pulpitu[wpis].folder;
     }
     BwsSchowekPlikow record{};
     PlikiUI::CelMenu target{selected,pulpit_cel_folder,PlikiUI::tekstowy(pulpit_cel,pulpit_cel_folder),
-        selected && konczy_sie(pulpit_cel,".bur"),PlikiUI::schowek_gotowy(&record)};
+        selected && konczy_sie(pulpit_cel,".bur"),PlikiUI::schowek_gotowy(&record),static_cast<unsigned>(desktop_layout.selected_count())};
     BursztynUI::Prostokat work{0,0,screen_w,screen_h-PASEK_WYS};
     pulpit_menu->events.geometria(work,work);pulpit_menu->otworz(x,y,target,true);
     pulpit_context_open=pulpit_menu->menu.czy_otwarte();
@@ -1850,8 +2020,11 @@ bool otworz_pulpit_context(int x,int y,int wpis) {
 bool obsluz_prawy_klik_pulpitu(const bws_zdarzenie& e) {
     if(e.typ!=BWS_ZDARZENIE_MYSZ_PRAWY_DOWN)return false;
     const int target=wpis_pulpitu_w_punkcie(e.x,e.y);
+    zapamietaj_zaznaczenie_pulpitu();
+    if(target>=0 && !desktop_layout.items[target].selected)desktop_layout.click(target,false);
+    if(target<0)desktop_layout.clear_selection();
     zaznaczony_wpis_pulpitu=target;
-    RysujPulpit(true);
+    odrysuj_zaznaczenie_pulpitu();
     if(e.y<screen_h-PASEK_WYS)otworz_pulpit_context(e.x,e.y,target);
     return true;
 }
@@ -1861,19 +2034,28 @@ void wykonaj_pulpit_context(PulpitContextAction action) {
     switch(action) {
     case PulpitContextAction::NEW_FILE:otworz_pulpit_modal(PulpitModalTyp::PLIK);return;
     case PulpitContextAction::NEW_FOLDER:otworz_pulpit_modal(PulpitModalTyp::FOLDER);return;
-    case PulpitContextAction::REMOVE:otworz_pulpit_modal(PulpitModalTyp::REMOVE);return;
+    case PulpitContextAction::REMOVE:
+        if(!zapisz_batch_pulpitu())return;
+        opis_batch("Usunąć trwale elementy: ",pulpit_batch_count,pulpit_batch_count);
+        otworz_pulpit_modal(PulpitModalTyp::REMOVE,pulpit_batch_count==1?pulpit_cel:pulpit_batch_message);return;
     case PulpitContextAction::RENAME:otworz_pulpit_modal(PulpitModalTyp::RENAME);return;
     case PulpitContextAction::MOVE:otworz_pulpit_modal(PulpitModalTyp::MOVE);return;
     case PulpitContextAction::OPEN_WITH:otworz_pulpit_modal(PulpitModalTyp::OPEN_WITH);return;
     case PulpitContextAction::NOTEPAD:PlikiUI::notatnik(pulpit_cel,pulpit_cel_folder);break;
     case PulpitContextAction::OPEN:otworz_wpis_pulpitu(selected);break;
-    case PulpitContextAction::COPY:ustaw_schowek_plikow(pulpit_cel,BWS_SCHOWEK_COPY);break;
-    case PulpitContextAction::CUT:ustaw_schowek_plikow(pulpit_cel,BWS_SCHOWEK_CUT);break;
-    case PulpitContextAction::PASTE:
-        if(PlikiUI::wklej(SCIEZKA_PULPIT)!=PlikiUI::WynikWklejenia::OK) {
-            otworz_pulpit_modal(PulpitModalTyp::NOTICE,"Nie wklejono: konflikt nazwy lub brak uprawnień.");return;
-        }
-        odswiez_pulpit_natychmiast();break;
+    case PulpitContextAction::COPY:case PulpitContextAction::CUT:
+        if(!zapisz_batch_pulpitu() || !ustaw_schowek_wielu_plikow(pulpit_batch,pulpit_batch_count,action==PulpitContextAction::COPY?BWS_SCHOWEK_COPY:BWS_SCHOWEK_CUT))
+            otworz_pulpit_modal(PulpitModalTyp::NOTICE,"Nie skopiowano zestawu do schowka: brak dostępu do co najmniej jednego elementu.");
+        pulpit_batch_count=0;break;
+    case PulpitContextAction::PASTE: {
+        PlikiUI::RaportWklejenia report;
+        auto result=PlikiUI::wklej(SCIEZKA_PULPIT,&report);
+        odswiez_pulpit_natychmiast();
+        if(result!=PlikiUI::WynikWklejenia::OK) {
+            opis_batch("Wklejono ",report.wykonane,report.wszystkie,report.blad);
+            otworz_pulpit_modal(PulpitModalTyp::NOTICE,pulpit_batch_message);return;
+        }break;
+    }
     case PulpitContextAction::REFRESH:odswiez_pulpit_natychmiast();break;
     default:break;
     }
@@ -1883,19 +2065,22 @@ void wykonaj_pulpit_context(PulpitContextAction action) {
 bool obsluz_popupy_pulpitu(const bws_zdarzenie& zdarzenie) {
     if(pulpit_modal_typ==PulpitModalTyp::MOVE && pulpit_wybor->events.zdarzenie(zdarzenie)) {
         if(pulpit_wybor->wynik_pliku()==BursztynUI::WynikDialoguPliku::Wybrano)zatwierdz_pulpit_modal();
-        else if(!pulpit_wybor->czy_otwarta())zamknij_pulpit_modal();
-        if(pulpit_wybor->events.wymaga_odswiezenia())gui_odswiez();return true;
+        else if(!pulpit_wybor->czy_otwarta()){pulpit_batch_count=0;zamknij_pulpit_modal();}
+        if(pulpit_wybor->events.wymaga_odswiezenia())gui_odswiez();
+        return true;
     }
     if(pulpit_dialog->zdarzenie(zdarzenie)) {
         if(pulpit_dialog->wynik()==1)zatwierdz_pulpit_modal();
-        else if(pulpit_dialog->wynik()==2 || !pulpit_dialog->czy_otwarta())zamknij_pulpit_modal();
-        if(pulpit_dialog->events.wymaga_odswiezenia())gui_odswiez();return true;
+        else if(pulpit_dialog->wynik()==2 || !pulpit_dialog->czy_otwarta()){pulpit_batch_count=0;zamknij_pulpit_modal();}
+        if(pulpit_dialog->events.wymaga_odswiezenia())gui_odswiez();
+        return true;
     }
     if(pulpit_menu->events.zdarzenie(zdarzenie)) {
         auto action=pulpit_menu->pobierz_akcje();pulpit_context_open=pulpit_menu->menu.czy_otwarte();
         if(action!=PulpitContextAction::NONE)wykonaj_pulpit_context(action);
         if(!pulpit_context_open)zarejestruj_pulpit_jako_cel_drop();
-        if(pulpit_menu->events.wymaga_odswiezenia())gui_odswiez();return true;
+        if(pulpit_menu->events.wymaga_odswiezenia())gui_odswiez();
+        return true;
     }
     return false;
 }
@@ -2139,6 +2324,7 @@ void rozmiesc_ikony_ekranu(){
         APLIKACJE_PULPITU[i].y=ui_skaluj(20,ui_skala_procent)+int(i/cols)*PULPIT_GRID_H;
     }
     PULPIT_GRID_Y=ui_skaluj(20,ui_skala_procent)+int((LICZBA_APLIKACJI_PULPITU+cols-1)/cols)*PULPIT_GRID_H;
+    aktualizuj_layout_pulpitu();
 }
 
 
@@ -2263,21 +2449,17 @@ extern "C" __attribute__((noreturn)) void _start() {
     gui_potwierdz_gotowosc_pulpitu();
 #endif
 
-    bool drag_candidate = false;
-    bool dragging_file = false;
-    int drag_index = -1;
-    int drag_start_x = 0;
-    int drag_start_y = 0;
-    char drag_path[512] = {};
     int last_desktop_click = -1;
     uint64_t last_desktop_click_time = 0;
 
     while (true) {
         bws_zdarzenie zdarzenie{};
         if (!gui_czekaj_na_zdarzenie(&zdarzenie)) continue;
+        if(zdarzenie.typ==BWS_ZDARZENIE_KLAWISZ_FIZYCZNY)desktop_modifiers=zdarzenie.przyciski;
+        if(zdarzenie.typ==BWS_ZDARZENIE_BLUR)obsluz_gest_pulpitu(zdarzenie);
         if(zdarzenie.typ==BWS_ZDARZENIE_EKRAN){
             zamknij_pulpit_context();zamknij_pulpit_modal();
-            menu_start_otwarte=false;menu_gry_otwarte=false;dragging_file=false;drag_candidate=false;
+            menu_start_otwarte=false;menu_gry_otwarte=false;anuluj_gest_pulpitu();
             // Pola zdarzenia (dx/dy/kod) pochodza z chwili wyslania i moga byc
             // nieaktualne, gdy kolejka zdarzen jest przetwarzana z opoznieniem
             // (np. szybkie sekwencje modesetow). Zapis obszaru roboczego ze
@@ -2364,7 +2546,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             zamknij_pulpit_context();
             /* Pelne przerysowanie warstwy nadpisaloby piksele otwartego
                dialogu; odswiezamy dopiero po jego zamknieciu. */
-            if (pulpit_modal_typ==PulpitModalTyp::BRAK && odswiez_wpisy_pulpitu())
+            if (!desktop_gesture.candidate && pulpit_modal_typ==PulpitModalTyp::BRAK && odswiez_wpisy_pulpitu())
                 RysujPulpit(true);
             continue;
         }
@@ -2373,8 +2555,7 @@ extern "C" __attribute__((noreturn)) void _start() {
 
         if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN) {
             if (menu_start_otwarte) zamknij_menu_i_odtworz_pulpit();
-            drag_candidate = false;
-            dragging_file = false;
+            anuluj_gest_pulpitu();
             last_desktop_click=-1;last_desktop_click_time=0;
             gui_ustaw_capture_myszy(false);
             (void)obsluz_prawy_klik_pulpitu(zdarzenie);
@@ -2399,39 +2580,12 @@ extern "C" __attribute__((noreturn)) void _start() {
             continue;
         }
 
-        const bool left_button = (zdarzenie.przyciski & 1U) != 0;
-        if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_RUCH &&
-            drag_candidate && left_button) {
-            const int dx = mx - drag_start_x;
-            const int dy = my - drag_start_y;
-            if (!dragging_file && (dx > 4 || dx < -4 || dy > 4 || dy < -4))
-                dragging_file = true;
-            if (dragging_file)
-                (void)gui_aktualizuj_drag(drag_path, mx, my, false);
-            continue;
+        if(zdarzenie.typ!=BWS_ZDARZENIE_MYSZ_DOWN && obsluz_gest_pulpitu(zdarzenie)) {
+            if(desktop_gesture.dragging){last_desktop_click=-1;last_desktop_click_time=0;}continue;
         }
-        if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_UP && drag_candidate) {
-            if (dragging_file) {
-                const BwsWynikDrop result = gui_aktualizuj_drag(
-                    drag_path, mx, my, true);
-                if (result == BWS_DROP_PRZENIESIONO) {
-                    hash_pulpitu_wazny = false;
-                    (void)odswiez_wpisy_pulpitu();
-                    zaznaczony_wpis_pulpitu = -1;
-                    RysujPulpit(true);
-                }
-            }
-            drag_candidate = false;
-            dragging_file = false;
-            drag_index = -1;
-            drag_path[0] = '\0';
-            gui_ustaw_capture_myszy(false);
-            continue;
-        }
-
         if (zdarzenie.typ == BWS_ZDARZENIE_TIMER) {
             zarejestruj_pulpit_jako_cel_drop();
-            if (!pulpit_context_open && pulpit_modal_typ==PulpitModalTyp::BRAK &&
+            if (!desktop_gesture.candidate && !pulpit_context_open && pulpit_modal_typ==PulpitModalTyp::BRAK &&
                 ++pulpit_refresh_ticks >= PULPIT_REFRESH_TICKS) {
                 pulpit_refresh_ticks = 0;
                 if (odswiez_wpisy_pulpitu()) RysujPulpit(true);
@@ -2456,22 +2610,13 @@ extern "C" __attribute__((noreturn)) void _start() {
             }
             const int desktop_entry = wpis_pulpitu_w_punkcie(mx, my);
             if (desktop_entry >= 0) {
-                const bool double_click = desktop_entry == last_desktop_click &&
+                const bool double_click = !(desktop_modifiers&BWS_MOD_CTRL) && desktop_entry == last_desktop_click &&
                     podwojny_klik(last_desktop_click_time, zdarzenie.timestamp);
-                zaznaczony_wpis_pulpitu = desktop_entry;
-                RysujPulpit(true);
+                (void)obsluz_gest_pulpitu(zdarzenie);
                 last_desktop_click = desktop_entry;
                 last_desktop_click_time = zdarzenie.timestamp;
-                drag_index = desktop_entry;
-                drag_candidate = sciezka_wpisu_pulpitu(
-                    drag_index, drag_path, sizeof(drag_path));
-                dragging_file = false;
-                drag_start_x = mx;
-                drag_start_y = my;
-                if (drag_candidate) gui_ustaw_capture_myszy(true);
                 if (double_click) {
-                    gui_ustaw_capture_myszy(false);
-                    drag_candidate = false;
+                    anuluj_gest_pulpitu();
                     otworz_wpis_pulpitu(desktop_entry);
                     last_desktop_click = -1;
                     last_desktop_click_time = 0;
@@ -2480,7 +2625,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             }
             last_desktop_click = -1;
             last_desktop_click_time = 0;
-            obsluz_klikniecie(mx, my);
+            if(!obsluz_gest_pulpitu(zdarzenie))obsluz_klikniecie(mx, my);
         }
 
     }

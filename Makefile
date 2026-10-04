@@ -684,7 +684,7 @@ repro_blob.o: repro_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
 # 16. MENEDZER OKIEN .bur
 # ============================================================================
 
-menedzer_okien_tmp.o: menedzer_okien.cpp bursztyn_gui.h ui_skala.h pulpit_geometria.h obrazy/png_dekoder.h plik_popup_ui.h plik_operacje_ui.h $(wildcard bursztyn_ui/*.h)
+menedzer_okien_tmp.o: menedzer_okien.cpp desktop_layout.h bursztyn_gui.h ui_skala.h pulpit_geometria.h obrazy/png_dekoder.h plik_popup_ui.h plik_operacje_ui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
 
 menedzer_okien_blob.o: menedzer_okien_tmp.o bursztyn_gui.o $(MENEDZER_OKIEN_LINKER)
@@ -1565,3 +1565,5 @@ test-filesystem-move-host: installer-unit-test
 	@mkdir -p .installertest
 	g++ -std=c++17 -O0 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined narzedzia/test_move_authorization.cpp storage_format.cpp psf.cpp -o .installertest/test-move-authorization
 	ASAN_OPTIONS=detect_leaks=0 .installertest/test-move-authorization
+
+bursztyn_gui.o syscalls.o: bws_pliki.h motyw.h
