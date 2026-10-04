@@ -5,14 +5,15 @@ param(
     [string]$QemuPath = "",
     [string]$DiskSize = "4G",
     [string]$AudioBackend = "dsound",
-    [string]$DisplayBackend = ""
+    [string]$DisplayBackend = "sdl",
+    [string]$Iso = ""
 )
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 Set-Location $ScriptDir
 
-$IsoNormal = Join-Path $ScriptDir "BursztynOS.iso"
+$IsoNormal = if ($Iso) { [System.IO.Path]::GetFullPath($Iso) } else { Join-Path $ScriptDir "BursztynOS.iso" }
 $IsoCiTest = Join-Path $ScriptDir ".bursztyn_ci_test.iso"
 $Disk = Join-Path $ScriptDir "wirtualny_dysk.img"
 $LogDir = Join-Path $ScriptDir "logi_qemu"
@@ -116,7 +117,7 @@ function Start-BursztynQemu {
             "-device", "virtio-net-pci,netdev=n1,disable-legacy=on",
             "-device", "virtio-rng-pci,disable-legacy=on",
             "-device", "virtio-keyboard-pci,disable-legacy=on",
-            "-device", "virtio-mouse-pci,disable-legacy=on",
+            "-device", "virtio-tablet-pci,disable-legacy=on",
             "-vga", "none",
             "-device", "virtio-vga,id=gpu0,disable-legacy=on,xres=1280,yres=720"
         )
@@ -174,6 +175,9 @@ function Start-BursztynQemu {
     Write-Host "Dysk:         $Disk"
     Write-Host "Rozdzielczosc poczatkowa okna: 1280x720"
     Write-Host "============================================================`n"
+
+    Write-Host "QEMU executable: $qemu"
+    Write-Host "QEMU argv: $($argsList | ConvertTo-Json -Compress)"
 
     if ($SaveLog) {
         if (-not (Test-Path $LogDir)) {

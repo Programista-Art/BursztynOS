@@ -5737,6 +5737,71 @@ void test_virtio_input_abs_scaling() {
     input_reset_all();
 }
 
+// Independent ranges are discovered through the real config protocol, then
+// processed through the real VirtIO queue -> EV_ABS -> SYN_REPORT dispatcher.
+void test_virtio_input_asymmetric_abs_mapping() {
+    input_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_input_device(&dev,2),"Probe asymmetric tablet");
+    g_mock_input_cfg.abs_min_x=101;g_mock_input_cfg.abs_max_x=60001;
+    g_mock_input_cfg.abs_min_y=503;g_mock_input_cfg.abs_max_y=9503;
+    VirtioInputDriver drv{};
+    TEST_ASSERT(virtio_input_init(&drv,&dev),"Init asymmetric tablet");
+    TEST_ASSERT(drv.input_dev.abs_x.min==101&&drv.input_dev.abs_x.max==60001&&
+                drv.input_dev.abs_y.min==503&&drv.input_dev.abs_y.max==9503,
+                "Independent ABS_INFO discovery for both axes");
+    auto send=[&](int x,int y,bool axis_x=true,bool axis_y=true){
+        if(axis_x)mock_inject_input_event(&drv,INPUT_EV_ABS,INPUT_ABS_X,uint32_t(x));
+        if(axis_y)mock_inject_input_event(&drv,INPUT_EV_ABS,INPUT_ABS_Y,uint32_t(y));
+        mock_inject_input_event(&drv,INPUT_EV_SYN,INPUT_SYN_REPORT,0);
+        virtio_input_poll_events(&drv,10);
+    };
+    // External harness state is deliberately not exposed to the guest. The
+    // same raw report must map identically across normal/maximized/restored.
+    struct HostWindow {int logical_w,logical_h,pixel_w,pixel_h,ui_scale;};
+    const HostWindow hosts[]={{1280,720,1280,720,100},{1920,1040,2400,1300,125},
+                              {1280,720,1600,900,125}};
+    for(auto mode:std::vector<std::pair<int,int>>{{1280,720},{1920,1080},{1024,768},{800,600},{2560,540}}) {
+        g_mock_screen_w=mode.first;g_mock_screen_h=mode.second;
+        for(const auto& host:hosts) {
+            TEST_ASSERT(host.pixel_w>=host.logical_w&&host.pixel_h>=host.logical_h,"Harness host DPI geometry");
+            for(auto raw:std::vector<std::pair<int,int>>{{101,503},{60001,503},{101,9503},{60001,9503},
+                {30101,5003},{102,504},{60000,9502},{161,512},{59941,9494},
+                {30101,503},{30101,9503},{101,5003},{60001,5003},{0,0},{70000,10000}}) {
+                send(raw.first,raw.second);
+                const int x=raw.first<101?101:(raw.first>60001?60001:raw.first);
+                const int y=raw.second<503?503:(raw.second>9503?9503:raw.second);
+                TEST_ASSERT(g_mock_input_capture.abs_x==int(int64_t(x-101)*(mode.first-1)/59900)&&
+                            g_mock_input_capture.abs_y==int(int64_t(y-503)*(mode.second-1)/9000),
+                            "Non-square mapping invariant across external host resize/DPI");
+            }
+            send(101,503);send(60001,0,true,false);
+            TEST_ASSERT(g_mock_input_capture.abs_x==mode.first-1&&g_mock_input_capture.abs_y==0,
+                        "X-only report preserves logical Y");
+            send(0,9503,false,true);
+            TEST_ASSERT(g_mock_input_capture.abs_x==mode.first-1&&g_mock_input_capture.abs_y==mode.second-1,
+                        "Y-only report preserves logical X");
+            // Multiple axis values before SYN coalesce to the last raw value.
+            mock_inject_input_event(&drv,INPUT_EV_ABS,INPUT_ABS_X,101);
+            mock_inject_input_event(&drv,INPUT_EV_ABS,INPUT_ABS_X,60001);
+            mock_inject_input_event(&drv,INPUT_EV_SYN,INPUT_SYN_REPORT,0);
+            virtio_input_poll_events(&drv,10);
+            TEST_ASSERT(g_mock_input_capture.abs_x==mode.first-1,"Latest raw ABS X before SYN wins");
+        }
+    }
+    // Full signed ranges exercise multiplication beyond 32 bits in the actual
+    // dispatcher, independently of the VirtIO tablet's usual unsigned range.
+    drv.input_dev.abs_x.min=INT32_MIN;drv.input_dev.abs_x.max=INT32_MAX;
+    drv.input_dev.abs_y.min=-100;drv.input_dev.abs_y.max=100;
+    g_mock_screen_w=1920;g_mock_screen_h=1080;
+    send(INT32_MAX,100);
+    TEST_ASSERT(g_mock_input_capture.abs_x==1919&&g_mock_input_capture.abs_y==1079,"Wide multiplication max");
+    send(INT32_MIN,-100);
+    TEST_ASSERT(g_mock_input_capture.abs_x==0&&g_mock_input_capture.abs_y==0,"Signed minima");
+    TEST_ASSERT(virtio_input_reset(&drv),"Reset asymmetric tablet");input_reset_all();
+    g_mock_screen_w=1024;g_mock_screen_h=768;
+}
+
 // 10. VirtIO-INPUT: Buforowanie zmian do nadejscia SYN_REPORT
 void test_virtio_input_syn_report() {
     input_reset_all();
@@ -6849,6 +6914,7 @@ int main() {
     RUN_TEST(test_virtio_input_rel_xy);
     RUN_TEST(test_virtio_input_rel_wheel);
     RUN_TEST(test_virtio_input_abs_scaling);
+    RUN_TEST(test_virtio_input_asymmetric_abs_mapping);
     RUN_TEST(test_virtio_input_syn_report);
     RUN_TEST(test_virtio_input_malformed_config_size);
     RUN_TEST(test_virtio_input_malformed_used_len);

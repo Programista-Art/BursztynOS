@@ -1527,3 +1527,16 @@ test-compositor-cursor:
 	mkdir -p .wm-test
 	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_compositor_cursor.cpp -Wl,--gc-sections -o .wm-test/compositor-cursor
 	ASAN_OPTIONS=detect_leaks=1 .wm-test/compositor-cursor
+
+BURSZTYNDIAGABSMAP ?= 0
+ifeq ($(BURSZTYNDIAGABSMAP),1)
+KERNEL_CXXFLAGS += -DBURSZTYNDIAGABSMAP=1
+RING3_FLAGS += -DBURSZTYNDIAGABSMAP=1
+endif
+input_device.o: abs_map_diag.h
+
+.PHONY: test-abs-map-diag
+test-abs-map-diag:
+	@mkdir -p .wm-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -ffunction-sections -fdata-sections -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYNDIAGABSMAP=1 -fsanitize=address,undefined input_device.cpp narzedzia/test_abs_map_diag.cpp -Wl,--gc-sections -o .wm-test/abs-map-diag
+	ASAN_OPTIONS=detect_leaks=1 .wm-test/abs-map-diag

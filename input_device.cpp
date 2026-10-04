@@ -6,6 +6,11 @@
 
 #include "input_device.h"
 #include "mysz_input.h"
+#include "abs_map_diag.h"
+#if BURSZTYNDIAGABSMAP
+#include "sterowniki/czas/hpet.h"
+void grafika_abs_map_geometria();
+#endif
 
 #ifdef BURSZTYN_VIRTIO_HOST_TEST
 #include <cstring>
@@ -32,6 +37,31 @@ constexpr size_t MAX_INPUT_DEVICES = 16;
 static InputDevice* s_devices[MAX_INPUT_DEVICES] = {};
 static size_t s_device_count = 0;
 static InputDevice* s_pointer_owner = nullptr;
+
+#if BURSZTYNDIAGABSMAP
+static AbsMapSample s_abs_maps[MAX_INPUT_DEVICES]{};
+static AbsMapSample* abs_sample(InputDevice* dev) {
+    for(size_t i=0;i<MAX_INPUT_DEVICES;++i)if(s_devices[i]==dev)return &s_abs_maps[i];
+    return nullptr;
+}
+static void abs_report(InputDevice* dev,uint64_t now) {
+    auto* a=abs_sample(dev);if(!a||!a->due(now))return;
+    char buf[640]{};size_t n=0;
+    auto text=[&](const char* s){while(*s&&n+1<sizeof(buf))buf[n++]=*s++;};
+    auto num=[&](int64_t v){if(v<0){text("-");v=-v;}char b[24];unsigned i=0;do{b[i++]=char('0'+v%10);v/=10;}while(v);while(i&&n+1<sizeof(buf))buf[n++]=b[--i];};
+    auto pair=[&](const char* k,int64_t x,int64_t y){text(k);num(x);text(",");num(y);text(" ");};
+    text("[ABS MAP] dev='");text(dev->name);text("' mode=ABS ");
+    pair("raw=",a->raw_x,a->raw_y);pair("xrange=",a->min_x,a->max_x);pair("yrange=",a->min_y,a->max_y);
+    pair("valid=",a->valid_x,a->valid_y);pair("mapped=",a->mapped_x,a->mapped_y);
+    pair("logical=",grafika_pobierz_mysz_x(),grafika_pobierz_mysz_y());pair("screen=",a->width,a->height);
+    pair("observed_x=",a->low_x,a->high_x);pair("observed_y=",a->low_y,a->high_y);
+    pair("stalled=",a->stalled_x,a->stalled_y);text("near_edge=");num(a->near_edge);
+    pair(" hit_x_min_max=",bool(a->endpoints&1),bool(a->endpoints&2));
+    pair("hit_y_min_max=",bool(a->endpoints&4),bool(a->endpoints&8));text("reports=");num(a->reports);
+    text(" interval_ns=");num(now-a->started);text("\n");klog_serial(buf);
+    grafika_abs_map_geometria();a->consumed(now);
+}
+#endif
 
 static inline bool str_rowne(const char* a, const char* b) {
     if (!a || !b) return false;
@@ -329,6 +359,9 @@ bool input_register_device(InputDevice* dev) {
     for (size_t i = 0; i < MAX_INPUT_DEVICES; ++i) {
         if (s_devices[i] == nullptr) {
             s_devices[i] = dev;
+#if BURSZTYNDIAGABSMAP
+            s_abs_maps[i]=AbsMapSample{};
+#endif
             dev->registered = true;
             dev->rel_x = 0;
             dev->rel_y = 0;
@@ -540,6 +573,12 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
                                 const bool can_abs_x = dev->has_abs_x && (dev->abs_x.max > dev->abs_x.min);
                                 const bool can_abs_y = dev->has_abs_y && (dev->abs_y.max > dev->abs_y.min);
                                 if ((dev->kinds & INPUT_DEVICE_KIND_TABLET) != 0 || can_abs_x || can_abs_y) {
+#if BURSZTYNDIAGABSMAP
+                                    if(auto* a=abs_sample(dev))a->record(dev->abs_val_x,dev->abs_val_y,
+                                        dev->has_abs_x,dev->has_abs_y,dev->abs_x.min,dev->abs_x.max,
+                                        dev->abs_y.min,dev->abs_y.max,target_x,target_y,screen_w,screen_h,
+                                        hpet_dostepny()?czas_monotoniczny_ns():0);
+#endif
                                     zaktualizuj_mysze_pozycja_zrodlo(target_x, target_y, dev->buttons_state, src_name);
                                     const int rx = grafika_pobierz_mysz_x();
                                     const int ry = grafika_pobierz_mysz_y();
@@ -584,6 +623,13 @@ void input_dispatch_events(InputDevice* dev, const InputEvent* evs, size_t count
     }
 }
 
+#if BURSZTYNDIAGABSMAP
+void input_abs_map_diag_obsluz() {
+    const auto now=hpet_dostepny()?czas_monotoniczny_ns():0;
+    for(size_t i=0;i<MAX_INPUT_DEVICES;++i)if(s_devices[i])abs_report(s_devices[i],now);
+}
+#endif
+
 void input_service_all(void) {
     for (size_t i = 0; i < MAX_INPUT_DEVICES; ++i) {
         if (s_devices[i] && s_devices[i]->poll_fn) {
@@ -593,6 +639,9 @@ void input_service_all(void) {
 }
 
 void input_reset_all(void) {
+#if BURSZTYNDIAGABSMAP
+    for(auto& a:s_abs_maps)a=AbsMapSample{};
+#endif
     for (size_t i = 0; i < MAX_INPUT_DEVICES; ++i) {
         if (s_devices[i]) {
             s_devices[i]->registered = false;

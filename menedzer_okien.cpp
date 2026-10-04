@@ -2255,6 +2255,16 @@ static void wm_log(const char* s) {
     wypisz(buf);
 }
 
+#if BURSZTYNDIAGABSMAP
+static void wm_abs_geometry(const char* cause) {
+    char b[160]{};unsigned n=0;
+    auto text=[&](const char* p){while(*p&&n+1<sizeof(b))b[n++]=*p++;};
+    auto num=[&](unsigned v){char t[12];unsigned i=0;do{t[i++]=char('0'+v%10);v/=10;}while(v);while(i&&n+1<sizeof(b))b[n++]=t[--i];};
+    text("[ABS WM] cause=");text(cause);text(" wm=");num(screen_w);text("x");num(screen_h);
+    text(" scale=");num(ui_skala_procent);text("\n");bws_wywolaj(1,(uint64_t)b,0,0,0);
+}
+#endif
+
 extern "C" __attribute__((noreturn)) void _start() {
 #if BURSZTYN_DIAG_BOOT
     wm_log("[WM-BOOT] entered-ring3\n");
@@ -2263,6 +2273,9 @@ extern "C" __attribute__((noreturn)) void _start() {
     GuiMonitorInfo mon{};if(gui_pobierz_monitor(0,&mon))ui_skala_procent=mon.scale_x1000/10;
     metryki_ekranu();
     gui_pobierz_rozdzielczosc(&screen_w, &screen_h);
+#if BURSZTYNDIAGABSMAP
+    wm_abs_geometry("startup");
+#endif
     zaktualizuj_cache_przycisku(ui_skala_procent);
 #if BURSZTYN_DIAG_BOOT
     wm_log_i32("[WM] screen_w=", screen_w);
@@ -2362,6 +2375,9 @@ extern "C" __attribute__((noreturn)) void _start() {
                 if(ui_skala_poprawna(zdarzenie.kod))ui_skala_procent=zdarzenie.kod;
                 screen_w=zdarzenie.dx;screen_h=zdarzenie.dy;
             }
+#if BURSZTYNDIAGABSMAP
+            wm_abs_geometry("BWS-display-event");
+#endif
             metryki_ekranu();
             zaktualizuj_cache_przycisku(ui_skala_procent);
             if(screen_w>0&&screen_h>PASEK_WYS)

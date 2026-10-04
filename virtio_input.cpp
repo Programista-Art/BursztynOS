@@ -210,7 +210,7 @@ static void virtio_input_classify_device(VirtioInputDriver* drv) {
         }
     }
 
-#if BURSZTYNDIAGGUIRUNTIME
+#if BURSZTYNDIAGGUIRUNTIME || BURSZTYNDIAGABSMAP
     char caps[256]{};unsigned pos=0;
     auto txt=[&](const char* p){while(*p&&pos+1<sizeof(caps))caps[pos++]=*p++;};
     auto num=[&](int64_t v){if(v<0){txt("-");v=-v;}char t[24];unsigned i=0;do{t[i++]=char('0'+v%10);v/=10;}while(v);while(i&&pos+1<sizeof(caps))caps[pos++]=t[--i];};
@@ -551,12 +551,18 @@ VirtioInputDriver* virtio_input_get_driver(size_t index) {
     return &s_drivers[index];
 }
 
+#if BURSZTYNDIAGABSMAP
+extern "C" void input_abs_map_diag_obsluz();
+#endif
 void virtio_input_obsluz(void) {
     for (size_t i = 0; i < s_driver_count; ++i) {
         if (s_drivers[i].initialized) {
             virtio_input_poll_events(&s_drivers[i], 64);
         }
     }
+#if BURSZTYNDIAGABSMAP
+    input_abs_map_diag_obsluz();
+#endif
 }
 
 bool virtio_input_stress_test(VirtioInputDriver* drv) {

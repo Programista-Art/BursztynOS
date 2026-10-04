@@ -50,7 +50,7 @@ esac
 QEMU="${QEMU:-qemu-system-x86_64}"
 QEMU_IMG="${QEMU_IMG:-qemu-img}"
 
-ISO_NORMAL="$SCRIPT_DIR/BursztynOS.iso"
+ISO_NORMAL="${BURSZTYN_ISO:-$SCRIPT_DIR/BursztynOS.iso}"
 ISO_CI_TEST="$SCRIPT_DIR/.bursztyn_ci_test.iso"
 DISK="$SCRIPT_DIR/wirtualny_dysk.img"
 DISK_SIZE="${DISK_SIZE:-4G}"
@@ -64,11 +64,9 @@ OVMF_VARS_RUNTIME="$SCRIPT_DIR/.bursztyn_ovmf_vars_unix.fd"
 #   QEMU_DISPLAY_ARGS="-display gtk,zoom-to-fit=off"
 #   QEMU_EXTRA_ARGS="-d guest_errors"
 #
-# Domyslnie pozwalamy QEMU wybrac natywny backend okna:
-# Linux -> zwykle GTK/SDL
-# macOS -> Cocoa
+# Produkcyjny profil SDL + tablet, zgodny z Makefile.
 AUDIO_BACKEND="${AUDIO_BACKEND:-$DEFAULT_AUDIO}"
-QEMU_DISPLAY_ARGS="${QEMU_DISPLAY_ARGS:-}"
+QEMU_DISPLAY_ARGS="${QEMU_DISPLAY_ARGS:--display sdl}"
 QEMU_EXTRA_ARGS="${QEMU_EXTRA_ARGS:-}"
 
 # Firmware mozna nadpisac recznie:
@@ -283,7 +281,7 @@ build_virtio_args() {
     local rng_dev="virtio-rng-pci,rng=rng0,disable-legacy=on"
     local gpu_dev="virtio-vga,disable-legacy=on,xres=1280,yres=720"
     local kbd_dev="virtio-keyboard-pci"
-    local mouse_dev="virtio-mouse-pci"
+    local mouse_dev="virtio-tablet-pci"
 
     QEMU_ARGS=()
     append_common_machine_args
@@ -412,7 +410,7 @@ validate_virtio_environment() {
         virtio-rng-pci \
         virtio-vga \
         virtio-keyboard-pci \
-        virtio-mouse-pci
+        virtio-tablet-pci
     do
         if ! qemu_has_device "$dev"; then
             echo "BRAK QEMU device: $dev" >&2

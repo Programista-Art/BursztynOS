@@ -1027,6 +1027,11 @@ __attribute__((noinline)) uint64_t bws_wypisz(
     }
 
     SerialLog(bufor.jako_char());
+#if BURSZTYNDIAGABSMAP
+    const char* abs_prefix="[ABS WM] ";unsigned abs_len=0;
+    while(abs_prefix[abs_len]&&bufor.jako_char()[abs_len]==abs_prefix[abs_len])++abs_len;
+    if(!abs_prefix[abs_len])return 1;
+#endif
 #if BURSZTYNDIAGGUIRUNTIME
     // Serial-only diagnostic output must not create the GPU traffic it measures.
     const char* prefix="[SHELL PERF] ";unsigned prefix_len=0;

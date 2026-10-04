@@ -1228,6 +1228,21 @@ void grafika_prezentuj_scene_z_kursorem(const GuiDirtyRect* dirty, uint32_t coun
     // Logical position is input-owned. Never commit an older consumed sample.
     kursor_diag_finish();
 }
+#if BURSZTYNDIAGABSMAP
+void grafika_abs_map_geometria() {
+    char buf[384]{};unsigned n=0;
+    auto text=[&](const char* p){while(*p&&n+1<sizeof(buf))buf[n++]=*p++;};
+    auto num=[&](uint64_t v){char t[24];unsigned i=0;do{t[i++]=char('0'+v%10);v/=10;}while(v);while(i&&n+1<sizeof(buf))buf[n++]=t[--i];};
+    auto size=[&](const char* key,unsigned w,unsigned h){text(key);num(w);text("x");num(h);text(" ");};
+    text("[ABS GEOM] ");size("fb=",aktywny_ekran->PobierzSzerokosc(),aktywny_ekran->PobierzWysokosc());
+    // Compositor clips against these physical graphics dimensions; no host viewport.
+    size("comp=",grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc());
+    if(auto* desktop=pobierz_warstwe(1))size("desktop=",desktop->szerokosc,desktop->wysokosc);
+    else text("desktop=unavailable ");
+    text("wm=see-ABS-WM ");text("gen=");num(grafika_generacja_ekranu());
+    text(" scale=");num(ekran_skala());text("\n");klog_serial(buf);
+}
+#endif
 #if BURSZTYNDIAGGUIRUNTIME
 void grafika_runtime_diag_snapshot() {
     static uint64_t previous=0;const auto now=gui_perf_now();
