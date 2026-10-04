@@ -41,7 +41,7 @@ static void desktop_remaining_cases() {
             for(auto r:test_paint_rects)if(r.color==motyw_pulpit_zaznaczenie(theme)) {
                 found=true;CHECK(r.x==visual.x && r.y==visual.y && r.w==visual.szerokosc && r.h==visual.wysokosc);
                 CHECK(r.w<cell.szerokosc);CHECK(r.h<=cell.wysokosc);CHECK(r.color>>24==32);
-                CHECK((r.color&0xffffff)==(theme.tekst&0xffffff));
+                CHECK((r.color&0xffffff)==motyw_pulpit_odcien(theme,true,24));
             }
             CHECK(found);CHECK(motyw_pulpit_ramka(theme)>>24==112);
         }

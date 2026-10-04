@@ -1567,3 +1567,9 @@ test-filesystem-move-host: installer-unit-test
 	ASAN_OPTIONS=detect_leaks=0 .installertest/test-move-authorization
 
 bursztyn_gui.o syscalls.o: bws_pliki.h motyw.h
+
+.PHONY: test-desktop-selection-theme
+test-desktop-selection-theme:
+	@mkdir -p .motywytest
+	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined narzedzia/test_desktop_selection_theme.cpp -o .motywytest/test-desktop-selection
+	ASAN_OPTIONS=detect_leaks=0 .motywytest/test-desktop-selection

@@ -62,7 +62,7 @@ inline bool intersects(Prostokat a,Prostokat b) {
 inline Prostokat visual(int x,int y,const Label& l,uint32_t scale) {
     auto g=pulpit_geometria_komorki(x,y,scale);int pad=ui_skaluj(3,scale);
     auto r=unite({g.ikona_x,g.ikona_y,g.ikona_szer,g.ikona_wys},
-        {g.etykieta_x,g.etykieta_y,g.etykieta_szer,l.height});
+        {g.etykieta_x+(g.etykieta_szer-l.width)/2,g.etykieta_y,l.width,l.height});
     return {r.x-pad,r.y-pad,r.szerokosc+2*pad,r.wysokosc+2*pad};
 }
 struct Position {int col=0,row=0,span=1;bool placed=false,selected=false,custom=false;Label label;};

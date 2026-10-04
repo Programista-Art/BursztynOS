@@ -1523,6 +1523,7 @@ void zloz_warstwe(
     }
 
     const bool decorated=ma_dekoracje(indeks);
+    const BursztynMotyw* desktop_theme=w.z_order==0?motyw_pobierz_aktywny():nullptr;
     const int bar=ui_skaluj(28,ekran_skala());
     const uint64_t szerokosc_warstwy =
         static_cast<uint64_t>(
@@ -1614,7 +1615,7 @@ void zloz_warstwe(
              * surfaces retain RGB marker semantics.
              */
             kolor = motyw_pulpit_skladaj(grafika_pobierz_wiersz_backbuffer(dst_y)[clip.dst_x+x],
-                kolor,w.z_order==0);
+                kolor,w.z_order==0,desktop_theme);
 
             grafika_zapisz_surowy_piksel(
                 clip.dst_x + x,
@@ -1632,12 +1633,13 @@ void zloz_snapshot_region(const LayerRenderInfo& w,const GuiDirtyRect& r) {
     int y1=w.y+w.height<r.y+r.height?w.y+w.height:r.y+r.height;
     if(x0>=x1||y0>=y1||!w.buffer)return;
     const bool decorated=ma_dekoracje(w.pid) && w.buffer==tablica_warstw[w.pid].bufor_pikseli;
+    const BursztynMotyw* desktop_theme=w.z==0?motyw_pobierz_aktywny():nullptr;
     for(int py=y0;py<y1;++py){
         if(decorated && py-w.y<ui_skaluj(28,ekran_skala())) continue;
         uint64_t first=(uint64_t)(py-w.y)*(uint32_t)w.width+(uint32_t)(x0-w.x);
         uint64_t len=(uint32_t)(x1-x0);if(first>w.pixels||len>w.pixels-first)return;
         const uint32_t* src=w.buffer+first;uint32_t* dst=grafika_pobierz_wiersz_backbuffer(py)+x0;
-        for(int px=x0;px<x1;++px){uint32_t c=*src++;if(c)*dst=motyw_pulpit_skladaj(*dst,c,w.z==0);++dst;}
+        for(int px=x0;px<x1;++px){uint32_t c=*src++;if(c)*dst=motyw_pulpit_skladaj(*dst,c,w.z==0,desktop_theme);++dst;}
     }
     if(decorated) zloz_dekoracje(w.pid,r);
 }

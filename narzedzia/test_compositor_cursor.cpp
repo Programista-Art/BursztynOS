@@ -48,7 +48,7 @@ int main(){
         for(uint32_t pixel:{0x20000000U,0x70ffffffU,0x01000000U,0x00abcdefU}) {
             desktop->bufor_pikseli[0]=pixel;scene[0]=0x123456;
             zloz_snapshot_region({desktop->bufor_pikseli,0,0,sw,sh,0,1,uint64_t(sw)*sh},{0,0,1,1});
-            uint32_t expected=motyw_pulpit_skladaj(0x123456,pixel,true);assert(scene[0]==expected);
+            uint32_t expected=motyw_pulpit_skladaj(0x123456,pixel,true,motyw_pobierz_aktywny());assert(scene[0]==expected);
             scene[0]=0x123456;zloz_warstwe(1,sw,sh);assert(scene[0]==expected);
             scene[0]=0x123456;
             zloz_snapshot_region({desktop->bufor_pikseli,0,0,sw,sh,10,1,uint64_t(sw)*sh},{0,0,1,1});
