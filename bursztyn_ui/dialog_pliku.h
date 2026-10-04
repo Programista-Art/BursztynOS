@@ -178,6 +178,11 @@ public:
 
     ~DialogPliku() override = default;
 
+    bool pokaz(ZarzadcaPopupow& z,Kontrolka* owner=nullptr) {
+        wynik_pliku_=WynikDialoguPliku::Brak;wybrana_sciezka_[0]=0;
+        return OknoDialogowe::pokaz(z,owner);
+    }
+
     static const char* domyslny_tytul(TrybDialoguPliku t) {
         switch (t) {
             case TrybDialoguPliku::Otworz: return "Otwórz plik";
@@ -1429,6 +1434,7 @@ private:
             for (size_t i = 0; i < liczba_wpisow_; ++i) {
                 const WpisKatalogu& wp = wpisy_[i];
                 if (wp.katalog != dir_pass) continue;
+                if(tryb_==TrybDialoguPliku::WybierzKatalog && !wp.katalog)continue;
 
                 // Katalogi zawsze widoczne. Pliki podlegaja filtrowi.
                 if (!wp.katalog && !czy_wszystkie && !sprawdz_filtr(wp.nazwa, current_ext)) {

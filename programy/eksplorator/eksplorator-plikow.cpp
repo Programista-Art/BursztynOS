@@ -20,8 +20,8 @@ extern "C" __attribute__((noreturn)) void _start();
 extern "C" {
 __attribute__((section(".naglowek"), used)) NaglowekBur naglowek = {
     {'B', 'U', 'R', '\0'}, reinterpret_cast<uint64_t>(&_start),
-    UINT64_C(0x1000), UINT64_C(0x30000), UINT64_C(0x1001000),
-    UINT64_C(0x31000), UINT64_C(0x20000), UINT64_C(0x1031000)};
+    UINT64_C(0x1000), UINT64_C(0x40000), UINT64_C(0x1001000),
+    UINT64_C(0x41000), UINT64_C(0x20000), UINT64_C(0x1041000)};
 }
 #endif
 
@@ -39,7 +39,6 @@ constexpr uint32_t MANIFEST_MAX = 16U * 1024U;
 constexpr int MAX_ENTRIES = 8192;
 constexpr int HISTORY_MAX = 32;
 constexpr int QUICK_MAX = 10;
-constexpr int REFRESH_TICKS = 3;
 
 /*
  * Jeden cel zawiera pelna, 512-bajtowa sciezke. Cala tablica celow nie moze
@@ -559,7 +558,15 @@ public:
         return result;
     }
 
-    Change refresh() { return load(path_, true); }
+    Change refresh() {
+        const Change pending = mutation_change_;
+        mutation_change_ = Change::UNCHANGED;
+        const Change current = load(path_, true);
+        // Do not swallow a later filesystem event while a mutation awaits repaint.
+        return current == Change::UNCHANGED || current == Change::DETAILS
+            ? (pending == Change::CHANGED ? pending : current) : current;
+    }
+    void refresh_after_mutation() {hash_valid_=false;mutation_change_=load(path_,true);}
 
     Change back() {
         if (!can_back()) {
@@ -766,7 +773,8 @@ public:
             set_status("Zmiana nazwy nie powiodła się: cel istnieje albo PZB odmówił.");
             return false;
         }
-        hash_valid_ = false;
+        copy_text(entries_[selected_].name,NAME_CAP,new_name);
+        refresh_after_mutation();
         set_status("Zmieniono nazwę elementu.");
         return true;
     }
@@ -781,11 +789,15 @@ public:
             set_status("Nie usunięto: folder nie jest pusty, błąd PSF albo odmowa PZB.");
             return false;
         }
-        hash_valid_ = false;
+        refresh_after_mutation();
         set_status("Element usunięto trwale (Kosz nie jest zaimplementowany).");
         return true;
     }
 
+    static bool prefix_equal(const char* text,const char* prefix,size_t n) {
+        for(size_t i=0;i<n;++i)if(text[i]!=prefix[i])return false;
+        return true;
+    }
     bool move_selected(const char* destination_folder) {
         if (!valid_path(destination_folder)) {
             set_status("Docelowy folder ma nieprawidłową ścieżkę.");
@@ -796,11 +808,17 @@ public:
             set_status("Nie można przenieść tego wpisu.");
             return false;
         }
+        size_t source_len=len_limit(source,PATH_CAP);
+        if(equal_text(source,destination_folder) ||
+            (entries_[selected_].directory && len_limit(destination_folder,PATH_CAP)>source_len &&
+             prefix_equal(destination_folder,source,source_len) && destination_folder[source_len]=='/')) {
+            set_status("Nie można przenieść folderu do siebie ani do jego podkatalogu.");return false;
+        }
         if (!przenies_twor_uzytkownika(source, destination_folder)) {
             set_status("Nie przeniesiono: cel istnieje, własne poddrzewo, błąd PSF lub PZB.");
             return false;
         }
-        hash_valid_ = false;
+        refresh_after_mutation();
         set_status("Element przeniesiono bez nadpisywania celu.");
         return true;
     }
@@ -829,7 +847,7 @@ public:
             set_status("Nie wklejono: konflikt nazwy, brak uprawnień lub pusty schowek.");
             return false;
         }
-        hash_valid_ = false;
+        refresh_after_mutation();
         set_status("Wklejono bez nadpisywania celu.");
         return true;
     }
@@ -865,6 +883,7 @@ private:
     Details details_;
     uint64_t hash_;
     bool hash_valid_;
+    Change mutation_change_{Change::UNCHANGED};
 
     char* history(int index) {
         return history_ + static_cast<size_t>(index) * PATH_CAP;
@@ -1410,7 +1429,7 @@ private:
             return false;
         }
         set_status(directory ? "Utworzono nowy folder." : "Utworzono nowy plik.");
-        hash_valid_ = false;
+        refresh_after_mutation();
         return true;
     }
 };
@@ -1518,7 +1537,7 @@ struct AktowkaLayout {
 };
 
 /* Jedyne zrodlo geometrii calego klienta Aktowki. */
-AktowkaLayout calculate_layout(const AktowkaWindow& window) {
+AktowkaLayout calculate_layout(const AktowkaWindow& window, int count = -1) {
     AktowkaLayout layout{};
     const int client_x = window.x + 3;
     const int client_w = window.w > 6 ? window.w - 6 : 0;
@@ -1645,7 +1664,7 @@ AktowkaLayout calculate_layout(const AktowkaWindow& window) {
     const int list_y = layout.table_header.y + layout.table_header.h;
     const int list_h = layout.center.y + layout.center.h > list_y
         ? layout.center.y + layout.center.h - list_y : 0;
-    const int scrollbar = layout.center.w > SCROLL_W + 40 ? SCROLL_W : 0;
+    const int scrollbar = (count<0 || count>list_h/ROW_H) && layout.center.w>SCROLL_W+40 ? SCROLL_W : 0;
     layout.list_body = {
         layout.center.x,
         list_y,
@@ -1702,10 +1721,10 @@ public:
         scrollbar_.ustaw_orientacje(BursztynUI::Orientacja::Pionowa);
     }
 
-    AktowkaLayout layout() const { return calculate_layout(window_); }
+    AktowkaLayout layout() const { return calculate_layout(window_,model_.visible_count()); }
     EditMode edit_mode() const { return edit_mode_; }
     const char* edit_text() const {
-        return modal_open() ? dialog_.tekst() : edit_mode_==EditMode::PATH ? path_field_.tekst() : search_field_.tekst();
+        return edit_mode_==EditMode::MOVE?chooser_.wybrana_sciezka():modal_open() ? dialog_.tekst() : edit_mode_==EditMode::PATH ? path_field_.tekst() : search_field_.tekst();
     }
     bool modal_open() const {
         return edit_mode_ == EditMode::CREATE_FOLDER ||
@@ -1715,6 +1734,8 @@ public:
                edit_mode_ == EditMode::OPEN_WITH || edit_mode_ == EditMode::NOTICE;
     }
 #ifdef AKTOWKA_HOST_TEST
+    BursztynUI::PasekPrzewijania& test_scrollbar() {return scrollbar_;}
+    PlikiUI::WyborKatalogu& test_chooser() {return chooser_;}
     bool toolbar_enabled(size_t i) const {return i<12 && buttons_[i].czy_wlaczona();}
 #endif
     bool context_open() const { return menu_.menu.czy_otwarte(); }
@@ -1728,13 +1749,13 @@ public:
         } else if (mode == EditMode::MOVE) {
             initial = model_.path();
         }
-        edit_mode_=mode;input_bytes_=0;
+        edit_mode_=mode;input_bytes_=0;field_skip_count_=field_skip_pos_=0;
         auto& field=mode==EditMode::PATH?path_field_:search_field_;
         field.ustaw_tekst(initial);field.obsluz_uzyskanie_skupienia();
     }
 
     void end_edit() {
-        dialog_.zamknij();
+        dialog_.zamknij();chooser_.zamknij();
         edit_mode_ = EditMode::NONE;
         input_bytes_=0;
     }
@@ -1753,6 +1774,11 @@ public:
         if ((mode==EditMode::RENAME || mode==EditMode::MOVE || mode==EditMode::CONFIRM_DELETE || mode==EditMode::OPEN_WITH) &&
             (!selected || selected->type==EntryType::PARENT)) return false;
         edit_mode_=mode;
+        if(mode==EditMode::MOVE) {
+            bool opened=chooser_.otworz(selected->name,model_.path(),owner(),work());
+            if(!opened)end_edit();
+            (void)gui_rejestruj_cele_drop(nullptr,0);gui_odswiez();return opened;
+        }
         const char* initial=mode==EditMode::RENAME?selected->name:
             mode==EditMode::MOVE?model_.path():mode==EditMode::CREATE_FILE?"Nowy plik.txt":"";
         char question[224]{};
@@ -1772,10 +1798,11 @@ public:
         (void)gui_rejestruj_cele_drop(nullptr,0); gui_odswiez(); return ok;
     }
     void close_modal() { if(!modal_open())return; end_edit(); register_drop_targets(); gui_odswiez(); }
-    bool dialog_open() const {return dialog_.czy_otwarta();}
-    int modal_result() const { return dialog_.wynik(); }
+    bool dialog_open() const {return edit_mode_==EditMode::MOVE?chooser_.czy_otwarta():dialog_.czy_otwarta();}
+    int modal_result() const { return edit_mode_==EditMode::MOVE?static_cast<int>(chooser_.wynik_pliku()):dialog_.wynik(); }
     bool popup_event(const bws_zdarzenie& e) {
-        if(modal_open()) return dialog_.zdarzenie(e);
+        if(modal_open()) return edit_mode_==EditMode::MOVE?chooser_.events.zdarzenie(e):dialog_.zdarzenie(e);
+        if(dialog_.zdarzenie(e) || chooser_.events.zdarzenie(e))return true;
         return menu_.events.zdarzenie(e);
     }
     ContextAction pending_action() { return menu_.pobierz_akcje(); }
@@ -1785,7 +1812,7 @@ public:
         path_field_.zaktualizuj_motyw(); search_field_.zaktualizuj_motyw();
         for(auto& b:buttons_) b.zaktualizuj_motyw();
         draw_workspace();
-        menu_.events.popups.zaktualizuj_motyw(); dialog_.events.popups.zaktualizuj_motyw(); gui_odswiez();
+        menu_.events.popups.zaktualizuj_motyw(); dialog_.events.popups.zaktualizuj_motyw(); chooser_.events.popups.zaktualizuj_motyw();gui_odswiez();
     }
     void pointer_hover(int x,int y) {
         for(auto& b:buttons_) {
@@ -1810,8 +1837,18 @@ public:
         scrollbar_.rozmiesc({l.scroll_up.x,l.list_body.y,SCROLL_W,l.list_body.h});
     }
     bool scrollbar_event(const bws_zdarzenie& e) {
+        if(e.typ==BWS_ZDARZENIE_KLAWISZ_FIZYCZNY && e.x && edit_mode_==EditMode::NONE) {
+            uint32_t key=PlikiUI::ObslugaPopup::klawisz(e);
+            if(key==0x49 || key==0x51) {
+                if(model_.scroll_by((key==0x49?-1:1)*visible_rows(),visible_rows())) {draw_list_only();gui_odswiez();}
+                return true;
+            }
+        }
         auto r=scrollbar_.obszar_ekranu();
-        if(!r.zawiera(e.x,e.y) && !scrollbar_.czy_przeciagany())return false;
+        if(e.typ==BWS_ZDARZENIE_MYSZ_KOLO && hit(e.x,e.y,layout().center)) {
+            if(model_.scroll_by(-clamp_int(e.dy,-MAX_ENTRIES,MAX_ENTRIES)*3,visible_rows())) {draw_list_only();gui_odswiez();}return true;
+        }
+        if(!scrollbar_.czy_widoczna() || (!r.zawiera(e.x,e.y) && !scrollbar_.czy_przeciagany()))return false;
         BursztynUI::ZdarzenieMyszki m{};m.x=e.x;m.y=e.y;m.przycisk=1;
         if(e.typ==BWS_ZDARZENIE_MYSZ_DOWN) {scrollbar_.obsluz_wcisniecie_myszy(m);if(m.obsluzone)gui_ustaw_capture_myszy(true);}
         else if(e.typ==BWS_ZDARZENIE_MYSZ_UP) {scrollbar_.obsluz_zwolnienie_myszy(m);gui_ustaw_capture_myszy(false);}
@@ -1853,11 +1890,34 @@ public:
         if(len_limit(field.tekst(),max)+used>=max)return false;
         BursztynUI::ZdarzenieWprowadzaniaTekstu e{};e.punkt_kodowy=cp;field.obsluz_wprowadzenie_tekstu(e);return e.obsluzone;
     }
-    bool edit_key(uint32_t code) {
+    bool edit_key(uint32_t code,uint32_t mods=0,uint32_t scan=0) {
         if(modal_open())return false;
-        BursztynUI::ZdarzenieKlawiatury e{};e.kod_klawisza=code;active_field().obsluz_wcisniecie_klawisza(e);return e.obsluzone;
+        BursztynUI::ZdarzenieKlawiatury e{};e.kod_klawisza=code;e.modyfikatory=mods;e.kod_skanu=scan;active_field().obsluz_wcisniecie_klawisza(e);return e.obsluzone;
     }
-    bool erase_input() {input_bytes_=0;return edit_key(0x0e);}
+    bool field_event(const bws_zdarzenie& e) {
+        if(edit_mode_!=EditMode::PATH && edit_mode_!=EditMode::SEARCH)return false;
+        if(e.typ==BWS_ZDARZENIE_KLAWISZ && field_skip_pos_<field_skip_count_) {
+            if(e.kod==static_cast<unsigned char>(field_skip_[field_skip_pos_])) {++field_skip_pos_;return true;}
+            field_skip_count_=field_skip_pos_=0;
+        }
+        if(e.typ==BWS_ZDARZENIE_TEXT_INPUT) {
+            BursztynUI::ZdarzenieWprowadzaniaTekstu t{};t.punkt_kodowy=e.kod;t.modyfikatory=e.przyciski;
+            active_field().obsluz_wprowadzenie_tekstu(t);
+            field_skip_count_=BursztynUI::CzcionkaUI::zakoduj_utf8(e.kod,field_skip_);field_skip_pos_=0;
+        } else if(e.typ==BWS_ZDARZENIE_KLAWISZ_FIZYCZNY) {
+            if(!e.x)return true;
+            uint32_t key=PlikiUI::ObslugaPopup::klawisz(e);
+            if(key==13 || key==27)return false; // existing confirm/cancel byte path
+            edit_key(key,e.przyciski,e.kod);
+            const char* legacy=key==8?"\b":key==9?"\t":key==0x4b?"\x1b[D":key==0x4d?"\x1b[C":
+                key==0x53?"\x1b[3~":key==0x47?"\x1b[H":key==0x4f?"\x1b[F":nullptr;
+            if(legacy) {field_skip_count_=field_skip_pos_=0;while(legacy[field_skip_count_] && field_skip_count_<4) {field_skip_[field_skip_count_]=legacy[field_skip_count_];++field_skip_count_;}}
+        } else return false;
+        if(edit_mode_==EditMode::PATH)draw_path_field();
+        else {model_.set_filter(active_field().tekst());draw_search_field();draw_list_only();draw_details_panel();draw_status();}
+        gui_odswiez();return true;
+    }
+    bool erase_input() {input_bytes_=0;return edit_key(8);}
     bool delete_input() {return edit_key(0x53);}
     bool move_caret_left() {return edit_key(0x4b);}
     bool move_caret_right() {return edit_key(0x4d);}
@@ -1967,13 +2027,27 @@ public:
     void draw_full(bool clear_desktop) {
         if (window_.minimized) return;
         if (clear_desktop) gui_odswiez_pulpit();
-        gui_rysuj_okno(window_.x, window_.y, window_.w, window_.h, "Eksplorator Plików");
+        gui_ustaw_tytul_okna("Eksplorator Plików");
         gui_rysuj_standardowa_belke(window_.x, window_.y, window_.w,
                                     "Eksplorator Plików", window_.maximized);
         draw_workspace();
         gui_odswiez();
     }
 
+    void draw_directory_change() {
+        hover_entry_=-1;
+        draw_path_field();draw_table_header();draw_list_only();draw_details_panel();draw_status();draw_left_panel(true);
+        // Only buttons whose enabled state changed need repainting.
+        const auto l=layout();
+        const Rect r[]={l.back,l.forward,l.rename,l.remove,l.move,l.run};
+        const unsigned ix[]={0,1,6,7,8,9};
+        const Entry* item=model_.entry(model_.selected());
+        const bool selected=item && item->type!=EntryType::PARENT;
+        const bool enabled[]={model_.can_back(),model_.can_forward(),selected,selected,selected,item && (item->type==EntryType::BUR || item->type==EntryType::CEBULA)};
+        const char* labels[]={"<-","->","Zmień nazwę","Usuń","Przenieś","Uruchom"};
+        for(unsigned i=0;i<6;++i)if(buttons_[ix[i]].czy_wlaczona()!=enabled[i])draw_button(r[i],enabled[i],labels[i]);
+        register_drop_targets();
+    }
     void draw_workspace() {
         const AktowkaLayout value = layout();
         const int client_h = window_.h - TITLE_H - 3;
@@ -2015,23 +2089,27 @@ public:
 
     void draw_path_field() { draw_text_field(path_field_,layout().path,edit_mode_==EditMode::PATH,model_.path(),"Ścieżka"); }
     void draw_search_field() { draw_text_field(search_field_,layout().search,edit_mode_==EditMode::SEARCH,model_.filter(),"Szukaj"); }
-    void draw_left_panel() {
+    void draw_left_panel(bool changed_only=false) {
         const AktowkaLayout value = layout();
-        gui_rysuj_prostokat(value.left.x, value.left.y, value.left.w, value.left.h, COLOR_PANEL);
-        draw_panel_title(value.left, "Szybki dostęp");
+        if(!changed_only) {
+            gui_rysuj_prostokat(value.left.x, value.left.y, value.left.w, value.left.h, COLOR_PANEL);
+            draw_panel_title(value.left, "Szybki dostęp");
+        }
         int y = value.left.y + PANEL_TITLE_H + 4;
         bool pinned_header = false;
         for (int i = 0; i < model_.quick_count(); ++i) {
             const QuickItem* item = model_.quick(i);
             if (!item) continue;
             if (item->pinned && !pinned_header) {
-                draw_clipped(value.left.x + 7, y + 4, value.left.w - 14,
+                if(!changed_only)draw_clipped(value.left.x + 7, y + 4, value.left.w - 14,
                              "Przypięte foldery", COLOR_MUTED, false);
                 y += 23;
                 pinned_header = true;
             }
             if (y + ROW_H > value.left.y + value.left.h) break;
             const bool current = equal_text(item->path, model_.path());
+            if(changed_only && quick_active_[i]==current) {y+=ROW_H;continue;}
+            quick_active_[i]=current;
             gui_rysuj_prostokat(value.left.x + 2, y,
                                 value.left.w > 4 ? value.left.w - 4 : 0,
                                 ROW_H, current ? COLOR_SELECT : COLOR_PANEL);
@@ -2051,15 +2129,21 @@ public:
         draw_list_only();
     }
 
-    void draw_table_header() { paint_table(layout().table_header); }
+    void draw_table_header() {
+        auto r=layout().table_header;gui_rysuj_prostokat(r.x,r.y,r.w,r.h,COLOR_PANEL);paint_table(r);
+    }
     void draw_list_only() {
+        model_.clamp_scroll(visible_rows());
         paint_table(layout().list_body);
         auto l=layout();
         scrollbar_.ustaw_skale_dpi(ui_skala());
         scrollbar_.rozmiesc(BursztynUI::Prostokat(l.scroll_up.x,l.list_body.y,SCROLL_W,l.list_body.h));
-        scrollbar_.ustaw_zakres(0,model_.visible_count()); scrollbar_.ustaw_rozmiar_strony(visible_rows());
+        model_.clamp_scroll(visible_rows());
+        int maximum=model_.visible_count()-visible_rows();if(maximum<0)maximum=0;
+        scrollbar_.ustaw_widoczna(maximum>0 && l.scroll_up.w>0);
+        scrollbar_.ustaw_zakres(0,maximum); scrollbar_.ustaw_rozmiar_strony(visible_rows());
         scrollbar_.ustaw_wartosc(model_.scroll()); scrollbar_.ustaw_maly_krok(1);scrollbar_.ustaw_duzy_krok(visible_rows());
-        paint(scrollbar_);
+        if(scrollbar_.czy_widoczna())paint(scrollbar_);
     }
     void draw_visual_row(int visual) {
         auto l=layout();int local=visual-model_.scroll();if(local<0 || local>=visible_rows())return;
@@ -2172,9 +2256,12 @@ private:
     AktowkaModel& model_;
     AktowkaWindow& window_;
     PlikiUI::DialogPlikowy dialog_;
+    PlikiUI::WyborKatalogu chooser_;
     PlikiUI::MenuPlikowe menu_;
     BursztynUI::TabelaWirtualna table_;
     BursztynUI::PasekPrzewijania scrollbar_;
+    bool quick_active_[QUICK_MAX]{};
+    char field_skip_[5]{};unsigned field_skip_count_{0},field_skip_pos_{0};
     BursztynUI::PoleTekstowe path_field_, search_field_;
     BursztynUI::Przycisk buttons_[12];
     BursztynUI::KontekstRysowania drawing_;
@@ -2276,7 +2363,7 @@ bool is_double_click(uint64_t previous, uint64_t current) {
 }
 
 void present_workspace_change(AktowkaView& view, Change change) {
-    if (change == Change::CHANGED) view.draw_workspace();
+    if (change == Change::CHANGED) view.draw_directory_change();
     else if (change == Change::DETAILS) {
         view.draw_selected_row();
         view.draw_details_panel();
@@ -2290,7 +2377,7 @@ void present_workspace_change(AktowkaView& view, Change change) {
 }
 
 void present_activation(AktowkaView& view, Activation activation) {
-    if (activation == Activation::NAVIGATION) view.draw_workspace();
+    if (activation == Activation::NAVIGATION) view.draw_directory_change();
     else view.draw_status();
     view.register_drop_targets();
     gui_odswiez();
@@ -2436,7 +2523,7 @@ extern "C" __attribute__((noreturn)) void _start() {
     int drag_x = 0;
     int drag_y = 0;
     int last_entry = -1;
-    int refresh_ticks = 0;
+    bool refresh_pending = false;
     uint64_t last_click_time = 0;
     AnsiState ansi = AnsiState::NONE;
     bool item_drag_candidate = false;
@@ -2489,16 +2576,17 @@ extern "C" __attribute__((noreturn)) void _start() {
             view.close_transient();
             const bool restored = window.minimized;
             window.minimized = false;
-            refresh_ticks = 0;
+            refresh_pending = false;
             const Change change = model.refresh();
             if (restored) view.draw_full(false);
             else present_workspace_change(view, change);
             continue;
         }
         if (event.typ == BWS_ZDARZENIE_PLIKI_ZMIENIONE) {
-            refresh_ticks = 0;
+            refresh_pending = false;
             if (!window.minimized && !view.modal_open() && !view.context_open())
                 present_workspace_change(view, model.refresh());
+            else refresh_pending=true;
             continue;
         }
         if (event.typ == BWS_ZDARZENIE_DRAG_HOVER) {
@@ -2521,6 +2609,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             if(action!=ContextAction::NONE) perform_context_action(view,model,action);
             if(view.modal_open() && view.modal_result()==1)submit_modal(view,model);
             else if(view.modal_open() && (view.modal_result()==2 || !view.dialog_open()))view.close_modal();
+            if(refresh_pending && !view.modal_open() && !view.context_open()) {refresh_pending=false;present_workspace_change(view,model.refresh());}
             view.register_drop_targets();gui_odswiez();continue;
         }
         if (event.typ == BWS_ZDARZENIE_TIMER) {
@@ -2535,10 +2624,8 @@ extern "C" __attribute__((noreturn)) void _start() {
                 }
                 gui_odswiez();
             }
-            if (!window.minimized && !view.modal_open() &&
-                !view.context_open() && ++refresh_ticks >= REFRESH_TICKS) {
-                refresh_ticks = 0;
-                present_workspace_change(view, model.refresh());
+            if(refresh_pending && !window.minimized && !view.modal_open() && !view.context_open()) {
+                refresh_pending=false;present_workspace_change(view,model.refresh());
             }
             view.register_drop_targets();
             continue;
@@ -2783,6 +2870,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             continue;
         }
 
+        if(view.field_event(event))continue;
         if (event.typ != BWS_ZDARZENIE_KLAWISZ) continue;
         const char character = static_cast<char>(event.kod);
         if (view.edit_mode() != EditMode::NONE) {
@@ -2820,6 +2908,11 @@ extern "C" __attribute__((noreturn)) void _start() {
                         else view.draw_search_field();
                         gui_odswiez();
                     }
+                } else if(character=='H' || character=='F') {
+                    ansi=AnsiState::NONE;
+                    view.edit_key(character=='H'?0x47:0x4f);
+                    if(mode==EditMode::PATH)view.draw_path_field();else view.draw_search_field();
+                    gui_odswiez();
                 } else if (character == '3') {
                     ansi = AnsiState::CSI_DELETE;
                 } else {

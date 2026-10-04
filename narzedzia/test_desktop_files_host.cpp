@@ -40,7 +40,7 @@ int main() {
     CHECK(files.count(std::string(SCIEZKA_PULPIT)+"/folder2"));
     files["/dest"]=true;snprintf(pulpit_cel,sizeof(pulpit_cel),"%s/folder2",SCIEZKA_PULPIT);
     CHECK(otworz_pulpit_modal(PulpitModalTyp::MOVE));
-    static_cast<PoleTekstowe*>(pulpit_dialog->dziecko(2))->ustaw_tekst("/dest");zatwierdz_pulpit_modal();
+    CHECK(pulpit_wybor->przejdz_do_katalogu("/dest"));pulpit_wybor->zatwierdz();zatwierdz_pulpit_modal();
     CHECK(files.count("/dest/folder2"));CHECK(!files.count(pulpit_cel));
     for(auto operation:{BWS_SCHOWEK_COPY,BWS_SCHOWEK_CUT}) {
         CHECK(ustaw_schowek_plikow("/dest/folder2",operation));
@@ -52,6 +52,31 @@ int main() {
     static_cast<PoleTekstowe*>(pulpit_dialog->dziecko(2))->ustaw_tekst("folder2");zatwierdz_pulpit_modal();
     CHECK(pulpit_dialog->czy_otwarta()); // failed create explains collision in a native dialog
     zamknij_pulpit_modal();
-    delete pulpit_menu;delete pulpit_dialog;
+    zamknij_pulpit_modal();
+    for(unsigned scale:{100U,125U}) {
+        ui_skala_procent=scale;
+        bws_zdarzenie right{};right.typ=BWS_ZDARZENIE_MYSZ_PRAWY_DOWN;right.x=620;right.y=300;
+        CHECK(obsluz_prawy_klik_pulpitu(right));CHECK(pulpit_context_open);CHECK(zaznaczony_wpis_pulpitu==-1);
+        for(size_t i=0;i<pulpit_menu->menu.menu().liczba_elementow();++i) {
+            auto* a=pulpit_menu->menu.menu().element(i);auto id=static_cast<PlikiUI::Akcja>(a->identyfikator());
+            if(id==PlikiUI::Akcja::NEW_FOLDER || id==PlikiUI::Akcja::NEW_FILE)CHECK(a->czy_wlaczony());
+            if(id==PlikiUI::Akcja::COPY || id==PlikiUI::Akcja::CUT || id==PlikiUI::Akcja::REMOVE || id==PlikiUI::Akcja::OPEN_WITH || id==PlikiUI::Akcja::NOTEPAD)CHECK(!a->czy_wlaczony());
+            if(id==PlikiUI::Akcja::REMOVE)CHECK(!strcmp(a->tekst(),"Usuń"));
+        }
+        zamknij_pulpit_context();
+        for(bool folder:{false,true}) {
+            files[std::string(SCIEZKA_PULPIT)+"/target.txt"]=folder;hash_pulpitu_wazny=false;odswiez_wpisy_pulpitu();
+            int target=-1;for(int i=0;i<liczba_wpisow_pulpitu;++i)if(!strcmp(wpisy_pulpitu[i].nazwa,"target.txt"))target=i;
+            CHECK(target>=0);prostokat_wpisu_pulpitu(target,&right.x,&right.y);++right.x;++right.y;
+            CHECK(obsluz_prawy_klik_pulpitu(right));CHECK(zaznaczony_wpis_pulpitu==target);
+            CHECK(pulpit_menu->menu.menu().element(4)->czy_wlaczony());CHECK(pulpit_menu->menu.menu().element(5)->czy_wlaczony());
+            CHECK(pulpit_menu->menu.menu().element(8)->czy_wlaczony());CHECK(pulpit_menu->menu.menu().element(1)->czy_wlaczony()==!folder);
+            auto t=*gui_pobierz_motyw();t.panel^=0xffffff;test_ustaw_aktywny_motyw(&t);pulpit_menu->events.popups.zaktualizuj_motyw();CHECK(pulpit_menu->menu.czy_otwarte());
+            click.typ=BWS_ZDARZENIE_MYSZ_DOWN;click.x=0;click.y=0;int before=launches;CHECK(obsluz_popupy_pulpitu(click));
+            click.typ=BWS_ZDARZENIE_MYSZ_UP;CHECK(obsluz_popupy_pulpitu(click));CHECK(launches==before);
+            test_ustaw_aktywny_motyw(nullptr);
+        }
+    }
+    delete pulpit_menu;delete pulpit_dialog;delete pulpit_wybor;
     printf("Desktop production file actions: %d/%d PASS (RAM filesystem)\n",checks,checks);
 }

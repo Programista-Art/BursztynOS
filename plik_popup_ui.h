@@ -3,6 +3,7 @@
 #include "bursztyn_ui/menu_kontekstowe.h"
 #include "bursztyn_ui/pole_tekstowe.h"
 #include "bursztyn_ui/etykieta.h"
+#include "bursztyn_ui/dialog_pliku.h"
 #include "bursztyn_ui/przycisk.h"
 
 namespace PlikiUI {
@@ -32,55 +33,100 @@ public:
         popups.ustaw_skale_dpi(ui_skala());
         popups.ustaw_geometrie_wlasciciela(owner, work);
     }
+    void limit_tekstu(PoleTekstowe* field,size_t bytes) {limit_field_=field;limit_bytes_=bytes;}
+    void reset_input() { skip_count_=skip_pos_=ansi_=byte_count_=0; }
+    static uint32_t klawisz(const bws_zdarzenie& e) {
+        unsigned code=e.kod&255;
+        if(e.kod&BWS_KEY_SOURCE_USB) {
+            switch(code) {
+            case 40:return 13; case 41:return 27; case 42:return 8; case 43:return 9;
+            case 76:return 0x53; case 79:return 0x4d; case 80:return 0x4b;
+            case 81:return 0x50; case 82:return 0x48; case 74:return 0x47;
+            case 77:return 0x4f; case 75:return 0x49; case 78:return 0x51;
+            default:return e.kod;
+            }
+        }
+        switch(code&127) {
+        case 14:return 8; case 28:return 13; case 1:return 27; case 15:return 9;
+        default:return (e.kod&BWS_KEY_SOURCE_E0)?code:e.kod;
+        }
+    }
     bool zdarzenie(const bws_zdarzenie& e) {
         if(e.typ==BWS_ZDARZENIE_MYSZ_PRAWY_UP && consume_right_up_) {consume_right_up_=false;return true;}
-        if (e.typ == BWS_ZDARZENIE_MYSZ_UP && consume_up_) { consume_up_=false; return true; }
-        if (e.typ == BWS_ZDARZENIE_KLAWISZ && skip_byte_ >= 0) {
-            bool skip = int(e.kod) == skip_byte_; skip_byte_=-1; if (skip) return true;
+        if(e.typ==BWS_ZDARZENIE_MYSZ_UP && consume_up_) {consume_up_=false;return true;}
+        if(e.typ==BWS_ZDARZENIE_KLAWISZ && skip_pos_<skip_count_) {
+            if(e.kod==static_cast<unsigned char>(skip_[skip_pos_])) {++skip_pos_;return true;}
+            skip_count_=skip_pos_=0;
         }
-        if (!popups.czy_otwarty()) return false;
-        ZdarzenieMyszki m{}; m.x=e.x; m.y=e.y; m.przycisk=1;
-        switch (e.typ) {
-        case BWS_ZDARZENIE_MYSZ_RUCH: popups.obsluz_ruch(m); break;
-        case BWS_ZDARZENIE_MYSZ_DOWN: popups.obsluz_wcisniecie(m); consume_up_=!popups.czy_otwarty(); break;
-        case BWS_ZDARZENIE_MYSZ_UP: popups.obsluz_zwolnienie(m); break;
-        case BWS_ZDARZENIE_MYSZ_PRAWY_DOWN: popups.zamknij(); consume_right_up_=true;break;
-        case BWS_ZDARZENIE_KLAWISZ:
-            if(ansi_==1) {ansi_=e.kod=='['?2:0;break;}
+        if(!popups.czy_otwarty()) return false;
+        ZdarzenieMyszki m{};m.x=e.x;m.y=e.y;m.przycisk=1;
+        switch(e.typ) {
+        case BWS_ZDARZENIE_MYSZ_RUCH:popups.obsluz_ruch(m);break;
+        case BWS_ZDARZENIE_MYSZ_DOWN:popups.obsluz_wcisniecie(m);consume_up_=!popups.czy_otwarty();break;
+        case BWS_ZDARZENIE_MYSZ_UP:popups.obsluz_zwolnienie(m);break;
+        case BWS_ZDARZENIE_MYSZ_PRAWY_DOWN:popups.zamknij();consume_right_up_=true;break;
+        case BWS_ZDARZENIE_MYSZ_KOLO: {
+            ZdarzenieRolki r{};r.x=e.x;r.y=e.y;r.delta_y=e.dy;r.delta_x=e.dx;popups.obsluz_rolke(r);break;
+        }
+        case BWS_ZDARZENIE_TEXT_INPUT: {
+            skip_count_=CzcionkaUI::zakoduj_utf8(e.kod,skip_);skip_pos_=0;
+            ZdarzenieWprowadzaniaTekstu t{};t.punkt_kodowy=e.kod;t.modyfikatory=e.przyciski;send_text(t);break;
+        }
+        case BWS_ZDARZENIE_KLAWISZ_FIZYCZNY:
+            if(e.x) {
+                uint32_t key=klawisz(e);send_key(key,e.przyciski,e.kod);
+                const char* legacy=key==8?"\b":key==13?"\n":key==27?"\x1b":key==9?"\t":
+                    key==0x4b?"\x1b[D":key==0x4d?"\x1b[C":key==0x48?"\x1b[A":key==0x50?"\x1b[B":
+                    key==0x53?"\x1b[3~":key==0x47?"\x1b[H":key==0x4f?"\x1b[F":
+                    key==0x49?"\x1b[5~":key==0x51?"\x1b[6~":nullptr;
+                if(legacy) {skip_count_=0;skip_pos_=0;while(legacy[skip_count_] && skip_count_<4) {skip_[skip_count_]=legacy[skip_count_];++skip_count_;}}
+            }
+            break;
+        case BWS_ZDARZENIE_KLAWISZ: {
+            unsigned char c=e.kod;
+            if(ansi_==1) {ansi_=c=='['?2:0;break;}
             if(ansi_==2) {
                 ansi_=0;
-                if(!physical_arrow_) {
-                    ZdarzenieKlawiatury k{};k.kod_klawisza=e.kod=='A'?0x48:e.kod=='B'?0x50:e.kod=='C'?0x4d:e.kod=='D'?0x4b:0;
-                    if(k.kod_klawisza)popups.obsluz_klawisz(k);
-                }
-                physical_arrow_=false;break;
+                if(c>='1' && c<='6') {ansi_=10+c-'0';break;}
+                send_key(c=='A'?0x48:c=='B'?0x50:c=='C'?0x4d:c=='D'?0x4b:c=='H'?0x47:c=='F'?0x4f:0);break;
             }
-            if(e.kod==27)ansi_=1;
-            else if(e.kod==10 || e.kod==13) {ZdarzenieKlawiatury k{};k.kod_klawisza=13;popups.obsluz_klawisz(k);}
-            break;
-        case BWS_ZDARZENIE_TIMER:
-            if(ansi_==1) {ansi_=0;popups.zamknij(PowodZamknieciaPopup::Escape);}
-            break;
-        case BWS_ZDARZENIE_KLAWISZ_FIZYCZNY:
-            if (e.x) {
-                ZdarzenieKlawiatury k{}; k.kod_klawisza=e.kod; k.modyfikatory=e.przyciski;
-                if ((e.kod & BWS_KEY_SOURCE_USB) && (e.kod & 255)==40) k.kod_klawisza=13;
-                popups.obsluz_klawisz(k);
-                const unsigned code=e.kod & 255;
-                if(code==82 || code==81 || code==79 || code==80 || code==0x48 || code==0x50 || code==0x4b || code==0x4d)physical_arrow_=true;
-                if (code==40 || code==0x1c) skip_byte_='\n';
-                else if (code==41 || code==1) skip_byte_=27;
+            if(ansi_>=10) {int n=ansi_-10;ansi_=0;if(c=='~')send_key(n==3?0x53:n==1?0x47:n==4?0x4f:n==5?0x49:n==6?0x51:0);break;}
+            if(c==27) {ansi_=1;break;}
+            if(c<32 || c==127) {send_key(c==127?0x53:c==10?13:c);break;}
+            if(byte_count_ && (c&192)!=128)byte_count_=0;
+            if(!byte_count_ && c>=128 && (c<194 || c>244))break;
+            bytes_[byte_count_++]=char(c);bytes_[byte_count_]=0;
+            unsigned char first=bytes_[0];unsigned expected=first<128?1:first<224?2:first<240?3:4;
+            if(byte_count_==expected) {
+                uint32_t cp=0;if(CzcionkaUI::dekoduj_utf8(bytes_,0,&cp)==expected) {ZdarzenieWprowadzaniaTekstu t{};t.punkt_kodowy=cp;send_text(t);}
+                byte_count_=0;
             }
             break;
-        default: break;
         }
-        if (popups.czy_otwarty()) popups.odrysuj_popupy();
+        case BWS_ZDARZENIE_TIMER:if(ansi_==1) {ansi_=0;send_key(27);}break;
+        default:break;
+        }
+        if(popups.czy_otwarty())popups.odrysuj_popupy();
         return true;
     }
 private:
     bool consume_up_{false},consume_right_up_{false};
-    int skip_byte_{-1},ansi_{0};
-    bool physical_arrow_{false};
+    char skip_[5]{},bytes_[5]{};
+    unsigned skip_count_{0},skip_pos_{0},byte_count_{0};int ansi_{0};
+    PoleTekstowe* limit_field_{nullptr};size_t limit_bytes_{0};
+    void send_text(ZdarzenieWprowadzaniaTekstu& t) {
+        if(limit_field_ && popups.fokus_popupu()==limit_field_) {
+            char bytes[5]{};size_t add=CzcionkaUI::zakoduj_utf8(t.punkt_kodowy,bytes),len=0;
+            while(limit_field_->tekst()[len])++len;
+            if(len-limit_field_->dlugosc_zaznaczenia()+add>limit_bytes_)return;
+        }
+        popups.obsluz_tekst(t);
+    }
+    void send_key(uint32_t key,uint32_t mods=0,uint32_t scan=0) {
+        if(!key)return;
+        ZdarzenieKlawiatury k{};k.kod_klawisza=key;k.kod_skanu=scan;k.modyfikatory=mods;popups.obsluz_klawisz(k);
+    }
+
 };
 
 class MenuPlikowe {
@@ -88,12 +134,12 @@ public:
     ObslugaPopup events;
     MenuKontekstowe menu;
     void otworz(int x,int y,CelMenu target,bool desktop=false) {
-        menu.ukryj(); menu.menu().wyczysc(); pending_=Akcja::NONE;
+        menu.ukryj(); events.reset_input();menu.menu().wyczysc(); pending_=Akcja::NONE;
         const Akcja actions[]={Akcja::OPEN,Akcja::OPEN_WITH,Akcja::NOTEPAD,Akcja::RENAME,
             Akcja::CUT,Akcja::COPY,Akcja::PASTE,Akcja::MOVE,Akcja::REMOVE,
             Akcja::NEW_FOLDER,Akcja::NEW_FILE,Akcja::REFRESH};
         const char* labels[]={"Otwórz","Otwórz za pomocą","Notatnik","Zmień nazwę",
-            "Wytnij","Kopiuj","Wklej","Przenieś","Usuń plik",
+            "Wytnij","Kopiuj","Wklej","Przenieś","Usuń",
             "Utwórz folder","Utwórz plik tekstowy","Odśwież"};
         for (unsigned i=0;i<12;++i) {
             // Same safe policy on desktop and Explorer; empty targets remain disabled.
@@ -123,11 +169,12 @@ public:
         dodaj_kontrolke(title_); dodaj_kontrolke(message_); dodaj_kontrolke(field_);
         dodaj_kontrolke(ok_); dodaj_kontrolke(cancel_);
         ok_->przy_kliknieciu(accept,this); cancel_->przy_kliknieciu(cancel,this);
+        field_->przy_zatwierdzeniu([](PoleTekstowe*,const char*,void* data) {static_cast<DialogPlikowy*>(data)->result_=1;},this);
     }
     bool otworz(const char* title,const char* initial,const char* question,
                 Prostokat owner,Prostokat work,size_t limit=55,const char* accept_label="OK") {
-        events.popups.zamknij(); result_=0; byte_count_=0; ansi_=0;
-        confirmation_=initial==nullptr; limit_=limit;
+        events.popups.zamknij(); events.reset_input(); result_=0;
+        confirmation_=initial==nullptr; events.limit_tekstu(field_,limit);
         title_->ustaw_tekst(title); message_->ustaw_tekst(question ? question : "Nazwa elementu:");
         field_->ustaw_tekst(initial ? initial : ""); field_->ustaw_widoczna(!confirmation_);
         ok_->ustaw_tekst(accept_label); ustaw_skale_dpi(ui_skala()); zaktualizuj_motyw();
@@ -157,55 +204,39 @@ public:
     }
     const char* tekst() const override { return field_->tekst(); }
     int wynik() const { return result_; }
+    void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
+        if(e.kod_klawisza==9) {
+            Kontrolka* current=events.popups.fokus_popupu();
+            Kontrolka* next=e.czy_shift()?(current==cancel_?static_cast<Kontrolka*>(ok_):current==ok_&&!confirmation_?static_cast<Kontrolka*>(field_):cancel_):
+                (current==field_?static_cast<Kontrolka*>(ok_):current==ok_?cancel_:confirmation_?static_cast<Kontrolka*>(ok_):field_);
+            events.popups.ustaw_fokus_popupu(next);e.obsluzone=true;
+        }
+    }
     bool zdarzenie(const bws_zdarzenie& e) {
-        if (czy_otwarta() && e.typ==BWS_ZDARZENIE_KLAWISZ) {
-            unsigned char c=static_cast<unsigned char>(e.kod);
-            if (ansi_==1) { ansi_=c=='['?2:0; if (!ansi_) result_=2; return true; }
-            if (ansi_==2) {
-                ansi_=0; ZdarzenieKlawiatury k{};
-                if(c=='D') k.kod_klawisza=0x4b; else if(c=='C') k.kod_klawisza=0x4d;
-                else if(c=='3') {ansi_=3;return true;}
-                field_->obsluz_wcisniecie_klawisza(k); events.popups.odrysuj_popupy(); return true;
-            }
-            if(ansi_==3) {ansi_=0; if(c=='~') {ZdarzenieKlawiatury k{};k.kod_klawisza=0x53;field_->obsluz_wcisniecie_klawisza(k);} return true;}
-            if (c==27) {ansi_=1;return true;}
-            if (c=='\n'||c=='\r') {result_=events.popups.fokus_popupu()==cancel_?2:1;return true;}
-            if (!confirmation_) {
-                if(c=='\b'||c==127) {ZdarzenieKlawiatury k{};k.kod_klawisza=0x0e;field_->obsluz_wcisniecie_klawisza(k);}
-                else if(c>=32) {
-                    if(byte_count_==0 && c>=128 && (c<194 || c>244))return true;
-                    if(byte_count_ && (c&192)!=128) {byte_count_=0;return true;}
-                    if(byte_count_<4) bytes_[byte_count_++]=char(c);
-                    bytes_[byte_count_]=0;
-                    size_t expected=(static_cast<unsigned char>(bytes_[0])<128)?1:(static_cast<unsigned char>(bytes_[0])<224?2:(static_cast<unsigned char>(bytes_[0])<240?3:4));
-                    if(byte_count_==expected) {
-                        uint32_t cp=0; size_t used=CzcionkaUI::dekoduj_utf8(bytes_,0,&cp);
-                        size_t len=0;while(field_->tekst()[len])++len;
-                        if(used==expected && len+expected<=limit_) {ZdarzenieWprowadzaniaTekstu t{};t.punkt_kodowy=cp;field_->obsluz_wprowadzenie_tekstu(t);}
-                        byte_count_=0;
-                    }
-                }
-                events.popups.odrysuj_popupy();
-            }
-            return true;
-        }
-        if(czy_otwarta() && e.typ==BWS_ZDARZENIE_TIMER && ansi_==1) {ansi_=0;result_=2;return true;}
-        // BWS emits text bytes in addition to physical keys. Avoid duplicate edits.
-        if(czy_otwarta() && e.typ==BWS_ZDARZENIE_KLAWISZ_FIZYCZNY) {
-            unsigned code=e.kod&255;
-            if((e.kod&BWS_KEY_SOURCE_USB)?code==43:code==15)return events.zdarzenie(e);
-            return true;
-        }
-        return events.zdarzenie(e);
+        bool open=czy_otwarta();bool handled=events.zdarzenie(e);
+        if(open && !czy_otwarta() && !result_)result_=2;
+        return handled;
     }
     void zamknij() { events.popups.zamknij(); result_=0; }
 private:
     Etykieta *title_,*message_;
     PoleTekstowe* field_;
     Przycisk *ok_,*cancel_;
-    bool confirmation_{false}; size_t limit_{55}; int result_{0},ansi_{0};
-    char bytes_[5]{}; size_t byte_count_{0};
+    bool confirmation_{false}; int result_{0};
     static void accept(Przycisk*,void* data) {static_cast<DialogPlikowy*>(data)->result_=1;}
     static void cancel(Przycisk*,void* data) {static_cast<DialogPlikowy*>(data)->result_=2;}
+};
+class WyborKatalogu : public DialogPliku {
+public:
+    ObslugaPopup events;
+    WyborKatalogu() : DialogPliku(TrybDialoguPliku::WybierzKatalog,"Przenieś — folder docelowy") {}
+    bool otworz(const char* source,const char* directory,Prostokat owner,Prostokat work) {
+        events.popups.zamknij();events.reset_input();events.geometria(owner,work);
+        ustaw_tekst(source);ustaw_nazwe_poczatkowa("");ustaw_katalog_poczatkowy(directory);ustaw_skale_dpi(ui_skala());zaktualizuj_motyw();
+        bool ok=pokaz(events.popups);events.popups.odrysuj_popupy(true);return ok;
+    }
+    void zamknij() {events.popups.zamknij();}
+protected:
+    void oblicz_geometrie_dialogu(int& w,int& h) override {w=620*skala_dpi_;h=420*skala_dpi_;}
 };
 } // namespace PlikiUI

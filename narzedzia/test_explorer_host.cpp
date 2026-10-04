@@ -20,6 +20,7 @@ static bws_zdarzenie event(uint32_t type,int x=0,int y=0,uint32_t key=0) {
 static void input(PlikiUI::DialogPlikowy& d,const char* text) {
     for(const unsigned char* c=reinterpret_cast<const unsigned char*>(text);*c;++c)d.zdarzenie(event(BWS_ZDARZENIE_KLAWISZ,0,0,*c));
 }
+#include "explorer_regression_cases.h"
 int main() {
     g_test_bws_hook=explorer_bws;
     files={{"/",true},{"/test",true},{"/dest",true},{"/test/żółć.txt",false},{"/test/program.bur",false},{"/test/folder",true}};
@@ -45,7 +46,7 @@ int main() {
         auto menu=new MenuPlikowe();menu->events.geometria({0,0,640,440},{0,0,640,440});menu->otworz(630,430,target,desktop);
         CHECK(menu->menu.czy_otwarte());
         for(size_t i=0;i<menu->menu.menu().liczba_elementow();++i) {
-            auto* item=menu->menu.menu().element(i);CHECK(item->czy_wlaczony()==dostepna(static_cast<Akcja>(item->identyfikator()),target));
+            auto* item=menu->menu.menu().element(i);if(static_cast<Akcja>(item->identyfikator())==Akcja::REMOVE)CHECK(!strcmp(item->tekst(),"Usuń"));CHECK(item->czy_wlaczony()==dostepna(static_cast<Akcja>(item->identyfikator()),target));
         }
         auto rect=menu->events.popups.prostokat_zarejestrowany_ekranu();CHECK(rect.x>=0 && rect.y>=0 && rect.prawy()<=640 && rect.dolny()<=440);
         CHECK(menu->events.zdarzenie(event(BWS_ZDARZENIE_MYSZ_PRAWY_DOWN,0,0)));CHECK(!menu->menu.czy_otwarte());CHECK(menu->pobierz_akcje()==Akcja::NONE);
@@ -89,5 +90,5 @@ int main() {
     CHECK(menu->events.zdarzenie(event(BWS_ZDARZENIE_KLAWISZ,0,0,'[')));
     CHECK(menu->events.zdarzenie(event(BWS_ZDARZENIE_KLAWISZ,0,0,'B')));CHECK(menu->menu.czy_otwarte());
     menu->events.zdarzenie(event(BWS_ZDARZENIE_KLAWISZ,0,0,27));menu->events.zdarzenie(event(BWS_ZDARZENIE_TIMER));CHECK(!menu->menu.czy_otwarte());delete menu;
-    delete view;delete model;printf("Explorer/desktop shared behavior: %d/%d PASS (RAM filesystem)\n",checks,checks);
+    delete view;delete model;regression_cases();printf("Explorer/desktop shared behavior: %d/%d PASS (RAM filesystem)\n",checks,checks);
 }

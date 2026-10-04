@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <vector>
 
 #define BURSZTYN_HOST_TEST 1
 
@@ -78,8 +79,16 @@ bool clipboard_read(const char* /*mime*/, void* dane, uint64_t pojemnosc, uint64
 void* gui_malloc(unsigned long rozmiar) { return malloc(rozmiar); }
 void gui_free(void* ptr) { free(ptr); }
 void* gui_realloc(void* ptr, size_t size) { return realloc(ptr, size); }
-void gui_rysuj_prostokat(int, int, int, int, uint32_t) {}
-bool gui_blit(int, int, int, int, const uint32_t*) { return true; }
+struct TestPaintRect {int x,y,w,h;};
+static bool test_capture_paints=false;
+static std::vector<TestPaintRect> test_paint_rects;
+void gui_rysuj_prostokat(int x,int y,int w,int h,uint32_t) {
+    if(test_capture_paints)test_paint_rects.push_back({x,y,w,h});
+}
+bool gui_blit(int x,int y,int w,int h,const uint32_t*) {
+    if(test_capture_paints)test_paint_rects.push_back({x,y,w,h});
+    return true;
+}
 bool gui_blit_popup(int, int, int, int, const uint32_t*) { return true; }
 void gui_wypisz_tekst_kolor_skala(int, int, uint32_t, int, const char*) {}
 void motyw_odswiez_lokalny() {}

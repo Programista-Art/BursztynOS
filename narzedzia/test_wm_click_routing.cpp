@@ -28,6 +28,9 @@ bool gui_blit(int,int,int,int,const uint32_t*) {return true;}
 void gui_odswiez_pulpit() {}
 void gui_wypisz_tekst_kolor(int,int,uint32_t,const char*) {}
 void wypisz(const char*) {}
+static unsigned checks=0;
+#undef assert
+#define assert(condition) do {++checks;if(!(condition)){fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#condition);abort();}} while(0)
 int main() {
     assert(wm_cel_ruchu(2,-1,1,true)==1); // outside focused Shell -> desktop
     assert(wm_cel_ruchu(2,-1,3,true)==3); // another hovered window
@@ -63,6 +66,8 @@ int main() {
                 [&](int pid){return &layers[pid];},
                 [&](int pid,int lx,int ly){return decorated[pid]&&wm_dekoracja_w_punkcie(400,300,lx,ly,scale);});
         };
+        std::fill(desktop.begin(),desktop.end(),0);
+        assert(hit(900,500)==1); // empty transparent desktop receives right click
         assert(hit(35,699)==1); // transparent top object cannot block Start
         assert(hit(150,110)==2); // visible compositor titlebar, zero retained pixel
         decorated[2]=false;assert(hit(150,110)==1); // reproduce the old pixel-only rejection
@@ -89,5 +94,5 @@ int main() {
             assert(scene[60*400+50]==0); // no full-client decoration coverage
         }
     }
-    puts("WM click routing passed: desktop, Start, launch, client PID, titlebar, close region, transparency, z-order, popup owner, theme and redraw");
+    printf("WM routing %u/%u PASS: ",checks,checks);puts("WM click routing passed: desktop, Start, launch, client PID, titlebar, close region, transparency, z-order, popup owner, theme and redraw");
 }

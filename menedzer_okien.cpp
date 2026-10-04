@@ -32,8 +32,8 @@ extern "C" {
     struct NaglowekBur naglowek = {
         {'B', 'U', 'R', '\0'},
         (uint64_t)&_start,
-        4096, 196608, 0x1001000,
-        200704, 131072, 0x1031000
+        4096, 262144, 0x1001000,
+        266240, 131072, 0x1041000
     };
 }
 
@@ -930,6 +930,7 @@ BwsCelDrop cele_drop_pulpitu[BWS_DROP_CELE_MAX] = {};
 using PulpitContextAction = PlikiUI::Akcja;
 PlikiUI::MenuPlikowe* pulpit_menu = nullptr;
 PlikiUI::DialogPlikowy* pulpit_dialog = nullptr;
+PlikiUI::WyborKatalogu* pulpit_wybor = nullptr;
 bool pulpit_context_open = false;
 bool odswiez_wpisy_pulpitu();
 void RysujPulpit(bool wymus_pelne_odswiezenie);
@@ -940,6 +941,7 @@ bool pulpit_cel_folder = false;
 
 void zamknij_pulpit_modal() {
     if(pulpit_dialog)pulpit_dialog->zamknij();
+    if(pulpit_wybor)pulpit_wybor->zamknij();
     pulpit_modal_typ=PulpitModalTyp::BRAK;
 }
 void odswiez_pulpit_natychmiast() {
@@ -947,6 +949,12 @@ void odswiez_pulpit_natychmiast() {
 }
 bool otworz_pulpit_modal(PulpitModalTyp typ,const char* message=nullptr) {
     zamknij_pulpit_modal();
+    if(typ==PulpitModalTyp::MOVE) {
+        if(!pulpit_wybor)pulpit_wybor=new PlikiUI::WyborKatalogu();
+        BursztynUI::Prostokat work{0,0,screen_w,screen_h-PASEK_WYS};
+        if(!pulpit_wybor->otworz(pulpit_cel,SCIEZKA_PULPIT,work,work))return false;
+        pulpit_modal_typ=typ;(void)gui_rejestruj_cele_drop(nullptr,0);gui_odswiez();return true;
+    }
     const char* initial=typ==PulpitModalTyp::PLIK?"Nowy plik.txt":typ==PulpitModalTyp::MOVE?SCIEZKA_PULPIT:"";
     if(typ==PulpitModalTyp::RENAME) {
         initial=pulpit_cel;for(const char* c=pulpit_cel;*c;++c)if(*c=='/')initial=c+1;
@@ -963,7 +971,7 @@ bool otworz_pulpit_modal(PulpitModalTyp typ,const char* message=nullptr) {
     pulpit_modal_typ=typ;(void)gui_rejestruj_cele_drop(nullptr,0);gui_odswiez();return true;
 }
 void zatwierdz_pulpit_modal() {
-    const char* text=pulpit_dialog->tekst();
+    const char* text=pulpit_modal_typ==PulpitModalTyp::MOVE?pulpit_wybor->wybrana_sciezka():pulpit_dialog->tekst();
     const auto type=pulpit_modal_typ;
     bool ok=false;
     if(type==PulpitModalTyp::PLIK || type==PulpitModalTyp::FOLDER)
@@ -1831,6 +1839,14 @@ bool otworz_pulpit_context(int x,int y,int wpis) {
     pulpit_context_open=pulpit_menu->menu.czy_otwarte();
     (void)gui_rejestruj_cele_drop(nullptr,0);gui_odswiez();return pulpit_context_open;
 }
+bool obsluz_prawy_klik_pulpitu(const bws_zdarzenie& e) {
+    if(e.typ!=BWS_ZDARZENIE_MYSZ_PRAWY_DOWN)return false;
+    const int target=wpis_pulpitu_w_punkcie(e.x,e.y);
+    zaznaczony_wpis_pulpitu=target;
+    RysujPulpit(true);
+    if(e.y<screen_h-PASEK_WYS)otworz_pulpit_context(e.x,e.y,target);
+    return true;
+}
 void wykonaj_pulpit_context(PulpitContextAction action) {
     const int selected=zaznaczony_wpis_pulpitu;
     zamknij_pulpit_context();
@@ -1857,6 +1873,11 @@ void wykonaj_pulpit_context(PulpitContextAction action) {
 }
 
 bool obsluz_popupy_pulpitu(const bws_zdarzenie& zdarzenie) {
+    if(pulpit_modal_typ==PulpitModalTyp::MOVE && pulpit_wybor->events.zdarzenie(zdarzenie)) {
+        if(pulpit_wybor->wynik_pliku()==BursztynUI::WynikDialoguPliku::Wybrano)zatwierdz_pulpit_modal();
+        else if(!pulpit_wybor->czy_otwarta())zamknij_pulpit_modal();
+        gui_odswiez();return true;
+    }
     if(pulpit_dialog->zdarzenie(zdarzenie)) {
         if(pulpit_dialog->wynik()==1)zatwierdz_pulpit_modal();
         else if(pulpit_dialog->wynik()==2 || !pulpit_dialog->czy_otwarta())zamknij_pulpit_modal();
@@ -2277,6 +2298,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             BursztynUI::Motyw::pobierz_domyslny().zaktualizuj_z_systemu();
             pulpit_menu->events.popups.zaktualizuj_motyw();
             pulpit_dialog->events.popups.zaktualizuj_motyw();
+            if(pulpit_wybor)pulpit_wybor->events.popups.zaktualizuj_motyw();
             g_cached_skala = 0;
             zaktualizuj_cache_przycisku(ui_skala_procent);
             RysujPulpit(true);
@@ -2334,7 +2356,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             zamknij_pulpit_context();
             /* Pelne przerysowanie warstwy nadpisaloby piksele otwartego
                dialogu; odswiezamy dopiero po jego zamknieciu. */
-            if (!pulpit_dialog->czy_otwarta() && odswiez_wpisy_pulpitu())
+            if (pulpit_modal_typ==PulpitModalTyp::BRAK && odswiez_wpisy_pulpitu())
                 RysujPulpit(true);
             continue;
         }
@@ -2347,11 +2369,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             dragging_file = false;
             last_desktop_click=-1;last_desktop_click_time=0;
             gui_ustaw_capture_myszy(false);
-            const int desktop_entry = wpis_pulpitu_w_punkcie(mx, my);
-            zaznaczony_wpis_pulpitu = desktop_entry;
-            RysujPulpit(true);
-            if (my < screen_h - PASEK_WYS)
-                (void)otworz_pulpit_context(mx, my, desktop_entry);
+            (void)obsluz_prawy_klik_pulpitu(zdarzenie);
             continue;
         }
 
@@ -2405,7 +2423,7 @@ extern "C" __attribute__((noreturn)) void _start() {
 
         if (zdarzenie.typ == BWS_ZDARZENIE_TIMER) {
             zarejestruj_pulpit_jako_cel_drop();
-            if (!pulpit_context_open && !pulpit_dialog->czy_otwarta() &&
+            if (!pulpit_context_open && pulpit_modal_typ==PulpitModalTyp::BRAK &&
                 ++pulpit_refresh_ticks >= PULPIT_REFRESH_TICKS) {
                 pulpit_refresh_ticks = 0;
                 if (odswiez_wpisy_pulpitu()) RysujPulpit(true);

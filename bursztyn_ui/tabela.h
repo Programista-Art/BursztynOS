@@ -279,7 +279,7 @@ public:
         if (wiersz < 0 || wiersz >= static_cast<int>(liczba_wierszy_) || !pionowy_) return;
         int row_h = wysokosc_wiersza_ * skala_dpi_;
         int row_y = wiersz * row_h;
-        int vp_h = viewport_h() - (wysokosc_naglowka_ * skala_dpi_);
+        int vp_h = prostokat_danych().wysokosc;
         if (vp_h <= 0) return;
         int cur_scroll = static_cast<int>(pionowy_->wartosc());
 
@@ -433,12 +433,11 @@ public:
 
         int lx = e.x - obszar_ekranu_.x;
         int ly = e.y - obszar_ekranu_.y;
-        int h_naglowka = wysokosc_naglowka_ * skala_dpi_;
         int h_wiersza = wysokosc_wiersza_ * skala_dpi_;
         int scroll_y = pionowy_ && pionowy_->czy_widoczna() ? static_cast<int>(pionowy_->wartosc()) : 0;
 
-        if (ly > h_naglowka && lx < viewport_w() && ly < viewport_h()) {
-            int rel_y = ly - h_naglowka - 1 + scroll_y;
+        if (prostokat_danych().zawiera(lx,ly)) {
+            int rel_y = ly - prostokat_danych().y + scroll_y;
             int r = rel_y / h_wiersza;
             if (r >= 0 && r < static_cast<int>(liczba_wierszy_)) {
                 ustaw_zaznaczony_wiersz(r);
@@ -461,13 +460,12 @@ public:
 
         int lx = e.x - obszar_ekranu_.x;
         int ly = e.y - obszar_ekranu_.y;
-        int h_naglowka = wysokosc_naglowka_ * skala_dpi_;
         int h_wiersza = wysokosc_wiersza_ * skala_dpi_;
         int scroll_y = pionowy_ && pionowy_->czy_widoczna() ? static_cast<int>(pionowy_->wartosc()) : 0;
 
         int stary = najechany_wiersz_;
-        if (ly > h_naglowka && lx < viewport_w() && ly < viewport_h()) {
-            int rel_y = ly - h_naglowka - 1 + scroll_y;
+        if (prostokat_danych().zawiera(lx,ly)) {
+            int rel_y = ly - prostokat_danych().y + scroll_y;
             int r = rel_y / h_wiersza;
             najechany_wiersz_ = (r >= 0 && r < static_cast<int>(liczba_wierszy_)) ? r : -1;
         } else {
@@ -620,9 +618,16 @@ private:
 
     void aktualizuj_geometrie_paskow() {
         int sb_sz = szerokosc_paska_ * skala_dpi_;
-        bool potr_pion = (static_cast<int>(liczba_wierszy_) * wysokosc_wiersza_ * skala_dpi_) >
-                         (obszar_.wysokosc - wysokosc_naglowka_ * skala_dpi_);
-        bool potr_poz = calkowita_szerokosc_kolumn_ > (obszar_.szerokosc - (potr_pion ? sb_sz : 0));
+        // Both axes share the actual client viewport (borders and header separator included).
+        // A horizontal bar can itself make vertical scrolling necessary, and conversely.
+        bool potr_pion=false,potr_poz=false;
+        const int content_h=static_cast<int>(liczba_wierszy_)*wysokosc_wiersza_*skala_dpi_;
+        for(int pass=0;pass<3;++pass) {
+            const int width=obszar_.szerokosc-2-(potr_pion?sb_sz:0);
+            const int height=obszar_.wysokosc-3-wysokosc_naglowka_*skala_dpi_-(potr_poz?sb_sz:0);
+            potr_pion=content_h>(height>0?height:0);
+            potr_poz=calkowita_szerokosc_kolumn_>(width>0?width:0);
+        }
 
         if (pionowy_) {
             pionowy_->ustaw_widoczna(potr_pion);
@@ -646,7 +651,7 @@ private:
         aktualizuj_geometrie_paskow();
         if (pionowy_) {
             int h_danych = static_cast<int>(liczba_wierszy_) * wysokosc_wiersza_ * skala_dpi_;
-            int h_widoku = viewport_h() - (wysokosc_naglowka_ * skala_dpi_);
+            int h_widoku = prostokat_danych().wysokosc;
             int maks = h_danych - (h_widoku > 0 ? h_widoku : 0);
             if (maks < 0) maks = 0;
             pionowy_->ustaw_zakres(0, maks);

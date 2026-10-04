@@ -1,0 +1,25 @@
+{
+  "session_count": 1,
+  "environment": "Live ISO without persistent disk",
+  "launch": "make -o prepare-disk -o uefi runuefi QEMU_DISK_DRIVE= QEMU_VIRTIO_BLK= QEMUDISPLAYARGS=\"-display sdl -qmp unix:/tmp/bursztyn-live-once.sock,server=on,wait=off\"",
+  "result": "BLOCKED before desktop: black SDL window and stalled startup; QMP timed out",
+  "last_serial_marker": "[VIRTIO-PCI] features device=0x10130000000 driver=0x100000000",
+  "persistent_disk_used": false,
+  "filesystem_mutations": 0,
+  "checks": {
+    "create_refresh": "NOT TESTED",
+    "rename_backspace_delete": "NOT TESTED",
+    "utf8_editing": "NOT TESTED",
+    "move_chooser": "NOT TESTED",
+    "move_refresh": "NOT TESTED",
+    "scrollbar_visibility": "NOT TESTED",
+    "scrollbar_wheel_drag": "NOT TESTED",
+    "navigation_repaint": "NOT TESTED",
+    "legacy_border": "NOT TESTED",
+    "explorer_context_menu": "NOT TESTED",
+    "empty_desktop_context_menu": "NOT TESTED",
+    "click_through": "NOT TESTED",
+    "live_theme": "NOT TESTED"
+  },
+  "cleanup": "No test files created"
+}

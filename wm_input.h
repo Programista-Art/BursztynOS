@@ -13,7 +13,8 @@ int wm_warstwa_pod_punktem(int x, int y, int overlay, Layer layer, Decoration de
             int64_t(x)>=int64_t(w->x)+w->szerokosc ||
             int64_t(y)>=int64_t(w->y)+w->wysokosc) continue;
         const int lx=x-w->x, ly=y-w->y;
-        if (!decoration(pid,lx,ly) && w->bufor_pikseli &&
+        // The root desktop is transparent over the wallpaper but owns background input.
+        if (w->z_order != 0 && !decoration(pid,lx,ly) && w->bufor_pikseli &&
             w->bufor_pikseli[uint64_t(ly)*w->szerokosc+lx]==0) continue;
         if (result<0 || w->z_order>z || (w->z_order==z && pid>result)) {
             result=pid; z=w->z_order;
