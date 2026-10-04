@@ -1,5 +1,8 @@
 /* Bursztyn OS - Eksplorator Plikow. Ring 3 korzysta tylko z GUI/BWS. */
 #include "../../bursztyn_gui.h"
+#include "../../plik_popup_ui.h"
+#include "../../bursztyn_ui/pasek_przewijania.h"
+#include "../../bursztyn_ui/tabela_wirtualna.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -17,8 +20,8 @@ extern "C" __attribute__((noreturn)) void _start();
 extern "C" {
 __attribute__((section(".naglowek"), used)) NaglowekBur naglowek = {
     {'B', 'U', 'R', '\0'}, reinterpret_cast<uint64_t>(&_start),
-    UINT64_C(0x1000), UINT64_C(0xD000), UINT64_C(0x1001000),
-    UINT64_C(0xE000), UINT64_C(0x20000), UINT64_C(0x100E000)};
+    UINT64_C(0x1000), UINT64_C(0x30000), UINT64_C(0x1001000),
+    UINT64_C(0x31000), UINT64_C(0x20000), UINT64_C(0x1031000)};
 }
 #endif
 
@@ -55,35 +58,35 @@ constexpr int MIN_W = 600;
 constexpr int MIN_H = 400;
 constexpr int TASKBAR_H = 40;
 constexpr int Z_ORDER = 10;
-constexpr int TITLE_H = 28;
-constexpr int MARGIN = 6;
-constexpr int GAP = 4;
-constexpr int TOOL_H = 26;
-constexpr int TOOLBAR_H = 96;
-constexpr int STATUS_H = 25;
-constexpr int PANEL_TITLE_H = 27;
-constexpr int TABLE_HEAD_H = 27;
-constexpr int ROW_H = 24;
-constexpr int SCROLL_W = 22;
-constexpr int ICON = 13;
+#define TITLE_H ui_skaluj(28,ui_skala_procent)
+#define MARGIN ui_skaluj(6, ui_skala_procent)
+#define GAP ui_skaluj(4, ui_skala_procent)
+#define TOOL_H ui_skaluj(28, ui_skala_procent)
+#define TOOLBAR_H ui_skaluj(100, ui_skala_procent)
+#define STATUS_H ui_skaluj(25, ui_skala_procent)
+#define PANEL_TITLE_H ui_skaluj(27, ui_skala_procent)
+#define TABLE_HEAD_H ui_skaluj(26, ui_skala_procent)
+#define ROW_H ui_skaluj(24, ui_skala_procent)
+#define SCROLL_W ui_skaluj(18, ui_skala_procent)
+#define ICON ui_skaluj(13, ui_skala_procent)
 
-constexpr uint32_t BG = 0x00280F00U;
-constexpr uint32_t PANEL = 0x00301500U;
-constexpr uint32_t PANEL_ALT = 0x00391B02U;
-constexpr uint32_t BORDER = 0x00E58A00U;
-constexpr uint32_t BORDER_DARK = 0x00794400U;
-constexpr uint32_t TEXT = 0x00FFFFFFU;
-constexpr uint32_t TEXT2 = 0x00D1D5DBU;
-constexpr uint32_t MUTED = 0x009B9B9BU;
-constexpr uint32_t DISABLED = 0x00606060U;
-constexpr uint32_t SELECT = 0x00603800U;
-constexpr uint32_t DROP_TARGET = 0x008A5A00U;
-constexpr uint32_t FOLDER = 0x00FFBF00U;
-constexpr uint32_t BUR = 0x0038B000U;
-constexpr uint32_t CEBULA = 0x00D050A0U;
-constexpr uint32_t TXT = 0x004C9BE8U;
-constexpr uint32_t BMP = 0x00C04060U;
-constexpr uint32_t FILE_COLOR = 0x00708090U;
+#define COLOR_BG motyw_kolor(MOTYW_KOLOR_OKNOTLO)
+#define COLOR_PANEL motyw_kolor(MOTYW_KOLOR_PANEL)
+#define COLOR_PANEL_ALT motyw_kolor(MOTYW_KOLOR_PODNIESIONY)
+#define COLOR_BORDER motyw_kolor(MOTYW_KOLOR_RAMKA)
+#define COLOR_BORDER_DARK motyw_kolor(MOTYW_KOLOR_RAMKA)
+#define COLOR_TEXT motyw_kolor(MOTYW_KOLOR_TEKST)
+#define COLOR_TEXT2 motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI)
+#define COLOR_MUTED motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI)
+#define COLOR_DISABLED motyw_kolor(MOTYW_KOLOR_WYLACZONY)
+#define COLOR_SELECT motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE)
+#define COLOR_DROP_TARGET motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY)
+#define COLOR_FOLDER motyw_kolor(MOTYW_KOLOR_OSTRZEZENIE)
+#define COLOR_BUR motyw_kolor(MOTYW_KOLOR_SUKCES)
+#define COLOR_CEBULA motyw_kolor(MOTYW_KOLOR_AKCENT)
+#define COLOR_TXT motyw_kolor(MOTYW_KOLOR_INFORMACJA)
+#define COLOR_BMP motyw_kolor(MOTYW_KOLOR_AKCENT)
+#define COLOR_FILE_COLOR motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI)
 
 struct Rect {
     int x;
@@ -226,13 +229,6 @@ size_t next_codepoint(const char* text, size_t offset, size_t length) {
     return offset + static_cast<size_t>(count);
 }
 
-size_t previous_codepoint(const char* text, size_t offset) {
-    if (!text || offset == 0) return 0;
-    size_t previous = offset - 1;
-    while (previous > 0 &&
-           is_continuation(static_cast<uint8_t>(text[previous]))) --previous;
-    return previous;
-}
 
 void clip_utf8_px(const char* text, char* output, size_t capacity,
                   int max_pixels, bool keep_tail) {
@@ -300,18 +296,7 @@ bool append_unsigned(char* destination, size_t capacity, uint64_t value) {
     return append_text(destination, capacity, ordered);
 }
 
-bool valid_name(const char* name) {
-    if (!name) return false;
-    const size_t length = len_limit(name, NAME_CAP);
-    if (length == 0 || length >= NAME_CAP || equal_text(name, ".") || equal_text(name, ".."))
-        return false;
-    for (size_t i = 0; i < length; ++i) {
-        const uint8_t value = static_cast<uint8_t>(name[i]);
-        if (value < 0x20U || value == 0x7FU || value == '/' || value == '\\')
-            return false;
-    }
-    return true;
-}
+bool valid_name(const char* name) { return PlikiUI::nazwa_poprawna(name, NAME_CAP); }
 
 bool valid_path(const char* path) {
     if (!path || path[0] != '/') return false;
@@ -839,30 +824,13 @@ public:
     }
 
     bool paste_clipboard() {
-        BwsSchowekPlikow clipboard{};
-        if (!pobierz_schowek_plikow(&clipboard) ||
-            clipboard.wersja != BWS_SCHOWEK_WERSJA ||
-            clipboard.operacja == BWS_SCHOWEK_PUSTY ||
-            clipboard.sciezka[0] != '/') {
-            set_status("Schowek plików jest pusty.");
-            return false;
-        }
-        bool success = false;
-        if (clipboard.operacja == BWS_SCHOWEK_COPY) {
-            success = kopiuj_twor_uzytkownika(clipboard.sciezka, path_);
-        } else if (clipboard.operacja == BWS_SCHOWEK_CUT) {
-            /* Move zachowuje atomowa semantyke istniejacego BWS48. */
-            success = przenies_twor_uzytkownika(clipboard.sciezka, path_);
-            if (success) (void)wyczysc_schowek_plikow(clipboard.generacja);
-        }
-        if (!success) {
-            set_status("Wklejanie nie powiodło się: konflikt nazwy, poddrzewo lub PZB.");
+        auto result = PlikiUI::wklej(path_);
+        if (result != PlikiUI::WynikWklejenia::OK) {
+            set_status("Nie wklejono: konflikt nazwy, brak uprawnień lub pusty schowek.");
             return false;
         }
         hash_valid_ = false;
-        set_status(clipboard.operacja == BWS_SCHOWEK_COPY
-            ? "Wklejono kopię bez nadpisywania celu."
-            : "Przeniesiono element przez BWS48 i wyczyszczono CUT.");
+        set_status("Wklejono bez nadpisywania celu.");
         return true;
     }
 
@@ -1434,9 +1402,7 @@ private:
             set_status("Nie można utworzyć elementu: ścieżka przekracza 511 bajtów.");
             return false;
         }
-        const bool success = directory
-            ? utworz_katalog_uzytkownika(full)
-            : utworz(full);
+        const bool success = PlikiUI::utworz_element(path_,name,directory);
         if (!success) {
             set_status(directory
                 ? "Nie utworzono folderu: istnieje albo PZB odmówił zapisu."
@@ -1569,11 +1535,11 @@ AktowkaLayout calculate_layout(const AktowkaWindow& window) {
     const int row_w = layout.toolbar.w > MARGIN * 2
         ? layout.toolbar.w - MARGIN * 2 : 0;
     const int row_y = layout.toolbar.y + 2;
-    const int nav_nominal[5] = {32, 32, 32, 88, 76};
+    const int nav_nominal[5] = {32*ui_skala(),32*ui_skala(),32*ui_skala(),88*ui_skala(),96*ui_skala()};
     Rect* nav_buttons[5] = {
         &layout.back, &layout.forward, &layout.up, &layout.refresh, &layout.run
     };
-    const int nav_nominal_total = 260;
+    const int nav_nominal_total = 280*ui_skala();
     const int nav_available = row_w > GAP * 4 ? row_w - GAP * 4 : 0;
     const int nav_scale_base = nav_available < nav_nominal_total
         ? nav_nominal_total : nav_available;
@@ -1587,12 +1553,12 @@ AktowkaLayout calculate_layout(const AktowkaWindow& window) {
     }
 
     const int action_y = row_y + TOOL_H + GAP;
-    const int action_nominal[5] = {110, 90, 110, 70, 90};
+    const int action_nominal[5] = {110*ui_skala(),90*ui_skala(),110*ui_skala(),70*ui_skala(),90*ui_skala()};
     Rect* action_buttons[5] = {
         &layout.new_folder, &layout.new_file, &layout.rename,
         &layout.remove, &layout.move
     };
-    const int action_nominal_total = 470;
+    const int action_nominal_total = 470*ui_skala();
     const int action_available = row_w > GAP * 4 ? row_w - GAP * 4 : 0;
     button_x = row_x;
     for (int i = 0; i < 5; ++i) {
@@ -1721,39 +1687,37 @@ AktowkaLayout calculate_layout(const AktowkaWindow& window) {
 }
 
 enum class EditMode : uint8_t {
-    NONE, PATH, SEARCH, CREATE_FOLDER, CREATE_FILE, RENAME, MOVE, CONFIRM_DELETE
+    NONE, PATH, SEARCH, CREATE_FOLDER, CREATE_FILE, RENAME, MOVE, CONFIRM_DELETE, OPEN_WITH, NOTICE
 };
 
-enum class ContextAction : uint8_t {
-    NONE, OPEN, RUN, COPY, CUT, RENAME, REMOVE, PROPERTIES,
-    PASTE, NEW_FILE, NEW_FOLDER, REFRESH
-};
+using ContextAction = PlikiUI::Akcja;
 
-struct ContextItem { const char* label; ContextAction action; };
-
-class AktowkaView {
+class AktowkaView : public BursztynUI::DostawcaDanychTabeli {
 public:
     AktowkaView(AktowkaModel& model, AktowkaWindow& window)
         : model_(model), window_(window), edit_mode_(EditMode::NONE),
-          edit_length_(0), edit_caret_(0), edit_view_start_(0),
           drop_target_entry_(-1), drop_target_body_(false),
-          context_open_(false), context_empty_(false), context_hover_(-1),
-          context_count_(0), context_rect_{} {
-        edit_[0] = '\0';
+          hover_entry_(-1) {
+        table_.ustaw_dostawce(this);
+        scrollbar_.ustaw_orientacje(BursztynUI::Orientacja::Pionowa);
     }
 
     AktowkaLayout layout() const { return calculate_layout(window_); }
     EditMode edit_mode() const { return edit_mode_; }
     const char* edit_text() const {
-        return modal_open() ? gui_modal_tekst(&modal_) : edit_;
+        return modal_open() ? dialog_.tekst() : edit_mode_==EditMode::PATH ? path_field_.tekst() : search_field_.tekst();
     }
     bool modal_open() const {
         return edit_mode_ == EditMode::CREATE_FOLDER ||
                edit_mode_ == EditMode::CREATE_FILE ||
                edit_mode_ == EditMode::RENAME ||
-               edit_mode_ == EditMode::CONFIRM_DELETE;
+               edit_mode_ == EditMode::CONFIRM_DELETE || edit_mode_ == EditMode::MOVE ||
+               edit_mode_ == EditMode::OPEN_WITH || edit_mode_ == EditMode::NOTICE;
     }
-    bool context_open() const { return context_open_; }
+#ifdef AKTOWKA_HOST_TEST
+    bool toolbar_enabled(size_t i) const {return i<12 && buttons_[i].czy_wlaczona();}
+#endif
+    bool context_open() const { return menu_.menu.czy_otwarte(); }
 
     void begin_edit(EditMode mode) {
         const char* initial = "";
@@ -1764,20 +1728,15 @@ public:
         } else if (mode == EditMode::MOVE) {
             initial = model_.path();
         }
-        if (!copy_text(edit_, sizeof(edit_), initial)) return;
-        edit_length_ = len_limit(edit_, sizeof(edit_));
-        edit_caret_ = edit_length_;
-        edit_view_start_ = 0;
-        edit_mode_ = mode;
+        edit_mode_=mode;input_bytes_=0;
+        auto& field=mode==EditMode::PATH?path_field_:search_field_;
+        field.ustaw_tekst(initial);field.obsluz_uzyskanie_skupienia();
     }
 
     void end_edit() {
-        if (gui_modal_otwarty(&modal_)) gui_modal_zamknij(&modal_);
+        dialog_.zamknij();
         edit_mode_ = EditMode::NONE;
-        edit_[0] = '\0';
-        edit_length_ = 0;
-        edit_caret_ = 0;
-        edit_view_start_ = 0;
+        input_bytes_=0;
     }
 
     Rect modal_area() const {
@@ -1787,167 +1746,124 @@ public:
                 window_.h > TITLE_H + 2 ? window_.h - TITLE_H - 2 : 0};
     }
 
-    Rect modal_field() const {
-        const GuiModalProstokat* pole = gui_modal_pole(&modal_);
-        return pole ? Rect{pole->x, pole->y, pole->szer, pole->wys}
-                    : Rect{0, 0, 0, 0};
-    }
-
+    Rect modal_field() const { return {0,0,0,0}; }
     bool open_modal(EditMode mode) {
         close_context();
-        if (mode == EditMode::RENAME || mode == EditMode::CONFIRM_DELETE) {
-            const Entry* selected = model_.entry(model_.selected());
-            if (!selected || selected->type == EntryType::PARENT) {
-                model_.set_status("Najpierw zaznacz plik albo folder.");
-                draw_status();
-                gui_odswiez();
-                return false;
+        const Entry* selected=model_.entry(model_.selected());
+        if ((mode==EditMode::RENAME || mode==EditMode::MOVE || mode==EditMode::CONFIRM_DELETE || mode==EditMode::OPEN_WITH) &&
+            (!selected || selected->type==EntryType::PARENT)) return false;
+        edit_mode_=mode;
+        const char* initial=mode==EditMode::RENAME?selected->name:
+            mode==EditMode::MOVE?model_.path():mode==EditMode::CREATE_FILE?"Nowy plik.txt":"";
+        char question[224]{};
+        if(mode==EditMode::CONFIRM_DELETE) {
+            append_text(question,sizeof(question),"Usunąć trwale: ");
+            append_text(question,sizeof(question),selected->name);
+        }
+        const char* title=mode==EditMode::CREATE_FOLDER?"Utwórz folder":mode==EditMode::CREATE_FILE?"Utwórz plik tekstowy":
+            mode==EditMode::RENAME?"Zmień nazwę":mode==EditMode::MOVE?"Przenieś do folderu":mode==EditMode::OPEN_WITH?"Otwórz za pomocą":"Potwierdzenie";
+        bool confirmation=mode==EditMode::CONFIRM_DELETE || mode==EditMode::OPEN_WITH || mode==EditMode::NOTICE;
+        bool ok=dialog_.otworz(title,confirmation?nullptr:initial,
+            mode==EditMode::CONFIRM_DELETE?question:mode==EditMode::OPEN_WITH?"Aplikacja: Notatnik (pliki tekstowe)":
+            mode==EditMode::NOTICE?model_.status():mode==EditMode::MOVE?"Ścieżka folderu docelowego:":nullptr,
+            owner(),work(),mode==EditMode::MOVE?PATH_CAP-1:NAME_CAP-1,
+            mode==EditMode::CONFIRM_DELETE?"Usuń":mode==EditMode::OPEN_WITH?"Otwórz":"OK");
+        if(!ok) end_edit();
+        (void)gui_rejestruj_cele_drop(nullptr,0); gui_odswiez(); return ok;
+    }
+    void close_modal() { if(!modal_open())return; end_edit(); register_drop_targets(); gui_odswiez(); }
+    bool dialog_open() const {return dialog_.czy_otwarta();}
+    int modal_result() const { return dialog_.wynik(); }
+    bool popup_event(const bws_zdarzenie& e) {
+        if(modal_open()) return dialog_.zdarzenie(e);
+        return menu_.events.zdarzenie(e);
+    }
+    ContextAction pending_action() { return menu_.pobierz_akcje(); }
+    void theme_refresh() {
+        BursztynUI::Motyw::pobierz_domyslny().zaktualizuj_z_systemu();
+        table_.zaktualizuj_motyw(); scrollbar_.zaktualizuj_motyw();
+        path_field_.zaktualizuj_motyw(); search_field_.zaktualizuj_motyw();
+        for(auto& b:buttons_) b.zaktualizuj_motyw();
+        draw_workspace();
+        menu_.events.popups.zaktualizuj_motyw(); dialog_.events.popups.zaktualizuj_motyw(); gui_odswiez();
+    }
+    void pointer_hover(int x,int y) {
+        for(auto& b:buttons_) {
+            bool now=b.obszar_ekranu().zawiera(x,y);
+            if(now!=b.czy_najechana()) {
+                if(now)b.obsluz_wejscie_myszy();else b.obsluz_opuszczenie_myszy();
+                paint(b);gui_odswiez();
             }
         }
-        const Rect area = modal_area();
-        if (area.w <= 0 || area.h <= 0) {
-            model_.set_status("Nie można otworzyć dialogu modalnego.");
-            return false;
-        }
-        const char* initial = "";
-        char question[SHOW_CAP] = {};
-        if (mode == EditMode::RENAME) {
-            const Entry* selected = model_.entry(model_.selected());
-            initial = selected ? selected->name : "";
-        } else if (mode == EditMode::CONFIRM_DELETE) {
-            const Entry* selected = model_.entry(model_.selected());
-            (void)append_text(question, sizeof(question), "Czy na pewno usunąć ");
-            (void)append_text(question, sizeof(question),
-                              selected ? selected->name : "element");
-            (void)append_text(question, sizeof(question), "?");
-        }
-        const char* title = mode == EditMode::CREATE_FILE ? "Nowy plik" :
-            (mode == EditMode::CREATE_FOLDER ? "Nowy folder" :
-             (mode == EditMode::RENAME ? "Zmień nazwę" : "Usuń element"));
-        edit_mode_ = mode;
-        gui_modal_ustaw_przycisk_ok(&modal_,
-            mode == EditMode::CONFIRM_DELETE ? "Usuń" : "OK",
-            mode == EditMode::CONFIRM_DELETE ? 0x00AA0000U : GUI_MODAL_RAMKA);
-        const GuiModalProstokat obszar{area.x, area.y, area.w, area.h};
-        if (!gui_modal_otworz(&modal_, title,
-                              mode == EditMode::CONFIRM_DELETE
-                                  ? nullptr : initial,
-                              mode == EditMode::CONFIRM_DELETE
-                                  ? question : nullptr,
-                              &obszar,
-                              static_cast<uint32_t>(NAME_CAP - 1))) {
-            end_edit();
-            model_.set_status("Nie można otworzyć dialogu modalnego.");
-            return false;
-        }
-        (void)gui_rejestruj_cele_drop(nullptr, 0);
-        gui_odswiez();
-        return true;
-    }
-
-    void close_modal() {
-        if (!modal_open()) return;
-        if (gui_modal_otwarty(&modal_)) gui_modal_zamknij(&modal_);
-        end_edit();
-        register_drop_targets();
+        int next=model_.visible_entry_index(row_at(x,y));
+        if(next==hover_entry_)return;
+        int old=hover_entry_;hover_entry_=next;
+        if(old>=0)draw_entry_row(old);
+        if(next>=0)draw_entry_row(next);
         gui_odswiez();
     }
-
-    int modal_button_at(int x, int y) {
-        if (!modal_open()) return 0;
-        const gui_modal_wynik wynik = gui_modal_klik(&modal_, x, y);
-        return wynik == GUI_MODAL_OK ? 1 :
-               (wynik == GUI_MODAL_ANULUJ ? 2 : 0);
+    void relayout_controls() {
+        auto l=layout();const Rect positions[]={l.back,l.forward,l.up,l.refresh,l.new_folder,l.new_file,l.rename,l.remove,l.move,l.run,l.sort,details_run_rect()};
+        for(unsigned i=0;i<12;++i)buttons_[i].rozmiesc({positions[i].x,positions[i].y,positions[i].w,positions[i].h});
+        path_field_.rozmiesc({l.path.x,l.path.y,l.path.w,l.path.h});
+        search_field_.rozmiesc({l.search.x,l.search.y,l.search.w,l.search.h});
+        scrollbar_.rozmiesc({l.scroll_up.x,l.list_body.y,SCROLL_W,l.list_body.h});
     }
-
-    void place_modal_caret(int mouse_x) {
-        if (!modal_open() || edit_mode_ == EditMode::CONFIRM_DELETE) return;
-        gui_modal_karetka_za_mysza(&modal_, mouse_x);
+    bool scrollbar_event(const bws_zdarzenie& e) {
+        auto r=scrollbar_.obszar_ekranu();
+        if(!r.zawiera(e.x,e.y) && !scrollbar_.czy_przeciagany())return false;
+        BursztynUI::ZdarzenieMyszki m{};m.x=e.x;m.y=e.y;m.przycisk=1;
+        if(e.typ==BWS_ZDARZENIE_MYSZ_DOWN) {scrollbar_.obsluz_wcisniecie_myszy(m);if(m.obsluzone)gui_ustaw_capture_myszy(true);}
+        else if(e.typ==BWS_ZDARZENIE_MYSZ_UP) {scrollbar_.obsluz_zwolnienie_myszy(m);gui_ustaw_capture_myszy(false);}
+        else if(e.typ==BWS_ZDARZENIE_MYSZ_RUCH)scrollbar_.obsluz_ruch_myszy(m);
+        else return false;
+        if(model_.scroll_by(int(scrollbar_.wartosc())-model_.scroll(),visible_rows()))draw_list_only();
+        else if(scrollbar_.czy_brudna())paint(scrollbar_);
+        gui_odswiez();return true;
     }
-
+    size_t liczba_wierszy() override {return model_.visible_count();}
+    size_t liczba_kolumn() override {return 4;}
+    const char* naglowek_kolumny(size_t c) override {
+        const char* names[]={"Nazwa","Typ","Data utworzenia","Bezpieczeństwo"};return c<4?names[c]:"";
+    }
+    int szerokosc_kolumny(size_t c) override {
+        auto l=layout();const Rect columns[]={l.col_name,l.col_type,l.col_date,l.col_security};
+        return c<4?ui_odskaluj(columns[c].w,ui_skala_procent):0;
+    }
+    const char* pobierz_komorke(size_t row,size_t c,char* out,size_t cap) override {
+        const Entry* item=model_.entry(model_.visible_entry_index(int(row)));if(!item)return "";
+        if(c==0)return item->name;
+        if(c==1)return entry_type_name(item->type);
+        if(c==2) {if(item->creation_available && format_rtc_creation(item->creation_time,out,cap))return out;return "Niedostępna";}
+        out[0]=0;if(item->pzb_available){append_text(out,cap,"PZB ");append_unsigned(out,cap,item->pzb);return out;}return "Brak";
+    }
+    BursztynUI::PoleTekstowe& active_field() {return edit_mode_==EditMode::PATH?path_field_:search_field_;}
     bool append_input(char character) {
-        if (modal_open()) return gui_modal_dopisz(&modal_, character);
-        const uint8_t value = static_cast<uint8_t>(character);
-        if (value < 0x20U || value == 0x7FU) return false;
-        size_t capacity = sizeof(edit_);
-        if (edit_mode_ == EditMode::SEARCH) capacity = SEARCH_CAP;
-        if (edit_mode_ == EditMode::CREATE_FOLDER || edit_mode_ == EditMode::CREATE_FILE ||
-            edit_mode_ == EditMode::RENAME)
-            capacity = NAME_CAP;
-        if (edit_length_ + 1 >= capacity) {
-            model_.set_status(edit_mode_ == EditMode::PATH
-                ? "Ścieżka osiągnęła limit 511 bajtów."
-                : "Pole osiągnęło swój limit długości.");
-            return false;
-        }
-        for (size_t i = edit_length_ + 1; i > edit_caret_; --i)
-            edit_[i] = edit_[i - 1];
-        edit_[edit_caret_++] = character;
-        ++edit_length_;
-        return true;
+        if(modal_open())return false;
+        unsigned char c=static_cast<unsigned char>(character);if(c<32 || c==127)return false;
+        if(input_bytes_==0)input_expected_=c<128?1:c>=194 && c<=223?2:c>=224 && c<=239?3:c>=240 && c<=244?4:0;
+        if(!input_expected_)return false;
+        if(input_bytes_ && (c&192)!=128) {input_bytes_=0;return false;}
+        input_utf8_[input_bytes_++]=character;input_utf8_[input_bytes_]=0;
+        if(input_bytes_<input_expected_)return false;
+        uint32_t cp=0;size_t used=BursztynUI::CzcionkaUI::dekoduj_utf8(input_utf8_,0,&cp);
+        input_bytes_=0;
+        if(used!=input_expected_)return false;
+        auto& field=active_field();size_t max=edit_mode_==EditMode::SEARCH?SEARCH_CAP:PATH_CAP;
+        if(len_limit(field.tekst(),max)+used>=max)return false;
+        BursztynUI::ZdarzenieWprowadzaniaTekstu e{};e.punkt_kodowy=cp;field.obsluz_wprowadzenie_tekstu(e);return e.obsluzone;
     }
-
-    bool erase_input() {
-        if (modal_open()) return gui_modal_usun_wstecz(&modal_);
-        if (edit_caret_ == 0) return false;
-        const size_t previous = previous_codepoint(edit_, edit_caret_);
-        const size_t removed = edit_caret_ - previous;
-        for (size_t i = previous; i + removed <= edit_length_; ++i)
-            edit_[i] = edit_[i + removed];
-        edit_length_ -= removed;
-        edit_caret_ = previous;
-        if (edit_view_start_ > edit_caret_) edit_view_start_ = edit_caret_;
-        return true;
+    bool edit_key(uint32_t code) {
+        if(modal_open())return false;
+        BursztynUI::ZdarzenieKlawiatury e{};e.kod_klawisza=code;active_field().obsluz_wcisniecie_klawisza(e);return e.obsluzone;
     }
-
-    bool delete_input() {
-        if (modal_open()) return gui_modal_usun_przed(&modal_);
-        if (edit_caret_ >= edit_length_) return false;
-        const size_t next = next_codepoint(edit_, edit_caret_, edit_length_);
-        const size_t removed = next - edit_caret_;
-        for (size_t i = edit_caret_; i + removed <= edit_length_; ++i)
-            edit_[i] = edit_[i + removed];
-        edit_length_ -= removed;
-        return true;
-    }
-
-    bool move_caret_left() {
-        if (modal_open()) return gui_modal_przesun_karetke(&modal_, -1);
-        if (edit_caret_ == 0) return false;
-        edit_caret_ = previous_codepoint(edit_, edit_caret_);
-        if (edit_caret_ < edit_view_start_) edit_view_start_ = edit_caret_;
-        return true;
-    }
-
-    bool move_caret_right() {
-        if (modal_open()) return gui_modal_przesun_karetke(&modal_, 1);
-        if (edit_caret_ >= edit_length_) return false;
-        edit_caret_ = next_codepoint(edit_, edit_caret_, edit_length_);
-        return true;
-    }
-
-    void place_path_caret(int mouse_x) {
-        if (edit_mode_ != EditMode::PATH) return;
-        const AktowkaLayout value = layout();
-        const int prefix = oblicz_szerokosc_tekstu("Ścieżka: ", 1);
-        int wanted = mouse_x - (value.path.x + 5 + prefix);
-        if (wanted <= 0) {
-            edit_caret_ = edit_view_start_;
-            return;
-        }
-        size_t position = edit_view_start_;
-        while (position < edit_length_) {
-            const size_t next = next_codepoint(edit_, position, edit_length_);
-            char fragment[8] = {};
-            size_t n = next - position;
-            for (size_t i = 0; i < n && i + 1 < sizeof(fragment); ++i)
-                fragment[i] = edit_[position + i];
-            const int width = oblicz_szerokosc_tekstu(fragment, 1);
-            if (wanted < width / 2) break;
-            wanted -= width;
-            position = next;
-        }
-        edit_caret_ = position;
+    bool erase_input() {input_bytes_=0;return edit_key(0x0e);}
+    bool delete_input() {return edit_key(0x53);}
+    bool move_caret_left() {return edit_key(0x4b);}
+    bool move_caret_right() {return edit_key(0x4d);}
+    void place_path_caret(int x) {
+        BursztynUI::ZdarzenieMyszki e{};e.x=x;e.y=layout().path.y+TOOL_H/2;e.przycisk=1;
+        path_field_.obsluz_wcisniecie_myszy(e);path_field_.obsluz_zwolnienie_myszy(e);
     }
 
     int visible_rows() const {
@@ -1988,7 +1904,7 @@ public:
 
     void register_drop_targets() {
         /* Zminimalizowane okno nie moze zostawiac niewidzialnych celow drop. */
-        if (window_.minimized || modal_open() || context_open_) {
+        if (window_.minimized || modal_open() || context_open()) {
             (void)gui_rejestruj_cele_drop(nullptr, 0);
             return;
         }
@@ -2064,15 +1980,16 @@ public:
         if (client_h > 0)
             gui_rysuj_prostokat(window_.x + 2, window_.y + TITLE_H,
                                 window_.w > 4 ? window_.w - 4 : 0,
-                                client_h, BG);
+                                client_h, COLOR_BG);
+        hover_entry_=-1;
         draw_toolbar();
         draw_left_panel();
         draw_center_panel();
         draw_details_panel();
         gui_rysuj_prostokat(value.left_divider.x, value.left_divider.y,
-                            value.left_divider.w, value.left_divider.h, BORDER_DARK);
+                            value.left_divider.w, value.left_divider.h, COLOR_BORDER_DARK);
         gui_rysuj_prostokat(value.right_divider.x, value.right_divider.y,
-                            value.right_divider.w, value.right_divider.h, BORDER_DARK);
+                            value.right_divider.w, value.right_divider.h, COLOR_BORDER_DARK);
         draw_status();
         register_drop_targets();
     }
@@ -2080,82 +1997,27 @@ public:
     void draw_toolbar() {
         const AktowkaLayout value = layout();
         gui_rysuj_prostokat(value.toolbar.x, value.toolbar.y,
-                            value.toolbar.w, value.toolbar.h, PANEL_ALT);
-        draw_button(value.back, model_.can_back() ? BORDER : DISABLED, "<-");
-        draw_button(value.forward, model_.can_forward() ? BORDER : DISABLED, "->");
-        draw_button(value.up, BORDER, "^");
-        draw_button(value.refresh, BORDER, "Odśwież");
-        draw_button(value.new_folder, BORDER, "Nowy folder");
-        draw_button(value.new_file, BORDER, "Nowy plik");
-        draw_button(value.rename, BORDER, "Zmień nazwę");
-        draw_button(value.remove, BORDER, "Usuń");
-        draw_button(value.move, BORDER, "Przenieś");
-        draw_button(value.run, BORDER, "Uruchom");
+                            value.toolbar.w, value.toolbar.h, COLOR_PANEL_ALT);
+        draw_button(value.back, model_.can_back() ? true : false, "<-");
+        draw_button(value.forward, model_.can_forward() ? true : false, "->");
+        draw_button(value.up, true, "^");
+        draw_button(value.refresh, true, "Odśwież");
+        draw_button(value.new_folder, true, "Nowy folder");
+        draw_button(value.new_file, true, "Nowy plik");
+        draw_button(value.rename, model_.selected()>=0 && model_.entry(model_.selected())->type!=EntryType::PARENT ? true : false, "Zmień nazwę");
+        draw_button(value.remove, model_.selected()>=0 && model_.entry(model_.selected())->type!=EntryType::PARENT ? true : false, "Usuń");
+        draw_button(value.move, model_.selected()>=0 && model_.entry(model_.selected())->type!=EntryType::PARENT ? true : false, "Przenieś");
+        draw_button(value.run, model_.entry(model_.selected()) && (model_.entry(model_.selected())->type==EntryType::BUR || model_.entry(model_.selected())->type==EntryType::CEBULA) ? true : false, "Uruchom");
         draw_path_field();
         draw_search_field();
-        draw_button(value.sort, BORDER, sort_mode_name(model_.sort_mode()));
+        draw_button(value.sort, true, sort_mode_name(model_.sort_mode()));
     }
 
-    void draw_path_field() {
-        const AktowkaLayout value = layout();
-        const bool active = edit_mode_ == EditMode::PATH;
-        draw_field(value.path, active);
-        const char* prefix = "Ścieżka: ";
-        draw_clipped(value.path.x + 5, value.path.y + 5,
-                     value.path.w - 10, prefix, TEXT, false);
-        const int prefix_width = oblicz_szerokosc_tekstu(prefix, 1);
-        const int available = value.path.w - 10 - prefix_width;
-        if (!active) {
-            draw_clipped(value.path.x + 5 + prefix_width, value.path.y + 5,
-                         available, model_.path(), TEXT, true);
-            return;
-        }
-        while (edit_view_start_ > edit_caret_)
-            edit_view_start_ = previous_codepoint(edit_, edit_view_start_);
-        while (edit_view_start_ < edit_caret_) {
-            char before[PATH_CAP] = {};
-            size_t out = 0;
-            for (size_t i = edit_view_start_; i < edit_caret_ && out + 1 < sizeof(before); ++i)
-                before[out++] = edit_[i];
-            if (oblicz_szerokosc_tekstu(before, 1) +
-                oblicz_szerokosc_tekstu("|", 1) <= available) break;
-            edit_view_start_ = next_codepoint(edit_, edit_view_start_, edit_length_);
-        }
-        char shown[PATH_CAP + 2] = {};
-        size_t out = 0;
-        for (size_t i = edit_view_start_; i < edit_length_ && out + 2 < sizeof(shown); ++i) {
-            if (i == edit_caret_) shown[out++] = '|';
-            shown[out++] = edit_[i];
-        }
-        if (edit_caret_ == edit_length_ && out + 1 < sizeof(shown)) shown[out++] = '|';
-        shown[out] = '\0';
-        draw_clipped(value.path.x + 5 + prefix_width, value.path.y + 5,
-                     available, shown, TEXT, false);
-    }
-
-    void draw_search_field() {
-        const AktowkaLayout value = layout();
-        const bool active = edit_mode_ == EditMode::SEARCH ||
-                            edit_mode_ == EditMode::MOVE;
-        draw_field(value.search, active);
-        char source[PATH_CAP] = {};
-        if (edit_mode_ == EditMode::MOVE)
-            (void)append_text(source, sizeof(source), "Do folderu: ");
-        else
-            (void)append_text(source, sizeof(source), "Szukaj: ");
-        if (active) {
-            (void)append_text(source, sizeof(source), edit_);
-            (void)append_text(source, sizeof(source), "|");
-        } else {
-            (void)append_text(source, sizeof(source), model_.filter());
-        }
-        draw_clipped(value.search.x + 5, value.search.y + 5,
-                     value.search.w - 10, source, TEXT, false);
-    }
-
+    void draw_path_field() { draw_text_field(path_field_,layout().path,edit_mode_==EditMode::PATH,model_.path(),"Ścieżka"); }
+    void draw_search_field() { draw_text_field(search_field_,layout().search,edit_mode_==EditMode::SEARCH,model_.filter(),"Szukaj"); }
     void draw_left_panel() {
         const AktowkaLayout value = layout();
-        gui_rysuj_prostokat(value.left.x, value.left.y, value.left.w, value.left.h, PANEL);
+        gui_rysuj_prostokat(value.left.x, value.left.y, value.left.w, value.left.h, COLOR_PANEL);
         draw_panel_title(value.left, "Szybki dostęp");
         int y = value.left.y + PANEL_TITLE_H + 4;
         bool pinned_header = false;
@@ -2164,7 +2026,7 @@ public:
             if (!item) continue;
             if (item->pinned && !pinned_header) {
                 draw_clipped(value.left.x + 7, y + 4, value.left.w - 14,
-                             "Przypięte foldery", MUTED, false);
+                             "Przypięte foldery", COLOR_MUTED, false);
                 y += 23;
                 pinned_header = true;
             }
@@ -2172,10 +2034,10 @@ public:
             const bool current = equal_text(item->path, model_.path());
             gui_rysuj_prostokat(value.left.x + 2, y,
                                 value.left.w > 4 ? value.left.w - 4 : 0,
-                                ROW_H, current ? SELECT : PANEL);
-            gui_rysuj_prostokat(value.left.x + 7, y + 7, 10, 10, FOLDER);
+                                ROW_H, current ? COLOR_SELECT : COLOR_PANEL);
+            gui_rysuj_prostokat(value.left.x + 7, y + 7, 10, 10, COLOR_FOLDER);
             draw_clipped(value.left.x + 23, y + 5, value.left.w - 29,
-                         item->label, current ? TEXT : TEXT2, false);
+                         item->label, current ? COLOR_TEXT : COLOR_TEXT2, false);
             y += ROW_H;
         }
     }
@@ -2183,87 +2045,26 @@ public:
     void draw_center_panel() {
         const AktowkaLayout value = layout();
         gui_rysuj_prostokat(value.center.x, value.center.y,
-                            value.center.w, value.center.h, BG);
+                            value.center.w, value.center.h, COLOR_BG);
         draw_panel_title(value.center, "Zawartość folderu");
         draw_table_header();
         draw_list_only();
     }
 
-    void draw_table_header() {
-        const AktowkaLayout value = layout();
-        gui_rysuj_prostokat(value.table_header.x, value.table_header.y,
-                            value.table_header.w, value.table_header.h, PANEL_ALT);
-        draw_header_cell(value.col_name, "Nazwa");
-        draw_header_cell(value.col_type, "Typ");
-        draw_header_cell(value.col_date, model_.has_creation_dates()
-            ? "Data utworzenia" : "Data (niedostępna)");
-        draw_header_cell(value.col_security, "Bezpieczeństwo");
-    }
-
+    void draw_table_header() { paint_table(layout().table_header); }
     void draw_list_only() {
-        const AktowkaLayout value = layout();
-        gui_rysuj_prostokat(value.list_body.x, value.list_body.y,
-                            value.list_body.w, value.list_body.h, BG);
-        const int rows = visible_rows();
-        for (int i = 0; i < rows; ++i)
-            draw_visual_row(model_.scroll() + i);
-        if (value.scroll_up.w > 0) {
-            draw_button(value.scroll_up, BORDER, "^");
-            draw_button(value.scroll_down, BORDER, "v");
-            const int track_y = value.scroll_up.y + value.scroll_up.h;
-            const int track_h = value.scroll_down.y - track_y;
-            if (track_h > 0)
-                gui_rysuj_prostokat(value.scroll_up.x, track_y,
-                                    value.scroll_up.w, track_h, PANEL);
-        }
-        register_drop_targets();
+        paint_table(layout().list_body);
+        auto l=layout();
+        scrollbar_.ustaw_skale_dpi(ui_skala());
+        scrollbar_.rozmiesc(BursztynUI::Prostokat(l.scroll_up.x,l.list_body.y,SCROLL_W,l.list_body.h));
+        scrollbar_.ustaw_zakres(0,model_.visible_count()); scrollbar_.ustaw_rozmiar_strony(visible_rows());
+        scrollbar_.ustaw_wartosc(model_.scroll()); scrollbar_.ustaw_maly_krok(1);scrollbar_.ustaw_duzy_krok(visible_rows());
+        paint(scrollbar_);
     }
-
-    void draw_visual_row(int visual_index) {
-        const AktowkaLayout value = layout();
-        const int local = visual_index - model_.scroll();
-        if (local < 0 || local >= visible_rows()) return;
-        const int y = value.list_body.y + local * ROW_H;
-        int height = ROW_H;
-        if (y + height > value.list_body.y + value.list_body.h)
-            height = value.list_body.y + value.list_body.h - y;
-        if (height <= 0) return;
-        const int entry_index = model_.visible_entry_index(visual_index);
-        const Entry* item = model_.entry(entry_index);
-        gui_rysuj_prostokat(value.list_body.x, y, value.list_body.w, height,
-                            entry_index >= 0 && entry_index == drop_target_entry_
-                                ? DROP_TARGET
-                                : (entry_index >= 0 && entry_index == model_.selected()
-                                    ? SELECT : BG));
-        draw_row_separators(y, height);
-        if (!item) return;
-        const uint32_t icon_color = color_for(*item);
-        gui_rysuj_prostokat(value.col_name.x + 6, y + 6, ICON, ICON, icon_color);
-        if (item->directory)
-            gui_rysuj_prostokat(value.col_name.x + 8, y + 4, ICON - 5, 4, icon_color);
-        draw_clipped(value.col_name.x + 25, y + 5,
-                     value.col_name.w - 29, item->name,
-                     entry_index == model_.selected() ? TEXT : TEXT2, false);
-        draw_clipped(value.col_type.x + 5, y + 5, value.col_type.w - 10,
-                     entry_type_name(item->type), TEXT2, false);
-        char creation[48] = {};
-        if (!item->creation_available ||
-            !format_rtc_creation(item->creation_time, creation, sizeof(creation)))
-            (void)copy_text(creation, sizeof(creation), "Niedostępna");
-        draw_clipped(value.col_date.x + 5, y + 5, value.col_date.w - 10,
-                     creation, item->creation_available ? TEXT2 : MUTED, false);
-        char security[16] = {};
-        if (item->pzb_available) {
-            (void)append_text(security, sizeof(security), "PZB ");
-            (void)append_unsigned(security, sizeof(security),
-                                  static_cast<uint64_t>(item->pzb));
-        } else {
-            (void)copy_text(security, sizeof(security), "Brak");
-        }
-        draw_clipped(value.col_security.x + 5, y + 5,
-                     value.col_security.w - 10, security, MUTED, false);
+    void draw_visual_row(int visual) {
+        auto l=layout();int local=visual-model_.scroll();if(local<0 || local>=visible_rows())return;
+        paint_table({l.list_body.x,l.list_body.y+local*ROW_H,l.list_body.w,ROW_H});
     }
-
     void draw_entry_row(int entry_index) {
         const int visual = model_.visible_position(entry_index);
         if (visual >= model_.scroll() && visual < model_.scroll() + visible_rows())
@@ -2275,31 +2076,31 @@ public:
     void draw_details_panel() {
         const AktowkaLayout value = layout();
         gui_rysuj_prostokat(value.right.x, value.right.y,
-                            value.right.w, value.right.h, PANEL);
+                            value.right.w, value.right.h, COLOR_PANEL);
         draw_panel_title(value.right, "Podgląd elementu / Szczegóły");
         gui_rysuj_prostokat(value.details_body.x, value.details_body.y,
-                            value.details_body.w, value.details_body.h, PANEL);
+                            value.details_body.w, value.details_body.h, COLOR_PANEL);
         const Entry* item = model_.entry(model_.selected());
         const Details& details = model_.details();
         if (!item || !details.valid) {
             draw_clipped(value.details_body.x + 8, value.details_body.y + 9,
                          value.details_body.w - 16,
-                         "Zaznacz element, aby zobaczyć szczegóły.", MUTED, false);
+                         "Zaznacz element, aby zobaczyć szczegóły.", COLOR_MUTED, false);
             return;
         }
         int y = value.details_body.y + 8;
         detail_line("Nazwa", item->name, y);
-        y += 36;
+        y += 36*ui_skala();
         detail_line("Typ", entry_type_name(item->type), y);
-        y += 36;
+        y += 36*ui_skala();
         detail_line("Pełna ścieżka", details.full_path, y);
-        y += 36;
+        y += 36*ui_skala();
         char creation[48] = {};
         if (!details.creation_available ||
             !format_rtc_creation(details.creation_time, creation, sizeof(creation)))
             (void)copy_text(creation, sizeof(creation), "Niedostępna (stary BSP2/RTC)");
         detail_line("Data utworzenia", creation, y);
-        y += 36;
+        y += 36*ui_skala();
         char size[40] = {};
         if (details.size_available) {
             (void)append_unsigned(size, sizeof(size), details.size);
@@ -2309,7 +2110,7 @@ public:
                 ? "Nie dotyczy folderu" : "Niedostępny");
         }
         detail_line("Rozmiar", size, y);
-        y += 36;
+        y += 36*ui_skala();
         char pzb[48] = {};
         if (details.pzb_available) {
             (void)append_text(pzb, sizeof(pzb), "Poziom ");
@@ -2319,16 +2120,16 @@ public:
             (void)copy_text(pzb, sizeof(pzb), "Niedostępny (stary BSP2)");
         }
         detail_line("Bezpieczeństwo / PZB", pzb, y);
-        y += 36;
+        y += 36*ui_skala();
         if (item->type == EntryType::CEBULA) {
             detail_line("Nazwa aplikacji",
                         details.application[0] ? details.application : "Brak w manifeście", y);
-            y += 36;
+            y += 36*ui_skala();
             detail_line("plik_startowy",
                         details.entry_point[0] ? details.entry_point : "Brak w manifeście", y);
-            y += 39;
+            y += 39*ui_skala();
             const Rect run_rect = details_run_rect();
-            draw_button(run_rect, BORDER, "Uruchom");
+            draw_button(run_rect, true, "Uruchom");
         }
     }
 
@@ -2343,185 +2144,94 @@ public:
     void draw_status() {
         const AktowkaLayout value = layout();
         gui_rysuj_prostokat(value.status.x, value.status.y,
-                            value.status.w, value.status.h, PANEL_ALT);
+                            value.status.w, value.status.h, COLOR_PANEL_ALT);
         gui_rysuj_prostokat(value.status.x, value.status.y,
-                            value.status.w, value.status.h > 0 ? 1 : 0, BORDER);
+                            value.status.w, value.status.h > 0 ? 1 : 0, COLOR_BORDER);
         draw_clipped(value.status.x + 6, value.status.y + 5,
-                     value.status.w - 12, model_.status(), TEXT, false);
+                     value.status.w - 12, model_.status(), COLOR_TEXT, false);
     }
 
-    void draw_modal() {
-        if (!modal_open()) return;
-        gui_modal_rysuj(&modal_);
+    void draw_modal() { if(modal_open())dialog_.events.popups.odrysuj_popupy(true); }
+    bool open_context(int x,int y,bool empty) {
+        if(modal_open())return false;
+        const Entry* item=empty?nullptr:model_.entry(model_.selected());
+        BwsSchowekPlikow record{};
+        PlikiUI::CelMenu target{item && item->type!=EntryType::PARENT,item && item->directory,
+            item && PlikiUI::tekstowy(item->name,item->directory),item && (item->type==EntryType::BUR || item->type==EntryType::CEBULA),
+            PlikiUI::schowek_gotowy(&record)};
+        menu_.events.geometria(owner(),work());menu_.otworz(x,y,target);
+        (void)gui_rejestruj_cele_drop(nullptr,0);gui_odswiez();return context_open();
     }
-
-    bool open_context(int mouse_x, int mouse_y, bool empty) {
-        if (modal_open()) return false;
-        close_context();
-        context_empty_ = empty;
-        context_count_ = 0;
-        if (empty) {
-            add_context("Wklej", ContextAction::PASTE);
-            add_context("Nowy plik", ContextAction::NEW_FILE);
-            add_context("Nowy folder", ContextAction::NEW_FOLDER);
-            add_context("Odśwież", ContextAction::REFRESH);
-        } else {
-            const Entry* item = model_.entry(model_.selected());
-            if (!item || item->type == EntryType::PARENT) return false;
-            add_context("Otwórz", ContextAction::OPEN);
-            if (item->type == EntryType::BUR || item->type == EntryType::CEBULA)
-                add_context("Uruchom", ContextAction::RUN);
-            add_context("Kopiuj", ContextAction::COPY);
-            add_context("Wytnij", ContextAction::CUT);
-            add_context("Zmień nazwę", ContextAction::RENAME);
-            add_context("Usuń", ContextAction::REMOVE);
-            add_context("Właściwości", ContextAction::PROPERTIES);
-        }
-        const int width = 190;
-        const int height = context_count_ * ROW_H + 4;
-        int x = mouse_x;
-        int y = mouse_y;
-        const int min_x = window_.x + 2;
-        const int min_y = window_.y + TITLE_H;
-        const int max_x = window_.x + window_.w - width - 2;
-        const int max_y = window_.y + window_.h - height - 2;
-        x = clamp_int(x, min_x, max_x);
-        y = clamp_int(y, min_y, max_y);
-        context_rect_ = {x, y, width, height};
-        context_hover_ = -1;
-        if (!gui_ustaw_popup_aplikacji(true, x, y, width, height)) {
-            context_count_ = 0;
-            return false;
-        }
-        context_open_ = true;
-        (void)gui_rejestruj_cele_drop(nullptr, 0);
-        draw_context();
-        gui_odswiez();
-        return true;
-    }
-
-    void close_context() {
-        if (!context_open_) return;
-        (void)gui_ustaw_popup_aplikacji(false, 0, 0, 0, 0);
-        context_open_ = false;
-        context_count_ = 0;
-        context_hover_ = -1;
-        register_drop_targets();
-        gui_odswiez();
-    }
-
-    ContextAction context_action_at(int x, int y) const {
-        if (!context_open_ || !hit(x, y, context_rect_)) return ContextAction::NONE;
-        const int index = (y - context_rect_.y - 2) / ROW_H;
-        return index >= 0 && index < context_count_
-            ? context_items_[index].action : ContextAction::NONE;
-    }
-
-    void context_hover(int x, int y) {
-        if (!context_open_) return;
-        int next = -1;
-        if (hit(x, y, context_rect_)) {
-            next = (y - context_rect_.y - 2) / ROW_H;
-            if (next < 0 || next >= context_count_) next = -1;
-        }
-        if (next == context_hover_) return;
-        const int old = context_hover_;
-        context_hover_ = next;
-        if (old >= 0) draw_context_row(old);
-        if (next >= 0) draw_context_row(next);
-        gui_odswiez();
-    }
-
+    void close_context() { menu_.zamknij();register_drop_targets();gui_odswiez(); }
     void close_transient() {
-        if (context_open_) close_context();
+        if (context_open()) close_context();
         if (modal_open()) close_modal();
     }
 
 private:
     AktowkaModel& model_;
     AktowkaWindow& window_;
-    GuiModalDialog modal_{};
+    PlikiUI::DialogPlikowy dialog_;
+    PlikiUI::MenuPlikowe menu_;
+    BursztynUI::TabelaWirtualna table_;
+    BursztynUI::PasekPrzewijania scrollbar_;
+    BursztynUI::PoleTekstowe path_field_, search_field_;
+    BursztynUI::Przycisk buttons_[12];
+    BursztynUI::KontekstRysowania drawing_;
     EditMode edit_mode_;
-    char edit_[PATH_CAP];
-    size_t edit_length_;
-    size_t edit_caret_;
-    size_t edit_view_start_;
     int drop_target_entry_;
     bool drop_target_body_;
-    bool context_open_;
-    bool context_empty_;
-    int context_hover_;
-    int context_count_;
-    Rect context_rect_;
-    ContextItem context_items_[8];
-
-    void add_context(const char* label, ContextAction action) {
-        if (context_count_ >= static_cast<int>(sizeof(context_items_) /
-                                               sizeof(context_items_[0]))) return;
-        context_items_[context_count_++] = {label, action};
+    int hover_entry_;
+    char input_utf8_[5]{};size_t input_bytes_{0},input_expected_{0};
+    BursztynUI::Prostokat owner() const {return {window_.x+2,window_.y+TITLE_H,window_.w-4,window_.h-TITLE_H-2};}
+    BursztynUI::Prostokat work() const {return {0,0,window_.screen_w,window_.screen_h-TASKBAR_H};}
+    void paint(BursztynUI::Kontrolka& c) {c.rysuj(drawing_,true);}
+    void paint_table(Rect clip) {
+        auto l=layout();table_.ustaw_skale_dpi(ui_skala());
+        table_.rozmiesc({l.table_header.x,l.table_header.y,l.list_body.w,l.table_header.h+l.list_body.h});
+        table_.ustaw_stan_widoku(model_.visible_position(model_.selected()),model_.scroll(),ROW_H,TABLE_HEAD_H,
+            model_.visible_position(hover_entry_),model_.visible_position(drop_target_entry_));
+        drawing_.dodaj_przyciecie({clip.x,clip.y,clip.w,clip.h});paint(table_);drawing_.zdejmij_przyciecie();
     }
-
-    void draw_context_row(int index) {
-        if (index < 0 || index >= context_count_) return;
-        const Rect row{context_rect_.x + 2,
-                       context_rect_.y + 2 + index * ROW_H,
-                       context_rect_.w - 4, ROW_H};
-        gui_rysuj_prostokat(row.x, row.y, row.w, row.h,
-                            index == context_hover_ ? SELECT : PANEL_ALT);
-        draw_clipped(row.x + 9, row.y + 5, row.w - 18,
-                     context_items_[index].label, TEXT, false);
+    void draw_text_field(BursztynUI::PoleTekstowe& field,Rect r,bool active,const char* value,const char* hint) {
+        field.ustaw_skale_dpi(ui_skala());field.rozmiesc({r.x,r.y,r.w,r.h});
+        field.ustaw_tekst_zastepczy(hint);
+        if(!active && !equal_text(field.tekst(),value))field.ustaw_tekst(value);
+        if(active)field.obsluz_uzyskanie_skupienia();else field.obsluz_utrate_skupienia();
+        paint(field);
     }
-
-    void draw_context() {
-        gui_rysuj_prostokat(context_rect_.x, context_rect_.y,
-                            context_rect_.w, context_rect_.h, PANEL_ALT);
-        gui_rysuj_prostokat(context_rect_.x, context_rect_.y,
-                            context_rect_.w, 2, BORDER);
-        gui_rysuj_prostokat(context_rect_.x, context_rect_.y + context_rect_.h - 2,
-                            context_rect_.w, 2, BORDER_DARK);
-        gui_rysuj_prostokat(context_rect_.x, context_rect_.y,
-                            2, context_rect_.h, BORDER);
-        gui_rysuj_prostokat(context_rect_.x + context_rect_.w - 2,
-                            context_rect_.y, 2, context_rect_.h, BORDER_DARK);
-        for (int i = 0; i < context_count_; ++i) draw_context_row(i);
-    }
-
-    void draw_button(const Rect& rect, uint32_t border, const char* label) {
-        if (rect.w <= 0 || rect.h <= 0) return;
-        RysujPrzycisk(rect.x, rect.y, rect.w, rect.h, border, BG, label);
-    }
-
-    void draw_field(const Rect& rect, bool active) {
-        if (rect.w <= 0 || rect.h <= 0) return;
-        gui_rysuj_prostokat(rect.x, rect.y, rect.w, rect.h, active ? SELECT : PANEL);
-        gui_rysuj_prostokat(rect.x, rect.y, rect.w, 1, BORDER);
-        gui_rysuj_prostokat(rect.x, rect.y + rect.h - 1, rect.w, 1, BORDER);
-        gui_rysuj_prostokat(rect.x, rect.y, 1, rect.h, BORDER_DARK);
-        gui_rysuj_prostokat(rect.x + rect.w - 1, rect.y, 1, rect.h, BORDER_DARK);
+    void draw_button(const Rect& rect,bool enabled,const char* label) {
+        auto l=layout(); const Rect all[]={l.back,l.forward,l.up,l.refresh,l.new_folder,l.new_file,l.rename,l.remove,l.move,l.run,l.sort,details_run_rect()};
+        unsigned index=0;for(unsigned i=0;i<12;++i)if(rect.x==all[i].x && rect.y==all[i].y){index=i;break;}
+        auto& button=buttons_[index];button.ustaw_skale_dpi(ui_skala());button.rozmiesc({rect.x,rect.y,rect.w,rect.h});
+        button.ustaw_tekst(label);button.ustaw_wlaczona(enabled);paint(button);
     }
 
     void draw_clipped(int x, int y, int width, const char* text,
                       uint32_t color, bool keep_tail) {
         if (width <= 0 || !text) return;
-        char shown[SHOW_CAP] = {};
-        clip_utf8_px(text, shown, sizeof(shown), width, keep_tail);
-        gui_wypisz_tekst_kolor(x, y, color, shown);
+        drawing_.dodaj_przyciecie({x,y,width,BursztynUI::CzcionkaUI::pobierz_wysokosc(ui_skala())});
+        if(keep_tail) {
+            char shown[SHOW_CAP]{};clip_utf8_px(text,shown,sizeof(shown),ui_odskaluj(width,ui_skala_procent),true);
+            drawing_.rysuj_tekst({x,y},shown,color,ui_skala());
+        } else drawing_.rysuj_tekst_obciety({x,y},text,color,width,ui_skala());
+        drawing_.zdejmij_przyciecie();
     }
 
     void draw_panel_title(const Rect& panel, const char* title) {
         if (panel.w <= 0 || panel.h <= 0) return;
         const int height = panel.h < PANEL_TITLE_H ? panel.h : PANEL_TITLE_H;
-        gui_rysuj_prostokat(panel.x, panel.y, panel.w, height, PANEL_ALT);
+        gui_rysuj_prostokat(panel.x, panel.y, panel.w, height, COLOR_PANEL_ALT);
         gui_rysuj_prostokat(panel.x, panel.y + height - 1,
-                            panel.w, height > 0 ? 1 : 0, BORDER_DARK);
-        draw_clipped(panel.x + 7, panel.y + 6, panel.w - 14, title, TEXT, false);
+                            panel.w, height > 0 ? 1 : 0, COLOR_BORDER_DARK);
+        draw_clipped(panel.x + 7, panel.y + 6, panel.w - 14, title, COLOR_TEXT, false);
     }
 
     void draw_header_cell(const Rect& rect, const char* text) {
         if (rect.w <= 0 || rect.h <= 0) return;
         gui_rysuj_prostokat(rect.x + rect.w - 1, rect.y,
-                            1, rect.h, BORDER_DARK);
-        draw_clipped(rect.x + 5, rect.y + 6, rect.w - 10, text, TEXT, false);
+                            1, rect.h, COLOR_BORDER_DARK);
+        draw_clipped(rect.x + 5, rect.y + 6, rect.w - 10, text, COLOR_TEXT, false);
     }
 
     void draw_row_separators(int y, int height) {
@@ -2530,28 +2240,28 @@ private:
             value.col_type.x, value.col_date.x, value.col_security.x
         };
         for (int i = 0; i < 3; ++i)
-            gui_rysuj_prostokat(positions[i], y, 1, height, BORDER_DARK);
+            gui_rysuj_prostokat(positions[i], y, 1, height, COLOR_BORDER_DARK);
         gui_rysuj_prostokat(value.list_body.x, y + height - 1,
-                            value.list_body.w, 1, PANEL_ALT);
+                            value.list_body.w, 1, COLOR_PANEL_ALT);
     }
 
     uint32_t color_for(const Entry& item) const {
         if (item.type == EntryType::PARENT || item.type == EntryType::FOLDER)
-            return FOLDER;
-        if (item.type == EntryType::BUR) return BUR;
-        if (item.type == EntryType::CEBULA) return CEBULA;
-        if (item.type == EntryType::TXT) return TXT;
-        if (item.type == EntryType::BMP) return BMP;
-        return FILE_COLOR;
+            return COLOR_FOLDER;
+        if (item.type == EntryType::BUR) return COLOR_BUR;
+        if (item.type == EntryType::CEBULA) return COLOR_CEBULA;
+        if (item.type == EntryType::TXT) return COLOR_TXT;
+        if (item.type == EntryType::BMP) return COLOR_BMP;
+        return COLOR_FILE_COLOR;
     }
 
     void detail_line(const char* label, const char* value, int y) {
         const AktowkaLayout layout_value = layout();
-        if (y + 30 > layout_value.details_body.y + layout_value.details_body.h) return;
+        if (y + 32*ui_skala() > layout_value.details_body.y + layout_value.details_body.h) return;
         draw_clipped(layout_value.details_body.x + 8, y,
-                     layout_value.details_body.w - 16, label, MUTED, false);
-        draw_clipped(layout_value.details_body.x + 8, y + 16,
-                     layout_value.details_body.w - 16, value, TEXT2, true);
+                     layout_value.details_body.w - 16, label, COLOR_MUTED, false);
+        draw_clipped(layout_value.details_body.x + 8, y + 16*ui_skala(),
+                     layout_value.details_body.w - 16, value, COLOR_TEXT2, true);
     }
 };
 
@@ -2595,12 +2305,13 @@ void redraw_selection(AktowkaView& view, AktowkaModel& model,
         if (model.selected() >= 0) view.draw_entry_row(model.selected());
     }
     view.draw_details_panel();
+    view.draw_toolbar();
     view.register_drop_targets();
     gui_odswiez();
 }
 
 void redraw_filter(AktowkaView& view) {
-    view.draw_search_field();
+    view.draw_toolbar();
     view.draw_list_only();
     view.draw_details_panel();
     view.draw_status();
@@ -2632,10 +2343,16 @@ void submit_modal(AktowkaView& view, AktowkaModel& model) {
             (mode == EditMode::CREATE_FOLDER
                 ? model.create_folder(name) : model.create_file(name));
     }
+    if(mode==EditMode::MOVE) success=model.move_selected(view.edit_text());
+    if(mode==EditMode::OPEN_WITH) {
+        char path[PATH_CAP]{};const Entry* item=model.entry(model.selected());
+        success=item && model.selected_path(path,sizeof(path)) && PlikiUI::notatnik(path,item->directory);
+    }
     view.close_modal();
     if (success) present_workspace_change(view, model.refresh());
     else {
         view.draw_status();
+        if(mode!=EditMode::NOTICE)view.open_modal(EditMode::NOTICE);
         gui_odswiez();
     }
 }
@@ -2672,7 +2389,7 @@ void perform_context_action(AktowkaView& view, AktowkaModel& model,
         case ContextAction::PASTE:
             if (model.paste_clipboard())
                 present_workspace_change(view, model.refresh());
-            else { view.draw_status(); gui_odswiez(); }
+            else { view.draw_status(); view.open_modal(EditMode::NOTICE); gui_odswiez(); }
             break;
         case ContextAction::NEW_FILE:
             (void)view.open_modal(EditMode::CREATE_FILE);
@@ -2680,6 +2397,13 @@ void perform_context_action(AktowkaView& view, AktowkaModel& model,
         case ContextAction::NEW_FOLDER:
             (void)view.open_modal(EditMode::CREATE_FOLDER);
             break;
+        case ContextAction::MOVE: view.open_modal(EditMode::MOVE);break;
+        case ContextAction::OPEN_WITH: view.open_modal(EditMode::OPEN_WITH);break;
+        case ContextAction::NOTEPAD: {
+            char path[PATH_CAP]{};const Entry* item=model.entry(model.selected());
+            if(item && model.selected_path(path,sizeof(path))) PlikiUI::notatnik(path,item->directory);
+            break;
+        }
         case ContextAction::REFRESH:
             present_workspace_change(view, model.refresh());
             break;
@@ -2691,9 +2415,10 @@ void perform_context_action(AktowkaView& view, AktowkaModel& model,
 
 #ifndef AKTOWKA_HOST_TEST
 extern "C" __attribute__((noreturn)) void _start() {
-    gui_legacy_wlacz();
-    AktowkaModel model;
-    AktowkaWindow window;
+    GuiMonitorInfo monitor{};
+    if(gui_pobierz_monitor(0,&monitor)) ui_skala_procent=monitor.scale_x1000/10;
+    AktowkaModel& model=*new AktowkaModel();
+    static AktowkaWindow window;
     gui_pobierz_rozdzielczosc(&window.screen_w, &window.screen_h);
     window.clamp();
     if (!window.create_layer()) gui_zakoncz_aplikacje();
@@ -2703,7 +2428,7 @@ extern "C" __attribute__((noreturn)) void _start() {
     if (pobierz_argument_startowy(startup_path, sizeof(startup_path)) &&
         startup_path[0] == '/')
         (void)model.navigate(startup_path);
-    AktowkaView view(model, window);
+    AktowkaView& view=*new AktowkaView(model, window);
     view.draw_full(true);
 
     bool quit = false;
@@ -2723,7 +2448,9 @@ extern "C" __attribute__((noreturn)) void _start() {
     while (!quit) {
         bws_zdarzenie event{};
         if (!gui_czekaj_na_zdarzenie(&event)) continue;
+        if(event.typ==BWS_ZDARZENIE_MOTYW_ZMIENIONY) {view.theme_refresh();continue;}
         if (event.typ == BWS_ZDARZENIE_EKRAN) {
+            view.close_transient();if(ui_skala_poprawna(event.kod))ui_skala_procent=event.kod;
             gui_pobierz_rozdzielczosc(&window.screen_w,&window.screen_h);
             if (window.maximized) {
                 window.x=0; window.y=0; window.w=window.screen_w;
@@ -2789,6 +2516,13 @@ extern "C" __attribute__((noreturn)) void _start() {
             present_workspace_change(view, model.refresh());
             continue;
         }
+        if(view.popup_event(event)) {
+            ContextAction action=view.pending_action();
+            if(action!=ContextAction::NONE) perform_context_action(view,model,action);
+            if(view.modal_open() && view.modal_result()==1)submit_modal(view,model);
+            else if(view.modal_open() && (view.modal_result()==2 || !view.dialog_open()))view.close_modal();
+            view.register_drop_targets();gui_odswiez();continue;
+        }
         if (event.typ == BWS_ZDARZENIE_TIMER) {
             if (view.edit_mode() != EditMode::NONE && ansi == AnsiState::ESC) {
                 ansi = AnsiState::NONE;
@@ -2815,58 +2549,11 @@ extern "C" __attribute__((noreturn)) void _start() {
         const int my = event.y;
         const bool left_button = (event.przyciski & 1U) != 0;
 
-        if (view.context_open()) {
-            if (event.typ == BWS_ZDARZENIE_MYSZ_RUCH) {
-                view.context_hover(mx, my);
-                continue;
-            }
-            if (event.typ == BWS_ZDARZENIE_MYSZ_DOWN) {
-                const ContextAction action = view.context_action_at(mx, my);
-                if (action == ContextAction::NONE) view.close_context();
-                else perform_context_action(view, model, action);
-                continue;
-            }
-            if (event.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN) {
-                view.close_context();
-                continue;
-            }
-            if (event.typ == BWS_ZDARZENIE_KLAWISZ &&
-                static_cast<char>(event.kod) == '\x1B') {
-                view.close_context();
-                ansi = AnsiState::NONE;
-                continue;
-            }
-        }
-
-        if (view.modal_open() &&
-            (event.typ == BWS_ZDARZENIE_MYSZ_DOWN ||
-             event.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN)) {
-            if (event.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN) continue;
-            const gui_akcja_belki modal_title = gui_hit_test_belki(
-                mx, my, window.x, window.y, window.w);
-            if (modal_title == GUI_BELKA_ZAMKNIJ) {
-                view.close_transient();
-                quit = true;
-                continue;
-            }
-            if (modal_title == GUI_BELKA_MINIMALIZUJ) {
-                view.close_transient();
-                window.minimized = gui_minimalizuj_okno();
-                gui_ustaw_capture_myszy(false);
-                continue;
-            }
-            const int button = view.modal_button_at(mx, my);
-            if (button == 1) submit_modal(view, model);
-            else if (button == 2) view.close_modal();
-            else if (hit(mx, my, view.modal_field())) {
-                view.place_modal_caret(mx);
-                view.draw_modal();
-                gui_odswiez();
-            }
-            continue; /* modal przechwytuje input tylko procesu wlasciciela */
-        }
+        if(view.scrollbar_event(event))continue;
+        if(event.typ==BWS_ZDARZENIE_MYSZ_RUCH && !dragging && !item_dragging)view.pointer_hover(mx,my);
 
         if (event.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN) {
+            last_entry=-1;last_click_time=0;item_drag_candidate=false;item_dragging=false;gui_ustaw_capture_myszy(false);
             const int visual_index = view.row_at(mx, my);
             if (visual_index >= 0) {
                 const int old_entry = model.selected();
@@ -2885,6 +2572,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             window.y = my - drag_y;
             window.clamp();
             bws_przesun_warstwe(window.x, window.y);
+            view.relayout_controls();
             continue;
         }
         if (event.typ == BWS_ZDARZENIE_MYSZ_RUCH &&
@@ -3011,15 +2699,11 @@ extern "C" __attribute__((noreturn)) void _start() {
                 continue;
             }
             if (hit(mx, my, layout.move)) {
-                view.begin_edit(EditMode::MOVE);
-                model.set_status("Wpisz pełną ścieżkę folderu docelowego i naciśnij Enter.");
-                view.draw_search_field();
-                view.draw_status();
-                gui_odswiez();
+                view.open_modal(EditMode::MOVE);
                 continue;
             }
             if (hit(mx, my, layout.run)) {
-                model.run_selected_package();
+                model.run_selected_context();
                 view.draw_status();
                 gui_odswiez();
                 continue;
@@ -3057,20 +2741,6 @@ extern "C" __attribute__((noreturn)) void _start() {
                 if (quick) {
                     view.end_edit();
                     present_workspace_change(view, model.navigate(quick->path));
-                }
-                continue;
-            }
-            if (hit(mx, my, layout.scroll_up)) {
-                if (model.scroll_by(-1, view.visible_rows())) {
-                    view.draw_list_only();
-                    gui_odswiez();
-                }
-                continue;
-            }
-            if (hit(mx, my, layout.scroll_down)) {
-                if (model.scroll_by(1, view.visible_rows())) {
-                    view.draw_list_only();
-                    gui_odswiez();
                 }
                 continue;
             }

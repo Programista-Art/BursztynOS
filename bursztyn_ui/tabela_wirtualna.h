@@ -51,6 +51,17 @@ public:
     size_t liczba_wierszy() const { return dostawca_ ? dostawca_->liczba_wierszy() : 0; }
     size_t liczba_kolumn() const { return dostawca_ ? dostawca_->liczba_kolumn() : 0; }
 
+    // External models can retain their selection/scroll without callbacks or
+    // copying thousands of rows. The owner supplies a shared scrollbar.
+    void ustaw_stan_widoku(int selected, int first, int row_height, int header_height,
+                           int hover = -1, int drop = -1) {
+        wybrany_wiersz_ = selected < 0 ? SIZE_MAX : static_cast<size_t>(selected);
+        wiersz_najechany_ = hover; wiersz_drop_ = drop;
+        wysokosc_wiersza_px_ = row_height; wysokosc_naglowka_px_ = header_height;
+        przewiniecie_y_ = first * wysokosc_wiersza();
+        zewnetrzne_przewijanie_ = true;
+    }
+
     size_t wybrany_wiersz() const { return wybrany_wiersz_; }
     void ustaw_wybrany_wiersz(size_t w) {
         size_t n = liczba_wierszy();
@@ -73,8 +84,8 @@ public:
     size_t pierwszy_widoczny_wiersz() const { return pierwszy_widoczny_; }
     size_t ostatni_widoczny_wiersz() const { return ostatni_widoczny_; }
 
-    int wysokosc_naglowka() const { return 26 * skala_dpi_; }
-    int wysokosc_wiersza() const { return 22 * skala_dpi_; }
+    int wysokosc_naglowka() const { return wysokosc_naglowka_px_ > 0 ? wysokosc_naglowka_px_ : 26 * skala_dpi_; }
+    int wysokosc_wiersza() const { return wysokosc_wiersza_px_ > 0 ? wysokosc_wiersza_px_ : 22 * skala_dpi_; }
 
     Rozmiar zmierz(Rozmiar dostepny) override {
         SkalaUI s = skala_dpi_;
@@ -101,7 +112,7 @@ public:
         int row_h = wysokosc_wiersza();
         int font_h = CzcionkaUI::pobierz_wysokosc(s);
         int pad_text = 6 * s;
-        int sb_w = 12 * s;
+        int sb_w = zewnetrzne_przewijanie_ ? 0 : 12 * s;
 
         // Oblicz całkowitą szerokość kolumn
         int total_col_w = 0;
@@ -157,11 +168,16 @@ public:
             int y = start_y + static_cast<int>(r - idx_start) * row_h;
             if (y + row_h <= header_h) continue;
 
+            if (!ctx.przecina_klip(Prostokat(0,y,table_w,row_h))) continue;
             bool zaznaczony = (r == wybrany_wiersz_);
             Prostokat r_wiersza(1, y, table_w - 2, row_h);
 
-            if (zaznaczony) {
+            if (static_cast<int>(r) == wiersz_drop_) {
+                ctx.rysuj_prostokat(r_wiersza,motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY));
+            } else if (zaznaczony) {
                 ctx.rysuj_prostokat(r_wiersza, motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));
+            } else if (static_cast<int>(r)==wiersz_najechany_) {
+                ctx.rysuj_prostokat(r_wiersza,motyw_kolor(MOTYW_KOLOR_PRZYCISK_NAJECHANY));
             } else if ((r & 1) != 0) {
                 ctx.rysuj_prostokat(r_wiersza, motyw_kolor(MOTYW_KOLOR_PODNIESIONY));
             }
@@ -187,7 +203,7 @@ public:
         }
 
         // Pasek przewijania pionowy
-        rysuj_pasek_pionowy(ctx, rows, row_h, sb_w);
+        if(!zewnetrzne_przewijanie_) rysuj_pasek_pionowy(ctx, rows, row_h, sb_w);
     }
 
     void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e) override {
@@ -197,7 +213,7 @@ public:
         SkalaUI s = skala_dpi_;
         int header_h = wysokosc_naglowka();
         int row_h = wysokosc_wiersza();
-        int sb_w = 12 * s;
+        int sb_w = zewnetrzne_przewijanie_ ? 0 : 12 * s;
 
         // Kliknięcie w nagłówek kolumny -> zażądaj sortowania
         if (ly < header_h) {
@@ -344,6 +360,9 @@ private:
                                         motyw_kolor(MOTYW_KOLOR_RAMKA), 3 * s);
     }
 
+    bool zewnetrzne_przewijanie_{false};
+    int wysokosc_wiersza_px_{0}, wysokosc_naglowka_px_{0};
+    int wiersz_najechany_{-1}, wiersz_drop_{-1};
     DostawcaDanychTabeli* dostawca_{nullptr};
     size_t wybrany_wiersz_{0};
     int przewiniecie_x_{0};

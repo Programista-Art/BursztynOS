@@ -541,8 +541,8 @@ notatnik_blob.o: notatnik_tmp.o bursztyn_gui.o $(NOTATNIK_LINKER)
 # 15. EKSPLORATOR PLIKOW .bur
 # ============================================================================
 
-eksplorator_tmp.o: programy/eksplorator/eksplorator-plikow.cpp bursztyn_gui.h
-	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
+eksplorator_tmp.o: programy/eksplorator/eksplorator-plikow.cpp bursztyn_gui.h plik_popup_ui.h plik_operacje_ui.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
 
 eksplorator_blob.o: eksplorator_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
 	$(LD) -T $(EKSPLORATOR_LINKER) $(RING3_LDFLAGS) \
@@ -684,8 +684,8 @@ repro_blob.o: repro_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
 # 16. MENEDZER OKIEN .bur
 # ============================================================================
 
-menedzer_okien_tmp.o: menedzer_okien.cpp bursztyn_gui.h ui_skala.h pulpit_geometria.h obrazy/png_dekoder.h
-	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
+menedzer_okien_tmp.o: menedzer_okien.cpp bursztyn_gui.h ui_skala.h pulpit_geometria.h obrazy/png_dekoder.h plik_popup_ui.h plik_operacje_ui.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
 
 menedzer_okien_blob.o: menedzer_okien_tmp.o bursztyn_gui.o $(MENEDZER_OKIEN_LINKER)
 	$(LD) -T $(MENEDZER_OKIEN_LINKER) $(RING3_LDFLAGS) \
@@ -1540,3 +1540,15 @@ test-abs-map-diag:
 	@mkdir -p .wm-test
 	g++ -std=c++17 -O1 -g -Wall -Wextra -ffunction-sections -fdata-sections -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYNDIAGABSMAP=1 -fsanitize=address,undefined input_device.cpp narzedzia/test_abs_map_diag.cpp -Wl,--gc-sections -o .wm-test/abs-map-diag
 	ASAN_OPTIONS=detect_leaks=1 .wm-test/abs-map-diag
+
+.PHONY: test-explorer-host
+test-explorer-host:
+	@mkdir -p .bursztyn-ui-test
+	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined narzedzia/test_explorer_host.cpp -o .bursztyn-ui-test/test-explorer
+	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-explorer
+
+.PHONY: test-desktop-files-host
+test-desktop-files-host:
+	@mkdir -p .bursztyn-ui-test
+	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined narzedzia/test_desktop_files_host.cpp -o .bursztyn-ui-test/test-desktop-files
+	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-desktop-files
