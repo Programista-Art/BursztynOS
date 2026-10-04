@@ -1,11 +1,13 @@
 # Bursztyn OS - Windows PowerShell Launcher
 # QEMU BIOS / UEFI + VirtIO Full / USB HID
+# Windows: GTK domyslnie; SDL tylko eksperymentalnie / diagnostycznie.
+# Linux zachowuje SDL. Windows SDL z tabletem zatrzymuje boot w tescie A/B.
 
 param(
     [string]$QemuPath = "",
     [string]$DiskSize = "4G",
     [string]$AudioBackend = "dsound",
-    [string]$DisplayBackend = "sdl",
+    [string]$DisplayBackend = "gtk",
     [string]$Iso = ""
 )
 
@@ -101,13 +103,14 @@ function Start-BursztynQemu {
     $argsList = @(
         "-machine", "pc,hpet=on",
         "-cpu", "max",
-        "-accel", "tcg,thread=single",
+        "-accel", $(if ($VirtIoFull) { "tcg,thread=multi" } else { "tcg,thread=single" }),
         "-smp", "1",
         "-m", "2G"
     )
 
     if ($VirtIoFull) {
         # VirtIO Full: GPU, BLK, NET, RNG, INPUT
+        # GTK jest bezpiecznym frontendem Windows; SDL sluzy do diagnostyki.
         # Wyeliminowano miniaturowe okno 640x480 przez ustawienie xres=1280,yres=720 w virtio-vga
         # oraz -vga none zapobiegajacy rozdzielaniu konsoli na std-vga i virtio-gpu.
         $argsList += @(
@@ -121,9 +124,8 @@ function Start-BursztynQemu {
             "-vga", "none",
             "-device", "virtio-vga,id=gpu0,disable-legacy=on,xres=1280,yres=720"
         )
-        if ($DisplayBackend) {
-            $argsList += @("-display", $DisplayBackend)
-        }
+        $effectiveDisplay = if ($DisplayBackend) { $DisplayBackend } else { "gtk" }
+        $argsList += @("-display", $effectiveDisplay)
     } else {
         # Standard emulation: AHCI + E1000 + xHCI USB + Bochs/STD VGA
         $argsList += @(
@@ -171,6 +173,10 @@ function Start-BursztynQemu {
     Write-Host "Uruchamianie: $ModeName"
     Write-Host "Firmware:     $Firmware"
     Write-Host "Profil:       $(if ($VirtIoFull) { 'VirtIO Full' } else { 'Standard VGA/USB' })"
+    if ($VirtIoFull) {
+        $displayLabel = if ($effectiveDisplay -match '^sdl(,|$)') { 'SDL eksperymentalny / diagnostyczny' } else { $effectiveDisplay.ToUpperInvariant() }
+        Write-Host "Display:      $displayLabel"
+    }
     Write-Host "ISO:          $IsoPath"
     Write-Host "Dysk:         $Disk"
     Write-Host "Rozdzielczosc poczatkowa okna: 1280x720"
@@ -219,6 +225,10 @@ while ($true) {
   9  - BIOS / Bochs VBE (FHD, QHD, UWQHD, 4K, skala, rollback)
  10  - UEFI (backend + skala)
 
+ FRONTEND WINDOWS - VIRTIO FULL (aktualnie: $DisplayBackend)
+ 11  - GTK (zalecany, domyslny)
+ 12  - SDL eksperymentalny / diagnostyczny
+
  ZAINSTALOWANY SYSTEM - BEZ ISO
  14  - UEFI z wirtualny_dysk.img (odpowiednik make run-installed)
 
@@ -240,6 +250,8 @@ while ($true) {
         "8" { Start-BursztynQemu -ModeName "Interaktywne testy UEFI" -Firmware "UEFI" -IsoPath $IsoNormal -VirtIoFull $false -SaveLog $true }
         "9" { Start-BursztynQemu -ModeName "Ustawienia ekranu BIOS Bochs VBE" -Firmware "BIOS" -IsoPath $IsoNormal -VirtIoFull $false -SaveLog $true }
         "10" { Start-BursztynQemu -ModeName "Ustawienia ekranu UEFI" -Firmware "UEFI" -IsoPath $IsoNormal -VirtIoFull $false -SaveLog $true }
+        "11" { $DisplayBackend = "gtk" }
+        "12" { $DisplayBackend = "sdl" }
         "14" { Start-BursztynQemu -ModeName "Zainstalowany UEFI" -Firmware "UEFI" -IsoPath "" -VirtIoFull $false -SaveLog $false }
         "15" { Start-BursztynQemu -ModeName "Instalator UEFI" -Firmware "UEFI" -IsoPath $IsoNormal -VirtIoFull $false -SaveLog $true }
         "0" { exit 0 }
