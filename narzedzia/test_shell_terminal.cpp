@@ -17,17 +17,26 @@ static std::string copied;
 static std::string sponsor_file;
 static bool sponsor_exists=true, popup_open=false;
 static Prostokat popup_rect;
+static uint32_t theme_background=0x102030;
+static unsigned popup_paints=0;
+static bool expect_live_theme=false;
+static std::vector<uint32_t> popup_pixels;
 uint8_t motyw_cien_okna() { return 1; }
 bool gui_ustaw_popup_aplikacji(bool open,int x,int y,int w,int h) { popup_open=open;popup_rect=Prostokat(x,y,w,h);return true; }
-bool gui_blit_popup(int,int,int w,int h,const uint32_t* data) { assert(w>0 && h>0 && data);return true; }
+bool gui_blit_popup(int,int,int w,int h,const uint32_t* data) { assert(w>0 && h>0 && data);++popup_paints;popup_pixels.assign(data,data+w*h);return true; }
 bool clipboard_size(const char*,uint64_t* n) { *n=copied.size()+1;return true; }
 bool clipboard_read(const char*,void* out,uint64_t capacity,uint64_t* n) { if(capacity<copied.size()+1) return false;*n=copied.size()+1;memcpy(out,copied.c_str(),*n);return true; }
 bool pobierz_rozmiar_pliku(const char* path,uint32_t* n) { assert(!strcmp(path,SHELL_SPONSOR_PATH));*n=sponsor_file.size();return sponsor_exists; }
 bool gui_czekaj_na_zdarzenie(bws_zdarzenie* e) {
-    assert(event_index<events.size());*e=events[event_index++];return true;
+    assert(event_index<events.size());
+    if(expect_live_theme && events[event_index].typ==BWS_ZDARZENIE_BLUR) {
+        assert(popup_open && !popup_pixels.empty());
+        assert(popup_paints>0);expect_live_theme=false;
+    }
+    *e=events[event_index++];return true;
 }
 void gui_odswiez() {}
-uint32_t motyw_kolor(uint32_t id) { return id==MOTYW_KOLOR_OKNOTLO?0x102030:0xeeddcc; }
+uint32_t motyw_kolor(uint32_t id) { return id==MOTYW_KOLOR_OKNOTLO?theme_background:(0xeeddcc ^ (theme_background ^ 0x102030)); }
 uint16_t motyw_promien(uint32_t) { return 0; }
 uint8_t motyw_grubosc_ramki() { return 1; }
 void motyw_odswiez_lokalny() {}
@@ -112,6 +121,12 @@ int main() {
         ui_skala_procent=scale;shell_screen_w=1280;shell_screen_h=720;reset();g_obecny_bufor_wejscia=input;g_input_capacity=sizeof(input);
         strcpy(input,"Zażółć gęślą jaźń");g_input_anchor=0;g_caret=strlen(input);
         shell_context_open(shell_input_rect().x+5,shell_input_rect().y+5);
+        int longest=0;
+        for(size_t i=0;i<g_context_menu->menu().liczba_elementow();++i) {
+            int width=CzcionkaUI::zmierz_tekst(g_context_menu->menu().element(i)->tekst(),ui_skala());
+            if(width>longest) longest=width;
+        }
+        assert(popup_rect.szerokosc==longest+2*ui_skala()+16*ui_skala()+2*static_cast<int>(ui_skala()));
         assert(popup_open);g_context_menu->menu().element(0)->wykonaj();assert(copied==input);
         g_context_menu->menu().element(3)->wykonaj();assert(!input[0]);
         g_context_menu->menu().element(2)->wykonaj();assert(!strcmp(input,"Zażółć gęślą jaźń"));
@@ -144,6 +159,8 @@ int main() {
             for(int i=0;i<6;++i) { Prostokat r=view->prostokat_elementu_klienta(i);assert(r.szerokosc>0 && r.wysokosc>0); }
             bws_zdarzenie outside{};outside.typ=BWS_ZDARZENIE_MYSZ_DOWN;outside.x=-1;outside.y=-1;
             assert(shell_context_event(outside));assert(!popup_open);outside.typ=BWS_ZDARZENIE_MYSZ_UP;assert(shell_context_event(outside));
+            // Dismissal consumes this DOWN/UP pair only; subsequent clicks route normally.
+            outside.typ=BWS_ZDARZENIE_MYSZ_DOWN;assert(!shell_context_event(outside));
         }
         reset();shell_wypisz("Nie usuwaj ąę\n");g_output_selection=true;g_selection_anchor={0,0};g_selection_end={0,strlen(shell_line(0).tekst)};
         shell_context_open(shell_output_rect().x+5,shell_output_rect().y+5);
@@ -166,6 +183,54 @@ int main() {
         reset();sponsor_file=std::string(3000,'W')+"\n";shell_sponsors();assert(g_total_rows>2);
         reset();sponsor_file="";for(int i=0;i<100;++i) sponsor_file+="Sponsor ąęż\n";shell_sponsors();assert(shell_max_scroll()>0);
         reset();char version_command[]="wersja";arguments.dane[0]=version_command;wykonaj_polecenie(arguments);assert(!strcmp(shell_line(0).tekst,"Bursztyn OS v1.0.1.6"));
+    }
+    reset();sponsor_file="Test wsparcia ąę\n";
+    char support_command[]="wsparcie";Argumenty support_args{};
+    assert(parse_argumenty(support_command,&support_args));wykonaj_polecenie(support_args);
+    assert(!strcmp(shell_line(1).tekst,"Test wsparcia ąę"));
+    reset();wypisz_pomoc();bool support_help=false;
+    for(int i=0;i<g_liczba_linii;++i) {
+        assert(!strstr(shell_line(i).tekst,"sponsorzy"));
+        if(!strcmp(shell_line(i).tekst,"wsparcie")) {
+            assert(!strcmp(shell_line(i).opis,"Wyświetla listę wspierających Bursztyn OS."));support_help=true;
+        }
+    }
+    assert(support_help);
+    for(uint32_t scale:{100U,125U}) {
+        reset();ui_skala_procent=scale;shell_w=ui_skaluj(700,scale);shell_h=ui_skaluj(450,scale);
+        for(int i=0;i<70;++i) shell_wypisz("wiersz ąę\n");
+        shell_set_scroll(3);dodaj_do_historii("pisz historia");
+        memset(input,'W',sizeof(input)-1);input[sizeof(input)-1]=0;
+        g_obecny_bufor_wejscia=input;g_input_capacity=sizeof(input);g_caret=strlen(input);g_input_anchor=2;
+        shell_rysuj_terminal();
+        g_output_selection=true;g_selection_anchor={4,0};g_selection_end={5,3};
+        const int scroll=g_scroll_linia,hscroll=g_input_scroll_px,lines=g_liczba_linii;
+        ShellLine* buffer=g_linie;std::string text=input,clip=copied;
+        shell_context_open(shell_input_rect().x+5,shell_input_rect().y+5);
+        auto before=submitted,menu_before=popup_pixels;unsigned paints=popup_paints;
+        theme_background=theme_background==0x102030?0x405060:0x102030;
+        bws_zdarzenie theme{};theme.typ=BWS_ZDARZENIE_MOTYW_ZMIENIONY;
+        events.push_back(theme);expect_live_theme=true;
+        bws_zdarzenie blur{};blur.typ=BWS_ZDARZENIE_BLUR;events.push_back(blur);bytes("x");assert(pobierz_znak_blokujaco()=='x');
+        assert(submitted!=before && popup_pixels!=menu_before && popup_paints>paints && !expect_live_theme);
+        assert(submitted_rect.x==shell_obszar_klienta().x && submitted_rect.y==shell_obszar_klienta().y);
+        assert(g_linie==buffer && g_liczba_linii==lines && text==input && copied==clip);
+        assert(g_scroll_linia==scroll && g_input_scroll_px==hscroll && !g_auto_scroll);
+        assert(g_caret==text.size() && g_input_anchor==2 && historia_ilosc==1);
+        assert(g_output_selection && g_selection_anchor.line==4 && g_selection_end.line==5);
+        assert(ui_skala_procent==scale);shell_context_close();
+    }
+    for(uint32_t scale:{100U,125U}) {
+        Menu menu;auto& item=menu.dodaj_element("Zażółć",1);
+        WidokMenuPopup view;view.ustaw(&menu,nullptr);SkalaUI s=SkalaUI::procent(scale);
+        const int text=CzcionkaUI::zmierz_tekst(item.tekst(),s);
+        assert(view.tekst_x(s)==1*s+8*s);
+        assert(view.wymagany_rozmiar(s).szerokosc==2*s+16*s+text);
+        item.ustaw_ikone(1).ustaw_typ_zaznaczenia(TypZaznaczeniaMenu::Pole).ustaw_skrot("Ctrl+C");
+        assert(view.tekst_x(s)==1*s+8*s+18*s+20*s);
+        assert(view.wymagany_rozmiar(s).szerokosc==2*s+16*s+18*s+20*s+text+12*s+CzcionkaUI::zmierz_tekst("Ctrl+C",s));
+        item.ustaw_widoczny(false);
+        assert(view.tekst_x(s)==1*s+8*s);
     }
     reset();sponsor_file=std::string(SHELL_SPONSOR_LINE_LIMIT,'a')+"\r\n";shell_sponsors();
     assert(!strcmp(shell_line(0).tekst,"Sponsorzy projektu"));

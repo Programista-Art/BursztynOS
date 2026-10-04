@@ -1,0 +1,8 @@
+{
+  "session_count": 1,
+  "checks": {},
+  "screenshots": [],
+  "pass": false,
+  "error": "Desktop readiness timed out",
+  "diagnostic_error": "cannot access local variable 'layers' where it is not associated with a value"
+}

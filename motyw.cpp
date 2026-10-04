@@ -11,6 +11,7 @@
 
 #ifndef BURSZTYN_HOST_TEST
 #include "pzb.h"
+#include "skladacz_obrazu.h"
 #include "psf.h"
 #include "scheduler.h"
 #include "bws_api.h"
@@ -635,6 +636,7 @@ static uint64_t pobierz_czas_systemowy_ms() {
 
 void motyw_rozglos_zmiane(void) {
 #ifndef BURSZTYN_HOST_TEST
+    skladacz_obrazu_odswiez_dekoracje();
     bws_zdarzenie e{};
     e.typ = BWS_ZDARZENIE_MOTYW_ZMIENIONY;
     e.timestamp = pobierz_czas_systemowy_ms();

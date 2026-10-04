@@ -1462,3 +1462,26 @@ ekran_format_ring3.o: ekran_format.cpp ekran_format.h
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
 bws_nowoczesne.o ekran.o grafika.o kernel.o: ekran.h ekran_format.h bufory_grafiki.h
 test_tmp.o: programy/test/ekran_testy.h programy/ekran/klient.h programy/ekran/ekran_okno.h ekran_format.h pulpit_geometria.h
+
+# Central WM chrome and shared popup layout dependencies.
+skladacz_obrazu.o: wm_dekoracje.h motyw.h bursztyn_ui/czcionka.h ui_skala.h
+motyw.o: skladacz_obrazu.h
+shell_tmp.o: bursztyn_ui/widok_menu_popup.h
+grafika.o: wm_input.h
+bursztyn_gui.o: wm_belka_hit.h
+
+.PHONY: test-wm-click-routing test-wm-dekoracje test-shell-host
+test-wm-click-routing:
+	@mkdir -p .wm-test
+	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_wm_click_routing.cpp -Wl,--gc-sections -o .wm-test/click-routing
+	ASAN_OPTIONS=detect_leaks=0 .wm-test/click-routing
+
+test-wm-dekoracje:
+	@mkdir -p .wm-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined narzedzia/test_wm_dekoracje.cpp -o .wm-test/dekoracje
+	ASAN_OPTIONS=detect_leaks=0 .wm-test/dekoracje
+
+test-shell-host:
+	@mkdir -p .wm-test
+	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_shell_terminal.cpp -Wl,--gc-sections -o .wm-test/shell
+	ASAN_OPTIONS=detect_leaks=0 .wm-test/shell

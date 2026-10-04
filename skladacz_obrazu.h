@@ -439,3 +439,6 @@ void skladacz_cofnij_ekran(ZmianaWarstwEkranu*);
 void skladacz_zakoncz_zmiane_ekranu(ZmianaWarstwEkranu*,bool zastosowana);
 void skladacz_reset_ekranu();
 void skladacz_stan_max(int pid,bool max);
+
+void skladacz_obrazu_odswiez_dekoracje();
+bool skladacz_obrazu_dekoracja_w_punkcie(int pid, int lx, int ly);

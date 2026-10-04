@@ -44,19 +44,34 @@ public:
         indeks_otwartego_podmenu_ = -1;
         uniewaznij_element(aktywny_); aktywny_ = i; uniewaznij_element(aktywny_);
     }
-    Rozmiar wymagany_rozmiar(SkalaUI skala = 1) const {
-        int w = 150 * skala, h = 2 * skala;
-        if (!menu_) return Rozmiar(w, 28 * skala);
-        for (size_t i = 0; i < menu_->liczba_elementow(); ++i) {
-            const ElementMenu* e = menu_->element(i); if (!e || !e->czy_widoczny()) continue;
-            h += e->czy_separator() ? 9 * skala : 24 * skala;
-            if (!e->czy_separator()) {
-                int sw = CzcionkaUI::zmierz_tekst(e->tekst(), skala) +
-                         CzcionkaUI::zmierz_tekst(e->skrot(), skala) + 92 * skala;
-                if (sw > w) w = sw;
-            }
+    // Shared columns keep every label left aligned; absent features cost no space.
+    struct Kolumny { int znak=0, ikona=0, tekst=0, skrot=0, strzalka=0; };
+    Kolumny kolumny(SkalaUI s) const {
+        Kolumny c;
+        if(!menu_) return c;
+        for(size_t i=0;i<menu_->liczba_elementow();++i) {
+            const ElementMenu* e=menu_->element(i);
+            if(!e || !e->czy_widoczny() || e->czy_separator()) continue;
+            if(e->typ_zaznaczenia()!=TypZaznaczeniaMenu::Brak || e->czy_zaznaczony()) c.znak=18*s;
+            if(e->ikona()) c.ikona=20*s;
+            if(e->podmenu()) c.strzalka=14*s;
+            int width=CzcionkaUI::zmierz_tekst(e->tekst(),s);if(width>c.tekst) c.tekst=width;
+            width=CzcionkaUI::zmierz_tekst(e->skrot(),s);if(width>c.skrot) c.skrot=width;
         }
-        return Rozmiar(w, h);
+        return c;
+    }
+    int tekst_x(SkalaUI s) const { Kolumny c=kolumny(s);return 1*s+8*s+c.znak+c.ikona; }
+    Rozmiar wymagany_rozmiar(SkalaUI skala = 1) const {
+        Kolumny c=kolumny(skala);
+        int w=2*skala+16*skala+c.znak+c.ikona+c.tekst+c.strzalka;
+        if(c.skrot) w+=12*skala+c.skrot;
+        int h=2*skala;
+        if(!menu_) return Rozmiar(w,28*skala);
+        for(size_t i=0;i<menu_->liczba_elementow();++i) {
+            const ElementMenu* e=menu_->element(i);
+            if(e && e->czy_widoczny()) h+=e->czy_separator()?9*skala:24*skala;
+        }
+        return Rozmiar(w,h);
     }
     Prostokat prostokat_elementu(int indeks) const {
         if (!menu_ || indeks < 0) return Prostokat();
@@ -81,6 +96,8 @@ public:
         rysuj_tlo_i_ramke(ctx, styl_.normalny);
         if (!menu_) return;
         SkalaUI s = skala_dpi_;
+        const Kolumny columns=kolumny(s);
+        const int label_x=tekst_x(s);
         for (int i = 0; i < static_cast<int>(menu_->liczba_elementow()); ++i) {
             ElementMenu* e = menu_->element(i); if (!e || !e->czy_widoczny()) continue;
             Prostokat r = prostokat_elementu(i);
@@ -103,24 +120,24 @@ public:
             if (e->czy_zaznaczony()) {
                 uint32_t mark_col = (jest_aktywny || jest_wcisniety) ? stan_wiersza.tekst : motyw_kolor(MOTYW_KOLOR_AKCENT);
                 if (e->typ_zaznaczenia() == TypZaznaczeniaMenu::Radio)
-                    ctx.rysuj_zaokraglony_prostokat(Prostokat(r.x + 9 * s, ty + 5 * s, 6 * s, 6 * s),
+                    ctx.rysuj_zaokraglony_prostokat(Prostokat(r.x + 8 * s + 3 * s, ty + 5 * s, 6 * s, 6 * s),
                                                     mark_col, 3 * s);
                 else {
-                    ctx.rysuj_linie_pozioma(r.x + 7 * s, ty + 8 * s, 5 * s, mark_col);
-                    ctx.rysuj_linie_pozioma(r.x + 10 * s, ty + 11 * s, 8 * s, mark_col);
+                    ctx.rysuj_linie_pozioma(r.x + 8 * s, ty + 8 * s, 5 * s, mark_col);
+                    ctx.rysuj_linie_pozioma(r.x + 11 * s, ty + 11 * s, 8 * s, mark_col);
                 }
             }
-            if (e->ikona() != 0) rysuj_ikone_ui(ctx, Prostokat(r.x + 25 * s, r.y + 5 * s,
+            if (e->ikona() != 0) rysuj_ikone_ui(ctx, Prostokat(r.x + 8 * s + columns.znak, r.y + 5 * s,
                                                                14 * s, 14 * s),
                                                 e->ikona(), e->czy_wlaczony(), s);
-            ctx.rysuj_tekst(Punkt(r.x + 45 * s, ty), e->tekst(), kolor, s);
+            ctx.rysuj_tekst(Punkt(label_x, ty), e->tekst(), kolor, s);
             if (e->skrot()[0]) {
                 int sw = CzcionkaUI::zmierz_tekst(e->skrot(), s);
                 uint32_t skrot_col = (jest_aktywny || jest_wcisniety) ? stan_wiersza.tekst
                     : (e->czy_wlaczony() ? motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI) : motyw_kolor(MOTYW_KOLOR_TEKST_WYLACZONY));
-                ctx.rysuj_tekst(Punkt(r.prawy() - sw - 22 * s, ty), e->skrot(), skrot_col, s);
+                ctx.rysuj_tekst(Punkt(r.prawy() - sw - 8 * s - columns.strzalka, ty), e->skrot(), skrot_col, s);
             }
-            if (e->podmenu()) ctx.rysuj_tekst(Punkt(r.prawy() - 15 * s, ty), ">", kolor, s);
+            if (e->podmenu()) ctx.rysuj_tekst(Punkt(r.prawy() - 8 * s - 6 * s, ty), ">", kolor, s);
         }
     }
     void obsluz_ruch_myszy(ZdarzenieMyszki& e) override {

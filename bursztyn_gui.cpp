@@ -5,6 +5,7 @@
 
 #include "bursztyn_gui.h"
 #include "ui_skala.h"
+#include "wm_belka_hit.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -1574,7 +1575,9 @@ void gui_rysuj_standardowa_belke(int x, int y, int szer,
                                  const char* tytul, bool zmaksymalizowane) {
     const uint32_t p = legacy_wlaczony ? 100U : ui_skala_procent;
     if (!tytul || szer < ui_skaluj(90,p)) return;
-    if (legacy_wlaczony) (void)gui_ustaw_tytul_okna(tytul);
+    // Normal window chrome is composed by the WM from central theme roles.
+    (void)gui_ustaw_tytul_okna(tytul);
+    if (!legacy_wlaczony) return;
 
     const uint32_t kolor_belki = motyw_kolor(MOTYW_KOLOR_PANEL);
     const uint32_t kolor_akcent = motyw_kolor(MOTYW_KOLOR_AKCENT);
@@ -1625,22 +1628,7 @@ void gui_rysuj_standardowa_belke(int x, int y, int szer,
 gui_akcja_belki gui_hit_test_belki(int mx, int my,
                                    int x, int y, int szer) {
     const uint32_t p = legacy_wlaczony ? 100U : ui_skala_procent;
-    if (szer < ui_skaluj(90,p) || mx < x || mx >= x + szer || my < y || my >= y + ui_skaluj(28,p))
-        return GUI_BELKA_BRAK;
-
-    int r = ui_skaluj(motyw_promien(MOTYW_ROG_OKNO), p);
-    int dy = my - y;
-    if (dy >= 0 && dy < r) {
-        int inset = motyw_promien_inset(r, dy);
-        if (mx < x + inset || mx >= x + szer - inset) {
-            return GUI_BELKA_BRAK;
-        }
-    }
-
-    if (mx >= x + szer - ui_skaluj(26,p)) return GUI_BELKA_ZAMKNIJ;
-    if (mx >= x + szer - ui_skaluj(50,p)) return GUI_BELKA_MAKSYMALIZUJ;
-    if (mx >= x + szer - ui_skaluj(74,p)) return GUI_BELKA_MINIMALIZUJ;
-    return GUI_BELKA_DRAG;
+    return wm_hit_test_belki(mx,my,x,y,szer,p,ui_skaluj(motyw_promien(MOTYW_ROG_OKNO),p));
 }
 
 void gui_pobierz_rozdzielczosc(int* w,

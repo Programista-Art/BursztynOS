@@ -1,3 +1,4 @@
+#include "wm_input.h"
 #include "grafika.h"
 #include "bufory_grafiki.h"
 #include "sterowniki/grafika/bochs_vbe.h"
@@ -2181,31 +2182,10 @@ static void NaprawWlascicielaMyszyJesliProcesZniknal() {
 }
 
 static int znajdz_warstwe_pod_punktem(int x, int y) {
-    const int overlay = skladacz_obrazu_overlay_pod_punktem(x, y);
-    if (overlay >= 0) return overlay;
-    int wynik = -1;
-    int najlepsze_z = -2147483647 - 1;
-    for (int pid = 1; pid < SKLADACZ_MAKS_WARSTW; ++pid) {
-        warstwa_obrazu* w = pobierz_warstwe(pid);
-        if (!w || !w->aktywna || x < w->x || y < w->y ||
-            static_cast<int64_t>(x) >= static_cast<int64_t>(w->x) + w->szerokosc ||
-            static_cast<int64_t>(y) >= static_cast<int64_t>(w->y) + w->wysokosc)
-            continue;
-        if (w->bufor_pikseli) {
-            const int lx = x - w->x;
-            const int ly = y - w->y;
-            const uint64_t idx = static_cast<uint64_t>(ly) * static_cast<uint64_t>(w->szerokosc) + static_cast<uint64_t>(lx);
-            if (w->bufor_pikseli[idx] == 0x00000000U) {
-                continue; // Przezroczysty piksel (np. zaokrąglony róg) - przepuść kliknięcie
-            }
-        }
-        if (wynik < 0 || w->z_order > najlepsze_z ||
-            (w->z_order == najlepsze_z && pid > wynik)) {
-            wynik = pid;
-            najlepsze_z = w->z_order;
-        }
-    }
-    return wynik;
+    return wm_warstwa_pod_punktem(x,y,
+        skladacz_obrazu_overlay_pod_punktem(x,y),
+        [](int pid) { return pobierz_warstwe(pid); },
+        [](int pid,int lx,int ly) { return skladacz_obrazu_dekoracja_w_punkcie(pid,lx,ly); });
 }
 
 static void ustaw_focus_gui(int pid) {
@@ -2421,6 +2401,7 @@ extern "C" void zaktualizuj_mysze_zrodlo(int dx,
         }
         const int cel = capture_pid_gui > 0 ? capture_pid_gui : aktywny_pid_gui;
         if (klik) {
+#if BURSZTYN_DEBUG_GUI_INPUT
             static uint32_t s_click_trace_cnt = 0;
             if (s_click_trace_cnt < 30) {
                 ++s_click_trace_cnt;
@@ -2457,6 +2438,7 @@ extern "C" void zaktualizuj_mysze_zrodlo(int dx,
                 *cp = '\0';
                 klog_serial(cbuf);
             }
+#endif
         }
         if (cel > 0) {
             if (klik || pusc || dx != 0 || dy != 0) {

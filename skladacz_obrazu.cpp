@@ -39,6 +39,7 @@
 
 #include "skladacz_obrazu.h"
 #include "ekran.h"
+#include "wm_dekoracje.h"
 #include "zegar_ui.h"
 #include "bufory_grafiki.h"
 #include "ekran_format.h"
@@ -1462,6 +1463,26 @@ void usun_warstwe(
 
 namespace {
 
+bool ma_dekoracje(int pid) {
+    return pid_poprawny(pid) && tablica_warstw[pid].z_order>0 && tytul_okna[pid][0];
+}
+void zloz_dekoracje(int pid,const GuiDirtyRect& clip) {
+    if(!ma_dekoracje(pid)) return;
+    const auto& w=tablica_warstw[pid];
+    const int bar=ui_skaluj(28,ekran_skala()),edge=ui_skaluj(1,ekran_skala());
+    if(clip.x>=w.x+edge && clip.y>=w.y+bar &&
+       clip.x+clip.width<=w.x+int(w.szerokosc)-edge &&
+       clip.y+clip.height<=w.y+int(w.wysokosc)-edge) return;
+    const BursztynMotyw* theme=motyw_pobierz_aktywny();
+    wm_rysuj_dekoracje(w.szerokosc,w.wysokosc,tytul_okna[pid],
+        stan_okna[pid]==GUI_OKNO_ZMAKSYMALIZOWANE,ekran_skala(),*theme,
+        [&](int x,int y,uint32_t color) {
+            x+=w.x;y+=w.y;
+            if(x>=clip.x && y>=clip.y && x<clip.x+clip.width && y<clip.y+clip.height)
+                grafika_zapisz_surowy_piksel(x,y,color);
+        });
+}
+
 void zloz_warstwe(
     int indeks,
     int ekran_szer,
@@ -1487,6 +1508,8 @@ void zloz_warstwe(
         return;
     }
 
+    const bool decorated=ma_dekoracje(indeks);
+    const int bar=ui_skaluj(28,ekran_skala());
     const uint64_t szerokosc_warstwy =
         static_cast<uint64_t>(
             static_cast<uint32_t>(
@@ -1549,6 +1572,7 @@ void zloz_warstwe(
             clip.dst_y +
             y;
 
+        if(decorated && dst_y-w.y<bar) continue;
         for (int x = 0;
              x < clip.szer;
              ++x) {
@@ -1584,6 +1608,7 @@ void zloz_warstwe(
             );
         }
     }
+    zloz_dekoracje(indeks,{0,0,ekran_szer,ekran_wys});
 }
 
 void zloz_snapshot_region(const LayerRenderInfo& w,const GuiDirtyRect& r) {
@@ -1591,12 +1616,15 @@ void zloz_snapshot_region(const LayerRenderInfo& w,const GuiDirtyRect& r) {
     int x1=w.x+w.width<r.x+r.width?w.x+w.width:r.x+r.width;
     int y1=w.y+w.height<r.y+r.height?w.y+w.height:r.y+r.height;
     if(x0>=x1||y0>=y1||!w.buffer)return;
+    const bool decorated=ma_dekoracje(w.pid) && w.buffer==tablica_warstw[w.pid].bufor_pikseli;
     for(int py=y0;py<y1;++py){
+        if(decorated && py-w.y<ui_skaluj(28,ekran_skala())) continue;
         uint64_t first=(uint64_t)(py-w.y)*(uint32_t)w.width+(uint32_t)(x0-w.x);
         uint64_t len=(uint32_t)(x1-x0);if(first>w.pixels||len>w.pixels-first)return;
         const uint32_t* src=w.buffer+first;uint32_t* dst=grafika_pobierz_wiersz_backbuffer(py)+x0;
         for(int px=x0;px<x1;++px){uint32_t c=*src++;if(c)*dst=c&SKLADACZ_MASKA_KOLORU_RGB;++dst;}
     }
+    if(decorated) zloz_dekoracje(w.pid,r);
 }
 
 void rysuj_drag_overlay_region(const GuiDirtyRect& region) {
@@ -1980,6 +2008,7 @@ bool skladacz_obrazu_ustaw_tytul(int pid, const char* tytul) {
     }
     if (tytul_okna[pid][i] != '\0') zmieniony = true;
     tytul_okna[pid][i] = '\0';
+    if(zmieniony) skladacz_obrazu_odswiez_dekoracje();
     return zmieniony;
 }
 
@@ -2286,4 +2315,24 @@ bool skladacz_test_reset_ekranu(){
     skladacz_reset_ekranu();
     return dirty_count==1 && dirty_rects[0].x==0 && dirty_rects[0].y==0 &&
         dirty_rects[0].width==grafika_pobierz_szerokosc() && dirty_rects[0].height==grafika_pobierz_wysokosc() && !cursor_pending;
+}
+
+// Theme changes invalidate WM-owned strips only; retained client buffers survive.
+bool skladacz_obrazu_dekoracja_w_punkcie(int pid, int lx, int ly) {
+    if (!ma_dekoracje(pid)) return false;
+    const auto& w=tablica_warstw[pid];
+    // Input geometry stays stable across themes. Rounded corners are visual.
+    return wm_dekoracja_w_punkcie(w.szerokosc,w.wysokosc,lx,ly,ekran_skala());
+}
+
+void skladacz_obrazu_odswiez_dekoracje() {
+    const int bar=ui_skaluj(28,ekran_skala()),edge=ui_skaluj(1,ekran_skala());
+    for(int pid=1;pid<MAKS_WARSTW;++pid) {
+        if(!warstwa_ma_spojny_bufor(pid) || !ma_dekoracje(pid)) continue;
+        const auto& w=tablica_warstw[pid];
+        skladacz_obrazu_oznacz_dirty_rect(w.x,w.y,w.szerokosc,bar);
+        skladacz_obrazu_oznacz_dirty_rect(w.x,w.y+bar,edge,w.wysokosc-bar);
+        skladacz_obrazu_oznacz_dirty_rect(w.x+w.szerokosc-edge,w.y+bar,edge,w.wysokosc-bar);
+        skladacz_obrazu_oznacz_dirty_rect(w.x,w.y+w.wysokosc-edge,w.szerokosc,edge);
+    }
 }

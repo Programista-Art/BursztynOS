@@ -523,6 +523,15 @@ int pobierz_znak_blokujaco() {
     for (;;) {
         bws_zdarzenie e{};
         if (!gui_czekaj_na_zdarzenie(&e)) continue;
+        // Handle before popup dispatch: an open menu consumes other events.
+        // GUI has refreshed its local theme; refresh the UI styles as Okno does.
+        if (e.typ == BWS_ZDARZENIE_MOTYW_ZMIENIONY) {
+            Motyw::pobierz_domyslny().zaktualizuj_z_systemu();
+            if (g_pasek_przewijania) g_pasek_przewijania->zaktualizuj_motyw();
+            shell_rysuj_terminal();
+            if (g_context_popups) g_context_popups->zaktualizuj_motyw();
+            continue;
+        }
         if (e.typ == BWS_ZDARZENIE_KLAWISZ_FIZYCZNY) key_modifiers = e.przyciski;
         if (shell_context_event(e)) continue;
 

@@ -2113,6 +2113,7 @@ void obsluz_klikniecie(int mx, int my) {
     }
 
     if (menu_start_otwarte) {
+#if BURSZTYN_DIAG_BOOT
         static uint32_t s_menu_hit_log_cnt = 0;
         if (s_menu_hit_log_cnt < 30) {
             ++s_menu_hit_log_cnt;
@@ -2144,6 +2145,7 @@ void obsluz_klikniecie(int mx, int my) {
             wypisz(hbuf);
         }
 
+#endif
         // Najpierw podmenu Gry, bo lezy poza prostokatem glownej listy.
         if (menu_gry_otwarte) {
             const int gry_x = menu_gry_x();

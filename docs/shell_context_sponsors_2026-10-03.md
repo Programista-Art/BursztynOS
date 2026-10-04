@@ -1,4 +1,4 @@
-# Shell: menu, wersja i sponsorzy — 2026-10-03
+# Shell: menu, wersja i wsparcie — 2026-10-03
 
 ## Zakres i implementacja
 
@@ -44,6 +44,9 @@ wklejenie nie wykonuje poleceń. Kursor i kotwica pozostają offsetami bajtowymi
 granicach kodów UTF-8. Nie dodano drugiego schowka.
 
 ## Wersja i zasób sponsorów
+
+Publiczne polecenie to `wsparcie`, z opisem pomocy
+`Wyświetla listę wspierających Bursztyn OS.` Ścieżka zasobu pozostaje bez zmian.
 
 Centralne źródło to `wersja_systemu.h`: `BURSZTYN_WERSJA_TEKST` i złożony z niego
 `BURSZTYN_NAZWA_WERSJI` (`Bursztyn OS v1.0.1.6`). Shell używa go w bannerze,
