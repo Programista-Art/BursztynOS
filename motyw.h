@@ -37,7 +37,8 @@ enum MotywKolorRola : uint32_t {
     MOTYW_KOLOR_PULPIT_ZAZNACZENIE = 20,
     MOTYW_KOLOR_PULPIT_RAMKA = 21,
     MOTYW_KOLOR_PULPIT_TEKST = 22,
-    MOTYW_KOLOR_ROL_LICZBA = 23
+    MOTYW_KOLOR_PULPIT_TEKST_ZAZNACZONY = 23,
+    MOTYW_KOLOR_ROL_LICZBA = 24
 };
 
 // Aliases ról kolorystycznych
@@ -174,6 +175,15 @@ inline uint32_t motyw_pulpit_odcien(const BursztynMotyw& m,bool jasny,unsigned w
     bool panel_jasniejszy=motyw_jasnosc_rgb(m.panel)>motyw_jasnosc_rgb(m.tekst);
     uint32_t surface=(jasny==panel_jasniejszy)?m.panel:m.tekst;
     return motyw_mieszaj(surface,m.ramka,weight);
+}
+// Wallpaper labels need a bright foreground independent of window text.
+// Use the brighter theme surface; lift it toward white to keep a dark theme's
+// gray text readable too. Existing desktop glyph shadows cover bright regions.
+inline uint32_t motyw_pulpit_tekst_zaznaczony(const BursztynMotyw& m) {
+    uint32_t base=motyw_jasnosc_rgb(m.panel)>motyw_jasnosc_rgb(m.tekst)?m.panel:m.tekst;
+    uint32_t out=0;
+    for(unsigned shift=0;shift<24;shift+=8)out|=((((base>>shift)&255)+3*255)/4)<<shift;
+    return out;
 }
 inline uint32_t motyw_pulpit_zaznaczenie(const BursztynMotyw& m) {
     return 0x20000000U | motyw_pulpit_odcien(m,true,24);

@@ -23,6 +23,7 @@ static bool add_file(const char* path,bool directory) {
 }
 static uint64_t explorer_bws(uint64_t nr,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t) {
     const char* path=reinterpret_cast<const char*>(a1);
+    if(nr==10){++launches;launched_app=path;return 1;}
     if(nr==46)return add_file(path,true);
     if(nr==6) {
         if(!files.count(path) || !files[path])return 0;
@@ -85,7 +86,7 @@ bool usun_prefiks_schowka_plikow(uint64_t gen,uint32_t count) {
     file_clip=file_clip_items[0];return true;
 }
 bool uruchom_program_z_argumentem_uzytkownika(const char* app,const char* path) {++launches;launched_app=app;launched_file=path;return true;}
-bool uruchom_program_uzytkownika(const char*) {return true;}
+bool uruchom_program_uzytkownika(const char* path) {++launches;launched_app=path;return true;}
 wynik_otwarcia_skojarzonego otworz_plik_skojarzony(const char*) {return OTWORZ_PLIK_URUCHOMIONO;}
 bool czytaj(const char*,void*,uint32_t,uint32_t*) {return false;}
 bool czytaj_plik(const char*,char*,uint32_t) {return false;}

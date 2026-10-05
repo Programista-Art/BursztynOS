@@ -59,6 +59,31 @@ public:
         return motyw_promien(MOTYW_ROG_MENU);
     }
 
+    bool zawiera_ksztalt(Punkt pt) const {
+        auto r=obszar();if(!r.zawiera(pt))return false;
+        int radius=int(promien_zaokraglenia())*skala_dpi_;
+        int maxRadius=(r.szerokosc<r.wysokosc?r.szerokosc:r.wysokosc)/2;
+        if(radius>maxRadius)radius=maxRadius;
+        int y=pt.y-r.y;
+        int edge=y<r.wysokosc-1-y?y:r.wysokosc-1-y;
+        int inset=radius>0 && edge<radius?motyw_promien_inset(radius,edge):0;
+        return pt.x>=r.x+inset && pt.x<r.prawy()-inset;
+    }
+    // One radius controls the body, border and manager's translated shadow.
+    void rysuj_zaokraglone_tlo(KontekstRysowania& ctx,
+        uint32_t background=motyw_kolor(MOTYW_KOLOR_PANEL),
+        uint32_t border=motyw_kolor(MOTYW_KOLOR_RAMKA),int thickness=1) {
+        Prostokat r(0,0,szerokosc(),wysokosc());
+        int radius=int(promien_zaokraglenia())*skala_dpi_;
+        ctx.rysuj_zaokraglony_prostokat(r,background|0xff000000U,radius);
+        rysuj_ramke_popupu(ctx,border,thickness);
+    }
+    void rysuj_ramke_popupu(KontekstRysowania& ctx,
+        uint32_t border=motyw_kolor(MOTYW_KOLOR_RAMKA),int thickness=1) {
+        ctx.rysuj_zaokraglona_ramke({0,0,szerokosc(),wysokosc()},border|0xff000000U,
+            int(promien_zaokraglenia())*skala_dpi_,thickness*skala_dpi_);
+    }
+
 private:
     friend class ZarzadcaPopupow;
     ZarzadcaPopupow* zarzadca_{nullptr};
@@ -88,7 +113,7 @@ public:
         wlasciciel_ = ekran;
         obszar_roboczy_ = praca;
         if ((dx || dy) && liczba_) {
-            const int cien = motyw_cien_okna() ? 2 * static_cast<int>(skala_dpi_) : 0;
+            const int cien = motyw_cien_okna() ? 2 * skala_dpi_ : 0;
             for (int i = 0; i < liczba_; ++i) {
                 if (!powierzchnie_[i]->czy_podaza_za_wlascicielem()) continue;
                 Prostokat r = powierzchnie_[i]->obszar();
@@ -155,7 +180,7 @@ public:
         Prostokat d = obszar_roboczy_;
         int w = rozmiar.szerokosc > d.szerokosc ? d.szerokosc : rozmiar.szerokosc;
         int h = rozmiar.wysokosc > d.wysokosc ? d.wysokosc : rozmiar.wysokosc;
-        int cien = motyw_cien_okna() ? 2 * static_cast<int>(skala_dpi_) : 0;
+        int cien = motyw_cien_okna() ? 2 * skala_dpi_ : 0;
         int dol = k.dolny();
         int gora = k.y - h;
         bool md = (dol + h + cien <= d.dolny());
@@ -181,7 +206,7 @@ public:
         Prostokat d = obszar_roboczy_;
         int w = rozmiar.szerokosc > d.szerokosc ? d.szerokosc : rozmiar.szerokosc;
         int h = rozmiar.wysokosc > d.wysokosc ? d.wysokosc : rozmiar.wysokosc;
-        int cien = motyw_cien_okna() ? 2 * static_cast<int>(skala_dpi_) : 0;
+        int cien = motyw_cien_okna() ? 2 * skala_dpi_ : 0;
         int max_x = d.prawy() - w - cien; if (max_x < d.x) max_x = d.x;
         int max_y = d.dolny() - h - cien; if (max_y < d.y) max_y = d.y;
         int x = (e.prawy() + w + cien <= d.prawy()) ? e.prawy() : (e.x - w - cien);
@@ -198,7 +223,7 @@ public:
         Prostokat d = obszar_roboczy_;
         int w = rozmiar.szerokosc > d.szerokosc ? d.szerokosc : rozmiar.szerokosc;
         int h = rozmiar.wysokosc > d.wysokosc ? d.wysokosc : rozmiar.wysokosc;
-        int cien = motyw_cien_okna() ? 2 * static_cast<int>(skala_dpi_) : 0;
+        int cien = motyw_cien_okna() ? 2 * skala_dpi_ : 0;
         int max_x = d.prawy() - w - cien; if (max_x < d.x) max_x = d.x;
         int max_y = d.dolny() - h - cien; if (max_y < d.y) max_y = d.y;
         x = przytnij(x, d.x, max_x);
@@ -211,7 +236,7 @@ public:
                                                    int margines_prawy,
                                                    int margines_dolny) const {
         Prostokat d = obszar_roboczy_;
-        int cien = motyw_cien_okna() ? 2 * static_cast<int>(skala_dpi_) : 0;
+        int cien = motyw_cien_okna() ? 2 * skala_dpi_ : 0;
         int w = rozmiar.szerokosc > d.szerokosc ? d.szerokosc : rozmiar.szerokosc;
         int h = rozmiar.wysokosc > d.wysokosc ? d.wysokosc : rozmiar.wysokosc;
         int x = d.prawy() - margines_prawy - w - cien;
@@ -496,11 +521,11 @@ public:
             Prostokat r = p->obszar();
 
             if (motyw_cien_okna()) {
-                int cien = 2 * static_cast<int>(skala_dpi_);
-                int promien_cienia = p->promien_zaokraglenia() * static_cast<int>(skala_dpi_);
+                int cien = 2 * skala_dpi_;
+                int promien_cienia = int(p->promien_zaokraglenia()) * skala_dpi_;
                 ctx.rysuj_zaokraglony_prostokat(
                     Prostokat(r.x + cien, r.y + cien, r.szerokosc, r.wysokosc),
-                    motyw_kolor(MOTYW_KOLOR_RAMKA),
+                    motyw_kolor(MOTYW_KOLOR_RAMKA)|0xff000000U,
                     promien_cienia);
             }
 
@@ -525,7 +550,7 @@ private:
     Prostokat prostokat_wizualny_popupu(const PowierzchniaPopup* p) const {
         if (!p) return Prostokat();
         Prostokat r = p->obszar();
-        int cien = motyw_cien_okna() ? 2 * static_cast<int>(skala_dpi_) : 0;
+        int cien = motyw_cien_okna() ? 2 * skala_dpi_ : 0;
         return Prostokat(r.x, r.y, r.szerokosc + cien, r.wysokosc + cien);
     }
 
@@ -559,7 +584,7 @@ private:
 
     Kontrolka* trafienie(Punkt pt) const {
         for (int i = liczba_ - 1; i >= 0; --i) {
-            if (powierzchnie_[i]) {
+            if (powierzchnie_[i] && powierzchnie_[i]->zawiera_ksztalt(pt)) {
                 Kontrolka* hit = powierzchnie_[i]->sprawdz_trafienie(pt);
                 if (hit) return hit;
             }

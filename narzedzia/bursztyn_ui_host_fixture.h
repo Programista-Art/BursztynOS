@@ -99,7 +99,18 @@ bool gui_blit(int x,int y,int w,int h,const uint32_t* data) {
     if(test_capture_pixels)for(int j=0;j<h;++j)for(int i=0;i<w;++i)test_pixels[{x+i,y+j}]=data[j*w+i];
     return true;
 }
-bool gui_blit_popup(int, int, int, int, const uint32_t*) { ++test_popup_blits;return true; }
+static std::vector<uint32_t> test_popup_pixels;
+static struct {int x,y,szerokosc,wysokosc;} test_popup_rect;
+bool gui_blit_popup(int x,int y,int w,int h,const uint32_t* pixels) {
+    ++test_popup_blits;test_popup_rect={x,y,w,h};test_popup_pixels.assign(pixels,pixels+w*h);return true;
+}
+static uint64_t test_activated_window=0;
+static const char* test_running_title=nullptr;
+uint32_t gui_pobierz_okna(GuiOknoInfo* out,uint32_t capacity) {
+    if(!test_running_title || !capacity)return 0;
+    out[0]={};out[0].window_id=42;strncpy(out[0].tytul,test_running_title,sizeof(out[0].tytul)-1);return 1;
+}
+bool gui_aktywuj_okno(uint64_t id) {test_activated_window=id;return true;}
 void gui_wypisz_tekst_kolor_skala(int, int, uint32_t, int, const char*) {}
 void motyw_odswiez_lokalny() {}
 bool gui_ustaw_tytul_okna(const char*) { return true; }
@@ -118,7 +129,8 @@ void gui_ustaw_capture_myszy(bool value) {test_mouse_capture=value;}
 bool gui_ustaw_geometrie_okna(int, int, int, int, int) { return true; }
 bool gui_pobierz_monitor(uint32_t, GuiMonitorInfo*) { return false; }
 void bws_przesun_warstwe(int, int) {}
-bool gui_ustaw_popup_aplikacji(bool, int, int, int, int) { return true; }
+static bool test_popup_registered=false;
+bool gui_ustaw_popup_aplikacji(bool open, int, int, int, int) {test_popup_registered=open;return true;}
 void gui_pobierz_rozdzielczosc(int* w, int* h) {
     if (w) *w = 1280;
     if (h) *h = 720;
@@ -154,6 +166,7 @@ uint32_t motyw_kolor(uint32_t rola) {
         case MOTYW_KOLOR_PULPIT_ZAZNACZENIE: return motyw_pulpit_zaznaczenie(*m);
         case MOTYW_KOLOR_PULPIT_RAMKA: return motyw_pulpit_ramka(*m);
         case MOTYW_KOLOR_PULPIT_TEKST: return m->tekst;
+        case MOTYW_KOLOR_PULPIT_TEKST_ZAZNACZONY: return motyw_pulpit_tekst_zaznaczony(*m);
         default: return m->tekst;
     }
 }

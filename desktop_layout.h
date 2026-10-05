@@ -65,22 +65,28 @@ inline Prostokat visual(int x,int y,const Label& l,uint32_t scale) {
         {g.etykieta_x+(g.etykieta_szer-l.width)/2,g.etykieta_y,l.width,l.height});
     return {r.x-pad,r.y-pad,r.szerokosc+2*pad,r.wysokosc+2*pad};
 }
-struct Position {int col=0,row=0,span=1;bool placed=false,selected=false,custom=false;Label label;};
+struct Position {int col=0,row=0,span=1,offsetX=0,offsetY=0;bool placed=false,selected=false,custom=false;Label label;};
 template<int Capacity> class Layout {
 public:
     Position items[Capacity]{};
     int count=0,cols=1,rows=1,x0=0,y0=0,cw=120,ch=100;
+    int workWidth=0,workBottom=0;uint32_t dpi=100;
     void geometry(int width,int bottom,int originY,uint32_t scale) {
+        workWidth=width;workBottom=bottom;dpi=scale;
         cw=ui_skaluj(120,scale);ch=ui_skaluj(100,scale);x0=ui_skaluj(20,scale);y0=originY;
         cols=(width-2*x0)/cw;if(cols<1)cols=1;rows=(bottom-y0)/ch;if(rows<0)rows=0;
     }
-    Prostokat cell(int i) const {auto p=items[i];return {x0+p.col*cw,y0+p.row*ch,cw,p.span*ch};}
+    Prostokat cell(int i) const {auto p=items[i];return {x0+p.col*cw+p.offsetX,y0+p.row*ch+p.offsetY,cw,p.span*ch};}
     bool fits(int i,int col,int row,int dc=0,int dr=0,bool group=false) const {
         if(col<0 || col>=cols || row<0 || row+items[i].span>rows)return false;
         for(int j=0;j<count;++j)if(j!=i && items[j].placed) {
             int jc=items[j].col,jr=items[j].row;
             if(group && items[j].selected){jc+=dc;jr+=dr;}
-            if(col==jc && row<jr+items[j].span && jr<row+items[i].span)return false;
+            if(items[i].custom || items[j].custom) {
+                auto a=visual(x0+col*cw+items[i].offsetX,y0+row*ch+items[i].offsetY,items[i].label,dpi);
+                auto b=visual(x0+jc*cw+items[j].offsetX,y0+jr*ch+items[j].offsetY,items[j].label,dpi);
+                if(intersects(a,b))return false;
+            } else if(col==jc && row<jr+items[j].span && jr<row+items[i].span)return false;
         }
         return true;
     }
@@ -116,18 +122,56 @@ public:
         for(int i=0;i<count;++i)if(items[i].selected && items[i].placed){items[i].col+=bc;items[i].row+=br;items[i].custom=true;}
         return true;
     }
+    Prostokat visual_bounds(int i) const {
+        auto r=cell(i);return visual(r.x,r.y,items[i].label,dpi);
+    }
     void clamp_delta(int& dx,int& dy) const {
-        int minx=0,miny=0,maxx=cols*cw,maxy=rows*ch;bool first=true;
+        Prostokat bounds{};
+        for(int i=0;i<count;++i)if(items[i].selected && items[i].placed)
+            bounds=unite(bounds,visual_bounds(i));
+        if(bounds.czy_pusty()){dx=dy=0;return;}
+        if(dx < -bounds.x)dx=-bounds.x;
+        if(dy < -bounds.y)dy=-bounds.y;
+        if(dx > workWidth-bounds.prawy())dx=workWidth-bounds.prawy();
+        if(dy > workBottom-bounds.dolny())dy=workBottom-bounds.dolny();
+    }
+    bool visual_group_fits(int dx,int dy) const {
         for(int i=0;i<count;++i)if(items[i].selected && items[i].placed) {
-            auto p=items[i];int x=p.col*cw,y=p.row*ch;
-            if(first){minx=x;miny=y;maxx=x+cw;maxy=y+p.span*ch;first=false;}
-            else {if(x<minx)minx=x;if(y<miny)miny=y;if(x+cw>maxx)maxx=x+cw;if(y+p.span*ch>maxy)maxy=y+p.span*ch;}
+            auto moved=visual_bounds(i);moved.x+=dx;moved.y+=dy;
+            if(moved.x<0 || moved.y<0 || moved.prawy()>workWidth || moved.dolny()>workBottom)return false;
+            for(int j=0;j<count;++j)if(!items[j].selected && items[j].placed &&
+                intersects(moved,visual_bounds(j)))return false;
         }
-        if(first){dx=dy=0;return;}
-        if(dx< -minx)dx=-minx;
-        if(dy< -miny)dy=-miny;
-        if(dx>cols*cw-maxx)dx=cols*cw-maxx;
-        if(dy>rows*ch-maxy)dy=rows*ch-maxy;
+        return true;
+    }
+    // Grid snapping remains the normal placement rule. At an edge the shared
+    // delta is limited by the actual icon/label/padding union, not a grid cell.
+    bool move_visual_group(int dx,int dy) {
+        int snappedX=(dx+(dx>=0?cw/2:-cw/2))/cw*cw;
+        int snappedY=(dy+(dy>=0?ch/2:-ch/2))/ch*ch;
+        int edgeX=dx,edgeY=dy;clamp_delta(edgeX,edgeY);
+        clamp_delta(snappedX,snappedY);
+        // A pointer already clamped against an edge must settle on that edge.
+        int probeX=dx+(dx>=0?1:-1),probeY=dy+(dy>=0?1:-1);
+        clamp_delta(probeX,probeY);
+        if(dx && probeX==edgeX)snappedX=edgeX;
+        if(dy && probeY==edgeY)snappedY=edgeY;
+        if(!visual_group_fits(snappedX,snappedY)) {
+            // Retain the existing nearest-free-placement behavior, translating
+            // the entire group together. Zero is a legal fallback in a packed desktop.
+            int best=0x7fffffff,bestX=0,bestY=0;
+            for(int row=-rows;row<=rows;++row)for(int col=-cols;col<=cols;++col) {
+                int x=col*cw,y=row*ch;clamp_delta(x,y);
+                int ex=x-snappedX,ey=y-snappedY,distance=ex*ex+ey*ey;
+                if(distance<best && visual_group_fits(x,y)){best=distance;bestX=x;bestY=y;}
+            }
+            if(best==0x7fffffff)return false;
+            snappedX=bestX;snappedY=bestY;
+        }
+        for(int i=0;i<count;++i)if(items[i].selected && items[i].placed) {
+            items[i].offsetX+=snappedX;items[i].offsetY+=snappedY;items[i].custom=true;
+        }
+        return true;
     }
 };
 }

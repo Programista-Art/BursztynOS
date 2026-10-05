@@ -46,8 +46,10 @@ int main() {
     obsluz_klikniecie(35,699); assert(menu_start_otwarte);
     obsluz_klikniecie(100,232); assert(launched==SCIEZKA_POWLOKA);assert(!menu_start_otwarte);
     obsluz_klikniecie(35,699);obsluz_klikniecie(100,282);assert(launched==SCIEZKA_NOTATNIK);
-    launched.clear();obsluz_klikniecie(APLIKACJE_PULPITU[0].x+5,APLIKACJE_PULPITU[0].y+5);
-    assert(launched==APLIKACJE_PULPITU[0].sciezka);
+    for(auto& launcher:DesktopEntries::Launchers) {
+        launched.clear();uruchom_lub_aktywuj(launcher.path,launcher.title);
+        assert(launched==launcher.path);
+    }
     // Use the production kernel selection, with retained client buffers.
     for(uint32_t scale:{100U,125U}) {
         warstwa_obrazu layers[SKLADACZ_MAKS_WARSTW]{};

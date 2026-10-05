@@ -406,11 +406,8 @@ public:
 
     void rysuj_siebie(KontekstRysowania& ctx) override {
         SkalaUI s = skala_dpi_;
-        Prostokat b(0, 0, obszar_.szerokosc, obszar_.wysokosc);
-
         int promien = motyw_promien(MOTYW_ROG_OKNO) * s;
-        ctx.rysuj_zaokraglony_prostokat(b, styl_.normalny.tlo, promien);
-        ctx.rysuj_zaokraglona_ramke(b, styl_.normalny.ramka, promien, 2 * s);
+        rysuj_zaokraglone_tlo(ctx,styl_.normalny.tlo,styl_.normalny.ramka,0);
 
         // Belka naglowkowa
         int h_belki = 32 * s;
@@ -461,6 +458,7 @@ public:
         // Subtelna linia oddzielajaca pasek przyciskow
         int sep_y = obszar_przyciskow_.y;
         ctx.rysuj_linie_pozioma(12 * s, sep_y, obszar_.szerokosc - 24 * s, motyw_kolor(MOTYW_KOLOR_RAMKA));
+        rysuj_ramke_popupu(ctx,styl_.normalny.ramka,2);
     }
 
     void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e) override {

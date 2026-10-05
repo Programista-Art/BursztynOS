@@ -2,6 +2,7 @@
 #include "ekran_format.h"
 #include "pulpit_geometria.h"
 #include "desktop_layout.h"
+#include "desktop_entries.h"
 #include "obrazy/png_dekoder.h"
 /*
  * Menedzer Okien (Pulpit i Pasek Zadan) dla Bursztyn OS
@@ -75,12 +76,12 @@ constexpr int BUFOR_CZASU = 32;
 int TASK_BUTTON_X = 66;
 int TASK_BUTTON_W = 112;
 int TASK_BUTTON_GAP = 4;
-constexpr int PULPIT_MAX_WPISOW = 128;
+constexpr int PULPIT_MAX_WPISOW = 128+DesktopEntries::Count;
 constexpr int PULPIT_LIST_CAP = 16384;
 constexpr int PULPIT_NAZWA_CAP = BWS_DROP_SCIEZKA_MAX; // display capacity; PSF validates mutations
 int PULPIT_GRID_W = 120;
 int PULPIT_GRID_H = 100;
-int PULPIT_GRID_Y = 140;
+int PULPIT_GRID_Y = 3;
 constexpr int PULPIT_REFRESH_TICKS = 3;
 
 
@@ -135,72 +136,20 @@ const char* const SCIEZKA_AKTUALIZACJE =
     "/programy/aktualizacje.cebula/aktualizacje.bur";
 const char* const SCIEZKA_MOTYWY =
     "/programy/motywy.cebula/motywy.bur";
-const char* const SCIEZKA_PULPIT = "/uzytkownicy/Pulpit";
+const char* const SCIEZKA_PULPIT = DesktopEntries::Directory;
 
 // Kanoniczna tabela uruchamiania ikon wbudowanych. Obsluga klikniecia nie
 // zna poszczegolnych aplikacji; kazda ikona korzysta z tego samego mechanizmu
 // uruchom-lub-aktywuj i zachowuje systemowa polityke jednej instancji.
-enum class TypIkonyAplikacji : uint8_t {
-    Notatnik,
-    Kalkulator,
-    Husarz,
-    Test,
-    Snake,
-    Eksplorator,
-    Obrazy,
-    DemoUI,
-    Kontrolki2,
-    Kontrolki3,
-    Kontrolki4,
-    Aktualizacje,
-    Motywy
-};
-
-struct AplikacjaPulpitu {
-    int x;
-    int y;
-    const char* sciezka;
-    const char* prefiks_tytulu;
-    const char* etykieta_1;
-    const char* etykieta_2;
-    TypIkonyAplikacji typ_ikony;
-};
-
-AplikacjaPulpitu APLIKACJE_PULPITU[] = {
-    {50,  50, SCIEZKA_NOTATNIK, "Notatnik", "Notatnik", nullptr,
-     TypIkonyAplikacji::Notatnik},
-    {130, 50, SCIEZKA_KALKULATOR, "Kalkulator", "Kalkulator", nullptr,
-     TypIkonyAplikacji::Kalkulator},
-    {210, 50, SCIEZKA_HUSSAR, "Husarz", "Husarz", nullptr,
-     TypIkonyAplikacji::Husarz},
-    {290, 50, SCIEZKA_TEST, "Testy Bursztyn OS", "Testy", "systemu",
-     TypIkonyAplikacji::Test},
-    {370, 50, SCIEZKA_SNAKE, "Snake", "Snake", nullptr,
-     TypIkonyAplikacji::Snake},
-    {460, 50, SCIEZKA_EKSPLORATOR, "Eksplorator Plików", "Eksplorator", nullptr,
-     TypIkonyAplikacji::Eksplorator},
-    {550, 50, SCIEZKA_PRZEGLADARKA_OBRAZOW, "Przeglądarka Obrazów",
-     "Przeglądarka", "Obrazów", TypIkonyAplikacji::Obrazy},
-    {640, 50, SCIEZKA_DEMO_UI, "BursztynUI -", "Demo", "BursztynUI",
-     TypIkonyAplikacji::DemoUI},
-    {720, 50, SCIEZKA_KONTROLKI2, "BursztynUI Kontrolki 2", "Kontrolki 2", nullptr,
-     TypIkonyAplikacji::Kontrolki2},
-    {800, 50, SCIEZKA_KONTROLKI3, "Kontrolki 3", "Kontrolki 3", nullptr,
-     TypIkonyAplikacji::Kontrolki3},
-    {880, 50, SCIEZKA_AKTUALIZACJE, "Aktualizacje Systemu", "Aktualizacje", nullptr,
-     TypIkonyAplikacji::Aktualizacje},
-    {960, 50, SCIEZKA_MOTYWY, "Motywy", "Motywy", nullptr,
-     TypIkonyAplikacji::Motywy},
-    {10, 140, SCIEZKA_KONTROLKI4, "Kontrolki 4", "Kontrolki 4", nullptr,
-     TypIkonyAplikacji::Kontrolki4}
-};
-
-constexpr size_t LICZBA_APLIKACJI_PULPITU =
-    sizeof(APLIKACJE_PULPITU) / sizeof(APLIKACJE_PULPITU[0]);
+using TypIkonyAplikacji=DesktopEntries::TypIkonyAplikacji;
+struct AplikacjaPulpitu {int x,y;TypIkonyAplikacji typ_ikony;};
+void rysuj_ikone_aplikacji(const AplikacjaPulpitu&);
+void uruchom_lub_aktywuj(const char*,const char*);
 
 struct WpisPulpitu {
     char nazwa[PULPIT_NAZWA_CAP];
     bool folder;
+    int launcher=-1;
 };
 
 
@@ -849,40 +798,6 @@ static void rysuj_etykiete_pulpitu(int x, int y, int w, int h, int skala,
     rysuj_tekst_wysrodkowany(x, y, w, h, skala, kolor, tekst);
 }
 
-static void podpis_do_szerokosci(const char* zrodlo, char* cel, size_t cap,
-                                 int maks_szer) {
-    if (!cel || !cap) return;
-    cel[0] = '\0';
-    if (!zrodlo) return;
-    size_t dl = 0;
-    while (zrodlo[dl] && dl + 1 < cap) { cel[dl] = zrodlo[dl]; ++dl; }
-    cel[dl] = '\0';
-    if (!zrodlo[dl] && oblicz_szerokosc_tekstu(cel, int(ui_skala_procent)) <= maks_szer)
-        return;
-
-    dl = 0;
-    cel[0] = '\0';
-    while (zrodlo[dl]) {
-        const uint8_t b = static_cast<uint8_t>(zrodlo[dl]);
-        const size_t znak = b < 0x80U ? 1U : ((b & 0xE0U) == 0xC0U ? 2U :
-                            ((b & 0xF0U) == 0xE0U ? 3U : 4U));
-        if (dl + znak + 4 > cap) break;
-        for (size_t i = 0; i < znak; ++i) cel[dl + i] = zrodlo[dl + i];
-        dl += znak;
-        cel[dl] = '.'; cel[dl + 1] = '.'; cel[dl + 2] = '.'; cel[dl + 3] = '\0';
-        if (oblicz_szerokosc_tekstu(cel, int(ui_skala_procent)) > maks_szer) {
-            dl -= znak;
-            break;
-        }
-        cel[dl] = '\0';
-    }
-    if (zrodlo[dl] && dl + 4 <= cap) {
-        cel[dl++] = '.'; cel[dl++] = '.'; cel[dl++] = '.';
-    }
-    cel[dl] = '\0';
-}
-
-
 __attribute__((noinline))
 static void rysuj_ikone_paleta(
     int x,
@@ -1053,6 +968,7 @@ bool konczy_sie(const char* tekst, const char* sufiks) {
 }
 
 bool sciezka_wpisu_pulpitu(int indeks, char* wynik, int pojemnosc) {
+    if(indeks>=0 && indeks<liczba_wpisow_pulpitu && wpisy_pulpitu[indeks].launcher>=0)return false;
     if (!wynik || indeks < 0 || indeks >= liczba_wpisow_pulpitu) return false;
     const int baza = dlugosc_limit(SCIEZKA_PULPIT, pojemnosc);
     const int nazwa = dlugosc_limit(wpisy_pulpitu[indeks].nazwa, PULPIT_NAZWA_CAP);
@@ -1083,7 +999,13 @@ bool odswiez_wpisy_pulpitu() {
     if(!wpisy_pulpitu)return false;
     wyzeruj_bufor(lista_pulpitu, PULPIT_LIST_CAP);
     if (!wylistuj_katalog_uzytkownika(
-            SCIEZKA_PULPIT, lista_pulpitu, PULPIT_LIST_CAP)) return false;
+            SCIEZKA_PULPIT, lista_pulpitu, PULPIT_LIST_CAP)) {
+        // Launchers existed independently of filesystem listing before this
+        // integration. Retain loaded entries on failure; on first load still
+        // expose the protected catalog without creating a directory or files.
+        if(liczba_wpisow_pulpitu>0)return false;
+        lista_pulpitu[0]=0;
+    }
     const int length = dlugosc_limit(lista_pulpitu, PULPIT_LIST_CAP);
     if (length >= PULPIT_LIST_CAP || (length > 0 && lista_pulpitu[length - 1] != '\n'))
         return false;
@@ -1111,10 +1033,16 @@ bool odswiez_wpisy_pulpitu() {
         ++count;
         pos = end + 1;
     }
+    if(count+DesktopEntries::Count>PULPIT_MAX_WPISOW)return false;
+    for(int id=0;id<DesktopEntries::Count;++id) {
+        auto& entry=nowe[count++];entry.launcher=id;
+        const char* name=DesktopEntries::Launchers[id].name;
+        for(int b=0;name[b];++b)entry.nazwa[b]=name[b];
+    }
     for(int i=0;i<desktop_layout.count;++i)desktop_previous[i]=desktop_layout.items[i];
     for(int i=0;i<count;++i) {
         Desktop::Position saved{};
-        for(int j=0;j<liczba_wpisow_pulpitu;++j)if(wpisy_pulpitu[j].folder==nowe[i].folder &&
+        for(int j=0;j<liczba_wpisow_pulpitu;++j)if(wpisy_pulpitu[j].launcher==nowe[i].launcher && wpisy_pulpitu[j].folder==nowe[i].folder &&
             teksty_rowne(wpisy_pulpitu[j].nazwa,nowe[i].nazwa)) {saved=desktop_previous[j];break;}
         desktop_layout.items[i]=saved;
     }
@@ -1140,7 +1068,14 @@ void aktualizuj_layout_pulpitu() {
     // grid where it fits; tall labels reserve extra rows rather than overlapping.
     for(int i=0;i<desktop_layout.count;++i) {
         auto& p=desktop_layout.items[i];
-        if(p.placed && !desktop_layout.fits(i,p.col,p.row))p.placed=false;
+        if(p.placed && !p.custom && !desktop_layout.fits(i,p.col,p.row))p.placed=false;
+        if(p.placed && p.custom) {
+            auto r=desktop_layout.visual_bounds(i);
+            if(r.x<0)p.offsetX-=r.x;
+            if(r.y<0)p.offsetY-=r.y;
+            if(r.prawy()>screen_w)p.offsetX-=r.prawy()-screen_w;
+            if(r.dolny()>screen_h-PASEK_WYS)p.offsetY-=r.dolny()-(screen_h-PASEK_WYS);
+        }
     }
     for(int i=0;i<desktop_layout.count;++i)if(!desktop_layout.items[i].placed)
         desktop_layout.place(i,i%desktop_layout.cols,i/desktop_layout.cols);
@@ -1155,6 +1090,7 @@ Desktop::Prostokat wizualny_wpis_pulpitu(int i) {
     return Desktop::visual(x,y,desktop_layout.items[i].label,ui_skala_procent);
 }
 int wpis_pulpitu_w_punkcie(int x, int y) {
+    for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].placed && wizualny_wpis_pulpitu(i).zawiera(x,y))return i;
     for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].placed && desktop_layout.cell(i).zawiera(x,y))return i;
     return -1;
 }
@@ -1542,7 +1478,10 @@ void RysujWpisPulpitu(int i) {
         gui_rysuj_prostokat(r.x,r.y,r.szerokosc,r.wysokosc,motyw_kolor(MOTYW_KOLOR_PULPIT_ZAZNACZENIE));
         rysuj_ramke_pulpitu(r,motyw_kolor(MOTYW_KOLOR_PULPIT_RAMKA));
     }
-    if(PlikiUI::tekstowy(wpisy_pulpitu[i].nazwa,wpisy_pulpitu[i].folder)) {
+    if(auto* launcher=DesktopEntries::launcher(wpisy_pulpitu[i].launcher)) {
+        AplikacjaPulpitu app{x,y,launcher->icon};
+        rysuj_ikone_aplikacji(app);
+    } else if(PlikiUI::tekstowy(wpisy_pulpitu[i].nazwa,wpisy_pulpitu[i].folder)) {
         // Native document silhouette, folded corner and text strokes, using
         // the same scaled fragments as the existing desktop icon renderer.
         uint32_t paper=motyw_kolor(MOTYW_KOLOR_PANEL);
@@ -1572,7 +1511,7 @@ void RysujWpisPulpitu(int i) {
         }
         rysuj_etykiete_pulpitu(g.etykieta_x,g.etykieta_y+line*(m.wysokosc_linii+m.odstep_linii),
             g.etykieta_szer,m.wysokosc_linii,int(ui_skala_procent),
-            p.selected?motyw_kolor(MOTYW_KOLOR_PULPIT_TEKST):KANONICZNY_KOLOR_ETYKIETY_PULPITU,text);
+            p.selected?motyw_kolor(MOTYW_KOLOR_PULPIT_TEKST_ZAZNACZONY):KANONICZNY_KOLOR_ETYKIETY_PULPITU,text);
     }
 }
 void RysujWpisyPulpitu() {for(int i=0;i<desktop_layout.count;++i)RysujWpisPulpitu(i);}
@@ -1582,7 +1521,6 @@ void odrysuj_obszar_pulpitu(Desktop::Prostokat r) {
     // Zero removes pixels from this transparent desktop surface. The compositor
     // restores its cached wallpaper; no wallpaper decode or full-layer clear.
     gui_rysuj_prostokat(r.x,r.y,r.szerokosc,r.wysokosc,0);
-    for(const auto& app:APLIKACJE_PULPITU)if(Desktop::intersects(r,{app.x,app.y,PULPIT_GRID_W,PULPIT_GRID_H}))rysuj_ikone_aplikacji(app);
     for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].placed && Desktop::intersects(r,wizualny_wpis_pulpitu(i)))RysujWpisPulpitu(i);
 }
 void odrysuj_zaznaczenie_pulpitu() {
@@ -1671,8 +1609,6 @@ bool obsluz_gest_pulpitu(const bws_zdarzenie& e) {
     if(e.typ==BWS_ZDARZENIE_MYSZ_DOWN) {
         int i=wpis_pulpitu_w_punkcie(e.x,e.y);
         if(e.y<0 || e.y>=screen_h-PASEK_WYS || e.x<0 || e.x>=screen_w)return false;
-        if(i<0)for(const auto& app:APLIKACJE_PULPITU)
-            if(punkt_w_prostokacie(e.x,e.y,app.x,app.y,PULPIT_GRID_W,PULPIT_GRID_H))return false;
         anuluj_gest_pulpitu();zapamietaj_zaznaczenie_pulpitu();
         g.item=i;g.ctrl=(desktop_modifiers&BWS_MOD_CTRL)!=0;g.rubber=i<0;
         for(int k=0;k<desktop_layout.count;++k)g.base[k]=desktop_layout.items[k].selected;
@@ -1715,18 +1651,16 @@ bool obsluz_gest_pulpitu(const bws_zdarzenie& e) {
                 (void)wykonaj_drop_pulpitu(target);gui_odswiez();return true;
             }
             zapamietaj_zaznaczenie_pulpitu();
-            int dc=(g.dx+(g.dx>=0?desktop_layout.cw/2:-desktop_layout.cw/2))/desktop_layout.cw;
-            int dr=(g.dy+(g.dy>=0?desktop_layout.ch/2:-desktop_layout.ch/2))/desktop_layout.ch;
-            desktop_layout.move_group(dc,dr);
+            desktop_layout.move_visual_group(g.dx,g.dy);
             // Clear every old location before drawing any new location.
             for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].selected && desktop_layout.items[i].placed) {
                 const auto& old=desktop_previous[i];
-                auto r=Desktop::visual(desktop_layout.x0+old.col*desktop_layout.cw,desktop_layout.y0+old.row*desktop_layout.ch,old.label,ui_skala_procent);
+                auto r=Desktop::visual(desktop_layout.x0+old.col*desktop_layout.cw+old.offsetX,desktop_layout.y0+old.row*desktop_layout.ch+old.offsetY,old.label,ui_skala_procent);
                 gui_rysuj_prostokat(r.x,r.y,r.szerokosc,r.wysokosc,0);
             }
             for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].selected && desktop_layout.items[i].placed) {
                 const auto& old=desktop_previous[i];
-                odrysuj_obszar_pulpitu(Desktop::visual(desktop_layout.x0+old.col*desktop_layout.cw,desktop_layout.y0+old.row*desktop_layout.ch,old.label,ui_skala_procent));
+                odrysuj_obszar_pulpitu(Desktop::visual(desktop_layout.x0+old.col*desktop_layout.cw+old.offsetX,desktop_layout.y0+old.row*desktop_layout.ch+old.offsetY,old.label,ui_skala_procent));
                 RysujWpisPulpitu(i);
             }
             zarejestruj_pulpit_jako_cel_drop();
@@ -1931,22 +1865,7 @@ void rysuj_ikone_aplikacji(const AplikacjaPulpitu& aplikacja) {
             break;
     }
 
-    // Etykiety ikon na pulpicie sa celowym wyjatkiem: zawsze biale z cieniem,
-    // poniewaz sa renderowane bezposrednio nad tapetami, a nie powierzchniami okien.
-    // Nie moga zmienic sie na czarne pod wplywem zadnego motywu (np. Bursztyn Jasny).
-    const uint32_t kolor_etykiety = KANONICZNY_KOLOR_ETYKIETY_PULPITU;
-    char linia[64]{};
-    podpis_do_szerokosci(aplikacja.etykieta_1, linia, sizeof(linia), g.etykieta_szer);
-    rysuj_etykiete_pulpitu(g.etykieta_x, g.etykieta_y,
-                           g.etykieta_szer, PULPIT_LINE_H,
-                           int(ui_skala_procent), kolor_etykiety, linia);
-    if (aplikacja.etykieta_2) {
-        podpis_do_szerokosci(aplikacja.etykieta_2, linia, sizeof(linia), g.etykieta_szer);
-        rysuj_etykiete_pulpitu(g.etykieta_x,
-                               g.etykieta_y + PULPIT_LINE_H + PULPIT_LINE_GAP,
-                               g.etykieta_szer, PULPIT_LINE_H,
-                               int(ui_skala_procent), kolor_etykiety, linia);
-    }
+
 }
 
 void RysujPulpit(bool wymus_pelne_odswiezenie) {
@@ -1957,9 +1876,6 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
 
     RysujTaskbar();
 
-    for (size_t i = 0; i < LICZBA_APLIKACJI_PULPITU; ++i) {
-        rysuj_ikone_aplikacji(APLIKACJE_PULPITU[i]);
-    }
 
     RysujWpisyPulpitu();
 
@@ -2050,6 +1966,10 @@ void uruchom_program_gui(const char* sciezka) {
 }
 
 void otworz_wpis_pulpitu(int indeks) {
+    if(indeks<0 || indeks>=desktop_layout.count)return;
+    if(auto* launcher=DesktopEntries::launcher(wpisy_pulpitu[indeks].launcher)) {
+        uruchom_lub_aktywuj(launcher->path,launcher->title);return;
+    }
     char sciezka[512] = {};
     if (!sciezka_wpisu_pulpitu(indeks, sciezka, sizeof(sciezka))) return;
     if (wpisy_pulpitu[indeks].folder || konczy_sie(sciezka, ".cebula")) {
@@ -2067,6 +1987,15 @@ void otworz_wpis_pulpitu(int indeks) {
     (void)otworz_plik_skojarzony(sciezka);
 }
 
+bool obsluz_klik_wpisu_pulpitu(const bws_zdarzenie& e,int& last,uint64_t& lastTime) {
+    const int entry=wpis_pulpitu_w_punkcie(e.x,e.y);
+    if(entry<0)return false;
+    bool doubleClick=!(desktop_modifiers&BWS_MOD_CTRL) && entry==last && podwojny_klik(lastTime,e.timestamp);
+    (void)obsluz_gest_pulpitu(e);last=entry;lastTime=e.timestamp;
+    if(doubleClick) {anuluj_gest_pulpitu();otworz_wpis_pulpitu(entry);last=-1;lastTime=0;}
+    return true;
+}
+
 void zamknij_pulpit_context() {
     if(pulpit_menu)pulpit_menu->zamknij();
     pulpit_context_open=false;zarejestruj_pulpit_jako_cel_drop();gui_odswiez();
@@ -2077,12 +2006,13 @@ bool otworz_pulpit_context(int x,int y,int wpis) {
     if(selected) {
         if(!desktop_layout.items[wpis].selected)desktop_layout.click(wpis,false);
         zaznaczony_wpis_pulpitu=wpis;
-        selected=sciezka_wpisu_pulpitu(wpis,pulpit_cel,sizeof(pulpit_cel));
+        if(wpisy_pulpitu[wpis].launcher<0)selected=sciezka_wpisu_pulpitu(wpis,pulpit_cel,sizeof(pulpit_cel));
         pulpit_cel_folder=wpisy_pulpitu[wpis].folder;
     }
     BwsSchowekPlikow record{};
     PlikiUI::CelMenu target{selected,pulpit_cel_folder,PlikiUI::tekstowy(pulpit_cel,pulpit_cel_folder),
-        selected && konczy_sie(pulpit_cel,".bur"),PlikiUI::schowek_gotowy(&record),static_cast<unsigned>(desktop_layout.selected_count())};
+        selected && konczy_sie(pulpit_cel,".bur"),PlikiUI::schowek_gotowy(&record),static_cast<unsigned>(desktop_layout.selected_count()),false};
+    for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].selected && wpisy_pulpitu[i].launcher>=0)target.protected_launcher=true;
     BursztynUI::Prostokat work{0,0,screen_w,screen_h-PASEK_WYS};
     pulpit_menu->events.geometria(work,work);pulpit_menu->otworz(x,y,target,true);
     pulpit_context_open=pulpit_menu->menu.czy_otwarte();
@@ -2101,7 +2031,11 @@ bool obsluz_prawy_klik_pulpitu(const bws_zdarzenie& e) {
 }
 void wykonaj_pulpit_context(PulpitContextAction action) {
     const int selected=zaznaczony_wpis_pulpitu;
+    bool protectedSelection=false;
+    for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].selected && wpisy_pulpitu[i].launcher>=0)protectedSelection=true;
     zamknij_pulpit_context();
+    if(protectedSelection && action!=PulpitContextAction::OPEN && action!=PulpitContextAction::NEW_FILE &&
+        action!=PulpitContextAction::NEW_FOLDER && action!=PulpitContextAction::REFRESH)return;
     switch(action) {
     case PulpitContextAction::NEW_FILE:otworz_pulpit_modal(PulpitModalTyp::PLIK);return;
     case PulpitContextAction::NEW_FOLDER:otworz_pulpit_modal(PulpitModalTyp::FOLDER);return;
@@ -2364,17 +2298,6 @@ void obsluz_klikniecie(int mx, int my) {
         return;
     }
 
-    // Wszystkie wbudowane ikony korzystaja z jednej tabeli deskryptorow.
-    for (size_t i = 0; i < LICZBA_APLIKACJI_PULPITU; ++i) {
-        const AplikacjaPulpitu& aplikacja = APLIKACJE_PULPITU[i];
-        if (punkt_w_prostokacie(mx, my, aplikacja.x, aplikacja.y,
-                                PULPIT_GRID_W, PULPIT_GRID_H)) {
-            uruchom_lub_aktywuj(aplikacja.sciezka,
-                                aplikacja.prefiks_tytulu);
-            return;
-        }
-    }
-
     int task_x = TASK_BUTTON_X;
     for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
         if (okna_taskbara[i].tytul[0] == '\0' ||
@@ -2389,12 +2312,7 @@ void obsluz_klikniecie(int mx, int my) {
 }
 
 void rozmiesc_ikony_ekranu(){
-    int cols=(screen_w-ui_skaluj(40,ui_skala_procent))/PULPIT_GRID_W;if(cols<1)cols=1;
-    for(size_t i=0;i<LICZBA_APLIKACJI_PULPITU;++i){
-        APLIKACJE_PULPITU[i].x=ui_skaluj(20,ui_skala_procent)+int(i%cols)*PULPIT_GRID_W;
-        APLIKACJE_PULPITU[i].y=ui_skaluj(20,ui_skala_procent)+int(i/cols)*PULPIT_GRID_H;
-    }
-    PULPIT_GRID_Y=ui_skaluj(20,ui_skala_procent)+int((LICZBA_APLIKACJI_PULPITU+cols-1)/cols)*PULPIT_GRID_H;
+    PULPIT_GRID_Y=ui_skaluj(3,ui_skala_procent);
     aktualizuj_layout_pulpitu();
 }
 
@@ -2501,7 +2419,7 @@ extern "C" __attribute__((noreturn)) void _start() {
     (void)odswiez_wpisy_pulpitu();
 
 #if BURSZTYN_DIAG_BOOT
-    const int desktop_icon_count = static_cast<int>(LICZBA_APLIKACJI_PULPITU) + liczba_wpisow_pulpitu;
+    const int desktop_icon_count = liczba_wpisow_pulpitu;
     wm_log_i32("[BWS] desktop_icons=", desktop_icon_count);
     wm_log("[BWS] taskbar visible=1\n");
 #endif
@@ -2679,21 +2597,7 @@ extern "C" __attribute__((noreturn)) void _start() {
                 obsluz_klikniecie(mx, my);
                 continue;
             }
-            const int desktop_entry = wpis_pulpitu_w_punkcie(mx, my);
-            if (desktop_entry >= 0) {
-                const bool double_click = !(desktop_modifiers&BWS_MOD_CTRL) && desktop_entry == last_desktop_click &&
-                    podwojny_klik(last_desktop_click_time, zdarzenie.timestamp);
-                (void)obsluz_gest_pulpitu(zdarzenie);
-                last_desktop_click = desktop_entry;
-                last_desktop_click_time = zdarzenie.timestamp;
-                if (double_click) {
-                    anuluj_gest_pulpitu();
-                    otworz_wpis_pulpitu(desktop_entry);
-                    last_desktop_click = -1;
-                    last_desktop_click_time = 0;
-                }
-                continue;
-            }
+            if(obsluz_klik_wpisu_pulpitu(zdarzenie,last_desktop_click,last_desktop_click_time))continue;
             last_desktop_click = -1;
             last_desktop_click_time = 0;
             if(!obsluz_gest_pulpitu(zdarzenie))obsluz_klikniecie(mx, my);

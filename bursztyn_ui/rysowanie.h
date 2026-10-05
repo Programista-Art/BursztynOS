@@ -171,15 +171,30 @@ public:
             rysuj_prostokat(Prostokat(r.x, r.y + promien, grubosc, mid_h), kolor);
             rysuj_prostokat(Prostokat(r.x + r.szerokosc - grubosc, r.y + promien, grubosc, mid_h), kolor);
         }
-        // Zaokrąglone narożniki
+        // The border is the outer rounded shape minus its inset shape.
+        // A single pixel per corner row left gaps when the circular scanline
+        // advanced by more than one pixel, and at the top/bottom tangent.
+        int inner_radius=promien-grubosc;
+        if(inner_radius<0)inner_radius=0;
         for (int dy = 0; dy < promien; ++dy) {
-            int inset = motyw_promien_inset(promien, dy);
-            // Lewy róg (góra/dół)
-            rysuj_prostokat(Prostokat(r.x + inset, r.y + dy, grubosc, 1), kolor);
-            rysuj_prostokat(Prostokat(r.x + inset, r.y + r.wysokosc - 1 - dy, grubosc, 1), kolor);
-            // Prawy róg (góra/dół)
-            rysuj_prostokat(Prostokat(r.x + r.szerokosc - inset - grubosc, r.y + dy, grubosc, 1), kolor);
-            rysuj_prostokat(Prostokat(r.x + r.szerokosc - inset - grubosc, r.y + r.wysokosc - 1 - dy, grubosc, 1), kolor);
+            int inset=motyw_promien_inset(promien,dy);
+            int top=r.y+dy,bottom=r.y+r.wysokosc-1-dy;
+            if(dy<grubosc) {
+                int width=r.szerokosc-2*inset;
+                if(width>0) {
+                    rysuj_prostokat(Prostokat(r.x+inset,top,width,1),kolor);
+                    rysuj_prostokat(Prostokat(r.x+inset,bottom,width,1),kolor);
+                }
+            } else {
+                int inner=grubosc+motyw_promien_inset(inner_radius,dy-grubosc);
+                int width=inner-inset;
+                if(width>0) {
+                    rysuj_prostokat(Prostokat(r.x+inset,top,width,1),kolor);
+                    rysuj_prostokat(Prostokat(r.x+inset,bottom,width,1),kolor);
+                    rysuj_prostokat(Prostokat(r.prawy()-inner,top,width,1),kolor);
+                    rysuj_prostokat(Prostokat(r.prawy()-inner,bottom,width,1),kolor);
+                }
+            }
         }
     }
 

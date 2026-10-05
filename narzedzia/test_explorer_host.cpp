@@ -22,6 +22,7 @@ static void input(PlikiUI::DialogPlikowy& d,const char* text) {
 }
 #include "explorer_regression_cases.h"
 #include "text_context_cases.h"
+#include "explorer_launcher_cases.h"
 static void remaining_regressions() {
     files={{"/",true},{"/test",true},{"/test/nested",true},{"/test/żółć",true},{"/test/file.txt",false}};
     auto* m=new AktowkaModel();CHECK(m->initialize());CHECK(m->navigate("/test")!=Change::ERROR);
@@ -128,5 +129,5 @@ int main() {
     CHECK(menu->events.zdarzenie(event(BWS_ZDARZENIE_KLAWISZ,0,0,'[')));
     CHECK(menu->events.zdarzenie(event(BWS_ZDARZENIE_KLAWISZ,0,0,'B')));CHECK(menu->menu.czy_otwarte());
     menu->events.zdarzenie(event(BWS_ZDARZENIE_KLAWISZ,0,0,27));menu->events.zdarzenie(event(BWS_ZDARZENIE_TIMER));CHECK(!menu->menu.czy_otwarte());delete menu;
-    delete view;delete model;regression_cases();remaining_regressions();text_context_cases();printf("Explorer/desktop shared behavior: %d/%d PASS (RAM filesystem)\n",checks,checks);
+    delete view;delete model;regression_cases();remaining_regressions();text_context_cases();explorer_launcher_cases();printf("Explorer/desktop shared behavior: %d/%d PASS (RAM filesystem)\n",checks,checks);
 }

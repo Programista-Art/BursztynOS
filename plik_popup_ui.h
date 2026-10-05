@@ -12,8 +12,10 @@ enum class Akcja : uint8_t {
     NONE, OPEN, RUN, COPY, CUT, RENAME, REMOVE, PROPERTIES,
     PASTE, NEW_FILE, NEW_FOLDER, REFRESH, OPEN_WITH, NOTEPAD, MOVE
 };
-struct CelMenu { bool selected{false}, directory{false}, text{false}, program{false}, paste{false}; unsigned count{1}; };
+struct CelMenu { bool selected{false}, directory{false}, text{false}, program{false}, paste{false}; unsigned count{1}; bool protected_launcher{false}; };
 inline bool dostepna(Akcja a, CelMenu t) {
+    if(t.protected_launcher && a!=Akcja::OPEN && a!=Akcja::RUN &&
+        a!=Akcja::NEW_FOLDER && a!=Akcja::NEW_FILE && a!=Akcja::REFRESH)return false;
     switch (a) {
     case Akcja::COPY: case Akcja::CUT: case Akcja::REMOVE: return t.selected;
     case Akcja::OPEN: case Akcja::RENAME: case Akcja::MOVE: case Akcja::PROPERTIES: return t.selected && t.count==1;
@@ -206,10 +208,8 @@ public:
         ok_->rozmiesc(Prostokat(r.szerokosc-2*bw-2*pad,r.wysokosc-bh-pad,bw,bh));
         cancel_->rozmiesc(Prostokat(r.szerokosc-bw-pad,r.wysokosc-bh-pad,bw,bh));
     }
-    void rysuj_siebie(KontekstRysowania& ctx) override {
-        ctx.rysuj_zaokraglony_prostokat(Prostokat(0,0,szerokosc(),wysokosc()),motyw_kolor(MOTYW_KOLOR_PANEL),motyw_promien(MOTYW_ROG_OKNO));
-        ctx.rysuj_ramke(Prostokat(0,0,szerokosc(),wysokosc()),motyw_kolor(MOTYW_KOLOR_RAMKA));
-    }
+    uint16_t promien_zaokraglenia() const override {return motyw_promien(MOTYW_ROG_OKNO);}
+    void rysuj_siebie(KontekstRysowania& ctx) override {rysuj_zaokraglone_tlo(ctx);}
     const char* tekst() const override { return field_->tekst(); }
     int wynik() const { return result_; }
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {

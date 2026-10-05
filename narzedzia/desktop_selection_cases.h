@@ -5,14 +5,14 @@ static void desktop_selection_cases() {
         files={{"/",true},{SCIEZKA_PULPIT,true}};
         for(auto name:{"i","WWWWWWWW","żółć","żółć i ąćęłńóśźż bardzo długa nazwa"})files[std::string(SCIEZKA_PULPIT)+"/"+name]=true;
         desktop_layout.count=liczba_wpisow_pulpitu=0;hash_pulpitu_wazny=false;CHECK(odswiez_wpisy_pulpitu());
-        CHECK(desktop_layout.count==4);
+        CHECK(desktop_layout.count==4+DesktopEntries::Count);
         int shortItem=desktop_find("i"),wideItem=desktop_find("WWWWWWWW"),polishItem=desktop_find("żółć");
         CHECK(shortItem>=0 && wideItem>=0 && polishItem>=0);
         desktop_click(shortItem);desktop_click(wideItem,true);desktop_click(polishItem,true);
         CHECK(desktop_layout.selected_count()==3);desktop_layout.items[desktop_find("żółć i ąćęłńóśźż bardzo długa nazwa")].selected=true;
         int pad=ui_skaluj(3,scale);CHECK(pad==(scale==100?3:4));
         auto metrics=pulpit_metryki(scale);
-        for(int i=0;i<desktop_layout.count;++i) {
+        for(int i=0;i<4;++i) {
             auto& label=desktop_layout.items[i].label;auto box=wizualny_wpis_pulpitu(i),cell=desktop_layout.cell(i);
             auto geometry=pulpit_geometria_komorki(cell.x,cell.y,scale);
             CHECK(label.complete);int actualWidth=0;

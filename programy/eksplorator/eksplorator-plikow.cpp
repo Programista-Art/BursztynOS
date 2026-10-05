@@ -1,6 +1,7 @@
 /* Bursztyn OS - Eksplorator Plikow. Ring 3 korzysta tylko z GUI/BWS. */
 #include "../../bursztyn_gui.h"
 #include "../../plik_popup_ui.h"
+#include "../../desktop_entries.h"
 #include "../../bursztyn_ui/menu_tekstowe.h"
 #include "../../bursztyn_ui/pasek_przewijania.h"
 #include "../../bursztyn_ui/tabela_wirtualna.h"
@@ -379,7 +380,7 @@ uint64_t list_hash(const char* data, size_t length) {
     return hash ^ static_cast<uint64_t>(length);
 }
 
-enum class EntryType : uint8_t { PARENT, FOLDER, BUR, CEBULA, TXT, BMP, FILE };
+enum class EntryType : uint8_t { PARENT, FOLDER, BUR, CEBULA, TXT, BMP, FILE, LAUNCHER };
 enum class SortMode : uint8_t { AZ, ZA, TYPE, DATE };
 enum class Change : uint8_t { ERROR, UNCHANGED, DETAILS, CHANGED };
 enum class Activation : uint8_t { STATUS, NAVIGATION };
@@ -387,6 +388,7 @@ enum class Activation : uint8_t { STATUS, NAVIGATION };
 struct Entry {
     char name[NAME_CAP];
     EntryType type;
+    int launcher;
     bool directory;
     int manifest_pzb;
     uint64_t size;
@@ -448,6 +450,7 @@ const char* entry_type_name(EntryType type) {
     switch (type) {
         case EntryType::PARENT: return "Folder nadrzędny";
         case EntryType::FOLDER: return "Folder";
+        case EntryType::LAUNCHER: return "Skrót aplikacji";
         case EntryType::BUR: return "Program BUR";
         case EntryType::CEBULA: return "Paczka Cebula";
         case EntryType::TXT: return "Dokument tekstowy";
@@ -692,6 +695,11 @@ public:
             return Activation::STATUS;
         }
         const Entry& selected = entries_[selected_];
+        if(selected.type==EntryType::LAUNCHER) {
+            const auto* launcher=DesktopEntries::launcher(selected.launcher);
+            if(launcher)run_launcher(*launcher);
+            return Activation::STATUS;
+        }
         if (selected.type == EntryType::PARENT)
             return parent() != Change::ERROR ? Activation::NAVIGATION : Activation::STATUS;
         char full[PATH_CAP] = {};
@@ -749,12 +757,12 @@ public:
 
     bool selected_path(char* output, size_t capacity) const {
         if (!output || selected_ < 0 || selected_ >= count_ ||
-            entries_[selected_].type == EntryType::PARENT) return false;
+            (entries_[selected_].type == EntryType::PARENT || entries_[selected_].type == EntryType::LAUNCHER)) return false;
         return join_segment(path_, entries_[selected_].name, output, capacity);
     }
 
     bool entry_path(int index, char* output, size_t capacity) const {
-        if (!output || index < 0 || index >= count_) return false;
+        if (!output || index < 0 || index >= count_ || entries_[index].type==EntryType::LAUNCHER) return false;
         if (entries_[index].type == EntryType::PARENT)
             return parent_path(path_, output, capacity);
         return join_segment(path_, entries_[index].name, output, capacity);
@@ -865,7 +873,7 @@ public:
             return;
         }
         if (item->type == EntryType::CEBULA) run_selected_package();
-        else if (item->type == EntryType::BUR) (void)activate();
+        else if (item->type == EntryType::BUR || item->type==EntryType::LAUNCHER) (void)activate();
         else set_status("Dla tego typu nie ma osobnej akcji Uruchom.");
     }
 
@@ -1043,6 +1051,7 @@ private:
             case EntryType::PARENT: return -1;
             case EntryType::FOLDER: return 0;
             case EntryType::CEBULA: return 1;
+            case EntryType::LAUNCHER: return 2;
             case EntryType::BUR: return 2;
             case EntryType::TXT: return 3;
             case EntryType::BMP: return 3;
@@ -1179,13 +1188,18 @@ private:
 
         char old_name[NAME_CAP] = {};
         bool old_directory = false;
+        EntryType old_type=EntryType::FILE;int old_launcher=-1;
         if (selected_ >= 0 && selected_ < count_) {
             (void)copy_text(old_name, sizeof(old_name), entries_[selected_].name);
             old_directory = entries_[selected_].directory;
+            old_type=entries_[selected_].type;old_launcher=entries_[selected_].launcher;
         }
         const int old_scroll = scroll_;
         size_t target_count = equal_text(target_path, "/") ? 0U : 1U;
         if (!validate_listing(length, &target_count)) return Change::ERROR;
+        bool desktop=DesktopEntries::is_desktop(target_path);
+        if(desktop)target_count+=DesktopEntries::Count;
+        if(target_count>MAX_ENTRIES){set_status("Katalog zawiera zbyt wiele wpisów.");return Change::ERROR;}
         size_t index = 0;
         if (!equal_text(target_path, "/")) {
             Entry& parent = entries_[0];
@@ -1197,6 +1211,11 @@ private:
             index = 1;
         }
         fill_entries(length, &index, target_path);
+        if(desktop)for(int id=0;id<DesktopEntries::Count;++id) {
+            auto& item=entries_[index++];zero_memory(&item,sizeof(item));
+            item.type=EntryType::LAUNCHER;item.launcher=id;item.manifest_pzb=-1;
+            copy_text(item.name,sizeof(item.name),DesktopEntries::Launchers[id].name);
+        }
         if (index != target_count || !copy_text(path_, sizeof(path_), target_path)) {
             set_status("Błąd wewnętrzny parsera listy katalogu.");
             return Change::ERROR;
@@ -1205,8 +1224,8 @@ private:
         clear_selection();
         if (old_name[0]) {
             for (int i = 0; i < count_; ++i) {
-                if (entries_[i].directory == old_directory &&
-                    equal_text(entries_[i].name, old_name)) {
+                if (entries_[i].directory == old_directory && entries_[i].type==old_type &&
+                    (old_type!=EntryType::LAUNCHER || entries_[i].launcher==old_launcher) && equal_text(entries_[i].name, old_name)) {
                     selected_ = i;
                     break;
                 }
@@ -1355,6 +1374,15 @@ private:
         zero_memory(&details_, sizeof(details_));
         if (selected_ < 0 || selected_ >= count_) return;
         Entry& selected = entries_[selected_];
+        if(selected.type==EntryType::LAUNCHER) {
+            if(auto* launcher=DesktopEntries::launcher(selected.launcher)) {
+                details_.valid=true;
+                copy_text(details_.full_path,sizeof(details_.full_path),launcher->path);
+                copy_text(details_.application,sizeof(details_.application),launcher->name);
+                copy_text(details_.entry_point,sizeof(details_.entry_point),launcher->path);
+            }
+            return;
+        }
         if (selected.type == EntryType::PARENT) {
             if (!parent_path(path_, details_.full_path, sizeof(details_.full_path))) return;
         } else if (!join_segment(path_, selected.name, details_.full_path,
@@ -1383,6 +1411,22 @@ private:
         }
     }
 
+    void run_launcher(const DesktopEntries::Launcher& launcher) {
+        // Same title-prefix activation policy as the desktop. The temporary
+        // snapshot stays off the small Ring 3 stack and is used only on open.
+        auto* windows=static_cast<GuiOknoInfo*>(gui_malloc(sizeof(GuiOknoInfo)*SKLADACZ_MAKS_WARSTW));
+        if(windows) {
+            uint32_t count=gui_pobierz_okna(windows,SKLADACZ_MAKS_WARSTW);
+            for(uint32_t i=0;i<count && i<SKLADACZ_MAKS_WARSTW;++i) {
+                size_t n=0;while(launcher.title[n] && launcher.title[n]==windows[i].tytul[n])++n;
+                if(!launcher.title[n] && gui_aktywuj_okno(windows[i].window_id)) {
+                    gui_free(windows);set_status("Aktywowano aplikację skrótu.");return;
+                }
+            }
+            gui_free(windows);
+        }
+        run_bur(launcher.path);
+    }
     void run_bur(const char* path) {
         if (len_limit(path, PATH_CAP) >= 64U) {
             set_status("Loader: ścieżka .bur przekracza 63 bajty.");
@@ -1786,7 +1830,7 @@ public:
         close_context();
         const Entry* selected=model_.entry(model_.selected());
         if ((mode==EditMode::RENAME || mode==EditMode::MOVE || mode==EditMode::CONFIRM_DELETE || mode==EditMode::OPEN_WITH) &&
-            (!selected || selected->type==EntryType::PARENT)) return false;
+            (!selected || selected->type==EntryType::PARENT || selected->type==EntryType::LAUNCHER)) return false;
         edit_mode_=mode;
         if(mode==EditMode::MOVE) {
             bool opened=chooser_.otworz(selected->name,model_.path(),owner(),work());
@@ -2100,8 +2144,8 @@ public:
         const Rect r[]={l.back,l.forward,l.rename,l.remove,l.move,l.run};
         const unsigned ix[]={0,1,6,7,8,9};
         const Entry* item=model_.entry(model_.selected());
-        const bool selected=item && item->type!=EntryType::PARENT;
-        const bool enabled[]={model_.can_back(),model_.can_forward(),selected,selected,selected,item && (item->type==EntryType::BUR || item->type==EntryType::CEBULA)};
+        const bool selected=item && item->type!=EntryType::PARENT && item->type!=EntryType::LAUNCHER;
+        const bool enabled[]={model_.can_back(),model_.can_forward(),selected,selected,selected,item && (item->type==EntryType::BUR || item->type==EntryType::CEBULA || item->type==EntryType::LAUNCHER)};
         const char* labels[]={"<-","->","Zmień nazwę","Usuń","Przenieś","Uruchom"};
         for(unsigned i=0;i<6;++i)if(buttons_[ix[i]].czy_wlaczona()!=enabled[i])draw_button(r[i],enabled[i],labels[i]);
         register_drop_targets();
@@ -2135,10 +2179,10 @@ public:
         draw_button(value.refresh, true, "Odśwież");
         draw_button(value.new_folder, true, "Nowy folder");
         draw_button(value.new_file, true, "Nowy plik");
-        draw_button(value.rename, model_.selected()>=0 && model_.entry(model_.selected())->type!=EntryType::PARENT ? true : false, "Zmień nazwę");
-        draw_button(value.remove, model_.selected()>=0 && model_.entry(model_.selected())->type!=EntryType::PARENT ? true : false, "Usuń");
-        draw_button(value.move, model_.selected()>=0 && model_.entry(model_.selected())->type!=EntryType::PARENT ? true : false, "Przenieś");
-        draw_button(value.run, model_.entry(model_.selected()) && (model_.entry(model_.selected())->type==EntryType::BUR || model_.entry(model_.selected())->type==EntryType::CEBULA) ? true : false, "Uruchom");
+        draw_button(value.rename, model_.selected()>=0 && model_.entry(model_.selected())->type!=EntryType::PARENT && model_.entry(model_.selected())->type!=EntryType::LAUNCHER ? true : false, "Zmień nazwę");
+        draw_button(value.remove, model_.selected()>=0 && model_.entry(model_.selected())->type!=EntryType::PARENT && model_.entry(model_.selected())->type!=EntryType::LAUNCHER ? true : false, "Usuń");
+        draw_button(value.move, model_.selected()>=0 && model_.entry(model_.selected())->type!=EntryType::PARENT && model_.entry(model_.selected())->type!=EntryType::LAUNCHER ? true : false, "Przenieś");
+        draw_button(value.run, model_.entry(model_.selected()) && (model_.entry(model_.selected())->type==EntryType::BUR || model_.entry(model_.selected())->type==EntryType::CEBULA || model_.entry(model_.selected())->type==EntryType::LAUNCHER) ? true : false, "Uruchom");
         draw_path_field();
         draw_search_field();
         draw_button(value.sort, true, sort_mode_name(model_.sort_mode()));
@@ -2298,8 +2342,8 @@ public:
         const Entry* item=empty?nullptr:model_.entry(model_.selected());
         BwsSchowekPlikow record{};
         PlikiUI::CelMenu target{item && item->type!=EntryType::PARENT,item && item->directory,
-            item && PlikiUI::tekstowy(item->name,item->directory),item && (item->type==EntryType::BUR || item->type==EntryType::CEBULA),
-            PlikiUI::schowek_gotowy(&record)};
+            item && PlikiUI::tekstowy(item->name,item->directory),item && (item->type==EntryType::BUR || item->type==EntryType::CEBULA || item->type==EntryType::LAUNCHER),
+            PlikiUI::schowek_gotowy(&record),1,item && item->type==EntryType::LAUNCHER};
         menu_.events.geometria(owner(),work());menu_.otworz(x,y,target);
         (void)gui_rejestruj_cele_drop(nullptr,0);gui_odswiez();return context_open();
     }
@@ -2395,7 +2439,7 @@ private:
     uint32_t color_for(const Entry& item) const {
         if (item.type == EntryType::PARENT || item.type == EntryType::FOLDER)
             return COLOR_FOLDER;
-        if (item.type == EntryType::BUR) return COLOR_BUR;
+        if (item.type == EntryType::BUR || item.type==EntryType::LAUNCHER) return COLOR_BUR;
         if (item.type == EntryType::CEBULA) return COLOR_CEBULA;
         if (item.type == EntryType::TXT) return COLOR_TXT;
         if (item.type == EntryType::BMP) return COLOR_BMP;

@@ -6,21 +6,23 @@
 // Rendering/WM BWS calls are observed only; no guest storage or launcher runs.
 void gui_ustaw_przejecie_myszy(bool) {}
 void gui_ustaw_system_overlay(bool,int,int,int,int) {}
-void rysuj_tekst_wysrodkowany(int,int,int,int,int,uint32_t,const char*) {}
+struct LabelPaint {uint32_t color;std::string text;};
+static std::vector<LabelPaint> label_paints;
+static bool capture_labels=false;
+void rysuj_tekst_wysrodkowany(int,int,int,int,int,uint32_t color,const char* text) {if(capture_labels)label_paints.push_back({color,text});}
 void gui_odswiez_pulpit() {}
-uint32_t gui_pobierz_okna(GuiOknoInfo*,uint32_t) {return 0;}
-bool gui_aktywuj_okno(uint64_t) {return true;}
 int bws_utworz_warstwe(int,int,int,int,int) {return 1;}
 
 #include "desktop_usability_cases.h"
 #include "desktop_remaining_cases.h"
 #include "desktop_selection_cases.h"
+#include "desktop_launcher_edge_cases.h"
 
 int main() {
     g_test_bws_hook=explorer_bws;
     files={{"/",true},{"/uzytkownicy",true},{SCIEZKA_PULPIT,true}};
     pulpit_menu=new PlikiUI::MenuPlikowe();pulpit_dialog=new PlikiUI::DialogPlikowy();
-    screen_w=640;screen_h=480;
+    screen_w=1280;screen_h=720;
     CHECK(otworz_pulpit_context(638,438,-1));
     CHECK(!pulpit_menu->menu.menu().element(0)->czy_wlaczony());
     CHECK(!pulpit_menu->menu.menu().element(2)->czy_wlaczony());
@@ -107,6 +109,7 @@ int main() {
     desktop_usability_cases();
     desktop_remaining_cases();
     desktop_selection_cases();
+    desktop_launcher_edge_cases();
     delete pulpit_menu;delete pulpit_dialog;delete pulpit_wybor;
     printf("Desktop production file actions: %d/%d PASS (RAM filesystem)\n",checks,checks);
 }

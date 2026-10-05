@@ -1530,6 +1530,7 @@ uint32_t motyw_kolor(uint32_t rola) {
         case MOTYW_KOLOR_PULPIT_ZAZNACZENIE: return motyw_pulpit_zaznaczenie(*m);
         case MOTYW_KOLOR_PULPIT_RAMKA: return motyw_pulpit_ramka(*m);
         case MOTYW_KOLOR_PULPIT_TEKST: return m->tekst;
+        case MOTYW_KOLOR_PULPIT_TEKST_ZAZNACZONY: return motyw_pulpit_tekst_zaznaczony(*m);
         default: return m->tekst;
     }
 }

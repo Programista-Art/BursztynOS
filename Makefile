@@ -541,7 +541,7 @@ notatnik_blob.o: notatnik_tmp.o bursztyn_gui.o $(NOTATNIK_LINKER)
 # 15. EKSPLORATOR PLIKOW .bur
 # ============================================================================
 
-eksplorator_tmp.o: programy/eksplorator/eksplorator-plikow.cpp bursztyn_gui.h plik_popup_ui.h plik_operacje_ui.h $(wildcard bursztyn_ui/*.h)
+eksplorator_tmp.o: programy/eksplorator/eksplorator-plikow.cpp desktop_entries.h bursztyn_gui.h plik_popup_ui.h plik_operacje_ui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
 
 eksplorator_blob.o: eksplorator_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
@@ -684,7 +684,7 @@ repro_blob.o: repro_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
 # 16. MENEDZER OKIEN .bur
 # ============================================================================
 
-menedzer_okien_tmp.o: menedzer_okien.cpp desktop_layout.h bursztyn_gui.h ui_skala.h pulpit_geometria.h obrazy/png_dekoder.h plik_popup_ui.h plik_operacje_ui.h $(wildcard bursztyn_ui/*.h)
+menedzer_okien_tmp.o: menedzer_okien.cpp desktop_entries.h desktop_layout.h bursztyn_gui.h ui_skala.h pulpit_geometria.h obrazy/png_dekoder.h plik_popup_ui.h plik_operacje_ui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
 
 menedzer_okien_blob.o: menedzer_okien_tmp.o bursztyn_gui.o $(MENEDZER_OKIEN_LINKER)
@@ -1573,3 +1573,9 @@ test-desktop-selection-theme:
 	@mkdir -p .motywytest
 	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined narzedzia/test_desktop_selection_theme.cpp -o .motywytest/test-desktop-selection
 	ASAN_OPTIONS=detect_leaks=0 .motywytest/test-desktop-selection
+
+.PHONY: test-file-popup-host
+test-file-popup-host:
+	@mkdir -p .bursztyn-ui-test
+	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined narzedzia/test_file_popup_host.cpp -o .bursztyn-ui-test/test-file-popup
+	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-file-popup

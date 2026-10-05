@@ -30,7 +30,7 @@ static void desktop_remaining_cases() {
         std::string longName;for(int i=0;i<40;++i)longName+="żółć";
         files={{"/",true},{SCIEZKA_PULPIT,true},{std::string(SCIEZKA_PULPIT)+"/"+longName,true}};
         desktop_layout.count=liczba_wpisow_pulpitu=0;hash_pulpitu_wazny=false;CHECK(odswiez_wpisy_pulpitu());
-        CHECK(desktop_layout.count==1);CHECK(longName==wpisy_pulpitu[0].nazwa);
+        CHECK(desktop_layout.count==1+DesktopEntries::Count);CHECK(longName==wpisy_pulpitu[0].nazwa);
         auto l=desktop_layout.items[0].label;CHECK(l.count>2);CHECK(l.count<=Desktop::MaxLines);
         for(int i=0;i<l.count;++i){CHECK((static_cast<unsigned char>(longName[l.ends[i]])&192)!=128);CHECK(l.widths[i]<=pulpit_metryki(scale).etykieta_szer);}
         CHECK(!PlikiUI::nazwa_poprawna(longName.c_str())); // PSF's on-disk limit is unchanged.
@@ -84,7 +84,7 @@ static void desktop_remaining_cases() {
     obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_RUCH,end.x+10,end.y+10));CHECK(pulpit_hover_folder==target);
     obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_UP,end.x+10,end.y+10));
     CHECK(files.count(std::string(SCIEZKA_PULPIT)+"/target/a.txt"));CHECK(files.count(std::string(SCIEZKA_PULPIT)+"/target/b"));
-    CHECK(desktop_layout.count==1);CHECK(!test_mouse_capture);
+    CHECK(desktop_layout.count==1+DesktopEntries::Count);CHECK(!test_mouse_capture);
     // Partial failure is bounded; stop before attempting later sources and
     // report the completed prefix without modifying the clipboard.
     files={{"/",true},{SCIEZKA_PULPIT,true}};

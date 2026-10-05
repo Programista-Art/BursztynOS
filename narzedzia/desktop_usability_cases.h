@@ -7,6 +7,7 @@ static void desktop_ctrl(bool on) {
 }
 static void desktop_click(int i,bool ctrl=false) {
     desktop_ctrl(ctrl);auto r=desktop_layout.cell(i);
+    if(r.x+10<0 || r.y+10<0)r=wizualny_wpis_pulpitu(i);
     CHECK(obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_DOWN,r.x+10,r.y+10)));
     CHECK(test_mouse_capture);
     CHECK(obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_UP,r.x+10,r.y+10)));
@@ -19,7 +20,7 @@ static void desktop_usability_cases() {
         for(auto name:{"a.txt","b folder","nowy test z pełną nazwą","żółć i ąćęłńóśźż bardzo długa nazwa"})
             files[std::string(SCIEZKA_PULPIT)+"/"+name]=strcmp(name,"a.txt")!=0;
         liczba_wpisow_pulpitu=0;desktop_layout.count=0;hash_pulpitu_wazny=false;CHECK(odswiez_wpisy_pulpitu());
-        CHECK(desktop_layout.count==4);
+        CHECK(desktop_layout.count==4+DesktopEntries::Count);
         for(int i=0;i<4;++i) {
             auto p=desktop_layout.items[i];auto cell=desktop_layout.cell(i),r=wizualny_wpis_pulpitu(i);
             CHECK(p.placed);CHECK(p.label.complete);CHECK(p.label.count>=1);
@@ -48,16 +49,16 @@ static void desktop_usability_cases() {
         CHECK(obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_UP,r.x+10,r.y+desktop_layout.ch+10)));
         CHECK(desktop_layout.selected_count()==2);CHECK(desktop_layout.items[1].col-desktop_layout.items[0].col==rel);CHECK(files==before);CHECK(!test_mouse_capture);
         for(auto edge:{std::pair<int,int>{-999,-999},{9999,-999},{-999,9999},{9999,9999}}) {
-            r=desktop_layout.cell(0);
+            r=wizualny_wpis_pulpitu(0);
             obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_DOWN,r.x+10,r.y+10));
             test_paint_rects.clear();test_capture_paints=true;
             obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_RUCH,edge.first,edge.second));
             test_capture_paints=false;
             for(auto paint:test_paint_rects)CHECK(paint.w<screen_w || paint.h<screen_h-PASEK_WYS);
             obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_UP,edge.first,edge.second));
-            for(int i:{0,1}) {auto c=desktop_layout.cell(i);CHECK(c.x>=0);CHECK(c.y>=PULPIT_GRID_Y);CHECK(c.x+c.szerokosc<=screen_w);CHECK(c.y+c.wysokosc<=screen_h-PASEK_WYS);}
+            for(int i:{0,1}) {auto c=wizualny_wpis_pulpitu(i);CHECK(c.x>=0);CHECK(c.y>=0);CHECK(c.prawy()<=screen_w);CHECK(c.dolny()<=screen_h-PASEK_WYS);}
             CHECK(desktop_layout.selected_count()==2);CHECK(files==before);
-            for(int i=0;i<4;++i)for(int j=i+1;j<4;++j)CHECK(!Desktop::intersects(desktop_layout.cell(i),desktop_layout.cell(j)));
+            for(int i=0;i<4;++i)for(int j=i+1;j<4;++j)CHECK(!Desktop::intersects(wizualny_wpis_pulpitu(i),wizualny_wpis_pulpitu(j)));
         }
         // Preserve group on right click; single-target actions are disabled.
         r=desktop_layout.cell(0);auto right=desktop_event(BWS_ZDARZENIE_MYSZ_PRAWY_DOWN,r.x+10,r.y+10);
@@ -75,11 +76,13 @@ static void desktop_usability_cases() {
         CHECK(sciezka_wpisu_pulpitu(0,pulpit_cel,sizeof(pulpit_cel)));
         int oldDeletes=deletes;wykonaj_pulpit_context(PulpitContextAction::REMOVE);
         CHECK(pulpit_modal_typ==PulpitModalTyp::REMOVE);CHECK(deletes==oldDeletes);CHECK(pulpit_batch_count==2);
-        zatwierdz_pulpit_modal();CHECK(deletes==oldDeletes+2);CHECK(desktop_layout.count==0);
+        zatwierdz_pulpit_modal();CHECK(deletes==oldDeletes+2);CHECK(desktop_layout.count==0+DesktopEntries::Count);
         // Rebuild a predictable row for rubber-band and theme tests.
         files[std::string(SCIEZKA_PULPIT)+"/a"]=true;files[std::string(SCIEZKA_PULPIT)+"/b"]=false;
-        hash_pulpitu_wazny=false;CHECK(odswiez_wpisy_pulpitu());desktop_layout.clear_selection();
-        r=desktop_layout.cell(0);int y=r.y+desktop_layout.ch-3;
+        hash_pulpitu_wazny=false;CHECK(odswiez_wpisy_pulpitu());
+        for(int i=0;i<desktop_layout.count;++i)desktop_layout.items[i]=Desktop::Position{};
+        aktualizuj_layout_pulpitu();desktop_layout.clear_selection();
+        r=desktop_layout.cell(0);int y=wizualny_wpis_pulpitu(0).dolny()-1;
         obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_DOWN,0,y));
         CHECK(obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_RUCH,r.x+2*desktop_layout.cw,r.y)));
         CHECK(desktop_layout.selected_count()==2);CHECK(desktop_gesture.rubber);
@@ -98,7 +101,7 @@ static void desktop_usability_cases() {
         obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_DOWN,0,y));CHECK(desktop_layout.selected_count()==0);
         obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_UP,0,y));
         auto key=desktop_event(BWS_ZDARZENIE_KLAWISZ_FIZYCZNY,1);key.kod=0x1e;key.przyciski=BWS_MOD_CTRL;
-        CHECK(obsluz_gest_pulpitu(key));CHECK(desktop_layout.selected_count()==2);desktop_ctrl(false);
+        CHECK(obsluz_gest_pulpitu(key));CHECK(desktop_layout.selected_count()==2+DesktopEntries::Count);desktop_ctrl(false);
         CHECK(obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_DOWN,0,0)));CHECK(desktop_layout.selected_count()==0);
         CHECK(obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_UP,0,0)));CHECK(!test_mouse_capture);
         // Single file/folder drag is visual only and survives listing refresh.

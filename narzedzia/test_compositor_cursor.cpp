@@ -40,6 +40,34 @@ void grafika_prezentuj_scene_z_kursorem(const GuiDirtyRect* r,uint32_t count,int
         [](GuiDirtyRect rect){assert(rect.x>=0&&rect.y>=0&&rect.x+rect.width<=sw&&rect.y+rect.height<=sh);++presents;},[](int){});
 }
 void grafika_prezentuj_kursor_w(int x,int y){grafika_prezentuj_scene_z_kursorem(nullptr,0,x,y);}
+static unsigned popup_checks=0;
+static void popup_restoration_cases() {
+    use_clock=false;skladacz_obrazu_oznacz_dirty();skladacz_obrazu_obsluz_dirty();
+    int x=200,y=220,w=ui_skaluj(80,scale),h=ui_skaluj(60,scale),r=ui_skaluj(8,scale);
+    std::vector<uint32_t> baseline(w*h),pixels(w*h,0);
+    for(int py=0;py<h;++py)for(int px=0;px<w;++px)baseline[py*w+px]=scene[(y+py)*sw+x+px];
+    for(int py=0;py<h;++py) {
+        int edge=py<h-1-py?py:h-1-py;
+        int inset=edge<r?motyw_promien_inset(r,edge):0;
+        for(int px=inset;px<w-inset;++px)pixels[py*w+px]=0xff335577U;
+    }
+    assert(skladacz_obrazu_ustaw_popup_aplikacji(1,true,x,y,w,h));++popup_checks;
+    assert(skladacz_obrazu_blit_popup(1,x,y,w,h,pixels.data()));++popup_checks;
+    for(int py=0;py<h;++py)for(int px=0;px<w;++px) {
+        uint32_t expected=pixels[py*w+px]?0x335577U:baseline[py*w+px];
+        assert(scene[(y+py)*sw+x+px]==expected);++popup_checks;
+    }
+    // Replacing the surface with transparent pixels must erase old popup pixels.
+    std::fill(pixels.begin(),pixels.end(),0);
+    assert(skladacz_obrazu_blit_popup(1,x,y,w,h,pixels.data()));++popup_checks;
+    for(int py=0;py<h;++py)for(int px=0;px<w;++px) {
+        assert(scene[(y+py)*sw+x+px]==baseline[py*w+px]);++popup_checks;
+    }
+    assert(skladacz_obrazu_ustaw_popup_aplikacji(1,false,0,0,0,0));++popup_checks;
+    for(int py=0;py<h;++py)for(int px=0;px<w;++px) {
+        assert(scene[(y+py)*sw+x+px]==baseline[py*w+px]);++popup_checks;
+    }
+}
 int main(){
     for(auto dpi:{100U,125U}){
         scale=dpi;sw=1280;sh=720;overlay={};
@@ -55,11 +83,13 @@ int main(){
             assert(scene[0]==(pixel&0xffffff)); // alpha tags are desktop-only
         }
         desktop->bufor_pikseli[0]=0;
+        popup_restoration_cases();
         lx=1279;ly=719;skladacz_obrazu_oznacz_ruch_kursora(0,0,lx,ly);skladacz_obrazu_obsluz_dirty();
         sw=1920;sh=1080;++generation;skladacz_reset_ekranu();
         assert(dirty_count==1&&dirty_rects[0].width==1920&&dirty_rects[0].height==1080);
         lx=0;ly=0;skladacz_obrazu_oznacz_ruch_kursora(1279,719,lx,ly);presents=0;skladacz_obrazu_obsluz_dirty();assert(presents==1);
         lx=1919;ly=1079;skladacz_obrazu_oznacz_ruch_kursora(0,0,lx,ly);presents=0;skladacz_obrazu_obsluz_dirty();assert(presents==1);
+        popup_restoration_cases();
         const auto gen=generation;const int oldx=lx,oldy=ly;
         assert(utworz_warstwe(2,300,200,700,450,10)==2); // Shell-equivalent surface
         assert(skladacz_obrazu_ustaw_tytul(2,"Powłoka Bursztynowa"));
@@ -83,5 +113,6 @@ int main(){
         use_clock=false;
         usun_warstwe(2);usun_warstwe(1);skladacz_reset_ekranu();
     }
+    printf("Popup compositor background restoration: %u/%u PASS\n",popup_checks,popup_checks);
     puts("Production compositor host PASS: modeset dirty geometry, Shell-equivalent layer preserves cursor/screen/generation, coalescing and theme/decor/full scene transactions");
 }
