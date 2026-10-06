@@ -1,7 +1,11 @@
 #include <cassert>
 #include <cstdio>
+#include <cstdlib>
 #include <vector>
 #include "../wm_dekoracje.h"
+static unsigned checks=0;
+#undef assert
+#define assert(c) do {++checks;if(!(c)){fprintf(stderr,"FAIL %d: %s\n",__LINE__,#c);abort();}}while(0)
 int main() {
     for(uint32_t scale:{100U,125U}) for(bool maximized:{false,true}) {
         int w=ui_skaluj(700,scale),h=ui_skaluj(450,scale);
@@ -27,5 +31,6 @@ int main() {
         for(int y=0;y<h;++y) for(int x=0;x<w;++x)
             if(x<100 || x>=120 || y<5 || y>=15) assert(scene[y*w+x]==0xabcdef);
     }
+    printf("WM decoration renderer: %u/%u PASS\n",checks,checks);
     puts("WM decoration renderer host checks passed (100%, 125%); not runtime validation.");
 }

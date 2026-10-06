@@ -50,6 +50,15 @@ int main() {
         launched.clear();uruchom_lub_aktywuj(launcher.path,launcher.title);
         assert(launched==launcher.path);
     }
+    for(uint32_t scale:{100U,125U}) {
+        ui_skala_procent=scale;metryki_ekranu();launched.clear();
+        assert(!menu_start_otwarte);
+        obsluz_klikniecie(PRZYCISK_MENU_X+2,przycisk_menu_y()+2);
+        assert(menu_start_otwarte && launched.empty());
+        int x,y,w,h;assert(prostokat_elementu_menu(0,&x,&y,&w,&h));
+        obsluz_klikniecie(x+w/2,y+h/2);
+        assert(launched==SCIEZKA_POWLOKA && !menu_start_otwarte);
+    }
     // Use the production kernel selection, with retained client buffers.
     for(uint32_t scale:{100U,125U}) {
         warstwa_obrazu layers[SKLADACZ_MAKS_WARSTW]{};

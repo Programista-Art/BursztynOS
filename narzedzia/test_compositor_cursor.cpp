@@ -4,6 +4,10 @@
 #include <vector>
 #define BURSZTYN_COMPOSITOR_HOST_TEST 1
 #include "../skladacz_obrazu.cpp"
+static unsigned compositor_checks=0;
+#undef assert
+#define assert(c) do {++compositor_checks;if(!(c)){fprintf(stderr,"FAIL %d: %s\n",__LINE__,#c);abort();}}while(0)
+static BursztynMotyw compositor_theme=g_domyslny_motyw_fallback;
 static int sw=1280,sh=720,lx=0,ly=0;
 static uint64_t generation=1;
 static uint32_t scale=100;
@@ -31,7 +35,7 @@ void grafika_zakoncz_scene(){}
 void grafika_odtworz_tlo_regionu(int x,int y,int w,int h){for(int yy=y;yy<y+h;++yy)for(int xx=x;xx<x+w;++xx)scene[yy*sw+xx]=0x123456;}
 void grafika_zapisz_surowy_piksel(int x,int y,uint32_t c){scene[y*sw+x]=c;}
 void grafika_naloz_okno_terminala_region(int,int,int,int){}
-const BursztynMotyw* motyw_pobierz_aktywny(){return &g_domyslny_motyw_fallback;}
+const BursztynMotyw* motyw_pobierz_aktywny(){return &compositor_theme;}
 void grafika_prezentuj_region(int,int,int,int){++presents;}
 void grafika_prezentuj_scene_z_kursorem(const GuiDirtyRect* r,uint32_t count,int x,int y){
     uint32_t scratch[64*64]{};
@@ -73,6 +77,7 @@ int main(){
         scale=dpi;sw=1280;sh=720;overlay={};
         assert(utworz_warstwe(1,0,0,sw,sh,0)==1);
         auto* desktop=pobierz_warstwe(1);
+        assert(skladacz_obrazu_publikuj_klatke(1));
         for(uint32_t pixel:{0x20000000U,0x70ffffffU,0x01000000U,0x00abcdefU}) {
             desktop->bufor_pikseli[0]=pixel;scene[0]=0x123456;
             zloz_snapshot_region({desktop->bufor_pikseli,0,0,sw,sh,0,1,uint64_t(sw)*sh},{0,0,1,1});
@@ -113,6 +118,8 @@ int main(){
         use_clock=false;
         usun_warstwe(2);usun_warstwe(1);skladacz_reset_ekranu();
     }
+    printf("Compositor lifecycle/scene: %u/%u PASS\n",compositor_checks,compositor_checks);
     printf("Popup compositor background restoration: %u/%u PASS\n",popup_checks,popup_checks);
     puts("Production compositor host PASS: modeset dirty geometry, Shell-equivalent layer preserves cursor/screen/generation, coalescing and theme/decor/full scene transactions");
+    return 0;
 }

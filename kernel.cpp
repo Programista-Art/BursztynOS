@@ -2564,9 +2564,11 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
            !zapisz_blob_bur(INSTALATOR_PROGRAM,_binary_instalator_bin_start,_binary_instalator_bin_end))
             zatrzymaj_start("Nie mozna przygotowac aplikacji instalatora w RAM.");
     }
+    // Restoring the display mode can compose immediately, before WM exists.
+    // Resolve the current palette before that first composition.
+    motyw_inicjalizuj();
     tapety_inicjalizuj(g_multiboot_info_ptr);
     ekran_inicjalizuj();
-    motyw_inicjalizuj();
 
     if (tryb_testowy) {
         ekran_test_virtio_gpu_modeset(zadano_automatyczne_testy(

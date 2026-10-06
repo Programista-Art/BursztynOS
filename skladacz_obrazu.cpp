@@ -120,6 +120,8 @@ uint64_t rozmiar_alokacji_warstwy[
 ] = {};
 
 bool widocznosc_warstwy[MAKS_WARSTW] = {};
+// Registration permits drawing; only an explicit completed frame permits composition.
+bool klatka_gotowa[MAKS_WARSTW] = {};
 uint32_t generacja_okna[MAKS_WARSTW] = {};
 uint32_t stan_okna[MAKS_WARSTW] = {};
 char tytul_okna[MAKS_WARSTW][48] = {};
@@ -597,7 +599,7 @@ bool warstwa_bufor_spojny(
 
 bool warstwa_ma_spojny_bufor(int indeks) {
     return pid_poprawny(indeks) && widocznosc_warstwy[indeks] &&
-           warstwa_bufor_spojny(indeks);
+           klatka_gotowa[indeks] && warstwa_bufor_spojny(indeks);
 }
 
 /* =========================================================================
@@ -976,8 +978,7 @@ warstwa_obrazu* pobierz_warstwe(
     /*
      * Nie zwracamy uszkodzonej powierzchni do grafika.cpp.
      */
-    if (!warstwa_ma_spojny_bufor(
-            pid)) {
+    if (!widocznosc_warstwy[pid] || !warstwa_bufor_spojny(pid)) {
 
         return nullptr;
     }
@@ -1103,6 +1104,7 @@ int utworz_warstwe(
             __ATOMIC_RELEASE
         );
 
+        klatka_gotowa[pid] = false;
         widocznosc_warstwy[pid] = true;
         if (nowe_okno) {
             if (++generacja_okna[pid] == 0) ++generacja_okna[pid];
@@ -1207,6 +1209,7 @@ int utworz_warstwe(
         __ATOMIC_RELEASE
     );
 
+    klatka_gotowa[pid] = false;
     widocznosc_warstwy[pid] = true;
     if (nowe_okno) {
         if (++generacja_okna[pid] == 0) ++generacja_okna[pid];
@@ -1439,6 +1442,7 @@ void usun_warstwe(
         __ATOMIC_RELEASE
     );
     widocznosc_warstwy[pid] = false;
+    klatka_gotowa[pid] = false;
     stan_okna[pid] = GUI_OKNO_NORMALNE;
     tytul_okna[pid][0] = '\0';
 
@@ -2051,9 +2055,19 @@ uint64_t skladacz_obrazu_id_okna(int pid) {
            static_cast<uint32_t>(pid);
 }
 
+bool skladacz_obrazu_publikuj_klatke(int pid) {
+    if (!pid_poprawny(pid) || !warstwa_bufor_spojny(pid)) return false;
+    if (klatka_gotowa[pid]) return false;
+    klatka_gotowa[pid] = true;
+    if (widocznosc_warstwy[pid]) {
+        const auto& w = tablica_warstw[pid];
+        skladacz_obrazu_oznacz_dirty_rect(w.x, w.y, w.szerokosc, w.wysokosc);
+    }
+    return true;
+}
+
 bool skladacz_obrazu_czy_widoczna(int pid) {
-    return pid_poprawny(pid) && widocznosc_warstwy[pid] &&
-           warstwa_bufor_spojny(pid);
+    return warstwa_ma_spojny_bufor(pid);
 }
 
 bool skladacz_obrazu_minimalizuj(int pid) {
@@ -2113,7 +2127,7 @@ uint32_t skladacz_obrazu_snapshot_okien(GuiOknoInfo* out, uint32_t max,
         o.pid = pid;
         o.generation = generacja_okna[pid];
         o.stan = stan_okna[pid];
-        o.widoczne = widocznosc_warstwy[pid] ? 1U : 0U;
+        o.widoczne = warstwa_ma_spojny_bufor(pid) ? 1U : 0U;
         o.aktywne = pid == aktywny_pid ? 1U : 0U;
         o.x = w.x; o.y = w.y; o.szerokosc = w.szerokosc; o.wysokosc = w.wysokosc;
         for (uint32_t i = 0; i < sizeof(o.tytul); ++i) o.tytul[i] = tytul_okna[pid][i];

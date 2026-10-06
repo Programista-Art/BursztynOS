@@ -9,6 +9,9 @@
 #include "../shell.cpp"
 #undef _start
 
+static unsigned checks=0;
+#undef assert
+#define assert(c) do {++checks;if(!(c)){fprintf(stderr,"FAIL %d: %s\n",__LINE__,#c);abort();}}while(0)
 static std::vector<bws_zdarzenie> events;
 static size_t event_index;
 static std::vector<uint32_t> submitted;
@@ -80,6 +83,17 @@ static void reset() {
 int main() {
     g_linie=new ShellLine[MAXSCROLLBACKLINES]{};g_pasek_przewijania=new PasekPrzewijania();
     char input[SHELL_INPUT_CAPACITY];
+    // Execute the production first client paint with two resolved theme palettes.
+    for(unsigned scale:{100U,125U}) for(uint32_t background:{0x00191C20U,0x00EDF1F5U}) {
+        ui_skala_procent=scale;shell_w=ui_skaluj(700,scale);shell_h=ui_skaluj(450,scale);
+        theme_background=background;reset();submitted.clear();unsigned before=refreshes;
+        shell_rysuj_terminal();
+        assert(refreshes==before+1 && !submitted.empty());
+        assert(submitted_rect.x==shell_obszar_klienta().x && submitted_rect.y==shell_obszar_klienta().y);
+        assert(submitted.front()==background);
+        assert(background!=0x001A0B00U && background!=0x00280F00U);
+    }
+    theme_background=0x102030;shell_w=700;shell_h=450;
     // Feed the real blocking event loop 250 ticks and 100 irrelevant outside
     // moves, then return one key without editor-side repaint.
     for(unsigned scale:{100U,125U}) {
@@ -143,7 +157,8 @@ int main() {
             int width=CzcionkaUI::zmierz_tekst(g_context_menu->menu().element(i)->tekst(),ui_skala());
             if(width>longest) longest=width;
         }
-        assert(popup_rect.szerokosc==longest+2*ui_skala()+16*ui_skala()+2*static_cast<int>(ui_skala()));
+        // Native popup includes a 2 logical-pixel shadow; scale it before rounding.
+        assert(popup_rect.szerokosc==longest+2*ui_skala()+16*ui_skala()+2*ui_skala());
         assert(popup_open);g_context_menu->menu().element(0)->wykonaj();assert(copied==input);
         g_context_menu->menu().element(3)->wykonaj();assert(!input[0]);
         g_context_menu->menu().element(2)->wykonaj();assert(!strcmp(input,"Zażółć gęślą jaźń"));
@@ -172,7 +187,7 @@ int main() {
             shell_context_open(point.x,point.y);assert(popup_open);
             assert(popup_rect.x>=0 && popup_rect.y>=0 && popup_rect.prawy()<=1280 && popup_rect.dolny()<=720);
             auto* view=static_cast<WidokMenuPopup*>(g_context_popups->fokus_popupu());
-            assert(popup_rect.wysokosc==view->wymagany_rozmiar(ui_skala()).wysokosc+2*static_cast<int>(ui_skala()));
+            assert(popup_rect.wysokosc==view->wymagany_rozmiar(ui_skala()).wysokosc+2*ui_skala());
             for(int i=0;i<6;++i) { Prostokat r=view->prostokat_elementu_klienta(i);assert(r.szerokosc>0 && r.wysokosc>0); }
             bws_zdarzenie outside{};outside.typ=BWS_ZDARZENIE_MYSZ_DOWN;outside.x=-1;outside.y=-1;
             assert(shell_context_event(outside));assert(!popup_open);outside.typ=BWS_ZDARZENIE_MYSZ_UP;assert(shell_context_event(outside));
@@ -260,5 +275,6 @@ int main() {
     shell_delete_range(input,2,SIZE_MAX);assert(!strcmp(input,"abc"));g_caret=g_input_anchor=3;
     shell_context_open(500,350);bws_zdarzenie close{};close.typ=BWS_ZDARZENIE_ZAMKNIJ;shell_context_event(close);assert(!popup_open);
     shell_context_open(500,350);close.typ=BWS_ZDARZENIE_KLAWISZ;close.kod=27;assert(shell_context_event(close));assert(!popup_open);
+    printf("Shell host: %u/%u PASS\n",checks,checks);
     puts("Host checks passed: editor, popup, clipboard, sponsors and version (100%, 125%); not OS runtime validation.");
 }

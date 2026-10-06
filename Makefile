@@ -1585,3 +1585,14 @@ test-desktop-settings-host:
 	@mkdir -p .installertest
 	g++ -std=c++17 -O0 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined narzedzia/test_desktop_settings_authorization.cpp storage_format.cpp psf.cpp -o .installertest/test-desktop-settings
 	ASAN_OPTIONS=detect_leaks=0 .installertest/test-desktop-settings
+
+.PHONY: test-startup-visibility
+grafika.o skladacz_obrazu.o kernel.o: skladacz_obrazu.h
+# Host-only: production compositor lifecycle + kernel graphics + boot policy.
+test-startup-visibility:
+	@mkdir -p .wm-test
+	g++ -std=c++17 -O0 -g0 -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_startup_visibility.cpp -Wl,--gc-sections -o .wm-test/startup-visibility
+	ASAN_OPTIONS=detect_leaks=0 .wm-test/startup-visibility
+	g++ -std=c++17 -O0 -g0 -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_boot_graphics.cpp -Wl,--gc-sections -o .wm-test/boot-graphics
+	ASAN_OPTIONS=detect_leaks=0 .wm-test/boot-graphics
+	$(PYTHON) narzedzia/test_startup_policy.py

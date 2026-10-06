@@ -22,7 +22,7 @@
 /* Rewizja prezentacji; trzyczęściowa struktura aktualizacji pozostaje bez zmian. */
 #define BURSZTYN_WERSJA_REWIZJA 6U
 
-#define BURSZTYN_WERSJA_TEKST "1.0.1.6"
+#define BURSZTYN_WERSJA_TEKST "1.0.1.7"
 #define BURSZTYN_NAZWA_WERSJI "Bursztyn OS v" BURSZTYN_WERSJA_TEKST
 
 /* Kanal domyslny dla wykazu aktualizacji. */

@@ -382,6 +382,9 @@ void skladacz_obrazu_podnies_warstwe(int pid);
 bool skladacz_obrazu_ustaw_tytul(int pid, const char* tytul);
 bool skladacz_obrazu_minimalizuj(int pid);
 bool skladacz_obrazu_przywroc(uint64_t window_id);
+// Called by BWS refresh after client drawing. Also invalidates initial chrome.
+// Recreated/cleared-on-resize surfaces require a new commit; restore does not.
+bool skladacz_obrazu_publikuj_klatke(int pid);
 bool skladacz_obrazu_czy_widoczna(int pid);
 uint64_t skladacz_obrazu_id_okna(int pid);
 uint32_t skladacz_obrazu_snapshot_okien(GuiOknoInfo* out, uint32_t max,

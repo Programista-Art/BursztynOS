@@ -571,7 +571,7 @@ static Okno okna[1] = {
         "Terminal",
         "Powłoka Bursztynowa",
         0x001A0B00,
-        true,
+        false,
         false
     }
 };
@@ -942,11 +942,7 @@ void boot_log_gui(const char* tekst) {
     DopiszDoBufora(tekst, 0x00FFBF00);
     DopiszDoBufora("\n", 0x00FFBF00);
 
-    OdswiezEkran();
-    PrzeniesNaEkran();
-    /* Scene zostaje bez kursora; overlay powstaje dopiero po present. */
-    kursor_overlay_widoczny = false;
-    PokazKursor();
+    // Bootstrap diagnostics stay headless. The desktop owns presentation.
 }
 
 // =========================================================================
@@ -1073,7 +1069,7 @@ void grafika_odtworz_tlo_skladania() {
         }
     } else {
         const BursztynMotyw* m = motyw_pobierz_aktywny();
-        const uint32_t kolor_pulpitu = m ? m->pulpit : 0x001A0B00;
+        const uint32_t kolor_pulpitu = m ? m->pulpit : g_domyslny_motyw_fallback.pulpit;
         for (int y = 0; y < wys; ++y) {
             uint32_t* dst =
                 reinterpret_cast<uint32_t*>(
@@ -1097,7 +1093,7 @@ void grafika_odtworz_tlo_regionu(int x, int y, int szer, int wys) {
     if (x0 >= x1 || y0 >= y1) return;
     const uint32_t pitch = aktywny_ekran->PobierzPitch();
     const BursztynMotyw* m = motyw_pobierz_aktywny();
-    const uint32_t kolor_pulpitu = m ? m->pulpit : 0x001A0B00;
+    const uint32_t kolor_pulpitu = m ? m->pulpit : g_domyslny_motyw_fallback.pulpit;
     for (int py = y0; py < y1; ++py) {
         uint32_t* dst = reinterpret_cast<uint32_t*>(backbuffer +
             static_cast<uint64_t>(py) * pitch) + x0;
@@ -2171,14 +2167,13 @@ static void NaprawWlascicielaMyszyJesliProcesZniknal() {
     pid_przejmujacy_mysz =
         znajdz_pierwsza_warstwe_gui();
 
-    if (pid_przejmujacy_mysz == -1)
-        okna[0].widoczne = true;
+    // Losing a GUI owner never activates the obsolete kernel terminal.
 }
 
 static int znajdz_warstwe_pod_punktem(int x, int y) {
     return wm_warstwa_pod_punktem(x,y,
         skladacz_obrazu_overlay_pod_punktem(x,y),
-        [](int pid) { return pobierz_warstwe(pid); },
+        [](int pid) { return skladacz_obrazu_czy_widoczna(pid) ? pobierz_warstwe(pid) : nullptr; },
         [](int pid,int lx,int ly) { return skladacz_obrazu_dekoracja_w_punkcie(pid,lx,ly); });
 }
 
@@ -3116,6 +3111,9 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
     }
     klog_serial(bochs?"[EKRAN] Backend Bochs VBE (PCI/BAR/DISPI potwierdzone).":
         (mamy_efi?"[EKRAN] Backend UEFI GOP (framebuffer).":"[EKRAN] Backend VESA (framebuffer)."));
+    // Present an intentional neutral theme background before desktop initialization.
+    grafika_odtworz_tlo_skladania();
+    PrzeniesNaEkran();
     wypisz_log("[SYSTEM] Bursztyn OS HAL gotowy!");
 }
 
@@ -3258,6 +3256,9 @@ extern "C" void bws_gui_odswiez() {
 
     if(ma_oczekujacy_dirty[aktualny_pid]){
         const GuiDirtyRect r=oczekujacy_dirty[aktualny_pid];ma_oczekujacy_dirty[aktualny_pid]=false;
+        if (skladacz_obrazu_publikuj_klatke(aktualny_pid) &&
+            skladacz_obrazu_czy_widoczna(aktualny_pid))
+            bws_gui_powiadom_lifecycle(BWS_ZDARZENIE_OKNO_POKAZANE, aktualny_pid);
         skladacz_obrazu_oznacz_dirty_rect(r.x,r.y,r.width,r.height);
     }
 }
@@ -3478,15 +3479,10 @@ extern "C" void bws_gui_ustaw_przejecie_myszy(bool stan) {
         return;
     }
 
-    /*
-     * Wylaczenie trybu GUI jest globalnym przejsciem do starej powloki.
-     * Zachowujemy to ABI dla menedzera okien / shell.bur.
-     */
+    // Releasing input ownership must not resurrect the kernel terminal.
     pid_przejmujacy_mysz = -1;
     flaga_zamkniecia_powloki = false;
-    okna[0].widoczne = true;
-    skladacz_obrazu_oznacz_dirty_rect(
-        okna[0].x, okna[0].y, okna[0].szer, okna[0].wys);
+    okna[0].widoczne = false;
 }
 
 extern "C" void bws_gui_ustaw_capture(bool stan) {
@@ -3574,6 +3570,7 @@ extern "C" int bws_gui_aktywny_pid() { return aktywny_pid_gui; }
 
 extern "C" void bws_gui_aktywuj_warstwe(int pid) {
     if(pid<=0||!pobierz_warstwe(pid))return;
+    ma_oczekujacy_dirty[pid] = false;
     ustaw_focus_gui(pid);
     skladacz_obrazu_podnies_warstwe(pid);
 }
@@ -3623,8 +3620,7 @@ extern "C" void bws_gui_zwolnij_mysz_procesu(int pid) {
     pid_przejmujacy_mysz =
         znajdz_pierwsza_warstwe_gui();
 
-    okna[0].widoczne =
-        pid_przejmujacy_mysz == -1;
+    okna[0].widoczne = false;
 }
 
 extern "C" void bws_gui_pobierz_rozdzielczosc(
@@ -3808,9 +3804,7 @@ bool grafika_aktywuj_virtio_gpu(VirtioGpuDriver* drv) {
             }
             backbuffer = nowy_bb;
             backbuffer_bajty = wymagane_bajty;
-            for (size_t i = 0; i < wymagane_bajty; ++i) {
-                backbuffer[i] = static_cast<uint8_t*>(drv->fb_vaddr)[i];
-            }
+            // The new scanout is not a source of valid desktop pixels.
         }
     }
     if (bufor_tapety && tapeta_zmapowane_bajty < wymagane_bajty) {
@@ -3830,6 +3824,7 @@ bool grafika_aktywuj_virtio_gpu(VirtioGpuDriver* drv) {
     kursor_overlay_x = 0;
     kursor_overlay_y = 0;
 
+    grafika_odtworz_tlo_skladania();
     PrzeniesNaEkran();
     PokazKursor();
 
