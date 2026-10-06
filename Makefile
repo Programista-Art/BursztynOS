@@ -684,7 +684,7 @@ repro_blob.o: repro_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
 # 16. MENEDZER OKIEN .bur
 # ============================================================================
 
-menedzer_okien_tmp.o: menedzer_okien.cpp desktop_entries.h desktop_layout.h bursztyn_gui.h ui_skala.h pulpit_geometria.h obrazy/png_dekoder.h plik_popup_ui.h plik_operacje_ui.h $(wildcard bursztyn_ui/*.h)
+menedzer_okien_tmp.o: menedzer_okien.cpp desktop_entries.h desktop_layout_settings.h desktop_layout.h bursztyn_gui.h ui_skala.h pulpit_geometria.h obrazy/png_dekoder.h plik_popup_ui.h plik_operacje_ui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
 
 menedzer_okien_blob.o: menedzer_okien_tmp.o bursztyn_gui.o $(MENEDZER_OKIEN_LINKER)
@@ -1579,3 +1579,9 @@ test-file-popup-host:
 	@mkdir -p .bursztyn-ui-test
 	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined narzedzia/test_file_popup_host.cpp -o .bursztyn-ui-test/test-file-popup
 	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-file-popup
+
+.PHONY: test-desktop-settings-host
+test-desktop-settings-host:
+	@mkdir -p .installertest
+	g++ -std=c++17 -O0 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined narzedzia/test_desktop_settings_authorization.cpp storage_format.cpp psf.cpp -o .installertest/test-desktop-settings
+	ASAN_OPTIONS=detect_leaks=0 .installertest/test-desktop-settings

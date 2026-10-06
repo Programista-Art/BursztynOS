@@ -125,6 +125,44 @@ public:
     Prostokat visual_bounds(int i) const {
         auto r=cell(i);return visual(r.x,r.y,items[i].label,dpi);
     }
+    void visual_position(int i,int x,int y) {
+        auto& p=items[i];
+        auto origin=visual(x0+p.col*cw,y0+p.row*ch,p.label,dpi);
+        p.offsetX=x-origin.x;p.offsetY=y-origin.y;p.placed=true;p.custom=true;
+    }
+    bool visible(int i) const {
+        auto r=visual_bounds(i);
+        return r.x>=0 && r.y>=0 && r.prawy()<=workWidth && r.dolny()<=workBottom;
+    }
+    // Retain every valid item first. Relocate only invalid/colliding entries,
+    // then fill holes for new entries. No transient selection is changed.
+    int reflow() {
+        int corrected=0;
+        for(int i=0;i<count;++i)if(items[i].placed) {
+            bool valid=visible(i);
+            for(int j=0;j<i && valid;++j)if(items[j].placed && intersects(visual_bounds(i),visual_bounds(j)))valid=false;
+            if(!valid){items[i].placed=false;++corrected;}
+        }
+        for(int i=0;i<count;++i)if(!items[i].placed) {
+            auto desired=visual_bounds(i);
+            int bestX=0,bestY=0;int64_t best=INT64_MAX;
+            for(int row=0;row<=rows;++row)for(int col=0;col<=cols;++col) {
+                auto candidate=visual(x0+col*cw,y0+row*ch,items[i].label,dpi);
+                // Partial edge cells use their real visual size.
+                if(candidate.szerokosc>workWidth || candidate.wysokosc>workBottom)continue;
+                if(candidate.x<0)candidate.x=0;
+                if(candidate.y<0)candidate.y=0;
+                if(candidate.prawy()>workWidth)candidate.x=workWidth-candidate.szerokosc;
+                if(candidate.dolny()>workBottom)candidate.y=workBottom-candidate.wysokosc;
+                bool free=true;
+                for(int j=0;j<count && free;++j)if(j!=i && items[j].placed && intersects(candidate,visual_bounds(j)))free=false;
+                int64_t dx=int64_t(candidate.x)-desired.x,dy=int64_t(candidate.y)-desired.y,d=dx*dx+dy*dy;
+                if(free && d<best){best=d;bestX=candidate.x;bestY=candidate.y;}
+            }
+            if(best!=INT64_MAX)visual_position(i,bestX,bestY);
+        }
+        return corrected;
+    }
     void clamp_delta(int& dx,int& dy) const {
         Prostokat bounds{};
         for(int i=0;i<count;++i)if(items[i].selected && items[i].placed)

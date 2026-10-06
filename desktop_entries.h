@@ -20,22 +20,22 @@ enum class TypIkonyAplikacji : uint8_t {
     Motywy
 };
 
-struct Launcher {const char* name; const char* path; const char* title; TypIkonyAplikacji icon;};
+struct Launcher {const char* name; const char* path; const char* title; TypIkonyAplikacji icon; const char* id;};
 inline constexpr const char* Directory="/uzytkownicy/Pulpit";
 inline constexpr Launcher Launchers[]={
-    {"Notatnik","/programy/notatnik.cebula/notatnik.bur","Notatnik",TypIkonyAplikacji::Notatnik},
-    {"Kalkulator","/programy/kalkulator.cebula/kalkulator.bur","Kalkulator",TypIkonyAplikacji::Kalkulator},
-    {"Husarz","/programy/przegladarka.cebula/przegladarka.bur","Husarz",TypIkonyAplikacji::Husarz},
-    {"Testy systemu","/programy/test.cebula/test.bur","Testy Bursztyn OS",TypIkonyAplikacji::Test},
-    {"Snake","/gry/snake.cebula/snake.bur","Snake",TypIkonyAplikacji::Snake},
-    {"Eksplorator","/programy/eksplorator.cebula/eksplorator-plikow.bur","Eksplorator Plików",TypIkonyAplikacji::Eksplorator},
-    {"Przeglądarka Obrazów","/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur","Przeglądarka Obrazów",TypIkonyAplikacji::Obrazy},
-    {"Demo BursztynUI","/programy/demo_ui.cebula/demo_ui.bur","BursztynUI -",TypIkonyAplikacji::DemoUI},
-    {"Kontrolki 2","/programy/kontrolki2.cebula/kontrolki2.bur","BursztynUI Kontrolki 2",TypIkonyAplikacji::Kontrolki2},
-    {"Kontrolki 3","/programy/kontrolki3.cebula/kontrolki3.bur","Kontrolki 3",TypIkonyAplikacji::Kontrolki3},
-    {"Aktualizacje","/programy/aktualizacje.cebula/aktualizacje.bur","Aktualizacje Systemu",TypIkonyAplikacji::Aktualizacje},
-    {"Motywy","/programy/motywy.cebula/motywy.bur","Motywy",TypIkonyAplikacji::Motywy},
-    {"Kontrolki 4","/programy/kontrolki4.cebula/kontrolki4.bur","Kontrolki 4",TypIkonyAplikacji::Kontrolki4},
+    {"Notatnik","/programy/notatnik.cebula/notatnik.bur","Notatnik",TypIkonyAplikacji::Notatnik,"notatnik"},
+    {"Kalkulator","/programy/kalkulator.cebula/kalkulator.bur","Kalkulator",TypIkonyAplikacji::Kalkulator,"kalkulator"},
+    {"Husarz","/programy/przegladarka.cebula/przegladarka.bur","Husarz",TypIkonyAplikacji::Husarz,"husarz"},
+    {"Testy systemu","/programy/test.cebula/test.bur","Testy Bursztyn OS",TypIkonyAplikacji::Test,"testy-systemu"},
+    {"Snake","/gry/snake.cebula/snake.bur","Snake",TypIkonyAplikacji::Snake,"snake"},
+    {"Eksplorator","/programy/eksplorator.cebula/eksplorator-plikow.bur","Eksplorator Plików",TypIkonyAplikacji::Eksplorator,"eksplorator"},
+    {"Przeglądarka Obrazów","/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur","Przeglądarka Obrazów",TypIkonyAplikacji::Obrazy,"obrazy"},
+    {"Demo BursztynUI","/programy/demo_ui.cebula/demo_ui.bur","BursztynUI -",TypIkonyAplikacji::DemoUI,"demo-ui"},
+    {"Kontrolki 2","/programy/kontrolki2.cebula/kontrolki2.bur","BursztynUI Kontrolki 2",TypIkonyAplikacji::Kontrolki2,"kontrolki2"},
+    {"Kontrolki 3","/programy/kontrolki3.cebula/kontrolki3.bur","Kontrolki 3",TypIkonyAplikacji::Kontrolki3,"kontrolki3"},
+    {"Aktualizacje","/programy/aktualizacje.cebula/aktualizacje.bur","Aktualizacje Systemu",TypIkonyAplikacji::Aktualizacje,"aktualizacje"},
+    {"Motywy","/programy/motywy.cebula/motywy.bur","Motywy",TypIkonyAplikacji::Motywy,"motywy"},
+    {"Kontrolki 4","/programy/kontrolki4.cebula/kontrolki4.bur","Kontrolki 4",TypIkonyAplikacji::Kontrolki4,"kontrolki4"},
 };
 inline constexpr int Count=sizeof(Launchers)/sizeof(Launchers[0]);
 inline bool is_desktop(const char* path) {

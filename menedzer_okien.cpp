@@ -3,6 +3,7 @@
 #include "pulpit_geometria.h"
 #include "desktop_layout.h"
 #include "desktop_entries.h"
+#include "desktop_layout_settings.h"
 #include "obrazy/png_dekoder.h"
 /*
  * Menedzer Okien (Pulpit i Pasek Zadan) dla Bursztyn OS
@@ -839,6 +840,36 @@ int liczba_wpisow_pulpitu = 0;
 int zaznaczony_wpis_pulpitu = -1; // context anchor, selection lives in desktop_layout
 Desktop::Layout<PULPIT_MAX_WPISOW> desktop_layout;
 static Desktop::Position desktop_previous[PULPIT_MAX_WPISOW];
+static DesktopSettings::State* desktop_settings=nullptr;
+static int desktop_restore_x[PULPIT_MAX_WPISOW],desktop_restore_y[PULPIT_MAX_WPISOW];
+DesktopSettings::Key klucz_ukladu_pulpitu(int i) {
+    auto* launcher=DesktopEntries::launcher(wpisy_pulpitu[i].launcher);
+    return {launcher?'L':'F',launcher?launcher->id:wpisy_pulpitu[i].nazwa};
+}
+uint64_t plik_ukladu_bws(uint64_t nr,uint64_t a,uint64_t b,uint64_t c) {
+    return bws_wywolaj(nr,a,b,c);
+}
+#if BURSZTYNDIAGDESKTOPLAYOUT
+void diagnostyka_ukladu(const char* label,int value) {
+    char line[96]{},digits[10];int n=0,d=0;
+    while(*label && n<80)line[n++]=*label++;
+    do{digits[d++]=char('0'+value%10);value/=10;}while(value && d<10);
+    while(d)line[n++]=digits[--d];
+    line[n++]='\n';
+    bws_wywolaj(1,reinterpret_cast<uint64_t>(line));
+}
+#endif
+void zapisz_uklad_pulpitu() {
+    if(!desktop_settings || !desktop_settings->dirty)return;
+    // Called after capture release and visual commit. WM owns no graphics lock;
+    // the compositor is a separate task. BWS owns filesystem authorization.
+    bool ok=desktop_settings->save(desktop_layout,klucz_ukladu_pulpitu,plik_ukladu_bws);
+    if(!ok)bws_wywolaj(1,reinterpret_cast<uint64_t>("[DESKTOP-LAYOUT] save failed\n"));
+#if BURSZTYNDIAGDESKTOPLAYOUT
+    if(ok)bws_wywolaj(1,reinterpret_cast<uint64_t>("[DESKTOP-LAYOUT] saved\n"));
+#endif
+}
+
 void aktualizuj_layout_pulpitu();
 void odrysuj_obszar_pulpitu(Desktop::Prostokat r);
 void odrysuj_zaznaczenie_pulpitu();
@@ -1048,6 +1079,24 @@ bool odswiez_wpisy_pulpitu() {
     }
     for (int i = 0; i < count; ++i) wpisy_pulpitu[i] = nowe[i];
     liczba_wpisow_pulpitu = count;desktop_layout.count=count;aktualizuj_layout_pulpitu();
+    if(!desktop_settings) {
+        desktop_settings=new DesktopSettings::State{};
+        if(desktop_settings) {
+            if(desktop_settings->load(plik_ukladu_bws)) {
+                [[maybe_unused]] int corrected=desktop_settings->apply(desktop_layout,klucz_ukladu_pulpitu);
+#if BURSZTYNDIAGDESKTOPLAYOUT
+                diagnostyka_ukladu("[DESKTOP-LAYOUT] reflow=",corrected);
+#endif
+            }
+#if BURSZTYNDIAGDESKTOPLAYOUT
+            bws_wywolaj(1,reinterpret_cast<uint64_t>("[DESKTOP-LAYOUT] /ustawienia/uklad-pulpitu.cfg\n"));
+            diagnostyka_ukladu("[DESKTOP-LAYOUT] loaded=",desktop_settings->count);
+            diagnostyka_ukladu("[DESKTOP-LAYOUT] launchers=",desktop_settings->matchedLaunchers);
+            diagnostyka_ukladu("[DESKTOP-LAYOUT] files=",desktop_settings->matchedFiles);
+            diagnostyka_ukladu("[DESKTOP-LAYOUT] stale=",desktop_settings->stale);
+#endif
+        }
+    }
     if (zaznaczony_wpis_pulpitu >= count) zaznaczony_wpis_pulpitu = -1;
     hash_pulpitu = nowy_hash;
     hash_pulpitu_wazny = true;
@@ -1055,6 +1104,12 @@ bool odswiez_wpisy_pulpitu() {
 }
 
 void aktualizuj_layout_pulpitu() {
+    const int previousDpi=desktop_layout.dpi;
+    const bool geometryChanged=desktop_layout.workWidth>0 && (desktop_layout.workWidth!=screen_w ||
+        desktop_layout.workBottom!=screen_h-PASEK_WYS || desktop_layout.dpi!=ui_skala_procent);
+    if(geometryChanged)for(int i=0;i<desktop_layout.count;++i) {
+        auto r=desktop_layout.visual_bounds(i);desktop_restore_x[i]=r.x;desktop_restore_y[i]=r.y;
+    }
     desktop_layout.geometry(screen_w,screen_h-PASEK_WYS,PULPIT_GRID_Y,ui_skala_procent);
     auto m=pulpit_metryki(ui_skala_procent);
     int maxLines=(desktop_layout.rows*desktop_layout.ch-m.ikona_wys-m.odstep_etykiety-ui_skaluj(6,ui_skala_procent))/(m.wysokosc_linii+m.odstep_linii);
@@ -1064,21 +1119,19 @@ void aktualizuj_layout_pulpitu() {
         int height=m.ikona_wys+m.odstep_etykiety+p.label.height+ui_skaluj(6,ui_skala_procent);
         p.span=(height+desktop_layout.ch-1)/desktop_layout.ch;
     }
-    // Existing positions win. Newly discovered entries use the original row-major
-    // grid where it fits; tall labels reserve extra rows rather than overlapping.
-    for(int i=0;i<desktop_layout.count;++i) {
-        auto& p=desktop_layout.items[i];
-        if(p.placed && !p.custom && !desktop_layout.fits(i,p.col,p.row))p.placed=false;
-        if(p.placed && p.custom) {
-            auto r=desktop_layout.visual_bounds(i);
-            if(r.x<0)p.offsetX-=r.x;
-            if(r.y<0)p.offsetY-=r.y;
-            if(r.prawy()>screen_w)p.offsetX-=r.prawy()-screen_w;
-            if(r.dolny()>screen_h-PASEK_WYS)p.offsetY-=r.dolny()-(screen_h-PASEK_WYS);
-        }
-    }
+    if(geometryChanged)for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].placed)
+        desktop_layout.visual_position(i,int(int64_t(desktop_restore_x[i])*ui_skala_procent/previousDpi),
+            int(int64_t(desktop_restore_y[i])*ui_skala_procent/previousDpi));
+    // Retain the existing initial row-major layout. Settings restoration and
+    // display changes reserve valid visual positions before relocating others.
     for(int i=0;i<desktop_layout.count;++i)if(!desktop_layout.items[i].placed)
         desktop_layout.place(i,i%desktop_layout.cols,i/desktop_layout.cols);
+    const int corrected=desktop_layout.reflow();
+    if(corrected && desktop_settings)desktop_settings->dirty=true;
+#if BURSZTYNDIAGDESKTOPLAYOUT
+    if(corrected)diagnostyka_ukladu("[DESKTOP-LAYOUT] reflow=",corrected);
+#endif
+
 }
 void prostokat_wpisu_pulpitu(int indeks, int* x, int* y) {
     auto r=desktop_layout.cell(indeks);
@@ -1640,6 +1693,7 @@ bool obsluz_gest_pulpitu(const bws_zdarzenie& e) {
         gui_odswiez();return true;
     }
     if(e.typ==BWS_ZDARZENIE_MYSZ_UP && g.candidate) {
+        bool layoutChanged=false;
         if(g.dragging && g.rubber)odtworz_obrys(g.band);
         else if(g.dragging) {
             obrysy_grupy(true);
@@ -1652,6 +1706,11 @@ bool obsluz_gest_pulpitu(const bws_zdarzenie& e) {
             }
             zapamietaj_zaznaczenie_pulpitu();
             desktop_layout.move_visual_group(g.dx,g.dy);
+            if(desktop_settings)for(int i=0;i<desktop_layout.count;++i) {
+                const auto& p=desktop_layout.items[i];const auto& old=desktop_previous[i];
+                if(p.placed && p.selected && (p.col!=old.col || p.row!=old.row || p.offsetX!=old.offsetX || p.offsetY!=old.offsetY))
+                    layoutChanged=desktop_settings->dirty=true;
+            }
             // Clear every old location before drawing any new location.
             for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].selected && desktop_layout.items[i].placed) {
                 const auto& old=desktop_previous[i];
@@ -1667,7 +1726,7 @@ bool obsluz_gest_pulpitu(const bws_zdarzenie& e) {
         } else if(g.item>=0 && !g.ctrl) {
             zapamietaj_zaznaczenie_pulpitu();desktop_layout.click(g.item,false);odrysuj_zaznaczenie_pulpitu();
         }
-        g=GestPulpitu{};gui_ustaw_capture_myszy(false);gui_odswiez();return true;
+        g=GestPulpitu{};gui_ustaw_capture_myszy(false);gui_odswiez();if(layoutChanged)zapisz_uklad_pulpitu();return true;
     }
     return false;
 }
@@ -2428,6 +2487,7 @@ extern "C" __attribute__((noreturn)) void _start() {
     wm_log("[WM-BOOT] desktop-render-start\n");
 #endif
     RysujPulpit(true);
+    zapisz_uklad_pulpitu();
 #if BURSZTYN_DIAG_BOOT
     wm_log("[WM-BOOT] desktop-render-complete\n");
 #endif
@@ -2471,7 +2531,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             zaktualizuj_cache_przycisku(ui_skala_procent);
             if(screen_w>0&&screen_h>PASEK_WYS)
                 gui_ustaw_obszar_roboczy(0, 0, screen_w, screen_h - PASEK_WYS);
-            rozmiesc_ikony_ekranu();zarejestruj_pulpit_jako_cel_drop();aktualizuj_overlay_menu();RysujPulpit(true);continue;
+            rozmiesc_ikony_ekranu();zarejestruj_pulpit_jako_cel_drop();aktualizuj_overlay_menu();RysujPulpit(true);zapisz_uklad_pulpitu();continue;
         }
         if (zdarzenie.typ == BWS_ZDARZENIE_MOTYW_ZMIENIONY) {
             BursztynUI::Motyw::pobierz_domyslny().zaktualizuj_z_systemu();

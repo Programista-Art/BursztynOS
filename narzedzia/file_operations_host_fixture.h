@@ -24,6 +24,9 @@ static bool add_file(const char* path,bool directory) {
 static uint64_t explorer_bws(uint64_t nr,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t) {
     const char* path=reinterpret_cast<const char*>(a1);
     if(nr==10){++launches;launched_app=path;return 1;}
+    // Generic file-action fixture models no settings storage; dedicated layout
+    // tests install an I/O hook, including capture ordering and failure modes.
+    if(nr==46 && !strcmp(path,"/ustawienia"))return 0;
     if(nr==46)return add_file(path,true);
     if(nr==6) {
         if(!files.count(path) || !files[path])return 0;
