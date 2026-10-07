@@ -1,3 +1,5 @@
+#include "diagnostyka_startu.h"
+#include "ekran_powitalny_api.h"
 #include "move_trace.h"
 #include "wm_input.h"
 #include "gui_runtime_diag.h"
@@ -536,6 +538,8 @@ static int clip_terminala_y1 = 0;
 void UkryjKursor();
 void PokazKursor();
 void OdswiezEkran();
+static bool grafika_wyciszona=false;
+void grafika_wycisz() {grafika_wyciszona=true;tryb_skladania_obrazu=false;diag_start_reboot("[STARTUP] graphics quiesce");}
 void PrzeniesNaEkran();
 void PrzeniesFragmentNaEkran(int x, int y, int szer, int wys);
 void PostawPiksel(int x, int y, uint32_t kolor);
@@ -950,24 +954,27 @@ void boot_log_gui(const char* tekst) {
 // =========================================================================
 
 void PrzeniesNaEkran() {
-    if (!backbuffer || !aktywny_ekran)
+    if (grafika_wyciszona || !backbuffer || !aktywny_ekran)
         return;
 
-    aktywny_ekran->KopiujNaEkran(backbuffer);
+    aktywny_ekran->KopiujNaEkran(powitanie_zrodlo(backbuffer,
+        grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc(),aktywny_ekran->PobierzPitch(),
+        0,0,grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc(),ekran_skala()));
 }
 
 void PrzeniesFragmentNaEkran(int x,
                              int y,
                              int szer,
                              int wys) {
-    if (!backbuffer || !aktywny_ekran)
+    if (grafika_wyciszona || !backbuffer || !aktywny_ekran)
         return;
 
     const auto start=gui_perf_now();
     MoveTrace::present();
     gui_perf_add(0,GP_PRESENT);gui_perf_add(0,GP_COPY);
     aktywny_ekran->KopiujFragmentNaEkran(
-        backbuffer, x, y, szer, wys);
+        powitanie_zrodlo(backbuffer,grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc(),
+            aktywny_ekran->PobierzPitch(),x,y,szer,wys,ekran_skala()), x, y, szer, wys);
     const auto elapsed=gui_perf_now()-start;
     gui_perf_add(0,GP_PRESENT_NS,elapsed);gui_perf_max(0,GP_PRESENT_MAX_NS,elapsed);
 }
@@ -2044,6 +2051,22 @@ extern "C" void grafika_naloz_okno_terminala_region(int x,
     clip_terminala_aktywny = false;
 }
 
+// Retain pointer movement and lifecycle delivery; consume interaction while
+// the system welcome surface covers the desktop. No app receives splash focus.
+static bool grafika_dostarcz_zdarzenie(int pid,const bws_zdarzenie* e) {
+    if(powitanie_aktywne()) {
+        switch(e->typ) {
+        case BWS_ZDARZENIE_MYSZ_RUCH: case BWS_ZDARZENIE_MYSZ_DOWN:
+        case BWS_ZDARZENIE_MYSZ_UP: case BWS_ZDARZENIE_MYSZ_PRAWY_DOWN:
+        case BWS_ZDARZENIE_MYSZ_PRAWY_UP: case BWS_ZDARZENIE_MYSZ_KOLO:
+        case BWS_ZDARZENIE_KLAWISZ: case BWS_ZDARZENIE_KLAWISZ_FIZYCZNY:
+        case BWS_ZDARZENIE_TEXT_INPUT: case BWS_ZDARZENIE_WSKAZNIK_PRECYZYJNY: return true;
+        default: break;
+        }
+    }
+    return scheduler_dodaj_zdarzenie(pid,e);
+}
+
 // =========================================================================
 // KLAWIATURA
 // =========================================================================
@@ -2059,7 +2082,7 @@ extern "C" bool zaktualizuj_klawiature_gui(char znak) {
     SerialLog("[KEY] char="); SerialLiczba(static_cast<uint8_t>(znak));
     SerialLog(" focus_pid="); SerialLiczba(aktywny_pid_gui); SerialLog("\n");
 #endif
-    (void)scheduler_dodaj_zdarzenie(aktywny_pid_gui, &e);
+    (void)grafika_dostarcz_zdarzenie(aktywny_pid_gui, &e);
     /* Aktywny model GUI jest wylacznym odbiorca. Nawet przepelnienie jego
        kolejki nie moze spowodowac double-delivery do legacy byte-streamu. */
     return true;
@@ -2077,7 +2100,7 @@ extern "C" bool zaktualizuj_klawisz_fizyczny_gui(
     e.przyciski = modyfikatory;
     e.kod = kod;
     e.timestamp = znacznik_zdarzenia();
-    (void)scheduler_dodaj_zdarzenie(aktywny_pid_gui, &e);
+    (void)grafika_dostarcz_zdarzenie(aktywny_pid_gui, &e);
     return true;
 }
 
@@ -2092,7 +2115,7 @@ extern "C" bool zaktualizuj_tekst_gui(
     e.przyciski = modyfikatory;
     e.kod = codepoint;
     e.timestamp = znacznik_zdarzenia();
-    (void)scheduler_dodaj_zdarzenie(aktywny_pid_gui, &e);
+    (void)grafika_dostarcz_zdarzenie(aktywny_pid_gui, &e);
     return true;
 }
 
@@ -2400,7 +2423,7 @@ extern "C" void zaktualizuj_mysze_zrodlo(int dx,
                 bws_zdarzenie out{};out.typ=BWS_ZDARZENIE_MYSZ_RUCH;
                 out.x=mysz_x;out.y=mysz_y;out.dx=dx;out.dy=-dy;
                 out.przyciski=przyciski;out.kod=klawiatura_modyfikatory();out.timestamp=znacznik_zdarzenia();
-                scheduler_dodaj_zdarzenie(leave,&out);
+                grafika_dostarcz_zdarzenie(leave,&out);
             }
         }
         if (klik) {
@@ -2452,10 +2475,10 @@ extern "C" void zaktualizuj_mysze_zrodlo(int dx,
                 e.przyciski = przyciski;
                 e.kod = klawiatura_modyfikatory();
                 e.timestamp = znacznik_zdarzenia();
-                scheduler_dodaj_zdarzenie(cel, &e);
+                grafika_dostarcz_zdarzenie(cel, &e);
                 if (dx != 0 || dy != 0) {
                     e.typ = BWS_ZDARZENIE_WSKAZNIK_PRECYZYJNY;
-                    scheduler_dodaj_zdarzenie(cel, &e);
+                    grafika_dostarcz_zdarzenie(cel, &e);
                 }
             }
             if (prawy_klik || prawy_pusc) {
@@ -2466,7 +2489,7 @@ extern "C" void zaktualizuj_mysze_zrodlo(int dx,
                 e.przyciski = przyciski;
                 e.kod = klawiatura_modyfikatory();
                 e.timestamp = znacznik_zdarzenia();
-                scheduler_dodaj_zdarzenie(cel, &e);
+                grafika_dostarcz_zdarzenie(cel, &e);
             }
         }
         if (pusc) capture_pid_gui = -1;
@@ -2678,7 +2701,7 @@ extern "C" void zaktualizuj_kolo_myszy(
     e.przyciski = przyciski;
     e.kod = klawiatura_modyfikatory();
     e.timestamp = znacznik_zdarzenia();
-    (void)scheduler_dodaj_zdarzenie(cel, &e);
+    (void)grafika_dostarcz_zdarzenie(cel, &e);
 }
 
 extern "C" void obsluga_przerwania_zegara() {
@@ -2795,7 +2818,11 @@ uint8_t st_vesa_pamiec[sizeof(SterownikVESA)];
 alignas(SterownikGOP) static
 uint8_t st_gop_pamiec[sizeof(SterownikGOP)];
 
+static void grafika_reset_startu() {
+    powitanie_wycisz();grafika_wyciszona=false;skladacz_obrazu_wznow();
+}
 void InicjalizujGrafike(uint64_t adres_mb2) {
+    grafika_reset_startu();
     if (adres_mb2 == 0)
         return;
 

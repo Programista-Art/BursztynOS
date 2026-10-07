@@ -1,3 +1,5 @@
+#include "ekran_powitalny_api.h"
+#include "opcje_startowe.h"
 #include "tapety.h"
 #include "ekran.h"
 extern "C" uint8_t _binary_ekran_bin_start[], _binary_ekran_bin_end[];
@@ -913,8 +915,7 @@ bool zadano_automatyczne_testy(uint64_t mbi, const char* token = "bursztyn.test=
             const uint32_t pojemnosc = tag->rozmiar - 8;
             for (uint32_t i = 0; i < pojemnosc; ++i) {
                 if (cmdline[i] == '\0') {
-                    return tekst_zawiera(
-                        cmdline, token);
+                    return opcja_startowa_obecna(cmdline, token);
                 }
             }
             return false;
@@ -2123,6 +2124,7 @@ extern "C" bool system_potwierdz_gotowosc_pulpitu(int pid) {
     if (w->z_order != 0) return false;
     if (w->x != 0 || w->y != 0) return false;
     if (w->bufor_pikseli == nullptr) return false;
+    if (!skladacz_obrazu_czy_widoczna(pid)) return false;
 
     const int screen_w = grafika_pobierz_szerokosc();
     const int screen_h = grafika_pobierz_wysokosc();
@@ -2136,6 +2138,8 @@ extern "C" bool system_potwierdz_gotowosc_pulpitu(int pid) {
         // Pulpit zostal juz potwierdzony; powtorne wywolanie przez uprawniony proces to idempotentny no-op.
         return true;
     }
+
+    powitanie_pulpit_gotowy(grafika_czy_tapeta(),pid);
 
     // Dokoncz pierwsze pelne zlozenie i flush pulpitu na scanout
     zablokuj_ekran();
@@ -2310,6 +2314,11 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
         wypisz_log(hpet_test_wrap_diagnostyczny()
             ? "[HPET-TEST] 32-bit wrap monotonic: OK"
             : "[HPET-TEST] 32-bit wrap monotonic: BLAD");
+
+    powitanie_inicjalizuj(
+        !zadano_automatyczne_testy(g_multiboot_info_ptr) &&
+        !zadano_automatyczne_testy(g_multiboot_info_ptr, "bursztyn.splash=0") &&
+        !zadano_automatyczne_testy(g_multiboot_info_ptr, "bursztyn.install=1"));
 
     /* ---------------------------------------------------------------------
      * Scheduler i kryptografia

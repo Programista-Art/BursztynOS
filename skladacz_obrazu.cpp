@@ -1,3 +1,5 @@
+#include "diagnostyka_startu.h"
+#include "ekran_powitalny_api.h"
 #include "move_trace.h"
 /*
  * Bursztyn OS - Skladacz Obrazu
@@ -606,6 +608,7 @@ bool warstwa_ma_spojny_bufor(int indeks) {
  * 4. GUARD SKLADANIA
  * ========================================================================= */
 
+static bool skladacz_wyciszony=false;
 bool rozpocznij_guard_skladania() {
     return
         !__atomic_test_and_set(
@@ -1724,6 +1727,7 @@ void zakoncz_snapshot(){uint64_t f=irq_off();if(render_readers)--render_readers;
  * ========================================================================= */
 
 void skladacz_obrazu_zloz_klatke() {
+    if(skladacz_wyciszony)return;
     GuardSkladania guard;
 
     if (!guard.aktywny()) {
@@ -1839,13 +1843,25 @@ void skladacz_obrazu_zloz_klatke() {
      *   - opuszcza surowy tryb skladania.
      */
     grafika_zakoncz_skladanie();
+#if BURSZTYNDIAGSPLASHTIMING
+    powitanie_diag_prezentacja();
+#endif
 }
 
+void skladacz_obrazu_wycisz() {
+    skladacz_wyciszony=true;
+    dirty_count=0;cursor_pending=false;nastepna_klatka_ns=0;
+    for(auto& p:pending_geometry)p={};
+    pending_drag_overlay={};drag_frame_waiting=false;
+    diag_start_reboot("[STARTUP] compositor quiesce");
+}
+void skladacz_obrazu_wznow() {skladacz_wyciszony=false;}
 void skladacz_obrazu_oznacz_dirty() {
     skladacz_obrazu_oznacz_dirty_rect(0,0,grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc());
 }
 
 void skladacz_obrazu_oznacz_dirty_rect(int x,int y,int width,int height){
+    if(skladacz_wyciszony)return;
     GuiDirtyRect r{x,y,width,height};const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
     if(!rect_clip(&r,sw,sh))return;
 #if BURSZTYNDIAGMOVE
@@ -1873,6 +1889,7 @@ void skladacz_obrazu_oznacz_dirty_rect(int x,int y,int width,int height){
 void skladacz_obrazu_oznacz_dirty_warstwy(int pid){warstwa_obrazu*w=pobierz_warstwe(pid);if(w)skladacz_obrazu_oznacz_dirty_rect(w->x,w->y,w->szerokosc,w->wysokosc);}
 
 void skladacz_obrazu_oznacz_ruch_kursora(int old_x,int old_y,int new_x,int new_y){
+    if(skladacz_wyciszony)return;
     (void)old_x; (void)old_y;
     const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
     if(sw<=0||sh<=0){kursor_diag_drop();return;}
@@ -1884,6 +1901,8 @@ void skladacz_obrazu_oznacz_ruch_kursora(int old_x,int old_y,int new_x,int new_y
 }
 
 void skladacz_obrazu_obsluz_dirty() {
+    if(skladacz_wyciszony)return;
+    powitanie_tick();
     MoveTrace::report();
     gui_perf_report();
 #if BURSZTYNDIAGGUIRUNTIME
@@ -1994,6 +2013,9 @@ void skladacz_obrazu_obsluz_dirty() {
 #endif
     if(count) zakoncz_snapshot();
     ++licznik_klatek;
+#if BURSZTYNDIAGSPLASHTIMING
+    powitanie_diag_prezentacja();
+#endif
     suma_dirty_px+=pixels;
     suma_rect+=count+(cursor_work?2U:0U);
     if(pixels>maks_dirty_px)maks_dirty_px=pixels;
@@ -2321,6 +2343,7 @@ bool skladacz_przygotuj_ekran(int sw,int sh,int work_h,ZmianaWarstwEkranu* z){
     return true;
 }
 void skladacz_reset_ekranu(){
+    powitanie_reset_ekranu();
     if(application_popup.otwarty)skladacz_obrazu_ustaw_popup_aplikacji(application_popup.pid,false,0,0,0,0);
     system_overlay={false,-1,{0,0,0,0}};drag_overlay={false,-1,0,0};pending_drag_overlay={};
     uint64_t f=irq_off();dirty_count=0;cursor_pending=false;nastepna_klatka_ns=0;

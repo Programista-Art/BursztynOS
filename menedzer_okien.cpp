@@ -2491,12 +2491,16 @@ extern "C" __attribute__((noreturn)) void _start() {
 #if BURSZTYN_DIAG_BOOT
     wm_log("[WM-BOOT] desktop-render-complete\n");
 #endif
-    wm_log("[WM] Initial Desktop ready\n");
+    // The model flag is set only after launchers and saved/default positions
+    // are prepared. Filesystem enumeration failure is retried by the WM timer.
+    bool start_pulpitu_gotowy=false;
+    if(hash_pulpitu_wazny) {
+        start_pulpitu_gotowy=gui_potwierdz_gotowosc_pulpitu();
 #if BURSZTYN_DIAG_BOOT
-    wm_log_i32("[WM-BOOT] handshake-result=", gui_potwierdz_gotowosc_pulpitu());
-#else
-    gui_potwierdz_gotowosc_pulpitu();
+        wm_log_i32("[WM-BOOT] handshake-result=",start_pulpitu_gotowy);
 #endif
+        if(start_pulpitu_gotowy)wm_log("[WM] Initial Desktop ready\n");
+    }
 
     int last_desktop_click = -1;
     uint64_t last_desktop_click_time = 0;
@@ -2638,6 +2642,10 @@ extern "C" __attribute__((noreturn)) void _start() {
                 ++pulpit_refresh_ticks >= PULPIT_REFRESH_TICKS) {
                 pulpit_refresh_ticks = 0;
                 if (odswiez_wpisy_pulpitu()) RysujPulpit(true);
+                if(!start_pulpitu_gotowy&&hash_pulpitu_wazny) {
+                    RysujPulpit(true);
+                    start_pulpitu_gotowy=gui_potwierdz_gotowosc_pulpitu();
+                }
             }
         }
 

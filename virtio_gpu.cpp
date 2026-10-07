@@ -1424,7 +1424,9 @@ void virtio_gpu_quiesce_for_reboot(void) {
                 : (start_ns + QUIESCE_TIMEOUT_NS);
 
         bool locked = false;
-        while (true) {
+        // HPET moze byc niedostepny: zerowy odczyt nie ogranicza petli.
+        // Zachowaj istniejacy timeout; ogranicz tez liczbe prob bez zegara.
+        for (uint32_t spin=0; spin<VIRTIO_GPU_MAX_SPINS_GUARD; ++spin) {
             if (__atomic_test_and_set(&drv->lock, __ATOMIC_ACQUIRE) == 0) {
                 locked = true;
                 break;
@@ -1440,6 +1442,22 @@ void virtio_gpu_quiesce_for_reboot(void) {
             continue; /* NIE dotykaj controlq, inna zablokowana petla moze go uzywac! */
         }
 
+        // Submissions are stopped: at most queue_size completions can remain.
+        // A rejected used entry is not consumed by virtqueue_pop_used(). Never
+        // retry that same invalid entry forever, including after SET_SCANOUT.
+        auto drain_used = [&]() {
+            for (uint32_t drained=0; virtqueue_has_used(drv->controlq); ++drained) {
+                void* cookie=nullptr;uint32_t used_len=0;
+                if (drained>=drv->controlq->queue_size ||
+                    virtqueue_pop_used(drv->controlq,&cookie,&used_len)<0) {
+                    gpu_klog("[REBOOT TRACE] gpu quiesce invalid completion - aborting drain");
+                    drv->has_error=true;
+                    return false;
+                }
+            }
+            return true;
+        };
+
         /* 2. Sprawdz czy jest oczekujace polecenie lub nieodebrane zakonczenia */
         const bool has_pending =
             virtqueue_has_used(drv->controlq) ||
@@ -1451,13 +1469,8 @@ void virtio_gpu_quiesce_for_reboot(void) {
             for (uint32_t spin = 0; spin < 10000000U; ++spin) {
                 if (__atomic_load_n(&drv->command_done, __ATOMIC_ACQUIRE) ||
                     virtqueue_has_used(drv->controlq)) {
-                    while (virtqueue_has_used(drv->controlq)) {
-                        void* cookie = nullptr;
-                        uint32_t used_len = 0;
-                        if (virtqueue_pop_used(drv->controlq, &cookie, &used_len) < 0) break;
-                    }
+                    quiesced = drain_used();
                     __atomic_store_n(&drv->command_done, 0U, __ATOMIC_RELEASE);
-                    quiesced = true;
                     break;
                 }
                 const uint64_t now = gpu_monotonic_ns();
@@ -1465,7 +1478,7 @@ void virtio_gpu_quiesce_for_reboot(void) {
                 asm volatile("pause" ::: "memory");
             }
             if (!quiesced) {
-                gpu_klog("[REBOOT TRACE] gpu quiesce pop TIMEOUT");
+                if (!drv->has_error)gpu_klog("[REBOOT TRACE] gpu quiesce pop TIMEOUT");
                 drv->has_error = true;
                 __atomic_clear(&drv->lock, __ATOMIC_RELEASE);
                 continue;
@@ -1506,11 +1519,7 @@ void virtio_gpu_quiesce_for_reboot(void) {
                 
                 for (uint32_t spin = 0; spin < 10000000U; ++spin) {
                     if (__atomic_load_n(&drv->command_done, __ATOMIC_ACQUIRE) || virtqueue_has_used(drv->controlq)) {
-                        while (virtqueue_has_used(drv->controlq)) {
-                            void* cookie = nullptr;
-                            uint32_t used_len = 0;
-                            virtqueue_pop_used(drv->controlq, &cookie, &used_len);
-                        }
+                        drain_used();
                         __atomic_store_n(&drv->command_done, 0U, __ATOMIC_RELEASE);
                         break;
                     }

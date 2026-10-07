@@ -1,0 +1,14 @@
+#pragma once
+#include <stdint.h>
+// System presentation layer; never a BWS application.
+void powitanie_inicjalizuj(bool wlacz);
+void powitanie_pulpit_gotowy(bool tapeta=false,int pid=0);
+void powitanie_tick();
+bool powitanie_aktywne();
+uint8_t* powitanie_zrodlo(uint8_t* scena,int w,int h,int pitch,int x,int y,int rw,int rh,uint32_t skala);
+// Wszystkie wywolania pod istniejaca blokada ekranu (takze kopiowanie zrodla).
+// Wyciszanie nie pobiera blokad ani nie wysyla polecen GPU.
+void powitanie_wycisz();
+void powitanie_reset_ekranu();
+// Optional counter of completed compositor transactions, no per-frame logging.
+void powitanie_diag_prezentacja();

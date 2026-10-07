@@ -445,3 +445,7 @@ void skladacz_stan_max(int pid,bool max);
 
 void skladacz_obrazu_odswiez_dekoracje();
 bool skladacz_obrazu_dekoracja_w_punkcie(int pid, int lx, int ly);
+
+// Wyciszanie pod zewnetrzna blokada ekranu, bez oczekiwania na GPU.
+void skladacz_obrazu_wycisz();
+void skladacz_obrazu_wznow();

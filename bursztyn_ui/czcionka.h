@@ -178,6 +178,51 @@ public:
         return nowa_czcionka_16x16['?'];
     }
 
+    // Pomiar wspolnego renderera grayscale obejmuje skale duzych napisow.
+    static int zmierz_tekst_wygladzony(const char* tekst,uint32_t procent) {
+        const uint32_t p=procent>=100&&procent<=800?procent:100;
+        int szer=0;
+        for(size_t i=0;tekst&&tekst[i];) {
+            uint32_t cp=0;i+=dekoduj_utf8(tekst,i,&cp);
+            const int krok=ui_skaluj(szerokosc_znaku(cp)+1,p);
+            if(szer>INT32_MAX-krok)return INT32_MAX;
+            szer+=krok;
+        }
+        return szer;
+    }
+    // Wspolny opcjonalny renderer grayscale: te same glify Unicode i metryki.
+    // Interpolacja pokrycia, bez FPU, alokacji i subpikselowych kolorow.
+    template<class Piksel>
+    static void rysuj_tekst_wygladzony(const char* tekst, int x, int y,
+                                      uint32_t procent, Piksel piksel) {
+        if (!tekst) return;
+        const int p = int(procent>=100&&procent<=800?procent:100);
+        for (size_t i=0; tekst[i];) {
+            uint32_t cp=0; i+=dekoduj_utf8(tekst,i,&cp);
+            const auto* glif=bitmapa_znaku(cp);
+            const int gw=szerokosc_znaku(cp), dw=ui_skaluj(gw,p), dh=ui_skaluj(WYSOKOSC,p);
+            auto probka=[&](int sx,int sy)->unsigned {
+                return sx>=0&&sx<gw&&sy>=0&&sy<WYSOKOSC&&
+                    (glif[sy]&(1U<<(15-sx))) ? 255U : 0U;
+            };
+            for(int dy=0;dy<dh;++dy) {
+                const int fy=(2*dy+1)*128*100/p-128;
+                const int sy=fy>=0?fy/256:(fy-255)/256;
+                const unsigned wy=unsigned(fy-sy*256);
+                for(int dx=0;dx<dw;++dx) {
+                    const int fx=(2*dx+1)*128*100/p-128;
+                    const int sx=fx>=0?fx/256:(fx-255)/256;
+                    const unsigned wx=unsigned(fx-sx*256);
+                    const unsigned a=probka(sx,sy)*(256-wx)+probka(sx+1,sy)*wx;
+                    const unsigned b=probka(sx,sy+1)*(256-wx)+probka(sx+1,sy+1)*wx;
+                    const unsigned pokrycie=(a*(256-wy)+b*wy+32768)/65536;
+                    if(pokrycie) piksel(x+dx,y+dy,pokrycie);
+                }
+            }
+            x+=ui_skaluj(szerokosc_znaku(cp)+1,p);
+        }
+    }
+
     // Zwraca krok pozycji X dla znaku (szerokość + 1px odstępu * skala)
     static int postep_znaku(uint32_t cp, SkalaUI skala = 1) {
         SkalaUI s = skala;

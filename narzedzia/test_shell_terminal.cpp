@@ -214,7 +214,7 @@ int main() {
         reset();sponsor_file=std::string(16385,'a');shell_sponsors();assert(!strcmp(shell_line(0).tekst,"Plik sponsorów jest zbyt duży."));
         reset();sponsor_file=std::string(3000,'W')+"\n";shell_sponsors();assert(g_total_rows>2);
         reset();sponsor_file="";for(int i=0;i<100;++i) sponsor_file+="Sponsor ąęż\n";shell_sponsors();assert(shell_max_scroll()>0);
-        reset();char version_command[]="wersja";arguments.dane[0]=version_command;wykonaj_polecenie(arguments);assert(!strcmp(shell_line(0).tekst,"Bursztyn OS v1.0.1.6"));
+        reset();char version_command[]="wersja";arguments.dane[0]=version_command;wykonaj_polecenie(arguments);assert(!strcmp(shell_line(0).tekst,BURSZTYN_NAZWA_WERSJI));
     }
     reset();sponsor_file="Test wsparcia ąę\n";
     char support_command[]="wsparcie";Argumenty support_args{};

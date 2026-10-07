@@ -1,3 +1,6 @@
+#include "cykl_wylaczania_grafiki.h"
+#include "ekran_powitalny_api.h"
+#include "diagnostyka_startu.h"
 #include "move_trace.h"
 #include "gui_runtime_diag.h"
 /*
@@ -2391,6 +2394,8 @@ uint64_t reset_ps2() {
     wypisz_log("[REBOOT TRACE] begin");
     wypisz_log("[REBOOT TRACE] stop new GPU submissions");
 #endif
+    wycisz_start_przed_restartem();
+    diag_start_reboot("[STARTUP] GPU quiesce begin");
     virtio_gpu_stop_submissions();
 
 #if BURSZTYNDIAGREBOOT
@@ -2398,6 +2403,7 @@ uint64_t reset_ps2() {
     wypisz_log("[REBOOT TRACE] gpu quiesce begin");
 #endif
     virtio_gpu_quiesce_for_reboot();
+    diag_start_reboot("[STARTUP] GPU quiesce complete");
 
 #if BURSZTYNDIAGREBOOT
     wypisz_log("[REBOOT TRACE] gpu quiesce done");
@@ -2417,7 +2423,9 @@ uint64_t reset_ps2() {
     /*
      * FAZA 3: Wylaczenie przerwan. GPU jest juz spokojny.
      */
-    asm volatile("cli" ::: "memory");
+    diag_start_reboot("[STARTUP] reboot handoff");
+    uint64_t poprzednie_flagi;
+    asm volatile("pushfq; popq %0; cli" : "=r"(poprzednie_flagi) :: "memory", "cc");
 
     /*
      * FAZA 4: Reset przez ACPI ResetReg (FADT), jesli dostepny.
@@ -2462,6 +2470,8 @@ uint64_t reset_ps2() {
     }
 
     if (!gotowe) {
+        // Nie wracaj do aplikacji z wylaczonymi IRQ po nieudanym handoff.
+        if(poprzednie_flagi&(1ULL<<9))asm volatile("sti" ::: "memory");
         return 0;
     }
 
@@ -2500,9 +2510,13 @@ uint64_t reset_ps2() {
 [[noreturn]]
 void wylacz_qemu() {
     wypisz_log("[POWER] Wylaczanie systemu.");
+    wycisz_start_przed_restartem();
+    diag_start_reboot("[STARTUP] GPU quiesce begin");
     virtio_gpu_stop_submissions();
     virtio_gpu_quiesce_for_reboot();
+    diag_start_reboot("[STARTUP] GPU quiesce complete");
     psf_flush_cache();
+    diag_start_reboot("[STARTUP] shutdown handoff");
     asm volatile("cli" ::: "memory");
     if (acpi_wykonaj_shutdown()) {
         for (;;) asm volatile("hlt" ::: "memory");

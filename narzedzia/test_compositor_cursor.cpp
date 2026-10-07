@@ -32,6 +32,8 @@ void grafika_pobierz_pozycje_kursora(int* x,int* y){*x=lx;*y=ly;}
 void grafika_pobierz_overlay_kursora(int* x,int* y,int* w,int* h,bool* visible){*x=overlay.x;*y=overlay.y;*w=overlay.width;*h=overlay.height;*visible=overlay.width>0;}
 void grafika_rozpocznij_skladanie(){}
 void grafika_zakoncz_scene(){}
+void grafika_zakoncz_skladanie(){++presents;}
+void grafika_odtworz_tlo_skladania(){for(int i=0;i<sw*sh;++i)scene[i]=0x123456;}
 void grafika_odtworz_tlo_regionu(int x,int y,int w,int h){for(int yy=y;yy<y+h;++yy)for(int xx=x;xx<x+w;++xx)scene[yy*sw+xx]=0x123456;}
 void grafika_zapisz_surowy_piksel(int x,int y,uint32_t c){scene[y*sw+x]=c;}
 void grafika_naloz_okno_terminala_region(int,int,int,int){}
@@ -118,8 +120,25 @@ int main(){
         use_clock=false;
         usun_warstwe(2);usun_warstwe(1);skladacz_reset_ekranu();
     }
+    // Repeated power quiesce drops bounded pending work and prevents new work.
+    for(unsigned cycle=0;cycle<100;++cycle) {
+        skladacz_obrazu_wznow();
+        skladacz_obrazu_oznacz_dirty();skladacz_obrazu_oznacz_ruch_kursora(0,0,10,10);
+        assert(dirty_count>0&&cursor_pending);
+        skladacz_obrazu_wycisz();
+        assert(dirty_count==0&&!cursor_pending&&nastepna_klatka_ns==0);
+        const auto before=presents;
+        skladacz_obrazu_oznacz_dirty();skladacz_obrazu_oznacz_ruch_kursora(0,0,20,20);
+        skladacz_obrazu_obsluz_dirty();skladacz_obrazu_zloz_klatke();
+        assert(dirty_count==0&&!cursor_pending&&presents==before);
+        skladacz_obrazu_wznow();skladacz_reset_ekranu();assert(dirty_count==1);
+    }
+    skladacz_obrazu_wznow();
     printf("Compositor lifecycle/scene: %u/%u PASS\n",compositor_checks,compositor_checks);
     printf("Popup compositor background restoration: %u/%u PASS\n",popup_checks,popup_checks);
     puts("Production compositor host PASS: modeset dirty geometry, Shell-equivalent layer preserves cursor/screen/generation, coalescing and theme/decor/full scene transactions");
     return 0;
 }
+
+void powitanie_reset_ekranu() {}
+void powitanie_tick() {} // Dedicated presentation tests exercise the real runtime.

@@ -255,3 +255,6 @@ void grafika_ustaw_tryby_virtio_gpu();
 
 struct GuiDirtyRect;
 void grafika_prezentuj_scene_z_kursorem(const GuiDirtyRect*, uint32_t, int, int);
+
+// Pod blokada ekranu; blokuje prezentacje przed GPU quiesce.
+void grafika_wycisz();

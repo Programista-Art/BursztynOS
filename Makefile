@@ -347,6 +347,7 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	vmm.o \
 	psf.o \
 	grafika.o \
+	ekran_powitalny.o \
 	syscall.o \
 	syscalls.o \
 	bws_nowoczesne.o \
@@ -1596,3 +1597,51 @@ test-startup-visibility:
 	g++ -std=c++17 -O0 -g0 -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_boot_graphics.cpp -Wl,--gc-sections -o .wm-test/boot-graphics
 	ASAN_OPTIONS=detect_leaks=0 .wm-test/boot-graphics
 	$(PYTHON) narzedzia/test_startup_policy.py
+
+# Welcome layer dependencies and deterministic host regression suite.
+ekran_powitalny.o: ekran_powitalny.h ekran_powitalny_api.h bursztyn_ui/czcionka.h ui_skala.h
+grafika.o skladacz_obrazu.o kernel.o: ekran_powitalny_api.h
+kernel.o: opcje_startowe.h
+
+.PHONY: test-powitanie
+test-powitanie:
+	@mkdir -p .wm-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined narzedzia/test_powitanie.cpp -o .wm-test/powitanie
+	ASAN_OPTIONS=detect_leaks=0 .wm-test/powitanie
+	$(PYTHON) narzedzia/test_powitanie_policy.py
+
+BURSZTYNDIAGSTARTUPREBOOT ?= 0
+ifeq ($(BURSZTYNDIAGSTARTUPREBOOT),1)
+KERNEL_CXXFLAGS += -DBURSZTYNDIAGSTARTUPREBOOT=1
+endif
+grafika.o skladacz_obrazu.o syscalls.o ekran_powitalny.o: diagnostyka_startu.h
+syscalls.o: ekran_powitalny_api.h skladacz_obrazu.h
+
+syscalls.o: cykl_wylaczania_grafiki.h
+
+.PHONY: test-powitanie-reboot
+test-powitanie-reboot:
+	@mkdir -p .wm-test
+	g++ -std=c++17 -O1 -g -pthread -fsanitize=address,undefined narzedzia/test_powitanie_reboot.cpp -o .wm-test/powitanie-reboot
+	ASAN_OPTIONS=detect_leaks=1 .wm-test/powitanie-reboot
+
+.PHONY: test-gpu-quiesce-host
+test-gpu-quiesce-host:
+	@mkdir -p .wm-test
+	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_gpu_quiesce_host.cpp -Wl,--gc-sections -o .wm-test/gpu-quiesce
+	ASAN_OPTIONS=detect_leaks=1 .wm-test/gpu-quiesce
+
+# Opt-in sparse splash timing diagnostics; production default has no frame logs.
+BURSZTYNDIAGSPLASHTIMING ?= 0
+ifeq ($(BURSZTYNDIAGSPLASHTIMING),1)
+KERNEL_CXXFLAGS += -DBURSZTYNDIAGSPLASHTIMING=1
+endif
+
+.PHONY: test-splash-timing test-windows-launcher
+test-splash-timing:
+	@mkdir -p .wm-test
+	g++ -std=c++17 -O1 -g -DBURSZTYNDIAGSPLASHTIMING=1 -fsanitize=address,undefined narzedzia/test_splash_timing.cpp -o .wm-test/splash-timing
+	ASAN_OPTIONS=detect_leaks=1 .wm-test/splash-timing
+
+test-windows-launcher:
+	$(PYTHON) narzedzia/test_windows_launcher_config.py

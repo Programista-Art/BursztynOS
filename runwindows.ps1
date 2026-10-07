@@ -7,6 +7,7 @@ param(
     [string]$QemuPath = "",
     [string]$DiskSize = "4G",
     [string]$AudioBackend = "dsound",
+    [ValidateSet("gtk", "sdl", "")]
     [string]$DisplayBackend = "gtk",
     [string]$Iso = ""
 )
@@ -88,6 +89,16 @@ function Prepare-Disk {
     }
 }
 
+# GTK jest zweryfikowanym backendem Windows; SDL tylko jawnie diagnostycznie.
+# Brak GTK konczy uruchomienie z komunikatem, bez automatycznego fallbacku SDL.
+function Assert-QemuDisplay {
+    param([string]$Qemu, [string]$Backend)
+    $available = & $Qemu -display help 2>&1
+    if ($LASTEXITCODE -ne 0 -or -not ($available | Where-Object { "$_" -match "^\s*$Backend(\s|$)" })) {
+        throw "QEMU nie udostepnia backendu $Backend. Dla normalnego Windows wymagane jest GTK. Zainstaluj QEMU z GTK; SDL jest tylko opcja diagnostyczna."
+    }
+}
+
 function Start-BursztynQemu {
     param(
         [string]$ModeName,
@@ -98,14 +109,24 @@ function Start-BursztynQemu {
     )
 
     $qemu = Find-Qemu
+    $effectiveDisplay = if ($DisplayBackend) { $DisplayBackend } else { "gtk" }
+    Assert-QemuDisplay -Qemu $qemu -Backend $effectiveDisplay
     Prepare-Disk
 
     $argsList = @(
         "-machine", "pc,hpet=on",
         "-cpu", "max",
-        "-accel", $(if ($VirtIoFull) { "tcg,thread=multi" } else { "tcg,thread=single" }),
+        "-accel", "tcg,thread=multi",
         "-smp", "1",
-        "-m", "2G"
+        "-m", "2G",
+        "-display", $effectiveDisplay
+    )
+
+    # Audio
+    $argsList += @(
+        "-audiodev", "$AudioBackend,id=snd",
+        "-device", "intel-hda",
+        "-device", "hda-output,audiodev=snd"
     )
 
     if ($VirtIoFull) {
@@ -119,13 +140,12 @@ function Start-BursztynQemu {
             "-netdev", "user,id=n1",
             "-device", "virtio-net-pci,netdev=n1,disable-legacy=on",
             "-device", "virtio-rng-pci,disable-legacy=on",
-            "-device", "virtio-keyboard-pci,disable-legacy=on",
-            "-device", "virtio-tablet-pci,disable-legacy=on",
             "-vga", "none",
-            "-device", "virtio-vga,id=gpu0,disable-legacy=on,xres=1280,yres=720"
+            "-device", "virtio-vga,id=gpu0,disable-legacy=on,xres=1280,yres=720",
+            "-device", "virtio-keyboard-pci,disable-legacy=on",
+            # Tablet jest produkcyjnym urzadzeniem wskazujacym (bez virtio-mouse).
+            "-device", "virtio-tablet-pci,disable-legacy=on"
         )
-        $effectiveDisplay = if ($DisplayBackend) { $DisplayBackend } else { "gtk" }
-        $argsList += @("-display", $effectiveDisplay)
     } else {
         # Standard emulation: AHCI + E1000 + xHCI USB + Bochs/STD VGA
         $argsList += @(
@@ -141,13 +161,6 @@ function Start-BursztynQemu {
             "-global", "VGA.vgamem_mb=64"
         )
     }
-
-    # Audio
-    $argsList += @(
-        "-audiodev", "$AudioBackend,id=snd",
-        "-device", "intel-hda",
-        "-device", "hda-output,audiodev=snd"
-    )
 
     # Firmware
     if ($Firmware -eq "UEFI") {
@@ -173,10 +186,8 @@ function Start-BursztynQemu {
     Write-Host "Uruchamianie: $ModeName"
     Write-Host "Firmware:     $Firmware"
     Write-Host "Profil:       $(if ($VirtIoFull) { 'VirtIO Full' } else { 'Standard VGA/USB' })"
-    if ($VirtIoFull) {
-        $displayLabel = if ($effectiveDisplay -match '^sdl(,|$)') { 'SDL eksperymentalny / diagnostyczny' } else { $effectiveDisplay.ToUpperInvariant() }
-        Write-Host "Display:      $displayLabel"
-    }
+    $displayLabel = if ($effectiveDisplay -match '^sdl(,|$)') { 'SDL eksperymentalny / diagnostyczny' } else { $effectiveDisplay.ToUpperInvariant() }
+    Write-Host "Display:      $displayLabel"
     Write-Host "ISO:          $IsoPath"
     Write-Host "Dysk:         $Disk"
     Write-Host "Rozdzielczosc poczatkowa okna: 1280x720"
