@@ -41,14 +41,15 @@ static void drain_contracts(){
     VirtqAvail avail{};VirtQueue queue{};queue.avail=&avail;queue.queue_size=16;
     std::vector<uint8_t> cmd(VIRTIO_GPU_CMD_BUFFER_SIZE);
     auto& drv=g_gpu_drivers[0];
-    for(unsigned mode=0;mode<3;++mode){
+    for(unsigned mode=0;mode<4;++mode){
         drv={};drv.initialized=true;drv.controlq=&queue;
         drv.scanout_set=mode!=1;drv.cmd_vaddr=cmd.data();
+        if(mode==3){drv.scanout_set=false;drv.initial_scanout_pending=true;drv.old_resource_id=1;}
         invalid_completion=mode==1;used_completion=mode==1;
         complete_submit=mode!=1;repeating_completion=mode==2;
         unsigned before=popped,before_commands=commands;
         virtio_gpu_quiesce_for_reboot();
-        assert(drv.lock==0&&drv.has_error==(mode!=0));
+        assert(drv.lock==0&&drv.has_error==(mode==1||mode==2));
         assert(popped-before==(mode==2?16U:1U));
         assert(commands-before_commands==(mode==1?0U:1U));
     }
@@ -74,7 +75,7 @@ int main(int argc,char**){
     width=320;height=240;std::vector<uint32_t> scene(320*240,0x234567);
     for(unsigned mode=0;mode<3;++mode){
         now=0;powitanie_inicjalizuj(true);
-        auto present=[&](){powitanie_zrodlo(reinterpret_cast<uint8_t*>(scene.data()),320,240,1280,0,0,320,240,100);};
+        auto present=[&](){powitanie_zrodlo(reinterpret_cast<uint8_t*>(scene.data()),320,240,1280,0,0,320,240,100);powitanie_publikacja();};
         advance(100000);present();advance(3100000);present();
         assert(powitanie_aktywne()&&live==1&&sekwencja.komunikat==1);
         drv={};drv.initialized=true;drv.controlq=&queue;drv.lock=mode==1;

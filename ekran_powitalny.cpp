@@ -1,5 +1,6 @@
 #include "ekran_powitalny.h"
 #include "diagnostyka_startu.h"
+#include "diagnostyka_klatek_startu.h"
 #include "bufory_grafiki.h"
 #include "grafika.h"
 #include "skladacz_obrazu.h"
@@ -18,6 +19,8 @@ bool tlo_tapeta=false;
 int pulpit_pid=0;
 bool zakonczenie_oczekuje=false;
 bool pelne_rysowanie=false;
+bool pierwsza_klatka_gotowa=false, pierwsza_klatka_opublikowana=false;
+bool animacja_rozpoczeta=false;
 unsigned poprzedni_tekst=99,poprzednie_przenikanie=999;
 #if BURSZTYNDIAGSPLASHTIMING
 uint64_t prezentacje=0;
@@ -34,6 +37,15 @@ void diag_czas(const char*,uint64_t) {}
 #endif
 }
 void powitanie_diag_prezentacja() {
+#if BURSZTYNDIAGSPLASHFIRSTFRAME
+    static uint64_t logged_generation=UINT64_MAX, logged_frame=UINT64_MAX;
+    const auto& id=SplashFirstDiag::id();
+    if(powitanie_aktywne()&&pierwsza_klatka_gotowa&&
+       (id.generation!=logged_generation||id.frame!=logged_frame)) {
+        logged_generation=id.generation;logged_frame=id.frame;
+        SplashFirstDiag::event("first_compositor_commit",czas_monotoniczny_us());
+    }
+#endif
 #if BURSZTYNDIAGSPLASHTIMING
     if(powitanie_aktywne())++prezentacje;
 #endif
@@ -41,9 +53,13 @@ void powitanie_diag_prezentacja() {
 namespace {
 void zwolnij_powierzchnie() {
     if(powierzchnia) {bufor_grafiki_zwolnij(powierzchnia);diag_start_reboot("[STARTUP] splash surface released");}
+    pierwsza_klatka_gotowa=false;pierwsza_klatka_opublikowana=false;
+    KlatkiStartuDiag::info().ready=false;
     powierzchnia=nullptr;bajty=0;szer=wys=stride=0;procent=0;
 }
 void zakoncz_powitanie() {
+    animacja_rozpoczeta=false;
+    KlatkiStartuDiag::info().active=false;
     zwolnij_powierzchnie();
     zakonczenie_oczekuje=false;pulpit_gotowy=false;gotowosc_utracona=false;tlo_tapeta=false;pulpit_pid=0;
     sekwencja={};sekwencja.stan=Powitanie::Stan::Zakonczony;
@@ -51,6 +67,8 @@ void zakoncz_powitanie() {
 }
 }
 void powitanie_wycisz() {
+    animacja_rozpoczeta=false;
+    KlatkiStartuDiag::info().active=false;
     diag_start_reboot("[STARTUP] splash quiesce begin");
     sekwencja.stan=Powitanie::Stan::Wyciszanie;
     zakonczenie_oczekuje=false;pulpit_gotowy=false;gotowosc_utracona=false;tlo_tapeta=false;pulpit_pid=0;
@@ -59,16 +77,37 @@ void powitanie_wycisz() {
     nastepny=0;pelne_rysowanie=false;poprzedni_tekst=99;poprzednie_przenikanie=999;
 }
 void powitanie_reset_ekranu() {
+    PrezentacjaStartu::uniewaznij();
     const bool aktywne=powitanie_aktywne();
     zwolnij_powierzchnie();pulpit_gotowy=false;gotowosc_utracona=false;tlo_tapeta=false;pulpit_pid=0;
     zakonczenie_oczekuje=false;pelne_rysowanie=true;nastepny=0;
     poprzedni_tekst=99;poprzednie_przenikanie=999;
     if(aktywne) {sekwencja.stan=Powitanie::Stan::Widoczny;sekwencja.gotowy=false;sekwencja.fade=0;sekwencja.odsloniecie=0;}
 }
+bool powitanie_pierwsza_klatka_gotowa(){return pierwsza_klatka_gotowa;}
+bool powitanie_pierwsza_publikacja(){return powitanie_aktywne()&&!pierwsza_klatka_opublikowana;}
+void powitanie_publikacja() {
+    if(powitanie_aktywne()&&pierwsza_klatka_gotowa&&!pierwsza_klatka_opublikowana){
+        if(!animacja_rozpoczeta) {
+            // Allocation and backend probing can outlast the first hold. Its
+            // absolute-time origin is the completed first visible welcome,
+            // never creation of an off-screen surface. Later mode resets keep it.
+            sekwencja.start=sekwencja.ostatni=czas_monotoniczny_us();
+            animacja_rozpoczeta=true;nastepny=0;
+            diag_czas("start",sekwencja.start);
+        }
+        SplashFirstDiag::event("first_visible_commit",czas_monotoniczny_us());
+        pierwsza_klatka_opublikowana=true;
+    }
+}
 bool powitanie_aktywne(){return sekwencja.aktywny()||zakonczenie_oczekuje;}
 void powitanie_inicjalizuj(bool wlacz){
     powitanie_wycisz();
+    PrezentacjaStartu::uniewaznij();
+    PrezentacjaStartu::wybierz();
     ++generacja;pelne_rysowanie=true;
+    SplashFirstDiag::id()={generacja,0,false,false};
+    SplashFirstDiag::event("splash_created",czas_monotoniczny_us());
 #if BURSZTYNDIAGSTARTUPREBOOT
     char msg[96]="[STARTUP] splash init generation=";unsigned n=sizeof("[STARTUP] splash init generation=")-1;
     char digits[24];unsigned count=0;uint64_t value=generacja;
@@ -77,10 +116,10 @@ void powitanie_inicjalizuj(bool wlacz){
     msg[n]=0;klog_serial(msg);
 #endif
     sekwencja.rozpocznij(wlacz&&hpet_dostepny(),czas_monotoniczny_us());
+    KlatkiStartuDiag::info().active=sekwencja.aktywny();
 #if BURSZTYNDIAGSPLASHTIMING
     prezentacje=0;
 #endif
-    if(sekwencja.aktywny())diag_czas("start",sekwencja.start);
     if(wlacz&&!hpet_dostepny())klog_serial("[WELCOME] No monotonic clock; clean startup without presentation delay.");
     if(sekwencja.aktywny()){diag_start_reboot("[STARTUP] splash active");PrzeniesNaEkran();}
 }
@@ -93,11 +132,11 @@ void powitanie_pulpit_gotowy(bool tapeta,int pid){
     tlo_tapeta=tapeta;pulpit_pid=pid;
     __atomic_store_n(&pulpit_gotowy,true,__ATOMIC_RELEASE);
 }
-void powitanie_tick(){
-    if(!powitanie_aktywne())return;
+static void powitanie_aktualizuj_stan(bool pacing){
+    if(!powitanie_aktywne()||!animacja_rozpoczeta)return;
     const uint64_t now=czas_monotoniczny_us();
-    if(now<nastepny)return;
-    nastepny=now>UINT64_MAX-33333?UINT64_MAX:now+33333;
+    if(pacing&&now<nastepny)return;
+    if(pacing)nastepny=now>UINT64_MAX-33333?UINT64_MAX:now+33333;
     const auto stan=sekwencja.stan;
     const unsigned poprzednie_odsloniecie=sekwencja.odsloniecie;
     const unsigned tekst=sekwencja.komunikat,przenikanie=sekwencja.przenikanie;
@@ -129,8 +168,9 @@ void powitanie_tick(){
     if(stan==Powitanie::Stan::Zanikanie||sekwencja.stan==Powitanie::Stan::Zanikanie||!sekwencja.aktywny())
         skladacz_obrazu_oznacz_dirty();
     else if(tekst!=sekwencja.komunikat||przenikanie!=sekwencja.przenikanie){
-        const auto r=Powitanie::centrum(grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc(),procent?procent:100);
-        skladacz_obrazu_oznacz_dirty_rect(r.x,r.y,r.w,r.h);
+        // Animation is one complete visual transaction, including after a
+        // geometry/DPI change. No partial text band can retain an older row.
+        skladacz_obrazu_oznacz_dirty();
     }
     if(sekwencja.stan==Powitanie::Stan::Zakonczony&&!zakonczenie_oczekuje){
         // Pacing may defer the full composition. Cursor-only presentation must
@@ -139,8 +179,11 @@ void powitanie_tick(){
         sekwencja.odsloniecie=poprzednie_odsloniecie<255?poprzednie_odsloniecie:254;
     }
 }
+void powitanie_tick(){powitanie_aktualizuj_stan(true);}
 uint8_t* powitanie_zrodlo(uint8_t* scena,int w,int h,int pitch,int x,int y,int rw,int rh,uint32_t skala){
     if(!powitanie_aktywne()||w<=0||h<=0||int64_t(pitch)<int64_t(w)*4)return scena;
+    // Pacing limits scheduled work, never the state of an actual presentation.
+    powitanie_aktualizuj_stan(false);
     if(zakonczenie_oczekuje&&x==0&&y==0&&rw==w&&rh==h){
         diag_czas("final_removal",czas_monotoniczny_us());
         zakoncz_powitanie();diag_start_reboot("[STARTUP] splash finished");
@@ -149,6 +192,7 @@ uint8_t* powitanie_zrodlo(uint8_t* scena,int w,int h,int pitch,int x,int y,int r
     if(size_t(h)>SIZE_MAX/size_t(pitch))return scena;
     const size_t potrzebne=size_t(pitch)*h;
     bool rebuild=pelne_rysowanie||w!=szer||h!=wys||pitch!=stride||skala!=procent;
+    if(rebuild){pierwsza_klatka_gotowa=false;pierwsza_klatka_opublikowana=false;PrezentacjaStartu::uniewaznij();}
     if(potrzebne>bajty){
         auto* nowa=static_cast<uint8_t*>(bufor_grafiki_alokuj(potrzebne));
         if(!nowa){
@@ -162,20 +206,56 @@ uint8_t* powitanie_zrodlo(uint8_t* scena,int w,int h,int pitch,int x,int y,int r
         diag_start_reboot("[STARTUP] splash surface allocated");
     }
     szer=w;wys=h;stride=pitch;procent=skala;
+    // Allocation/mapping can consume time too; sample after preparation and
+    // before freezing the complete frame instead of replaying its old state.
+    powitanie_aktualizuj_stan(false);
     auto* dst=reinterpret_cast<uint32_t*>(powierzchnia);
-    if(rebuild||poprzedni_tekst!=sekwencja.komunikat||poprzednie_przenikanie!=sekwencja.przenikanie){
-        Powitanie::rysuj(dst,w,h,pitch/4,skala,sekwencja,rebuild);
+    {
+        if(rebuild) {
+            // The first visible welcome stays at time zero until publication;
+            // subsequent geometry changes use the current absolute state.
+            SplashFirstDiag::id().message_index=sekwencja.komunikat;
+            SplashFirstDiag::event("render_begin",czas_monotoniczny_us());
+        }
+        // Freeze one absolute-time state for both glyph passes. Always rebuild
+        // background and title too; the reusable allocation carries no history.
+        const auto frame=sekwencja;
+        Powitanie::rysuj(dst,w,h,pitch/4,skala,frame,true);
+        ++SplashFirstDiag::id().frame;
         poprzedni_tekst=sekwencja.komunikat;poprzednie_przenikanie=sekwencja.przenikanie;pelne_rysowanie=false;
     }
     if(sekwencja.stan==Powitanie::Stan::Zanikanie||zakonczenie_oczekuje){
-        // Recreate only the presented region; never blend an already blended pixel.
-        // Full-screen work is limited to the final 600 ms at existing frame pacing.
-        int x0=x<0?0:x,y0=y<0?0:y;
-        const int64_t right=int64_t(x)+rw,bottom=int64_t(y)+rh;
-        int x1=right>w?w:(right<0?0:int(right)),y1=bottom>h?h:(bottom<0?0:int(bottom));
-        if(x0<x1&&y0<y1)Powitanie::rysuj(dst,w,h,pitch/4,skala,sekwencja,true,{x0,y0,x1-x0,y1-y0});
+        // Blend a newly reconstructed complete frame, never the last blend.
         auto* src=reinterpret_cast<const uint32_t*>(scena);
-        for(int yy=y0;yy<y1;++yy)for(int xx=x0;xx<x1;++xx){size_t i=size_t(yy)*(pitch/4)+xx;dst[i]=Powitanie::mieszaj(dst[i],src[i],sekwencja.odsloniecie);}
+        for(int yy=0;yy<h;++yy)for(int xx=0;xx<w;++xx){size_t i=size_t(yy)*(pitch/4)+xx;dst[i]=Powitanie::mieszaj(dst[i],src[i],sekwencja.odsloniecie);}
     }
+    if(rebuild) {
+#if BURSZTYNDIAGSPLASHFIRSTFRAME
+        auto ink=[&](Powitanie::Obszar r){
+            for(int yy=r.y<0?0:r.y;yy<h&&yy<r.y+r.h;++yy)
+                for(int xx=r.x<0?0:r.x;xx<w&&xx<r.x+r.w;++xx)
+                    if(dst[size_t(yy)*(pitch/4)+xx]!=Powitanie::TLO)return true;
+            return false;
+        };
+        const auto g=Powitanie::geometria(w,h,skala,sekwencja.komunikat);
+        SplashFirstDiag::id().title=ink(g.tytul);
+        SplashFirstDiag::id().message=ink(Powitanie::centrum(w,h,skala));
+#endif
+        SplashFirstDiag::event("render_end",czas_monotoniczny_us());
+        // The surface becomes publishable only after all CPU rendering.
+        pierwsza_klatka_gotowa=true;
+        SplashFirstDiag::event("first_frame_ready",czas_monotoniczny_us());
+    }
+    // Hardware preparation may invalidate publication without changing this
+    // allocation/geometry (for example a rejected startup modeset). Every
+    // completed full render, not only a surface rebuild, restores readiness.
+    PrezentacjaStartu::przygotowana();
+#if BURSZTYNDIAGSPLASHRUNTIMEFRAMES
+    const auto g=Powitanie::geometria(w,h,skala,0);
+    KlatkiStartuDiag::info()={SplashFirstDiag::id().frame,true,pierwsza_klatka_gotowa,
+        {g.tytul.x,g.tytul.y,g.tytul.w,g.tytul.h},
+        {g.komunikat.x,g.komunikat.y,g.komunikat.w,g.komunikat.h},Powitanie::TLO};
+    KlatkiStartuDiag::info().message_index=sekwencja.komunikat;
+#endif
     return powierzchnia;
 }

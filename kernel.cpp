@@ -52,6 +52,7 @@ extern "C" void odblokuj_ekran();
 #include "virtio_rng.h"
 #include "virtio_blk.h"
 #include "virtio_gpu.h"
+#include "prezentacja_startu.h"
 #include "input_device.h"
 #include "virtio_input.h"
 
@@ -2424,6 +2425,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
         VirtioGpuDriver* gpu_drv = virtio_gpu_get_driver(0);
         if (gpu_drv && gpu_drv->initialized) {
             if (tryb_testowy) {
+                // Explicit diagnostic patterns own their complete test frame.
+                PrezentacjaStartu::wybierz_backend();PrezentacjaStartu::przygotowana();
                 virtio_gpu_test_teardown_reinit(gpu_drv);
                 gpu_drv = virtio_gpu_get_driver(0);
                 if (gpu_drv && gpu_drv->initialized) {
@@ -2440,6 +2443,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
             }
         }
     }
+    grafika_zakoncz_wybor_backendu();
     virtio_pci_diag_trace_type(VIRTIO_ID_GPU, "driver probe end");
 
     /* BMP pozostaje fallbackiem po inicjalizacji BSP2. */
@@ -2578,6 +2582,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     motyw_inicjalizuj();
     tapety_inicjalizuj(g_multiboot_info_ptr);
     ekran_inicjalizuj();
+    PrezentacjaStartu::zakoncz_inicjalizacje();
 
     if (tryb_testowy) {
         ekran_test_virtio_gpu_modeset(zadano_automatyczne_testy(

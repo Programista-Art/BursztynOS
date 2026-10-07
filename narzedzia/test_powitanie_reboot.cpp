@@ -30,6 +30,7 @@ int main(){
     for(unsigned cycle=0;cycle<100;++cycle){
         {std::lock_guard<std::mutex> guard(ekran_mutex);now=cycle;powitanie_inicjalizuj(true);
          powitanie_zrodlo(reinterpret_cast<uint8_t*>(image.data()),320,240,1280,0,0,320,240,100);
+         powitanie_publikacja();
          assert(live==1);}
         wycisz_start_przed_restartem();
         {std::lock_guard<std::mutex> guard(ekran_mutex);assert(!locked&&live==0&&!powitanie_aktywne());}

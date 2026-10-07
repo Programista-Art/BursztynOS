@@ -5,6 +5,8 @@
  */
 
 #include "virtio_pci.h"
+#include "diagnostyka_klatek_startu.h"
+#include "sterowniki/czas/hpet.h"
 
 #ifdef BURSZTYN_VIRTIO_HOST_TEST
 #include <cstdio>
@@ -408,6 +410,20 @@ uint8_t virtio_pci_get_status(const VirtioPciDevice* dev) {
 
 void virtio_pci_set_status(VirtioPciDevice* dev, uint8_t status) {
     if (!dev || !dev->common_cfg) return;
+#if BURSZTYNDIAGSPLASHRUNTIMEFRAMES
+    if(status==VIRTIO_STATUS_RESET&&dev->virtio_id==VIRTIO_ID_GPU) {
+#ifdef BURSZTYN_VIRTIO_HOST_TEST
+        extern uint64_t host_czas_monotoniczny_ns();
+        const auto now=host_czas_monotoniczny_ns()/1000;
+#else
+        const auto now=czas_monotoniczny_us();
+#endif
+        // A status reset can replace QEMU's display surface without any GPU
+        // command. Record it separately; host pixels cannot be read from here.
+        KlatkiStartuDiag::event("virtio_pci_set_status/RESET","VirtIO/device-reset",now,
+            nullptr,KlatkiStartuDiag::info().backbuffer,0,{},nullptr,0,0,0,true);
+    }
+#endif
 #if defined(BURSZTYN_DIAG_VIRTIO_BOOT) && BURSZTYN_DIAG_VIRTIO_BOOT
     if (status == VIRTIO_STATUS_RESET) {
         // Also cover the GPU driver's second reset, which calls set_status directly.
@@ -791,6 +807,7 @@ void virtio_pci_cleanup(VirtioPciDevice* dev) {
 
 bool virtio_pci_probe(uint8_t bus, uint8_t slot, uint8_t func,
                       VirtioPciDevice* dev, uint64_t requested_features) {
+    KlatkiStartuDiag::Sciezka diagnostic_path("PCI/probe");
     pci_trace_bdf(bus, slot, func, "virtio probe entered");
     if (!dev) return false;
     *dev = {};
@@ -1142,7 +1159,11 @@ bool virtio_pci_probe(uint8_t bus, uint8_t slot, uint8_t func,
 #if BURSZTYN_DIAG_PCI_ENUM
     pci_diag_step("[PCI-SCAN] virtio reset begin");
 #endif
-    if (!virtio_pci_reset(dev)) {
+    // A cold GPU is already reset. Rewriting zero makes QEMU replace the
+    // shared VGA/GOP console surface with NULL, flashing before any scanout.
+    // Other device types and nonzero GPU states keep the normal reset path.
+    const bool gpu_juz_zresetowany=dev->virtio_id==VIRTIO_ID_GPU&&virtio_pci_get_status(dev)==VIRTIO_STATUS_RESET;
+    if (!gpu_juz_zresetowany&&!virtio_pci_reset(dev)) {
         klog_impl("[VIRTIO-PCI] initialization rejected: device reset timed out");
         return false;
     }

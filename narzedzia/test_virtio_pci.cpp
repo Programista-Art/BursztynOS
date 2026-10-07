@@ -37,6 +37,7 @@
 #include "virtio_blk.h"
 #include "virtio_net.h"
 #include "virtio_gpu.h"
+#include "prezentacja_startu.h"
 #include "input_device.h"
 #include "virtio_input.h"
 #include "sterowniki/usb/usb_hid.h"
@@ -207,6 +208,9 @@ struct MockDeviceState {
     uint32_t gpu_processed_count = 0;
     uint32_t gpu_last_nr_entries = 0;
     std::vector<uint32_t> gpu_commands_seen;
+    bool gpu_capture_transfer=false;
+    uint32_t gpu_transferred_resource=0;
+    std::vector<uint32_t> gpu_transferred_frame;
 
     // Stan MSI-X:
     bool     msix_enabled = false;
@@ -275,7 +279,8 @@ struct MockDeviceState {
         gpu_display_h = 800;
         gpu_processed_count = 0;
         gpu_last_nr_entries = 0;
-        gpu_commands_seen.clear();
+        gpu_commands_seen.clear();gpu_capture_transfer=false;
+        gpu_transferred_resource=0;gpu_transferred_frame.clear();
         isr_val = 0;
         notify_bar = 0xFF;
         notify_bar_off = 0;
@@ -338,6 +343,8 @@ static void* host_phys_to_virt(uint64_t paddr) {
 }
 
 } // namespace
+
+#include "mock_gpu_scanout.h"
 
 void host_virtqueue_mb_hook() {
     g_virtqueue_mb_count++;
@@ -591,6 +598,7 @@ void host_mmio_write8(volatile void* addr, uint8_t val) {
                         // Sprzet symuluje zawieszenie resetu - ignoruje wpisanie 0
                         return;
                     }
+                    if(g_mock.gpu_auto_process)gpu_scanout_model.reset_display();
                     for (int i = 0; i < 8; ++i) {
                         g_mock.queues[i].enable = 0;
                     }
@@ -875,6 +883,14 @@ void host_mmio_write16(volatile void* addr, uint16_t val) {
                                     const auto* req_hdr = static_cast<const VirtioGpuCtrlHdr*>(vreq);
                                     auto* resp_hdr = static_cast<VirtioGpuCtrlHdr*>(vresp);
                                     g_mock.gpu_commands_seen.push_back(req_hdr->type);
+                                    if(req_hdr->type!=g_mock.gpu_fail_cmd_type&&!g_mock.gpu_override_resp_type)
+                                        gpu_scanout_model.execute(vreq,req_len);
+                                    if(g_mock.gpu_capture_transfer&&req_hdr->type==VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D) {
+                                        auto* drv=virtio_gpu_get_driver(0);
+                                        auto* pixels=static_cast<uint32_t*>(drv->fb_vaddr);
+                                        g_mock.gpu_transferred_resource=static_cast<const VirtioGpuTransferToHost2d*>(vreq)->resource_id;
+                                        g_mock.gpu_transferred_frame.assign(pixels,pixels+drv->fb_size/4);
+                                    }
 
                                     if (req_hdr->type == VIRTIO_GPU_CMD_GET_DISPLAY_INFO) {
                                         auto* dresp = static_cast<VirtioGpuRespDisplayInfo*>(vresp);
@@ -4328,9 +4344,10 @@ void test_virtio_net_stress_and_wraparound() {
 // ============================================================================
 
 static bool setup_mock_gpu_device(VirtioPciDevice* dev,
-                                  uint32_t disp_w = 1280,
-                                  uint32_t disp_h = 800,
-                                  uint64_t extra_features = 0) {
+                                   uint32_t disp_w = 1280,
+                                   uint32_t disp_h = 800,
+                                   uint64_t extra_features = 0,
+                                   uint8_t initial_status = 0) {
     g_mock.reset();
     setup_pci_hdr(0x1AF4, 0x1050, 0x1AF4, 0x0010);
     std::vector<CapBuilderEntry> caps = {
@@ -4356,6 +4373,7 @@ static bool setup_mock_gpu_device(VirtioPciDevice* dev,
     g_mock.gpu_display_h = disp_h;
     g_mock.gpu_processed_count = 0;
     g_mock.gpu_commands_seen.clear();
+    g_mock.device_status=initial_status;g_mock.bars[0].mem[20]=initial_status;
 
     return virtio_pci_probe(0, 7, 0, dev, 0);
 }
@@ -4393,6 +4411,68 @@ static bool setup_mock_gpu_device_msix(VirtioPciDevice* dev,
     g_mock.gpu_commands_seen.clear();
 
     return virtio_pci_probe(0, 7, 0, dev, 0);
+}
+
+// The real command queue must never attach an untransferred initial resource.
+void test_virtio_gpu_probe_reset_ownership() {
+    for(uint8_t initial:{uint8_t(0),uint8_t(VIRTIO_STATUS_DRIVER_OK|VIRTIO_STATUS_DRIVER|VIRTIO_STATUS_ACKNOWLEDGE)}) {
+        virtio_gpu_reset_all();gpu_scanout_model.reset();VirtioPciDevice dev{};
+        TEST_ASSERT(setup_mock_gpu_device(&dev,1280,720,0,initial), "GPU probe feature negotiation");
+        TEST_ASSERT(gpu_scanout_model.display_resets==(initial?1U:0U), "Cold GPU retains firmware; active owner resets once");
+        const auto resets=gpu_scanout_model.display_resets;
+        TEST_ASSERT(virtio_gpu_init(&dev), "GPU consumes completed PCI negotiation");
+        TEST_ASSERT(gpu_scanout_model.display_resets==resets, "GPU init never resets its own clean probe again");
+        virtio_gpu_reset_all();gpu_scanout_model.reset(false);
+    }
+}
+
+void test_virtio_gpu_first_publication() {
+    for(unsigned generation=0;generation<2;++generation) {
+        virtio_gpu_reset_all();
+        VirtioPciDevice dev{};
+        TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe first-frame GPU");
+        TEST_ASSERT(virtio_gpu_init(&dev), "Init first-frame GPU");
+        auto* drv=virtio_gpu_get_driver(0);
+        TEST_ASSERT(drv->initial_scanout_pending&&!drv->scanout_set, "New generation is not visible");
+        for(auto cmd:g_mock.gpu_commands_seen)
+            TEST_ASSERT(cmd!=VIRTIO_GPU_CMD_SET_SCANOUT&&cmd!=VIRTIO_GPU_CMD_RESOURCE_FLUSH&&cmd!=VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D,
+                        "No blank initial publication");
+        // A resolution change while unpublished also stays off-screen.
+        TEST_ASSERT(virtio_gpu_setup_framebuffer(drv,1024,768), "Unpublished resolution change");
+        TEST_ASSERT(drv->initial_scanout_pending&&!drv->scanout_set, "New resolution still pending");
+        g_mock.gpu_commands_seen.clear();
+        TEST_ASSERT(!virtio_gpu_transfer_and_flush(drv,0,0,16,16), "Partial first frame rejected");
+        TEST_ASSERT(g_mock.gpu_commands_seen.empty(), "No partial GPU publication commands");
+        // Distinct background/title/message sentinels prove the actual transfer
+        // consumes this complete CPU frame and the current resource, not a stale one.
+        std::vector<uint32_t> complete(drv->fb_size/4,0x101720);
+        complete[302*1024+500]=0xE9BE76;complete[382*1024+500]=0xE1E6ED;
+        memcpy(drv->fb_vaddr,complete.data(),drv->fb_size);
+        g_mock.gpu_capture_transfer=true;
+        TEST_ASSERT(virtio_gpu_transfer_and_flush(drv,0,0,1024,768), "Publish complete initial frame");
+        const std::vector<uint32_t> expected={VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D,VIRTIO_GPU_CMD_SET_SCANOUT,VIRTIO_GPU_CMD_RESOURCE_FLUSH};
+        TEST_ASSERT(g_mock.gpu_commands_seen==expected, "Complete transfer precedes scanout and single flush");
+        TEST_ASSERT(g_mock.gpu_transferred_frame==complete&&g_mock.gpu_transferred_resource==drv->resource_id,
+                    "First uploaded frame has complete title/message/background data in the new resource");
+        g_mock.gpu_capture_transfer=false;
+        TEST_ASSERT(drv->scanout_set&&!drv->initial_scanout_pending, "First publication complete");
+        g_mock.gpu_commands_seen.clear();
+        TEST_ASSERT(virtio_gpu_transfer_and_flush(drv,0,0,16,16), "Later partial frame allowed");
+        TEST_ASSERT(g_mock.gpu_commands_seen.size()==2, "Later frame has normal transfer/flush");
+        virtio_gpu_reset_all();
+    }
+    // Failed initial upload/attachment never authorizes a blank scanout/flush.
+    for(auto failure:{VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D,VIRTIO_GPU_CMD_SET_SCANOUT}) {
+        virtio_gpu_reset_all();VirtioPciDevice dev{};
+        TEST_ASSERT(setup_mock_gpu_device(&dev)&&virtio_gpu_init(&dev), "Init failed-publication probe");
+        auto* drv=virtio_gpu_get_driver(0);g_mock.gpu_commands_seen.clear();
+        g_mock.gpu_fail_cmd_type=failure;
+        TEST_ASSERT(!virtio_gpu_transfer_and_flush(drv,0,0,drv->fb_width,drv->fb_height), "Failed first publication propagates");
+        TEST_ASSERT(drv->initial_scanout_pending&&!drv->scanout_set, "Failed first publication stays invisible");
+        TEST_ASSERT(g_mock.gpu_commands_seen.size()==(failure==VIRTIO_GPU_CMD_SET_SCANOUT?2U:1U), "No flush follows failed first publication");
+        g_mock.gpu_fail_cmd_type=0;virtio_gpu_reset_all();
+    }
+
 }
 
 // ----------------------------------------------------------------------------
@@ -4522,6 +4602,10 @@ void test_virtio_gpu_set_scanout() {
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
     VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(!virtio_gpu_cmd_set_scanout(drv,0,drv->resource_id,0,0,drv->fb_width,drv->fb_height),
+        "Raw SETSCANOUT cannot expose untransferred first resource");
+    TEST_ASSERT(virtio_gpu_cmd_transfer_to_host_2d(drv,drv->resource_id,0,0,drv->fb_width,drv->fb_height),
+        "Complete first transfer before raw scanout");
     TEST_ASSERT(virtio_gpu_cmd_set_scanout(drv, 0, 1, 0, 0, 1280, 800), "set_scanout");
 
     virtio_gpu_reset(drv);
@@ -4556,6 +4640,10 @@ void test_virtio_gpu_resource_flush() {
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
     VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(!virtio_gpu_cmd_resource_flush(drv,drv->resource_id,0,0,drv->fb_width,drv->fb_height),
+        "Raw flush cannot expose pending first resource");
+    TEST_ASSERT(virtio_gpu_transfer_and_flush(drv,0,0,drv->fb_width,drv->fb_height),
+        "Publish complete first resource before testing partial flush");
     const uint64_t flushes_before = drv->flush_count;
     TEST_ASSERT(virtio_gpu_cmd_resource_flush(drv, 1, 10, 20, 100, 50), "resource_flush dirty rect");
     TEST_ASSERT(drv->flush_count == flushes_before + 1, "flush_count zwiekszony o 1");
@@ -4593,6 +4681,8 @@ void test_virtio_gpu_command_timeout() {
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
     VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(virtio_gpu_transfer_and_flush(drv,0,0,drv->fb_width,drv->fb_height),
+                "Complete initial frame before command timeout injection");
     g_mock.gpu_skip_reply = true;
     TEST_ASSERT(!virtio_gpu_cmd_resource_flush(drv, 1, 0, 0, 100, 100), "Timeout zwraca false");
     TEST_ASSERT(drv->has_error, "drv->has_error == true po timeoucie");
@@ -4648,6 +4738,8 @@ void test_virtio_gpu_queue_corruption() {
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
     VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(virtio_gpu_transfer_and_flush(drv,0,0,drv->fb_width,drv->fb_height),
+                "Complete initial frame before queue exhaustion injection");
     VirtqBuffer dummy_buf{};
     dummy_buf.phys_addr = drv->cmd_paddr;
     dummy_buf.len = 16;
@@ -4670,16 +4762,25 @@ void test_virtio_gpu_reset_failure_quarantine() {
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
     VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(virtio_gpu_transfer_and_flush(drv,0,0,drv->fb_width,drv->fb_height),
+                "Complete old scanout before quarantine test");
+    PrezentacjaStartu::stan().inicjalizacja=true;
+    TEST_ASSERT(virtio_gpu_setup_framebuffer(drv,1024,768), "Pending startup replacement before failed reset");
+    TEST_ASSERT(drv->initial_scanout_pending&&drv->old_fb_vaddr, "Retained visible old backing exists");
     const size_t allocs_before = g_host_dma_allocs.size();
+    const size_t frames_before = g_host_fb_allocs.size();
     g_mock.ignore_reset = true;
 
     TEST_ASSERT(!virtio_gpu_reset(drv), "Reset zwraca false gdy sprzet ignoruje reset");
     TEST_ASSERT(drv->has_error, "drv->has_error == true");
     TEST_ASSERT(g_host_dma_allocs.size() == allocs_before, "Pamiec DMA poddana kwarantannie (niezwolniona)");
+    TEST_ASSERT(g_host_fb_allocs.size()==frames_before&&frames_before==2&&drv->old_fb_vaddr,
+                "Both current and retained-old backings quarantined until confirmed reset");
 
     g_mock.ignore_reset = false;
-    g_host_dma_allocs.clear();
     virtio_gpu_reset_all();
+    PrezentacjaStartu::zakoncz_inicjalizacje();
+    TEST_ASSERT(g_host_dma_allocs.empty()&&g_host_fb_allocs.empty(), "Confirmed retry releases both quarantined backings");
 }
 
 // ----------------------------------------------------------------------------
@@ -4692,6 +4793,7 @@ void test_virtio_gpu_resource_teardown_ordering() {
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
     VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(virtio_gpu_transfer_and_flush(drv,0,0,drv->fb_width,drv->fb_height), "Complete first frame before runtime lifecycle");
     g_mock.gpu_commands_seen.clear();
     TEST_ASSERT(virtio_gpu_reset(drv), "Reset driver");
 
@@ -4810,6 +4912,8 @@ void test_virtio_gpu_used_len_validation() {
 
     VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
     TEST_ASSERT(drv != nullptr, "drv != nullptr");
+    TEST_ASSERT(virtio_gpu_transfer_and_flush(drv,0,0,drv->fb_width,drv->fb_height),
+                "Complete first frame before malformed flush response");
 
     // Przypadek 1: used_len = 0 (< sizeof(VirtioGpuCtrlHdr))
     g_mock.gpu_override_len = 0;
@@ -4837,6 +4941,8 @@ void test_virtio_gpu_used_len_validation() {
     drv = virtio_gpu_get_driver(0);
 
     // Przypadek 3: used_len > resp_size (np. 1000 bajtow przy oczekiwanych 24 bajtach)
+    TEST_ASSERT(virtio_gpu_transfer_and_flush(drv,0,0,drv->fb_width,drv->fb_height),
+                "Complete first frame before oversized flush response");
     g_mock.gpu_override_len = 1000;
     TEST_ASSERT(!virtio_gpu_cmd_resource_flush(drv, 1, 0, 0, 100, 100), "Odrzucenie used_len > resp_size");
     TEST_ASSERT(drv->has_error, "drv->has_error == true po used_len > resp_size");
@@ -4859,6 +4965,8 @@ void test_virtio_gpu_error_responses() {
 
     VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
     TEST_ASSERT(drv != nullptr, "drv != nullptr");
+    TEST_ASSERT(virtio_gpu_transfer_and_flush(drv,0,0,drv->fb_width,drv->fb_height),
+                "Complete first frame before device error response injection");
 
     const uint32_t error_codes[] = {
         VIRTIO_GPU_RESP_ERR_UNSPEC,
@@ -4954,6 +5062,7 @@ void test_virtio_gpu_runtime_modeset_and_rollback() {
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU z 1280x720");
 
     VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(virtio_gpu_transfer_and_flush(drv,0,0,drv->fb_width,drv->fb_height), "Complete first frame before runtime lifecycle");
     TEST_ASSERT(drv != nullptr, "drv != nullptr");
     const uint32_t initial_res_id = drv->resource_id;
 
@@ -5012,6 +5121,7 @@ void test_virtio_gpu_confirmation_lifecycle_and_injected_failures() {
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU z 1280x720");
 
     VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(virtio_gpu_transfer_and_flush(drv,0,0,drv->fb_width,drv->fb_height), "Complete first frame before runtime lifecycle");
     TEST_ASSERT(drv != nullptr, "drv != nullptr");
     TEST_ASSERT(drv->fb_width == 1280 && drv->fb_height == 720, "Poczatkowa geometria 1280x720");
     TEST_ASSERT(drv->resource_id == 1, "Poczatkowy resource_id == 1");
@@ -6880,6 +6990,8 @@ int main() {
     RUN_TEST(test_virtio_net_stress_and_wraparound);
 
     // Testy VirtIO-GPU (2D)
+    RUN_TEST(test_virtio_gpu_probe_reset_ownership);
+    RUN_TEST(test_virtio_gpu_first_publication);
     RUN_TEST(test_virtio_gpu_init_and_cleanup);
     RUN_TEST(test_virtio_gpu_get_display_info);
     RUN_TEST(test_virtio_gpu_resource_create_2d);

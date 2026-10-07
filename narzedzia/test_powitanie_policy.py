@@ -1,6 +1,7 @@
 """Integration contracts; pixel/timing execution lives in the C++ suites."""
 from test_startup_policy import body, check, root, kernel, wm, gfx, boot, wm_start
 import test_startup_policy as base
+startup_checks=base.checks
 welcome=(root/'ekran_powitalny.cpp').read_text()
 comp=(root/'skladacz_obrazu.cpp').read_text()
 start=boot.index('powitanie_inicjalizuj(')
@@ -19,7 +20,7 @@ check('/shell.bur' not in welcome and 'utworz_warstwe' not in welcome,'no Shell 
 check('scheduler_' not in welcome and 'asm volatile' not in welcome and 'sleep' not in welcome,'no scheduler/IRQ blocking or delay')
 check('BURSZTYN_WERSJA' not in welcome,'optional version omitted; no duplicate version constant')
 check('Powitanie::Stan::Zakonczony' in welcome,'resource failure terminates rather than stalls')
-print(f'Welcome integration policy: {base.checks-19}/{base.checks-19} PASS; existing startup contracts: 19/19')
+print(f'Welcome integration policy: {base.checks-startup_checks}/{base.checks-startup_checks} PASS; existing startup contracts: {startup_checks}/{startup_checks}')
 
 power=(root/'syscalls.cpp').read_text()
 order=(root/'cykl_wylaczania_grafiki.h').read_text()

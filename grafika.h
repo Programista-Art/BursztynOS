@@ -29,6 +29,8 @@ void grafika_tapeta_solid();
  * ========================================================================= */
 
 void InicjalizujGrafike(uint64_t adres_info_multiboot);
+// Finish backend selection before the first native/GPU frame becomes visible.
+void grafika_zakoncz_wybor_backendu();
 void wypisz_log(const char* tekst);
 void klog_serial(const char* tekst);
 void boot_log_gui(const char* tekst);

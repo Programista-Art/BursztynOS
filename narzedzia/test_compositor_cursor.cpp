@@ -14,6 +14,9 @@ static uint32_t scale=100;
 static std::vector<uint32_t> scene(1920*1080,0x123456);
 static GuiDirtyRect overlay{};
 static unsigned presents=0;
+static bool mock_first_splash=false;
+static uint32_t recorded_count=0;
+static GuiDirtyRect recorded_first{};
 static bool use_clock=false;
 static uint64_t mock_now=1000000000;
 int aktualny_pid=0;
@@ -40,6 +43,7 @@ void grafika_naloz_okno_terminala_region(int,int,int,int){}
 const BursztynMotyw* motyw_pobierz_aktywny(){return &compositor_theme;}
 void grafika_prezentuj_region(int,int,int,int){++presents;}
 void grafika_prezentuj_scene_z_kursorem(const GuiDirtyRect* r,uint32_t count,int x,int y){
+    recorded_count=count;if(count)recorded_first=r[0];
     uint32_t scratch[64*64]{};
     overlay=kursor_prezentuj_transakcje(scene.data(),sw,sw,sh,overlay,x,y,16,16,scratch,r,count,
         [](int,int,uint32_t& c){c=0xffffff;return true;},
@@ -120,6 +124,16 @@ int main(){
         use_clock=false;
         usun_warstwe(2);usun_warstwe(1);skladacz_reset_ekranu();
     }
+    // Several initial element dirty regions produce a single full splash commit.
+    skladacz_reset_ekranu();dirty_count=0;overlay={};mock_first_splash=true;
+    PrezentacjaStartu::stan().pelna=true;
+    skladacz_obrazu_oznacz_dirty_rect(0,0,10,10);
+    skladacz_obrazu_oznacz_dirty_rect(500,300,20,20);
+    skladacz_obrazu_oznacz_dirty_rect(800,500,20,20);
+    presents=0;skladacz_obrazu_obsluz_dirty();
+    assert(presents==1&&recorded_count==1);
+    assert(recorded_first.x==0&&recorded_first.y==0&&recorded_first.width==sw&&recorded_first.height==sh);
+    mock_first_splash=false;PrezentacjaStartu::stan().pelna=false;
     // Repeated power quiesce drops bounded pending work and prevents new work.
     for(unsigned cycle=0;cycle<100;++cycle) {
         skladacz_obrazu_wznow();
@@ -141,4 +155,5 @@ int main(){
 }
 
 void powitanie_reset_ekranu() {}
+bool powitanie_pierwsza_publikacja() {return mock_first_splash;}
 void powitanie_tick() {} // Dedicated presentation tests exercise the real runtime.

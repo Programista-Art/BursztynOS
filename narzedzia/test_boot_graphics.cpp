@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #define __dso_handle boot_test_dso_handle
 #define __cxa_atexit boot_test_cxa_atexit
 #include "../grafika.cpp"
@@ -104,6 +105,30 @@ int main() {
     test_now=7040000;powitanie_tick();PrzeniesNaEkran();
     assert(!powitanie_aktywne());assert(display.scanout[0]==0x008A5A00);
     assert(!okna[0].widoczne);assert(presentable);
+    // Each fresh first publication uses real graphics presentation entry points.
+    // Initialization cannot present without a valid display; the previous valid
+    // framebuffer remains untouched until a complete render becomes possible.
+    for(auto delay:{0ULL,500000ULL,1500000ULL,3000000ULL}) {
+        powitanie_wycisz();test_now=0;aktywny_ekran=nullptr;
+        unsigned before=presents;
+        powitanie_inicjalizuj(true);
+        assert(!powitanie_pierwsza_klatka_gotowa()&&presents==before);
+        test_now=delay;aktywny_ekran=&display;
+        // A cursor-sized first dirty rect still publishes a complete frame once.
+        PrzeniesFragmentNaEkran(0,0,1,1);
+        assert(presents==before+1&&powitanie_pierwsza_klatka_gotowa());
+        const auto g=Powitanie::geometria(1280,720,100,sekwencja.komunikat);
+        auto ink=[&](Powitanie::Obszar r){
+            for(int y=r.y;y<r.y+r.h;++y)for(int x=r.x;x<r.x+r.w;++x)
+                if(display.scanout[y*1280+x]!=Powitanie::TLO)return true;
+            return false;
+        };
+        assert(ink(g.tytul)&&ink(Powitanie::centrum(1280,720,100)));
+        assert(display.scanout[0]==Powitanie::TLO&&display.scanout[1280*720-1]==Powitanie::TLO);
+        assert(sekwencja.komunikat==0&&sekwencja.start==delay);
+        powitanie_reset_ekranu();assert(!powitanie_pierwsza_klatka_gotowa());
+        PrzeniesFragmentNaEkran(0,0,1,1);assert(presents==before+2);
+    }
     // Power quiesce blocks both presentation entry points. Simulated graphics
     // reinit clears the gate under the same screen lock as production startup.
     unsigned before_quiesce=presents;
@@ -111,10 +136,14 @@ int main() {
     PrzeniesNaEkran();PrzeniesFragmentNaEkran(0,0,1,1);
     assert(presents==before_quiesce&&!powitanie_aktywne());
     grafika_reset_startu();assert(!grafika_wyciszona);
+    grafika_zakoncz_wybor_backendu();
     test_now=0;powitanie_inicjalizuj(true);
     assert(sekwencja.komunikat==0&&sekwencja.start==0);
     powitanie_wycisz();
-    powitanie_inicjalizuj(false);PrzeniesNaEkran();assert(display.scanout[0]==0x008A5A00);
+    powitanie_inicjalizuj(false);
+    const GuiDirtyRect complete_desktop{0,0,1280,720};
+    grafika_prezentuj_scene_z_kursorem(&complete_desktop,1,-100,-100);
+    assert(display.scanout[0]==0x008A5A00);
     free(layer.bufor_pikseli);layer={};
     free(bufor_tapety);free(backbuffer);backbuffer=nullptr;aktywny_ekran=nullptr;
     printf("Production boot graphics/frame commit: %u/%u PASS\n",checks,checks);

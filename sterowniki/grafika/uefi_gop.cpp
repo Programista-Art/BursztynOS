@@ -16,6 +16,8 @@
  */
 
 #include "uefi_gop.h"
+#include "../../diagnostyka_klatek_startu.h"
+#include "../czas/hpet.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -358,6 +360,7 @@ void GOP_PostawPiksel(
     int y,
     uint32_t kolor
 ) {
+    if(!PrezentacjaStartu::dozwolona())return;
     if (!__atomic_load_n(
             &gop_gotowy,
             __ATOMIC_ACQUIRE)) {
@@ -480,4 +483,7 @@ void GOP_PostawPiksel(
 
     *piksel =
         kolor;
+    if(BURSZTYNDIAGSPLASHRUNTIMEFRAMES)KlatkiStartuDiag::event("GOP_PostawPiksel","GOP/direct",czas_monotoniczny_us(),
+        gop_ekran.framebuffer,nullptr,0,{x,y,1,1},gop_ekran.framebuffer,
+        gop_ekran.szerokosc,gop_ekran.wysokosc,gop_ekran.pitch/4,true);
 }

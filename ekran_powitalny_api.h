@@ -12,3 +12,8 @@ void powitanie_wycisz();
 void powitanie_reset_ekranu();
 // Optional counter of completed compositor transactions, no per-frame logging.
 void powitanie_diag_prezentacja();
+
+// Under the existing screen lock. A new size/DPI/surface invalidates readiness.
+bool powitanie_pierwsza_klatka_gotowa();
+bool powitanie_pierwsza_publikacja();
+void powitanie_publikacja();

@@ -1,4 +1,5 @@
 #include "diagnostyka_startu.h"
+#include "diagnostyka_klatek_startu.h"
 #include "ekran_powitalny_api.h"
 #include "move_trace.h"
 /*
@@ -1726,8 +1727,20 @@ void zakoncz_snapshot(){uint64_t f=irq_off();if(render_readers)--render_readers;
  * 15. KOMPOZYCJA CALEJ KLATKI
  * ========================================================================= */
 
+static void diag_splash_compositor_ready() {
+#if BURSZTYNDIAGSPLASHFIRSTFRAME
+    static uint64_t logged_generation=UINT64_MAX;
+    if(logged_generation!=SplashFirstDiag::id().generation) {
+        logged_generation=SplashFirstDiag::id().generation;
+        SplashFirstDiag::event("compositor_ready",czas_monotoniczny_us());
+    }
+#endif
+}
+
 void skladacz_obrazu_zloz_klatke() {
+    KlatkiStartuDiag::Sciezka diagnostic_path("compositor/full");
     if(skladacz_wyciszony)return;
+    diag_splash_compositor_ready();
     GuardSkladania guard;
 
     if (!guard.aktywny()) {
@@ -1843,7 +1856,7 @@ void skladacz_obrazu_zloz_klatke() {
      *   - opuszcza surowy tryb skladania.
      */
     grafika_zakoncz_skladanie();
-#if BURSZTYNDIAGSPLASHTIMING
+#if BURSZTYNDIAGSPLASHTIMING || BURSZTYNDIAGSPLASHFIRSTFRAME
     powitanie_diag_prezentacja();
 #endif
 }
@@ -1901,7 +1914,9 @@ void skladacz_obrazu_oznacz_ruch_kursora(int old_x,int old_y,int new_x,int new_y
 }
 
 void skladacz_obrazu_obsluz_dirty() {
+    KlatkiStartuDiag::Sciezka diagnostic_path("compositor/dirty");
     if(skladacz_wyciszony)return;
+    diag_splash_compositor_ready();
     powitanie_tick();
     MoveTrace::report();
     gui_perf_report();
@@ -1959,6 +1974,10 @@ void skladacz_obrazu_obsluz_dirty() {
     /* Faza A: wszystkie regiony trafiaja w calosci do scene backbufferu.
        Framebuffer nie jest dotykany podczas kosztownego compositingu. */
     const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
+    // One full first commit, rather than one GPU flush per initial dirty element.
+    if(count&&PrezentacjaStartu::wymaga_pelnej()) {
+        work[0]={0,0,sw,sh};count=1;
+    }
     for(uint32_t ri=0;ri<count;++ri){
         const GuiDirtyRect&r=work[ri];
         pixels+=rect_area(r);
@@ -2013,7 +2032,7 @@ void skladacz_obrazu_obsluz_dirty() {
 #endif
     if(count) zakoncz_snapshot();
     ++licznik_klatek;
-#if BURSZTYNDIAGSPLASHTIMING
+#if BURSZTYNDIAGSPLASHTIMING || BURSZTYNDIAGSPLASHFIRSTFRAME
     powitanie_diag_prezentacja();
 #endif
     suma_dirty_px+=pixels;

@@ -814,7 +814,7 @@ test-e1000-qemu: iso
 test-virtio-pci:
 	@mkdir -p .virtiotest
 	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -pthread pci.cpp virtio_pci.cpp virtqueue.cpp virtio_rng.cpp virtio_blk.cpp network_device.cpp virtio_net.cpp virtio_gpu.cpp input_device.cpp virtio_input.cpp sterowniki/usb/usb_hid.cpp klawiatura.cpp narzedzia/test_virtio_pci.cpp -o .virtiotest/test-virtio-pci
-	ASAN_OPTIONS=detect_leaks=1 .virtiotest/test-virtio-pci
+	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .virtiotest/test-virtio-pci
 
 test-virtio-qemu: $(CI_TEST_ISO)
 	$(PYTHON) narzedzia/test_virtio_qemu.py
@@ -1527,7 +1527,7 @@ test-gui-runtime-diag:
 test-compositor-cursor:
 	mkdir -p .wm-test
 	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_compositor_cursor.cpp -Wl,--gc-sections -o .wm-test/compositor-cursor
-	ASAN_OPTIONS=detect_leaks=1 .wm-test/compositor-cursor
+	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/compositor-cursor
 
 BURSZTYNDIAGABSMAP ?= 0
 ifeq ($(BURSZTYNDIAGABSMAP),1)
@@ -1623,13 +1623,13 @@ syscalls.o: cykl_wylaczania_grafiki.h
 test-powitanie-reboot:
 	@mkdir -p .wm-test
 	g++ -std=c++17 -O1 -g -pthread -fsanitize=address,undefined narzedzia/test_powitanie_reboot.cpp -o .wm-test/powitanie-reboot
-	ASAN_OPTIONS=detect_leaks=1 .wm-test/powitanie-reboot
+	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/powitanie-reboot
 
 .PHONY: test-gpu-quiesce-host
 test-gpu-quiesce-host:
 	@mkdir -p .wm-test
 	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_gpu_quiesce_host.cpp -Wl,--gc-sections -o .wm-test/gpu-quiesce
-	ASAN_OPTIONS=detect_leaks=1 .wm-test/gpu-quiesce
+	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/gpu-quiesce
 
 # Opt-in sparse splash timing diagnostics; production default has no frame logs.
 BURSZTYNDIAGSPLASHTIMING ?= 0
@@ -1641,7 +1641,48 @@ endif
 test-splash-timing:
 	@mkdir -p .wm-test
 	g++ -std=c++17 -O1 -g -DBURSZTYNDIAGSPLASHTIMING=1 -fsanitize=address,undefined narzedzia/test_splash_timing.cpp -o .wm-test/splash-timing
-	ASAN_OPTIONS=detect_leaks=1 .wm-test/splash-timing
+	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/splash-timing
 
 test-windows-launcher:
 	$(PYTHON) narzedzia/test_windows_launcher_config.py
+
+BURSZTYNDIAGSPLASHFIRSTFRAME ?= 0
+ifeq ($(BURSZTYNDIAGSPLASHFIRSTFRAME),1)
+KERNEL_CXXFLAGS += -DBURSZTYNDIAGSPLASHFIRSTFRAME=1
+endif
+virtio_gpu.o: diagnostyka_startu.h
+grafika.o: virtio_gpu.h
+.PHONY: test-splash-first-frame
+test-splash-first-frame:
+	@mkdir -p .wm-test
+	g++ -std=c++17 -O1 -g -DBURSZTYNDIAGSPLASHFIRSTFRAME=1 -fsanitize=address,undefined narzedzia/test_splash_first_frame.cpp -o .wm-test/splash-first-frame
+	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/splash-first-frame
+
+BURSZTYNDIAGSPLASHRUNTIMEFRAMES ?= 0
+ifeq ($(BURSZTYNDIAGSPLASHRUNTIMEFRAMES),1)
+KERNEL_CXXFLAGS += -DBURSZTYNDIAGSPLASHRUNTIMEFRAMES=1
+endif
+grafika.o ekran_powitalny.o skladacz_obrazu.o virtio_gpu.o virtio_pci.o uefi_gop.o kernel.o: prezentacja_startu.h diagnostyka_klatek_startu.h
+
+.PHONY: test-splash-snapshots
+test-splash-snapshots:
+	@mkdir -p .wm-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined narzedzia/test_splash_snapshots.cpp -o .wm-test/splash-snapshots
+	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/splash-snapshots
+
+# Restricted ptrace environments may override only leak checking; ASan/UBSan
+# remain compiled into all of these startup verification binaries.
+STARTUP_ASAN_OPTIONS ?= detect_leaks=1
+
+.PHONY: test-splash-production-path
+STARTUP_HOST_FLAGS := -std=c++17 -O1 -g -I. -ffunction-sections -fdata-sections -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_GRAPHICS_HOST_TEST -DBURSZTYN_COMPOSITOR_HOST_TEST -DBURSZTYNDIAGSPLASHRUNTIMEFRAMES=1 -fsanitize=address,undefined -pthread
+STARTUP_HOST_SOURCES := narzedzia/test_splash_production_path.cpp grafika.cpp ekran_powitalny.cpp skladacz_obrazu.cpp sterowniki/grafika/uefi_gop.cpp pci.cpp virtio_pci.cpp virtqueue.cpp virtio_rng.cpp virtio_blk.cpp network_device.cpp virtio_net.cpp virtio_gpu.cpp input_device.cpp virtio_input.cpp sterowniki/usb/usb_hid.cpp klawiatura.cpp
+STARTUP_HOST_OBJECTS := $(addprefix .wm-test/runtime-host/,$(STARTUP_HOST_SOURCES:.cpp=.o))
+.wm-test/runtime-host/%.o: %.cpp
+	@mkdir -p $(@D)
+	g++ $(STARTUP_HOST_FLAGS) -MMD -MP -c $< -o $@
+-include $(STARTUP_HOST_OBJECTS:.o=.d)
+test-splash-production-path: $(STARTUP_HOST_OBJECTS)
+	@mkdir -p .wm-test
+	g++ $(STARTUP_HOST_FLAGS) -Wl,--gc-sections $(STARTUP_HOST_OBJECTS) -o .wm-test/splash-production-path
+	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/splash-production-path

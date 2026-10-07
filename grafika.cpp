@@ -1,4 +1,5 @@
 #include "diagnostyka_startu.h"
+#include "diagnostyka_klatek_startu.h"
 #include "ekran_powitalny_api.h"
 #include "move_trace.h"
 #include "wm_input.h"
@@ -48,6 +49,9 @@ extern bool czy_bezpieczny_zakres_uzytkownika_do_zapisu(
 extern "C" uint32_t klawiatura_modyfikatory();
 
 // Placement new bez zaleznosci od biblioteki standardowej.
+#ifdef BURSZTYN_GRAPHICS_HOST_TEST
+#include <new>
+#else
 inline void* operator new(unsigned long, void* p) { return p; }
 inline void* operator new[](unsigned long, void* p) { return p; }
 
@@ -55,6 +59,7 @@ extern "C" {
     void* __dso_handle = nullptr;
     int __cxa_atexit(void (*)(void*), void*, void*) { return 0; }
 }
+#endif
 
 extern "C" bool bws_uruchom_program_z_pliku(
     const char* sciezka_pliku,
@@ -151,6 +156,10 @@ void przeladuj_cr3() {
 bool zmapuj_framebuffer(uint64_t adres_fizyczny,
                         uint64_t rozmiar,
                         uint64_t* adres_wirtualny_wynik) {
+#ifdef BURSZTYN_GRAPHICS_HOST_TEST
+    if(!adres_fizyczny||!rozmiar||!adres_wirtualny_wynik)return false;
+    *adres_wirtualny_wynik=adres_fizyczny;return true;
+#else
     if (!adres_wirtualny_wynik || rozmiar == 0)
         return false;
 
@@ -197,6 +206,7 @@ bool zmapuj_framebuffer(uint64_t adres_fizyczny,
         VADDR_FRAMEBUFFER + przesuniecie;
 
     return true;
+#endif
 }
 
 int ogranicz_skale(int skala) {
@@ -233,7 +243,7 @@ protected:
     volatile uint8_t* framebuffer_fizyczny = nullptr;
 
     void KopiujCalyBufor32(uint8_t* bufor) {
-        if (!bufor || !framebuffer_fizyczny || bpp != 32)
+        if (!PrezentacjaStartu::dozwolona() || !bufor || !framebuffer_fizyczny || bpp != 32)
             return;
 
         for (uint32_t rzad = 0; rzad < wysokosc; ++rzad) {
@@ -248,7 +258,17 @@ protected:
             for (uint32_t x = 0; x < szerokosc; ++x) {
                 dst[x] = src[x];
             }
+#ifdef BURSZTYN_GRAPHICS_HOST_TEST
+            if(KopiaWidoczna()) {
+                extern void grafika_host_wiersz_opublikowany(uint32_t);
+                grafika_host_wiersz_opublikowany(rzad);
+            }
+#endif
         }
+        if(BURSZTYNDIAGSPLASHRUNTIMEFRAMES&&KopiaWidoczna())KlatkiStartuDiag::event("KopiujCalyBufor32",Backend(),czas_monotoniczny_us(),
+            const_cast<const uint8_t*>(framebuffer_fizyczny),bufor,0,{0,0,int(szerokosc),int(wysokosc)},
+            reinterpret_cast<const uint32_t*>(const_cast<const uint8_t*>(framebuffer_fizyczny)),
+            szerokosc,wysokosc,pitch/4,true);
     }
 
     void KopiujFragment32(uint8_t* bufor,
@@ -256,11 +276,10 @@ protected:
                           int y,
                           int szer,
                           int wys) {
-        if (!bufor || !framebuffer_fizyczny ||
+        if (!PrezentacjaStartu::dozwolona() || !bufor || !framebuffer_fizyczny ||
             bpp != 32 || szer <= 0 || wys <= 0) {
             return;
         }
-
         int64_t start_x = static_cast<int64_t>(x);
         int64_t start_y = static_cast<int64_t>(y);
         int64_t end_x = start_x + static_cast<int64_t>(szer);
@@ -299,9 +318,17 @@ protected:
                 dst[i] = src[i];
             }
         }
+        if(BURSZTYNDIAGSPLASHRUNTIMEFRAMES&&KopiaWidoczna())KlatkiStartuDiag::event("KopiujFragment32",Backend(),czas_monotoniczny_us(),
+            const_cast<const uint8_t*>(framebuffer_fizyczny),bufor,0,{int(start_x),int(start_y),int(end_x-start_x),int(end_y-start_y)},
+            reinterpret_cast<const uint32_t*>(const_cast<const uint8_t*>(framebuffer_fizyczny)),
+            szerokosc,wysokosc,pitch/4,true);
     }
 
 public:
+    virtual const char* Backend() const { return "native"; }
+    virtual uint32_t ZasobScanoutu() const { return 0; }
+    virtual bool KopiaWidoczna() const { return true; }
+    virtual bool PublikacjaUdana() const { return PrezentacjaStartu::dozwolona(); }
     virtual ~SterownikEkranu() {}
 
     virtual bool Inicjalizuj(uint64_t adres_lfb,
@@ -351,6 +378,7 @@ public:
 
 class SterownikVESA final : public SterownikEkranu {
 public:
+    const char* Backend() const override { return "VESA"; }
     void KopiujNaEkran(uint8_t* bufor) override {
         KopiujCalyBufor32(bufor);
     }
@@ -366,6 +394,7 @@ public:
 
 class SterownikGOP final : public SterownikEkranu {
 public:
+    const char* Backend() const override { return "GOP"; }
     bool Inicjalizuj(uint64_t adres_lfb,
                      uint32_t w,
                      uint32_t h,
@@ -396,8 +425,13 @@ public:
 class SterownikVirtioGPU final : public SterownikEkranu {
 private:
     VirtioGpuDriver* drv = nullptr;
+    bool opublikowano=false;
 
 public:
+    const char* Backend() const override { return "VirtIO"; }
+    uint32_t ZasobScanoutu() const override { return drv?drv->resource_id:0; }
+    bool KopiaWidoczna() const override { return false; }
+    bool PublikacjaUdana() const override { return opublikowano; }
     bool InicjalizujGPU(VirtioGpuDriver* gdrv) {
         if (!gdrv || !gdrv->fb_vaddr || gdrv->fb_width == 0 || gdrv->fb_height == 0) {
             return false;
@@ -432,12 +466,13 @@ public:
     VirtioGpuDriver* PobierzSterownikGPU() const { return drv; }
 
     void KopiujNaEkran(uint8_t* bufor) override {
-        if (virtio_gpu_is_quiescing() || !drv || !drv->initialized || drv->has_error) return;
+        opublikowano=false;
+        if (!PrezentacjaStartu::dozwolona() || virtio_gpu_is_quiescing() || !drv || !drv->initialized || drv->has_error) return;
         if (static_cast<const void*>(bufor) != static_cast<const void*>(const_cast<const uint8_t*>(framebuffer_fizyczny))) {
             KopiujCalyBufor32(bufor);
         }
         MoveTrace::flush_request();
-        virtio_gpu_transfer_and_flush(drv, 0, 0, szerokosc, wysokosc);
+        opublikowano=virtio_gpu_transfer_and_flush(drv, 0, 0, szerokosc, wysokosc);
     }
 
     void KopiujFragmentNaEkran(uint8_t* bufor,
@@ -445,7 +480,8 @@ public:
                                int y,
                                int szer,
                                int wys) override {
-        if (virtio_gpu_is_quiescing() || !drv || !drv->initialized || drv->has_error) return;
+        opublikowano=false;
+        if (!PrezentacjaStartu::dozwolona() || virtio_gpu_is_quiescing() || !drv || !drv->initialized || drv->has_error) return;
         if (szer <= 0 || wys <= 0) return;
 
         int x0 = x < 0 ? 0 : x;
@@ -468,7 +504,7 @@ public:
         gui_perf_add(0,GP_COPY_NS,gui_perf_now()-copy_start);
         const auto gpu_start=gui_perf_now();
         MoveTrace::flush_request();
-        virtio_gpu_transfer_and_flush(drv, static_cast<uint32_t>(rx), static_cast<uint32_t>(ry),
+        opublikowano=virtio_gpu_transfer_and_flush(drv, static_cast<uint32_t>(rx), static_cast<uint32_t>(ry),
                                       static_cast<uint32_t>(rw), static_cast<uint32_t>(rh));
         const auto gpu_elapsed=gui_perf_now()-gpu_start;
         gui_perf_add(0,GP_GPU_NS,gpu_elapsed);gui_perf_max(0,GP_GPU_MAX_NS,gpu_elapsed);
@@ -478,6 +514,11 @@ public:
 alignas(SterownikVirtioGPU) static uint8_t st_virtio_gpu_pamiec[sizeof(SterownikVirtioGPU)];
 
 static SterownikEkranu* aktywny_ekran = nullptr;
+#ifdef BURSZTYN_GRAPHICS_HOST_TEST
+void grafika_host_bezposrednia_kopia(uint8_t* p) {
+    if(aktywny_ekran){aktywny_ekran->KopiujNaEkran(p);aktywny_ekran->KopiujFragmentNaEkran(p,0,0,1,1);}
+}
+#endif
 static uint8_t* backbuffer = nullptr;
 static size_t backbuffer_bajty=0;
 static uint64_t ekran_lfb_va=0, ekran_vram=0;
@@ -744,12 +785,16 @@ static inline void serial_outb(uint16_t port, uint8_t val) {
 
 extern "C" void SerialLog(const char* str) {
     if (!str) return;
-
+#ifdef BURSZTYN_GRAPHICS_HOST_TEST
+    extern void grafika_host_serial(const char*);
+    grafika_host_serial(str);
+#else
     for (size_t i = 0; str[i] != '\0'; ++i) {
         const uint8_t c = static_cast<uint8_t>(str[i]);
         serial_outb(0x3F8, c);
         serial_outb(0xE9, c);
     }
+#endif
 }
 
 #ifndef BURSZTYN_DEBUG_GUI_INPUT
@@ -957,9 +1002,20 @@ void PrzeniesNaEkran() {
     if (grafika_wyciszona || !backbuffer || !aktywny_ekran)
         return;
 
-    aktywny_ekran->KopiujNaEkran(powitanie_zrodlo(backbuffer,
+    auto* source=powitanie_zrodlo(backbuffer,
         grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc(),aktywny_ekran->PobierzPitch(),
-        0,0,grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc(),ekran_skala()));
+        0,0,grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc(),ekran_skala());
+    if(powitanie_aktywne()&&!powitanie_pierwsza_klatka_gotowa())return;
+    if(!PrezentacjaStartu::dozwolona())return;
+    if(BURSZTYNDIAGSPLASHRUNTIMEFRAMES)KlatkiStartuDiag::info().backbuffer=source;
+    if(BURSZTYNDIAGSPLASHRUNTIMEFRAMES)KlatkiStartuDiag::event("PrzeniesNaEkran",aktywny_ekran->Backend(),czas_monotoniczny_us(),
+        const_cast<const uint8_t*>(aktywny_ekran->PobierzBuforFizyczny()),source,aktywny_ekran->ZasobScanoutu(),
+        {0,0,grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc()},
+        reinterpret_cast<const uint32_t*>(source),grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc(),
+        aktywny_ekran->PobierzPitch()/4,false);
+    if(powitanie_pierwsza_publikacja())SplashFirstDiag::event("first_graphics_commit",czas_monotoniczny_us());
+    aktywny_ekran->KopiujNaEkran(source);
+    if(aktywny_ekran->PublikacjaUdana()){PrezentacjaStartu::opublikowana();powitanie_publikacja();}
 }
 
 void PrzeniesFragmentNaEkran(int x,
@@ -972,9 +1028,21 @@ void PrzeniesFragmentNaEkran(int x,
     const auto start=gui_perf_now();
     MoveTrace::present();
     gui_perf_add(0,GP_PRESENT);gui_perf_add(0,GP_COPY);
-    aktywny_ekran->KopiujFragmentNaEkran(
-        powitanie_zrodlo(backbuffer,grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc(),
-            aktywny_ekran->PobierzPitch(),x,y,szer,wys,ekran_skala()), x, y, szer, wys);
+    auto* source=powitanie_zrodlo(backbuffer,grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc(),
+            aktywny_ekran->PobierzPitch(),x,y,szer,wys,ekran_skala());
+    if(powitanie_aktywne()&&!powitanie_pierwsza_klatka_gotowa())return;
+    if(!PrezentacjaStartu::dozwolona())return;
+    if(BURSZTYNDIAGSPLASHRUNTIMEFRAMES)KlatkiStartuDiag::info().backbuffer=source;
+    if(BURSZTYNDIAGSPLASHRUNTIMEFRAMES)KlatkiStartuDiag::event("PrzeniesFragmentNaEkran",aktywny_ekran->Backend(),czas_monotoniczny_us(),
+        const_cast<const uint8_t*>(aktywny_ekran->PobierzBuforFizyczny()),source,aktywny_ekran->ZasobScanoutu(),{x,y,szer,wys},
+        reinterpret_cast<const uint32_t*>(source),grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc(),
+        aktywny_ekran->PobierzPitch()/4,false);
+    // First publication is always the whole image, even for a cursor dirty rect.
+    if(powitanie_aktywne()||PrezentacjaStartu::wymaga_pelnej()) {
+        SplashFirstDiag::event("first_graphics_commit",czas_monotoniczny_us());
+        aktywny_ekran->KopiujNaEkran(source);
+        if(aktywny_ekran->PublikacjaUdana()){PrezentacjaStartu::opublikowana();powitanie_publikacja();}
+    } else aktywny_ekran->KopiujFragmentNaEkran(source,x,y,szer,wys);
     const auto elapsed=gui_perf_now()-start;
     gui_perf_add(0,GP_PRESENT_NS,elapsed);gui_perf_max(0,GP_PRESENT_MAX_NS,elapsed);
 }
@@ -1206,6 +1274,13 @@ void grafika_prezentuj_scene_z_kursorem(const GuiDirtyRect* dirty, uint32_t coun
     if (!aktywny_ekran || !backbuffer) return;
     const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
     if(sw<=0||sh<=0||count>SKLADACZ_MAKS_DIRTY_RECT)return;
+    // A completed system overlay is committed once, never through each cursor
+    // dirty rectangle. The compositor still owns only generic scene regions.
+    if(powitanie_aktywne()) {
+        PrzeniesNaEkran();kursor_overlay_widoczny=false;return;
+    }
+    if(count==1&&dirty[0].x==0&&dirty[0].y==0&&dirty[0].width==sw&&dirty[0].height==sh)
+        PrezentacjaStartu::przygotowana();
     // Snapshot shape too: input can change focus while presentation runs.
     StanKursoraProcesu shape{};
     const auto* active=aktywny_stan_kursora();
@@ -1273,6 +1348,9 @@ void grafika_runtime_diag_snapshot() {
 #endif
 
 void grafika_prezentuj_kursor_w(int x,int y) {
+    // The system surface has no pointer overlay. A cursor-only request cannot
+    // create a second publication of the same splash animation transaction.
+    if(powitanie_aktywne())return;
     grafika_prezentuj_scene_z_kursorem(nullptr,0,x,y);
 }
 
@@ -1281,11 +1359,15 @@ void grafika_prezentuj_kursor(){int x=0,y=0;grafika_pobierz_pozycje_kursora(&x,&
 void grafika_zakoncz_scene(){tryb_skladania_obrazu=false;}
 
 void grafika_pobierz_pozycje_kursora(int* x,int* y) {
+#ifndef BURSZTYN_GRAPHICS_HOST_TEST
     uint64_t flags;
     asm volatile("pushfq; popq %0; cli":"=r"(flags)::"memory","cc");
+#endif
     if(x) *x=mysz_x;
     if(y) *y=mysz_y;
+#ifndef BURSZTYN_GRAPHICS_HOST_TEST
     if(flags&(1ULL<<9))asm volatile("sti":::"memory");
+#endif
 }
 
 void grafika_pobierz_overlay_kursora(int* x,int* y,int* w,int* h,bool* widoczny) {
@@ -2819,9 +2901,11 @@ alignas(SterownikGOP) static
 uint8_t st_gop_pamiec[sizeof(SterownikGOP)];
 
 static void grafika_reset_startu() {
+    PrezentacjaStartu::reset();KlatkiStartuDiag::reset();
     powitanie_wycisz();grafika_wyciszona=false;skladacz_obrazu_wznow();
 }
 void InicjalizujGrafike(uint64_t adres_mb2) {
+    KlatkiStartuDiag::Sciezka diagnostic_path("graphics/init");
     grafika_reset_startu();
     if (adres_mb2 == 0)
         return;
@@ -3138,9 +3222,13 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
     }
     klog_serial(bochs?"[EKRAN] Backend Bochs VBE (PCI/BAR/DISPI potwierdzone).":
         (mamy_efi?"[EKRAN] Backend UEFI GOP (framebuffer).":"[EKRAN] Backend VESA (framebuffer)."));
-    // Present an intentional neutral theme background before desktop initialization.
+    // Initialize off-screen; retain firmware pixels until the startup policy
+    // can publish a complete welcome (or the compositor's complete desktop).
     grafika_odtworz_tlo_skladania();
-    PrzeniesNaEkran();
+    SplashFirstDiag::event("graphics_ready",czas_monotoniczny_us());
+    if(BURSZTYNDIAGSPLASHRUNTIMEFRAMES)KlatkiStartuDiag::event("InicjalizujGrafike",mamy_efi?"GOP/init":"VESA/init",czas_monotoniczny_us(),
+        reinterpret_cast<const void*>(framebuffer_wirtualny),backbuffer,0,{0,0,int(SZER),int(WYS)},
+        reinterpret_cast<const uint32_t*>(framebuffer_wirtualny),SZER,WYS,PITCH/4,false);
     wypisz_log("[SYSTEM] Bursztyn OS HAL gotowy!");
 }
 
@@ -3745,6 +3833,8 @@ bool grafika_przygotuj_ekran(const TrybEkranu&t,StanBuforowEkranu* s){
     return true;
 }
 bool grafika_zmien_sprzet(const TrybEkranu&t){
+    if(PrezentacjaStartu::stan().inicjalizacja&&!ekran_ten_sam(t,grafika_tryb_ekranu()))
+        PrezentacjaStartu::uniewaznij();
     if(ekran_caps.backend==EKRAN_VIRTIO_GPU){
         VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
         if(!drv)return false;
@@ -3801,6 +3891,7 @@ void grafika_ustaw_tryby_virtio_gpu() {
 }
 
 bool grafika_aktywuj_virtio_gpu(VirtioGpuDriver* drv) {
+    KlatkiStartuDiag::Sciezka diagnostic_path("graphics/backend-selection");
     if (!drv || !drv->initialized || !drv->fb_vaddr) return false;
 
     SterownikVirtioGPU* st = new (st_virtio_gpu_pamiec) SterownikVirtioGPU();
@@ -3851,7 +3942,10 @@ bool grafika_aktywuj_virtio_gpu(VirtioGpuDriver* drv) {
     kursor_overlay_x = 0;
     kursor_overlay_y = 0;
 
+    // A new graphics generation cannot inherit a publishable splash surface.
+    powitanie_reset_ekranu();
     grafika_odtworz_tlo_skladania();
+    PrezentacjaStartu::wybierz_backend();
     PrzeniesNaEkran();
     PokazKursor();
 
@@ -3876,6 +3970,14 @@ bool grafika_aktywuj_virtio_gpu(VirtioGpuDriver* drv) {
     SerialLog("\n");
 #endif
     return true;
+}
+
+void grafika_zakoncz_wybor_backendu() {
+    if(PrezentacjaStartu::stan().backend)return;
+    PrezentacjaStartu::wybierz_backend();
+    // Native fallback retains firmware until this completed policy frame.
+    // With an inactive overlay the compositor authorizes its first full scene.
+    if(powitanie_aktywne())PrzeniesNaEkran();
 }
 
 bool grafika_przywroc_boot_backend() {
@@ -4131,4 +4233,3 @@ bool grafika_test_kursor_suite(VirtioGpuDriver* gpu_drv) {
     grafika_prezentuj_kursor_w(500, 300);
     return true;
 }
-

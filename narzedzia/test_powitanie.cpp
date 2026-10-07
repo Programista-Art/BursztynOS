@@ -60,7 +60,7 @@ int main(){
         std::vector<uint32_t> scene(size_t(pitch)*height,0xABCDEF);
         now=0;powitanie_inicjalizuj(true);
         auto source=[&](int x=0,int y=0,int rw=-1,int rh=-1){return reinterpret_cast<uint32_t*>(powitanie_zrodlo(reinterpret_cast<uint8_t*>(scene.data()),w,height,pitch*4,x,y,rw<0?w:rw,rh<0?height:rh,dpi));};
-        auto* out=source();assert(out!=scene.data());assert(out[0]==TLO);
+        auto* out=source();powitanie_publikacja();assert(out!=scene.data());assert(out[0]==TLO);
         assert(scene[0]==0xABCDEF); // normal app/window scene remains private
         unsigned allocated=allocations;
         for(auto t:{1400000ULL,1533333ULL,1633333ULL,1800000ULL,3233333ULL,3500000ULL}){
@@ -93,7 +93,7 @@ int main(){
         // Explicit diagnostic and automated boot have no delay.
         powitanie_inicjalizuj(false);assert(!powitanie_aktywne());assert(source()==scene.data());
     }
-    // Geometry, actual grayscale pixels and affected-band restoration.
+    // Geometry, actual grayscale pixels and complete reusable-frame restoration.
     for(int w:{1280,1920})for(unsigned dpi:{100U,125U})for(unsigned msg=0;msg<3;++msg) {
         int h=w==1280?720:1080;auto g=geometria(w,h,dpi,msg);
         assert(g.tytul.h==ui_skaluj(56,dpi));assert(g.komunikat.h==ui_skaluj(36,dpi));
@@ -111,7 +111,7 @@ int main(){
             if(y<affected.y||y>=affected.y+affected.h||x<affected.x||x>=affected.x+affected.w)outside&=c==0x123456;
             else if(c!=TLO&&c!=0xE9BE76&&c!=0xE1E6ED)++smooth;
         }
-        assert(smooth>0&&outside);
+        assert(smooth>0&&!outside); // The production renderer owns the whole frame.
         rysuj(image.data(),w,h,w,dpi,draw,true);
         auto ink_height=[&](Obszar r){int lo=h,hi=-1;
             for(int y=r.y;y<r.y+r.h;++y)for(int x=r.x;x<r.x+r.w;++x)
@@ -133,7 +133,7 @@ int main(){
     // Reconfigure framebuffer while active; no old geometry or app pixels escape.
     now=0;powitanie_inicjalizuj(true);
     std::vector<uint32_t> small(1280*720,0x123456),large(1920*1080,0x654321);
-    auto* a=powitanie_zrodlo(reinterpret_cast<uint8_t*>(small.data()),1280,720,5120,0,0,1280,720,100);assert(a);
+    auto* a=powitanie_zrodlo(reinterpret_cast<uint8_t*>(small.data()),1280,720,5120,0,0,1280,720,100);powitanie_publikacja();assert(a);
     auto* b=reinterpret_cast<uint32_t*>(powitanie_zrodlo(reinterpret_cast<uint8_t*>(large.data()),1920,1080,7680,0,0,1920,1080,125));assert(b[1920*1080-1]==TLO);
     assert(large.back()==0x654321);
     // Modeset invalidates desktop readiness until WM republishes its root.
@@ -172,7 +172,7 @@ int main(){
         assert(sekwencja.start==123&&sekwencja.fade==0&&sekwencja.komunikat==0);
         assert(!pulpit_gotowy&&!tlo_tapeta&&pulpit_pid==0&&nastepny==0);
         auto source=[&](){return powitanie_zrodlo(reinterpret_cast<uint8_t*>(cycle_scene.data()),320,240,1280,0,0,320,240,100);};
-        source();assert(live==1);
+        source();powitanie_publikacja();assert(live==1);
         if(ready)powitanie_pulpit_gotowy(false); // async wallpaper pending / valid fallback
         if(stage>=6500000)advance(6400123);
         advance(123+stage);source();

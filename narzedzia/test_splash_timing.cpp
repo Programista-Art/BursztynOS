@@ -47,7 +47,7 @@ int main(){
     // Real module schedules at most one dirty action per sample after any stall.
     width=1280;height=720;
     std::vector<uint32_t> scene(size_t(width)*height,0x234567);
-    auto source=[&](bool whole=true){return reinterpret_cast<uint32_t*>(powitanie_zrodlo(reinterpret_cast<uint8_t*>(scene.data()),width,height,width*4,0,0,whole?width:1,whole?height:1,100));};
+    auto source=[&](bool whole=true){auto* p=reinterpret_cast<uint32_t*>(powitanie_zrodlo(reinterpret_cast<uint8_t*>(scene.data()),width,height,width*4,0,0,whole?width:1,whole?height:1,100));powitanie_publikacja();return p;};
     for(uint64_t stall:{500000ULL,1500000ULL,3000000ULL}) {
         now=0;powitanie_inicjalizuj(true);source();powitanie_pulpit_gotowy();advance(1900000);
         unsigned before=full+partial;advance(1900000+stall);

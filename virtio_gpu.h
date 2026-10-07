@@ -298,6 +298,9 @@ struct VirtioGpuDriver {
     bool resource_created;
     bool backing_attached;
     bool scanout_set;
+    bool initial_scanout_pending; // Prepared resource, not yet visible.
+    bool first_transfer_complete;
+    bool old_scanout_pending;
 
     /* Blokada spinlock */
     uint32_t lock;

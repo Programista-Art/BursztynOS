@@ -8,6 +8,8 @@
  */
 
 #include "virtio_gpu.h"
+#include "diagnostyka_startu.h"
+#include "diagnostyka_klatek_startu.h"
 #include "idt.h"
 #include "apic.h"
 
@@ -624,6 +626,11 @@ static bool virtio_gpu_cmd_set_scanout_locked(
     uint32_t height
 ) {
     if (!drv || scanout_id >= VIRTIO_GPU_MAX_SCANOUTS) return false;
+    if(resource_id!=0) {
+        const bool valid_old=resource_id==drv->old_resource_id&&!drv->old_scanout_pending;
+        if(!valid_old&&!PrezentacjaStartu::dozwolona())return false;
+        if(resource_id==drv->resource_id&&drv->initial_scanout_pending&&!drv->first_transfer_complete)return false;
+    }
 
     VirtioGpuSetScanout req{};
     req.hdr.type = VIRTIO_GPU_CMD_SET_SCANOUT;
@@ -637,6 +644,12 @@ static bool virtio_gpu_cmd_set_scanout_locked(
     VirtioGpuCtrlHdr resp{};
     bool ok = virtio_gpu_send_command_locked(
         drv, &req, sizeof(req), &resp, sizeof(resp), VIRTIO_GPU_RESP_OK_NODATA);
+    if(ok&&resource_id!=0&&resource_id==drv->resource_id) {
+        drv->scanout_set=true;drv->initial_scanout_pending=false;
+    }
+    if(BURSZTYNDIAGSPLASHRUNTIMEFRAMES&&ok)KlatkiStartuDiag::event("virtio_gpu_cmd_set_scanout","VirtIO/SETSCANOUT",gpu_monotonic_ns()/1000,
+        drv->fb_vaddr,KlatkiStartuDiag::info().backbuffer,resource_id,{int(x),int(y),int(width),int(height)},
+        static_cast<const uint32_t*>(drv->fb_vaddr),drv->fb_width,drv->fb_height,drv->fb_stride/4,true);
 
     if (resource_id != 0) {
         char smsg[96]{};
@@ -700,6 +713,11 @@ bool virtio_gpu_cmd_transfer_to_host_2d(
     }
 
     drv->transfer_count++;
+    if(resource_id==drv->resource_id&&x==0&&y==0&&width==drv->fb_width&&height==drv->fb_height)
+        drv->first_transfer_complete=true;
+    if(BURSZTYNDIAGSPLASHRUNTIMEFRAMES)KlatkiStartuDiag::event("virtio_gpu_cmd_transfer_to_host_2d","VirtIO/TRANSFER",gpu_monotonic_ns()/1000,
+        drv->fb_vaddr,KlatkiStartuDiag::info().backbuffer,resource_id,{int(x),int(y),int(width),int(height)},
+        static_cast<const uint32_t*>(drv->fb_vaddr),drv->fb_width,drv->fb_height,drv->fb_stride/4,false);
     return true;
 }
 
@@ -712,6 +730,7 @@ bool virtio_gpu_cmd_resource_flush(
     uint32_t height
 ) {
     if (!drv || resource_id == 0 || width == 0 || height == 0 || virtio_gpu_is_quiescing()) return false;
+    if(!PrezentacjaStartu::dozwolona()||(resource_id==drv->resource_id&&drv->initial_scanout_pending))return false;
     if (x > drv->fb_width || y > drv->fb_height) return false;
     if (width > drv->fb_width - x || height > drv->fb_height - y) return false;
 
@@ -733,6 +752,9 @@ bool virtio_gpu_cmd_resource_flush(
     }
 
     drv->flush_count++;
+    if(BURSZTYNDIAGSPLASHRUNTIMEFRAMES)KlatkiStartuDiag::event("virtio_gpu_cmd_resource_flush","VirtIO/RESOURCEFLUSH",gpu_monotonic_ns()/1000,
+        drv->fb_vaddr,KlatkiStartuDiag::info().backbuffer,resource_id,{int(x),int(y),int(width),int(height)},
+        static_cast<const uint32_t*>(drv->fb_vaddr),drv->fb_width,drv->fb_height,drv->fb_stride/4,true);
     return true;
 }
 
@@ -778,10 +800,10 @@ bool virtio_gpu_cmd_resource_unref(VirtioGpuDriver* drv, uint32_t resource_id) {
  * 3. ZARZADZANIE BUFOREM RAMKI I INICJALIZACJA 2D
  * ========================================================================= */
 
-static void virtio_gpu_free_stale_resource_locked(VirtioGpuDriver* drv) {
+static void virtio_gpu_free_stale_resource_locked(VirtioGpuDriver* drv,bool sprzet_zresetowany=false) {
     if (!drv || drv->old_resource_id == 0) return;
 
-    if (!drv->has_error) {
+    if (!drv->has_error&&!sprzet_zresetowany) {
         virtio_gpu_cmd_resource_detach_backing_locked(drv, drv->old_resource_id);
         virtio_gpu_cmd_resource_unref_locked(drv, drv->old_resource_id);
     }
@@ -807,6 +829,9 @@ static void virtio_gpu_free_stale_resource_locked(VirtioGpuDriver* drv) {
 
 void virtio_gpu_free_stale_resource(VirtioGpuDriver* drv) {
     if (!drv || drv->old_resource_id == 0 || virtio_gpu_is_quiescing()) return;
+    // The previous valid scanout is retained while a startup replacement is
+    // still off-screen. Unref would otherwise blank the currently visible image.
+    if(drv->initial_scanout_pending&&!drv->old_scanout_pending)return;
     GpuSpinLockGuard guard(drv->lock);
     virtio_gpu_free_stale_resource_locked(drv);
 }
@@ -851,7 +876,9 @@ static bool virtio_gpu_rollback_modeset_locked(VirtioGpuDriver* drv) {
     drv->fb_stride = drv->old_display_width * 4U;
     drv->resource_created = true;
     drv->backing_attached = true;
-    drv->scanout_set = true;
+    drv->initial_scanout_pending=drv->old_scanout_pending;
+    drv->scanout_set = !drv->initial_scanout_pending;
+    drv->first_transfer_complete=!drv->initial_scanout_pending;
 
     drv->old_resource_id = 0;
     drv->old_fb_vaddr = nullptr;
@@ -888,6 +915,9 @@ bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t
     /*
      * 0. Jesli istnial poprzedni niezwolniony zasob oczekujacy, posprzataj go
      */
+    if(drv->old_resource_id&&drv->initial_scanout_pending&&!drv->old_scanout_pending) {
+        if(!virtio_gpu_rollback_modeset(drv))return false;
+    }
     virtio_gpu_free_stale_resource(drv);
 
     /*
@@ -968,10 +998,11 @@ bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t
         return false;
     }
 
-    /*
-     * 7. Powiazanie scanoutu z nowym zasobem
-     */
-    if (!virtio_gpu_cmd_set_scanout(drv, drv->scanout_id, new_res_id, 0, 0, width, height)) {
+    // Initial scanout must not expose a resource with no host-side pixels.
+    // Runtime modesetting retains its existing rollback/confirmation path.
+    const bool defer_scanout=drv->resource_id==0||drv->initial_scanout_pending||PrezentacjaStartu::stan().inicjalizacja;
+    SplashFirstDiag::event("gpu_scanout_prepared",gpu_monotonic_ns()/1000,new_res_id);
+    if (!defer_scanout && !virtio_gpu_cmd_set_scanout(drv, drv->scanout_id, new_res_id, 0, 0, width, height)) {
         gpu_klog("[VIRTIO-GPU] BLAD: set_scanout failed!");
         virtio_gpu_cmd_resource_detach_backing(drv, new_res_id);
         gpu_fb_free(fb_vaddr, frames, actual_pages);
@@ -985,6 +1016,7 @@ bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t
      * 8. Zachowanie poprzedniego zasobu do zwolnienia po redraw/flush
      */
     if (drv->resource_id != 0 && drv->fb_vaddr != nullptr) {
+        drv->old_scanout_pending=drv->initial_scanout_pending;
         drv->old_resource_id = drv->resource_id;
         drv->old_fb_vaddr = drv->fb_vaddr;
         drv->old_allocated_frames = drv->allocated_frames;
@@ -1008,9 +1040,14 @@ bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t
     drv->nr_entries = nr_entries;
     drv->resource_created = true;
     drv->backing_attached = true;
-    drv->scanout_set = true;
+    drv->initial_scanout_pending = defer_scanout;
+    drv->first_transfer_complete=false;
+    drv->scanout_set = !defer_scanout;
     drv->display_width = width;
     drv->display_height = height;
+    if(BURSZTYNDIAGSPLASHRUNTIMEFRAMES)KlatkiStartuDiag::event("virtio_gpu_setup_framebuffer","VirtIO/prepared",gpu_monotonic_ns()/1000,
+        drv->fb_vaddr,nullptr,new_res_id,{0,0,int(width),int(height)},
+        static_cast<const uint32_t*>(drv->fb_vaddr),width,height,drv->fb_stride/4,false);
 
     char msg[128]{};
     size_t mpos = 0;
@@ -1029,14 +1066,25 @@ bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t
 }
 
 bool virtio_gpu_transfer_and_flush(VirtioGpuDriver* drv, uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
-    if (virtio_gpu_is_quiescing() || !drv || !drv->initialized || drv->has_error || drv->resource_id == 0) return false;
+    if (!PrezentacjaStartu::dozwolona() || virtio_gpu_is_quiescing() || !drv || !drv->initialized || drv->has_error || drv->resource_id == 0) return false;
 
+    const bool first=drv->initial_scanout_pending;
+    // Reject partial initial updates: they cannot authorize a visible scanout.
+    if(first&&(x!=0||y!=0||width!=drv->fb_width||height!=drv->fb_height))return false;
     if (!virtio_gpu_cmd_transfer_to_host_2d(drv, drv->resource_id, x, y, width, height)) {
         return false;
+    }
+    if(first) {
+        SplashFirstDiag::event("first_transfer_to_host",gpu_monotonic_ns()/1000,drv->resource_id);
+        if(!virtio_gpu_cmd_set_scanout(drv,drv->scanout_id,drv->resource_id,0,0,width,height))return false;
+        drv->scanout_set=true;
+        drv->initial_scanout_pending=false;
+        SplashFirstDiag::event("first_scanout_commit",gpu_monotonic_ns()/1000,drv->resource_id);
     }
     if (!virtio_gpu_cmd_resource_flush(drv, drv->resource_id, x, y, width, height)) {
         return false;
     }
+    if(first)SplashFirstDiag::event("first_resource_flush",gpu_monotonic_ns()/1000,drv->resource_id);
     return true;
 }
 
@@ -1104,6 +1152,7 @@ bool virtio_gpu_render_test_pattern(VirtioGpuDriver* drv) {
  * ========================================================================= */
 
 bool virtio_gpu_init(VirtioPciDevice* dev) {
+    KlatkiStartuDiag::Sciezka diagnostic_path("VirtIO/init");
     if (!dev) return false;
 
     __atomic_store_n(&g_gpu_reboot_quiescing, 0U, __ATOMIC_RELEASE);
@@ -1140,10 +1189,17 @@ bool virtio_gpu_init(VirtioPciDevice* dev) {
     drv->dev = dev;
     drv->irq_vector = -1;
 
-    /* VirtIO 1.x: Reset sekwencji statusu */
-    virtio_pci_set_status(dev, VIRTIO_STATUS_RESET);
-    virtio_pci_set_status(dev, virtio_pci_get_status(dev) | VIRTIO_STATUS_ACKNOWLEDGE);
-    virtio_pci_set_status(dev, virtio_pci_get_status(dev) | VIRTIO_STATUS_DRIVER);
+    // PCI probe already completed this exact 2D feature negotiation and owns
+    // no queues. Resetting it again destroys the visible firmware surface in
+    // QEMU even though first-frame command gating is otherwise correct.
+    const auto status=virtio_pci_get_status(dev);
+    const bool po_probe=dev->initialized&&
+        status==(VIRTIO_STATUS_ACKNOWLEDGE|VIRTIO_STATUS_DRIVER|VIRTIO_STATUS_FEATURES_OK)&&
+        dev->driver_features==VIRTIO_F_VERSION_1;
+    if(!po_probe) {
+        if(status!=VIRTIO_STATUS_RESET&&!virtio_pci_reset(dev))return false;
+        virtio_pci_set_status(dev, VIRTIO_STATUS_ACKNOWLEDGE|VIRTIO_STATUS_DRIVER);
+    }
 
     /* Negocjacja cech */
     const uint64_t dev_features = virtio_pci_read_device_features(dev);
@@ -1155,9 +1211,10 @@ bool virtio_gpu_init(VirtioPciDevice* dev) {
 
     /* Zadamy wylacznie 2D - BEZ VIRGL */
     const uint64_t drv_features = VIRTIO_F_VERSION_1;
-    virtio_pci_write_driver_features(dev, drv_features);
-
-    virtio_pci_set_status(dev, virtio_pci_get_status(dev) | VIRTIO_STATUS_FEATURES_OK);
+    if(!po_probe) {
+        virtio_pci_write_driver_features(dev, drv_features);
+        virtio_pci_set_status(dev, virtio_pci_get_status(dev) | VIRTIO_STATUS_FEATURES_OK);
+    }
     if ((virtio_pci_get_status(dev) & VIRTIO_STATUS_FEATURES_OK) == 0) {
         gpu_klog("[VIRTIO-GPU] Urzadzenie odrzucilo cechy (FEATURES_OK nieaktywne)");
         virtio_pci_set_status(dev, VIRTIO_STATUS_FAILED);
@@ -1486,7 +1543,7 @@ void virtio_gpu_quiesce_for_reboot(void) {
         }
 
         /* 3. Wylacz scanout aby QEMU nie probowalo czytac pamieci podczas resetu maszyny */
-        if (drv->scanout_set && drv->cmd_vaddr) {
+        if ((drv->scanout_set||(drv->old_resource_id&&!drv->old_scanout_pending)) && drv->cmd_vaddr) {
             VirtioGpuSetScanout req{};
             req.hdr.type = VIRTIO_GPU_CMD_SET_SCANOUT;
             req.scanout_id = 0;
@@ -1537,14 +1594,13 @@ bool virtio_gpu_reset(VirtioGpuDriver* drv) {
 
     GpuSpinLockGuard guard(drv->lock);
 
-    /* Posprzataj ewentualny stary zasob po modesettingu wewnatrz blokady */
-    virtio_gpu_free_stale_resource_locked(drv);
-
     /* 1. Odpiecie scanoutu jesli byl ustawiony */
-    if (drv->scanout_set && !drv->has_error) {
+    if ((drv->scanout_set||(drv->old_resource_id&&!drv->old_scanout_pending)) && !drv->has_error) {
         virtio_gpu_cmd_set_scanout_locked(drv, drv->scanout_id, 0, 0, 0, 0, 0);
         drv->scanout_set = false;
     }
+    /* Keep both CPU backings until hardware reset is confirmed. A failed
+       disable/timeout may leave the retained old scanout reading its backing. */
 
     /* 2. Odlaczenie pamieci backing jesli byla podpieta */
     if (drv->backing_attached && !drv->has_error) {
@@ -1607,6 +1663,7 @@ bool virtio_gpu_reset(VirtioGpuDriver* drv) {
     }
 
     /* Sprzet potwierdzil reset: mozemy bezpiecznie zwolnic kolejki i DMA */
+    virtio_gpu_free_stale_resource_locked(drv,true);
     if (drv->controlq) {
         virtqueue_destroy(drv->controlq);
         drv->controlq = nullptr;
@@ -1654,6 +1711,9 @@ bool virtio_gpu_reset(VirtioGpuDriver* drv) {
     drv->resource_created = false;
     drv->backing_attached = false;
     drv->scanout_set = false;
+    drv->initial_scanout_pending = false;
+    drv->first_transfer_complete = false;
+    drv->old_scanout_pending = false;
     drv->initialized = false;
     drv->has_error = false;
     drv->dev = nullptr;
