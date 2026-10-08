@@ -99,6 +99,13 @@ bool gui_blit(int x,int y,int w,int h,const uint32_t* data) {
     if(test_capture_pixels)for(int j=0;j<h;++j)for(int i=0;i<w;++i)test_pixels[{x+i,y+j}]=data[j*w+i];
     return true;
 }
+static int test_region_replacements=0;
+bool gui_zastap_region(int x,int y,int w,int h,const uint32_t* pixels) {
+    ++test_region_replacements;
+    if(test_capture_paints)test_paint_rects.push_back({x,y,w,h});
+    if(test_capture_pixels)for(int j=0;j<h;++j)for(int i=0;i<w;++i)test_pixels[{x+i,y+j}]=pixels[j*w+i];
+    return true;
+}
 static std::vector<uint32_t> test_popup_pixels;
 static struct {int x,y,szerokosc,wysokosc;} test_popup_rect;
 bool gui_blit_popup(int x,int y,int w,int h,const uint32_t* pixels) {
@@ -115,7 +122,8 @@ void gui_wypisz_tekst_kolor_skala(int, int, uint32_t, int, const char*) {}
 void motyw_odswiez_lokalny() {}
 bool gui_ustaw_tytul_okna(const char*) { return true; }
 uint32_t gui_skala_procent() { return 100; }
-void gui_odswiez() {++test_refreshes;}
+static void (*test_publish_observer)()=nullptr;
+void gui_odswiez() {++test_refreshes;if(test_publish_observer)test_publish_observer();}
 gui_akcja_belki gui_hit_test_belki(int, int, int, int, int) { return GUI_BELKA_BRAK; }
 void gui_rysuj_standardowa_belke(int, int, int, const char*, bool) {}
 bool gui_minimalizuj_okno() { return true; }

@@ -341,19 +341,17 @@ public:
     }
 
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
-        uint32_t kod = e.kod_klawisza;
-        bool usb = (kod & BWS_KEY_SOURCE_USB) != 0;
-        uint32_t baza = usb ? (kod & 0xFFU) : (kod & 0x7FU);
+        uint32_t kod = e.polecenie();
 
         // Escape: anuluj
-        if (kod == 27U || (usb && baza == 41U) || (!usb && baza == 0x01U)) {
+        if (kod == 27U) {
             zamknij_z_wynikiem(wynik_anuluj_);
             e.obsluzone = true;
             return;
         }
 
         // Enter: wykonaj skupiony lub domyslny przycisk
-        if (kod == 13U || kod == 10U || (usb && baza == 40U) || (!usb && baza == 0x1CU)) {
+        if (kod == 13U) {
             if (indeks_fokusu_przycisku_ >= 0 && indeks_fokusu_przycisku_ < static_cast<int>(liczba_przyciskow_)) {
                 zamknij_z_wynikiem(sloty_[indeks_fokusu_przycisku_].wynik);
             } else {
@@ -364,7 +362,7 @@ public:
         }
 
         // Tab / Shift+Tab oraz strzalki przechodza po rzeczywistych przyciskach.
-        const bool tab = kod == 9U || (usb && baza == 43U) || (!usb && baza == 0x0FU);
+        const bool tab = kod == 9U;
         if (tab && e.czy_shift()) {
             if (liczba_przyciskow_ > 1) {
                 int poprz = (indeks_fokusu_przycisku_ + static_cast<int>(liczba_przyciskow_) - 1) % static_cast<int>(liczba_przyciskow_);
@@ -373,7 +371,7 @@ public:
                 return;
             }
         }
-        if (tab || (usb && baza == 79U) || (!usb && baza == 0x4DU)) {
+        if (tab || kod == 0x4DU) {
             if (liczba_przyciskow_ > 1) {
                 int nast = (indeks_fokusu_przycisku_ + 1) % static_cast<int>(liczba_przyciskow_);
                 ustaw_fokus_przycisku(nast);
@@ -383,7 +381,7 @@ public:
         }
 
         // Strzalka w lewo: poprzedni przycisk
-        if ((usb && baza == 80U) || (!usb && baza == 0x4BU)) {
+        if (kod == 0x4BU) {
             if (liczba_przyciskow_ > 1) {
                 int poprz = (indeks_fokusu_przycisku_ + static_cast<int>(liczba_przyciskow_) - 1) % static_cast<int>(liczba_przyciskow_);
                 ustaw_fokus_przycisku(poprz);
@@ -393,7 +391,7 @@ public:
         }
 
         // Spacja: jesli przycisk ma indeks fokusu, kliknij
-        if (kod == 32U || (usb && baza == 44U) || (!usb && baza == 0x39U)) {
+        if (kod == 32U) {
             if (indeks_fokusu_przycisku_ >= 0 && indeks_fokusu_przycisku_ < static_cast<int>(liczba_przyciskow_)) {
                 zamknij_z_wynikiem(sloty_[indeks_fokusu_przycisku_].wynik);
                 e.obsluzone = true;

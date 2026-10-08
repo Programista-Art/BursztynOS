@@ -18,11 +18,12 @@ static bws_zdarzenie event(uint32_t type,int x=0,int y=0,uint32_t key=0) {
     bws_zdarzenie e{};e.typ=type;e.x=x;e.y=y;e.kod=key;return e;
 }
 static void input(PlikiUI::DialogPlikowy& d,const char* text) {
-    for(const unsigned char* c=reinterpret_cast<const unsigned char*>(text);*c;++c)d.zdarzenie(event(BWS_ZDARZENIE_KLAWISZ,0,0,*c));
+    for(size_t i=0;text[i];) {uint32_t cp;size_t n=BursztynUI::CzcionkaUI::dekoduj_utf8(text,i,&cp);CHECK(n);d.zdarzenie(event(BWS_ZDARZENIE_TEXT_INPUT,0,0,cp));i+=n;}
 }
 #include "explorer_regression_cases.h"
 #include "text_context_cases.h"
 #include "explorer_launcher_cases.h"
+#include "explorer_input_cases.h"
 static void remaining_regressions() {
     files={{"/",true},{"/test",true},{"/test/nested",true},{"/test/żółć",true},{"/test/file.txt",false}};
     auto* m=new AktowkaModel();CHECK(m->initialize());CHECK(m->navigate("/test")!=Change::ERROR);
@@ -37,11 +38,11 @@ static void remaining_regressions() {
     }
     for(const char* path:{"/missing","/test/file.txt","relative"}) {
         std::string before=m->path();v->begin_edit(EditMode::PATH);v->active_field().ustaw_tekst(path);
-        CHECK(v->field_event(event(BWS_ZDARZENIE_KLAWISZ,0,0,10)));CHECK(v->dialog_open());CHECK(before==m->path());v->close_modal();
+        CHECK(v->field_event(event(BWS_ZDARZENIE_KLAWISZ_FIZYCZNY,1,0,28)));CHECK(v->dialog_open());CHECK(before==m->path());v->close_modal();
     }
     v->begin_edit(EditMode::PATH);v->active_field().ustaw_tekst("/test/żółćXY");
     CHECK(v->erase_input());CHECK(v->move_caret_left());CHECK(v->delete_input());
-    CHECK(!strcmp(v->edit_text(),"/test/żółć"));CHECK(v->field_event(event(BWS_ZDARZENIE_KLAWISZ,0,0,13)));CHECK(!strcmp(m->path(),"/test/żółć"));
+    CHECK(!strcmp(v->edit_text(),"/test/żółć"));CHECK(v->field_event(event(BWS_ZDARZENIE_KLAWISZ_FIZYCZNY,1,0,28)));CHECK(!strcmp(m->path(),"/test/żółć"));
     v->begin_edit(EditMode::PATH);v->active_field().ustaw_tekst("/test/żółć");CHECK(v->erase_input());v->append_input(0xc4);CHECK(v->append_input(0x87));CHECK(v->submit_path());
     v->begin_edit(EditMode::PATH);v->active_field().ustaw_tekst("/test/żółć");v->active_field().ustaw_zaznaczenie(6,10);
     CHECK(v->open_path_context(v->layout().path.x+10,v->layout().path.y+10));CHECK(v->active_field().czy_ma_zaznaczenie());
@@ -62,6 +63,7 @@ static void remaining_regressions() {
 }
 int main() {
     g_test_bws_hook=explorer_bws;
+    explorer_input_cases();
     files={{"/",true},{"/test",true},{"/dest",true},{"/test/żółć.txt",false},{"/test/program.bur",false},{"/test/folder",true}};
     using namespace PlikiUI;
     CHECK(nazwa_poprawna("zażółć gęślą.txt"));CHECK(!nazwa_poprawna(""));CHECK(!nazwa_poprawna(".."));
@@ -112,7 +114,7 @@ int main() {
         auto d=new DialogPlikowy();CHECK(d->otworz("Nazwa","","",{500,320,140,120},{0,0,640,440}));
         auto r=d->events.popups.prostokat_zarejestrowany_ekranu();CHECK(r.x>=0 && r.y>=0 && r.prawy()<=640 && r.dolny()<=440);
         input(*d,"zażółć.txt");CHECK(!strcmp(d->tekst(),"zażółć.txt"));
-        d->zdarzenie(event(BWS_ZDARZENIE_KLAWISZ,0,0,27));d->zdarzenie(event(BWS_ZDARZENIE_TIMER));CHECK(d->wynik()==2);d->zamknij();delete d;
+        d->zdarzenie(event(BWS_ZDARZENIE_KLAWISZ_FIZYCZNY,1,0,1));CHECK(d->wynik()==2);d->zamknij();delete d;
     }
     ui_skala_procent=100;
     view->begin_edit(EditMode::SEARCH);for(const char* c=" nowy";*c;++c)view->append_input(*c);
@@ -125,9 +127,13 @@ int main() {
     editing=view->edit_text();view->theme_refresh();CHECK(editing==view->edit_text());CHECK(view->dialog_open());view->close_modal();
     auto menu=new MenuPlikowe();menu->events.geometria({0,0,640,440},{0,0,640,440});
     menu->otworz(100,100,{true,false,true,false,false});
+    // This ANSI-only fixture represents a separate legacy-only process.
+    // A process already receiving physical events must ignore these echoes.
+    const bool physical_process=klawiatura_fizyczna_gui;klawiatura_fizyczna_gui=false;
     CHECK(menu->events.zdarzenie(event(BWS_ZDARZENIE_KLAWISZ,0,0,27)));
     CHECK(menu->events.zdarzenie(event(BWS_ZDARZENIE_KLAWISZ,0,0,'[')));
     CHECK(menu->events.zdarzenie(event(BWS_ZDARZENIE_KLAWISZ,0,0,'B')));CHECK(menu->menu.czy_otwarte());
     menu->events.zdarzenie(event(BWS_ZDARZENIE_KLAWISZ,0,0,27));menu->events.zdarzenie(event(BWS_ZDARZENIE_TIMER));CHECK(!menu->menu.czy_otwarte());delete menu;
+    klawiatura_fizyczna_gui=physical_process;
     delete view;delete model;regression_cases();remaining_regressions();text_context_cases();explorer_launcher_cases();printf("Explorer/desktop shared behavior: %d/%d PASS (RAM filesystem)\n",checks,checks);
 }

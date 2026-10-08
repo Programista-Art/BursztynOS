@@ -291,7 +291,7 @@ public:
 
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
         if (!czy_wlaczona_) return;
-        KierunekKlawisza kierunek = rozpoznaj_klawisz(e.kod_klawisza);
+        KierunekKlawisza kierunek = rozpoznaj_klawisz(e.polecenie());
         bool obslugiwany = true;
         int64_t docelowa = wartosc_;
         int64_t duzy_krok = static_cast<int64_t>(krok_) * 10;
@@ -535,38 +535,17 @@ private:
     }
 
     KierunekKlawisza rozpoznaj_klawisz(uint32_t kod) const {
-        bool usb = (kod & BWS_KEY_SOURCE_USB) != 0;
-        bool e0 = (kod & BWS_KEY_SOURCE_E0) != 0;
-        uint32_t baza = usb ? (kod & 0xFFU) : (kod & 0x7FU);
-
-        if (usb) {
-            if (baza == 74U) return KierunekKlawisza::Minimum;       // Home
-            if (baza == 77U) return KierunekKlawisza::Maksimum;      // End
-            if (baza == 75U) return KierunekKlawisza::StronaWieksza; // PageUp
-            if (baza == 78U) return KierunekKlawisza::StronaMniejsza;// PageDown
+            if (kod == 0x47U) return KierunekKlawisza::Minimum;
+            if (kod == 0x4FU) return KierunekKlawisza::Maksimum;
+            if (kod == 0x49U) return KierunekKlawisza::StronaWieksza;
+            if (kod == 0x51U) return KierunekKlawisza::StronaMniejsza;
             if (orientacja_ == Orientacja::Pozioma) {
-                if (baza == 80U) return KierunekKlawisza::Mniejsza;  // Left
-                if (baza == 79U) return KierunekKlawisza::Wieksza;   // Right
+                if (kod == 0x4BU) return KierunekKlawisza::Mniejsza;
+                if (kod == 0x4DU) return KierunekKlawisza::Wieksza;
             } else {
-                if (baza == 82U) return KierunekKlawisza::Wieksza;   // Up
-                if (baza == 81U) return KierunekKlawisza::Mniejsza;  // Down
+                if (kod == 0x48U) return KierunekKlawisza::Wieksza;
+                if (kod == 0x50U) return KierunekKlawisza::Mniejsza;
             }
-            return KierunekKlawisza::Brak;
-        }
-
-        if (e0 || kod <= 0x7FU) {
-            if (baza == 0x47U) return KierunekKlawisza::Minimum;
-            if (baza == 0x4FU) return KierunekKlawisza::Maksimum;
-            if (baza == 0x49U) return KierunekKlawisza::StronaWieksza;
-            if (baza == 0x51U) return KierunekKlawisza::StronaMniejsza;
-            if (orientacja_ == Orientacja::Pozioma) {
-                if (baza == 0x4BU) return KierunekKlawisza::Mniejsza;
-                if (baza == 0x4DU) return KierunekKlawisza::Wieksza;
-            } else {
-                if (baza == 0x48U) return KierunekKlawisza::Wieksza;
-                if (baza == 0x50U) return KierunekKlawisza::Mniejsza;
-            }
-        }
         return KierunekKlawisza::Brak;
     }
 

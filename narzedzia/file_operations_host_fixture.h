@@ -27,7 +27,13 @@ static uint64_t explorer_bws(uint64_t nr,uint64_t a1,uint64_t a2,uint64_t a3,uin
     // Generic file-action fixture models no settings storage; dedicated layout
     // tests install an I/O hook, including capture ordering and failure modes.
     if(nr==46 && !strcmp(path,"/ustawienia"))return 0;
-    if(nr==46)return add_file(path,true);
+    if(nr==2 || nr==46) {
+        if(a2==BWS_STATUS_PLIKOWY) {
+            if(files.count(path))return uint64_t(WynikPlikowy::Istnieje);
+            if(deny_operation)return uint64_t(WynikPlikowy::BrakUprawnien);
+        }
+        return add_file(path,nr==46);
+    }
     if(nr==6) {
         if(!files.count(path) || !files[path])return 0;
         std::string prefix=std::string(path)+(strcmp(path,"/")?"/":""),listing;
@@ -48,6 +54,18 @@ bool utworz(const char* path) {return add_file(path,false);}
 bool usun_twor_uzytkownika(const char* path) {
     if(deny_operation || deny_path==path || !files.count(path))return false;
     files.erase(path);++deletes;return true;
+}
+WynikPlikowy usun_drzewo_uzytkownika(const char* path) {
+    if(!files.count(path))return WynikPlikowy::Brak;
+    if(deny_operation || deny_path==path)return WynikPlikowy::BrakUprawnien;
+    std::string prefix=std::string(path)+"/";
+    for(auto& f:files)if(f.first.compare(0,prefix.size(),prefix)==0 && f.first==deny_path)
+        return WynikPlikowy::BrakUprawnien;
+    for(auto i=files.begin();i!=files.end();) {
+        if(i->first==path || i->first.compare(0,prefix.size(),prefix)==0){i=files.erase(i);++deletes;}
+        else ++i;
+    }
+    return WynikPlikowy::Ok;
 }
 bool zmien_nazwe_uzytkownika(const char* path,const char* name) {
     auto dir=std::string(path).substr(0,std::string(path).rfind('/'));if(dir.empty())dir="/";

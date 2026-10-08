@@ -178,17 +178,16 @@ public:
         if (wykonaj) aktywuj(i);
     }
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
-        uint32_t k = e.kod_klawisza; bool usb = (k & BWS_KEY_SOURCE_USB) != 0;
-        uint32_t b = usb ? k & 0xFFU : k & 0x7FU;
-        if ((usb && b == 82U) || (!usb && b == 0x48U)) { // Strzalka w gore
+        uint32_t k = e.polecenie();
+        if (k == 0x48U) { // Strzalka w gore
             ustaw_aktywny_indeks(nastepny_aktywny(aktywny_, -1));
-        } else if ((usb && b == 81U) || (!usb && b == 0x50U)) { // Strzalka w dol
+        } else if (k == 0x50U) { // Strzalka w dol
             ustaw_aktywny_indeks(nastepny_aktywny(aktywny_, 1));
-        } else if ((usb && b == 74U) || (!usb && (b == 0x47U || k == 36U))) { // Home
+        } else if (k == 0x47U) { // Home
             ustaw_aktywny_indeks(pierwszy_aktywny(1));
-        } else if ((usb && b == 77U) || (!usb && (b == 0x4FU || k == 35U))) { // End
+        } else if (k == 0x4FU) { // End
             ustaw_aktywny_indeks(nastepny_aktywny(static_cast<int>(menu_ ? menu_->liczba_elementow() : 0), -1));
-        } else if ((usb && b == 79U) || (!usb && b == 0x4DU)) { // Strzalka w prawo
+        } else if (k == 0x4DU) { // Strzalka w prawo
             int sel = (aktywny_ >= 0) ? aktywny_ : pierwszy_aktywny(1);
             ElementMenu* el = (sel >= 0 && menu_) ? menu_->element(sel) : nullptr;
             if (el && el->czy_wlaczony() && el->podmenu() && host_) {
@@ -197,9 +196,9 @@ public:
                 host_->menu_otworz_podmenu(*this, *el, prostokat_elementu_klienta(sel));
             }
             else if (host_) host_->menu_kierunek_poziomy(*this, 1);
-        } else if ((usb && b == 80U) || (!usb && b == 0x4BU)) { // Strzalka w lewo
+        } else if (k == 0x4BU) { // Strzalka w lewo
             if (host_) host_->menu_kierunek_poziomy(*this, -1);
-        } else if (k == 13U || k == 10U || b == 0x1CU) { // Enter
+        } else if (k == 13U) { // Enter
             aktywuj(aktywny_);
         } else return;
         e.obsluzone = true;

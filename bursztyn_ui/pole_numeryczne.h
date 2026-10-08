@@ -235,32 +235,29 @@ private:
         explicit PoleWewnetrzne(PoleNumeryczne* rod) : rod_(rod) {}
         void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
             if (!rod_) { PoleTekstowe::obsluz_wcisniecie_klawisza(e); return; }
-            uint32_t kod = e.kod_klawisza;
-            bool usb = (kod & BWS_KEY_SOURCE_USB) != 0;
-            bool e0 = (kod & BWS_KEY_SOURCE_E0) != 0;
-            uint32_t baza = usb ? (kod & 0xFFU) : (kod & 0x7FU);
+            uint32_t kod = e.polecenie();
 
-            if (kod == 27U || (usb && baza == 41U) || (!usb && baza == 0x01U)) {
+            if (kod == 27U) {
                 rod_->anuluj_edycje();
                 e.obsluzone = true;
                 return;
             }
-            if ((!usb && e0 && baza == 0x48U) || (usb && baza == 82U)) { // Up
+            if (kod == 0x48U) { // Up
                 rod_->zwieksz();
                 e.obsluzone = true;
                 return;
             }
-            if ((!usb && e0 && baza == 0x50U) || (usb && baza == 81U)) { // Down
+            if (kod == 0x50U) { // Down
                 rod_->zmniejsz();
                 e.obsluzone = true;
                 return;
             }
-            if ((!usb && e0 && baza == 0x49U) || (usb && baza == 75U)) { // PageUp
+            if (kod == 0x49U) { // PageUp
                 rod_->zmien_wartosc_o(rod_->duzy_krok());
                 e.obsluzone = true;
                 return;
             }
-            if ((!usb && e0 && baza == 0x51U) || (usb && baza == 78U)) { // PageDown
+            if (kod == 0x51U) { // PageDown
                 rod_->zmien_wartosc_o(-rod_->duzy_krok());
                 e.obsluzone = true;
                 return;

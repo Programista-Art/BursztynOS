@@ -911,11 +911,14 @@ extern "C" bool bws_socket_rezerwuje_stos_tcp() {
 extern "C" void bws_powiadom_zmiane_pliku(const char* sciezka,
                                             uint32_t akcja) {
     if (!sciezka || (akcja & BWS_FILE_WATCH_WSZYSTKO) == 0) return;
+    const bool subtree=(akcja & BWS_POWIADOM_PODDRZEWO)!=0;
+    akcja &= BWS_FILE_WATCH_WSZYSTKO;
     for (uint32_t i = 0; i < WATCH_MAX; ++i) {
         const Watcher& w = watchers[i];
         if (!w.aktywny || (w.maska & akcja) == 0 ||
             !scheduler_pid_uzytkownika(w.owner_pid) ||
-            !sciezka_pasuje(w.sciezka, sciezka)) continue;
+            !(sciezka_pasuje(w.sciezka, sciezka) ||
+              (subtree && sciezka_pasuje(sciezka,w.sciezka)))) continue;
         const proces_t& odbiorca = tablica_procesow[w.owner_pid];
         if (odbiorca.pid != static_cast<uint64_t>(w.owner_pid) ||
             !ma_prawo(odbiorca, PRAWO_PLIKI_CZYTAJ)) continue;

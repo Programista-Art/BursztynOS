@@ -135,14 +135,11 @@ public:
 
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
         if (!czy_wlaczona_) return;
-        uint32_t k = e.kod_klawisza;
-        bool usb = (k & BWS_KEY_SOURCE_USB) != 0;
-        uint32_t b = usb ? (k & 0xFFU) : (k & 0x7FU);
-        if (k == 13U || k == 10U || k == 32U || (usb && (b == 40U || b == 44U))) {
+        uint32_t k = e.polecenie();
+        if (k == 13U || k == 32U) {
             wykonaj_glowna(); e.obsluzone = true; return;
         }
-        if ((e.czy_alt() && ((usb && b == 81U) || (k & BWS_KEY_SOURCE_E0))) ||
-            (usb && b == 81U)) {
+        if (k == 0x50U) {
             otworz_menu(); e.obsluzone = true; return;
         }
         Kontrolka::obsluz_wcisniecie_klawisza(e);

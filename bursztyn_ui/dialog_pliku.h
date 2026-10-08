@@ -690,26 +690,24 @@ public:
     }
 
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
-        uint32_t kod = e.kod_klawisza;
-        bool usb = (kod & BWS_KEY_SOURCE_USB) != 0;
-        uint32_t baza = usb ? (kod & 0xFFU) : (kod & 0x7FU);
+        uint32_t kod = e.polecenie();
 
         // Escape: anuluj
-        if (kod == 27U || (usb && baza == 41U) || (!usb && baza == 0x01U)) {
+        if (kod == 27U) {
             anuluj();
             e.obsluzone = true;
             return;
         }
 
         // Enter
-        if (kod == 13U || kod == 10U || (usb && baza == 40U) || (!usb && baza == 0x1CU)) {
+        if (kod == 13U) {
             zatwierdz();
             e.obsluzone = true;
             return;
         }
 
         // Tab / Shift+Tab
-        const bool tab = kod == 9U || (usb && baza == 43U) || (!usb && baza == 0x0FU);
+        const bool tab = kod == 9U;
         if (tab) {
             if (zarzadca()) synchronizuj_indeks_fokusu(zarzadca()->fokus_popupu());
             nawiguj_fokus(!e.czy_shift());

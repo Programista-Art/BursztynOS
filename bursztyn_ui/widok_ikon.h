@@ -367,48 +367,45 @@ public:
         int cols = liczba_kolumn_siatki();
         if (cols <= 0) return;
 
-        uint32_t kod = e.kod_klawisza;
-        bool usb = (kod & BWS_KEY_SOURCE_USB) != 0;
-        bool e0 = (kod & BWS_KEY_SOURCE_E0) != 0;
-        uint32_t baza = usb ? (kod & 0xFFU) : (kod & 0x7FU);
+        uint32_t kod = e.polecenie();
 
-        if ((usb && baza == 79U) || (e0 && baza == 0x4DU)) { // Right
+        if (kod == 0x4DU) { // Right
             int next = wybrany_indeks_ + 1;
             if (next < static_cast<int>(liczba_)) ustaw_wybrany_indeks(next);
             e.obsluzone = true;
-        } else if ((usb && baza == 80U) || (e0 && baza == 0x4BU)) { // Left
+        } else if (kod == 0x4BU) { // Left
             int prev = wybrany_indeks_ - 1;
             if (prev >= 0) ustaw_wybrany_indeks(prev);
             e.obsluzone = true;
-        } else if ((usb && baza == 81U) || (e0 && baza == 0x50U)) { // Down
+        } else if (kod == 0x50U) { // Down
             int target = wybrany_indeks_ + cols;
             if (target < static_cast<int>(liczba_)) ustaw_wybrany_indeks(target);
             e.obsluzone = true;
-        } else if ((usb && baza == 82U) || (e0 && baza == 0x48U)) { // Up
+        } else if (kod == 0x48U) { // Up
             int target = wybrany_indeks_ - cols;
             if (target >= 0) ustaw_wybrany_indeks(target);
             e.obsluzone = true;
-        } else if ((usb && baza == 78U) || (e0 && baza == 0x51U)) { // Page Down
+        } else if (kod == 0x51U) { // Page Down
             int cell_h = wysokosc_komorki_ * skala_dpi_;
             int rows_per_page = viewport_h() / (cell_h > 0 ? cell_h : 1);
             int target = wybrany_indeks_ + rows_per_page * cols;
             if (target >= static_cast<int>(liczba_)) target = static_cast<int>(liczba_ - 1);
             ustaw_wybrany_indeks(target);
             e.obsluzone = true;
-        } else if ((usb && baza == 75U) || (e0 && baza == 0x49U)) { // Page Up
+        } else if (kod == 0x49U) { // Page Up
             int cell_h = wysokosc_komorki_ * skala_dpi_;
             int rows_per_page = viewport_h() / (cell_h > 0 ? cell_h : 1);
             int target = wybrany_indeks_ - rows_per_page * cols;
             if (target < 0) target = 0;
             ustaw_wybrany_indeks(target);
             e.obsluzone = true;
-        } else if ((usb && baza == 74U) || (e0 && baza == 0x47U)) { // Home
+        } else if (kod == 0x47U) { // Home
             ustaw_wybrany_indeks(0);
             e.obsluzone = true;
-        } else if ((usb && baza == 77U) || (e0 && baza == 0x4FU)) { // End
+        } else if (kod == 0x4FU) { // End
             ustaw_wybrany_indeks(static_cast<int>(liczba_ - 1));
             e.obsluzone = true;
-        } else if (kod == 13 || (usb && baza == 40U)) { // Enter
+        } else if (kod == 13) { // Enter
             if (wybrany_indeks_ >= 0 && cb_aktywacja_) {
                 cb_aktywacja_(this, wybrany_indeks_, dane_aktywacji_);
                 e.obsluzone = true;

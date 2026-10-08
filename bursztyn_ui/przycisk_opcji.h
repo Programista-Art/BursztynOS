@@ -131,22 +131,15 @@ public:
 
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
         if (!czy_wlaczona_) return;
-        uint32_t baza = (e.kod_klawisza & BWS_KEY_SOURCE_USB)
-                      ? (e.kod_klawisza & 0xFFU) : (e.kod_klawisza & 0x7FU);
-        if (e.kod_klawisza == ' ' || baza == 0x39U ||
-            ((e.kod_klawisza & BWS_KEY_SOURCE_USB) && baza == 44U)) {
+        const uint32_t kod=e.polecenie();
+        if (kod == 32U) {
             ustaw_zaznaczony(true);
             e.obsluzone = true;
             return;
         }
         int kierunek = 0;
-        if ((e.kod_klawisza & BWS_KEY_SOURCE_USB) != 0) {
-            if (baza == 80U || baza == 82U) kierunek = -1;
-            if (baza == 79U || baza == 81U) kierunek = 1;
-        } else {
-            if (baza == 0x4BU || baza == 0x48U) kierunek = -1;
-            if (baza == 0x4DU || baza == 0x50U) kierunek = 1;
-        }
+        if (kod == 0x4BU || kod == 0x48U) kierunek = -1;
+        if (kod == 0x4DU || kod == 0x50U) kierunek = 1;
         if (kierunek && grupa_ && grupa_->wybierz_sasiednia(this, kierunek)) {
             e.obsluzone = true;
             return;

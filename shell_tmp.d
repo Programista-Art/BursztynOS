@@ -1,7 +1,7 @@
 shell_tmp.o: shell.cpp bursztyn_gui.h bws_zdarzenia.h bws_pliki.h \
- bws_api.h bws_nowoczesne.h bws_ota.h skladacz_obrazu.h pzb.h legacy_ui.h \
- ui_skala.h motyw.h bursztyn_ui/czcionka.h bursztyn_ui/typy.h \
- bursztyn_ui/../czcionki/extronic16Bunicode.h \
+ plik_status.h bws_api.h bws_nowoczesne.h bws_ota.h skladacz_obrazu.h \
+ pzb.h legacy_ui.h ui_skala.h motyw.h bursztyn_ui/czcionka.h \
+ bursztyn_ui/typy.h bursztyn_ui/../czcionki/extronic16Bunicode.h \
  bursztyn_ui/../czcionki/extronic16B_unicode.h bursztyn_ui/rysowanie.h \
  bursztyn_ui/pasek_przewijania.h bursztyn_ui/kontrolka.h \
  bursztyn_ui/diagnostyka.h bursztyn_ui/zdarzenia.h bursztyn_ui/motyw.h \
@@ -13,6 +13,7 @@ shell_tmp.o: shell.cpp bursztyn_gui.h bws_zdarzenia.h bws_pliki.h \
 bursztyn_gui.h:
 bws_zdarzenia.h:
 bws_pliki.h:
+plik_status.h:
 bws_api.h:
 bws_nowoczesne.h:
 bws_ota.h:

@@ -185,6 +185,8 @@ bool bws_gui_blit(
     const uint32_t* piksele
 );
 
+bool bws_gui_zastap_region(int,int,int,int,const uint32_t*);
+
 extern "C" void SerialLog(
     const char* str
 );
@@ -1055,7 +1057,7 @@ __attribute__((noinline)) uint64_t bws_wypisz(
 
 __attribute__((noinline)) uint64_t bws_utworz_plik(
     proces_t& proces,
-    uint64_t arg1
+    uint64_t arg1, uint64_t mode=0
 ) {
     char sciezka[
         MAX_SCIEZKA_PLIKU_BWS] = {};
@@ -1064,18 +1066,25 @@ __attribute__((noinline)) uint64_t bws_utworz_plik(
             arg1,
             sciezka)) {
 
-        return 0;
+        return mode==BWS_STATUS_PLIKOWY?uint64_t(WynikPlikowy::NieprawidlowaNazwa):0;
     }
 
     if (!proces_moze_utworzyc_w_sciezce(
             proces,
             sciezka)) {
         wypisz_log("[PZB] file_create=DENY");
-        return 0;
+        return mode==BWS_STATUS_PLIKOWY?uint64_t(WynikPlikowy::BrakUprawnien):0;
     }
     wypisz_log("[PZB] file_create=ALLOW");
 
     const uint8_t eff = efektywny_pzb_dla_nowego(proces, sciezka);
+    if(mode==BWS_STATUS_PLIKOWY) {
+        const auto result=psf_utworz_wynik(sciezka,false,eff);
+        psf_metadane meta{};
+        if(result==WynikPlikowy::Ok || (result==WynikPlikowy::BladIO && pobierz_metadane_tworu(sciezka,&meta)))
+            powiadom_zmiane_systemu_plikow(sciezka,BWS_FILE_CREATE);
+        return uint64_t(result);
+    }
     const bool wynik = utworz_plik_z_pzb(sciezka, eff);
     if (wynik) powiadom_zmiane_systemu_plikow(sciezka, BWS_FILE_CREATE);
     return wynik ? 1ULL : 0ULL;
@@ -1364,30 +1373,46 @@ __attribute__((noinline)) uint64_t bws_wylistuj_katalog(
     return 1;
 }
 
+WynikPlikowy autoryzacja_drzewa(const char* path, const psf_metadane& meta,
+                               const psf_metadane& parent, void* context) {
+    const auto& proces=*static_cast<const proces_t*>(context);
+    // GUI tree removal never removes protected namespaces, even for a service
+    // process. Ordinary per-object PZB and parent labels still apply below.
+    const char* protected_roots[]={"/system", "/jadro", "/sterowniki", "/programy", "/sloty"};
+    for(const char* root : protected_roots)
+        if(segment_prefiksu(path,root))return WynikPlikowy::Chroniony;
+    if(!proces_moze_modyfikowac_sciezke(proces,path) ||
+       (meta.pzb_dostepny && proces.poziom_zaufania>meta.poziom_pzb) ||
+       (parent.pzb_dostepny && proces.poziom_zaufania>parent.poziom_pzb))
+        return WynikPlikowy::BrakUprawnien;
+    return WynikPlikowy::Ok;
+}
 __attribute__((noinline)) uint64_t bws_usun_twor(
-    proces_t& proces,
-    uint64_t arg1
+    proces_t& proces, uint64_t arg1, uint64_t mode=0
 ) {
-    char sciezka[
-        MAX_SCIEZKA_PLIKU_BWS] = {};
-
-    if (!pobierz_sciezke_pliku(
-            arg1,
-            sciezka)) {
-
-        return 0;
+    char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
+    if(mode!=0 && mode!=BWS_USUN_DRZEWO && mode!=BWS_STATUS_PLIKOWY)return 0;
+    if(!pobierz_sciezke_pliku(arg1,sciezka))
+        return mode?uint64_t(WynikPlikowy::NieprawidlowaNazwa):0;
+    if(mode==BWS_USUN_DRZEWO) {
+        const auto result=psf_usun_drzewo(sciezka,autoryzacja_drzewa,&proces);
+        // One notification for a whole logical mutation, including partial I/O
+        // failure. Preflight refusal emits no notification and changes nothing.
+        if(result==WynikPlikowy::Ok || result==WynikPlikowy::Czesciowo)
+            powiadom_zmiane_systemu_plikow(sciezka,BWS_FILE_DELETE|BWS_POWIADOM_PODDRZEWO);
+        return uint64_t(result);
     }
-
-    if (!proces_moze_modyfikowac_obiekt(
-            proces,
-            sciezka)) {
-
-        return 0;
+    if(mode==BWS_STATUS_PLIKOWY) {
+        if(!proces_moze_modyfikowac_obiekt(proces,sciezka))return uint64_t(WynikPlikowy::BrakUprawnien);
+        const auto result=psf_usun_wynik(sciezka);
+        if(result==WynikPlikowy::Ok || result==WynikPlikowy::BladIO)
+            powiadom_zmiane_systemu_plikow(sciezka,BWS_FILE_DELETE);
+        return uint64_t(result);
     }
-
-    const bool wynik = usun_twor(sciezka);
-    if (wynik) powiadom_zmiane_systemu_plikow(sciezka, BWS_FILE_DELETE);
-    return wynik ? 1ULL : 0ULL;
+    if(!proces_moze_modyfikowac_obiekt(proces,sciezka))return 0;
+    const bool wynik=usun_twor(sciezka);
+    if(wynik)powiadom_zmiane_systemu_plikow(sciezka,BWS_FILE_DELETE);
+    return wynik?1ULL:0ULL;
 }
 
 __attribute__((noinline)) uint64_t bws_zmien_nazwe(
@@ -2939,16 +2964,23 @@ __attribute__((noinline)) uint64_t bws_pobierz_argument(
 
 __attribute__((noinline)) uint64_t bws_utworz_katalog(
     proces_t& proces,
-    uint64_t arg1
+    uint64_t arg1, uint64_t mode=0
 ) {
     char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
-    if (!pobierz_sciezke_pliku(arg1, sciezka)) return 0;
+    if (!pobierz_sciezke_pliku(arg1, sciezka)) return mode==BWS_STATUS_PLIKOWY?uint64_t(WynikPlikowy::NieprawidlowaNazwa):0;
     if (!proces_moze_utworzyc_w_sciezce(proces, sciezka)) {
         wypisz_log("[PZB] directory_create=DENY");
-        return 0;
+        return mode==BWS_STATUS_PLIKOWY?uint64_t(WynikPlikowy::BrakUprawnien):0;
     }
     wypisz_log("[PZB] directory_create=ALLOW");
     const uint8_t eff = efektywny_pzb_dla_nowego(proces, sciezka);
+    if(mode==BWS_STATUS_PLIKOWY) {
+        const auto result=psf_utworz_wynik(sciezka,true,eff);
+        psf_metadane meta{};
+        if(result==WynikPlikowy::Ok || (result==WynikPlikowy::BladIO && pobierz_metadane_tworu(sciezka,&meta)))
+            powiadom_zmiane_systemu_plikow(sciezka,BWS_FILE_CREATE);
+        return uint64_t(result);
+    }
     const bool wynik = utworz_katalog_z_pzb(sciezka, eff);
     if (wynik)
         powiadom_zmiane_systemu_plikow(sciezka, BWS_FILE_CREATE);
@@ -3105,7 +3137,7 @@ static uint64_t obsluga_wywolan_systemowych_impl(
             return
                 bws_utworz_plik(
                     proces,
-                    arg1
+                    arg1, arg2
                 );
 
         case 3:
@@ -3144,7 +3176,7 @@ static uint64_t obsluga_wywolan_systemowych_impl(
             return
                 bws_usun_twor(
                     proces,
-                    arg1
+                    arg1, arg2
                 );
 
         case 8:
@@ -3816,7 +3848,7 @@ static uint64_t obsluga_wywolan_systemowych_impl(
             return bws_pobierz_argument(arg1, arg2);
 
         case 46:
-            return bws_utworz_katalog(proces, arg1);
+            return bws_utworz_katalog(proces, arg1, arg2);
 
         case 47:
             return bws_pobierz_metadane(proces, arg1, arg2);
@@ -3882,7 +3914,8 @@ static uint64_t obsluga_wywolan_systemowych_impl(
                     aktualny_pid, x, y, szer, wys,
                     reinterpret_cast<const uint32_t*>(arg3)) ? 1ULL : 0ULL;
             }
-            return bws_gui_blit(
+            const auto blit=arg4==2?bws_gui_zastap_region:bws_gui_blit;
+            return blit(
                 x, y, szer, wys,
                 reinterpret_cast<const uint32_t*>(arg3)) ? 1ULL : 0ULL;
         }

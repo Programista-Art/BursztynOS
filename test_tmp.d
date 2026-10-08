@@ -1,8 +1,9 @@
 test_tmp.o: programy/test/test.cpp bursztyn_gui.h bws_zdarzenia.h \
- bws_pliki.h bws_api.h bws_nowoczesne.h bws_ota.h skladacz_obrazu.h pzb.h \
- legacy_ui.h ui_skala.h motyw.h bursztyn_ui/bursztyn_ui.h \
- bursztyn_ui/typy.h bursztyn_ui/zdarzenia.h bursztyn_ui/motyw.h \
- bursztyn_ui/czcionka.h bursztyn_ui/../czcionki/extronic16Bunicode.h \
+ bws_pliki.h plik_status.h bws_api.h bws_nowoczesne.h bws_ota.h \
+ skladacz_obrazu.h pzb.h legacy_ui.h ui_skala.h motyw.h \
+ bursztyn_ui/bursztyn_ui.h bursztyn_ui/typy.h bursztyn_ui/zdarzenia.h \
+ bursztyn_ui/motyw.h bursztyn_ui/czcionka.h \
+ bursztyn_ui/../czcionki/extronic16Bunicode.h \
  bursztyn_ui/../czcionki/extronic16B_unicode.h bursztyn_ui/rysowanie.h \
  bursztyn_ui/polecenie_ui.h bursztyn_ui/ikona_ui.h \
  bursztyn_ui/kontrolka.h bursztyn_ui/diagnostyka.h bursztyn_ui/panel.h \
@@ -47,6 +48,7 @@ test_tmp.o: programy/test/test.cpp bursztyn_gui.h bws_zdarzenia.h \
 bursztyn_gui.h:
 bws_zdarzenia.h:
 bws_pliki.h:
+plik_status.h:
 bws_api.h:
 bws_nowoczesne.h:
 bws_ota.h:

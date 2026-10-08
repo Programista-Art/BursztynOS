@@ -9,6 +9,7 @@ demo_ui_tmp.o: programy/demo_ui/demo_ui.cpp \
  programy/demo_ui/../../bursztyn_ui/motyw.h \
  programy/demo_ui/../../bursztyn_ui/../bursztyn_gui.h \
  programy/demo_ui/../../bursztyn_ui/../bws_pliki.h \
+ programy/demo_ui/../../bursztyn_ui/../plik_status.h \
  programy/demo_ui/../../bursztyn_ui/../bws_api.h \
  programy/demo_ui/../../bursztyn_ui/../bws_nowoczesne.h \
  programy/demo_ui/../../bursztyn_ui/../bws_ota.h \
@@ -93,6 +94,7 @@ programy/demo_ui/../../bursztyn_ui/../bws_zdarzenia.h:
 programy/demo_ui/../../bursztyn_ui/motyw.h:
 programy/demo_ui/../../bursztyn_ui/../bursztyn_gui.h:
 programy/demo_ui/../../bursztyn_ui/../bws_pliki.h:
+programy/demo_ui/../../bursztyn_ui/../plik_status.h:
 programy/demo_ui/../../bursztyn_ui/../bws_api.h:
 programy/demo_ui/../../bursztyn_ui/../bws_nowoczesne.h:
 programy/demo_ui/../../bursztyn_ui/../bws_ota.h:

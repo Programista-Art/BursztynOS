@@ -143,15 +143,12 @@ public:
         Kontrolka::obsluz_wcisniecie_klawisza(e);
         if (!czy_wlaczona_) return;
 
-        uint32_t kod = e.kod_klawisza;
-        bool usb = (kod & BWS_KEY_SOURCE_USB) != 0;
-        bool e0 = (kod & BWS_KEY_SOURCE_E0) != 0;
-        uint32_t baza = usb ? (kod & 0xFFU) : (kod & 0x7FU);
+        uint32_t kod = e.polecenie();
 
-        if ((usb && baza == 82U) || (e0 && baza == 0x48U)) { // Up
+        if (kod == 0x48U) { // Up
             kolejny_dzien();
             e.obsluzone = true;
-        } else if ((usb && baza == 81U) || (e0 && baza == 0x50U)) { // Down
+        } else if (kod == 0x50U) { // Down
             poprzedni_dzien();
             e.obsluzone = true;
         }

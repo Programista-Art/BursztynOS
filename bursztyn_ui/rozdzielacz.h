@@ -238,20 +238,17 @@ public:
         Kontrolka::obsluz_wcisniecie_klawisza(e);
         if (!czy_wlaczona_) return;
 
-        uint32_t kod = e.kod_klawisza;
-        bool usb = (kod & BWS_KEY_SOURCE_USB) != 0;
-        bool e0 = (kod & BWS_KEY_SOURCE_E0) != 0;
-        uint32_t baza = usb ? (kod & 0xFFU) : (kod & 0x7FU);
+        uint32_t kod = e.polecenie();
 
         int krok = 10 * skala_dpi_;
         int stara_poz = pozycja_podzialu_;
 
         if (orientacja_ == Orientacja::Pozioma) {
-            if ((usb && baza == 80U) || (e0 && baza == 0x4BU)) pozycja_podzialu_ -= krok; // Left
-            else if ((usb && baza == 79U) || (e0 && baza == 0x4DU)) pozycja_podzialu_ += krok; // Right
+            if (kod == 0x4BU) pozycja_podzialu_ -= krok; // Left
+            else if (kod == 0x4DU) pozycja_podzialu_ += krok; // Right
         } else {
-            if ((usb && baza == 82U) || (e0 && baza == 0x48U)) pozycja_podzialu_ -= krok; // Up
-            else if ((usb && baza == 81U) || (e0 && baza == 0x50U)) pozycja_podzialu_ += krok; // Down
+            if (kod == 0x48U) pozycja_podzialu_ -= krok; // Up
+            else if (kod == 0x50U) pozycja_podzialu_ += krok; // Down
         }
 
         ogranicz_pozycje_podzialu();

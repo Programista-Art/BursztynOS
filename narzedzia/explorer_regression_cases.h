@@ -77,22 +77,22 @@ static void regression_cases() {
             CHECK(v->open_modal(mode));
             // Exercise the actual focused dialog field, not a separate editor.
             auto ctrl_a=physical(4,BWS_MOD_CTRL);CHECK(v->popup_event(ctrl_a));
-            for(const unsigned char* c=reinterpret_cast<const unsigned char*>("aąbć");*c;++c)v->popup_event(event(BWS_ZDARZENIE_KLAWISZ,0,0,*c));
+            for(uint32_t cp:{uint32_t('a'),uint32_t(0x105),uint32_t('b'),uint32_t(0x107)})v->popup_event(event(BWS_ZDARZENIE_TEXT_INPUT,0,0,cp));
             CHECK(!strcmp(v->edit_text(),"aąbć"));
             CHECK(v->popup_event(physical(42)));CHECK(!strcmp(v->edit_text(),"aąb"));
             // Legacy echo of physical Backspace must not perform a second edit.
             CHECK(v->popup_event(event(BWS_ZDARZENIE_KLAWISZ,0,0,8)));CHECK(!strcmp(v->edit_text(),"aąb"));
             CHECK(v->popup_event(physical(74)));CHECK(v->popup_event(physical(76)));CHECK(!strcmp(v->edit_text(),"ąb"));
             CHECK(v->popup_event(physical(79)));CHECK(v->popup_event(physical(42)));CHECK(!strcmp(v->edit_text(),"b"));
-            CHECK(v->popup_event(physical(77)));CHECK(v->popup_event(event(BWS_ZDARZENIE_KLAWISZ,0,0,8)));CHECK(!strcmp(v->edit_text(),""));
+            CHECK(v->popup_event(physical(77)));CHECK(v->popup_event(physical(42)));CHECK(!strcmp(v->edit_text(),""));
             CHECK(v->popup_event(physical(4,BWS_MOD_CTRL)));
             auto text=event(BWS_ZDARZENIE_TEXT_INPUT,0,0,0x17c);CHECK(v->popup_event(text));
             for(const unsigned char* c=reinterpret_cast<const unsigned char*>("ż");*c;++c)v->popup_event(event(BWS_ZDARZENIE_KLAWISZ,0,0,*c));
             CHECK(!strcmp(v->edit_text(),"ż"));
             CHECK(v->popup_event(physical(14,0,false)));CHECK(!strcmp(v->edit_text(),""));
-            for(const unsigned char* c=reinterpret_cast<const unsigned char*>("aąb");*c;++c)v->popup_event(event(BWS_ZDARZENIE_KLAWISZ,0,0,*c));
-            for(char c:std::string("\x1b[H\x1b[3~"))v->popup_event(event(BWS_ZDARZENIE_KLAWISZ,0,0,c));CHECK(!strcmp(v->edit_text(),"ąb"));
-            for(char c:std::string("\x1b[F"))v->popup_event(event(BWS_ZDARZENIE_KLAWISZ,0,0,c));
+            for(uint32_t cp:{uint32_t('a'),uint32_t(0x105),uint32_t('b')})v->popup_event(event(BWS_ZDARZENIE_TEXT_INPUT,0,0,cp));
+            v->popup_event(physical(74));v->popup_event(physical(76));CHECK(!strcmp(v->edit_text(),"ąb"));
+            v->popup_event(physical(77));
             v->popup_event(physical(0x0e,0,false));CHECK(!strcmp(v->edit_text(),"ą"));
             // Tab transfers focus to OK. Backspace must not edit the unfocused field.
             CHECK(v->popup_event(physical(43)));CHECK(v->popup_event(physical(42)));CHECK(!strcmp(v->edit_text(),"ą"));

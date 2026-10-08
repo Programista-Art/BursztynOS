@@ -6,6 +6,10 @@
 
 #define BWS_NOWOCZESNE_ABI_WERSJA 1U
 
+// Internal notification hint, stripped before publishing an event. This is
+// never an accepted watcher mask or an additional userspace event field.
+constexpr uint32_t BWS_POWIADOM_PODDRZEWO=1U<<31;
+
 struct GuiMonitorInfo {
     uint32_t wersja;
     uint32_t monitor_id;
@@ -125,4 +129,3 @@ static_assert(sizeof(BwsIpcOdbierz) == 544, "ABI BwsIpcOdbierz");
 static_assert(sizeof(GuiCustomCursorInfo) == 32, "ABI GuiCustomCursorInfo");
 static_assert(sizeof(BwsIoResult) == 16, "ABI BwsIoResult");
 #endif
-

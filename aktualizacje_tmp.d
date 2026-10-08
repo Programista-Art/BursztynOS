@@ -9,6 +9,7 @@ aktualizacje_tmp.o: programy/aktualizacje/aktualizacje.cpp \
  programy/aktualizacje/../../bursztyn_ui/motyw.h \
  programy/aktualizacje/../../bursztyn_ui/../bursztyn_gui.h \
  programy/aktualizacje/../../bursztyn_ui/../bws_pliki.h \
+ programy/aktualizacje/../../bursztyn_ui/../plik_status.h \
  programy/aktualizacje/../../bursztyn_ui/../bws_api.h \
  programy/aktualizacje/../../bursztyn_ui/../bws_nowoczesne.h \
  programy/aktualizacje/../../bursztyn_ui/../bws_ota.h \
@@ -93,6 +94,7 @@ programy/aktualizacje/../../bursztyn_ui/../bws_zdarzenia.h:
 programy/aktualizacje/../../bursztyn_ui/motyw.h:
 programy/aktualizacje/../../bursztyn_ui/../bursztyn_gui.h:
 programy/aktualizacje/../../bursztyn_ui/../bws_pliki.h:
+programy/aktualizacje/../../bursztyn_ui/../plik_status.h:
 programy/aktualizacje/../../bursztyn_ui/../bws_api.h:
 programy/aktualizacje/../../bursztyn_ui/../bws_nowoczesne.h:
 programy/aktualizacje/../../bursztyn_ui/../bws_ota.h:

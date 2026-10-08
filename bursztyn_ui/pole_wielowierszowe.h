@@ -246,7 +246,9 @@ public:
     }
 
     void obsluz_wprowadzenie_tekstu(ZdarzenieWprowadzaniaTekstu& e) override {
-        if (!czy_wlaczona_ || czy_tylko_do_odczytu_ || e.punkt_kodowy < 32 ||
+        if (!czy_wlaczona_ || czy_tylko_do_odczytu_ || e.punkt_kodowy < 32 || e.punkt_kodowy > 0x10ffff ||
+            (e.punkt_kodowy >= 127 && e.punkt_kodowy <= 159) ||
+            (e.punkt_kodowy >= 0xd800 && e.punkt_kodowy <= 0xdfff) ||
             (e.czy_ctrl() && !e.czy_alt()) || e.czy_super()) return;
         char znak[5];
         if (CzcionkaUI::zakoduj_utf8(e.punkt_kodowy, znak)) {
@@ -338,8 +340,7 @@ public:
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
         if (!czy_wlaczona_) return;
         bool ctrl = e.czy_ctrl(), shift = e.czy_shift();
-        uint32_t k = e.kod_klawisza;
-        uint32_t b = (k & BWS_KEY_SOURCE_USB) ? k & 0xFFU : k & 0x7FU;
+        uint32_t k = e.polecenie();
         if (k == 27) { // Escape: unieważnij zaznaczenie
             if (czy_ma_zaznaczenie()) {
                 kotwica_ = kursor_;
@@ -354,37 +355,37 @@ public:
         if (ctrl && klawisz_litery(e, 'v', 0x2F)) { if (!czy_tylko_do_odczytu_) wklej(); e.obsluzone = true; return; }
         if (ctrl && !shift && klawisz_litery(e, 'z', 0x2C)) { if (!czy_tylko_do_odczytu_) cofnij(); e.obsluzone = true; return; }
         if (ctrl && (klawisz_litery(e, 'y', 0x15) || (shift && klawisz_litery(e, 'z', 0x2C)))) { if (!czy_tylko_do_odczytu_) ponow(); e.obsluzone = true; return; }
-        if (k == 13 || k == 10 || b == 0x1CU) {
+        if (k == 13) {
             if (!czy_tylko_do_odczytu_) wstaw_fragment("\n");
             if (cb_zatwierdzenie_) cb_zatwierdzenie_(this, bufor_, dane_zatwierdzenia_);
             e.obsluzone = true; return;
         }
         if (k == 8) { if (!czy_tylko_do_odczytu_) usun_wstecz(); e.obsluzone = true; return; }
-        if (k == 127 || b == 0x53U) { if (!czy_tylko_do_odczytu_) usun_w_przod(); e.obsluzone = true; return; }
+        if (k == 0x53U) { if (!czy_tylko_do_odczytu_) usun_w_przod(); e.obsluzone = true; return; }
         size_t stary = kursor_;
         bool ruch = true;
-        if (ctrl && ((k & BWS_KEY_SOURCE_USB && b == 74U) || (!(k & BWS_KEY_SOURCE_USB) && b == 0x47U))) kursor_ = 0;
-        else if (ctrl && ((k & BWS_KEY_SOURCE_USB && b == 77U) || (!(k & BWS_KEY_SOURCE_USB) && b == 0x4FU))) kursor_ = dlugosc_;
-        else if ((k & BWS_KEY_SOURCE_USB && b == 80U) || (!(k & BWS_KEY_SOURCE_USB) && b == 0x4BU)) {
+        if (ctrl && (k == 0x47U)) kursor_ = 0;
+        else if (ctrl && (k == 0x4FU)) kursor_ = dlugosc_;
+        else if (k == 0x4BU) {
             if (!shift && czy_ma_zaznaczenie()) {
                 kursor_ = poczatek_zaznaczenia();
             } else {
                 kursor_ = poprzedni_bajt(kursor_, ctrl);
             }
         }
-        else if ((k & BWS_KEY_SOURCE_USB && b == 79U) || (!(k & BWS_KEY_SOURCE_USB) && b == 0x4DU)) {
+        else if (k == 0x4DU) {
             if (!shift && czy_ma_zaznaczenie()) {
                 kursor_ = koniec_zaznaczenia();
             } else {
                 kursor_ = nastepny_bajt(kursor_, ctrl);
             }
         }
-        else if ((k & BWS_KEY_SOURCE_USB && b == 82U) || (!(k & BWS_KEY_SOURCE_USB) && b == 0x48U)) przesun_pionowo(-1);
-        else if ((k & BWS_KEY_SOURCE_USB && b == 81U) || (!(k & BWS_KEY_SOURCE_USB) && b == 0x50U)) przesun_pionowo(1);
-        else if ((k & BWS_KEY_SOURCE_USB && b == 75U) || (!(k & BWS_KEY_SOURCE_USB) && b == 0x49U)) przesun_pionowo(-liczba_widocznych_linii());
-        else if ((k & BWS_KEY_SOURCE_USB && b == 78U) || (!(k & BWS_KEY_SOURCE_USB) && b == 0x51U)) przesun_pionowo(liczba_widocznych_linii());
-        else if ((k & BWS_KEY_SOURCE_USB && b == 74U) || (!(k & BWS_KEY_SOURCE_USB) && b == 0x47U)) kursor_ = linie_[linia_dla_bajtu(kursor_)].start;
-        else if ((k & BWS_KEY_SOURCE_USB && b == 77U) || (!(k & BWS_KEY_SOURCE_USB) && b == 0x4FU)) kursor_ = linie_[linia_dla_bajtu(kursor_)].koniec;
+        else if (k == 0x48U) przesun_pionowo(-1);
+        else if (k == 0x50U) przesun_pionowo(1);
+        else if (k == 0x49U) przesun_pionowo(-liczba_widocznych_linii());
+        else if (k == 0x51U) przesun_pionowo(liczba_widocznych_linii());
+        else if (k == 0x47U) kursor_ = linie_[linia_dla_bajtu(kursor_)].start;
+        else if (k == 0x4FU) kursor_ = linie_[linia_dla_bajtu(kursor_)].koniec;
         else ruch = false;
         if (ruch) {
             if (!shift) kotwica_ = kursor_;
@@ -422,7 +423,7 @@ private:
         dst[i] = '\0';
     }
     static bool klawisz_litery(const ZdarzenieKlawiatury& e, char l, uint32_t scan) {
-        uint32_t kod = e.kod_klawisza;
+        uint32_t kod = e.polecenie();
         if ((kod & BWS_KEY_SOURCE_USB) != 0) {
             return (kod & 0xFFU) == static_cast<uint32_t>(4 + (l - 'a'));
         }

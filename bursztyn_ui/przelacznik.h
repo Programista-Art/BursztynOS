@@ -88,10 +88,8 @@ public:
 
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
         if (!czy_wlaczona_ || czy_tylko_do_odczytu_) return;
-        const uint32_t kod = e.kod_klawisza;
-        const bool usb = (kod & BWS_KEY_SOURCE_USB) != 0;
-        const uint32_t baza = usb ? (kod & 0xFFU) : (kod & 0x7FU);
-        if (kod == 32U || (usb && baza == 44U)) {
+        const uint32_t kod = e.polecenie();
+        if (kod == 32U) {
             ustaw_wartosc(!wartosc_);
             e.obsluzone = true;
             return;

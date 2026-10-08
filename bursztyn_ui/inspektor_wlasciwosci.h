@@ -33,12 +33,11 @@ private:
     public:
         explicit Edytor(InspektorWlasciwosci* w) : PoleTekstowe("Wartość"), wlasciciel_(w) {}
         void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
-            uint32_t k = e.kod_klawisza; bool usb = (k & BWS_KEY_SOURCE_USB) != 0;
-            uint32_t b = usb ? k & 0xFFU : k & 0x7FU;
-            if (wlasciciel_ && (k == 13U || k == 10U || (usb && b == 40U))) {
+            uint32_t k = e.polecenie();
+            if (wlasciciel_ && (k == 13U)) {
                 wlasciciel_->zatwierdz_edycje(); e.obsluzone = true; return;
             }
-            if (wlasciciel_ && (k == 27U || (usb && b == 41U) || (!usb && b == 1U))) {
+            if (wlasciciel_ && (k == 27U)) {
                 wlasciciel_->anuluj_edycje(); e.obsluzone = true; return;
             }
             PoleTekstowe::obsluz_wcisniecie_klawisza(e);
@@ -204,13 +203,10 @@ public:
     void obsluz_rolke(ZdarzenieRolki& e) override { if (e.delta_y && pionowy_->czy_widoczna()) { pionowy_->przewin_o(e.delta_y > 0 ? -3 * wysokosc_wiersza_ : 3 * wysokosc_wiersza_); e.obsluzone = true; } }
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
         if (!czy_wlaczona_ || liczba_ == 0) return;
-        uint32_t k = e.kod_klawisza;
-        bool usb = (k & BWS_KEY_SOURCE_USB) != 0;
-        bool e0 = (k & BWS_KEY_SOURCE_E0) != 0;
-        uint32_t b = usb ? k & 0xFFU : k & 0x7FU;
-        if (k == 13U || (usb && b == 40U)) { rozpocznij_edycje(fokus_ < 0 ? 0 : fokus_); e.obsluzone = true; return; }
-        if (k == 27U || (usb && b == 41U)) { anuluj_edycje(); e.obsluzone = true; return; }
-        int d = 0; if ((usb && b == 82U) || (e0 && b == 0x48U)) d = -1; if ((usb && b == 81U) || (e0 && b == 0x50U)) d = 1;
+        uint32_t k = e.polecenie();
+        if (k == 13U) { rozpocznij_edycje(fokus_ < 0 ? 0 : fokus_); e.obsluzone = true; return; }
+        if (k == 27U) { anuluj_edycje(); e.obsluzone = true; return; }
+        int d = 0; if (k == 0x48U) d = -1; if (k == 0x50U) d = 1;
         if (d) { int n = fokus_ < 0 ? 0 : przytnij(fokus_ + d, 0, static_cast<int>(liczba_) - 1); ustaw_wybrany_indeks(n); przewin_do(n); e.obsluzone = true; return; }
         Kontrolka::obsluz_wcisniecie_klawisza(e);
     }

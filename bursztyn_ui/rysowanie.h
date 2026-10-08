@@ -12,8 +12,8 @@ class KontekstRysowania {
 public:
     static inline bool g_tlum_rysowanie_globalne = false;
 
-    KontekstRysowania() {
-        stos_przyciecia_[0] = Prostokat(0, 0, 4096, 4096);
+    explicit KontekstRysowania(Prostokat granice=Prostokat(0,0,4096,4096)) {
+        stos_przyciecia_[0] = granice;
         stos_przesuniecia_[0] = Punkt(0, 0);
     }
 

@@ -794,8 +794,10 @@ public:
             set_status("Nie można usunąć tego wpisu.");
             return false;
         }
-        if (!usun_twor_uzytkownika(source)) {
-            set_status("Nie usunięto: folder nie jest pusty, błąd PSF albo odmowa PZB.");
+        const auto result=usun_drzewo_uzytkownika(source);
+        if (result!=WynikPlikowy::Ok) {
+            if(result==WynikPlikowy::Czesciowo)refresh();
+            set_status(PlikiUI::komunikat_bledu(result));
             return false;
         }
         refresh_after_mutation();
@@ -1471,11 +1473,9 @@ private:
             set_status("Nie można utworzyć elementu: ścieżka przekracza 511 bajtów.");
             return false;
         }
-        const bool success = PlikiUI::utworz_element(path_,name,directory);
-        if (!success) {
-            set_status(directory
-                ? "Nie utworzono folderu: istnieje albo PZB odmówił zapisu."
-                : "Nie utworzono pliku: istnieje albo PZB odmówił zapisu.");
+        const auto result=PlikiUI::utworz_element_wynik(path_,name,directory);
+        if (result!=WynikPlikowy::Ok) {
+            set_status(PlikiUI::komunikat_bledu(result));
             return false;
         }
         set_status(directory ? "Utworzono nowy folder." : "Utworzono nowy plik.");
@@ -1957,14 +1957,16 @@ public:
     }
     bool edit_key(uint32_t code,uint32_t mods=0,uint32_t scan=0) {
         if(modal_open())return false;
-        BursztynUI::ZdarzenieKlawiatury e{};e.kod_klawisza=code;e.modyfikatory=mods;e.kod_skanu=scan;active_field().obsluz_wcisniecie_klawisza(e);return e.obsluzone;
+        BursztynUI::ZdarzenieKlawiatury e{};e.kod_klawisza=code;e.modyfikatory=mods;e.kod_skanu=scan?scan|BursztynUI::KLAWISZ_FIZYCZNY_GUI:0;active_field().obsluz_wcisniecie_klawisza(e);return e.obsluzone;
     }
     bool field_event(const bws_zdarzenie& e) {
+        if(BursztynUI::echo_klawiatury(e))return true;
         if(e.typ==BWS_ZDARZENIE_KLAWISZ && field_skip_pos_<field_skip_count_) {
             if(e.kod==static_cast<unsigned char>(field_skip_[field_skip_pos_])) {++field_skip_pos_;return true;}
             field_skip_count_=field_skip_pos_=0;
         }
         if(edit_mode_!=EditMode::PATH && edit_mode_!=EditMode::SEARCH)return false;
+        if(e.typ==BWS_ZDARZENIE_KLAWISZ && e.kod>=32 && e.kod!=127)return true;
         if(e.typ==BWS_ZDARZENIE_KLAWISZ && (e.kod==10 || e.kod==13)) {
             edit_key(13);if(edit_mode_==EditMode::PATH && path_submit_pending_)submit_path();
             else {end_edit();draw_search_field();}gui_odswiez();return true;
@@ -1976,7 +1978,11 @@ public:
         } else if(e.typ==BWS_ZDARZENIE_KLAWISZ_FIZYCZNY) {
             if(!e.x)return true;
             uint32_t key=PlikiUI::ObslugaPopup::klawisz(e);
-            if(key==27)return false;
+            if(key==27) {
+                const EditMode cancelled=edit_mode_;end_edit();
+                if(cancelled==EditMode::PATH)draw_path_field();else draw_search_field();
+                gui_odswiez();return true;
+            }
             if(key==13) {
                 edit_key(key,e.przyciski,e.kod);
                 if(edit_mode_==EditMode::PATH && path_submit_pending_)submit_path();
@@ -2510,6 +2516,20 @@ void redraw_filter(AktowkaView& view) {
     gui_odswiez();
 }
 
+bool obsluz_nawigacje_fizyczna(AktowkaView& view,AktowkaModel& model,const bws_zdarzenie& event) {
+    if(event.typ!=BWS_ZDARZENIE_KLAWISZ_FIZYCZNY || view.edit_mode()!=EditMode::NONE)return false;
+    (void)BursztynUI::echo_klawiatury(event);
+    if(!event.x)return true;
+    const uint32_t key=BursztynUI::klawisz_polecenia(event);
+    if(key==0x48 || key==0x50) {
+        int old_entry=-1;bool scroll_changed=false;
+        if(model.move_selection(key==0x48?-1:1,view.visible_rows(),&old_entry,&scroll_changed))
+            redraw_selection(view,model,old_entry,scroll_changed);
+    } else if(key==13)present_activation(view,model.activate());
+    else if(key==8)present_workspace_change(view,model.back());
+    return true;
+}
+
 void redraw_sort(AktowkaView& view) {
     view.draw_toolbar();
     view.draw_table_header();
@@ -2717,6 +2737,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             if(refresh_pending && !view.modal_open() && !view.context_open()) {refresh_pending=false;present_workspace_change(view,model.refresh());}
             view.register_drop_targets();if(view.popup_needs_refresh())gui_odswiez();continue;
         }
+        if(obsluz_nawigacje_fizyczna(view,model,event))continue;
         if (event.typ == BWS_ZDARZENIE_TIMER) {
             if (view.edit_mode() != EditMode::NONE && ansi == AnsiState::ESC) {
                 ansi = AnsiState::NONE;

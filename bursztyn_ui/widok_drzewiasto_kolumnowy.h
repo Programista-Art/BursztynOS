@@ -568,18 +568,17 @@ public:
 
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
         if (!czy_wlaczona_ || liczba_widocznych_ == 0) return;
-        uint32_t k = e.kod_klawisza; bool usb = (k & BWS_KEY_SOURCE_USB) != 0;
-        bool e0 = (k & BWS_KEY_SOURCE_E0) != 0; uint32_t b = usb ? k & 0xFFU : k & 0x7FU;
+        uint32_t k = e.polecenie();
         int poz = pozycja_widocznego(fokus_.czy_poprawny() ? fokus_ : wybrany_);
         if (poz < 0) poz = 0;
         int cel = poz;
-        if ((usb && b == 82U) || (e0 && b == 0x48U)) --cel;
-        else if ((usb && b == 81U) || (e0 && b == 0x50U)) ++cel;
-        else if ((usb && b == 75U) || (e0 && b == 0x49U)) cel -= widoczne_wiersze();
-        else if ((usb && b == 78U) || (e0 && b == 0x51U)) cel += widoczne_wiersze();
-        else if ((usb && b == 74U) || (e0 && b == 0x47U)) cel = 0;
-        else if ((usb && b == 77U) || (e0 && b == 0x4FU)) cel = static_cast<int>(liczba_widocznych_) - 1;
-        else if ((usb && b == 80U) || (e0 && b == 0x4BU)) {
+        if (k == 0x48U) --cel;
+        else if (k == 0x50U) ++cel;
+        else if (k == 0x49U) cel -= widoczne_wiersze();
+        else if (k == 0x51U) cel += widoczne_wiersze();
+        else if (k == 0x47U) cel = 0;
+        else if (k == 0x4FU) cel = static_cast<int>(liczba_widocznych_) - 1;
+        else if (k == 0x4BU) {
             if (fokus_.czy_poprawny() && wezly_[fokus_.indeks].rozwiniety && wezly_[fokus_.indeks].liczba_dzieci > 0)
                 zwin(fokus_);
             else if (fokus_.czy_poprawny() && wezly_[fokus_.indeks].rodzic >= 0) {
@@ -587,13 +586,13 @@ public:
                 ustaw_fokus_wezel({static_cast<uint32_t>(p), wezly_[p].generacja});
             }
             e.obsluzone = true; return;
-        } else if ((usb && b == 79U) || (e0 && b == 0x4DU)) {
+        } else if (k == 0x4DU) {
             if (fokus_.czy_poprawny() && wezly_[fokus_.indeks].liczba_dzieci > 0) {
                 if (!wezly_[fokus_.indeks].rozwiniety) rozwin(fokus_);
                 else { int d = wezly_[fokus_.indeks].pierwsze_dziecko; ustaw_fokus_wezel({static_cast<uint32_t>(d), wezly_[d].generacja}); }
             }
             e.obsluzone = true; return;
-        } else if (k == 13U || k == 32U || (usb && (b == 40U || b == 44U))) {
+        } else if (k == 13U || k == 32U) {
             if (fokus_.czy_poprawny()) {
                 ustaw_wybrany_wezel(fokus_);
                 if (wezly_[fokus_.indeks].liczba_dzieci > 0) przelacz_rozwiniecie(fokus_);

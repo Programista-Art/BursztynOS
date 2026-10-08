@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "plik_status.h"
 
 /* Addytywne ABI BWS dla metadanych PSF i systemowego drag & drop. */
 

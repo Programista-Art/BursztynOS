@@ -86,6 +86,17 @@ int main() {
     bws_gui_odswiez();assert(commits==1 && shown==1);
     bws_gui_rysuj_prostokat(100,100,100,100,test_theme.oknotlo);
     bws_gui_odswiez();assert(commits==1 && shown==1);
+    // The real dirty-region replacement copies transparency without clearing
+    // or publishing the layer between preparation and the one BWS17 commit.
+    const uint32_t replacement[]={0,0x123456,0,0x654321};
+    const unsigned dirty_before=invalidations,frames_before=presents;
+    assert(bws_gui_zastap_region(100,100,2,2,replacement));
+    assert(layer.bufor_pikseli[0]==0&&layer.bufor_pikseli[1]==0x123456);
+    assert(layer.bufor_pikseli[100]==0&&layer.bufor_pikseli[101]==0x654321);
+    assert(invalidations==dirty_before&&presents==frames_before);
+    bws_gui_odswiez();assert(invalidations==dirty_before+1&&presents==frames_before);
+    assert(bws_gui_blit(100,100,2,2,replacement));
+    bws_gui_odswiez();assert(layer.bufor_pikseli[1]==0x123456);
     // Real production presentation entry points select the dedicated system
     // surface, including cursor-sized presentations. The scene is retained.
     test_clock=true;test_now=0;powitanie_inicjalizuj(true);

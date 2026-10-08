@@ -212,23 +212,20 @@ public:
         Kontrolka::obsluz_wcisniecie_klawisza(e);
         if (!czy_wlaczona_) return;
 
-        uint32_t kod = e.kod_klawisza;
-        bool usb = (kod & BWS_KEY_SOURCE_USB) != 0;
-        bool e0 = (kod & BWS_KEY_SOURCE_E0) != 0;
-        uint32_t baza = usb ? (kod & 0xFFU) : (kod & 0x7FU);
+        uint32_t kod = e.polecenie();
 
-        if ((usb && baza == 82U) || (e0 && baza == 0x48U)) { // Up
+        if (kod == 0x48U) { // Up
             zwieksz_aktywny_segment();
             e.obsluzone = true;
-        } else if ((usb && baza == 81U) || (e0 && baza == 0x50U)) { // Down
+        } else if (kod == 0x50U) { // Down
             zmniejsz_aktywny_segment();
             e.obsluzone = true;
-        } else if ((usb && baza == 79U) || (e0 && baza == 0x4DU)) { // Right
+        } else if (kod == 0x4DU) { // Right
             if (aktywny_segment_ < 2) {
                 ustaw_aktywny_segment(aktywny_segment_ + 1);
             }
             e.obsluzone = true;
-        } else if ((usb && baza == 80U) || (e0 && baza == 0x4BU)) { // Left
+        } else if (kod == 0x4BU) { // Left
             if (aktywny_segment_ > 0) {
                 ustaw_aktywny_segment(aktywny_segment_ - 1);
             }

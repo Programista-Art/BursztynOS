@@ -184,12 +184,9 @@ public:
 
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
         if (!czy_wlaczona_) return;
-        const uint32_t kod = e.kod_klawisza;
-        const bool usb = (kod & BWS_KEY_SOURCE_USB) != 0;
-        const uint32_t baza = usb ? (kod & 0xFFU) : (kod & 0x7FU);
-        const bool spacja = kod == 32U || (usb ? baza == 44U : baza == 0x39U);
-        const bool enter = kod == 13U || kod == 10U ||
-                           (usb ? baza == 40U : baza == 0x1CU);
+        const uint32_t kod = e.polecenie();
+        const bool spacja = kod == 32U;
+        const bool enter = kod == 13U;
         if (spacja || enter) {
             aktywuj();
             e.obsluzone = true;

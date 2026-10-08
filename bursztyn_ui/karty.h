@@ -331,13 +331,10 @@ public:
 
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
         if (!czy_wlaczona_) return;
-        uint32_t kod = e.kod_klawisza;
-        bool usb = (kod & BWS_KEY_SOURCE_USB) != 0;
-        bool e0 = (kod & BWS_KEY_SOURCE_E0) != 0;
-        uint32_t baza = usb ? (kod & 0xFFU) : (kod & 0x7FU);
+        uint32_t kod = e.polecenie();
 
         // Ctrl+Tab / Ctrl+Shift+Tab
-        if (e.czy_ctrl() && (kod == 9 || (usb && baza == 43U))) {
+        if (e.czy_ctrl() && (kod == 9)) {
             if (e.czy_shift()) przelacz_na_poprzednia();
             else przelacz_na_kolejna();
             e.obsluzone = true;
@@ -345,26 +342,26 @@ public:
         }
 
         // Left / Right
-        if ((!usb && e0 && baza == 0x4BU) || (usb && baza == 80U)) {
+        if (kod == 0x4BU) {
             przelacz_na_poprzednia();
             e.obsluzone = true;
             return;
         }
-        if ((!usb && e0 && baza == 0x4DU) || (usb && baza == 79U)) {
+        if (kod == 0x4DU) {
             przelacz_na_kolejna();
             e.obsluzone = true;
             return;
         }
 
         // Home / End
-        if ((!usb && e0 && baza == 0x47U) || (usb && baza == 74U)) {
+        if (kod == 0x47U) {
             for (int i = 0; i < liczba_kart_; ++i) {
                 if (strony_[i].czy_wlaczona()) { ustaw_aktywna_karte(i); break; }
             }
             e.obsluzone = true;
             return;
         }
-        if ((!usb && e0 && baza == 0x4FU) || (usb && baza == 77U)) {
+        if (kod == 0x4FU) {
             for (int i = liczba_kart_ - 1; i >= 0; --i) {
                 if (strony_[i].czy_wlaczona()) { ustaw_aktywna_karte(i); break; }
             }

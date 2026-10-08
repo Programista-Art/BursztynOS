@@ -10,7 +10,8 @@ struct LabelPaint {uint32_t color;std::string text;};
 static std::vector<LabelPaint> label_paints;
 static bool capture_labels=false;
 void rysuj_tekst_wysrodkowany(int,int,int,int,int,uint32_t color,const char* text) {if(capture_labels)label_paints.push_back({color,text});}
-void gui_odswiez_pulpit() {}
+static void (*test_layer_clear_observer)()=nullptr;
+void gui_odswiez_pulpit() {if(test_layer_clear_observer)test_layer_clear_observer();}
 int bws_utworz_warstwe(int,int,int,int,int) {return 1;}
 
 #include "desktop_usability_cases.h"
@@ -19,6 +20,7 @@ int bws_utworz_warstwe(int,int,int,int,int) {return 1;}
 #include "desktop_launcher_edge_cases.h"
 #include "desktop_persistence_cases.h"
 #include "desktop_capacity_cases.h"
+#include "desktop_mutation_cases.h"
 
 int main() {
     g_test_bws_hook=explorer_bws;
@@ -114,6 +116,7 @@ int main() {
     desktop_launcher_edge_cases();
     desktop_persistence_cases();
     desktop_capacity_cases();
+    desktop_mutation_cases();
     delete pulpit_menu;delete pulpit_dialog;delete pulpit_wybor;
     printf("Desktop production file actions: %d/%d PASS (RAM filesystem)\n",checks,checks);
 }

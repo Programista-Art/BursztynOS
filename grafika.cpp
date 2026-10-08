@@ -3506,12 +3506,12 @@ extern "C" void bws_gui_rysuj_prostokat(
     zapamietaj_dirty_rysowania(x,y,w,h);
 }
 
-extern "C" bool bws_gui_blit(
+static bool gui_blit_region(
     int x,
     int y,
     int szer,
     int wys,
-    const uint32_t* piksele) {
+    const uint32_t* piksele, bool zastap_przezroczyste) {
 
     if (!piksele) return false;
     if (!backbuffer || !aktywny_ekran ||
@@ -3544,13 +3544,20 @@ extern "C" bool bws_gui_blit(
             int srcX = dx - x;
             uint64_t srcIdx = srcRow + (uint64_t)srcX;
             uint32_t pix = piksele[srcIdx];
-            if (pix == SKLADACZ_PIKSEL_PRZEZROCZYSTY) continue;
+            if (!zastap_przezroczyste && pix == SKLADACZ_PIKSEL_PRZEZROCZYSTY) continue;
             uint64_t dstIdx = dstRow + (uint64_t)(dx - warstwa->x);
             warstwa->bufor_pikseli[dstIdx] = pix;
         }
     }
     zapamietaj_dirty_rysowania(lx0, ly0, lx1 - lx0, ly1 - ly0);
     return true;
+}
+
+extern "C" bool bws_gui_blit(int x,int y,int w,int h,const uint32_t* pixels) {
+    return gui_blit_region(x,y,w,h,pixels,false);
+}
+extern "C" bool bws_gui_zastap_region(int x,int y,int w,int h,const uint32_t* pixels) {
+    return gui_blit_region(x,y,w,h,pixels,true);
 }
 
 extern "C" bool bws_gui_ustaw_tytul_okna(const char* tytul) {

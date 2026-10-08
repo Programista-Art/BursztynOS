@@ -5,9 +5,9 @@ grafika.o: grafika.cpp diagnostyka_startu.h diagnostyka_klatek_startu.h \
  sterowniki/grafika/bochs_vbe.h virtio_gpu.h virtio_pci.h pci.h \
  virtqueue.h sterowniki/dma.h mysz_input.h pamiec.h zegar-rtc.h psf.h \
  storage_format.h aktualizacja_rozruch.h block_device.h \
- psf_bootstrap_status.h scheduler.h bws_zdarzenia.h ekran.h zegar_ui.h \
- sterowniki/czas/hpet.h bws_nowoczesne.h bws_ota.h heap.h motyw.h \
- czcionki/extronic16Bunicode.h czcionki/extronic16B_unicode.h \
+ psf_bootstrap_status.h plik_status.h scheduler.h bws_zdarzenia.h ekran.h \
+ zegar_ui.h sterowniki/czas/hpet.h bws_nowoczesne.h bws_ota.h heap.h \
+ motyw.h czcionki/extronic16Bunicode.h czcionki/extronic16B_unicode.h \
  sterowniki/grafika/uefi_gop.h
 diagnostyka_startu.h:
 diagnostyka_klatek_startu.h:
@@ -38,6 +38,7 @@ storage_format.h:
 aktualizacja_rozruch.h:
 block_device.h:
 psf_bootstrap_status.h:
+plik_status.h:
 scheduler.h:
 bws_zdarzenia.h:
 ekran.h:

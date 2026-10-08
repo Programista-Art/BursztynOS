@@ -193,13 +193,10 @@ private:
     }
     void popup_zamkniety() { podswietlona_ = -1; pierwsza_widoczna_ = 0; }
     bool obsluz_klawisz_popupu(ZdarzenieKlawiatury& e) {
-        uint32_t k = e.kod_klawisza;
-        bool usb = (k & BWS_KEY_SOURCE_USB) != 0;
-        bool e0 = (k & BWS_KEY_SOURCE_E0) != 0;
-        uint32_t b = usb ? (k & 0xFFU) : (k & 0x7FU);
+        uint32_t k = e.polecenie();
         int delta = 0;
-        if ((usb && b == 82U) || (e0 && b == 0x48U)) delta = -1;
-        if ((usb && b == 81U) || (e0 && b == 0x50U)) delta = 1;
+        if (k == 0x48U) delta = -1;
+        if (k == 0x50U) delta = 1;
         if (delta && liczba_dopasowanych_) {
             if (!popup_.czy_otwarta()) otworz_popup();
             int n = podswietlona_ < 0 ? 0 : podswietlona_ + delta;
@@ -211,11 +208,11 @@ private:
             uniewaznij_wiersz_popupu(stary); uniewaznij_wiersz_popupu(n);
             e.obsluzone = true; return true;
         }
-        if (k == 13U || k == 10U || (usb && b == 40U)) {
+        if (k == 13U) {
             if (popup_.czy_otwarta() && podswietlona_ >= 0) zaakceptuj_podswietlona();
             e.obsluzone = true; return true;
         }
-        if (k == 27U || (usb && b == 41U) || (!usb && b == 1U)) {
+        if (k == 27U) {
             if (popup_.czy_otwarta()) zamknij_popup();
             else wyczysc();
             e.obsluzone = true; return true;

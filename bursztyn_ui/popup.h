@@ -458,10 +458,8 @@ public:
             surf->obsluz_wcisniecie_klawisza(e);
             if (e.obsluzone) return true;
         }
-        uint32_t kod = e.kod_klawisza;
-        bool usb = (kod & BWS_KEY_SOURCE_USB) != 0;
-        uint32_t baza = usb ? (kod & 0xFFU) : (kod & 0x7FU);
-        if (kod == 27U || (usb && baza == 41U) || (!usb && baza == 0x01U)) {
+        uint32_t kod = e.polecenie();
+        if (kod == 27U) {
             if (liczba_ > 1) {
                 zamknij_od_poziomu(liczba_ - 1, PowodZamknieciaPopup::Escape);
             } else {

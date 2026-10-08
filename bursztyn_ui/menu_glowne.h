@@ -92,11 +92,10 @@ public:
         if (i >= 0) { aktywny_glowny_ = i; otworz_glowny(i); e.obsluzone = true; }
     }
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
-        uint32_t k = e.kod_klawisza; bool usb = (k & BWS_KEY_SOURCE_USB) != 0;
-        uint32_t b = usb ? k & 0xFFU : k & 0x7FU;
-        if ((usb && b == 79U) || (!usb && b == 0x4DU)) aktywny_glowny_ = nastepny_glowny(aktywny_glowny_, 1);
-        else if ((usb && b == 80U) || (!usb && b == 0x4BU)) aktywny_glowny_ = nastepny_glowny(aktywny_glowny_, -1);
-        else if ((usb && b == 81U) || (!usb && b == 0x50U) || k == 13U || b == 0x1CU)
+        uint32_t k = e.polecenie();
+        if (k == 0x4DU) aktywny_glowny_ = nastepny_glowny(aktywny_glowny_, 1);
+        else if (k == 0x4BU) aktywny_glowny_ = nastepny_glowny(aktywny_glowny_, -1);
+        else if (k == 0x50U || k == 13U)
             otworz_glowny(aktywny_glowny_ < 0 ? nastepny_glowny(-1, 1) : aktywny_glowny_);
         else return;
         uniewaznij(); e.obsluzone = true;

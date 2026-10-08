@@ -228,11 +228,9 @@ public:
 
 private:
     bool obsluz_klawisz_specjalny(ZdarzenieKlawiatury& e) {
-        uint32_t k = e.kod_klawisza;
-        bool usb = (k & BWS_KEY_SOURCE_USB) != 0;
-        uint32_t b = usb ? k & 0xFFU : k & 0x7FU;
-        bool dol = (usb && b == 81U) || (!usb && b == 0x50U);
-        bool gora = (usb && b == 82U) || (!usb && b == 0x48U);
+        uint32_t k = e.polecenie();
+        bool dol = k == 0x50U;
+        bool gora = k == 0x48U;
         if (czy_enter(e)) {
             if (czy_rozwinieta()) zatwierdz_popup(); else rozwin();
             e.obsluzone = true; return true;
@@ -253,7 +251,7 @@ private:
         return false;
     }
     static bool czy_enter(const ZdarzenieKlawiatury& e) {
-        uint32_t k = e.kod_klawisza;
+        uint32_t k = e.polecenie();
         return k == 13U || k == 10U || ((k & 0x7FU) == 0x1CU);
     }
     void wybrano_z_popupu(int indeks) {

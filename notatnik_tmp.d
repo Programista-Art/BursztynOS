@@ -2,10 +2,10 @@ notatnik_tmp.o: notatnik.cpp loader.h pzb.h pamiec.h \
  bursztyn_ui/bursztyn_ui.h bursztyn_ui/typy.h bursztyn_ui/../ui_skala.h \
  bursztyn_ui/zdarzenia.h bursztyn_ui/../bws_zdarzenia.h \
  bursztyn_ui/motyw.h bursztyn_ui/../bursztyn_gui.h \
- bursztyn_ui/../bws_pliki.h bursztyn_ui/../bws_api.h \
- bursztyn_ui/../bws_nowoczesne.h bursztyn_ui/../bws_ota.h \
- bursztyn_ui/../skladacz_obrazu.h bursztyn_ui/../legacy_ui.h \
- bursztyn_ui/../motyw.h bursztyn_ui/czcionka.h \
+ bursztyn_ui/../bws_pliki.h bursztyn_ui/../plik_status.h \
+ bursztyn_ui/../bws_api.h bursztyn_ui/../bws_nowoczesne.h \
+ bursztyn_ui/../bws_ota.h bursztyn_ui/../skladacz_obrazu.h \
+ bursztyn_ui/../legacy_ui.h bursztyn_ui/../motyw.h bursztyn_ui/czcionka.h \
  bursztyn_ui/../czcionki/extronic16Bunicode.h \
  bursztyn_ui/../czcionki/extronic16B_unicode.h bursztyn_ui/rysowanie.h \
  bursztyn_ui/polecenie_ui.h bursztyn_ui/ikona_ui.h \
@@ -49,6 +49,7 @@ bursztyn_ui/../bws_zdarzenia.h:
 bursztyn_ui/motyw.h:
 bursztyn_ui/../bursztyn_gui.h:
 bursztyn_ui/../bws_pliki.h:
+bursztyn_ui/../plik_status.h:
 bursztyn_ui/../bws_api.h:
 bursztyn_ui/../bws_nowoczesne.h:
 bursztyn_ui/../bws_ota.h:

@@ -533,28 +533,26 @@ public:
 
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
         if (!czy_wlaczona_ || czy_tylko_do_odczytu_) return;
-        uint32_t k = e.kod_klawisza;
-        bool usb = (k & BWS_KEY_SOURCE_USB) != 0;
-        uint32_t b = usb ? (k & 0xFFU) : (k & 0x7FU);
+        uint32_t k = e.polecenie();
 
         if (tryb_ == TrybSelektoraKoloru::Osadzony) {
             bool zmiana = false;
             // Lewo / Prawo -> Saturation
-            if ((usb && b == 80U) || (!usb && b == 0x4BU)) {
+            if (k == 0x4BU) {
                 sat_ = (sat_ >= 4) ? sat_ - 4 : 0; zmiana = true;
-            } else if ((usb && b == 79U) || (!usb && b == 0x4DU)) {
+            } else if (k == 0x4DU) {
                 sat_ = (sat_ <= 251) ? sat_ + 4 : 255; zmiana = true;
             }
             // Gora / Dol -> Value
-            else if ((usb && b == 82U) || (!usb && b == 0x48U)) {
+            else if (k == 0x48U) {
                 val_ = (val_ <= 251) ? val_ + 4 : 255; zmiana = true;
-            } else if ((usb && b == 81U) || (!usb && b == 0x50U)) {
+            } else if (k == 0x50U) {
                 val_ = (val_ >= 4) ? val_ - 4 : 0; zmiana = true;
             }
             // PageUp / PageDown -> Hue
-            else if ((usb && b == 75U) || (!usb && b == 0x49U)) {
+            else if (k == 0x49U) {
                 h_ = (h_ + 10) % 360; zmiana = true;
-            } else if ((usb && b == 78U) || (!usb && b == 0x51U)) {
+            } else if (k == 0x51U) {
                 h_ = (h_ + 350) % 360; zmiana = true;
             }
 
@@ -566,7 +564,7 @@ public:
                 return;
             }
         } else {
-            if (k == 13 || k == 32 || (usb && (b == 40 || b == 44))) {
+            if (k == 13 || k == 32) {
                 otworz_popup();
                 e.obsluzone = true;
             }

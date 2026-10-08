@@ -266,30 +266,27 @@ public:
 
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
         if (!czy_wlaczona_) return;
-        uint32_t kod = e.kod_klawisza;
-        bool usb = (kod & BWS_KEY_SOURCE_USB) != 0;
-        bool e0 = (kod & BWS_KEY_SOURCE_E0) != 0;
-        uint32_t baza = usb ? (kod & 0xFFU) : (kod & 0x7FU);
+        uint32_t kod = e.polecenie();
 
-        if (kod == 13 || (usb && baza == 40U)) { // Enter
+        if (kod == 13) { // Enter
             if (wybrany_.czy_poprawny() && cb_aktywacja_) {
                 cb_aktywacja_(this, wybrany_, dane_aktywacji_);
                 e.obsluzone = true;
                 return;
             }
-        } else if (kod == 32 || (usb && baza == 44U)) { // Space
+        } else if (kod == 32) { // Space
             if (wybrany_.czy_poprawny() && wezly_[wybrany_.indeks].liczba_dzieci > 0) {
                 przelacz_rozwiniecie(wybrany_);
                 e.obsluzone = true;
                 return;
             }
-        } else if ((usb && baza == 82U) || (e0 && baza == 0x48U)) { // Up
+        } else if (kod == 0x48U) { // Up
             nawiguj_wzglednie(-1);
             e.obsluzone = true;
-        } else if ((usb && baza == 81U) || (e0 && baza == 0x50U)) { // Down
+        } else if (kod == 0x50U) { // Down
             nawiguj_wzglednie(1);
             e.obsluzone = true;
-        } else if ((usb && baza == 80U) || (e0 && baza == 0x4BU)) { // Left
+        } else if (kod == 0x4BU) { // Left
             if (wybrany_.czy_poprawny()) {
                 if (wezly_[wybrany_.indeks].rozwiniety) {
                     ustaw_rozwiniety(wybrany_, false);
@@ -299,7 +296,7 @@ public:
                 }
                 e.obsluzone = true;
             }
-        } else if ((usb && baza == 79U) || (e0 && baza == 0x4DU)) { // Right
+        } else if (kod == 0x4DU) { // Right
             if (wybrany_.czy_poprawny()) {
                 if (wezly_[wybrany_.indeks].liczba_dzieci > 0) {
                     if (!wezly_[wybrany_.indeks].rozwiniety) {
@@ -310,18 +307,18 @@ public:
                 }
                 e.obsluzone = true;
             }
-        } else if ((usb && baza == 75U) || (e0 && baza == 0x49U)) { // Page Up
+        } else if (kod == 0x49U) { // Page Up
             nawiguj_wzglednie(-widoczne_wiersze());
             e.obsluzone = true;
-        } else if ((usb && baza == 78U) || (e0 && baza == 0x51U)) { // Page Down
+        } else if (kod == 0x51U) { // Page Down
             nawiguj_wzglednie(widoczne_wiersze());
             e.obsluzone = true;
-        } else if ((usb && baza == 74U) || (e0 && baza == 0x47U)) { // Home
+        } else if (kod == 0x47U) { // Home
             if (liczba_widocznych_ > 0) {
                 ustaw_wybrany(widoczne_[0].uchwyt);
                 e.obsluzone = true;
             }
-        } else if ((usb && baza == 77U) || (e0 && baza == 0x4FU)) { // End
+        } else if (kod == 0x4FU) { // End
             if (liczba_widocznych_ > 0) {
                 ustaw_wybrany(widoczne_[liczba_widocznych_ - 1].uchwyt);
                 e.obsluzone = true;

@@ -14,6 +14,7 @@
 #include <string>
 using namespace Storage;
 void* kmalloc(size_t n){return std::malloc(n);}
+void kfree(void* p){std::free(p);}
 void wypisz_log(const char*){}
 bool pobierz_czas_rtc_bezpiecznie(czas_rtc*){return false;}
 bool authorized=true;
@@ -489,4 +490,3 @@ int main(){
 
     std::printf("Storage/BSP2 host: %u PASS, 0 FAIL (includes outside-partition sentinel, faults, >2 TiB GPT, A/B ESP, BlockDevice abstraction)\n",checks);
 }
-

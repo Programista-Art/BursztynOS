@@ -409,7 +409,9 @@ public:
     void obsluz_wprowadzenie_tekstu(ZdarzenieWprowadzaniaTekstu& e) override {
         if (!czy_wlaczona_ || czy_tylko_do_odczytu_ ||
             (e.czy_ctrl() && !e.czy_alt()) || e.czy_super()) return;
-        if (e.punkt_kodowy >= 32) {
+        if (e.punkt_kodowy >= 32 && e.punkt_kodowy <= 0x10ffff &&
+            !(e.punkt_kodowy >= 127 && e.punkt_kodowy <= 159) &&
+            !(e.punkt_kodowy >= 0xd800 && e.punkt_kodowy <= 0xdfff)) {
             char utf8_bytes[5]{0};
             size_t bytes = CzcionkaUI::zakoduj_utf8(e.punkt_kodowy, utf8_bytes);
             if (bytes > 0) {
@@ -472,7 +474,7 @@ public:
         }
 
         // Strzałka w lewo
-        if (e.kod_klawisza == 0x4B || e.kod_skanu == 0x4B || e.kod_klawisza == 2) {
+        if (e.kod_klawisza == 0x4B) {
             if (shift) {
                 przesun_kursor_w_lewo();
             } else {
@@ -491,7 +493,7 @@ public:
         }
 
         // Strzałka w prawo
-        if (e.kod_klawisza == 0x4D || e.kod_skanu == 0x4D || e.kod_klawisza == 3) {
+        if (e.kod_klawisza == 0x4D) {
             if (shift) {
                 przesun_kursor_w_prawo();
             } else {
@@ -510,7 +512,7 @@ public:
         }
 
         // Home
-        if (e.kod_klawisza == 0x47 || e.kod_skanu == 0x47) {
+        if (e.kod_klawisza == 0x47) {
             bajt_kursora_ = 0;
             if (!shift) bajt_kotwicy_ = 0;
             dopasuj_przewiniecie();
@@ -520,7 +522,7 @@ public:
         }
 
         // End
-        if (e.kod_klawisza == 0x4F || e.kod_skanu == 0x4F) {
+        if (e.kod_klawisza == 0x4F) {
             bajt_kursora_ = dlugosc_;
             if (!shift) bajt_kotwicy_ = dlugosc_;
             dopasuj_przewiniecie();
@@ -543,7 +545,7 @@ public:
         }
 
         // Delete
-        if (e.kod_klawisza == 127 || e.kod_klawisza == 0x53 || e.kod_skanu == 0x53) {
+        if (e.kod_klawisza == 0x53) {
             if (!czy_tylko_do_odczytu_) {
                 if (czy_ma_zaznaczenie()) {
                     usun_zaznaczenie();
@@ -556,7 +558,7 @@ public:
         }
 
         // Enter
-        if (e.kod_klawisza == 13 || e.kod_klawisza == 10 || e.kod_skanu == 0x1C) {
+        if (e.kod_klawisza == 13) {
             if (cb_zatwierdzenie_) {
                 cb_zatwierdzenie_(this, bufor_, dane_zatwierdzenia_);
             }
@@ -588,7 +590,7 @@ private:
                    (baza >= 84U && baza <= 103U);
         }
 
-        return kod >= 32U && kod < 127U;
+        return (kod & KLAWISZ_FIZYCZNY_GUI) || (kod >= 32U && kod < 127U);
     }
 
     static bool klawisz_litery(const ZdarzenieKlawiatury& e,

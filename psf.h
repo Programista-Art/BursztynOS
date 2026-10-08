@@ -30,6 +30,7 @@
 #include <stdbool.h>
 #include "storage_format.h"
 #include "psf_bootstrap_status.h"
+#include "plik_status.h"
 
 void psf_ustaw_partycje(const Storage::Partition* partition);
 #ifdef __cplusplus
@@ -228,6 +229,13 @@ struct psf_metadane {
     uint8_t czas_dostepny;
     uint8_t pzb_dostepny;
 };
+
+// Called under the PSF lock: use the supplied metadata, do not call PSF again.
+using PsfAutoryzacjaUsuwania = WynikPlikowy (*)(const char*, const psf_metadane&,
+                                               const psf_metadane&, void*);
+extern "C" WynikPlikowy psf_usun_drzewo(const char*, PsfAutoryzacjaUsuwania, void*);
+extern "C" WynikPlikowy psf_usun_wynik(const char*);
+extern "C" WynikPlikowy psf_utworz_wynik(const char*, bool katalog, uint8_t pzb);
 
 /* =========================================================================
  * 5. KONTROLA ABI FORMATU DYSKOWEGO

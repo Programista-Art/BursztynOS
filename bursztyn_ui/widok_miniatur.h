@@ -213,24 +213,23 @@ public:
     }
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
         if (!czy_wlaczona_ || liczba_ == 0) return;
-        uint32_t k = e.kod_klawisza; bool usb = (k & BWS_KEY_SOURCE_USB) != 0;
-        bool e0 = (k & BWS_KEY_SOURCE_E0) != 0; uint32_t b = usb ? k & 0xFFU : k & 0x7FU;
+        uint32_t k = e.polecenie();
         int delta = 0, cols = liczba_kolumn();
-        if ((usb && b == 79U) || (e0 && b == 0x4DU)) delta = 1;
-        if ((usb && b == 80U) || (e0 && b == 0x4BU)) delta = -1;
-        if ((usb && b == 81U) || (e0 && b == 0x50U)) delta = cols;
-        if ((usb && b == 82U) || (e0 && b == 0x48U)) delta = -cols;
+        if (k == 0x4DU) delta = 1;
+        if (k == 0x4BU) delta = -1;
+        if (k == 0x50U) delta = cols;
+        if (k == 0x48U) delta = -cols;
         if (delta) {
             int n = fokus_ < 0 ? 0 : przytnij(fokus_ + delta, 0, static_cast<int>(liczba_) - 1);
             ustaw_fokus_indeks(n); e.obsluzone = true; return;
         }
-        if ((usb && b == 74U) || (e0 && b == 0x47U)) { // Home
+        if (k == 0x47U) { // Home
             ustaw_fokus_indeks(0); e.obsluzone = true; return;
         }
-        if ((usb && b == 77U) || (e0 && b == 0x4FU)) { // End
+        if (k == 0x4FU) { // End
             ustaw_fokus_indeks(static_cast<int>(liczba_ - 1)); e.obsluzone = true; return;
         }
-        if ((usb && b == 78U) || (e0 && b == 0x51U)) { // Page Down
+        if (k == 0x51U) { // Page Down
             int ch = wysokosc_elementu_ * (skala_dpi_);
             int rpp = ch > 0 ? (viewport_h() / ch) : 1;
             if (rpp < 1) rpp = 1;
@@ -238,7 +237,7 @@ public:
             int n = przytnij(cur + rpp * cols, 0, static_cast<int>(liczba_) - 1);
             ustaw_fokus_indeks(n); e.obsluzone = true; return;
         }
-        if ((usb && b == 75U) || (e0 && b == 0x49U)) { // Page Up
+        if (k == 0x49U) { // Page Up
             int ch = wysokosc_elementu_ * (skala_dpi_);
             int rpp = ch > 0 ? (viewport_h() / ch) : 1;
             if (rpp < 1) rpp = 1;
@@ -246,7 +245,7 @@ public:
             int n = przytnij(cur - rpp * cols, 0, static_cast<int>(liczba_) - 1);
             ustaw_fokus_indeks(n); e.obsluzone = true; return;
         }
-        if (k == 13U || k == 32U || (usb && (b == 40U || b == 44U))) {
+        if (k == 13U || k == 32U) {
             if (fokus_ >= 0) ustaw_wybrany_indeks(fokus_);
             e.obsluzone = true;
             return;

@@ -9,6 +9,7 @@ kontrolki3tmp.o: programy/kontrolki3/kontrolki3.cpp \
  programy/kontrolki3/../../bursztyn_ui/motyw.h \
  programy/kontrolki3/../../bursztyn_ui/../bursztyn_gui.h \
  programy/kontrolki3/../../bursztyn_ui/../bws_pliki.h \
+ programy/kontrolki3/../../bursztyn_ui/../plik_status.h \
  programy/kontrolki3/../../bursztyn_ui/../bws_api.h \
  programy/kontrolki3/../../bursztyn_ui/../bws_nowoczesne.h \
  programy/kontrolki3/../../bursztyn_ui/../bws_ota.h \
@@ -93,6 +94,7 @@ programy/kontrolki3/../../bursztyn_ui/../bws_zdarzenia.h:
 programy/kontrolki3/../../bursztyn_ui/motyw.h:
 programy/kontrolki3/../../bursztyn_ui/../bursztyn_gui.h:
 programy/kontrolki3/../../bursztyn_ui/../bws_pliki.h:
+programy/kontrolki3/../../bursztyn_ui/../plik_status.h:
 programy/kontrolki3/../../bursztyn_ui/../bws_api.h:
 programy/kontrolki3/../../bursztyn_ui/../bws_nowoczesne.h:
 programy/kontrolki3/../../bursztyn_ui/../bws_ota.h:

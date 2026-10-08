@@ -149,14 +149,12 @@ public:
 
 protected:
     virtual bool obsluz_klawisz_specjalny(ZdarzenieKlawiatury& e) {
-        uint32_t k = e.kod_klawisza;
-        bool usb = (k & BWS_KEY_SOURCE_USB) != 0;
-        uint32_t b = usb ? (k & 0xFFU) : (k & 0x7FU);
-        if (k == 13U || k == 10U || (usb && b == 40U)) {
+        uint32_t k = e.polecenie();
+        if (k == 13U) {
             if (cb_wyszukanie_) cb_wyszukanie_(this, pole_->tekst(), dane_wyszukania_);
             e.obsluzone = true; return true;
         }
-        if (k == 27U || (usb && b == 41U) || (!usb && b == 1U)) {
+        if (k == 27U) {
             if (pole_->tekst()[0] != '\0' && !czy_tylko_do_odczytu_) wyczysc();
             e.obsluzone = true; return true;
         }

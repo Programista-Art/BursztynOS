@@ -4,6 +4,24 @@
 
 // App-level policy only. Permissions and atomic operations remain in BWS/PSF.
 namespace PlikiUI {
+inline const char* komunikat_bledu(WynikPlikowy wynik) {
+    switch(wynik) {
+    case WynikPlikowy::Ok:return "Operacja zakończona.";
+    case WynikPlikowy::Istnieje:return "Element o tej nazwie już istnieje.";
+    case WynikPlikowy::BrakUprawnien:return "Brak uprawnień do elementu lub jego folderu.";
+    case WynikPlikowy::Niepusty:return "Folder nie jest pusty.";
+    case WynikPlikowy::Brak:return "Nie znaleziono elementu.";
+    case WynikPlikowy::NieprawidlowaNazwa:return "Nieprawidłowa nazwa lub ścieżka.";
+    case WynikPlikowy::BrakMiejsca:return "Brak miejsca w systemie plików.";
+    case WynikPlikowy::BladIO:return "Błąd odczytu lub zapisu systemu plików.";
+    case WynikPlikowy::Chroniony:return "Element systemowy jest chroniony przed usunięciem.";
+    case WynikPlikowy::Czesciowo:return "Usunięto tylko część elementów. Operacja została przerwana.";
+    case WynikPlikowy::Uszkodzony:return "Niespójna struktura folderu. Nie wykonano usuwania.";
+    case WynikPlikowy::Limit:return "Folder przekracza bezpieczny limit usuwania.";
+    case WynikPlikowy::BrakPamieci:return "Brak pamięci do wykonania operacji.";
+    default:return "Nie udało się wykonać operacji plikowej.";
+    }
+}
 inline bool nazwa_poprawna(const char* name, size_t capacity = 56) {
     if (!name || !name[0]) return false;
     size_t n = 0;
@@ -22,16 +40,19 @@ inline bool nazwa_poprawna(const char* name, size_t capacity = 56) {
     }
     return true;
 }
-inline bool utworz_element(const char* directory,const char* name,bool folder) {
-    if(!directory || directory[0]!='/' || !nazwa_poprawna(name))return false;
+inline WynikPlikowy utworz_element_wynik(const char* directory,const char* name,bool folder) {
+    if(!directory || directory[0]!='/' || !nazwa_poprawna(name))return WynikPlikowy::NieprawidlowaNazwa;
     char path[512]{};size_t n=0;
     while(n<sizeof(path)-1 && directory[n]){path[n]=directory[n];++n;}
-    if(directory[n])return false;
+    if(directory[n])return WynikPlikowy::NieprawidlowaNazwa;
     if(n>1 && path[n-1]=='/')--n;
-    if(n>1){if(n+1>=sizeof(path))return false;path[n++]='/';}
-    for(size_t i=0;name[i];++i){if(n+1>=sizeof(path))return false;path[n++]=name[i];}
+    if(n>1){if(n+1>=sizeof(path))return WynikPlikowy::NieprawidlowaNazwa;path[n++]='/';}
+    for(size_t i=0;name[i];++i){if(n+1>=sizeof(path))return WynikPlikowy::NieprawidlowaNazwa;path[n++]=name[i];}
     path[n]=0;
-    return folder?utworz_katalog_uzytkownika(path):utworz(path);
+    return static_cast<WynikPlikowy>(bws_wywolaj(folder?46:2,reinterpret_cast<uint64_t>(path),BWS_STATUS_PLIKOWY));
+}
+inline bool utworz_element(const char* directory,const char* name,bool folder) {
+    return utworz_element_wynik(directory,name,folder)==WynikPlikowy::Ok;
 }
 // Paths supplied by desktop listings are absolute, normalized paths.
 inline bool cel_przeniesienia_poprawny(const char* source,const char* target) {

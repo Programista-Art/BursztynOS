@@ -2,6 +2,7 @@ eksplorator_tmp.o: programy/eksplorator/eksplorator-plikow.cpp \
  programy/eksplorator/../../bursztyn_gui.h \
  programy/eksplorator/../../bws_zdarzenia.h \
  programy/eksplorator/../../bws_pliki.h \
+ programy/eksplorator/../../plik_status.h \
  programy/eksplorator/../../bws_api.h \
  programy/eksplorator/../../bws_nowoczesne.h \
  programy/eksplorator/../../bws_ota.h \
@@ -47,6 +48,7 @@ eksplorator_tmp.o: programy/eksplorator/eksplorator-plikow.cpp \
 programy/eksplorator/../../bursztyn_gui.h:
 programy/eksplorator/../../bws_zdarzenia.h:
 programy/eksplorator/../../bws_pliki.h:
+programy/eksplorator/../../plik_status.h:
 programy/eksplorator/../../bws_api.h:
 programy/eksplorator/../../bws_nowoczesne.h:
 programy/eksplorator/../../bws_ota.h:

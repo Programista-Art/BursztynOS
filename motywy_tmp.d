@@ -1,11 +1,11 @@
 motywy_tmp.o: programy/motywy/motywy.cpp programy/motywy/../../motyw.h \
  programy/motywy/../../bursztyn_gui.h \
  programy/motywy/../../bws_zdarzenia.h programy/motywy/../../bws_pliki.h \
- programy/motywy/../../bws_api.h programy/motywy/../../bws_nowoczesne.h \
- programy/motywy/../../bws_ota.h programy/motywy/../../skladacz_obrazu.h \
- programy/motywy/../../pzb.h programy/motywy/../../legacy_ui.h \
- programy/motywy/../../ui_skala.h programy/motywy/../../loader.h \
- programy/motywy/../../pamiec.h \
+ programy/motywy/../../plik_status.h programy/motywy/../../bws_api.h \
+ programy/motywy/../../bws_nowoczesne.h programy/motywy/../../bws_ota.h \
+ programy/motywy/../../skladacz_obrazu.h programy/motywy/../../pzb.h \
+ programy/motywy/../../legacy_ui.h programy/motywy/../../ui_skala.h \
+ programy/motywy/../../loader.h programy/motywy/../../pamiec.h \
  programy/motywy/../../bursztyn_ui/bursztyn_ui.h \
  programy/motywy/../../bursztyn_ui/typy.h \
  programy/motywy/../../bursztyn_ui/zdarzenia.h \
@@ -81,6 +81,7 @@ programy/motywy/../../motyw.h:
 programy/motywy/../../bursztyn_gui.h:
 programy/motywy/../../bws_zdarzenia.h:
 programy/motywy/../../bws_pliki.h:
+programy/motywy/../../plik_status.h:
 programy/motywy/../../bws_api.h:
 programy/motywy/../../bws_nowoczesne.h:
 programy/motywy/../../bws_ota.h:

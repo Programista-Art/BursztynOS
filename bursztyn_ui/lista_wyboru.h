@@ -262,23 +262,21 @@ public:
         if (!czy_wlaczona_) return;
         int nowy = indeks_fokusu_;
         if (nowy < 0 && liczba_ > 0) nowy = 0;
-        uint32_t kod = e.kod_klawisza;
-        bool usb = (kod & BWS_KEY_SOURCE_USB) != 0;
-        uint32_t b = usb ? kod & 0xFFU : kod & 0x7FU;
+        uint32_t kod = e.polecenie();
         int strona = liczba_widocznych_wierszy();
         bool obsl = true;
-        if ((usb && b == 82U) || (!usb && b == 0x48U)) --nowy;
-        else if ((usb && b == 81U) || (!usb && b == 0x50U)) ++nowy;
-        else if ((usb && b == 74U) || (!usb && b == 0x47U)) nowy = 0;
-        else if ((usb && b == 77U) || (!usb && b == 0x4FU)) nowy = static_cast<int>(liczba_) - 1;
-        else if ((usb && b == 75U) || (!usb && b == 0x49U)) nowy -= strona;
-        else if ((usb && b == 78U) || (!usb && b == 0x51U)) nowy += strona;
-        else if (kod == 13 || kod == 10 || b == 0x1CU) {
+        if (kod == 0x48U) --nowy;
+        else if (kod == 0x50U) ++nowy;
+        else if (kod == 0x47U) nowy = 0;
+        else if (kod == 0x4FU) nowy = static_cast<int>(liczba_) - 1;
+        else if (kod == 0x49U) nowy -= strona;
+        else if (kod == 0x51U) nowy += strona;
+        else if (kod == 13) {
             if (indeks_fokusu_ >= 0 && cb_aktywacja_)
                 cb_aktywacja_(this, indeks_fokusu_, dane_aktywacji_);
         } else obsl = false;
         if (obsl) {
-            if (liczba_ > 0 && !(kod == 13 || kod == 10 || b == 0x1CU)) {
+            if (liczba_ > 0 && !(kod == 13)) {
                 if (nowy < 0) nowy = 0;
                 if (nowy >= static_cast<int>(liczba_)) nowy = static_cast<int>(liczba_) - 1;
                 ustaw_wybrany_indeks(nowy);

@@ -984,6 +984,16 @@ bool usun_twor_uzytkownika(const char* sciezka) {
     return sciezka && bws_wywolaj(7, reinterpret_cast<uint64_t>(sciezka)) == 1ULL;
 }
 
+WynikPlikowy usun_drzewo_uzytkownika(const char* sciezka) {
+    if(!sciezka)return WynikPlikowy::NieprawidlowaNazwa;
+    return static_cast<WynikPlikowy>(bws_wywolaj(7,reinterpret_cast<uint64_t>(sciezka),BWS_USUN_DRZEWO));
+}
+bool gui_zastap_region(int x,int y,int szer,int wys,const uint32_t* piksele) {
+    if(!piksele || szer<=0 || wys<=0)return false;
+    return bws_wywolaj(57,spakuj_dwa_i32(legacy_x(x),legacy_y(y)),
+        spakuj_dwa_i32(legacy_w(szer),legacy_h(wys)),reinterpret_cast<uint64_t>(piksele),2)==1;
+}
+
 bool zmien_nazwe_uzytkownika(const char* sciezka, const char* nowa_nazwa) {
     return sciezka && nowa_nazwa &&
         bws_wywolaj(8, reinterpret_cast<uint64_t>(sciezka),

@@ -3,6 +3,7 @@ przegladarka_obrazow_tmp.o: \
  programy/przegladarka-obrazow/../../bursztyn_gui.h \
  programy/przegladarka-obrazow/../../bws_zdarzenia.h \
  programy/przegladarka-obrazow/../../bws_pliki.h \
+ programy/przegladarka-obrazow/../../plik_status.h \
  programy/przegladarka-obrazow/../../bws_api.h \
  programy/przegladarka-obrazow/../../bws_nowoczesne.h \
  programy/przegladarka-obrazow/../../bws_ota.h \
@@ -14,6 +15,7 @@ przegladarka_obrazow_tmp.o: \
 programy/przegladarka-obrazow/../../bursztyn_gui.h:
 programy/przegladarka-obrazow/../../bws_zdarzenia.h:
 programy/przegladarka-obrazow/../../bws_pliki.h:
+programy/przegladarka-obrazow/../../plik_status.h:
 programy/przegladarka-obrazow/../../bws_api.h:
 programy/przegladarka-obrazow/../../bws_nowoczesne.h:
 programy/przegladarka-obrazow/../../bws_ota.h:

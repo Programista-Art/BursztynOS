@@ -241,7 +241,7 @@ public:
 
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
         if (!czy_wlaczona_) return;
-        AkcjaKlawisza akcja = rozpoznaj_klawisz(e.kod_klawisza);
+        AkcjaKlawisza akcja = rozpoznaj_klawisz(e.polecenie());
         bool obsluzone = true;
         switch (akcja) {
             case AkcjaKlawisza::Mniej: model_.przewin_maly_krok(-1); break;
@@ -499,35 +499,16 @@ private:
     }
 
     AkcjaKlawisza rozpoznaj_klawisz(uint32_t kod) const {
-        bool usb = (kod & BWS_KEY_SOURCE_USB) != 0;
-        bool e0 = (kod & BWS_KEY_SOURCE_E0) != 0;
-        uint32_t baza = usb ? (kod & 0xFFU) : (kod & 0x7FU);
-        if (usb) {
-            if (baza == 74U) return AkcjaKlawisza::Minimum;
-            if (baza == 77U) return AkcjaKlawisza::Maksimum;
-            if (baza == 75U) return AkcjaKlawisza::StronaMniej;
-            if (baza == 78U) return AkcjaKlawisza::StronaWiecej;
-            if (orientacja_ == Orientacja::Pozioma) {
-                if (baza == 80U) return AkcjaKlawisza::Mniej;
-                if (baza == 79U) return AkcjaKlawisza::Wiecej;
-            } else {
-                if (baza == 82U) return AkcjaKlawisza::Mniej;
-                if (baza == 81U) return AkcjaKlawisza::Wiecej;
-            }
-            return AkcjaKlawisza::Brak;
-        }
-        if (e0 || kod <= 0x7FU) {
-            if (baza == 0x47U) return AkcjaKlawisza::Minimum;
-            if (baza == 0x4FU) return AkcjaKlawisza::Maksimum;
-            if (baza == 0x49U) return AkcjaKlawisza::StronaMniej;
-            if (baza == 0x51U) return AkcjaKlawisza::StronaWiecej;
-            if (orientacja_ == Orientacja::Pozioma) {
-                if (baza == 0x4BU) return AkcjaKlawisza::Mniej;
-                if (baza == 0x4DU) return AkcjaKlawisza::Wiecej;
-            } else {
-                if (baza == 0x48U) return AkcjaKlawisza::Mniej;
-                if (baza == 0x50U) return AkcjaKlawisza::Wiecej;
-            }
+        if (kod == 0x47U) return AkcjaKlawisza::Minimum;
+        if (kod == 0x4FU) return AkcjaKlawisza::Maksimum;
+        if (kod == 0x49U) return AkcjaKlawisza::StronaMniej;
+        if (kod == 0x51U) return AkcjaKlawisza::StronaWiecej;
+        if (orientacja_ == Orientacja::Pozioma) {
+            if (kod == 0x4BU) return AkcjaKlawisza::Mniej;
+            if (kod == 0x4DU) return AkcjaKlawisza::Wiecej;
+        } else {
+            if (kod == 0x48U) return AkcjaKlawisza::Mniej;
+            if (kod == 0x50U) return AkcjaKlawisza::Wiecej;
         }
         return AkcjaKlawisza::Brak;
     }

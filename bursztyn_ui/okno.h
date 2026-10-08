@@ -820,21 +820,20 @@ public:
             case BWS_ZDARZENIE_KLAWISZ:
             case BWS_ZDARZENIE_KLAWISZ_FIZYCZNY: {
                 bool fizyczny = surowe_zdarzenie.typ == BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;
+                if(echo_klawiatury(surowe_zdarzenie))break;
+                const uint32_t polecenie=klawisz_polecenia(surowe_zdarzenie);
+                if(!polecenie)break;
                 bool wcisniety = !fizyczny || surowe_zdarzenie.x != 0;
                 uint32_t kod_bazowy = surowe_zdarzenie.kod & 0xFFU;
                 bool klawisz_alt = ((surowe_zdarzenie.kod & BWS_KEY_SOURCE_USB) &&
                                     (kod_bazowy == 226U || kod_bazowy == 230U)) ||
                                    (!(surowe_zdarzenie.kod & BWS_KEY_SOURCE_USB) &&
                                     ((surowe_zdarzenie.kod & 0x7FU) == 0x38U));
-                if (wcisniety && klawisz_alt && kontrolka_glowna_) {
+                if (fizyczny && wcisniety && klawisz_alt && kontrolka_glowna_) {
                     Kontrolka* cel_alt = kontrolka_glowna_->kontrolka_aktywacji_alt();
                     if (cel_alt) { ustaw_fokus(cel_alt); break; }
                 }
-                bool usb = (surowe_zdarzenie.kod & BWS_KEY_SOURCE_USB) != 0;
-                uint32_t baza = usb ? (surowe_zdarzenie.kod & 0xFFU)
-                                    : (surowe_zdarzenie.kod & 0x7FU);
-                bool tab = surowe_zdarzenie.kod == 9 ||
-                           (!usb && baza == 0x0FU) || (usb && baza == 43U);
+                bool tab = polecenie == 9;
                 // Ctrl+Tab nalezy do kontenera kart, nie do globalnej
                 // nawigacji fokusu.
                 if (wcisniety && tab && !popupy_.czy_otwarty() &&
@@ -846,8 +845,8 @@ public:
 
                 ZdarzenieKlawiatury ke;
                 ke.typ = TypZdarzenia::KlawiszWcisniety;
-                ke.kod_klawisza = surowe_zdarzenie.kod;
-                ke.kod_skanu = surowe_zdarzenie.kod;
+                ke.kod_klawisza = polecenie;
+                ke.kod_skanu = fizyczny ? surowe_zdarzenie.kod|KLAWISZ_FIZYCZNY_GUI : 0;
                 ke.modyfikatory = surowe_zdarzenie.przyciski;
                 if (wcisniety && popupy_.czy_otwarty() && popupy_.obsluz_klawisz(ke)) break;
                 if (kontrolka_z_fokusem_) {
@@ -872,7 +871,7 @@ public:
                 // fokusem. Ctrl+C/V/X pozostaja dzieki temu w edytorze tekstu,
                 // jesli edytor potrafi je wykonac.
                 if (wcisniety && !ke.obsluzone && lista_polecen_ &&
-                    lista_polecen_->wykonaj_skrot(ke.kod_klawisza, ke.modyfikatory))
+                    lista_polecen_->wykonaj_skrot(surowe_zdarzenie.kod, ke.modyfikatory))
                     ke.obsluzone = true;
                 break;
             }

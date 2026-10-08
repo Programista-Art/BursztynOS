@@ -36,26 +36,14 @@ public:
         popups.ustaw_geometrie_wlasciciela(owner, work);
     }
     void limit_tekstu(PoleTekstowe* field,size_t bytes) {limit_field_=field;limit_bytes_=bytes;}
-    void reset_input() { skip_count_=skip_pos_=ansi_=byte_count_=0; }
+    void reset_input() { skip_count_=skip_pos_=ansi_=0; }
     static uint32_t klawisz(const bws_zdarzenie& e) {
-        unsigned code=e.kod&255;
-        if(e.kod&BWS_KEY_SOURCE_USB) {
-            switch(code) {
-            case 40:return 13; case 41:return 27; case 42:return 8; case 43:return 9;
-            case 76:return 0x53; case 79:return 0x4d; case 80:return 0x4b;
-            case 81:return 0x50; case 82:return 0x48; case 74:return 0x47;
-            case 77:return 0x4f; case 75:return 0x49; case 78:return 0x51;
-            default:return e.kod;
-            }
-        }
-        switch(code&127) {
-        case 14:return 8; case 28:return 13; case 1:return 27; case 15:return 9;
-        default:return (e.kod&BWS_KEY_SOURCE_E0)?code:e.kod;
-        }
+        return klawisz_polecenia(e);
     }
     bool wymaga_odswiezenia() const {return needs_refresh_;}
     bool zdarzenie(const bws_zdarzenie& e) {
         needs_refresh_=e.typ!=BWS_ZDARZENIE_TIMER;
+        if(echo_klawiatury(e)) {needs_refresh_=false;return popups.czy_otwarty();}
         if(e.typ==BWS_ZDARZENIE_MYSZ_PRAWY_UP && consume_right_up_) {consume_right_up_=false;return true;}
         if(e.typ==BWS_ZDARZENIE_MYSZ_UP && consume_up_) {consume_up_=false;return true;}
         if(e.typ==BWS_ZDARZENIE_KLAWISZ && skip_pos_<skip_count_) {
@@ -101,14 +89,7 @@ public:
             if(ansi_>=10) {int n=ansi_-10;ansi_=0;if(c=='~')send_key(n==3?0x53:n==1?0x47:n==4?0x4f:n==5?0x49:n==6?0x51:0);break;}
             if(c==27) {ansi_=1;break;}
             if(c<32 || c==127) {send_key(c==127?0x53:c==10?13:c);break;}
-            if(byte_count_ && (c&192)!=128)byte_count_=0;
-            if(!byte_count_ && c>=128 && (c<194 || c>244))break;
-            bytes_[byte_count_++]=char(c);bytes_[byte_count_]=0;
-            unsigned char first=bytes_[0];unsigned expected=first<128?1:first<224?2:first<240?3:4;
-            if(byte_count_==expected) {
-                uint32_t cp=0;if(CzcionkaUI::dekoduj_utf8(bytes_,0,&cp)==expected) {ZdarzenieWprowadzaniaTekstu t{};t.punkt_kodowy=cp;send_text(t);}
-                byte_count_=0;
-            }
+            // Legacy printable bytes are echoes, never another text source.
             break;
         }
         case BWS_ZDARZENIE_TIMER:if(ansi_==1) {ansi_=0;send_key(27);needs_refresh_=true;}break;
@@ -121,8 +102,8 @@ public:
 private:
     bool needs_refresh_{false};
     bool consume_up_{false},consume_right_up_{false};
-    char skip_[5]{},bytes_[5]{};
-    unsigned skip_count_{0},skip_pos_{0},byte_count_{0};int ansi_{0};
+    char skip_[5]{};
+    unsigned skip_count_{0},skip_pos_{0};int ansi_{0};
     PoleTekstowe* limit_field_{nullptr};size_t limit_bytes_{0};
     void send_text(ZdarzenieWprowadzaniaTekstu& t) {
         if(limit_field_ && popups.fokus_popupu()==limit_field_) {
@@ -134,7 +115,7 @@ private:
     }
     void send_key(uint32_t key,uint32_t mods=0,uint32_t scan=0) {
         if(!key)return;
-        ZdarzenieKlawiatury k{};k.kod_klawisza=key;k.kod_skanu=scan;k.modyfikatory=mods;popups.obsluz_klawisz(k);
+        ZdarzenieKlawiatury k{};k.kod_klawisza=key;k.kod_skanu=scan ? scan|KLAWISZ_FIZYCZNY_GUI : 0;k.modyfikatory=mods;popups.obsluz_klawisz(k);
     }
 
 };

@@ -273,39 +273,37 @@ public:
 
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
         if (!czy_wlaczona_ || liczba_wierszy() == 0) return;
-        uint32_t k = e.kod_klawisza;
-        bool usb = (k & BWS_KEY_SOURCE_USB) != 0;
-        uint32_t b = usb ? (k & 0xFFU) : (k & 0x7FU);
+        uint32_t k = e.polecenie();
 
-        if ((usb && b == 82U) || (!usb && b == 0x48U)) {
+        if (k == 0x48U) {
             if (wybrany_wiersz_ > 0) ustaw_wybrany_wiersz(wybrany_wiersz_ - 1);
             e.obsluzone = true;
             return;
         }
-        if ((usb && b == 81U) || (!usb && b == 0x50U)) {
+        if (k == 0x50U) {
             if (wybrany_wiersz_ + 1 < liczba_wierszy()) ustaw_wybrany_wiersz(wybrany_wiersz_ + 1);
             e.obsluzone = true;
             return;
         }
-        if ((usb && b == 75U) || (!usb && b == 0x49U)) {
+        if (k == 0x49U) {
             int page = (obszar_.wysokosc - wysokosc_naglowka()) / (wysokosc_wiersza() > 0 ? wysokosc_wiersza() : 1);
             if (wybrany_wiersz_ > static_cast<size_t>(page)) ustaw_wybrany_wiersz(wybrany_wiersz_ - page);
             else ustaw_wybrany_wiersz(0);
             e.obsluzone = true;
             return;
         }
-        if ((usb && b == 78U) || (!usb && b == 0x51U)) {
+        if (k == 0x51U) {
             int page = (obszar_.wysokosc - wysokosc_naglowka()) / (wysokosc_wiersza() > 0 ? wysokosc_wiersza() : 1);
             ustaw_wybrany_wiersz(wybrany_wiersz_ + page);
             e.obsluzone = true;
             return;
         }
-        if ((usb && b == 74U) || (!usb && b == 0x47U)) {
+        if (k == 0x47U) {
             ustaw_wybrany_wiersz(0);
             e.obsluzone = true;
             return;
         }
-        if ((usb && b == 77U) || (!usb && b == 0x4FU)) {
+        if (k == 0x4FU) {
             ustaw_wybrany_wiersz(liczba_wierszy() - 1);
             e.obsluzone = true;
             return;

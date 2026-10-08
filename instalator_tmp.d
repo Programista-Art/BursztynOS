@@ -9,6 +9,7 @@ instalator_tmp.o: programy/instalator/instalator.cpp \
  programy/instalator/../../bursztyn_ui/motyw.h \
  programy/instalator/../../bursztyn_ui/../bursztyn_gui.h \
  programy/instalator/../../bursztyn_ui/../bws_pliki.h \
+ programy/instalator/../../bursztyn_ui/../plik_status.h \
  programy/instalator/../../bursztyn_ui/../bws_api.h \
  programy/instalator/../../bursztyn_ui/../bws_nowoczesne.h \
  programy/instalator/../../bursztyn_ui/../bws_ota.h \
@@ -94,6 +95,7 @@ programy/instalator/../../bursztyn_ui/../bws_zdarzenia.h:
 programy/instalator/../../bursztyn_ui/motyw.h:
 programy/instalator/../../bursztyn_ui/../bursztyn_gui.h:
 programy/instalator/../../bursztyn_ui/../bws_pliki.h:
+programy/instalator/../../bursztyn_ui/../plik_status.h:
 programy/instalator/../../bursztyn_ui/../bws_api.h:
 programy/instalator/../../bursztyn_ui/../bws_nowoczesne.h:
 programy/instalator/../../bursztyn_ui/../bws_ota.h:

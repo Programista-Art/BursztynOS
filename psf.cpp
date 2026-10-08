@@ -4207,10 +4207,9 @@ extern "C" bool wylistuj_katalog(
  * PUBLICZNE API - USUWANIE
  * ========================================================================= */
 
-extern "C" bool usun_twor(
+static bool usun_twor_bez_blokady(
     const char* sciezka
 ) {
-    BlokadaPSF blokada;
 
     if (!psf_gotowy ||
         !bezpieczna_sciezka(
@@ -4376,6 +4375,11 @@ extern "C" bool usun_twor(
     return true;
 }
 
+extern "C" bool usun_twor(const char* sciezka) {
+    BlokadaPSF blokada;
+    return usun_twor_bez_blokady(sciezka);
+}
+
 /* =========================================================================
  * PUBLICZNE API - ROZMIAR
  * ========================================================================= */
@@ -4505,6 +4509,24 @@ extern "C" bool czy_katalog_istnieje(const char* sciezka) {
     return czy_katalog_istnieje_wewn(sciezka);
 }
 
+namespace { bool sciezka_usuwania(const char*,char*); }
+extern "C" WynikPlikowy psf_utworz_wynik(const char* path,bool folder,uint8_t pzb) {
+    BlokadaPSF lock;
+    char canonical[512]{};
+    if(!sciezka_usuwania(path,canonical) || canonical[1]==0)return WynikPlikowy::NieprawidlowaNazwa;
+    PsfStanStartu status{};ZakresStanuStartu scope(&status);
+    const bool ok=utworz_twor(canonical,folder?TYP_KATALOG:TYP_PLIK,pzb);
+    switch(status.blad) {
+    case PsfBladStartu::Ok:return ok?WynikPlikowy::Ok:WynikPlikowy::BladIO;
+    case PsfBladStartu::JuzIstnieje:return WynikPlikowy::Istnieje;
+    case PsfBladStartu::ZlaSciezka:return WynikPlikowy::NieprawidlowaNazwa;
+    case PsfBladStartu::BrakRodzica:return WynikPlikowy::Brak;
+    case PsfBladStartu::BrakWezlow:case PsfBladStartu::BrakBlokow:
+    case PsfBladStartu::LimitKatalogu:return WynikPlikowy::BrakMiejsca;
+    default:return WynikPlikowy::BladIO;
+    }
+}
+
 extern "C" bool zapewnij_katalog(const char* sciezka) {
     BlokadaPSF blokada;
     if (czy_katalog_istnieje_wewn(sciezka))
@@ -4630,18 +4652,7 @@ extern "C" bool zmien_nazwe_tworu(
  * PUBLICZNE API - METADANE I PRZENOSZENIE
  * ========================================================================= */
 
-extern "C" bool pobierz_metadane_tworu(
-    const char* sciezka,
-    psf_metadane* metadane
-) {
-    BlokadaPSF blokada;
-    if (!psf_gotowy || !bezpieczna_sciezka(sciezka) || !metadane)
-        return false;
-
-    const uint64_t id = rozwiaz_sciezke(sciezka, nullptr, false);
-    wezel_indeksowy* w = pobierz_wezel(id);
-    if (id == 0 || !w || w->typ == TYP_WOLNY) return false;
-
+static bool metadane_wezla(const wezel_indeksowy* w, psf_metadane* metadane) {
     metadane->rozmiar = w->rozmiar_w_bajtach;
     metadane->czas_utworzenia_rtc = 0;
     metadane->typ = w->typ;
@@ -4665,6 +4676,21 @@ extern "C" bool pobierz_metadane_tworu(
         metadane->pzb_dostepny = 1;
     }
     return true;
+}
+
+extern "C" bool pobierz_metadane_tworu(
+    const char* sciezka,
+    psf_metadane* metadane
+) {
+    BlokadaPSF blokada;
+    if (!psf_gotowy || !bezpieczna_sciezka(sciezka) || !metadane)
+        return false;
+
+    const uint64_t id = rozwiaz_sciezke(sciezka, nullptr, false);
+    wezel_indeksowy* w = pobierz_wezel(id);
+    if (id == 0 || !w || w->typ == TYP_WOLNY) return false;
+
+    return metadane_wezla(w, metadane);
 }
 
 #ifdef BURSZTYN_PSF_HOST_TEST
@@ -4756,6 +4782,8 @@ extern "C" PsfMoveWynik psf_przenies_twor_wynik(const char* sciezka,const char* 
 extern "C" bool przenies_twor(const char* sciezka,const char* folder_docelowy) {
     return psf_przenies_twor_wynik(sciezka,folder_docelowy)==PSF_MOVE_OK;
 }
+
+#include "psf_usuwanie.inc"
 
 extern "C" bool kopiuj_twor_z_pzb(
     const char* sciezka,

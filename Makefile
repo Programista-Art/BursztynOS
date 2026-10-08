@@ -1707,10 +1707,25 @@ test-splash-production-path: $(STARTUP_HOST_OBJECTS)
 # Bootstrap status is shared with kernel early startup; explicit first-build
 # edges complement generated dependencies when upgrading an existing worktree.
 psf.o kernel.o: psf.h psf_bootstrap_status.h
+psf.o: psf_usuwanie.inc plik_status.h
+bursztyn_gui.o syscalls.o: plik_status.h
 kernel.o: psf_bootstrap.h
 -include $(wildcard *.d biblioteki/mbedtls/library/*.d)
 
 PSF_BOOTSTRAP_HOST_FLAGS := -std=c++17 -O1 -g -Wall -Wextra -I. -Ibiblioteki/mbedtls/include -DBURSZTYN_PSF_HOST_TEST -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined
+.PHONY: test-gui-text-input-host test-recursive-delete-host test-file-watch-host
+test-file-watch-host:
+	@mkdir -p .installertest
+	g++ $(PSF_BOOTSTRAP_HOST_FLAGS) narzedzia/test_file_watch_host.cpp -o .installertest/test-file-watch
+	ASAN_OPTIONS=detect_leaks=0 .installertest/test-file-watch
+test-gui-text-input-host:
+	@mkdir -p .bursztyn-ui-test
+	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined narzedzia/test_gui_text_input.cpp klawiatura.cpp -o .bursztyn-ui-test/test-gui-text-input
+	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-gui-text-input
+test-recursive-delete-host:
+	@mkdir -p .installertest
+	g++ $(PSF_BOOTSTRAP_HOST_FLAGS) narzedzia/test_recursive_delete_host.cpp storage_format.cpp -o .installertest/test-recursive-delete
+	ASAN_OPTIONS=detect_leaks=0 .installertest/test-recursive-delete
 .PHONY: test-psf-bootstrap-host
 test-psf-bootstrap-host:
 	@mkdir -p .installertest
