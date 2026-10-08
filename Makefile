@@ -420,6 +420,17 @@ bios: iso
 
 uefi: iso
 
+# Compiler-generated header dependencies cover PSF, kernel and embedded Ring3.
+KERNEL_CXXFLAGS += -MMD -MP
+RING3_FLAGS += -MMD -MP
+MBEDTLS_CFLAGS += -MMD -MP
+
+# Targeted base-tree diagnostics only; no normal filesystem-operation logging.
+BURSZTYNDIAGPSFBOOTSTRAP ?= 0
+ifeq ($(BURSZTYNDIAGPSFBOOTSTRAP),1)
+KERNEL_CXXFLAGS += -DBURSZTYNDIAGPSFBOOTSTRAP=1
+endif
+
 # ============================================================================
 # 9. REGULY OGOLNE
 # ============================================================================
@@ -1554,6 +1565,12 @@ test-desktop-files-host:
 	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined narzedzia/test_desktop_files_host.cpp -o .bursztyn-ui-test/test-desktop-files
 	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-desktop-files
 
+.PHONY: test-desktop-capacity-host
+test-desktop-capacity-host:
+	@mkdir -p .bursztyn-ui-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined narzedzia/test_desktop_capacity_host.cpp -o .bursztyn-ui-test/test-desktop-capacity
+	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-desktop-capacity
+
 # Opt-in aggregate move diagnostics; no normal-build logging or GPU behavior changes.
 BURSZTYNDIAGMOVE ?= 0
 ifeq ($(BURSZTYNDIAGMOVE),1)
@@ -1686,3 +1703,18 @@ test-splash-production-path: $(STARTUP_HOST_OBJECTS)
 	@mkdir -p .wm-test
 	g++ $(STARTUP_HOST_FLAGS) -Wl,--gc-sections $(STARTUP_HOST_OBJECTS) -o .wm-test/splash-production-path
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/splash-production-path
+
+# Bootstrap status is shared with kernel early startup; explicit first-build
+# edges complement generated dependencies when upgrading an existing worktree.
+psf.o kernel.o: psf.h psf_bootstrap_status.h
+kernel.o: psf_bootstrap.h
+-include $(wildcard *.d biblioteki/mbedtls/library/*.d)
+
+PSF_BOOTSTRAP_HOST_FLAGS := -std=c++17 -O1 -g -Wall -Wextra -I. -Ibiblioteki/mbedtls/include -DBURSZTYN_PSF_HOST_TEST -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined
+.PHONY: test-psf-bootstrap-host
+test-psf-bootstrap-host:
+	@mkdir -p .installertest
+	g++ $(PSF_BOOTSTRAP_HOST_FLAGS) -DBURSZTYNDIAGPSFBOOTSTRAP=0 narzedzia/test_psf_bootstrap_host.cpp aktualizacja.cpp storage_format.cpp -o .installertest/test-psf-bootstrap-normal
+	ASAN_OPTIONS=detect_leaks=0 .installertest/test-psf-bootstrap-normal
+	g++ $(PSF_BOOTSTRAP_HOST_FLAGS) -DBURSZTYNDIAGPSFBOOTSTRAP=1 narzedzia/test_psf_bootstrap_host.cpp aktualizacja.cpp storage_format.cpp -o .installertest/test-psf-bootstrap
+	ASAN_OPTIONS=detect_leaks=0 .installertest/test-psf-bootstrap

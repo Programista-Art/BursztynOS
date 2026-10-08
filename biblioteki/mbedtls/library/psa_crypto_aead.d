@@ -1,0 +1,10 @@
+biblioteki/mbedtls/library/psa_crypto_aead.o: \
+ biblioteki/mbedtls/library/psa_crypto_aead.c \
+ biblioteki/mbedtls/library/common.h \
+ biblioteki/mbedtls/include/mbedtls/config.h \
+ biblioteki/mbedtls/bursztyn_mbedtls_config.h \
+ biblioteki/mbedtls/include/mbedtls/check_config.h
+biblioteki/mbedtls/library/common.h:
+biblioteki/mbedtls/include/mbedtls/config.h:
+biblioteki/mbedtls/bursztyn_mbedtls_config.h:
+biblioteki/mbedtls/include/mbedtls/check_config.h:

@@ -29,6 +29,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include "storage_format.h"
+#include "psf_bootstrap_status.h"
 
 void psf_ustaw_partycje(const Storage::Partition* partition);
 #ifdef __cplusplus
@@ -440,6 +441,10 @@ bool zapisz_do_pliku(
 );
 
 bool psf_czy_gotowy();
+
+// Narrow kernel bootstrap path: directory lookup, idempotent create, status.
+// Generic creation and listing contracts remain unchanged.
+bool psf_przygotuj_katalog_startowy(const char* sciezka, PsfStanStartu* stan);
 
 bool zapisz_fragment_pliku(
     const char* sciezka,

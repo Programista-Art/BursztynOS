@@ -18,6 +18,7 @@ int bws_utworz_warstwe(int,int,int,int,int) {return 1;}
 #include "desktop_selection_cases.h"
 #include "desktop_launcher_edge_cases.h"
 #include "desktop_persistence_cases.h"
+#include "desktop_capacity_cases.h"
 
 int main() {
     g_test_bws_hook=explorer_bws;
@@ -112,6 +113,7 @@ int main() {
     desktop_selection_cases();
     desktop_launcher_edge_cases();
     desktop_persistence_cases();
+    desktop_capacity_cases();
     delete pulpit_menu;delete pulpit_dialog;delete pulpit_wybor;
     printf("Desktop production file actions: %d/%d PASS (RAM filesystem)\n",checks,checks);
 }

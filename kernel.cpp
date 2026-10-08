@@ -27,6 +27,7 @@ extern "C" void odblokuj_ekran();
 
 #include "pamiec.h"
 #include "psf.h"
+#include "psf_bootstrap.h"
 #include "grafika.h"
 #include "loader.h"
 #include "ahci.h"
@@ -721,108 +722,6 @@ bool instaluj_paczke(
  * SYSTEM PLIKOW
  * ========================================================================= */
 
-/*
- * Sprawdza, czy podana sciezka wskazuje na istniejacy katalog.
- *
- * Uzywamy publicznego API PSF zamiast zagladac do jego prywatnych struktur.
- * wylistuj_katalog() zwraca true tylko dla poprawnego, istniejacego katalogu.
- * Bufor o rozmiarze 1 jest wystarczajacy do samego testu istnienia/typu.
- */
-bool katalog_istnieje(const char* sciezka) {
-    if (!sciezka)
-        return false;
-
-    char bufor_testowy[1] = {'\0'};
-
-    return wylistuj_katalog(
-        sciezka,
-        bufor_testowy,
-        sizeof(bufor_testowy));
-}
-
-
-
-
-/*
- * Zapewnia istnienie katalogu, ale nie traktuje ponownego uruchomienia
- * systemu jako bledu.
- *
- * To jest wazne dla trwalego BSP2: po pierwszym uruchomieniu katalogi sa
- * juz zapisane na SATA. utworz_katalog() zgodnie z API zwraca false, gdy
- * obiekt juz istnieje, dlatego nie wolno uzywac samego wyniku CREATE jako
- * testu poprawnosci startu.
- */
-bool zapewnij_katalog_startowy(const char* sciezka) {
-    if (!sciezka)
-        return false;
-
-    if (katalog_istnieje(sciezka))
-        return true;
-
-    if (!utworz_katalog(sciezka))
-        return false;
-
-    /*
-     * Weryfikujemy rezultat po utworzeniu. Chroni to start przed sytuacja,
-     * w ktorej implementacja PSF zwroci sukces, ale katalog nie bedzie
-     * mozliwy do poprawnego odczytania.
-     */
-    return katalog_istnieje(sciezka);
-}
-
-static const char* const KATALOGI_SYSTEMOWE[] = {
-        "/sloty",
-        "/sloty/a",
-        "/sloty/a/programy",
-        "/sloty/a/system",
-        "/sloty/a/system/jadro",
-        "/sloty/a/system/biblioteki",
-        "/sloty/a/system/konfig",
-        "/sloty/a/system/motywy",
-        "/sloty/a/system/boot",
-        "/sloty/b",
-        "/sloty/b/programy",
-        "/sloty/b/system",
-        "/sloty/b/system/jadro",
-        "/sloty/b/system/biblioteki",
-        "/sloty/b/system/konfig",
-        "/sloty/b/system/motywy",
-        "/sloty/b/system/boot",
-        "/jadro",
-        "/system",
-        "/dane",
-        "/dane/sponsorze",
-        "/system/konfig",
-        "/system/motywy",
-        "/programy",
-        "/programy/notatnik.cebula",
-        "/programy/eksplorator.cebula",
-        "/programy/kalkulator.cebula",
-        "/programy/przegladarka.cebula",
-        "/programy/przegladarka-obrazow.cebula",
-        "/programy/demo_ui.cebula",
-        "/programy/kontrolki2.cebula",
-        "/programy/kontrolki3.cebula",
-        "/programy/kontrolki4.cebula",
-        "/programy/aktualizacje.cebula",
-        "/programy/test.cebula",
-        "/programy/ekran.cebula",
-        "/programy/tapety.cebula",
-        "/programy/motywy.cebula",
-        "/gry",
-        "/gry/snake.cebula",
-        "/uslugi",
-        "/sterowniki",
-        "/uzytkownicy",
-        "/uzytkownicy/Pulpit",
-        "/ustawienia",
-        "/logi",
-        "/piaskownica",
-        "/tymczasowe",
-        "/obrazy",
-        "/aktualizacje",
-        "/aktualizacje/przygotowanie"
-};
 
 void utworz_drabine_katalogow() {
 
@@ -830,15 +729,19 @@ void utworz_drabine_katalogow() {
          i < sizeof(KATALOGI_SYSTEMOWE) / sizeof(KATALOGI_SYSTEMOWE[0]);
          ++i) {
 
-        if (!zapewnij_katalog_startowy(KATALOGI_SYSTEMOWE[i])) {
+        PsfStanStartu stan{};
+        const bool ok=zapewnij_katalog_startowy(KATALOGI_SYSTEMOWE[i],&stan);
+        psf_start_log(i,KATALOGI_SYSTEMOWE[i],!instalator_system_zainstalowany(),stan);
+        if (!ok) {
             if(scisla_instalacja){pliki_instalacja_ok=false;return;}
             /*
              * Dopuszczamy katalogi odziedziczone z trwalego BSP2, ale nadal
              * zatrzymujemy start, jezeli wymaganej sciezki nie mozna ani
              * odczytac jako katalogu, ani poprawnie utworzyc.
              */
-            zatrzymaj_start(
-                "Nie mozna przygotowac podstawowego drzewa katalogow PSF.");
+            char komunikat[192]{};
+            psf_start_panic(komunikat,sizeof(komunikat),KATALOGI_SYSTEMOWE[i],stan);
+            zatrzymaj_start(komunikat);
         }
     }
 }

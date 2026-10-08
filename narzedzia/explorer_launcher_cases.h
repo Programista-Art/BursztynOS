@@ -32,4 +32,10 @@ static void explorer_launcher_cases() {
     }
     CHECK(files==before);CHECK(model.navigate("/uzytkownicy")!=Change::ERROR);
     for(int i=0;i<model.count();++i)CHECK(model.entry(i)->type!=EntryType::LAUNCHER);
+    // More files than the WM's model or visual capacity remain accessible here.
+    for(int i=0;i<150;++i){char name[32];snprintf(name,sizeof(name),"overflow-%03d",i);files[std::string(DesktopEntries::Directory)+"/"+name]=false;}
+    CHECK(model.navigate(DesktopEntries::Directory)!=Change::ERROR);
+    CHECK(model.count()==150+DesktopEntries::Count+3);
+    for(int i=0;i<150;++i){char name[32];snprintf(name,sizeof(name),"overflow-%03d",i);select_name(model,name);CHECK(model.entry(model.selected())->type!=EntryType::LAUNCHER);}
+    CHECK(model.create_folder("overflow-folder"));CHECK(files.count(std::string(DesktopEntries::Directory)+"/overflow-folder"));
 }

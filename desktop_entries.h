@@ -38,6 +38,9 @@ inline constexpr Launcher Launchers[]={
     {"Kontrolki 4","/programy/kontrolki4.cebula/kontrolki4.bur","Kontrolki 4",TypIkonyAplikacji::Kontrolki4,"kontrolki4"},
 };
 inline constexpr int Count=sizeof(Launchers)/sizeof(Launchers[0]);
+// Logical UI budget, independent of grid capacity and filesystem limits.
+inline constexpr int FileCapacity=128;
+inline constexpr int ModelCapacity=FileCapacity+Count;
 inline bool is_desktop(const char* path) {
     if(!path)return false;
     size_t i=0;

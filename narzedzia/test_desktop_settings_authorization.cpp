@@ -59,5 +59,25 @@ int main(){
         char end[32];snprintf(end,sizeof(end),"end=%08X\n",DesktopSettings::checksum(text.data(),text.size()));text+=end;
         memcpy(state->buffer,text.data(),text.size());CHECK(!state->parse(text.size()));CHECK(state->count==0);
     }
-    printf("Desktop settings production BWS/PZB: %u/%u PASS (RAM PSF)\n",checks,checks);
+    // Actual filesystem success does not depend on the visual or logical grid.
+    (void)bws_utworz_katalog(p,(uint64_t)"/uzytkownicy");
+    CHECK(bws_utworz_katalog(p,(uint64_t)DesktopEntries::Directory));
+    std::string base=std::string(DesktopEntries::Directory)+"/";
+    for(int i=0;i<130;++i){auto path=base+"f"+std::to_string(i);CHECK(bws_utworz_plik(p,(uint64_t)path.c_str()));}
+    CHECK(bws_utworz_katalog(p,(uint64_t)(base+"folder").c_str()));
+    CHECK(utworz_katalog("/source"));CHECK(utworz_plik("/source/copied"));CHECK(utworz_plik("/source/moved"));
+    CHECK(bws_kopiuj_twor(p,(uint64_t)"/source/copied",(uint64_t)DesktopEntries::Directory));
+    CHECK(bws_przenies(p,(uint64_t)"/source/moved",(uint64_t)DesktopEntries::Directory));
+    CHECK(pobierz_metadane_tworu("/source/copied",&metadata));CHECK(!pobierz_metadane_tworu("/source/moved",&metadata));
+    CHECK(pobierz_metadane_tworu((base+"copied").c_str(),&metadata));CHECK(pobierz_metadane_tworu((base+"moved").c_str(),&metadata));
+    auto listing=std::make_unique<char[]>(65536);CHECK(bws_wylistuj_katalog(p,(uint64_t)DesktopEntries::Directory,(uint64_t)listing.get(),65536));
+    unsigned lines=0;for(char* c=listing.get();*c;++c)lines+=*c=='\n';CHECK(lines==133);
+    // Overflow halfway through tag/name, at newline and exactly after a complete
+    // entry all report failure, never a misleading successful prefix.
+    const char* newline=strchr(listing.get(),'\n');CHECK(newline);
+    size_t first=size_t(newline-listing.get())+1;
+    for(size_t cap:{size_t(1),size_t(4),size_t(8),first,first+1,first+4}) {
+        CHECK(!bws_wylistuj_katalog(p,(uint64_t)DesktopEntries::Directory,(uint64_t)listing.get(),cap));CHECK(!psf_test_lock_held());
+    }
+    printf("Desktop settings/overflow production BWS/PZB: %u/%u PASS (RAM PSF)\n",checks,checks);
 }

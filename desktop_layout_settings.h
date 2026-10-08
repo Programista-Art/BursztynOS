@@ -10,7 +10,7 @@
 // Text settings through the existing BWS file API. No filesystem internals.
 namespace DesktopSettings {
 constexpr const char* Path="/ustawienia/uklad-pulpitu.cfg";
-constexpr int Capacity=128+DesktopEntries::Count;
+constexpr int Capacity=DesktopEntries::ModelCapacity;
 constexpr size_t IdCapacity=512, BufferCapacity=Capacity*(3*IdCapacity+64)+256;
 constexpr int CoordinateMax=1000000;
 struct Key {char type;const char* id;}; // L: catalog ID; F: desktop-relative path
@@ -21,8 +21,22 @@ inline bool equal(const char* a,const char* b) {
 inline bool identity(const char* id) {
     if(!id || !*id || equal(id,".") || equal(id,".."))return false;
     size_t n=0;
-    for(;id[n] && n<IdCapacity;++n)if(id[n]=='/' || static_cast<unsigned char>(id[n])<32)return false;
-    return n<IdCapacity;
+    for(;n<IdCapacity && id[n];++n)if(id[n]=='/' || id[n]=='\\' || static_cast<unsigned char>(id[n])<32 || id[n]==127)return false;
+    if(n==IdCapacity)return false;
+    // Strict UTF-8: no overlong forms, surrogates, truncated continuations or
+    // code points outside Unicode. Persistent identity never uses label clipping.
+    for(size_t p=0;p<n;) {
+        unsigned char c=id[p++];if(c<128)continue;
+        unsigned bytes=0;uint32_t cp=0,min=0;
+        if(c>=0xc2 && c<=0xdf){bytes=1;cp=c&31;min=0x80;}
+        else if(c>=0xe0 && c<=0xef){bytes=2;cp=c&15;min=0x800;}
+        else if(c>=0xf0 && c<=0xf4){bytes=3;cp=c&7;min=0x10000;}
+        else return false;
+        if(bytes>n-p)return false;
+        while(bytes--){unsigned char b=id[p++];if((b&192)!=128)return false;cp=(cp<<6)|(b&63);}
+        if(cp<min || cp>0x10ffff || (cp>=0xd800 && cp<=0xdfff))return false;
+    }
+    return true;
 }
 inline bool number(const char* s,size_t n,int& value) {
     if(!n)return false;
@@ -53,7 +67,7 @@ struct State {
     char buffer[BufferCapacity]{};
     Record scratch{};
     int count=0,savedDpi=100;
-    bool loaded=false,dirty=false;
+    bool loaded=false,dirty=false,applied=false;
     int matchedLaunchers=0,matchedFiles=0,stale=0;
     void reset() {count=0;savedDpi=100;matchedLaunchers=matchedFiles=stale=0;}
     bool parse(size_t size) {
@@ -94,7 +108,10 @@ struct State {
             bool duplicate=false;
             for(int i=0;i<count;++i)if(records[i].type==scratch.type && equal(records[i].id,scratch.id))duplicate=true;
             // First valid record wins, regardless of unknown trailing flags.
-            if(!duplicate && count<Capacity)records[count++]=scratch;
+            if(!duplicate) {
+                if(count==Capacity){reset();return false;}
+                records[count++]=scratch;
+            }
         }
         return true;
     }
@@ -122,6 +139,7 @@ struct State {
         int corrected=layout.reflow();dirty=corrected>0;return corrected;
     }
     template<class Layout,class Keys> size_t serialize(const Layout& layout,Keys key) {
+        if(layout.count<0 || layout.count>Capacity || layout.workWidth<=0 || layout.workBottom<=0)return 0;
         size_t pos=0;bool ok=true;
         auto put=[&](char c){if(pos+1>=BufferCapacity){ok=false;return;}buffer[pos++]=c;};
         auto text=[&](const char* s){while(*s)put(*s++);};
@@ -129,7 +147,7 @@ struct State {
         text("BursztynDesktopLayout=1\nwidth=");num(layout.workWidth);text("\nheight=");num(layout.workBottom);text("\ndpi=");num(layout.dpi);put('\n');
         for(int i=0;i<layout.count;++i)if(layout.items[i].placed) {
             auto k=key(i);auto r=layout.visual_bounds(i);
-            if(!identity(k.id)||r.x<0||r.y<0||r.x>CoordinateMax||r.y>CoordinateMax)return 0;
+            if((k.type!='L' && k.type!='F') || !identity(k.id)||r.x<0||r.y<0||r.x>CoordinateMax||r.y>CoordinateMax)return 0;
             put(k.type);put('\t');
             for(size_t b=0;k.id[b];++b) {
                 unsigned char c=k.id[b];

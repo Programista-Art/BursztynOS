@@ -176,10 +176,10 @@ static void desktop_persistence_cases() {
     CHECK(obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_DOWN,from.x+20,from.y+10)));
     CHECK(obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_RUCH,to.x+20,to.y+10)));
     CHECK(obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_UP,to.x+20,to.y+10)));
-    CHECK(layout_writes==written);CHECK(!test_mouse_capture);
+    CHECK(layout_writes==written+1);CHECK(!test_mouse_capture); // completed filesystem/layout transaction
     CHECK(!files.count(std::string(SCIEZKA_PULPIT)+"/plik-żółty"));CHECK(files.count(std::string(SCIEZKA_PULPIT)+"/folder/plik-żółty"));
     delete desktop_settings;desktop_settings=nullptr;desktop_layout={};liczba_wpisow_pulpitu=0;hash_pulpitu_wazny=false;
-    CHECK(odswiez_wpisy_pulpitu());CHECK(desktop_settings->stale==1);
+    CHECK(odswiez_wpisy_pulpitu());CHECK(desktop_settings->stale==0); // departed identity pruned at drop
     for(int i=0;i<desktop_layout.count;++i)CHECK(strcmp(wpisy_pulpitu[i].nazwa,"plik-żółty"));
     desktop_settings->dirty=true;zapisz_uklad_pulpitu();CHECK(reload->load(layout_test_io));
     for(int i=0;i<reload->count;++i)CHECK(!equal(reload->records[i].id,"plik-żółty"));

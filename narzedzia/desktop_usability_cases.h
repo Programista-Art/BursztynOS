@@ -82,6 +82,9 @@ static void desktop_usability_cases() {
         hash_pulpitu_wazny=false;CHECK(odswiez_wpisy_pulpitu());
         for(int i=0;i<desktop_layout.count;++i)desktop_layout.items[i]=Desktop::Position{};
         aktualizuj_layout_pulpitu();desktop_layout.clear_selection();
+        // Isolate the two filesystem entries for this rubber-band test;
+        // automatic placement now reserves the catalog before user items.
+        for(int i=0;i<2;++i){auto& p=desktop_layout.items[i];p.col=i;p.row=3;p.offsetX=p.offsetY=0;p.placed=p.custom=true;}
         r=desktop_layout.cell(0);int y=wizualny_wpis_pulpitu(0).dolny()-1;
         obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_DOWN,0,y));
         CHECK(obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_RUCH,r.x+2*desktop_layout.cw,r.y)));
@@ -117,8 +120,8 @@ static void desktop_usability_cases() {
     // Bounded storage handles the full entry limit; a packed grid restores a
     // group when no alternate translated arrangement is free.
     static Desktop::Layout<128> bounded;bounded.count=128;
-    bounded.clear_selection();for(int i=0;i<128;++i)bounded.click(i,true);CHECK(bounded.selected_count()==128);
-    static Desktop::Layout<4> packed;packed.count=4;packed.cols=2;packed.rows=2;
+    bounded.clear_selection();for(int i=0;i<128;++i)bounded.click(i,true);CHECK(bounded.selected_count()==0); // all unplaced
+    static Desktop::Layout<4> packed;packed.count=4;packed.geometry(280,203,3,100);
     for(int i=0;i<4;++i){packed.items[i]={};packed.items[i].placed=true;packed.items[i].col=i%2;packed.items[i].row=i/2;}
     packed.items[0].selected=packed.items[3].selected=true;CHECK(packed.move_group(1,0));CHECK(packed.items[0].col==0);CHECK(packed.items[3].col==1);
     for(auto text:{std::string(55,'W'),std::string("żółćżółćżółćżółćżółćżółć"),std::string(255,'W')}) {

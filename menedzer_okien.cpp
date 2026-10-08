@@ -77,8 +77,9 @@ constexpr int BUFOR_CZASU = 32;
 int TASK_BUTTON_X = 66;
 int TASK_BUTTON_W = 112;
 int TASK_BUTTON_GAP = 4;
-constexpr int PULPIT_MAX_WPISOW = 128+DesktopEntries::Count;
-constexpr int PULPIT_LIST_CAP = 16384;
+constexpr int PULPIT_MAX_WPISOW = DesktopEntries::ModelCapacity;
+// Match the established BWS/Explorer enumeration budget; not a model increase.
+constexpr int PULPIT_LIST_CAP = 64*1024;
 constexpr int PULPIT_NAZWA_CAP = BWS_DROP_SCIEZKA_MAX; // display capacity; PSF validates mutations
 int PULPIT_GRID_W = 120;
 int PULPIT_GRID_H = 100;
@@ -835,8 +836,9 @@ char ostatni_czas[BUFOR_CZASU] = {};
 GuiOknoInfo okna_taskbara[SKLADACZ_MAKS_WARSTW] = {};
 uint32_t liczba_okien_taskbara = 0;
 WpisPulpitu* wpisy_pulpitu = nullptr;
-char lista_pulpitu[PULPIT_LIST_CAP] = {};
+char* lista_pulpitu = nullptr;
 int liczba_wpisow_pulpitu = 0;
+int pulpit_nadmiar_modelu = 0;
 int zaznaczony_wpis_pulpitu = -1; // context anchor, selection lives in desktop_layout
 Desktop::Layout<PULPIT_MAX_WPISOW> desktop_layout;
 static Desktop::Position desktop_previous[PULPIT_MAX_WPISOW];
@@ -874,6 +876,7 @@ void aktualizuj_layout_pulpitu();
 void odrysuj_obszar_pulpitu(Desktop::Prostokat r);
 void odrysuj_zaznaczenie_pulpitu();
 uint64_t hash_pulpitu = 0;
+uint64_t hash_modelu_pulpitu = 0;
 bool hash_pulpitu_wazny = false;
 bool pulpit_drop_hover = false;
 int pulpit_hover_folder = -1;
@@ -906,7 +909,7 @@ bool zapisz_batch_pulpitu() {
     pulpit_batch_count=0;
     if(!pulpit_batch)pulpit_batch=new char[PULPIT_MAX_WPISOW][BWS_DROP_SCIEZKA_MAX]{};
     if(!pulpit_batch)return false;
-    for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].selected) {
+    for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].selected && desktop_layout.items[i].placed) {
         if(!sciezka_wpisu_pulpitu(i,pulpit_batch[pulpit_batch_count],BWS_DROP_SCIEZKA_MAX))return false;
         ++pulpit_batch_count;
     }
@@ -920,7 +923,7 @@ void zamknij_pulpit_modal() {
     pulpit_modal_typ=PulpitModalTyp::BRAK;
 }
 void odswiez_pulpit_natychmiast() {
-    hash_pulpitu_wazny=false;(void)odswiez_wpisy_pulpitu();RysujPulpit(true);
+    hash_pulpitu_wazny=false;(void)odswiez_wpisy_pulpitu();RysujPulpit(true);zapisz_uklad_pulpitu();
 }
 bool otworz_pulpit_modal(PulpitModalTyp typ,const char* message=nullptr) {
     zamknij_pulpit_modal();
@@ -1023,11 +1026,16 @@ uint64_t hash_listy(const char* tekst, int n) {
 }
 
 bool teksty_rowne(const char* a,const char* b) {while(*a && *a==*b){++a;++b;}return *a==*b;}
+int porownaj_nazwy_pulpitu(const char* a,const char* b) {
+    while(*a && *a==*b){++a;++b;}
+    return int(static_cast<unsigned char>(*a))-int(static_cast<unsigned char>(*b));
+}
 bool odswiez_wpisy_pulpitu() {
     // Keep display buffers off the Ring 3 stack and within BUR's static data
     // budget. They are allocated once, never from the pointer-motion path.
     if(!wpisy_pulpitu)wpisy_pulpitu=new WpisPulpitu[PULPIT_MAX_WPISOW]{};
-    if(!wpisy_pulpitu)return false;
+    if(!lista_pulpitu)lista_pulpitu=new char[PULPIT_LIST_CAP]{};
+    if(!wpisy_pulpitu || !lista_pulpitu)return false;
     wyzeruj_bufor(lista_pulpitu, PULPIT_LIST_CAP);
     if (!wylistuj_katalog_uzytkownika(
             SCIEZKA_PULPIT, lista_pulpitu, PULPIT_LIST_CAP)) {
@@ -1042,29 +1050,63 @@ bool odswiez_wpisy_pulpitu() {
         return false;
     const uint64_t nowy_hash = hash_listy(lista_pulpitu, length);
     if (hash_pulpitu_wazny && nowy_hash == hash_pulpitu) return false;
+    if(!desktop_settings) {
+        desktop_settings=new DesktopSettings::State{};
+        if(desktop_settings)(void)desktop_settings->load(plik_ukladu_bws);
+    }
 
     static WpisPulpitu* nowe=nullptr;
     if(!nowe)nowe=new WpisPulpitu[PULPIT_MAX_WPISOW]{};
     if(!nowe)return false;
     for(int i=0;i<PULPIT_MAX_WPISOW;++i)nowe[i]=WpisPulpitu{};
     int count = 0;
+    int filesSeen = 0;
+    static WpisPulpitu incoming;
+    static bool retained[DesktopEntries::FileCapacity];
     int pos = 0;
     while (pos < length) {
         int end = pos;
         while (end < length && lista_pulpitu[end] != '\n') ++end;
-        if (end - pos <= 7 || count >= PULPIT_MAX_WPISOW) return false;
+        if (end - pos <= 7) return false;
         const bool folder = lista_pulpitu[pos] == '[' && lista_pulpitu[pos + 1] == 'K';
         const bool file = lista_pulpitu[pos] == '[' && lista_pulpitu[pos + 1] == 'P';
         const int name_length = end - pos - 7;
         if ((!folder && !file) || name_length <= 0 || name_length >= PULPIT_NAZWA_CAP)
             return false;
-        nowe[count].folder = folder;
+        incoming=WpisPulpitu{};incoming.folder = folder;
         for (int i = 0; i < name_length; ++i)
-            nowe[count].nazwa[i] = lista_pulpitu[pos + 7 + i];
-        ++count;
+            incoming.nazwa[i] = lista_pulpitu[pos + 7 + i];
+        if(!DesktopSettings::identity(incoming.nazwa))return false;
+        ++filesSeen;
+        // Admit existing identities first, then stable UTF-8 order. At boot,
+        // saved identities protect previously visible files from new overflow.
+        bool keep=false;
+        for(int i=0;i<liczba_wpisow_pulpitu;++i)if(wpisy_pulpitu[i].launcher<0 && teksty_rowne(wpisy_pulpitu[i].nazwa,incoming.nazwa))keep=true;
+        if(!liczba_wpisow_pulpitu && desktop_settings)for(int i=0;i<desktop_settings->count;++i)
+            if(desktop_settings->records[i].type=='F' && teksty_rowne(desktop_settings->records[i].id,incoming.nazwa))keep=true;
+        int at=0;
+        while(at<count && ((retained[at] && !keep) || (retained[at]==keep && porownaj_nazwy_pulpitu(nowe[at].nazwa,incoming.nazwa)<0)))++at;
+        if(at<count && teksty_rowne(nowe[at].nazwa,incoming.nazwa))return false;
+        if(at<DesktopEntries::FileCapacity) {
+            if(count<DesktopEntries::FileCapacity)++count;
+            for(int j=count-1;j>at;--j){nowe[j]=nowe[j-1];retained[j]=retained[j-1];}
+            nowe[at]=incoming;retained[at]=keep;
+        }
         pos = end + 1;
     }
-    if(count+DesktopEntries::Count>PULPIT_MAX_WPISOW)return false;
+    // Model and waiting order do not depend on admission priority or enumeration.
+    for(int i=1;i<count;++i) {
+        incoming=nowe[i];int j=i;
+        while(j>0 && porownaj_nazwy_pulpitu(nowe[j-1].nazwa,incoming.nazwa)>0){nowe[j]=nowe[j-1];--j;}
+        nowe[j]=incoming;
+    }
+    const int excess=filesSeen-count;
+    if(excess && excess!=pulpit_nadmiar_modelu)bws_wywolaj(1,reinterpret_cast<uint64_t>(
+        "[DESKTOP] Przekroczono limit modelu (128 plików). Pozostałe elementy są dostępne w Eksploratorze.\n"));
+    pulpit_nadmiar_modelu=excess;
+    uint64_t modelHash=uint64_t(count);
+    for(int i=0;i<count;++i)modelHash=(modelHash ^ hash_listy(nowe[i].nazwa,dlugosc_limit(nowe[i].nazwa,PULPIT_NAZWA_CAP)) ^ uint64_t(nowe[i].folder))*UINT64_C(1099511628211);
+    const bool modelChanged=desktop_settings && desktop_settings->applied && modelHash!=hash_modelu_pulpitu;
     for(int id=0;id<DesktopEntries::Count;++id) {
         auto& entry=nowe[count++];entry.launcher=id;
         const char* name=DesktopEntries::Launchers[id].name;
@@ -1076,13 +1118,13 @@ bool odswiez_wpisy_pulpitu() {
         for(int j=0;j<liczba_wpisow_pulpitu;++j)if(wpisy_pulpitu[j].launcher==nowe[i].launcher && wpisy_pulpitu[j].folder==nowe[i].folder &&
             teksty_rowne(wpisy_pulpitu[j].nazwa,nowe[i].nazwa)) {saved=desktop_previous[j];break;}
         desktop_layout.items[i]=saved;
+        desktop_layout.items[i].launcher=nowe[i].launcher>=0;
     }
     for (int i = 0; i < count; ++i) wpisy_pulpitu[i] = nowe[i];
-    liczba_wpisow_pulpitu = count;desktop_layout.count=count;aktualizuj_layout_pulpitu();
-    if(!desktop_settings) {
-        desktop_settings=new DesktopSettings::State{};
+    liczba_wpisow_pulpitu = count;(void)desktop_layout.set_count(count);aktualizuj_layout_pulpitu();
+    if(desktop_settings && !desktop_settings->applied) {
         if(desktop_settings) {
-            if(desktop_settings->load(plik_ukladu_bws)) {
+            if(desktop_settings->count) {
                 [[maybe_unused]] int corrected=desktop_settings->apply(desktop_layout,klucz_ukladu_pulpitu);
 #if BURSZTYNDIAGDESKTOPLAYOUT
                 diagnostyka_ukladu("[DESKTOP-LAYOUT] reflow=",corrected);
@@ -1096,10 +1138,13 @@ bool odswiez_wpisy_pulpitu() {
             diagnostyka_ukladu("[DESKTOP-LAYOUT] stale=",desktop_settings->stale);
 #endif
         }
+        desktop_settings->applied=true;
     }
     if (zaznaczony_wpis_pulpitu >= count) zaznaczony_wpis_pulpitu = -1;
     hash_pulpitu = nowy_hash;
+    hash_modelu_pulpitu=modelHash;
     hash_pulpitu_wazny = true;
+    if(modelChanged)desktop_settings->dirty=true;
     return true;
 }
 
@@ -1115,6 +1160,7 @@ void aktualizuj_layout_pulpitu() {
     int maxLines=(desktop_layout.rows*desktop_layout.ch-m.ikona_wys-m.odstep_etykiety-ui_skaluj(6,ui_skala_procent))/(m.wysokosc_linii+m.odstep_linii);
     for(int i=0;i<desktop_layout.count;++i) {
         auto& p=desktop_layout.items[i];
+        p.launcher=wpisy_pulpitu[i].launcher>=0;
         p.label=Desktop::wrap(wpisy_pulpitu[i].nazwa,m.etykieta_szer,m.wysokosc_linii,m.odstep_linii,maxLines,int(ui_skala_procent),oblicz_szerokosc_tekstu);
         int height=m.ikona_wys+m.odstep_etykiety+p.label.height+ui_skaluj(6,ui_skala_procent);
         p.span=(height+desktop_layout.ch-1)/desktop_layout.ch;
@@ -1124,10 +1170,15 @@ void aktualizuj_layout_pulpitu() {
             int(int64_t(desktop_restore_y[i])*ui_skala_procent/previousDpi));
     // Retain the existing initial row-major layout. Settings restoration and
     // display changes reserve valid visual positions before relocating others.
-    for(int i=0;i<desktop_layout.count;++i)if(!desktop_layout.items[i].placed)
-        desktop_layout.place(i,i%desktop_layout.cols,i/desktop_layout.cols);
+    for(int i=0;i<desktop_layout.count;++i)if(!desktop_layout.items[i].placed && !desktop_layout.items[i].custom) {
+        // Catalog priority without changing model indices or valid saved positions.
+        int order=wpisy_pulpitu[i].launcher>=0?wpisy_pulpitu[i].launcher:DesktopEntries::Count+i;
+        auto& p=desktop_layout.items[i];
+        p.col=desktop_layout.cols?order%desktop_layout.cols:0;
+        p.row=desktop_layout.cols?order/desktop_layout.cols:0;
+    }
     const int corrected=desktop_layout.reflow();
-    if(corrected && desktop_settings)desktop_settings->dirty=true;
+    if(desktop_settings && desktop_settings->applied && (corrected || desktop_layout.newlyPlaced || (geometryChanged && previousDpi!=int(ui_skala_procent))))desktop_settings->dirty=true;
 #if BURSZTYNDIAGDESKTOPLAYOUT
     if(corrected)diagnostyka_ukladu("[DESKTOP-LAYOUT] reflow=",corrected);
 #endif
@@ -1649,7 +1700,7 @@ bool obsluz_gest_pulpitu(const bws_zdarzenie& e) {
         bool a=(e.kod&BWS_KEY_SOURCE_USB)?(e.kod&255)==4:(e.kod&127)==0x1e;
         if(e.x && a && (desktop_modifiers&BWS_MOD_CTRL)) {
             zapamietaj_zaznaczenie_pulpitu();
-            for(int i=0;i<desktop_layout.count;++i)desktop_layout.items[i].selected=true;
+            for(int i=0;i<desktop_layout.count;++i)desktop_layout.items[i].selected=desktop_layout.items[i].placed;
             odrysuj_zaznaczenie_pulpitu();gui_odswiez();return true;
         }
         return false;
@@ -1685,7 +1736,7 @@ bool obsluz_gest_pulpitu(const bws_zdarzenie& e) {
             g.band={x<g.x?x:g.x,y<g.y?y:g.y,(x<g.x?g.x-x:x-g.x)+1,(y<g.y?g.y-y:y-g.y)+1};
             zapamietaj_zaznaczenie_pulpitu();
             for(int i=0;i<desktop_layout.count;++i)desktop_layout.items[i].selected=
-                (g.ctrl && g.base[i]) || (desktop_layout.items[i].placed && Desktop::intersects(g.band,wizualny_wpis_pulpitu(i)));
+                desktop_layout.items[i].placed && ((g.ctrl && g.base[i]) || Desktop::intersects(g.band,wizualny_wpis_pulpitu(i)));
             odrysuj_zaznaczenie_pulpitu();rysuj_ramke_pulpitu(g.band,motyw_kolor(MOTYW_KOLOR_PULPIT_RAMKA));
         } else {
             desktop_layout.clamp_delta(dx,dy);g.dx=dx;g.dy=dy;obrysy_grupy(false);
@@ -1721,6 +1772,12 @@ bool obsluz_gest_pulpitu(const bws_zdarzenie& e) {
                 const auto& old=desktop_previous[i];
                 odrysuj_obszar_pulpitu(Desktop::visual(desktop_layout.x0+old.col*desktop_layout.cw+old.offsetX,desktop_layout.y0+old.row*desktop_layout.ch+old.offsetY,old.label,ui_skala_procent));
                 RysujWpisPulpitu(i);
+            }
+            // A completed visual move can free space for waiting entries.
+            desktop_layout.reflow();
+            if(desktop_layout.newlyPlaced) {
+                layoutChanged=true;if(desktop_settings)desktop_settings->dirty=true;
+                RysujPulpit(true);
             }
             zarejestruj_pulpit_jako_cel_drop();
         } else if(g.item>=0 && !g.ctrl) {
@@ -2599,8 +2656,9 @@ extern "C" __attribute__((noreturn)) void _start() {
             zamknij_pulpit_context();
             /* Pelne przerysowanie warstwy nadpisaloby piksele otwartego
                dialogu; odswiezamy dopiero po jego zamknieciu. */
-            if (!desktop_gesture.candidate && pulpit_modal_typ==PulpitModalTyp::BRAK && odswiez_wpisy_pulpitu())
-                RysujPulpit(true);
+            if (!desktop_gesture.candidate && pulpit_modal_typ==PulpitModalTyp::BRAK && odswiez_wpisy_pulpitu()) {
+                RysujPulpit(true);zapisz_uklad_pulpitu();
+            }
             continue;
         }
 
@@ -2629,7 +2687,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             pulpit_drop_hover = false;
             hash_pulpitu_wazny = false;
             (void)odswiez_wpisy_pulpitu();
-            RysujPulpit(true);
+            RysujPulpit(true);zapisz_uklad_pulpitu();
             continue;
         }
 
@@ -2641,7 +2699,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             if (!desktop_gesture.candidate && !pulpit_context_open && pulpit_modal_typ==PulpitModalTyp::BRAK &&
                 ++pulpit_refresh_ticks >= PULPIT_REFRESH_TICKS) {
                 pulpit_refresh_ticks = 0;
-                if (odswiez_wpisy_pulpitu()) RysujPulpit(true);
+                if (odswiez_wpisy_pulpitu()){RysujPulpit(true);zapisz_uklad_pulpitu();}
                 if(!start_pulpitu_gotowy&&hash_pulpitu_wazny) {
                     RysujPulpit(true);
                     start_pulpitu_gotowy=gui_potwierdz_gotowosc_pulpitu();

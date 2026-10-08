@@ -65,88 +65,131 @@ inline Prostokat visual(int x,int y,const Label& l,uint32_t scale) {
         {g.etykieta_x+(g.etykieta_szer-l.width)/2,g.etykieta_y,l.width,l.height});
     return {r.x-pad,r.y-pad,r.szerokosc+2*pad,r.wysokosc+2*pad};
 }
-struct Position {int col=0,row=0,span=1,offsetX=0,offsetY=0;bool placed=false,selected=false,custom=false;Label label;};
+struct Position {int col=0,row=0,span=1,offsetX=0,offsetY=0;bool placed=false,selected=false,custom=false,launcher=false;Label label;};
 template<int Capacity> class Layout {
 public:
+    static constexpr int capacity=Capacity;
+    // Matches settings/display bounds, also bounds every search and product.
+    static constexpr int GeometryMax=8192;
     Position items[Capacity]{};
     int count=0,cols=1,rows=1,x0=0,y0=0,cw=120,ch=100;
     int workWidth=0,workBottom=0;uint32_t dpi=100;
+    uint64_t searchIterations=0;
+    int newlyPlaced=0;
+    bool set_count(int n) {if(n<0 || n>Capacity)return false;count=n;return true;}
     void geometry(int width,int bottom,int originY,uint32_t scale) {
+        width=width<0?0:width>GeometryMax?GeometryMax:width;
+        bottom=bottom<0?0:bottom>GeometryMax?GeometryMax:bottom;
+        scale=scale>=100 && scale<=400?scale:100;
+        originY=originY<0?0:originY>bottom?bottom:originY;
         workWidth=width;workBottom=bottom;dpi=scale;
         cw=ui_skaluj(120,scale);ch=ui_skaluj(100,scale);x0=ui_skaluj(20,scale);y0=originY;
-        cols=(width-2*x0)/cw;if(cols<1)cols=1;rows=(bottom-y0)/ch;if(rows<0)rows=0;
+        cols=width>2*x0?(width-2*x0)/cw:0;rows=(bottom-y0)/ch;
     }
-    Prostokat cell(int i) const {auto p=items[i];return {x0+p.col*cw+p.offsetX,y0+p.row*ch+p.offsetY,cw,p.span*ch};}
+    uint64_t candidate_limit() const {
+        if(cols<0 || rows<0)return 0;
+        uint64_t c=uint64_t(cols)+1,r=uint64_t(rows)+1;
+        return r && c>UINT64_MAX/r?0:c*r;
+    }
+    bool index(int i) const {return i>=0 && i<count && i<Capacity;}
+    Prostokat cell(int i) const {
+        if(!index(i))return {};
+        const auto& p=items[i];
+        int64_t x=int64_t(x0)+int64_t(p.col)*cw+p.offsetX;
+        int64_t y=int64_t(y0)+int64_t(p.row)*ch+p.offsetY;
+        int64_t h=int64_t(p.span)*ch;
+        if(x < -GeometryMax*8 || x>GeometryMax*8 || y < -GeometryMax*8 || y>GeometryMax*8 || h<0 || h>GeometryMax*8)return {};
+        return {int(x),int(y),cw,int(h)};
+    }
     bool fits(int i,int col,int row,int dc=0,int dr=0,bool group=false) const {
-        if(col<0 || col>=cols || row<0 || row+items[i].span>rows)return false;
+        if(!index(i) || col<0 || col>=cols || row<0 || int64_t(row)+items[i].span>rows)return false;
+        const auto& p=items[i];
+        int64_t ax=int64_t(x0)+int64_t(col)*cw+p.offsetX,ay=int64_t(y0)+int64_t(row)*ch+p.offsetY;
+        if(ax < -GeometryMax*8 || ax>GeometryMax*8 || ay < -GeometryMax*8 || ay>GeometryMax*8)return false;
+        auto a=visual(int(ax),int(ay),p.label,dpi);
+        if(a.x<0 || a.y<0 || int64_t(a.x)+a.szerokosc>workWidth || int64_t(a.y)+a.wysokosc>workBottom)return false;
         for(int j=0;j<count;++j)if(j!=i && items[j].placed) {
-            int jc=items[j].col,jr=items[j].row;
-            if(group && items[j].selected){jc+=dc;jr+=dr;}
-            if(items[i].custom || items[j].custom) {
-                auto a=visual(x0+col*cw+items[i].offsetX,y0+row*ch+items[i].offsetY,items[i].label,dpi);
-                auto b=visual(x0+jc*cw+items[j].offsetX,y0+jr*ch+items[j].offsetY,items[j].label,dpi);
-                if(intersects(a,b))return false;
-            } else if(col==jc && row<jr+items[j].span && jr<row+items[i].span)return false;
+            auto b=visual_bounds(j);
+            if(group && items[j].selected){b.x+=dc*cw;b.y+=dr*ch;}
+            if(intersects(a,b))return false;
         }
         return true;
     }
     bool place(int i,int desiredCol,int desiredRow) {
-        int best=-1,distance=0x7fffffff;
+        if(!index(i))return false;
+        int best=-1;int64_t distance=INT64_MAX;
+        desiredCol=desiredCol<0?0:desiredCol>cols?cols:desiredCol;
+        desiredRow=desiredRow<0?0:desiredRow>rows?rows:desiredRow;
         for(int r=0;r<rows;++r)for(int c=0;c<cols;++c)if(fits(i,c,r)) {
-            int dx=c-desiredCol,dy=r-desiredRow,d=dx*dx+dy*dy;
+            int64_t dx=c-desiredCol,dy=r-desiredRow,d=dx*dx+dy*dy;
             if(d<distance){distance=d;best=r*cols+c;}
         }
-        if(best<0){items[i].placed=false;return false;}
+        if(best<0){items[i].placed=items[i].selected=false;return false;}
         items[i].col=best%cols;items[i].row=best/cols;items[i].placed=true;return true;
     }
     void clear_selection() {for(int i=0;i<count;++i)items[i].selected=false;}
-    int selected_count() const {int n=0;for(int i=0;i<count;++i)n+=items[i].selected;return n;}
+    int selected_count() const {int n=0;for(int i=0;i<count;++i)n+=items[i].selected && items[i].placed;return n;}
     void click(int i,bool ctrl) {
         if(!ctrl)clear_selection();
-        if(i>=0 && i<count)items[i].selected=ctrl?!items[i].selected:true;
+        if(index(i) && items[i].placed)items[i].selected=ctrl?!items[i].selected:true;
     }
     // Dragging a selected member preserves the whole group until MouseUp.
-    void drag_click(int i,bool ctrl) {if(ctrl || i<0 || !items[i].selected)click(i,ctrl);}
+    void drag_click(int i,bool ctrl) {if(ctrl || !index(i) || !items[i].selected)click(i,ctrl);}
     bool group_fits(int dc,int dr) const {
         for(int i=0;i<count;++i)if(items[i].selected && items[i].placed &&
             !fits(i,items[i].col+dc,items[i].row+dr,dc,dr,true))return false;
         return true;
     }
     bool move_group(int wantedCol,int wantedRow) {
-        int bc=0,br=0,best=0x7fffffff;
+        if(!selected_count())return false;
+        int bc=0,br=0;int64_t best=INT64_MAX;
+        wantedCol=wantedCol < -cols?-cols:wantedCol>cols?cols:wantedCol;
+        wantedRow=wantedRow < -rows?-rows:wantedRow>rows?rows:wantedRow;
         for(int dr=-rows;dr<=rows;++dr)for(int dc=-cols;dc<=cols;++dc)if(group_fits(dc,dr)) {
-            int dx=dc-wantedCol,dy=dr-wantedRow,d=dx*dx+dy*dy;
+            int64_t dx=dc-wantedCol,dy=dr-wantedRow,d=dx*dx+dy*dy;
             if(d<best){best=d;bc=dc;br=dr;}
         }
-        if(best==0x7fffffff)return false;
+        if(best==INT64_MAX)return false;
         for(int i=0;i<count;++i)if(items[i].selected && items[i].placed){items[i].col+=bc;items[i].row+=br;items[i].custom=true;}
         return true;
     }
     Prostokat visual_bounds(int i) const {
-        auto r=cell(i);return visual(r.x,r.y,items[i].label,dpi);
+        auto r=cell(i);return r.czy_pusty()?Prostokat{}:visual(r.x,r.y,items[i].label,dpi);
     }
     void visual_position(int i,int x,int y) {
+        if(!index(i))return;
         auto& p=items[i];
-        auto origin=visual(x0+p.col*cw,y0+p.row*ch,p.label,dpi);
-        p.offsetX=x-origin.x;p.offsetY=y-origin.y;p.placed=true;p.custom=true;
+        // Normalize the grid representation; saved visual coordinates are bounded.
+        p.col=p.row=0;
+        auto origin=visual(x0,y0,p.label,dpi);
+        int64_t dx=int64_t(x)-origin.x,dy=int64_t(y)-origin.y;
+        if(dx<INT_MIN || dx>INT_MAX || dy<INT_MIN || dy>INT_MAX){p.placed=p.selected=false;return;}
+        p.offsetX=int(dx);p.offsetY=int(dy);p.placed=true;p.custom=true;
     }
     bool visible(int i) const {
         auto r=visual_bounds(i);
-        return r.x>=0 && r.y>=0 && r.prawy()<=workWidth && r.dolny()<=workBottom;
+        return !r.czy_pusty() && r.x>=0 && r.y>=0 && int64_t(r.x)+r.szerokosc<=workWidth && int64_t(r.y)+r.wysokosc<=workBottom;
     }
     // Retain every valid item first. Relocate only invalid/colliding entries,
-    // then fill holes for new entries. No transient selection is changed.
+    // then fill holes for new entries. Invisible items cannot stay selected.
     int reflow() {
+        searchIterations=0;newlyPlaced=0;
+        if(count<0 || count>Capacity)return -1;
         int corrected=0;
-        for(int i=0;i<count;++i)if(items[i].placed) {
+        for(int pass=0;pass<2;++pass)for(int i=0;i<count;++i)if(items[i].placed && items[i].launcher==(pass==0)) {
             bool valid=visible(i);
-            for(int j=0;j<i && valid;++j)if(items[j].placed && intersects(visual_bounds(i),visual_bounds(j)))valid=false;
-            if(!valid){items[i].placed=false;++corrected;}
+            for(int j=0;j<count && valid;++j)if(items[j].placed &&
+                ((items[j].launcher && !items[i].launcher) || (items[j].launcher==items[i].launcher && j<i)) &&
+                intersects(visual_bounds(i),visual_bounds(j)))valid=false;
+            if(!valid){items[i].placed=items[i].selected=false;++corrected;}
         }
-        for(int i=0;i<count;++i)if(!items[i].placed) {
+        // Valid positions always win; priority applies only to waiting items.
+        for(int pass=0;pass<2;++pass)for(int i=0;i<count;++i)if(!items[i].placed && items[i].launcher==(pass==0)) {
+            items[i].selected=false;
             auto desired=visual_bounds(i);
             int bestX=0,bestY=0;int64_t best=INT64_MAX;
             for(int row=0;row<=rows;++row)for(int col=0;col<=cols;++col) {
+                ++searchIterations;
                 auto candidate=visual(x0+col*cw,y0+row*ch,items[i].label,dpi);
                 // Partial edge cells use their real visual size.
                 if(candidate.szerokosc>workWidth || candidate.wysokosc>workBottom)continue;
@@ -159,7 +202,7 @@ public:
                 int64_t dx=int64_t(candidate.x)-desired.x,dy=int64_t(candidate.y)-desired.y,d=dx*dx+dy*dy;
                 if(free && d<best){best=d;bestX=candidate.x;bestY=candidate.y;}
             }
-            if(best!=INT64_MAX)visual_position(i,bestX,bestY);
+            if(best!=INT64_MAX){visual_position(i,bestX,bestY);++newlyPlaced;}
         }
         return corrected;
     }
@@ -185,6 +228,9 @@ public:
     // Grid snapping remains the normal placement rule. At an edge the shared
     // delta is limited by the actual icon/label/padding union, not a grid cell.
     bool move_visual_group(int dx,int dy) {
+        if(!selected_count())return false;
+        // Pointer deltas can be arbitrary; clamp before rounding/products.
+        clamp_delta(dx,dy);
         int snappedX=(dx+(dx>=0?cw/2:-cw/2))/cw*cw;
         int snappedY=(dy+(dy>=0?ch/2:-ch/2))/ch*ch;
         int edgeX=dx,edgeY=dy;clamp_delta(edgeX,edgeY);
@@ -197,13 +243,13 @@ public:
         if(!visual_group_fits(snappedX,snappedY)) {
             // Retain the existing nearest-free-placement behavior, translating
             // the entire group together. Zero is a legal fallback in a packed desktop.
-            int best=0x7fffffff,bestX=0,bestY=0;
+            int64_t best=INT64_MAX;int bestX=0,bestY=0;
             for(int row=-rows;row<=rows;++row)for(int col=-cols;col<=cols;++col) {
                 int x=col*cw,y=row*ch;clamp_delta(x,y);
-                int ex=x-snappedX,ey=y-snappedY,distance=ex*ex+ey*ey;
+                int64_t ex=int64_t(x)-snappedX,ey=int64_t(y)-snappedY,distance=ex*ex+ey*ey;
                 if(distance<best && visual_group_fits(x,y)){best=distance;bestX=x;bestY=y;}
             }
-            if(best==0x7fffffff)return false;
+            if(best==INT64_MAX)return false;
             snappedX=bestX;snappedY=bestY;
         }
         for(int i=0;i<count;++i)if(items[i].selected && items[i].placed) {

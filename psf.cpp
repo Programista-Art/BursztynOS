@@ -329,6 +329,16 @@ uint64_t ostatni_szukany_blok_danych = 0;
 
 bool psf_gotowy = false;
 
+// Status is active only inside the locked base-tree operation. No global logs.
+PsfStanStartu* stan_startu = nullptr;
+void blad_startu(PsfBladStartu blad) {
+    if(stan_startu && stan_startu->blad==PsfBladStartu::Ok)stan_startu->blad=blad;
+}
+struct ZakresStanuStartu {
+    explicit ZakresStanuStartu(PsfStanStartu* s){stan_startu=s;}
+    ~ZakresStanuStartu(){stan_startu=nullptr;}
+};
+
 /*
  * Nosnik blokowy moze byc niedostepny. BSP2 nadal dziala wtedy jako ramdysk.
  *
@@ -716,14 +726,16 @@ bool zapisz_sektory_porcjami(
                 : static_cast<uint32_t>(
                     pozostalo);
 
-        if (!(blokowy_zapis_instalatora() ? Storage::write_verify : Storage::write)(
-                bsp_partycja,
-                lba + zapisano,
-                paczka,
-                const_cast<uint8_t*>(dane +
-                    zapisano *
-                    ROZMIAR_SEKTORA))) {
-
+        if(stan_startu && stan_startu->zapis!=PsfEtapStartu::Blad){stan_startu->zapis=PsfEtapStartu::Ok;stan_startu->blokZapisu=(lba+zapisano)/(PSF_ROZMIAR_BLOKU/ROZMIAR_SEKTORA);}
+        const uint8_t* fragment=dane+zapisano*ROZMIAR_SEKTORA;
+        const BlockError wynik=blokowy_zapis_instalatora()
+            ? (Storage::write_verify(bsp_partycja,lba+zapisano,paczka,fragment)?BlockError::Ok:BlockError::IOError)
+            : (bsp_partycja.device->sector_size==512
+                ? Storage::partition_write(bsp_partycja,lba+zapisano,paczka,fragment)
+                : BlockError::InvalidArgument);
+        if(wynik!=BlockError::Ok) {
+            if(stan_startu){stan_startu->zapis=PsfEtapStartu::Blad;stan_startu->bladBlokowy=wynik;}
+            blad_startu(PsfBladStartu::Zapis);
             return false;
         }
 
@@ -768,6 +780,7 @@ bool czytaj_sektory_porcjami(
                     przeczytano *
                     ROZMIAR_SEKTORA)) {
 
+            blad_startu(PsfBladStartu::Odczyt);
             return false;
         }
 
@@ -802,7 +815,10 @@ bool bsp_zapisz_zmiany() {
     if (!brudny_caly_system &&
         liczba_brudnych_blokow == 0) {
 
-        ostatni_flush_ok = Storage::flush(bsp_partycja);
+        const BlockError wynik=Storage::partition_flush(bsp_partycja);
+        ostatni_flush_ok = wynik==BlockError::Ok;
+        if(stan_startu){stan_startu->flush=ostatni_flush_ok?PsfEtapStartu::Ok:PsfEtapStartu::Blad;stan_startu->bladBlokowy=wynik;}
+        if(!ostatni_flush_ok)blad_startu(PsfBladStartu::Flush);
         return ostatni_flush_ok;
     }
 
@@ -899,7 +915,12 @@ bool bsp_zapisz_zmiany() {
         }
     }
 
-    if (sukces) sukces = Storage::flush(bsp_partycja);
+    if (sukces) {
+        const BlockError wynik=Storage::partition_flush(bsp_partycja);
+        sukces = wynik==BlockError::Ok;
+        if(stan_startu){stan_startu->flush=sukces?PsfEtapStartu::Ok:PsfEtapStartu::Blad;stan_startu->bladBlokowy=wynik;}
+        if(!sukces)blad_startu(PsfBladStartu::Flush);
+    }
     if (!sukces) zapis_trwaly_dozwolony = false;
     if (sukces) {
         wyczysc_liste_brudnych();
@@ -1302,7 +1323,14 @@ bool ustaw_stan_bloku_danych(
     return true;
 }
 
+#ifdef BURSZTYN_PSF_HOST_TEST
+bool psf_test_bootstrap_brak_bloku=false;
+#endif
 uint64_t zaalokuj_wolny_blok_danych() {
+    if(stan_startu)stan_startu->alokacjaBloku=PsfEtapStartu::Blad;
+#ifdef BURSZTYN_PSF_HOST_TEST
+    if(stan_startu && psf_test_bootstrap_brak_bloku){blad_startu(PsfBladStartu::BrakBlokow);return BARK_BLOKU;}
+#endif
     if (!dysk_superblok ||
         calkowita_liczba_blokow_danych == 0) {
 
@@ -1387,10 +1415,12 @@ uint64_t zaalokuj_wolny_blok_danych() {
                 ostatni_szukany_blok_danych = 0;
             }
 
+            if(stan_startu)stan_startu->alokacjaBloku=PsfEtapStartu::Ok;
             return id;
         }
     }
 
+    blad_startu(PsfBladStartu::BrakBlokow);
     return BARK_BLOKU;
 }
 
@@ -1908,6 +1938,7 @@ bool dodaj_wpis_do_katalogu(
     uint64_t nowy_twor_id,
     const char* nazwa
 ) {
+    if(stan_startu)stan_startu->wpis=PsfEtapStartu::Blad;
     if (!poprawna_nazwa(nazwa)) {
         return false;
     }
@@ -2051,10 +2082,12 @@ bool dodaj_wpis_do_katalogu(
                 katalog_id
             );
 
+            if(stan_startu)stan_startu->wpis=PsfEtapStartu::Ok;
             return true;
         }
     }
 
+    blad_startu(PsfBladStartu::LimitKatalogu);
     return false;
 }
 
@@ -3143,6 +3176,7 @@ bool utworz_twor(
     if (!psf_gotowy ||
         !bezpieczna_sciezka(
             sciezka)) {
+        blad_startu(psf_gotowy?PsfBladStartu::ZlaSciezka:PsfBladStartu::NieGotowy);
         return false;
     }
 
@@ -3150,6 +3184,7 @@ bool utworz_twor(
             sciezka,
             nullptr,
             false) != 0) {
+        blad_startu(PsfBladStartu::JuzIstnieje);
         return false;
     }
 
@@ -3165,6 +3200,7 @@ bool utworz_twor(
 
     if (rodzic_id == 0 ||
         !poprawna_nazwa(nazwa)) {
+        blad_startu(PsfBladStartu::BrakRodzica);
         return false;
     }
 
@@ -3175,6 +3211,7 @@ bool utworz_twor(
 
     if (!rodzic ||
         rodzic->typ != TYP_KATALOG) {
+        blad_startu(PsfBladStartu::NieKatalog);
         return false;
     }
 
@@ -3184,15 +3221,18 @@ bool utworz_twor(
         return false;
     }
 
+    if(stan_startu)stan_startu->alokacjaWezla=PsfEtapStartu::Blad;
     const uint64_t nowy_id =
         zaalokuj_wolny_wezel(
             typ
         );
 
     if (nowy_id == 0) {
+        blad_startu(PsfBladStartu::BrakWezlow);
         return false;
     }
 
+    if(stan_startu){stan_startu->alokacjaWezla=PsfEtapStartu::Ok;stan_startu->wezel=nowy_id;}
     ustaw_metadane_nowego_wezla(
         pobierz_wezel(nowy_id),
         poziom_pzb
@@ -3215,7 +3255,8 @@ bool utworz_twor(
      * odwraca logicznie udanej operacji RAM FS; dirty state pozostaje
      * do ewentualnej kolejnej proby zapisu.
      */
-    (void)bsp_zapisz_zmiany();
+    const bool zapis_ok=bsp_zapisz_zmiany();
+    if(!zapis_ok)blad_startu(PsfBladStartu::Zapis);
 
     return true;
 }
@@ -4113,7 +4154,7 @@ extern "C" bool wylistuj_katalog(
                     bufor[pozycja] =
                         '\0';
 
-                    return true;
+                    return false;
                 }
 
                 bufor[pozycja++] =
@@ -4137,7 +4178,7 @@ extern "C" bool wylistuj_katalog(
                     bufor[pozycja] =
                         '\0';
 
-                    return true;
+                    return false;
                 }
 
                 bufor[pozycja++] =
@@ -4153,7 +4194,7 @@ extern "C" bool wylistuj_katalog(
                 bufor[pozycja] =
                     '\0';
 
-                return true;
+                return false;
             }
         }
     }
@@ -4404,6 +4445,59 @@ static bool czy_katalog_istnieje_wewn(const char* sciezka) {
     return
         w != nullptr &&
         w->typ == TYP_KATALOG;
+}
+
+extern "C" bool psf_przygotuj_katalog_startowy(const char* sciezka,PsfStanStartu* stan) {
+    BlokadaPSF blokada;
+    if(!stan)return false;
+    *stan=PsfStanStartu{};
+    ZakresStanuStartu zakres(stan);
+    stan->gotowy=psf_gotowy;
+    stan->trwaly=nosnik_blokowy_dostepny;
+    stan->backend=stan->trwaly && bsp_partycja.device?bsp_partycja.device->device_type:BlockDeviceType::Ramdisk;
+    stan->korzen=dysk_superblok?dysk_superblok->id_korzenia:0;
+    if(!psf_gotowy){blad_startu(PsfBladStartu::NieGotowy);return false;}
+    if(!bezpieczna_sciezka(sciezka)){blad_startu(PsfBladStartu::ZlaSciezka);return false;}
+    auto* korzen=pobierz_wezel(stan->korzen);
+    if(!korzen || korzen->typ!=TYP_KATALOG ||
+       korzen->rozmiar_w_bajtach>PSF_MAX_BLOKOW_W_WEZLE*wpisow_katalogowych_na_blok()) {
+        blad_startu(PsfBladStartu::ZlyKorzen);return false;
+    }
+    for(size_t i=0;i<PSF_MAX_BLOKOW_W_WEZLE;++i)if(korzen->wskazniki_blokow[i]!=BARK_BLOKU &&
+        !id_bloku_danych_poprawne(korzen->wskazniki_blokow[i])){blad_startu(PsfBladStartu::ZlyKorzen);return false;}
+#if defined(BURSZTYNDIAGPSFBOOTSTRAP) && BURSZTYNDIAGPSFBOOTSTRAP
+    char translacja[160]{};
+    const char* fizyczna=psf_przetlumacz_sciezke_slotu(sciezka,translacja);
+    size_t n=0;
+    while(n+1<sizeof(stan->sciezkaFizyczna) && fizyczna[n]){stan->sciezkaFizyczna[n]=fizyczna[n];++n;}
+    // Counts are not maintained globally; scan only in opt-in bootstrap diagnostics.
+    for(uint64_t i=1;i<=calkowita_liczba_wezlow;++i){auto* w=pobierz_wezel(i);if(w && w->typ==TYP_WOLNY)++stan->wolneWezly;}
+    for(uint64_t i=0;i<calkowita_liczba_blokow_danych;++i)if(!czy_blok_danych_zajety(i))++stan->wolneBloki;
+#endif
+    char nazwa[PSF_MAX_NAZWA]{};
+    stan->rodzic=rozwiaz_sciezke(sciezka,nazwa,true);
+    auto* rodzic=pobierz_wezel(stan->rodzic);
+    if(rodzic)stan->wpisyRodzica=rodzic->rozmiar_w_bajtach;
+    stan->wezel=rozwiaz_sciezke(sciezka,nullptr,false);
+    stan->istnial=stan->wezel!=0;
+    stan->lookup=stan->istnial?PsfEtapStartu::Ok:PsfEtapStartu::Blad;
+    if(stan->blad!=PsfBladStartu::Ok)return false;
+    if(stan->istnial) {
+        auto* w=pobierz_wezel(stan->wezel);
+        if(w && w->typ==TYP_KATALOG)return true;
+        blad_startu(PsfBladStartu::NieKatalog);return false;
+    }
+    if(!rodzic){blad_startu(PsfBladStartu::BrakRodzica);return false;}
+    stan->tworzenie=PsfEtapStartu::Blad;
+    if(!utworz_twor(sciezka,TYP_KATALOG,DOMYSLNY_PZB_PLIKU)) {
+        if(stan->blad==PsfBladStartu::Ok)blad_startu(PsfBladStartu::Odczyt);
+        return false;
+    }
+    stan->tworzenie=PsfEtapStartu::Ok;
+    // Generic CREATE commits RAM even on I/O failure. Boot reports it precisely.
+    if(stan->blad!=PsfBladStartu::Ok)return false;
+    if(!czy_katalog_istnieje_wewn(sciezka)){blad_startu(PsfBladStartu::Odczyt);return false;}
+    return true;
 }
 
 extern "C" bool czy_katalog_istnieje(const char* sciezka) {
