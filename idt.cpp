@@ -787,6 +787,7 @@ void UstawWpisIDT(uint8_t wektor,
  * WSPOLNY DYSPozytor PRZERWAN
  * ========================================================================= */
 
+#include "virtio_input_activation_diag.h"
 extern "C" uint64_t WspolnaObslugaPrzerwan(
     uint64_t rsp) {
 
@@ -798,6 +799,11 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
 
     const uint64_t wektor64 =
         stan->wektor_przerwania;
+
+#if BURSZTYNDIAGVIRTIOINPUTINIT
+    input_activation_entry(wektor64, stan->adres_powrotu, stan->kod_bledu,
+        wektor64 == 14 || wektor64 == 8 ? odczytaj_cr2() : 0);
+#endif
 
     if (wektor64 < 32) {
         panic_wyjatek(stan);
@@ -870,8 +876,12 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
     wyslij_eoi_jesli_potrzebne(
         wektor);
 
-    if (wektor != WEKTOR_TIMERA)
+    if (wektor != WEKTOR_TIMERA) {
+#if BURSZTYNDIAGVIRTIOINPUTINIT
+        input_activation_exit(wektor);
+#endif
         return rsp;
+    }
 
     /*
      * Scheduler:
@@ -917,7 +927,14 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
         pid_idle ||
         proces_juz_pusty ||
         proces_blokuje_w_bws38) {
-        return PrzelaczKontekst(rsp);
+#if BURSZTYNDIAGVIRTIOINPUTINIT
+        if (input_activation_trace.armed) input_activation_log("scheduler enter", wektor);
+#endif
+        const uint64_t next_rsp = PrzelaczKontekst(rsp);
+#if BURSZTYNDIAGVIRTIOINPUTINIT
+        input_activation_exit(wektor);
+#endif
+        return next_rsp;
     }
 
     /*
@@ -926,6 +943,9 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
      * kompletna rame IRQ na prywatnym stosie procesu, a po wybudzeniu IRETQ
      * wznawia ten sam SYSCALL za HLT.
      */
+#if BURSZTYNDIAGVIRTIOINPUTINIT
+    input_activation_exit(wektor);
+#endif
     return rsp;
 }
 
@@ -1050,6 +1070,10 @@ extern "C" bool idt_zarejestruj_irq(uint8_t vector, IrqHandlerFn handler, void* 
         przywroc_przerwania(rflags);
         return false;
     }
+    if (dynamiczne_irq[vector].handler) {
+        przywroc_przerwania(rflags);
+        return false; // Preserve the existing vector's handler/context ownership.
+    }
     dynamiczne_irq[vector].handler = handler;
     dynamiczne_irq[vector].context = context;
     przywroc_przerwania(rflags);
@@ -1080,4 +1104,3 @@ extern "C" uint32_t idt_zaalokowane_wektory_liczba(void) {
     przywroc_przerwania(rflags);
     return count;
 }
-

@@ -219,6 +219,7 @@ struct InputDevice {
     int32_t      rel_x;
     int32_t      rel_y;
     int32_t      rel_wheel;
+    int32_t      rel_hwheel;
     int32_t      abs_val_x;
     int32_t      abs_val_y;
     bool         has_abs_x;
@@ -266,4 +267,3 @@ uint16_t input_usb_hid_mod_to_linux(uint8_t bit_index);
 #ifdef __cplusplus
 }
 #endif
-

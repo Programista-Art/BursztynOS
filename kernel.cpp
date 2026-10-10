@@ -32,6 +32,7 @@ extern "C" void odblokuj_ekran();
 #include "loader.h"
 #include "ahci.h"
 #include "instalator.h"
+#include "virtio_input_activation_diag.h"
 #include "blokowy.h"
 #include "e1000.h"
 #include "virtio_net.h"
@@ -2369,14 +2370,13 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     virtio_pci_diag_trace_type(VIRTIO_ID_NET, "driver probe end");
 
     virtio_pci_diag_trace_type(VIRTIO_ID_INPUT, "driver probe begin");
-    const uint32_t virtio_input_count = virtio_input_probe_and_init();
-    if (virtio_input_count > 0) {
-        if (tryb_testowy) {
-            virtio_input_stress_test_all();
-        } else {
-            wypisz_log("[VIRTIO-INPUT] Sanity check: OK (devices initialized and registered).");
-        }
-    }
+#if BURSZTYNDIAGVIRTIOINPUTINIT
+    input_activation_log("boot installer mode", instalator_tryb());
+    input_activation_log("boot Multiboot address", g_multiboot_info_ptr);
+    input_activation_log("boot scheduler PID", aktualny_pid);
+#endif
+    const uint32_t virtio_input_prepared = virtio_input_probe_and_prepare();
+    if (virtio_input_prepared) wypisz_log("[VIRTIO-INPUT] Devices PREPARED; activation deferred until kernel bootstrap completes.");
     virtio_pci_diag_trace_type(VIRTIO_ID_INPUT, "driver probe end");
 
     NetworkDevice* net_dev = net_get_primary_device();
@@ -2490,6 +2490,23 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     if (tryb_testowy) {
         ekran_test_virtio_gpu_modeset(zadano_automatyczne_testy(
             g_multiboot_info_ptr, "bursztyn.test.gpu-capture=1"));
+    }
+
+    // Common late activation barrier: memory/IDT/APIC, initialized scheduler,
+    // PSF/services, application resources and display bootstrap are complete.
+    // No Ring3 GUI process exists yet. Both normal and Installer use this point;
+    // IF/dispatch policy stays unchanged until the existing final STI below.
+#if BURSZTYNDIAGVIRTIOINPUTINIT
+    input_activation_log("kernel phase: bootstrap complete / before Ring3", 1);
+    input_activation_log("late activation installer mode", instalator_tryb());
+    input_activation_log("late activation scheduler PID", aktualny_pid);
+    input_activation_log("late activation scheduler PID0 state", tablica_procesow[0].stan);
+    input_activation_log("late activation scheduler dispatch enabled", wielozadaniowosc_aktywna);
+#endif
+    const uint32_t virtio_input_active = virtio_input_activate_prepared();
+    if (virtio_input_active) {
+        if (tryb_testowy) virtio_input_stress_test_all();
+        else wypisz_log("[VIRTIO-INPUT] Sanity check: OK (devices initialized and registered).");
     }
 
     /* ---------------------------------------------------------------------

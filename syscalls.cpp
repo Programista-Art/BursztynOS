@@ -2,6 +2,7 @@
 #include "ekran_powitalny_api.h"
 #include "diagnostyka_startu.h"
 #include "move_trace.h"
+#include "virtio_input.h"
 #include "gui_runtime_diag.h"
 /*
  * Bursztyn OS - Bursztynowe Wywolania Systemowe (BWS)
@@ -2420,6 +2421,7 @@ uint64_t reset_ps2() {
     wypisz_log("[REBOOT TRACE] stop new GPU submissions");
 #endif
     wycisz_start_przed_restartem();
+    virtio_input_quiesce_for_reboot();
     diag_start_reboot("[STARTUP] GPU quiesce begin");
     virtio_gpu_stop_submissions();
 
@@ -2536,6 +2538,7 @@ uint64_t reset_ps2() {
 void wylacz_qemu() {
     wypisz_log("[POWER] Wylaczanie systemu.");
     wycisz_start_przed_restartem();
+    virtio_input_quiesce_for_reboot();
     diag_start_reboot("[STARTUP] GPU quiesce begin");
     virtio_gpu_stop_submissions();
     virtio_gpu_quiesce_for_reboot();

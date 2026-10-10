@@ -37,6 +37,11 @@ constexpr size_t MAX_INPUT_DEVICES = 16;
 static InputDevice* s_devices[MAX_INPUT_DEVICES] = {};
 static size_t s_device_count = 0;
 static InputDevice* s_pointer_owner = nullptr;
+static int32_t input_accumulate_delta(int32_t previous, int32_t delta) {
+    const int64_t sum = int64_t(previous) + delta;
+    // Keep negation valid too: the graphics convention negates Y deltas.
+    return sum > INT32_MAX ? INT32_MAX : sum < -INT32_MAX ? -INT32_MAX : int32_t(sum);
+}
 
 #if BURSZTYNDIAGABSMAP
 static AbsMapSample s_abs_maps[MAX_INPUT_DEVICES]{};
@@ -365,7 +370,8 @@ bool input_register_device(InputDevice* dev) {
             dev->registered = true;
             dev->rel_x = 0;
             dev->rel_y = 0;
-            dev->rel_wheel = 0;
+    dev->rel_wheel = 0;
+    dev->rel_hwheel = 0;
             dev->abs_val_x = 0;
             dev->abs_val_y = 0;
             dev->has_abs_x = false;
@@ -443,6 +449,7 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
         case INPUT_EV_KEY: {
             const uint16_t code = ev->code;
             const uint32_t val = ev->value;
+            if (val > 2) break; // Only release, press and repeat are defined.
 
             // Przyciski myszy / urzadzenia wskazujacego
             if (code == INPUT_BTN_LEFT || code == INPUT_BTN_TOUCH) {
@@ -464,13 +471,9 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
                     dev->buttons_state &= ~MYSZ_PRZYCISK_SRODKOWY;
                 }
             } else if (code >= INPUT_BTN_MISC && code < 0x200U) {
-                // Inne przyciski rozszerzone
-                if (val != 0) {
-                    dev->buttons_state |= MYSZ_PRZYCISK_LEWY;
-                } else {
-                    dev->buttons_state &= ~MYSZ_PRZYCISK_LEWY;
-                }
-            } else {
+                // Unsupported buttons must not manufacture left-click edges.
+            } else if (code > 0 && code < INPUT_BTN_MISC &&
+                       (dev->kinds & INPUT_DEVICE_KIND_KEYBOARD)) {
                 // Standardowe klawisze klawiatury
                 klawiatura_obsluz_klawisz(code, val);
             }
@@ -480,11 +483,13 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
         case INPUT_EV_REL: {
             const int32_t delta = static_cast<int32_t>(ev->value);
             if (ev->code == INPUT_REL_X) {
-                dev->rel_x += delta;
+                dev->rel_x = input_accumulate_delta(dev->rel_x, delta);
             } else if (ev->code == INPUT_REL_Y) {
-                dev->rel_y += delta;
+                dev->rel_y = input_accumulate_delta(dev->rel_y, delta);
             } else if (ev->code == INPUT_REL_WHEEL) {
-                dev->rel_wheel += delta;
+                dev->rel_wheel = input_accumulate_delta(dev->rel_wheel, delta);
+            } else if (ev->code == INPUT_REL_HWHEEL) {
+                dev->rel_hwheel = input_accumulate_delta(dev->rel_hwheel, delta);
             }
             log_raw_virtio_rel(dev, ev, delta);
             break;
@@ -510,7 +515,7 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
                 const char* src_name = (dev->name[0] != '\0') ? dev->name : "input";
 
                 const bool has_pointer_activity = (dev->rel_x != 0 || dev->rel_y != 0 ||
-                    dev->rel_wheel != 0 || dev->has_abs_x || dev->has_abs_y ||
+                    dev->rel_wheel != 0 || dev->rel_hwheel != 0 || dev->has_abs_x || dev->has_abs_y ||
                     dev->buttons_state != dev->prev_buttons_state);
 
                 if (has_pointer_activity) {
@@ -536,9 +541,10 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
                         }
 
                         // 2. Kolo myszy
-                        if (dev->rel_wheel != 0) {
-                            zaktualizuj_kolo_myszy(dev->rel_wheel, 0, dev->buttons_state);
+                        if (dev->rel_wheel != 0 || dev->rel_hwheel != 0) {
+                            zaktualizuj_kolo_myszy(dev->rel_wheel, dev->rel_hwheel, dev->buttons_state);
                             dev->rel_wheel = 0;
+                            dev->rel_hwheel = 0;
                         }
 
                         // 3. Pozycjonowanie bezwzgledne (tablet / ekran dotykowy)
@@ -549,6 +555,8 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
                             if (screen_w > 0 && screen_h > 0) {
                                 int target_x = dev->has_abs_x ? dev->abs_val_x : grafika_pobierz_mysz_x();
                                 int target_y = dev->has_abs_y ? dev->abs_val_y : grafika_pobierz_mysz_y();
+                                if (dev->abs_x.max <= dev->abs_x.min) target_x = grafika_pobierz_mysz_x();
+                                if (dev->abs_y.max <= dev->abs_y.min) target_y = grafika_pobierz_mysz_y();
 
                                 // Skalowanie osi X z pelna ochrona przed overflow
                                 if (dev->has_abs_x && dev->abs_x.max > dev->abs_x.min) {
@@ -572,6 +580,12 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
 
                                 const bool can_abs_x = dev->has_abs_x && (dev->abs_x.max > dev->abs_x.min);
                                 const bool can_abs_y = dev->has_abs_y && (dev->abs_y.max > dev->abs_y.min);
+                                // Invalid/unavailable ranges preserve the current
+                                // pixel position; never send raw/extreme ABS as pixels.
+                                if (target_x < 0) target_x = 0;
+                                if (target_y < 0) target_y = 0;
+                                if (target_x >= screen_w) target_x = screen_w - 1;
+                                if (target_y >= screen_h) target_y = screen_h - 1;
                                 if ((dev->kinds & INPUT_DEVICE_KIND_TABLET) != 0 || can_abs_x || can_abs_y) {
 #if BURSZTYNDIAGABSMAP
                                     if(auto* a=abs_sample(dev))a->record(dev->abs_val_x,dev->abs_val_y,
@@ -600,6 +614,7 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
                         dev->rel_x = 0;
                         dev->rel_y = 0;
                         dev->rel_wheel = 0;
+                        dev->rel_hwheel = 0;
                         dev->has_abs_x = false;
                         dev->has_abs_y = false;
                     }

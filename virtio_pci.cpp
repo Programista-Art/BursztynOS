@@ -5,6 +5,7 @@
  */
 
 #include "virtio_pci.h"
+#include "virtio_input_activation_diag.h"
 #include "diagnostyka_klatek_startu.h"
 #include "sterowniki/czas/hpet.h"
 
@@ -410,6 +411,13 @@ uint8_t virtio_pci_get_status(const VirtioPciDevice* dev) {
 
 void virtio_pci_set_status(VirtioPciDevice* dev, uint8_t status) {
     if (!dev || !dev->common_cfg) return;
+    // Preparation cannot accidentally activate a function via a shared helper.
+    // FAILED is permitted during cleanup; it does not initiate activation.
+    if (dev->input_init_active && (status & VIRTIO_STATUS_DRIVER_OK) &&
+        !(status & VIRTIO_STATUS_FAILED) && !dev->input_activation_allowed) {
+        virtio_pci_input_init_trace(dev, "early DRIVER_OK blocked", status);
+        return;
+    }
 #if BURSZTYNDIAGSPLASHRUNTIMEFRAMES
     if(status==VIRTIO_STATUS_RESET&&dev->virtio_id==VIRTIO_ID_GPU) {
 #ifdef BURSZTYN_VIRTIO_HOST_TEST
@@ -430,7 +438,56 @@ void virtio_pci_set_status(VirtioPciDevice* dev, uint8_t status) {
         pci_trace_bdf(dev->bus, dev->slot, dev->func, "8-bit device_status reset store begin");
     }
 #endif
-    virtio_write8(&dev->common_cfg->device_status, status);
+    if (dev->input_init_active) {
+        virtio_pci_input_init_trace(dev, "status before transition read begin");
+        const uint8_t previous = virtio_pci_get_status(dev);
+        virtio_pci_input_init_trace(dev, "status before transition read done", previous);
+    }
+    virtio_pci_input_init_trace(dev, "status store begin", status);
+    if (dev->input_init_active && (status & VIRTIO_STATUS_DRIVER_OK)) {
+#if BURSZTYNDIAGVIRTIOINPUTINIT
+        input_activation_trace.bdf = (uint64_t(dev->bus) << 16) | (uint64_t(dev->slot) << 8) | dev->func;
+        input_activation_trace.mmio = reinterpret_cast<uintptr_t>(&dev->common_cfg->device_status);
+        input_activation_trace.entries = input_activation_trace.exits = 0;
+        input_activation_trace.irq_depth = 0;
+        input_activation_trace.phase = 0;
+        input_activation_trace.store_rip = input_activation_trace.next_rip = 0;
+        input_activation_trace.armed = 1;
+#ifndef BURSZTYN_VIRTIO_HOST_TEST
+        uint64_t flags;
+        asm volatile("pushfq; popq %0" : "=r"(flags) :: "memory");
+        input_activation_trace.rflags = flags;
+#endif
+        input_activation_log("STORE address", input_activation_trace.mmio);
+        input_activation_log("STORE rflags", input_activation_trace.rflags);
+#ifdef BURSZTYN_VIRTIO_HOST_TEST
+        input_activation_trace.phase = 1;
+        virtio_write8(&dev->common_cfg->device_status, status);
+        input_activation_trace.phase = 2;
+#else
+        // Exactly three stores in one compiler barrier. The instruction after
+        // the byte MMIO store records phase=2 in ordinary kernel RAM, before
+        // any function call, serial I/O or status readback. IF is unchanged.
+        asm volatile("leaq 1f(%%rip), %%rax\n\tmovq %%rax, %1\n\t"
+                     "leaq 2f(%%rip), %%rax\n\tmovq %%rax, %2\n\t"
+                     "movl $1, %0\n1:\tmovb %b4, (%3)\n2:\tmovl $2, %0"
+            : "=m"(input_activation_trace.phase),
+              "=m"(input_activation_trace.store_rip), "=m"(input_activation_trace.next_rip)
+            : "r"(&dev->common_cfg->device_status), "q"(status) : "rax", "memory");
+#endif
+        input_activation_log("STORE returned", input_activation_trace.phase);
+#else
+        virtio_write8(&dev->common_cfg->device_status, status);
+#endif
+    } else {
+        virtio_write8(&dev->common_cfg->device_status, status);
+    }
+    virtio_pci_input_init_trace(dev, "status store done", status);
+    if (dev->input_init_active) {
+        virtio_pci_input_init_trace(dev, "status after transition read begin");
+        const uint8_t current = virtio_pci_get_status(dev);
+        virtio_pci_input_init_trace(dev, "status after transition read done", current);
+    }
 #if defined(BURSZTYN_DIAG_VIRTIO_BOOT) && BURSZTYN_DIAG_VIRTIO_BOOT
     if (status == VIRTIO_STATUS_RESET) {
         pci_trace_bdf(dev->bus, dev->slot, dev->func, "8-bit device_status reset store returned");
@@ -438,6 +495,85 @@ void virtio_pci_set_status(VirtioPciDevice* dev, uint8_t status) {
     if ((status & VIRTIO_STATUS_DRIVER_OK) != 0) {
         pci_trace_bdf(dev->bus, dev->slot, dev->func, "DRIVEROK");
     }
+#endif
+}
+
+#if BURSZTYNDIAGVIRTIOINPUTINIT
+InputActivationTrace input_activation_trace{};
+void input_activation_log(const char* operation, uint64_t value) {
+    char msg[192]{}; size_t pos = 0;
+    log_append_str(msg, sizeof(msg), pos, "[VI-ACT] bdf=");
+    log_append_u64_hex(msg, sizeof(msg), pos, input_activation_trace.bdf, 6);
+    log_append_str(msg, sizeof(msg), pos, " phase=");
+    log_append_u64_dec(msg, sizeof(msg), pos, input_activation_trace.phase);
+    log_append_str(msg, sizeof(msg), pos, " ");
+    log_append_str(msg, sizeof(msg), pos, operation);
+    log_append_str(msg, sizeof(msg), pos, " value=0x");
+    log_append_u64_hex(msg, sizeof(msg), pos, value, 16);
+#ifdef BURSZTYN_VIRTIO_HOST_TEST
+    host_klog(msg);
+#else
+    // No logger, locks, allocation, clock or UART-ready wait. Each message
+    // has at most 191 bytes. Same COM1/debug-port transport as early startup.
+    for (size_t i = 0; i < pos; ++i) {
+        asm volatile("outb %0, %1" :: "a"(msg[i]), "Nd"(uint16_t(0x3f8)) : "memory");
+        asm volatile("outb %0, %1" :: "a"(msg[i]), "Nd"(uint16_t(0xe9)) : "memory");
+    }
+    asm volatile("outb %0, %1" :: "a"(uint8_t('\n')), "Nd"(uint16_t(0x3f8)) : "memory");
+    asm volatile("outb %0, %1" :: "a"(uint8_t('\n')), "Nd"(uint16_t(0xe9)) : "memory");
+#endif
+}
+void input_activation_entry(uint64_t vector, uint64_t rip, uint64_t error, uint64_t cr2) {
+    if (!input_activation_trace.armed) return;
+    input_activation_trace.vector = vector; input_activation_trace.rip = rip;
+    input_activation_trace.error = error; input_activation_trace.cr2 = cr2;
+    ++input_activation_trace.irq_depth;
+    const auto n = ++input_activation_trace.entries;
+    if (n <= 16 || vector < 32) {
+        input_activation_log(vector < 32 ? "EXCEPTION vector" : "IRQ enter vector", vector);
+        input_activation_log("entry RIP", rip);
+        if (n == 1 || vector < 32) {
+            input_activation_log("MMIO store RIP", input_activation_trace.store_rip);
+            input_activation_log("instruction after MMIO RIP", input_activation_trace.next_rip);
+        }
+        if (vector < 32) {
+            input_activation_log("exception error", error);
+            input_activation_log("exception CR2", cr2);
+        }
+    }
+}
+void input_activation_exit(uint64_t vector) {
+    if (!input_activation_trace.armed) return;
+    if (input_activation_trace.irq_depth) --input_activation_trace.irq_depth;
+    if (++input_activation_trace.exits <= 16) input_activation_log("IRQ exit vector", vector);
+}
+#endif
+
+void virtio_pci_input_init_trace(VirtioPciDevice* dev, const char* operation, uint64_t value) {
+    if (!dev || !dev->input_init_active || dev->input_init_stage >= 256) return;
+    ++dev->input_init_stage;
+#ifdef BURSZTYN_VIRTIO_HOST_TEST
+    extern void host_input_init_checkpoint(VirtioPciDevice*, const char*, uint64_t) __attribute__((weak));
+    if (host_input_init_checkpoint) host_input_init_checkpoint(dev, operation, value);
+#endif
+#if defined(BURSZTYNDIAGVIRTIOINPUTINIT) && BURSZTYNDIAGVIRTIOINPUTINIT
+    // No MMIO reads here: a begin checkpoint must precede the access it traces.
+    char msg[320]{}; size_t pos = 0;
+    log_append_str(msg, sizeof(msg), pos, "[VIRTIO-INPUT-INIT] bdf=");
+    log_append_u64_hex(msg, sizeof(msg), pos, dev->bus, 2);
+    log_append_str(msg, sizeof(msg), pos, ":");
+    log_append_u64_hex(msg, sizeof(msg), pos, dev->slot, 2);
+    log_append_str(msg, sizeof(msg), pos, ".");
+    log_append_u64_dec(msg, sizeof(msg), pos, dev->func);
+    log_append_str(msg, sizeof(msg), pos, " stage=");
+    log_append_u64_dec(msg, sizeof(msg), pos, dev->input_init_stage);
+    log_append_str(msg, sizeof(msg), pos, " ");
+    log_append_str(msg, sizeof(msg), pos, operation);
+    log_append_str(msg, sizeof(msg), pos, " value=0x");
+    log_append_u64_hex(msg, sizeof(msg), pos, value, 16);
+    klog_impl(msg);
+#else
+    (void)operation; (void)value;
 #endif
 }
 
@@ -501,9 +637,11 @@ bool virtio_pci_reset(VirtioPciDevice* dev) {
 #if defined(BURSZTYN_DIAG_VIRTIO_BOOT) && BURSZTYN_DIAG_VIRTIO_BOOT
     klog_impl("[VIRTIO RESET TRACE] status write returned");
 #endif
+    virtio_pci_input_init_trace(dev, "reset confirmation begin");
     for (uint32_t i = 0; i < 10000; ++i) {
         if (virtio_pci_get_status(dev) == 0) {
             pci_trace_bdf(dev->bus, dev->slot, dev->func, "reset end");
+            virtio_pci_input_init_trace(dev, "reset confirmation done", i);
             return true;
         }
         asm volatile("pause" ::: "memory");
@@ -515,11 +653,19 @@ bool virtio_pci_reset(VirtioPciDevice* dev) {
 
 uint64_t virtio_pci_read_device_features(VirtioPciDevice* dev) {
     if (!dev || !dev->common_cfg) return 0;
+    virtio_pci_input_init_trace(dev, "feature bank 0 select begin");
     virtio_write32(&dev->common_cfg->device_feature_select, 0);
+    virtio_pci_input_init_trace(dev, "feature bank 0 select done", 0);
+    virtio_pci_input_init_trace(dev, "feature bank 0 read begin");
     const uint32_t f0 = virtio_read32(&dev->common_cfg->device_feature);
+    virtio_pci_input_init_trace(dev, "feature bank 0 read done", f0);
 
+    virtio_pci_input_init_trace(dev, "feature bank 1 select begin");
     virtio_write32(&dev->common_cfg->device_feature_select, 1);
+    virtio_pci_input_init_trace(dev, "feature bank 1 select done", 1);
+    virtio_pci_input_init_trace(dev, "feature bank 1 read begin");
     const uint32_t f1 = virtio_read32(&dev->common_cfg->device_feature);
+    virtio_pci_input_init_trace(dev, "feature bank 1 read done", f1);
 
     return (static_cast<uint64_t>(f1) << 32) | f0;
 }
@@ -541,7 +687,9 @@ bool virtio_pci_negotiate_features(VirtioPciDevice* dev, uint64_t requested_feat
 #if BURSZTYN_DIAG_PCI_ENUM
     pci_diag_step("[PCI-SCAN] feature read begin");
 #endif
+    virtio_pci_input_init_trace(dev, "features read begin");
     dev->device_features = virtio_pci_read_device_features(dev);
+    virtio_pci_input_init_trace(dev, "features read done", dev->device_features);
     pci_trace_bdf(dev->bus, dev->slot, dev->func, "feature read end");
 #if BURSZTYN_DIAG_PCI_ENUM
     pci_diag_features("[PCI-SCAN] feature read end: device_features=0x", dev->device_features);
@@ -559,7 +707,9 @@ bool virtio_pci_negotiate_features(VirtioPciDevice* dev, uint64_t requested_feat
 #endif
     pci_trace_bdf(dev->bus, dev->slot, dev->func, "feature selection");
     dev->driver_features = (dev->device_features & requested_features) | VIRTIO_F_VERSION_1;
+    virtio_pci_input_init_trace(dev, "features write begin", dev->driver_features);
     virtio_pci_write_driver_features(dev, dev->driver_features);
+    virtio_pci_input_init_trace(dev, "features write done", dev->driver_features);
 
     if ((dev->driver_features & VIRTIO_F_NOTIFICATION_DATA) != 0) {
         if (!virtio_pci_validate_notify_multiplier(dev->notify_multiplier, true)) {
@@ -576,7 +726,9 @@ bool virtio_pci_negotiate_features(VirtioPciDevice* dev, uint64_t requested_feat
     virtio_pci_set_status(dev, status);
 
     // Weryfikacja: urzadzenie musi zachowac bit FEATURES_OK
+    virtio_pci_input_init_trace(dev, "FEATURES_OK readback begin");
     const uint8_t status_after = virtio_pci_get_status(dev);
+    virtio_pci_input_init_trace(dev, "FEATURES_OK readback done", status_after);
     pci_trace_bdf(dev->bus, dev->slot, dev->func, "FEATURESOK verification");
     if ((status_after & VIRTIO_STATUS_FEATURES_OK) == 0) {
         klog_impl("[VIRTIO-PCI] initialization rejected: device cleared FEATURES_OK");
@@ -592,7 +744,9 @@ bool virtio_pci_negotiate_features(VirtioPciDevice* dev, uint64_t requested_feat
 
 void virtio_pci_select_queue(VirtioPciDevice* dev, uint16_t queue_index) {
     if (!dev || !dev->common_cfg) return;
+    virtio_pci_input_init_trace(dev, "queue select begin", queue_index);
     virtio_write16(&dev->common_cfg->queue_select, queue_index);
+    virtio_pci_input_init_trace(dev, "queue select done", queue_index);
 }
 
 uint16_t virtio_pci_get_queue_size(const VirtioPciDevice* dev) {
@@ -686,7 +840,10 @@ volatile uint16_t* virtio_pci_notify_address(const VirtioPciDevice* dev, uint16_
     const uint64_t rel = static_cast<uint64_t>(queue_notify_off) * dev->notify_multiplier;
     if (rel > UINT64_MAX - sizeof(uint16_t)) return nullptr;
     if (rel + sizeof(uint16_t) > dev->notify_cap_len) return nullptr;
-    return reinterpret_cast<volatile uint16_t*>(dev->notify_base + rel);
+    const uintptr_t base = reinterpret_cast<uintptr_t>(dev->notify_base);
+    if (base > UINTPTR_MAX - rel || base + rel > UINTPTR_MAX - sizeof(uint16_t) ||
+        ((base + rel) & 1U)) return nullptr;
+    return reinterpret_cast<volatile uint16_t*>(base + rel);
 }
 
 void virtio_pci_notify_queue(VirtioPciDevice* dev, uint16_t queue_index, uint16_t queue_notify_off) {
@@ -712,17 +869,17 @@ uint8_t virtio_pci_read_device_config8(const VirtioPciDevice* dev, uint32_t offs
 }
 
 uint16_t virtio_pci_read_device_config16(const VirtioPciDevice* dev, uint32_t offset) {
-    if (!dev || !dev->device_cfg || offset > dev->device_cfg_len - sizeof(uint16_t)) return 0;
+    if (!dev || !dev->device_cfg || offset > dev->device_cfg_len || sizeof(uint16_t) > dev->device_cfg_len - offset) return 0;
     return virtio_read16(dev->device_cfg + offset);
 }
 
 uint32_t virtio_pci_read_device_config32(const VirtioPciDevice* dev, uint32_t offset) {
-    if (!dev || !dev->device_cfg || offset > dev->device_cfg_len - sizeof(uint32_t)) return 0;
+    if (!dev || !dev->device_cfg || offset > dev->device_cfg_len || sizeof(uint32_t) > dev->device_cfg_len - offset) return 0;
     return virtio_read32(dev->device_cfg + offset);
 }
 
 uint64_t virtio_pci_read_device_config64(const VirtioPciDevice* dev, uint32_t offset) {
-    if (!dev || !dev->device_cfg || offset > dev->device_cfg_len - sizeof(uint64_t)) return 0;
+    if (!dev || !dev->device_cfg || offset > dev->device_cfg_len || sizeof(uint64_t) > dev->device_cfg_len - offset) return 0;
     volatile const uint32_t* p = reinterpret_cast<volatile const uint32_t*>(dev->device_cfg + offset);
     const uint32_t lo = virtio_read32(p);
     const uint32_t hi = virtio_read32(p + 1);
@@ -735,12 +892,12 @@ void virtio_pci_write_device_config8(VirtioPciDevice* dev, uint32_t offset, uint
 }
 
 void virtio_pci_write_device_config16(VirtioPciDevice* dev, uint32_t offset, uint16_t val) {
-    if (!dev || !dev->device_cfg || offset > dev->device_cfg_len - sizeof(uint16_t)) return;
+    if (!dev || !dev->device_cfg || offset > dev->device_cfg_len || sizeof(uint16_t) > dev->device_cfg_len - offset) return;
     virtio_write16(dev->device_cfg + offset, val);
 }
 
 void virtio_pci_write_device_config32(VirtioPciDevice* dev, uint32_t offset, uint32_t val) {
-    if (!dev || !dev->device_cfg || offset > dev->device_cfg_len - sizeof(uint32_t)) return;
+    if (!dev || !dev->device_cfg || offset > dev->device_cfg_len || sizeof(uint32_t) > dev->device_cfg_len - offset) return;
     virtio_write32(dev->device_cfg + offset, val);
 }
 
@@ -1336,4 +1493,19 @@ bool virtio_pci_unmask_msix_entry(VirtioPciDevice* dev, uint16_t entry_index) {
 bool virtio_pci_is_entry_masked(const VirtioPciDevice* dev, uint16_t entry_index) {
     if (!dev || !dev->has_msix || !dev->msix_table) return true;
     return pci_msix_is_entry_masked(dev->msix_table, dev->msix_cap.table_size, entry_index);
+}
+
+uint16_t virtio_pci_get_num_queues(const VirtioPciDevice* dev) {
+    if (!dev || !dev->common_cfg) return 0;
+    return virtio_read16(&dev->common_cfg->num_queues);
+}
+
+bool virtio_pci_disable_intx(VirtioPciDevice* dev) {
+    if (!dev) return false;
+    const uint32_t command_status = pci_read32(dev->bus, dev->slot, dev->func, PCI_OFFSET_COMMAND_STATUS);
+    if (command_status == UINT32_MAX) return false;
+    // PCI Status is W1C: do not echo its upper half back to the device.
+    const uint16_t command = static_cast<uint16_t>(command_status) | PCI_COMMAND_INT_DISABLE;
+    pci_write32(dev->bus, dev->slot, dev->func, PCI_OFFSET_COMMAND_STATUS, command);
+    return (pci_read32(dev->bus, dev->slot, dev->func, PCI_OFFSET_COMMAND_STATUS) & PCI_COMMAND_INT_DISABLE) != 0;
 }

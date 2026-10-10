@@ -183,6 +183,12 @@ struct VirtioPciDevice {
     uint32_t device_cfg_len;
     uint8_t  device_cfg_bar;
     bool     has_device_cfg;
+    // Nonblocking per-function selector ownership (used by VirtIO input).
+    uint32_t input_config_lock;
+    bool input_init_active;
+    // Set only around the single late DRIVER_OK transition, never by prepare.
+    bool input_activation_allowed;
+    uint32_t input_init_stage;
 
     /* Wynegocjowane cechy: */
     uint64_t device_features;
@@ -338,3 +344,11 @@ bool virtio_pci_is_entry_masked(const VirtioPciDevice* dev, uint16_t entry_index
 #ifdef __cplusplus
 }
 #endif
+
+// Bounded initialization-only checkpoints; value is a completed read or intended write.
+void virtio_pci_input_init_trace(VirtioPciDevice* dev, const char* operation, uint64_t value = 0);
+
+uint16_t virtio_pci_get_num_queues(const VirtioPciDevice* dev);
+
+// Polling-only drivers must suppress unhandled legacy PCI interrupts.
+bool virtio_pci_disable_intx(VirtioPciDevice* dev);

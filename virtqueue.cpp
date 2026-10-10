@@ -109,12 +109,17 @@ VirtQueue* virtqueue_create(VirtioPciDevice* dev, uint16_t queue_index) {
     virtio_pci_select_queue(dev, queue_index);
 
     // 2. Weryfikacja, czy kolejka nie jest juz wlaczona
-    if (virtio_pci_get_queue_enable(dev) != 0) {
+    virtio_pci_input_init_trace(dev, "queue enable read begin");
+    const uint16_t enabled = virtio_pci_get_queue_enable(dev);
+    virtio_pci_input_init_trace(dev, "queue enable read done", enabled);
+    if (enabled != 0) {
         return nullptr;
     }
 
     // 3. Odczyt i scisla walidacja rozmiaru kolejki
+    virtio_pci_input_init_trace(dev, "queue size read begin");
     const uint16_t qsize = virtio_pci_get_queue_size(dev);
+    virtio_pci_input_init_trace(dev, "queue size read done", qsize);
     if (qsize == 0 || qsize > VIRTQUEUE_MAX_QUEUE_SIZE || (qsize & (qsize - 1U)) != 0) {
         return nullptr;
     }
@@ -135,12 +140,15 @@ VirtQueue* virtqueue_create(VirtioPciDevice* dev, uint16_t queue_index) {
     uint64_t dma_phys = 0;
     size_t dma_pages = 0;
 
+    virtio_pci_input_init_trace(dev, "queue DMA allocate begin", total_dma_size);
     if (!virtq_dma_alloc(total_dma_size, 4096, &dma_virt, &dma_phys, &dma_pages)) {
         return nullptr;
     }
     virtio_pci_diag_trace_queue(dev, queue_index, "queue allocation");
 
+    virtio_pci_input_init_trace(dev, "queue DMA allocate done", dma_phys);
     // 6. Alokacja obiektu zarzadzania i tablic sledzenia
+    virtio_pci_input_init_trace(dev, "queue heap allocate begin");
     VirtQueue* vq = static_cast<VirtQueue*>(kernel_kmalloc(sizeof(VirtQueue)));
     if (!vq) {
         virtq_dma_free(dma_virt, dma_phys, dma_pages);
@@ -148,14 +156,18 @@ VirtQueue* virtqueue_create(VirtioPciDevice* dev, uint16_t queue_index) {
     }
     *vq = {};
 
+    virtio_pci_input_init_trace(dev, "queue descriptor state allocate begin", qsize);
     vq->desc_state = static_cast<VirtQueueDescState*>(kernel_kmalloc(sizeof(VirtQueueDescState) * qsize));
+    virtio_pci_input_init_trace(dev, "queue descriptor state allocate done");
     if (!vq->desc_state) {
         kernel_kfree(vq);
         virtq_dma_free(dma_virt, dma_phys, dma_pages);
         return nullptr;
     }
 
+    virtio_pci_input_init_trace(dev, "queue free list allocate begin", qsize);
     vq->free_desc_next = static_cast<uint16_t*>(kernel_kmalloc(sizeof(uint16_t) * qsize));
+    virtio_pci_input_init_trace(dev, "queue free list allocate done");
     if (!vq->free_desc_next) {
         kernel_kfree(vq->desc_state);
         kernel_kfree(vq);
@@ -163,6 +175,7 @@ VirtQueue* virtqueue_create(VirtioPciDevice* dev, uint16_t queue_index) {
         return nullptr;
     }
 
+    virtio_pci_input_init_trace(dev, "queue heap allocate done");
     vq->dev = dev;
     vq->queue_index = queue_index;
     vq->queue_size = qsize;
@@ -193,8 +206,11 @@ VirtQueue* virtqueue_create(VirtioPciDevice* dev, uint16_t queue_index) {
     vq->last_used_idx = 0;
 
     // 7. Weryfikacja adresu powiadomien w warstwie transportowej
+    virtio_pci_input_init_trace(dev, "queue notify offset read begin");
     vq->queue_notify_off = virtio_pci_get_queue_notify_off(dev);
+    virtio_pci_input_init_trace(dev, "queue notify offset read done", vq->queue_notify_off);
     volatile uint16_t* notify_addr = virtio_pci_notify_address(dev, vq->queue_notify_off);
+    virtio_pci_input_init_trace(dev, "queue notify address", reinterpret_cast<uintptr_t>(notify_addr));
     if (!notify_addr) {
         kernel_kfree(vq->free_desc_next);
         kernel_kfree(vq->desc_state);
@@ -204,16 +220,29 @@ VirtQueue* virtqueue_create(VirtioPciDevice* dev, uint16_t queue_index) {
     }
 
     // 8. Programowanie rejestrow transportu PCI
+    virtio_pci_input_init_trace(dev, "queue size store begin", qsize);
     virtio_pci_set_queue_size(dev, qsize);
+    virtio_pci_input_init_trace(dev, "queue size store done");
     virtio_pci_diag_trace_queue(dev, queue_index, "queue physical addresses");
+    virtio_pci_input_init_trace(dev, "queue descriptor address store begin", vq->desc_phys);
     virtio_pci_set_queue_desc(dev, vq->desc_phys);
+    virtio_pci_input_init_trace(dev, "queue descriptor address store done");
+    virtio_pci_input_init_trace(dev, "queue available address store begin", vq->driver_phys);
     virtio_pci_set_queue_driver(dev, vq->driver_phys);
+    virtio_pci_input_init_trace(dev, "queue available address store done");
+    virtio_pci_input_init_trace(dev, "queue used address store begin", vq->device_phys);
     virtio_pci_set_queue_device(dev, vq->device_phys);
+    virtio_pci_input_init_trace(dev, "queue used address store done");
 
     // 9. Wlaczenie kolejki i weryfikacja
     virtio_pci_diag_trace_queue(dev, queue_index, "queue enable");
+    virtio_pci_input_init_trace(dev, "queue enable store begin");
     virtio_pci_set_queue_enable(dev, 1);
-    if (virtio_pci_get_queue_enable(dev) != 1) {
+    virtio_pci_input_init_trace(dev, "queue enable store done");
+    virtio_pci_input_init_trace(dev, "queue enable readback begin");
+    const uint16_t confirmed_enable = virtio_pci_get_queue_enable(dev);
+    virtio_pci_input_init_trace(dev, "queue enable readback done", confirmed_enable);
+    if (confirmed_enable != 1) {
         // Rollback w razie odmowy wlaczenia (VirtIO 1.0 sec 4.1.4.3: MUST NOT write 0 to queue_enable)
         virtio_pci_set_queue_desc(dev, 0);
         virtio_pci_set_queue_driver(dev, 0);
@@ -282,6 +311,26 @@ int virtqueue_submit(VirtQueue* vq, const VirtqBuffer* bufs, uint32_t num_bufs, 
         return -2;
     }
 
+    // Validate the entire allocation before changing ownership. A damaged
+    // free list must never become an unchecked descriptor-table subscript.
+    if (vq->num_free > vq->queue_size || vq->outstanding_heads >= vq->queue_size)
+        return -4;
+    if (++vq->visit_sequence == 0) {
+        for (uint16_t i = 0; i < vq->queue_size; ++i) vq->desc_state[i].visit = 0;
+        ++vq->visit_sequence;
+    }
+    uint16_t check = vq->free_head;
+    for (uint32_t i = 0; i < num_bufs; ++i) {
+        if (check >= vq->queue_size || vq->desc_state[check].is_allocated ||
+            vq->desc_state[check].visit == vq->visit_sequence) return -4;
+        vq->desc_state[check].visit = vq->visit_sequence;
+        check = vq->free_desc_next[check];
+    }
+    if ((vq->num_free == num_bufs && check != vq->queue_size) ||
+        (vq->num_free > num_bufs && (check >= vq->queue_size ||
+         vq->desc_state[check].is_allocated ||
+         vq->desc_state[check].visit == vq->visit_sequence))) return -4;
+
     // Przydzial deskryptorow z listy wolnych
     const uint16_t head = vq->free_head;
     uint16_t curr = head;
@@ -308,12 +357,18 @@ int virtqueue_submit(VirtQueue* vq, const VirtqBuffer* bufs, uint32_t num_bufs, 
         vq->desc[desc_idx].len = bufs[i].len;
         vq->desc[desc_idx].flags = flags;
         vq->desc[desc_idx].next = (i + 1 < num_bufs) ? next_free : 0;
+        vq->desc_state[desc_idx].owner = head;
+        vq->desc_state[desc_idx].next = vq->desc[desc_idx].next;
+        vq->desc_state[desc_idx].flags = flags;
+        vq->desc_state[desc_idx].buffer_addr = bufs[i].phys_addr;
+        vq->desc_state[desc_idx].buffer_len = bufs[i].len;
 
         curr = next_free;
     }
 
     vq->free_head = curr;
     vq->num_free -= static_cast<uint16_t>(num_bufs);
+    ++vq->outstanding_heads;
 
     // Bariera Store-Store: upewniamy sie, ze tablica deskryptorow jest zapisana przed ringiem
     virtqueue_wmb();
@@ -355,12 +410,14 @@ bool virtqueue_has_used(const VirtQueue* vq) {
 int virtqueue_pop_used(VirtQueue* vq, void** out_cookie, uint32_t* out_len) {
     if (!vq || !vq->initialized || !vq->used) return -1;
 
-    // Bariera Load-Load: upewniamy sie, ze odczyt used->idx poprzedza odczyt ring[]
-    virtqueue_rmb();
-
-    if (vq->last_used_idx == vq->used->idx) {
+    const uint16_t used_idx = vq->used->idx;
+    if (vq->last_used_idx == used_idx) {
         return -1; // Brak nowych zakonczen
     }
+    // The acquire barrier belongs AFTER observing the published used index.
+    virtqueue_rmb();
+    const uint16_t pending = static_cast<uint16_t>(used_idx - vq->last_used_idx);
+    if (pending > vq->queue_size || pending > vq->outstanding_heads) return -4;
 
     const uint16_t ring_idx = vq->last_used_idx & (vq->queue_size - 1U);
     const uint32_t id = vq->used->ring[ring_idx].id;
@@ -388,8 +445,25 @@ int virtqueue_pop_used(VirtQueue* vq, void** out_cookie, uint32_t* out_len) {
 
     void* const cookie = vq->desc_state[id].cookie;
 
-    // Bezpieczny recykling lancucha deskryptorow
+    // Validate every link before freeing ANY link. Keep trusted chain metadata
+    // outside DMA so a malformed completion cannot splice another request.
     uint16_t curr = static_cast<uint16_t>(id);
+    if (vq->num_free > vq->queue_size - expected_chain_len) return -4;
+    for (uint16_t i = 0; i < expected_chain_len; ++i) {
+        if (curr >= vq->queue_size) return -4;
+        const auto& state = vq->desc_state[curr];
+        const bool next_required = (i + 1U < expected_chain_len);
+        if (!state.is_allocated || state.owner != id ||
+            state.is_chain_head != (i == 0) ||
+            ((state.flags & VRING_DESC_F_NEXT) != 0) != next_required ||
+            (state.flags & ~(VRING_DESC_F_NEXT | VRING_DESC_F_WRITE)) != 0 ||
+            vq->desc[curr].next != state.next || vq->desc[curr].flags != state.flags ||
+            vq->desc[curr].addr != state.buffer_addr || vq->desc[curr].len != state.buffer_len)
+            return -4;
+        curr = state.next;
+    }
+
+    curr = static_cast<uint16_t>(id);
     uint16_t freed_count = 0;
 
     while (freed_count < expected_chain_len) {
@@ -428,6 +502,7 @@ int virtqueue_pop_used(VirtQueue* vq, void** out_cookie, uint32_t* out_len) {
     virtqueue_mb();
 
     vq->last_used_idx = static_cast<uint16_t>(vq->last_used_idx + 1U);
+    --vq->outstanding_heads;
 
     if (out_cookie) *out_cookie = cookie;
     if (out_len) *out_len = len;

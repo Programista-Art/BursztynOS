@@ -82,6 +82,7 @@ struct VirtioInputConfig {
         VirtioInputDevids ids;
     } u;
 };
+static_assert(offsetof(VirtioInputConfig, u) == 8, "input payload offset");
 static_assert(sizeof(VirtioInputConfig) == 136, "VirtioInputConfig rozmiar != 136 B");
 
 #pragma pack(pop)
@@ -92,8 +93,17 @@ static_assert(sizeof(VirtioInputConfig) == 136, "VirtioInputConfig rozmiar != 13
 
 constexpr size_t VIRTIO_INPUT_NUM_EVENT_BUFS = 64;
 constexpr size_t VIRTIO_INPUT_MAX_DRIVERS = 8;
+enum class VirtioInputBufferState : uint8_t { FREE, POSTED_TO_DEVICE, RETURNED_IN_USED_RING, BEING_PROCESSED };
+
+enum class VirtioInputInitState : uint8_t {
+    UNINITIALIZED, RESETTING, NEGOTIATING, QUEUE_SETUP, BUFFERS_POSTED,
+    INTERRUPTS_READY, DRIVER_READY, REGISTERED, FAILED,
+    PREPARED, ACTIVATING, ACTIVE
+};
 
 struct VirtioInputDriver {
+    VirtioInputInitState init_state;
+    uint32_t failed_init_stage;
     VirtioPciDevice*   dev;
     VirtQueue*         eventq;
     VirtQueue*         statusq;
@@ -123,6 +133,15 @@ struct VirtioInputDriver {
     volatile uint32_t  irq_count;
     volatile bool      has_pending_events;
     uint64_t           total_events_processed;
+    // Service/reset exclusion is nonblocking: an IRQ or recursive poll never
+    // waits for the interrupted owner. DMA stays live until confirmed reset.
+    uint32_t           service_lock;
+    bool               reset_requested;
+    VirtioInputBufferState buffer_state[VIRTIO_INPUT_NUM_EVENT_BUFS];
+    uint16_t           buffer_head[VIRTIO_INPUT_NUM_EVENT_BUFS];
+    uint64_t           syn_sequence;
+    uint32_t           diagnostic_events;
+    bool               first_event_logged;
 };
 
 /* =========================================================================
@@ -133,12 +152,19 @@ struct VirtioInputDriver {
 bool virtio_input_query_config(VirtioPciDevice* dev, uint8_t select, uint8_t subsel,
                                void* out_data, uint8_t* out_size, size_t max_out);
 
-/* Inicjalizacja i zwalnianie pojedynczego sterownika */
+/* Early preparation never sets DRIVER_OK, registers InputDevice, or notifies.
+ * Activation is permitted only after the common late startup pass opens it. */
+bool virtio_input_prepare(VirtioInputDriver* drv, VirtioPciDevice* dev);
+bool virtio_input_activate(VirtioInputDriver* drv);
+uint32_t virtio_input_activate_prepared(void);
+/* Compatibility ABI: init now means prepare only. */
 bool virtio_input_init(VirtioInputDriver* drv, VirtioPciDevice* dev);
 bool virtio_input_reset(VirtioInputDriver* drv);
 void virtio_input_reset_all(void);
+void virtio_input_quiesce_for_reboot(void);
 
-/* Skanowanie PCI i inicjalizacja wszystkich wykrytych urzadzen VirtIO-INPUT */
+/* PCI preparation only, shared by normal/Installer/automated boot. */
+uint32_t virtio_input_probe_and_prepare(void);
 uint32_t virtio_input_probe_and_init(void);
 size_t virtio_input_get_count(void);
 VirtioInputDriver* virtio_input_get_driver(size_t index);

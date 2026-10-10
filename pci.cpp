@@ -37,6 +37,13 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include "pci.h"
+#include "virtio_input_activation_diag.h"
+#ifdef BURSZTYN_LOCK_HOST_TEST
+extern uint64_t host_memory_irq_save();
+extern void host_memory_irq_restore(uint64_t);
+extern void host_pci_lock_io_write(uint16_t, uint32_t);
+extern uint32_t host_pci_lock_io_read(uint16_t);
+#endif
 
 #ifdef BURSZTYN_VIRTIO_HOST_TEST
 extern uint32_t host_pci_read(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset);
@@ -116,7 +123,9 @@ struct StanPrzerwan {
 
 StanPrzerwan pci_zapisz_i_wylacz_irq() {
     StanPrzerwan stan{};
-
+#ifdef BURSZTYN_LOCK_HOST_TEST
+    stan.rflags = host_memory_irq_save();
+#else
     asm volatile(
         "pushfq\n\t"
         "popq %0\n\t"
@@ -125,6 +134,7 @@ StanPrzerwan pci_zapisz_i_wylacz_irq() {
         :
         : "memory", "cc"
     );
+#endif
 
     return stan;
 }
@@ -132,6 +142,9 @@ StanPrzerwan pci_zapisz_i_wylacz_irq() {
 void pci_przywroc_irq(
     StanPrzerwan stan
 ) {
+#ifdef BURSZTYN_LOCK_HOST_TEST
+    host_memory_irq_restore(stan.rflags);
+#else
     if ((stan.rflags &
          (UINT64_C(1) << 9)) != 0) {
 
@@ -142,6 +155,7 @@ void pci_przywroc_irq(
             : "memory"
         );
     }
+#endif
 }
 
 void pci_zablokuj() {
@@ -210,6 +224,9 @@ void pci_outl(
     uint16_t port,
     uint32_t wartosc
 ) {
+#ifdef BURSZTYN_LOCK_HOST_TEST
+    host_pci_lock_io_write(port, wartosc);
+#else
     asm volatile(
         "outl %0, %1"
         :
@@ -217,11 +234,15 @@ void pci_outl(
           "Nd"(port)
         : "memory"
     );
+#endif
 }
 
 uint32_t pci_inl(
     uint16_t port
 ) {
+#ifdef BURSZTYN_LOCK_HOST_TEST
+    return host_pci_lock_io_read(port);
+#else
     uint32_t wartosc =
         0;
 
@@ -233,6 +254,7 @@ uint32_t pci_inl(
     );
 
     return wartosc;
+#endif
 }
 
 /* =========================================================================
@@ -1285,6 +1307,31 @@ extern "C" void skanuj_magistrale_pci() {
     }
 }
 #endif // !BURSZTYN_VIRTIO_HOST_TEST
+
+#if BURSZTYNDIAGVIRTIOINPUTINIT
+uint32_t pci_diagnostic_lock_state() {
+#ifdef BURSZTYN_VIRTIO_HOST_TEST
+    return 0;
+#else
+    return __atomic_load_n(&blokada_pci, __ATOMIC_RELAXED);
+#endif
+}
+bool pci_diagnostic_try_read(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t* value) {
+    if (!value || slot > 31 || func > 7) return false;
+#ifdef BURSZTYN_VIRTIO_HOST_TEST
+    *value = host_pci_read(bus, slot, func, offset); return true;
+#else
+    const auto flags = pci_zapisz_i_wylacz_irq();
+    // One attempt: diagnostics must not wait on the lock being diagnosed.
+    if (__atomic_exchange_n(&blokada_pci, 1U, __ATOMIC_ACQUIRE)) {
+        pci_przywroc_irq(flags); return false;
+    }
+    pci_outl(PCI_PORT_CONFIG_ADDRESS, pci_zbuduj_adres(bus, slot, func, offset));
+    *value = pci_inl(PCI_PORT_CONFIG_DATA);
+    pci_odblokuj(); pci_przywroc_irq(flags); return true;
+#endif
+}
+#endif
 
 /* =========================================================================
  * 6. OBSLUGA CAPABILITIES ORAZ GENERYCZNE MSI / MSI-X

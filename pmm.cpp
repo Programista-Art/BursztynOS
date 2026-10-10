@@ -22,6 +22,18 @@
  */
 
 #include "pamiec.h"
+#include "pmm_diagnostics.h"
+
+#ifdef BURSZTYN_PMM_HOST_TEST
+// Host tests exercise the actual bitmap/tag/allocator code. Only privileged
+// CPU operations and linker-provided physical kernel bounds are substituted.
+#define __kernel_start reinterpret_cast<char*>(0x100000ULL)
+#define __kernel_end reinterpret_cast<char*>(0x200000ULL)
+#endif
+#ifdef BURSZTYN_LOCK_HOST_TEST
+extern uint64_t host_memory_irq_save();
+extern void host_memory_irq_restore(uint64_t);
+#endif
 
 #include <stdint.h>
 #include <stddef.h>
@@ -135,6 +147,10 @@ bool pmm_zainicjalizowany = false;
  */
 uint32_t blokada_pmm = 0;
 
+#if BURSZTYNDIAGVIRTIOINPUTINIT || defined(BURSZTYN_PMM_HOST_TEST)
+uint64_t diagnostic_multiboot = 0;
+#endif
+
 /* =========================================================================
  * STRUKTURY MULTIBOOT2 NIEOBECNE W PUBLICZNYM NAGLOWKU
  * ========================================================================= */
@@ -171,7 +187,9 @@ struct StanPrzerwan {
 
 static inline StanPrzerwan wylacz_przerwania() {
     StanPrzerwan stan{};
-
+#if defined(BURSZTYN_LOCK_HOST_TEST)
+    stan.rflags = host_memory_irq_save();
+#elif !defined(BURSZTYN_PMM_HOST_TEST)
     asm volatile(
         "pushfq\n\t"
         "popq %0\n\t"
@@ -180,6 +198,7 @@ static inline StanPrzerwan wylacz_przerwania() {
         :
         : "memory", "cc"
     );
+#endif
 
     return stan;
 }
@@ -187,6 +206,9 @@ static inline StanPrzerwan wylacz_przerwania() {
 static inline void przywroc_przerwania(
     StanPrzerwan stan
 ) {
+#if defined(BURSZTYN_LOCK_HOST_TEST)
+    host_memory_irq_restore(stan.rflags);
+#elif !defined(BURSZTYN_PMM_HOST_TEST)
     if ((stan.rflags & (1ULL << 9)) != 0) {
         asm volatile(
             "sti"
@@ -195,6 +217,9 @@ static inline void przywroc_przerwania(
             : "memory"
         );
     }
+#else
+    (void)stan;
+#endif
 }
 
 static void zablokuj_pmm() {
@@ -1386,6 +1411,10 @@ void InicjalizujPMM(
 
     wyzeruj_stan_pmm();
 
+#if BURSZTYNDIAGVIRTIOINPUTINIT || defined(BURSZTYN_PMM_HOST_TEST)
+    diagnostic_multiboot = adres_info_multiboot;
+#endif
+
     ZakresMultiboot mb{};
 
     if (!pobierz_zakres_multiboot(
@@ -1815,3 +1844,54 @@ extern "C" uint64_t pmm_pobierz_wolne_ramki() {
     }
     return sum;
 }
+
+#if BURSZTYNDIAGVIRTIOINPUTINIT || defined(BURSZTYN_PMM_HOST_TEST)
+uint32_t pmm_diagnostic_lock_state() {
+    return __atomic_load_n(&blokada_pmm, __ATOMIC_RELAXED);
+}
+PmmPageOwner pmm_diagnostic_page_owner(uint64_t physical) {
+    if (!pmm_zainicjalizowany || pmm_diagnostic_lock_state() || physical >= MAKS_ADRES_FIZYCZNY_PMM)
+        return PmmPageOwner::UNKNOWN;
+    const uint64_t page = wyrownaj_w_dol_do_strony(physical);
+    if (page < GRANICA_NISKIEJ_PAMIECI ||
+        (page < reinterpret_cast<uint64_t>(__kernel_end) && page + ROZMIAR_STRONY > reinterpret_cast<uint64_t>(__kernel_start)))
+        return PmmPageOwner::KERNEL;
+    if (page == LAPIC_MMIO || page == IOAPIC_MMIO) return PmmPageOwner::MMIO;
+    ZakresMultiboot mb{};
+    if (!pobierz_zakres_multiboot(diagnostic_multiboot, &mb)) return PmmPageOwner::UNKNOWN;
+    PmmPageOwner owner = PmmPageOwner::UNKNOWN;
+    const bool valid = przejdz_po_tagach_multiboot(mb, [&](const WpisTaguMB2* tag) {
+        if (tag->typ == MULTIBOOT_TAG_TYPE_MODULE && tag->rozmiar >= sizeof(TagModuluMB2)) {
+            const auto* m = reinterpret_cast<const TagModuluMB2*>(tag);
+            if (page < m->mod_end && page + ROZMIAR_STRONY > m->mod_start)
+                owner = PmmPageOwner::RESERVED_MODULE;
+        } else if (tag->typ == MULTIBOOT_TAG_TYPE_FRAMEBUFFER && tag->rozmiar >= sizeof(TagFramebufferMB2)) {
+            const auto* fb = reinterpret_cast<const TagFramebufferMB2*>(tag);
+            const uint64_t bytes = uint64_t(fb->pitch) * fb->wysokosc;
+            if (bytes <= UINT64_MAX - fb->adres_fizyczny && page < fb->adres_fizyczny + bytes && page + ROZMIAR_STRONY > fb->adres_fizyczny)
+                owner = PmmPageOwner::FRAMEBUFFER;
+        }
+        return true;
+    });
+    if (!valid) return PmmPageOwner::UNKNOWN;
+    if (owner != PmmPageOwner::UNKNOWN) return owner;
+    if (!ramka_dostepna(page / ROZMIAR_STRONY)) return PmmPageOwner::RESERVED_FIRMWARE;
+    return ramka_wolna(page / ROZMIAR_STRONY) ? PmmPageOwner::FREE : PmmPageOwner::ALLOCATED_PMM;
+}
+void pmm_diagnostic_dump_modules() {
+#if BURSZTYNDIAGVIRTIOINPUTINIT
+    ZakresMultiboot mb{};
+    if (!pobierz_zakres_multiboot(diagnostic_multiboot, &mb)) return;
+    unsigned count = 0;
+    przejdz_po_tagach_multiboot(mb, [&](const WpisTaguMB2* tag) {
+        if (tag->typ == MULTIBOOT_TAG_TYPE_MODULE && tag->rozmiar >= sizeof(TagModuluMB2)) {
+            const auto* m = reinterpret_cast<const TagModuluMB2*>(tag);
+            if (++count > 32) return false;
+            input_activation_log("module start", m->mod_start);
+            input_activation_log("module end", m->mod_end);
+        }
+        return true;
+    });
+#endif
+}
+#endif

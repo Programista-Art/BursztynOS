@@ -32,6 +32,9 @@
 #include "idt.h"
 #include "apic.h"
 #include "virtio_pci.h"
+#include "virtio_input_activation_diag.h"
+#include "pmm_diagnostics.h"
+#include "pamiec.h"
 #include "virtqueue.h"
 #include "virtio_rng.h"
 #include "virtio_blk.h"
@@ -88,7 +91,7 @@ extern "C" bool idt_zwolnij_wektor_irq(uint8_t vector) {
 
 extern "C" bool idt_zarejestruj_irq(uint8_t vector, IrqHandlerFn handler, void* context) {
     if (vector < IDT_PIERWSZY_WEKTOR_DYNAMICZNY || vector > IDT_OSTATNI_WEKTOR_DYNAMICZNY || !handler) return false;
-    if (!g_mock_idt[vector].allocated) return false;
+    if (!g_mock_idt[vector].allocated || g_mock_idt[vector].handler) return false;
     g_mock_idt[vector].handler = handler;
     g_mock_idt[vector].context = context;
     return true;
@@ -314,6 +317,12 @@ static uint64_t g_next_dma_phys = 0x10000000ULL;
 static bool g_mock_dma_alloc_fail = false;
 static uint32_t g_mock_dma_alloc_fail_at = 0;
 static uint32_t g_mock_dma_alloc_count = 0;
+static bool g_use_pmm_dma = false;
+struct HostReservedMemory {
+    uint64_t physical;
+    std::vector<uint8_t> bytes;
+};
+static std::vector<HostReservedMemory> g_host_reserved_memory;
 
 struct HostFbAllocEntry {
     void* vaddr;
@@ -325,8 +334,16 @@ static std::vector<HostFbAllocEntry> g_host_fb_allocs;
 static uint32_t g_virtqueue_mb_count = 0;
 static uint32_t g_virtqueue_rmb_count = 0;
 static uint32_t g_virtqueue_wmb_count = 0;
+static void (*g_input_notify_hook)() = nullptr;
+static void (*g_input_mb_hook)() = nullptr;
 
 static void* host_phys_to_virt(uint64_t paddr) {
+    // Reserved module contents participate in the same physical address map
+    // as DMA, so a bad descriptor can actually overwrite their sentinels.
+    for (auto& entry : g_host_reserved_memory) {
+        if (paddr >= entry.physical && paddr - entry.physical < entry.bytes.size())
+            return entry.bytes.data() + (paddr - entry.physical);
+    }
     for (const auto& entry : g_host_dma_allocs) {
         if (paddr >= entry.paddr && paddr < entry.paddr + entry.pages * 4096) {
             return static_cast<uint8_t*>(entry.vaddr) + (paddr - entry.paddr);
@@ -348,6 +365,7 @@ static void* host_phys_to_virt(uint64_t paddr) {
 
 void host_virtqueue_mb_hook() {
     g_virtqueue_mb_count++;
+    if (g_input_mb_hook) g_input_mb_hook();
 }
 
 void host_virtqueue_rmb_hook() {
@@ -373,14 +391,19 @@ bool host_dma_alloc(size_t size, size_t alignment, void** vaddr, uint64_t* paddr
     if (alignment < 4096) alignment = 4096;
 
     void* ptr = nullptr;
-    if (posix_memalign(&ptr, alignment, size) != 0) {
+    const size_t num_pages = (size + 4095) / 4096;
+    if (posix_memalign(&ptr, alignment, num_pages * 4096 + 64) != 0) {
         return false;
     }
-    std::memset(ptr, 0, size);
+    std::memset(ptr, 0, num_pages * 4096);
+    std::memset(static_cast<uint8_t*>(ptr) + num_pages * 4096, 0xD3, 64);
 
-    size_t num_pages = (size + 4095) / 4096;
-    uint64_t phys = g_next_dma_phys;
-    g_next_dma_phys += num_pages * 4096;
+    uint64_t phys = g_use_pmm_dma ? reinterpret_cast<uintptr_t>(ZaalokujCiagleRamki(num_pages)) : g_next_dma_phys;
+    if (!phys) { std::free(ptr); return false; }
+    for (const auto& reserved : g_host_reserved_memory)
+        assert(phys + num_pages * 4096 <= reserved.physical ||
+               phys >= reserved.physical + reserved.bytes.size());
+    if (!g_use_pmm_dma) g_next_dma_phys += num_pages * 4096;
 
     *vaddr = ptr;
     *paddr = phys;
@@ -395,6 +418,9 @@ void host_dma_free(void* vaddr, uint64_t paddr, size_t pages) {
     (void)pages;
     for (auto it = g_host_dma_allocs.begin(); it != g_host_dma_allocs.end(); ++it) {
         if (it->vaddr == vaddr) {
+            for (unsigned i=0; i<64; ++i)
+                assert(static_cast<uint8_t*>(vaddr)[it->pages * 4096+i]==0xD3);
+            if (g_use_pmm_dma) ZwolnijCiagleRamki(reinterpret_cast<void*>(paddr), pages);
             std::free(vaddr);
             g_host_dma_allocs.erase(it);
             return;
@@ -455,7 +481,12 @@ void host_fb_free(void* vaddr, void** frames, size_t page_count) {
 // IMPLEMENTACJA HOOKOW DLA virtio_pci.cpp
 // ============================================================================
 
+#include "mock_virtio_input_init.inc"
+
 uint32_t host_pci_read(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
+    for(auto* f:init_functions) if(f->dev.bus==bus && f->dev.slot==slot && f->dev.func==func) {
+        uint32_t v=0; std::memcpy(&v,f->pci+(offset & ~3U),4); return v;
+    }
     (void)bus; (void)slot; (void)func;
     offset &= ~3U;
 
@@ -483,6 +514,9 @@ uint32_t host_pci_read(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) 
 }
 
 void host_pci_write(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t val) {
+    for(auto* f:init_functions) if(f->dev.bus==bus && f->dev.slot==slot && f->dev.func==func) {
+        std::memcpy(f->pci+(offset & ~3U),&val,4); return;
+    }
     (void)bus; (void)slot; (void)func;
     offset &= ~3U;
 
@@ -544,6 +578,7 @@ uint64_t host_czas_monotoniczny_ns(void) {
 
 // Hooki MMIO
 uint8_t host_mmio_read8(volatile const void* addr) {
+    uint64_t separate=0; if(init_read(addr,1,separate)) return static_cast<uint8_t>(separate);
     const uintptr_t a = reinterpret_cast<uintptr_t>(addr);
     for (int b = 0; b < 6; ++b) {
         const uintptr_t base = reinterpret_cast<uintptr_t>(g_mock.bars[b].mem.data());
@@ -561,6 +596,7 @@ uint8_t host_mmio_read8(volatile const void* addr) {
 }
 
 uint16_t host_mmio_read16(volatile const void* addr) {
+    uint64_t separate=0; if(init_read(addr,2,separate)) return static_cast<uint16_t>(separate);
     const uintptr_t a = reinterpret_cast<uintptr_t>(addr);
     for (int b = 0; b < 6; ++b) {
         const uintptr_t base = reinterpret_cast<uintptr_t>(g_mock.bars[b].mem.data());
@@ -574,6 +610,7 @@ uint16_t host_mmio_read16(volatile const void* addr) {
 }
 
 uint32_t host_mmio_read32(volatile const void* addr) {
+    uint64_t separate=0; if(init_read(addr,4,separate)) return static_cast<uint32_t>(separate);
     const uintptr_t a = reinterpret_cast<uintptr_t>(addr);
     for (int b = 0; b < 6; ++b) {
         const uintptr_t base = reinterpret_cast<uintptr_t>(g_mock.bars[b].mem.data());
@@ -587,6 +624,7 @@ uint32_t host_mmio_read32(volatile const void* addr) {
 }
 
 void host_mmio_write8(volatile void* addr, uint8_t val) {
+    if(init_write(addr,1,val)) return;
     const uintptr_t a = reinterpret_cast<uintptr_t>(addr);
     for (int b = 0; b < 6; ++b) {
         const uintptr_t base = reinterpret_cast<uintptr_t>(g_mock.bars[b].mem.data());
@@ -677,6 +715,7 @@ static void mock_check_and_trigger_msix(uint16_t queue_idx) {
 }
 
 void host_mmio_write16(volatile void* addr, uint16_t val) {
+    if(init_write(addr,2,val)) return;
     const uintptr_t a = reinterpret_cast<uintptr_t>(addr);
     for (int b = 0; b < 6; ++b) {
         const uintptr_t base = reinterpret_cast<uintptr_t>(g_mock.bars[b].mem.data());
@@ -687,6 +726,7 @@ void host_mmio_write16(volatile void* addr, uint16_t val) {
             if (b == g_mock.notify_bar && off >= g_mock.notify_bar_off && off + 2 <= g_mock.notify_bar_off + g_mock.notify_bar_len) {
                 g_mock.last_notified_queue = val;
                 g_mock.notify_count++;
+                if (g_input_notify_hook) g_input_notify_hook();
 
                 if (g_mock.rng_auto_process && val == 0 && !g_mock.rng_skip_reply) {
                     VirtioRngDriver* drv = virtio_rng_get_driver();
@@ -996,6 +1036,7 @@ void host_mmio_write16(volatile void* addr, uint16_t val) {
 }
 
 void host_mmio_write32(volatile void* addr, uint32_t val) {
+    if(init_write(addr,4,val)) return;
     const uintptr_t a = reinterpret_cast<uintptr_t>(addr);
     for (int b = 0; b < 6; ++b) {
         const uintptr_t base = reinterpret_cast<uintptr_t>(g_mock.bars[b].mem.data());
@@ -1215,6 +1256,8 @@ static int g_fail_count = 0;
 
 #define RUN_TEST(fn) \
     do { \
+        const char* filter = std::getenv("BURSZTYN_HOST_TEST_FILTER"); \
+        if (filter && !std::strstr(#fn, filter)) break; \
         std::printf("[RUN] %s...\n", #fn); \
         const int before_fail = g_fail_count; \
         fn(); \
@@ -5368,6 +5411,25 @@ static uint16_t g_mock_input_processed_idx = 0;
 
 void mock_virtio_input_on_config_select(VirtioPciDevice* dev, uint8_t select, uint8_t subsel) {
     if (!dev) return;
+    for(auto* f:init_functions) if(&f->dev==dev) {
+        // Device-side config response; never use the driver's MMIO writes to
+        // manufacture payload beyond the advertised capability.
+        uint8_t payload[128]{}; uint8_t size=0;
+        if(select==VIRTIO_INPUT_CFG_ID_NAME) {
+            const char* name=f->tablet ? "QEMU Virtio Tablet" : "QEMU Virtio Keyboard";
+            size=std::strlen(name); std::memcpy(payload,name,size);
+        } else if(select==VIRTIO_INPUT_CFG_EV_BITS) {
+            if(subsel==INPUT_EV_KEY) { size=f->tablet?35:16; payload[f->tablet?34:0]=1; }
+            if(subsel==INPUT_EV_ABS && f->tablet) { size=1; payload[0]=3; }
+        } else if(select==VIRTIO_INPUT_CFG_ABS_INFO && f->tablet) {
+            size=subsel==INPUT_ABS_X ? f->abs_size : f->abs_y_size; VirtioInputAbsInfo info{uint32_t(f->abs_min),uint32_t(f->abs_max),0,0,1};
+            std::memcpy(payload,&info,sizeof(info));
+        }
+        if(dev->device_cfg_len>=3) f->bar[322]=size;
+        for(size_t i=0;i<size && 8+i<dev->device_cfg_len;++i) f->bar[328+i]=payload[i];
+        return;
+    }
+
     if (g_mock_input_cfg.force_zero_size) {
         virtio_pci_write_device_config8(dev, 2, 0);
         return;
@@ -5601,6 +5663,14 @@ static bool mock_inject_input_event(VirtioInputDriver* drv, uint16_t type, uint1
 // ============================================================================
 
 // 1. VirtIO-INPUT: Odpytanie przestrzeni konfiguracji (NAME, SERIAL, DEVIDS, PROP, EV_BITS)
+// Legacy event tests explicitly cross both lifecycle phases. Production init
+// remains preparation only; the late barrier opens activation in this fixture.
+static bool host_input_prepare_and_activate(VirtioInputDriver* drv, VirtioPciDevice* dev) {
+    if (!virtio_input_prepare(drv, dev)) return false;
+    (void)virtio_input_activate_prepared();
+    return virtio_input_activate(drv);
+}
+
 void test_virtio_input_config_discovery() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 0), "Probe dev");
@@ -5630,7 +5700,7 @@ void test_virtio_input_keyboard_classification() {
     TEST_ASSERT(setup_mock_input_device(&dev, 0), "Probe dev");
 
     VirtioInputDriver drv{};
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init keyboard driver");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init keyboard driver");
     TEST_ASSERT(drv.has_keyboard, "Sklasyfikowano jako klawiature");
     TEST_ASSERT(!drv.has_rel_mouse, "Nie jest mysza wzgledna");
     TEST_ASSERT(!drv.has_abs_tablet, "Nie jest tabletem bezwzglednym");
@@ -5649,7 +5719,7 @@ void test_virtio_input_mouse_rel_classification() {
     TEST_ASSERT(setup_mock_input_device(&dev, 1), "Probe dev");
 
     VirtioInputDriver drv{};
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init mouse driver");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init mouse driver");
     TEST_ASSERT(!drv.has_keyboard, "Nie jest klawiatura");
     TEST_ASSERT(drv.has_rel_mouse, "Sklasyfikowano jako mysz wzgledna");
     TEST_ASSERT(!drv.has_abs_tablet, "Nie jest tabletem");
@@ -5667,7 +5737,7 @@ void test_virtio_input_tablet_abs_classification() {
     TEST_ASSERT(setup_mock_input_device(&dev, 2), "Probe dev");
 
     VirtioInputDriver drv{};
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init tablet driver");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init tablet driver");
     TEST_ASSERT(!drv.has_keyboard, "Nie jest klawiatura");
     TEST_ASSERT(!drv.has_rel_mouse, "Nie jest mysza wzgledna");
     TEST_ASSERT(drv.has_abs_tablet, "Sklasyfikowano jako tablet bezwzgledny");
@@ -5686,7 +5756,7 @@ void test_virtio_input_ev_key_press_release() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 0), "Probe dev");
     VirtioInputDriver drv{};
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     g_mock_input_capture.reset();
     TEST_ASSERT(mock_inject_input_event(&drv, INPUT_EV_KEY, INPUT_KEY_A, 1), "Inject press A");
@@ -5715,7 +5785,7 @@ void test_virtio_input_btn_events() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 1), "Probe dev");
     VirtioInputDriver drv{};
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     g_mock_input_capture.reset();
     // LPM down
@@ -5747,7 +5817,7 @@ void test_virtio_input_rel_xy() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 1), "Probe dev");
     VirtioInputDriver drv{};
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     g_mock_input_capture.reset();
     mock_inject_input_event(&drv, INPUT_EV_REL, INPUT_REL_X, 15);
@@ -5769,7 +5839,7 @@ void test_virtio_input_rel_wheel() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 1), "Probe dev");
     VirtioInputDriver drv{};
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     g_mock_input_capture.reset();
     mock_inject_input_event(&drv, INPUT_EV_REL, INPUT_REL_WHEEL, 2);
@@ -5795,7 +5865,7 @@ void test_virtio_input_abs_scaling() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 2), "Probe tablet");
     VirtioInputDriver drv{};
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     g_mock_input_capture.reset();
     mock_inject_input_event(&drv, INPUT_EV_ABS, INPUT_ABS_X, 16383);
@@ -5856,7 +5926,7 @@ void test_virtio_input_asymmetric_abs_mapping() {
     g_mock_input_cfg.abs_min_x=101;g_mock_input_cfg.abs_max_x=60001;
     g_mock_input_cfg.abs_min_y=503;g_mock_input_cfg.abs_max_y=9503;
     VirtioInputDriver drv{};
-    TEST_ASSERT(virtio_input_init(&drv,&dev),"Init asymmetric tablet");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv,&dev),"Init asymmetric tablet");
     TEST_ASSERT(drv.input_dev.abs_x.min==101&&drv.input_dev.abs_x.max==60001&&
                 drv.input_dev.abs_y.min==503&&drv.input_dev.abs_y.max==9503,
                 "Independent ABS_INFO discovery for both axes");
@@ -5918,7 +5988,7 @@ void test_virtio_input_syn_report() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 1), "Probe dev");
     VirtioInputDriver drv{};
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     g_mock_input_capture.reset();
     mock_inject_input_event(&drv, INPUT_EV_REL, INPUT_REL_X, 20);
@@ -5943,8 +6013,8 @@ void test_virtio_input_malformed_config_size() {
     g_mock_input_cfg.forced_size = 250;
     uint8_t out[128]{};
     uint8_t sz = 0;
-    TEST_ASSERT(virtio_input_query_config(&dev, VIRTIO_INPUT_CFG_ID_NAME, 0, out, &sz, sizeof(out)), "Query");
-    TEST_ASSERT(sz == 250, "Zgloszony surowy rozmiar");
+    TEST_ASSERT(!virtio_input_query_config(&dev, VIRTIO_INPUT_CFG_ID_NAME, 0, out, &sz, sizeof(out)), "Oversized configuration rejected");
+    TEST_ASSERT(sz == 0, "No untrusted size exposed to callers");
 
     g_mock_input_cfg.force_zero_size = true;
     TEST_ASSERT(!virtio_input_query_config(&dev, VIRTIO_INPUT_CFG_ID_NAME, 0, out, &sz, sizeof(out)), "Rozmiar 0 odrzucony");
@@ -5958,7 +6028,7 @@ void test_virtio_input_malformed_used_len() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 1), "Probe dev");
     VirtioInputDriver drv{};
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     g_mock_input_capture.reset();
     TEST_ASSERT(mock_inject_input_event(&drv, INPUT_EV_REL, INPUT_REL_X, 10, 4), "Inject len=4");
@@ -5980,7 +6050,7 @@ void test_virtio_input_invalid_desc_id() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 0), "Probe dev");
     VirtioInputDriver drv{};
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     mock_inject_input_event(&drv, INPUT_EV_KEY, INPUT_KEY_A, 1, 8, 99);
     virtio_input_poll_events(&drv, 10);
@@ -5996,7 +6066,7 @@ void test_virtio_input_unsupported_event_type() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 0), "Probe dev");
     VirtioInputDriver drv{};
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     g_mock_input_capture.reset();
     mock_inject_input_event(&drv, 0x9999, 1, 1);
@@ -6014,7 +6084,7 @@ void test_virtio_input_queue_recycling() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 1), "Probe dev");
     VirtioInputDriver drv{};
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     for (int batch = 0; batch < 3; ++batch) {
         for (int i = 0; i < 20; ++i) {
@@ -6035,7 +6105,7 @@ void test_virtio_input_queue_wraparound() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 1), "Probe dev");
     VirtioInputDriver drv{};
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     constexpr size_t TOTAL = 5000;
     for (size_t i = 0; i < TOTAL; ++i) {
@@ -6055,7 +6125,7 @@ void test_virtio_input_msix_setup_and_delivery() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device_msix(&dev, 0), "Probe dev z MSI-X");
     VirtioInputDriver drv{};
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init z MSI-X");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init z MSI-X");
 
     TEST_ASSERT(drv.use_msix, "Wlaczono tryb MSI-X");
     TEST_ASSERT(drv.irq_vector >= IDT_PIERWSZY_WEKTOR_DYNAMICZNY, "Wektor IDT zaalokowany");
@@ -6081,7 +6151,7 @@ void test_virtio_input_polling_fallback() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 0), "Probe dev bez MSI-X");
     VirtioInputDriver drv{};
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init bez MSI-X");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init bez MSI-X");
 
     TEST_ASSERT(!drv.use_msix, "MSI-X wylaczone");
     TEST_ASSERT(drv.irq_vector == -1, "Brak wektora IRQ");
@@ -6101,7 +6171,7 @@ void test_virtio_input_repeated_init_reset() {
         VirtioPciDevice dev{};
         TEST_ASSERT(setup_mock_input_device_msix(&dev, 1), "Probe cyklu");
         VirtioInputDriver drv{};
-        TEST_ASSERT(virtio_input_init(&drv, &dev), "Init cyklu");
+        TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init cyklu");
 
         for (int i = 0; i < 5; ++i) {
             mock_inject_input_event(&drv, INPUT_EV_REL, INPUT_REL_X, 2);
@@ -6123,7 +6193,7 @@ void test_virtio_input_dma_and_vector_cleanup() {
         VirtioPciDevice dev_kbd{};
         VirtioInputDriver drv_kbd{};
         TEST_ASSERT(setup_mock_input_device_msix(&dev_kbd, 0), "Probe kbd");
-        TEST_ASSERT(virtio_input_init(&drv_kbd, &dev_kbd), "Init kbd");
+        TEST_ASSERT(host_input_prepare_and_activate(&drv_kbd, &dev_kbd), "Init kbd");
         TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 1, "1 wektor zaalokowany dla kbd");
         TEST_ASSERT(input_get_device_count() == 1, "1 urzadzenie zarejestrowane dla kbd");
         TEST_ASSERT(virtio_input_reset(&drv_kbd), "Reset kbd");
@@ -6137,7 +6207,7 @@ void test_virtio_input_dma_and_vector_cleanup() {
         VirtioPciDevice dev_mouse{};
         VirtioInputDriver drv_mouse{};
         TEST_ASSERT(setup_mock_input_device_msix(&dev_mouse, 1), "Probe mouse");
-        TEST_ASSERT(virtio_input_init(&drv_mouse, &dev_mouse), "Init mouse");
+        TEST_ASSERT(host_input_prepare_and_activate(&drv_mouse, &dev_mouse), "Init mouse");
         TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 1, "1 wektor zaalokowany dla mouse");
         TEST_ASSERT(input_get_device_count() == 1, "1 urzadzenie zarejestrowane dla mouse");
         TEST_ASSERT(virtio_input_reset(&drv_mouse), "Reset mouse");
@@ -6151,7 +6221,7 @@ void test_virtio_input_dma_and_vector_cleanup() {
         VirtioPciDevice dev_tab{};
         VirtioInputDriver drv_tab{};
         TEST_ASSERT(setup_mock_input_device_msix(&dev_tab, 2), "Probe tab");
-        TEST_ASSERT(virtio_input_init(&drv_tab, &dev_tab), "Init tab");
+        TEST_ASSERT(host_input_prepare_and_activate(&drv_tab, &dev_tab), "Init tab");
         TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 1, "1 wektor zaalokowany dla tab");
         TEST_ASSERT(input_get_device_count() == 1, "1 urzadzenie zarejestrowane dla tab");
         TEST_ASSERT(virtio_input_reset(&drv_tab), "Reset tab");
@@ -6190,7 +6260,7 @@ void test_input_same_key_ps2_usb_virtio() {
     TEST_ASSERT(setup_mock_input_device_msix(&dev, 0), "Probe VirtIO kbd");
     VirtioInputDriver& drv = s_shared_input_drv;
     std::memset(&drv, 0, sizeof(drv));
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init VirtIO kbd");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init VirtIO kbd");
 
     // 1. Klawisz 'A' (Linux keycode 30 == INPUT_KEY_A)
     // a) PS/2: scancode 0x1E (press)
@@ -6265,7 +6335,7 @@ void test_input_press_release() {
     TEST_ASSERT(setup_mock_input_device_msix(&dev, 0), "Probe VirtIO kbd");
     VirtioInputDriver& drv = s_shared_input_drv;
     std::memset(&drv, 0, sizeof(drv));
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init VirtIO kbd");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init VirtIO kbd");
 
     // PS/2: Q (0x10 / 0x90)
     ps2_klawiatura_przetworz_scancode(0x10);
@@ -6310,7 +6380,7 @@ void test_input_modifiers() {
     TEST_ASSERT(setup_mock_input_device_msix(&dev, 0), "Probe VirtIO kbd");
     VirtioInputDriver& drv = s_shared_input_drv;
     std::memset(&drv, 0, sizeof(drv));
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init VirtIO kbd");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init VirtIO kbd");
 
     // 1. Shift (LeftShift, RightShift)
     // PS/2
@@ -6459,7 +6529,7 @@ void test_input_extended_keys() {
     TEST_ASSERT(setup_mock_input_device_msix(&dev, 0), "Probe VirtIO kbd");
     VirtioInputDriver& drv = s_shared_input_drv;
     std::memset(&drv, 0, sizeof(drv));
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init VirtIO kbd");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init VirtIO kbd");
 
     uint8_t rep_empty[8] = { 0 };
 
@@ -6569,7 +6639,7 @@ void test_input_repeat() {
     TEST_ASSERT(setup_mock_input_device_msix(&dev, 0), "Probe VirtIO kbd");
     VirtioInputDriver& drv = s_shared_input_drv;
     std::memset(&drv, 0, sizeof(drv));
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init VirtIO kbd");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init VirtIO kbd");
 
     // 1. PS/2 repeat: powtorne nadejscie scancode make (0x1E) bez up (0x9E)
     ps2_klawiatura_przetworz_scancode(0x1E);
@@ -6713,7 +6783,7 @@ void test_bursztyn_keyboard_layout_preserved() {
     TEST_ASSERT(setup_mock_input_device_msix(&dev, 0), "Probe VirtIO kbd");
     VirtioInputDriver& drv = s_shared_input_drv;
     std::memset(&drv, 0, sizeof(drv));
-    TEST_ASSERT(virtio_input_init(&drv, &dev), "Init VirtIO kbd");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init VirtIO kbd");
 
     uint8_t rep_empty[8] = { 0 };
 
@@ -6850,7 +6920,7 @@ void test_input_pointer_ownership_and_no_duplicate_motion() {
     VirtioPciDevice dev_mouse{};
     VirtioInputDriver drv_mouse{};
     TEST_ASSERT(setup_mock_input_device_msix(&dev_mouse, 1), "Probe VirtIO mouse");
-    TEST_ASSERT(virtio_input_init(&drv_mouse, &dev_mouse), "Init VirtIO mouse");
+    TEST_ASSERT(host_input_prepare_and_activate(&drv_mouse, &dev_mouse), "Init VirtIO mouse");
     TEST_ASSERT(input_get_pointer_owner() == &drv_mouse.input_dev, "VirtIO przejmuje wlasnosc kursora od PS/2");
 
     // 3. Sprawdz brak duplikacji: nadeslanie ruchu z PS/2 podczas gdy VirtIO jest wlascicielem
@@ -6885,6 +6955,11 @@ void test_input_pointer_ownership_and_no_duplicate_motion() {
 // ============================================================================
 // PUNKT WEJSCIA TESTOW
 // ============================================================================
+
+#include "test_virtio_input_faults.inc"
+#include "test_virtio_input_init.inc"
+#include "test_virtio_input_activation.inc"
+#include "test_virtio_input_lifecycle.inc"
 
 int main() {
     std::printf("========================================================\n");
@@ -7017,7 +7092,30 @@ int main() {
     RUN_TEST(test_virtio_gpu_confirmation_lifecycle_and_injected_failures);
 
     // Testy VirtIO-INPUT i InputDevice
+    RUN_TEST(test_input_synchronous_driver_ok_activation);
+    RUN_TEST(test_input_prepare_activate_single_matrix);
+    RUN_TEST(test_input_prepared_pair_idempotent_late_pass);
+    RUN_TEST(test_input_late_failure_preserves_other_device_and_ps2);
+    RUN_TEST(test_input_prepared_cleanup_and_pre_activation_failure);
+    RUN_TEST(test_input_late_pair_synchronous_report_and_pending_irq);
+    RUN_TEST(test_input_installer_pmm_dma_addresses);
+    RUN_TEST(test_input_pmm_module_page_boundaries);
+    RUN_TEST(test_input_pmm_exhaustion_and_lock_release);
+#if BURSZTYNDIAGVIRTIOINPUTINIT
+    RUN_TEST(test_input_activation_emergency_exception_record);
+#endif
+    RUN_TEST(test_input_init_reset_failure_quarantines_live_dma);
+    RUN_TEST(test_input_init_irqs_at_each_readiness_boundary);
+    RUN_TEST(test_input_init_registry_failure_cleanup);
+    RUN_TEST(test_input_init_independent_functions_early_irq);
+    RUN_TEST(test_input_init_queue_capacity_matrix);
+    RUN_TEST(test_input_init_capability_lengths_and_wide_access);
+    RUN_TEST(test_input_init_absinfo_failure_matrix);
+    RUN_TEST(test_input_init_feature_vector_reset_failures);
     RUN_TEST(test_virtio_input_config_discovery);
+    RUN_TEST(test_virtio_input_fault_short_completion_feedback);
+    RUN_TEST(test_virtio_input_fault_duplicate_completion);
+    RUN_TEST(test_virtio_input_dual_device_and_motion_stress);
     RUN_TEST(test_virtio_input_keyboard_classification);
     RUN_TEST(test_virtio_input_mouse_rel_classification);
     RUN_TEST(test_virtio_input_tablet_abs_classification);

@@ -421,6 +421,11 @@ bios: iso
 uefi: iso
 
 # Compiler-generated header dependencies cover PSF, kernel and embedded Ring3.
+BURSZTYNDIAGVIRTIOINPUTINIT ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYNDIAGVIRTIOINPUTINIT)),)
+KERNEL_CXXFLAGS += -DBURSZTYNDIAGVIRTIOINPUTINIT=1
+endif
+
 KERNEL_CXXFLAGS += -MMD -MP
 RING3_FLAGS += -MMD -MP
 MBEDTLS_CFLAGS += -MMD -MP
@@ -823,9 +828,16 @@ test-e1000-qemu: iso
 	$(PYTHON) narzedzia/test_e1000_qemu.py
 
 test-virtio-pci:
+	$(PYTHON) narzedzia/test_input_boot_order.py
 	@mkdir -p .virtiotest
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -pthread pci.cpp virtio_pci.cpp virtqueue.cpp virtio_rng.cpp virtio_blk.cpp network_device.cpp virtio_net.cpp virtio_gpu.cpp input_device.cpp virtio_input.cpp sterowniki/usb/usb_hid.cpp klawiatura.cpp narzedzia/test_virtio_pci.cpp -o .virtiotest/test-virtio-pci
-	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .virtiotest/test-virtio-pci
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_PMM_HOST_TEST $(if $(filter 1 yes true,$(BURSZTYNDIAGVIRTIOINPUTINIT)),-DBURSZTYNDIAGVIRTIOINPUTINIT=1) -fsanitize=address,undefined -pthread pci.cpp pmm.cpp virtio_pci.cpp virtqueue.cpp virtio_rng.cpp virtio_blk.cpp network_device.cpp virtio_net.cpp virtio_gpu.cpp input_device.cpp virtio_input.cpp sterowniki/usb/usb_hid.cpp klawiatura.cpp narzedzia/test_virtio_pci.cpp -o .virtiotest/test-virtio-pci
+	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) UBSAN_OPTIONS=halt_on_error=1 .virtiotest/test-virtio-pci
+
+.PHONY: test-input-init-locks
+test-input-init-locks:
+	@mkdir -p .virtiotest
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_LOCK_HOST_TEST -DBURSZTYN_PMM_HOST_TEST -DBURSZTYNDIAGVIRTIOINPUTINIT=1 -ffunction-sections -fdata-sections -fsanitize=address,undefined -pthread heap.cpp pmm.cpp pci.cpp narzedzia/test_input_init_locks.cpp -Wl,--gc-sections -o .virtiotest/test-input-init-locks
+	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) UBSAN_OPTIONS=halt_on_error=1 .virtiotest/test-input-init-locks
 
 test-virtio-qemu: $(CI_TEST_ISO)
 	$(PYTHON) narzedzia/test_virtio_qemu.py

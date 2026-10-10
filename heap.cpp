@@ -16,6 +16,11 @@
  */
 
 #include "heap.h"
+#include "virtio_input_activation_diag.h"
+#ifdef BURSZTYN_LOCK_HOST_TEST
+extern uint64_t host_memory_irq_save();
+extern void host_memory_irq_restore(uint64_t);
+#endif
 
 namespace {
 
@@ -42,6 +47,9 @@ uintptr_t koniec_sterty = 0; // Pierwszy adres juz nienalezacy do sterty.
  * ========================================================================= */
 
 static inline uint64_t zapisz_i_wylacz_przerwania() {
+#ifdef BURSZTYN_LOCK_HOST_TEST
+    return host_memory_irq_save();
+#else
     uint64_t rflags = 0;
 
     asm volatile(
@@ -53,12 +61,17 @@ static inline uint64_t zapisz_i_wylacz_przerwania() {
         : "memory");
 
     return rflags;
+#endif
 }
 
 static inline void przywroc_przerwania(uint64_t rflags) {
+#ifdef BURSZTYN_LOCK_HOST_TEST
+    host_memory_irq_restore(rflags);
+#else
     if ((rflags & (1ULL << 9)) != 0) {
         asm volatile("sti" ::: "memory");
     }
+#endif
 }
 
 static inline void przejmij_blokade_sterty() {
@@ -477,6 +490,12 @@ BlokSterty* znajdz_blok_po_wskazniku(void* wskaznik) {
 
 } // namespace
 
+#if BURSZTYNDIAGVIRTIOINPUTINIT
+uint32_t heap_diagnostic_lock_state() {
+    return __atomic_load_n(&blokada_sterty, __ATOMIC_RELAXED);
+}
+#endif
+
 /* =========================================================================
  * INICJALIZACJA
  * ========================================================================= */
@@ -835,6 +854,7 @@ void kfree(void* wskaznik) {
  * GLOBALNE OPERATORY C++
  * ========================================================================= */
 
+#ifndef BURSZTYN_LOCK_HOST_TEST
 void* operator new(size_t size) {
     /*
      * C++ dopuszcza new T[0]; operator new powinien wtedy otrzymac szanse
@@ -874,3 +894,4 @@ void operator delete[](void* p,
                        size_t) noexcept {
     kfree(p);
 }
+#endif

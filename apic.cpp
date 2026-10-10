@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include "pamiec.h"
 #include "sterowniki/czas/hpet.h"
+#include "virtio_input_activation_diag.h"
 
 extern void wypisz_log(const char* tekst);
 
@@ -500,6 +501,14 @@ volatile uint32_t* baza_lapic_wirtualna = nullptr;
 volatile uint32_t* baza_ioapic_wirtualna = nullptr;
 
 }
+
+#if BURSZTYNDIAGVIRTIOINPUTINIT
+uint32_t apic_diagnostic_pending(uint8_t vector) {
+    if (!baza_lapic_wirtualna) return UINT32_MAX;
+    const uint32_t offset = 0x200 + (vector / 32U) * 0x10; // LAPIC IRR, read-only
+    return (baza_lapic_wirtualna[offset / 4] >> (vector % 32U)) & 1U;
+}
+#endif
 
 /* =========================================================================
  * PUBLICZNE FUNKCJE

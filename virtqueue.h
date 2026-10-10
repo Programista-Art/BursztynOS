@@ -121,16 +121,26 @@ struct VirtQueueDescState {
     uint16_t chain_len;
     bool     is_allocated;
     bool     is_chain_head;
+    uint16_t owner;
+    uint16_t next;
+    uint16_t flags;
+    uint64_t buffer_addr;
+    uint32_t buffer_len;
+    uint32_t visit;
 };
 
 /*
  * Glowna struktura zarzadzania kolejka VirtQueue:
  */
 struct VirtQueue {
+    // Callers serialize submissions/completions. IRQ callbacks must not
+    // modify this state while their driver's service/reset operation runs.
     VirtioPciDevice* dev;
     uint16_t queue_index;
     uint16_t queue_size;
     uint16_t queue_notify_off;
+    uint16_t outstanding_heads;
+    uint32_t visit_sequence;
 
     /* Bufor DMA zawierajacy struktury pierscieni: */
     void*    dma_virtual;
