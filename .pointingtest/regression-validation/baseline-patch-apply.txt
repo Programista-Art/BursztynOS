@@ -1,0 +1,1 @@
+patching file .pointingtest/latest-patch-input.cpp

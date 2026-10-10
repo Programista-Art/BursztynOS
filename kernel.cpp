@@ -2266,9 +2266,12 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     wypisz_log(
         "[APIC] LAPIC/IOAPIC uruchomiony.");
 
+    input_set_pointer_ready(false);
     (void)ps2_klawiatura_pobierz_urzadzenie();
+    // Complete USB firmware handoff/controller setup before negotiating the
+    // i8042 streaming protocol, as in the known-working hardware sequence.
+    // USB registration stays ineligible until a real valid runtime report.
     usb_inicjalizuj();
-
     InicjalizujMyszPS2();
 
     wypisz_log(
@@ -2488,6 +2491,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     tapety_inicjalizuj(g_multiboot_info_ptr);
     ekran_inicjalizuj();
     PrezentacjaStartu::zakoncz_inicjalizacje();
+    input_set_pointer_ready(true);
+    input_pointer_boot_diagnostic();
 
     if (tryb_testowy) {
         ekran_test_virtio_gpu_modeset(zadano_automatyczne_testy(

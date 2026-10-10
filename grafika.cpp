@@ -1,3 +1,5 @@
+#include "xhci_pointing_diag.h"
+#include "pointer_coordinates.h"
 #include "diagnostyka_startu.h"
 #include "diagnostyka_klatek_startu.h"
 #include "ekran_powitalny_api.h"
@@ -1050,7 +1052,8 @@ void PrzeniesFragmentNaEkran(int x,
 int grafika_pobierz_szerokosc() {
     if (!aktywny_ekran) return 0;
 
-    if (aktywny_stan.szerokosc) return static_cast<int>(aktywny_stan.szerokosc);
+    if (aktywny_stan.szerokosc) return aktywny_stan.szerokosc > uint32_t(INT32_MAX) ?
+        INT32_MAX : static_cast<int>(aktywny_stan.szerokosc);
 
     const uint32_t szer =
         aktywny_ekran->PobierzSzerokosc();
@@ -1064,7 +1067,8 @@ int grafika_pobierz_szerokosc() {
 int grafika_pobierz_wysokosc() {
     if (!aktywny_ekran) return 0;
 
-    if (aktywny_stan.wysokosc) return static_cast<int>(aktywny_stan.wysokosc);
+    if (aktywny_stan.wysokosc) return aktywny_stan.wysokosc > uint32_t(INT32_MAX) ?
+        INT32_MAX : static_cast<int>(aktywny_stan.wysokosc);
 
     const uint32_t wys =
         aktywny_ekran->PobierzWysokosc();
@@ -2375,29 +2379,18 @@ extern "C" void zaktualizuj_mysze_zrodlo(int dx,
     const int stary_mysz_x = mysz_x;
     const int stary_mysz_y = mysz_y;
 
-    int64_t nowy_x =
-        static_cast<int64_t>(mysz_x) +
-        static_cast<int64_t>(dx);
-
-    int64_t nowy_y =
-        static_cast<int64_t>(mysz_y) -
-        static_cast<int64_t>(dy);
-
     const int ekran_szer = grafika_pobierz_szerokosc();
     const int ekran_wys = grafika_pobierz_wysokosc();
     if (ekran_szer <= 0 || ekran_wys <= 0) return;
+    const int nowy_x = pointer_accumulate(mysz_x, int64_t(dx), ekran_szer);
+    // Legacy graphics entry uses upward Y. InputDevice's screen-down adapter
+    // changes representation here; PS/2 protocol inversion stays in its parser.
+    const int nowy_y = pointer_accumulate(mysz_y, -int64_t(dy), ekran_wys);
 
-    if (nowy_x < 0) nowy_x = 0;
-    if (nowy_y < 0) nowy_y = 0;
-
-    if (nowy_x >= ekran_szer)
-        nowy_x = ekran_szer - 1;
-
-    if (nowy_y >= ekran_wys)
-        nowy_y = ekran_wys - 1;
-
+    pointing_count(pointing_counters.gui_consumed);
     mysz_x = static_cast<int>(nowy_x);
     mysz_y = static_cast<int>(nowy_y);
+    pointing_count(pointing_counters.cursor_commits);
     kursor_diag_logical();
 
     const uint64_t gen = grafika_generacja_ekranu();

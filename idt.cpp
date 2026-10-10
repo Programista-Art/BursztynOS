@@ -1,3 +1,7 @@
+#ifdef BURSZTYN_IDT_HOST_TEST
+extern unsigned long host_idt_irq_save();
+extern void host_idt_irq_restore(unsigned long);
+#endif
 /*
  * Bursztyn OS - Interrupt Descriptor Table (IDT)
  *
@@ -133,6 +137,9 @@ void serial_wypisz(const char* tekst) {
  * ========================================================================= */
 
 uint64_t zapisz_i_wylacz_przerwania() {
+#ifdef BURSZTYN_IDT_HOST_TEST
+    return host_idt_irq_save();
+#else
     uint64_t rflags = 0;
 
     asm volatile(
@@ -144,11 +151,16 @@ uint64_t zapisz_i_wylacz_przerwania() {
         : "memory");
 
     return rflags;
+#endif
 }
 
 void przywroc_przerwania(uint64_t rflags) {
+#ifdef BURSZTYN_IDT_HOST_TEST
+    host_idt_irq_restore(rflags);
+#else
     if ((rflags & (1ULL << 9)) != 0)
         asm volatile("sti" ::: "memory");
+#endif
 }
 
 uint64_t odczytaj_cr2() {
@@ -1023,6 +1035,7 @@ extern "C" void InicjalizujIDT() {
  * DYNAMICZNE ZARZADZANIE WEKTORAMI IRQ (MSI / MSI-X)
  * ========================================================================= */
 
+static_assert(IDT_PIERWSZY_WEKTOR_DYNAMICZNY > 47, "Dynamic MSI vectors must exclude PS/2 IRQ12 and fixed vectors");
 extern "C" int idt_alokuj_wektor_irq(void) {
     const uint64_t rflags = zapisz_i_wylacz_przerwania();
     int zaalokowany = -1;
@@ -1030,6 +1043,9 @@ extern "C" int idt_alokuj_wektor_irq(void) {
         const int bajt = v / 8;
         const int bit = v % 8;
         if ((wektory_zaalokowane[bajt] & (1U << bit)) == 0) {
+#if defined(BURSZTYNDIAGXHCIPOINTING) && BURSZTYNDIAGXHCIPOINTING
+            if(dynamiczne_irq[v].handler || v==44)__builtin_trap();
+#endif
             wektory_zaalokowane[bajt] |= static_cast<uint8_t>(1U << bit);
             dynamiczne_irq[v].handler = nullptr;
             dynamiczne_irq[v].context = nullptr;

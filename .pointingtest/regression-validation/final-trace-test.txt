@@ -1,0 +1,6 @@
+g++ -DBURSZTYNDIAGXHCIPOINTING=1   -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer narzedzia/test_pointer_regression.cpp sterowniki/usb/hid_pointer.cpp input_device.cpp -o .pointingtest/pointer-regression
+.pointingtest/pointer-regression
+Signed relative cursor regression: 396600 checks PASS
+InputDevice modes/readiness/API regression: 56 checks PASS
+python3 narzedzia/test_pointer_boot_order.py
+Pointer boot order/barrier: 6 checks PASS

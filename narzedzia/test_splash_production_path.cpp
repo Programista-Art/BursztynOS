@@ -83,6 +83,7 @@ static void check_image(const std::vector<uint32_t>& p,int w,int h,uint64_t elap
     auto ink=[&](Powitanie::Obszar r){for(int y=r.y;y<r.y+r.h;++y)for(int x=r.x;x<r.x+r.w;++x)if(p[y*w+x]!=Powitanie::TLO)return true;return false;};
     assert(ink(g.tytul)&&ink(g.komunikat));assert(p.front()==Powitanie::TLO);
 }
+#ifndef BURSZTYN_POINTER_GRAPHICS_FIXTURE
 int main(){
     for(bool efi:{false,true})for(uint64_t delay:{0ULL,500000ULL,1500000ULL,3000000ULL}) {
         std::vector<uint32_t> native(1280*720,0xE750A1),blank(1280*720,0);
@@ -187,3 +188,5 @@ int main(){
     }
     printf("Production init/native/compositor/GPU scanout/startup modeset: %u/%u PASS\n",checks,checks);
 }
+
+#endif

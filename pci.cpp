@@ -1381,6 +1381,24 @@ extern "C" uint8_t pci_find_capability(uint8_t bus, uint8_t slot, uint8_t func, 
     return 0;
 }
 
+// Validate the whole conventional capability chain before programming a message
+// capability. Reject another header inside its payload and cycles, including
+// malformed links after the requested capability.
+static bool pci_capability_extent(uint8_t bus,uint8_t slot,uint8_t func,uint8_t off,uint32_t bytes) {
+    const uint32_t end=uint32_t(off)+((bytes+3U)&~3U);
+    if(off<0x40 || (off&3U) || end>256)return false;
+    uint8_t p=pci_odczytaj_byte(bus,slot,func,0x34);
+    uint64_t visited=0; bool found=false;
+    for(unsigned hops=0;p && hops<48;++hops) {
+        if(p<0x40 || (p&3U) || (visited&(UINT64_C(1)<<(p/4))))return false;
+        visited|=UINT64_C(1)<<(p/4);
+        if(p==off)found=true;
+        else if(p>off && uint32_t(p)<end)return false;
+        p=pci_odczytaj_byte(bus,slot,func,uint8_t(p+1));
+    }
+    return !p && found;
+}
+
 extern "C" bool pci_find_msi(uint8_t bus, uint8_t slot, uint8_t func, PciMsiCapability* out_msi) {
     if (!out_msi) return false;
     const uint8_t cap_off = pci_find_capability(bus, slot, func, PCI_CAP_ID_MSI);
@@ -1392,10 +1410,10 @@ extern "C" bool pci_find_msi(uint8_t bus, uint8_t slot, uint8_t func, PciMsiCapa
 
     uint32_t required_size = 10;
     if (is_64bit && !has_pvm) required_size = 14;
-    else if (!is_64bit && has_pvm) required_size = 16;
+    else if (!is_64bit && has_pvm) required_size = 20;
     else if (is_64bit && has_pvm) required_size = 24;
 
-    if (static_cast<uint32_t>(cap_off) + required_size > 256) {
+    if (!pci_capability_extent(bus,slot,func,cap_off,required_size)) {
         return false;
     }
 
@@ -1415,7 +1433,7 @@ extern "C" bool pci_find_msix(uint8_t bus, uint8_t slot, uint8_t func, PciMsixCa
     const uint8_t cap_off = pci_find_capability(bus, slot, func, PCI_CAP_ID_MSIX);
     if (cap_off == 0) return false;
 
-    if (static_cast<uint32_t>(cap_off) + 12 > 256) {
+    if (!pci_capability_extent(bus,slot,func,cap_off,12)) {
         return false;
     }
 
@@ -1488,11 +1506,12 @@ extern "C" bool pci_msix_validate_bar_bounds(const PciMsixCapability* msix, uint
 
 extern "C" bool pci_msi_enable(uint8_t bus, uint8_t slot, uint8_t func,
                                const PciMsiCapability* msi, uint8_t apic_id, uint8_t vector) {
-    if (!msi || msi->cap_offset == 0) return false;
+    if (!msi || !pci_capability_extent(bus,slot,func,msi->cap_offset,
+        msi->is_64bit ? (msi->has_pvm?24:14) : (msi->has_pvm?20:10))) return false;
 
     const uint32_t cmd_status = pci_odczytaj_dword(bus, slot, func, PCI_OFFSET_COMMAND_STATUS);
     const uint16_t cmd = static_cast<uint16_t>(cmd_status & 0xFFFFU) | PCI_COMMAND_INT_DISABLE;
-    pci_zapisz_dword(bus, slot, func, PCI_OFFSET_COMMAND_STATUS, (cmd_status & 0xFFFF0000U) | cmd);
+    pci_zapisz_dword(bus, slot, func, PCI_OFFSET_COMMAND_STATUS, cmd);
 
     PciMsixCapability msix{};
     if (pci_find_msix(bus, slot, func, &msix)) {
@@ -1550,11 +1569,11 @@ extern "C" void pci_msi_set_mask(uint8_t bus, uint8_t slot, uint8_t func, const 
 }
 
 extern "C" bool pci_msix_enable(uint8_t bus, uint8_t slot, uint8_t func, const PciMsixCapability* msix) {
-    if (!msix || msix->cap_offset == 0) return false;
+    if (!msix || !pci_capability_extent(bus,slot,func,msix->cap_offset,12)) return false;
 
     const uint32_t cmd_status = pci_odczytaj_dword(bus, slot, func, PCI_OFFSET_COMMAND_STATUS);
     const uint16_t cmd = static_cast<uint16_t>(cmd_status & 0xFFFFU) | PCI_COMMAND_INT_DISABLE;
-    pci_zapisz_dword(bus, slot, func, PCI_OFFSET_COMMAND_STATUS, (cmd_status & 0xFFFF0000U) | cmd);
+    pci_zapisz_dword(bus, slot, func, PCI_OFFSET_COMMAND_STATUS, cmd);
 
     PciMsiCapability msi{};
     if (pci_find_msi(bus, slot, func, &msi)) {

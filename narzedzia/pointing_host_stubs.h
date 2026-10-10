@@ -4,6 +4,9 @@
 #include <cstdint>
 #include <climits>
 #include "input_device.h"
+#include "pointer_coordinates.h"
+struct HostPointerReady { HostPointerReady(){input_set_pointer_ready(true);} };
+static HostPointerReady host_pointer_ready;
 static unsigned checks{},motions{},clicks{},logs{};
 static int width=1280,height=720,px=640,py=360;
 static uint8_t last_buttons{};
@@ -17,8 +20,8 @@ extern "C" int grafika_pobierz_mysz_y(){return py;}
 extern "C" void zaktualizuj_mysze_pozycja_zrodlo(int x,int y,uint8_t b,const char*){px=x;py=y;++motions;if(b!=last_buttons)++clicks;last_buttons=b;}
 extern "C" void zaktualizuj_mysze_zrodlo(int dx,int dy,uint8_t b,const char*){
     if(width<=0||height<=0)return;
-    const int64_t x=int64_t(px)+dx,y=int64_t(py)-dy;
-    px=int(x<0?0:x>=width?width-1:x);py=int(y<0?0:y>=height?height-1:y);
+    px=pointer_accumulate(px,int64_t(dx),width);
+    py=pointer_accumulate(py,-int64_t(dy),height);
     ++motions;if(b!=last_buttons)++clicks;last_buttons=b;
 }
 extern "C" void zaktualizuj_kolo_myszy(int,int,uint8_t){}

@@ -1,5 +1,7 @@
 #include "sterowniki/usb/hid_pointer.h"
 #include "pointing_diag.h"
+#include "pointer_coordinates.h"
+#include "xhci_pointing_diag.h"
 
 namespace {
 uint16_t le16(const uint8_t* b) { return uint16_t(b[0]) | uint16_t(b[1])<<8; }
@@ -175,16 +177,52 @@ bool hid_pointer_decode(const HidPointerLayout& l,const uint8_t* report,size_t l
     for(size_t i=0;i<n;++i)events[i]=decoded[i];
     count=n;return true;
 }
-bool hid_pointer_publish(InputDevice& dev,const HidPointerLayout& layout,const uint8_t* b,size_t n,uint32_t id) {
-    InputEvent events[HID_POINTER_FIELDS_MAX+1];size_t count=0;
-    if(!hid_pointer_decode(layout,b,n,events,HID_POINTER_FIELDS_MAX+1,count))return false;
+bool hid_pointer_register(InputDevice& dev,const HidPointerLayout& layout,uint32_t id) {
     if(!dev.registered) {
         const char* name=layout.absolute?"usb-tablet":"usb-mouse";
         for(size_t i=0;name[i];++i)dev.name[i]=name[i];
         dev.kinds=layout.absolute?INPUT_DEVICE_KIND_TABLET:INPUT_DEVICE_KIND_MOUSE;
+        dev.pointer_mode=layout.absolute?INPUT_POINTER_ABSOLUTE:INPUT_POINTER_RELATIVE;
         dev.bus_type=INPUT_BUS_USB;dev.device_id=id;dev.abs_x=layout.x;dev.abs_y=layout.y;
         if(!input_register_device(&dev))return false;
     }
+    pointing_snapshot("hid-registered");
+    return true;
+}
+bool hid_pointer_publish(InputDevice& dev,const HidPointerLayout& layout,const uint8_t* b,size_t n,uint32_t id) {
+    InputEvent events[HID_POINTER_FIELDS_MAX+1];size_t count=0;
+    if(!hid_pointer_decode(layout,b,n,events,HID_POINTER_FIELDS_MAX+1,count)) {
+        pointing_count(pointing_counters.hid_rejected); return false;
+    }
+    // Some report IDs can describe buttons alone. Absolute readiness needs both axes.
+    bool x=false,y=false;
+    for(size_t i=0;i<count;++i) {
+        x |= events[i].type==INPUT_EV_ABS && events[i].code==INPUT_ABS_X;
+        y |= events[i].type==INPUT_EV_ABS && events[i].code==INPUT_ABS_Y;
+    }
+    if(layout.absolute && (!x || !y) &&
+       (!dev.registered || dev.pointer_state!=INPUT_POINTER_PROVEN_ACTIVE)) {
+        pointing_count(pointing_counters.hid_rejected); return false;
+    }
+    if(!dev.registered && !hid_pointer_register(dev,layout,id))return false;
+#if BURSZTYNDIAGXHCIPOINTING
+    static unsigned trace_reports=0;
+    if(trace_reports<64) {
+        ++trace_reports;int32_t rx=0,ry=0;
+        for(size_t i=0;i<count;++i) {
+            if((events[i].type==INPUT_EV_ABS && events[i].code==INPUT_ABS_X) ||
+                (events[i].type==INPUT_EV_REL && events[i].code==INPUT_REL_X))rx=input_signed_value(events[i].value);
+            if((events[i].type==INPUT_EV_ABS && events[i].code==INPUT_ABS_Y) ||
+                (events[i].type==INPUT_EV_REL && events[i].code==INPUT_REL_Y))ry=input_signed_value(events[i].value);
+        }
+        const int64_t v[]={dev.device_id,dev.usb_controller,layout.numbered?b[0]:0,rx,ry,
+            layout.x.min,layout.x.max,layout.y.min,layout.y.max,dev.pointer_state,
+            dev.pointer_state!=INPUT_POINTER_PROVEN_ACTIVE};
+        pointing_diag("[USB POINTER] id/controller/reportID/decodedX/Y/logicalMinMaxX/Y/state/first-valid",v,11);
+    }
+#endif
+    pointing_count(pointing_counters.hid_accepted);
+    if(!input_arm_pointer(&dev) || !input_prove_pointer(&dev))return false;
 #if BURSZTYNDIAGUSBHID
     static unsigned reports=0;
     if(reports<32){++reports;for(size_t i=0;i<count;++i){const int64_t v[]={events[i].type,events[i].code,int32_t(events[i].value)};

@@ -22,6 +22,7 @@ extern "C" void zaktualizuj_mysze_zrodlo(int,int,uint8_t,const char*){}
 extern "C" void zaktualizuj_kolo_myszy(int,int,uint8_t){}
 extern "C" void klawiatura_obsluz_klawisz(uint16_t,uint32_t){}
 int main() {
+    input_set_pointer_ready(true);
     AbsMapSample a;
     for(int i=0;i<1000;++i) {
         a.record(i,i*2,true,true,0,999,0,1998,i/10,i/20,1280,720,100+i);

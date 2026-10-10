@@ -28,20 +28,23 @@ bool xhci_command_ring_enqueue(XhciProducerRing* ring, const XhciTrb& source,
     ring->trbs[index].dword0 = trb.dword0;
     ring->trbs[index].dword1 = trb.dword1;
     ring->trbs[index].dword2 = trb.dword2;
+    const bool wraps=index==ring->trb_count-2U;
+    if(wraps) {
+        // Publish the Link with this traversal's cycle before the preceding TRB
+        // becomes visible. Hardware may follow the Link immediately.
+        XhciTrb& link=ring->trbs[ring->trb_count-1U];
+        link.dword3=xhci_trb::type_field(xhci_trb::TYPE_LINK) |
+            xhci_trb::TOGGLE_CYCLE | (ring->producer_cycle?xhci_trb::CYCLE:0U);
+    }
     __atomic_thread_fence(__ATOMIC_RELEASE);
-    ring->trbs[index].dword3 = trb.dword3;
+    __atomic_store_n(&ring->trbs[index].dword3,trb.dword3,__ATOMIC_RELEASE);
     *physical_trb = ring->dma.physical_address +
                     static_cast<uint64_t>(index) * sizeof(XhciTrb);
     ++ring->producer_index;
     ++ring->outstanding;
-    if (ring->producer_index == ring->trb_count - 1U) {
-        XhciTrb& link = ring->trbs[ring->trb_count - 1U];
-        link.dword3 = xhci_trb::type_field(xhci_trb::TYPE_LINK) |
-                      xhci_trb::TOGGLE_CYCLE |
-                      (ring->producer_cycle ? xhci_trb::CYCLE : 0U);
-        __atomic_thread_fence(__ATOMIC_RELEASE);
-        ring->producer_index = 0;
-        ring->producer_cycle = !ring->producer_cycle;
+    if(wraps) {
+        ring->producer_index=0;
+        ring->producer_cycle=!ring->producer_cycle;
     }
     return true;
 }

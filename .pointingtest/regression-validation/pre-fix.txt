@@ -1,0 +1,1 @@
+FAIL narzedzia/test_pointer_regression.cpp:12: px==641&&py==359

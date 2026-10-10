@@ -1,0 +1,3 @@
+g++    -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer narzedzia/test_pointer_regression.cpp sterowniki/usb/hid_pointer.cpp input_device.cpp -o .pointingtest/pointer-regression
+.pointingtest/pointer-regression
+Pointer regression: 3 checks PASS

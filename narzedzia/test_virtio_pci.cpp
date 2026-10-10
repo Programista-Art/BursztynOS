@@ -6962,6 +6962,7 @@ void test_input_pointer_ownership_and_no_duplicate_motion() {
 #include "test_virtio_input_lifecycle.inc"
 
 int main() {
+    input_set_pointer_ready(true);
     std::printf("========================================================\n");
     std::printf(" BURSZTYN OS - TESTY TRANSPORTU VIRTIO 1.X MODERN PCI\n");
     std::printf("========================================================\n");

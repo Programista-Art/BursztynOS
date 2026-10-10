@@ -1,0 +1,11 @@
+Final exact `make -B -j2 all iso`: **PASS, exit 0**, diagnostics disabled.
+Diagnostic full build and final diagnostic object refresh/relink: **PASS, exit 0**.
+ISO kernel extraction: all seven tested diagnostic markers present in diagnostic kernel and absent in normal kernel. The normal extracted kernel exactly matches final `system_operacyjny.bin`.
+
+SHA-256:
+
+```text
+31c643d28bbfbf08bb6c4768b76b300f2a470a02bb6425fd9f9ab32b1b864b99  BursztynOS.iso
+abd8016c03599e5df8b216bd3e31572463c75dcbe93c9d2091c4208e4ae7dbb8  BursztynOS-pointer-regression-diag.iso
+```
+

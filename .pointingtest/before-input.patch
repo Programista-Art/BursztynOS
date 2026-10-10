@@ -1,0 +1,94 @@
+diff --git a/input_device.cpp b/input_device.cpp
+index ae8b5e7..442323b 100644
+--- a/input_device.cpp
++++ b/input_device.cpp
+@@ -5,6 +5,7 @@
+  */
+ 
+ #include "input_device.h"
++#include "xhci_pointing_diag.h"
+ #include "mysz_input.h"
+ #include "abs_map_diag.h"
+ #if BURSZTYNDIAGABSMAP
+@@ -102,7 +103,7 @@ static void input_recalc_pointer_owner(void) {
+     uint32_t best_prio = 0;
+     for (size_t i = 0; i < MAX_INPUT_DEVICES; ++i) {
+         InputDevice* d = s_devices[i];
+-        if (d && d->registered && input_is_pointer_device(d)) {
++        if (d && d->registered && d->pointer_state == INPUT_POINTER_PROVEN_ACTIVE && input_is_pointer_device(d)) {
+             uint32_t prio = input_calc_priority(d);
+             if (prio > best_prio || best == nullptr) {
+                 best = d;
+@@ -112,6 +113,8 @@ static void input_recalc_pointer_owner(void) {
+     }
+     if (s_pointer_owner != best) {
+         s_pointer_owner = best;
++        pointing_count(pointing_counters.owner_transitions);
++        pointing_snapshot("owner-change");
+         char buf[160]{};
+         char* p = buf;
+         char* e = buf + sizeof(buf);
+@@ -368,6 +371,8 @@ bool input_register_device(InputDevice* dev) {
+             s_abs_maps[i]=AbsMapSample{};
+ #endif
+             dev->registered = true;
++            dev->pointer_state = dev->bus_type == INPUT_BUS_USB ?
++                INPUT_POINTER_REGISTERED_INACTIVE : INPUT_POINTER_PROVEN_ACTIVE;
+             dev->rel_x = 0;
+             dev->rel_y = 0;
+     dev->rel_wheel = 0;
+@@ -409,12 +414,33 @@ bool input_register_device(InputDevice* dev) {
+     return false;
+ }
+ 
++bool input_arm_pointer(InputDevice* dev) {
++    if (!dev || !dev->registered || dev->bus_type != INPUT_BUS_USB ||
++        !input_is_pointer_device(dev)) return false;
++    if (dev->pointer_state == INPUT_POINTER_REGISTERED_INACTIVE)
++        dev->pointer_state = INPUT_POINTER_ARMED;
++    return true;
++}
++bool input_prove_pointer(InputDevice* dev) {
++    if (!dev || !dev->registered || dev->bus_type != INPUT_BUS_USB ||
++        !input_is_pointer_device(dev) || dev->pointer_state == INPUT_POINTER_REGISTERED_INACTIVE)
++        return false;
++    if (dev->pointer_state != INPUT_POINTER_PROVEN_ACTIVE) {
++        dev->pointer_state = INPUT_POINTER_PROVEN_ACTIVE;
++        pointing_count(pointing_counters.proven);
++        pointing_snapshot("first-valid-report");
++        input_recalc_pointer_owner();
++    }
++    return true;
++}
++
+ bool input_unregister_device(InputDevice* dev) {
+     if (!dev || !dev->registered) return false;
+     for (size_t i = 0; i < MAX_INPUT_DEVICES; ++i) {
+         if (s_devices[i] == dev) {
+             s_devices[i] = nullptr;
+             dev->registered = false;
++            dev->pointer_state = INPUT_POINTER_REGISTERED_INACTIVE;
+             if (s_device_count > 0) s_device_count--;
+             input_recalc_pointer_owner();
+             return true;
+@@ -526,7 +552,11 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
+                     if (!s_pointer_owner) {
+                         input_recalc_pointer_owner();
+                     }
+-                    const bool is_owner = (s_pointer_owner == nullptr || s_pointer_owner == dev);
++                    const bool is_owner = s_pointer_owner == dev;
++                    pointing_count(is_owner ? pointing_counters.owner_accepted : pointing_counters.nonowner_ignored);
++                    if (!is_owner && dev->bus_type == INPUT_BUS_PS2 && !pointing_counters.ps2_drop_seen) {
++                        pointing_counters.ps2_drop_seen = true; pointing_snapshot("ps2-owner-drop");
++                    }
+ 
+                     if (is_owner) {
+                         // 1. Zdarzenia myszy wzglednej (ruch lub zmiana przyciskow)
+@@ -664,6 +694,7 @@ void input_reset_all(void) {
+     for (size_t i = 0; i < MAX_INPUT_DEVICES; ++i) {
+         if (s_devices[i]) {
+             s_devices[i]->registered = false;
++            s_devices[i]->pointer_state = INPUT_POINTER_REGISTERED_INACTIVE;
+             s_devices[i] = nullptr;
+         }
+     }

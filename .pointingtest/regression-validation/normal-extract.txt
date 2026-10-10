@@ -1,0 +1,14 @@
+xorriso 1.5.6 : RockRidge filesystem manipulator, libburnia project.
+
+Copying of file objects from ISO image to disk filesystem is: Enabled
+xorriso : NOTE : Loading ISO image tree from LBA 0
+xorriso : UPDATE :     604 nodes read in 1 seconds
+xorriso : NOTE : Detected El-Torito boot information which currently is set to be discarded
+Drive current: -indev 'BursztynOS.iso'
+Media current: stdio file, overwriteable
+Media status : is written , is appendable
+Boot record  : El Torito , MBR protective-msdos-label grub2-mbr cyl-align-off GPT APM
+Media summary: 1 session, 17295 data blocks, 33.8m data, 11.9g free
+Volume id    : 'ISOIMAGE'
+xorriso : UPDATE :       1 files restored (7990.9k) in 1 seconds = 5.9xD
+Extracted from ISO image: file '/boot/system_operacyjny.bin'='/tmp/bursztyn-pointer-final-normal.bin'

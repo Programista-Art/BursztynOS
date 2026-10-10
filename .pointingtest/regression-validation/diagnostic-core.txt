@@ -1,0 +1,30 @@
+g++ -DBURSZTYNDIAGXHCIPOINTING=1 -DBURSZTYNDIAGPS2=1 -DBURSZTYNDIAGUSBHID=1 -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer narzedzia/test_pointing.cpp sterowniki/usb/hid_pointer.cpp input_device.cpp -o .pointingtest/pointing
+.pointingtest/pointing
+PS/2 parser: 330443 checks PASS
+HID descriptor/report: 6051 checks PASS
+USB configuration: 48 checks PASS
+InputDevice ownership/mapping: 141 checks PASS
+g++ -DBURSZTYNDIAGXHCIPOINTING=1 -DBURSZTYNDIAGPS2=1 -DBURSZTYNDIAGUSBHID=1 -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer -pthread -DBURSZTYN_PS2_HOST_TEST -DREAL_KEYBOARD=1 narzedzia/test_ps2_controller.cpp input_device.cpp klawiatura.cpp sterowniki/usb/usb_hid.cpp -o .pointingtest/ps2-controller
+.pointingtest/ps2-controller
+i8042/IRQ1/IRQ12/initialization: 4140 checks PASS
+g++ -DBURSZTYNDIAGXHCIPOINTING=1 -DBURSZTYNDIAGPS2=1 -DBURSZTYNDIAGUSBHID=1 -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer narzedzia/test_ohci.cpp sterowniki/usb/hid_pointer.cpp input_device.cpp -o .pointingtest/ohci
+.pointingtest/ohci
+Shared VirtualBox tablet stream: 5400 checks PASS
+OHCI production enumeration/transfers/failure: 5855 checks PASS
+g++ -DBURSZTYNDIAGXHCIPOINTING=1 -DBURSZTYNDIAGPS2=1 -DBURSZTYNDIAGUSBHID=1 -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer -ffunction-sections -fdata-sections -DBURSZTYN_IDT_HOST_TEST narzedzia/test_xhci_pointer.cpp idt.cpp pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp input_device.cpp -Wl,--gc-sections -o .pointingtest/xhci-pointer
+.pointingtest/xhci-pointer
+xHCI production interrupt setup/BDF/capability/failure/IF: 133 checks PASS
+Command/transfer producer wrap and Link cycle: 1030 checks PASS
+xHCI Supported Protocol/endpoint context: 15 checks PASS
+xHCI failed first submission preserves PS/2: 24 checks PASS
+Shared VirtualBox tablet stream: 4800 checks PASS
+xHCI production pointer completions/short control/stale events: 9484 checks PASS
+g++ -DBURSZTYNDIAGXHCIPOINTING=1 -DBURSZTYNDIAGPS2=1 -DBURSZTYNDIAGUSBHID=1 -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer narzedzia/test_pointer_regression.cpp sterowniki/usb/hid_pointer.cpp input_device.cpp -o .pointingtest/pointer-regression
+.pointingtest/pointer-regression
+Signed relative cursor regression: 396600 checks PASS
+InputDevice modes/readiness/API regression: 56 checks PASS
+python3 narzedzia/test_pointer_boot_order.py
+Pointer boot order/barrier: 6 checks PASS
+g++ -DBURSZTYNDIAGXHCIPOINTING=1 -DBURSZTYNDIAGPS2=1 -DBURSZTYNDIAGUSBHID=1 -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer -DBURSZTYN_IDT_HOST_TEST -ffunction-sections -fdata-sections idt.cpp narzedzia/test_irq_allocation.cpp -Wl,--gc-sections -o .pointingtest/irq-allocation
+.pointingtest/irq-allocation
+Production IRQ allocator uniqueness/exhaustion/IF restore: 3740 checks PASS

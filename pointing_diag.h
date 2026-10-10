@@ -4,7 +4,7 @@
 // Call only from controlled initialization or deferred input service, never IRQ.
 inline void pointing_diag(const char* tag,const int64_t* values,size_t count) {
     extern void klog_serial(const char*);
-    char buffer[240]{};size_t n=0;
+    char buffer[512]{};size_t n=0;
     auto append=[&](char c){if(n+1<sizeof(buffer))buffer[n++]=c;};
     while(*tag)append(*tag++);
     for(size_t i=0;i<count;++i){append(' ');int64_t v=values[i];

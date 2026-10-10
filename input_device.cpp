@@ -5,6 +5,8 @@
  */
 
 #include "input_device.h"
+#include "pointer_coordinates.h"
+#include "xhci_pointing_diag.h"
 #include "mysz_input.h"
 #include "abs_map_diag.h"
 #if BURSZTYNDIAGABSMAP
@@ -37,6 +39,27 @@ constexpr size_t MAX_INPUT_DEVICES = 16;
 static InputDevice* s_devices[MAX_INPUT_DEVICES] = {};
 static size_t s_device_count = 0;
 static InputDevice* s_pointer_owner = nullptr;
+static bool s_pointer_delivery_ready = false;
+#if BURSZTYNDIAGXHCIPOINTING
+static unsigned s_pointer_traces[MAX_INPUT_DEVICES]{};
+#endif
+static void pointer_trace(InputDevice* dev,InputPointerMode mode,int32_t raw_x,int32_t raw_y,int before_x,int before_y,int result) {
+#if BURSZTYNDIAGXHCIPOINTING
+    size_t slot=0;while(slot<MAX_INPUT_DEVICES && s_devices[slot]!=dev)++slot;
+    if(slot==MAX_INPUT_DEVICES || s_pointer_traces[slot]>=32)return;
+    ++s_pointer_traces[slot];
+    const auto* owner=input_get_pointer_owner();
+    const int64_t v[]={dev->device_id,dev->bus_type,owner?int64_t(owner->device_id):-1,
+        uint32_t(raw_x),uint32_t(raw_y),raw_x,raw_y,before_x,before_y,
+        grafika_pobierz_mysz_x(),grafika_pobierz_mysz_y(),grafika_pobierz_szerokosc(),
+        grafika_pobierz_wysokosc(),result,dev->pointer_state,dev->usb_controller};
+    pointing_diag(mode==INPUT_POINTER_ABSOLUTE ?
+        "[POINTER ABSOLUTE] id/bus/owner/rawbitsX/Y/signedX/Y/beforeX/Y/afterX/Y/width/height/accepted(0=owner-reject,2=deferred)/state/controller" :
+        "[POINTER RELATIVE] id/bus/owner/rawbitsX/Y/signedX/Y/beforeX/Y/afterX/Y/width/height/accepted(0=owner-reject,2=deferred)/state/controller",v,16);
+#else
+    (void)dev;(void)mode;(void)raw_x;(void)raw_y;(void)before_x;(void)before_y;(void)result;
+#endif
+}
 static int32_t input_accumulate_delta(int32_t previous, int32_t delta) {
     const int64_t sum = int64_t(previous) + delta;
     // Keep negation valid too: the graphics convention negates Y deltas.
@@ -102,7 +125,7 @@ static void input_recalc_pointer_owner(void) {
     uint32_t best_prio = 0;
     for (size_t i = 0; i < MAX_INPUT_DEVICES; ++i) {
         InputDevice* d = s_devices[i];
-        if (d && d->registered && input_is_pointer_device(d)) {
+        if (d && d->registered && d->pointer_state == INPUT_POINTER_PROVEN_ACTIVE && input_is_pointer_device(d)) {
             uint32_t prio = input_calc_priority(d);
             if (prio > best_prio || best == nullptr) {
                 best = d;
@@ -111,7 +134,15 @@ static void input_recalc_pointer_owner(void) {
         }
     }
     if (s_pointer_owner != best) {
+        // Pending input belongs to its old owner, never replay it on fallback.
+        if (s_pointer_owner) {
+            s_pointer_owner->rel_x = s_pointer_owner->rel_y = 0;
+            s_pointer_owner->rel_wheel = s_pointer_owner->rel_hwheel = 0;
+            s_pointer_owner->has_abs_x = s_pointer_owner->has_abs_y = false;
+        }
         s_pointer_owner = best;
+        pointing_count(pointing_counters.owner_transitions);
+        pointing_snapshot("owner-change");
         char buf[160]{};
         char* p = buf;
         char* e = buf + sizeof(buf);
@@ -360,6 +391,14 @@ const char* input_bus_name(uint32_t bus_type) {
 bool input_register_device(InputDevice* dev) {
     if (!dev || dev->registered) return false;
     if (s_device_count >= MAX_INPUT_DEVICES) return false;
+    // Compatibility for callers declaring capabilities rather than the mode.
+    // Never derive coordinate semantics from transport, priority or values.
+    if (dev->pointer_mode == INPUT_POINTER_UNSPECIFIED)
+        dev->pointer_mode = (dev->kinds & INPUT_DEVICE_KIND_TABLET) ?
+            ((dev->kinds & INPUT_DEVICE_KIND_MOUSE) ? INPUT_POINTER_RELATIVE_AND_ABSOLUTE : INPUT_POINTER_ABSOLUTE) : INPUT_POINTER_RELATIVE;
+    if (dev->pointer_mode != INPUT_POINTER_RELATIVE &&
+        dev->pointer_mode != INPUT_POINTER_ABSOLUTE &&
+        dev->pointer_mode != INPUT_POINTER_RELATIVE_AND_ABSOLUTE) return false;
 
     for (size_t i = 0; i < MAX_INPUT_DEVICES; ++i) {
         if (s_devices[i] == nullptr) {
@@ -367,7 +406,12 @@ bool input_register_device(InputDevice* dev) {
 #if BURSZTYNDIAGABSMAP
             s_abs_maps[i]=AbsMapSample{};
 #endif
+#if BURSZTYNDIAGXHCIPOINTING
+            s_pointer_traces[i]=0;
+#endif
             dev->registered = true;
+            dev->pointer_state = dev->bus_type == INPUT_BUS_USB ?
+                INPUT_POINTER_REGISTERED_INACTIVE : INPUT_POINTER_PROVEN_ACTIVE;
             dev->rel_x = 0;
             dev->rel_y = 0;
     dev->rel_wheel = 0;
@@ -409,12 +453,33 @@ bool input_register_device(InputDevice* dev) {
     return false;
 }
 
+bool input_arm_pointer(InputDevice* dev) {
+    if (!dev || !dev->registered || dev->bus_type != INPUT_BUS_USB ||
+        !input_is_pointer_device(dev)) return false;
+    if (dev->pointer_state == INPUT_POINTER_REGISTERED_INACTIVE)
+        dev->pointer_state = INPUT_POINTER_ARMED;
+    return true;
+}
+bool input_prove_pointer(InputDevice* dev) {
+    if (!dev || !dev->registered || dev->bus_type != INPUT_BUS_USB ||
+        !input_is_pointer_device(dev) || dev->pointer_state == INPUT_POINTER_REGISTERED_INACTIVE)
+        return false;
+    if (dev->pointer_state != INPUT_POINTER_PROVEN_ACTIVE) {
+        dev->pointer_state = INPUT_POINTER_PROVEN_ACTIVE;
+        pointing_count(pointing_counters.proven);
+        pointing_snapshot("first-valid-report");
+        input_recalc_pointer_owner();
+    }
+    return true;
+}
+
 bool input_unregister_device(InputDevice* dev) {
     if (!dev || !dev->registered) return false;
     for (size_t i = 0; i < MAX_INPUT_DEVICES; ++i) {
         if (s_devices[i] == dev) {
             s_devices[i] = nullptr;
             dev->registered = false;
+            dev->pointer_state = INPUT_POINTER_REGISTERED_INACTIVE;
             if (s_device_count > 0) s_device_count--;
             input_recalc_pointer_owner();
             return true;
@@ -443,7 +508,7 @@ InputDevice* input_find_device_by_name(const char* name) {
 }
 
 void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
-    if (!dev || !ev) return;
+    if (!dev || !ev || !dev->registered) return;
 
     switch (ev->type) {
         case INPUT_EV_KEY: {
@@ -485,7 +550,9 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
         }
 
         case INPUT_EV_REL: {
-            const int32_t delta = static_cast<int32_t>(ev->value);
+            const int32_t delta = input_signed_value(ev->value);
+            if ((ev->code == INPUT_REL_X || ev->code == INPUT_REL_Y) &&
+                !(dev->pointer_mode & INPUT_POINTER_RELATIVE)) break;
             if (ev->code == INPUT_REL_X) {
                 dev->rel_x = input_accumulate_delta(dev->rel_x, delta);
             } else if (ev->code == INPUT_REL_Y) {
@@ -500,7 +567,8 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
         }
 
         case INPUT_EV_ABS: {
-            const int32_t coord = static_cast<int32_t>(ev->value);
+            if (!(dev->pointer_mode & INPUT_POINTER_ABSOLUTE)) break;
+            const int32_t coord = input_signed_value(ev->value);
             if (ev->code == INPUT_ABS_X) {
                 dev->abs_val_x = coord;
                 dev->has_abs_x = true;
@@ -526,8 +594,23 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
                     if (!s_pointer_owner) {
                         input_recalc_pointer_owner();
                     }
-                    const bool is_owner = (s_pointer_owner == nullptr || s_pointer_owner == dev);
+                    const bool is_owner = s_pointer_owner == dev;
+                    const int before_x=grafika_pobierz_mysz_x(),before_y=grafika_pobierz_mysz_y();
+                    const InputPointerMode trace_mode=(dev->has_abs_x || dev->has_abs_y ||
+                        dev->pointer_mode==INPUT_POINTER_ABSOLUTE) ? INPUT_POINTER_ABSOLUTE : INPUT_POINTER_RELATIVE;
+                    const int32_t trace_x=trace_mode==INPUT_POINTER_ABSOLUTE?dev->abs_val_x:dev->rel_x;
+                    const int32_t trace_y=trace_mode==INPUT_POINTER_ABSOLUTE?dev->abs_val_y:dev->rel_y;
+                    pointing_count(is_owner ? pointing_counters.owner_accepted : pointing_counters.nonowner_ignored);
+                    if (!is_owner && dev->bus_type == INPUT_BUS_PS2 && !pointing_counters.ps2_drop_seen) {
+                        pointing_counters.ps2_drop_seen = true; pointing_snapshot("ps2-owner-drop");
+                    }
 
+                    if (is_owner && !input_pointer_geometry_ready()) {
+                        // Keep signed motion / last absolute axes and buttons until
+                        // display bootstrap publishes usable cursor geometry.
+                        pointer_trace(dev,trace_mode,trace_x,trace_y,before_x,before_y,2);
+                        return;
+                    }
                     if (is_owner) {
                         // 1. Zdarzenia myszy wzglednej (ruch lub zmiana przyciskow)
                         if (dev->rel_x != 0 || dev->rel_y != 0) {
@@ -622,6 +705,7 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
                         dev->has_abs_x = false;
                         dev->has_abs_y = false;
                     }
+                    pointer_trace(dev,trace_mode,trace_x,trace_y,before_x,before_y,is_owner?1:0);
                 }
 
                 dev->prev_buttons_state = dev->buttons_state;
@@ -649,9 +733,38 @@ void input_abs_map_diag_obsluz() {
 }
 #endif
 
+void input_set_pointer_ready(bool ready) { s_pointer_delivery_ready = ready; }
+bool input_pointer_geometry_ready(void) {
+    return s_pointer_delivery_ready && grafika_pobierz_szerokosc() > 0 &&
+        grafika_pobierz_wysokosc() > 0;
+}
+void input_pointer_boot_diagnostic(void) {
+#if BURSZTYNDIAGXHCIPOINTING
+    const InputDevice* ps2 = input_find_device_by_name("ps2-mouse");
+    int ohci=-1,xhci=-1;
+    for(size_t i=0;i<input_get_device_count();++i) {
+        const auto* d=input_get_device(i);
+        if(d && d->bus_type==INPUT_BUS_USB && input_is_pointer_device(d)) {
+            if(d->usb_controller==INPUT_USB_CONTROLLER_OHCI)ohci=d->pointer_state;
+            if(d->usb_controller==INPUT_USB_CONTROLLER_XHCI)xhci=d->pointer_state;
+        }
+    }
+    const auto* owner=input_get_pointer_owner();
+    const int64_t v[]={s_pointer_delivery_ready,input_pointer_geometry_ready(),
+        grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc(),ps2!=nullptr,
+        ps2 && ps2->pointer_state==INPUT_POINTER_PROVEN_ACTIVE,owner?int64_t(owner->device_id):-1,ohci,xhci};
+    pointing_diag("[POINTER BOOT] INPUTSUBSYSTEMREADY/CURSORGEOMETRYREADY/SCREENWIDTH/SCREENHEIGHT/PS2REGISTERED/PS2ELIGIBLE/CURRENTPOINTEROWNER/OHCIPOINTERSTATE/XHCIPOINTERSTATE",v,9);
+#endif
+}
 void input_service_all(void) {
+    if (input_pointer_geometry_ready() && s_pointer_owner) {
+        const InputEvent sync{INPUT_EV_SYN, INPUT_SYN_REPORT, 0};
+        input_dispatch_event(s_pointer_owner, &sync);
+    }
     for (size_t i = 0; i < MAX_INPUT_DEVICES; ++i) {
-        if (s_devices[i] && s_devices[i]->poll_fn) {
+        if (s_devices[i] && s_devices[i]->poll_fn &&
+            (!input_is_pointer_device(s_devices[i]) ||
+             (s_devices[i]->kinds & INPUT_DEVICE_KIND_KEYBOARD) || input_pointer_geometry_ready())) {
             s_devices[i]->poll_fn(s_devices[i]);
         }
     }
@@ -664,6 +777,7 @@ void input_reset_all(void) {
     for (size_t i = 0; i < MAX_INPUT_DEVICES; ++i) {
         if (s_devices[i]) {
             s_devices[i]->registered = false;
+            s_devices[i]->pointer_state = INPUT_POINTER_REGISTERED_INACTIVE;
             s_devices[i] = nullptr;
         }
     }

@@ -162,4 +162,53 @@ void ownership_tests(){
     width=0;height=0;InputDevice usb{};auto d=tablet_descriptor();HidPointerLayout l{};CHECK(hid_pointer_compile(d.data(),d.size(),l));auto r=tablet_report(l,32767,32767);
     const int oldx=px,oldy=py;CHECK(hid_pointer_publish(usb,l,r.data(),r.size(),1));CHECK(px==oldx&&py==oldy);input_reset_all();width=1280;height=720;
 }
-int main(){unsigned start=checks;ps2_tests();printf("PS/2 parser: %u checks PASS\n",checks-start);start=checks;hid_tests();printf("HID descriptor/report: %u checks PASS\n",checks-start);start=checks;usb_tests();printf("USB configuration: %u checks PASS\n",checks-start);start=checks;ownership_tests();printf("InputDevice ownership/mapping: %u checks PASS\n",checks-start);}
+void readiness_tests(){
+    input_reset_all();InputDevice ps2{},usb{},other{},virtio{};
+    ps2.bus_type=INPUT_BUS_PS2;ps2.kinds=INPUT_DEVICE_KIND_MOUSE;
+    CHECK(input_register_device(&ps2));CHECK(input_get_pointer_owner()==&ps2);
+    auto desc=tablet_descriptor(true);HidPointerLayout layout{};
+    CHECK(hid_pointer_compile(desc.data(),desc.size(),layout));
+    CHECK(hid_pointer_register(usb,layout,101));
+    CHECK(usb.pointer_state==INPUT_POINTER_REGISTERED_INACTIVE);
+    CHECK(input_get_pointer_owner()==&ps2);
+    CHECK(!input_prove_pointer(&usb));CHECK(input_arm_pointer(&usb));
+    CHECK(usb.pointer_state==INPUT_POINTER_ARMED);CHECK(input_get_pointer_owner()==&ps2);
+    InputEvent move[]={{INPUT_EV_REL,INPUT_REL_X,1},{INPUT_EV_SYN,0,0}};
+    unsigned before=motions;input_dispatch_events(&ps2,move,2);CHECK(motions==before+1);
+    uint8_t bad[]={42,0};CHECK(!hid_pointer_publish(usb,layout,bad,sizeof(bad),101));
+    CHECK(input_get_pointer_owner()==&ps2);
+    hid_pointer_remove(usb);CHECK(input_get_pointer_owner()==&ps2);
+    // A structurally valid button-only report ID cannot prove absolute axes.
+    auto split=tablet_descriptor(true);const uint8_t usage[]={9,0x30};
+    const auto at=std::search(split.begin(),split.end(),usage,usage+2);
+    split.insert(at,{0x85,9});HidPointerLayout split_layout{};
+    CHECK(hid_pointer_compile(split.data(),split.size(),split_layout));
+    auto buttons=tablet_report(split_layout,0,0,0,0,7);
+    CHECK(!hid_pointer_publish(usb,split_layout,buttons.data(),buttons.size(),101));
+    CHECK(input_get_pointer_owner()==&ps2);
+    auto axes=tablet_report(split_layout,0,0,0,0,9);
+    CHECK(hid_pointer_publish(usb,split_layout,axes.data(),axes.size(),101));
+    CHECK(hid_pointer_publish(usb,split_layout,buttons.data(),buttons.size(),101));
+    hid_pointer_remove(usb);CHECK(input_get_pointer_owner()==&ps2);
+    // A failed first submission/removal cannot displace the fallback.
+    CHECK(hid_pointer_register(usb,layout,101));hid_pointer_remove(usb);
+    CHECK(input_get_pointer_owner()==&ps2);
+    CHECK(hid_pointer_register(usb,layout,101));CHECK(input_arm_pointer(&usb));
+    px=0;py=0;auto report=tablet_report(layout,0,0,0); // stationary report proves readiness
+    CHECK(hid_pointer_publish(usb,layout,report.data(),report.size(),101));
+    CHECK(px==0&&py==0);CHECK(usb.pointer_state==INPUT_POINTER_PROVEN_ACTIVE);CHECK(input_get_pointer_owner()==&usb);
+    size_t count=input_get_device_count();
+    CHECK(hid_pointer_publish(usb,layout,report.data(),report.size(),101));
+    CHECK(input_get_device_count()==count);CHECK(input_get_pointer_owner()==&usb);
+    before=motions;input_dispatch_events(&ps2,move,2);CHECK(motions==before);
+    CHECK(hid_pointer_register(other,layout,102));CHECK(input_arm_pointer(&other));
+    CHECK(hid_pointer_publish(other,layout,report.data(),report.size(),102));
+    CHECK(input_get_pointer_owner()==&usb); // equal priority uses registry order
+    hid_pointer_remove(usb);CHECK(input_get_pointer_owner()==&other);
+    hid_pointer_remove(other);CHECK(input_get_pointer_owner()==&ps2);
+    virtio.bus_type=INPUT_BUS_VIRTIO;virtio.kinds=INPUT_DEVICE_KIND_MOUSE;
+    CHECK(input_register_device(&virtio));CHECK(input_get_pointer_owner()==&virtio);
+    CHECK(input_unregister_device(&virtio));CHECK(input_get_pointer_owner()==&ps2);
+    input_reset_all();
+}
+int main(){unsigned start=checks;ps2_tests();printf("PS/2 parser: %u checks PASS\n",checks-start);start=checks;hid_tests();printf("HID descriptor/report: %u checks PASS\n",checks-start);start=checks;usb_tests();printf("USB configuration: %u checks PASS\n",checks-start);start=checks;ownership_tests();readiness_tests();printf("InputDevice ownership/mapping: %u checks PASS\n",checks-start);}

@@ -28,6 +28,7 @@ struct UsbHidInterface {
 bool usb_hid_find_interface(const uint8_t*,size_t,UsbHidInterface&);
 bool hid_pointer_compile(const uint8_t*,size_t,HidPointerLayout&);
 bool hid_pointer_decode(const HidPointerLayout&,const uint8_t*,size_t,InputEvent*,size_t,size_t&);
+bool hid_pointer_register(InputDevice&,const HidPointerLayout&,uint32_t);
 // Called only by a serialized USB service, after real interrupt transfer success.
 bool hid_pointer_publish(InputDevice&,const HidPointerLayout&,const uint8_t*,size_t,uint32_t);
 void hid_pointer_remove(InputDevice&);

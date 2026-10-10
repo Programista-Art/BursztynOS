@@ -8,6 +8,7 @@
 #include "pci.h"
 #include "pamiec.h"
 #include "pointing_diag.h"
+#include "xhci_pointing_diag.h"
 
 void wypisz_log(const char*);
 namespace {
@@ -169,7 +170,10 @@ bool enumerate(unsigned port){
     d.interval=uint8_t(interval);
     d.interrupt->info=d.address|((d.iface.endpoint&15U)<<7)|(2U<<11)|(d.low?1U<<13:0)|(uint32_t(d.packet)<<16);
     d.tail=4;d.interrupt->head=phys(d,d.td+4);d.interrupt->tail=d.interrupt->head;
-    queue_interrupt(d);d.ready=true;rebuild_periodic();
+    d.input.usb_controller=INPUT_USB_CONTROLLER_OHCI;
+    if(!d.keyboard && !hid_pointer_register(d.input,d.layout,d.address))return false;
+    queue_interrupt(d);if(!d.keyboard)input_arm_pointer(&d.input);
+    d.ready=true;rebuild_periodic();
     wypisz_log("[OHCI] Root-port HID interrupt IN configured.");return true;
 }
 }
@@ -214,6 +218,7 @@ void ohci_service(){
         if((t.info>>28)!=0|| (cbp&&(cbp<base||cbp>base+d.packet))){
             d.interrupt->info|=1U<<14;d.ready=false;hid_pointer_remove(d.input);continue;
         }
+        pointing_count(pointing_counters.hid_completions);
         const size_t actual=cbp?cbp-base:d.packet;
         if(d.keyboard){if(actual>=8)usb_hid_przetworz_raport(static_cast<const uint8_t*>(d.data.virtual_address));}
         else hid_pointer_publish(d.input,d.layout,static_cast<const uint8_t*>(d.data.virtual_address),actual,d.address);

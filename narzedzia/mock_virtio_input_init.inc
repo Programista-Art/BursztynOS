@@ -32,6 +32,7 @@ struct InitFunction {
         dev.msix_table = reinterpret_cast<PciMsixTableEntry*>(bar.data()+768);
         std::memset(bar.data()+768, 0, 16);
         dev.bars[0].vaddr = bar.data(); dev.bars[0].size = bar.size(); dev.bars[0].is_mapped = true;
+        pci[6] = 0x10; pci[0x34] = 0xA0;
         pci[0xA0] = PCI_CAP_ID_MSIX;
     }
     bool allowed(size_t off, size_t n) const {

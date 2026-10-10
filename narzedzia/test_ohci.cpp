@@ -4,6 +4,7 @@
 #include <vector>
 #include <algorithm>
 #include "narzedzia/virtualbox_tablet_descriptor.h"
+#include "narzedzia/pointer_transport_stream.h"
 #define BURSZTYN_USB_HOST_TEST 1
 #include "sterowniki/usb/ohci.cpp"
 
@@ -83,6 +84,13 @@ int main(){
     InputDevice ps2{};ps2.kinds=INPUT_DEVICE_KIND_MOUSE;ps2.bus_type=INPUT_BUS_PS2;CHECK(input_register_device(&ps2));
     CHECK(ohci_initialize());CHECK(used==1&&devices[0].ready);CHECK(transactions>=7);CHECK(input_get_pointer_owner()==&ps2);
     Device& d=devices[0];CHECK(d.address==1&&d.layout.absolute);CHECK(d.packet==8);CHECK(d.interval==8);CHECK(hcca->table[0]==phys(d,d.interrupt));CHECK(hcca->table[1]==0);
+    CHECK(d.input.pointer_state==INPUT_POINTER_ARMED);
+    interrupt(d,{});ohci_service();CHECK(d.input.pointer_state==INPUT_POINTER_ARMED);CHECK(input_get_pointer_owner()==&ps2);CHECK(d.pending);
+    interrupt(d,{0});ohci_service();CHECK(d.input.pointer_state==INPUT_POINTER_ARMED);CHECK(input_get_pointer_owner()==&ps2);CHECK(d.pending);
+    px=0;py=0; // the first complete axes report is stationary and still proves readiness
+    pointer_transport_stream(d.layout,d.input,[&](const std::vector<uint8_t>& report){
+        interrupt(d,report);ohci_service();CHECK(d.pending);CHECK(!d.retired[d.active]);
+    });
     auto r=tablet_report(d.layout,32767,32767,5,-1);interrupt(d,r);ohci_service();CHECK(input_get_pointer_owner()==&d.input);CHECK(px==1279&&py==719&&last_buttons==5);CHECK(d.pending);
     for(unsigned i=0;i<100;++i){r=tablet_report(d.layout,int(i),int(i),0,0);interrupt(d,r);ohci_service();CHECK(d.pending);CHECK(d.retired[d.active]==false);}
     const int prevx=px,prevy=py;interrupt(d,{0});ohci_service();CHECK(px==prevx&&py==prevy);CHECK(d.pending);

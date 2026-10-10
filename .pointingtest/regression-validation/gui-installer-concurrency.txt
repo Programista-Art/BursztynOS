@@ -1,0 +1,30 @@
+mkdir -p .wm-test
+g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined narzedzia/test_cursor_host.cpp -o .wm-test/cursor
+ASAN_OPTIONS=detect_leaks=0 .wm-test/cursor
+Cursor diagnostics host PASS: default fast frames silent; anomaly timestamps, dirty metrics and coalescing logged
+Cursor host PASS: clipping, union, 100-position coalescing, interleaved producer, clean background, scene/theme/decor redraw, final-only presents and no stale pixels
+g++ -std=c++17 -O1 -g -Wall -Wextra -ffunction-sections -fdata-sections -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYNDIAGABSMAP=1 -fsanitize=address,undefined input_device.cpp narzedzia/test_abs_map_diag.cpp -Wl,--gc-sections -o .wm-test/abs-map-diag
+ASAN_OPTIONS=detect_leaks=1 .wm-test/abs-map-diag
+ABS diagnostics PASS: throttling, raw extrema, endpoints, rounding stalls, idle and reset
+g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined narzedzia/test_gui_text_input.cpp klawiatura.cpp -o .bursztyn-ui-test/test-gui-text-input
+ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-gui-text-input
+Production keyboard / TEXTINPUT / dialogs: 7291/7291 PASS
+g++ -std=c++17 -O1 -g -Wall -Wextra -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined narzedzia/instalator/test_storage.cpp storage_format.cpp psf.cpp -o .installertest/test-storage
+ASAN_OPTIONS=detect_leaks=0 .installertest/test-storage
+Native directory/file move: 138 assertions PASS (RAM)
+Storage/BSP2 host: 10493 PASS, 0 FAIL (includes outside-partition sentinel, faults, >2 TiB GPT, A/B ESP, BlockDevice abstraction)
+python3 narzedzia/test_wspolbieznosc.py
+=== TEST WSPOLBIEZNOSCI WORKSPACE OTA/STORAGE BURSZTYN OS ===
+PASS blokady_brak_odwrotnych_krawedzi
+PASS irq_bez_blokad
+PASS brak_spania_pod_blokada
+PASS psf_brak_rekurencji_publicznej
+PASS ahci_try_lock_bez_petli
+PASS ahci_sprawdzenie_aktywnosci
+PASS workspace_nie_ucieka
+PASS diagnostyka_owner
+PASS host_kompilacja
+PASS host_wspolbieznosc
+==============================================================
+Zdane: 10, Zlane: 0
+Wszystkie testy wspolbieznosci zakonczone sukcesem.

@@ -488,6 +488,9 @@ bool virtio_input_prepare(VirtioInputDriver* drv, VirtioPciDevice* dev) {
     // Klasyfikacja urzadzenia z bitmapy EV_BITS
     virtio_pci_input_init_trace(dev, "role detection begin");
     if (!virtio_input_classify_device(drv)) return input_init_failure(drv, "unsupported input capabilities or invalid ABSINFO");
+    drv->input_dev.pointer_mode = drv->has_abs_tablet ?
+        (drv->has_rel_mouse ? INPUT_POINTER_RELATIVE_AND_ABSOLUTE : INPUT_POINTER_ABSOLUTE) :
+        INPUT_POINTER_RELATIVE;
     virtio_pci_input_init_trace(dev, "role detection done/kinds", drv->input_dev.kinds);
 
     // 5. Utworzenie Split VirtQueue 0 (eventq)

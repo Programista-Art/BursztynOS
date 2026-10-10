@@ -1764,7 +1764,7 @@ ifeq ($(BURSZTYNDIAGUSBHID),1)
 KERNEL_CXXFLAGS += -DBURSZTYNDIAGUSBHID=1
 endif
 
-POINTING_HOST_FLAGS := $(if $(filter 1,$(BURSZTYNDIAGPS2)),-DBURSZTYNDIAGPS2=1) $(if $(filter 1,$(BURSZTYNDIAGUSBHID)),-DBURSZTYNDIAGUSBHID=1) -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer
+POINTING_HOST_FLAGS := $(if $(filter 1,$(BURSZTYNDIAGXHCIPOINTING)),-DBURSZTYNDIAGXHCIPOINTING=1) $(if $(filter 1,$(BURSZTYNDIAGPS2)),-DBURSZTYNDIAGPS2=1) $(if $(filter 1,$(BURSZTYNDIAGUSBHID)),-DBURSZTYNDIAGUSBHID=1) -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer
 .PHONY: test-pointing-host
 test-pointing-host:
 	@mkdir -p .pointingtest
@@ -1774,9 +1774,35 @@ test-pointing-host:
 	.pointingtest/ps2-controller
 	g++ $(POINTING_HOST_FLAGS) narzedzia/test_ohci.cpp sterowniki/usb/hid_pointer.cpp input_device.cpp -o .pointingtest/ohci
 	.pointingtest/ohci
-	g++ $(POINTING_HOST_FLAGS) -ffunction-sections -fdata-sections narzedzia/test_xhci_pointer.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp input_device.cpp -Wl,--gc-sections -o .pointingtest/xhci-pointer
+	g++ $(POINTING_HOST_FLAGS) -ffunction-sections -fdata-sections -DBURSZTYN_IDT_HOST_TEST narzedzia/test_xhci_pointer.cpp idt.cpp pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp input_device.cpp -Wl,--gc-sections -o .pointingtest/xhci-pointer
 	.pointingtest/xhci-pointer
 
 mysz.o: ps2_mouse_parser.h pointing_diag.h
 hid_pointer.o: pointing_diag.h input_device.h
 xhci.o usb.o: sterowniki/usb/ohci.h sterowniki/usb/hid_pointer.h
+
+# One bounded shared diagnostic stream; production default is silent.
+BURSZTYNDIAGXHCIPOINTING ?= 0
+ifeq ($(BURSZTYNDIAGXHCIPOINTING),1)
+KERNEL_CXXFLAGS += -DBURSZTYNDIAGXHCIPOINTING=1
+endif
+input_device.o mysz.o grafika.o hid_pointer.o xhci.o ohci.o idt.o: xhci_pointing_diag.h
+
+.PHONY: test-irq-allocation-host
+test-irq-allocation-host:
+	@mkdir -p .pointingtest
+	g++ $(POINTING_HOST_FLAGS) -DBURSZTYN_IDT_HOST_TEST -ffunction-sections -fdata-sections idt.cpp narzedzia/test_irq_allocation.cpp -Wl,--gc-sections -o .pointingtest/irq-allocation
+	.pointingtest/irq-allocation
+
+.PHONY: test-pointer-regression-host
+test-pointer-regression-host:
+	@mkdir -p .pointingtest
+	g++ $(POINTING_HOST_FLAGS) narzedzia/test_pointer_regression.cpp sterowniki/usb/hid_pointer.cpp input_device.cpp -o .pointingtest/pointer-regression
+	.pointingtest/pointer-regression
+	$(PYTHON) narzedzia/test_pointer_boot_order.py
+input_device.o grafika.o hid_pointer.o: pointer_coordinates.h
+
+.PHONY: test-pointer-graphics-host
+test-pointer-graphics-host: $(filter-out .wm-test/runtime-host/narzedzia/test_splash_production_path.o,$(STARTUP_HOST_OBJECTS))
+	g++ $(STARTUP_HOST_FLAGS) -DBURSZTYN_PMM_HOST_TEST -Wl,--gc-sections narzedzia/test_pointer_graphics.cpp sterowniki/usb/hid_pointer.cpp $^ -o .wm-test/pointer-graphics
+	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/pointer-graphics

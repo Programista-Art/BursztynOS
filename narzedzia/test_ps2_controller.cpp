@@ -28,6 +28,13 @@ int main(){
     output.push_back({0x21,0xAA});output.push_back({0x21,0});output.push_back({1,0x10});
     InicjalizujMyszPS2();CHECK(mysz_zainicjalizowana);CHECK(parser.id==3);CHECK(output.empty());CHECK(parser.index==0);CHECK(input_get_pointer_owner()==&s_ps2_mouse_device);
     CHECK(commands[0]==0xF5&&commands[1]==0xF5);CHECK(commands.back()==0xF4);
+    // Hardware/IRQ12 may be ready before the cursor. The existing SPSC queue
+    // must retain the real report; no synthetic movement or byte discard.
+    input_set_pointer_ready(false);
+    for(uint8_t b:{uint8_t(8),uint8_t(1),uint8_t(1),uint8_t(0)})output.push_back({0x21,b});
+    obsluga_przerwania_myszy();input_service_all();CHECK(px==640&&py==360);CHECK(pending_head!=pending_tail);
+    input_set_pointer_ready(true);input_service_all();CHECK(px==641&&py==359);CHECK(pending_head==pending_tail);
+    px=640;py=360;
     const unsigned before=reads;output.push_back({0x21,0x38});obsluga_przerwania_klawiatury();CHECK(reads==before);CHECK(output.size()==1);
     output.push_back({0x21,0xFF});output.push_back({0x21,0xFF});output.push_back({0x21,0xFF});
     const unsigned moved=motions;obsluga_przerwania_myszy();CHECK(output.empty());CHECK(motions==moved);CHECK(parser.index==0);input_service_all();CHECK(px==639&&py==361);

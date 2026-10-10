@@ -27,6 +27,7 @@
 #include "input_device.h"
 #include "ps2_mouse_parser.h"
 #include "pointing_diag.h"
+#include "xhci_pointing_diag.h"
 extern "C" void ps2_klawiatura_przetworz_scancode(uint8_t);
 #ifdef BURSZTYN_PS2_HOST_TEST
 extern uint8_t ps2_test_read(uint16_t);
@@ -89,6 +90,7 @@ static void dispatch_mouse_report(InputDevice* dev,const Ps2MouseReport& r) {
     evs[n++]={INPUT_EV_REL,INPUT_REL_WHEEL,uint32_t(r.wheel)};
     for(unsigned i=0;i<5;++i)evs[n++]={INPUT_EV_KEY,uint16_t(INPUT_BTN_LEFT+i),uint32_t((r.buttons>>i)&1)};
     evs[n++]={INPUT_EV_SYN,INPUT_SYN_REPORT,0};
+    pointing_count(pointing_counters.ps2_published);
     input_dispatch_events(dev,evs,n);
 }
 uint32_t pending_head{}, pending_tail{};
@@ -97,9 +99,12 @@ struct PacketDiag {int64_t v[10];};
 PacketDiag packet_diags[128]{};unsigned diag_written{},diag_read{};
 #endif
 void poll_mouse(InputDevice* dev) {
+    if(pointing_counters.xhci_active && !pointing_counters.ps2_after_seen && pointing_read(pointing_counters.ps2_irq)!=pointing_counters.ps2_irq_at_activation) {
+        pointing_counters.ps2_after_seen=true; pointing_snapshot("ps2-irq12-after-xhci");
+    }
 #if BURSZTYNDIAGPS2
     const unsigned available=__atomic_load_n(&diag_written,__ATOMIC_ACQUIRE);
-    while(diag_read<available)pointing_diag("[PS2] byte/state/bytes[0..3]/dx/dy/overflow/rejected",packet_diags[diag_read++].v,10);
+    while(diag_read<available)pointing_diag("[PS2 RELATIVE; Y inverted only in parser] byte/state/raw[0..3]/signedDX/DY/overflow/rejected",packet_diags[diag_read++].v,10);
 #endif
     for(unsigned budget=0;budget<64;++budget) {
         const uint32_t tail=__atomic_load_n(&pending_tail,__ATOMIC_RELAXED);
@@ -391,6 +396,7 @@ bool wyslij_komende_myszy(
 
 void zresetuj_synchronizacje_pakietu() { parser.reset(); }
 void przyjmij_bajt_pakietu(uint8_t status,uint8_t bajt) {
+    pointing_count(pointing_counters.ps2_bytes);
     Ps2MouseReport r{};
     const bool complete=parser.feed(status,bajt,r);
 #if BURSZTYNDIAGPS2
@@ -399,6 +405,7 @@ void przyjmij_bajt_pakietu(uint8_t status,uint8_t bajt) {
         __atomic_store_n(&diag_written,i+1,__ATOMIC_RELEASE);}
 #endif
     if(!complete) return;
+    pointing_count(pointing_counters.ps2_packets);
     const uint64_t sequence=++produced_sequence;
     const uint32_t head=__atomic_load_n(&pending_head,__ATOMIC_RELAXED), next=(head+1)%64;
     if(next==__atomic_load_n(&pending_tail,__ATOMIC_ACQUIRE)) {
@@ -505,6 +512,7 @@ extern "C" void InicjalizujMyszPS2() {
             s_ps2_mouse_device.name[i] = "ps2-mouse"[i];
         }
         s_ps2_mouse_device.kinds = INPUT_DEVICE_KIND_MOUSE;
+        s_ps2_mouse_device.pointer_mode = INPUT_POINTER_RELATIVE;
         s_ps2_mouse_device.bus_type = INPUT_BUS_PS2;
         s_ps2_mouse_device.device_id = parser.id;
         s_ps2_mouse_device.poll_fn=poll_mouse;
@@ -517,6 +525,7 @@ extern "C" void InicjalizujMyszPS2() {
  * ========================================================================= */
 
 extern "C" void obsluga_przerwania_myszy() {
+    pointing_count(pointing_counters.ps2_irq);
     /*
      * Audyt petli zrzutu bufora IRQ12:
      * 1. Bounded iteration count: scisle ograniczona do maks 64 iteracji, brak nieskonczonej petli

@@ -205,6 +205,17 @@ struct InputAbsInfo {
     int32_t res;
 };
 
+enum InputPointerMode : uint8_t {
+    INPUT_POINTER_UNSPECIFIED, INPUT_POINTER_RELATIVE, INPUT_POINTER_ABSOLUTE,
+    INPUT_POINTER_RELATIVE_AND_ABSOLUTE
+};
+
+enum InputUsbController : uint8_t { INPUT_USB_CONTROLLER_NONE, INPUT_USB_CONTROLLER_OHCI, INPUT_USB_CONTROLLER_XHCI };
+
+enum InputPointerState : uint8_t {
+    INPUT_POINTER_REGISTERED_INACTIVE, INPUT_POINTER_ARMED, INPUT_POINTER_PROVEN_ACTIVE
+};
+
 struct InputDevice {
     char         name[64];
     uint32_t     kinds;
@@ -227,6 +238,9 @@ struct InputDevice {
     uint8_t      buttons_state;
     uint8_t      prev_buttons_state;
     bool         registered;
+    InputPointerState pointer_state;
+    InputPointerMode pointer_mode;
+    InputUsbController usb_controller;
 };
 
 /* =========================================================================
@@ -235,6 +249,9 @@ struct InputDevice {
 
 bool input_register_device(InputDevice* dev);
 bool input_unregister_device(InputDevice* dev);
+bool input_arm_pointer(InputDevice* dev);
+// Transport calls this only after a structurally valid runtime report.
+bool input_prove_pointer(InputDevice* dev);
 size_t input_get_device_count(void);
 InputDevice* input_get_device(size_t index);
 InputDevice* input_find_device_by_name(const char* name);
@@ -247,6 +264,10 @@ void input_dispatch_events(InputDevice* dev, const InputEvent* evs, size_t count
 
 /* Polling / obsluga zarejestrowanych urzadzen spoza kontekstu twardego IRQ */
 void input_service_all(void);
+// Display bootstrap barrier, independent of device hardware/owner readiness.
+void input_set_pointer_ready(bool ready);
+bool input_pointer_geometry_ready(void);
+void input_pointer_boot_diagnostic(void);
 
 /* Reset rejestru urzadzen (uzywany przy restarcie i w testach) */
 void input_reset_all(void);
