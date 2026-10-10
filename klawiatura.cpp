@@ -18,6 +18,9 @@
 #include <stddef.h>
 #include "bws_zdarzenia.h"
 #include "input_device.h"
+#ifdef BURSZTYN_VIRTIO_HOST_TEST
+extern uint8_t ps2_test_read(uint16_t) __attribute__((weak));
+#endif
 
 /* =========================================================================
  * PORTY PS/2
@@ -182,8 +185,7 @@ const char kbd_us_shift[128] = {
 
 static inline uint8_t wejscie_port_bajt(uint16_t port) {
 #ifdef BURSZTYN_VIRTIO_HOST_TEST
-    (void)port;
-    return 0;
+    return ps2_test_read ? ps2_test_read(port) : 0;
 #else
     uint8_t wartosc = 0;
 
@@ -651,12 +653,12 @@ extern "C" void obsluga_przerwania_klawiatury() {
      * przed odczytem pustego portu przy nietypowym/spurious wywolaniu.
      */
     const uint8_t status = wejscie_port_bajt(PORT_PS2_STATUS);
-    if ((status & PS2_STATUS_OUTPUT_FULL) == 0) {
+    if ((status & PS2_STATUS_OUTPUT_FULL) == 0 || (status & 0x20U) != 0) {
         return;
     }
 
     const uint8_t scancode = wejscie_port_bajt(PORT_PS2_DANE);
-    ps2_klawiatura_przetworz_scancode(scancode);
+    if(!(status & 0xC0U)) ps2_klawiatura_przetworz_scancode(scancode);
     /*
      * Brak EOI tutaj.
      * WspolnaObslugaPrzerwan() w idt.cpp wykonuje je centralnie

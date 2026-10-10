@@ -1,7 +1,8 @@
 /*
  * Bursztyn OS - sterownik myszy PS/2
  *
- * Obsluguje standardowa mysz PS/2 w trybie 3-bajtowych pakietow:
+ * Obsluguje PS/2 ID 0 (3 bajty) oraz ID 3/4 (4 bajty z rolka).
+ * Standardowy naglowek i osie:
  *
  *   bajt 0:
  *     bit 0 - lewy przycisk
@@ -24,6 +25,13 @@
 #include <stdbool.h>
 #include "mysz_input.h"
 #include "input_device.h"
+#include "ps2_mouse_parser.h"
+#include "pointing_diag.h"
+extern "C" void ps2_klawiatura_przetworz_scancode(uint8_t);
+#ifdef BURSZTYN_PS2_HOST_TEST
+extern uint8_t ps2_test_read(uint16_t);
+extern void ps2_test_write(uint16_t,uint8_t);
+#endif
 
 /* =========================================================================
  * POLACZENIE Z PODSYSTEMEM GRAFIKI
@@ -57,32 +65,67 @@ constexpr uint8_t MYSZ_WLACZ_RAPORTOWANIE     = 0xF4;
 constexpr uint8_t MYSZ_ACK                     = 0xFA;
 constexpr uint8_t MYSZ_RESEND                  = 0xFE;
 
-constexpr uint8_t PAKIET_BIT_ZAWSZE_1          = 1U << 3;
-constexpr uint8_t PAKIET_X_OVERFLOW            = 1U << 6;
-constexpr uint8_t PAKIET_Y_OVERFLOW            = 1U << 7;
-
 constexpr uint32_t LIMIT_OCZEKIWANIA           = 100000U;
 constexpr uint32_t LIMIT_PROB_RESEND            = 3U;
 
-constexpr uint8_t MAKS_ROZMIAR_PAKIETU         = 4U;
-static uint8_t s_rozmiar_pakietu               = 3U;
+
 
 /* =========================================================================
  * STAN STEROWNIKA
  * ========================================================================= */
 
-uint8_t pakiet[MAKS_ROZMIAR_PAKIETU] = {};
-uint8_t indeks_pakietu = 0;
+Ps2MouseParser parser{};
+struct PendingReport { Ps2MouseReport report; uint64_t sequence; };
+PendingReport pending[64]{};
+uint64_t produced_sequence{},consumed_sequence{},overflow_sequence{};
+uint8_t overflow_buttons{};
+static bool newer_sequence(uint64_t a,uint64_t b) {
+    return a!=b && uint64_t(a-b)<(UINT64_C(1)<<63);
+}
+static void dispatch_mouse_report(InputDevice* dev,const Ps2MouseReport& r) {
+    InputEvent evs[10];size_t n=0;
+    evs[n++]={INPUT_EV_REL,INPUT_REL_X,uint32_t(r.dx)};
+    evs[n++]={INPUT_EV_REL,INPUT_REL_Y,uint32_t(r.dy)};
+    evs[n++]={INPUT_EV_REL,INPUT_REL_WHEEL,uint32_t(r.wheel)};
+    for(unsigned i=0;i<5;++i)evs[n++]={INPUT_EV_KEY,uint16_t(INPUT_BTN_LEFT+i),uint32_t((r.buttons>>i)&1)};
+    evs[n++]={INPUT_EV_SYN,INPUT_SYN_REPORT,0};
+    input_dispatch_events(dev,evs,n);
+}
+uint32_t pending_head{}, pending_tail{};
+#if BURSZTYNDIAGPS2
+struct PacketDiag {int64_t v[10];};
+PacketDiag packet_diags[128]{};unsigned diag_written{},diag_read{};
+#endif
+void poll_mouse(InputDevice* dev) {
+#if BURSZTYNDIAGPS2
+    const unsigned available=__atomic_load_n(&diag_written,__ATOMIC_ACQUIRE);
+    while(diag_read<available)pointing_diag("[PS2] byte/state/bytes[0..3]/dx/dy/overflow/rejected",packet_diags[diag_read++].v,10);
+#endif
+    for(unsigned budget=0;budget<64;++budget) {
+        const uint32_t tail=__atomic_load_n(&pending_tail,__ATOMIC_RELAXED);
+        if(tail==__atomic_load_n(&pending_head,__ATOMIC_ACQUIRE))break;
+        const PendingReport entry=pending[tail];
+        __atomic_store_n(&pending_tail,(tail+1)%64,__ATOMIC_RELEASE);
+        if(!newer_sequence(entry.sequence,consumed_sequence))continue;
+        consumed_sequence=entry.sequence;
+        dispatch_mouse_report(dev,entry.report);
+    }
+    // Queue overload may lose motion, but must never leave a button stuck.
+    // Only the producer writes this snapshot. SC publication plus a bounded
+    // double read prevents mixing a sequence with a different button state.
+    const uint64_t sequence=__atomic_load_n(&overflow_sequence,__ATOMIC_SEQ_CST);
+    const uint8_t buttons=__atomic_load_n(&overflow_buttons,__ATOMIC_SEQ_CST);
+    if(sequence && sequence==__atomic_load_n(&overflow_sequence,__ATOMIC_SEQ_CST) &&
+       newer_sequence(sequence,consumed_sequence)) {
+        consumed_sequence=sequence;
+        Ps2MouseReport recovery{};recovery.buttons=buttons;
+        dispatch_mouse_report(dev,recovery);
+    }
+}
 
 bool mysz_zainicjalizowana = false;
 static InputDevice s_ps2_mouse_device{};
 
-/*
- * Liczniki diagnostyczne. Nie sa obecnie eksportowane przez BWS,
- * ale pomagaja przy debugowaniu w GDB/serialu.
- */
-uint64_t licznik_blednych_pakietow = 0;
-uint64_t licznik_przepelnien_ruchu = 0;
 
 /* =========================================================================
  * NISKIE I/O
@@ -92,17 +135,24 @@ static inline void wyjscie_port_bajt(
     uint16_t port,
     uint8_t wartosc
 ) {
+#ifdef BURSZTYN_PS2_HOST_TEST
+    ps2_test_write(port,wartosc);
+#else
     asm volatile(
         "outb %0, %1"
         :
         : "a"(wartosc), "Nd"(port)
         : "memory"
     );
+#endif
 }
 
 static inline uint8_t wejscie_port_bajt(
     uint16_t port
 ) {
+#ifdef BURSZTYN_PS2_HOST_TEST
+    return ps2_test_read(port);
+#else
     uint8_t wartosc = 0;
 
     asm volatile(
@@ -113,6 +163,7 @@ static inline uint8_t wejscie_port_bajt(
     );
 
     return wartosc;
+#endif
 }
 
 /*
@@ -121,12 +172,14 @@ static inline uint8_t wejscie_port_bajt(
  * do starszego kontrolera 8042.
  */
 static inline void opoznienie_io() {
+#ifndef BURSZTYN_PS2_HOST_TEST
     asm volatile(
         "outb %%al, $0x80"
         :
         : "a"(0)
         : "memory"
     );
+#endif
 }
 
 /* =========================================================================
@@ -168,8 +221,8 @@ bool czekaj_na_dane(
          * scancode'u klawiatury z ACK myszy.
          *
          * Podczas inicjalizacji jadra przerwania sa wylaczone, dlatego
-         * obcy bajt musimy usunac z bufora kontrolera, aby nie blokowal
-         * odpowiedzi urzadzenia.
+         * przekazujemy bajt klawiatury do jej dekodera, aby nie blokowal
+         * odpowiedzi myszy i nie gubil legalnego nacisniecia klawisza.
          */
         const bool dane_myszy =
             (status & STATUS_AUX_DATA) != 0;
@@ -177,7 +230,10 @@ bool czekaj_na_dane(
         const uint8_t bajt =
             wejscie_port_bajt(PORT_PS2_DANE);
 
+        if(status & 0xC0U)continue;
+        if(!wymagaj_danych_myszy && dane_myszy)continue;
         if (wymagaj_danych_myszy && !dane_myszy) {
+            ps2_klawiatura_przetworz_scancode(bajt);
             continue;
         }
 
@@ -201,7 +257,8 @@ void oproznij_bufor_kontrolera() {
             break;
         }
 
-        (void)wejscie_port_bajt(PORT_PS2_DANE);
+        const uint8_t b=wejscie_port_bajt(PORT_PS2_DANE);
+        if(!(status & STATUS_AUX_DATA)) ps2_klawiatura_przetworz_scancode(b);
         opoznienie_io();
     }
 }
@@ -332,117 +389,25 @@ bool wyslij_komende_myszy(
  * OBRABIANIE PAKIETU MYSZY
  * ========================================================================= */
 
-void zresetuj_synchronizacje_pakietu() {
-    indeks_pakietu = 0;
-}
-
-void przetworz_pakiet() {
-    const uint8_t flagi =
-        pakiet[0];
-
-    /*
-     * Bit 3 pierwszego bajtu standardowego pakietu PS/2 zawsze wynosi 1.
-     */
-    if ((flagi & PAKIET_BIT_ZAWSZE_1) == 0) {
-        ++licznik_blednych_pakietow;
+void zresetuj_synchronizacje_pakietu() { parser.reset(); }
+void przyjmij_bajt_pakietu(uint8_t status,uint8_t bajt) {
+    Ps2MouseReport r{};
+    const bool complete=parser.feed(status,bajt,r);
+#if BURSZTYNDIAGPS2
+    const unsigned i=__atomic_load_n(&diag_written,__ATOMIC_RELAXED);
+    if(i<128){packet_diags[i]={{bajt,parser.index,parser.bytes[0],parser.bytes[1],parser.bytes[2],parser.bytes[3],r.dx,r.dy,parser.overflow,parser.rejected}};
+        __atomic_store_n(&diag_written,i+1,__ATOMIC_RELEASE);}
+#endif
+    if(!complete) return;
+    const uint64_t sequence=++produced_sequence;
+    const uint32_t head=__atomic_load_n(&pending_head,__ATOMIC_RELAXED), next=(head+1)%64;
+    if(next==__atomic_load_n(&pending_tail,__ATOMIC_ACQUIRE)) {
+        __atomic_store_n(&overflow_sequence,0,__ATOMIC_SEQ_CST);
+        __atomic_store_n(&overflow_buttons,r.buttons,__ATOMIC_SEQ_CST);
+        __atomic_store_n(&overflow_sequence,sequence,__ATOMIC_SEQ_CST);
         return;
     }
-
-    /*
-     * Przy overflow wartosc X/Y jest niewiarygodna. Zamiast generowac
-     * ogromny skok kursora odrzucamy caly ruch z tego pakietu.
-     * Stan przyciskow rowniez jest pomijany, aby packet byl atomowy.
-     */
-    if ((flagi &
-         (PAKIET_X_OVERFLOW | PAKIET_Y_OVERFLOW)) != 0) {
-        ++licznik_przepelnien_ruchu;
-        return;
-    }
-
-    /*
-     * Prawidlowe dekodowanie 9-bitowych delty ze znakiem w standardzie PS/2:
-     * Bajty 1 i 2 to mlodsze 8 bitow delty.
-     * Bity 4 i 5 bajtu 0 to bity znaku (bit 8) odpowiednio dla X i Y.
-     */
-    int dx = static_cast<int>(pakiet[1]);
-    if ((flagi & (1U << 4)) != 0) {
-        dx -= 256;
-    }
-
-    int dy = static_cast<int>(pakiet[2]);
-    if ((flagi & (1U << 5)) != 0) {
-        dy -= 256;
-    }
-
-    int dz = 0;
-    if (s_rozmiar_pakietu == 4U) {
-        dz = static_cast<int>(static_cast<int8_t>(pakiet[3]));
-    }
-
-    const uint8_t przyciski =
-        static_cast<uint8_t>(
-            flagi & MYSZ_MASKA_PRZYCISKOW);
-
-    if (!s_ps2_mouse_device.registered) {
-        for (size_t i = 0; i < sizeof(s_ps2_mouse_device.name) - 1 && "ps2-mouse"[i]; ++i) {
-            s_ps2_mouse_device.name[i] = "ps2-mouse"[i];
-        }
-        s_ps2_mouse_device.kinds = INPUT_DEVICE_KIND_MOUSE;
-        s_ps2_mouse_device.bus_type = INPUT_BUS_PS2;
-        s_ps2_mouse_device.device_id = 0;
-        input_register_device(&s_ps2_mouse_device);
-    }
-
-    InputEvent evs[6];
-    size_t n = 0;
-    if (dx != 0) {
-        evs[n++] = { INPUT_EV_REL, INPUT_REL_X, static_cast<uint32_t>(dx) };
-    }
-    if (dy != 0) {
-        // W standardzie PS/2 dy>0 oznacza ruch w gore. W standardzie Linux Input REL_Y:
-        // wartosci dodatnie oznaczaja ruch w dol ekranu (stad -dy).
-        evs[n++] = { INPUT_EV_REL, INPUT_REL_Y, static_cast<uint32_t>(-dy) };
-    }
-    if (dz != 0) {
-        evs[n++] = { INPUT_EV_REL, INPUT_REL_WHEEL, static_cast<uint32_t>(dz) };
-    }
-    evs[n++] = { INPUT_EV_KEY, INPUT_BTN_LEFT, (przyciski & MYSZ_PRZYCISK_LEWY) ? 1U : 0U };
-    evs[n++] = { INPUT_EV_KEY, INPUT_BTN_RIGHT, (przyciski & MYSZ_PRZYCISK_PRAWY) ? 1U : 0U };
-    evs[n++] = { INPUT_EV_KEY, INPUT_BTN_MIDDLE, (przyciski & MYSZ_PRZYCISK_SRODKOWY) ? 1U : 0U };
-    evs[n++] = { INPUT_EV_SYN, INPUT_SYN_REPORT, 0 };
-    input_dispatch_events(&s_ps2_mouse_device, evs, n);
-}
-
-void przyjmij_bajt_pakietu(
-    uint8_t bajt
-) {
-    if (indeks_pakietu == 0) {
-        /*
-         * Szukamy prawidlowego pierwszego bajtu. Po utracie jednego
-         * bajtu transmisji pozwala to odzyskac synchronizacje.
-         */
-        if ((bajt & PAKIET_BIT_ZAWSZE_1) == 0) {
-            ++licznik_blednych_pakietow;
-            return;
-        }
-
-        pakiet[0] = bajt;
-        indeks_pakietu = 1;
-        return;
-    }
-
-    if (indeks_pakietu >= s_rozmiar_pakietu) {
-        ++licznik_blednych_pakietow;
-        zresetuj_synchronizacje_pakietu();
-        return;
-    }
-
-    pakiet[indeks_pakietu++] = bajt;
-
-    if (indeks_pakietu == s_rozmiar_pakietu) {
-        przetworz_pakiet();
-        zresetuj_synchronizacje_pakietu();
-    }
+    pending[head]={r,sequence};__atomic_store_n(&pending_head,next,__ATOMIC_RELEASE);
 }
 
 } // namespace
@@ -453,6 +418,12 @@ void przyjmij_bajt_pakietu(
 
 extern "C" void InicjalizujMyszPS2() {
     mysz_zainicjalizowana = false;
+    parser.streaming=false;
+    // Controlled startup/reinitialization runs with IRQs disabled.
+    __atomic_store_n(&pending_head,0,__ATOMIC_RELAXED);
+    __atomic_store_n(&pending_tail,0,__ATOMIC_RELAXED);
+    __atomic_store_n(&overflow_sequence,0,__ATOMIC_RELAXED);
+    consumed_sequence=produced_sequence;
     zresetuj_synchronizacje_pakietu();
 
     oproznij_bufor_kontrolera();
@@ -465,12 +436,18 @@ extern "C" void InicjalizujMyszPS2() {
         return;
     }
 
+    if(!wyslij_komende_kontrolera(0xAD))return;
+    oproznij_bufor_kontrolera();
     uint8_t konfiguracja = 0;
 
     if (!odczytaj_konfiguracje_kontrolera(
             &konfiguracja)) {
+        (void)wyslij_komende_kontrolera(0xAE);
         return;
     }
+
+    (void)wyslij_komende_kontrolera(0xAE);
+    konfiguracja &= uint8_t(~0x10U);
 
     /*
      * Wlacz IRQ12 i upewnij sie, ze zegar drugiego portu nie jest
@@ -496,7 +473,7 @@ extern "C" void InicjalizujMyszPS2() {
      *   - rozdzielczosc 4 counts/mm,
      *   - scaling 1:1.
      */
-    if (!wyslij_komende_myszy(
+    if (!wyslij_komende_myszy(0xF5) || !wyslij_komende_myszy(
             MYSZ_USTAW_DOMYSLNE)) {
         return;
     }
@@ -505,28 +482,12 @@ extern "C" void InicjalizujMyszPS2() {
      * Proba negocjacji IntelliMouse (obsluga 4-bajtowych pakietow z rolka):
      * Sekwencja probkowania magic knock: 200, 100, 80.
      */
-    s_rozmiar_pakietu = 3U;
-    (void)wyslij_komende_myszy(0xF3);
-    (void)wyslij_komende_myszy(200);
-    (void)wyslij_komende_myszy(0xF3);
-    (void)wyslij_komende_myszy(100);
-    (void)wyslij_komende_myszy(0xF3);
-    (void)wyslij_komende_myszy(80);
-
-    /*
-     * Odczyt identyfikatora urzadzenia (0xF2):
-     * 0x00 - mysz standardowa (3-bajtowa)
-     * 0x03 - IntelliMouse z rolka (4-bajtowa)
-     * 0x04 - IntelliMouse Explorer (4-bajtowa z przyciskami bocznymi)
-     */
-    if (wyslij_komende_myszy(0xF2)) {
-        uint8_t dev_id = 0;
-        if (czekaj_na_dane(true, &dev_id)) {
-            if (dev_id >= 3U) {
-                s_rozmiar_pakietu = 4U;
-            }
-        }
-    }
+    // Every byte is an acknowledged transaction. Never guess packet length
+    // after a failed negotiation: leave the optional device unavailable.
+    const uint8_t sequence[]={0xF3,200,0xF3,100,0xF3,80};
+    for(uint8_t b:sequence) if(!wyslij_komende_myszy(b))return;
+    uint8_t dev_id=0;
+    if(!wyslij_komende_myszy(0xF2)||!czekaj_na_dane(true,&dev_id)||!parser.configure(dev_id))return;
 
     /*
      * 0xF4 uruchamia stream mode.
@@ -536,6 +497,7 @@ extern "C" void InicjalizujMyszPS2() {
         return;
     }
 
+    parser.streaming=true;
     mysz_zainicjalizowana = true;
 
     if (!s_ps2_mouse_device.registered) {
@@ -544,7 +506,8 @@ extern "C" void InicjalizujMyszPS2() {
         }
         s_ps2_mouse_device.kinds = INPUT_DEVICE_KIND_MOUSE;
         s_ps2_mouse_device.bus_type = INPUT_BUS_PS2;
-        s_ps2_mouse_device.device_id = 0;
+        s_ps2_mouse_device.device_id = parser.id;
+        s_ps2_mouse_device.poll_fn=poll_mouse;
         input_register_device(&s_ps2_mouse_device);
     }
 }
@@ -588,8 +551,7 @@ extern "C" void obsluga_przerwania_myszy() {
             break;
         }
 
-        przyjmij_bajt_pakietu(
-            bajt);
+        przyjmij_bajt_pakietu(status,bajt);
     }
 
     /*

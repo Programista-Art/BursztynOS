@@ -6,6 +6,9 @@
 #include "pci.h"
 #include "mysz_input.h"
 #include "input_device.h"
+#include "sterowniki/usb/hid_pointer.h"
+#include "sterowniki/usb/ohci.h"
+#include "sterowniki/usb/usb_hid.h"
 
 #ifndef BURSZTYN_DEBUG_GUI_PERF
 #define BURSZTYN_DEBUG_GUI_PERF 0
@@ -58,7 +61,7 @@ struct CommandResult { uint8_t code, slot; bool valid; };
 struct TransferResult { uint8_t code, slot, endpoint; uint32_t residual;
     uint64_t pointer; bool valid; };
 enum UsbDeviceType : uint8_t { USB_DEVICE_UNKNOWN, USB_HID_BOOT_KEYBOARD,
-    USB_HID_BOOT_MOUSE };
+    USB_HID_BOOT_MOUSE, USB_HID_POINTER };
 struct XhciDevice {
     uint8_t slot_id, root_port, speed_id; UsbSpeed logical_speed;
     uint8_t device_address{}; uint16_t vendor_id{}, product_id{};
@@ -72,11 +75,15 @@ struct XhciDevice {
     TransferResult hid_result{};
     size_t hid_dma_length{};
     uint8_t mouse_buttons{};
+    HidPointerLayout pointer_layout{};
+    InputDevice pointer_device{};
+    bool control_failed{};
+    uint64_t hid_transfer_pointer{};
     uint8_t poprzedni_raport[8]{};
 };
 
 struct PciDevice { uint8_t bus, slot, function; uint16_t vendor, device; };
-static InputDevice s_usb_mouse_dev{};
+
 struct ErstEntry { uint64_t address; uint32_t size; uint32_t reserved; };
 static_assert(sizeof(ErstEntry) == 16, "ERST entry");
 
@@ -103,7 +110,9 @@ struct Controller {
     XhciDevice devices[BURSZTYN_XHCI_MAX_SLOTS+1]{};
     uint8_t pending_port{}; bool port_event{};
     uint64_t wanted_command{}; CommandResult command_result{};
-    uint64_t wanted_transfer{}; TransferResult transfer_result{};
+    uint64_t wanted_transfer{},wanted_setup{},wanted_data{};
+    uint32_t control_residual{};uint8_t control_slot{};
+    TransferResult transfer_result{};
     uint64_t usb_service_calls{},usb_events_processed{},mouse_reports_processed{},keyboard_reports_processed{};
     size_t max_events_per_service{};
     bool ready{};
@@ -170,11 +179,12 @@ bool wait_bits(const volatile uint8_t* base,uint32_t off,uint32_t mask,uint32_t 
     const uint64_t start=czas_monotoniczny_ns();
     if (start > UINT64_MAX-WAIT_NS) return false;
     const uint64_t deadline=start+WAIT_NS;
-    for (;;) {
+    for (unsigned spins=0;spins<10000000;++spins) {
         if ((read32(base,off)&mask)==expected) return true;
         if (czas_monotoniczny_ns()>=deadline) return false;
         asm volatile("pause" ::: "memory");
     }
+    return false;
 }
 
 bool parse_protocol(Controller& c,uint32_t off,uint32_t next) {
@@ -363,10 +373,11 @@ bool reset_port(uint8_t port) {
     const uint32_t reset_change=p->usb3?(1U<<19):PORT_PRC;
     port_clear_changes(port,reset_change);port_set(port,p->usb3?PORT_WPR:PORT_PR);
     const uint64_t end=deadline();uint32_t v=0;
+    unsigned reset_spins=0;
     do{xhci_poll_events(32);v=read32(xhc.operational,PORTSC_BASE+(port-1U)*16U);
        if((v&PORT_CCS)==0)return false;
        if((v&(PORT_PR|PORT_WPR))==0&&(v&reset_change)!=0)break;
-       asm volatile("pause":::"memory");}while(before_deadline(end));
+       asm volatile("pause":::"memory");}while(++reset_spins<10000000&&before_deadline(end));
     xhc.pending_port=0;if((v&(PORT_PR|PORT_WPR))!=0||(v&reset_change)==0)return false;
     port_clear_changes(port,reset_change);log_port_text(port," reset ","OK.");
     SpeedInfo s=xhci_pobierz_predkosc_portu(port);log_port_text(port," speed=",speed_name(s.logical));log_port_value(port," raw=",s.raw);
@@ -377,17 +388,12 @@ bool reset_port(uint8_t port) {
 CommandResult execute_command(XhciTrb trb) {
     uint64_t pa=0;CommandResult bad{};if(!xhci_command_ring_enqueue(&xhc.command,trb,&pa))return bad;
     xhc.wanted_command=pa;xhc.command_result={};__atomic_thread_fence(__ATOMIC_RELEASE);write32(xhc.doorbells,0,0);
-    const uint64_t end=deadline();while(before_deadline(end)){xhci_poll_events(64);if(xhc.command_result.valid){xhc.wanted_command=0;return xhc.command_result;}asm volatile("pause":::"memory");}
+    const uint64_t end=deadline();for(unsigned spins=0;spins<10000000&&before_deadline(end);++spins){xhci_poll_events(64);if(xhc.command_result.valid){xhc.wanted_command=0;return xhc.command_result;}asm volatile("pause":::"memory");}
     xhc.wanted_command=0;return bad;
 }
 CommandResult simple_slot_command(uint32_t type,uint8_t slot){XhciTrb t{};t.dword3=xhci_trb::type_field(type)|(static_cast<uint32_t>(slot)<<24);return execute_command(t);}
 bool disable_slot(XhciDevice& d){if(!d.enabled)return true;CommandResult r=simple_slot_command(xhci_trb::TYPE_DISABLE_SLOT,d.slot_id);if(!r.valid||r.code!=1)return false;d.enabled=false;return true;}
-void release_mouse_buttons(XhciDevice& d){
-    if(d.type==USB_HID_BOOT_MOUSE&&d.mouse_buttons){
-        zaktualizuj_mysze_zrodlo(0,0,0,"usb");d.mouse_buttons=0;
-        wypisz_log("[USB-MYSZ] Disconnect: przyciski zwolnione.");
-    }
-}
+void release_mouse_buttons(XhciDevice& d){ hid_pointer_remove(d.pointer_device); }
 void free_device(XhciDevice& d){
     release_mouse_buttons(d);
     xhci_command_ring_destroy(&d.hid_ring);dma_release(&d.hid_raport);xhci_command_ring_destroy(&d.ep0);dma_release(&d.input_context);dma_release(&d.output_context);d=XhciDevice{};
@@ -417,19 +423,15 @@ bool xhci_waliduj_configure_endpoint(XhciDevice& d,const hid_wynik_konfiguracji&
     if((reinterpret_cast<uintptr_t>(d.input_context.virtual_address)&63U)!=0||dequeue==0||(ep[2]&15U)!=1){wypisz_log("[xHCI-VALIDATE] FAIL pole=alignment_or_dequeue");ok=false;}
     return ok;
 }
-bool usb_sprawdz_deskryptor_konfiguracji(const uint8_t* dane,size_t dlugosc,hid_wynik_konfiguracji* wynik){
-    if(!dane||!wynik||dlugosc<9||dane[0]<9||dane[1]!=2||le16(dane+2)<9)return false;
-    *wynik={};wynik->konfiguracja=dane[5];const size_t calkowita=le16(dane+2);wynik->calkowita_dlugosc=static_cast<uint16_t>(calkowita);if(calkowita>USB_MAKSYMALNY_ROZMIAR_KONFIGURACJI||calkowita>dlugosc)return false;
-    uint8_t interfejs=0,alternatywa=0;bool pasujacy=false,hid=false;
-    for(size_t o=0;o<calkowita;){if(o+2>calkowita)return false;const uint8_t n=dane[o],t=dane[o+1];if(n<2||o+n>calkowita)return false;
-      if(t==4&&n>=9){interfejs=dane[o+2];alternatywa=dane[o+3];const uint8_t protokol=dane[o+7];pasujacy=dane[o+5]==3&&dane[o+6]==1&&(protokol==1||protokol==2);hid=false;
-        if(pasujacy&&alternatywa==0){wynik->interfejs=interfejs;wynik->alternatywa=alternatywa;wynik->type=protokol==1?USB_HID_BOOT_KEYBOARD:USB_HID_BOOT_MOUSE;wypisz_log(protokol==1?"[USB] Interface HID Boot Keyboard znaleziona.":"[USB] Interface HID Boot Mouse znaleziona.");}}
-      else if(t==0x21&&n>=9&&pasujacy&&alternatywa==0){wynik->hid_bcd=le16(dane+o+2);wynik->raport_dlugosc=le16(dane+o+7);hid=true;}
-      else if(t==5&&n>=7&&pasujacy&&alternatywa==0&&hid&&dane[o+2]&0x80U&&((dane[o+3]&3U)==3U)&&dane[o+2]!=0x80U){
-        wynik->endpoint=dane[o+2];wynik->maksymalny_rozmiar=static_cast<uint16_t>(le16(dane+o+4)&0x7FFU);wynik->interwal=dane[o+6];wynik->dci=xhci_oblicz_dci(static_cast<uint8_t>(dane[o+2]&0x0FU),true);wynik->znaleziono=true;
-        wypisz_log(wynik->type==USB_HID_BOOT_MOUSE?"[USB-MYSZ] Interrupt IN endpoint znaleziony.":"[USB-HID] Interrupt IN endpoint znaleziony.");}
-      o+=n;}
-    return wynik->znaleziono&&wynik->maksymalny_rozmiar!=0&&wynik->maksymalny_rozmiar<=1024;
+bool usb_sprawdz_deskryptor_konfiguracji(const uint8_t* data,size_t length,hid_wynik_konfiguracji* h){
+    UsbHidInterface u{};
+    if(!h||!usb_hid_find_interface(data,length,u))return false;
+    *h={};h->konfiguracja=u.configuration;h->interfejs=u.interface_number;
+    h->endpoint=u.endpoint;h->hid_bcd=u.hid_bcd;h->raport_dlugosc=u.report_length;
+    h->maksymalny_rozmiar=u.packet_size;h->interwal=u.interval;
+    h->dci=uint8_t((u.endpoint&15)*2+1);h->znaleziono=true;
+    h->type=u.subclass==1&&u.protocol==1?USB_HID_BOOT_KEYBOARD:USB_HID_POINTER;
+    return true;
 }
 bool usb_pobierz_konfiguracje(XhciDevice& d,DmaBuffer& dane,hid_wynik_konfiguracji* wynik){
     DmaBuffer naglowek{};if(!dma_allocate(9,64,&naglowek))return false;uint32_t got=0;UsbSetupPacket s{0x80,6,static_cast<uint16_t>(2U<<8),0,9};
@@ -442,12 +444,15 @@ bool usb_pobierz_konfiguracje(XhciDevice& d,DmaBuffer& dane,hid_wynik_konfigurac
 }
 uint8_t xhci_oblicz_dci(uint8_t numer_endpointu,bool kierunek){if(numer_endpointu==0||numer_endpointu>15)return 0;return static_cast<uint8_t>(numer_endpointu*2U+(kierunek?1U:0U));}
 uint8_t xhci_oblicz_interwal(UsbSpeed predkosc,uint8_t b_interval){
-    if(b_interval==0||b_interval>16)return 0;
+    if(b_interval==0)return 0;
+    if((predkosc==USB_HIGH_SPEED||predkosc==USB_SUPER_SPEED||predkosc==USB_SUPER_SPEED_PLUS)&&b_interval>16)return 0;
     if(predkosc==USB_HIGH_SPEED||predkosc==USB_SUPER_SPEED||predkosc==USB_SUPER_SPEED_PLUS)return static_cast<uint8_t>(b_interval-1U);
-    uint8_t potega=0;uint8_t okres=1;while(okres<b_interval){okres=static_cast<uint8_t>(okres<<1U);++potega;}return static_cast<uint8_t>(potega+3U);
+    uint8_t potega=0;uint16_t okres=1;while(okres*2U<=b_interval){okres=uint16_t(okres<<1U);++potega;}return static_cast<uint8_t>(potega+3U);
 }
 bool xhci_skonfiguruj_endpoint(XhciDevice& d,const hid_wynik_konfiguracji& h){
     if(!h.znaleziono||h.dci<2||h.dci>31||h.maksymalny_rozmiar==0)return false;
+    if((d.logical_speed==USB_LOW_SPEED&&h.maksymalny_rozmiar>8)||
+       (d.logical_speed==USB_FULL_SPEED&&h.maksymalny_rozmiar>64))return false;
     const size_t dma_length=h.type==USB_HID_BOOT_MOUSE&&h.maksymalny_rozmiar<HID_MOUSE_DMA_SIZE?HID_MOUSE_DMA_SIZE:h.maksymalny_rozmiar;
     if(!xhci_command_ring_create(&d.hid_ring,HID_TRBS)||!dma_allocate(dma_length,64,&d.hid_raport))return false;
     d.hid_dma_length=dma_length;d.type=h.type;
@@ -465,16 +470,7 @@ bool xhci_skonfiguruj_endpoint(XhciDevice& d,const hid_wynik_konfiguracji& h){
     if(!xhci_waliduj_configure_endpoint(d,h,icc,sc,ep)){xhci_command_ring_destroy(&d.hid_ring);dma_release(&d.hid_raport);return false;}
     __atomic_thread_fence(__ATOMIC_RELEASE);XhciTrb t{};t.dword0=static_cast<uint32_t>(d.input_context.physical_address);t.dword1=static_cast<uint32_t>(d.input_context.physical_address>>32);t.dword3=xhci_trb::type_field(xhci_trb::TYPE_CONFIGURE_ENDPOINT)|(static_cast<uint32_t>(d.slot_id)<<24);
     xhci_log_cfg("configure_trb_dword0",t.dword0);xhci_log_cfg("configure_trb_dword1",t.dword1);xhci_log_cfg("configure_trb_dword2",t.dword2);xhci_log_cfg("configure_trb_dword3",t.dword3);
-    CommandResult r=execute_command(t);if(!r.valid||r.code!=1){log_values("[xHCI] Configure Endpoint completion=",r.code);xhci_command_ring_destroy(&d.hid_ring);dma_release(&d.hid_raport);return false;}wypisz_log(d.type==USB_HID_BOOT_MOUSE?"[xHCI] Configure Endpoint Mouse: OK":"[xHCI] Configure Endpoint: OK");log_values("[xHCI] DCI=",d.hid_dci);
-    if(d.type==USB_HID_BOOT_MOUSE){
-        if(!s_usb_mouse_dev.registered){
-            for(size_t i=0;i<sizeof(s_usb_mouse_dev.name)-1&&"usb-mouse"[i];++i) s_usb_mouse_dev.name[i]="usb-mouse"[i];
-            s_usb_mouse_dev.kinds=INPUT_DEVICE_KIND_MOUSE;
-            s_usb_mouse_dev.bus_type=INPUT_BUS_USB;
-            s_usb_mouse_dev.device_id=d.slot_id;
-            input_register_device(&s_usb_mouse_dev);
-        }
-    }
+    CommandResult r=execute_command(t);if(!r.valid||r.code!=1){log_values("[xHCI] Configure Endpoint completion=",r.code);return false;}wypisz_log(d.type==USB_HID_BOOT_MOUSE?"[xHCI] Configure Endpoint Mouse: OK":"[xHCI] Configure Endpoint: OK");log_values("[xHCI] DCI=",d.hid_dci);
     return true;
 }
 bool usb_ustaw_konfiguracje(XhciDevice& d,uint8_t wartosc){UsbSetupPacket s{0,9,wartosc,0,0};uint32_t got=0;return usb_control_transfer(d,s,nullptr,0,&got);}
@@ -482,31 +478,31 @@ bool hid_ustaw_protokol_boot(XhciDevice& d){UsbSetupPacket s{0x21,0x0B,0, d.hid_
 bool hid_ustaw_bezczynnosc(XhciDevice& d,uint8_t* completion){UsbSetupPacket s{0x21,0x0A,0,d.hid_interfejs,0};uint32_t got=0;return usb_control_transfer(d,s,nullptr,0,&got,completion);}
 #include "sterowniki/usb/usb_hid.h"
 bool xhci_zakolejkuj_transfer_interrupt_in(XhciDevice& d){if(!d.hid_gotowy||d.hid_transfer_oczekiwany||!d.hid_raport.virtual_address)return false;zero_dma(d.hid_raport);XhciTrb t{};t.dword0=static_cast<uint32_t>(d.hid_raport.physical_address);t.dword1=static_cast<uint32_t>(d.hid_raport.physical_address>>32);t.dword2=static_cast<uint32_t>(d.hid_dma_length);t.dword3=xhci_trb::type_field(xhci_trb::TYPE_NORMAL)|(1U<<5);
-    uint64_t ptr=0;if(!xhci_command_ring_enqueue(&d.hid_ring,t,&ptr))return false;__atomic_thread_fence(__ATOMIC_RELEASE);d.hid_transfer_oczekiwany=true;write32(xhc.doorbells,static_cast<uint32_t>(d.slot_id)*4U,d.hid_dci);if(!d.pierwszy_raport_zalogowany)wypisz_log(d.type==USB_HID_BOOT_MOUSE?"[USB-MYSZ] First Interrupt IN transfer queued.":"[USB-HID] First Interrupt IN transfer queued.");return true;}
-void xhci_obsluz_hid(XhciDevice& d){if(!d.hid_gotowy)return;if(d.hid_result.valid){TransferResult r=d.hid_result;d.hid_result={};d.hid_transfer_oczekiwany=false;if((r.code==1||r.code==13)&&r.residual<=d.hid_dma_length){__atomic_thread_fence(__ATOMIC_ACQUIRE);const size_t actual=d.hid_dma_length-r.residual;uint8_t raport[8]{};const size_t copy=actual<sizeof(raport)?actual:sizeof(raport);const uint8_t* dma=static_cast<const uint8_t*>(d.hid_raport.virtual_address);for(size_t i=0;i<copy;++i)raport[i]=dma[i];xhci_ring_complete(&d.hid_ring,1);
-        if(d.type==USB_HID_BOOT_MOUSE){if(actual>=3){++xhc.mouse_reports_processed;const uint8_t buttons=raport[0]&MYSZ_MASKA_PRZYCISKOW;const int dx=static_cast<int>(static_cast<int8_t>(raport[1]));const int dy=static_cast<int>(static_cast<int8_t>(raport[2]));if(!d.pierwszy_raport_zalogowany){char s[160],*p=s,*e=s+sizeof(s);append(p,e,"[USB-MYSZ] First report length=");append_dec(p,e,actual);append(p,e," buttons=");append_dec(p,e,buttons);append(p,e," dx=");if(dx<0){append(p,e,"-");append_dec(p,e,static_cast<uint64_t>(-dx));}else append_dec(p,e,dx);append(p,e," dy=");if(dy<0){append(p,e,"-");append_dec(p,e,static_cast<uint64_t>(-dy));}else append_dec(p,e,dy);*p=0;wypisz_log(s);d.pierwszy_raport_zalogowany=true;}d.mouse_buttons=buttons;
-            if(!s_usb_mouse_dev.registered){
-                for(size_t i=0;i<sizeof(s_usb_mouse_dev.name)-1&&"usb-mouse"[i];++i) s_usb_mouse_dev.name[i]="usb-mouse"[i];
-                s_usb_mouse_dev.kinds=INPUT_DEVICE_KIND_MOUSE;
-                s_usb_mouse_dev.bus_type = INPUT_BUS_USB;
-                s_usb_mouse_dev.device_id = d.slot_id;
-                input_register_device(&s_usb_mouse_dev);
+    uint64_t ptr=0;if(!xhci_command_ring_enqueue(&d.hid_ring,t,&ptr))return false;__atomic_thread_fence(__ATOMIC_RELEASE);d.hid_transfer_oczekiwany=true;d.hid_transfer_pointer=ptr;write32(xhc.doorbells,static_cast<uint32_t>(d.slot_id)*4U,d.hid_dci);if(!d.pierwszy_raport_zalogowany)wypisz_log(d.type==USB_HID_BOOT_MOUSE?"[USB-MYSZ] First Interrupt IN transfer queued.":"[USB-HID] First Interrupt IN transfer queued.");return true;}
+void xhci_obsluz_hid(XhciDevice& d) {
+    if(!d.hid_gotowy)return;
+    if(d.hid_result.valid) {
+        const TransferResult r=d.hid_result;d.hid_result={};d.hid_transfer_oczekiwany=false;d.hid_transfer_pointer=0;
+        xhci_ring_complete(&d.hid_ring,1);
+        if((r.code==1||r.code==13)&&r.residual<=d.hid_dma_length) {
+            __atomic_thread_fence(__ATOMIC_ACQUIRE);
+            const size_t actual=d.hid_dma_length-r.residual;
+            const uint8_t* report=static_cast<const uint8_t*>(d.hid_raport.virtual_address);
+            if(d.type==USB_HID_POINTER) {
+                if(hid_pointer_publish(d.pointer_device,d.pointer_layout,report,actual,d.slot_id))
+                    ++xhc.mouse_reports_processed;
+            } else if(d.type==USB_HID_BOOT_KEYBOARD&&actual>=8) {
+                ++xhc.keyboard_reports_processed;usb_hid_przetworz_raport(report);
             }
-            const int wheel=(actual>=4)?static_cast<int>(static_cast<int8_t>(raport[3])):0;
-            InputEvent evs[6];
-            size_t n=0;
-            if(dx!=0) evs[n++]={INPUT_EV_REL, INPUT_REL_X, static_cast<uint32_t>(dx)};
-            if(dy!=0) evs[n++]={INPUT_EV_REL, INPUT_REL_Y, static_cast<uint32_t>(dy)};
-            if(wheel!=0) evs[n++]={INPUT_EV_REL, INPUT_REL_WHEEL, static_cast<uint32_t>(wheel)};
-            evs[n++]={INPUT_EV_KEY, INPUT_BTN_LEFT, (buttons & MYSZ_PRZYCISK_LEWY)?1U:0U};
-            evs[n++]={INPUT_EV_KEY, INPUT_BTN_RIGHT, (buttons & MYSZ_PRZYCISK_PRAWY)?1U:0U};
-            evs[n++]={INPUT_EV_KEY, INPUT_BTN_MIDDLE, (buttons & MYSZ_PRZYCISK_SRODKOWY)?1U:0U};
-            evs[n++]={INPUT_EV_SYN, INPUT_SYN_REPORT, 0};
-            input_dispatch_events(&s_usb_mouse_dev, evs, n);
-            }else wypisz_log("[USB-MYSZ-WARN] Za krotki raport HID.");}
-        else if(actual>=8){++xhc.keyboard_reports_processed;if(!d.pierwszy_raport_zalogowany){log_values("[USB-HID] First report byte0=",raport[0]," byte2=",raport[2]);d.pierwszy_raport_zalogowany=true;}usb_hid_przetworz_raport(raport);}
-      }else{xhci_ring_complete(&d.hid_ring,1);}}
-    if(!d.hid_transfer_oczekiwany)xhci_zakolejkuj_transfer_interrupt_in(d);}
+            d.pierwszy_raport_zalogowany=true;
+        } else {
+            // A stalled/halted endpoint is not a completed reusable transfer.
+            // Retain DMA until Disable Slot confirms quiescence on disconnect.
+            d.hid_gotowy=false;release_mouse_buttons(d);return;
+        }
+    }
+    if(!d.hid_transfer_oczekiwany)xhci_zakolejkuj_transfer_interrupt_in(d);
+}
 
 uint32_t* context(DmaBuffer& b,uint8_t index){return reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(b.virtual_address)+static_cast<size_t>(index)*xhc.context_size);}
 void zero_dma(DmaBuffer& b){volatile uint8_t* p=static_cast<volatile uint8_t*>(b.virtual_address);for(size_t i=0;i<b.size;++i)p[i]=0;}
@@ -539,26 +535,31 @@ bool evaluate_ep0(XhciDevice& d,uint16_t mps){zero_dma(d.input_context);uint32_t
 
 bool usb_control_transfer(XhciDevice& d,const UsbSetupPacket& setup,DmaBuffer* data,
                           uint16_t length,uint32_t* actual,uint8_t* completion) {
-    if(length&&(!data||data->size<length))return false;
+    if(d.control_failed||!d.enabled|| (length&&(!data||data->size<length)))return false;
     XhciTrb s{},dt{},st{};
     const uint8_t* q=reinterpret_cast<const uint8_t*>(&setup);s.dword0=static_cast<uint32_t>(q[0])|(static_cast<uint32_t>(q[1])<<8)|(static_cast<uint32_t>(q[2])<<16)|(static_cast<uint32_t>(q[3])<<24);
     s.dword1=static_cast<uint32_t>(q[4])|(static_cast<uint32_t>(q[5])<<8)|(static_cast<uint32_t>(q[6])<<16)|(static_cast<uint32_t>(q[7])<<24);
     s.dword2=8;s.dword3=xhci_trb::type_field(xhci_trb::TYPE_SETUP_STAGE)|(1U<<6)|
       ((length?((setup.bmRequestType&0x80U)?3U:2U):0U)<<16)|(1U<<4);
-    uint64_t ignore=0,last=0;if(!xhci_command_ring_enqueue(&d.ep0,s,&ignore))return false;
+    uint64_t setup_ptr=0,data_ptr=0,last=0;
+    if(!xhci_command_ring_enqueue(&d.ep0,s,&setup_ptr))return false;
     uint16_t count=1;if(length){dt.dword0=static_cast<uint32_t>(data->physical_address);dt.dword1=static_cast<uint32_t>(data->physical_address>>32);dt.dword2=length;
       dt.dword3=xhci_trb::type_field(xhci_trb::TYPE_DATA_STAGE)|((setup.bmRequestType&0x80U)?(1U<<16):0U)|(1U<<4)|(1U<<2);
-      if(!xhci_command_ring_enqueue(&d.ep0,dt,&ignore))return false;
+      if(!xhci_command_ring_enqueue(&d.ep0,dt,&data_ptr))return false;
       ++count;}
     st.dword3=xhci_trb::type_field(xhci_trb::TYPE_STATUS_STAGE)|(1U<<5)|((length&&(setup.bmRequestType&0x80U))?0U:(1U<<16));
     if(!xhci_command_ring_enqueue(&d.ep0,st,&last))return false;
     ++count;
-    xhc.wanted_transfer=last;xhc.transfer_result={};__atomic_thread_fence(__ATOMIC_RELEASE);write32(xhc.doorbells,static_cast<uint32_t>(d.slot_id)*4U,1U);
-    const uint64_t end=deadline();while(before_deadline(end)){xhci_poll_events(64);if((read32(xhc.operational,PORTSC_BASE+(d.root_port-1U)*16U)&PORT_CCS)==0)break;
+    xhc.wanted_transfer=last;xhc.wanted_setup=setup_ptr;xhc.wanted_data=data_ptr;
+    xhc.control_slot=d.slot_id;xhc.control_residual=0;xhc.transfer_result={};__atomic_thread_fence(__ATOMIC_RELEASE);write32(xhc.doorbells,static_cast<uint32_t>(d.slot_id)*4U,1U);
+    const uint64_t end=deadline();for(unsigned spins=0;spins<10000000&&before_deadline(end);++spins){xhci_poll_events(64);if((read32(xhc.operational,PORTSC_BASE+(d.root_port-1U)*16U)&PORT_CCS)==0)break;
       if(xhc.transfer_result.valid){TransferResult r=xhc.transfer_result;xhc.wanted_transfer=0;xhci_ring_complete(&d.ep0,count);if(completion)*completion=r.code;
         if(r.slot!=d.slot_id||r.endpoint!=1||r.residual>length||(r.code!=1&&r.code!=13))return false;
         __atomic_thread_fence(__ATOMIC_ACQUIRE);if(actual)*actual=length-r.residual;return true;}asm volatile("pause":::"memory");}
-    xhc.wanted_transfer=0;return false;
+    xhc.wanted_transfer=0;d.control_failed=true;
+    // Never release a buffer while the controller may still DMA to it.
+    if(!disable_slot(d)&&data)*data={}; // intentional DMA quarantine
+    return false;
 }
 
 bool get_descriptor(XhciDevice& d,uint16_t length,DmaBuffer& data,uint32_t* actual){UsbSetupPacket s{0x80,6,static_cast<uint16_t>(1U<<8),0,length};return usb_control_transfer(d,s,&data,length,actual);}
@@ -594,15 +595,33 @@ bool enumerate_port(uint8_t port) {
       log_values(mouse?"[USB-MYSZ] endpoint=":"[USB-HID] endpoint=",hid.endpoint,nullptr,0,true);log_values(mouse?"[USB-MYSZ] wMaxPacketSize=":"[USB-HID] wMaxPacketSize=",hid.maksymalny_rozmiar);log_values(mouse?"[USB-MYSZ] bInterval=":"[USB-HID] bInterval=",hid.interwal);log_values(mouse?"[USB-MYSZ] xHCI Interval=":"[USB-HID] xHCI Interval=",xhci_oblicz_interwal(d.logical_speed,hid.interwal));
       if(xhci_skonfiguruj_endpoint(d,hid)&&usb_ustaw_konfiguracje(d,hid.konfiguracja)){
         d.konfiguracja=hid.konfiguracja;wypisz_log(mouse?"[USB-MYSZ] SET_CONFIGURATION: OK":"[USB] SET_CONFIGURATION: OK");
-        if(hid_ustaw_protokol_boot(d)){wypisz_log(mouse?"[USB-MYSZ] SET_PROTOCOL BOOT: OK":"[USB-HID] SET_PROTOCOL BOOT: OK");uint8_t idle_code=0;if(hid_ustaw_bezczynnosc(d,&idle_code)){
-          wypisz_log(mouse?"[USB-MYSZ] SET_IDLE: OK":"[USB-HID] SET_IDLE: OK");d.hid_gotowy=true;
-        }else if(mouse&&idle_code==6){wypisz_log("[USB-MYSZ] SET_IDLE niewspierane; kontynuuje.");d.hid_gotowy=true;
-        }else wypisz_log(mouse?"[USB-MYSZ] SET_IDLE: blad transportu":"[USB-HID] SET_IDLE: STALL/BLAD");
-        if(d.hid_gotowy)xhci_zakolejkuj_transfer_interrupt_in(d);
-        }else wypisz_log(mouse?"[USB-MYSZ] SET_PROTOCOL BOOT: STALL/BLAD":"[USB-HID] SET_PROTOCOL BOOT: STALL/BLAD");
+        if(d.type==USB_HID_POINTER) {
+            DmaBuffer descriptor{};uint32_t received=0;
+            if(dma_allocate(hid.raport_dlugosc,64,&descriptor)) {
+                UsbSetupPacket request{0x81,6,0x2200,hid.interfejs,hid.raport_dlugosc};
+                if(usb_control_transfer(d,request,&descriptor,hid.raport_dlugosc,&received)&&
+                   received==hid.raport_dlugosc&&hid_pointer_compile(static_cast<const uint8_t*>(descriptor.virtual_address),received,d.pointer_layout)) {
+                    UsbHidInterface iface{};
+                    usb_hid_find_interface(static_cast<const uint8_t*>(konfiguracja.virtual_address),konfiguracja.size,iface);
+                    bool protocol_ok=true;
+                    if(iface.subclass==1) {
+                        UsbSetupPacket protocol{0x21,0x0B,1,hid.interfejs,0};uint32_t ignored=0;
+                        protocol_ok=usb_control_transfer(d,protocol,nullptr,0,&ignored);
+                    }
+                    for(unsigned i=0;i<d.pointer_layout.id_count;++i)
+                        if((d.pointer_layout.bits[i]+7U)/8+(d.pointer_layout.numbered?1U:0U)>d.hid_dma_length)protocol_ok=false;
+                    d.hid_gotowy=protocol_ok;
+                }
+                dma_release(&descriptor);
+            }
+        } else if(hid_ustaw_protokol_boot(d)) {
+            uint8_t idle_code=0;
+            d.hid_gotowy=hid_ustaw_bezczynnosc(d,&idle_code)||idle_code==6;
+        }
+        if(d.hid_gotowy&&!xhci_zakolejkuj_transfer_interrupt_in(d))d.hid_gotowy=false;
       }else wypisz_log("[USB] Konfiguracja HID nieudana.");
     }else wypisz_log("[USB] Brak obslugiwanej klawiatury HID Boot.");
-    dma_release(&konfiguracja);wypisz_log(d.hid_gotowy?(d.type==USB_HID_BOOT_MOUSE?"[USB-MYSZ] Mysz Boot HID skonfigurowana.":"[USB-HID] Klawiatura Boot HID skonfigurowana."):"[USB] Urzadzenie wykryte; klasy jeszcze nie konfiguruje.");dma_release(&data);
+    dma_release(&konfiguracja);wypisz_log(d.hid_gotowy?(d.type==USB_HID_POINTER?"[USB-HID] Descriptor pointer configured.":"[USB-HID] Klawiatura Boot HID skonfigurowana."):"[USB] Urzadzenie wykryte; klasy jeszcze nie konfiguruje.");dma_release(&data);
     if(hid.znaleziono&&!d.hid_gotowy){if(disable_slot(d))free_device(d);return false;}
     return true;
 }
@@ -612,8 +631,8 @@ void ports(Controller& c) {
         if((v&PORT_CCS)==0)append(q,e,"disconnected");else{append(q,e,"connected speed=");append_dec(q,e,(v>>PORT_SPEED_SHIFT)&PORT_SPEED_MASK);append(q,e," state=");append_dec(q,e,(v>>PORT_PLS_SHIFT)&PORT_PLS_MASK);append(q,e," PORTSC=");append_hex(q,e,v);}*q='\0';wypisz_log(s);}
 }
 
-void enumerate_connected_ports(){for(uint8_t p=1;p<=xhc.max_ports;++p){const uint32_t v=read32(xhc.operational,PORTSC_BASE+(p-1U)*16U);
- if(v&PORT_CCS){log_port_text(p,": ","connected.");enumerate_port(p);}}}
+void enumerate_connected_ports(){for(uint32_t p=1;p<=xhc.max_ports;++p){const uint32_t v=read32(xhc.operational,PORTSC_BASE+(p-1U)*16U);
+ if(v&PORT_CCS){log_port_text(p,": ","connected.");enumerate_port(static_cast<uint8_t>(p));}}}
 }
 
 uint32_t xhci_read32(const volatile void* base,uint32_t offset){return read32(static_cast<const volatile uint8_t*>(base),offset);}
@@ -674,14 +693,18 @@ size_t xhci_poll_events(size_t budget) {
             const bool hid=ep==d.hid_dci&&d.hid_gotowy;const uint64_t base=hid?d.hid_ring.dma.physical_address:d.ep0.dma.physical_address;
             const uint16_t liczba=hid?d.hid_ring.trb_count:d.ep0.trb_count;const uint64_t end=base+static_cast<uint64_t>(liczba-1U)*sizeof(XhciTrb);
             if((hid||ep==1)&&ptr>=base&&ptr<end&&((ptr-base)%sizeof(XhciTrb))==0){
-              if(hid&&d.hid_transfer_oczekiwany&&!d.hid_result.valid)d.hid_result={code,slot,ep,residual,ptr,true};
-              else if(ep==1&&xhc.wanted_transfer==ptr)xhc.transfer_result={code,slot,ep,residual,ptr,true};}}}
+              if(hid&&d.hid_transfer_oczekiwany&&ptr==d.hid_transfer_pointer&&!d.hid_result.valid)d.hid_result={code,slot,ep,residual,ptr,true};
+              else if(ep==1&&xhc.wanted_transfer&&slot==xhc.control_slot){
+                if(ptr==xhc.wanted_data&&code==13)xhc.control_residual=residual;
+                else if(ptr==xhc.wanted_transfer)xhc.transfer_result={code,slot,ep,xhc.control_residual?xhc.control_residual:residual,ptr,true};
+                else if((ptr==xhc.wanted_data||ptr==xhc.wanted_setup)&&code!=1)xhc.transfer_result={code,slot,ep,residual,ptr,true};
+              }}}}
         ++xhc.event_index;if(xhc.event_index==EVENT_TRBS){xhc.event_index=0;xhc.event_cycle=!xhc.event_cycle;}++done;}
     if(done){const uint64_t erdp=xhc.event_segment.physical_address+static_cast<uint64_t>(xhc.event_index)*sizeof(XhciTrb);write64(xhc.runtime+0x20U,0x18,erdp|(1U<<3));}
     return done;
 }
 
-void usb_obsluz(){if(!xhc.ready)return;++xhc.usb_service_calls;const size_t events=xhci_poll_events(16);xhc.usb_events_processed+=events;if(events>xhc.max_events_per_service)xhc.max_events_per_service=events;
+void usb_obsluz(){ohci_service();if(!xhc.ready)return;++xhc.usb_service_calls;const size_t events=xhci_poll_events(16);xhc.usb_events_processed+=events;if(events>xhc.max_events_per_service)xhc.max_events_per_service=events;
 #if BURSZTYN_DEBUG_GUI_PERF
     if((xhc.usb_service_calls%1024U)==0){log_values("[USB-PERF] service_calls=",xhc.usb_service_calls);log_values("[USB-PERF] events=",xhc.usb_events_processed);log_values("[USB-PERF] max_events_per_service=",xhc.max_events_per_service);log_values("[USB-PERF] mouse_reports=",xhc.mouse_reports_processed);log_values("[USB-PERF] keyboard_reports=",xhc.keyboard_reports_processed);}
 #endif

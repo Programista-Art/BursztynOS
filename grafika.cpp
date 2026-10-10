@@ -2385,6 +2385,7 @@ extern "C" void zaktualizuj_mysze_zrodlo(int dx,
 
     const int ekran_szer = grafika_pobierz_szerokosc();
     const int ekran_wys = grafika_pobierz_wysokosc();
+    if (ekran_szer <= 0 || ekran_wys <= 0) return;
 
     if (nowy_x < 0) nowy_x = 0;
     if (nowy_y < 0) nowy_y = 0;

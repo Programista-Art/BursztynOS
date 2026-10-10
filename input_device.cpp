@@ -470,6 +470,10 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
                 } else {
                     dev->buttons_state &= ~MYSZ_PRZYCISK_SRODKOWY;
                 }
+            } else if (code == INPUT_BTN_SIDE || code == INPUT_BTN_EXTRA) {
+                const uint8_t bit=uint8_t(1U << (code-INPUT_BTN_LEFT));
+                if(val)dev->buttons_state|=bit;
+                else dev->buttons_state &= uint8_t(~bit);
             } else if (code >= INPUT_BTN_MISC && code < 0x200U) {
                 // Unsupported buttons must not manufacture left-click edges.
             } else if (code > 0 && code < INPUT_BTN_MISC &&

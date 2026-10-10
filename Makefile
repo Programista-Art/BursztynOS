@@ -332,6 +332,8 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	xhci.o \
 	xhci_ring.o \
 	usb_hid.o \
+	hid_pointer.o \
+	ohci.o \
 	apic.o \
 	idt.o \
 	przerwania.o \
@@ -1745,3 +1747,36 @@ test-psf-bootstrap-host:
 	ASAN_OPTIONS=detect_leaks=0 .installertest/test-psf-bootstrap-normal
 	g++ $(PSF_BOOTSTRAP_HOST_FLAGS) -DBURSZTYNDIAGPSFBOOTSTRAP=1 narzedzia/test_psf_bootstrap_host.cpp aktualizacja.cpp storage_format.cpp -o .installertest/test-psf-bootstrap
 	ASAN_OPTIONS=detect_leaks=0 .installertest/test-psf-bootstrap
+
+
+hid_pointer.o: sterowniki/usb/hid_pointer.cpp sterowniki/usb/hid_pointer.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+ohci.o: sterowniki/usb/ohci.cpp sterowniki/usb/ohci.h sterowniki/usb/hid_pointer.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+BURSZTYNDIAGPS2 ?= 0
+BURSZTYNDIAGUSBHID ?= 0
+ifeq ($(BURSZTYNDIAGPS2),1)
+KERNEL_CXXFLAGS += -DBURSZTYNDIAGPS2=1
+endif
+ifeq ($(BURSZTYNDIAGUSBHID),1)
+KERNEL_CXXFLAGS += -DBURSZTYNDIAGUSBHID=1
+endif
+
+POINTING_HOST_FLAGS := $(if $(filter 1,$(BURSZTYNDIAGPS2)),-DBURSZTYNDIAGPS2=1) $(if $(filter 1,$(BURSZTYNDIAGUSBHID)),-DBURSZTYNDIAGUSBHID=1) -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer
+.PHONY: test-pointing-host
+test-pointing-host:
+	@mkdir -p .pointingtest
+	g++ $(POINTING_HOST_FLAGS) narzedzia/test_pointing.cpp sterowniki/usb/hid_pointer.cpp input_device.cpp -o .pointingtest/pointing
+	.pointingtest/pointing
+	g++ $(POINTING_HOST_FLAGS) -pthread -DBURSZTYN_PS2_HOST_TEST -DREAL_KEYBOARD=1 narzedzia/test_ps2_controller.cpp input_device.cpp klawiatura.cpp sterowniki/usb/usb_hid.cpp -o .pointingtest/ps2-controller
+	.pointingtest/ps2-controller
+	g++ $(POINTING_HOST_FLAGS) narzedzia/test_ohci.cpp sterowniki/usb/hid_pointer.cpp input_device.cpp -o .pointingtest/ohci
+	.pointingtest/ohci
+	g++ $(POINTING_HOST_FLAGS) -ffunction-sections -fdata-sections narzedzia/test_xhci_pointer.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp input_device.cpp -Wl,--gc-sections -o .pointingtest/xhci-pointer
+	.pointingtest/xhci-pointer
+
+mysz.o: ps2_mouse_parser.h pointing_diag.h
+hid_pointer.o: pointing_diag.h input_device.h
+xhci.o usb.o: sterowniki/usb/ohci.h sterowniki/usb/hid_pointer.h

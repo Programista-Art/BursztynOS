@@ -102,6 +102,7 @@ extern "C" void InicjalizujGDT();
 extern "C" void InicjalizujIDT();
 extern "C" void inicjalizuj_apic();
 extern "C" void InicjalizujMyszPS2();
+extern "C" InputDevice* ps2_klawiatura_pobierz_urzadzenie();
 
 extern "C" void inicjalizuj_tss(void* stos_jadra);
 extern "C" void zaladuj_tss(uint16_t selektor_tss);
@@ -2265,6 +2266,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     wypisz_log(
         "[APIC] LAPIC/IOAPIC uruchomiony.");
 
+    (void)ps2_klawiatura_pobierz_urzadzenie();
     usb_inicjalizuj();
 
     InicjalizujMyszPS2();
@@ -2584,6 +2586,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
 
     while (true) {
         usb_obsluz();
+        input_service_all();
         virtio_input_obsluz();
         ekran_obsluz_timeout();
         zablokuj_ekran();

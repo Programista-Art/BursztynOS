@@ -1,0 +1,32 @@
+{
+  "BursztynOS.iso": {
+    "size": 35416064,
+    "sha256": "f7bcc4c28269c3c17aa2699c64021a5f5694ed857c397284830772566d372f13"
+  },
+  "BursztynOS-pointing-diag.iso": {
+    "size": 35420160,
+    "sha256": "335ce587d484c4b013eab9088a54269dcea9145795d054a4571af0e5146da6f2"
+  },
+  "system_operacyjny.bin": {
+    "size": 8178008,
+    "sha256": "6f586441fe790fd72d6b8537c7b399abd2185a81a2d8247f406b0c94a832047b"
+  },
+  "runwindows.ps1": {
+    "size": 10147,
+    "sha256": "b98a5d033842b53affab8707d80596a947672b1bd487a0a70672c9eb75103e81"
+  },
+  "rununix.sh": {
+    "size": 15729,
+    "sha256": "0d682097e7e5a61f2e44941d862d9459e8d5081b820d096334c2529a6d3eab18"
+  },
+  "rununix_virtio_latest.sh": {
+    "size": 20478,
+    "sha256": "898f323b78a306f6dff89150f54ef050bdf85ba2fe05efda3f7b92ef3d90274d"
+  },
+  "disp.img": {
+    "size": 4294967296,
+    "mtime": 1790638047,
+    "check": "metadata unchanged; not hashed or written"
+  },
+  "verification": "Both Multiboot2; diagnostic markers only in diagnostic kernel; normal local kernel matches normal ISO; GRUB identical; launchers unchanged"
+}
