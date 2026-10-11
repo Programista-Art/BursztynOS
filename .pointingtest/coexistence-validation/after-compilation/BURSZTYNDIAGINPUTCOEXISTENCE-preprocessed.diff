@@ -1,0 +1,194 @@
+--- production/xhci.o
++++ BURSZTYNDIAGINPUTCOEXISTENCE/xhci.o
+@@ -148,7 +148,8 @@
+     buffer[n]=0;klog_serial(buffer);
+ }
+ inline void input_coexistence_diag(const char* stage, const int64_t* values, size_t count) {
+-    (void)stage; (void)values; (void)count;
++    static unsigned lines = 0;
++    if (lines < 256) {++lines;pointing_diag(stage, values, count);}
+ }
+ namespace BootTiming {
+ enum Phase : uint8_t { PciScan, UsbBeforeSplash, Discovery, Legacy, Halt, Reset,
+@@ -190,6 +191,20 @@
+     return names[p];
+ }
+ inline void dump(){
++    if(!summary_emitted && entry_ticks && framebuffer_ticks && publication_ticks && splash_ticks && anchor_ticks) {
++        const uint64_t t=ticks(),n=now();
++        const uint64_t dt=t>anchor_ticks?t-anchor_ticks:0,dn=n>=anchor_ns?n-anchor_ns:0;
++        const int64_t summary[]={int64_t(estimated_ns(framebuffer_ticks-entry_ticks,dt,dn)),
++            int64_t(estimated_ns(publication_ticks-entry_ticks,dt,dn)),
++            int64_t(estimated_ns(splash_ticks-publication_ticks,dt,dn)),
++            int64_t(estimated_ns(splash_ticks-framebuffer_ticks,dt,dn)),
++            int64_t(estimated_ns(splash_ticks-entry_ticks,dt,dn)),int64_t(totals[UsbBeforeSplash])};
++        pointing_diag("[BOOT PHASE totals ns; pre-HPET TSC calibrated estimate] entry-to-framebuffer-ready/entry-to-framebuffer-publication/publication-to-splash/framebuffer-ready-to-splash/entry-to-splash/USB-before-splash",summary,6);
++        summary_emitted=true;
++    }
++    while(emitted<recorded){const auto& r=records[emitted++];
++        const int64_t values[]={r.detail,int64_t(r.start),int64_t(r.duration)};
++        pointing_diag(name(r.phase),values,3);}
+ }
+ }
+        
+--- production/grafika.o
++++ BURSZTYNDIAGINPUTCOEXISTENCE/grafika.o
+@@ -60,7 +60,8 @@
+     buffer[n]=0;klog_serial(buffer);
+ }
+ inline void input_coexistence_diag(const char* stage, const int64_t* values, size_t count) {
+-    (void)stage; (void)values; (void)count;
++    static unsigned lines = 0;
++    if (lines < 256) {++lines;pointing_diag(stage, values, count);}
+ }
+ namespace BootTiming {
+ enum Phase : uint8_t { PciScan, UsbBeforeSplash, Discovery, Legacy, Halt, Reset,
+@@ -102,6 +103,20 @@
+     return names[p];
+ }
+ inline void dump(){
++    if(!summary_emitted && entry_ticks && framebuffer_ticks && publication_ticks && splash_ticks && anchor_ticks) {
++        const uint64_t t=ticks(),n=now();
++        const uint64_t dt=t>anchor_ticks?t-anchor_ticks:0,dn=n>=anchor_ns?n-anchor_ns:0;
++        const int64_t summary[]={int64_t(estimated_ns(framebuffer_ticks-entry_ticks,dt,dn)),
++            int64_t(estimated_ns(publication_ticks-entry_ticks,dt,dn)),
++            int64_t(estimated_ns(splash_ticks-publication_ticks,dt,dn)),
++            int64_t(estimated_ns(splash_ticks-framebuffer_ticks,dt,dn)),
++            int64_t(estimated_ns(splash_ticks-entry_ticks,dt,dn)),int64_t(totals[UsbBeforeSplash])};
++        pointing_diag("[BOOT PHASE totals ns; pre-HPET TSC calibrated estimate] entry-to-framebuffer-ready/entry-to-framebuffer-publication/publication-to-splash/framebuffer-ready-to-splash/entry-to-splash/USB-before-splash",summary,6);
++        summary_emitted=true;
++    }
++    while(emitted<recorded){const auto& r=records[emitted++];
++        const int64_t values[]={r.detail,int64_t(r.start),int64_t(r.duration)};
++        pointing_diag(name(r.phase),values,3);}
+ }
+ }
+        
+--- production/ekran_powitalny.o
++++ BURSZTYNDIAGINPUTCOEXISTENCE/ekran_powitalny.o
+@@ -60,7 +60,8 @@
+     buffer[n]=0;klog_serial(buffer);
+ }
+ inline void input_coexistence_diag(const char* stage, const int64_t* values, size_t count) {
+-    (void)stage; (void)values; (void)count;
++    static unsigned lines = 0;
++    if (lines < 256) {++lines;pointing_diag(stage, values, count);}
+ }
+ namespace BootTiming {
+ enum Phase : uint8_t { PciScan, UsbBeforeSplash, Discovery, Legacy, Halt, Reset,
+@@ -102,6 +103,20 @@
+     return names[p];
+ }
+ inline void dump(){
++    if(!summary_emitted && entry_ticks && framebuffer_ticks && publication_ticks && splash_ticks && anchor_ticks) {
++        const uint64_t t=ticks(),n=now();
++        const uint64_t dt=t>anchor_ticks?t-anchor_ticks:0,dn=n>=anchor_ns?n-anchor_ns:0;
++        const int64_t summary[]={int64_t(estimated_ns(framebuffer_ticks-entry_ticks,dt,dn)),
++            int64_t(estimated_ns(publication_ticks-entry_ticks,dt,dn)),
++            int64_t(estimated_ns(splash_ticks-publication_ticks,dt,dn)),
++            int64_t(estimated_ns(splash_ticks-framebuffer_ticks,dt,dn)),
++            int64_t(estimated_ns(splash_ticks-entry_ticks,dt,dn)),int64_t(totals[UsbBeforeSplash])};
++        pointing_diag("[BOOT PHASE totals ns; pre-HPET TSC calibrated estimate] entry-to-framebuffer-ready/entry-to-framebuffer-publication/publication-to-splash/framebuffer-ready-to-splash/entry-to-splash/USB-before-splash",summary,6);
++        summary_emitted=true;
++    }
++    while(emitted<recorded){const auto& r=records[emitted++];
++        const int64_t values[]={r.detail,int64_t(r.start),int64_t(r.duration)};
++        pointing_diag(name(r.phase),values,3);}
+ }
+ }
+        
+--- production/input_device.o
++++ BURSZTYNDIAGINPUTCOEXISTENCE/input_device.o
+@@ -147,7 +147,8 @@
+     buffer[n]=0;klog_serial(buffer);
+ }
+ inline void input_coexistence_diag(const char* stage, const int64_t* values, size_t count) {
+-    (void)stage; (void)values; (void)count;
++    static unsigned lines = 0;
++    if (lines < 256) {++lines;pointing_diag(stage, values, count);}
+ }
+        
+ struct PointingCounters {
+@@ -247,8 +248,19 @@
+ static InputDevice* s_pointer_owner = nullptr;
+ static InputDevice* s_last_pointer_source = nullptr;
+ static bool s_pointer_delivery_ready = false;
++static unsigned s_pointer_traces[MAX_INPUT_DEVICES]{};
+ static void pointer_trace(InputDevice* dev,InputPointerMode mode,int32_t raw_x,int32_t raw_y,int before_x,int before_y,int result) {
+-    (void)dev;(void)mode;(void)raw_x;(void)raw_y;(void)before_x;(void)before_y;(void)result;
++    size_t slot=0;while(slot<MAX_INPUT_DEVICES && s_devices[slot]!=dev)++slot;
++    if(slot==MAX_INPUT_DEVICES || s_pointer_traces[slot]>=32)return;
++    ++s_pointer_traces[slot];
++    const auto* owner=input_get_pointer_owner();
++    const int64_t v[]={dev->device_id,dev->bus_type,owner?int64_t(owner->device_id):-1,
++        uint32_t(raw_x),uint32_t(raw_y),raw_x,raw_y,before_x,before_y,
++        grafika_pobierz_mysz_x(),grafika_pobierz_mysz_y(),grafika_pobierz_szerokosc(),
++        grafika_pobierz_wysokosc(),result,dev->pointer_state,dev->usb_controller,dev->contact_active};
++    pointing_diag(mode==INPUT_POINTER_ABSOLUTE ?
++        "[POINTER ABSOLUTE] id/bus/owner/rawbitsX/Y/signedX/Y/beforeX/Y/afterX/Y/width/height/accepted(0=inactive,2=deferred)/state/controller/contact" :
++        "[POINTER RELATIVE] id/bus/owner/rawbitsX/Y/signedX/Y/beforeX/Y/afterX/Y/width/height/accepted(0=inactive,2=deferred)/state/controller/contact",v,17);
+ }
+ static int32_t input_accumulate_delta(int32_t previous, int32_t delta) {
+     const int64_t sum = int64_t(previous) + delta;
+@@ -455,6 +467,7 @@
+     for (size_t i = 0; i < MAX_INPUT_DEVICES; ++i) {
+         if (s_devices[i] == nullptr) {
+             s_devices[i] = dev;
++            s_pointer_traces[i]=0;
+             dev->registered = true;
+             dev->pointer_state = dev->bus_type == INPUT_BUS_USB ?
+                 INPUT_POINTER_REGISTERED_INACTIVE : INPUT_POINTER_ARMED;
+@@ -654,6 +667,20 @@
+         grafika_pobierz_wysokosc() > 0;
+ }
+ void input_pointer_boot_diagnostic(void) {
++    const InputDevice* ps2 = input_find_device_by_name("ps2-mouse");
++    int ohci=-1,xhci=-1;
++    for(size_t i=0;i<MAX_INPUT_DEVICES;++i) {
++        const auto* d=input_get_device(i);
++        if(d && d->bus_type==INPUT_BUS_USB && input_is_pointer_device(d)) {
++            if(d->usb_controller==INPUT_USB_CONTROLLER_OHCI)ohci=d->pointer_state;
++            if(d->usb_controller==INPUT_USB_CONTROLLER_XHCI)xhci=d->pointer_state;
++        }
++    }
++    const auto* owner=input_get_pointer_owner();
++    const int64_t v[]={s_pointer_delivery_ready,input_pointer_geometry_ready(),
++        grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc(),ps2!=nullptr,
++        ps2 && ps2->pointer_state==INPUT_POINTER_PROVEN_ACTIVE,owner?int64_t(owner->device_id):-1,ohci,xhci};
++    pointing_diag("[POINTER BOOT] INPUTSUBSYSTEMREADY/CURSORGEOMETRYREADY/SCREENWIDTH/SCREENHEIGHT/PS2REGISTERED/PS2ELIGIBLE/CURRENTPOINTEROWNER/OHCIPOINTERSTATE/XHCIPOINTERSTATE",v,9);
+ }
+ void input_service_all(void) {
+     flush_pointer_reports();
+--- production/kernel.o
++++ BURSZTYNDIAGINPUTCOEXISTENCE/kernel.o
+@@ -72,7 +72,8 @@
+     buffer[n]=0;klog_serial(buffer);
+ }
+ inline void input_coexistence_diag(const char* stage, const int64_t* values, size_t count) {
+-    (void)stage; (void)values; (void)count;
++    static unsigned lines = 0;
++    if (lines < 256) {++lines;pointing_diag(stage, values, count);}
+ }
+ namespace BootTiming {
+ enum Phase : uint8_t { PciScan, UsbBeforeSplash, Discovery, Legacy, Halt, Reset,
+@@ -114,6 +115,20 @@
+     return names[p];
+ }
+ inline void dump(){
++    if(!summary_emitted && entry_ticks && framebuffer_ticks && publication_ticks && splash_ticks && anchor_ticks) {
++        const uint64_t t=ticks(),n=now();
++        const uint64_t dt=t>anchor_ticks?t-anchor_ticks:0,dn=n>=anchor_ns?n-anchor_ns:0;
++        const int64_t summary[]={int64_t(estimated_ns(framebuffer_ticks-entry_ticks,dt,dn)),
++            int64_t(estimated_ns(publication_ticks-entry_ticks,dt,dn)),
++            int64_t(estimated_ns(splash_ticks-publication_ticks,dt,dn)),
++            int64_t(estimated_ns(splash_ticks-framebuffer_ticks,dt,dn)),
++            int64_t(estimated_ns(splash_ticks-entry_ticks,dt,dn)),int64_t(totals[UsbBeforeSplash])};
++        pointing_diag("[BOOT PHASE totals ns; pre-HPET TSC calibrated estimate] entry-to-framebuffer-ready/entry-to-framebuffer-publication/publication-to-splash/framebuffer-ready-to-splash/entry-to-splash/USB-before-splash",summary,6);
++        summary_emitted=true;
++    }
++    while(emitted<recorded){const auto& r=records[emitted++];
++        const int64_t values[]={r.detail,int64_t(r.start),int64_t(r.duration)};
++        pointing_diag(name(r.phase),values,3);}
+ }
+ }
+        

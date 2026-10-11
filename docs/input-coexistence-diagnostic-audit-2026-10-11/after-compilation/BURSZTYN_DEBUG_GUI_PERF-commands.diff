@@ -1,0 +1,5 @@
+--- production/xhci.o
++++ BURSZTYN_DEBUG_GUI_PERF/xhci.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -I. -c sterowniki/usb/xhci.cpp -o xhci.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -I. -c sterowniki/usb/xhci.cpp -o xhci.o -DBURSZTYN_DEBUG_GUI_PERF=1

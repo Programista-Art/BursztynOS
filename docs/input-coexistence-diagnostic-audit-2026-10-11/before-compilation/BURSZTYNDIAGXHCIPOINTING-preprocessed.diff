@@ -1,0 +1,268 @@
+--- production/xhci.o
++++ BURSZTYNDIAGXHCIPOINTING/xhci.o
+@@ -742,7 +742,22 @@
+     return __atomic_load_n(&counter,0);
+ }
+ inline void pointing_snapshot(const char* reason) {
+-    (void)reason;
++    const auto& c=pointing_counters;
++    const InputDevice* owner=input_get_pointer_owner();
++    int64_t stamp=0;
++    extern uint64_t czas_monotoniczny_ns();
++    stamp=int64_t(czas_monotoniczny_ns());
++    const int64_t v[]={stamp,owner?int64_t(owner->device_id):-1,owner?owner->bus_type:0,
++        pointing_read(c.ps2_irq),pointing_read(c.ps2_bytes),pointing_read(c.ps2_packets),pointing_read(c.ps2_published),pointing_read(c.owner_transitions),
++        pointing_read(c.owner_accepted),pointing_read(c.nonowner_ignored),pointing_read(c.xhci_irq),pointing_read(c.events),pointing_read(c.transfers),pointing_read(c.commands),
++        pointing_read(c.bad_completions),pointing_read(c.hid_completions),pointing_read(c.hid_accepted),pointing_read(c.hid_rejected),pointing_read(c.proven),
++        pointing_read(c.gui_consumed),pointing_read(c.cursor_commits)};
++    pointing_diag(reason,v,sizeof(v)/sizeof(v[0]));
++    for(size_t i=0;i<input_get_device_count();++i) {
++        const auto* d=input_get_device(i); if(!d)continue;
++        const int64_t state[]={d->device_id,d->bus_type,d->pointer_state};
++        pointing_diag("[POINTING state] id/bus/state",state,3);
++    }
+ }
+        
+ constexpr uint8_t MYSZ_PRZYCISK_LEWY = 1U << 0;
+@@ -1385,6 +1400,10 @@
+         const TransferResult r=d.hid_result;
+         if(!d.hid_transfer_oczekiwany || r.slot!=d.slot_id || r.endpoint!=d.hid_dci ||
+            r.pointer!=d.hid_transfer_pointer) { d.hid_result={}; return; }
++        if(!d.pierwszy_raport_zalogowany || (r.code!=1&&r.code!=13)) {
++            const int64_t values[]={r.slot,r.endpoint,r.code,int64_t(r.pointer),r.residual,int64_t(d.hid_dma_length)};
++            pointing_diag("[XHCI completion] slot/endpoint/code/TRB/residual/requested",values,6);
++        }
+         if(d.type==USB_HID_POINTER && d.diagnostic_transfers<16){
+             const int64_t v[]={int64_t(r.pointer),int64_t(d.hid_transfer_pointer),r.slot,r.endpoint,r.code,r.residual,
+                 r.residual<=d.hid_dma_length?int64_t(d.hid_dma_length-r.residual):-1};
+@@ -1615,6 +1634,17 @@
+                 }
+                 release_interrupt(xhc);
+             }
++            uint64_t flags;asm volatile("pushfq; popq %0":"=r"(flags));
++            if((flags^flags_before)&512U)__builtin_trap();
++            const auto* owner=input_get_pointer_owner();
++            char line[320],*p=line,*e=line+sizeof(line);
++            append(p,e,"[XHCI INIT] PS2IRQ12BEFORE=");append_dec(p,e,before);
++            append(p,e," PS2IRQ12AFTER=");append_dec(p,e,pointing_read(pointing_counters.ps2_irq));
++            append(p,e," CURRENTPOINTEROWNER=");append(p,e,owner?owner->name:"none");
++            append(p,e," XHCIVECTOR=");append_dec(p,e,xhc.irq_vector<0?0:uint32_t(xhc.irq_vector));
++            append(p,e," PS2VECTOR=44 XHCIIRQMODE=");append(p,e,xhc.irq_mode==2?"MSI-X":xhc.irq_mode==1?"MSI":"none");
++            append(p,e," IFSTATE=");append_dec(p,e,(flags>>9)&1);*p=0;wypisz_log(line);
++            pointing_snapshot(xhc.ready?"xhci-ready":"xhci-init-error");
+         }
+     } guard;
+  if(!hpet_dostepny()){wypisz_log("[xHCI-ERR] HPET niedostepny; bezpieczne timeouty niemozliwe.");return false;}
+--- production/hid_pointer.o
++++ BURSZTYNDIAGXHCIPOINTING/hid_pointer.o
+@@ -186,7 +186,22 @@
+     return __atomic_load_n(&counter,0);
+ }
+ inline void pointing_snapshot(const char* reason) {
+-    (void)reason;
++    const auto& c=pointing_counters;
++    const InputDevice* owner=input_get_pointer_owner();
++    int64_t stamp=0;
++    extern uint64_t czas_monotoniczny_ns();
++    stamp=int64_t(czas_monotoniczny_ns());
++    const int64_t v[]={stamp,owner?int64_t(owner->device_id):-1,owner?owner->bus_type:0,
++        pointing_read(c.ps2_irq),pointing_read(c.ps2_bytes),pointing_read(c.ps2_packets),pointing_read(c.ps2_published),pointing_read(c.owner_transitions),
++        pointing_read(c.owner_accepted),pointing_read(c.nonowner_ignored),pointing_read(c.xhci_irq),pointing_read(c.events),pointing_read(c.transfers),pointing_read(c.commands),
++        pointing_read(c.bad_completions),pointing_read(c.hid_completions),pointing_read(c.hid_accepted),pointing_read(c.hid_rejected),pointing_read(c.proven),
++        pointing_read(c.gui_consumed),pointing_read(c.cursor_commits)};
++    pointing_diag(reason,v,sizeof(v)/sizeof(v[0]));
++    for(size_t i=0;i<input_get_device_count();++i) {
++        const auto* d=input_get_device(i); if(!d)continue;
++        const int64_t state[]={d->device_id,d->bus_type,d->pointer_state};
++        pointing_diag("[POINTING state] id/bus/state",state,3);
++    }
+ }
+        
+ inline bool xhci_physical_log_allowed() {
+@@ -388,6 +403,22 @@
+         pointing_count(pointing_counters.hid_rejected); return false;
+     }
+     if(!dev.registered && !hid_pointer_register(dev,layout,id))return false;
++    static unsigned trace_reports=0;
++    if(trace_reports<64 && (1 || dev.usb_controller==INPUT_USB_CONTROLLER_XHCI)) {
++        ++trace_reports;int32_t rx=0,ry=0,wheel=0;uint32_t buttons=0;
++        for(size_t i=0;i<count;++i) {
++            if(events[i].type==0x01U && events[i].value && events[i].code>=0x110U && events[i].code<=0x114U)buttons|=1U<<(events[i].code-0x110U);
++            if(events[i].type==0x02U && events[i].code==0x08U)wheel=input_signed_value(events[i].value);
++            if((events[i].type==0x03U && events[i].code==0x00U) ||
++                (events[i].type==0x02U && events[i].code==0x00U))rx=input_signed_value(events[i].value);
++            if((events[i].type==0x03U && events[i].code==0x01U) ||
++                (events[i].type==0x02U && events[i].code==0x01U))ry=input_signed_value(events[i].value);
++        }
++        const int64_t v[]={dev.device_id,dev.usb_controller,layout.numbered?b[0]:0,rx,ry,
++            layout.x.min,layout.x.max,layout.y.min,layout.y.max,dev.pointer_state,
++            dev.pointer_state!=INPUT_POINTER_PROVEN_ACTIVE,buttons,wheel,dev.pointer_mode};
++        pointing_diag("[USB POINTER] id/controller/reportID/decodedX/Y/logicalMinMaxX/Y/state/first-valid/buttons/wheel/mode",v,14);
++    }
+     pointing_count(pointing_counters.hid_accepted);
+     if(!input_arm_pointer(&dev) || !input_prove_pointer(&dev))return false;
+     input_dispatch_events(&dev,events,count);return true;
+--- production/ohci.o
++++ BURSZTYNDIAGXHCIPOINTING/ohci.o
+@@ -685,7 +685,22 @@
+     return __atomic_load_n(&counter,0);
+ }
+ inline void pointing_snapshot(const char* reason) {
+-    (void)reason;
++    const auto& c=pointing_counters;
++    const InputDevice* owner=input_get_pointer_owner();
++    int64_t stamp=0;
++    extern uint64_t czas_monotoniczny_ns();
++    stamp=int64_t(czas_monotoniczny_ns());
++    const int64_t v[]={stamp,owner?int64_t(owner->device_id):-1,owner?owner->bus_type:0,
++        pointing_read(c.ps2_irq),pointing_read(c.ps2_bytes),pointing_read(c.ps2_packets),pointing_read(c.ps2_published),pointing_read(c.owner_transitions),
++        pointing_read(c.owner_accepted),pointing_read(c.nonowner_ignored),pointing_read(c.xhci_irq),pointing_read(c.events),pointing_read(c.transfers),pointing_read(c.commands),
++        pointing_read(c.bad_completions),pointing_read(c.hid_completions),pointing_read(c.hid_accepted),pointing_read(c.hid_rejected),pointing_read(c.proven),
++        pointing_read(c.gui_consumed),pointing_read(c.cursor_commits)};
++    pointing_diag(reason,v,sizeof(v)/sizeof(v[0]));
++    for(size_t i=0;i<input_get_device_count();++i) {
++        const auto* d=input_get_device(i); if(!d)continue;
++        const int64_t state[]={d->device_id,d->bus_type,d->pointer_state};
++        pointing_diag("[POINTING state] id/bus/state",state,3);
++    }
+ }
+ void wypisz_log(const char*);
+ namespace {
+--- production/idt.o
++++ BURSZTYNDIAGXHCIPOINTING/idt.o
+@@ -1194,6 +1194,7 @@
+         const int bajt = v / 8;
+         const int bit = v % 8;
+         if ((wektory_zaalokowane[bajt] & (1U << bit)) == 0) {
++            if(dynamiczne_irq[v].handler || v==44)__builtin_trap();
+             wektory_zaalokowane[bajt] |= static_cast<uint8_t>(1U << bit);
+             dynamiczne_irq[v].handler = nullptr;
+             dynamiczne_irq[v].context = nullptr;
+--- production/mysz.o
++++ BURSZTYNDIAGXHCIPOINTING/mysz.o
+@@ -191,7 +191,22 @@
+     return __atomic_load_n(&counter,0);
+ }
+ inline void pointing_snapshot(const char* reason) {
+-    (void)reason;
++    const auto& c=pointing_counters;
++    const InputDevice* owner=input_get_pointer_owner();
++    int64_t stamp=0;
++    extern uint64_t czas_monotoniczny_ns();
++    stamp=int64_t(czas_monotoniczny_ns());
++    const int64_t v[]={stamp,owner?int64_t(owner->device_id):-1,owner?owner->bus_type:0,
++        pointing_read(c.ps2_irq),pointing_read(c.ps2_bytes),pointing_read(c.ps2_packets),pointing_read(c.ps2_published),pointing_read(c.owner_transitions),
++        pointing_read(c.owner_accepted),pointing_read(c.nonowner_ignored),pointing_read(c.xhci_irq),pointing_read(c.events),pointing_read(c.transfers),pointing_read(c.commands),
++        pointing_read(c.bad_completions),pointing_read(c.hid_completions),pointing_read(c.hid_accepted),pointing_read(c.hid_rejected),pointing_read(c.proven),
++        pointing_read(c.gui_consumed),pointing_read(c.cursor_commits)};
++    pointing_diag(reason,v,sizeof(v)/sizeof(v[0]));
++    for(size_t i=0;i<input_get_device_count();++i) {
++        const auto* d=input_get_device(i); if(!d)continue;
++        const int64_t state[]={d->device_id,d->bus_type,d->pointer_state};
++        pointing_diag("[POINTING state] id/bus/state",state,3);
++    }
+ }
+ extern "C" void ps2_klawiatura_przetworz_scancode(uint8_t);
+ namespace {
+--- production/grafika.o
++++ BURSZTYNDIAGXHCIPOINTING/grafika.o
+@@ -145,7 +145,22 @@
+     return __atomic_load_n(&counter,0);
+ }
+ inline void pointing_snapshot(const char* reason) {
+-    (void)reason;
++    const auto& c=pointing_counters;
++    const InputDevice* owner=input_get_pointer_owner();
++    int64_t stamp=0;
++    extern uint64_t czas_monotoniczny_ns();
++    stamp=int64_t(czas_monotoniczny_ns());
++    const int64_t v[]={stamp,owner?int64_t(owner->device_id):-1,owner?owner->bus_type:0,
++        pointing_read(c.ps2_irq),pointing_read(c.ps2_bytes),pointing_read(c.ps2_packets),pointing_read(c.ps2_published),pointing_read(c.owner_transitions),
++        pointing_read(c.owner_accepted),pointing_read(c.nonowner_ignored),pointing_read(c.xhci_irq),pointing_read(c.events),pointing_read(c.transfers),pointing_read(c.commands),
++        pointing_read(c.bad_completions),pointing_read(c.hid_completions),pointing_read(c.hid_accepted),pointing_read(c.hid_rejected),pointing_read(c.proven),
++        pointing_read(c.gui_consumed),pointing_read(c.cursor_commits)};
++    pointing_diag(reason,v,sizeof(v)/sizeof(v[0]));
++    for(size_t i=0;i<input_get_device_count();++i) {
++        const auto* d=input_get_device(i); if(!d)continue;
++        const int64_t state[]={d->device_id,d->bus_type,d->pointer_state};
++        pointing_diag("[POINTING state] id/bus/state",state,3);
++    }
+ }
+        
+ inline int pointer_accumulate(int current, int64_t delta, int dimension) {
+--- production/input_device.o
++++ BURSZTYNDIAGXHCIPOINTING/input_device.o
+@@ -154,7 +154,22 @@
+     return __atomic_load_n(&counter,0);
+ }
+ inline void pointing_snapshot(const char* reason) {
+-    (void)reason;
++    const auto& c=pointing_counters;
++    const InputDevice* owner=input_get_pointer_owner();
++    int64_t stamp=0;
++    extern uint64_t czas_monotoniczny_ns();
++    stamp=int64_t(czas_monotoniczny_ns());
++    const int64_t v[]={stamp,owner?int64_t(owner->device_id):-1,owner?owner->bus_type:0,
++        pointing_read(c.ps2_irq),pointing_read(c.ps2_bytes),pointing_read(c.ps2_packets),pointing_read(c.ps2_published),pointing_read(c.owner_transitions),
++        pointing_read(c.owner_accepted),pointing_read(c.nonowner_ignored),pointing_read(c.xhci_irq),pointing_read(c.events),pointing_read(c.transfers),pointing_read(c.commands),
++        pointing_read(c.bad_completions),pointing_read(c.hid_completions),pointing_read(c.hid_accepted),pointing_read(c.hid_rejected),pointing_read(c.proven),
++        pointing_read(c.gui_consumed),pointing_read(c.cursor_commits)};
++    pointing_diag(reason,v,sizeof(v)/sizeof(v[0]));
++    for(size_t i=0;i<input_get_device_count();++i) {
++        const auto* d=input_get_device(i); if(!d)continue;
++        const int64_t state[]={d->device_id,d->bus_type,d->pointer_state};
++        pointing_diag("[POINTING state] id/bus/state",state,3);
++    }
+ }
+        
+ inline bool xhci_physical_log_allowed() {
+@@ -232,8 +247,19 @@
+ static size_t s_device_count = 0;
+ static InputDevice* s_pointer_owner = nullptr;
+ static bool s_pointer_delivery_ready = false;
++static unsigned s_pointer_traces[MAX_INPUT_DEVICES]{};
+ static void pointer_trace(InputDevice* dev,InputPointerMode mode,int32_t raw_x,int32_t raw_y,int before_x,int before_y,int result) {
+-    (void)dev;(void)mode;(void)raw_x;(void)raw_y;(void)before_x;(void)before_y;(void)result;
++    size_t slot=0;while(slot<MAX_INPUT_DEVICES && s_devices[slot]!=dev)++slot;
++    if(slot==MAX_INPUT_DEVICES || s_pointer_traces[slot]>=32)return;
++    ++s_pointer_traces[slot];
++    const auto* owner=input_get_pointer_owner();
++    const int64_t v[]={dev->device_id,dev->bus_type,owner?int64_t(owner->device_id):-1,
++        uint32_t(raw_x),uint32_t(raw_y),raw_x,raw_y,before_x,before_y,
++        grafika_pobierz_mysz_x(),grafika_pobierz_mysz_y(),grafika_pobierz_szerokosc(),
++        grafika_pobierz_wysokosc(),result,dev->pointer_state,dev->usb_controller};
++    pointing_diag(mode==INPUT_POINTER_ABSOLUTE ?
++        "[POINTER ABSOLUTE] id/bus/owner/rawbitsX/Y/signedX/Y/beforeX/Y/afterX/Y/width/height/accepted(0=owner-reject,2=deferred)/state/controller" :
++        "[POINTER RELATIVE] id/bus/owner/rawbitsX/Y/signedX/Y/beforeX/Y/afterX/Y/width/height/accepted(0=owner-reject,2=deferred)/state/controller",v,16);
+ }
+ static int32_t input_accumulate_delta(int32_t previous, int32_t delta) {
+     const int64_t sum = int64_t(previous) + delta;
+@@ -338,6 +364,7 @@
+     for (size_t i = 0; i < MAX_INPUT_DEVICES; ++i) {
+         if (s_devices[i] == nullptr) {
+             s_devices[i] = dev;
++            s_pointer_traces[i]=0;
+             dev->registered = true;
+             dev->pointer_state = dev->bus_type == INPUT_BUS_USB ?
+                 INPUT_POINTER_REGISTERED_INACTIVE : INPUT_POINTER_PROVEN_ACTIVE;
+@@ -613,6 +640,20 @@
+         grafika_pobierz_wysokosc() > 0;
+ }
+ void input_pointer_boot_diagnostic(void) {
++    const InputDevice* ps2 = input_find_device_by_name("ps2-mouse");
++    int ohci=-1,xhci=-1;
++    for(size_t i=0;i<input_get_device_count();++i) {
++        const auto* d=input_get_device(i);
++        if(d && d->bus_type==INPUT_BUS_USB && input_is_pointer_device(d)) {
++            if(d->usb_controller==INPUT_USB_CONTROLLER_OHCI)ohci=d->pointer_state;
++            if(d->usb_controller==INPUT_USB_CONTROLLER_XHCI)xhci=d->pointer_state;
++        }
++    }
++    const auto* owner=input_get_pointer_owner();
++    const int64_t v[]={s_pointer_delivery_ready,input_pointer_geometry_ready(),
++        grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc(),ps2!=nullptr,
++        ps2 && ps2->pointer_state==INPUT_POINTER_PROVEN_ACTIVE,owner?int64_t(owner->device_id):-1,ohci,xhci};
++    pointing_diag("[POINTER BOOT] INPUTSUBSYSTEMREADY/CURSORGEOMETRYREADY/SCREENWIDTH/SCREENHEIGHT/PS2REGISTERED/PS2ELIGIBLE/CURRENTPOINTEROWNER/OHCIPOINTERSTATE/XHCIPOINTERSTATE",v,9);
+ }
+ void input_service_all(void) {
+     if (input_pointer_geometry_ready() && s_pointer_owner) {

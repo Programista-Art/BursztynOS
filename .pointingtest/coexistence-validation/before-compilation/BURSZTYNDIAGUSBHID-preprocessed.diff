@@ -1,0 +1,42 @@
+--- production/hid_pointer.o
++++ BURSZTYNDIAGUSBHID/hid_pointer.o
+@@ -239,6 +239,8 @@
+         }
+         p+=len;
+     }
++    if(found){const int64_t v[]={out.interface_number,3,out.subclass,out.protocol,out.hid_bcd,out.report_length,out.endpoint,out.packet_size};
++        pointing_diag("[USB-HID] interface/class/subclass/protocol/bcdHID/report-length/endpoint/mps",v,8);}
+     return found;
+ }
+ bool hid_pointer_compile(const uint8_t* data,size_t length,HidPointerLayout& out) {
+@@ -331,6 +333,9 @@
+     if(layout.numbered) for(unsigned i=0;i<layout.id_count;++i)
+         if(!layout.ids[i] || size_t((layout.bits[i]+7)/8+1)>HID_POINTER_REPORT_MAX)return false;
+     layout.absolute=!relative_x;out=layout;
++    for(unsigned i=0;i<out.field_count;++i){const auto& f=out.fields[i];
++        const int64_t v[]={f.page,f.usage,f.report_id,f.offset,f.size,f.minimum,f.maximum,f.relative};
++        pointing_diag("[USB-HID] page/usage/id/bit-offset/size/min/max/relative",v,8);}
+     return true;
+ }
+ bool hid_pointer_decode(const HidPointerLayout& l,const uint8_t* report,size_t length,
+@@ -390,6 +395,9 @@
+     if(!dev.registered && !hid_pointer_register(dev,layout,id))return false;
+     pointing_count(pointing_counters.hid_accepted);
+     if(!input_arm_pointer(&dev) || !input_prove_pointer(&dev))return false;
++    static unsigned reports=0;
++    if(reports<32){++reports;for(size_t i=0;i<count;++i){const int64_t v[]={events[i].type,events[i].code,int32_t(events[i].value)};
++        pointing_diag("[USB-HID] decoded type/code/value",v,3);}}
+     input_dispatch_events(&dev,events,count);return true;
+ }
+ void hid_pointer_remove(InputDevice& dev) {
+--- production/ohci.o
++++ BURSZTYNDIAGUSBHID/ohci.o
+@@ -812,6 +812,8 @@
+     if(!control(d,0,5,address,0,0,got)||!frames(2))return false;
+     d.address=address;
+     if(!control(d,0x80,6,0x100,0,18,got)||got<18||data[0]!=18||data[1]!=1)return false;
++    const int64_t identity[]={uint16_t(data[8])|(uint16_t(data[9])<<8),uint16_t(data[10])|(uint16_t(data[11])<<8),port};
++    pointing_diag("[OHCI HID] VID/PID/root-port",identity,3);
+     if(!control(d,0x80,6,0x200,0,9,got)||got<9||data[0]!=9||data[1]!=2)return false;
+     const uint16_t total=uint16_t(data[2])|uint16_t(data[3])<<8;
+     if(total<9||total>4096||!control(d,0x80,6,0x200,0,total,got)||!usb_hid_find_interface(data,got,d.iface))return false;

@@ -1,0 +1,11 @@
+--- production/xhci.o
++++ BURSZTYN_DEBUG_GUI_PERF/xhci.o
+@@ -1774,6 +1774,8 @@
+         else write32(xhc.runtime+0x20U,0,2U);
+     }
+     xhc.usb_events_processed+=events;if(events>xhc.max_events_per_service)xhc.max_events_per_service=events;
++    static unsigned perf_lines=0;
++    if(perf_lines<16 && (xhc.usb_service_calls%1024U)==0){++perf_lines;log_values("[USB-PERF] service_calls=",xhc.usb_service_calls);log_values("[USB-PERF] events=",xhc.usb_events_processed);log_values("[USB-PERF] max_events_per_service=",xhc.max_events_per_service);log_values("[USB-PERF] mouse_reports=",xhc.mouse_reports_processed);log_values("[USB-PERF] keyboard_reports=",xhc.keyboard_reports_processed);}
+     if(xhc.port_event || xhc.discovery_pending) {
+         const bool changes=xhc.port_event;xhc.port_event=false;
+         const uint32_t begin=changes?1:xhc.discovery_port;

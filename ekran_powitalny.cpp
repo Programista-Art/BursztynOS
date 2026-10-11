@@ -1,3 +1,4 @@
+#include "boot_phase_timing.h"
 #include "ekran_powitalny.h"
 #include "diagnostyka_startu.h"
 #include "diagnostyka_klatek_startu.h"
@@ -94,6 +95,7 @@ void powitanie_publikacja() {
             // never creation of an off-screen surface. Later mode resets keep it.
             sekwencja.start=sekwencja.ostatni=czas_monotoniczny_us();
             animacja_rozpoczeta=true;nastepny=0;
+            BootTiming::splash_started();
             diag_czas("start",sekwencja.start);
         }
         SplashFirstDiag::event("first_visible_commit",czas_monotoniczny_us());

@@ -1,0 +1,47 @@
+g++    -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer narzedzia/test_pointing.cpp sterowniki/usb/hid_pointer.cpp input_device.cpp -o .pointingtest/pointing
+.pointingtest/pointing
+PS/2 parser: 330443 checks PASS
+HID descriptor/report: 6051 checks PASS
+USB configuration: 48 checks PASS
+InputDevice ownership/mapping: 146 checks PASS
+g++    -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer -pthread -DBURSZTYN_PS2_HOST_TEST -DREAL_KEYBOARD=1 narzedzia/test_ps2_controller.cpp input_device.cpp klawiatura.cpp sterowniki/usb/usb_hid.cpp -o .pointingtest/ps2-controller
+.pointingtest/ps2-controller
+i8042/IRQ1/IRQ12/initialization: 4140 checks PASS
+g++    -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer narzedzia/test_ohci.cpp sterowniki/usb/hid_pointer.cpp input_device.cpp -o .pointingtest/ohci
+.pointingtest/ohci
+Shared VirtualBox tablet stream: 5400 checks PASS
+OHCI production enumeration/transfers/failure: 5855 checks PASS
+g++    -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer -ffunction-sections -fdata-sections -DBURSZTYN_IDT_HOST_TEST narzedzia/test_xhci_pointer.cpp idt.cpp pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp input_device.cpp -Wl,--gc-sections -o .pointingtest/xhci-pointer
+.pointingtest/xhci-pointer
+xHCI production interrupt setup/BDF/capability/failure/IF: 133 checks PASS
+Command/transfer producer wrap and Link cycle: 1030 checks PASS
+xHCI Supported Protocol/endpoint context: 15 checks PASS
+xHCI failed first submission preserves PS/2: 24 checks PASS
+Shared VirtualBox tablet stream: 4800 checks PASS
+xHCI production pointer completions/short control/stale events: 9484 checks PASS
+g++    -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer narzedzia/test_pointer_regression.cpp sterowniki/usb/hid_pointer.cpp input_device.cpp -o .pointingtest/pointer-regression
+.pointingtest/pointer-regression
+Signed relative cursor regression: 396600 checks PASS
+InputDevice modes/readiness/API regression: 56 checks PASS
+python3 narzedzia/test_pointer_boot_order.py
+Pointer boot order/barrier: 6 checks PASS
+g++    -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer -DBURSZTYN_XHCI_HOST_TEST -DBURSZTYN_IDT_HOST_TEST -DBURSZTYNDIAGXHCIPHYSICALMOUSE=0 -ffunction-sections -fdata-sections narzedzia/test_xhci_physical_mouse.cpp idt.cpp pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp input_device.cpp -Wl,--gc-sections -o .pointingtest/xhci-physical-mouse-production
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 .pointingtest/xhci-physical-mouse-production
+Intel capabilities/legacy handoff/address width: 39 checks PASS
+Control TRB requests/directions/reserved fields: 32 checks PASS
+Multi-interface/companion/interval/DCI/Boot Mouse/packed report: 1597 checks PASS
+Ring full/wrap/Link/pre-publication observation: 1497 checks PASS
+Production Intel-style boot/hotplug/EP0/IRQ/mouse/requeue/removal: 15246 checks PASS
+Control short/Stall recovery/USB2-USB3 PORTSC/reset failure: 1635 checks PASS
+Connected-at-boot mouse/first live report: 276 checks PASS
+Physical xHCI mouse total: 20322 checks PASS; allocations 248 releases 248
+g++    -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer -DBURSZTYN_XHCI_HOST_TEST -DBURSZTYN_IDT_HOST_TEST -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -ffunction-sections -fdata-sections narzedzia/test_xhci_physical_mouse.cpp idt.cpp pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp input_device.cpp -Wl,--gc-sections -o .pointingtest/xhci-physical-mouse
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 .pointingtest/xhci-physical-mouse
+Intel capabilities/legacy handoff/address width: 39 checks PASS
+Control TRB requests/directions/reserved fields: 32 checks PASS
+Multi-interface/companion/interval/DCI/Boot Mouse/packed report: 1597 checks PASS
+Ring full/wrap/Link/pre-publication observation: 1497 checks PASS
+Production Intel-style boot/hotplug/EP0/IRQ/mouse/requeue/removal: 15246 checks PASS
+Control short/Stall recovery/USB2-USB3 PORTSC/reset failure: 1635 checks PASS
+Connected-at-boot mouse/first live report: 276 checks PASS
+Physical xHCI mouse total: 20322 checks PASS; allocations 248 releases 248

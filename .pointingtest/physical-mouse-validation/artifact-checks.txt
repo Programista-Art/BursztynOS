@@ -1,0 +1,10 @@
+Diagnostic build: exit 0.
+Diagnostic ISO kernel equals build output.
+Physical diagnostic markers present; unrelated pointing diagnostic markers absent.
+Production build: exit 0.
+Production ISO kernel equals final build output.
+Physical and unrelated pointing diagnostic markers absent from production kernel.
+Production build has no BURSZTYNDIAG definitions; diagnostic build defines only BURSZTYNDIAGXHCIPHYSICALMOUSE=1.
+Production and diagnostic kernels differ. Both build logs contain zero warnings.
+Physical fixture: 20321 checks per mode; both diagnostic modes exit 0 under ASan/UBSan with leak checking.
+Pointing/regression/IRQ suites exit 0 under ASan/UBSan.

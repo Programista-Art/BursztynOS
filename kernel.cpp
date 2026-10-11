@@ -1,4 +1,5 @@
 #include "ekran_powitalny_api.h"
+#include "boot_phase_timing.h"
 #include "opcje_startowe.h"
 #include "tapety.h"
 #include "ekran.h"
@@ -2087,6 +2088,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
      * Szczegolnie wazne jest, aby timer APIC nie uruchomil schedulera
      * zanim zostanie zainstalowany i utworzony pierwszy proces Ring 3.
      */
+    BootTiming::entry();
     asm volatile("cli" ::: "memory");
     serial_inicjalizuj();
 #if defined(BURSZTYN_DIAG_VIRTIO_BOOT) && BURSZTYN_DIAG_VIRTIO_BOOT
@@ -2160,6 +2162,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
 
     InicjalizujGrafike(
         multiboot_info_ptr);
+    BootTiming::framebuffer_ready();
 
     grafika_gotowa = true;
 
@@ -2221,6 +2224,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
             ? "[HPET-TEST] 32-bit wrap monotonic: OK"
             : "[HPET-TEST] 32-bit wrap monotonic: BLAD");
 
+    BootTiming::clock_ready();
     powitanie_inicjalizuj(
         !zadano_automatyczne_testy(g_multiboot_info_ptr) &&
         !zadano_automatyczne_testy(g_multiboot_info_ptr, "bursztyn.splash=0") &&
@@ -2259,7 +2263,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
      * PCI i kontrolery przerwan
      * ------------------------------------------------------------------ */
 
-    skanuj_magistrale_pci();
+    {BootTiming::Scope timing(BootTiming::PciScan);skanuj_magistrale_pci();}
 
     inicjalizuj_apic();
 
@@ -2271,8 +2275,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     // Complete USB firmware handoff/controller setup before negotiating the
     // i8042 streaming protocol, as in the known-working hardware sequence.
     // USB registration stays ineligible until a real valid runtime report.
-    usb_inicjalizuj();
-    InicjalizujMyszPS2();
+    {BootTiming::Scope timing(BootTiming::UsbBeforeSplash);usb_inicjalizuj();}
+    {BootTiming::Scope timing(BootTiming::Ps2Init);InicjalizujMyszPS2();}
 
     wypisz_log(
         "[I/O] PS/2 gotowe.");
@@ -2353,6 +2357,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
         }
     }
     grafika_zakoncz_wybor_backendu();
+    BootTiming::dump();
     virtio_pci_diag_trace_type(VIRTIO_ID_GPU, "driver probe end");
 
     /* BMP pozostaje fallbackiem po inicjalizacji BSP2. */

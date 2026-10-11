@@ -1,3 +1,4 @@
+#include "boot_phase_timing.h"
 #include "xhci_pointing_diag.h"
 #include "pointer_coordinates.h"
 #include "diagnostyka_startu.h"
@@ -1017,7 +1018,7 @@ void PrzeniesNaEkran() {
         aktywny_ekran->PobierzPitch()/4,false);
     if(powitanie_pierwsza_publikacja())SplashFirstDiag::event("first_graphics_commit",czas_monotoniczny_us());
     aktywny_ekran->KopiujNaEkran(source);
-    if(aktywny_ekran->PublikacjaUdana()){PrezentacjaStartu::opublikowana();powitanie_publikacja();}
+    if(aktywny_ekran->PublikacjaUdana()){BootTiming::framebuffer_published();PrezentacjaStartu::opublikowana();powitanie_publikacja();}
 }
 
 void PrzeniesFragmentNaEkran(int x,
@@ -1043,7 +1044,7 @@ void PrzeniesFragmentNaEkran(int x,
     if(powitanie_aktywne()||PrezentacjaStartu::wymaga_pelnej()) {
         SplashFirstDiag::event("first_graphics_commit",czas_monotoniczny_us());
         aktywny_ekran->KopiujNaEkran(source);
-        if(aktywny_ekran->PublikacjaUdana()){PrezentacjaStartu::opublikowana();powitanie_publikacja();}
+        if(aktywny_ekran->PublikacjaUdana()){BootTiming::framebuffer_published();PrezentacjaStartu::opublikowana();powitanie_publikacja();}
     } else aktywny_ekran->KopiujFragmentNaEkran(source,x,y,szer,wys);
     const auto elapsed=gui_perf_now()-start;
     gui_perf_add(0,GP_PRESENT_NS,elapsed);gui_perf_max(0,GP_PRESENT_MAX_NS,elapsed);

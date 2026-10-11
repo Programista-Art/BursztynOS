@@ -1,0 +1,2 @@
+BOOT baseline USB-before-splash=2801500000 ns control-requests=7
+Boot/coexistence fixture total: 267 checks PASS

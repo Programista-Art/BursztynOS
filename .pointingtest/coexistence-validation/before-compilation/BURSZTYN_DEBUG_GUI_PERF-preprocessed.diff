@@ -1,0 +1,10 @@
+--- production/xhci.o
++++ BURSZTYN_DEBUG_GUI_PERF/xhci.o
+@@ -1703,6 +1703,7 @@
+         else write32(xhc.runtime+0x20U,0,2U);
+     }
+     xhc.usb_events_processed+=events;if(events>xhc.max_events_per_service)xhc.max_events_per_service=events;
++    if((xhc.usb_service_calls%1024U)==0){log_values("[USB-PERF] service_calls=",xhc.usb_service_calls);log_values("[USB-PERF] events=",xhc.usb_events_processed);log_values("[USB-PERF] max_events_per_service=",xhc.max_events_per_service);log_values("[USB-PERF] mouse_reports=",xhc.mouse_reports_processed);log_values("[USB-PERF] keyboard_reports=",xhc.keyboard_reports_processed);}
+     if(xhc.port_event){xhc.port_event=false;for(uint32_t p=1;p<=xhc.max_ports;++p){XhciDevice* found=nullptr;for(uint32_t s=1;s<=xhc.enabled_slots;++s)if(xhc.devices[s].enabled&&xhc.devices[s].root_port==p){found=&xhc.devices[s];break;}const uint32_t status=read32(xhc.operational,PORTSC_BASE+(p-1U)*16U);
+         const bool connected=status&PORT_CCS;
+         port_clear_changes(uint8_t(p),status&PORT_RW1C);

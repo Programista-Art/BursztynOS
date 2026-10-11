@@ -1,0 +1,20 @@
+g++    -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer -DBURSZTYN_XHCI_HOST_TEST -DBURSZTYN_IDT_HOST_TEST -DBURSZTYNDIAGXHCIPHYSICALMOUSE=0 -ffunction-sections -fdata-sections narzedzia/test_xhci_physical_mouse.cpp idt.cpp pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp input_device.cpp -Wl,--gc-sections -o .pointingtest/xhci-physical-mouse-production
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 .pointingtest/xhci-physical-mouse-production
+Intel capabilities/legacy handoff/address width: 39 checks PASS
+Control TRB requests/directions/reserved fields: 32 checks PASS
+Multi-interface/companion/interval/DCI/Boot Mouse/packed report: 1597 checks PASS
+Ring full/wrap/Link/pre-publication observation: 1497 checks PASS
+Production Intel-style boot/hotplug/EP0/IRQ/mouse/requeue/removal: 15246 checks PASS
+Control short/Stall recovery/USB2-USB3 PORTSC/reset failure: 1635 checks PASS
+Connected-at-boot mouse/first live report: 275 checks PASS
+Physical xHCI mouse total: 20321 checks PASS; allocations 248 releases 248
+g++    -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer -DBURSZTYN_XHCI_HOST_TEST -DBURSZTYN_IDT_HOST_TEST -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -ffunction-sections -fdata-sections narzedzia/test_xhci_physical_mouse.cpp idt.cpp pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp input_device.cpp -Wl,--gc-sections -o .pointingtest/xhci-physical-mouse
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 .pointingtest/xhci-physical-mouse
+Intel capabilities/legacy handoff/address width: 39 checks PASS
+Control TRB requests/directions/reserved fields: 32 checks PASS
+Multi-interface/companion/interval/DCI/Boot Mouse/packed report: 1597 checks PASS
+Ring full/wrap/Link/pre-publication observation: 1497 checks PASS
+Production Intel-style boot/hotplug/EP0/IRQ/mouse/requeue/removal: 15246 checks PASS
+Control short/Stall recovery/USB2-USB3 PORTSC/reset failure: 1635 checks PASS
+Connected-at-boot mouse/first live report: 275 checks PASS
+Physical xHCI mouse total: 20321 checks PASS; allocations 248 releases 248

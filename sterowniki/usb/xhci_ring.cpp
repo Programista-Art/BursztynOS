@@ -18,7 +18,7 @@ bool xhci_command_ring_create(XhciProducerRing* ring, uint16_t trb_count) {
 }
 
 bool xhci_command_ring_enqueue(XhciProducerRing* ring, const XhciTrb& source,
-                               uint64_t* physical_trb) {
+                               uint64_t* physical_trb, bool publish) {
     if (!ring || !ring->trbs || !physical_trb ||
         ring->outstanding >= static_cast<uint16_t>(ring->trb_count - 2U)) return false;
     XhciTrb trb = source;
@@ -37,7 +37,12 @@ bool xhci_command_ring_enqueue(XhciProducerRing* ring, const XhciTrb& source,
             xhci_trb::TOGGLE_CYCLE | (ring->producer_cycle?xhci_trb::CYCLE:0U);
     }
     __atomic_thread_fence(__ATOMIC_RELEASE);
-    __atomic_store_n(&ring->trbs[index].dword3,trb.dword3,__ATOMIC_RELEASE);
+#ifdef BURSZTYN_XHCI_HOST_TEST
+    extern void xhci_host_before_publish(const XhciProducerRing*,uint16_t,const XhciTrb&);
+    xhci_host_before_publish(ring,index,trb);
+#endif
+    // A multi-stage control request publishes its first TRB only after Status.
+    if(publish)__atomic_store_n(&ring->trbs[index].dword3,trb.dword3,__ATOMIC_RELEASE);
     *physical_trb = ring->dma.physical_address +
                     static_cast<uint64_t>(index) * sizeof(XhciTrb);
     ++ring->producer_index;

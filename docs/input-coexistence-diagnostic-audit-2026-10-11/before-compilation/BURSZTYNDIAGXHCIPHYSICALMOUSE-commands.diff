@@ -1,0 +1,290 @@
+--- production/instalator.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/instalator.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c instalator.cpp -o instalator.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c instalator.cpp -o instalator.o
+--- production/storage_format.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/storage_format.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c storage_format.cpp -o storage_format.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c storage_format.cpp -o storage_format.o
+--- production/blokowy.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/blokowy.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c blokowy.cpp -o blokowy.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c blokowy.cpp -o blokowy.o
+--- production/ekran.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/ekran.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c ekran.cpp -o ekran.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c ekran.cpp -o ekran.o
+--- production/ekran_format.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/ekran_format.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c ekran_format.cpp -o ekran_format.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c ekran_format.cpp -o ekran_format.o
+--- production/bufory_grafiki.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/bufory_grafiki.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c bufory_grafiki.cpp -o bufory_grafiki.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c bufory_grafiki.cpp -o bufory_grafiki.o
+--- production/bochs_vbe.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/bochs_vbe.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c sterowniki/grafika/bochs_vbe.cpp -o bochs_vbe.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c sterowniki/grafika/bochs_vbe.cpp -o bochs_vbe.o
+--- production/tapety.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/tapety.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c tapety.cpp -o tapety.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c tapety.cpp -o tapety.o
+--- production/btp.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/btp.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c narzedzia/tapety-btp/tapetybtp.cpp -o btp.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c narzedzia/tapety-btp/tapetybtp.cpp -o btp.o
+--- production/gdt.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/gdt.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c gdt.cpp -o gdt.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c gdt.cpp -o gdt.o
+--- production/tss.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/tss.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c tss.cpp -o tss.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c tss.cpp -o tss.o
+--- production/acpi.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/acpi.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c acpi.cpp -o acpi.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c acpi.cpp -o acpi.o
+--- production/hpet.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/hpet.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -I. -c sterowniki/czas/hpet.cpp -o hpet.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -I. -c sterowniki/czas/hpet.cpp -o hpet.o
+--- production/dma.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/dma.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -I. -c sterowniki/dma.cpp -o dma.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -I. -c sterowniki/dma.cpp -o dma.o
+--- production/usb.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/usb.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -I. -c sterowniki/usb/usb.cpp -o usb.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -I. -c sterowniki/usb/usb.cpp -o usb.o
+--- production/xhci.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/xhci.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -I. -c sterowniki/usb/xhci.cpp -o xhci.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -I. -c sterowniki/usb/xhci.cpp -o xhci.o
+--- production/xhci_ring.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/xhci_ring.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -I. -c sterowniki/usb/xhci_ring.cpp -o xhci_ring.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -I. -c sterowniki/usb/xhci_ring.cpp -o xhci_ring.o
+--- production/usb_hid.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/usb_hid.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -I. -c sterowniki/usb/usb_hid.cpp -o usb_hid.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -I. -c sterowniki/usb/usb_hid.cpp -o usb_hid.o
+--- production/hid_pointer.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/hid_pointer.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -I. -c sterowniki/usb/hid_pointer.cpp -o hid_pointer.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -I. -c sterowniki/usb/hid_pointer.cpp -o hid_pointer.o
+--- production/ohci.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/ohci.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -I. -c sterowniki/usb/ohci.cpp -o ohci.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -I. -c sterowniki/usb/ohci.cpp -o ohci.o
+--- production/apic.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/apic.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c apic.cpp -o apic.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c apic.cpp -o apic.o
+--- production/idt.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/idt.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c idt.cpp -o idt.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c idt.cpp -o idt.o
+--- production/network_device.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/network_device.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c network_device.cpp -o network_device.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c network_device.cpp -o network_device.o
+--- production/e1000.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/e1000.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c e1000.cpp -o e1000.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c e1000.cpp -o e1000.o
+--- production/siec.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/siec.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c siec.cpp -o siec.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c siec.cpp -o siec.o
+--- production/hda.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/hda.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c sterowniki/dzwiek/hda.cpp -o hda.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c sterowniki/dzwiek/hda.cpp -o hda.o
+--- production/klawiatura.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/klawiatura.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c klawiatura.cpp -o klawiatura.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c klawiatura.cpp -o klawiatura.o
+--- production/mysz.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/mysz.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c mysz.cpp -o mysz.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c mysz.cpp -o mysz.o
+--- production/zegar-rtc.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/zegar-rtc.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c zegar-rtc.cpp -o zegar-rtc.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c zegar-rtc.cpp -o zegar-rtc.o
+--- production/pmm.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/pmm.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c pmm.cpp -o pmm.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c pmm.cpp -o pmm.o
+--- production/vmm.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/vmm.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c vmm.cpp -o vmm.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c vmm.cpp -o vmm.o
+--- production/psf.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/psf.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c psf.cpp -o psf.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c psf.cpp -o psf.o
+--- production/grafika.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/grafika.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c grafika.cpp -o grafika.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c grafika.cpp -o grafika.o
+--- production/ekran_powitalny.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/ekran_powitalny.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c ekran_powitalny.cpp -o ekran_powitalny.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c ekran_powitalny.cpp -o ekran_powitalny.o
+--- production/syscalls.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/syscalls.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c syscalls.cpp -o syscalls.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c syscalls.cpp -o syscalls.o
+--- production/bws_nowoczesne.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/bws_nowoczesne.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -Os -c bws_nowoczesne.cpp -o bws_nowoczesne.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -Os -c bws_nowoczesne.cpp -o bws_nowoczesne.o
+--- production/pci.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/pci.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c pci.cpp -o pci.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c pci.cpp -o pci.o
+--- production/virtio_pci.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/virtio_pci.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c virtio_pci.cpp -o virtio_pci.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c virtio_pci.cpp -o virtio_pci.o
+--- production/virtqueue.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/virtqueue.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c virtqueue.cpp -o virtqueue.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c virtqueue.cpp -o virtqueue.o
+--- production/virtio_rng.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/virtio_rng.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c virtio_rng.cpp -o virtio_rng.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c virtio_rng.cpp -o virtio_rng.o
+--- production/virtio_blk.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/virtio_blk.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c virtio_blk.cpp -o virtio_blk.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c virtio_blk.cpp -o virtio_blk.o
+--- production/virtio_net.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/virtio_net.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c virtio_net.cpp -o virtio_net.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c virtio_net.cpp -o virtio_net.o
+--- production/virtio_gpu.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/virtio_gpu.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c virtio_gpu.cpp -o virtio_gpu.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c virtio_gpu.cpp -o virtio_gpu.o
+--- production/virtio_input.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/virtio_input.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c virtio_input.cpp -o virtio_input.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c virtio_input.cpp -o virtio_input.o
+--- production/input_device.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/input_device.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c input_device.cpp -o input_device.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c input_device.cpp -o input_device.o
+--- production/ahci.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/ahci.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c ahci.cpp -o ahci.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c ahci.cpp -o ahci.o
+--- production/stos_jadra.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/stos_jadra.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c stos_jadra.cpp -o stos_jadra.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c stos_jadra.cpp -o stos_jadra.o
+--- production/loader.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/loader.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c loader.cpp -o loader.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c loader.cpp -o loader.o
+--- production/kernel.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/kernel.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c kernel.cpp -o kernel.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c kernel.cpp -o kernel.o
+--- production/uefi_gop.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/uefi_gop.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c sterowniki/grafika/uefi_gop.cpp -o uefi_gop.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c sterowniki/grafika/uefi_gop.cpp -o uefi_gop.o
+--- production/heap.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/heap.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c heap.cpp -o heap.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c heap.cpp -o heap.o
+--- production/scheduler.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/scheduler.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c scheduler.cpp -o scheduler.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c scheduler.cpp -o scheduler.o
+--- production/skladacz_obrazu.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/skladacz_obrazu.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c skladacz_obrazu.cpp -o skladacz_obrazu.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c skladacz_obrazu.cpp -o skladacz_obrazu.o
+--- production/mbedtls_port.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/mbedtls_port.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c biblioteki/mbedtls/mbedtls_port.cpp -o mbedtls_port.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c biblioteki/mbedtls/mbedtls_port.cpp -o mbedtls_port.o
+--- production/tls.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/tls.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c tls.cpp -o tls.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c tls.cpp -o tls.o
+--- production/bezpieczenstwo.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/bezpieczenstwo.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c bezpieczenstwo.cpp -o bezpieczenstwo.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c bezpieczenstwo.cpp -o bezpieczenstwo.o
+--- production/aktualizacja.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/aktualizacja.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c aktualizacja.cpp -o aktualizacja.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c aktualizacja.cpp -o aktualizacja.o
+--- production/motyw.o
++++ BURSZTYNDIAGXHCIPHYSICALMOUSE/motyw.o
+@@ -1 +1 @@
+-x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c motyw.cpp -o motyw.o
++x86_64-linux-gnu-g++ -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-stack-protector -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage '-DMBEDTLS_USER_CONFIG_FILE="bursztyn_mbedtls_config.h"' -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -c motyw.cpp -o motyw.o

@@ -94,7 +94,10 @@ void test_virtio_input_dual_device_and_motion_stress() {
     // stream. Every poll is bounded to 32 descriptors and preserves all
     // completions; alternately deliver keyboard events during the same run.
     constexpr uint32_t REPORTS = 1000000;
-    uint32_t completed = 0;
+    // This fixture advertises BTN_TOUCH; its moving stream has active contact.
+    TEST_ASSERT(mock_inject_input_event_for(&tablet,tablet_consumed,INPUT_EV_KEY,INPUT_BTN_TOUCH,1),"Inject active tablet contact");
+    TEST_ASSERT(virtio_input_poll_events(&tablet,1)==1,"Consume contact without committing axes");
+    uint32_t completed = 1;
     g_mock_input_capture.reset();
     for (uint32_t i = 0; i < REPORTS; ++i) {
         if (uint16_t(tablet.eventq->avail->idx - tablet_consumed) < 3) {

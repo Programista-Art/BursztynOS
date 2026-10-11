@@ -241,6 +241,16 @@ struct InputDevice {
     InputPointerState pointer_state;
     InputPointerMode pointer_mode;
     InputUsbController usb_controller;
+    // Contact is independent of buttons and coordinate scale. Backends that
+    // advertise BTN_TOUCH must set this capability before registration.
+    bool         abs_contact_required;
+    bool         contact_active;
+    bool         last_contact_active;
+    bool         report_valid;
+    bool         last_abs_x_valid, last_abs_y_valid;
+    int32_t      last_abs_x, last_abs_y;
+    uint8_t      published_buttons;
+    int          last_abs_width, last_abs_height;
 };
 
 /* =========================================================================
@@ -256,6 +266,10 @@ size_t input_get_device_count(void);
 InputDevice* input_get_device(size_t index);
 InputDevice* input_find_device_by_name(const char* name);
 InputDevice* input_get_pointer_owner(void);
+// Compatibility getter above reports a preferred source only. Neither getter
+// is an event acceptance gate and both are side-effect free.
+InputDevice* input_get_last_pointer_source(void);
+bool input_pointer_is_active(const InputDevice* dev);
 const char* input_bus_name(uint32_t bus_type);
 
 /* Dyspozycja pojedynczego lub serii zdarzen z urzadzenia wejsciowego */

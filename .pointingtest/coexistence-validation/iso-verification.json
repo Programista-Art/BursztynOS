@@ -1,0 +1,14 @@
+{
+  "BursztynOS.iso": {
+    "sha256": "8ed796871adf8e9f7bd423ac948bf8801dc8c7476c26238b5681617f67815155",
+    "kernel_sha256": "35398446a9dfdce8605dbf9c4f894e6e212933563b6e591f18ebde58dd6d1d3f",
+    "fresh_kernel": true,
+    "coexistence_diagnostics": false
+  },
+  "BursztynOS-input-coexistence-diag.iso": {
+    "sha256": "121f9191ccdb8a60e24e8144947e3a98820322b1ded165fc4e65071f80206e33",
+    "kernel_sha256": "a6882de8564de0a1c5e09b69e3da41783df5d267f6b955263abab29d202c733a",
+    "fresh_kernel": true,
+    "coexistence_diagnostics": true
+  }
+}

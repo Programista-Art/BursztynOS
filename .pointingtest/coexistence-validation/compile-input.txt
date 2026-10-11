@@ -1,0 +1,4 @@
+input_device.cpp: In function ‘InputDevice* input_find_device_by_name(const char*)’:
+input_device.cpp:636:12: error: cannot convert ‘bool’ to ‘InputDevice*’ in return
+  636 |     return false;
+      |            ^~~~~

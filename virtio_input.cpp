@@ -338,6 +338,7 @@ static bool virtio_input_classify_device(VirtioInputDriver* drv) {
             }
         }
         // BTN_TOUCH = 0x14A = 330 = bajt 41 bit 2
+        drv->input_dev.abs_contact_required = key_bits_size > 41 && (key_bits[41] & (1U << 2));
         if (key_bits_size > 41) {
             if ((key_bits[41] & (1U << 2)) != 0) {
                 has_mouse_btn = true;

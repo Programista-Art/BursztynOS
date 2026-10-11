@@ -1,0 +1,5 @@
+g++    -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer -DBURSZTYN_XHCI_HOST_TEST -DBURSZTYN_IDT_HOST_TEST -DBURSZTYNDIAGXHCIPHYSICALMOUSE=0 -ffunction-sections -fdata-sections narzedzia/test_xhci_physical_mouse.cpp idt.cpp pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp input_device.cpp -Wl,--gc-sections -o .pointingtest/xhci-physical-mouse-production
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 .pointingtest/xhci-physical-mouse-production
+FAIL narzedzia/test_xhci_physical_mouse.cpp:242: !(read32(xhc.operational,PORTSC_BASE+8*16)&PORT_RW1C)
+Aborted (core dumped)
+make: *** [Makefile:1822: test-xhci-physical-mouse-host] Error 134

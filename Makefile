@@ -1708,14 +1708,15 @@ STARTUP_ASAN_OPTIONS ?= detect_leaks=1
 .PHONY: test-splash-production-path
 STARTUP_HOST_FLAGS := -std=c++17 -O1 -g -I. -ffunction-sections -fdata-sections -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_GRAPHICS_HOST_TEST -DBURSZTYN_COMPOSITOR_HOST_TEST -DBURSZTYNDIAGSPLASHRUNTIMEFRAMES=1 -fsanitize=address,undefined -pthread
 STARTUP_HOST_SOURCES := narzedzia/test_splash_production_path.cpp grafika.cpp ekran_powitalny.cpp skladacz_obrazu.cpp sterowniki/grafika/uefi_gop.cpp pci.cpp virtio_pci.cpp virtqueue.cpp virtio_rng.cpp virtio_blk.cpp network_device.cpp virtio_net.cpp virtio_gpu.cpp input_device.cpp virtio_input.cpp sterowniki/usb/usb_hid.cpp klawiatura.cpp
+.wm-test/runtime-host/narzedzia/test_splash_production_path.o .wm-test/runtime-host/pmm.o: STARTUP_HOST_FLAGS += -DBURSZTYN_PMM_HOST_TEST
 STARTUP_HOST_OBJECTS := $(addprefix .wm-test/runtime-host/,$(STARTUP_HOST_SOURCES:.cpp=.o))
 .wm-test/runtime-host/%.o: %.cpp
 	@mkdir -p $(@D)
 	g++ $(STARTUP_HOST_FLAGS) -MMD -MP -c $< -o $@
 -include $(STARTUP_HOST_OBJECTS:.o=.d)
-test-splash-production-path: $(STARTUP_HOST_OBJECTS)
+test-splash-production-path: $(STARTUP_HOST_OBJECTS) .wm-test/runtime-host/pmm.o
 	@mkdir -p .wm-test
-	g++ $(STARTUP_HOST_FLAGS) -Wl,--gc-sections $(STARTUP_HOST_OBJECTS) -o .wm-test/splash-production-path
+	g++ $(STARTUP_HOST_FLAGS) -Wl,--gc-sections $(STARTUP_HOST_OBJECTS) .wm-test/runtime-host/pmm.o -o .wm-test/splash-production-path
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/splash-production-path
 
 # Bootstrap status is shared with kernel early startup; explicit first-build
@@ -1806,3 +1807,28 @@ input_device.o grafika.o hid_pointer.o: pointer_coordinates.h
 test-pointer-graphics-host: $(filter-out .wm-test/runtime-host/narzedzia/test_splash_production_path.o,$(STARTUP_HOST_OBJECTS))
 	g++ $(STARTUP_HOST_FLAGS) -DBURSZTYN_PMM_HOST_TEST -Wl,--gc-sections narzedzia/test_pointer_graphics.cpp sterowniki/usb/hid_pointer.cpp $^ -o .wm-test/pointer-graphics
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/pointer-graphics
+
+# Physical hardware diagnostics: bounded, deferred, no polling or timing changes.
+BURSZTYNDIAGXHCIPHYSICALMOUSE ?= 0
+ifeq ($(BURSZTYNDIAGXHCIPHYSICALMOUSE),1)
+KERNEL_CXXFLAGS += -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1
+endif
+xhci.o: sterowniki/usb/xhci_hw.h
+xhci.o hid_pointer.o input_device.o: sterowniki/usb/xhci_physical_diag.h
+
+.PHONY: test-xhci-physical-mouse-host
+test-xhci-physical-mouse-host:
+	@mkdir -p .pointingtest
+	g++ $(POINTING_HOST_FLAGS) -DBURSZTYN_XHCI_HOST_TEST -DBURSZTYN_IDT_HOST_TEST -DBURSZTYNDIAGXHCIPHYSICALMOUSE=0 -ffunction-sections -fdata-sections narzedzia/test_xhci_physical_mouse.cpp idt.cpp pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp input_device.cpp -Wl,--gc-sections -o .pointingtest/xhci-physical-mouse-production
+	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 .pointingtest/xhci-physical-mouse-production
+	g++ $(POINTING_HOST_FLAGS) -DBURSZTYN_XHCI_HOST_TEST -DBURSZTYN_IDT_HOST_TEST -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -ffunction-sections -fdata-sections narzedzia/test_xhci_physical_mouse.cpp idt.cpp pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp input_device.cpp -Wl,--gc-sections -o .pointingtest/xhci-physical-mouse
+	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 .pointingtest/xhci-physical-mouse
+
+BURSZTYNDIAGINPUTCOEXISTENCE ?= 0
+ifeq ($(BURSZTYNDIAGINPUTCOEXISTENCE),1)
+KERNEL_CXXFLAGS += -DBURSZTYNDIAGINPUTCOEXISTENCE=1
+endif
+
+.PHONY: test-input-coexistence-host
+test-input-coexistence-host:
+	python3 narzedzia/test_input_diagnostic_parity.py

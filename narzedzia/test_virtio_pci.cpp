@@ -5867,6 +5867,8 @@ void test_virtio_input_abs_scaling() {
     VirtioInputDriver drv{};
     TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
+    TEST_ASSERT(mock_inject_input_event(&drv,INPUT_EV_KEY,INPUT_BTN_TOUCH,1),"Active touch contact for coordinate scaling");
+    TEST_ASSERT(virtio_input_poll_events(&drv,1)==1,"Consume contact");
     g_mock_input_capture.reset();
     mock_inject_input_event(&drv, INPUT_EV_ABS, INPUT_ABS_X, 16383);
     mock_inject_input_event(&drv, INPUT_EV_ABS, INPUT_ABS_Y, 16383);
@@ -5930,6 +5932,8 @@ void test_virtio_input_asymmetric_abs_mapping() {
     TEST_ASSERT(drv.input_dev.abs_x.min==101&&drv.input_dev.abs_x.max==60001&&
                 drv.input_dev.abs_y.min==503&&drv.input_dev.abs_y.max==9503,
                 "Independent ABS_INFO discovery for both axes");
+    TEST_ASSERT(mock_inject_input_event(&drv,INPUT_EV_KEY,INPUT_BTN_TOUCH,1),"Active touch contact for asymmetric mapping");
+    TEST_ASSERT(virtio_input_poll_events(&drv,1)==1,"Consume contact");
     auto send=[&](int x,int y,bool axis_x=true,bool axis_y=true){
         if(axis_x)mock_inject_input_event(&drv,INPUT_EV_ABS,INPUT_ABS_X,uint32_t(x));
         if(axis_y)mock_inject_input_event(&drv,INPUT_EV_ABS,INPUT_ABS_Y,uint32_t(y));
@@ -6893,7 +6897,7 @@ void test_bursztyn_keyboard_layout_preserved() {
     TEST_ASSERT(g_host_dma_allocs.empty(), "Zero wyciekow DMA");
 }
 
-// 29. Generyczne wejscie: Arbitraż priorytetów wskaźnika (PS/2 vs VirtIO) i brak duplikacji ruchu
+// 29. Independent PS/2 and VirtIO sources; preferred metadata never gates input.
 void test_input_pointer_ownership_and_no_duplicate_motion() {
     input_reset_all();
     g_mock_input_capture.reset();
@@ -6923,17 +6927,17 @@ void test_input_pointer_ownership_and_no_duplicate_motion() {
     TEST_ASSERT(host_input_prepare_and_activate(&drv_mouse, &dev_mouse), "Init VirtIO mouse");
     TEST_ASSERT(input_get_pointer_owner() == &drv_mouse.input_dev, "VirtIO przejmuje wlasnosc kursora od PS/2");
 
-    // 3. Sprawdz brak duplikacji: nadeslanie ruchu z PS/2 podczas gdy VirtIO jest wlascicielem
+    // 3. PS/2 remains active while VirtIO is the preferred diagnostic source.
     g_mock_input_capture.reset();
     input_dispatch_events(&ps2_dev, ev_ps2_rel, 2);
-    TEST_ASSERT(g_mock_input_capture.rel_calls == 0, "Ruch z PS/2 ZIGNOROWANY (brak duplikacji kursora)");
+    TEST_ASSERT(g_mock_input_capture.rel_calls == 1, "PS/2 remains usable beside VirtIO");
 
     // 4. Ruch z VirtIO jest normalnie akceptowany
     mock_inject_input_event(&drv_mouse, INPUT_EV_REL, INPUT_REL_X, 25);
     mock_inject_input_event(&drv_mouse, INPUT_EV_SYN, INPUT_SYN_REPORT, 0);
     virtio_input_poll_events(&drv_mouse, 10);
-    TEST_ASSERT(g_mock_input_capture.rel_calls == 1, "Ruch z VirtIO zaakceptowany, rel_calls == 1");
-    TEST_ASSERT(g_mock_input_capture.rel_dx == 25, "dx == 25 z VirtIO");
+    TEST_ASSERT(g_mock_input_capture.rel_calls == 2, "Both independent pointer reports delivered exactly once");
+    TEST_ASSERT(g_mock_input_capture.rel_dx == 35, "PS/2 10 plus VirtIO 25 arrive exactly once");
 
     // 5. Odlaczenie/reset urzadzenia VirtIO -> fallback z powrotem do PS/2
     TEST_ASSERT(virtio_input_reset(&drv_mouse), "Reset VirtIO mouse");

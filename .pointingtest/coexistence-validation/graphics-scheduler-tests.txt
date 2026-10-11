@@ -1,0 +1,115 @@
+g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_LOCK_HOST_TEST -DBURSZTYN_PMM_HOST_TEST -DBURSZTYNDIAGVIRTIOINPUTINIT=1 -ffunction-sections -fdata-sections -fsanitize=address,undefined -pthread heap.cpp pmm.cpp pci.cpp narzedzia/test_input_init_locks.cpp -Wl,--gc-sections -o .virtiotest/test-input-init-locks
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .virtiotest/test-input-init-locks
+PASS=4 FAIL=0: production heap/PMM/PCI locks, IRQ restoration, contention and failure paths
+g++    -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer -DBURSZTYN_IDT_HOST_TEST -ffunction-sections -fdata-sections idt.cpp narzedzia/test_irq_allocation.cpp -Wl,--gc-sections -o .pointingtest/irq-allocation
+.pointingtest/irq-allocation
+Production IRQ allocator uniqueness/exhaustion/IF restore: 3740 checks PASS
+g++ -std=c++17 -O1 -g -I. -ffunction-sections -fdata-sections -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_GRAPHICS_HOST_TEST -DBURSZTYN_COMPOSITOR_HOST_TEST -DBURSZTYNDIAGSPLASHRUNTIMEFRAMES=1 -fsanitize=address,undefined -pthread -MMD -MP -c grafika.cpp -o .wm-test/runtime-host/grafika.o
+g++ -std=c++17 -O1 -g -I. -ffunction-sections -fdata-sections -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_GRAPHICS_HOST_TEST -DBURSZTYN_COMPOSITOR_HOST_TEST -DBURSZTYNDIAGSPLASHRUNTIMEFRAMES=1 -fsanitize=address,undefined -pthread -MMD -MP -c ekran_powitalny.cpp -o .wm-test/runtime-host/ekran_powitalny.o
+g++ -std=c++17 -O1 -g -I. -ffunction-sections -fdata-sections -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_GRAPHICS_HOST_TEST -DBURSZTYN_COMPOSITOR_HOST_TEST -DBURSZTYNDIAGSPLASHRUNTIMEFRAMES=1 -fsanitize=address,undefined -pthread -MMD -MP -c input_device.cpp -o .wm-test/runtime-host/input_device.o
+g++ -std=c++17 -O1 -g -I. -ffunction-sections -fdata-sections -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_GRAPHICS_HOST_TEST -DBURSZTYN_COMPOSITOR_HOST_TEST -DBURSZTYNDIAGSPLASHRUNTIMEFRAMES=1 -fsanitize=address,undefined -pthread -MMD -MP -c virtio_input.cpp -o .wm-test/runtime-host/virtio_input.o
+g++ -std=c++17 -O1 -g -I. -ffunction-sections -fdata-sections -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_GRAPHICS_HOST_TEST -DBURSZTYN_COMPOSITOR_HOST_TEST -DBURSZTYNDIAGSPLASHRUNTIMEFRAMES=1 -fsanitize=address,undefined -pthread -MMD -MP -c sterowniki/usb/usb_hid.cpp -o .wm-test/runtime-host/sterowniki/usb/usb_hid.o
+g++ -std=c++17 -O1 -g -I. -ffunction-sections -fdata-sections -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_GRAPHICS_HOST_TEST -DBURSZTYN_COMPOSITOR_HOST_TEST -DBURSZTYNDIAGSPLASHRUNTIMEFRAMES=1 -fsanitize=address,undefined -pthread -MMD -MP -c klawiatura.cpp -o .wm-test/runtime-host/klawiatura.o
+g++ -std=c++17 -O1 -g -I. -ffunction-sections -fdata-sections -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_GRAPHICS_HOST_TEST -DBURSZTYN_COMPOSITOR_HOST_TEST -DBURSZTYNDIAGSPLASHRUNTIMEFRAMES=1 -fsanitize=address,undefined -pthread -DBURSZTYN_PMM_HOST_TEST -Wl,--gc-sections narzedzia/test_pointer_graphics.cpp sterowniki/usb/hid_pointer.cpp .wm-test/runtime-host/grafika.o .wm-test/runtime-host/ekran_powitalny.o .wm-test/runtime-host/skladacz_obrazu.o .wm-test/runtime-host/sterowniki/grafika/uefi_gop.o .wm-test/runtime-host/pci.o .wm-test/runtime-host/virtio_pci.o .wm-test/runtime-host/virtqueue.o .wm-test/runtime-host/virtio_rng.o .wm-test/runtime-host/virtio_blk.o .wm-test/runtime-host/network_device.o .wm-test/runtime-host/virtio_net.o .wm-test/runtime-host/virtio_gpu.o .wm-test/runtime-host/input_device.o .wm-test/runtime-host/virtio_input.o .wm-test/runtime-host/sterowniki/usb/usb_hid.o .wm-test/runtime-host/klawiatura.o -o .wm-test/pointer-graphics
+ASAN_OPTIONS=detect_leaks=1 .wm-test/pointer-graphics
+Real graphics/InputDevice/HID pointer integration: 40 checks PASS
+mkdir -p .wm-test
+g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined narzedzia/test_cursor_host.cpp -o .wm-test/cursor
+ASAN_OPTIONS=detect_leaks=0 .wm-test/cursor
+Cursor diagnostics host PASS: default fast frames silent; anomaly timestamps, dirty metrics and coalescing logged
+Cursor host PASS: clipping, union, 100-position coalescing, interleaved producer, clean background, scene/theme/decor redraw, final-only presents and no stale pixels
+mkdir -p .wm-test
+g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_compositor_cursor.cpp -Wl,--gc-sections -o .wm-test/compositor-cursor
+ASAN_OPTIONS=detect_leaks=1 .wm-test/compositor-cursor
+Compositor lifecycle/scene: 74293/74293 PASS
+Popup compositor background restoration: 73816/73816 PASS
+Production compositor host PASS: modeset dirty geometry, Shell-equivalent layer preserves cursor/screen/generation, coalescing and theme/decor/full scene transactions
+g++ -std=c++17 -O1 -g -DBURSZTYNDIAGSPLASHTIMING=1 -fsanitize=address,undefined narzedzia/test_splash_timing.cpp -o .wm-test/splash-timing
+ASAN_OPTIONS=detect_leaks=1 .wm-test/splash-timing
+Splash exact timing / nonempty crossfades / stalls / diagnostics: 2185/2185 PASS
+g++ -std=c++17 -O1 -g -DBURSZTYNDIAGSPLASHFIRSTFRAME=1 -fsanitize=address,undefined narzedzia/test_splash_first_frame.cpp -o .wm-test/splash-first-frame
+ASAN_OPTIONS=detect_leaks=1 .wm-test/splash-first-frame
+First splash frame ordering / pixels / delayed render / resolution / DPI / generations: 101/101 PASS
+g++ -std=c++17 -O1 -g -fsanitize=address,undefined narzedzia/test_splash_snapshots.cpp -o .wm-test/splash-snapshots
+ASAN_OPTIONS=detect_leaks=1 .wm-test/splash-snapshots
+Message bounds 100%: second=(469,388)-(808,417), third=(512,388)-(765,417), shared baseline=411
+Message bounds 125%: second=(428,395)-(848,432), third=(481,395)-(794,432), shared baseline=425
+Production splash snapshots/baseline/reusable backing/absolute boundaries: 342/342 PASS
+g++ -std=c++17 -O1 -g -I. -ffunction-sections -fdata-sections -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_GRAPHICS_HOST_TEST -DBURSZTYN_COMPOSITOR_HOST_TEST -DBURSZTYNDIAGSPLASHRUNTIMEFRAMES=1 -fsanitize=address,undefined -pthread -MMD -MP -c narzedzia/test_splash_production_path.cpp -o .wm-test/runtime-host/narzedzia/test_splash_production_path.o
+In file included from narzedzia/test_splash_production_path.cpp:19:
+narzedzia/test_virtio_input_activation.inc: In function ‘void test_input_installer_pmm_dma_addresses()’:
+narzedzia/test_virtio_input_activation.inc:123:25: error: ‘pmm_diagnostic_page_owner’ was not declared in this scope
+  123 |             TEST_ASSERT(pmm_diagnostic_page_owner(p)==PmmPageOwner::RESERVED_MODULE,"Module ownership");
+      |                         ^~~~~~~~~~~~~~~~~~~~~~~~~
+narzedzia/test_virtio_pci.cpp:1250:15: note: in definition of macro ‘TEST_ASSERT’
+ 1250 |         if (!(cond)) { \
+      |               ^~~~
+narzedzia/test_virtio_input_activation.inc:123:55: error: ‘PmmPageOwner’ has not been declared
+  123 |             TEST_ASSERT(pmm_diagnostic_page_owner(p)==PmmPageOwner::RESERVED_MODULE,"Module ownership");
+      |                                                       ^~~~~~~~~~~~
+narzedzia/test_virtio_pci.cpp:1250:15: note: in definition of macro ‘TEST_ASSERT’
+ 1250 |         if (!(cond)) { \
+      |               ^~~~
+narzedzia/test_virtio_input_activation.inc:125:21: error: ‘pmm_diagnostic_page_owner’ was not declared in this scope
+  125 |         TEST_ASSERT(pmm_diagnostic_page_owner(target)==PmmPageOwner::FREE,"DMA candidate is FREE before allocation");
+      |                     ^~~~~~~~~~~~~~~~~~~~~~~~~
+narzedzia/test_virtio_pci.cpp:1250:15: note: in definition of macro ‘TEST_ASSERT’
+ 1250 |         if (!(cond)) { \
+      |               ^~~~
+narzedzia/test_virtio_input_activation.inc:125:56: error: ‘PmmPageOwner’ has not been declared
+  125 |         TEST_ASSERT(pmm_diagnostic_page_owner(target)==PmmPageOwner::FREE,"DMA candidate is FREE before allocation");
+      |                                                        ^~~~~~~~~~~~
+narzedzia/test_virtio_pci.cpp:1250:15: note: in definition of macro ‘TEST_ASSERT’
+ 1250 |         if (!(cond)) { \
+      |               ^~~~
+narzedzia/test_virtio_input_activation.inc:133:21: error: ‘pmm_diagnostic_page_owner’ was not declared in this scope
+  133 |         TEST_ASSERT(pmm_diagnostic_page_owner(target)==PmmPageOwner::ALLOCATED_PMM && pmm_diagnostic_page_owner(target+4096)==PmmPageOwner::ALLOCATED_PMM,"DMA allocated RAM");
+      |                     ^~~~~~~~~~~~~~~~~~~~~~~~~
+narzedzia/test_virtio_pci.cpp:1250:15: note: in definition of macro ‘TEST_ASSERT’
+ 1250 |         if (!(cond)) { \
+      |               ^~~~
+narzedzia/test_virtio_input_activation.inc:133:56: error: ‘PmmPageOwner’ has not been declared
+  133 |         TEST_ASSERT(pmm_diagnostic_page_owner(target)==PmmPageOwner::ALLOCATED_PMM && pmm_diagnostic_page_owner(target+4096)==PmmPageOwner::ALLOCATED_PMM,"DMA allocated RAM");
+      |                                                        ^~~~~~~~~~~~
+narzedzia/test_virtio_pci.cpp:1250:15: note: in definition of macro ‘TEST_ASSERT’
+ 1250 |         if (!(cond)) { \
+      |               ^~~~
+narzedzia/test_virtio_input_activation.inc:133:127: error: ‘PmmPageOwner’ has not been declared
+  133 |         TEST_ASSERT(pmm_diagnostic_page_owner(target)==PmmPageOwner::ALLOCATED_PMM && pmm_diagnostic_page_owner(target+4096)==PmmPageOwner::ALLOCATED_PMM,"DMA allocated RAM");
+      |                                                                                                                               ^~~~~~~~~~~~
+narzedzia/test_virtio_pci.cpp:1250:15: note: in definition of macro ‘TEST_ASSERT’
+ 1250 |         if (!(cond)) { \
+      |               ^~~~
+narzedzia/test_virtio_input_activation.inc: In function ‘void test_input_pmm_module_page_boundaries()’:
+narzedzia/test_virtio_input_activation.inc:152:21: error: ‘pmm_diagnostic_lock_state’ was not declared in this scope
+  152 |         TEST_ASSERT(pmm_diagnostic_lock_state()==0,"Allocator releases lock on return");
+      |                     ^~~~~~~~~~~~~~~~~~~~~~~~~
+narzedzia/test_virtio_pci.cpp:1250:15: note: in definition of macro ‘TEST_ASSERT’
+ 1250 |         if (!(cond)) { \
+      |               ^~~~
+narzedzia/test_virtio_input_activation.inc:157:17: error: ‘pmm_diagnostic_page_owner’ was not declared in this scope
+  157 |     TEST_ASSERT(pmm_diagnostic_page_owner(0x3000000)==PmmPageOwner::FRAMEBUFFER,"Framebuffer ownership");
+      |                 ^~~~~~~~~~~~~~~~~~~~~~~~~
+narzedzia/test_virtio_pci.cpp:1250:15: note: in definition of macro ‘TEST_ASSERT’
+ 1250 |         if (!(cond)) { \
+      |               ^~~~
+narzedzia/test_virtio_input_activation.inc:157:55: error: ‘PmmPageOwner’ has not been declared
+  157 |     TEST_ASSERT(pmm_diagnostic_page_owner(0x3000000)==PmmPageOwner::FRAMEBUFFER,"Framebuffer ownership");
+      |                                                       ^~~~~~~~~~~~
+narzedzia/test_virtio_pci.cpp:1250:15: note: in definition of macro ‘TEST_ASSERT’
+ 1250 |         if (!(cond)) { \
+      |               ^~~~
+narzedzia/test_virtio_input_activation.inc: In function ‘void test_input_pmm_exhaustion_and_lock_release()’:
+narzedzia/test_virtio_input_activation.inc:180:17: error: ‘pmm_diagnostic_lock_state’ was not declared in this scope
+  180 |     TEST_ASSERT(pmm_diagnostic_lock_state()==0,"Failure paths release PMM lock");
+      |                 ^~~~~~~~~~~~~~~~~~~~~~~~~
+narzedzia/test_virtio_pci.cpp:1250:15: note: in definition of macro ‘TEST_ASSERT’
+ 1250 |         if (!(cond)) { \
+      |               ^~~~
+narzedzia/test_virtio_input_activation.inc:184:17: error: ‘pmm_diagnostic_lock_state’ was not declared in this scope
+  184 |     TEST_ASSERT(pmm_diagnostic_lock_state()==0,"Invalid requests leave lock clear");
+      |                 ^~~~~~~~~~~~~~~~~~~~~~~~~
+narzedzia/test_virtio_pci.cpp:1250:15: note: in definition of macro ‘TEST_ASSERT’
+ 1250 |         if (!(cond)) { \
+      |               ^~~~
+make: *** [Makefile:1714: .wm-test/runtime-host/narzedzia/test_splash_production_path.o] Error 1

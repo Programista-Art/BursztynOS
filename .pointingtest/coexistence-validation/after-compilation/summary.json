@@ -1,0 +1,56 @@
+{
+  "BURSZTYNDIAGXHCIPHYSICALMOUSE": {
+    "changed_translation_units": [
+      "xhci.o",
+      "hid_pointer.o",
+      "input_device.o"
+    ],
+    "preprocessed_diff_lines": 240
+  },
+  "BURSZTYNDIAGXHCIPOINTING": {
+    "changed_translation_units": [
+      "xhci.o",
+      "hid_pointer.o",
+      "ohci.o",
+      "mysz.o",
+      "grafika.o",
+      "input_device.o"
+    ],
+    "preprocessed_diff_lines": 277
+  },
+  "BURSZTYNDIAGPS2": {
+    "changed_translation_units": [
+      "mysz.o"
+    ],
+    "preprocessed_diff_lines": 27
+  },
+  "BURSZTYNDIAGUSBHID": {
+    "changed_translation_units": [
+      "hid_pointer.o",
+      "ohci.o"
+    ],
+    "preprocessed_diff_lines": 42
+  },
+  "BURSZTYNDIAGINPUTCOEXISTENCE": {
+    "changed_translation_units": [
+      "xhci.o",
+      "grafika.o",
+      "ekran_powitalny.o",
+      "input_device.o",
+      "kernel.o"
+    ],
+    "preprocessed_diff_lines": 194
+  },
+  "BURSZTYN_DEBUG_XHCI": {
+    "changed_translation_units": [
+      "xhci.o"
+    ],
+    "preprocessed_diff_lines": 12
+  },
+  "BURSZTYN_DEBUG_GUI_PERF": {
+    "changed_translation_units": [
+      "xhci.o"
+    ],
+    "preprocessed_diff_lines": 11
+  }
+}

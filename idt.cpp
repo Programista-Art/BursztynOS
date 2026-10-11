@@ -1043,9 +1043,8 @@ extern "C" int idt_alokuj_wektor_irq(void) {
         const int bajt = v / 8;
         const int bit = v % 8;
         if ((wektory_zaalokowane[bajt] & (1U << bit)) == 0) {
-#if defined(BURSZTYNDIAGXHCIPOINTING) && BURSZTYNDIAGXHCIPOINTING
-            if(dynamiczne_irq[v].handler || v==44)__builtin_trap();
-#endif
+            // A stale occupied entry is unavailable in every build.
+            if(dynamiczne_irq[v].handler)continue;
             wektory_zaalokowane[bajt] |= static_cast<uint8_t>(1U << bit);
             dynamiczne_irq[v].handler = nullptr;
             dynamiczne_irq[v].context = nullptr;

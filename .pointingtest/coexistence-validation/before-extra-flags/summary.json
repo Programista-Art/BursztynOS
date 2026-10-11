@@ -1,0 +1,14 @@
+{
+  "BURSZTYN_DEBUG_XHCI": {
+    "changed_translation_units": [
+      "xhci.o"
+    ],
+    "preprocessed_diff_lines": 11
+  },
+  "BURSZTYN_DEBUG_GUI_PERF": {
+    "changed_translation_units": [
+      "xhci.o"
+    ],
+    "preprocessed_diff_lines": 10
+  }
+}

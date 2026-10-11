@@ -1,0 +1,35 @@
+{
+  "BURSZTYNDIAGXHCIPHYSICALMOUSE": {
+    "changed_translation_units": [
+      "xhci.o",
+      "hid_pointer.o",
+      "input_device.o"
+    ],
+    "preprocessed_diff_lines": 232
+  },
+  "BURSZTYNDIAGXHCIPOINTING": {
+    "changed_translation_units": [
+      "xhci.o",
+      "hid_pointer.o",
+      "ohci.o",
+      "idt.o",
+      "mysz.o",
+      "grafika.o",
+      "input_device.o"
+    ],
+    "preprocessed_diff_lines": 268
+  },
+  "BURSZTYNDIAGPS2": {
+    "changed_translation_units": [
+      "mysz.o"
+    ],
+    "preprocessed_diff_lines": 27
+  },
+  "BURSZTYNDIAGUSBHID": {
+    "changed_translation_units": [
+      "hid_pointer.o",
+      "ohci.o"
+    ],
+    "preprocessed_diff_lines": 42
+  }
+}

@@ -25,6 +25,9 @@ inline uint32_t pointing_read(const uint32_t& counter) {
 // Deferred context only. IRQ handlers only increment counters.
 inline void pointing_snapshot(const char* reason) {
 #if BURSZTYNDIAGXHCIPOINTING
+    static unsigned snapshots=0;
+    if(snapshots>=32)return;
+    ++snapshots;
     const auto& c=pointing_counters;
     const InputDevice* owner=input_get_pointer_owner();
     int64_t stamp=0;
@@ -38,7 +41,7 @@ inline void pointing_snapshot(const char* reason) {
         pointing_read(c.bad_completions),pointing_read(c.hid_completions),pointing_read(c.hid_accepted),pointing_read(c.hid_rejected),pointing_read(c.proven),
         pointing_read(c.gui_consumed),pointing_read(c.cursor_commits)};
     pointing_diag(reason,v,sizeof(v)/sizeof(v[0]));
-    for(size_t i=0;i<input_get_device_count();++i) {
+    for(size_t i=0;i<16;++i) {
         const auto* d=input_get_device(i); if(!d)continue;
         const int64_t state[]={d->device_id,d->bus_type,d->pointer_state};
         pointing_diag("[POINTING state] id/bus/state",state,3);

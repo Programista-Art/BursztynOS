@@ -1,0 +1,27 @@
+--- production/mysz.o
++++ BURSZTYNDIAGPS2/mysz.o
+@@ -242,10 +242,14 @@
+     input_dispatch_events(dev,evs,n);
+ }
+ uint32_t pending_head{}, pending_tail{};
++struct PacketDiag {int64_t v[10];};
++PacketDiag packet_diags[128]{};unsigned diag_written{},diag_read{};
+ void poll_mouse(InputDevice* dev) {
+     if(pointing_counters.xhci_active && !pointing_counters.ps2_after_seen && pointing_read(pointing_counters.ps2_irq)!=pointing_counters.ps2_irq_at_activation) {
+         pointing_counters.ps2_after_seen=true; pointing_snapshot("ps2-irq12-after-xhci");
+     }
++    const unsigned available=__atomic_load_n(&diag_written,2);
++    while(diag_read<available)pointing_diag("[PS2 RELATIVE; Y inverted only in parser] byte/state/raw[0..3]/signedDX/DY/overflow/rejected",packet_diags[diag_read++].v,10);
+     for(unsigned budget=0;budget<64;++budget) {
+         const uint32_t tail=__atomic_load_n(&pending_tail,0);
+         if(tail==__atomic_load_n(&pending_head,2))break;
+@@ -438,6 +442,9 @@
+     pointing_count(pointing_counters.ps2_bytes);
+     Ps2MouseReport r{};
+     const bool complete=parser.feed(status,bajt,r);
++    const unsigned i=__atomic_load_n(&diag_written,0);
++    if(i<128){packet_diags[i]={{bajt,parser.index,parser.bytes[0],parser.bytes[1],parser.bytes[2],parser.bytes[3],r.dx,r.dy,parser.overflow,parser.rejected}};
++        __atomic_store_n(&diag_written,i+1,3);}
+     if(!complete) return;
+     pointing_count(pointing_counters.ps2_packets);
+     const uint64_t sequence=++produced_sequence;

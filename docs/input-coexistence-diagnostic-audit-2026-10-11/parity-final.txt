@@ -1,0 +1,181 @@
+input-production: Input coexistence: 132 checks PASS
+input-physical: Input coexistence: 132 checks PASS
+Parity input/physical: 51 ordered functional records identical
+input-coexistence: Input coexistence: 132 checks PASS
+Parity input/coexistence: 51 ordered functional records identical
+input-all-input-diagnostics: Input coexistence: 132 checks PASS
+Parity input/all-input-diagnostics: 51 ordered functional records identical
+boot-production: Intel capabilities/legacy handoff/address width: 39 checks PASS
+boot-production: Control TRB requests/directions/reserved fields: 32 checks PASS
+boot-production: Multi-interface/companion/interval/DCI/Boot Mouse/packed report: 1597 checks PASS
+boot-production: Ring full/wrap/Link/pre-publication observation: 1497 checks PASS
+boot-production: Production Intel-style boot/hotplug/EP0/IRQ/mouse/requeue/removal: 15246 checks PASS
+boot-production: Control short/Stall recovery/USB2-USB3 PORTSC/reset failure: 1635 checks PASS
+boot-production: Connected-at-boot mouse/first live report: 276 checks PASS
+boot-production: Physical xHCI mouse total: 20322 checks PASS; allocations 248 releases 248
+boot-production: EMPTY ports=1 ns=4000 resets=0 controls=0
+boot-production: EMPTY ports=20 ns=80000 resets=0 controls=0
+boot-production: EMPTY ports=255 ns=1020000 resets=0 controls=0
+boot-production: TIMEOUT stage=0 IF=0 ns=1005000000
+boot-production: TIMEOUT stage=0 IF=1 ns=1005000000
+boot-production: TIMEOUT stage=1 IF=0 ns=1011000000
+boot-production: TIMEOUT stage=1 IF=1 ns=1011000000
+boot-production: TIMEOUT stage=2 IF=0 ns=1014000000
+boot-production: TIMEOUT stage=2 IF=1 ns=1014000000
+boot-production: TIMEOUT stage=3 IF=0 ns=1017000000
+boot-production: TIMEOUT stage=3 IF=1 ns=1017000000
+boot-production: Deferred startup/empty ports/handoff/controller and port timeout bounds: 3027 checks PASS
+boot-production: BOOT repaired USB-before-splash=2800000 ns USB-after-publication=2808100000 ns control-requests=7
+boot-production: PHASE xHCI discovery calls=1 ns=100000
+boot-production: PHASE BIOS handoff calls=1 ns=200000
+boot-production: PHASE controller halt calls=1 ns=200000
+boot-production: PHASE controller reset calls=1 ns=200000
+boot-production: PHASE CNR wait calls=2 ns=400000
+boot-production: PHASE scratchpads calls=1 ns=100000
+boot-production: PHASE DCBAA calls=1 ns=100000
+boot-production: PHASE command ring calls=1 ns=100000
+boot-production: PHASE event ring calls=1 ns=100000
+boot-production: PHASE IRQ setup calls=1 ns=100000
+boot-production: PHASE root port inspect calls=20 ns=2806100000
+boot-production: PHASE root port reset calls=1 ns=200000
+boot-production: PHASE Enable Slot calls=1 ns=300000
+boot-production: PHASE Address Device calls=1 ns=300000
+boot-production: PHASE control transfer calls=7 ns=2800700000
+boot-production: PHASE config parse calls=1 ns=100000
+boot-production: PHASE HID setup calls=1 ns=500000
+boot-production: PHASE first receive calls=1 ns=100000
+boot-production: PHASE port enumeration calls=1 ns=2804000000
+boot-production: PHASE xHCI command calls=2 ns=600000
+boot-production: Boot/coexistence fixture total: 23622 checks PASS
+boot-physical: Intel capabilities/legacy handoff/address width: 39 checks PASS
+boot-physical: Control TRB requests/directions/reserved fields: 32 checks PASS
+boot-physical: Multi-interface/companion/interval/DCI/Boot Mouse/packed report: 1597 checks PASS
+boot-physical: Ring full/wrap/Link/pre-publication observation: 1497 checks PASS
+boot-physical: Production Intel-style boot/hotplug/EP0/IRQ/mouse/requeue/removal: 15246 checks PASS
+boot-physical: Control short/Stall recovery/USB2-USB3 PORTSC/reset failure: 1635 checks PASS
+boot-physical: Connected-at-boot mouse/first live report: 276 checks PASS
+boot-physical: Physical xHCI mouse total: 20322 checks PASS; allocations 248 releases 248
+boot-physical: EMPTY ports=1 ns=4000 resets=0 controls=0
+boot-physical: EMPTY ports=20 ns=80000 resets=0 controls=0
+boot-physical: EMPTY ports=255 ns=1020000 resets=0 controls=0
+boot-physical: TIMEOUT stage=0 IF=0 ns=1005000000
+boot-physical: TIMEOUT stage=0 IF=1 ns=1005000000
+boot-physical: TIMEOUT stage=1 IF=0 ns=1011000000
+boot-physical: TIMEOUT stage=1 IF=1 ns=1011000000
+boot-physical: TIMEOUT stage=2 IF=0 ns=1014000000
+boot-physical: TIMEOUT stage=2 IF=1 ns=1014000000
+boot-physical: TIMEOUT stage=3 IF=0 ns=1017000000
+boot-physical: TIMEOUT stage=3 IF=1 ns=1017000000
+boot-physical: Deferred startup/empty ports/handoff/controller and port timeout bounds: 3027 checks PASS
+boot-physical: BOOT repaired USB-before-splash=2800000 ns USB-after-publication=2808100000 ns control-requests=7
+boot-physical: PHASE xHCI discovery calls=1 ns=100000
+boot-physical: PHASE BIOS handoff calls=1 ns=200000
+boot-physical: PHASE controller halt calls=1 ns=200000
+boot-physical: PHASE controller reset calls=1 ns=200000
+boot-physical: PHASE CNR wait calls=2 ns=400000
+boot-physical: PHASE scratchpads calls=1 ns=100000
+boot-physical: PHASE DCBAA calls=1 ns=100000
+boot-physical: PHASE command ring calls=1 ns=100000
+boot-physical: PHASE event ring calls=1 ns=100000
+boot-physical: PHASE IRQ setup calls=1 ns=100000
+boot-physical: PHASE root port inspect calls=20 ns=2806100000
+boot-physical: PHASE root port reset calls=1 ns=200000
+boot-physical: PHASE Enable Slot calls=1 ns=300000
+boot-physical: PHASE Address Device calls=1 ns=300000
+boot-physical: PHASE control transfer calls=7 ns=2800700000
+boot-physical: PHASE config parse calls=1 ns=100000
+boot-physical: PHASE HID setup calls=1 ns=500000
+boot-physical: PHASE first receive calls=1 ns=100000
+boot-physical: PHASE port enumeration calls=1 ns=2804000000
+boot-physical: PHASE xHCI command calls=2 ns=600000
+boot-physical: Boot/coexistence fixture total: 23622 checks PASS
+Parity boot/physical: 18432 ordered functional records identical
+boot-coexistence: Intel capabilities/legacy handoff/address width: 39 checks PASS
+boot-coexistence: Control TRB requests/directions/reserved fields: 32 checks PASS
+boot-coexistence: Multi-interface/companion/interval/DCI/Boot Mouse/packed report: 1597 checks PASS
+boot-coexistence: Ring full/wrap/Link/pre-publication observation: 1497 checks PASS
+boot-coexistence: Production Intel-style boot/hotplug/EP0/IRQ/mouse/requeue/removal: 15246 checks PASS
+boot-coexistence: Control short/Stall recovery/USB2-USB3 PORTSC/reset failure: 1635 checks PASS
+boot-coexistence: Connected-at-boot mouse/first live report: 276 checks PASS
+boot-coexistence: Physical xHCI mouse total: 20322 checks PASS; allocations 248 releases 248
+boot-coexistence: EMPTY ports=1 ns=4000 resets=0 controls=0
+boot-coexistence: EMPTY ports=20 ns=80000 resets=0 controls=0
+boot-coexistence: EMPTY ports=255 ns=1020000 resets=0 controls=0
+boot-coexistence: TIMEOUT stage=0 IF=0 ns=1005000000
+boot-coexistence: TIMEOUT stage=0 IF=1 ns=1005000000
+boot-coexistence: TIMEOUT stage=1 IF=0 ns=1011000000
+boot-coexistence: TIMEOUT stage=1 IF=1 ns=1011000000
+boot-coexistence: TIMEOUT stage=2 IF=0 ns=1014000000
+boot-coexistence: TIMEOUT stage=2 IF=1 ns=1014000000
+boot-coexistence: TIMEOUT stage=3 IF=0 ns=1017000000
+boot-coexistence: TIMEOUT stage=3 IF=1 ns=1017000000
+boot-coexistence: Deferred startup/empty ports/handoff/controller and port timeout bounds: 3027 checks PASS
+boot-coexistence: BOOT repaired USB-before-splash=2800000 ns USB-after-publication=2808100000 ns control-requests=7
+boot-coexistence: PHASE xHCI discovery calls=1 ns=100000
+boot-coexistence: PHASE BIOS handoff calls=1 ns=200000
+boot-coexistence: PHASE controller halt calls=1 ns=200000
+boot-coexistence: PHASE controller reset calls=1 ns=200000
+boot-coexistence: PHASE CNR wait calls=2 ns=400000
+boot-coexistence: PHASE scratchpads calls=1 ns=100000
+boot-coexistence: PHASE DCBAA calls=1 ns=100000
+boot-coexistence: PHASE command ring calls=1 ns=100000
+boot-coexistence: PHASE event ring calls=1 ns=100000
+boot-coexistence: PHASE IRQ setup calls=1 ns=100000
+boot-coexistence: PHASE root port inspect calls=20 ns=2806100000
+boot-coexistence: PHASE root port reset calls=1 ns=200000
+boot-coexistence: PHASE Enable Slot calls=1 ns=300000
+boot-coexistence: PHASE Address Device calls=1 ns=300000
+boot-coexistence: PHASE control transfer calls=7 ns=2800700000
+boot-coexistence: PHASE config parse calls=1 ns=100000
+boot-coexistence: PHASE HID setup calls=1 ns=500000
+boot-coexistence: PHASE first receive calls=1 ns=100000
+boot-coexistence: PHASE port enumeration calls=1 ns=2804000000
+boot-coexistence: PHASE xHCI command calls=2 ns=600000
+boot-coexistence: Boot/coexistence fixture total: 23622 checks PASS
+Parity boot/coexistence: 18432 ordered functional records identical
+boot-all-input-diagnostics: Intel capabilities/legacy handoff/address width: 39 checks PASS
+boot-all-input-diagnostics: Control TRB requests/directions/reserved fields: 32 checks PASS
+boot-all-input-diagnostics: Multi-interface/companion/interval/DCI/Boot Mouse/packed report: 1597 checks PASS
+boot-all-input-diagnostics: Ring full/wrap/Link/pre-publication observation: 1497 checks PASS
+boot-all-input-diagnostics: Production Intel-style boot/hotplug/EP0/IRQ/mouse/requeue/removal: 15246 checks PASS
+boot-all-input-diagnostics: Control short/Stall recovery/USB2-USB3 PORTSC/reset failure: 1635 checks PASS
+boot-all-input-diagnostics: Connected-at-boot mouse/first live report: 276 checks PASS
+boot-all-input-diagnostics: Physical xHCI mouse total: 20322 checks PASS; allocations 248 releases 248
+boot-all-input-diagnostics: EMPTY ports=1 ns=4000 resets=0 controls=0
+boot-all-input-diagnostics: EMPTY ports=20 ns=80000 resets=0 controls=0
+boot-all-input-diagnostics: EMPTY ports=255 ns=1020000 resets=0 controls=0
+boot-all-input-diagnostics: TIMEOUT stage=0 IF=0 ns=1005000000
+boot-all-input-diagnostics: TIMEOUT stage=0 IF=1 ns=1005000000
+boot-all-input-diagnostics: TIMEOUT stage=1 IF=0 ns=1011000000
+boot-all-input-diagnostics: TIMEOUT stage=1 IF=1 ns=1011000000
+boot-all-input-diagnostics: TIMEOUT stage=2 IF=0 ns=1014000000
+boot-all-input-diagnostics: TIMEOUT stage=2 IF=1 ns=1014000000
+boot-all-input-diagnostics: TIMEOUT stage=3 IF=0 ns=1017000000
+boot-all-input-diagnostics: TIMEOUT stage=3 IF=1 ns=1017000000
+boot-all-input-diagnostics: Deferred startup/empty ports/handoff/controller and port timeout bounds: 3027 checks PASS
+boot-all-input-diagnostics: BOOT repaired USB-before-splash=2800000 ns USB-after-publication=2808100000 ns control-requests=7
+boot-all-input-diagnostics: PHASE xHCI discovery calls=1 ns=100000
+boot-all-input-diagnostics: PHASE BIOS handoff calls=1 ns=200000
+boot-all-input-diagnostics: PHASE controller halt calls=1 ns=200000
+boot-all-input-diagnostics: PHASE controller reset calls=1 ns=200000
+boot-all-input-diagnostics: PHASE CNR wait calls=2 ns=400000
+boot-all-input-diagnostics: PHASE scratchpads calls=1 ns=100000
+boot-all-input-diagnostics: PHASE DCBAA calls=1 ns=100000
+boot-all-input-diagnostics: PHASE command ring calls=1 ns=100000
+boot-all-input-diagnostics: PHASE event ring calls=1 ns=100000
+boot-all-input-diagnostics: PHASE IRQ setup calls=1 ns=100000
+boot-all-input-diagnostics: PHASE root port inspect calls=20 ns=2806100000
+boot-all-input-diagnostics: PHASE root port reset calls=1 ns=200000
+boot-all-input-diagnostics: PHASE Enable Slot calls=1 ns=300000
+boot-all-input-diagnostics: PHASE Address Device calls=1 ns=300000
+boot-all-input-diagnostics: PHASE control transfer calls=7 ns=2800700000
+boot-all-input-diagnostics: PHASE config parse calls=1 ns=100000
+boot-all-input-diagnostics: PHASE HID setup calls=1 ns=500000
+boot-all-input-diagnostics: PHASE first receive calls=1 ns=100000
+boot-all-input-diagnostics: PHASE port enumeration calls=1 ns=2804000000
+boot-all-input-diagnostics: PHASE xHCI command calls=2 ns=600000
+boot-all-input-diagnostics: Boot/coexistence fixture total: 23622 checks PASS
+Parity boot/all-input-diagnostics: 18432 ordered functional records identical
+boot-baseline: BOOT baseline USB-before-splash=2801500000 ns control-requests=7
+boot-baseline: Boot/coexistence fixture total: 267 checks PASS
+Diagnostic functional parity: 6 comparisons PASS
