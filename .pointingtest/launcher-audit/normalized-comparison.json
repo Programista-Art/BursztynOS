@@ -97,7 +97,7 @@
     "-cdrom",
     "<ISO>",
     "-name",
-    "Bursztyn OS - UEFI VirtIO Full"
+    "Bursztyn OS - VirtIO UEFI (ISO)"
   ],
   "canonical": [
     "-bios",
@@ -151,7 +151,7 @@
       "-serial": "stdio",
       "-display": "gtk",
       "-audiodev": "none,id=snd",
-      "-name": "Bursztyn OS - UEFI VirtIO Full"
+      "-name": "Bursztyn OS - VirtIO UEFI (ISO)"
     }
   }
 }

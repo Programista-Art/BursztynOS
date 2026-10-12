@@ -45,6 +45,8 @@
  */
 
 #include "hda.h"
+#include "hda_diag_format.h"
+#include "hda_wewnetrzny.h"
 #include "../../pamiec.h"
 #include "../../pci.h"
 
@@ -499,6 +501,15 @@ uint16_t hda_gcap =
 
 uint8_t hda_codec_addr =
     0xFFU;
+
+uint16_t hda_initial_statests =
+    0;
+
+uint16_t hda_discovered_codec_mask =
+    0;
+
+uint16_t hda_responsive_codec_mask =
+    0;
 
 BdfPCI hda_bdf{};
 
@@ -1704,18 +1715,11 @@ uint32_t verb12(
     uint16_t verb,
     uint8_t payload
 ) {
-    return
-        (static_cast<uint32_t>(
-             cad &
-             0x0FU) << 28) |
-        (static_cast<uint32_t>(
-             nid) << 20) |
-        (static_cast<uint32_t>(
-             verb &
-             0x0FFFU) << 8) |
-        static_cast<uint32_t>(
-            payload
-        );
+    uint32_t cmd = 0;
+    if (!hda_zbuduj_verb12(cad, nid, verb, payload, &cmd)) {
+        return 0;
+    }
+    return cmd;
 }
 
 uint32_t verb4(
@@ -1724,177 +1728,165 @@ uint32_t verb4(
     uint8_t verb,
     uint16_t payload
 ) {
-    return
-        (static_cast<uint32_t>(
-             cad &
-             0x0FU) << 28) |
-        (static_cast<uint32_t>(
-             nid) << 20) |
-        (static_cast<uint32_t>(
-             verb &
-             0x0FU) << 16) |
-        static_cast<uint32_t>(
-            payload
-        );
+    uint32_t cmd = 0;
+    if (!hda_zbuduj_verb4(cad, nid, verb, payload, &cmd)) {
+        return 0;
+    }
+    return cmd;
+}
+
+struct HdaImmediateDiagLog {
+    uint16_t icis_before;
+    uint16_t icis_after_stale;
+    uint32_t icoi_written;
+    uint16_t icis_after_busy;
+    uint16_t icis_completion;
+    uint32_t icii_response;
+    uint32_t elapsed_us;
+    HdaTransportStatus status;
+};
+
+HdaTransportStatus hda_transport_send_immediate_ex(
+    uint32_t komenda,
+    uint32_t* odpowiedz,
+    HdaImmediateDiagLog* diag = nullptr
+) {
+    if (hda_mmio_base == 0 || !odpowiedz) {
+        if (diag) diag->status = HDA_TRANSPORT_NOT_READY;
+        return HDA_TRANSPORT_NOT_READY;
+    }
+
+    *odpowiedz = 0;
+
+    const uint32_t start_walclk = mmio_odczytaj32(HDA_REG_WALCLK);
+
+    /* 1. Odczytaj ICIS przed poleceniem */
+    const uint16_t icis_before = mmio_odczytaj16(HDA_REG_ICIS);
+    if (diag) {
+        diag->icis_before = icis_before;
+        diag->icoi_written = komenda;
+    }
+
+    if (icis_before == UINT16_MAX) {
+        if (diag) diag->status = HDA_TRANSPORT_NOT_READY;
+        return HDA_TRANSPORT_NOT_READY;
+    }
+
+    /* 2. Czekaj tylko gdy BUSY jest faktycznie aktywne */
+    if ((icis_before & HDA_ICIS_ICB) != 0) {
+        bool busy_cleared = false;
+        for (uint32_t i = 0; i < HDA_TIMEOUT_IMMEDIATE; ++i) {
+            if ((mmio_odczytaj16(HDA_REG_ICIS) & HDA_ICIS_ICB) == 0) {
+                busy_cleared = true;
+                break;
+            }
+            pause_cpu();
+        }
+        if (!busy_cleared) {
+            if (diag) {
+                diag->icis_after_stale = mmio_odczytaj16(HDA_REG_ICIS);
+                diag->icis_completion = diag->icis_after_stale;
+                diag->status = HDA_TRANSPORT_BUSY_STUCK;
+            }
+            return HDA_TRANSPORT_BUSY_STUCK;
+        }
+    }
+
+    /* 3. Wyczyść zaległy IRV przed wysłaniem nowego słowa (RW1C) */
+    uint16_t icis_cur = mmio_odczytaj16(HDA_REG_ICIS);
+    if ((icis_cur & HDA_ICIS_IRV) != 0) {
+        mmio_zapisz16(HDA_REG_ICIS, HDA_ICIS_IRV);
+        bariera_dma_po_urzadzeniu();
+        icis_cur = mmio_odczytaj16(HDA_REG_ICIS);
+    }
+    if (diag) {
+        diag->icis_after_stale = icis_cur;
+    }
+
+    if ((icis_cur & (HDA_ICIS_ICB | HDA_ICIS_IRV)) != 0) {
+        if (diag) {
+            diag->icis_completion = icis_cur;
+            diag->status = HDA_TRANSPORT_NOT_READY;
+        }
+        return HDA_TRANSPORT_NOT_READY;
+    }
+
+    /* 4. Zapisz 32-bitowe słowo komendy do ICOI */
+    mmio_zapisz32(HDA_REG_ICOI, komenda);
+    bariera_dma_po_urzadzeniu();
+
+    /* 5. Uruchom komendę: ustaw tylko ICB przy 16-bitowym dostępie */
+    mmio_zapisz16(HDA_REG_ICIS, HDA_ICIS_ICB);
+    bariera_dma_po_urzadzeniu();
+
+    const uint16_t icis_after_set = mmio_odczytaj16(HDA_REG_ICIS);
+    if (diag) {
+        diag->icis_after_busy = icis_after_set;
+    }
+
+    /* 6. Polling BUSY z ograniczonym czasem */
+    bool bus_cleared = false;
+    uint16_t icis_done = 0;
+    for (uint32_t i = 0; i < HDA_TIMEOUT_IMMEDIATE; ++i) {
+        icis_done = mmio_odczytaj16(HDA_REG_ICIS);
+        if (icis_done == UINT16_MAX) {
+            if (diag) {
+                diag->icis_completion = UINT16_MAX;
+                diag->status = HDA_TRANSPORT_NOT_READY;
+            }
+            return HDA_TRANSPORT_NOT_READY;
+        }
+        if ((icis_done & HDA_ICIS_ICB) == 0) {
+            bus_cleared = true;
+            break;
+        }
+        pause_cpu();
+    }
+
+    const uint32_t end_walclk = mmio_odczytaj32(HDA_REG_WALCLK);
+    if (diag) {
+        diag->icis_completion = icis_done;
+        diag->elapsed_us = (start_walclk != UINT32_MAX && end_walclk != UINT32_MAX && end_walclk >= start_walclk)
+                               ? ((end_walclk - start_walclk) / 24U)
+                               : 0U;
+    }
+
+    if (!bus_cleared) {
+        /* Recovery w QEMU/sprzęcie: zapis 0 czyści zawieszone ICB */
+        mmio_zapisz16(HDA_REG_ICIS, 0);
+        bariera_dma_po_urzadzeniu();
+        if (diag) diag->status = HDA_TRANSPORT_TIMEOUT;
+        return HDA_TRANSPORT_TIMEOUT;
+    }
+
+    /* 7. Wymagaj odpowiedzi IRV */
+    if ((icis_done & HDA_ICIS_IRV) == 0) {
+        if (diag) diag->status = HDA_TRANSPORT_NO_VALID_RESPONSE;
+        return HDA_TRANSPORT_NO_VALID_RESPONSE;
+    }
+
+    /* 8. Odczytaj 32-bitową odpowiedź z ICII */
+    const uint32_t resp = mmio_odczytaj32(HDA_REG_ICII);
+    *odpowiedz = resp;
+    if (diag) {
+        diag->icii_response = resp;
+    }
+
+    /* 9. Potwierdź pobranie wyniku (RW1C bitu IRV) */
+    mmio_zapisz16(HDA_REG_ICIS, HDA_ICIS_IRV);
+    bariera_dma_po_urzadzeniu();
+
+    if (diag) diag->status = HDA_TRANSPORT_SUCCESS;
+    return HDA_TRANSPORT_SUCCESS;
 }
 
 bool wyslij_immediate(
     uint32_t komenda,
     uint32_t* odpowiedz
 ) {
-    if (hda_mmio_base == 0 ||
-        !odpowiedz) {
-
-        return false;
-    }
-
-    /*
-     * Poczekaj az ICB=0.
-     */
-    bool gotowy =
-        false;
-
-    for (uint32_t i = 0;
-         i <
-            HDA_TIMEOUT_IMMEDIATE;
-         ++i) {
-
-        const uint16_t icis =
-            mmio_odczytaj16(
-                HDA_REG_ICIS
-            );
-
-        if (icis ==
-            UINT16_MAX) {
-
-            return false;
-        }
-
-        if ((icis &
-             HDA_ICIS_ICB) == 0) {
-
-            gotowy =
-                true;
-
-            break;
-        }
-
-        pause_cpu();
-    }
-
-    if (!gotowy) {
-        /*
-         * Spec dopuszcza wyczyszczenie ICB przy timeout, gdy CORB nie dziala.
-         */
-        mmio_zapisz16(
-            HDA_REG_ICIS,
-            0
-        );
-
-        for (uint32_t i = 0;
-             i <
-                HDA_TIMEOUT_IMMEDIATE;
-             ++i) {
-
-            if ((mmio_odczytaj16(
-                     HDA_REG_ICIS) &
-                 HDA_ICIS_ICB) == 0) {
-
-                gotowy =
-                    true;
-
-                break;
-            }
-
-            pause_cpu();
-        }
-    }
-
-    if (!gotowy) {
-        return false;
-    }
-
-    /*
-     * IRV jest RW1C. Przed nowym command usuwamy stara odpowiedz.
-     */
-    mmio_zapisz16(
-        HDA_REG_ICIS,
-        HDA_ICIS_IRV
-    );
-
-    mmio_zapisz32(
-        HDA_REG_ICOI,
-        komenda
-    );
-
-    /*
-     * ICB=1 uruchamia PIO verb.
-     */
-    mmio_zapisz16(
-        HDA_REG_ICIS,
-        HDA_ICIS_ICB
-    );
-
-    bool odpowiedz_gotowa =
-        false;
-
-    for (uint32_t i = 0;
-         i <
-            HDA_TIMEOUT_IMMEDIATE;
-         ++i) {
-
-        const uint16_t icis =
-            mmio_odczytaj16(
-                HDA_REG_ICIS
-            );
-
-        if (icis ==
-            UINT16_MAX) {
-
-            return false;
-        }
-
-        if ((icis &
-             HDA_ICIS_IRV) != 0 &&
-            (icis &
-             HDA_ICIS_ICB) == 0) {
-
-            odpowiedz_gotowa =
-                true;
-
-            break;
-        }
-
-        pause_cpu();
-    }
-
-    if (!odpowiedz_gotowa) {
-        /*
-         * Best-effort recovery zalecany dla timeoutu Immediate Command.
-         */
-        mmio_zapisz16(
-            HDA_REG_ICIS,
-            0
-        );
-
-        return false;
-    }
-
-    *odpowiedz =
-        mmio_odczytaj32(
-            HDA_REG_ICII
-        );
-
-    /*
-     * Skonsumowana odpowiedz.
-     */
-    mmio_zapisz16(
-        HDA_REG_ICIS,
-        HDA_ICIS_IRV
-    );
-
-    return true;
+    return hda_transport_send_immediate_ex(komenda, odpowiedz) == HDA_TRANSPORT_SUCCESS;
 }
+
 
 /* =========================================================================
  * 13. KODEK QEMU
@@ -1923,6 +1915,16 @@ bool znajdz_kodek() {
             ) &
             0x7FFFU
         );
+
+    /*
+     * Zachowaj poczatkowy STATESTS zanim zostanie skasowany (W1C).
+     * Diagnostyka potrzebuje tej informacji nawet po acknowledge.
+     */
+    hda_initial_statests =
+        states;
+
+    hda_discovered_codec_mask =
+        states;
 
     /*
      * W typowym QEMU hda-output kodek ma CAD=0.
@@ -3035,6 +3037,15 @@ void anuluj_inicjalizacje() {
 
     hda_codec_addr =
         0xFFU;
+
+    hda_initial_statests =
+        0;
+
+    hda_discovered_codec_mask =
+        0;
+
+    hda_responsive_codec_mask =
+        0;
 }
 
 } // namespace
@@ -3373,6 +3384,9 @@ bool hda_wew_pobierz_stan_kontrolera(HdaWewStanKontrolera* out) {
         (out->gcap & HDA_GCAP_BSS_MASK) >> HDA_GCAP_BSS_SHIFT);
     out->dma64 = static_cast<uint8_t>(
         (out->gcap & HDA_GCAP_64OK) ? 1 : 0);
+    out->initial_statests = hda_initial_statests;
+    out->discovered_codec_mask = hda_discovered_codec_mask;
+    out->responsive_codec_mask = hda_responsive_codec_mask;
     return true;
 }
 
@@ -3702,3 +3716,143 @@ bool hda_wew_test_tick(uint64_t) {
     }
     return true;
 }
+
+static bool s_pierwszy_skan_zalogowany = false;
+
+static void log_pierwszy_skan_probka(
+    uint8_t cad,
+    uint32_t cmd,
+    const HdaImmediateDiagLog& diag
+) {
+    char buf[200];
+    size_t pos = 0;
+    auto append_str = [&](const char* s) {
+        while (*s && pos + 1 < sizeof(buf)) buf[pos++] = *s++;
+        buf[pos] = '\0';
+    };
+    auto append_hex = [&](uint32_t v, int digits) {
+        const char hex_chars[] = "0123456789ABCDEF";
+        append_str("0x");
+        char tmp[9];
+        for (int i = digits - 1; i >= 0; --i) {
+            tmp[i] = hex_chars[v & 0xF];
+            v >>= 4;
+        }
+        tmp[digits] = '\0';
+        append_str(tmp);
+    };
+    auto append_dec = [&](uint32_t v) {
+        char tmp[12];
+        int i = 0;
+        if (v == 0) tmp[i++] = '0';
+        else {
+            while (v > 0) {
+                tmp[i++] = '0' + (v % 10);
+                v /= 10;
+            }
+        }
+        while (i > 0 && pos + 1 < sizeof(buf)) {
+            buf[pos++] = tmp[--i];
+        }
+        buf[pos] = '\0';
+    };
+
+    append_str("[HDA Diag] BDF ");
+    append_hex(hda_bdf.bus, 2);
+    append_str(":");
+    append_hex(hda_bdf.slot, 2);
+    append_str(".");
+    append_dec(hda_bdf.func);
+    append_str(" IC InitState:");
+    append_hex(hda_initial_statests, 4);
+    append_str(" CurState:");
+    append_hex(mmio_odczytaj16(HDA_REG_STATESTS), 4);
+    append_str(" DiscMask:");
+    append_hex(hda_discovered_codec_mask, 4);
+    append_str(" CAD:");
+    append_dec(cad);
+    append_str(" NID:0 Verb:0xF00 Param:0x00 Cmd:");
+    append_hex(cmd, 8);
+    append_str(" ICIS(bef:");
+    append_hex(diag.icis_before, 4);
+    append_str(" stl:");
+    append_hex(diag.icis_after_stale, 4);
+    append_str(" bsy:");
+    append_hex(diag.icis_after_busy, 4);
+    append_str(" cmp:");
+    append_hex(diag.icis_completion, 4);
+    append_str(") ICII:");
+    append_hex(diag.icii_response, 8);
+    append_str(" ");
+    append_dec(diag.elapsed_us);
+    append_str("us Stat:");
+    append_dec(diag.status);
+
+    wypisz_log(buf);
+}
+
+bool hda_wew_sonda_pojedynczego_kodeka(
+    uint8_t cad,
+    bool* out_odpowiada,
+    uint32_t* out_vendor
+) {
+    if (!out_odpowiada || !out_vendor || cad > 14U || hda_mmio_base == 0) {
+        return false;
+    }
+    *out_odpowiada = false;
+    *out_vendor = 0;
+
+    uint32_t cmd = 0;
+    if (!hda_zbuduj_get_param(cad, 0, HDA_PAR_VENDOR_ID, &cmd)) {
+        return false;
+    }
+
+    const bool czy_logowac = !s_pierwszy_skan_zalogowany;
+    uint32_t vendor = 0;
+    HdaImmediateDiagLog diag{};
+    HdaTransportStatus st = hda_transport_send_immediate_ex(cmd, &vendor, czy_logowac ? &diag : nullptr);
+
+    if (czy_logowac) {
+        log_pierwszy_skan_probka(cad, cmd, diag);
+        if (cad == 14U) {
+            s_pierwszy_skan_zalogowany = true;
+        }
+    }
+
+    if (st == HDA_TRANSPORT_SUCCESS && vendor != 0 && vendor != 0xFFFFFFFFU) {
+        *out_odpowiada = true;
+        *out_vendor = vendor;
+        hda_responsive_codec_mask = static_cast<uint16_t>(hda_responsive_codec_mask | (1U << cad));
+        hda_discovered_codec_mask = static_cast<uint16_t>(hda_discovered_codec_mask | (1U << cad));
+    }
+
+    return true;
+}
+
+bool hda_wew_aktywne_sondowanie_kodekow(
+    uint16_t* responsive_mask
+) {
+    if (!responsive_mask || hda_mmio_base == 0) {
+        return false;
+    }
+
+    uint16_t maska = 0;
+    for (uint8_t cad = 0; cad < 15U; ++cad) {
+        bool odp = false;
+        uint32_t vendor = 0;
+        if (hda_wew_sonda_pojedynczego_kodeka(cad, &odp, &vendor) && odp) {
+            maska = static_cast<uint16_t>(maska | (1U << cad));
+        }
+    }
+
+    *responsive_mask = maska;
+    return true;
+}
+
+bool hda_wew_send_verb_readonly(
+    uint32_t verb,
+    uint32_t* response
+) {
+    return wyslij_immediate(verb, response);
+}
+

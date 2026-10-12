@@ -61,9 +61,11 @@
 #define HDA_DIAG_MAKS_RAPORTU              UINT32_C(262144)
 
 /*
- * Maks. liczba slow pochodzenia w jednym kroku skanu (bounded work).
+ * Maks. liczba slow/verbów pochodzenia w jednym kroku skanu (bounded work).
+ * Dokładnie 4 operacje read verb na krok serwisowy, aby nie blokować GUI ani CPU.
  */
-#define HDA_DIAG_SLOW_NA_KROK              UINT32_C(16)
+#define HDA_DIAG_LIMIT_VERBOW_NA_KROK      UINT32_C(4)
+#define HDA_DIAG_SLOW_NA_KROK              HDA_DIAG_LIMIT_VERBOW_NA_KROK
 
 /* =========================================================================
  * 2. KODY BLEDOW DIAGNOSTYCZNYCH
@@ -97,18 +99,48 @@ enum HdaDiagBlad : uint32_t {
 };
 
 /*
- * Etapy skanu widoczne dla aplikacji.
+ * Etapy skanu widoczne dla aplikacji (granularna maszyna stanow).
  */
 enum HdaDiagEtap : uint32_t {
-    HDA_DIAG_ETAP_BEZCZYNNY = 0,
-    HDA_DIAG_ETAP_KONTROLER = 1,
-    HDA_DIAG_ETAP_KODEK = 2,
-    HDA_DIAG_ETAP_FG = 3,
-    HDA_DIAG_ETAP_WIDGETY = 4,
-    HDA_DIAG_ETAP_SCIEZKI = 5,
-    HDA_DIAG_ETAP_GOTOWY = 6,
-    HDA_DIAG_ETAP_BLAD = 7
+    HDA_DIAG_ETAP_BEZCZYNNY = 0,             /* Bezczynny / Uruchamianie */
+    HDA_DIAG_ETAP_KONTROLER = 1,             /* Skanowanie kontrolera HDA */
+    HDA_DIAG_ETAP_SONDOWANIE_KODEKOW = 2,     /* Sondowanie kodeków (CAD 0..14) */
+    HDA_DIAG_ETAP_PARAMETRY_KORZENIA = 3,     /* Odczytywanie parametrów korzenia kodeka */
+    HDA_DIAG_ETAP_GRUPY_FUNKCYJNE = 4,        /* Odczytywanie grup funkcyjnych */
+    HDA_DIAG_ETAP_PARAMETRY_AFG = 5,          /* Odczytywanie parametrów AFG */
+    HDA_DIAG_ETAP_WIDGET_ODKRYCIE = 6,        /* Skanowanie widgetów (AWCAP) */
+    HDA_DIAG_ETAP_WIDGET_PARAMETRY = 7,       /* Odczytywanie parametrów widgetów / pinów */
+    HDA_DIAG_ETAP_POLACZENIA = 8,             /* Odczytywanie połączeń */
+    HDA_DIAG_ETAP_BUDOWANIE_SCIEZEK = 9,      /* Budowanie topologii */
+    HDA_DIAG_ETAP_PUBLIKACJA = 10,            /* Publikacja raportu i migawki */
+    HDA_DIAG_ETAP_GOTOWY = 11,                /* Gotowe */
+    HDA_DIAG_ETAP_BLAD = 12                   /* Błąd diagnostyki HDA */
 };
+
+/* Zgodnosc wsteczna ze starymi stalymi etapow */
+constexpr uint32_t HDA_DIAG_ETAP_KODEK = HDA_DIAG_ETAP_PARAMETRY_KORZENIA;
+constexpr uint32_t HDA_DIAG_ETAP_FG = HDA_DIAG_ETAP_GRUPY_FUNKCYJNE;
+constexpr uint32_t HDA_DIAG_ETAP_WIDGETY = HDA_DIAG_ETAP_WIDGET_ODKRYCIE;
+constexpr uint32_t HDA_DIAG_ETAP_SCIEZKI = HDA_DIAG_ETAP_BUDOWANIE_SCIEZEK;
+
+inline const char* hda_diag_etap_nazwa(uint32_t etap) {
+    switch (etap) {
+        case HDA_DIAG_ETAP_BEZCZYNNY: return "Uruchamianie";
+        case HDA_DIAG_ETAP_KONTROLER: return "Skanowanie kontrolera HDA";
+        case HDA_DIAG_ETAP_SONDOWANIE_KODEKOW: return "Sondowanie kodeków";
+        case HDA_DIAG_ETAP_PARAMETRY_KORZENIA: return "Odczytywanie grup funkcyjnych";
+        case HDA_DIAG_ETAP_GRUPY_FUNKCYJNE: return "Odczytywanie grup funkcyjnych";
+        case HDA_DIAG_ETAP_PARAMETRY_AFG: return "Odczytywanie grup funkcyjnych";
+        case HDA_DIAG_ETAP_WIDGET_ODKRYCIE: return "Skanowanie widgetów";
+        case HDA_DIAG_ETAP_WIDGET_PARAMETRY: return "Skanowanie widgetów";
+        case HDA_DIAG_ETAP_POLACZENIA: return "Odczytywanie połączeń";
+        case HDA_DIAG_ETAP_BUDOWANIE_SCIEZEK: return "Budowanie topologii";
+        case HDA_DIAG_ETAP_PUBLIKACJA: return "Budowanie topologii";
+        case HDA_DIAG_ETAP_GOTOWY: return "Gotowe";
+        case HDA_DIAG_ETAP_BLAD: return "Błąd diagnostyki HDA";
+        default: return "Nieznany";
+    }
+}
 
 /*
  * Stan strumienia odtwarzania.
@@ -539,20 +571,15 @@ inline bool hda_cel_jest_niepodlaczony(uint32_t cel) {
  *   bits 14:8  = Range end NID (gdy Range=1)
  *   bits 7:0   = NID (poczatek zakresu)
  */
-#define HDA_CONNLIST_LEN_MASK    UINT32_C(0xFF)
-#define HDA_CONNLIST_LONG        (UINT32_C(1) << 8)
+#define HDA_CONNLIST_LEN_MASK    UINT32_C(0x7F)
+#define HDA_CONNLIST_LONG        (UINT32_C(1) << 7)
 
 inline uint8_t hda_connlist_liczba(uint32_t param) {
     return static_cast<uint8_t>(param & HDA_CONNLIST_LEN_MASK);
 }
 
 inline bool hda_connlist_long_form(uint32_t param) {
-    /*
-     * Long form gdy bit 8 jest ustawiony LUB gdy liczba wpisow > 2.
-     * Spec dopuszcza short form tylko dla 1..2 wpisow bez range.
-     */
-    return (param & HDA_CONNLIST_LONG) != 0 ||
-           hda_connlist_liczba(param) > 2;
+    return (param & HDA_CONNLIST_LONG) != 0;
 }
 
 /*
@@ -689,23 +716,24 @@ inline bool hda_rozszerz_liste_polaczen(
  * 6. PARAMETRY GETPARAMETER (dekodowanie bitowe)
  * ========================================================================= */
 
-/* Param ID z HDA 1.0 Table 72. */
+/* Param ID z HDA 1.0 Table 72 i Table 140. */
 #define HDA_PAR_VENDOR_ID        UINT8_C(0x00)
-#define HDA_PAR_REV_ID           UINT8_C(0x01)
-#define HDA_PAR_SUB_NODE_COUNT   UINT8_C(0x02)
-#define HDA_PAR_FGROUP_TYPE      UINT8_C(0x03)
-#define HDA_PAR_AFG_CAPS         UINT8_C(0x04)
-#define HDA_PAR_WIDGET_CAP       UINT8_C(0x05)
-#define HDA_PAR_PCM_SIZE_RATE    UINT8_C(0x06)
-#define HDA_PAR_STREAM_FORMATS   UINT8_C(0x07)
-#define HDA_PAR_PIN_CAP          UINT8_C(0x08)
-#define HDA_PAR_AMP_IN_CAP       UINT8_C(0x09)
-#define HDA_PAR_CONNLIST_LEN     UINT8_C(0x0A)
-#define HDA_PAR_POWER_STATES     UINT8_C(0x0B)
-#define HDA_PAR_PROCESSING_CAP   UINT8_C(0x0C)
-#define HDA_PAR_GPIO_COUNT       UINT8_C(0x0D)
-#define HDA_PAR_AMP_OUT_CAP      UINT8_C(0x0E)
-#define HDA_PAR_VOLKNOB_CAP      UINT8_C(0x0F)
+#define HDA_PAR_SUBSYSTEM_ID     UINT8_C(0x01)
+#define HDA_PAR_REV_ID           UINT8_C(0x02)
+#define HDA_PAR_SUB_NODE_COUNT   UINT8_C(0x04)
+#define HDA_PAR_FGROUP_TYPE      UINT8_C(0x05)
+#define HDA_PAR_AFG_CAPS         UINT8_C(0x08)
+#define HDA_PAR_WIDGET_CAP       UINT8_C(0x09)
+#define HDA_PAR_PCM_SIZE_RATE    UINT8_C(0x0A)
+#define HDA_PAR_STREAM_FORMATS   UINT8_C(0x0B)
+#define HDA_PAR_PIN_CAP          UINT8_C(0x0C)
+#define HDA_PAR_AMP_IN_CAP       UINT8_C(0x0D)
+#define HDA_PAR_CONNLIST_LEN     UINT8_C(0x0E)
+#define HDA_PAR_POWER_STATES     UINT8_C(0x0F)
+#define HDA_PAR_PROCESSING_CAP   UINT8_C(0x10)
+#define HDA_PAR_GPIO_COUNT       UINT8_C(0x11)
+#define HDA_PAR_AMP_OUT_CAP      UINT8_C(0x12)
+#define HDA_PAR_VOLKNOB_CAP      UINT8_C(0x13)
 
 /* Vendor ID: bits 31:16 vendor, 15:0 device. */
 inline uint16_t hda_vendor_id(uint32_t p) {
@@ -741,6 +769,72 @@ inline uint8_t hda_fg_typ(uint32_t p) {
 }
 inline bool hda_fg_jest_audio(uint32_t p) {
     return hda_fg_typ(p) == 1;
+}
+
+/* =========================================================================
+ * 6B. BUDOWA I WALIDACJA KOMEND ORAZ TRANSPORT HDA
+ * ========================================================================= */
+
+enum HdaTransportStatus : uint32_t {
+    HDA_TRANSPORT_SUCCESS = 0,
+    HDA_TRANSPORT_NOT_READY = 1,
+    HDA_TRANSPORT_BUSY_STUCK = 2,
+    HDA_TRANSPORT_TIMEOUT = 3,
+    HDA_TRANSPORT_NO_VALID_RESPONSE = 4,
+    HDA_TRANSPORT_INVALID_ARGUMENT = 5,
+};
+
+inline bool hda_waliduj_cad(uint8_t cad) {
+    return cad <= 14U;
+}
+
+inline bool hda_waliduj_nid(uint8_t nid) {
+    return nid <= 127U;
+}
+
+inline bool hda_zbuduj_verb12(
+    uint8_t cad,
+    uint8_t nid,
+    uint16_t verb,
+    uint8_t payload,
+    uint32_t* out_cmd
+) {
+    if (!out_cmd || !hda_waliduj_cad(cad) || !hda_waliduj_nid(nid) || (verb > 0x0FFFU)) {
+        if (out_cmd) *out_cmd = 0;
+        return false;
+    }
+    *out_cmd = (static_cast<uint32_t>(cad & 0x0FU) << 28) |
+               (static_cast<uint32_t>(nid & 0x7FU) << 20) |
+               (static_cast<uint32_t>(verb & 0x0FFFU) << 8) |
+               static_cast<uint32_t>(payload);
+    return true;
+}
+
+inline bool hda_zbuduj_verb4(
+    uint8_t cad,
+    uint8_t nid,
+    uint8_t verb,
+    uint16_t payload,
+    uint32_t* out_cmd
+) {
+    if (!out_cmd || !hda_waliduj_cad(cad) || !hda_waliduj_nid(nid) || (verb > 0x0FU)) {
+        if (out_cmd) *out_cmd = 0;
+        return false;
+    }
+    *out_cmd = (static_cast<uint32_t>(cad & 0x0FU) << 28) |
+               (static_cast<uint32_t>(nid & 0x7FU) << 20) |
+               (static_cast<uint32_t>(verb & 0x0FU) << 16) |
+               static_cast<uint32_t>(payload);
+    return true;
+}
+
+inline bool hda_zbuduj_get_param(
+    uint8_t cad,
+    uint8_t nid,
+    uint8_t param_id,
+    uint32_t* out_cmd
+) {
+    return hda_zbuduj_verb12(cad, nid, 0x0F00U, param_id, out_cmd);
 }
 
 /* Amp Capabilities: ALSA-compatible layout. */
@@ -804,21 +898,45 @@ inline uint8_t hda_amp_rozmiar_kroku_25(uint32_t caps) {
 
 /*
  * Stan skanu diagnostycznego (widoczny dla Ring 3 przez BWS).
+ * Zawiera jawna wersje, rozmiar, generacje i granularny stan postepu.
  */
 struct HdaDiagSkan {
-    uint32_t etap;
-    uint32_t blad;
-    uint32_t postep_0_1000;
-    uint32_t kontroler_idx;
-    uint32_t kodek_idx;
-    uint32_t fg_idx;
-    uint32_t widget_idx;
-    uint32_t slow_w_kroku;
-    uint8_t aktywny;
-    uint8_t gotowy;
-    uint8_t przerwany;
-    uint8_t rezerwa;
+    uint32_t wersja;                    /* HDA_DIAG_WERSJA_ABI */
+    uint32_t rozmiar;                   /* sizeof(HdaDiagSkan) */
+    uint32_t generacja_skanu;           /* numer generacji biezacego skanu */
+    uint32_t etap;                      /* stan skanu (HdaDiagEtap) */
+    uint32_t blad;                      /* ostatni kod bledu (HdaDiagBlad) */
+    uint32_t postep_biezacy;            /* postep biezacy (kroki/indeks) */
+    uint32_t postep_maksymalny;         /* postep calkowity (szacowany) */
+    uint32_t postep_0_1000;             /* postep promilowy 0..1000 */
+    uint32_t kontroler_idx;             /* indeks kontrolera (0) */
+    uint32_t biezacy_cad;               /* biezacy badany CAD kodeka (0..14) */
+    uint32_t biezacy_nid;               /* biezacy badany NID wezla (0..255) */
+    uint32_t kodek_idx;                 /* indeks w tablicy kodekow */
+    uint32_t fg_idx;                    /* indeks Function Group */
+    uint32_t widget_idx;                /* indeks widgetu */
+    uint32_t slow_w_kroku;              /* slow/verbow wykonanych w kroku */
+    uint32_t generacja_opublikowana;    /* numer ostatnio ukonczonej migawki */
+    uint8_t aktywny;                    /* 1 gdy skan w toku */
+    uint8_t gotowy;                     /* 1 gdy skan ukonczony sukcesem */
+    uint8_t migawka_dostepna;           /* 1 gdy opublikowano pelna migawke */
+    uint8_t przerwany;                  /* 1 gdy przerwany / anulowany */
+    uint8_t rezerwa[4];                 /* wyrownanie do 8 bajtow */
 };
+
+static_assert(sizeof(HdaDiagSkan) == 72, "HdaDiagSkan layout");
+static_assert(__builtin_offsetof(HdaDiagSkan, wersja) == 0, "HdaDiagSkan wersja offset");
+static_assert(__builtin_offsetof(HdaDiagSkan, generacja_skanu) == 8, "HdaDiagSkan generacja_skanu offset");
+static_assert(__builtin_offsetof(HdaDiagSkan, etap) == 12, "HdaDiagSkan etap offset");
+static_assert(__builtin_offsetof(HdaDiagSkan, blad) == 16, "HdaDiagSkan blad offset");
+static_assert(__builtin_offsetof(HdaDiagSkan, postep_0_1000) == 28, "HdaDiagSkan postep_0_1000 offset");
+static_assert(__builtin_offsetof(HdaDiagSkan, biezacy_cad) == 36, "HdaDiagSkan biezacy_cad offset");
+static_assert(__builtin_offsetof(HdaDiagSkan, biezacy_nid) == 40, "HdaDiagSkan biezacy_nid offset");
+static_assert(__builtin_offsetof(HdaDiagSkan, generacja_opublikowana) == 60, "HdaDiagSkan generacja_opublikowana offset");
+static_assert(__builtin_offsetof(HdaDiagSkan, aktywny) == 64, "HdaDiagSkan aktywny offset");
+static_assert(__builtin_offsetof(HdaDiagSkan, gotowy) == 65, "HdaDiagSkan gotowy offset");
+static_assert(__builtin_offsetof(HdaDiagSkan, migawka_dostepna) == 66, "HdaDiagSkan migawka_dostepna offset");
+
 
 /* =========================================================================
  * 7. STRUKTURY MIGAWKI (publiczne ABI, wersja+rozmiar)
@@ -876,8 +994,10 @@ struct HdaDiagKontroler {
     uint8_t dma64;            /* GCAP 64OK */
     uint8_t liczba_kodekow;
     uint8_t transport;        /* 1 = Immediate Command */
-    uint16_t rezerwa3;
-    uint32_t rezerwa4;
+    uint8_t rezerwa3;
+    uint16_t initial_statests;
+    uint16_t discovered_codec_mask;
+    uint16_t responsive_codec_mask;
 };
 
 struct HdaDiagKodek {
@@ -1217,6 +1337,13 @@ inline bool hda_sciezka_sluchawki_istnieje(const HdaDiagSciezka* s, uint32_t n) 
     return false;
 }
 
+inline bool hda_sciezka_line_out_istnieje(const HdaDiagSciezka* s, uint32_t n) {
+    for (uint32_t i = 0; i < n && s; ++i) {
+        if (s[i].cel == HDA_CEL_WYJSCIE_LINIOWE) return true;
+    }
+    return false;
+}
+
 inline bool hda_sciezka_hdmi_istnieje(const HdaDiagSciezka* s, uint32_t n) {
     for (uint32_t i = 0; i < n && s; ++i) {
         if (hda_cel_jest_hdmi(s[i].cel)) return true;
@@ -1230,6 +1357,90 @@ inline uint32_t hda_liczba_sciezek_glosnik(const HdaDiagSciezka* s, uint32_t n) 
         if (hda_cel_jest_glosnikiem(s[i].cel)) ++c;
     }
     return c;
+}
+
+/*
+ * Zwraca czytelny stan diagnostyczny wyjscia audio wg 11 wymaganych stanow:
+ *  - Brak kontrolera HDA
+ *  - Kontroler HDA wykryty
+ *  - Brak odpowiedzi kodeka
+ *  - Kodek wykryty
+ *  - Brak Audio Function Group
+ *  - Brak wykrytego wyjścia audio
+ *  - Wyjście Głośniki
+ *  - Wyjście Słuchawki
+ *  - Wyjście Line Out
+ *  - Wyjście HDMI DisplayPort
+ *  - Nieznany typ wyjścia
+ */
+inline const char* hda_diag_stan_wyjscia_tekst(
+    const HdaDiagSnapshot* snap,
+    const HdaDiagSkan* scan
+) {
+    if (!snap || snap->liczba_kontrolerow == 0 ||
+        (scan && scan->blad == HDA_DIAG_BLAD_BRAK_KONTROLERA)) {
+        return "Brak kontrolera HDA";
+    }
+
+    uint32_t liczba_odp = 0;
+    for (uint32_t k = 0; k < snap->liczba_kontrolerow && k < HDA_DIAG_MAKS_KONTROLEROW; ++k) {
+        for (uint32_t c = 0; c < HDA_DIAG_MAKS_KODEKOW; ++c) {
+            if (snap->kodeki[k][c].odpowiada) ++liczba_odp;
+        }
+    }
+
+    if (liczba_odp == 0) {
+        if (scan && (scan->blad == HDA_DIAG_BLAD_KODEK_NIE_ODPOWIADA ||
+                     scan->blad == HDA_DIAG_BLAD_BRAK_KODEKA ||
+                     scan->etap == HDA_DIAG_ETAP_BLAD ||
+                     scan->gotowy)) {
+            return "Brak odpowiedzi kodeka";
+        }
+        return "Kontroler HDA wykryty";
+    }
+
+    uint32_t liczba_afg = 0;
+    for (uint32_t k = 0; k < snap->liczba_kontrolerow && k < HDA_DIAG_MAKS_KONTROLEROW; ++k) {
+        for (uint32_t c = 0; c < HDA_DIAG_MAKS_KODEKOW; ++c) {
+            if (!snap->kodeki[k][c].odpowiada) continue;
+            for (uint32_t f = 0; f < snap->kodeki[k][c].liczba_fg && f < HDA_DIAG_MAKS_FG; ++f) {
+                if (snap->fg[k][c][f].audio) ++liczba_afg;
+            }
+        }
+    }
+
+    if (liczba_afg == 0) {
+        if (scan && (scan->blad == HDA_DIAG_BLAD_BRAK_AFG ||
+                     scan->gotowy ||
+                     scan->etap == HDA_DIAG_ETAP_GOTOWY)) {
+            return "Brak Audio Function Group";
+        }
+        return "Kodek wykryty";
+    }
+
+    if (snap->liczba_sciezek == 0) {
+        if (scan && (scan->blad == HDA_DIAG_BLAD_BRAK_WYJSC ||
+                     scan->gotowy ||
+                     scan->etap == HDA_DIAG_ETAP_GOTOWY)) {
+            return "Brak wykrytego wyjścia audio";
+        }
+        return "Kodek wykryty";
+    }
+
+    /* Wykryto sciezki: klasyfikujemy urzadzenie wyjsciowe */
+    if (hda_sciezka_glosnik_istnieje(snap->sciezki, snap->liczba_sciezek)) {
+        return "Wyjście Głośniki";
+    }
+    if (hda_sciezka_sluchawki_istnieje(snap->sciezki, snap->liczba_sciezek)) {
+        return "Wyjście Słuchawki";
+    }
+    if (hda_sciezka_line_out_istnieje(snap->sciezki, snap->liczba_sciezek)) {
+        return "Wyjście Line Out";
+    }
+    if (hda_sciezka_hdmi_istnieje(snap->sciezki, snap->liczba_sciezek)) {
+        return "Wyjście HDMI DisplayPort";
+    }
+    return "Nieznany typ wyjścia";
 }
 
 /* =========================================================================
@@ -1433,11 +1644,17 @@ inline bool hda_sformatuj_raport(
         hda_raport_klucz_hex16(out, "GCAP raw", c.gcap);
         hda_raport_klucz_hex32(out, "GCTL raw", c.gctl);
         hda_raport_klucz_hex16(out, "STATESTS raw", c.statests);
+        hda_raport_klucz_hex16(out, "STATESTS initial", c.initial_statests);
+        hda_raport_klucz_hex16(out, "Discovered codec mask", c.discovered_codec_mask);
+        hda_raport_klucz_hex16(out, "Responsive codec mask", c.responsive_codec_mask);
         hda_raport_klucz_liczba(out, "OSS", c.oss);
         hda_raport_klucz_liczba(out, "ISS", c.iss);
         hda_raport_klucz_liczba(out, "BSS", c.bss);
         hda_raport_klucz_liczba(out, "DMA64", c.dma64);
         hda_raport_klucz_liczba(out, "Codecs", c.liczba_kodekow);
+        hda_raport_dopisz(out, "Transport ");
+        hda_raport_dopisz(out, c.transport == 1 ? "Immediate Command (IC)" : "CORB/RIRB");
+        hda_raport_dopisz(out, "\n");
 
         for (uint32_t kd = 0; kd < HDA_DIAG_MAKS_KODEKOW; ++kd) {
             const HdaDiagKodek& ko = snap->kodeki[k][kd];

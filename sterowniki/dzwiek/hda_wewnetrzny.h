@@ -18,6 +18,11 @@
  */
 bool hda_wew_wyslij_immediate(uint32_t komenda, uint32_t* odpowiedz);
 
+/*
+ * Bezpieczne wyslanie komendy read-only ze statusem transportu.
+ */
+bool hda_wew_send_verb_readonly(uint32_t verb, uint32_t* response);
+
 /* Budowa slowa komendy (12-bit verb z 8-bit payload). */
 uint32_t hda_wew_verb12(uint8_t cad, uint8_t nid, uint16_t verb, uint8_t payload);
 
@@ -53,6 +58,9 @@ struct HdaWewStanKontrolera {
     uint8_t iss;
     uint8_t bss;
     uint8_t dma64;
+    uint16_t initial_statests;
+    uint16_t discovered_codec_mask;
+    uint16_t responsive_codec_mask;
 };
 
 bool hda_wew_pobierz_stan_kontrolera(HdaWewStanKontrolera* out);
@@ -107,3 +115,23 @@ void hda_wew_test_stop();
 
 /* Czy testowy strumien gra. Auto-stop po czas_ms. */
 bool hda_wew_test_tick(uint64_t teraz_ms);
+
+/*
+ * Aktywne sondowanie pojedynczego adresu kodeka (0..14).
+ * Bounded work: wysyla dokladnie 1 zapytanie GetParameter VendorID.
+ */
+bool hda_wew_sonda_pojedynczego_kodeka(
+    uint8_t cad,
+    bool* out_odpowiada,
+    uint32_t* out_vendor
+);
+
+/*
+ * Aktywne sondowanie wszystkich adresow kodekow (0..14).
+ * Zwraca maske bitowa responsive kodeków w *responsive_mask.
+ * Nie modyfikuje routingu ani stanu kodeka.
+ */
+bool hda_wew_aktywne_sondowanie_kodekow(
+    uint16_t* responsive_mask
+);
+

@@ -103,7 +103,7 @@ void dopisz_hex32(char* buf, size_t cap, size_t* pos, uint32_t v) {
     dopisz_str(buf, cap, pos, tmp);
 }
 
-const char* nazwa_etapu(uint32_t etap) {
+[[maybe_unused]] static const char* nazwa_etapu(uint32_t etap) {
     switch (etap) {
         case HDA_DIAG_ETAP_BEZCZYNNY: return "Bezczynny";
         case HDA_DIAG_ETAP_KONTROLER: return "Skanowanie kontrolera";
@@ -123,12 +123,12 @@ const char* nazwa_bledu(uint32_t blad) {
         case HDA_DIAG_BLAD_BRAK_KONTROLERA: return "Brak kontrolera HDA";
         case HDA_DIAG_BLAD_MMIO: return "Nie udało się odczytać kontrolera";
         case HDA_DIAG_BLAD_RESET: return "Błąd resetu kontrolera";
-        case HDA_DIAG_BLAD_BRAK_KODEKA: return "Brak kodeka w STATESTS";
-        case HDA_DIAG_BLAD_KODEK_NIE_ODPOWIADA: return "Kodek nie odpowiada";
+        case HDA_DIAG_BLAD_BRAK_KODEKA: return "Brak odpowiedzi kodeka";
+        case HDA_DIAG_BLAD_KODEK_NIE_ODPOWIADA: return "Brak odpowiedzi kodeka";
         case HDA_DIAG_BLAD_ZLY_ZAKRES_WEZLOW: return "Nieprawidłowy zakres węzłów";
         case HDA_DIAG_BLAD_LISTA_POLACZEN: return "Nieprawidłowa lista połączeń";
         case HDA_DIAG_BLAD_BRAK_AFG: return "Brak Audio Function Group";
-        case HDA_DIAG_BLAD_BRAK_WYJSC: return "Brak widgetów wyjściowych";
+        case HDA_DIAG_BLAD_BRAK_WYJSC: return "Brak wykrytego wyjścia audio";
         case HDA_DIAG_BLAD_BRAK_GLOSNIKA: return "Brak wyjścia Głośniki";
         case HDA_DIAG_BLAD_STRUMIEN: return "Błąd uruchamiania strumienia";
         case HDA_DIAG_BLAD_TIMEOUT_ODTWORZENIA: return "Upłynął czas odtwarzania";
@@ -166,6 +166,10 @@ bool diag_skan_start() {
 
 bool diag_skan_krok() {
     return bws_wywolaj(BWS_HDA_DIAG, BWS_HDA_DIAG_SKAN_KROK, 0, 0, 0) == 1;
+}
+
+bool diag_skan_anuluj() {
+    return bws_wywolaj(BWS_HDA_DIAG, BWS_HDA_DIAG_SKAN_ANULUJ, 0, 0, 0) == 1;
 }
 
 bool diag_snapshot(HdaDiagSnapshot* out) {
@@ -228,11 +232,15 @@ void zbuduj_raport(char* out, size_t cap, bool* obciety) {
     dopisz_liczbe(wersja, sizeof(wersja), &p, BURSZTYN_WERSJA_PATCH);
 
     if (g_snapshot_ok) {
+        if (g_stan_skan.aktywny) {
+            hda_raport_linia(&rb, "[UWAGA: Skan w toku - raport zawiera poprzednia kompletna migawke]");
+            hda_raport_klucz_wartosc(&rb, "Biezacy etap skanu", hda_diag_etap_nazwa(g_stan_skan.etap));
+        }
         (void)hda_sformatuj_raport(&g_snapshot, wersja, &rb);
     } else {
         hda_raport_linia(&rb, "=== Raport diagnostyczny HDA ===");
         hda_raport_linia(&rb, "Brak migawki. Użyj Odśwież raport.");
-        hda_raport_klucz_wartosc(&rb, "Stan", nazwa_etapu(g_stan_skan.etap));
+        hda_raport_klucz_wartosc(&rb, "Stan", hda_diag_etap_nazwa(g_stan_skan.etap));
         hda_raport_klucz_wartosc(&rb, "Błąd", nazwa_bledu(g_stan_skan.blad));
     }
     if (obciety) *obciety = rb.obciety;
@@ -366,6 +374,14 @@ class OknoTestDzwieku : public Okno {
 public:
     OknoTestDzwieku() : Okno("Test dźwięku", 980, 620) {}
     ~OknoTestDzwieku() override {
+        if (skan_w_toku_) {
+            diag_skan_anuluj();
+            skan_w_toku_ = false;
+        }
+        if (wskaznik_) {
+            wskaznik_->stop();
+        }
+        test_stop();
         // Okno owns its default Panel; a replacement root is app-owned.
         zarzadca_popupow().zamknij(PowodZamknieciaPopup::WlascicielZamkniety);
         auto* root = kontrolka_glowna();
@@ -377,14 +393,32 @@ public:
         if (info_) info_->ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI));
     }
 
+    WskaznikZajetosci* wskaznik() const { return wskaznik_; }
+
     void inicjalizuj() {
         test_trace("BursztynUI initialized");
         PanelDokowany& root = dodaj<PanelDokowany>();
         root.ustaw_wypelnienie(Marginesy(8)); root.ustaw_odstep(6);
-        status_ = &root.dodaj<PasekInformacyjny>(Dokowanie::Gora,
-            TypKomunikatu::Informacja, "Łączenie z diagnostyką HDA");
+        Siatka& header = root.dodaj<Siatka>(Dokowanie::Gora);
+        header.ustaw_wypelnienie(Marginesy(0)); header.ustaw_odstep(6);
+        header.ustaw_preferowany_rozmiar(Rozmiar(-1, 36));
+        header.dodaj_wiersz(DefinicjaWymiaru::piksele(36));
+        header.dodaj_kolumne(DefinicjaWymiaru::gwiazdka(1));
+        header.dodaj_kolumne(DefinicjaWymiaru::automatyczny());
+
+        status_ = new PasekInformacyjny(TypKomunikatu::Informacja, "Łączenie z diagnostyką HDA");
         status_->ustaw_przycisk_zamkniecia(false);
-        status_->ustaw_preferowany_rozmiar(Rozmiar(-1, 36));
+        status_->ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+        status_->ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+        header.dodaj_do_siatki(status_, 0, 0);
+
+        wskaznik_ = new WskaznikZajetosci(false);
+        wskaznik_->ustaw_preferowany_rozmiar(Rozmiar(32, 32));
+        wskaznik_->ustaw_wyrownanie_poziome(WyrownaniePoziome::Srodek);
+        wskaznik_->ustaw_wyrownanie_pionowe(WyrownaniePionowe::Srodek);
+        wskaznik_->ustaw_widoczna(false);
+        header.dodaj_do_siatki(wskaznik_, 0, 1);
+
         sekcje_ = &root.dodaj<ListaRozwijana>(Dokowanie::Gora);
         sekcje_->ustaw_preferowany_rozmiar(Rozmiar(-1, 34));
         const char* names[] = {"Kontroler", "Kodeki", "Widgety", "Ścieżki audio",
@@ -477,19 +511,28 @@ public:
             if (!diag_stan(&g_stan_skan)) { blad_bws("Diagnostyka HDA", 89, 0); return; }
             polaczony_ = true;
         }
-        if (!diag_stan(&g_stan_skan)) { blad_bws("Diagnostyka HDA", 89, 0); return; }
-        if (g_stan_skan.aktywny) { timer_ = 1; return; }
+        if (skan_w_toku_) {
+            diag_skan_anuluj();
+            skan_w_toku_ = false;
+        }
         if (!diag_skan_start()) {
             if (diag_stan(&g_stan_skan)) ustaw_status(nazwa_bledu(g_stan_skan.blad), TypKomunikatu::Blad);
             else blad_bws("Skan HDA", 89, 0);
-            g_snapshot_ok = diag_snapshot(&g_snapshot);
+            if (wskaznik_) {
+                wskaznik_->stop();
+                wskaznik_->ustaw_widoczna(false);
+            }
             odswiez_wszystko();
             return;
         }
-        g_snapshot_ok = false;
         if (!diag_stan(&g_stan_skan)) { blad_bws("Stan skanu", 89, 0); return; }
+        zadana_generacja_ = g_stan_skan.generacja_skanu;
+        skan_w_toku_ = true;
         timer_ = 1;
-        btn_odswiez_->ustaw_wlaczona(false);
+        if (wskaznik_) {
+            wskaznik_->ustaw_widoczna(true);
+            wskaznik_->start();
+        }
         zaktualizuj_postep();
     }
     void tick_skanu() {
@@ -504,28 +547,45 @@ public:
             test_trace("HDA diagnostic ABI connected");
             rozpocznij_skan();
         }
-        if (timer_) {
-            (void)diag_skan_krok();
+        if (skan_w_toku_) {
+            const bool koniec = diag_skan_krok();
             if (!diag_stan(&g_stan_skan)) {
-                timer_ = 0; btn_odswiez_->ustaw_wlaczona(true);
+                skan_w_toku_ = false;
+                timer_ = 0;
+                if (wskaznik_) {
+                    wskaznik_->stop();
+                    wskaznik_->ustaw_widoczna(false);
+                }
                 blad_bws("Stan skanu", 89, 0); return;
             }
-            zaktualizuj_postep();
-            if (!g_stan_skan.aktywny) {
-                timer_ = 0; btn_odswiez_->ustaw_wlaczona(true);
-                g_snapshot_ok = diag_snapshot(&g_snapshot);
-                if (g_stan_skan.blad) ustaw_status(nazwa_bledu(g_stan_skan.blad), TypKomunikatu::Blad);
-                else if (!g_snapshot_ok) ustaw_status("Migawka niedostępna - użyj Odśwież", TypKomunikatu::Blad);
-                else {
-                    bool kodek_odpowiada = false;
-                    for (uint32_t k = 0; k < g_snapshot.liczba_kontrolerow; ++k)
-                        for (uint32_t c = 0; c < HDA_DIAG_MAKS_KODEKOW; ++c)
-                            kodek_odpowiada |= g_snapshot.kodeki[k][c].odpowiada != 0;
-                    if (!g_snapshot.liczba_kontrolerow) ustaw_status("Brak kontrolera HDA", TypKomunikatu::Blad);
-                    else if (!kodek_odpowiada) ustaw_status("Brak odpowiadających kodeków", TypKomunikatu::Blad);
-                    else ustaw_status("Gotowe", TypKomunikatu::Sukces);
+            if (g_stan_skan.generacja_skanu == zadana_generacja_) {
+                zaktualizuj_postep();
+                if (!g_stan_skan.aktywny || koniec) {
+                    skan_w_toku_ = false;
+                    timer_ = 0;
+                    if (wskaznik_) {
+                        wskaznik_->stop();
+                        wskaznik_->ustaw_widoczna(false);
+                    }
+                    if (g_stan_skan.etap == HDA_DIAG_ETAP_GOTOWY) {
+                        g_snapshot_ok = diag_snapshot(&g_snapshot);
+                        bool kodek_odpowiada = false;
+                        for (uint32_t k = 0; k < g_snapshot.liczba_kontrolerow; ++k)
+                            for (uint32_t c = 0; c < HDA_DIAG_MAKS_KODEKOW; ++c)
+                                kodek_odpowiada |= g_snapshot.kodeki[k][c].odpowiada != 0;
+
+                        const char* st_tekst = hda_diag_stan_wyjscia_tekst(g_snapshot_ok ? &g_snapshot : nullptr, &g_stan_skan);
+                        TypKomunikatu st_typ = TypKomunikatu::Sukces;
+                        if (!g_snapshot_ok || g_snapshot.liczba_kontrolerow == 0 || !kodek_odpowiada || g_stan_skan.blad != HDA_DIAG_OK) {
+                            st_typ = TypKomunikatu::Blad;
+                        }
+                        ustaw_status(st_tekst, st_typ);
+                        odswiez_wszystko();
+                    } else if (g_stan_skan.etap == HDA_DIAG_ETAP_BLAD) {
+                        ustaw_status(nazwa_bledu(g_stan_skan.blad), TypKomunikatu::Blad);
+                        odswiez_wszystko();
+                    }
                 }
-                odswiez_wszystko();
             }
         }
         if (ton_aktywny_) {
@@ -540,7 +600,7 @@ public:
     void ustaw_status(const char* t, TypKomunikatu typ = TypKomunikatu::Informacja) {
         if (status_) { status_->ustaw_typ_komunikatu(typ); status_->ustaw_tekst(t ? t : ""); }
     }
-    bool potrzebuje_ticku() const { return !pierwsza_klatka_ || timer_ || ton_aktywny_; }
+    bool potrzebuje_ticku() const { return !pierwsza_klatka_ || skan_w_toku_ || timer_ || ton_aktywny_; }
 
 
 private:
@@ -614,11 +674,13 @@ private:
 
     void zaktualizuj_postep() {
         char buf[96]{}; size_t p = 0;
-        dopisz_str(buf, sizeof(buf), &p, nazwa_etapu(g_stan_skan.etap));
-        dopisz_str(buf, sizeof(buf), &p, " (");
-        dopisz_liczbe(buf, sizeof(buf), &p, g_stan_skan.postep_0_1000 / 10);
-        dopisz_str(buf, sizeof(buf), &p, "%)");
-        ustaw_status(buf);
+        dopisz_str(buf, sizeof(buf), &p, hda_diag_etap_nazwa(g_stan_skan.etap));
+        if (g_stan_skan.postep_0_1000 > 0 && g_stan_skan.postep_0_1000 <= 1000) {
+            dopisz_str(buf, sizeof(buf), &p, " (");
+            dopisz_liczbe(buf, sizeof(buf), &p, g_stan_skan.postep_0_1000 / 10);
+            dopisz_str(buf, sizeof(buf), &p, "%)");
+        }
+        ustaw_status(buf, TypKomunikatu::Informacja);
     }
     void odswiez_strumien() {
         if (!g_snapshot_ok) return;
@@ -680,8 +742,14 @@ private:
                 dopisz_hex32(buf, sizeof(buf), &p, c.gcap);
                 dopisz_str(buf, sizeof(buf), &p, " GCTL ");
                 dopisz_hex32(buf, sizeof(buf), &p, c.gctl);
-                dopisz_str(buf, sizeof(buf), &p, "\nSTATESTS ");
+                dopisz_str(buf, sizeof(buf), &p, "\nSTATESTS teraz ");
                 dopisz_hex32(buf, sizeof(buf), &p, c.statests);
+                dopisz_str(buf, sizeof(buf), &p, "\nSTATESTS przy starcie ");
+                dopisz_hex32(buf, sizeof(buf), &p, c.initial_statests);
+                dopisz_str(buf, sizeof(buf), &p, "\nMaska wykryta podczas inicjalizacji ");
+                dopisz_hex32(buf, sizeof(buf), &p, c.discovered_codec_mask);
+                dopisz_str(buf, sizeof(buf), &p, "\nMaska potwierdzona skanem ");
+                dopisz_hex32(buf, sizeof(buf), &p, c.responsive_codec_mask);
                 dopisz_str(buf, sizeof(buf), &p, "\nOSS ");
                 dopisz_liczbe(buf, sizeof(buf), &p, c.oss);
                 dopisz_str(buf, sizeof(buf), &p, " ISS ");
@@ -691,7 +759,7 @@ private:
                 dopisz_str(buf, sizeof(buf), &p, " DMA64 ");
                 dopisz_liczbe(buf, sizeof(buf), &p, c.dma64);
                 dopisz_str(buf, sizeof(buf), &p, "\nTransport: Immediate Command (IC)\n");
-                dopisz_str(buf, sizeof(buf), &p, "Kodeki: ");
+                dopisz_str(buf, sizeof(buf), &p, "Liczba odpowiadających kodeków: ");
                 dopisz_liczbe(buf, sizeof(buf), &p, c.liczba_kodekow);
                 dopisz_str(buf, sizeof(buf), &p, "\n\n");
             }
@@ -713,14 +781,19 @@ private:
                     if (!ko.odpowiada) continue;
                     dopisz_str(buf, sizeof(buf), &p, "Adres kodeka ");
                     dopisz_liczbe(buf, sizeof(buf), &p, ko.cad);
-                    dopisz_str(buf, sizeof(buf), &p, "\nVendor ID ");
+                    dopisz_str(buf, sizeof(buf), &p, "\nVendor ID 0x");
                     dopisz_liczbe(buf, sizeof(buf), &p, ko.vendor_id, 16);
-                    dopisz_str(buf, sizeof(buf), &p, " Device ID ");
+                    if (ko.vendor_id == 0x1AF4) dopisz_str(buf, sizeof(buf), &p, " (QEMU / Red Hat)");
+                    else if (ko.vendor_id == 0x8086) dopisz_str(buf, sizeof(buf), &p, " (Intel)");
+                    else if (ko.vendor_id == 0x10EC) dopisz_str(buf, sizeof(buf), &p, " (Realtek)");
+                    dopisz_str(buf, sizeof(buf), &p, " Device ID 0x");
                     dopisz_liczbe(buf, sizeof(buf), &p, ko.device_id, 16);
                     dopisz_str(buf, sizeof(buf), &p, "\nRevisionID ");
                     dopisz_hex32(buf, sizeof(buf), &p, ko.revision_id);
                     dopisz_str(buf, sizeof(buf), &p, "\nRootSubCount ");
                     dopisz_hex32(buf, sizeof(buf), &p, ko.root_sub_count);
+                    dopisz_str(buf, sizeof(buf), &p, "\nFunction Groups: ");
+                    dopisz_liczbe(buf, sizeof(buf), &p, ko.liczba_fg);
                     for (uint32_t f = 0; f < HDA_DIAG_MAKS_FG; ++f) {
                         const HdaDiagFG& g = g_snapshot.fg[k][kd][f];
                         if (g.nid == 0 && g.widget_count == 0) continue;
@@ -728,6 +801,8 @@ private:
                         dopisz_hex8(buf, sizeof(buf), &p, g.nid);
                         dopisz_str(buf, sizeof(buf), &p, " typ ");
                         dopisz_liczbe(buf, sizeof(buf), &p, g.typ);
+                        dopisz_str(buf, sizeof(buf), &p, " (Audio Function Group)\nWidget count: ");
+                        dopisz_liczbe(buf, sizeof(buf), &p, g.widget_count);
                         dopisz_str(buf, sizeof(buf), &p, " widgety ");
                         dopisz_liczbe(buf, sizeof(buf), &p, g.widget_start);
                         dopisz_str(buf, sizeof(buf), &p, "+");
@@ -883,12 +958,30 @@ private:
             tekst_strumien_->ustaw_tekst(buf);
         }
 
+        if (info_ && g_snapshot_ok) {
+            const char* dev_name = "Wyjście audio";
+            if (hda_sciezka_glosnik_istnieje(g_snapshot.sciezki, g_snapshot.liczba_sciezek)) {
+                dev_name = "Głośniki";
+            } else if (hda_sciezka_sluchawki_istnieje(g_snapshot.sciezki, g_snapshot.liczba_sciezek)) {
+                dev_name = "Słuchawki";
+            } else if (hda_sciezka_line_out_istnieje(g_snapshot.sciezki, g_snapshot.liczba_sciezek)) {
+                dev_name = "Wyjście Line Out";
+            } else if (hda_sciezka_hdmi_istnieje(g_snapshot.sciezki, g_snapshot.liczba_sciezek)) {
+                dev_name = "HDMI / DisplayPort";
+            }
+            char ibuf[160]{}; size_t ip = 0;
+            dopisz_str(ibuf, sizeof(ibuf), &ip, dev_name);
+            dopisz_str(ibuf, sizeof(ibuf), &ip, " - wybierz test. Czas: 1,5 s. Dźwięk nie uruchamia się automatycznie.");
+            info_->ustaw_tekst(ibuf);
+        }
+
         odswiez_raport();
     }
 
     Przycisk* btn_odswiez_ = nullptr;
     Przycisk* btn_zapisz_ = nullptr;
     Przycisk* btn_stop_ = nullptr;
+    WskaznikZajetosci* wskaznik_ = nullptr;
     Etykieta* info_ = nullptr;
     ListaRozwijana* sekcje_ = nullptr;
     PasekInformacyjny* status_ = nullptr;
@@ -900,6 +993,8 @@ private:
     WidokRaportu* tekst_strumien_ = nullptr;
     WidokRaportu* tekst_raport_ = nullptr;
     bool pierwsza_klatka_{false}, polaczony_{false}, ton_aktywny_{false};
+    bool skan_w_toku_{false};
+    uint32_t zadana_generacja_{0};
     uint8_t timer_ = 0;
     uint64_t ostatni_tick_ns_ = 0;
 
@@ -943,5 +1038,6 @@ extern "C" __attribute__((noreturn)) void _start() {
         (void)app.uruchom(*okno.p);
     }
     test_stop();
+    diag_skan_anuluj();
     bws_zakoncz_proces();
 }

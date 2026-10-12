@@ -43,6 +43,17 @@ bool hda_diag_krok_skanu();
 void hda_diag_pobierz_stan(HdaDiagSkan* out);
 
 /*
+ * Anuluje biezacy skan jesli byl aktywny.
+ */
+void hda_diag_anuluj_skan();
+
+/*
+ * Pobiera wskaznik do ostatnio opublikowanej pelnej migawki.
+ * Zwraca nullptr jesli zaden skan sie jeszcze nie zakonczyl.
+ */
+const HdaDiagSnapshot* hda_diag_pobierz_opublikowana(uint32_t* generacja);
+
+/*
  * Atomowa publikacja: kopiuje kompletna migawke do bufora uzytkownika
  * po stronie jadra. Nigdy nie zwraca polowy starej i polowy nowej.
  *

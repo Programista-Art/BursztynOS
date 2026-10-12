@@ -1052,6 +1052,10 @@ uint64_t bws_hda_diag(const proces_t& proces, uint64_t a1, uint64_t a2,
             (void)a4;
             return koniec ? 1ULL : 0ULL;
         }
+        case BWS_HDA_DIAG_SKAN_ANULUJ: {
+            hda_diag_anuluj_skan();
+            return 1ULL;
+        }
         case BWS_HDA_DIAG_SNAPSHOT: {
             if (a2 == 0) return 0;
             BwsHdaSnapshotZadanie zad{};

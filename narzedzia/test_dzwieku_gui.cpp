@@ -68,10 +68,13 @@ static uint64_t hook(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3, uint64_
         switch (a1) {
             case BWS_HDA_DIAG_STAN: std::memcpy(reinterpret_cast<void*>(a2), &scan, sizeof(scan)); return 1;
             case BWS_HDA_DIAG_SKAN_START:
-                scan = {}; scan.aktywny = 1; scan.etap = HDA_DIAG_ETAP_KODEK; return 1;
+                scan = {}; scan.aktywny = 1; scan.etap = HDA_DIAG_ETAP_KONTROLER; scan.generacja_skanu = 7; return 1;
             case BWS_HDA_DIAG_SKAN_KROK:
                 scan.aktywny = 0; scan.gotowy = !scan_error; scan.blad = scan_error;
-                scan.etap = scan_error ? HDA_DIAG_ETAP_BLAD : HDA_DIAG_ETAP_GOTOWY; return 1;
+                scan.etap = scan_error ? HDA_DIAG_ETAP_BLAD : HDA_DIAG_ETAP_GOTOWY;
+                scan.generacja_skanu = 7; scan.generacja_opublikowana = 7; return 1;
+            case BWS_HDA_DIAG_SKAN_ANULUJ:
+                scan.aktywny = 0; scan.przerwany = 1; return 1;
             case BWS_HDA_DIAG_SNAPSHOT: {
                 ++snapshot_calls; if (!ready) return 0;
                 auto* request = reinterpret_cast<BwsHdaSnapshotZadanie*>(a2);
@@ -225,6 +228,19 @@ int main(int argc, char** argv) {
         CHECK(window.status_->typ_komunikatu() == TypKomunikatu::Sukces);
     }
     reset(); OknoTestDzwieku window; start(window); CHECK(g_snapshot_ok); CHECK(g_generacja == 7);
+    CHECK(window.wskaznik() != nullptr);
+    CHECK(!window.wskaznik()->czy_aktywny());
+    CHECK(!window.wskaznik()->czy_widoczna());
+    /* Test animacji spinnera, odswiezania i odpornosci na wielokrotne klikniecia */
+    click(*window.btn_odswiez_);
+    CHECK(window.wskaznik()->czy_aktywny());
+    CHECK(window.wskaznik()->czy_widoczna());
+    click(*window.btn_odswiez_);
+    click(*window.btn_odswiez_);
+    CHECK(window.wskaznik()->czy_aktywny());
+    window.tick_skanu();
+    CHECK(!window.wskaznik()->czy_aktywny());
+    CHECK(!window.wskaznik()->czy_widoczna());
     for (const char* text : {"PCI BDF 00:1B.0", "0x8086", "0x2668", "GCAP", "STATESTS"})
         CHECK(std::strstr(window.tekst_kontroler_->tekst(), text));
     CHECK(std::strstr(window.tekst_kodeki_->tekst(), "AFG NID"));

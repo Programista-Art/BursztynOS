@@ -441,6 +441,290 @@ static void test_stale_testu() {
     CHECK(HDA_TEST_TON_1K_HZ == 1000);
 }
 
+static void test_verb_construction() {
+    /* Walidacja CAd i NID */
+    CHECK(hda_waliduj_cad(0));
+    CHECK(hda_waliduj_cad(14));
+    CHECK(!hda_waliduj_cad(15));
+    CHECK(!hda_waliduj_cad(255));
+
+    CHECK(hda_waliduj_nid(0));
+    CHECK(hda_waliduj_nid(127));
+    CHECK(!hda_waliduj_nid(128));
+    CHECK(!hda_waliduj_nid(255));
+
+    /* 12-bit verb */
+    uint32_t cmd = 0;
+    CHECK(hda_zbuduj_verb12(0, 0, 0xF00, 0x00, &cmd));
+    CHECK(cmd == 0x000F0000); /* Root Vendor ID dla CAD 0 */
+
+    CHECK(hda_zbuduj_verb12(1, 0, 0xF00, 0x00, &cmd));
+    CHECK(cmd == 0x100F0000); /* Root Vendor ID dla CAD 1 */
+
+    CHECK(hda_zbuduj_verb12(0, 1, 0xF00, 0x05, &cmd));
+    CHECK(cmd == 0x001F0005); /* FG Type dla NID 1 */
+
+    CHECK(hda_zbuduj_verb12(0, 3, 0xF1C, 0x00, &cmd));
+    CHECK(cmd == 0x003F1C00); /* Pin Default Config dla NID 3 */
+
+    CHECK(hda_zbuduj_verb12(0, 2, 0x705, 0x00, &cmd));
+    CHECK(cmd == 0x00270500); /* Set Power D0 dla NID 2 */
+
+    /* Niepoprawne parametry */
+    CHECK(!hda_zbuduj_verb12(15, 0, 0xF00, 0, &cmd));
+    CHECK(!hda_zbuduj_verb12(0, 128, 0xF00, 0, &cmd));
+    CHECK(!hda_zbuduj_verb12(0, 0, 0x1000, 0, &cmd));
+    CHECK(!hda_zbuduj_verb12(0, 0, 0xF00, 0, nullptr));
+
+    /* 4-bit verb */
+    CHECK(hda_zbuduj_verb4(0, 2, 0x2, 0x0011, &cmd));
+    CHECK(cmd == 0x00220011); /* Set Stream Format dla NID 2 */
+
+    CHECK(hda_zbuduj_verb4(0, 3, 0x3, 0xB04A, &cmd));
+    CHECK(cmd == 0x0033B04A); /* Set Amp Gain Mute dla NID 3 */
+
+    CHECK(!hda_zbuduj_verb4(15, 0, 0x2, 0x0011, &cmd));
+    CHECK(!hda_zbuduj_verb4(0, 128, 0x2, 0x0011, &cmd));
+    CHECK(!hda_zbuduj_verb4(0, 0, 0x10, 0x0011, &cmd));
+
+    /* Helper GetParameter */
+    CHECK(hda_zbuduj_get_param(0, 0, HDA_PAR_VENDOR_ID, &cmd));
+    CHECK(cmd == 0x000F0000);
+    CHECK(hda_zbuduj_get_param(0, 0, HDA_PAR_REV_ID, &cmd));
+    CHECK(cmd == 0x000F0002);
+    CHECK(hda_zbuduj_get_param(0, 0, HDA_PAR_SUB_NODE_COUNT, &cmd));
+    CHECK(cmd == 0x000F0004);
+}
+
+static void test_transport_immediate_modeling() {
+    /*
+     * Modelowanie rejestrow Immediate Command wg HDA 1.0 Section 3.3.34..3.3.36:
+     * - ICOI: 32-bit R/W
+     * - ICII: 32-bit RO
+     * - ICIS: 16-bit (Bit 0 = ICB, Bit 1 = IRV RW1C, CAD bits 7:4)
+     */
+    struct ModeledHdaRegs {
+        uint32_t icoi{0};
+        uint32_t icii{0};
+        uint16_t icis{0};
+
+        void write_icoi(uint32_t v) { icoi = v; }
+        uint32_t read_icii() const { return icii; }
+        uint16_t read_icis() const { return icis; }
+
+        void write_icis(uint16_t v) {
+            /* Bit 1 (IRV) is W1C */
+            if (v & (1U << 1)) {
+                icis &= ~static_cast<uint16_t>(1U << 1);
+            }
+            /* Bit 0 (ICB): writing 1 sets ICB, writing 0 clears ICB */
+            if (v & (1U << 0)) {
+                icis |= (1U << 0);
+            } else {
+                icis &= ~static_cast<uint16_t>(1U << 0);
+            }
+        }
+
+        /* Symulacja QEMU intel-hda: obsluga polecenia gdy ICB staje sie 1 */
+        void qemu_step() {
+            if (icis & (1U << 0)) {
+                uint8_t cad = static_cast<uint8_t>((icoi >> 28) & 0x0FU);
+                if (cad == 0) {
+                    /* Kodek istnieje: zwroc vendor ID QEMU */
+                    icii = 0x1AF40022;
+                    icis &= ~static_cast<uint16_t>(1U << 0); /* ICB = 0 */
+                    icis |= (1U << 1);                       /* IRV = 1 */
+                } else {
+                    /* Nieistniejacy kodek: QEMU nie czysci ICB i nie ustawia IRV */
+                }
+            }
+        }
+    } dev;
+
+    /* 1. Normalna transakcja do CAD 0 */
+    dev.icis = 0;
+    CHECK((dev.read_icis() & 1) == 0); /* idle */
+    dev.write_icoi(0x000F0000);
+    dev.write_icis(1); /* set ICB */
+    CHECK((dev.read_icis() & 1) != 0);
+    dev.qemu_step(); /* hardware process */
+    CHECK((dev.read_icis() & 1) == 0); /* ICB cleared */
+    CHECK((dev.read_icis() & 2) != 0); /* IRV set */
+    CHECK(dev.read_icii() == 0x1AF40022);
+    /* Ack IRV: W1C write of 2 */
+    dev.write_icis(2);
+    CHECK(dev.read_icis() == 0); /* idle again */
+
+    /* 2. Obsluga zaleglego IRV przed nowym verbem */
+    dev.icis = 2; /* stale IRV */
+    if (dev.read_icis() & 2) {
+        dev.write_icis(2); /* acknowledge stale */
+    }
+    CHECK(dev.read_icis() == 0);
+
+    /* 3. Non-existent codec timeout i recovery (CAD 1) */
+    dev.write_icoi(0x100F0000);
+    dev.write_icis(1); /* set ICB */
+    dev.qemu_step();   /* QEMU leaves ICB=1 */
+    CHECK((dev.read_icis() & 1) != 0); /* ICB still set */
+    CHECK((dev.read_icis() & 2) == 0); /* IRV not set */
+    /* Driver timeout recovery: write 0 clears ICB */
+    dev.write_icis(0);
+    CHECK((dev.read_icis() & 1) == 0); /* cleared and recovered */
+    CHECK(dev.read_icis() == 0);
+
+    /* 4. Szerokosc rejestrow ABI */
+    CHECK(sizeof(dev.icis) == 2);
+    CHECK(sizeof(dev.icoi) == 4);
+    CHECK(sizeof(dev.icii) == 4);
+}
+
+static void test_status_banner_11_states() {
+    /* 1. Brak kontrolera HDA */
+    HdaDiagSnapshot s1{};
+    s1.liczba_kontrolerow = 0;
+    CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s1, nullptr), "Brak kontrolera HDA") == 0);
+
+    /* 2. Kontroler HDA wykryty */
+    HdaDiagSnapshot s2{};
+    s2.liczba_kontrolerow = 1;
+    HdaDiagSkan sc2{};
+    sc2.aktywny = 1;
+    CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s2, &sc2), "Kontroler HDA wykryty") == 0);
+
+    /* 3. Brak odpowiedzi kodeka */
+    HdaDiagSnapshot s3{};
+    s3.liczba_kontrolerow = 1;
+    HdaDiagSkan sc3{};
+    sc3.gotowy = 1;
+    sc3.blad = HDA_DIAG_BLAD_KODEK_NIE_ODPOWIADA;
+    CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s3, &sc3), "Brak odpowiedzi kodeka") == 0);
+
+    /* 4. Kodek wykryty */
+    HdaDiagSnapshot s4{};
+    s4.liczba_kontrolerow = 1;
+    s4.kodeki[0][0].odpowiada = 1;
+    HdaDiagSkan sc4{};
+    sc4.aktywny = 1;
+    CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s4, &sc4), "Kodek wykryty") == 0);
+
+    /* 5. Brak Audio Function Group */
+    HdaDiagSnapshot s5{};
+    s5.liczba_kontrolerow = 1;
+    s5.kodeki[0][0].odpowiada = 1;
+    HdaDiagSkan sc5{};
+    sc5.gotowy = 1;
+    sc5.blad = HDA_DIAG_BLAD_BRAK_AFG;
+    CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s5, &sc5), "Brak Audio Function Group") == 0);
+
+    /* 6. Brak wykrytego wyjścia audio */
+    HdaDiagSnapshot s6{};
+    s6.liczba_kontrolerow = 1;
+    s6.kodeki[0][0].odpowiada = 1;
+    s6.kodeki[0][0].liczba_fg = 1;
+    s6.fg[0][0][0].audio = 1;
+    s6.liczba_sciezek = 0;
+    HdaDiagSkan sc6{};
+    sc6.gotowy = 1;
+    sc6.blad = HDA_DIAG_BLAD_BRAK_WYJSC;
+    CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s6, &sc6), "Brak wykrytego wyjścia audio") == 0);
+
+    /* 7. Wyjście Głośniki */
+    HdaDiagSnapshot s7{};
+    s7.liczba_kontrolerow = 1;
+    s7.kodeki[0][0].odpowiada = 1;
+    s7.kodeki[0][0].liczba_fg = 1;
+    s7.fg[0][0][0].audio = 1;
+    s7.liczba_sciezek = 1;
+    s7.sciezki[0].cel = HDA_CEL_GLOSNIK;
+    CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s7, nullptr), "Wyjście Głośniki") == 0);
+
+    /* 8. Wyjście Słuchawki */
+    HdaDiagSnapshot s8 = s7;
+    s8.sciezki[0].cel = HDA_CEL_SLUCHAWKI;
+    CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s8, nullptr), "Wyjście Słuchawki") == 0);
+
+    /* 9. Wyjście Line Out (QEMU default) */
+    HdaDiagSnapshot s9 = s7;
+    s9.sciezki[0].cel = HDA_CEL_WYJSCIE_LINIOWE;
+    CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s9, nullptr), "Wyjście Line Out") == 0);
+
+    /* 10. Wyjście HDMI DisplayPort */
+    HdaDiagSnapshot s10 = s7;
+    s10.sciezki[0].cel = HDA_CEL_HDMI;
+    CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s10, nullptr), "Wyjście HDMI DisplayPort") == 0);
+
+    /* 11. Nieznany typ wyjścia */
+    HdaDiagSnapshot s11 = s7;
+    s11.sciezki[0].cel = HDA_CEL_NIEZNANY;
+    CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s11, nullptr), "Nieznany typ wyjścia") == 0);
+}
+
+static void test_qemu_topology_and_malformed() {
+    /* QEMU Pin 3 Default Config: 0x01014010 */
+    const uint32_t qemu_pincfg = 0x01014010;
+    CHECK(hda_klasyfikuj_pin(qemu_pincfg) == HDA_CEL_WYJSCIE_LINIOWE);
+    CHECK(hda_klasyfikuj_pin(qemu_pincfg) != HDA_CEL_GLOSNIK);
+
+    /* Cykl w topologii: 2 -> 3 -> 4 -> 3 */
+    const uint8_t c3[] = {2, 4};
+    const uint8_t c4[] = {3};
+    const uint8_t cp[] = {4};
+    HdaDiagWidget widgets[4] = {
+        zrob_widget(2, HDA_WID_OUT),
+        zrob_widget(3, HDA_WID_MIX, 0, c3, 2),
+        zrob_widget(4, HDA_WID_MIX, 0, c4, 1),
+        zrob_widget(5, HDA_WID_PIN, 0x01014010, cp, 1)
+    };
+    HdaDiagSciezka sciezki[8]{};
+    uint32_t n_sciezek = 0;
+    bool obc = false;
+    CHECK(hda_zbuduj_sciezki(widgets, 4, sciezki, 8, &n_sciezek, &obc));
+    CHECK(n_sciezek > 0);
+    CHECK(sciezki[0].konwerter_nid == 2);
+    CHECK(sciezki[0].pin_nid == 5);
+}
+
+static void test_async_state_machine_and_budget() {
+    /* Limit verbow na pojedynczy krok (budzet) */
+    CHECK(HDA_DIAG_LIMIT_VERBOW_NA_KROK == 4);
+    CHECK(HDA_DIAG_SLOW_NA_KROK == 4);
+
+    /* Nazwy etapow */
+    CHECK(std::strcmp(hda_diag_etap_nazwa(HDA_DIAG_ETAP_BEZCZYNNY), "Uruchamianie") == 0);
+    CHECK(std::strcmp(hda_diag_etap_nazwa(HDA_DIAG_ETAP_KONTROLER), "Skanowanie kontrolera HDA") == 0);
+    CHECK(std::strcmp(hda_diag_etap_nazwa(HDA_DIAG_ETAP_SONDOWANIE_KODEKOW), "Sondowanie kodeków") == 0);
+    CHECK(std::strcmp(hda_diag_etap_nazwa(HDA_DIAG_ETAP_PARAMETRY_KORZENIA), "Odczytywanie grup funkcyjnych") == 0);
+    CHECK(std::strcmp(hda_diag_etap_nazwa(HDA_DIAG_ETAP_GRUPY_FUNKCYJNE), "Odczytywanie grup funkcyjnych") == 0);
+    CHECK(std::strcmp(hda_diag_etap_nazwa(HDA_DIAG_ETAP_PARAMETRY_AFG), "Odczytywanie grup funkcyjnych") == 0);
+    CHECK(std::strcmp(hda_diag_etap_nazwa(HDA_DIAG_ETAP_WIDGET_ODKRYCIE), "Skanowanie widgetów") == 0);
+    CHECK(std::strcmp(hda_diag_etap_nazwa(HDA_DIAG_ETAP_WIDGET_PARAMETRY), "Skanowanie widgetów") == 0);
+    CHECK(std::strcmp(hda_diag_etap_nazwa(HDA_DIAG_ETAP_POLACZENIA), "Odczytywanie połączeń") == 0);
+    CHECK(std::strcmp(hda_diag_etap_nazwa(HDA_DIAG_ETAP_BUDOWANIE_SCIEZEK), "Budowanie topologii") == 0);
+    CHECK(std::strcmp(hda_diag_etap_nazwa(HDA_DIAG_ETAP_PUBLIKACJA), "Budowanie topologii") == 0);
+    CHECK(std::strcmp(hda_diag_etap_nazwa(HDA_DIAG_ETAP_GOTOWY), "Gotowe") == 0);
+    CHECK(std::strcmp(hda_diag_etap_nazwa(HDA_DIAG_ETAP_BLAD), "Błąd diagnostyki HDA") == 0);
+
+    /* Kompatybilnosc aliasow */
+    CHECK(HDA_DIAG_ETAP_KODEK == HDA_DIAG_ETAP_PARAMETRY_KORZENIA);
+    CHECK(HDA_DIAG_ETAP_FG == HDA_DIAG_ETAP_GRUPY_FUNKCYJNE);
+    CHECK(HDA_DIAG_ETAP_WIDGETY == HDA_DIAG_ETAP_WIDGET_ODKRYCIE);
+    CHECK(HDA_DIAG_ETAP_SCIEZKI == HDA_DIAG_ETAP_BUDOWANIE_SCIEZEK);
+
+    /* Rozmiar struktury stanu skanu (72 bajty) */
+    CHECK(sizeof(HdaDiagSkan) == 72);
+    HdaDiagSkan s{};
+    s.wersja = HDA_DIAG_WERSJA_ABI;
+    s.rozmiar = sizeof(HdaDiagSkan);
+    s.generacja_skanu = 42;
+    s.generacja_opublikowana = 41;
+    s.migawka_dostepna = 1;
+    CHECK(s.wersja == 1);
+    CHECK(s.rozmiar == 72);
+    CHECK(s.generacja_skanu == 42);
+    CHECK(s.generacja_opublikowana == 41);
+}
+
 int main() {
     test_awcap_typy();
     test_awcap_flagi();
@@ -464,6 +748,11 @@ int main() {
     test_raport_obciazenie_marker();
     test_limity_abi();
     test_stale_testu();
+    test_verb_construction();
+    test_transport_immediate_modeling();
+    test_status_banner_11_states();
+    test_qemu_topology_and_malformed();
+    test_async_state_machine_and_budget();
 
     std::printf("HDA diag host: %d testow, %d bledow\n", testy, bledy);
     return bledy == 0 ? 0 : 1;

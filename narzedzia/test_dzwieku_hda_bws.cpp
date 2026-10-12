@@ -40,7 +40,11 @@ bool hda_wew_kontroler_gotowy() { return controller; }
 bool hda_wew_pobierz_stan_kontrolera(HdaWewStanKontrolera* out) {
     if (!controller) return false;
     *out = {}; out->slot = 27; out->vendor_id = 0x8086;
-    out->device_id = 0x2668; out->gcap = 0x4401; out->statests = 1; out->oss = 4; out->dma64 = 1; return true;
+    out->device_id = 0x2668; out->gcap = 0x4401; out->statests = 1; out->oss = 4; out->dma64 = 1;
+    out->initial_statests = 1;
+    out->discovered_codec_mask = 1;
+    out->responsive_codec_mask = codec ? 1 : 0;
+    return true;
 }
 bool hda_wew_pobierz_stan_strumienia(HdaWewStanStrumienia* out) { *out = {}; out->run = playing; return controller; }
 void hda_wew_pobierz_sciezke_testu(HdaWewSciezkaTestu* out) { *out = {0, 2, 3, 0}; }
@@ -75,6 +79,25 @@ bool hda_wew_wyslij_immediate(uint32_t cmd, uint32_t* out) {
     else if (nid == 3 && param == HDA_PAR_CONNLIST_LEN) *out = 1;
     return true;
 }
+bool hda_wew_send_verb_readonly(uint32_t verb, uint32_t* response) {
+    return hda_wew_wyslij_immediate(verb, response);
+}
+bool hda_wew_aktywne_sondowanie_kodekow(uint16_t* responsive_mask) {
+    if (!responsive_mask || !controller) return false;
+    *responsive_mask = codec ? 1 : 0;
+    return true;
+}
+bool hda_wew_sonda_pojedynczego_kodeka(uint8_t cad, bool* out_odpowiada, uint32_t* out_vendor) {
+    if (!controller) return false;
+    if (cad == 0 && codec) {
+        if (out_odpowiada) *out_odpowiada = true;
+        if (out_vendor) *out_vendor = 0x1af40022;
+    } else {
+        if (out_odpowiada) *out_odpowiada = false;
+        if (out_vendor) *out_vendor = 0;
+    }
+    return true;
+}
 static void user(void* p, size_t n, bool writable = true) { ranges.push_back({reinterpret_cast<uintptr_t>(p), n, writable}); }
 int main() {
     proces_t p{}; p.uprawnienia = PRAWO_GUI;
@@ -86,7 +109,7 @@ int main() {
     ++scenarios; CHECK(hda_diag_inicjalizuj());
     CHECK(!bws_hda_diag(p, BWS_HDA_DIAG_SNAPSHOT, req, 0, 0)); CHECK(allocations.empty());
     CHECK(bws_hda_diag(p, BWS_HDA_DIAG_SKAN_START, 0, 0, 0));
-    for (unsigned i = 0; i < 32; ++i) {
+    for (unsigned i = 0; i < 64; ++i) {
         (void)bws_hda_diag(p, BWS_HDA_DIAG_SKAN_KROK, 0, 0, 0);
         CHECK(bws_hda_diag(p, BWS_HDA_DIAG_STAN, status, 0, 0));
         if (!scan.aktywny) break;
@@ -100,6 +123,15 @@ int main() {
     CHECK(snapshot->fg[0][0][0].widget_count == 2); CHECK(snapshot->widgety[0][0][0][1].typ == HDA_WID_PIN);
     CHECK(snapshot->widgety[0][0][0][1].liczba_polaczen == 1); CHECK(snapshot->widgety[0][0][0][1].polaczenia[0] == 2);
     CHECK(snapshot->liczba_sciezek > 0);
+    /* Test anulowania skanu */
+    ++scenarios;
+    CHECK(bws_hda_diag(p, BWS_HDA_DIAG_SKAN_START, 0, 0, 0));
+    CHECK(bws_hda_diag(p, BWS_HDA_DIAG_STAN, status, 0, 0));
+    CHECK(scan.aktywny);
+    CHECK(bws_hda_diag(p, BWS_HDA_DIAG_SKAN_ANULUJ, 0, 0, 0));
+    CHECK(bws_hda_diag(p, BWS_HDA_DIAG_STAN, status, 0, 0));
+    CHECK(!scan.aktywny);
+    CHECK(scan.przerwany);
     ++scenarios; auto good = request;
     request.bufor = UINT64_MAX - 4; CHECK(!bws_hda_diag(p, 4, req, 0, 0)); request = good;
     request.bufor_maks = sizeof(*snapshot) - 1; CHECK(!bws_hda_diag(p, 4, req, 0, 0)); request = good;
@@ -138,7 +170,7 @@ int main() {
     CHECK(bws_hda_diag(p, 2, 0, 0, 0)); CHECK(bws_hda_diag(p, 1, status, 0, 0));
     CHECK(scan.blad == HDA_DIAG_BLAD_BRAK_KONTROLERA); CHECK(!scan.aktywny);
     controller = true; codec = false; hda_diag_inicjalizuj(); CHECK(bws_hda_diag(p, 2, 0, 0, 0));
-    for (unsigned i = 0; i < 32; ++i) if (bws_hda_diag(p, 3, 0, 0, 0)) break;
+    for (unsigned i = 0; i < 64; ++i) if (bws_hda_diag(p, 3, 0, 0, 0)) break;
     CHECK(bws_hda_diag(p, 4, req, 0, 0)); CHECK(snapshot->liczba_kontrolerow == 1);
     CHECK(!snapshot->kodeki[0][0].odpowiada); CHECK(allocations.empty());
     std::printf("Test dzwieku actual BWS89/90/HDA: %u scenarios, %u checks PASS; ASan+UBSan\n", scenarios, checks);

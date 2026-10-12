@@ -24,7 +24,7 @@
     "-device",
     "hda-output,audiodev=snd",
     "-drive",
-    "id=disk,file=/home/programista/Pulpit/Burstzyn/BursztynOS/wirtualny_dysk.img,format=raw,if=none",
+    "id=disk,file=/home/programista/Pulpit/Burstzyn/BursztynOS\\wirtualny_dysk.img,format=raw,if=none",
     "-device",
     "virtio-blk-pci,drive=disk,disable-legacy=on",
     "-netdev",
@@ -46,11 +46,11 @@
     "-boot",
     "order=d,menu=on",
     "-cdrom",
-    "/home/programista/Pulpit/Burstzyn/BursztynOS/BursztynOS.iso",
+    "/home/programista/Pulpit/Burstzyn/BursztynOS\\BursztynOS.iso",
     "-name",
-    "Bursztyn OS - UEFI VirtIO Full"
+    "Bursztyn OS - VirtIO UEFI (ISO)"
   ],
-  "host_os": "Unix 7.0.0.31",
+  "host_os": "Microsoft Windows",
   "qemu_binary": "qemu-system-x86_64.exe",
   "topology": [
     {

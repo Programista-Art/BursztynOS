@@ -1,0 +1,25 @@
+sterowniki/dzwiek/hda.cpp:1749:20:HdaTransportStatus {anonymous}::hda_transport_send_immediate_ex(uint32_t, uint32_t*, HdaImmediateDiagLog*)	8	static
+sterowniki/dzwiek/hda.cpp:2013:6:bool {anonymous}::konfiguruj_kodek_qemu()	40	static
+sterowniki/dzwiek/hda.cpp:2137:6:void {anonymous}::zwolnij_dma()	32	static
+sterowniki/dzwiek/hda.cpp:898:6:void {anonymous}::stream_zapisz_ctl(uint32_t)	8	static
+sterowniki/dzwiek/hda.cpp:868:10:uint32_t {anonymous}::stream_odczytaj_ctl()	8	static
+sterowniki/dzwiek/hda.cpp:2776:6:bool {anonymous}::uruchom_stream()	8	static
+sterowniki/dzwiek/hda.cpp:2848:6:0()	8	static
+sterowniki/dzwiek/hda.cpp:3012:6:void {anonymous}::anuluj_inicjalizacje()	32	static
+sterowniki/dzwiek/hda.cpp:2246:6:bool {anonymous}::resetuj_stream()	16	static
+sterowniki/dzwiek/hda.cpp:2655:6:bool {anonymous}::zaprogramuj_stream(uint32_t, uint32_t)	48	static
+sterowniki/dzwiek/hda.cpp:3057:6:bool inicjalizuj_hda()	128	static
+sterowniki/dzwiek/hda.cpp:3205:6:bool hda_test_ton(uint32_t, uint32_t)	128	static
+sterowniki/dzwiek/hda.cpp:3301:6:void hda_stop()	32	static
+sterowniki/dzwiek/hda.cpp:3331:6:bool hda_wew_wyslij_immediate(uint32_t, uint32_t*)	8	static
+sterowniki/dzwiek/hda.cpp:3335:10:uint32_t hda_wew_verb12(uint8_t, uint8_t, uint16_t, uint8_t)	8	static
+sterowniki/dzwiek/hda.cpp:3339:10:uint32_t hda_wew_verb4(uint8_t, uint8_t, uint8_t, uint16_t)	8	static
+sterowniki/dzwiek/hda.cpp:3343:6:bool hda_wew_kontroler_gotowy()	8	static
+sterowniki/dzwiek/hda.cpp:3347:6:bool hda_wew_pobierz_stan_kontrolera(HdaWewStanKontrolera*)	48	static
+sterowniki/dzwiek/hda.cpp:3393:6:bool hda_wew_pobierz_stan_strumienia(HdaWewStanStrumienia*)	8	static
+sterowniki/dzwiek/hda.cpp:3613:6:void hda_wew_pobierz_sciezke_testu(HdaWewSciezkaTestu*)	8	static
+sterowniki/dzwiek/hda.cpp:3636:6:bool hda_wew_test_start(uint32_t, uint32_t, uint32_t, uint8_t)	160	static
+sterowniki/dzwiek/hda.cpp:3687:6:void hda_wew_test_stop()	32	static
+sterowniki/dzwiek/hda.cpp:3696:6:bool hda_wew_test_tick(uint64_t)	8	static
+sterowniki/dzwiek/hda.cpp:3794:6:bool hda_wew_aktywne_sondowanie_kodekow(uint16_t*)	336	static
+sterowniki/dzwiek/hda.cpp:3837:6:bool hda_wew_send_verb_readonly(uint32_t, uint32_t*)	8	static

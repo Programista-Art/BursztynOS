@@ -26,7 +26,8 @@ enum BwsHdaDiagPolecenie : uint64_t {
     BWS_HDA_DIAG_SKAN_KROK = 3,
     BWS_HDA_DIAG_SNAPSHOT = 4,
     BWS_HDA_DIAG_STRUMIEN = 5,
-    BWS_HDA_DIAG_TEST_STAN = 6
+    BWS_HDA_DIAG_TEST_STAN = 6,
+    BWS_HDA_DIAG_SKAN_ANULUJ = 7
 };
 
 /*

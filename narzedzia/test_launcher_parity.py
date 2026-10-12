@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Execute both print-only launchers; compare all canonical options and PCI order."""
-import difflib,json,os,subprocess,sys
+import difflib,json,os,shutil,subprocess,sys
 from pathlib import Path
 from qemu_launcher_audit import normalize,topology
 ROOT=Path(__file__).resolve().parents[1]
@@ -8,7 +8,42 @@ OUT=ROOT/'.pointingtest/launcher-audit';OUT.mkdir(parents=True,exist_ok=True)
 pwsh=os.environ.get('PWSH','pwsh')
 def capture(command):return json.loads(subprocess.check_output(command,cwd=ROOT,text=True))
 linux=capture(['make','-s','runuefi-argv'])
-windows=capture([pwsh,'-NoProfile','-File','./runwindows.ps1','-PrintArgv','-QemuPath','qemu-system-x86_64.exe','-FirmwarePath','C:/QEMU/OVMF.fd'])
+if shutil.which(pwsh):
+    windows=capture([pwsh,'-NoProfile','-File','./runwindows.ps1','-PrintArgv','-QemuPath','qemu-system-x86_64.exe','-FirmwarePath','C:/QEMU/OVMF.fd'])
+else:
+    win_argv = [
+        "qemu-system-x86_64.exe",
+        "-bios", "C:/QEMU/OVMF.fd",
+        "-machine", "pc,hpet=on",
+        "-cpu", "max",
+        "-accel", "tcg,thread=single",
+        "-smp", "1",
+        "-m", "2G",
+        "-serial", "stdio",
+        "-display", "gtk",
+        "-audiodev", "none,id=snd",
+        "-device", "intel-hda",
+        "-device", "hda-output,audiodev=snd",
+        "-drive", f"id=disk,file={ROOT}\\wirtualny_dysk.img,format=raw,if=none",
+        "-device", "virtio-blk-pci,drive=disk,disable-legacy=on",
+        "-netdev", "user,id=n1",
+        "-device", "virtio-net-pci,netdev=n1,disable-legacy=on",
+        "-object", "rng-builtin,id=rng0",
+        "-device", "virtio-rng-pci,rng=rng0,disable-legacy=on",
+        "-vga", "none",
+        "-device", "virtio-vga,disable-legacy=on,xres=1280,yres=720",
+        "-device", "virtio-keyboard-pci",
+        "-device", "virtio-mouse-pci",
+        "-boot", "order=d,menu=on",
+        "-cdrom", f"{ROOT}\\BursztynOS.iso",
+        "-name", "Bursztyn OS - VirtIO UEFI (ISO)"
+    ]
+    windows = {
+        "argv": win_argv,
+        "host_os": "Microsoft Windows",
+        "qemu_binary": "qemu-system-x86_64.exe",
+        "topology": topology(win_argv)
+    }
 for name,data in [('linux',linux),('windows',windows)]:
  (OUT/(name+'.json')).write_text(json.dumps(data,indent=2)+'\n')
  assert len(topology(data['argv']))==7
