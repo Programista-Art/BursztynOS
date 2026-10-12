@@ -5324,8 +5324,14 @@ struct MockInputCapture {
     }
 };
 static MockInputCapture g_mock_input_capture;
+// Optional observation sink for the independent DMA/queue forensic fixture.
+static void (*g_input_relative_observer)(int64_t, int64_t, uint8_t, const char*) = nullptr;
 
 extern "C" void zaktualizuj_mysze_zrodlo(int dx, int dy, uint8_t przyciski, const char* zrodlo) {
+    if (g_input_relative_observer) {
+        g_input_relative_observer(dx, dy, przyciski, zrodlo);
+        return;
+    }
     g_mock_input_capture.rel_dx += dx;
     g_mock_input_capture.rel_dy += dy;
     g_mock_input_capture.buttons = przyciski;
@@ -5339,6 +5345,12 @@ extern "C" void zaktualizuj_mysze_pozycja_zrodlo(int x, int y, uint8_t przyciski
     g_mock_input_capture.buttons = przyciski;
     g_mock_input_capture.abs_calls++;
     if (zrodlo) g_mock_input_capture.last_source = zrodlo;
+}
+
+extern "C" void zaktualizuj_mysze_wzgledne_zrodlo(int32_t dx,int32_t dy,uint8_t buttons,const char* source) {
+    if(g_input_relative_observer) {g_input_relative_observer(dx,-int64_t(dy),buttons,source);return;}
+    assert(dy!=INT32_MIN); // Extremes use the independent 64-bit observer.
+    zaktualizuj_mysze_zrodlo(dx,-dy,buttons,source);
 }
 
 extern "C" void zaktualizuj_kolo_myszy(int pion, int poziom, uint8_t przyciski) {
@@ -5416,10 +5428,13 @@ void mock_virtio_input_on_config_select(VirtioPciDevice* dev, uint8_t select, ui
         // manufacture payload beyond the advertised capability.
         uint8_t payload[128]{}; uint8_t size=0;
         if(select==VIRTIO_INPUT_CFG_ID_NAME) {
-            const char* name=f->tablet ? "QEMU Virtio Tablet" : "QEMU Virtio Keyboard";
+            const char* name=f->tablet ? "QEMU Virtio Tablet" :
+                (f->relative || f->buttons_only) ? "QEMU Virtio Mouse" : "QEMU Virtio Keyboard";
             size=std::strlen(name); std::memcpy(payload,name,size);
         } else if(select==VIRTIO_INPUT_CFG_EV_BITS) {
-            if(subsel==INPUT_EV_KEY) { size=f->tablet?35:16; payload[f->tablet?34:0]=1; }
+            const bool pointer=f->tablet || f->relative || f->buttons_only;
+            if(subsel==INPUT_EV_KEY) { size=pointer?35:16; payload[pointer?34:0]=1; }
+            if(subsel==INPUT_EV_REL && f->relative) { size=1; payload[0]=f->relative_bits; }
             if(subsel==INPUT_EV_ABS && f->tablet) { size=1; payload[0]=3; }
         } else if(select==VIRTIO_INPUT_CFG_ABS_INFO && f->tablet) {
             size=subsel==INPUT_ABS_X ? f->abs_size : f->abs_y_size; VirtioInputAbsInfo info{uint32_t(f->abs_min),uint32_t(f->abs_max),0,0,1};
@@ -5898,6 +5913,9 @@ void test_virtio_input_abs_scaling() {
         (void)scale; // input has physical pixels, deliberately no DPI argument
         for(auto mode:std::vector<std::pair<int,int>>{{1280,720},{1920,1080}}) {
             g_mock_screen_w=mode.first;g_mock_screen_h=mode.second;
+            // Establish the display boundary before injecting the next report.
+            // A report already queued at the boundary belongs to the old mode.
+            TEST_ASSERT(virtio_input_poll_events(&drv,10)==0,"Empty modeset admission barrier");
             for(int i=0;i<=16;++i)for(int edge=0;edge<4;++edge) {
                 int along=i*32767/16;
                 int raw_x=edge==0?0:(edge==1?32767:along);
@@ -5940,6 +5958,10 @@ void test_virtio_input_asymmetric_abs_mapping() {
         mock_inject_input_event(&drv,INPUT_EV_SYN,INPUT_SYN_REPORT,0);
         virtio_input_poll_events(&drv,10);
     };
+    // Finish the contact report before changing the display generation. An
+    // incomplete contact, just like incomplete motion, cannot cross modeset.
+    send(101,503);
+    TEST_ASSERT(input_pointer_is_active(&drv.input_dev),"Complete initial contact report");
     // External harness state is deliberately not exposed to the guest. The
     // same raw report must map identically across normal/maximized/restored.
     struct HostWindow {int logical_w,logical_h,pixel_w,pixel_h,ui_scale;};
@@ -5947,6 +5969,7 @@ void test_virtio_input_asymmetric_abs_mapping() {
                               {1280,720,1600,900,125}};
     for(auto mode:std::vector<std::pair<int,int>>{{1280,720},{1920,1080},{1024,768},{800,600},{2560,540}}) {
         g_mock_screen_w=mode.first;g_mock_screen_h=mode.second;
+        TEST_ASSERT(virtio_input_poll_events(&drv,10)==0,"Empty asymmetric modeset admission barrier");
         for(const auto& host:hosts) {
             TEST_ASSERT(host.pixel_w>=host.logical_w&&host.pixel_h>=host.logical_h,"Harness host DPI geometry");
             for(auto raw:std::vector<std::pair<int,int>>{{101,503},{60001,503},{101,9503},{60001,9503},
@@ -5978,6 +6001,7 @@ void test_virtio_input_asymmetric_abs_mapping() {
     drv.input_dev.abs_x.min=INT32_MIN;drv.input_dev.abs_x.max=INT32_MAX;
     drv.input_dev.abs_y.min=-100;drv.input_dev.abs_y.max=100;
     g_mock_screen_w=1920;g_mock_screen_h=1080;
+    TEST_ASSERT(virtio_input_poll_events(&drv,10)==0,"Empty signed-range modeset admission barrier");
     send(INT32_MAX,100);
     TEST_ASSERT(g_mock_input_capture.abs_x==1919&&g_mock_input_capture.abs_y==1079,"Wide multiplication max");
     send(INT32_MIN,-100);
@@ -6964,6 +6988,8 @@ void test_input_pointer_ownership_and_no_duplicate_motion() {
 #include "test_virtio_input_init.inc"
 #include "test_virtio_input_activation.inc"
 #include "test_virtio_input_lifecycle.inc"
+#include "../virtio_input_qemu_diag.h"
+#include "test_virtio_input_qemu_checkpoints.inc"
 
 int main() {
     input_set_pointer_ready(true);
@@ -7152,6 +7178,7 @@ int main() {
     RUN_TEST(test_input_usb_and_ps2_fallback);
     RUN_TEST(test_bursztyn_keyboard_layout_preserved);
     RUN_TEST(test_input_pointer_ownership_and_no_duplicate_motion);
+    RUN_TEST(test_input_qemu_relative_checkpoints_coexistence);
 
     std::printf("========================================================\n");
     std::printf("PODSUMOWANIE: PASS=%d, FAIL=%d\n", g_pass_count, g_fail_count);

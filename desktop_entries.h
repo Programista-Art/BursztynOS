@@ -17,7 +17,8 @@ enum class TypIkonyAplikacji : uint8_t {
     Kontrolki3,
     Kontrolki4,
     Aktualizacje,
-    Motywy
+    Motywy,
+    TestDzwieku
 };
 
 struct Launcher {const char* name; const char* path; const char* title; TypIkonyAplikacji icon; const char* id;};
@@ -36,6 +37,7 @@ inline constexpr Launcher Launchers[]={
     {"Aktualizacje","/programy/aktualizacje.cebula/aktualizacje.bur","Aktualizacje Systemu",TypIkonyAplikacji::Aktualizacje,"aktualizacje"},
     {"Motywy","/programy/motywy.cebula/motywy.bur","Motywy",TypIkonyAplikacji::Motywy,"motywy"},
     {"Kontrolki 4","/programy/kontrolki4.cebula/kontrolki4.bur","Kontrolki 4",TypIkonyAplikacji::Kontrolki4,"kontrolki4"},
+    {"Test dźwięku","/programy/test_dzwieku.cebula/test_dzwieku.bur","Test dźwięku",TypIkonyAplikacji::TestDzwieku,"test-dzwieku"},
 };
 inline constexpr int Count=sizeof(Launchers)/sizeof(Launchers[0]);
 // Logical UI budget, independent of grid capacity and filesystem limits.

@@ -46,7 +46,7 @@ GUI relative 2147483647 -2147483647 0 1279 719
 GUI relative -2147483647 2147483647 0 0 0
 GUI relative -17 -29 0 623 389
 GUI relative 2147483647 -2147483647 0 1279 719
-GUI relative -2147483647 2147483647 0 0 0
+GUI relative -2147483648 2147483648 0 0 0
 GUI absolute 600 168 1 600 168
 STATE descriptor Tip Switch cursor=600,168 buttons=1 touch=1,2,1,1 usb=0,0,0 preferred=100 last=100
 Input coexistence: 132 checks PASS

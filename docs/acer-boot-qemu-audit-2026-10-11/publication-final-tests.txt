@@ -1,0 +1,7 @@
+Splash exact timing / nonempty crossfades / stalls / diagnostics: 2185/2185 PASS
+First splash frame ordering / pixels / delayed render / resolution / DPI / generations: 101/101 PASS
+Message bounds 100%: second=(469,388)-(808,417), third=(512,388)-(765,417), shared baseline=411
+Message bounds 125%: second=(428,395)-(848,432), third=(481,395)-(794,432), shared baseline=425
+Production splash snapshots/baseline/reusable backing/absolute boundaries: 342/342 PASS
+Production init/native/compositor/GPU scanout/startup modeset: 722/722 PASS
+Real graphics/InputDevice/HID pointer integration: 40 checks PASS

@@ -9,13 +9,13 @@ OUT = ROOT / '.pointingtest/coexistence-validation/parity'
 FLAGS = ['-std=c++17', '-O1', '-g', '-Wall', '-Wextra', '-I.', '-fno-omit-frame-pointer',
          '-fsanitize=address,undefined', '-no-pie', '-ffunction-sections', '-fdata-sections',
          '-DBURSZTYN_VIRTIO_HOST_TEST', '-DBURSZTYN_BOOT_TIMING_HOST_TEST']
-MODES = {'production': [], 'physical': ['BURSZTYNDIAGXHCIPHYSICALMOUSE'],
+MODES = {'boot-timing': ['BURSZTYNDIAGBOOTXHCITIMING'], 'production': [], 'physical': ['BURSZTYNDIAGXHCIPHYSICALMOUSE'],
          'coexistence': ['BURSZTYNDIAGINPUTCOEXISTENCE'],
          'all-input-diagnostics': ['BURSZTYNDIAGXHCIPHYSICALMOUSE', 'BURSZTYNDIAGINPUTCOEXISTENCE',
              'BURSZTYNDIAGXHCIPOINTING', 'BURSZTYNDIAGUSBHID', 'BURSZTYNDIAGPS2',
              'BURSZTYN_DEBUG_XHCI', 'BURSZTYN_DEBUG_GUI_PERF']}
 COMMON = ['input_device.cpp', 'sterowniki/usb/hid_pointer.cpp']
-CASES = {'input': (['narzedzia/test_input_coexistence.cpp'] + COMMON, []),
+CASES = {'incremental': (['narzedzia/test_xhci_incremental.cpp', 'idt.cpp', 'pci.cpp', 'sterowniki/usb/xhci_ring.cpp'] + COMMON, ['-DBURSZTYN_XHCI_HOST_TEST', '-DBURSZTYN_IDT_HOST_TEST']), 'input': (['narzedzia/test_input_coexistence.cpp'] + COMMON, []),
          'boot': (['narzedzia/test_xhci_boot_coexistence.cpp', 'idt.cpp', 'pci.cpp',
                    'sterowniki/usb/xhci_ring.cpp'] + COMMON,
                   ['-DBURSZTYN_XHCI_HOST_TEST', '-DBURSZTYN_IDT_HOST_TEST'])}
@@ -34,10 +34,14 @@ def run(name, sources, defines):
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--baseline', type=Path)
+    parser.add_argument('--case', action='append', choices=tuple(CASES),
+                        help='Run only these suites; default runs all suites.')
     args=parser.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     comparisons=0
     for case, (sources, extra) in CASES.items():
+        if args.case and case not in args.case:
+            continue
         expected=None
         for mode, flags in MODES.items():
             effects=run(case+'-'+mode, sources, extra+['-D'+f+'=1' for f in flags])

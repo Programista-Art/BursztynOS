@@ -184,6 +184,8 @@ extern "C" uint8_t _binary_aktualizacje_bin_end[];
 
 extern "C" uint8_t _binary_motywy_bin_start[];
 extern "C" uint8_t _binary_motywy_bin_end[];
+extern "C" uint8_t _binary_test_dzwieku_bin_start[];
+extern "C" uint8_t _binary_test_dzwieku_bin_end[];
 
 extern "C" uint8_t _binary_przegladarka_obrazow_bin_start[];
 extern "C" uint8_t _binary_przegladarka_obrazow_bin_end[];
@@ -1174,6 +1176,18 @@ void instaluj_wbudowane_programy() {
         "    \"pliki_zapisz\",\n"
         "    \"system_config\"\n"
         "]\n";
+
+    static const char MANIFEST_TEST_DZWIEKU[] =
+        "nazwa = \"Test dźwięku\"\n"
+        "autor = \"Programista Art\"\n"
+        "wersja = \"1.0\"\n"
+        "poziom_zaufania = 3\n"
+        "plik_startowy = \"test_dzwieku.bur\"\n"
+        "uprawnienia = [\n"
+        "    \"okna\",\n"
+        "    \"pliki_czytaj\",\n"
+        "    \"pliki_zapisz\"\n"
+        "]\n";
     
     /*
      * WAZNE:
@@ -1666,6 +1680,19 @@ void instaluj_wbudowane_programy() {
             "[BSP] Motywy Systemowe zainstalowane jako .cebula.");
     }
 
+    if (!instaluj_paczke(
+            "/programy/test_dzwieku.cebula/opis.aplikacji",
+            MANIFEST_TEST_DZWIEKU,
+            "/programy/test_dzwieku.cebula/test_dzwieku.bur",
+            _binary_test_dzwieku_bin_start,
+            _binary_test_dzwieku_bin_end)) {
+        wypisz_log(
+            "[BSP-BLAD] Nie mozna zainstalowac Testu dzwieku.");
+    } else {
+        wypisz_log(
+            "[BSP] Test dzwieku zainstalowany jako .cebula.");
+    }
+
 
 /* TEMP-REPRO instalacja wylaczona na czas testu GUI */
 
@@ -2047,6 +2074,7 @@ extern "C" bool system_potwierdz_gotowosc_pulpitu(int pid) {
     }
 
     powitanie_pulpit_gotowy(grafika_czy_tapeta(),pid);
+    virtio_input_set_desktop_ready(true);
 
     // Dokoncz pierwsze pelne zlozenie i flush pulpitu na scanout
     zablokuj_ekran();
@@ -2225,6 +2253,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
             : "[HPET-TEST] 32-bit wrap monotonic: BLAD");
 
     BootTiming::clock_ready();
+    BootTiming::mark("HPET ready");
     powitanie_inicjalizuj(
         !zadano_automatyczne_testy(g_multiboot_info_ptr) &&
         !zadano_automatyczne_testy(g_multiboot_info_ptr, "bursztyn.splash=0") &&
@@ -2246,6 +2275,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
         );
     }
 
+    BootTiming::mark("scheduler initialization begin");
     InicjalizujPlaniste(
         reinterpret_cast<uint64_t>(
             stack_top),
@@ -2254,7 +2284,9 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     wypisz_log(
         "[SCHED] PID 0 (idle) przygotowany.");
 
+    BootTiming::mark("scheduler ready");
     inicjalizuj_mbedtls();
+    BootTiming::mark("crypto ready");
 
     wypisz_log(
         "[KRYPTO] Pula mbedTLS gotowa.");
@@ -2265,7 +2297,9 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
 
     {BootTiming::Scope timing(BootTiming::PciScan);skanuj_magistrale_pci();}
 
+    BootTiming::mark("APIC initialization begin");
     inicjalizuj_apic();
+    BootTiming::mark("APIC ready");
 
     wypisz_log(
         "[APIC] LAPIC/IOAPIC uruchomiony.");
@@ -2315,7 +2349,9 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     }
     virtio_pci_diag_trace_type(VIRTIO_ID_RNG, "driver probe end");
     virtio_pci_diag_trace_type(VIRTIO_ID_BLOCK, "driver probe begin");
+    BootTiming::mark("block probe begin");
     const uint32_t virtio_blk_count = virtio_blk_probe_and_init();
+    BootTiming::mark("block probe end");
     if (virtio_blk_count > 0) {
         VirtioBlkDriver* blk_drv = virtio_blk_get_driver(0);
         if (blk_drv && blk_drv->initialized) {
@@ -2333,7 +2369,9 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     virtio_pci_diag_trace_type(VIRTIO_ID_BLOCK, "driver probe end");
 
     virtio_pci_diag_trace_type(VIRTIO_ID_GPU, "driver probe begin");
+    BootTiming::mark("graphics probe begin");
     const uint32_t virtio_gpu_count = virtio_gpu_probe_and_init();
+    BootTiming::mark("graphics probe end");
     if (virtio_gpu_count > 0) {
         VirtioGpuDriver* gpu_drv = virtio_gpu_get_driver(0);
         if (gpu_drv && gpu_drv->initialized) {

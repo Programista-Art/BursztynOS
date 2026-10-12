@@ -11,11 +11,12 @@ static void init_emit_report(InitFunction& f) {
     const VirtioInputEvent events[]={{INPUT_EV_ABS,INPUT_ABS_X,100},
         {INPUT_EV_ABS,INPUT_ABS_Y,200},{INPUT_EV_SYN,INPUT_SYN_REPORT,0}};
     for(unsigned i=0;i<3;++i) {
-        const auto id=q->avail->ring[i]; assert(id<q->queue_size);
+        const auto id=q->avail->ring[f.events_consumed&(q->queue_size-1)]; assert(id<q->queue_size);
         auto* dst=static_cast<VirtioInputEvent*>(host_phys_to_virt(q->desc[id].addr));
-        assert(dst); *dst=events[i]; q->used->ring[i].id=id; q->used->ring[i].len=8;
+        const auto at=q->used->idx&(q->queue_size-1);
+        assert(dst); *dst=events[i]; q->used->ring[at].id=id; q->used->ring[at].len=8;
+        ++f.events_consumed;q->used->idx=uint16_t(q->used->idx+1);
     }
-    q->used->idx=3;
 }
 void test_input_init_independent_functions_early_irq() {
     init_fixture_clear();

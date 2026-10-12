@@ -63,6 +63,7 @@
 #include "bws_zdarzenia.h"
 #include "bws_pliki.h"
 #include "bws_api.h"
+#include "bws_czcionka.h"
 #include "bws_nowoczesne.h"
 #include "pamiec.h"
 #include "loader.h"
@@ -3866,8 +3867,7 @@ static uint64_t obsluga_wywolan_systemowych_impl(
             return bws_aktualizuj_drag(proces, arg1, arg2, arg3);
 
         case 51:
-            /* extronic16B_unicode.h: jeden glif ma 16 wierszy bitmapy. */
-            return proces_ma_prawo(proces, PRAWO_GUI) ? 16ULL : 0ULL;
+            return bws_czcionka_kopiuj(proces.uprawnienia, arg1, arg2, arg3);
 
         case 52:
             return bws_ustaw_schowek_plikow(proces, arg1, arg2,arg3);

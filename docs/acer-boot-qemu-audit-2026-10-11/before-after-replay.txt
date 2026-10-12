@@ -1,0 +1,3 @@
+before: controller-ready-ns=2800000 pre-first-frame-critical-work-ns=2810900000 max-service-ns=2804300000 total-to-HID-armed-ns=2810900000 controls=7
+after: controller-ready-ns=5100000 pre-first-frame-critical-work-ns=5100000 max-service-ns=800000 total-to-HID-armed-ns=3171300000 controls=7
+Before/after deterministic replay: 2 driver variants PASS (100 us simulated clock read increments; 400 ms device control latency; 10 ms scheduler intervals after publication)

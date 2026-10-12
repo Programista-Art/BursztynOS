@@ -49,6 +49,7 @@ static const char* const KATALOGI_SYSTEMOWE[] = {
         "/programy/ekran.cebula",
         "/programy/tapety.cebula",
         "/programy/motywy.cebula",
+        "/programy/test_dzwieku.cebula",
         "/gry",
         "/gry/snake.cebula",
         "/uslugi",

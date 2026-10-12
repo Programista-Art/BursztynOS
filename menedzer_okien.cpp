@@ -49,11 +49,11 @@ int MENU_X = 10;
 int MENU_W = 260;
 int MENU_GORNY_MARGINES = 10;
 int MENU_ELEMENT_WYS = 25;
-constexpr int MENU_ELEMENTOW = 18;
+constexpr int MENU_ELEMENTOW = 19;
 int MENU_WYS = (10 * 2) + (MENU_ELEMENTOW * 25);
 
 // Pozycja "Gry ->" w glownym Menu Start.
-constexpr int MENU_GRY_INDEX = 15;
+constexpr int MENU_GRY_INDEX = 16;
 int MENU_GRY_W = 180;
 constexpr int MENU_GRY_ELEMENTOW = 1;
 int MENU_GRY_WYS = (10 * 2) + (MENU_GRY_ELEMENTOW * 25);
@@ -138,6 +138,8 @@ const char* const SCIEZKA_AKTUALIZACJE =
     "/programy/aktualizacje.cebula/aktualizacje.bur";
 const char* const SCIEZKA_MOTYWY =
     "/programy/motywy.cebula/motywy.bur";
+const char* const SCIEZKA_TEST_DZWIEKU =
+    "/programy/test_dzwieku.cebula/test_dzwieku.bur";
 const char* const SCIEZKA_PULPIT = DesktopEntries::Directory;
 
 // Kanoniczna tabela uruchamiania ikon wbudowanych. Obsluga klikniecia nie
@@ -2059,6 +2061,15 @@ void rysuj_ikone_aplikacji(const AplikacjaPulpitu& aplikacja) {
             rysuj_fragment_ikony(x,y,6,26,16,16,0x0051B87A);
             rysuj_fragment_ikony(x,y,26,26,16,16,0x00E85D5D);
             break;
+        case TypIkonyAplikacji::TestDzwieku:
+            // Glosnik + fala: znak aplikacji Test dźwięku
+            rysuj_fragment_ikony(x,y,0,0,48,48,0x001A2030);
+            rysuj_fragment_ikony(x,y,2,2,44,44,0x00243048);
+            rysuj_fragment_ikony(x,y,10,18,10,12,0x00FFBF00);
+            rysuj_fragment_ikony(x,y,20,14,4,20,0x00FFBF00);
+            rysuj_fragment_ikony(x,y,28,12,3,24,0x0066D9FF);
+            rysuj_fragment_ikony(x,y,34,8,3,32,0x0066D9FF);
+            break;
     }
 
 
@@ -2104,6 +2115,7 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
             "> Ustawienia ekranu",
             "> Aktualizacje Systemu",
             "> Motywy Systemowe",
+            "> Test dźwięku",
             "> Gry ->",
             "> Uruchom ponownie",
             "> Zamknij"
@@ -2382,15 +2394,18 @@ void obsluz_element_menu(int item_index) {
         case 14:
             uruchom_lub_aktywuj(SCIEZKA_MOTYWY, "Motywy");
             break;
+        case 15:
+            uruchom_lub_aktywuj(SCIEZKA_TEST_DZWIEKU, "Test dźwięku");
+            break;
         case MENU_GRY_INDEX:
             menu_gry_otwarte = !menu_gry_otwarte;
             aktualizuj_overlay_menu();
             RysujPulpit(true);
             break;
-        case 16:
+        case 17:
             wykonaj_restart();
             break;
-        case 17:
+        case 18:
             wykonaj_zamkniecie();
             break;
         default:

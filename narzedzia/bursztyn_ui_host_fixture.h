@@ -130,8 +130,9 @@ bool gui_minimalizuj_okno() { return true; }
 __attribute__((noreturn)) void gui_zakoncz_aplikacje() { exit(0); }
 uint64_t gui_czas_monotoniczny_ns() { return 1000000000ULL; }
 bool gui_pobierz_zdarzenie(bws_zdarzenie*) { return false; }
-bool gui_czekaj_na_zdarzenie(bws_zdarzenie*) { return false; }
-bool gui_czekaj_na_zdarzenie_z_timeoutem(bws_zdarzenie*, uint64_t) { return false; }
+static void (*test_wait_observer)()=nullptr;
+bool gui_czekaj_na_zdarzenie(bws_zdarzenie*) { if(test_wait_observer)test_wait_observer();return false; }
+bool gui_czekaj_na_zdarzenie_z_timeoutem(bws_zdarzenie*, uint64_t) { if(test_wait_observer)test_wait_observer();return false; }
 static bool test_mouse_capture=false;
 void gui_ustaw_capture_myszy(bool value) {test_mouse_capture=value;}
 bool gui_ustaw_geometrie_okna(int, int, int, int, int) { return true; }

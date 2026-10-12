@@ -1,0 +1,98 @@
+{
+  "argv": [
+    "qemu-system-x86_64",
+    "-bios",
+    "/usr/share/ovmf/OVMF.fd",
+    "-machine",
+    "pc,hpet=on",
+    "-cpu",
+    "max",
+    "-accel",
+    "tcg,thread=multi",
+    "-smp",
+    "1",
+    "-m",
+    "2G",
+    "-audiodev",
+    "alsa,id=snd",
+    "-device",
+    "intel-hda",
+    "-device",
+    "hda-output,audiodev=snd",
+    "-serial",
+    "stdio",
+    "-display",
+    "sdl",
+    "-drive",
+    "id=disk,file=wirtualny_dysk.img,format=raw,if=none",
+    "-device",
+    "virtio-blk-pci,drive=disk,disable-legacy=on",
+    "-netdev",
+    "user,id=n1",
+    "-device",
+    "virtio-net-pci,netdev=n1,disable-legacy=on",
+    "-object",
+    "rng-random,id=rng0,filename=/dev/urandom",
+    "-device",
+    "virtio-rng-pci,rng=rng0,disable-legacy=on",
+    "-vga",
+    "none",
+    "-device",
+    "virtio-vga,disable-legacy=on,xres=1280,yres=720",
+    "-device",
+    "virtio-keyboard-pci",
+    "-device",
+    "virtio-tablet-pci",
+    "-boot",
+    "order=d",
+    "-cdrom",
+    "BursztynOS.iso"
+  ],
+  "host_os": "Linux-7.0.0-31-generic-x86_64-with-glibc2.39",
+  "qemu_binary": "/usr/bin/qemu-system-x86_64",
+  "topology": [
+    {
+      "order": 0,
+      "device": "intel-hda",
+      "expected_class": "audio",
+      "expected_bdf": "00:02.0"
+    },
+    {
+      "order": 1,
+      "device": "virtio-blk-pci,drive=disk,disable-legacy=on",
+      "expected_class": "storage",
+      "expected_bdf": "00:03.0"
+    },
+    {
+      "order": 2,
+      "device": "virtio-net-pci,netdev=n1,disable-legacy=on",
+      "expected_class": "network",
+      "expected_bdf": "00:04.0"
+    },
+    {
+      "order": 3,
+      "device": "virtio-rng-pci,rng=rng0,disable-legacy=on",
+      "expected_class": "rng",
+      "expected_bdf": "00:05.0"
+    },
+    {
+      "order": 4,
+      "device": "virtio-vga,disable-legacy=on,xres=1280,yres=720",
+      "expected_class": "gpu",
+      "expected_bdf": "00:06.0"
+    },
+    {
+      "order": 5,
+      "device": "virtio-keyboard-pci",
+      "expected_class": "keyboard",
+      "expected_bdf": "00:07.0"
+    },
+    {
+      "order": 6,
+      "device": "virtio-tablet-pci",
+      "expected_class": "absolute tablet",
+      "expected_bdf": "00:08.0"
+    }
+  ],
+  "bdf_assumption": "pc/i440fx default host bridge/PIIX at 00:00.0/00:01.*, -vga none, no extra PCI devices"
+}

@@ -1,0 +1,283 @@
+narzedzia/test_xhci_incremental.cpp: In function ‘void asynchronous_stages()’:
+narzedzia/test_xhci_incremental.cpp:30:5: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+   30 |     for(unsigned i=0;i<100;++i)service();CHECK(enumeration.step==EnumStep::Idle);CHECK(!xhc.wanted_command);
+      |     ^~~
+In file included from ./narzedzia/test_xhci_physical_mouse.cpp:2,
+                 from narzedzia/test_xhci_incremental.cpp:2:
+./narzedzia/pointing_host_stubs.h:13:18: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+   13 | #define CHECK(x) do { ++checks; if(!(x)){std::fprintf(stderr,"FAIL %s:%d: %s\n",__FILE__,__LINE__,#x);std::abort();} } while(0)
+      |                  ^~
+narzedzia/test_xhci_incremental.cpp:30:42: note: in expansion of macro ‘CHECK’
+   30 |     for(unsigned i=0;i<100;++i)service();CHECK(enumeration.step==EnumStep::Idle);CHECK(!xhc.wanted_command);
+      |                                          ^~~~~
+incremental-boot-timing: Incremental submissions/later completion/near deadline/publication barrier: 796 checks PASS
+incremental-boot-timing: Disconnected/many disconnected/multiple ports/slow device fairness: 5393 checks PASS
+incremental-boot-timing: Command/transfer/short/timeout/disconnect/reconnect safe retirement: 11277 checks PASS
+incremental-boot-timing: Incremental enumeration total: 17466 checks PASS; service calls=2699 max simulated service ns=8000
+narzedzia/test_xhci_incremental.cpp: In function ‘void asynchronous_stages()’:
+narzedzia/test_xhci_incremental.cpp:30:5: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+   30 |     for(unsigned i=0;i<100;++i)service();CHECK(enumeration.step==EnumStep::Idle);CHECK(!xhc.wanted_command);
+      |     ^~~
+In file included from ./narzedzia/test_xhci_physical_mouse.cpp:2,
+                 from narzedzia/test_xhci_incremental.cpp:2:
+./narzedzia/pointing_host_stubs.h:13:18: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+   13 | #define CHECK(x) do { ++checks; if(!(x)){std::fprintf(stderr,"FAIL %s:%d: %s\n",__FILE__,__LINE__,#x);std::abort();} } while(0)
+      |                  ^~
+narzedzia/test_xhci_incremental.cpp:30:42: note: in expansion of macro ‘CHECK’
+   30 |     for(unsigned i=0;i<100;++i)service();CHECK(enumeration.step==EnumStep::Idle);CHECK(!xhc.wanted_command);
+      |                                          ^~~~~
+incremental-production: Incremental submissions/later completion/near deadline/publication barrier: 796 checks PASS
+incremental-production: Disconnected/many disconnected/multiple ports/slow device fairness: 5393 checks PASS
+incremental-production: Command/transfer/short/timeout/disconnect/reconnect safe retirement: 11277 checks PASS
+incremental-production: Incremental enumeration total: 17466 checks PASS; service calls=2699 max simulated service ns=8000
+Parity incremental/production: 10822 ordered functional records identical
+narzedzia/test_xhci_incremental.cpp: In function ‘void asynchronous_stages()’:
+narzedzia/test_xhci_incremental.cpp:30:5: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+   30 |     for(unsigned i=0;i<100;++i)service();CHECK(enumeration.step==EnumStep::Idle);CHECK(!xhc.wanted_command);
+      |     ^~~
+In file included from ./narzedzia/test_xhci_physical_mouse.cpp:2,
+                 from narzedzia/test_xhci_incremental.cpp:2:
+./narzedzia/pointing_host_stubs.h:13:18: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+   13 | #define CHECK(x) do { ++checks; if(!(x)){std::fprintf(stderr,"FAIL %s:%d: %s\n",__FILE__,__LINE__,#x);std::abort();} } while(0)
+      |                  ^~
+narzedzia/test_xhci_incremental.cpp:30:42: note: in expansion of macro ‘CHECK’
+   30 |     for(unsigned i=0;i<100;++i)service();CHECK(enumeration.step==EnumStep::Idle);CHECK(!xhc.wanted_command);
+      |                                          ^~~~~
+incremental-physical: Incremental submissions/later completion/near deadline/publication barrier: 796 checks PASS
+incremental-physical: Disconnected/many disconnected/multiple ports/slow device fairness: 5393 checks PASS
+incremental-physical: Command/transfer/short/timeout/disconnect/reconnect safe retirement: 11277 checks PASS
+incremental-physical: Incremental enumeration total: 17466 checks PASS; service calls=2699 max simulated service ns=8000
+Parity incremental/physical: 10822 ordered functional records identical
+narzedzia/test_xhci_incremental.cpp: In function ‘void asynchronous_stages()’:
+narzedzia/test_xhci_incremental.cpp:30:5: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+   30 |     for(unsigned i=0;i<100;++i)service();CHECK(enumeration.step==EnumStep::Idle);CHECK(!xhc.wanted_command);
+      |     ^~~
+In file included from ./narzedzia/test_xhci_physical_mouse.cpp:2,
+                 from narzedzia/test_xhci_incremental.cpp:2:
+./narzedzia/pointing_host_stubs.h:13:18: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+   13 | #define CHECK(x) do { ++checks; if(!(x)){std::fprintf(stderr,"FAIL %s:%d: %s\n",__FILE__,__LINE__,#x);std::abort();} } while(0)
+      |                  ^~
+narzedzia/test_xhci_incremental.cpp:30:42: note: in expansion of macro ‘CHECK’
+   30 |     for(unsigned i=0;i<100;++i)service();CHECK(enumeration.step==EnumStep::Idle);CHECK(!xhc.wanted_command);
+      |                                          ^~~~~
+incremental-coexistence: Incremental submissions/later completion/near deadline/publication barrier: 796 checks PASS
+incremental-coexistence: Disconnected/many disconnected/multiple ports/slow device fairness: 5393 checks PASS
+incremental-coexistence: Command/transfer/short/timeout/disconnect/reconnect safe retirement: 11277 checks PASS
+incremental-coexistence: Incremental enumeration total: 17466 checks PASS; service calls=2699 max simulated service ns=8000
+Parity incremental/coexistence: 10822 ordered functional records identical
+narzedzia/test_xhci_incremental.cpp: In function ‘void asynchronous_stages()’:
+narzedzia/test_xhci_incremental.cpp:30:5: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+   30 |     for(unsigned i=0;i<100;++i)service();CHECK(enumeration.step==EnumStep::Idle);CHECK(!xhc.wanted_command);
+      |     ^~~
+In file included from ./narzedzia/test_xhci_physical_mouse.cpp:2,
+                 from narzedzia/test_xhci_incremental.cpp:2:
+./narzedzia/pointing_host_stubs.h:13:18: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+   13 | #define CHECK(x) do { ++checks; if(!(x)){std::fprintf(stderr,"FAIL %s:%d: %s\n",__FILE__,__LINE__,#x);std::abort();} } while(0)
+      |                  ^~
+narzedzia/test_xhci_incremental.cpp:30:42: note: in expansion of macro ‘CHECK’
+   30 |     for(unsigned i=0;i<100;++i)service();CHECK(enumeration.step==EnumStep::Idle);CHECK(!xhc.wanted_command);
+      |                                          ^~~~~
+incremental-all-input-diagnostics: Incremental submissions/later completion/near deadline/publication barrier: 796 checks PASS
+incremental-all-input-diagnostics: Disconnected/many disconnected/multiple ports/slow device fairness: 5393 checks PASS
+incremental-all-input-diagnostics: Command/transfer/short/timeout/disconnect/reconnect safe retirement: 11277 checks PASS
+incremental-all-input-diagnostics: Incremental enumeration total: 17466 checks PASS; service calls=2699 max simulated service ns=8000
+Parity incremental/all-input-diagnostics: 10822 ordered functional records identical
+input-boot-timing: Input coexistence: 132 checks PASS
+input-production: Input coexistence: 132 checks PASS
+Parity input/production: 51 ordered functional records identical
+input-physical: Input coexistence: 132 checks PASS
+Parity input/physical: 51 ordered functional records identical
+input-coexistence: Input coexistence: 132 checks PASS
+Parity input/coexistence: 51 ordered functional records identical
+input-all-input-diagnostics: Input coexistence: 132 checks PASS
+Parity input/all-input-diagnostics: 51 ordered functional records identical
+boot-boot-timing: Intel capabilities/legacy handoff/address width: 39 checks PASS
+boot-boot-timing: Control TRB requests/directions/reserved fields: 32 checks PASS
+boot-boot-timing: Multi-interface/companion/interval/DCI/Boot Mouse/packed report: 1597 checks PASS
+boot-boot-timing: Ring full/wrap/Link/pre-publication observation: 1497 checks PASS
+boot-boot-timing: Production Intel-style boot/hotplug/EP0/IRQ/mouse/requeue/removal: 18874 checks PASS
+boot-boot-timing: Control short/Stall recovery/USB2-USB3 PORTSC/reset failure: 1674 checks PASS
+boot-boot-timing: Connected-at-boot mouse/first live report: 320 checks PASS
+boot-boot-timing: Physical xHCI mouse total: 24033 checks PASS; allocations 248 releases 248
+boot-boot-timing: EMPTY ports=1 ns=4000 resets=0 controls=0
+boot-boot-timing: EMPTY ports=20 ns=80000 resets=0 controls=0
+boot-boot-timing: EMPTY ports=255 ns=1020000 resets=0 controls=0
+boot-boot-timing: TIMEOUT stage=0 IF=0 ns=1005000000
+boot-boot-timing: TIMEOUT stage=0 IF=1 ns=1005000000
+boot-boot-timing: TIMEOUT stage=1 IF=0 ns=1011000000
+boot-boot-timing: TIMEOUT stage=1 IF=1 ns=1011000000
+boot-boot-timing: TIMEOUT stage=2 IF=0 ns=1014000000
+boot-boot-timing: TIMEOUT stage=2 IF=1 ns=1014000000
+boot-boot-timing: TIMEOUT stage=3 IF=0 ns=1017000000
+boot-boot-timing: TIMEOUT stage=3 IF=1 ns=1017000000
+boot-boot-timing: Deferred startup/empty ports/handoff/controller and port timeout bounds: 2982 checks PASS
+boot-boot-timing: BOOT repaired USB-before-splash=2800000 ns USB-after-publication=3074500000 ns control-requests=7
+boot-boot-timing: PHASE xHCI discovery calls=1 ns=100000
+boot-boot-timing: PHASE BIOS handoff calls=1 ns=200000
+boot-boot-timing: PHASE controller halt calls=1 ns=200000
+boot-boot-timing: PHASE controller reset calls=1 ns=200000
+boot-boot-timing: PHASE CNR wait calls=2 ns=400000
+boot-boot-timing: PHASE scratchpads calls=1 ns=100000
+boot-boot-timing: PHASE DCBAA calls=1 ns=100000
+boot-boot-timing: PHASE command ring calls=1 ns=100000
+boot-boot-timing: PHASE event ring calls=1 ns=100000
+boot-boot-timing: PHASE IRQ setup calls=1 ns=100000
+boot-boot-timing: PHASE root port inspect calls=318 ns=31800000
+boot-boot-timing: PHASE control transfer calls=7 ns=700000
+boot-boot-timing: PHASE config parse calls=1 ns=100000
+boot-boot-timing: PHASE HID setup calls=1 ns=100000
+boot-boot-timing: PHASE first receive calls=1 ns=100000
+boot-boot-timing: Boot/coexistence fixture total: 27884 checks PASS
+boot-production: Intel capabilities/legacy handoff/address width: 39 checks PASS
+boot-production: Control TRB requests/directions/reserved fields: 32 checks PASS
+boot-production: Multi-interface/companion/interval/DCI/Boot Mouse/packed report: 1597 checks PASS
+boot-production: Ring full/wrap/Link/pre-publication observation: 1497 checks PASS
+boot-production: Production Intel-style boot/hotplug/EP0/IRQ/mouse/requeue/removal: 18874 checks PASS
+boot-production: Control short/Stall recovery/USB2-USB3 PORTSC/reset failure: 1674 checks PASS
+boot-production: Connected-at-boot mouse/first live report: 320 checks PASS
+boot-production: Physical xHCI mouse total: 24033 checks PASS; allocations 248 releases 248
+boot-production: EMPTY ports=1 ns=4000 resets=0 controls=0
+boot-production: EMPTY ports=20 ns=80000 resets=0 controls=0
+boot-production: EMPTY ports=255 ns=1020000 resets=0 controls=0
+boot-production: TIMEOUT stage=0 IF=0 ns=1005000000
+boot-production: TIMEOUT stage=0 IF=1 ns=1005000000
+boot-production: TIMEOUT stage=1 IF=0 ns=1011000000
+boot-production: TIMEOUT stage=1 IF=1 ns=1011000000
+boot-production: TIMEOUT stage=2 IF=0 ns=1014000000
+boot-production: TIMEOUT stage=2 IF=1 ns=1014000000
+boot-production: TIMEOUT stage=3 IF=0 ns=1017000000
+boot-production: TIMEOUT stage=3 IF=1 ns=1017000000
+boot-production: Deferred startup/empty ports/handoff/controller and port timeout bounds: 2982 checks PASS
+boot-production: BOOT repaired USB-before-splash=2800000 ns USB-after-publication=3074500000 ns control-requests=7
+boot-production: PHASE xHCI discovery calls=1 ns=100000
+boot-production: PHASE BIOS handoff calls=1 ns=200000
+boot-production: PHASE controller halt calls=1 ns=200000
+boot-production: PHASE controller reset calls=1 ns=200000
+boot-production: PHASE CNR wait calls=2 ns=400000
+boot-production: PHASE scratchpads calls=1 ns=100000
+boot-production: PHASE DCBAA calls=1 ns=100000
+boot-production: PHASE command ring calls=1 ns=100000
+boot-production: PHASE event ring calls=1 ns=100000
+boot-production: PHASE IRQ setup calls=1 ns=100000
+boot-production: PHASE root port inspect calls=318 ns=31800000
+boot-production: PHASE control transfer calls=7 ns=700000
+boot-production: PHASE config parse calls=1 ns=100000
+boot-production: PHASE HID setup calls=1 ns=100000
+boot-production: PHASE first receive calls=1 ns=100000
+boot-production: Boot/coexistence fixture total: 27884 checks PASS
+Parity boot/production: 21862 ordered functional records identical
+boot-physical: Intel capabilities/legacy handoff/address width: 39 checks PASS
+boot-physical: Control TRB requests/directions/reserved fields: 32 checks PASS
+boot-physical: Multi-interface/companion/interval/DCI/Boot Mouse/packed report: 1597 checks PASS
+boot-physical: Ring full/wrap/Link/pre-publication observation: 1497 checks PASS
+boot-physical: Production Intel-style boot/hotplug/EP0/IRQ/mouse/requeue/removal: 18874 checks PASS
+boot-physical: Control short/Stall recovery/USB2-USB3 PORTSC/reset failure: 1674 checks PASS
+boot-physical: Connected-at-boot mouse/first live report: 320 checks PASS
+boot-physical: Physical xHCI mouse total: 24033 checks PASS; allocations 248 releases 248
+boot-physical: EMPTY ports=1 ns=4000 resets=0 controls=0
+boot-physical: EMPTY ports=20 ns=80000 resets=0 controls=0
+boot-physical: EMPTY ports=255 ns=1020000 resets=0 controls=0
+boot-physical: TIMEOUT stage=0 IF=0 ns=1005000000
+boot-physical: TIMEOUT stage=0 IF=1 ns=1005000000
+boot-physical: TIMEOUT stage=1 IF=0 ns=1011000000
+boot-physical: TIMEOUT stage=1 IF=1 ns=1011000000
+boot-physical: TIMEOUT stage=2 IF=0 ns=1014000000
+boot-physical: TIMEOUT stage=2 IF=1 ns=1014000000
+boot-physical: TIMEOUT stage=3 IF=0 ns=1017000000
+boot-physical: TIMEOUT stage=3 IF=1 ns=1017000000
+boot-physical: Deferred startup/empty ports/handoff/controller and port timeout bounds: 2982 checks PASS
+boot-physical: BOOT repaired USB-before-splash=2800000 ns USB-after-publication=3074500000 ns control-requests=7
+boot-physical: PHASE xHCI discovery calls=1 ns=100000
+boot-physical: PHASE BIOS handoff calls=1 ns=200000
+boot-physical: PHASE controller halt calls=1 ns=200000
+boot-physical: PHASE controller reset calls=1 ns=200000
+boot-physical: PHASE CNR wait calls=2 ns=400000
+boot-physical: PHASE scratchpads calls=1 ns=100000
+boot-physical: PHASE DCBAA calls=1 ns=100000
+boot-physical: PHASE command ring calls=1 ns=100000
+boot-physical: PHASE event ring calls=1 ns=100000
+boot-physical: PHASE IRQ setup calls=1 ns=100000
+boot-physical: PHASE root port inspect calls=318 ns=31800000
+boot-physical: PHASE control transfer calls=7 ns=700000
+boot-physical: PHASE config parse calls=1 ns=100000
+boot-physical: PHASE HID setup calls=1 ns=100000
+boot-physical: PHASE first receive calls=1 ns=100000
+boot-physical: Boot/coexistence fixture total: 27884 checks PASS
+Parity boot/physical: 21862 ordered functional records identical
+boot-coexistence: Intel capabilities/legacy handoff/address width: 39 checks PASS
+boot-coexistence: Control TRB requests/directions/reserved fields: 32 checks PASS
+boot-coexistence: Multi-interface/companion/interval/DCI/Boot Mouse/packed report: 1597 checks PASS
+boot-coexistence: Ring full/wrap/Link/pre-publication observation: 1497 checks PASS
+boot-coexistence: Production Intel-style boot/hotplug/EP0/IRQ/mouse/requeue/removal: 18874 checks PASS
+boot-coexistence: Control short/Stall recovery/USB2-USB3 PORTSC/reset failure: 1674 checks PASS
+boot-coexistence: Connected-at-boot mouse/first live report: 320 checks PASS
+boot-coexistence: Physical xHCI mouse total: 24033 checks PASS; allocations 248 releases 248
+boot-coexistence: EMPTY ports=1 ns=4000 resets=0 controls=0
+boot-coexistence: EMPTY ports=20 ns=80000 resets=0 controls=0
+boot-coexistence: EMPTY ports=255 ns=1020000 resets=0 controls=0
+boot-coexistence: TIMEOUT stage=0 IF=0 ns=1005000000
+boot-coexistence: TIMEOUT stage=0 IF=1 ns=1005000000
+boot-coexistence: TIMEOUT stage=1 IF=0 ns=1011000000
+boot-coexistence: TIMEOUT stage=1 IF=1 ns=1011000000
+boot-coexistence: TIMEOUT stage=2 IF=0 ns=1014000000
+boot-coexistence: TIMEOUT stage=2 IF=1 ns=1014000000
+boot-coexistence: TIMEOUT stage=3 IF=0 ns=1017000000
+boot-coexistence: TIMEOUT stage=3 IF=1 ns=1017000000
+boot-coexistence: Deferred startup/empty ports/handoff/controller and port timeout bounds: 2982 checks PASS
+boot-coexistence: BOOT repaired USB-before-splash=2800000 ns USB-after-publication=3074500000 ns control-requests=7
+boot-coexistence: PHASE xHCI discovery calls=1 ns=100000
+boot-coexistence: PHASE BIOS handoff calls=1 ns=200000
+boot-coexistence: PHASE controller halt calls=1 ns=200000
+boot-coexistence: PHASE controller reset calls=1 ns=200000
+boot-coexistence: PHASE CNR wait calls=2 ns=400000
+boot-coexistence: PHASE scratchpads calls=1 ns=100000
+boot-coexistence: PHASE DCBAA calls=1 ns=100000
+boot-coexistence: PHASE command ring calls=1 ns=100000
+boot-coexistence: PHASE event ring calls=1 ns=100000
+boot-coexistence: PHASE IRQ setup calls=1 ns=100000
+boot-coexistence: PHASE root port inspect calls=318 ns=31800000
+boot-coexistence: PHASE control transfer calls=7 ns=700000
+boot-coexistence: PHASE config parse calls=1 ns=100000
+boot-coexistence: PHASE HID setup calls=1 ns=100000
+boot-coexistence: PHASE first receive calls=1 ns=100000
+boot-coexistence: Boot/coexistence fixture total: 27884 checks PASS
+Parity boot/coexistence: 21862 ordered functional records identical
+boot-all-input-diagnostics: Intel capabilities/legacy handoff/address width: 39 checks PASS
+boot-all-input-diagnostics: Control TRB requests/directions/reserved fields: 32 checks PASS
+boot-all-input-diagnostics: Multi-interface/companion/interval/DCI/Boot Mouse/packed report: 1597 checks PASS
+boot-all-input-diagnostics: Ring full/wrap/Link/pre-publication observation: 1497 checks PASS
+boot-all-input-diagnostics: Production Intel-style boot/hotplug/EP0/IRQ/mouse/requeue/removal: 18874 checks PASS
+boot-all-input-diagnostics: Control short/Stall recovery/USB2-USB3 PORTSC/reset failure: 1674 checks PASS
+boot-all-input-diagnostics: Connected-at-boot mouse/first live report: 320 checks PASS
+boot-all-input-diagnostics: Physical xHCI mouse total: 24033 checks PASS; allocations 248 releases 248
+boot-all-input-diagnostics: EMPTY ports=1 ns=4000 resets=0 controls=0
+boot-all-input-diagnostics: EMPTY ports=20 ns=80000 resets=0 controls=0
+boot-all-input-diagnostics: EMPTY ports=255 ns=1020000 resets=0 controls=0
+boot-all-input-diagnostics: TIMEOUT stage=0 IF=0 ns=1005000000
+boot-all-input-diagnostics: TIMEOUT stage=0 IF=1 ns=1005000000
+boot-all-input-diagnostics: TIMEOUT stage=1 IF=0 ns=1011000000
+boot-all-input-diagnostics: TIMEOUT stage=1 IF=1 ns=1011000000
+boot-all-input-diagnostics: TIMEOUT stage=2 IF=0 ns=1014000000
+boot-all-input-diagnostics: TIMEOUT stage=2 IF=1 ns=1014000000
+boot-all-input-diagnostics: TIMEOUT stage=3 IF=0 ns=1017000000
+boot-all-input-diagnostics: TIMEOUT stage=3 IF=1 ns=1017000000
+boot-all-input-diagnostics: Deferred startup/empty ports/handoff/controller and port timeout bounds: 2982 checks PASS
+boot-all-input-diagnostics: BOOT repaired USB-before-splash=2800000 ns USB-after-publication=3074500000 ns control-requests=7
+boot-all-input-diagnostics: PHASE xHCI discovery calls=1 ns=100000
+boot-all-input-diagnostics: PHASE BIOS handoff calls=1 ns=200000
+boot-all-input-diagnostics: PHASE controller halt calls=1 ns=200000
+boot-all-input-diagnostics: PHASE controller reset calls=1 ns=200000
+boot-all-input-diagnostics: PHASE CNR wait calls=2 ns=400000
+boot-all-input-diagnostics: PHASE scratchpads calls=1 ns=100000
+boot-all-input-diagnostics: PHASE DCBAA calls=1 ns=100000
+boot-all-input-diagnostics: PHASE command ring calls=1 ns=100000
+boot-all-input-diagnostics: PHASE event ring calls=1 ns=100000
+boot-all-input-diagnostics: PHASE IRQ setup calls=1 ns=100000
+boot-all-input-diagnostics: PHASE root port inspect calls=318 ns=31800000
+boot-all-input-diagnostics: PHASE control transfer calls=7 ns=700000
+boot-all-input-diagnostics: PHASE config parse calls=1 ns=100000
+boot-all-input-diagnostics: PHASE HID setup calls=1 ns=100000
+boot-all-input-diagnostics: PHASE first receive calls=1 ns=100000
+boot-all-input-diagnostics: Boot/coexistence fixture total: 27884 checks PASS
+Parity boot/all-input-diagnostics: 21862 ordered functional records identical
+Diagnostic functional parity: 12 comparisons PASS

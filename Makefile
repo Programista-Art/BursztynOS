@@ -341,6 +341,7 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	e1000.o \
 	siec.o \
 	hda.o \
+	hda_diag.o \
 	klawiatura.o \
 	przegladarka_blob.o \
 	mysz.o \
@@ -369,6 +370,7 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	eksplorator_blob.o \
 	kalkulator_blob.o \
 	loader.o \
+	czcionka_systemowa.o \
 	kernel.o \
 	shell_blob.o \
 	menedzer_okien_blob.o \
@@ -394,6 +396,7 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	aktualizacje_blob.o \
 	motyw.o \
 	motywy_blob.o \
+	test_dzwieku_blob.o \
 	test_bmp_blob.o \
 	test1_bmp_blob.o \
 	logo_png_blob.o \
@@ -477,13 +480,16 @@ mbedtls_port.o: biblioteki/mbedtls/mbedtls_port.cpp biblioteki/mbedtls/bursztyn_
 # Bounded resource tables in the modern BWS layer are intentionally dynamic;
 # optimize its dispatcher for size so the fixed pre-Ring3 kernel VA contract
 # (kernel <= 14 MiB with >= 2 MiB guard below RING3_BASE at 16 MiB) remains intact.
-bws_nowoczesne.o: bws_nowoczesne.cpp bws_nowoczesne.h bws_api.h
+bws_nowoczesne.o: bws_nowoczesne.cpp bws_nowoczesne.h bws_api.h bws_hda_diag.h sterowniki/dzwiek/hda.h sterowniki/dzwiek/hda_diag.h sterowniki/dzwiek/hda_diag_format.h
 	$(CXX) $(KERNEL_CXXFLAGS) -Os -c $< -o $@
 
 syscalls.o: syscalls.cpp bws_api.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
-hda.o: sterowniki/dzwiek/hda.cpp sterowniki/dzwiek/hda.h pamiec.h pci.h
+hda.o: sterowniki/dzwiek/hda.cpp sterowniki/dzwiek/hda.h sterowniki/dzwiek/hda_wewnetrzny.h sterowniki/dzwiek/hda_diag_format.h pamiec.h pci.h
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+
+hda_diag.o: sterowniki/dzwiek/hda_diag.cpp sterowniki/dzwiek/hda_diag.h sterowniki/dzwiek/hda_diag_format.h sterowniki/dzwiek/hda_wewnetrzny.h sterowniki/dzwiek/hda.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
 uefi_gop.o: sterowniki/grafika/uefi_gop.cpp sterowniki/grafika/uefi_gop.h
@@ -689,6 +695,24 @@ motywy_blob.o: motywy_tmp.o bursztyn_gui.o $(MOTYWY_LINKER)
 	$(OBJCOPY) -O binary motywy.elf motywy.bin
 	$(LD) -r -b binary motywy.bin -o motywy_blob.o
 
+# Test dźwięku — diagnostyka HDA
+BURSZTYNDIAGTESTDZWIEKU ?= 0
+ifeq ($(BURSZTYNDIAGTESTDZWIEKU),1)
+KERNEL_CXXFLAGS += -DBURSZTYNDIAGTESTDZWIEKU=1
+RING3_FLAGS += -DBURSZTYNDIAGTESTDZWIEKU=1
+endif
+
+test_dzwieku_tmp.o: programy/test_dzwieku/test_dzwieku.cpp bursztyn_gui.h bws_hda_diag.h bws_czcionka.h test_dzwieku_trace.h \
+		sterowniki/dzwiek/hda_diag_format.h wersja_systemu.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
+
+test_dzwieku_blob.o: test_dzwieku_tmp.o bursztyn_gui.o programy/test_dzwieku/test_dzwieku_linker.ld narzedzia/test_dzwieku_size.py
+	$(LD) --orphan-handling=error -T programy/test_dzwieku/test_dzwieku_linker.ld $(RING3_LDFLAGS) \
+		test_dzwieku_tmp.o bursztyn_gui.o -o test_dzwieku.elf
+	$(OBJCOPY) -O binary test_dzwieku.elf test_dzwieku.bin
+	$(PYTHON) narzedzia/test_dzwieku_size.py test_dzwieku.bin
+	$(LD) -r -b binary test_dzwieku.bin -o test_dzwieku_blob.o
+
 # REPRO (tylko diagnostyka BWS2/BWS46)
 repro_tmp.o: programy/repro/repro.cpp bursztyn_gui.h
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
@@ -829,10 +853,18 @@ test-network-device:
 test-e1000-qemu: iso
 	$(PYTHON) narzedzia/test_e1000_qemu.py
 
+.PHONY: test-virtio-input-events
+test-virtio-input-events:
+	@mkdir -p .virtiotest
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_PMM_HOST_TEST \
+		-fsanitize=address,undefined -pthread \
+		input_device.cpp narzedzia/test_virtio_input_events.cpp -o .virtiotest/test-virtio-input-events
+	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) UBSAN_OPTIONS=halt_on_error=1 .virtiotest/test-virtio-input-events
+
 test-virtio-pci:
 	$(PYTHON) narzedzia/test_input_boot_order.py
 	@mkdir -p .virtiotest
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_PMM_HOST_TEST $(if $(filter 1 yes true,$(BURSZTYNDIAGVIRTIOINPUTINIT)),-DBURSZTYNDIAGVIRTIOINPUTINIT=1) -fsanitize=address,undefined -pthread pci.cpp pmm.cpp virtio_pci.cpp virtqueue.cpp virtio_rng.cpp virtio_blk.cpp network_device.cpp virtio_net.cpp virtio_gpu.cpp input_device.cpp virtio_input.cpp sterowniki/usb/usb_hid.cpp klawiatura.cpp narzedzia/test_virtio_pci.cpp -o .virtiotest/test-virtio-pci
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_PMM_HOST_TEST $(if $(filter 1 yes true,$(BURSZTYNDIAGVIRTIOINPUTINIT)),-DBURSZTYNDIAGVIRTIOINPUTINIT=1) $(if $(filter 1,$(BURSZTYNDIAGVIRTIOINPUTQEMU)),-DBURSZTYNDIAGVIRTIOINPUTQEMU=1) -fsanitize=address,undefined -pthread pci.cpp pmm.cpp virtio_pci.cpp virtqueue.cpp virtio_rng.cpp virtio_blk.cpp network_device.cpp virtio_net.cpp virtio_gpu.cpp input_device.cpp virtio_input.cpp sterowniki/usb/usb_hid.cpp klawiatura.cpp narzedzia/test_virtio_pci.cpp -o .virtiotest/test-virtio-pci
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) UBSAN_OPTIONS=halt_on_error=1 .virtiotest/test-virtio-pci
 
 .PHONY: test-input-init-locks
@@ -1090,7 +1122,7 @@ prepare-disk: $(VIRTUAL_DISK)
 #   make runuefi QEMU_DISPLAY_ARGS="-display gtk,zoom-to-fit=off"
 #
 
-QEMUACCEL ?= tcg,thread=multi
+QEMUACCEL ?= tcg,thread=single
 QEMU_ACCEL ?= $(QEMUACCEL)
 QEMU_RAM ?= 2G
 QEMU_SMP ?= 1
@@ -1124,12 +1156,12 @@ QEMU_AHCI_DISK_BOOT := -device ich9-ahci,id=ahci -device ide-hd,drive=disk,bus=a
 QEMU_VIRTIO_COMMON_ARGS := \
 	-netdev user,id=n1 \
 	-device virtio-net-pci,netdev=n1,disable-legacy=on \
-	-object rng-random,id=rng0,filename=/dev/urandom \
+	-object rng-builtin,id=rng0 \
 	-device virtio-rng-pci,rng=rng0,disable-legacy=on \
 	-vga none \
 	-device virtio-vga,disable-legacy=on,xres=$(QEMU_VIRTIO_XRES),yres=$(QEMU_VIRTIO_YRES) \
 	-device virtio-keyboard-pci \
-	-device virtio-tablet-pci
+	-device virtio-mouse-pci
 
 # Produkcyjny profil VirtIO 1.x Modern PCI (Live / CD / instalator).
 # xres/yres sa jedynie poczatkowa wskazowka scanoutu QEMU; sterownik
@@ -1181,7 +1213,7 @@ run: iso prepare-disk
 	$(QEMU) \
 		$(QEMU_BASE_ARGS) \
 		$(QEMU_VIRTIO_ARGS) \
-		-boot order=d \
+		-boot order=d,menu=on \
 		-cdrom $(ISO)
 
 # Start BIOS bez VirtIO: AHCI + E1000 + STD VGA/Bochs + PS/2.
@@ -1190,21 +1222,21 @@ run-legacy: iso prepare-disk
 	$(QEMU) \
 		$(QEMU_BASE_ARGS) \
 		$(QEMU_LEGACY_ARGS) \
-		-boot order=d \
+		-boot order=d,menu=on \
 		-cdrom $(ISO)
 
 run8k: iso8k prepare-disk
 	$(QEMU) \
 		$(QEMU_BASE_ARGS) \
 		$(QEMU_VIRTIO_ARGS) \
-		-boot order=d \
+		-boot order=d,menu=on \
 		-cdrom $(ISO8K)
 
 run-test: $(CI_TEST_ISO) prepare-disk
 	$(QEMU) \
 		$(QEMU_BASE_ARGS) \
 		$(QEMU_VIRTIO_ARGS) \
-		-boot order=d \
+		-boot order=d,menu=on \
 		-cdrom $(CI_TEST_ISO)
 
 run-geom-trace: prepare-disk
@@ -1218,7 +1250,7 @@ runusb: iso prepare-disk
 		$(QEMU_BASE_ARGS) \
 		$(QEMU_LEGACY_ARGS) \
 		-device qemu-xhci,id=xhci \
-		-boot order=d \
+		-boot order=d,menu=on \
 		-cdrom $(ISO)
 
 runusbkbd: iso prepare-disk
@@ -1227,7 +1259,7 @@ runusbkbd: iso prepare-disk
 		$(QEMU_LEGACY_ARGS) \
 		-device qemu-xhci,id=xhci \
 		-device usb-kbd,id=usbkbd,bus=xhci.0 \
-		-boot order=d \
+		-boot order=d,menu=on \
 		-cdrom $(ISO)
 
 runusbmouse: iso prepare-disk
@@ -1236,7 +1268,7 @@ runusbmouse: iso prepare-disk
 		$(QEMU_LEGACY_ARGS) \
 		-device qemu-xhci,id=xhci \
 		-device usb-mouse,id=usbmouse,bus=xhci.0 \
-		-boot order=d \
+		-boot order=d,menu=on \
 		-cdrom $(ISO)
 
 runusbhid: iso prepare-disk
@@ -1244,7 +1276,7 @@ runusbhid: iso prepare-disk
 		$(QEMU_BASE_ARGS) \
 		$(QEMU_LEGACY_ARGS) \
 		$(QEMU_USB_HID_ARGS) \
-		-boot order=d \
+		-boot order=d,menu=on \
 		-cdrom $(ISO)
 
 # ============================================================================
@@ -1265,26 +1297,20 @@ check-ovmf:
 	fi
 
 # Domyslny start UEFI: pelny aktualny profil VirtIO.
+QEMU_UEFI_FIRMWARE_ARGS = $(if $(strip $(OVMF_MONO)),-bios "$(OVMF_MONO)",-drive if=pflash,format=raw,readonly=on,file="$(OVMF_CODE)" -drive if=pflash,format=raw,file="$(OVMF_VARS_RUNTIME)")
+RUNUEFI_ISO ?= $(ISO)
+QEMU_RUNUEFI_ARGS = $(QEMU_UEFI_FIRMWARE_ARGS) $(QEMU_BASE_ARGS) $(QEMU_VIRTIO_ARGS) -boot order=d,menu=on -cdrom $(RUNUEFI_ISO)
 runuefi: uefi prepare-disk check-ovmf
-	@if [ -n "$(OVMF_MONO)" ]; then \
-		echo "[QEMU] Start UEFI/OVMF / VirtIO Full (-bios)."; \
-		exec $(QEMU) \
-			-bios "$(OVMF_MONO)" \
-			$(QEMU_BASE_ARGS) \
-			$(QEMU_VIRTIO_ARGS) \
-			-boot order=d \
-			-cdrom $(ISO); \
-	else \
-		echo "[QEMU] Start UEFI/OVMF / VirtIO Full (pflash CODE+VARS)."; \
-		cp "$(OVMF_VARS)" "$(OVMF_VARS_RUNTIME)"; \
-		exec $(QEMU) \
-			-drive if=pflash,format=raw,readonly=on,file="$(OVMF_CODE)" \
-			-drive if=pflash,format=raw,file="$(OVMF_VARS_RUNTIME)" \
-			$(QEMU_BASE_ARGS) \
-			$(QEMU_VIRTIO_ARGS) \
-			-boot order=d \
-			-cdrom $(ISO); \
-	fi
+	@if [ -z "$(OVMF_MONO)" ]; then cp "$(OVMF_VARS)" "$(OVMF_VARS_RUNTIME)"; fi
+	@$(PYTHON) narzedzia/qemu_launcher_audit.py -- $(QEMU) $(QEMU_RUNUEFI_ARGS)
+	$(QEMU) $(QEMU_RUNUEFI_ARGS)
+
+# These targets have no build/disk/firmware-copy prerequisites and never boot a VM.
+.PHONY: runuefi-argv runuefi-audit
+runuefi-argv:
+	@$(PYTHON) narzedzia/qemu_launcher_audit.py -- $(QEMU) $(QEMU_RUNUEFI_ARGS)
+runuefi-audit:
+	@$(PYTHON) narzedzia/qemu_launcher_audit.py --probe -- $(QEMU) $(QEMU_RUNUEFI_ARGS)
 
 # UEFI bez VirtIO: AHCI + E1000 + GOP/STD VGA + PS/2.
 runuefi-legacy: uefi prepare-disk check-ovmf
@@ -1573,6 +1599,20 @@ test-explorer-host:
 	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined narzedzia/test_explorer_host.cpp -o .bursztyn-ui-test/test-explorer
 	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-explorer
 
+.PHONY: test-hda-diag test-dzwieku-packaging test-dzwieku-repair
+test-dzwieku-repair: test_dzwieku_blob.o
+	$(PYTHON) narzedzia/test_dzwieku_repair.py
+
+test-dzwieku-packaging: test_dzwieku_blob.o
+	$(PYTHON) narzedzia/test_dzwieku_packaging.py
+
+test-hda-diag:
+	@mkdir -p .hda-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined narzedzia/test_hda_diag.cpp -o .hda-test/test-hda-diag
+	ASAN_OPTIONS=detect_leaks=0 .hda-test/test-hda-diag
+	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined narzedzia/test_hda_bws_isolation.cpp -o .hda-test/test-hda-bws
+	ASAN_OPTIONS=detect_leaks=0 .hda-test/test-hda-bws
+
 .PHONY: test-desktop-files-host
 test-desktop-files-host:
 	@mkdir -p .bursztyn-ui-test
@@ -1832,3 +1872,30 @@ endif
 .PHONY: test-input-coexistence-host
 test-input-coexistence-host:
 	python3 narzedzia/test_input_diagnostic_parity.py
+
+BURSZTYNDIAGBOOTXHCITIMING ?= 0
+BURSZTYNDIAGVIRTIOINPUTQEMU ?= 0
+BURSZTYNDIAGVIRTIOINPUTFORENSIC ?= 0
+ifeq ($(BURSZTYNDIAGVIRTIOINPUTFORENSIC),1)
+KERNEL_CXXFLAGS += -DBURSZTYNDIAGVIRTIOINPUTFORENSIC=1
+endif
+ifeq ($(BURSZTYNDIAGBOOTXHCITIMING),1)
+KERNEL_CXXFLAGS += -DBURSZTYNDIAGBOOTXHCITIMING=1
+endif
+ifeq ($(BURSZTYNDIAGVIRTIOINPUTQEMU),1)
+KERNEL_CXXFLAGS += -DBURSZTYNDIAGVIRTIOINPUTQEMU=1
+endif
+
+.PHONY: test-launcher-parity
+test-launcher-parity:
+	$(PYTHON) narzedzia/test_launcher_parity.py
+
+.PHONY: test-virtio-input-qemu-parity-host
+test-virtio-input-qemu-parity-host:
+	$(PYTHON) narzedzia/test_virtio_input_qemu_parity.py
+
+.PHONY: test-virtio-input-forensic-host
+test-virtio-input-forensic-host:
+	@mkdir -p .virtiotest/forensic-validation
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_PMM_HOST_TEST -DBURSZTYNDIAGVIRTIOINPUTFORENSIC=$(BURSZTYNDIAGVIRTIOINPUTFORENSIC) -fsanitize=address,undefined -pthread pci.cpp pmm.cpp virtio_pci.cpp virtqueue.cpp virtio_rng.cpp virtio_blk.cpp network_device.cpp virtio_net.cpp virtio_gpu.cpp input_device.cpp virtio_input.cpp sterowniki/usb/usb_hid.cpp klawiatura.cpp narzedzia/test_virtio_input_forensic.cpp -o .virtiotest/forensic-validation/queue-$(BURSZTYNDIAGVIRTIOINPUTFORENSIC)
+	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) UBSAN_OPTIONS=halt_on_error=1 .virtiotest/forensic-validation/queue-$(BURSZTYNDIAGVIRTIOINPUTFORENSIC)

@@ -5,7 +5,7 @@ xhci.o: sterowniki/usb/xhci.cpp sterowniki/usb/xhci.h \
  sterowniki/usb/xhci_physical_diag.h pamiec.h pci.h idt.h apic.h \
  xhci_pointing_diag.h input_device.h mysz_input.h \
  sterowniki/usb/hid_pointer.h sterowniki/usb/ohci.h \
- sterowniki/usb/usb_hid.h
+ sterowniki/usb/usb_hid.h sterowniki/usb/xhci_enumeration.inc
 sterowniki/usb/xhci.h:
 sterowniki/usb/xhci_ring.h:
 sterowniki/dma.h:
@@ -26,3 +26,4 @@ mysz_input.h:
 sterowniki/usb/hid_pointer.h:
 sterowniki/usb/ohci.h:
 sterowniki/usb/usb_hid.h:
+sterowniki/usb/xhci_enumeration.inc:

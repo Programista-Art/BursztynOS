@@ -25,6 +25,11 @@ extern "C" void zaktualizuj_mysze_zrodlo(int dx,int dy,uint8_t b,const char*){
     ++motions;if(b!=last_buttons)++clicks;last_buttons=b;
 }
 extern "C" void zaktualizuj_kolo_myszy(int,int,uint8_t){}
+extern "C" void zaktualizuj_mysze_wzgledne_zrodlo(int32_t dx,int32_t dy,uint8_t b,const char*){
+    if(width<=0||height<=0)return;
+    px=pointer_accumulate(px,int64_t(dx),width);py=pointer_accumulate(py,int64_t(dy),height);
+    ++motions;if(b!=last_buttons)++clicks;last_buttons=b;
+}
 #ifndef REAL_KEYBOARD
 extern "C" void klawiatura_obsluz_klawisz(uint16_t,uint32_t){}
 #else

@@ -32,6 +32,21 @@ int main(){
     }
     x=grafika_pobierz_mysz_x();y=grafika_pobierz_mysz_y();hid_pointer_remove(usb);
     assert(input_get_pointer_owner()==&ps2);assert(grafika_pobierz_mysz_x()==x&&grafika_pobierz_mysz_y()==y);
+    InputDevice virtio{};virtio.kinds=INPUT_DEVICE_KIND_MOUSE;virtio.bus_type=INPUT_BUS_VIRTIO;
+    virtio.pointer_mode=INPUT_POINTER_RELATIVE;assert(input_register_device(&virtio));
+    for(auto delta:std::vector<std::pair<int32_t,int32_t>>{{3,-2},{-3,2},{INT32_MIN,INT32_MIN},{INT32_MAX,INT32_MAX},{-1,1}}){
+        zaktualizuj_mysze_pozycja_zrodlo(640,360,0,"virtio-test-setup");
+        InputEvent e[]={{INPUT_EV_REL,INPUT_REL_X,uint32_t(delta.first)},{INPUT_EV_REL,INPUT_REL_Y,uint32_t(delta.second)},{INPUT_EV_SYN,0,0}};
+        input_dispatch_events(&virtio,e,3);
+        assert(grafika_pobierz_mysz_x()==std::clamp(int64_t(640)+delta.first,int64_t(0),int64_t(1279)));
+        assert(grafika_pobierz_mysz_y()==std::clamp(int64_t(360)+delta.second,int64_t(0),int64_t(719)));
+        assert(input_pointer_is_active(&virtio) && input_pointer_is_active(&ps2));
+        const int vx=grafika_pobierz_mysz_x(),vy=grafika_pobierz_mysz_y();
+        const InputEvent physical[]={{INPUT_EV_REL,INPUT_REL_X,1},{INPUT_EV_REL,INPUT_REL_Y,uint32_t(-1)},{INPUT_EV_SYN,0,0}};
+        input_dispatch_events(&ps2,physical,3);
+        assert(grafika_pobierz_mysz_x()==std::clamp(vx+1,0,1279));
+        assert(grafika_pobierz_mysz_y()==std::clamp(vy-1,0,719));
+    }
     input_reset_all();StanBuforowEkranu last{};grafika_pobierz_stan(&last);grafika_wymien_stan({});grafika_zwolnij_stan(&last);
     assert(graphical_allocs.empty());printf("Real graphics/InputDevice/HID pointer integration: %u checks PASS\n",checks);
 }

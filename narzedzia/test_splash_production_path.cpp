@@ -11,6 +11,7 @@
 #define zaktualizuj_klawisz_fizyczny_gui unused_physical_key_mock
 #define zaktualizuj_tekst_gui unused_text_mock
 #define zaktualizuj_mysze_zrodlo unused_mouse_mock
+#define zaktualizuj_mysze_wzgledne_zrodlo unused_relative_mouse_mock
 #define zaktualizuj_mysze_pozycja_zrodlo unused_absolute_mock
 #define zaktualizuj_mysze_precyzyjna_zrodlo unused_precision_mock
 #define zaktualizuj_kolo_myszy unused_wheel_mock
@@ -27,6 +28,7 @@
 #undef zaktualizuj_klawisz_fizyczny_gui
 #undef zaktualizuj_tekst_gui
 #undef zaktualizuj_mysze_zrodlo
+#undef zaktualizuj_mysze_wzgledne_zrodlo
 #undef zaktualizuj_mysze_pozycja_zrodlo
 #undef zaktualizuj_mysze_precyzyjna_zrodlo
 #undef zaktualizuj_kolo_myszy

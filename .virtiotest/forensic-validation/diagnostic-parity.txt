@@ -1,0 +1,9 @@
+FORENSIC parity PASS: 5 production translation units identical outside one emission function; ordered queue/reference records identical with diagnostics off/on. ASan and UBSan passed.
+FORENSIC valid-small-stream reports=4857 first=(-3,-2) last=(-2,2) cursor=635,360
+FORENSIC keyboard-isolation keyboard_pending=0,0 mouse_report=3,-2
+FORENSIC exact-observed-wire decoded/report=-27496,44561 legacy-adapter=-27496,-44561 cursor=0,719
+FORENSIC boot reports actual=0 reference=0 pending=0,0 cursor=640,360 missingSYN=0 dropped=0
+FORENSIC boot reports actual=0 reference=0 pending=0,0 cursor=640,360 missingSYN=1 dropped=0
+FORENSIC boot reports actual=0 reference=0 pending=0,0 cursor=640,360 missingSYN=1 dropped=1
+FORENSIC SYN_DROPPED actual=0 reference=0 first_dx=0
+FORENSIC RESULT cases=38 checks=124704 failures=0 digest=c1a266193a85fe75

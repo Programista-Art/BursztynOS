@@ -24,9 +24,10 @@ static void timing_benchmark(){
     CHECK(!xhc.devices[2].hid_gotowy);CHECK(control_requests==controls_before);
     CHECK(synchronous<10000000ULL);CHECK(BootTiming::calls[BootTiming::PortReset]==0);
     CHECK(BootTiming::calls[BootTiming::Control]==0);CHECK(xhc.discovery_pending);
-    const uint64_t visible=mock_now; // Display is free to publish before deferred service.
+    BootTiming::first_visible_splash=true;const uint64_t visible=mock_now; // Display is free to publish before deferred service.
     for(unsigned i=0;i<xhc.max_ports;++i)usb_obsluz();
-    CHECK(xhc.devices[2].hid_gotowy);CHECK(mock_now-visible>=2000000000ULL);
+    for(unsigned call=0;call<2000&&!xhc.devices[2].hid_transfer_oczekiwany;++call){mock_now+=10000000;usb_obsluz();}
+    CHECK(xhc.devices[2].hid_transfer_oczekiwany);CHECK(mock_now-visible>=2000000000ULL);
     printf("BOOT repaired USB-before-splash=%llu ns USB-after-publication=%llu ns control-requests=%u\n",
         (unsigned long long)synchronous,(unsigned long long)(mock_now-visible),control_requests-controls_before);
     for(unsigned i=0;i<BootTiming::Count;++i)if(BootTiming::calls[i])
@@ -76,11 +77,13 @@ static void startup_tests(){unsigned start=checks;
     fixture();reset_timing();CHECK(xhci_inicjalizuj_pierwszy());clock_step=1000000;port_reset_stuck=true;
     put(xhc.operational,PORTSC_BASE,PORT_CCS|(1U<<10));
     const unsigned writes=port_writes;const uint64_t begin=mock_now;usb_obsluz();
-    CHECK(mock_now-begin>=1000000000ULL&&mock_now-begin<1100000000ULL);
-    CHECK(BootTiming::calls[BootTiming::PortReset]==1);CHECK(port_writes>writes);
-    const auto resets=BootTiming::calls[BootTiming::PortReset];
+    CHECK(mock_now-begin<10000000ULL);
+    usb_obsluz();CHECK(enumeration.step==EnumStep::ResetWait);
+    mock_now+=WAIT_NS;usb_obsluz();CHECK(enumeration.step==EnumStep::Idle);
+    CHECK(xhc.ports[1].state==PortState::Failed);CHECK(port_writes>writes);
+    const auto resets=std::count_if(port_values.begin(),port_values.end(),[](uint32_t v){return v&(PORT_PR|PORT_WPR);});
     for(unsigned i=0;i<3;++i){xhc.port_event=true;usb_obsluz();}
-    CHECK(BootTiming::calls[BootTiming::PortReset]==resets); // Own reset changes do not restart a failed connection.
+    CHECK(std::count_if(port_values.begin(),port_values.end(),[](uint32_t v){return v&(PORT_PR|PORT_WPR);})==resets); // Own reset changes do not restart a failed connection.
     clean();prior_if=true;
     boot_and_insert(true);
     const InputEvent ps2_first[]={{INPUT_EV_REL,INPUT_REL_X,uint32_t(-5)},
@@ -91,11 +94,16 @@ static void startup_tests(){unsigned start=checks;
     CHECK(input_pointer_is_active(&touchpad)&&input_pointer_is_active(&xhc.devices[2].pointer_device));
     const int saved_x=px,saved_y=py;
     put(xhc.operational,PORTSC_BASE+8*16,PORT_CCS|(1U<<10)|(1U<<17)|(1U<<9));
-    emit(uint64_t(9)<<24,0,xhci_trb::type_field(34));xhci_irq(&xhc);usb_obsluz();
-    CHECK(xhc.devices[2].hid_gotowy);CHECK(px==saved_x&&py==saved_y);
-    CHECK(input_pointer_is_active(&touchpad));CHECK(!input_pointer_is_active(&xhc.devices[2].pointer_device));
-    report_complete({0,0xff,0});CHECK(px==saved_x-1&&py==saved_y);
-    CHECK(input_pointer_is_active(&touchpad)&&input_pointer_is_active(&xhc.devices[2].pointer_device));
+    emit(uint64_t(9)<<24,0,xhci_trb::type_field(34));xhci_irq(&xhc);
+    for(unsigned call=0;call<500&&!xhc.devices[3].hid_transfer_oczekiwany;++call)usb_obsluz();
+    CHECK(xhc.devices[3].hid_transfer_oczekiwany);CHECK(!xhc.devices[2].enabled);
+    CHECK(px==saved_x&&py==saved_y);CHECK(input_pointer_is_active(&touchpad));
+    CHECK(!input_pointer_is_active(&xhc.devices[3].pointer_device));
+    auto& replacement=xhc.devices[3];static_cast<uint8_t*>(replacement.hid_raport.virtual_address)[1]=0xff;
+    emit(replacement.hid_transfer_pointer,(13U<<24)|uint32_t(replacement.hid_dma_length-3),
+        xhci_trb::type_field(32)|(3U<<24)|(uint32_t(replacement.hid_dci)<<16));
+    xhci_irq(&xhc);usb_obsluz();CHECK(px==saved_x-1&&py==saved_y);
+    CHECK(input_pointer_is_active(&touchpad)&&input_pointer_is_active(&replacement.pointer_device));
     clean();section("Deferred startup/empty ports/handoff/controller and port timeout bounds",start);
 }
 #endif

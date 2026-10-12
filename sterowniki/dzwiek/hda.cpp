@@ -3305,3 +3305,400 @@ void hda_stop() {
 
     (void)zatrzymaj_stream_wewnetrznie();
 }
+
+/* =========================================================================
+ * 24. WEWNĘTRZNE API DIAGNOSTYCZNE (hda_diag.cpp)
+ * =========================================================================
+ *
+ * Eksportowane wylacznie do warstwy diagnostycznej jadra.
+ * Nigdy nie sa wystawiane przez BWS do Ring 3.
+ */
+
+#include "hda_wewnetrzny.h"
+#include "hda_diag_format.h"
+
+bool hda_wew_wyslij_immediate(uint32_t komenda, uint32_t* odpowiedz) {
+    return wyslij_immediate(komenda, odpowiedz);
+}
+
+uint32_t hda_wew_verb12(uint8_t cad, uint8_t nid, uint16_t verb, uint8_t payload) {
+    return verb12(cad, nid, verb, payload);
+}
+
+uint32_t hda_wew_verb4(uint8_t cad, uint8_t nid, uint8_t verb, uint16_t payload) {
+    return verb4(cad, nid, verb, payload);
+}
+
+bool hda_wew_kontroler_gotowy() {
+    return hda_mmio_base != 0;
+}
+
+bool hda_wew_pobierz_stan_kontrolera(HdaWewStanKontrolera* out) {
+    if (!out || hda_mmio_base == 0) return false;
+
+    out->bus = hda_bdf.bus;
+    out->slot = hda_bdf.slot;
+    out->func = hda_bdf.func;
+
+    const uint32_t vd = pci_odczytaj_dword(
+        hda_bdf.bus, hda_bdf.slot, hda_bdf.func, PCI_OFFSET_VENDOR_DEVICE);
+    out->vendor_id = static_cast<uint16_t>(vd & 0xFFFFU);
+    out->device_id = static_cast<uint16_t>(vd >> 16);
+
+    const uint32_t cs = pci_odczytaj_dword(
+        hda_bdf.bus, hda_bdf.slot, hda_bdf.func, PCI_OFFSET_CLASS_INFO);
+    out->revision = static_cast<uint16_t>(cs & 0xFFU);
+    out->command = static_cast<uint16_t>(
+        pci_odczytaj_dword(
+            hda_bdf.bus, hda_bdf.slot, hda_bdf.func, PCI_OFFSET_COMMAND_STATUS) &
+        0xFFFFU);
+
+    out->bar0 = hda_mmio_base;
+    out->bar0_dlugosc = static_cast<uint32_t>(HDA_MMIO_ROZMIAR);
+
+    out->hda_vmin = mmio_odczytaj8(HDA_REG_VMIN);
+    out->hda_vmaj = mmio_odczytaj8(HDA_REG_VMAJ);
+    out->gcap = mmio_odczytaj16(HDA_REG_GCAP);
+    out->gctl = mmio_odczytaj32(HDA_REG_GCTL);
+    out->statests = mmio_odczytaj16(HDA_REG_STATESTS);
+    out->outpay = mmio_odczytaj16(HDA_REG_OUTPAY);
+    out->wakeen = mmio_odczytaj16(HDA_REG_WAKEEN);
+    out->intsts = mmio_odczytaj32(HDA_REG_INTSTS);
+
+    out->oss = static_cast<uint8_t>(
+        (out->gcap & HDA_GCAP_OSS_MASK) >> HDA_GCAP_OSS_SHIFT);
+    out->iss = static_cast<uint8_t>(
+        (out->gcap & HDA_GCAP_ISS_MASK) >> HDA_GCAP_ISS_SHIFT);
+    out->bss = static_cast<uint8_t>(
+        (out->gcap & HDA_GCAP_BSS_MASK) >> HDA_GCAP_BSS_SHIFT);
+    out->dma64 = static_cast<uint8_t>(
+        (out->gcap & HDA_GCAP_64OK) ? 1 : 0);
+    return true;
+}
+
+bool hda_wew_pobierz_stan_strumienia(HdaWewStanStrumienia* out) {
+    if (!out || hda_stream_base == 0) return false;
+
+    out->numer = 1;
+    out->stream_tag = HDA_STREAM_TAG;
+    out->format_raw = mmio_odczytaj16(
+        static_cast<uint32_t>(hda_stream_base - hda_mmio_base) + HDA_SD_FMT);
+    out->cbl = mmio_odczytaj32(
+        static_cast<uint32_t>(hda_stream_base - hda_mmio_base) + HDA_SD_CBL);
+    out->lvi = mmio_odczytaj16(
+        static_cast<uint32_t>(hda_stream_base - hda_mmio_base) + HDA_SD_LVI);
+    out->lpib = mmio_odczytaj32(
+        static_cast<uint32_t>(hda_stream_base - hda_mmio_base) + HDA_SD_LPIB);
+
+    uint32_t ctl = stream_odczytaj_ctl();
+    out->ctl = ctl;
+    out->run = (ctl & HDA_SD_CTL_RUN) ? 1 : 0;
+
+    const uint8_t sts = stream_odczytaj_sts();
+    out->sts = sts;
+    out->bcis = (sts & HDA_SD_STS_BCIS) ? 1 : 0;
+    out->fifoe = (sts & HDA_SD_STS_FIFOE) ? 1 : 0;
+    out->dese = (sts & HDA_SD_STS_DESE) ? 1 : 0;
+    out->fifordy = (sts & HDA_SD_STS_FIFORDY) ? 1 : 0;
+
+    /*
+     * Sanitized BDL info: nie ujawniamy uzytkowalnego adresu fizycznego.
+     * Tylko maska (dolne 12 bitow wyzerowane) i liczba wpisow.
+     */
+    out->bdl_wpisow = 0;
+    out->bdl_maska_fiz = 0;
+    out->bdl_uzywa_64 = static_cast<uint8_t>(
+        (hda_gcap & HDA_GCAP_64OK) ? 1 : 0);
+    if (hda_bdl) {
+        uint32_t n = 0;
+        for (uint32_t i = 0; i < HDA_MAKS_BDL; ++i) {
+            if (hda_bdl[i].dlugosc == 0) break;
+            ++n;
+        }
+        out->bdl_wpisow = n;
+        const uint64_t phys = reinterpret_cast<uint64_t>(hda_bdl_phys);
+        out->bdl_maska_fiz = static_cast<uint32_t>((phys >> 12) & 0xFFFFFU);
+    }
+    return true;
+}
+
+namespace {
+
+struct StanTestuWew {
+    uint8_t tryb = 0;
+    uint8_t kanaly = 3;
+    bool aktywny = false;
+    uint64_t start_walclk = 0;
+    uint32_t czas_ticks = 0;
+    uint32_t hz_start = 0;
+    uint32_t hz_koniec = 0;
+};
+
+StanTestuWew stan_test_wew;
+uint8_t sciezka_test_cad = 0;
+uint8_t sciezka_test_konw = 0;
+uint8_t sciezka_test_pin = 0;
+uint8_t sciezka_test_fizyczny = 0;
+
+int16_t probka_ton_mask(int32_t v, uint8_t kanal_bit, uint8_t kanaly) {
+    return (kanaly & kanal_bit) ? static_cast<int16_t>(v) : 0;
+}
+
+bool wypelnij_ton_kanaly(
+    uint32_t hz,
+    uint8_t kanaly,
+    uint32_t* bdl_count,
+    uint32_t* cbl_bytes
+) {
+    if (!bdl_count || !cbl_bytes) return false;
+    if (!hda_api_czestotliwosc_poprawna(hz)) return false;
+
+    const uint32_t gcd = nwd_u32(HDA_SAMPLE_RATE, hz);
+    if (gcd == 0) return false;
+    const uint32_t okres_probek = HDA_SAMPLE_RATE / gcd;
+    const uint64_t bytes64 =
+        static_cast<uint64_t>(okres_probek) * HDA_BAJTY_RAMKI_AUDIO;
+    if (bytes64 < 8U || bytes64 > HDA_MAKS_BAJTOW_OKRESU) return false;
+    const uint32_t bytes = static_cast<uint32_t>(bytes64);
+
+    uint32_t count = (bytes + HDA_DMA_BUFOR_BAJTOW - 1U) / HDA_DMA_BUFOR_BAJTOW;
+    if (count < 2U) count = 2U;
+    if (count > HDA_MAKS_BDL) return false;
+
+    wyzeruj(hda_bdl, ROZMIAR_RAMKI_4K);
+    for (uint32_t i = 0; i < count; ++i) {
+        wyzeruj(dma_wirtualny_z_fizycznego(hda_bufory_phys[i]), ROZMIAR_RAMKI_4K);
+    }
+
+    uint32_t specjalny_pierwszy = 0;
+    if (bytes <= HDA_DMA_BUFOR_BAJTOW) {
+        specjalny_pierwszy = (bytes / 2U) & ~UINT32_C(3);
+        if (specjalny_pierwszy < 4U) specjalny_pierwszy = 4U;
+        if (bytes - specjalny_pierwszy < 4U) specjalny_pierwszy = bytes - 4U;
+    }
+
+    uint32_t faza = 0;
+    uint32_t globalna = 0;
+    uint32_t pozostalo = bytes;
+
+    for (uint32_t i = 0; i < count; ++i) {
+        uint32_t len;
+        if (bytes <= HDA_DMA_BUFOR_BAJTOW) {
+            len = (i == 0) ? specjalny_pierwszy : bytes - specjalny_pierwszy;
+        } else {
+            len = pozostalo > HDA_DMA_BUFOR_BAJTOW ? HDA_DMA_BUFOR_BAJTOW : pozostalo;
+        }
+        if (len < 4U || (len & 3U) != 0) return false;
+
+        uint8_t* bufor = static_cast<uint8_t*>(
+            dma_wirtualny_z_fizycznego(hda_bufory_phys[i]));
+        const uint32_t frames = len / HDA_BAJTY_RAMKI_AUDIO;
+        for (uint32_t f = 0; f < frames; ++f) {
+            const int16_t base = probka_trojkatna(faza);
+            /* Amplituda ~50% (HDA_TEST_AMPLITUDA) zamiast 75%. */
+            const int32_t v = (static_cast<int32_t>(base) * HDA_TEST_AMPLITUDA) / 24576;
+            const int16_t l = probka_ton_mask(v, 1, kanaly);
+            const int16_t r = probka_ton_mask(v, 2, kanaly);
+            const uint32_t off = f * HDA_BAJTY_RAMKI_AUDIO;
+            const uint16_t ul = static_cast<uint16_t>(l);
+            const uint16_t ur = static_cast<uint16_t>(r);
+            bufor[off + 0] = static_cast<uint8_t>(ul & 0xFF);
+            bufor[off + 1] = static_cast<uint8_t>(ul >> 8);
+            bufor[off + 2] = static_cast<uint8_t>(ur & 0xFF);
+            bufor[off + 3] = static_cast<uint8_t>(ur >> 8);
+            faza += hz;
+            if (faza >= HDA_SAMPLE_RATE) faza -= HDA_SAMPLE_RATE;
+            ++globalna;
+        }
+        hda_bdl[i].adres = reinterpret_cast<uint64_t>(hda_bufory_phys[i]);
+        hda_bdl[i].dlugosc = len;
+        hda_bdl[i].flagi = 0;
+        if (pozostalo >= len) pozostalo -= len; else pozostalo = 0;
+    }
+
+    if (globalna != okres_probek || faza != 0) return false;
+    *bdl_count = count;
+    *cbl_bytes = bytes;
+    return true;
+}
+
+bool wypelnij_sweep(
+    uint32_t hz_start,
+    uint32_t hz_koniec,
+    uint8_t kanaly,
+    uint32_t* bdl_count,
+    uint32_t* cbl_bytes
+) {
+    /*
+     * Krótki sweep 200..4000 Hz. Generujemy liniowy narastajacy
+     * accumulator fazy (bez FP). Caly sweep miesci sie w ~1 s
+     * (limit buforow DMA).
+     */
+    if (!bdl_count || !cbl_bytes) return false;
+    if (hz_start < HDA_TEST_SWEEP_MIN_HZ) hz_start = HDA_TEST_SWEEP_MIN_HZ;
+    if (hz_koniec > HDA_TEST_SWEEP_MAX_HZ) hz_koniec = HDA_TEST_SWEEP_MAX_HZ;
+    if (hz_start > hz_koniec) return false;
+
+    uint32_t count = HDA_MAKS_BUFOROW_DMA;
+    /* Uzyjemy tylko tylu stron ile potrzeba na ~1 s. */
+    const uint32_t docelowe = HDA_SAMPLE_RATE * HDA_BAJTY_RAMKI_AUDIO;
+    uint32_t uzyte = docelowe / HDA_DMA_BUFOR_BAJTOW;
+    if (uzyte < 2U) uzyte = 2U;
+    if (uzyte > HDA_MAKS_BDL) uzyte = HDA_MAKS_BDL;
+    count = uzyte;
+    const uint32_t ramki = count * (HDA_DMA_BUFOR_BAJTOW / HDA_BAJTY_RAMKI_AUDIO);
+    const uint32_t bytes_sweep = ramki * HDA_BAJTY_RAMKI_AUDIO;
+
+    wyzeruj(hda_bdl, ROZMIAR_RAMKI_4K);
+    for (uint32_t i = 0; i < count; ++i) {
+        wyzeruj(dma_wirtualny_z_fizycznego(hda_bufory_phys[i]), ROZMIAR_RAMKI_4K);
+    }
+
+    uint32_t faza = 0;
+    uint32_t globalna = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        uint8_t* bufor = static_cast<uint8_t*>(
+            dma_wirtualny_z_fizycznego(hda_bufory_phys[i]));
+        const uint32_t frames = HDA_DMA_BUFOR_BAJTOW / HDA_BAJTY_RAMKI_AUDIO;
+        for (uint32_t f = 0; f < frames; ++f) {
+            /*
+             * Postep sweepu: interpolacja liniowa hz w Q16.
+             */
+            const uint64_t postep =
+                (static_cast<uint64_t>(globalna) << 16) / ramki;
+            const uint32_t hz = hz_start +
+                static_cast<uint32_t>(
+                    (static_cast<uint64_t>(hz_koniec - hz_start) * postep) >> 16);
+            const int16_t base = probka_trojkatna(faza);
+            const int32_t v = (static_cast<int32_t>(base) * HDA_TEST_AMPLITUDA) / 24576;
+            const int16_t l = probka_ton_mask(v, 1, kanaly);
+            const int16_t r = probka_ton_mask(v, 2, kanaly);
+            const uint32_t off = f * HDA_BAJTY_RAMKI_AUDIO;
+            const uint16_t ul = static_cast<uint16_t>(l);
+            const uint16_t ur = static_cast<uint16_t>(r);
+            bufor[off + 0] = static_cast<uint8_t>(ul & 0xFF);
+            bufor[off + 1] = static_cast<uint8_t>(ul >> 8);
+            bufor[off + 2] = static_cast<uint8_t>(ur & 0xFF);
+            bufor[off + 3] = static_cast<uint8_t>(ur >> 8);
+            faza += hz;
+            if (faza >= HDA_SAMPLE_RATE) faza -= HDA_SAMPLE_RATE;
+            ++globalna;
+        }
+        hda_bdl[i].adres = reinterpret_cast<uint64_t>(hda_bufory_phys[i]);
+        hda_bdl[i].dlugosc = HDA_DMA_BUFOR_BAJTOW;
+        hda_bdl[i].flagi = 0;
+    }
+
+    *bdl_count = count;
+    *cbl_bytes = bytes_sweep;
+    return true;
+}
+
+} // namespace
+
+void hda_wew_pobierz_sciezke_testu(HdaWewSciezkaTestu* out) {
+    if (!out) return;
+    /*
+     * Obecna implementacja zna stala sciezke QEMU (NID DAC/PIN).
+     * Dla nieznanego kodeka nie zgadujemy routingu fizycznego.
+     */
+    if (hda_codec_addr != 0xFFU && hda_gotowy) {
+        out->cad = hda_codec_addr;
+        out->konwerter_nid = QEMU_NID_DAC;
+        out->pin_nid = QEMU_NID_LINE_OUT;
+        out->routing_fizyczny = 0;
+    } else {
+        out->cad = hda_codec_addr != 0xFFU ? hda_codec_addr : 0;
+        out->konwerter_nid = 0;
+        out->pin_nid = 0;
+        out->routing_fizyczny = 0;
+    }
+    sciezka_test_cad = out->cad;
+    sciezka_test_konw = out->konwerter_nid;
+    sciezka_test_pin = out->pin_nid;
+    sciezka_test_fizyczny = out->routing_fizyczny;
+}
+
+bool hda_wew_test_start(
+    uint32_t tryb,
+    uint32_t hz,
+    uint32_t czas_ms,
+    uint8_t kanaly
+) {
+    if (!__atomic_load_n(&hda_gotowy, __ATOMIC_ACQUIRE)) return false;
+    if (kanaly == 0) return false;
+
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return false;
+
+    (void)zatrzymaj_stream_wewnetrznie();
+
+    uint32_t bdl_count = 0;
+    uint32_t cbl_bytes = 0;
+
+    if (tryb == HDA_TEST_SWEEP) {
+        if (!wypelnij_sweep(
+                HDA_TEST_SWEEP_MIN_HZ, HDA_TEST_SWEEP_MAX_HZ,
+                kanaly, &bdl_count, &cbl_bytes)) {
+            return false;
+        }
+    } else {
+        if (!wypelnij_ton_kanaly(hz, kanaly, &bdl_count, &cbl_bytes)) {
+            return false;
+        }
+    }
+
+    if (!konfiguruj_kodek_qemu()) return false;
+    if (!zaprogramuj_stream(bdl_count, cbl_bytes)) return false;
+    if (!uruchom_stream()) {
+        (void)zatrzymaj_stream_wewnetrznie();
+        return false;
+    }
+
+    stan_test_wew.tryb = static_cast<uint8_t>(tryb);
+    stan_test_wew.kanaly = kanaly;
+    stan_test_wew.aktywny = true;
+    stan_test_wew.hz_start = hz;
+    stan_test_wew.hz_koniec =
+        (tryb == HDA_TEST_SWEEP) ? HDA_TEST_SWEEP_MAX_HZ : hz;
+    stan_test_wew.czas_ticks =
+        static_cast<uint32_t>(
+            (static_cast<uint64_t>(czas_ms) * HDA_WALCLK_TICKS_PER_MS));
+    if (stan_test_wew.czas_ticks == 0) stan_test_wew.czas_ticks = 1;
+    stan_test_wew.start_walclk = mmio_odczytaj32(HDA_REG_WALCLK);
+
+    return true;
+}
+
+void hda_wew_test_stop() {
+    if (hda_mmio_base == 0) return;
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return;
+    (void)zatrzymaj_stream_wewnetrznie();
+    stan_test_wew.aktywny = false;
+    stan_test_wew.tryb = 0;
+}
+
+bool hda_wew_test_tick(uint64_t) {
+    if (!stan_test_wew.aktywny) return false;
+    if (hda_mmio_base == 0) {
+        stan_test_wew.aktywny = false;
+        return false;
+    }
+    /*
+     * Auto-stop po czas_ms mierzone WALCLK (jak istniejacy hda_test_ton).
+     * Kontrola bledow streamu przy kazdym tick.
+     */
+    const uint8_t sts = stream_odczytaj_sts();
+    if ((sts & (HDA_SD_STS_DESE | HDA_SD_STS_FIFOE)) != 0) {
+        hda_wew_test_stop();
+        return false;
+    }
+    const uint32_t teraz = mmio_odczytaj32(HDA_REG_WALCLK);
+    const uint32_t start = static_cast<uint32_t>(stan_test_wew.start_walclk);
+    if (static_cast<uint32_t>(teraz - start) >= stan_test_wew.czas_ticks) {
+        hda_wew_test_stop();
+        return false;
+    }
+    return true;
+}

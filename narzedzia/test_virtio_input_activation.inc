@@ -95,7 +95,9 @@ void test_input_synchronous_driver_ok_activation() {
         TEST_ASSERT(hits==1 && delivered==1,"Inside-store DMA and pending IRQ actually exercised");
         TEST_ASSERT(kbd.bar==keyboard,"Activation never changes keyboard BAR");
         TEST_ASSERT(virtio_input_poll_events(&tab.drv,64)==0,"Whole report drained exactly once by late activation");
-        TEST_ASSERT(tab.drv.total_events_processed==3 && tab.drv.input_dev.abs_val_x==100 && tab.drv.input_dev.abs_val_y==200,"Report dispatched only after registration");
+        TEST_ASSERT(tab.drv.total_events_processed==3 && tab.drv.input_dev.abs_val_x==0 && tab.drv.input_dev.abs_val_y==0 && !input_pointer_is_active(&tab.drv.input_dev),"Cold activation report consumed without cursor replay or proof");
+        init_emit_report(tab);
+        TEST_ASSERT(virtio_input_poll_events(&tab.drv,64)==3 && tab.drv.input_dev.abs_val_x==100 && tab.drv.input_dev.abs_val_y==200 && input_pointer_is_active(&tab.drv.input_dev),"Next fresh complete report is admitted and proves liveness");
         for(unsigned i=0x200;i<4096;++i) TEST_ASSERT(static_cast<uint8_t*>(tab.drv.dma_virt)[i]==0xD3,"Eight-byte DMA bounds");
 #if BURSZTYNDIAGVIRTIOINPUTINIT
         TEST_ASSERT(input_activation_trace.phase==2 && !input_activation_trace.armed,"Returned instruction and diagnostic window closed");

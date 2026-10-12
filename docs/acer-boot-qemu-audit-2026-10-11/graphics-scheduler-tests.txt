@@ -1,0 +1,26 @@
+Real graphics/InputDevice/HID pointer integration: 40 checks PASS
+Compositor lifecycle/scene: 74293/74293 PASS
+Popup compositor background restoration: 73816/73816 PASS
+Production compositor host PASS: modeset dirty geometry, Shell-equivalent layer preserves cursor/screen/generation, coalescing and theme/decor/full scene transactions
+Cursor diagnostics host PASS: default fast frames silent; anomaly timestamps, dirty metrics and coalescing logged
+Cursor host PASS: clipping, union, 100-position coalescing, interleaved producer, clean background, scene/theme/decor redraw, final-only presents and no stale pixels
+Splash exact timing / nonempty crossfades / stalls / diagnostics: 2185/2185 PASS
+First splash frame ordering / pixels / delayed render / resolution / DPI / generations: 101/101 PASS
+Message bounds 100%: second=(469,388)-(808,417), third=(512,388)-(765,417), shared baseline=411
+Message bounds 125%: second=(428,395)-(848,432), third=(481,395)-(794,432), shared baseline=425
+Production splash snapshots/baseline/reusable backing/absolute boundaries: 342/342 PASS
+Production init/native/compositor/GPU scanout/startup modeset: 722/722 PASS
+=== TEST WSPOLBIEZNOSCI WORKSPACE OTA/STORAGE BURSZTYN OS ===
+PASS blokady_brak_odwrotnych_krawedzi
+PASS irq_bez_blokad
+PASS brak_spania_pod_blokada
+PASS psf_brak_rekurencji_publicznej
+PASS ahci_try_lock_bez_petli
+PASS ahci_sprawdzenie_aktywnosci
+PASS workspace_nie_ucieka
+PASS diagnostyka_owner
+PASS host_kompilacja
+PASS host_wspolbieznosc
+==============================================================
+Zdane: 10, Zlane: 0
+Wszystkie testy wspolbieznosci zakonczone sukcesem.

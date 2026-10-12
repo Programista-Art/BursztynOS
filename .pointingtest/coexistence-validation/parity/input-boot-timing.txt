@@ -1,0 +1,52 @@
+GUI absolute 400 200 1 400 200
+STATE touchpad first report cursor=400,200 buttons=1 touch=1,2,1,1 usb=0,0,0 preferred=100 last=100
+STATE USB registration cursor=400,200 buttons=1 touch=1,2,1,1 usb=1,0,0 preferred=100 last=100
+STATE USB stationary proof cursor=400,200 buttons=1 touch=1,2,1,1 usb=1,2,0 preferred=200 last=100
+GUI relative 0 0 0 400 200
+GUI relative -20 -30 0 380 230
+STATE inactive contact cannot overwrite cursor=380,230 buttons=0 touch=1,2,0,0 usb=1,2,0 preferred=200 last=200
+GUI absolute 1000 600 1 1000 600
+GUI relative 10 15 1 1010 585
+GUI absolute 500 250 1 500 250
+GUI relative -7 9 1 493 241
+STATE alternating sources cursor=493,241 buttons=1 touch=1,2,1,1 usb=1,2,0 preferred=200 last=200
+GUI relative 0 0 0 493 241
+GUI absolute 500 250 1 500 250
+GUI relative -7 9 1 493 241
+GUI relative 1 -1 1 494 242
+GUI relative 0 0 0 494 242
+GUI relative 0 0 2 494 242
+GUI absolute 10 10 3 10 10
+GUI relative 0 0 1 10 10
+GUI absolute 600 300 1 600 300
+STATE USB removed cursor=600,300 buttons=1 touch=1,2,1,1 usb=0,0,0 preferred=100 last=100
+GUI relative 0 0 0 600 300
+GUI relative -127 127 0 473 173
+STATE USB reconnected cursor=473,173 buttons=0 touch=1,2,0,0 usb=1,2,0 preferred=200 last=200
+GUI relative -127 127 0 346 46
+GUI relative -127 127 0 219 0
+GUI relative -127 127 0 92 0
+GUI relative -127 0 0 0 0
+GUI absolute 1279 719 1 1279 719
+GUI relative 127 -127 1 1279 719
+STATE clamped edges cursor=1279,719 buttons=1 touch=1,2,1,1 usb=1,2,0 preferred=200 last=200
+GUI absolute 300 200 1 300 200
+GUI relative -10 20 1 290 180
+STATE deferred touchpad then USB cursor=290,180 buttons=1 touch=1,2,1,1 usb=1,2,0 preferred=200 last=200
+GUI relative -10 20 0 630 340
+GUI absolute 300 200 1 300 200
+STATE deferred USB then touchpad cursor=300,200 buttons=1 touch=1,2,1,1 usb=1,2,0 preferred=200 last=100
+GUI absolute 500 300 1 500 300
+STATE cancel disconnected pending reports cursor=500,300 buttons=1 touch=1,2,1,1 usb=1,0,0 preferred=100 last=100
+GUI absolute 700 400 0 700 400
+GUI relative 20 -10 0 720 410
+STATE stationary contactless tablet cursor=720,410 buttons=0 touch=1,2,0,0 usb=1,2,0 preferred=200 last=200
+GUI relative -17 -29 0 623 389
+GUI relative 2147483647 -2147483647 0 1279 719
+GUI relative -2147483647 2147483647 0 0 0
+GUI relative -17 -29 0 623 389
+GUI relative 2147483647 -2147483647 0 1279 719
+GUI relative -2147483648 2147483648 0 0 0
+GUI absolute 600 168 1 600 168
+STATE descriptor Tip Switch cursor=600,168 buttons=1 touch=1,2,1,1 usb=0,0,0 preferred=100 last=100
+Input coexistence: 132 checks PASS

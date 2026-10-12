@@ -7,9 +7,12 @@
  */
 
 #include "virtio_input.h"
+#include "virtio_input_qemu_diag.h"
+#include "virtio_input_forensic.h"
 #include "virtio_pci.h"
 #include "virtqueue.h"
 #include "input_device.h"
+#include "pointer_coordinates.h"
 #include "idt.h"
 #include "apic.h"
 #include "virtio_input_activation_diag.h"
@@ -21,7 +24,11 @@
 extern bool host_dma_alloc(size_t size, size_t alignment, void** vaddr, uint64_t* paddr, size_t* pages);
 extern void host_dma_free(void* vaddr, uint64_t paddr, size_t pages);
 extern void mock_virtio_input_on_config_select(VirtioPciDevice* dev, uint8_t select, uint8_t subsel);
-static void input_klog(const char* msg) { (void)msg; }
+extern void host_virtio_input_log(const char*) __attribute__((weak));
+extern uint64_t host_virtio_input_time_ns() __attribute__((weak));
+extern uint64_t host_virtio_input_geometry_generation() __attribute__((weak));
+extern bool host_virtio_input_splash_active() __attribute__((weak));
+static void input_klog(const char* msg) { if(host_virtio_input_log)host_virtio_input_log(msg); }
 
 static bool input_dma_alloc(size_t size, size_t alignment, void** vaddr, uint64_t* paddr, size_t* pages) {
     return host_dma_alloc(size, alignment, vaddr, paddr, pages);
@@ -35,6 +42,8 @@ static void input_dma_free(void* vaddr, uint64_t paddr, size_t pages) {
 #include "sterowniki/dma.h"
 #include "grafika.h"
 #include "pamiec.h"
+#include "sterowniki/czas/hpet.h"
+#include "ekran_powitalny_api.h"
 extern "C" void* memset(void* s, int c, size_t n);
 extern "C" void* memcpy(void* dest, const void* src, size_t n);
 extern "C" size_t strlen(const char* s);
@@ -60,7 +69,47 @@ static void input_dma_free(void* vaddr, uint64_t paddr, size_t pages) {
 }
 #endif
 
+extern "C" int grafika_pobierz_mysz_x();
+extern "C" int grafika_pobierz_mysz_y();
+int grafika_pobierz_szerokosc();
+int grafika_pobierz_wysokosc();
+namespace VirtioInputForensic { void emit(const char* s) { input_klog(s); } }
+
 namespace {
+static uint64_t input_observed_ns() {
+#ifdef BURSZTYN_VIRTIO_HOST_TEST
+    return host_virtio_input_time_ns ? host_virtio_input_time_ns() : 0;
+#else
+    return hpet_dostepny() ? czas_monotoniczny_ns() : 0;
+#endif
+}
+static uint64_t input_geometry_generation() {
+#ifdef BURSZTYN_VIRTIO_HOST_TEST
+    return host_virtio_input_geometry_generation ? host_virtio_input_geometry_generation() : 0;
+#else
+    return grafika_generacja_ekranu();
+#endif
+}
+static bool input_splash_active() {
+#ifdef BURSZTYN_VIRTIO_HOST_TEST
+    return host_virtio_input_splash_active && host_virtio_input_splash_active();
+#else
+    return powitanie_aktywne();
+#endif
+}
+// x86 coherent WB RAM: acquire orders device's used.idx publication before
+// ring/payload reads; volatile byte loads below force exactly eight DMA reads.
+static inline void input_dma_acquire() { asm volatile("lfence" ::: "memory"); }
+static uint16_t input_wire16(const uint8_t* b) { return uint16_t(b[0])|(uint16_t(b[1])<<8); }
+static uint32_t input_wire32(const uint8_t* b) {
+    return uint32_t(b[0])|(uint32_t(b[1])<<8)|(uint32_t(b[2])<<16)|(uint32_t(b[3])<<24);
+}
+static uint32_t qemu_diag_bdf(const VirtioPciDevice* d){return (uint32_t(d->bus)<<16)|(uint32_t(d->slot)<<8)|d->func;}
+static void qemu_diag(VirtioPciDevice* d,const char* label,uint64_t a=0,uint64_t b=0,uint64_t c=0){
+    VirtioInputQemuDiag::record(qemu_diag_bdf(d),label,a,b,c);
+    VirtioInputForensic::transition(qemu_diag_bdf(d),input_observed_ns(),label,a,b);
+}
+
 
 #if BURSZTYNDIAGVIRTIOINPUTINIT && !defined(BURSZTYN_VIRTIO_HOST_TEST)
 bool input_activation_snapshot(VirtioInputDriver* drv) {
@@ -131,6 +180,11 @@ bool input_activation_snapshot(VirtioInputDriver* drv) {
 static VirtioInputDriver s_drivers[VIRTIO_INPUT_MAX_DRIVERS] = {};
 static size_t s_driver_count = 0;
 static bool s_late_activation_allowed = false;
+#ifdef BURSZTYN_VIRTIO_HOST_TEST
+static bool s_desktop_ready = true; // Existing fixtures model an interactive display.
+#else
+static bool s_desktop_ready = false;
+#endif
 
 static void virtio_input_msix_handler(void* context) {
     auto* drv = static_cast<VirtioInputDriver*>(context);
@@ -199,6 +253,8 @@ static void input_queue_diagnostic(VirtioInputDriver* drv, const char* reason,
 static void input_fail_closed(VirtioInputDriver* drv, const char* reason, int head = -1, size_t idx = SIZE_MAX) {
     if (!drv->has_error) input_queue_diagnostic(drv, reason, head, idx, nullptr);
     drv->has_error = true;
+    if(drv->dev)VirtioInputForensic::transition(qemu_diag_bdf(drv->dev),input_observed_ns(),reason,uint32_t(head),idx);
+    input_discard_pointer_report(&drv->input_dev);
     __atomic_store_n(&drv->init_state, VirtioInputInitState::FAILED, __ATOMIC_RELEASE);
     __atomic_store_n(&drv->initialized, false, __ATOMIC_RELEASE);
     if (drv->eventq) { drv->eventq->avail->flags = VRING_AVAIL_F_NO_INTERRUPT; __atomic_thread_fence(__ATOMIC_SEQ_CST); }
@@ -247,6 +303,7 @@ static bool input_init_failure(VirtioInputDriver* drv, const char* reason = "ini
 static void input_init_state(VirtioInputDriver* drv, VirtioInputInitState state) {
     __atomic_store_n(&drv->init_state, state, __ATOMIC_RELEASE);
     virtio_pci_input_init_trace(drv->dev, "init state", static_cast<uint8_t>(state));
+    VirtioInputForensic::transition(qemu_diag_bdf(drv->dev),input_observed_ns(),"lifecycle",uint8_t(state));
 }
 
 extern "C" {
@@ -264,6 +321,7 @@ bool virtio_input_query_config(VirtioPciDevice* dev, uint8_t select, uint8_t sub
         ~ConfigGuard() { __atomic_store_n(lock, 0U, __ATOMIC_RELEASE); }
     } guard{&dev->input_config_lock};
 
+    const uint8_t diagnostic_generation_before=virtio_pci_get_config_generation(dev);
     virtio_pci_input_init_trace(dev, "config select store begin", select);
     virtio_pci_write_device_config8(dev, 0, select);
     virtio_pci_input_init_trace(dev, "config select store done", select);
@@ -301,6 +359,16 @@ bool virtio_input_query_config(VirtioPciDevice* dev, uint8_t select, uint8_t sub
     virtio_pci_input_init_trace(dev, "config payload read done", copy_len);
     if (select == VIRTIO_INPUT_CFG_EV_BITS && out_data && copy_len)
         virtio_pci_input_init_trace(dev, "event bitmap first byte", *static_cast<uint8_t*>(out_data));
+    const uint8_t diagnostic_generation_after=virtio_pci_get_config_generation(dev);
+    // Only the initial name/capability reads are recorded, never stress queries.
+    if(dev->input_init_active && select==VIRTIO_INPUT_CFG_EV_BITS && out_data){
+        const auto* bits=static_cast<const uint8_t*>(out_data);uint64_t low=0;
+        for(unsigned i=0;i<copy_len&&i<8;++i)low|=uint64_t(bits[i])<<(i*8);
+        qemu_diag(dev,"[VINPUT EVBITS] type/low64/buttons272-279",subsel,low,copy_len>34?bits[34]:0);
+        if(subsel==INPUT_EV_REL)qemu_diag(dev,"[VINPUT RELBITS] size/low64",copy_len,low);
+        if(subsel==INPUT_EV_KEY)qemu_diag(dev,"[VINPUT KEYBITS] buttons272-279/touch330",copy_len>34?bits[34]:0,copy_len>41?bits[41]:0);
+    }
+    if(dev->input_init_active)qemu_diag(dev,"[VINPUT config generations] select-subsel/before/after",(uint32_t(select)<<8)|subsel,diagnostic_generation_before,diagnostic_generation_after);
     if (out_size) *out_size = copy_len;
     return true;
 }
@@ -314,7 +382,6 @@ static bool virtio_input_classify_device(VirtioInputDriver* drv) {
     drv->input_dev.kinds = INPUT_DEVICE_KIND_UNKNOWN;
 
     // 1. Analiza bitmapy klawiszy i przyciskow (subsel = INPUT_EV_KEY)
-    bool has_mouse_btn = false;
     bool has_kbd_keys = false;
 
     uint8_t key_bits[128]{};
@@ -331,19 +398,8 @@ static bool virtio_input_classify_device(VirtioInputDriver* drv) {
             }
         }
 
-        // Sprawdzenie przyciskow myszy (BTN_LEFT = 0x110 = 272 = bajt 34 bit 0)
-        if (key_bits_size > 34) {
-            if ((key_bits[34] & 0x07U) != 0) { // BTN_LEFT, BTN_RIGHT, BTN_MIDDLE
-                has_mouse_btn = true;
-            }
-        }
         // BTN_TOUCH = 0x14A = 330 = bajt 41 bit 2
         drv->input_dev.abs_contact_required = key_bits_size > 41 && (key_bits[41] & (1U << 2));
-        if (key_bits_size > 41) {
-            if ((key_bits[41] & (1U << 2)) != 0) {
-                has_mouse_btn = true;
-            }
-        }
     }
 
     // 2. Analiza osi wzglednych (subsel = INPUT_EV_REL)
@@ -414,9 +470,7 @@ static bool virtio_input_classify_device(VirtioInputDriver* drv) {
     if (has_kbd_keys) {
         drv->has_keyboard = true;
     }
-    if (has_mouse_btn && !drv->has_rel_mouse && !drv->has_abs_tablet) {
-        drv->has_rel_mouse = true;
-    }
+    // Buttons alone do not establish REL_X/REL_Y capability.
 
     // Ustawienie flag klasyfikacji urzadzenia
     if (drv->has_keyboard)   drv->input_dev.kinds |= INPUT_DEVICE_KIND_KEYBOARD;
@@ -440,6 +494,8 @@ bool virtio_input_prepare(VirtioInputDriver* drv, VirtioPciDevice* dev) {
 #endif
     drv->dev = dev;
     drv->irq_vector = -1;
+    qemu_diag(dev,"[VINPUT PCI] vendor/device/virtio-id",dev->pci_vendor_id,dev->pci_device_id,dev->virtio_id);
+    qemu_diag(dev,"[VINPUT transport] modern/transitional",dev->common_cfg!=nullptr,dev->pci_device_id<0x1040);
     dev->input_init_active = true;
     dev->input_activation_allowed = false;
     dev->input_init_stage = 0;
@@ -452,11 +508,13 @@ bool virtio_input_prepare(VirtioInputDriver* drv, VirtioPciDevice* dev) {
     virtio_pci_input_init_trace(dev, "reset begin");
     if (!virtio_pci_reset(dev)) return input_init_failure(drv, "reset status never became zero");
     virtio_pci_input_init_trace(dev, "reset done");
+    qemu_diag(dev,"[VINPUT status] reset",0);
 
     // 2. Ustawienie statusu ACKNOWLEDGE i DRIVER
     virtio_pci_set_status(dev, VIRTIO_STATUS_ACKNOWLEDGE);
     virtio_pci_set_status(dev, VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER);
     input_init_state(drv, VirtioInputInitState::NEGOTIATING);
+    qemu_diag(dev,"[VINPUT status] ACK/DRIVER",1,3);
 
     // 3. Negocjacja cech (wymog standardu VirtIO 1.x Modern)
     if (!virtio_pci_negotiate_features(dev, 0)) {
@@ -464,6 +522,7 @@ bool virtio_input_prepare(VirtioInputDriver* drv, VirtioPciDevice* dev) {
         return input_init_failure(drv, "feature negotiation rejected");
     }
 
+    qemu_diag(dev,"[VINPUT features] offered/accepted/FEATURES_OK",dev->device_features,dev->driver_features,virtio_pci_get_status(dev));
     // 4. Odpytanie przestrzeni konfiguracji o nazwe, serial, devids i mozliwosci
     uint8_t name_sz = 0;
     if (virtio_input_query_config(dev, VIRTIO_INPUT_CFG_ID_NAME, 0, drv->name, &name_sz, sizeof(drv->name) - 1)) {
@@ -472,6 +531,7 @@ bool virtio_input_prepare(VirtioInputDriver* drv, VirtioPciDevice* dev) {
         drv->name[0] = 'v'; drv->name[1] = 'i'; drv->name[2] = 'n'; drv->name[3] = 'p'; drv->name[4] = '\0';
     }
 
+    VirtioInputQemuDiag::name(qemu_diag_bdf(dev),drv->name);
     uint8_t serial_sz = 0;
     if (virtio_input_query_config(dev, VIRTIO_INPUT_CFG_ID_SERIAL, 0, drv->serial, &serial_sz, sizeof(drv->serial) - 1)) {
         drv->serial[serial_sz] = '\0';
@@ -489,16 +549,23 @@ bool virtio_input_prepare(VirtioInputDriver* drv, VirtioPciDevice* dev) {
     // Klasyfikacja urzadzenia z bitmapy EV_BITS
     virtio_pci_input_init_trace(dev, "role detection begin");
     if (!virtio_input_classify_device(drv)) return input_init_failure(drv, "unsupported input capabilities or invalid ABSINFO");
-    drv->input_dev.pointer_mode = drv->has_abs_tablet ?
-        (drv->has_rel_mouse ? INPUT_POINTER_RELATIVE_AND_ABSOLUTE : INPUT_POINTER_ABSOLUTE) :
-        INPUT_POINTER_RELATIVE;
+    // Pointer mode follows the advertised axes, independently for each BDF.
+    if (drv->has_abs_tablet)
+        drv->input_dev.pointer_mode = drv->has_rel_mouse ?
+            INPUT_POINTER_RELATIVE_AND_ABSOLUTE : INPUT_POINTER_ABSOLUTE;
+    else if (drv->has_rel_mouse)
+        drv->input_dev.pointer_mode = INPUT_POINTER_RELATIVE;
+    else
+        drv->input_dev.pointer_mode = INPUT_POINTER_UNSPECIFIED;
     virtio_pci_input_init_trace(dev, "role detection done/kinds", drv->input_dev.kinds);
 
+    qemu_diag(dev,"[VINPUT classification] keyboard/relative/absolute",drv->has_keyboard,drv->has_rel_mouse,drv->has_abs_tablet);
     // 5. Utworzenie Split VirtQueue 0 (eventq)
     input_init_state(drv, VirtioInputInitState::QUEUE_SETUP);
     virtio_pci_input_init_trace(dev, "queue count read begin");
     const uint16_t queue_count = virtio_pci_get_num_queues(dev);
     virtio_pci_input_init_trace(dev, "queue count read done", queue_count);
+    qemu_diag(dev,"[VINPUT queue count]",queue_count);
     if (queue_count < 2) return input_init_failure(drv, "missing input queues");
     // statusq (1) is unused: this driver sends no LED/status feedback.
     virtio_pci_input_init_trace(dev, "eventq create begin");
@@ -605,6 +672,12 @@ bool virtio_input_prepare(VirtioInputDriver* drv, VirtioPciDevice* dev) {
     const uint8_t prepared_status = virtio_pci_get_status(dev);
     if (prepared_status != (VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_FEATURES_OK))
         return input_init_failure(drv, "PREPARED status must remain 0x0B");
+    qemu_diag(dev,"[VINPUT queue ready] selected/size/posted",drv->eventq->queue_index,drv->eventq->queue_size,drv->eventq->avail->idx);
+    const auto* q=drv->eventq;
+    const uint64_t base=q->dma_physical;const auto virt=reinterpret_cast<uintptr_t>(q->dma_virtual);
+    qemu_diag(dev,"[VINPUT ring physical] desc/avail/used",base+reinterpret_cast<uintptr_t>(q->desc)-virt,base+reinterpret_cast<uintptr_t>(q->avail)-virt,base+reinterpret_cast<uintptr_t>(q->used)-virt);
+    qemu_diag(dev,"[VINPUT interrupts] MSIX/MSI/vector",drv->use_msix,dev->msi_enabled,drv->irq_vector);
+    qemu_diag(dev,"[VINPUT status] PREPARED",prepared_status);
     input_init_state(drv, VirtioInputInitState::PREPARED);
     virtio_pci_input_init_trace(dev, "PREPARED/status (no DRIVER_OK)", prepared_status);
     return true;
@@ -652,9 +725,11 @@ bool virtio_input_activate(VirtioInputDriver* drv) {
     dev->input_activation_allowed = true;
     virtio_pci_set_status(dev, static_cast<uint8_t>(cur_st | VIRTIO_STATUS_DRIVER_OK));
     dev->input_activation_allowed = false;
+    qemu_diag(dev,"[VINPUT DRIVER_OK store]",cur_st|VIRTIO_STATUS_DRIVER_OK);
     virtio_pci_input_init_trace(dev, "DRIVER_OK readback begin");
     const uint8_t ready_status = virtio_pci_get_status(dev);
     virtio_pci_input_init_trace(dev, "DRIVER_OK readback done", ready_status);
+    qemu_diag(dev,"[VINPUT DRIVER_OK readback]",ready_status);
     if ((ready_status & VIRTIO_STATUS_DRIVER_OK) == 0 ||
         (ready_status & (VIRTIO_STATUS_FAILED | VIRTIO_STATUS_DEVICE_NEEDS_RESET)) != 0) {
         input_klog("[VIRTIO-INPUT-ERR] Blad ustawienia DRIVER_OK");
@@ -667,10 +742,15 @@ bool virtio_input_activate(VirtioInputDriver* drv) {
     drv->input_dev.device_id = drv->dev ? ((static_cast<uint32_t>(drv->dev->bus) << 16) | (static_cast<uint32_t>(drv->dev->slot) << 8) | drv->dev->func) : 1;
     drv->input_dev.driver_data = drv;
     drv->input_dev.poll_fn = virtio_input_device_poll;
+    asm volatile("" ::: "memory");
+    drv->registration_used=drv->eventq->used->idx;
+    input_dma_acquire();
+    drv->pre_registration_events=uint16_t(drv->registration_used-drv->eventq->last_used_idx);
     virtio_pci_input_init_trace(dev, "InputDevice register begin");
     if (!input_register_device(&drv->input_dev)) return input_init_failure(drv, "input registry rejected device");
     virtio_pci_input_init_trace(dev, "InputDevice register done");
     input_init_state(drv, VirtioInputInitState::REGISTERED);
+    qemu_diag(dev,"[VINPUT registered] state/active",unsigned(drv->input_dev.pointer_state),input_pointer_is_active(&drv->input_dev));
     __atomic_store_n(&drv->initialized, true, __ATOMIC_RELEASE);
     virtio_pci_input_init_trace(dev, "InputDevice readiness published", 1);
     virtio_pci_input_init_trace(dev, "MSI-X unmask begin", drv->use_msix);
@@ -720,11 +800,31 @@ size_t virtio_input_poll_events(VirtioInputDriver* drv, size_t max_events) {
     q->avail->flags = VRING_AVAIL_F_NO_INTERRUPT;
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
-    // Snapshot the device's publication, not a moving completion target. The
-    // modulo distance is bounded by the number of posted single descriptors.
+    // Observe publication, THEN acquire the ring entries and writable buffers.
     const uint16_t published = q->used->idx;
-    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    input_dma_acquire();
     const uint16_t pending = uint16_t(published - q->last_used_idx);
+    const auto bdf=qemu_diag_bdf(drv->dev);
+    if(__atomic_load_n(&drv->irq_count,__ATOMIC_RELAXED))VirtioInputQemuDiag::once(bdf,0,"[VINPUT first IRQ]",drv->irq_count);
+    if(pending)VirtioInputQemuDiag::once(bdf,1,"[VINPUT first used ring change]",published,q->last_used_idx);
+
+    const int width=grafika_pobierz_szerokosc(),height=grafika_pobierz_wysokosc();
+    const auto generation=input_geometry_generation();
+    const bool geometry=input_pointer_geometry_ready();
+    const bool interactive=geometry && __atomic_load_n(&s_desktop_ready,__ATOMIC_ACQUIRE) && !input_splash_active();
+    if(interactive!=drv->pointer_interactive || width!=drv->pointer_width ||
+       height!=drv->pointer_height || generation!=drv->pointer_generation) {
+        // No event timestamp exists on the wire. The first consumer turn at a
+        // display boundary snapshots a precise used-index cutoff. Completions
+        // already published at that cutoff are old, including split reports.
+        if(drv->input_dev.report_valid)drv->discard_until_syn=true;
+        input_discard_pointer_report(&drv->input_dev);
+        drv->stale_until_used=published;drv->stale_completions=pending!=0;
+        VirtioInputForensic::transition(bdf,input_observed_ns(),"pointer admission boundary",interactive,published);
+        drv->pointer_interactive=interactive;drv->pointer_width=width;drv->pointer_height=height;
+        drv->pointer_generation=generation;
+    }
+
     uint64_t seen_buffers = 0;
     bool valid = pending <= drv->num_event_bufs && pending <= q->outstanding_heads;
     if (!valid) input_fail_closed(drv, "used index exceeds posted capacity");
@@ -736,11 +836,18 @@ size_t virtio_input_poll_events(VirtioInputDriver* drv, size_t max_events) {
             !q->desc_state[id].is_chain_head || q->desc_state[id].chain_len != 1) {
             input_fail_closed(drv, "invalid used descriptor", int(id)); valid = false; break;
         }
-        const auto idx = reinterpret_cast<uintptr_t>(q->desc_state[id].cookie);
+        const auto& state=q->desc_state[id];
+        const auto idx = reinterpret_cast<uintptr_t>(state.cookie);
+        // Larger buffers are legal. This driver posts eight bytes, so a
+        // completion larger than that offered capacity is malformed, not an
+        // input-event ABI extension. Only copy the required eight bytes.
         if (idx >= drv->num_event_bufs || drv->buffer_head[idx] != id ||
             drv->buffer_state[idx] != VirtioInputBufferState::POSTED_TO_DEVICE ||
-            (seen_buffers & (uint64_t(1) << idx)) || len != sizeof(VirtioInputEvent)) {
-            input_fail_closed(drv, "duplicate ownership or invalid event length", int(id), idx);
+            (seen_buffers & (uint64_t(1) << idx)) || len < sizeof(VirtioInputEvent) ||
+            len>state.buffer_len || state.buffer_len<sizeof(VirtioInputEvent) ||
+            state.buffer_addr!=drv->dma_phys+idx*sizeof(VirtioInputEvent) ||
+            len>(drv->num_event_bufs-idx)*sizeof(VirtioInputEvent)) {
+            input_fail_closed(drv, "duplicate ownership or invalid event length/address", int(id), idx);
             valid = false; break;
         }
         seen_buffers |= uint64_t(1) << idx;
@@ -748,26 +855,27 @@ size_t virtio_input_poll_events(VirtioInputDriver* drv, size_t max_events) {
 
     const size_t budget = max_events && max_events < drv->num_event_bufs ? max_events : drv->num_event_bufs;
     const size_t count = pending < budget ? pending : budget;
-    VirtioInputEvent events[VIRTIO_INPUT_NUM_EVENT_BUFS]{};
-    size_t indices[VIRTIO_INPUT_NUM_EVENT_BUFS]{};
+    struct CopiedEvent { uint8_t bytes[8];uint16_t sequence,head;uint32_t len;size_t buffer; };
+    CopiedEvent events[VIRTIO_INPUT_NUM_EVENT_BUFS]{};
     size_t taken = 0;
     for (; valid && taken < count; ++taken) {
-        void* cookie = nullptr; uint32_t used_len = 0;
-        const int head = virtqueue_pop_used(q, &cookie, &used_len);
+        auto& e=events[taken];e.sequence=q->last_used_idx;
+        void* cookie = nullptr;
+        const int head = virtqueue_pop_used(q, &cookie, &e.len);
         if (head < 0) { input_fail_closed(drv, "corrupt descriptor chain", head); valid = false; break; }
-        const auto idx = reinterpret_cast<uintptr_t>(cookie);
-        drv->buffer_state[idx] = VirtioInputBufferState::RETURNED_IN_USED_RING;
-        indices[taken] = idx;
-        drv->buffer_state[idx] = VirtioInputBufferState::BEING_PROCESSED;
-        events[taken] = drv->dma_events[idx];
-        input_queue_diagnostic(drv, nullptr, head, idx, &events[taken]);
+        e.head=uint16_t(head);e.buffer=reinterpret_cast<uintptr_t>(cookie);
+        drv->buffer_state[e.buffer] = VirtioInputBufferState::RETURNED_IN_USED_RING;
+        input_dma_acquire();
+        const auto* dma=reinterpret_cast<volatile const uint8_t*>(drv->dma_virt)+e.buffer*8;
+        for(unsigned byte=0;byte<8;++byte)e.bytes[byte]=dma[byte];
+        asm volatile("" ::: "memory");
+        drv->buffer_state[e.buffer] = VirtioInputBufferState::BEING_PROCESSED;
     }
-
-    // All completions in the snapshot were checked before any buffer reuse.
-    // Publish a single batch and kick once, after every DMA copy is complete.
+    // Private copies precede EVERY repost. An immediate device completion on
+    // a reused descriptor cannot overwrite the event being dispatched below.
     for (size_t i = 0; valid && i < taken; ++i) {
-        if (!input_post_buffer(drv, indices[i])) {
-            input_fail_closed(drv, "buffer repost failed", -1, indices[i]); valid = false;
+        if (!input_post_buffer(drv, events[i].buffer)) {
+            input_fail_closed(drv, "buffer repost failed", -1, events[i].buffer); valid = false;
         }
     }
     if (valid && taken) (void)virtqueue_kick(q, false);
@@ -775,28 +883,81 @@ size_t virtio_input_poll_events(VirtioInputDriver* drv, size_t max_events) {
     size_t delivered = 0;
     for (size_t i = 0; valid && i < taken &&
          !__atomic_load_n(&drv->reset_requested, __ATOMIC_ACQUIRE); ++i) {
-        const auto& raw = events[i];
-        if ((raw.type == INPUT_EV_ABS || raw.type == INPUT_EV_REL) && raw.code <= 1) kursor_diag_input();
-        if (raw.type == INPUT_EV_SYN && raw.code == INPUT_SYN_REPORT) ++drv->syn_sequence;
-        const InputEvent ev{raw.type, raw.code, raw.value};
-        // Idle-context delivery, after queue bookkeeping; never from the IRQ.
-        input_dispatch_event(&drv->input_dev, &ev);
+        const auto& copied=events[i];
+        const InputEvent ev{input_wire16(copied.bytes),input_wire16(copied.bytes+2),input_wire32(copied.bytes+4)};
+        const int32_t value=input_signed_value(ev.value);
+        auto& device=drv->input_dev;
+        const bool pointer=(device.kinds&(INPUT_DEVICE_KIND_MOUSE|INPUT_DEVICE_KIND_TABLET))!=0;
+        const bool pointer_event=pointer && (ev.type==INPUT_EV_REL || ev.type==INPUT_EV_ABS ||
+            ev.type==INPUT_EV_SYN || (ev.type==INPUT_EV_KEY && ev.code>=INPUT_BTN_MISC));
+        const bool stale=drv->stale_completions;
+        if(stale && uint16_t(copied.sequence+1)==drv->stale_until_used)drv->stale_completions=false;
+        const bool sync=ev.type==INPUT_EV_SYN && ev.code==INPUT_SYN_REPORT;
+        VirtioInputForensic::Event trace{};
+        trace.ns=input_observed_ns();trace.bdf=bdf;trace.queue=q->queue_index;
+        trace.used_idx=published;trace.used_element=copied.sequence&(q->queue_size-1U);
+        trace.descriptor=copied.head;trace.used_len=copied.len;
+        for(unsigned byte=0;byte<8;++byte)trace.raw[byte]=copied.bytes[byte];
+        trace.type=ev.type;trace.code=ev.code;trace.value=value;
+        trace.role=uint8_t(device.kinds);trace.lifecycle=uint8_t(drv->init_state);
+        trace.mode=device.pointer_mode;trace.kinds=device.kinds;
+        trace.readiness=uint8_t(device.registered)|(uint8_t(geometry)<<1)|(uint8_t(interactive)<<2);
+        trace.proven=device.pointer_state;trace.before_x=device.rel_x;trace.before_y=device.rel_y;
+        trace.cursor_x=grafika_pobierz_mysz_x();trace.cursor_y=grafika_pobierz_mysz_y();trace.width=width;trace.height=height;
+        const bool before_registration=drv->pre_registration_events!=0;
+        if(before_registration)--drv->pre_registration_events;
+        trace.phases=(before_registration?1:0)|(!input_pointer_is_active(&device)?2:0)|
+            (!geometry?4:0)|(!interactive || stale?8:0);
+        trace.action=ev.type!=INPUT_EV_SYN?VirtioInputForensic::None:sync?VirtioInputForensic::Report:
+            ev.code==INPUT_SYN_DROPPED?VirtioInputForensic::Dropped:VirtioInputForensic::Unsupported;
+        trace.outcome=VirtioInputForensic::Retained;
+
+        if(pointer_event && ev.type==INPUT_EV_SYN && ev.code==INPUT_SYN_DROPPED) {
+            input_discard_pointer_report(&device);drv->discard_until_syn=true;
+            trace.outcome=VirtioInputForensic::Discarded;
+        } else if(pointer_event && (!interactive || stale || drv->discard_until_syn)) {
+            input_discard_pointer_report(&device);
+            if(ev.type==INPUT_EV_REL || ev.type==INPUT_EV_ABS || ev.type==INPUT_EV_KEY)drv->discard_until_syn=true;
+            if(drv->discard_until_syn)trace.action=VirtioInputForensic::Resync;
+            if(sync)drv->discard_until_syn=false;
+            trace.outcome=VirtioInputForensic::Discarded;
+        } else {
+            const bool activity=device.rel_x || device.rel_y || device.rel_wheel || device.rel_hwheel ||
+                device.has_abs_x || device.has_abs_y || device.buttons_state!=device.published_buttons;
+            input_dispatch_event(&device,&ev);
+            if(sync) {
+                trace.outcome=pointer && activity && input_pointer_is_active(&device)?VirtioInputForensic::Published:VirtioInputForensic::Empty;
+                if(trace.outcome==VirtioInputForensic::Published){trace.dx=trace.before_x;trace.dy=trace.before_y;}
+            }
+        }
+        trace.after_x=device.rel_x;trace.after_y=device.rel_y;
+        trace.new_x=grafika_pobierz_mysz_x();trace.new_y=grafika_pobierz_mysz_y();
+        auto magnitude=[](int32_t n){return n<0?-int64_t(n):int64_t(n);};
+        trace.anomaly=(ev.type==INPUT_EV_REL && ((ev.code==INPUT_REL_X && width>0 && magnitude(value)>width) ||
+            (ev.code==INPUT_REL_Y && height>0 && magnitude(value)>height))) ||
+            (width>0 && magnitude(trace.dx)>width) || (height>0 && magnitude(trace.dy)>height);
+        VirtioInputForensic::event(trace); // Observation never changes admission.
 #if BURSZTYNDIAGVIRTIOINPUTINIT
-        if (!drv->first_event_logged) {
-            drv->first_event_logged = true;
-            input_activation_trace.bdf = (uint64_t(drv->dev->bus) << 16) | (uint64_t(drv->dev->slot) << 8) | drv->dev->func;
-            input_activation_log("first input event type/code", (uint64_t(raw.type) << 32) | raw.code);
-            input_activation_log("first input event value", raw.value);
+        if(!drv->first_event_logged) {
+            drv->first_event_logged=true;input_activation_trace.bdf=bdf;
+            input_activation_log("first input event type/code",(uint64_t(ev.type)<<32)|ev.code);
+            input_activation_log("first input event value",ev.value);
         }
 #endif
-        ++delivered; ++drv->total_events_processed;
+
+        if ((ev.type == INPUT_EV_ABS || ev.type == INPUT_EV_REL) && ev.code <= 1) kursor_diag_input();
+        if(sync)++drv->syn_sequence;
+        VirtioInputQemuDiag::once(bdf,2,"[VINPUT first event] type/code/value",ev.type,ev.code,ev.value);
+        if(ev.type==INPUT_EV_REL)VirtioInputQemuDiag::once(bdf,3,"[VINPUT first EVREL] code/value",ev.code,ev.value);
+        if(ev.type==INPUT_EV_SYN)VirtioInputQemuDiag::once(bdf,4,"[VINPUT first SYN] code/value",ev.code,ev.value);
+        ++delivered;++drv->total_events_processed;
     }
     if (valid) {
         q->avail->flags = 0;
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
-        // Recheck after enabling notifications; work arriving while suppressed
-        // is retained for the next bounded service turn (timer also wakes idle).
         if (virtqueue_has_used(q)) __atomic_store_n(&drv->has_pending_events, true, __ATOMIC_RELEASE);
+        if(interactive && !drv->stale_completions && !drv->discard_until_syn)
+            VirtioInputForensic::interactive(bdf,input_observed_ns());
     }
     __atomic_store_n(&drv->service_lock, 0U, __ATOMIC_RELEASE);
     if (__atomic_load_n(&drv->reset_requested, __ATOMIC_ACQUIRE)) virtio_input_reset(drv);
@@ -809,6 +970,9 @@ bool virtio_input_reset(VirtioInputDriver* drv) {
     if (__atomic_exchange_n(&drv->service_lock, 1U, __ATOMIC_ACQUIRE)) return false;
     __atomic_store_n(&drv->init_state, VirtioInputInitState::RESETTING, __ATOMIC_RELEASE);
     __atomic_store_n(&drv->initialized, false, __ATOMIC_RELEASE);
+    if(drv->dev)VirtioInputForensic::transition(qemu_diag_bdf(drv->dev),input_observed_ns(),"reset",drv->total_events_processed);
+    input_discard_pointer_report(&drv->input_dev);
+    drv->pointer_interactive=drv->discard_until_syn=drv->stale_completions=false;
 
     // 1. Wyrejestrowanie urzadzenia wejsciowego z dyspozytora
     input_unregister_device(&drv->input_dev);
@@ -966,14 +1130,20 @@ VirtioInputDriver* virtio_input_get_driver(size_t index) {
 extern "C" void input_abs_map_diag_obsluz();
 #endif
 void virtio_input_obsluz(void) {
+    VirtioInputQemuDiag::dump();
     for (size_t i = 0; i < s_driver_count; ++i) {
         if (s_drivers[i].initialized) {
             virtio_input_poll_events(&s_drivers[i], 64);
         }
     }
+    VirtioInputForensic::dump();
 #if BURSZTYNDIAGABSMAP
     input_abs_map_diag_obsluz();
 #endif
+}
+
+void virtio_input_set_desktop_ready(bool ready) {
+    __atomic_store_n(&s_desktop_ready,ready,__ATOMIC_RELEASE);
 }
 
 bool virtio_input_stress_test(VirtioInputDriver* drv) {

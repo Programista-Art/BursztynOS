@@ -174,6 +174,18 @@ extern "C" bool bur_waliduj_naglowek(
     uint64_t rozmiar_pliku
 );
 
+/* BUR v1 has no explicit version or file-backed DATA length. EOF ends DATA;
+ * the remaining declared DATA memory is zero-filled. Keep that ABI unchanged. */
+extern "C" const char* bur_blad_naglowka(const NaglowekBur&, uint64_t);
+struct BurObrazPliku {
+    uint8_t* dane{nullptr}; // private kmalloc allocation, owned by the caller
+    uint64_t rozmiar{0};
+    NaglowekBur naglowek{};
+    uint32_t bajty_naglowka{0};
+    const char* blad{nullptr};
+};
+extern "C" void bur_formatuj_blad(char*, size_t, const char*, const BurObrazPliku&);
+
 /* =========================================================================
  * 5. PUBLICZNE API LOADERA
  * ========================================================================= */

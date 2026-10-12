@@ -1,0 +1,1 @@
+controller-ready-ns=2800000 pre-first-frame-critical-work-ns=2810900000 max-service-ns=2804300000 total-to-HID-armed-ns=2810900000 controls=7

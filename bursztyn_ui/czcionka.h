@@ -3,14 +3,34 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "typy.h"
+#if defined(BURSZTYN_UI_CZCIONKA_SYSTEMOWA)
+#include "../bws_czcionka.h"
+#include "../bursztyn_gui.h"
+#else
 #include "../czcionki/extronic16Bunicode.h"
+#endif
 
 namespace BursztynUI {
 
 class CzcionkaUI {
 public:
     static constexpr int WYSOKOSC = 16;
+#if defined(BURSZTYN_UI_CZCIONKA_SYSTEMOWA)
+    static constexpr uint32_t LICZBA_GLIFOW = BWS_CZCIONKA_GLIFY;
+    static bool pobierz_systemowa() {
+        if (systemowa_gotowa_) return true;
+        if (bws_wywolaj(51, 1, reinterpret_cast<uint64_t>(&systemowa_),
+                sizeof(systemowa_), 0) != 1 ||
+            systemowa_.wersja != BWS_CZCIONKA_WERSJA ||
+            systemowa_.rozmiar != sizeof(systemowa_) ||
+            systemowa_.liczba_glifow != LICZBA_GLIFOW || systemowa_.wysokosc != 16)
+            return false;
+        systemowa_gotowa_ = true;
+        return true;
+    }
+#else
     static constexpr uint32_t LICZBA_GLIFOW = sizeof(nowa_czcionka_16x16) / sizeof(nowa_czcionka_16x16[0]);
+#endif
 
     // Dekoduje jeden punkt kodowy UTF-8 z ciągu bajtów.
     // Zapewnia pełną odporność na sekwencje obcięte i zniekształcone:
@@ -157,6 +177,11 @@ public:
 
     // Zwraca rzeczywistą szerokość glifu w pikselach (1..16) z tablicy czcionki
     static int szerokosc_znaku(uint32_t cp) {
+#if defined(BURSZTYN_UI_CZCIONKA_SYSTEMOWA)
+        if (!pobierz_systemowa()) return 1;
+        int w = systemowa_.szerokosci[cp < LICZBA_GLIFOW ? cp : '?'];
+        return w < 1 ? 1 : w > 16 ? 16 : w;
+#else
         if (cp < LICZBA_GLIFOW) {
             int w = nowa_czcionka_szerokosci[cp];
             if (w < 1) w = 1;
@@ -168,14 +193,20 @@ public:
         if (w < 1) w = 1;
         if (w > 16) w = 16;
         return w;
+#endif
     }
 
     // Kanoniczna bitmapa glifu uzywana przez renderer z przycinaniem.
     // Dla nieobslugiwanego punktu kodowego zachowujemy ten sam znak
     // zastepczy co pomiar, aby geometria i rysowanie nie rozjezdzaly sie.
     static const uint16_t* bitmapa_znaku(uint32_t cp) {
+#if defined(BURSZTYN_UI_CZCIONKA_SYSTEMOWA)
+        if (!pobierz_systemowa()) { static const uint16_t pusty[16]{}; return pusty; }
+        return systemowa_.bitmapy[cp < LICZBA_GLIFOW ? cp : '?'];
+#else
         if (cp < LICZBA_GLIFOW) return nowa_czcionka_16x16[cp];
         return nowa_czcionka_16x16['?'];
+#endif
     }
 
     // Pomiar wspolnego renderera grayscale obejmuje skale duzych napisow.
@@ -329,6 +360,11 @@ public:
         }
         return pos;
     }
+#if defined(BURSZTYN_UI_CZCIONKA_SYSTEMOWA)
+private:
+    static inline BwsCzcionkaSystemowa systemowa_{}; // BSS, never font bytes in BUR
+    static inline bool systemowa_gotowa_{false};
+#endif
 };
 
 } // namespace BursztynUI

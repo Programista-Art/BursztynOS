@@ -33,6 +33,7 @@
 #include "blokowy.h"
 #include "zegar-rtc.h"
 #include "heap.h"
+#include "loader.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -3978,6 +3979,43 @@ extern "C" bool czytaj_z_pliku(
 /* =========================================================================
  * PUBLICZNE API - BUFOR DLA LOADERA
  * ========================================================================= */
+
+extern "C" bool bsp_wczytaj_obraz_bur(const char* sciezka, BurObrazPliku* out,
+    uint64_t maks, const char* (*walidator)(const NaglowekBur&, uint64_t)) {
+    if (!out) return false;
+    *out = {};
+    out->blad = "filesystem-not-ready";
+    if (!psf_gotowy || !sciezka || !walidator) return false;
+    if (maks > BUR_MAKS_ROZMIAR_PLIKU || maks > UINT32_MAX || maks > SIZE_MAX)
+        { out->blad = "invalid-image-limit"; return false; }
+    BlokadaPSF blokada; // inode, prefix and complete image belong to one version
+    const uint64_t id = rozwiaz_sciezke(sciezka, nullptr, false);
+    const wezel_indeksowy* w = id ? pobierz_wezel(id) : nullptr;
+    if (!w) { out->blad = "file-not-found"; return false; }
+    out->rozmiar = w->rozmiar_w_bajtach;
+    if (w->typ != TYP_PLIK) { out->blad = "not-a-file"; return false; }
+    const uint32_t prefix = out->rozmiar < sizeof(NaglowekBur)
+        ? static_cast<uint32_t>(out->rozmiar) : sizeof(NaglowekBur);
+    uint32_t n = 0;
+    if (prefix && (!czytaj_fragment_pliku_wewn(sciezka, 0,
+            reinterpret_cast<char*>(&out->naglowek), prefix, &n) || n != prefix))
+        { out->blad = "header-read-failed"; return false; }
+    out->bajty_naglowka = n;
+    if (out->rozmiar > maks) { out->blad = "file-size-exceeds-maximum"; return false; }
+    if (n < sizeof(NaglowekBur)) { out->blad = "truncated-header"; return false; }
+    out->blad = walidator(out->naglowek, out->rozmiar);
+    if (out->blad) return false;
+    auto* obraz = static_cast<uint8_t*>(kmalloc(out->rozmiar));
+    if (!obraz) { out->blad = "image-allocation-failed"; return false; }
+    if (!czytaj_fragment_pliku_wewn(sciezka, 0, reinterpret_cast<char*>(obraz),
+            static_cast<uint32_t>(out->rozmiar), &n) || n != out->rozmiar) {
+        kfree(obraz);
+        out->blad = "image-read-failed";
+        return false;
+    }
+    out->dane = obraz;
+    return true;
+}
 
 extern "C" uint8_t* bsp_wczytaj_plik_do_pamieci(
     const char* sciezka,

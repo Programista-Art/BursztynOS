@@ -500,6 +500,13 @@ uint8_t* bsp_wczytaj_plik_do_pamieci(
     uint64_t* rozmiar_wyj
 );
 
+/* Atomic, bounded executable snapshot; validates before allocation.
+ * No shared temporary storage. A successful result must be freed with kfree. */
+struct BurObrazPliku;
+struct NaglowekBur;
+bool bsp_wczytaj_obraz_bur(const char*, struct BurObrazPliku*, uint64_t,
+    const char* (*walidator)(const struct NaglowekBur&, uint64_t));
+
 /*
  * Zapisuje tekstowa liste elementow katalogu do bufora.
  *

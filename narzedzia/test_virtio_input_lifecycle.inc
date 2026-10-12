@@ -127,8 +127,10 @@ void test_input_late_pair_synchronous_report_and_pending_irq() {
         VirtioInputDriver* drivers[]={&kbd.drv,&tab.drv};
         TEST_ASSERT(virtio_input_host_activate_prepared(drivers,2)==2,"Late pair activation returns");
         TEST_ASSERT(reports==1 && irqs==(mode==2?0U:1U),"Synchronous/latched/no-IRQ variants actually exercised");
-        TEST_ASSERT(tab.drv.total_events_processed==3 && tab.drv.input_dev.abs_val_x==100 && tab.drv.input_dev.abs_val_y==200,"Whole immediate ABS report delivered after readiness");
+        TEST_ASSERT(tab.drv.total_events_processed==3 && tab.drv.input_dev.abs_val_x==0 && tab.drv.input_dev.abs_val_y==0 && !input_pointer_is_active(&tab.drv.input_dev),"Immediate cold ABS report is drained without replay or false proof");
         TEST_ASSERT(virtio_input_poll_events(&tab.drv,64)==0,"No duplicate delivery");
+        init_emit_report(tab);
+        TEST_ASSERT(virtio_input_poll_events(&tab.drv,64)==3 && tab.drv.input_dev.abs_val_x==100 && tab.drv.input_dev.abs_val_y==200 && input_pointer_is_active(&tab.drv.input_dev),"Fresh post-barrier ABS report still reaches the cursor");
         TEST_ASSERT(input_get_pointer_owner()==&tab.drv.input_dev,"Tablet owns pointer only after successful activation");
         init_driver_ok_action=nullptr;init_checkpoint_action=nullptr;
         TEST_ASSERT(virtio_input_reset(&tab.drv) && virtio_input_reset(&kbd.drv),"Cleanup");input_unregister_device(&ps2);init_fixture_clear();

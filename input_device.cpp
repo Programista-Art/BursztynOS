@@ -1,3 +1,4 @@
+#include "virtio_input_qemu_diag.h"
 /*
  * Bursztyn OS - Implementacja Abstrakcji Urzadzen Wejsciowych (InputDevice)
  *
@@ -29,6 +30,7 @@ void klog_serial(const char* msg);
 
 /* Interfejsy z podsystemu grafiki i klawiatury Bursztyn OS */
 extern "C" void zaktualizuj_mysze_zrodlo(int dx, int dy, uint8_t przyciski, const char* zrodlo);
+extern "C" void zaktualizuj_mysze_wzgledne_zrodlo(int32_t dx, int32_t dy, uint8_t przyciski, const char* zrodlo);
 extern "C" void zaktualizuj_kolo_myszy(int pion, int poziom, uint8_t przyciski);
 extern "C" void zaktualizuj_mysze_pozycja_zrodlo(int x, int y, uint8_t przyciski, const char* zrodlo);
 int grafika_pobierz_szerokosc(void);
@@ -66,10 +68,10 @@ static void pointer_trace(InputDevice* dev,InputPointerMode mode,int32_t raw_x,i
     (void)dev;(void)mode;(void)raw_x;(void)raw_y;(void)before_x;(void)before_y;(void)result;
 #endif
 }
-static int32_t input_accumulate_delta(int32_t previous, int32_t delta) {
+static int32_t input_accumulate_delta(int32_t previous, int32_t delta, bool full_signed=false) {
     const int64_t sum = int64_t(previous) + delta;
-    // Keep negation valid too: the graphics convention negates Y deltas.
-    return sum > INT32_MAX ? INT32_MAX : sum < -INT32_MAX ? -INT32_MAX : int32_t(sum);
+    const int32_t minimum=full_signed ? INT32_MIN : -INT32_MAX;
+    return sum > INT32_MAX ? INT32_MAX : sum < minimum ? minimum : int32_t(sum);
 }
 
 #if BURSZTYNDIAGABSMAP
@@ -403,8 +405,11 @@ static void publish_report(const PointerReport& r) {
     bool published=false;
     if(r.dx || r.dy) {
         log_raw_virtio_syn(dev,r.dx,r.dy);
-        // GUI's legacy API alone negates Y; this adapter cancels it once.
-        zaktualizuj_mysze_zrodlo(r.dx,-r.dy,buttons,source);
+        // The VirtIO screen-down entry preserves INT32_MIN without negating it
+        // in 32-bit arithmetic. Existing physical transport adapters stay intact.
+        if(dev->bus_type==INPUT_BUS_VIRTIO)
+            zaktualizuj_mysze_wzgledne_zrodlo(r.dx,r.dy,buttons,source);
+        else zaktualizuj_mysze_zrodlo(r.dx,-r.dy,buttons,source);
         published=true;
     }
     if(r.wheel || r.hwheel) {
@@ -434,7 +439,9 @@ static void publish_report(const PointerReport& r) {
     if(!published && buttons!=previous) {
         zaktualizuj_mysze_zrodlo(0,0,buttons,source);published=true;
     }
-    if(published)s_last_pointer_source=dev;
+    if(published){s_last_pointer_source=dev;
+        if(dev->bus_type==INPUT_BUS_VIRTIO)VirtioInputQemuDiag::once(dev->device_id,5,"[VINPUT first pointer publication] mode",dev->pointer_mode);
+    }
     log_pointer_event(dev,r.dx,r.dy,grafika_pobierz_mysz_x(),grafika_pobierz_mysz_y(),true);
     pointer_trace(dev,(r.has_x||r.has_y)?INPUT_POINTER_ABSOLUTE:INPUT_POINTER_RELATIVE,
         (r.has_x||r.has_y)?r.x:r.dx,(r.has_x||r.has_y)?r.y:r.dy,bx,by,1);
@@ -460,6 +467,10 @@ static void forget_pointer_reports(InputDevice* dev) {
 static void submit_pointer_report(InputDevice& dev) {
     // Non-USB transports call this only with validated transport events. USB
     // proves liveness explicitly after descriptor-aware report decoding.
+    const int32_t pend_dx_before = dev.rel_x;
+    const int32_t pend_dy_before = dev.rel_y;
+    (void)pend_dx_before;
+    (void)pend_dy_before;
     if(dev.bus_type!=INPUT_BUS_USB && dev.report_valid &&
        (dev.pointer_mode!=INPUT_POINTER_ABSOLUTE ||
         (dev.has_abs_x && dev.has_abs_y && dev.abs_x.max>dev.abs_x.min && dev.abs_y.max>dev.abs_y.min)))
@@ -477,6 +488,21 @@ static void submit_pointer_report(InputDevice& dev) {
     if(dev.has_abs_y){dev.last_abs_y=dev.abs_val_y;dev.last_abs_y_valid=true;}
     const bool activity=r.dx || r.dy || r.wheel || r.hwheel || r.has_x || r.has_y || r.buttons!=dev.published_buttons;
     clear_report(dev);
+#if BURSZTYNDIAGVIRTIOINPUTQEMU
+    if (dev.bus_type == INPUT_BUS_VIRTIO) {
+        static uint32_t s_syn_trace = 0;
+        if (s_syn_trace < 64) {
+            ++s_syn_trace;
+            const int cx = grafika_pobierz_mysz_x(), cy = grafika_pobierz_mysz_y();
+            const int64_t v[] = {
+                int64_t(dev.device_id), int64_t(pend_dx_before), int64_t(pend_dy_before),
+                int64_t(r.dx), int64_t(r.dy), activity ? 1 : 0,
+                int64_t(cx), int64_t(cy)
+            };
+            pointing_diag("[VINPUT SYN] id/pendDxBefore/pendDyBefore/pubDx/pubDy/active/cursorX/cursorY", v, 8);
+        }
+    }
+#endif
     if(!activity)return;
     pointing_count(pointing_counters.owner_accepted);
     if(input_pointer_geometry_ready()){flush_pointer_reports();publish_report(r);return;}
@@ -513,10 +539,15 @@ bool input_register_device(InputDevice* dev) {
     if (s_device_count >= MAX_INPUT_DEVICES) return false;
     // Compatibility for callers declaring capabilities rather than the mode.
     // Never derive coordinate semantics from transport, priority or values.
-    if (dev->pointer_mode == INPUT_POINTER_UNSPECIFIED)
-        dev->pointer_mode = (dev->kinds & INPUT_DEVICE_KIND_TABLET) ?
-            ((dev->kinds & INPUT_DEVICE_KIND_MOUSE) ? INPUT_POINTER_RELATIVE_AND_ABSOLUTE : INPUT_POINTER_ABSOLUTE) : INPUT_POINTER_RELATIVE;
-    if (dev->pointer_mode != INPUT_POINTER_RELATIVE &&
+    // Pointer modes describe pointer capabilities; keyboards need no such mode.
+    if (dev->pointer_mode == INPUT_POINTER_UNSPECIFIED) {
+        if (dev->kinds & INPUT_DEVICE_KIND_TABLET)
+            dev->pointer_mode = (dev->kinds & INPUT_DEVICE_KIND_MOUSE) ?
+                INPUT_POINTER_RELATIVE_AND_ABSOLUTE : INPUT_POINTER_ABSOLUTE;
+        else if (dev->kinds & INPUT_DEVICE_KIND_MOUSE)
+            dev->pointer_mode = INPUT_POINTER_RELATIVE;
+    }
+    if (input_is_pointer_device(dev) && dev->pointer_mode != INPUT_POINTER_RELATIVE &&
         dev->pointer_mode != INPUT_POINTER_ABSOLUTE &&
         dev->pointer_mode != INPUT_POINTER_RELATIVE_AND_ABSOLUTE) return false;
 
@@ -690,12 +721,12 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
 
         case INPUT_EV_REL: {
             const int32_t delta = input_signed_value(ev->value);
-            if ((ev->code == INPUT_REL_X || ev->code == INPUT_REL_Y) &&
-                !(dev->pointer_mode & INPUT_POINTER_RELATIVE)) break;
+            if (!(dev->pointer_mode & INPUT_POINTER_RELATIVE) || !input_is_pointer_device(dev)) break;
+            const bool full_signed=dev->bus_type==INPUT_BUS_VIRTIO;
             if (ev->code == INPUT_REL_X) {
-                dev->rel_x = input_accumulate_delta(dev->rel_x, delta);
+                dev->rel_x = input_accumulate_delta(dev->rel_x, delta,full_signed);
             } else if (ev->code == INPUT_REL_Y) {
-                dev->rel_y = input_accumulate_delta(dev->rel_y, delta);
+                dev->rel_y = input_accumulate_delta(dev->rel_y, delta,full_signed);
             } else if (ev->code == INPUT_REL_WHEEL) {
                 dev->rel_wheel = input_accumulate_delta(dev->rel_wheel, delta);
             } else if (ev->code == INPUT_REL_HWHEEL) {
@@ -740,6 +771,14 @@ void input_dispatch_events(InputDevice* dev, const InputEvent* evs, size_t count
     for (size_t i = 0; i < count; ++i) {
         input_dispatch_event(dev, &evs[i]);
     }
+}
+
+void input_discard_pointer_report(InputDevice* dev) {
+    if(!dev)return;
+    dev->buttons_state=dev->prev_buttons_state;
+    dev->contact_active=dev->last_contact_active;
+    clear_report(*dev);
+    forget_pointer_reports(dev);
 }
 
 #if BURSZTYNDIAGABSMAP

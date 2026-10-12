@@ -21,6 +21,9 @@
 #include "sterowniki/siec/sockets.h"
 #include "aktualizacja.h"
 #include "motyw.h"
+#include "bws_hda_diag.h"
+#include "sterowniki/dzwiek/hda.h"
+#include "sterowniki/dzwiek/hda_diag.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -1008,6 +1011,181 @@ static bool czy_sciezka_menedzera_okien(const char* sciezka) {
     return DOCELOWA[i] == '\0' && (i >= PZB_DLUGOSC_SCIEZKI_PROCESU || sciezka[i] == '\0');
 }
 
+/*
+ * Diagnostyka HDA (BWS 89 / 90).
+ *
+ * Bezpieczenstwo:
+ *  - wylacznie odczyt diagnostyczny + kontrolowany test tonu,
+ *  - brak surowych verbów HDA z Ring 3,
+ *  - walidacja kazdego wskaznika i dlugosci przez BWS safety layer,
+ *  - brak adresów fizycznych w odpowiedziach (BDL zamaskowany),
+ *  - wymagane PRAWO_GUI (jak istniejace BWS 27).
+ */
+namespace {
+
+bool hda_diag_ma_prawo(const proces_t& p) {
+    return ma_prawo(p, PRAWO_GUI);
+}
+
+uint64_t bws_hda_diag(const proces_t& proces, uint64_t a1, uint64_t a2,
+                      uint64_t a3, uint64_t a4) {
+    if (!hda_diag_ma_prawo(proces)) return 0;
+    const uint64_t polecenie = a1;
+
+    switch (polecenie) {
+        case BWS_HDA_DIAG_STAN: {
+            if (a2 == 0) return 0;
+            HdaDiagSkan stan{};
+            hda_diag_pobierz_stan(&stan);
+            if (!skopiuj_do_przestrzeni_uzytkownika(
+                    reinterpret_cast<void*>(a2), &stan, sizeof(stan))) {
+                return 0;
+            }
+            return 1;
+        }
+        case BWS_HDA_DIAG_SKAN_START: {
+            return hda_diag_startuj_skan() ? 1ULL : 0ULL;
+        }
+        case BWS_HDA_DIAG_SKAN_KROK: {
+            const bool koniec = hda_diag_krok_skanu();
+            (void)a3;
+            (void)a4;
+            return koniec ? 1ULL : 0ULL;
+        }
+        case BWS_HDA_DIAG_SNAPSHOT: {
+            if (a2 == 0) return 0;
+            BwsHdaSnapshotZadanie zad{};
+            if (!skopiuj_z_przestrzeni_uzytkownika(
+                    &zad, reinterpret_cast<const void*>(a2), sizeof(zad))) {
+                return 0;
+            }
+            if (zad.wersja != HDA_DIAG_WERSJA_ABI ||
+                zad.rozmiar != sizeof(BwsHdaSnapshotZadanie)) {
+                return 0;
+            }
+            if (zad.bufor == 0 || zad.bufor > UINT64_MAX - zad.bufor_maks) return 0;
+            if (zad.bufor_maks < sizeof(HdaDiagSnapshot)) return 0;
+            /*
+             * Twardy limit bufora uzytkownika: nie wiecej niz
+             * sizeof(HdaDiagSnapshot). Zapobiega nadmiarowym kopiom.
+             */
+            if (zad.bufor_maks > sizeof(HdaDiagSnapshot) + 4096U) {
+                return 0;
+            }
+            if (!czy_bezpieczny_zakres_uzytkownika_do_zapisu(
+                    reinterpret_cast<void*>(zad.bufor), zad.bufor_maks)) {
+                return 0;
+            }
+            // Use the single validated copy: a second user read could change
+            // the output address/length after the range check (TOCTOU).
+            if (!czy_bezpieczny_zakres_uzytkownika_do_zapisu(
+                    reinterpret_cast<void*>(a2), sizeof(zad))) {
+                return 0;
+            }
+            /*
+             * Kernel-owned snapshot. Do kopiowania uzywamy wewnetrznego
+             * bufora, nigdy mapowan MMIO.
+             */
+            struct MigawkaHda {
+                HdaDiagSnapshot* p = static_cast<HdaDiagSnapshot*>(kmalloc(sizeof(HdaDiagSnapshot)));
+                ~MigawkaHda() { if (p) kfree(p); }
+            } roboczy;
+            if (!roboczy.p) return 0;
+            uint32_t zapisano = 0;
+            uint32_t generacja = 0;
+            if (!hda_diag_pobierz_snapshot(roboczy.p,
+                                           static_cast<uint32_t>(sizeof(HdaDiagSnapshot)),
+                                           &zapisano, &generacja)) {
+                return 0;
+            }
+            if (zapisano > zad.bufor_maks) return 0;
+            if (!skopiuj_do_przestrzeni_uzytkownika(
+                    reinterpret_cast<void*>(zad.bufor), roboczy.p, zapisano)) {
+                return 0;
+            }
+            zad.generacja = generacja;
+            zad.zapisano = zapisano;
+            if (!skopiuj_do_przestrzeni_uzytkownika(
+                    reinterpret_cast<void*>(a2), &zad, sizeof(zad))) {
+                return 0;
+            }
+            return 1;
+        }
+        case BWS_HDA_DIAG_STRUMIEN: {
+            if (a2 == 0) return 0;
+            HdaDiagStrumien s{};
+            if (!hda_diag_pobierz_strumien(&s)) return 0;
+            if (!skopiuj_do_przestrzeni_uzytkownika(
+                    reinterpret_cast<void*>(a2), &s, sizeof(s))) {
+                return 0;
+            }
+            return 1;
+        }
+        case BWS_HDA_DIAG_TEST_STAN: {
+            if (a2 == 0) return 0;
+            HdaDiagStanTestu t{};
+            if (!hda_diag_pobierz_test(&t)) return 0;
+            if (!skopiuj_do_przestrzeni_uzytkownika(
+                    reinterpret_cast<void*>(a2), &t, sizeof(t))) {
+                return 0;
+            }
+            return 1;
+        }
+        default:
+            return 0;
+    }
+}
+
+uint64_t bws_hda_test(const proces_t& proces, uint64_t a1, uint64_t a2,
+                      uint64_t a3, uint64_t a4) {
+    if (!hda_diag_ma_prawo(proces)) return 0;
+    const uint64_t polecenie = a1;
+
+    if (polecenie == BWS_HDA_TEST_STOP) {
+        hda_diag_test_stop();
+        return 1;
+    }
+
+    if (polecenie == BWS_HDA_TEST_START) {
+        if (a2 == 0) return 0;
+        BwsHdaTestStart t{};
+        if (!skopiuj_z_przestrzeni_uzytkownika(
+                &t, reinterpret_cast<const void*>(a2), sizeof(t))) {
+            return 0;
+        }
+        if (t.wersja != HDA_DIAG_WERSJA_ABI ||
+            t.rozmiar != sizeof(BwsHdaTestStart)) {
+            return 0;
+        }
+        /*
+         * Walidacja parametrow po stronie jadra (podwojna).
+         * Bez zmiennoprzecinkowych, bez vendor verbs.
+         */
+        if (t.czas_ms == 0 || t.czas_ms > HDA_API_MAX_CZAS_MS) return 0;
+        if (t.tryb == HDA_TEST_TON || t.tryb == HDA_TEST_LEWY ||
+            t.tryb == HDA_TEST_PRAWY || t.tryb == HDA_TEST_OBA) {
+            if (!hda_api_czestotliwosc_poprawna(t.czestotliwosc_hz)) return 0;
+        }
+        if (t.tryb == HDA_TEST_SWEEP) {
+            /* Sweep: staly, bezpieczny zakres 200..4000 Hz. */
+        } else if (t.tryb != HDA_TEST_TON && t.tryb != HDA_TEST_LEWY &&
+                   t.tryb != HDA_TEST_PRAWY && t.tryb != HDA_TEST_OBA) {
+            return 0;
+        }
+        if (t.kanaly == 0 || t.kanaly > 3) return 0;
+        (void)a3;
+        (void)a4;
+        return hda_diag_test_start(t.tryb, t.czestotliwosc_hz, t.czas_ms,
+                                   t.kanaly)
+                   ? 1ULL
+                   : 0ULL;
+    }
+
+    return 0;
+}
+
+} // namespace
+
 uint64_t bws_potwierdz_pulpit_gotowy(const proces_t& proces) {
     if (proces.pid <= 0 || proces.pid >= MAKS_PROCESOW) return 0;
     if (proces.poziom_zaufania > PZB_USLUGI) return 0;
@@ -1107,6 +1285,10 @@ extern "C" uint64_t bws_nowoczesne_obsluz(
             return motyw_bws_polecenie(proces, static_cast<uint32_t>(a1), a2, a3);
         case BWS_PULPIT_GOTOWY:
             return bws_potwierdz_pulpit_gotowy(*proces);
+        case BWS_HDA_DIAG:
+            return bws_hda_diag(*proces, a1, a2, a3, a4);
+        case BWS_HDA_TEST:
+            return bws_hda_test(*proces, a1, a2, a3, a4);
         default: return UINT64_MAX;
     }
 }

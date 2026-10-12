@@ -2366,8 +2366,8 @@ static void log_granice_kursora(const char* zrodlo, uint32_t sw, uint32_t sh, ui
 
 extern "C" void input_device_pobierz_ostatnie_abs(int32_t* rx, int32_t* ry);
 
-extern "C" void zaktualizuj_mysze_zrodlo(int dx,
-                                         int dy,
+static void zaktualizuj_mysze_wspolne(int64_t dx,
+                                         int64_t dy,
                                          uint8_t przyciski,
                                          const char* zrodlo) {
     if (!backbuffer || !aktywny_ekran)
@@ -2737,6 +2737,13 @@ extern "C" void zaktualizuj_mysze_zrodlo(int dx,
 
     skladacz_obrazu_oznacz_ruch_kursora(
         stary_mysz_x, stary_mysz_y, mysz_x, mysz_y);
+}
+
+extern "C" void zaktualizuj_mysze_zrodlo(int dx,int dy,uint8_t buttons,const char* source) {
+    zaktualizuj_mysze_wspolne(dx,dy,buttons,source);
+}
+extern "C" void zaktualizuj_mysze_wzgledne_zrodlo(int32_t dx,int32_t dy,uint8_t buttons,const char* source) {
+    zaktualizuj_mysze_wspolne(dx,-int64_t(dy),buttons,source);
 }
 
 extern "C" void zaktualizuj_mysze(int dx,
@@ -3948,6 +3955,7 @@ bool grafika_aktywuj_virtio_gpu(VirtioGpuDriver* drv) {
     powitanie_reset_ekranu();
     grafika_odtworz_tlo_skladania();
     PrezentacjaStartu::wybierz_backend();
+    BootTiming::mark("graphics backend selected");
     PrzeniesNaEkran();
     PokazKursor();
 
@@ -3977,6 +3985,7 @@ bool grafika_aktywuj_virtio_gpu(VirtioGpuDriver* drv) {
 void grafika_zakoncz_wybor_backendu() {
     if(PrezentacjaStartu::stan().backend)return;
     PrezentacjaStartu::wybierz_backend();
+    BootTiming::mark("graphics backend selected");
     // Native fallback retains firmware until this completed policy frame.
     // With an inactive overlay the compositor authorizes its first full scene.
     if(powitanie_aktywne())PrzeniesNaEkran();

@@ -19,6 +19,7 @@ void grafika_abs_map_geometria(){++geom_snapshots;}
 extern "C" void input_abs_map_diag_obsluz();
 extern "C" void zaktualizuj_mysze_pozycja_zrodlo(int x,int y,uint8_t,const char*){logical_x=x;logical_y=y;}
 extern "C" void zaktualizuj_mysze_zrodlo(int,int,uint8_t,const char*){}
+extern "C" void zaktualizuj_mysze_wzgledne_zrodlo(int32_t,int32_t,uint8_t,const char*){}
 extern "C" void zaktualizuj_kolo_myszy(int,int,uint8_t){}
 extern "C" void klawiatura_obsluz_klawisz(uint16_t,uint32_t){}
 int main() {

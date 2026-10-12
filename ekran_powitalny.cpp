@@ -104,6 +104,7 @@ void powitanie_publikacja() {
 }
 bool powitanie_aktywne(){return sekwencja.aktywny()||zakonczenie_oczekuje;}
 void powitanie_inicjalizuj(bool wlacz){
+    BootTiming::splash_expected=wlacz;
     powitanie_wycisz();
     PrezentacjaStartu::uniewaznij();
     PrezentacjaStartu::wybierz();

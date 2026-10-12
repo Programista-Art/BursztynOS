@@ -1,0 +1,97 @@
+PS/2 parser: 330443 checks PASS
+HID descriptor/report: 6051 checks PASS
+USB configuration: 48 checks PASS
+InputDevice ownership/mapping: 146 checks PASS
+i8042/IRQ1/IRQ12/initialization: 4140 checks PASS
+Shared VirtualBox tablet stream: 5400 checks PASS
+OHCI production enumeration/transfers/failure: 5855 checks PASS
+In file included from ./sterowniki/usb/xhci.cpp:889,
+                 from narzedzia/test_xhci_pointer.cpp:6:
+./sterowniki/usb/xhci_enumeration.inc: In function ‘void {anonymous}::enumeration_step()’:
+./sterowniki/usb/xhci_enumeration.inc:162:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  162 |         if(enum_buffer(18))enum_control({0x80,6,0x100,0,8},EnumStep::FirstDescriptorDone);return;
+      |         ^~
+./sterowniki/usb/xhci_enumeration.inc:162:91: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  162 |         if(enum_buffer(18))enum_control({0x80,6,0x100,0,8},EnumStep::FirstDescriptorDone);return;
+      |                                                                                           ^~~~~~
+./sterowniki/usb/xhci_enumeration.inc:184:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  184 |         if(enum_buffer(9))enum_control({0x80,6,0x200,0,9},EnumStep::ConfigHeaderDone);return;
+      |         ^~
+./sterowniki/usb/xhci_enumeration.inc:184:87: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  184 |         if(enum_buffer(9))enum_control({0x80,6,0x200,0,9},EnumStep::ConfigHeaderDone);return;
+      |                                                                                       ^~~~~~
+./sterowniki/usb/xhci_enumeration.inc:209:9: warning: this ‘else’ clause does not guard... [-Wmisleading-indentation]
+  209 |         else e.step=EnumStep::ReportDescriptor;return;
+      |         ^~~~
+./sterowniki/usb/xhci_enumeration.inc:209:48: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘else’
+  209 |         else e.step=EnumStep::ReportDescriptor;return;
+      |                                                ^~~~~~
+xHCI production interrupt setup/BDF/capability/failure/IF: 133 checks PASS
+Command/transfer producer wrap and Link cycle: 1030 checks PASS
+xHCI Supported Protocol/endpoint context: 22 checks PASS
+xHCI failed first submission preserves PS/2: 24 checks PASS
+Shared VirtualBox tablet stream: 4800 checks PASS
+xHCI production pointer completions/short control/stale events: 9484 checks PASS
+Signed relative cursor regression: 396600 checks PASS
+InputDevice modes/readiness/API regression: 56 checks PASS
+Pointer boot order/barrier: 6 checks PASS
+In file included from ./sterowniki/usb/xhci.cpp:889,
+                 from narzedzia/test_xhci_physical_mouse.cpp:8:
+./sterowniki/usb/xhci_enumeration.inc: In function ‘void {anonymous}::enumeration_step()’:
+./sterowniki/usb/xhci_enumeration.inc:162:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  162 |         if(enum_buffer(18))enum_control({0x80,6,0x100,0,8},EnumStep::FirstDescriptorDone);return;
+      |         ^~
+./sterowniki/usb/xhci_enumeration.inc:162:91: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  162 |         if(enum_buffer(18))enum_control({0x80,6,0x100,0,8},EnumStep::FirstDescriptorDone);return;
+      |                                                                                           ^~~~~~
+./sterowniki/usb/xhci_enumeration.inc:184:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  184 |         if(enum_buffer(9))enum_control({0x80,6,0x200,0,9},EnumStep::ConfigHeaderDone);return;
+      |         ^~
+./sterowniki/usb/xhci_enumeration.inc:184:87: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  184 |         if(enum_buffer(9))enum_control({0x80,6,0x200,0,9},EnumStep::ConfigHeaderDone);return;
+      |                                                                                       ^~~~~~
+./sterowniki/usb/xhci_enumeration.inc:209:9: warning: this ‘else’ clause does not guard... [-Wmisleading-indentation]
+  209 |         else e.step=EnumStep::ReportDescriptor;return;
+      |         ^~~~
+./sterowniki/usb/xhci_enumeration.inc:209:48: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘else’
+  209 |         else e.step=EnumStep::ReportDescriptor;return;
+      |                                                ^~~~~~
+Intel capabilities/legacy handoff/address width: 39 checks PASS
+Control TRB requests/directions/reserved fields: 32 checks PASS
+Multi-interface/companion/interval/DCI/Boot Mouse/packed report: 1597 checks PASS
+Ring full/wrap/Link/pre-publication observation: 1497 checks PASS
+Production Intel-style boot/hotplug/EP0/IRQ/mouse/requeue/removal: 18874 checks PASS
+Control short/Stall recovery/USB2-USB3 PORTSC/reset failure: 1674 checks PASS
+Connected-at-boot mouse/first live report: 320 checks PASS
+Physical xHCI mouse total: 24033 checks PASS; allocations 248 releases 248
+In file included from ./sterowniki/usb/xhci.cpp:889,
+                 from narzedzia/test_xhci_physical_mouse.cpp:8:
+./sterowniki/usb/xhci_enumeration.inc: In function ‘void {anonymous}::enumeration_step()’:
+./sterowniki/usb/xhci_enumeration.inc:162:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  162 |         if(enum_buffer(18))enum_control({0x80,6,0x100,0,8},EnumStep::FirstDescriptorDone);return;
+      |         ^~
+./sterowniki/usb/xhci_enumeration.inc:162:91: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  162 |         if(enum_buffer(18))enum_control({0x80,6,0x100,0,8},EnumStep::FirstDescriptorDone);return;
+      |                                                                                           ^~~~~~
+./sterowniki/usb/xhci_enumeration.inc:184:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  184 |         if(enum_buffer(9))enum_control({0x80,6,0x200,0,9},EnumStep::ConfigHeaderDone);return;
+      |         ^~
+./sterowniki/usb/xhci_enumeration.inc:184:87: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  184 |         if(enum_buffer(9))enum_control({0x80,6,0x200,0,9},EnumStep::ConfigHeaderDone);return;
+      |                                                                                       ^~~~~~
+./sterowniki/usb/xhci_enumeration.inc:209:9: warning: this ‘else’ clause does not guard... [-Wmisleading-indentation]
+  209 |         else e.step=EnumStep::ReportDescriptor;return;
+      |         ^~~~
+./sterowniki/usb/xhci_enumeration.inc:209:48: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘else’
+  209 |         else e.step=EnumStep::ReportDescriptor;return;
+      |                                                ^~~~~~
+Intel capabilities/legacy handoff/address width: 39 checks PASS
+Control TRB requests/directions/reserved fields: 32 checks PASS
+Multi-interface/companion/interval/DCI/Boot Mouse/packed report: 1597 checks PASS
+Ring full/wrap/Link/pre-publication observation: 1497 checks PASS
+Production Intel-style boot/hotplug/EP0/IRQ/mouse/requeue/removal: 18874 checks PASS
+Control short/Stall recovery/USB2-USB3 PORTSC/reset failure: 1674 checks PASS
+Connected-at-boot mouse/first live report: 320 checks PASS
+Physical xHCI mouse total: 24033 checks PASS; allocations 248 releases 248
+Production IRQ allocator uniqueness/exhaustion/IF restore: 3740 checks PASS
+PASS=4 FAIL=0: production heap/PMM/PCI locks, IRQ restoration, contention and failure paths

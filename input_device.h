@@ -275,6 +275,9 @@ const char* input_bus_name(uint32_t bus_type);
 /* Dyspozycja pojedynczego lub serii zdarzen z urzadzenia wejsciowego */
 void input_dispatch_event(InputDevice* dev, const InputEvent* ev);
 void input_dispatch_events(InputDevice* dev, const InputEvent* evs, size_t count);
+// Transport report boundary/reset: forget unpublished motion without changing
+// registration, PROVEN_ACTIVE, coordinate mapping or another input source.
+void input_discard_pointer_report(InputDevice* dev);
 
 /* Polling / obsluga zarejestrowanych urzadzen spoza kontekstu twardego IRQ */
 void input_service_all(void);

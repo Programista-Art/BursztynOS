@@ -69,6 +69,8 @@ struct VirtioInputEvent {
     uint32_t value;
 };
 static_assert(sizeof(VirtioInputEvent) == 8, "VirtioInputEvent rozmiar != 8 B");
+static_assert(offsetof(VirtioInputEvent,type)==0 && offsetof(VirtioInputEvent,code)==2 &&
+              offsetof(VirtioInputEvent,value)==4, "VirtIO input wire offsets");
 
 struct VirtioInputConfig {
     uint8_t select;
@@ -142,6 +144,16 @@ struct VirtioInputDriver {
     uint64_t           syn_sequence;
     uint32_t           diagnostic_events;
     bool               first_event_logged;
+    // Pointer publication is independent of transport DRIVER_OK. Pre-desktop
+    // completions are consumed/recycled, never replayed as interactive motion.
+    bool               pointer_interactive;
+    bool               discard_until_syn;
+    bool               stale_completions;
+    uint16_t           stale_until_used;
+    uint16_t           registration_used;
+    uint16_t           pre_registration_events;
+    int                pointer_width, pointer_height;
+    uint64_t           pointer_generation;
 };
 
 /* =========================================================================
@@ -174,6 +186,9 @@ size_t virtio_input_poll_events(VirtioInputDriver* drv, size_t max_events);
 
 /* Wspolna funkcja serwisowa wywolywana periodycznie z glownej petli idle */
 void virtio_input_obsluz(void);
+// Desktop-root readiness; the consumer also waits for the splash to finish.
+// This affects only VirtIO pointers. Keyboard and physical sources keep running.
+void virtio_input_set_desktop_ready(bool ready);
 
 /* Testy integracyjne / obciazeniowe (wylacznie w trybie bursztyn.test=automated) */
 bool virtio_input_stress_test(VirtioInputDriver* drv);

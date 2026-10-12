@@ -18,6 +18,7 @@ bool skladacz_obrazu_czy_widoczna(int pid){return pid==2&&root_visible;}
 #define assert(c) do {++checks;if(!(c)){fprintf(stderr,"FAIL %d: %s\n",__LINE__,#c);abort();}}while(0)
 bool hpet_dostepny(){return clock_ok;}
 uint64_t czas_monotoniczny_us(){return now;}
+uint64_t czas_monotoniczny_ns(){return now*1000;}
 void* bufor_grafiki_alokuj(size_t n){if(fail_alloc)return nullptr;++allocations;++live;return calloc(1,n);}
 void bufor_grafiki_zwolnij(void* p){assert(p&&live);--live;free(p);}
 static std::vector<std::string> logged_strings;

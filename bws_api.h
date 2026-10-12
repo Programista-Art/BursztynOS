@@ -101,6 +101,15 @@ enum BwsNumer : uint64_t {
     BWS_MOTYW_POLECENIE = 87,
     BWS_PULPIT_GOTOWY = 88,
 
-    BWS_PIERWSZY_WOLNY = 89
+    /*
+     * Diagnostyka HDA (Test dźwięku). Znaczenie zamrozone.
+     *  89 = wylacznie odczyt diagnostyczny / kontrola skanu
+     *  90 = kontrolowany test odtwarzania
+     * Brak syscalla z surowymi verbami HDA.
+     */
+    BWS_HDA_DIAG = 89,
+    BWS_HDA_TEST = 90,
+
+    BWS_PIERWSZY_WOLNY = 91
 };
 

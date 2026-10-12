@@ -1,0 +1,110 @@
+{
+  "argv": [
+    "qemu-system-x86_64",
+    "-bios",
+    "/usr/share/ovmf/OVMF.fd",
+    "-machine",
+    "pc,hpet=on",
+    "-cpu",
+    "max",
+    "-accel",
+    "tcg,thread=single",
+    "-smp",
+    "1",
+    "-m",
+    "2G",
+    "-audiodev",
+    "alsa,id=snd",
+    "-device",
+    "intel-hda",
+    "-device",
+    "hda-output,audiodev=snd",
+    "-serial",
+    "stdio",
+    "-display",
+    "sdl",
+    "-drive",
+    "id=disk,file=wirtualny_dysk.img,format=raw,if=none",
+    "-device",
+    "virtio-blk-pci,drive=disk,disable-legacy=on",
+    "-netdev",
+    "user,id=n1",
+    "-device",
+    "virtio-net-pci,netdev=n1,disable-legacy=on",
+    "-object",
+    "rng-builtin,id=rng0",
+    "-device",
+    "virtio-rng-pci,rng=rng0,disable-legacy=on",
+    "-vga",
+    "none",
+    "-device",
+    "virtio-vga,disable-legacy=on,xres=1280,yres=720",
+    "-device",
+    "virtio-keyboard-pci",
+    "-device",
+    "virtio-mouse-pci",
+    "-boot",
+    "order=d,menu=on",
+    "-cdrom",
+    "BursztynOS.iso"
+  ],
+  "host_os": "Linux-7.0.0-31-generic-x86_64-with-glibc2.39",
+  "qemu_binary": "/usr/bin/qemu-system-x86_64",
+  "topology": [
+    {
+      "order": 0,
+      "device": "intel-hda",
+      "expected_class": "audio",
+      "expected_bdf": "00:02.0"
+    },
+    {
+      "order": 1,
+      "device": "virtio-blk-pci,drive=disk,disable-legacy=on",
+      "expected_class": "storage",
+      "expected_bdf": "00:03.0"
+    },
+    {
+      "order": 2,
+      "device": "virtio-net-pci,netdev=n1,disable-legacy=on",
+      "expected_class": "network",
+      "expected_bdf": "00:04.0"
+    },
+    {
+      "order": 3,
+      "device": "virtio-rng-pci,rng=rng0,disable-legacy=on",
+      "expected_class": "rng",
+      "expected_bdf": "00:05.0"
+    },
+    {
+      "order": 4,
+      "device": "virtio-vga,disable-legacy=on,xres=1280,yres=720",
+      "expected_class": "gpu",
+      "expected_bdf": "00:06.0"
+    },
+    {
+      "order": 5,
+      "device": "virtio-keyboard-pci",
+      "expected_class": "keyboard",
+      "expected_bdf": "00:07.0"
+    },
+    {
+      "order": 6,
+      "device": "virtio-mouse-pci",
+      "expected_class": "relative mouse",
+      "expected_bdf": "00:08.0"
+    }
+  ],
+  "bdf_assumption": "pc/i440fx default host bridge/PIIX at 00:00.0/00:01.*, -vga none, no extra PCI devices",
+  "version": {
+    "returncode": 0,
+    "output": "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)\nCopyright (c) 2003-2023 Fabrice Bellard and the QEMU Project developers\n"
+  },
+  "machines": {
+    "returncode": 0,
+    "output": "Supported machines are:\nmicrovm              microvm (i386)\npc-i440fx-zesty      Ubuntu 17.04 PC (i440FX + PIIX, 1996)\npc-i440fx-yakkety    Ubuntu 16.10 PC (i440FX + PIIX, 1996)\npc-i440fx-xenial     Ubuntu 16.04 PC (i440FX + PIIX, 1996)\npc-i440fx-wily       Ubuntu 15.04 PC (i440FX + PIIX, 1996)\npc-i440fx-trusty     Ubuntu 14.04 PC (i440FX + PIIX, 1996) (deprecated)\nubuntu               Ubuntu 24.04 PC v2 (i440FX + PIIX, arch_caps fix, 1996) (alias of pc-i440fx-noble-v2)\npc-i440fx-noble-v2   Ubuntu 24.04 PC v2 (i440FX + PIIX, arch_caps fix, 1996) (default)\npc                   Ubuntu 24.04 PC (i440FX + PIIX, 1996) (alias of pc-i440fx-noble)\npc-i440fx-noble      Ubuntu 24.04 PC (i440FX + PIIX, 1996)\npc-i440fx-mantic-maxcpus Ubuntu 23.10 PC (i440FX + PIIX, maxcpus=1024, 1996)\npc-i440fx-mantic     Ubuntu 23.10 PC (i440FX + PIIX, 1996)\npc-i440fx-mantic-hpb-maxcpus Ubuntu 23.10 PC (i440FX + PIIX +host-phys-bits=true, maxcpus=1024, 1996)\npc-i440fx-mantic-hpb Ubuntu 23.10 PC (i440FX + PIIX +host-phys-bits=true, 1996)\npc-i440fx-lunar      Ubuntu 23.04 PC (i440FX + PIIX, 1996)\npc-i440fx-lunar-hpb  Ubuntu 23.04 PC (i440FX + PIIX +host-phys-bits=true, 1996)\npc-i440fx-kinetic    Ubuntu 22.10 PC (i440FX + PIIX, 1996)\npc-i440fx-kinetic-hpb Ubuntu 22.10 PC (i440FX + PIIX +host-phys-bits=true, 1996)\npc-i440fx-jammy-maxcpus Ubuntu 22.04 PC (i440FX + PIIX, maxcpus=1024, 1996)\npc-i440fx-jammy      Ubuntu 22.04 PC (i440FX + PIIX, 1996)\npc-i440fx-jammy-hpb-maxcpus Ubuntu 22.04 PC (i440FX + PIIX +host-phys-bits=true, maxcpus=1024, 1996)\npc-i440fx-jammy-hpb  Ubuntu 22.04 PC (i440FX + PIIX +host-phys-bits=true, 1996)\npc-i440fx-impish     Ubuntu 21.10 PC (i440FX + PIIX, 1996)\npc-i440fx-impish-hpb Ubuntu 21.10 PC (i440FX + PIIX +host-phys-bits=true, 1996)\npc-i440fx-hirsute    Ubuntu 21.04 PC (i440FX + PIIX, 1996)\npc-i440fx-hirsute-hpb Ubuntu 21.04 PC (i440FX + PIIX +host-phys-bits=true, 1996)\npc-i440fx-groovy     Ubuntu 20.10 PC (i440FX + PIIX, 1996)\npc-i440fx-groovy-hpb Ubuntu 20.10 PC (i440FX + PIIX +host-phys-bits=true, 1996)\npc-i440fx-focal      Ubuntu 20.04 PC (i440FX + PIIX, 1996)\npc-i440fx-focal-hpb  Ubuntu 20.04 PC (i440FX + PIIX +host-phys-bits=true, 1996)\npc-i440fx-eoan       Ubuntu 19.10 PC (i440FX + PIIX, 1996)\npc-i440fx-eoan-hpb   Ubuntu 19.10 PC (i440FX + PIIX +host-phys-bits=true, 1996)\npc-i440fx-disco      Ubuntu 19.04 PC (i440FX + PIIX, 1996)\npc-i440fx-disco-hpb  Ubuntu 19.04 PC (i440FX + PIIX +host-phys-bits=true, 1996)\npc-i440fx-cosmic     Ubuntu 18.10 PC (i440FX + PIIX, 1996)\npc-i440fx-cosmic-hpb Ubuntu 18.10 PC (i440FX + PIIX +host-phys-bits=true, 1996)\npc-i440fx-bionic     Ubuntu 18.04 PC (i440FX + PIIX, 1996)\npc-i440fx-bionic-hpb Ubuntu 18.04 PC (i440FX + PIIX, +host-phys-bits=true, 1996)\npc-i440fx-artful     Ubuntu 17.10 PC (i440FX + PIIX, 1996)\npc                   Standard PC (i440FX + PIIX, 1996) (alias of pc-i440fx-8.2)\npc-i440fx-8.2        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-8.1        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-8.0        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-7.2        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-7.1        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-7.0        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-6.2        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-6.1        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-6.0        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-5.2        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-5.1        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-5.0        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-4.2        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-4.1        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-4.0        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-3.1        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-3.0        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-2.9        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-2.8        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-2.7        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-2.6        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-2.5        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-2.4        Standard PC (i440FX + PIIX, 1996)\npc-i440fx-2.3        Standard PC (i440FX + PIIX, 1996) (deprecated)\npc-i440fx-2.2        Standard PC (i440FX + PIIX, 1996) (deprecated)\npc-i440fx-2.12       Standard PC (i440FX + PIIX, 1996)\npc-i440fx-2.11       Standard PC (i440FX + PIIX, 1996)\npc-i440fx-2.10       Standard PC (i440FX + PIIX, 1996)\npc-i440fx-2.1        Standard PC (i440FX + PIIX, 1996) (deprecated)\npc-i440fx-2.0        Standard PC (i440FX + PIIX, 1996) (deprecated)\npc-q35-zesty         Ubuntu 17.04 PC (Q35 + ICH9, 2009)\npc-q35-yakkety       Ubuntu 16.10 PC (Q35 + ICH9, 2009)\npc-q35-xenial        Ubuntu 16.04 PC (Q35 + ICH9, 2009)\nubuntu-q35           Ubuntu 24.04 PC v2 (Q35 + ICH9, arch_caps fix, 2009) (alias of pc-q35-noble-v2)\npc-q35-noble-v2      Ubuntu 24.04 PC v2 (Q35 + ICH9, arch_caps fix, 2009)\nq35                  Ubuntu 24.04 PC (Q35 + ICH9, 2009) (alias of pc-q35-noble)\npc-q35-noble         Ubuntu 24.04 PC (Q35 + ICH9, 2009)\npc-q35-mantic-maxcpus Ubuntu 23.10 PC (Q35 + ICH9, maxcpus=1024, 2009)\npc-q35-mantic        Ubuntu 23.10 PC (Q35 + ICH9, 2009)\npc-q35-mantic-hpb-maxcpus Ubuntu 23.10 PC (Q35 + ICH9, +host-phys-bits=true, maxcpus=1024, 2009)\npc-q35-mantic-hpb    Ubuntu 23.10 PC (Q35 + ICH9, +host-phys-bits=true, 2009)\npc-q35-lunar         Ubuntu 23.04 PC (Q35 + ICH9, 2009)\npc-q35-lunar-hpb     Ubuntu 23.04 PC (Q35 + ICH9, +host-phys-bits=true, 2009)\npc-q35-kinetic       Ubuntu 22.10 PC (Q35 + ICH9, 2009)\npc-q35-kinetic-hpb   Ubuntu 22.10 PC (Q35 + ICH9, +host-phys-bits=true, 2009)\npc-q35-jammy-maxcpus Ubuntu 22.04 PC (Q35 + ICH9, maxcpus=1024, 2009)\npc-q35-jammy         Ubuntu 22.04 PC (Q35 + ICH9, 2009)\npc-q35-jammy-hpb-maxcpus Ubuntu 22.04 PC (Q35 + ICH9, +host-phys-bits=true, maxcpus=1024, 2009)\npc-q35-jammy-hpb     Ubuntu 22.04 PC (Q35 + ICH9, +host-phys-bits=true, 2009)\npc-q35-impish        Ubuntu 21.10 PC (Q35 + ICH9, 2009)\npc-q35-impish-hpb    Ubuntu 21.10 PC (Q35 + ICH9, +host-phys-bits=true, 2009)\npc-q35-hirsute       Ubuntu 21.04 PC (Q35 + ICH9, 2009)\npc-q35-hirsute-hpb   Ubuntu 21.04 PC (Q35 + ICH9, +host-phys-bits=true, 2009)\npc-q35-groovy        Ubuntu 20.10 PC (Q35 + ICH9, 2009)\npc-q35-groovy-hpb    Ubuntu 20.10 PC (Q35 + ICH9, +host-phys-bits=true, 2009)\npc-q35-focal         Ubuntu 20.04 PC (Q35 + ICH9, 2009)\npc-q35-focal-hpb     Ubuntu 20.04 PC (Q35 + ICH9, +host-phys-bits=true, 2009)\npc-q35-eoan          Ubuntu 19.10 PC (Q35 + ICH9, 2009)\npc-q35-eoan-hpb      Ubuntu 19.10 PC (Q35 + ICH9, +host-phys-bits=true, 2009)\npc-q35-disco         Ubuntu 19.04 PC (Q35 + ICH9, 2009)\npc-q35-disco-hpb     Ubuntu 19.04 PC (Q35 + ICH9, +host-phys-bits=true, 2009)\npc-q35-cosmic        Ubuntu 18.10 PC (Q35 + ICH9, 2009)\npc-q35-cosmic-hpb    Ubuntu 18.10 PC (Q35 + ICH9, +host-phys-bits=true, 2009)\npc-q35-bionic        Ubuntu 18.04 PC (Q35 + ICH9, 2009)\npc-q35-bionic-hpb    Ubuntu 18.04 PC (Q35 + ICH9, +host-phys-bits=true, 2009)\npc-q35-artful        Ubuntu 17.10 PC (Q35 + ICH9, 2009)\nq35                  Standard PC (Q35 + ICH9, 2009) (alias of pc-q35-8.2)\npc-q35-8.2           Standard PC (Q35 + ICH9, 2009)\npc-q35-8.1           Standard PC (Q35 + ICH9, 2009)\npc-q35-8.0           Standard PC (Q35 + ICH9, 2009)\npc-q35-7.2           Standard PC (Q35 + ICH9, 2009)\npc-q35-7.1           Standard PC (Q35 + ICH9, 2009)\npc-q35-7.0           Standard PC (Q35 + ICH9, 2009)\npc-q35-6.2           Standard PC (Q35 + ICH9, 2009)\npc-q35-6.1           Standard PC (Q35 + ICH9, 2009)\npc-q35-6.0           Standard PC (Q35 + ICH9, 2009)\npc-q35-5.2           Standard PC (Q35 + ICH9, 2009)\npc-q35-5.1           Standard PC (Q35 + ICH9, 2009)\npc-q35-5.0           Standard PC (Q35 + ICH9, 2009)\npc-q35-4.2           Standard PC (Q35 + ICH9, 2009)\npc-q35-4.1           Standard PC (Q35 + ICH9, 2009)\npc-q35-4.0.1         Standard PC (Q35 + ICH9, 2009)\npc-q35-4.0           Standard PC (Q35 + ICH9, 2009)\npc-q35-3.1           Standard PC (Q35 + ICH9, 2009)\npc-q35-3.0           Standard PC (Q35 + ICH9, 2009)\npc-q35-2.9           Standard PC (Q35 + ICH9, 2009)\npc-q35-2.8           Standard PC (Q35 + ICH9, 2009)\npc-q35-2.7           Standard PC (Q35 + ICH9, 2009)\npc-q35-2.6           Standard PC (Q35 + ICH9, 2009)\npc-q35-2.5           Standard PC (Q35 + ICH9, 2009)\npc-q35-2.4           Standard PC (Q35 + ICH9, 2009)\npc-q35-2.12          Standard PC (Q35 + ICH9, 2009)\npc-q35-2.11          Standard PC (Q35 + ICH9, 2009)\npc-q35-2.10          Standard PC (Q35 + ICH9, 2009)\nisapc                ISA-only PC\nnone                 empty machine\nx-remote             Experimental remote machine\n"
+  },
+  "virtio_mouse_properties": {
+    "returncode": 0,
+    "output": "virtio-mouse-pci options:\n  acpi-index=<uint32>    -  (default: 0)\n  addr=<int32>           - Slot and optional function number, example: 06.0 or 06 (default: -1)\n  aer=<bool>             - on/off (default: false)\n  any_layout=<bool>      - on/off (default: true)\n  ats=<bool>             - on/off (default: false)\n  disable-legacy=<OnOffAuto> - on/off/auto (default: \"auto\")\n  disable-modern=<bool>  -  (default: false)\n  display=<str>\n  event_idx=<bool>       - on/off (default: true)\n  failover_pair_id=<str>\n  head=<uint32>          -  (default: 0)\n  indirect_desc=<bool>   - on/off (default: true)\n  iommu_platform=<bool>  - on/off (default: false)\n  migrate-extra=<bool>   - on/off (default: true)\n  modern-pio-notify=<bool> - on/off (default: false)\n  multifunction=<bool>   - on/off (default: false)\n  notify_on_empty=<bool> - on/off (default: true)\n  packed=<bool>          - on/off (default: false)\n  page-per-vq=<bool>     - on/off (default: false)\n  queue_reset=<bool>     - on/off (default: true)\n  rombar=<uint32>        -  (default: 1)\n  romfile=<str>\n  romsize=<uint32>       -  (default: 4294967295)\n  serial=<str>\n  use-disabled-flag=<bool> -  (default: true)\n  use-started=<bool>     -  (default: true)\n  vectors=<uint32>       -  (default: 2)\n  virtio-backend=<child<virtio-mouse-device>>\n  virtio-pci-bus-master-bug-migration=<bool> - on/off (default: false)\n  wheel-axis=<bool>      -  (default: true)\n  x-ats-page-aligned=<bool> - on/off (default: true)\n  x-disable-legacy-check=<bool> -  (default: false)\n  x-disable-pcie=<bool>  - on/off (default: false)\n  x-ignore-backend-features=<bool> -  (default: false)\n  x-pcie-ari-nextfn-1=<bool> - on/off (default: false)\n  x-pcie-deverr-init=<bool> - on/off (default: true)\n  x-pcie-err-unc-mask=<bool> - on/off (default: true)\n  x-pcie-extcap-init=<bool> - on/off (default: true)\n  x-pcie-flr-init=<bool> - on/off (default: true)\n  x-pcie-lnkctl-init=<bool> - on/off (default: true)\n  x-pcie-lnksta-dllla=<bool> - on/off (default: true)\n  x-pcie-pm-init=<bool>  - on/off (default: true)\n"
+  }
+}

@@ -1,0 +1,9 @@
+#define main fixture_main
+#include "/tmp/bursztyn-boot-input-before/fixture.inc"
+#undef main
+int main(){fixture();clock_step=100000;control_delay=400000000;
+    put(registers,0x80+PORTSC_BASE+8*16,PORT_CCS|(1U<<10)|(1U<<17));
+    CHECK(xhci_inicjalizuj_pierwszy());for(unsigned n=0;n<8;++n)usb_obsluz();
+    const auto before=mock_now;usb_obsluz();
+    printf("PREVIOUS deferred invocation simulated ns=%llu controls=%u HID=%u splash-visible=%u\n",(unsigned long long)(mock_now-before),control_requests,xhc.devices[2].hid_gotowy,0);
+    clean();}

@@ -1,0 +1,26 @@
+[
+  {
+    "iso": "BursztynOS.iso",
+    "sha256": "6d555ad7a9c7da9e9b2739fcc478302c1181ee1d0a7e3e4931842e69b3b2d95e",
+    "size": 35446784,
+    "embedded_kernel_matches": true,
+    "boot_timing_emitter": false,
+    "virtio_input_emitter": false
+  },
+  {
+    "iso": "BursztynOS-boot-xhci-timing-diag.iso",
+    "sha256": "29900f028f25ac277e75afec08b53c2246dfb6ef1473331c26d1a05a873b553a",
+    "size": 35446784,
+    "embedded_kernel_matches": true,
+    "boot_timing_emitter": true,
+    "virtio_input_emitter": false
+  },
+  {
+    "iso": "BursztynOS-virtio-input-qemu-diag.iso",
+    "sha256": "97e1ee1025e52d7113fbbce03744d15bf6e844309ffba06fbbffb74dce528262",
+    "size": 35446784,
+    "embedded_kernel_matches": true,
+    "boot_timing_emitter": false,
+    "virtio_input_emitter": true
+  }
+]

@@ -15,13 +15,18 @@ int grafika_pobierz_szerokosc(){return width;}
 int grafika_pobierz_wysokosc(){return height;}
 extern "C" int grafika_pobierz_mysz_x(){return px;}
 extern "C" int grafika_pobierz_mysz_y(){return py;}
-static void record(const char* kind,int x,int y,uint8_t b){printf("GUI %s %d %d %u %d %d\n",kind,x,y,b,px,py);buttons=b;}
+static void record(const char* kind,int64_t x,int64_t y,uint8_t b){printf("GUI %s %lld %lld %u %d %d\n",kind,(long long)x,(long long)y,b,px,py);buttons=b;}
 extern "C" void zaktualizuj_mysze_zrodlo(int dx,int dy,uint8_t b,const char*){
     const int64_t x=int64_t(px)+dx,y=int64_t(py)-dy;
     if(width>0&&height>0){px=int(std::clamp(x,int64_t(0),int64_t(width)-1));py=int(std::clamp(y,int64_t(0),int64_t(height)-1));}
     record("relative",dx,dy,b);
 }
 extern "C" void zaktualizuj_mysze_pozycja_zrodlo(int x,int y,uint8_t b,const char*){px=x;py=y;record("absolute",x,y,b);}
+extern "C" void zaktualizuj_mysze_wzgledne_zrodlo(int32_t dx,int32_t dy,uint8_t b,const char*){
+    const int64_t x=int64_t(px)+dx,y=int64_t(py)+dy;
+    if(width>0&&height>0){px=int(std::clamp(x,int64_t(0),int64_t(width)-1));py=int(std::clamp(y,int64_t(0),int64_t(height)-1));}
+    record("relative",dx,-int64_t(dy),b);
+}
 extern "C" void zaktualizuj_kolo_myszy(int x,int y,uint8_t b){record("wheel",x,y,b);}
 extern "C" void klawiatura_obsluz_klawisz(uint16_t,uint32_t){}
 static void state(const char* stage,const InputDevice& t,const InputDevice& u){

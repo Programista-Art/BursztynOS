@@ -111,13 +111,16 @@ void context_tests(){
     auto completion=[&](){auto& e=events[xhc.event_index];const uint64_t ptr=xhc.command.dma.physical_address+uint64_t(xhc.command.producer_index)*16;
         e={uint32_t(ptr),uint32_t(ptr>>32),1U<<24,xhci_trb::type_field(xhci_trb::TYPE_COMMAND_COMPLETION)|(1U<<24)|(xhc.event_cycle?1U:0U)};};
     hid_wynik_konfiguracji h{};h.znaleziono=true;h.dci=3;h.endpoint=0x81;h.maksymalny_rozmiar=8;h.interwal=10;h.type=USB_HID_POINTER;
-    completion();CHECK(xhci_skonfiguruj_endpoint(d,h));
+    completion();XhciTrb command{};CHECK(prepare_hid_endpoint(d,h,command));
+    CHECK(submit_command(command,EnumStep::ConfigureWait));CHECK(xhc.wanted_command);
+    CHECK(xhci_poll_events(1)==1);CHECK(command_ready(1)==1);
     uint32_t* ep=xhci_context_ptr(d.input_context,3);
     CHECK((ep[4]>>16)==8);CHECK((ep[4]&65535)==8);CHECK(((ep[1]>>3)&7)==7);
     CHECK(((ep[0]>>16)&255)==6);CHECK(ep[3]==uint32_t(d.hid_ring.dma.physical_address>>32));
     xhci_command_ring_destroy(&d.hid_ring);dma_release(&d.hid_raport);
     // High-speed bInterval=1 legitimately encodes interval zero.
-    d.logical_speed=USB_HIGH_SPEED;h.interwal=1;completion();CHECK(xhci_skonfiguruj_endpoint(d,h));
+    d.logical_speed=USB_HIGH_SPEED;h.interwal=1;completion();CHECK(prepare_hid_endpoint(d,h,command));
+    CHECK(submit_command(command,EnumStep::ConfigureWait));CHECK(xhci_poll_events(1)==1);CHECK(command_ready(1)==1);
     CHECK(d.hid_interwal==0);
     d.enabled=false;free_device(d);xhci_command_ring_destroy(&xhc.command);xhc=Controller{};
     printf("xHCI Supported Protocol/endpoint context: %u checks PASS\n",checks-start);

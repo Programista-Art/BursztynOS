@@ -158,6 +158,8 @@ void zaktualizuj_mysze_pozycja_zrodlo(int x,
                                       int y,
                                       uint8_t przyciski,
                                       const char* zrodlo);
+// Relative screen-down input; widen before adapting the legacy upward Y API.
+void zaktualizuj_mysze_wzgledne_zrodlo(int32_t dx,int32_t dy,uint8_t przyciski,const char* zrodlo);
 
 int grafika_pobierz_mysz_x();
 int grafika_pobierz_mysz_y();

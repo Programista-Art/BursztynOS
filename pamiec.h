@@ -456,6 +456,12 @@ void ZmapujStrone(
     uint32_t flagi
 );
 
+/* Loader-only checked mapping in the current private process CR3. A successful
+ * call transfers ownership of the frame to that address space; a failed call
+ * leaves the frame with the caller. Supervisor identity mappings may be
+ * replaced, but an existing USER page must never be overwritten. */
+extern "C" bool VmmMapujNowaStroneProcesu(void* va, void* pa, bool zapis);
+
 /* Waskie API dla natywnych obiektow SHM. Operuje tylko na aktualnym CR3,
  * stronach 4 KiB USER i nigdy nie publikuje adresu fizycznego Ring 3. */
 extern "C" bool VmmMapujStroneWspoldzielona(

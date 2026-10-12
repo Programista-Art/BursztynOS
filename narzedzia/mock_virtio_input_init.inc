@@ -5,6 +5,8 @@ struct InitFunction {
     std::vector<uint8_t> bar;
     uint8_t pci[256]{};
     bool tablet;
+    bool relative = false, buttons_only = false;
+    uint8_t relative_bits = 3;
     bool accept_features = true, accept_vector = true, reset_completes = true;
     uint8_t abs_size = 20;
     uint8_t abs_y_size = 20;
@@ -12,6 +14,7 @@ struct InitFunction {
     int32_t abs_min = 0, abs_max = 32767;
     uint32_t accesses = 0, resets = 0;
     uint32_t notifies = 0;
+    uint16_t events_consumed = 0;
     std::vector<uint8_t> statuses;
     InitFunction(uint8_t slot, bool tab, uint16_t size = 64, uint32_t cfg_len = 136)
         : bar(4096, 0xA5), tablet(tab) {

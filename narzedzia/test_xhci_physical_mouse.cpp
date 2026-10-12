@@ -14,6 +14,8 @@
 static bool functional_trace=false;
 static uint64_t mock_now=0,clock_step=1000,control_delay=0,pending_due=0;
 static unsigned pending_control=0;
+static bool delayed_commands=false;static uint64_t delayed_command_pointer=0;
+static uint8_t delayed_command_slot=0,command_error=1,enable_slot_next=2;
 static uint64_t ownership_delay=0,ownership_due=0;
 static void progress_clock();
 static void trace_write(const char* kind,uint64_t offset,uint64_t value){
@@ -135,10 +137,11 @@ void xhci_host_write(volatile uint8_t* b,uint32_t off,uint32_t v){
     put(b,off,v);
     if(b==xhc.doorbells && off==0 && xhc.wanted_command){
         const auto& trb=xhc.command.trbs[(xhc.wanted_command-xhc.command.dma.physical_address)/16];
-        const uint32_t type=xhci_trb::type(trb.dword3);const unsigned slot=type==9?2:trb.dword3>>24;
+        const uint32_t type=xhci_trb::type(trb.dword3);const unsigned slot=type==9?enable_slot_next++:trb.dword3>>24;
         if(type==11){auto& d=xhc.devices[slot];std::memcpy(d.output_context.virtual_address,
             static_cast<uint8_t*>(d.input_context.virtual_address)+xhc.context_size,32*xhc.context_size);context(d.output_context,0)[3]=5;}
-        emit(xhc.wanted_command,1U<<24,xhci_trb::type_field(33)|(uint32_t(command_slot_override?command_slot_override:slot)<<24));
+        if(delayed_commands){delayed_command_pointer=xhc.wanted_command;delayed_command_slot=uint8_t(command_slot_override?command_slot_override:slot);}
+        else emit(xhc.wanted_command,uint32_t(command_error)<<24,xhci_trb::type_field(33)|(uint32_t(command_slot_override?command_slot_override:slot)<<24));
     }else if(b==xhc.doorbells && off && v==1 && xhc.wanted_transfer){if(control_delay){pending_control=off/4;pending_due=mock_now+control_delay;}else control_complete(xhc.devices[off/4]);}
 }
 
@@ -172,10 +175,12 @@ static void ring_full_test(){const unsigned start=checks;XhciProducerRing ring{}
 static void section(const char* name,unsigned start){printf("%s: %u checks PASS\n",name,checks-start);}
 static void clean(){
     for(auto& d:xhc.devices){d.enabled=false;free_device(d);}release_interrupt(xhc);release_structures(xhc);
+    dma_release(&enumeration.data);enumeration=Enumeration{};
     pending_control=0;ownership_due=0;input_reset_all();xhc=Controller{};dma_map.clear();CHECK(allocated==released);
 }
 static void fixture(bool csz64=true){
     clean();model=true;firmware_stuck=reset_stuck=halt_stuck=cnr_stuck=port_reset_stuck=stall_protocol=conventional_wheel_descriptor=false;
+    delayed_commands=false;delayed_command_pointer=0;command_error=1;enable_slot_next=2;
     clock_step=1000;control_delay=0;pending_control=0;ownership_delay=ownership_due=0;control_error=command_slot_override=0;control_short=0;
     event_producer=0;event_cycle=true;port_values.clear();next_dma=0x100000;
     std::memset(registers,0,sizeof(registers));std::memset(irq_bar,0,sizeof(irq_bar));std::memset(cfg,0,sizeof(cfg));
@@ -194,6 +199,7 @@ static void fixture(bool csz64=true){
     put(registers,0x120,2U|(3U<<24));put(registers,0x124,0x20425355);put(registers,0x128,15U|(6U<<8));
     // Firmware may leave CSC set even on an empty port. Must acknowledge it.
     put(registers,0x80+PORTSC_BASE+8*16,1U<<17);
+    BootTiming::first_visible_splash=true;
     width=1280;height=720;px=640;py=360;input_set_pointer_ready(true);
 }
 static void caps_tests(){unsigned start=checks;
@@ -274,6 +280,7 @@ static void boot_and_insert(bool csz64,bool boot_stalls=false,bool wheel=false){
     CHECK(!(read32(xhc.operational,PORTSC_BASE+8*16)&PORT_RW1C));
     const uint32_t port=PORTSC_BASE+8*16;put(xhc.operational,port,(1U<<9)|PORT_CCS|(1U<<10)|(1U<<17));
     emit(uint64_t(9)<<24,0,xhci_trb::type_field(34));xhci_irq(&xhc);usb_obsluz();
+    for(unsigned call=0;call<400&&!xhc.devices[2].hid_transfer_oczekiwany;++call)usb_obsluz();
     auto& d=xhc.devices[2];CHECK(d.enabled&&d.hid_gotowy&&d.boot_mouse==!boot_stalls);CHECK(d.root_port==9&&d.speed_id==1);
     CHECK(d.hid_dci==11&&d.hid_endpoint==0x85);CHECK(d.ep0_mps==64);CHECK(d.hid_ring.outstanding==1);
     CHECK(d.pointer_device.pointer_mode==INPUT_POINTER_RELATIVE);CHECK(d.pointer_device.pointer_state==INPUT_POINTER_ARMED);
@@ -314,6 +321,7 @@ static void runtime_tests(){unsigned start=checks;
         const uint64_t current=d.hid_transfer_pointer;report_complete({},13,0,2,11,first);CHECK(d.hid_transfer_pointer==current);
         const int before_x=px,before_y=py;
         put(xhc.operational,PORTSC_BASE+8*16,(1U<<9)|(1U<<17));emit(uint64_t(9)<<24,0,xhci_trb::type_field(34));xhci_irq(&xhc);usb_obsluz();
+        for(unsigned call=0;call<100&&d.enabled;++call)usb_obsluz();
         CHECK(!d.enabled&&!d.pointer_device.registered);CHECK(input_get_pointer_owner()==&touchpad);CHECK(px==before_x&&py==before_y);
         clean();
     }
@@ -371,7 +379,7 @@ static void coldplug_test(){unsigned start=checks;fixture();touchpad={};touchpad
     touchpad.kinds=INPUT_DEVICE_KIND_MOUSE;touchpad.pointer_mode=INPUT_POINTER_RELATIVE;CHECK(input_register_device(&touchpad));
     put(registers,0x80+PORTSC_BASE+8*16,PORT_CCS|(1U<<10)|(1U<<17));
     CHECK(xhci_inicjalizuj_pierwszy());CHECK(!xhc.devices[2].hid_gotowy);
-    for(unsigned i=0;i<xhc.max_ports;++i)usb_obsluz();
+    for(unsigned i=0;i<400&&!xhc.devices[2].hid_transfer_oczekiwany;++i)usb_obsluz();
     CHECK(xhc.devices[2].hid_gotowy);CHECK(input_get_pointer_owner()==&touchpad);
     report_complete({0,0xf9,13});CHECK(px==633&&py==373);CHECK(xhc.devices[2].pointer_device.pointer_state==INPUT_POINTER_PROVEN_ACTIVE);
     clean();section("Connected-at-boot mouse/first live report",start);

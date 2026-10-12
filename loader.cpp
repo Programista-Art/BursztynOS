@@ -15,6 +15,7 @@
 #include "loader.h"
 #include "pamiec.h"
 #include "pzb.h"
+#include "test_dzwieku_trace.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -29,10 +30,7 @@
 #endif
 
 extern "C" void* PobierzAktualnePML4();
-extern "C" uint8_t* bsp_wczytaj_plik_do_pamieci(
-    const char* sciezka,
-    uint64_t* rozmiar_wyj
-);
+#include "psf.h"
 
 /*
  * Funkcja z bezpieczenstwo.cpp.
@@ -186,7 +184,7 @@ struct StanPrzerwan {
 
 static inline StanPrzerwan wylacz_przerwania() {
     StanPrzerwan stan{};
-
+#ifndef BURSZTYN_LOADER_RUNTIME_HOST_TEST
     asm volatile(
         "pushfq\n\t"
         "popq %0\n\t"
@@ -195,6 +193,7 @@ static inline StanPrzerwan wylacz_przerwania() {
         :
         : "memory", "cc"
     );
+#endif
 
     return stan;
 }
@@ -205,7 +204,9 @@ static inline void przywroc_przerwania(StanPrzerwan stan) {
      * biezacego kodu i nie powinny byc nadpisywane przez helper.
      */
     if ((stan.rflags & (1ULL << 9)) != 0) {
+#ifndef BURSZTYN_LOADER_RUNTIME_HOST_TEST
         asm volatile("sti" ::: "memory");
+#endif
     }
 }
 
@@ -420,13 +421,13 @@ static void zwolnij_rezerwacje_procesu(
 
 } // namespace
 
-extern "C" bool bur_waliduj_naglowek(
+extern "C" const char* bur_blad_naglowka(
     const NaglowekBur& naglowek,
     uint64_t rozmiar_pliku
 ) {
     if (rozmiar_pliku < sizeof(NaglowekBur) ||
         rozmiar_pliku > BUR_MAKS_ROZMIAR_PLIKU) {
-        return false;
+        return "file-size-out-of-range";
     }
 
     const uint8_t oczekiwana_magia[4] = {
@@ -437,7 +438,7 @@ extern "C" bool bur_waliduj_naglowek(
             naglowek.magia,
             oczekiwana_magia,
             sizeof(oczekiwana_magia))) {
-        return false;
+        return "invalid-magic";
     }
 
     /*
@@ -448,18 +449,18 @@ extern "C" bool bur_waliduj_naglowek(
      */
     if (naglowek.tekst_rozmiar == 0 ||
         naglowek.tekst_rozmiar > BUR_MAKS_TEKST_ROZMIAR) {
-        return false;
+        return "text-size-out-of-range";
     }
 
     if ((naglowek.tekst_rozmiar & MASKA_STRONY) != 0 ||
         (naglowek.tekst_przesuniecie & MASKA_STRONY) != 0 ||
         (naglowek.tekst_wirtualny & MASKA_STRONY) != 0) {
-        return false;
+        return "text-not-page-aligned";
     }
 
     if (naglowek.tekst_przesuniecie < sizeof(NaglowekBur) ||
         naglowek.tekst_przesuniecie > rozmiar_pliku) {
-        return false;
+        return "text-file-offset-out-of-range";
     }
 
     uint64_t koniec_tekstu_w_pliku = 0;
@@ -468,7 +469,7 @@ extern "C" bool bur_waliduj_naglowek(
             naglowek.tekst_rozmiar,
             &koniec_tekstu_w_pliku) ||
         koniec_tekstu_w_pliku > rozmiar_pliku) {
-        return false;
+        return "text-file-end-overflow-or-truncated";
     }
 
     uint64_t koniec_tekstu_va = 0;
@@ -478,7 +479,7 @@ extern "C" bool bur_waliduj_naglowek(
             MIN_ADRES_USER,
             BAZA_STERTY_USER,
             &koniec_tekstu_va)) {
-        return false;
+        return "text-address-overflow-or-outside-user-image";
     }
 
     /*
@@ -490,13 +491,13 @@ extern "C" bool bur_waliduj_naglowek(
 
     if (naglowek.dane_rozmiar != 0) {
         if (naglowek.dane_rozmiar > BUR_MAKS_DANE_ROZMIAR) {
-            return false;
+            return "data-size-out-of-range";
         }
 
         if ((naglowek.dane_rozmiar & MASKA_STRONY) != 0 ||
             (naglowek.dane_przesuniecie & MASKA_STRONY) != 0 ||
             (naglowek.dane_wirtualny & MASKA_STRONY) != 0) {
-            return false;
+            return "data-not-page-aligned";
         }
 
         uint64_t calkowity_rozmiar_va = 0;
@@ -505,12 +506,12 @@ extern "C" bool bur_waliduj_naglowek(
                 naglowek.dane_rozmiar,
                 &calkowity_rozmiar_va) ||
             calkowity_rozmiar_va > BUR_MAKS_CALKOWITY_ROZMIAR) {
-            return false;
+            return "mapped-size-overflow-or-exceeds-maximum";
         }
 
         if (naglowek.dane_przesuniecie < sizeof(NaglowekBur) ||
             naglowek.dane_przesuniecie > rozmiar_pliku) {
-            return false;
+            return "data-file-offset-out-of-range";
         }
 
         if (!zakres_w_przedziale(
@@ -519,7 +520,7 @@ extern "C" bool bur_waliduj_naglowek(
                 MIN_ADRES_USER,
                 BAZA_STERTY_USER,
                 &koniec_danych_va)) {
-            return false;
+            return "data-address-overflow-or-outside-user-image";
         }
 
         if (zakresy_nachodza(
@@ -527,7 +528,7 @@ extern "C" bool bur_waliduj_naglowek(
                 koniec_tekstu_va,
                 naglowek.dane_wirtualny,
                 koniec_danych_va)) {
-            return false;
+            return "segments-overlap-in-memory";
         }
 
         /*
@@ -544,7 +545,7 @@ extern "C" bool bur_waliduj_naglowek(
         const uint64_t bss_rozmiar =
             naglowek.dane_rozmiar - dane_w_pliku;
         if (bss_rozmiar > BUR_MAKS_BSS_ROZMIAR) {
-            return false;
+            return "zero-fill-exceeds-maximum";
         }
 
         if (dane_w_pliku != 0) {
@@ -554,7 +555,7 @@ extern "C" bool bur_waliduj_naglowek(
                     naglowek.dane_przesuniecie,
                     dane_w_pliku,
                     &koniec_danych_w_pliku)) {
-                return false;
+                return "data-file-end-overflow";
             }
 
             if (zakresy_nachodza(
@@ -562,7 +563,7 @@ extern "C" bool bur_waliduj_naglowek(
                     koniec_tekstu_w_pliku,
                     naglowek.dane_przesuniecie,
                     koniec_danych_w_pliku)) {
-                return false;
+                return "segments-overlap-in-file";
             }
         }
     }
@@ -576,7 +577,7 @@ extern "C" bool bur_waliduj_naglowek(
             BAZA_STOSU_USER,
             MAKS_ROZMIAR_STOSU_USER,
             &stos_obszar_koniec)) {
-        return false;
+        return "stack-range-overflow";
     }
 
     if (zakresy_nachodza(
@@ -584,7 +585,7 @@ extern "C" bool bur_waliduj_naglowek(
             koniec_tekstu_va,
             stos_obszar_start,
             stos_obszar_koniec)) {
-        return false;
+        return "text-overlaps-stack-guard";
     }
 
     if (naglowek.dane_rozmiar != 0) {
@@ -593,7 +594,7 @@ extern "C" bool bur_waliduj_naglowek(
                 koniec_danych_va,
                 stos_obszar_start,
                 stos_obszar_koniec)) {
-            return false;
+            return "data-overlaps-stack-guard";
         }
     }
 
@@ -602,7 +603,7 @@ extern "C" bool bur_waliduj_naglowek(
      */
     if (naglowek.punkt_wejscia < naglowek.tekst_wirtualny ||
         naglowek.punkt_wejscia >= koniec_tekstu_va) {
-        return false;
+        return "entry-outside-text";
     }
 
     /*
@@ -611,7 +612,7 @@ extern "C" bool bur_waliduj_naglowek(
      */
     if (BAZA_STOSU_USER < MIN_ADRES_USER ||
         BAZA_STOSU_USER >= KONIEC_ADRESOW_USER) {
-        return false;
+        return "invalid-user-stack-base";
     }
 
     uint64_t koniec_stosu = 0;
@@ -620,10 +621,63 @@ extern "C" bool bur_waliduj_naglowek(
             ROZMIAR_STOSU_USER,
             &koniec_stosu) ||
         koniec_stosu > KONIEC_ADRESOW_USER) {
-        return false;
+        return "stack-end-overflow";
     }
 
-    return true;
+    return nullptr;
+}
+
+extern "C" bool bur_waliduj_naglowek(const NaglowekBur& n, uint64_t size) {
+    return bur_blad_naglowka(n, size) == nullptr;
+}
+
+extern "C" void bur_formatuj_blad(char* out, size_t cap, const char* path,
+                                   const BurObrazPliku& obraz) {
+    if (!out || !cap) return;
+    size_t pos = 0;
+    auto str = [&](const char* p) {
+        for (size_t i = 0; p && p[i] && pos + 1 < cap; ++i) {
+            const unsigned char c = p[i];
+            out[pos++] = c < 32 ? '?' : c;
+        }
+        out[pos] = 0;
+    };
+    auto num = [&](uint64_t n, unsigned base = 10) {
+        char digits[24]; size_t count = 0;
+        do { digits[count++] = "0123456789abcdef"[n % base]; n /= base; } while (n);
+        while (count && pos + 1 < cap) out[pos++] = digits[--count];
+        out[pos] = 0;
+    };
+    const auto& n = obraz.naglowek;
+    const bool header = obraz.bajty_naglowka == sizeof(n);
+    const bool magic = obraz.bajty_naglowka >= 4 && n.magia[0] == 'B' &&
+        n.magia[1] == 'U' && n.magia[2] == 'R' && n.magia[3] == 0;
+    uint64_t data = 0, mapped = 0;
+    if (header && n.dane_przesuniecie <= obraz.rozmiar) {
+        data = obraz.rozmiar - n.dane_przesuniecie;
+        if (data > n.dane_rozmiar) data = n.dane_rozmiar;
+    }
+    str("[BUR FAIL] path='");
+    for (size_t i = 0; path && path[i] && pos + 1 < cap; ++i) {
+        const unsigned char c = path[i];
+        out[pos++] = c < 32 || c == '\'' ? '?' : c;
+    }
+    out[pos] = 0;
+    str("' file="); num(obraz.rozmiar);
+    str(" max="); num(BUR_MAKS_ROZMIAR_PLIKU);
+    str(" magic="); str(obraz.bajty_naglowka < 4 ? "unavailable" : magic ? "ok" : "bad");
+    str(" version="); str(magic ? "v1-implicit" : "unavailable");
+    str(" header="); str(header ? "complete" : "truncated");
+    str(" text_off=0x"); num(n.tekst_przesuniecie, 16);
+    str(" text_file="); num(n.tekst_rozmiar);
+    str(" data_off=0x"); num(n.dane_przesuniecie, 16);
+    str(" data_file="); num(data);
+    str(" data_memory="); num(n.dane_rozmiar);
+    str(" zero_fill="); num(n.dane_rozmiar - data);
+    str(" mapped=");
+    if (dodaj_bez_przepelnienia(n.tekst_rozmiar, n.dane_rozmiar, &mapped)) num(mapped);
+    else str("overflow");
+    str(" reason="); str(obraz.blad ? obraz.blad : "unspecified-launch-failure");
 }
 
 #ifndef BURSZTYN_LOADER_HOST_TEST
@@ -689,12 +743,14 @@ static bool mapuj_segment_z_pliku(
          * Dane zapisujemy do fizycznej ramki PRZED mapowaniem.
          * Dzieki temu segment kodu mozna od razu zmapowac bez FLAGA_ZAPIS.
          */
-        ZmapujStrone(
+        if (!VmmMapujNowaStroneProcesu(
             reinterpret_cast<void*>(
                 adres_wirtualny + przesuniecie),
             ramka,
-            flagi
-        );
+            (flagi & FLAGA_ZAPIS) != 0)) {
+            ZwolnijRamke(ramka);
+            return false;
+        }
 
         przesuniecie += ROZMIAR_STRONY;
     }
@@ -729,13 +785,15 @@ static bool mapuj_stos_uzytkownika(
             p[j] = 0;
         }
 
-        ZmapujStrone(
+        if (!VmmMapujNowaStroneProcesu(
             reinterpret_cast<void*>(
                 BAZA_STOSU_USER +
                 i * ROZMIAR_STRONY),
             ramka,
-            flagi
-        );
+            (flagi & FLAGA_ZAPIS) != 0)) {
+            ZwolnijRamke(ramka);
+            return false;
+        }
     }
 
     return true;
@@ -774,6 +832,23 @@ static void posprzataj_przestrzen_po_bledzie(
 
 } // namespace
 
+namespace {
+struct ProbaUruchomienia {
+    char sciezka[MAKS_DLUGOSC_SCIEZKI]{};
+    BurObrazPliku obraz{};
+    bool sukces{false};
+    ProbaUruchomienia() { obraz.blad = "invalid-launch-arguments"; }
+    ~ProbaUruchomienia() {
+        if (!sukces) {
+            char rekord[640];
+            bur_formatuj_blad(rekord, sizeof(rekord), sciezka, obraz);
+            wypisz_log(rekord);
+        }
+        if (obraz.dane) kfree(obraz.dane);
+    }
+};
+}
+
 static bool uruchom_program_z_pliku_impl(
     const char* sciezka_pliku,
     uint8_t bzl_poziom,
@@ -781,26 +856,31 @@ static bool uruchom_program_z_pliku_impl(
     bool z_syscalla,
     const char* argument_startowy
 ) {
+    ProbaUruchomienia proba;
     /*
      * Bursztynowe Poziomy Zaufania maja zakres 0..5.
      * Nie korygujemy blednej wartosci po cichu.
      */
     if (bzl_poziom > 5) {
+        proba.obraz.blad = "invalid-trust-level";
         return false;
     }
 
-    char bezpieczna_sciezka[MAKS_DLUGOSC_SCIEZKI];
+    auto& bezpieczna_sciezka = proba.sciezka;
     char bezpieczny_argument[MAKS_ARGUMENT_STARTOWY] = {};
 
     if (!pobierz_bezpieczna_sciezke(
             bezpieczna_sciezka,
             sciezka_pliku,
             z_syscalla)) {
+        proba.obraz.blad = "invalid-or-overlong-app-path";
         return false;
     }
 
-    if (!kopiuj_argument_startowy(bezpieczny_argument, argument_startowy))
+    if (!kopiuj_argument_startowy(bezpieczny_argument, argument_startowy)) {
+        proba.obraz.blad = "invalid-or-overlong-launch-argument";
         return false;
+    }
 
     bool aplikacja_testowa = true;
     static const char SCIEZKA_TEST[] = "/programy/test.cebula/test.bur";
@@ -833,51 +913,32 @@ static bool uruchom_program_z_pliku_impl(
         );
 
     if (pid == -2) {
-        wypisz_log(
-            "[LOADER] Aplikacja juz dziala! "
-            "Blokada wielu instancji."
-        );
+        proba.obraz.blad = "already-running";
         return false;
     }
 
     if (pid < 0) {
+        proba.obraz.blad = "no-process-slot";
         return false;
     }
 
-    uint64_t rozmiar_pliku = 0;
-
-    uint8_t* bufor_pliku =
-        bsp_wczytaj_plik_do_pamieci(
-            bezpieczna_sciezka,
-            &rozmiar_pliku
-        );
-
-    if (!bufor_pliku ||
-        rozmiar_pliku < sizeof(NaglowekBur)) {
-        wypisz_log("[LOADER-DBG] bsp_wczytaj_plik_do_pamieci fail");
+    if (!bsp_wczytaj_obraz_bur(bezpieczna_sciezka, &proba.obraz,
+            BUR_MAKS_ROZMIAR_PLIKU, bur_blad_naglowka)) {
         zwolnij_rezerwacje_procesu(pid);
         return false;
     }
-
-    /*
-     * Naglowek kopiujemy do poprawnie wyrownanej lokalnej struktury.
-     * Plik jest tablica bajtow i nie zakladamy wyrownania jego adresu.
-     */
-    NaglowekBur naglowek{};
-    KopiujPamiec(
-        &naglowek,
-        bufor_pliku,
-        sizeof(naglowek)
-    );
-
-    if (!bur_waliduj_naglowek(
-            naglowek,
-            rozmiar_pliku)) {
-        wypisz_log("[LOADER-DBG] bur_waliduj_naglowek fail");
-        zwolnij_rezerwacje_procesu(pid);
-        return false;
+    const uint64_t rozmiar_pliku = proba.obraz.rozmiar;
+    const uint8_t* bufor_pliku = proba.obraz.dane;
+    const NaglowekBur& naglowek = proba.obraz.naglowek;
+#if BURSZTYNDIAGTESTDZWIEKU
+    const bool trace_app = takie_same_sciezki(bezpieczna_sciezka,
+        "/programy/test_dzwieku.cebula/test_dzwieku.bur");
+    if (trace_app) {
+        wypisz_log("[TEST DZWIEKU] BUR file accepted");
+        wypisz_log("[TEST DZWIEKU] process created");
+        wypisz_log("[TEST DZWIEKU] entry point validated");
     }
-
+#endif
     /*
      * Prywatny stos Ring 0 alokujemy w dedykowanej galezi jadra z unmapped
      * guard page bezposrednio ponizej oraz kanarkiem na dnie.
@@ -886,7 +947,7 @@ static bool uruchom_program_z_pliku_impl(
     uint64_t szczyt_stosu_jadra = 0;
 
     if (!stos_jadra_przydziel(pid, &baza_stosu_jadra, &szczyt_stosu_jadra)) {
-        wypisz_log("[LOADER-DBG] stos_jadra_przydziel fail");
+        proba.obraz.blad = "stos_jadra_przydziel-failed";
         zwolnij_rezerwacje_procesu(pid);
         return false;
     }
@@ -907,7 +968,7 @@ static bool uruchom_program_z_pliku_impl(
         PobierzAktualnePML4();
 
     if (!poprzednie_pml4) {
-        wypisz_log("[LOADER-DBG] PobierzAktualnePML4 fail");
+        proba.obraz.blad = "PobierzAktualnePML4-failed";
         stos_jadra_zwolnij(pid);
         zwolnij_rezerwacje_procesu(pid);
         return false;
@@ -917,14 +978,14 @@ static bool uruchom_program_z_pliku_impl(
         UtworzPrzestrzenAdresowaProcesu();
 
     if (!pml4_procesu) {
-        wypisz_log("[LOADER-DBG] UtworzPrzestrzenAdresowaProcesu fail");
+        proba.obraz.blad = "UtworzPrzestrzenAdresowaProcesu-failed";
         stos_jadra_zwolnij(pid);
         zwolnij_rezerwacje_procesu(pid);
         return false;
     }
 
     /*
-     * ZmapujStrone() pracuje na aktualnym CR3. Na czas budowania nowej
+     * VmmMapujNowaStroneProcesu() pracuje na aktualnym CR3. Na czas budowania nowej
      * przestrzeni blokujemy przerwania, aby timer nie przelaczyl procesu
      * podczas gdy CR3 wskazuje na niedokonczona hierarchie stron.
      */
@@ -957,7 +1018,7 @@ static bool uruchom_program_z_pliku_impl(
                 naglowek.tekst_przesuniecie,
             naglowek.tekst_rozmiar,
             flagi_kod)) {
-        wypisz_log("[LOADER-DBG] mapuj_segment_z_pliku kod fail");
+        proba.obraz.blad = "mapuj_segment_z_pliku-kod-failed";
         mapowanie_ok = false;
     }
 
@@ -985,7 +1046,7 @@ static bool uruchom_program_z_pliku_impl(
                     naglowek.dane_przesuniecie,
                 kopiowane_dane,
                 flagi_dane)) {
-            wypisz_log("[LOADER-DBG] mapuj_segment_z_pliku dane fail");
+            proba.obraz.blad = "mapuj_segment_z_pliku-dane-failed";
             mapowanie_ok = false;
         }
     }
@@ -999,7 +1060,7 @@ static bool uruchom_program_z_pliku_impl(
         !mapuj_stos_uzytkownika(
             flagi_dane,
             liczba_stron_stosu)) {
-        wypisz_log("[LOADER-DBG] mapuj_stos_uzytkownika fail");
+        proba.obraz.blad = "mapuj_stos_uzytkownika-failed";
         mapowanie_ok = false;
     }
 
@@ -1024,6 +1085,9 @@ static bool uruchom_program_z_pliku_impl(
         zwolnij_rezerwacje_procesu(pid);
         return false;
     }
+#if BURSZTYNDIAGTESTDZWIEKU
+    if (trace_app) wypisz_log("[TEST DZWIEKU] Ring3 pages mapped");
+#endif
 
     /*
      * SysV AMD64: zwykla funkcja zaczyna z RSP == 16n + 8.
@@ -1056,6 +1120,7 @@ static bool uruchom_program_z_pliku_impl(
     if (!WirtualnyDoFizycznego(
             pml4_procesu,
             &pml4_procesu_fiz)) {
+        proba.obraz.blad = "process-cr3-translation-failed";
         przywroc_przerwania(
             stan_przerwan
         );
@@ -1116,6 +1181,9 @@ static bool uruchom_program_z_pliku_impl(
         PROCES_GOTOWY,
         __ATOMIC_RELEASE
     );
+#if BURSZTYNDIAGTESTDZWIEKU
+    if (trace_app) wypisz_log("[TEST DZWIEKU] process scheduled (ready)");
+#endif
 
 #if BURSZTYN_DIAG_BOOT
     if (takie_same_sciezki(sciezka_pliku, "/menedzer_okien.bur")) {
@@ -1131,6 +1199,7 @@ static bool uruchom_program_z_pliku_impl(
     }
 #endif
 
+    proba.sukces = true;
     przywroc_przerwania(
         stan_przerwan
     );

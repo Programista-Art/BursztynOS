@@ -1,0 +1,7 @@
+VirtIO diagnostic functional parity: 6 ordered records identical; 334 named cases PASS across 2 builds. ASan/UBSan PASS.
+VIRTIO STATE prepare status=11 avail=32 used=0 registered=0 active=0
+VIRTIO STATE activate status=15 avail=32 used=0 registered=1 active=0
+VIRTIO STATE report=0 status=15 avail=35 used=3 events=3 irq=4 dx=7 dy=-5 active=1,1
+VIRTIO STATE report=1 status=15 avail=38 used=6 events=6 irq=8 dx=-4 dy=8 active=1,1
+VIRTIO STATE report=2 status=15 avail=41 used=9 events=9 irq=12 dx=3 dy=3 active=1,1
+VIRTIO STATE report=3 status=15 avail=44 used=12 events=12 irq=16 dx=-8 dy=16 active=1,1
