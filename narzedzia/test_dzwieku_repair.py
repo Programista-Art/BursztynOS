@@ -97,7 +97,7 @@ def main():
         run([binary, ROOT / "test_dzwieku.bin"], env)
     run(flags + ["-DBURSZTYNDIAGTESTDZWIEKU=1", "narzedzia/test_dzwieku_gui.cpp", "storage_format.cpp", "-o", OUT / "gui"])
     run([OUT / "gui", ROOT / "test_dzwieku.bin"], env)
-    run(flags + ["narzedzia/test_dzwieku_hda_bws.cpp", "sterowniki/dzwiek/hda_diag.cpp", "-o", OUT / "hda-bws"])
+    run(flags + ["-DBURSZTYN_HDA_HOST_TEST", "narzedzia/test_dzwieku_hda_bws.cpp", "sterowniki/dzwiek/hda_transport.cpp", "sterowniki/dzwiek/hda_diag.cpp", "-o", OUT / "hda-bws"])
     run([OUT / "hda-bws"], env)
     print("TEST DŹWIĘKU: ASan + UBSan PASS (production and bounded startup trace)")
 

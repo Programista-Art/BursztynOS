@@ -1,4 +1,4 @@
-/* Kontrolki 3: 144 KiB TEXT (zmierzone uzycie 0x20e80), 128 KiB DATA. */
+/* Tapety: 256 KiB TEXT, 128 KiB DATA. */
 OUTPUT_FORMAT(elf64-x86-64)
 OUTPUT_ARCH(i386:x86-64)
 ENTRY(_start)
@@ -88,28 +88,28 @@ SECTIONS {
         *(.gnu.lto_*)
     }
 
-    ASSERT(DEFINED(_start), "KONTROLKI3 BUR: brak _start")
-    ASSERT(DEFINED(naglowek), "KONTROLKI3 BUR: brak naglowka")
+    ASSERT(DEFINED(_start), "TAPETY BUR: brak _start")
+    ASSERT(DEFINED(naglowek), "TAPETY BUR: brak naglowka")
     ASSERT(__bur_header_payload_end <= BUR_HEADER_VADDR + BUR_HEADER_SIZE,
-           "KONTROLKI3 BUR: naglowek przekroczyl 4 KiB")
+           "TAPETY BUR: naglowek przekroczyl 4 KiB")
     ASSERT(SIZEOF(.naglowek) == BUR_HEADER_SIZE,
-           "KONTROLKI3 BUR: nieprawidlowy obszar naglowka")
+           "TAPETY BUR: nieprawidlowy obszar naglowka")
     ASSERT(__bur_text_used_end <= BUR_TEXT_END,
-           "KONTROLKI3 BUR: TEXT przekroczyl 192 KiB")
+           "TAPETY BUR: TEXT przekroczyl 256 KiB")
     ASSERT(SIZEOF(.text) == BUR_TEXT_SIZE,
-           "KONTROLKI3 BUR: nieprawidlowy TEXT")
+           "TAPETY BUR: nieprawidlowy TEXT")
     ASSERT(__bur_data_file_end <= BUR_DATA_END,
-           "KONTROLKI3 BUR: DATA przekroczylo 128 KiB")
+           "TAPETY BUR: DATA przekroczylo 128 KiB")
     ASSERT(__bur_data_memory_end <= BUR_DATA_END,
-           "KONTROLKI3 BUR: DATA+BSS przekroczyly 128 KiB")
+           "TAPETY BUR: DATA+BSS przekroczyly 128 KiB")
     ASSERT(__bur_ctor_start == __bur_ctor_end,
-           "KONTROLKI3 BUR: konstruktory nie sa obslugiwane")
+           "TAPETY BUR: konstruktory nie sa obslugiwane")
     ASSERT(__bur_tls_start == __bur_tls_end,
-           "KONTROLKI3 BUR: TLS nie jest obslugiwany")
+           "TAPETY BUR: TLS nie jest obslugiwany")
     ASSERT(__bur_dynamic_start == __bur_dynamic_end,
-           "KONTROLKI3 BUR: dynamic linking jest zabroniony")
+           "TAPETY BUR: dynamic linking jest zabroniony")
     ASSERT(BUR_TEXT_OFFSET + BUR_TEXT_SIZE == BUR_DATA_OFFSET,
-           "KONTROLKI3 BUR: niespojne offsety")
+           "TAPETY BUR: niespojne offsety")
     ASSERT(BUR_TEXT_VADDR + BUR_TEXT_SIZE == BUR_DATA_VADDR,
-           "KONTROLKI3 BUR: niespojne VA")
+           "TAPETY BUR: niespojne VA")
 }

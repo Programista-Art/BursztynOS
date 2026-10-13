@@ -207,7 +207,7 @@ static void test_struktury_publiczne_maja_wersje() {
     HdaDiagSnapshot s{};
     s.wersja = HDA_DIAG_WERSJA_ABI;
     s.rozmiar = sizeof(HdaDiagSnapshot);
-    CHECK(s.wersja == 1);
+    CHECK(s.wersja == HDA_DIAG_WERSJA_ABI);
     CHECK(s.rozmiar == sizeof(HdaDiagSnapshot));
     HdaDiagWidget w{};
     w.wersja = HDA_DIAG_WERSJA_ABI;

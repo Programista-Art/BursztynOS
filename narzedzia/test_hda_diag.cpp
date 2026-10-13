@@ -76,14 +76,14 @@ static void test_awcap_flagi() {
 static void test_pincfg() {
     /* Speaker / Internal / Fixed Function. */
     const uint32_t speaker =
-        (2u << 30) | (0x30u << 24) | (0x1u << 20) | (0x3u << 16);
+        (2u << 30) | (0x10u << 24) | (0x1u << 20) | (0x3u << 16);
     CHECK(hda_pincfg_port(speaker) == 2);
     CHECK(hda_lokacja_wewnetrzna(hda_pincfg_lokacja(speaker)));
     CHECK(hda_pincfg_dev(speaker) == 1);
     CHECK(hda_klasyfikuj_pin(speaker) == HDA_CEL_GLOSNIK);
     CHECK(hda_cel_jest_glosnikiem(hda_klasyfikuj_pin(speaker)));
     CHECK(std::strcmp(hda_nazwa_domyslnego_urzadzenia(1), "Speaker") == 0);
-    CHECK(std::strcmp(hda_nazwa_lokacji(0x30), "Internal") == 0);
+    CHECK(std::strcmp(hda_nazwa_lokacji(0x10), "Internal") == 0);
     CHECK(std::strcmp(hda_nazwa_portu(2), "Fixed Function") == 0);
 
     /* Headphone / External / Jack. */
@@ -177,14 +177,12 @@ static void test_connlist_long() {
 }
 
 static void test_connlist_range() {
-    /* Long form: bit 15 = range, bits 14:8 = end, bits 7:0 = start. */
-    const uint16_t wpis = 0x8000 | (0x05u << 8) | 0x02; /* range 2..5 */
-    /* Long form: dwa 16-bitowe wpisy w jednym slowie 32-bit. */
-    const uint32_t slowa[] = { static_cast<uint32_t>(wpis) | (0x0008u << 16) };
+    /* Range entry names the final NID after a preceding start entry. */
+    const uint32_t slowa[] = {0x80050002,8};
     uint8_t out[12] = {0};
     uint32_t n = 0;
     bool trunc = false;
-    CHECK(hda_rozszerz_liste_polaczen(slowa, 1, true, 2, out, 12, &n, &trunc));
+    CHECK(hda_rozszerz_liste_polaczen(slowa, 2, true, 3, out, 12, &n, &trunc));
     CHECK(n == 5); /* 2,3,4,5 + 8 */
     CHECK(out[0] == 2 && out[3] == 5 && out[4] == 8);
 }
@@ -208,13 +206,11 @@ static void test_connlist_malformed() {
 }
 
 static void test_connlist_truncacja() {
-    /* 3 wpisy short, ale bufor na 2 NID-y z range rozbudowanym. */
-    const uint16_t zakres = 0x8000 | (0x0Au << 8) | 0x01; /* 1..10 */
-    const uint32_t slowa[] = { static_cast<uint32_t>(zakres) | (0x0020u << 16) };
+    const uint32_t slowa[] = {0x800A0001,0x20};
     uint8_t out[4] = {0};
     uint32_t n = 0;
     bool trunc = false;
-    CHECK(hda_rozszerz_liste_polaczen(slowa, 1, true, 2, out, 4, &n, &trunc));
+    CHECK(hda_rozszerz_liste_polaczen(slowa, 2, true, 3, out, 4, &n, &trunc));
     CHECK(trunc);
     CHECK(n == 4);
 }
@@ -231,6 +227,7 @@ static HdaDiagWidget zrob_widget(uint8_t nid, uint8_t typ, uint32_t defcfg = 0,
     if (typ == HDA_WID_PIN) {
         w.awcap |= HDA_WCAP_CONN_LIST | HDA_WCAP_STEREO;
         w.default_config = defcfg;
+        w.pin_caps=HDA_PINCAP_OUTPUT;
     }
     if (typ == HDA_WID_OUT) {
         w.awcap |= HDA_WCAP_STEREO | HDA_WCAP_OUT_AMP;
@@ -254,7 +251,7 @@ static void test_sciezka_prosta() {
     const uint8_t conn[] = {2};
     HdaDiagWidget w[2] = {
         zrob_widget(2, HDA_WID_OUT),
-        zrob_widget(4, HDA_WID_PIN, (2u << 30) | (0x30u << 24) | (1u << 20), conn, 1)
+        zrob_widget(4, HDA_WID_PIN, (2u << 30) | (0x10u << 24) | (1u << 20), conn, 1)
     };
     HdaDiagSciezka s[HDA_DIAG_MAKS_SCIEZEK]{};
     uint32_t n = 0;
@@ -274,7 +271,7 @@ static void test_sciezka_z_mixerem() {
     HdaDiagWidget w[3] = {
         zrob_widget(2, HDA_WID_OUT),
         zrob_widget(5, HDA_WID_MIX, 0, c_mix, 1),
-        zrob_widget(4, HDA_WID_PIN, (2u << 30) | (0x30u << 24) | (1u << 20), c_pin, 1)
+        zrob_widget(4, HDA_WID_PIN, (2u << 30) | (0x10u << 24) | (1u << 20), c_pin, 1)
     };
     HdaDiagSciezka s[8]{};
     uint32_t n = 0;
@@ -307,7 +304,7 @@ static void test_sciezka_wiele_glosnikow() {
     /* Jeden DAC, dwa piny Speaker. */
     const uint8_t c1[] = {2};
     const uint8_t c2[] = {2};
-    const uint32_t spk = (2u << 30) | (0x30u << 24) | (1u << 20);
+    const uint32_t spk = (2u << 30) | (0x10u << 24) | (1u << 20);
     HdaDiagWidget w[3] = {
         zrob_widget(2, HDA_WID_OUT),
         zrob_widget(4, HDA_WID_PIN, spk, c1, 1),
@@ -329,7 +326,7 @@ static void test_sciezka_cykl() {
     HdaDiagWidget w[3] = {
         zrob_widget(2, HDA_WID_OUT),
         zrob_widget(5, HDA_WID_MIX, 0, c5, 2),
-        zrob_widget(4, HDA_WID_PIN, (2u << 30) | (0x30u << 24) | (1u << 20), c4, 1)
+        zrob_widget(4, HDA_WID_PIN, (2u << 30) | (0x10u << 24) | (1u << 20), c4, 1)
     };
     HdaDiagSciezka s[8]{};
     uint32_t n = 0;
@@ -367,7 +364,7 @@ static void test_sciezka_hdmi_i_niepodlaczony() {
     uint32_t n = 0;
     bool obc = false;
     CHECK(hda_zbuduj_sciezki(w, 3, s, 8, &n, &obc));
-    CHECK(n == 2);
+    CHECK(n == 1); /* Disconnected pins are not viable playback routes. */
     CHECK(hda_sciezka_hdmi_istnieje(s, n));
     CHECK(!hda_sciezka_glosnik_istnieje(s, n));
 }
@@ -375,7 +372,7 @@ static void test_sciezka_hdmi_i_niepodlaczony() {
 static void test_sciezka_limit() {
     /* 3 piny, limit 2 sciezek. */
     const uint8_t c[] = {2};
-    const uint32_t spk = (2u << 30) | (0x30u << 24) | (1u << 20);
+    const uint32_t spk = (2u << 30) | (0x10u << 24) | (1u << 20);
     HdaDiagWidget w[4] = {
         zrob_widget(2, HDA_WID_OUT),
         zrob_widget(4, HDA_WID_PIN, spk, c, 1),
@@ -409,7 +406,7 @@ static void test_raport() {
 }
 
 static void test_raport_obciazenie_marker() {
-    HdaDiagSnapshot snap{};
+    static HdaDiagSnapshot snap{};
     snap.wersja = HDA_DIAG_WERSJA_ABI;
     snap.rozmiar = sizeof(HdaDiagSnapshot);
     snap.flagi = HDA_DIAG_FLAGA_OBECIETA;
@@ -423,13 +420,13 @@ static void test_raport_obciazenie_marker() {
 }
 
 static void test_limity_abi() {
-    CHECK(HDA_DIAG_WERSJA_ABI == 1);
+    CHECK(HDA_DIAG_WERSJA_ABI == 2);
     CHECK(HDA_DIAG_MAKS_POLACZEN >= 4);
     CHECK(HDA_DIAG_MAKS_DLUGOSC_SCIEZKI >= 3);
     CHECK(sizeof(HdaDiagNaglowek) == 8);
     /* Snapshot miesci sie w rozsadnym limicie (nie nieograniczony). */
-    CHECK(sizeof(HdaDiagSnapshot) < 128 * 1024);
-    CHECK(sizeof(HdaDiagWidget) < 128);
+    CHECK(sizeof(HdaDiagSnapshot) < 3 * 1024 * 1024);
+    CHECK(sizeof(HdaDiagWidget) < 512);
 }
 
 static void test_stale_testu() {
@@ -581,19 +578,19 @@ static void test_transport_immediate_modeling() {
 
 static void test_status_banner_11_states() {
     /* 1. Brak kontrolera HDA */
-    HdaDiagSnapshot s1{};
+    static HdaDiagSnapshot s1{};
     s1.liczba_kontrolerow = 0;
     CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s1, nullptr), "Brak kontrolera HDA") == 0);
 
     /* 2. Kontroler HDA wykryty */
-    HdaDiagSnapshot s2{};
+    static HdaDiagSnapshot s2{};
     s2.liczba_kontrolerow = 1;
     HdaDiagSkan sc2{};
     sc2.aktywny = 1;
     CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s2, &sc2), "Kontroler HDA wykryty") == 0);
 
     /* 3. Brak odpowiedzi kodeka */
-    HdaDiagSnapshot s3{};
+    static HdaDiagSnapshot s3{};
     s3.liczba_kontrolerow = 1;
     HdaDiagSkan sc3{};
     sc3.gotowy = 1;
@@ -601,7 +598,7 @@ static void test_status_banner_11_states() {
     CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s3, &sc3), "Brak odpowiedzi kodeka") == 0);
 
     /* 4. Kodek wykryty */
-    HdaDiagSnapshot s4{};
+    static HdaDiagSnapshot s4{};
     s4.liczba_kontrolerow = 1;
     s4.kodeki[0][0].odpowiada = 1;
     HdaDiagSkan sc4{};
@@ -609,7 +606,7 @@ static void test_status_banner_11_states() {
     CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s4, &sc4), "Kodek wykryty") == 0);
 
     /* 5. Brak Audio Function Group */
-    HdaDiagSnapshot s5{};
+    static HdaDiagSnapshot s5{};
     s5.liczba_kontrolerow = 1;
     s5.kodeki[0][0].odpowiada = 1;
     HdaDiagSkan sc5{};
@@ -618,7 +615,7 @@ static void test_status_banner_11_states() {
     CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s5, &sc5), "Brak Audio Function Group") == 0);
 
     /* 6. Brak wykrytego wyjścia audio */
-    HdaDiagSnapshot s6{};
+    static HdaDiagSnapshot s6{};
     s6.liczba_kontrolerow = 1;
     s6.kodeki[0][0].odpowiada = 1;
     s6.kodeki[0][0].liczba_fg = 1;
@@ -630,7 +627,7 @@ static void test_status_banner_11_states() {
     CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s6, &sc6), "Brak wykrytego wyjścia audio") == 0);
 
     /* 7. Wyjście Głośniki */
-    HdaDiagSnapshot s7{};
+    static HdaDiagSnapshot s7{};
     s7.liczba_kontrolerow = 1;
     s7.kodeki[0][0].odpowiada = 1;
     s7.kodeki[0][0].liczba_fg = 1;
@@ -640,22 +637,22 @@ static void test_status_banner_11_states() {
     CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s7, nullptr), "Wyjście Głośniki") == 0);
 
     /* 8. Wyjście Słuchawki */
-    HdaDiagSnapshot s8 = s7;
+    static HdaDiagSnapshot s8 = s7;
     s8.sciezki[0].cel = HDA_CEL_SLUCHAWKI;
     CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s8, nullptr), "Wyjście Słuchawki") == 0);
 
     /* 9. Wyjście Line Out (QEMU default) */
-    HdaDiagSnapshot s9 = s7;
+    static HdaDiagSnapshot s9 = s7;
     s9.sciezki[0].cel = HDA_CEL_WYJSCIE_LINIOWE;
     CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s9, nullptr), "Wyjście Line Out") == 0);
 
     /* 10. Wyjście HDMI DisplayPort */
-    HdaDiagSnapshot s10 = s7;
+    static HdaDiagSnapshot s10 = s7;
     s10.sciezki[0].cel = HDA_CEL_HDMI;
     CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s10, nullptr), "Wyjście HDMI DisplayPort") == 0);
 
     /* 11. Nieznany typ wyjścia */
-    HdaDiagSnapshot s11 = s7;
+    static HdaDiagSnapshot s11 = s7;
     s11.sciezki[0].cel = HDA_CEL_NIEZNANY;
     CHECK(std::strcmp(hda_diag_stan_wyjscia_tekst(&s11, nullptr), "Nieznany typ wyjścia") == 0);
 }
@@ -687,8 +684,8 @@ static void test_qemu_topology_and_malformed() {
 
 static void test_async_state_machine_and_budget() {
     /* Limit verbow na pojedynczy krok (budzet) */
-    CHECK(HDA_DIAG_LIMIT_VERBOW_NA_KROK == 4);
-    CHECK(HDA_DIAG_SLOW_NA_KROK == 4);
+    CHECK(HDA_DIAG_LIMIT_VERBOW_NA_KROK == 1);
+    CHECK(HDA_DIAG_SLOW_NA_KROK == 1);
 
     /* Nazwy etapow */
     CHECK(std::strcmp(hda_diag_etap_nazwa(HDA_DIAG_ETAP_BEZCZYNNY), "Uruchamianie") == 0);
@@ -719,7 +716,7 @@ static void test_async_state_machine_and_budget() {
     s.generacja_skanu = 42;
     s.generacja_opublikowana = 41;
     s.migawka_dostepna = 1;
-    CHECK(s.wersja == 1);
+    CHECK(s.wersja == HDA_DIAG_WERSJA_ABI);
     CHECK(s.rozmiar == 72);
     CHECK(s.generacja_skanu == 42);
     CHECK(s.generacja_opublikowana == 41);

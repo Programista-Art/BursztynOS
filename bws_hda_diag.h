@@ -9,7 +9,7 @@
  *   90 = BWS_HDA_TEST   - kontrolowany test odtwarzania
  *
  * Nie istnieje syscall z surowymi verbami HDA.
- * Ring3 nie otrzymuje adresow fizycznych ani mapowan MMIO.
+ * Ring3 nie otrzymuje adresow DMA ani mapowan MMIO. BAR PCI jest tylko metadana.
  */
 
 #pragma once
@@ -27,7 +27,8 @@ enum BwsHdaDiagPolecenie : uint64_t {
     BWS_HDA_DIAG_SNAPSHOT = 4,
     BWS_HDA_DIAG_STRUMIEN = 5,
     BWS_HDA_DIAG_TEST_STAN = 6,
-    BWS_HDA_DIAG_SKAN_ANULUJ = 7
+    BWS_HDA_DIAG_SKAN_ANULUJ = 7,
+    BWS_HDA_DIAG_METRYKI = 8
 };
 
 /*
@@ -70,3 +71,19 @@ struct BwsHdaSnapshotZadanie {
  */
 static_assert(sizeof(BwsHdaTestStart) == 24, "BwsHdaTestStart layout");
 static_assert(sizeof(BwsHdaSnapshotZadanie) == 32, "BwsHdaSnapshotZadanie layout");
+
+// Optional input for START/STEP/CANCEL. Null retains scan-all behavior.
+// ABI v2 is deliberately rejected by old kernels; old snapshot layouts are never over-copied.
+struct BwsHdaSkanZadanie {
+    uint32_t wersja;
+    uint32_t rozmiar;
+    uint32_t kontroler_idx; // UINT32_MAX = all, otherwise validated registry index
+    uint32_t rezerwa;
+};
+struct BwsHdaMetryki {
+    uint32_t wersja;
+    uint32_t rozmiar;
+    uint64_t maks_serwis_ns;
+};
+static_assert(sizeof(BwsHdaSkanZadanie)==16,"HDA controller request");
+static_assert(sizeof(BwsHdaMetryki)==16,"HDA service timings");

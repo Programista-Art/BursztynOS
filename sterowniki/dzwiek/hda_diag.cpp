@@ -1,792 +1,441 @@
-/*
- * Bursztyn OS - HDA diagnostyka: inkrementalny skan i migawka
- *
- * Kernel-owned. Kazdy krok skanu ma ograniczona liczbe transakcji verb.
- * Publikacja migawki jest atomowa (podwojny bufor + generacja).
- *
- * Nie wykonuj hda_diag_startuj_skan() na sciezce krytycznego bootu.
- */
-
+/* Kernel-owned, resumable HDA discovery. No hardware polling loops, no codec writes. */
 #include "hda_diag.h"
+#include "hda_transport.h"
 #include "hda_wewnetrzny.h"
 #include "hda.h"
-
-#include <stdint.h>
-#include <stddef.h>
-#include <stdbool.h>
-
-uint64_t czas_monotoniczny_ns();
-bool hpet_dostepny();
+#include "../czas/hpet.h"
+void* kmalloc(size_t);
+void kfree(void*);
 
 namespace {
-
-/* --------------------------------------------------------------------- */
-/* Podwojny bufor migawki (publikacja atomowa)                            */
-/* --------------------------------------------------------------------- */
-
-HdaDiagSnapshot bufor_a;
-HdaDiagSnapshot bufor_b;
-HdaDiagSnapshot* opublikowana = nullptr;
-uint32_t generacja_publikacji = 0;
-uint32_t licznik_generacji = 0;
-
-/* Bufor roboczy skanu (nie widoczny dla Ring3 az do publikacji). */
-HdaDiagSnapshot skan_docelowy;
-
+HdaDiagSnapshot* bufor_a=nullptr;
+HdaDiagSnapshot* bufor_b=nullptr;
+HdaDiagSnapshot* skan_bufor=nullptr;
+#define skan_docelowy (*skan_bufor)
+HdaDiagSnapshot* opublikowana=nullptr;
+uint32_t generacja_publikacji=0, licznik_generacji=0;
 HdaDiagSkan stan_skan{};
-
-/* --------------------------------------------------------------------- */
-/* Stan testu tonu                                                        */
-/* --------------------------------------------------------------------- */
-
-HdaDiagStanTestu stan_test{};
-uint64_t test_start_ms = 0;
-uint64_t test_czas_ms = 0;
-bool test_aktywny = false;
-
-uint64_t teraz_ms_monotoniczny() {
-    if (hpet_dostepny()) {
-        return czas_monotoniczny_ns() / 1000000ULL;
-    }
-    return 0;
-}
-
-/* --------------------------------------------------------------------- */
-/* Pomocnicze                                                             */
-/* --------------------------------------------------------------------- */
-
-void wyzeruj_snapshot(HdaDiagSnapshot* s) {
-    if (!s) return;
-    uint8_t* p = reinterpret_cast<uint8_t*>(s);
-    for (size_t i = 0; i < sizeof(HdaDiagSnapshot); ++i) p[i] = 0;
-    s->wersja = HDA_DIAG_WERSJA_ABI;
-    s->rozmiar = static_cast<uint32_t>(sizeof(HdaDiagSnapshot));
-}
-
-void skopiuj_snapshot(HdaDiagSnapshot* cel, const HdaDiagSnapshot* zrodlo) {
-    if (!cel || !zrodlo) return;
-    const uint8_t* s = reinterpret_cast<const uint8_t*>(zrodlo);
-    uint8_t* d = reinterpret_cast<uint8_t*>(cel);
-    for (size_t i = 0; i < sizeof(HdaDiagSnapshot); ++i) d[i] = s[i];
-}
-
-bool odpowiedz_nie_poprawna(uint32_t r) {
-    /*
-     * Niektore implementacje zwracaja 0xFFFFFFFF / 0x00000000 dla
-     * nieobslugiwanych verbów. Traktujemy to jako brak odpowiedzi.
-     */
-    return r == 0xFFFFFFFFU;
-}
-
-bool pobierz_parametr(uint8_t cad, uint8_t nid, uint8_t param, uint32_t* out) {
-    if (!out) return false;
-    const uint32_t cmd = hda_wew_verb12(cad, nid, 0xF00U, param);
-    uint32_t resp = 0;
-    if (!hda_wew_wyslij_immediate(cmd, &resp)) return false;
-    if (odpowiedz_nie_poprawna(resp)) return false;
-    *out = resp;
-    return true;
-}
-
-bool pobierz_pin_config(uint8_t cad, uint8_t nid, uint32_t* out) {
-    if (!out) return false;
-    /* Get Configuration Default: verb 0xF1C (12-bit, payload 0). */
-    const uint32_t cmd = hda_wew_verb12(cad, nid, 0xF1CU, 0);
-    uint32_t resp = 0;
-    if (!hda_wew_wyslij_immediate(cmd, &resp)) return false;
-    if (odpowiedz_nie_poprawna(resp)) return false;
-    *out = resp;
-    return true;
-}
-
-bool pobierz_power_state(uint8_t cad, uint8_t nid, uint8_t* out) {
-    if (!out) return false;
-    /* Get Power State: verb 0xF05. */
-    const uint32_t cmd = hda_wew_verb12(cad, nid, 0xF05U, 0);
-    uint32_t resp = 0;
-    if (!hda_wew_wyslij_immediate(cmd, &resp)) return false;
-    if (odpowiedz_nie_poprawna(resp)) return false;
-    *out = static_cast<uint8_t>(resp & 0x0FU);
-    return true;
-}
-
-struct StanSkanuWew {
-    uint8_t sonda_cad{0};
-    uint16_t responsive_mask{0};
-    uint8_t subnode_start{0};
-    uint8_t subnode_count{0};
-    uint8_t subnode_idx{0};
-    uint8_t fg_licznik{0};
-    uint8_t conn_idx{0};
-    uint8_t conn_slowo_idx{0};
-    uint32_t conn_slowa[4]{0};
+bool blokada_skanu=false;
+struct GuardSkan {
+    bool ok;
+    GuardSkan():ok(!__atomic_test_and_set(&blokada_skanu,__ATOMIC_ACQUIRE)){}
+    ~GuardSkan(){if(ok)__atomic_clear(&blokada_skanu,__ATOMIC_RELEASE);}
 };
-
-static StanSkanuWew s_skan_wew{};
-
-} // namespace
-
-/* ========================================================================= */
-/* Publiczne API                                                             */
-/* ========================================================================= */
-
-bool hda_diag_inicjalizuj() {
-    wyzeruj_snapshot(&bufor_a);
-    wyzeruj_snapshot(&bufor_b);
-    wyzeruj_snapshot(&skan_docelowy);
-    opublikowana = nullptr;
-    generacja_publikacji = 0;
-    licznik_generacji = 0;
-    stan_skan = HdaDiagSkan{};
-    stan_skan.wersja = HDA_DIAG_WERSJA_ABI;
-    stan_skan.rozmiar = static_cast<uint32_t>(sizeof(HdaDiagSkan));
-    stan_test.wersja = HDA_DIAG_WERSJA_ABI;
-    stan_test.rozmiar = static_cast<uint32_t>(sizeof(HdaDiagStanTestu));
-    s_skan_wew = StanSkanuWew{};
-    return true;
+struct SkanKontrolera {
+    HdaDiagSkan stan{};
+    uint8_t cad=0, param=0, fg_root=0, fg_idx=0, widget=0, conn=0;
+    uint8_t sub_start=0, sub_count=0;
+    bool transakcja=false;
+    bool uzyte_nid[128]{};
+};
+SkanKontrolera skany[HDA_DIAG_MAKS_KONTROLEROW];
+uint32_t nastepny=0;
+size_t przygotowanie_offset=0;
+uint32_t przygotowanie_wybrany=HDA_DIAG_WSZYSTKIE_KONTROLERY;
+bool przygotowanie=false, anulowana_generacja=false;
+uint64_t maks_serwis_ns=0;
+HdaDiagStanTestu stan_test{};
+uint64_t test_start_ms=0, test_czas_ms=0;
+bool test_aktywny=false;
+uint64_t teraz_ms_monotoniczny(){return hpet_dostepny()?czas_monotoniczny_ns()/1000000ULL:0;}
+void zero(void* dst,size_t len){auto* p=static_cast<uint8_t*>(dst);for(size_t i=0;i<len;++i)p[i]=0;}
+void skopiuj_snapshot(HdaDiagSnapshot* dst,const HdaDiagSnapshot* src){
+    auto* d=reinterpret_cast<uint8_t*>(dst);const auto* s=reinterpret_cast<const uint8_t*>(src);
+    for(size_t i=0;i<sizeof(*dst);++i)d[i]=s[i];
 }
-
-bool hda_diag_startuj_skan() {
-    // Rozpocznij nowa generacje skanu (jesli poprzedni trwal, oznacz go jako przestarzaly/nadpisany)
-    stan_skan = HdaDiagSkan{};
-    stan_skan.wersja = HDA_DIAG_WERSJA_ABI;
-    stan_skan.rozmiar = static_cast<uint32_t>(sizeof(HdaDiagSkan));
-    stan_skan.generacja_skanu = ++licznik_generacji;
-    stan_skan.generacja_opublikowana = generacja_publikacji;
-    stan_skan.migawka_dostepna = (opublikowana != nullptr) ? 1 : 0;
-    stan_skan.aktywny = 1;
-    stan_skan.gotowy = 0;
-    stan_skan.przerwany = 0;
-    stan_skan.blad = HDA_DIAG_OK;
-    stan_skan.etap = HDA_DIAG_ETAP_KONTROLER;
-    stan_skan.postep_0_1000 = 20;
-
-    s_skan_wew = StanSkanuWew{};
-
-    wyzeruj_snapshot(&skan_docelowy);
-    skan_docelowy.generacja = stan_skan.generacja_skanu;
-    skan_docelowy.etap = HDA_DIAG_ETAP_KONTROLER;
-    skan_docelowy.flagi = HDA_DIAG_FLAGA_SKAN_W_TOKU;
-
-    if (!hda_wew_kontroler_gotowy()) {
-        /* Sprobuj zainicjalizowac kontroler do celow diagnostycznych. */
-        extern bool inicjalizuj_hda();
-        if (!inicjalizuj_hda()) {
-            if (!hda_wew_kontroler_gotowy()) {
-                stan_skan.etap = HDA_DIAG_ETAP_BLAD;
-                stan_skan.blad = HDA_DIAG_BLAD_BRAK_KONTROLERA;
-                stan_skan.aktywny = 0;
-                skan_docelowy.etap = HDA_DIAG_ETAP_BLAD;
-                skan_docelowy.blad = HDA_DIAG_BLAD_BRAK_KONTROLERA;
-                skan_docelowy.flagi |= HDA_DIAG_FLAGA_BRAK_KONTROLERA;
-                return true; /* skan zakonczony (bledem braku kontrolera) */
-            }
-        }
+template<class T> void naglowek(T& v){v.wersja=HDA_DIAG_WERSJA_ABI;v.rozmiar=sizeof(v);}
+void init_snapshot(HdaDiagSnapshot& s){zero(&s,sizeof(s));naglowek(s);}
+void obetnij(){skan_docelowy.flagi|=HDA_DIAG_FLAGA_OBECIETA;}
+void koniec_kontrolera(uint32_t k,uint32_t blad){
+    // Finish bounded recovery after the final absent CAD as well. Otherwise a
+    // healthy controller with no codecs would be published as uninitialized.
+    HdaDiagKontroler info{};
+    if(!hda_transport_stan(k,&info))return;
+    if(!info.gotowy&&info.inicjalizacja!=HDA_INIT_BLAD){
+        skany[k].stan.blad=blad;skany[k].stan.etap=HDA_DIAG_ETAP_PUBLIKACJA;
+        hda_transport_odnow(k);return;
     }
-
-    return true;
-}
-
-void hda_diag_anuluj_skan() {
-    if (stan_skan.aktywny) {
-        stan_skan.aktywny = 0;
-        stan_skan.przerwany = 1;
-        stan_skan.etap = HDA_DIAG_ETAP_BEZCZYNNY;
+    if(info.inicjalizacja==HDA_INIT_BLAD&&blad==HDA_DIAG_OK)blad=info.blad;
+    auto& s=skany[k].stan;s.aktywny=0;s.gotowy=1;s.postep_0_1000=1000;
+    s.blad=blad;s.etap=blad?HDA_DIAG_ETAP_BLAD:HDA_DIAG_ETAP_GOTOWY;
+    auto& c=skan_docelowy.kontrolery[k];c.blad=blad;
+    hda_transport_zapisz_maski(k,c.discovered_codec_mask,c.responsive_codec_mask);
+    HdaDiagKontroler fresh{};
+    if(hda_transport_stan(k,&fresh)){
+        fresh.liczba_kodekow=c.liczba_kodekow;fresh.blad=blad;c=fresh;
     }
 }
-
-const HdaDiagSnapshot* hda_diag_pobierz_opublikowana(uint32_t* out_generacja) {
-    HdaDiagSnapshot* zrodlo = __atomic_load_n(&opublikowana, __ATOMIC_ACQUIRE);
-    if (!zrodlo) return nullptr;
-    if (out_generacja) {
-        *out_generacja = __atomic_load_n(&generacja_publikacji, __ATOMIC_ACQUIRE);
+// Returns PENDING without touching the scan cursor, so the caller retries the SAME read.
+HdaTransportStatus odczyt(uint32_t k,SkanKontrolera& s,uint8_t cad,uint8_t nid,
+                         uint16_t verb,uint8_t payload,uint32_t* out){
+    auto& status=s.stan;status.biezacy_cad=cad;status.biezacy_nid=nid;
+    if(!s.transakcja){
+        uint32_t cmd=0;
+        if(!hda_zbuduj_verb12(cad,nid,verb,payload,&cmd))return HDA_TRANSPORT_INVALID_ARGUMENT;
+        auto rc=hda_transport_zglos(k,HDA_WLASCICIEL_DIAG,cmd);
+        if(rc==HDA_TRANSPORT_NOT_READY){
+            HdaDiagKontroler info{};
+            if(hda_transport_stan(k,&info)&&info.inicjalizacja!=HDA_INIT_BLAD){
+                hda_transport_odnow(k);return HDA_TRANSPORT_PENDING;
+            }
+        }
+        if(rc==HDA_TRANSPORT_BUSY)return HDA_TRANSPORT_PENDING;
+        if(rc==HDA_TRANSPORT_PENDING){s.transakcja=true;status.slow_w_kroku=1;}
+        return rc;
     }
-    return zrodlo;
+    const auto rc=hda_transport_krok(k,HDA_WLASCICIEL_DIAG);
+    if(rc==HDA_TRANSPORT_PENDING||rc==HDA_TRANSPORT_BUSY)return HDA_TRANSPORT_PENDING;
+    const auto result=hda_transport_odbierz(k,HDA_WLASCICIEL_DIAG,out);
+    s.transakcja=false;
+    return result;
 }
-
-bool hda_diag_krok_skanu() {
-    if (!stan_skan.aktywny) {
-        return true;
+HdaTransportStatus parametr(uint32_t k,SkanKontrolera& s,uint8_t cad,uint8_t nid,
+                           uint8_t p,uint32_t* out){return odczyt(k,s,cad,nid,0xf00,p,out);}
+bool poprawna_odp(HdaTransportStatus rc,uint32_t r){return rc==HDA_TRANSPORT_SUCCESS&&r!=UINT32_MAX;}
+void nastepny_kodek(uint32_t k,SkanKontrolera& s){
+    ++s.stan.kodek_idx;s.param=0;s.fg_root=0;s.fg_idx=0;s.widget=0;
+    for(bool& v:s.uzyte_nid)v=false;
+    if(s.stan.kodek_idx>=skan_docelowy.kontrolery[k].liczba_kodekow){
+        s.stan.kodek_idx=0;s.stan.fg_idx=0;s.stan.etap=HDA_DIAG_ETAP_BUDOWANIE_SCIEZEK;
+    }else s.stan.etap=HDA_DIAG_ETAP_PARAMETRY_KORZENIA;
+}
+void nastepny_widget(SkanKontrolera& s){
+    ++s.widget;s.param=0;s.conn=0;s.stan.widget_idx=s.widget;
+    s.stan.etap=HDA_DIAG_ETAP_WIDGET_ODKRYCIE;
+}
+void krok_kontrolera(uint32_t k){
+    auto& s=skany[k];auto& st=s.stan;auto& ctrl=skan_docelowy.kontrolery[k];
+    st.slow_w_kroku=0;
+    if(!st.aktywny)return;
+    uint32_t r=0;HdaTransportStatus rc=HDA_TRANSPORT_PENDING;
+    switch(st.etap){
+    case HDA_DIAG_ETAP_KONTROLER:{
+        HdaDiagKontroler info{};
+        if(!hda_transport_stan(k,&info)){return;}
+        ctrl=info;
+        if(info.inicjalizacja==HDA_INIT_BLAD){koniec_kontrolera(k,info.blad);return;}
+        if(!info.gotowy){hda_transport_init_krok(k);return;}
+        ctrl.liczba_kodekow=0;ctrl.responsive_codec_mask=0;
+        st.etap=HDA_DIAG_ETAP_SONDOWANIE_KODEKOW;st.postep_0_1000=20;return;
     }
-
-    uint32_t budzet = HDA_DIAG_LIMIT_VERBOW_NA_KROK;
-    uint32_t wykonane_slowa = 0;
-
-    switch (stan_skan.etap) {
-        case HDA_DIAG_ETAP_KONTROLER: {
-            HdaWewStanKontrolera kc{};
-            if (!hda_wew_pobierz_stan_kontrolera(&kc)) {
-                stan_skan.etap = HDA_DIAG_ETAP_BLAD;
-                stan_skan.blad = HDA_DIAG_BLAD_MMIO;
-                stan_skan.aktywny = 0;
-                break;
-            }
-            HdaDiagKontroler& c = skan_docelowy.kontrolery[0];
-            c.wersja = HDA_DIAG_WERSJA_ABI;
-            c.rozmiar = static_cast<uint32_t>(sizeof(HdaDiagKontroler));
-            c.bus = kc.bus;
-            c.slot = kc.slot;
-            c.func = kc.func;
-            c.vendor_id = kc.vendor_id;
-            c.device_id = kc.device_id;
-            c.revision = kc.revision;
-            c.command = kc.command;
-            c.bar0 = kc.bar0;
-            c.bar0_dlugosc = kc.bar0_dlugosc;
-            c.hda_vmin = kc.hda_vmin;
-            c.hda_vmaj = kc.hda_vmaj;
-            c.gcap = kc.gcap;
-            c.gctl = kc.gctl;
-            c.statests = kc.statests;
-            c.outpay = kc.outpay;
-            c.wakeen = kc.wakeen;
-            c.intsts = kc.intsts;
-            c.oss = kc.oss;
-            c.iss = kc.iss;
-            c.bss = kc.bss;
-            c.dma64 = kc.dma64;
-            c.transport = 1; /* Immediate Command */
-            c.flagi = HDA_DIAG_FLAGA_TRANSPORT_IC;
-            c.blad = HDA_DIAG_OK;
-            c.initial_statests = kc.initial_statests;
-            c.discovered_codec_mask = kc.discovered_codec_mask;
-            c.responsive_codec_mask = 0;
-            skan_docelowy.liczba_kontrolerow = 1;
-            skan_docelowy.flagi |= HDA_DIAG_FLAGA_TRANSPORT_IC;
-
-            s_skan_wew.sonda_cad = 0;
-            s_skan_wew.responsive_mask = 0;
-            stan_skan.biezacy_cad = 0;
-            stan_skan.biezacy_nid = 0;
-            stan_skan.etap = HDA_DIAG_ETAP_SONDOWANIE_KODEKOW;
-            stan_skan.postep_0_1000 = 30;
-            break;
+    case HDA_DIAG_ETAP_SONDOWANIE_KODEKOW:
+        rc=parametr(k,s,s.cad,0,HDA_PAR_VENDOR_ID,&r);if(rc==HDA_TRANSPORT_PENDING)return;
+        if(poprawna_odp(rc,r)&&r&&uint16_t(r>>16)!=65535){
+            ctrl.responsive_codec_mask|=uint16_t(1U<<s.cad);ctrl.discovered_codec_mask|=uint16_t(1U<<s.cad);
+            if(ctrl.liczba_kodekow<HDA_DIAG_MAKS_KODEKOW){
+                auto& c=skan_docelowy.kodeki[k][ctrl.liczba_kodekow++];naglowek(c);
+                c.cad=s.cad;c.odpowiada=1;c.vendor_id=hda_vendor_id(r);c.device_id=hda_device_id(r);
+            }else obetnij();
         }
-
-        case HDA_DIAG_ETAP_SONDOWANIE_KODEKOW: {
-            const uint8_t cad = s_skan_wew.sonda_cad;
-            stan_skan.biezacy_cad = cad;
-            stan_skan.biezacy_nid = 0;
-
-            bool odp = false;
-            uint32_t vendor = 0;
-            hda_wew_sonda_pojedynczego_kodeka(cad, &odp, &vendor);
-            wykonane_slowa += 1;
-            --budzet;
-
-            if (odp) {
-                uint8_t ile = skan_docelowy.kontrolery[0].liczba_kodekow;
-                if (ile < HDA_DIAG_MAKS_KODEKOW) {
-                    HdaDiagKodek& k = skan_docelowy.kodeki[0][ile];
-                    k.wersja = HDA_DIAG_WERSJA_ABI;
-                    k.rozmiar = static_cast<uint32_t>(sizeof(HdaDiagKodek));
-                    k.cad = cad;
-                    k.odpowiada = 1;
-                    k.vendor_id = hda_vendor_id(vendor);
-                    k.device_id = hda_device_id(vendor);
-                    skan_docelowy.kontrolery[0].liczba_kodekow = ile + 1;
-                }
-                s_skan_wew.responsive_mask = static_cast<uint16_t>(s_skan_wew.responsive_mask | (1U << cad));
-            }
-
-            s_skan_wew.sonda_cad++;
-            stan_skan.postep_0_1000 = 30 + (s_skan_wew.sonda_cad * 120) / 15;
-
-            if (s_skan_wew.sonda_cad >= 15U) {
-                skan_docelowy.kontrolery[0].responsive_codec_mask = s_skan_wew.responsive_mask;
-                if (skan_docelowy.kontrolery[0].liczba_kodekow == 0) {
-                    skan_docelowy.flagi |= HDA_DIAG_FLAGA_SKAN_BLAD;
-                    stan_skan.blad = HDA_DIAG_BLAD_KODEK_NIE_ODPOWIADA;
-                    stan_skan.etap = HDA_DIAG_ETAP_BLAD;
-                    stan_skan.aktywny = 0;
-                    break;
-                }
-                stan_skan.kodek_idx = 0;
-                stan_skan.etap = HDA_DIAG_ETAP_PARAMETRY_KORZENIA;
-            }
-            break;
+        ++s.cad;st.postep_0_1000=20+uint32_t(s.cad)*180/15;
+        if(s.cad==15){
+            hda_transport_zapisz_maski(k,ctrl.discovered_codec_mask,ctrl.responsive_codec_mask);
+            if(!ctrl.liczba_kodekow){koniec_kontrolera(k,HDA_DIAG_BLAD_KODEK_NIE_ODPOWIADA);return;}
+            st.kodek_idx=0;s.param=0;st.etap=HDA_DIAG_ETAP_PARAMETRY_KORZENIA;
         }
-
-        case HDA_DIAG_ETAP_PARAMETRY_KORZENIA: {
-            const uint32_t nk = skan_docelowy.kontrolery[0].liczba_kodekow;
-            if (stan_skan.kodek_idx >= nk) {
-                stan_skan.kodek_idx = 0;
-                stan_skan.fg_idx = 0;
-                stan_skan.widget_idx = 0;
-                stan_skan.etap = HDA_DIAG_ETAP_WIDGET_ODKRYCIE;
-                break;
-            }
-
-            HdaDiagKodek& k = skan_docelowy.kodeki[0][stan_skan.kodek_idx];
-            const uint8_t cad = k.cad;
-            stan_skan.biezacy_cad = cad;
-            stan_skan.biezacy_nid = 0;
-
-            uint32_t vendor = 0;
-            if (!pobierz_parametr(cad, 0, HDA_PAR_VENDOR_ID, &vendor)) {
-                k.odpowiada = 0;
-                k.blad = HDA_DIAG_BLAD_KODEK_NIE_ODPOWIADA;
-                stan_skan.kodek_idx++;
-                wykonane_slowa += 1;
-                break;
-            }
-            k.vendor_id = hda_vendor_id(vendor);
-            k.device_id = hda_device_id(vendor);
-            wykonane_slowa += 1;
-
-            uint32_t rev = 0;
-            if (pobierz_parametr(cad, 0, HDA_PAR_REV_ID, &rev)) {
-                k.revision_id = rev;
-            }
-            wykonane_slowa += 1;
-
-            uint32_t sub = 0;
-            if (!pobierz_parametr(cad, 0, HDA_PAR_SUB_NODE_COUNT, &sub)) {
-                k.blad = HDA_DIAG_BLAD_ZLA_ODPOWIEDZ;
-                stan_skan.kodek_idx++;
-                wykonane_slowa += 1;
-                break;
-            }
-            k.root_sub_count = sub;
-            wykonane_slowa += 1;
-
-            const uint8_t start = hda_sub_start(sub);
-            const uint8_t count = hda_sub_count(sub);
-            if (!hda_zakres_wezlow_poprawny(start, count)) {
-                k.blad = HDA_DIAG_BLAD_ZLY_ZAKRES_WEZLOW;
-                stan_skan.kodek_idx++;
-                break;
-            }
-
-            s_skan_wew.subnode_start = start;
-            s_skan_wew.subnode_count = count;
-            s_skan_wew.subnode_idx = 0;
-            s_skan_wew.fg_licznik = 0;
-            stan_skan.etap = HDA_DIAG_ETAP_GRUPY_FUNKCYJNE;
-            stan_skan.postep_0_1000 = 200;
-            break;
+        return;
+    case HDA_DIAG_ETAP_PARAMETRY_KORZENIA:{
+        auto& c=skan_docelowy.kodeki[k][st.kodek_idx];
+        rc=parametr(k,s,c.cad,0,s.param==0?HDA_PAR_REV_ID:HDA_PAR_SUB_NODE_COUNT,&r);
+        if(rc==HDA_TRANSPORT_PENDING)return;
+        if(!poprawna_odp(rc,r)){c.blad=HDA_DIAG_BLAD_ZLA_ODPOWIEDZ;nastepny_kodek(k,s);return;}
+        if(s.param++==0){c.revision_id=r;return;}
+        c.root_sub_count=r;s.sub_start=hda_sub_start(r);s.sub_count=hda_sub_count(r);
+        if(!hda_zakres_wezlow_poprawny(s.sub_start,s.sub_count)||!s.sub_start){
+            c.blad=HDA_DIAG_BLAD_ZLY_ZAKRES_WEZLOW;nastepny_kodek(k,s);return;
         }
-
-        case HDA_DIAG_ETAP_GRUPY_FUNKCYJNE: {
-            HdaDiagKodek& k = skan_docelowy.kodeki[0][stan_skan.kodek_idx];
-            const uint8_t cad = k.cad;
-
-            while (s_skan_wew.subnode_idx < s_skan_wew.subnode_count &&
-                   s_skan_wew.fg_licznik < HDA_DIAG_MAKS_FG && budzet > 0) {
-                const uint8_t nid = static_cast<uint8_t>(s_skan_wew.subnode_start + s_skan_wew.subnode_idx);
-                stan_skan.biezacy_cad = cad;
-                stan_skan.biezacy_nid = nid;
-
-                uint32_t fgt = 0;
-                const bool ok = pobierz_parametr(cad, nid, HDA_PAR_FGROUP_TYPE, &fgt);
-                wykonane_slowa += 1;
-                --budzet;
-
-                if (ok && hda_fg_jest_audio(fgt)) {
-                    HdaDiagFG& g = skan_docelowy.fg[0][stan_skan.kodek_idx][s_skan_wew.fg_licznik];
-                    g.wersja = HDA_DIAG_WERSJA_ABI;
-                    g.rozmiar = static_cast<uint32_t>(sizeof(HdaDiagFG));
-                    g.nid = nid;
-                    g.typ = hda_fg_typ(fgt);
-                    g.audio = 1;
-                    stan_skan.etap = HDA_DIAG_ETAP_PARAMETRY_AFG;
-                    break;
-                }
-                s_skan_wew.subnode_idx++;
-            }
-
-            if (stan_skan.etap == HDA_DIAG_ETAP_PARAMETRY_AFG) {
+        s.fg_root=0;s.param=0;st.etap=HDA_DIAG_ETAP_GRUPY_FUNKCYJNE;return;
+    }
+    case HDA_DIAG_ETAP_GRUPY_FUNKCYJNE:{
+        auto& c=skan_docelowy.kodeki[k][st.kodek_idx];
+        if(s.fg_root>=s.sub_count){nastepny_kodek(k,s);return;}
+        const uint8_t nid=uint8_t(s.sub_start+s.fg_root);
+        rc=parametr(k,s,c.cad,nid,HDA_PAR_FGROUP_TYPE,&r);if(rc==HDA_TRANSPORT_PENDING)return;
+        ++s.fg_root;
+        if(!poprawna_odp(rc,r))return;
+        if(c.liczba_fg>=HDA_DIAG_MAKS_FG){c.flagi|=1;obetnij();return;}
+        s.fg_idx=c.liczba_fg++;st.fg_idx=s.fg_idx;
+        auto& f=skan_docelowy.fg[k][st.kodek_idx][s.fg_idx];naglowek(f);
+        f.nid=nid;f.typ=hda_fg_typ(r);f.audio=hda_fg_jest_audio(r);s.uzyte_nid[nid]=true;
+        if(f.audio){s.param=0;st.etap=HDA_DIAG_ETAP_PARAMETRY_AFG;}
+        return;
+    }
+    case HDA_DIAG_ETAP_PARAMETRY_AFG:{
+        auto& c=skan_docelowy.kodeki[k][st.kodek_idx];auto& f=skan_docelowy.fg[k][st.kodek_idx][s.fg_idx];
+        const uint8_t params[]={HDA_PAR_AFG_CAPS,HDA_PAR_SUB_NODE_COUNT,HDA_PAR_PCM_SIZE_RATE,
+            HDA_PAR_STREAM_FORMATS,HDA_PAR_AMP_IN_CAP,HDA_PAR_AMP_OUT_CAP,HDA_PAR_POWER_STATES};
+        rc=parametr(k,s,c.cad,f.nid,params[s.param],&r);if(rc==HDA_TRANSPORT_PENDING)return;
+        if(poprawna_odp(rc,r))switch(s.param){
+            case 0:f.fg_caps=r;break;
+            case 1:
+                f.sub_start=hda_sub_start(r);f.sub_count=hda_sub_count(r);
+                if(hda_zakres_wezlow_poprawny(uint8_t(f.sub_start),uint8_t(f.sub_count))&&f.sub_start){
+                    f.widget_start=f.sub_start;f.widget_count=f.sub_count;
+                    if(f.widget_count>HDA_DIAG_MAKS_WIDGETOW){f.flagi|=1;obetnij();}
+                }else f.blad=HDA_DIAG_BLAD_ZLY_ZAKRES_WEZLOW;
                 break;
-            }
-
-            if (s_skan_wew.subnode_idx >= s_skan_wew.subnode_count || s_skan_wew.fg_licznik >= HDA_DIAG_MAKS_FG) {
-                k.liczba_fg = s_skan_wew.fg_licznik;
-                if (k.liczba_fg == 0) {
-                    k.blad = HDA_DIAG_BLAD_BRAK_AFG;
-                }
-                stan_skan.kodek_idx++;
-                const uint32_t nk = skan_docelowy.kontrolery[0].liczba_kodekow;
-                if (stan_skan.kodek_idx < nk) {
-                    stan_skan.etap = HDA_DIAG_ETAP_PARAMETRY_KORZENIA;
-                } else {
-                    stan_skan.kodek_idx = 0;
-                    stan_skan.fg_idx = 0;
-                    stan_skan.widget_idx = 0;
-                    stan_skan.etap = HDA_DIAG_ETAP_WIDGET_ODKRYCIE;
-                    stan_skan.postep_0_1000 = 300;
-                }
-            }
-            break;
-        }
-
-        case HDA_DIAG_ETAP_PARAMETRY_AFG: {
-            HdaDiagKodek& k = skan_docelowy.kodeki[0][stan_skan.kodek_idx];
-            HdaDiagFG& g = skan_docelowy.fg[0][stan_skan.kodek_idx][s_skan_wew.fg_licznik];
-            const uint8_t cad = k.cad;
-            const uint8_t nid = g.nid;
-
-            uint32_t fgc = 0;
-            if (pobierz_parametr(cad, nid, HDA_PAR_AFG_CAPS, &fgc)) {
-                g.fg_caps = fgc;
-            }
-            wykonane_slowa += 1;
-
-            uint32_t subg = 0;
-            if (pobierz_parametr(cad, nid, HDA_PAR_SUB_NODE_COUNT, &subg)) {
-                g.sub_start = hda_sub_start(subg);
-                g.sub_count = hda_sub_count(subg);
-                if (hda_zakres_wezlow_poprawny(static_cast<uint8_t>(g.sub_start), static_cast<uint8_t>(g.sub_count))) {
-                    g.widget_start = g.sub_start;
-                    g.widget_count = g.sub_count;
-                } else {
-                    g.blad = HDA_DIAG_BLAD_ZLY_ZAKRES_WEZLOW;
-                }
-            } else {
-                g.blad = HDA_DIAG_BLAD_ZLA_ODPOWIEDZ;
-            }
-            wykonane_slowa += 1;
-
-            s_skan_wew.fg_licznik++;
-            s_skan_wew.subnode_idx++;
-            stan_skan.etap = HDA_DIAG_ETAP_GRUPY_FUNKCYJNE;
-            break;
-        }
-
-        case HDA_DIAG_ETAP_WIDGET_ODKRYCIE: {
-            const uint32_t nk = skan_docelowy.kontrolery[0].liczba_kodekow;
-            if (stan_skan.kodek_idx >= nk) {
-                stan_skan.etap = HDA_DIAG_ETAP_BUDOWANIE_SCIEZEK;
-                break;
-            }
-            const uint32_t nf = skan_docelowy.kodeki[0][stan_skan.kodek_idx].liczba_fg;
-            if (stan_skan.fg_idx >= nf) {
-                stan_skan.kodek_idx++;
-                stan_skan.fg_idx = 0;
-                stan_skan.widget_idx = 0;
-                break;
-            }
-            HdaDiagFG& g = skan_docelowy.fg[0][stan_skan.kodek_idx][stan_skan.fg_idx];
-            if (g.widget_count == 0 || stan_skan.widget_idx >= g.widget_count) {
-                stan_skan.fg_idx++;
-                stan_skan.widget_idx = 0;
-                break;
-            }
-
-            const uint8_t cad = skan_docelowy.kodeki[0][stan_skan.kodek_idx].cad;
-            const uint8_t nid = static_cast<uint8_t>(g.widget_start + stan_skan.widget_idx);
-            stan_skan.biezacy_cad = cad;
-            stan_skan.biezacy_nid = nid;
-
-            if (stan_skan.widget_idx >= HDA_DIAG_MAKS_WIDGETOW) {
-                skan_docelowy.flagi |= HDA_DIAG_FLAGA_OBECIETA;
-                stan_skan.widget_idx++;
-                break;
-            }
-
-            HdaDiagWidget& w = skan_docelowy.widgety[0][stan_skan.kodek_idx][stan_skan.fg_idx][stan_skan.widget_idx];
-            w.wersja = HDA_DIAG_WERSJA_ABI;
-            w.rozmiar = static_cast<uint32_t>(sizeof(HdaDiagWidget));
-            w.nid = nid;
-
-            uint32_t awcap = 0;
-            if (!pobierz_parametr(cad, nid, HDA_PAR_WIDGET_CAP, &awcap)) {
-                w.flagi = 2;
-                w.blad = HDA_DIAG_BLAD_ZLA_ODPOWIEDZ;
-                stan_skan.widget_idx++;
-                wykonane_slowa += 1;
-                break;
-            }
-            w.awcap = awcap;
-            w.typ = hda_wcap_typ(awcap);
-            wykonane_slowa += 1;
-
-            stan_skan.etap = HDA_DIAG_ETAP_WIDGET_PARAMETRY;
-            break;
-        }
-
-        case HDA_DIAG_ETAP_WIDGET_PARAMETRY: {
-            HdaDiagFG& g = skan_docelowy.fg[0][stan_skan.kodek_idx][stan_skan.fg_idx];
-            HdaDiagWidget& w = skan_docelowy.widgety[0][stan_skan.kodek_idx][stan_skan.fg_idx][stan_skan.widget_idx];
-            const uint8_t cad = skan_docelowy.kodeki[0][stan_skan.kodek_idx].cad;
-            const uint8_t nid = w.nid;
-
-            if (hda_typ_wolno_pin_caps(w.typ)) {
-                uint32_t pc = 0;
-                if (pobierz_parametr(cad, nid, HDA_PAR_PIN_CAP, &pc)) w.pin_caps = pc;
-                uint32_t dc = 0;
-                if (pobierz_pin_config(cad, nid, &dc)) w.default_config = dc;
-                wykonane_slowa += 2;
-            }
-            if (hda_typ_wolno_pcm_caps(w.typ)) {
-                uint32_t ps = 0;
-                if (pobierz_parametr(cad, nid, HDA_PAR_PCM_SIZE_RATE, &ps)) w.pcm_size_rate = ps;
-                uint32_t sf = 0;
-                if (pobierz_parametr(cad, nid, HDA_PAR_STREAM_FORMATS, &sf)) w.stream_formats = sf;
-                wykonane_slowa += 2;
-            }
-            if (hda_typ_wolno_amp_out(w.awcap)) {
-                uint32_t ac = 0;
-                if (pobierz_parametr(cad, nid, HDA_PAR_AMP_OUT_CAP, &ac)) w.out_amp_caps = ac;
-                wykonane_slowa += 1;
-            }
-            if (hda_typ_wolno_amp_in(w.awcap)) {
-                uint32_t ac = 0;
-                if (pobierz_parametr(cad, nid, HDA_PAR_AMP_IN_CAP, &ac)) w.in_amp_caps = ac;
-                wykonane_slowa += 1;
-            }
-            uint8_t ps = 0;
-            if (pobierz_power_state(cad, nid, &ps)) w.power_current = ps;
-            uint32_t psc = 0;
-            if (pobierz_parametr(cad, nid, HDA_PAR_POWER_STATES, &psc)) w.power_states = psc;
-            wykonane_slowa += 2;
-
-            if (hda_typ_wolno_conn_list(w.awcap)) {
-                uint32_t cl = 0;
-                if (pobierz_parametr(cad, nid, HDA_PAR_CONNLIST_LEN, &cl)) {
-                    w.connlist_len_raw = cl;
-                    const uint8_t ile = hda_connlist_liczba(cl);
-                    const bool lf = hda_connlist_long_form(cl);
-                    w.conn_long_form = lf ? 1 : 0;
-                    if (ile > 0 && ile <= HDA_DIAG_MAKS_POLACZEN) {
-                        s_skan_wew.conn_idx = 0;
-                        s_skan_wew.conn_slowo_idx = 0;
-                        for (int i = 0; i < 4; ++i) s_skan_wew.conn_slowa[i] = 0;
-                        stan_skan.etap = HDA_DIAG_ETAP_POLACZENIA;
-                        wykonane_slowa += 1;
-                        break;
-                    } else if (ile > HDA_DIAG_MAKS_POLACZEN) {
-                        w.flagi = 1;
-                        skan_docelowy.flagi |= HDA_DIAG_FLAGA_OBECIETA;
-                    }
-                }
-                wykonane_slowa += 1;
-            }
-
-            stan_skan.widget_idx++;
-            stan_skan.postep_0_1000 = 300 + (stan_skan.widget_idx * 500) / (g.widget_count ? g.widget_count : 1);
-            stan_skan.etap = HDA_DIAG_ETAP_WIDGET_ODKRYCIE;
-            break;
-        }
-
-        case HDA_DIAG_ETAP_POLACZENIA: {
-            HdaDiagFG& g = skan_docelowy.fg[0][stan_skan.kodek_idx][stan_skan.fg_idx];
-            HdaDiagWidget& w = skan_docelowy.widgety[0][stan_skan.kodek_idx][stan_skan.fg_idx][stan_skan.widget_idx];
-            const uint8_t cad = skan_docelowy.kodeki[0][stan_skan.kodek_idx].cad;
-            const uint8_t nid = w.nid;
-            const uint8_t ile = hda_connlist_liczba(w.connlist_len_raw);
-            const bool lf = w.conn_long_form != 0;
-            const uint32_t na_slowo = lf ? 2U : 4U;
-
-            while (s_skan_wew.conn_idx < ile && s_skan_wew.conn_slowo_idx < 4 && budzet > 0) {
-                const uint32_t cmd = hda_wew_verb12(cad, nid, 0xF02U, s_skan_wew.conn_idx);
-                uint32_t resp = 0;
-                if (!hda_wew_wyslij_immediate(cmd, &resp) || odpowiedz_nie_poprawna(resp)) {
-                    w.flagi = 2;
-                    w.blad = HDA_DIAG_BLAD_LISTA_POLACZEN;
-                    break;
-                }
-                s_skan_wew.conn_slowa[s_skan_wew.conn_slowo_idx++] = resp;
-                s_skan_wew.conn_idx = static_cast<uint8_t>(s_skan_wew.conn_idx + na_slowo);
-                wykonane_slowa += 1;
-                --budzet;
-            }
-
-            if (s_skan_wew.conn_idx >= ile || s_skan_wew.conn_slowo_idx >= 4 || w.flagi == 2) {
-                if (w.flagi != 2) {
-                    uint32_t out_n = 0;
-                    bool trunc = false;
-                    uint8_t tmp[HDA_DIAG_MAKS_POLACZEN] = {0};
-                    if (hda_rozszerz_liste_polaczen(s_skan_wew.conn_slowa, s_skan_wew.conn_slowo_idx, lf, ile, tmp,
-                                                    HDA_DIAG_MAKS_POLACZEN, &out_n, &trunc)) {
-                        w.liczba_polaczen = static_cast<uint8_t>(out_n);
-                        for (uint32_t ci = 0; ci < out_n; ++ci) {
-                            w.polaczenia[ci] = tmp[ci];
-                            w.polaczenia_surowe[ci] = tmp[ci];
-                        }
-                        if (trunc) skan_docelowy.flagi |= HDA_DIAG_FLAGA_OBECIETA;
-                    } else {
-                        w.blad = HDA_DIAG_BLAD_LISTA_POLACZEN;
-                    }
-                }
-                stan_skan.widget_idx++;
-                stan_skan.postep_0_1000 = 300 + (stan_skan.widget_idx * 500) / (g.widget_count ? g.widget_count : 1);
-                stan_skan.etap = HDA_DIAG_ETAP_WIDGET_ODKRYCIE;
-            }
-            break;
-        }
-
-        case HDA_DIAG_ETAP_BUDOWANIE_SCIEZEK: {
-            uint32_t ile_sciezek = 0;
-            bool trunc = false;
-            const uint32_t nk = skan_docelowy.kontrolery[0].liczba_kodekow;
-            for (uint32_t ki = 0; ki < nk; ++ki) {
-                const uint32_t nf = skan_docelowy.kodeki[0][ki].liczba_fg;
-                for (uint32_t fi = 0; fi < nf; ++fi) {
-                    HdaDiagWidget lokalne[HDA_DIAG_MAKS_WIDGETOW];
-                    uint32_t n = 0;
-                    for (uint32_t wi = 0; wi < HDA_DIAG_MAKS_WIDGETOW; ++wi) {
-                        const HdaDiagWidget& src = skan_docelowy.widgety[0][ki][fi][wi];
-                        if (src.awcap == 0 && src.nid == 0) continue;
-                        if (n >= HDA_DIAG_MAKS_WIDGETOW) break;
-                        lokalne[n++] = src;
-                    }
-                    if (n == 0) continue;
-                    HdaDiagSciezka tmp[HDA_DIAG_MAKS_SCIEZEK];
-                    uint32_t ns = 0;
-                    bool obc = false;
-                    if (!hda_zbuduj_sciezki(lokalne, n, tmp, HDA_DIAG_MAKS_SCIEZEK, &ns, &obc)) {
-                        continue;
-                    }
-                    for (uint32_t si = 0; si < ns; ++si) {
-                        if (ile_sciezek >= HDA_DIAG_MAKS_SCIEZEK) {
-                            trunc = true;
-                            break;
-                        }
-                        skan_docelowy.sciezki[ile_sciezek] = tmp[si];
-                        ++ile_sciezek;
-                    }
-                    if (obc) trunc = true;
-                }
-            }
-            skan_docelowy.liczba_sciezek = ile_sciezek;
-            if (trunc) skan_docelowy.flagi |= HDA_DIAG_FLAGA_OBECIETA;
-            if (ile_sciezek == 0) {
-                stan_skan.blad = HDA_DIAG_BLAD_BRAK_WYJSC;
-            } else {
-                stan_skan.blad = HDA_DIAG_OK;
-            }
-            stan_skan.postep_0_1000 = 950;
-            stan_skan.etap = HDA_DIAG_ETAP_PUBLIKACJA;
-            break;
-        }
-
-        case HDA_DIAG_ETAP_PUBLIKACJA: {
-            HdaDiagSnapshot* cel = (opublikowana == &bufor_a) ? &bufor_b : &bufor_a;
-            skan_docelowy.wersja = HDA_DIAG_WERSJA_ABI;
-            skan_docelowy.rozmiar = static_cast<uint32_t>(sizeof(HdaDiagSnapshot));
-            skan_docelowy.generacja = stan_skan.generacja_skanu;
-            skan_docelowy.etap = HDA_DIAG_ETAP_GOTOWY;
-            skan_docelowy.blad = stan_skan.blad;
-            skan_docelowy.postep_0_1000 = 1000;
-            skan_docelowy.flagi &= ~HDA_DIAG_FLAGA_SKAN_W_TOKU;
-            skan_docelowy.flagi |= HDA_DIAG_FLAGA_SKAN_GOTOWY;
-
-            HdaWewStanStrumienia ws{};
-            if (hda_wew_pobierz_stan_strumienia(&ws)) {
-                HdaDiagStrumien& s = skan_docelowy.strumien;
-                s.wersja = HDA_DIAG_WERSJA_ABI;
-                s.rozmiar = static_cast<uint32_t>(sizeof(HdaDiagStrumien));
-                s.numer = ws.numer;
-                s.stream_tag = ws.stream_tag;
-                s.format_raw = ws.format_raw;
-                s.cbl = ws.cbl;
-                s.lvi = ws.lvi;
-                s.lpib = ws.lpib;
-                s.ctl = ws.ctl;
-                s.sts = ws.sts;
-                s.bcis = ws.bcis;
-                s.fifoe = ws.fifoe;
-                s.dese = ws.dese;
-                s.fifordy = ws.fifordy;
-                s.run = ws.run;
-                s.bdl.wersja = HDA_DIAG_WERSJA_ABI;
-                s.bdl.rozmiar = static_cast<uint32_t>(sizeof(HdaDiagBdlInfo));
-                s.bdl.liczba_wpisow = ws.bdl_wpisow;
-                s.bdl.maska_fizycznego = ws.bdl_maska_fiz;
-                s.bdl.flagi = ws.bdl_uzywa_64;
-                if (ws.run) s.stan = HDA_STRUMIEN_GRA;
-                else if (ws.ctl != 0) s.stan = HDA_STRUMIEN_SKONFIGUROWANY;
-                else s.stan = HDA_STRUMIEN_BEZCZYNNY;
-            }
-
-            skan_docelowy.test = stan_test;
-            HdaWewSciezkaTestu sp{};
-            hda_wew_pobierz_sciezke_testu(&sp);
-            skan_docelowy.test.kontroler_idx = 0;
-            skan_docelowy.test.codec_cad = sp.cad;
-            skan_docelowy.test.konwerter_nid = sp.konwerter_nid;
-            skan_docelowy.test.pin_nid = sp.pin_nid;
-            skan_docelowy.test.routing_fizyczny = sp.routing_fizyczny;
-
-            skopiuj_snapshot(cel, &skan_docelowy);
-            __atomic_store_n(&opublikowana, cel, __ATOMIC_RELEASE);
-            __atomic_store_n(&generacja_publikacji, skan_docelowy.generacja, __ATOMIC_RELEASE);
-
-            stan_skan.generacja_opublikowana = skan_docelowy.generacja;
-            stan_skan.migawka_dostepna = 1;
-            stan_skan.aktywny = 0;
-            stan_skan.gotowy = 1;
-            stan_skan.etap = HDA_DIAG_ETAP_GOTOWY;
-            stan_skan.postep_0_1000 = 1000;
-            return true;
-        }
-
-        case HDA_DIAG_ETAP_GOTOWY:
-        case HDA_DIAG_ETAP_BLAD:
+            case 2:f.pcm_size_rate=r;break;case 3:f.stream_formats=r;break;
+            case 4:f.in_amp_caps=r;break;case 5:f.out_amp_caps=r;break;case 6:f.power_states=r;break;
+        }else if(s.param==1)f.blad=HDA_DIAG_BLAD_ZLA_ODPOWIEDZ;
+        if(++s.param==sizeof(params)){s.param=0;s.widget=0;st.widget_idx=0;st.etap=HDA_DIAG_ETAP_WIDGET_ODKRYCIE;}
+        return;
+    }
+    case HDA_DIAG_ETAP_WIDGET_ODKRYCIE:{
+        auto& c=skan_docelowy.kodeki[k][st.kodek_idx];auto& f=skan_docelowy.fg[k][st.kodek_idx][s.fg_idx];
+        if(f.blad||s.widget>=f.widget_count||s.widget>=HDA_DIAG_MAKS_WIDGETOW){st.etap=HDA_DIAG_ETAP_GRUPY_FUNKCYJNE;return;}
+        const uint8_t nid=uint8_t(f.widget_start+s.widget);
+        if(!nid||nid>127||s.uzyte_nid[nid]){f.blad=HDA_DIAG_BLAD_ZLY_ZAKRES_WEZLOW;st.etap=HDA_DIAG_ETAP_GRUPY_FUNKCYJNE;return;}
+        rc=parametr(k,s,c.cad,nid,HDA_PAR_WIDGET_CAP,&r);if(rc==HDA_TRANSPORT_PENDING)return;
+        s.uzyte_nid[nid]=true;
+        auto& w=skan_docelowy.widgety[k][st.kodek_idx][s.fg_idx][s.widget];naglowek(w);w.nid=nid;
+        if(!poprawna_odp(rc,r)){w.flagi|=2;w.blad=HDA_DIAG_BLAD_ZLA_ODPOWIEDZ;nastepny_widget(s);return;}
+        w.awcap=r;w.typ=hda_wcap_typ(r);s.param=0;st.etap=HDA_DIAG_ETAP_WIDGET_PARAMETRY;
+        st.postep_0_1000=200+uint32_t(s.fg_root)*700/(s.sub_count?s.sub_count:1);return;
+    }
+    case HDA_DIAG_ETAP_WIDGET_PARAMETRY:{
+        auto& c=skan_docelowy.kodeki[k][st.kodek_idx];auto& f=skan_docelowy.fg[k][st.kodek_idx][s.fg_idx];
+        auto& w=skan_docelowy.widgety[k][st.kodek_idx][s.fg_idx][s.widget];
+        // Each supported read is a separate resumable operation; skipped metadata does no I/O.
+        uint16_t verb=0xf00;uint8_t p=0;uint32_t* dst=nullptr;bool query=true;
+        switch(s.param){
+        case 0:p=HDA_PAR_PIN_CAP;dst=&w.pin_caps;query=w.typ==HDA_WID_PIN;
+               break;
+        case 1:verb=0xf1c;dst=&w.default_config;query=w.typ==HDA_WID_PIN;
+               break;
+        case 2:p=HDA_PAR_PCM_SIZE_RATE;dst=&w.pcm_size_rate;query=hda_typ_wolno_pcm_caps(w.typ)&&(w.awcap&HDA_WCAP_FORMAT_OVRD);
+               if(!query&&hda_typ_wolno_pcm_caps(w.typ))w.pcm_size_rate=f.pcm_size_rate;
+               break;
+        case 3:p=HDA_PAR_STREAM_FORMATS;dst=&w.stream_formats;query=hda_typ_wolno_pcm_caps(w.typ)&&(w.awcap&HDA_WCAP_FORMAT_OVRD);
+               if(!query&&hda_typ_wolno_pcm_caps(w.typ))w.stream_formats=f.stream_formats;
+               break;
+        case 4:p=HDA_PAR_AMP_IN_CAP;dst=&w.in_amp_caps;query=(w.awcap&HDA_WCAP_IN_AMP)&&(w.awcap&HDA_WCAP_AMP_OVRD);
+               if(!query&&(w.awcap&HDA_WCAP_IN_AMP))w.in_amp_caps=f.in_amp_caps;
+               break;
+        case 5:p=HDA_PAR_AMP_OUT_CAP;dst=&w.out_amp_caps;query=(w.awcap&HDA_WCAP_OUT_AMP)&&(w.awcap&HDA_WCAP_AMP_OVRD);
+               if(!query&&(w.awcap&HDA_WCAP_OUT_AMP))w.out_amp_caps=f.out_amp_caps;
+               break;
+        case 6:p=HDA_PAR_POWER_STATES;dst=&w.power_states;query=(w.awcap&(1U<<10))!=0;
+               break;
+        case 7:verb=0xf05;query=(w.awcap&(1U<<10))!=0;
+               break;
+        case 8:p=HDA_PAR_CONNLIST_LEN;dst=&w.connlist_len_raw;query=hda_typ_wolno_conn_list(w.awcap);
+               break;
+        case 9:verb=0xf01;dst=&w.conn_select;query=hda_connlist_liczba(w.connlist_len_raw)>1&&w.typ!=HDA_WID_MIX;
+               break;
+        case 10:verb=0xf0c;dst=&w.eapd;query=w.typ==HDA_WID_PIN&&(w.pin_caps&HDA_PINCAP_EAPD);break;
         default:
-            return true;
+            if(hda_connlist_liczba(w.connlist_len_raw)){s.conn=0;w.conn_long_form=hda_connlist_long_form(w.connlist_len_raw);st.etap=HDA_DIAG_ETAP_POLACZENIA;}
+            else nastepny_widget(s);
+            return;
+        }
+        if(query){
+            rc=odczyt(k,s,c.cad,w.nid,verb,p,&r);if(rc==HDA_TRANSPORT_PENDING)return;
+            if(poprawna_odp(rc,r)){if(dst)*dst=r;else w.power_current=uint8_t((r>>4)&15);}
+            else {w.blad=HDA_DIAG_BLAD_ZLA_ODPOWIEDZ;w.flagi|=2;}
+        }
+        ++s.param;return;
     }
-
-    if (stan_skan.etap == HDA_DIAG_ETAP_BLAD) {
-        HdaDiagSnapshot* cel = (opublikowana == &bufor_a) ? &bufor_b : &bufor_a;
-        skan_docelowy.wersja = HDA_DIAG_WERSJA_ABI;
-        skan_docelowy.rozmiar = static_cast<uint32_t>(sizeof(HdaDiagSnapshot));
-        skan_docelowy.generacja = stan_skan.generacja_skanu;
-        skan_docelowy.etap = HDA_DIAG_ETAP_BLAD;
-        skan_docelowy.blad = stan_skan.blad;
-        skan_docelowy.flagi &= ~HDA_DIAG_FLAGA_SKAN_W_TOKU;
-        skan_docelowy.flagi |= HDA_DIAG_FLAGA_SKAN_BLAD;
-
-        skopiuj_snapshot(cel, &skan_docelowy);
-        __atomic_store_n(&opublikowana, cel, __ATOMIC_RELEASE);
-        __atomic_store_n(&generacja_publikacji, skan_docelowy.generacja, __ATOMIC_RELEASE);
-
-        stan_skan.generacja_opublikowana = skan_docelowy.generacja;
-        stan_skan.migawka_dostepna = 1;
-        stan_skan.aktywny = 0;
-        stan_skan.gotowy = 0;
-        return true;
+    case HDA_DIAG_ETAP_POLACZENIA:{
+        auto& c=skan_docelowy.kodeki[k][st.kodek_idx];auto& f=skan_docelowy.fg[k][st.kodek_idx][s.fg_idx];
+        auto& w=skan_docelowy.widgety[k][st.kodek_idx][s.fg_idx][s.widget];
+        const uint32_t entries=hda_connlist_liczba(w.connlist_len_raw), per=w.conn_long_form?2:4;
+        if(s.conn<entries){
+            rc=odczyt(k,s,c.cad,w.nid,0xf02,s.conn,&r);if(rc==HDA_TRANSPORT_PENDING)return;
+            if(!poprawna_odp(rc,r)){w.blad=HDA_DIAG_BLAD_LISTA_POLACZEN;nastepny_widget(s);return;}
+            w.conn_slowa[w.liczba_slow_polaczen++]=r;s.conn=uint8_t(s.conn+per);return;
+        }
+        uint32_t count=0;bool truncated=false;
+        if(!hda_rozszerz_liste_polaczen(w.conn_slowa,w.liczba_slow_polaczen,w.conn_long_form,uint8_t(entries),
+            w.polaczenia,HDA_DIAG_MAKS_POLACZEN,&count,&truncated)) w.blad=HDA_DIAG_BLAD_LISTA_POLACZEN;
+        else {
+            w.liczba_polaczen=uint8_t(count);
+            for(uint32_t ci=0;ci<count;++ci){
+                const auto nid=w.polaczenia[ci];w.polaczenia_surowe[ci]=nid;
+                if(nid<f.widget_start||nid>=f.widget_start+f.widget_count){w.blad=HDA_DIAG_BLAD_LISTA_POLACZEN;}
+            }
+        }
+        if(truncated){w.flagi|=1;obetnij();}
+        nastepny_widget(s);return;
     }
-
-    stan_skan.slow_w_kroku = wykonane_slowa;
-    return false;
+    case HDA_DIAG_ETAP_BUDOWANIE_SCIEZEK:{
+        if(st.kodek_idx>=ctrl.liczba_kodekow){koniec_kontrolera(k,HDA_DIAG_OK);return;}
+        auto& c=skan_docelowy.kodeki[k][st.kodek_idx];
+        if(st.fg_idx>=c.liczba_fg){++st.kodek_idx;st.fg_idx=0;return;}
+        auto& f=skan_docelowy.fg[k][st.kodek_idx][st.fg_idx];
+        if(f.audio&&!f.blad){
+            const uint32_t begin=skan_docelowy.liczba_sciezek;
+            const uint32_t capacity=HDA_DIAG_MAKS_SCIEZEK-begin;
+            uint32_t count=0;bool truncated=false;
+            if(capacity){
+                const uint32_t n=f.widget_count<HDA_DIAG_MAKS_WIDGETOW?f.widget_count:HDA_DIAG_MAKS_WIDGETOW;
+                hda_zbuduj_sciezki(skan_docelowy.widgety[k][st.kodek_idx][st.fg_idx],n,
+                    skan_docelowy.sciezki+begin,capacity,&count,&truncated);
+                for(uint32_t j=begin;j<begin+count;++j){auto& route=skan_docelowy.sciezki[j];route.kontroler_idx=uint8_t(k);route.codec_cad=c.cad;route.fg_nid=f.nid;}
+                skan_docelowy.liczba_sciezek+=count;
+            }else truncated=true;
+            if(truncated)obetnij();
+        }
+        ++st.fg_idx;st.postep_0_1000=950;return;
+    }
+    case HDA_DIAG_ETAP_PUBLIKACJA:koniec_kontrolera(k,st.blad);return;
+    default:koniec_kontrolera(k,HDA_DIAG_BLAD_ZLA_ODPOWIEDZ);return;
+    }
 }
-
-void hda_diag_pobierz_stan(HdaDiagSkan* out) {
-    if (!out) return;
-    *out = stan_skan;
-    out->wersja = HDA_DIAG_WERSJA_ABI;
-    out->rozmiar = static_cast<uint32_t>(sizeof(HdaDiagSkan));
-    out->migawka_dostepna = (__atomic_load_n(&opublikowana, __ATOMIC_ACQUIRE) != nullptr) ? 1 : 0;
-    out->generacja_opublikowana = __atomic_load_n(&generacja_publikacji, __ATOMIC_ACQUIRE);
-}
-
-
-bool hda_diag_pobierz_snapshot(
-    HdaDiagSnapshot* out,
-    uint32_t out_maks,
-    uint32_t* zapisano,
-    uint32_t* generacja
-) {
-    if (!out || !zapisano || out_maks < sizeof(HdaDiagSnapshot)) {
-        return false;
-    }
-    HdaDiagSnapshot* zrodlo = __atomic_load_n(&opublikowana, __ATOMIC_ACQUIRE);
-    if (!zrodlo) {
-        return false;
-    }
-    skopiuj_snapshot(out, zrodlo);
-    *zapisano = static_cast<uint32_t>(sizeof(HdaDiagSnapshot));
-    if (generacja) {
-        *generacja = __atomic_load_n(&generacja_publikacji, __ATOMIC_ACQUIRE);
-    }
+bool publikuj(){
+    // Under the short scan/publication try-lock: readers cannot race buffer reuse.
+    auto* dst=skan_bufor;
+    skan_docelowy.generacja=stan_skan.generacja_skanu;
+    skan_docelowy.flagi&=~HDA_DIAG_FLAGA_SKAN_W_TOKU;
+    skan_docelowy.flagi|=HDA_DIAG_FLAGA_SKAN_GOTOWY;
+    skan_docelowy.etap=HDA_DIAG_ETAP_GOTOWY;skan_docelowy.postep_0_1000=1000;
+    skan_docelowy.test=stan_test;
+    HdaWewSciezkaTestu path{};hda_wew_pobierz_sciezke_testu(&path);
+    skan_docelowy.test.kontroler_idx=uint8_t(hda_wew_kontroler_odtwarzania());
+    skan_docelowy.test.codec_cad=path.cad;skan_docelowy.test.konwerter_nid=path.konwerter_nid;
+    skan_docelowy.test.pin_nid=path.pin_nid;skan_docelowy.test.routing_fizyczny=path.routing_fizyczny;
+    hda_diag_pobierz_strumien(&skan_docelowy.strumien);
+    auto* wolny=bufor_a;
+    bufor_a=bufor_b;
+    bufor_b=dst;
+    __atomic_store_n(&opublikowana,dst,__ATOMIC_RELEASE);
+    skan_bufor=wolny;
+    generacja_publikacji=dst->generacja;stan_skan.generacja_opublikowana=generacja_publikacji;
+    stan_skan.migawka_dostepna=1;stan_skan.aktywny=0;stan_skan.gotowy=1;
+    stan_skan.etap=HDA_DIAG_ETAP_GOTOWY;stan_skan.postep_0_1000=1000;
     return true;
 }
+}
 
+bool hda_diag_inicjalizuj(){
+    GuardSkan g;if(!g.ok)return false;
+    for(uint32_t k=0;k<hda_transport_liczba();++k)hda_transport_anuluj(k,HDA_WLASCICIEL_DIAG);
+    if(!bufor_a)bufor_a=static_cast<HdaDiagSnapshot*>(kmalloc(sizeof(HdaDiagSnapshot)));
+    if(!bufor_b)bufor_b=static_cast<HdaDiagSnapshot*>(kmalloc(sizeof(HdaDiagSnapshot)));
+    if(!skan_bufor)skan_bufor=static_cast<HdaDiagSnapshot*>(kmalloc(sizeof(HdaDiagSnapshot)));
+    if(!bufor_a||!bufor_b||!skan_bufor){
+        if(bufor_a)kfree(bufor_a);
+        if(bufor_b)kfree(bufor_b);
+        if(skan_bufor)kfree(skan_bufor);
+        bufor_a=bufor_b=skan_bufor=nullptr;return false;
+    }
+    init_snapshot(*bufor_a);init_snapshot(*bufor_b);init_snapshot(skan_docelowy);
+    opublikowana=nullptr;generacja_publikacji=licznik_generacji=0;
+    stan_skan={};naglowek(stan_skan);stan_test={};naglowek(stan_test);
+    for(auto& s:skany)s={};
+    maks_serwis_ns=0;przygotowanie=false;return true;
+}
+bool hda_diag_startuj_skan(uint32_t wybrany){
+    if(!skan_bufor&&!hda_diag_inicjalizuj())return false;
+    GuardSkan g;if(!g.ok)return false;
+    const uint32_t n=hda_transport_liczba();
+    if(wybrany!=HDA_DIAG_WSZYSTKIE_KONTROLERY&&wybrany>=n)return false;
+    if(stan_skan.aktywny)for(uint32_t k=0;k<n;++k)hda_transport_anuluj(k,HDA_WLASCICIEL_DIAG);
+    // Refresh keeps the previous complete generation visible. Copy for a selected-controller refresh.
+    anulowana_generacja=false;przygotowanie=true;przygotowanie_offset=0;przygotowanie_wybrany=wybrany;
+    stan_skan={};naglowek(stan_skan);stan_skan.generacja_skanu=++licznik_generacji;
+    if(!stan_skan.generacja_skanu)stan_skan.generacja_skanu=++licznik_generacji;
+    stan_skan.generacja_opublikowana=generacja_publikacji;stan_skan.migawka_dostepna=opublikowana!=nullptr;
+    stan_skan.aktywny=1;stan_skan.etap=HDA_DIAG_ETAP_KONTROLER;
+
+    for(uint32_t k=0;k<n;++k){
+        auto& s=skany[k];s={};naglowek(s.stan);s.stan.kontroler_idx=k;
+        s.stan.generacja_skanu=stan_skan.generacja_skanu;s.stan.etap=HDA_DIAG_ETAP_KONTROLER;
+        s.stan.aktywny=wybrany==HDA_DIAG_WSZYSTKIE_KONTROLERY||wybrany==k;
+        if(s.stan.aktywny){
+            hda_transport_generacja(k,stan_skan.generacja_skanu);
+        }
+    }
+    nastepny=0;
+    return true;
+}
+void hda_diag_anuluj_skan(uint32_t wybrany){
+    GuardSkan g;if(!g.ok)return;
+    for(uint32_t k=0;k<hda_transport_liczba();++k)if(wybrany==HDA_DIAG_WSZYSTKIE_KONTROLERY||wybrany==k){
+        if(skany[k].stan.aktywny)anulowana_generacja=true;
+        hda_transport_anuluj(k,HDA_WLASCICIEL_DIAG);skany[k].transakcja=false;skany[k].stan.aktywny=0;skany[k].stan.przerwany=1;
+    }
+    bool active=false;for(const auto& s:skany)active|=s.stan.aktywny;
+    if(!active){przygotowanie=false;stan_skan.aktywny=0;stan_skan.przerwany=1;stan_skan.etap=HDA_DIAG_ETAP_BEZCZYNNY;}
+}
+bool hda_diag_krok_skanu(uint32_t wybrany){
+    GuardSkan g;if(!g.ok)return false;
+    if(!stan_skan.aktywny)return true;
+    const uint64_t start=czas_monotoniczny_ns();
+    struct Timing{uint64_t start;~Timing(){const uint64_t end=czas_monotoniczny_ns();if(end>=start&&end-start>maks_serwis_ns)maks_serwis_ns=end-start;}} timing{start};
+    const uint32_t n=hda_transport_liczba();bool ran=false;
+    if(przygotowanie){
+        // Bounded RAM work as well as bounded MMIO work: at most 16 KiB per service turn.
+        const size_t end=przygotowanie_offset+16384<sizeof(HdaDiagSnapshot)?przygotowanie_offset+16384:sizeof(HdaDiagSnapshot);
+        auto* dst=reinterpret_cast<uint8_t*>(skan_bufor);
+        const auto* src=reinterpret_cast<const uint8_t*>(opublikowana);
+        const bool retain=src&&przygotowanie_wybrany!=HDA_DIAG_WSZYSTKIE_KONTROLERY;
+        for(size_t i=przygotowanie_offset;i<end;++i)dst[i]=retain?src[i]:0;
+        if(retain){
+            const uint32_t k=przygotowanie_wybrany;
+            const void* regions[]={skan_docelowy.kodeki[k],skan_docelowy.fg[k],skan_docelowy.widgety[k]};
+            const size_t sizes[]={sizeof(skan_docelowy.kodeki[k]),sizeof(skan_docelowy.fg[k]),sizeof(skan_docelowy.widgety[k])};
+            for(uint32_t j=0;j<3;++j){
+                const size_t from=static_cast<const uint8_t*>(regions[j])-dst,to=from+sizes[j];
+                const size_t lo=from>przygotowanie_offset?from:przygotowanie_offset,hi=to<end?to:end;
+                if(hi>lo)zero(dst+lo,hi-lo);
+            }
+        }
+        przygotowanie_offset=end;
+        if(end==sizeof(HdaDiagSnapshot)){
+            przygotowanie=false;naglowek(skan_docelowy);
+            skan_docelowy.flagi&=~(HDA_DIAG_FLAGA_SKAN_GOTOWY|HDA_DIAG_FLAGA_SKAN_BLAD);
+            skan_docelowy.flagi|=HDA_DIAG_FLAGA_SKAN_W_TOKU;
+            skan_docelowy.liczba_kontrolerow=n;
+            if(hda_transport_rejestr_obciety())obetnij();
+            if(retain){
+                uint32_t out=0;
+                for(uint32_t j=0;j<skan_docelowy.liczba_sciezek&&j<HDA_DIAG_MAKS_SCIEZEK;++j)
+                    if(skan_docelowy.sciezki[j].kontroler_idx!=przygotowanie_wybrany)skan_docelowy.sciezki[out++]=skan_docelowy.sciezki[j];
+                skan_docelowy.liczba_sciezek=out;
+            }
+            if(!n){stan_skan.blad=HDA_DIAG_BLAD_BRAK_KONTROLERA;skan_docelowy.blad=stan_skan.blad;
+                skan_docelowy.flagi|=HDA_DIAG_FLAGA_BRAK_KONTROLERA;return publikuj();}
+        }
+        return false;
+    }
+    for(uint32_t j=0;j<n;++j){
+        const uint32_t k=(nastepny+j)%n;
+        if((wybrany==HDA_DIAG_WSZYSTKIE_KONTROLERY||wybrany==k)&&skany[k].stan.aktywny){
+            krok_kontrolera(k);nastepny=(k+1)%n;
+            const auto generation=stan_skan.generacja_skanu;
+            stan_skan=skany[k].stan;stan_skan.generacja_skanu=generation;ran=true;break;
+        }
+    }
+    bool active=false;uint32_t progress=0;
+    for(uint32_t k=0;k<n;++k){active|=skany[k].stan.aktywny;progress+=skany[k].stan.postep_0_1000;}
+    stan_skan.aktywny=active;stan_skan.generacja_opublikowana=generacja_publikacji;stan_skan.migawka_dostepna=opublikowana!=nullptr;
+    stan_skan.postep_0_1000=n?progress/n:1000;
+    if(!active){
+        if(anulowana_generacja){stan_skan.przerwany=1;stan_skan.gotowy=0;stan_skan.etap=HDA_DIAG_ETAP_BEZCZYNNY;return true;}
+        return publikuj();
+    }
+    (void)ran;return false;
+}
+void hda_diag_pobierz_stan(HdaDiagSkan* out,uint32_t wybrany){
+    if(!out)return;
+    GuardSkan g;if(!g.ok){*out={};naglowek(*out);out->aktywny=1;out->blad=HDA_DIAG_BLAD_W_TRAKCIE;return;}
+    *out=wybrany<hda_transport_liczba()?skany[wybrany].stan:stan_skan;
+    naglowek(*out);out->migawka_dostepna=opublikowana!=nullptr;out->generacja_opublikowana=generacja_publikacji;
+}
+uint64_t hda_diag_maks_krok_ns(){return maks_serwis_ns;}
+const HdaDiagSnapshot* hda_diag_pobierz_opublikowana(uint32_t* gen){
+    if(gen)*gen=__atomic_load_n(&generacja_publikacji,__ATOMIC_ACQUIRE);
+    return __atomic_load_n(&opublikowana,__ATOMIC_ACQUIRE);
+}
+bool hda_diag_pobierz_snapshot(HdaDiagSnapshot* out,uint32_t cap,uint32_t* written,uint32_t* gen){
+    if(!out||!written||cap<sizeof(*out))return false;
+    GuardSkan g;if(!g.ok||!opublikowana)return false;
+    skopiuj_snapshot(out,opublikowana);*written=sizeof(*out);if(gen)*gen=generacja_publikacji;return true;
+}
 bool hda_diag_pobierz_strumien(HdaDiagStrumien* out) {
     if (!out) return false;
-    HdaDiagSnapshot* zrodlo = __atomic_load_n(&opublikowana, __ATOMIC_ACQUIRE);
-    if (!zrodlo) {
+    *out={};
+    {
         /* Probe live. */
         HdaWewStanStrumienia ws{};
         if (!hda_wew_pobierz_stan_strumienia(&ws)) return false;
@@ -805,10 +454,16 @@ bool hda_diag_pobierz_strumien(HdaDiagStrumien* out) {
         out->dese = ws.dese;
         out->fifordy = ws.fifordy;
         out->run = ws.run;
+        out->stan=ws.run?HDA_STRUMIEN_GRA:ws.ctl?HDA_STRUMIEN_SKONFIGUROWANY:HDA_STRUMIEN_BEZCZYNNY;
+        out->bdl.wersja=HDA_DIAG_WERSJA_ABI;out->bdl.rozmiar=sizeof(HdaDiagBdlInfo);
+        out->bdl.liczba_wpisow=ws.bdl_wpisow;out->bdl.maska_fizycznego=0;out->bdl.flagi=ws.bdl_uzywa_64;
+        out->kanaly=uint8_t((ws.format_raw&15)+1);
+        const uint8_t depth=(ws.format_raw>>4)&7;
+        const uint16_t bits[]={8,16,20,24,32};out->bits=depth<5?bits[depth]:0;
+        out->sample_rate=((ws.format_raw&(1U<<14))?44100U:48000U)*(((ws.format_raw>>11)&7)+1)/(((ws.format_raw>>8)&7)+1);
         return true;
     }
-    *out = zrodlo->strumien;
-    return true;
+    return false;
 }
 
 bool hda_diag_pobierz_test(HdaDiagStanTestu* out) {
@@ -869,7 +524,7 @@ bool hda_diag_test_start(
 
     HdaWewSciezkaTestu sp{};
     hda_wew_pobierz_sciezke_testu(&sp);
-    stan_test.kontroler_idx = 0;
+    stan_test.kontroler_idx = static_cast<uint8_t>(hda_wew_kontroler_odtwarzania());
     stan_test.codec_cad = sp.cad;
     stan_test.konwerter_nid = sp.konwerter_nid;
     stan_test.pin_nid = sp.pin_nid;
@@ -917,7 +572,7 @@ void hda_diag_pobierz_sciezke_testu(
 ) {
     HdaWewSciezkaTestu sp{};
     hda_wew_pobierz_sciezke_testu(&sp);
-    if (kontroler) *kontroler = 0;
+    if (kontroler) *kontroler = static_cast<uint8_t>(hda_wew_kontroler_odtwarzania());
     if (cad) *cad = sp.cad;
     if (konwerter) *konwerter = sp.konwerter_nid;
     if (pin) *pin = sp.pin_nid;

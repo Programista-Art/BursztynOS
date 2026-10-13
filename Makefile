@@ -342,6 +342,7 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	siec.o \
 	hda.o \
 	hda_diag.o \
+	hda_transport.o \
 	klawiatura.o \
 	przegladarka_blob.o \
 	mysz.o \
@@ -486,10 +487,13 @@ bws_nowoczesne.o: bws_nowoczesne.cpp bws_nowoczesne.h bws_api.h bws_hda_diag.h s
 syscalls.o: syscalls.cpp bws_api.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
-hda.o: sterowniki/dzwiek/hda.cpp sterowniki/dzwiek/hda.h sterowniki/dzwiek/hda_wewnetrzny.h sterowniki/dzwiek/hda_diag_format.h pamiec.h pci.h
+hda.o: sterowniki/dzwiek/hda.cpp sterowniki/dzwiek/hda_transport.h sterowniki/dzwiek/hda.h sterowniki/dzwiek/hda_wewnetrzny.h sterowniki/dzwiek/hda_diag_format.h pamiec.h pci.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
-hda_diag.o: sterowniki/dzwiek/hda_diag.cpp sterowniki/dzwiek/hda_diag.h sterowniki/dzwiek/hda_diag_format.h sterowniki/dzwiek/hda_wewnetrzny.h sterowniki/dzwiek/hda.h
+hda_transport.o: sterowniki/dzwiek/hda_transport.cpp sterowniki/dzwiek/hda_transport.h sterowniki/dzwiek/hda_diag_format.h pamiec.h pci.h sterowniki/dma.h sterowniki/czas/hpet.h
+	$(CXX) $(KERNEL_CXXFLAGS) -c sterowniki/dzwiek/hda_transport.cpp -o $@
+
+hda_diag.o: sterowniki/dzwiek/hda_diag.cpp sterowniki/dzwiek/hda_transport.h sterowniki/dzwiek/hda_diag.h sterowniki/dzwiek/hda_diag_format.h sterowniki/dzwiek/hda_wewnetrzny.h sterowniki/dzwiek/hda.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
 uefi_gop.o: sterowniki/grafika/uefi_gop.cpp sterowniki/grafika/uefi_gop.h
@@ -1488,9 +1492,15 @@ test-image:
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 /tmp/bursztyn-test-tapety-manifest
 tapety_tmp.o: programy/tapety/tapety.cpp programy/tapety/klient.h programy/tapety/miniatury.h tapety_format.h obrazy/skalowanie.h obrazy/dekoder_obrazu.h narzedzia/tapety-btp/tapetybtp.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
-tapety_blob.o: tapety_tmp.o btp_ring3.o image_ring3.o bursztyn_gui.o programy/tapety/tapety_linker.ld
+	@test -s $@ || { rm -f $@; echo "[BLAD] tapety_tmp.o jest pusty"; exit 1; }
+tapety_blob.o: tapety_tmp.o btp_ring3.o image_ring3.o bursztyn_gui.o programy/tapety/tapety_linker.ld narzedzia/test_tapety_size.py
+	@if [ ! -s tapety_tmp.o ]; then \
+		echo "[TAPETY BUILD] tapety_tmp.o jest pusty lub uszkodzony - ponowna kompilacja..."; \
+		$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c programy/tapety/tapety.cpp -o tapety_tmp.o; \
+	fi
 	$(LD) --gc-sections -T programy/tapety/tapety_linker.ld $(RING3_LDFLAGS) tapety_tmp.o btp_ring3.o image_ring3.o bursztyn_gui.o -o tapety.elf
 	$(OBJCOPY) -O binary tapety.elf tapety.bin
+	$(PYTHON) narzedzia/test_tapety_size.py tapety.bin
 	$(LD) -r -b binary tapety.bin -o $@
 
 $(filter %tmp.o %_tmp.o,$(wildcard *.o)): obrazy/skalowanie.h
@@ -1599,7 +1609,13 @@ test-explorer-host:
 	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined narzedzia/test_explorer_host.cpp -o .bursztyn-ui-test/test-explorer
 	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-explorer
 
-.PHONY: test-hda-diag test-dzwieku-packaging test-dzwieku-repair
+.PHONY: test-tapety-bur
+test-tapety-bur: tapety_blob.o
+	$(PYTHON) narzedzia/test_tapety_regression.py
+
+.PHONY: test-hda-physical test-hda-diag test-dzwieku-packaging test-dzwieku-repair
+test-hda-physical:
+	$(PYTHON) narzedzia/test_hda_physical.py
 test-dzwieku-repair: test_dzwieku_blob.o
 	$(PYTHON) narzedzia/test_dzwieku_repair.py
 

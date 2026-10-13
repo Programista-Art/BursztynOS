@@ -24,6 +24,8 @@
 #include "bws_hda_diag.h"
 #include "sterowniki/dzwiek/hda.h"
 #include "sterowniki/dzwiek/hda_diag.h"
+#include "sterowniki/dzwiek/hda_transport.h"
+#include "sterowniki/dzwiek/hda_wewnetrzny.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -1031,10 +1033,19 @@ uint64_t bws_hda_diag(const proces_t& proces, uint64_t a1, uint64_t a2,
                       uint64_t a3, uint64_t a4) {
     if (!hda_diag_ma_prawo(proces)) return 0;
     const uint64_t polecenie = a1;
+    uint32_t kontroler = HDA_DIAG_WSZYSTKIE_KONTROLERY;
+    if ((polecenie == BWS_HDA_DIAG_SKAN_START || polecenie == BWS_HDA_DIAG_SKAN_KROK ||
+         polecenie == BWS_HDA_DIAG_SKAN_ANULUJ) && a2) {
+        BwsHdaSkanZadanie z{};
+        if (!skopiuj_z_przestrzeni_uzytkownika(&z,reinterpret_cast<const void*>(a2),sizeof(z)) ||
+            z.wersja != HDA_DIAG_WERSJA_ABI || z.rozmiar != sizeof(z) || z.rezerwa ||
+            (z.kontroler_idx != HDA_DIAG_WSZYSTKIE_KONTROLERY && z.kontroler_idx >= hda_transport_liczba())) return 0;
+        kontroler = z.kontroler_idx;
+    }
 
     switch (polecenie) {
         case BWS_HDA_DIAG_STAN: {
-            if (a2 == 0) return 0;
+            if (a2 == 0 || a3 != sizeof(HdaDiagSkan) || a4 != HDA_DIAG_WERSJA_ABI) return 0;
             HdaDiagSkan stan{};
             hda_diag_pobierz_stan(&stan);
             if (!skopiuj_do_przestrzeni_uzytkownika(
@@ -1044,17 +1055,22 @@ uint64_t bws_hda_diag(const proces_t& proces, uint64_t a1, uint64_t a2,
             return 1;
         }
         case BWS_HDA_DIAG_SKAN_START: {
-            return hda_diag_startuj_skan() ? 1ULL : 0ULL;
+            return hda_diag_startuj_skan(kontroler) ? 1ULL : 0ULL;
         }
         case BWS_HDA_DIAG_SKAN_KROK: {
-            const bool koniec = hda_diag_krok_skanu();
+            const bool koniec = hda_diag_krok_skanu(kontroler);
             (void)a3;
             (void)a4;
             return koniec ? 1ULL : 0ULL;
         }
         case BWS_HDA_DIAG_SKAN_ANULUJ: {
-            hda_diag_anuluj_skan();
+            hda_diag_anuluj_skan(kontroler);
             return 1ULL;
+        }
+        case BWS_HDA_DIAG_METRYKI: {
+            if (!a2 || a3 != sizeof(BwsHdaMetryki) || a4 != HDA_DIAG_WERSJA_ABI) return 0;
+            BwsHdaMetryki m{HDA_DIAG_WERSJA_ABI,sizeof(BwsHdaMetryki),hda_diag_maks_krok_ns()};
+            return skopiuj_do_przestrzeni_uzytkownika(reinterpret_cast<void*>(a2),&m,sizeof(m)) ? 1 : 0;
         }
         case BWS_HDA_DIAG_SNAPSHOT: {
             if (a2 == 0) return 0;
@@ -1116,7 +1132,7 @@ uint64_t bws_hda_diag(const proces_t& proces, uint64_t a1, uint64_t a2,
             return 1;
         }
         case BWS_HDA_DIAG_STRUMIEN: {
-            if (a2 == 0) return 0;
+            if (!a2 || a3!=sizeof(HdaDiagStrumien) || a4!=HDA_DIAG_WERSJA_ABI) return 0;
             HdaDiagStrumien s{};
             if (!hda_diag_pobierz_strumien(&s)) return 0;
             if (!skopiuj_do_przestrzeni_uzytkownika(
@@ -1126,7 +1142,7 @@ uint64_t bws_hda_diag(const proces_t& proces, uint64_t a1, uint64_t a2,
             return 1;
         }
         case BWS_HDA_DIAG_TEST_STAN: {
-            if (a2 == 0) return 0;
+            if (!a2 || a3!=sizeof(HdaDiagStanTestu) || a4!=HDA_DIAG_WERSJA_ABI) return 0;
             HdaDiagStanTestu t{};
             if (!hda_diag_pobierz_test(&t)) return 0;
             if (!skopiuj_do_przestrzeni_uzytkownika(
@@ -1177,8 +1193,8 @@ uint64_t bws_hda_test(const proces_t& proces, uint64_t a1, uint64_t a2,
             return 0;
         }
         if (t.kanaly == 0 || t.kanaly > 3) return 0;
-        (void)a3;
-        (void)a4;
+        if (a3 >= hda_transport_liczba() || a4 != HDA_DIAG_WERSJA_ABI ||
+            a3 != hda_wew_kontroler_odtwarzania()) return 0;
         return hda_diag_test_start(t.tryb, t.czestotliwosc_hz, t.czas_ms,
                                    t.kanaly)
                    ? 1ULL

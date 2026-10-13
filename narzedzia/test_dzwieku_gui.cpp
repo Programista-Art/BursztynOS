@@ -60,13 +60,13 @@ static uint64_t file_fail_nr = 0, file_fail_code = 0;
 static bool wrong_file_size = false;
 static std::vector<BwsHdaTestStart> tone_requests;
 static std::vector<uint64_t> tone_commands;
-static uint64_t hook(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t) {
+static uint64_t hook(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4) {
     if (nr == 51) return bws_czcionka_kopiuj(PRAWO_GUI, a1, a2, a3);
     if (nr == 89 || nr == 90) { ++hda_calls; CHECK(windows > 0); CHECK(test_refreshes > 0); }
     if (nr == 89) {
         if (!connected) return 0;
         switch (a1) {
-            case BWS_HDA_DIAG_STAN: std::memcpy(reinterpret_cast<void*>(a2), &scan, sizeof(scan)); return 1;
+            case BWS_HDA_DIAG_STAN: CHECK(a3==sizeof(HdaDiagSkan)&&a4==HDA_DIAG_WERSJA_ABI);std::memcpy(reinterpret_cast<void*>(a2), &scan, sizeof(scan)); return 1;
             case BWS_HDA_DIAG_SKAN_START:
                 scan = {}; scan.aktywny = 1; scan.etap = HDA_DIAG_ETAP_KONTROLER; scan.generacja_skanu = 7; return 1;
             case BWS_HDA_DIAG_SKAN_KROK:
@@ -93,7 +93,7 @@ static uint64_t hook(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3, uint64_
     if (nr == 90) {
         tone_commands.push_back(a1);
         if (a1 == BWS_HDA_TEST_STOP) { ++tone_stops; tone = false; return 1; }
-        CHECK(a1 == BWS_HDA_TEST_START); CHECK(!tone);
+        CHECK(a1 == BWS_HDA_TEST_START); CHECK(!tone);CHECK(a3==g_kontroler&&a4==HDA_DIAG_WERSJA_ABI);
         const auto t = *reinterpret_cast<BwsHdaTestStart*>(a2);
         CHECK(t.wersja == HDA_DIAG_WERSJA_ABI); CHECK(t.rozmiar == sizeof(t));
         CHECK(t.czas_ms == HDA_TEST_DOMYSLNY_CZAS_MS); CHECK(t.kanaly >= 1 && t.kanaly <= 3);
@@ -116,12 +116,12 @@ static uint64_t hook(uint64_t nr, uint64_t a1, uint64_t a2, uint64_t a3, uint64_
 }
 static void reset() {
     connected = ready = tone_ok = true; scan = {}; scan_error = 0; tone = false;
-    g_snapshot_ok = false; g_generacja = 0; g_stan_skan = {}; g_raport_obciety = false;
+    g_snapshot_ok = false; g_generacja = 0; g_kontroler=0; g_stan_skan = {}; g_raport_obciety = false;
     fixture = {}; fixture.wersja = HDA_DIAG_WERSJA_ABI; fixture.rozmiar = sizeof(fixture);
     fixture.liczba_kontrolerow = 1; fixture.etap = HDA_DIAG_ETAP_GOTOWY;
     auto& c = fixture.kontrolery[0]; c.bus = 0; c.slot = 27; c.vendor_id = 0x8086;
-    c.device_id = 0x2668; c.gcap = 0x4401; c.statests = 1; c.liczba_kodekow = 1;
-    auto& codec = fixture.kodeki[0][0]; codec.odpowiada = 1; codec.vendor_id = 0x1af4; codec.device_id = 0x22;
+    c.device_id = 0x2668;c.gotowy=1;c.test_dostepny=1;c.transport=1;c.inicjalizacja=22;c.hda_vmaj=1; c.gcap = 0x4401; c.statests = 1; c.liczba_kodekow = 1;
+    auto& codec = fixture.kodeki[0][0]; codec.odpowiada = 1; codec.vendor_id = 0x1af4; codec.device_id = 0x12;
     auto& fg = fixture.fg[0][0][0]; fg.nid = 1; fg.audio = 1; fg.typ = 1; fg.widget_start = 2; fg.widget_count = 2;
     auto& dac = fixture.widgety[0][0][0][0]; dac.nid = 2; dac.typ = HDA_WID_OUT; dac.awcap = 1;
     auto& pin = fixture.widgety[0][0][0][1]; pin.nid = 3; pin.typ = HDA_WID_PIN;
@@ -348,13 +348,31 @@ int main(int argc, char** argv) {
                 }
             }
         }
+    // A realistic laptop report fits; the deliberately impossible maximum is explicitly clipped.
+    window.odswiez_wszystko(); CHECK(g_raport_obciety); CHECK(!zapisz_raport());
+    g_snapshot.liczba_kontrolerow=2;
+    for(uint32_t k=0;k<HDA_DIAG_MAKS_KONTROLEROW;++k)
+        for(uint32_t c=0;c<HDA_DIAG_MAKS_KODEKOW;++c){
+            g_snapshot.kodeki[k][c].odpowiada=k<2&&c==0;
+            for(uint32_t f=0;f<HDA_DIAG_MAKS_FG;++f)g_snapshot.fg[k][c][f].widget_count=f==0?64:0;
+        }
     window.odswiez_wszystko(); CHECK(!g_raport_obciety); CHECK(!window.tekst_widgety_->czy_obciety());
     CHECK(zapisz_raport()); CHECK(rozmiar_pliku(SCIEZKA_RAPORTU) == std::strlen(g_raport));
     std::vector<char> maximal(std::strlen(g_raport)); bytes = 0;
     CHECK(psf_host_czytaj_fragment_pliku(SCIEZKA_RAPORTU, 0, maximal.data(), maximal.size(), &bytes));
     CHECK(bytes == maximal.size()); CHECK(!std::memcmp(maximal.data(), g_raport, bytes));
     char too_small[32]{}; bool truncated_report = false; zbuduj_raport(too_small, sizeof(too_small), &truncated_report);
-    CHECK(truncated_report); std::printf("maximum ABI widget report: %zu bytes, complete file roundtrip PASS\n", maximal.size());
+    CHECK(truncated_report); std::printf("two-controller 128-widget report: %zu bytes, complete file roundtrip PASS\n", maximal.size());
+    ++scenarios;g_snapshot=fixture;g_snapshot_ok=true;g_snapshot.liczba_kontrolerow=2;
+    g_snapshot.kontrolery[1]=g_snapshot.kontrolery[0];g_snapshot.kontrolery[1].vendor_id=0x10de;
+    g_snapshot.kontrolery[1].device_id=0x0fb9;g_snapshot.kontrolery[1].test_dostepny=0;
+    window.odswiez_wszystko();CHECK(window.kontrolery_->czy_widoczna());
+    g_kontroler=1;window.odswiez_wszystko();CHECK(std::strstr(window.tekst_kontroler_->tekst(),"0x10DE"));
+    CHECK(std::strstr(window.info_->tekst(),"niedostępny"));
+    CHECK(!window.przyciski_testu_[0]->czy_wlaczona());
+    g_snapshot.kontrolery[1].gotowy=0;g_snapshot.kontrolery[1].etap_bledu=15;
+    window.odswiez_wszystko();CHECK(std::strstr(window.info_->tekst(),"CORB"));
+    g_kontroler=0;g_snapshot=fixture;window.odswiez_wszystko();
     ++scenarios; fixture.widgety[0][0][0][0].liczba_polaczen = 255; CHECK(!diag_snapshot(&g_snapshot));
     fixture.widgety[0][0][0][0].liczba_polaczen = 0; fixture.liczba_sciezek = HDA_DIAG_MAKS_SCIEZEK + 1;
     CHECK(!diag_snapshot(&g_snapshot)); fixture.liczba_sciezek = 0;

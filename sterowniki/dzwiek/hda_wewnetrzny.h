@@ -1,8 +1,9 @@
 /*
  * Bursztyn OS - wewnetrzne API transportu HDA (jadar tylko)
  *
- * Umozliwia hda_diag.cpp korzystanie z Immediate Command bez
- * ujawniania MMIO/verbów w Ring3.
+ * Legacy API odtwarzania QEMU i stanu strumienia.
+ * Skaner uzywa wylacznie asynchronicznego hda_transport.h.
+ * Nie ujawnia MMIO/verbów w Ring3.
  *
  * Nie dolaczaj z aplikacji Ring 3.
  */
@@ -135,3 +136,5 @@ bool hda_wew_aktywne_sondowanie_kodekow(
     uint16_t* responsive_mask
 );
 
+
+uint32_t hda_wew_kontroler_odtwarzania();

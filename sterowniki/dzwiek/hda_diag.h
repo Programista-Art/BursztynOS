@@ -2,11 +2,11 @@
  * Bursztyn OS - HDA diagnostyka: API jadra
  *
  * Kernel-owned snapshot diagnostyczny HDA.
- * Ring3 nie ma dostepu do MMIO, verbów ani adresów fizycznych.
+ * Ring3 nie ma dostepu do MMIO, verbów ani adresów DMA. BAR PCI jest tylko metadana.
  *
  * Implementacja:
  *   hda_diag.cpp  - inkrementalny skan i publikacja atomowa
- *   hda.cpp       - transport Immediate Command (istniejacy)
+ *   hda_transport.cpp - wspolny asynchroniczny IC / CORB / RIRB
  *
  * Czysty format/dekodowanie:
  *   hda_diag_format.h (host-testowalny)
@@ -29,23 +29,25 @@ bool hda_diag_inicjalizuj();
  * Startuje (lub restartuje) inkrementalny skan topologii.
  * Nie wywoluj na sciezce krytycznego bootu.
  */
-bool hda_diag_startuj_skan();
+constexpr uint32_t HDA_DIAG_WSZYSTKIE_KONTROLERY = UINT32_MAX;
+bool hda_diag_startuj_skan(uint32_t kontroler = HDA_DIAG_WSZYSTKIE_KONTROLERY);
 
 /*
  * Wykonuje ograniczona porcje pracy skanu (max HDA_DIAG_SLOW_NA_KROK
- * transakcji verb). Zwraca true, gdy skan zakonczony (gotowy lub blad).
+ * faz jednej transakcji verb). Zwraca true, gdy skan zakonczony (gotowy lub blad).
  */
-bool hda_diag_krok_skanu();
+bool hda_diag_krok_skanu(uint32_t kontroler = HDA_DIAG_WSZYSTKIE_KONTROLERY);
 
 /*
  * Stan skanu dla Ring3 (kopiowany przez BWS).
  */
-void hda_diag_pobierz_stan(HdaDiagSkan* out);
+void hda_diag_pobierz_stan(HdaDiagSkan* out, uint32_t kontroler = HDA_DIAG_WSZYSTKIE_KONTROLERY);
+uint64_t hda_diag_maks_krok_ns();
 
 /*
  * Anuluje biezacy skan jesli byl aktywny.
  */
-void hda_diag_anuluj_skan();
+void hda_diag_anuluj_skan(uint32_t kontroler = HDA_DIAG_WSZYSTKIE_KONTROLERY);
 
 /*
  * Pobiera wskaznik do ostatnio opublikowanej pelnej migawki.

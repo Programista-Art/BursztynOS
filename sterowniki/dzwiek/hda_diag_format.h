@@ -29,7 +29,7 @@
  * Wersja schematu migawki diagnostycznej HDA.
  * Zwiekszana przy niekompatybilnej zmianie layoutu.
  */
-#define HDA_DIAG_WERSJA_ABI UINT32_C(1)
+#define HDA_DIAG_WERSJA_ABI UINT32_C(2)
 
 /*
  * Znaczniki obciazenia / obciecia migawki.
@@ -45,26 +45,26 @@
  * Maksima reprezentowane w jednej migawce.
  * Przekroczenie ustawia HDA_DIAG_FLAGA_OBECIETA zamiast przelewac pamiec.
  */
-#define HDA_DIAG_MAKS_KONTROLEROW          UINT32_C(2)
-#define HDA_DIAG_MAKS_KODEKOW              UINT32_C(2)
-#define HDA_DIAG_MAKS_FG                   UINT32_C(2)
-#define HDA_DIAG_MAKS_WIDGETOW             UINT32_C(48)
-#define HDA_DIAG_MAKS_POLACZEN             UINT32_C(12)
-#define HDA_DIAG_MAKS_SCIEZEK              UINT32_C(16)
-#define HDA_DIAG_MAKS_DLUGOSC_SCIEZKI      UINT32_C(8)
+#define HDA_DIAG_MAKS_KONTROLEROW          UINT32_C(4)
+#define HDA_DIAG_MAKS_KODEKOW              UINT32_C(4)
+#define HDA_DIAG_MAKS_FG                   UINT32_C(4)
+#define HDA_DIAG_MAKS_WIDGETOW             UINT32_C(96)
+#define HDA_DIAG_MAKS_POLACZEN             UINT32_C(32)
+#define HDA_DIAG_MAKS_SCIEZEK              UINT32_C(64)
+#define HDA_DIAG_MAKS_DLUGOSC_SCIEZKI      UINT32_C(16)
 #define HDA_DIAG_MAKS_BLEDOW_STRUMIENIA    UINT32_C(8)
 #define HDA_DIAG_MAKS_HISTORII             UINT32_C(8)
 
 /*
  * Twardy limit bajtow tekstu raportu generowanego z migawki.
  */
-#define HDA_DIAG_MAKS_RAPORTU              UINT32_C(262144)
+#define HDA_DIAG_MAKS_RAPORTU              UINT32_C(1048576)
 
 /*
  * Maks. liczba slow/verbów pochodzenia w jednym kroku skanu (bounded work).
- * Dokładnie 4 operacje read verb na krok serwisowy, aby nie blokować GUI ani CPU.
+ * Jedna aktywna transakcja na kontroler; krok nigdy nie czeka na sprzet.
  */
-#define HDA_DIAG_LIMIT_VERBOW_NA_KROK      UINT32_C(4)
+#define HDA_DIAG_LIMIT_VERBOW_NA_KROK      UINT32_C(1)
 #define HDA_DIAG_SLOW_NA_KROK              HDA_DIAG_LIMIT_VERBOW_NA_KROK
 
 /* =========================================================================
@@ -218,8 +218,8 @@ enum HdaDiagCelPinu : uint32_t {
 #define HDA_WCAP_UNSOL_CAP       (UINT32_C(1) << 7)
 #define HDA_WCAP_CONN_LIST       (UINT32_C(1) << 8)
 #define HDA_WCAP_DIGITAL         (UINT32_C(1) << 9)
-#define HDA_WCAP_DELAY_MASK      UINT32_C(0x000000F0)
-#define HDA_WCAP_DELAY_SHIFT     UINT32_C(4)
+#define HDA_WCAP_DELAY_MASK      UINT32_C(0x000F0000)
+#define HDA_WCAP_DELAY_SHIFT     UINT32_C(16)
 
 enum HdaTypWidgetu : uint8_t {
     HDA_WID_OUT = 0x0,
@@ -406,15 +406,15 @@ inline const char* hda_nazwa_lokacji(uint8_t loc) {
     const uint8_t gross = static_cast<uint8_t>((loc >> 4) & 0x3U);
     switch (gross) {
         case 0: return "External";
-        case 1: return "Separate chassis";
-        case 2: return "Other chassis";
-        case 3: return "Internal";
+        case 1: return "Internal";
+        case 2: return "Separate chassis";
+        case 3: return "Other chassis";
         default: return "Unknown";
     }
 }
 
 inline bool hda_lokacja_wewnetrzna(uint8_t loc) {
-    return ((loc >> 4) & 0x3U) == 0x3U;
+    return ((loc >> 4) & 0x3U) == 0x1U;
 }
 
 inline const char* hda_nazwa_domyslnego_urzadzenia(uint8_t dev) {
@@ -596,119 +596,40 @@ struct HdaWpisPolaczenia {
  * Dekoduje surowy wpis short (8-bit) lub long (16-bit).
  * Odrzuca NID spoza 0x00..0x7F oraz puste zakresy.
  */
-inline HdaWpisPolaczenia hda_dekoduj_wpis_polaczenia(
-    uint32_t surowy,
-    bool long_form
-) {
+// HDA 1.0a 7.3.3.1: range marks the END NID; start is the preceding entry.
+inline HdaWpisPolaczenia hda_dekoduj_wpis_polaczenia(uint32_t raw, bool long_form) {
     HdaWpisPolaczenia w{};
-    if (long_form) {
-        const uint16_t v = static_cast<uint16_t>(surowy & 0xFFFFU);
-        const bool range = (v & 0x8000U) != 0;
-        const uint8_t start = static_cast<uint8_t>(v & 0x7FU);
-        const uint8_t end = static_cast<uint8_t>((v >> 8) & 0x7FU);
-        if (start > 0x7FU) {
-            w.poprawny = false;
-            return w;
-        }
-        if (range) {
-            if (end < start || end > 0x7FU) {
-                w.poprawny = false;
-                return w;
-            }
-            w.zakres = true;
-            w.nid_start = start;
-            w.nid_koniec = end;
-        } else {
-            w.zakres = false;
-            w.nid_start = start;
-            w.nid_koniec = start;
-        }
-        w.poprawny = true;
-    } else {
-        const uint8_t v = static_cast<uint8_t>(surowy & 0xFFU);
-        if (v > 0x7FU) {
-            w.poprawny = false;
-            return w;
-        }
-        w.zakres = false;
-        w.nid_start = v;
-        w.nid_koniec = v;
-        w.poprawny = true;
-    }
+    const uint32_t range = long_form ? 0x8000U : 0x80U;
+    const uint32_t nid = raw & (range - 1U);
+    w.poprawny = nid > 0 && nid <= 127 && raw <= (long_form ? 65535U : 255U);
+    w.zakres = (raw & range) != 0;
+    w.nid_start = w.nid_koniec = static_cast<uint8_t>(nid);
     return w;
 }
 
-/*
- * Rozszerza liste surowych slow odpowiedzi Get Connection List Entry
- * do listy NID-ow z obsluga range i limitow.
- *
- * slowa[]     - odpowiedzi 32-bit z verb 0xF02 (po 4 short / 2 long)
- * liczba_slow - ile slow dostarczono
- * long_form   - czy interpretowac jako 16-bitowe wpisy
- * oczekiwane  - ConListLen do zweryfikowania
- * out[]       - bufor wyjsciowy NID-ow
- * out_max     - pojemnosc out[]
- * out_count   - ile wpisow zapisano
- * truncated   - czy obcieto
- *
- * Zwraca false przy malformowanej liscie (range < start, NID > 0x7F,
- * liczba wpisow niezgodna z oczekiwana).
- */
-inline bool hda_rozszerz_liste_polaczen(
-    const uint32_t* slowa,
-    uint32_t liczba_slow,
-    bool long_form,
-    uint8_t oczekiwane,
-    uint8_t* out,
-    uint32_t out_max,
-    uint32_t* out_count,
-    bool* truncated
-) {
-    if (!out_count) return false;
-    *out_count = 0;
+inline bool hda_rozszerz_liste_polaczen(const uint32_t* words, uint32_t word_count,
+    bool long_form, uint8_t entries, uint8_t* out, uint32_t capacity,
+    uint32_t* count, bool* truncated) {
+    if (!count) return false;
+    *count = 0;
     if (truncated) *truncated = false;
-    if (!slowa || !out || out_max == 0) return false;
-    if (oczekiwane == 0) return true;
-    if (oczekiwane > HDA_DIAG_MAKS_POLACZEN) {
-        return false;
-    }
-
-    uint32_t zapisane = 0;
-    uint32_t napotkane = 0;
-
-    for (uint32_t s = 0; s < liczba_slow; ++s) {
-        const uint32_t slowo = slowa[s];
-        const uint32_t na_slowo = long_form ? 2U : 4U;
-        for (uint32_t k = 0; k < na_slowo; ++k) {
-            if (napotkane >= oczekiwane) break;
-            const uint32_t przesuniecie = long_form ? (k * 16U) : (k * 8U);
-            const uint32_t maska = long_form ? 0xFFFFU : 0xFFU;
-            const uint32_t surowy = (slowo >> przesuniecie) & maska;
-            const HdaWpisPolaczenia wpis =
-                hda_dekoduj_wpis_polaczenia(surowy, long_form);
-            if (!wpis.poprawny) {
-                return false;
-            }
-            ++napotkane;
-
-            for (uint8_t nid = wpis.nid_start;
-                 nid <= wpis.nid_koniec;
-                 ++nid) {
-                if (zapisane >= out_max) {
-                    if (truncated) *truncated = true;
-                    /* Kontynuujemy liczenie, ale nie zapisujemy. */
-                    continue;
-                }
-                out[zapisane++] = nid;
-            }
+    if (!words || !out || !capacity || entries > 127) return false;
+    const uint32_t per_word = long_form ? 2U : 4U;
+    if (word_count < (entries + per_word - 1) / per_word) return false;
+    uint32_t stored = 0, previous = 0;
+    for (uint32_t i = 0; i < entries; ++i) {
+        const uint32_t raw = (words[i / per_word] >> ((i % per_word) * (long_form ? 16 : 8))) &
+            (long_form ? 65535U : 255U);
+        const auto e = hda_dekoduj_wpis_polaczenia(raw, long_form);
+        if (!e.poprawny || (e.zakres && (!previous || e.nid_koniec <= previous))) return false;
+        const uint32_t start = e.zakres ? previous + 1 : e.nid_start;
+        for (uint32_t nid = start; nid <= e.nid_koniec; ++nid) {
+            if (stored < capacity) out[stored++] = static_cast<uint8_t>(nid);
+            else if (truncated) *truncated = true;
         }
+        previous = e.nid_koniec;
     }
-
-    if (napotkane != oczekiwane) {
-        return false;
-    }
-
-    *out_count = zapisane;
+    *count = stored;
     return true;
 }
 
@@ -782,6 +703,15 @@ enum HdaTransportStatus : uint32_t {
     HDA_TRANSPORT_TIMEOUT = 3,
     HDA_TRANSPORT_NO_VALID_RESPONSE = 4,
     HDA_TRANSPORT_INVALID_ARGUMENT = 5,
+    HDA_TRANSPORT_PENDING = 6,
+    HDA_TRANSPORT_BUSY = 7,
+    HDA_TRANSPORT_CORB_FULL = 8,
+    HDA_TRANSPORT_RIRB_NO_RESPONSE = 9,
+    HDA_TRANSPORT_CODEC_NO_RESPONSE = 10,
+    HDA_TRANSPORT_MALFORMED = 11,
+    HDA_TRANSPORT_RESET_REQUIRED = 12,
+    HDA_TRANSPORT_CANCELLED = 13,
+
 };
 
 inline bool hda_waliduj_cad(uint8_t cad) {
@@ -842,7 +772,7 @@ inline bool hda_zbuduj_get_param(
 #define HDA_AMP_OFFSET_MASK      UINT32_C(0x7F)
 #define HDA_AMP_NUM_STEPS_MASK   UINT32_C(0x7F00)
 #define HDA_AMP_NUM_STEPS_SHIFT  UINT32_C(8)
-#define HDA_AMP_STEP_SIZE_MASK   UINT32_C(0x70000)
+#define HDA_AMP_STEP_SIZE_MASK   UINT32_C(0x7F0000)
 #define HDA_AMP_STEP_SIZE_SHIFT  UINT32_C(16)
 
 inline bool hda_amp_mute(uint32_t caps) {
@@ -856,44 +786,44 @@ inline uint8_t hda_amp_kroki(uint32_t caps) {
         (caps & HDA_AMP_NUM_STEPS_MASK) >> HDA_AMP_NUM_STEPS_SHIFT);
 }
 inline uint8_t hda_amp_rozmiar_kroku_25(uint32_t caps) {
-    /* Wartosc w 0.25 dB: 0..7 -> 0.00..1.75 dB. */
+    /* Encoded step size; physical step is (value + 1) * 0.25 dB. */
     return static_cast<uint8_t>(
         (caps & HDA_AMP_STEP_SIZE_MASK) >> HDA_AMP_STEP_SIZE_SHIFT);
 }
 
 /* Pin Capabilities (wybrane bity). */
-#define HDA_PINCAP_EAPD          (UINT32_C(1) << 0)
-#define HDA_PINCAP_VREF_HIZ      (UINT32_C(1) << 1)
-#define HDA_PINCAP_VREF_50       (UINT32_C(1) << 2)
-#define HDA_PINCAP_VREF_GND      (UINT32_C(1) << 3)
-#define HDA_PINCAP_VREF_80       (UINT32_C(1) << 4)
-#define HDA_PINCAP_VREF_100      (UINT32_C(1) << 5)
+#define HDA_PINCAP_EAPD          (UINT32_C(1) << 16)
+#define HDA_PINCAP_VREF_HIZ      (UINT32_C(1) << 8)
+#define HDA_PINCAP_VREF_50       (UINT32_C(1) << 9)
+#define HDA_PINCAP_VREF_GND      (UINT32_C(1) << 10)
+#define HDA_PINCAP_VREF_80       (UINT32_C(1) << 12)
+#define HDA_PINCAP_VREF_100      (UINT32_C(1) << 13)
 #define HDA_PINCAP_BALANCED      (UINT32_C(1) << 6)
-#define HDA_PINCAP_INPUT         (UINT32_C(1) << 7)
-#define HDA_PINCAP_OUTPUT        (UINT32_C(1) << 8)
-#define HDA_PINCAP_HP_DRV        (UINT32_C(1) << 9)
-#define HDA_PINCAP_PRESDET       (UINT32_C(1) << 10)
-#define HDA_PINCAP_TRIGGER       (UINT32_C(1) << 11)
+#define HDA_PINCAP_INPUT         (UINT32_C(1) << 5)
+#define HDA_PINCAP_OUTPUT        (UINT32_C(1) << 4)
+#define HDA_PINCAP_HP_DRV        (UINT32_C(1) << 3)
+#define HDA_PINCAP_PRESDET       (UINT32_C(1) << 2)
+#define HDA_PINCAP_TRIGGER       (UINT32_C(1) << 1)
 #define HDA_PINCAP_DP            (UINT32_C(1) << 24)
-#define HDA_PINCAP_HDMI          (UINT32_C(1) << 23)
+#define HDA_PINCAP_HDMI          (UINT32_C(1) << 7)
 
 /* PCM Size / Rate. */
-#define HDA_PCM_8BIT             (UINT32_C(1) << 0)
-#define HDA_PCM_16BIT            (UINT32_C(1) << 1)
-#define HDA_PCM_20BIT            (UINT32_C(1) << 2)
-#define HDA_PCM_24BIT            (UINT32_C(1) << 3)
-#define HDA_PCM_32BIT            (UINT32_C(1) << 4)
-#define HDA_RATE_8K              (UINT32_C(1) << 8)
-#define HDA_RATE_11K             (UINT32_C(1) << 9)
-#define HDA_RATE_16K             (UINT32_C(1) << 10)
-#define HDA_RATE_22K             (UINT32_C(1) << 11)
-#define HDA_RATE_32K             (UINT32_C(1) << 12)
-#define HDA_RATE_44K             (UINT32_C(1) << 13)
-#define HDA_RATE_48K             (UINT32_C(1) << 14)
-#define HDA_RATE_88K             (UINT32_C(1) << 15)
-#define HDA_RATE_96K             (UINT32_C(1) << 16)
-#define HDA_RATE_176K            (UINT32_C(1) << 17)
-#define HDA_RATE_192K            (UINT32_C(1) << 18)
+#define HDA_PCM_8BIT             (UINT32_C(1) << 16)
+#define HDA_PCM_16BIT            (UINT32_C(1) << 17)
+#define HDA_PCM_20BIT            (UINT32_C(1) << 18)
+#define HDA_PCM_24BIT            (UINT32_C(1) << 19)
+#define HDA_PCM_32BIT            (UINT32_C(1) << 20)
+#define HDA_RATE_8K              (UINT32_C(1) << 0)
+#define HDA_RATE_11K             (UINT32_C(1) << 1)
+#define HDA_RATE_16K             (UINT32_C(1) << 2)
+#define HDA_RATE_22K             (UINT32_C(1) << 3)
+#define HDA_RATE_32K             (UINT32_C(1) << 4)
+#define HDA_RATE_44K             (UINT32_C(1) << 5)
+#define HDA_RATE_48K             (UINT32_C(1) << 6)
+#define HDA_RATE_88K             (UINT32_C(1) << 7)
+#define HDA_RATE_96K             (UINT32_C(1) << 8)
+#define HDA_RATE_176K            (UINT32_C(1) << 9)
+#define HDA_RATE_192K            (UINT32_C(1) << 10)
 
 
 /*
@@ -998,6 +928,28 @@ struct HdaDiagKontroler {
     uint16_t initial_statests;
     uint16_t discovered_codec_mask;
     uint16_t responsive_codec_mask;
+    uint8_t bar_typ;          /* 32 or 64 */
+    uint8_t mmio_zmapowane;
+    uint8_t corb_caps;
+    uint8_t rirb_caps;
+    uint16_t corb_rozmiar;
+    uint16_t rirb_rozmiar;
+    uint8_t corb_run;
+    uint8_t rirb_run;
+    uint8_t gotowy;
+    uint8_t test_dostepny;
+    uint32_t inicjalizacja;
+    uint32_t etap_bledu;
+    uint32_t stan_transakcji;
+    uint32_t status_transportu;
+    uint32_t corb_stan;
+    uint32_t rirb_stan;
+    uint32_t odpowiedzi_niezamowione;
+    uint32_t odpowiedzi_obce;
+    uint32_t odzyskiwania;
+    uint64_t maks_krok_ns;
+    uint32_t generacja;
+    uint32_t subsystem_id;
 };
 
 struct HdaDiagKodek {
@@ -1028,7 +980,11 @@ struct HdaDiagFG {
     uint32_t widget_start;
     uint32_t widget_count;
     uint32_t blad;
-    uint32_t rezerwa;
+    uint32_t pcm_size_rate;
+    uint32_t stream_formats;
+    uint32_t in_amp_caps;
+    uint32_t out_amp_caps;
+    uint32_t power_states;
 };
 
 struct HdaDiagWidget {
@@ -1053,7 +1009,11 @@ struct HdaDiagWidget {
     uint8_t polaczenia[HDA_DIAG_MAKS_POLACZEN];
     uint8_t polaczenia_surowe[HDA_DIAG_MAKS_POLACZEN];
     uint32_t blad;
-    uint32_t rezerwa1;
+    uint32_t conn_select;
+    uint32_t eapd;
+    uint32_t conn_slowa[64];   /* original packed responses, long form included */
+    uint8_t liczba_slow_polaczen;
+    uint8_t rezerwa1[3];
 };
 
 struct HdaDiagSciezka {
@@ -1067,7 +1027,11 @@ struct HdaDiagSciezka {
     uint8_t flagi;            /* bit0: niejednoznaczna, bit1: cykl */
     uint8_t rezerwa[2];
     uint32_t default_config_pinu;
-    uint32_t rezerwa2;
+    uint8_t kontroler_idx;
+    uint8_t codec_cad;
+    uint8_t fg_nid;
+    uint8_t ocena;
+    uint8_t selektory[HDA_DIAG_MAKS_DLUGOSC_SCIEZKI];
 };
 
 struct HdaDiagStrumien {
@@ -1195,9 +1159,12 @@ inline bool hda_zbuduj_sciezki(
     for (int i = 0; i < 128; ++i) idx_po_nid[i] = -1;
     for (uint32_t i = 0; i < liczba_widgetow; ++i) {
         const uint8_t nid = widgety[i].nid;
-        if (nid < 128) idx_po_nid[nid] = static_cast<int16_t>(i);
+        if(!nid || nid>=128 || widgety[i].blad)continue;
+        if(idx_po_nid[nid]>=0)return false;
+        idx_po_nid[nid] = static_cast<int16_t>(i);
     }
-    (void)idx_po_nid;
+    uint32_t operacje = 0;
+    constexpr uint32_t MAKS_OPERACJI = 8192;
 
     /*
      * Sygnal w HDA plynie: zrodlowe wezly -> ... -> Pin.
@@ -1210,7 +1177,7 @@ inline bool hda_zbuduj_sciezki(
      */
     for (uint32_t w = 0; w < liczba_widgetow; ++w) {
         const HdaDiagWidget& konw = widgety[w];
-        if (hda_wcap_typ(konw.awcap) != HDA_WID_OUT) continue;
+        if (konw.nid > 127 || !konw.nid || konw.blad || hda_wcap_typ(konw.awcap) != HDA_WID_OUT) continue;
 
         struct Ramka {
             uint8_t nid;
@@ -1237,7 +1204,9 @@ inline bool hda_zbuduj_sciezki(
             for (uint16_t kandydat = top.kandydat;
                  kandydat < liczba_widgetow;
                  ++kandydat) {
+                if (++operacje > MAKS_OPERACJI) { if (obciete) *obciete = true; return true; }
                 const HdaDiagWidget& odb = widgety[kandydat];
+                if(odb.blad || (odb.flagi&1))continue;
                 bool polaczony = false;
                 for (uint8_t c = 0;
                      c < odb.liczba_polaczen && c < HDA_DIAG_MAKS_POLACZEN;
@@ -1252,7 +1221,7 @@ inline bool hda_zbuduj_sciezki(
                 top.kandydat = static_cast<uint16_t>(kandydat + 1);
 
                 const uint8_t nidl = odb.nid;
-                if (nidl >= 128) continue;
+                if (!nidl || nidl >= 128) continue;
 
                 if (w_sciezce[nidl]) {
                     cykl = true;
@@ -1266,7 +1235,7 @@ inline bool hda_zbuduj_sciezki(
 
                 const uint8_t typ_odb = hda_wcap_typ(odb.awcap);
 
-                if (typ_odb == HDA_WID_PIN) {
+                if (typ_odb == HDA_WID_PIN && (odb.pin_caps&HDA_PINCAP_OUTPUT) && hda_cel_jest_wyjsciem(hda_klasyfikuj_pin(odb.default_config))) {
                     if (*liczba_sciezek >= max_sciezek) {
                         if (obciete) *obciete = true;
                         continue;
@@ -1288,7 +1257,17 @@ inline bool hda_zbuduj_sciezki(
                     s.flagi = static_cast<uint8_t>(cykl ? 2 : 0);
                     s.rezerwa[0] = 0;
                     s.rezerwa[1] = 0;
-                    s.rezerwa2 = 0;
+                    s.kontroler_idx = 0;
+                    s.codec_cad = 0;
+                    s.fg_nid = 0;
+                    s.ocena = s.cel == HDA_CEL_GLOSNIK && hda_lokacja_wewnetrzna(hda_pincfg_lokacja(odb.default_config)) ? 100 :
+                        s.cel == HDA_CEL_SLUCHAWKI ? 60 : s.cel == HDA_CEL_WYJSCIE_LINIOWE ? 40 : 10;
+                    for (uint8_t h = 1; h < s.dlugosc; ++h) {
+                        const int index = idx_po_nid[s.nids[h]];
+                        s.selektory[h] = 255;
+                        if (index >= 0) for (uint8_t ci = 0; ci < widgety[index].liczba_polaczen && ci < HDA_DIAG_MAKS_POLACZEN; ++ci)
+                            if (widgety[index].polaczenia[ci] == s.nids[h-1]) { s.selektory[h] = ci; break; }
+                    }
                     ++(*liczba_sciezek);
                     continue;
                 }
@@ -1317,6 +1296,11 @@ inline bool hda_zbuduj_sciezki(
         }
     }
 
+    for(uint32_t i=1;i<*liczba_sciezek;++i){
+        const auto route=sciezki[i];uint32_t j=i;
+        while(j&&sciezki[j-1].ocena<route.ocena){sciezki[j]=sciezki[j-1];--j;}
+        sciezki[j]=route;
+    }
     return true;
 }
 
@@ -1582,6 +1566,38 @@ inline void hda_raport_klucz_liczba(HdaRaportBufor* b,
     hda_raport_dopisz(b, "\n");
 }
 
+inline const char* hda_nazwa_transportu(uint32_t t){return t==1?"Immediate Command (IC)":t==2?"CORB/RIRB":"not selected";}
+inline const char* hda_nazwa_statusu_transportu(uint32_t s){
+    const char* names[]={"success","controller unavailable","ICB stuck","timeout","IRV missing","invalid argument",
+        "pending","transport busy","CORB full","RIRB no response","codec no response","malformed state","reset required","cancelled"};
+    return s<sizeof(names)/sizeof(names[0])?names[s]:"unknown status";
+}
+inline const char* hda_nazwa_etapu_bledu(uint32_t stage) {
+    const char* names[]={"OK","BAR nieprawidłowy","MMIO: mapowanie nieudane","PCI Memory Space wyłączone",
+        "PCI Bus Master wyłączony","GCAP nieprawidłowy","Nieobsługiwana wersja HDA","Brak zegara HPET",
+        "Timeout zatrzymywania DMA","Timeout CRST=0","Timeout CRST=1","CORB: brak obsługiwanego rozmiaru",
+        "RIRB: brak obsługiwanego rozmiaru","CORB: alokacja DMA nieudana","RIRB: alokacja DMA nieudana",
+        "CORB: reset wskaźnika nieudany","RIRB: reset wskaźnika nieudany","CORB/RIRB: start nieudany",
+        "Kontroler zresetowany lub transport wymaga resetu"};
+    return stage<sizeof(names)/sizeof(names[0])?names[stage]:"Nieznany etap";
+}
+inline void hda_raport_pcm(HdaRaportBufor* out,uint32_t caps,uint32_t formats) {
+    hda_raport_klucz_hex32(out,"PCMSizeRate raw",caps);
+    const char* rates[]={"8000","11025","16000","22050","32000","44100","48000","88200","96000","176400","192000","384000"};
+    hda_raport_dopisz(out,"Rates [Hz]");for(uint32_t i=0;i<12;++i)if(caps&(1U<<i)){hda_raport_dopisz(out," ");hda_raport_dopisz(out,rates[i]);}
+    hda_raport_dopisz(out,"\nBit depths");const uint8_t bits[]={8,16,20,24,32};
+    for(uint32_t i=0;i<5;++i)if(caps&(1U<<(16+i))){hda_raport_dopisz(out," ");hda_raport_liczba(out,bits[i],10);}
+    hda_raport_dopisz(out,"\n");hda_raport_klucz_hex32(out,"StreamFormats raw",formats);
+    hda_raport_dopisz(out,"Formats");if(formats&1)hda_raport_dopisz(out," PCM");if(formats&2)hda_raport_dopisz(out," Float32");if(formats&4)hda_raport_dopisz(out," AC3");hda_raport_dopisz(out,"\n");
+}
+inline void hda_raport_amp(HdaRaportBufor* out,const char* name,uint32_t caps) {
+    hda_raport_klucz_hex32(out,name,caps);
+    hda_raport_klucz_liczba(out,"  offset (0 dB step)",hda_amp_offset(caps));
+    hda_raport_klucz_liczba(out,"  number of steps",hda_amp_kroki(caps));
+    hda_raport_klucz_liczba(out,"  step size [0.25 dB]",uint32_t(hda_amp_rozmiar_kroku_25(caps))+1);
+    hda_raport_klucz_liczba(out,"  mute supported",hda_amp_mute(caps));
+}
+
 /*
  * Formatuje pelny raport tekstowy z migawki.
  * Surowe wartosci sa oznaczane sufiksem "raw", dekodowane osobno.
@@ -1636,6 +1652,31 @@ inline bool hda_sformatuj_raport(
         hda_raport_liczba(out, c.bar0, 16);
         hda_raport_dopisz(out, "\n");
         hda_raport_klucz_liczba(out, "BAR0_MMIO_LEN", c.bar0_dlugosc);
+        hda_raport_klucz_liczba(out,"BAR width",c.bar_typ);
+        hda_raport_klucz_liczba(out,"MMIO mapped",c.mmio_zmapowane);
+        hda_raport_klucz_hex32(out,"Subsystem PCI ID",c.subsystem_id);
+        hda_raport_klucz_liczba(out,"Initialization state",c.inicjalizacja);
+        hda_raport_klucz_liczba(out,"Initialization ready",c.gotowy);
+        hda_raport_klucz_liczba(out,"Initialization failure stage",c.etap_bledu);
+        hda_raport_klucz_wartosc(out,"Initialization detail",hda_nazwa_etapu_bledu(c.etap_bledu));
+        hda_raport_klucz_liczba(out,"Diagnostic generation",c.generacja);
+        hda_raport_klucz_liczba(out,"Transaction phase",c.stan_transakcji);
+        hda_raport_klucz_liczba(out,"Transport status",c.status_transportu);
+        hda_raport_klucz_wartosc(out,"Transport detail",hda_nazwa_statusu_transportu(c.status_transportu));
+        hda_raport_klucz_hex32(out,"CORB capabilities",c.corb_caps);
+        hda_raport_klucz_liczba(out,"CORB selected size",c.corb_rozmiar);
+        hda_raport_klucz_liczba(out,"CORB initialization",c.corb_stan);
+        hda_raport_klucz_liczba(out,"CORB running",c.corb_run);
+        hda_raport_klucz_hex32(out,"RIRB capabilities",c.rirb_caps);
+        hda_raport_klucz_liczba(out,"RIRB selected size",c.rirb_rozmiar);
+        hda_raport_klucz_liczba(out,"RIRB initialization",c.rirb_stan);
+        hda_raport_klucz_liczba(out,"RIRB running",c.rirb_run);
+        hda_raport_klucz_liczba(out,"Unsolicited responses separated",c.odpowiedzi_niezamowione);
+        hda_raport_klucz_liczba(out,"Foreign/stale responses separated",c.odpowiedzi_obce);
+        hda_raport_klucz_liczba(out,"Bounded recoveries",c.odzyskiwania);
+        hda_raport_klucz_liczba(out,"Maximum transport service [ns]",c.maks_krok_ns);
+        hda_raport_klucz_wartosc(out,"Test tone",c.test_dostepny?"available (proven QEMU path)":"unavailable (physical route not configured)");
+
         hda_raport_dopisz(out, "HDA ");
         hda_raport_liczba(out, c.hda_vmaj, 10);
         hda_raport_dopisz(out, ".");
@@ -1653,7 +1694,7 @@ inline bool hda_sformatuj_raport(
         hda_raport_klucz_liczba(out, "DMA64", c.dma64);
         hda_raport_klucz_liczba(out, "Codecs", c.liczba_kodekow);
         hda_raport_dopisz(out, "Transport ");
-        hda_raport_dopisz(out, c.transport == 1 ? "Immediate Command (IC)" : "CORB/RIRB");
+        hda_raport_dopisz(out, hda_nazwa_transportu(c.transport));
         hda_raport_dopisz(out, "\n");
 
         for (uint32_t kd = 0; kd < HDA_DIAG_MAKS_KODEKOW; ++kd) {
@@ -1675,6 +1716,10 @@ inline bool hda_sformatuj_raport(
             hda_raport_dopisz(out, "\n");
             hda_raport_klucz_hex32(out, "RevisionID raw", ko.revision_id);
             hda_raport_klucz_hex32(out, "RootSubCount raw", ko.root_sub_count);
+            hda_raport_klucz_liczba(out,"Root subordinate start",hda_sub_start(ko.root_sub_count));
+            hda_raport_klucz_liczba(out,"Root subordinate count",hda_sub_count(ko.root_sub_count));
+            hda_raport_klucz_liczba(out,"Function Groups",ko.liczba_fg);
+            hda_raport_klucz_liczba(out,"Codec read error",ko.blad);
 
             for (uint32_t f = 0; f < HDA_DIAG_MAKS_FG; ++f) {
                 const HdaDiagFG& g = snap->fg[k][kd][f];
@@ -1686,6 +1731,11 @@ inline bool hda_sformatuj_raport(
                 hda_raport_klucz_hex32(out, "  FGCaps raw", g.fg_caps);
                 hda_raport_klucz_liczba(out, "  WidgetStart", g.widget_start);
                 hda_raport_klucz_liczba(out, "  WidgetCount", g.widget_count);
+                hda_raport_pcm(out,g.pcm_size_rate,g.stream_formats);
+                hda_raport_amp(out,"AFG input amplifier",g.in_amp_caps);
+                hda_raport_amp(out,"AFG output amplifier",g.out_amp_caps);
+                hda_raport_klucz_hex32(out,"AFG power capabilities",g.power_states);
+                hda_raport_klucz_liczba(out,"FG read error",g.blad);
 
                 for (uint32_t wi = 0; wi < HDA_DIAG_MAKS_WIDGETOW; ++wi) {
                     const HdaDiagWidget& w = snap->widgety[k][kd][f][wi];
@@ -1698,6 +1748,25 @@ inline bool hda_sformatuj_raport(
                     hda_raport_dopisz(out, hda_nazwa_typu_widgetu(w.typ));
                     hda_raport_dopisz(out, "\n");
                     hda_raport_klucz_hex32(out, "AWCAP raw", w.awcap);
+                    hda_raport_klucz_liczba(out,"Stereo",(w.awcap&HDA_WCAP_STEREO)!=0);
+                    hda_raport_klucz_liczba(out,"Digital",(w.awcap&HDA_WCAP_DIGITAL)!=0);
+                    hda_raport_klucz_liczba(out,"Input amp present",(w.awcap&HDA_WCAP_IN_AMP)!=0);
+                    hda_raport_klucz_liczba(out,"Output amp present",(w.awcap&HDA_WCAP_OUT_AMP)!=0);
+                    hda_raport_klucz_liczba(out,"Amp override",(w.awcap&HDA_WCAP_AMP_OVRD)!=0);
+                    hda_raport_klucz_liczba(out,"Format override",(w.awcap&HDA_WCAP_FORMAT_OVRD)!=0);
+                    hda_raport_klucz_liczba(out,"Widget read error",w.blad);
+                    hda_raport_klucz_hex32(out,"Power capabilities",w.power_states);
+                    hda_raport_klucz_liczba(out,"Power current",w.power_current);
+                    hda_raport_klucz_hex32(out,"Connection list length raw",w.connlist_len_raw);
+                    hda_raport_klucz_liczba(out,"Connection list entries",hda_connlist_liczba(w.connlist_len_raw));
+                    hda_raport_klucz_wartosc(out,"Connection list form",w.conn_long_form?"long":"short");
+                    hda_raport_klucz_liczba(out,"Current connection selector",w.conn_select);
+                    if(w.flagi&1)hda_raport_linia(out,"WARNING: widget connections truncated by explicit limit");
+                    if(w.liczba_slow_polaczen<=64){
+                        hda_raport_dopisz(out,"Packed connection responses");
+                        for(uint32_t n=0;n<w.liczba_slow_polaczen;++n){hda_raport_dopisz(out," ");hda_raport_hex32(out,w.conn_slowa[n]);}
+                        hda_raport_dopisz(out,"\n");
+                    }
 
                     if (hda_typ_widgetu_pin(w.typ)) {
                         hda_raport_klucz_hex32(out, "DefaultConfig raw", w.default_config);
@@ -1715,27 +1784,34 @@ inline bool hda_sformatuj_raport(
                                      hda_pincfg_port(w.default_config)));
                         hda_raport_dopisz(out, "\n");
                         hda_raport_klucz_hex32(out, "PinCaps raw", w.pin_caps);
+                        hda_raport_klucz_wartosc(out,"Connection type",hda_nazwa_typu_polaczenia(hda_pincfg_con(w.default_config)));
+                        hda_raport_klucz_wartosc(out,"Color",hda_nazwa_koloru(hda_pincfg_kolor(w.default_config)));
+                        hda_raport_klucz_liczba(out,"Association",hda_pincfg_asocjacja(w.default_config));
+                        hda_raport_klucz_liczba(out,"Sequence",hda_pincfg_sekwencja(w.default_config));
+                        hda_raport_klucz_liczba(out,"EAPD capability",(w.pin_caps&HDA_PINCAP_EAPD)!=0);
+                        if(w.pin_caps&HDA_PINCAP_EAPD)hda_raport_klucz_hex32(out,"EAPD current raw",w.eapd);
+                        hda_raport_klucz_liczba(out,"Pin output capability",(w.pin_caps&HDA_PINCAP_OUTPUT)!=0);
+                        hda_raport_klucz_liczba(out,"Pin input capability",(w.pin_caps&HDA_PINCAP_INPUT)!=0);
                     }
 
                     if (hda_typ_wolno_pcm_caps(w.typ)) {
-                        hda_raport_klucz_hex32(out, "PCMSizeRate raw", w.pcm_size_rate);
-                        hda_raport_klucz_hex32(out, "StreamFormats raw", w.stream_formats);
+                        hda_raport_pcm(out,w.pcm_size_rate,w.stream_formats);
                     }
 
                     if (w.out_amp_caps || w.in_amp_caps) {
-                        hda_raport_klucz_hex32(out, "OutAmpCaps raw", w.out_amp_caps);
-                        hda_raport_klucz_hex32(out, "InAmpCaps raw", w.in_amp_caps);
+                        hda_raport_amp(out,"OutAmpCaps raw",w.out_amp_caps);
+                        hda_raport_amp(out,"InAmpCaps raw",w.in_amp_caps);
                     }
 
                     if (w.liczba_polaczen > 0) {
                         hda_raport_dopisz(out, "Connections");
-                        for (uint8_t ci = 0; ci < w.liczba_polaczen; ++ci) {
+                        for (uint8_t ci = 0; ci < w.liczba_polaczen && ci < HDA_DIAG_MAKS_POLACZEN; ++ci) {
                             hda_raport_dopisz(out, " ");
                             hda_raport_hex8(out, w.polaczenia[ci]);
                         }
                         hda_raport_dopisz(out, "\n");
                         hda_raport_dopisz(out, "ConnectionsRaw");
-                        for (uint8_t ci = 0; ci < w.liczba_polaczen; ++ci) {
+                        for (uint8_t ci = 0; ci < w.liczba_polaczen && ci < HDA_DIAG_MAKS_POLACZEN; ++ci) {
                             hda_raport_dopisz(out, " ");
                             hda_raport_hex8(out, w.polaczenia_surowe[ci]);
                         }
@@ -1747,13 +1823,17 @@ inline bool hda_sformatuj_raport(
 
         /* Sciezki naleza do calego snapshotu, ale raportujemy je
          * przy pierwszym kontrolerze z kontekstem. */
-        if (k == 0) {
+        {
             hda_raport_linia(out, "Audio paths");
             for (uint32_t s = 0; s < snap->liczba_sciezek &&
                                 s < HDA_DIAG_MAKS_SCIEZEK; ++s) {
                 const HdaDiagSciezka& sc = snap->sciezki[s];
+                if(sc.kontroler_idx!=k)continue;
                 hda_raport_dopisz(out, "Path ");
                 hda_raport_liczba(out, s, 10);
+                hda_raport_dopisz(out," CAD ");hda_raport_liczba(out,sc.codec_cad,10);
+                hda_raport_dopisz(out," FG ");hda_raport_hex8(out,sc.fg_nid);
+                hda_raport_dopisz(out," score ");hda_raport_liczba(out,sc.ocena,10);
                 hda_raport_dopisz(out, " converter ");
                 hda_raport_hex8(out, sc.konwerter_nid);
                 hda_raport_dopisz(out, " pin ");
@@ -1765,7 +1845,9 @@ inline bool hda_sformatuj_raport(
                     hda_raport_hex8(out, sc.nids[i]);
                     hda_raport_dopisz(out, " ");
                 }
-                hda_raport_dopisz(out, "\n");
+                hda_raport_dopisz(out, "\nSelector indices");
+                for(uint8_t h=1;h<sc.dlugosc&&h<HDA_DIAG_MAKS_DLUGOSC_SCIEZKI;++h){hda_raport_dopisz(out," ");hda_raport_liczba(out,sc.selektory[h],10);}
+                hda_raport_dopisz(out, "\nOutput route discovered; physical activation awaits real hardware evidence.\n");
             }
         }
     }

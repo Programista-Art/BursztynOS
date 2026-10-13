@@ -47,6 +47,7 @@ void test_trace(const char* stage) {
 /* ------------------------------------------------------------------------- */
 
 HdaDiagSnapshot g_snapshot;
+uint32_t g_kontroler = 0;
 bool g_snapshot_ok = false;
 uint32_t g_generacja = 0;
 HdaDiagSkan g_stan_skan{};
@@ -157,7 +158,7 @@ const char* nazwa_stanu_strumienia(uint32_t s) {
 
 bool diag_stan(HdaDiagSkan* out) {
     return out && bws_wywolaj(BWS_HDA_DIAG, BWS_HDA_DIAG_STAN,
-                              reinterpret_cast<uint64_t>(out), 0, 0) == 1;
+                              reinterpret_cast<uint64_t>(out), sizeof(HdaDiagSkan), HDA_DIAG_WERSJA_ABI) == 1;
 }
 
 bool diag_skan_start() {
@@ -187,11 +188,16 @@ bool diag_snapshot(HdaDiagSnapshot* out) {
         out->wersja != HDA_DIAG_WERSJA_ABI || out->rozmiar != sizeof(*out) ||
         out->liczba_kontrolerow > HDA_DIAG_MAKS_KONTROLEROW ||
         out->liczba_sciezek > HDA_DIAG_MAKS_SCIEZEK) return false;
+    for(uint32_t k=0;k<out->liczba_kontrolerow;++k){
+        if(out->kontrolery[k].liczba_kodekow>HDA_DIAG_MAKS_KODEKOW)return false;
+        for(uint32_t c=0;c<HDA_DIAG_MAKS_KODEKOW;++c)
+            if(out->kodeki[k][c].liczba_fg>HDA_DIAG_MAKS_FG)return false;
+    }
     for (uint32_t k = 0; k < HDA_DIAG_MAKS_KONTROLEROW; ++k)
         for (uint32_t c = 0; c < HDA_DIAG_MAKS_KODEKOW; ++c)
             for (uint32_t f = 0; f < HDA_DIAG_MAKS_FG; ++f)
                 for (uint32_t w = 0; w < HDA_DIAG_MAKS_WIDGETOW; ++w)
-                    if (out->widgety[k][c][f][w].liczba_polaczen > HDA_DIAG_MAKS_POLACZEN)
+                    if (out->widgety[k][c][f][w].liczba_polaczen > HDA_DIAG_MAKS_POLACZEN || out->widgety[k][c][f][w].liczba_slow_polaczen>64)
                         return false;
     for (uint32_t i = 0; i < out->liczba_sciezek; ++i)
         if (out->sciezki[i].dlugosc > HDA_DIAG_MAKS_DLUGOSC_SCIEZKI) return false;
@@ -208,7 +214,7 @@ bool test_start(uint32_t tryb, uint32_t hz, uint32_t czas_ms, uint8_t kanaly) {
     t.czas_ms = czas_ms;
     t.kanaly = kanaly;
     return bws_wywolaj(BWS_HDA_TEST, BWS_HDA_TEST_START,
-                       reinterpret_cast<uint64_t>(&t), 0, 0) == 1;
+                       reinterpret_cast<uint64_t>(&t), g_kontroler, HDA_DIAG_WERSJA_ABI) == 1;
 }
 
 void test_stop() {
@@ -249,6 +255,7 @@ void zbuduj_raport(char* out, size_t cap, bool* obciety) {
 uint64_t g_plik_bws = 0;
 uint64_t g_plik_kod = 0;
 bool zapisz_raport() {
+    if (!g_snapshot_ok) { g_plik_bws=89; g_plik_kod=HDA_DIAG_BLAD_BRAK_SNAPSHOTU; return false; }
     zbuduj_raport(g_raport, sizeof(g_raport), &g_raport_obciety);
     if (g_raport_obciety) { g_plik_bws = 0; g_plik_kod = 12; return false; }
     const char* dirs[] = {"/dane", "/dane/diagnostyka"};
@@ -418,6 +425,15 @@ public:
         wskaznik_->ustaw_wyrownanie_pionowe(WyrownaniePionowe::Srodek);
         wskaznik_->ustaw_widoczna(false);
         header.dodaj_do_siatki(wskaznik_, 0, 1);
+
+        kontrolery_ = &root.dodaj<ListaRozwijana>(Dokowanie::Gora);
+        kontrolery_->ustaw_preferowany_rozmiar(Rozmiar(-1, 34));
+        kontrolery_->ustaw_widoczna(false);
+        kontrolery_->przy_zmianie_wyboru([](ListaRozwijana*, int i, void* ctx) {
+            if (i < 0 || !g_snapshot_ok || uint32_t(i) >= g_snapshot.liczba_kontrolerow) return;
+            g_kontroler=uint32_t(i);
+            static_cast<OknoTestDzwieku*>(ctx)->odswiez_wszystko();
+        }, this);
 
         sekcje_ = &root.dodaj<ListaRozwijana>(Dokowanie::Gora);
         sekcje_->ustaw_preferowany_rozmiar(Rozmiar(-1, 34));
@@ -590,7 +606,7 @@ public:
         }
         if (ton_aktywny_) {
             HdaDiagStanTestu t{};
-            if (bws_wywolaj(89, BWS_HDA_DIAG_TEST_STAN, reinterpret_cast<uint64_t>(&t), 0, 0) != 1) {
+            if (bws_wywolaj(89, BWS_HDA_DIAG_TEST_STAN, reinterpret_cast<uint64_t>(&t), sizeof(t), HDA_DIAG_WERSJA_ABI) != 1) {
                 ton_aktywny_ = false; blad_bws("Stan testu", 89, 0);
             } else if (!t.aktywny) {
                 ton_aktywny_ = false; ustaw_status("Gotowe", TypKomunikatu::Sukces); odswiez_strumien();
@@ -613,6 +629,7 @@ private:
         /* Callback musi byc statyczny; uzywamy tablicy kontekstow. */
         const int idx = liczba_kontekstow_;
         if (idx >= MAKS_KONTEKSTOW) return;
+        przyciski_testu_[idx]=&b;
         konteksty_[idx] = {this, tryb, hz, kanaly};
         ++liczba_kontekstow_;
         b.przy_kliknieciu(
@@ -685,13 +702,13 @@ private:
     void odswiez_strumien() {
         if (!g_snapshot_ok) return;
         const uint64_t stream_rc = bws_wywolaj(89, BWS_HDA_DIAG_STRUMIEN,
-                          reinterpret_cast<uint64_t>(&g_snapshot.strumien), 0, 0);
+                          reinterpret_cast<uint64_t>(&g_snapshot.strumien), sizeof(HdaDiagStrumien), HDA_DIAG_WERSJA_ABI);
         if (stream_rc != 1) {
             g_snapshot.strumien = {};
             blad_bws("Stan strumienia", 89, stream_rc);
         }
         const uint64_t test_rc = bws_wywolaj(89, BWS_HDA_DIAG_TEST_STAN,
-                          reinterpret_cast<uint64_t>(&g_snapshot.test), 0, 0);
+                          reinterpret_cast<uint64_t>(&g_snapshot.test), sizeof(HdaDiagStanTestu), HDA_DIAG_WERSJA_ABI);
         if (test_rc != 1) {
             g_snapshot.test = {};
             blad_bws("Stan testu", 89, test_rc);
@@ -707,6 +724,25 @@ private:
     }
 
     void odswiez_wszystko() {
+        const bool playable=g_snapshot_ok&&g_kontroler<g_snapshot.liczba_kontrolerow&&g_snapshot.kontrolery[g_kontroler].test_dostepny;
+        for(int i=0;i<liczba_kontekstow_;++i)if(przyciski_testu_[i])przyciski_testu_[i]->ustaw_wlaczona(playable);
+        if (g_snapshot_ok && kontrolery_ && liczba_kontrolerow_ui_ != g_snapshot.liczba_kontrolerow) {
+            liczba_kontrolerow_ui_ = g_snapshot.liczba_kontrolerow;
+            kontrolery_->wyczysc();
+            for(uint32_t k=0;k<g_snapshot.liczba_kontrolerow;++k){
+                char name[96]{};size_t p=0;const auto& c=g_snapshot.kontrolery[k];
+                dopisz_str(name,sizeof(name),&p,c.vendor_id==0x8086?"Intel HDA ":c.vendor_id==0x10de?"NVIDIA HDA ":"HDA ");
+                dopisz_liczbe(name,sizeof(name),&p,c.vendor_id,16);dopisz_str(name,sizeof(name),&p," ");
+                dopisz_liczbe(name,sizeof(name),&p,c.device_id,16);dopisz_str(name,sizeof(name),&p," [");
+                dopisz_liczbe(name,sizeof(name),&p,c.bus,16);dopisz_str(name,sizeof(name),&p,":");
+                dopisz_liczbe(name,sizeof(name),&p,c.slot,16);dopisz_str(name,sizeof(name),&p,".");
+                dopisz_liczbe(name,sizeof(name),&p,c.func);dopisz_str(name,sizeof(name),&p,"]");
+                kontrolery_->dodaj_element(name);
+            }
+            if(g_kontroler>=g_snapshot.liczba_kontrolerow)g_kontroler=0;
+            kontrolery_->ustaw_wybrany_indeks(int(g_kontroler));
+            kontrolery_->ustaw_widoczna(g_snapshot.liczba_kontrolerow>1);
+        }
         if (!g_snapshot_ok) {
             if (tekst_kontroler_)
                 tekst_kontroler_->ustaw_tekst("Dane niedostępne - użyj Odśwież.");
@@ -720,7 +756,7 @@ private:
         if (tekst_kontroler_) {
             char buf[2048]{};
             size_t p = 0;
-            for (uint32_t k = 0; k < g_snapshot.liczba_kontrolerow &&
+            for (uint32_t k = g_kontroler; k < g_kontroler+1 && k < g_snapshot.liczba_kontrolerow &&
                                 k < HDA_DIAG_MAKS_KONTROLEROW; ++k) {
                 const HdaDiagKontroler& c = g_snapshot.kontrolery[k];
                 dopisz_str(buf, sizeof(buf), &p, "Kontroler HDA ");
@@ -758,7 +794,22 @@ private:
                 dopisz_liczbe(buf, sizeof(buf), &p, c.bss);
                 dopisz_str(buf, sizeof(buf), &p, " DMA64 ");
                 dopisz_liczbe(buf, sizeof(buf), &p, c.dma64);
-                dopisz_str(buf, sizeof(buf), &p, "\nTransport: Immediate Command (IC)\n");
+                dopisz_str(buf, sizeof(buf), &p, "\nWersja HDA ");
+                dopisz_liczbe(buf,sizeof(buf),&p,c.hda_vmaj);dopisz_str(buf,sizeof(buf),&p,".");dopisz_liczbe(buf,sizeof(buf),&p,c.hda_vmin);
+                dopisz_str(buf,sizeof(buf),&p,"\nStan: ");dopisz_str(buf,sizeof(buf),&p,c.gotowy?"Kontroler zainicjalizowany":"Kontroler wykryty, inicjalizacja nieudana");
+                dopisz_str(buf,sizeof(buf),&p,"\nEtap: ");dopisz_str(buf,sizeof(buf),&p,hda_nazwa_etapu_bledu(c.etap_bledu));
+                dopisz_str(buf,sizeof(buf),&p,"\nTransport: ");dopisz_str(buf,sizeof(buf),&p,hda_nazwa_transportu(c.transport));
+                dopisz_str(buf,sizeof(buf),&p," stan ");dopisz_liczbe(buf,sizeof(buf),&p,c.status_transportu);
+                dopisz_str(buf,sizeof(buf),&p,"\nCORB caps ");dopisz_hex32(buf,sizeof(buf),&p,c.corb_caps);
+                dopisz_str(buf,sizeof(buf),&p," rozmiar ");dopisz_liczbe(buf,sizeof(buf),&p,c.corb_rozmiar);
+                dopisz_str(buf,sizeof(buf),&p," RUN ");dopisz_liczbe(buf,sizeof(buf),&p,c.corb_run);
+                dopisz_str(buf,sizeof(buf),&p,"\nRIRB caps ");dopisz_hex32(buf,sizeof(buf),&p,c.rirb_caps);
+                dopisz_str(buf,sizeof(buf),&p," rozmiar ");dopisz_liczbe(buf,sizeof(buf),&p,c.rirb_rozmiar);
+                dopisz_str(buf,sizeof(buf),&p," RUN ");dopisz_liczbe(buf,sizeof(buf),&p,c.rirb_run);
+                dopisz_str(buf,sizeof(buf),&p,"\nBAR ");dopisz_liczbe(buf,sizeof(buf),&p,c.bar_typ);
+                dopisz_str(buf,sizeof(buf),&p," bit, MMIO ");dopisz_liczbe(buf,sizeof(buf),&p,c.mmio_zmapowane);
+                dopisz_str(buf,sizeof(buf),&p,"\nMaks. faza transportu [ns] ");dopisz_liczbe(buf,sizeof(buf),&p,c.maks_krok_ns);
+                dopisz_str(buf,sizeof(buf),&p,"\n");
                 dopisz_str(buf, sizeof(buf), &p, "Liczba odpowiadających kodeków: ");
                 dopisz_liczbe(buf, sizeof(buf), &p, c.liczba_kodekow);
                 dopisz_str(buf, sizeof(buf), &p, "\n\n");
@@ -774,7 +825,7 @@ private:
         if (tekst_kodeki_) {
             char buf[4096]{};
             size_t p = 0;
-            for (uint32_t k = 0; k < g_snapshot.liczba_kontrolerow &&
+            for (uint32_t k = g_kontroler; k < g_kontroler+1 && k < g_snapshot.liczba_kontrolerow &&
                                 k < HDA_DIAG_MAKS_KONTROLEROW; ++k) {
                 for (uint32_t kd = 0; kd < HDA_DIAG_MAKS_KODEKOW; ++kd) {
                     const HdaDiagKodek& ko = g_snapshot.kodeki[k][kd];
@@ -821,7 +872,7 @@ private:
             static char buf[HDA_DIAG_MAKS_RAPORTU];
             buf[0] = 0;
             size_t p = 0;
-            for (uint32_t k = 0; k < g_snapshot.liczba_kontrolerow &&
+            for (uint32_t k = g_kontroler; k < g_kontroler+1 && k < g_snapshot.liczba_kontrolerow &&
                                 k < HDA_DIAG_MAKS_KONTROLEROW; ++k) {
                 for (uint32_t kd = 0; kd < HDA_DIAG_MAKS_KODEKOW; ++kd) {
                     for (uint32_t f = 0; f < HDA_DIAG_MAKS_FG; ++f) {
@@ -892,6 +943,7 @@ private:
             for (uint32_t s = 0; s < g_snapshot.liczba_sciezek &&
                                 s < HDA_DIAG_MAKS_SCIEZEK; ++s) {
                 const HdaDiagSciezka& sc = g_snapshot.sciezki[s];
+                if(sc.kontroler_idx!=g_kontroler)continue;
                 dopisz_str(buf, sizeof(buf), &p, "Ścieżka ");
                 dopisz_liczbe(buf, sizeof(buf), &p, s);
                 dopisz_str(buf, sizeof(buf), &p, ": konwerter ");
@@ -960,18 +1012,24 @@ private:
 
         if (info_ && g_snapshot_ok) {
             const char* dev_name = "Wyjście audio";
-            if (hda_sciezka_glosnik_istnieje(g_snapshot.sciezki, g_snapshot.liczba_sciezek)) {
-                dev_name = "Głośniki";
-            } else if (hda_sciezka_sluchawki_istnieje(g_snapshot.sciezki, g_snapshot.liczba_sciezek)) {
-                dev_name = "Słuchawki";
-            } else if (hda_sciezka_line_out_istnieje(g_snapshot.sciezki, g_snapshot.liczba_sciezek)) {
-                dev_name = "Wyjście Line Out";
-            } else if (hda_sciezka_hdmi_istnieje(g_snapshot.sciezki, g_snapshot.liczba_sciezek)) {
-                dev_name = "HDMI / DisplayPort";
+            uint8_t best=0;bool speaker=false;
+            for(uint32_t j=0;j<g_snapshot.liczba_sciezek&&j<HDA_DIAG_MAKS_SCIEZEK;++j){
+                const auto& path=g_snapshot.sciezki[j];if(path.kontroler_idx!=g_kontroler)continue;
+                speaker|=path.cel==HDA_CEL_GLOSNIK&&path.ocena==100;
+                if(path.ocena>=best){best=path.ocena;dev_name=hda_nazwa_celu_pinu(path.cel);}
             }
             char ibuf[160]{}; size_t ip = 0;
             dopisz_str(ibuf, sizeof(ibuf), &ip, dev_name);
             dopisz_str(ibuf, sizeof(ibuf), &ip, " - wybierz test. Czas: 1,5 s. Dźwięk nie uruchamia się automatycznie.");
+            const auto& c=g_snapshot.kontrolery[g_kontroler];
+            if(!c.gotowy){
+                ibuf[0]=0;ip=0;dopisz_str(ibuf,sizeof(ibuf),&ip,"Kontroler wykryty. Błąd: ");
+                dopisz_str(ibuf,sizeof(ibuf),&ip,hda_nazwa_etapu_bledu(c.etap_bledu));
+            }else if(!c.liczba_kodekow){
+                ibuf[0]=0;ip=0;dopisz_str(ibuf,sizeof(ibuf),&ip,"Kontroler zainicjalizowany; brak odpowiedzi kodeka.");
+            }else if(!c.test_dostepny){
+                ibuf[0]=0;ip=0;dopisz_str(ibuf,sizeof(ibuf),&ip,speaker?"Trasa głośnika wykryta; jeszcze nieskonfigurowana. Test niedostępny.":"Topologia odkryta; trasa głośnika niepotwierdzona. Test niedostępny.");
+            }
             info_->ustaw_tekst(ibuf);
         }
 
@@ -984,6 +1042,8 @@ private:
     WskaznikZajetosci* wskaznik_ = nullptr;
     Etykieta* info_ = nullptr;
     ListaRozwijana* sekcje_ = nullptr;
+    ListaRozwijana* kontrolery_ = nullptr;
+    uint32_t liczba_kontrolerow_ui_ = UINT32_MAX;
     PasekInformacyjny* status_ = nullptr;
     Kontrolka* pages_[7]{};
     WidokRaportu* tekst_kontroler_ = nullptr;
@@ -1005,6 +1065,7 @@ private:
         uint8_t kanaly;
     };
     KontekstTestu konteksty_[MAKS_KONTEKSTOW]{};
+    Przycisk* przyciski_testu_[MAKS_KONTEKSTOW]{};
     int liczba_kontekstow_ = 0;
     ZegarSkanu* zegar_ = nullptr;
     friend class ZegarSkanu;

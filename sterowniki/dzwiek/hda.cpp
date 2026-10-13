@@ -47,6 +47,9 @@
 #include "hda.h"
 #include "hda_diag_format.h"
 #include "hda_wewnetrzny.h"
+#include "hda_transport.h"
+#include "hda_diag.h"
+#include "../czas/hpet.h"
 #include "../../pamiec.h"
 #include "../../pci.h"
 
@@ -490,6 +493,8 @@ struct BdfPCI {
     uint8_t func;
 };
 
+uint32_t hda_kontroler_odtwarzania = UINT32_MAX;
+
 uint64_t hda_mmio_base =
     0;
 
@@ -649,31 +654,11 @@ bool fizyczny_dma_poprawny(
  * 6. BLOKADA
  * ========================================================================= */
 
-bool hda_sprobuj_zablokowac(
-    uint32_t timeout
-) {
-    for (uint32_t i = 0;
-         i < timeout;
-         ++i) {
-
-        bool oczekiwane =
-            false;
-
-        if (__atomic_compare_exchange_n(
-                &hda_blokada,
-                &oczekiwane,
-                true,
-                false,
-                __ATOMIC_ACQUIRE,
-                __ATOMIC_RELAXED)) {
-
-            return true;
-        }
-
-        pause_cpu();
-    }
-
-    return false;
+// Playback ownership reservation: one CAS, never spin waiting for another caller.
+// Hardware command ownership lives independently in each controller transport.
+bool hda_sprobuj_zablokowac(uint32_t) {
+    bool expected=false;
+    return __atomic_compare_exchange_n(&hda_blokada,&expected,true,false,__ATOMIC_ACQUIRE,__ATOMIC_RELAXED);
 }
 
 void hda_odblokuj() {
@@ -959,679 +944,6 @@ void stream_wyczysc_sts() {
 }
 
 /* =========================================================================
- * 8. PCI
- * ========================================================================= */
-
-bool znajdz_hda(
-    BdfPCI* wynik
-) {
-    if (!wynik) {
-        return false;
-    }
-
-    for (uint16_t bus16 = 0;
-         bus16 <
-            PCI_LICZBA_MAGISTRAL;
-         ++bus16) {
-
-        const uint8_t bus =
-            static_cast<uint8_t>(
-                bus16
-            );
-
-        for (uint8_t slot = 0;
-             slot <=
-                PCI_MAKS_SLOT;
-             ++slot) {
-
-            if (!pci_funkcja_obecna(
-                    bus,
-                    slot,
-                    0)) {
-
-                continue;
-            }
-
-            const uint32_t header =
-                pci_odczytaj_dword(
-                    bus,
-                    slot,
-                    0,
-                    PCI_OFFSET_HEADER_INFO
-                );
-
-            const uint8_t maks_func =
-                pci_jest_multifunction(
-                    pci_typ_naglowka(
-                        header
-                    )
-                )
-                    ? PCI_MAKS_FUNC
-                    : 0U;
-
-            for (uint8_t func = 0;
-                 func <=
-                    maks_func;
-                 ++func) {
-
-                if (!pci_funkcja_obecna(
-                        bus,
-                        slot,
-                        func)) {
-
-                    continue;
-                }
-
-                const uint32_t class_info =
-                    pci_odczytaj_dword(
-                        bus,
-                        slot,
-                        func,
-                        PCI_OFFSET_CLASS_INFO
-                    );
-
-                if (pci_klasa(
-                        class_info) !=
-                        PCI_KLASA_MULTIMEDIA ||
-                    pci_podklasa(
-                        class_info) !=
-                        PCI_PODKLASA_HDA) {
-
-                    continue;
-                }
-
-                wynik->bus =
-                    bus;
-
-                wynik->slot =
-                    slot;
-
-                wynik->func =
-                    func;
-
-                return true;
-            }
-        }
-    }
-
-    return false;
-}
-
-bool pobierz_bar0(
-    const BdfPCI& bdf,
-    uint64_t* wynik
-) {
-    if (!wynik) {
-        return false;
-    }
-
-    const uint32_t bar0 =
-        pci_odczytaj_dword(
-            bdf.bus,
-            bdf.slot,
-            bdf.func,
-            PCI_OFFSET_BAR0
-        );
-
-    if (bar0 == 0 ||
-        bar0 ==
-            UINT32_MAX ||
-        (bar0 &
-         PCI_BAR_IO) != 0) {
-
-        return false;
-    }
-
-    const uint32_t typ =
-        bar0 &
-        PCI_BAR_MEM_TYPE_MASK;
-
-    if (typ ==
-        PCI_BAR_MEM_TYPE_32) {
-
-        *wynik =
-            static_cast<uint64_t>(
-                bar0 &
-                PCI_BAR_MEM_ADDR_MASK
-            );
-
-        return
-            *wynik != 0;
-    }
-
-    if (typ ==
-        PCI_BAR_MEM_TYPE_64) {
-
-        const uint32_t bar1 =
-            pci_odczytaj_dword(
-                bdf.bus,
-                bdf.slot,
-                bdf.func,
-                PCI_OFFSET_BAR1
-            );
-
-        *wynik =
-            (static_cast<uint64_t>(
-                 bar1) << 32) |
-            static_cast<uint64_t>(
-                bar0 &
-                PCI_BAR_MEM_ADDR_MASK
-            );
-
-        return
-            *wynik != 0;
-    }
-
-    return false;
-}
-
-bool wlacz_pci_hda(
-    const BdfPCI& bdf
-) {
-    const uint32_t command_status =
-        pci_odczytaj_dword(
-            bdf.bus,
-            bdf.slot,
-            bdf.func,
-            PCI_OFFSET_COMMAND_STATUS
-        );
-
-    uint16_t command =
-        static_cast<uint16_t>(
-            command_status &
-            0xFFFFU
-        );
-
-    command =
-        static_cast<uint16_t>(
-            command |
-            PCI_COMMAND_MEMORY_SPACE |
-            PCI_COMMAND_BUS_MASTER |
-            PCI_COMMAND_INT_DISABLE
-        );
-
-    /*
-     * Gorna polowa DWORD to PCI Status z bitami W1C.
-     * Nie zapisujemy odczytanego statusu z powrotem.
-     */
-    pci_zapisz_dword(
-        bdf.bus,
-        bdf.slot,
-        bdf.func,
-        PCI_OFFSET_COMMAND_STATUS,
-        static_cast<uint32_t>(
-            command
-        )
-    );
-
-    const uint16_t po =
-        static_cast<uint16_t>(
-            pci_odczytaj_dword(
-                bdf.bus,
-                bdf.slot,
-                bdf.func,
-                PCI_OFFSET_COMMAND_STATUS
-            ) &
-            0xFFFFU
-        );
-
-    const uint16_t wymagane =
-        static_cast<uint16_t>(
-            PCI_COMMAND_MEMORY_SPACE |
-            PCI_COMMAND_BUS_MASTER
-        );
-
-    return
-        (po &
-         wymagane) ==
-        wymagane;
-}
-
-void wylacz_pci_busmaster(
-    const BdfPCI& bdf
-) {
-    const uint32_t command_status =
-        pci_odczytaj_dword(
-            bdf.bus,
-            bdf.slot,
-            bdf.func,
-            PCI_OFFSET_COMMAND_STATUS
-        );
-
-    uint16_t command =
-        static_cast<uint16_t>(
-            command_status &
-            0xFFFFU
-        );
-
-    command =
-        static_cast<uint16_t>(
-            command &
-            ~PCI_COMMAND_BUS_MASTER
-        );
-
-    pci_zapisz_dword(
-        bdf.bus,
-        bdf.slot,
-        bdf.func,
-        PCI_OFFSET_COMMAND_STATUS,
-        static_cast<uint32_t>(
-            command
-        )
-    );
-}
-
-/* =========================================================================
- * 9. MAPOWANIE MMIO
- * ========================================================================= */
-
-bool mapuj_mmio(
-    uint64_t baza
-) {
-    if (baza == 0 ||
-        baza >
-            UINT64_MAX -
-            (HDA_MMIO_ROZMIAR - 1ULL)) {
-
-        return false;
-    }
-
-    const uint64_t start =
-        baza &
-        ~UINT64_C(0xFFF);
-
-    const uint64_t koniec =
-        (baza +
-         HDA_MMIO_ROZMIAR -
-         1ULL) &
-        ~UINT64_C(0xFFF);
-
-    const uint32_t flagi =
-        VMM_FLAGA_OBECNA |
-        VMM_FLAGA_ZAPIS |
-        VMM_FLAGA_PWT |
-        VMM_FLAGA_PCD;
-
-    for (uint64_t strona =
-             start;
-         strona <=
-             koniec;
-         strona +=
-             ROZMIAR_RAMKI_4K) {
-
-        ZmapujStrone(
-            reinterpret_cast<void*>(
-                strona
-            ),
-            reinterpret_cast<void*>(
-                strona
-            ),
-            flagi
-        );
-
-        if (strona >
-            UINT64_MAX -
-            ROZMIAR_RAMKI_4K) {
-
-            break;
-        }
-    }
-
-    hda_mmio_base =
-        baza;
-
-    /*
-     * ZmapujStrone() nadal zwraca void, wiec nie mozemy wiarygodnie
-     * odroznic bledu mapowania od poprawnego rejestru o wartosci 0xFFFF.
-     * Weryfikujemy przynajmniej major version.
-     */
-    const uint8_t major =
-        mmio_odczytaj8(
-            HDA_REG_VMAJ
-        );
-
-    return
-        major !=
-            UINT8_MAX &&
-        major >=
-            1U;
-}
-
-/* =========================================================================
- * 10. GLOBAL RESET
- * ========================================================================= */
-
-uint32_t liczba_streamow_z_gcap(
-    uint16_t gcap
-) {
-    const uint32_t iss =
-        (gcap &
-         HDA_GCAP_ISS_MASK) >>
-        HDA_GCAP_ISS_SHIFT;
-
-    const uint32_t oss =
-        (gcap &
-         HDA_GCAP_OSS_MASK) >>
-        HDA_GCAP_OSS_SHIFT;
-
-    const uint32_t bss =
-        (gcap &
-         HDA_GCAP_BSS_MASK) >>
-        HDA_GCAP_BSS_SHIFT;
-
-    const uint32_t suma =
-        iss +
-        oss +
-        bss;
-
-    return
-        suma <= 30U
-            ? suma
-            : 30U;
-}
-
-void zatrzymaj_wszystkie_streamy(
-    uint16_t gcap
-) {
-    const uint32_t liczba =
-        liczba_streamow_z_gcap(
-            gcap
-        );
-
-    for (uint32_t i = 0;
-         i < liczba;
-         ++i) {
-
-        const uint32_t base =
-            HDA_STREAM_BASE +
-            i *
-            HDA_STREAM_STRIDE;
-
-        /*
-         * Czytamy tylko 24-bit SDCTL.
-         */
-        const uint16_t low =
-            mmio_odczytaj16(
-                base +
-                HDA_SD_CTL_LO
-            );
-
-        const uint8_t high =
-            mmio_odczytaj8(
-                base +
-                HDA_SD_CTL_HI
-            );
-
-        uint32_t ctl =
-            static_cast<uint32_t>(
-                low) |
-            (static_cast<uint32_t>(
-                 high) << 16);
-
-        ctl &=
-            ~HDA_SD_CTL_RUN;
-
-        mmio_zapisz16(
-            base +
-            HDA_SD_CTL_LO,
-            static_cast<uint16_t>(
-                ctl &
-                0xFFFFU
-            )
-        );
-
-        mmio_zapisz8(
-            base +
-            HDA_SD_CTL_HI,
-            static_cast<uint8_t>(
-                ctl >>
-                16
-            )
-        );
-    }
-}
-
-bool resetuj_kontroler() {
-    if (hda_mmio_base == 0) {
-        return false;
-    }
-
-    const uint16_t gcap_przed =
-        mmio_odczytaj16(
-            HDA_REG_GCAP
-        );
-
-    if (gcap_przed ==
-        UINT16_MAX) {
-
-        return false;
-    }
-
-    /*
-     * Polling: zadnych IRQ.
-     */
-    mmio_zapisz32(
-        HDA_REG_INTCTL,
-        0
-    );
-
-    mmio_zapisz16(
-        HDA_REG_WAKEEN,
-        0
-    );
-
-    zatrzymaj_wszystkie_streamy(
-        gcap_przed
-    );
-
-    /*
-     * Immediate Commands nie moga wspolistniec z aktywnym CORB/RIRB.
-     */
-    mmio_zapisz8(
-        HDA_REG_CORBCTL,
-        static_cast<uint8_t>(
-            mmio_odczytaj8(
-                HDA_REG_CORBCTL
-            ) &
-            ~HDA_CORBCTL_RUN
-        )
-    );
-
-    mmio_zapisz8(
-        HDA_REG_RIRBCTL,
-        static_cast<uint8_t>(
-            mmio_odczytaj8(
-                HDA_REG_RIRBCTL
-            ) &
-            ~HDA_RIRBCTL_RUN
-        )
-    );
-
-    /*
-     * Wylacz DMA Position Buffer.
-     */
-    mmio_zapisz32(
-        HDA_REG_DPLBASE,
-        0
-    );
-
-    mmio_zapisz32(
-        HDA_REG_DPUBASE,
-        0
-    );
-
-    uint32_t gctl =
-        mmio_odczytaj32(
-            HDA_REG_GCTL
-        );
-
-    if (gctl ==
-        UINT32_MAX) {
-
-        return false;
-    }
-
-    gctl &=
-        ~HDA_GCTL_CRST;
-
-    mmio_zapisz32(
-        HDA_REG_GCTL,
-        gctl
-    );
-
-    bool wszedl_w_reset =
-        false;
-
-    for (uint32_t i = 0;
-         i <
-            HDA_TIMEOUT_RESET;
-         ++i) {
-
-        if ((mmio_odczytaj32(
-                 HDA_REG_GCTL) &
-             HDA_GCTL_CRST) == 0) {
-
-            wszedl_w_reset =
-                true;
-
-            break;
-        }
-
-        pause_cpu();
-    }
-
-    if (!wszedl_w_reset) {
-        wypisz_log(
-            "[HDA] Timeout wejscia kontrolera w CRST=0."
-        );
-
-        return false;
-    }
-
-    /*
-     * Przytrzymujemy RESET# przez ograniczony czas.
-     * Nie ma jeszcze dzialajacego WALCLK, bo link jest w resecie.
-     */
-    for (uint32_t i = 0;
-         i < 100000U;
-         ++i) {
-
-        pause_cpu();
-    }
-
-    mmio_zapisz32(
-        HDA_REG_GCTL,
-        gctl |
-        HDA_GCTL_CRST
-    );
-
-    bool wyszedl_z_reset =
-        false;
-
-    for (uint32_t i = 0;
-         i <
-            HDA_TIMEOUT_RESET;
-         ++i) {
-
-        if ((mmio_odczytaj32(
-                 HDA_REG_GCTL) &
-             HDA_GCTL_CRST) != 0) {
-
-            wyszedl_z_reset =
-                true;
-
-            break;
-        }
-
-        pause_cpu();
-    }
-
-    if (!wyszedl_z_reset) {
-        wypisz_log(
-            "[HDA] Timeout wyjscia kontrolera z resetu."
-        );
-
-        return false;
-    }
-
-    hda_gcap =
-        mmio_odczytaj16(
-            HDA_REG_GCAP
-        );
-
-    if (hda_gcap ==
-        UINT16_MAX) {
-
-        return false;
-    }
-
-    const uint32_t oss =
-        (hda_gcap &
-         HDA_GCAP_OSS_MASK) >>
-        HDA_GCAP_OSS_SHIFT;
-
-    if (oss == 0) {
-        wypisz_log(
-            "[HDA] Kontroler nie posiada Output Stream."
-        );
-
-        return false;
-    }
-
-    /*
-     * Stereo 16-bit przy 48 kHz zuzywa 2 slowa 16-bit na frame.
-     */
-    const uint16_t outpay =
-        mmio_odczytaj16(
-            HDA_REG_OUTPAY
-        );
-
-    const uint16_t outstrmpay =
-        mmio_odczytaj16(
-            HDA_REG_OUTSTRMPAY
-        );
-
-    if ((outpay != 0 &&
-         outpay < 2U) ||
-        (outstrmpay != 0 &&
-         outstrmpay < 2U)) {
-
-        wypisz_log(
-            "[HDA] Za mala przepustowosc dla 48k/16/stereo."
-        );
-
-        return false;
-    }
-
-    const uint32_t iss =
-        (hda_gcap &
-         HDA_GCAP_ISS_MASK) >>
-        HDA_GCAP_ISS_SHIFT;
-
-    const uint64_t stream =
-        hda_mmio_base +
-        HDA_STREAM_BASE +
-        static_cast<uint64_t>(
-            iss) *
-        HDA_STREAM_STRIDE;
-
-    if (stream <
-            hda_mmio_base ||
-        stream >
-            hda_mmio_base +
-            HDA_MMIO_ROZMIAR -
-            HDA_STREAM_STRIDE) {
-
-        return false;
-    }
-
-    hda_stream_base =
-        stream;
-
-    return true;
-}
-
-/* =========================================================================
  * 11. WALCLK
  * ========================================================================= */
 
@@ -1746,138 +1058,25 @@ struct HdaImmediateDiagLog {
     HdaTransportStatus status;
 };
 
-HdaTransportStatus hda_transport_send_immediate_ex(
-    uint32_t komenda,
-    uint32_t* odpowiedz,
-    HdaImmediateDiagLog* diag = nullptr
-) {
-    if (hda_mmio_base == 0 || !odpowiedz) {
-        if (diag) diag->status = HDA_TRANSPORT_NOT_READY;
-        return HDA_TRANSPORT_NOT_READY;
-    }
-
-    *odpowiedz = 0;
-
-    const uint32_t start_walclk = mmio_odczytaj32(HDA_REG_WALCLK);
-
-    /* 1. Odczytaj ICIS przed poleceniem */
-    const uint16_t icis_before = mmio_odczytaj16(HDA_REG_ICIS);
-    if (diag) {
-        diag->icis_before = icis_before;
-        diag->icoi_written = komenda;
-    }
-
-    if (icis_before == UINT16_MAX) {
-        if (diag) diag->status = HDA_TRANSPORT_NOT_READY;
-        return HDA_TRANSPORT_NOT_READY;
-    }
-
-    /* 2. Czekaj tylko gdy BUSY jest faktycznie aktywne */
-    if ((icis_before & HDA_ICIS_ICB) != 0) {
-        bool busy_cleared = false;
-        for (uint32_t i = 0; i < HDA_TIMEOUT_IMMEDIATE; ++i) {
-            if ((mmio_odczytaj16(HDA_REG_ICIS) & HDA_ICIS_ICB) == 0) {
-                busy_cleared = true;
-                break;
-            }
-            pause_cpu();
-        }
-        if (!busy_cleared) {
-            if (diag) {
-                diag->icis_after_stale = mmio_odczytaj16(HDA_REG_ICIS);
-                diag->icis_completion = diag->icis_after_stale;
-                diag->status = HDA_TRANSPORT_BUSY_STUCK;
-            }
-            return HDA_TRANSPORT_BUSY_STUCK;
-        }
-    }
-
-    /* 3. Wyczyść zaległy IRV przed wysłaniem nowego słowa (RW1C) */
-    uint16_t icis_cur = mmio_odczytaj16(HDA_REG_ICIS);
-    if ((icis_cur & HDA_ICIS_IRV) != 0) {
-        mmio_zapisz16(HDA_REG_ICIS, HDA_ICIS_IRV);
-        bariera_dma_po_urzadzeniu();
-        icis_cur = mmio_odczytaj16(HDA_REG_ICIS);
-    }
-    if (diag) {
-        diag->icis_after_stale = icis_cur;
-    }
-
-    if ((icis_cur & (HDA_ICIS_ICB | HDA_ICIS_IRV)) != 0) {
-        if (diag) {
-            diag->icis_completion = icis_cur;
-            diag->status = HDA_TRANSPORT_NOT_READY;
-        }
-        return HDA_TRANSPORT_NOT_READY;
-    }
-
-    /* 4. Zapisz 32-bitowe słowo komendy do ICOI */
-    mmio_zapisz32(HDA_REG_ICOI, komenda);
-    bariera_dma_po_urzadzeniu();
-
-    /* 5. Uruchom komendę: ustaw tylko ICB przy 16-bitowym dostępie */
-    mmio_zapisz16(HDA_REG_ICIS, HDA_ICIS_ICB);
-    bariera_dma_po_urzadzeniu();
-
-    const uint16_t icis_after_set = mmio_odczytaj16(HDA_REG_ICIS);
-    if (diag) {
-        diag->icis_after_busy = icis_after_set;
-    }
-
-    /* 6. Polling BUSY z ograniczonym czasem */
-    bool bus_cleared = false;
-    uint16_t icis_done = 0;
-    for (uint32_t i = 0; i < HDA_TIMEOUT_IMMEDIATE; ++i) {
-        icis_done = mmio_odczytaj16(HDA_REG_ICIS);
-        if (icis_done == UINT16_MAX) {
-            if (diag) {
-                diag->icis_completion = UINT16_MAX;
-                diag->status = HDA_TRANSPORT_NOT_READY;
-            }
-            return HDA_TRANSPORT_NOT_READY;
-        }
-        if ((icis_done & HDA_ICIS_ICB) == 0) {
-            bus_cleared = true;
-            break;
-        }
+// Boot/legacy compatibility wrapper. BWS89 NEVER calls this function.
+// No transport lock is held between service phases.
+HdaTransportStatus hda_transport_send_immediate_ex(uint32_t cmd, uint32_t* out,
+                                                  HdaImmediateDiagLog* diag=nullptr) {
+    if(!out || hda_kontroler_odtwarzania==UINT32_MAX || !hpet_dostepny()) return HDA_TRANSPORT_NOT_READY;
+    const uint32_t k=hda_kontroler_odtwarzania;
+    auto status=hda_transport_zglos(k,HDA_WLASCICIEL_BOOT,cmd);
+    if(status!=HDA_TRANSPORT_PENDING) return status;
+    const uint64_t start=czas_monotoniczny_ns();
+    for(uint32_t guard=0;guard<2000000;++guard) {
+        status=hda_transport_krok(k,HDA_WLASCICIEL_BOOT);
+        if(status!=HDA_TRANSPORT_PENDING) break;
+        if(czas_monotoniczny_ns()-start>100000000ULL) { hda_transport_anuluj(k,HDA_WLASCICIEL_BOOT); return HDA_TRANSPORT_TIMEOUT; }
         pause_cpu();
     }
-
-    const uint32_t end_walclk = mmio_odczytaj32(HDA_REG_WALCLK);
-    if (diag) {
-        diag->icis_completion = icis_done;
-        diag->elapsed_us = (start_walclk != UINT32_MAX && end_walclk != UINT32_MAX && end_walclk >= start_walclk)
-                               ? ((end_walclk - start_walclk) / 24U)
-                               : 0U;
-    }
-
-    if (!bus_cleared) {
-        /* Recovery w QEMU/sprzęcie: zapis 0 czyści zawieszone ICB */
-        mmio_zapisz16(HDA_REG_ICIS, 0);
-        bariera_dma_po_urzadzeniu();
-        if (diag) diag->status = HDA_TRANSPORT_TIMEOUT;
-        return HDA_TRANSPORT_TIMEOUT;
-    }
-
-    /* 7. Wymagaj odpowiedzi IRV */
-    if ((icis_done & HDA_ICIS_IRV) == 0) {
-        if (diag) diag->status = HDA_TRANSPORT_NO_VALID_RESPONSE;
-        return HDA_TRANSPORT_NO_VALID_RESPONSE;
-    }
-
-    /* 8. Odczytaj 32-bitową odpowiedź z ICII */
-    const uint32_t resp = mmio_odczytaj32(HDA_REG_ICII);
-    *odpowiedz = resp;
-    if (diag) {
-        diag->icii_response = resp;
-    }
-
-    /* 9. Potwierdź pobranie wyniku (RW1C bitu IRV) */
-    mmio_zapisz16(HDA_REG_ICIS, HDA_ICIS_IRV);
-    bariera_dma_po_urzadzeniu();
-
-    if (diag) diag->status = HDA_TRANSPORT_SUCCESS;
-    return HDA_TRANSPORT_SUCCESS;
+    if(status==HDA_TRANSPORT_PENDING) { hda_transport_anuluj(k,HDA_WLASCICIEL_BOOT); return HDA_TRANSPORT_TIMEOUT; }
+    status=hda_transport_odbierz(k,HDA_WLASCICIEL_BOOT,out);
+    if(diag) { *diag={}; diag->status=status; diag->icii_response=*out; }
+    return status;
 }
 
 bool wyslij_immediate(
@@ -1920,11 +1119,9 @@ bool znajdz_kodek() {
      * Zachowaj poczatkowy STATESTS zanim zostanie skasowany (W1C).
      * Diagnostyka potrzebuje tej informacji nawet po acknowledge.
      */
-    hda_initial_statests =
-        states;
+    hda_initial_statests |= states;
 
-    hda_discovered_codec_mask =
-        states;
+    hda_discovered_codec_mask |= states;
 
     /*
      * W typowym QEMU hda-output kodek ma CAD=0.
@@ -1938,7 +1135,7 @@ bool znajdz_kodek() {
          cad < 15U;
          ++cad) {
 
-        if ((states &
+        if (((states | hda_initial_statests) &
              (1U << cad)) != 0) {
 
             kandydat =
@@ -1981,7 +1178,7 @@ bool znajdz_kodek() {
         );
 
     if (vendor_id !=
-        QEMU_HDA_VENDOR_ID) {
+        QEMU_HDA_VENDOR_ID || (uint16_t(vendor)!=0x0012 && uint16_t(vendor)!=0x0022)) {
 
         /*
          * Obecne verb-y NID 2/3 sa topologia QEMU. Dla prawdziwego kodeka
@@ -2971,83 +2168,6 @@ bool czekaj_na_czas_tonu(
  * 20. CLEANUP
  * ========================================================================= */
 
-void zatrzymaj_hardware() {
-    if (hda_mmio_base == 0) {
-        return;
-    }
-
-    (void)zatrzymaj_stream_wewnetrznie();
-
-    mmio_zapisz32(
-        HDA_REG_INTCTL,
-        0
-    );
-
-    mmio_zapisz16(
-        HDA_REG_WAKEEN,
-        0
-    );
-
-    mmio_zapisz8(
-        HDA_REG_CORBCTL,
-        static_cast<uint8_t>(
-            mmio_odczytaj8(
-                HDA_REG_CORBCTL
-            ) &
-            ~HDA_CORBCTL_RUN
-        )
-    );
-
-    mmio_zapisz8(
-        HDA_REG_RIRBCTL,
-        static_cast<uint8_t>(
-            mmio_odczytaj8(
-                HDA_REG_RIRBCTL
-            ) &
-            ~HDA_RIRBCTL_RUN
-        )
-    );
-}
-
-void anuluj_inicjalizacje() {
-    __atomic_store_n(
-        &hda_gotowy,
-        false,
-        __ATOMIC_RELEASE
-    );
-
-    zatrzymaj_hardware();
-
-    zwolnij_dma();
-
-    if (hda_mmio_base != 0) {
-        wylacz_pci_busmaster(
-            hda_bdf
-        );
-    }
-
-    hda_mmio_base =
-        0;
-
-    hda_stream_base =
-        0;
-
-    hda_gcap =
-        0;
-
-    hda_codec_addr =
-        0xFFU;
-
-    hda_initial_statests =
-        0;
-
-    hda_discovered_codec_mask =
-        0;
-
-    hda_responsive_codec_mask =
-        0;
-}
-
 } // namespace
 
 /* =========================================================================
@@ -3055,147 +2175,38 @@ void anuluj_inicjalizacje() {
  * ========================================================================= */
 
 bool inicjalizuj_hda() {
-    if (__atomic_load_n(
-            &hda_gotowy,
-            __ATOMIC_ACQUIRE)) {
-
-        return true;
+    if(hda_gotowy) return true;
+    // Called once during boot. BWS89 never enumerates PCI or calls synchronous initialization.
+    if(!hda_transport_wykryj()) return false;
+    (void)hda_diag_inicjalizuj();
+    bool any=false;
+    for(uint32_t k=0;k<hda_transport_liczba();++k) {
+        const uint64_t start=czas_monotoniczny_ns();
+        for(uint32_t steps=0;steps<2000000;++steps) {
+            if(hda_transport_init_krok(k)) break;
+            if(czas_monotoniczny_ns()-start>100000000ULL) break;
+            pause_cpu();
+        }
+        HdaDiagKontroler info{};
+        if(!hda_transport_stan(k,&info) || !info.gotowy) continue;
+        any=true;
+        // Physical controllers stay read-only, with independent CORB/RIRB ready for discovery.
+        // Only the accepted emulated controller gets the existing QEMU playback setup.
+        if(info.vendor_id!=0x8086 || info.device_id!=0x2668 || hda_gotowy) continue;
+        hda_kontroler_odtwarzania=k;
+        hda_mmio_base=hda_transport_mmio(k); hda_gcap=info.gcap;
+        hda_bdf={info.bus,info.slot,info.func};
+        hda_initial_statests=info.initial_statests;
+        hda_discovered_codec_mask=info.discovered_codec_mask;
+        hda_stream_base=hda_mmio_base+0x80+uint64_t(info.iss)*0x20;
+        if(!znajdz_kodek() || !zaalokuj_dma() || !konfiguruj_kodek_qemu() || !resetuj_stream()) {
+            zwolnij_dma(); hda_mmio_base=0; hda_stream_base=0; hda_kontroler_odtwarzania=UINT32_MAX;
+            continue; // Keep registry and precise initialization state, including other controllers.
+        }
+        __atomic_store_n(&hda_gotowy,true,__ATOMIC_RELEASE);
+        hda_transport_test_dostepny(k,true);
     }
-
-    GuardHDA guard(
-        HDA_TIMEOUT_LOCK
-    );
-
-    if (!guard.aktywny()) {
-        return false;
-    }
-
-    if (__atomic_load_n(
-            &hda_gotowy,
-            __ATOMIC_ACQUIRE)) {
-
-        return true;
-    }
-
-    wypisz_log(
-        "[HDA] Szukam kontrolera High Definition Audio..."
-    );
-
-    BdfPCI bdf{};
-
-    if (!znajdz_hda(
-            &bdf)) {
-
-        wypisz_log(
-            "[HDA] Nie znaleziono kontrolera PCI klasy 04:03."
-        );
-
-        return false;
-    }
-
-    hda_bdf =
-        bdf;
-
-    uint64_t bar0 =
-        0;
-
-    if (!pobierz_bar0(
-            bdf,
-            &bar0)) {
-
-        wypisz_log(
-            "[HDA] BAR0 nie jest poprawnym MMIO BAR."
-        );
-
-        return false;
-    }
-
-    if (!wlacz_pci_hda(
-            bdf)) {
-
-        wypisz_log(
-            "[HDA] Nie udalo sie wlaczyc Memory Space/Bus Master."
-        );
-
-        return false;
-    }
-
-    if (!mapuj_mmio(
-            bar0)) {
-
-        wypisz_log(
-            "[HDA] Nie udalo sie przygotowac MMIO."
-        );
-
-        wylacz_pci_busmaster(
-            bdf
-        );
-
-        hda_mmio_base =
-            0;
-
-        return false;
-    }
-
-    if (!resetuj_kontroler()) {
-        anuluj_inicjalizacje();
-        return false;
-    }
-
-    /*
-     * Polling od samego poczatku.
-     */
-    mmio_zapisz32(
-        HDA_REG_INTCTL,
-        0
-    );
-
-    if (!znajdz_kodek()) {
-        anuluj_inicjalizacje();
-        return false;
-    }
-
-    if (!zaalokuj_dma()) {
-        wypisz_log(
-            "[HDA] Brak ramek PMM dla DMA audio."
-        );
-
-        anuluj_inicjalizacje();
-        return false;
-    }
-
-    if (!konfiguruj_kodek_qemu()) {
-        wypisz_log(
-            "[HDA] Nie udalo sie skonfigurowac kodeka QEMU."
-        );
-
-        anuluj_inicjalizacje();
-        return false;
-    }
-
-    /*
-     * Przygotuj stream w stanie zatrzymanym i zresetowanym.
-     */
-    if (!resetuj_stream()) {
-        wypisz_log(
-            "[HDA] Output Stream nie przeszedl resetu."
-        );
-
-        anuluj_inicjalizacje();
-        return false;
-    }
-
-    __atomic_store_n(
-        &hda_gotowy,
-        true,
-        __ATOMIC_RELEASE
-    );
-
-    wypisz_log(
-        "[HDA] Kontroler i kodek QEMU HDA gotowe."
-    );
-
-    return true;
+    return any;
 }
 
 /* =========================================================================
@@ -3341,52 +2352,21 @@ uint32_t hda_wew_verb4(uint8_t cad, uint8_t nid, uint8_t verb, uint16_t payload)
 }
 
 bool hda_wew_kontroler_gotowy() {
-    return hda_mmio_base != 0;
+    return hda_transport_liczba() != 0;
 }
 
 bool hda_wew_pobierz_stan_kontrolera(HdaWewStanKontrolera* out) {
-    if (!out || hda_mmio_base == 0) return false;
-
-    out->bus = hda_bdf.bus;
-    out->slot = hda_bdf.slot;
-    out->func = hda_bdf.func;
-
-    const uint32_t vd = pci_odczytaj_dword(
-        hda_bdf.bus, hda_bdf.slot, hda_bdf.func, PCI_OFFSET_VENDOR_DEVICE);
-    out->vendor_id = static_cast<uint16_t>(vd & 0xFFFFU);
-    out->device_id = static_cast<uint16_t>(vd >> 16);
-
-    const uint32_t cs = pci_odczytaj_dword(
-        hda_bdf.bus, hda_bdf.slot, hda_bdf.func, PCI_OFFSET_CLASS_INFO);
-    out->revision = static_cast<uint16_t>(cs & 0xFFU);
-    out->command = static_cast<uint16_t>(
-        pci_odczytaj_dword(
-            hda_bdf.bus, hda_bdf.slot, hda_bdf.func, PCI_OFFSET_COMMAND_STATUS) &
-        0xFFFFU);
-
-    out->bar0 = hda_mmio_base;
-    out->bar0_dlugosc = static_cast<uint32_t>(HDA_MMIO_ROZMIAR);
-
-    out->hda_vmin = mmio_odczytaj8(HDA_REG_VMIN);
-    out->hda_vmaj = mmio_odczytaj8(HDA_REG_VMAJ);
-    out->gcap = mmio_odczytaj16(HDA_REG_GCAP);
-    out->gctl = mmio_odczytaj32(HDA_REG_GCTL);
-    out->statests = mmio_odczytaj16(HDA_REG_STATESTS);
-    out->outpay = mmio_odczytaj16(HDA_REG_OUTPAY);
-    out->wakeen = mmio_odczytaj16(HDA_REG_WAKEEN);
-    out->intsts = mmio_odczytaj32(HDA_REG_INTSTS);
-
-    out->oss = static_cast<uint8_t>(
-        (out->gcap & HDA_GCAP_OSS_MASK) >> HDA_GCAP_OSS_SHIFT);
-    out->iss = static_cast<uint8_t>(
-        (out->gcap & HDA_GCAP_ISS_MASK) >> HDA_GCAP_ISS_SHIFT);
-    out->bss = static_cast<uint8_t>(
-        (out->gcap & HDA_GCAP_BSS_MASK) >> HDA_GCAP_BSS_SHIFT);
-    out->dma64 = static_cast<uint8_t>(
-        (out->gcap & HDA_GCAP_64OK) ? 1 : 0);
-    out->initial_statests = hda_initial_statests;
-    out->discovered_codec_mask = hda_discovered_codec_mask;
-    out->responsive_codec_mask = hda_responsive_codec_mask;
+    if(!out) return false;
+    HdaDiagKontroler c{};
+    if(!hda_transport_stan(0,&c)) return false;
+    *out={};
+    out->bus=c.bus; out->slot=c.slot; out->func=c.func;
+    out->vendor_id=c.vendor_id; out->device_id=c.device_id; out->revision=c.revision;
+    out->command=c.command; out->bar0=c.bar0; out->bar0_dlugosc=c.bar0_dlugosc;
+    out->hda_vmin=c.hda_vmin; out->hda_vmaj=c.hda_vmaj; out->gcap=c.gcap;
+    out->gctl=c.gctl; out->statests=c.statests; out->oss=c.oss; out->iss=c.iss;
+    out->bss=c.bss; out->dma64=c.dma64; out->initial_statests=c.initial_statests;
+    out->discovered_codec_mask=c.discovered_codec_mask; out->responsive_codec_mask=c.responsive_codec_mask;
     return true;
 }
 
@@ -3662,7 +2642,7 @@ bool hda_wew_test_start(
         }
     }
 
-    if (!konfiguruj_kodek_qemu()) return false;
+    // Read-only diagnostics cannot change the boot-proven QEMU codec configuration.
     if (!zaprogramuj_stream(bdl_count, cbl_bytes)) return false;
     if (!uruchom_stream()) {
         (void)zatrzymaj_stream_wewnetrznie();
@@ -3807,7 +2787,7 @@ bool hda_wew_sonda_pojedynczego_kodeka(
         return false;
     }
 
-    const bool czy_logowac = !s_pierwszy_skan_zalogowany;
+    const bool czy_logowac = false;
     uint32_t vendor = 0;
     HdaImmediateDiagLog diag{};
     HdaTransportStatus st = hda_transport_send_immediate_ex(cmd, &vendor, czy_logowac ? &diag : nullptr);
@@ -3856,3 +2836,5 @@ bool hda_wew_send_verb_readonly(
     return wyslij_immediate(verb, response);
 }
 
+
+uint32_t hda_wew_kontroler_odtwarzania() { return hda_kontroler_odtwarzania; }
