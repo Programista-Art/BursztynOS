@@ -13,7 +13,9 @@ void* kmalloc(size_t n){return std::malloc(n);}
 void kfree(void* p){std::free(p);}
 bool hpet_dostepny(){return active&&active->clock_ok;}
 uint64_t czas_monotoniczny_ns(){return HdaHostModel::clock(active);}
+void hda_powiadom_reset_kontrolera(uint32_t k){if(active&&k<active->devices.size())++active->devices[k].reset_notifications;}
 bool hda_wew_pobierz_stan_strumienia(HdaWewStanStrumienia* out){*out={};return true;}
+void hda_wew_pobierz_stan_tonu(HdaWewStanTonu* out){*out={};}
 void hda_wew_pobierz_sciezke_testu(HdaWewSciezkaTestu* out){*out={0,2,3,0};}
 uint32_t hda_wew_kontroler_odtwarzania(){return 0;}
 bool hda_wew_test_start(uint32_t,uint32_t,uint32_t,uint8_t){return false;}
@@ -33,6 +35,10 @@ static HdaTransportStatus complete(HdaHostModel& m,uint32_t k=0,uint32_t owner=1
     HdaTransportStatus rc=HDA_TRANSPORT_PENDING;
     for(unsigned j=0;j<128;++j){rc=hda_transport_krok(k,owner);if(rc!=HDA_TRANSPORT_PENDING)break;m.ns+=1000;}
     uint32_t r=0;const auto result=hda_transport_odbierz(k,owner,&r);if(out)*out=r;CHECK(result==rc);return rc;
+}
+static void recover(HdaHostModel& m,uint32_t k=0){
+    for(unsigned j=0;j<128&&!info(k).gotowy;++j){hda_transport_odnow(k);m.ns+=100000;}
+    CHECK(info(k).gotowy);CHECK(info(k).transport==2);CHECK(info(k).corb_run&&info(k).rirb_run);
 }
 static void discovery(){
     {++scenarios;Fixture f;f.m.add();f.m.add(0x10de,0xfb9,1,0,1);f.m.add(0xbeef,0xcafe,2,4,3);f.m.init_all();
@@ -55,7 +61,7 @@ static void discovery(){
     {++scenarios;Fixture f;for(unsigned j=0;j<6;++j)f.m.add(0x1234,0x5678,0,j);f.m.init_all();CHECK(hda_transport_liczba()==4);CHECK(hda_transport_rejestr_obciety());}
 }
 static void immediate(){
-    ++scenarios;Fixture f;f.m.add();f.m.init_all();hda_transport_test_dostepny(0,true);
+    ++scenarios;Fixture f;f.m.add();f.m.init_all();CHECK(hda_transport_host_immediate(0));
     auto& d=f.m.devices[0];d.set(0x68,2,2);d.set(0x64,4,0xdeadbeef);d.response_delay_ns=100000;
     CHECK(hda_transport_zglos(0,1,command())==HDA_TRANSPORT_PENDING);
     CHECK(hda_transport_zglos(0,3,command())==HDA_TRANSPORT_BUSY);
@@ -74,12 +80,64 @@ static void immediate(){
     for(unsigned j=0;j<4;++j)(void)hda_transport_krok(0,1);
     f.m.ns+=HDA_CZAS_VERBA_NS+1;CHECK(hda_transport_krok(0,1)==HDA_TRANSPORT_TIMEOUT);
     CHECK(hda_transport_odbierz(0,1,&r)==HDA_TRANSPORT_TIMEOUT);
-    f.m.ns+=HDA_CZAS_VERBA_NS+1;for(unsigned j=0;j<4;++j)hda_transport_odnow(0);CHECK(info().gotowy);
+    recover(f.m);CHECK(hda_transport_host_immediate(0));
     ++scenarios;d.response_delay_ns=10000;CHECK(hda_transport_zglos(0,1,command())==HDA_TRANSPORT_PENDING);
     for(unsigned j=0;j<4;++j)(void)hda_transport_krok(0,1);
     hda_transport_anuluj(0,1);CHECK(hda_transport_zglos(0,1,command())!=HDA_TRANSPORT_PENDING);
-    f.m.ns+=20000;for(unsigned j=0;j<4;++j)hda_transport_odnow(0);CHECK(info().gotowy);
+    recover(f.m);
     CHECK(hda_transport_zglos(0,1,command())==HDA_TRANSPORT_PENDING);CHECK(complete(f.m)==HDA_TRANSPORT_SUCCESS);
+}
+static void qemu_regression(){
+    ++scenarios;Fixture f;auto& d=f.m.add(0x8086,0x2668,0,2,0);
+    d.set(0x0e,2,1);d.set(0x4e,1,0x40);d.set(0x5e,1,0x40);
+    CHECK(!hda_pobierz_quirki_kontrolera(d.vendor,d.device).corbrp_self_clear);
+    f.m.init_all();const auto c=info();
+    CHECK(c.inicjalizacja==HDA_INIT_GOTOWY);CHECK(c.gotowy);CHECK(c.status_transportu==HDA_TRANSPORT_SUCCESS);
+    CHECK(c.initial_statests==1&&c.discovered_codec_mask==1);CHECK(c.statests==0);
+    CHECK(c.corb_rozmiar==256&&c.rirb_rozmiar==256);CHECK(c.corb_run&&c.rirb_run);CHECK(c.transport==2);
+    CHECK(c.corb_ctl_before_start==0&&c.rirb_ctl_before_start==0);
+    CHECK(c.corb_ctl_after_start==2&&c.rirb_ctl_after_start==3);CHECK(d.corbrp_set_reads>0);
+    CHECK(d.get(0x20,4)==0);CHECK(d.get(0x5a,2)==1);CHECK(d.get(0x5c,1)==3);
+    // Two commands catch the QEMU RINTCNT stall that a single verb misses.
+    for(unsigned j=0;j<2;++j){uint32_t r=0;CHECK(hda_transport_zglos(0,1,command())==HDA_TRANSPORT_PENDING);
+        f.m.ns+=100000;CHECK(complete(f.m,0,1,&r)==HDA_TRANSPORT_SUCCESS);CHECK(r==0x1af40012);CHECK(d.rirb_count==0);}
+    CHECK(hda_diag_inicjalizuj());CHECK(hda_diag_startuj_skan());
+    for(unsigned j=0;j<30000;++j){const bool done=hda_diag_krok_skanu();f.m.ns+=100000;if(done)break;}
+    auto snap=std::make_unique<HdaDiagSnapshot>();uint32_t bytes=0,generation=0;
+    CHECK(hda_diag_pobierz_snapshot(snap.get(),sizeof(*snap),&bytes,&generation));
+    CHECK(snap->kontrolery[0].liczba_kodekow==1);CHECK(snap->kodeki[0][0].cad==0);
+    CHECK(snap->kodeki[0][0].vendor_id==0x1af4&&snap->kodeki[0][0].device_id==0x12);
+    CHECK(info().gotowy&&info().corb_run&&info().rirb_run);CHECK(d.ic_commands==0);
+    // Reproduce the old poison: QEMU keeps ICB=1 for an absent codec before
+    // test availability is established. Recovery must reset and restart rings.
+    ++scenarios;CHECK(!info().test_dostepny);CHECK(hda_transport_host_immediate(0));
+    CHECK(hda_transport_zglos(0,1,command(1))==HDA_TRANSPORT_PENDING);
+    for(unsigned j=0;j<4;++j)(void)hda_transport_krok(0,1);
+    f.m.ns+=HDA_CZAS_VERBA_NS+1;CHECK(hda_transport_krok(0,1)==HDA_TRANSPORT_TIMEOUT);
+    uint32_t r=0;CHECK(hda_transport_odbierz(0,1,&r)==HDA_TRANSPORT_TIMEOUT);CHECK(d.get(0x68,2)&1);
+    CHECK(!hda_transport_host_immediate(0));CHECK(hda_transport_zglos(0,1,command())==HDA_TRANSPORT_NOT_READY);
+    const auto allocated=f.m.allocated.size();recover(f.m);CHECK(!(d.get(0x68,2)&1));CHECK(f.m.allocated.size()==allocated);
+    CHECK(d.reset_notifications==2);CHECK(hda_transport_zglos(0,1,command())==HDA_TRANSPORT_PENDING);
+    CHECK(complete(f.m,0,1,&r)==HDA_TRANSPORT_SUCCESS);CHECK(r==0x1af40012);
+    ++scenarios;CHECK(hda_transport_zglos(0,1,command())==HDA_TRANSPORT_PENDING);d.set(8,4,0);
+    CHECK(hda_transport_krok(0,1)==HDA_TRANSPORT_RESET_REQUIRED);
+    CHECK(hda_transport_odbierz(0,1,&r)==HDA_TRANSPORT_RESET_REQUIRED);
+    CHECK(!hda_transport_host_immediate(0));recover(f.m);CHECK(d.reset_notifications==3);
+}
+static void controller_quirk_ordering(){
+    for(bool nvidia_first:{true,false}){
+        ++scenarios;Fixture f;
+        for(unsigned k=0;k<2;++k){const bool nvidia=(k==0)==nvidia_first;
+            f.m.add(nvidia?0x10de:0x8086,nvidia?0xfb9:0x2668,0,uint8_t(2+k));}
+        f.m.init_all();
+        for(unsigned k=0;k<2;++k){const auto& d=f.m.devices[k];
+            CHECK(info(k).gotowy&&info(k).corb_run&&info(k).rirb_run);
+            CHECK(hda_pobierz_quirki_kontrolera(d.vendor,d.device).corbrp_self_clear==(d.vendor==0x10de));
+            CHECK((d.corbrp_set_reads>0)==(d.vendor==0x8086));
+            uint32_t r=0;CHECK(hda_transport_zglos(k,1,command())==HDA_TRANSPORT_PENDING);
+            CHECK(complete(f.m,k,1,&r)==HDA_TRANSPORT_SUCCESS);CHECK(r==0x1af40012);
+        }
+    }
 }
 static void rings(){
     for(uint8_t caps:{uint8_t(0x10),uint8_t(0x20),uint8_t(0x40),uint8_t(0x70)}){
@@ -138,7 +196,8 @@ static void scan(){
         cpu_max=std::max(cpu_max,uint64_t((cpu_end.tv_sec-cpu_start.tv_sec)*1000000000LL+cpu_end.tv_nsec-cpu_start.tv_nsec));
         const auto elapsed=uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-start).count());wall_max=std::max(wall_max,elapsed);
         unsigned after=0,reads_after=0,writes_after=0;for(auto& d:f.m.devices){after+=d.verbs;reads_after+=d.mmio_reads;writes_after+=d.mmio_writes;}CHECK(after-before<=1);
-        max_reads=std::max(max_reads,reads_after-reads);max_writes=std::max(max_writes,writes_after-writes);CHECK(reads_after-reads<=8);CHECK(writes_after-writes<=8);
+        // Recovery start also captures four explicit control-register readbacks.
+        max_reads=std::max(max_reads,reads_after-reads);max_writes=std::max(max_writes,writes_after-writes);CHECK(reads_after-reads<=12);CHECK(writes_after-writes<=8);
         ++turns;f.m.ns+=100000;if(done)break;
     }
     HdaDiagSkan state{};hda_diag_pobierz_stan(&state);CHECK(!state.aktywny);CHECK(state.gotowy);CHECK(turns>1000&&turns<30000);
@@ -191,4 +250,4 @@ static void topology_limits(){
     CHECK(snap->widgety[0][0][0][3].flagi&1);CHECK(snap->widgety[0][0][0][3].liczba_polaczen==32);
     CHECK(d.codec_writes==0);
 }
-int main(){discovery();immediate();rings();scan();topology_limits();std::printf("HDA production transport/discovery/scan: %u scenarios, %u checks PASS; ASan+UBSan\n",scenarios,checks);}
+int main(){discovery();immediate();qemu_regression();controller_quirk_ordering();rings();scan();topology_limits();std::printf("HDA production transport/discovery/scan: %u scenarios, %u checks PASS; ASan+UBSan\n",scenarios,checks);}

@@ -90,6 +90,17 @@ struct HdaWewStanStrumienia {
 
 bool hda_wew_pobierz_stan_strumienia(HdaWewStanStrumienia* out);
 
+struct HdaWewStanTonu {
+    uint64_t deadline_ns;
+    uint32_t stop_reason; // HdaTonStopPowod w hda_diag_format.h
+    uint8_t active;
+    uint8_t run_after_stop; // rzeczywisty odczyt SDnCTL po ostatnim STOP
+    uint64_t last_running_ns; // ostatni produkcyjny odczyt RUN=1 przed deadline
+    uint64_t stopped_ns; // czas potwierdzonego RUN=0, nie czas obserwatora
+};
+
+void hda_wew_pobierz_stan_tonu(HdaWewStanTonu* out);
+
 /*
  * Aktualna konfiguracja sciezki odtwarzania (stala QEMU lub odkryta).
  */

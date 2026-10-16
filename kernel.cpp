@@ -45,6 +45,8 @@ extern "C" void odblokuj_ekran();
 #include "acpi.h"
 #include "sterowniki/czas/hpet.h"
 #include "sterowniki/dzwiek/hda.h"
+#include "sterowniki/dzwiek/hda_praca_odroczona.h"
+#include "sterowniki/dzwiek/hda_qemu_regression.h"
 #include "sterowniki/usb/usb.h"
 #include "aktualizacja.h"
 #include "wersja_systemu.h"
@@ -2454,9 +2456,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
         wypisz_log(
             "[HDA] Karta HDA gotowa.");
 
-        hda_test_ton(
-            880,
-            500);
+        // Startup audio remains disabled until physical hardware retesting
+        // confirms deadline maintenance and DMA stop/readback on Acer.
     } else {
         wypisz_log(
             "[HDA] Brak dostepnego urzadzenia HDA.");
@@ -2611,6 +2612,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
      * Flaga musi zostac ustawiona PRZED STI.
      * Pierwsze przerwanie timera moze od razu wykonac PrzelaczKontekst().
      */
+    const bool hda_qemu_regression_requested = zadano_automatyczne_testy(
+        g_multiboot_info_ptr, "bursztyn.test=hda-tone");
     t_kernel_ready_us = hpet_dostepny() ? czas_monotoniczny_us() : 0;
 
     wielozadaniowosc_aktywna = true;
@@ -2633,6 +2636,10 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     asm volatile("sti" ::: "memory");
 
     while (true) {
+        hda_wykonaj_prace_odroczona();
+        hda_qemu_regression_krok(hda_qemu_regression_requested &&
+            __atomic_load_n(&system_pulpit_gotowy, __ATOMIC_ACQUIRE) &&
+            !powitanie_aktywne());
         usb_obsluz();
         input_service_all();
         virtio_input_obsluz();

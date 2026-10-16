@@ -72,6 +72,7 @@
 #include "instalator.h"
 #include "acpi.h"
 #include "sterowniki/czas/hpet.h"
+#include "sterowniki/dzwiek/hda_praca_odroczona.h"
 #include "stos_jadra.h"
 #include "virtio_gpu.h"
 
@@ -3950,6 +3951,7 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
     uint64_t arg3,
     uint64_t arg4
 ) {
+    hda_wykonaj_zaplanowana_prace_odroczona();
     uint64_t rsp_in = 0;
     asm volatile("mov %%rsp, %0" : "=r"(rsp_in));
 
@@ -3965,6 +3967,7 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
     }
 
     uint64_t res = obsluga_wywolan_systemowych_impl(nr_funkcji, arg1, arg2, arg3, arg4);
+    hda_wykonaj_zaplanowana_prace_odroczona();
 
     if (proc) {
         uint64_t rsp_out = 0;

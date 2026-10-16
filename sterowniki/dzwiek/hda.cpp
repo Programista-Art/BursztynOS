@@ -34,8 +34,8 @@
  *   - stream przechodzi prawidlowa sekwencje resetu przed programowaniem,
  *   - statusy DESE/FIFOE/BCIS sa czyszczone jako RW1C,
  *   - IRQ HDA i stream interrupt enables sa wylaczone przy pollingu,
- *   - hda_test_ton() jest synchroniczny i zatrzymuje DMA po czas_ms,
- *   - czas odtwarzania mierzony jest sprzetowym WALCLK 24 MHz,
+ *   - hda_test_ton() wraca po START; produkcyjna praca odroczona wykonuje STOP,
+ *   - czas odtwarzania wymaga dzialajacego monotonicznego HPET,
  *   - bufor tonu zawiera calkowity okres sygnalu, wiec cykliczny BDL
  *     nie wprowadza skoku fazy na koncu bufora,
  *   - dostep do sterownika jest serializowany try-lockiem.
@@ -49,6 +49,7 @@
 #include "hda_wewnetrzny.h"
 #include "hda_transport.h"
 #include "hda_diag.h"
+#include "hda_quirks.h"
 #include "../czas/hpet.h"
 #include "../../pamiec.h"
 #include "../../pci.h"
@@ -56,6 +57,11 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+
+#ifdef BURSZTYN_HDA_HOST_TEST
+// Modeluje jedynie zapis rejestru (w tym W1C); test wykonuje prawdziwy kod tonu.
+extern void hda_host_mmio_zapis(uint32_t offset, uint8_t szerokosc, uint32_t wartosc);
+#endif
 
 /* =========================================================================
  * 1. ZEWNĘTRZNE API JADRA
@@ -388,11 +394,26 @@ constexpr uint8_t HDA_VERB4_SET_AMP_GAIN_MUTE =
 constexpr uint16_t HDA_AMP_SET_OUTPUT =
     1U << 15;
 
+constexpr uint16_t HDA_AMP_SET_INPUT =
+    1U << 14;
+
 constexpr uint16_t HDA_AMP_SET_LEFT =
     1U << 13;
 
 constexpr uint16_t HDA_AMP_SET_RIGHT =
     1U << 12;
+
+constexpr uint16_t HDA_VERB_SET_CONNECTION_SELECT =
+    0x701U;
+
+constexpr uint16_t HDA_VERB_GET_CONNECTION_SELECT =
+    0xF01U;
+
+constexpr uint16_t HDA_VERB_SET_EAPD_BTL_ENABLE =
+    0x70CU;
+
+constexpr uint16_t HDA_VERB_GET_EAPD_BTL_ENABLE =
+    0xF0CU;
 
 constexpr uint16_t QEMU_HDA_GAIN =
     0x004AU;
@@ -533,6 +554,17 @@ bool hda_gotowy =
 
 bool hda_blokada =
     false;
+
+HdaDiagSciezka s_aktywna_sciezka{};
+bool s_sciezka_skonfigurowana = false;
+bool s_legacy_qemu_potwierdzony = false;
+uint64_t s_ton_deadline_ns = 0;
+uint64_t s_ton_last_running_ns = 0;
+uint64_t s_ton_stopped_ns = 0;
+bool s_ton_aktywny = false;
+uint32_t s_ton_stop_powod = HDA_TON_STOP_BRAK;
+uint32_t s_ton_stop_zadany = HDA_TON_STOP_BRAK;
+uint8_t s_ton_run_po_stop = 0;
 
 /* =========================================================================
  * 5. PROSTE HELPERY
@@ -796,12 +828,16 @@ void mmio_zapisz8(
         return;
     }
 
+#ifdef BURSZTYN_HDA_HOST_TEST
+    hda_host_mmio_zapis(offset, 1, wartosc);
+#else
     *reinterpret_cast<
         volatile uint8_t*>(
             hda_mmio_base +
             offset
         ) =
         wartosc;
+#endif
 }
 
 void mmio_zapisz16(
@@ -817,12 +853,16 @@ void mmio_zapisz16(
         return;
     }
 
+#ifdef BURSZTYN_HDA_HOST_TEST
+    hda_host_mmio_zapis(offset, 2, wartosc);
+#else
     *reinterpret_cast<
         volatile uint16_t*>(
             hda_mmio_base +
             offset
         ) =
         wartosc;
+#endif
 }
 
 void mmio_zapisz32(
@@ -838,12 +878,16 @@ void mmio_zapisz32(
         return;
     }
 
+#ifdef BURSZTYN_HDA_HOST_TEST
+    hda_host_mmio_zapis(offset, 4, wartosc);
+#else
     *reinterpret_cast<
         volatile uint32_t*>(
             hda_mmio_base +
             offset
         ) =
         wartosc;
+#endif
 }
 
 /*
@@ -1092,6 +1136,12 @@ bool wyslij_immediate(
  * ========================================================================= */
 
 bool znajdz_kodek() {
+    s_legacy_qemu_potwierdzony = false;
+    HdaDiagKontroler kontroler{};
+    if (!hda_transport_stan(hda_kontroler_odtwarzania, &kontroler) ||
+        kontroler.vendor_id != 0x8086U || kontroler.device_id != 0x2668U) {
+        return false;
+    }
     /*
      * Intel HDA wymaga odczekania minimum 521 us po CRST=1 przed
      * zalozeniem, ze wszystkie kodeki zakonczyly enumeracje.
@@ -1193,6 +1243,7 @@ bool znajdz_kodek() {
 
     hda_codec_addr =
         kandydat;
+    s_legacy_qemu_potwierdzony = true;
 
     /*
      * STATESTS jest RW1C.
@@ -1208,7 +1259,7 @@ bool znajdz_kodek() {
 }
 
 bool konfiguruj_kodek_qemu() {
-    if (hda_codec_addr >
+    if (!s_legacy_qemu_potwierdzony || hda_codec_addr >
         14U) {
 
         return false;
@@ -1325,6 +1376,421 @@ bool konfiguruj_kodek_qemu() {
     }
 
     return true;
+}
+
+const HdaDiagWidget* znajdz_widget_w_snapshot(
+    const HdaDiagSnapshot& snap,
+    uint8_t k,
+    uint8_t cad,
+    uint8_t fg_nid,
+    uint8_t nid
+) {
+    if (k >= HDA_DIAG_MAKS_KONTROLEROW) return nullptr;
+    const uint32_t n_kodekow = snap.kontrolery[k].liczba_kodekow;
+    for (uint32_t ki = 0; ki < n_kodekow && ki < HDA_DIAG_MAKS_KODEKOW; ++ki) {
+        if (snap.kodeki[k][ki].cad != cad) continue;
+        const uint32_t n_fg = snap.kodeki[k][ki].liczba_fg;
+        for (uint32_t fi = 0; fi < n_fg && fi < HDA_DIAG_MAKS_FG; ++fi) {
+            if (fg_nid != 0 && snap.fg[k][ki][fi].nid != fg_nid) continue;
+            const uint32_t n_w = snap.fg[k][ki][fi].widget_count;
+            for (uint32_t wi = 0; wi < n_w && wi < HDA_DIAG_MAKS_WIDGETOW; ++wi) {
+                if (snap.widgety[k][ki][fi][wi].nid == nid) {
+                    return &snap.widgety[k][ki][fi][wi];
+                }
+            }
+        }
+    }
+    return nullptr;
+}
+
+const HdaDiagFG* znajdz_afg_w_snapshot(
+    const HdaDiagSnapshot& snap,
+    uint8_t k,
+    uint8_t cad,
+    uint8_t fg_nid
+) {
+    if (k >= HDA_DIAG_MAKS_KONTROLEROW) return nullptr;
+    const uint32_t n_kodekow = snap.kontrolery[k].liczba_kodekow;
+    for (uint32_t ki = 0; ki < n_kodekow && ki < HDA_DIAG_MAKS_KODEKOW; ++ki) {
+        if (snap.kodeki[k][ki].cad != cad) continue;
+        const uint32_t n_fg = snap.kodeki[k][ki].liczba_fg;
+        for (uint32_t fi = 0; fi < n_fg && fi < HDA_DIAG_MAKS_FG; ++fi) {
+            if (snap.fg[k][ki][fi].audio && (fg_nid == 0 || snap.fg[k][ki][fi].nid == fg_nid)) {
+                return &snap.fg[k][ki][fi];
+            }
+        }
+    }
+    return nullptr;
+}
+
+bool konfiguruj_trase_audio(
+    const HdaDiagSciezka& sciezka,
+    const HdaDiagSnapshot& snap
+) {
+    if (sciezka.codec_cad > 14U || sciezka.dlugosc == 0 ||
+        sciezka.dlugosc > HDA_DIAG_MAKS_DLUGOSC_SCIEZKI) {
+        return false;
+    }
+
+    uint32_t resp = 0;
+    const uint8_t cad = sciezka.codec_cad;
+    const uint8_t k = sciezka.kontroler_idx;
+
+    const auto* afg = znajdz_afg_w_snapshot(snap, k, cad, sciezka.fg_nid);
+    const uint8_t fg_nid = afg ? afg->nid : (sciezka.fg_nid ? sciezka.fg_nid : 1);
+    const uint32_t fg_in_caps = afg ? afg->in_amp_caps : 0;
+    const uint32_t fg_out_caps = afg ? afg->out_amp_caps : 0;
+
+    // 1. Power state: AFG i widgety trasy w stan D0
+    if (!wyslij_immediate(
+            verb12(cad, fg_nid, HDA_VERB_SET_POWER_STATE, HDA_POWER_D0),
+            &resp)) {
+        return false;
+    }
+
+    for (uint8_t h = 0; h < sciezka.dlugosc; ++h) {
+        const uint8_t nid = sciezka.nids[h];
+        if (nid == 0 || nid >= 128) continue;
+        (void)wyslij_immediate(
+            verb12(cad, nid, HDA_VERB_SET_POWER_STATE, HDA_POWER_D0),
+            &resp);
+    }
+
+    // 2. Connection Select Control dla widgetow posrednich i pinu
+    for (uint8_t h = 1; h < sciezka.dlugosc; ++h) {
+        const uint8_t curr_nid = sciezka.nids[h];
+        const uint8_t prev_nid = sciezka.nids[h - 1];
+        const auto* w = znajdz_widget_w_snapshot(snap, k, cad, fg_nid, curr_nid);
+
+        uint8_t conn_idx = 255;
+        if (sciezka.selektory[h] < 255) {
+            conn_idx = sciezka.selektory[h];
+        } else if (w) {
+            for (uint8_t ci = 0; ci < w->liczba_polaczen && ci < HDA_DIAG_MAKS_POLACZEN; ++ci) {
+                if (w->polaczenia[ci] == prev_nid) {
+                    conn_idx = ci;
+                    break;
+                }
+            }
+        }
+
+        if (conn_idx != 255) {
+            (void)wyslij_immediate(
+                verb12(cad, curr_nid, HDA_VERB_SET_CONNECTION_SELECT, conn_idx),
+                &resp);
+        }
+    }
+
+    // 3. Konfiguracja DAC (Audio Output converter)
+    const uint8_t dac_nid = sciezka.konwerter_nid ? sciezka.konwerter_nid : sciezka.nids[0];
+    const uint32_t set_format =
+        (static_cast<uint32_t>(cad) << 28) |
+        (static_cast<uint32_t>(dac_nid) << 20) |
+        (static_cast<uint32_t>(HDA_VERB_SET_STREAM_FORMAT) << 8) |
+        static_cast<uint32_t>(HDA_FORMAT_48K_16_STEREO);
+
+    if (!wyslij_immediate(set_format, &resp)) {
+        return false;
+    }
+
+    if (!wyslij_immediate(
+            verb12(cad, dac_nid, HDA_VERB_SET_CHANNEL_STREAMID,
+                   static_cast<uint8_t>(HDA_STREAM_TAG << 4)),
+            &resp)) {
+        return false;
+    }
+
+    // 4. Wzmacniacze: Unmute i bezpieczny gain wzdluz calej aktywnej trasy
+    for (uint8_t h = 0; h < sciezka.dlugosc; ++h) {
+        const uint8_t nid = sciezka.nids[h];
+        const auto* w = znajdz_widget_w_snapshot(snap, k, cad, fg_nid, nid);
+
+        // Output Amplifier
+        const bool ma_out_amp = w ? ((w->awcap & (1U << 2)) != 0 || w->out_amp_caps != 0) : (nid == dac_nid);
+        if (ma_out_amp) {
+            const uint32_t caps = (w && w->out_amp_caps) ? w->out_amp_caps : fg_out_caps;
+            uint8_t gain = 0;
+            if (!hda_konserwatywne_wzmocnienie(caps, &gain)) {
+                gain = static_cast<uint8_t>(caps & 0x7F);
+                if (gain == 0 && (caps & 0x7F00) != 0) {
+                    gain = static_cast<uint8_t>(((caps >> 8) & 0x7F) / 2);
+                }
+                if (gain == 0 && nid == QEMU_NID_DAC) {
+                    gain = static_cast<uint8_t>(QEMU_HDA_GAIN & 0x7F);
+                }
+            }
+            const uint16_t amp_out =
+                HDA_AMP_SET_OUTPUT | HDA_AMP_SET_LEFT | HDA_AMP_SET_RIGHT | (gain & 0x7F);
+            (void)wyslij_immediate(
+                verb4(cad, nid, HDA_VERB4_SET_AMP_GAIN_MUTE, amp_out),
+                &resp);
+        }
+
+        // Input Amplifier
+        if (h > 0) {
+            const bool ma_in_amp = w && (((w->awcap & (1U << 1)) != 0) || w->in_amp_caps != 0);
+            if (ma_in_amp) {
+                const uint32_t caps = w->in_amp_caps ? w->in_amp_caps : fg_in_caps;
+                uint8_t gain = 0;
+                if (!hda_konserwatywne_wzmocnienie(caps, &gain)) {
+                    gain = static_cast<uint8_t>(caps & 0x7F);
+                    if (gain == 0 && (caps & 0x7F00) != 0) {
+                        gain = static_cast<uint8_t>(((caps >> 8) & 0x7F) / 2);
+                    }
+                }
+                uint8_t in_idx = (sciezka.selektory[h] < 16) ? sciezka.selektory[h] : 0;
+                const uint16_t amp_in =
+                    HDA_AMP_SET_INPUT | HDA_AMP_SET_LEFT | HDA_AMP_SET_RIGHT |
+                    (static_cast<uint16_t>(in_idx & 0x0F) << 8) | (gain & 0x7F);
+                (void)wyslij_immediate(
+                    verb4(cad, nid, HDA_VERB4_SET_AMP_GAIN_MUTE, amp_in),
+                    &resp);
+            }
+        }
+    }
+
+    // 5. Pin Widget Control dla pinu glosnika/wyjscia
+    const uint8_t pin_nid = sciezka.pin_nid ? sciezka.pin_nid : sciezka.nids[sciezka.dlugosc - 1];
+    const auto* pin_w = znajdz_widget_w_snapshot(snap, k, cad, fg_nid, pin_nid);
+    uint8_t pin_ctrl = HDA_PIN_OUT_ENABLE;
+    if (sciezka.cel == HDA_CEL_SLUCHAWKI && pin_w && (pin_w->pin_caps & (1U << 3))) {
+        pin_ctrl |= 0x80U;
+    }
+    if (!wyslij_immediate(
+            verb12(cad, pin_nid, HDA_VERB_SET_PIN_WIDGET_CONTROL, pin_ctrl),
+            &resp)) {
+        return false;
+    }
+
+    // 6. EAPD: External Amplifier Power Down / BTL Enable
+    if (pin_w && (pin_w->pin_caps & HDA_PINCAP_EAPD)) {
+        uint32_t cur_eapd = 0;
+        (void)wyslij_immediate(
+            verb12(cad, pin_nid, HDA_VERB_GET_EAPD_BTL_ENABLE, 0),
+            &cur_eapd);
+        const uint8_t new_eapd = static_cast<uint8_t>((cur_eapd & 0x07) | 0x02);
+        (void)wyslij_immediate(
+            verb12(cad, pin_nid, HDA_VERB_SET_EAPD_BTL_ENABLE, new_eapd),
+            &resp);
+        uint32_t verif_eapd = 0;
+        (void)wyslij_immediate(
+            verb12(cad, pin_nid, HDA_VERB_GET_EAPD_BTL_ENABLE, 0),
+            &verif_eapd);
+    }
+
+    return true;
+}
+
+bool konfiguruj_trase_biezaca() {
+    if (s_sciezka_skonfigurowana) {
+        const HdaDiagSnapshot* snap = hda_diag_pobierz_opublikowana(nullptr);
+        if (snap) {
+            return konfiguruj_trase_audio(s_aktywna_sciezka, *snap);
+        }
+    }
+    return konfiguruj_kodek_qemu();
+}
+
+void loguj_konfiguracje_trasy(
+    const HdaDiagSciezka& sciezka,
+    const HdaDiagSnapshot& snap
+) {
+    char buf[256];
+    size_t pos = 0;
+    auto append_str = [&](const char* s) {
+        while (*s && pos + 1 < sizeof(buf)) buf[pos++] = *s++;
+        buf[pos] = '\0';
+    };
+    auto append_hex = [&](uint64_t v, int digits) {
+        const char hex_chars[] = "0123456789ABCDEF";
+        append_str("0x");
+        char tmp[17];
+        for (int i = digits - 1; i >= 0; --i) {
+            tmp[i] = hex_chars[v & 0xF];
+            v >>= 4;
+        }
+        tmp[digits] = '\0';
+        append_str(tmp);
+    };
+    auto append_dec = [&](uint32_t v) {
+        char tmp[12];
+        int i = 0;
+        if (v == 0) tmp[i++] = '0';
+        else {
+            while (v > 0) {
+                tmp[i++] = '0' + (v % 10);
+                v /= 10;
+            }
+        }
+        while (i > 0 && pos + 1 < sizeof(buf)) {
+            buf[pos++] = tmp[--i];
+        }
+        buf[pos] = '\0';
+    };
+
+    const auto& cinfo = snap.kontrolery[sciezka.kontroler_idx];
+    pos = 0;
+    append_str("[HDA] PCI ");
+    append_hex(cinfo.bus, 2);
+    append_str(":");
+    append_hex(cinfo.slot, 2);
+    append_str(".");
+    append_dec(cinfo.func);
+    append_str(cinfo.vendor_id == 0x8086 ? " Intel HDA" : (cinfo.vendor_id == 0x10DE ? " NVIDIA HDA" : " HDA"));
+    append_str(" (vendor=");
+    append_hex(cinfo.vendor_id, 4);
+    append_str(" device=");
+    append_hex(cinfo.device_id, 4);
+    append_str(")");
+    wypisz_log(buf);
+
+    const auto* afg = znajdz_afg_w_snapshot(snap, sciezka.kontroler_idx, sciezka.codec_cad, sciezka.fg_nid);
+    uint32_t codec_vendor = 0, codec_device = 0;
+    for (uint32_t ki = 0; ki < cinfo.liczba_kodekow && ki < HDA_DIAG_MAKS_KODEKOW; ++ki) {
+        if (snap.kodeki[sciezka.kontroler_idx][ki].cad == sciezka.codec_cad) {
+            codec_vendor = snap.kodeki[sciezka.kontroler_idx][ki].vendor_id;
+            codec_device = snap.kodeki[sciezka.kontroler_idx][ki].device_id;
+            break;
+        }
+    }
+    pos = 0;
+    append_str("[HDA] codec CAD=");
+    append_dec(sciezka.codec_cad);
+    append_str(" vendor=");
+    append_hex(codec_vendor, 4);
+    append_str(" device=");
+    append_hex(codec_device, 4);
+    wypisz_log(buf);
+
+    pos = 0;
+    append_str("[HDA] AFG NID=");
+    append_hex(afg ? afg->nid : sciezka.fg_nid, 2);
+    wypisz_log(buf);
+
+    pos = 0;
+    append_str("[HDA] speaker pin NID=");
+    append_hex(sciezka.pin_nid, 2);
+    append_str(" (cel=");
+    append_str(hda_nazwa_celu_pinu(sciezka.cel));
+    append_str(" ocena=");
+    append_dec(sciezka.ocena);
+    append_str(")");
+    wypisz_log(buf);
+
+    pos = 0;
+    append_str("[HDA] route: ");
+    for (uint8_t h = 0; h < sciezka.dlugosc && h < HDA_DIAG_MAKS_DLUGOSC_SCIEZKI; ++h) {
+        if (h > 0) append_str(" -> ");
+        append_hex(sciezka.nids[h], 2);
+    }
+    wypisz_log(buf);
+
+    for (uint8_t h = 0; h < sciezka.dlugosc && h < HDA_DIAG_MAKS_DLUGOSC_SCIEZKI; ++h) {
+        const uint8_t nid = sciezka.nids[h];
+        const auto* w = znajdz_widget_w_snapshot(snap, sciezka.kontroler_idx, sciezka.codec_cad, sciezka.fg_nid, nid);
+        pos = 0;
+        append_str("[HDA] widget NID=");
+        append_hex(nid, 2);
+        if (w) {
+            append_str(" typ=");
+            append_str(hda_nazwa_typu_widgetu(w->typ));
+            append_str(" awcap=");
+            append_hex(w->awcap, 8);
+            if (hda_typ_widgetu_pin(w->typ)) {
+                append_str(" pin_caps=");
+                append_hex(w->pin_caps, 8);
+                if (w->pin_caps & HDA_PINCAP_EAPD) {
+                    append_str(" EAPD=capable");
+                }
+            }
+            if (w->in_amp_caps || (w->awcap & 2)) {
+                append_str(" in_amp=");
+                append_hex(w->in_amp_caps, 8);
+            }
+            if (w->out_amp_caps || (w->awcap & 4)) {
+                append_str(" out_amp=");
+                append_hex(w->out_amp_caps, 8);
+            }
+            if (w->liczba_polaczen > 1) {
+                append_str(" conn_idx=");
+                append_dec(sciezka.selektory[h]);
+            }
+        }
+        append_str(" power=D0");
+        wypisz_log(buf);
+    }
+}
+
+void loguj_stan_streamu() {
+    if (hda_stream_base == 0) return;
+    char buf[256];
+    size_t pos = 0;
+    auto append_str = [&](const char* s) {
+        while (*s && pos + 1 < sizeof(buf)) buf[pos++] = *s++;
+        buf[pos] = '\0';
+    };
+    auto append_hex = [&](uint64_t v, int digits) {
+        const char hex_chars[] = "0123456789ABCDEF";
+        append_str("0x");
+        char tmp[17];
+        for (int i = digits - 1; i >= 0; --i) {
+            tmp[i] = hex_chars[v & 0xF];
+            v >>= 4;
+        }
+        tmp[digits] = '\0';
+        append_str(tmp);
+    };
+    auto append_dec = [&](uint32_t v) {
+        char tmp[12];
+        int i = 0;
+        if (v == 0) tmp[i++] = '0';
+        else {
+            while (v > 0) {
+                tmp[i++] = '0' + (v % 10);
+                v /= 10;
+            }
+        }
+        while (i > 0 && pos + 1 < sizeof(buf)) {
+            buf[pos++] = tmp[--i];
+        }
+        buf[pos] = '\0';
+    };
+
+    const uint32_t base = static_cast<uint32_t>(hda_stream_base - hda_mmio_base);
+    const uint32_t ctl = stream_odczytaj_ctl();
+    const uint8_t sts = stream_odczytaj_sts();
+    const uint32_t lpib1 = mmio_odczytaj32(base + HDA_SD_LPIB);
+    const uint32_t cbl = mmio_odczytaj32(base + HDA_SD_CBL);
+    const uint16_t lvi = mmio_odczytaj16(base + HDA_SD_LVI);
+    const uint16_t fmt = mmio_odczytaj16(base + HDA_SD_FMT);
+    const uint64_t bdpl = mmio_odczytaj32(base + HDA_SD_BDPL);
+    const uint64_t bdpu = mmio_odczytaj32(base + HDA_SD_BDPU);
+    const uint64_t bdl_addr = (bdpu << 32) | bdpl;
+
+    for (int p = 0; p < 200; ++p) pause_cpu();
+    const uint32_t lpib2 = mmio_odczytaj32(base + HDA_SD_LPIB);
+    const bool moving = (lpib2 != lpib1) || (lpib2 > 0);
+
+    pos = 0;
+    append_str("[HDA] Stream #0 tag=");
+    append_dec((ctl >> 20) & 0x0F);
+    append_str(" fmt=");
+    append_hex(fmt, 4);
+    append_str(" BDL=");
+    append_hex(bdl_addr, 8);
+    append_str(" CBL=");
+    append_dec(cbl);
+    append_str(" LVI=");
+    append_dec(lvi);
+    append_str(" RUN=");
+    append_dec((ctl >> 1) & 1);
+    append_str(" LPIB=");
+    append_dec(lpib2);
+    append_str(" STS=");
+    append_hex(sts, 2);
+    append_str(" DMA_moving=");
+    append_str(moving ? "YES" : "NO/WAIT");
+    wypisz_log(buf);
 }
 
 /* =========================================================================
@@ -1901,6 +2367,24 @@ bool zaprogramuj_stream(
 
     mmio_zapisz32(
         base +
+        HDA_SD_BDPL,
+        static_cast<uint32_t>(
+            bdl_phys &
+            UINT64_C(0xFFFFFFFF)
+        )
+    );
+
+    mmio_zapisz32(
+        base +
+        HDA_SD_BDPU,
+        static_cast<uint32_t>(
+            bdl_phys >>
+            32
+        )
+    );
+
+    mmio_zapisz32(
+        base +
         HDA_SD_CBL,
         cbl_bytes
     );
@@ -1918,24 +2402,6 @@ bool zaprogramuj_stream(
         base +
         HDA_SD_FMT,
         HDA_FORMAT_48K_16_STEREO
-    );
-
-    mmio_zapisz32(
-        base +
-        HDA_SD_BDPL,
-        static_cast<uint32_t>(
-            bdl_phys &
-            UINT64_C(0xFFFFFFFF)
-        )
-    );
-
-    mmio_zapisz32(
-        base +
-        HDA_SD_BDPU,
-        static_cast<uint32_t>(
-            bdl_phys >>
-            32
-        )
     );
 
     /*
@@ -2071,98 +2537,51 @@ bool zatrzymaj_stream_wewnetrznie() {
         zatrzymany;
 }
 
-/* =========================================================================
- * 19. ODTWARZANIE PRZEZ WALCLK
- * ========================================================================= */
-
-bool czekaj_na_czas_tonu(
-    uint32_t czas_ms
-) {
-    const uint64_t target64 =
-        static_cast<uint64_t>(
-            czas_ms) *
-        HDA_WALCLK_TICKS_PER_MS;
-
-    if (target64 == 0 ||
-        target64 >
-            UINT32_MAX) {
-
-        return false;
+// Wywolywane z zajeta blokada odtwarzania; zawsze dotyczy tego samego SDn,
+// ktory ustawil RUN w uruchom_stream(). Nie kasuj aktywnosci przy bledzie STOP.
+bool zatrzymaj_ton_wewnetrznie(uint32_t powod) {
+    const bool aktywny = __atomic_load_n(&s_ton_aktywny, __ATOMIC_ACQUIRE);
+    const bool gral = (stream_odczytaj_ctl() & HDA_SD_CTL_RUN) != 0;
+    const bool zatrzymany = zatrzymaj_stream_wewnetrznie();
+    const uint8_t run = (stream_odczytaj_ctl() & HDA_SD_CTL_RUN) ? 1U : 0U;
+    const uint8_t poprzedni_run = __atomic_exchange_n(&s_ton_run_po_stop, run, __ATOMIC_ACQ_REL);
+    if (aktywny || gral) {
+        __atomic_store_n(&s_ton_stop_powod, powod, __ATOMIC_RELEASE);
     }
-
-    const uint32_t target =
-        static_cast<uint32_t>(
-            target64
-        );
-
-    const uint32_t start =
-        mmio_odczytaj32(
-            HDA_REG_WALCLK
-        );
-
-    if (start ==
-        UINT32_MAX) {
-
-        return false;
+    if (zatrzymany && run == 0) {
+        if (aktywny || gral) {
+            __atomic_store_n(&s_ton_stopped_ns,
+                             hpet_dostepny() ? czas_monotoniczny_ns() : 0,
+                             __ATOMIC_RELEASE);
+        }
+        __atomic_store_n(&s_ton_aktywny, false, __ATOMIC_RELEASE);
+        __atomic_store_n(&s_ton_stop_zadany, HDA_TON_STOP_BRAK, __ATOMIC_RELEASE);
+        return true;
     }
-
-    uint32_t ostatni =
-        start;
-
-    uint32_t stagnacja =
-        0;
-
-    for (;;) {
-        const uint8_t sts =
-            stream_odczytaj_sts();
-
-        if ((sts &
-             (HDA_SD_STS_DESE |
-              HDA_SD_STS_FIFOE)) != 0) {
-
-            return false;
-        }
-
-        const uint32_t teraz =
-            mmio_odczytaj32(
-                HDA_REG_WALCLK
-            );
-
-        if (teraz ==
-            UINT32_MAX) {
-
-            return false;
-        }
-
-        if (static_cast<uint32_t>(
-                teraz -
-                start) >=
-            target) {
-
-            return true;
-        }
-
-        if (teraz ==
-            ostatni) {
-
-            ++stagnacja;
-
-            if (stagnacja >=
-                HDA_TIMEOUT_RESET) {
-
-                return false;
-            }
-        } else {
-            ostatni =
-                teraz;
-
-            stagnacja =
-                0;
-        }
-
-        pause_cpu();
+    // Zachowaj aktywnosc i powod: nastepny produkcyjny obieg ponowi STOP.
+    __atomic_store_n(&s_ton_aktywny, true, __ATOMIC_RELEASE);
+    __atomic_store_n(&s_ton_stop_zadany, powod, __ATOMIC_RELEASE);
+    if (poprzedni_run != 1U) {
+        wypisz_log("[HDA] STOP niepotwierdzony: SDnCTL.RUN=1; ponawiam w pracy odroczonej.");
     }
+    return false;
 }
+
+bool uzbroj_deadline_tonu(uint32_t czas_ms) {
+    // Brak HPET oznacza czas_monotoniczny_ns()==0 na tej platformie.
+    // Nigdy nie uruchamiaj cyklicznego BDL bez dzialajacego zegara.
+    if (!hpet_dostepny()) return false;
+    const uint64_t teraz = czas_monotoniczny_ns();
+    const uint64_t dlugosc = static_cast<uint64_t>(czas_ms) * 1000000ULL;
+    if (teraz > UINT64_MAX - dlugosc) return false;
+    __atomic_store_n(&s_ton_deadline_ns, teraz + dlugosc, __ATOMIC_RELEASE);
+    __atomic_store_n(&s_ton_last_running_ns, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&s_ton_stopped_ns, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&s_ton_stop_powod, HDA_TON_STOP_BRAK, __ATOMIC_RELEASE);
+    __atomic_store_n(&s_ton_stop_zadany, HDA_TON_STOP_BRAK, __ATOMIC_RELEASE);
+    return true;
+}
+
 
 /* =========================================================================
  * 20. CLEANUP
@@ -2175,66 +2594,131 @@ bool czekaj_na_czas_tonu(
  * ========================================================================= */
 
 bool inicjalizuj_hda() {
-    if(hda_gotowy) return true;
-    // Called once during boot. BWS89 never enumerates PCI or calls synchronous initialization.
-    if(!hda_transport_wykryj()) return false;
+    if (__atomic_load_n(&hda_gotowy, __ATOMIC_ACQUIRE)) return true;
+    if (!hda_transport_wykryj()) return false;
     (void)hda_diag_inicjalizuj();
-    bool any=false;
-    for(uint32_t k=0;k<hda_transport_liczba();++k) {
-        const uint64_t start=czas_monotoniczny_ns();
-        for(uint32_t steps=0;steps<2000000;++steps) {
-            if(hda_transport_init_krok(k)) break;
-            if(czas_monotoniczny_ns()-start>100000000ULL) break;
+
+    bool any = false;
+    for (uint32_t k = 0; k < hda_transport_liczba(); ++k) {
+        const uint64_t start = czas_monotoniczny_ns();
+        for (uint32_t steps = 0; steps < 2000000; ++steps) {
+            if (hda_transport_init_krok(k)) break;
+            if (czas_monotoniczny_ns() - start > 100000000ULL) break;
             pause_cpu();
         }
         HdaDiagKontroler info{};
-        if(!hda_transport_stan(k,&info) || !info.gotowy) continue;
-        any=true;
-        // Physical controllers stay read-only, with independent CORB/RIRB ready for discovery.
-        // Only the accepted emulated controller gets the existing QEMU playback setup.
-        if(info.vendor_id!=0x8086 || info.device_id!=0x2668 || hda_gotowy) continue;
-        hda_kontroler_odtwarzania=k;
-        hda_mmio_base=hda_transport_mmio(k); hda_gcap=info.gcap;
-        hda_bdf={info.bus,info.slot,info.func};
-        hda_initial_statests=info.initial_statests;
-        hda_discovered_codec_mask=info.discovered_codec_mask;
-        hda_stream_base=hda_mmio_base+0x80+uint64_t(info.iss)*0x20;
-        if(!znajdz_kodek() || !zaalokuj_dma() || !konfiguruj_kodek_qemu() || !resetuj_stream()) {
-            zwolnij_dma(); hda_mmio_base=0; hda_stream_base=0; hda_kontroler_odtwarzania=UINT32_MAX;
-            continue; // Keep registry and precise initialization state, including other controllers.
-        }
-        __atomic_store_n(&hda_gotowy,true,__ATOMIC_RELEASE);
-        hda_transport_test_dostepny(k,true);
+        if (!hda_transport_stan(k, &info) || !info.gotowy) continue;
+        any = true;
     }
-    return any;
+    if (!any) return false;
+
+    // Run discovery scan across ready controllers to discover topology and audio routes
+    hda_diag_startuj_skan(HDA_DIAG_WSZYSTKIE_KONTROLERY);
+    const uint64_t scan_start = czas_monotoniczny_ns();
+    while (czas_monotoniczny_ns() - scan_start < 500000000ULL /* 500 ms bounded timeout */) {
+        if (hda_diag_krok_skanu(HDA_DIAG_WSZYSTKIE_KONTROLERY)) break;
+        pause_cpu();
+    }
+
+    const HdaDiagSnapshot* snap = hda_diag_pobierz_opublikowana(nullptr);
+    const HdaDiagSciezka* najlepsza = nullptr;
+    uint8_t najlepsza_ocena = 0;
+
+    if (snap && snap->liczba_sciezek > 0) {
+        for (uint32_t j = 0; j < snap->liczba_sciezek && j < HDA_DIAG_MAKS_SCIEZEK; ++j) {
+            const auto& r = snap->sciezki[j];
+            if (r.kontroler_idx >= hda_transport_liczba()) continue;
+            HdaDiagKontroler kinfo{};
+            if (!hda_transport_stan(r.kontroler_idx, &kinfo) || !kinfo.gotowy) continue;
+            uint8_t waga = r.ocena;
+            // Highest priority: built-in speaker on Intel controller
+            if (kinfo.vendor_id == 0x8086 && r.cel == HDA_CEL_GLOSNIK) {
+                waga = 150;
+            } else if (r.cel == HDA_CEL_GLOSNIK) {
+                waga = 120;
+            }
+            if (waga > najlepsza_ocena) {
+                najlepsza_ocena = waga;
+                najlepsza = &r;
+            }
+        }
+    }
+
+    if (najlepsza && snap) {
+        const uint32_t k = najlepsza->kontroler_idx;
+        HdaDiagKontroler info{};
+        hda_transport_stan(k, &info);
+        hda_kontroler_odtwarzania = k;
+        hda_mmio_base = hda_transport_mmio(k);
+        hda_gcap = info.gcap;
+        hda_bdf = {info.bus, info.slot, info.func};
+        hda_initial_statests = info.initial_statests;
+        hda_discovered_codec_mask = info.discovered_codec_mask;
+        hda_codec_addr = najlepsza->codec_cad;
+        hda_stream_base = hda_mmio_base + 0x80 + uint64_t(info.iss) * 0x20;
+
+        if (zaalokuj_dma() && resetuj_stream() && konfiguruj_trase_audio(*najlepsza, *snap)) {
+            s_aktywna_sciezka = *najlepsza;
+            s_sciezka_skonfigurowana = true;
+            __atomic_store_n(&hda_gotowy, true, __ATOMIC_RELEASE);
+            hda_transport_test_dostepny(k, true);
+            loguj_konfiguracje_trasy(*najlepsza, *snap);
+        } else {
+            zwolnij_dma();
+            hda_mmio_base = 0;
+            hda_stream_base = 0;
+            hda_kontroler_odtwarzania = UINT32_MAX;
+            s_sciezka_skonfigurowana = false;
+        }
+    }
+
+    // Fallback: If no topology route was configured, try proven QEMU setup on controller 0x8086:0x2668
+    if (!__atomic_load_n(&hda_gotowy, __ATOMIC_ACQUIRE)) {
+        for (uint32_t k = 0; k < hda_transport_liczba(); ++k) {
+            HdaDiagKontroler info{};
+            if (!hda_transport_stan(k, &info) || !info.gotowy) continue;
+            if (info.vendor_id == 0x8086 && info.device_id == 0x2668) {
+                hda_kontroler_odtwarzania = k;
+                hda_mmio_base = hda_transport_mmio(k);
+                hda_gcap = info.gcap;
+                hda_bdf = {info.bus, info.slot, info.func};
+                hda_initial_statests = info.initial_statests;
+                hda_discovered_codec_mask = info.discovered_codec_mask;
+                hda_stream_base = hda_mmio_base + 0x80 + uint64_t(info.iss) * 0x20;
+                if (znajdz_kodek() && zaalokuj_dma() && konfiguruj_kodek_qemu() && resetuj_stream()) {
+                    __atomic_store_n(&hda_gotowy, true, __ATOMIC_RELEASE);
+                    hda_transport_test_dostepny(k, true);
+                    break;
+                } else {
+                    zwolnij_dma();
+                    hda_mmio_base = 0;
+                    hda_stream_base = 0;
+                    hda_kontroler_odtwarzania = UINT32_MAX;
+                }
+            }
+        }
+    }
+
+    return __atomic_load_n(&hda_gotowy, __ATOMIC_ACQUIRE);
 }
 
 /* =========================================================================
- * 22. PUBLICZNY TON TESTOWY
+ * 22. PUBLICZNY TON TESTOWY (ASYNCHRONICZNY / NON-BLOCKING)
  * ========================================================================= */
 
 bool hda_test_ton(
     uint32_t czestotliwosc_hz,
     uint32_t czas_ms
 ) {
-    if (!__atomic_load_n(
-            &hda_gotowy,
-            __ATOMIC_ACQUIRE) ||
-        czestotliwosc_hz <
-            HDA_MIN_HZ ||
-        czestotliwosc_hz >
-            HDA_MAX_HZ ||
+    if (!__atomic_load_n(&hda_gotowy, __ATOMIC_ACQUIRE) ||
+        czestotliwosc_hz < HDA_MIN_HZ ||
+        czestotliwosc_hz > HDA_MAX_HZ ||
         czas_ms == 0 ||
-        czas_ms >
-            HDA_MAX_MS) {
-
+        czas_ms > HDA_MAX_MS || !hpet_dostepny()) {
         return false;
     }
 
-    GuardHDA guard(
-        HDA_TIMEOUT_LOCK
-    );
-
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
     if (!guard.aktywny()) {
         return false;
     }
@@ -2242,67 +2726,111 @@ bool hda_test_ton(
     /*
      * Zawsze zaczynamy od zatrzymanego silnika.
      */
-    if (!zatrzymaj_stream_wewnetrznie()) {
+    if (!zatrzymaj_ton_wewnetrznie(HDA_TON_STOP_RECZNY)) {
         return false;
     }
 
-    uint32_t bdl_count =
-        0;
-
-    uint32_t cbl_bytes =
-        0;
+    uint32_t bdl_count = 0;
+    uint32_t cbl_bytes = 0;
 
     if (!przygotuj_okres_tonu(
             czestotliwosc_hz,
             &bdl_count,
             &cbl_bytes)) {
-
         return false;
     }
 
     /*
-     * Codec i kontroler musza miec identyczny format oraz Stream Tag.
-     * Ponawiamy konfiguracje przed odtworzeniem, bo stream reset nie resetuje
-     * kodeka, ale inne przyszle operacje audio moga go przestawic.
+     * Prawidlowa kolejnosc DMA:
+     * 1. zatrzymanie streamu
+     * 2. reset stream descriptor
+     * 3. konfiguracja BDL (przygotuj_okres_tonu)
+     * 4. BDPL/BDPU, CBL, LVI, FMT, Stream Tag (zaprogramuj_stream)
+     * 5. konfiguracja kodeka
+     * 6. wyczyszczenie statusow
+     * 7. uruchomienie RUN
      */
-    if (!konfiguruj_kodek_qemu()) {
+    if (!resetuj_stream()) {
         return false;
     }
 
     if (!zaprogramuj_stream(
             bdl_count,
             cbl_bytes)) {
-
         return false;
     }
 
+    if (!konfiguruj_trase_biezaca()) {
+        return false;
+    }
+
+    if (!uzbroj_deadline_tonu(czas_ms)) return false;
     if (!uruchom_stream()) {
-        (void)zatrzymaj_stream_wewnetrznie();
-
-        wypisz_log(
-            "[HDA] Output DMA nie wystartowalo."
-        );
-
+        (void)zatrzymaj_ton_wewnetrznie(HDA_TON_STOP_BLAD_STRUMIENIA);
+        wypisz_log("[HDA] Output DMA nie wystartowalo.");
         return false;
     }
 
-    const bool czas_ok =
-        czekaj_na_czas_tonu(
-            czas_ms
-        );
+    __atomic_store_n(&s_ton_aktywny, true, __ATOMIC_RELEASE);
 
-    const bool stop_ok =
-        zatrzymaj_stream_wewnetrznie();
+    loguj_stan_streamu();
 
-    if (!czas_ok) {
-        wypisz_log(
-            "[HDA] Blad/timeout podczas odtwarzania tonu."
-        );
+    return true;
+}
+
+void hda_zatrzymaj_ton() {
+    __atomic_store_n(&s_ton_stop_zadany, HDA_TON_STOP_RECZNY, __ATOMIC_RELEASE);
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return;
+    (void)zatrzymaj_ton_wewnetrznie(HDA_TON_STOP_RECZNY);
+}
+
+void hda_obsluz_okresowo() {
+    if (!__atomic_load_n(&s_ton_aktywny, __ATOMIC_ACQUIRE) &&
+        __atomic_load_n(&s_ton_stop_zadany, __ATOMIC_ACQUIRE) == HDA_TON_STOP_BRAK) return;
+    GuardHDA guard(HDA_TIMEOUT_LOCK); // jeden CAS, bez czekania na innego wlasciciela
+    if (!guard.aktywny()) return;
+    uint32_t powod = __atomic_load_n(&s_ton_stop_zadany, __ATOMIC_ACQUIRE);
+    if (powod == HDA_TON_STOP_BRAK) {
+        if ((mmio_odczytaj32(HDA_REG_GCTL) & 1U) == 0) {
+            powod = HDA_TON_STOP_RESET_KONTROLERA;
+        } else if ((stream_odczytaj_sts() & (HDA_SD_STS_DESE | HDA_SD_STS_FIFOE)) != 0) {
+            powod = HDA_TON_STOP_BLAD_STRUMIENIA;
+        } else if (!hpet_dostepny()) {
+            powod = HDA_TON_STOP_BLAD_ZEGARA;
+        } else {
+            const uint64_t teraz = czas_monotoniczny_ns();
+            if (teraz >= __atomic_load_n(&s_ton_deadline_ns, __ATOMIC_ACQUIRE)) {
+                powod = HDA_TON_STOP_DEADLINE;
+            } else if (__atomic_load_n(&s_ton_aktywny, __ATOMIC_ACQUIRE) &&
+                       (stream_odczytaj_ctl() & HDA_SD_CTL_RUN) != 0) {
+                __atomic_store_n(&s_ton_last_running_ns, teraz, __ATOMIC_RELEASE);
+            }
+        }
     }
+    if (powod != HDA_TON_STOP_BRAK) (void)zatrzymaj_ton_wewnetrznie(powod);
+}
 
-    return
-        czas_ok &&
-        stop_ok;
+void hda_powiadom_reset_kontrolera(uint32_t kontroler_idx) {
+    if (kontroler_idx != hda_kontroler_odtwarzania ||
+        !__atomic_load_n(&s_ton_aktywny, __ATOMIC_ACQUIRE)) return;
+    __atomic_store_n(&s_ton_stop_zadany, HDA_TON_STOP_RESET_KONTROLERA, __ATOMIC_RELEASE);
+    hda_obsluz_okresowo();
+}
+
+void hda_wew_pobierz_stan_tonu(HdaWewStanTonu* out) {
+    if (!out) return;
+    out->deadline_ns = __atomic_load_n(&s_ton_deadline_ns, __ATOMIC_ACQUIRE);
+    out->stop_reason = __atomic_load_n(&s_ton_stop_powod, __ATOMIC_ACQUIRE);
+    out->active = __atomic_load_n(&s_ton_aktywny, __ATOMIC_ACQUIRE) ? 1U : 0U;
+    out->run_after_stop = __atomic_load_n(&s_ton_run_po_stop, __ATOMIC_ACQUIRE);
+    out->last_running_ns = __atomic_load_n(&s_ton_last_running_ns, __ATOMIC_ACQUIRE);
+    out->stopped_ns = __atomic_load_n(&s_ton_stopped_ns, __ATOMIC_ACQUIRE);
+}
+
+bool hda_ton_aktywny() {
+    hda_obsluz_okresowo();
+    return __atomic_load_n(&s_ton_aktywny, __ATOMIC_ACQUIRE);
 }
 
 /* =========================================================================
@@ -2310,22 +2838,7 @@ bool hda_test_ton(
  * ========================================================================= */
 
 void hda_stop() {
-    if (!__atomic_load_n(
-            &hda_gotowy,
-            __ATOMIC_ACQUIRE)) {
-
-        return;
-    }
-
-    GuardHDA guard(
-        HDA_TIMEOUT_LOCK
-    );
-
-    if (!guard.aktywny()) {
-        return;
-    }
-
-    (void)zatrzymaj_stream_wewnetrznie();
+    hda_zatrzymaj_ton();
 }
 
 /* =========================================================================
@@ -2418,17 +2931,6 @@ bool hda_wew_pobierz_stan_strumienia(HdaWewStanStrumienia* out) {
 
 namespace {
 
-struct StanTestuWew {
-    uint8_t tryb = 0;
-    uint8_t kanaly = 3;
-    bool aktywny = false;
-    uint64_t start_walclk = 0;
-    uint32_t czas_ticks = 0;
-    uint32_t hz_start = 0;
-    uint32_t hz_koniec = 0;
-};
-
-StanTestuWew stan_test_wew;
 uint8_t sciezka_test_cad = 0;
 uint8_t sciezka_test_konw = 0;
 uint8_t sciezka_test_pin = 0;
@@ -2592,11 +3094,13 @@ bool wypelnij_sweep(
 
 void hda_wew_pobierz_sciezke_testu(HdaWewSciezkaTestu* out) {
     if (!out) return;
-    /*
-     * Obecna implementacja zna stala sciezke QEMU (NID DAC/PIN).
-     * Dla nieznanego kodeka nie zgadujemy routingu fizycznego.
-     */
-    if (hda_codec_addr != 0xFFU && hda_gotowy) {
+    if (s_sciezka_skonfigurowana && __atomic_load_n(&hda_gotowy, __ATOMIC_ACQUIRE)) {
+        out->cad = s_aktywna_sciezka.codec_cad;
+        out->konwerter_nid = s_aktywna_sciezka.konwerter_nid;
+        out->pin_nid = s_aktywna_sciezka.pin_nid;
+        out->routing_fizyczny = 1;
+    } else if (s_legacy_qemu_potwierdzony && hda_codec_addr != 0xFFU &&
+               __atomic_load_n(&hda_gotowy, __ATOMIC_ACQUIRE)) {
         out->cad = hda_codec_addr;
         out->konwerter_nid = QEMU_NID_DAC;
         out->pin_nid = QEMU_NID_LINE_OUT;
@@ -2619,13 +3123,14 @@ bool hda_wew_test_start(
     uint32_t czas_ms,
     uint8_t kanaly
 ) {
-    if (!__atomic_load_n(&hda_gotowy, __ATOMIC_ACQUIRE)) return false;
+    if (!__atomic_load_n(&hda_gotowy, __ATOMIC_ACQUIRE) ||
+        !hda_api_czas_poprawny(czas_ms) || !hpet_dostepny()) return false;
     if (kanaly == 0) return false;
 
     GuardHDA guard(HDA_TIMEOUT_LOCK);
     if (!guard.aktywny()) return false;
 
-    (void)zatrzymaj_stream_wewnetrznie();
+    if (!zatrzymaj_ton_wewnetrznie(HDA_TON_STOP_RECZNY)) return false;
 
     uint32_t bdl_count = 0;
     uint32_t cbl_bytes = 0;
@@ -2642,59 +3147,28 @@ bool hda_wew_test_start(
         }
     }
 
-    // Read-only diagnostics cannot change the boot-proven QEMU codec configuration.
+    if (!resetuj_stream()) return false;
     if (!zaprogramuj_stream(bdl_count, cbl_bytes)) return false;
+    if (!konfiguruj_trase_biezaca()) return false;
+    if (!uzbroj_deadline_tonu(czas_ms)) return false;
     if (!uruchom_stream()) {
-        (void)zatrzymaj_stream_wewnetrznie();
+        (void)zatrzymaj_ton_wewnetrznie(HDA_TON_STOP_BLAD_STRUMIENIA);
         return false;
     }
+    __atomic_store_n(&s_ton_aktywny, true, __ATOMIC_RELEASE);
 
-    stan_test_wew.tryb = static_cast<uint8_t>(tryb);
-    stan_test_wew.kanaly = kanaly;
-    stan_test_wew.aktywny = true;
-    stan_test_wew.hz_start = hz;
-    stan_test_wew.hz_koniec =
-        (tryb == HDA_TEST_SWEEP) ? HDA_TEST_SWEEP_MAX_HZ : hz;
-    stan_test_wew.czas_ticks =
-        static_cast<uint32_t>(
-            (static_cast<uint64_t>(czas_ms) * HDA_WALCLK_TICKS_PER_MS));
-    if (stan_test_wew.czas_ticks == 0) stan_test_wew.czas_ticks = 1;
-    stan_test_wew.start_walclk = mmio_odczytaj32(HDA_REG_WALCLK);
+    loguj_stan_streamu();
 
     return true;
 }
 
 void hda_wew_test_stop() {
-    if (hda_mmio_base == 0) return;
-    GuardHDA guard(HDA_TIMEOUT_LOCK);
-    if (!guard.aktywny()) return;
-    (void)zatrzymaj_stream_wewnetrznie();
-    stan_test_wew.aktywny = false;
-    stan_test_wew.tryb = 0;
+    hda_zatrzymaj_ton();
 }
 
 bool hda_wew_test_tick(uint64_t) {
-    if (!stan_test_wew.aktywny) return false;
-    if (hda_mmio_base == 0) {
-        stan_test_wew.aktywny = false;
-        return false;
-    }
-    /*
-     * Auto-stop po czas_ms mierzone WALCLK (jak istniejacy hda_test_ton).
-     * Kontrola bledow streamu przy kazdym tick.
-     */
-    const uint8_t sts = stream_odczytaj_sts();
-    if ((sts & (HDA_SD_STS_DESE | HDA_SD_STS_FIFOE)) != 0) {
-        hda_wew_test_stop();
-        return false;
-    }
-    const uint32_t teraz = mmio_odczytaj32(HDA_REG_WALCLK);
-    const uint32_t start = static_cast<uint32_t>(stan_test_wew.start_walclk);
-    if (static_cast<uint32_t>(teraz - start) >= stan_test_wew.czas_ticks) {
-        hda_wew_test_stop();
-        return false;
-    }
-    return true;
+    // Zgodnosc diagnostyki; bezpieczenstwo deadline zapewnia sciezka produkcyjna.
+    return hda_ton_aktywny();
 }
 
 static bool s_pierwszy_skan_zalogowany = false;

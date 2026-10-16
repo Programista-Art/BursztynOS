@@ -55,6 +55,14 @@ narzedzia/test_kontrolki4_qemu.py
 loop_log_1.txt
 loop_log_2.txt
 loop_test.sh
+.hda-test/physical/reproduce-before
+.hda-test/physical/reproduce-before.cpp
+.hda-test/physical/transport-before.cpp
+.hda-test/physical/transport-debug
+.hda-test/regression-qemu/
+.hda-test/regression/
+.hda-test/tone/
+
 
 
 

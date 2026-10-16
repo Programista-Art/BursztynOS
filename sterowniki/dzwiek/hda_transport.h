@@ -67,4 +67,6 @@ uint32_t hda_transport_odczyt_rejestru(uint32_t, uint32_t, uint8_t);
 
 #ifdef BURSZTYN_HDA_HOST_TEST
 void hda_transport_host_reset();
+// Exercise the bounded IC implementation without selecting it at real boot.
+bool hda_transport_host_immediate(uint32_t);
 #endif

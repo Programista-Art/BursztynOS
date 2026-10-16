@@ -7,7 +7,8 @@ syscalls.o: syscalls.cpp cykl_wylaczania_grafiki.h ekran_powitalny_api.h \
  bws_nowoczesne.h bws_ota.h pamiec.h loader.h heap.h psf.h \
  storage_format.h aktualizacja_rozruch.h block_device.h \
  psf_bootstrap_status.h instalator.h instalator_format.h acpi.h \
- sterowniki/czas/hpet.h stos_jadra.h virtio_gpu.h sterowniki/dma.h
+ sterowniki/czas/hpet.h sterowniki/dzwiek/hda_praca_odroczona.h \
+ sterowniki/dzwiek/hda.h stos_jadra.h virtio_gpu.h sterowniki/dma.h
 cykl_wylaczania_grafiki.h:
 ekran_powitalny_api.h:
 skladacz_obrazu.h:
@@ -48,6 +49,8 @@ instalator.h:
 instalator_format.h:
 acpi.h:
 sterowniki/czas/hpet.h:
+sterowniki/dzwiek/hda_praca_odroczona.h:
+sterowniki/dzwiek/hda.h:
 stos_jadra.h:
 virtio_gpu.h:
 sterowniki/dma.h:

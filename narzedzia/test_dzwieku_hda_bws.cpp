@@ -40,6 +40,7 @@ bool hpet_dostepny() { return true; }
 uint64_t czas_monotoniczny_ns() { return HdaHostModel::clock(&model); }
 uint32_t hda_wew_kontroler_odtwarzania(){return 0;}
 bool inicjalizuj_hda() { return controller; }
+void hda_powiadom_reset_kontrolera(uint32_t k) { if (k == 0) playing = false; }
 bool hda_wew_kontroler_gotowy() { return controller; }
 bool hda_wew_pobierz_stan_kontrolera(HdaWewStanKontrolera* out) {
     if (!controller) return false;
@@ -51,6 +52,7 @@ bool hda_wew_pobierz_stan_kontrolera(HdaWewStanKontrolera* out) {
     return true;
 }
 bool hda_wew_pobierz_stan_strumienia(HdaWewStanStrumienia* out) { *out = {}; out->run = playing; return controller; }
+void hda_wew_pobierz_stan_tonu(HdaWewStanTonu* out) { *out = {}; out->active = playing; }
 void hda_wew_pobierz_sciezke_testu(HdaWewSciezkaTestu* out) { *out = {0, 2, 3, 0}; }
 bool hda_wew_test_start(uint32_t, uint32_t, uint32_t, uint8_t channels) {
     CHECK(!playing); ++starts; last_channels = channels; playing = controller; return playing;
@@ -109,6 +111,7 @@ int main() {
     user(&selected,sizeof(selected));const uint64_t selected_ptr=reinterpret_cast<uint64_t>(&selected);
     CHECK(!bws_hda_diag(p,BWS_HDA_DIAG_STAN,status,sizeof(scan)-1,HDA_DIAG_WERSJA_ABI));
     CHECK(!bws_hda_diag(p,BWS_HDA_DIAG_STAN,status,sizeof(scan),1));
+    CHECK(!bws_hda_diag(p,BWS_HDA_DIAG_STAN,status,sizeof(scan),2));
     selected.wersja=1;CHECK(!bws_hda_diag(p,2,selected_ptr,0,0));selected.wersja=HDA_DIAG_WERSJA_ABI;
     selected.rozmiar=15;CHECK(!bws_hda_diag(p,2,selected_ptr,0,0));selected.rozmiar=sizeof(selected);
     selected.kontroler_idx=1;CHECK(!bws_hda_diag(p,2,selected_ptr,0,0));selected.kontroler_idx=0;

@@ -73,7 +73,7 @@ static_assert(sizeof(BwsHdaTestStart) == 24, "BwsHdaTestStart layout");
 static_assert(sizeof(BwsHdaSnapshotZadanie) == 32, "BwsHdaSnapshotZadanie layout");
 
 // Optional input for START/STEP/CANCEL. Null retains scan-all behavior.
-// ABI v2 is deliberately rejected by old kernels; old snapshot layouts are never over-copied.
+// ABI v3 adds tone and transport readbacks; incompatible layouts are rejected.
 struct BwsHdaSkanZadanie {
     uint32_t wersja;
     uint32_t rozmiar;

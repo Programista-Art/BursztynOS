@@ -1613,9 +1613,13 @@ test-explorer-host:
 test-tapety-bur: tapety_blob.o
 	$(PYTHON) narzedzia/test_tapety_regression.py
 
-.PHONY: test-hda-physical test-hda-diag test-dzwieku-packaging test-dzwieku-repair
+.PHONY: test-hda-physical test-hda-tone test-hda-regression-qemu test-hda-diag test-dzwieku-packaging test-dzwieku-repair
 test-hda-physical:
 	$(PYTHON) narzedzia/test_hda_physical.py
+test-hda-tone:
+	$(PYTHON) narzedzia/test_hda_tone.py
+test-hda-regression-qemu: all
+	$(PYTHON) narzedzia/test_hda_regression_qemu.py
 test-dzwieku-repair: test_dzwieku_blob.o
 	$(PYTHON) narzedzia/test_dzwieku_repair.py
 

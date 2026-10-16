@@ -63,6 +63,11 @@ struct HdaHostModel {
         bool map_fails=false, memory_fails=false, master_fails=false, reset_zero_fails=false, reset_one_fails=false;
         bool corb_reset_fails=false, rirb_reset_fails=false, start_fails=false, ic_never_idle=false, no_response=false;
         bool qemu_absent_busy=true;
+        // The QEMU response counter stops CORB at RINTCNT until RINTFL is
+        // acknowledged. Preserve this behavior so polling cannot hide it.
+        bool qemu_rintcnt=true;
+        uint32_t rirb_count=0;
+        uint32_t corbrp_set_reads=0, reset_notifications=0, ic_commands=0;
         uint64_t response_delay_ns=10000, response_due=0, irv_delay_ns=0, irv_due=0;
         uint32_t pending=0, verbs=0, codec_writes=0, mmio_reads=0, mmio_writes=0;
         bool pending_ic=false,pending_valid=false;
@@ -88,6 +93,21 @@ struct HdaHostModel {
         const uint32_t wp=(d.get(0x58,2)+1)%size;
         const uint64_t pa=d.get(0x50,4)|(uint64_t(d.get(0x54,4))<<32);
         auto* p=static_cast<uint32_t*>(physical(pa));if(!p)std::abort();p[wp*2]=response;p[wp*2+1]=ext;d.set(0x58,2,wp);
+        ++d.rirb_count;
+        if(d.get(0x5c,1)&1)d.set(0x5d,1,d.get(0x5d,1)|1);
+    }
+    void consume_corb(uint32_t k){
+        auto& d=devices.at(k);
+        if(!(d.get(8,4)&1) || !(d.get(0x4c,1)&2) || d.pending_valid ||
+            (d.qemu_rintcnt&&d.rirb_count==d.get(0x5a,2)))return;
+        const uint32_t code=d.get(0x4e,1)&3,size=code==2?256:code==1?16:2;
+        const uint32_t rp=d.get(0x4a,2)&0xff,wp=d.get(0x48,2);
+        if(rp==wp)return;
+        const uint32_t next=(rp+1)%size;
+        const uint64_t pa=d.get(0x40,4)|(uint64_t(d.get(0x44,4))<<32);
+        auto* corb=static_cast<uint32_t*>(physical(pa));if(!corb)std::abort();
+        d.pending=corb[next];d.pending_ic=false;d.pending_valid=true;
+        d.response_due=ns+d.response_delay_ns;++d.verbs;d.set(0x4a,2,next);
     }
     void service(uint32_t k){
         auto& d=devices.at(k);
@@ -128,29 +148,40 @@ struct HdaHostModel {
         if(o==0x30)return uint32_t(m.ns*24/1000);
         if(o==0x68&&d.ic_never_idle)return 1;
         if(o>=0x80&&o<0x440&&(o%0x20)==4&&(d.get(o-4,2)&2))d.set(o,4,d.get(o,4)+128);
+        if(o==0x4a && (d.get(o,n)&0x8000))++d.corbrp_set_reads;
         return d.get(o,n);
     }
     static void write(void* ctx,uint32_t k,uint32_t o,uint8_t n,uint32_t v){
         auto& m=*static_cast<HdaHostModel*>(ctx);m.ns+=m.cost_ns;auto& d=m.devices.at(k);++d.mmio_writes;
         if(o==0x0e){d.set(o,n,d.get(o,n)&~v);return;}
-        if(o==0x4d||o==0x5d||(o>=0x80&&(o%0x20)==3)){d.set(o,n,d.get(o,n)&~v);return;}
+        if(o==0x4d||o==0x5d||(o>=0x80&&(o%0x20)==3)){
+            const uint32_t old=d.get(o,n);d.set(o,n,old&~v);
+            if(o==0x5d && (old&1) && (v&1)){d.rirb_count=0;m.consume_corb(k);}return;
+        }
         if(o==8){if((!(v&1)&&d.reset_zero_fails)||((v&1)&&d.reset_one_fails))return;
+            if(!(v&1)){
+                d.pending_valid=false;d.pending_ic=false;d.rirb_count=0;
+                d.set(0x68,2,0);d.set(0x4c,1,0);d.set(0x5c,1,0);d.set(0x4d,1,0);d.set(0x5d,1,0);
+            }
             d.set(o,n,v);if(v&1){uint16_t mask=0;for(auto& entry:d.codecs)mask|=1U<<entry.first;d.set(0xe,2,d.get(0xe,2)|mask);}return;}
-        if(o==0x4a&&(v&0x8000)){if(!d.corb_reset_fails)d.set(o,n,0x8000);return;}
+        if(o==0x4a&&(v&0x8000)){
+            if(!d.corb_reset_fails) {
+                if(d.vendor == 0x10de) d.set(o, n, 0);
+                else d.set(o, n, 0x8000);
+            }
+            return;
+        }
         if(o==0x58&&(v&0x8000)){if(!d.rirb_reset_fails)d.set(o,n,0);return;}
+        if(o==0x4e||o==0x5e){d.set(o,n,(d.get(o,n)&0x70)|(v&3));return;}
         if((o==0x4c||o==0x5c)&&d.start_fails&&(v&2))return;
         if(o==0x68){
             if(v&2)d.set(o,n,d.get(o,n)&~2U);
-            else if(v&1){d.set(o,n,1);d.pending=d.get(0x60,4);d.pending_ic=true;d.pending_valid=true;d.response_due=m.ns+d.response_delay_ns;++d.verbs;}
+            else if(v&1){d.set(o,n,1);d.pending=d.get(0x60,4);d.pending_ic=true;d.pending_valid=true;d.response_due=m.ns+d.response_delay_ns;++d.verbs;++d.ic_commands;}
             else{d.set(o,n,0);d.pending_valid=false;}
             return;
         }
         d.set(o,n,v);
-        if(o==0x48&&(d.get(0x4c,1)&2)){
-            const uint64_t pa=d.get(0x40,4)|(uint64_t(d.get(0x44,4))<<32);
-            auto* corb=static_cast<uint32_t*>(m.physical(pa));if(!corb)std::abort();
-            d.pending=corb[v];d.pending_ic=false;d.pending_valid=true;d.response_due=m.ns+d.response_delay_ns;++d.verbs;d.set(0x4a,2,v);
-        }
+        if(o==0x48||o==0x4c)m.consume_corb(k);
     }
     static bool dma(void* ctx,bool dma64,DmaBuffer* out){
         auto& m=*static_cast<HdaHostModel*>(ctx);++m.dma_calls;

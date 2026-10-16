@@ -403,6 +403,23 @@ static void test_raport() {
     hda_raport_dopisz(&rb2, "0123456789ABCDEFGHIJ");
     CHECK(rb2.obciety);
     CHECK(rb2.dlugosc < sizeof(maly));
+
+    static HdaDiagSnapshot snap{};
+    snap.wersja = HDA_DIAG_WERSJA_ABI;
+    snap.rozmiar = sizeof(snap);
+    snap.strumien.ton_deadline_ns = UINT64_C(1234567890123);
+    snap.strumien.ton_stop_powod = HDA_TON_STOP_DEADLINE;
+    snap.strumien.run_po_stop = 0;
+    char report[8192];
+    hda_raport_init(&rb, report, sizeof(report));
+    CHECK(hda_sformatuj_raport(&snap, "test", &rb));
+    CHECK(std::strstr(report, "Tone active 0") != nullptr);
+    CHECK(std::strstr(report, "Tone deadline ns 1234567890123") != nullptr);
+    CHECK(std::strstr(report, "Tone stop reason: deadline") != nullptr);
+    CHECK(std::strstr(report, "Stream RUN after stop 0") != nullptr);
+    CHECK(std::strcmp(hda_ton_stop_nazwa(HDA_TON_STOP_RECZNY), "manual Stop") == 0);
+    CHECK(std::strcmp(hda_ton_stop_nazwa(HDA_TON_STOP_BLAD_STRUMIENIA), "stream error") == 0);
+    CHECK(std::strcmp(hda_ton_stop_nazwa(HDA_TON_STOP_RESET_KONTROLERA), "controller reset") == 0);
 }
 
 static void test_raport_obciazenie_marker() {
@@ -420,7 +437,7 @@ static void test_raport_obciazenie_marker() {
 }
 
 static void test_limity_abi() {
-    CHECK(HDA_DIAG_WERSJA_ABI == 2);
+    CHECK(HDA_DIAG_WERSJA_ABI == 3);
     CHECK(HDA_DIAG_MAKS_POLACZEN >= 4);
     CHECK(HDA_DIAG_MAKS_DLUGOSC_SCIEZKI >= 3);
     CHECK(sizeof(HdaDiagNaglowek) == 8);

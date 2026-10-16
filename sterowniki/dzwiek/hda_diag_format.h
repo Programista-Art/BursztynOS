@@ -29,7 +29,7 @@
  * Wersja schematu migawki diagnostycznej HDA.
  * Zwiekszana przy niekompatybilnej zmianie layoutu.
  */
-#define HDA_DIAG_WERSJA_ABI UINT32_C(2)
+#define HDA_DIAG_WERSJA_ABI UINT32_C(3)
 
 /*
  * Znaczniki obciazenia / obciecia migawki.
@@ -152,6 +152,26 @@ enum HdaDiagStanStrumienia : uint32_t {
     HDA_STRUMIEN_ZATRZYMANY = 3,
     HDA_STRUMIEN_BLAD = 4
 };
+
+enum HdaTonStopPowod : uint32_t {
+    HDA_TON_STOP_BRAK = 0,
+    HDA_TON_STOP_DEADLINE = 1,
+    HDA_TON_STOP_RECZNY = 2,
+    HDA_TON_STOP_BLAD_STRUMIENIA = 3,
+    HDA_TON_STOP_RESET_KONTROLERA = 4,
+    HDA_TON_STOP_BLAD_ZEGARA = 5
+};
+
+inline const char* hda_ton_stop_nazwa(uint32_t powod) {
+    switch (powod) {
+        case HDA_TON_STOP_DEADLINE: return "deadline";
+        case HDA_TON_STOP_RECZNY: return "manual Stop";
+        case HDA_TON_STOP_BLAD_STRUMIENIA: return "stream error";
+        case HDA_TON_STOP_RESET_KONTROLERA: return "controller reset";
+        case HDA_TON_STOP_BLAD_ZEGARA: return "clock unavailable";
+        default: return "none";
+    }
+}
 
 /*
  * Tryby kontrolowanego testu odtwarzania.
@@ -950,6 +970,10 @@ struct HdaDiagKontroler {
     uint64_t maks_krok_ns;
     uint32_t generacja;
     uint32_t subsystem_id;
+    uint32_t corb_ctl_before_start;
+    uint32_t corb_ctl_after_start;
+    uint32_t rirb_ctl_before_start;
+    uint32_t rirb_ctl_after_start;
 };
 
 struct HdaDiagKodek {
@@ -1065,6 +1089,11 @@ struct HdaDiagStrumien {
     uint8_t historia_typ[HDA_DIAG_MAKS_HISTORII];
     uint8_t liczba_historii;
     uint8_t rezerwa4[3];
+    uint64_t ton_deadline_ns;
+    uint32_t ton_stop_powod;
+    uint8_t ton_aktywny;
+    uint8_t run_po_stop;       /* last STOP readback; initially 0, updated before START too */
+    uint8_t rezerwa_tonu[2];
 };
 
 struct HdaDiagStanTestu {
@@ -1658,6 +1687,10 @@ inline bool hda_sformatuj_raport(
         hda_raport_klucz_liczba(out,"Initialization state",c.inicjalizacja);
         hda_raport_klucz_liczba(out,"Initialization ready",c.gotowy);
         hda_raport_klucz_liczba(out,"Initialization failure stage",c.etap_bledu);
+        hda_raport_klucz_hex32(out,"CORBCTL before RUN write",c.corb_ctl_before_start);
+        hda_raport_klucz_hex32(out,"CORBCTL after RUN write",c.corb_ctl_after_start);
+        hda_raport_klucz_hex32(out,"RIRBCTL before RUN write",c.rirb_ctl_before_start);
+        hda_raport_klucz_hex32(out,"RIRBCTL after RUN write",c.rirb_ctl_after_start);
         hda_raport_klucz_wartosc(out,"Initialization detail",hda_nazwa_etapu_bledu(c.etap_bledu));
         hda_raport_klucz_liczba(out,"Diagnostic generation",c.generacja);
         hda_raport_klucz_liczba(out,"Transaction phase",c.stan_transakcji);
@@ -1863,6 +1896,11 @@ inline bool hda_sformatuj_raport(
     hda_raport_klucz_liczba(out, "LPIB", snap->strumien.lpib);
     hda_raport_klucz_hex32(out, "CTL raw", snap->strumien.ctl);
     hda_raport_klucz_hex32(out, "STS raw", snap->strumien.sts);
+    hda_raport_klucz_liczba(out, "Tone active", snap->strumien.ton_aktywny);
+    hda_raport_klucz_liczba(out, "Tone deadline ns", snap->strumien.ton_deadline_ns);
+    hda_raport_dopisz(out, "Tone stop reason: ");
+    hda_raport_linia(out, hda_ton_stop_nazwa(snap->strumien.ton_stop_powod));
+    hda_raport_klucz_liczba(out, "Stream RUN after stop", snap->strumien.run_po_stop);
 
     hda_raport_linia(out, "Test path");
     hda_raport_klucz_liczba(out, "Tryb", snap->test.tryb);

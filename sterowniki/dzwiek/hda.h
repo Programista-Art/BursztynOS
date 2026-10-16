@@ -14,7 +14,7 @@
  *   - konfiguruje kodek przez Immediate Command,
  *   - posiada bezpieczne DMA przez PMM,
  *   - obsluguje obecnie topologie kodeka QEMU hda-output/hda-duplex,
- *   - udostepnia synchroniczny test tonu.
+ *   - udostepnia asynchroniczny test tonu z produkcyjnym deadline.
  *
  * Struktury MMIO, Stream Descriptor oraz BDL sa celowo prywatne dla
  * hda.cpp. Inne moduly jadra powinny korzystac tylko z API ponizej.
@@ -54,7 +54,7 @@
 #define HDA_API_MAX_CZESTOTLIWOSC_HZ UINT32_C(20000)
 
 /*
- * Maksymalny czas jednego synchronicznego testu tonu.
+ * Maksymalny czas jednego testu tonu.
  */
 #define HDA_API_MAX_CZAS_MS UINT32_C(10000)
 
@@ -93,7 +93,7 @@
 bool inicjalizuj_hda();
 
 /*
- * Synchronicznie odtwarza testowy ton.
+ * Uruchamia ograniczony czasowo testowy ton. Wymaga dzialajacego HPET.
  *
  * czestotliwosc_hz:
  *   HDA_API_MIN_CZESTOTLIWOSC_HZ ..
@@ -105,12 +105,10 @@ bool inicjalizuj_hda();
  * Zwraca true tylko wtedy, gdy:
  *   - HDA jest zainicjalizowane,
  *   - parametry sa poprawne,
- *   - DMA stream wystartowal,
- *   - w trakcie odtwarzania nie wystapil blad streamu,
- *   - stream zostal poprawnie zatrzymany.
+ *   - DMA stream wystartowal.
  *
- * Funkcja jest synchroniczna: wraca dopiero po zakonczeniu zadanego czasu
- * albo po bledzie/timeout.
+ * Funkcja jest asynchroniczna / bez blokowania: uruchamia DMA stream,
+ * zapamietuje deadline i zwraca true natychmiast, bez zawieszania CPU/GUI.
  */
 bool hda_test_ton(
     uint32_t czestotliwosc_hz,
@@ -118,7 +116,27 @@ bool hda_test_ton(
 );
 
 /*
- * Zatrzymuje aktualny Output Stream.
+ * Sprawdza, czy testowy ton jest aktualnie aktywny/odtwarzany.
+ * Wykonuje takze obsluge okresowa (auto-stop po osiagnieciu deadline).
+ */
+bool hda_ton_aktywny();
+
+/*
+ * Zatrzymuje aktualnie odtwarzany testowy ton.
+ */
+void hda_zatrzymaj_ton();
+
+/*
+ * Obsluga okresowa testu tonu z produkcyjnej petli PID0 (poza IRQ).
+ * Zatrzymuje stream po uplywie zapamietanego czasu i sprawdza RUN=0.
+ */
+void hda_obsluz_okresowo();
+
+/* Transport wywoluje przed resetem kontrolera; zachowuje powod STOP. */
+void hda_powiadom_reset_kontrolera(uint32_t kontroler_idx);
+
+/*
+ * Zatrzymuje aktualny Output Stream (zgodnosc wsteczna).
  *
  * Funkcja:
  *   - jest bezpieczna przed inicjalizacja,

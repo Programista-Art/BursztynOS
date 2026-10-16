@@ -1006,6 +1006,15 @@ private:
             dopisz_str(buf, sizeof(buf), &p, "\nBDL wpisy ");
             dopisz_liczbe(buf, sizeof(buf), &p, s.bdl.liczba_wpisow);
             dopisz_str(buf, sizeof(buf), &p, " (adresy zamaskowane)\n");
+            dopisz_str(buf, sizeof(buf), &p, "Tone active ");
+            dopisz_liczbe(buf, sizeof(buf), &p, s.ton_aktywny);
+            dopisz_str(buf, sizeof(buf), &p, "\nTone deadline ns ");
+            dopisz_liczbe(buf, sizeof(buf), &p, s.ton_deadline_ns);
+            dopisz_str(buf, sizeof(buf), &p, "\nTone stop reason: ");
+            dopisz_str(buf, sizeof(buf), &p, hda_ton_stop_nazwa(s.ton_stop_powod));
+            dopisz_str(buf, sizeof(buf), &p, "\nStream RUN after stop ");
+            dopisz_liczbe(buf, sizeof(buf), &p, s.run_po_stop);
+            dopisz_str(buf, sizeof(buf), &p, "\n");
             buf[sizeof(buf) - 1] = '\0';
             tekst_strumien_->ustaw_tekst(buf);
         }

@@ -17,6 +17,20 @@ inline const HdaQuirk* hda_znajdz_quirk(HdaTozsamoscKodeka) {
     return nullptr;
 }
 
+// Controller-level quirks based on PCI Vendor ID / Device ID.
+struct HdaControllerQuirks {
+    bool corbrp_self_clear; // NVIDIA CORBRP.RST self-clears immediately
+};
+
+inline HdaControllerQuirks hda_pobierz_quirki_kontrolera(uint16_t vendor_id, uint16_t device_id) {
+    HdaControllerQuirks q{};
+    if (vendor_id == 0x10DE) { // NVIDIA Corporation
+        q.corbrp_self_clear = true;
+    }
+    (void)device_id;
+    return q;
+}
+
 // Standard amp capabilities use offset as 0 dB, steps as max encoded gain,
 // and (StepSize+1)*0.25 dB. Prepare a conservative <= -18 dB setting without
 // writing any codec register. A missing attenuator cannot guarantee safe gain.

@@ -1,8 +1,12 @@
 #include "hda_transport.h"
+#include "hda_quirks.h"
+// Called before a link reset invalidates a running playback stream.
+void hda_powiadom_reset_kontrolera(uint32_t);
 #ifndef BURSZTYN_HDA_HOST_TEST
 #include "../../pamiec.h"
 #include "../../pci.h"
 #include "../czas/hpet.h"
+void wypisz_log(const char*);
 #endif
 
 namespace {
@@ -14,6 +18,7 @@ constexpr uint32_t RIRBCTL = 0x5c, RIRBSTS = 0x5d, RIRBSIZE = 0x5e;
 constexpr uint32_t ICOI = 0x60, ICII = 0x64, ICIS = 0x68;
 struct Kontroler {
     HdaDiagKontroler info{};
+    HdaControllerQuirks quirks{};
     uint64_t mmio = 0, deadline = 0;
     DmaBuffer corb{}, rirb{};
     uint16_t corb_wp = 0, rirb_rp = 0, discarded = 0;
@@ -42,7 +47,7 @@ bool expired(uint64_t d) { return now() >= d; }
 void fail(Kontroler& c, HdaEtapBledu stage) {
     c.info.etap_bledu = stage; c.info.inicjalizacja = HDA_INIT_BLAD; c.info.gotowy = 0;
     c.info.blad = stage == HDA_BLAD_MAPOWANIA ? HDA_DIAG_BLAD_MMIO : HDA_DIAG_BLAD_RESET;
-    c.status = HDA_TRANSPORT_NOT_READY;
+    c.status = stage == HDA_BLAD_RESET_W_TRAKCIE ? HDA_TRANSPORT_RESET_REQUIRED : HDA_TRANSPORT_NOT_READY;
 }
 uint16_t ring_size(uint8_t caps) { return caps & 0x40 ? 256 : caps & 0x20 ? 16 : caps & 0x10 ? 2 : 0; }
 uint8_t ring_code(uint16_t n) { return n == 256 ? 2 : n == 16 ? 1 : 0; }
@@ -56,14 +61,12 @@ void begin_recovery(uint32_t k, Kontroler& c) {
     c.recoveries = 1; // A single bounded recovery attempt for this failed transaction.
     ++c.info.odzyskiwania;
     c.recovering = true;
-    if (c.info.transport == 2) {
-        c.info.inicjalizacja = HDA_INIT_RING_STOP;
-    } else {
-        // ICB is hardware-owned. Do not clear it with a speculative write of zero.
-        c.deadline = deadline(HDA_CZAS_VERBA_NS);
-        c.info.inicjalizacja = HDA_INIT_GOTOWY;
-    }
-    (void)k;
+    // An unfinished IC command or loss of CRST needs a complete link reset,
+    // not a transition back to READY while ICB is still hardware-owned.
+    if (c.status == HDA_TRANSPORT_RESET_REQUIRED || c.info.transport == 1 || !(rd(k,8,4)&1)) {
+        c.info.transport = 2;
+        c.info.inicjalizacja = HDA_INIT_STOP;
+    } else c.info.inicjalizacja = HDA_INIT_RING_STOP;
 }
 HdaTransportStatus tx_error(uint32_t k, Kontroler& c, HdaTransportStatus s) {
     c.status = s; c.phase = s == HDA_TRANSPORT_TIMEOUT || s == HDA_TRANSPORT_RIRB_NO_RESPONSE ? HDA_TX_TIMEOUT : HDA_TX_BLAD;
@@ -76,6 +79,21 @@ void sample(uint32_t k, Kontroler& c) {
     c.info.discovered_codec_mask |= c.info.statests;
     c.info.corb_run = (rd(k,CORBCTL,1) & 2) != 0;
     c.info.rirb_run = (rd(k,RIRBCTL,1) & 2) != 0;
+}
+void log_run_failure(uint32_t k, const Kontroler& c) {
+#ifndef BURSZTYN_HDA_HOST_TEST
+    char message[192];uint32_t length=0;
+    auto add=[&](const char* s){while(*s&&length+1<sizeof(message))message[length++]=*s++;};
+    auto hex=[&](uint32_t v){for(int shift=28;shift>=0;shift-=4)message[length++]="0123456789ABCDEF"[(v>>shift)&15];};
+    add("[HDA] RUN start failed controller=");hex(k);
+    add(" CORBCTL before=");hex(c.info.corb_ctl_before_start);
+    add(" after=");hex(c.info.corb_ctl_after_start);add(" current=");hex(rd(k,CORBCTL,1));
+    add(" RIRBCTL before=");hex(c.info.rirb_ctl_before_start);
+    add(" after=");hex(c.info.rirb_ctl_after_start);add(" current=");hex(rd(k,RIRBCTL,1));
+    message[length]=0;wypisz_log(message);
+#else
+    (void)k;(void)c;
+#endif
 }
 }
 
@@ -96,6 +114,7 @@ bool hda_transport_wykryj_z(const HdaPlatforma& p) {
             auto& i=c.info; i.wersja=HDA_DIAG_WERSJA_ABI; i.rozmiar=sizeof(i);
             i.bus=uint8_t(bus); i.slot=slot; i.func=fn; i.vendor_id=uint16_t(vd);
             i.device_id=uint16_t(vd>>16); i.revision=uint8_t(cl); i.inicjalizacja=HDA_INIT_PCI;
+            c.quirks=hda_pobierz_quirki_kontrolera(i.vendor_id, i.device_id);
             i.subsystem_id=p.pci_odczyt(p.kontekst,i.bus,slot,fn,0x2c);
             const uint32_t lo=p.pci_odczyt(p.kontekst,i.bus,slot,fn,0x10);
             const uint32_t type=lo&6;
@@ -147,24 +166,8 @@ bool hda_transport_init_krok(uint32_t k) {
     auto& i=c.info;
     if (i.inicjalizacja==HDA_INIT_BLAD) return true;
     if (!platforma.zegar_gotowy(platforma.kontekst)) { fail(c,HDA_BLAD_ZEGARA); return true; }
-    if (c.recovering && i.transport==1) {
-        const auto status=rd(k,ICIS,2);
-        if (status==65535 || !(rd(k,8,4)&1)) { fail(c,HDA_BLAD_RESET_W_TRAKCIE); return true; }
-        if (status&1) {
-            if (expired(c.deadline)) {
-                if(c.info.test_dostepny) {
-                    // Proven QEMU IC compatibility: absent CAD leaves ICB set.
-                    // The accepted QEMU model implements software clear, real controllers do not need this quirk.
-                    wr(k,ICIS,2,0); wr(k,ICIS,2,2);
-                    if(rd(k,ICIS,2)&1){fail(c,HDA_BLAD_RESET_W_TRAKCIE);c.recovering=false;}
-                }else{fail(c,HDA_BLAD_RESET_W_TRAKCIE);c.recovering=false;}
-                c.status=HDA_TRANSPORT_RESET_REQUIRED;
-            }
-            return false;
-        }
-        if (status&2) wr(k,ICIS,2,2);
-        c.recovering=false; i.gotowy=1; c.phase=HDA_TX_BEZCZYNNY; c.owner=0;
-        return true;
+    if (i.inicjalizacja>=HDA_INIT_RING_BUFOR && i.inicjalizacja!=HDA_INIT_GOTOWY && !(rd(k,8,4)&1)) {
+        fail(c,HDA_BLAD_RESET_W_TRAKCIE); return true;
     }
     switch (i.inicjalizacja) {
     case HDA_INIT_MAPOWANIE:
@@ -194,6 +197,7 @@ bool hda_transport_init_krok(uint32_t k) {
         break;
     }
     case HDA_INIT_RESET_ZERO:
+        hda_powiadom_reset_kontrolera(k);
         wr(k,8,4,rd(k,8,4)&~1U); c.deadline=deadline(HDA_CZAS_RESETU_NS);
         i.inicjalizacja=HDA_INIT_CZEKA_RESET_ZERO; break;
     case HDA_INIT_CZEKA_RESET_ZERO:
@@ -221,15 +225,16 @@ bool hda_transport_init_krok(uint32_t k) {
         i.corb_rozmiar=ring_size(i.corb_caps); i.rirb_rozmiar=ring_size(i.rirb_caps);
         if(!i.corb_rozmiar) { fail(c,HDA_BLAD_CORB_ROZMIAR); break; }
         if(!i.rirb_rozmiar) { fail(c,HDA_BLAD_RIRB_ROZMIAR); break; }
-        if(!platforma.dma(platforma.kontekst,i.dma64,&c.corb) || !dma_valid(c.corb,i.dma64)) {
+        if((!c.corb.virtual_address && !platforma.dma(platforma.kontekst,i.dma64,&c.corb)) || !dma_valid(c.corb,i.dma64)) {
             platforma.zwolnij_dma(platforma.kontekst,&c.corb); fail(c,HDA_BLAD_CORB_DMA); break;
         }
-        if(!platforma.dma(platforma.kontekst,i.dma64,&c.rirb) || !dma_valid(c.rirb,i.dma64)) {
+        if((!c.rirb.virtual_address && !platforma.dma(platforma.kontekst,i.dma64,&c.rirb)) || !dma_valid(c.rirb,i.dma64)) {
             platforma.zwolnij_dma(platforma.kontekst,&c.rirb);
             platforma.zwolnij_dma(platforma.kontekst,&c.corb); fail(c,HDA_BLAD_RIRB_DMA); break;
         }
-        // Compatibility policy only; discovery remains entirely class-based.
-        i.transport=i.vendor_id==0x8086 && i.device_id==0x2668 ? 1 : 2;
+        // QEMU 8086:2668 supports the standard rings. Never bypass their RUN
+        // handshake or enter IC simply because this is an emulated controller.
+        i.transport=2;
         i.inicjalizacja=HDA_INIT_RING_STOP; break;
     case HDA_INIT_RING_STOP:
         wr(k,CORBCTL,1,0); wr(k,RIRBCTL,1,0); c.deadline=deadline(HDA_CZAS_RESETU_NS);
@@ -255,7 +260,13 @@ bool hda_transport_init_krok(uint32_t k) {
         i.inicjalizacja=HDA_INIT_CORB_RESET; break;
     case HDA_INIT_CORB_RESET:
         wr(k,CORBRP,2,0x8000); c.deadline=deadline(HDA_CZAS_RESETU_NS);
-        i.corb_stan=1; i.inicjalizacja=HDA_INIT_CORB_CZEKA_RESET; break;
+        i.corb_stan=1;
+        if(c.quirks.corbrp_self_clear) {
+            i.inicjalizacja=HDA_INIT_CORB_ZERUJ_RESET;
+        } else {
+            i.inicjalizacja=HDA_INIT_CORB_CZEKA_RESET;
+        }
+        break;
     case HDA_INIT_CORB_CZEKA_RESET:
         if(rd(k,CORBRP,2)&0x8000) i.inicjalizacja=HDA_INIT_CORB_ZERUJ_RESET;
         else if(expired(c.deadline)) fail(c,HDA_BLAD_CORB_RESET);
@@ -277,13 +288,19 @@ bool hda_transport_init_krok(uint32_t k) {
     case HDA_INIT_RING_START:
         wr(k,CORBSTS,1,1); wr(k,RIRBSTS,1,5); wr(k,RINTCNT,2,1);
         fence();
-        if(i.transport==2) { wr(k,RIRBCTL,1,2); wr(k,CORBCTL,1,2); }
+        i.rirb_ctl_before_start=rd(k,RIRBCTL,1); i.corb_ctl_before_start=rd(k,CORBCTL,1);
+        // RINTCNT=1 needs response-status generation, also in polling mode:
+        // QEMU advances the response counter only after RIRBSTS.RINTFL ack.
+        // INTCTL remains zero, so this does not enable a hardware IRQ.
+        wr(k,RIRBCTL,1,3); wr(k,CORBCTL,1,2);
+        i.rirb_ctl_after_start=rd(k,RIRBCTL,1); i.corb_ctl_after_start=rd(k,CORBCTL,1);
         c.deadline=deadline(HDA_CZAS_RESETU_NS); i.inicjalizacja=HDA_INIT_RING_CZEKA_START; break;
     case HDA_INIT_RING_CZEKA_START:
-        if(i.transport==1 || ((rd(k,RIRBCTL,1)&2) && (rd(k,CORBCTL,1)&2))) {
+        if((rd(k,RIRBCTL,1)&2) && (rd(k,CORBCTL,1)&2)) {
             i.inicjalizacja=HDA_INIT_GOTOWY; i.gotowy=1; i.corb_stan=3; i.rirb_stan=3;
+            i.etap_bledu=HDA_BRAK_BLEDU; i.blad=HDA_DIAG_OK;
             c.recovering=false; c.phase=HDA_TX_BEZCZYNNY; c.owner=0; c.status=HDA_TRANSPORT_SUCCESS;
-        } else if(expired(c.deadline)) fail(c,HDA_BLAD_RING_START);
+        } else if(expired(c.deadline)) {log_run_failure(k,c);fail(c,HDA_BLAD_RING_START);}
         break;
     case HDA_INIT_GOTOWY: return true;
     default: fail(c,HDA_BLAD_MAPOWANIA); break;
@@ -311,8 +328,9 @@ HdaTransportStatus hda_transport_krok(uint32_t k,uint32_t owner) {
         if(elapsed>c.info.maks_krok_ns) c.info.maks_krok_ns=elapsed;
     } } timing{c,begin};
     if(c.phase==HDA_TX_GOTOWA || c.phase==HDA_TX_BLAD || c.phase==HDA_TX_TIMEOUT) return c.status;
-    if(!c.info.gotowy || !(rd(k,8,4)&1)) {
-        fail(c,HDA_BLAD_RESET_W_TRAKCIE); c.phase=HDA_TX_BLAD; c.status=HDA_TRANSPORT_RESET_REQUIRED; return c.status;
+    if(!c.info.gotowy || c.recovering || !(rd(k,8,4)&1)) {
+        c.info.etap_bledu=HDA_BLAD_RESET_W_TRAKCIE;
+        return tx_error(k,c,HDA_TRANSPORT_RESET_REQUIRED);
     }
     if(c.info.transport==1) {
         // ONE short phase. Never poll hardware in a loop, even when already ready.
@@ -367,6 +385,7 @@ HdaTransportStatus hda_transport_krok(uint32_t k,uint32_t owner) {
                     // A delayed service turn may find the valid reply already queued behind an event.
                     // Drain at most one ring's worth, one entry per turn, before applying timeout.
                     if(++c.discarded>=c.info.rirb_rozmiar)return tx_error(k,c,HDA_TRANSPORT_MALFORMED);
+                    if(c.rirb_rp==wp)wr(k,RIRBSTS,1,1);
                     if(c.phase==HDA_TX_CZEKA_ODPOWIEDZ && c.rirb_rp==wp && expired(c.tx_deadline))
                         return tx_error(k,c,HDA_TRANSPORT_RIRB_NO_RESPONSE);
                     break;
@@ -379,7 +398,8 @@ HdaTransportStatus hda_transport_krok(uint32_t k,uint32_t owner) {
             break;
         }
         case HDA_TX_WYSLIJ: {
-            if(rd(k,CORBSTS,1)&1) return tx_error(k,c,HDA_TRANSPORT_MALFORMED);
+            // CORB memory error requires CRST before commands may resume.
+            if(rd(k,CORBSTS,1)&1) return tx_error(k,c,HDA_TRANSPORT_RESET_REQUIRED);
             if(!(rd(k,CORBCTL,1)&2) || !(rd(k,RIRBCTL,1)&2)) return tx_error(k,c,HDA_TRANSPORT_RESET_REQUIRED);
             const uint32_t rp=rd(k,CORBRP,2);
             if((rp&0x8000) || (rp&0xff)>=c.info.corb_rozmiar) return tx_error(k,c,HDA_TRANSPORT_MALFORMED);
@@ -470,6 +490,15 @@ bool hda_transport_wykryj() { return wykryto; }
 #endif
 
 #ifdef BURSZTYN_HDA_HOST_TEST
+bool hda_transport_host_immediate(uint32_t k){
+    if(k>=liczba)return false;
+    auto& c=kontrolery[k];Guard g(c);
+    if(!g.ok || !c.info.gotowy || c.recovering || c.owner || c.phase!=HDA_TX_BEZCZYNNY ||
+        !(rd(k,8,4)&1) || c.status==HDA_TRANSPORT_RESET_REQUIRED)return false;
+    wr(k,CORBCTL,1,0);wr(k,RIRBCTL,1,0);
+    if((rd(k,CORBCTL,1)&2)||(rd(k,RIRBCTL,1)&2))return false;
+    c.info.transport=1;return true;
+}
 void hda_transport_host_reset(){
     for(uint32_t k=0;k<liczba;++k){
         if(platforma.zwolnij_dma){platforma.zwolnij_dma(platforma.kontekst,&kontrolery[k].corb);platforma.zwolnij_dma(platforma.kontekst,&kontrolery[k].rirb);}

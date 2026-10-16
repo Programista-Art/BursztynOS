@@ -454,6 +454,12 @@ bool hda_diag_pobierz_strumien(HdaDiagStrumien* out) {
         out->dese = ws.dese;
         out->fifordy = ws.fifordy;
         out->run = ws.run;
+        HdaWewStanTonu ton{};
+        hda_wew_pobierz_stan_tonu(&ton);
+        out->ton_deadline_ns = ton.deadline_ns;
+        out->ton_stop_powod = ton.stop_reason;
+        out->ton_aktywny = ton.active;
+        out->run_po_stop = ton.run_after_stop;
         out->stan=ws.run?HDA_STRUMIEN_GRA:ws.ctl?HDA_STRUMIEN_SKONFIGUROWANY:HDA_STRUMIEN_BEZCZYNNY;
         out->bdl.wersja=HDA_DIAG_WERSJA_ABI;out->bdl.rozmiar=sizeof(HdaDiagBdlInfo);
         out->bdl.liczba_wpisow=ws.bdl_wpisow;out->bdl.maska_fizycznego=0;out->bdl.flagi=ws.bdl_uzywa_64;
@@ -469,7 +475,9 @@ bool hda_diag_pobierz_strumien(HdaDiagStrumien* out) {
 bool hda_diag_pobierz_test(HdaDiagStanTestu* out) {
     if (!out) return false;
     *out = stan_test;
-    if (test_aktywny) {
+    HdaWewStanTonu ton{};
+    hda_wew_pobierz_stan_tonu(&ton);
+    if (test_aktywny && ton.active) {
         const uint64_t t = teraz_ms_monotoniczny();
         const uint64_t uplynelo = t >= test_start_ms ? t - test_start_ms : 0;
         const uint64_t pozostalo =

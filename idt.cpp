@@ -25,6 +25,7 @@ extern void host_idt_irq_restore(unsigned long);
 #include "scheduler.h"
 #include "pzb.h"
 #include "stos_jadra.h"
+#include "sterowniki/dzwiek/hda_praca_odroczona.h"
 
 /* =========================================================================
  * POLACZENIA Z INNYMI MODULAMI
@@ -853,6 +854,7 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
 
     switch (wektor) {
         case WEKTOR_TIMERA:
+            hda_zaplanuj_prace_odroczona();
             obsluga_przerwania_zegara();
             break;
 
