@@ -1,3 +1,4 @@
+#include "diagnostyka_systemu.h"
 /*
  * Bursztyn OS - APIC / IOAPIC
  *
@@ -206,6 +207,7 @@ static void przywroc_przerwania(uint64_t rflags) {
 
 [[noreturn]]
 static void zatrzymaj_system_apic() {
+    diag_simple(DIAG_APIC,"LAPIC / IOAPIC","apic",DIAG_CRITICAL,true,"Błąd inicjalizacji kontrolera przerwań");
     while (true)
         asm volatile("cli; hlt");
 }
@@ -704,6 +706,7 @@ extern "C" void inicjalizuj_apic() {
      * przerwania byly wlaczone. W obecnym kernel_main() APIC jest
      * inicjalizowany przed globalnym STI, wiec pozostana wylaczone.
      */
+    diag_simple(DIAG_APIC,"LAPIC / IOAPIC","apic",DIAG_OK,true,"Routing IRQ i timer LAPIC uruchomione");
     przywroc_przerwania(
         stare_rflags);
 }

@@ -1,3 +1,4 @@
+#include "diagnostyka_pci.h"
 #include "kursor_diag.h"
 #include "gui_runtime_diag.h"
 /*
@@ -485,6 +486,8 @@ bool virtio_input_prepare(VirtioInputDriver* drv, VirtioPciDevice* dev) {
     }
     // Never overwrite an active instance or DMA quarantined after reset failure.
     if (drv->dev || drv->eventq || drv->dma_virt) return false;
+    DiagPciAttempt diagnostic(DIAG_VIRTIO_INPUT,"Kontroler VirtIO Input","virtio-input",
+        dev->bus,dev->slot,dev->func,dev->pci_vendor_id,dev->pci_device_id);
 
     // Zerowanie struktury sterownika
 #ifdef BURSZTYN_VIRTIO_HOST_TEST
@@ -680,6 +683,7 @@ bool virtio_input_prepare(VirtioInputDriver* drv, VirtioPciDevice* dev) {
     qemu_diag(dev,"[VINPUT status] PREPARED",prepared_status);
     input_init_state(drv, VirtioInputInitState::PREPARED);
     virtio_pci_input_init_trace(dev, "PREPARED/status (no DRIVER_OK)", prepared_status);
+    diagnostic.ready(DIAG_INACTIVE);
     return true;
 }
 
@@ -697,6 +701,8 @@ bool virtio_input_activate(VirtioInputDriver* drv) {
     if (!__atomic_compare_exchange_n(&drv->init_state, &state, VirtioInputInitState::ACTIVATING,
                                     false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) return false;
     auto* dev = drv->dev;
+    DiagPciAttempt diagnostic(DIAG_VIRTIO_INPUT,"Kontroler VirtIO Input","virtio-input",
+        dev->bus,dev->slot,dev->func,dev->pci_vendor_id,dev->pci_device_id);
     virtio_pci_input_init_trace(dev, "late activation state before", static_cast<uint8_t>(state));
     // Resume the prepared transport. No reset, allocation, queue rebuild or
     // feature negotiation is allowed in this phase.
@@ -784,6 +790,7 @@ bool virtio_input_activate(VirtioInputDriver* drv) {
     }
     input_klog("  - Podsystem: Zarejestrowano w InputDevice");
 
+    diagnostic.ready();
     return true;
 }
 

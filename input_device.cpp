@@ -1,3 +1,4 @@
+#include "diagnostyka_systemu.h"
 #include "virtio_input_qemu_diag.h"
 /*
  * Bursztyn OS - Implementacja Abstrakcji Urzadzen Wejsciowych (InputDevice)
@@ -39,7 +40,7 @@ extern "C" void klawiatura_obsluz_klawisz(uint16_t keycode, uint32_t value);
 
 namespace {
 
-constexpr size_t MAX_INPUT_DEVICES = 16;
+constexpr size_t MAX_INPUT_DEVICES = 64;
 static InputDevice* s_devices[MAX_INPUT_DEVICES] = {};
 static size_t s_device_count = 0;
 static InputDevice* s_pointer_owner = nullptr;
@@ -534,6 +535,32 @@ const char* input_bus_name(uint32_t bus_type) {
     }
 }
 
+static void input_diag_totals() {
+    uint32_t keyboards=0,pointers=0;
+    for(const auto* source:s_devices)if(source&&source->registered){
+        if(source->kinds&INPUT_DEVICE_KIND_KEYBOARD)++keyboards;
+        if(input_is_pointer_device(source)&&source->pointer_state!=INPUT_POINTER_REGISTERED_INACTIVE)++pointers;
+    }
+    diag_input_counts(keyboards,pointers);
+}
+static void input_diag_publish(InputDevice* dev, size_t index, bool present) {
+    const bool pointer=(dev->kinds&(INPUT_DEVICE_KIND_MOUSE|INPUT_DEVICE_KIND_TABLET))!=0;
+    const bool ready=present&&(!pointer||dev->pointer_state!=INPUT_POINTER_REGISTERED_INACTIVE);
+    const uint32_t category=dev->bus_type==INPUT_BUS_VIRTIO?DIAG_VIRTIO_INPUT:
+        (dev->kinds&INPUT_DEVICE_KIND_KEYBOARD)?DIAG_KEYBOARD:DIAG_MOUSE;
+    auto d=diag_device(category,dev->name,
+        dev->bus_type==INPUT_BUS_VIRTIO?"virtio-input":dev->bus_type==INPUT_BUS_USB?"usbhid":"ps2input",
+        ready?DIAG_OK:DIAG_INACTIVE,present,ready?"Źródło wejścia zarejestrowane i gotowe":"Źródło wejścia nieaktywne");
+    d.transport=dev->bus_type==INPUT_BUS_VIRTIO?DIAG_TRANSPORT_VIRTIO:
+        dev->bus_type==INPUT_BUS_USB?DIAG_TRANSPORT_USB:DIAG_TRANSPORT_PS2;
+    if(dev->kinds&INPUT_DEVICE_KIND_KEYBOARD)d.flags|=DIAG_FLAG_KEYBOARD;
+    if(pointer)d.flags|=DIAG_FLAG_POINTER;
+    diag_publish((1ULL<<63)|index,d);
+}
+static void input_diag_update(InputDevice* dev) {
+    for(size_t i=0;i<MAX_INPUT_DEVICES;++i)if(s_devices[i]==dev){input_diag_publish(dev,i,true);break;}
+}
+
 bool input_register_device(InputDevice* dev) {
     if (!dev || dev->registered) return false;
     if (s_device_count >= MAX_INPUT_DEVICES) return false;
@@ -578,6 +605,8 @@ bool input_register_device(InputDevice* dev) {
             dev->contact_active = dev->last_contact_active = dev->report_valid = false;
             dev->last_abs_x_valid = dev->last_abs_y_valid = false;
             s_device_count++;
+            input_diag_publish(dev,i,true);
+            input_diag_totals();
 
             char buf[160]{};
             char* p = buf;
@@ -615,6 +644,8 @@ bool input_arm_pointer(InputDevice* dev) {
         !input_is_pointer_device(dev)) return false;
     if (dev->pointer_state == INPUT_POINTER_REGISTERED_INACTIVE)
         dev->pointer_state = INPUT_POINTER_ARMED;
+    input_diag_update(dev);
+    input_diag_totals();
     return true;
 }
 bool input_prove_pointer(InputDevice* dev) {
@@ -638,7 +669,9 @@ bool input_unregister_device(InputDevice* dev) {
         if (s_devices[i] == dev) {
             const uint8_t previous_buttons=common_buttons();
             forget_pointer_reports(dev);
+            input_diag_publish(dev,i,false);
             s_devices[i] = nullptr;
+            input_diag_totals();
             if(s_last_pointer_source==dev)s_last_pointer_source=nullptr;
             dev->published_buttons=0;
             dev->registered = false;
@@ -834,6 +867,7 @@ void input_reset_all(void) {
         }
     }
     s_device_count = 0;
+    input_diag_totals();
     s_pointer_owner = s_last_pointer_source = nullptr;
     s_pending_begin=s_pending_count=0;
 }

@@ -1,3 +1,4 @@
+#include "diagnostyka_pci.h"
 /*
  * Bursztyn OS - Intel 82540EM / QEMU E1000
  *
@@ -2224,6 +2225,9 @@ extern "C" void inicjalizuj_e1000() {
         return;
     }
 
+    const uint32_t identity=pci_odczytaj_dword(bdf.bus,bdf.slot,bdf.func,0);
+    DiagPciAttempt diagnostic(DIAG_NETWORK,"Kontroler Intel E1000","e1000",bdf.bus,bdf.slot,bdf.func,
+        uint16_t(identity),uint16_t(identity>>16));
     e1000_bdf =
         bdf;
 
@@ -2380,6 +2384,7 @@ extern "C" void inicjalizuj_e1000() {
         true,
         __ATOMIC_RELEASE
     );
+    diagnostic.ready();
 
     if (czekaj_na_link()) {
         wypisz_log(

@@ -1,3 +1,4 @@
+#include "diagnostyka_pci.h"
 /*
  * Bursztyn OS - Sterownik karty sieciowej VirtIO-NET (VirtIO 1.x Modern PCI)
  *
@@ -653,6 +654,9 @@ bool virtio_net_init(VirtioPciDevice* dev) {
         return false;
     }
 
+    DiagPciAttempt diagnostic(DIAG_VIRTIO_NET,"Kontroler virtio-net","virtio-net",
+        dev->bus,dev->slot,dev->func,dev->pci_vendor_id,dev->pci_device_id);
+
     // Znajdz istniejacy slot lub przydziel nowy
     VirtioNetDriver* drv = nullptr;
     uint32_t slot_idx = 0;
@@ -970,6 +974,7 @@ bool virtio_net_init(VirtioPciDevice* dev) {
     reg_msg[rp] = '\0';
     net_klog(reg_msg);
 
+    diagnostic.ready();
     return true;
 }
 

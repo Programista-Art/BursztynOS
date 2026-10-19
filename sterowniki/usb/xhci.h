@@ -5,6 +5,8 @@
 constexpr uint32_t BURSZTYN_XHCI_MAX_SLOTS = 64U;
 constexpr uint32_t BURSZTYN_XHCI_MAX_PORTS = 255U;
 
+bool xhci_inicjalizuj_wszystkie();
+// Compatibility entry point now initializes every discovered controller.
 bool xhci_inicjalizuj_pierwszy();
 bool xhci_dostepny();
 size_t xhci_poll_events(size_t budget);

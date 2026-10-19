@@ -71,3 +71,6 @@ loop_test.sh
 
 
 
+
+# Modern input regression artifacts
+.input-test/

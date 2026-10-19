@@ -1,3 +1,4 @@
+#include "diagnostyka_systemu.h"
 /*
  * Bursztyn OS - Rejestr i Mostek Urzadzen Sieciowych
  *
@@ -27,6 +28,14 @@ bool str_equals(const char* a, const char* b) {
 
 } // namespace
 
+static void net_diag(NetworkDevice* dev,bool active) {
+    const bool virtio=dev->device_type==NetDeviceType::VirtIO;
+    auto d=diag_device(virtio?DIAG_VIRTIO_NET:DIAG_NETWORK,dev->name,virtio?"virtio-net":"e1000",
+        active?DIAG_OK:DIAG_INACTIVE,true,active?"Sterownik sieciowy zarejestrowany":"Sterownik sieciowy nieaktywny");
+    d.transport=virtio?DIAG_TRANSPORT_VIRTIO:DIAG_TRANSPORT_PCI;
+    // Key is kernel-private; it is never part of the exported record.
+    diag_publish((1ULL<<63)|reinterpret_cast<uint64_t>(dev),d);
+}
 extern "C" bool net_register_device(NetworkDevice* dev) {
     if (!dev) return false;
     if (!dev->ops || !dev->ops->transmit) return false;
@@ -41,6 +50,7 @@ extern "C" bool net_register_device(NetworkDevice* dev) {
     if (s_device_count >= MAX_NET_DEVICES) return false;
 
     dev->active = true;
+    net_diag(dev,true);
     s_devices[s_device_count++] = dev;
 
     if (!s_primary_device) {
@@ -56,6 +66,7 @@ extern "C" void net_unregister_device(NetworkDevice* dev) {
     for (uint32_t i = 0; i < s_device_count; ++i) {
         if (s_devices[i] == dev) {
             dev->active = false;
+            net_diag(dev,false);
             for (uint32_t j = i; j + 1 < s_device_count; ++j) {
                 s_devices[j] = s_devices[j + 1];
             }

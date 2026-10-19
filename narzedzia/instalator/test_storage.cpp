@@ -1,6 +1,7 @@
 // Host exercises the production partition/GPT/FAT and BSP2 code with a faulting backend.
 #include "../../storage_format.h"
 #include "../../psf.h"
+#include "../../diagnostyka_systemu_format.h"
 #include "../../zegar-rtc.h"
 #include "../../instalator_format.h"
 #include "../../tapety.h"
@@ -421,6 +422,25 @@ int main(){
     authorized=false;CHECK(!psf_formatuj_instalacje(l.bsp));authorized=true;
     disk.fail_after=disk.calls;CHECK(!psf_formatuj_instalacje(l.bsp));disk.fail_after=UINT64_MAX;
     CHECK(psf_formatuj_instalacje(l.bsp));CHECK(psf_znacznik_instalacji(uuid,false));CHECK(!complete(l.bsp,uuid));
+    // Diagnostic preferences use the existing persistent PSF, including remount.
+    CHECK(utworz_katalog("/uzytkownicy"));CHECK(utworz_plik(DIAG_CONFIG_PATH));
+    const char off[]="autostart=0\nproblems=0\n";
+    CHECK(zapisz_do_pliku(DIAG_CONFIG_PATH,off,sizeof(off)-1));CHECK(psf_weryfikuj_dysk());
+    psf_ustaw_partycje(&l.bsp);inicjalizuj_psf(ram.data(),ram.size());CHECK(psf_czy_gotowy());
+    char diag_config[128]{};uint32_t diag_read=0;
+    CHECK(czytaj_fragment_pliku(DIAG_CONFIG_PATH,0,diag_config,sizeof(diag_config),&diag_read));
+    auto diag_pref=diag_parse_preferences(diag_config,diag_read);CHECK(!diag_pref.autostart&&!diag_pref.problems);
+    const char on[]="autostart=1\nproblems=1\n";
+    CHECK(zapisz_do_pliku(DIAG_CONFIG_PATH,on,sizeof(on)-1));CHECK(psf_weryfikuj_dysk());
+    psf_ustaw_partycje(&l.bsp);inicjalizuj_psf(ram.data(),ram.size());CHECK(psf_czy_gotowy());
+    CHECK(czytaj_fragment_pliku(DIAG_CONFIG_PATH,0,diag_config,sizeof(diag_config),&diag_read));
+    diag_pref=diag_parse_preferences(diag_config,diag_read);CHECK(diag_pref.autostart&&diag_pref.problems);
+    CHECK(utworz_katalog("/logi"));CHECK(utworz_plik(DIAG_REPORT_PATH));
+    const char diag_report[]="Bursztyn OS\nKlawiatura: Sprawny\nINPUT-USB-XHCI-0001\n";
+    CHECK(zapisz_do_pliku(DIAG_REPORT_PATH,diag_report,sizeof(diag_report)-1));CHECK(psf_weryfikuj_dysk());
+    psf_ustaw_partycje(&l.bsp);inicjalizuj_psf(ram.data(),ram.size());CHECK(psf_czy_gotowy());
+    CHECK(czytaj_fragment_pliku(DIAG_REPORT_PATH,0,diag_config,sizeof(diag_config),&diag_read));
+    CHECK(diag_read==sizeof(diag_report)-1&&!std::memcmp(diag_report,diag_config,diag_read));
     CHECK(utworz_plik("/system"));CHECK(zapisz_do_pliku("/system",bytes.data(),bytes.size()));CHECK(psf_weryfikuj_dysk());
     CHECK(czytaj_fragment_pliku("/system",0,&first,1,&got)&&first=='R');
     CHECK(psf_znacznik_instalacji(uuid,true));CHECK(complete(l.bsp,uuid));

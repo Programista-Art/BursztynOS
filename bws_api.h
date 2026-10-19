@@ -110,6 +110,7 @@ enum BwsNumer : uint64_t {
     BWS_HDA_DIAG = 89,
     BWS_HDA_TEST = 90,
 
-    BWS_PIERWSZY_WOLNY = 91
+    BWS_DIAGNOSTYKA_SYSTEMU = 91,
+    BWS_PIERWSZY_WOLNY = 92
 };
 

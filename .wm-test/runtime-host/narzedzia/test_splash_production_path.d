@@ -9,7 +9,9 @@
  narzedzia/test_virtio_input_faults.inc \
  narzedzia/test_virtio_input_init.inc \
  narzedzia/test_virtio_input_activation.inc \
- narzedzia/test_virtio_input_lifecycle.inc narzedzia/../grafika.h \
+ narzedzia/test_virtio_input_lifecycle.inc \
+ narzedzia/../virtio_input_qemu_diag.h narzedzia/../pointing_diag.h \
+ narzedzia/test_virtio_input_qemu_checkpoints.inc narzedzia/../grafika.h \
  narzedzia/../ekran_format.h narzedzia/../ui_skala.h \
  narzedzia/../ekran_powitalny.h narzedzia/../bursztyn_ui/czcionka.h \
  narzedzia/../bursztyn_ui/typy.h \
@@ -46,6 +48,9 @@ narzedzia/test_virtio_input_faults.inc:
 narzedzia/test_virtio_input_init.inc:
 narzedzia/test_virtio_input_activation.inc:
 narzedzia/test_virtio_input_lifecycle.inc:
+narzedzia/../virtio_input_qemu_diag.h:
+narzedzia/../pointing_diag.h:
+narzedzia/test_virtio_input_qemu_checkpoints.inc:
 narzedzia/../grafika.h:
 narzedzia/../ekran_format.h:
 narzedzia/../ui_skala.h:

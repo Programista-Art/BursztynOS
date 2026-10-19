@@ -1,3 +1,4 @@
+#include "diagnostyka_systemu.h"
 /*
  * Bursztyn OS - sterownik myszy PS/2
  *
@@ -423,7 +424,51 @@ void przyjmij_bajt_pakietu(uint8_t status,uint8_t bajt) {
  * INICJALIZACJA MYSZY PS/2
  * ========================================================================= */
 
-extern "C" void InicjalizujMyszPS2() {
+void wypisz_log(const char*);
+extern "C" InputDevice* ps2_klawiatura_pobierz_urzadzenie();
+extern "C" bool ps2_inicjalizuj_klawiature() {
+    struct Status {
+        bool ready{},port_disabled{};
+        ~Status(){
+            if(port_disabled)(void)wyslij_komende_kontrolera(0xAE);
+            wypisz_log(ready?"[PS/2] keyboard detected, streaming enabled":"[PS/2] keyboard unavailable");
+            auto d=diag_device(DIAG_PS2,"Klawiatura PS/2","ps2keyboard",ready?DIAG_OK:DIAG_NOT_FOUND,ready,
+                ready?"Klawiatura odpowiada; transmisja włączona":"Brak odpowiedzi klawiatury PS/2");
+            d.transport=DIAG_TRANSPORT_PS2;diag_publish(1,d);
+        }
+    } status;
+    if(wejscie_port_bajt(PORT_PS2_STATUS)==0xff){wypisz_log("[PS/2] controller absent");
+        diag_simple(DIAG_PS2,"Kontroler i8042","i8042",DIAG_NOT_FOUND,false,"Brak kontrolera PS/2",0);return false;}
+    // Preserve firmware translation/scancode setup; enable IRQ1 and streaming.
+    // Do not reset the shared controller or disturb a working auxiliary port.
+    if(!wyslij_komende_kontrolera(0xAD))return false;
+    status.port_disabled=true;
+    oproznij_bufor_kontrolera();uint8_t config=0;
+    if(!odczytaj_konfiguracje_kontrolera(&config)){
+        (void)wyslij_komende_kontrolera(0xAE);return false;}
+    wypisz_log("[PS/2] controller detected");
+    diag_simple(DIAG_PS2,"Kontroler i8042","i8042",DIAG_OK,true,"Odczyt konfiguracji kontrolera powiódł się",0);
+    config=uint8_t((config|0x01U)&~0x10U);
+    if(!zapisz_konfiguracje_kontrolera(config)||!wyslij_komende_kontrolera(0xAE))return false;
+    status.port_disabled=false;
+    for(unsigned attempt=0;attempt<3;++attempt){
+        if(!czekaj_na_mozliwosc_zapisu())return false;
+        wyjscie_port_bajt(PORT_PS2_DANE,0xF4);
+        for(unsigned bytes=0;bytes<16;++bytes){uint8_t reply=0;
+            if(!czekaj_na_dane(false,&reply))return false;
+            if(reply==0xFA){status.ready=true;(void)ps2_klawiatura_pobierz_urzadzenie();return true;}
+            if(reply==0xFE)break;
+            ps2_klawiatura_przetworz_scancode(reply);
+        }
+    }
+    return false;
+}
+
+extern "C" bool InicjalizujMyszPS2() {
+    diag_simple(DIAG_PS2,"Port pomocniczy i8042","i8042-aux",DIAG_NOT_FOUND,false,"Port pomocniczy niedostępny",2);
+    struct Status {bool ready{};~Status(){wypisz_log(ready?"[PS/2] auxiliary mouse detected, streaming enabled":"[PS/2] mouse unavailable");
+        auto d=diag_device(DIAG_PS2,"Mysz PS/2","ps2mouse",ready?DIAG_OK:DIAG_NOT_FOUND,ready,
+            ready?"Mysz odpowiada; transmisja włączona":"Mysz PS/2 niedostępna");d.transport=DIAG_TRANSPORT_PS2;diag_publish(3,d);}} status;
     mysz_zainicjalizowana = false;
     parser.streaming=false;
     // Controlled startup/reinitialization runs with IRQs disabled.
@@ -433,6 +478,8 @@ extern "C" void InicjalizujMyszPS2() {
     consumed_sequence=produced_sequence;
     zresetuj_synchronizacje_pakietu();
 
+    if(wejscie_port_bajt(PORT_PS2_STATUS)==0xff){wypisz_log("[PS/2] controller absent");
+        diag_simple(DIAG_PS2,"Kontroler i8042","i8042",DIAG_NOT_FOUND,false,"Brak kontrolera PS/2",0);return false;}
     oproznij_bufor_kontrolera();
 
     /*
@@ -440,20 +487,21 @@ extern "C" void InicjalizujMyszPS2() {
      */
     if (!wyslij_komende_kontrolera(
             KONTROLER_WLACZ_PORT_MYSZY)) {
-        return;
+        return false;
     }
 
-    if(!wyslij_komende_kontrolera(0xAD))return;
+    if(!wyslij_komende_kontrolera(0xAD))return false;
     oproznij_bufor_kontrolera();
     uint8_t konfiguracja = 0;
 
     if (!odczytaj_konfiguracje_kontrolera(
             &konfiguracja)) {
         (void)wyslij_komende_kontrolera(0xAE);
-        return;
+        return false;
     }
 
     (void)wyslij_komende_kontrolera(0xAE);
+    diag_simple(DIAG_PS2,"Port pomocniczy i8042","i8042-aux",DIAG_INACTIVE,false,"Włączono port; oczekiwanie na odpowiedź urządzenia",2);
     konfiguracja &= uint8_t(~0x10U);
 
     /*
@@ -471,7 +519,7 @@ extern "C" void InicjalizujMyszPS2() {
 
     if (!zapisz_konfiguracje_kontrolera(
             konfiguracja)) {
-        return;
+        return false;
     }
 
     /*
@@ -482,8 +530,10 @@ extern "C" void InicjalizujMyszPS2() {
      */
     if (!wyslij_komende_myszy(0xF5) || !wyslij_komende_myszy(
             MYSZ_USTAW_DOMYSLNE)) {
-        return;
+        return false;
     }
+
+    diag_simple(DIAG_PS2,"Port pomocniczy i8042","i8042-aux",DIAG_OK,true,"Urządzenie odpowiedziało przez port pomocniczy",2);
 
     /*
      * Proba negocjacji IntelliMouse (obsluga 4-bajtowych pakietow z rolka):
@@ -492,16 +542,16 @@ extern "C" void InicjalizujMyszPS2() {
     // Every byte is an acknowledged transaction. Never guess packet length
     // after a failed negotiation: leave the optional device unavailable.
     const uint8_t sequence[]={0xF3,200,0xF3,100,0xF3,80};
-    for(uint8_t b:sequence) if(!wyslij_komende_myszy(b))return;
+    for(uint8_t b:sequence) if(!wyslij_komende_myszy(b))return false;
     uint8_t dev_id=0;
-    if(!wyslij_komende_myszy(0xF2)||!czekaj_na_dane(true,&dev_id)||!parser.configure(dev_id))return;
+    if(!wyslij_komende_myszy(0xF2)||!czekaj_na_dane(true,&dev_id)||!parser.configure(dev_id))return false;
 
     /*
      * 0xF4 uruchamia stream mode.
      */
     if (!wyslij_komende_myszy(
             MYSZ_WLACZ_RAPORTOWANIE)) {
-        return;
+        return false;
     }
 
     parser.streaming=true;
@@ -518,6 +568,7 @@ extern "C" void InicjalizujMyszPS2() {
         s_ps2_mouse_device.poll_fn=poll_mouse;
         input_register_device(&s_ps2_mouse_device);
     }
+    status.ready=true;return true;
 }
 
 /* =========================================================================

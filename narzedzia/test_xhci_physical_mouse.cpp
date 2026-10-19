@@ -15,7 +15,7 @@ static bool functional_trace=false;
 static uint64_t mock_now=0,clock_step=1000,control_delay=0,pending_due=0;
 static unsigned pending_control=0;
 static bool delayed_commands=false;static uint64_t delayed_command_pointer=0;
-static uint8_t delayed_command_slot=0,command_error=1,enable_slot_next=2;
+static uint8_t delayed_command_slot=0,command_error=1,enable_slot_next=2,second_enable_slot_next=2;
 static uint64_t ownership_delay=0,ownership_due=0;
 static void progress_clock();
 static void trace_write(const char* kind,uint64_t offset,uint64_t value){
@@ -33,6 +33,9 @@ void dma_release(DmaBuffer* b){if(b->virtual_address){trace_write("FREE",b->phys
 extern "C" void usb_hid_przetworz_raport(const uint8_t*){}
 void ohci_service(){}
 void ZmapujStrone(void*,void*,unsigned int){CHECK(false);}
+static bool second_present=false;
+static uint8_t second_cfg[256];
+static uint32_t second_bar_mask[6];static bool second_probing[6];
 static uint8_t cfg[256];static uint32_t bar_mask[6];static bool probing[6];
 static bool prior_if=true;
 unsigned long host_idt_irq_save(){unsigned long f=prior_if?512:0;prior_if=false;return f;}
@@ -41,22 +44,28 @@ extern "C" uint8_t apic_pobierz_lapic_id(){return 0;}
 bool hpet_dostepny(){return true;}
 uint64_t czas_monotoniczny_ns(){mock_now+=clock_step;progress_clock();return mock_now;}
 uint32_t host_pci_read(uint8_t bus,uint8_t slot,uint8_t fn,uint8_t off){
-    if(bus!=0||slot!=20||fn!=0)return UINT32_MAX;
-    if(off>=0x10&&off<0x28&&probing[(off-0x10)/4])return bar_mask[(off-0x10)/4];
-    uint32_t v;std::memcpy(&v,cfg+(off&252),4);return v;
+    if(bus!=0||slot!=20||fn>1|| (fn==1&&!second_present))return UINT32_MAX;
+    const auto* config=fn?second_cfg:cfg;const auto* masks=fn?second_bar_mask:bar_mask;
+    const auto* probes=fn?second_probing:probing;
+    if(off>=0x10&&off<0x28&&probes[(off-0x10)/4])return masks[(off-0x10)/4];
+    uint32_t v;std::memcpy(&v,config+(off&252),4);return v;
 }
 void host_pci_write(uint8_t bus,uint8_t slot,uint8_t fn,uint8_t off,uint32_t v){
-    CHECK(bus==0&&slot==20&&fn==0);trace_write("PCI",off,v);
-    if(off==4){CHECK(!(v&0xffff0000U));uint32_t old;std::memcpy(&old,cfg+4,4);v=(old&0xffff0000U)|(v&65535);}
-    if(off>=0x10&&off<0x28){unsigned i=(off-0x10)/4;probing[i]=v==UINT32_MAX;if(probing[i])return;}
-    std::memcpy(cfg+(off&252),&v,4);
+    CHECK(bus==0&&slot==20&&(fn==0||(fn==1&&second_present)));trace_write("PCI",off,v);
+    auto* config=fn?second_cfg:cfg;auto* probes=fn?second_probing:probing;
+    if(off==4){CHECK(!(v&0xffff0000U));uint32_t old;std::memcpy(&old,config+4,4);v=(old&0xffff0000U)|(v&65535);}
+    if(off>=0x10&&off<0x28){unsigned i=(off-0x10)/4;probes[i]=v==UINT32_MAX;if(probes[i])return;}
+    std::memcpy(config+(off&252),&v,4);
 }
-alignas(4096) static uint8_t registers[65536],irq_bar[4096];
+alignas(4096) static uint8_t registers[65536],irq_bar[4096],second_registers[65536];
+static Controller* model_controller=&controllers[0];
+static uint16_t second_event_producer{};static bool second_event_cycle=true;
 static bool model=true,firmware_stuck,reset_stuck,halt_stuck,cnr_stuck,port_reset_stuck,stall_protocol,conventional_wheel_descriptor;
 static uint16_t event_producer;static bool event_cycle=true;
 static unsigned port_writes,control_requests,boot_requests;
 static uint8_t control_error,command_slot_override;static uint32_t control_short;
 static std::vector<uint32_t> port_values;
+static std::vector<uint8_t> composite_configuration;
 static const uint8_t configuration[]={
     9,2,50,0,2,1,0,0x80,50,
     9,4,0,0,1,0xff,0,0,0, 7,5,0x02,2,64,0,0,
@@ -70,17 +79,22 @@ static std::vector<uint8_t> report_descriptor(){
 }
 namespace {
 volatile uint8_t* xhci_host_map_bar(uint8_t bir,uint64_t physical,uint64_t size){
+    if(bir==0&&physical==0xf2000000){CHECK(size==65536);return second_registers;}
     if(bir==0){CHECK(physical==0xf0000000 && size==65536);return registers;}
     CHECK(bir==2&&physical==0xf1000000&&size==4096);return irq_bar;
 }
 static void put(volatile uint8_t* base,uint32_t off,uint32_t v){*reinterpret_cast<volatile uint32_t*>(base+off)=v;}
 uint32_t xhci_host_read(const volatile uint8_t* b,uint32_t off){return *reinterpret_cast<const volatile uint32_t*>(b+off);}
 static void emit(uint64_t ptr,uint32_t status,uint32_t flags){
+    auto& xhc=*model_controller;
+    auto& producer=xhc.index?second_event_producer:event_producer;
+    auto& cycle=xhc.index?second_event_cycle:event_cycle;
     auto* events=static_cast<XhciTrb*>(xhc.event_segment.virtual_address);CHECK(events);
-    events[event_producer]={uint32_t(ptr),uint32_t(ptr>>32),status,flags|(event_cycle?1U:0U)};
-    if(++event_producer==EVENT_TRBS){event_producer=0;event_cycle=!event_cycle;}
+    events[producer]={uint32_t(ptr),uint32_t(ptr>>32),status,flags|(cycle?1U:0U)};
+    if(++producer==EVENT_TRBS){producer=0;cycle=!cycle;}
 }
 static void control_complete(XhciDevice& d){
+    auto& xhc=*model_controller;
     ++control_requests;
     const auto* setup=reinterpret_cast<const uint8_t*>(&d.ep0.trbs[(xhc.wanted_setup-d.ep0.dma.physical_address)/16]);
     CHECK(!(d.ep0.trbs[(xhc.wanted_setup-d.ep0.dma.physical_address)/16].dword3&(1U<<4)));
@@ -93,7 +107,7 @@ static void control_complete(XhciDevice& d){
         if(value==0x200){static std::vector<uint8_t> config_copy(configuration,configuration+sizeof(configuration));
             const auto descriptor=report_descriptor();
             config_copy[41]=uint8_t(descriptor.size());config_copy[42]=uint8_t(descriptor.size()>>8);
-            source=config_copy.data();size=config_copy.size();}
+            source=composite_configuration.empty()?config_copy.data():composite_configuration.data();size=composite_configuration.empty()?config_copy.size():composite_configuration.size();}
         if(value==0x2200){static std::vector<uint8_t> report;report=report_descriptor();source=report.data();size=report.size();}
         // Locate DMA by TRB address through the fixture's tracked allocations.
         extern void* dma_virtual(uint64_t);
@@ -105,6 +119,12 @@ static void control_complete(XhciDevice& d){
     emit(code==1?xhc.wanted_transfer:xhc.wanted_setup,(uint32_t(code)<<24),xhci_trb::type_field(32)|(uint32_t(d.slot_id)<<24)|(1U<<16));
 }
 void xhci_host_write(volatile uint8_t* b,uint32_t off,uint32_t v){
+    Controller* previous=model_controller;
+    const uintptr_t address=reinterpret_cast<uintptr_t>(b);
+    if(address>=reinterpret_cast<uintptr_t>(second_registers)&&address<reinterpret_cast<uintptr_t>(second_registers)+sizeof(second_registers))model_controller=&controllers[1];
+    else model_controller=&controllers[0];
+    struct Restore {Controller* prior;~Restore(){model_controller=prior;}} restore{previous};
+    auto& xhc=*model_controller;
     if(functional_trace){
         const uintptr_t address=reinterpret_cast<uintptr_t>(b)+off;
         const uintptr_t first=reinterpret_cast<uintptr_t>(registers),irq=reinterpret_cast<uintptr_t>(irq_bar);
@@ -113,16 +133,20 @@ void xhci_host_write(volatile uint8_t* b,uint32_t off,uint32_t v){
         else CHECK(false);
     }
     if(!model){put(b,off,v);return;}
-    if(b==registers && off==0x100){
+    if((b==registers||b==second_registers) && off==0x100){
         if((v&(1U<<24))&&!firmware_stuck){
             if(ownership_delay && (v&(1U<<16)))ownership_due=mock_now+ownership_delay;
             else v&=~(1U<<16);
         }
         put(b,off,v);return;
     }
+    if(b==xhc.runtime+0x20 && off==0x14){
+        CHECK(host_pci_read(xhc.pci.bus,xhc.pci.slot,xhc.pci.function,4)&PCI_COMMAND_BUS_MASTER);
+        CHECK(read32(xhc.operational,USBSTS)&STS_HCH);
+    }
     if(b==xhc.operational && off==USBCMD){
-        if(v&CMD_HCRST){CHECK(!(host_pci_read(0,20,0,4)&4U));put(b,off,reset_stuck?v:v&~CMD_HCRST);put(b,USBSTS,STS_HCH|(cnr_stuck?STS_CNR:0));}
-        else {if(v&CMD_RS)CHECK((host_pci_read(0,20,0,4)&6U)==6U);put(b,off,v);put(b,USBSTS,v&CMD_RS?0:halt_stuck?0:STS_HCH);}return;
+        if(v&CMD_HCRST){CHECK(!(host_pci_read(xhc.pci.bus,xhc.pci.slot,xhc.pci.function,4)&4U));put(b,off,reset_stuck?v:v&~CMD_HCRST);put(b,USBSTS,STS_HCH|(cnr_stuck?STS_CNR:0));}
+        else {if(v&CMD_RS)CHECK((host_pci_read(xhc.pci.bus,xhc.pci.slot,xhc.pci.function,4)&6U)==6U);put(b,off,v);put(b,USBSTS,v&CMD_RS?0:halt_stuck?0:STS_HCH);}return;
     }
     if(b==xhc.operational && off>=PORTSC_BASE && off<PORTSC_BASE+255*16 && !(off&15)){
         ++port_writes;port_values.push_back(v);
@@ -137,9 +161,12 @@ void xhci_host_write(volatile uint8_t* b,uint32_t off,uint32_t v){
     put(b,off,v);
     if(b==xhc.doorbells && off==0 && xhc.wanted_command){
         const auto& trb=xhc.command.trbs[(xhc.wanted_command-xhc.command.dma.physical_address)/16];
-        const uint32_t type=xhci_trb::type(trb.dword3);const unsigned slot=type==9?enable_slot_next++:trb.dword3>>24;
+        const uint32_t type=xhci_trb::type(trb.dword3);const unsigned slot=type==9?(xhc.index?second_enable_slot_next++:enable_slot_next++):trb.dword3>>24;
         if(type==11){auto& d=xhc.devices[slot];std::memcpy(d.output_context.virtual_address,
-            static_cast<uint8_t*>(d.input_context.virtual_address)+xhc.context_size,32*xhc.context_size);context(d.output_context,0)[3]=5;}
+            static_cast<uint8_t*>(d.input_context.virtual_address)+xhc.context_size,32*xhc.context_size);context(xhc,d.output_context,0)[3]=5;}
+        if(type==12&&command_error==1){auto& d=xhc.devices[slot];
+            const auto* flags=context(xhc,d.input_context,0);
+            for(unsigned i=0;i<32;++i)if(flags[1]&(1U<<i))std::memcpy(context(xhc,d.output_context,uint8_t(i)),context(xhc,d.input_context,uint8_t(i+1)),xhc.context_size);}
         if(delayed_commands){delayed_command_pointer=xhc.wanted_command;delayed_command_slot=uint8_t(command_slot_override?command_slot_override:slot);}
         else emit(xhc.wanted_command,uint32_t(command_error)<<24,xhci_trb::type_field(33)|(uint32_t(command_slot_override?command_slot_override:slot)<<24));
     }else if(b==xhc.doorbells && off && v==1 && xhc.wanted_transfer){if(control_delay){pending_control=off/4;pending_due=mock_now+control_delay;}else control_complete(xhc.devices[off/4]);}
@@ -174,13 +201,15 @@ static void ring_full_test(){const unsigned start=checks;XhciProducerRing ring{}
 }
 static void section(const char* name,unsigned start){printf("%s: %u checks PASS\n",name,checks-start);}
 static void clean(){
-    for(auto& d:xhc.devices){d.enabled=false;free_device(d);}release_interrupt(xhc);release_structures(xhc);
+    for(size_t i=0;i<(controller_count?controller_count:1);++i){auto& c=controllers[i];
+        for(auto& d:c.devices){d.enabled=false;free_device(c,d);}release_interrupt(c);release_structures(c);
+        dma_release(&c.enumeration.data);c=Controller{};}
     dma_release(&enumeration.data);enumeration=Enumeration{};
-    pending_control=0;ownership_due=0;input_reset_all();xhc=Controller{};dma_map.clear();CHECK(allocated==released);
+    pending_control=0;ownership_due=0;input_reset_all();xhc=Controller{};controller_count=0;controllers_scanned=false;dma_map.clear();CHECK(allocated==released);
 }
 static void fixture(bool csz64=true){
-    clean();model=true;firmware_stuck=reset_stuck=halt_stuck=cnr_stuck=port_reset_stuck=stall_protocol=conventional_wheel_descriptor=false;
-    delayed_commands=false;delayed_command_pointer=0;command_error=1;enable_slot_next=2;
+    clean();composite_configuration.clear();second_present=false;model_controller=&controllers[0];second_event_producer=0;second_event_cycle=true;model=true;firmware_stuck=reset_stuck=halt_stuck=cnr_stuck=port_reset_stuck=stall_protocol=conventional_wheel_descriptor=false;
+    delayed_commands=false;delayed_command_pointer=0;command_error=1;enable_slot_next=second_enable_slot_next=2;
     clock_step=1000;control_delay=0;pending_control=0;ownership_delay=ownership_due=0;control_error=command_slot_override=0;control_short=0;
     event_producer=0;event_cycle=true;port_values.clear();next_dma=0x100000;
     std::memset(registers,0,sizeof(registers));std::memset(irq_bar,0,sizeof(irq_bar));std::memset(cfg,0,sizeof(cfg));

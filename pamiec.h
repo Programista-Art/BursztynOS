@@ -456,6 +456,9 @@ void ZmapujStrone(
     uint32_t flagi
 );
 
+// Checked equivalent for hardware mappings; preserves the existing mapping API.
+bool ZmapujStroneSprawdzona(void* va,void* pa,uint32_t flagi);
+
 /* Loader-only checked mapping in the current private process CR3. A successful
  * call transfers ownership of the frame to that address space; a failed call
  * leaves the frame with the caller. Supervisor identity mappings may be

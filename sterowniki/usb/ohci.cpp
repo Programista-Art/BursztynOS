@@ -1,3 +1,4 @@
+#include "../../diagnostyka_systemu.h"
 // OHCI 1.0 root-port HID driver. Polled schedules, no IRQ callbacks. DMA
 // objects have controller lifetime, including failed enumeration and unplug.
 #include "sterowniki/usb/ohci.h"
@@ -26,7 +27,7 @@ struct Device {
     uint16_t packet{};UsbHidInterface iface{};HidPointerLayout layout{};InputDevice input{};
 };
 volatile uint32_t* regs{};DmaBuffer hcca_dma{};HCCA* hcca{};
-Device devices[MAX_DEVICES]{};unsigned ports{},used{};bool ready{};
+Device devices[MAX_DEVICES]{};unsigned ports{},used{};bool ready{};uint32_t diagnostic_id{};
 #ifdef BURSZTYN_USB_HOST_TEST
 uint32_t ohci_test_read(unsigned);
 void ohci_test_write(unsigned,uint32_t);
@@ -57,6 +58,7 @@ bool frames(unsigned count){
     return false;
 }
 void fail_controller(){
+    diag_set_status(diagnostic_id,DIAG_INIT_FAILED,DIAG_CODE_HID_INIT,"Kontroler OHCI zatrzymany; sprawdź log USB");
     ready=false;write(4,0); // reset state stops USB schedules; retain all DMA
     for(auto& d:devices)if(d.used){d.ready=false;hid_pointer_remove(d.input);}
     wypisz_log("[OHCI] Controller failure; DMA retained, PS/2 fallback available.");
@@ -183,7 +185,17 @@ bool ohci_initialize(){
         if(pci_vendor_id(uint8_t(bus),slot,fn)==0xFFFF)continue;
         const uint32_t cls=pci_odczytaj_dword(uint8_t(bus),slot,fn,8);
         if((cls>>8)!=0x0C0310)continue;
+        struct DiagResult {DiagDevice d;~DiagResult(){d.status=ready?DIAG_OK:DIAG_INIT_FAILED;
+            if(!ready)d.code=DIAG_CODE_HID_INIT;
+            d.ports=ports;diagnostic_id=diag_publish(0,d);}}
+            diag{diag_device(DIAG_OHCI,"Kontroler OHCI","ohci",DIAG_INACTIVE,true,"Inicjalizacja kontrolera OHCI")};
+        diag.d.parent=diag_pci_parent(uint8_t(bus),slot,fn);
+        diag.d.transport=DIAG_TRANSPORT_PCI;diag.d.bus=uint8_t(bus);diag.d.pci_device=slot;
+        diag.d.function=fn;diag.d.pci_valid=1;
+        const uint32_t ident=pci_odczytaj_dword(uint8_t(bus),slot,fn,0);
+        diag.d.vendor=uint16_t(ident);diag.d.device=uint16_t(ident>>16);
         const uint32_t bar=pci_odczytaj_dword(uint8_t(bus),slot,fn,0x10);
+        diag.d.bar=bar;
         if((bar&15)||!bar)continue;
         // OHCI registers and at most 15 root ports fit inside one BAR page.
         ZmapujStrone(reinterpret_cast<void*>(MMIO),reinterpret_cast<void*>(uintptr_t(bar&~4095U)),VMM_FLAGA_PRESENT|VMM_FLAGA_ZAPIS|VMM_FLAGA_PCD|VMM_FLAGA_PWT);

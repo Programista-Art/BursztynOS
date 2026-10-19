@@ -1,3 +1,4 @@
+#include "diagnostyka_systemu.h"
 /*
  * Bursztyn OS - sterownik AHCI 1.x (SATA)
  *
@@ -2540,6 +2541,17 @@ extern "C" void inicjalizuj_kontroler_ahci() {
         return;
     }
 
+    struct DiagResult {
+        DiagDevice d;bool ready{};
+        ~DiagResult(){d.status=ready?DIAG_OK:DIAG_INIT_FAILED;
+            if(!ready){d.code=DIAG_CODE_AHCI_INIT;d.flags|=DIAG_FLAG_SYSTEM_REQUIRED;}
+            diag_publish(0,d);}
+    } diag{diag_device(DIAG_AHCI,"Kontroler SATA AHCI","ahci",DIAG_INACTIVE,true,"Inicjalizacja kontrolera SATA AHCI")};
+    diag.d.parent=diag_pci_parent(bdf.bus,bdf.slot,bdf.func);
+    diag.d.transport=DIAG_TRANSPORT_PCI;diag.d.bus=bdf.bus;diag.d.pci_device=bdf.slot;
+    diag.d.function=bdf.func;diag.d.pci_valid=1;diag.d.bar=abar;
+    const uint32_t identity=pci_odczytaj_dword(bdf.bus,bdf.slot,bdf.func,0);
+    diag.d.vendor=uint16_t(identity);diag.d.device=uint16_t(identity>>16);
     kontroler_bdf =
         bdf;
 
@@ -2624,6 +2636,7 @@ extern "C" void inicjalizuj_kontroler_ahci() {
         // prawidlowo zweryfikowanej inicjalizacji urzadzenia:
         blokowy_zarejestruj_dysk(&d.bdev);
     }
+    diag.ready=true;
     ahci_gotowy = liczba_dyskow != 0;
     if (ahci_gotowy) wybierz_dysk(0);
 }

@@ -19,7 +19,8 @@ bool xhci_command_ring_create(XhciProducerRing* ring, uint16_t trb_count) {
 
 bool xhci_command_ring_enqueue(XhciProducerRing* ring, const XhciTrb& source,
                                uint64_t* physical_trb, bool publish) {
-    if (!ring || !ring->trbs || !physical_trb ||
+    if (!ring || !ring->trbs || !physical_trb || ring->trb_count<16U || ring->trb_count>256U ||
+        ring->producer_index>=ring->trb_count-1U || ring->dma.size<size_t(ring->trb_count)*sizeof(XhciTrb) ||
         ring->outstanding >= static_cast<uint16_t>(ring->trb_count - 2U)) return false;
     XhciTrb trb = source;
     trb.dword3 = (trb.dword3 & ~xhci_trb::CYCLE) |

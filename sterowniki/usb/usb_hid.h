@@ -27,3 +27,104 @@ void usb_klawiatura_zresetuj_stan(void);
 #ifdef __cplusplus
 }
 #endif
+
+#ifdef __cplusplus
+inline bool usb_hid_keyboard_register(InputDevice& device) {
+    if(device.registered)return true;
+    const char* name="usb-keyboard";
+    for(size_t i=0;name[i]&&i+1<sizeof(device.name);++i)device.name[i]=name[i];
+    device.kinds=INPUT_DEVICE_KIND_KEYBOARD;device.bus_type=INPUT_BUS_USB;
+    return input_register_device(&device);
+}
+inline void usb_hid_keyboard_report(InputDevice& device, uint8_t* previous, const uint8_t* raport, size_t length) {
+    if (!raport || !previous || length < 8) return;
+    for (unsigned i=2;i<8;++i) if (raport[i]>=1 && raport[i]<=3) return;
+
+    if(!usb_hid_keyboard_register(device))return;
+
+    const uint8_t raw_mod = raport[0];
+    const uint8_t prev_mod = previous[0];
+
+    InputEvent evs[32];
+    size_t n = 0;
+
+    // 1. Zmiany modyfikatorow (bity 0..7)
+    for (uint8_t bit = 0; bit < 8; ++bit) {
+        const bool was = (prev_mod & (1U << bit)) != 0;
+        const bool now = (raw_mod & (1U << bit)) != 0;
+        if (was != now) {
+            const uint16_t linux_kc = input_usb_hid_mod_to_linux(bit);
+            if (linux_kc != 0 && n < 31) {
+                evs[n++] = { INPUT_EV_KEY, linux_kc, now ? 1U : 0U };
+            }
+        }
+    }
+
+    // 2. Klawisze zwolnione (obecne w prev, nieobecne w current)
+    for (uint8_t i = 0; i < 6; ++i) {
+        const uint8_t old_u = previous[2 + i];
+        if (old_u < 4) continue;
+        bool nadal = false;
+        for (uint8_t j = 0; j < 6; ++j) {
+            if (raport[2 + j] == old_u) {
+                nadal = true;
+                break;
+            }
+        }
+        if (!nadal) {
+            const uint16_t linux_kc = input_usb_hid_usage_to_linux(old_u);
+            if (linux_kc != 0 && n < 31) {
+                evs[n++] = { INPUT_EV_KEY, linux_kc, 0U };
+            }
+        }
+    }
+
+    // 3. Sprawdzenie czy caly raport jest identyczny (potencjalny auto-repeat)
+    bool identyczny = (raw_mod == prev_mod);
+    if (identyczny) {
+        for (uint8_t i = 0; i < 6; ++i) {
+            if (raport[2 + i] != previous[2 + i]) {
+                identyczny = false;
+                break;
+            }
+        }
+    }
+
+    // 4. Klawisze wcisniete lub powtorzone
+    for (uint8_t i = 0; i < 6; ++i) {
+        const uint8_t u = raport[2 + i];
+        if (u < 4) continue;
+        bool byl = false;
+        for (uint8_t j = 0; j < 6; ++j) {
+            if (previous[2 + j] == u) {
+                byl = true;
+                break;
+            }
+        }
+        const uint16_t linux_kc = input_usb_hid_usage_to_linux(u);
+        if (linux_kc == 0) continue;
+
+        if (!byl) {
+            // Nowe wcisniecie
+            if (n < 31) {
+                evs[n++] = { INPUT_EV_KEY, linux_kc, 1U };
+            }
+        } else if (identyczny) {
+            // Raport przyszedl ponownie bez zmian ze stabilnie trzymanym klawiszem -> repeat
+            if (n < 31) {
+                evs[n++] = { INPUT_EV_KEY, linux_kc, 2U };
+            }
+        }
+    }
+
+    for (uint8_t i = 0; i < 8; ++i) {
+        previous[i] = raport[i];
+    }
+
+    if (n > 0) {
+        evs[n++] = { INPUT_EV_SYN, INPUT_SYN_REPORT, 0 };
+        input_dispatch_events(&device, evs, n);
+    }
+}
+
+#endif

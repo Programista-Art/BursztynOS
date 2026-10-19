@@ -1,3 +1,4 @@
+#include "diagnostyka_pci.h"
 /*
  * Bursztyn OS - Sterownik dysku blokowego VirtIO-BLK (VirtIO 1.x Modern PCI)
  *
@@ -649,6 +650,9 @@ bool virtio_blk_init(VirtioPciDevice* dev) {
         return false;
     }
 
+    DiagPciAttempt diagnostic(DIAG_VIRTIO_BLOCK,"Kontroler virtio-blk","virtio-blk",
+        dev->bus,dev->slot,dev->func,dev->pci_vendor_id,dev->pci_device_id);
+
     // Znajdz istniejacy slot lub przydziel nowy dla tego urzadzenia
     VirtioBlkDriver* drv = nullptr;
     uint32_t slot_idx = 0;
@@ -937,6 +941,7 @@ bool virtio_blk_init(VirtioPciDevice* dev) {
     }
 
     blk_klog("[VIRTIO-BLK] Successfully initialized and registered VirtIO-BLK device");
+    diagnostic.ready();
     return true;
 }
 

@@ -59,7 +59,7 @@ static void desktop_persistence_cases() {
     }
     for(unsigned dpi:{100U,125U}) {
         setup(30,1920,1080-ui_skaluj(40,dpi),dpi);
-        layout->visual_position(0,0,0);layout->visual_position(13,1700,800);
+        layout->visual_position(0,0,0);layout->visual_position(DesktopEntries::Count,1700,800);
         layout->reflow();
         std::vector<std::pair<int,int>> original;
         for(int i=0;i<layout->count;++i){auto r=layout->visual_bounds(i);original.push_back({r.x,r.y});layout->items[i].selected=true;}
@@ -67,13 +67,13 @@ static void desktop_persistence_cases() {
         CHECK(layout_disk.find("selected")==std::string::npos);CHECK(layout_disk.find("zażółć")!=std::string::npos);
         CHECK(reload->load(layout_test_io));CHECK(reload->count==30);
         setup(31,1920,1080-ui_skaluj(40,dpi),dpi);CHECK(reload->apply(*layout,key)==0);
-        CHECK(reload->matchedLaunchers==DesktopEntries::Count);CHECK(reload->matchedFiles==17);CHECK(!reload->dirty);
+        CHECK(reload->matchedLaunchers==DesktopEntries::Count);CHECK(reload->matchedFiles==30-DesktopEntries::Count);CHECK(!reload->dirty);
         for(int i=0;i<30;++i) {
             auto r=layout->visual_bounds(i);CHECK(r.x==original[i].first && r.y==original[i].second);CHECK(!layout->items[i].selected);
         }
         CHECK(layout->items[30].placed); // new filesystem entry
-        names[0]="new-launcher";names[13]="renamed-file";
-        CHECK(reload->apply(*layout,key)>=0);CHECK(reload->stale==2);CHECK(layout->items[0].placed);CHECK(layout->items[13].placed);
+        names[0]="new-launcher";names[DesktopEntries::Count]="renamed-file";
+        CHECK(reload->apply(*layout,key)>=0);CHECK(reload->stale==2);CHECK(layout->items[0].placed);CHECK(layout->items[DesktopEntries::Count].placed);
         setup(30,1280,720-ui_skaluj(40,dpi),dpi);int corrected=reload->apply(*layout,key);CHECK(corrected>0);CHECK(reload->dirty);
         for(int i=0;i<30;++i)if(layout->items[i].placed) {
             CHECK(layout->visible(i));for(int j=0;j<i;++j)if(layout->items[j].placed)CHECK(!Desktop::intersects(layout->visual_bounds(i),layout->visual_bounds(j)));

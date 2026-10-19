@@ -14,46 +14,84 @@ struct Local {
     uint32_t usages[128]{}; unsigned count{}; uint32_t lo{},hi{}; bool range{},has_hi{};
 };
 }
-bool usb_hid_find_interface(const uint8_t* b,size_t n,UsbHidInterface& out) {
+bool usb_hid_parse_configuration(const uint8_t* b,size_t n,UsbHidConfiguration& out) {
     out={};
     if(!b||n<9||b[0]!=9||b[1]!=2||le16(b+2)>n||le16(b+2)<9||le16(b+2)>4096||!b[5])return false;
-    const size_t total=le16(b+2); UsbHidInterface candidate{}; bool match=false,hid=false,found=false;size_t companion_offset=0;
-    // Validate the entire configuration, including descriptors after our endpoint.
+    const size_t total=le16(b+2);
+    UsbHidConfiguration result{};
+    result.configuration=b[5];result.declared_interfaces=b[4];
+    UsbHidInterface candidate{};
+    bool match=false,selected=false;
+    int companion=-1;size_t companion_offset=0;
+    uint32_t endpoints=0;
     for(size_t p=9;p<total;) {
         if(total-p<2||b[p]<2||b[p]>total-p)return false;
         const uint8_t len=b[p],type=b[p+1];
         if(type==4) {
             if(len<9)return false;
-            match=b[p+5]==3&&b[p+3]==0;hid=false;
-            candidate={}; candidate.configuration=b[5];candidate.interface_number=b[p+2];
-            candidate.subclass=b[p+6];candidate.protocol=b[p+7];
+            match=b[p+5]==3&&b[p+3]==0;selected=false;
+            candidate={};candidate.configuration=b[5];candidate.interface_number=b[p+2];
+            candidate.alternate=b[p+3];candidate.subclass=b[p+6];candidate.protocol=b[p+7];
         } else if(type==0x21&&match) {
             if(len<6||unsigned(6+3*b[p+5])>len)return false;
             candidate.hid_bcd=le16(b+p+2);
-            for(unsigned j=0;j<b[p+5];++j)if(b[p+6+3*j]==0x22) {
-                candidate.report_length=le16(b+p+7+3*j);hid=true;
-            }
-        } else if(type==5&&match) {
+            for(unsigned j=0;j<b[p+5];++j)if(b[p+6+3*j]==0x22)
+                candidate.report_length=le16(b+p+7+3*j);
+        } else if(type==5) {
             if(len<7)return false;
             const uint16_t raw=le16(b+p+4);
-            if(hid && (b[p+2]&0x80) && !(b[p+2]&0x70) && (b[p+2]&15) &&
-               (b[p+3]&3)==3 && (raw&0x7ff) && (raw&0x7ff)<=HID_POINTER_REPORT_MAX && !(raw&0xe000) && b[p+6] &&
-               candidate.report_length && candidate.report_length<=HID_POINTER_DESCRIPTOR_MAX && !found) {
-                candidate.endpoint=b[p+2];candidate.packet_size=raw&0x7ff;candidate.transactions=uint8_t((raw>>11)&3);candidate.interval=b[p+6];
-                out=candidate;found=true;companion_offset=p+len;
+            const unsigned endpoint=b[p+2]&15U,dci=endpoint*2U+1U;
+            if(match&&!selected&&((candidate.subclass==1&&(candidate.protocol==1||candidate.protocol==2))||
+               (candidate.report_length&&candidate.report_length<=HID_POINTER_DESCRIPTOR_MAX))&&(b[p+2]&0x80)&&!(b[p+2]&0x70)&&endpoint&&
+               (b[p+3]&3)==3&&(raw&0x7ff)&&(raw&0x7ff)<=1024&&!(raw&0xe000)&&
+               ((raw>>11)&3)!=3&&b[p+6]&&!(endpoints&(1U<<dci))) {
+                candidate.endpoint=b[p+2];candidate.packet_size=raw&0x7ff;
+                candidate.transactions=uint8_t((raw>>11)&3);candidate.interval=b[p+6];
+                // Boot interfaces can work even without a usable report descriptor.
+                bool duplicate=false;
+                for(size_t i=0;i<result.count;++i)if(result.interfaces[i].interface_number==candidate.interface_number)duplicate=true;
+                if(!duplicate) {
+                    if(result.count==USB_HID_INTERFACES_MAX)result.truncated=true;
+                    else {companion=int(result.count);result.interfaces[result.count++]=candidate;
+                        companion_offset=p+len;endpoints|=1U<<dci;}
+                }
+                selected=true;
             }
         }
-        if(type==0x30 && found && p==companion_offset) {
-            if(len<6 || b[p+2]>15 || b[p+3]!=0)return false;
-            out.companion=true;out.max_burst=b[p+2];out.bytes_per_interval=le16(b+p+4);
+        if(type==0x30&&companion>=0&&p==companion_offset) {
+            if(len<6||b[p+2]>15||b[p+3]!=0)return false;
+            auto& u=result.interfaces[companion];
+            if(b[p+2]<=15&&b[p+3]==0){u.companion=true;u.max_burst=b[p+2];u.bytes_per_interval=le16(b+p+4);}
         }
         p+=len;
     }
-#if BURSZTYNDIAGUSBHID
-    if(found){const int64_t v[]={out.interface_number,3,out.subclass,out.protocol,out.hid_bcd,out.report_length,out.endpoint,out.packet_size};
-        pointing_diag("[USB-HID] interface/class/subclass/protocol/bcdHID/report-length/endpoint/mps",v,8);}
-#endif
-    return found;
+    out=result;return true;
+}
+bool usb_hid_find_interface(const uint8_t* b,size_t n,UsbHidInterface& out) {
+    out={};UsbHidConfiguration config{};
+    if(!usb_hid_parse_configuration(b,n,config)||!config.count)return false;
+    out=config.interfaces[0];return true;
+}
+uint8_t hid_report_roles(const uint8_t* b,size_t n){
+    if(!b||!n||n>HID_POINTER_DESCRIPTOR_MAX)return HID_ROLE_UNKNOWN;
+    uint32_t page=0,stack[4]{};unsigned depth=0;uint8_t roles=0;
+    for(size_t p=0;p<n;){const uint8_t prefix=b[p++];
+        if(prefix==0xfe){if(n-p<2)return HID_ROLE_UNKNOWN;const size_t bytes=b[p];p+=2;if(bytes>n-p)return HID_ROLE_UNKNOWN;p+=bytes;continue;}
+        unsigned size=prefix&3;if(size==3)size=4;if(size>n-p)return HID_ROLE_UNKNOWN;
+        uint32_t value=0;for(unsigned i=0;i<size;++i)value|=uint32_t(b[p++])<<(i*8);
+        const unsigned type=(prefix>>2)&3,tag=prefix>>4;
+        if(type==1&&tag==0)page=value;
+        else if(type==1&&tag==10){if(depth==4)return HID_ROLE_UNKNOWN;stack[depth++]=page;}
+        else if(type==1&&tag==11){if(!depth)return HID_ROLE_UNKNOWN;page=stack[--depth];}
+        else if(type==2&&tag==0){const uint32_t usage_page=size==4?value>>16:page,usage=value&65535;
+            if(usage_page==1&&usage==6)roles|=HID_ROLE_KEYBOARD;
+            else if(usage_page==1&&(usage==1||usage==2))roles|=HID_ROLE_POINTER;
+            else if(usage_page==0x0c)roles|=HID_ROLE_CONSUMER;
+            else if(usage_page==0x0d)roles|=HID_ROLE_POINTER;
+            else roles|=HID_ROLE_OTHER;
+        }
+    }
+    return roles;
 }
 bool hid_pointer_compile(const uint8_t* data,size_t length,HidPointerLayout& out) {
     out={};HidPointerLayout layout{};

@@ -28,11 +28,14 @@
  */
 
 #include "../bursztyn_gui.h"
+#include "bursztyn_ui/bursztyn_ui.h"
 #include "http_kody.h"
 
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+
+using namespace BursztynUI;
 
 #ifndef BURSZTYN_DEBUG_GUI_PERF
 #define BURSZTYN_DEBUG_GUI_PERF 0
@@ -49,8 +52,8 @@
  * przegladarka_linker.ld MUSI miec ten sam layout:
  *
  *   HEADER  off 0x0000  VA 0x1000000  region 0x1000
- *   TEXT    off 0x1000  VA 0x1001000  region 0xF000
- *   DATA    off 0x10000 VA 0x1010000  memory 0x80000
+ *   TEXT    off 0x1000  VA 0x1001000  region 0x40000
+ *   DATA    off 0x41000 VA 0x1041000  memory 0x80000
  */
 struct NaglowekBur {
     uint8_t magia[4];
@@ -94,12 +97,12 @@ NaglowekBur naglowek = {
     ),
 
     0x1000ULL,
-    0xF000ULL,
+    0x40000ULL,
     0x1001000ULL,
 
-    0x10000ULL,
+    0x41000ULL,
     0x80000ULL,
-    0x1010000ULL
+    0x1041000ULL
 };
 
 }
@@ -145,36 +148,6 @@ constexpr size_t ULUBIONE_PLIK_POJEMNOSC =
 constexpr size_t STATUS_POJEMNOSC =
     96U;
 
-constexpr int PASEK_SYSTEMOWY_WYS =
-    40;
-
-constexpr int TYTUL_WYS =
-    26;
-
-constexpr int ZAKLADKI_Y =
-    28;
-
-constexpr int ZAKLADKI_WYS =
-    24;
-
-constexpr int NARZEDZIA_Y =
-    56;
-
-constexpr int NARZEDZIA_WYS =
-    36;
-
-constexpr int TRESC_Y =
-    96;
-
-constexpr int STATUS_WYS =
-    22;
-
-constexpr int MIN_WIN_W =
-    560;
-
-constexpr int MIN_WIN_H =
-    360;
-
 constexpr int DOMYSLNY_WIN_W =
     800;
 
@@ -183,30 +156,6 @@ constexpr int DOMYSLNY_WIN_H =
 
 constexpr int MAX_PRZEKIEROWAN =
     5;
-
-constexpr int Z_ORDER_HUSSAR =
-    10;
-
-constexpr uint32_t KOLOR_TLO =
-    0x00F8F9FAU;
-
-constexpr uint32_t KOLOR_TEKST =
-    0x00222222U;
-
-constexpr uint32_t KOLOR_BIALY =
-    0x00FFFFFFU;
-
-constexpr uint32_t KOLOR_AKTYWNY =
-    0x004A2500U;
-
-constexpr uint32_t KOLOR_POMARANCZ =
-    0x00E58A00U;
-
-constexpr uint32_t KOLOR_STATUS =
-    0x00FFBF00U;
-
-constexpr uint32_t KOLOR_CZERWONY =
-    0x00AA0000U;
 
 /*
  * Bounce buffer BWS29/BWS30.
@@ -300,59 +249,7 @@ char status_bufor[
     STATUS_POJEMNOSC
 ] = {};
 
-bool menu_ulubione_otwarte =
-    false;
 
-bool menu_ustawienia_otwarte =
-    false;
-
-bool w_polu_url =
-    false;
-
-bool zmaksymalizowane =
-    false;
-
-bool aplikacja_zminimalizowana =
-    false;
-
-bool dragging =
-    false;
-
-int drag_off_x =
-    0;
-
-int drag_off_y =
-    0;
-
-int screen_w =
-    1024;
-
-int screen_h =
-    768;
-
-int WIN_X =
-    50;
-
-int WIN_Y =
-    50;
-
-int WIN_W =
-    DOMYSLNY_WIN_W;
-
-int WIN_H =
-    DOMYSLNY_WIN_H;
-
-int old_win_x =
-    50;
-
-int old_win_y =
-    50;
-
-int old_win_w =
-    DOMYSLNY_WIN_W;
-
-int old_win_h =
-    DOMYSLNY_WIN_H;
 
 int max_przewin_y =
     0;
@@ -651,7 +548,7 @@ void wyzeruj(
     }
 }
 
-bool dopisz_znak_limit(
+[[maybe_unused]] bool dopisz_znak_limit(
     char* s,
     size_t pojemnosc,
     char znak
@@ -685,7 +582,7 @@ bool dopisz_znak_limit(
     return true;
 }
 
-size_t utf8_poprzedni(
+[[maybe_unused]] size_t utf8_poprzedni(
     const char* s,
     size_t pos
 ) {
@@ -709,7 +606,7 @@ size_t utf8_poprzedni(
     return pos;
 }
 
-void usun_ostatni_utf8(
+[[maybe_unused]] void usun_ostatni_utf8(
     char* s,
     size_t pojemnosc
 ) {
@@ -740,6 +637,10 @@ void usun_ostatni_utf8(
         '\0';
 }
 
+void zaktualizuj_pasek_stanu_tekst(
+    const char* txt
+);
+
 void ustaw_status(
     const char* tekst
 ) {
@@ -748,23 +649,10 @@ void ustaw_status(
         sizeof(status_bufor),
         tekst
     );
-}
 
-bool punkt_w_prostokacie(
-    int px,
-    int py,
-    int x,
-    int y,
-    int w,
-    int h
-) {
-    return
-        w > 0 &&
-        h > 0 &&
-        px >= x &&
-        py >= y &&
-        px < x + w &&
-        py < y + h;
+    zaktualizuj_pasek_stanu_tekst(
+        status_bufor
+    );
 }
 
 /* =========================================================================
@@ -2814,6 +2702,7 @@ __attribute__((noinline)) bool ustaw_url_z_location(
  * ========================================================================= */
 
 struct Renderer {
+    KontekstRysowania* ctx{nullptr};
     int x;
     int y;
     int szer;
@@ -2904,14 +2793,23 @@ void renderer_znak(
                 bytes[i];
         }
 
-        wypisz_skalowane(
-            r.x +
-                r.logiczny_x,
-            draw_y,
-            r.kolor,
-            r.skala,
-            temp
-        );
+        if (r.ctx) {
+            r.ctx->rysuj_tekst(
+                Punkt(r.x + r.logiczny_x, draw_y),
+                temp,
+                r.kolor,
+                SkalaUI(r.skala)
+            );
+        } else {
+            wypisz_skalowane(
+                r.x +
+                    r.logiczny_x,
+                draw_y,
+                r.kolor,
+                r.skala,
+                temp
+            );
+        }
     }
 
     r.logiczny_x +=
@@ -3853,977 +3751,7 @@ void przelicz_scroll(
     }
 }
 
-/* =========================================================================
- * 16. GUI - PRZYCISK / URL WIDTH
- * ========================================================================= */
-
-int szerokosc_utf8(
-    const char* tekst,
-    int skala = 1
-) {
-    if (!tekst) {
-        return 0;
-    }
-
-    int width =
-        0;
-
-    for (size_t i = 0;
-         tekst[i] != '\0';) {
-
-        const Utf8Znak z =
-            dekoduj_utf8(
-                tekst +
-                i
-            );
-
-        width +=
-            (szerokosc_znaku(
-                 z.kod) +
-             1) *
-            skala;
-
-        i +=
-            static_cast<size_t>(
-                z.bajty
-            );
-    }
-
-    return width;
-}
-
-void RysujPrzyciskLokalny(
-    int x,
-    int y,
-    int w,
-    int h,
-    uint32_t bg,
-    uint32_t fg,
-    const char* tekst
-) {
-    gui_rysuj_prostokat(
-        x,
-        y,
-        w,
-        h,
-        bg
-    );
-
-    const int tw =
-        szerokosc_utf8(
-            tekst
-        );
-
-    const int tx =
-        x +
-        (w -
-         tw) /
-            2;
-
-    int ty =
-        y +
-        (h -
-         16) /
-            2;
-
-    if (ty <
-        y) {
-
-        ty =
-            y;
-    }
-
-    gui_wypisz_tekst_kolor(
-        tx,
-        ty,
-        fg,
-        tekst
-    );
-}
-
-/* =========================================================================
- * 17. LAYER/WINDOW
- * ========================================================================= */
-
-void ogranicz_okno_do_ekranu() {
-    if (screen_w <
-        MIN_WIN_W) {
-
-        WIN_W =
-            screen_w;
-    } else if (WIN_W <
-               MIN_WIN_W) {
-
-        WIN_W =
-            MIN_WIN_W;
-    } else if (WIN_W >
-               screen_w) {
-
-        WIN_W =
-            screen_w;
-    }
-
-    const int max_h =
-        screen_h -
-        PASEK_SYSTEMOWY_WYS;
-
-    if (max_h <
-        MIN_WIN_H) {
-
-        WIN_H =
-            max_h;
-    } else if (WIN_H <
-               MIN_WIN_H) {
-
-        WIN_H =
-            MIN_WIN_H;
-    } else if (WIN_H >
-               max_h) {
-
-        WIN_H =
-            max_h;
-    }
-
-    if (WIN_X < 0) {
-        WIN_X =
-            0;
-    }
-
-    if (WIN_Y < 0) {
-        WIN_Y =
-            0;
-    }
-
-    if (WIN_X +
-            WIN_W >
-        screen_w) {
-
-        WIN_X =
-            screen_w -
-            WIN_W;
-    }
-
-    if (WIN_Y +
-            WIN_H >
-        max_h) {
-
-        WIN_Y =
-            max_h -
-            WIN_H;
-    }
-
-    if (WIN_X < 0) {
-        WIN_X =
-            0;
-    }
-
-    if (WIN_Y < 0) {
-        WIN_Y =
-            0;
-    }
-}
-
-bool ustaw_geometrie_warstwy(
-    int x,
-    int y,
-    int w,
-    int h
-) {
-    const int stary_x =
-        WIN_X;
-
-    const int stary_y =
-        WIN_Y;
-
-    const int stary_w =
-        WIN_W;
-
-    const int stary_h =
-        WIN_H;
-
-    WIN_X =
-        x;
-
-    WIN_Y =
-        y;
-
-    WIN_W =
-        w;
-
-    WIN_H =
-        h;
-
-    ogranicz_okno_do_ekranu();
-
-    if (bws_utworz_warstwe(
-            WIN_X,
-            WIN_Y,
-            WIN_W,
-            WIN_H,
-            Z_ORDER_HUSSAR
-        ) < 0) {
-
-        WIN_X =
-            stary_x;
-
-        WIN_Y =
-            stary_y;
-
-        WIN_W =
-            stary_w;
-
-        WIN_H =
-            stary_h;
-
-        (void)bws_utworz_warstwe(
-            WIN_X,
-            WIN_Y,
-            WIN_W,
-            WIN_H,
-            Z_ORDER_HUSSAR
-        );
-
-        return false;
-    }
-
-    return true;
-}
-
-void przelacz_maksymalizacje() {
-    if (!zmaksymalizowane) {
-        old_win_x =
-            WIN_X;
-
-        old_win_y =
-            WIN_Y;
-
-        old_win_w =
-            WIN_W;
-
-        old_win_h =
-            WIN_H;
-
-        if (ustaw_geometrie_warstwy(
-                0,
-                0,
-                screen_w,
-                screen_h -
-                    PASEK_SYSTEMOWY_WYS)) {
-
-            zmaksymalizowane =
-                true;
-        } else {
-            ustaw_status(
-                "Brak pamieci na maksymalizacje okna."
-            );
-        }
-    } else {
-        if (ustaw_geometrie_warstwy(
-                old_win_x,
-                old_win_y,
-                old_win_w,
-                old_win_h)) {
-
-            zmaksymalizowane =
-                false;
-        } else {
-            ustaw_status(
-                "Nie udalo sie przywrocic rozmiaru okna."
-            );
-        }
-    }
-
-    max_przewin_y =
-        0;
-}
-
-void zminimalizuj() {
-    aplikacja_zminimalizowana = gui_minimalizuj_okno();
-
-    dragging =
-        false;
-
-    menu_ulubione_otwarte =
-        false;
-
-    menu_ustawienia_otwarte =
-        false;
-
-    w_polu_url =
-        false;
-
-    gui_ustaw_capture_myszy(false);
-}
-
-/* =========================================================================
- * 18. GUI - RYSOWANIE
- * ========================================================================= */
-
-void rysuj_krotki_url(
-    int x,
-    int y,
-    uint32_t kolor,
-    const char* url
-) {
-    char temp[
-        16
-    ] = {};
-
-    if (!url ||
-        url[0] ==
-            '\0') {
-
-        (void)kopiuj_limit(
-            temp,
-            sizeof(temp),
-            "Nowa"
-        );
-    } else {
-        (void)kopiuj_limit(
-            temp,
-            sizeof(temp),
-            url
-        );
-    }
-
-    gui_wypisz_tekst_kolor(
-        x,
-        y,
-        kolor,
-        temp
-    );
-}
-
-struct HusarzPerf {
-    uint64_t key_count, full_redraw_count, partial_redraw_count;
-    uint64_t dirty_area, compose_requests, allocations_key;
-} husarz_perf{};
-
-void husarz_rysuj_pole_adresu() {
-    if(aplikacja_zminimalizowana||liczba_zakladek<=0)return;
-    const int x=WIN_X+122,y=WIN_Y+NARZEDZIA_Y+4;
-    int width=WIN_W-122-286-8;if(width<80)width=80;
-    const char* url=zakladki[aktywna_zakladka].url;
-    const int max_text_width=width-13;
-    size_t length=0;while(url[length]!='\0'&&length+1U<URL_POJEMNOSC)++length;
-    size_t visible_bytes=static_cast<size_t>(max_text_width>0?max_text_width/9:0);
-    if(visible_bytes+1U>URL_WIDOCZNY_POJEMNOSC)
-        visible_bytes=URL_WIDOCZNY_POJEMNOSC-1U;
-    size_t start=length>visible_bytes?length-visible_bytes:0;
-    while(start<length&&(static_cast<uint8_t>(url[start])&0xC0U)==0x80U)++start;
-    char visible[URL_WIDOCZNY_POJEMNOSC]{};
-    (void)kopiuj_limit(visible,sizeof(visible),url+start);
-    gui_rysuj_prostokat(x,y,width,28,w_polu_url?KOLOR_BIALY:0x00303030U);
-    gui_wypisz_tekst_kolor(x+5,y+6,w_polu_url?0x00000001U:0x00D1D5DBU,visible);
-    if(w_polu_url){int caret=x+5+szerokosc_utf8(visible);if(caret>x+width-8)caret=x+width-8;
-        gui_wypisz_tekst_kolor(caret,y+6,0x00000001U,"_");}
-    gui_odswiez();++husarz_perf.partial_redraw_count;++husarz_perf.compose_requests;
-    husarz_perf.dirty_area+=static_cast<uint64_t>(width)*28U;
-}
-
-void RysujInterfejs(
-    bool odswiez_tlo
-) {
-    ++husarz_perf.full_redraw_count;
-    if (aplikacja_zminimalizowana) {
-        return;
-    }
-
-    if (odswiez_tlo) {
-        gui_odswiez_pulpit();
-    }
-
-    gui_rysuj_okno(
-        WIN_X,
-        WIN_Y,
-        WIN_W,
-        WIN_H,
-        "Husarz - Polska Przegladarka WWW"
-    );
-    gui_rysuj_standardowa_belke(WIN_X, WIN_Y, WIN_W,
-                                "Husarz - Polska Przegladarka WWW",
-                                zmaksymalizowane);
-
-    /*
-     * Zakladki.
-     */
-    for (int i = 0;
-         i <
-            liczba_zakladek;
-         ++i) {
-
-        const int tx =
-            WIN_X +
-            10 +
-            i *
-                110;
-
-        if (tx +
-                100 >
-            WIN_X +
-                WIN_W -
-                90) {
-
-            break;
-        }
-
-        const uint32_t bg =
-            i ==
-                    aktywna_zakladka
-                ? KOLOR_AKTYWNY
-                : 0x00202020U;
-
-        gui_rysuj_prostokat(
-            tx,
-            WIN_Y +
-                ZAKLADKI_Y,
-            100,
-            ZAKLADKI_WYS,
-            bg
-        );
-
-        rysuj_krotki_url(
-            tx +
-                5,
-            WIN_Y +
-                ZAKLADKI_Y +
-                4,
-            KOLOR_BIALY,
-            zakladki[i].url
-        );
-
-        if (liczba_zakladek >
-            1) {
-
-            RysujPrzyciskLokalny(
-                tx +
-                    80,
-                WIN_Y +
-                    ZAKLADKI_Y +
-                    2,
-                16,
-                20,
-                KOLOR_CZERWONY,
-                KOLOR_BIALY,
-                "X"
-            );
-        }
-    }
-
-    if (liczba_zakladek <
-        MAX_ZAKLADKI) {
-
-        const int plus_x =
-            WIN_X +
-            10 +
-            liczba_zakladek *
-                110;
-
-        if (plus_x +
-                24 <
-            WIN_X +
-                WIN_W -
-                80) {
-
-            RysujPrzyciskLokalny(
-                plus_x,
-                WIN_Y +
-                    ZAKLADKI_Y,
-                24,
-                24,
-                KOLOR_POMARANCZ,
-                0x001A0B00U,
-                "+"
-            );
-        }
-    }
-
-    /*
-     * Pasek nawigacji.
-     */
-    const int narzedzia_y =
-        WIN_Y +
-        NARZEDZIA_Y;
-
-    gui_rysuj_prostokat(
-        WIN_X +
-            2,
-        narzedzia_y,
-        WIN_W -
-            4,
-        NARZEDZIA_WYS,
-        0x00202020U
-    );
-
-    const uint32_t nieaktywny =
-        0x00303030U;
-
-    RysujPrzyciskLokalny(
-        WIN_X +
-            8,
-        narzedzia_y +
-            4,
-        34,
-        28,
-        historia_idx >
-                0
-            ? KOLOR_AKTYWNY
-            : nieaktywny,
-        KOLOR_BIALY,
-        "<-"
-    );
-
-    RysujPrzyciskLokalny(
-        WIN_X +
-            44,
-        narzedzia_y +
-            4,
-        34,
-        28,
-        historia_idx >= 0 &&
-                historia_idx <
-                    historia_max
-            ? KOLOR_AKTYWNY
-            : nieaktywny,
-        KOLOR_BIALY,
-        "->"
-    );
-
-    RysujPrzyciskLokalny(
-        WIN_X +
-            80,
-        narzedzia_y +
-            4,
-        34,
-        28,
-        KOLOR_AKTYWNY,
-        KOLOR_BIALY,
-        "R"
-    );
-
-    const int przyciski_prawe =
-        286;
-
-    const int adres_x =
-        WIN_X +
-        122;
-
-    int adres_w =
-        WIN_W -
-        122 -
-        przyciski_prawe -
-        8;
-
-    if (adres_w <
-        80) {
-
-        adres_w =
-            80;
-    }
-
-    const uint32_t kolor_paska =
-        w_polu_url
-            ? KOLOR_BIALY
-            : 0x00303030U;
-
-    const uint32_t kolor_url =
-        w_polu_url
-            ? 0x00000001U
-            : 0x00D1D5DBU;
-
-    gui_rysuj_prostokat(
-        adres_x,
-        narzedzia_y +
-            4,
-        adres_w,
-        28,
-        kolor_paska
-    );
-
-    /*
-     * URL moze byc dluzszy od paska. Na razie GUI API nie ma clippingu
-     * tekstu, wiec tworzymy widoczny suffix/prefix ograniczony bajtowo.
-     */
-    char url_widoczny[URL_WIDOCZNY_POJEMNOSC] = {};
-
-    if (liczba_zakladek > 0) {
-        const char* pelny=zakladki[aktywna_zakladka].url;
-        size_t len=dlugosc_limit(pelny,URL_POJEMNOSC);
-        size_t widoczne=adres_w>13?static_cast<size_t>((adres_w-13)/9):0U;
-        if(widoczne+1U>sizeof(url_widoczny))widoczne=sizeof(url_widoczny)-1U;
-        size_t start=len>widoczne?len-widoczne:0U;
-        while(start<len&&(static_cast<uint8_t>(pelny[start])&0xC0U)==0x80U)++start;
-        (void)kopiuj_limit(
-            url_widoczny,
-            sizeof(url_widoczny),
-            pelny+start
-        );
-    }
-
-    gui_wypisz_tekst_kolor(
-        adres_x +
-            5,
-        narzedzia_y +
-            10,
-        kolor_url,
-        url_widoczny
-    );
-
-    if (w_polu_url) {
-        int cursor_x =
-            adres_x +
-            5 +
-            szerokosc_utf8(
-                url_widoczny
-            );
-
-        if (cursor_x >
-            adres_x +
-                adres_w -
-                8) {
-
-            cursor_x =
-                adres_x +
-                adres_w -
-                8;
-        }
-
-        gui_wypisz_tekst_kolor(
-            cursor_x,
-            narzedzia_y +
-                10,
-            0x00000001U,
-            "_"
-        );
-    }
-
-    RysujPrzyciskLokalny(
-        WIN_X +
-            WIN_W -
-            286,
-        narzedzia_y +
-            4,
-        28,
-        28,
-        KOLOR_CZERWONY,
-        KOLOR_BIALY,
-        "X"
-    );
-
-    RysujPrzyciskLokalny(
-        WIN_X +
-            WIN_W -
-            254,
-        narzedzia_y +
-            4,
-        54,
-        28,
-        KOLOR_POMARANCZ,
-        0x001A0B00U,
-        "Idz"
-    );
-
-    RysujPrzyciskLokalny(
-        WIN_X +
-            WIN_W -
-            196,
-        narzedzia_y +
-            4,
-        88,
-        28,
-        KOLOR_AKTYWNY,
-        KOLOR_BIALY,
-        "Zakladki"
-    );
-
-    RysujPrzyciskLokalny(
-        WIN_X +
-            WIN_W -
-            104,
-        narzedzia_y +
-            4,
-        96,
-        28,
-        KOLOR_AKTYWNY,
-        KOLOR_BIALY,
-        "Ustawienia"
-    );
-
-    /*
-     * Status.
-     */
-    gui_rysuj_prostokat(
-        WIN_X +
-            2,
-        WIN_Y +
-            WIN_H -
-            STATUS_WYS,
-        WIN_W -
-            4,
-        STATUS_WYS -
-            2,
-        0x00202020U
-    );
-
-    gui_wypisz_tekst_kolor(
-        WIN_X +
-            8,
-        WIN_Y +
-            WIN_H -
-            18,
-        KOLOR_STATUS,
-        status_bufor
-    );
-
-    /*
-     * Tresc.
-     */
-    const int obszar_y =
-        WIN_Y +
-        TRESC_Y;
-
-    const int obszar_h =
-        WIN_H -
-        TRESC_Y -
-        STATUS_WYS -
-        2;
-
-    gui_rysuj_prostokat(
-        WIN_X +
-            2,
-        obszar_y,
-        WIN_W -
-            4,
-        obszar_h,
-        KOLOR_TLO
-    );
-
-    if (liczba_zakladek >
-        0) {
-
-        Zakladka& z =
-            zakladki[
-                aktywna_zakladka
-            ];
-
-        const char* tresc =
-            z.tresc;
-
-        if (!tresc ||
-            tresc[0] ==
-                '\0') {
-
-            tresc =
-                "Wpisz adres strony lub zapytanie i wybierz Idz.";
-        }
-
-        Renderer r{
-            WIN_X + 8,
-            obszar_y + 5,
-            WIN_W - 24,
-            obszar_h - 10,
-            z.przewin_y,
-
-            0,
-            0,
-
-            20,
-
-            KOLOR_TEKST,
-            1,
-
-            false
-        };
-
-        if (z.to_jest_html) {
-            renderuj_html(
-                r,
-                tresc
-            );
-        } else {
-            renderer_tekst(
-                r,
-                tresc
-            );
-        }
-
-        przelicz_scroll(
-            r,
-            obszar_h -
-            10
-        );
-
-        /*
-         * Scrollbar.
-         */
-        if (max_przewin_y >
-            0) {
-
-            const int scroll_x =
-                WIN_X +
-                WIN_W -
-                8;
-
-            const int track_h =
-                obszar_h -
-                4;
-
-            gui_rysuj_prostokat(
-                scroll_x,
-                obszar_y +
-                    2,
-                6,
-                track_h,
-                0x00CCCCCCU
-            );
-
-            int denom =
-                obszar_h +
-                max_przewin_y;
-
-            if (denom <= 0) {
-                denom =
-                    1;
-            }
-
-            int suwak_h =
-                (obszar_h *
-                 obszar_h) /
-                denom;
-
-            if (suwak_h <
-                12) {
-
-                suwak_h =
-                    12;
-            }
-
-            if (suwak_h >
-                track_h) {
-
-                suwak_h =
-                    track_h;
-            }
-
-            const int droga =
-                track_h -
-                suwak_h;
-
-            const int suwak_y =
-                obszar_y +
-                2 +
-                (droga *
-                 z.przewin_y) /
-                    max_przewin_y;
-
-            gui_rysuj_prostokat(
-                scroll_x,
-                suwak_y,
-                6,
-                suwak_h,
-                KOLOR_POMARANCZ
-            );
-        }
-    }
-
-    /*
-     * Menu Zakladek.
-     */
-    const int menu_y =
-        WIN_Y +
-        94;
-
-    if (menu_ulubione_otwarte) {
-        const int menu_x =
-            WIN_X +
-            WIN_W -
-            270;
-
-        const int menu_h =
-            26 +
-            ulubione_ilosc *
-                20;
-
-        gui_rysuj_prostokat(
-            menu_x,
-            menu_y,
-            260,
-            menu_h,
-            KOLOR_AKTYWNY
-        );
-
-        gui_wypisz_tekst_kolor(
-            menu_x +
-                8,
-            menu_y +
-                5,
-            KOLOR_BIALY,
-            "+ Dodaj obecna strone"
-        );
-
-        for (int i = 0;
-             i <
-                ulubione_ilosc;
-             ++i) {
-
-            char label[
-                30
-            ] = {};
-
-            (void)kopiuj_limit(
-                label,
-                sizeof(label),
-                ulubione[i]
-            );
-
-            gui_wypisz_tekst_kolor(
-                menu_x +
-                    8,
-                menu_y +
-                    28 +
-                    i *
-                        20,
-                KOLOR_BIALY,
-                label
-            );
-        }
-    }
-
-    if (menu_ustawienia_otwarte) {
-        const int menu_x =
-            WIN_X +
-            WIN_W -
-            190;
-
-        gui_rysuj_prostokat(
-            menu_x,
-            menu_y,
-            180,
-            48,
-            KOLOR_AKTYWNY
-        );
-
-        gui_wypisz_tekst_kolor(
-            menu_x +
-                8,
-            menu_y +
-                7,
-            KOLOR_BIALY,
-            "JavaScript: wyl."
-        );
-
-        gui_wypisz_tekst_kolor(
-            menu_x +
-                8,
-            menu_y +
-                27,
-            KOLOR_BIALY,
-            "Renderer: prosty HTML"
-        );
-    }
-
-    gui_odswiez();
-}
+void odswiez_pasek_stanu_natychmiast();
 
 /* =========================================================================
  * 19. POBIERANIE STRONY
@@ -4936,9 +3864,7 @@ __attribute__((noinline)) bool pobierz_jeden_url(
         "DNS: wyszukiwanie serwera..."
     );
 
-    RysujInterfejs(
-        true
-    );
+    odswiez_pasek_stanu_natychmiast();
 
     uint8_t ip[
         4
@@ -4998,9 +3924,7 @@ __attribute__((noinline)) bool pobierz_jeden_url(
             : "HTTP: pobieranie..."
     );
 
-    RysujInterfejs(
-        true
-    );
+    odswiez_pasek_stanu_natychmiast();
 
     const bool pobrano =
         p.https
@@ -5488,845 +4412,691 @@ void Nawiguj(
 }
 
 /* =========================================================================
- * 20. OBSLUGA KLIKNIEC
+ * 20. BURSZTYN UI - MODERN INTEGRATION
  * ========================================================================= */
 
-void ustaw_scroll(
-    int wartosc
-) {
-    if (liczba_zakladek <= 0) {
-        return;
-    }
+class WidokStrony;
+class OknoHusarz;
 
-    if (wartosc < 0) {
-        wartosc =
-            0;
-    }
+struct HusarzApp {
+    AplikacjaGUI* app{nullptr};
+    OknoHusarz* okno{nullptr};
+    MenuGlowne* menu{nullptr};
+    MenuKontekstowe* menu_kontekstowe{nullptr};
+    MenuKontekstowe* menu_zakladki_popup{nullptr};
 
-    if (wartosc >
-        max_przewin_y) {
+    Panel* pasek_kart{nullptr};
+    Przycisk* btn_karty[MAX_ZAKLADKI]{};
+    Przycisk* btn_zamknij_karty[MAX_ZAKLADKI]{};
+    Przycisk* btn_nowa_karta{nullptr};
 
-        wartosc =
-            max_przewin_y;
-    }
+    Panel* pasek_narzedzi{nullptr};
+    Przycisk* btn_wstecz{nullptr};
+    Przycisk* btn_dalej{nullptr};
+    Przycisk* btn_odswiez{nullptr};
+    Przycisk* btn_zatrzymaj{nullptr};
+    Przycisk* btn_dom{nullptr};
+    PoleTekstowe* txt_adres{nullptr};
+    Przycisk* btn_idz{nullptr};
+    Przycisk* btn_zakladki{nullptr};
 
-    zakladki[
-        aktywna_zakladka
-    ].przewin_y =
-        wartosc;
-}
+    WidokStrony* widok_strony{nullptr};
+    PasekPrzewijania* suwak_pionowy{nullptr};
+    PasekStanu* pasek_stanu{nullptr};
 
-bool klik_menu(
-    int mx,
-    int my
-) {
-    const int menu_y =
-        WIN_Y +
-        94;
+    void zbuduj_ui();
+    void aktualizuj_pasek_kart();
+    void aktualizuj_pasek_stanu();
+    void przelacz_zakladke(int idx);
+    void nowa_zakladka_gui();
+    void zamknij_zakladke_gui(int idx);
+    void przejdz_do_url(const char* url);
+    void wstecz();
+    void dalej();
+    void odswiez();
+    void zatrzymaj();
+    void dom();
+    void dodaj_obecna_do_ulubionych_akcja();
+    void kopiuj_adres_do_schowka();
+    void wklej_adres_ze_schowka();
+    void przewin_do(int y);
+    bool przewin_o(int dy);
+    void pokaz_o_programie();
+    void pokaz_zakladki();
+};
 
-    if (menu_ulubione_otwarte) {
-        const int menu_x =
-            WIN_X +
-            WIN_W -
-            270;
+static HusarzApp g_husarz;
 
-        const int menu_h =
-            26 +
-            ulubione_ilosc *
-                20;
-
-        if (punkt_w_prostokacie(
-                mx,
-                my,
-                menu_x,
-                menu_y,
-                260,
-                menu_h)) {
-
-            if (my <
-                menu_y +
-                26) {
-
-                dodaj_obecna_do_ulubionych();
-            } else {
-                const int index =
-                    (my -
-                     (menu_y +
-                      26)) /
-                    20;
-
-                if (index >= 0 &&
-                    index <
-                        ulubione_ilosc) {
-
-                    if (!kopiuj_limit(
-                        zakladki[
-                            aktywna_zakladka
-                        ].url,
-                        URL_POJEMNOSC,
-                        ulubione[
-                            index
-                        ]
-                    )) {
-                        ustaw_status(
-                            "Uszkodzony adres w zakladkach."
-                        );
-                        return false;
-                    }
-
-                    menu_ulubione_otwarte =
-                        false;
-
-                    Nawiguj(
-                        true,
-                        false
-                    );
-                }
-            }
-
-            return true;
-        }
-    }
-
-    if (menu_ustawienia_otwarte) {
-        const int menu_x =
-            WIN_X +
-            WIN_W -
-            190;
-
-        if (punkt_w_prostokacie(
-                mx,
-                my,
-                menu_x,
-                menu_y,
-                180,
-                48)) {
-
-            return true;
-        }
-    }
-
-    return false;
-}
-
-void klik_zakladki(
-    int mx,
-    int my
-) {
-    for (int i = 0;
-         i <
-            liczba_zakladek;
-         ++i) {
-
-        const int tx =
-            WIN_X +
-            10 +
-            i *
-                110;
-
-        if (!punkt_w_prostokacie(
-                mx,
-                my,
-                tx,
-                WIN_Y +
-                    ZAKLADKI_Y,
-                100,
-                ZAKLADKI_WYS)) {
-
-            continue;
-        }
-
-        if (liczba_zakladek >
-                1 &&
-            punkt_w_prostokacie(
-                mx,
-                my,
-                tx +
-                    80,
-                WIN_Y +
-                    ZAKLADKI_Y +
-                    2,
-                16,
-                20)) {
-
-            zamknij_zakladke(
-                i
-            );
-        } else {
-            aktywna_zakladka =
-                i;
-
-            max_przewin_y =
-                0;
-
-            ustaw_status(
-                "Przelaczono zakladke."
-            );
-        }
-
-        return;
-    }
-
-    if (liczba_zakladek <
-        MAX_ZAKLADKI) {
-
-        const int plus_x =
-            WIN_X +
-            10 +
-            liczba_zakladek *
-                110;
-
-        if (punkt_w_prostokacie(
-                mx,
-                my,
-                plus_x,
-                WIN_Y +
-                    ZAKLADKI_Y,
-                24,
-                24)) {
-
-            (void)nowa_zakladka();
-        }
+void zaktualizuj_pasek_stanu_tekst(const char* txt) {
+    if (g_husarz.pasek_stanu) {
+        g_husarz.pasek_stanu->ustaw_tekst(0, txt ? txt : "");
     }
 }
 
-void klik_narzedzia(
-    int mx,
-    int my
-) {
-    if (liczba_zakladek <= 0) {
-        return;
+void odswiez_pasek_stanu_natychmiast() {
+    if (g_husarz.pasek_stanu && g_husarz.okno && !KontekstRysowania::g_tlum_rysowanie_globalne) {
+        KontekstRysowania ctx;
+        g_husarz.pasek_stanu->rysuj(ctx, true);
+        gui_odswiez();
     }
-
-    const int y =
-        WIN_Y +
-        NARZEDZIA_Y;
-
-    if (punkt_w_prostokacie(
-            mx,
-            my,
-            WIN_X +
-                8,
-            y +
-                4,
-            34,
-            28)) {
-
-        if (historia_idx >
-            0) {
-
-            --historia_idx;
-
-            if (!kopiuj_limit(
-                zakladki[
-                    aktywna_zakladka
-                ].url,
-                URL_POJEMNOSC,
-                historia[
-                    historia_idx
-                ]
-            )) {
-                ++historia_idx;
-                ustaw_status(
-                    "Uszkodzony wpis historii."
-                );
-                return;
-            }
-
-            Nawiguj(
-                false,
-                false
-            );
-        }
-
-        w_polu_url =
-            false;
-
-        return;
-    }
-
-    if (punkt_w_prostokacie(
-            mx,
-            my,
-            WIN_X +
-                44,
-            y +
-                4,
-            34,
-            28)) {
-
-        if (historia_idx >= 0 &&
-            historia_idx <
-                historia_max) {
-
-            ++historia_idx;
-
-            if (!kopiuj_limit(
-                zakladki[
-                    aktywna_zakladka
-                ].url,
-                URL_POJEMNOSC,
-                historia[
-                    historia_idx
-                ]
-            )) {
-                --historia_idx;
-                ustaw_status(
-                    "Uszkodzony wpis historii."
-                );
-                return;
-            }
-
-            Nawiguj(
-                false,
-                false
-            );
-        }
-
-        w_polu_url =
-            false;
-
-        return;
-    }
-
-    if (punkt_w_prostokacie(
-            mx,
-            my,
-            WIN_X +
-                80,
-            y +
-                4,
-            34,
-            28)) {
-
-        Nawiguj(
-            false,
-            false
-        );
-
-        w_polu_url =
-            false;
-
-        return;
-    }
-
-    const int adres_x =
-        WIN_X +
-        122;
-
-    int adres_w =
-        WIN_W -
-        122 -
-        286 -
-        8;
-
-    if (adres_w <
-        80) {
-
-        adres_w =
-            80;
-    }
-
-    if (punkt_w_prostokacie(
-            mx,
-            my,
-            adres_x,
-            y +
-                4,
-            adres_w,
-            28)) {
-
-        w_polu_url =
-            true;
-
-        menu_ulubione_otwarte =
-            false;
-
-        menu_ustawienia_otwarte =
-            false;
-
-        ustaw_status(
-            "Edycja adresu URL..."
-        );
-
-        return;
-    }
-
-    if (punkt_w_prostokacie(
-            mx,
-            my,
-            WIN_X +
-                WIN_W -
-                286,
-            y +
-                4,
-            28,
-            28)) {
-
-        zakladki[
-            aktywna_zakladka
-        ].url[0] =
-            '\0';
-
-        w_polu_url =
-            true;
-
-        return;
-    }
-
-    if (punkt_w_prostokacie(
-            mx,
-            my,
-            WIN_X +
-                WIN_W -
-                254,
-            y +
-                4,
-            54,
-            28)) {
-
-        w_polu_url =
-            false;
-
-        Nawiguj(
-            true,
-            true
-        );
-
-        return;
-    }
-
-    if (punkt_w_prostokacie(
-            mx,
-            my,
-            WIN_X +
-                WIN_W -
-                196,
-            y +
-                4,
-            88,
-            28)) {
-
-        menu_ulubione_otwarte =
-            !menu_ulubione_otwarte;
-
-        menu_ustawienia_otwarte =
-            false;
-
-        w_polu_url =
-            false;
-
-        return;
-    }
-
-    if (punkt_w_prostokacie(
-            mx,
-            my,
-            WIN_X +
-                WIN_W -
-                104,
-            y +
-                4,
-            96,
-            28)) {
-
-        menu_ustawienia_otwarte =
-            !menu_ustawienia_otwarte;
-
-        menu_ulubione_otwarte =
-            false;
-
-        w_polu_url =
-            false;
-
-        return;
-    }
-
-    w_polu_url =
-        false;
 }
 
-bool obsluz_klik(
-    int mx,
-    int my
-) {
-    if (aplikacja_zminimalizowana) {
-        return true;
+class WidokStrony : public Kontrolka {
+public:
+    WidokStrony() {
+        czy_moze_miec_fokus_ = true;
+        preferowany_rozmiar_ = Rozmiar(-1, -1);
+        wyrownanie_poziome_ = WyrownaniePoziome::Rozciagnij;
+        wyrownanie_pionowe_ = WyrownaniePionowe::Rozciagnij;
     }
 
-    if (!punkt_w_prostokacie(
-            mx,
-            my,
-            WIN_X,
-            WIN_Y,
-            WIN_W,
-            WIN_H)) {
+    void rysuj_siebie(KontekstRysowania& ctx) override {
+        Prostokat r(0, 0, obszar_.szerokosc, obszar_.wysokosc);
+        ctx.rysuj_prostokat(r, motyw_kolor(MOTYW_KOLOR_POLETEKSTOWE));
 
-        return false;
-    }
-
-    if (klik_menu(
-            mx,
-            my)) {
-
-        return true;
-    }
-
-    /*
-     * Klik poza otwartym menu zamyka je.
-     */
-    if (menu_ulubione_otwarte ||
-        menu_ustawienia_otwarte) {
-
-        menu_ulubione_otwarte =
-            false;
-
-        menu_ustawienia_otwarte =
-            false;
-    }
-
-    if (punkt_w_prostokacie(
-            mx,
-            my,
-            WIN_X,
-            WIN_Y,
-            WIN_W,
-            TYTUL_WYS)) {
-
-        if (punkt_w_prostokacie(
-                mx,
-                my,
-                WIN_X +
-                    WIN_W -
-                    74,
-                WIN_Y +
-                    4,
-                20,
-                20)) {
-
-            zminimalizuj();
-
-            return true;
-        }
-
-        if (punkt_w_prostokacie(
-                mx,
-                my,
-                WIN_X +
-                    WIN_W -
-                    50,
-                WIN_Y +
-                    4,
-                20,
-                20)) {
-
-            przelacz_maksymalizacje();
-
-            return true;
-        }
-
-        if (punkt_w_prostokacie(
-                mx,
-                my,
-                WIN_X +
-                    WIN_W -
-                    26,
-                WIN_Y +
-                    4,
-                20,
-                20)) {
-
-            return false;
-        }
-
-        if (!zmaksymalizowane) {
-            dragging =
-                true;
-            gui_ustaw_capture_myszy(true);
-
-            drag_off_x =
-                mx -
-                WIN_X;
-
-            drag_off_y =
-                my -
-                WIN_Y;
-
-            w_polu_url =
-                false;
-        }
-
-        return true;
-    }
-
-    if (punkt_w_prostokacie(
-            mx,
-            my,
-            WIN_X,
-            WIN_Y +
-                ZAKLADKI_Y,
-            WIN_W,
-            ZAKLADKI_WYS)) {
-
-        klik_zakladki(
-            mx,
-            my
-        );
-
-        return true;
-    }
-
-    if (punkt_w_prostokacie(
-            mx,
-            my,
-            WIN_X,
-            WIN_Y +
-                NARZEDZIA_Y,
-            WIN_W,
-            NARZEDZIA_WYS)) {
-
-        klik_narzedzia(
-            mx,
-            my
-        );
-
-        return true;
-    }
-
-    w_polu_url =
-        false;
-
-    return true;
-}
-
-/* =========================================================================
- * 21. KLAWIATURA
- * ========================================================================= */
-
-void obsluz_znak(
-    char znak,
-    int* ansi_stan
-) {
-    if (!ansi_stan ||
-        liczba_zakladek <= 0) {
-
-        return;
-    }
-
-    Zakladka& z =
-        zakladki[
-            aktywna_zakladka
-        ];
-
-    if (*ansi_stan == 0 &&
-        znak ==
-            '\x1B') {
-
-        *ansi_stan =
-            1;
-
-        return;
-    }
-
-    if (*ansi_stan == 1) {
-        if (znak ==
-            '[') {
-
-            *ansi_stan =
-                2;
-
+        if (liczba_zakladek <= 0) {
             return;
         }
 
-        *ansi_stan =
-            0;
-
-        return;
-    }
-
-    if (*ansi_stan == 2) {
-        *ansi_stan =
-            0;
-
-        if (znak ==
-            'A') {
-
-            ustaw_scroll(
-                z.przewin_y -
-                100
-            );
-        } else if (znak ==
-                   'B') {
-
-            ustaw_scroll(
-                z.przewin_y +
-                100
-            );
+        Zakladka& z = zakladki[aktywna_zakladka];
+        const char* tresc = z.tresc;
+        if (!tresc || tresc[0] == '\0') {
+            tresc = "Wpisz adres strony lub zapytanie i wybierz Przejdz.";
         }
 
-        return;
+        Renderer ren{
+            &ctx,
+            8,
+            8,
+            obszar_.szerokosc > 24 ? obszar_.szerokosc - 24 : obszar_.szerokosc,
+            obszar_.wysokosc,
+            z.przewin_y,
+            0,
+            0,
+            20,
+            motyw_kolor(MOTYW_KOLOR_TEKST),
+            1,
+            false
+        };
+
+        if (z.to_jest_html) {
+            renderuj_html(ren, tresc);
+        } else {
+            renderer_tekst(ren, tresc);
+        }
+
+        przelicz_scroll(ren, obszar_.wysokosc > 16 ? obszar_.wysokosc - 16 : 1);
+
+        if (g_husarz.suwak_pionowy) {
+            g_husarz.suwak_pionowy->ustaw_zakres(0, max_przewin_y);
+            g_husarz.suwak_pionowy->ustaw_wartosc(z.przewin_y);
+            g_husarz.suwak_pionowy->ustaw_widoczna(max_przewin_y > 0);
+        }
     }
 
-    *ansi_stan =
-        0;
-
-    if (!w_polu_url) {
-        return;
+    void obsluz_rolke(ZdarzenieRolki& e) override {
+        if (liczba_zakladek <= 0) return;
+        int krok = (e.delta_y < 0) ? -60 : 60;
+        if (g_husarz.przewin_o(krok)) {
+            e.obsluzone = true;
+        }
     }
 
-    if (znak ==
-            '\n' ||
-        znak ==
-            '\r') {
-
-        w_polu_url =
-            false;
-
-        Nawiguj(
-            true,
-            true
-        );
-
-        return;
+    void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e) override {
+        Kontrolka::obsluz_wcisniecie_myszy(e);
     }
 
-    if (znak ==
-        '\b') {
+    void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
+        if (liczba_zakladek <= 0) return;
+        uint32_t cmd = e.polecenie();
+        int dy = 0;
+        if (cmd == 0x48) { // Up
+            dy = -30;
+        } else if (cmd == 0x50) { // Down
+            dy = 30;
+        } else if (cmd == 0x49) { // PageUp
+            dy = -(obszar_.wysokosc > 40 ? obszar_.wysokosc - 40 : 40);
+        } else if (cmd == 0x51) { // PageDown
+            dy = (obszar_.wysokosc > 40 ? obszar_.wysokosc - 40 : 40);
+        } else if (cmd == 0x47) { // Home
+            g_husarz.przewin_do(0);
+            e.obsluzone = true;
+            return;
+        } else if (cmd == 0x4f) { // End
+            g_husarz.przewin_do(max_przewin_y);
+            e.obsluzone = true;
+            return;
+        }
+        if (dy != 0) {
+            if (g_husarz.przewin_o(dy)) {
+                e.obsluzone = true;
+            }
+        }
+    }
+};
 
-        usun_ostatni_utf8(
-            z.url,
-            sizeof(
-                z.url
-            )
-        );
+class OknoHusarz : public Okno {
+public:
+    explicit OknoHusarz(const char* tytul, int szer = DOMYSLNY_WIN_W, int wys = DOMYSLNY_WIN_H)
+        : Okno(tytul, szer, wys) {}
 
-        return;
+    void obsluz_zdarzenie(const bws_zdarzenie& ev) override {
+        if (ev.typ == BWS_ZDARZENIE_OTWORZ_PLIK) {
+            char nowa_sciezka[URL_POJEMNOSC] = {};
+            if (pobierz_argument_startowy(nowa_sciezka, sizeof(nowa_sciezka)) && nowa_sciezka[0] != '\0') {
+                g_husarz.przejdz_do_url(nowa_sciezka);
+            }
+            return;
+        }
+
+        if (ev.typ == BWS_ZDARZENIE_KLAWISZ || ev.typ == BWS_ZDARZENIE_KLAWISZ_FIZYCZNY) {
+            bool fizyczny = (ev.typ == BWS_ZDARZENIE_KLAWISZ_FIZYCZNY);
+            bool wcisniety = !fizyczny || ev.x != 0;
+            if (wcisniety) {
+                uint32_t kod = ev.kod;
+                bool usb = (kod & BWS_KEY_SOURCE_USB) != 0;
+                uint32_t baza = usb ? (kod & 0xFFU) : (kod & 0x7FU);
+                bool ctrl = (ev.przyciski & BWS_MOD_CTRL) != 0;
+                bool alt = (ev.przyciski & BWS_MOD_ALT) != 0;
+
+                // F5 - Odswiez
+                bool is_f5 = (kod == 0x3F || (usb && baza == 0x3E) || (!usb && baza == 0x3F));
+                if (is_f5) {
+                    g_husarz.odswiez();
+                    return;
+                }
+
+                // Esc - Zatrzymaj
+                bool is_esc = (kod == 27 || (usb && baza == 41) || (!usb && baza == 1));
+                if (is_esc) {
+                    g_husarz.zatrzymaj();
+                    return;
+                }
+
+                if (ctrl) {
+                    // Ctrl+L - Zaznacz pasek adresu
+                    if (kod == 'l' || kod == 'L' || (usb && baza == 15) || (!usb && baza == 0x26)) {
+                        if (g_husarz.txt_adres) {
+                            ustaw_fokus(g_husarz.txt_adres);
+                            g_husarz.txt_adres->zaznacz_wszystko();
+                        }
+                        return;
+                    }
+                    // Ctrl+R - Odswiez
+                    if (kod == 'r' || kod == 'R' || (usb && baza == 21) || (!usb && baza == 0x13)) {
+                        g_husarz.odswiez();
+                        return;
+                    }
+                    // Ctrl+T - Nowa karta
+                    if (kod == 't' || kod == 'T' || (usb && baza == 23) || (!usb && baza == 0x14)) {
+                        g_husarz.nowa_zakladka_gui();
+                        return;
+                    }
+                    // Ctrl+W - Zamknij karte
+                    if (kod == 'w' || kod == 'W' || (usb && baza == 26) || (!usb && baza == 0x11)) {
+                        g_husarz.zamknij_zakladke_gui(aktywna_zakladka);
+                        return;
+                    }
+                    // Ctrl+D - Dodaj do zakladek
+                    if (kod == 'd' || kod == 'D' || (usb && baza == 7) || (!usb && baza == 0x20)) {
+                        g_husarz.dodaj_obecna_do_ulubionych_akcja();
+                        return;
+                    }
+                }
+
+                if (alt) {
+                    // Alt+Left - Wstecz
+                    if ((usb && baza == 80) || (!usb && baza == 0x4B)) {
+                        g_husarz.wstecz();
+                        return;
+                    }
+                    // Alt+Right - Dalej
+                    if ((usb && baza == 79) || (!usb && baza == 0x4D)) {
+                        g_husarz.dalej();
+                        return;
+                    }
+                    // Alt+Home - Strona domowa
+                    if ((usb && baza == 74) || (!usb && baza == 0x47)) {
+                        g_husarz.dom();
+                        return;
+                    }
+                }
+            }
+        }
+
+        Okno::obsluz_zdarzenie(ev);
+    }
+};
+
+void HusarzApp::zbuduj_ui() {
+    if (!okno) return;
+
+    Panel* korzen = new Panel(Orientacja::Pionowa);
+    korzen->ustaw_wypelnienie(Marginesy(0, 0, 0, 0));
+    korzen->ustaw_odstep(0);
+    okno->ustaw_kontrolke_glowna(korzen);
+
+    // 1. Menu Glowne
+    MenuGlowne& m = korzen->dodaj<MenuGlowne>();
+    menu = &m;
+
+    Menu& m_plik = m.menu().dodaj_podmenu("Plik", 100);
+    m_plik.dodaj_element("Nowa karta (Ctrl+T)", 101, [](ElementMenu&, void*) { g_husarz.nowa_zakladka_gui(); });
+    m_plik.dodaj_element("Zamknij kartę (Ctrl+W)", 102, [](ElementMenu&, void*) { g_husarz.zamknij_zakladke_gui(aktywna_zakladka); });
+    m_plik.dodaj_separator();
+    m_plik.dodaj_element("Zakończ (Alt+F4)", 109, [](ElementMenu&, void*) { if (g_husarz.app) g_husarz.app->zakoncz(); });
+
+    Menu& m_edycja = m.menu().dodaj_podmenu("Edycja", 200);
+    m_edycja.dodaj_element("Zaznacz adres (Ctrl+L)", 201, [](ElementMenu&, void*) {
+        if (g_husarz.txt_adres && g_husarz.okno) {
+            g_husarz.okno->ustaw_fokus(g_husarz.txt_adres);
+            g_husarz.txt_adres->zaznacz_wszystko();
+        }
+    });
+    m_edycja.dodaj_element("Kopiuj adres", 202, [](ElementMenu&, void*) { g_husarz.kopiuj_adres_do_schowka(); });
+    m_edycja.dodaj_element("Wklej adres ze schowka", 203, [](ElementMenu&, void*) { g_husarz.wklej_adres_ze_schowka(); });
+
+    Menu& m_widok = m.menu().dodaj_podmenu("Widok", 300);
+    m_widok.dodaj_element("Odśwież stronę (F5)", 301, [](ElementMenu&, void*) { g_husarz.odswiez(); });
+    m_widok.dodaj_separator();
+    m_widok.dodaj_element("Przewiń na górę (Home)", 302, [](ElementMenu&, void*) { g_husarz.przewin_do(0); });
+    m_widok.dodaj_element("Przewiń na dół (End)", 303, [](ElementMenu&, void*) { g_husarz.przewin_do(max_przewin_y); });
+
+    Menu& m_nawigacja = m.menu().dodaj_podmenu("Nawigacja", 400);
+    m_nawigacja.dodaj_element("Wstecz (Alt+Lewo)", 401, [](ElementMenu&, void*) { g_husarz.wstecz(); });
+    m_nawigacja.dodaj_element("Dalej (Alt+Prawo)", 402, [](ElementMenu&, void*) { g_husarz.dalej(); });
+    m_nawigacja.dodaj_element("Strona domowa (Alt+Home)", 403, [](ElementMenu&, void*) { g_husarz.dom(); });
+    m_nawigacja.dodaj_separator();
+    m_nawigacja.dodaj_element("Przejdź do adresu (Enter)", 404, [](ElementMenu&, void*) {
+        if (g_husarz.txt_adres) g_husarz.przejdz_do_url(g_husarz.txt_adres->tekst());
+    });
+
+    Menu& m_zakladki = m.menu().dodaj_podmenu("Zakładki", 500);
+    m_zakladki.dodaj_element("Dodaj do zakładek (Ctrl+D)", 501, [](ElementMenu&, void*) { g_husarz.dodaj_obecna_do_ulubionych_akcja(); });
+    m_zakladki.dodaj_separator();
+    m_zakladki.dodaj_element("Bursztyn OS (http://example.com/)", 502, [](ElementMenu&, void*) { g_husarz.przejdz_do_url("http://example.com/"); });
+    m_zakladki.dodaj_element("Wikipedia (http://wikipedia.org/)", 503, [](ElementMenu&, void*) { g_husarz.przejdz_do_url("http://wikipedia.org/"); });
+
+    Menu& m_pomoc = m.menu().dodaj_podmenu("Pomoc", 600);
+    m_pomoc.dodaj_element("O programie Husarz...", 601, [](ElementMenu&, void*) { g_husarz.pokaz_o_programie(); });
+
+    // 2. Pasek Kart
+    Panel& p_kart = korzen->dodaj<Panel>(Orientacja::Pozioma);
+    pasek_kart = &p_kart;
+    p_kart.ustaw_preferowany_rozmiar(Rozmiar(-1, 28));
+    p_kart.ustaw_wypelnienie(Marginesy(2, 2, 2, 2));
+    p_kart.ustaw_odstep(2);
+
+    for (int i = 0; i < MAX_ZAKLADKI; ++i) {
+        Przycisk& b_k = p_kart.dodaj<Przycisk>("Karta");
+        btn_karty[i] = &b_k;
+        b_k.ustaw_preferowany_rozmiar(Rozmiar(120, 24));
+        b_k.przy_kliknieciu([](Przycisk*, void* d) {
+            int idx = static_cast<int>(reinterpret_cast<intptr_t>(d));
+            g_husarz.przelacz_zakladke(idx);
+        }, reinterpret_cast<void*>(static_cast<intptr_t>(i)));
+
+        Przycisk& b_z = p_kart.dodaj<Przycisk>("x");
+        btn_zamknij_karty[i] = &b_z;
+        b_z.ustaw_preferowany_rozmiar(Rozmiar(20, 24));
+        b_z.przy_kliknieciu([](Przycisk*, void* d) {
+            int idx = static_cast<int>(reinterpret_cast<intptr_t>(d));
+            g_husarz.zamknij_zakladke_gui(idx);
+        }, reinterpret_cast<void*>(static_cast<intptr_t>(i)));
     }
 
-    const uint8_t b =
-        static_cast<uint8_t>(
-            znak
-        );
+    Przycisk& b_nowa = p_kart.dodaj<Przycisk>("+");
+    btn_nowa_karta = &b_nowa;
+    b_nowa.ustaw_preferowany_rozmiar(Rozmiar(24, 24));
+    b_nowa.przy_kliknieciu([](Przycisk*, void*) { g_husarz.nowa_zakladka_gui(); });
 
-    if (b >=
-        0x20U) {
+    // 3. Pasek Narzedzi
+    Panel& p_narz = korzen->dodaj<Panel>(Orientacja::Pozioma);
+    pasek_narzedzi = &p_narz;
+    p_narz.ustaw_preferowany_rozmiar(Rozmiar(-1, 32));
+    p_narz.ustaw_wypelnienie(Marginesy(3, 3, 3, 3));
+    p_narz.ustaw_odstep(4);
 
-        if (!dopisz_znak_limit(
-                z.url,
-                sizeof(z.url),
-                znak)) {
+    Przycisk& b_wst = p_narz.dodaj<Przycisk>("Wstecz");
+    btn_wstecz = &b_wst;
+    b_wst.ustaw_preferowany_rozmiar(Rozmiar(56, 26));
+    b_wst.przy_kliknieciu([](Przycisk*, void*) { g_husarz.wstecz(); });
 
-            ustaw_status(
-                "Adres URL osiagnal limit 2047 bajtow."
-            );
+    Przycisk& b_dal = p_narz.dodaj<Przycisk>("Dalej");
+    btn_dalej = &b_dal;
+    b_dal.ustaw_preferowany_rozmiar(Rozmiar(52, 26));
+    b_dal.przy_kliknieciu([](Przycisk*, void*) { g_husarz.dalej(); });
+
+    Przycisk& b_ods = p_narz.dodaj<Przycisk>("Odśwież");
+    btn_odswiez = &b_ods;
+    b_ods.ustaw_preferowany_rozmiar(Rozmiar(64, 26));
+    b_ods.przy_kliknieciu([](Przycisk*, void*) { g_husarz.odswiez(); });
+
+    Przycisk& b_zat = p_narz.dodaj<Przycisk>("Zatrzymaj");
+    btn_zatrzymaj = &b_zat;
+    b_zat.ustaw_preferowany_rozmiar(Rozmiar(70, 26));
+    b_zat.przy_kliknieciu([](Przycisk*, void*) { g_husarz.zatrzymaj(); });
+
+    Przycisk& b_dom = p_narz.dodaj<Przycisk>("Dom");
+    btn_dom = &b_dom;
+    b_dom.ustaw_preferowany_rozmiar(Rozmiar(48, 26));
+    b_dom.przy_kliknieciu([](Przycisk*, void*) { g_husarz.dom(); });
+
+    PoleTekstowe& t_adr = p_narz.dodaj<PoleTekstowe>("http://example.com/");
+    txt_adres = &t_adr;
+    t_adr.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+    t_adr.ustaw_preferowany_rozmiar(Rozmiar(-1, 26));
+    t_adr.ustaw_minimalny_rozmiar(Rozmiar(120, 26));
+    t_adr.ustaw_tekst_zastepczy("Wpisz adres URL...");
+    t_adr.przy_zatwierdzeniu([](PoleTekstowe*, const char* t, void*) { g_husarz.przejdz_do_url(t); });
+
+    Przycisk& b_idz = p_narz.dodaj<Przycisk>("Przejdź");
+    btn_idz = &b_idz;
+    b_idz.ustaw_preferowany_rozmiar(Rozmiar(62, 26));
+    b_idz.przy_kliknieciu([](Przycisk*, void*) {
+        if (g_husarz.txt_adres) g_husarz.przejdz_do_url(g_husarz.txt_adres->tekst());
+    });
+
+    Przycisk& b_zak = p_narz.dodaj<Przycisk>("Zakładki");
+    btn_zakladki = &b_zak;
+    b_zak.ustaw_preferowany_rozmiar(Rozmiar(72, 26));
+    b_zak.przy_kliknieciu([](Przycisk*, void*) { g_husarz.pokaz_zakladki(); });
+
+    // 4. Obszar Glowny (Widok Strony + Pionowy Scrollbar)
+    Panel& p_glowny = korzen->dodaj<Panel>(Orientacja::Pozioma);
+    p_glowny.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+    p_glowny.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+    p_glowny.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+    p_glowny.ustaw_wypelnienie(Marginesy(0, 0, 0, 0));
+    p_glowny.ustaw_odstep(0);
+
+    widok_strony = new WidokStrony();
+    p_glowny.dodaj_kontrolke(widok_strony);
+
+    suwak_pionowy = new PasekPrzewijania();
+    suwak_pionowy->ustaw_orientacje(Orientacja::Pionowa);
+    suwak_pionowy->ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+    suwak_pionowy->ustaw_preferowany_rozmiar(Rozmiar(16, -1));
+    suwak_pionowy->przy_przewijaniu([](PasekPrzewijania*, int64_t val, void*) {
+        if (liczba_zakladek > 0) {
+            zakladki[aktywna_zakladka].przewin_y = static_cast<int>(val);
+            if (g_husarz.widok_strony) g_husarz.widok_strony->uniewaznij();
+        }
+    });
+    p_glowny.dodaj_kontrolke(suwak_pionowy);
+
+    // 5. Pasek Stanu
+    PasekStanu& sb = korzen->dodaj<PasekStanu>();
+    pasek_stanu = &sb;
+    sb.ustaw_preferowany_rozmiar(Rozmiar(-1, 24));
+    sb.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+    sb.dodaj_sekcje("Gotowy", 200, RozmiarSekcjiStanu::Rozciagnij);
+    sb.dodaj_sekcje("HTTP", 70, RozmiarSekcjiStanu::Stala);
+    sb.dodaj_sekcje("Karta 1/1", 90, RozmiarSekcjiStanu::Stala);
+    sb.dodaj_sekcje("UTF-8", 60, RozmiarSekcjiStanu::Stala);
+
+    // 6. Menu Kontekstowe dla Widoku Strony
+    menu_kontekstowe = new MenuKontekstowe();
+    menu_kontekstowe->menu().dodaj_element("Wstecz", 1, [](ElementMenu&, void*) { g_husarz.wstecz(); });
+    menu_kontekstowe->menu().dodaj_element("Dalej", 2, [](ElementMenu&, void*) { g_husarz.dalej(); });
+    menu_kontekstowe->menu().dodaj_element("Odśwież", 3, [](ElementMenu&, void*) { g_husarz.odswiez(); });
+    menu_kontekstowe->menu().dodaj_separator();
+    menu_kontekstowe->menu().dodaj_element("Kopiuj adres", 4, [](ElementMenu&, void*) { g_husarz.kopiuj_adres_do_schowka(); });
+    menu_kontekstowe->menu().dodaj_element("Dodaj do zakładek", 5, [](ElementMenu&, void*) { g_husarz.dodaj_obecna_do_ulubionych_akcja(); });
+    widok_strony->ustaw_menu_kontekstowe(menu_kontekstowe);
+
+    menu_zakladki_popup = new MenuKontekstowe();
+}
+
+void HusarzApp::aktualizuj_pasek_kart() {
+    for (int i = 0; i < MAX_ZAKLADKI; ++i) {
+        if (!btn_karty[i] || !btn_zamknij_karty[i]) continue;
+        if (i < liczba_zakladek) {
+            char tytul[32] = {};
+            if (zakladki[i].url[0] != '\0') {
+                const char* u = zakladki[i].url;
+                if (u[0] == 'h' && u[1] == 't' && u[2] == 't' && u[3] == 'p') {
+                    if (u[4] == ':') u += 7;
+                    else if (u[4] == 's' && u[5] == ':') u += 8;
+                }
+                size_t l = 0;
+                if (i == aktywna_zakladka) {
+                    tytul[l++] = '>';
+                    tytul[l++] = ' ';
+                }
+                while (u[0] && u[0] != '/' && l < sizeof(tytul) - 1) {
+                    tytul[l++] = *u++;
+                }
+                tytul[l] = '\0';
+            } else {
+                tytul[0] = 'K'; tytul[1] = 'a'; tytul[2] = 'r'; tytul[3] = 't'; tytul[4] = 'a';
+                tytul[5] = ' '; tytul[6] = static_cast<char>('1' + i); tytul[7] = '\0';
+            }
+            btn_karty[i]->ustaw_tekst(tytul);
+            btn_karty[i]->ustaw_widoczna(true);
+            btn_zamknij_karty[i]->ustaw_widoczna(liczba_zakladek > 1);
+        } else {
+            btn_karty[i]->ustaw_widoczna(false);
+            btn_zamknij_karty[i]->ustaw_widoczna(false);
+        }
+    }
+    if (btn_nowa_karta) {
+        btn_nowa_karta->ustaw_widoczna(liczba_zakladek < MAX_ZAKLADKI);
+    }
+    if (okno) {
+        okno->przelicz_uklad();
+        okno->uniewaznij();
+    }
+}
+
+void HusarzApp::aktualizuj_pasek_stanu() {
+    if (!pasek_stanu) return;
+    pasek_stanu->ustaw_tekst(0, status_bufor[0] != '\0' ? status_bufor : "Gotowy");
+    if (liczba_zakladek > 0) {
+        bool https = (zakladki[aktywna_zakladka].url[0] == 'h' &&
+                      zakladki[aktywna_zakladka].url[1] == 't' &&
+                      zakladki[aktywna_zakladka].url[2] == 't' &&
+                      zakladki[aktywna_zakladka].url[3] == 'p' &&
+                      zakladki[aktywna_zakladka].url[4] == 's');
+        pasek_stanu->ustaw_tekst(1, https ? "HTTPS" : "HTTP");
+
+        char kbuf[32] = {};
+        kbuf[0] = 'K'; kbuf[1] = 'a'; kbuf[2] = 'r'; kbuf[3] = 't'; kbuf[4] = 'a'; kbuf[5] = ' ';
+        kbuf[6] = static_cast<char>('1' + aktywna_zakladka);
+        kbuf[7] = '/';
+        kbuf[8] = static_cast<char>('0' + liczba_zakladek);
+        kbuf[9] = '\0';
+        pasek_stanu->ustaw_tekst(2, kbuf);
+    }
+    pasek_stanu->ustaw_tekst(3, "UTF-8");
+}
+
+void HusarzApp::przelacz_zakladke(int idx) {
+    if (idx < 0 || idx >= liczba_zakladek) return;
+    aktywna_zakladka = idx;
+    max_przewin_y = 0;
+    if (txt_adres) {
+        txt_adres->ustaw_tekst(zakladki[idx].url);
+    }
+    ustaw_status("Przełączono kartę.");
+    aktualizuj_pasek_kart();
+    aktualizuj_pasek_stanu();
+    if (widok_strony) {
+        widok_strony->uniewaznij();
+    }
+}
+
+void HusarzApp::nowa_zakladka_gui() {
+    if (nowa_zakladka()) {
+        (void)kopiuj_limit(zakladki[aktywna_zakladka].url, sizeof(zakladki[aktywna_zakladka].url), "http://example.com/");
+        if (txt_adres) {
+            txt_adres->ustaw_tekst(zakladki[aktywna_zakladka].url);
+        }
+        aktualizuj_pasek_kart();
+        aktualizuj_pasek_stanu();
+        if (widok_strony) {
+            widok_strony->uniewaznij();
         }
     }
 }
 
-/* =========================================================================
- * 22. START / PETLA
- * ========================================================================= */
+void HusarzApp::zamknij_zakladke_gui(int idx) {
+    zamknij_zakladke(idx);
+    if (txt_adres && liczba_zakladek > 0) {
+        txt_adres->ustaw_tekst(zakladki[aktywna_zakladka].url);
+    }
+    aktualizuj_pasek_kart();
+    aktualizuj_pasek_stanu();
+    if (widok_strony) {
+        widok_strony->uniewaznij();
+    }
+}
+
+void HusarzApp::przejdz_do_url(const char* url) {
+    if (liczba_zakladek <= 0) return;
+    if (!url || url[0] == '\0') {
+        ustaw_status("Wpisz adres URL.");
+        aktualizuj_pasek_stanu();
+        return;
+    }
+    kopiuj_limit(zakladki[aktywna_zakladka].url, sizeof(zakladki[aktywna_zakladka].url), url);
+    Nawiguj(true, true);
+    if (txt_adres) {
+        txt_adres->ustaw_tekst(zakladki[aktywna_zakladka].url);
+    }
+    aktualizuj_pasek_kart();
+    aktualizuj_pasek_stanu();
+    if (widok_strony) {
+        widok_strony->uniewaznij();
+    }
+}
+
+void HusarzApp::wstecz() {
+    if (historia_idx > 0) {
+        --historia_idx;
+        kopiuj_limit(zakladki[aktywna_zakladka].url, URL_POJEMNOSC, historia[historia_idx]);
+        Nawiguj(false, false);
+        if (txt_adres) txt_adres->ustaw_tekst(zakladki[aktywna_zakladka].url);
+        aktualizuj_pasek_kart();
+        aktualizuj_pasek_stanu();
+        if (widok_strony) widok_strony->uniewaznij();
+    }
+}
+
+void HusarzApp::dalej() {
+    if (historia_idx >= 0 && historia_idx < historia_max) {
+        ++historia_idx;
+        kopiuj_limit(zakladki[aktywna_zakladka].url, URL_POJEMNOSC, historia[historia_idx]);
+        Nawiguj(false, false);
+        if (txt_adres) txt_adres->ustaw_tekst(zakladki[aktywna_zakladka].url);
+        aktualizuj_pasek_kart();
+        aktualizuj_pasek_stanu();
+        if (widok_strony) widok_strony->uniewaznij();
+    }
+}
+
+void HusarzApp::odswiez() {
+    Nawiguj(false, false);
+    aktualizuj_pasek_stanu();
+    if (widok_strony) widok_strony->uniewaznij();
+}
+
+void HusarzApp::zatrzymaj() {
+    ustaw_status("Zatrzymano wczytywanie.");
+    aktualizuj_pasek_stanu();
+}
+
+void HusarzApp::dom() {
+    przejdz_do_url("http://example.com/");
+}
+
+void HusarzApp::dodaj_obecna_do_ulubionych_akcja() {
+    dodaj_obecna_do_ulubionych();
+    zapisz_ulubione();
+    aktualizuj_pasek_stanu();
+}
+
+void HusarzApp::kopiuj_adres_do_schowka() {
+    if (liczba_zakladek <= 0) return;
+    const char* url = zakladki[aktywna_zakladka].url;
+    size_t len = dlugosc_limit(url, URL_POJEMNOSC);
+    if (len > 0) {
+        clipboard_set("text/plain", url, len + 1);
+        ustaw_status("Skopiowano adres do schowka.");
+        aktualizuj_pasek_stanu();
+    }
+}
+
+void HusarzApp::wklej_adres_ze_schowka() {
+    char bufor[URL_POJEMNOSC]{};
+    uint64_t len = 0;
+    if (clipboard_read("text/plain", bufor, sizeof(bufor) - 1, &len) && len > 0) {
+        bufor[len] = '\0';
+        przejdz_do_url(bufor);
+    }
+}
+
+void HusarzApp::przewin_do(int y) {
+    if (liczba_zakladek <= 0) return;
+    if (y < 0) y = 0;
+    if (y > max_przewin_y) y = max_przewin_y;
+    zakladki[aktywna_zakladka].przewin_y = y;
+    if (suwak_pionowy) suwak_pionowy->ustaw_wartosc(y);
+    if (widok_strony) widok_strony->uniewaznij();
+}
+
+bool HusarzApp::przewin_o(int dy) {
+    if (liczba_zakladek <= 0) return false;
+    int stary = zakladki[aktywna_zakladka].przewin_y;
+    int nowy = stary + dy;
+    if (nowy < 0) nowy = 0;
+    if (nowy > max_przewin_y) nowy = max_przewin_y;
+    if (nowy != stary) {
+        zakladki[aktywna_zakladka].przewin_y = nowy;
+        if (suwak_pionowy) suwak_pionowy->ustaw_wartosc(nowy);
+        if (widok_strony) widok_strony->uniewaznij();
+        return true;
+    }
+    return false;
+}
+
+void HusarzApp::pokaz_o_programie() {
+    if (okno) {
+        Komunikat::informacja(okno->zarzadca_popupow(), "O programie Husarz",
+            "Husarz - Nowoczesna Przeglądarka WWW\n"
+            "Wersja 2.0 (BursztynUI Native)\n"
+            "Bursztyn OS - Ring 3 GUI\n"
+            "Obsługiwane protokoły: HTTP/1.1, HTTPS (TLS), DNS");
+    }
+}
+
+void HusarzApp::pokaz_zakladki() {
+    if (!okno || !btn_zakladki || !menu_zakladki_popup) return;
+    menu_zakladki_popup->menu().wyczysc();
+    menu_zakladki_popup->menu().dodaj_element("+ Dodaj bieżącą stronę", 10, [](ElementMenu&, void*) {
+        g_husarz.dodaj_obecna_do_ulubionych_akcja();
+    });
+    if (ulubione_ilosc > 0) {
+        menu_zakladki_popup->menu().dodaj_separator();
+        for (int i = 0; i < ulubione_ilosc; ++i) {
+            menu_zakladki_popup->menu().dodaj_element(ulubione[i], 100 + i, [](ElementMenu& e, void*) {
+                g_husarz.przejdz_do_url(e.tekst());
+            });
+        }
+    }
+    menu_zakladki_popup->pokaz_pod_kontrolka(okno->zarzadca_popupow(), *btn_zakladki);
+}
 
 void inicjalizuj_stan() {
-    liczba_zakladek =
-        0;
+    liczba_zakladek = 0;
+    aktywna_zakladka = 0;
+    historia_idx = -1;
+    historia_max = -1;
+    ulubione_ilosc = 0;
+    max_przewin_y = 0;
+    calkowita_wysokosc_strony = 0;
 
-    aktywna_zakladka =
-        0;
-
-    historia_idx =
-        -1;
-
-    historia_max =
-        -1;
-
-    ulubione_ilosc =
-        0;
-
-    menu_ulubione_otwarte =
-        false;
-
-    menu_ustawienia_otwarte =
-        false;
-
-    w_polu_url =
-        false;
-
-    zmaksymalizowane =
-        false;
-
-    aplikacja_zminimalizowana =
-        false;
-
-    dragging =
-        false;
-
-    max_przewin_y =
-        0;
-
-    calkowita_wysokosc_strony =
-        0;
-
-    gui_pobierz_rozdzielczosc(
-        &screen_w,
-        &screen_h
-    );
-
-    if (screen_w <= 0 ||
-        screen_h <=
-            PASEK_SYSTEMOWY_WYS) {
-
-        gui_zakoncz_aplikacje();
-    }
-
-    WIN_W =
-        screen_w <
-                DOMYSLNY_WIN_W
-            ? screen_w
-            : DOMYSLNY_WIN_W;
-
-    WIN_H =
-        screen_h -
-            PASEK_SYSTEMOWY_WYS <
-                DOMYSLNY_WIN_H
-            ? screen_h -
-                PASEK_SYSTEMOWY_WYS
-            : DOMYSLNY_WIN_H;
-
-    WIN_X =
-        (screen_w -
-         WIN_W) /
-        2;
-
-    WIN_Y =
-        40;
-
-    if (WIN_Y +
-            WIN_H >
-        screen_h -
-            PASEK_SYSTEMOWY_WYS) {
-
-        WIN_Y =
-            0;
-    }
-
-    ogranicz_okno_do_ekranu();
-
-    old_win_x =
-        WIN_X;
-
-    old_win_y =
-        WIN_Y;
-
-    old_win_w =
-        WIN_W;
-
-    old_win_h =
-        WIN_H;
-
-    ustaw_status(
-        "Gotowy."
-    );
+    ustaw_status("Gotowy.");
 
     if (!nowa_zakladka()) {
         gui_zakoncz_aplikacje();
@@ -6334,9 +5104,7 @@ void inicjalizuj_stan() {
 
     (void)kopiuj_limit(
         zakladki[0].url,
-        sizeof(
-            zakladki[0].url
-        ),
+        sizeof(zakladki[0].url),
         "http://example.com/"
     );
 
@@ -6345,255 +5113,36 @@ void inicjalizuj_stan() {
 
 } // namespace
 
+/* =========================================================================
+ * 21. PUNKT WEJSCIA RING 3
+ * ========================================================================= */
+
+extern "C" {
+    void* __dso_handle = nullptr;
+    int __cxa_atexit(void (*)(void*), void*, void*) { return 0; }
+}
+
 extern "C" [[noreturn]] void _start() {
+    AplikacjaGUI app;
+    g_husarz.app = &app;
+
+    OknoHusarz okno("Husarz - Przeglądarka WWW", DOMYSLNY_WIN_W, DOMYSLNY_WIN_H);
+    g_husarz.okno = &okno;
+    app.ustaw_glowne_okno(&okno);
+
+    g_husarz.zbuduj_ui();
+
     inicjalizuj_stan();
 
-    gui_ustaw_przejecie_myszy(
-        true
-    );
-
-    if (bws_utworz_warstwe(
-            WIN_X,
-            WIN_Y,
-            WIN_W,
-            WIN_H,
-            Z_ORDER_HUSSAR
-        ) < 0) {
-
-        zwolnij_wszystkie_zakladki();
-
-        gui_ustaw_przejecie_myszy(
-            false
-        );
-
-        gui_zakoncz_aplikacje();
+    char start_arg[URL_POJEMNOSC] = {};
+    if (pobierz_argument_startowy(start_arg, sizeof(start_arg)) && start_arg[0] != '\0') {
+        g_husarz.przejdz_do_url(start_arg);
+    } else {
+        g_husarz.przelacz_zakladke(0);
     }
 
-    RysujInterfejs(
-        true
-    );
+    app.uruchom(okno);
 
-    bool dziala =
-        true;
-
-    bool scroll_dragging =
-        false;
-
-    int scroll_drag_start_y =
-        0;
-
-    int scroll_drag_start_value =
-        0;
-
-    int ansi_stan =
-        0;
-
-    while (dziala) {
-        bws_zdarzenie zdarzenie{};
-        if (!gui_czekaj_na_zdarzenie(&zdarzenie)) continue;
-        if (zdarzenie.typ == BWS_ZDARZENIE_FOCUS && aplikacja_zminimalizowana)
-            aplikacja_zminimalizowana = false;
-        const int mx = zdarzenie.x;
-        const int my = zdarzenie.y;
-        const uint8_t mb = static_cast<uint8_t>(zdarzenie.przyciski);
-
-        const bool lewy =
-            (mb &
-             1U) != 0;
-
-        const bool klik = zdarzenie.typ == BWS_ZDARZENIE_MYSZ_DOWN;
-
-        const bool pusc = zdarzenie.typ == BWS_ZDARZENIE_MYSZ_UP;
-
-        bool trzeba_rysowac =
-            false;
-
-        bool pelne_tlo =
-            false;
-
-        if (klik) {
-            if (!aplikacja_zminimalizowana &&
-                punkt_w_prostokacie(
-                    mx,
-                    my,
-                    WIN_X +
-                        WIN_W -
-                        26,
-                    WIN_Y +
-                        4,
-                    20,
-                    20)) {
-
-                dziala =
-                    false;
-            } else {
-                const bool wewnatrz =
-                    obsluz_klik(
-                        mx,
-                        my
-                    );
-
-                (void)wewnatrz;
-
-                trzeba_rysowac =
-                    !aplikacja_zminimalizowana &&
-                    !dragging;
-
-                pelne_tlo =
-                    !dragging;
-            }
-
-            if (!aplikacja_zminimalizowana &&
-                max_przewin_y >
-                    0) {
-
-                const int obszar_y =
-                    WIN_Y +
-                    TRESC_Y;
-
-                const int obszar_h =
-                    WIN_H -
-                    TRESC_Y -
-                    STATUS_WYS -
-                    2;
-
-                if (punkt_w_prostokacie(
-                        mx,
-                        my,
-                        WIN_X +
-                            WIN_W -
-                            20,
-                        obszar_y,
-                        20,
-                        obszar_h)) {
-
-                    scroll_dragging =
-                        true;
-                    gui_ustaw_capture_myszy(true);
-
-                    scroll_drag_start_y =
-                        my;
-
-                    scroll_drag_start_value =
-                        zakladki[
-                            aktywna_zakladka
-                        ].przewin_y;
-
-                    dragging =
-                        false;
-                }
-            }
-        }
-
-        if (dragging &&
-            lewy &&
-            !zmaksymalizowane) {
-
-            WIN_X =
-                mx -
-                drag_off_x;
-
-            WIN_Y =
-                my -
-                drag_off_y;
-
-            ogranicz_okno_do_ekranu();
-
-            bws_przesun_warstwe(
-                WIN_X,
-                WIN_Y
-            );
-        }
-
-        if (scroll_dragging &&
-            lewy &&
-            liczba_zakladek >
-                0) {
-
-            const int obszar_h =
-                WIN_H -
-                TRESC_Y -
-                STATUS_WYS -
-                2;
-
-            const int ruch =
-                my -
-                scroll_drag_start_y;
-
-            int skala =
-                max_przewin_y >
-                        obszar_h
-                    ? max_przewin_y /
-                        (obszar_h > 0
-                             ? obszar_h
-                             : 1)
-                    : 1;
-
-            if (skala <
-                1) {
-
-                skala =
-                    1;
-            }
-
-            ustaw_scroll(
-                scroll_drag_start_value +
-                ruch *
-                    skala
-            );
-
-            trzeba_rysowac =
-                true;
-        }
-
-        if (pusc) {
-            if (dragging) {
-                dragging =
-                    false;
-                gui_ustaw_capture_myszy(false);
-            }
-
-            scroll_dragging =
-                false;
-            gui_ustaw_capture_myszy(false);
-        }
-
-        const char znak = zdarzenie.typ == BWS_ZDARZENIE_KLAWISZ
-            ? static_cast<char>(zdarzenie.kod) : 0;
-
-        bool szybkie_pole_url=false;
-        if (znak !=
-            0) {
-
-            const bool url_przed=w_polu_url;
-
-            obsluz_znak(
-                znak,
-                &ansi_stan
-            );
-
-            const uint8_t u=static_cast<uint8_t>(znak);
-            szybkie_pole_url=url_przed&&w_polu_url&&
-                (u>=0x20U||znak=='\b'||u==0x7FU);
-            ++husarz_perf.key_count;
-            trzeba_rysowac=!szybkie_pole_url;
-        }
-
-        if(szybkie_pole_url)husarz_rysuj_pole_adresu();
-
-        if (trzeba_rysowac &&
-            !aplikacja_zminimalizowana) {
-
-            RysujInterfejs(
-                pelne_tlo
-            );
-        }
-    }
-
-    /*
-     * Wyjscie w uporzadkowanej kolejnosci.
-     */
     zwolnij_wszystkie_zakladki();
-
-    gui_zakoncz_aplikacje();
+    bws_zakoncz_proces();
 }

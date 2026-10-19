@@ -1,3 +1,5 @@
+#include "diagnostyka_systemu.h"
+#include "diagnostyka_systemu_format.h"
 #include "ekran_powitalny_api.h"
 #include "boot_phase_timing.h"
 #include "opcje_startowe.h"
@@ -104,7 +106,8 @@ static void wykonaj_selftest_sieci() {
 extern "C" void InicjalizujGDT();
 extern "C" void InicjalizujIDT();
 extern "C" void inicjalizuj_apic();
-extern "C" void InicjalizujMyszPS2();
+extern "C" bool InicjalizujMyszPS2();
+extern "C" bool ps2_inicjalizuj_klawiature();
 extern "C" InputDevice* ps2_klawiatura_pobierz_urzadzenie();
 
 extern "C" void inicjalizuj_tss(void* stos_jadra);
@@ -119,6 +122,7 @@ extern "C" void inicjalizuj_mbedtls();
 extern "C" uint8_t stack_top[];
 
 extern uint64_t najwyzsza_znaleziona_ramka;
+extern "C" uint64_t pmm_diagnostic_ram_bytes();
 
 extern "C" void skanuj_magistrale_pci();
 
@@ -186,6 +190,7 @@ extern "C" uint8_t _binary_aktualizacje_bin_end[];
 
 extern "C" uint8_t _binary_motywy_bin_start[];
 extern "C" uint8_t _binary_motywy_bin_end[];
+extern "C" uint8_t _binary_diagnostyka_bin_start[],_binary_diagnostyka_bin_end[];
 extern "C" uint8_t _binary_test_dzwieku_bin_start[];
 extern "C" uint8_t _binary_test_dzwieku_bin_end[];
 
@@ -280,6 +285,7 @@ void serial_wypisz(const char* tekst) {
 [[noreturn]]
 void zatrzymaj_start(const char* powod) {
     asm volatile("cli" ::: "memory");
+    diag_log(DIAG_SYSTEM,DIAG_CRITICAL,0,powod?powod:"Nieznany błąd startu");
 
     serial_wypisz("\n[KERNEL-PANIC] ");
     serial_wypisz(
@@ -1179,6 +1185,14 @@ void instaluj_wbudowane_programy() {
         "    \"system_config\"\n"
         "]\n";
 
+    static const char MANIFEST_DIAGNOSTYKA[] =
+        "nazwa = \"Diagnostyka systemu\"\n"
+        "autor = \"Programista Art\"\n"
+        "wersja = \"1.0\"\n"
+        "poziom_zaufania = 3\n"
+        "plik_startowy = \"diagnostyka.bur\"\n"
+        "uprawnienia = [\"okna\", \"pliki_czytaj\", \"pliki_zapisz\"]\n";
+
     static const char MANIFEST_TEST_DZWIEKU[] =
         "nazwa = \"Test dźwięku\"\n"
         "autor = \"Programista Art\"\n"
@@ -1682,6 +1696,10 @@ void instaluj_wbudowane_programy() {
             "[BSP] Motywy Systemowe zainstalowane jako .cebula.");
     }
 
+    if (!instaluj_paczke("/programy/diagnostyka.cebula/opis.aplikacji",MANIFEST_DIAGNOSTYKA,
+            DIAG_APP_PATH,_binary_diagnostyka_bin_start,_binary_diagnostyka_bin_end))
+        wypisz_log("[DIAG] Nie udało się zainstalować Diagnostyki systemu");
+
     if (!instaluj_paczke(
             "/programy/test_dzwieku.cebula/opis.aplikacji",
             MANIFEST_TEST_DZWIEKU,
@@ -2103,6 +2121,7 @@ extern "C" bool system_potwierdz_gotowosc_pulpitu(int pid) {
     wypisz_log("[SYSTEM] Pulpit gotowy.");
     wypisz_log("System operacyjny gotowy!");
     aktualizacja_potwierdz_rozruch();
+    diag_desktop_ready();
 
     return true;
 }
@@ -2205,6 +2224,21 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     wypisz_log("==================================================");
 
     wypisz_ilosc_ram();
+    {
+        char brand[49]{};uint32_t a,b,c,d;
+        asm volatile("cpuid":"=a"(a),"=b"(b),"=c"(c),"=d"(d):"a"(0x80000000U),"c"(0));
+        const uint32_t max=a;
+        if(max>=0x80000004U)for(uint32_t i=0;i<3;++i){
+            asm volatile("cpuid":"=a"(a),"=b"(b),"=c"(c),"=d"(d):"a"(0x80000002U+i),"c"(0));
+            const uint32_t words[]={a,b,c,d};for(unsigned j=0;j<16;++j)brand[i*16+j]=char(words[j/4]>>(8*(j%4)));
+        }
+        diag_simple(DIAG_CPU,brand[0]?brand:"Procesor x86-64","cpu",DIAG_OK,true,"Procesor x86-64 uruchomiony");
+        auto memory=diag_device(DIAG_MEMORY,"Pamięć RAM","pmm",DIAG_OK,true,"Dostępna pamięć RAM według mapy firmware (bajty)");
+        memory.value=pmm_diagnostic_ram_bytes();memory.transport=DIAG_TRANSPORT_MEMORY;diag_publish(0,memory);
+        auto graphics=diag_device(DIAG_GRAPHICS,"Grafika systemowa","framebuffer",grafika_pobierz_szerokosc()>0&&grafika_pobierz_wysokosc()>0?DIAG_OK:DIAG_INIT_FAILED,
+            grafika_pobierz_szerokosc()>0&&grafika_pobierz_wysokosc()>0,"Framebuffer systemowy; szczegóły akceleracji w logu");
+        graphics.flags|=DIAG_FLAG_SYSTEM_REQUIRED;diag_publish(0,graphics);
+    }
 
     wypisz_log(
         "[VMM] Paging 4-poziomowy aktywowany.");
@@ -2245,7 +2279,10 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
             "Nie udalo sie zainicjalizowac podsystemu stosow jadra.");
     }
 
-    if (!acpi_inicjalizuj(multiboot_info_ptr))
+    const bool diag_acpi=acpi_inicjalizuj(multiboot_info_ptr);
+    diag_simple(DIAG_ACPI,"Tabele ACPI","acpi",diag_acpi?DIAG_OK:DIAG_WARNING,diag_acpi,
+        diag_acpi?"Tabele ACPI i HPET zweryfikowane":"Brak poprawnej tabeli HPET w RSDT/XSDT; brak pełnej enumeracji ACPI");
+    if (!diag_acpi)
         wypisz_log("[ACPI] Brak poprawnej tabeli HPET w RSDT/XSDT.");
     else
         wypisz_log(acpi_uzyto_xsdt() ? "[ACPI] Uzywam XSDT." : "[ACPI] Uzywam RSDT.");
@@ -2254,6 +2291,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
             ? "[HPET-TEST] 32-bit wrap monotonic: OK"
             : "[HPET-TEST] 32-bit wrap monotonic: BLAD");
 
+    diag_simple(DIAG_HPET,"Zegar HPET","hpet",hpet_dostepny()?DIAG_OK:DIAG_INIT_FAILED,hpet_dostepny(),
+        hpet_dostepny()?"Zegar monotoniczny gotowy":"HPET niedostępny; timeouty sterowników ograniczone");
     BootTiming::clock_ready();
     BootTiming::mark("HPET ready");
     powitanie_inicjalizuj(
@@ -2307,15 +2346,12 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
         "[APIC] LAPIC/IOAPIC uruchomiony.");
 
     input_set_pointer_ready(false);
-    (void)ps2_klawiatura_pobierz_urzadzenie();
     // Complete USB firmware handoff/controller setup before negotiating the
     // i8042 streaming protocol, as in the known-working hardware sequence.
     // USB registration stays ineligible until a real valid runtime report.
     {BootTiming::Scope timing(BootTiming::UsbBeforeSplash);usb_inicjalizuj();}
-    {BootTiming::Scope timing(BootTiming::Ps2Init);InicjalizujMyszPS2();}
+    {BootTiming::Scope timing(BootTiming::Ps2Init);(void)ps2_inicjalizuj_klawiature();(void)InicjalizujMyszPS2();}
 
-    wypisz_log(
-        "[I/O] PS/2 gotowe.");
 
     wypisz_log(
         "[BWS] API Wywolan Systemowych gotowe.");
@@ -2452,7 +2488,9 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
      * Dzwiek
      * ------------------------------------------------------------------ */
 
-    if (inicjalizuj_hda()) {
+    const bool diag_hda_ready=inicjalizuj_hda();
+    diag_hda_boot_result(diag_hda_ready);
+    if (diag_hda_ready) {
         wypisz_log(
             "[HDA] Karta HDA gotowa.");
 
@@ -2560,6 +2598,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
         else wypisz_log("[VIRTIO-INPUT] Sanity check: OK (devices initialized and registered).");
     }
 
+    diag_boot_services_ready();
+
     /* ---------------------------------------------------------------------
      * Pierwszy proces Ring 3
      * ------------------------------------------------------------------ */
@@ -2641,6 +2681,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
             __atomic_load_n(&system_pulpit_gotowy, __ATOMIC_ACQUIRE) &&
             !powitanie_aktywne());
         usb_obsluz();
+        diag_service();
         input_service_all();
         virtio_input_obsluz();
         ekran_obsluz_timeout();

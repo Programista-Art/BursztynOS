@@ -100,7 +100,8 @@ def main() -> int:
     api = (ROOT / "bws_api.h").read_text(encoding="utf-8", errors="replace")
     check("BWS_HDA_DIAG = 89" in api, "BWS_HDA_DIAG == 89")
     check("BWS_HDA_TEST = 90" in api, "BWS_HDA_TEST == 90")
-    check("BWS_PIERWSZY_WOLNY = 91" in api, "next free is 91")
+    check("BWS_DIAGNOSTYKA_SYSTEMU = 91" in api, "system diagnostics reserves 91")
+    check("BWS_PIERWSZY_WOLNY = 92" in api, "next free is 92")
 
     # --- built artifact ---
     blob = ROOT / "test_dzwieku.bin"

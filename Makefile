@@ -398,6 +398,7 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	motyw.o \
 	motywy_blob.o \
 	test_dzwieku_blob.o \
+	diagnostyka_systemu.o diagnostyka_systemu_bws.o diagnostyka_systemu_boot.o diagnostyka_blob.o \
 	test_bmp_blob.o \
 	test1_bmp_blob.o \
 	logo_png_blob.o \
@@ -544,11 +545,11 @@ shell_blob.o: shell_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
 # 13. PRZEGLADARKA HUSSAR .bur
 # ============================================================================
 
-przegladarka_tmp.o: programy/przegladarka.cpp programy/http_kody.h bursztyn_gui.h
-	$(CXX) $(RING3_FLAGS) -c $< -o $@
+przegladarka_tmp.o: programy/przegladarka.cpp programy/http_kody.h bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 przegladarka_blob.o: przegladarka_tmp.o bursztyn_gui.o $(PRZEGLADARKA_LINKER)
-	$(LD) -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) \
+	$(LD) --gc-sections -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) \
 		przegladarka_tmp.o bursztyn_gui.o -o przegladarka.elf
 	$(OBJCOPY) -O binary przegladarka.elf przegladarka.bin
 	$(LD) -r -b binary przegladarka.bin -o przegladarka_blob.o
@@ -847,7 +848,7 @@ $(GRUB_CFG): $(KERNEL) $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile
 	@mkdir -p .installer-build
 	grub-mkstandalone -O x86_64-efi --locales="" --fonts="" --modules="part_gpt fat loadenv test normal multiboot2 configfile search search_fs_file all_video gfxterm" -o $@ "boot/grub/grub.cfg=$<"
 
-.PHONY: test-network-device test-e1000-qemu test-virtio-pci test-virtio-qemu test-virtio-blk-qemu test-virtio-net-qemu test-virtio-gpu-qemu test-virtio-input-qemu test-normal-boot test-diff-boot installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-aktualizacje-gui test-bur-loader test-aktualizacja-qemu test-rozruch-qemu test-ota audit-stos-jadra test-stos-jadra test-wspolbieznosc test-guard-page test-16k-bws84 test-motywy test-motywy-unit test-motywy-gui test-motywy-qemu test-notatnik-gui test-kalkulator-gui test-bursztyn-ui-polecenia test-kontrolki4 test-kontrolki4-qemu
+.PHONY: test-network-device test-e1000-qemu test-virtio-pci test-virtio-qemu test-virtio-blk-qemu test-virtio-net-qemu test-virtio-gpu-qemu test-virtio-input-qemu test-normal-boot test-diff-boot installer-unit-test installer-test run-installer test-aktualizacje test-rozruch test-aktualizacje-gui test-bur-loader test-aktualizacja-qemu test-rozruch-qemu test-ota audit-stos-jadra test-stos-jadra test-wspolbieznosc test-guard-page test-16k-bws84 test-motywy test-motywy-unit test-motywy-gui test-motywy-qemu test-notatnik-gui test-kalkulator-gui test-przegladarka-gui test-bursztyn-ui-polecenia test-kontrolki4 test-kontrolki4-qemu
 
 test-network-device:
 	@mkdir -p .nettest
@@ -924,6 +925,9 @@ test-notatnik-gui: notatnik_blob.o
 
 test-kalkulator-gui: kalkulator_blob.o
 	$(PYTHON) narzedzia/test_kalkulator_gui.py
+
+test-przegladarka-gui: przegladarka_blob.o
+	$(PYTHON) narzedzia/test_przegladarka_gui.py
 
 test-motywy: test-motywy-unit test-motywy-gui test-notatnik-gui test-kalkulator-gui
 
@@ -1919,3 +1923,49 @@ test-virtio-input-forensic-host:
 	@mkdir -p .virtiotest/forensic-validation
 	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_PMM_HOST_TEST -DBURSZTYNDIAGVIRTIOINPUTFORENSIC=$(BURSZTYNDIAGVIRTIOINPUTFORENSIC) -fsanitize=address,undefined -pthread pci.cpp pmm.cpp virtio_pci.cpp virtqueue.cpp virtio_rng.cpp virtio_blk.cpp network_device.cpp virtio_net.cpp virtio_gpu.cpp input_device.cpp virtio_input.cpp sterowniki/usb/usb_hid.cpp klawiatura.cpp narzedzia/test_virtio_input_forensic.cpp -o .virtiotest/forensic-validation/queue-$(BURSZTYNDIAGVIRTIOINPUTFORENSIC)
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) UBSAN_OPTIONS=halt_on_error=1 .virtiotest/forensic-validation/queue-$(BURSZTYNDIAGVIRTIOINPUTFORENSIC)
+
+.PHONY: test-usb-composite-host
+test-usb-composite-host:
+	@mkdir -p .pointingtest
+	g++ $(POINTING_HOST_FLAGS) -no-pie narzedzia/test_usb_composite.cpp sterowniki/usb/hid_pointer.cpp input_device.cpp -o .pointingtest/usb-composite
+	.pointingtest/usb-composite
+
+.PHONY: test-xhci-multi-host
+test-xhci-multi-host:
+	@mkdir -p .pointingtest
+	g++ $(POINTING_HOST_FLAGS) -no-pie -DBURSZTYN_BOOT_TIMING_HOST_TEST -DBURSZTYN_XHCI_HOST_TEST -DBURSZTYN_IDT_HOST_TEST -ffunction-sections -fdata-sections narzedzia/test_xhci_multi.cpp idt.cpp pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp input_device.cpp -Wl,--gc-sections -o .pointingtest/xhci-multi
+	.pointingtest/xhci-multi
+
+.PHONY: test-xhci-multi-qemu
+test-xhci-multi-qemu: all
+	$(PYTHON) narzedzia/test_xhci_multi_qemu.py
+	$(PYTHON) narzedzia/test_xhci_multi_qemu.py --virtio-input
+
+# Native read-only system diagnostics utility (.cebula / BUR v1).
+diagnostyka_tmp.o: programy/diagnostyka/diagnostyka.cpp programy/diagnostyka/model.h diagnostyka_systemu_abi.h diagnostyka_systemu_format.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
+
+diagnostyka_blob.o: diagnostyka_tmp.o bursztyn_gui.o programy/diagnostyka/diagnostyka_linker.ld
+	$(LD) --orphan-handling=error -T programy/diagnostyka/diagnostyka_linker.ld $(RING3_LDFLAGS) diagnostyka_tmp.o bursztyn_gui.o -o diagnostyka.elf
+	$(OBJCOPY) -O binary diagnostyka.elf diagnostyka.bin
+	$(LD) -r -b binary diagnostyka.bin -o diagnostyka_blob.o
+
+.PHONY: test-diagnostyka-systemu-host
+test-diagnostyka-systemu-host:
+	@mkdir -p .input-test/diagnostyka
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pthread -I. -DDIAG_HOST_TEST -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined diagnostyka_systemu.cpp diagnostyka_systemu_bws.cpp input_device.cpp narzedzia/test_diagnostyka_systemu.cpp -o .input-test/diagnostyka/host
+	ASAN_OPTIONS=detect_leaks=1 .input-test/diagnostyka/host
+
+.PHONY: test-diagnostyka-qemu
+test-diagnostyka-qemu: all
+	$(PYTHON) narzedzia/test_diagnostyka_qemu.py
+
+.PHONY: test-diagnostyka-xhci-host
+test-diagnostyka-xhci-host:
+	@mkdir -p .input-test/diagnostyka
+	g++ $(POINTING_HOST_FLAGS) -no-pie -DDIAG_HOST_TEST -DBURSZTYN_BOOT_TIMING_HOST_TEST -DBURSZTYN_XHCI_HOST_TEST -DBURSZTYN_IDT_HOST_TEST -ffunction-sections -fdata-sections narzedzia/test_diagnostyka_xhci.cpp diagnostyka_systemu.cpp idt.cpp pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp input_device.cpp -Wl,--gc-sections -o .input-test/diagnostyka/xhci
+	.input-test/diagnostyka/xhci
+
+.PHONY: test-diagnostyka-packaging
+test-diagnostyka-packaging: diagnostyka_blob.o
+	$(PYTHON) narzedzia/test_diagnostyka_packaging.py

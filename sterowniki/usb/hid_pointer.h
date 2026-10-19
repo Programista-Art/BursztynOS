@@ -21,11 +21,22 @@ struct HidPointerLayout {
     InputAbsInfo x{}, y{};
 };
 struct UsbHidInterface {
-    uint8_t configuration{}, interface_number{}, subclass{}, protocol{}, endpoint{}, interval{};
+    uint8_t configuration{}, interface_number{}, alternate{}, subclass{}, protocol{}, endpoint{}, interval{};
     uint16_t packet_size{}, report_length{}, hid_bcd{};
     uint8_t transactions{}, max_burst{};
     uint16_t bytes_per_interval{}; bool companion{};
 };
+enum HidReportRole : uint8_t { HID_ROLE_UNKNOWN=0,HID_ROLE_KEYBOARD=1,HID_ROLE_POINTER=2,HID_ROLE_CONSUMER=4,HID_ROLE_OTHER=8 };
+// Usage hints only; report decoding still requires a compiled supported layout.
+uint8_t hid_report_roles(const uint8_t*,size_t);
+constexpr size_t USB_HID_INTERFACES_MAX=16;
+struct UsbHidConfiguration {
+    UsbHidInterface interfaces[USB_HID_INTERFACES_MAX]{};
+    size_t count{};
+    uint8_t configuration{}, declared_interfaces{};
+    bool truncated{};
+};
+bool usb_hid_parse_configuration(const uint8_t*,size_t,UsbHidConfiguration&);
 // Pure bounded parsers. No allocation, I/O or device registration.
 bool usb_hid_find_interface(const uint8_t*,size_t,UsbHidInterface&);
 bool hid_pointer_compile(const uint8_t*,size_t,HidPointerLayout&);

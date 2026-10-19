@@ -1,3 +1,4 @@
+#include "diagnostyka_systemu.h"
 /*
  * Bursztyn OS - PCI Configuration Mechanism #1
  *
@@ -1188,6 +1189,15 @@ extern "C" void skanuj_magistrale_pci() {
                 }
 
                 ++liczba_funkcji;
+                const uint32_t identity=pci_odczytaj_dword(bus,slot,func,0);
+                const uint32_t cls=pci_odczytaj_dword(bus,slot,func,8)>>8;
+                auto diag=diag_device(DIAG_PCI,pci_nazwa_klasy(uint8_t(cls>>16),uint8_t(cls>>8),uint8_t(cls)),"",DIAG_INACTIVE,true,
+                    "Sprzęt wykryty; stan sterownika w oddzielnym wpisie");
+                diag.transport=DIAG_TRANSPORT_PCI;diag.vendor=uint16_t(identity);
+                diag.device=uint16_t(identity>>16);diag.bus=bus;diag.pci_device=slot;
+                diag.function=func;diag.pci_valid=1;diag.value=cls;
+                diag_publish((uint32_t(bus)<<16)|(uint32_t(slot)<<8)|func,diag);
+
 
                 (void)pci_dodaj_funkcje_do_raportu(
                     &raport,
@@ -1196,22 +1206,9 @@ extern "C" void skanuj_magistrale_pci() {
                     func
                 );
 
-                if (raport.uciety) {
-                    /*
-                     * Nie ma sensu wykonywac kolejnych tysiecy operacji I/O,
-                     * skoro raport i tak nie pomiesci nowych rekordow.
-                     */
-                    break;
-                }
+                // Continue detection even when the legacy text report is full.
+                // The bounded structured store records its own overflow count.
             }
-
-            if (raport.uciety) {
-                break;
-            }
-        }
-
-        if (raport.uciety) {
-            break;
         }
     }
 

@@ -1,5 +1,6 @@
 #define REAL_KEYBOARD 1
 #include "narzedzia/pointing_host_stubs.h"
+#include "sterowniki/usb/usb_hid.h"
 #include <deque>
 #include <vector>
 #include <thread>
@@ -8,16 +9,20 @@
 extern "C" void obsluga_przerwania_klawiatury();
 extern "C" InputDevice* ps2_klawiatura_pobierz_urzadzenie();
 struct Byte{uint8_t status,value;};static std::deque<Byte> output;
+static bool controller_absent{},keyboard_no_ack{};
 static bool to_mouse{},config_write{},drop_ack{},keyboard_injected{};
+static uint8_t controller_config=0x45,last_config_write=0;
 static uint8_t test_id=3;static unsigned reads{},resends{};
 static std::vector<uint8_t> commands;
 uint8_t ps2_test_read(uint16_t port){
-    if(port==0x64)return output.empty()?0:output.front().status;
+    if(port==0x64)return controller_absent?0xff:output.empty()?0:output.front().status;
     CHECK(port==0x60&&!output.empty());uint8_t b=output.front().value;output.pop_front();++reads;return b;
 }
 void ps2_test_write(uint16_t port,uint8_t b){
-    if(port==0x64){if(b==0xD4)to_mouse=true;if(b==0x20)output.push_back({1,0x45});if(b==0x60)config_write=true;return;}
-    if(config_write){config_write=false;return;}CHECK(to_mouse);to_mouse=false;commands.push_back(b);
+    if(port==0x64){if(b==0xD4)to_mouse=true;if(b==0x20)output.push_back({1,controller_config});if(b==0x60)config_write=true;return;}
+    if(config_write){config_write=false;last_config_write=controller_config=b;return;}
+    if(!to_mouse){CHECK(b==0xF4);if(!keyboard_no_ack)output.push_back({1,0xFA});return;}
+    CHECK(to_mouse);to_mouse=false;commands.push_back(b);
     if(drop_ack)return;
     if(!keyboard_injected){output.push_back({1,0x1E});keyboard_injected=true;}
     if(resends){--resends;output.push_back({0x21,0xFE});return;}
@@ -58,5 +63,18 @@ int main(){
     input_reset_all();drop_ack=true;InicjalizujMyszPS2();CHECK(!mysz_zainicjalizowana);CHECK(!s_ps2_mouse_device.registered);
     drop_ack=false;test_id=5;InicjalizujMyszPS2();CHECK(!mysz_zainicjalizowana);
     for(uint8_t id:{uint8_t(0),uint8_t(4)}){test_id=id;InicjalizujMyszPS2();CHECK(mysz_zainicjalizowana&&parser.id==id);input_reset_all();}
+    input_reset_all();output.clear();
+    for(uint8_t config:{uint8_t(0x04),uint8_t(0x44)}){
+        controller_config=config;CHECK(ps2_inicjalizuj_klawiature());
+        CHECK((last_config_write&0x40U)==(config&0x40U));CHECK(last_config_write&1U);input_reset_all();
+    }
+    CHECK(ps2_inicjalizuj_klawiature());
+    CHECK(input_find_device_by_name("ps2-keyboard")!=nullptr);
+    input_reset_all();keyboard_no_ack=true;CHECK(!ps2_inicjalizuj_klawiature());
+    CHECK(input_find_device_by_name("ps2-keyboard")==nullptr);
+    controller_absent=true;CHECK(!ps2_inicjalizuj_klawiature());CHECK(!InicjalizujMyszPS2());
+    const uint8_t usb_report[8]={0,0,4,0,0,0,0,0};usb_hid_przetworz_raport(usb_report);
+    CHECK(input_find_device_by_name("usb-keyboard")!=nullptr);CHECK(input_pointer_geometry_ready());
+    controller_absent=false;keyboard_no_ack=false;input_reset_all();
     printf("i8042/IRQ1/IRQ12/initialization: %u checks PASS\n",checks);
 }

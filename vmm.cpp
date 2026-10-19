@@ -1778,7 +1778,7 @@ uint64_t* globalne_pml4 = nullptr;
  * MAPOWANIE
  * ========================================================================= */
 
-void ZmapujStrone(
+bool ZmapujStroneSprawdzona(
     void* adres_wirtualny,
     void* adres_fizyczny,
     uint32_t flagi
@@ -1786,20 +1786,20 @@ void ZmapujStrone(
     BlokadaVMM blokada;
 
     if (!vmm_zainicjalizowany) {
-        return;
+        return false;
     }
 
     uint64_t* aktualne =
         pml4_z_cr3();
 
     if (!aktualne) {
-        return;
+        return false;
     }
 
     globalne_pml4 =
         aktualne;
 
-    (void)mapuj_strone_wewnetrznie(
+    return mapuj_strone_wewnetrznie(
         aktualne,
         reinterpret_cast<uint64_t>(
             adres_wirtualny),
@@ -1810,6 +1810,10 @@ void ZmapujStrone(
 }
 
 extern "C" void SerialLog(const char*);
+void ZmapujStrone(void* va,void* pa,uint32_t flags) {
+    (void)ZmapujStroneSprawdzona(va,pa,flags);
+}
+
 extern "C" bool VmmMapujNowaStroneProcesu(void* va, void* pa, bool zapis) {
     BlokadaVMM blokada;
     const uint64_t adres = reinterpret_cast<uint64_t>(va);

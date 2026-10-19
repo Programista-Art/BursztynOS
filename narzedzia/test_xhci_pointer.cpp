@@ -5,12 +5,14 @@
 #include "narzedzia/pointer_transport_stream.h"
 #include "sterowniki/usb/xhci.cpp"
 #include <cstring>
+static Controller& xhc=controllers[0];
 static uint64_t dma_next=0x100000;
 bool dma_allocate(size_t n,size_t alignment,DmaBuffer* b){n=(n+4095)&~size_t(4095);void* p=std::aligned_alloc(alignment,n);if(!p)return false;std::memset(p,0,n);*b={p,dma_next,n,n/4096};dma_next+=n;return true;}
 void dma_release(DmaBuffer* b){std::free(b->virtual_address);*b={};}
 extern "C" void usb_hid_przetworz_raport(const uint8_t*){}
 void ohci_service(){}
 void ZmapujStrone(void*,void*,unsigned int){CHECK(false);}
+bool ZmapujStroneSprawdzona(void*,void*,unsigned int){CHECK(false);return false;}
 static uint8_t config[256]{};
 static bool have_pci{},clock_ready{},reject_msi{},reject_msix{};
 static unsigned pci_writes{};
@@ -47,7 +49,7 @@ void irq_tests(){
         CHECK(xhc.irq_mode==1);CHECK(irq_enabled==prior);
         CHECK(idt_zaalokowane_wektory_liczba()==1);
         const int vector=xhc.irq_vector;xhc.ready=true;
-        CHECK(xhci_inicjalizuj_pierwszy());CHECK(xhc.irq_vector==vector);
+        CHECK(initialize_controller(xhc));CHECK(xhc.irq_vector==vector);
         CHECK(idt_zaalokowane_wektory_liczba()==1);
         xhci_irq(&xhc);CHECK(xhc.irq_pending==1);CHECK(read32(xhc.runtime+0x20,0)==1);
         release_interrupt(xhc);CHECK(idt_zaalokowane_wektory_liczba()==0);CHECK(irq_enabled==prior);
@@ -69,8 +71,8 @@ void irq_tests(){
         config[0x41]=0;
         offset=0x1000;std::memcpy(config+0x44,&offset,4);CHECK(!setup_interrupt(xhc));
         CHECK(idt_zaalokowane_wektory_liczba()==0);CHECK(irq_saves==irq_restores);
-        xhc=Controller{};clock_ready=false;CHECK(!xhci_inicjalizuj_pierwszy());CHECK(irq_enabled==prior);
-        CHECK(!xhci_inicjalizuj_pierwszy());CHECK(idt_zaalokowane_wektory_liczba()==0);
+        xhc=Controller{};clock_ready=false;CHECK(!initialize_controller(xhc));CHECK(irq_enabled==prior);
+        CHECK(!initialize_controller(xhc));CHECK(idt_zaalokowane_wektory_liczba()==0);
     }
     CHECK(pci_writes>0);xhc=Controller{};have_pci=false;
     printf("xHCI production interrupt setup/BDF/capability/failure/IF: %u checks PASS\n",checks-start);
@@ -111,18 +113,18 @@ void context_tests(){
     auto completion=[&](){auto& e=events[xhc.event_index];const uint64_t ptr=xhc.command.dma.physical_address+uint64_t(xhc.command.producer_index)*16;
         e={uint32_t(ptr),uint32_t(ptr>>32),1U<<24,xhci_trb::type_field(xhci_trb::TYPE_COMMAND_COMPLETION)|(1U<<24)|(xhc.event_cycle?1U:0U)};};
     hid_wynik_konfiguracji h{};h.znaleziono=true;h.dci=3;h.endpoint=0x81;h.maksymalny_rozmiar=8;h.interwal=10;h.type=USB_HID_POINTER;
-    completion();XhciTrb command{};CHECK(prepare_hid_endpoint(d,h,command));
-    CHECK(submit_command(command,EnumStep::ConfigureWait));CHECK(xhc.wanted_command);
-    CHECK(xhci_poll_events(1)==1);CHECK(command_ready(1)==1);
-    uint32_t* ep=xhci_context_ptr(d.input_context,3);
+    completion();XhciTrb command{};CHECK(prepare_hid_endpoint(xhc,d,h,command));
+    CHECK(submit_command(xhc,command,EnumStep::ConfigureWait));CHECK(xhc.wanted_command);
+    CHECK(poll_controller_events(xhc,1)==1);CHECK(command_ready(xhc,1)==1);
+    uint32_t* ep=xhci_context_ptr(xhc,d.input_context,3);
     CHECK((ep[4]>>16)==8);CHECK((ep[4]&65535)==8);CHECK(((ep[1]>>3)&7)==7);
     CHECK(((ep[0]>>16)&255)==6);CHECK(ep[3]==uint32_t(d.hid_ring.dma.physical_address>>32));
     xhci_command_ring_destroy(&d.hid_ring);dma_release(&d.hid_raport);
     // High-speed bInterval=1 legitimately encodes interval zero.
-    d.logical_speed=USB_HIGH_SPEED;h.interwal=1;completion();CHECK(prepare_hid_endpoint(d,h,command));
-    CHECK(submit_command(command,EnumStep::ConfigureWait));CHECK(xhci_poll_events(1)==1);CHECK(command_ready(1)==1);
+    d.logical_speed=USB_HIGH_SPEED;h.interwal=1;completion();CHECK(prepare_hid_endpoint(xhc,d,h,command));
+    CHECK(submit_command(xhc,command,EnumStep::ConfigureWait));CHECK(poll_controller_events(xhc,1)==1);CHECK(command_ready(xhc,1)==1);
     CHECK(d.hid_interwal==0);
-    d.enabled=false;free_device(d);xhci_command_ring_destroy(&xhc.command);xhc=Controller{};
+    d.enabled=false;free_device(xhc,d);xhci_command_ring_destroy(&xhc.command);xhc=Controller{};
     printf("xHCI Supported Protocol/endpoint context: %u checks PASS\n",checks-start);
 }
 
@@ -135,11 +137,11 @@ void first_submission_failure_tests(){
     CHECK(hid_pointer_compile(desc.data(),desc.size(),d.pointer_layout));
     CHECK(hid_pointer_register(d.pointer_device,d.pointer_layout,1));
     for(unsigned i=0;i<14;++i){XhciTrb t{};uint64_t ptr;CHECK(xhci_command_ring_enqueue(&d.hid_ring,t,&ptr));}
-    CHECK(!xhci_zakolejkuj_transfer_interrupt_in(d));CHECK(!d.hid_transfer_oczekiwany);
+    CHECK(!xhci_zakolejkuj_transfer_interrupt_in(xhc,d));CHECK(!d.hid_transfer_oczekiwany);
     CHECK(d.pointer_device.pointer_state==INPUT_POINTER_REGISTERED_INACTIVE);
     CHECK(input_get_pointer_owner()==&fallback);
     hid_pointer_remove(d.pointer_device);CHECK(input_get_pointer_owner()==&fallback);
-    d.enabled=false;free_device(d);input_reset_all();xhc=Controller{};
+    d.enabled=false;free_device(xhc,d);input_reset_all();xhc=Controller{};
     printf("xHCI failed first submission preserves PS/2: %u checks PASS\n",checks-start);
 }
 int main(){
@@ -156,12 +158,12 @@ int main(){
     XhciDevice& d=xhc.devices[1];d.enabled=true;d.slot_id=1;d.hid_dci=3;d.type=USB_HID_POINTER;d.hid_gotowy=true;d.hid_dma_length=8;
     CHECK(xhci_command_ring_create(&d.hid_ring,64));CHECK(dma_allocate(8,64,&d.hid_raport));CHECK(xhci_command_ring_create(&d.ep0,64));
     std::vector<uint8_t> descriptor(virtualbox_tablet_descriptor,virtualbox_tablet_descriptor+sizeof(virtualbox_tablet_descriptor));CHECK(hid_pointer_compile(descriptor.data(),descriptor.size(),d.pointer_layout));
-    CHECK(xhci_zakolejkuj_transfer_interrupt_in(d));const uint64_t first=d.hid_transfer_pointer;
-    CHECK(!xhci_zakolejkuj_transfer_interrupt_in(d));CHECK(d.hid_ring.outstanding==1);
+    CHECK(xhci_zakolejkuj_transfer_interrupt_in(xhc,d));const uint64_t first=d.hid_transfer_pointer;
+    CHECK(!xhci_zakolejkuj_transfer_interrupt_in(xhc,d));CHECK(d.hid_ring.outstanding==1);
     auto event=[&](uint64_t ptr,uint8_t ep,uint8_t code,uint32_t residual,uint8_t slot=1){
         XhciTrb& t=events[xhc.event_index];t={};t.dword0=uint32_t(ptr);t.dword1=uint32_t(ptr>>32);t.dword2=(uint32_t(code)<<24)|residual;
         t.dword3=xhci_trb::type_field(xhci_trb::TYPE_TRANSFER_EVENT)|(uint32_t(slot)<<24)|(uint32_t(ep)<<16)|(xhc.event_cycle?1U:0U);
-        CHECK(xhci_poll_events(1)==1);
+        CHECK(poll_controller_events(xhc,1)==1);
     };
     InputDevice fallback{};fallback.bus_type=INPUT_BUS_PS2;fallback.kinds=INPUT_DEVICE_KIND_MOUSE;
     CHECK(input_register_device(&fallback));CHECK(hid_pointer_register(d.pointer_device,d.pointer_layout,1));
@@ -169,40 +171,40 @@ int main(){
     event(first,3,1,0,2);CHECK(!d.hid_result.valid);
     event(first,5,1,0);CHECK(!d.hid_result.valid);
     event(first+1,3,1,0);CHECK(!d.hid_result.valid);
-    event(first,3,13,8);xhci_obsluz_hid(d);CHECK(input_get_pointer_owner()==&fallback);
+    event(first,3,13,8);xhci_obsluz_hid(xhc,d);CHECK(input_get_pointer_owner()==&fallback);
     // Explicit transport failure before readiness leaves the existing owner.
-    event(d.hid_transfer_pointer,3,6,0);xhci_obsluz_hid(d);
+    event(d.hid_transfer_pointer,3,6,0);xhci_obsluz_hid(xhc,d);
     CHECK(input_get_pointer_owner()==&fallback);CHECK(!d.pointer_device.registered);
     d.hid_gotowy=true;CHECK(hid_pointer_register(d.pointer_device,d.pointer_layout,1));
-    CHECK(xhci_zakolejkuj_transfer_interrupt_in(d));
+    CHECK(xhci_zakolejkuj_transfer_interrupt_in(xhc,d));
     uint64_t valid=d.hid_transfer_pointer;
-    event(valid,3,13,7);xhci_obsluz_hid(d);CHECK(input_get_pointer_owner()==&fallback);
+    event(valid,3,13,7);xhci_obsluz_hid(xhc,d);CHECK(input_get_pointer_owner()==&fallback);
     valid=d.hid_transfer_pointer;
     px=0;py=0; // stationary first complete report must prove readiness
     pointer_transport_stream(d.pointer_layout,d.pointer_device,[&](const std::vector<uint8_t>& r){
         std::memcpy(d.hid_raport.virtual_address,r.data(),r.size());
-        event(d.hid_transfer_pointer,3,1,uint32_t(8-r.size()));xhci_obsluz_hid(d);
+        event(d.hid_transfer_pointer,3,1,uint32_t(8-r.size()));xhci_obsluz_hid(xhc,d);
         CHECK(d.hid_transfer_oczekiwany);CHECK(d.hid_ring.outstanding==1);
     });
     valid=d.hid_transfer_pointer;
     auto report=tablet_report(d.pointer_layout,32767,32767,7);std::memcpy(d.hid_raport.virtual_address,report.data(),report.size());
-    event(valid,3,13,uint32_t(8-report.size()));CHECK(d.hid_result.valid);xhci_obsluz_hid(d);CHECK(px==1279&&py==719&&last_buttons==7);CHECK(d.pointer_device.registered);
+    event(valid,3,13,uint32_t(8-report.size()));CHECK(d.hid_result.valid);xhci_obsluz_hid(xhc,d);CHECK(px==1279&&py==719&&last_buttons==7);CHECK(d.pointer_device.registered);
     CHECK(d.hid_transfer_pointer!=first);const unsigned moved=motions;
-    event(first,3,13,0);CHECK(!d.hid_result.valid);xhci_obsluz_hid(d);CHECK(motions==moved);CHECK(d.hid_ring.outstanding==1);
+    event(first,3,13,0);CHECK(!d.hid_result.valid);xhci_obsluz_hid(xhc,d);CHECK(motions==moved);CHECK(d.hid_ring.outstanding==1);
     // Repeated completions wrap both event and transfer rings; each requeues once.
     for(unsigned i=0;i<EVENT_TRBS*3;++i) {
         const uint64_t ptr=d.hid_transfer_pointer;
         event(ptr,3,13,uint32_t(8-report.size()));
         CHECK(d.hid_result.valid);event(ptr,3,13,0); // duplicate before deferred service
-        xhci_obsluz_hid(d);CHECK(d.hid_transfer_oczekiwany);CHECK(d.hid_ring.outstanding==1);
+        xhci_obsluz_hid(xhc,d);CHECK(d.hid_transfer_oczekiwany);CHECK(d.hid_ring.outstanding==1);
         CHECK(read64(runtime+0x20,0x18)==(0x200000+uint64_t(xhc.event_index)*16+8));
     }
-    CHECK(xhci_poll_events(1)==0); // old-cycle entries must never replay
+    CHECK(poll_controller_events(xhc,1)==0); // old-cycle entries must never replay
     // A real IRQ notification drives deferred consumption and one requeue.
     auto& notified=events[xhc.event_index];const uint64_t queued=d.hid_transfer_pointer;
     notified={uint32_t(queued),uint32_t(queued>>32),(13U<<24)|uint32_t(8-report.size()),
         xhci_trb::type_field(xhci_trb::TYPE_TRANSFER_EVENT)|(1U<<24)|(3U<<16)|(xhc.event_cycle?1U:0U)};
-    xhci_irq(&xhc);usb_obsluz();CHECK(!xhc.irq_pending);CHECK(d.hid_ring.outstanding==1);
+    xhci_irq(&xhc);service_controller(xhc);CHECK(!xhc.irq_pending);CHECK(d.hid_ring.outstanding==1);
     CHECK(d.hid_transfer_pointer!=queued);CHECK(read32(runtime+0x20,0)==2);
     // A short control data-stage completion must be retained until status stage.
     xhc.wanted_transfer=d.ep0.dma.physical_address+32;xhc.wanted_data=d.ep0.dma.physical_address+16;xhc.wanted_setup=d.ep0.dma.physical_address;xhc.control_slot=1;
@@ -210,7 +212,7 @@ int main(){
     event(xhc.wanted_transfer,1,1,0);CHECK(xhc.transfer_result.valid&&xhc.transfer_result.residual==20);
     // Endpoint error removes pointer readiness and does not requeue a halted EP.
     InputDevice& ps2=fallback;
-    event(d.hid_transfer_pointer,3,6,0);xhci_obsluz_hid(d);CHECK(!d.hid_gotowy);CHECK(input_get_pointer_owner()==&ps2);CHECK(!d.hid_transfer_oczekiwany);
+    event(d.hid_transfer_pointer,3,6,0);xhci_obsluz_hid(xhc,d);CHECK(!d.hid_gotowy);CHECK(input_get_pointer_owner()==&ps2);CHECK(!d.hid_transfer_oczekiwany);
     CHECK(d.hid_raport.virtual_address!=nullptr); // retained until slot quiescence
     CHECK(xhc.ready); // endpoint failure leaves the controller serviceable
     CHECK(xhci_command_ring_create(&xhc.command,16));XhciTrb command{};
@@ -218,21 +220,21 @@ int main(){
     CHECK(xhci_command_ring_enqueue(&xhc.command,command,&command_ptr));xhc.wanted_command=command_ptr;
     events[xhc.event_index]={uint32_t(command_ptr),uint32_t(command_ptr>>32),1U<<24,
         xhci_trb::type_field(xhci_trb::TYPE_COMMAND_COMPLETION)|(1U<<24)|(xhc.event_cycle?1U:0U)};
-    CHECK(xhci_poll_events(1)==1);CHECK(xhc.command_result.valid&&xhc.command_result.code==1);
+    CHECK(poll_controller_events(xhc,1)==1);CHECK(xhc.command_result.valid&&xhc.command_result.code==1);
     CHECK(xhc.command.outstanding==0);xhci_command_ring_destroy(&xhc.command);xhc.wanted_command=0;
     // A removal quarantines pending DMA until the slot is confirmed disabled.
-    d.enabled=true;d.hid_gotowy=true;CHECK(xhci_zakolejkuj_transfer_interrupt_in(d));
+    d.enabled=true;d.hid_gotowy=true;CHECK(xhci_zakolejkuj_transfer_interrupt_in(xhc,d));
     const uint64_t removed=d.hid_transfer_pointer;release_mouse_buttons(d);d.hid_gotowy=false;
-    free_device(d);CHECK(d.hid_raport.virtual_address); // still enabled, cannot free
-    event(removed,3,1,0);xhci_obsluz_hid(d);CHECK(!d.pointer_device.registered);
-    d.enabled=false;free_device(d);CHECK(!d.hid_raport.virtual_address);free_device(d);
+    free_device(xhc,d);CHECK(d.hid_raport.virtual_address); // still enabled, cannot free
+    event(removed,3,1,0);xhci_obsluz_hid(xhc,d);CHECK(!d.pointer_device.registered);
+    d.enabled=false;free_device(xhc,d);CHECK(!d.hid_raport.virtual_address);free_device(xhc,d);
     event(removed,3,1,0);CHECK(!d.hid_result.valid); // late event after free
     // Controller-fatal status removes an owner and retains controller DMA.
     CHECK(hid_pointer_publish(d.pointer_device,d.pointer_layout,report.data(),report.size(),1)==false); // layout cleared on free
     CHECK(hid_pointer_compile(descriptor.data(),descriptor.size(),d.pointer_layout));
     CHECK(hid_pointer_publish(d.pointer_device,d.pointer_layout,report.data(),report.size(),1));
     CHECK(input_get_pointer_owner()==&d.pointer_device);
-    write32(operational,USBSTS,STS_HSE);usb_obsluz();
+    write32(operational,USBSTS,STS_HSE);service_controller(xhc);
     CHECK(!xhc.ready);CHECK(input_get_pointer_owner()==&fallback);CHECK(!d.pointer_device.registered);
     input_reset_all();xhci_command_ring_destroy(&d.hid_ring);xhci_command_ring_destroy(&d.ep0);dma_release(&d.hid_raport);
     printf("xHCI production pointer completions/short control/stale events: %u checks PASS\n",checks-runtime_start);

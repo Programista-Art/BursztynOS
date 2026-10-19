@@ -49,11 +49,11 @@ int MENU_X = 10;
 int MENU_W = 260;
 int MENU_GORNY_MARGINES = 10;
 int MENU_ELEMENT_WYS = 25;
-constexpr int MENU_ELEMENTOW = 19;
+constexpr int MENU_ELEMENTOW = 20;
 int MENU_WYS = (10 * 2) + (MENU_ELEMENTOW * 25);
 
 // Pozycja "Gry ->" w glownym Menu Start.
-constexpr int MENU_GRY_INDEX = 16;
+constexpr int MENU_GRY_INDEX = 17;
 int MENU_GRY_W = 180;
 constexpr int MENU_GRY_ELEMENTOW = 1;
 int MENU_GRY_WYS = (10 * 2) + (MENU_GRY_ELEMENTOW * 25);
@@ -2061,6 +2061,17 @@ void rysuj_ikone_aplikacji(const AplikacjaPulpitu& aplikacja) {
             rysuj_fragment_ikony(x,y,6,26,16,16,0x0051B87A);
             rysuj_fragment_ikony(x,y,26,26,16,16,0x00E85D5D);
             break;
+        case TypIkonyAplikacji::Diagnostyka:
+            // A themed monitor with a diagnostic pulse, using native icon primitives.
+            rysuj_fragment_ikony(x,y,3,6,42,30,motyw_kolor(MOTYW_KOLOR_RAMKA));
+            rysuj_fragment_ikony(x,y,6,9,36,24,motyw_kolor(MOTYW_KOLOR_PANEL));
+            rysuj_fragment_ikony(x,y,9,21,9,3,motyw_kolor(MOTYW_KOLOR_AKCENT));
+            rysuj_fragment_ikony(x,y,18,15,3,9,motyw_kolor(MOTYW_KOLOR_AKCENT));
+            rysuj_fragment_ikony(x,y,21,24,3,5,motyw_kolor(MOTYW_KOLOR_AKCENT));
+            rysuj_fragment_ikony(x,y,24,21,15,3,motyw_kolor(MOTYW_KOLOR_AKCENT));
+            rysuj_fragment_ikony(x,y,20,36,8,5,motyw_kolor(MOTYW_KOLOR_RAMKA));
+            rysuj_fragment_ikony(x,y,14,41,20,3,motyw_kolor(MOTYW_KOLOR_RAMKA));
+            break;
         case TypIkonyAplikacji::TestDzwieku:
             // Glosnik + fala: znak aplikacji Test dźwięku
             rysuj_fragment_ikony(x,y,0,0,48,48,0x001A2030);
@@ -2116,6 +2127,7 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
             "> Aktualizacje Systemu",
             "> Motywy Systemowe",
             "> Test dźwięku",
+            "> Diagnostyka systemu",
             "> Gry ->",
             "> Uruchom ponownie",
             "> Zamknij"
@@ -2397,15 +2409,18 @@ void obsluz_element_menu(int item_index) {
         case 15:
             uruchom_lub_aktywuj(SCIEZKA_TEST_DZWIEKU, "Test dźwięku");
             break;
+        case 16:
+            uruchom_lub_aktywuj("/programy/diagnostyka.cebula/diagnostyka.bur", "Diagnostyka systemu");
+            break;
         case MENU_GRY_INDEX:
             menu_gry_otwarte = !menu_gry_otwarte;
             aktualizuj_overlay_menu();
             RysujPulpit(true);
             break;
-        case 17:
+        case 18:
             wykonaj_restart();
             break;
-        case 18:
+        case 19:
             wykonaj_zamkniecie();
             break;
         default:

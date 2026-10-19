@@ -1,3 +1,4 @@
+#include "diagnostyka_systemu.h"
 #include "ekran.h"
 #include "instalator.h"
 /*
@@ -1305,6 +1306,8 @@ extern "C" uint64_t bws_nowoczesne_obsluz(
             return motyw_bws_polecenie(proces, static_cast<uint32_t>(a1), a2, a3);
         case BWS_PULPIT_GOTOWY:
             return bws_potwierdz_pulpit_gotowy(*proces);
+        case BWS_DIAGNOSTYKA_SYSTEMU:
+            return diag_read_request(uint32_t(a1), a2, a3, a4, a1 >> 32);
         case BWS_HDA_DIAG:
             return bws_hda_diag(*proces, a1, a2, a3, a4);
         case BWS_HDA_TEST:

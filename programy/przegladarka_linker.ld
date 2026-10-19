@@ -36,12 +36,12 @@ BUR_HEADER_SIZE   = 0x01000;
 BUR_HEADER_VADDR  = 0x1000000;
 
 BUR_TEXT_OFFSET   = 0x01000;
-BUR_TEXT_SIZE     = 0x0F000;
+BUR_TEXT_SIZE     = 0x40000;
 BUR_TEXT_VADDR    = 0x1001000;
 
-BUR_DATA_OFFSET   = 0x10000;
+BUR_DATA_OFFSET   = 0x41000;
 BUR_DATA_SIZE     = 0x80000;
-BUR_DATA_VADDR    = 0x1010000;
+BUR_DATA_VADDR    = 0x1041000;
 
 BUR_TEXT_END      = BUR_TEXT_VADDR + BUR_TEXT_SIZE;
 BUR_DATA_END      = BUR_DATA_VADDR + BUR_DATA_SIZE;
@@ -359,12 +359,12 @@ SECTIONS
 
     ASSERT(
         __bur_text_used_end <= BUR_TEXT_END,
-        "Hussar: kod/rodata przekracza region TEXT 0xF000"
+        "Hussar: kod/rodata przekracza region TEXT 0x40000"
     )
 
     ASSERT(
         SIZEOF(.text) == BUR_TEXT_SIZE,
-        "Hussar: TEXT musi byc fizycznie wypelniony do 0xF000 bajtow"
+        "Hussar: TEXT musi byc fizycznie wypelniony do 0x40000 bajtow"
     )
 
     ASSERT(
@@ -374,12 +374,12 @@ SECTIONS
 
     ASSERT(
         ADDR(.data) == BUR_DATA_VADDR,
-        "Hussar: DATA musi zaczynac sie pod 0x1010000"
+        "Hussar: DATA musi zaczynac sie pod 0x1041000"
     )
 
     ASSERT(
         LOADADDR(.data) == BUR_DATA_OFFSET,
-        "Hussar: DATA musi zaczynac sie w pliku pod 0x10000"
+        "Hussar: DATA musi zaczynac sie w pliku pod 0x41000"
     )
 
     ASSERT(
@@ -393,12 +393,12 @@ SECTIONS
     )
 
     /*
-     * Caly DATA/BSS konczy sie pod 0x1090000, a wiec daleko ponizej 4 GiB.
+     * Caly DATA/BSS konczy sie pod 0x10C1000, a wiec daleko ponizej 4 GiB.
      * To zachowuje wymaganie obecnego 32-bitowego ABI bufora BWS29/BWS30.
      */
     ASSERT(
         __bur_data_memory_end <= BUR_DATA_END,
-        "Hussar: niski DATA/BSS wychodzi poza VA 0x1010000..0x108FFFF"
+        "Hussar: niski DATA/BSS wychodzi poza VA 0x1041000..0x10C0FFF"
     )
 
     ASSERT(

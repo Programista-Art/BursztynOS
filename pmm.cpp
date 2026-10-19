@@ -42,6 +42,9 @@ extern void host_memory_irq_restore(uint64_t);
  * STALE
  * ========================================================================= */
 
+static uint64_t diagnostic_ram_bytes=0;
+extern "C" uint64_t pmm_diagnostic_ram_bytes(){return diagnostic_ram_bytes;}
+
 namespace {
 
 constexpr uint64_t ROZMIAR_STRONY =
@@ -957,6 +960,8 @@ static bool przetworz_mape_pamieci(
             continue;
         }
 
+        if(wpis.adres_bazowy<=UINT64_MAX-wpis.dlugosc && diagnostic_ram_bytes<=UINT64_MAX-wpis.dlugosc)
+            diagnostic_ram_bytes+=wpis.dlugosc;
         dodaj_dostepny_zakres(
             wpis.adres_bazowy,
             wpis.dlugosc
@@ -1077,6 +1082,7 @@ static void zarezerwuj_framebuffer(
  * ========================================================================= */
 
 static void wyzeruj_stan_pmm() {
+    diagnostic_ram_bytes=0;
     for (uint64_t i = 0;
          i < ROZMIAR_MAPY_BITOWEJ;
          ++i) {

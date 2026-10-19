@@ -1,3 +1,4 @@
+#include "diagnostyka_systemu.h"
 #include "boot_phase_timing.h"
 #include "xhci_pointing_diag.h"
 #include "pointer_coordinates.h"
@@ -976,6 +977,7 @@ static void OznaczDirtyTerminalaPoDopisaniu(int stary_r) {
 void wypisz_log(const char* tekst) {
     if (!tekst) return;
 
+    if (diag_log_impl) diag_capture_serial(tekst);
     SerialLog(tekst);
     SerialLog("\n");
 }
