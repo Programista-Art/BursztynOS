@@ -126,7 +126,8 @@ public:
     const bool ok=save_text(DIAG_REPORT_PATH,report,n);if(ok)wypisz("[DIAG APP] Report saved and size verified: /logi/DIAG.TXT\n");w->message(ok?(persistent_fs()?"Raport zapisany: /logi/DIAG.TXT":"Raport zapisany w RAM: /logi/DIAG.TXT. Skopiuj go przed restartem."):
     "Nie udało się zapisać raportu",ok?(persistent_fs()?TypKomunikatu::Sukces:TypKomunikatu::Ostrzezenie):TypKomunikatu::Blad);},this);
    else b->przy_kliknieciu([](Przycisk*,void* p){size_t n=0;auto* w=static_cast<Window*>(p);
-    const bool ok=model.report(report,sizeof(report),&n)&&clipboard_set("text/plain;charset=utf-8",report,n);
+    const bool ok=model.report(report,sizeof(report),&n)&&clipboard_set("text/plain",report,n+1);
+    if(ok)wypisz("[DIAG APP] Report copied to clipboard\n");
     w->message(ok?"Raport skopiowany do schowka":"Nie udało się skopiować raportu",ok?TypKomunikatu::Sukces:TypKomunikatu::Blad);},this);
   }
   normal=&root.dodaj<PoleWyboru>(Dokowanie::Dol,"Pokazuj Diagnostykę systemu przy uruchomieniu",preferences.autostart);

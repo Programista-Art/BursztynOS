@@ -74,3 +74,6 @@ loop_test.sh
 
 # Modern input regression artifacts
 .input-test/
+
+# Husarz parser, renderer and isolated QEMU regression artifacts
+.husarz-test/

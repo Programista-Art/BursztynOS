@@ -1,3 +1,4 @@
+#include "wyjatek_uzytkownika.h"
 #include "cykl_wylaczania_grafiki.h"
 #include "ekran_powitalny_api.h"
 #include "diagnostyka_startu.h"
@@ -3021,6 +3022,12 @@ __attribute__((noinline)) uint64_t bws_czytaj_fragment_pliku(
 }
 
 } // namespace
+
+// Faults in Ring 3 reuse exactly the normal GUI/IPC/socket/deferred-exit cleanup.
+// No faulting user pointer or user stack is dereferenced by this adapter.
+[[noreturn]] void syscalls_zakoncz_proces_po_wyjatku() {
+    bws_zakoncz_biezacy_proces();
+}
 
 /* =========================================================================
  * INICJALIZACJA SYSCALL / MSR

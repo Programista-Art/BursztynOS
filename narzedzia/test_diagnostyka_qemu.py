@@ -123,16 +123,24 @@ def main():
      for _ in range(40):
       cx,cy=position();dx=max(-80,min(80,x-cx));dy=max(-80,min(80,y-cy))
       if not dx and not dy:break
-      hmp(f'mouse_move {dx} {dy}');time.sleep(.12)
+      # QMP command completion does not acknowledge guest HID consumption.
+      # Wait for each report before calculating the next relative movement;
+      # otherwise slow TCG runs queue duplicates and overshoot the target.
+      hmp(f'mouse_move {dx} {dy}')
+      movement_deadline=min(deadline,time.monotonic()+10)
+      while position()==[cx,cy] and time.monotonic()<movement_deadline:time.sleep(.1)
+      if position()==[cx,cy]:raise RuntimeError('Guest did not consume mouse movement')
      else:raise RuntimeError('Cursor did not reach '+str((x,y,position())))
-     hmp('mouse_button 1');time.sleep(.3);hmp('mouse_button 0');time.sleep(.7)
+     time.sleep(.5)
+     if position()!=[x,y]:raise RuntimeError('Cursor moved after reaching target '+str((x,y,position())))
+     hmp('mouse_button 1');time.sleep(1);hmp('mouse_button 0');time.sleep(1)
     time.sleep(2);q.call('screendump',{'filename':str(out/'system.png'),'format':'png'})
     print('Diagnostics visible; '+str(sock),flush=True)
     if args.hold:time.sleep(min(args.hold,50))
     # Four native tab pages, standard default window at (100,30), 1040x650.
     for name,x,view in [('devices',260,'devices'),('drivers',350,'drivers'),('boot-log',450,'log')]:
      click(x,132);wait(lambda s:'[DIAG APP] View='+view in s,'tab '+view);time.sleep(1);q.call('screendump',{'filename':str(out/(name+'.png')),'format':'png'})
-    click(630,644)
+    click(630,654)
     wait(lambda s:'[DIAG APP] Report saved and size verified' in s,'report save via GUI')
     q.call('screendump',{'filename':str(out/'saved.png'),'format':'png'})
     result={'result':'PASS','kernel_sha256':kernel_sha,
@@ -143,7 +151,8 @@ def main():
      if '[PS/2] controller absent' not in text():raise RuntimeError('PS/2 was not disabled')
      result['usb_with_missing_ps2']=True
     # Clipboard export and ordinary WM minimize/restore/maximize actions.
-    click(950,654);time.sleep(1)
+    click(950,654);wait(lambda s:'[DIAG APP] Report copied to clipboard' in s,'clipboard report export')
+    result['report_copied']=True
     click(1075,44);time.sleep(1);q.call('screendump',{'filename':str(out/'minimized.png'),'format':'png'})
     click(120,700);time.sleep(1)
     click(1099,44);time.sleep(1);q.call('screendump',{'filename':str(out/'maximized.png'),'format':'png'})
@@ -176,11 +185,13 @@ def main():
      click(120,618);wait(lambda s:'[DIAG APP] Saved autostart=1' in s,'enable normal autostart')
      click(120,588);wait(lambda s:'[DIAG APP] Saved problems=1' in s,'enable problem autostart')
      if read_psf_file(disk,'/uzytkownicy/DIAG.CFG')!=b'autostart=1\nproblems=1\n':raise RuntimeError('Enabled preferences not persisted')
-     reboot('enabled');wait(lambda s:'[DIAG APP] First frame submitted' in s,'restored autostart')
+     reboot('enabled');wait(lambda s:'[DIAG APP] First frame submitted' in s,'restored autostart');time.sleep(2)
      q.call('screendump',{'filename':str(out/'autostart-enabled.png'),'format':'png'})
-     # Close and manually launch the protected desktop shortcut with Enter.
+     # The native desktop opens launchers on a double click.
      click(1124,44);time.sleep(1);click(560,128)
-     hmp('sendkey ret');wait(lambda s:s.count('[DIAG APP] First frame submitted')>=2,'desktop shortcut launch')
+     for _ in range(2):
+      hmp('mouse_button 1');time.sleep(.15);hmp('mouse_button 0');time.sleep(.15)
+     wait(lambda s:s.count('[DIAG APP] First frame submitted')>=2,'desktop shortcut launch')
      result['preferences_survived_reboots']=True;result['start_menu_launch']=True;result['desktop_launch']=True
     (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result),flush=True)
    except Exception:

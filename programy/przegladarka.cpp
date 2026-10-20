@@ -30,6 +30,8 @@
 #include "../bursztyn_gui.h"
 #include "bursztyn_ui/bursztyn_ui.h"
 #include "http_kody.h"
+#include "husarz/paint.h"
+#include "husarz/script.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -86,6 +88,7 @@ static_assert(
 
 extern "C" [[noreturn]] void _start();
 
+#ifndef HUSARZ_HOST_TEST
 extern "C" {
 
 __attribute__((section(".naglowek"), used))
@@ -106,6 +109,8 @@ NaglowekBur naglowek = {
 };
 
 }
+
+#endif
 
 /* =========================================================================
  * 2. STALE APLIKACJI
@@ -177,7 +182,8 @@ struct Zakladka {
 
     char* tresc;
 
-    int przewin_y;
+    Husarz::Document* dokument;
+    bool dokument_brudny;
 
     bool to_jest_html;
     bool wczytana;
@@ -251,11 +257,11 @@ char status_bufor[
 
 
 
-int max_przewin_y =
-    0;
+bool nawigacja_trwa=false;
+int maksimum_przewijania();
+void zresetuj_przewijanie();
 
-int calkowita_wysokosc_strony =
-    0;
+
 
 /* =========================================================================
  * 5. FREESTANDING MEMCPY/MEMSET
@@ -263,6 +269,7 @@ int calkowita_wysokosc_strony =
 
 } // namespace
 
+#ifndef HUSARZ_HOST_TEST
 extern "C" void* memcpy(
     void* dest,
     const void* src,
@@ -321,6 +328,8 @@ extern "C" void* memset(
 
     return dest;
 }
+
+#endif
 
 namespace {
 
@@ -656,281 +665,6 @@ void ustaw_status(
 }
 
 /* =========================================================================
- * 7. UTF-8
- * ========================================================================= */
-
-struct Utf8Znak {
-    uint32_t kod;
-    int bajty;
-};
-
-Utf8Znak dekoduj_utf8(
-    const char* s
-) {
-    Utf8Znak z{
-        0xFFFDU,
-        1
-    };
-
-    if (!s ||
-        s[0] == '\0') {
-
-        z.kod =
-            0;
-
-        return z;
-    }
-
-    const uint8_t b0 =
-        static_cast<uint8_t>(
-            s[0]
-        );
-
-    if (b0 < 0x80U) {
-        z.kod =
-            b0;
-
-        return z;
-    }
-
-    if ((b0 &
-         0xE0U) ==
-            0xC0U) {
-
-        if (s[1] == '\0') {
-            return z;
-        }
-
-        const uint8_t b1 =
-            static_cast<uint8_t>(
-                s[1]
-            );
-
-        if ((b1 &
-             0xC0U) !=
-                0x80U) {
-
-            return z;
-        }
-
-        const uint32_t cp =
-            ((b0 &
-              0x1FU) << 6) |
-            (b1 &
-             0x3FU);
-
-        if (cp <
-            0x80U) {
-
-            return z;
-        }
-
-        z.kod =
-            cp;
-
-        z.bajty =
-            2;
-
-        return z;
-    }
-
-    if ((b0 &
-         0xF0U) ==
-            0xE0U) {
-
-        if (s[1] == '\0') {
-            return z;
-        }
-
-        const uint8_t b1 =
-            static_cast<uint8_t>(
-                s[1]
-            );
-
-        if ((b1 &
-             0xC0U) !=
-                0x80U ||
-            s[2] ==
-                '\0') {
-
-            return z;
-        }
-
-        const uint8_t b2 =
-            static_cast<uint8_t>(
-                s[2]
-            );
-
-        if ((b2 &
-             0xC0U) !=
-                0x80U) {
-
-            return z;
-        }
-
-        const uint32_t cp =
-            ((b0 &
-              0x0FU) << 12) |
-            ((b1 &
-              0x3FU) << 6) |
-            (b2 &
-             0x3FU);
-
-        if (cp <
-                0x800U ||
-            (cp >= 0xD800U &&
-             cp <= 0xDFFFU)) {
-
-            return z;
-        }
-
-        z.kod =
-            cp;
-
-        z.bajty =
-            3;
-
-        return z;
-    }
-
-    if ((b0 &
-         0xF8U) ==
-            0xF0U) {
-
-        if (s[1] == '\0') {
-            return z;
-        }
-
-        const uint8_t b1 =
-            static_cast<uint8_t>(
-                s[1]
-            );
-
-        if ((b1 &
-             0xC0U) !=
-                0x80U ||
-            s[2] ==
-                '\0') {
-
-            return z;
-        }
-
-        const uint8_t b2 =
-            static_cast<uint8_t>(
-                s[2]
-            );
-
-        if ((b2 &
-             0xC0U) !=
-                0x80U ||
-            s[3] ==
-                '\0') {
-
-            return z;
-        }
-
-        const uint8_t b3 =
-            static_cast<uint8_t>(
-                s[3]
-            );
-
-        if ((b3 &
-             0xC0U) !=
-                0x80U) {
-
-            return z;
-        }
-
-        const uint32_t cp =
-            ((b0 &
-              0x07U) << 18) |
-            ((b1 &
-              0x3FU) << 12) |
-            ((b2 &
-              0x3FU) << 6) |
-            (b3 &
-             0x3FU);
-
-        if (cp <
-                0x10000U ||
-            cp >
-                0x10FFFFU) {
-
-            return z;
-        }
-
-        z.kod =
-            cp;
-
-        z.bajty =
-            4;
-
-        return z;
-    }
-
-    return z;
-}
-
-int szerokosc_znaku(
-    uint32_t unicode
-) {
-    int sw =
-        static_cast<int>(
-            bws_wywolaj(
-                24,
-                unicode
-            )
-        );
-
-    if (sw <= 0 ||
-        sw > 32) {
-
-        sw =
-            8;
-    }
-
-    return sw;
-}
-
-void wypisz_skalowane(
-    int x,
-    int y,
-    uint32_t kolor,
-    int skala,
-    const char* tekst
-) {
-    if (!tekst ||
-        skala < 1) {
-
-        return;
-    }
-
-    const uint64_t arg =
-        (static_cast<uint64_t>(
-             static_cast<uint32_t>(
-                 skala)) << 32) |
-        kolor;
-
-    bws_wywolaj(
-        20,
-        static_cast<uint64_t>(
-            static_cast<int64_t>(
-                x
-            )
-        ),
-        static_cast<uint64_t>(
-            static_cast<int64_t>(
-                y
-            )
-        ),
-        arg,
-        reinterpret_cast<uint64_t>(
-            tekst
-        )
-    );
-}
-
-/* =========================================================================
  * 8. ZAKLADKI / PAMIEC
  * ========================================================================= */
 
@@ -970,14 +704,15 @@ void wyczysc_zakladke(
         );
     }
 
+    if (zwolnij_tresc) delete z.dokument;
+    z.dokument = nullptr;
+    z.dokument_brudny = true;
     z.tresc =
         nullptr;
 
     z.url[0] =
         '\0';
-
-    z.przewin_y =
-        0;
+    z.dokument_brudny = true;
 
     z.to_jest_html =
         false;
@@ -1021,12 +756,7 @@ bool nowa_zakladka() {
         liczba_zakladek;
 
     ++liczba_zakladek;
-
-    max_przewin_y =
-        0;
-
-    calkowita_wysokosc_strony =
-        0;
+    zresetuj_przewijanie();
 
     ustaw_status(
         "Nowa zakladka."
@@ -1056,18 +786,14 @@ void zamknij_zakladke(
             z.tresc[0] =
                 '\0';
         }
-
-        z.przewin_y =
-            0;
+    z.dokument_brudny = true;
 
         z.to_jest_html =
             false;
 
         z.wczytana =
             false;
-
-        max_przewin_y =
-            0;
+    zresetuj_przewijanie();
 
         ustaw_status(
             "Wyczyszczono zakladke."
@@ -1076,6 +802,8 @@ void zamknij_zakladke(
         return;
     }
 
+    delete zakladki[indeks].dokument;
+    zakladki[indeks].dokument = nullptr;
     if (zakladki[indeks].tresc) {
         gui_free(
             zakladki[indeks].tresc
@@ -1104,6 +832,7 @@ void zamknij_zakladke(
      * Ostatni wpis jest duplikatem przeniesionego pointera.
      * Zerujemy go bez free.
      */
+    zakladki[liczba_zakladek].dokument = nullptr;
     zakladki[
         liczba_zakladek
     ].tresc =
@@ -1125,9 +854,7 @@ void zamknij_zakladke(
 
         --aktywna_zakladka;
     }
-
-    max_przewin_y =
-        0;
+    zresetuj_przewijanie();
 
     ustaw_status(
         "Zamknieto zakladke."
@@ -2247,7 +1974,7 @@ bool parsuj_odpowiedz_http(
         tekst_zawiera_ci(
             content_type,
             "text/plain"
-        ) ||
+        ) || tekst_zawiera_ci(content_type, "text/css") ||
         tekst_zawiera_ci(
             content_type,
             "application/json"
@@ -2697,1060 +2424,13 @@ __attribute__((noinline)) bool ustaw_url_z_location(
         );
 }
 
-/* =========================================================================
- * 14. RENDERER TEKSTU
- * ========================================================================= */
-
-struct Renderer {
-    KontekstRysowania* ctx{nullptr};
-    int x;
-    int y;
-    int szer;
-    int wys;
-    int przewin;
-
-    int logiczny_x;
-    int logiczny_y;
-
-    int line_height;
-
-    uint32_t kolor;
-    int skala;
-
-    bool ostatnia_spacja;
-};
-
-void renderer_nowa_linia(
-    Renderer& r,
-    int dodatkowo = 0
-) {
-    r.logiczny_x =
-        0;
-
-    r.logiczny_y +=
-        r.line_height *
-        r.skala +
-        dodatkowo;
-
-    r.ostatnia_spacja =
-        false;
+// Parsing is independent of viewport geometry and painting.
+void renderuj_html(Husarz::Document& document,const char* source,bool html) {
+    Husarz::parse_html(document,source,Husarz::length(source,HTML_POJEMNOSC),html);
+    Husarz::collect_styles(document);
+    Husarz::prepare_controls(document);
 }
-
-void renderer_znak(
-    Renderer& r,
-    const char* bytes,
-    uint32_t unicode,
-    int bytes_count
-) {
-    if (!bytes ||
-        bytes_count <= 0) {
-
-        return;
-    }
-
-    const int sw =
-        szerokosc_znaku(
-            unicode
-        );
-
-    const int pelna =
-        (sw +
-         1) *
-        r.skala;
-
-    if (r.logiczny_x +
-            pelna >
-        r.szer) {
-
-        renderer_nowa_linia(
-            r
-        );
-    }
-
-    const int draw_y =
-        r.y +
-        r.logiczny_y -
-        r.przewin;
-
-    if (draw_y +
-            r.line_height *
-            r.skala >=
-            r.y &&
-        draw_y <
-            r.y +
-            r.wys) {
-
-        char temp[
-            5
-        ] = {};
-
-        for (int i = 0;
-             i < bytes_count &&
-             i < 4;
-             ++i) {
-
-            temp[i] =
-                bytes[i];
-        }
-
-        if (r.ctx) {
-            r.ctx->rysuj_tekst(
-                Punkt(r.x + r.logiczny_x, draw_y),
-                temp,
-                r.kolor,
-                SkalaUI(r.skala)
-            );
-        } else {
-            wypisz_skalowane(
-                r.x +
-                    r.logiczny_x,
-                draw_y,
-                r.kolor,
-                r.skala,
-                temp
-            );
-        }
-    }
-
-    r.logiczny_x +=
-        pelna;
-}
-
-void renderer_spacja(
-    Renderer& r
-) {
-    if (r.logiczny_x == 0 ||
-        r.ostatnia_spacja) {
-
-        return;
-    }
-
-    r.logiczny_x +=
-        8 *
-        r.skala;
-
-    r.ostatnia_spacja =
-        true;
-}
-
-void renderer_tekst(
-    Renderer& r,
-    const char* tekst
-) {
-    if (!tekst) {
-        return;
-    }
-
-    for (size_t i = 0;
-         tekst[i] != '\0';) {
-
-        const char c =
-            tekst[i];
-
-        if (c == '\r') {
-            ++i;
-            continue;
-        }
-
-        if (c == '\n') {
-            renderer_nowa_linia(
-                r
-            );
-
-            ++i;
-            continue;
-        }
-
-        if (c == ' ' ||
-            c == '\t') {
-
-            renderer_spacja(
-                r
-            );
-
-            ++i;
-            continue;
-        }
-
-        r.ostatnia_spacja =
-            false;
-
-        const Utf8Znak z =
-            dekoduj_utf8(
-                tekst +
-                i
-            );
-
-        renderer_znak(
-            r,
-            tekst +
-                i,
-            z.kod,
-            z.bajty
-        );
-
-        i +=
-            static_cast<size_t>(
-                z.bajty
-            );
-    }
-}
-
-/* =========================================================================
- * 15. HTML PARSER/RENDERER
- * ========================================================================= */
-
-bool tag_nazwa_znak(
-    char c
-) {
-    return
-        (c >= 'a' &&
-         c <= 'z') ||
-        (c >= 'A' &&
-         c <= 'Z') ||
-        (c >= '0' &&
-         c <= '9');
-}
-
-bool tag_rowny(
-    const char* name,
-    size_t len,
-    const char* expected
-) {
-    return
-        tekst_rowny_ci(
-            name,
-            len,
-            expected
-        );
-}
-
-bool html_tag_blokowy(
-    const char* name,
-    size_t len
-) {
-    return
-        tag_rowny(
-            name,
-            len,
-            "p") ||
-        tag_rowny(
-            name,
-            len,
-            "div") ||
-        tag_rowny(
-            name,
-            len,
-            "section") ||
-        tag_rowny(
-            name,
-            len,
-            "article") ||
-        tag_rowny(
-            name,
-            len,
-            "header") ||
-        tag_rowny(
-            name,
-            len,
-            "footer") ||
-        tag_rowny(
-            name,
-            len,
-            "li") ||
-        tag_rowny(
-            name,
-            len,
-            "tr") ||
-        tag_rowny(
-            name,
-            len,
-            "blockquote") ||
-        tag_rowny(
-            name,
-            len,
-            "pre");
-}
-
-bool html_heading(
-    const char* name,
-    size_t len
-) {
-    return
-        tag_rowny(
-            name,
-            len,
-            "h1") ||
-        tag_rowny(
-            name,
-            len,
-            "h2") ||
-        tag_rowny(
-            name,
-            len,
-            "h3");
-}
-
-bool html_entity(
-    const char* s,
-    uint32_t* unicode,
-    size_t* zuzyto
-) {
-    if (!s ||
-        s[0] != '&' ||
-        !unicode ||
-        !zuzyto) {
-
-        return false;
-    }
-
-    struct Encja {
-        const char* nazwa;
-        uint32_t kod;
-    };
-
-    static constexpr Encja ENCJE[] = {
-        {"&amp;",  '&'},
-        {"&lt;",   '<'},
-        {"&gt;",   '>'},
-        {"&quot;", '"'},
-        {"&#39;",  '\''},
-        {"&apos;", '\''},
-        {"&nbsp;", ' '}
-    };
-
-    for (const Encja& e :
-         ENCJE) {
-
-        size_t i =
-            0;
-
-        while (e.nazwa[i] != '\0' &&
-               s[i] != '\0' &&
-               e.nazwa[i] ==
-                   s[i]) {
-
-            ++i;
-        }
-
-        if (e.nazwa[i] ==
-            '\0') {
-
-            *unicode =
-                e.kod;
-
-            *zuzyto =
-                i;
-
-            return true;
-        }
-    }
-
-    if (s[1] ==
-        '#') {
-
-        size_t i =
-            2;
-
-        bool hex =
-            false;
-
-        if (s[i] ==
-                'x' ||
-            s[i] ==
-                'X') {
-
-            hex =
-                true;
-
-            ++i;
-        }
-
-        uint32_t value =
-            0;
-
-        bool any =
-            false;
-
-        while (s[i] != '\0' &&
-               s[i] != ';') {
-
-            int digit =
-                -1;
-
-            if (hex) {
-                digit =
-                    hex_wartosc(
-                        s[i]
-                    );
-            } else if (s[i] >= '0' &&
-                       s[i] <= '9') {
-
-                digit =
-                    s[i] -
-                    '0';
-            }
-
-            if (digit < 0) {
-                return false;
-            }
-
-            const uint32_t base =
-                hex
-                    ? 16U
-                    : 10U;
-
-            if (value >
-                (0x10FFFFU -
-                 static_cast<uint32_t>(
-                     digit)) /
-                    base) {
-
-                return false;
-            }
-
-            value =
-                value *
-                base +
-                static_cast<uint32_t>(
-                    digit
-                );
-
-            any =
-                true;
-
-            ++i;
-        }
-
-        if (!any ||
-            s[i] != ';' ||
-            value == 0 ||
-            value >
-                0x10FFFFU ||
-            (value >= 0xD800U &&
-             value <= 0xDFFFU)) {
-
-            return false;
-        }
-
-        *unicode =
-            value;
-
-        *zuzyto =
-            i +
-            1U;
-
-        return true;
-    }
-
-    return false;
-}
-
-int utf8_zapisz(
-    uint32_t cp,
-    char out[5]
-) {
-    if (!out) {
-        return 0;
-    }
-
-    out[0] =
-        '\0';
-
-    if (cp <=
-        0x7FU) {
-
-        out[0] =
-            static_cast<char>(
-                cp
-            );
-
-        out[1] =
-            '\0';
-
-        return 1;
-    }
-
-    if (cp <=
-        0x7FFU) {
-
-        out[0] =
-            static_cast<char>(
-                0xC0U |
-                (cp >> 6)
-            );
-
-        out[1] =
-            static_cast<char>(
-                0x80U |
-                (cp &
-                 0x3FU)
-            );
-
-        out[2] =
-            '\0';
-
-        return 2;
-    }
-
-    if (cp <=
-        0xFFFFU) {
-
-        out[0] =
-            static_cast<char>(
-                0xE0U |
-                (cp >> 12)
-            );
-
-        out[1] =
-            static_cast<char>(
-                0x80U |
-                ((cp >> 6) &
-                 0x3FU)
-            );
-
-        out[2] =
-            static_cast<char>(
-                0x80U |
-                (cp &
-                 0x3FU)
-            );
-
-        out[3] =
-            '\0';
-
-        return 3;
-    }
-
-    out[0] =
-        static_cast<char>(
-            0xF0U |
-            (cp >> 18)
-        );
-
-    out[1] =
-        static_cast<char>(
-            0x80U |
-            ((cp >> 12) &
-             0x3FU)
-        );
-
-    out[2] =
-        static_cast<char>(
-            0x80U |
-            ((cp >> 6) &
-             0x3FU)
-        );
-
-    out[3] =
-        static_cast<char>(
-            0x80U |
-            (cp &
-             0x3FU)
-        );
-
-    out[4] =
-        '\0';
-
-    return 4;
-}
-
-void renderuj_html(
-    Renderer& r,
-    const char* html
-) {
-    if (!html) {
-        return;
-    }
-
-    enum class Ukryte {
-        Nic,
-        Head,
-        Script,
-        Style,
-        Svg
-    };
-
-    Ukryte ukryte =
-        Ukryte::Nic;
-
-    int poprzednia_skala[
-        16
-    ] = {};
-
-    int stack =
-        0;
-
-    bool widziano_body =
-        false;
-
-    bool w_body =
-        false;
-
-    for (size_t i = 0;
-         html[i] != '\0';) {
-
-        if (html[i] ==
-            '<') {
-
-            /*
-             * Komentarz <!-- ... -->
-             */
-            if (html[i + 1U] ==
-                    '!' &&
-                html[i + 2U] ==
-                    '-' &&
-                html[i + 3U] ==
-                    '-') {
-
-                i +=
-                    4U;
-
-                while (html[i] != '\0' &&
-                       !(html[i] ==
-                             '-' &&
-                         html[i + 1U] ==
-                             '-' &&
-                         html[i + 2U] ==
-                             '>')) {
-
-                    ++i;
-                }
-
-                if (html[i] != '\0') {
-                    i +=
-                        3U;
-                }
-
-                continue;
-            }
-
-            size_t p =
-                i +
-                1U;
-
-            while (ascii_biala(
-                       html[p])) {
-
-                ++p;
-            }
-
-            bool closing =
-                false;
-
-            if (html[p] ==
-                '/') {
-
-                closing =
-                    true;
-
-                ++p;
-
-                while (ascii_biala(
-                           html[p])) {
-
-                    ++p;
-                }
-            }
-
-            const size_t name_start =
-                p;
-
-            while (tag_nazwa_znak(
-                       html[p])) {
-
-                ++p;
-            }
-
-            const size_t name_len =
-                p -
-                name_start;
-
-            bool quote =
-                false;
-
-            char quote_char =
-                '\0';
-
-            size_t end =
-                p;
-
-            while (html[end] != '\0') {
-                const char c =
-                    html[end];
-
-                if (quote) {
-                    if (c ==
-                        quote_char) {
-
-                        quote =
-                            false;
-                    }
-                } else if (c ==
-                               '"' ||
-                           c ==
-                               '\'') {
-
-                    quote =
-                        true;
-
-                    quote_char =
-                        c;
-                } else if (c ==
-                           '>') {
-
-                    ++end;
-                    break;
-                }
-
-                ++end;
-            }
-
-            if (name_len == 0) {
-                i =
-                    end;
-
-                continue;
-            }
-
-            const char* name =
-                html +
-                name_start;
-
-            const bool is_head =
-                tag_rowny(
-                    name,
-                    name_len,
-                    "head"
-                );
-
-            const bool is_script =
-                tag_rowny(
-                    name,
-                    name_len,
-                    "script"
-                );
-
-            const bool is_style =
-                tag_rowny(
-                    name,
-                    name_len,
-                    "style"
-                );
-
-            const bool is_svg =
-                tag_rowny(
-                    name,
-                    name_len,
-                    "svg"
-                );
-
-            const bool is_body =
-                tag_rowny(
-                    name,
-                    name_len,
-                    "body"
-                );
-
-            if (is_body) {
-                widziano_body =
-                    true;
-
-                w_body =
-                    !closing;
-
-                i =
-                    end;
-
-                continue;
-            }
-
-            Ukryte rodzaj =
-                Ukryte::Nic;
-
-            if (is_head) {
-                rodzaj =
-                    Ukryte::Head;
-            } else if (is_script) {
-                rodzaj =
-                    Ukryte::Script;
-            } else if (is_style) {
-                rodzaj =
-                    Ukryte::Style;
-            } else if (is_svg) {
-                rodzaj =
-                    Ukryte::Svg;
-            }
-
-            if (ukryte !=
-                Ukryte::Nic) {
-
-                if (closing &&
-                    rodzaj ==
-                        ukryte) {
-
-                    ukryte =
-                        Ukryte::Nic;
-                }
-
-                i =
-                    end;
-
-                continue;
-            }
-
-            if (!closing &&
-                rodzaj !=
-                    Ukryte::Nic) {
-
-                ukryte =
-                    rodzaj;
-
-                i =
-                    end;
-
-                continue;
-            }
-
-            /*
-             * Jezeli HTML nie ma jawnego <body>, renderujemy zawartosc
-             * poza head/script/style - czeste w prostych stronach/errorach.
-             */
-            const bool renderowac =
-                !widziano_body ||
-                w_body;
-
-            if (renderowac) {
-                if (tag_rowny(
-                        name,
-                        name_len,
-                        "br")) {
-
-                    renderer_nowa_linia(
-                        r
-                    );
-                }
-
-                if (html_heading(
-                        name,
-                        name_len)) {
-
-                    if (!closing) {
-                        if (r.logiczny_x != 0) {
-                            renderer_nowa_linia(
-                                r,
-                                4
-                            );
-                        }
-
-                        if (stack <
-                            16) {
-
-                            poprzednia_skala[
-                                stack++
-                            ] =
-                                r.skala;
-                        }
-
-                        r.skala =
-                            tag_rowny(
-                                name,
-                                name_len,
-                                "h1")
-                                ? 2
-                                : 1;
-                    } else {
-                        renderer_nowa_linia(
-                            r,
-                            6
-                        );
-
-                        if (stack > 0) {
-                            r.skala =
-                                poprzednia_skala[
-                                    --stack
-                                ];
-                        } else {
-                            r.skala =
-                                1;
-                        }
-                    }
-                } else if (html_tag_blokowy(
-                               name,
-                               name_len)) {
-
-                    if (closing ||
-                        r.logiczny_x != 0) {
-
-                        renderer_nowa_linia(
-                            r,
-                            4
-                        );
-                    }
-                }
-
-                if (!closing &&
-                    tag_rowny(
-                        name,
-                        name_len,
-                        "li")) {
-
-                    renderer_tekst(
-                        r,
-                        "- "
-                    );
-                }
-            }
-
-            i =
-                end;
-
-            continue;
-        }
-
-        const bool renderowac =
-            ukryte ==
-                Ukryte::Nic &&
-            (!widziano_body ||
-             w_body);
-
-        if (!renderowac) {
-            ++i;
-            continue;
-        }
-
-        if (html[i] ==
-            '&') {
-
-            uint32_t cp =
-                0;
-
-            size_t used =
-                0;
-
-            if (html_entity(
-                    html +
-                        i,
-                    &cp,
-                    &used)) {
-
-                if (cp ==
-                    ' ') {
-
-                    renderer_spacja(
-                        r
-                    );
-                } else {
-                    char encoded[
-                        5
-                    ] = {};
-
-                    const int n =
-                        utf8_zapisz(
-                            cp,
-                            encoded
-                        );
-
-                    renderer_znak(
-                        r,
-                        encoded,
-                        cp,
-                        n
-                    );
-
-                    r.ostatnia_spacja =
-                        false;
-                }
-
-                i +=
-                    used;
-
-                continue;
-            }
-        }
-
-        const char c =
-            html[i];
-
-        if (ascii_biala(
-                c)) {
-
-            renderer_spacja(
-                r
-            );
-
-            ++i;
-
-            continue;
-        }
-
-        const Utf8Znak z =
-            dekoduj_utf8(
-                html +
-                i
-            );
-
-        renderer_znak(
-            r,
-            html +
-                i,
-            z.kod,
-            z.bajty
-        );
-
-        r.ostatnia_spacja =
-            false;
-
-        i +=
-            static_cast<size_t>(
-                z.bajty
-            );
-    }
-}
-
-void przelicz_scroll(
-    const Renderer& r,
-    int obszar_h
-) {
-    calkowita_wysokosc_strony =
-        r.logiczny_y +
-        r.line_height *
-        r.skala +
-        8;
-
-    if (calkowita_wysokosc_strony >
-        obszar_h) {
-
-        max_przewin_y =
-            calkowita_wysokosc_strony -
-            obszar_h;
-    } else {
-        max_przewin_y =
-            0;
-    }
-
-    if (liczba_zakladek <= 0) {
-        return;
-    }
-
-    int& scroll =
-        zakladki[
-            aktywna_zakladka
-        ].przewin_y;
-
-    if (scroll < 0) {
-        scroll =
-            0;
-    }
-
-    if (scroll >
-        max_przewin_y) {
-
-        scroll =
-            max_przewin_y;
-    }
-}
-
+void przygotuj_dokument_zakladki(Zakladka& z,bool resources);
 void odswiez_pasek_stanu_natychmiast();
 
 /* =========================================================================
@@ -3779,9 +2459,7 @@ void ustaw_tresc(
 
     z.wczytana =
         true;
-
-    z.przewin_y =
-        0;
+    z.dokument_brudny = true;
 }
 
 void ustaw_blad_html(
@@ -3817,11 +2495,31 @@ void ustaw_blad_html(
 
     z.wczytana =
         true;
-
-    z.przewin_y =
-        0;
+    z.dokument_brudny = true;
 }
 
+bool adres_ipv4_literal(const char *host, uint8_t out[4]) {
+    if (!host)
+        return false;
+    size_t pos = 0;
+    for (unsigned octet = 0; octet < 4; ++octet) {
+        unsigned value = 0, digits = 0;
+        while (host[pos] >= '0' && host[pos] <= '9') {
+            if (++digits > 3)
+                return false;
+            value = value * 10 + unsigned(host[pos++] - '0');
+        }
+        if (!digits || value > 255)
+            return false;
+        out[octet] = uint8_t(value);
+        if (octet < 3) {
+            if (host[pos++] != '.')
+                return false;
+        } else if (host[pos])
+            return false;
+    }
+    return true;
+}
 __attribute__((noinline)) bool pobierz_jeden_url(
     Zakladka& z,
     bool* redirect,
@@ -3841,7 +2539,9 @@ __attribute__((noinline)) bool pobierz_jeden_url(
     redirect_url[0] =
         '\0';
 
-    ParsedUrl p{};
+    struct ParsedOwner {ParsedUrl* value{new ParsedUrl{}};~ParsedOwner(){delete value;}} parsed;
+    if(!parsed.value){ustaw_tresc(z,"Brak pamięci na adres strony.",false);return false;}
+    ParsedUrl& p=*parsed.value;
 
     if (!parsuj_url(
             z.url,
@@ -3870,7 +2570,7 @@ __attribute__((noinline)) bool pobierz_jeden_url(
         4
     ] = {};
 
-    if (!bws_siec_dns(
+    if (!adres_ipv4_literal(p.domena,ip)&&!bws_siec_dns(
             p.domena,
             ip)) {
 
@@ -4205,9 +2905,7 @@ __attribute__((noinline)) bool pobierz_jeden_url(
 
     z.wczytana =
         true;
-
-    z.przewin_y =
-        0;
+    z.dokument_brudny = true;
 
     return true;
 }
@@ -4294,15 +2992,10 @@ bool PobierzStrone(
 
     z.to_jest_html =
         false;
+    z.dokument_brudny = true;
 
-    z.przewin_y =
-        0;
-
-    ustaw_tresc(
-        z,
-        "Ladowanie strony...",
-        false
-    );
+    ustaw_status("Ładowanie strony...");
+    odswiez_pasek_stanu_natychmiast();
 
     for (int redirect_count = 0;
          redirect_count <=
@@ -4406,9 +3099,10 @@ void Nawiguj(
         return;
     }
 
-    (void)PobierzStrone(
-        nowa_strona
-    );
+    nawigacja_trwa=true;
+    (void)PobierzStrone(nowa_strona);
+    przygotuj_dokument_zakladki(z,true);
+    nawigacja_trwa=false;
 }
 
 /* =========================================================================
@@ -4460,7 +3154,6 @@ struct HusarzApp {
     void kopiuj_adres_do_schowka();
     void wklej_adres_ze_schowka();
     void przewin_do(int y);
-    bool przewin_o(int dy);
     void pokaz_o_programie();
     void pokaz_zakladki();
 };
@@ -4473,119 +3166,106 @@ void zaktualizuj_pasek_stanu_tekst(const char* txt) {
     }
 }
 
-void odswiez_pasek_stanu_natychmiast() {
-    if (g_husarz.pasek_stanu && g_husarz.okno && !KontekstRysowania::g_tlum_rysowanie_globalne) {
-        KontekstRysowania ctx;
-        g_husarz.pasek_stanu->rysuj(ctx, true);
-        gui_odswiez();
-    }
+void odswiez_pasek_stanu_natychmiast();
+
+int advance_font(void*,uint32_t cp,int font,bool bold,bool) {
+    return Husarz::clamp64((int64_t(CzcionkaUI::szerokosc_znaku(cp)+1)*font+8)/16+(bold?1:0),1,1024);
 }
+int height_font(void*,int font){return font;}
+const uint16_t* bitmap_font(void*,uint32_t cp){return CzcionkaUI::bitmapa_znaku(cp);}
+int width_font(void*,uint32_t cp){return CzcionkaUI::szerokosc_znaku(cp);}
+const Husarz::Metrics browser_metrics{nullptr,advance_font,height_font};
+const Husarz::Glyphs browser_glyphs{nullptr,bitmap_font,width_font};
 
-class WidokStrony : public Kontrolka {
-public:
-    WidokStrony() {
-        czy_moze_miec_fokus_ = true;
-        preferowany_rozmiar_ = Rozmiar(-1, -1);
-        wyrownanie_poziome_ = WyrownaniePoziome::Rozciagnij;
-        wyrownanie_pionowe_ = WyrownaniePionowe::Rozciagnij;
-    }
-
-    void rysuj_siebie(KontekstRysowania& ctx) override {
-        Prostokat r(0, 0, obszar_.szerokosc, obszar_.wysokosc);
-        ctx.rysuj_prostokat(r, motyw_kolor(MOTYW_KOLOR_POLETEKSTOWE));
-
-        if (liczba_zakladek <= 0) {
-            return;
-        }
-
-        Zakladka& z = zakladki[aktywna_zakladka];
-        const char* tresc = z.tresc;
-        if (!tresc || tresc[0] == '\0') {
-            tresc = "Wpisz adres strony lub zapytanie i wybierz Przejdz.";
-        }
-
-        Renderer ren{
-            &ctx,
-            8,
-            8,
-            obszar_.szerokosc > 24 ? obszar_.szerokosc - 24 : obszar_.szerokosc,
-            obszar_.wysokosc,
-            z.przewin_y,
-            0,
-            0,
-            20,
-            motyw_kolor(MOTYW_KOLOR_TEKST),
-            1,
-            false
-        };
-
-        if (z.to_jest_html) {
-            renderuj_html(ren, tresc);
-        } else {
-            renderer_tekst(ren, tresc);
-        }
-
-        przelicz_scroll(ren, obszar_.wysokosc > 16 ? obszar_.wysokosc - 16 : 1);
-
-        if (g_husarz.suwak_pionowy) {
-            g_husarz.suwak_pionowy->ustaw_zakres(0, max_przewin_y);
-            g_husarz.suwak_pionowy->ustaw_wartosc(z.przewin_y);
-            g_husarz.suwak_pionowy->ustaw_widoczna(max_przewin_y > 0);
-        }
-    }
-
-    void obsluz_rolke(ZdarzenieRolki& e) override {
-        if (liczba_zakladek <= 0) return;
-        int krok = (e.delta_y < 0) ? -60 : 60;
-        if (g_husarz.przewin_o(krok)) {
-            e.obsluzone = true;
-        }
-    }
-
-    void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e) override {
-        Kontrolka::obsluz_wcisniecie_myszy(e);
-    }
-
-    void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
-        if (liczba_zakladek <= 0) return;
-        uint32_t cmd = e.polecenie();
-        int dy = 0;
-        if (cmd == 0x48) { // Up
-            dy = -30;
-        } else if (cmd == 0x50) { // Down
-            dy = 30;
-        } else if (cmd == 0x49) { // PageUp
-            dy = -(obszar_.wysokosc > 40 ? obszar_.wysokosc - 40 : 40);
-        } else if (cmd == 0x51) { // PageDown
-            dy = (obszar_.wysokosc > 40 ? obszar_.wysokosc - 40 : 40);
-        } else if (cmd == 0x47) { // Home
-            g_husarz.przewin_do(0);
-            e.obsluzone = true;
-            return;
-        } else if (cmd == 0x4f) { // End
-            g_husarz.przewin_do(max_przewin_y);
-            e.obsluzone = true;
-            return;
-        }
-        if (dy != 0) {
-            if (g_husarz.przewin_o(dy)) {
-                e.obsluzone = true;
-            }
-        }
-    }
+void przewin_kolem(PasekPrzewijania& bar,ZdarzenieRolki& e){
+    if(!e.delta_y)return;
+    int64_t units=e.delta_y;if(units>=120||units<=-120)units/=120;
+    bar.przewin_o(-units*bar.maly_krok());e.obsluzone=true;
+}
+class SuwakStrony : public PasekPrzewijania {
+public:void obsluz_rolke(ZdarzenieRolki& e)override{przewin_kolem(*this,e);}
 };
+class WidokStrony : public Kontrolka {
+    uint32_t* pixels_{};size_t capacity_{};
+public:
+    WidokStrony(){czy_moze_miec_fokus_=true;preferowany_rozmiar_=Rozmiar(-1,-1);}
+    ~WidokStrony()override{if(pixels_)gui_free(pixels_);}
+    void przygotuj(bool reset=false){
+        if(!g_husarz.suwak_pionowy||liczba_zakladek<=0)return;
+        auto& z=zakladki[aktywna_zakladka];
+        if(!z.dokument||(z.dokument_brudny&&!nawigacja_trwa))przygotuj_dokument_zakladki(z,false);
+        auto* d=z.dokument;int w=obszar_.szerokosc,h=obszar_.wysokosc;
+        if(w<1||h<1)return;
+        if(d&&(d->styles_dirty||d->layout_width!=w||d->layout_revision!=d->revision))
+            Husarz::reflow(*d,w,browser_metrics,motyw_kolor(MOTYW_KOLOR_TEKST));
+        auto& bar=*g_husarz.suwak_pionowy;
+        bar.ustaw_zakres(0,d&&d->height>h?d->height-h:0);
+        bar.ustaw_rozmiar_strony(h);bar.ustaw_maly_krok(d?d->styles[d->tag(1,"html")?1:0].line*3:60);
+        bar.ustaw_duzy_krok(h>40?h-40:h);bar.ustaw_wlaczona(bar.maksimum()>0);
+        if(reset)bar.ustaw_wartosc(0);
+        size_t count=w<=4096&&h<=4096?size_t(w)*h:0;
+        if(count>4U*1024*1024)count=0;
+        if(count>capacity_){auto* next=static_cast<uint32_t*>(gui_malloc(count*sizeof(uint32_t)));
+            if(next){if(pixels_)gui_free(pixels_);pixels_=next;capacity_=count;}}
+        uniewaznij();
+    }
+    void rozmiesc(Prostokat r)override{Kontrolka::rozmiesc(r);przygotuj();}
+    void zaktualizuj_motyw()override{
+        if(liczba_zakladek>0&&zakladki[aktywna_zakladka].dokument)zakladki[aktywna_zakladka].dokument->styles_dirty=true;
+        Kontrolka::zaktualizuj_motyw();
+    }
+    void rysuj_siebie(KontekstRysowania& ctx)override{
+        const int w=obszar_.szerokosc,h=obszar_.wysokosc;
+        if(w<=0||h<=0)return;
+        auto* d=liczba_zakladek>0?zakladki[aktywna_zakladka].dokument:nullptr;
+        if(!d||!pixels_||w>4096||h>4096||size_t(w)*h>capacity_){
+            ctx.rysuj_prostokat({0,0,w,h},motyw_kolor(MOTYW_KOLOR_POLETEKSTOWE));
+            ctx.rysuj_tekst({8,8},"Dane strony lub bufor widoku niedostępne.",motyw_kolor(MOTYW_KOLOR_TEKST));return;}
+        Husarz::Surface surface{pixels_,w,h};
+        Husarz::paint(*d,surface,int(g_husarz.suwak_pionowy->wartosc()),browser_metrics,browser_glyphs,motyw_kolor(MOTYW_KOLOR_POLETEKSTOWE));
+        Punkt origin=ctx.pobierz_przesuniecie();
+        for(int y=0;y<h;++y)ctx.rysuj_wiersz_ekranu(origin.x,origin.y+y,w,pixels_+size_t(y)*w);
+    }
+    void obsluz_rolke(ZdarzenieRolki& e)override{
+        if(!e.delta_y||!g_husarz.suwak_pionowy)return;
+        przewin_kolem(*g_husarz.suwak_pionowy,e);
+    }
+    void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e)override{
+        auto* bar=g_husarz.suwak_pionowy;if(!bar)return;
+        switch(e.polecenie()){
+        case 0x48:bar->przewin_o(-bar->maly_krok()/3);break;
+        case 0x50:bar->przewin_o(bar->maly_krok()/3);break;
+        case 0x49:bar->przewin_strone(-1);break;
+        case 0x51:bar->przewin_strone(1);break;
+        case 0x47:bar->ustaw_wartosc(0);break;
+        case 0x4f:bar->ustaw_wartosc(bar->maksimum());break;
+        default:return;}
+        e.obsluzone=true;
+    }
+    void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e)override;
+};
+
+__attribute__((noinline)) void otworz_argument_startowy(){
+    char argument[URL_POJEMNOSC]{};
+    if(pobierz_argument_startowy(argument,sizeof(argument))&&*argument)g_husarz.przejdz_do_url(argument);
+    else g_husarz.przelacz_zakladke(0);
+}
 
 class OknoHusarz : public Okno {
 public:
     explicit OknoHusarz(const char* tytul, int szer = DOMYSLNY_WIN_W, int wys = DOMYSLNY_WIN_H)
         : Okno(tytul, szer, wys) {}
+    ~OknoHusarz()override {
+        zarzadca_popupow().zamknij(PowodZamknieciaPopup::WlascicielZamkniety);
+        auto* root=kontrolka_glowna();ustaw_kontrolke_glowna(nullptr);delete root;
+        delete g_husarz.menu_kontekstowe;delete g_husarz.menu_zakladki_popup;
+        g_husarz={};
+    }
 
     void obsluz_zdarzenie(const bws_zdarzenie& ev) override {
+        if(echo_klawiatury(ev))return;
         if (ev.typ == BWS_ZDARZENIE_OTWORZ_PLIK) {
-            char nowa_sciezka[URL_POJEMNOSC] = {};
-            if (pobierz_argument_startowy(nowa_sciezka, sizeof(nowa_sciezka)) && nowa_sciezka[0] != '\0') {
-                g_husarz.przejdz_do_url(nowa_sciezka);
-            }
+            otworz_argument_startowy();
             return;
         }
 
@@ -4668,16 +3348,65 @@ public:
     }
 };
 
+int maksimum_przewijania(){return g_husarz.suwak_pionowy?int(g_husarz.suwak_pionowy->maksimum()):0;}
+void zresetuj_przewijanie(){if(g_husarz.suwak_pionowy){g_husarz.suwak_pionowy->ustaw_zakres(0,0);g_husarz.suwak_pionowy->ustaw_wartosc(0);}}
+void odswiez_pasek_stanu_natychmiast(){
+    if(!g_husarz.okno||!g_husarz.pasek_stanu||KontekstRysowania::g_tlum_rysowanie_globalne)return;
+    // Always paint through the owning window and its translated/clipped tree.
+    g_husarz.okno->przelicz_uklad();
+    KontekstRysowania ctx;g_husarz.okno->rysuj(ctx);gui_odswiez();
+}
+void przygotuj_dokument_zakladki(Zakladka& z,bool resources){
+    if(z.dokument&&!z.dokument_brudny)return;
+    auto* next=new Husarz::Document;
+    if(!next){ustaw_status("Brak pamięci na dokument.");return;}
+    const char* source=z.tresc&&*z.tresc?z.tresc:"Wpisz adres strony lub zapytanie i wybierz Przejdź.";
+    renderuj_html(*next,source,z.to_jest_html);
+    if(resources&&z.to_jest_html){
+        struct ResourceScratch {Zakladka asset{};ParsedUrl base{},target{};char redirect_url[URL_POJEMNOSC]{};};
+        auto* scratch=new ResourceScratch;
+        if(scratch){auto& asset=scratch->asset;auto& base=scratch->base;unsigned loaded=0;
+            if(parsuj_url(z.url,&base))for(uint16_t i=1;i<next->node_count&&loaded<4;++i){
+                if(!next->tag(i,"link")||!Husarz::equal_ci(next->attr(i,"rel"),Husarz::length(next->attr(i,"rel"),64),"stylesheet"))continue;
+                const char* href=next->attr(i,"href");if(!*href)continue;
+                if(!ustaw_url_z_location(asset.url,sizeof(asset.url),href,base))continue;
+                auto& target=scratch->target;if(!parsuj_url(asset.url,&target)||target.https!=base.https||!tekst_rowny(target.domena,base.domena))continue;
+                ++loaded;bool redirect=false;
+                if(pobierz_jeden_url(asset,&redirect,scratch->redirect_url)&&!redirect&&asset.tresc&&!asset.to_jest_html)
+                    Husarz::parse_css(*next,asset.tresc,Husarz::length(asset.tresc,65537),uint32_t(i)*4096);
+            }
+            if(asset.tresc)gui_free(asset.tresc);
+            delete scratch;
+        }else next->truncated=true;
+    }
+    delete z.dokument;z.dokument=next;z.dokument_brudny=false;
+    if(next->truncated)ustaw_status("Osiągnięto limit dokumentu; wyświetlono część strony.");
+    // The caller lays out the published document after this stack frame returns.
+    zresetuj_przewijanie();
+}
+void WidokStrony::obsluz_wcisniecie_myszy(ZdarzenieMyszki& e){
+    Kontrolka::obsluz_wcisniecie_myszy(e);
+    if(liczba_zakladek<=0||!zakladki[aktywna_zakladka].dokument)return;
+    const auto& d=*zakladki[aktywna_zakladka].dokument;
+    auto screen=obszar_ekranu();
+    uint16_t link=Husarz::hit_test(d,e.x-screen.x,e.y-screen.y+int(g_husarz.suwak_pionowy->wartosc()));
+    if(link){struct LinkScratch{ParsedUrl base{};char url[URL_POJEMNOSC]{};};auto* scratch=new LinkScratch;
+        if(!scratch)return;
+        if(parsuj_url(zakladki[aktywna_zakladka].url,&scratch->base)&&ustaw_url_z_location(scratch->url,sizeof(scratch->url),d.attr(link,"href"),scratch->base))g_husarz.przejdz_do_url(scratch->url);
+        delete scratch;
+    }
+}
+
 void HusarzApp::zbuduj_ui() {
     if (!okno) return;
 
-    Panel* korzen = new Panel(Orientacja::Pionowa);
+    PanelDokowany* korzen = new PanelDokowany();
     korzen->ustaw_wypelnienie(Marginesy(0, 0, 0, 0));
     korzen->ustaw_odstep(0);
     okno->ustaw_kontrolke_glowna(korzen);
 
     // 1. Menu Glowne
-    MenuGlowne& m = korzen->dodaj<MenuGlowne>();
+    MenuGlowne& m = korzen->dodaj<MenuGlowne>(Dokowanie::Gora);
     menu = &m;
 
     Menu& m_plik = m.menu().dodaj_podmenu("Plik", 100);
@@ -4700,7 +3429,7 @@ void HusarzApp::zbuduj_ui() {
     m_widok.dodaj_element("Odśwież stronę (F5)", 301, [](ElementMenu&, void*) { g_husarz.odswiez(); });
     m_widok.dodaj_separator();
     m_widok.dodaj_element("Przewiń na górę (Home)", 302, [](ElementMenu&, void*) { g_husarz.przewin_do(0); });
-    m_widok.dodaj_element("Przewiń na dół (End)", 303, [](ElementMenu&, void*) { g_husarz.przewin_do(max_przewin_y); });
+    m_widok.dodaj_element("Przewiń na dół (End)", 303, [](ElementMenu&, void*) { g_husarz.przewin_do(maksimum_przewijania()); });
 
     Menu& m_nawigacja = m.menu().dodaj_podmenu("Nawigacja", 400);
     m_nawigacja.dodaj_element("Wstecz (Alt+Lewo)", 401, [](ElementMenu&, void*) { g_husarz.wstecz(); });
@@ -4721,7 +3450,7 @@ void HusarzApp::zbuduj_ui() {
     m_pomoc.dodaj_element("O programie Husarz...", 601, [](ElementMenu&, void*) { g_husarz.pokaz_o_programie(); });
 
     // 2. Pasek Kart
-    Panel& p_kart = korzen->dodaj<Panel>(Orientacja::Pozioma);
+    Panel& p_kart = korzen->dodaj<Panel>(Dokowanie::Gora, Orientacja::Pozioma);
     pasek_kart = &p_kart;
     p_kart.ustaw_preferowany_rozmiar(Rozmiar(-1, 28));
     p_kart.ustaw_wypelnienie(Marginesy(2, 2, 2, 2));
@@ -4751,7 +3480,7 @@ void HusarzApp::zbuduj_ui() {
     b_nowa.przy_kliknieciu([](Przycisk*, void*) { g_husarz.nowa_zakladka_gui(); });
 
     // 3. Pasek Narzedzi
-    Panel& p_narz = korzen->dodaj<Panel>(Orientacja::Pozioma);
+    Panel& p_narz = korzen->dodaj<Panel>(Dokowanie::Gora, Orientacja::Pozioma);
     pasek_narzedzi = &p_narz;
     p_narz.ustaw_preferowany_rozmiar(Rozmiar(-1, 32));
     p_narz.ustaw_wypelnienie(Marginesy(3, 3, 3, 3));
@@ -4802,38 +3531,23 @@ void HusarzApp::zbuduj_ui() {
     b_zak.ustaw_preferowany_rozmiar(Rozmiar(72, 26));
     b_zak.przy_kliknieciu([](Przycisk*, void*) { g_husarz.pokaz_zakladki(); });
 
-    // 4. Obszar Glowny (Widok Strony + Pionowy Scrollbar)
-    Panel& p_glowny = korzen->dodaj<Panel>(Orientacja::Pozioma);
-    p_glowny.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
-    p_glowny.ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
-    p_glowny.ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
-    p_glowny.ustaw_wypelnienie(Marginesy(0, 0, 0, 0));
-    p_glowny.ustaw_odstep(0);
-
-    widok_strony = new WidokStrony();
-    p_glowny.dodaj_kontrolke(widok_strony);
-
-    suwak_pionowy = new PasekPrzewijania();
-    suwak_pionowy->ustaw_orientacje(Orientacja::Pionowa);
-    suwak_pionowy->ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
-    suwak_pionowy->ustaw_preferowany_rozmiar(Rozmiar(16, -1));
-    suwak_pionowy->przy_przewijaniu([](PasekPrzewijania*, int64_t val, void*) {
-        if (liczba_zakladek > 0) {
-            zakladki[aktywna_zakladka].przewin_y = static_cast<int>(val);
-            if (g_husarz.widok_strony) g_husarz.widok_strony->uniewaznij();
-        }
-    });
-    p_glowny.dodaj_kontrolke(suwak_pionowy);
-
-    // 5. Pasek Stanu
-    PasekStanu& sb = korzen->dodaj<PasekStanu>();
+    // Chrome belongs exclusively to the client rectangle, never to the DOM.
+    PasekStanu& sb = korzen->dodaj<PasekStanu>(Dokowanie::Dol);
     pasek_stanu = &sb;
-    sb.ustaw_preferowany_rozmiar(Rozmiar(-1, 24));
-    sb.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
-    sb.dodaj_sekcje("Gotowy", 200, RozmiarSekcjiStanu::Rozciagnij);
-    sb.dodaj_sekcje("HTTP", 70, RozmiarSekcjiStanu::Stala);
-    sb.dodaj_sekcje("Karta 1/1", 90, RozmiarSekcjiStanu::Stala);
-    sb.dodaj_sekcje("UTF-8", 60, RozmiarSekcjiStanu::Stala);
+    sb.ustaw_preferowany_rozmiar(Rozmiar(-1,24));
+    sb.dodaj_sekcje("Gotowy",200,RozmiarSekcjiStanu::Rozciagnij);
+    sb.dodaj_sekcje("HTTP",70,RozmiarSekcjiStanu::Stala);
+    sb.dodaj_sekcje("Karta 1/1",90,RozmiarSekcjiStanu::Stala);
+    sb.dodaj_sekcje("UTF-8",60,RozmiarSekcjiStanu::Stala);
+    auto& content=korzen->dodaj<PanelDokowany>(Dokowanie::Wypelnij);
+    content.ustaw_wypelnienie(Marginesy(0));content.ustaw_odstep(0);
+    suwak_pionowy=&content.dodaj<SuwakStrony>(Dokowanie::Prawo);
+    suwak_pionowy->ustaw_orientacje(Orientacja::Pionowa);
+    suwak_pionowy->ustaw_preferowany_rozmiar(Rozmiar(18,-1));
+    suwak_pionowy->przy_przewijaniu([](PasekPrzewijania*,int64_t,void*) {
+        if(g_husarz.widok_strony)g_husarz.widok_strony->uniewaznij();
+    });
+    widok_strony=&content.dodaj<WidokStrony>(Dokowanie::Wypelnij);
 
     // 6. Menu Kontekstowe dla Widoku Strony
     menu_kontekstowe = new MenuKontekstowe();
@@ -4846,6 +3560,7 @@ void HusarzApp::zbuduj_ui() {
     widok_strony->ustaw_menu_kontekstowe(menu_kontekstowe);
 
     menu_zakladki_popup = new MenuKontekstowe();
+    okno->przelicz_uklad();
 }
 
 void HusarzApp::aktualizuj_pasek_kart() {
@@ -4912,9 +3627,10 @@ void HusarzApp::aktualizuj_pasek_stanu() {
 }
 
 void HusarzApp::przelacz_zakladke(int idx) {
+    if(nawigacja_trwa)return;
     if (idx < 0 || idx >= liczba_zakladek) return;
     aktywna_zakladka = idx;
-    max_przewin_y = 0;
+    zresetuj_przewijanie();
     if (txt_adres) {
         txt_adres->ustaw_tekst(zakladki[idx].url);
     }
@@ -4922,11 +3638,12 @@ void HusarzApp::przelacz_zakladke(int idx) {
     aktualizuj_pasek_kart();
     aktualizuj_pasek_stanu();
     if (widok_strony) {
-        widok_strony->uniewaznij();
+        widok_strony->przygotuj();
     }
 }
 
 void HusarzApp::nowa_zakladka_gui() {
+    if(nawigacja_trwa)return;
     if (nowa_zakladka()) {
         (void)kopiuj_limit(zakladki[aktywna_zakladka].url, sizeof(zakladki[aktywna_zakladka].url), "http://example.com/");
         if (txt_adres) {
@@ -4935,12 +3652,13 @@ void HusarzApp::nowa_zakladka_gui() {
         aktualizuj_pasek_kart();
         aktualizuj_pasek_stanu();
         if (widok_strony) {
-            widok_strony->uniewaznij();
+            widok_strony->przygotuj();
         }
     }
 }
 
 void HusarzApp::zamknij_zakladke_gui(int idx) {
+    if(nawigacja_trwa)return;
     zamknij_zakladke(idx);
     if (txt_adres && liczba_zakladek > 0) {
         txt_adres->ustaw_tekst(zakladki[aktywna_zakladka].url);
@@ -4948,11 +3666,12 @@ void HusarzApp::zamknij_zakladke_gui(int idx) {
     aktualizuj_pasek_kart();
     aktualizuj_pasek_stanu();
     if (widok_strony) {
-        widok_strony->uniewaznij();
+        widok_strony->przygotuj();
     }
 }
 
 void HusarzApp::przejdz_do_url(const char* url) {
+    if(nawigacja_trwa)return;
     if (liczba_zakladek <= 0) return;
     if (!url || url[0] == '\0') {
         ustaw_status("Wpisz adres URL.");
@@ -4967,11 +3686,12 @@ void HusarzApp::przejdz_do_url(const char* url) {
     aktualizuj_pasek_kart();
     aktualizuj_pasek_stanu();
     if (widok_strony) {
-        widok_strony->uniewaznij();
+        widok_strony->przygotuj();
     }
 }
 
 void HusarzApp::wstecz() {
+    if(nawigacja_trwa)return;
     if (historia_idx > 0) {
         --historia_idx;
         kopiuj_limit(zakladki[aktywna_zakladka].url, URL_POJEMNOSC, historia[historia_idx]);
@@ -4979,11 +3699,12 @@ void HusarzApp::wstecz() {
         if (txt_adres) txt_adres->ustaw_tekst(zakladki[aktywna_zakladka].url);
         aktualizuj_pasek_kart();
         aktualizuj_pasek_stanu();
-        if (widok_strony) widok_strony->uniewaznij();
+        if (widok_strony) widok_strony->przygotuj();
     }
 }
 
 void HusarzApp::dalej() {
+    if(nawigacja_trwa)return;
     if (historia_idx >= 0 && historia_idx < historia_max) {
         ++historia_idx;
         kopiuj_limit(zakladki[aktywna_zakladka].url, URL_POJEMNOSC, historia[historia_idx]);
@@ -4991,14 +3712,15 @@ void HusarzApp::dalej() {
         if (txt_adres) txt_adres->ustaw_tekst(zakladki[aktywna_zakladka].url);
         aktualizuj_pasek_kart();
         aktualizuj_pasek_stanu();
-        if (widok_strony) widok_strony->uniewaznij();
+        if (widok_strony) widok_strony->przygotuj();
     }
 }
 
 void HusarzApp::odswiez() {
+    if(nawigacja_trwa)return;
     Nawiguj(false, false);
     aktualizuj_pasek_stanu();
-    if (widok_strony) widok_strony->uniewaznij();
+    if (widok_strony) widok_strony->przygotuj();
 }
 
 void HusarzApp::zatrzymaj() {
@@ -5028,37 +3750,14 @@ void HusarzApp::kopiuj_adres_do_schowka() {
 }
 
 void HusarzApp::wklej_adres_ze_schowka() {
-    char bufor[URL_POJEMNOSC]{};
-    uint64_t len = 0;
-    if (clipboard_read("text/plain", bufor, sizeof(bufor) - 1, &len) && len > 0) {
-        bufor[len] = '\0';
-        przejdz_do_url(bufor);
-    }
+    auto* bufor=static_cast<char*>(gui_malloc(URL_POJEMNOSC));if(!bufor)return;
+    uint64_t len=0;
+    if(clipboard_read("text/plain",bufor,URL_POJEMNOSC-1,&len)&&len>0&&len<URL_POJEMNOSC){bufor[len]=0;przejdz_do_url(bufor);}
+    gui_free(bufor);
 }
 
-void HusarzApp::przewin_do(int y) {
-    if (liczba_zakladek <= 0) return;
-    if (y < 0) y = 0;
-    if (y > max_przewin_y) y = max_przewin_y;
-    zakladki[aktywna_zakladka].przewin_y = y;
-    if (suwak_pionowy) suwak_pionowy->ustaw_wartosc(y);
-    if (widok_strony) widok_strony->uniewaznij();
-}
+void HusarzApp::przewin_do(int y){if(suwak_pionowy)suwak_pionowy->ustaw_wartosc(y);}
 
-bool HusarzApp::przewin_o(int dy) {
-    if (liczba_zakladek <= 0) return false;
-    int stary = zakladki[aktywna_zakladka].przewin_y;
-    int nowy = stary + dy;
-    if (nowy < 0) nowy = 0;
-    if (nowy > max_przewin_y) nowy = max_przewin_y;
-    if (nowy != stary) {
-        zakladki[aktywna_zakladka].przewin_y = nowy;
-        if (suwak_pionowy) suwak_pionowy->ustaw_wartosc(nowy);
-        if (widok_strony) widok_strony->uniewaznij();
-        return true;
-    }
-    return false;
-}
 
 void HusarzApp::pokaz_o_programie() {
     if (okno) {
@@ -5093,8 +3792,7 @@ void inicjalizuj_stan() {
     historia_idx = -1;
     historia_max = -1;
     ulubione_ilosc = 0;
-    max_przewin_y = 0;
-    calkowita_wysokosc_strony = 0;
+    zresetuj_przewijanie();
 
     ustaw_status("Gotowy.");
 
@@ -5117,6 +3815,7 @@ void inicjalizuj_stan() {
  * 21. PUNKT WEJSCIA RING 3
  * ========================================================================= */
 
+#ifndef HUSARZ_HOST_TEST
 extern "C" {
     void* __dso_handle = nullptr;
     int __cxa_atexit(void (*)(void*), void*, void*) { return 0; }
@@ -5126,23 +3825,21 @@ extern "C" [[noreturn]] void _start() {
     AplikacjaGUI app;
     g_husarz.app = &app;
 
-    OknoHusarz okno("Husarz - Przeglądarka WWW", DOMYSLNY_WIN_W, DOMYSLNY_WIN_H);
-    g_husarz.okno = &okno;
-    app.ustaw_glowne_okno(&okno);
+    auto* okno=new OknoHusarz("Husarz - Przeglądarka WWW", DOMYSLNY_WIN_W, DOMYSLNY_WIN_H);
+    if(!okno)bws_zakoncz_proces();
+    g_husarz.okno = okno;
+    app.ustaw_glowne_okno(okno);
 
     g_husarz.zbuduj_ui();
 
     inicjalizuj_stan();
-
-    char start_arg[URL_POJEMNOSC] = {};
-    if (pobierz_argument_startowy(start_arg, sizeof(start_arg)) && start_arg[0] != '\0') {
-        g_husarz.przejdz_do_url(start_arg);
-    } else {
-        g_husarz.przelacz_zakladke(0);
-    }
-
-    app.uruchom(okno);
+    g_husarz.widok_strony->przygotuj();
+    otworz_argument_startowy();
+    app.uruchom(*okno);
 
     zwolnij_wszystkie_zakladki();
+    delete okno;
     bws_zakoncz_proces();
 }
+
+#endif

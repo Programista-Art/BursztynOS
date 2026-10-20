@@ -86,6 +86,108 @@ Modified integration files: `Makefile`, `bws_api.h`, `bws_nowoczesne.cpp`, `kern
 
 Test updates: HDA syscall-number tests reserve BWS 91 without changing 89/90; storage tests verify actual PSF preference/report persistence across remount; desktop persistence tests derive file counts/file indices from the launcher registry; the existing xHCI fixture gains optional assertions for structured diagnostics. Earlier multi-xHCI/composite-HID input changes in the workspace are preserved.
 
+## Validation
+
+The implementation session was resumed on 2026-10-19 against checkout `eeff886`.
+The current full `make -j2 all` and `make -j2 iso` builds passed without compiler warnings. The
+diagnostic subsystem test passed 4,935 checks with ASan/UBSan; the production
+xHCI integration test passed 10,808 checks with ASan/UBSan. Packaging checks
+passed for the native BUR, memory permissions, absence of privileged hardware
+instructions, BWS numbering, bootstrap directories, desktop and Start registration.
+The current application is 127,232 bytes on disk with 1,667,072 bytes of data/BSS.
+
+The original broad host run executed 61 Makefile targets: 51 passed, three
+failed and seven exceeded its 300-second per-target limit. Its complete results
+and individual logs remain in `.input-test/diagnostyka/host-suite/`. Passing
+coverage includes BWS/loader, themes, GUI controls, input, pointer ownership,
+composite USB HID, multi-xHCI, PS/2 paths, audio diagnostics, desktop launchers,
+filesystem operations, settings, startup visibility and reboot/remount behavior.
+PSF tests save the diagnostic preferences and reports and verify them after
+remount; host tests separately exercise failure-only startup thresholds.
+
+Follow-up results distinguish time limits and unrelated failures:
+
+- `test-virtio-pci`: the earlier source-layout assertion failure is resolved in
+  this checkout; the current suite passes all 167 tests, including the real
+  production startup barrier.
+- `test-input-coexistence-host`: passes on the resumed run, including identical
+  ordered functional traces with diagnostic flags enabled and disabled.
+- `test-dzwieku-repair`: passes on the resumed run with ASan/UBSan, including
+  both loader-trace configurations, GUI/report file roundtrips and actual
+  HDA BWS 89/90 tests.
+- `test-wm-click-routing`: 182/182 assertions pass with ASan/UBSan. Its host
+  drawing stub now includes the scaled-text call introduced by the newer GUI
+  code, and Start-menu clicks use production item rectangles instead of stale
+  screen coordinates. The test explicitly launches the diagnostics menu entry.
+- The completed controls, Explorer, desktop-file and popup binaries passed
+  when executed after their original compile-time limits. Logs are retained
+  alongside the broad-suite output.
+- `test-image`: the earlier PNG decoder invocation failed for the absent
+  `obrazy/tapety/nowatapeta.png` fixture. This result was retained.
+- `test-windows-launcher`: the earlier configuration test expected a literal
+  `QEMUDISPLAYARGS ?= -display sdl`, while the Makefile supports an override
+  expression. This separate configuration failure was retained.
+
+The resumed QEMU harness waits for each relative USB movement to be consumed
+before issuing the next one. The former fixed 120-ms delay could queue duplicate
+movements under slow TCG and overshoot GUI controls. All guest memory inspection
+is read-only test observation; the application still uses only BWS. The installed
+test always copies its fixture and never attaches the original image for writes.
+An earlier run of the old installed-system fixture with the optional wallpaper
+pack did not reach a usable desktop; its baseline full-pack comparison also did
+not complete. Omitting that optional pack allowed the baseline to boot. The
+installed persistence regression therefore uses `--no-wallpapers`; the fixture
+failure is retained separately and its underlying filesystem/boot cause is not
+claimed to be resolved by this task.
+
+Review of QEMU screenshots also found that the initial report-copy action used
+a MIME string with parameters, which the existing clipboard validator rejects.
+The application now uses the established `text/plain` format with a terminating
+NUL, matching native text controls. The QEMU regression explicitly requires a
+successful clipboard export in addition to report saving.
+
+Final live QEMU command:
+
+```sh
+python3 narzedzia/test_diagnostyka_qemu.py --machine pc --timeout 600 \
+  --output .input-test/diagnostyka/resume-final-qemu
+```
+
+**PASS**, kernel SHA-256
+`a6794eb5bd126371b3f10d3885014c3e30935177f1588a5dfcfea10ca74b46b4`.
+This run includes the full wallpaper pack and verifies a visible native Ring 3
+window, all four tabs, two independently initialized xHCI controllers, working
+USB keyboard/mouse with i8042 disabled, automatic BOOTLOG saving, application
+report saving with file-size verification, clipboard export and normal window
+minimize/restore/maximize actions. The overview shows zero errors and warnings,
+with touchpad support independently unavailable. Screenshots, serial output,
+ISO-build output and machine-readable results are in that output directory.
+
+Final installed QEMU command:
+
+```sh
+python3 narzedzia/test_diagnostyka_qemu.py --machine pc --no-wallpapers \
+  --timeout 600 \
+  --installed-fixture .input-test/diagnostyka/resume-persistence/private-persistent.img \
+  --output .input-test/diagnostyka/resume-final-persistence
+```
+
+**PASS**, using the same final kernel hash as the live run. The fixture argument
+is a private copy from the preceding regression, and the harness makes another
+private copy before booting. This verifies report and BOOTLOG contents on BSP2,
+exact persisted config bytes, disabling both startup modes across a reboot,
+manual Start launch while startup is disabled, re-enabling both preferences
+across another reboot, restored automatic launch and manual desktop-icon launch.
+The desktop regression uses its supported double-click gesture. Both final
+QEMU runs completed without page faults, kernel panics or warning messages in
+their serial logs. No physical-machine result is claimed.
+
+Earlier multi-controller QEMU input runs passed both USB-only input with i8042
+disabled and VirtIO input, including keyboard modifiers and observed pointer
+movement. Those results used kernel hash
+`f26c8e3601100a14f5ae224e3820ebec0da84df29687c4e7312176251ed9d331`;
+they are historical results, not a claim about a later build.
+
 ## Physical testing
 
 1. Build/boot the resulting hybrid ISO using the normal UEFI path. Prefer a separate test installation when testing durable preferences. Preserve any existing disk before installation; a Live session uses RAM files.

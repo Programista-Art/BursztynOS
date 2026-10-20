@@ -304,9 +304,9 @@ static bool virtio_gpu_send_command_locked(
     uint32_t spin_guard = VIRTIO_GPU_MAX_SPINS_GUARD;
     bool completed = false;
     uint32_t actual_used_len = 0;
+    bool deadline_expired = false;
 
-    while (spin_guard > 0) {
-        spin_guard--;
+    for (;;) {
 
         if (__atomic_load_n(&drv->command_done, __ATOMIC_ACQUIRE) || virtqueue_has_used(drv->controlq)) {
             void* cookie = nullptr;
@@ -324,11 +324,12 @@ static bool virtio_gpu_send_command_locked(
             }
         }
 
+        // Completion can arrive while the clock read stalls (e.g. under TCG).
+        // Poll once more before treating the sampled deadline as a timeout.
+        if (deadline_expired || spin_guard == 0) break;
+        --spin_guard;
         const uint64_t now = gpu_monotonic_ns();
-        if (now != 0 && now >= deadline_ns) {
-            break;
-        }
-
+        deadline_expired = now != 0 && now >= deadline_ns;
         asm volatile("pause" ::: "memory");
     }
 
@@ -564,9 +565,9 @@ bool virtio_gpu_cmd_resource_attach_backing(
     uint32_t spin_guard = VIRTIO_GPU_MAX_SPINS_GUARD;
     bool completed = false;
     uint32_t actual_used_len = 0;
+    bool deadline_expired = false;
 
-    while (spin_guard > 0) {
-        spin_guard--;
+    for (;;) {
 
         if (__atomic_load_n(&drv->command_done, __ATOMIC_ACQUIRE) || virtqueue_has_used(drv->controlq)) {
             void* cookie = nullptr;
@@ -584,8 +585,12 @@ bool virtio_gpu_cmd_resource_attach_backing(
             }
         }
 
+        // Completion can arrive while the clock read stalls (e.g. under TCG).
+        // Poll once more before treating the sampled deadline as a timeout.
+        if (deadline_expired || spin_guard == 0) break;
+        --spin_guard;
         const uint64_t now = gpu_monotonic_ns();
-        if (now != 0 && now >= deadline_ns) break;
+        deadline_expired = now != 0 && now >= deadline_ns;
         asm volatile("pause" ::: "memory");
     }
 

@@ -27,6 +27,7 @@ uint32_t motyw_kolor(uint32_t) {return 0x123456;}
 bool gui_blit(int,int,int,int,const uint32_t*) {return true;}
 void gui_odswiez_pulpit() {}
 void gui_wypisz_tekst_kolor(int,int,uint32_t,const char*) {}
+void gui_wypisz_tekst_kolor_skala(int,int,uint32_t,int,const char*) {}
 void wypisz(const char*) {}
 static unsigned checks=0;
 #undef assert
@@ -43,9 +44,16 @@ int main() {
     assert(wm_cel_ruchu(2,-1,-1,true)==-1); // no hit -> no app wakeup
 
     screen_w=1280;screen_h=720;metryki_ekranu();
-    obsluz_klikniecie(35,699); assert(menu_start_otwarte);
-    obsluz_klikniecie(100,232); assert(launched==SCIEZKA_POWLOKA);assert(!menu_start_otwarte);
-    obsluz_klikniecie(35,699);obsluz_klikniecie(100,282);assert(launched==SCIEZKA_NOTATNIK);
+    auto menu_click=[](int item) {
+        obsluz_klikniecie(PRZYCISK_MENU_X+2,przycisk_menu_y()+2);
+        assert(menu_start_otwarte);
+        int x,y,w,h;assert(prostokat_elementu_menu(item,&x,&y,&w,&h));
+        obsluz_klikniecie(x+w/2,y+h/2);
+        assert(!menu_start_otwarte);
+    };
+    menu_click(0);assert(launched==SCIEZKA_POWLOKA);
+    menu_click(2);assert(launched==SCIEZKA_NOTATNIK);
+    menu_click(16);assert(launched=="/programy/diagnostyka.cebula/diagnostyka.bur");
     for(auto& launcher:DesktopEntries::Launchers) {
         launched.clear();uruchom_lub_aktywuj(launcher.path,launcher.title);
         assert(launched==launcher.path);

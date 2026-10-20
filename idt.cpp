@@ -25,6 +25,8 @@ extern void host_idt_irq_restore(unsigned long);
 #include "scheduler.h"
 #include "pzb.h"
 #include "stos_jadra.h"
+#include "wyjatek_uzytkownika.h"
+
 #include "sterowniki/dzwiek/hda_praca_odroczona.h"
 
 /* =========================================================================
@@ -819,6 +821,20 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
 #endif
 
     if (wektor64 < 32) {
+        const bool active_user=wielozadaniowosc_aktywna&&scheduler_pid_uzytkownika(aktualny_pid)&&
+            __atomic_load_n(&tablica_procesow[aktualny_pid].stan,__ATOMIC_ACQUIRE)==PROCES_GOTOWY;
+        if(wyjatek_izoluj_proces(wektor64,stan->rejestr_cs,active_user)){
+            // Do not inspect the faulting user stack or paint a system BSOD.
+            // The existing exit path removes GUI/IPC/socket state and defers
+            // freeing the current kernel stack/PML4 until a later context switch.
+            char value[32];
+            serial_wypisz("[USER FAULT] process terminated: pid=");
+            uint_do_dec_str(uint64_t(aktualny_pid),value,sizeof(value));serial_wypisz(value);
+            serial_wypisz(" vector=");uint_do_dec_str(wektor64,value,sizeof(value));serial_wypisz(value);
+            serial_wypisz(" rip=0x");uint_do_hex_str(stan->adres_powrotu,value);serial_wypisz(value);
+            serial_wypisz(" program=");serial_wypisz(tablica_procesow[aktualny_pid].sciezka_pliku);serial_wypisz("\n");
+            syscalls_zakoncz_proces_po_wyjatku();
+        }
         panic_wyjatek(stan);
     }
 

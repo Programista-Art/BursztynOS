@@ -1,0 +1,110 @@
+#pragma once
+#include "css.h"
+namespace Husarz {
+struct NodeHandle {
+    uint32_t generation{};
+    uint16_t id{};
+};
+struct ScriptLimits {
+    uint32_t instructions{100000}, source_bytes{MaxScriptSource}, recursion{32}, timers{0};
+};
+class ScriptBudget {
+    ScriptLimits limits_;
+    uint32_t instructions_{}, depth_{};
+
+  public:
+    explicit ScriptBudget(ScriptLimits limits = {}) : limits_(limits) {}
+    bool consume(uint32_t count = 1) {
+        if (count > limits_.instructions - instructions_)
+            return false;
+        instructions_ += count;
+        return true;
+    }
+    bool enter() {
+        if (depth_ >= limits_.recursion)
+            return false;
+        ++depth_;
+        return true;
+    }
+    void leave() {
+        if (depth_)
+            --depth_;
+    }
+};
+// The runtime sees handles and bounded strings. It receives no BWS functions,
+// native pointer values, GUI objects or hardware access capability.
+class ScriptDom {
+    Document &document_;
+
+  public:
+    explicit ScriptDom(Document &document) : document_(document) {}
+    bool valid(NodeHandle h) const {
+        return h.generation == document_.generation && h.id > 0 && h.id < document_.node_count;
+    }
+    NodeHandle get_element_by_id(const char *id) const {
+        size_t n = length(id, MaxAttrLength + 1);
+        if (n > MaxAttrLength)
+            return {};
+        for (uint16_t i = 1; i < document_.node_count; ++i)
+            if (equal(document_.attr(i, "id"), id))
+                return {document_.generation, i};
+        return {};
+    }
+    NodeHandle query_selector(const char *query) const {
+        size_t n = length(query, 257);
+        if (n > 256)
+            return {};
+        Selector s = selector({query, n});
+        uint32_t budget = 65536;
+        for (uint16_t i = 1; i < document_.node_count && budget; ++i)
+            if (matches(document_, i, s, budget))
+                return {document_.generation, i};
+        return {};
+    }
+    bool text_content(NodeHandle h, char *out, size_t cap) const {
+        if (!valid(h) || !out || !cap)
+            return false;
+        size_t used = 0;
+        out[0] = 0;
+        unsigned end = h.id + 1;
+        while (end < document_.node_count && document_.nodes[end].depth > document_.nodes[h.id].depth)
+            ++end;
+        for (unsigned i = h.id; i < end; ++i) {
+            const auto &n = document_.nodes[i];
+            if (!n.is_text && !n.raw)
+                continue;
+            const char *text = document_.str(n.text);
+            for (size_t p = 0; p < n.text_length; ++p) {
+                if (used + 1 == cap) {
+                    out[used] = 0;
+                    return false;
+                }
+                out[used++] = text[p];
+            }
+        }
+        out[used] = 0;
+        return true;
+    }
+    // Mutation/event dispatch intentionally stays outside the initial capability
+    // set. A future backend must route text/style changes through reparsing and
+    // revision invalidation; innerHTML and eval are not executable entry points.
+};
+enum class ScriptResult { Unavailable, SourceLimit, BudgetExceeded, Complete, Error };
+class ScriptExecutor {
+  public:
+    virtual ~ScriptExecutor() = default;
+    virtual ScriptResult execute(ScriptDom &, const char *, size_t, ScriptBudget &) = 0;
+};
+inline ScriptResult execute_script(Document &d, const Script &script, ScriptExecutor *executor,
+                                   ScriptLimits limits = {}) {
+    if (script.node >= d.node_count || script.source >= d.arena_used)
+        return ScriptResult::Error;
+    if (script.truncated || d.nodes[script.node].text_length > limits.source_bytes)
+        return ScriptResult::SourceLimit;
+    if (!executor || *d.str(script.url))
+        return ScriptResult::Unavailable;
+    ScriptDom dom(d);
+    ScriptBudget budget(limits);
+    return executor->execute(dom, d.str(script.source), d.nodes[script.node].text_length, budget);
+}
+} // namespace Husarz

@@ -545,8 +545,8 @@ shell_blob.o: shell_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
 # 13. PRZEGLADARKA HUSSAR .bur
 # ============================================================================
 
-przegladarka_tmp.o: programy/przegladarka.cpp programy/http_kody.h bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
-	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
+przegladarka_tmp.o: programy/przegladarka.cpp programy/http_kody.h bursztyn_gui.h $(wildcard bursztyn_ui/*.h) $(wildcard programy/husarz/*.h)
+	$(CXX) $(RING3_FLAGS) -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c $< -o $@
 
 przegladarka_blob.o: przegladarka_tmp.o bursztyn_gui.o $(PRZEGLADARKA_LINKER)
 	$(LD) --gc-sections -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) \
@@ -1969,3 +1969,49 @@ test-diagnostyka-xhci-host:
 .PHONY: test-diagnostyka-packaging
 test-diagnostyka-packaging: diagnostyka_blob.o
 	$(PYTHON) narzedzia/test_diagnostyka_packaging.py
+
+.PHONY: test-husarz-engine-host test-husarz-runtime-host
+
+test-husarz-engine-host:
+	@mkdir -p .husarz-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -I. narzedzia/test_husarz_engine.cpp -o .husarz-test/engine
+	ASAN_OPTIONS=detect_leaks=1 .husarz-test/engine
+
+test-husarz-runtime-host:
+	@mkdir -p .husarz-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_husarz_runtime.cpp -Wl,--gc-sections -o .husarz-test/runtime
+	ASAN_OPTIONS=detect_leaks=1 .husarz-test/runtime
+
+.PHONY: test-husarz-qemu
+test-husarz-qemu: iso
+	$(PYTHON) narzedzia/test_husarz_qemu.py
+
+.PHONY: test-user-fault-policy test-user-fault-qemu-build
+
+test-user-fault-policy:
+	@mkdir -p .husarz-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined narzedzia/test_user_fault_policy.cpp -o .husarz-test/user-fault-policy
+	.husarz-test/user-fault-policy
+
+# Substitute only the browser payload in a separate linked test kernel. The
+# production kernel, browser BUR and ordinary ISO are never overwritten.
+test-user-fault-qemu-build: all
+	@mkdir -p .husarz-test/user-fault
+	$(CC) $(ASM_FLAGS) -c narzedzia/fixtures/husarz/user_fault.S -o .husarz-test/user-fault/probe.o
+	$(LD) --gc-sections -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) .husarz-test/user-fault/probe.o -o .husarz-test/user-fault/probe.elf
+	$(OBJCOPY) -O binary .husarz-test/user-fault/probe.elf .husarz-test/user-fault/przegladarka.bin
+	cd .husarz-test/user-fault && $(LD) -r -b binary przegladarka.bin -o probe-blob.o
+	$(CXX) $(KERNEL_LDFLAGS) -o .husarz-test/user-fault/kernel.bin $(filter-out przegladarka_blob.o,$(OBJS)) .husarz-test/user-fault/probe-blob.o -lgcc
+
+.PHONY: test-user-page-fault-qemu-build
+test-user-page-fault-qemu-build: all
+	@mkdir -p .husarz-test/user-page-fault
+	$(CC) $(ASM_FLAGS) -DHUSARZ_FAULT_PAGE=1 -c narzedzia/fixtures/husarz/user_fault.S -o .husarz-test/user-page-fault/probe.o
+	$(LD) --gc-sections -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) .husarz-test/user-page-fault/probe.o -o .husarz-test/user-page-fault/probe.elf
+	$(OBJCOPY) -O binary .husarz-test/user-page-fault/probe.elf .husarz-test/user-page-fault/przegladarka.bin
+	cd .husarz-test/user-page-fault && $(LD) -r -b binary przegladarka.bin -o probe-blob.o
+	$(CXX) $(KERNEL_LDFLAGS) -o .husarz-test/user-page-fault/kernel.bin $(filter-out przegladarka_blob.o,$(OBJS)) .husarz-test/user-page-fault/probe-blob.o -lgcc
+
+.PHONY: test-husarz-stack
+test-husarz-stack: przegladarka_tmp.o
+	$(PYTHON) narzedzia/test_husarz_stack.py

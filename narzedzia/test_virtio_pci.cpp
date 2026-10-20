@@ -565,8 +565,17 @@ void host_klog(const char* msg) {
 
 static uint64_t g_host_mock_time_ns = 0;
 static bool g_host_use_mock_time = false;
+// Deliver a GPU response during the deadline read, after the caller's poll.
+static unsigned g_gpu_complete_on_clock_read = 0;
+void host_mmio_write16(volatile void* addr, uint16_t val);
 
 uint64_t host_czas_monotoniczny_ns(void) {
+    if (g_gpu_complete_on_clock_read && --g_gpu_complete_on_clock_read == 0) {
+        auto* drv = virtio_gpu_get_driver(0);
+        g_mock.gpu_skip_reply = false;
+        host_mmio_write16(virtio_pci_notify_address(drv->dev, drv->controlq->queue_notify_off), 0);
+        g_host_mock_time_ns += 600000000ULL;
+    }
     if (g_host_use_mock_time) {
         return g_host_mock_time_ns;
     }
@@ -4735,6 +4744,39 @@ void test_virtio_gpu_command_timeout() {
     virtio_gpu_reset_all();
 }
 
+// Regression: a response published during a delayed clock read is not a timeout.
+void test_virtio_gpu_completion_at_deadline() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU for deadline race");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU for deadline race");
+    auto* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(virtio_gpu_transfer_and_flush(drv, 0, 0, drv->fb_width, drv->fb_height),
+                "Complete initial frame before deadline injection");
+    g_host_use_mock_time = true;
+    g_host_mock_time_ns = 1;
+    g_mock.gpu_skip_reply = true;
+    g_gpu_complete_on_clock_read = 2;
+    const bool flush_ok = virtio_gpu_cmd_resource_flush(drv, drv->resource_id, 0, 0, 100, 100);
+    const bool flush_healthy = !drv->has_error;
+    const bool consumed = drv->controlq->last_used_idx == drv->controlq->used->idx;
+    VirtioGpuMemEntry entry = drv->mem_entries[0];
+    g_mock.gpu_skip_reply = true;
+    g_gpu_complete_on_clock_read = 2;
+    const bool attach_ok = virtio_gpu_cmd_resource_attach_backing(drv, drv->resource_id, &entry, 1);
+    const bool attach_healthy = !drv->has_error;
+    g_gpu_complete_on_clock_read = 0;
+    g_mock.gpu_skip_reply = false;
+    g_host_use_mock_time = false;
+    virtio_gpu_reset(drv);
+    virtio_gpu_reset_all();
+    TEST_ASSERT(flush_ok, "Completion during expired deadline sample must succeed");
+    TEST_ASSERT(flush_healthy, "Successful late observation must preserve presentation");
+    TEST_ASSERT(consumed, "Completion consumed exactly once");
+    TEST_ASSERT(attach_ok, "Attach backing also observes completion after deadline sample");
+    TEST_ASSERT(attach_healthy, "Attach deadline race must not poison driver");
+}
+
 // ----------------------------------------------------------------------------
 // 97. VirtIO-GPU: Ochrona przed przepelnieniem arytmetycznym (overflow safety)
 // ----------------------------------------------------------------------------
@@ -7107,6 +7149,7 @@ int main() {
     RUN_TEST(test_virtio_gpu_resource_flush);
     RUN_TEST(test_virtio_gpu_malformed_response);
     RUN_TEST(test_virtio_gpu_command_timeout);
+    RUN_TEST(test_virtio_gpu_completion_at_deadline);
     RUN_TEST(test_virtio_gpu_arithmetic_overflow);
     RUN_TEST(test_virtio_gpu_invalid_dimensions);
     RUN_TEST(test_virtio_gpu_queue_corruption);
