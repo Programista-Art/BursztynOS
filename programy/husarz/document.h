@@ -99,10 +99,13 @@ inline int resolve(Length v, int basis, int font, int root, int automatic = 0) {
                ? automatic
                : clamp64(int64_t(v.value) * b / (v.unit == Unit::Percent ? 100000 : 1000), -MaxDimension);
 }
-enum class Display : uint8_t { Inline, Block, None, Table, Row, Cell };
+enum class Display : uint8_t { Inline, InlineBlock, Block, None, Table, Row, Cell };
 enum class WhiteSpace : uint8_t { Normal, Pre, PreWrap, NoWrap };
 enum class Align : uint8_t { Left, Center, Right };
 enum class Vertical : uint8_t { Baseline, Top, Middle, Bottom };
+enum class Transform : uint8_t { None, Upper, Lower, Capitalize };
+enum class Position : uint8_t { Static, Relative, Absolute };
+enum class ListType : uint8_t { Disc, Circle, Square, Decimal, LowerAlpha, UpperAlpha, LowerRoman, UpperRoman, None };
 enum class Overflow : uint8_t { Visible, Hidden, Auto, Scroll };
 struct Style {
     Display display{Display::Inline};
@@ -110,13 +113,22 @@ struct Style {
     Align align{Align::Left};
     Vertical vertical{Vertical::Baseline};
     Overflow overflow_x{Overflow::Visible}, overflow_y{Overflow::Visible};
+    Transform transform{Transform::None};
+    Position position{Position::Static};
+    ListType list_type{ListType::Disc};
+    Length left{}, top{}, right{}, bottom{};
+    int letter_spacing{}, word_spacing{};
+    int border_spacing{2}; bool border_collapse{};
     bool visible{true}, bold{}, italic{}, underline{}, border_box{};
     uint8_t paint_opacity{255};
+    uint8_t color_alpha{255}, background_alpha{255}, border_alpha{255};
     uint8_t opacity{255}, border_style{};
-    uint32_t color{0x202020}, background{0x00ffffff}, border_color{0x202020};
+    uint32_t color{0x000000}, background{0x00ffffff}, border_color{0x202020};
     bool has_background{};
     int font{16}, line{20};
     uint32_t family{};
+    uint32_t background_base{}, background_image{}, background_size{}, background_position{};
+    uint8_t background_repeat{}; // 0 repeat, 1 repeat-x, 2 repeat-y, 3 no-repeat
     Length width{}, height{}, min_width{0, Unit::Px}, max_width{}, min_height{0, Unit::Px}, max_height{};
     Length margin[4]{{0, Unit::Px}, {0, Unit::Px}, {0, Unit::Px}, {0, Unit::Px}},
         padding[4]{{0, Unit::Px}, {0, Unit::Px}, {0, Unit::Px}, {0, Unit::Px}};
@@ -136,6 +148,7 @@ struct Node {
 struct Declaration {
     uint32_t name{}, value{};
     bool important{};
+    uint32_t base_url{}; bool user_agent{};
 };
 struct Rule {
     uint32_t selector{};
@@ -168,6 +181,7 @@ struct Fragment {
     uint32_t text{}, length{};
     int x{}, y{}, width{}, height{};
     Clip clip{};
+    uint16_t flow_node{};
 };
 struct Metrics {
     void *user{};
@@ -175,11 +189,37 @@ struct Metrics {
     int (*height)(void *, int){};
 };
 inline uint32_t document_generation = 0;
+// Web defaults are document-owned and have no BursztynUI dependency.
+struct UserAgentContext {
+    uint32_t canvas{0xffffff}, text{0x000000}, link{0x0000ee};
+};
+struct FormControl {
+    uint16_t node{}, cursor{}, length{}, option{}; bool checked{}; uint32_t display{}; char value[2049]{};
+};
+struct DocumentImage {
+    uint16_t node{}; unsigned width{}, height{}; const uint32_t *pixels{};
+    void *owner{}; void (*release)(void*){}; bool background{};
+};
+struct TablePlan { uint16_t node{}, columns{}; int weights[32]{}, total{}; };
 struct Document {
+    UserAgentContext user_agent{};
+    FormControl controls[64]{}; unsigned control_count{}; uint16_t focused_control{}, open_select{};
+    DocumentImage images[32]{}; unsigned image_count{}; size_t image_bytes{};
+    ~Document() { release_images(); }
+    void release_images() {
+        for (unsigned i=0;i<image_count;++i) if (images[i].release) images[i].release(images[i].owner);
+        image_count=0; image_bytes=0;
+    }
+    const DocumentImage *image(uint16_t node, bool background=false) const {
+        for (unsigned i=0;i<image_count;++i) if (images[i].node==node && images[i].background==background) return &images[i];
+        return nullptr;
+    }
     Node nodes[MaxNodes];
     Attribute attrs[MaxAttrs];
     Style styles[MaxNodes];
     Box boxes[MaxNodes];
+    int offset_x[MaxNodes]{}, offset_y[MaxNodes]{};
+    TablePlan tables[32]{}; uint16_t table_count{};
     Rule rules[MaxRules];
     Declaration declarations[MaxDeclarations];
     Fragment fragments[MaxFragments];
@@ -188,11 +228,15 @@ struct Document {
     uint32_t node_count{}, attr_count{}, arena_used{}, rule_count{}, declaration_count{}, fragment_count{},
         script_count{};
     uint32_t title{}, generation{}, revision{}, layout_revision{}, style_revision{}, base_url{};
-    bool truncated{}, styles_dirty{true};
+    bool truncated{}, styles_dirty{true}, user_agent_loaded{};
     int layout_width{}, height{}, root_font{16};
     uint32_t parse_count{}, reflow_count{};
     Document() { reset(); }
+    Document(const Document&) = delete;
+    Document& operator=(const Document&) = delete;
     void reset() {
+        release_images();
+        control_count=0; focused_control=open_select=0;
         node_count = 1;
         attr_count = rule_count = declaration_count = fragment_count = script_count = 0;
         arena_used = 1;
@@ -200,7 +244,7 @@ struct Document {
         nodes[0] = {};
         title = base_url = 0;
         truncated = false;
-        styles_dirty = true;
+        styles_dirty = true; user_agent_loaded=false;
         layout_width = 0;
         height = 0;
         generation = ++document_generation;
@@ -258,6 +302,7 @@ struct Document {
         return "";
     }
     bool has_attr(uint16_t id, const char *name) const {
+        if (id>=node_count) return false;
         const Node &n = nodes[id];
         for (unsigned i = 0; i < n.attr_count; ++i)
             if (equal(str(attrs[n.attr_start + i].name), name))

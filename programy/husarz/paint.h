@@ -81,9 +81,83 @@ inline Clip ancestor_clip(const Document &d, uint16_t id, int scroll, int vw, in
     }
     return clip;
 }
-inline void paint(Document &d, Surface &target, int scroll, const Metrics &metrics, const Glyphs &glyphs,
-                  uint32_t background) {
-    target.clear(background);
+inline void paint_image(const Document &d, uint16_t id, Surface &target, int scroll, Clip clip, bool background) {
+    const auto *image=d.image(id,background); if (!image) return;
+    const auto &b=d.boxes[id]; const auto &s=d.styles[id];
+    int x=background ? b.x : b.content_x, y=(background ? b.y : b.content_y)-scroll;
+    int w=background ? int(image->width) : b.content_width, h=background ? int(image->height) : b.content_height;
+    Clip area=background ? Clip{b.x,b.y-scroll,b.width,b.height} : Clip{x,y,w,h};
+    if (background && s.background_size) {
+        Span size{d.str(s.background_size),length(d.str(s.background_size),128)};
+        if (value_is(size,"cover") || value_is(size,"contain")) {
+            int64_t sx=int64_t(b.width)*1000/image->width, sy=int64_t(b.height)*1000/image->height;
+            int64_t scale=value_is(size,"cover") ? (sx>sy?sx:sy) : (sx<sy?sx:sy);
+            w=clamp64(int64_t(image->width)*scale/1000,1); h=clamp64(int64_t(image->height)*scale/1000,1);
+        } else {
+            Span parts[2]; unsigned count=words(size,parts,2); Length a{},c{};
+            if (count && count<=2 && css_length(parts[0],a)) {
+                if (count==2) css_length(parts[1],c);
+                if (a.unit!=Unit::Auto) w=clamp64(resolve(a,b.width,s.font,d.root_font),1);
+                if (c.unit!=Unit::Auto) h=clamp64(resolve(c,b.height,s.font,d.root_font),1);
+                else h=clamp64(int64_t(w)*image->height/image->width,1);
+                if (a.unit==Unit::Auto && c.unit!=Unit::Auto) w=clamp64(int64_t(h)*image->width/image->height,1);
+            }
+        }
+    }
+    if (background && s.background_position) {
+        Span parts[2]; unsigned count=words({d.str(s.background_position),length(d.str(s.background_position),128)},parts,2);
+        for (unsigned i=0;i<2 && count<=2;++i) {
+            Span part=i<count ? parts[i] : Span{"center",6}; Length l; int free=i ? b.height-h : b.width-w, pos=0;
+            if (value_is(part,"center")) pos=free/2;
+            else if (value_is(part,"right") || value_is(part,"bottom")) pos=free;
+            else if (css_length(part,l,true)) pos=resolve(l,free,s.font,d.root_font);
+            if (i) y+=pos; else x+=pos;
+        }
+    }
+    if (w<=0 || h<=0) return;
+    Clip visible=intersect(area,intersect(clip,{0,0,target.width,target.height}));
+    for (int yy=visible.y;yy<visible.y+visible.height && target.budget;++yy)
+        for (int xx=visible.x;xx<visible.x+visible.width && target.budget;++xx) {
+            --target.budget;
+            int dx=xx-x,dy=yy-y;
+            bool repeat_x=background && (s.background_repeat==0 || s.background_repeat==1);
+            bool repeat_y=background && (s.background_repeat==0 || s.background_repeat==2);
+            if ((!repeat_x && (dx<0 || dx>=w)) || (!repeat_y && (dy<0 || dy>=h))) continue;
+            if (background && !Surface::rounded(xx-b.x,yy-(b.y-scroll),b.width,b.height,s.radius)) continue;
+            dx=(dx%w+w)%w; dy=(dy%h+h)%h;
+            unsigned sx=unsigned(int64_t(dx)*image->width/w),sy=unsigned(int64_t(dy)*image->height/h);
+            uint32_t pixel=image->pixels[size_t(sy)*image->width+sx];
+            target.pixel(xx,yy,pixel,unsigned(pixel>>24)*s.paint_opacity/255);
+        }
+}
+inline void paint_menu_label(Surface &target,const char *text,int x,int y,const Style &style,
+                             const Metrics &metrics,const Glyphs &glyphs,Clip clip) {
+    size_t size=length(text,MaxAttrLength);
+    for (size_t p=0;p<size && target.budget && x<clip.x+clip.width;) {
+        size_t used; uint32_t cp=utf8(text+p,size-p,used); p+=used;
+        const uint16_t *bits=glyphs.bitmap?glyphs.bitmap(glyphs.user,cp):nullptr;
+        int gw=glyphs.width?glyphs.width(glyphs.user,cp):8;
+        int dw=clamp64((int64_t(gw)*style.font+8)/16,1,256),dh=font_height(metrics,style);
+        if (bits) for (int yy=0;yy<dh && target.budget;++yy) for (int xx=0;xx<dw && target.budget;++xx) {
+            --target.budget;
+            int sx=xx*gw/dw; if(sx>15)sx=15;
+            if ((bits[yy*16/dh]&(1U<<(15-sx))) && x+xx>=clip.x && x+xx<clip.x+clip.width && y+yy>=clip.y && y+yy<clip.y+clip.height)
+                target.pixel(x+xx,y+yy,style.color,unsigned(style.color_alpha)*style.paint_opacity/255);
+        }
+        x=clamp64(int64_t(x)+advance(metrics,cp,style),-MaxDimension);
+    }
+}
+inline void paint(Document &d, Surface &target, int scroll, const Metrics &metrics, const Glyphs &glyphs) {
+    target.clear(d.user_agent.canvas);
+    uint16_t canvas_node = 0;
+    for (uint16_t i = 1; i < d.node_count; ++i)
+        if ((d.tag(i, "html") || d.tag(i, "body")) && d.styles[i].has_background && d.styles[i].visible && d.styles[i].display!=Display::None) {
+            const Style &s = d.styles[i];
+            target.rect(0, 0, target.width, target.height, s.background, unsigned(s.background_alpha)*s.paint_opacity/255,
+                        {0, 0, target.width, target.height});
+            canvas_node = i;
+            break;
+        }
     uint32_t fi = 0;
     for (uint16_t id = 0; id < d.node_count; ++id) {
         const Style &s = d.styles[id];
@@ -92,9 +166,22 @@ inline void paint(Document &d, Surface &target, int scroll, const Metrics &metri
             continue;
         Clip clip = ancestor_clip(d, id, scroll, target.width, target.height);
         if (s.visible && s.paint_opacity && b.height && b.width) {
-            if (s.has_background)
-                target.rect(b.x, b.y - scroll, b.width, b.height, s.background, s.paint_opacity, clip,
+            if (s.has_background && id != canvas_node)
+                target.rect(b.x, b.y - scroll, b.width, b.height, s.background, unsigned(s.paint_opacity) * s.background_alpha / 255, clip,
                             s.radius);
+            paint_image(d,id,target,scroll,clip,true);
+            paint_image(d,id,target,scroll,clip,false);
+            if (auto *control_state=control(d,id)) {
+                if (control_state->checked && (input_type(d,id,"checkbox") || input_type(d,id,"radio"))) {
+                    int cx=b.content_x,cy=b.content_y-scroll;
+                    Clip control_clip=intersect(clip,{cx,cy,b.content_width,b.content_height});
+                    if (input_type(d,id,"radio")) target.rect(cx+3,cy+3,7,7,s.color,s.color_alpha,control_clip,4);
+                    else {
+                        for(int k=0;k<4;++k) target.rect(cx+2+k,cy+6+k,2,2,s.color,s.color_alpha,control_clip);
+                        for(int k=0;k<6;++k) target.rect(cx+5+k,cy+9-k,2,2,s.color,s.color_alpha,control_clip);
+                    }
+                }
+            }
             if (s.border_style) {
                 int y = b.y - scroll;
                 Clip c = intersect({b.x, y, b.width, b.height}, clip);
@@ -115,7 +202,7 @@ inline void paint(Document &d, Surface &target, int scroll, const Metrics &metri
                             if (((dy < s.border[0] || dy >= b.height - s.border[2] ? dx : dy) / step) & 1)
                                 continue;
                         }
-                        target.pixel(xx, yy, s.border_color, s.paint_opacity);
+                        target.pixel(xx, yy, s.border_color, unsigned(s.paint_opacity) * s.border_alpha / 255);
                     }
             }
         }
@@ -135,6 +222,7 @@ inline void paint(Document &d, Surface &target, int scroll, const Metrics &metri
             while (p < f.length && target.budget) {
                 size_t used;
                 uint32_t cp = utf8(text + p, f.length - p, used);
+                cp = transformed(cp,s.transform,p == 0);
                 int adv = advance(metrics, cp, s);
                 int gw = glyphs.width ? glyphs.width(glyphs.user, cp) : 8;
                 const uint16_t *bitmap = glyphs.bitmap ? glyphs.bitmap(glyphs.user, cp) : nullptr;
@@ -152,9 +240,9 @@ inline void paint(Document &d, Surface &target, int scroll, const Metrics &metri
                             int tx = x + px + skew, ty = y + py;
                             if (tx >= fc.x && tx < int64_t(fc.x) + fc.width && ty >= fc.y &&
                                 ty < int64_t(fc.y) + fc.height) {
-                                target.pixel(tx, ty, s.color, s.paint_opacity);
+                                target.pixel(tx, ty, s.color, unsigned(s.paint_opacity) * s.color_alpha / 255);
                                 if (s.bold && tx + 1 < int64_t(fc.x) + fc.width)
-                                    target.pixel(tx + 1, ty, s.color, s.paint_opacity);
+                                    target.pixel(tx + 1, ty, s.color, unsigned(s.paint_opacity) * s.color_alpha / 255);
                             }
                         }
                     }
@@ -162,7 +250,51 @@ inline void paint(Document &d, Surface &target, int scroll, const Metrics &metri
                 p += used;
             }
             if (s.underline)
-                target.rect(f.x, y + f.height - 1, f.width, 1, s.color, s.paint_opacity, fc);
+                target.rect(f.x, y + f.height - 1, f.width, 1, s.color, unsigned(s.paint_opacity) * s.color_alpha / 255, fc);
+        }
+    }
+    if (d.focused_control) {
+        auto *c=control(d,d.focused_control);
+        if (c) {
+            const auto &b=d.boxes[c->node]; const auto &s=d.styles[c->node];
+            Clip clip=ancestor_clip(d,c->node,scroll,target.width,target.height);
+            clip=intersect(clip,{b.content_x,b.content_y-scroll,b.content_width,b.content_height});
+            if (editable(d,*c)) {
+                unsigned cursor=c->cursor;
+                if (input_type(d,c->node,"password")) {
+                    cursor=0; for (size_t p=0;p<c->cursor;) { size_t used; utf8(c->value+p,c->cursor-p,used); p+=used; ++cursor; }
+                }
+                int x=b.content_x,y=b.content_y-scroll;
+                for (uint32_t i=0;i<d.fragment_count;++i) {
+                    const auto &f=d.fragments[i]; if (f.node!=c->node) continue;
+                    unsigned start=f.text-c->display;
+                    if (cursor>=start && cursor<=start+f.length) {
+                        x=f.x; y=f.y-scroll;
+                        for (size_t p=0;p<cursor-start;) { size_t used; uint32_t cp=utf8(d.str(f.text)+p,cursor-start-p,used); x+=advance(metrics,cp,s); p+=used; }
+                        break;
+                    }
+                }
+                target.rect(x,y,1,s.font,s.color,s.color_alpha,clip);
+            }
+        }
+    }
+    if (d.open_select) {
+        auto *c=control(d,d.open_select);
+        if (c) {
+            auto menu=select_popup(d,c->node,scroll,target.width,target.height);
+            const auto &s=d.styles[c->node]; Clip clip{menu.x,menu.y,menu.width,menu.height};
+            target.rect(menu.x,menu.y,menu.width,menu.height,s.border_color,255,clip);
+            for (int row=0;row<menu.rows;++row) {
+                unsigned index=menu.start+unsigned(row); if(index>=menu.count)break;
+                uint16_t option=menu.options[index], text=d.nodes[option].first;
+                Style row_style=s;
+                if (d.styles[option].has_background) row_style.background=d.styles[option].background;
+                else if (!s.has_background) row_style.background=0xffffff;
+                if(index==c->option) row_style.background=0xb9d7ff;
+                Clip row_clip{menu.x+1,menu.y+row*menu.row+1,menu.width-2,menu.row-2};
+                target.rect(row_clip.x,row_clip.y,row_clip.width,row_clip.height,row_style.background,255,row_clip);
+                if(text) paint_menu_label(target,d.str(d.nodes[text].text),row_clip.x+4,row_clip.y+3,row_style,metrics,glyphs,row_clip);
+            }
         }
     }
     if (!target.budget)

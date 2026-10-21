@@ -4,6 +4,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <fstream>
+#include <memory>
 #define HUSARZ_HOST_TEST 1
 #include "../programy/przegladarka.cpp"
 static unsigned checks = 0, publications = 0, requests = 0;
@@ -17,6 +19,7 @@ static unsigned checks = 0, publications = 0, requests = 0;
     } while (0)
 static bool dns_fails = false, http_fails = false, attempt_reentry = false;
 static std::string response;
+static uint32_t last_response_bytes;
 void wypisz(const char *) {}
 bool utworz(const char *) { return true; }
 bool zapisz_plik(const char *, const char *, uint32_t) { return true; }
@@ -30,6 +33,7 @@ static void validate_publication() {
     CHECK(bar.y + bar.wysokosc == client.y + client.wysokosc);
     CHECK(bar.y == w.wysokosc() - bar.wysokosc);
     for (const auto &r : test_paint_rects) {
+        if(r.x<w.x()) std::fprintf(stderr,"publication=%u rect=%d,%d %dx%d window=%d,%d\n",publications,r.x,r.y,r.w,r.h,w.x(),w.y());
         CHECK(r.x >= w.x());
         CHECK(r.y >= w.y());
         CHECK(int64_t(r.x) + r.w <= int64_t(w.x()) + w.szerokosc());
@@ -60,15 +64,26 @@ bool bws_siec_pobierz_http(uint8_t *, const char *, const char *path, char *data
     std::string payload =
         std::strcmp(path, "/site.css") == 0 ? "body {color:#123456} p{padding:4px}" : response;
     std::string type = std::strcmp(path, "/site.css") == 0 ? "text/css" : "text/html";
+    for (const char* fixture : {"render.css","sample.png","sample.jpg","malformed.png"}) {
+        if (std::string(path)==std::string("/")+fixture) {
+            std::ifstream in(std::string("narzedzia/fixtures/husarz/")+fixture,std::ios::binary);
+            payload=std::string((std::istreambuf_iterator<char>(in)),{});
+            type=std::strstr(fixture,".css")?"text/css":std::strstr(fixture,".jpg")?"image/jpeg":"image/png";
+        }
+    }
     std::string all = "HTTP/1.1 200 OK\r\nContent-Type: " + type +
                       "\r\nContent-Length: " + std::to_string(payload.size()) + "\r\n\r\n" + payload;
     if (all.size() + 1 > cap)
         return false;
+    last_response_bytes=uint32_t(all.size());
     std::memcpy(data, all.c_str(), all.size() + 1);
     return true;
 }
 bool bws_siec_pobierz_https(uint8_t *ip, const char *domain, const char *path, char *data, uint32_t cap) {
     return bws_siec_pobierz_http(ip, domain, path, data, cap);
+}
+uint32_t bws_siec_pobierz_bajty(bool, uint8_t* ip,const char* domain,const char* path,char* data,uint32_t cap) {
+    return bws_siec_pobierz_http(ip,domain,path,data,cap) ? last_response_bytes : 0;
 }
 bool bws_tls_certyfikat_zaufany() { return true; }
 static void wheel(int delta) {
@@ -83,6 +98,15 @@ static void network_parser_tests() {
     CHECK(url.https);
     CHECK(Husarz::equal(url.domena, "example.test"));
     CHECK(Husarz::equal(url.sciezka, "/path?q=1"));
+    char resolved[2048];
+    CHECK(ustaw_url_z_location(resolved,sizeof(resolved),"?next=2",url));
+    CHECK(Husarz::equal(resolved,"https://example.test/path?next=2"));
+    CHECK(!ustaw_url_z_location(resolved,sizeof(resolved),"file:///local",url));
+    CHECK(!ustaw_url_z_location(resolved,sizeof(resolved),"javascript:void(0)",url));
+    auto doc=std::make_unique<Husarz::Document>();
+    Husarz::parse_html(*doc,"<base href='/assets/'>",21);
+    CHECK(document_url_base("https://example.test/path",doc.get(),url));
+    CHECK(Husarz::equal(url.sciezka,"/assets/"));
     CHECK(!parsuj_url("javascript:alert(1)", &url));
     uint8_t ip[4]{};
     CHECK(adres_ipv4_literal("10.0.2.2", ip));
@@ -212,7 +236,7 @@ int main() {
         f5.typ = BWS_ZDARZENIE_KLAWISZ;
         f5.kod = 0x3f;
         w.obsluz_zdarzenie(f5);
-        CHECK(requests == before_key + 2);
+        CHECK(requests == before_key + 1);
         attempt_reentry = true;
         g_husarz.odswiez();
         attempt_reentry = false;
@@ -238,6 +262,104 @@ int main() {
         CHECK(bar.wartosc() == 0);
         thumb = bar.prostokat_uchwytu();
         CHECK(thumb.wysokosc > 0);
+        // Actual WidokStrony pixels must survive both desktop palettes, including
+        // unstyled content, author white/black pages, controls and external CSS/images.
+        for (const char* fixture : {"theme-white.html","theme-black.html","render.html"}) {
+            std::ifstream in(std::string("narzedzia/fixtures/husarz/")+fixture);
+            response=std::string((std::istreambuf_iterator<char>(in)),{});
+            g_husarz.przejdz_do_url("http://example.test/render.html");
+            auto *document=zakladki[0].dokument;
+            auto before=viewport->document_pixel_hash(); test_paint_rects.clear();
+            auto reflows=document->reflow_count;
+            BursztynMotyw dark=g_domyslny_motyw_fallback, light=dark;
+            dark.poletekstowe=0x15171a; dark.tekst=0xffffff; dark.panel=0x202328;
+            light.poletekstowe=0xffffff; light.tekst=0x101010; light.panel=0xeeeeee;
+            uint64_t chrome_hash[2]{}; unsigned theme_index=0;
+            for (auto* palette : {&dark,&light}) {
+                test_ustaw_aktywny_motyw(palette); w.zaktualizuj_motyw();
+                test_paint_rects.clear(); test_capture_pixels=true; test_pixels.clear();
+                KontekstRysowania context; w.rysuj(context,true);
+                test_capture_pixels=false;
+                uint64_t h=0;
+                for (auto pair:test_pixels) if (pair.first.second<viewport->obszar_ekranu().y) h=h*131+pair.second;
+                test_pixels.clear();
+                chrome_hash[theme_index++]=h; test_paint_rects.clear();
+                CHECK(viewport->document_pixel_hash()==before); test_paint_rects.clear(); CHECK(document->reflow_count==reflows);
+            }
+            CHECK(chrome_hash[0]!=chrome_hash[1]);
+            test_ustaw_aktywny_motyw(nullptr); w.zaktualizuj_motyw();
+            if (std::strcmp(fixture,"render.html")==0) {
+                CHECK(document->image_count==4); // PNG + JPEG + repeated PNG + background; malformed rejected
+                CHECK(resource_cache && resource_cache->images_decoded==2);
+                CHECK(resource_cache->image_failures>0);
+                auto network_before=requests;
+                g_husarz.odswiez(); CHECK(requests==network_before+1);
+                CHECK(resource_cache->hits>=4);
+                std::printf("cache hits=%llu misses=%llu decoded=%llu failures=%llu raw=%zu decoded_bytes=%zu\n",
+                    (unsigned long long)resource_cache->hits,(unsigned long long)resource_cache->misses,
+                    (unsigned long long)resource_cache->images_decoded,(unsigned long long)resource_cache->image_failures,
+                    resource_cache->raw_bytes,resource_cache->decoded_bytes);
+                g_husarz.nowa_zakladka_gui(); g_husarz.przejdz_do_url("http://example.test/render.html");
+                CHECK(zakladki[1].dokument->image_count==4); CHECK(resource_cache->images_decoded==2);
+                g_husarz.zamknij_zakladke_gui(1);
+                CHECK(zakladki[0].dokument->image_count==4);
+            }
+        }
+        {
+            std::ifstream in("narzedzia/fixtures/husarz/forms-native.html");
+            response=std::string((std::istreambuf_iterator<char>(in)),{});
+            g_husarz.odswiez(); auto &d=*zakladki[0].dokument;
+            auto id=[&](const char* name){return Husarz::ScriptDom(d).get_element_by_id(name).id;};
+            w.ustaw_fokus(viewport); d.focused_control=id("q");
+            auto physical=[&](unsigned usage,unsigned mods=0){bws_zdarzenie e{};e.typ=BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;e.kod=BWS_KEY_SOURCE_USB|usage;e.x=1;e.przyciski=mods;w.obsluz_zdarzenie(e);};
+            physical(43); CHECK(w.fokus()==viewport); CHECK(d.focused_control==id("p"));
+            bws_zdarzenie text{};text.typ=BWS_ZDARZENIE_TEXT_INPUT;text.kod='p';w.obsluz_zdarzenie(text);
+            CHECK(Husarz::equal(Husarz::control(d,id("p"))->value,"p"));
+            d.focused_control=id("note"); physical(230,BWS_MOD_ALT); CHECK(w.fokus()==viewport);
+            text.kod=0x142;text.przyciski=BWS_MOD_ALT;w.obsluz_zdarzenie(text);
+            CHECK(Husarz::equal(Husarz::control(d,id("note"))->value,"ł"));
+            d.focused_control=d.open_select=id("select"); physical(81); CHECK(Husarz::control(d,id("select"))->option==1);
+            physical(40); CHECK(d.open_select==0);
+            // Open through the actual page mouse handler, then select by keyboard.
+            d.focused_control=0;
+            Husarz::choose_option(d,*Husarz::control(d,id("select")),0);
+            viewport->przygotuj();
+            auto area=viewport->obszar_ekranu(); auto box=d.boxes[id("select")];
+            ZdarzenieMyszki click; click.x=area.x+box.x+10;
+            click.y=area.y+box.y+10-int(g_husarz.suwak_pionowy->wartosc());
+            viewport->obsluz_wcisniecie_myszy(click);
+            CHECK(click.obsluzone); CHECK(d.focused_control==id("select")); CHECK(d.open_select==id("select"));
+            physical(81); CHECK(Husarz::control(d,id("select"))->option==1);
+            physical(81); CHECK(Husarz::control(d,id("select"))->option==1);
+            physical(40); CHECK(d.open_select==0);
+        }
+        // Exercise the actual completion publisher with stale HTML, CSS and image
+        // replies. An old navigation or a different document cannot alter this tab.
+        browser_resources=new BrowserResources;
+        browser_resources->payload=new Husarz::WorkerPayload;
+        auto &state=*browser_resources;
+        auto &tab=zakladki[0]; tab.identity=77; tab.navigation=42;
+        auto *retained=tab.dokument; unsigned revision=retained->revision;
+        for (auto kind : {Husarz::RequestKind::Html,Husarz::RequestKind::Css,Husarz::RequestKind::Image}) {
+            state.active={}; state.active.tab=77; state.active.navigation=41;
+            state.active.document=retained->generation; state.active.kind=kind; state.active.request=9;
+            state.payload->magic=Husarz::AsyncMagic; state.payload->request=9; state.payload->kind=uint32_t(kind);
+            state.payload->success=1; state.payload->size=10;
+            apply_worker_result(); CHECK(tab.dokument==retained); CHECK(retained->revision==revision);
+        }
+        state.active.navigation=42; state.active.kind=Husarz::RequestKind::Css; state.active.document=retained->generation+1;
+        apply_worker_result(); CHECK(retained->revision==revision);
+        cancel_async_tab(tab); state.active.document=retained->generation;
+        apply_worker_result(); CHECK(retained->revision==revision);
+        CHECK(state.queue.discarded==5);
+        // Matching CSS may update the retained DOM, without parsing/replacing it.
+        state.active.navigation=tab.navigation; state.active.kind=Husarz::RequestKind::Css;
+        kopiuj_limit(state.active.url,sizeof(state.active.url),"http://example.test/race.css");
+        state.payload->kind=uint32_t(Husarz::RequestKind::Css);
+        const char* css="body {color:#abcdef}";
+        state.payload->size=uint32_t(std::strlen(css)); std::memcpy(state.payload->raw,css,state.payload->size);
+        apply_worker_result(); CHECK(tab.dokument==retained); CHECK(retained->revision>revision);
+        delete state.payload; state.payload=nullptr; delete browser_resources; browser_resources=nullptr;
         auto *theme_doc = zakladki[0].dokument;
         auto before_theme = theme_doc->parse_count;
         BursztynMotyw bright = g_domyslny_motyw_fallback;
@@ -249,7 +371,7 @@ int main() {
         odswiez_pasek_stanu_natychmiast();
         CHECK(zakladki[0].dokument == theme_doc);
         CHECK(theme_doc->parse_count == before_theme);
-        CHECK(theme_doc->styles[0].color == bright.tekst);
+        CHECK(theme_doc->styles[0].color == theme_doc->user_agent.text);
         test_ustaw_aktywny_motyw(nullptr);
         w.zaktualizuj_motyw();
         odswiez_pasek_stanu_natychmiast();
@@ -272,9 +394,42 @@ int main() {
         g_husarz.przelacz_zakladke(0);
         g_husarz.zamknij_zakladke_gui(1);
         CHECK(liczba_zakladek == 1);
+        g_husarz.nowa_zakladka_gui();
+        CHECK(zakladki[1].identity==0 && zakladki[1].navigation==0);
+        g_husarz.zamknij_zakladke_gui(1);
+        {
+            Husarz::ResourceCache isolated(gui_malloc,gui_free);
+            for (const char *fixture : {"sample-alpha.png","oversized.png","malformed.jpg"}) {
+                std::ifstream in(std::string("narzedzia/fixtures/husarz/")+fixture,std::ios::binary);
+                std::string raw((std::istreambuf_iterator<char>(in)),{});
+                auto *entry=isolated.insert(fixture,Husarz::ResourceType::Image,reinterpret_cast<const uint8_t*>(raw.data()),raw.size());
+                CHECK(entry);
+                bool success=decode_browser_image(isolated,*entry);
+                if(std::strcmp(fixture,"sample-alpha.png")==0) {
+                    CHECK(success); CHECK(entry->pixels[0]==0x801e64c8); CHECK(decode_workspace==0);
+                } else CHECK(!success);
+                CHECK(isolated.decoded_bytes<=Husarz::MaxCacheDecoded); CHECK(decode_workspace==0);
+            }
+        }
+        {
+            Husarz::ResourceCache fuzz_cache(gui_malloc,gui_free); uint32_t random=0xb83c0129;
+            std::ifstream in("narzedzia/fixtures/husarz/sample.png",std::ios::binary);
+            std::string prefix((std::istreambuf_iterator<char>(in)),{});
+            for(unsigned sample=0;sample<384;++sample) {
+                uint8_t data[128]{};
+                for(unsigned j=0;j<128;++j){random=random*1664525+1013904223;data[j]=uint8_t(random>>24);}
+                if(sample%2) for(unsigned j=0;j<33 && j<prefix.size();++j)data[j]=uint8_t(prefix[j]);
+                else {data[0]=0xff;data[1]=0xd8;}
+                if(sample%3==0){data[16]=0x7f;data[17]=data[18]=data[19]=0xff;}
+                auto *entry=fuzz_cache.insert("http://fuzz.test/image",Husarz::ResourceType::Image,data,sizeof(data));CHECK(entry);
+                (void)decode_browser_image(fuzz_cache,*entry);
+                CHECK(decode_workspace==0);CHECK(fuzz_cache.raw_bytes<=Husarz::MaxCacheRaw);CHECK(fuzz_cache.decoded_bytes<=Husarz::MaxCacheDecoded);
+            }
+        }
         test_publish_observer = nullptr;
         test_capture_paints = false;
         zwolnij_wszystkie_zakladki();
+        delete resource_cache; resource_cache=nullptr;
     }
     std::printf(
         "Husarz native runtime: %u checks PASS, %u loading publications, %u real HTTP parser requests\n",

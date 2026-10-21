@@ -25,6 +25,8 @@ using FormatPiksela = uint32_t;
 FormatObrazu rozpoznaj_obraz(const uint8_t* dane, size_t n);
 BladObrazu dekoduj_obraz(const uint8_t* dane, size_t n, DekodowanyObraz* out,
                          AlokujObraz alokuj, ZwolnijObraz zwolnij);
+// Web/reusable image surfaces retain straight alpha; legacy wallpaper API remains opaque.
+BladObrazu dekoduj_obraz_z_alfa(const uint8_t* dane,size_t n,DekodowanyObraz* out,AlokujObraz alokuj,ZwolnijObraz zwolnij);
 BladObrazu dekoduj_jpeg(const uint8_t* dane, size_t n, DekodowanyObraz* out,
                         AlokujObraz alokuj, ZwolnijObraz zwolnij);
 BladObrazu sprawdz_jpeg(const uint8_t* dane, size_t n,

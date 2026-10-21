@@ -126,7 +126,9 @@ def test_elf_binarny():
         raport("husarz_brak_wyjatkow_i_rtti", True)
 
         # Weryfikacja siec_bufor (256 KiB w niskim BSS pod 0x1042000)
-        m_siec = re.search(r"([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+b\s+.*siec_bufor", out_syms)
+        worker_symbols = subprocess.check_output(["nm", "-C", "-S", os.path.join(REPO,"husarz_worker.elf")], text=True)
+        assert not re.search(r"\bU\b|_GLOBAL__sub_I|__cxa_throw|__gxx_personality",worker_symbols)
+        m_siec = re.search(r"([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+b\s+.*siec_bufor", worker_symbols)
         if m_siec:
             addr = int(m_siec.group(1), 16)
             sz = int(m_siec.group(2), 16)
@@ -186,7 +188,8 @@ def test_bursztyn_ui_architektura():
     raport("husarz_usuniecie_legacy_rysowania", len(znalezione_legacy) == 0, str(znalezione_legacy))
 
     # Czystość motywu
-    ok_motyw = "motyw_kolor(" in src
+    # Native controls retain theme callbacks; the web renderer accepts no desktop palette.
+    ok_motyw = "Kontrolka::zaktualizuj_motyw()" in src and "motyw_kolor(" not in src
     raport("husarz_integracja_z_motywem", ok_motyw)
 
     # Elastyczny uklad paska narzedzi

@@ -1,5 +1,7 @@
 #pragma once
 #include "html.h"
+#include "css_colors.h"
+#include "user_agent.h"
 namespace Husarz {
 // Bounded lexical scans share quote/comment/bracket handling. No regex engine.
 class CssTokenizer {
@@ -133,67 +135,78 @@ inline int hex(char c) {
     c = lower(c);
     return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
 }
-inline bool color(Span v, uint32_t &out, bool &transparent) {
-    transparent = false;
-    if (value_is(v, "transparent")) {
-        transparent = true;
-        out = 0;
-        return true;
-    }
-    if (v.size && *v.data == '#' && (v.size == 4 || v.size == 7)) {
-        uint32_t c = 0;
-        for (size_t i = 1; i < v.size; ++i) {
-            int h = hex(v.data[i]);
-            if (h < 0)
-                return false;
-            c = (c << (v.size == 4 ? 8 : 4)) | uint32_t(v.size == 4 ? h * 17 : h);
+inline bool color(Span v, uint32_t &out, bool &transparent, uint8_t *alpha_out = nullptr) {
+    v = trimmed(v.data, v.size);
+    uint8_t alpha = 255;
+    uint32_t result = 0;
+    bool found = false;
+    if (value_is(v, "transparent")) { alpha = 0; found = true; }
+    else if (v.size && v.data[0] == '#' &&
+             (v.size == 4 || v.size == 5 || v.size == 7 || v.size == 9)) {
+        bool short_hex = v.size <= 5;
+        unsigned channels = (v.size == 5 || v.size == 9) ? 4 : 3;
+        for (unsigned i = 0; i < channels; ++i) {
+            unsigned pos = 1 + i * (short_hex ? 1 : 2);
+            int hi = hex(v.data[pos]), lo = short_hex ? hi : hex(v.data[pos + 1]);
+            if (hi < 0 || lo < 0) return false;
+            unsigned channel = unsigned(hi * 16 + lo);
+            if (i == 3) alpha = uint8_t(channel);
+            else result = (result << 8) | channel;
         }
-        out = c;
-        return true;
-    }
-    struct C {
-        const char *name;
-        uint32_t value;
-    };
-    static constexpr C names[] = {{"black", 0},         {"white", 0xffffff},   {"red", 0xff0000},
-                                  {"green", 0x008000},  {"blue", 0x0000ff},    {"yellow", 0xffff00},
-                                  {"gray", 0x808080},   {"grey", 0x808080},    {"silver", 0xc0c0c0},
-                                  {"navy", 0x000080},   {"teal", 0x008080},    {"purple", 0x800080},
-                                  {"orange", 0xffa500}, {"maroon", 0x800000},  {"lime", 0x00ff00},
-                                  {"aqua", 0x00ffff},   {"fuchsia", 0xff00ff}, {"olive", 0x808000}};
-    for (const auto &c : names)
-        if (value_is(v, c.name)) {
-            out = c.value;
-            return true;
+        found = true;
+    } else {
+        for (const auto &c : NamedColors)
+            if (value_is(v, c.name)) { result = c.rgb; found = true; break; }
+        bool rgba = v.size > 6 && equal_ci(v.data, 5, "rgba(");
+        bool rgb = v.size > 5 && equal_ci(v.data, 4, "rgb(");
+        bool hsla = v.size > 6 && equal_ci(v.data, 5, "hsla(");
+        bool hsl = v.size > 5 && equal_ci(v.data, 4, "hsl(");
+        if (!found && (rgba || rgb || hsla || hsl) && v.data[v.size - 1] == ')') {
+            size_t prefix = rgba || hsla ? 5 : 4;
+            CssTokenizer t(v.data + prefix, v.size - prefix - 1);
+            int values[4]{};
+            unsigned count = rgba || hsla ? 4 : 3;
+            for (unsigned i = 0; i < count; ++i) {
+                t.whitespace(); size_t start = t.p; t.scan(",");
+                Span part = trimmed(t.s + start, t.p - start);
+                int num; size_t used;
+                if (!number(part, num, used)) return false;
+                bool percent = used + 1 == part.size && part.data[used] == '%';
+                if (used != part.size && !percent) return false;
+                if (i == 3) values[i] = clamp64(int64_t(num) * 255 / (percent ? 100000 : 1000), 0, 255);
+                else if (hsl || hsla) {
+                    if ((i > 0) != percent) return false;
+                    values[i] = i ? clamp64(num, 0, 100000) : num;
+                } else values[i] = clamp64(int64_t(num) * (percent ? 255 : 1) / (percent ? 100000 : 1000), 0, 255);
+                if (i + 1 < count) {
+                    if (t.p == t.n || t.s[t.p] != ',') return false;
+                    ++t.p;
+                } else if (t.p != t.n) return false;
+            }
+            if (hsl || hsla) {
+                int hue = values[0] % 360000; if (hue < 0) hue += 360000;
+                int light = values[2], sat = values[1];
+                int twice = 2 * light - 100000; if (twice < 0) twice = -twice;
+                int chroma = int(int64_t(100000 - twice) * sat / 100000);
+                int triangle = hue % 120000 - 60000; if (triangle < 0) triangle = -triangle;
+                int x = int(int64_t(chroma) * (60000 - triangle) / 60000), m = light - chroma / 2;
+                int r = 0, g = 0, b = 0;
+                switch (hue / 60000) {
+                case 0: r = chroma; g = x; break; case 1: r = x; g = chroma; break;
+                case 2: g = chroma; b = x; break; case 3: g = x; b = chroma; break;
+                case 4: r = x; b = chroma; break; default: r = chroma; b = x; break;
+                }
+                result = (uint32_t((r + m) * 255 / 100000) << 16) |
+                         (uint32_t((g + m) * 255 / 100000) << 8) | uint32_t((b + m) * 255 / 100000);
+            } else result = (uint32_t(values[0]) << 16) | (uint32_t(values[1]) << 8) | uint32_t(values[2]);
+            if (count == 4) alpha = uint8_t(values[3]);
+            found = true;
         }
-    if (v.size > 5 && equal_ci(v.data, 4, "rgb(") && v.data[v.size - 1] == ')') {
-        CssTokenizer t(v.data + 4, v.size - 5);
-        uint32_t c = 0;
-        for (int i = 0; i < 3; ++i) {
-            t.whitespace();
-            size_t b = t.p;
-            t.scan(",");
-            Span part = trimmed(t.s + b, t.p - b);
-            int num;
-            size_t used;
-            if (!number(part, num, used))
-                return false;
-            bool percent = used + 1 == part.size && part.data[used] == '%';
-            if (used != part.size && !percent)
-                return false;
-            int channel = clamp64(int64_t(num) * (percent ? 255 : 1) / (percent ? 100000 : 1000), 0, 255);
-            c = (c << 8) | uint32_t(channel);
-            if (i < 2) {
-                if (t.p == t.n || t.s[t.p] != ',')
-                    return false;
-                ++t.p;
-            } else if (t.p != t.n)
-                return false;
-        }
-        out = c;
-        return true;
     }
-    return false;
+    if (!found) return false;
+    out = result; transparent = !alpha;
+    if (alpha_out) *alpha_out = alpha;
+    return true;
 }
 inline unsigned words(Span v, Span *out, unsigned cap) {
     unsigned n = 0;
@@ -210,166 +223,238 @@ inline unsigned words(Span v, Span *out, unsigned cap) {
     }
     return n;
 }
-struct SelectorPart {
-    Span compound;
-    char relation{' '};
-};
-struct Selector {
-    SelectorPart parts[8];
-    unsigned count{};
-    int specificity{};
-    bool valid{};
-};
-inline Selector selector(Span v) {
-    Selector out;
+struct SelectorPart { Span compound; char relation{' '}; };
+struct Selector { SelectorPart parts[8]; unsigned count{}; int specificity{}; bool valid{}; };
+inline bool span_equal(Span a, Span b) {
+    if (a.size != b.size) return false;
+    for (size_t i = 0; i < a.size; ++i) if (a.data[i] != b.data[i]) return false;
+    return true;
+}
+inline bool pseudo_name(Span n) {
+    return value_is(n,"first-child") || value_is(n,"last-child") || value_is(n,"only-child") ||
+           value_is(n,"first-of-type") || value_is(n,"last-of-type") || value_is(n,"nth-child") ||
+           value_is(n,"nth-last-child") || value_is(n,"not");
+}
+// Validate before matching; unsupported syntax never broadens a selector.
+inline bool simple_syntax(Span v, int &specificity, bool argument = false) {
+    if (!v.size || v.size > 256) return false;
     size_t p = 0;
-    char relation = ' ';
-    while (p < v.size) {
-        while (p < v.size && space(v.data[p]))
-            ++p;
-        if (p == v.size)
-            break;
-        if (v.data[p] == '>') {
-            if (!out.count)
-                return out;
-            relation = '>';
-            ++p;
-            while (p < v.size && space(v.data[p]))
-                ++p;
-            if (p == v.size)
-                return out;
-        }
-        size_t start = p;
-        int identifiers = 0;
-        bool tag = true;
-        while (p < v.size && !space(v.data[p]) && v.data[p] != '>') {
-            char c = v.data[p];
-            if (c == '*' && tag) {
-                ++p;
-                tag = false;
-                continue;
+    if (v.data[p] == '*') ++p;
+    else if (ident(v.data[p])) { while (p < v.size && ident(v.data[p])) ++p; ++specificity; }
+    unsigned count = 0;
+    while (p < v.size && ++count <= 16) {
+        char c = v.data[p++];
+        if (c == '.' || c == '#' || c == ':') {
+            size_t b = p; while (p < v.size && ident(v.data[p])) ++p;
+            if (p == b) return false;
+            Span name{v.data + b, p - b};
+            if (c != ':') { specificity += c == '#' ? 65536 : 256; continue; }
+            if (!pseudo_name(name) || (argument && value_is(name,"not"))) return false;
+            bool function = value_is(name,"not") || value_is(name,"nth-child") || value_is(name,"nth-last-child");
+            if (function) {
+                if (p == v.size || v.data[p++] != '(') return false;
+                b = p; while (p < v.size && v.data[p] != ')') ++p;
+                if (p == v.size || p == b) return false;
+                Span arg = trimmed(v.data + b, p++ - b);
+                if (value_is(name,"not")) { if (!simple_syntax(arg,specificity,true)) return false; }
+                else { if (arg.size > 64) return false; specificity += 256; }
+            } else specificity += 256;
+        } else if (c == '[') {
+            size_t b = p; while (p < v.size && ident(v.data[p])) ++p;
+            if (p == b) return false;
+            while (p < v.size && space(v.data[p])) ++p;
+            if (p == v.size) return false;
+            if (v.data[p] != ']') {
+                if (v.data[p] == '~' || v.data[p] == '^' || v.data[p] == '$' || v.data[p] == '*') ++p;
+                if (p == v.size || v.data[p++] != '=') return false;
+                while (p < v.size && space(v.data[p])) ++p;
+                char quote = p < v.size && (v.data[p] == '\'' || v.data[p] == '"') ? v.data[p++] : 0;
+                b = p;
+                while (p < v.size && (quote ? v.data[p] != quote : !space(v.data[p]) && v.data[p] != ']')) ++p;
+                if ((!quote && p == b) || p == v.size) return false;
+                if (quote) ++p;
+                while (p < v.size && space(v.data[p])) ++p;
             }
-            if (c == '.' || c == '#' || c == ':') {
-                tag = false;
-                ++p;
-                size_t b = p;
-                while (p < v.size && ident(v.data[p]))
-                    ++p;
-                if (p == b)
-                    return out;
-                if (c == ':') {
-                    if (!equal_ci(v.data + b, p - b, "first-child") &&
-                        !equal_ci(v.data + b, p - b, "last-child"))
-                        return out;
-                    out.specificity += 256;
-                } else
-                    out.specificity += c == '#' ? 65536 : 256;
-            } else if (tag && ident(c)) {
-                while (p < v.size && ident(v.data[p]))
-                    ++p;
-                tag = false;
-                ++out.specificity;
-            } else
-                return out;
-            if (++identifiers > 16)
-                return out;
-        }
-        if (out.count == 8 || p == start)
-            return out;
-        out.parts[out.count++] = {{v.data + start, p - start}, relation};
-        relation = ' ';
+            if (p == v.size || v.data[p++] != ']') return false;
+            specificity += 256;
+        } else return false;
     }
-    out.valid = out.count > 0;
-    return out;
+    return p == v.size && count <= 16;
+}
+inline Selector selector(Span v) {
+    Selector out; size_t p = 0; char relation = ' ';
+    while (p < v.size) {
+        while (p < v.size && space(v.data[p])) ++p;
+        if (p == v.size) break;
+        if (v.data[p] == '>' || v.data[p] == '+' || v.data[p] == '~') {
+            if (!out.count) return out;
+            relation = v.data[p++];
+            while (p < v.size && space(v.data[p])) ++p;
+            if (p == v.size) return out;
+        }
+        size_t start = p; char quote = 0; unsigned nesting = 0;
+        while (p < v.size) {
+            char c = v.data[p];
+            if (quote) { if (c == quote) quote = 0; }
+            else if (c == '\'' || c == '"') quote = c;
+            else if (c == '[' || c == '(') { if (++nesting > 2) return out; }
+            else if (c == ']' || c == ')') { if (!nesting) return out; --nesting; }
+            else if (!nesting && (space(c) || c == '>' || c == '+' || c == '~')) break;
+            ++p;
+        }
+        Span part{v.data + start,p - start};
+        if (quote || nesting || out.count == 8 || !simple_syntax(part,out.specificity)) return out;
+        out.parts[out.count++] = {part,relation}; relation = ' ';
+    }
+    out.valid = out.count != 0; return out;
+}
+inline bool nth(Span arg, int index) {
+    char text[65]{}; unsigned n = 0;
+    for (size_t i = 0; i < arg.size; ++i) if (!space(arg.data[i])) {
+        if (n == 64) return false;
+        text[n++] = lower(arg.data[i]);
+    }
+    if (equal(text,"odd")) return index % 2 == 1;
+    if (equal(text,"even")) return index % 2 == 0;
+    size_t pos = 0; int a = 0, b = 0; bool neg = false;
+    if (pos < n && (text[pos] == '+' || text[pos] == '-')) neg = text[pos++] == '-';
+    size_t begin = pos;
+    while (pos < n && text[pos] >= '0' && text[pos] <= '9') {
+        if (a > 100000) return false;
+        a = a * 10 + text[pos++] - '0';
+    }
+    if (pos == n) return begin != pos && index == (neg ? -a : a);
+    if (text[pos++] != 'n') return false;
+    if (begin == pos - 1) a = 1;
+    if (neg) a = -a;
+    if (pos < n) {
+        if (text[pos] != '+' && text[pos] != '-') return false;
+        bool minus = text[pos++] == '-'; begin = pos;
+        while (pos < n && text[pos] >= '0' && text[pos] <= '9') {
+            if (b > 100000) return false;
+            b = b * 10 + text[pos++] - '0';
+        }
+        if (pos != n || pos == begin) return false;
+        if (minus) b = -b;
+    }
+    return a ? (index - b) % a == 0 && (index - b) / a >= 0 : index == b;
 }
 inline bool compound(const Document &d, uint16_t id, Span v, uint32_t &budget) {
-    uint32_t cost = uint32_t(v.size) + 1 + (id < d.node_count ? d.nodes[id].attr_count * 8 : 0);
-    if (cost > budget) {
-        budget = 0;
-        return false;
-    }
-    budget -= cost;
-    if (!id || d.nodes[id].is_text)
-        return false;
+    if (!id || id >= d.node_count || d.nodes[id].is_text || v.size + 1 > budget) return false;
+    budget -= uint32_t(v.size) + 1;
     size_t p = 0;
-    if (p < v.size && v.data[p] == '*')
-        ++p;
-    else if (p < v.size && ident(v.data[p])) {
-        size_t start = p;
-        while (p < v.size && ident(v.data[p]))
-            ++p;
-        if (!equal_ci(v.data + start, p - start, d.str(d.nodes[id].tag)))
-            return false;
+    if (v.data[p] == '*') ++p;
+    else if (ident(v.data[p])) {
+        size_t b = p; while (p < v.size && ident(v.data[p])) ++p;
+        if (!equal_ci(v.data + b,p - b,d.str(d.nodes[id].tag))) return false;
     }
     while (p < v.size) {
-        char type = v.data[p++];
-        size_t b = p;
-        while (p < v.size && ident(v.data[p]))
-            ++p;
-        Span name{v.data + b, p - b};
-        if (type == '#') {
-            const char *a = d.attr(id, "id");
-            if (length(a, MaxAttrLength) != name.size)
-                return false;
-            for (size_t i = 0; i < name.size; ++i)
-                if (a[i] != name.data[i])
-                    return false;
-        } else if (type == '.') {
-            const char *a = d.attr(id, "class");
-            size_t n = length(a, MaxAttrLength), k = 0;
-            if (n > budget) {
-                budget = 0;
-                return false;
+        char type = v.data[p++]; size_t b = p;
+        while (p < v.size && ident(v.data[p])) ++p;
+        Span name{v.data + b,p - b};
+        if (type == '#' || type == '.') {
+            const char *s = d.attr(id,type == '#' ? "id" : "class");
+            size_t n = length(s,MaxAttrLength);
+            if (n > budget) { budget = 0; return false; } budget -= uint32_t(n);
+            if (type == '#') { if (!span_equal({s,n},name)) return false; }
+            else {
+                bool found = false; size_t k = 0;
+                while (k < n) {
+                    while (k < n && space(s[k])) ++k;
+                    size_t start = k; while (k < n && !space(s[k])) ++k;
+                    if (span_equal({s + start,k - start},name)) found = true;
+                }
+                if (!found) return false;
             }
-            budget -= uint32_t(n);
+        } else if (type == '[') {
+            const char *value = nullptr;
+            const Node &node = d.nodes[id];
+            for (unsigned i = 0; i < node.attr_count; ++i) {
+                if (!budget) return false;
+                --budget;
+                const auto &at = d.attrs[node.attr_start + i];
+                if (equal_ci(name.data,name.size,d.str(at.name))) { value = d.str(at.value); break; }
+            }
+            if (!value) return false;
+            while (p < v.size && space(v.data[p])) ++p;
+            if (v.data[p] == ']') { ++p; continue; }
+            char op = v.data[p++]; if (op != '=') ++p;
+            while (p < v.size && space(v.data[p])) ++p;
+            char quote = v.data[p] == '\'' || v.data[p] == '"' ? v.data[p++] : 0;
+            b = p;
+            while (p < v.size && (quote ? v.data[p] != quote : !space(v.data[p]) && v.data[p] != ']')) ++p;
+            Span wanted{v.data + b,p - b};
+            if (quote) ++p;
+            while (p < v.size && space(v.data[p])) ++p;
+            ++p;
+            size_t n = length(value,MaxAttrLength);
+            if (n > budget) { budget = 0; return false; } budget -= uint32_t(n);
             bool found = false;
-            while (k < n) {
-                while (k < n && space(a[k]))
-                    ++k;
-                size_t s = k;
-                while (k < n && !space(a[k]))
-                    ++k;
-                if (k - s == name.size) {
-                    bool same = true;
-                    for (size_t j = 0; j < name.size; ++j)
-                        if (a[s + j] != name.data[j])
-                            same = false;
-                    if (same)
-                        found = true;
+            if (op == '=') found = span_equal({value,n},wanted);
+            else if (wanted.size && wanted.size <= n) {
+                if (op == '^') found = span_equal({value,wanted.size},wanted);
+                else if (op == '$') found = span_equal({value + n - wanted.size,wanted.size},wanted);
+                else if (op == '*') {
+                    for (size_t j = 0; j + wanted.size <= n; ++j) {
+                        if (wanted.size > budget) { budget = 0; return false; }
+                        budget -= uint32_t(wanted.size);
+                        if (span_equal({value+j,wanted.size},wanted)) { found = true; break; }
+                    }
+                } else if (op == '~') {
+                    size_t k = 0;
+                    while (k < n) { while (k < n && space(value[k])) ++k;
+                        size_t start = k; while (k < n && !space(value[k])) ++k;
+                        if (span_equal({value+start,k-start},wanted)) found = true;
+                    }
                 }
             }
-            if (!found)
-                return false;
+            if (!found) return false;
         } else if (type == ':') {
-            bool first = equal_ci(name.data, name.size, "first-child");
-            uint16_t sib = first ? d.nodes[id].previous : d.nodes[id].next;
-            while (sib && d.nodes[sib].is_text)
-                sib = first ? d.nodes[sib].previous : d.nodes[sib].next;
-            if (sib)
-                return false;
-        } else
-            return false;
+            Span arg{};
+            if (p < v.size && v.data[p] == '(') {
+                b = ++p; while (p < v.size && v.data[p] != ')') ++p;
+                arg = trimmed(v.data+b,p-b); ++p;
+            }
+            if (value_is(name,"not")) { if (compound(d,id,arg,budget) || !budget) return false; continue; }
+            bool reverse = value_is(name,"last-child") || value_is(name,"last-of-type") || value_is(name,"nth-last-child");
+            bool of_type = value_is(name,"first-of-type") || value_is(name,"last-of-type");
+            int index = 1;
+            for (uint16_t sib = reverse ? d.nodes[id].next : d.nodes[id].previous; sib;
+                 sib = reverse ? d.nodes[sib].next : d.nodes[sib].previous) {
+                if (!budget) return false;
+                --budget;
+                if (!d.nodes[sib].is_text && (!of_type || equal(d.str(d.nodes[id].tag),d.str(d.nodes[sib].tag)))) ++index;
+            }
+            if (value_is(name,"nth-child") || value_is(name,"nth-last-child")) { if (!nth(arg,index)) return false; }
+            else if (index != 1) return false;
+            if (value_is(name,"only-child"))
+                for (uint16_t sib = d.nodes[id].next; sib; sib = d.nodes[sib].next) {
+                    if (!budget) return false;
+                --budget;
+                    if (!d.nodes[sib].is_text) return false;
+                }
+        } else return false;
     }
     return true;
 }
 inline bool match_part(const Document &d, uint16_t id, const Selector &s, unsigned part, uint32_t &budget) {
-    if (!budget)
-        return false;
+    if (!budget) return false;
     --budget;
-    if (!compound(d, id, s.parts[part].compound, budget))
-        return false;
-    if (!part)
-        return true;
-    uint16_t parent = d.nodes[id].parent;
-    if (s.parts[part].relation == '>')
-        return parent && match_part(d, parent, s, part - 1, budget);
-    for (unsigned depth = 0; parent && depth < MaxDepth; ++depth, parent = d.nodes[parent].parent)
-        if (match_part(d, parent, s, part - 1, budget))
-            return true;
+    if (!compound(d,id,s.parts[part].compound,budget)) return false;
+    if (!part) return true;
+    char rel = s.parts[part].relation;
+    uint16_t candidate = rel == '+' || rel == '~' ? d.nodes[id].previous : d.nodes[id].parent;
+    for (unsigned steps = 0; candidate && steps < MaxNodes && budget; ++steps) {
+        if (!d.nodes[candidate].is_text) {
+            if (match_part(d,candidate,s,part-1,budget)) return true;
+            if (rel == '+' || rel == '>') return false;
+        }
+        candidate = rel == '+' || rel == '~' ? d.nodes[candidate].previous : d.nodes[candidate].parent;
+    }
     return false;
 }
 inline bool matches(const Document &d, uint16_t id, const Selector &s, uint32_t &budget) {
-    return s.valid && match_part(d, id, s, s.count - 1, budget);
+    return s.valid && match_part(d,id,s,s.count-1,budget);
 }
 inline void css_declarations(Document &d, Span input, uint16_t &first, uint16_t &count) {
     first = uint16_t(d.declaration_count);
@@ -475,7 +560,7 @@ inline Span clean_css(Document &d, const char *input, size_t size) {
     }
     return {s, n};
 }
-inline void parse_css(Document &d, const char *css, size_t size, uint32_t order = 0) {
+inline void parse_css(Document &d, const char *css, size_t size, uint32_t order = 0, uint32_t base_url = 0, bool user_agent = false) {
     if (size > 65536) {
         size = 65536;
         d.truncated = true;
@@ -521,6 +606,7 @@ inline void parse_css(Document &d, const char *css, size_t size, uint32_t order 
             continue;
         uint16_t first, count;
         css_declarations(d, {css + body, end - body}, first, count);
+        for (unsigned i=0;i<count;++i) { d.declarations[first+i].base_url=base_url; d.declarations[first+i].user_agent=user_agent; }
         size_t p = 0;
         while (p < names.size) {
             size_t b = p;
@@ -585,6 +671,8 @@ enum Property {
     PRadius,
     POpacity,
     PBoxSizing,
+    PLetter, PWord, PTransform, PPosition, PLeft, PTop, PRight, PBottom, PList, PBorderSpacing, PCollapse,
+    PBackgroundImage, PBackgroundSize, PBackgroundPosition, PBackgroundRepeat,
     PCount
 };
 struct Winner {
@@ -592,6 +680,7 @@ struct Winner {
     uint64_t order{};
     int specificity{-1};
     bool important{};
+    uint32_t base_url{}; bool user_agent{};
 };
 inline int property(const char *name) {
     static constexpr const char *names[] = {"display",
@@ -631,20 +720,22 @@ inline int property(const char *name) {
                                             "vertical-align",
                                             "border-radius",
                                             "opacity",
-                                            "box-sizing"};
+                                            "box-sizing", "letter-spacing", "word-spacing", "text-transform", "position",
+                                            "left", "top", "right", "bottom", "list-style-type", "border-spacing", "border-collapse", "background-image", "background-size", "background-position", "background-repeat"};
     for (int i = 0; i < PCount; ++i)
         if (equal(name, names[i]))
             return i;
     return -1;
 }
-inline void offer(Winner *w, int p, Span value, int specificity, uint64_t order, bool important) {
-    if (p < 0 || p >= PCount)
-        return;
-    auto &old = w[p];
-    if (old.specificity < 0 || important > old.important ||
-        (important == old.important &&
-         (specificity > old.specificity || (specificity == old.specificity && order >= old.order))))
-        old = {value, order, specificity, important};
+inline void offer(Winner *w, int p, Span value, int specificity, uint64_t order, bool important,
+                  uint32_t base_url = 0, bool user_agent = false) {
+    if (p < 0 || p >= PCount) return;
+    auto &old=w[p];
+    unsigned rank=important?(user_agent?3U:2U):(user_agent?0U:1U);
+    unsigned old_rank=old.important?(old.user_agent?3U:2U):(old.user_agent?0U:1U);
+    if (old.specificity<0 || rank>old_rank || (rank==old_rank &&
+        (specificity>old.specificity || (specificity==old.specificity && order>=old.order))))
+        old={value,order,specificity,important,base_url,user_agent};
 }
 inline bool one_of(Span v, const char *list) {
     size_t p = 0;
@@ -666,7 +757,7 @@ inline bool one_of(Span v, const char *list) {
     return false;
 }
 inline bool valid_value(int p, Span v) {
-    if (value_is(v, "inherit") || value_is(v, "initial"))
+    if (value_is(v, "inherit") || value_is(v, "initial") || value_is(v, "unset"))
         return true;
     Length l;
     uint32_t c;
@@ -681,7 +772,7 @@ inline bool valid_value(int p, Span v) {
         return css_length(v, l) && l.unit != Unit::Auto;
     switch (p) {
     case PDisplay:
-        return one_of(v, "inline|block|none|table|table-row|table-cell");
+        return one_of(v, "inline|inline-block|block|none|table|table-row|table-cell");
     case PVisibility:
         return one_of(v, "visible|hidden|collapse");
     case PColor:
@@ -716,6 +807,25 @@ inline bool valid_value(int p, Span v) {
         return css_length(v, l) && l.unit != Unit::Auto;
     case POpacity:
         return number(v, n, used) && used == v.size;
+    case PBackgroundImage:
+        return value_is(v,"none") || (v.size>5 && equal_ci(v.data,4,"url(") && v.data[v.size-1]==')');
+    case PBackgroundSize: case PBackgroundPosition: {
+        Span parts[2]; unsigned count=words(v,parts,2);
+        if (!count || count>2) return false;
+        for (unsigned i=0;i<count;++i)
+            if (!css_length(parts[i],l,p==PBackgroundPosition) &&
+                !one_of(parts[i],p==PBackgroundSize ? "cover|contain" : "left|right|top|bottom|center")) return false;
+        return true;
+    }
+    case PBackgroundRepeat: return one_of(v,"repeat|repeat-x|repeat-y|no-repeat");
+    case PLetter: case PWord:
+        return value_is(v,"normal") || (css_length(v,l,true) && l.unit != Unit::Auto && l.unit != Unit::Percent);
+    case PTransform: return one_of(v,"none|uppercase|lowercase|capitalize");
+    case PPosition: return one_of(v,"static|relative|absolute");
+    case PLeft: case PTop: case PRight: case PBottom: return css_length(v,l,true);
+    case PList: return one_of(v,"disc|circle|square|decimal|lower-alpha|upper-alpha|lower-roman|upper-roman|none");
+    case PBorderSpacing: return css_length(v,l) && l.unit != Unit::Auto && l.unit != Unit::Percent;
+    case PCollapse: return one_of(v,"collapse|separate");
     case PBoxSizing:
         return one_of(v, "border-box|content-box");
     default:
@@ -729,7 +839,7 @@ inline void offer_declaration(Document &d, Winner *winners, const Declaration &d
     int prop = property(name);
     if (prop >= 0) {
         if (valid_value(prop, v))
-            offer(winners, prop, v, specificity, order, decl.important);
+            offer(winners, prop, v, specificity, order, decl.important, decl.base_url, decl.user_agent);
         return;
     }
     Span pieces[4];
@@ -749,23 +859,31 @@ inline void offer_declaration(Document &d, Winner *winners, const Declaration &d
                 return;
         unsigned map[4] = {0, n > 1 ? 1U : 0, n > 2 ? 2U : 0, n > 3 ? 3U : (n > 1 ? 1U : 0)};
         for (unsigned i = 0; i < 4; ++i)
-            offer(winners, base + i, pieces[map[i]], specificity, order, decl.important);
+            offer(winners, base + i, pieces[map[i]], specificity, order, decl.important, decl.base_url, decl.user_agent);
         return;
     }
     if (equal(name, "overflow") && valid_value(POverflowX, v)) {
-        offer(winners, POverflowX, v, specificity, order, decl.important);
-        offer(winners, POverflowY, v, specificity, order, decl.important);
+        offer(winners, POverflowX, v, specificity, order, decl.important, decl.base_url, decl.user_agent);
+        offer(winners, POverflowY, v, specificity, order, decl.important, decl.base_url, decl.user_agent);
     }
     if (equal(name, "background")) {
         uint32_t c;
         bool trans;
         if (color(v, c, trans))
-            offer(winners, PBackground, v, specificity, order, decl.important);
+            offer(winners, PBackground, v, specificity, order, decl.important, decl.base_url, decl.user_agent);
+        else {
+            Span parts[8]; unsigned count=words(v,parts,8);
+            if (count<=8) for (unsigned i=0;i<count;++i) {
+                if (color(parts[i],c,trans)) offer(winners,PBackground,parts[i],specificity,order,decl.important, decl.base_url, decl.user_agent);
+                else if (valid_value(PBackgroundImage,parts[i])) offer(winners,PBackgroundImage,parts[i],specificity,order,decl.important, decl.base_url, decl.user_agent);
+                else if (valid_value(PBackgroundRepeat,parts[i])) offer(winners,PBackgroundRepeat,parts[i],specificity,order,decl.important, decl.base_url, decl.user_agent);
+            }
+        }
     }
     if (equal(name, "border")) {
-        if (value_is(v, "inherit") || value_is(v, "initial")) {
+        if (value_is(v, "inherit") || value_is(v, "initial") || value_is(v, "unset")) {
             for (int p = PBorderT; p <= PBorderColor; ++p)
-                offer(winners, p, v, specificity, order, decl.important);
+                offer(winners, p, v, specificity, order, decl.important, decl.base_url, decl.user_agent);
             return;
         }
         // CSS shorthand resets omitted border components as well.
@@ -787,9 +905,9 @@ inline void offer_declaration(Document &d, Winner *winners, const Declaration &d
         }
         if (valid) {
             for (int p = PBorderT; p <= PBorderL; ++p)
-                offer(winners, p, width, specificity, order, decl.important);
-            offer(winners, PBorderStyle, style, specificity, order, decl.important);
-            offer(winners, PBorderColor, col, specificity, order, decl.important);
+                offer(winners, p, width, specificity, order, decl.important, decl.base_url, decl.user_agent);
+            offer(winners, PBorderStyle, style, specificity, order, decl.important, decl.base_url, decl.user_agent);
+            offer(winners, PBorderColor, col, specificity, order, decl.important, decl.base_url, decl.user_agent);
         }
     }
 }
@@ -799,12 +917,17 @@ inline Style defaults(const Document &d, uint16_t id, const Style &parent) {
     s.line = parent.line;
     s.family = parent.family;
     s.color = parent.color;
+    s.color_alpha = parent.color_alpha;
     s.bold = parent.bold;
     s.italic = parent.italic;
     s.underline = parent.underline;
     s.white = parent.white;
     s.align = parent.align;
     s.visible = parent.visible;
+    s.letter_spacing = parent.letter_spacing; s.word_spacing = parent.word_spacing;
+    s.transform = parent.transform; s.list_type = parent.list_type;
+    s.border_spacing = parent.border_spacing; s.border_collapse = parent.border_collapse;
+    if (d.tag(id,"ol")) s.list_type = ListType::Decimal;
     const char *t = d.str(d.nodes[id].tag);
     if (!id || d.tag(id, "html") || d.tag(id, "body") || block_tag(t) || d.tag(id, "form") ||
         d.tag(id, "hr") || d.tag(id, "thead") || d.tag(id, "tbody") || d.tag(id, "tfoot") || d.tag(id, "li"))
@@ -839,7 +962,7 @@ inline Style defaults(const Document &d, uint16_t id, const Style &parent) {
     if (d.tag(id, "u"))
         s.underline = true;
     if (d.tag(id, "a")) {
-        s.color = 0x155ab5;
+        s.color = d.user_agent.link;
         s.underline = true;
     }
     if (d.tag(id, "small")) {
@@ -870,8 +993,14 @@ inline Style defaults(const Document &d, uint16_t id, const Style &parent) {
             b = 1;
         for (auto &p : s.padding)
             p = {4000, Unit::Px};
-        if (d.tag(id, "input"))
+        if (d.tag(id, "input")) {
             s.width = {160000, Unit::Px};
+            const char *type=d.attr(id,"type"); size_t size=length(type,32);
+            if (equal_ci(type,size,"checkbox") || equal_ci(type,size,"radio")) {
+                s.width=s.height={13000,Unit::Px}; for (auto &p:s.padding) p={0,Unit::Px};
+                if(equal_ci(type,size,"radio")) s.radius_length={50000,Unit::Percent};
+            }
+        }
     }
     if (d.has_attr(id, "hidden") ||
         (d.tag(id, "input") && equal_ci(d.attr(id, "type"), length(d.attr(id, "type"), 64), "hidden")))
@@ -906,9 +1035,11 @@ inline void copy_property(Style &s, const Style &from, int p) {
         break;
     case PColor:
         s.color = from.color;
+        s.color_alpha = from.color_alpha;
         break;
     case PBackground:
         s.background = from.background;
+        s.background_alpha = from.background_alpha;
         s.has_background = from.has_background;
         break;
     case PWidth:
@@ -934,6 +1065,7 @@ inline void copy_property(Style &s, const Style &from, int p) {
         break;
     case PBorderColor:
         s.border_color = from.border_color;
+        s.border_alpha = from.border_alpha;
         break;
     case PFamily:
         s.family = from.family;
@@ -975,6 +1107,19 @@ inline void copy_property(Style &s, const Style &from, int p) {
     case POpacity:
         s.opacity = from.opacity;
         break;
+    case PBackgroundImage: s.background_base=from.background_base; s.background_image=from.background_image; break;
+    case PBackgroundSize: s.background_size=from.background_size; break;
+    case PBackgroundPosition: s.background_position=from.background_position; break;
+    case PBackgroundRepeat: s.background_repeat=from.background_repeat; break;
+    case PLetter: s.letter_spacing = from.letter_spacing; break;
+    case PWord: s.word_spacing = from.word_spacing; break;
+    case PTransform: s.transform = from.transform; break;
+    case PPosition: s.position = from.position; break;
+    case PLeft: s.left = from.left; break; case PTop: s.top = from.top; break;
+    case PRight: s.right = from.right; break; case PBottom: s.bottom = from.bottom; break;
+    case PList: s.list_type = from.list_type; break;
+    case PBorderSpacing: s.border_spacing = from.border_spacing; break;
+    case PCollapse: s.border_collapse = from.border_collapse; break;
     case PBoxSizing:
         s.border_box = from.border_box;
         break;
@@ -982,12 +1127,16 @@ inline void copy_property(Style &s, const Style &from, int p) {
         break;
     }
 }
+inline bool inherited_property(int p) {
+    return p == PColor || p == PVisibility || (p >= PFamily && p <= PWhite) ||
+           p == PLetter || p == PWord || p == PTransform || p == PList || p == PBorderSpacing || p == PCollapse;
+}
 inline void apply_property(Style &s, const Style &parent, int p, Span v, int root, uint32_t offset) {
-    if (value_is(v, "inherit")) {
+    if (value_is(v, "inherit") || (value_is(v,"unset") && inherited_property(p))) {
         copy_property(s, parent, p);
         return;
     }
-    if (value_is(v, "initial")) {
+    if (value_is(v, "initial") || value_is(v,"unset")) {
         Style initial;
         copy_property(s, initial, p);
         return;
@@ -1014,6 +1163,8 @@ inline void apply_property(Style &s, const Style &parent, int p, Span v, int roo
     case PDisplay:
         if (value_is(v, "block"))
             s.display = Display::Block;
+        else if (value_is(v, "inline-block"))
+            s.display = Display::InlineBlock;
         else if (value_is(v, "inline"))
             s.display = Display::Inline;
         else if (value_is(v, "none"))
@@ -1032,11 +1183,11 @@ inline void apply_property(Style &s, const Style &parent, int p, Span v, int roo
             s.visible = true;
         break;
     case PColor:
-        if (color(v, c, tr) && !tr)
+        if (color(v, c, tr, &s.color_alpha))
             s.color = c;
         break;
     case PBackground:
-        if (color(v, c, tr)) {
+        if (color(v, c, tr, &s.background_alpha)) {
             s.background = c;
             s.has_background = !tr;
         }
@@ -1065,7 +1216,7 @@ inline void apply_property(Style &s, const Style &parent, int p, Span v, int roo
     case PBorderColor:
         if (value_is(v, "currentcolor"))
             s.border_color = s.color;
-        else if (color(v, c, tr))
+        else if (color(v, c, tr, &s.border_alpha))
             s.border_color = c;
         break;
     case PFamily:
@@ -1173,6 +1324,35 @@ inline void apply_property(Style &s, const Style &parent, int p, Span v, int roo
             s.opacity = uint8_t(clamp64(int64_t(n) * 255 / 1000, 0, 255));
         break;
     }
+    case PBackgroundImage: s.background_image=value_is(v,"none") ? 0 : offset; break;
+    case PBackgroundSize: s.background_size=offset; break;
+    case PBackgroundPosition: s.background_position=offset; break;
+    case PBackgroundRepeat:
+        s.background_repeat=value_is(v,"repeat-x") ? 1 : value_is(v,"repeat-y") ? 2 : value_is(v,"no-repeat") ? 3 : 0; break;
+    case PLetter: case PWord: {
+        int spacing = 0;
+        if (css_length(v,l,true)) spacing = clamp64(resolve(l,0,s.font,root),-256,256);
+        if (p == PLetter) s.letter_spacing = spacing; else s.word_spacing = spacing;
+        break;
+    }
+    case PTransform:
+        s.transform = value_is(v,"uppercase") ? Transform::Upper : value_is(v,"lowercase") ? Transform::Lower :
+                      value_is(v,"capitalize") ? Transform::Capitalize : Transform::None; break;
+    case PPosition:
+        s.position = value_is(v,"relative") ? Position::Relative : value_is(v,"absolute") ? Position::Absolute : Position::Static; break;
+    case PLeft: case PTop: case PRight: case PBottom:
+        if (css_length(v,l,true)) {
+            Length* offsets[] = {&s.left,&s.top,&s.right,&s.bottom}; *offsets[p-PLeft] = l;
+        } break;
+    case PList: {
+        const char* names[] = {"disc","circle","square","decimal","lower-alpha","upper-alpha","lower-roman","upper-roman","none"};
+        for (unsigned i=0;i<9;++i) if (value_is(v,names[i])) s.list_type = ListType(i);
+        break;
+    }
+    case PBorderSpacing:
+        if (css_length(v,l)) s.border_spacing = clamp64(resolve(l,0,s.font,root),0,128);
+        break;
+    case PCollapse: s.border_collapse = value_is(v,"collapse"); break;
     case PBoxSizing:
         if (value_is(v, "border-box"))
             s.border_box = true;
@@ -1183,17 +1363,18 @@ inline void apply_property(Style &s, const Style &parent, int p, Span v, int roo
         break;
     }
 }
-inline void compute_styles(Document &d, uint32_t text_color = 0x202020) {
+inline void compute_styles(Document &d) {
     uint32_t budget = 4000000;
     Style initial;
-    initial.color = text_color;
+    initial.color = d.user_agent.text;
     d.root_font = 16;
     for (uint16_t id = 0; id < d.node_count; ++id) {
         const Node &node = d.nodes[id];
         const Style &parent = id ? d.styles[node.parent] : initial;
         if (node.is_text) {
-            d.styles[id] = parent;
+            d.styles[id] = defaults(d,id,parent);
             d.styles[id].display = Display::Inline;
+            d.styles[id].paint_opacity = parent.paint_opacity;
             continue;
         }
         Style s = defaults(d, id, parent);
@@ -1215,14 +1396,16 @@ inline void compute_styles(Document &d, uint32_t text_color = 0x202020) {
                 Span v = winners[p].value;
                 if (p == PFontSize || p == PFamily || p == PWeight || p == PItalic)
                     apply_property(s, parent, p, v, d.root_font,
-                                   (p == PFamily ? uint32_t(v.data - d.arena) : 0));
+                                   ((p == PFamily || p == PBackgroundImage || p == PBackgroundSize || p == PBackgroundPosition) ? uint32_t(v.data - d.arena) : 0));
             }
         for (int p = 0; p < PCount; ++p)
             if (winners[p].specificity >= 0 && p != PFontSize && p != PFamily && p != PWeight &&
                 p != PItalic) {
                 Span v = winners[p].value;
-                apply_property(s, parent, p, v, d.root_font, (p == PFamily ? uint32_t(v.data - d.arena) : 0));
+                apply_property(s, parent, p, v, d.root_font, ((p == PFamily || p == PBackgroundImage || p == PBackgroundSize || p == PBackgroundPosition) ? uint32_t(v.data - d.arena) : 0));
             }
+        if (winners[PBackgroundImage].specificity>=0 && !value_is(winners[PBackgroundImage].value,"inherit"))
+            s.background_base=winners[PBackgroundImage].base_url;
         if (d.tag(id, "html"))
             d.root_font = s.font;
         if (!s.border_style)
@@ -1237,6 +1420,10 @@ inline void compute_styles(Document &d, uint32_t text_color = 0x202020) {
     d.style_revision = d.revision;
 }
 inline void collect_styles(Document &d) {
+    if (!d.user_agent_loaded) {
+        parse_css(d,UserAgentStyleSheet,sizeof(UserAgentStyleSheet)-1,0,0,true);
+        d.user_agent_loaded=true;
+    }
     for (uint16_t i = 1; i < d.node_count; ++i) {
         if (d.tag(i, "style"))
             parse_css(d, d.str(d.nodes[i].text), d.nodes[i].text_length, uint32_t(i) * 4096);

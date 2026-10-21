@@ -486,6 +486,9 @@ extern "C" {
 bool bws_siec_dns(const char* domena,
                   uint8_t* wyjsciowy_ip);
 
+// Binary-safe BWS29/30 mode; returns exact response bytes, zero on failure.
+uint32_t bws_siec_pobierz_bajty(bool https, uint8_t* ip, const char* domain, const char* path, char* buffer, uint32_t capacity);
+
 bool bws_siec_pobierz_http(uint8_t* cel_ip,
                            const char* domena,
                            const char* sciezka,

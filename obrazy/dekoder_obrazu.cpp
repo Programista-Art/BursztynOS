@@ -300,8 +300,8 @@ BladObrazu sprawdz_png(const uint8_t* p, size_t n, uint32_t* ow, uint32_t* oh) {
     return BladObrazu::OK;
 }
 
-BladObrazu dekoduj_obraz(const uint8_t* dane, size_t n, DekodowanyObraz* out,
-                         AlokujObraz alokuj, ZwolnijObraz zwolnij) {
+static BladObrazu dekoduj_obraz_impl(const uint8_t* dane, size_t n, DekodowanyObraz* out,
+                         AlokujObraz alokuj, ZwolnijObraz zwolnij, bool zachowaj_alfa) {
     if (!out || !alokuj || !zwolnij) return BladObrazu::Argument;
     *out = {};
     if (!dane || !n || n > OBRAZ_MAX_PLIK) return BladObrazu::ZaDuzy;
@@ -349,7 +349,9 @@ BladObrazu dekoduj_obraz(const uint8_t* dane, size_t n, DekodowanyObraz* out,
             uint8_t g = rgba[4 * i + 1];
             uint8_t b = rgba[4 * i + 2];
             uint8_t a = rgba[4 * i + 3];
-            if (a == 255) {
+            if (zachowaj_alfa) {
+                rgba[4*i]=b; rgba[4*i+1]=g; rgba[4*i+2]=r; rgba[4*i+3]=a;
+            } else if (a == 255) {
                 rgba[4 * i] = b;
                 rgba[4 * i + 1] = g;
                 rgba[4 * i + 2] = r;
@@ -389,6 +391,13 @@ BladObrazu dekoduj_obraz(const uint8_t* dane, size_t n, DekodowanyObraz* out,
         return BladObrazu::OK;
     }
     return f == FormatObrazu::Nieznany ? BladObrazu::Format : BladObrazu::Nieobslugiwany;
+}
+
+BladObrazu dekoduj_obraz(const uint8_t* dane,size_t n,DekodowanyObraz* out,AlokujObraz alokuj,ZwolnijObraz zwolnij) {
+    return dekoduj_obraz_impl(dane,n,out,alokuj,zwolnij,false);
+}
+BladObrazu dekoduj_obraz_z_alfa(const uint8_t* dane,size_t n,DekodowanyObraz* out,AlokujObraz alokuj,ZwolnijObraz zwolnij) {
+    return dekoduj_obraz_impl(dane,n,out,alokuj,zwolnij,true);
 }
 
 BladObrazu dekoduj_jpeg(const uint8_t* dane, size_t n, DekodowanyObraz* out,

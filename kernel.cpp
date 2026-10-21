@@ -166,6 +166,8 @@ extern "C" uint8_t _binary_menedzer_okien_bin_end[];
 
 extern "C" uint8_t _binary_przegladarka_bin_start[];
 extern "C" uint8_t _binary_przegladarka_bin_end[];
+extern "C" uint8_t _binary_husarz_worker_bin_start[];
+extern "C" uint8_t _binary_husarz_worker_bin_end[];
 
 extern "C" uint8_t _binary_test_bin_start[];
 extern "C" uint8_t _binary_test_bin_end[];
@@ -1029,7 +1031,8 @@ void instaluj_wbudowane_programy() {
         "uprawnienia = [\n"
         "    \"okna\",\n"
         "    \"siec\",\n"
-        "    \"pliki_czytaj\"\n"
+        "    \"pliki_czytaj\",\n"
+        "    \"uruchom_program\"\n"
         "]\n";
 
     static const char MANIFEST_NOTATNIKA[] =
@@ -1509,6 +1512,17 @@ void instaluj_wbudowane_programy() {
     generuj_bmp_strumieniowo("/uzytkownicy/Pulpit/obraz_8k_32b.bmp", 7680, 4320, 32);
 #endif
 
+
+    static const char MANIFEST_HUSARZ_WORKER[] =
+        "nazwa = \"Husarz resources\"\n"
+        "autor = \"Programista Art\"\n"
+        "wersja = \"0.1\"\n"
+        "poziom_zaufania = 4\n"
+        "plik_startowy = \"husarz-worker.bur\"\n"
+        "uprawnienia = [\"okna\", \"siec\"]\n";
+    if (!instaluj_paczke("/programy/husarz-worker.cebula/opis.aplikacji",MANIFEST_HUSARZ_WORKER,
+            "/programy/husarz-worker.cebula/husarz-worker.bur",_binary_husarz_worker_bin_start,_binary_husarz_worker_bin_end))
+        wypisz_log("[BSP-BLAD] Husarz resource worker install failed.");
 
     if (!instaluj_paczke(
             "/programy/przegladarka.cebula/opis.aplikacji",

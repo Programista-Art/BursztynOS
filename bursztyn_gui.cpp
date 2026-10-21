@@ -665,6 +665,14 @@ bool bws_siec_dns(const char* domena,
         0, 0) == 1ULL;
 }
 
+uint32_t bws_siec_pobierz_bajty(bool https, uint8_t* ip, const char* domain, const char* path, char* buffer, uint32_t capacity) {
+    if (!ip || !domain || !path || !buffer || capacity<2 || capacity>256*1024 ||
+        reinterpret_cast<uint64_t>(buffer)>UINT32_MAX) return 0;
+    uint64_t packed=(reinterpret_cast<uint64_t>(buffer)<<32)|uint64_t(capacity)|0x80000000ULL;
+    uint64_t result=bws_wywolaj(https?30:29,reinterpret_cast<uint64_t>(ip),reinterpret_cast<uint64_t>(domain),reinterpret_cast<uint64_t>(path),packed);
+    return result>1 && result<=capacity ? uint32_t(result-1) : 0;
+}
+
 bool bws_siec_pobierz_http(uint8_t* cel_ip,
                            const char* domena,
                            const char* sciezka,

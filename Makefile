@@ -345,6 +345,7 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	hda_transport.o \
 	klawiatura.o \
 	przegladarka_blob.o \
+	husarz_worker_blob.o \
 	mysz.o \
 	zegar-rtc.o \
 	pmm.o \
@@ -545,14 +546,23 @@ shell_blob.o: shell_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
 # 13. PRZEGLADARKA HUSSAR .bur
 # ============================================================================
 
-przegladarka_tmp.o: programy/przegladarka.cpp programy/http_kody.h bursztyn_gui.h $(wildcard bursztyn_ui/*.h) $(wildcard programy/husarz/*.h)
-	$(CXX) $(RING3_FLAGS) -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c $< -o $@
+HUSARZ_DEBUG ?= 0
+przegladarka_tmp.o: programy/przegladarka.cpp Makefile programy/http_kody.h bursztyn_gui.h $(wildcard bursztyn_ui/*.h) $(wildcard programy/husarz/*.h) $(wildcard programy/husarz/*.inc)
+	$(CXX) $(RING3_FLAGS) -fcheck-new -DHUSARZ_DEBUG_RESOURCES=$(HUSARZ_DEBUG) -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c $< -o $@
 
-przegladarka_blob.o: przegladarka_tmp.o bursztyn_gui.o $(PRZEGLADARKA_LINKER)
+przegladarka_blob.o: przegladarka_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o $(PRZEGLADARKA_LINKER)
 	$(LD) --gc-sections -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) \
-		przegladarka_tmp.o bursztyn_gui.o -o przegladarka.elf
+		przegladarka_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o -o przegladarka.elf
 	$(OBJCOPY) -O binary przegladarka.elf przegladarka.bin
 	$(LD) -r -b binary przegladarka.bin -o przegladarka_blob.o
+
+husarz_worker_tmp.o: programy/przegladarka.cpp Makefile $(wildcard programy/husarz/*.h) $(wildcard programy/husarz/*.inc)
+	$(CXX) $(RING3_FLAGS) -fcheck-new -DHUSARZ_DEBUG_RESOURCES=$(HUSARZ_DEBUG) -DHUSARZ_WORKER_ONLY=1 -Wno-unused-function -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c $< -o $@
+
+husarz_worker_blob.o: husarz_worker_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o $(PRZEGLADARKA_LINKER)
+	$(LD) --gc-sections -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) husarz_worker_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o -o husarz_worker.elf
+	$(OBJCOPY) -O binary husarz_worker.elf husarz_worker.bin
+	$(LD) -r -b binary husarz_worker.bin -o husarz_worker_blob.o
 
 # ============================================================================
 # 14. NOTATNIK .bur
@@ -926,7 +936,7 @@ test-notatnik-gui: notatnik_blob.o
 test-kalkulator-gui: kalkulator_blob.o
 	$(PYTHON) narzedzia/test_kalkulator_gui.py
 
-test-przegladarka-gui: przegladarka_blob.o
+test-przegladarka-gui: przegladarka_blob.o husarz_worker_blob.o
 	$(PYTHON) narzedzia/test_przegladarka_gui.py
 
 test-motywy: test-motywy-unit test-motywy-gui test-notatnik-gui test-kalkulator-gui
@@ -1979,7 +1989,7 @@ test-husarz-engine-host:
 
 test-husarz-runtime-host:
 	@mkdir -p .husarz-test
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_husarz_runtime.cpp -Wl,--gc-sections -o .husarz-test/runtime
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_husarz_runtime.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -Wl,--gc-sections -o .husarz-test/runtime
 	ASAN_OPTIONS=detect_leaks=1 .husarz-test/runtime
 
 .PHONY: test-husarz-qemu
@@ -2015,3 +2025,9 @@ test-user-page-fault-qemu-build: all
 .PHONY: test-husarz-stack
 test-husarz-stack: przegladarka_tmp.o
 	$(PYTHON) narzedzia/test_husarz_stack.py
+
+.PHONY: test-husarz-fidelity-host
+test-husarz-fidelity-host:
+	@mkdir -p .husarz-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -I. narzedzia/test_husarz_fidelity.cpp -o .husarz-test/fidelity
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .husarz-test/fidelity

@@ -36,7 +36,7 @@ static uint16_t find(Document &d, const char *id) { return ScriptDom(d).get_elem
 static uint64_t checksum(Document &d, int width = 320, int height = 240) {
     std::vector<uint32_t> pixels(size_t(width) * height, 0);
     Surface surface{pixels.data(), width, height};
-    paint(d, surface, 0, metrics, glyphs, 0xffffff);
+    paint(d, surface, 0, metrics, glyphs);
     CHECK(!surface.truncated);
     uint64_t hash = 1469598103934665603ULL;
     for (auto p : pixels) {
@@ -128,7 +128,7 @@ int main() {
     load(d,
          "<style>p,span{color:rgb(100%,0%,0%)} #a{color:initial} p {padding:2px "
          "/*comment*/;color:red;garbage; {nested:bad} height:20px}</style><p id=a>A</p><span id=b>B</span>");
-    CHECK(d.styles[find(d, "a")].color == 0x202020);
+    CHECK(d.styles[find(d, "a")].color == 0x000000);
     CHECK(d.styles[find(d, "b")].color == 0xff0000);
     load(d,
          "<style>body{margin:0}</style><div id=a style='padding:8px;border:2px solid "
@@ -157,8 +157,8 @@ int main() {
     a = find(d, "a");
     b = find(d, "b");
     CHECK(d.boxes[a].y == d.boxes[b].y);
-    CHECK(d.boxes[b].x == d.boxes[a].x + d.boxes[a].width);
-    CHECK(d.boxes[a].width == 150);
+    CHECK(d.boxes[b].x == d.boxes[a].x + d.boxes[a].width + 2);
+    CHECK(d.boxes[a].width > d.boxes[b].width);
     invariant(d);
     load(d, "<p><a id=a href='/next'>A useful link</a></p><img id=img alt='Opis "
             "obrazu'><form><label>Name<input value=Jan></label><button>OK</button><textarea>Żółć\nnew "
@@ -300,4 +300,5 @@ int main() {
     }
     std::printf("Husarz engine: %u checks PASS; malformed input, DOM/CSS/layout/paint/JS boundaries\n",
                 checks);
+    return 0;
 }

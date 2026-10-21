@@ -1,0 +1,5 @@
+body { margin:8px; background:#fff; color:#222; font-family:system-ui,sans-serif; }
+a {color:#1255dd} .card {width:65%;margin:12px auto;padding:10px;border:2px solid #4285aa;background:#e8f2ff}
+.banner {height:42px;background-image:url(sample.png);background-size:24px 16px;background-repeat:repeat-x;background-position:left top}
+img {margin:4px} table {width:90%;border-collapse:collapse} td,th {padding:5px;border:1px solid #777} th {background:#d0e8ff}
+input,textarea,select,button {background:#fff;color:#112233;border:1px solid #557799;padding:4px}

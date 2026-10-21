@@ -1,5 +1,6 @@
 #pragma once
 #include "css.h"
+#include "forms.h"
 namespace Husarz {
 struct Flow {
     uint16_t node{};
@@ -8,8 +9,17 @@ struct Flow {
     bool pending_space{};
 };
 inline int advance(const Metrics &m, uint32_t cp, const Style &s) {
-    return clamp64(m.advance ? m.advance(m.user, cp, s.font, s.bold, s.italic) : (s.font * 9 + 8) / 16, 1,
-                   1024);
+    int base = m.advance ? m.advance(m.user, cp, s.font, s.bold, s.italic) : (s.font * 9 + 8) / 16;
+    return clamp64(int64_t(base) + s.letter_spacing + (cp == ' ' ? s.word_spacing : 0), 0, 2048);
+}
+inline uint32_t transformed(uint32_t cp, Transform t, bool word_start) {
+    bool upper = t == Transform::Upper || (t == Transform::Capitalize && word_start);
+    if (upper && cp >= 'a' && cp <= 'z') return cp - 32;
+    if (t == Transform::Lower && cp >= 'A' && cp <= 'Z') return cp + 32;
+    static constexpr uint32_t lo[] = {0x105,0x107,0x119,0x142,0x144,0xf3,0x15b,0x17a,0x17c};
+    static constexpr uint32_t hi[] = {0x104,0x106,0x118,0x141,0x143,0xd3,0x15a,0x179,0x17b};
+    for (unsigned i=0;i<9;++i) { if (upper && cp == lo[i]) return hi[i]; if (t == Transform::Lower && cp == hi[i]) return lo[i]; }
+    return cp;
 }
 inline int font_height(const Metrics &m, const Style &s) {
     return clamp64(m.height ? m.height(m.user, s.font) : s.font, 1, MaxFont * 2);
@@ -25,9 +35,10 @@ inline void finish_line(Document &d, Flow &f, bool force = false) {
         uint16_t moved = 0;
         for (uint32_t i = uint32_t(f.line_first); i < d.fragment_count; ++i) {
             auto &g = d.fragments[i];
+            if (g.flow_node != f.node) continue;
             const auto &s = d.styles[g.node];
             bool replaced = d.tag(g.node, "input") || d.tag(g.node, "textarea") || d.tag(g.node, "select") ||
-                            d.tag(g.node, "img");
+                            d.tag(g.node, "img") || d.tag(g.node,"button");
             int box_height = replaced && d.boxes[g.node].height ? d.boxes[g.node].height : g.height;
             int dy = s.vertical == Vertical::Top      ? 0
                      : s.vertical == Vertical::Middle ? (h - box_height) / 2
@@ -59,7 +70,7 @@ inline void emit(Document &d, Flow &f, uint16_t id, uint32_t off, uint32_t len, 
         return;
     }
     d.fragments[d.fragment_count++] = {
-        id, off, len, clamp64(int64_t(f.x) + f.pen, -MaxDimension), f.y, width, font_height(m, s), {}};
+        id, off, len, clamp64(int64_t(f.x) + f.pen, -MaxDimension), f.y, width, font_height(m, s), {}, f.node};
     f.pen = clamp64(int64_t(f.pen) + width);
     int h = s.line;
     if (h < font_height(m, s))
@@ -103,7 +114,7 @@ inline void layout_text(Document &d, Flow &f, uint16_t id, uint32_t offset, uint
         while (p < size && !space(text[p])) {
             size_t used;
             uint32_t cp = utf8(text + p, size - p, used);
-            width = clamp64(int64_t(width) + advance(m, cp, s));
+            width = clamp64(int64_t(width) + advance(m, transformed(cp,s.transform,p == start), s));
             p += used;
         }
         int gap = f.pending_space ? advance(m, ' ', s) : 0;
@@ -122,7 +133,7 @@ inline void layout_text(Document &d, Flow &f, uint16_t id, uint32_t offset, uint
         for (size_t k = start; k < p;) {
             size_t used;
             uint32_t cp = utf8(text + k, p - k, used);
-            int w = advance(m, cp, s);
+            int w = advance(m, transformed(cp,s.transform,k == start), s);
             if (chunk_width && int64_t(f.pen) + chunk_width + w > f.width) {
                 emit(d, f, id, offset + uint32_t(chunk), uint32_t(k - chunk), chunk_width, m);
                 finish_line(d, f);
@@ -136,25 +147,25 @@ inline void layout_text(Document &d, Flow &f, uint16_t id, uint32_t offset, uint
             emit(d, f, id, offset + uint32_t(chunk), uint32_t(p - chunk), chunk_width, m);
     }
 }
-inline unsigned table_columns(const Document &d, uint16_t id) {
-    for (uint16_t i = id; i > 0; i = d.nodes[i].parent)
-        if (d.styles[i].display == Display::Table) {
-            unsigned max = 1;
-            uint16_t end = uint16_t(i + 1);
-            while (end < d.node_count && d.nodes[end].depth > d.nodes[i].depth) {
-                if (d.styles[end].display == Display::Row) {
-                    unsigned n = 0;
-                    for (uint16_t c = d.nodes[end].first; c; c = d.nodes[c].next)
-                        if (d.styles[c].display == Display::Cell)
-                            ++n;
-                    if (n > max)
-                        max = n;
-                }
-                ++end;
-            }
-            return max > 32 ? 32 : max;
+inline unsigned positive_attribute(const Document &d, uint16_t id, const char *name, unsigned fallback, unsigned cap) {
+    const char *s = d.attr(id,name); if (!*s) return fallback;
+    unsigned value = 0;
+    for (unsigned i = 0; s[i]; ++i) {
+        if (i == 8 || s[i] < '0' || s[i] > '9') return fallback;
+        value = value * 10 + unsigned(s[i]-'0'); if (value > cap) return cap;
+    }
+    return value ? value : fallback;
+}
+inline const TablePlan *table_plan(const Document &d, uint16_t id) {
+    for (uint16_t p = id; p; p = d.nodes[p].parent)
+        if (d.styles[p].display == Display::Table) {
+            for (unsigned i=0;i<d.table_count;++i) if (d.tables[i].node == p) return &d.tables[i];
+            break;
         }
-    return 1;
+    return nullptr;
+}
+inline unsigned table_columns(const Document &d, uint16_t id) {
+    auto *plan = table_plan(d,id); return plan ? plan->columns : 1;
 }
 inline void prepare_controls(Document &d) {
     for (uint16_t id = 1; id < d.node_count; ++id) {
@@ -182,7 +193,9 @@ inline void prepare_controls(Document &d) {
                 marker[1] = char(0x80);
                 marker[2] = char(0xa2);
             }
-            n.text = d.store(marker, length(marker, 16));
+            char reserved[40]{};
+            for (unsigned i=0;i<16;++i) reserved[i]=marker[i];
+            n.text = d.store(reserved,39);
             n.text_length = uint32_t(length(marker, 16));
         } else if (d.tag(id, "input") || d.tag(id, "img")) {
             const char *text = d.attr(id, d.tag(id, "img") ? "alt" : "value");
@@ -209,12 +222,90 @@ inline void prepare_controls(Document &d) {
                 }
         }
     }
+    initialize_controls(d);
 }
-inline void reflow(Document &d, int width, const Metrics &metrics, uint32_t text_color = 0x202020) {
+inline int intrinsic_width(const Document &d, uint16_t id, const Metrics &metrics) {
+    int sum = 0;
+    for (uint16_t c = id; c < d.node_count && (c == id || d.nodes[c].depth > d.nodes[id].depth); ++c) {
+        const Node &n = d.nodes[c];
+        if (!n.is_text) continue;
+        for (size_t p = 0; p < n.text_length;) {
+            size_t used; uint32_t cp = utf8(d.str(n.text)+p,n.text_length-p,used);
+            sum = clamp64(int64_t(sum)+advance(metrics,cp,d.styles[c]),0,8192); p += used;
+        }
+    }
+    return sum;
+}
+inline void list_markers(Document &d) {
+    for (uint16_t id=1;id<d.node_count;++id) if (d.tag(id,"li") && d.nodes[id].text) {
+        auto &node=d.nodes[id]; char *out=d.arena+node.text; unsigned n=0;
+        auto kind=d.styles[id].list_type;
+        unsigned value=positive_attribute(d,node.parent,"start",1,3999);
+        for (uint16_t p=node.previous;p;p=d.nodes[p].previous) if (d.tag(p,"li")) ++value;
+        if (kind==ListType::Disc || kind==ListType::Circle || kind==ListType::Square) {
+            uint32_t cp=kind==ListType::Disc?0x2022:kind==ListType::Circle?0x25e6:0x25aa;
+            n=encode(cp,out);
+        } else if (kind==ListType::LowerAlpha || kind==ListType::UpperAlpha) {
+            char reversed[8]; unsigned k=0;
+            do { --value; reversed[k++]=char((kind==ListType::LowerAlpha?'a':'A')+value%26); value/=26; } while (value && k<8);
+            while (k) out[n++]=reversed[--k];
+            out[n++]='.';
+        } else if ((kind==ListType::LowerRoman || kind==ListType::UpperRoman) && value<=3999) {
+            const char *digits[]={"M","CM","D","CD","C","XC","L","XL","X","IX","V","IV","I"};
+            unsigned weights[]={1000,900,500,400,100,90,50,40,10,9,5,4,1};
+            for (unsigned i=0;i<13;++i) while (value>=weights[i] && n<35) {
+                value-=weights[i]; for (unsigned j=0;digits[i][j];++j) out[n++]=kind==ListType::LowerRoman?lower(digits[i][j]):digits[i][j];
+            }
+            out[n++]='.';
+        } else if (kind!=ListType::None) {
+            char reversed[12]; unsigned k=0; do { reversed[k++]=char('0'+value%10); value/=10; } while (value && k<12);
+            while (k) out[n++]=reversed[--k];
+            out[n++]='.';
+        }
+        out[n]=0; node.text_length=n;
+    }
+}
+inline void plan_tables(Document &d, const Metrics &metrics) {
+    d.table_count = 0;
+    for (uint16_t id=1;id<d.node_count;++id) if (d.styles[id].display == Display::Table) {
+        if (d.table_count == 32) { d.truncated = true; break; }
+        auto &plan = d.tables[d.table_count++]; plan = {}; plan.node = id;
+        unsigned rows = 0;
+        for (uint16_t row=id+1;row<d.node_count && d.nodes[row].depth>d.nodes[id].depth;++row) {
+            if (d.styles[row].display != Display::Row) continue;
+            // Nested tables have independent plans.
+            uint16_t table = d.nodes[row].parent;
+            while (table && d.styles[table].display != Display::Table) table = d.nodes[table].parent;
+            if (table != id) continue;
+            if (++rows > 256) { d.truncated = true; break; }
+            unsigned col = 0;
+            for (uint16_t cell=d.nodes[row].first;cell && col<32;cell=d.nodes[cell].next) {
+                if (d.styles[cell].display != Display::Cell) continue;
+                unsigned span = positive_attribute(d,cell,"colspan",1,32-col);
+                const auto &s = d.styles[cell];
+                int width = intrinsic_width(d,cell,metrics)+8;
+                if (s.width.unit == Unit::Px) width = resolve(s.width,0,s.font,d.root_font);
+                width = clamp64(width,8,8192)/int(span);
+                for (unsigned c=col;c<col+span;++c) if (width>plan.weights[c]) plan.weights[c]=width;
+                col += span;
+            }
+            if (col>plan.columns) plan.columns=uint16_t(col);
+        }
+        if (!plan.columns) plan.columns=1;
+        for (unsigned col=0;col<plan.columns;++col) {
+            if (!plan.weights[col]) plan.weights[col]=8;
+            plan.total += plan.weights[col];
+        }
+    }
+}
+inline void reflow(Document &d, int width, const Metrics &metrics) {
     width = clamp64(width, 1, 8192);
     if (d.styles_dirty)
-        compute_styles(d, text_color);
+        compute_styles(d);
+    list_markers(d);
+    plan_tables(d,metrics);
     d.fragment_count = 0;
+    d.offset_x[0] = d.offset_y[0] = 0;
     d.layout_width = width;
     ++d.reflow_count;
     Flow flow[MaxDepth + 2]{};
@@ -241,9 +332,10 @@ inline void reflow(Document &d, int width, const Metrics &metrics, uint32_t text
         box = {};
         skip[depth] = skip[parent_depth] || s.display == Display::None;
         bool replaced = !n.is_text && (d.tag(id, "input") || d.tag(id, "textarea") || d.tag(id, "select") ||
-                                       d.tag(id, "img"));
+                                       d.tag(id, "img") || d.tag(id,"button"));
         bool is_block = s.display == Display::Block || s.display == Display::Table ||
-                        s.display == Display::Row || s.display == Display::Cell;
+                        s.display == Display::Row || s.display == Display::Cell || s.display == Display::InlineBlock || s.position == Position::Absolute;
+        if (replaced) is_block=false;
         block[depth] = is_block;
         active[depth] = uint16_t(fidx);
         outer_margin[depth] = 0;
@@ -253,7 +345,8 @@ inline void reflow(Document &d, int width, const Metrics &metrics, uint32_t text
             else if (d.tag(id, "br"))
                 finish_line(d, parent, true);
             else if (is_block) {
-                finish_line(d, parent);
+                bool inline_box = s.display == Display::InlineBlock && s.position != Position::Absolute;
+                if (!inline_box && s.position != Position::Absolute) finish_line(d, parent);
                 int mt = resolve(s.margin[0], parent.width, s.font, d.root_font),
                     mb = resolve(s.margin[2], parent.width, s.font, d.root_font);
                 int ml = resolve(s.margin[3], parent.width, s.font, d.root_font),
@@ -263,12 +356,33 @@ inline void reflow(Document &d, int width, const Metrics &metrics, uint32_t text
                     pt = resolve(s.padding[0], parent.width, s.font, d.root_font);
                 int extra = clamp64(int64_t(pl) + pr + s.border[1] + s.border[3]);
                 int available = parent.width;
+                if (inline_box && s.width.unit == Unit::Auto)
+                    available = clamp64(int64_t(intrinsic_width(d,id,metrics))+extra,1,parent.width);
+                int inline_outer=resolve(s.width,parent.width,s.font,d.root_font,available);
+                if (s.width.unit!=Unit::Auto && !s.border_box) inline_outer=clamp64(int64_t(inline_outer)+extra);
+                if (inline_box && parent.pen && int64_t(parent.pen)+inline_outer > parent.width) finish_line(d,parent);
+                if (inline_box && parent.pending_space) { parent.pen=clamp64(int64_t(parent.pen)+advance(metrics,' ',s)); parent.pending_space=false; }
                 bool cell = s.display == Display::Cell && d.styles[parent.node].display == Display::Row;
-                if (cell)
-                    available = parent.width / (parent.columns ? parent.columns : 1);
+                int cell_offset = 0;
+                if (cell) {
+                    const auto *plan = table_plan(d,id);
+                    unsigned col = unsigned(parent.column), span = positive_attribute(d,id,"colspan",1,col<32 ? 32-col : 1);
+                    int before = 0, weight = 0;
+                    if (plan) {
+                        for (unsigned c=0;c<plan->columns;++c) {
+                            if (c<col) before += plan->weights[c];
+                            else if (c<col+span) weight += plan->weights[c];
+                        }
+                        cell_offset = int(int64_t(parent.width)*before/plan->total);
+                        available = int(int64_t(parent.width)*(before+weight)/plan->total)-cell_offset;
+                    } else { cell_offset = parent.column*(parent.width/parent.columns); available = parent.width/parent.columns; }
+                    int gap = d.styles[parent.node].border_collapse ? 0 : d.styles[parent.node].border_spacing;
+                    available = clamp64(int64_t(available)-gap);
+                }
                 int content = resolve(s.width, available, s.font, d.root_font,
                                       clamp64(int64_t(available) - ml - mr - extra));
-                if (s.width.unit != Unit::Auto && s.border_box)
+                if (cell) content = clamp64(int64_t(available)-extra);
+                if (!cell && s.width.unit != Unit::Auto && s.border_box)
                     content = clamp64(int64_t(content) - extra);
                 int min = resolve(s.min_width, available, s.font, d.root_font),
                     max = resolve(s.max_width, available, s.font, d.root_font, MaxDimension);
@@ -289,10 +403,13 @@ inline void reflow(Document &d, int width, const Metrics &metrics, uint32_t text
                         ml += s.margin[1].unit == Unit::Auto ? remainder / 2 : remainder;
                 }
                 int x =
-                    clamp64(int64_t(parent.x) +
-                                (cell ? int64_t(parent.column) * (parent.width / parent.columns) : 0) + ml,
+                    clamp64(int64_t(parent.x) + (inline_box ? parent.pen : 0) +
+                                (cell ? cell_offset : 0) + ml,
                             -MaxDimension);
-                int collapse = mt > parent.previous_margin ? mt - parent.previous_margin : 0;
+                int previous=parent.previous_margin;
+                int positive=(mt>0?mt:0)>(previous>0?previous:0)?(mt>0?mt:0):(previous>0?previous:0);
+                int negative=(mt<0?mt:0)<(previous<0?previous:0)?(mt<0?mt:0):(previous<0?previous:0);
+                int collapse=positive+negative-previous;
                 int y = clamp64(int64_t(parent.y) + (cell ? mt : collapse), -MaxDimension);
                 box = {x,
                        y,
@@ -302,6 +419,11 @@ inline void reflow(Document &d, int width, const Metrics &metrics, uint32_t text
                        clamp64(int64_t(y) + pt + s.border[0]),
                        content,
                        0};
+                if (s.height.unit!=Unit::Auto && s.height.unit!=Unit::Percent) {
+                    box.content_height=clamp64(resolve(s.height,0,s.font,d.root_font));
+                    if (s.border_box) box.content_height=clamp64(int64_t(box.content_height)-pt-s.border[0]-s.border[2]-resolve(s.padding[2],parent.width,s.font,d.root_font));
+                } else if (s.height.unit==Unit::Percent && d.boxes[parent.node].content_height>0)
+                    box.content_height=clamp64(resolve(s.height,d.boxes[parent.node].content_height,s.font,d.root_font));
                 active[depth] = uint16_t(depth);
                 flow[depth] = {id,
                                box.content_x,
@@ -323,6 +445,7 @@ inline void reflow(Document &d, int width, const Metrics &metrics, uint32_t text
                     flow[depth].line_first = int(d.fragment_count);
                 }
             } else if (replaced) {
+                if (s.display==Display::Block && s.position!=Position::Absolute) finish_line(d,parent);
                 int pl = resolve(s.padding[3], parent.width, s.font, d.root_font),
                     pr = resolve(s.padding[1], parent.width, s.font, d.root_font),
                     pt = resolve(s.padding[0], parent.width, s.font, d.root_font),
@@ -334,7 +457,18 @@ inline void reflow(Document &d, int width, const Metrics &metrics, uint32_t text
                     intrinsic = clamp64(int64_t(intrinsic) + advance(metrics, cp, s));
                     p += used;
                 }
-                int cw = resolve(s.width, parent.width, s.font, d.root_font, intrinsic),
+                const auto *image = d.image(id);
+                Length image_width=s.width, image_height=s.height;
+                if (d.tag(id,"img")) {
+                    if (image_width.unit==Unit::Auto && d.has_attr(id,"width")) image_width={int(positive_attribute(d,id,"width",1,8192))*1000,Unit::Px};
+                    if (image_height.unit==Unit::Auto && d.has_attr(id,"height")) image_height={int(positive_attribute(d,id,"height",1,8192))*1000,Unit::Px};
+                    if (image) {
+                        intrinsic=int(image->width);
+                        if (image_width.unit==Unit::Auto && image_height.unit!=Unit::Auto)
+                            intrinsic=clamp64(int64_t(resolve(image_height,0,s.font,d.root_font))*image->width/image->height);
+                    }
+                }
+                int cw = resolve(image_width, parent.width, s.font, d.root_font, intrinsic),
                     extra = clamp64(int64_t(pl) + pr + s.border[3] + s.border[1]);
                 if (s.width.unit != Unit::Auto && s.border_box)
                     cw = clamp64(int64_t(cw) - extra);
@@ -365,9 +499,11 @@ inline void reflow(Document &d, int width, const Metrics &metrics, uint32_t text
                 box.content_y = clamp64(int64_t(box.y) + pt + s.border[0]);
                 Flow local{id, box.content_x, box.content_y, cw, 0, 0, int(d.fragment_count), 0, 0, 0,
                            1,  false};
-                layout_text(d, local, id, n.text, n.text_length, metrics);
+                bool toggle=input_type(d,id,"checkbox") || input_type(d,id,"radio");
+                if (!image && !toggle) layout_text(d, local, id, n.text, n.text_length, metrics);
                 finish_line(d, local);
-                int ch = resolve(s.height, 0, s.font, d.root_font, clamp64(int64_t(local.y) - box.content_y));
+                int intrinsic_height=image ? clamp64(int64_t(cw)*image->height/image->width) : clamp64(int64_t(local.y)-box.content_y);
+                int ch = resolve(image_height, 0, s.font, d.root_font, intrinsic_height);
                 int vertical_extra = pt + pb + s.border[0] + s.border[2];
                 if (s.height.unit != Unit::Auto && s.border_box)
                     ch = clamp64(int64_t(ch) - vertical_extra);
@@ -384,9 +520,13 @@ inline void reflow(Document &d, int width, const Metrics &metrics, uint32_t text
                     ch = min_height;
                 box.content_height = ch;
                 box.height = clamp64(int64_t(ch) + vertical_extra);
-                parent.pen = clamp64(int64_t(parent.pen) + outer);
-                if (box.height > parent.line_height)
-                    parent.line_height = box.height;
+                if (image && d.fragment_count<MaxFragments)
+                    d.fragments[d.fragment_count++]={id,0,0,box.x,box.y,box.width,box.height,{},parent.node};
+                if (s.position!=Position::Absolute) {
+                    parent.pen = clamp64(int64_t(parent.pen) + outer);
+                    if (box.height > parent.line_height) parent.line_height = box.height;
+                    if (s.display==Display::Block) finish_line(d,parent);
+                }
             } else {
                 int left = resolve(s.margin[3], parent.width, s.font, d.root_font) +
                            resolve(s.padding[3], parent.width, s.font, d.root_font) + s.border[3];
@@ -426,8 +566,9 @@ inline void reflow(Document &d, int width, const Metrics &metrics, uint32_t text
                         content = f.row_height;
                     int pb = resolve(st.padding[2], pf.width, st.font, d.root_font);
                     int extra = clamp64(int64_t(b.content_y) - b.y + pb + st.border[2]);
-                    if (st.height.unit != Unit::Auto) {
-                        content = resolve(st.height, 0, st.font, d.root_font, content);
+                    int containing_height=d.boxes[pf.node].content_height;
+                    if (st.height.unit != Unit::Auto && (st.height.unit!=Unit::Percent || containing_height>0)) {
+                        content = resolve(st.height, containing_height, st.font, d.root_font, content);
                         if (st.border_box)
                             content = clamp64(int64_t(content) - extra);
                     }
@@ -444,18 +585,23 @@ inline void reflow(Document &d, int width, const Metrics &metrics, uint32_t text
                         content = min;
                     b.content_height = content;
                     b.height = clamp64(int64_t(content) + extra);
-                    if (st.display == Display::Cell && d.styles[pf.node].display == Display::Row) {
+                    if (st.position == Position::Absolute) {
+                        // The containing-block translation is applied after all dimensions are known.
+                    } else if (st.display == Display::InlineBlock) {
+                        pf.pen = clamp64(int64_t(pf.pen) + b.width);
+                        if (b.height > pf.line_height) pf.line_height = b.height;
+                    } else if (st.display == Display::Cell && d.styles[pf.node].display == Display::Row) {
                         int h = clamp64(int64_t(b.y) - pf.y + b.height + outer_margin[dep]);
                         if (h > pf.row_height)
                             pf.row_height = h;
-                        ++pf.column;
+                        pf.column += int(positive_attribute(d,id,"colspan",1,32));
                     } else {
                         pf.y = clamp64(int64_t(b.y) + b.height + outer_margin[dep]);
                         pf.previous_margin = outer_margin[dep];
                         pf.line_first = int(d.fragment_count);
                     }
                 } else if (!end.is_text && !d.tag(id, "input") && !d.tag(id, "textarea") &&
-                           !d.tag(id, "select") && !d.tag(id, "img")) {
+                           !d.tag(id, "select") && !d.tag(id, "img") && !d.tag(id,"button")) {
                     const Style &st = d.styles[id];
                     Flow &pf = flow[active[dep]];
                     pf.pen =
@@ -516,6 +662,33 @@ inline void reflow(Document &d, int width, const Metrics &metrics, uint32_t text
             }
         }
     }
+    // Parent-first transform pass. Absolute boxes do not contribute to normal flow.
+    for (uint16_t i = 1; i < d.node_count; ++i) {
+        auto &b = d.boxes[i]; const auto &s = d.styles[i];
+        int dx = d.offset_x[d.nodes[i].parent], dy = d.offset_y[d.nodes[i].parent];
+        if (s.position == Position::Relative) {
+            const auto &cb = d.boxes[d.nodes[i].parent];
+            dx += s.left.unit != Unit::Auto ? resolve(s.left,cb.content_width,s.font,d.root_font) : -resolve(s.right,cb.content_width,s.font,d.root_font);
+            dy += s.top.unit != Unit::Auto ? resolve(s.top,cb.content_height,s.font,d.root_font) : -resolve(s.bottom,cb.content_height,s.font,d.root_font);
+        } else if (s.position == Position::Absolute) {
+            uint16_t containing = d.nodes[i].parent;
+            while (containing && d.styles[containing].position == Position::Static) containing = d.nodes[containing].parent;
+            const auto &cb = d.boxes[containing];
+            if (s.left.unit != Unit::Auto) dx = cb.content_x + resolve(s.left,cb.content_width,s.font,d.root_font) - b.x;
+            else if (s.right.unit != Unit::Auto) dx = cb.content_x + cb.content_width - resolve(s.right,cb.content_width,s.font,d.root_font) - b.width - b.x;
+            if (s.top.unit != Unit::Auto) dy = cb.content_y + resolve(s.top,cb.content_height,s.font,d.root_font) - b.y;
+            else if (s.bottom.unit != Unit::Auto) dy = cb.content_y + cb.content_height - resolve(s.bottom,cb.content_height,s.font,d.root_font) - b.height - b.y;
+        }
+        dx = clamp64(dx,-MaxDimension); dy = clamp64(dy,-MaxDimension);
+        d.offset_x[i] = dx; d.offset_y[i] = dy;
+        b.x = clamp64(int64_t(b.x)+dx,-MaxDimension); b.content_x = clamp64(int64_t(b.content_x)+dx,-MaxDimension);
+        b.y = clamp64(int64_t(b.y)+dy,-MaxDimension); b.content_y = clamp64(int64_t(b.content_y)+dy,-MaxDimension);
+    }
+    for (uint32_t i = 0; i < d.fragment_count; ++i) {
+        auto &f = d.fragments[i];
+        f.x = clamp64(int64_t(f.x)+d.offset_x[f.node],-MaxDimension);
+        f.y = clamp64(int64_t(f.y)+d.offset_y[f.node],-MaxDimension);
+    }
     for (uint32_t i = 0; i < d.node_count; ++i) {
         auto &b = d.boxes[i];
         auto &st = d.styles[i];
@@ -539,6 +712,10 @@ inline void reflow(Document &d, int width, const Metrics &metrics, uint32_t text
                 c.height = b.height;
             }
             clip = intersect(clip, c);
+        }
+        if (is_control(d,f.node)) {
+            const auto &b=d.boxes[f.node];
+            clip=intersect(clip,{b.content_x,b.content_y,b.content_width,b.content_height});
         }
         f.clip = clip;
         int bottom = clamp64(int64_t(f.y) + f.height), limit = clamp64(int64_t(clip.y) + clip.height);

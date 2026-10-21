@@ -1855,7 +1855,9 @@ __attribute__((noinline)) uint64_t bws_uruchom(
                    PRAWO_URUCHOM_PROGRAM;
     else if (rowna_sciezka(sciezka,
                            "/programy/przegladarka.cebula/przegladarka.bur"))
-        wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ | PRAWO_SIEC;
+        wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ | PRAWO_SIEC | PRAWO_URUCHOM_PROGRAM;
+    else if (rowna_sciezka(sciezka,"/programy/husarz-worker.cebula/husarz-worker.bur"))
+        wymagane = PRAWO_GUI | PRAWO_SIEC;
     else if (rowna_sciezka(sciezka,
                            "/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur"))
         wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ;
@@ -2057,7 +2059,7 @@ bool dekoduj_bufor_sieci(
     const uint32_t rozmiar =
         static_cast<uint32_t>(
             arg4 &
-            0xFFFFFFFFULL
+            0x7FFFFFFFULL
         );
 
     if (adres32 == 0 ||
@@ -2226,7 +2228,8 @@ __attribute__((noinline)) uint64_t bws_http_common(
         return 0;
     }
 
-    return 1;
+    // Opt-in binary response mode preserves the legacy boolean return ABI.
+    return (arg4 & 0x80000000ULL) ? uint64_t(odebrano) + 1 : 1;
 }
 
 /* =========================================================================

@@ -31,11 +31,15 @@
 #include "bursztyn_ui/bursztyn_ui.h"
 #include "http_kody.h"
 #include "husarz/paint.h"
+#include "husarz/resource.h"
+#include "husarz/async.h"
+#include "../obrazy/dekoder_obrazu.h"
 #include "husarz/script.h"
 
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <string.h>
 
 using namespace BursztynUI;
 
@@ -182,6 +186,7 @@ struct Zakladka {
 
     char* tresc;
 
+    uint32_t identity{}, navigation{};
     Husarz::Document* dokument;
     bool dokument_brudny;
 
@@ -269,67 +274,6 @@ void zresetuj_przewijanie();
 
 } // namespace
 
-#ifndef HUSARZ_HOST_TEST
-extern "C" void* memcpy(
-    void* dest,
-    const void* src,
-    unsigned long n
-) {
-    if (!dest ||
-        !src) {
-
-        return dest;
-    }
-
-    uint8_t* d =
-        static_cast<uint8_t*>(
-            dest
-        );
-
-    const uint8_t* s =
-        static_cast<const uint8_t*>(
-            src
-        );
-
-    for (unsigned long i = 0;
-         i < n;
-         ++i) {
-
-        d[i] =
-            s[i];
-    }
-
-    return dest;
-}
-
-extern "C" void* memset(
-    void* dest,
-    int val,
-    unsigned long n
-) {
-    if (!dest) {
-        return dest;
-    }
-
-    uint8_t* d =
-        static_cast<uint8_t*>(
-            dest
-        );
-
-    for (unsigned long i = 0;
-         i < n;
-         ++i) {
-
-        d[i] =
-            static_cast<uint8_t>(
-                val
-            );
-    }
-
-    return dest;
-}
-
-#endif
 
 namespace {
 
@@ -705,6 +649,7 @@ void wyczysc_zakladke(
     }
 
     if (zwolnij_tresc) delete z.dokument;
+    z.identity=z.navigation=0;
     z.dokument = nullptr;
     z.dokument_brudny = true;
     z.tresc =
@@ -861,7 +806,7 @@ void zamknij_zakladke(
     );
 }
 
-void zwolnij_wszystkie_zakladki() {
+[[maybe_unused]] void zwolnij_wszystkie_zakladki() {
     for (int i = 0;
          i < liczba_zakladek;
          ++i) {
@@ -2259,6 +2204,12 @@ __attribute__((noinline)) bool ustaw_url_z_location(
             );
     }
 
+    // A colon before any path/query separator denotes an unsupported scheme.
+    // In particular, web links/forms cannot turn file:, data: or javascript:
+    // into native operations or accidental relative HTTP requests.
+    for(size_t i=0;location[i] && location[i]!='/' && location[i]!='?' && location[i]!='#';++i)
+        if(location[i]==':') return false;
+
     char wynik[
         URL_POJEMNOSC
     ] = {};
@@ -2335,6 +2286,15 @@ __attribute__((noinline)) bool ustaw_url_z_location(
         return false;
     }
 
+    if (location[0]=='?' || location[0]=='#') {
+        for(size_t i=0;obecny.sciezka[i] && obecny.sciezka[i]!='#' &&
+            (location[0]!='?' || obecny.sciezka[i]!='?');++i) {
+            if(p+1>=sizeof(wynik))return false;
+            wynik[p++]=obecny.sciezka[i];
+        }
+        wynik[p]=0;
+        return append(location) && kopiuj_limit(cel,pojemnosc,wynik);
+    }
     if (location[0] ==
         '/') {
 
@@ -2425,6 +2385,19 @@ __attribute__((noinline)) bool ustaw_url_z_location(
 }
 
 // Parsing is independent of viewport geometry and painting.
+__attribute__((noinline)) bool document_url_base(const char *url,const Husarz::Document *doc,ParsedUrl &base) {
+    if(!parsuj_url(url,&base))return false;
+    if(!doc || !doc->base_url || !*doc->str(doc->base_url))return true;
+    struct Address { char text[URL_POJEMNOSC]{}; }; auto *address=new Address;
+    if(!address)return true;
+    if(ustaw_url_z_location(address->text,sizeof(address->text),doc->str(doc->base_url),base)) {
+        auto *candidate=new ParsedUrl{};
+        if(candidate && parsuj_url(address->text,candidate))base=*candidate;
+        delete candidate;
+    }
+    delete address; return true;
+}
+
 void renderuj_html(Husarz::Document& document,const char* source,bool html) {
     Husarz::parse_html(document,source,Husarz::length(source,HTML_POJEMNOSC),html);
     Husarz::collect_styles(document);
@@ -2520,6 +2493,220 @@ bool adres_ipv4_literal(const char *host, uint8_t out[4]) {
     }
     return true;
 }
+__attribute__((noinline)) bool consume_http_response(Zakladka &z,bool *redirect,char *redirect_url,const ParsedUrl &p,const char *data,size_t response_len,bool trusted) {
+    *redirect=false; redirect_url[0]=0;
+    OdpowiedzHttp odp{};
+
+    if (!parsuj_odpowiedz_http(
+            data,
+            response_len,
+            &odp)) {
+
+        ustaw_tresc(
+            z,
+            "Odpowiedz serwera nie zawiera poprawnej linii statusu/naglowkow HTTP.",
+            false
+        );
+
+        ustaw_status(
+            "Nierozpoznana odpowiedz HTTP."
+        );
+
+        return false;
+    }
+
+    if (http_kod_przekierowanie(
+            odp.kod) &&
+        (odp.kod == 301 ||
+         odp.kod == 302 ||
+         odp.kod == 303 ||
+         odp.kod == 307 ||
+         odp.kod == 308)) {
+
+        size_t header_len =
+            static_cast<size_t>(
+                odp.body -
+                data
+            );
+
+        char location[
+            URL_POJEMNOSC
+        ] = {};
+
+        if (!znajdz_header(
+                data,
+                header_len,
+                "location",
+                location,
+                sizeof(location)
+            )) {
+
+            ustaw_blad_html(
+                z,
+                odp.kod,
+                "Serwer zwrocil przekierowanie bez poprawnego naglowka Location."
+            );
+
+            ustaw_status(
+                "Blad przekierowania HTTP."
+            );
+
+            return false;
+        }
+
+        if (!ustaw_url_z_location(
+                redirect_url,
+                URL_POJEMNOSC,
+                location,
+                p)) {
+
+            ustaw_blad_html(
+                z,
+                odp.kod,
+                "Naglowek Location jest zbyt dlugi lub ma nieobslugiwany format."
+            );
+
+            ustaw_status(
+                "Nieprawidlowe przekierowanie."
+            );
+
+            return false;
+        }
+
+        *redirect =
+            true;
+
+        return true;
+    }
+
+    if (!http_kod_sukces(
+            odp.kod)) {
+
+        ustaw_blad_html(
+            z,
+            odp.kod,
+            pobierz_opis_kodu_http(
+                odp.kod
+            )
+        );
+
+        ustaw_status(
+            "Odebrano status HTTP."
+        );
+
+        return true;
+    }
+
+    if (!odp.tekst) {
+        ustaw_tresc(
+            z,
+            "Husarz nie potrafi jeszcze wyswietlic skompresowanej albo binarnej odpowiedzi tego typu.",
+            false
+        );
+
+        ustaw_status(
+            "Nieobslugiwany typ odpowiedzi."
+        );
+
+        return true;
+    }
+
+    if (!alokuj_tresc_zakladki(
+            z)) {
+
+        ustaw_status(
+            "Brak pamieci na tresc strony."
+        );
+
+        return false;
+    }
+
+    size_t body_len =
+        odp.body_len;
+
+    bool body_ok =
+        true;
+
+    if (odp.chunked) {
+        body_ok =
+            dekoduj_chunked(
+                odp.body,
+                odp.body_len,
+                z.tresc,
+                HTML_POJEMNOSC,
+                &body_len
+            );
+    } else {
+        if (body_len >=
+            HTML_POJEMNOSC) {
+
+            body_len =
+                HTML_POJEMNOSC -
+                1U;
+
+            body_ok =
+                false;
+        }
+
+        for (size_t i = 0;
+             i < body_len;
+             ++i) {
+
+            z.tresc[i] =
+                odp.body[i];
+        }
+
+        z.tresc[
+            body_len
+        ] =
+            '\0';
+    }
+
+    if (!body_ok) {
+        /*
+         * Przy nieudanym dechunkowaniu nie pokazujemy surowego framingu jako
+         * HTML. To mogloby wygladac jak poprawna strona mimo uszkodzenia.
+         */
+        if (odp.chunked) {
+            ustaw_tresc(
+                z,
+                "Nie udalo sie bezpiecznie zdekodowac Transfer-Encoding: chunked.",
+                false
+            );
+
+            ustaw_status(
+                "Blad dekodowania HTTP chunked."
+            );
+
+            return false;
+        }
+
+        ustaw_status(
+            "Strona zostala ucieta do limitu Husarza."
+        );
+    } else if (p.https) {
+        ustaw_status(
+            trusted
+                ? "HTTPS: polaczenie zweryfikowane."
+                : "HTTPS: brak potwierdzenia zaufanego CA."
+        );
+    } else {
+        ustaw_status(
+            "Gotowy."
+        );
+    }
+
+    z.to_jest_html =
+        odp.html;
+
+    z.wczytana =
+        true;
+    z.dokument_brudny = true;
+
+    return true;
+}
+
+#ifdef HUSARZ_HOST_TEST
 __attribute__((noinline)) bool pobierz_jeden_url(
     Zakladka& z,
     bool* redirect,
@@ -2699,215 +2886,7 @@ __attribute__((noinline)) bool pobierz_jeden_url(
         return false;
     }
 
-    OdpowiedzHttp odp{};
-
-    if (!parsuj_odpowiedz_http(
-            siec_bufor,
-            response_len,
-            &odp)) {
-
-        ustaw_tresc(
-            z,
-            "Odpowiedz serwera nie zawiera poprawnej linii statusu/naglowkow HTTP.",
-            false
-        );
-
-        ustaw_status(
-            "Nierozpoznana odpowiedz HTTP."
-        );
-
-        return false;
-    }
-
-    if (http_kod_przekierowanie(
-            odp.kod) &&
-        (odp.kod == 301 ||
-         odp.kod == 302 ||
-         odp.kod == 303 ||
-         odp.kod == 307 ||
-         odp.kod == 308)) {
-
-        size_t header_len =
-            static_cast<size_t>(
-                odp.body -
-                siec_bufor
-            );
-
-        char location[
-            URL_POJEMNOSC
-        ] = {};
-
-        if (!znajdz_header(
-                siec_bufor,
-                header_len,
-                "location",
-                location,
-                sizeof(location)
-            )) {
-
-            ustaw_blad_html(
-                z,
-                odp.kod,
-                "Serwer zwrocil przekierowanie bez poprawnego naglowka Location."
-            );
-
-            ustaw_status(
-                "Blad przekierowania HTTP."
-            );
-
-            return false;
-        }
-
-        if (!ustaw_url_z_location(
-                redirect_url,
-                URL_POJEMNOSC,
-                location,
-                p)) {
-
-            ustaw_blad_html(
-                z,
-                odp.kod,
-                "Naglowek Location jest zbyt dlugi lub ma nieobslugiwany format."
-            );
-
-            ustaw_status(
-                "Nieprawidlowe przekierowanie."
-            );
-
-            return false;
-        }
-
-        *redirect =
-            true;
-
-        return true;
-    }
-
-    if (!http_kod_sukces(
-            odp.kod)) {
-
-        ustaw_blad_html(
-            z,
-            odp.kod,
-            pobierz_opis_kodu_http(
-                odp.kod
-            )
-        );
-
-        ustaw_status(
-            "Odebrano status HTTP."
-        );
-
-        return true;
-    }
-
-    if (!odp.tekst) {
-        ustaw_tresc(
-            z,
-            "Husarz nie potrafi jeszcze wyswietlic skompresowanej albo binarnej odpowiedzi tego typu.",
-            false
-        );
-
-        ustaw_status(
-            "Nieobslugiwany typ odpowiedzi."
-        );
-
-        return true;
-    }
-
-    if (!alokuj_tresc_zakladki(
-            z)) {
-
-        ustaw_status(
-            "Brak pamieci na tresc strony."
-        );
-
-        return false;
-    }
-
-    size_t body_len =
-        odp.body_len;
-
-    bool body_ok =
-        true;
-
-    if (odp.chunked) {
-        body_ok =
-            dekoduj_chunked(
-                odp.body,
-                odp.body_len,
-                z.tresc,
-                HTML_POJEMNOSC,
-                &body_len
-            );
-    } else {
-        if (body_len >=
-            HTML_POJEMNOSC) {
-
-            body_len =
-                HTML_POJEMNOSC -
-                1U;
-
-            body_ok =
-                false;
-        }
-
-        for (size_t i = 0;
-             i < body_len;
-             ++i) {
-
-            z.tresc[i] =
-                odp.body[i];
-        }
-
-        z.tresc[
-            body_len
-        ] =
-            '\0';
-    }
-
-    if (!body_ok) {
-        /*
-         * Przy nieudanym dechunkowaniu nie pokazujemy surowego framingu jako
-         * HTML. To mogloby wygladac jak poprawna strona mimo uszkodzenia.
-         */
-        if (odp.chunked) {
-            ustaw_tresc(
-                z,
-                "Nie udalo sie bezpiecznie zdekodowac Transfer-Encoding: chunked.",
-                false
-            );
-
-            ustaw_status(
-                "Blad dekodowania HTTP chunked."
-            );
-
-            return false;
-        }
-
-        ustaw_status(
-            "Strona zostala ucieta do limitu Husarza."
-        );
-    } else if (p.https) {
-        ustaw_status(
-            bws_tls_certyfikat_zaufany()
-                ? "HTTPS: polaczenie zweryfikowane."
-                : "HTTPS: brak potwierdzenia zaufanego CA."
-        );
-    } else {
-        ustaw_status(
-            "Gotowy."
-        );
-    }
-
-    z.to_jest_html =
-        odp.html;
-
-    z.wczytana =
-        true;
-    z.dokument_brudny = true;
-
-    return true;
+    return consume_http_response(z,redirect,redirect_url,p,siec_bufor,response_len,bws_tls_certyfikat_zaufany());
 }
 
 bool PobierzStrone(
@@ -3065,6 +3044,14 @@ bool PobierzStrone(
     return false;
 }
 
+#endif
+
+void begin_async_navigation(Zakladka&,bool);
+void async_tick();
+void async_receive();
+void async_shutdown();
+void cancel_async_tab(Zakladka&);
+
 void Nawiguj(
     bool nowa_strona,
     bool rozpoznaj_wyszukiwanie
@@ -3099,10 +3086,14 @@ void Nawiguj(
         return;
     }
 
+#ifdef HUSARZ_HOST_TEST
     nawigacja_trwa=true;
     (void)PobierzStrone(nowa_strona);
     przygotuj_dokument_zakladki(z,true);
     nawigacja_trwa=false;
+#else
+    begin_async_navigation(z,nowa_strona);
+#endif
 }
 
 /* =========================================================================
@@ -3185,6 +3176,8 @@ void przewin_kolem(PasekPrzewijania& bar,ZdarzenieRolki& e){
 class SuwakStrony : public PasekPrzewijania {
 public:void obsluz_rolke(ZdarzenieRolki& e)override{przewin_kolem(*this,e);}
 };
+void submit_browser_form(Husarz::Document&,uint16_t);
+void append_decimal(char *out,size_t &position,uint64_t value);
 class WidokStrony : public Kontrolka {
     uint32_t* pixels_{};size_t capacity_{};
 public:
@@ -3197,7 +3190,7 @@ public:
         auto* d=z.dokument;int w=obszar_.szerokosc,h=obszar_.wysokosc;
         if(w<1||h<1)return;
         if(d&&(d->styles_dirty||d->layout_width!=w||d->layout_revision!=d->revision))
-            Husarz::reflow(*d,w,browser_metrics,motyw_kolor(MOTYW_KOLOR_TEKST));
+            Husarz::reflow(*d,w,browser_metrics);
         auto& bar=*g_husarz.suwak_pionowy;
         bar.ustaw_zakres(0,d&&d->height>h?d->height-h:0);
         bar.ustaw_rozmiar_strony(h);bar.ustaw_maly_krok(d?d->styles[d->tag(1,"html")?1:0].line*3:60);
@@ -3210,8 +3203,9 @@ public:
         uniewaznij();
     }
     void rozmiesc(Prostokat r)override{Kontrolka::rozmiesc(r);przygotuj();}
+    bool czy_wymaga_animacji() const override;
+    void krok_animacji(uint64_t now=0) override;
     void zaktualizuj_motyw()override{
-        if(liczba_zakladek>0&&zakladki[aktywna_zakladka].dokument)zakladki[aktywna_zakladka].dokument->styles_dirty=true;
         Kontrolka::zaktualizuj_motyw();
     }
     void rysuj_siebie(KontekstRysowania& ctx)override{
@@ -3219,20 +3213,66 @@ public:
         if(w<=0||h<=0)return;
         auto* d=liczba_zakladek>0?zakladki[aktywna_zakladka].dokument:nullptr;
         if(!d||!pixels_||w>4096||h>4096||size_t(w)*h>capacity_){
-            ctx.rysuj_prostokat({0,0,w,h},motyw_kolor(MOTYW_KOLOR_POLETEKSTOWE));
-            ctx.rysuj_tekst({8,8},"Dane strony lub bufor widoku niedostępne.",motyw_kolor(MOTYW_KOLOR_TEKST));return;}
+            ctx.rysuj_prostokat({0,0,w,h},0xffffff);
+            ctx.rysuj_tekst({8,8},"Dane strony lub bufor widoku niedostępne.",0x000000);return;}
         Husarz::Surface surface{pixels_,w,h};
-        Husarz::paint(*d,surface,int(g_husarz.suwak_pionowy->wartosc()),browser_metrics,browser_glyphs,motyw_kolor(MOTYW_KOLOR_POLETEKSTOWE));
+        Husarz::paint(*d,surface,int(g_husarz.suwak_pionowy->wartosc()),browser_metrics,browser_glyphs);
         Punkt origin=ctx.pobierz_przesuniecie();
         for(int y=0;y<h;++y)ctx.rysuj_wiersz_ekranu(origin.x,origin.y+y,w,pixels_+size_t(y)*w);
     }
+#ifdef HUSARZ_HOST_TEST
+    uint64_t document_pixel_hash() {
+        KontekstRysowania ctx; auto area=obszar_ekranu(); ctx.dodaj_przesuniecie({area.x,area.y}); rysuj_siebie(ctx);
+        uint64_t hash=1469598103934665603ULL;
+        for (size_t i=0;i<size_t(obszar_.szerokosc)*obszar_.wysokosc;++i) { hash^=pixels_[i]; hash*=1099511628211ULL; }
+        return hash;
+    }
+#endif
     void obsluz_rolke(ZdarzenieRolki& e)override{
         if(!e.delta_y||!g_husarz.suwak_pionowy)return;
         przewin_kolem(*g_husarz.suwak_pionowy,e);
     }
     void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e)override{
         auto* bar=g_husarz.suwak_pionowy;if(!bar)return;
-        switch(e.polecenie()){
+        auto *d=liczba_zakladek>0?zakladki[aktywna_zakladka].dokument:nullptr;
+        unsigned key=e.polecenie();
+#if HUSARZ_DEBUG_RESOURCES
+        if (d && d->open_select) {
+            char diagnostic[128]="[HUSARZ FORM] key="; size_t used=18;
+            append_decimal(diagnostic,used,key);
+            const char *label=" focus="; for(unsigned i=0;label[i];++i)diagnostic[used++]=label[i];
+            append_decimal(diagnostic,used,d->focused_control);
+            label=" select="; for(unsigned i=0;label[i];++i)diagnostic[used++]=label[i];
+            append_decimal(diagnostic,used,d->open_select);
+            diagnostic[used++]='\n';diagnostic[used]=0;wypisz(diagnostic);
+        }
+#endif
+        if (d && key==9) {
+            d->open_select=0;
+            int current=-1;
+            for (unsigned i=0;i<d->control_count;++i) if (d->controls[i].node==d->focused_control) current=int(i);
+            for (unsigned step=0;step<d->control_count;++step) {
+                current=(current+(e.czy_shift()?-1:1)+int(d->control_count))%int(d->control_count);
+                uint16_t node=d->controls[current].node;
+                if (!d->has_attr(node,"disabled") && d->styles[node].display!=Husarz::Display::None) { d->focused_control=node; break; }
+            }
+            uniewaznij(); e.obsluzone=true; return;
+        }
+        if (d && d->focused_control) {
+            auto *c=Husarz::control(*d,d->focused_control);
+            if (c && Husarz::form_key(*d,key)) { przygotuj(); e.obsluzone=true; return; }
+            if (c && d->tag(c->node,"select") && (key==0x48 || key==0x50 || key==32 || key==13)) {
+                if (key==13 && d->open_select) d->open_select=0;
+                else if (key==32 || key==13) d->open_select=c->node;
+                else Husarz::form_select(*d,*c,key==0x48?-1:1);
+                przygotuj(); e.obsluzone=true; return;
+            }
+            if (c && (key==32 || key==13) && (Husarz::input_type(*d,c->node,"checkbox") || Husarz::input_type(*d,c->node,"radio"))) {
+                Husarz::form_toggle(*d,*c); przygotuj(); e.obsluzone=true; return;
+            }
+            if (c && key==13) { submit_browser_form(*d,c->node); e.obsluzone=true; return; }
+        }
+        switch(key){
         case 0x48:bar->przewin_o(-bar->maly_krok()/3);break;
         case 0x50:bar->przewin_o(bar->maly_krok()/3);break;
         case 0x49:bar->przewin_strone(-1);break;
@@ -3241,6 +3281,10 @@ public:
         case 0x4f:bar->ustaw_wartosc(bar->maksimum());break;
         default:return;}
         e.obsluzone=true;
+    }
+    void obsluz_wprowadzenie_tekstu(ZdarzenieWprowadzaniaTekstu& e) override {
+        auto *d=liczba_zakladek>0?zakladki[aktywna_zakladka].dokument:nullptr;
+        if (d && Husarz::form_insert(*d,e.punkt_kodowy)) { przygotuj(); e.obsluzone=true; }
     }
     void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e)override;
 };
@@ -3259,11 +3303,18 @@ public:
         zarzadca_popupow().zamknij(PowodZamknieciaPopup::WlascicielZamkniety);
         auto* root=kontrolka_glowna();ustaw_kontrolke_glowna(nullptr);delete root;
         delete g_husarz.menu_kontekstowe;delete g_husarz.menu_zakladki_popup;
+        async_shutdown();
         g_husarz={};
     }
 
     void obsluz_zdarzenie(const bws_zdarzenie& ev) override {
         if(echo_klawiatury(ev))return;
+#if HUSARZ_DEBUG_RESOURCES
+        if (ev.typ==BWS_ZDARZENIE_KLAWISZ_FIZYCZNY && ev.x && liczba_zakladek>0 &&
+            zakladki[aktywna_zakladka].dokument && zakladki[aktywna_zakladka].dokument->open_select)
+            wypisz(fokus()==g_husarz.widok_strony ? "[HUSARZ FORM] viewport focus\n" : "[HUSARZ FORM] other focus\n");
+#endif
+        if(ev.typ==BWS_ZDARZENIE_IPC_READY){async_receive();return;}
         if (ev.typ == BWS_ZDARZENIE_OTWORZ_PLIK) {
             otworz_argument_startowy();
             return;
@@ -3344,18 +3395,142 @@ public:
             }
         }
 
+        // Web controls own editing and intra-document Tab before the native
+        // window's global focus traversal. Right Alt belongs to Polish AltGr,
+        // not to native menu activation while the document has keyboard focus.
+        if ((ev.typ==BWS_ZDARZENIE_KLAWISZ || ev.typ==BWS_ZDARZENIE_KLAWISZ_FIZYCZNY) &&
+            fokus()==g_husarz.widok_strony && g_husarz.widok_strony && !zarzadca_popupow().czy_otwarty()) {
+            bool physical=ev.typ==BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;
+            bool usb=(ev.kod&BWS_KEY_SOURCE_USB)!=0;
+            if (physical && ((usb && (ev.kod&255U)==230U) ||
+                (!usb && (ev.kod&BWS_KEY_SOURCE_E0) && (ev.kod&127U)==0x38U))) return;
+            if (!physical || ev.x) {
+                ZdarzenieKlawiatury key;
+                key.kod_klawisza=klawisz_polecenia(ev);
+                key.kod_skanu=physical?ev.kod|KLAWISZ_FIZYCZNY_GUI:0;
+                key.modyfikatory=ev.przyciski;
+                g_husarz.widok_strony->obsluz_wcisniecie_klawisza(key);
+                if(key.obsluzone)return;
+            }
+        }
         Okno::obsluz_zdarzenie(ev);
     }
 };
 
 int maksimum_przewijania(){return g_husarz.suwak_pionowy?int(g_husarz.suwak_pionowy->maksimum()):0;}
 void zresetuj_przewijanie(){if(g_husarz.suwak_pionowy){g_husarz.suwak_pionowy->ustaw_zakres(0,0);g_husarz.suwak_pionowy->ustaw_wartosc(0);}}
-void odswiez_pasek_stanu_natychmiast(){
+[[maybe_unused]] void odswiez_pasek_stanu_natychmiast(){
     if(!g_husarz.okno||!g_husarz.pasek_stanu||KontekstRysowania::g_tlum_rysowanie_globalne)return;
     // Always paint through the owning window and its translated/clipped tree.
     g_husarz.okno->przelicz_uklad();
     KontekstRysowania ctx;g_husarz.okno->rysuj(ctx);gui_odswiez();
 }
+Husarz::ResourceCache *resource_cache{};
+Husarz::ResourceCache *cache_resources() {
+    if (!resource_cache) resource_cache=new Husarz::ResourceCache(gui_malloc,gui_free);
+    return resource_cache;
+}
+// The shared codec's temporary allocations have a separate hard workspace budget.
+size_t decode_workspace{};
+void *browser_image_alloc(size_t n) {
+    constexpr size_t limit=16*1024*1024;
+    if (!n || n>limit || decode_workspace>limit-n) return nullptr;
+    auto *p=static_cast<size_t*>(gui_malloc(n+sizeof(size_t)));
+    if (!p) return nullptr;
+    *p=n; decode_workspace+=n; return p+1;
+}
+void browser_image_free(void *ptr) {
+    if (!ptr) return;
+    auto *p=static_cast<size_t*>(ptr)-1; decode_workspace-=*p; gui_free(p);
+}
+bool decode_browser_image(Husarz::ResourceCache &cache,Husarz::ResourceEntry &entry) {
+    if (entry.pixels) return true;
+    uint32_t w=0,h=0; auto format=rozpoznaj_obraz(entry.raw,entry.size);
+    auto result=format==FormatObrazu::PNG ? sprawdz_png(entry.raw,entry.size,&w,&h) :
+                format==FormatObrazu::JPEG ? sprawdz_jpeg(entry.raw,entry.size,&w,&h) : BladObrazu::Format;
+    if (result!=BladObrazu::OK || !w || !h || w>Husarz::MaxImageSide || h>Husarz::MaxImageSide ||
+        uint64_t(w)*h>Husarz::MaxImagePixels) { ++cache.image_failures; return false; }
+    size_t bytes=size_t(w)*h*4;
+    ++entry.refs; // room() may evict other resources, never the compressed source being decoded.
+    bool room=cache.room(0,bytes,false);
+    --entry.refs;
+    if (!room) return false;
+    DekodowanyObraz decoded{};
+    result=dekoduj_obraz_z_alfa(entry.raw,entry.size,&decoded,browser_image_alloc,browser_image_free);
+    if (result!=BladObrazu::OK) { ++cache.image_failures; return false; }
+    auto *pixels=static_cast<uint32_t*>(gui_malloc(bytes));
+    if (!pixels) { browser_image_free(decoded.piksele); return false; }
+    for (size_t i=0;i<bytes;++i) reinterpret_cast<uint8_t*>(pixels)[i]=decoded.piksele[i];
+    browser_image_free(decoded.piksele);
+    entry.pixels=pixels; entry.width=w; entry.height=h; entry.decoded=bytes;
+    cache.decoded_bytes+=bytes; ++cache.images_decoded; return true;
+}
+bool resource_mime_is(const char *value,const char *expected) {
+    size_t n=0;while(value[n] && value[n]!=';' && !Husarz::space(value[n]))++n;
+    return Husarz::equal_ci(value,n,expected);
+}
+// HTTP responses must use the binary-safe count, never strlen on image data.
+Husarz::ResourceEntry *fetch_browser_resource(const char *url,Husarz::ResourceType type) {
+    struct Address { char normalized[URL_POJEMNOSC]{}; };
+    struct AddressOwner { Address *value{new Address}; ~AddressOwner(){delete value;} } address;
+    if (!address.value || !Husarz::normalize_resource_url(url,address.value->normalized,sizeof(address.value->normalized))) return nullptr;
+    url=address.value->normalized;
+    auto *cache=cache_resources(); if (!cache) return nullptr;
+    if (auto *hit=cache->find(url,type,gui_czas_monotoniczny_ns())) return hit;
+    auto *parsed=new ParsedUrl{}; if (!parsed) return nullptr;
+    if (!parsuj_url(url,parsed)) { delete parsed; return nullptr; }
+    uint8_t ip[4]{};
+    if (!adres_ipv4_literal(parsed->domena,ip) && !bws_siec_dns(parsed->domena,ip)) { delete parsed; return nullptr; }
+    uint32_t count=bws_siec_pobierz_bajty(parsed->https,ip,parsed->domena,parsed->sciezka,siec_bufor,sizeof(siec_bufor));
+    delete parsed;
+    OdpowiedzHttp response{};
+    if (!count || !parsuj_odpowiedz_http(siec_bufor,count,&response) || !http_kod_sukces(response.kod)) return nullptr;
+    size_t header_size=size_t(response.body-siec_bufor);
+    char mime[96]{}, directive[128]{}, content_length[32]{};
+    if (!znajdz_header(siec_bufor,header_size,"content-type",mime,sizeof(mime))) return nullptr;
+    if (type==Husarz::ResourceType::Css && !resource_mime_is(mime,"text/css")) return nullptr;
+    if (type==Husarz::ResourceType::Image && !resource_mime_is(mime,"image/png") && !resource_mime_is(mime,"image/jpeg")) return nullptr;
+    if (znajdz_header(siec_bufor,header_size,"content-length",content_length,sizeof(content_length))) {
+        size_t expected=0;
+        for (size_t i=0;content_length[i];++i) {
+            if (content_length[i]<'0' || content_length[i]>'9' || expected>Husarz::MaxResourceBytes) return nullptr;
+            expected=expected*10+unsigned(content_length[i]-'0');
+        }
+        if (!response.chunked && expected!=response.body_len) return nullptr;
+    }
+    // Until conditional revalidation exists, private/no-cache/no-store resources
+    // are transient entries removed after their document releases them.
+    bool transient=znajdz_header(siec_bufor,header_size,"cache-control",directive,sizeof(directive)) &&
+        (tekst_zawiera_ci(directive,"no-store") || tekst_zawiera_ci(directive,"no-cache"));
+    Husarz::ResourceEntry *entry=nullptr;
+    if (response.chunked) {
+        auto *body=static_cast<char*>(gui_malloc(Husarz::MaxResourceBytes+1));
+        size_t size=0;
+        if (body && dekoduj_chunked(response.body,response.body_len,body,Husarz::MaxResourceBytes+1,&size))
+            entry=cache->insert(url,type,reinterpret_cast<uint8_t*>(body),size);
+        if (body) gui_free(body);
+    } else entry=cache->insert(url,type,reinterpret_cast<const uint8_t*>(response.body),response.body_len);
+    if (entry) {
+        kopiuj_limit(entry->content_type,sizeof(entry->content_type),mime);
+        znajdz_header(siec_bufor,header_size,"etag",entry->etag,sizeof(entry->etag));
+        znajdz_header(siec_bufor,header_size,"last-modified",entry->modified,sizeof(entry->modified));
+        entry->transient=transient;
+        const char *age=directive;
+        for (size_t i=0;directive[i];++i) if (prefiks_ci(directive+i,"max-age=")) { age=directive+i+8; unsigned seconds=0,digits=0;
+            while (*age>='0' && *age<='9' && digits++<10) { seconds=seconds>3600?3600:seconds*10+unsigned(*age++-'0'); }
+            entry->cache_seconds=seconds>3600?3600:seconds;
+            if (!entry->cache_seconds) entry->transient=true;
+            break;
+        }
+        entry->created=gui_czas_monotoniczny_ns();
+        entry->expires=entry->created?entry->created+uint64_t(entry->cache_seconds)*1000000000:0;
+        if(entry->transient) entry->url[0]=0;
+    }
+    return entry;
+}
+#include "husarz/worker.inc"
+#include "husarz/async_runtime.inc"
+
 void przygotuj_dokument_zakladki(Zakladka& z,bool resources){
     if(z.dokument&&!z.dokument_brudny)return;
     auto* next=new Husarz::Document;
@@ -3363,41 +3538,124 @@ void przygotuj_dokument_zakladki(Zakladka& z,bool resources){
     const char* source=z.tresc&&*z.tresc?z.tresc:"Wpisz adres strony lub zapytanie i wybierz Przejdź.";
     renderuj_html(*next,source,z.to_jest_html);
     if(resources&&z.to_jest_html){
-        struct ResourceScratch {Zakladka asset{};ParsedUrl base{},target{};char redirect_url[URL_POJEMNOSC]{};};
-        auto* scratch=new ResourceScratch;
-        if(scratch){auto& asset=scratch->asset;auto& base=scratch->base;unsigned loaded=0;
-            if(parsuj_url(z.url,&base))for(uint16_t i=1;i<next->node_count&&loaded<4;++i){
-                if(!next->tag(i,"link")||!Husarz::equal_ci(next->attr(i,"rel"),Husarz::length(next->attr(i,"rel"),64),"stylesheet"))continue;
-                const char* href=next->attr(i,"href");if(!*href)continue;
-                if(!ustaw_url_z_location(asset.url,sizeof(asset.url),href,base))continue;
-                auto& target=scratch->target;if(!parsuj_url(asset.url,&target)||target.https!=base.https||!tekst_rowny(target.domena,base.domena))continue;
-                ++loaded;bool redirect=false;
-                if(pobierz_jeden_url(asset,&redirect,scratch->redirect_url)&&!redirect&&asset.tresc&&!asset.to_jest_html)
-                    Husarz::parse_css(*next,asset.tresc,Husarz::length(asset.tresc,65537),uint32_t(i)*4096);
+        struct ResourceScratch { ParsedUrl base{},css_base{}; char url[URL_POJEMNOSC]{}; };
+        auto *scratch=new ResourceScratch;
+        if (scratch && document_url_base(z.url,next,scratch->base)) {
+            unsigned stylesheets=0;
+            for (uint16_t i=1;i<next->node_count && stylesheets<8;++i) {
+                if (!next->tag(i,"link") || !Husarz::equal_ci(next->attr(i,"rel"),Husarz::length(next->attr(i,"rel"),64),"stylesheet")) continue;
+                if (!ustaw_url_z_location(scratch->url,sizeof(scratch->url),next->attr(i,"href"),scratch->base)) continue;
+                ++stylesheets;
+                auto *entry=fetch_browser_resource(scratch->url,Husarz::ResourceType::Css);
+                if (entry) {
+                    Husarz::parse_css(*next,reinterpret_cast<const char*>(entry->raw),entry->size,uint32_t(i)*4096,next->store(scratch->url,Husarz::length(scratch->url,URL_POJEMNOSC)));
+                    if(entry->transient && resource_cache) resource_cache->remove(*entry);
+                }
             }
-            if(asset.tresc)gui_free(asset.tresc);
-            delete scratch;
-        }else next->truncated=true;
+            Husarz::compute_styles(*next);
+            for (uint16_t i=1;i<next->node_count && next->image_count<Husarz::MaxDocumentImages;++i) {
+                for (unsigned bg=0;bg<2;++bg) {
+                    const char *src=bg ? next->str(next->styles[i].background_image) : next->tag(i,"img") ? next->attr(i,"src") : "";
+                    char *url=scratch->url;
+                    if (bg && *src) {
+                        Husarz::Span value{src,Husarz::length(src,Husarz::MaxAttrLength)};
+                        if (value.size<5) continue;
+                        value=Husarz::trimmed(src+4,value.size-5);
+                        if (value.size>=2 && (value.data[0]=='\'' || value.data[0]=='"') && value.data[value.size-1]==value.data[0]) {
+                            ++value.data; value.size-=2;
+                        }
+                        if (!value.size || value.size>=sizeof(scratch->url)) continue;
+                        for (size_t j=0;j<value.size;++j) url[j]=value.data[j];
+                        url[value.size]=0;
+                        src=url;
+                    }
+                    const ParsedUrl *base=&scratch->base;
+                    if (bg && next->styles[i].background_base && parsuj_url(next->str(next->styles[i].background_base),&scratch->css_base)) base=&scratch->css_base;
+                    if (!*src || !ustaw_url_z_location(url,sizeof(scratch->url),src,*base)) continue;
+                    auto *entry=fetch_browser_resource(url,Husarz::ResourceType::Image);
+                    if (entry && resource_cache && decode_browser_image(*resource_cache,*entry)) resource_cache->bind(*next,i,*entry,bg!=0);
+                }
+            }
+        }
+        delete scratch;
     }
     delete z.dokument;z.dokument=next;z.dokument_brudny=false;
     if(next->truncated)ustaw_status("Osiągnięto limit dokumentu; wyświetlono część strony.");
     // The caller lays out the published document after this stack frame returns.
-    zresetuj_przewijanie();
+    if(liczba_zakladek>0 && &z==&zakladki[aktywna_zakladka]) zresetuj_przewijanie();
+}
+void submit_browser_form(Husarz::Document &d,uint16_t control) {
+    uint16_t form=Husarz::form_owner(d,control); if (!form) return;
+    const char *method=d.attr(form,"method");
+    if (*method && !Husarz::equal_ci(method,Husarz::length(method,16),"get")) { ustaw_status("Ta metoda formularza nie jest obsługiwana (GET)."); g_husarz.aktualizuj_pasek_stanu(); return; }
+    struct FormScratch { ParsedUrl base{}; char url[URL_POJEMNOSC]{}, query[URL_POJEMNOSC]{}; };
+    auto *scratch=new FormScratch; if (!scratch) return;
+    const char *action=d.attr(form,"action"); if (!*action) action=zakladki[aktywna_zakladka].url;
+    bool ready=document_url_base(zakladki[aktywna_zakladka].url,&d,scratch->base) &&
+        ustaw_url_z_location(scratch->url,sizeof(scratch->url),action,scratch->base) &&
+        Husarz::form_query(d,form,control,scratch->query,sizeof(scratch->query));
+    if (ready) {
+        size_t n=0; while (scratch->url[n] && scratch->url[n]!='?' && scratch->url[n]!='#') ++n;
+        size_t q=Husarz::length(scratch->query,sizeof(scratch->query));
+        if (n+q+2<sizeof(scratch->url)) {
+            scratch->url[n++]='?'; for (size_t i=0;i<=q;++i) scratch->url[n+i]=scratch->query[i];
+            g_husarz.przejdz_do_url(scratch->url);
+        } else ustaw_status("Formularz przekracza limit adresu URL.");
+    }
+    delete scratch;
 }
 void WidokStrony::obsluz_wcisniecie_myszy(ZdarzenieMyszki& e){
     Kontrolka::obsluz_wcisniecie_myszy(e);
     if(liczba_zakladek<=0||!zakladki[aktywna_zakladka].dokument)return;
-    const auto& d=*zakladki[aktywna_zakladka].dokument;
+    auto& d=*zakladki[aktywna_zakladka].dokument;
     auto screen=obszar_ekranu();
+    int px=e.x-screen.x, py=e.y-screen.y+int(g_husarz.suwak_pionowy->wartosc());
+    if (d.open_select) {
+        auto *popup=new Husarz::SelectPopup(Husarz::select_popup(d,d.open_select,int(g_husarz.suwak_pionowy->wartosc()),obszar_.szerokosc,obszar_.wysokosc));
+        int local_y=e.y-screen.y;
+        uint16_t open=d.open_select; d.open_select=0;
+        if(!popup)return;
+        if (px>=popup->x && px<popup->x+popup->width && local_y>=popup->y && local_y<popup->y+popup->height) {
+            if(auto *c=Husarz::control(d,open)) Husarz::choose_option(d,*c,popup->start+unsigned((local_y-popup->y)/popup->row));
+            delete popup; przygotuj(); e.obsluzone=true; return;
+        }
+        delete popup;
+    }
+    uint16_t clicked=0;
+    for (uint16_t i=1;i<d.node_count;++i) {
+        const auto &b=d.boxes[i]; const auto &s=d.styles[i];
+        if ((Husarz::is_control(d,i) || d.tag(i,"label")) && s.visible && s.display!=Husarz::Display::None &&
+            px>=b.x && py>=b.y && int64_t(px)<int64_t(b.x)+b.width && int64_t(py)<int64_t(b.y)+b.height) {
+            auto clip=Husarz::ancestor_clip(d,i,0,obszar_.szerokosc,Husarz::MaxDimension);
+            if (px>=clip.x && py>=clip.y && int64_t(px)<int64_t(clip.x)+clip.width && int64_t(py)<int64_t(clip.y)+clip.height) clicked=i;
+        }
+    }
+    if (clicked && d.tag(clicked,"label")) {
+        const char *target=d.attr(clicked,"for");
+        for (unsigned i=0;i<d.control_count;++i) {
+            uint16_t node=d.controls[i].node;
+            if ((*target && Husarz::equal(d.attr(node,"id"),target)) || (!*target && d.nodes[node].parent==clicked)) { clicked=node; break; }
+        }
+    }
+    if (auto *c=Husarz::control(d,clicked)) {
+        if (d.has_attr(clicked,"disabled")) return;
+        d.focused_control=clicked; c->cursor=c->length;
+        if(!d.tag(clicked,"select")) d.open_select=0;
+        if (Husarz::input_type(d,clicked,"checkbox") || Husarz::input_type(d,clicked,"radio")) Husarz::form_toggle(d,*c);
+        else if (d.tag(clicked,"select")) d.open_select=clicked;
+        else if (Husarz::input_type(d,clicked,"submit") || (d.tag(clicked,"button") && !Husarz::input_type(d,clicked,"button"))) { submit_browser_form(d,clicked); return; }
+        przygotuj(); e.obsluzone=true; return;
+    }
+    d.focused_control=0; uniewaznij();
     uint16_t link=Husarz::hit_test(d,e.x-screen.x,e.y-screen.y+int(g_husarz.suwak_pionowy->wartosc()));
     if(link){struct LinkScratch{ParsedUrl base{};char url[URL_POJEMNOSC]{};};auto* scratch=new LinkScratch;
         if(!scratch)return;
-        if(parsuj_url(zakladki[aktywna_zakladka].url,&scratch->base)&&ustaw_url_z_location(scratch->url,sizeof(scratch->url),d.attr(link,"href"),scratch->base))g_husarz.przejdz_do_url(scratch->url);
+        if(document_url_base(zakladki[aktywna_zakladka].url,&d,scratch->base)&&ustaw_url_z_location(scratch->url,sizeof(scratch->url),d.attr(link,"href"),scratch->base))g_husarz.przejdz_do_url(scratch->url);
         delete scratch;
     }
 }
 
-void HusarzApp::zbuduj_ui() {
+[[maybe_unused]] void HusarzApp::zbuduj_ui() {
     if (!okno) return;
 
     PanelDokowany* korzen = new PanelDokowany();
@@ -3659,6 +3917,7 @@ void HusarzApp::nowa_zakladka_gui() {
 
 void HusarzApp::zamknij_zakladke_gui(int idx) {
     if(nawigacja_trwa)return;
+    if(idx>=0 && idx<liczba_zakladek) cancel_async_tab(zakladki[idx]);
     zamknij_zakladke(idx);
     if (txt_adres && liczba_zakladek > 0) {
         txt_adres->ustaw_tekst(zakladki[aktywna_zakladka].url);
@@ -3724,6 +3983,7 @@ void HusarzApp::odswiez() {
 }
 
 void HusarzApp::zatrzymaj() {
+    if(liczba_zakladek>0) cancel_async_tab(zakladki[aktywna_zakladka]);
     ustaw_status("Zatrzymano wczytywanie.");
     aktualizuj_pasek_stanu();
 }
@@ -3786,7 +4046,7 @@ void HusarzApp::pokaz_zakladki() {
     menu_zakladki_popup->pokaz_pod_kontrolka(okno->zarzadca_popupow(), *btn_zakladki);
 }
 
-void inicjalizuj_stan() {
+[[maybe_unused]] void inicjalizuj_stan() {
     liczba_zakladek = 0;
     aktywna_zakladka = 0;
     historia_idx = -1;
@@ -3822,6 +4082,9 @@ extern "C" {
 }
 
 extern "C" [[noreturn]] void _start() {
+#ifdef HUSARZ_WORKER_ONLY
+    browser_worker_main();
+#else
     AplikacjaGUI app;
     g_husarz.app = &app;
 
@@ -3839,7 +4102,9 @@ extern "C" [[noreturn]] void _start() {
 
     zwolnij_wszystkie_zakladki();
     delete okno;
+    delete resource_cache; resource_cache=nullptr;
     bws_zakoncz_proces();
+#endif
 }
 
 #endif
