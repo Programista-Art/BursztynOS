@@ -1,0 +1,21 @@
+<!doctype html><title>Bounded tables and margins</title>
+<style>
+body{margin:0;background:white;color:black}
+table{margin:0;border-spacing:0}td{padding:0;vertical-align:top;height:40px}
+#grid{width:300px}#grid col{width:100px}
+#span{background:#22aa44}#one{background:#2244cc}#two{background:#eebb22}
+#all{background:#ee7722;height:20px}
+.spacer{height:20px}
+#borders{width:100px;border-collapse:collapse}
+#thin{border:2px solid red}#thick{border:6px solid blue}
+#before{height:10px;width:40px;background:#cc2233;margin-bottom:10px}
+#empty{margin-top:50px;margin-bottom:-25px}
+#after{height:10px;width:40px;background:#6633cc;margin-top:5px}
+</style>
+<table id=grid><colgroup><col><col><col></colgroup>
+<thead><tr><td id=span rowspan=2 colspan=2>Span 2 x 2</td><td id=one>One</td></tr><tr><td id=two>Two</td></tr></thead>
+<tbody><tr><td id=all colspan=3>Three columns</td></tr></tbody></table>
+<div class=spacer></div>
+<table id=borders><colgroup><col style='width:50px'><col style='width:50px'></colgroup><tr><td id=thin>A</td><td id=thick>B</td></tr></table>
+<div class=spacer></div>
+<div id=before></div><div id=empty></div><div id=after></div>

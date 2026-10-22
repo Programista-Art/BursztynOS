@@ -33,12 +33,13 @@ def main():
     parser.add_argument('--iso', type=Path, default=ROOT / 'BursztynOS.iso')
     parser.add_argument('--output', type=Path, default=ROOT / '.husarz-test/qemu')
     parser.add_argument('--timeout', type=float, default=900)
+    parser.add_argument('--layout-only', action='store_true', help='Native table spans, border conflict and signed margin pixels with resize')
     parser.add_argument('--render-only', action='store_true', help='Development pass over resources, forms and theme isolation')
     parser.add_argument('--images-only', action='store_true', help='Focused native PNG/JPEG pixels and shared-cache regression')
     parser.add_argument('--fault-vector', type=int, choices=[6,14], default=6)
     parser.add_argument('--fault-probe', type=Path, help='Private test kernel with a deliberately faulting Ring 3 browser payload')
     args = parser.parse_args()
-    if args.images_only:
+    if args.images_only or args.layout_only:
         args.render_only = True
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -408,6 +409,40 @@ def main():
                 time.sleep(2)
                 screenshot('forward')
                 result['back_forward'] = True
+            if args.layout_only:
+                navigate('layout-grid.html')
+                points = [(180,10,(34,170,68)), (290,10,(34,68,204)),
+                          (290,50,(238,187,34)), (290,90,(238,119,34)),
+                          (48,140,(0,0,255)), (50,140,(0,0,255)),
+                          (52,140,(0,0,255)), (20,195,(204,34,51)),
+                          (20,230,(102,51,204))]
+                def layout_pixels():
+                    im=screenshot('layout-pixels-probe')
+                    return all(im.getpixel((frame['x']+x,frame['y']+116+y))==color for x,y,color in points)
+                wait(layout_pixels, 'rowspan/colspan, collapsed-border and negative-margin pixels', 60)
+                screenshot('layout-grid')
+                with requests_lock:
+                    before_resize=len(requests)
+                normal_frame=dict(frame)
+                click(frame['x']+frame['w']-40,frame['y']+14)
+                frame.update(x=0,y=0,w=1280,h=680)
+                wait(layout_pixels,'table pixels after maximize',30)
+                screenshot('layout-maximized')
+                click(frame['x']+frame['w']-40,frame['y']+14)
+                frame.update(normal_frame)
+                wait(layout_pixels,'table pixels after restore',30)
+                screenshot('layout-restored')
+                with requests_lock:
+                    if len(requests)!=before_resize:
+                        raise AssertionError('Layout resize fetched the document again')
+                health()
+                result.update(result='PASS',kernel_sha256=kernel_sha,iso_sha256=iso_sha,
+                              table_rowspan=True,table_combined_spans=True,table_border_conflict=True,
+                              negative_empty_margin_strut=True,resize_without_network_fetch=True,
+                              no_guest_fault=True,http_requests=list(requests),pixel_samples=points)
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
+                print(json.dumps(result),flush=True)
+                return
             for name in ([] if args.images_only else ['box.html', 'percent.html', 'tables.html', 'radius.html', 'wrapping.html']):
                 navigate(name)
                 screenshot(name.replace('.html', ''))

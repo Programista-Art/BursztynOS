@@ -2031,3 +2031,9 @@ test-husarz-fidelity-host:
 	@mkdir -p .husarz-test
 	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -I. narzedzia/test_husarz_fidelity.cpp -o .husarz-test/fidelity
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .husarz-test/fidelity
+
+.PHONY: test-husarz-layout-host
+test-husarz-layout-host:
+	@mkdir -p .husarz-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -I. narzedzia/test_husarz_layout.cpp -o .husarz-test/layout
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .husarz-test/layout

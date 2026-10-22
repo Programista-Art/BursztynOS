@@ -81,6 +81,66 @@ inline Clip ancestor_clip(const Document &d, uint16_t id, int scroll, int vw, in
     }
     return clip;
 }
+struct CollapsedBorder { uint16_t node{}; uint8_t side{}; int width{}; };
+inline CollapsedBorder border_winner(const Document &d, CollapsedBorder a, uint16_t node, unsigned side) {
+    if (!node) return a;
+    const auto &s=d.styles[node]; int width=s.border_style?s.border[side]:0;
+    if (width<=0) return a;
+    // Width, then solid/dashed/dotted style, then deterministic earlier DOM order.
+    unsigned rank=s.border_style==1?3:s.border_style==2?2:1;
+    unsigned old_rank=a.node?(d.styles[a.node].border_style==1?3:d.styles[a.node].border_style==2?2:1):0;
+    if (width>a.width || (width==a.width && (rank>old_rank || (rank==old_rank && node<a.node))))
+        return {node,uint8_t(side),width};
+    return a;
+}
+inline void paint_collapsed_edge(const Document &d, Surface &surface, CollapsedBorder edge,
+                                int x,int y,int extent,bool horizontal,Clip clip) {
+    if (!edge.node || extent<=0) return;
+    const auto &s=d.styles[edge.node]; unsigned alpha=unsigned(s.paint_opacity)*s.border_alpha/255;
+    if (!s.visible || !alpha) return;
+    if (s.border_style==1) {
+        surface.rect(x-(horizontal?0:edge.width/2),y-(horizontal?edge.width/2:0),
+                     horizontal?extent:edge.width,horizontal?edge.width:extent,s.border_color,alpha,clip);
+        return;
+    }
+    int step=s.border_style==2?6:2;
+    // Iteration follows visible pixels only, even for enormous CSS coordinates.
+    Clip line=intersect(clip,{0,0,surface.width,surface.height});
+    int first=horizontal?line.x-x:line.y-y, last=horizontal?line.x+line.width-x:line.y+line.height-y;
+    if (first<0) first=0;
+    if (last>extent) last=extent;
+    for (int i=first;i<last && surface.budget;++i) if (!((i/step)&1))
+        surface.rect(x+(horizontal?i:-edge.width/2),y+(horizontal?-edge.width/2:i),
+                     horizontal?1:edge.width,horizontal?edge.width:1,s.border_color,alpha,clip);
+}
+inline void paint_collapsed_tables(const Document &d, Surface &surface, int scroll) {
+    for (unsigned t=0;t<d.table_count && surface.budget;++t) {
+        const auto &p=d.tables[t]; if (!p.rows || !d.styles[p.node].border_collapse) continue;
+        const auto &b=d.boxes[p.node]; Clip clip=ancestor_clip(d,p.node,scroll,surface.width,surface.height);
+        for (unsigned r=0;r<=p.rows && surface.budget;++r) {
+            int y=r<p.rows?d.boxes[p.row_nodes[r]].y:d.boxes[p.row_nodes[p.rows?p.rows-1:0]].y+(p.rows?p.heights[p.rows-1]:0);
+            int x=b.content_x;
+            for (unsigned c=0;c<p.columns && surface.budget;++c) {
+                uint16_t above=r?p.grid[(r-1)*MaxTableColumns+c]:0, below=r<p.rows?p.grid[r*MaxTableColumns+c]:0;
+                CollapsedBorder edge;
+                if (above!=below) { edge=border_winner(d,edge,above,2); edge=border_winner(d,edge,below,0); }
+                if (!r || r==p.rows) edge=border_winner(d,edge,p.node,r?2:0);
+                paint_collapsed_edge(d,surface,edge,x,y-scroll,p.widths[c],true,clip); x+=p.widths[c];
+            }
+        }
+        int x=b.content_x;
+        for (unsigned c=0;c<=p.columns && surface.budget;++c) {
+            for (unsigned r=0;r<p.rows && surface.budget;++r) {
+                uint16_t left=c?p.grid[r*MaxTableColumns+c-1]:0, right=c<p.columns?p.grid[r*MaxTableColumns+c]:0;
+                CollapsedBorder edge;
+                if (left!=right) { edge=border_winner(d,edge,left,1); edge=border_winner(d,edge,right,3); }
+                if (!c || c==p.columns) edge=border_winner(d,edge,p.node,c?1:3);
+                paint_collapsed_edge(d,surface,edge,x,d.boxes[p.row_nodes[r]].y-scroll,p.heights[r],false,clip);
+            }
+            if (c<p.columns) x+=p.widths[c];
+        }
+    }
+}
 inline void paint_image(const Document &d, uint16_t id, Surface &target, int scroll, Clip clip, bool background) {
     const auto *image=d.image(id,background); if (!image) return;
     const auto &b=d.boxes[id]; const auto &s=d.styles[id];
@@ -182,7 +242,10 @@ inline void paint(Document &d, Surface &target, int scroll, const Metrics &metri
                     }
                 }
             }
-            if (s.border_style) {
+            const auto *collapsed=table_plan(d,id);
+            bool collapsed_part=collapsed && d.styles[collapsed->node].border_collapse &&
+                (id==collapsed->node || d.table_cell[id].table==collapsed->node);
+            if (s.border_style && !collapsed_part) {
                 int y = b.y - scroll;
                 Clip c = intersect({b.x, y, b.width, b.height}, clip);
                 int innerw = b.width - s.border[1] - s.border[3],
@@ -253,6 +316,7 @@ inline void paint(Document &d, Surface &target, int scroll, const Metrics &metri
                 target.rect(f.x, y + f.height - 1, f.width, 1, s.color, unsigned(s.paint_opacity) * s.color_alpha / 255, fc);
         }
     }
+    paint_collapsed_tables(d,target,scroll);
     if (d.focused_control) {
         auto *c=control(d,d.focused_control);
         if (c) {

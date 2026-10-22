@@ -4,8 +4,9 @@
 namespace Husarz {
 struct Flow {
     uint16_t node{};
-    int x{}, y{}, width{}, pen{}, line_height{}, line_first{}, previous_margin{}, row_height{}, column{},
-        columns{1};
+    int x{}, y{}, width{}, pen{}, line_height{}, line_first{};
+    MarginStrut previous_margin{};
+    int row_height{}, column{}, columns{1};
     bool pending_space{};
 };
 inline int advance(const Metrics &m, uint32_t cp, const Style &s) {
@@ -47,20 +48,21 @@ inline void finish_line(Document &d, Flow &f, bool force = false) {
                 auto &b = d.boxes[g.node];
                 b.x = clamp64(int64_t(b.x) + shift, -MaxDimension);
                 b.content_x = clamp64(int64_t(b.content_x) + shift, -MaxDimension);
-                b.y = clamp64(int64_t(b.y) + (dy > 0 ? dy : 0));
-                b.content_y = clamp64(int64_t(b.content_y) + (dy > 0 ? dy : 0));
+                b.y = clamp64(int64_t(b.y) + (dy > 0 ? dy : 0), -MaxDimension);
+                b.content_y = clamp64(int64_t(b.content_y) + (dy > 0 ? dy : 0), -MaxDimension);
                 moved = g.node;
             }
             if (dy < 0)
                 dy = 0;
             g.x = clamp64(int64_t(g.x) + shift, -MaxDimension);
-            g.y = clamp64(int64_t(g.y) + dy);
+            g.y = clamp64(int64_t(g.y) + dy, -MaxDimension);
         }
-        f.y = clamp64(int64_t(f.y) + h);
+        f.y = clamp64(int64_t(f.y) + h, -MaxDimension);
         f.pen = 0;
         f.line_height = 0;
         f.line_first = int(d.fragment_count);
         f.pending_space = false;
+        f.previous_margin = MarginStrut();
     }
 }
 inline void emit(Document &d, Flow &f, uint16_t id, uint32_t off, uint32_t len, int width, const Metrics &m) {
@@ -265,37 +267,283 @@ inline void list_markers(Document &d) {
         out[n]=0; node.text_length=n;
     }
 }
+inline bool table_work(Document &d, unsigned amount = 1) {
+    if (amount > MaxTableWork-d.table_work) { d.truncated=true; return false; }
+    d.table_work += amount; return true;
+}
+struct IntrinsicSize { int minimum{}, preferred{}; };
+inline IntrinsicSize cell_intrinsic(Document &d, uint16_t cell, const Metrics &metrics) {
+    int word=0, line=0, minimum=0, preferred=0;
+    for (uint16_t n=cell+1;n<d.node_count && d.nodes[n].depth>d.nodes[cell].depth;++n) {
+        if (!table_work(d)) break;
+        if (d.styles[n].display==Display::None) {
+            unsigned depth=d.nodes[n].depth;
+            while (unsigned(n)+1<d.node_count && d.nodes[n+1].depth>depth) ++n;
+            continue;
+        }
+        const auto &node=d.nodes[n]; const auto &style=d.styles[n];
+        if (style.display==Display::Block || style.display==Display::Row || d.tag(n,"br")) {
+            if (word>minimum) minimum=word;
+            if (line>preferred) preferred=line;
+            word=line=0;
+        }
+        if (d.tag(n,"img")) {
+            const auto *image=d.image(n);
+            int w=resolve(style.width,0,style.font,d.root_font,image?int(image->width):32);
+            if (style.width.unit==Unit::Auto && d.has_attr(n,"width")) w=int(positive_attribute(d,n,"width",32,8192));
+            word=clamp64(int64_t(word)+w); line=clamp64(int64_t(line)+w);
+        }
+        if (!node.is_text) continue;
+        for (size_t p=0;p<node.text_length;) {
+            if (!table_work(d)) break;
+            size_t used; uint32_t cp=utf8(d.str(node.text)+p,node.text_length-p,used);
+            int w=advance(metrics,transformed(cp,style.transform,!word),style);
+            if (space(char(cp)) && cp<128 && style.white!=WhiteSpace::NoWrap && style.white!=WhiteSpace::Pre) {
+                if (word>minimum) minimum=word;
+                word=0;
+            } else word=clamp64(int64_t(word)+w);
+            if (cp=='\n' && (style.white==WhiteSpace::Pre || style.white==WhiteSpace::PreWrap)) {
+                if (line>preferred) preferred=line;
+                line=0;
+            } else line=clamp64(int64_t(line)+w);
+            p+=used;
+        }
+    }
+    if (word>minimum) minimum=word;
+    if (line>preferred) preferred=line;
+    const auto &s=d.styles[cell]; int extra=s.border[1]+s.border[3];
+    // Percentage padding is resolved against the containing block during sizing.
+    for (unsigned side=1;side<=3;side+=2) if (s.padding[side].unit!=Unit::Percent)
+        extra=clamp64(int64_t(extra)+resolve(s.padding[side],0,s.font,d.root_font));
+    minimum=clamp64(int64_t(minimum)+extra,1); preferred=clamp64(int64_t(preferred)+extra,minimum);
+    if (s.width.unit!=Unit::Auto && s.width.unit!=Unit::Percent) {
+        int w=resolve(s.width,0,s.font,d.root_font)+(s.border_box?0:extra);
+        if (w>minimum) minimum=w;
+        if (w>preferred) preferred=w;
+    }
+    return {minimum,preferred};
+}
+inline void span_constraint(int *columns, unsigned start, unsigned count, int target, int gap) {
+    int64_t sum=int64_t(gap)*(count-1);
+    for (unsigned i=start;i<start+count;++i) sum+=columns[i];
+    if (sum>=target) return;
+    int deficit=int(target-sum);
+    for (unsigned i=0;i<count;++i) columns[start+i]=clamp64(int64_t(columns[start+i])+deficit/int(count)+(int(i)<deficit%int(count)?1:0));
+}
 inline void plan_tables(Document &d, const Metrics &metrics) {
-    d.table_count = 0;
-    for (uint16_t id=1;id<d.node_count;++id) if (d.styles[id].display == Display::Table) {
-        if (d.table_count == 32) { d.truncated = true; break; }
-        auto &plan = d.tables[d.table_count++]; plan = {}; plan.node = id;
-        unsigned rows = 0;
+    d.table_count=d.table_cells=0; d.table_work=0;
+    for (unsigned n=0;n<d.node_count;++n) d.table_cell[n]={};
+    for (uint16_t id=1;id<d.node_count;++id) if (d.styles[id].display==Display::Table) {
+        if (d.table_count==MaxTables) { d.truncated=true; break; }
+        auto &p=d.tables[d.table_count++];
+        // In-place clearing avoids a large temporary on the native Ring 3 stack.
+        p.node=id; p.rows=p.columns=0; p.total=0;
+        p.gap=d.styles[id].border_collapse?0:d.styles[id].border_spacing;
+        for (unsigned i=0;i<MaxTableColumns;++i) { p.minimum[i]=p.preferred[i]=p.widths[i]=0; p.explicit_columns[i]={}; }
+        for (unsigned i=0;i<MaxTableRows;++i) { p.row_nodes[i]=0; p.heights[i]=p.tops[i]=0; }
+        for (auto &entry:p.grid) entry=0;
+        // Record rows first, so spans can be clamped to existing rows and row groups.
         for (uint16_t row=id+1;row<d.node_count && d.nodes[row].depth>d.nodes[id].depth;++row) {
-            if (d.styles[row].display != Display::Row) continue;
-            // Nested tables have independent plans.
-            uint16_t table = d.nodes[row].parent;
-            while (table && d.styles[table].display != Display::Table) table = d.nodes[table].parent;
-            if (table != id) continue;
-            if (++rows > 256) { d.truncated = true; break; }
-            unsigned col = 0;
-            for (uint16_t cell=d.nodes[row].first;cell && col<32;cell=d.nodes[cell].next) {
-                if (d.styles[cell].display != Display::Cell) continue;
-                unsigned span = positive_attribute(d,cell,"colspan",1,32-col);
-                const auto &s = d.styles[cell];
-                int width = intrinsic_width(d,cell,metrics)+8;
-                if (s.width.unit == Unit::Px) width = resolve(s.width,0,s.font,d.root_font);
-                width = clamp64(width,8,8192)/int(span);
-                for (unsigned c=col;c<col+span;++c) if (width>plan.weights[c]) plan.weights[c]=width;
-                col += span;
+            if (!table_work(d)) break;
+            if (d.styles[row].display!=Display::Row) continue;
+            uint16_t owner=d.nodes[row].parent;
+            while (owner && d.styles[owner].display!=Display::Table) owner=d.nodes[owner].parent;
+            if (owner!=id) continue;
+            if (p.rows==MaxTableRows) { d.truncated=true; break; }
+            p.row_nodes[p.rows++]=row;
+        }
+        for (unsigned r=0;r<p.rows;++r) {
+            unsigned col=0;
+            for (uint16_t cell=d.nodes[p.row_nodes[r]].first;cell;cell=d.nodes[cell].next) {
+                if (d.styles[cell].display!=Display::Cell) continue;
+                if (d.table_cells==MaxTableCells || !table_work(d)) { d.truncated=true; break; }
+                while (col<MaxTableColumns && p.grid[r*MaxTableColumns+col]) ++col;
+                if (col==MaxTableColumns) { d.truncated=true; continue; }
+                unsigned cols=positive_attribute(d,cell,"colspan",1,MaxTableSpan);
+                if (cols>MaxTableColumns-col) cols=MaxTableColumns-col;
+                unsigned rows=positive_attribute(d,cell,"rowspan",1,MaxTableSpan);
+                if (rows>p.rows-r) rows=p.rows-r;
+                // A span cannot cross a row-group boundary.
+                for (unsigned j=1;j<rows;++j) if (d.nodes[p.row_nodes[r+j]].parent!=d.nodes[p.row_nodes[r]].parent) { rows=j; break; }
+                bool overlap=false;
+                for (unsigned y=r;y<r+rows;++y) for (unsigned x=col;x<col+cols;++x) {
+                    if (!table_work(d) || p.grid[y*MaxTableColumns+x]) overlap=true;
+                }
+                if (overlap) { d.truncated=true; continue; } // Never overwrite an earlier reservation.
+                d.table_cell[cell]={id,uint16_t(r),uint16_t(col),uint16_t(rows),uint16_t(cols)}; ++d.table_cells;
+                for (unsigned y=r;y<r+rows;++y) for (unsigned x=col;x<col+cols;++x) p.grid[y*MaxTableColumns+x]=cell;
+                col+=cols; if (col>p.columns) p.columns=uint16_t(col);
             }
-            if (col>plan.columns) plan.columns=uint16_t(col);
         }
-        if (!plan.columns) plan.columns=1;
-        for (unsigned col=0;col<plan.columns;++col) {
-            if (!plan.weights[col]) plan.weights[col]=8;
-            plan.total += plan.weights[col];
+        if (!p.columns) p.columns=1;
+        unsigned column=0;
+        for (uint16_t n=id+1;n<d.node_count && d.nodes[n].depth>d.nodes[id].depth;++n) if (d.tag(n,"col")) {
+            uint16_t owner=d.nodes[n].parent;
+            while (owner && d.styles[owner].display!=Display::Table) owner=d.nodes[owner].parent;
+            if (owner!=id) continue;
+            unsigned count=positive_attribute(d,n,"span",1,MaxTableSpan);
+            Length value=d.styles[n].width;
+            if (value.unit==Unit::Auto) css_length({d.attr(n,"width"),length(d.attr(n,"width"),32)},value);
+            while (count-- && column<p.columns) p.explicit_columns[column++]=value;
         }
+        // Two fixed passes: single-column minima, then spanning inequalities.
+        for (unsigned pass=0;pass<2;++pass)
+            for (uint16_t cell=id+1;cell<d.node_count && d.nodes[cell].depth>d.nodes[id].depth;++cell) {
+                const auto &c=d.table_cell[cell];
+                if (c.table!=id || (c.columns==1)!=(pass==0)) continue;
+                auto size=cell_intrinsic(d,cell,metrics);
+                span_constraint(p.minimum,c.column,c.columns,size.minimum,p.gap);
+                span_constraint(p.preferred,c.column,c.columns,size.preferred,p.gap);
+            }
+        for (unsigned c=0;c<p.columns;++c) {
+            if (!p.minimum[c]) p.minimum[c]=1;
+            if (p.preferred[c]<p.minimum[c]) p.preferred[c]=p.minimum[c];
+        }
+    }
+}
+inline void size_table(Document &d, TablePlan &p, int available) {
+    int64_t minimum=0, preferred=0;
+    for (unsigned c=0;c<p.columns;++c) {
+        const auto &s=d.styles[p.node];
+        int explicit_width=resolve(p.explicit_columns[c],available,s.font,d.root_font);
+        if (explicit_width>p.minimum[c]) p.minimum[c]=explicit_width;
+        if (p.preferred[c]<p.minimum[c]) p.preferred[c]=p.minimum[c];
+    }
+    for (uint16_t n=p.node+1;n<d.node_count && d.nodes[n].depth>d.nodes[p.node].depth;++n) {
+        const auto &cell=d.table_cell[n]; if (cell.table!=p.node) continue;
+        const auto &s=d.styles[n];
+        if (s.width.unit==Unit::Percent) {
+            int target=resolve(s.width,available,s.font,d.root_font);
+            if (!s.border_box) target=clamp64(int64_t(target)+s.border[1]+s.border[3]+
+                resolve(s.padding[1],available,s.font,d.root_font)+resolve(s.padding[3],available,s.font,d.root_font));
+            span_constraint(p.minimum,cell.column,cell.columns,target,p.gap);
+            span_constraint(p.preferred,cell.column,cell.columns,target,p.gap);
+        }
+    }
+    for (unsigned c=0;c<p.columns;++c) {
+        minimum+=p.minimum[c]; preferred+=p.preferred[c];
+    }
+    int room=clamp64(int64_t(available)-int64_t(p.gap)*(p.columns+1));
+    int target=room;
+    if (d.styles[p.node].width.unit==Unit::Auto && target>preferred) target=int(preferred);
+    if (target<minimum) target=clamp64(minimum);
+    int64_t remaining=int64_t(target)-minimum, flexibility=preferred-minimum;
+    int64_t allocated=0;
+    for (unsigned c=0;c<p.columns;++c) {
+        int64_t share=flexibility>0 && remaining<flexibility ? remaining*(p.preferred[c]-p.minimum[c])/flexibility :
+            (remaining>=flexibility ? p.preferred[c]-p.minimum[c]+(remaining-flexibility)/p.columns : 0);
+        p.widths[c]=clamp64(int64_t(p.minimum[c])+share); allocated+=p.widths[c];
+    }
+    // Rounding remainder is at most a few columns; no content-controlled loop.
+    for (unsigned c=0;c<p.columns && allocated<target;++c) { ++p.widths[c]; ++allocated; }
+    p.total=clamp64(allocated+int64_t(p.gap)*(p.columns+1));
+}
+inline int finish_table(Document &d, TablePlan &p) {
+    auto &table=d.boxes[p.node];
+    for (unsigned r=0;r<p.rows;++r) p.heights[r]=d.boxes[p.row_nodes[r]].height;
+    // Existing non-spanning row heights first, then one bounded span-deficit pass.
+    for (uint16_t n=p.node+1;n<d.node_count && d.nodes[n].depth>d.nodes[p.node].depth;++n) {
+        const auto &c=d.table_cell[n]; if (c.table!=p.node) continue;
+        span_constraint(p.heights,c.row,c.rows,d.boxes[n].height,p.gap);
+    }
+    int y=clamp64(int64_t(table.content_y)+p.gap, -MaxDimension);
+    for (unsigned r=0;r<p.rows;++r) { p.tops[r]=y; y=clamp64(int64_t(y)+p.heights[r]+p.gap, -MaxDimension); }
+    d.table_shift[p.node]=0;
+    for (uint16_t n=p.node+1;n<d.node_count && d.nodes[n].depth>d.nodes[p.node].depth;++n) {
+        auto &box=d.boxes[n]; const auto &c=d.table_cell[n];
+        int dy=d.table_shift[d.nodes[n].parent];
+        if (c.table==p.node) {
+            dy=p.tops[c.row]-box.y;
+            int height=0;
+            for (unsigned r=c.row;r<c.row+c.rows;++r) height=clamp64(int64_t(height)+p.heights[r]+(r>c.row?p.gap:0));
+            int spare=clamp64(int64_t(height)-box.height);
+            box.height=height;
+            // Padding/border stay in the cell; vertical alignment moves only its content.
+            int alignment=d.styles[n].vertical==Vertical::Middle?spare/2:d.styles[n].vertical==Vertical::Bottom?spare:0;
+            box.y=clamp64(int64_t(box.y)+dy,-MaxDimension);
+            box.content_y=clamp64(int64_t(box.content_y)+dy+alignment,-MaxDimension);
+            d.table_shift[n]=dy+alignment;
+            continue;
+        }
+        d.table_shift[n]=dy;
+        box.y=clamp64(int64_t(box.y)+dy,-MaxDimension); box.content_y=clamp64(int64_t(box.content_y)+dy,-MaxDimension);
+    }
+    for (unsigned r=0;r<p.rows;++r) {
+        auto &row=d.boxes[p.row_nodes[r]]; row.y=row.content_y=p.tops[r]; row.height=row.content_height=p.heights[r];
+    }
+    // Row-group rectangles follow finalized row geometry, including rowspan growth.
+    for (unsigned r=0;r<p.rows;++r) {
+        uint16_t group=d.nodes[p.row_nodes[r]].parent;
+        if (d.styles[group].display!=Display::RowGroup) continue;
+        auto &g=d.boxes[group];
+        bool first=!r || d.nodes[p.row_nodes[r-1]].parent!=group;
+        if (first) { g.x=g.content_x=table.content_x; g.y=g.content_y=p.tops[r]; g.width=g.content_width=table.content_width; }
+        g.height=g.content_height=clamp64(int64_t(p.tops[r])+p.heights[r]-g.y);
+    }
+    uint16_t end=p.node+1;
+    while (end<d.node_count && d.nodes[end].depth>d.nodes[p.node].depth) ++end;
+    for (uint32_t f=0;f<d.fragment_count;++f) {
+        auto &fragment=d.fragments[f];
+        // Parser indices are in tree preorder, just as in the sizing/layout walk.
+        if (fragment.node>p.node && fragment.node<end)
+            fragment.y=clamp64(int64_t(fragment.y)+d.table_shift[fragment.node],-MaxDimension);
+    }
+    return clamp64(int64_t(y)-table.content_y);
+}
+inline bool collapsing_block(const Document &d,uint16_t n) {
+    return d.styles[n].display==Display::Block && d.styles[n].position==Position::Static && !is_control(d,n);
+}
+inline bool flow_whitespace(const Document &d,uint16_t n) {
+    if (!d.nodes[n].is_text) return false;
+    for (unsigned i=0;i<d.nodes[n].text_length;++i) if (!space(d.str(d.nodes[n].text)[i])) return false;
+    return d.styles[n].white==WhiteSpace::Normal || d.styles[n].white==WhiteSpace::NoWrap;
+}
+inline bool collapse_ignored(const Document &d,uint16_t n) {
+    return d.styles[n].display==Display::None || d.styles[n].position==Position::Absolute || flow_whitespace(d,n);
+}
+inline void plan_margins(Document &d,int width) {
+    d.collapse_width[0]=width;
+    for (uint16_t n=1;n<d.node_count;++n) {
+        auto &m=d.margins[n]; m={}; const auto &s=d.styles[n]; int basis=d.collapse_width[d.nodes[n].parent];
+        m.top=MarginStrut(resolve(s.margin[0],basis,s.font,d.root_font));
+        m.bottom=MarginStrut(resolve(s.margin[2],basis,s.font,d.root_font));
+        int edges=s.border[1]+s.border[3]+resolve(s.padding[1],basis,s.font,d.root_font)+resolve(s.padding[3],basis,s.font,d.root_font);
+        int content=resolve(s.width,basis,s.font,d.root_font,clamp64(int64_t(basis)-edges-
+            resolve(s.margin[1],basis,s.font,d.root_font)-resolve(s.margin[3],basis,s.font,d.root_font)));
+        if (s.width.unit!=Unit::Auto && s.border_box) content=clamp64(int64_t(content)-edges);
+        d.collapse_width[n]=clamp64(content,1);
+    }
+    // Iterative postorder over parser indices; no recursive descent on web content.
+    for (uint16_t n=uint16_t(d.node_count); --n;) {
+        if (!collapsing_block(d,n) || d.tag(n,"html")) continue;
+        auto &m=d.margins[n]; const auto &s=d.styles[n];
+        int basis=d.collapse_width[d.nodes[n].parent];
+        bool context=s.overflow_x!=Overflow::Visible || s.overflow_y!=Overflow::Visible;
+        bool top=!context && !s.border[0] && !resolve(s.padding[0],basis,s.font,d.root_font);
+        bool bottom=!context && !s.border[2] && !resolve(s.padding[2],basis,s.font,d.root_font) &&
+            s.height.unit==Unit::Auto && resolve(s.min_height,0,s.font,d.root_font)==0;
+        bool empty=!context && top && !s.border[2] && !resolve(s.padding[2],basis,s.font,d.root_font) &&
+            (s.height.unit==Unit::Auto || (!s.height.value && s.height.unit!=Unit::Percent)) &&
+            resolve(s.min_height,0,s.font,d.root_font)==0;
+        for (uint16_t c=d.nodes[n].first;c;c=d.nodes[c].next) {
+            if (collapse_ignored(d,c)) continue;
+            if (!collapsing_block(d,c) || !d.margins[c].through) empty=false;
+            if (top && collapsing_block(d,c)) {
+                m.top.include(d.margins[c].top); d.margins[c].suppress_top=true;
+                if (d.margins[c].through) { m.top.include(d.margins[c].bottom); d.margins[c].suppress_bottom=true; }
+                else top=false;
+            } else top=false;
+        }
+        for (uint16_t c=d.nodes[n].last;c;c=d.nodes[c].previous) {
+            if (collapse_ignored(d,c)) continue;
+            if (bottom && collapsing_block(d,c)) {
+                m.bottom.include(d.margins[c].bottom); d.margins[c].suppress_bottom=true;
+                if (d.margins[c].through) { m.bottom.include(d.margins[c].top); d.margins[c].suppress_top=true; }
+                else bottom=false;
+            } else bottom=false;
+        }
+        m.through=empty;
+        if (empty) { m.top.include(m.bottom); m.bottom=m.top; }
     }
 }
 inline void reflow(Document &d, int width, const Metrics &metrics) {
@@ -304,6 +552,7 @@ inline void reflow(Document &d, int width, const Metrics &metrics) {
         compute_styles(d);
     list_markers(d);
     plan_tables(d,metrics);
+    plan_margins(d,width);
     d.fragment_count = 0;
     d.offset_x[0] = d.offset_y[0] = 0;
     d.layout_width = width;
@@ -331,10 +580,21 @@ inline void reflow(Document &d, int width, const Metrics &metrics) {
         Box &box = d.boxes[id];
         box = {};
         skip[depth] = skip[parent_depth] || s.display == Display::None;
+        if (s.display==Display::Cell && d.styles[parent.node].display==Display::Row && table_plan(d,id) && !d.table_cell[id].table)
+            skip[depth]=true;
+        if (s.display==Display::Table && !table_plan(d,id)) skip[depth]=true;
+        if (s.display==Display::Row) {
+            const auto *plan=table_plan(d,id);
+            if (plan) {
+                bool found=false;
+                for (unsigned r=0;r<plan->rows;++r) if (plan->row_nodes[r]==id) { found=true; break; }
+                if (!found) skip[depth]=true;
+            }
+        }
         bool replaced = !n.is_text && (d.tag(id, "input") || d.tag(id, "textarea") || d.tag(id, "select") ||
                                        d.tag(id, "img") || d.tag(id,"button"));
         bool is_block = s.display == Display::Block || s.display == Display::Table ||
-                        s.display == Display::Row || s.display == Display::Cell || s.display == Display::InlineBlock || s.position == Position::Absolute;
+                        s.display == Display::RowGroup || s.display == Display::Row || s.display == Display::Cell || s.display == Display::InlineBlock || s.position == Position::Absolute;
         if (replaced) is_block=false;
         block[depth] = is_block;
         active[depth] = uint16_t(fidx);
@@ -349,6 +609,12 @@ inline void reflow(Document &d, int width, const Metrics &metrics) {
                 if (!inline_box && s.position != Position::Absolute) finish_line(d, parent);
                 int mt = resolve(s.margin[0], parent.width, s.font, d.root_font),
                     mb = resolve(s.margin[2], parent.width, s.font, d.root_font);
+                MarginStrut top_margin(mt), bottom_margin(mb);
+                if (collapsing_block(d,id)) {
+                    top_margin=d.margins[id].suppress_top?MarginStrut():d.margins[id].top;
+                    bottom_margin=d.margins[id].suppress_bottom?MarginStrut():d.margins[id].bottom;
+                    mt=top_margin.value(); mb=bottom_margin.value();
+                }
                 int ml = resolve(s.margin[3], parent.width, s.font, d.root_font),
                     mr = resolve(s.margin[1], parent.width, s.font, d.root_font);
                 int pl = resolve(s.padding[3], parent.width, s.font, d.root_font),
@@ -366,18 +632,14 @@ inline void reflow(Document &d, int width, const Metrics &metrics) {
                 int cell_offset = 0;
                 if (cell) {
                     const auto *plan = table_plan(d,id);
-                    unsigned col = unsigned(parent.column), span = positive_attribute(d,id,"colspan",1,col<32 ? 32-col : 1);
-                    int before = 0, weight = 0;
-                    if (plan) {
-                        for (unsigned c=0;c<plan->columns;++c) {
-                            if (c<col) before += plan->weights[c];
-                            else if (c<col+span) weight += plan->weights[c];
-                        }
-                        cell_offset = int(int64_t(parent.width)*before/plan->total);
-                        available = int(int64_t(parent.width)*(before+weight)/plan->total)-cell_offset;
-                    } else { cell_offset = parent.column*(parent.width/parent.columns); available = parent.width/parent.columns; }
-                    int gap = d.styles[parent.node].border_collapse ? 0 : d.styles[parent.node].border_spacing;
-                    available = clamp64(int64_t(available)-gap);
+                    const auto &placement=d.table_cell[id];
+                    if (plan && placement.table==plan->node) {
+                        cell_offset=plan->gap;
+                        for (unsigned c=0;c<placement.column;++c) cell_offset+=plan->widths[c]+plan->gap;
+                        available=0;
+                        for (unsigned c=placement.column;c<placement.column+placement.columns;++c)
+                            available+=plan->widths[c]+(c>placement.column?plan->gap:0);
+                    } else { cell_offset=parent.column*(parent.width/parent.columns); available=parent.width/parent.columns; }
                 }
                 int content = resolve(s.width, available, s.font, d.root_font,
                                       clamp64(int64_t(available) - ml - mr - extra));
@@ -396,6 +658,11 @@ inline void reflow(Document &d, int width, const Metrics &metrics) {
                 if (content < min)
                     content = min;
                 content = clamp64(content);
+                if (s.display==Display::Table) {
+                    for (unsigned t=0;t<d.table_count;++t) if (d.tables[t].node==id) {
+                        size_table(d,d.tables[t],content); content=d.tables[t].total; break;
+                    }
+                }
                 int total = clamp64(int64_t(content) + extra);
                 if (s.margin[3].unit == Unit::Auto || s.margin[1].unit == Unit::Auto) {
                     int remainder = clamp64(int64_t(available) - total - ml - mr);
@@ -406,17 +673,17 @@ inline void reflow(Document &d, int width, const Metrics &metrics) {
                     clamp64(int64_t(parent.x) + (inline_box ? parent.pen : 0) +
                                 (cell ? cell_offset : 0) + ml,
                             -MaxDimension);
-                int previous=parent.previous_margin;
-                int positive=(mt>0?mt:0)>(previous>0?previous:0)?(mt>0?mt:0):(previous>0?previous:0);
-                int negative=(mt<0?mt:0)<(previous<0?previous:0)?(mt<0?mt:0):(previous<0?previous:0);
-                int collapse=positive+negative-previous;
+                MarginStrut merged=top_margin;
+                bool adjoining=collapsing_block(d,id);
+                if (adjoining) merged.include(parent.previous_margin);
+                int collapse=adjoining?merged.value()-parent.previous_margin.value():mt;
                 int y = clamp64(int64_t(parent.y) + (cell ? mt : collapse), -MaxDimension);
                 box = {x,
                        y,
                        total,
                        0,
                        clamp64(int64_t(x) + pl + s.border[3], -MaxDimension),
-                       clamp64(int64_t(y) + pt + s.border[0]),
+                       clamp64(int64_t(y) + pt + s.border[0], -MaxDimension),
                        content,
                        0};
                 if (s.height.unit!=Unit::Auto && s.height.unit!=Unit::Percent) {
@@ -496,7 +763,7 @@ inline void reflow(Document &d, int width, const Metrics &metrics) {
                 box = {
                     clamp64(int64_t(parent.x) + parent.pen, -MaxDimension), parent.y, outer, 0, 0, 0, cw, 0};
                 box.content_x = clamp64(int64_t(box.x) + pl + s.border[3], -MaxDimension);
-                box.content_y = clamp64(int64_t(box.y) + pt + s.border[0]);
+                box.content_y = clamp64(int64_t(box.y) + pt + s.border[0], -MaxDimension);
                 Flow local{id, box.content_x, box.content_y, cw, 0, 0, int(d.fragment_count), 0, 0, 0,
                            1,  false};
                 bool toggle=input_type(d,id,"checkbox") || input_type(d,id,"radio");
@@ -564,6 +831,8 @@ inline void reflow(Document &d, int width, const Metrics &metrics) {
                     int content = clamp64(int64_t(f.y) - b.content_y);
                     if (st.display == Display::Row && f.row_height > content)
                         content = f.row_height;
+                    if (st.display==Display::Table)
+                        for (unsigned t=0;t<d.table_count;++t) if (d.tables[t].node==id) { content=finish_table(d,d.tables[t]); break; }
                     int pb = resolve(st.padding[2], pf.width, st.font, d.root_font);
                     int extra = clamp64(int64_t(b.content_y) - b.y + pb + st.border[2]);
                     int containing_height=d.boxes[pf.node].content_height;
@@ -592,12 +861,18 @@ inline void reflow(Document &d, int width, const Metrics &metrics) {
                         if (b.height > pf.line_height) pf.line_height = b.height;
                     } else if (st.display == Display::Cell && d.styles[pf.node].display == Display::Row) {
                         int h = clamp64(int64_t(b.y) - pf.y + b.height + outer_margin[dep]);
-                        if (h > pf.row_height)
+                        if (d.table_cell[id].rows<=1 && h > pf.row_height)
                             pf.row_height = h;
                         pf.column += int(positive_attribute(d,id,"colspan",1,32));
                     } else {
-                        pf.y = clamp64(int64_t(b.y) + b.height + outer_margin[dep]);
-                        pf.previous_margin = outer_margin[dep];
+                        pf.y = clamp64(int64_t(b.y) + b.height + outer_margin[dep], -MaxDimension);
+                        if (collapsing_block(d,id)) {
+                            if (d.margins[id].through) {
+                                MarginStrut joined=d.margins[id].suppress_top?MarginStrut():d.margins[id].top;
+                                joined.include(pf.previous_margin); pf.previous_margin=joined;
+                                pf.y=b.y; // Empty blocks preserve the entire adjoining strut.
+                            } else pf.previous_margin=d.margins[id].suppress_bottom?MarginStrut():d.margins[id].bottom;
+                        } else pf.previous_margin=MarginStrut();
                         pf.line_first = int(d.fragment_count);
                     }
                 } else if (!end.is_text && !d.tag(id, "input") && !d.tag(id, "textarea") &&

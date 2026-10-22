@@ -99,7 +99,7 @@ inline int resolve(Length v, int basis, int font, int root, int automatic = 0) {
                ? automatic
                : clamp64(int64_t(v.value) * b / (v.unit == Unit::Percent ? 100000 : 1000), -MaxDimension);
 }
-enum class Display : uint8_t { Inline, InlineBlock, Block, None, Table, Row, Cell };
+enum class Display : uint8_t { Inline, InlineBlock, Block, None, Table, RowGroup, Row, Cell };
 enum class WhiteSpace : uint8_t { Normal, Pre, PreWrap, NoWrap };
 enum class Align : uint8_t { Left, Center, Right };
 enum class Vertical : uint8_t { Baseline, Top, Middle, Bottom };
@@ -200,7 +200,34 @@ struct DocumentImage {
     uint16_t node{}; unsigned width{}, height{}; const uint32_t *pixels{};
     void *owner{}; void (*release)(void*){}; bool background{};
 };
-struct TablePlan { uint16_t node{}, columns{}; int weights[32]{}, total{}; };
+// All table storage is document-owned, never allocated from content dimensions.
+constexpr unsigned MaxTables = 32, MaxTableRows = 256, MaxTableColumns = 32;
+constexpr unsigned MaxTableCells = 1024, MaxTableSpan = 32, MaxTableWork = 2000000;
+struct MarginStrut {
+    int positive{}, negative{};
+    MarginStrut(int value=0) : positive(value>0?value:0), negative(value<0?value:0) {}
+    int value() const { return positive+negative; }
+    void include(MarginStrut other) {
+        if (other.positive>positive) positive=other.positive;
+        if (other.negative<negative) negative=other.negative;
+    }
+};
+struct CollapsedMargins {
+    MarginStrut top{}, bottom{};
+    bool through{}, suppress_top{}, suppress_bottom{};
+};
+struct TableCell {
+    uint16_t table{}, row{}, column{}, rows{}, columns{};
+};
+struct TablePlan {
+    uint16_t node{}, columns{}, rows{};
+    uint16_t row_nodes[MaxTableRows]{};
+    uint16_t grid[MaxTableRows * MaxTableColumns]{};
+    int minimum[MaxTableColumns]{}, preferred[MaxTableColumns]{}, widths[MaxTableColumns]{};
+    Length explicit_columns[MaxTableColumns]{};
+    int heights[MaxTableRows]{}, tops[MaxTableRows]{};
+    int total{}, gap{};
+};
 struct Document {
     UserAgentContext user_agent{};
     FormControl controls[64]{}; unsigned control_count{}; uint16_t focused_control{}, open_select{};
@@ -219,7 +246,12 @@ struct Document {
     Style styles[MaxNodes];
     Box boxes[MaxNodes];
     int offset_x[MaxNodes]{}, offset_y[MaxNodes]{};
-    TablePlan tables[32]{}; uint16_t table_count{};
+    TablePlan tables[MaxTables]{}; uint16_t table_count{}, table_cells{};
+    TableCell table_cell[MaxNodes]{};
+    int table_shift[MaxNodes]{};
+    CollapsedMargins margins[MaxNodes]{};
+    int collapse_width[MaxNodes]{};
+    uint32_t table_work{};
     Rule rules[MaxRules];
     Declaration declarations[MaxDeclarations];
     Fragment fragments[MaxFragments];
@@ -237,6 +269,7 @@ struct Document {
     void reset() {
         release_images();
         control_count=0; focused_control=open_select=0;
+        table_count=table_cells=0; table_work=0;
         node_count = 1;
         attr_count = rule_count = declaration_count = fragment_count = script_count = 0;
         arena_used = 1;

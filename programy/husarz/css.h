@@ -772,7 +772,7 @@ inline bool valid_value(int p, Span v) {
         return css_length(v, l) && l.unit != Unit::Auto;
     switch (p) {
     case PDisplay:
-        return one_of(v, "inline|inline-block|block|none|table|table-row|table-cell");
+        return one_of(v, "inline|inline-block|block|none|table|table-row-group|table-header-group|table-footer-group|table-row|table-cell");
     case PVisibility:
         return one_of(v, "visible|hidden|collapse");
     case PColor:
@@ -975,6 +975,8 @@ inline Style defaults(const Document &d, uint16_t id, const Style &parent) {
         s.display = Display::Table;
         s.margin[0] = s.margin[2] = {8000, Unit::Px};
     }
+    if (d.tag(id, "thead") || d.tag(id, "tbody") || d.tag(id, "tfoot"))
+        s.display = Display::RowGroup;
     if (d.tag(id, "tr"))
         s.display = Display::Row;
     if (d.tag(id, "td") || d.tag(id, "th")) {
@@ -1171,6 +1173,8 @@ inline void apply_property(Style &s, const Style &parent, int p, Span v, int roo
             s.display = Display::None;
         else if (value_is(v, "table"))
             s.display = Display::Table;
+        else if (value_is(v, "table-row-group") || value_is(v, "table-header-group") || value_is(v, "table-footer-group"))
+            s.display = Display::RowGroup;
         else if (value_is(v, "table-row"))
             s.display = Display::Row;
         else if (value_is(v, "table-cell"))
