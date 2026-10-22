@@ -235,3 +235,30 @@ An initial focused run failed because the new harness assumed the document
 started two pixels inside the native window. Screenshot inspection established
 that its x origin is the window x itself. Only that observer coordinate was
 corrected; all nine assertions remain, and the verified run passed them.
+
+## Resumed full regression, 2026-10-22
+
+The interrupted full release-ISO regression was rerun to completion and **passed**.
+Machine-readable results and screenshots are in
+`.husarz-test/qemu-resume-regression/`; the complete observer log is
+`.husarz-test/resume-qemu-regression.log`.
+
+This run covers 24 anchored refresh frames, wheel/scrollbar/keyboard scrolling,
+maximize/restore without another fetch, back/forward, malformed HTML, layout
+fixtures, PNG/JPEG pixels and shared image cache across tabs, GET form submission
+with UTF-8, closing tabs during image/CSS loading, live desktop themes and white/
+black document theme isolation, Stop/navigation without stale HTML, and closing
+the browser window during a request. No guest fault or forbidden script URL
+request was observed. This does not change the outstanding subsystem list above.
+
+`make iso` and `make test-husarz-stack` also passed. The largest browser frame
+remains 4,272 bytes. Build log: `.husarz-test/resume-release-build.log`;
+stack log: `.husarz-test/resume-stack.log`.
+
+The rebuilt kernel matches the earlier validated kernel. The ISO hash below
+identifies the newly generated image used for this full regression:
+
+```
+94e09d42b4f23003b2eb3b8f5f35524f47e01340361081f4ac08e5f9badbde3c  system_operacyjny.bin
+45f46886dfbfb703d393e03b8cc0c64766f917dd22bf7ef08100a03920e8e37a  BursztynOS.iso
+```

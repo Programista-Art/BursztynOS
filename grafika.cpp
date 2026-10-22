@@ -2160,7 +2160,24 @@ static bool grafika_dostarcz_zdarzenie(int pid,const bws_zdarzenie* e) {
 // KLAWIATURA
 // =========================================================================
 
+// System window switching is handled before application delivery, so a busy
+// Ring 3 client cannot capture Alt+Tab as ordinary control-focus traversal.
+static bool system_tab_down = false;
+static void przelacz_okno_klawiatura(bool odwrotnie) {
+    GuiOknoInfo windows[SKLADACZ_MAKS_WARSTW]{};
+    const unsigned count=skladacz_obrazu_snapshot_okien(windows,SKLADACZ_MAKS_WARSTW,aktywny_pid_gui);
+    if(!count)return;
+    unsigned active=odwrotnie?0:count-1;
+    for(unsigned i=0;i<count;++i)if(windows[i].aktywne){active=i;break;}
+    for(unsigned step=1;step<=count;++step){
+        const unsigned i=odwrotnie?(active+count-step)%count:(active+step)%count;
+        if(windows[i].aktywne || !windows[i].tytul[0])continue;
+        if(bws_gui_aktywuj_okno(windows[i].window_id))break;
+    }
+}
+
 extern "C" bool zaktualizuj_klawiature_gui(char znak) {
+    if(system_tab_down && znak=='\t')return true;
     if (aktywny_pid_gui <= 0)
         return false;
     bws_zdarzenie e{};
@@ -2182,6 +2199,15 @@ extern "C" bool zaktualizuj_klawisz_fizyczny_gui(
     bool wcisniety,
     uint32_t modyfikatory
 ) {
+    const bool tab=(kod&BWS_KEY_SOURCE_USB)?(kod&255U)==43U:
+        !(kod&BWS_KEY_SOURCE_E0) && (kod&127U)==15U;
+    if(tab && !wcisniety && system_tab_down){system_tab_down=false;return true;}
+    if(tab && wcisniety && (modyfikatory&BWS_MOD_ALT) &&
+       !(modyfikatory&(BWS_MOD_CTRL|BWS_MOD_SUPER)) && !powitanie_aktywne()){
+        system_tab_down=true;
+        przelacz_okno_klawiatura((modyfikatory&BWS_MOD_SHIFT)!=0);
+        return true;
+    }
     if (aktywny_pid_gui <= 0) return false;
     bws_zdarzenie e{};
     e.typ = BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;
@@ -2197,6 +2223,7 @@ extern "C" bool zaktualizuj_tekst_gui(
     uint32_t codepoint,
     uint32_t modyfikatory
 ) {
+    if(system_tab_down && codepoint=='\t')return true;
     if (aktywny_pid_gui <= 0 || codepoint == 0 || codepoint > 0x10FFFFU ||
         (codepoint >= 0xD800U && codepoint <= 0xDFFFU)) return false;
     bws_zdarzenie e{};

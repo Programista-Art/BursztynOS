@@ -9,24 +9,25 @@ class CssTokenizer {
     const char *s;
     size_t n, p{};
     CssTokenizer(const char *text, size_t size) : s(text), n(size) {}
-    void whitespace() {
-        for (;;) {
+    Work whitespace_work() {
+        for (;;) { co_await WorkPoint{1};
             while (p < n && space(s[p]))
-                ++p;
+                { co_await WorkPoint{1}; ++p; }
             if (p + 1 < n && s[p] == '/' && s[p + 1] == '*') {
                 p += 2;
                 while (p + 1 < n && !(s[p] == '*' && s[p + 1] == '/'))
-                    ++p;
+                    { co_await WorkPoint{1}; ++p; }
                 p = p + 1 < n ? p + 2 : n;
             } else
                 break;
         }
     }
-    size_t scan(const char *delimiters) {
-        size_t start = p;
+inline void whitespace() { finish_work(whitespace_work()); }
+
+    Work scan_work(const char *delimiters) {
         char quote = 0;
         unsigned brackets = 0;
-        while (p < n) {
+        while (p < n) { co_await WorkPoint{1};
             char c = s[p];
             if (quote) {
                 if (c == '\\' && p + 1 < n) {
@@ -50,15 +51,16 @@ class CssTokenizer {
             } else if (!brackets) {
                 bool end = false;
                 for (const char *d = delimiters; *d; ++d)
-                    if (c == *d)
-                        end = true;
+                    { co_await WorkPoint{1}; if (c == *d)
+                        end = true; }
                 if (end)
                     break;
             }
             ++p;
         }
-        return start;
     }
+inline void scan(const char *delimiters) { finish_work(scan_work(delimiters)); }
+
 };
 inline Span trimmed(const char *s, size_t n) {
     while (n && space(*s)) {
@@ -339,133 +341,166 @@ inline bool nth(Span arg, int index) {
     }
     return a ? (index - b) % a == 0 && (index - b) / a >= 0 : index == b;
 }
-inline bool compound(const Document &d, uint16_t id, Span v, uint32_t &budget) {
-    if (!id || id >= d.node_count || d.nodes[id].is_text || v.size + 1 > budget) return false;
+inline Work compound_work(const Document &d, uint16_t id, Span v, uint32_t &budget, bool &result) {
+    if (!id || id >= d.node_count || d.nodes[id].is_text || v.size + 1 > budget) {result=false;co_return;}
     budget -= uint32_t(v.size) + 1;
     size_t p = 0;
     if (v.data[p] == '*') ++p;
     else if (ident(v.data[p])) {
-        size_t b = p; while (p < v.size && ident(v.data[p])) ++p;
-        if (!equal_ci(v.data + b,p - b,d.str(d.nodes[id].tag))) return false;
+        size_t b = p; while (p < v.size && ident(v.data[p])) { co_await WorkPoint{1}; ++p; }
+        if (!equal_ci(v.data + b,p - b,d.str(d.nodes[id].tag))) {result=false;co_return;}
     }
-    while (p < v.size) {
+    while (p < v.size) { co_await WorkPoint{1};
         char type = v.data[p++]; size_t b = p;
-        while (p < v.size && ident(v.data[p])) ++p;
+        while (p < v.size && ident(v.data[p])) { co_await WorkPoint{1}; ++p; }
         Span name{v.data + b,p - b};
         if (type == '#' || type == '.') {
             const char *s = d.attr(id,type == '#' ? "id" : "class");
             size_t n = length(s,MaxAttrLength);
-            if (n > budget) { budget = 0; return false; } budget -= uint32_t(n);
-            if (type == '#') { if (!span_equal({s,n},name)) return false; }
+            if (n > budget) { budget = 0; {result=false;co_return;} } budget -= uint32_t(n);
+            if (type == '#') { if (!span_equal({s,n},name)) {result=false;co_return;} }
             else {
                 bool found = false; size_t k = 0;
-                while (k < n) {
-                    while (k < n && space(s[k])) ++k;
-                    size_t start = k; while (k < n && !space(s[k])) ++k;
+                while (k < n) { co_await WorkPoint{1};
+                    while (k < n && space(s[k])) { co_await WorkPoint{1}; ++k; }
+                    size_t start = k; while (k < n && !space(s[k])) { co_await WorkPoint{1}; ++k; }
                     if (span_equal({s + start,k - start},name)) found = true;
                 }
-                if (!found) return false;
+                if (!found) {result=false;co_return;}
             }
         } else if (type == '[') {
             const char *value = nullptr;
             const Node &node = d.nodes[id];
-            for (unsigned i = 0; i < node.attr_count; ++i) {
-                if (!budget) return false;
+            for (unsigned i = 0; i < node.attr_count; ++i) { co_await WorkPoint{1};
+                if (!budget) {result=false;co_return;}
                 --budget;
                 const auto &at = d.attrs[node.attr_start + i];
                 if (equal_ci(name.data,name.size,d.str(at.name))) { value = d.str(at.value); break; }
             }
-            if (!value) return false;
-            while (p < v.size && space(v.data[p])) ++p;
+            if (!value) {result=false;co_return;}
+            while (p < v.size && space(v.data[p])) { co_await WorkPoint{1}; ++p; }
             if (v.data[p] == ']') { ++p; continue; }
             char op = v.data[p++]; if (op != '=') ++p;
-            while (p < v.size && space(v.data[p])) ++p;
+            while (p < v.size && space(v.data[p])) { co_await WorkPoint{1}; ++p; }
             char quote = v.data[p] == '\'' || v.data[p] == '"' ? v.data[p++] : 0;
             b = p;
-            while (p < v.size && (quote ? v.data[p] != quote : !space(v.data[p]) && v.data[p] != ']')) ++p;
+            while (p < v.size && (quote ? v.data[p] != quote : !space(v.data[p]) && v.data[p] != ']')) { co_await WorkPoint{1}; ++p; }
             Span wanted{v.data + b,p - b};
             if (quote) ++p;
-            while (p < v.size && space(v.data[p])) ++p;
+            while (p < v.size && space(v.data[p])) { co_await WorkPoint{1}; ++p; }
             ++p;
             size_t n = length(value,MaxAttrLength);
-            if (n > budget) { budget = 0; return false; } budget -= uint32_t(n);
+            if (n > budget) { budget = 0; {result=false;co_return;} } budget -= uint32_t(n);
             bool found = false;
             if (op == '=') found = span_equal({value,n},wanted);
             else if (wanted.size && wanted.size <= n) {
                 if (op == '^') found = span_equal({value,wanted.size},wanted);
                 else if (op == '$') found = span_equal({value + n - wanted.size,wanted.size},wanted);
                 else if (op == '*') {
-                    for (size_t j = 0; j + wanted.size <= n; ++j) {
-                        if (wanted.size > budget) { budget = 0; return false; }
+                    for (size_t j = 0; j + wanted.size <= n; ++j) { co_await WorkPoint{1};
+                        if (wanted.size > budget) { budget = 0; {result=false;co_return;} }
                         budget -= uint32_t(wanted.size);
                         if (span_equal({value+j,wanted.size},wanted)) { found = true; break; }
                     }
                 } else if (op == '~') {
                     size_t k = 0;
-                    while (k < n) { while (k < n && space(value[k])) ++k;
-                        size_t start = k; while (k < n && !space(value[k])) ++k;
+                    while (k < n) { co_await WorkPoint{1};  while (k < n && space(value[k])) { co_await WorkPoint{1}; ++k; }
+                        size_t start = k; while (k < n && !space(value[k])) { co_await WorkPoint{1}; ++k; }
                         if (span_equal({value+start,k-start},wanted)) found = true;
                     }
                 }
             }
-            if (!found) return false;
+            if (!found) {result=false;co_return;}
         } else if (type == ':') {
             Span arg{};
             if (p < v.size && v.data[p] == '(') {
-                b = ++p; while (p < v.size && v.data[p] != ')') ++p;
+                b = ++p; while (p < v.size && v.data[p] != ')') { co_await WorkPoint{1}; ++p; }
                 arg = trimmed(v.data+b,p-b); ++p;
             }
-            if (value_is(name,"not")) { if (compound(d,id,arg,budget) || !budget) return false; continue; }
+            if (value_is(name,"not")) { bool rejected=false; co_await compound_work(d,id,arg,budget,rejected); if (rejected || !budget) {result=false;co_return;} continue; }
             bool reverse = value_is(name,"last-child") || value_is(name,"last-of-type") || value_is(name,"nth-last-child");
             bool of_type = value_is(name,"first-of-type") || value_is(name,"last-of-type");
             int index = 1;
             for (uint16_t sib = reverse ? d.nodes[id].next : d.nodes[id].previous; sib;
-                 sib = reverse ? d.nodes[sib].next : d.nodes[sib].previous) {
-                if (!budget) return false;
+                 sib = reverse ? d.nodes[sib].next : d.nodes[sib].previous) { co_await WorkPoint{1};
+                if (!budget) {result=false;co_return;}
                 --budget;
                 if (!d.nodes[sib].is_text && (!of_type || equal(d.str(d.nodes[id].tag),d.str(d.nodes[sib].tag)))) ++index;
             }
-            if (value_is(name,"nth-child") || value_is(name,"nth-last-child")) { if (!nth(arg,index)) return false; }
-            else if (index != 1) return false;
+            if (value_is(name,"nth-child") || value_is(name,"nth-last-child")) { if (!nth(arg,index)) {result=false;co_return;} }
+            else if (index != 1) {result=false;co_return;}
             if (value_is(name,"only-child"))
-                for (uint16_t sib = d.nodes[id].next; sib; sib = d.nodes[sib].next) {
-                    if (!budget) return false;
+                for (uint16_t sib = d.nodes[id].next; sib; sib = d.nodes[sib].next) { co_await WorkPoint{1};
+                    if (!budget) {result=false;co_return;}
                 --budget;
-                    if (!d.nodes[sib].is_text) return false;
+                    if (!d.nodes[sib].is_text) {result=false;co_return;}
                 }
-        } else return false;
+        } else {result=false;co_return;}
     }
-    return true;
+    {result=true;co_return;}
 }
-inline bool match_part(const Document &d, uint16_t id, const Selector &s, unsigned part, uint32_t &budget) {
-    if (!budget) return false;
+inline bool compound(const Document &d,uint16_t id,Span v,uint32_t &budget) { bool result{};finish_work(compound_work(d,id,v,budget,result));return result; }
+
+// Fast complete grammar for positive tag/id/class compounds. Attribute and
+// pseudo selectors retain the resumable reference path below.
+inline bool simple_compound_match(const Document &d,uint16_t id,Span v,uint32_t &budget,bool &result){
+    for(size_t i=0;i<v.size;++i)if(!ident(v.data[i]) && v.data[i]!='*' && v.data[i]!='.' && v.data[i]!='#')return false;
+    result=false;
+    if(!id || id>=d.node_count || d.nodes[id].is_text || v.size+1>budget)return true;
+    budget-=uint32_t(v.size)+1;size_t p=0;
+    if(v.data[p]=='*')++p;
+    else if(ident(v.data[p])){size_t b=p;while(p<v.size && ident(v.data[p]))++p;if(!equal_ci(v.data+b,p-b,d.str(d.nodes[id].tag)))return true;}
+    while(p<v.size){char type=v.data[p++];size_t b=p;while(p<v.size && ident(v.data[p]))++p;
+        Span name{v.data+b,p-b};const char *value=d.attr(id,type=='#'?"id":"class");size_t n=length(value,MaxAttrLength);
+        if(n>budget){budget=0;return true;}budget-=uint32_t(n);
+        if(type=='#'){if(!span_equal({value,n},name))return true;}
+        else {bool found=false;size_t k=0;while(k<n){while(k<n && space(value[k]))++k;size_t start=k;while(k<n && !space(value[k]))++k;if(span_equal({value+start,k-start},name))found=true;}if(!found)return true;}
+    }
+    result=true;return true;
+}
+inline Work match_part_work(const Document &d, uint16_t id, const Selector &s, unsigned part, uint32_t &budget, bool &result) {
+    if (!budget) {result=false;co_return;}
     --budget;
-    if (!compound(d,id,s.parts[part].compound,budget)) return false;
-    if (!part) return true;
+    bool accepted=false;
+    auto v=s.parts[part].compound;
+    unsigned classes=unsigned(length(d.attr(id,"class"),MaxAttrLength)),name=unsigned(length(d.attr(id,"id"),MaxAttrLength));
+    unsigned bytes=(classes>name?classes:name)+64;
+    unsigned estimate=unsigned(v.size)*bytes/64+16;
+    if(estimate<=MaxSliceWork){
+        co_await WorkPoint{estimate};
+        if(!simple_compound_match(d,id,v,budget,accepted))co_await compound_work(d,id,v,budget,accepted);
+    }else co_await compound_work(d,id,v,budget,accepted);
+    if (!accepted) {result=false;co_return;}
+    if (!part) {result=true;co_return;}
     char rel = s.parts[part].relation;
     uint16_t candidate = rel == '+' || rel == '~' ? d.nodes[id].previous : d.nodes[id].parent;
-    for (unsigned steps = 0; candidate && steps < MaxNodes && budget; ++steps) {
+    for (unsigned steps = 0; candidate && steps < MaxNodes && budget; ++steps) { co_await WorkPoint{1};
         if (!d.nodes[candidate].is_text) {
-            if (match_part(d,candidate,s,part-1,budget)) return true;
-            if (rel == '+' || rel == '>') return false;
+            bool found=false; co_await match_part_work(d,candidate,s,part-1,budget,found); if (found) {result=true;co_return;}
+            if (rel == '+' || rel == '>') {result=false;co_return;}
         }
         candidate = rel == '+' || rel == '~' ? d.nodes[candidate].previous : d.nodes[candidate].parent;
     }
-    return false;
+    {result=false;co_return;}
 }
-inline bool matches(const Document &d, uint16_t id, const Selector &s, uint32_t &budget) {
-    return s.valid && match_part(d,id,s,s.count-1,budget);
+inline bool match_part(const Document &d,uint16_t id,const Selector &s,unsigned part,uint32_t &budget) { bool result{};finish_work(match_part_work(d,id,s,part,budget,result));return result; }
+
+inline Work matches_work(const Document &d,uint16_t id,const Selector &s,uint32_t &budget,bool &result) {
+    result=false;
+    if(s.valid) co_await match_part_work(d,id,s,s.count-1,budget,result);
 }
-inline void css_declarations(Document &d, Span input, uint16_t &first, uint16_t &count) {
+inline bool matches(const Document &d,uint16_t id,const Selector &s,uint32_t &budget) { bool result{};finish_work(matches_work(d,id,s,budget,result));return result; }
+
+inline Work css_declarations_work(Document &d, Span input, uint16_t &first, uint16_t &count) {
     first = uint16_t(d.declaration_count);
     count = 0;
     CssTokenizer t(input.data, input.size);
-    while (t.p < t.n) {
-        t.whitespace();
+    while (t.p < t.n) { HUSARZ_PROGRESS(Css,t.p,t.n);co_await WorkPoint{1};
+        co_await t.whitespace_work();
         if (t.p == t.n)
             break;
         size_t start = t.p;
-        t.scan(":;{}");
+        co_await t.scan_work(":;{}");
         Span name = trimmed(t.s + start, t.p - start);
         if (t.p == t.n)
             break;
@@ -473,7 +508,7 @@ inline void css_declarations(Document &d, Span input, uint16_t &first, uint16_t 
             if (t.s[t.p] == '{') {
                 unsigned depth = 1;
                 ++t.p;
-                while (t.p < t.n && depth) {
+                while (t.p < t.n && depth) { co_await WorkPoint{1};
                     if (t.s[t.p] == '{')
                         ++depth;
                     else if (t.s[t.p] == '}')
@@ -486,12 +521,12 @@ inline void css_declarations(Document &d, Span input, uint16_t &first, uint16_t 
         }
         ++t.p;
         start = t.p;
-        t.scan(";{}");
+        co_await t.scan_work(";{}");
         Span value = trimmed(t.s + start, t.p - start);
         if (t.p < t.n && t.s[t.p] == '{') {
             unsigned depth = 1;
             ++t.p;
-            while (t.p < t.n && depth) {
+            while (t.p < t.n && depth) { co_await WorkPoint{1};
                 if (t.s[t.p] == '{')
                     ++depth;
                 else if (t.s[t.p] == '}')
@@ -502,13 +537,13 @@ inline void css_declarations(Document &d, Span input, uint16_t &first, uint16_t 
         }
         bool valid = name.size > 0 && name.size <= 64 && value.size > 0 && value.size <= MaxAttrLength;
         for (size_t i = 0; i < name.size; ++i)
-            if (!ident(name.data[i]))
-                valid = false;
+            { co_await WorkPoint{1}; if (!ident(name.data[i]))
+                valid = false; }
         bool important = false;
         size_t bang = value.size;
         for (size_t i = 0; i < value.size; ++i)
-            if (value.data[i] == '!')
-                bang = i;
+            { co_await WorkPoint{1}; if (value.data[i] == '!')
+                bang = i; }
         if (bang < value.size) {
             Span tail = trimmed(value.data + bang + 1, value.size - bang - 1);
             if (value_is(tail, "important")) {
@@ -531,14 +566,16 @@ inline void css_declarations(Document &d, Span input, uint16_t &first, uint16_t 
             ++t.p;
     }
 }
-inline Span clean_css(Document &d, const char *input, size_t size) {
-    uint32_t off = d.store(input, size, 65536);
+inline void css_declarations(Document &d,Span input,uint16_t &first,uint16_t &count) { finish_work(css_declarations_work(d,input,first,count)); }
+
+inline Work clean_css_work(Document &d, const char *input, size_t size, Span &result) {
+    uint32_t off=0;co_await store_string_work(d,input,size,65536,off);
     if (!off)
-        return {};
+        {result={};co_return;}
     char *s = d.arena + off;
     size_t n = length(s, 65536);
     char quote = 0;
-    for (size_t i = 0; i < n; ++i) {
+    for (size_t i = 0; i < n; ++i) { co_await WorkPoint{1};
         if (quote) {
             if (s[i] == '\\' && i + 1 < n)
                 ++i;
@@ -550,7 +587,7 @@ inline Span clean_css(Document &d, const char *input, size_t size) {
             s[i++] = ' ';
             s[i] = ' ';
             while (i + 1 < n && !(s[i] == '*' && s[i + 1] == '/'))
-                s[i++] = ' ';
+                { co_await WorkPoint{1}; s[i++] = ' '; }
             if (i + 1 < n) {
                 s[i++] = ' ';
                 s[i] = ' ';
@@ -558,24 +595,27 @@ inline Span clean_css(Document &d, const char *input, size_t size) {
                 s[i] = ' ';
         }
     }
-    return {s, n};
+    {result={s, n};co_return;}
 }
-inline void parse_css(Document &d, const char *css, size_t size, uint32_t order = 0, uint32_t base_url = 0, bool user_agent = false) {
+inline Span clean_css(Document &d,const char *input,size_t size) { Span result{};finish_work(clean_css_work(d,input,size,result));return result; }
+
+inline Work parse_css_work(Document &d, const char *css, size_t size, uint32_t order = 0, uint32_t base_url = 0, bool user_agent = false) {
+    HUSARZ_SCOPE(d, Css);
     if (size > 65536) {
         size = 65536;
         d.truncated = true;
     }
-    Span clean = clean_css(d, css, size);
+    Span clean;co_await clean_css_work(d,css,size,clean);
     css = clean.data;
     size = clean.size;
     CssTokenizer t(css, size);
     uint32_t local = 0;
-    while (t.p < t.n) {
-        t.whitespace();
+    while (t.p < t.n) { HUSARZ_PROGRESS(Css,t.p,t.n);co_await WorkPoint{1};
+        co_await t.whitespace_work();
         if (t.p == t.n)
             break;
         size_t start = t.p;
-        t.scan("{;");
+        co_await t.scan_work("{;");
         if (t.p == t.n)
             break;
         if (t.s[t.p] == ';') {
@@ -587,7 +627,7 @@ inline void parse_css(Document &d, const char *css, size_t size, uint32_t order 
         size_t body = t.p;
         unsigned depth = 1;
         char quote = 0;
-        while (t.p < t.n && depth) {
+        while (t.p < t.n && depth) { co_await WorkPoint{1};
             char c = t.s[t.p++];
             if (quote) {
                 if (c == '\\' && t.p < t.n)
@@ -605,13 +645,13 @@ inline void parse_css(Document &d, const char *css, size_t size, uint32_t order 
         if (!names.size || names.data[0] == '@')
             continue;
         uint16_t first, count;
-        css_declarations(d, {css + body, end - body}, first, count);
-        for (unsigned i=0;i<count;++i) { d.declarations[first+i].base_url=base_url; d.declarations[first+i].user_agent=user_agent; }
+        co_await css_declarations_work(d,{css+body,end-body},first,count);
+        for (unsigned i=0;i<count;++i) { co_await WorkPoint{1};  d.declarations[first+i].base_url=base_url; d.declarations[first+i].user_agent=user_agent; }
         size_t p = 0;
-        while (p < names.size) {
+        while (p < names.size) { co_await WorkPoint{1};
             size_t b = p;
             while (p < names.size && names.data[p] != ',')
-                ++p;
+                { co_await WorkPoint{1}; ++p; }
             Span sel = trimmed(names.data + b, p - b);
             if (p < names.size)
                 ++p;
@@ -632,6 +672,8 @@ inline void parse_css(Document &d, const char *css, size_t size, uint32_t order 
     d.styles_dirty = true;
     ++d.revision;
 }
+inline void parse_css(Document &d,const char *css,size_t size,uint32_t order=0,uint32_t base_url=0,bool user_agent=false) { finish_work(parse_css_work(d,css,size,order,base_url,user_agent)); }
+
 enum Property {
     PDisplay,
     PVisibility,
@@ -1367,12 +1409,54 @@ inline void apply_property(Style &s, const Style &parent, int p, Span v, int roo
         break;
     }
 }
-inline void compute_styles(Document &d) {
+// One necessary key from the rightmost compound. Hash collisions only add
+// candidates; the complete matcher remains authoritative. Rule order is retained.
+struct SelectorIndex {
+    static constexpr unsigned Buckets=128, Words=(MaxRules+63)/64;
+    Selector parsed[MaxRules]{};
+    uint64_t buckets[Buckets][Words]{}, general[Words]{};
+    unsigned count{};
+    static unsigned hash(Span s,unsigned kind) {
+        uint32_t h=2166136261U^kind;
+        for(size_t i=0;i<s.size;++i) h=(h^uint8_t(kind==1?lower(s.data[i]):s.data[i]))*16777619U;
+        return h%Buckets;
+    }
+    void add(const Document &d,unsigned r) {
+        auto &sel=parsed[r];sel=selector({d.str(d.rules[r].selector),length(d.str(d.rules[r].selector),256)});
+        Span key{};unsigned kind=0;
+        if(sel.valid) {
+            Span v=sel.parts[sel.count-1].compound;size_t p=0;
+            if(p<v.size && ident(v.data[p])) {size_t b=p;while(p<v.size && ident(v.data[p]))++p;key={v.data+b,p-b};kind=1;}
+            else if(p<v.size && v.data[p]=='*')++p;
+            // Only scan leading positive class/id tests, never :not arguments.
+            while(p<v.size && (v.data[p]=='.' || v.data[p]=='#')) {
+                char type=v.data[p++];size_t b=p;while(p<v.size && ident(v.data[p]))++p;
+                if(type=='#' || kind!=3){key={v.data+b,p-b};kind=type=='#'?3:2;}
+            }
+        }
+        auto *bits=kind?buckets[hash(key,kind)]:general;bits[r/64]|=UINT64_C(1)<<(r%64);
+    }
+    void candidates(const Document &d,uint16_t id,uint64_t *bits)const {
+        for(unsigned w=0;w<Words;++w)bits[w]=general[w];
+        auto include=[&](Span key,unsigned kind){auto *b=buckets[hash(key,kind)];for(unsigned w=0;w<Words;++w)bits[w]|=b[w];};
+        const char *tag=d.str(d.nodes[id].tag);include({tag,length(tag,64)},1);
+        const char *name=d.attr(id,"id");if(*name)include({name,length(name,MaxAttrLength)},3);
+        const char *classes=d.attr(id,"class");size_t n=length(classes,MaxAttrLength),p=0;
+        while(p<n){while(p<n && space(classes[p]))++p;size_t b=p;while(p<n && !space(classes[p]))++p;if(p>b)include({classes+b,p-b},2);}
+    }
+};
+
+inline void release_selector_index(SelectorIndex *p){delete p;}
+inline Work compute_styles_work(Document &d,bool indexed=true) {
+    HUSARZ_SCOPE(d, Style);
     uint32_t budget = 4000000;
     Style initial;
     initial.color = d.user_agent.text;
     d.root_font = 16;
-    for (uint16_t id = 0; id < d.node_count; ++id) {
+    if(indexed && !d.selector_index)d.selector_index=new SelectorIndex;
+    auto *index=indexed?d.selector_index:nullptr;
+    if(index) while(index->count<d.rule_count){co_await WorkPoint{1};index->add(d,index->count++);}
+    for (uint16_t id = 0; id < d.node_count; ++id) { HUSARZ_PROGRESS(Style,id,d.node_count);co_await WorkPoint{1};
         const Node &node = d.nodes[id];
         const Style &parent = id ? d.styles[node.parent] : initial;
         if (node.is_text) {
@@ -1383,38 +1467,47 @@ inline void compute_styles(Document &d) {
         }
         Style s = defaults(d, id, parent);
         Winner winners[PCount];
-        for (uint32_t r = 0; r < d.rule_count && budget; ++r) {
+        uint64_t candidates[SelectorIndex::Words]{};if(index)index->candidates(d,id,candidates);
+        for(unsigned word=0;word<SelectorIndex::Words && budget;++word){
+            uint64_t pending=index?candidates[word]:UINT64_MAX;
+            while(pending && budget){co_await WorkPoint{1};
+            unsigned r=word*64+unsigned(__builtin_ctzll(pending));pending&=pending-1;
+            if(r>=d.rule_count)break;
             const Rule &rule = d.rules[r];
-            Selector sel = selector({d.str(rule.selector), length(d.str(rule.selector), 256)});
-            if (!matches(d, id, sel, budget))
+            Selector sel=index?index->parsed[r]:selector({d.str(rule.selector), length(d.str(rule.selector),256)});
+            HUSARZ_COUNT(d, selector_checks, 1);
+            bool matched=false; co_await matches_work(d,id,sel,budget,matched);
+            if (!matched)
                 continue;
+            HUSARZ_COUNT(d, selector_matches, 1);
             for (uint32_t n = 0; n < rule.count; ++n)
-                offer_declaration(d, winners, d.declarations[rule.first + n], sel.specificity,
-                                  uint64_t(rule.order) * (MaxDeclarations + 1) + n);
+                { co_await WorkPoint{1}; offer_declaration(d, winners, d.declarations[rule.first + n], sel.specificity,
+                                  uint64_t(rule.order) * (MaxDeclarations + 1) + n); }
+        }
         }
         for (unsigned n = 0; n < node.inline_count; ++n)
-            offer_declaration(d, winners, d.declarations[node.inline_first + n], (1 << 24),
-                              (UINT64_C(1) << 60) + n);
+            { co_await WorkPoint{1}; offer_declaration(d, winners, d.declarations[node.inline_first + n], (1 << 24),
+                              (UINT64_C(1) << 60) + n); }
         for (int p = 0; p < PCount; ++p)
-            if (winners[p].specificity >= 0) {
+            { co_await WorkPoint{1}; if (winners[p].specificity >= 0) {
                 Span v = winners[p].value;
                 if (p == PFontSize || p == PFamily || p == PWeight || p == PItalic)
                     apply_property(s, parent, p, v, d.root_font,
                                    ((p == PFamily || p == PBackgroundImage || p == PBackgroundSize || p == PBackgroundPosition) ? uint32_t(v.data - d.arena) : 0));
-            }
+            } }
         for (int p = 0; p < PCount; ++p)
-            if (winners[p].specificity >= 0 && p != PFontSize && p != PFamily && p != PWeight &&
+            { co_await WorkPoint{1}; if (winners[p].specificity >= 0 && p != PFontSize && p != PFamily && p != PWeight &&
                 p != PItalic) {
                 Span v = winners[p].value;
                 apply_property(s, parent, p, v, d.root_font, ((p == PFamily || p == PBackgroundImage || p == PBackgroundSize || p == PBackgroundPosition) ? uint32_t(v.data - d.arena) : 0));
-            }
+            } }
         if (winners[PBackgroundImage].specificity>=0 && !value_is(winners[PBackgroundImage].value,"inherit"))
             s.background_base=winners[PBackgroundImage].base_url;
         if (d.tag(id, "html"))
             d.root_font = s.font;
         if (!s.border_style)
             for (auto &b : s.border)
-                b = 0;
+                { co_await WorkPoint{1}; b = 0; }
         s.paint_opacity = id ? uint8_t(unsigned(s.opacity) * parent.paint_opacity / 255) : s.opacity;
         d.styles[id] = s;
     }
@@ -1423,18 +1516,20 @@ inline void compute_styles(Document &d) {
     d.styles_dirty = false;
     d.style_revision = d.revision;
 }
-inline void collect_styles(Document &d) {
+inline void compute_styles(Document &d,bool indexed=true) { finish_work(compute_styles_work(d,indexed)); }
+
+inline Work collect_styles_work(Document &d) {
     if (!d.user_agent_loaded) {
-        parse_css(d,UserAgentStyleSheet,sizeof(UserAgentStyleSheet)-1,0,0,true);
+        co_await parse_css_work(d,UserAgentStyleSheet,sizeof(UserAgentStyleSheet)-1,0,0,true);
         d.user_agent_loaded=true;
     }
-    for (uint16_t i = 1; i < d.node_count; ++i) {
+    for (uint16_t i = 1; i < d.node_count; ++i) { co_await WorkPoint{1};
         if (d.tag(i, "style"))
-            parse_css(d, d.str(d.nodes[i].text), d.nodes[i].text_length, uint32_t(i) * 4096);
+            co_await parse_css_work(d, d.str(d.nodes[i].text), d.nodes[i].text_length, uint32_t(i) * 4096);
         const char *in = d.attr(i, "style");
-        if (*in)
-            css_declarations(d, clean_css(d, in, length(in, MaxAttrLength)), d.nodes[i].inline_first,
-                             d.nodes[i].inline_count);
+        if (*in){Span clean;co_await clean_css_work(d,in,length(in,MaxAttrLength),clean);co_await css_declarations_work(d,clean,d.nodes[i].inline_first,d.nodes[i].inline_count);}
     }
 }
+inline void collect_styles(Document &d) { finish_work(collect_styles_work(d)); }
+
 } // namespace Husarz

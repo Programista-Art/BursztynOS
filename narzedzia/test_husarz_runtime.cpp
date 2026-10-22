@@ -338,6 +338,7 @@ int main() {
         browser_resources=new BrowserResources;
         browser_resources->payload=new Husarz::WorkerPayload;
         auto &state=*browser_resources;
+        Zakladka blank_a{},blank_b{};ensure_tab_identity(blank_a);ensure_tab_identity(blank_b);CHECK(blank_a.identity && blank_b.identity && blank_a.identity!=blank_b.identity);
         auto &tab=zakladki[0]; tab.identity=77; tab.navigation=42;
         auto *retained=tab.dokument; unsigned revision=retained->revision;
         for (auto kind : {Husarz::RequestKind::Html,Husarz::RequestKind::Css,Husarz::RequestKind::Image}) {
@@ -352,13 +353,30 @@ int main() {
         cancel_async_tab(tab); state.active.document=retained->generation;
         apply_worker_result(); CHECK(retained->revision==revision);
         CHECK(state.queue.discarded==5);
-        // Matching CSS may update the retained DOM, without parsing/replacing it.
+        // Matching CSS is pinned for the next cooperative document transaction.
         state.active.navigation=tab.navigation; state.active.kind=Husarz::RequestKind::Css;
         kopiuj_limit(state.active.url,sizeof(state.active.url),"http://example.test/race.css");
         state.payload->kind=uint32_t(Husarz::RequestKind::Css);
         const char* css="body {color:#abcdef}";
         state.payload->size=uint32_t(std::strlen(css)); std::memcpy(state.payload->raw,css,state.payload->size);
-        apply_worker_result(); CHECK(tab.dokument==retained); CHECK(retained->revision>revision);
+        apply_worker_result(); CHECK(tab.dokument==retained); CHECK(retained->revision==revision);
+        CHECK(tab.pending_css && tab.pending_css->count==1 && tab.work_pending);
+        auto document_generation=retained->generation, parse_count=retained->parse_count;
+        browser_viewport.request(762,410);
+        unsigned cooperative_steps=0;
+        while(browser_has_work()){browser_step_work();CHECK(++cooperative_steps<10000);}
+        CHECK(cooperative_steps>0 && !tab.pending_css && !tab.work_pending);
+        CHECK(tab.dokument->generation==document_generation && tab.dokument->parse_count==parse_count);
+        CHECK(tab.dokument->revision>revision);
+        CHECK(!tab.dokument->styles_dirty);
+        cancel_async_tab(tab); CHECK(!tab.pending_css && !tab.work_pending);
+        state.active.navigation=tab.navigation;state.active.document=tab.dokument->generation;state.active.kind=Husarz::RequestKind::Image;
+        kopiuj_limit(state.active.url,sizeof(state.active.url),"http://example.test/cancel-image.png");
+        state.payload->kind=uint32_t(Husarz::RequestKind::Image);state.payload->success=1;state.payload->size=32;state.payload->width=512;state.payload->height=512;
+        auto raw_before=resource_cache->raw_bytes,decoded_before=resource_cache->decoded_bytes;
+        Husarz::WorkDriver publication_driver;publication_driver.clock=[]()->uint64_t{static uint64_t now=1;return now+=3000000;};
+        auto publication=apply_worker_result_work();CHECK(!publication.step(publication_driver));publication.cancel();
+        CHECK(resource_cache->raw_bytes==raw_before && resource_cache->decoded_bytes==decoded_before);
         delete state.payload; state.payload=nullptr; delete browser_resources; browser_resources=nullptr;
         auto *theme_doc = zakladki[0].dokument;
         auto before_theme = theme_doc->parse_count;

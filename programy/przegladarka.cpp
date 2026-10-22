@@ -30,7 +30,8 @@
 #include "../bursztyn_gui.h"
 #include "bursztyn_ui/bursztyn_ui.h"
 #include "http_kody.h"
-#include "husarz/paint.h"
+#include "husarz/pipeline.h"
+#include "husarz/work_clock.h"
 #include "husarz/resource.h"
 #include "husarz/async.h"
 #include "../obrazy/dekoder_obrazu.h"
@@ -58,8 +59,8 @@ using namespace BursztynUI;
  * przegladarka_linker.ld MUSI miec ten sam layout:
  *
  *   HEADER  off 0x0000  VA 0x1000000  region 0x1000
- *   TEXT    off 0x1000  VA 0x1001000  region 0x40000
- *   DATA    off 0x41000 VA 0x1041000  memory 0x80000
+ *   TEXT    off 0x1000  VA 0x1001000  region 0x60000
+ *   DATA    off 0x61000 VA 0x1061000  memory 0x80000
  */
 struct NaglowekBur {
     uint8_t magia[4];
@@ -104,12 +105,12 @@ NaglowekBur naglowek = {
     ),
 
     0x1000ULL,
-    0x40000ULL,
+    0x60000ULL,
     0x1001000ULL,
 
-    0x41000ULL,
+    0x61000ULL,
     0x80000ULL,
-    0x1041000ULL
+    0x1061000ULL
 };
 
 }
@@ -179,20 +180,33 @@ char siec_bufor[
  * 3. STRUKTURY
  * ========================================================================= */
 
+struct PendingCss {
+    struct Item{Husarz::ResourceEntry *entry{};uint16_t node{};} items[8]{};
+    unsigned count{};
+    ~PendingCss(){for(unsigned i=0;i<count;++i)Husarz::ResourceCache::unpin(items[i].entry);}
+};
+void browser_cancel_work(uint32_t identity);
 struct Zakladka {
     char url[
         URL_POJEMNOSC
     ];
 
     char* tresc;
+    char published_url[URL_POJEMNOSC]{};
 
     uint32_t identity{}, navigation{};
     Husarz::Document* dokument;
     bool dokument_brudny;
+    bool work_pending{};uint32_t resource_revision{};uint64_t navigation_started{};bool navigation_measured{};PendingCss *pending_css{};
 
     bool to_jest_html;
     bool wczytana;
 };
+
+uint32_t next_tab_identity{};
+void ensure_tab_identity(Zakladka &z){
+    if(!z.identity){z.identity=++next_tab_identity;if(!z.identity)z.identity=++next_tab_identity;}
+}
 
 struct ParsedUrl {
     bool https;
@@ -648,6 +662,7 @@ void wyczysc_zakladke(
         );
     }
 
+    if(zwolnij_tresc){browser_cancel_work(z.identity);delete z.pending_css;z.pending_css=nullptr;}
     if (zwolnij_tresc) delete z.dokument;
     z.identity=z.navigation=0;
     z.dokument = nullptr;
@@ -657,6 +672,7 @@ void wyczysc_zakladke(
 
     z.url[0] =
         '\0';
+    z.published_url[0]=0;
     z.dokument_brudny = true;
 
     z.to_jest_html =
@@ -747,6 +763,7 @@ void zamknij_zakladke(
         return;
     }
 
+    browser_cancel_work(zakladki[indeks].identity);delete zakladki[indeks].pending_css;zakladki[indeks].pending_css=nullptr;
     delete zakladki[indeks].dokument;
     zakladki[indeks].dokument = nullptr;
     if (zakladki[indeks].tresc) {
@@ -778,6 +795,7 @@ void zamknij_zakladke(
      * Zerujemy go bez free.
      */
     zakladki[liczba_zakladek].dokument = nullptr;
+    zakladki[liczba_zakladek].pending_css=nullptr;zakladki[liczba_zakladek].work_pending=false;
     zakladki[
         liczba_zakladek
     ].tresc =
@@ -2386,7 +2404,9 @@ __attribute__((noinline)) bool ustaw_url_z_location(
 
 // Parsing is independent of viewport geometry and painting.
 __attribute__((noinline)) bool document_url_base(const char *url,const Husarz::Document *doc,ParsedUrl &base) {
-    if(!parsuj_url(url,&base))return false;
+    const char *origin=url;
+    for(int i=0;i<liczba_zakladek;++i)if(doc && zakladki[i].dokument==doc && zakladki[i].published_url[0]){origin=zakladki[i].published_url;break;}
+    if(!parsuj_url(origin,&base))return false;
     if(!doc || !doc->base_url || !*doc->str(doc->base_url))return true;
     struct Address { char text[URL_POJEMNOSC]{}; }; auto *address=new Address;
     if(!address)return true;
@@ -3177,20 +3197,37 @@ class SuwakStrony : public PasekPrzewijania {
 public:void obsluz_rolke(ZdarzenieRolki& e)override{przewin_kolem(*this,e);}
 };
 void submit_browser_form(Husarz::Document&,uint16_t);
+Husarz::ViewportRequest browser_viewport{};
+void browser_request_work(Zakladka&);
+bool browser_has_work();
+bool browser_active_busy();
+void browser_document_painted();
+void browser_step_work();
 void append_decimal(char *out,size_t &position,uint64_t value);
 class WidokStrony : public Kontrolka {
     uint32_t* pixels_{};size_t capacity_{};
+    uint32_t *back_pixels_{};size_t back_capacity_{};
+    Husarz::Work paint_task_{};Husarz::WorkDriver paint_driver_{};Husarz::Surface paint_surface_{};
+    bool paint_requested_{true};Husarz::Document *paint_document_{};
+    uint32_t paint_generation_{},paint_revision_{},paint_reflow_{};
+    int paint_width_{},paint_height_{},paint_scroll_{};uint16_t paint_focus_{},paint_select_{};
+    const Husarz::Document *painted_{};uint32_t painted_generation_{},painted_revision_{},painted_reflow_{};
+    int painted_width_{},painted_height_{},painted_scroll_{-1};uint16_t painted_focus_{},painted_select_{};
 public:
     WidokStrony(){czy_moze_miec_fokus_=true;preferowany_rozmiar_=Rozmiar(-1,-1);}
-    ~WidokStrony()override{if(pixels_)gui_free(pixels_);}
+    ~WidokStrony()override{paint_task_.cancel();if(pixels_)gui_free(pixels_);if(back_pixels_)gui_free(back_pixels_);}
     void przygotuj(bool reset=false){
         if(!g_husarz.suwak_pionowy||liczba_zakladek<=0)return;
         auto& z=zakladki[aktywna_zakladka];
         if(!z.dokument||(z.dokument_brudny&&!nawigacja_trwa))przygotuj_dokument_zakladki(z,false);
         auto* d=z.dokument;int w=obszar_.szerokosc,h=obszar_.wysokosc;
         if(w<1||h<1)return;
-        if(d&&(d->styles_dirty||d->layout_width!=w||d->layout_revision!=d->revision))
-            Husarz::reflow(*d,w,browser_metrics);
+#ifdef HUSARZ_HOST_TEST
+        if(d&&(d->styles_dirty||d->layout_width!=w||d->layout_revision!=d->revision))Husarz::reflow(*d,w,browser_metrics);
+#else
+        if(browser_viewport.request(w,h) && d){HUSARZ_COUNT(*d,resize_received,1);}
+        if(z.dokument_brudny || !d || d->styles_dirty || d->layout_width!=w || d->layout_revision!=d->revision || (z.pending_css && z.pending_css->count))browser_request_work(z);
+#endif
         auto& bar=*g_husarz.suwak_pionowy;
         bar.ustaw_zakres(0,d&&d->height>h?d->height-h:0);
         bar.ustaw_rozmiar_strony(h);bar.ustaw_maly_krok(d?d->styles[d->tag(1,"html")?1:0].line*3:60);
@@ -3198,8 +3235,12 @@ public:
         if(reset)bar.ustaw_wartosc(0);
         size_t count=w<=4096&&h<=4096?size_t(w)*h:0;
         if(count>4U*1024*1024)count=0;
+#ifdef HUSARZ_HOST_TEST
         if(count>capacity_){auto* next=static_cast<uint32_t*>(gui_malloc(count*sizeof(uint32_t)));
             if(next){if(pixels_)gui_free(pixels_);pixels_=next;capacity_=count;}}
+#else
+        (void)count;paint_requested_=true;
+#endif
         uniewaznij();
     }
     void rozmiesc(Prostokat r)override{Kontrolka::rozmiesc(r);przygotuj();}
@@ -3212,13 +3253,35 @@ public:
         const int w=obszar_.szerokosc,h=obszar_.wysokosc;
         if(w<=0||h<=0)return;
         auto* d=liczba_zakladek>0?zakladki[aktywna_zakladka].dokument:nullptr;
-        if(!d||!pixels_||w>4096||h>4096||size_t(w)*h>capacity_){
+        if(!d||w>4096||h>4096
+#ifdef HUSARZ_HOST_TEST
+            ||!pixels_||size_t(w)*h>capacity_
+#endif
+        ){
             ctx.rysuj_prostokat({0,0,w,h},0xffffff);
             ctx.rysuj_tekst({8,8},"Dane strony lub bufor widoku niedostępne.",0x000000);return;}
+#ifdef HUSARZ_HOST_TEST
         Husarz::Surface surface{pixels_,w,h};
-        Husarz::paint(*d,surface,int(g_husarz.suwak_pionowy->wartosc()),browser_metrics,browser_glyphs);
+        int scroll=int(g_husarz.suwak_pionowy->wartosc());
+        dirty_focus(*d);
+        bool full=d->damage.full || painted_generation_!=d->generation || painted_width_!=w || painted_height_!=h || painted_scroll_!=scroll;
+        bool visual=painted_revision_!=d->paint_revision || painted_focus_!=d->focused_control || painted_select_!=d->open_select;
+        if(full || (visual && (d->damage.full || painted_select_!=d->open_select)))
+            Husarz::paint(*d,surface,scroll,browser_metrics,browser_glyphs);
+        else if(visual)for(unsigned i=0;i<d->damage.count;++i){auto r=d->damage.rectangles[i];r.y-=scroll;
+            r=Husarz::intersect(r,{0,0,w,h});if(r.width && r.height)Husarz::paint(*d,surface,scroll,browser_metrics,browser_glyphs,r);}
+        painted_=d;painted_generation_=d->generation;painted_revision_=d->paint_revision;painted_reflow_=d->reflow_count;
+        painted_width_=w;painted_height_=h;painted_scroll_=scroll;painted_focus_=d->focused_control;painted_select_=d->open_select;d->damage.clear();
         Punkt origin=ctx.pobierz_przesuniecie();
         for(int y=0;y<h;++y)ctx.rysuj_wiersz_ekranu(origin.x,origin.y+y,w,pixels_+size_t(y)*w);
+#else
+        int scroll=int(g_husarz.suwak_pionowy->wartosc());
+        if(painted_!=d || painted_generation_!=d->generation || painted_revision_!=d->paint_revision || painted_reflow_!=d->reflow_count || painted_width_!=w || painted_height_!=h || painted_scroll_!=scroll || painted_focus_!=d->focused_control || painted_select_!=d->open_select)paint_requested_=true;
+        ctx.rysuj_prostokat({0,0,w,h},d->user_agent.canvas);
+        Punkt origin=ctx.pobierz_przesuniecie();
+        if(pixels_){int rows=h<painted_height_?h:painted_height_,columns=w<painted_width_?w:painted_width_;
+            for(int y=0;y<rows;++y)ctx.rysuj_wiersz_ekranu(origin.x,origin.y+y,columns,pixels_+size_t(y)*painted_width_);}
+#endif
     }
 #ifdef HUSARZ_HOST_TEST
     uint64_t document_pixel_hash() {
@@ -3228,6 +3291,59 @@ public:
         return hash;
     }
 #endif
+    void dirty_focus(Husarz::Document &d){
+        if(painted_generation_!=d.generation)return;
+        if(d.open_select && painted_revision_!=d.paint_revision)Husarz::invalidate_select_popup(d,g_husarz.suwak_pionowy?int(g_husarz.suwak_pionowy->wartosc()):0,obszar_.szerokosc,obszar_.wysokosc);
+        if(painted_focus_==d.focused_control)return;
+        uint16_t ids[2]={painted_focus_,d.focused_control};for(uint16_t id:ids)if(id && id<d.node_count){auto &b=d.boxes[id];d.damage.add({b.x,b.y,b.width,b.height});}
+    }
+    bool paint_pending()const{return bool(paint_task_.handle) || (paint_requested_ && liczba_zakladek>0 && zakladki[aktywna_zakladka].dokument); }
+    void cancel_paint(){paint_task_.cancel();paint_driver_={};paint_requested_=true;paint_document_=nullptr;}
+    Husarz::Work render_pending_page(){
+        auto &d=*paint_document_;
+        bool full=painted_generation_!=d.generation || painted_width_!=paint_width_ || painted_height_!=paint_height_ || painted_scroll_!=paint_scroll_ || d.damage.full || painted_select_!=paint_select_;
+        if(full)co_await Husarz::paint_work(d,paint_surface_,paint_scroll_,browser_metrics,browser_glyphs,{0,0,paint_width_,paint_height_});
+        else {
+            co_await Husarz::copy_document_bytes(back_pixels_,pixels_,size_t(paint_width_)*paint_height_*4);
+            Husarz::DirtyRectangles regions=d.damage;
+            for(unsigned i=0;i<regions.count;++i){auto r=regions.rectangles[i];r.y-=paint_scroll_;
+                r=Husarz::intersect(r,{0,0,paint_width_,paint_height_});if(r.width && r.height)co_await Husarz::paint_work(d,paint_surface_,paint_scroll_,browser_metrics,browser_glyphs,r);}
+        }
+    }
+    void advance_paint(){
+#ifndef HUSARZ_HOST_TEST
+        auto *d=liczba_zakladek?zakladki[aktywna_zakladka].dokument:nullptr;
+        int w=obszar_.szerokosc,h=obszar_.wysokosc,scroll=g_husarz.suwak_pionowy?int(g_husarz.suwak_pionowy->wartosc()):0;
+        if(paint_task_.handle && (d!=paint_document_ || !d || d->generation!=paint_generation_ || d->paint_revision!=paint_revision_ || d->reflow_count!=paint_reflow_ || w!=paint_width_ || h!=paint_height_ || scroll!=paint_scroll_ || d->focused_control!=paint_focus_ || d->open_select!=paint_select_))cancel_paint();
+        if(!d || w<1 || h<1 || w>4096 || h>4096 || size_t(w)*h>4U*1024*1024)return;
+        // Keep published pixels while the mutable model needs new geometry.
+        if(d->styles_dirty || d->layout_revision!=d->revision || d->layout_width!=w)return;
+        if(!paint_task_.handle){
+            if(!paint_requested_)return;
+            if(painted_generation_==d->generation && painted_revision_==d->paint_revision && painted_reflow_==d->reflow_count && painted_width_==w && painted_height_==h && painted_scroll_==scroll && painted_focus_==d->focused_control && painted_select_==d->open_select && !d->damage.full && !d->damage.count){paint_requested_=false;browser_document_painted();return;}
+            size_t count=size_t(w)*h;
+            if(count>back_capacity_){auto *p=static_cast<uint32_t*>(gui_malloc(count*4));if(!p)return;if(back_pixels_)gui_free(back_pixels_);back_pixels_=p;back_capacity_=count;}
+            dirty_focus(*d);
+            paint_document_=d;paint_generation_=d->generation;paint_revision_=d->paint_revision;paint_reflow_=d->reflow_count;
+            paint_width_=w;paint_height_=h;paint_scroll_=scroll;paint_focus_=d->focused_control;paint_select_=d->open_select;
+            paint_surface_={back_pixels_,w,h};paint_driver_={};paint_driver_.allow_clock=false;paint_driver_.clock=Husarz::native_work_clock.valid?Husarz::native_work_now:nullptr;paint_task_=render_pending_page();
+            if(!paint_task_.handle)return;
+        }
+        if(!paint_task_.step(paint_driver_))return;
+        if(!paint_driver_.failed){
+            auto *swap=pixels_;pixels_=back_pixels_;back_pixels_=swap;size_t old=capacity_;capacity_=back_capacity_;back_capacity_=old;
+            painted_=d;painted_generation_=paint_generation_;painted_revision_=paint_revision_;painted_reflow_=paint_reflow_;
+            painted_width_=w;painted_height_=h;painted_scroll_=scroll;painted_focus_=paint_focus_;painted_select_=paint_select_;
+            d->damage.clear();paint_requested_=false;uniewaznij();browser_document_painted();
+#if HUSARZ_PERF
+            if(paint_driver_.maximum_ns>d->perf.max_slice_ns)d->perf.max_slice_ns=paint_driver_.maximum_ns;
+            if(paint_driver_.maximum>d->perf.max_slice_work)d->perf.max_slice_work=paint_driver_.maximum;
+            Husarz::report_performance(*d,browser_viewport);
+#endif
+        }
+        paint_task_.cancel();paint_driver_={};
+#endif
+    }
     void obsluz_rolke(ZdarzenieRolki& e)override{
         if(!e.delta_y||!g_husarz.suwak_pionowy)return;
         przewin_kolem(*g_husarz.suwak_pionowy,e);
@@ -3530,8 +3646,12 @@ Husarz::ResourceEntry *fetch_browser_resource(const char *url,Husarz::ResourceTy
 }
 #include "husarz/worker.inc"
 #include "husarz/async_runtime.inc"
+#include "husarz/pipeline_runtime.inc"
 
-void przygotuj_dokument_zakladki(Zakladka& z,bool resources){
+__attribute__((noinline)) void przygotuj_dokument_zakladki(Zakladka& z,bool resources){
+#ifndef HUSARZ_HOST_TEST
+    (void)resources;if(!z.dokument || z.dokument_brudny)browser_request_work(z);return;
+#endif
     if(z.dokument&&!z.dokument_brudny)return;
     auto* next=new Husarz::Document;
     if(!next){ustaw_status("Brak pamięci na dokument.");return;}
@@ -3579,7 +3699,7 @@ void przygotuj_dokument_zakladki(Zakladka& z,bool resources){
         }
         delete scratch;
     }
-    delete z.dokument;z.dokument=next;z.dokument_brudny=false;
+    delete z.dokument;z.dokument=next;z.dokument_brudny=false;kopiuj_limit(z.published_url,sizeof(z.published_url),z.url);
     if(next->truncated)ustaw_status("Osiągnięto limit dokumentu; wyświetlono część strony.");
     // The caller lays out the published document after this stack frame returns.
     if(liczba_zakladek>0 && &z==&zakladki[aktywna_zakladka]) zresetuj_przewijanie();
@@ -3590,7 +3710,7 @@ void submit_browser_form(Husarz::Document &d,uint16_t control) {
     if (*method && !Husarz::equal_ci(method,Husarz::length(method,16),"get")) { ustaw_status("Ta metoda formularza nie jest obsługiwana (GET)."); g_husarz.aktualizuj_pasek_stanu(); return; }
     struct FormScratch { ParsedUrl base{}; char url[URL_POJEMNOSC]{}, query[URL_POJEMNOSC]{}; };
     auto *scratch=new FormScratch; if (!scratch) return;
-    const char *action=d.attr(form,"action"); if (!*action) action=zakladki[aktywna_zakladka].url;
+    const char *action=d.attr(form,"action"); if (!*action) action=zakladki[aktywna_zakladka].published_url[0]?zakladki[aktywna_zakladka].published_url:zakladki[aktywna_zakladka].url;
     bool ready=document_url_base(zakladki[aktywna_zakladka].url,&d,scratch->base) &&
         ustaw_url_z_location(scratch->url,sizeof(scratch->url),action,scratch->base) &&
         Husarz::form_query(d,form,control,scratch->query,sizeof(scratch->query));
@@ -4085,6 +4205,10 @@ extern "C" [[noreturn]] void _start() {
 #ifdef HUSARZ_WORKER_ONLY
     browser_worker_main();
 #else
+#if HUSARZ_PERF
+    Husarz::perf_clock=gui_czas_monotoniczny_ns;
+    Husarz::perf_log=[](const char *s){wypisz(s);};
+#endif
     AplikacjaGUI app;
     g_husarz.app = &app;
 

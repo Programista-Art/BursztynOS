@@ -2,6 +2,7 @@ struct BrowserResources {
     Husarz::ResourceQueue queue{}; Husarz::ResourceTask active{};
     uint64_t endpoint{}, worker{}, worker_pid{}, nonce{}, shared{}, started{};
     Husarz::WorkerPayload *payload{};
+    Husarz::Work publication{};Husarz::WorkDriver publication_driver{};
     uint32_t next_tab{}; bool busy{}, launching{};
 };
 BrowserResources *browser_resources{};
@@ -36,15 +37,22 @@ Zakladka *task_tab(const Husarz::ResourceTask &task) {
     }
     return nullptr;
 }
+void async_release_shared();
 void cancel_async_tab(Zakladka &z) {
+    if(browser_resources && browser_resources->publication.handle && browser_resources->active.tab==z.identity)async_release_shared();
+    z.navigation_started=0;z.navigation_measured=false;
+    browser_cancel_work(z.identity);z.work_pending=false;z.dokument_brudny=false;delete z.pending_css;z.pending_css=nullptr;
     ++z.navigation; if (!z.navigation) ++z.navigation;
     if (browser_resources) browser_resources->queue.cancel(z.identity);
 }
 [[maybe_unused]] void async_release_shared() {
     if (!browser_resources) return;
     auto &state=*browser_resources;
+    state.publication.cancel();state.publication_driver={};
+#ifndef HUSARZ_HOST_TEST
     if (state.payload) shm_unmap(state.payload);
     if (state.shared) shm_close(state.shared);
+#endif
     state.payload=nullptr; state.shared=0; state.busy=false;
 }
 void async_shutdown() {
@@ -62,8 +70,8 @@ void async_shutdown() {
     if (!browser_resources) browser_resources=new BrowserResources;
     if (!browser_resources) { ustaw_status("Brak pamięci na zadania sieciowe."); return; }
     if (!z.dokument) przygotuj_dokument_zakladki(z,false);
-    if (!z.identity) { z.identity=++browser_resources->next_tab; if(!z.identity) z.identity=++browser_resources->next_tab; }
-    cancel_async_tab(z);
+    ensure_tab_identity(z);
+    cancel_async_tab(z);z.navigation_started=gui_czas_monotoniczny_ns();z.navigation_measured=false;
     auto *task=new Husarz::ResourceTask{}; if (!task) return;
     task->tab=z.identity; task->navigation=z.navigation; task->document=z.dokument?z.dokument->generation:0; task->kind=Husarz::RequestKind::Html; task->history=history;
     if (kopiuj_limit(task->url,sizeof(task->url),z.url)) browser_resources->queue.push(*task);
@@ -75,7 +83,7 @@ void async_shutdown() {
 }
 void async_refresh(Zakladka &z) {
     if (liczba_zakladek>0 && &z==&zakladki[aktywna_zakladka]) {
-        if (g_husarz.txt_adres) g_husarz.txt_adres->ustaw_tekst(z.url);
+        if (g_husarz.txt_adres && (!g_husarz.okno || g_husarz.okno->fokus()!=g_husarz.txt_adres)) g_husarz.txt_adres->ustaw_tekst(z.url);
         if (g_husarz.widok_strony) g_husarz.widok_strony->przygotuj();
         g_husarz.aktualizuj_pasek_kart(); g_husarz.aktualizuj_pasek_stanu();
     }
@@ -83,7 +91,7 @@ void async_refresh(Zakladka &z) {
 void queue_images(Zakladka &z) {
     if (!browser_resources || !z.dokument) return;
     auto &d=*z.dokument;
-    if (d.styles_dirty) Husarz::compute_styles(d);
+    if (d.styles_dirty || z.work_pending || (z.pending_css && z.pending_css->count)) return;
     struct Scratch { ParsedUrl base{},css{}; char source[URL_POJEMNOSC]{}; Husarz::ResourceTask task{}; };
     auto *scratch=new Scratch; if (!scratch) return;
     if (!document_url_base(z.url,z.dokument,scratch->base)) { delete scratch; return; }
@@ -142,22 +150,36 @@ void queue_document_resources(Zakladka &z) {
 void finish_resource_task(const Husarz::ResourceTask &task,Husarz::ResourceEntry *entry) {
     auto *z=task_tab(task); if (!z || !z->dokument) return;
     auto &d=*z->dokument;
+    HUSARZ_SCOPE(d, Publication);
+#if HUSARZ_PERF
+    if(resource_cache){d.perf.cache_hits=resource_cache->hits;d.perf.cache_misses=resource_cache->misses;}
+#endif
     if (task.kind==Husarz::RequestKind::Css) {
-        if (entry) Husarz::parse_css(d,reinterpret_cast<const char*>(entry->raw),entry->size,uint32_t(task.node)*4096,
-            d.store(task.url,Husarz::length(task.url,sizeof(task.url))));
-        if (!queued_css(*z)) queue_images(*z);
+        if(entry){
+            if(!z->pending_css)z->pending_css=new PendingCss;
+            if(z->pending_css && z->pending_css->count<8){++entry->refs;z->pending_css->items[z->pending_css->count++]={entry,task.node};++z->resource_revision;browser_request_work(*z);}
+        }
+        if(!entry && !queued_css(*z))queue_images(*z);
     } else if (entry && resource_cache) {
-        if (resource_cache->bind(d,task.node,*entry,task.background)) ++d.revision;
+        if (resource_cache->bind(d,task.node,*entry,task.background)) {
+            ++z->resource_revision;
+            const auto &style=d.styles[task.node];
+            bool fixed=task.background || ((style.width.unit!=Husarz::Unit::Auto || d.has_attr(task.node,"width")) && (style.height.unit!=Husarz::Unit::Auto || d.has_attr(task.node,"height")));
+            if(fixed && (task.background || Husarz::publish_fixed_image_paint(d,task.node,browser_metrics,browser_glyphs)))d.invalidate(task.node,1);
+            else {d.invalidate(task.node,4);browser_request_work(*z);}
+        }
     }
     async_refresh(*z);
 }
-[[maybe_unused]] void apply_worker_result() {
+[[maybe_unused]] Husarz::Work apply_worker_result_work() {
+    HUSARZ_PROGRESS(Publication,0,1);
     auto &state=*browser_resources; const auto &task=state.active;
     auto *z=task_tab(task);
-    if (!z) { ++state.queue.discarded; resource_debug("discard",&task); return; }
+    if (!z) { ++state.queue.discarded; resource_debug("discard",&task); co_return; }
     auto &payload=*state.payload;
+    if(z->dokument){HUSARZ_COUNT(*z->dokument,resource_completions,1);}
     if (payload.magic!=Husarz::AsyncMagic || payload.request!=task.request || payload.kind!=uint32_t(task.kind) || payload.size>sizeof(payload.raw)) {
-        ++state.queue.discarded; return;
+        ++state.queue.discarded; co_return;
     }
     ++state.queue.completed;
     resource_debug("complete",&task);
@@ -165,7 +187,7 @@ void finish_resource_task(const Husarz::ResourceTask &task,Husarz::ResourceEntry
         if (!payload.success) ustaw_tresc(*z,"Nie udało się pobrać strony.",false);
         else {
             struct Scratch { ParsedUrl parsed{}; char redirect[URL_POJEMNOSC]{}; };
-            auto *scratch=new Scratch; if (!scratch) return;
+            auto *scratch=new Scratch; if (!scratch) co_return;
             bool redirect=false;
             if (parsuj_url(task.url,&scratch->parsed)) consume_http_response(*z,&redirect,scratch->redirect,scratch->parsed,
                 reinterpret_cast<const char*>(payload.raw),payload.size,payload.trusted!=0);
@@ -173,16 +195,22 @@ void finish_resource_task(const Husarz::ResourceTask &task,Husarz::ResourceEntry
                 auto *next=new Husarz::ResourceTask(task);
                 if (next) { ++next->redirects; kopiuj_limit(next->url,sizeof(next->url),scratch->redirect);
                     kopiuj_limit(z->url,sizeof(z->url),scratch->redirect); state.queue.push(*next); delete next; }
-                delete scratch; return;
+                delete scratch; co_return;
             }
             if (redirect) ustaw_tresc(*z,"Przekroczono limit przekierowań.",false);
             delete scratch;
         }
         przygotuj_dokument_zakladki(*z,false);
         if (task.history) dopisz_do_historii(z->url);
-        queue_document_resources(*z); async_refresh(*z);
+        async_refresh(*z);
     } else {
         auto *cache=cache_resources(); Husarz::ResourceEntry *entry=nullptr;
+        // A canceled pixel copy must not leave an undecoded cache entry that
+        // shadows a later successful entry for the same URL.
+        struct PendingImage {
+            Husarz::ResourceEntry *entry{};
+            ~PendingImage(){if(entry && entry->cache && !entry->refs && !entry->pixels)entry->cache->remove(*entry);}
+        } pending_image;
         if (payload.success && cache && payload.size && payload.size<=Husarz::MaxResourceBytes) {
             auto type=task.kind==Husarz::RequestKind::Css?Husarz::ResourceType::Css:Husarz::ResourceType::Image;
             entry=cache->insert(task.url,type,payload.raw,payload.size,gui_czas_monotoniczny_ns());
@@ -194,16 +222,18 @@ void finish_resource_task(const Husarz::ResourceTask &task,Husarz::ResourceEntry
                 entry->expires=entry->created?entry->created+uint64_t(entry->cache_seconds)*1000000000:0;
             }
             if (entry && task.kind==Husarz::RequestKind::Image) {
+                pending_image.entry=entry;
                 uint32_t w=payload.width,h=payload.height;
                 if (!w || !h || w>Husarz::MaxImageSide || h>Husarz::MaxImageSide || uint64_t(w)*h>Husarz::AsyncImagePixels) {
                     ++cache->image_failures; entry=nullptr;
                 } else {
                     size_t bytes=size_t(w)*h*4; ++entry->refs; bool room=cache->room(0,bytes,false); --entry->refs;
                     if (room) {
-                        auto *pixels=static_cast<uint32_t*>(gui_malloc(bytes));
+                        struct PixelOwner{uint32_t *value{};~PixelOwner(){if(value)gui_free(value);}} owned;
+                        auto *pixels=owned.value=static_cast<uint32_t*>(gui_malloc(bytes));
                         if (pixels) {
-                            for (size_t i=0;i<size_t(w)*h;++i) pixels[i]=payload.pixels[i];
-                            entry->pixels=pixels; entry->width=w; entry->height=h; entry->decoded=bytes;
+                            for(size_t i=0;i<size_t(w)*h;++i){if(!(i&63))co_await Husarz::WorkPoint{1};pixels[i]=payload.pixels[i];}
+                            entry->pixels=pixels;owned.value=nullptr; entry->width=w; entry->height=h; entry->decoded=bytes;
                             cache->decoded_bytes+=bytes; ++cache->images_decoded;
                         }
                     }
@@ -215,6 +245,7 @@ void finish_resource_task(const Husarz::ResourceTask &task,Husarz::ResourceEntry
         if (entry && entry->transient && !entry->refs && cache) cache->remove(*entry);
     }
 }
+[[maybe_unused]] void apply_worker_result(){Husarz::finish_work(apply_worker_result_work());}
 void async_receive() {
 #ifndef HUSARZ_HOST_TEST
     if (!browser_resources || !browser_resources->endpoint) return;
@@ -228,7 +259,7 @@ void async_receive() {
         if (message.type==1 && state.launching) {
             state.worker=message.endpoint; state.worker_pid=incoming.nadawca_pid; state.launching=false;
         } else if (message.type==3 && state.busy && incoming.nadawca_pid==state.worker_pid && message.request==state.active.request) {
-            apply_worker_result(); async_release_shared();
+            if(!state.publication.handle){state.publication_driver={};state.publication_driver.allow_clock=false;state.publication_driver.clock=Husarz::native_work_clock.valid?Husarz::native_work_now:nullptr;state.publication=apply_worker_result_work();}
         }
     }
     async_dispatch();
@@ -252,7 +283,7 @@ void async_receive() {
         return;
     }
     // Only one worker request can use the native global network session at once.
-    for (unsigned step=0;step<Husarz::MaxPendingRequests && state.queue.pop(state.active);++step) {
+    for (unsigned step=0;step<4 && state.queue.pop(state.active);++step) {
         if (!task_tab(state.active)) { ++state.queue.discarded; continue; }
         struct Url { char text[2048]{}; }; auto *url=new Url;
         if (!url) return;
@@ -285,10 +316,20 @@ void async_tick() {
             state.queue.count=0; async_shutdown(); ustaw_status("Przekroczono czas oczekiwania na sieć."); g_husarz.aktualizuj_pasek_stanu(); return;
         }
     }
-    async_receive(); async_dispatch();
+    async_receive();
+    if(browser_resources && browser_resources->publication.handle){auto &state=*browser_resources;
+        if(!task_tab(state.active)){async_release_shared();}
+        else if(state.publication.step(state.publication_driver)){
+#if HUSARZ_PERF
+            if(auto *tab=task_tab(state.active))if(tab->dokument)tab->dokument->perf.duration[unsigned(Husarz::Stage::Publication)]+=state.publication_driver.cpu;
+#endif
+            async_release_shared();
+        }
+    }
+    async_dispatch();
 #endif
 }
 bool WidokStrony::czy_wymaga_animacji() const {
-    return browser_resources && (browser_resources->busy || browser_resources->launching || browser_resources->queue.count);
+    return paint_pending() || browser_has_work() || (browser_resources && (browser_resources->busy || browser_resources->launching || browser_resources->queue.count));
 }
-void WidokStrony::krok_animacji(uint64_t) { async_tick(); }
+void WidokStrony::krok_animacji(uint64_t now) { Husarz::native_work_clock.sample(now,Husarz::work_cycles());async_tick();if(!browser_resources || !browser_resources->publication.handle)browser_step_work();advance_paint();if(g_husarz.btn_zatrzymaj)g_husarz.btn_zatrzymaj->ustaw_wlaczona(browser_active_busy());if(g_husarz.app)g_husarz.app->ustaw_odstep_animacji((browser_has_work() || paint_pending() || (browser_resources && browser_resources->publication.handle))?1:8); }

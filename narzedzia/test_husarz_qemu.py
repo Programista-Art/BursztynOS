@@ -31,8 +31,11 @@ FIXTURES = ROOT / 'narzedzia/fixtures/husarz'
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--iso', type=Path, default=ROOT / 'BursztynOS.iso')
+    parser.add_argument('--kernel', type=Path, default=ROOT / 'system_operacyjny.bin', help='Matching unmodified kernel ELF for symbol observation and artifact hashing')
     parser.add_argument('--output', type=Path, default=ROOT / '.husarz-test/qemu')
     parser.add_argument('--timeout', type=float, default=900)
+    parser.add_argument('--diagnostics-only', action='store_true', help='Development counters observed through serial, without screenshot polling during work')
+    parser.add_argument('--performance', action='store_true', help='Heavy supported pages, repeated maximize/restore, cancellation and long scrolling')
     parser.add_argument('--layout-only', action='store_true', help='Native table spans, border conflict and signed margin pixels with resize')
     parser.add_argument('--render-only', action='store_true', help='Development pass over resources, forms and theme isolation')
     parser.add_argument('--images-only', action='store_true', help='Focused native PNG/JPEG pixels and shared-cache regression')
@@ -62,6 +65,8 @@ def main():
                 time.sleep(.3)  # Expose the ordinary loading redraws to observation.
             self.send_response(200)
             self.send_header('Content-Type', 'text/css' if name.endswith('.css') else 'image/png' if name.endswith('.png') else 'image/jpeg' if name.endswith('.jpg') else 'text/html; charset=utf-8')
+            # Cache assertions test reuse of fresh entries, independent of slow TCG runs.
+            self.send_header('Cache-Control', 'max-age=3600')
             self.send_header('Content-Length', str(len(data)))
             self.send_header('Connection', 'close')
             self.end_headers()
@@ -79,7 +84,7 @@ def main():
     serial = out / 'serial.log'
     serial.unlink(missing_ok=True)
     temporary_iso = None
-    kernel = args.fault_probe.resolve() if args.fault_probe else ROOT / 'system_operacyjny.bin'
+    kernel = args.fault_probe.resolve() if args.fault_probe else args.kernel.resolve()
     if args.fault_probe:
         temporary_iso = tempfile.TemporaryDirectory(prefix='husarz-user-fault-')
         staging = Path(temporary_iso.name) / 'staging'
@@ -132,13 +137,13 @@ def main():
                     raise TimeoutError('Husarz regression deadline\n' + text[-2000:])
                 return text
 
-            def wait(predicate, label, seconds=90):
+            def wait(predicate, label, seconds=90, interval=.15):
                 until = min(deadline, time.monotonic() + seconds)
                 while time.monotonic() < until:
                     health()
                     if predicate():
                         return
-                    time.sleep(.15)
+                    time.sleep(interval)
                 raise TimeoutError(label)
 
             wait(lambda: '[DIAG APP] First frame submitted' in health(), 'native desktop ready', args.timeout)
@@ -207,8 +212,16 @@ def main():
             def screenshot(name):
                 if not name.endswith('probe') and name not in ('browser-opening', 'notepad-after-fault'):
                     print('Screenshot:', name, flush=True)
-                path = out / (name + '.png')
-                q.call('screendump', {'filename': str(path), 'format': 'png'})
+                probe=name.endswith('probe') or name=='browser-opening'
+                path = out / (name + ('.ppm' if probe else '.png'))
+                # Freeze virtual device time only while observing the frame.
+                # Host image encoding/file IO must not consume the guest GPU's
+                # 500 ms control-command deadline with its backend blocked by QMP.
+                q.call('stop')
+                try:
+                    q.call('screendump', {'filename': str(path), 'format': 'ppm' if probe else 'png'})
+                finally:
+                    q.call('cont')
                 with Image.open(path) as im:
                     return im.convert('RGB').copy()
 
@@ -216,7 +229,27 @@ def main():
                 with requests_lock:
                     return requests.count('/' + path)
 
-            def navigate(name):
+            def page_idle():
+                # A white mouse pointer over the label is not enabled text.
+                # Move it using native input before observing button state.
+                pointer=position()
+                if frame['x']+160<=pointer[0]<=frame['x']+285 and frame['y']+65<=pointer[1]<=frame['y']+140:
+                    move(frame['x']+400,frame['y']+100)
+                im=screenshot('idle-probe')
+                # Observe enabled/disabled native Stop text after the submitted frame;
+                # asynchronous publication and both stock themes are supported.
+                area=im.crop((frame['x']+190,frame['y']+94,frame['x']+250,frame['y']+107))
+                # Both stock themes use gray disabled text. Enabled text is
+                # white on dark chrome and black on light chrome; background
+                # brightness must never be counted as enabled label pixels.
+                background=im.getpixel((frame['x']+205,frame['y']+90))
+                if sum(background)>384:
+                    enabled=sum(1 for r,g,b in area.getdata() if max(r,g,b)<80)
+                else:
+                    enabled=sum(1 for r,g,b in area.getdata() if min(r,g,b)>200)
+                return enabled<8
+
+            def navigate(name, settle=2):
                 print('Navigate:', name, flush=True)
                 previous = count(name)
                 key('ctrl', 'l')
@@ -228,7 +261,9 @@ def main():
                         key({'/': 'slash', '.': 'dot', '-': 'minus', '_': 'minus'}.get(c, c))
                 key('ret')
                 wait(lambda: count(name) > previous, 'HTTP request ' + name)
-                time.sleep(2)
+                time.sleep(settle)
+                if settle and not name.startswith('slow-'):
+                    wait(page_idle,'active-tab processing completed for '+name,240,interval=1)
                 health()
 
             def thumb(image):
@@ -270,7 +305,8 @@ def main():
                 time.sleep(1)
                 move(80,28)
                 desktop=screenshot('fault-isolated-desktop')
-                click(80,28,double=True)
+                hmp('mouse_button 2');time.sleep(.2);hmp('mouse_button 0');time.sleep(.5)
+                click(105,43)
                 def notepad_ready():
                     im=screenshot('notepad-after-fault')
                     a=desktop.crop((100,100,650,450));b=im.crop((100,100,650,450))
@@ -282,6 +318,142 @@ def main():
                 health()
                 result={'result':'PASS','fault_isolated':True,'native_app_after_fault':True,
                         'kernel_sha256':kernel_sha,'fault_vector':args.fault_vector}
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
+                print(json.dumps(result),flush=True)
+                return
+            if args.diagnostics_only:
+                def native_perf(nodes,width=None,after_candidates=None):
+                    for line in reversed(health().splitlines()):
+                        if not line.startswith('[HUSARZ PERF] '):continue
+                        fields={key:int(value) for key,value in re.findall(r'(\w+)=(\d+)',line)}
+                        if fields.get('nodes')!=nodes or not fields.get('navigationms'):continue
+                        if width is not None and fields.get('viewportwidth')!=width:continue
+                        if after_candidates is not None and fields.get('paintcandidates',0)<=after_candidates:continue
+                        return fields
+                    return None
+                navigate('heavy-mixed.html',settle=0)
+                wait(lambda:native_perf(1266),'serial mixed navigation completion',300)
+                normal=native_perf(1266);normal_frame=dict(frame)
+                screenshot('diagnostic-mixed')
+                click(frame['x']+frame['w']-40,frame['y']+14)
+                frame.update(x=0,y=0,w=1280,h=680)
+                wait(lambda:native_perf(1266,1262),'serial maximized layout and paint',180)
+                maximized=native_perf(1266,1262)
+                click(frame['x']+frame['w']-40,frame['y']+14);frame.update(normal_frame)
+                wait(lambda:native_perf(1266,782, maximized['paintcandidates']),'serial restored layout and paint',180)
+                restored=native_perf(1266,782, maximized['paintcandidates'])
+                navigate('heavy-long.html',settle=0)
+                wait(lambda:native_perf(1406),'serial long navigation completion',300)
+                long_initial=native_perf(1406)
+                click(400,400);key('end')
+                wait(lambda:native_perf(1406,after_candidates=long_initial['paintcandidates']),'serial long scroll paint',180)
+                long_scrolled=native_perf(1406,after_candidates=long_initial['paintcandidates'])
+                screenshot('diagnostic-long-scrolled');health()
+                samples=[normal,maximized,restored,long_initial,long_scrolled]
+                if any(sample['maxslicework']>2048 for sample in samples):raise AssertionError('Native deterministic work cap exceeded')
+                if normal['selectorchecks']!=restored['selectorchecks']:raise AssertionError('Resize repeated style matching')
+                if long_initial['paintculled']<=long_initial['paintvisible']*5:raise AssertionError('Insufficient native long-page culling')
+                result.update(result='PASS',mode='diagnostics',kernel_sha256=kernel_sha,iso_sha256=iso_sha,
+                              no_guest_fault=True,http_requests=list(requests),samples=samples)
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
+                print(json.dumps(result),flush=True)
+                return
+            if args.performance:
+                result['mode']='performance'
+                navigate('heavy-mixed.html')
+                def marker_span():
+                    im=screenshot('performance-probe')
+                    xs=[x for x in range(frame['x'],frame['x']+frame['w']-18)
+                        if im.getpixel((x,frame['y']+126))==(38,162,105)]
+                    return (min(xs),max(xs)) if xs else None
+                wait(marker_span,'heavy mixed content published',120)
+                def marker_width_is(width):
+                    span=marker_span()
+                    return span is not None and span[1]-span[0]+1==width
+                normal_frame=dict(frame)
+                initial_span=marker_span();normal_width=initial_span[1]-initial_span[0]+1
+                before_resize=list(requests)
+                resize_samples=[]
+                for cycle in range(4):
+                    click(frame['x']+frame['w']-40,frame['y']+14)
+                    frame.update(x=0,y=0,w=1280,h=680)
+                    # Consume native input before waiting for the new layout.
+                    # This observes the WM/input path while reflow is pending.
+                    move(1000,500)
+                    if position()!=[1000,500]:raise AssertionError('Mouse did not respond during pending maximize')
+                    wait(lambda: marker_width_is(normal_width+480),'latest maximized heavy geometry',90,interval=1)
+                    move(1000,500)
+                    if position()!=[1000,500]:raise AssertionError('Mouse did not respond during maximize')
+                    thumb(screenshot('heavy-maximized-'+str(cycle)))
+                    resize_samples.append({'maximized':True,'span':marker_span()})
+                    click(frame['x']+frame['w']-40,frame['y']+14)
+                    frame.update(normal_frame)
+                    move(800,500)
+                    if position()!=[800,500]:raise AssertionError('Mouse did not respond during pending restore')
+                    wait(lambda: marker_width_is(normal_width),'latest restored heavy geometry',90,interval=1)
+                    thumb(screenshot('heavy-restored-'+str(cycle)))
+                    resize_samples.append({'maximized':False,'span':marker_span()})
+                if list(requests)!=before_resize:raise AssertionError('Maximize/restore fetched resources')
+                result['maximize_restore']=resize_samples
+                # Each fixture is fetched through the unchanged real native worker.
+                for name in ['heavy-dom.html','heavy-css.html','heavy-table.html','heavy-images.html']:
+                    navigate(name);move(900,650);time.sleep(4)
+                    if name=='heavy-images.html':wait(lambda: count('sample.jpg?slot=11')>0,'uncached image storm completed',120)
+                    health();screenshot(name[:-5])
+                navigate('heavy-long.html')
+                wait(lambda: thumb(screenshot('long-ready-probe')),'long page scrollbar',90)
+                time.sleep(4);before_scroll=list(requests)
+                click(400,400)
+                wheel_before=thumb(screenshot('long-wheel-before'))[0]
+                q.call('input-send-event',{'events':[{'type':'btn','data':{'button':'wheel-down','down':down}} for _ in range(6) for down in (True,False)]})
+                wait(lambda: thumb(screenshot('long-wheel-probe'))[0]>wheel_before,'heavy long page wheel scroll',60)
+                wait(page_idle,'heavy long wheel paint',90,interval=1)
+                key('pgdn');key('pgdn');key('end');time.sleep(2)
+                long_end=screenshot('heavy-long-end')
+                start,end=thumb(long_end)
+                if end<frame['y']+frame['h']-90:raise AssertionError('Long page End did not reach bottom')
+                key('home');time.sleep(1)
+                bar=thumb(screenshot('heavy-long-home'));x=frame['x']+frame['w']-9
+                move(x,(bar[0]+bar[1])//2);hmp('mouse_button 1');move(x,frame['y']+frame['h']-70);hmp('mouse_button 0');time.sleep(2)
+                screenshot('heavy-long-dragged')
+                if list(requests)!=before_scroll:raise AssertionError('Long page scroll triggered a fetch')
+                result['long_scroll_no_fetch']=True
+                # Start another heavy navigation and issue ordinary UI commands.
+                # Stop and tab commands must be processed before waiting for page pixels.
+                # Open a real second app, then return to the browser before
+                # starting work. Title pixels establish that Alt+Tab switched apps.
+                def title_hash():
+                    return hashlib.sha256(screenshot('title-probe').crop((105,101,800,126)).tobytes()).hexdigest()
+                browser_title=title_hash()
+                move(80,28);hmp('mouse_button 2');time.sleep(.2);hmp('mouse_button 0');time.sleep(.5)
+                click(105,43)
+                wait(lambda: title_hash()!=browser_title,'second native app first frame',60)
+                key('alt','tab')
+                wait(lambda: title_hash()==browser_title,'browser active before heavy navigation',30)
+                click(400,400);key('home');move(1000,660)
+                wait(page_idle,'long scroll paint finished',90,interval=1)
+                old_content=page_hash(screenshot('before-heavy-cancel'))
+                navigate('heavy-css.html',settle=0)
+                wait(lambda:not page_idle(),'heavy cancellation work visibly pending',30)
+                key('alt','tab')
+                wait(lambda: title_hash()!=browser_title,'another native app active during document work',30)
+                key('alt','tab')
+                wait(lambda: title_hash()==browser_title,'returned to Husarz during document work',30)
+                key('esc');time.sleep(2)
+                if page_hash(screenshot('heavy-stopped'))!=old_content:
+                    raise AssertionError('Canceled heavy work published new page pixels')
+                def tabs_hash():
+                    return hashlib.sha256(screenshot('tabs-probe').crop((101,157,899,185)).tobytes()).hexdigest()
+                tabs=tabs_hash();key('ctrl','t')
+                wait(lambda: tabs_hash()!=tabs,'new tab command handled',30)
+                navigate('heavy-css.html',settle=0)
+                wait(lambda:not page_idle(),'tab close work visibly pending',30)
+                key('ctrl','w')
+                wait(lambda: tabs_hash()==tabs,'tab close command handled',30)
+                move(800,600);health();screenshot('heavy-stop-tab-close')
+                result.update(result='PASS',kernel_sha256=kernel_sha,iso_sha256=iso_sha,
+                              no_guest_fault=True,http_requests=list(requests),mouse_responsive=True,
+                              heavy_fixtures=6,stop_tab_close_commands=True,app_switch_commands=True)
                 (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
                 print(json.dumps(result),flush=True)
                 return
@@ -314,6 +486,7 @@ def main():
                         refresh_frames += 1
                         time.sleep(.15)
                     wait(lambda: count('scroll.html') > previous, 'refresh HTTP')
+                    wait(page_idle,'refreshed document processing complete',90,interval=1)
                     time.sleep(1)
                 result['refresh_frames_anchored'] = refresh_frames
                 def wheel_steps(button, steps, direction):
@@ -321,12 +494,15 @@ def main():
                     # TCG can take longer than a fixed delay to drain USB input and
                     # paint a page; queued down events must not overlap the up test.
                     for _ in range(steps):
-                        previous = thumb(screenshot('wheel-probe'))[0]
+                        previous_image=screenshot('wheel-probe')
+                        previous=thumb(previous_image)[0];previous_hash=page_hash(previous_image)
                         q.call('input-send-event', {'events': [
                             {'type': 'btn', 'data': {'button': button, 'down': True}},
                             {'type': 'btn', 'data': {'button': button, 'down': False}}]})
-                        wait(lambda: direction * (thumb(screenshot('wheel-probe'))[0] - previous) > 0,
-                             'native repaint after ' + button, 20)
+                        def wheel_repainted():
+                            current=screenshot('wheel-probe')
+                            return direction*(thumb(current)[0]-previous)>0 and page_hash(current)!=previous_hash
+                        wait(wheel_repainted,'native repaint after '+button,90,interval=1)
 
                 before = screenshot('wheel-before')
                 wheel_steps('wheel-down', 8, 1)

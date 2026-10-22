@@ -1,6 +1,15 @@
 #pragma once
 #include "document.h"
+#include "work.h"
 namespace Husarz {
+inline Work store_string_work(Document &d,const char *source,size_t size,size_t limit,uint32_t &offset){
+    offset=0;if(!source)co_return;
+    if(size>limit){size=limit;d.truncated=true;}
+    if(size+1>ArenaSize-d.arena_used){d.truncated=true;co_return;}
+    offset=d.arena_used;d.arena_used+=uint32_t(size+1);
+    for(size_t i=0;i<size;++i){if(!(i&63))co_await WorkPoint{1};d.arena[offset+i]=source[i];}
+    d.arena[offset+size]=0;
+}
 inline bool entity(const char *s, size_t n, uint32_t &cp, size_t &used) {
     if (n < 3 || *s != '&')
         return false;
@@ -55,11 +64,11 @@ inline bool entity(const char *s, size_t n, uint32_t &cp, size_t &used) {
         }
     return false;
 }
-inline uint32_t decoded(Document &d, const char *s, size_t n, size_t limit = MaxText, bool entities = true,
-                        size_t *consumed = nullptr) {
+inline Work decoded_work(Document &d, const char *s, size_t n, size_t limit, bool entities,
+                        size_t *consumed, uint32_t &result) {
     uint32_t start = d.arena_used;
     size_t bytes = 0, processed = 0;
-    for (size_t i = 0; i < n;) {
+    for (size_t i = 0; i < n;) { co_await WorkPoint{1};
         uint32_t cp;
         size_t used = 1;
         if (entities && entity(s + i, n - i, cp, used)) {
@@ -72,7 +81,7 @@ inline uint32_t decoded(Document &d, const char *s, size_t n, size_t limit = Max
             break;
         }
         for (unsigned j = 0; j < k; ++j)
-            d.arena[d.arena_used++] = b[j];
+            { co_await WorkPoint{1}; d.arena[d.arena_used++] = b[j]; }
         bytes += k;
         i += used;
         processed = i;
@@ -81,11 +90,13 @@ inline uint32_t decoded(Document &d, const char *s, size_t n, size_t limit = Max
         *consumed = processed;
     if (d.arena_used >= ArenaSize) {
         d.truncated = true;
-        return 0;
+        {result=0;co_return;}
     }
     d.arena[d.arena_used++] = 0;
-    return start;
+    {result=start;co_return;}
 }
+inline uint32_t decoded(Document &d,const char *s,size_t n,size_t limit=MaxText,bool entities=true,size_t *consumed=nullptr) { uint32_t result{};finish_work(decoded_work(d,s,n,limit,entities,consumed,result));return result; }
+
 struct Span {
     const char *data{};
     size_t size{};
@@ -108,34 +119,34 @@ class HtmlTokenizer {
         size_t n = length(s, 64);
         return p + n <= size && equal_ci(source + p, n, s);
     }
-    HtmlToken next() {
+    Work next_work(HtmlToken &result) {
         HtmlToken t;
         if (pos >= size)
-            return t;
+            {result=t;co_return;}
         if (source[pos] != '<') {
             size_t start = pos;
-            while (pos < size && source[pos] != '<' && pos - start < MaxText / 3) {
+            while (pos < size && source[pos] != '<' && pos - start < MaxText / 3) { co_await WorkPoint{1};
                 size_t used;
                 utf8(source + pos, size - pos, used);
                 pos += used;
             }
             t.kind = HtmlToken::Text;
             t.text = {source + start, pos - start};
-            return t;
+            {result=t;co_return;}
         }
         if (starts(pos, "<!--")) {
             pos += 4;
             while (pos < size && !starts(pos, "-->"))
-                ++pos;
+                { co_await WorkPoint{1}; ++pos; }
             if (pos < size)
                 pos += 3;
             t.kind = HtmlToken::Ignore;
-            return t;
+            {result=t;co_return;}
         }
         if (pos + 1 < size && (source[pos + 1] == '!' || source[pos + 1] == '?')) {
             pos += 2;
             char quote = 0;
-            while (pos < size) {
+            while (pos < size) { co_await WorkPoint{1};
                 char c = source[pos++];
                 if (quote) {
                     if (c == quote)
@@ -146,28 +157,28 @@ class HtmlTokenizer {
                     break;
             }
             t.kind = HtmlToken::Ignore;
-            return t;
+            {result=t;co_return;}
         }
         size_t begin = pos++;
         bool close = pos < size && source[pos] == '/';
         if (close)
             ++pos;
         while (pos < size && space(source[pos]))
-            ++pos;
+            { co_await WorkPoint{1}; ++pos; }
         size_t ns = pos;
         while (pos < size && ident(source[pos]))
-            ++pos;
+            { co_await WorkPoint{1}; ++pos; }
         if (pos == ns) {
             t.kind = HtmlToken::Text;
             t.text = {source + begin, 1};
             pos = begin + 1;
-            return t;
+            {result=t;co_return;}
         }
         t.name = {source + ns, pos - ns};
         t.kind = close ? HtmlToken::Close : HtmlToken::Open;
-        while (pos < size) {
+        while (pos < size) { co_await WorkPoint{1};
             while (pos < size && space(source[pos]))
-                ++pos;
+                { co_await WorkPoint{1}; ++pos; }
             if (pos == size)
                 break;
             if (source[pos] == '>') {
@@ -182,7 +193,7 @@ class HtmlTokenizer {
             size_t as = pos;
             while (pos < size && !space(source[pos]) && source[pos] != '=' && source[pos] != '>' &&
                    source[pos] != '/' && source[pos] != '<' && source[pos] != '\'' && source[pos] != '"')
-                ++pos;
+                { co_await WorkPoint{1}; ++pos; }
             if (pos == as) {
                 if (source[pos] == '<')
                     break;
@@ -191,25 +202,25 @@ class HtmlTokenizer {
             }
             Span name{source + as, pos - as};
             while (pos < size && space(source[pos]))
-                ++pos;
+                { co_await WorkPoint{1}; ++pos; }
             Span value{};
             if (pos < size && source[pos] == '=') {
                 ++pos;
                 while (pos < size && space(source[pos]))
-                    ++pos;
+                    { co_await WorkPoint{1}; ++pos; }
                 char q = 0;
                 if (pos < size && (source[pos] == '\'' || source[pos] == '"'))
                     q = source[pos++];
                 size_t vs = pos;
                 if (q) {
                     while (pos < size && source[pos] != q)
-                        ++pos;
+                        { co_await WorkPoint{1}; ++pos; }
                     value = {source + vs, pos - vs};
                     if (pos < size)
                         ++pos;
                 } else {
                     while (pos < size && !space(source[pos]) && source[pos] != '>' && source[pos] != '<')
-                        ++pos;
+                        { co_await WorkPoint{1}; ++pos; }
                     value = {source + vs, pos - vs};
                 }
             }
@@ -218,27 +229,29 @@ class HtmlTokenizer {
             else
                 t.overflow = true;
         }
-        return t;
+        {result=t;co_return;}
     }
-    Span raw(const char *tag) {
+    inline Work raw_work(const char *tag, Span &result) {
         size_t start = pos;
-        while (pos < size) {
+        while (pos < size) { co_await WorkPoint{1};
             if (source[pos] == '<' && pos + 2 < size && source[pos + 1] == '/') {
                 size_t p = pos + 2, n = length(tag, 64);
                 if (p + n <= size && equal_ci(source + p, n, tag) &&
                     (p + n == size || space(source[p + n]) || source[p + n] == '>')) {
                     Span out{source + start, pos - start};
                     while (pos < size && source[pos] != '>')
-                        ++pos;
+                        { co_await WorkPoint{1}; ++pos; }
                     if (pos < size)
                         ++pos;
-                    return out;
+                    {result=out;co_return;}
                 }
             }
             ++pos;
         }
-        return {source + start, pos - start};
+        {result={source + start, pos - start};co_return;}
     }
+inline Span raw(const char *tag) { Span result{};finish_work(raw_work(tag,result));return result; }
+
 };
 inline bool void_tag(const char *s) {
     return equal(s, "br") || equal(s, "hr") || equal(s, "img") || equal(s, "meta") || equal(s, "input") ||
@@ -251,7 +264,8 @@ inline bool block_tag(const char *s) {
            equal(s, "ul") || equal(s, "ol") || equal(s, "table") || equal(s, "blockquote") ||
            equal(s, "pre") || (s[0] == 'h' && s[1] >= '1' && s[1] <= '6' && !s[2]);
 }
-inline void parse_html(Document &d, const char *source, size_t size, bool html = true) {
+inline Work parse_html_work(Document &d, const char *source, size_t size, bool html = true) {
+    HUSARZ_SCOPE(d, Html);
     d.reset();
     ++d.parse_count;
     if (!source)
@@ -263,23 +277,23 @@ inline void parse_html(Document &d, const char *source, size_t size, bool html =
     if (!html) {
         uint16_t pre = d.add(0);
         d.nodes[pre].tag = d.store("pre", 3);
-        for (size_t p = 0; p < size;) {
+        for (size_t p = 0; p < size;) { co_await WorkPoint{1};
             size_t n = size - p;
             if (n > MaxText / 3) {
                 n = MaxText / 3;
                 while (n && (uint8_t(source[p + n]) & 0xc0) == 0x80)
-                    --n;
+                    { co_await WorkPoint{1}; --n; }
                 if (!n)
                     n = 1;
             }
             auto id = d.add(pre, true);
             if (!id)
                 break;
-            d.nodes[id].text = decoded(d, source + p, n, MaxText, false);
+            co_await decoded_work(d,source+p,n,MaxText,false,nullptr,d.nodes[id].text);
             d.nodes[id].text_length = uint32_t(length(d.str(d.nodes[id].text), MaxText));
             p += n;
         }
-        return;
+        co_return;
     }
     HtmlTokenizer tok(source, size);
     uint16_t stack[MaxDepth + 1]{};
@@ -298,8 +312,8 @@ inline void parse_html(Document &d, const char *source, size_t size, bool html =
             stack[2] = body_id;
         }
     };
-    while (tok.pos < size) {
-        HtmlToken t = tok.next();
+    while (tok.pos < size) { HUSARZ_PROGRESS(Html,tok.pos,size);co_await WorkPoint{1};
+        HtmlToken t;co_await tok.next_work(t);
         if (t.overflow)
             d.truncated = true;
         if (t.kind == HtmlToken::Ignore)
@@ -310,8 +324,8 @@ inline void parse_html(Document &d, const char *source, size_t size, bool html =
             if (depth == 1 || (depth == 2 && stack[2] == head_id)) {
                 bool blank = true;
                 for (size_t j = 0; j < t.text.size; ++j)
-                    if (!space(t.text.data[j]))
-                        blank = false;
+                    { co_await WorkPoint{1}; if (!space(t.text.data[j]))
+                        blank = false; }
                 if (blank)
                     continue;
                 ensure_body();
@@ -321,7 +335,7 @@ inline void parse_html(Document &d, const char *source, size_t size, bool html =
             auto id = d.add(stack[depth < MaxDepth ? depth : MaxDepth - 1], true);
             if (!id)
                 break;
-            d.nodes[id].text = decoded(d, t.text.data, t.text.size);
+            co_await decoded_work(d,t.text.data,t.text.size,MaxText,true,nullptr,d.nodes[id].text);
             d.nodes[id].text_length = uint32_t(length(d.str(d.nodes[id].text), MaxText));
             continue;
         }
@@ -331,7 +345,7 @@ inline void parse_html(Document &d, const char *source, size_t size, bool html =
         }
         char name[65];
         for (size_t i = 0; i < t.name.size; ++i)
-            name[i] = lower(t.name.data[i]);
+            { co_await WorkPoint{1}; name[i] = lower(t.name.data[i]); }
         name[t.name.size] = 0;
         if (t.kind == HtmlToken::Close) {
             if (equal(name, "html")) {
@@ -344,10 +358,10 @@ inline void parse_html(Document &d, const char *source, size_t size, bool html =
                 continue;
             }
             for (unsigned k = depth; k > 0; --k)
-                if (d.tag(stack[k], name)) {
+                { co_await WorkPoint{1}; if (d.tag(stack[k], name)) {
                     depth = k - 1;
                     break;
-                }
+                } }
             continue;
         }
         bool wrapper = false;
@@ -407,7 +421,7 @@ inline void parse_html(Document &d, const char *source, size_t size, bool html =
         if (!n.attr_count)
             n.attr_start = uint16_t(d.attr_count);
         const unsigned count = n.attr_count && wrapper ? 0 : t.count;
-        for (unsigned i = 0; i < count; ++i) {
+        for (unsigned i = 0; i < count; ++i) { co_await WorkPoint{1};
             if (d.attr_count == MaxAttrs) {
                 d.truncated = true;
                 break;
@@ -415,13 +429,13 @@ inline void parse_html(Document &d, const char *source, size_t size, bool html =
             const auto &a = t.attrs[i];
             bool duplicate = false;
             for (unsigned j = 0; j < n.attr_count; ++j)
-                if (equal_ci(a.name.data, a.name.size, d.str(d.attrs[n.attr_start + j].name)))
-                    duplicate = true;
+                { co_await WorkPoint{1}; if (equal_ci(a.name.data, a.name.size, d.str(d.attrs[n.attr_start + j].name)))
+                    duplicate = true; }
             if (duplicate)
                 continue;
             Attribute at;
             at.name = d.store(a.name.data, a.name.size, 64, true);
-            at.value = decoded(d, a.value.data, a.value.size, MaxAttrLength);
+            co_await decoded_work(d,a.value.data,a.value.size,MaxAttrLength,true,nullptr,at.value);
             d.attrs[d.attr_count++] = at;
             ++n.attr_count;
         }
@@ -429,12 +443,11 @@ inline void parse_html(Document &d, const char *source, size_t size, bool html =
             d.base_url = d.store(d.attr(id, "href"), length(d.attr(id, "href"), MaxAttrLength));
         if (equal(name, "script") || equal(name, "style") || equal(name, "title") ||
             equal(name, "textarea")) {
-            Span raw = tok.raw(name);
+            Span raw;co_await tok.raw_work(name,raw);
             n.raw = true;
             size_t cap = equal(name, "script") ? MaxScriptSource : equal(name, "style") ? 65536 : MaxText;
             size_t raw_consumed = 0;
-            n.text = decoded(d, raw.data, raw.size, cap, !equal(name, "script") && !equal(name, "style"),
-                             &raw_consumed);
+            co_await decoded_work(d,raw.data,raw.size,cap,!equal(name,"script") && !equal(name,"style"),&raw_consumed,n.text);
             n.text_length = uint32_t(length(d.str(n.text), cap));
             if (equal(name, "title"))
                 d.title = n.text;
@@ -453,4 +466,6 @@ inline void parse_html(Document &d, const char *source, size_t size, bool html =
             stack[++depth] = id;
     }
 }
+inline void parse_html(Document &d,const char *source,size_t size,bool html=true) { finish_work(parse_html_work(d,source,size,html)); }
+
 } // namespace Husarz

@@ -1,5 +1,6 @@
 #pragma once
 #include "document.h"
+#include "work.h"
 namespace Husarz {
 constexpr unsigned MaxFormControls=64, MaxFormValue=2048;
 inline bool is_control(const Document &d,uint16_t id) {
@@ -24,11 +25,11 @@ inline void control_display(Document &d,FormControl &c) {
     } else { for (;n<c.length;++n) out[n]=c.value[n]; }
     if (!n) out[n++]=' ';
     out[n]=0; d.nodes[c.node].text=c.display; d.nodes[c.node].text_length=n;
-    ++d.revision;
+    d.invalidate(c.node,4);
 }
-inline void initialize_controls(Document &d) {
+inline Work initialize_controls_work(Document &d) {
     d.control_count=0; d.focused_control=0;
-    for (uint16_t id=1;id<d.node_count;++id) if (is_control(d,id)) {
+    for (uint16_t id=1;id<d.node_count;++id) { co_await WorkPoint{1}; if (is_control(d,id)) {
         if (d.control_count==MaxFormControls) { d.truncated=true; break; }
         auto &c=d.controls[d.control_count]; c={}; c.node=id; c.checked=d.has_attr(id,"checked");
         // Reserve a stable display buffer once; typing never grows the arena.
@@ -40,20 +41,22 @@ inline void initialize_controls(Document &d) {
         }
         if (d.tag(id,"select")) {
             unsigned option=0;
-            for (uint16_t child=d.nodes[id].first;child && option<64;child=d.nodes[child].next) if (d.tag(child,"option")) {
+            for (uint16_t child=d.nodes[id].first;child && option<64;child=d.nodes[child].next) { co_await WorkPoint{1}; if (d.tag(child,"option")) {
                 if (!option || d.has_attr(child,"selected")) {
                     c.option=uint16_t(option);
                     uint16_t text=d.nodes[child].first; value=text?d.str(d.nodes[text].text):"";
                 }
                 ++option;
-            }
+            } }
         }
         if (!*value && (input_type(d,id,"submit") || d.tag(id,"button"))) value="Submit";
         c.length=uint16_t(length(value,MaxFormValue));
-        for (unsigned i=0;i<c.length;++i) c.value[i]=value[i];
+        for (unsigned i=0;i<c.length;++i) { co_await WorkPoint{1}; c.value[i]=value[i]; }
         c.cursor=c.length; ++d.control_count; control_display(d,c);
-    }
+    } }
 }
+inline void initialize_controls(Document &d) { finish_work(initialize_controls_work(d)); }
+
 inline bool editable(const Document &d,const FormControl &c) {
     return !d.has_attr(c.node,"disabled") && !d.has_attr(c.node,"readonly") &&
         (d.tag(c.node,"textarea") || (d.tag(c.node,"input") &&
@@ -73,18 +76,20 @@ inline bool form_key(Document &d,unsigned key) {
     unsigned pos=c->cursor, end=pos;
     if (key==0x4b || key==8) { if (pos) { --pos; while (pos && (uint8_t(c->value[pos])&0xc0)==0x80) --pos; } }
     else if (key==0x4d || key==0x53) { if (end<c->length) { ++end; while (end<c->length && (uint8_t(c->value[end])&0xc0)==0x80) ++end; } }
-    else if (key==0x47) { c->cursor=0; return true; }
-    else if (key==0x4f) { c->cursor=c->length; return true; }
+    else if (key==0x47) { if(c->cursor){c->cursor=0;d.invalidate(c->node,1);} return true; }
+    else if (key==0x4f) { if(c->cursor!=c->length){c->cursor=c->length;d.invalidate(c->node,1);} return true; }
     else if (key==13 && d.tag(c->node,"textarea")) {
         if (c->length==MaxFormValue) return true;
         for (unsigned i=c->length+1;i>pos;--i) c->value[i]=c->value[i-1];
         c->value[pos]='\n'; ++c->length; ++c->cursor; control_display(d,*c); return true;
     } else return false;
-    if (key==8 || key==0x53) {
+    if ((key==8 || key==0x53) && end>pos) {
         for (unsigned i=end;i<=c->length;++i) c->value[pos+i-end]=c->value[i];
         c->length-=uint16_t(end-pos); control_display(d,*c);
     }
-    c->cursor=uint16_t(key==0x4d ? end : pos); return true;
+    unsigned cursor=key==0x4d?end:pos;
+    if(c->cursor!=cursor && (key==0x4b || key==0x4d))d.invalidate(c->node,1);
+    c->cursor=uint16_t(cursor); return true;
 }
 inline uint16_t form_owner(const Document &d,uint16_t id) {
     while (id && !d.tag(id,"form")) id=d.nodes[id].parent;
@@ -97,11 +102,11 @@ inline void form_toggle(Document &d,FormControl &c) {
         for (unsigned i=0;i<d.control_count;++i) {
             auto &other=d.controls[i];
             if (input_type(d,other.node,"radio") && form_owner(d,other.node)==form_owner(d,c.node) && equal(d.attr(other.node,"name"),d.attr(c.node,"name"))) {
-                other.checked=other.node==c.node; control_display(d,other);
+                other.checked=other.node==c.node; d.invalidate(other.node,1);
             }
         }
     }
-    control_display(d,c);
+    d.invalidate(c.node,1);
 }
 struct SelectPopup { int x{}, y{}, width{}, height{}, row{}, rows{}; unsigned start{}, count{}; uint16_t options[64]{}; };
 inline SelectPopup select_popup(const Document &d,uint16_t id,int scroll,int width,int height) {
@@ -117,6 +122,11 @@ inline SelectPopup select_popup(const Document &d,uint16_t id,int scroll,int wid
     for (unsigned i=0;i<d.control_count;++i) if (d.controls[i].node==id && d.controls[i].option>=unsigned(p.rows) && p.rows)
         p.start=d.controls[i].option-unsigned(p.rows)+1;
     return p;
+}
+inline void invalidate_select_popup(Document &d,int scroll,int width,int height){
+    if(!d.open_select || d.open_select>=d.node_count)return;
+    auto popup=select_popup(d,d.open_select,scroll,width,height);
+    d.damage.add({popup.x,popup.y+scroll,popup.width,popup.height});
 }
 inline void choose_option(Document &d,FormControl &c,unsigned index) {
     unsigned count=0; uint16_t selected=0;

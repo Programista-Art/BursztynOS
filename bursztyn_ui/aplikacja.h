@@ -46,6 +46,10 @@ public:
         gui_zakoncz_aplikacje();
     }
 
+    // Apps with bounded cooperative work can request a shorter idle interval.
+    // Input still wakes the wait immediately; other applications retain 8 ticks.
+    void ustaw_odstep_animacji(uint32_t ticks) { odstep_animacji_=ticks<1?1:ticks>8?8:ticks; }
+
     int uruchom(Okno& okno) {
         ustaw_glowne_okno(&okno);
         return uruchom();
@@ -91,7 +95,7 @@ public:
                     ++statystyki_.odrysowania;
                 }
                 // Usypiamy proces w schedulerze na czas do klatki (8 tickow = ~32 ms przy 250 Hz)
-                odebrano = gui_czekaj_na_zdarzenie_z_timeoutem(&ev, 8);
+                odebrano = gui_czekaj_na_zdarzenie_z_timeoutem(&ev, odstep_animacji_);
             } else {
                 odebrano = gui_czekaj_na_zdarzenie(&ev);
             }
@@ -119,6 +123,7 @@ public:
     }
 
 private:
+    uint32_t odstep_animacji_{8};
     Okno* glowne_okno_{nullptr};
     bool czy_dziala_{false};
     SkalaUI skala_dpi_{1};

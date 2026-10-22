@@ -4,6 +4,9 @@
 #include "sterowniki/usb/hid_pointer.h"
 #include "pointing_test_descriptors.h"
 #include "virtualbox_tablet_descriptor.h"
+extern "C" bool zaktualizuj_klawisz_fizyczny_gui(uint32_t,bool,uint32_t);
+extern "C" bool zaktualizuj_klawiature_gui(char);
+extern "C" bool zaktualizuj_tekst_gui(uint32_t,uint32_t);
 void ZwolnijCiagleRamki(void*,size_t){assert(false);}
 extern "C" void WybudzProcesyOczekujaceNaMysz(){}
 int main(){
@@ -47,6 +50,33 @@ int main(){
         assert(grafika_pobierz_mysz_x()==std::clamp(vx+1,0,1279));
         assert(grafika_pobierz_mysz_y()==std::clamp(vy-1,0,719));
     }
+    // Real system Alt+Tab routing must switch even when no application polls.
+    assert(utworz_warstwe(1,0,0,1280,680,0)==1); // untitled desktop is skipped
+    assert(utworz_warstwe(2,100,100,400,300,10)==2);
+    assert(utworz_warstwe(3,150,150,400,300,11)==3);
+    assert(skladacz_obrazu_ustaw_tytul(2,"Husarz"));
+    assert(skladacz_obrazu_ustaw_tytul(3,"Notatnik"));
+    powitanie_inicjalizuj(false);
+    bws_gui_aktywuj_warstwe(2);assert(bws_gui_aktywny_pid()==2);
+    assert(zaktualizuj_klawisz_fizyczny_gui(15,true,BWS_MOD_ALT));
+    assert(bws_gui_aktywny_pid()==3);
+    assert(zaktualizuj_klawiature_gui('\t'));assert(zaktualizuj_tekst_gui(9,BWS_MOD_ALT));
+    assert(zaktualizuj_klawisz_fizyczny_gui(15,false,0));
+    assert(zaktualizuj_klawisz_fizyczny_gui(BWS_KEY_SOURCE_USB|43,true,BWS_MOD_ALT));
+    assert(bws_gui_aktywny_pid()==2);
+    assert(zaktualizuj_klawisz_fizyczny_gui(BWS_KEY_SOURCE_USB|43,false,BWS_MOD_ALT));
+    assert(bws_gui_minimalizuj_warstwe(3));
+    assert(zaktualizuj_klawisz_fizyczny_gui(15,true,BWS_MOD_ALT|BWS_MOD_SHIFT));
+    assert(bws_gui_aktywny_pid()==3);
+    GuiOknoInfo restored[SKLADACZ_MAKS_WARSTW]{};
+    unsigned restored_count=skladacz_obrazu_snapshot_okien(restored,SKLADACZ_MAKS_WARSTW,3);
+    bool restored_state=false;for(unsigned i=0;i<restored_count;++i)if(restored[i].pid==3)restored_state=restored[i].stan==GUI_OKNO_NORMALNE;
+    assert(restored_state);
+    assert(zaktualizuj_klawisz_fizyczny_gui(15,false,0));
+    assert(zaktualizuj_klawisz_fizyczny_gui(15,true,BWS_MOD_CTRL|BWS_MOD_ALT));
+    assert(bws_gui_aktywny_pid()==3);
+    assert(zaktualizuj_klawisz_fizyczny_gui(15,false,0));
+    usun_warstwe(3);usun_warstwe(2);usun_warstwe(1);
     input_reset_all();StanBuforowEkranu last{};grafika_pobierz_stan(&last);grafika_wymien_stan({});grafika_zwolnij_stan(&last);
     assert(graphical_allocs.empty());printf("Real graphics/InputDevice/HID pointer integration: %u checks PASS\n",checks);
 }

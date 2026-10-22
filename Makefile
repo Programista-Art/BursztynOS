@@ -547,8 +547,14 @@ shell_blob.o: shell_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
 # ============================================================================
 
 HUSARZ_DEBUG ?= 0
+HUSARZ_PERF ?= 0
+.PHONY: husarz-build-config-force
+.husarz-test/build-config: husarz-build-config-force
+	@mkdir -p .husarz-test
+	@$(PYTHON) -c "from pathlib import Path; p=Path('$@'); v='debug=$(HUSARZ_DEBUG) perf=$(HUSARZ_PERF)'; p.write_text(v) if not p.exists() or p.read_text()!=v else None"
+przegladarka_tmp.o husarz_worker_tmp.o: .husarz-test/build-config
 przegladarka_tmp.o: programy/przegladarka.cpp Makefile programy/http_kody.h bursztyn_gui.h $(wildcard bursztyn_ui/*.h) $(wildcard programy/husarz/*.h) $(wildcard programy/husarz/*.inc)
-	$(CXX) $(RING3_FLAGS) -fcheck-new -DHUSARZ_DEBUG_RESOURCES=$(HUSARZ_DEBUG) -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c $< -o $@
+	$(CXX) $(RING3_FLAGS) -fcoroutines -fcheck-new -DHUSARZ_DEBUG_RESOURCES=$(HUSARZ_DEBUG) -DHUSARZ_PERF=$(HUSARZ_PERF) -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c $< -o $@
 
 przegladarka_blob.o: przegladarka_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o $(PRZEGLADARKA_LINKER)
 	$(LD) --gc-sections -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) \
@@ -557,7 +563,7 @@ przegladarka_blob.o: przegladarka_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o
 	$(LD) -r -b binary przegladarka.bin -o przegladarka_blob.o
 
 husarz_worker_tmp.o: programy/przegladarka.cpp Makefile $(wildcard programy/husarz/*.h) $(wildcard programy/husarz/*.inc)
-	$(CXX) $(RING3_FLAGS) -fcheck-new -DHUSARZ_DEBUG_RESOURCES=$(HUSARZ_DEBUG) -DHUSARZ_WORKER_ONLY=1 -Wno-unused-function -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c $< -o $@
+	$(CXX) $(RING3_FLAGS) -fcoroutines -fcheck-new -DHUSARZ_DEBUG_RESOURCES=$(HUSARZ_DEBUG) -DHUSARZ_PERF=$(HUSARZ_PERF) -DHUSARZ_WORKER_ONLY=1 -Wno-unused-function -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c $< -o $@
 
 husarz_worker_blob.o: husarz_worker_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o $(PRZEGLADARKA_LINKER)
 	$(LD) --gc-sections -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) husarz_worker_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o -o husarz_worker.elf
@@ -1984,12 +1990,12 @@ test-diagnostyka-packaging: diagnostyka_blob.o
 
 test-husarz-engine-host:
 	@mkdir -p .husarz-test
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -I. narzedzia/test_husarz_engine.cpp -o .husarz-test/engine
+	g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -I. narzedzia/test_husarz_engine.cpp -o .husarz-test/engine
 	ASAN_OPTIONS=detect_leaks=1 .husarz-test/engine
 
 test-husarz-runtime-host:
 	@mkdir -p .husarz-test
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_husarz_runtime.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -Wl,--gc-sections -o .husarz-test/runtime
+	g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_husarz_runtime.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -Wl,--gc-sections -o .husarz-test/runtime
 	ASAN_OPTIONS=detect_leaks=1 .husarz-test/runtime
 
 .PHONY: test-husarz-qemu
@@ -2029,11 +2035,17 @@ test-husarz-stack: przegladarka_tmp.o
 .PHONY: test-husarz-fidelity-host
 test-husarz-fidelity-host:
 	@mkdir -p .husarz-test
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -I. narzedzia/test_husarz_fidelity.cpp -o .husarz-test/fidelity
+	g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -I. narzedzia/test_husarz_fidelity.cpp -o .husarz-test/fidelity
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .husarz-test/fidelity
 
 .PHONY: test-husarz-layout-host
 test-husarz-layout-host:
 	@mkdir -p .husarz-test
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -I. narzedzia/test_husarz_layout.cpp -o .husarz-test/layout
+	g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -I. narzedzia/test_husarz_layout.cpp -o .husarz-test/layout
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .husarz-test/layout
+
+.PHONY: test-husarz-performance-host
+test-husarz-performance-host:
+	@mkdir -p .husarz-test
+	g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -I. narzedzia/test_husarz_performance.cpp -o .husarz-test/performance
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .husarz-test/performance

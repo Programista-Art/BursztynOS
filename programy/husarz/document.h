@@ -1,6 +1,7 @@
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
+#include "perf.h"
 // No OS, networking or GUI dependency. All indices refer to this document.
 namespace Husarz {
 constexpr uint32_t MaxSource = 256 * 1024, MaxNodes = 2048, MaxDepth = 64, MaxAttrs = 8192;
@@ -224,15 +225,49 @@ struct TablePlan {
     uint16_t row_nodes[MaxTableRows]{};
     uint16_t grid[MaxTableRows * MaxTableColumns]{};
     int minimum[MaxTableColumns]{}, preferred[MaxTableColumns]{}, widths[MaxTableColumns]{};
+    int intrinsic_minimum[MaxTableColumns]{},intrinsic_preferred[MaxTableColumns]{};
     Length explicit_columns[MaxTableColumns]{};
     int heights[MaxTableRows]{}, tops[MaxTableRows]{};
     int total{}, gap{};
 };
+struct SelectorIndex;
+void release_selector_index(SelectorIndex*);
+struct TableStorage {
+    TablePlan *slabs[MaxTables/4]{};
+    ~TableStorage(){clear();}
+    void clear(){for(auto &p:slabs){delete[] p;p=nullptr;}}
+    bool ensure(unsigned index){auto &p=slabs[index/4];if(!p)p=new TablePlan[4];return p!=nullptr;}
+    TablePlan &operator[](unsigned i){return slabs[i/4][i%4];}
+    const TablePlan &operator[](unsigned i)const{return slabs[i/4][i%4];}
+    size_t bytes()const{size_t n=0;for(auto *p:slabs)if(p)n+=4*sizeof(TablePlan);return n;}
+};
+struct DirtyRectangles {
+    Clip rectangles[8]{};unsigned count{};bool full{true};
+    void clear(){count=0;full=false;}
+    void all(){count=0;full=true;}
+    void add(Clip r){
+        if(full || r.width<=0 || r.height<=0)return;
+        for(unsigned i=0;i<count;){
+            auto a=rectangles[i];
+            if(int64_t(r.x)<=int64_t(a.x)+a.width && int64_t(a.x)<=int64_t(r.x)+r.width && int64_t(r.y)<=int64_t(a.y)+a.height && int64_t(a.y)<=int64_t(r.y)+r.height){
+                int x=r.x<a.x?r.x:a.x,y=r.y<a.y?r.y:a.y;
+                int right=clamp64(int64_t(r.x)+r.width),bottom=clamp64(int64_t(r.y)+r.height);
+                if(int64_t(a.x)+a.width>right)right=clamp64(int64_t(a.x)+a.width);
+                if(int64_t(a.y)+a.height>bottom)bottom=clamp64(int64_t(a.y)+a.height);
+                r={x,y,right-x,bottom-y};rectangles[i]=rectangles[--count];i=0;
+            }else ++i;
+        }
+        if(count==8){all();return;}rectangles[count++]=r;
+    }
+};
 struct Document {
+#if HUSARZ_PERF
+    mutable Performance perf{};
+#endif
     UserAgentContext user_agent{};
     FormControl controls[64]{}; unsigned control_count{}; uint16_t focused_control{}, open_select{};
     DocumentImage images[32]{}; unsigned image_count{}; size_t image_bytes{};
-    ~Document() { release_images(); }
+    ~Document() { release_images(); release_selector_index(selector_index); }
     void release_images() {
         for (unsigned i=0;i<image_count;++i) if (images[i].release) images[i].release(images[i].owner);
         image_count=0; image_bytes=0;
@@ -246,12 +281,13 @@ struct Document {
     Style styles[MaxNodes];
     Box boxes[MaxNodes];
     int offset_x[MaxNodes]{}, offset_y[MaxNodes]{};
-    TablePlan tables[MaxTables]{}; uint16_t table_count{}, table_cells{};
+    TableStorage tables{}; uint16_t table_count{}, table_cells{};
     TableCell table_cell[MaxNodes]{};
     int table_shift[MaxNodes]{};
     CollapsedMargins margins[MaxNodes]{};
     int collapse_width[MaxNodes]{};
     uint32_t table_work{};
+    SelectorIndex *selector_index{};
     Rule rules[MaxRules];
     Declaration declarations[MaxDeclarations];
     Fragment fragments[MaxFragments];
@@ -262,12 +298,23 @@ struct Document {
     uint32_t title{}, generation{}, revision{}, layout_revision{}, style_revision{}, base_url{};
     bool truncated{}, styles_dirty{true}, user_agent_loaded{};
     int layout_width{}, height{}, root_font{16};
-    uint32_t parse_count{}, reflow_count{};
+    uint32_t parse_count{}, reflow_count{}, paint_revision{}, table_plan_revision{};
+    uint8_t dirty{15};uint8_t node_dirty[MaxNodes]{};
+    DirtyRectangles damage{};
+    void invalidate(uint16_t node,uint8_t flags){
+        if(flags&8){flags|=4;styles_dirty=true;}
+        if(flags&4)flags|=3;
+        if(flags&4)++revision;
+        dirty|=flags;if(node<node_count)node_dirty[node]|=flags;
+        ++paint_revision;
+        if(flags&4)damage.all();else if(node<node_count){auto &b=boxes[node];damage.add({b.x,b.y,b.width,b.height});}
+    }
     Document() { reset(); }
     Document(const Document&) = delete;
     Document& operator=(const Document&) = delete;
     void reset() {
         release_images();
+        tables.clear(); release_selector_index(selector_index); selector_index=nullptr;
         control_count=0; focused_control=open_select=0;
         table_count=table_cells=0; table_work=0;
         node_count = 1;
@@ -276,7 +323,8 @@ struct Document {
         arena[0] = 0;
         nodes[0] = {};
         title = base_url = 0;
-        truncated = false;
+        truncated = false;dirty=15;damage.all();++paint_revision;
+        for(auto &f:node_dirty)f=0;
         styles_dirty = true; user_agent_loaded=false;
         layout_width = 0;
         height = 0;
