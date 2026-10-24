@@ -133,7 +133,7 @@ void queue_images(Zakladka &z) {
             auto &task=scratch->task; task={}; task.tab=z.identity; task.navigation=z.navigation; task.document=d.generation;
             task.node=i;task.node_identity=d.nodes[i].identity; task.kind=Husarz::RequestKind::Image; task.background=bg!=0;
             if (ustaw_url_z_location(task.url,sizeof(task.url),src,*base)) {
-                if (!browser_resources->queue.push(task)) d.truncated=true;
+                if (!browser_resources->queue.push(task)) {d.limit(Husarz::LimitStylesheets);resource_field("error","RESOURCE_QUEUE_LIMIT");}
                 ++queued;
             }
         }
@@ -149,22 +149,25 @@ bool queued_css(const Zakladka &z) {
 }
 void queue_document_scripts(Zakladka &);
 void queue_document_resources(Zakladka &z) {
-    queue_document_scripts(z);
     if (!browser_resources || !z.dokument || !z.to_jest_html) return;
     struct Scratch { ParsedUrl base{}; Husarz::ResourceTask task{}; };
     auto *scratch=new Scratch; if (!scratch) return;
     unsigned count=0;
-    if (document_url_base(z.url,z.dokument,scratch->base)) for (uint16_t i=1;i<z.dokument->node_count && count<8;++i) {
+    if (document_url_base(z.url,z.dokument,scratch->base)) for (uint16_t i=1;i<z.dokument->node_count;++i) {
         auto &d=*z.dokument;
-        if (!d.tag(i,"link") || !Husarz::equal_ci(d.attr(i,"rel"),Husarz::length(d.attr(i,"rel"),64),"stylesheet")) continue;
+        if (!d.tag(i,"link") || !Husarz::token_ci(d.attr(i,"rel"),"stylesheet")) continue;
         auto &task=scratch->task; task={}; task.tab=z.identity; task.navigation=z.navigation; task.document=d.generation;
         task.node=i;task.node_identity=z.dokument->nodes[i].identity; task.kind=Husarz::RequestKind::Css;
+        resource_field("original",d.attr(i,"href"));resource_field("base",z.url);
+        if(count==Husarz::MaxStylesheets){d.limit(Husarz::LimitStylesheets);resource_field("error","STYLESHEET_COUNT_LIMIT");continue;}
         if (ustaw_url_z_location(task.url,sizeof(task.url),d.attr(i,"href"),scratch->base)) {
-            if (!browser_resources->queue.push(task)) d.truncated=true;
+            resource_address(task.url,Husarz::ResourceType::Css);resource_field("same-origin",Husarz::Origin::parse(task.url).same(Husarz::Origin::parse(z.url))?"yes":"no");
+            if (!browser_resources->queue.push(task)) {d.limit(Husarz::LimitStylesheets);resource_field("error","RESOURCE_QUEUE_LIMIT");}
             ++count;
         }
     }
     delete scratch;
+    queue_document_scripts(z);
     if (!count) queue_images(z);
 }
 void finish_resource_task(const Husarz::ResourceTask &task,Husarz::ResourceEntry *entry) {
@@ -180,7 +183,7 @@ void finish_resource_task(const Husarz::ResourceTask &task,Husarz::ResourceEntry
     if (task.kind==Husarz::RequestKind::Css) {
         if(entry){
             if(!z->pending_css)z->pending_css=new PendingCss;
-            if(z->pending_css && z->pending_css->count<8){++entry->refs;z->pending_css->items[z->pending_css->count++]={entry,target};++z->resource_revision;browser_request_work(*z);}
+            if(z->pending_css && z->pending_css->count<Husarz::MaxStylesheets){++entry->refs;z->pending_css->items[z->pending_css->count++]={entry,target};++z->resource_revision;browser_request_work(*z);}
         }
         if(!entry && !queued_css(*z))queue_images(*z);
     } else if (entry && resource_cache) {
@@ -246,6 +249,7 @@ void finish_resource_task(const Husarz::ResourceTask &task,Husarz::ResourceEntry
             auto type=task.kind==Husarz::RequestKind::Css?Husarz::ResourceType::Css:task.kind==Husarz::RequestKind::Script?Husarz::ResourceType::Script:task.kind==Husarz::RequestKind::Fetch?Husarz::ResourceType::Fetch:Husarz::ResourceType::Image;
             entry=cache->insert(task.url,type,payload.raw,payload.size,gui_czas_monotoniczny_ns());
             if(entry) {
+                kopiuj_limit(entry->source_url,sizeof(entry->source_url),payload.url);
                 kopiuj_limit(entry->content_type,sizeof(entry->content_type),payload.content_type);
                 kopiuj_limit(entry->etag,sizeof(entry->etag),payload.etag);
                 kopiuj_limit(entry->modified,sizeof(entry->modified),payload.modified);

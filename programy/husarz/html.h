@@ -4,8 +4,8 @@
 namespace Husarz {
 inline Work store_string_work(Document &d,const char *source,size_t size,size_t limit,uint32_t &offset){
     offset=0;if(!source)co_return;
-    if(size>limit){size=limit;d.truncated=true;}
-    if(size+1>ArenaSize-d.arena_used){d.truncated=true;co_return;}
+    if(size>limit){size=limit;d.limit(limit==MaxStylesheetBytes?LimitCssBytes:LimitText);}
+    if(size+1>ArenaSize-d.arena_used){d.limit(LimitArena);co_return;}
     offset=d.arena_used;d.arena_used+=uint32_t(size+1);
     for(size_t i=0;i<size;++i){if(!(i&63))co_await WorkPoint{1};d.arena[offset+i]=source[i];}
     d.arena[offset+size]=0;
@@ -77,7 +77,7 @@ inline Work decoded_work(Document &d, const char *s, size_t n, size_t limit, boo
         char b[4];
         unsigned k = encode(cp, b);
         if (bytes + k > limit || d.arena_used + k + 1 > ArenaSize) {
-            d.truncated = true;
+            d.limit(d.arena_used+k+1>ArenaSize?LimitArena:LimitText);
             break;
         }
         for (unsigned j = 0; j < k; ++j)
@@ -445,7 +445,7 @@ inline Work parse_html_work(Document &d, const char *source, size_t size, bool h
             equal(name, "textarea")) {
             Span raw;co_await tok.raw_work(name,raw);
             n.raw = true;
-            size_t cap = equal(name, "script") ? MaxScriptSource : equal(name, "style") ? 65536 : MaxText;
+            size_t cap = equal(name, "script") ? MaxScriptSource : equal(name, "style") ? MaxStylesheetBytes : MaxText;
             size_t raw_consumed = 0;
             co_await decoded_work(d,raw.data,raw.size,cap,!equal(name,"script") && !equal(name,"style"),&raw_consumed,n.text);
             n.text_length = uint32_t(length(d.str(n.text), cap));

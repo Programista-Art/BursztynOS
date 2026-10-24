@@ -40,8 +40,9 @@ int main() {
     for (auto s : {"span + b","span ~ b","b:nth-child(2)","b:nth-last-child(2)","b:not(span)"}) CHECK(match(d,"b",s));
     for (auto s : {"span:last-child","span:last-of-type","span:nth-child(-n+3)"}) CHECK(match(d,"c",s));
     CHECK(match(d,"only","i:only-child"));
+    CHECK(match(d,"a","span:not(:not(span))"));
     for (auto s : {"[missing]","[data-x~=alp]","span:last-child","span:not(span)","span:nth-child(2)"}) CHECK(!match(d,"a",s));
-    for (auto s : {"span:not(:not(span))","div >","[x='unterminated]","span:nth-child(2n+1) +"}) CHECK(!selector({s,std::strlen(s)}).valid);
+    for (auto s : {"div >","[x='unterminated]","span:nth-child(2n+1) +"}) CHECK(!selector({s,std::strlen(s)}).valid);
     load(d,"<style>body{background:#123456;color:#fedcba} p{color:red!important} #a{color:green} div{letter-spacing:2px;word-spacing:3px} span{color:unset} a{color:#551a8b}</style><div><span id=s>Text</span><p id=a style='color:blue'>text</p><a id=l href='/'>Link</a></div>");
     CHECK(d.styles[find(d,"a")].color==0xff0000); CHECK(d.styles[find(d,"s")].color==0xfedcba);
     CHECK(d.styles[find(d,"s")].letter_spacing==2); CHECK(d.styles[find(d,"s")].word_spacing==3); CHECK(d.styles[find(d,"l")].color==0x551a8b);

@@ -1,3 +1,4 @@
+#include "http_target.h"
 /*
  * Bursztyn OS - HTTPS / TLS
  *
@@ -263,112 +264,13 @@ bool znak_domeny_poprawny(
 bool domena_poprawna(
     const char* domena
 ) {
-    if (!domena) {
-        return false;
-    }
-
-    const size_t len =
-        tekst_dlugosc_limit(
-            domena,
-            TLS_MAX_DOMENA + 1U
-        );
-
-    if (len == 0 ||
-        len > TLS_MAX_DOMENA) {
-
-        return false;
-    }
-
-    /*
-     * Akceptujemy standardowe ASCII hostname/FQDN. IDN powinien trafic
-     * tutaj jako ASCII Punycode (xn--...).
-     */
-    size_t label_start =
-        0;
-
-    for (size_t i = 0;
-         i <= len;
-         ++i) {
-
-        const bool koniec =
-            i == len ||
-            domena[i] == '.';
-
-        if (!koniec) {
-            if (!znak_domeny_poprawny(
-                    domena[i])) {
-
-                return false;
-            }
-
-            continue;
-        }
-
-        const size_t label_len =
-            i -
-            label_start;
-
-        if (label_len == 0 ||
-            label_len > TLS_MAX_LABEL) {
-
-            return false;
-        }
-
-        if (domena[label_start] == '-' ||
-            domena[i - 1U] == '-') {
-
-            return false;
-        }
-
-        label_start =
-            i + 1U;
-    }
-
-    return true;
+    return HttpTarget::hostname(domena);
 }
 
 bool sciezka_http_poprawna(
     const char* sciezka
 ) {
-    if (!sciezka) {
-        return false;
-    }
-
-    const size_t len =
-        tekst_dlugosc_limit(
-            sciezka,
-            TLS_MAX_SCIEZKA_HTTP + 1U
-        );
-
-    if (len == 0 ||
-        len > TLS_MAX_SCIEZKA_HTTP ||
-        sciezka[0] != '/') {
-
-        return false;
-    }
-
-    for (size_t i = 0;
-         i < len;
-         ++i) {
-
-        const uint8_t c =
-            static_cast<uint8_t>(
-                sciezka[i]
-            );
-
-        /*
-         * Request-target powinien byc ASCII/percent-encoded.
-         * Blokujemy kontrolne, spacje, DEL i surowe znaki spoza ASCII.
-         * Tym samym CRLF injection jest niemozliwy.
-         */
-        if (c <= 0x20U ||
-            c >= 0x7FU) {
-
-            return false;
-        }
-    }
-
-    return true;
+    return !HttpTarget::target_error(sciezka);
 }
 
 bool zbuduj_zadanie_http(
@@ -1292,9 +1194,8 @@ extern "C" bool kernel_siec_pobierz_https(
         !sciezka_http_poprawna(
             sciezka)) {
 
-        wypisz_log(
-            "[TLS] Nieprawidlowa domena lub sciezka HTTPS."
-        );
+        wypisz_log(!domena_poprawna(domena)?"[TLS] Nieprawidlowa domena HTTPS.":"[TLS] Nieprawidlowa sciezka HTTPS.");
+        if (const char *reason=HttpTarget::target_error(sciezka)) wypisz_log(reason);
 
         return false;
     }

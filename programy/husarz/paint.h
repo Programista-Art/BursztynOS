@@ -199,6 +199,8 @@ inline Work paint_image_work(const Document &d, uint16_t id, Surface &target, in
     int x=background ? b.x : b.content_x, y=(background ? b.y : b.content_y)-scroll;
     int w=background ? int(image->width) : b.content_width, h=background ? int(image->height) : b.content_height;
     Clip area=background ? Clip{b.x,b.y-scroll,b.width,b.height} : Clip{x,y,w,h};
+    if(!background&&s.object_fit){int64_t sx=int64_t(b.content_width)*1000/image->width,sy=int64_t(b.content_height)*1000/image->height;int64_t scale=s.object_fit==2?(sx>sy?sx:sy):(sx<sy?sx:sy);
+        w=clamp64(int64_t(image->width)*scale/1000,1);h=clamp64(int64_t(image->height)*scale/1000,1);x+=(b.content_width-w)/2;y+=(b.content_height-h)/2;}
     if (background && s.background_size) {
         Span size{d.str(s.background_size),length(d.str(s.background_size),128)};
         if (value_is(size,"cover") || value_is(size,"contain")) {
@@ -303,6 +305,32 @@ inline Work paint_control_text_work(Document &d,FormControl &c,Surface &target,i
     if(d.focused_control==c.node)co_await target.rect_work(caret_x,caret_y,1,font_height(metrics,s),s.color,s.color_alpha,clip);
 }
 
+inline Work paint_shadow_work(const Document &d,uint16_t id,Surface &target,int scroll,Clip clip){
+    const auto &s=d.styles[id];if(!s.has_shadow)co_return;const auto &b=d.boxes[id];
+    int passes=s.shadow_blur?s.shadow_blur:1;
+    for(int blur=passes;blur>=0;--blur){co_await WorkPoint{1};int spread=s.shadow_spread+blur;int w=clamp64(int64_t(b.width)+2*spread),h=clamp64(int64_t(b.height)+2*spread);
+        unsigned alpha=unsigned(s.shadow_alpha)*s.paint_opacity/255/unsigned(passes+1);
+        co_await target.rect_work(b.x+s.shadow_x-spread,b.y-scroll+s.shadow_y-spread,w,h,s.shadow_color,alpha,clip,clamp64(int64_t(s.radius)+spread,0,4096));
+    }
+}
+inline Work paint_generated_work(const Document &d,uint16_t owner,Surface &target,int scroll,Metrics metrics,Glyphs glyphs,Clip clip){
+    for(unsigned i=0;i<d.generated_count;++i){co_await WorkPoint{1};const auto &g=d.generated[i];if(g.owner!=owner||g.style.display==Display::None||!g.style.visible)continue;
+        const auto &s=g.style;if(s.has_background)co_await target.rect_work(g.x,g.y-scroll,g.width,g.height,s.background,unsigned(s.background_alpha)*s.paint_opacity/255,clip,s.radius);
+        if(g.content)co_await paint_menu_label_work(target,d.str(g.content),g.x,g.y-scroll,s,metrics,glyphs,clip);
+    }
+}
+inline Work paint_gradient_work(const Document &d,uint16_t id,Surface &target,int scroll,Clip clip){
+    const auto &s=d.styles[id];if(!s.has_gradient)co_return;const auto &b=d.boxes[id];
+    Clip area=intersect({b.x,b.y-scroll,b.width,b.height},intersect(clip,target.damage));
+    int span=s.gradient_horizontal?b.width:b.height;if(span<1)co_return;
+    for(int y=area.y;y<area.y+area.height&&target.budget;++y){co_await WorkPoint{1};for(int x=area.x;x<area.x+area.width&&target.budget;++x){if(!(x&63))co_await WorkPoint{1};--target.budget;
+        if(!Surface::rounded(x-b.x,y-(b.y-scroll),b.width,b.height,s.radius))continue;
+        int position=s.gradient_horizontal?x-b.x:y-(b.y-scroll);uint32_t c=0;
+        for(unsigned channel=0;channel<3;++channel){unsigned shift=channel*8;int a=(s.gradient_color[0]>>shift)&255,z=(s.gradient_color[1]>>shift)&255;c|=uint32_t(a+int64_t(z-a)*position/span)<<shift;}
+        unsigned alpha=unsigned(int(s.gradient_alpha[0])+int64_t(int(s.gradient_alpha[1])-s.gradient_alpha[0])*position/span)*s.paint_opacity/255;
+        target.pixel(x,y,c,alpha);
+    }}
+}
 inline Work paint_work(Document &d, Surface &target, int scroll, Metrics metrics, Glyphs glyphs, Clip damage) {
     target.damage=intersect(damage,{0,0,target.width,target.height});
     if(!target.damage.width || !target.damage.height)co_return;
@@ -331,10 +359,12 @@ inline Work paint_work(Document &d, Surface &target, int scroll, Metrics metrics
         if(box_visible)HUSARZ_COUNT(d,paint_visible,1);else HUSARZ_COUNT(d,paint_culled,1);
         Clip clip=box_visible?intersect(ancestor_clip(d,id,scroll,target.width,target.height),target.damage):Clip{0,0,0,0};
         if (box_visible && b.height && b.width) {
+            co_await paint_shadow_work(d,id,target,scroll,clip);
             if (s.has_background && id != canvas_node)
                 co_await target.rect_work(b.x, b.y - scroll, b.width, b.height, s.background, unsigned(s.paint_opacity) * s.background_alpha / 255, clip,
                             s.radius);
             co_await paint_image_work(d,id,target,scroll,clip,true);
+            co_await paint_gradient_work(d,id,target,scroll,clip);
             co_await paint_image_work(d,id,target,scroll,clip,false);
             if (auto *control_state=control(d,id)) {
                 if(selectable(d,*control_state))co_await paint_control_text_work(d,*control_state,target,scroll,metrics,glyphs,clip);
@@ -348,6 +378,7 @@ inline Work paint_work(Document &d, Surface &target, int scroll, Metrics metrics
                     }
                 }
             }
+            co_await paint_generated_work(d,id,target,scroll,metrics,glyphs,clip);
             const auto *collapsed=table_plan(d,id);
             bool collapsed_part=collapsed && d.styles[collapsed->node].border_collapse &&
                 (id==collapsed->node || d.table_cell[id].table==collapsed->node);
@@ -368,12 +399,14 @@ inline Work paint_work(Document &d, Surface &target, int scroll, Metrics metrics
                         if (!Surface::rounded(dx, dy, b.width, b.height, s.radius) ||
                             Surface::rounded(dx - s.border[3], dy - s.border[0], innerw, innerh, r))
                             continue;
-                        if (s.border_style > 1) {
-                            int step = s.border_style == 2 ? 6 : 2;
+                        unsigned side=dy<s.border[0]?0:dx>=b.width-s.border[1]?1:dy>=b.height-s.border[2]?2:3;
+                        unsigned style=s.border_styles[side]?s.border_styles[side]:s.border_style;
+                        if (style > 1) {
+                            int step = style == 2 ? 6 : 2;
                             if (((dy < s.border[0] || dy >= b.height - s.border[2] ? dx : dy) / step) & 1)
                                 continue;
                         }
-                        target.pixel(xx, yy, s.border_color, unsigned(s.paint_opacity) * s.border_alpha / 255);
+                        target.pixel(xx, yy, s.border_colors[side], unsigned(s.paint_opacity) * s.border_alphas[side] / 255);
                     } }
             }
         }

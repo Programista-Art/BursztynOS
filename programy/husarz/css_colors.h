@@ -1,4 +1,5 @@
 #pragma once
+#include <stdint.h>
 // CSS named sRGB colors. Kept separate from all native UI palettes.
 namespace Husarz {
 struct NamedColor { const char* name; uint32_t rgb; };

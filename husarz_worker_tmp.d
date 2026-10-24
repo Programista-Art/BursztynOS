@@ -38,18 +38,21 @@ husarz_worker_tmp.o: programy/przegladarka.cpp programy/../bursztyn_gui.h \
  bursztyn_ui/tabela_wirtualna.h bursztyn_ui/powiadomienie.h \
  bursztyn_ui/aplikacja.h programy/http_kody.h programy/husarz/pipeline.h \
  programy/husarz/paint.h programy/husarz/layout.h programy/husarz/css.h \
- programy/husarz/html.h programy/husarz/document.h programy/husarz/perf.h \
- programy/husarz/work.h programy/husarz/css_colors.h \
- programy/husarz/user_agent.h programy/husarz/forms.h \
- programy/husarz/control_text.h programy/husarz/work_clock.h \
- programy/husarz/resource.h programy/husarz/async.h \
- programy/../obrazy/dekoder_obrazu.h programy/husarz/script.h \
- programy/husarz/js_dom.h programy/husarz/js_core.h \
- programy/husarz/js_number.h programy/husarz/js_promise_types.h \
- programy/husarz/js_json.h programy/husarz/origin.h \
- programy/husarz/storage.h programy/husarz/worker.inc \
- programy/husarz/async_runtime.inc programy/husarz/pipeline_runtime.inc \
- programy/husarz/script_runtime.inc
+ programy/husarz/css_colors.h programy/husarz/html.h \
+ programy/husarz/document.h programy/husarz/perf.h programy/husarz/work.h \
+ programy/husarz/user_agent.h programy/husarz/css_math.inc \
+ programy/husarz/css_grid.inc programy/husarz/css_shadow.inc \
+ programy/husarz/css_variables.h programy/husarz/forms.h \
+ programy/husarz/flex_layout.inc programy/husarz/control_text.h \
+ programy/husarz/work_clock.h programy/husarz/resource.h \
+ programy/husarz/url.h programy/husarz/../../http_target.h \
+ programy/husarz/async.h programy/../obrazy/dekoder_obrazu.h \
+ programy/husarz/script.h programy/husarz/js_dom.h \
+ programy/husarz/js_core.h programy/husarz/js_number.h \
+ programy/husarz/js_promise_types.h programy/husarz/js_json.h \
+ programy/husarz/origin.h programy/husarz/storage.h \
+ programy/husarz/worker.inc programy/husarz/async_runtime.inc \
+ programy/husarz/pipeline_runtime.inc programy/husarz/script_runtime.inc
 programy/../bursztyn_gui.h:
 programy/../bws_zdarzenia.h:
 programy/../bws_pliki.h:
@@ -138,16 +141,23 @@ programy/husarz/pipeline.h:
 programy/husarz/paint.h:
 programy/husarz/layout.h:
 programy/husarz/css.h:
+programy/husarz/css_colors.h:
 programy/husarz/html.h:
 programy/husarz/document.h:
 programy/husarz/perf.h:
 programy/husarz/work.h:
-programy/husarz/css_colors.h:
 programy/husarz/user_agent.h:
+programy/husarz/css_math.inc:
+programy/husarz/css_grid.inc:
+programy/husarz/css_shadow.inc:
+programy/husarz/css_variables.h:
 programy/husarz/forms.h:
+programy/husarz/flex_layout.inc:
 programy/husarz/control_text.h:
 programy/husarz/work_clock.h:
 programy/husarz/resource.h:
+programy/husarz/url.h:
+programy/husarz/../../http_target.h:
 programy/husarz/async.h:
 programy/../obrazy/dekoder_obrazu.h:
 programy/husarz/script.h:

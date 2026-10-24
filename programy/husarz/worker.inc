@@ -94,6 +94,7 @@
                     kopiuj_limit(payload->content_type,sizeof(payload->content_type),entry->content_type);
                     kopiuj_limit(payload->etag,sizeof(payload->etag),entry->etag);
                     kopiuj_limit(payload->modified,sizeof(payload->modified),entry->modified);
+                    kopiuj_limit(payload->url,sizeof(payload->url),entry->source_url[0]?entry->source_url:entry->url);
                     payload->status=entry->status;payload->size=uint32_t(entry->size); payload->success=1; payload->no_cache=entry->transient; payload->cache_seconds=entry->cache_seconds;
                     if (type==Husarz::ResourceType::Image) {
                         if (decode_browser_image(*resource_cache,*entry) && uint64_t(entry->width)*entry->height<=Husarz::AsyncImagePixels) {

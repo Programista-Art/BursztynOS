@@ -1,0 +1,12 @@
+:root {--primary:#f59e0b;--paper:#111827;--ink:white;--a:var(--b);--b:var(--a)}
+* {box-sizing:border-box}
+body {margin:0;background:var(--paper);color:var(--ink);font-family:sans-serif}
+header {background:#243b53;color:#e2e8f0;height:48px;padding:12px}
+#flex-row {display:flex;justify-content:space-between;align-items:center;gap:16px;padding:16px}
+.button {display:inline-flex;align-items:center;justify-content:center;color:var(--ink);background:var(--primary) url('../img/dot.png') center/cover no-repeat;width:180px;height:64px;padding:10px;border:1px solid #333;border-radius:8px;text-decoration:none;unknown-property:keep-going}
+#second-card {width:180px;height:64px;background:#22c55e;padding:10px}
+footer {height:48px;padding:12px;color:var(--missing,#abcdef);background:#2c3e50}
+#download-button::before {content:"";position:absolute;left:4px;top:4px;width:4px;height:4px;background:white}
+@media screen and (max-width:900px) {#flex-row {flex-direction:column;align-items:flex-start}}
+@unknown { .not-real {display:none} }
+@supports (display:flex) {footer{font-weight:700}}

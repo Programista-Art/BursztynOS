@@ -1,5 +1,5 @@
-tls.o: tls.cpp siec.h network_device.h grafika.h ekran_format.h \
- ui_skala.h sterowniki/czas/hpet.h heap.h \
+tls.o: tls.cpp http_target.h siec.h network_device.h grafika.h \
+ ekran_format.h ui_skala.h sterowniki/czas/hpet.h heap.h \
  biblioteki/mbedtls/include/mbedtls/ssl.h \
  biblioteki/mbedtls/include/mbedtls/config.h \
  biblioteki/mbedtls/bursztyn_mbedtls_config.h \
@@ -24,6 +24,7 @@ tls.o: tls.cpp siec.h network_device.h grafika.h ekran_format.h \
  biblioteki/mbedtls/include/mbedtls/entropy.h \
  biblioteki/mbedtls/include/mbedtls/sha512.h \
  biblioteki/mbedtls/include/mbedtls/error.h
+http_target.h:
 siec.h:
 network_device.h:
 grafika.h:

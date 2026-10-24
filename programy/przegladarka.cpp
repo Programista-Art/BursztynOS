@@ -187,7 +187,7 @@ char siec_bufor[
  * ========================================================================= */
 
 struct PendingCss {
-    struct Item{Husarz::ResourceEntry *entry{};uint16_t node{};} items[8]{};
+    struct Item{Husarz::ResourceEntry *entry{};uint16_t node{};} items[Husarz::MaxStylesheets]{};
     unsigned count{};
     ~PendingCss(){for(unsigned i=0;i<count;++i)Husarz::ResourceCache::unpin(items[i].entry);}
 };
@@ -1420,177 +1420,18 @@ bool przygotuj_adres_wyszukiwania(
     return true;
 }
 
-bool domena_znak_poprawny(
-    char c
-) {
-    return
-        (c >= 'a' &&
-         c <= 'z') ||
-        (c >= 'A' &&
-         c <= 'Z') ||
-        (c >= '0' &&
-         c <= '9') ||
-        c == '-' ||
-        c == '.';
-}
-
 bool parsuj_url(
     const char* url,
     ParsedUrl* wynik
 ) {
-    if (!url ||
-        !wynik ||
-        url[0] ==
-            '\0') {
-
-        return false;
-    }
-
-    size_t i =
-        0;
-
-    if (prefiks_ci(
-            url,
-            "https://")) {
-
-        wynik->https =
-            true;
-
-        i =
-            8U;
-    } else if (prefiks_ci(
-                   url,
-                   "http://")) {
-
-        wynik->https =
-            false;
-
-        i =
-            7U;
-    } else {
-        return false;
-    }
-
-    if (url[i] ==
-        '\0') {
-
-        return false;
-    }
-
-    size_t d =
-        0;
-
-    while (url[i] != '\0' &&
-           url[i] != '/' &&
-           url[i] != '?' &&
-           url[i] != '#') {
-
-        const char c =
-            url[i];
-
-        /*
-         * Userinfo oraz niestandardowe porty nie sa obecnie wspierane przez
-         * BWS29/BWS30, bo port jest na stale 80/443 w kernelu.
-         */
-        if (c == '@' ||
-            c == ':') {
-
-            return false;
-        }
-
-        if (!domena_znak_poprawny(
-                c)) {
-
-            return false;
-        }
-
-        if (d + 1U >=
-            sizeof(
-                wynik->domena
-            )) {
-
-            return false;
-        }
-
-        wynik->domena[d++] =
-            c;
-
-        ++i;
-    }
-
-    if (d == 0 ||
-        wynik->domena[0] ==
-            '.' ||
-        wynik->domena[
-            d - 1U] ==
-            '.') {
-
-        return false;
-    }
-
-    wynik->domena[d] =
-        '\0';
-
-    size_t p =
-        0;
-
-    if (url[i] ==
-            '\0' ||
-        url[i] ==
-            '#') {
-
-        wynik->sciezka[0] =
-            '/';
-
-        wynik->sciezka[1] =
-            '\0';
-
-        return true;
-    }
-
-    if (url[i] ==
-        '?') {
-
-        wynik->sciezka[p++] =
-            '/';
-    }
-
-    while (url[i] != '\0' &&
-           url[i] != '#') {
-
-        const uint8_t c =
-            static_cast<uint8_t>(
-                url[i]
-            );
-
-        if (c < 0x20U ||
-            c ==
-                0x7FU) {
-
-            return false;
-        }
-
-        if (p + 1U >=
-            sizeof(
-                wynik->sciezka
-            )) {
-
-            return false;
-        }
-
-        wynik->sciezka[p++] =
-            static_cast<char>(
-                c
-            );
-
-        ++i;
-    }
-
-    wynik->sciezka[p] =
-        '\0';
-
-    return
-        p > 0;
+    if(!wynik)return false;
+    auto *u=new Husarz::Url;if(!u)return false;
+    bool ok=Husarz::parse_absolute_url(url,*u);
+    // BWS29/30 currently connect to the scheme's fixed port. Explicit default
+    // ports are supported; other ports must never be silently redirected to it.
+    if(ok&&u->port!=(u->secure?443:80))ok=false;
+    if(ok){wynik->https=u->secure;kopiuj_limit(wynik->domena,sizeof(wynik->domena),u->host);kopiuj_limit(wynik->sciezka,sizeof(wynik->sciezka),u->target);}
+    delete u;return ok;
 }
 
 /* =========================================================================
@@ -2206,208 +2047,12 @@ __attribute__((noinline)) bool ustaw_url_z_location(
     const char* location,
     const ParsedUrl& obecny
 ) {
-    if (!cel ||
-        pojemnosc == 0 ||
-        !location ||
-        location[0] ==
-            '\0') {
-
-        return false;
-    }
-
-    if (prefiks_ci(
-            location,
-            "http://") ||
-        prefiks_ci(
-            location,
-            "https://")) {
-
-        return
-            kopiuj_limit(
-                cel,
-                pojemnosc,
-                location
-            );
-    }
-
-    // A colon before any path/query separator denotes an unsupported scheme.
-    // In particular, web links/forms cannot turn file:, data: or javascript:
-    // into native operations or accidental relative HTTP requests.
-    for(size_t i=0;location[i] && location[i]!='/' && location[i]!='?' && location[i]!='#';++i)
-        if(location[i]==':') return false;
-
-    char wynik[
-        URL_POJEMNOSC
-    ] = {};
-
-    size_t p =
-        0;
-
-    const char* scheme =
-        obecny.https
-            ? "https://"
-            : "http://";
-
-    auto append = [&wynik, &p](
-        const char* s
-    ) -> bool {
-        if (!s) {
-            return false;
-        }
-
-        for (size_t i = 0;
-             s[i] != '\0';
-             ++i) {
-
-            if (p + 1U >=
-                sizeof(wynik)) {
-
-                return false;
-            }
-
-            wynik[p++] =
-                s[i];
-        }
-
-        wynik[p] =
-            '\0';
-
-        return true;
-    };
-
-    /*
-     * Scheme-relative URL: //host/path
-     */
-    if (location[0] ==
-            '/' &&
-        location[1] ==
-            '/') {
-
-        const char* scheme_only =
-            obecny.https
-                ? "https:"
-                : "http:";
-
-        if (!append(
-                scheme_only) ||
-            !append(
-                location)) {
-
-            return false;
-        }
-
-        return
-            kopiuj_limit(
-                cel,
-                pojemnosc,
-                wynik
-            );
-    }
-
-    if (!append(
-            scheme) ||
-        !append(
-            obecny.domena)) {
-
-        return false;
-    }
-
-    if (location[0]=='?' || location[0]=='#') {
-        for(size_t i=0;obecny.sciezka[i] && obecny.sciezka[i]!='#' &&
-            (location[0]!='?' || obecny.sciezka[i]!='?');++i) {
-            if(p+1>=sizeof(wynik))return false;
-            wynik[p++]=obecny.sciezka[i];
-        }
-        wynik[p]=0;
-        return append(location) && kopiuj_limit(cel,pojemnosc,wynik);
-    }
-    if (location[0] ==
-        '/') {
-
-        if (!append(
-                location)) {
-
-            return false;
-        }
-
-        return
-            kopiuj_limit(
-                cel,
-                pojemnosc,
-                wynik
-            );
-    }
-
-    /*
-     * Relative path: /katalog/stara -> /katalog/nowa
-     */
-    char katalog[
-        SCIEZKA_POJEMNOSC
-    ] = {};
-
-    size_t slash =
-        0;
-
-    for (size_t i = 0;
-         obecny.sciezka[i] != '\0';
-         ++i) {
-
-        if (obecny.sciezka[i] ==
-            '/') {
-
-            slash =
-                i;
-        }
-
-        if (obecny.sciezka[i] ==
-            '?' ||
-            obecny.sciezka[i] ==
-            '#') {
-
-            break;
-        }
-    }
-
-    size_t kp =
-        0;
-
-    for (size_t i = 0;
-         i <= slash &&
-         obecny.sciezka[i] != '\0';
-         ++i) {
-
-        if (kp + 1U >=
-            sizeof(katalog)) {
-
-            return false;
-        }
-
-        katalog[kp++] =
-            obecny.sciezka[i];
-    }
-
-    if (kp == 0) {
-        katalog[kp++] =
-            '/';
-    }
-
-    katalog[kp] =
-        '\0';
-
-    if (!append(
-            katalog) ||
-        !append(
-            location)) {
-
-        return false;
-    }
-
-    return
-        kopiuj_limit(
-            cel,
-            pojemnosc,
-            wynik
-        );
+    if(!cel||!location)return false;
+    struct Scratch{char base[URL_POJEMNOSC]{};};auto *scratch=new Scratch;if(!scratch)return false;
+    size_t n=0;const char *scheme=obecny.https?"https://":"http://";bool ok=true;
+    auto add=[&](const char *text){for(size_t i=0;text[i];++i){if(n+1>=sizeof(scratch->base))return false;scratch->base[n++]=text[i];}scratch->base[n]=0;return true;};
+    ok=add(scheme)&&add(obecny.domena)&&add(obecny.sciezka);
+    if(ok)ok=Husarz::resolve_resource_url(scratch->base,location,cel,pojemnosc);delete scratch;return ok;
 }
 
 // Parsing is independent of viewport geometry and painting.
@@ -3665,32 +3310,106 @@ bool decode_browser_image(Husarz::ResourceCache &cache,Husarz::ResourceEntry &en
     entry.pixels=pixels; entry.width=w; entry.height=h; entry.decoded=bytes;
     cache.decoded_bytes+=bytes; ++cache.images_decoded; return true;
 }
+// Diagnostics are compiled out of ordinary release builds. Values are escaped
+// so a malformed resource cannot forge another serial diagnostic line.
+void resource_field(const char *key,const char *value) {
+#if HUSARZ_DEBUG_RESOURCES
+    char *line=new char[2304];if(!line)return;size_t n=0;
+    const char *prefix="[HUSARZ RESOURCE] ";while(*prefix)line[n++]=*prefix++;
+    for(size_t i=0;key[i]&&n<200;++i)line[n++]=key[i];line[n++]='=';
+    for(size_t i=0;value&&value[i]&&n<2300;++i){unsigned c=uint8_t(value[i]);line[n++]=c<32||c==127?'?':char(c);}
+    line[n++]='\n';line[n]=0;wypisz(line);delete[] line;
+#else
+    (void)key;(void)value;
+#endif
+}
+void resource_number(const char *key,uint64_t value){
+#if HUSARZ_DEBUG_RESOURCES
+    char text[24]{};size_t n=0;char reverse[24];unsigned k=0;do{reverse[k++]=char('0'+value%10);value/=10;}while(value);while(k)text[n++]=reverse[--k];resource_field(key,text);
+#else
+    (void)key;(void)value;
+#endif
+}
+void resource_address(const char *url,Husarz::ResourceType type){
+#if HUSARZ_DEBUG_RESOURCES
+    resource_field("type",type==Husarz::ResourceType::Css?"stylesheet":type==Husarz::ResourceType::Script?"script":type==Husarz::ResourceType::Image?"image":"fetch");
+    resource_field("resolved",url);auto *parsed=new ParsedUrl{};
+    if(parsed&&parsuj_url(url,parsed)){resource_field("scheme",parsed->https?"https":"http");resource_field("host",parsed->domena);resource_number("port",parsed->https?443:80);resource_field("request-target",parsed->sciezka);size_t split=0;while(parsed->sciezka[split]&&parsed->sciezka[split]!='?')++split;char mark=parsed->sciezka[split];parsed->sciezka[split]=0;resource_field("path",parsed->sciezka);parsed->sciezka[split]=mark;resource_field("query",mark?parsed->sciezka+split+1:"");size_t fragment=0;while(url[fragment]&&url[fragment]!='#')++fragment;resource_field("fragment",url[fragment]?url+fragment+1:"");}
+    else resource_field("error","URL_PARSE");delete parsed;
+#else
+    (void)url;(void)type;
+#endif
+}
+Husarz::Work debug_computed_style(Husarz::Document &d,uint16_t node){
+#if HUSARZ_DEBUG_RESOURCES
+    if(node>=d.node_count)co_return;
+    resource_field("CSS COMPUTED node",*d.attr(node,"id")?d.attr(node,"id"):d.str(d.nodes[node].tag));
+    Husarz::Winner winners[Husarz::PCount];uint32_t budget=100000;
+    auto offer=[&](const Husarz::Declaration &source,int specificity,uint64_t order){auto decl=source;Husarz::Span v{d.str(decl.value),Husarz::length(d.str(decl.value),Husarz::MaxAttrLength)};
+        if(Husarz::has_variable(v)){char value[Husarz::MaxResolvedValue+1]{};size_t n=0;Husarz::VariableResolver resolver{d};if(!resolver.expand(node,v,value,sizeof(value),n))return;decl.value=d.store(value,n,Husarz::MaxResolvedValue);}
+        Husarz::offer_declaration(d,winners,decl,specificity,order);};
+    for(unsigned r=0;r<d.rule_count;++r){co_await Husarz::WorkPoint{1};const auto &rule=d.rules[r];if(rule.pseudo||d.style_viewport_width<rule.media_min||d.style_viewport_width>rule.media_max)continue;
+        auto selector=Husarz::selector({d.str(rule.selector),Husarz::length(d.str(rule.selector),Husarz::MaxSelectorLength)});bool matched=false;co_await Husarz::matches_work(d,node,selector,budget,matched);if(!matched)continue;
+        resource_field("matched-selector",d.str(rule.selector));resource_number("specificity",unsigned(selector.specificity));resource_number("source-order",rule.order);
+        for(unsigned i=0;i<rule.count;++i){co_await Husarz::WorkPoint{Husarz::MaxSliceWork};offer(d.declarations[rule.first+i],selector.specificity,uint64_t(rule.order)*(Husarz::MaxDeclarations+1)+i);}
+    }
+    const auto &n=d.nodes[node];for(unsigned i=0;i<n.inline_count;++i){co_await Husarz::WorkPoint{Husarz::MaxSliceWork};offer(d.declarations[n.inline_first+i],1<<24,(UINT64_C(1)<<60)+i);}
+    const int properties[]={Husarz::PColor,Husarz::PBackground};const char *names[]={"color-source","background-source"};
+    for(unsigned i=0;i<2;++i){const auto &winner=winners[properties[i]];resource_field(names[i],winner.specificity<0?(i==0?"inherited/UA":"initial"):winner.base_url?d.str(winner.base_url):winner.user_agent?"UA":"inline author style");if(winner.specificity>=0){char value[Husarz::MaxResolvedValue+1]{};size_t bytes=winner.value.size;if(bytes>Husarz::MaxResolvedValue)bytes=Husarz::MaxResolvedValue;for(size_t j=0;j<bytes;++j)value[j]=winner.value.data[j];resource_field("winning-value",value);}}
+    auto color=[&](const char *name,uint32_t value){char text[8]="#000000";const char *digits="0123456789abcdef";for(unsigned i=0;i<6;++i)text[6-i]=digits[(value>>(i*4))&15];resource_field(name,text);};
+    color("computed-color",d.styles[node].color);color("computed-background",d.styles[node].background);resource_number("font-weight",d.styles[node].bold?700:400);resource_field("display",d.styles[node].grid?"grid":d.styles[node].flex?"flex":d.styles[node].display==Husarz::Display::Block?"block":"inline");
+#else
+    (void)d;(void)node;
+#endif
+    co_return;
+}
 bool resource_mime_is(const char *value,const char *expected) {
-    size_t n=0;while(value[n] && value[n]!=';' && !Husarz::space(value[n]))++n;
-    return Husarz::equal_ci(value,n,expected);
+    return Husarz::mime_is(value,expected);
 }
 // HTTP responses must use the binary-safe count, never strlen on image data.
 Husarz::ResourceEntry *fetch_browser_resource(const char *url,Husarz::ResourceType type) {
-    struct Address { char normalized[URL_POJEMNOSC]{}; };
+    struct Address { char normalized[URL_POJEMNOSC]{},original[URL_POJEMNOSC]{},location[URL_POJEMNOSC]{},visited[MAX_PRZEKIEROWAN+1][URL_POJEMNOSC]{}; };
     struct AddressOwner { Address *value{new Address}; ~AddressOwner(){delete value;} } address;
     if (!address.value || !Husarz::normalize_resource_url(url,address.value->normalized,sizeof(address.value->normalized))) return nullptr;
     url=address.value->normalized;
+    resource_address(url,type);
     auto *cache=cache_resources(); if (!cache) return nullptr;
-    if (auto *hit=cache->find(url,type,gui_czas_monotoniczny_ns())) return hit;
-    auto *parsed=new ParsedUrl{}; if (!parsed) return nullptr;
-    if (!parsuj_url(url,parsed)) { delete parsed; return nullptr; }
-    uint8_t ip[4]{};
-    if (!adres_ipv4_literal(parsed->domena,ip) && !bws_siec_dns(parsed->domena,ip)) { delete parsed; return nullptr; }
-    uint32_t count=bws_siec_pobierz_bajty(parsed->https,ip,parsed->domena,parsed->sciezka,siec_bufor,sizeof(siec_bufor));
-    delete parsed;
-    OdpowiedzHttp response{};
-    if (!count || !parsuj_odpowiedz_http(siec_bufor,count,&response) || (type!=Husarz::ResourceType::Fetch&&!http_kod_sukces(response.kod))) return nullptr;
-    size_t header_size=size_t(response.body-siec_bufor);
+    if (auto *hit=cache->find(url,type,gui_czas_monotoniczny_ns())) {resource_field("cache","HIT");return hit;}
+    resource_field("cache","MISS");
+    auto &address_data=*address.value;kopiuj_limit(address_data.original,sizeof(address_data.original),url);
+    OdpowiedzHttp response{};size_t header_size=0;bool received=false;
+    for(unsigned hop=0;hop<=MAX_PRZEKIEROWAN;++hop){
+        for(unsigned previous=0;previous<hop;++previous)if(Husarz::equal(address_data.visited[previous],url)){resource_field("error","REDIRECT_LOOP");return nullptr;}
+        kopiuj_limit(address_data.visited[hop],sizeof(address_data.visited[hop]),url);
+        auto *parsed=new ParsedUrl{};if(!parsed)return nullptr;
+        if(!parsuj_url(url,parsed)){delete parsed;resource_field("error","URL_PARSE");return nullptr;}
+        uint8_t ip[4]{};
+        if(!adres_ipv4_literal(parsed->domena,ip)&&!bws_siec_dns(parsed->domena,ip)){delete parsed;resource_field("error","DNS_FAILED");return nullptr;}
+        uint32_t count=bws_siec_pobierz_bajty(parsed->https,ip,parsed->domena,parsed->sciezka,siec_bufor,sizeof(siec_bufor));
+        resource_number("response-bytes",count);
+        if(!count||!parsuj_odpowiedz_http(siec_bufor,count,&response)){delete parsed;resource_field("error",count?"HTTP_PARSE":"REQUEST_FAILED");return nullptr;}
+        resource_number("HTTP",response.kod);resource_number("body-bytes",response.body_len);header_size=size_t(response.body-siec_bufor);
+        if(response.kod==301||response.kod==302||response.kod==303||response.kod==307||response.kod==308){
+            if(type==Husarz::ResourceType::Fetch){delete parsed;resource_field("error","FETCH_REDIRECT_POLICY");return nullptr;}
+            if(hop==MAX_PRZEKIEROWAN){delete parsed;resource_field("error","REDIRECT_LIMIT");return nullptr;}
+            if(!znajdz_header(siec_bufor,header_size,"location",address_data.location,sizeof(address_data.location))){delete parsed;resource_field("error","REDIRECT_LOCATION");return nullptr;}
+            resource_field("redirect-Location",address_data.location);
+            bool resolved=ustaw_url_z_location(address_data.normalized,sizeof(address_data.normalized),address_data.location,*parsed);delete parsed;
+            if(!resolved){resource_field("error","REDIRECT_URL");return nullptr;}
+            resource_address(url,type);continue;
+        }
+        delete parsed;
+        if(type!=Husarz::ResourceType::Fetch&&!http_kod_sukces(response.kod)){resource_field("error","HTTP_STATUS");return nullptr;}
+        received=true;break;
+    }
+    if(!received)return nullptr;
     if(type==Husarz::ResourceType::Fetch&&!response.chunked&&response.body_len>Husarz::Js::BrowserRuntime::FetchBodyLimit)return nullptr;
     char mime[96]{}, directive[128]{}, content_length[32]{};
-    if (!znajdz_header(siec_bufor,header_size,"content-type",mime,sizeof(mime))&&type!=Husarz::ResourceType::Fetch) return nullptr;
+    if (!znajdz_header(siec_bufor,header_size,"content-type",mime,sizeof(mime))&&type!=Husarz::ResourceType::Fetch) {resource_field("error","MIME_MISSING");return nullptr;}
     if(type==Husarz::ResourceType::Fetch&&(response.kod>=300&&response.kod<400))return nullptr;
-    if (type==Husarz::ResourceType::Css && !resource_mime_is(mime,"text/css")) return nullptr;
+    resource_field("MIME",mime);
+    if (type==Husarz::ResourceType::Css && !resource_mime_is(mime,"text/css")) {resource_field("error","MIME_REJECTED");return nullptr;}
+    if(type==Husarz::ResourceType::Css)resource_field("MIME-result","accepted");
     if(type==Husarz::ResourceType::Script && !resource_mime_is(mime,"text/javascript") && !resource_mime_is(mime,"application/javascript") && !resource_mime_is(mime,"application/x-javascript"))return nullptr;
     if (type==Husarz::ResourceType::Image && !resource_mime_is(mime,"image/png") && !resource_mime_is(mime,"image/jpeg") && !resource_mime_is(mime,"image/gif")) return nullptr;
     if (znajdz_header(siec_bufor,header_size,"content-length",content_length,sizeof(content_length))) {
@@ -3710,10 +3429,11 @@ Husarz::ResourceEntry *fetch_browser_resource(const char *url,Husarz::ResourceTy
         auto *body=static_cast<char*>(gui_malloc(Husarz::MaxResourceBytes+1));
         size_t size=0;
         if (body && dekoduj_chunked(response.body,response.body_len,body,type==Husarz::ResourceType::Fetch?Husarz::Js::BrowserRuntime::FetchBodyLimit+1:Husarz::MaxResourceBytes+1,&size))
-            entry=cache->insert(url,type,reinterpret_cast<uint8_t*>(body),size);
+            entry=cache->insert(address_data.original,type,reinterpret_cast<uint8_t*>(body),size);
         if (body) gui_free(body);
-    } else entry=cache->insert(url,type,reinterpret_cast<const uint8_t*>(response.body),response.body_len);
+    } else entry=cache->insert(address_data.original,type,reinterpret_cast<const uint8_t*>(response.body),response.body_len);
     if (entry) {
+        kopiuj_limit(entry->source_url,sizeof(entry->source_url),url);
         kopiuj_limit(entry->content_type,sizeof(entry->content_type),mime);
         znajdz_header(siec_bufor,header_size,"etag",entry->etag,sizeof(entry->etag));
         znajdz_header(siec_bufor,header_size,"last-modified",entry->modified,sizeof(entry->modified));
@@ -3750,8 +3470,8 @@ __attribute__((noinline)) void przygotuj_dokument_zakladki(Zakladka& z,bool reso
         auto *scratch=new ResourceScratch;
         if (scratch && document_url_base(z.url,next,scratch->base)) {
             unsigned stylesheets=0;
-            for (uint16_t i=1;i<next->node_count && stylesheets<8;++i) {
-                if (!next->tag(i,"link") || !Husarz::equal_ci(next->attr(i,"rel"),Husarz::length(next->attr(i,"rel"),64),"stylesheet")) continue;
+            for (uint16_t i=1;i<next->node_count && stylesheets<Husarz::MaxStylesheets;++i) {
+                if (!next->tag(i,"link") || !Husarz::token_ci(next->attr(i,"rel"),"stylesheet")) continue;
                 if (!ustaw_url_z_location(scratch->url,sizeof(scratch->url),next->attr(i,"href"),scratch->base)) continue;
                 ++stylesheets;
                 auto *entry=fetch_browser_resource(scratch->url,Husarz::ResourceType::Css);
@@ -4315,6 +4035,9 @@ extern "C" {
 }
 
 extern "C" [[noreturn]] void _start() {
+#if HUSARZ_DEBUG_RESOURCES
+    Husarz::document_limit_log=wypisz;
+#endif
 #ifdef HUSARZ_WORKER_ONLY
     browser_worker_main();
 #else

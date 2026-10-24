@@ -6,6 +6,8 @@
 #include <string>
 #include <fstream>
 #include <memory>
+#include <map>
+#include <vector>
 #define HUSARZ_HOST_TEST 1
 #include "../programy/przegladarka.cpp"
 static unsigned checks = 0, publications = 0, requests = 0;
@@ -19,6 +21,8 @@ static unsigned checks = 0, publications = 0, requests = 0;
     } while (0)
 static bool dns_fails = false, http_fails = false, attempt_reentry = false;
 static std::string response;
+static std::map<std::string,std::string> resource_responses;
+static std::vector<std::string> resource_targets;
 static uint32_t last_response_bytes;
 void wypisz(const char *) {}
 bool utworz(const char *) { return true; }
@@ -52,6 +56,11 @@ bool bws_siec_dns(const char *, uint8_t *ip) {
 }
 bool bws_siec_pobierz_http(uint8_t *, const char *, const char *path, char *data, uint32_t cap) {
     ++requests;
+    if(!resource_responses.empty()){
+        CHECK(!HttpTarget::target_error(path));CHECK(HttpTarget::hostname("example.test"));resource_targets.push_back(path);
+        auto found=resource_responses.find(path);if(found==resource_responses.end())return false;
+        if(found->second.size()+1>cap)return false;last_response_bytes=uint32_t(found->second.size());std::memcpy(data,found->second.c_str(),found->second.size()+1);return true;
+    }
     if (attempt_reentry) {
         int tabs = liczba_zakladek;
         g_husarz.zamknij_zakladke_gui(0);
@@ -126,8 +135,27 @@ static void network_parser_tests() {
     CHECK(!dekoduj_chunked("fffffff\r\nx", 10, body, sizeof(body), &len));
     CHECK(!parsuj_odpowiedz_http("HTTP/1.1 xx", 11, &parsed));
 }
+static void resource_compatibility_tests(){
+    auto answer=[](const char *status,const char *headers,const std::string &body){return std::string("HTTP/1.1 ")+status+"\r\n"+headers+"Content-Length: "+std::to_string(body.size())+"\r\n\r\n"+body;};
+    resource_responses["/assets/start.css?ver=7&theme=dark"]=answer("302 Found","Location: css/main.css?ver=7&theme=dark#ignored\r\n","");
+    resource_responses["/assets/css/main.css?ver=7&theme=dark"]=answer("200 OK","Content-Type: TeXt/CsS; charset=utf-8\r\n","body{color:white;background:#111 url('../img/bg.png') center/cover no-repeat}");
+    auto *entry=fetch_browser_resource("https://example.test:443/assets/start.css?ver=7&theme=dark",Husarz::ResourceType::Css);CHECK(entry);CHECK(entry->status==200);CHECK(resource_targets.size()==2);CHECK(resource_targets[1]=="/assets/css/main.css?ver=7&theme=dark");
+    CHECK(Husarz::equal(entry->source_url,"https://example.test/assets/css/main.css?ver=7&theme=dark"));
+    auto doc=std::make_unique<Husarz::Document>();const char *html="<html><body id=page>Theme</body></html>";renderuj_html(*doc,html,true);
+    Husarz::parse_css(*doc,reinterpret_cast<const char*>(entry->raw),entry->size,10000,doc->store(entry->source_url,std::strlen(entry->source_url)));Husarz::reflow(*doc,800,{});
+    auto body=Husarz::ScriptDom(*doc).query_selector("#page").id;CHECK(body);CHECK(Husarz::equal(doc->str(doc->styles[body].background_image),"url('../img/bg.png')"));
+    char resolved[2048];CHECK(Husarz::resolve_resource_url(doc->str(doc->styles[body].background_base),"../img/bg.png",resolved,sizeof(resolved)));CHECK(Husarz::equal(resolved,"https://example.test/assets/img/bg.png"));
+    resource_responses["/html.css"]=answer("200 OK","Content-Type: text/html\r\n","<html>Error</html>");CHECK(!fetch_browser_resource("https://example.test/html.css",Husarz::ResourceType::Css));
+    resource_responses["/loop.css"]=answer("308 Redirect","Location: /loop.css\r\n","");CHECK(!fetch_browser_resource("https://example.test/loop.css",Husarz::ResourceType::Css));
+    resource_responses["/unsafe.css"]=answer("301 Redirect","Location: javascript:bad\r\n","");CHECK(!fetch_browser_resource("https://example.test/unsafe.css",Husarz::ResourceType::Css));
+    for(unsigned i=0;i<7;++i)resource_responses["/hop"+std::to_string(i)+".css"]=answer(i%2?"303 Redirect":"307 Redirect",("Location: /hop"+std::to_string(i+1)+".css\r\n").c_str(),"");
+    CHECK(!fetch_browser_resource("https://example.test/hop0.css",Husarz::ResourceType::Css));
+    CHECK(!fetch_browser_resource("https://example.test/unsafe.css",Husarz::ResourceType::Fetch));
+    delete resource_cache;resource_cache=nullptr;resource_responses.clear();resource_targets.clear();requests=0;
+}
 int main() {
     network_parser_tests();
+    resource_compatibility_tests();
     Okno::g_tlum_operacje_systemowe = true;
     {
         OknoHusarz w("Husarz regression", 800, 550);

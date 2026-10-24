@@ -21,7 +21,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from PIL import Image
+from PIL import Image, ImageChops
 from test_hda_regression_qemu import Qmp
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +33,8 @@ def main():
     parser.add_argument('--iso', type=Path, default=ROOT / 'BursztynOS.iso')
     parser.add_argument('--kernel', type=Path, default=ROOT / 'system_operacyjny.bin', help='Matching unmodified kernel ELF for symbol observation and artifact hashing')
     parser.add_argument('--output', type=Path, default=ROOT / '.husarz-test/qemu')
+    parser.add_argument('--css-only', action='store_true', help='External CSS redirects, variables, pixels, flex/media resize and cancellation')
+    parser.add_argument('--real-css', action='store_true', help='Observe public Tomato and WordPress pages; Internet required, no deterministic PASS assertion')
     parser.add_argument('--timeout', type=float, default=900)
     parser.add_argument('--diagnostics-only', action='store_true', help='Development counters observed through serial, without screenshot polling during work')
     parser.add_argument('--performance', action='store_true', help='Heavy supported pages, repeated maximize/restore, cancellation and long scrolling')
@@ -76,10 +78,14 @@ def main():
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
             name = self.path.split('?', 1)[0].lstrip('/')
-            if '/' in name or not (FIXTURES / name).is_file():
+            candidate=(FIXTURES/name).resolve()
+            if name == 'css-redirect.css':
+                with requests_lock:requests.append(self.path)
+                self.send_response(302);self.send_header('Location','assets/css/tomato.css?v=7&theme=dark');self.send_header('Content-Length','0');self.end_headers();return
+            if not candidate.is_relative_to(FIXTURES.resolve()) or not candidate.is_file():
                 self.send_error(404)
                 return
-            data = (FIXTURES / name).read_bytes()
+            data = candidate.read_bytes()
             with requests_lock:
                 requests.append(self.path)
             if name.startswith('slow-'):
@@ -90,7 +96,7 @@ def main():
                 time.sleep(.3)  # Expose the ordinary loading redraws to observation.
             try:
                 self.send_response(200)
-                self.send_header('Content-Type', 'text/javascript' if name.endswith('.js') else 'text/css' if name.endswith('.css') else 'image/png' if name.endswith('.png') else 'image/jpeg' if name.endswith('.jpg') else 'image/gif' if name.endswith('.gif') else 'text/html; charset=utf-8')
+                self.send_header('Content-Type', 'text/javascript' if name.endswith('.js') else ' TeXt/CsS; charset=utf-8 ' if name.endswith('.css') else 'image/png' if name.endswith('.png') else 'image/jpeg' if name.endswith('.jpg') else 'image/gif' if name.endswith('.gif') else 'text/html; charset=utf-8')
                 # Cache assertions test reuse of fresh entries, independent of slow TCG runs.
                 self.send_header('Cache-Control', 'no-store' if name.startswith('slow-js-') else 'max-age=3600')
                 self.send_header('Content-Length', str(len(data)))
@@ -360,6 +366,71 @@ def main():
                     return r > 150 and g < 130 and b < 130
                 wait(browser_ready, 'first complete native browser frame')
             screenshot('browser-open')
+            if args.css_only:
+                navigate('css-tomato.html')
+                wait(lambda:count('assets/css/tomato.css?v=7&theme=dark')>0,'redirect stylesheet downloaded',60)
+                def bounds(color,name='css-colors-probe'):
+                    im=screenshot(name)
+                    left,top=frame['x']+3,frame['y']+118
+                    crop=im.crop((left,top,frame['x']+frame['w']-20,frame['y']+frame['h']-25))
+                    channels=ImageChops.difference(crop,Image.new('RGB',crop.size,color)).split()
+                    distance=ImageChops.lighter(ImageChops.lighter(channels[0],channels[1]),channels[2])
+                    found=distance.point([255]+[0]*255).getbbox()
+                    return (found[0]+left,found[1]+top,found[2]+left-1,found[3]+top-1) if found else None
+                amber=(245,158,11);green=(34,197,94);navy=(17,24,39)
+                wait(lambda:bounds(amber) is not None and bounds(green) is not None,'computed variable colors painted',120,interval=2)
+                a=bounds(amber);b=bounds(green)
+                if b[1]<=a[1]:raise AssertionError('Narrow media query did not produce column layout')
+                im=screenshot('css-narrow')
+                if not bounds(navy):raise AssertionError('Author canvas background lost')
+                if not bounds((44,62,80)) or not bounds((171,205,239)):raise AssertionError('Footer background/fallback ink lost')
+                if not bounds((226,232,240)):raise AssertionError('Author heading color lost')
+                button_ink=im.crop((a[0]+2,a[1]+2,a[2]-2,a[3]-2))
+                if sum(1 for c in button_ink.getdata() if c==(255,255,255))<5:raise AssertionError('Button author ink missing')
+                if any(c==(0,0,238) for c in button_ink.getdata()):raise AssertionError('UA blue overrode author button color')
+                if not count('assets/img/dot.png'):raise AssertionError('CSS image did not resolve relative to the redirected stylesheet')
+                result.update(author_background=True,variable_button_pixels=True,author_button_ink=True,heading_color=True,footer_colors=True,stylesheet_relative_image=True,media_column=True,stylesheet_redirect=True,query_stylesheet=True)
+                click(frame['x']+frame['w']-42,frame['y']+14)
+                frame.update(x=0,y=0,w=1280,h=692)
+                wait(page_idle,'CSS resize completed',180,interval=2)
+                def wide_row_published():
+                    a=bounds(amber);b=bounds(green)
+                    return a is not None and b is not None and abs(a[1]-b[1])<=2 and b[0]>a[0]
+                wait(wide_row_published,'wide media/flex row painted after cooperative resize',240,interval=2)
+                a=bounds(amber);b=bounds(green)
+                screenshot('css-wide');result.update(media_row=True,resize_responsive=True)
+                click(1238,14);frame.update(x=100,y=100,w=800,h=550)
+                wait(page_idle,'CSS restore completed',180,interval=2)
+                navigate('css-cancel.html',settle=0)
+                wait(lambda:count('slow-css-compatible.css')>0,'pending CSS started',60)
+                click(frame['x']+225,frame['y']+100)
+                navigate('theme-white.html');time.sleep(7)
+                im=screenshot('css-stop-navigation')
+                if im.getpixel((frame['x']+20,frame['y']+frame['h']-45))!=(255,255,255):raise AssertionError('Stale CSS published after navigation')
+                result.update(result='PASS',stop_and_stale_css=True,no_guest_fault=True,kernel_sha256=kernel_sha,iso_sha256=iso_sha,http_requests=request_log())
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result),flush=True);return
+            if args.real_css:
+                for label, url in [('tomato','https://tomato.dimitalart.pl/'),('wordpress','https://dimitalart.pl/')]:
+                    key('ctrl','l')
+                    for c in url:
+                        if c==':':key('shift','semicolon')
+                        else:key({'/':'slash','.':'dot','-':'minus'}.get(c,c))
+                    key('ret')
+                    started=guest_ticks()
+                    wait(lambda:guest_ticks()-started>=20*250,'real site resource observation',180)
+                    def author_colors():
+                        im=screenshot('real-author-probe')
+                        area=im.crop((frame['x']+3,frame['y']+118,frame['x']+frame['w']-20,frame['y']+frame['h']-25))
+                        if label=='tomato':return sum(1 for c in area.getdata() if c==(231,76,60))>80
+                        dark=sum(1 for r,g,b in area.getdata() if r<20 and g<50 and b<70)
+                        cyan=sum(1 for r,g,b in area.getdata() if r<160 and g>170 and b>170)
+                        return dark>2000 and cyan>80
+                    wait(author_colors,'real author colors '+label,900,interval=2)
+                    result[label]={'author_colors_observed':True,'network_or_script_busy':not page_idle()}
+                    screenshot('real-'+label)
+                result.update(result='OBSERVED',kernel_sha256=kernel_sha,iso_sha256=iso_sha,no_guest_fault=True)
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
+                return
             if args.fault_probe:
                 wait(lambda: '[USER FAULT] process terminated:' in health(), 'Ring 3 exception isolated')
                 text = health()
@@ -574,6 +645,9 @@ def main():
                             return direction*(thumb(current)[0]-previous)>0 and page_hash(current)!=previous_hash
                         wait(wheel_repainted,'native repaint after '+button,90,interval=1)
 
+                # Refresh is a toolbar action. Establish the page's native focus
+                # before testing its wheel routing, as in the heavy-page suite.
+                click(400,300)
                 before = screenshot('wheel-before')
                 wheel_steps('wheel-down', 8, 1)
                 down = screenshot('wheel-down')

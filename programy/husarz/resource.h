@@ -1,36 +1,6 @@
 #pragma once
-#include "document.h"
+#include "url.h"
 namespace Husarz {
-// Normalize scheme/host, fragments and dot segments while preserving query bytes.
-inline bool normalize_resource_url(const char *input,char *out,size_t cap) {
-    if (!input || !out) return false;
-    size_t n=length(input,2048); if (!n || n==2048 || n+2>cap) return false;
-    size_t authority=0;
-    if (n>=7 && equal_ci(input,7,"http://")) authority=7;
-    else if (n>=8 && equal_ci(input,8,"https://")) authority=8;
-    else return false;
-    size_t path=authority;
-    while (path<n && input[path]!='/' && input[path]!='?' && input[path]!='#') ++path;
-    if (path==authority) return false;
-    for (size_t i=0;i<path;++i) out[i]=lower(input[i]);
-    size_t used=path; out[used++]='/';
-    size_t p=path;
-    if (p<n && input[p]=='/') ++p;
-    while (p<n && input[p]!='?' && input[p]!='#') {
-        size_t start=p; while (p<n && input[p]!='/' && input[p]!='?' && input[p]!='#') ++p;
-        size_t count=p-start;
-        if (count==1 && input[start]=='.') {}
-        else if (count==2 && input[start]=='.' && input[start+1]=='.') {
-            if (used>path+1) { if (out[used-1]=='/') --used; while (used>path+1 && out[used-1]!='/') --used; }
-        } else {
-            for (size_t i=start;i<p;++i) out[used++]=input[i];
-            if (p<n && input[p]=='/') out[used++]='/';
-        }
-        if (p<n && input[p]=='/') ++p;
-    }
-    if (p<n && input[p]=='?') while (p<n && input[p]!='#') out[used++]=input[p++];
-    out[used]=0; return true;
-}
 enum class ResourceType : uint8_t { Html, Css, Image, Script, Fetch };
 constexpr unsigned MaxCacheObjects = 32, MaxDocumentImages = 32;
 constexpr size_t MaxResourceBytes = 240 * 1024, MaxCacheRaw = 2 * 1024 * 1024;
@@ -40,7 +10,7 @@ struct ResourceCache;
 struct ResourceEntry {
     ResourceCache *cache{}; bool transient{};
     char content_type[96]{}, etag[128]{}, modified[128]{};
-    char url[2048]{};
+    char url[2048]{}, source_url[2048]{};
     ResourceType type{}; uint16_t status{200};
     uint8_t *raw{}; size_t size{};
     uint32_t *pixels{}; unsigned width{}, height{}; size_t decoded{};
