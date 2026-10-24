@@ -2,6 +2,8 @@
 #include "document.h"
 #include "work.h"
 namespace Husarz {
+inline bool editable(const Document &,const FormControl &);
+inline bool selectable(const Document &,const FormControl &);
 constexpr unsigned MaxFormControls=64, MaxFormValue=2048;
 inline bool is_control(const Document &d,uint16_t id) {
     return d.tag(id,"input") || d.tag(id,"textarea") || d.tag(id,"button") || d.tag(id,"select");
@@ -14,6 +16,7 @@ inline bool input_type(const Document &d,uint16_t id,const char *type) {
     return equal_ci(d.attr(id,"type"),length(d.attr(id,"type"),32),type);
 }
 inline void control_display(Document &d,FormControl &c) {
+    c.reveal_caret=true;
     char *out=d.arena+c.display;
     unsigned n=0;
     if (input_type(d,c.node,"checkbox") || input_type(d,c.node,"radio")) {
@@ -25,7 +28,7 @@ inline void control_display(Document &d,FormControl &c) {
     } else { for (;n<c.length;++n) out[n]=c.value[n]; }
     if (!n) out[n++]=' ';
     out[n]=0; d.nodes[c.node].text=c.display; d.nodes[c.node].text_length=n;
-    d.invalidate(c.node,4);
+    d.invalidate(c.node,selectable(d,c)?1:4);
 }
 inline Work initialize_controls_work(Document &d) {
     d.control_count=0; d.focused_control=0;
@@ -50,46 +53,142 @@ inline Work initialize_controls_work(Document &d) {
             } }
         }
         if (!*value && (input_type(d,id,"submit") || d.tag(id,"button"))) value="Submit";
-        c.length=uint16_t(length(value,MaxFormValue));
-        for (unsigned i=0;i<c.length;++i) { co_await WorkPoint{1}; c.value[i]=value[i]; }
-        c.cursor=c.length; ++d.control_count; control_display(d,c);
+        size_t source_size=length(value,MaxFormValue);
+        if(selectable(d,c)) {
+            for(size_t i=0;i<source_size;) {
+                co_await WorkPoint{1};size_t used;uint32_t cp=utf8(value+i,source_size-i,used);i+=used;
+                if(cp=='\r')continue;
+                if((cp=='\n' || cp=='\t') && !d.tag(id,"textarea"))cp=' ';
+                char bytes[4];unsigned count=encode(cp,bytes);if(c.length+count>MaxFormValue)break;
+                for(unsigned j=0;j<count;++j)c.value[c.length++]=bytes[j];
+            }
+        } else {
+            c.length=uint16_t(source_size);
+            for(unsigned i=0;i<c.length;++i){co_await WorkPoint{1};c.value[i]=value[i];}
+        }
+        c.value[c.length]=0; c.cursor=c.anchor=c.length; ++d.control_count; control_display(d,c);
     } }
 }
 inline void initialize_controls(Document &d) { finish_work(initialize_controls_work(d)); }
 
-inline bool editable(const Document &d,const FormControl &c) {
-    return !d.has_attr(c.node,"disabled") && !d.has_attr(c.node,"readonly") &&
+inline bool selectable(const Document &d,const FormControl &c) {
+    return !d.has_attr(c.node,"disabled") &&
         (d.tag(c.node,"textarea") || (d.tag(c.node,"input") &&
         (!*d.attr(c.node,"type") || input_type(d,c.node,"text") || input_type(d,c.node,"password"))));
 }
-inline bool form_insert(Document &d,uint32_t cp) {
-    auto *c=control(d,d.focused_control);
-    if (!c || !editable(d,*c) || cp<32 || cp==127 || cp>0x10ffff) return false;
-    char encoded[4]; unsigned n=encode(cp,encoded);
-    if (c->length+n>MaxFormValue) return true;
-    for (unsigned i=c->length+1;i>c->cursor;--i) c->value[i+n-1]=c->value[i-1];
-    for (unsigned i=0;i<n;++i) c->value[c->cursor+i]=encoded[i];
-    c->length+=uint16_t(n); c->cursor+=uint16_t(n); control_display(d,*c); return true;
+inline bool editable(const Document &d,const FormControl &c) {
+    return selectable(d,c) && !d.has_attr(c.node,"readonly");
 }
-inline bool form_key(Document &d,unsigned key) {
-    auto *c=control(d,d.focused_control); if (!c || !editable(d,*c)) return false;
-    unsigned pos=c->cursor, end=pos;
-    if (key==0x4b || key==8) { if (pos) { --pos; while (pos && (uint8_t(c->value[pos])&0xc0)==0x80) --pos; } }
-    else if (key==0x4d || key==0x53) { if (end<c->length) { ++end; while (end<c->length && (uint8_t(c->value[end])&0xc0)==0x80) ++end; } }
-    else if (key==0x47) { if(c->cursor){c->cursor=0;d.invalidate(c->node,1);} return true; }
-    else if (key==0x4f) { if(c->cursor!=c->length){c->cursor=c->length;d.invalidate(c->node,1);} return true; }
-    else if (key==13 && d.tag(c->node,"textarea")) {
-        if (c->length==MaxFormValue) return true;
-        for (unsigned i=c->length+1;i>pos;--i) c->value[i]=c->value[i-1];
-        c->value[pos]='\n'; ++c->length; ++c->cursor; control_display(d,*c); return true;
-    } else return false;
-    if ((key==8 || key==0x53) && end>pos) {
-        for (unsigned i=end;i<=c->length;++i) c->value[pos+i-end]=c->value[i];
-        c->length-=uint16_t(end-pos); control_display(d,*c);
+// All positions are byte offsets on validated UTF-8 boundaries. Editing loops
+// are bounded by MaxFormValue, independent of document size.
+inline unsigned form_previous(const FormControl &c,unsigned p) {
+    if (p>c.length) p=c.length;
+    if (p) { --p; while (p && (uint8_t(c.value[p])&0xc0)==0x80) --p; }
+    return p;
+}
+inline unsigned form_next(const FormControl &c,unsigned p) {
+    if (p>=c.length) return c.length;
+    size_t used; utf8(c.value+p,c.length-p,used); return p+unsigned(used);
+}
+inline unsigned selection_start(const FormControl &c) {return c.anchor<c.cursor?c.anchor:c.cursor;}
+inline unsigned selection_end(const FormControl &c) {return c.anchor>c.cursor?c.anchor:c.cursor;}
+inline void form_move(Document &d,FormControl &c,unsigned p,bool extend) {
+    p=p>c.length?c.length:p;
+    while (p && p<c.length && (uint8_t(c.value[p])&0xc0)==0x80) --p;
+    if(c.cursor==p && (extend || c.anchor==p))return;
+    c.cursor=uint16_t(p); if(!extend)c.anchor=c.cursor;
+    c.preferred_x=-1;c.reveal_caret=true;d.invalidate(c.node,1);
+}
+inline bool form_replace(Document &d,FormControl &c,const char *text,size_t size,bool *changed=nullptr) {
+    if(changed)*changed=false;
+    if(!editable(d,c) || (!text && size))return false;
+    unsigned start=selection_start(c),end=selection_end(c);
+    unsigned room=MaxFormValue-(c.length-(end-start)),accepted=0;
+    // Invalid/truncated UTF-8 terminates the safe prefix. No partial codepoint
+    // enters a control, even when clipboard_read cut a longer representation.
+    while(accepted<size && accepted<room) {
+        size_t used;uint32_t cp=utf8(text+accepted,size-accepted,used);
+        if(!text[accepted] || (cp==0xfffd && used==1 && uint8_t(text[accepted])>=128) || used>room-accepted)break;
+        if(cp<32 && cp!='\n' && cp!='\t')break;
+        if(cp==127 || ((cp=='\n' || cp=='\t') && !d.tag(c.node,"textarea")))break;
+        accepted+=unsigned(used);
     }
-    unsigned cursor=key==0x4d?end:pos;
-    if(c->cursor!=cursor && (key==0x4b || key==0x4d))d.invalidate(c->node,1);
-    c->cursor=uint16_t(cursor); return true;
+    if(!accepted && size)return true; // A full field must keep its selection.
+    if(!accepted && start==end)return true;
+    for(unsigned i=end;i<=c.length;++i) c.value[start+i-end]=c.value[i];
+    c.length-=uint16_t(end-start);
+    for(unsigned i=c.length+1;i>start;--i)c.value[i+accepted-1]=c.value[i-1];
+    for(unsigned i=0;i<accepted;++i)c.value[start+i]=text[i];
+    c.length+=uint16_t(accepted);c.cursor=c.anchor=uint16_t(start+accepted);c.preferred_x=-1;
+    control_display(d,c);if(changed)*changed=true;return true;
+}
+inline bool form_insert(Document &d,uint32_t cp,bool *changed=nullptr) {
+    if(changed)*changed=false;
+    auto *c=control(d,d.focused_control);
+    if(!c || !editable(d,*c) || cp<32 || cp==127 || cp>0x10ffff || (cp>=0xd800 && cp<=0xdfff))return false;
+    char encoded[4];unsigned n=encode(cp,encoded);return form_replace(d,*c,encoded,n,changed);
+}
+inline bool form_key(Document &d,unsigned key,bool shift=false,bool ctrl=false,bool *changed=nullptr) {
+    if(changed)*changed=false;
+    auto *c=control(d,d.focused_control); if(!c || !selectable(d,*c))return false;
+    if(ctrl && (key=='a' || key=='A' || key==1)){c->anchor=0;c->cursor=c->length;c->preferred_x=-1;c->reveal_caret=true;d.invalidate(c->node,1);return true;}
+    unsigned p=c->cursor;
+    if(key==8 || key==0x53) {
+        if(!editable(d,*c))return true;
+        if(c->anchor==c->cursor) {
+            if(key==8)c->anchor=uint16_t(form_previous(*c,p));
+            else c->anchor=uint16_t(form_next(*c,p));
+        }
+        return form_replace(d,*c,nullptr,0,changed);
+    }
+    if(key==0x4b)p=!shift && c->anchor!=p?selection_start(*c):form_previous(*c,p);
+    else if(key==0x4d)p=!shift && c->anchor!=p?selection_end(*c):form_next(*c,p);
+    else if(key==0x47) {
+        if(!ctrl && d.tag(c->node,"textarea")) {while(p && c->value[p-1]!='\n')--p;}
+        else p=0;
+    } else if(key==0x4f) {
+        if(!ctrl && d.tag(c->node,"textarea")) {while(p<c->length && c->value[p]!='\n')++p;}
+        else p=c->length;
+    } else if(key==13 && d.tag(c->node,"textarea"))return !editable(d,*c) || form_replace(d,*c,"\n",1,changed);
+    else return false;
+    form_move(d,*c,p,shift);return true;
+}
+// Caller supplies the existing OS clipboard; password checks live here as well
+// as in GUI routing so alternate callers cannot accidentally disclose a secret.
+struct FormClipboard {
+    bool (*set)(const char*,const void*,uint64_t){};
+    bool (*read)(const char*,void*,uint64_t,uint64_t*){};
+};
+inline bool form_clipboard(Document &d,unsigned key,FormClipboard clipboard,bool *changed=nullptr) {
+    if(changed)*changed=false;
+    auto *c=control(d,d.focused_control);if(!c || !selectable(d,*c))return false;
+    key=unsigned(lower(char(key)));
+    if(key!='c' && key!='x' && key!='v')return false;
+    if(key!='c' && !editable(d,*c))return true;
+    if(key!='v' && input_type(d,c->node,"password"))return true;
+    struct Buffer {char bytes[MaxFormValue+1]{};};
+    auto *buffer=new Buffer;if(!buffer)return true;
+    if(key=='v') {
+        uint64_t n=0;
+        if(clipboard.read && clipboard.read("text/plain",buffer->bytes,MaxFormValue,&n) && n<=MaxFormValue) {
+            unsigned out=0;
+            for(unsigned i=0;i<n && buffer->bytes[i];++i) {
+                char ch=buffer->bytes[i];if(ch=='\r') {if(i+1<n && buffer->bytes[i+1]=='\n')continue;ch='\n';}
+                if((ch=='\n' || ch=='\t') && !d.tag(c->node,"textarea"))ch=' ';
+                buffer->bytes[out++]=ch;
+            }
+            if(out)form_replace(d,*c,buffer->bytes,out,changed);
+        }
+    } else {
+        unsigned start=selection_start(*c),n=selection_end(*c)-start;
+        if(n) {
+            for(unsigned i=0;i<n;++i)buffer->bytes[i]=c->value[start+i];
+            if(clipboard.set && clipboard.set("text/plain",buffer->bytes,n+1) && key=='x')form_replace(d,*c,nullptr,0,changed);
+        }
+    }
+    // Do not retain pasted passwords in temporary heap storage.
+    volatile char *wipe=buffer->bytes;for(unsigned i=0;i<=MaxFormValue;++i)wipe[i]=0;
+    delete buffer;return true;
 }
 inline uint16_t form_owner(const Document &d,uint16_t id) {
     while (id && !d.tag(id,"form")) id=d.nodes[id].parent;
@@ -139,7 +238,7 @@ inline void choose_option(Document &d,FormControl &c,unsigned index) {
     const char *value=text?d.str(d.nodes[text].text):"";
     c.length=uint16_t(length(value,MaxFormValue));
     for (unsigned i=0;i<c.length;++i) c.value[i]=value[i];
-    c.value[c.length]=0; c.cursor=c.length; control_display(d,c);
+    c.value[c.length]=0; c.cursor=c.anchor=c.length; control_display(d,c);
 }
 inline void form_select(Document &d,FormControl &c,int delta) {
     unsigned count=0; uint16_t choices[64]{};
@@ -153,7 +252,7 @@ inline void form_select(Document &d,FormControl &c,int delta) {
     c.length=uint16_t(length(value,MaxFormValue));
     for (unsigned i=0;i<c.length;++i) c.value[i]=value[i];
     c.value[c.length]=0;
-    c.cursor=c.length; control_display(d,c);
+    c.cursor=c.anchor=c.length; control_display(d,c);
 }
 inline bool encode_form_part(char *out,size_t cap,size_t &used,const char *s) {
     static constexpr char digits[]="0123456789ABCDEF";
@@ -172,7 +271,8 @@ inline bool form_query(Document &d,uint16_t form,uint16_t submit,char *out,size_
     for (unsigned i=0;i<d.control_count;++i) {
         const auto &c=d.controls[i]; uint16_t id=c.node;
         const char *name=d.attr(id,"name");
-        if (form_owner(d,id)!=form || !*name || d.has_attr(id,"disabled") || input_type(d,id,"button") ||
+        if(form_owner(d,id)==form && input_type(d,id,"file") && !d.has_attr(id,"disabled"))return false;
+        if (form_owner(d,id)!=form || !*name || d.has_attr(id,"disabled") || input_type(d,id,"button") || input_type(d,id,"reset") ||
             ((input_type(d,id,"checkbox") || input_type(d,id,"radio")) && !c.checked) ||
             ((input_type(d,id,"submit") || d.tag(id,"button")) && id!=submit)) continue;
         if (used) { if (used+1>=cap) return false; out[used++]='&'; }

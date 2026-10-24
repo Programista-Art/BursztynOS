@@ -318,6 +318,23 @@ int main() {
             d.focused_control=id("note"); physical(230,BWS_MOD_ALT); CHECK(w.fokus()==viewport);
             text.kod=0x142;text.przyciski=BWS_MOD_ALT;w.obsluz_zdarzenie(text);
             CHECK(Husarz::equal(Husarz::control(d,id("note"))->value,"ł"));
+            // Physical USB shortcuts use the same command decoder as release.
+            d.focused_control=id("q");physical(4,BWS_MOD_CTRL);
+            const uint32_t polish[]={0x105,0x107,0x119,0x142,0x144,0xf3,0x15b,0x17a,0x17c};
+            for(auto cp:polish){text.kod=cp;text.przyciski=0;w.obsluz_zdarzenie(text);}
+            auto *field=Husarz::control(d,id("q"));CHECK(Husarz::equal(field->value,"ąćęłńóśźż"));
+            physical(4,BWS_MOD_CTRL);physical(6,BWS_MOD_CTRL);physical(27,BWS_MOD_CTRL);CHECK(!field->length);
+            physical(25,BWS_MOD_CTRL);CHECK(Husarz::equal(field->value,"ąćęłńóśźż"));
+            d.focused_control=id("p");physical(4,BWS_MOD_CTRL);physical(6,BWS_MOD_CTRL);physical(27,BWS_MOD_CTRL);
+            CHECK(Husarz::equal(Husarz::control(d,id("p"))->value,"p"));
+            d.focused_control=id("q");physical(4,BWS_MOD_CTRL);physical(25,BWS_MOD_CTRL);
+            CHECK(Husarz::equal(field->value,"ąćęłńóśźż"));
+            auto area_edit=viewport->obszar_ekranu();auto field_box=d.boxes[field->node];
+            ZdarzenieMyszki down;down.przycisk=1;down.x=area_edit.x+field_box.content_x;down.y=area_edit.y+field_box.content_y+1;
+            viewport->obsluz_wcisniecie_myszy(down);CHECK(field->cursor==0 && field->anchor==0);
+            auto drag=down;drag.x+=30;viewport->obsluz_ruch_myszy(drag);CHECK(field->cursor>0 && field->anchor==0);
+            viewport->obsluz_zwolnienie_myszy(drag);CHECK(drag.obsluzone);
+            auto pos=field->cursor;viewport->obsluz_ruch_myszy(down);CHECK(field->cursor==pos);
             d.focused_control=d.open_select=id("select"); physical(81); CHECK(Husarz::control(d,id("select"))->option==1);
             physical(40); CHECK(d.open_select==0);
             // Open through the actual page mouse handler, then select by keyboard.
@@ -325,13 +342,38 @@ int main() {
             Husarz::choose_option(d,*Husarz::control(d,id("select")),0);
             viewport->przygotuj();
             auto area=viewport->obszar_ekranu(); auto box=d.boxes[id("select")];
-            ZdarzenieMyszki click; click.x=area.x+box.x+10;
+            ZdarzenieMyszki click; click.przycisk=1; click.x=area.x+box.x+10;
             click.y=area.y+box.y+10-int(g_husarz.suwak_pionowy->wartosc());
             viewport->obsluz_wcisniecie_myszy(click);
             CHECK(click.obsluzone); CHECK(d.focused_control==id("select")); CHECK(d.open_select==id("select"));
             physical(81); CHECK(Husarz::control(d,id("select"))->option==1);
             physical(81); CHECK(Husarz::control(d,id("select"))->option==1);
             physical(40); CHECK(d.open_select==0);
+        }
+        {
+            std::ifstream in("narzedzia/fixtures/husarz/js-forms.html");response=std::string((std::istreambuf_iterator<char>(in)),{});
+            g_husarz.odswiez();auto &z=zakladki[0];ensure_tab_identity(z);auto &d=*z.dokument;z.javascript=new Husarz::Js::BrowserRuntime;z.javascript->bind(d,z.identity,z.navigation,z.url);
+            auto pump=[&](){for(unsigned i=0;i<600;++i){z.javascript->publication_pending=false;z.work_pending=false;browser_script_step(uint64_t(i+1)*1000000);viewport->przygotuj();}};
+            pump();CHECK(z.javascript->errors==0);
+            auto id=[&](const char *name){return Husarz::ScriptDom(d).get_element_by_id(name).id;};
+            auto area=viewport->obszar_ekranu();auto box=d.boxes[id("field")];ZdarzenieMyszki click;click.przycisk=1;click.x=area.x+box.x+12;click.y=area.y+box.y+12;
+            viewport->obsluz_wcisniecie_myszy(click);pump();w.ustaw_fokus(viewport);
+            const char *observe="var edits=0;document.getElementById('field').addEventListener('input',function(e){edits++;e.target.setAttribute('data-edits',''+edits);});";
+            CHECK(z.javascript->start(observe,Husarz::length(observe,512)));pump();
+            bws_zdarzenie backspace{};backspace.typ=BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;backspace.kod=BWS_KEY_SOURCE_USB|42;backspace.x=1;w.obsluz_zdarzenie(backspace);pump();
+            CHECK(!d.has_attr(id("field"),"data-edits"));
+            bws_zdarzenie physical{};physical.typ=BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;physical.kod=BWS_KEY_SOURCE_USB|29;physical.x=1;w.obsluz_zdarzenie(physical);
+            bws_zdarzenie text{};text.typ=BWS_ZDARZENIE_TEXT_INPUT;text.kod='z';w.obsluz_zdarzenie(text);pump();CHECK(!Husarz::control(d,id("field"))->length);
+            physical.kod=BWS_KEY_SOURCE_USB|4;w.obsluz_zdarzenie(physical);text.kod='a';w.obsluz_zdarzenie(text);pump();CHECK(Husarz::equal(Husarz::control(d,id("field"))->value,"a"));
+            CHECK(Husarz::equal(d.attr(id("field"),"data-edits"),"1"));
+            box=d.boxes[id("submit")];click.x=area.x+box.x+12;click.y=area.y+box.y+12;viewport->obsluz_wcisniecie_myszy(click);CHECK(z.dokument==&d);pump();CHECK(z.dokument==&d);
+            if(z.javascript->errors)std::fprintf(stderr,"JS native errors=%u last=%u line=%u col=%u\n",z.javascript->errors,unsigned(z.javascript->last_error),z.javascript->last_error_line,z.javascript->last_error_column);
+            CHECK(z.javascript->errors==0);CHECK(Husarz::control(d,id("check"))->checked);CHECK(Husarz::control(d,id("choice"))->option==1);
+            CHECK(tekst_zawiera_ci(d.attr(id("marker"),"style"),"#3366cc"));
+            d.invalidate(0,8);z.work_pending=true;g_husarz.zatrzymaj();
+            CHECK(!z.javascript);CHECK(z.work_pending);
+            for(unsigned i=0;i<20000&&z.work_pending;++i)browser_step_work();
+            CHECK(!z.work_pending);CHECK(!z.dokument->styles_dirty);CHECK(z.dokument->layout_revision==z.dokument->revision);CHECK(!z.javascript);
         }
         // Exercise the actual completion publisher with stale HTML, CSS and image
         // replies. An old navigation or a different document cannot alter this tab.

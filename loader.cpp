@@ -24,6 +24,7 @@
 #include "grafika.h"
 #include "heap.h"
 #include "scheduler.h"
+#include "fpu.h"
 #include "stos_jadra.h"
 #ifndef BURSZTYN_DIAG_BOOT
 #define BURSZTYN_DIAG_BOOT 0
@@ -369,6 +370,7 @@ static int zarezerwuj_slot_procesu(
         proces_t& proces = tablica_procesow[pid];
 
         wyzeruj_znane_pola_procesu(proces);
+        fpu_reset_process(pid);
         argument_startowy_procesu[pid][0] = '\0';
         proces.pid = static_cast<uint64_t>(pid);
 

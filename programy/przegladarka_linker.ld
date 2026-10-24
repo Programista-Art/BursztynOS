@@ -8,8 +8,8 @@
  * Uklad surowego pliku .bur po `objcopy -O binary`:
  *
  *   plik 0x00000 .. 0x00FFF   HEADER  -> VA 0x1000000
- *   plik 0x01000 .. 0x0FFFF   TEXT    -> VA 0x1001000, 0xF000 bajtow
- *   plik 0x10000 ..           DATA    -> VA 0x1010000
+ *   plik 0x01000 .. 0x80FFF   TEXT    -> VA 0x1001000, 0x80000 bajtow
+ *   plik 0x81000 ..           DATA    -> VA 0x1081000
  *
  * Loader rezerwuje dla DATA+BSS lacznie 0x80000 bajtow:
  *
@@ -36,12 +36,12 @@ BUR_HEADER_SIZE   = 0x01000;
 BUR_HEADER_VADDR  = 0x1000000;
 
 BUR_TEXT_OFFSET   = 0x01000;
-BUR_TEXT_SIZE     = 0x60000;
+BUR_TEXT_SIZE     = DEFINED(HUSARZ_WORKER_BUILD) ? 0x10000 : 0x80000;
 BUR_TEXT_VADDR    = 0x1001000;
 
-BUR_DATA_OFFSET   = 0x61000;
+BUR_DATA_OFFSET   = BUR_TEXT_OFFSET + BUR_TEXT_SIZE;
 BUR_DATA_SIZE     = 0x80000;
-BUR_DATA_VADDR    = 0x1061000;
+BUR_DATA_VADDR    = BUR_TEXT_VADDR + BUR_TEXT_SIZE;
 
 BUR_TEXT_END      = BUR_TEXT_VADDR + BUR_TEXT_SIZE;
 BUR_DATA_END      = BUR_DATA_VADDR + BUR_DATA_SIZE;
@@ -124,7 +124,7 @@ SECTIONS
         __bur_text_used_end = .;
 
         /*
-         * Naglowek deklaruje tekst_rozmiar = 0xF000. Loader kopiuje caly
+         * Naglowek deklaruje tekst_rozmiar = 0x80000. Loader kopiuje caly
          * zadeklarowany TEXT, wiec region musi fizycznie istniec w raw .bur.
          */
         . = BUR_TEXT_SIZE;
@@ -359,12 +359,12 @@ SECTIONS
 
     ASSERT(
         __bur_text_used_end <= BUR_TEXT_END,
-        "Hussar: kod/rodata przekracza region TEXT 0x60000"
+        "Hussar: kod/rodata przekracza region TEXT 0x80000"
     )
 
     ASSERT(
         SIZEOF(.text) == BUR_TEXT_SIZE,
-        "Hussar: TEXT musi byc fizycznie wypelniony do 0x60000 bajtow"
+        "Hussar: TEXT musi byc fizycznie wypelniony do 0x80000 bajtow"
     )
 
     ASSERT(
@@ -374,12 +374,12 @@ SECTIONS
 
     ASSERT(
         ADDR(.data) == BUR_DATA_VADDR,
-        "Hussar: DATA musi zaczynac sie pod 0x1061000"
+        "Hussar: DATA musi zaczynac sie pod 0x1081000"
     )
 
     ASSERT(
         LOADADDR(.data) == BUR_DATA_OFFSET,
-        "Hussar: DATA musi zaczynac sie w pliku pod 0x61000"
+        "Hussar: DATA musi zaczynac sie w pliku pod 0x81000"
     )
 
     ASSERT(
@@ -398,7 +398,7 @@ SECTIONS
      */
     ASSERT(
         __bur_data_memory_end <= BUR_DATA_END,
-        "Hussar: niski DATA/BSS wychodzi poza VA 0x1061000..0x10E0FFF"
+        "Hussar: niski DATA/BSS wychodzi poza VA 0x1081000..0x10E0FFF"
     )
 
     ASSERT(

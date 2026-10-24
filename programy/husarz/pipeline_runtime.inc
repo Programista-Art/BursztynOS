@@ -15,13 +15,14 @@ uint32_t work_cursor{};
 void browser_request_work(Zakladka &z){ensure_tab_identity(z);z.work_pending=true;}
 bool browser_has_work(){
     if(document_job)return true;
-    for(int i=0;i<liczba_zakladek;++i)if(zakladki[i].work_pending)return true;
+    for(int i=0;i<liczba_zakladek;++i)if(zakladki[i].work_pending || (zakladki[i].javascript && zakladki[i].javascript->task.handle))return true;
     return false;
 }
 bool browser_active_busy(){
     if(!liczba_zakladek)return false;
     if(g_husarz.widok_strony && g_husarz.widok_strony->paint_pending())return true;
     auto &z=zakladki[aktywna_zakladka];
+    if(z.javascript&&!z.javascript->cancelled){if(z.javascript->task.handle||z.javascript->script_index<z.dokument->script_count)return true;for(auto &timer:z.javascript->timers)if(timer.active)return true;}
     if(z.work_pending || (document_job && document_job->identity.tab==z.identity) || (z.pending_css && z.pending_css->count))return true;
     if(!browser_resources)return false;
     auto &state=*browser_resources;
@@ -85,6 +86,7 @@ void browser_step_work(){
         // Prefer the visible tab, but give another pending tab every eighth turn.
         if((++work_cursor&7U) && liczba_zakladek && zakladki[aktywna_zakladka].work_pending)selected=aktywna_zakladka;
         if(selected<0)for(int n=0;n<liczba_zakladek;++n){int i=int((work_cursor+unsigned(n))%unsigned(liczba_zakladek));if(zakladki[i].work_pending){selected=i;break;}}
+        if(selected>=0 && zakladki[selected].javascript && zakladki[selected].javascript->task.handle){selected=-1;for(int n=0;n<liczba_zakladek;++n){auto &other=zakladki[n];if(other.work_pending&&(!other.javascript||!other.javascript->task.handle)){selected=n;break;}}}
         if(selected<0)return;
         auto &z=zakladki[selected];
         auto *job=new Husarz::DocumentJob;if(!job)return;
@@ -110,9 +112,11 @@ void browser_step_work(){
         z.work_pending=false;
         if(job.driver.failed){ustaw_status("Brak pamięci na przetwarzanie strony.");break;}
         bool parsed=job.parse;
+        if(parsed){delete z.javascript;z.javascript=nullptr;}
         if(g_husarz.widok_strony)g_husarz.widok_strony->cancel_paint();
         delete z.dokument;z.dokument=job.result;job.result=nullptr;z.dokument_brudny=false;
         if(z.pending_css){delete z.pending_css;z.pending_css=nullptr;}
+        if(z.javascript)z.javascript->bind(*z.dokument,z.identity,z.navigation,z.url);
         [[maybe_unused]] auto &d=*z.dokument;
         HUSARZ_COUNT(d,slices,job.driver.slices);
 #if HUSARZ_PERF

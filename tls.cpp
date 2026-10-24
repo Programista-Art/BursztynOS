@@ -567,12 +567,7 @@ namespace {
 void tls_pompuj_siec() {
     net_poll_rx();
 
-    asm volatile(
-        "pause"
-        :
-        :
-        : "memory"
-    );
+    siec_odstap_w_czekaniu();
 }
 
 bool tls_kod_ponow(

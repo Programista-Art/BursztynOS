@@ -3,10 +3,10 @@
 namespace Husarz {
 struct NodeHandle {
     uint32_t generation{};
-    uint16_t id{};
+    uint16_t id{},identity{};
 };
 struct ScriptLimits {
-    uint32_t instructions{100000}, source_bytes{MaxScriptSource}, recursion{32}, timers{0};
+    uint32_t instructions{100000}, source_bytes{MaxScriptSource}, recursion{32}, timers{16};
 };
 class ScriptBudget {
     ScriptLimits limits_;
@@ -20,6 +20,8 @@ class ScriptBudget {
         instructions_ += count;
         return true;
     }
+    uint32_t used()const{return instructions_;}
+    uint32_t remaining()const{return limits_.instructions-instructions_;}
     bool enter() {
         if (depth_ >= limits_.recursion)
             return false;
@@ -38,16 +40,24 @@ class ScriptDom {
 
   public:
     explicit ScriptDom(Document &document) : document_(document) {}
+    Document &document(){return document_;}
     bool valid(NodeHandle h) const {
-        return h.generation == document_.generation && h.id > 0 && h.id < document_.node_count;
+        return h.generation == document_.generation && h.id > 0 && h.id < document_.node_count && (!h.identity || document_.nodes[h.id].identity==h.identity);
+    }
+    NodeHandle handle(uint16_t id)const {
+        return id>0&&id<document_.node_count&&document_.nodes[id].identity?NodeHandle{document_.generation,id,document_.nodes[id].identity}:NodeHandle{};
+    }
+    NodeHandle by_identity(uint16_t identity)const {
+        if(identity&&identity<MaxNodes){uint16_t id=document_.identity_index[identity];if(id&&id<document_.node_count&&document_.nodes[id].identity==identity)return handle(id);}
+        return {};
     }
     NodeHandle get_element_by_id(const char *id) const {
         size_t n = length(id, MaxAttrLength + 1);
         if (n > MaxAttrLength)
             return {};
         for (uint16_t i = 1; i < document_.node_count; ++i)
-            if (equal(document_.attr(i, "id"), id))
-                return {document_.generation, i};
+            if (!document_.nodes[i].detached && equal(document_.attr(i, "id"), id))
+                return {document_.generation, i, document_.nodes[i].identity};
         return {};
     }
     NodeHandle query_selector(const char *query) const {
@@ -57,8 +67,8 @@ class ScriptDom {
         Selector s = selector({query, n});
         uint32_t budget = 65536;
         for (uint16_t i = 1; i < document_.node_count && budget; ++i)
-            if (matches(document_, i, s, budget))
-                return {document_.generation, i};
+            if (!document_.nodes[i].detached && matches(document_, i, s, budget))
+                return {document_.generation, i, document_.nodes[i].identity};
         return {};
     }
     bool text_content(NodeHandle h, char *out, size_t cap) const {
@@ -85,11 +95,10 @@ class ScriptDom {
         out[used] = 0;
         return true;
     }
-    // Mutation/event dispatch intentionally stays outside the initial capability
-    // set. A future backend must route text/style changes through reparsing and
-    // revision invalidation; innerHTML and eval are not executable entry points.
+    // The native JS bridge extends these read capabilities with validated
+    // document-owned identities, transactional mutation and revision invalidation.
 };
-enum class ScriptResult { Unavailable, SourceLimit, BudgetExceeded, Complete, Error };
+enum class ScriptResult { Unavailable, SourceLimit, BudgetExceeded, Complete, Error, Suspended };
 class ScriptExecutor {
   public:
     virtual ~ScriptExecutor() = default;

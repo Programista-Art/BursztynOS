@@ -371,6 +371,7 @@ inline Work compound_work(const Document &d, uint16_t id, Span v, uint32_t &budg
         } else if (type == '[') {
             const char *value = nullptr;
             const Node &node = d.nodes[id];
+
             for (unsigned i = 0; i < node.attr_count; ++i) { co_await WorkPoint{1};
                 if (!budget) {result=false;co_return;}
                 --budget;
@@ -1026,8 +1027,10 @@ inline Style defaults(const Document &d, uint16_t id, const Style &parent) {
         for (auto &p : s.padding)
             p = {4000, Unit::Px};
     }
-    if (d.tag(id, "textarea"))
+    if (d.tag(id, "textarea")) {
         s.white = WhiteSpace::PreWrap;
+        s.width={160000,Unit::Px};s.height={64000,Unit::Px};
+    }
     if (d.tag(id, "input") || d.tag(id, "button") || d.tag(id, "select") || d.tag(id, "textarea")) {
         s.color = 0x202020;
         s.has_background = true;
@@ -1458,6 +1461,7 @@ inline Work compute_styles_work(Document &d,bool indexed=true) {
     if(index) while(index->count<d.rule_count){co_await WorkPoint{1};index->add(d,index->count++);}
     for (uint16_t id = 0; id < d.node_count; ++id) { HUSARZ_PROGRESS(Style,id,d.node_count);co_await WorkPoint{1};
         const Node &node = d.nodes[id];
+        if(node.detached){d.styles[id]={};d.styles[id].display=Display::None;continue;}
         const Style &parent = id ? d.styles[node.parent] : initial;
         if (node.is_text) {
             d.styles[id] = defaults(d,id,parent);

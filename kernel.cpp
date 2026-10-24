@@ -168,6 +168,7 @@ extern "C" uint8_t _binary_przegladarka_bin_start[];
 extern "C" uint8_t _binary_przegladarka_bin_end[];
 extern "C" uint8_t _binary_husarz_worker_bin_start[];
 extern "C" uint8_t _binary_husarz_worker_bin_end[];
+extern "C" uint8_t _binary_fpu_probe_bin_start[],_binary_fpu_probe_bin_end[];
 
 extern "C" uint8_t _binary_test_bin_start[];
 extern "C" uint8_t _binary_test_bin_end[];
@@ -1513,13 +1514,18 @@ void instaluj_wbudowane_programy() {
 #endif
 
 
+    static const char FPU_A_MANIFEST[]="nazwa = \"FPU isolation probe\"\npoziom_zaufania = 4\nplik_startowy = \"fpu-a.bur\"\nuprawnienia = [\"okna\",\"uruchom_program\"]\n";
+    static const char FPU_B_MANIFEST[]="nazwa = \"FPU probe partner\"\npoziom_zaufania = 4\nplik_startowy = \"fpu-b.bur\"\nuprawnienia = [\"okna\"]\n";
+    instaluj_paczke("/programy/fpu-a.cebula/opis.aplikacji",FPU_A_MANIFEST,"/programy/fpu-a.cebula/fpu-a.bur",_binary_fpu_probe_bin_start,_binary_fpu_probe_bin_end);
+    instaluj_paczke("/programy/fpu-b.cebula/opis.aplikacji",FPU_B_MANIFEST,"/programy/fpu-b.cebula/fpu-b.bur",_binary_fpu_probe_bin_start,_binary_fpu_probe_bin_end);
+
     static const char MANIFEST_HUSARZ_WORKER[] =
         "nazwa = \"Husarz resources\"\n"
         "autor = \"Programista Art\"\n"
         "wersja = \"0.1\"\n"
         "poziom_zaufania = 4\n"
         "plik_startowy = \"husarz-worker.bur\"\n"
-        "uprawnienia = [\"okna\", \"siec\"]\n";
+        "uprawnienia = [\"okna\", \"siec\", \"pliki_czytaj\", \"pliki_zapisz\"]\n";
     if (!instaluj_paczke("/programy/husarz-worker.cebula/opis.aplikacji",MANIFEST_HUSARZ_WORKER,
             "/programy/husarz-worker.cebula/husarz-worker.bur",_binary_husarz_worker_bin_start,_binary_husarz_worker_bin_end))
         wypisz_log("[BSP-BLAD] Husarz resource worker install failed.");

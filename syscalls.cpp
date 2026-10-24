@@ -1990,6 +1990,14 @@ bool pobierz_http_sciezka_user(
         );
 }
 
+class SieciowaOperacja {
+    bool acquired_;
+public:
+    SieciowaOperacja():acquired_(siec_operacja_rozpocznij()){}
+    ~SieciowaOperacja(){if(acquired_)siec_operacja_zakoncz();}
+    explicit operator bool()const{return acquired_;}
+};
+
 __attribute__((noinline)) uint64_t bws_dns(
     proces_t& proces,
     uint64_t arg1,
@@ -2017,6 +2025,8 @@ __attribute__((noinline)) uint64_t bws_dns(
 
         return 0;
     }
+
+    SieciowaOperacja network_owner;if(!network_owner)return 0;
 
     uint8_t ip[4] = {};
 
@@ -2091,6 +2101,8 @@ __attribute__((noinline)) uint64_t bws_http_common(
 
         return 0;
     }
+
+    SieciowaOperacja network_owner;if(!network_owner)return 0;
 
     uint8_t ip[4] = {};
 
@@ -2253,6 +2265,8 @@ __attribute__((noinline)) uint64_t bws_legacy_http_do_pliku(
 
         return 0;
     }
+
+    SieciowaOperacja network_owner;if(!network_owner)return 0;
 
     uint8_t ip[4] = {};
 

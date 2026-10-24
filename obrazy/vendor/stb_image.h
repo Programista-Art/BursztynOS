@@ -429,7 +429,7 @@ STBIDEF stbi_uc *stbi_load_from_file  (FILE *f, int *x, int *y, int *channels_in
 // for stbi_load_from_file, file pointer is left pointing immediately after image
 #endif
 
-#ifndef STBI_NO_GIF
+#if !defined(STBI_NO_GIF) && !defined(STBI_NO_GIF_ANIMATION)
 STBIDEF stbi_uc *stbi_load_gif_from_memory(stbi_uc const *buffer, int len, int **delays, int *x, int *y, int *z, int *comp, int req_comp);
 #endif
 
@@ -952,7 +952,9 @@ static int      stbi__pic_info(stbi__context *s, int *x, int *y, int *comp);
 #ifndef STBI_NO_GIF
 static int      stbi__gif_test(stbi__context *s);
 static void    *stbi__gif_load(stbi__context *s, int *x, int *y, int *comp, int req_comp, stbi__result_info *ri);
+#ifndef STBI_NO_GIF_ANIMATION
 static void    *stbi__load_gif_main(stbi__context *s, int **delays, int *x, int *y, int *z, int *comp, int req_comp);
+#endif
 static int      stbi__gif_info(stbi__context *s, int *x, int *y, int *comp);
 #endif
 
@@ -1440,7 +1442,7 @@ STBIDEF stbi_uc *stbi_load_from_callbacks(stbi_io_callbacks const *clbk, void *u
    return stbi__load_and_postprocess_8bit(&s,x,y,comp,req_comp);
 }
 
-#ifndef STBI_NO_GIF
+#if !defined(STBI_NO_GIF) && !defined(STBI_NO_GIF_ANIMATION)
 STBIDEF stbi_uc *stbi_load_gif_from_memory(stbi_uc const *buffer, int len, int **delays, int *x, int *y, int *z, int *comp, int req_comp)
 {
    unsigned char *result;
@@ -6600,6 +6602,9 @@ typedef struct
    stbi_uc  pal[256][4];
    stbi_uc lpal[256][4];
    stbi__gif_lzw codes[8192];
+   // Bursztyn: bounded iterative prefix expansion; never recurse on file data.
+   stbi_uc decode_stack[8192];
+   int decode_error;
    stbi_uc *color_table;
    int parse, step;
    int lflags;
@@ -6656,8 +6661,8 @@ static int stbi__gif_header(stbi__context *s, stbi__gif *g, int *comp, int is_in
    g->ratio = stbi__get8(s);
    g->transparent = -1;
 
-   if (g->w > STBI_MAX_DIMENSIONS) return stbi__err("too large","Very large image (corrupt?)");
-   if (g->h > STBI_MAX_DIMENSIONS) return stbi__err("too large","Very large image (corrupt?)");
+   if ((stbi__uint32) g->w > STBI_MAX_DIMENSIONS) return stbi__err("too large","Very large image (corrupt?)");
+   if ((stbi__uint32) g->h > STBI_MAX_DIMENSIONS) return stbi__err("too large","Very large image (corrupt?)");
 
    if (comp != 0) *comp = 4;  // can't actually tell whether it's 3 or 4 until we parse the comments
 
@@ -6687,20 +6692,24 @@ static int stbi__gif_info_raw(stbi__context *s, int *x, int *y, int *comp)
 static void stbi__out_gif_code(stbi__gif *g, stbi__uint16 code)
 {
    stbi_uc *p, *c;
-   int idx;
-
-   // recurse to decode the prefixes, since the linked-list is backwards,
-   // and working backwards through an interleaved image would be nasty
-   if (g->codes[code].prefix >= 0)
-      stbi__out_gif_code(g, g->codes[code].prefix);
-
-   if (g->cur_y >= g->max_y) return;
+   int idx, count = 0, prefix = code;
+   if (g->cur_y >= g->max_y) { g->decode_error = 1; return; }
+   while (prefix >= 0) {
+      if (prefix >= 8192 || count >= 8192) { g->decode_error = 1; return; }
+      g->decode_stack[count++] = g->codes[prefix].suffix;
+      // Prefixes must precede dictionary entries, excluding cycles and forward
+      // references even for corrupt streams.
+      if (g->codes[prefix].prefix >= prefix) { g->decode_error = 1; return; }
+      prefix = g->codes[prefix].prefix;
+   }
+   while (count) {
+   if (g->cur_y >= g->max_y) { g->decode_error = 1; return; }
 
    idx = g->cur_x + g->cur_y;
    p = &g->out[idx];
    g->history[idx / 4] = 1;
 
-   c = &g->color_table[g->codes[code].suffix * 4];
+   c = &g->color_table[g->decode_stack[--count] * 4];
    if (c[3] > 128) { // don't render transparent pixels;
       p[0] = c[2];
       p[1] = c[1];
@@ -6718,6 +6727,7 @@ static void stbi__out_gif_code(stbi__gif *g, stbi__uint16 code)
          g->cur_y = g->start_y + (g->step >> 1);
          --g->parse;
       }
+   }
    }
 }
 
@@ -6753,7 +6763,7 @@ static stbi_uc *stbi__process_gif_raster(stbi__context *s, stbi__gif *g)
          if (len == 0) {
             len = stbi__get8(s); // start new block
             if (len == 0)
-               return g->out;
+               return stbi__errpuc("missing GIF end code", "Corrupt GIF");
          }
          --len;
          bits |= (stbi__int32) stbi__get8(s) << valid_bits;
@@ -6779,7 +6789,7 @@ static stbi_uc *stbi__process_gif_raster(stbi__context *s, stbi__gif *g)
                return stbi__errpuc("no clear code", "Corrupt GIF");
             }
 
-            if (oldcode >= 0) {
+            if (oldcode >= 0 && avail < 4096) {
                p = &g->codes[avail++];
                if (avail > 8192) {
                   return stbi__errpuc("too many codes", "Corrupt GIF");
@@ -6792,6 +6802,7 @@ static stbi_uc *stbi__process_gif_raster(stbi__context *s, stbi__gif *g)
                return stbi__errpuc("illegal code in raster", "Corrupt GIF");
 
             stbi__out_gif_code(g, (stbi__uint16) code);
+            if (g->decode_error) return stbi__errpuc("invalid prefix chain", "Corrupt GIF");
 
             if ((avail & codemask) == 0 && avail <= 0x0FFF) {
                codesize++;
@@ -6922,6 +6933,7 @@ static stbi_uc *stbi__gif_load_next(stbi__context *s, stbi__gif *g, int *comp, i
 
             o = stbi__process_gif_raster(s, g);
             if (!o) return NULL;
+            if (g->cur_y < g->max_y) return stbi__errpuc("short GIF raster", "Corrupt GIF");
 
             // if this was the first frame,
             pcount = g->w * g->h;
@@ -6982,6 +6994,7 @@ static stbi_uc *stbi__gif_load_next(stbi__context *s, stbi__gif *g, int *comp, i
    }
 }
 
+#ifndef STBI_NO_GIF_ANIMATION
 static void *stbi__load_gif_main_outofmem(stbi__gif *g, stbi_uc *out, int **delays)
 {
    STBI_FREE(g->out);
@@ -7078,32 +7091,36 @@ static void *stbi__load_gif_main(stbi__context *s, int **delays, int *x, int *y,
    }
 }
 
+#endif // STBI_NO_GIF_ANIMATION
+
 static void *stbi__gif_load(stbi__context *s, int *x, int *y, int *comp, int req_comp, stbi__result_info *ri)
 {
    stbi_uc *u = 0;
-   stbi__gif g;
-   memset(&g, 0, sizeof(g));
+   stbi__gif *g = (stbi__gif*) stbi__malloc(sizeof(stbi__gif));
+   if (!g) return stbi__errpuc("outofmem", "Out of memory");
+   memset(g, 0, sizeof(*g));
    STBI_NOTUSED(ri);
 
-   u = stbi__gif_load_next(s, &g, comp, req_comp, 0);
+   u = stbi__gif_load_next(s, g, comp, req_comp, 0);
    if (u == (stbi_uc *) s) u = 0;  // end of animated gif marker
    if (u) {
-      *x = g.w;
-      *y = g.h;
+      *x = g->w;
+      *y = g->h;
 
       // moved conversion to after successful load so that the same
       // can be done for multiple frames.
       if (req_comp && req_comp != 4)
-         u = stbi__convert_format(u, 4, req_comp, g.w, g.h);
-   } else if (g.out) {
+         u = stbi__convert_format(u, 4, req_comp, g->w, g->h);
+   } else if (g->out) {
       // if there was an error and we allocated an image buffer, free it!
-      STBI_FREE(g.out);
+      STBI_FREE(g->out);
    }
 
    // free buffers needed for multiple frame loading;
-   STBI_FREE(g.history);
-   STBI_FREE(g.background);
+   STBI_FREE(g->history);
+   STBI_FREE(g->background);
 
+   STBI_FREE(g);
    return u;
 }
 

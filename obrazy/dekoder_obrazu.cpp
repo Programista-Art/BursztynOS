@@ -38,6 +38,8 @@ void* memset(void* dst, int v, size_t n) {
 
 #define STBI_ONLY_JPEG
 #define STBI_ONLY_PNG
+#define STBI_ONLY_GIF
+#define STBI_NO_GIF_ANIMATION
 #define STBI_STRICT_JPEG_ENTROPY
 #define STBI_NO_STDIO
 #define STBI_NO_SIMD
@@ -74,7 +76,47 @@ FormatObrazu rozpoznaj_obraz(const uint8_t* p, size_t n) {
     if (p[0] == 'B' && p[1] == 'M') return FormatObrazu::BMP;
     if (n >= 8 && p[0] == 137 && p[1] == 'P' && p[2] == 'N' && p[3] == 'G')
         return FormatObrazu::PNG;
+    if (n>=6 && p[0]=='G' && p[1]=='I' && p[2]=='F' && p[3]=='8' && (p[4]=='7' || p[4]=='9') && p[5]=='a')return FormatObrazu::GIF;
     return FormatObrazu::Nieznany;
+}
+
+BladObrazu sprawdz_gif(const uint8_t *p,size_t n,uint32_t *ow,uint32_t *oh) {
+    if(ow)*ow=0;
+    if(oh)*oh=0;
+    if(!p || n<13 || rozpoznaj_obraz(p,n)!=FormatObrazu::GIF)return BladObrazu::Format;
+    if(n>OBRAZ_MAX_PLIK)return BladObrazu::ZaDuzy;
+    auto le=[](const uint8_t *b)->unsigned{return unsigned(b[0])|(unsigned(b[1])<<8);};
+    unsigned w=le(p+6),h=le(p+8);if(!limit(w,h))return BladObrazu::ZaDuzy;
+    size_t at=13;unsigned global=(p[10]&128)?(2U<<(p[10]&7)):0;
+    if(global && p[11]>=global)return BladObrazu::Uszkodzony;
+    if(global*3>n-at)return BladObrazu::Uszkodzony;
+    at+=global*3;unsigned frames=0;
+    while(at<n) {
+        unsigned tag=p[at++];
+        if(tag==0x3b){if(!frames || at!=n)return BladObrazu::Uszkodzony;if(ow)*ow=w;if(oh)*oh=h;return BladObrazu::OK;}
+        if(tag==0x2c) {
+            if(++frames>256)return BladObrazu::ZaDuzy;
+            if(n-at<9)return BladObrazu::Uszkodzony;
+            unsigned x=le(p+at),y=le(p+at+2),iw=le(p+at+4),ih=le(p+at+6),flags=p[at+8];at+=9;
+            if(!iw || !ih || x+iw>w || y+ih>h || (flags&0x18))return BladObrazu::Uszkodzony;
+            unsigned palette=(flags&128)?(2U<<(flags&7)):global;
+            if(!palette)return BladObrazu::Uszkodzony;
+            if(flags&128){if(palette*3>n-at)return BladObrazu::Uszkodzony;at+=palette*3;}
+            if(at>=n || p[at]<2 || p[at]>8)return BladObrazu::Uszkodzony;
+            ++at;
+        } else if(tag==0x21) {
+            if(at>=n)return BladObrazu::Uszkodzony;
+            unsigned ext=p[at++];
+            if(ext==0xf9) {
+                if(n-at<6 || p[at]!=4 || p[at+5]!=0 || (p[at+1]&0xe0))return BladObrazu::Uszkodzony;
+                at+=6;continue;
+            }
+            if(ext!=0xfe && ext!=0xff && ext!=1)return BladObrazu::Uszkodzony;
+        } else return BladObrazu::Uszkodzony;
+        // Every iteration consumes at least one byte. No unbounded extensions.
+        for(;;){if(at>=n)return BladObrazu::Uszkodzony;unsigned size=p[at++];if(!size)break;if(size>n-at)return BladObrazu::Uszkodzony;at+=size;}
+    }
+    return BladObrazu::Uszkodzony;
 }
 
 BladObrazu sprawdz_jpeg(const uint8_t* p, size_t n, uint32_t* ow, uint32_t* oh) {
@@ -328,8 +370,8 @@ static BladObrazu dekoduj_obraz_impl(const uint8_t* dane, size_t n, DekodowanyOb
         *out = {w, h, w * 4, OBRAZ_BGRA8888, rgba, count * 4};
         return BladObrazu::OK;
     }
-    if (f == FormatObrazu::PNG) {
-        const BladObrazu valid = sprawdz_png(dane, n, &w, &h);
+    if (f == FormatObrazu::PNG || f == FormatObrazu::GIF) {
+        const BladObrazu valid = f==FormatObrazu::PNG?sprawdz_png(dane,n,&w,&h):sprawdz_gif(dane,n,&w,&h);
         if (valid != BladObrazu::OK) return valid;
         if (n > 0x7fffffffU) return BladObrazu::ZaDuzy;
         g_alokuj = alokuj; g_zwolnij = zwolnij;

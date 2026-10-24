@@ -799,7 +799,9 @@ inline Work reflow_work(Document &d, int width, Metrics metrics) {
                 bool toggle=input_type(d,id,"checkbox") || input_type(d,id,"radio");
                 if (!image && !toggle) co_await layout_text_work(d, local, id, n.text, n.text_length, metrics);
                 co_await finish_line_work(d, local);
-                int intrinsic_height=image ? clamp64(int64_t(cw)*image->height/image->width) : clamp64(int64_t(local.y)-box.content_y);
+                auto *field=control(d,id);
+                int intrinsic_height=image ? clamp64(int64_t(cw)*image->height/image->width) :
+                    field && selectable(d,*field) ? font_height(metrics,s) : clamp64(int64_t(local.y)-box.content_y);
                 int ch = resolve(image_height, 0, s.font, d.root_font, intrinsic_height);
                 int vertical_extra = pt + pb + s.border[0] + s.border[2];
                 if (s.height.unit != Unit::Auto && s.border_box)
@@ -1029,6 +1031,7 @@ inline Work reflow_work(Document &d, int width, Metrics metrics) {
         if (bottom > d.height)
             d.height = bottom;
     }
+    for(unsigned i=0;i<d.control_count;++i){co_await WorkPoint{1};d.controls[i].reveal_caret=true;}
     d.layout_revision = d.revision;++d.paint_revision;d.dirty=1;d.damage.all();
     for(auto &flags:d.node_dirty)flags=0;
 }

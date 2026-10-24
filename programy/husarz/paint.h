@@ -1,5 +1,6 @@
 #pragma once
 #include "layout.h"
+#include "control_text.h"
 namespace Husarz {
 struct Surface {
     uint32_t *pixels{};
@@ -254,13 +255,53 @@ inline Work paint_menu_label_work(Surface &target,const char *text,int x,int y,c
         if (bits) for (int yy=0;yy<dh && target.budget;++yy) { co_await WorkPoint{1}; for (int xx=0;xx<dw && target.budget;++xx) { if(!(xx&63))co_await WorkPoint{1};
             --target.budget;
             int sx=xx*gw/dw; if(sx>15)sx=15;
-            if ((bits[yy*16/dh]&(1U<<(15-sx))) && x+xx>=clip.x && x+xx<clip.x+clip.width && y+yy>=clip.y && y+yy<clip.y+clip.height)
-                target.pixel(x+xx,y+yy,style.color,unsigned(style.color_alpha)*style.paint_opacity/255);
+            int tx=x+xx+(style.italic?(dh-1-yy)/5:0),ty=y+yy;
+            if ((bits[yy*16/dh]&(1U<<(15-sx))) && tx>=clip.x && tx<clip.x+clip.width && ty>=clip.y && ty<clip.y+clip.height) {
+                target.pixel(tx,ty,style.color,unsigned(style.color_alpha)*style.paint_opacity/255);
+                if(style.bold && tx+1<clip.x+clip.width)target.pixel(tx+1,ty,style.color,unsigned(style.color_alpha)*style.paint_opacity/255);
+            }
         } }
         x=clamp64(int64_t(x)+advance(metrics,cp,style),-MaxDimension);
     }
 }
 inline void paint_menu_label(Surface &target,const char *text,int x,int y,const Style &style,Metrics metrics,Glyphs glyphs,Clip clip) { finish_work(paint_menu_label_work(target,text,x,y,style,metrics,glyphs,clip)); }
+
+inline Work paint_control_text_work(Document &d,FormControl &c,Surface &target,int scroll,Metrics metrics,Glyphs glyphs,Clip clip) {
+    const auto &b=d.boxes[c.node];const auto &s=d.styles[c.node];
+    clip=intersect(clip,{b.content_x,b.content_y-scroll,b.content_width,b.content_height});
+    clip=intersect(clip,target.damage);if(!clip.width || !clip.height)co_return;
+    // Geometry is scanned cooperatively as well; paint never performs a hidden
+    // full synchronous field scan. Scroll offsets are updated on input/resize.
+    ControlTextGeometry g;ControlTextWalker scan(d,c,metrics);
+    for(;;) {
+        co_await WorkPoint{1};scan.prepare();
+        if(scan.pos==c.cursor){g.caret_x=scan.x;g.caret_y=scan.y;}
+        if(scan.x>g.width)g.width=scan.x;
+        g.height=scan.y+scan.line;
+        if(scan.pos>=c.length)break;
+        scan.next();
+    }
+    if(d.focused_control==c.node && c.reveal_caret){control_apply_geometry(d,c,metrics,g);c.reveal_caret=false;}
+    ControlTextWalker w(d,c,metrics);
+    unsigned start=selection_start(c),end=selection_end(c);
+    int caret_x=b.content_x+g.caret_x-c.scroll_x,caret_y=b.content_y+g.caret_y-c.scroll_y-scroll;
+    for(;;) {
+        co_await WorkPoint{1};w.prepare();
+        int x=b.content_x+w.x-c.scroll_x,y=b.content_y+w.y-c.scroll_y-scroll;
+        if(w.pos>=c.length)break;
+        size_t used;uint32_t cp=w.codepoint(used);int adv=w.step_width(cp);
+        if((!w.multiline || cp!='\n') && x<int64_t(clip.x)+clip.width && int64_t(x)+adv>clip.x && y<int64_t(clip.y)+clip.height && y+w.line>clip.y) {
+            bool selected=w.pos>=start && w.pos<end && d.focused_control==c.node;
+            Style ink=s;
+            if(selected){co_await target.rect_work(x,y,adv,w.line,0x245ac4,255,clip);ink.color=0xffffff;ink.color_alpha=255;}
+            char text[5]{};encode(cp,text);
+            co_await paint_menu_label_work(target,text,x,y,ink,metrics,glyphs,clip);
+        } else if(w.multiline && cp=='\n' && w.pos>=start && w.pos<end && d.focused_control==c.node)
+            co_await target.rect_work(x,y,advance(metrics,' ',s),w.line,0x245ac4,255,clip);
+        w.next();
+    }
+    if(d.focused_control==c.node)co_await target.rect_work(caret_x,caret_y,1,font_height(metrics,s),s.color,s.color_alpha,clip);
+}
 
 inline Work paint_work(Document &d, Surface &target, int scroll, Metrics metrics, Glyphs glyphs, Clip damage) {
     target.damage=intersect(damage,{0,0,target.width,target.height});
@@ -296,6 +337,7 @@ inline Work paint_work(Document &d, Surface &target, int scroll, Metrics metrics
             co_await paint_image_work(d,id,target,scroll,clip,true);
             co_await paint_image_work(d,id,target,scroll,clip,false);
             if (auto *control_state=control(d,id)) {
+                if(selectable(d,*control_state))co_await paint_control_text_work(d,*control_state,target,scroll,metrics,glyphs,clip);
                 if (control_state->checked && (input_type(d,id,"checkbox") || input_type(d,id,"radio"))) {
                     int cx=b.content_x,cy=b.content_y-scroll;
                     Clip control_clip=intersect(clip,{cx,cy,b.content_width,b.content_height});
@@ -339,6 +381,7 @@ inline Work paint_work(Document &d, Surface &target, int scroll, Metrics metrics
             { co_await WorkPoint{1}; ++fi; }
         while (fi < d.fragment_count && d.fragments[fi].node == id) { co_await WorkPoint{1};
             const Fragment &f = d.fragments[fi++];
+            if(auto *field=control(d,id))if(selectable(d,*field))continue;
             HUSARZ_COUNT(d,paint_candidates,1);
             Clip fc=intersect({f.clip.x,f.clip.y-scroll,f.clip.width,f.clip.height},target.damage);
             // Advance widths can be zero with negative letter spacing. Ink can
@@ -390,31 +433,6 @@ inline Work paint_work(Document &d, Surface &target, int scroll, Metrics metrics
         }
     }
     co_await paint_collapsed_tables_work(d,target,scroll);
-    if (d.focused_control) {
-        auto *c=control(d,d.focused_control);
-        if (c) {
-            const auto &b=d.boxes[c->node]; const auto &s=d.styles[c->node];
-            Clip clip=ancestor_clip(d,c->node,scroll,target.width,target.height);
-            clip=intersect(clip,{b.content_x,b.content_y-scroll,b.content_width,b.content_height});
-            if (editable(d,*c)) {
-                unsigned cursor=c->cursor;
-                if (input_type(d,c->node,"password")) {
-                    cursor=0; for (size_t p=0;p<c->cursor;) { co_await WorkPoint{1};  size_t used; utf8(c->value+p,c->cursor-p,used); p+=used; ++cursor; }
-                }
-                int x=b.content_x,y=b.content_y-scroll;
-                for (uint32_t i=0;i<d.fragment_count;++i) { co_await WorkPoint{1};
-                    const auto &f=d.fragments[i]; if (f.node!=c->node) continue;
-                    unsigned start=f.text-c->display;
-                    if (cursor>=start && cursor<=start+f.length) {
-                        x=f.x; y=f.y-scroll;
-                        for (size_t p=0;p<cursor-start;) { co_await WorkPoint{1};  size_t used; uint32_t cp=utf8(d.str(f.text)+p,cursor-start-p,used); x+=advance(metrics,cp,s); p+=used; }
-                        break;
-                    }
-                }
-                co_await target.rect_work(x,y,1,s.font,s.color,s.color_alpha,clip);
-            }
-        }
-    }
     if (d.open_select) {
         auto *c=control(d,d.open_select);
         if (c) {

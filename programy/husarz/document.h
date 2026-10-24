@@ -144,7 +144,8 @@ struct Node {
     uint16_t parent{}, first{}, last{}, next{}, previous{}, depth{}, attr_start{}, attr_count{};
     uint32_t tag{}, text{}, text_length{};
     uint16_t inline_first{}, inline_count{};
-    bool is_text{}, raw{};
+    bool is_text{}, raw{}, detached{};
+    uint16_t identity{};
 };
 struct Declaration {
     uint32_t name{}, value{};
@@ -196,6 +197,9 @@ struct UserAgentContext {
 };
 struct FormControl {
     uint16_t node{}, cursor{}, length{}, option{}; bool checked{}; uint32_t display{}; char value[2049]{};
+    uint16_t anchor{};
+    int scroll_x{}, scroll_y{}, preferred_x{-1};
+    bool reveal_caret{true};
 };
 struct DocumentImage {
     uint16_t node{}; unsigned width{}, height{}; const uint32_t *pixels{};
@@ -277,6 +281,7 @@ struct Document {
         return nullptr;
     }
     Node nodes[MaxNodes];
+    uint16_t identity_index[MaxNodes]{};
     Attribute attrs[MaxAttrs];
     Style styles[MaxNodes];
     Box boxes[MaxNodes];
@@ -295,6 +300,7 @@ struct Document {
     char arena[ArenaSize];
     uint32_t node_count{}, attr_count{}, arena_used{}, rule_count{}, declaration_count{}, fragment_count{},
         script_count{};
+    uint16_t next_node_identity{};
     uint32_t title{}, generation{}, revision{}, layout_revision{}, style_revision{}, base_url{};
     bool truncated{}, styles_dirty{true}, user_agent_loaded{};
     int layout_width{}, height{}, root_font{16};
@@ -317,7 +323,7 @@ struct Document {
         tables.clear(); release_selector_index(selector_index); selector_index=nullptr;
         control_count=0; focused_control=open_select=0;
         table_count=table_cells=0; table_work=0;
-        node_count = 1;
+        node_count = 1;next_node_identity=0;for(auto &index:identity_index)index=0;
         attr_count = rule_count = declaration_count = fragment_count = script_count = 0;
         arena_used = 1;
         arena[0] = 0;
@@ -359,6 +365,7 @@ struct Document {
         uint16_t id = uint16_t(node_count++);
         Node &n = nodes[id];
         n = {};
+        n.identity=++next_node_identity;identity_index[n.identity]=id;
         n.parent = parent;
         n.is_text = text;
         n.depth = nodes[parent].depth + 1;

@@ -956,7 +956,7 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
     if (przerwano_ring3 ||
         pid_idle ||
         proces_juz_pusty ||
-        proces_blokuje_w_bws38) {
+        proces_blokuje_w_bws38 || scheduler_czeka_w_sieci(aktualny_pid)) {
 #if BURSZTYNDIAGVIRTIOINPUTINIT
         if (input_activation_trace.armed) input_activation_log("scheduler enter", wektor);
 #endif
@@ -969,7 +969,7 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
 
     /*
      * Jezeli timer przerwal zwykly kod Ring 0, pozostajemy w tym samym
-     * kontekscie. Wyjatek BWS38 powyzej jest bezpieczny: scheduler zapisuje
+     * kontekscie. BWS38 i jawny HLT sieci sa bezpieczne: scheduler zapisuje
      * kompletna rame IRQ na prywatnym stosie procesu, a po wybudzeniu IRETQ
      * wznawia ten sam SYSCALL za HLT.
      */

@@ -146,6 +146,7 @@ MBEDTLS_CONFIG := \
 	-DMBEDTLS_USER_CONFIG_FILE=\"bursztyn_mbedtls_config.h\"
 
 KERNEL_CXXFLAGS := \
+	-mgeneral-regs-only \
 	-std=gnu++17 \
 	-O2 -g \
 	$(FREESTANDING_FLAGS) \
@@ -346,6 +347,7 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	klawiatura.o \
 	przegladarka_blob.o \
 	husarz_worker_blob.o \
+	fpu_probe_blob.o \
 	mysz.o \
 	zegar-rtc.o \
 	pmm.o \
@@ -382,6 +384,7 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	sponsorzy_blob.o \
 	heap.o \
 	scheduler.o \
+	fpu.o \
 	skladacz_obrazu.o \
  mbedtls_port.o \
  tls.o \
@@ -554,7 +557,7 @@ HUSARZ_PERF ?= 0
 	@$(PYTHON) -c "from pathlib import Path; p=Path('$@'); v='debug=$(HUSARZ_DEBUG) perf=$(HUSARZ_PERF)'; p.write_text(v) if not p.exists() or p.read_text()!=v else None"
 przegladarka_tmp.o husarz_worker_tmp.o: .husarz-test/build-config
 przegladarka_tmp.o: programy/przegladarka.cpp Makefile programy/http_kody.h bursztyn_gui.h $(wildcard bursztyn_ui/*.h) $(wildcard programy/husarz/*.h) $(wildcard programy/husarz/*.inc)
-	$(CXX) $(RING3_FLAGS) -fcoroutines -fcheck-new -DHUSARZ_DEBUG_RESOURCES=$(HUSARZ_DEBUG) -DHUSARZ_PERF=$(HUSARZ_PERF) -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c $< -o $@
+	$(CXX) $(RING3_FLAGS) -msse2 -mfpmath=sse -mno-avx -fcoroutines -fcheck-new -DHUSARZ_DEBUG_RESOURCES=$(HUSARZ_DEBUG) -DHUSARZ_PERF=$(HUSARZ_PERF) -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c $< -o $@
 
 przegladarka_blob.o: przegladarka_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o $(PRZEGLADARKA_LINKER)
 	$(LD) --gc-sections -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) \
@@ -563,10 +566,10 @@ przegladarka_blob.o: przegladarka_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o
 	$(LD) -r -b binary przegladarka.bin -o przegladarka_blob.o
 
 husarz_worker_tmp.o: programy/przegladarka.cpp Makefile $(wildcard programy/husarz/*.h) $(wildcard programy/husarz/*.inc)
-	$(CXX) $(RING3_FLAGS) -fcoroutines -fcheck-new -DHUSARZ_DEBUG_RESOURCES=$(HUSARZ_DEBUG) -DHUSARZ_PERF=$(HUSARZ_PERF) -DHUSARZ_WORKER_ONLY=1 -Wno-unused-function -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c $< -o $@
+	$(CXX) $(RING3_FLAGS) -msse2 -mfpmath=sse -mno-avx -fcoroutines -fcheck-new -DHUSARZ_DEBUG_RESOURCES=$(HUSARZ_DEBUG) -DHUSARZ_PERF=$(HUSARZ_PERF) -DHUSARZ_WORKER_ONLY=1 -Wno-unused-function -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c $< -o $@
 
 husarz_worker_blob.o: husarz_worker_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o $(PRZEGLADARKA_LINKER)
-	$(LD) --gc-sections -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) husarz_worker_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o -o husarz_worker.elf
+	$(LD) --defsym=HUSARZ_WORKER_BUILD=1 --gc-sections -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) husarz_worker_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o -o husarz_worker.elf
 	$(OBJCOPY) -O binary husarz_worker.elf husarz_worker.bin
 	$(LD) -r -b binary husarz_worker.bin -o husarz_worker_blob.o
 
@@ -1995,7 +1998,7 @@ test-husarz-engine-host:
 
 test-husarz-runtime-host:
 	@mkdir -p .husarz-test
-	g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_husarz_runtime.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -Wl,--gc-sections -o .husarz-test/runtime
+	g++ -std=c++17 -fcoroutines -O1 -fno-inline -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_husarz_runtime.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -Wl,--gc-sections -o .husarz-test/runtime
 	ASAN_OPTIONS=detect_leaks=1 .husarz-test/runtime
 
 .PHONY: test-husarz-qemu
@@ -2049,3 +2052,44 @@ test-husarz-performance-host:
 	@mkdir -p .husarz-test
 	g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -I. narzedzia/test_husarz_performance.cpp -o .husarz-test/performance
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .husarz-test/performance
+
+.PHONY: test-husarz-selection-host
+test-husarz-selection-host:
+	@mkdir -p .husarz-test
+	g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -I. narzedzia/test_husarz_selection.cpp -o .husarz-test/selection
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .husarz-test/selection
+
+.PHONY: test-husarz-gif-host
+test-husarz-gif-host:
+	@mkdir -p .husarz-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wno-unused-function -Wno-unused-parameter -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -I. narzedzia/test_husarz_gif.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -o .husarz-test/gif
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .husarz-test/gif
+
+.PHONY: test-husarz-javascript-host
+test-husarz-javascript-host:
+	@mkdir -p .husarz-test
+	g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wno-misleading-indentation -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -I. narzedzia/test_husarz_javascript.cpp -o .husarz-test/javascript
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .husarz-test/javascript
+
+.PHONY: test-fpu-host
+test-fpu-host:
+	@mkdir -p .husarz-test
+	g++ -std=c++17 -O2 -mno-sse -mno-sse2 -mno-mmx -I. narzedzia/test_fpu_host.cpp -o .husarz-test/fpu
+	.husarz-test/fpu
+
+fpu_probe_tmp.o: programy/fpu_probe.cpp fpu.h bursztyn_gui.h
+	$(CXX) $(RING3_FLAGS) -mgeneral-regs-only -I. -Os -c $< -o $@
+fpu_probe_blob.o: fpu_probe_tmp.o bursztyn_gui.o $(PRZEGLADARKA_LINKER)
+	$(LD) --defsym=HUSARZ_WORKER_BUILD=1 --gc-sections -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) fpu_probe_tmp.o bursztyn_gui.o -o fpu_probe.elf
+	$(OBJCOPY) -O binary fpu_probe.elf fpu_probe.bin
+	$(LD) -r -b binary fpu_probe.bin -o $@
+
+.PHONY: test-kernel-simd
+test-kernel-simd: $(KERNEL)
+	$(PYTHON) narzedzia/test_kernel_simd.py $(KERNEL)
+
+.PHONY: test-network-lease-host
+test-network-lease-host:
+	@mkdir -p .husarz-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-pie -no-pie -I. narzedzia/test_network_lease.cpp -o .husarz-test/network-lease
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .husarz-test/network-lease

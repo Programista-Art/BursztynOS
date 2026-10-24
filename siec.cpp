@@ -50,6 +50,8 @@
  */
 
 #include "siec.h"
+#include "scheduler.h"
+#include "network_lease.h"
 #include "network_device.h"
 #include "sterowniki/czas/hpet.h"
 
@@ -72,6 +74,15 @@ void wypisz_log(
 /* =========================================================================
  * 2. STALE PROTOKOLOW
  * ========================================================================= */
+
+static NetworkLease operacja_sieci;
+bool siec_operacja_rozpocznij(){return operacja_sieci.acquire(aktualny_pid);}
+void siec_operacja_zakoncz(){(void)operacja_sieci.release(aktualny_pid);}
+bool siec_operacja_trwa(){return operacja_sieci.busy();}
+void siec_odstap_w_czekaniu(){
+    if(operacja_sieci.owned_by(aktualny_pid))scheduler_odstap_w_czekaniu_sieci();
+    else asm volatile("pause" ::: "memory");
+}
 
 namespace {
 
@@ -1774,9 +1785,7 @@ bool rozwiaz_adres_mac(
             return true;
         }
 
-        asm volatile(
-            "pause"
-        );
+        siec_odstap_w_czekaniu();
     }
 
     wypisz_ip_log("[ARP] timeout ip=", nastepny_hop);
@@ -2309,9 +2318,7 @@ extern "C" void uruchom_klienta_dhcp() {
             break;
         }
 
-        asm volatile(
-            "pause"
-        );
+        siec_odstap_w_czekaniu();
     }
 
     if (!__atomic_load_n(
@@ -2356,9 +2363,7 @@ extern "C" void uruchom_klienta_dhcp() {
             break;
         }
 
-        asm volatile(
-            "pause"
-        );
+        siec_odstap_w_czekaniu();
     }
 
     if (__atomic_load_n(
@@ -2607,9 +2612,7 @@ extern "C" uint32_t bws_siec_ping(
             return 2;
         }
 
-        asm volatile(
-            "pause"
-        );
+        siec_odstap_w_czekaniu();
     }
 
     wypisz_log(
@@ -3142,9 +3145,7 @@ extern "C" bool kernel_siec_dns(
                 );
         }
 
-        asm volatile(
-            "pause"
-        );
+        siec_odstap_w_czekaniu();
     }
     wypisz_log("[DNS] response timeout.");
 
@@ -3579,9 +3580,7 @@ bool tcp_czekaj_na_polaczenie() {
             return false;
         }
 
-        asm volatile(
-            "pause"
-        );
+        siec_odstap_w_czekaniu();
     }
 
     return false;
@@ -4004,9 +4003,10 @@ extern "C" void tcp_gniazdo_zamknij() {
      * Nie czekamy bez konca na FIN-ACK. TLS potrzebuje deterministycznego
      * close callbacku.
      */
+    const uint64_t close_deadline=deadline_ms(100);
     for (uint32_t proba = 0;
          proba <
-            100000U;
+            100000U && czas_monotoniczny_ms()<close_deadline;
          ++proba) {
 
         net_poll_rx();
@@ -4017,9 +4017,7 @@ extern "C" void tcp_gniazdo_zamknij() {
             break;
         }
 
-        asm volatile(
-            "pause"
-        );
+        siec_odstap_w_czekaniu();
     }
 
     tcp_resetuj_sesje(
@@ -4285,9 +4283,7 @@ extern "C" bool kernel_siec_pobierz_http(
             break;
         }
 
-        asm volatile(
-            "pause"
-        );
+        siec_odstap_w_czekaniu();
     }
 
     if (stan_tcp !=
@@ -5591,5 +5587,12 @@ void obsluz_pakiet_sieciowy(
             pakiet,
             dlugosc
         );
+    }
+}
+
+void siec_operacja_posprzataj(int pid) {
+    if(operacja_sieci.owned_by(pid)){
+        tcp_resetuj_sesje(true);
+        (void)operacja_sieci.release(pid);
     }
 }

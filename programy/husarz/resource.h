@@ -31,7 +31,7 @@ inline bool normalize_resource_url(const char *input,char *out,size_t cap) {
     if (p<n && input[p]=='?') while (p<n && input[p]!='#') out[used++]=input[p++];
     out[used]=0; return true;
 }
-enum class ResourceType : uint8_t { Html, Css, Image };
+enum class ResourceType : uint8_t { Html, Css, Image, Script, Fetch };
 constexpr unsigned MaxCacheObjects = 32, MaxDocumentImages = 32;
 constexpr size_t MaxResourceBytes = 240 * 1024, MaxCacheRaw = 2 * 1024 * 1024;
 constexpr size_t MaxCacheDecoded = 16 * 1024 * 1024, MaxDocumentDecoded = 8 * 1024 * 1024;
@@ -41,7 +41,7 @@ struct ResourceEntry {
     ResourceCache *cache{}; bool transient{};
     char content_type[96]{}, etag[128]{}, modified[128]{};
     char url[2048]{};
-    ResourceType type{};
+    ResourceType type{}; uint16_t status{200};
     uint8_t *raw{}; size_t size{};
     uint32_t *pixels{}; unsigned width{}, height{}; size_t decoded{};
     unsigned refs{}; uint64_t used{}, created{}, expires{}; uint32_t cache_seconds{60};
@@ -83,7 +83,7 @@ struct ResourceCache {
     }
     ResourceEntry *insert(const char *url,ResourceType type,const uint8_t *data,size_t size,uint64_t now=0) {
         size_t n = length(url,2048);
-        if (!url || !n || !allocate || !release || !data || !size || size > MaxResourceBytes || n == 2048 || !room(size,0,true)) return nullptr;
+        if (!url || !n || !allocate || !release || !data || (!size&&type!=ResourceType::Fetch) || size > MaxResourceBytes || n == 2048 || !room(size,0,true)) return nullptr;
         for (auto &e:entries) if (!e.raw) {
             auto *copy = static_cast<uint8_t*>(allocate(size+1)); if (!copy) return nullptr;
             for (size_t i=0;i<size;++i) copy[i]=data[i];

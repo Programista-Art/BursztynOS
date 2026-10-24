@@ -3,11 +3,11 @@
 namespace Husarz {
 constexpr uint32_t AsyncMagic=0x48535233;
 constexpr unsigned MaxPendingRequests=48;
-enum class RequestKind : uint32_t { Html, Css, Image };
+enum class RequestKind : uint32_t { Html, Css, Image, Script, Fetch, StorageRead, StorageWrite };
 struct ResourceTask {
     uint32_t request{}, tab{}, navigation{}, document{};
-    uint16_t node{}; RequestKind kind{};
-    bool background{}, history{}; uint8_t redirects{};
+    uint16_t node{},node_identity{},script{}; RequestKind kind{};
+    bool background{}, history{}; uint32_t storage_revision{}; uint8_t redirects{};
     char url[2048]{};
 };
 struct WorkerMessage { uint32_t magic{AsyncMagic}, type{}, request{}, reserved{}; uint64_t endpoint{}, nonce{}; };
@@ -17,6 +17,7 @@ constexpr size_t AsyncRawCapacity=256*1024;
 constexpr unsigned AsyncImagePixels=384*1024;
 struct WorkerPayload {
     uint32_t magic{}, request{}, kind{}, success{}, size{}, width{}, height{}, trusted{}, no_cache{}, cache_seconds{60};
+    uint32_t status{};
     char url[2048]{};
     char content_type[96]{}, etag[128]{}, modified[128]{};
     uint8_t raw[AsyncRawCapacity]{};

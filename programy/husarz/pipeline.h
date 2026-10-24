@@ -28,7 +28,7 @@ inline Work copy_document_bytes(void *out,const void *input,size_t n) {
     for(size_t i=0;i<n;){co_await WorkPoint{1};size_t end=i+64;if(end>n)end=n;while(i<end){dst[i]=src[i];++i;}}
 }
 inline Work clone_layout_document(Document &dst,const Document &src) {
-    dst.node_count=src.node_count;dst.attr_count=src.attr_count;dst.arena_used=src.arena_used;
+    dst.next_node_identity=src.next_node_identity;dst.node_count=src.node_count;dst.attr_count=src.attr_count;dst.arena_used=src.arena_used;
     dst.rule_count=src.rule_count;dst.declaration_count=src.declaration_count;dst.script_count=src.script_count;
     dst.title=src.title;dst.base_url=src.base_url;dst.generation=src.generation;dst.revision=src.revision;
     dst.styles_dirty=src.styles_dirty;dst.style_revision=src.style_revision;dst.user_agent_loaded=src.user_agent_loaded;
@@ -38,6 +38,7 @@ inline Work clone_layout_document(Document &dst,const Document &src) {
     dst.perf=src.perf;
 #endif
     co_await copy_document_bytes(dst.nodes,src.nodes,src.node_count*sizeof(Node));
+    co_await copy_document_bytes(dst.identity_index,src.identity_index,sizeof(src.identity_index));
     co_await copy_document_bytes(dst.attrs,src.attrs,src.attr_count*sizeof(Attribute));
     co_await copy_document_bytes(dst.styles,src.styles,src.node_count*sizeof(Style));
     co_await copy_document_bytes(dst.rules,src.rules,src.rule_count*sizeof(Rule));

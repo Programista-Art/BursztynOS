@@ -8,6 +8,7 @@
  */
 
 #include "bws_api.h"
+#include "siec.h"
 #include "bws_nowoczesne.h"
 #include "bws_zdarzenia.h"
 #include "pzb.h"
@@ -809,14 +810,14 @@ uint32_t socket_generacja = 0;
 
 bool socket_handle_ok(uint64_t handle) {
     uint32_t i = 0, gen = 0;
-    return dekoduj_handle(handle, 1, &i, &gen) && i == 0 &&
+    return !siec_operacja_trwa() && dekoduj_handle(handle, 1, &i, &gen) && i == 0 &&
            socket_stan.aktywny && socket_stan.generacja == gen &&
            socket_stan.owner_pid == aktualny_pid;
 }
 
 uint64_t socket_create(proces_t& p, uint64_t typ) {
     if (!ma_prawo(p, PRAWO_SIEC) || typ != BWS_SOCKET_TCP_IPV4 ||
-        socket_stan.aktywny || tcp_gniazdo_otwarte()) return 0;
+        socket_stan.aktywny || siec_operacja_trwa() || tcp_gniazdo_otwarte()) return 0;
     uint32_t gen = ++socket_generacja;
     if (gen == 0) gen = ++socket_generacja;
     socket_stan = {true, false, gen, aktualny_pid};
@@ -945,6 +946,7 @@ extern "C" void bws_powiadom_zmiane_pliku(const char* sciezka,
 extern "C" void bws_nowoczesne_posprzataj_proces(int pid, bool aktywny_cr3) {
     if (pid <= 0 || pid >= static_cast<int>(PZB_MAKS_PROCESOW)) return;
 
+    siec_operacja_posprzataj(pid);
     ekran_posprzataj_proces(pid);
     instalator_zamknij_proces(pid);
     motyw_posprzataj_proces(pid);

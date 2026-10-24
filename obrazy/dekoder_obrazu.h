@@ -4,7 +4,7 @@
 
 // Shared Ring 3 image boundary. The caller owns the returned BGRA8888 surface.
 // A new format can be added without changing consumers of dekoduj_obraz().
-enum class FormatObrazu : uint8_t { Nieznany, JPEG, BTP, BMP, PNG };
+enum class FormatObrazu : uint8_t { Nieznany, JPEG, BTP, BMP, PNG, GIF };
 enum class BladObrazu : uint8_t { OK, Argument, Format, Nieobslugiwany, Uszkodzony, ZaDuzy, Pamiec };
 struct DekodowanyObraz {
     uint32_t szerokosc, wysokosc, stride;
@@ -58,3 +58,6 @@ inline bool dekoduj_png(const uint8_t* dane, size_t n, DekodowanyObraz* out,
     return err == BladObrazu::OK;
 }
 
+
+// Static GIF87a/89a and first frame only; full stream framing is validated.
+BladObrazu sprawdz_gif(const uint8_t*,size_t,uint32_t*,uint32_t*);

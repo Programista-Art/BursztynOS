@@ -732,3 +732,12 @@ inline constexpr bool siec_tcp_flaga_ustawiona(
 }
 
 #endif /* __cplusplus */
+
+#ifdef __cplusplus
+// Kernel-only ownership of the existing single transport during yielding BWS calls.
+bool siec_operacja_rozpocznij();
+void siec_operacja_zakoncz();
+bool siec_operacja_trwa();
+void siec_odstap_w_czekaniu();
+void siec_operacja_posprzataj(int pid);
+#endif

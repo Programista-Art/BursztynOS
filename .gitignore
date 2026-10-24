@@ -62,6 +62,20 @@ loop_test.sh
 .hda-test/regression-qemu/
 .hda-test/regression/
 .hda-test/tone/
+.hda-test/
+.kontrolki4-qemu/
+.kontrolki4-test/
+.mimocode/
+.motywytest/
+.nettest/
+.phase20_test/
+.pointingtest/
+.qemu_ci/
+.suite_test/
+.test_run_uefi/
+.virtiotest/
+.wm-test/
+
 
 
 

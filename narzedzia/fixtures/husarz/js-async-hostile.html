@@ -1,0 +1,1 @@
+<!doctype html><body><div style="width:600px;height:180px;background:#3366cc">Bounded hostile async recursion</div><script>async function loop(){await Promise.resolve();return loop();}loop();</script></body>

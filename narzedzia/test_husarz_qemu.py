@@ -38,17 +38,40 @@ def main():
     parser.add_argument('--performance', action='store_true', help='Heavy supported pages, repeated maximize/restore, cancellation and long scrolling')
     parser.add_argument('--layout-only', action='store_true', help='Native table spans, border conflict and signed margin pixels with resize')
     parser.add_argument('--render-only', action='store_true', help='Development pass over resources, forms and theme isolation')
+    parser.add_argument('--javascript-forms-only', action='store_true', help='Focused native JavaScript form and keyboard diagnostic')
+    parser.add_argument('--javascript-cancellation-only', action='store_true', help='Focused pending async fetch navigation and tab-close cancellation')
+    parser.add_argument('--javascript-storage-only', action='store_true', help='Focused ordinary-ISO storage persistence and isolation acceptance')
+    parser.add_argument('--modern-javascript-only', action='store_true', help='New FPU/modern JavaScript acceptance; run --javascript-only separately for existing JS regression')
+    parser.add_argument('--modern-javascript', action='store_true', help='Binary64, prototypes, exceptions, Promise/async, fetch/JSON and storage plus existing JS regression')
+    parser.add_argument('--javascript-only', action='store_true', help='Native bounded JavaScript, DOM, events, forms, timers and external cache')
+    parser.add_argument('--editing-only', action='store_true', help='Release UTF-8 selection, OS clipboard, password protection and GIF pixels')
     parser.add_argument('--images-only', action='store_true', help='Focused native PNG/JPEG pixels and shared-cache regression')
     parser.add_argument('--fault-vector', type=int, choices=[6,14], default=6)
     parser.add_argument('--fault-probe', type=Path, help='Private test kernel with a deliberately faulting Ring 3 browser payload')
     args = parser.parse_args()
-    if args.images_only or args.layout_only:
+    if args.modern_javascript_only:args.modern_javascript=True
+    if args.javascript_forms_only or args.modern_javascript or args.javascript_storage_only or args.javascript_cancellation_only:args.javascript_only=True
+    if args.images_only or args.layout_only or args.editing_only or args.javascript_only:
         args.render_only = True
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=True)
     (out / 'result.json').unlink(missing_ok=True)
     requests = []
+    finished_responses = []
     requests_lock = threading.Lock()
+
+    def request_for_log(path):
+        # Keep fixture assertions in memory; persist no submitted control values,
+        # including passwords, in diagnostics or machine-readable reports.
+        route, mark, query = path.partition('?')
+        if not mark:
+            return path
+        return route + '?' + '&'.join(part.split('=', 1)[0] + '=[redacted]'
+                                      for part in query.split('&'))
+
+    def request_log():
+        with requests_lock:
+            return [request_for_log(path) for path in requests]
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -60,17 +83,23 @@ def main():
             with requests_lock:
                 requests.append(self.path)
             if name.startswith('slow-'):
-                time.sleep(5)
+                # Cancellation must precede completion even when native USB
+                # pointer movement/clicks take several host seconds under TCG.
+                time.sleep(30 if self.path == '/slow-js-data.json?cancel=1' else 5)
             if name == 'scroll.html':
                 time.sleep(.3)  # Expose the ordinary loading redraws to observation.
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/css' if name.endswith('.css') else 'image/png' if name.endswith('.png') else 'image/jpeg' if name.endswith('.jpg') else 'text/html; charset=utf-8')
-            # Cache assertions test reuse of fresh entries, independent of slow TCG runs.
-            self.send_header('Cache-Control', 'max-age=3600')
-            self.send_header('Content-Length', str(len(data)))
-            self.send_header('Connection', 'close')
-            self.end_headers()
-            self.wfile.write(data)
+            try:
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/javascript' if name.endswith('.js') else 'text/css' if name.endswith('.css') else 'image/png' if name.endswith('.png') else 'image/jpeg' if name.endswith('.jpg') else 'image/gif' if name.endswith('.gif') else 'text/html; charset=utf-8')
+                # Cache assertions test reuse of fresh entries, independent of slow TCG runs.
+                self.send_header('Cache-Control', 'no-store' if name.startswith('slow-js-') else 'max-age=3600')
+                self.send_header('Content-Length', str(len(data)))
+                self.send_header('Connection', 'close')
+                self.end_headers()
+                self.wfile.write(data)
+            finally:
+                with requests_lock:
+                    finished_responses.append(self.path)
 
         def log_message(self, *_):
             pass
@@ -115,7 +144,7 @@ def main():
            '-device', 'virtio-blk-pci,drive=boot,disable-legacy=on,bootindex=1',
            '-device', 'qemu-xhci,id=usb', '-device', 'usb-kbd,bus=usb.0', '-device', 'usb-mouse,bus=usb.0',
            '-audiodev', 'none,id=snd', '-device', 'intel-hda', '-device', 'hda-output,audiodev=snd',
-           '-netdev', 'user,id=n1,guestfwd=tcp:10.0.2.100:80-cmd:' + bridge_command, '-device', 'virtio-net-pci,netdev=n1,disable-legacy=on']
+           '-netdev', 'user,id=n1,guestfwd=tcp:10.0.2.100:80-cmd:' + bridge_command + ',guestfwd=tcp:10.0.2.101:80-cmd:' + bridge_command, '-device', 'virtio-net-pci,netdev=n1,disable-legacy=on']
     q = None
     vm = None
     deadline = time.monotonic() + args.timeout
@@ -131,8 +160,13 @@ def main():
                         '[PF]', '[KERNEL-PANIC]', '[GP]', 'KRYTYCZNY BLAD SYSTEMU',
                         '[VIRTIO-GPU] BLAD KRYTYCZNY')):
                     raise RuntimeError('Guest stopped or faulted\n' + text[-2000:])
-                if not args.fault_probe and '[USER FAULT]' in text:
-                    raise RuntimeError('Browser process faulted\n'+text[-2000:])
+                # Serial writes arrive in fragments; the process path used to
+                # distinguish the deliberate FPU fault can be in a later write.
+                complete_text=text[:text.rfind('\n')+1]
+                faults=[line for line in complete_text.splitlines() if '[USER FAULT]' in line]
+                unexpected=[line for line in faults if not (args.modern_javascript and 'vector=6 ' in line and 'program=/programy/fpu-b.cebula/fpu-b.bur' in line)]
+                if not args.fault_probe and unexpected:
+                    raise RuntimeError('Ring 3 process faulted\n'+text[-2000:])
                 if time.monotonic() >= deadline:
                     raise TimeoutError('Husarz regression deadline\n' + text[-2000:])
                 return text
@@ -229,6 +263,10 @@ def main():
                 with requests_lock:
                     return requests.count('/' + path)
 
+            def finished(path):
+                with requests_lock:
+                    return finished_responses.count('/' + path)
+
             def page_idle():
                 # A white mouse pointer over the label is not enabled text.
                 # Move it using native input before observing button state.
@@ -249,21 +287,33 @@ def main():
                     enabled=sum(1 for r,g,b in area.getdata() if min(r,g,b)>200)
                 return enabled<8
 
-            def navigate(name, settle=2):
+            def navigate(name, settle=2,host="10.0.2.100"):
                 print('Navigate:', name, flush=True)
                 previous = count(name)
                 key('ctrl', 'l')
                 time.sleep(.15)
-                for c in 'http://10.0.2.100/' + name:
+                for c in 'http://' + host + '/' + name:
                     if c == ':':
                         key('shift', 'semicolon')
                     else:
                         key({'/': 'slash', '.': 'dot', '-': 'minus', '_': 'minus'}.get(c, c))
                 key('ret')
                 wait(lambda: count(name) > previous, 'HTTP request ' + name)
-                time.sleep(settle)
+                if settle:
+                    started=guest_ticks()
+                    wait(lambda:guest_ticks()-started>=int(settle*250),
+                         'guest processing time for '+name,60)
                 if settle and not name.startswith('slow-'):
-                    wait(page_idle,'active-tab processing completed for '+name,240,interval=1)
+                    idle_since=None
+                    def settled_idle():
+                        nonlocal idle_since
+                        if not page_idle():
+                            idle_since=None
+                            return False
+                        now=guest_ticks()
+                        if idle_since is None:idle_since=now
+                        return now-idle_since>=128
+                    wait(settled_idle,'active-tab processing completed for '+name,240,interval=1)
                 health()
 
             def thumb(image):
@@ -284,6 +334,21 @@ def main():
 
             time.sleep(2)
             click(1124, 44)  # Close the default diagnostic utility through its normal titlebar.
+            if args.modern_javascript:
+                click(32,700);click(130,182);time.sleep(2)
+                for c in 'uruchom /programy/fpu-a.cebula/fpu-a.bur':
+                    key({' ':'spc','/':'slash','.':'dot','-':'minus'}.get(c,c))
+                key('ret')
+                wait(lambda:'[FPU PROBE] A PASS' in health() and health().count('[FPU PROBE] B PASS')>=2,'native FPU context isolation, fault cleanup and PID reuse',180)
+                if '[FPU PROBE] FAIL' in health():raise AssertionError('Native FPU isolation failed')
+                result['fpu_process_isolation']=True
+                # The native shell implements its exit command; it does not
+                # implement the browser's Alt+F4 shortcut or window geometry.
+                shell_header=screenshot('fpu-shell-probe').crop((300,116,930,142)).tobytes()
+                for code in 'exit':key(code)
+                key('ret')
+                wait(lambda:screenshot('fpu-shell-probe').crop((300,116,930,142)).tobytes()!=shell_header,'FPU launcher shell closed',60)
+                screenshot('fpu-shell-closed')
             move(320,28)
             hmp('mouse_button 2'); time.sleep(.2); hmp('mouse_button 0'); time.sleep(.5)
             screenshot('browser-launch-menu')
@@ -354,7 +419,7 @@ def main():
                 if normal['selectorchecks']!=restored['selectorchecks']:raise AssertionError('Resize repeated style matching')
                 if long_initial['paintculled']<=long_initial['paintvisible']*5:raise AssertionError('Insufficient native long-page culling')
                 result.update(result='PASS',mode='diagnostics',kernel_sha256=kernel_sha,iso_sha256=iso_sha,
-                              no_guest_fault=True,http_requests=list(requests),samples=samples)
+                              no_guest_fault=True,http_requests=request_log(),samples=samples)
                 (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
                 print(json.dumps(result),flush=True)
                 return
@@ -452,7 +517,7 @@ def main():
                 wait(lambda: tabs_hash()==tabs,'tab close command handled',30)
                 move(800,600);health();screenshot('heavy-stop-tab-close')
                 result.update(result='PASS',kernel_sha256=kernel_sha,iso_sha256=iso_sha,
-                              no_guest_fault=True,http_requests=list(requests),mouse_responsive=True,
+                              no_guest_fault=True,http_requests=request_log(),mouse_responsive=True,
                               heavy_fixtures=6,stop_tab_close_commands=True,app_switch_commands=True)
                 (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
                 print(json.dumps(result),flush=True)
@@ -496,9 +561,14 @@ def main():
                     for _ in range(steps):
                         previous_image=screenshot('wheel-probe')
                         previous=thumb(previous_image)[0];previous_hash=page_hash(previous_image)
+                        started=guest_ticks()
                         q.call('input-send-event', {'events': [
-                            {'type': 'btn', 'data': {'button': button, 'down': True}},
+                            {'type': 'btn', 'data': {'button': button, 'down': True}}]})
+                        wait(lambda:guest_ticks()-started>=32,'guest consumed wheel press',30)
+                        started=guest_ticks()
+                        q.call('input-send-event', {'events': [
                             {'type': 'btn', 'data': {'button': button, 'down': False}}]})
+                        wait(lambda:guest_ticks()-started>=32,'guest consumed wheel release',30)
                         def wheel_repainted():
                             current=screenshot('wheel-probe')
                             return direction*(thumb(current)[0]-previous)>0 and page_hash(current)!=previous_hash
@@ -516,11 +586,13 @@ def main():
                 sx = frame['x']+frame['w']-9
                 sy = sum(thumb(up))//2
                 move(sx, sy)
-                hmp('mouse_button 1')
-                time.sleep(.2)
+                started=guest_ticks();hmp('mouse_button 1')
+                wait(lambda:guest_ticks()-started>=32,'guest consumed scrollbar drag press',30)
                 move(sx, frame['y']+frame['h']-55)
-                time.sleep(.3)
-                hmp('mouse_button 0')
+                started=guest_ticks()
+                wait(lambda:guest_ticks()-started>=32,'guest consumed scrollbar drag move',30)
+                started=guest_ticks();hmp('mouse_button 0')
+                wait(lambda:guest_ticks()-started>=32,'guest consumed scrollbar drag release',30)
                 wait(lambda: thumb(screenshot('drag-probe'))[0] >= frame['y']+frame['h']-55-(thumb(up)[1]-thumb(up)[0])//2-2,
                      'native thumb reached the drag target', 30)
                 move(1000,660)
@@ -529,28 +601,30 @@ def main():
                     raise AssertionError('Scrollbar dragging did not move the document')
                 click(sx, frame['y']+155)
                 wait(lambda: thumb(screenshot('track-probe'))[0] < thumb(dragged)[0],
-                     'native track click repaint', 20)
+                     'native track click repaint', 90)
                 track = screenshot('track-click')
                 if thumb(track)[0] >= thumb(dragged)[0]:
                     raise AssertionError('Scrollbar track click')
                 click(400, 300)
                 key('home')
+                # Match wheel/resize publication deadlines under contended TCG.
+                # The observed canonical thumb position must still be exact.
                 wait(lambda: thumb(screenshot('home-probe'))[0] == initial_thumb[0],
-                     'Home resets the canonical offset', 20)
+                     'Home resets the canonical offset', 90)
                 if thumb(screenshot('home'))[0] != initial_thumb[0]:
                     raise AssertionError('Home did not reset the canonical offset')
                 key('end')
                 wait(lambda: thumb(screenshot('end-probe'))[0] > initial_thumb[0],
-                     'End scrolls to the bottom', 20)
+                     'End scrolls to the bottom', 90)
                 end = thumb(screenshot('end'))
                 key('pgup')
                 wait(lambda: thumb(screenshot('page-up-probe'))[0] < end[0],
-                     'Page Up repaint', 20)
+                     'Page Up repaint', 90)
                 if thumb(screenshot('page-up'))[0] >= end[0]:
                     raise AssertionError('Page Up')
                 key('pgdn')
                 wait(lambda: thumb(screenshot('page-down-probe'))[0] == end[0],
-                     'Page Down returns to the bottom', 20)
+                     'Page Down returns to the bottom', 90)
                 screenshot('page-down')
                 result['scrolling'] = ['wheel down/up', 'thumb drag', 'track click', 'Home/End', 'Page Up/Down']
                 with requests_lock:
@@ -585,6 +659,188 @@ def main():
                 time.sleep(2)
                 screenshot('forward')
                 result['back_forward'] = True
+            if args.javascript_only:
+                green=(51,187,119)
+                blue=(51,102,204)
+                def pixels(color):
+                    im=screenshot('javascript-probe')
+                    return sum(n for n,c in (im.getcolors(im.width*im.height) or []) if c==color)
+                def marker(color, label):
+                    wait(lambda:pixels(color)>10000,label,120,interval=.5)
+                def click_color(color):
+                    points=[]
+                    def target_ready():
+                        nonlocal points
+                        im=screenshot('event-target-probe')
+                        points=[(x,y) for y in range(frame['y']+116,min(im.height,frame['y']+frame['h']))
+                                for x in range(frame['x'],min(im.width,frame['x']+frame['w']-16)) if im.getpixel((x,y))==color]
+                        return bool(points)
+                    wait(target_ready,'native event target '+str(color),90,interval=.5)
+                    x=min(p[0] for p in points)+12;y=min(p[1] for p in points)+12
+                    click(x,y)
+                def frame_ready(expected):
+                    im=screenshot('frame-geometry-probe')
+                    r,g,b=im.getpixel((expected['x']+expected['w']-17,expected['y']+14))
+                    return r>150 and g<130 and b<130
+                def storage_acceptance():
+                    navigate('js-storage.html');marker(green,'first localStorage visit')
+                    navigate('js-storage.html');marker(blue,'localStorage reload persistence')
+                    navigate('js-session.html');marker(blue,'sessionStorage survives same-tab navigation')
+                    key('ctrl','t');navigate('js-session.html');marker(green,'new tab has independent sessionStorage')
+                    navigate('js-storage.html');marker(blue,'same-origin localStorage shared across tabs')
+                    key('ctrl','w');navigate('js-session.html');marker(blue,'original tab retains sessionStorage')
+                    navigate('js-storage.html',host='10.0.2.101');marker(green,'different origin cannot read localStorage')
+                    navigate('js-storage.html');marker(blue,'original origin still owns its data')
+                    # Worker persistence completes before closing the owning process.
+                    started=guest_ticks();wait(lambda:guest_ticks()-started>=1000,'storage worker flush interval',60)
+                    for restart in range(3):
+                        click(frame['x']+frame['w']-17,frame['y']+14)
+                        wait(lambda:not browser_ready(),'browser window closed before restart',90)
+                        move(320,28);hmp('mouse_button 2');time.sleep(.2);hmp('mouse_button 0');time.sleep(.5);click(345,43)
+                        wait(browser_ready,'browser restart after localStorage write '+str(restart))
+                        navigate('js-session.html');marker(green,'browser restart destroys sessionStorage')
+                        navigate('js-storage.html');marker(blue,'localStorage survives browser restart')
+                def cancellation_acceptance():
+                    navigate('js-number.html');marker(green,'baseline before async cancellation')
+                    move(frame['x']+30,frame['y']+100)
+                    before_forbidden=count('js-forbidden.html');slow_before=count('slow-js-data.json?cancel=1')
+                    navigate('js-async-cancel.html',settle=0);wait(lambda:count('slow-js-data.json?cancel=1')>slow_before,'async fetch pending before navigation',90)
+                    move(frame['x']+60,frame['y']+100)
+                    # Observe a fresh response before checking pixels: the outgoing
+                    # document can remain visible while navigation is pending.
+                    # Use the native Back button so a held keyboard shortcut cannot
+                    # repeat across two fast history entries under loaded TCG.
+                    baseline_requests=count('js-number.html')
+                    click(frame['x']+30,frame['y']+100)
+                    wait(lambda:count('js-number.html')>baseline_requests,'Back loaded the async cancellation baseline',90)
+                    marker(green,'navigation invalidates pending async fetch continuation')
+                    if count('js-forbidden.html')!=before_forbidden:raise AssertionError('Stale async fetch navigated')
+                    slow_before=count('slow-js-data.json?cancel=1');key('ctrl','t');navigate('js-async-cancel.html',settle=0)
+                    wait(lambda:count('slow-js-data.json?cancel=1')>slow_before,'async fetch pending before tab close',90);key('ctrl','w');marker(green,'tab close invalidates pending async fetch')
+                    expected_responses=count('slow-js-data.json?cancel=1')
+                    wait(lambda:finished('slow-js-data.json?cancel=1')>=expected_responses,'old fetch responses completed after cancellation',90)
+                    marker(green,'old fetch completions preserve the current document')
+                    if count('js-forbidden.html')!=before_forbidden:raise AssertionError('Closed-tab async fetch navigated')
+                if args.javascript_cancellation_only:
+                    cancellation_acceptance()
+                    result.update(result='PASS',mode='javascript-cancellation-only',kernel_sha256=kernel_sha,iso_sha256=iso_sha,async_cancellation=True,no_guest_fault=True,http_requests=request_log())
+                    (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
+                if args.javascript_storage_only:
+                    storage_acceptance()
+                    result.update(result='PASS',mode='javascript-storage-only',kernel_sha256=kernel_sha,iso_sha256=iso_sha,storage=True,no_guest_fault=True,http_requests=request_log())
+                    (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
+                def modern_acceptance_record():
+                    expected=[line for line in health().splitlines() if '[USER FAULT]' in line]
+                    if len(expected)!=1:raise AssertionError('Expected exactly one native FPU partner fault')
+                    if any(path.startswith('/js-forbidden.html') or path.startswith('/cross-only.json') for path in requests):raise AssertionError('Canceled or cross-origin JS work reached a forbidden fixture')
+                    result.pop('no_guest_fault',None)
+                    result.update(no_unexpected_guest_fault=True,no_browser_fault=True,expected_fpu_fault_vector=6,
+                                  async_fetch_navigation_cancellation=True,async_fetch_tab_close_cancellation=True,
+                                  async_resize=True,local_storage_reload=True,local_storage_browser_restart=True,
+                                  storage_origin_isolation=True,session_storage_tab_isolation=True,installed_volume_reboot_tested=False)
+                if args.modern_javascript:
+                    for name in ['js-number','js-prototype','js-exceptions','js-arrow','js-promise','js-async','js-fetch','js-modern-mixed']:
+                        if name=='js-modern-mixed':
+                            navigate(name+'.html',settle=0);normal_frame=dict(frame)
+                            marker((68,102,136),'new async mixed document readiness stripe')
+                            click(frame['x']+frame['w']-40,frame['y']+14);frame.update(x=0,y=0,w=1280,h=680)
+                            wait(lambda:frame_ready(frame),'async maximized native window geometry',90)
+                            marker(blue,'async fetch DOM completion while maximized')
+                            click(frame['x']+frame['w']-40,frame['y']+14);frame.update(normal_frame)
+                            wait(lambda:frame_ready(frame),'async restored native window geometry',90)
+                            marker(blue,'async document restored')
+                        else:navigate(name+'.html');marker(green,name+' modern native result')
+                        screenshot(name)
+                    if count('cross-only.json'):raise AssertionError('Cross-origin JavaScript fetch reached the network')
+                    cancellation_acceptance()
+                    navigate('js-async-hostile.html',settle=0);move(1000,500);marker(blue,'hostile async recursion contained')
+                    storage_acceptance()
+                    navigate('js-microtask-hostile.html',settle=0);move(1000,500)
+                    if position()!=[1000,500]:raise AssertionError('Hostile microtasks stopped native mouse input')
+                    marker(blue,'hostile Promise chain contained')
+                    click(frame['x']+220,frame['y']+100);navigate('js-number.html');marker(green,'Stop and navigation after hostile microtasks')
+                    result['modern_javascript']=True
+                    if args.modern_javascript_only:
+                        click(frame['x']+frame['w']-17,frame['y']+14)
+                        health()
+                        result.update(result='PASS',mode='modern-javascript-only',kernel_sha256=kernel_sha,iso_sha256=iso_sha,native_vm=True,hostile_microtasks_contained=True,hostile_async_contained=True,http_requests=request_log())
+                        modern_acceptance_record()
+                        (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
+                        print(json.dumps(result),flush=True)
+                        return
+                for name,color in ([] if args.javascript_forms_only else [('js-basic.html',green),('js-dom.html',blue),('js-timers.html',green),('js-errors.html',green),('js-hostile.html',blue)]):
+                    navigate(name)
+                    marker(color,name+' visible script result')
+                    screenshot(name[:-5])
+                if not args.javascript_forms_only:navigate('js-events.html')
+                before_forbidden=count('js-forbidden.html')
+                if not args.javascript_forms_only:
+                    click_color((153,119,68));marker(green,'click listener')
+                    click_color((170,102,187));marker(blue,'preventDefault link')
+                    time.sleep(1)
+                    if count('js-forbidden.html')!=before_forbidden:raise AssertionError('Prevented link navigated')
+                navigate('js-forms.html')
+                click(frame['x']+60,frame['y']+116+84)
+                key('z');time.sleep(.5)
+                if pixels(green)>10000:raise AssertionError('Prevented key inserted text')
+                key('a');marker(green,'input event')
+                click_color((153,119,68));marker(blue,'submit prevention and form mutation')
+                if count('js-forbidden.html')!=before_forbidden:raise AssertionError('Prevented form submitted')
+                if args.javascript_forms_only:
+                    result.update(result='PASS',mode='javascript-forms-only',kernel_sha256=kernel_sha,iso_sha256=iso_sha,input=True,keydown_prevention=True,submit_prevention=True,no_guest_fault=True)
+                    (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
+                navigate('js-external.html');marker(blue,'ordered external plus inline execution')
+                loaded=count('js-external.js')
+                navigate('js-external.html');marker(blue,'cached external script execution')
+                if count('js-external.js')!=loaded:raise AssertionError('External JavaScript cache missed')
+                def js_title():
+                    return hashlib.sha256(screenshot('js-title-probe').crop((105,101,800,126)).tobytes()).hexdigest()
+                browser_title=js_title()
+                move(80,28);hmp('mouse_button 2');time.sleep(.2);hmp('mouse_button 0');time.sleep(.5);click(105,43)
+                wait(lambda:js_title()!=browser_title,'real second native app opened',60)
+                key('alt','tab');wait(lambda:js_title()==browser_title,'browser restored before JS work',30)
+                navigate('js-heavy.html',settle=0)
+                key('alt','tab');wait(lambda:js_title()!=browser_title,'second app while JS work pending',30)
+                key('alt','tab');wait(lambda:js_title()==browser_title,'return to JS browser',30)
+                marker(green,'bounded heavy script completion after app switching')
+                normal_frame=dict(frame)
+                click(frame['x']+frame['w']-40,frame['y']+14)
+                frame.update(x=0,y=0,w=1280,h=680)
+                marker(green,'script document maximized')
+                click(frame['x']+frame['w']-40,frame['y']+14)
+                frame.update(normal_frame)
+                marker(green,'script document restored')
+                click(frame['x']+220,frame['y']+100)
+                wait(page_idle,'Stop cancels active script-driven mutation timer',90)
+                # Desktop theme changes must not recolor stable web content.
+                move(1000,660);before_theme=screenshot('js-theme-before');content_before=page_hash(before_theme)
+                click(32,700);click(130,532);time.sleep(2);click(210,350);click(330,466)
+                wait(lambda:min(screenshot('js-theme-probe').getpixel((110,550)))>160,'light desktop theme during JS milestone',30)
+                click(784,114);wait(lambda:page_hash(screenshot('js-theme-after'))==content_before,'web colors survive desktop theme change',30)
+                # Replace a document before a retained timer fires.
+                navigate('js-cancel.html',settle=0)
+                navigate('js-basic.html');marker(green,'navigation cancels old script runtime')
+                time.sleep(.5);marker(green,'stale timer cannot affect new document')
+                key('ctrl','t');navigate('js-hostile.html');marker(blue,'hostile second tab contained')
+                key('ctrl','w');marker(green,'original tab remains usable')
+                before_forbidden=count('js-forbidden.html')
+                key('ctrl','t');navigate('js-active.html',settle=0);marker(green,'active bounded timer in new tab')
+                key('ctrl','w');time.sleep(31)
+                if count('js-forbidden.html')!=before_forbidden:raise AssertionError('Closed tab timer survived')
+                marker(green,'surviving tab after active timer closure')
+                navigate('js-active.html',settle=0);marker(green,'active script before browser close')
+                click(frame['x']+frame['w']-17,frame['y']+14);time.sleep(2)
+                health()
+                result.update(result='PASS',mode='javascript-only',kernel_sha256=kernel_sha,iso_sha256=iso_sha,
+                              native_vm=True,inline_order=True,dom_mutation=True,click=True,prevent_default=True,
+                              input_event=True,submit_prevented=True,timer=True,external_cache=True,
+                              hostile_budget_contained=True,error_contained=True,app_switch=True,
+                              resize=True,navigation_cancellation=True,tab_isolation=True,stop_active_js=True,close_active_timer=True,close_active_js_browser=True,theme_independent=True,no_guest_fault=True,
+                              http_requests=request_log())
+                if args.modern_javascript:modern_acceptance_record()
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
+                print(json.dumps(result),flush=True)
+                return
             if args.layout_only:
                 navigate('layout-grid.html')
                 points = [(180,10,(34,170,68)), (290,10,(34,68,204)),
@@ -615,7 +871,56 @@ def main():
                 result.update(result='PASS',kernel_sha256=kernel_sha,iso_sha256=iso_sha,
                               table_rowspan=True,table_combined_spans=True,table_border_conflict=True,
                               negative_empty_margin_strut=True,resize_without_network_fetch=True,
-                              no_guest_fault=True,http_requests=list(requests),pixel_samples=points)
+                              no_guest_fault=True,http_requests=request_log(),pixel_samples=points)
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
+                print(json.dumps(result),flush=True)
+                return
+            if args.editing_only:
+                navigate('editing.html')
+                wait(lambda:count('sample.gif')>0,'GIF request')
+                def gif_pixels():
+                    im=screenshot('gif-probe')
+                    return sum(n for n,c in (im.getcolors(im.width*im.height) or []) if c==(40,80,120))>11000
+                wait(gif_pixels,'decoded GIF and CSS background pixels',60)
+                screenshot('gif-loaded')
+                result['gif_first_frame_pixels']=True
+                result['gif_background_pixels']=True
+                gif_count=count('sample.gif')
+                # Root viewport starts below the 116px native chrome. All edits
+                # use native pointer/keyboard and the existing OS clipboard.
+                click(frame['x']+60,frame['y']+150)
+                key('ctrl','a')
+                def selected():
+                    im=screenshot('selection-probe')
+                    return sum(n for n,c in (im.getcolors(im.width*im.height) or []) if c==(36,90,196))>200
+                wait(selected,'browser selection highlight',30)
+                screenshot('utf8-selected')
+                key('ctrl','c')
+                click(frame['x']+60,frame['y']+194)
+                key('ctrl','v');key('ctrl','a');key('ctrl','x');key('ctrl','v')
+                # Copy/cut on a password must leave the public selection in the
+                # OS clipboard. The password control has no successful name.
+                click(frame['x']+60,frame['y']+270)
+                key('ctrl','a');key('ctrl','c');key('ctrl','x')
+                click(frame['x']+60,frame['y']+150)
+                key('ctrl','a');key('ctrl','v')
+                with requests_lock:before=len(requests)
+                click(frame['x']+80,frame['y']+310)
+                def selection_submitted():
+                    with requests_lock:return next((p for p in requests[before:] if p.startswith('/editing.html?')),None)
+                wait(selection_submitted,'selection/clipboard form submission',60)
+                from urllib.parse import parse_qs, urlsplit
+                values=parse_qs(urlsplit(selection_submitted()).query)
+                expected='aąbćęłńóśźżZ'
+                if values.get('q')!=[expected] or values.get('note')!=[expected]:
+                    raise AssertionError('UTF-8 clipboard or password copy protection failed')
+                if any('private-password' in request for request in requests):
+                    raise AssertionError('Password appeared in a request')
+                wait(page_idle,'editing page ready after submission',120)
+                if count('sample.gif')!=gif_count:raise AssertionError('GIF cache missed after navigation')
+                result.update(result='PASS',mode='editing-only',kernel_sha256=kernel_sha,iso_sha256=iso_sha,
+                              utf8_selection=True,clipboard_copy_cut_paste=True,password_copy_cut_protected=True,
+                              gif_cache_reuse=True,no_guest_fault=True,http_requests=request_log())
                 (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
                 print(json.dumps(result),flush=True)
                 return
@@ -662,7 +967,7 @@ def main():
                 screenshot('images-cached')
                 health()
                 result.update(result='PASS', mode='images-only', kernel_sha256=kernel_sha,
-                              iso_sha256=iso_sha, http_requests=list(requests), no_guest_fault=True)
+                              iso_sha256=iso_sha, http_requests=request_log(), no_guest_fault=True)
                 (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
                 print(json.dumps(result),flush=True)
                 return
@@ -696,8 +1001,8 @@ def main():
             query=submitted()
             for part in ['q=a','p=p','note=x%0Ay%C5%82','check=on','r=two','s=second']:
                 if part not in query:
-                    raise AssertionError('Incorrect form value '+part+' in '+query)
-            result['native_forms_get_utf8']=query
+                    raise AssertionError('Incorrect form control '+part.split('=',1)[0])
+            result['native_forms_get_utf8']=request_for_log(query)
             time.sleep(2)
             navigate('theme-white.html')
             # Closing an image tab must preserve the previous document and remain interactive.
@@ -777,7 +1082,7 @@ def main():
                 if any('must-not-run' in p for p in requests):
                     raise AssertionError('Script URL was requested without an engine')
             result.update(result='PASS', kernel_sha256=kernel_sha,
-                          iso_sha256=iso_sha, http_requests=list(requests),
+                          iso_sha256=iso_sha, http_requests=request_log(),
                           external_css=True, malformed_page=True, no_guest_fault=True)
             (out/'result.json').write_text(json.dumps(result, indent=2)+'\n')
             print(json.dumps(result), flush=True)
@@ -792,7 +1097,7 @@ def main():
                 q.call('screendump', {'filename': str(out/'failure.png'), 'format': 'png'})
             raise
         finally:
-            (out/'http-requests.json').write_text(json.dumps(requests, indent=2)+'\n')
+            (out/'http-requests.json').write_text(json.dumps(request_log(), indent=2)+'\n')
             if q:
                 q.close()
             if vm:

@@ -40,6 +40,8 @@ static const char* const KATALOGI_SYSTEMOWE[] = {
         "/programy/kalkulator.cebula",
         "/programy/przegladarka.cebula",
         "/programy/husarz-worker.cebula",
+        "/programy/fpu-a.cebula",
+        "/programy/fpu-b.cebula",
         "/programy/przegladarka-obrazow.cebula",
         "/programy/demo_ui.cebula",
         "/programy/kontrolki2.cebula",

@@ -17,12 +17,13 @@
  * wyslaniu EOI Local APIC. Kod przerwania nastepnie ustawia RSP na wartosc
  * zwrocona przez scheduler i wykonuje iretq.
  *
- * Scheduler nie przelacza procesu w srodku zwyklego SYSCALL. BWS38 jest
- * jedynym jawnym wyjatkiem: czeka przez HLT, timer buduje standardowa rame
+ * Scheduler nie przelacza procesu w srodku zwyklego SYSCALL. BWS38
+ * oraz jawne oczekiwania sieciowe sa wyjatkami: HLT i timer buduja rame
  * RejestryStanowe na prywatnym stosie, a idt.cpp wznawia syscall po wakeup.
  */
 
 #include "scheduler.h"
+#include "fpu.h"
 #include "gui_runtime_diag.h"
 #include "pzb.h"
 #include "pamiec.h"
@@ -78,6 +79,7 @@ static uint64_t licznik_tykniec_zegara = 0;
 static uint64_t licznik_irq_timera = 0;
 static uint64_t licznik_przelaczen_kontekstu = 0;
 static uint64_t licznik_wybudzen_event = 0;
+static bool jawne_czekanie_sieci[MAKS_PROCESOW]{};
 
 /*
  * Stary kod wybudzal wszystkie procesy myszy co 20 tickow.
@@ -565,6 +567,8 @@ static void posprzataj_zakonczone_procesy(
         proces.kernel_rsp=0;
         proces.baza_stosu_jadra=0;
         proces.szczyt_stosu_jadra=0;
+        fpu_reset_process(pid);
+        __atomic_store_n(&jawne_czekanie_sieci[pid],false,__ATOMIC_RELEASE);
         ustaw_stan_procesu(proces,PROCES_PUSTY);
     }
 }
@@ -643,6 +647,21 @@ static int znajdz_nastepny_proces(
 }
 
 } // namespace
+
+bool scheduler_czeka_w_sieci(int pid) {
+    return pid>0 && pid<MAKS_PROCESOW && __atomic_load_n(&jawne_czekanie_sieci[pid],__ATOMIC_ACQUIRE);
+}
+void scheduler_odstap_w_czekaniu_sieci() {
+    const int pid=aktualny_pid;
+    const StanPrzerwan irq=zapisz_i_wylacz_przerwania();
+    // IRQ handlers and interrupt-disabled critical sections must never yield.
+    if(pid>0 && pid<MAKS_PROCESOW && wielozadaniowosc_aktywna && (irq.rflags&(1ULL<<9))) {
+        __atomic_store_n(&jawne_czekanie_sieci[pid],true,__ATOMIC_RELEASE);
+        asm volatile("sti\n\thlt\n\tcli" ::: "memory","cc");
+        __atomic_store_n(&jawne_czekanie_sieci[pid],false,__ATOMIC_RELEASE);
+    }
+    przywroc_przerwania(irq);
+}
 
 /* =========================================================================
  * OCZEKIWANIE NA MYSZ
@@ -975,6 +994,11 @@ void InicjalizujPlaniste(
 
     aktualny_pid = -1;
 
+    // No Ring 3 context may run without eager floating-point ownership.
+    if (!fpu_initialize()) {
+        while (true) asm volatile("cli; hlt");
+    }
+
     licznik_tykniec_zegara = 0;
 
     __atomic_store_n(
@@ -1273,6 +1297,7 @@ extern "C" uint64_t PrzelaczKontekst(
         klog_serial("[WM-BOOT] scheduled");
     }
 #endif
+    fpu_switch_process(stary_pid, nastepny_pid);
     gui_perf_switch(nastepny_pid);
     aktualny_pid =
         nastepny_pid;

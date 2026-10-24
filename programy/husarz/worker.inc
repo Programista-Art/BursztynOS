@@ -46,10 +46,36 @@
         if (message.type!=2 || !(incoming.flagi&BWS_IPC_ZAWIERA_SHM) || !incoming.shm_handle) continue;
         auto *payload=static_cast<Husarz::WorkerPayload*>(shm_map(incoming.shm_handle,BWS_SHM_READ|BWS_SHM_WRITE));
         if (!payload) { shm_close(incoming.shm_handle); continue; }
-        payload->success=payload->size=payload->width=payload->height=0;
+        uint32_t storage_input_size=payload->size;payload->success=payload->size=payload->width=payload->height=0;
         if (payload->magic==Husarz::AsyncMagic && payload->request==message.request &&
             Husarz::length(payload->url,sizeof(payload->url))<sizeof(payload->url)) {
-            if (payload->kind==uint32_t(Husarz::RequestKind::Html)) {
+            if(payload->kind==uint32_t(Husarz::RequestKind::StorageRead)||payload->kind==uint32_t(Husarz::RequestKind::StorageWrite)){
+                auto origin=Husarz::Origin::parse(payload->url);auto *s=new Husarz::StorageNamespace;auto *candidate=new Husarz::StorageNamespace;auto *disk=new uint8_t[Husarz::StorageDiskCapacity]{};
+                if(origin.valid&&s&&candidate&&disk){
+                    s->origin=origin;s->loaded=true;s->saved=1;char path[96];bool collision=false;uint32_t committed[2]{};
+                    // Both generations belong to one complete origin, even on a hash collision.
+                    for(unsigned slot=0;slot<2;++slot){Husarz::storage_path(origin,slot,path);for(unsigned i=0;i<Husarz::StorageDiskCapacity;++i)disk[i]=0;
+                        if(czytaj_plik(path,reinterpret_cast<char*>(disk),Husarz::StorageDiskCapacity)){
+                            unsigned bytes=Husarz::storage_read_u32(disk+4);if(Husarz::storage_conflicts(disk,bytes,origin))collision=true;
+                            if(Husarz::storage_decode(*candidate,disk,bytes,origin))committed[slot]=candidate->revision;
+                        }}
+                    if(!collision&&payload->kind==uint32_t(Husarz::RequestKind::StorageWrite)){
+                        if(storage_input_size<=Husarz::StorageDiskCapacity&&Husarz::storage_decode(*s,payload->raw,storage_input_size,origin)){
+                            utworz_katalog_uzytkownika("/uzytkownicy/husarz");Husarz::storage_path(origin,Husarz::storage_write_slot(committed),path);
+                            char listing[2048]{};bool listed=wylistuj_katalog_uzytkownika("/uzytkownicy/husarz",listing,sizeof(listing));unsigned files=0;bool exists=false;
+                            if(listed){for(unsigned i=0;listing[i]&&i+6<sizeof(listing);++i)if(listing[i]=='['&&listing[i+1]=='P'&&listing[i+2]=='L'&&listing[i+3]=='I'&&listing[i+4]=='K'&&listing[i+5]==']')++files;char probe[24]{};exists=czytaj_plik(path,probe,sizeof(probe));}
+                            if(listed&&(exists||files<8)){(void)utworz(path);payload->success=zapisz_plik(path,reinterpret_cast<const char*>(payload->raw),storage_input_size);}
+                        }
+                    }else if(!collision){
+                        for(unsigned slot=0;slot<2;++slot){Husarz::storage_path(origin,slot,path);for(unsigned i=0;i<Husarz::StorageDiskCapacity;++i)disk[i]=0;
+                            if(czytaj_plik(path,reinterpret_cast<char*>(disk),Husarz::StorageDiskCapacity)){
+                                unsigned n=Husarz::storage_read_u32(disk+4);if(n<=Husarz::StorageDiskCapacity&&Husarz::storage_decode(*candidate,disk,n,origin)&&candidate->revision>=s->revision)*s=*candidate;
+                            }
+                        }
+                        payload->size=Husarz::storage_encode(*s,payload->raw,sizeof(payload->raw));payload->success=payload->size!=0;
+                    }
+                }delete s;delete candidate;delete[] disk;
+            }else if (payload->kind==uint32_t(Husarz::RequestKind::Html)) {
                 auto *parsed=new ParsedUrl{};
                 uint8_t ip[4]{};
                 if (parsed && parsuj_url(payload->url,parsed) && (adres_ipv4_literal(parsed->domena,ip)||bws_siec_dns(parsed->domena,ip))) {
@@ -60,15 +86,15 @@
                     }
                 }
                 delete parsed;
-            } else if (payload->kind==uint32_t(Husarz::RequestKind::Css) || payload->kind==uint32_t(Husarz::RequestKind::Image)) {
-                auto type=payload->kind==uint32_t(Husarz::RequestKind::Css)?Husarz::ResourceType::Css:Husarz::ResourceType::Image;
+            } else if (payload->kind==uint32_t(Husarz::RequestKind::Css) || payload->kind==uint32_t(Husarz::RequestKind::Image) || payload->kind==uint32_t(Husarz::RequestKind::Script)||payload->kind==uint32_t(Husarz::RequestKind::Fetch)) {
+                auto type=payload->kind==uint32_t(Husarz::RequestKind::Css)?Husarz::ResourceType::Css:payload->kind==uint32_t(Husarz::RequestKind::Script)?Husarz::ResourceType::Script:payload->kind==uint32_t(Husarz::RequestKind::Fetch)?Husarz::ResourceType::Fetch:Husarz::ResourceType::Image;
                 auto *entry=fetch_browser_resource(payload->url,type);
                 if (entry && entry->size<=sizeof(payload->raw)) {
                     for (size_t i=0;i<entry->size;++i) payload->raw[i]=entry->raw[i];
                     kopiuj_limit(payload->content_type,sizeof(payload->content_type),entry->content_type);
                     kopiuj_limit(payload->etag,sizeof(payload->etag),entry->etag);
                     kopiuj_limit(payload->modified,sizeof(payload->modified),entry->modified);
-                    payload->size=uint32_t(entry->size); payload->success=1; payload->no_cache=entry->transient; payload->cache_seconds=entry->cache_seconds;
+                    payload->status=entry->status;payload->size=uint32_t(entry->size); payload->success=1; payload->no_cache=entry->transient; payload->cache_seconds=entry->cache_seconds;
                     if (type==Husarz::ResourceType::Image) {
                         if (decode_browser_image(*resource_cache,*entry) && uint64_t(entry->width)*entry->height<=Husarz::AsyncImagePixels) {
                             payload->width=entry->width; payload->height=entry->height;

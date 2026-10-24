@@ -79,7 +79,9 @@ int main(){
     }
     drain(load(*d,"<style>input{width:80px;height:24px}</style><div>Before</div><input value='a'><div>After</div>"));
     uint16_t control_node=d->controls[0].node;d->focused_control=control_node;auto full=d->perf.full_reflows;
-    CHECK(form_insert(*d,'b'));CHECK(local_control_update(*d,780)==control_node);
+    auto edit_revision=d->revision;CHECK(form_insert(*d,'b'));CHECK(d->revision==edit_revision && !(d->dirty&4));
+    // Retain coverage of the conservative partial geometry fallback as well.
+    d->invalidate(control_node,4);CHECK(local_control_update(*d,780)==control_node);
     auto local=std::make_unique<Document>();drain(clone_layout_document(*local,*d));drain(update_control_layout(*local,*d,control_node,{}));
     CHECK(local->height==d->height && local->perf.full_reflows==full && local->perf.partial_reflows==1);
     auto ref=std::make_unique<Document>();drain(clone_layout_document(*ref,*d));reflow(*ref,780,{});

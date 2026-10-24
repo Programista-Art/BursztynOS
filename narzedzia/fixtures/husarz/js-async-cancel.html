@@ -1,0 +1,1 @@
+<!doctype html><body><div style="width:600px;height:180px;background:#3366cc">Pending async fetch cancellation</div><script>async function pending(){var r=await fetch('slow-js-data.json?cancel=1');document.body.textContent='STALE';window.location.href='js-forbidden.html';}pending();</script></body>

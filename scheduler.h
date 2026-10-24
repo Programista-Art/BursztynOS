@@ -500,6 +500,9 @@ void ZablokujAktualnyProcesNaMyszy();
 bool scheduler_dodaj_zdarzenie(int pid, const bws_zdarzenie* zdarzenie);
 bool scheduler_pobierz_zdarzenie(int pid, bws_zdarzenie* zdarzenie);
 void scheduler_czekaj_na_zdarzenie(int pid, uint64_t timeout_ticki = 0);
+// Explicit safe point, called only after network polling has released its locks.
+void scheduler_odstap_w_czekaniu_sieci();
+bool scheduler_czeka_w_sieci(int pid);
 bool scheduler_zuzyj_wygasly_timeout_zdarzenia(int pid);
 void scheduler_usun_zdarzenia_procesu(int pid);
 void scheduler_czekaj_na_klawiature(int pid);
