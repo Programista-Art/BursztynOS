@@ -63,14 +63,31 @@ struct Surface {
     }
     void rect(int x,int y,int w,int h,uint32_t color,unsigned alpha,Clip clip,int radius=0){finish_work(rect_work(x,y,w,h,color,alpha,clip,radius));}
 };
+struct AlphaGlyph {
+    int width{},height{},x{},y{};const uint8_t* pixels{};
+    void* lease{};void (*release)(void*){};
+    AlphaGlyph()=default;AlphaGlyph(const AlphaGlyph&)=delete;
+    ~AlphaGlyph(){if(release)release(lease);}
+};
 struct Glyphs {
     void *user{};
     const uint16_t *(*bitmap)(void *, uint32_t){};
     int (*width)(void *, uint32_t){};
+    bool (*alpha)(void*,uint32_t,int,bool,bool,uint32_t,AlphaGlyph&){};
+    bool (*cached)(void*,uint32_t,int,bool,bool,uint32_t){};
 };
+inline Work paint_alpha_glyph_work(Surface& target,uint32_t cp,int x,int y,const Style& s,Glyphs glyphs,Clip clip,bool& rendered){
+    rendered=false;if(!glyphs.alpha)co_return;
+    if(glyphs.cached&&!glyphs.cached(glyphs.user,cp,s.font,s.bold,s.italic,s.native_family))co_await WorkPoint{MaxSliceWork};
+    AlphaGlyph g;if(!glyphs.alpha(glyphs.user,cp,s.font,s.bold,s.italic,s.native_family,g))co_return;rendered=true;
+    for(int yy=0;yy<g.height&&target.budget;++yy){co_await WorkPoint{unsigned(g.width+63)/64+1};int ty=y+g.y+yy;if(ty<clip.y||ty>=int64_t(clip.y)+clip.height)continue;
+        for(int xx=0;xx<g.width&&target.budget;++xx){--target.budget;int tx=x+g.x+xx;if(tx<clip.x||tx>=int64_t(clip.x)+clip.width)continue;unsigned a=g.pixels[yy*g.width+xx];if(a)target.pixel(tx,ty,s.color,a*unsigned(s.color_alpha)*s.paint_opacity/(255*255));}
+    }
+}
 // Replace an unavailable image's retained alt fragments only when fixed boxes,
 // line alignment, painted ink and scroll extent provably stay unchanged.
 inline bool publish_fixed_image_paint(Document &d,uint16_t id,Metrics metrics,Glyphs glyphs){
+    if(glyphs.alpha)return false;
     if(id>=d.node_count || !d.tag(id,"img") || !d.image(id))return false;
     const auto &b=d.boxes[id];const auto &style=d.styles[id];
     unsigned first=0,last=d.fragment_count;
@@ -251,7 +268,8 @@ inline Work paint_menu_label_work(Surface &target,const char *text,int x,int y,c
     size_t size=length(text,MaxAttrLength);
     for (size_t p=0;p<size && target.budget && x<clip.x+clip.width;) { co_await WorkPoint{1};
         size_t used; uint32_t cp=utf8(text+p,size-p,used); p+=used;
-        const uint16_t *bits=glyphs.bitmap?glyphs.bitmap(glyphs.user,cp):nullptr;
+        bool rendered=false;co_await paint_alpha_glyph_work(target,cp,x,y,style,glyphs,clip,rendered);
+        const uint16_t *bits=!rendered&&glyphs.bitmap?glyphs.bitmap(glyphs.user,cp):nullptr;
         int gw=glyphs.width?glyphs.width(glyphs.user,cp):8;
         int dw=clamp64((int64_t(gw)*style.font+8)/16,1,256),dh=font_height(metrics,style);
         if (bits) for (int yy=0;yy<dh && target.budget;++yy) { co_await WorkPoint{1}; for (int xx=0;xx<dw && target.budget;++xx) { if(!(xx&63))co_await WorkPoint{1};
@@ -435,10 +453,11 @@ inline Work paint_work(Document &d, Surface &target, int scroll, Metrics metrics
                 cp = transformed(cp,s.transform,p == 0);
                 int adv = advance(metrics, cp, s);
                 if(x>=int64_t(fc.x)+fc.width)break;
+                bool rendered=false;co_await paint_alpha_glyph_work(target,cp,x,y,s,glyphs,fc,rendered);
                 int gw = glyphs.width ? glyphs.width(glyphs.user, cp) : 8;
                 int dw = clamp64((int64_t(gw) * s.font + 8) / 16, 1, 256), dh = font_height(metrics, s);
                 bool ink_visible=int64_t(x)+dw+(s.italic?(dh-1)/5:0)+(s.bold?1:0)>fc.x && y+dh>fc.y && y<int64_t(fc.y)+fc.height;
-                const uint16_t *bitmap = ink_visible && glyphs.bitmap ? glyphs.bitmap(glyphs.user, cp) : nullptr;
+                const uint16_t *bitmap = !rendered && ink_visible && glyphs.bitmap ? glyphs.bitmap(glyphs.user, cp) : nullptr;
                 if (bitmap)
                     for (int py = 0; py < dh && target.budget; ++py) { co_await WorkPoint{unsigned(dw+63)/64};
                         int sy = py * 16 / dh, skew = s.italic ? (dh - 1 - py) / 5 : 0;

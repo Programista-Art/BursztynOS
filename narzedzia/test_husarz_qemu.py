@@ -32,14 +32,24 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--iso', type=Path, default=ROOT / 'BursztynOS.iso')
     parser.add_argument('--kernel', type=Path, default=ROOT / 'system_operacyjny.bin', help='Matching unmodified kernel ELF for symbol observation and artifact hashing')
+    parser.add_argument('--installed-disk',type=Path,help='Private disposable .bsf-test/*.img; disk-only font persistence test')
+    parser.add_argument('--expected-font-size',type=int,help='Assert restored native config before changing anything')
+    parser.add_argument('--font-restore-only',action='store_true',help='Observe restored Settings without applying another change')
     parser.add_argument('--output', type=Path, default=ROOT / '.husarz-test/qemu')
+    parser.add_argument('--fonts-only',action='store_true',help='Native BSF alpha typography and Settings font page')
+    parser.add_argument('--native-font-apps',action='store_true',help='Also exercise Notepad, Calculator and Explorer across the font update')
+    parser.add_argument('--font-fallback-only',action='store_true',help='Readable native bitmap fallback with rejected font assets')
+    parser.add_argument('--theme-only',action='store_true',help='Focused desktop/web theme isolation and navigation cancellation regression')
     parser.add_argument('--css-only', action='store_true', help='External CSS redirects, variables, pixels, flex/media resize and cancellation')
     parser.add_argument('--real-css', action='store_true', help='Observe public Tomato and WordPress pages; Internet required, no deterministic PASS assertion')
+    parser.add_argument('--tomato-only',action='store_true',help='Observe only the requested real Tomato page')
     parser.add_argument('--timeout', type=float, default=900)
     parser.add_argument('--diagnostics-only', action='store_true', help='Development counters observed through serial, without screenshot polling during work')
+    parser.add_argument('--font-profile-only', action='store_true', help='BSF_PROFILE=1 HUSARZ_PERF=1 private build: desktop and repeated heavy-page native timings')
     parser.add_argument('--performance', action='store_true', help='Heavy supported pages, repeated maximize/restore, cancellation and long scrolling')
     parser.add_argument('--layout-only', action='store_true', help='Native table spans, border conflict and signed margin pixels with resize')
     parser.add_argument('--render-only', action='store_true', help='Development pass over resources, forms and theme isolation')
+    parser.add_argument('--scroll-only',action='store_true',help='Release scrolling, refresh anchoring, resize and history regression')
     parser.add_argument('--javascript-forms-only', action='store_true', help='Focused native JavaScript form and keyboard diagnostic')
     parser.add_argument('--javascript-cancellation-only', action='store_true', help='Focused pending async fetch navigation and tab-close cancellation')
     parser.add_argument('--javascript-storage-only', action='store_true', help='Focused ordinary-ISO storage persistence and isolation acceptance')
@@ -51,6 +61,7 @@ def main():
     parser.add_argument('--fault-vector', type=int, choices=[6,14], default=6)
     parser.add_argument('--fault-probe', type=Path, help='Private test kernel with a deliberately faulting Ring 3 browser payload')
     args = parser.parse_args()
+    if args.tomato_only:args.real_css=True
     if args.modern_javascript_only:args.modern_javascript=True
     if args.javascript_forms_only or args.modern_javascript or args.javascript_storage_only or args.javascript_cancellation_only:args.javascript_only=True
     if args.images_only or args.layout_only or args.editing_only or args.javascript_only:
@@ -130,6 +141,16 @@ def main():
         args.iso = Path(temporary_iso.name)/'probe.iso'
         with (out/'iso-build.log').open('w') as iso_log:
             subprocess.run(['grub-mkrescue','-o',str(args.iso),str(staging)],stdout=iso_log,stderr=subprocess.STDOUT,check=True,timeout=45)
+    elif args.font_fallback_only:
+        temporary_iso=tempfile.TemporaryDirectory(prefix='bsf-corrupt-fonts-')
+        staging=Path(temporary_iso.name)/'staging'
+        shutil.copytree(ROOT/'isodir',staging)
+        shutil.copy2(kernel,staging/'boot/system_operacyjny.bin')
+        for font in (staging/'czcionki/ttf').iterdir():
+            if font.suffix.lower()=='.ttf':font.write_bytes(b'INVALID-TRUETYPE'*3)
+        args.iso=Path(temporary_iso.name)/'fallback.iso'
+        with (out/'iso-build.log').open('w') as iso_log:
+            subprocess.run(['grub-mkrescue','-o',str(args.iso),str(staging)],stdout=iso_log,stderr=subprocess.STDOUT,check=True,timeout=45)
     symbols = subprocess.check_output(['nm', '-C', str(kernel)], text=True)
 
     def symbol(name):
@@ -151,6 +172,12 @@ def main():
            '-device', 'qemu-xhci,id=usb', '-device', 'usb-kbd,bus=usb.0', '-device', 'usb-mouse,bus=usb.0',
            '-audiodev', 'none,id=snd', '-device', 'intel-hda', '-device', 'hda-output,audiodev=snd',
            '-netdev', 'user,id=n1,guestfwd=tcp:10.0.2.100:80-cmd:' + bridge_command + ',guestfwd=tcp:10.0.2.101:80-cmd:' + bridge_command, '-device', 'virtio-net-pci,netdev=n1,disable-legacy=on']
+    if args.installed_disk:
+        disk=args.installed_disk.resolve()
+        if not disk.is_relative_to((ROOT/'.bsf-test').resolve()) or disk.suffix!='.img' or not disk.is_file():
+            raise RuntimeError('Installed font test requires a disposable .bsf-test/*.img')
+        index=cmd.index(f'file={args.iso.resolve()},id=boot,if=none,format=raw,readonly=on')
+        cmd[index]=f'file={disk},id=boot,if=none,format=raw'
     q = None
     vm = None
     deadline = time.monotonic() + args.timeout
@@ -277,21 +304,57 @@ def main():
                 # A white mouse pointer over the label is not enabled text.
                 # Move it using native input before observing button state.
                 pointer=position()
-                if frame['x']+160<=pointer[0]<=frame['x']+285 and frame['y']+65<=pointer[1]<=frame['y']+140:
+                if frame['y']+65<=pointer[1]<=frame['y']+140:
                     move(frame['x']+400,frame['y']+100)
                 im=screenshot('idle-probe')
                 # Observe enabled/disabled native Stop text after the submitted frame;
                 # asynchronous publication and both stock themes are supported.
-                area=im.crop((frame['x']+190,frame['y']+94,frame['x']+250,frame['y']+107))
+                bounds=stop_bounds(im)
+                if bounds is None:return False # compositor resize has not published chrome yet
+                left,right=bounds
+                area=im.crop((left+3,frame['y']+94,right-3,frame['y']+107))
                 # Both stock themes use gray disabled text. Enabled text is
                 # white on dark chrome and black on light chrome; background
                 # brightness must never be counted as enabled label pixels.
-                background=im.getpixel((frame['x']+205,frame['y']+90))
+                background=im.getpixel(((left+right)//2,frame['y']+90))
                 if sum(background)>384:
                     enabled=sum(1 for r,g,b in area.getdata() if max(r,g,b)<80)
                 else:
                     enabled=sum(1 for r,g,b in area.getdata() if min(r,g,b)>200)
                 return enabled<8
+
+            def stop_bounds(im):
+                # The fourth native toolbar button sizes itself from actual
+                # font metrics. Observe its background runs above the text;
+                # fixed bitmap-era X coordinates can land on Refresh now.
+                y=frame['y']+90
+                color=im.getpixel((frame['x']+10,y))
+                runs=[];start=None
+                for x in range(frame['x']+2,frame['x']+frame['w']-2):
+                    if im.getpixel((x,y))==color:
+                        if start is None:start=x
+                    elif start is not None:
+                        if x-start>=20:runs.append((start,x))
+                        start=None
+                if len(runs)<4:return None
+                return runs[3]
+
+            def stop_page():
+                wait(lambda:stop_bounds(screenshot('stop-bounds-probe')) is not None,'native Stop button submitted',90)
+                left,right=stop_bounds(screenshot('stop-bounds-probe'))
+                click((left+right)//2,frame['y']+100)
+
+            def open_themes():
+                click(32,700)
+                def start_ready():
+                    r,g,b=screenshot('start-opening-probe').getpixel((10,150))
+                    return r>140 and g>80 and b<100
+                wait(start_ready,'Start menu submitted',90,interval=1)
+                click(130,507)
+                def themes_ready():
+                    r,g,b=screenshot('themes-opening-probe').getpixel((779,109))
+                    return r>150 and g<130 and b<130
+                wait(themes_ready,'first complete Themes frame',180,interval=1)
 
             def navigate(name, settle=2,host="10.0.2.100"):
                 print('Navigate:', name, flush=True)
@@ -338,10 +401,77 @@ def main():
                                      frame['y']+frame['h']-24))
                 return hashlib.sha256(region.tobytes()).hexdigest()
 
-            time.sleep(2)
-            click(1124, 44)  # Close the default diagnostic utility through its normal titlebar.
+            def theme_regression():
+                navigate('theme-white.html')
+                move(1000,660); time.sleep(.3)
+                before_theme = screenshot('theme-before')
+                open_themes()
+                screenshot('themes-open')
+                click(210, 365)  # Bursztyn Jasny, fifth row in the native theme list.
+                click(330, 466)  # Apply, in the private Live session only.
+                wait(lambda: min(screenshot('theme-probe').getpixel((110, 550))) > 160,
+                     'light theme applied to the native window', 30)
+                screenshot('theme-applied')
+                click(784, 114)
+                region = (frame['x']+10, frame['y']+30, frame['x']+frame['w']-20, frame['y']+45)
+                wait(lambda: before_theme.crop(region).tobytes() !=
+                     screenshot('browser-theme-probe').crop(region).tobytes(),
+                     'browser chrome updated after theme change', 30)
+                after_theme = screenshot('browser-themed')
+                if before_theme.crop(region).tobytes() == after_theme.crop(region).tobytes():
+                    raise AssertionError('Browser chrome did not update after the theme change')
+                if page_hash(before_theme)!=page_hash(after_theme):
+                    raise AssertionError('Document pixels changed under the light desktop theme')
+                result['live_theme'] = True
+                result['white_page_theme_isolation'] = True
+                navigate('theme-black.html')
+                move(1000,660); time.sleep(.3)
+                black_before=screenshot('black-theme-before')
+                open_themes()
+                click(210,262); click(330,466)
+                wait(lambda: max(screenshot('dark-theme-probe').getpixel((110,550)))<100,'dark desktop theme',30)
+                click(784,114); move(1000,660); time.sleep(1)
+                black_after=screenshot('black-theme-after')
+                if page_hash(black_before)!=page_hash(black_after):
+                    raise AssertionError('Black document pixels changed under dark desktop theme')
+                result['black_page_theme_isolation']=True
+                # Start a delayed response, then cancel and navigate using the live GUI.
+                navigate('slow-main.html')
+                stop_page()
+                navigate('theme-white.html'); time.sleep(5)
+                move(1000,660)
+                stopped=screenshot('stop-after-navigation')
+                if stopped.getpixel((frame['x']+20,frame['y']+frame['h']-45))!=(255,255,255):
+                    raise AssertionError('Stale delayed HTML appeared after Stop/navigation')
+                result['stop_and_stale_html']=True
+                navigate('slow-main.html')
+                click(frame['x']+frame['w']-16,frame['y']+14)
+                time.sleep(7)
+                move(80,28); hmp('mouse_button 2'); time.sleep(.2); hmp('mouse_button 0'); time.sleep(.5)
+                click(105,43); time.sleep(2); key('a')
+                screenshot('native-app-after-browser-close')
+                health()
+                result['window_close_during_request']=True
+
+            # The first-frame trace precedes submission. Wait for the actual
+            # window before sending input, including a cold userspace font load.
+            def diagnostic_drawn():
+                im=screenshot('diagnostic-opening-probe')
+                r,g,b=im.getpixel((1118,37))
+                return r>150 and g<130 and b<130
+            wait(diagnostic_drawn,'diagnostic first frame visible',240,interval=1)
+            click(1124, 44)
+            def diagnostic_closed():
+                im=screenshot('diagnostic-closing-probe')
+                r,g,b=im.getpixel((1118,37))
+                return not (r>150 and g<130 and b<130)
+            wait(diagnostic_closed,'diagnostic closed through native titlebar',240,interval=1)
             if args.modern_javascript:
-                click(32,700);click(130,182);time.sleep(2)
+                click(32,700);click(130,157)
+                def shell_prompt_ready():
+                    im=screenshot('shell-opening-probe').crop((298,536,400,562))
+                    return sum(1 for r,g,b in im.getdata() if r>180 and g>110 and b<100)>40
+                wait(shell_prompt_ready,'native shell prompt ready for FPU command',180,interval=1)
                 for c in 'uruchom /programy/fpu-a.cebula/fpu-a.bur':
                     key({' ':'spc','/':'slash','.':'dot','-':'minus'}.get(c,c))
                 key('ret')
@@ -357,15 +487,108 @@ def main():
                 screenshot('fpu-shell-closed')
             move(320,28)
             hmp('mouse_button 2'); time.sleep(.2); hmp('mouse_button 0'); time.sleep(.5)
+            def launch_menu_visible():
+                im=screenshot('browser-launch-menu-probe')
+                r,g,b=im.getpixel((350,55))
+                return 25<r<80 and abs(r-g)<12 and abs(g-b)<16
+            wait(launch_menu_visible,'native desktop context menu submitted',180,interval=1)
             screenshot('browser-launch-menu')
-            click(345,43)  # Open in the native desktop context menu; no timed double-click.
+            click(345,43)  # Open after native popup submission.
             if not args.fault_probe:
                 def browser_ready():
                     im = screenshot('browser-opening')
                     r, g, b = im.getpixel((883, 114))
                     return r > 150 and g < 130 and b < 130
-                wait(browser_ready, 'first complete native browser frame')
+                wait(browser_ready, 'first complete native browser frame',240)
             screenshot('browser-open')
+            if args.theme_only:
+                theme_regression()
+                result.update(result='PASS',mode='theme-only',kernel_sha256=kernel_sha,iso_sha256=iso_sha,no_guest_fault=True,http_requests=request_log())
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
+            if args.fonts_only or args.font_fallback_only:
+                native_apps=[]
+                if args.native_font_apps:
+                    for label,icon,close in [('notepad',80,(759,109)),('calculator',200,(379,109)),('explorer',680,(949,59))]:
+                        move(icon,28);hmp('mouse_button 2');time.sleep(.5);hmp('mouse_button 0')
+                        wait(lambda:screenshot('native-menu-probe').getpixel((icon+30,55))[0]<100,'native launch menu',90)
+                        click(icon+25,43)
+                        def native_ready():
+                            r,g,b=screenshot('native-opening-probe').getpixel(close)
+                            return r>150 and g<130 and b<130
+                        wait(native_ready,'first '+label+' frame',180,interval=1)
+                        if label=='notepad':
+                            click(250,300)
+                            for code in ('w','w','w','spc','i','i','i'):key(code)
+                            key('ctrl','a');key('ctrl','c');key('end');key('ctrl','v')
+                        if label=='calculator':
+                            key('1');key('shift','equal');key('2');key('ret')
+                        screenshot(label+'-font-16');native_apps.append(label)
+                    click(120,700)
+                if not args.font_restore_only:navigate('fonts.html')
+                def font_pixels():
+                    im=screenshot('font-pixels-probe');area=im.crop((frame['x']+3,frame['y']+116,frame['x']+frame['w']-20,frame['y']+frame['h']-25))
+                    colors=area.getcolors(area.width*area.height) or []
+                    red=sum(n for n,c in colors if c==(231,76,60))
+                    aa=sum(n for n,(r,g,b) in colors if r>60 and r>g*1.7 and r>b*1.3 and (r,g,b)!=(231,76,60))
+                    return red>100 and (aa<20 if args.font_fallback_only else aa>100)
+                if not args.font_restore_only:
+                    wait(font_pixels,'native font coverage and author colors',240,interval=1)
+                    screenshot('fonts-web')
+                click(32,700);click(130,657)
+                def settings_ready():
+                    im=screenshot('settings-opening-probe')
+                    return im.getpixel((800,450))==(21,24,28) and im.getpixel((1033,14))[0]>150
+                wait(settings_ready,'Settings preview submitted',180,interval=1)
+                screenshot('settings-fonts')
+                config_address=symbol('bsf_config_request(proces*, unsigned long, unsigned long, unsigned long)::active')
+                def font_config():
+                    dump=hmp(f'xp /6wx 0x{config_address:x}')
+                    values=[]
+                    for line in dump.splitlines():
+                        if ':' in line:values.extend(int(v,16) for v in re.findall(r'0x([0-9a-fA-F]+)',line.split(':',1)[1]))
+                    if len(values)!=6:raise RuntimeError('Font config observer unavailable')
+                    return values
+                before=font_config()
+                if args.expected_font_size is not None and before[3]!=args.expected_font_size:
+                    raise AssertionError('Persisted font size was not restored: '+str(before))
+                if args.font_restore_only:
+                    result.update(result='PASS',mode='font-restored',restored_size=before[3],disk_only=bool(args.installed_disk),no_guest_fault=True,kernel_sha256=kernel_sha,iso_sha256=iso_sha)
+                    (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
+                # Focus and change the size using ordinary popup keyboard input.
+                click(940,148);key('end');key('ret')
+                time.sleep(2)
+                if font_config()!=before:raise AssertionError('Local preview changed global config')
+                im=screenshot('settings-preview-24')
+                # Locate the end of the fixed preview canvas, so panel spacing
+                # and real font line metrics do not become hardcoded test input.
+                bottom=max(y for y in range(200,600) if im.getpixel((320,y))==(21,24,28))
+                click(390,bottom+34)
+                wait(lambda:font_config()[3]==24 and font_config()[4]!=before[4],'Settings Apply publishes font generation',90)
+                header=(310,55,760,85)
+                before_header=im.crop(header).tobytes()
+                if not args.font_fallback_only:
+                    wait(lambda:screenshot('settings-reflow-probe').crop(header).tobytes()!=before_header,'live Settings font reflow',90,interval=1)
+                screenshot('settings-applied-24')
+                result.update(local_preview=True,apply_size=24,font_generation=font_config()[4])
+                if native_apps:
+                    click(1033,14)
+                    for index,label in enumerate(['browser']+native_apps):
+                        click(120+116*index,700)
+                        started=guest_ticks()
+                        wait(lambda:guest_ticks()-started>=500,label+' font repaint',90)
+                        screenshot(label+'-font-24')
+                    result['native_apps_repainted']=native_apps
+                if not args.font_fallback_only:
+                    started=guest_ticks()
+                    wait(lambda:guest_ticks()-started>=500,'desktop font generation consumed',90)
+                    click(32,700)
+                    def large_menu_ready():
+                        r,g,b=screenshot('large-start-probe').getpixel((10,100))
+                        return r>140 and g>80 and b<100
+                    wait(large_menu_ready,'large-font Start menu submitted',90,interval=1)
+                    screenshot('start-font-24');click(32,700)
+                health();result.update(result='PASS',mode='font-fallback-only' if args.font_fallback_only else 'fonts-only',ttf_alpha_pixels=not args.font_fallback_only,kernel_sha256=kernel_sha,iso_sha256=iso_sha,no_guest_fault=True,http_requests=request_log())
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
             if args.css_only:
                 navigate('css-tomato.html')
                 wait(lambda:count('assets/css/tomato.css?v=7&theme=dark')>0,'redirect stylesheet downloaded',60)
@@ -403,14 +626,16 @@ def main():
                 wait(page_idle,'CSS restore completed',180,interval=2)
                 navigate('css-cancel.html',settle=0)
                 wait(lambda:count('slow-css-compatible.css')>0,'pending CSS started',60)
-                click(frame['x']+225,frame['y']+100)
+                stop_page()
                 navigate('theme-white.html');time.sleep(7)
                 im=screenshot('css-stop-navigation')
                 if im.getpixel((frame['x']+20,frame['y']+frame['h']-45))!=(255,255,255):raise AssertionError('Stale CSS published after navigation')
                 result.update(result='PASS',stop_and_stale_css=True,no_guest_fault=True,kernel_sha256=kernel_sha,iso_sha256=iso_sha,http_requests=request_log())
                 (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result),flush=True);return
             if args.real_css:
-                for label, url in [('tomato','https://tomato.dimitalart.pl/'),('wordpress','https://dimitalart.pl/')]:
+                sites=[('tomato','https://tomato.dimitalart.pl/')]
+                if not args.tomato_only:sites.append(('wordpress','https://dimitalart.pl/'))
+                for label, url in sites:
                     key('ctrl','l')
                     for c in url:
                         if c==':':key('shift','semicolon')
@@ -428,6 +653,16 @@ def main():
                     wait(author_colors,'real author colors '+label,900,interval=2)
                     result[label]={'author_colors_observed':True,'network_or_script_busy':not page_idle()}
                     screenshot('real-'+label)
+                    if args.tomato_only:
+                        move(1000,660)
+                        before=page_hash(screenshot('tomato-before-scroll-probe'))
+                        click(frame['x']+400,frame['y']+250);key('end')
+                        move(1000,660)
+                        def footer_painted():
+                            im=screenshot('tomato-scrolling-probe')
+                            return thumb(im)[0]>=frame['y']+frame['h']-120 and page_hash(im)!=before
+                        wait(footer_painted,'Tomato end-of-page repaint',180,interval=1)
+                        screenshot('real-tomato-footer')
                 result.update(result='OBSERVED',kernel_sha256=kernel_sha,iso_sha256=iso_sha,no_guest_fault=True)
                 (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
                 return
@@ -454,6 +689,35 @@ def main():
                 health()
                 result={'result':'PASS','fault_isolated':True,'native_app_after_fault':True,
                         'kernel_sha256':kernel_sha,'fault_vector':args.fault_vector}
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
+                print(json.dumps(result),flush=True)
+                return
+            if args.font_profile_only:
+                desktop=[]
+                for line in health().splitlines():
+                    if line.startswith('[BSF DESKTOP] '):
+                        fields={k:int(v) for k,v in re.findall(r'(\w+)=(\d+)',line)}
+                        if fields.get('full')==1 and fields.get('menu')==0:desktop.append(fields)
+                if len(desktop)<8:raise AssertionError('Missing eight BSF_PROFILE boot repaint samples')
+                samples=[]
+                for repeat in range(3):
+                    for page,nodes in [('heavy-mixed.html',1266),('bsf-text-heavy.html',246)]:
+                        offset=len(health())
+                        navigate(page,settle=0)
+                        def completed_profile():
+                            for line in health()[offset:].splitlines():
+                                if not line.startswith('[HUSARZ PERF] '):continue
+                                fields={k:int(v) for k,v in re.findall(r'(\w+)=(\d+)',line)}
+                                if fields.get('nodes')==nodes and fields.get('navigationms',0)>0:
+                                    return fields
+                            return None
+                        wait(completed_profile,'native font profile '+page,300,interval=.25)
+                        sample=completed_profile()
+                        if sample.get('maxslicework',0)>2048:raise AssertionError('Native work cap exceeded')
+                        samples.append(dict(page=page,repeat=repeat,**sample))
+                        screenshot('profile-'+str(repeat)+'-'+page.removesuffix('.html'))
+                result.update(result='PASS',mode='font-profile',kernel_sha256=kernel_sha,
+                              iso_sha256=iso_sha,no_guest_fault=True,desktop=desktop[:8],samples=samples)
                 (out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
                 print(json.dumps(result),flush=True)
                 return
@@ -633,13 +897,11 @@ def main():
                         previous_image=screenshot('wheel-probe')
                         previous=thumb(previous_image)[0];previous_hash=page_hash(previous_image)
                         started=guest_ticks()
-                        q.call('input-send-event', {'events': [
-                            {'type': 'btn', 'data': {'button': button, 'down': True}}]})
-                        wait(lambda:guest_ticks()-started>=32,'guest consumed wheel press',30)
-                        started=guest_ticks()
-                        q.call('input-send-event', {'events': [
-                            {'type': 'btn', 'data': {'button': button, 'down': False}}]})
-                        wait(lambda:guest_ticks()-started>=32,'guest consumed wheel release',30)
+                        # Use the explicitly selected USB mouse, as in the
+                        # heavy-page test. Generic QMP button events can target
+                        # an inactive pointer backend instead of this device.
+                        hmp('mouse_move 0 0 '+str(-direction))
+                        wait(lambda:guest_ticks()-started>=64,'guest consumed wheel detent',30)
                         def wheel_repainted():
                             current=screenshot('wheel-probe')
                             return direction*(thumb(current)[0]-previous)>0 and page_hash(current)!=previous_hash
@@ -733,6 +995,9 @@ def main():
                 time.sleep(2)
                 screenshot('forward')
                 result['back_forward'] = True
+                if args.scroll_only:
+                    result.update(result='PASS',mode='scroll-only',kernel_sha256=kernel_sha,iso_sha256=iso_sha,no_guest_fault=True,http_requests=request_log())
+                    (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
             if args.javascript_only:
                 green=(51,187,119)
                 blue=(51,102,204)
@@ -832,7 +1097,7 @@ def main():
                     navigate('js-microtask-hostile.html',settle=0);move(1000,500)
                     if position()!=[1000,500]:raise AssertionError('Hostile microtasks stopped native mouse input')
                     marker(blue,'hostile Promise chain contained')
-                    click(frame['x']+220,frame['y']+100);navigate('js-number.html');marker(green,'Stop and navigation after hostile microtasks')
+                    stop_page();navigate('js-number.html');marker(green,'Stop and navigation after hostile microtasks')
                     result['modern_javascript']=True
                     if args.modern_javascript_only:
                         click(frame['x']+frame['w']-17,frame['y']+14)
@@ -871,7 +1136,10 @@ def main():
                     return hashlib.sha256(screenshot('js-title-probe').crop((105,101,800,126)).tobytes()).hexdigest()
                 browser_title=js_title()
                 move(80,28);hmp('mouse_button 2');time.sleep(.2);hmp('mouse_button 0');time.sleep(.5);click(105,43)
-                wait(lambda:js_title()!=browser_title,'real second native app opened',60)
+                def notepad_frame_ready():
+                    r,g,b=screenshot('notepad-opening-probe').getpixel((759,109))
+                    return r>150 and g<130 and b<130
+                wait(notepad_frame_ready,'complete second native app frame',180,interval=1)
                 key('alt','tab');wait(lambda:js_title()==browser_title,'browser restored before JS work',30)
                 navigate('js-heavy.html',settle=0)
                 key('alt','tab');wait(lambda:js_title()!=browser_title,'second app while JS work pending',30)
@@ -884,11 +1152,11 @@ def main():
                 click(frame['x']+frame['w']-40,frame['y']+14)
                 frame.update(normal_frame)
                 marker(green,'script document restored')
-                click(frame['x']+220,frame['y']+100)
+                stop_page()
                 wait(page_idle,'Stop cancels active script-driven mutation timer',90)
                 # Desktop theme changes must not recolor stable web content.
                 move(1000,660);before_theme=screenshot('js-theme-before');content_before=page_hash(before_theme)
-                click(32,700);click(130,532);time.sleep(2);click(210,350);click(330,466)
+                open_themes();click(210,365);click(330,466)
                 wait(lambda:min(screenshot('js-theme-probe').getpixel((110,550)))>160,'light desktop theme during JS milestone',30)
                 click(784,114);wait(lambda:page_hash(screenshot('js-theme-after'))==content_before,'web colors survive desktop theme change',30)
                 # Replace a document before a retained timer fires.
@@ -1099,58 +1367,7 @@ def main():
             if css_closed.getpixel((frame['x']+20,frame['y']+frame['h']-45))!=(255,255,255):
                 raise AssertionError('Stylesheet completion changed the surviving tab')
             result['close_css_tab_while_loading']=True
-            navigate('theme-white.html')
-            move(1000,660); time.sleep(.3)
-            before_theme = screenshot('theme-before')
-            click(32, 700)
-            click(130, 532)  # Native Start entry: Motywy systemowe.
-            time.sleep(2)
-            screenshot('themes-open')
-            click(210, 350)  # Bursztyn Jasny, fifth row in the native theme list.
-            click(330, 466)  # Apply, in the private Live session only.
-            wait(lambda: min(screenshot('theme-probe').getpixel((110, 550))) > 160,
-                 'light theme applied to the native window', 30)
-            screenshot('theme-applied')
-            click(784, 114)
-            region = (frame['x']+10, frame['y']+30, frame['x']+frame['w']-20, frame['y']+45)
-            wait(lambda: before_theme.crop(region).tobytes() !=
-                 screenshot('browser-theme-probe').crop(region).tobytes(),
-                 'browser chrome updated after theme change', 30)
-            after_theme = screenshot('browser-themed')
-            if before_theme.crop(region).tobytes() == after_theme.crop(region).tobytes():
-                raise AssertionError('Browser chrome did not update after the theme change')
-            if page_hash(before_theme)!=page_hash(after_theme):
-                raise AssertionError('Document pixels changed under the light desktop theme')
-            result['live_theme'] = True
-            result['white_page_theme_isolation'] = True
-            navigate('theme-black.html')
-            move(1000,660); time.sleep(.3)
-            black_before=screenshot('black-theme-before')
-            click(32,700); click(130,532); time.sleep(1)
-            click(210,262); click(330,466)
-            wait(lambda: max(screenshot('dark-theme-probe').getpixel((110,550)))<100,'dark desktop theme',30)
-            click(784,114); move(1000,660); time.sleep(1)
-            black_after=screenshot('black-theme-after')
-            if page_hash(black_before)!=page_hash(black_after):
-                raise AssertionError('Black document pixels changed under dark desktop theme')
-            result['black_page_theme_isolation']=True
-            # Start a delayed response, then cancel and navigate using the live GUI.
-            navigate('slow-main.html')
-            click(frame['x']+225,frame['y']+100) # native Stop
-            navigate('theme-white.html'); time.sleep(5)
-            move(1000,660)
-            stopped=screenshot('stop-after-navigation')
-            if stopped.getpixel((frame['x']+20,frame['y']+frame['h']-45))!=(255,255,255):
-                raise AssertionError('Stale delayed HTML appeared after Stop/navigation')
-            result['stop_and_stale_html']=True
-            navigate('slow-main.html')
-            click(frame['x']+frame['w']-16,frame['y']+14)
-            time.sleep(7)
-            move(80,28); hmp('mouse_button 2'); time.sleep(.2); hmp('mouse_button 0'); time.sleep(.5)
-            click(105,43); time.sleep(2); key('a')
-            screenshot('native-app-after-browser-close')
-            health()
-            result['window_close_during_request']=True
+            theme_regression()
             health()
             with requests_lock:
                 if any('must-not-run' in p for p in requests):

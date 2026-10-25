@@ -6,11 +6,11 @@ using namespace BursztynUI;
 
 extern "C" void _start();
 static constexpr uint64_t BUR_TEKST_PRZESUNIECIE = 0x1000ULL;
-static constexpr uint64_t BUR_TEKST_ROZMIAR = 0x30000ULL;
+static constexpr uint64_t BUR_TEKST_ROZMIAR = 0x34000ULL;
 static constexpr uint64_t BUR_TEKST_WIRTUALNY = 0x1001000ULL;
-static constexpr uint64_t BUR_DANE_PRZESUNIECIE = 0x31000ULL;
+static constexpr uint64_t BUR_DANE_PRZESUNIECIE = 0x35000ULL;
 static constexpr uint64_t BUR_DANE_ROZMIAR = 0x20000ULL;
-static constexpr uint64_t BUR_DANE_WIRTUALNY = 0x1031000ULL;
+static constexpr uint64_t BUR_DANE_WIRTUALNY = 0x1035000ULL;
 
 extern "C" {
 __attribute__((section(".naglowek"), used)) NaglowekBur naglowek = {

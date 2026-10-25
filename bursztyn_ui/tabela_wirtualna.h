@@ -84,8 +84,16 @@ public:
     size_t pierwszy_widoczny_wiersz() const { return pierwszy_widoczny_; }
     size_t ostatni_widoczny_wiersz() const { return ostatni_widoczny_; }
 
-    int wysokosc_naglowka() const { return wysokosc_naglowka_px_ > 0 ? wysokosc_naglowka_px_ : 26 * skala_dpi_; }
-    int wysokosc_wiersza() const { return wysokosc_wiersza_px_ > 0 ? wysokosc_wiersza_px_ : 22 * skala_dpi_; }
+    int wysokosc_naglowka() const {
+        int requested=wysokosc_naglowka_px_ > 0 ? wysokosc_naglowka_px_ : 26 * skala_dpi_;
+        int minimum=CzcionkaUI::pobierz_wysokosc(skala_dpi_)+4*skala_dpi_;
+        return requested>minimum?requested:minimum;
+    }
+    int wysokosc_wiersza() const {
+        int requested=wysokosc_wiersza_px_ > 0 ? wysokosc_wiersza_px_ : 22 * skala_dpi_;
+        int minimum=CzcionkaUI::pobierz_wysokosc(skala_dpi_)+2*skala_dpi_;
+        return requested>minimum?requested:minimum;
+    }
 
     Rozmiar zmierz(Rozmiar dostepny) override {
         SkalaUI s = skala_dpi_;

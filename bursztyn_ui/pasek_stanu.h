@@ -183,6 +183,19 @@ public:
         return (indeks < liczba_sekcji_) ? sekcje_[indeks].prostokat_ : Prostokat();
     }
 
+    Rozmiar zmierz(Rozmiar dostepny) override {
+        // Legacy apps request a 24 px bar. Keep that request, but reserve the
+        // current font's full line box so large system fonts retain descenders.
+        if (preferowany_rozmiar_.wysokosc != ostatnia_wysokosc_)
+            zadana_wysokosc_ = preferowany_rozmiar_.wysokosc;
+        int procent = skala_dpi_.procent();
+        int line = (CzcionkaUI::pobierz_wysokosc(skala_dpi_) * 100 + procent - 1) / procent;
+        int height = line + 4;
+        if (zadana_wysokosc_ > height) height = zadana_wysokosc_;
+        preferowany_rozmiar_.wysokosc = ostatnia_wysokosc_ = height;
+        return Kontrolka::zmierz(dostepny);
+    }
+
     void rozmiesc(Prostokat r) override {
         Kontrolka::rozmiesc(r);
         przelicz_sekcje();
@@ -212,7 +225,7 @@ public:
 
                 ctx.dodaj_przyciecie(tekst_r);
 
-                int ty = tekst_r.y + (tekst_r.wysokosc - 16) / 2;
+                int ty = tekst_r.y + (tekst_r.wysokosc - CzcionkaUI::pobierz_wysokosc(skala_dpi_)) / 2;
                 int tx = tekst_r.x;
                 if (s.wyrownanie() == WyrownaniePoziome::Srodek) {
                     int tw = CzcionkaUI::zmierz_tekst(s.tekst(), skala_dpi_);
@@ -229,6 +242,7 @@ public:
     }
 
 private:
+    int zadana_wysokosc_{24}, ostatnia_wysokosc_{-1};
     void przelicz_sekcje() {
         int w = obszar_ekranu_.szerokosc;
         int h = obszar_ekranu_.wysokosc;

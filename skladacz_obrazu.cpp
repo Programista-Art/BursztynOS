@@ -128,6 +128,9 @@ bool klatka_gotowa[MAKS_WARSTW] = {};
 uint32_t generacja_okna[MAKS_WARSTW] = {};
 uint32_t stan_okna[MAKS_WARSTW] = {};
 char tytul_okna[MAKS_WARSTW][48] = {};
+struct TitleCoverage {uint16_t width{},height{};uint32_t capacity{};uint8_t* alpha{};};
+// GUI coverage textures, never font data/parser objects. At most 64 KiB/layer.
+static TitleCoverage title_coverage[MAKS_WARSTW];
 
 /*
  * Steady-state budzet powierzchni.
@@ -1408,6 +1411,7 @@ void wyczysc_warstwe(
 void usun_warstwe(
     int pid
 ) {
+    if(pid_poprawny(pid)){kfree(title_coverage[pid].alpha);title_coverage[pid]=TitleCoverage{};}
     if (application_popup.pid == pid)
         skladacz_obrazu_ustaw_popup_aplikacji(pid, false, 0, 0, 0, 0);
     if (drag_overlay.pid == pid ||
@@ -1496,13 +1500,21 @@ void zloz_dekoracje(int pid,const GuiDirtyRect& clip) {
        clip.y+clip.height<=w.y+int(w.wysokosc)-edge) return;
     const BursztynMotyw* theme=motyw_pobierz_aktywny();
     kursor_diag_decor();
-    wm_rysuj_dekoracje(w.szerokosc,w.wysokosc,tytul_okna[pid],
+    wm_rysuj_dekoracje(w.szerokosc,w.wysokosc,title_coverage[pid].width?"":tytul_okna[pid],
         stan_okna[pid]==GUI_OKNO_ZMAKSYMALIZOWANE,ekran_skala(),*theme,
         [&](int x,int y,uint32_t color) {
             x+=w.x;y+=w.y;
             if(x>=clip.x && y>=clip.y && x<clip.x+clip.width && y<clip.y+clip.height)
                 grafika_zapisz_surowy_piksel(x,y,color);
         });
+    const auto& mask=title_coverage[pid];
+    int origin_x=w.x+ui_skaluj(8,ekran_skala()),origin_y=w.y+(bar-int(mask.height))/2;
+    int right=w.x+int(w.szerokosc)-ui_skaluj(80,ekran_skala());
+    for(unsigned yy=0;yy<mask.height;++yy){int y=origin_y+int(yy);if(y<0||y>=grafika_pobierz_wysokosc()||y<w.y||y>=w.y+bar||y<clip.y||y>=int64_t(clip.y)+clip.height)continue;
+        for(unsigned xx=0;xx<mask.width;++xx){int x=origin_x+int(xx);if(x<0||x>=grafika_pobierz_szerokosc()||x>=right||x<clip.x||x>=int64_t(clip.x)+clip.width)continue;unsigned alpha=mask.alpha[yy*mask.width+xx];if(!alpha)continue;
+            uint32_t old=grafika_pobierz_wiersz_backbuffer(y)[x],color=0;for(unsigned shift=0;shift<24;shift+=8)color|=((((theme->tekst>>shift)&255)*alpha+((old>>shift)&255)*(255-alpha)+127)/255)<<shift;grafika_zapisz_surowy_piksel(x,y,color);}
+    }
+
 }
 
 void zloz_warstwe(
@@ -2086,7 +2098,7 @@ bool skladacz_obrazu_ustaw_tytul(int pid, const char* tytul) {
     }
     if (tytul_okna[pid][i] != '\0') zmieniony = true;
     tytul_okna[pid][i] = '\0';
-    if(zmieniony) skladacz_obrazu_odswiez_dekoracje();
+    if(zmieniony){title_coverage[pid].width=title_coverage[pid].height=0;skladacz_obrazu_odswiez_dekoracje();}
     return zmieniony;
 }
 
@@ -2424,4 +2436,11 @@ void skladacz_obrazu_odswiez_dekoracje() {
         skladacz_obrazu_oznacz_dirty_rect(w.x+w.szerokosc-edge,w.y+bar,edge,w.wysokosc-bar);
         skladacz_obrazu_oznacz_dirty_rect(w.x,w.y+w.wysokosc-edge,w.szerokosc,edge);
     }
+}
+
+bool skladacz_obrazu_ustaw_maske_tytulu(int pid,int w,int h,const uint8_t* alpha){
+    if(!pid_poprawny(pid)||!warstwa_bufor_spojny(pid)||w<0||h<0||w>512||h>128)return false;
+    auto& mask=title_coverage[pid];if(!w||!h){mask.width=mask.height=0;skladacz_obrazu_odswiez_dekoracje();return true;}if(!alpha)return false;
+    uint32_t bytes=uint32_t(w*h);if(bytes>mask.capacity){auto* buffer=static_cast<uint8_t*>(kmalloc(bytes));if(!buffer)return false;kfree(mask.alpha);mask.alpha=buffer;mask.capacity=bytes;}
+    for(uint32_t i=0;i<bytes;++i)mask.alpha[i]=alpha[i];mask.height=uint16_t(h);mask.width=uint16_t(w);skladacz_obrazu_odswiez_dekoracje();return true;
 }

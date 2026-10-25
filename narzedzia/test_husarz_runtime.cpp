@@ -154,6 +154,28 @@ static void resource_compatibility_tests(){
     delete resource_cache;resource_cache=nullptr;resource_responses.clear();resource_targets.clear();requests=0;
 }
 int main() {
+    {
+        struct Parent : BursztynUI::Panel {
+            unsigned invalidations{};
+            void uniewaznij_dziecko(BursztynUI::Kontrolka* child,BursztynUI::Prostokat rect) override {
+                ++invalidations;Panel::uniewaznij_dziecko(child,rect);
+            }
+        } parent;
+        auto& bar=parent.dodaj<PasekNarzedziHusarza>();
+        for(const char* label:{"Wstecz","Dalej","Odśwież","Zatrzymaj","Dom"})bar.dodaj<BursztynUI::Przycisk>(label);
+        auto& address=bar.dodaj<BursztynUI::PoleTekstowe>();
+        address.ustaw_wyrownanie_poziome(BursztynUI::WyrownaniePoziome::Rozciagnij);
+        address.ustaw_minimalny_rozmiar({120,26});
+        bar.dodaj<BursztynUI::Przycisk>("Przejdź");bar.dodaj<BursztynUI::Przycisk>("Zakładki");
+        bar.zmierz({1200,100});parent.invalidations=0;
+        for(unsigned i=0;i<20;++i)bar.zmierz({1200,100});
+        CHECK(parent.invalidations==0);
+        bar.zmierz({350,100});CHECK(!strcmp(bar.dziecko(0)->tekst(),"‹"));
+        parent.invalidations=0;
+        for(unsigned i=0;i<20;++i)bar.zmierz({350,100});
+        CHECK(parent.invalidations==0);
+        bar.zmierz({1200,100});CHECK(!strcmp(bar.dziecko(0)->tekst(),"Wstecz"));
+    }
     network_parser_tests();
     resource_compatibility_tests();
     Okno::g_tlum_operacje_systemowe = true;

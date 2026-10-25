@@ -13,8 +13,10 @@ eksplorator_tmp.o: programy/eksplorator/eksplorator-plikow.cpp \
  programy/eksplorator/../../plik_operacje_ui.h \
  programy/eksplorator/../../bursztyn_ui/czcionka.h \
  programy/eksplorator/../../bursztyn_ui/typy.h \
- programy/eksplorator/../../bursztyn_ui/../czcionki/extronic16Bunicode.h \
- programy/eksplorator/../../bursztyn_ui/../czcionki/extronic16B_unicode.h \
+ programy/eksplorator/../../bursztyn_ui/../bsf/runtime.h \
+ programy/eksplorator/../../bursztyn_ui/../bsf/bsf.h \
+ programy/eksplorator/../../bursztyn_ui/../bsf/config.h \
+ programy/eksplorator/../../bursztyn_ui/../bws_czcionka.h \
  programy/eksplorator/../../bursztyn_ui/menu_kontekstowe.h \
  programy/eksplorator/../../bursztyn_ui/widok_menu_popup.h \
  programy/eksplorator/../../bursztyn_ui/popup.h \
@@ -61,8 +63,10 @@ programy/eksplorator/../../plik_popup_ui.h:
 programy/eksplorator/../../plik_operacje_ui.h:
 programy/eksplorator/../../bursztyn_ui/czcionka.h:
 programy/eksplorator/../../bursztyn_ui/typy.h:
-programy/eksplorator/../../bursztyn_ui/../czcionki/extronic16Bunicode.h:
-programy/eksplorator/../../bursztyn_ui/../czcionki/extronic16B_unicode.h:
+programy/eksplorator/../../bursztyn_ui/../bsf/runtime.h:
+programy/eksplorator/../../bursztyn_ui/../bsf/bsf.h:
+programy/eksplorator/../../bursztyn_ui/../bsf/config.h:
+programy/eksplorator/../../bursztyn_ui/../bws_czcionka.h:
 programy/eksplorator/../../bursztyn_ui/menu_kontekstowe.h:
 programy/eksplorator/../../bursztyn_ui/widok_menu_popup.h:
 programy/eksplorator/../../bursztyn_ui/popup.h:

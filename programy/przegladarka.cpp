@@ -100,7 +100,7 @@ extern "C" {
 #ifdef HUSARZ_WORKER_ONLY
 constexpr uint64_t BUR_TEXT_SIZE=0x10000ULL,BUR_DATA_OFFSET=0x11000ULL,BUR_DATA_VADDR=0x1011000ULL;
 #else
-constexpr uint64_t BUR_TEXT_SIZE=0x80000ULL,BUR_DATA_OFFSET=0x81000ULL,BUR_DATA_VADDR=0x1081000ULL;
+constexpr uint64_t BUR_TEXT_SIZE=0x84000ULL,BUR_DATA_OFFSET=0x85000ULL,BUR_DATA_VADDR=0x1085000ULL;
 #endif
 __attribute__((section(".naglowek"), used))
 NaglowekBur naglowek = {
@@ -2838,8 +2838,18 @@ int advance_font(void*,uint32_t cp,int font,bool bold,bool) {
 int height_font(void*,int font){return font;}
 const uint16_t* bitmap_font(void*,uint32_t cp){return CzcionkaUI::bitmapa_znaku(cp);}
 int width_font(void*,uint32_t cp){return CzcionkaUI::szerokosc_znaku(cp);}
+#if defined(BSF_NATIVE)
+uint32_t browser_font_generation{};
+int advance_family(void*,uint32_t cp,int px,bool bold,bool,uint32_t family){int a=BSF::measure_cp(cp,px,bold,BSF::family_name(family));return a>=0?a:BSF::family_monospace(family)?px:advance_font(nullptr,cp,px,bold,false);}
+int height_family(void*,int px,uint32_t family){int h=BSF::height(px,BSF::family_name(family));return h>0?h:px;}
+bool alpha_font(void*,uint32_t cp,int px,bool bold,bool italic,uint32_t family,Husarz::AlphaGlyph& out){const char* name=BSF::family_name(family);auto* g=BSF::glyph(cp,px,bold,name,italic);if(!g)return false;BSF::pin(g);out.width=g->width;out.height=g->height;out.x=g->x;out.y=BSF::ascent(px,name)+g->y;out.pixels=g->alpha;out.lease=const_cast<BSF::Glyph*>(g);out.release=BSF::unpin;return true;}
+bool cached_font(void*,uint32_t cp,int px,bool bold,bool italic,uint32_t family){return BSF::cached(cp,px,bold,BSF::family_name(family),italic);}
+const Husarz::Metrics browser_metrics{nullptr,advance_font,height_font,advance_family,height_family};
+const Husarz::Glyphs browser_glyphs{nullptr,bitmap_font,width_font,alpha_font,cached_font};
+#else
 const Husarz::Metrics browser_metrics{nullptr,advance_font,height_font};
 const Husarz::Glyphs browser_glyphs{nullptr,bitmap_font,width_font};
+#endif
 
 unsigned browser_edit_command(const ZdarzenieKlawiatury &e) {
     unsigned key=e.polecenie(),raw=e.kod_skanu;
@@ -2917,6 +2927,10 @@ public:
     void krok_animacji(uint64_t now=0) override;
     void zaktualizuj_motyw()override{
         Kontrolka::zaktualizuj_motyw();
+#if defined(BSF_NATIVE)
+        uint32_t current=BSF::generation();
+        if(current!=browser_font_generation){browser_font_generation=current;cancel_paint();for(int i=0;i<liczba_zakladek;++i){++zakladki[i].resource_revision;zakladki[i].work_pending=true;}uniewaznij();}
+#endif
     }
     void rysuj_siebie(KontekstRysowania& ctx)override{
         const int w=obszar_.szerokosc,h=obszar_.wysokosc;
@@ -3598,6 +3612,35 @@ void WidokStrony::obsluz_wcisniecie_myszy(ZdarzenieMyszki& e){
     }
 }
 
+class PasekNarzedziHusarza : public Panel {
+public:
+    PasekNarzedziHusarza() : Panel(Orientacja::Pozioma) {}
+    Rozmiar zmierz(Rozmiar dostepny) override {
+        const SkalaUI s=skala_dpi();
+        int h=(CzcionkaUI::pobierz_wysokosc(s)*100+s.procent()-1)/s.procent()+6;
+        if(h<26)h=26;
+        if(preferowany_rozmiar().szerokosc!=-1 || preferowany_rozmiar().wysokosc!=h+6)
+            ustaw_preferowany_rozmiar(Rozmiar(-1,h+6));
+        for(size_t i=0;i<liczba_dzieci();++i){
+            auto* c=dziecko(i);
+            if(c->preferowany_rozmiar().wysokosc!=h)
+                c->ustaw_preferowany_rozmiar(Rozmiar(c->preferowany_rozmiar().szerokosc,h));
+        }
+        if(liczba_dzieci()>=2){
+            int width=6*s+int(liczba_dzieci()-1)*odstep()*s;
+            for(size_t i=0;i<liczba_dzieci();++i){
+                auto* c=dziecko(i);
+                if(i<2){width+=CzcionkaUI::zmierz_tekst(i?"Dalej":"Wstecz",s)+20*s;continue;}
+                width+=c->wyrownanie_poziome()==WyrownaniePoziome::Rozciagnij
+                    ? c->minimalny_rozmiar().szerokosc*s : c->zmierz(dostepny).szerokosc;
+            }
+            dziecko(0)->ustaw_tekst(width>dostepny.szerokosc?"‹":"Wstecz");
+            dziecko(1)->ustaw_tekst(width>dostepny.szerokosc?"›":"Dalej");
+        }
+        return Panel::zmierz(dostepny);
+    }
+};
+
 [[maybe_unused]] void HusarzApp::zbuduj_ui() {
     if (!okno) return;
 
@@ -3681,7 +3724,7 @@ void WidokStrony::obsluz_wcisniecie_myszy(ZdarzenieMyszki& e){
     b_nowa.przy_kliknieciu([](Przycisk*, void*) { g_husarz.nowa_zakladka_gui(); });
 
     // 3. Pasek Narzedzi
-    Panel& p_narz = korzen->dodaj<Panel>(Dokowanie::Gora, Orientacja::Pozioma);
+    Panel& p_narz = korzen->dodaj<PasekNarzedziHusarza>(Dokowanie::Gora);
     pasek_narzedzi = &p_narz;
     p_narz.ustaw_preferowany_rozmiar(Rozmiar(-1, 32));
     p_narz.ustaw_wypelnienie(Marginesy(3, 3, 3, 3));
@@ -3689,27 +3732,34 @@ void WidokStrony::obsluz_wcisniecie_myszy(ZdarzenieMyszki& e){
 
     Przycisk& b_wst = p_narz.dodaj<Przycisk>("Wstecz");
     btn_wstecz = &b_wst;
-    b_wst.ustaw_preferowany_rozmiar(Rozmiar(56, 26));
+    b_wst.ustaw_podpowiedz("Wstecz (Alt+Lewo)");
+    b_wst.ustaw_wypelnienie(Marginesy(0));
+    b_wst.ustaw_preferowany_rozmiar(Rozmiar(-1, 26));
     b_wst.przy_kliknieciu([](Przycisk*, void*) { g_husarz.wstecz(); });
 
     Przycisk& b_dal = p_narz.dodaj<Przycisk>("Dalej");
     btn_dalej = &b_dal;
-    b_dal.ustaw_preferowany_rozmiar(Rozmiar(52, 26));
+    b_dal.ustaw_podpowiedz("Dalej (Alt+Prawo)");
+    b_dal.ustaw_wypelnienie(Marginesy(0));
+    b_dal.ustaw_preferowany_rozmiar(Rozmiar(-1, 26));
     b_dal.przy_kliknieciu([](Przycisk*, void*) { g_husarz.dalej(); });
 
     Przycisk& b_ods = p_narz.dodaj<Przycisk>("Odśwież");
     btn_odswiez = &b_ods;
-    b_ods.ustaw_preferowany_rozmiar(Rozmiar(64, 26));
+    b_ods.ustaw_wypelnienie(Marginesy(0));
+    b_ods.ustaw_preferowany_rozmiar(Rozmiar(-1, 26));
     b_ods.przy_kliknieciu([](Przycisk*, void*) { g_husarz.odswiez(); });
 
     Przycisk& b_zat = p_narz.dodaj<Przycisk>("Zatrzymaj");
     btn_zatrzymaj = &b_zat;
-    b_zat.ustaw_preferowany_rozmiar(Rozmiar(70, 26));
+    b_zat.ustaw_wypelnienie(Marginesy(0));
+    b_zat.ustaw_preferowany_rozmiar(Rozmiar(-1, 26));
     b_zat.przy_kliknieciu([](Przycisk*, void*) { g_husarz.zatrzymaj(); });
 
     Przycisk& b_dom = p_narz.dodaj<Przycisk>("Dom");
     btn_dom = &b_dom;
-    b_dom.ustaw_preferowany_rozmiar(Rozmiar(48, 26));
+    b_dom.ustaw_wypelnienie(Marginesy(0));
+    b_dom.ustaw_preferowany_rozmiar(Rozmiar(-1, 26));
     b_dom.przy_kliknieciu([](Przycisk*, void*) { g_husarz.dom(); });
 
     PoleTekstowe& t_adr = p_narz.dodaj<PoleTekstowe>("http://example.com/");
@@ -3722,14 +3772,16 @@ void WidokStrony::obsluz_wcisniecie_myszy(ZdarzenieMyszki& e){
 
     Przycisk& b_idz = p_narz.dodaj<Przycisk>("Przejdź");
     btn_idz = &b_idz;
-    b_idz.ustaw_preferowany_rozmiar(Rozmiar(62, 26));
+    b_idz.ustaw_wypelnienie(Marginesy(0));
+    b_idz.ustaw_preferowany_rozmiar(Rozmiar(-1, 26));
     b_idz.przy_kliknieciu([](Przycisk*, void*) {
         if (g_husarz.txt_adres) g_husarz.przejdz_do_url(g_husarz.txt_adres->tekst());
     });
 
     Przycisk& b_zak = p_narz.dodaj<Przycisk>("Zakładki");
     btn_zakladki = &b_zak;
-    b_zak.ustaw_preferowany_rozmiar(Rozmiar(72, 26));
+    b_zak.ustaw_wypelnienie(Marginesy(0));
+    b_zak.ustaw_preferowany_rozmiar(Rozmiar(-1, 26));
     b_zak.przy_kliknieciu([](Przycisk*, void*) { g_husarz.pokaz_zakladki(); });
 
     // Chrome belongs exclusively to the client rectangle, never to the DOM.
@@ -4035,6 +4087,10 @@ extern "C" {
 }
 
 extern "C" [[noreturn]] void _start() {
+#if defined(BSF_NATIVE) && !defined(HUSARZ_WORKER_ONLY)
+    (void)BSF::enumerate();browser_font_generation=BSF::generation();Husarz::font_family_resolver=BSF::resolve_family;
+#endif
+
 #if HUSARZ_DEBUG_RESOURCES
     Husarz::document_limit_log=wypisz;
 #endif

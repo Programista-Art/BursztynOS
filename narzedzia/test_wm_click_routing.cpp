@@ -14,6 +14,7 @@ uint64_t bws_wywolaj(uint64_t nr,uint64_t a,uint64_t,uint64_t,uint64_t) {
     if(nr==10) launched=reinterpret_cast<const char*>(a);
     return 1;
 }
+int gui_pobierz_wysokosc_fontu() {return 16;}
 uint32_t gui_pobierz_okna(GuiOknoInfo*,uint32_t) {return 0;}
 void gui_ustaw_przejecie_myszy(bool) {}
 bool gui_aktywuj_okno(uint64_t) {return true;}

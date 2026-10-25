@@ -179,12 +179,12 @@ inline Prostokat shell_obszar_klienta() {
 
 
 constexpr uint64_t BUR_TEXT_OFFSET = 0x1000ULL;
-constexpr uint64_t BUR_TEXT_SIZE   = 0x20000ULL;
+constexpr uint64_t BUR_TEXT_SIZE   = 0x24000ULL;
 constexpr uint64_t BUR_TEXT_VADDR  = 0x1001000ULL;
 
-constexpr uint64_t BUR_DATA_OFFSET = 0x21000ULL;
+constexpr uint64_t BUR_DATA_OFFSET = 0x25000ULL;
 constexpr uint64_t BUR_DATA_SIZE   = 0x40000ULL;
-constexpr uint64_t BUR_DATA_VADDR  = 0x1021000ULL;
+constexpr uint64_t BUR_DATA_VADDR  = 0x1025000ULL;
 
 constexpr size_t SHELL_INPUT_CAPACITY = 2048;
 #include "shell_context.h"
@@ -2396,6 +2396,10 @@ NaglowekBur naglowek = {
 extern "C"
 __attribute__((noreturn))
 void _start() {
+#if defined(BSF_NATIVE)
+    BSF::monospace(true); // Terminal columns retain the existing bitmap path.
+#endif
+
     g_linie = new ShellLine[MAXSCROLLBACKLINES]{};
     if (!g_linie) gui_zakoncz_aplikacje();
     GuiMonitorInfo monitor{};

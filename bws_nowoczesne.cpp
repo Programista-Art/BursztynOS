@@ -39,6 +39,8 @@ extern bool skopiuj_string_z_uzytkownika(char*, const char*, size_t);
 extern bool czy_bezpieczny_zakres_uzytkownika_do_odczytu(const void*, size_t);
 extern bool czy_bezpieczny_zakres_uzytkownika_do_zapisu(void*, size_t);
 extern volatile bool ekran_zajety;
+#include "bsf/config_kernel.inc"
+
 
 extern "C" bool bws_gui_ustaw_kursor_ksztalt(int pid, uint32_t typ);
 extern "C" bool bws_gui_ustaw_kursor_custom(
@@ -1302,6 +1304,8 @@ extern "C" uint64_t bws_nowoczesne_obsluz(
             return aktualizacja_bws_status(proces, a1);
         case BWS_OTA_POLECENIE:
             return aktualizacja_bws_polecenie(proces, static_cast<uint32_t>(a1), a2);
+        case BWS_BSF_CONFIG:
+            return bsf_config_request(proces,a1,a2,a3);
         case BWS_MOTYW_POBIERZ:
             return motyw_bws_pobierz(proces, a1);
         case BWS_MOTYW_POLECENIE:

@@ -10,7 +10,7 @@ struct Flow {
     bool pending_space{};
 };
 inline int advance(Metrics m, uint32_t cp, const Style &s) {
-    int base = m.advance ? m.advance(m.user, cp, s.font, s.bold, s.italic) : (s.font * 9 + 8) / 16;
+    int base = m.family_advance?m.family_advance(m.user,cp,s.font,s.bold,s.italic,s.native_family):m.advance ? m.advance(m.user, cp, s.font, s.bold, s.italic) : (s.font * 9 + 8) / 16;
     return clamp64(int64_t(base) + s.letter_spacing + (cp == ' ' ? s.word_spacing : 0), 0, 2048);
 }
 inline uint32_t transformed(uint32_t cp, Transform t, bool word_start) {
@@ -30,7 +30,7 @@ inline uint32_t transformed(uint32_t cp, Transform t, bool word_start) {
     return cp;
 }
 inline int font_height(Metrics m, const Style &s) {
-    return clamp64(m.height ? m.height(m.user, s.font) : s.font, 1, MaxFont * 2);
+    return clamp64(m.family_height?m.family_height(m.user,s.font,s.native_family):m.height ? m.height(m.user, s.font) : s.font, 1, MaxFont * 2);
 }
 inline Work finish_line_work(Document &d, Flow &f, bool force = false) {
     if (f.pen || force) {

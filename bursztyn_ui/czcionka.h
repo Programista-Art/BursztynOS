@@ -3,7 +3,12 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "typy.h"
-#if defined(BURSZTYN_UI_CZCIONKA_SYSTEMOWA)
+#if defined(BSF_NATIVE)
+#include "../bsf/runtime.h"
+#endif
+#if defined(BSF_NATIVE)
+#include "../bws_czcionka.h"
+#elif defined(BURSZTYN_UI_CZCIONKA_SYSTEMOWA)
 #include "../bws_czcionka.h"
 #include "../bursztyn_gui.h"
 #else
@@ -14,8 +19,23 @@ namespace BursztynUI {
 
 class CzcionkaUI {
 public:
+#if defined(BSF_NATIVE)
+    template<class Mask>
+    static bool rysuj_bsf(const char* text,int x,int y,int px,Mask mask,bool bold=false,const char* family=nullptr) {
+        if(!BSF::ready(family)||px<1||px>128)return false;
+        size_t size=0;while(text&&text[size]&&size<65536)++size;uint32_t previous=0;
+        for(size_t at=0;at<size;){uint32_t cp=0;at+=BSF::utf8(text+at,size-at,cp);if(previous)x+=BSF::kern(previous,cp,px,bold,family);
+            const auto* g=BSF::glyph(cp,px,bold,family);
+            if(g){mask(x+g->x,y+BSF::ascent(px,family)+g->y,g->width,g->height,g->alpha);x+=g->advance;}
+            else {int w=(szerokosc_znaku(cp)*px+8)/16,h=px;if(w>128)w=128;if(h>128)h=128;auto* a=new uint8_t[size_t(w)*h];if(a){const auto* bits=bitmapa_znaku(cp);for(int yy=0;yy<h;++yy)for(int xx=0;xx<w;++xx)a[yy*w+xx]=(bits[yy*16/h]&(1u<<(15-xx*16/px)))?255:0;mask(x,y,w,h,a);delete[] a;}x+=(szerokosc_znaku(cp)+1)*px/16;}
+            previous=cp;
+        }return true;
+    }
+#endif
     static constexpr int WYSOKOSC = 16;
-#if defined(BURSZTYN_UI_CZCIONKA_SYSTEMOWA)
+#if defined(BSF_NATIVE)
+    static constexpr uint32_t LICZBA_GLIFOW=BWS_CZCIONKA_GLIFY;
+#elif defined(BURSZTYN_UI_CZCIONKA_SYSTEMOWA)
     static constexpr uint32_t LICZBA_GLIFOW = BWS_CZCIONKA_GLIFY;
     static bool pobierz_systemowa() {
         if (systemowa_gotowa_) return true;
@@ -40,6 +60,11 @@ public:
     // - W przypadku błędu konsumuje bezpiecznie 1 bajt i zwraca glif zastępczy '?'.
     static size_t dekoduj_utf8(const char* tekst, size_t i, uint32_t* znak) {
         if (!tekst || !znak || tekst[i] == '\0') return 0;
+#if defined(BSF_NATIVE)
+        size_t available = 0;
+        while (available < 4 && tekst[i + available]) ++available;
+        return BSF::utf8(tekst + i, available, *znak);
+#endif
         const uint8_t b0 = static_cast<uint8_t>(tekst[i]);
 
         // 1 bajt (ASCII: 0x00 .. 0x7F)
@@ -177,7 +202,9 @@ public:
 
     // Zwraca rzeczywistą szerokość glifu w pikselach (1..16) z tablicy czcionki
     static int szerokosc_znaku(uint32_t cp) {
-#if defined(BURSZTYN_UI_CZCIONKA_SYSTEMOWA)
+#if defined(BSF_NATIVE)
+        return BSF::bitmap_width(cp);
+#elif defined(BURSZTYN_UI_CZCIONKA_SYSTEMOWA)
         if (!pobierz_systemowa()) return 1;
         int w = systemowa_.szerokosci[cp < LICZBA_GLIFOW ? cp : '?'];
         return w < 1 ? 1 : w > 16 ? 16 : w;
@@ -200,7 +227,9 @@ public:
     // Dla nieobslugiwanego punktu kodowego zachowujemy ten sam znak
     // zastepczy co pomiar, aby geometria i rysowanie nie rozjezdzaly sie.
     static const uint16_t* bitmapa_znaku(uint32_t cp) {
-#if defined(BURSZTYN_UI_CZCIONKA_SYSTEMOWA)
+#if defined(BSF_NATIVE)
+        return BSF::bitmap(cp);
+#elif defined(BURSZTYN_UI_CZCIONKA_SYSTEMOWA)
         if (!pobierz_systemowa()) { static const uint16_t pusty[16]{}; return pusty; }
         return systemowa_.bitmapy[cp < LICZBA_GLIFOW ? cp : '?'];
 #else
@@ -256,18 +285,29 @@ public:
 
     // Zwraca krok pozycji X dla znaku (szerokość + 1px odstępu * skala)
     static int postep_znaku(uint32_t cp, SkalaUI skala = 1) {
+#if defined(BSF_NATIVE)
+        int a=BSF::measure_cp(cp,ui_skaluj(BSF::ui_size(),skala.procent()));
+        if(a>=0)return a;
+#endif
         SkalaUI s = skala;
         return (szerokosc_znaku(cp) + 1) * s;
     }
 
     // Zwraca wysokość linii czcionki (16px * skala)
     static int pobierz_wysokosc(SkalaUI skala = 1) {
+#if defined(BSF_NATIVE)
+        int h=BSF::height(ui_skaluj(BSF::ui_size(),skala.procent()));
+        if(h>0)return h;
+#endif
         SkalaUI s = skala;
         return WYSOKOSC * s;
     }
 
     // Mierzy całkowitą szerokość tekstu w pikselach
     static int zmierz_tekst(const char* tekst, SkalaUI skala = 1) {
+#if defined(BSF_NATIVE)
+        if(BSF::ready())return BSF::measure_text(tekst,ui_skaluj(BSF::ui_size(),skala.procent()));
+#endif
         if (!tekst || tekst[0] == '\0') return 0;
         SkalaUI s = skala;
         int szer = 0;
@@ -289,6 +329,9 @@ public:
 
     // Zwraca szerokość tekstu od początku do bajt_limit
     static int pozycja_x_z_bajtu(const char* tekst, size_t bajt_limit, SkalaUI skala = 1) {
+#if defined(BSF_NATIVE)
+        if(BSF::ready()){size_t boundary=0;while(tekst&&tekst[boundary]&&boundary<bajt_limit){uint32_t cp;size_t n=dekoduj_utf8(tekst,boundary,&cp);if(!n||n>bajt_limit-boundary)break;boundary+=n;}return BSF::measure_text(tekst,ui_skaluj(BSF::ui_size(),skala.procent()),false,nullptr,boundary);}
+#endif
         if (!tekst || tekst[0] == '\0' || bajt_limit == 0) return 0;
         SkalaUI s = skala;
         int szer = 0;
@@ -315,7 +358,10 @@ public:
             size_t zuzyte = dekoduj_utf8(tekst, biezacy_bajt, &cp);
             if (zuzyte == 0) break;
 
-            int postep = (szerokosc_znaku(cp) + 1) * s;
+            int postep = postep_znaku(cp,s);
+#if defined(BSF_NATIVE)
+            if(BSF::ready()&&biezacy_bajt){uint32_t prev=0;size_t before=poprzedni_znak(tekst,biezacy_bajt);dekoduj_utf8(tekst,before,&prev);postep+=BSF::kern(prev,cp,ui_skaluj(BSF::ui_size(),s.procent()));}
+#endif
             int nastepny_x = poprz_x + postep;
 
             if (target_x < (poprz_x + nastepny_x) / 2) {

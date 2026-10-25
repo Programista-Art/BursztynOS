@@ -3542,7 +3542,7 @@ static bool gui_blit_region(
     int y,
     int szer,
     int wys,
-    const uint32_t* piksele, bool zastap_przezroczyste) {
+    const uint32_t* piksele, bool zastap_przezroczyste, bool alfa=false) {
 
     if (!piksele) return false;
     if (!backbuffer || !aktywny_ekran ||
@@ -3577,6 +3577,7 @@ static bool gui_blit_region(
             uint32_t pix = piksele[srcIdx];
             if (!zastap_przezroczyste && pix == SKLADACZ_PIKSEL_PRZEZROCZYSTY) continue;
             uint64_t dstIdx = dstRow + (uint64_t)(dx - warstwa->x);
+            if(alfa){unsigned a=pix>>24;if(!a)continue;uint32_t old=warstwa->bufor_pikseli[dstIdx];uint32_t color=0;for(unsigned shift=0;shift<24;shift+=8)color|=((((pix>>shift)&255)*a+((old>>shift)&255)*(255-a)+127)/255)<<shift;pix=0xFF000000U|color;}
             warstwa->bufor_pikseli[dstIdx] = pix;
         }
     }
@@ -3586,6 +3587,9 @@ static bool gui_blit_region(
 
 extern "C" bool bws_gui_blit(int x,int y,int w,int h,const uint32_t* pixels) {
     return gui_blit_region(x,y,w,h,pixels,false);
+}
+extern "C" bool bws_gui_alpha_blit(int x,int y,int w,int h,const uint32_t* pixels) {
+    return gui_blit_region(x,y,w,h,pixels,false,true);
 }
 extern "C" bool bws_gui_zastap_region(int x,int y,int w,int h,const uint32_t* pixels) {
     return gui_blit_region(x,y,w,h,pixels,true);

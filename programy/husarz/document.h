@@ -193,7 +193,7 @@ struct Style {
     uint32_t shadow_color{};
     uint8_t shadow_alpha{255};
     int font{16}, line{20};
-    uint32_t family{};
+    uint32_t family{},native_family{};
     uint32_t background_base{}, background_image{}, background_size{}, background_position{};
     uint8_t background_repeat{}; // 0 repeat, 1 repeat-x, 2 repeat-y, 3 no-repeat
     Length width{}, height{}, min_width{0, Unit::Px}, max_width{}, min_height{0, Unit::Px}, max_height{};
@@ -271,7 +271,10 @@ struct Metrics {
     void *user{};
     int (*advance)(void *, uint32_t, int, bool, bool){};
     int (*height)(void *, int){};
+    int (*family_advance)(void*,uint32_t,int,bool,bool,uint32_t){};
+    int (*family_height)(void*,int,uint32_t){};
 };
+inline uint32_t (*font_family_resolver)(const char*){};
 inline uint32_t document_generation = 0;
 // Web defaults are document-owned and have no BursztynUI dependency.
 struct UserAgentContext {

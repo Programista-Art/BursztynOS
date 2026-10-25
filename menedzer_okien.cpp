@@ -13,6 +13,11 @@
 #include "bursztyn_gui.h"
 #include "plik_popup_ui.h"
 
+// Opt-in native repaint profiling. No clock reads or extra paints in release.
+#ifndef BSF_PROFILE
+#define BSF_PROFILE 0
+#endif
+
 #ifndef BURSZTYN_DIAG_BOOT
 #define BURSZTYN_DIAG_BOOT 0
 #endif
@@ -49,7 +54,15 @@ int MENU_X = 10;
 int MENU_W = 260;
 int MENU_GORNY_MARGINES = 10;
 int MENU_ELEMENT_WYS = 25;
-constexpr int MENU_ELEMENTOW = 20;
+constexpr int MENU_ELEMENTOW = 21;
+const char* const MENU_ETYKIETY[MENU_ELEMENTOW] = {
+    "> Powloka Bursztyna", "> Eksplorator Plików", "> Notatnik", "> Kalkulator",
+    "> Przegladarka Husarz", "> Przeglądarka Obrazów", "> Demo BursztynUI",
+    "> Kontrolki 2", "> Kontrolki 3", "> Kontrolki 4", "> Testy systemu",
+    "> Tapety", "> Ustawienia ekranu", "> Aktualizacje Systemu",
+    "> Motywy Systemowe", "> Test dźwięku", "> Diagnostyka systemu", "> Gry ->",
+    "> Uruchom ponownie", "> Zamknij", "> Ustawienia"
+};
 int MENU_WYS = (10 * 2) + (MENU_ELEMENTOW * 25);
 
 // Pozycja "Gry ->" w glownym Menu Start.
@@ -108,6 +121,17 @@ TASK_BUTTON_GAP=ui_skaluj(4,ui_skala_procent);
 PULPIT_GRID_W=pulpit.komorka_szer;
 PULPIT_GRID_H=pulpit.komorka_wys;
 PULPIT_GRID_Y=ui_skaluj(140,ui_skala_procent);
+#if defined(BSF_NATIVE)
+int font_height=BSF::height(ui_skaluj(BSF::ui_size(),ui_skala_procent));
+for(const char* label:MENU_ETYKIETY){
+    int width=BSF::measure_text(label,ui_skaluj(BSF::ui_size(),ui_skala_procent))+ui_skaluj(20,ui_skala_procent);
+    if(width>MENU_W)MENU_W=width;
+}
+if(MENU_W>screen_w-MENU_X)MENU_W=screen_w-MENU_X;
+int row_height=font_height+2;if(row_height>MENU_ELEMENT_WYS)MENU_ELEMENT_WYS=row_height;
+int max_row=(screen_h-PASEK_WYS-2*MENU_GORNY_MARGINES)/MENU_ELEMENTOW;
+if(max_row>0&&MENU_ELEMENT_WYS>max_row)MENU_ELEMENT_WYS=max_row;
+#endif
 MENU_WYS=2*MENU_GORNY_MARGINES+MENU_ELEMENTOW*MENU_ELEMENT_WYS;
 MENU_GRY_WYS=2*MENU_GORNY_MARGINES+MENU_GRY_ELEMENTOW*MENU_ELEMENT_WYS;
 }
@@ -2087,6 +2111,9 @@ void rysuj_ikone_aplikacji(const AplikacjaPulpitu& aplikacja) {
 }
 
 void RysujPulpit(bool wymus_pelne_odswiezenie) {
+#if BSF_PROFILE
+    const uint64_t profile_start=gui_czas_monotoniczny_ns();
+#endif
     if (wymus_pelne_odswiezenie) {
         // Dla procesu warstwowego BWS 19 zeruje prywatna warstwe.
         gui_odswiez_pulpit();
@@ -2110,29 +2137,6 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
         gui_rysuj_prostokat(MENU_X, menu_y + MENU_WYS - 1,
                             MENU_W, 1, motyw_kolor(MOTYW_KOLOR_RAMKA));
 
-        const char* menu_elementy[MENU_ELEMENTOW] = {
-            "> Powloka Bursztyna",
-            "> Eksplorator Plików",
-            "> Notatnik",
-            "> Kalkulator",
-            "> Przegladarka Husarz",
-            "> Przeglądarka Obrazów",
-            "> Demo BursztynUI",
-            "> Kontrolki 2",
-            "> Kontrolki 3",
-            "> Kontrolki 4",
-            "> Testy systemu",
-            "> Tapety",
-            "> Ustawienia ekranu",
-            "> Aktualizacje Systemu",
-            "> Motywy Systemowe",
-            "> Test dźwięku",
-            "> Diagnostyka systemu",
-            "> Gry ->",
-            "> Uruchom ponownie",
-            "> Zamknij"
-        };
-
         for (int i = 0; i < MENU_ELEMENTOW; ++i) {
             int item_x = 0, item_y = 0, item_w = 0, item_h = 0;
             prostokat_elementu_menu(i, &item_x, &item_y, &item_w, &item_h);
@@ -2143,8 +2147,8 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
                                     motyw_kolor(MOTYW_KOLOR_PODNIESIONY));
             }
 
-            gui_wypisz_tekst_kolor(item_x + 10, item_y + 5,
-                                   motyw_kolor(MOTYW_KOLOR_TEKST), menu_elementy[i]);
+            gui_wypisz_tekst_kolor(item_x + 10, item_y + (item_h-gui_pobierz_wysokosc_fontu())/2,
+                                   motyw_kolor(MOTYW_KOLOR_TEKST), MENU_ETYKIETY[i]);
         }
 
         RysujMenuGry();
@@ -2153,6 +2157,17 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
     // BWS 17 sklada warstwy i prezentuje gotowa klatke.
     zarejestruj_pulpit_jako_cel_drop();
     gui_odswiez();
+#if BSF_PROFILE
+    const uint64_t profile_elapsed=gui_czas_monotoniczny_ns()-profile_start;
+    char profile_line[160]{};unsigned profile_n=0;
+    auto profile_text=[&](const char* s){while(*s)profile_line[profile_n++]=*s++;};
+    auto profile_num=[&](uint64_t v){char b[24];unsigned n=0;do{b[n++]=char('0'+v%10);v/=10;}while(v);while(n)profile_line[profile_n++]=b[--n];};
+    profile_text("[BSF DESKTOP] ns=");profile_num(profile_elapsed);
+    profile_text(" full=");profile_num(wymus_pelne_odswiezenie);
+    profile_text(" menu=");profile_num(menu_start_otwarte);
+    profile_text(" entries=");profile_num(desktop_layout.count);
+    profile_text("\n");wypisz(profile_line);
+#endif
 }
 
 void zamknij_menu_i_odtworz_pulpit() {
@@ -2420,6 +2435,9 @@ void obsluz_element_menu(int item_index) {
         case 18:
             wykonaj_restart();
             break;
+        case 20:
+            uruchom_lub_aktywuj("/programy/ustawienia.cebula/ustawienia.bur", "Ustawienia");
+            break;
         case 19:
             wykonaj_zamkniecie();
             break;
@@ -2669,6 +2687,9 @@ extern "C" __attribute__((noreturn)) void _start() {
 #endif
     RysujPulpit(true);
     zapisz_uklad_pulpitu();
+#if BSF_PROFILE
+    for(unsigned profile_sample=0;profile_sample<7;++profile_sample)RysujPulpit(true);
+#endif
 #if BURSZTYN_DIAG_BOOT
     wm_log("[WM-BOOT] desktop-render-complete\n");
 #endif
@@ -2720,6 +2741,7 @@ extern "C" __attribute__((noreturn)) void _start() {
         }
         if (zdarzenie.typ == BWS_ZDARZENIE_MOTYW_ZMIENIONY) {
             BursztynUI::Motyw::pobierz_domyslny().zaktualizuj_z_systemu();
+            metryki_ekranu();
             pulpit_menu->events.popups.zaktualizuj_motyw();
             pulpit_dialog->events.popups.zaktualizuj_motyw();
             if(pulpit_wybor)pulpit_wybor->events.popups.zaktualizuj_motyw();

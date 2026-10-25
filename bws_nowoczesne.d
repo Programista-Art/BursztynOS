@@ -9,7 +9,8 @@ bws_nowoczesne.o: bws_nowoczesne.cpp diagnostyka_systemu.h \
  aktualizacja_format.h motyw.h bws_hda_diag.h \
  sterowniki/dzwiek/hda_diag_format.h sterowniki/dzwiek/hda.h \
  sterowniki/dzwiek/hda_diag.h sterowniki/dzwiek/hda_transport.h \
- sterowniki/dzwiek/../dma.h sterowniki/dzwiek/hda_wewnetrzny.h
+ sterowniki/dzwiek/../dma.h sterowniki/dzwiek/hda_wewnetrzny.h \
+ bsf/config_kernel.inc bsf/config.h
 diagnostyka_systemu.h:
 diagnostyka_systemu_abi.h:
 ekran.h:
@@ -50,3 +51,5 @@ sterowniki/dzwiek/hda_diag.h:
 sterowniki/dzwiek/hda_transport.h:
 sterowniki/dzwiek/../dma.h:
 sterowniki/dzwiek/hda_wewnetrzny.h:
+bsf/config_kernel.inc:
+bsf/config.h:

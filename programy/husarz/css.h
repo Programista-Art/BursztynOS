@@ -1901,6 +1901,7 @@ inline Style defaults(const Document &d, uint16_t id, const Style &parent) {
     s.font = parent.font;
     s.line = parent.line;
     s.family = parent.family;
+    s.native_family = parent.native_family;
     s.color = parent.color;
     s.color_alpha = parent.color_alpha;
     s.bold = parent.bold;
@@ -2129,6 +2130,7 @@ inline void copy_property(Style &s, const Style &from, int p) {
         break;
     case PFamily:
         s.family = from.family;
+        s.native_family = from.native_family;
         break;
     case PFontSize:
         s.font = from.font;
@@ -2858,6 +2860,7 @@ inline Work compute_styles_work(Document &d, bool indexed = true) {
         s.paint_opacity = id ? uint8_t(unsigned(s.opacity) * parent.paint_opacity / 255) : s.opacity;
         if (parent.flex && s.display == Display::Inline)
             s.display = Display::Block;
+        if(font_family_resolver)s.native_family=font_family_resolver(d.str(s.family));
         d.styles[id] = s;
     }
     if (!budget)
@@ -2966,6 +2969,7 @@ inline Work compute_generated_work(Document &d) {
             style.color = parent.color;
             style.color_alpha = parent.color_alpha;
             style.family = parent.family;
+            style.native_family = parent.native_family;
             style.bold = parent.bold;
             style.italic = parent.italic;
             for (int p = 0; p < PCount; ++p) {
@@ -2979,6 +2983,7 @@ inline Work compute_generated_work(Document &d) {
                     d.style_viewport_width, d.style_viewport_height);
             }
             style.paint_opacity = uint8_t(unsigned(style.opacity) * parent.paint_opacity / 255);
+            if(font_family_resolver)style.native_family=font_family_resolver(d.str(style.family));
             box.style = style;
         }
     }

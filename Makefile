@@ -181,7 +181,7 @@ RING3_FLAGS := \
 	-fdata-sections \
 	-fno-exceptions \
 	-fno-rtti \
-	-fno-threadsafe-statics
+	-fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new
 
 BURSZTYN_DIAG_GEOM_TRACE ?= 0
 ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_GEOM_TRACE) $(GEOM_TRACE)),)
@@ -526,8 +526,26 @@ usb_hid.o: sterowniki/usb/usb_hid.cpp sterowniki/usb/usb_hid.h input_device.h
 # 11. BIBLIOTEKA GUI RING 3
 # ============================================================================
 
-bursztyn_gui.o: bursztyn_gui.cpp bursztyn_gui.h
+bursztyn_gui.o: bursztyn_gui_base.o bsf_core.o bsf_runtime.o bsf_bitmap.o
+	$(LD) -r bursztyn_gui_base.o bsf_core.o bsf_runtime.o bsf_bitmap.o -o $@
+
+bursztyn_gui_base.o: bursztyn_gui.cpp bursztyn_gui.h bsf/runtime.h
 	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -c $< -o $@
+
+# Background resource workers/FPU probes have no font renderer.
+bursztyn_gui_minimal.o: bursztyn_gui.cpp bursztyn_gui.h
+	$(CXX) $(RING3_FLAGS) -UBSF_NATIVE -Os -c $< -o $@
+
+bsf_core.o: bsf/bsf.cpp bsf/bsf.h bsf/vendor/stb_truetype.h
+	$(CXX) $(RING3_FLAGS) -msse2 -mfpmath=sse -mno-avx -Os -fstack-usage -c $< -o $@
+
+bsf_runtime.o: bsf/runtime.cpp bsf/runtime.h bsf/config.h
+	$(CXX) $(RING3_FLAGS) -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Os -fstack-usage -c $< -o $@
+
+bsf_bitmap.o: bsf/bitmap.cpp bsf/runtime.h
+	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
+
+-include bursztyn_gui_base.d bsf_core.d bsf_runtime.d bsf_bitmap.d bursztyn_gui_minimal.d
 
 # ============================================================================
 # 12. SHELL .bur
@@ -539,8 +557,8 @@ shell_tmp.o: shell.cpp shell_terminal.h shell_context.h shell_sponsors.h wersja_
 .PHONY: shellblob.o
 shellblob.o: shell_blob.o
 
-shell_blob.o: shell_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
-	$(LD) -T $(RING3_STD_LINKER) $(RING3_LDFLAGS) \
+shell_blob.o: shell_tmp.o bursztyn_gui.o programy/shell_bsf_linker.ld
+	$(LD) -T programy/shell_bsf_linker.ld $(RING3_LDFLAGS) \
 		shell_tmp.o bursztyn_gui.o -o shell.elf
 	$(OBJCOPY) -O binary shell.elf shell.bin
 	$(LD) -r -b binary shell.bin -o shell_blob.o
@@ -552,6 +570,12 @@ shell_blob.o: shell_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
 HUSARZ_DEBUG ?= 0
 HUSARZ_RESOURCE_DEBUG ?= $(HUSARZ_DEBUG)
 HUSARZ_PERF ?= 0
+BSF_PROFILE ?= 0
+.PHONY: bsf-profile-config-force
+.bsf-test/profile-build-config: bsf-profile-config-force
+	@mkdir -p .bsf-test
+	@$(PYTHON) -c "from pathlib import Path; p=Path('$@'); v='profile=$(BSF_PROFILE)'; p.write_text(v) if not p.exists() or p.read_text()!=v else None"
+menedzer_okien_tmp.o: .bsf-test/profile-build-config
 .PHONY: husarz-build-config-force
 .husarz-test/build-config: husarz-build-config-force
 	@mkdir -p .husarz-test
@@ -570,8 +594,8 @@ przegladarka_blob.o: przegladarka_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o
 husarz_worker_tmp.o: programy/przegladarka.cpp Makefile $(wildcard programy/husarz/*.h) $(wildcard programy/husarz/*.inc)
 	$(CXX) $(RING3_FLAGS) -msse2 -mfpmath=sse -mno-avx -fcoroutines -fcheck-new -DHUSARZ_DEBUG_RESOURCES=$(HUSARZ_RESOURCE_DEBUG) -DHUSARZ_PERF=$(HUSARZ_PERF) -DHUSARZ_WORKER_ONLY=1 -Wno-unused-function -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c $< -o $@
 
-husarz_worker_blob.o: husarz_worker_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o $(PRZEGLADARKA_LINKER)
-	$(LD) --defsym=HUSARZ_WORKER_BUILD=1 --gc-sections -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) husarz_worker_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o -o husarz_worker.elf
+husarz_worker_blob.o: husarz_worker_tmp.o bursztyn_gui_minimal.o image_ring3.o btp_ring3.o $(PRZEGLADARKA_LINKER)
+	$(LD) --defsym=HUSARZ_WORKER_BUILD=1 --gc-sections -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) husarz_worker_tmp.o bursztyn_gui_minimal.o image_ring3.o btp_ring3.o -o husarz_worker.elf
 	$(OBJCOPY) -O binary husarz_worker.elf husarz_worker.bin
 	$(LD) -r -b binary husarz_worker.bin -o husarz_worker_blob.o
 
@@ -739,12 +763,20 @@ test_dzwieku_blob.o: test_dzwieku_tmp.o bursztyn_gui.o programy/test_dzwieku/tes
 	$(PYTHON) narzedzia/test_dzwieku_size.py test_dzwieku.bin
 	$(LD) -r -b binary test_dzwieku.bin -o test_dzwieku_blob.o
 
+ustawienia_tmp.o: programy/ustawienia/ustawienia.cpp $(wildcard bursztyn_ui/*.h) bsf/runtime.h
+	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
+
+ustawienia_blob.o: ustawienia_tmp.o bursztyn_gui.o $(MOTYWY_LINKER)
+	$(LD) --gc-sections -T $(MOTYWY_LINKER) $(RING3_LDFLAGS) ustawienia_tmp.o bursztyn_gui.o -o ustawienia.elf
+	$(OBJCOPY) -O binary ustawienia.elf ustawienia.bin
+	$(LD) -r -b binary ustawienia.bin -o $@
+
 # REPRO (tylko diagnostyka BWS2/BWS46)
 repro_tmp.o: programy/repro/repro.cpp bursztyn_gui.h
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
 
-repro_blob.o: repro_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
-	$(LD) -T $(EKSPLORATOR_LINKER) $(RING3_LDFLAGS) \
+repro_blob.o: repro_tmp.o bursztyn_gui.o programy/repro/repro_linker.ld
+	$(LD) -T programy/repro/repro_linker.ld $(RING3_LDFLAGS) \
 		repro_tmp.o bursztyn_gui.o -o repro.elf
 	$(OBJCOPY) -O binary repro.elf repro.bin
 	$(LD) -r -b binary repro.bin -o repro_blob.o
@@ -754,7 +786,7 @@ repro_blob.o: repro_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
 # ============================================================================
 
 menedzer_okien_tmp.o: menedzer_okien.cpp desktop_entries.h desktop_layout_settings.h desktop_layout.h bursztyn_gui.h ui_skala.h pulpit_geometria.h obrazy/png_dekoder.h plik_popup_ui.h plik_operacje_ui.h $(wildcard bursztyn_ui/*.h)
-	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
+	$(CXX) $(RING3_FLAGS) -DBSF_PROFILE=$(BSF_PROFILE) -Os -fstack-usage -c menedzer_okien.cpp -o $@
 
 menedzer_okien_blob.o: menedzer_okien_tmp.o bursztyn_gui.o $(MENEDZER_OKIEN_LINKER)
 	$(LD) -T $(MENEDZER_OKIEN_LINKER) $(RING3_LDFLAGS) \
@@ -814,7 +846,7 @@ check-kernel: $(KERNEL)
 # 1. Bursztyn OS (domyslny, czysty start bez autostartu testow)
 # 2. Bursztyn OS - testy automatyczne (multiboot2 bursztyn.test=automated)
 #
-$(GRUB_CFG): $(KERNEL) $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile
+$(GRUB_CFG): $(KERNEL) ustawienia_blob.o $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile narzedzia/package_bsf.py czcionki/ttf $(wildcard czcionki/ttf/*)
 	@mkdir -p $(ISO_DIR)/boot/grub
 	@cp $(KERNEL) $(ISO_DIR)/boot/
 	@echo "[ISO] Kopiuje $(TAPETY_PAK) jako /boot/tapety.pak (modul Multiboot2)."
@@ -864,6 +896,7 @@ $(GRUB_CFG): $(KERNEL) $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile
 		'    boot' \
 		'}' \
 		> $(GRUB_CFG)
+	$(PYTHON) narzedzia/package_bsf.py $(ISO_DIR)
 
 .installer-build/BOOTX64.EFI: narzedzia/instalator/grub-embedded.cfg Makefile
 	@mkdir -p .installer-build
@@ -996,13 +1029,14 @@ run-installer: iso
 
 instalator_tmp.o: programy/instalator/instalator.cpp instalator_format.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
-instalator_blob.o: instalator_tmp.o bursztyn_gui.o programy/kontrolki3/kontrolki3_linker.ld
-	$(LD) --gc-sections -T programy/kontrolki3/kontrolki3_linker.ld $(RING3_LDFLAGS) instalator_tmp.o bursztyn_gui.o -o instalator.elf
+instalator_blob.o: instalator_tmp.o bursztyn_gui.o programy/instalator/instalator_linker.ld
+	$(LD) --gc-sections -T programy/instalator/instalator_linker.ld $(RING3_LDFLAGS) instalator_tmp.o bursztyn_gui.o -o instalator.elf
 	$(OBJCOPY) -O binary instalator.elf instalator.bin
 	$(LD) -r -b binary instalator.bin -o $@
 
 $(ISO): check-kernel $(KERNEL) $(TAPETY_PAK) $(GRUB_CFG)
 	$(GRUB_MKRESCUE) -o $@ $(ISO_DIR) --xorriso=$(XORRISO)
+	$(PYTHON) narzedzia/verify_bsf_iso.py $@
 	@cmp -s $(TAPETY_PAK) $(ISO_DIR)/boot/tapety.pak || { echo "[TAPETY BUILD] BLAD: staging ISO nie jest identyczny z $(TAPETY_PAK)"; exit 1; }
 	@rm -f $(TAPETY_ISO_CHECK)
 	@$(XORRISO) -osirrox on -indev $@ -extract /boot/tapety.pak $(TAPETY_ISO_CHECK) >/dev/null 2>&1
@@ -1539,8 +1573,8 @@ bochs_vbe.o: sterowniki/grafika/bochs_vbe.cpp sterowniki/grafika/bochs_vbe.h ekr
 
 ekran_tmp.o: programy/ekran/ekran.cpp programy/ekran/klient.h programy/ekran/ekran_okno.h ekran_format.h ui_skala.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
-ekran_blob.o: ekran_tmp.o bursztyn_gui.o programy/kontrolki3/kontrolki3_linker.ld
-	$(LD) --gc-sections -T programy/kontrolki3/kontrolki3_linker.ld $(RING3_LDFLAGS) ekran_tmp.o bursztyn_gui.o -o ekran.elf
+ekran_blob.o: ekran_tmp.o bursztyn_gui.o programy/ekran/ekran_linker.ld
+	$(LD) --gc-sections -T programy/ekran/ekran_linker.ld $(RING3_LDFLAGS) ekran_tmp.o bursztyn_gui.o -o ekran.elf
 	$(OBJCOPY) -O binary ekran.elf ekran.bin
 	$(LD) -r -b binary ekran.bin -o $@
 $(filter %_tmp.o,$(OBJS)) bursztyn_gui.o: ui_skala.h
@@ -2081,8 +2115,8 @@ test-fpu-host:
 
 fpu_probe_tmp.o: programy/fpu_probe.cpp fpu.h bursztyn_gui.h
 	$(CXX) $(RING3_FLAGS) -mgeneral-regs-only -I. -Os -c $< -o $@
-fpu_probe_blob.o: fpu_probe_tmp.o bursztyn_gui.o $(PRZEGLADARKA_LINKER)
-	$(LD) --defsym=HUSARZ_WORKER_BUILD=1 --gc-sections -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) fpu_probe_tmp.o bursztyn_gui.o -o fpu_probe.elf
+fpu_probe_blob.o: fpu_probe_tmp.o bursztyn_gui_minimal.o $(PRZEGLADARKA_LINKER)
+	$(LD) --defsym=HUSARZ_WORKER_BUILD=1 --gc-sections -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) fpu_probe_tmp.o bursztyn_gui_minimal.o -o fpu_probe.elf
 	$(OBJCOPY) -O binary fpu_probe.elf fpu_probe.bin
 	$(LD) -r -b binary fpu_probe.bin -o $@
 
@@ -2101,3 +2135,21 @@ test-husarz-css-host:
 	@mkdir -p .husarz-test
 	g++ -std=c++17 -fcoroutines -O0 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -I. narzedzia/test_husarz_css_compat.cpp -o .husarz-test/css-compat
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .husarz-test/css-compat
+
+.PHONY: test-bsf-host
+test-bsf-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections narzedzia/test_bsf.cpp bsf/bsf.cpp -Wl,--gc-sections -o .bsf-test/bsf-host
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/bsf-host
+
+.PHONY: test-bsf-ui-host
+test-bsf-ui-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -fcoroutines -O0 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_bsf_ui.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/ui-host
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/ui-host
+
+.PHONY: profile-bsf-host
+profile-bsf-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O2 -ffunction-sections -fdata-sections narzedzia/profile_bsf.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/profile
+	.bsf-test/profile

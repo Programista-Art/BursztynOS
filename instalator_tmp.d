@@ -17,8 +17,10 @@ instalator_tmp.o: programy/instalator/instalator.cpp \
  programy/instalator/../../bursztyn_ui/../legacy_ui.h \
  programy/instalator/../../bursztyn_ui/../motyw.h \
  programy/instalator/../../bursztyn_ui/czcionka.h \
- programy/instalator/../../bursztyn_ui/../czcionki/extronic16Bunicode.h \
- programy/instalator/../../bursztyn_ui/../czcionki/extronic16B_unicode.h \
+ programy/instalator/../../bursztyn_ui/../bsf/runtime.h \
+ programy/instalator/../../bursztyn_ui/../bsf/bsf.h \
+ programy/instalator/../../bursztyn_ui/../bsf/config.h \
+ programy/instalator/../../bursztyn_ui/../bws_czcionka.h \
  programy/instalator/../../bursztyn_ui/rysowanie.h \
  programy/instalator/../../bursztyn_ui/polecenie_ui.h \
  programy/instalator/../../bursztyn_ui/ikona_ui.h \
@@ -103,8 +105,10 @@ programy/instalator/../../bursztyn_ui/../skladacz_obrazu.h:
 programy/instalator/../../bursztyn_ui/../legacy_ui.h:
 programy/instalator/../../bursztyn_ui/../motyw.h:
 programy/instalator/../../bursztyn_ui/czcionka.h:
-programy/instalator/../../bursztyn_ui/../czcionki/extronic16Bunicode.h:
-programy/instalator/../../bursztyn_ui/../czcionki/extronic16B_unicode.h:
+programy/instalator/../../bursztyn_ui/../bsf/runtime.h:
+programy/instalator/../../bursztyn_ui/../bsf/bsf.h:
+programy/instalator/../../bursztyn_ui/../bsf/config.h:
+programy/instalator/../../bursztyn_ui/../bws_czcionka.h:
 programy/instalator/../../bursztyn_ui/rysowanie.h:
 programy/instalator/../../bursztyn_ui/polecenie_ui.h:
 programy/instalator/../../bursztyn_ui/ikona_ui.h:

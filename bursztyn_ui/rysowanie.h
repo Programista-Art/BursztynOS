@@ -198,9 +198,115 @@ public:
         }
     }
 
+#if defined(BSF_NATIVE)
+    bool rysuj_tekst_bsf(Punkt pt, const char *tekst, uint32_t kolor, int px,
+                         bool bold = false) {
+      // Direct desktop canvases have no software target. Submit a whole
+      // clipped text run instead of one syscall per scanline of each glyph.
+      if (!cel_ && px >= 1 && px <= 128 && BSF::ready()) {
+        const Punkt off = pobierz_przesuniecie();
+        const Prostokat clip = pobierz_przyciecie();
+        const int advance = BSF::measure_text(tekst, px, bold);
+        const int line = BSF::height(px);
+        if (advance >= 0 && advance <= 65536 && line > 0) {
+          const Prostokat run(pt.x + off.x - px, pt.y + off.y - px,
+                              advance + 2 * px, line + 2 * px);
+          const Prostokat visible = run.przeciecie(clip);
+          if (visible.czy_pusty()) return true;
+          if (g_tlum_rysowanie_globalne) {
+            dodaj_pomiar_tekstu(visible);
+            return true;
+          }
+          const size_t area = size_t(visible.szerokosc) * visible.wysokosc;
+          if (visible.szerokosc <= 2048 && visible.wysokosc <= 256 &&
+              area <= 262144) {
+            auto *pixels = new uint32_t[area];
+            if (pixels) {
+              for (size_t i = 0; i < area; ++i)
+                static_cast<volatile uint32_t *>(pixels)[i] = 0;
+              const bool drawn = CzcionkaUI::rysuj_bsf(
+                  tekst, pt.x + off.x, pt.y + off.y, px,
+                  [&](int gx, int gy, int w, int h, const uint8_t *alpha) {
+                    for (int y = 0; y < h; ++y) {
+                      if (gy + y < visible.y || gy + y >= visible.dolny())
+                        continue;
+                      for (int x = 0; x < w; ++x) {
+                        if (gx + x < visible.x || gx + x >= visible.prawy())
+                          continue;
+                        auto &dst = pixels[size_t(gy + y - visible.y) *
+                                               visible.szerokosc +
+                                           gx + x - visible.x];
+                        unsigned a = alpha[y * w + x];
+                        a += (dst >> 24) * (255 - a) / 255;
+                        dst = (a << 24) | (kolor & 0xffffff);
+                      }
+                    }
+                  },
+                  bold);
+              if (drawn) {
+                gui_blit_alpha(visible.x, visible.y, visible.szerokosc,
+                               visible.wysokosc, pixels);
+                dodaj_pomiar_tekstu(visible);
+              }
+              delete[] pixels;
+              if (drawn)
+                return true;
+            }
+          }
+        }
+      }
+
+      {
+        Punkt off = pobierz_przesuniecie();
+        Prostokat clip = pobierz_przyciecie();
+        if (CzcionkaUI::rysuj_bsf(
+                tekst, pt.x + off.x, pt.y + off.y, px,
+                [&](int gx, int gy, int w, int h, const uint8_t *alpha) {
+                  uint32_t row[BSF::MaxBitmap]{};
+                  for (int y = 0; y < h; ++y) {
+                    if (gy + y < clip.y || gy + y >= clip.dolny())
+                      continue;
+                    int left = gx < clip.x ? clip.x : gx,
+                        right = gx + w > clip.prawy() ? clip.prawy() : gx + w;
+                    for (int x = left; x < right; ++x) {
+                      unsigned a = alpha[y * w + x - gx];
+                      row[x - left] = (a << 24) | (kolor & 0xffffff);
+                      if (cel_ && granice_celu_.zawiera(Punkt(x, gy + y))) {
+                        auto &dst = cel_[size_t(gy + y - granice_celu_.y) *
+                                             granice_celu_.szerokosc +
+                                         x - granice_celu_.x];
+                        uint32_t c = 0;
+                        for (unsigned shift = 0; shift < 24; shift += 8)
+                          c |= ((((kolor >> shift) & 255) * a +
+                                 ((dst >> shift) & 255) * (255 - a) + 127) /
+                                255)
+                               << shift;
+                        dst = 0xff000000 | c;
+                      }
+                    }
+                    if (!cel_ && !g_tlum_rysowanie_globalne && right > left)
+                      gui_blit_alpha(left, gy + y, right - left, 1, row);
+                  }
+                },
+                bold)) {
+          dodaj_pomiar_tekstu(Prostokat(pt.x + off.x, pt.y + off.y,
+                                        BSF::measure_text(tekst, px, bold),
+                                        BSF::height(px))
+                                  .przeciecie(clip));
+          return true;
+        }
+      }
+
+      return false;
+    }
+#endif
+
     void rysuj_tekst(Punkt pt, const char* tekst, uint32_t kolor, SkalaUI skala = 1) {
         if (!tekst || tekst[0] == '\0') return;
         if (skala < 1) skala = 1;
+#if defined(BSF_NATIVE)
+        if(rysuj_tekst_bsf(pt,tekst,kolor,ui_skaluj(BSF::ui_size(),skala.procent())))return;
+#endif
         Punkt off = pobierz_przesuniecie();
         int tx = pt.x + off.x;
         int ty = pt.y + off.y;

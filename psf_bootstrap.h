@@ -66,7 +66,10 @@ static const char* const KATALOGI_SYSTEMOWE[] = {
         "/tymczasowe",
         "/obrazy",
         "/aktualizacje",
-        "/aktualizacje/przygotowanie"
+        "/aktualizacje/przygotowanie",
+        "/czcionki",
+        "/czcionki/ttf",
+        "/programy/ustawienia.cebula"
 };
 
 inline constexpr size_t LICZBA_KATALOGOW_SYSTEMOWYCH =

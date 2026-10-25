@@ -11,8 +11,10 @@ motywy_tmp.o: programy/motywy/motywy.cpp programy/motywy/../../motyw.h \
  programy/motywy/../../bursztyn_ui/zdarzenia.h \
  programy/motywy/../../bursztyn_ui/motyw.h \
  programy/motywy/../../bursztyn_ui/czcionka.h \
- programy/motywy/../../bursztyn_ui/../czcionki/extronic16Bunicode.h \
- programy/motywy/../../bursztyn_ui/../czcionki/extronic16B_unicode.h \
+ programy/motywy/../../bursztyn_ui/../bsf/runtime.h \
+ programy/motywy/../../bursztyn_ui/../bsf/bsf.h \
+ programy/motywy/../../bursztyn_ui/../bsf/config.h \
+ programy/motywy/../../bursztyn_ui/../bws_czcionka.h \
  programy/motywy/../../bursztyn_ui/rysowanie.h \
  programy/motywy/../../bursztyn_ui/polecenie_ui.h \
  programy/motywy/../../bursztyn_ui/ikona_ui.h \
@@ -96,8 +98,10 @@ programy/motywy/../../bursztyn_ui/typy.h:
 programy/motywy/../../bursztyn_ui/zdarzenia.h:
 programy/motywy/../../bursztyn_ui/motyw.h:
 programy/motywy/../../bursztyn_ui/czcionka.h:
-programy/motywy/../../bursztyn_ui/../czcionki/extronic16Bunicode.h:
-programy/motywy/../../bursztyn_ui/../czcionki/extronic16B_unicode.h:
+programy/motywy/../../bursztyn_ui/../bsf/runtime.h:
+programy/motywy/../../bursztyn_ui/../bsf/bsf.h:
+programy/motywy/../../bursztyn_ui/../bsf/config.h:
+programy/motywy/../../bursztyn_ui/../bws_czcionka.h:
 programy/motywy/../../bursztyn_ui/rysowanie.h:
 programy/motywy/../../bursztyn_ui/polecenie_ui.h:
 programy/motywy/../../bursztyn_ui/ikona_ui.h:

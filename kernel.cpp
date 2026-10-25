@@ -1022,7 +1022,21 @@ void importuj_modul_test8k(uint64_t mbi) {
     wypisz_log("[PMM] Pamiec fizyczna modulu test8k.bmp zwolniona do puli PMM.");
 }
 
+#include "bsf/bootstrap.inc"
+
 void instaluj_wbudowane_programy() {
+    bsf_import_fonts();
+    static const char SETTINGS_MANIFEST[] =
+        "nazwa = \"Ustawienia\"\n"
+        "autor = \"Bursztyn OS\"\n"
+        "wersja = \"1.0\"\n"
+        "poziom_zaufania = 3\n"
+        "plik_startowy = \"ustawienia.bur\"\n"
+        "uprawnienia = [\"okna\", \"pliki_czytaj\", \"pliki_zapisz\"]\n";
+    ModulMB2 settings_payload{};
+    if(znajdz_modul_mb2(g_multiboot_info_ptr,"bsf-settings",&settings_payload)&&tekst_rowny(settings_payload.cmdline,"bsf-settings")&&settings_payload.rozmiar<=512*1024){
+        (void)instaluj_paczke("/programy/ustawienia.cebula/opis.aplikacji",SETTINGS_MANIFEST,"/programy/ustawienia.cebula/ustawienia.bur",reinterpret_cast<const uint8_t*>(uintptr_t(settings_payload.start)),reinterpret_cast<const uint8_t*>(uintptr_t(settings_payload.koniec)));
+    }else{wypisz_log("[BSF] Settings payload unavailable; desktop bitmap fallback remains available.");if(scisla_instalacja||planowanie_instalacji)pliki_instalacja_ok=false;}
     static const char MANIFEST_PRZEGLADARKI[] =
         "nazwa = \"Husarz\"\n"
         "autor = \"Programista Art\"\n"

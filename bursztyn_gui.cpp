@@ -6,6 +6,9 @@
 #include "bursztyn_gui.h"
 #include "ui_skala.h"
 #include "wm_belka_hit.h"
+#if defined(BSF_NATIVE)
+#include "bursztyn_ui/czcionka.h"
+#endif
 
 #include <stdint.h>
 #include <stddef.h>
@@ -19,6 +22,60 @@ namespace {
 uint64_t liczba_alokacji_sterty = 0;
 uint64_t liczba_aktywnych_alokacji_sterty = 0;
 uint64_t spakuj_dwa_i32(int a, int b);
+
+#if defined(BSF_NATIVE)
+char bsf_window_title[48]{};
+uint32_t bsf_title_generation{}, bsf_title_scale{};
+void bsf_update_window_title() {
+  if (!bsf_window_title[0])
+    return;
+  struct FontMode {
+    bool old;
+    FontMode() : old(BSF::monospace()) { BSF::monospace(false); }
+    ~FontMode() { BSF::monospace(old); }
+  } mode;
+  uint32_t generation = BSF::generation();
+  if (bsf_title_generation == generation && bsf_title_scale == ui_skala_procent)
+    return;
+  if (!BSF::ready()) {
+    (void)bws_wywolaj(93, 0, 0, 0, 0);
+    bsf_title_generation = generation;
+    bsf_title_scale = ui_skala_procent;
+    return;
+  }
+  int px = ui_skaluj(BSF::ui_size(), ui_skala_procent),
+      w = BSF::measure_text(bsf_window_title, px) + 8, h = BSF::height(px);
+  if (w < 1 || h < 1)
+    return;
+  if (w > 512)
+    w = 512;
+  if (h > 128)
+    h = 128;
+  auto *alpha = new uint8_t[size_t(w) * h];
+  if (!alpha)
+    return;
+  for (size_t i = 0; i < size_t(w) * h; ++i)
+    static_cast<volatile uint8_t *>(alpha)[i] = 0;
+  BursztynUI::CzcionkaUI::rysuj_bsf(
+      bsf_window_title, 0, 0, px,
+      [&](int x, int y, int gw, int gh, const uint8_t *a) {
+        for (int yy = 0; yy < gh; ++yy)
+          for (int xx = 0; xx < gw; ++xx)
+            if (x + xx >= 0 && x + xx < w && y + yy >= 0 && y + yy < h) {
+              auto &dst = alpha[(y + yy) * w + x + xx];
+              unsigned src = a[yy * gw + xx];
+              dst = uint8_t(src + unsigned(dst) * (255 - src) / 255);
+            }
+      });
+  uint64_t dimensions = (uint64_t(uint32_t(w)) << 32) | uint32_t(h);
+  if (bws_wywolaj(93, dimensions, reinterpret_cast<uint64_t>(alpha), 0, 0) ==
+      1) {
+    bsf_title_generation = generation;
+    bsf_title_scale = ui_skala_procent;
+  }
+  delete[] alpha;
+}
+#endif
 
 bool legacy_wlaczony = false;
 bool legacy_ma_warstwe = false;
@@ -773,6 +830,9 @@ void gui_wypisz_tekst(int x,
     if (!tekst)
         return;
 
+#if defined(BSF_NATIVE)
+    if(BSF::ready()){gui_wypisz_tekst_kolor(x,y,motyw_kolor(MOTYW_KOLOR_TEKST),tekst);return;}
+#endif
     if (legacy_wlaczony) {
         gui_wypisz_tekst_kolor_skala(x, y, 0x00D1D5DB, 100, tekst);
         return;
@@ -802,6 +862,9 @@ void gui_wyczyscz_obszar(int x,
 }
 
 void gui_odswiez() {
+#if defined(BSF_NATIVE)
+    bsf_update_window_title();
+#endif
     bws_wywolaj(
         17, 0, 0, 0, 0);
 }
@@ -853,6 +916,21 @@ void gui_wypisz_tekst_kolor_skala(int x,
         if (poprawna_skala > 400U) poprawna_skala = 400U;
     }
 
+#if defined(BSF_NATIVE)
+    int pixel_size=ui_skaluj(BSF::ui_size(),poprawna_skala);
+    if(pixel_size>=1&&pixel_size<=128&&BSF::ready()){
+        int width=BSF::measure_text(tekst,pixel_size)+8,height=BSF::height(pixel_size)+4;
+        if(width>0&&width<=2048&&height>0&&height<=128){
+            auto* pixels=new uint32_t[size_t(width)*height];
+            if(pixels){for(size_t i=0;i<size_t(width)*height;++i)static_cast<volatile uint32_t*>(pixels)[i]=0;
+                BursztynUI::CzcionkaUI::rysuj_bsf(tekst,4,0,pixel_size,[&](int gx,int gy,int w,int h,const uint8_t* alpha){for(int yy=0;yy<h;++yy)for(int xx=0;xx<w;++xx)if(gx+xx>=0&&gx+xx<width&&gy+yy>=0&&gy+yy<height){auto& dst=pixels[size_t(gy+yy)*width+gx+xx];unsigned a=alpha[yy*w+xx],previous=dst>>24;a+=previous*(255-a)/255;dst=(a<<24)|(kolor&0xffffff);}});
+                gui_blit_alpha(legacy_x(x)-4,legacy_y(y),width,height,pixels);delete[] pixels;return;
+            }
+        }
+    }
+    if(BursztynUI::CzcionkaUI::rysuj_bsf(tekst,legacy_x(x),legacy_y(y),pixel_size,
+        [&](int gx,int gy,int w,int h,const uint8_t* alpha){uint32_t row[BSF::MaxBitmap];for(int yy=0;yy<h;++yy){for(int xx=0;xx<w;++xx)row[xx]=(uint32_t(alpha[yy*w+xx])<<24)|(kolor&0xffffff);gui_blit_alpha(gx,gy+yy,w,1,row);}}))return;
+#endif
     const uint64_t kolor_skala =
         (static_cast<uint64_t>(poprawna_skala) << 32) |
         static_cast<uint64_t>(kolor);
@@ -892,6 +970,8 @@ bool gui_blit(int x, int y, int szer, int wys, const uint32_t* piksele) {
     return wynik == 1ULL;
 }
 
+bool gui_blit_alpha(int x,int y,int w,int h,const uint32_t* pixels){if(!pixels||w<1||h<1)return false;return bws_wywolaj(57,spakuj_dwa_i32(x,y),spakuj_dwa_i32(w,h),reinterpret_cast<uint64_t>(pixels),3)==1;}
+
 bool gui_blit_popup(int x, int y, int szer, int wys, const uint32_t* piksele) {
     if (!piksele || szer <= 0 || wys <= 0) return false;
     const uint64_t wynik = bws_wywolaj(
@@ -904,11 +984,14 @@ bool gui_blit_popup(int x, int y, int szer, int wys, const uint32_t* piksele) {
 }
 
 bool gui_ustaw_tytul_okna(const char* tytul) {
-    if (!tytul) return false;
-    return bws_wywolaj(
-        58,
-        reinterpret_cast<uint64_t>(tytul),
-        0, 0, 0) == 1ULL;
+    if(!tytul)return false;
+#if defined(BSF_NATIVE)
+    size_t length=0;while(tytul[length]&&length<4096)++length;size_t at=0;
+    while(at<length){uint32_t cp;size_t n=BSF::utf8(tytul+at,length-at,cp);if(at+n>=sizeof(bsf_window_title))break;for(size_t j=0;j<n;++j)bsf_window_title[at+j]=tytul[at+j];at+=n;}bsf_window_title[at]=0;bsf_title_generation=0;
+    bool result=bws_wywolaj(58,reinterpret_cast<uint64_t>(bsf_window_title),0,0,0)==1;bsf_update_window_title();return result;
+#else
+    return bws_wywolaj(58,reinterpret_cast<uint64_t>(tytul),0,0,0)==1;
+#endif
 }
 
 void gui_ustaw_przejecie_myszy(bool stan) {
@@ -1508,6 +1591,9 @@ static BursztynMotyw g_lokalny_motyw = g_domyslny_motyw_fallback;
 static bool g_motyw_zainicjalizowany = false;
 
 void motyw_odswiez_lokalny() {
+#if defined(BSF_NATIVE)
+    BSF::refresh();bsf_update_window_title();
+#endif
     BursztynMotyw m{};
     if (bws_wywolaj(BWS_MOTYW_POBIERZ, reinterpret_cast<uint64_t>(&m)) == 1) {
         g_lokalny_motyw = m;
@@ -1680,6 +1766,9 @@ void gui_pobierz_rozdzielczosc(int* w,
 }
 
 int gui_pobierz_szerokosc_znaku(uint32_t znak) {
+#if defined(BSF_NATIVE)
+    int a=BSF::measure_cp(znak,BSF::ui_size());if(a>=0)return a>0?a-1:0;
+#endif
     const uint64_t wynik =
         bws_wywolaj(
             24,
@@ -1693,6 +1782,9 @@ int gui_pobierz_szerokosc_znaku(uint32_t znak) {
 }
 
 int gui_pobierz_wysokosc_fontu() {
+#if defined(BSF_NATIVE)
+    int h=BSF::height(BSF::ui_size());if(h>0)return h;
+#endif
     const uint64_t wynik = bws_wywolaj(51, 0, 0, 0, 0);
     return wynik >= 1 && wynik <= 64 ? static_cast<int>(wynik) : 16;
 }
@@ -1823,6 +1915,9 @@ int oblicz_szerokosc_tekstu(const char* tekst,
                         : 100U * uint32_t(popraw_skale(skala)))
         : (skala>=100?uint32_t(popraw_skale(skala)):ui_skala_procent*popraw_skale(skala));
 
+#if defined(BSF_NATIVE)
+    if(BSF::ready())return BSF::measure_text(tekst,ui_skaluj(BSF::ui_size(),procent));
+#endif
     int szerokosc = 0;
     size_t i = 0;
 
@@ -1868,6 +1963,24 @@ void rysuj_tekst_wysrodkowany(int px,
                         : 100U * uint32_t(popraw_skale(skala)))
         : (skala>=100?uint32_t(popraw_skale(skala)):ui_skala_procent*popraw_skale(skala));
 
+#if defined(BSF_NATIVE)
+    // Labels constrained by a button/taskbar cell must retain UTF-8 boundaries.
+    char fitted[512];
+    size_t length = 0;
+    while (tekst[length] && length < sizeof(fitted) - 1) ++length;
+    size_t accepted = 0;
+    for (size_t at = 0; at < length;) {
+        uint32_t cp;
+        const size_t consumed = BSF::utf8(tekst + at, length - at, cp);
+        if (!consumed || at + consumed >= sizeof(fitted)) break;
+        for (size_t j = 0; j < consumed; ++j) fitted[at + j] = tekst[at + j];
+        fitted[at + consumed] = 0;
+        if (oblicz_szerokosc_tekstu(fitted, procent) > w) break;
+        accepted = at += consumed;
+    }
+    fitted[accepted] = 0;
+    tekst = fitted;
+#endif
     const int szer_tekstu =
         oblicz_szerokosc_tekstu(
             tekst,

@@ -66,6 +66,7 @@
 #include "bws_api.h"
 #include "bws_czcionka.h"
 #include "bws_nowoczesne.h"
+#include "bsf/asset_path.h"
 #include "pamiec.h"
 #include "loader.h"
 #include "heap.h"
@@ -190,6 +191,7 @@ bool bws_gui_blit(
 );
 
 bool bws_gui_zastap_region(int,int,int,int,const uint32_t*);
+bool bws_gui_alpha_blit(int,int,int,int,const uint32_t*);
 
 extern "C" void SerialLog(
     const char* str
@@ -1185,13 +1187,6 @@ __attribute__((noinline)) uint64_t bws_czytaj_plik(
     uint64_t arg2,
     uint64_t arg3
 ) {
-    if (!proces_ma_prawo(
-            proces,
-            PRAWO_PLIKI_CZYTAJ)) {
-
-        return 0;
-    }
-
     char sciezka[
         MAX_SCIEZKA_PLIKU_BWS] = {};
 
@@ -1201,6 +1196,9 @@ __attribute__((noinline)) uint64_t bws_czytaj_plik(
 
         return 0;
     }
+
+    if(!proces_ma_prawo(proces,PRAWO_PLIKI_CZYTAJ)&&
+       !(proces_ma_prawo(proces,PRAWO_GUI)&&BSF::trusted_asset(sciezka,false)&&arg3<=2*1024*1024))return 0;
 
     if (arg3 >
         MAX_PLIK_BSP2_BWS) {
@@ -1296,13 +1294,6 @@ __attribute__((noinline)) uint64_t bws_wylistuj_katalog(
     uint64_t arg2,
     uint64_t arg3
 ) {
-    if (!proces_ma_prawo(
-            proces,
-            PRAWO_PLIKI_CZYTAJ)) {
-
-        return 0;
-    }
-
     char sciezka[
         MAX_SCIEZKA_PLIKU_BWS] = {};
 
@@ -1312,6 +1303,9 @@ __attribute__((noinline)) uint64_t bws_wylistuj_katalog(
 
         return 0;
     }
+
+    if(!proces_ma_prawo(proces,PRAWO_PLIKI_CZYTAJ)&&
+       !(proces_ma_prawo(proces,PRAWO_GUI)&&BSF::trusted_asset(sciezka,true)&&arg3<=8192))return 0;
 
     if (arg2 == 0 ||
         arg3 == 0 ||
@@ -2959,9 +2953,9 @@ __attribute__((noinline)) uint64_t bws_rozmiar_pliku(
     proces_t& proces,
     uint64_t arg1
 ) {
-    if (!proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ)) return 0;
     char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
     if (!pobierz_sciezke_pliku(arg1, sciezka)) return 0;
+    if(!proces_ma_prawo(proces,PRAWO_PLIKI_CZYTAJ)&&!(proces_ma_prawo(proces,PRAWO_GUI)&&BSF::trusted_asset(sciezka)))return 0;
     /* +1 zachowuje 0 jako blad i pozwala reprezentowac pusty plik. */
     return static_cast<uint64_t>(rozmiar_pliku(sciezka)) + 1ULL;
 }
@@ -3145,6 +3139,14 @@ static uint64_t obsluga_wywolan_systemowych_impl(
     proces_t& proces =
         *proces_ptr;
 
+    if(nr_funkcji==BWS_GUI_TYTUL_ALFA){
+        if(!proces_ma_prawo(proces,PRAWO_GUI))return 0;
+        int w=gorne_i32(arg1),h=dolne_i32(arg1);if(w<0||h<0||w>512||h>128)return 0;
+        size_t bytes=size_t(w)*size_t(h);
+        if(bytes&&(!arg2||!czy_bezpieczny_zakres_uzytkownika_do_odczytu(reinterpret_cast<const void*>(arg2),bytes)||!bws_vmm_sprawdz_zakres_uzytkownika(reinterpret_cast<const void*>(arg2),bytes,false)))return 0;
+        BlokadaEkranu lock;
+        return skladacz_obrazu_ustaw_maske_tytulu(aktualny_pid,w,h,reinterpret_cast<const uint8_t*>(arg2))?1:0;
+    }
     if (nr_funkcji >= BWS_GUI_GEOMETRIA &&
         nr_funkcji < BWS_PIERWSZY_WOLNY) {
         return bws_nowoczesne_obsluz(
@@ -3942,7 +3944,7 @@ static uint64_t obsluga_wywolan_systemowych_impl(
                     aktualny_pid, x, y, szer, wys,
                     reinterpret_cast<const uint32_t*>(arg3)) ? 1ULL : 0ULL;
             }
-            const auto blit=arg4==2?bws_gui_zastap_region:bws_gui_blit;
+            const auto blit=arg4==3?bws_gui_alpha_blit:arg4==2?bws_gui_zastap_region:bws_gui_blit;
             return blit(
                 x, y, szer, wys,
                 reinterpret_cast<const uint32_t*>(arg3)) ? 1ULL : 0ULL;

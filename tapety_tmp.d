@@ -16,8 +16,10 @@ tapety_tmp.o: programy/tapety/tapety.cpp programy/tapety/../../loader.h \
  programy/tapety/../../bursztyn_ui/../legacy_ui.h \
  programy/tapety/../../bursztyn_ui/../motyw.h \
  programy/tapety/../../bursztyn_ui/czcionka.h \
- programy/tapety/../../bursztyn_ui/../czcionki/extronic16Bunicode.h \
- programy/tapety/../../bursztyn_ui/../czcionki/extronic16B_unicode.h \
+ programy/tapety/../../bursztyn_ui/../bsf/runtime.h \
+ programy/tapety/../../bursztyn_ui/../bsf/bsf.h \
+ programy/tapety/../../bursztyn_ui/../bsf/config.h \
+ programy/tapety/../../bursztyn_ui/../bws_czcionka.h \
  programy/tapety/../../bursztyn_ui/rysowanie.h \
  programy/tapety/../../bursztyn_ui/polecenie_ui.h \
  programy/tapety/../../bursztyn_ui/ikona_ui.h \
@@ -105,8 +107,10 @@ programy/tapety/../../bursztyn_ui/../skladacz_obrazu.h:
 programy/tapety/../../bursztyn_ui/../legacy_ui.h:
 programy/tapety/../../bursztyn_ui/../motyw.h:
 programy/tapety/../../bursztyn_ui/czcionka.h:
-programy/tapety/../../bursztyn_ui/../czcionki/extronic16Bunicode.h:
-programy/tapety/../../bursztyn_ui/../czcionki/extronic16B_unicode.h:
+programy/tapety/../../bursztyn_ui/../bsf/runtime.h:
+programy/tapety/../../bursztyn_ui/../bsf/bsf.h:
+programy/tapety/../../bursztyn_ui/../bsf/config.h:
+programy/tapety/../../bursztyn_ui/../bws_czcionka.h:
 programy/tapety/../../bursztyn_ui/rysowanie.h:
 programy/tapety/../../bursztyn_ui/polecenie_ui.h:
 programy/tapety/../../bursztyn_ui/ikona_ui.h:

@@ -1,0 +1,5 @@
+stb_truetype.h v1.26
+https://github.com/nothings/stb
+commit 003501f6d7a8668ce8b6d875e34dd97ad0d5d5b5
+MIT alternative selected; see LICENSE.
+Only rasterization of BSF-validated vertices is used. Raw stb font parsers are never called.

@@ -16,8 +16,10 @@ ekran_tmp.o: programy/ekran/ekran.cpp programy/ekran/../../loader.h \
  programy/ekran/../../bursztyn_ui/../legacy_ui.h \
  programy/ekran/../../bursztyn_ui/../motyw.h \
  programy/ekran/../../bursztyn_ui/czcionka.h \
- programy/ekran/../../bursztyn_ui/../czcionki/extronic16Bunicode.h \
- programy/ekran/../../bursztyn_ui/../czcionki/extronic16B_unicode.h \
+ programy/ekran/../../bursztyn_ui/../bsf/runtime.h \
+ programy/ekran/../../bursztyn_ui/../bsf/bsf.h \
+ programy/ekran/../../bursztyn_ui/../bsf/config.h \
+ programy/ekran/../../bursztyn_ui/../bws_czcionka.h \
  programy/ekran/../../bursztyn_ui/rysowanie.h \
  programy/ekran/../../bursztyn_ui/polecenie_ui.h \
  programy/ekran/../../bursztyn_ui/ikona_ui.h \
@@ -102,8 +104,10 @@ programy/ekran/../../bursztyn_ui/../skladacz_obrazu.h:
 programy/ekran/../../bursztyn_ui/../legacy_ui.h:
 programy/ekran/../../bursztyn_ui/../motyw.h:
 programy/ekran/../../bursztyn_ui/czcionka.h:
-programy/ekran/../../bursztyn_ui/../czcionki/extronic16Bunicode.h:
-programy/ekran/../../bursztyn_ui/../czcionki/extronic16B_unicode.h:
+programy/ekran/../../bursztyn_ui/../bsf/runtime.h:
+programy/ekran/../../bursztyn_ui/../bsf/bsf.h:
+programy/ekran/../../bursztyn_ui/../bsf/config.h:
+programy/ekran/../../bursztyn_ui/../bws_czcionka.h:
 programy/ekran/../../bursztyn_ui/rysowanie.h:
 programy/ekran/../../bursztyn_ui/polecenie_ui.h:
 programy/ekran/../../bursztyn_ui/ikona_ui.h:

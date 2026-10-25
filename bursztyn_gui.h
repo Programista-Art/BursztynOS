@@ -349,6 +349,8 @@ bool gui_blit(int x,
               int szer,
               int wys,
               const uint32_t* piksele);
+// Physical coordinates; source-over ARGB into the caller-owned layer (BWS57/3).
+bool gui_blit_alpha(int x,int y,int width,int height,const uint32_t* pixels);
 
 bool gui_blit_popup(int x,
                     int y,

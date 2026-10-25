@@ -449,3 +449,6 @@ bool skladacz_obrazu_dekoracja_w_punkcie(int pid, int lx, int ly);
 // Wyciszanie pod zewnetrzna blokada ekranu, bez oczekiwania na GPU.
 void skladacz_obrazu_wycisz();
 void skladacz_obrazu_wznow();
+
+// Bounded, pre-rendered userspace title coverage. Called under the GUI lock.
+bool skladacz_obrazu_ustaw_maske_tytulu(int pid,int w,int h,const uint8_t* alpha);
