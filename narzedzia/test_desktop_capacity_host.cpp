@@ -43,7 +43,7 @@ int main() {
     auto mp=std::make_unique<Model>();auto& m=*mp;
     CHECK(m.set_count(Model::capacity));CHECK(!m.set_count(Model::capacity+1));CHECK(m.count==Model::capacity);CHECK(!m.set_count(-1));
     for(unsigned dpi:{100U,125U}) {
-        const int capacity=dpi==100?77:45;
+        const int capacity=dpi==100?50:32;
         for(int count:{0,1,capacity-1,capacity,capacity+1,capacity+40,Model::capacity}) {
             setup(m,count,1280,720,dpi);CHECK(placed(m)==(count<capacity?count:capacity));
             auto previous=m;CHECK(m.reflow()==0);CHECK(m.newlyPlaced==0);invariant(m);
@@ -51,14 +51,15 @@ int main() {
         }
         setup(m,Model::capacity,1280,720,dpi);
         std::vector<int> waiting;for(int i=0;i<m.count;++i)if(!m.items[i].placed)waiting.push_back(i);
-        auto first=m.visual_bounds(0);m.items[0].placed=false;m.items[0].label.height=m.workBottom+1;
-        m.reflow();CHECK(m.newlyPlaced==1);CHECK(m.items[waiting[0]].placed);CHECK(placed(m)==capacity);invariant(m);
-        // Remove several occupying items from the logical model; only the first
-        // waiting identities fill the holes, without touching valid positions.
+        auto original=m.cell(0);m.items[0].label.height=m.workBottom+1;
+        CHECK(m.reflow()==0);CHECK(m.cell(0)==original);CHECK(placed(m)==capacity);
+        // Removing an occupied identity admits the first waiting identity.
+        for(int i=1;i<m.count;++i)m.items[i-1]=m.items[i];--m.count;
+        m.reflow();CHECK(m.newlyPlaced==1);CHECK(m.items[waiting[0]-1].placed);CHECK(placed(m)==capacity);invariant(m);
         setup(m,Model::capacity,1280,720,dpi);waiting.clear();
         for(int i=0;i<m.count;++i)if(!m.items[i].placed)waiting.push_back(i);
-        for(int i=0;i<3;++i){m.items[i].placed=false;m.items[i].label.height=m.workBottom+1;}
-        m.reflow();CHECK(m.newlyPlaced==3);for(int i=0;i<3;++i)CHECK(m.items[waiting[i]].placed);invariant(m);
+        for(int i=3;i<m.count;++i)m.items[i-3]=m.items[i];m.count-=3;
+        m.reflow();CHECK(m.newlyPlaced==3);for(int i=0;i<3;++i)CHECK(m.items[waiting[i]-3].placed);invariant(m);
         // Packed destination and extreme pointer deltas cannot partly translate
         // a group or overflow distance calculations.
         setup(m,capacity+1,1280,720,dpi);m.click(0,false);m.click(1,true);auto a=m.visual_bounds(0),b=m.visual_bounds(1);
@@ -75,7 +76,7 @@ int main() {
         setup(m,Model::capacity,1280,720,dpi);
         for(int i=0;i<m.count;++i){m.items[i].placed=false;m.items[i].launcher=i>=DesktopEntries::FileCapacity;}
         m.reflow();for(int i=DesktopEntries::FileCapacity;i<m.count;++i)CHECK(m.items[i].placed);invariant(m);
-        (void)first;
+
     }
     auto state=std::make_unique<DesktopSettings::State>();auto reload=std::make_unique<DesktopSettings::State>();
     std::vector<std::string> names(Model::capacity);for(int i=0;i<Model::capacity;++i)names[i]="żółć-"+std::to_string(i);

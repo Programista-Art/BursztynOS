@@ -146,6 +146,11 @@ public:
         uniewaznij();
     }
     int wysokosc_wiersza() const { return wysokosc_wiersza_; }
+    int wysokosc_wiersza_piksele() const { return wysokosc_piks(); }
+    int wysokosc_dla_wierszy(int rows) const {
+        return rows*wysokosc_piks()+wypelnienie_.pionowo()*skala_dpi_+2*grubosc_ramki_geometrii();
+    }
+    void ustaw_przewijanie_poziome(bool enabled) { przewijanie_poziome_=enabled; aktualizuj_przewijanie(); uniewaznij(); }
 
     void przy_zmianie_wyboru(FunkcjaIndeksu cb, void* dane = nullptr) {
         cb_zmiana_ = cb; dane_zmiany_ = dane;
@@ -357,7 +362,7 @@ private:
             int vw = baza.szerokosc - (pv ? gp : 0); if (vw < 0) vw = 0;
             int vh = baza.wysokosc - (ph ? gp : 0); if (vh < 0) vh = 0;
             bool potrzebny_p = static_cast<int64_t>(liczba_) * wysokosc_piks() > vh;
-            bool potrzebny_h = maks_szerokosc_ + 8 * s > vw;
+            bool potrzebny_h = przewijanie_poziome_ && maks_szerokosc_ + 8 * s > vw;
             bool nowy_p = pv || potrzebny_p;
             bool nowy_h = ph || potrzebny_h;
             if (nowy_p == pv && nowy_h == ph) break;
@@ -452,6 +457,7 @@ private:
     int wysokosc_wiersza_{22};
     int maks_szerokosc_{0};
     bool wielokrotny_{false};
+    bool przewijanie_poziome_{true};
     PasekPrzewijania* pionowy_{nullptr};
     PasekPrzewijania* poziomy_{nullptr};
     mutable size_t ostatnio_narysowane_{0};

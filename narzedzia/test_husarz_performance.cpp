@@ -61,10 +61,11 @@ int main(){
     SelectorIndex index;for(unsigned i=0;i<d->rule_count;++i)index.add(*d,i);
     for(uint16_t n=0;n<d->node_count;++n){uint64_t bits[SelectorIndex::Words];index.candidates(*d,n,bits);
         for(unsigned r=0;r<d->rule_count;++r){uint32_t budget=4000000;bool match=matches(*d,n,index.parsed[r],budget);if(match)CHECK(bits[r/64]&(UINT64_C(1)<<(r%64)));}}
-    for(const char *fixture:{"heavy-dom.html","heavy-css.html","heavy-table.html","heavy-long.html","heavy-images.html","heavy-mixed.html"}){
+    for(const char *fixture:{"heavy-dom.html","heavy-css.html","heavy-table.html","heavy-long.html","heavy-images.html","heavy-mixed.html","bsf-text-heavy.html"}){
         std::ifstream f(std::string("narzedzia/fixtures/husarz/")+fixture);std::string html((std::istreambuf_iterator<char>(f)),{});CHECK(!html.empty());
         unsigned yields=drain(load(*d,html));CHECK(yields>0);CHECK(!d->truncated);CHECK(d->node_count<=MaxNodes);
         if(equal(fixture,"heavy-dom.html"))CHECK(d->node_count>=2000);
+        if(equal(fixture,"bsf-text-heavy.html"))CHECK(d->node_count==246);
         if(equal(fixture,"heavy-long.html"))CHECK(d->height>=40000);
         if(equal(fixture,"heavy-table.html"))CHECK(d->table_count==12 && d->tables.bytes()<=MaxTables*sizeof(TablePlan));
         if(equal(fixture,"heavy-dom.html"))CHECK(d->tables.bytes()==0);

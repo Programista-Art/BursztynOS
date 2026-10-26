@@ -3,8 +3,9 @@
 Status: native implementation delivered; functional acceptance results are recorded
 below, including installed persistence and real Tomato observations. Tests span
 several release revisions; the evidence table identifies their exact kernels.
-Controlled before/after desktop repaint and text-heavy page timings remain
-unmeasured, so this report does not assert completion of that profiling requirement.
+Controlled same-kernel BSF/bitmap desktop repaint and text-heavy page timings
+are recorded in the final profiling section. This compares current rendering
+paths; it does not benchmark a historical pre-BSF operating system build.
 
 ## Ownership and data flow
 
@@ -154,7 +155,8 @@ priority, Polish bold text and cooperative paint budget.
 Release ISO verification: four TTF files and three notice/provenance files match
 source bytes; Settings payload also matches. Native release QEMU confirms alpha
 coverage, author colors, the Settings font page, local preview, Apply to 24 px,
-and visible live geometry reflow. The final artifact is identified by SHA-256:
+and visible live geometry reflow. The original tested release artifact is
+identified by SHA-256 (the later repackaged ISO is identified below):
 
 - kernel: `9e34b08356fc3598e1432d3ed27e042a1598fe21a9609eab2f34c1697df0a216`
 - ISO: `0fa3bedfa0dfd9c67caa3673795570a457c36e8106f15ca54435eb9839bf764f`
@@ -188,7 +190,7 @@ cache hit average 2,056 ns; hits 10,464, misses 3,682, evictions 3,296 across th
 stress test. These are host stress-test costs, not desktop repaint timings.
 Later host profiling, stack audit, installed persistence, Tomato observations
 and regression results are recorded below. Controlled QEMU desktop/page timing
-comparisons are still outstanding.
+comparisons were subsequently collected in the final profiling section.
 
 Additional checks: all 24 generated BUR headers agree with their ELF text/data
 contracts. A kernel symbol audit confirms no BSF Face parser, rasterizer or cache
@@ -336,9 +338,9 @@ application/dialog at every available font/scale combination.
 Remaining limitations: no OTF/CFF, WOFF, downloaded webfonts, hint execution or
 complex-script shaping; web fragment placement currently omits pair kerning;
 Terminal content deliberately keeps bitmap monospaced text. Host cache and
-measurement microbenchmarks are available, but controlled before/after native
-desktop repaint and text-heavy page timings have not been collected. Heavy-page
-responsiveness and successful repaint are functional evidence, not those timings.
+measurement microbenchmarks and same-kernel native BSF/bitmap timing comparisons
+are available below. Heavy-page responsiveness and successful repaint alone
+remain functional evidence, distinct from those timings.
 
 
 Resume verification (`.bsf-test/resume-verification.log`): the freshly rebuilt
@@ -348,5 +350,98 @@ The optimized host rerun measured first glyph 2,913,519 ns, mean cache hit
 The cold sample varied substantially from the earlier run; these single cold
 samples do not establish a stable latency distribution. Capacity remains
 2,097,152 bytes with 108 occupied alpha pixels for the one-glyph benchmark.
-`.bsf-test/resume-evidence.json` indexes the current artifact hashes and the
+`.bsf-test/resume-evidence.json` indexes the then-current artifact hashes and the
 11 completed QEMU records above. `git diff --check` passed after report updates.
+
+## Controlled native BSF versus bitmap profiling
+
+`narzedzia/profile_bsf_qemu.py` runs the existing native profile harness twice,
+sequentially, using one private `BSF_PROFILE=1 HUSARZ_PERF=1` kernel. The BSF
+image retains the bundled fonts; the bitmap image replaces all four TTF payloads
+with invalid bytes. The harness verifies matching kernel bytes and observes
+the explicit no-usable-TTF fallback message. No data disks attach. This is a
+comparison of current render paths, not the historical pre-BSF OS or a benchmark
+of the desktop text batching change in isolation.
+
+Environment: QEMU TCG, `pc,hpet=on,i8042=off`, one `max` vCPU, 2 GiB RAM,
+OVMF, VirtIO VGA at 1280×720, browser viewport 782×410. The same loopback HTTP
+fixtures and USB input automation run in both guests. No compilation runs during
+these measurements. Each guest supplies eight full desktop repaints with Start
+closed and 18 entries, followed by three alternating visits to each page.
+The first desktop sample follows startup/layout and is not a cold-glyph cost.
+Desktop timing spans `RysujPulpit` through its GUI submission call; it does not
+observe physical display scanout.
+
+Times below are median [minimum–maximum], in milliseconds. Desktop rows have
+seven subsequent samples; each page row has three samples including first visit.
+
+| Native measurement | Bitmap fallback | BSF |
+| --- | ---: | ---: |
+| First observed full desktop repaint | 24.970 | 65.858 |
+| Subsequent full desktop repaint | 21.230 [21.079–21.464] | 50.662 [50.507–50.741] |
+| Mixed page navigation | 30,758 [30,369–41,254] | 26,436 [24,105–31,351] |
+| Mixed page layout | 4,321 [4,294–4,411] | 4,255 [3,786–4,317] |
+| Mixed page paint | 454 [337–701] | 570 [175–1,726] |
+| Text-heavy page navigation | 19,675 [19,312–34,622] | 8,931 [7,832–10,782] |
+| Text-heavy page layout | 985 [971–1,674] | 2,955 [2,757–3,089] |
+| Text-heavy page paint | 628 [501–1,709] | 568 [381–953] |
+
+BSF adds measurable desktop and text-layout cost. Navigation includes scheduling,
+HTTP/resource completion and publication; it is not the sum of layout and paint
+CPU counters. Its lower observed median does not establish a rendering speedup.
+The text fixture has 246 nodes and 6,788 fragments in both paths, but proportional
+metrics change document height from 35,408 bitmap pixels to 18,212 BSF pixels,
+with 64 versus 128 visible paint candidates. Thus paint rows also compare
+different visible work. The mixed fixture has 1,266 nodes and 2,377 fragments.
+These small TCG samples describe this run, not physical-hardware latency.
+
+Both guests completed all six navigations with PASS and no guest fault. Every
+page sample respected the 2,048-unit work cap. Maximum observed slice duration
+was 380 ms with BSF and 261 ms with bitmap under TCG; bounded work is not a
+guarantee of a 2 ms wall-clock slice. Browser `cachehits/cachemisses` in the raw
+records are resource-cache counters, not glyph-cache counters.
+
+Evidence: `.bsf-test/resume-native-comparison-3/comparison.json`, both mode
+directories' `result.json`, `serial.log`, and six screenshots each. The exact
+instrumented artifacts are retained as `profile-kernel.bin` and `profile.iso`:
+
+- kernel: `d1a3141c7ae4d85b348c41b47a55c62ef559f5f99a9fecf2928b71d31c36cc59`
+- ISO: `6b6c7037dcb34b1b347ca2e537442161ec10d225add290329207b7658771f0b2`
+
+The previously empty `bsf-text-heavy.html` fixture now contains a 48 px heading
+and 119 long Polish/Latin paragraphs. The native parser confirms 246 nodes.
+The performance host suite now covers this fixture and checks that node count;
+the QEMU profile mode rejects missing/empty fixtures before booting. Earlier
+interrupted attempts are not PASS evidence.
+
+Reproduce with a private `make BSF_PROFILE=1 HUSARZ_PERF=1 iso` build and:
+
+```sh
+python3 narzedzia/profile_bsf_qemu.py \
+  --iso .bsf-test/resume-native-comparison-3/profile.iso \
+  --kernel .bsf-test/resume-native-comparison-3/profile-kernel.bin \
+  --output .bsf-test/native-comparison-new
+```
+
+The output directory must be new. The wrapper retains both profile artifacts,
+packages its bitmap fixture, verifies both runs, and writes raw samples plus
+median/minimum/maximum summaries. Production builds default to disabled profile
+instrumentation.
+
+After profiling, a normal `BSF_PROFILE=0 HUSARZ_PERF=0` build restored the root
+`BursztynOS.iso`, `system_operacyjny.bin`, and Settings binary, which were absent
+at resumption. The rebuilt release kernel is byte-identical to the previously
+accepted kernel, SHA-256
+`9e34b08356fc3598e1432d3ed27e042a1598fe21a9609eab2f34c1697df0a216`.
+The newly packaged ISO is
+`1b2fdd0ac23fd90fc6abad930a6b511362c8300013c6dfd6db835f3d612ae7c4`.
+The root ISO verifier passes all seven font/notice assets and Settings bytes.
+Neither desktop nor browser profile-log marker remains in the production kernel.
+
+Final host validation: `make test-husarz-performance-host` passes 4,621 checks
+under ASan/UBSan, including all seven heavy fixtures. The restored text fixture
+passes with 246 nodes and 166 cooperative yields. Peak coroutine storage is
+33,024 bytes and the deterministic slice cap remains 2,048. Evidence is
+`.bsf-test/resume-performance-host.log`. Python syntax checks and final
+`git diff --check` pass. `.bsf-test/resume-native-comparison-3/evidence.json`
+indexes the rebuilt release hashes and completed native comparison records.

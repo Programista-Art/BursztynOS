@@ -16,6 +16,7 @@ instalator_tmp.o: programy/instalator/instalator.cpp \
  programy/instalator/../../bursztyn_ui/../skladacz_obrazu.h \
  programy/instalator/../../bursztyn_ui/../legacy_ui.h \
  programy/instalator/../../bursztyn_ui/../motyw.h \
+ programy/instalator/../../bursztyn_ui/../kolor_alfa.h \
  programy/instalator/../../bursztyn_ui/czcionka.h \
  programy/instalator/../../bursztyn_ui/../bsf/runtime.h \
  programy/instalator/../../bursztyn_ui/../bsf/bsf.h \
@@ -104,6 +105,7 @@ programy/instalator/../../bursztyn_ui/../bws_ota.h:
 programy/instalator/../../bursztyn_ui/../skladacz_obrazu.h:
 programy/instalator/../../bursztyn_ui/../legacy_ui.h:
 programy/instalator/../../bursztyn_ui/../motyw.h:
+programy/instalator/../../bursztyn_ui/../kolor_alfa.h:
 programy/instalator/../../bursztyn_ui/czcionka.h:
 programy/instalator/../../bursztyn_ui/../bsf/runtime.h:
 programy/instalator/../../bursztyn_ui/../bsf/bsf.h:

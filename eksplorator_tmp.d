@@ -9,6 +9,7 @@ eksplorator_tmp.o: programy/eksplorator/eksplorator-plikow.cpp \
  programy/eksplorator/../../skladacz_obrazu.h \
  programy/eksplorator/../../pzb.h programy/eksplorator/../../legacy_ui.h \
  programy/eksplorator/../../ui_skala.h programy/eksplorator/../../motyw.h \
+ programy/eksplorator/../../kolor_alfa.h \
  programy/eksplorator/../../plik_popup_ui.h \
  programy/eksplorator/../../plik_operacje_ui.h \
  programy/eksplorator/../../bursztyn_ui/czcionka.h \
@@ -59,6 +60,7 @@ programy/eksplorator/../../pzb.h:
 programy/eksplorator/../../legacy_ui.h:
 programy/eksplorator/../../ui_skala.h:
 programy/eksplorator/../../motyw.h:
+programy/eksplorator/../../kolor_alfa.h:
 programy/eksplorator/../../plik_popup_ui.h:
 programy/eksplorator/../../plik_operacje_ui.h:
 programy/eksplorator/../../bursztyn_ui/czcionka.h:

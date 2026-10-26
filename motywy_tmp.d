@@ -1,5 +1,5 @@
 motywy_tmp.o: programy/motywy/motywy.cpp programy/motywy/../../motyw.h \
- programy/motywy/../../bursztyn_gui.h \
+ programy/motywy/../../kolor_alfa.h programy/motywy/../../bursztyn_gui.h \
  programy/motywy/../../bws_zdarzenia.h programy/motywy/../../bws_pliki.h \
  programy/motywy/../../plik_status.h programy/motywy/../../bws_api.h \
  programy/motywy/../../bws_nowoczesne.h programy/motywy/../../bws_ota.h \
@@ -80,6 +80,7 @@ motywy_tmp.o: programy/motywy/motywy.cpp programy/motywy/../../motyw.h \
  programy/motywy/../../bursztyn_ui/powiadomienie.h \
  programy/motywy/../../bursztyn_ui/aplikacja.h
 programy/motywy/../../motyw.h:
+programy/motywy/../../kolor_alfa.h:
 programy/motywy/../../bursztyn_gui.h:
 programy/motywy/../../bws_zdarzenia.h:
 programy/motywy/../../bws_pliki.h:

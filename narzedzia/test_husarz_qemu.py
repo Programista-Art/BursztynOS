@@ -36,6 +36,9 @@ def main():
     parser.add_argument('--expected-font-size',type=int,help='Assert restored native config before changing anything')
     parser.add_argument('--font-restore-only',action='store_true',help='Observe restored Settings without applying another change')
     parser.add_argument('--output', type=Path, default=ROOT / '.husarz-test/qemu')
+    parser.add_argument('--desktop-grid-restore',type=Path,help='Previous grid result directory for disk-only reboot coordinate comparison')
+    parser.add_argument('--desktop-grid-only',action='store_true',help='Exact image-anchor comparison over repeated live font-family changes')
+    parser.add_argument('--desktop-ui-only',action='store_true',help='Desktop selection, fixed Start search/power region and Settings font sizes')
     parser.add_argument('--fonts-only',action='store_true',help='Native BSF alpha typography and Settings font page')
     parser.add_argument('--native-font-apps',action='store_true',help='Also exercise Notepad, Calculator and Explorer across the font update')
     parser.add_argument('--font-fallback-only',action='store_true',help='Readable native bitmap fallback with rejected font assets')
@@ -61,6 +64,11 @@ def main():
     parser.add_argument('--fault-vector', type=int, choices=[6,14], default=6)
     parser.add_argument('--fault-probe', type=Path, help='Private test kernel with a deliberately faulting Ring 3 browser payload')
     args = parser.parse_args()
+    if args.font_profile_only:
+        for name in ('heavy-mixed.html', 'bsf-text-heavy.html'):
+            fixture = FIXTURES / name
+            if not fixture.is_file() or not fixture.stat().st_size:
+                parser.error('Missing or empty font profiling fixture: ' + str(fixture))
     if args.tomato_only:args.real_css=True
     if args.modern_javascript_only:args.modern_javascript=True
     if args.javascript_forms_only or args.modern_javascript or args.javascript_storage_only or args.javascript_cancellation_only:args.javascript_only=True
@@ -344,13 +352,26 @@ def main():
                 left,right=stop_bounds(screenshot('stop-bounds-probe'))
                 click((left+right)//2,frame['y']+100)
 
-            def open_themes():
+            def settings_positions(line):
+                control=max(30,line+12);button=line+22;top=2*line+16+control+12
+                preview=min(238,484-top-button-36-2*line-4)
+                return 142+2*line+16+control//2,142+top+preview+12+button//2
+
+            def red_close(im,xy):
+                r,g,b=im.getpixel(xy);return r>150 and g<130 and b<130
+
+            def open_start():
+                before=screenshot('start-closed-probe').crop((15,85,80,125)).tobytes()
                 click(32,700)
-                def start_ready():
-                    r,g,b=screenshot('start-opening-probe').getpixel((10,150))
-                    return r>140 and g>80 and b<100
-                wait(start_ready,'Start menu submitted',90,interval=1)
-                click(130,507)
+                wait(lambda:screenshot('start-open-probe').crop((15,85,80,125)).tobytes()!=before,'Start popup submitted',120,interval=1)
+
+            def launch_start(query):
+                open_start()
+                for code in query:key(code)
+                key('ret')
+
+            def open_themes():
+                launch_start('motywy')
                 def themes_ready():
                     r,g,b=screenshot('themes-opening-probe').getpixel((779,109))
                     return r>150 and g<130 and b<130
@@ -466,8 +487,141 @@ def main():
                 r,g,b=im.getpixel((1118,37))
                 return not (r>150 and g<130 and b<130)
             wait(diagnostic_closed,'diagnostic closed through native titlebar',240,interval=1)
+            if args.desktop_grid_only:
+                config_address=symbol('bsf_config_request(proces*, unsigned long, unsigned long, unsigned long)::active')
+                def config_values():
+                    values=[]
+                    for line in hmp(f'xp /6wx 0x{config_address:x}').splitlines():
+                        if ':' in line:values.extend(int(v,16) for v in re.findall(r'0x([0-9a-fA-F]+)',line.split(':',1)[1]))
+                    return values
+                click(1100,650);move(1100,650)
+                if not args.desktop_grid_restore:
+                    # Real user-created folders populate a third row.
+                    for name in ['gg','gggggg','grid1','grid2','grid3']:
+                        move(1100,500);hmp('mouse_button 2');hmp('mouse_button 0')
+                        key('home');key('ret')
+                        for code in name:key(code)
+                        key('ret')
+                    start=guest_ticks();wait(lambda:guest_ticks()-start>=500,'new folders repainted',30)
+                baseline=screenshot('grid-sans-before')
+                if args.desktop_grid_restore:
+                    baseline=Image.open(args.desktop_grid_restore/'grid-sans-before.png').convert('RGB')
+                # Static top strips of icon images exclude embedded font glyphs.
+                # Locate each strip across the full desktop, not just expected Y.
+                templates=[]
+                for row in range(3):
+                    for col in range(10):
+                        x=56+120*col;y=3+124*row
+                        if y+48>=680:continue
+                        strip=baseline.crop((x,y,x+48,y+10))
+                        if len(set(strip.getdata()))<2:continue
+                        templates.append((col,row,strip))
+                def locate(im,template):
+                    w,h=template.size
+                    probe_row=max(range(h),key=lambda y:len(set(template.crop((0,y,w,y+1)).getdata())))
+                    needle=template.crop((0,probe_row,w,probe_row+1)).tobytes();data=im.tobytes();found=[];start=0
+                    while True:
+                        offset=data.find(needle,start)
+                        if offset<0:break
+                        start=offset+3
+                        if offset%3:continue
+                        y,x=divmod(offset//3,im.width);y-=probe_row
+                        if y>=0 and x+w<=im.width and y+h<680 and im.crop((x,y,x+w,y+h)).tobytes()==template.tobytes():found.append([x,y])
+                    return found
+                before=[(col,row,locate(baseline,t)) for col,row,t in templates]
+                if len(templates)<18 or not any(row>=2 and coords for col,row,coords in before):raise AssertionError('Missing multirow icon templates')
+                transitions=[]
+                if args.desktop_grid_restore:
+                    old=json.loads((args.desktop_grid_restore/'result.json').read_text())
+                    if config_values()[2]!=old['transitions'][-1]['config'][2]:raise AssertionError('Family not restored after reboot')
+                    im=screenshot('grid-mono-after-reboot')
+                    after=[(col,row,locate(im,t)) for col,row,t in templates]
+                    if after!=before:raise AssertionError('Reboot moved icon anchors')
+                for target in ([] if args.desktop_grid_restore else ['mono','sans','mono','sans','mono']):
+                    launch_start('ustawienia')
+                    wait(lambda:red_close(screenshot('grid-settings-probe'),(1033,114)),'Settings first frame',180,interval=1)
+                    old=config_values();click(500,settings_positions(19)[0]);key('end' if target=='mono' else 'home');key('ret')
+                    click(320,settings_positions(19)[1])
+                    wait(lambda:config_values()[2]!=old[2],'live family Apply '+target,120,interval=1)
+                    click(1033,114);move(1100,650)
+                    def anchors_ready():
+                        im=screenshot('grid-repaint-probe')
+                        return [(col,row,locate(im,t)) for col,row,t in templates]==before
+                    wait(anchors_ready,'all icon images repainted at original anchors',120,interval=1)
+                    im=screenshot('grid-'+str(len(transitions))+'-'+target)
+                    after=[(col,row,locate(im,t)) for col,row,t in templates]
+                    if after!=before:raise AssertionError('Desktop icon image anchors changed')
+                    transitions.append(dict(family=target,config=config_values(),anchors=after))
+                health();result.update(result='PASS',mode='desktop-grid',kernel_sha256=kernel_sha,iso_sha256=iso_sha,
+                    no_guest_fault=True,baseline=before,transitions=transitions)
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
+            if args.desktop_ui_only:
+                config_address=symbol('bsf_config_request(proces*, unsigned long, unsigned long, unsigned long)::active')
+                def config_values():
+                    values=[]
+                    for line in hmp(f'xp /6wx 0x{config_address:x}').splitlines():
+                        if ':' in line:values.extend(int(v,16) for v in re.findall(r'0x([0-9a-fA-F]+)',line.split(':',1)[1]))
+                    return values
+                def menu_fixed(im):
+                    return im.crop((10,90,12,670)).tobytes(),im.crop((20,600,335,670)).tobytes()
+                open_start();move(1000,660);initial=screenshot('start-normal');fixed=menu_fixed(initial)
+                for query in ['hus','usta','diag','kalk','xyz']:
+                    key('ctrl','a')
+                    for code in query:key(code)
+                    move(1000,660)
+                    im=screenshot('start-search-'+query)
+                    if menu_fixed(im)!=fixed:raise AssertionError('Start border/power area changed while filtering '+query)
+                key('ctrl','a')
+                for code in 'kalk':key(code)
+                key('down');key('up');key('ret')
+                wait(lambda:red_close(screenshot('calculator-launch-probe'),(379,109)),'keyboard result launches Calculator',180,interval=1)
+                click(379,109)
+                open_start();move(1000,660)
+                if screenshot('start-query-cleared').crop((30,140,320,550)).tobytes()!=initial.crop((30,140,320,550)).tobytes():
+                    raise AssertionError('Start query/results were not reset on reopening')
+                move(180,250)
+                for _ in range(10):hmp('mouse_button 16');hmp('mouse_button 0');time.sleep(.1)
+                move(1000,660);scrolled=screenshot('start-scrolled')
+                if scrolled.crop((20,600,335,670)).tobytes()!=initial.crop((20,600,335,670)).tobytes():raise AssertionError('Power region scrolled')
+                key('esc')
+                # Select and deselect multiple native launchers, then compare an identical selection.
+                click(80,25);move(1000,660);selected=screenshot('desktop-selected-first').crop((15,0,145,130)).tobytes()
+                click(200,25);move(1000,660);screenshot('desktop-selected-second')
+                click(80,25);move(1000,660)
+                if screenshot('desktop-selected-again').crop((15,0,145,130)).tobytes()!=selected:raise AssertionError('Repeated icon selection retained stale pixels')
+                click(1100,650)
+                launch_start('ustawienia')
+                wait(lambda:red_close(screenshot('settings-launch-probe'),(1033,114)),'Settings first frame',180,interval=1)
+                # Geometry follows the measured DejaVu line height used by this fixture.
+                for target,current,line in [(12,16,19),(16,12,14),(24,16,19)]:
+                    before=config_values();control=max(30,line+12);field_y,_=settings_positions(line)
+                    click(986,field_y)
+                    popup_y=142+2*line+16+control
+                    row=max(22,line+6)
+                    screenshot('settings-size-dropdown-'+str(current))
+                    click(986,popup_y+6+{12:0,16:2,24:5}[target]*row+row//2)
+                    time.sleep(1)
+                    if config_values()!=before:raise AssertionError('Preview changed the persisted font')
+                    # Apply remains below the fixed preview viewport.
+                    _,y=settings_positions(line)
+                    click(320,y)
+                    wait(lambda:config_values()[3]==target,'Apply font '+str(target),120,interval=1)
+                    screenshot('settings-font-'+str(target))
+                    click(1033,114);open_start();move(1000,660);screenshot('start-font-'+str(target));key('esc')
+                    launch_start('ustawienia')
+                    wait(lambda:red_close(screenshot('settings-reopen-probe'),(1033,114)),'Settings reopen',180,interval=1)
+                before_family=config_values()
+                click(500,234);screenshot('settings-family-dropdown-24');key('end');key('ret')
+                click(320,settings_positions(28)[1])
+                wait(lambda:config_values()[2]!=before_family[2],'Apply another font family',120,interval=1)
+                screenshot('settings-family-applied-24')
+                click(1033,114);open_start();move(1000,660);screenshot('start-family-applied-24');key('esc')
+                health();result.update(result='PASS',mode='desktop-ui',kernel_sha256=kernel_sha,iso_sha256=iso_sha,no_guest_fault=True,
+                    search_queries=['hus','usta','diag','kalk','xyz'],stable_menu=True,keyboard_launch=True,query_reset=True,power_fixed=True,
+                    selection_idempotent=True,font_sizes=[12,16,24],family_change=True)
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
             if args.modern_javascript:
-                click(32,700);click(130,157)
+                launch_start('shell')
                 def shell_prompt_ready():
                     im=screenshot('shell-opening-probe').crop((298,536,400,562))
                     return sum(1 for r,g,b in im.getdata() if r>180 and g>110 and b<100)>40
@@ -524,6 +678,10 @@ def main():
                             key('1');key('shift','equal');key('2');key('ret')
                         screenshot(label+'-font-16');native_apps.append(label)
                     click(120,700)
+                    # Taskbar activation and native client repaint are queued;
+                    # do not send Ctrl+L to the previously active Explorer.
+                    activated=guest_ticks()
+                    wait(lambda:guest_ticks()-activated>=500,'browser activation after native apps',120)
                 if not args.font_restore_only:navigate('fonts.html')
                 def font_pixels():
                     im=screenshot('font-pixels-probe');area=im.crop((frame['x']+3,frame['y']+116,frame['x']+frame['w']-20,frame['y']+frame['h']-25))
@@ -534,10 +692,10 @@ def main():
                 if not args.font_restore_only:
                     wait(font_pixels,'native font coverage and author colors',240,interval=1)
                     screenshot('fonts-web')
-                click(32,700);click(130,657)
+                launch_start('ustawienia')
                 def settings_ready():
                     im=screenshot('settings-opening-probe')
-                    return im.getpixel((800,450))==(21,24,28) and im.getpixel((1033,14))[0]>150
+                    return red_close(im,(1033,114)) and im.getpixel((280,200))[0]<100
                 wait(settings_ready,'Settings preview submitted',180,interval=1)
                 screenshot('settings-fonts')
                 config_address=symbol('bsf_config_request(proces*, unsigned long, unsigned long, unsigned long)::active')
@@ -555,23 +713,22 @@ def main():
                     result.update(result='PASS',mode='font-restored',restored_size=before[3],disk_only=bool(args.installed_disk),no_guest_fault=True,kernel_sha256=kernel_sha,iso_sha256=iso_sha)
                     (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
                 # Focus and change the size using ordinary popup keyboard input.
-                click(940,148);key('end');key('ret')
+                click(986,settings_positions(19)[0]);key('end');key('ret')
                 time.sleep(2)
                 if font_config()!=before:raise AssertionError('Local preview changed global config')
                 im=screenshot('settings-preview-24')
                 # Locate the end of the fixed preview canvas, so panel spacing
                 # and real font line metrics do not become hardcoded test input.
-                bottom=max(y for y in range(200,600) if im.getpixel((320,y))==(21,24,28))
-                click(390,bottom+34)
+                click(320,settings_positions(19)[1])
                 wait(lambda:font_config()[3]==24 and font_config()[4]!=before[4],'Settings Apply publishes font generation',90)
-                header=(310,55,760,85)
+                header=(310,145,760,175)
                 before_header=im.crop(header).tobytes()
                 if not args.font_fallback_only:
                     wait(lambda:screenshot('settings-reflow-probe').crop(header).tobytes()!=before_header,'live Settings font reflow',90,interval=1)
                 screenshot('settings-applied-24')
                 result.update(local_preview=True,apply_size=24,font_generation=font_config()[4])
                 if native_apps:
-                    click(1033,14)
+                    click(1033,114)
                     for index,label in enumerate(['browser']+native_apps):
                         click(120+116*index,700)
                         started=guest_ticks()
@@ -581,11 +738,7 @@ def main():
                 if not args.font_fallback_only:
                     started=guest_ticks()
                     wait(lambda:guest_ticks()-started>=500,'desktop font generation consumed',90)
-                    click(32,700)
-                    def large_menu_ready():
-                        r,g,b=screenshot('large-start-probe').getpixel((10,100))
-                        return r>140 and g>80 and b<100
-                    wait(large_menu_ready,'large-font Start menu submitted',90,interval=1)
+                    open_start()
                     screenshot('start-font-24');click(32,700)
                 health();result.update(result='PASS',mode='font-fallback-only' if args.font_fallback_only else 'fonts-only',ttf_alpha_pixels=not args.font_fallback_only,kernel_sha256=kernel_sha,iso_sha256=iso_sha,no_guest_fault=True,http_requests=request_log())
                 (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return

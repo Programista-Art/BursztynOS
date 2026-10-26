@@ -12,6 +12,7 @@
 
 #include "bursztyn_gui.h"
 #include "plik_popup_ui.h"
+#include "start_menu_ui.h"
 
 // Opt-in native repaint profiling. No clock reads or extra paints in release.
 #ifndef BSF_PROFILE
@@ -51,25 +52,7 @@ int screen_w = 1024;
 int screen_h = 768;
 int PASEK_WYS = 40;
 int MENU_X = 10;
-int MENU_W = 260;
-int MENU_GORNY_MARGINES = 10;
-int MENU_ELEMENT_WYS = 25;
-constexpr int MENU_ELEMENTOW = 21;
-const char* const MENU_ETYKIETY[MENU_ELEMENTOW] = {
-    "> Powloka Bursztyna", "> Eksplorator Plików", "> Notatnik", "> Kalkulator",
-    "> Przegladarka Husarz", "> Przeglądarka Obrazów", "> Demo BursztynUI",
-    "> Kontrolki 2", "> Kontrolki 3", "> Kontrolki 4", "> Testy systemu",
-    "> Tapety", "> Ustawienia ekranu", "> Aktualizacje Systemu",
-    "> Motywy Systemowe", "> Test dźwięku", "> Diagnostyka systemu", "> Gry ->",
-    "> Uruchom ponownie", "> Zamknij", "> Ustawienia"
-};
-int MENU_WYS = (10 * 2) + (MENU_ELEMENTOW * 25);
-
-// Pozycja "Gry ->" w glownym Menu Start.
-constexpr int MENU_GRY_INDEX = 17;
-int MENU_GRY_W = 180;
-constexpr int MENU_GRY_ELEMENTOW = 1;
-int MENU_GRY_WYS = (10 * 2) + (MENU_GRY_ELEMENTOW * 25);
+StartMenu::Surface* start_menu=nullptr;
 
 constexpr int LOGO_LOGICZNA_SZER = 24;
 constexpr int LOGO_LOGICZNA_WYS = 26;
@@ -103,10 +86,6 @@ constexpr int PULPIT_REFRESH_TICKS = 3;
 void metryki_ekranu(){
 PASEK_WYS=ui_skaluj(TASKBAR_LOGICZNA_WYS,ui_skala_procent);
 MENU_X=ui_skaluj(10,ui_skala_procent);
-MENU_W=ui_skaluj(260,ui_skala_procent);
-MENU_GORNY_MARGINES=ui_skaluj(10,ui_skala_procent);
-MENU_ELEMENT_WYS=ui_skaluj(25,ui_skala_procent);
-MENU_GRY_W=ui_skaluj(180,ui_skala_procent);
 PRZYCISK_MENU_X=ui_skaluj(10,ui_skala_procent);
 PRZYCISK_MENU_W=ui_skaluj(PRZYCISK_MENU_LOGICZNA_SZER,ui_skala_procent);
 PRZYCISK_MENU_H=ui_skaluj(PRZYCISK_MENU_LOGICZNA_WYS,ui_skala_procent);
@@ -120,20 +99,7 @@ TASK_BUTTON_W=ui_skaluj(112,ui_skala_procent);
 TASK_BUTTON_GAP=ui_skaluj(4,ui_skala_procent);
 PULPIT_GRID_W=pulpit.komorka_szer;
 PULPIT_GRID_H=pulpit.komorka_wys;
-PULPIT_GRID_Y=ui_skaluj(140,ui_skala_procent);
-#if defined(BSF_NATIVE)
-int font_height=BSF::height(ui_skaluj(BSF::ui_size(),ui_skala_procent));
-for(const char* label:MENU_ETYKIETY){
-    int width=BSF::measure_text(label,ui_skaluj(BSF::ui_size(),ui_skala_procent))+ui_skaluj(20,ui_skala_procent);
-    if(width>MENU_W)MENU_W=width;
-}
-if(MENU_W>screen_w-MENU_X)MENU_W=screen_w-MENU_X;
-int row_height=font_height+2;if(row_height>MENU_ELEMENT_WYS)MENU_ELEMENT_WYS=row_height;
-int max_row=(screen_h-PASEK_WYS-2*MENU_GORNY_MARGINES)/MENU_ELEMENTOW;
-if(max_row>0&&MENU_ELEMENT_WYS>max_row)MENU_ELEMENT_WYS=max_row;
-#endif
-MENU_WYS=2*MENU_GORNY_MARGINES+MENU_ELEMENTOW*MENU_ELEMENT_WYS;
-MENU_GRY_WYS=2*MENU_GORNY_MARGINES+MENU_GRY_ELEMENTOW*MENU_ELEMENT_WYS;
+PULPIT_GRID_Y=ui_skaluj(3,ui_skala_procent);
 }
 
 inline int przycisk_menu_y() {
@@ -829,10 +795,10 @@ static void rysuj_tekst_ikony(int x, int y, int lx, int ly, int lw, int lh,
 }
 
 static void rysuj_etykiete_pulpitu(int x, int y, int w, int h, int skala,
-                                   uint32_t kolor, const char* tekst) {
+                                   uint32_t kolor, const char* tekst, bool selected=false) {
     if (!tekst || !tekst[0] || w <= 0 || h <= 0) return;
-    // Subtelny cien pod glifami zapewnia doskonala czytelnosc na jasnych tapetach.
-    pulpit_tekst(x + 1, y + 1, w, h, skala, KANONICZNY_KOLOR_CIENIA_PULPITU, tekst);
+    // Tylko zwykla etykieta potrzebuje jednego cienia; zaznaczenie zapewnia kontrast.
+    if(!selected)pulpit_tekst(x + 1, y + 1, w, h, skala, KANONICZNY_KOLOR_CIENIA_PULPITU, tekst);
     pulpit_tekst(x, y, w, h, skala, kolor, tekst);
 }
 
@@ -1227,23 +1193,25 @@ void aktualizuj_layout_pulpitu() {aktualizuj_layout_modelu(desktop_layout,wpisy_
 void aktualizuj_layout_modelu(Desktop::Layout<PULPIT_MAX_WPISOW>& layout,WpisPulpitu* entries,bool track) {
     auto& desktop_layout=layout;auto* wpisy_pulpitu=entries;
     const int previousDpi=desktop_layout.dpi;
+    const auto metrics=pulpit_metryki(ui_skala_procent);
     const bool geometryChanged=desktop_layout.workWidth>0 && (desktop_layout.workWidth!=screen_w ||
-        desktop_layout.workBottom!=screen_h-PASEK_WYS || desktop_layout.dpi!=ui_skala_procent);
+        desktop_layout.workBottom!=screen_h-PASEK_WYS || desktop_layout.dpi!=ui_skala_procent ||
+        desktop_layout.ch!=metrics.komorka_wys || desktop_layout.y0!=PULPIT_GRID_Y);
     if(geometryChanged)for(int i=0;i<desktop_layout.count;++i) {
-        auto r=desktop_layout.visual_bounds(i);desktop_restore_x[i]=r.x;desktop_restore_y[i]=r.y;
+        auto r=desktop_layout.cell(i);desktop_restore_x[i]=r.x;desktop_restore_y[i]=r.y;
     }
     desktop_layout.geometry(screen_w,screen_h-PASEK_WYS,PULPIT_GRID_Y,ui_skala_procent);
     auto m=pulpit_metryki(ui_skala_procent);
-    int maxLines=(desktop_layout.rows*desktop_layout.ch-m.ikona_wys-m.odstep_etykiety-ui_skaluj(6,ui_skala_procent))/(m.wysokosc_linii+m.odstep_linii);
+    int maxLines=(m.etykieta_wys+m.odstep_linii)/(m.wysokosc_linii+m.odstep_linii);
+    if(maxLines>m.max_linii)maxLines=m.max_linii;
     for(int i=0;i<desktop_layout.count;++i) {
         auto& p=desktop_layout.items[i];
         p.launcher=wpisy_pulpitu[i].launcher>=0;
         p.label=Desktop::wrap(wpisy_pulpitu[i].nazwa,m.etykieta_szer,m.wysokosc_linii,m.odstep_linii,maxLines,int(ui_skala_procent),oblicz_szerokosc_tekstu);
-        int height=m.ikona_wys+m.odstep_etykiety+p.label.height+ui_skaluj(6,ui_skala_procent);
-        p.span=(height+desktop_layout.ch-1)/desktop_layout.ch;
+        p.span=1;
     }
     if(geometryChanged)for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].placed)
-        desktop_layout.visual_position(i,int(int64_t(desktop_restore_x[i])*ui_skala_procent/previousDpi),
+        desktop_layout.anchor_position(i,int(int64_t(desktop_restore_x[i])*ui_skala_procent/previousDpi),
             int(int64_t(desktop_restore_y[i])*ui_skala_procent/previousDpi));
     // Retain the existing initial row-major layout. Settings restoration and
     // display changes reserve valid visual positions before relocating others.
@@ -1254,7 +1222,11 @@ void aktualizuj_layout_modelu(Desktop::Layout<PULPIT_MAX_WPISOW>& layout,WpisPul
         p.col=desktop_layout.cols?order%desktop_layout.cols:0;
         p.row=desktop_layout.cols?order/desktop_layout.cols:0;
     }
-    const int corrected=desktop_layout.reflow();
+    bool waiting=false;
+    for(int i=0;i<desktop_layout.count;++i)if(!desktop_layout.items[i].placed)waiting=true;
+    // Family/theme updates only refresh labels; anchors and persistence stay put.
+    desktop_layout.newlyPlaced=0;
+    const int corrected=(geometryChanged || waiting)?desktop_layout.reflow():0;
     if(track && desktop_settings && desktop_settings->applied && (corrected || desktop_layout.newlyPlaced || (geometryChanged && previousDpi!=int(ui_skala_procent))))desktop_settings->dirty=true;
 #if BURSZTYNDIAGDESKTOPLAYOUT
     if(corrected)diagnostyka_ukladu("[DESKTOP-LAYOUT] reflow=",corrected);
@@ -1272,7 +1244,6 @@ Desktop::Prostokat wizualny_wpis_pulpitu(int i) {
 }
 int wpis_pulpitu_w_punkcie(int x, int y) {
     for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].placed && wizualny_wpis_pulpitu(i).zawiera(x,y))return i;
-    for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].placed && desktop_layout.cell(i).zawiera(x,y))return i;
     return -1;
 }
 
@@ -1692,7 +1663,7 @@ void RysujWpisPulpitu(int i) {
         }
         rysuj_etykiete_pulpitu(g.etykieta_x,g.etykieta_y+line*(m.wysokosc_linii+m.odstep_linii),
             g.etykieta_szer,m.wysokosc_linii,int(ui_skala_procent),
-            p.selected?motyw_kolor(MOTYW_KOLOR_PULPIT_TEKST_ZAZNACZONY):KANONICZNY_KOLOR_ETYKIETY_PULPITU,text);
+            p.selected?motyw_kolor(MOTYW_KOLOR_PULPIT_TEKST_ZAZNACZONY):KANONICZNY_KOLOR_ETYKIETY_PULPITU,text,p.selected || pulpit_hover_folder==i);
     }
 }
 void RysujWpisyPulpitu() {for(int i=0;i<desktop_layout.count;++i)RysujWpisPulpitu(i);}
@@ -1894,91 +1865,7 @@ bool obsluz_gest_pulpitu(const bws_zdarzenie& e) {
     return false;
 }
 
-int menu_glowne_y() {
-    int y = screen_h - PASEK_WYS - MENU_WYS;
-    if (y < 0) y = 0;
-    return y;
-}
-
-inline bool prostokat_elementu_menu(int index, int* x, int* y, int* w, int* h) {
-    if (index < 0 || index >= MENU_ELEMENTOW) return false;
-    if (x) *x = MENU_X;
-    if (y) *y = menu_glowne_y() + MENU_GORNY_MARGINES + index * MENU_ELEMENT_WYS;
-    if (w) *w = MENU_W;
-    if (h) *h = MENU_ELEMENT_WYS;
-    return true;
-}
-
-int menu_gry_x() {
-    // Preferuj podmenu po prawej stronie. Na bardzo malej rozdzielczosci
-    // sproboj pokazac je po lewej stronie glownego menu.
-    const int po_prawej = MENU_X + MENU_W;
-    if (po_prawej + MENU_GRY_W <= screen_w) return po_prawej;
-
-    const int po_lewej = MENU_X - MENU_GRY_W;
-    if (po_lewej >= 0) return po_lewej;
-    return 0;
-}
-
-int menu_gry_y() {
-    int y = menu_glowne_y() + MENU_GORNY_MARGINES +
-            MENU_GRY_INDEX * MENU_ELEMENT_WYS;
-
-    const int dol_pulpitu = screen_h - PASEK_WYS;
-    if (y + MENU_GRY_WYS > dol_pulpitu)
-        y = dol_pulpitu - MENU_GRY_WYS;
-    if (y < 0) y = 0;
-    return y;
-}
-
-void aktualizuj_overlay_menu() {
-    if (!menu_start_otwarte) {
-        gui_ustaw_system_overlay(false, 0, 0, 0, 0);
-        return;
-    }
-
-    int lewo = MENU_X;
-    int gora = menu_glowne_y();
-    int prawo = MENU_X + MENU_W;
-    int dol = gora + MENU_WYS;
-
-    if (menu_gry_otwarte) {
-        const int gry_x = menu_gry_x();
-        const int gry_y = menu_gry_y();
-        if (gry_x < lewo) lewo = gry_x;
-        if (gry_y < gora) gora = gry_y;
-        if (gry_x + MENU_GRY_W > prawo) prawo = gry_x + MENU_GRY_W;
-        if (gry_y + MENU_GRY_WYS > dol) dol = gry_y + MENU_GRY_WYS;
-    }
-
-    gui_ustaw_system_overlay(true, lewo, gora, prawo - lewo, dol - gora);
-}
-
-void RysujMenuGry() {
-    if (!menu_start_otwarte || !menu_gry_otwarte) return;
-
-    const int x = menu_gry_x();
-    const int y = menu_gry_y();
-
-    gui_rysuj_prostokat(x, y, MENU_GRY_W, MENU_GRY_WYS, motyw_kolor(MOTYW_KOLOR_PANEL));
-    gui_rysuj_prostokat(x, y, MENU_GRY_W, 1, motyw_kolor(MOTYW_KOLOR_AKCENT));
-    gui_rysuj_prostokat(x, y, 1, MENU_GRY_WYS, motyw_kolor(MOTYW_KOLOR_AKCENT));
-    gui_rysuj_prostokat(x + MENU_GRY_W - 1, y,
-                        1, MENU_GRY_WYS, motyw_kolor(MOTYW_KOLOR_RAMKA));
-    gui_rysuj_prostokat(x, y + MENU_GRY_WYS - 1,
-                        MENU_GRY_W, 1, motyw_kolor(MOTYW_KOLOR_RAMKA));
-
-    const char* gry[MENU_GRY_ELEMENTOW] = {
-        "> Snake"
-    };
-
-    for (int i = 0; i < MENU_GRY_ELEMENTOW; ++i) {
-        const int item_y = y + MENU_GORNY_MARGINES +
-                           i * MENU_ELEMENT_WYS;
-        gui_wypisz_tekst_kolor(x + 10, item_y + 5,
-                               motyw_kolor(MOTYW_KOLOR_TEKST), gry[i]);
-    }
-}
+void aktualizuj_overlay_menu() {gui_ustaw_system_overlay(false,0,0,0,0);}
 
 void rysuj_ikone_aplikacji(const AplikacjaPulpitu& aplikacja) {
     const PulpitGeometriaKomorki g =
@@ -2126,34 +2013,6 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
     RysujWpisyPulpitu();
 
 
-    if (menu_start_otwarte) {
-        const int menu_y = menu_glowne_y();
-
-        gui_rysuj_prostokat(MENU_X, menu_y, MENU_W, MENU_WYS, motyw_kolor(MOTYW_KOLOR_PANEL));
-        gui_rysuj_prostokat(MENU_X, menu_y, MENU_W, 1, motyw_kolor(MOTYW_KOLOR_AKCENT));
-        gui_rysuj_prostokat(MENU_X, menu_y, 1, MENU_WYS, motyw_kolor(MOTYW_KOLOR_AKCENT));
-        gui_rysuj_prostokat(MENU_X + MENU_W - 1, menu_y,
-                            1, MENU_WYS, motyw_kolor(MOTYW_KOLOR_RAMKA));
-        gui_rysuj_prostokat(MENU_X, menu_y + MENU_WYS - 1,
-                            MENU_W, 1, motyw_kolor(MOTYW_KOLOR_RAMKA));
-
-        for (int i = 0; i < MENU_ELEMENTOW; ++i) {
-            int item_x = 0, item_y = 0, item_w = 0, item_h = 0;
-            prostokat_elementu_menu(i, &item_x, &item_y, &item_w, &item_h);
-
-            if (i == MENU_GRY_INDEX && menu_gry_otwarte) {
-                gui_rysuj_prostokat(item_x + 2, item_y,
-                                    item_w - 4, item_h,
-                                    motyw_kolor(MOTYW_KOLOR_PODNIESIONY));
-            }
-
-            gui_wypisz_tekst_kolor(item_x + 10, item_y + (item_h-gui_pobierz_wysokosc_fontu())/2,
-                                   motyw_kolor(MOTYW_KOLOR_TEKST), MENU_ETYKIETY[i]);
-        }
-
-        RysujMenuGry();
-    }
-
     // BWS 17 sklada warstwy i prezentuje gotowa klatke.
     zarejestruj_pulpit_jako_cel_drop();
     gui_odswiez();
@@ -2177,8 +2036,8 @@ void zamknij_menu_i_odtworz_pulpit() {
     menu_gry_otwarte = false;
     aktualizuj_overlay_menu();
 
-    // Pelne odswiezenie usuwa piksele glownego menu i jego podmenu.
-    RysujPulpit(true);
+    if(start_menu)start_menu->close();
+    RysujPrzyciskMenu();gui_odswiez();
 }
 
 bool aktywuj_istniejace(const char* prefiks_tytulu);
@@ -2427,10 +2286,8 @@ void obsluz_element_menu(int item_index) {
         case 16:
             uruchom_lub_aktywuj("/programy/diagnostyka.cebula/diagnostyka.bur", "Diagnostyka systemu");
             break;
-        case MENU_GRY_INDEX:
-            menu_gry_otwarte = !menu_gry_otwarte;
-            aktualizuj_overlay_menu();
-            RysujPulpit(true);
+        case 21:
+            uruchom_lub_aktywuj(SCIEZKA_SNAKE,"Snake");
             break;
         case 18:
             wykonaj_restart();
@@ -2446,113 +2303,14 @@ void obsluz_element_menu(int item_index) {
     }
 }
 
-void obsluz_element_menu_gry(int item_index) {
-    switch (item_index) {
-        case 0:
-            uruchom_lub_aktywuj(SCIEZKA_SNAKE, "Snake");
-            break;
-        default:
-            break;
-    }
-}
-
 void obsluz_klikniecie(int mx, int my) {
-    const int menu_y = menu_glowne_y();
-    const int lista_y = menu_y + MENU_GORNY_MARGINES;
-    const int lista_h = MENU_ELEMENTOW * MENU_ELEMENT_WYS;
-
-    // Przycisk Menu ma pierwszenstwo niezaleznie od aktualnego stanu menu.
-    if (punkt_w_prostokacie(mx, my,
-                            PRZYCISK_MENU_X, przycisk_menu_y(),
-                            PRZYCISK_MENU_W, PRZYCISK_MENU_H)) {
-        if (menu_start_otwarte) {
-            zamknij_menu_i_odtworz_pulpit();
-        } else {
-            menu_start_otwarte = true;
-            menu_gry_otwarte = false;
-            aktualizuj_overlay_menu();
-            RysujPulpit(false);
+    if (punkt_w_prostokacie(mx,my,PRZYCISK_MENU_X,przycisk_menu_y(),PRZYCISK_MENU_W,PRZYCISK_MENU_H)) {
+        if(menu_start_otwarte)zamknij_menu_i_odtworz_pulpit();
+        else {
+            if(!start_menu)start_menu=new StartMenu::Surface();
+            if(start_menu){start_menu->open({0,0,screen_w,screen_h-PASEK_WYS},MENU_X);menu_start_otwarte=start_menu->czy_otwarta();}
+            RysujPrzyciskMenu();gui_odswiez();
         }
-        return;
-    }
-
-    if (menu_start_otwarte) {
-#if BURSZTYN_DIAG_BOOT
-        static uint32_t s_menu_hit_log_cnt = 0;
-        if (s_menu_hit_log_cnt < 30) {
-            ++s_menu_hit_log_cnt;
-            int it0_x = 0, it0_y = 0, it0_w = 0, it0_h = 0;
-            prostokat_elementu_menu(0, &it0_x, &it0_y, &it0_w, &it0_h);
-            const bool in_item0 = punkt_w_prostokacie(mx, my, it0_x, it0_y, it0_w, it0_h);
-            const bool in_menu = punkt_w_prostokacie(mx, my, MENU_X, menu_y, MENU_W, MENU_WYS);
-            char hbuf[256]{};
-            char* hp = hbuf;
-            char* hep = hbuf + sizeof(hbuf);
-            auto happ = [&](const char* s) { while (*s && hp + 1 < hep) *hp++ = *s++; };
-            auto happ_i = [&](int64_t v) {
-                if (v < 0) { if (hp + 1 < hep) *hp++ = '-'; v = -v; }
-                char b[24]; int idx = 0;
-                do { b[idx++] = static_cast<char>('0' + (v % 10)); v /= 10; } while (v);
-                while (idx > 0 && hp + 1 < hep) *hp++ = b[--idx];
-            };
-            happ("[MENU HIT]\n  menu=("); happ_i(MENU_X); happ(","); happ_i(menu_y);
-            happ(")-("); happ_i(MENU_X + MENU_W); happ(","); happ_i(menu_y + MENU_WYS);
-            happ(")\n  item=\"Powłoka Bursztyna\"\n  itemrect=(");
-            happ_i(it0_x); happ(","); happ_i(it0_y);
-            happ(")-("); happ_i(it0_x + it0_w); happ(","); happ_i(it0_y + it0_h);
-            happ(")\n  click=("); happ_i(mx); happ(","); happ_i(my);
-            happ(")\n  hit=");
-            if (in_item0) happ("YES\n");
-            else if (in_menu) happ("NO (inside menu, other item)\n");
-            else happ("NO (outside menu)\n");
-            *hp = '\0';
-            wypisz(hbuf);
-        }
-
-#endif
-        // Najpierw podmenu Gry, bo lezy poza prostokatem glownej listy.
-        if (menu_gry_otwarte) {
-            const int gry_x = menu_gry_x();
-            const int gry_y = menu_gry_y();
-            const int gry_lista_y = gry_y + MENU_GORNY_MARGINES;
-            const int gry_lista_h = MENU_GRY_ELEMENTOW * MENU_ELEMENT_WYS;
-
-            if (punkt_w_prostokacie(mx, my,
-                                    gry_x, gry_lista_y,
-                                    MENU_GRY_W, gry_lista_h)) {
-                const int item_index =
-                    (my - gry_lista_y) / MENU_ELEMENT_WYS;
-                if (item_index >= 0 && item_index < MENU_GRY_ELEMENTOW)
-                    obsluz_element_menu_gry(item_index);
-                return;
-            }
-
-            // Klik w ramke/margines podmenu nie powinien przypadkowo
-            // uruchomic elementu glownego menu ani zamknac menu.
-            if (punkt_w_prostokacie(mx, my,
-                                    gry_x, gry_y,
-                                    MENU_GRY_W, MENU_GRY_WYS))
-                return;
-        }
-
-        // Klikalne sa tylko rzeczywiste wiersze listy. Gorny margines nie
-        // moze zostac zinterpretowany jako element numer 0.
-        if (punkt_w_prostokacie(mx, my,
-                                MENU_X, lista_y,
-                                MENU_W, lista_h)) {
-            const int item_index = (my - lista_y) / MENU_ELEMENT_WYS;
-            if (item_index >= 0 && item_index < MENU_ELEMENTOW)
-                obsluz_element_menu(item_index);
-            return;
-        }
-
-        // Klik w margines glownego menu pozostawia menu otwarte.
-        if (punkt_w_prostokacie(mx, my,
-                                MENU_X, menu_y, MENU_W, MENU_WYS))
-            return;
-
-        // Klik poza glownym menu i podmenu zamyka calosc.
-        zamknij_menu_i_odtworz_pulpit();
         return;
     }
 
@@ -2615,6 +2373,7 @@ static void wm_abs_geometry(const char* cause) {
 #endif
 
 extern "C" __attribute__((noreturn)) void _start() {
+    start_menu=new StartMenu::Surface();
     pulpit_menu=new PlikiUI::MenuPlikowe();
     pulpit_dialog=new PlikiUI::DialogPlikowy();
 #if BURSZTYN_DIAG_BOOT
@@ -2714,6 +2473,7 @@ extern "C" __attribute__((noreturn)) void _start() {
         if(zdarzenie.typ==BWS_ZDARZENIE_BLUR)obsluz_gest_pulpitu(zdarzenie);
         if(zdarzenie.typ==BWS_ZDARZENIE_EKRAN){
             zamknij_pulpit_context();zamknij_pulpit_modal();
+            if(start_menu)start_menu->close();
             menu_start_otwarte=false;menu_gry_otwarte=false;anuluj_gest_pulpitu();
             // Pola zdarzenia (dx/dy/kod) pochodza z chwili wyslania i moga byc
             // nieaktualne, gdy kolejka zdarzen jest przetwarzana z opoznieniem
@@ -2742,6 +2502,8 @@ extern "C" __attribute__((noreturn)) void _start() {
         if (zdarzenie.typ == BWS_ZDARZENIE_MOTYW_ZMIENIONY) {
             BursztynUI::Motyw::pobierz_domyslny().zaktualizuj_z_systemu();
             metryki_ekranu();
+            aktualizuj_layout_pulpitu();
+            if(start_menu)start_menu->refresh();
             pulpit_menu->events.popups.zaktualizuj_motyw();
             pulpit_dialog->events.popups.zaktualizuj_motyw();
             if(pulpit_wybor)pulpit_wybor->events.popups.zaktualizuj_motyw();
@@ -2793,6 +2555,7 @@ extern "C" __attribute__((noreturn)) void _start() {
         }
 
         if (zdarzenie.typ == BWS_ZDARZENIE_BLUR) {
+            zamknij_menu_i_odtworz_pulpit();
             zamknij_pulpit_context();
             zamknij_pulpit_modal();
             continue;
@@ -2800,6 +2563,13 @@ extern "C" __attribute__((noreturn)) void _start() {
 
         if(obsluz_zmiane_plikow_pulpitu(zdarzenie))continue;
 
+        if(start_menu && start_menu->events.zdarzenie(zdarzenie)) {
+            const int action=start_menu->take_action();
+            menu_start_otwarte=start_menu->czy_otwarta();
+            if(action>=0){zamknij_menu_i_odtworz_pulpit();obsluz_element_menu(action);}
+            else {RysujPrzyciskMenu();gui_odswiez();}
+            if(zdarzenie.typ!=BWS_ZDARZENIE_TIMER)continue;
+        }
         if(obsluz_popupy_pulpitu(zdarzenie))continue;
 
         if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN) {

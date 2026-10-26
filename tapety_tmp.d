@@ -15,6 +15,7 @@ tapety_tmp.o: programy/tapety/tapety.cpp programy/tapety/../../loader.h \
  programy/tapety/../../bursztyn_ui/../skladacz_obrazu.h \
  programy/tapety/../../bursztyn_ui/../legacy_ui.h \
  programy/tapety/../../bursztyn_ui/../motyw.h \
+ programy/tapety/../../bursztyn_ui/../kolor_alfa.h \
  programy/tapety/../../bursztyn_ui/czcionka.h \
  programy/tapety/../../bursztyn_ui/../bsf/runtime.h \
  programy/tapety/../../bursztyn_ui/../bsf/bsf.h \
@@ -106,6 +107,7 @@ programy/tapety/../../bursztyn_ui/../bws_ota.h:
 programy/tapety/../../bursztyn_ui/../skladacz_obrazu.h:
 programy/tapety/../../bursztyn_ui/../legacy_ui.h:
 programy/tapety/../../bursztyn_ui/../motyw.h:
+programy/tapety/../../bursztyn_ui/../kolor_alfa.h:
 programy/tapety/../../bursztyn_ui/czcionka.h:
 programy/tapety/../../bursztyn_ui/../bsf/runtime.h:
 programy/tapety/../../bursztyn_ui/../bsf/bsf.h:

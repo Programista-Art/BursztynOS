@@ -15,6 +15,7 @@ ekran_tmp.o: programy/ekran/ekran.cpp programy/ekran/../../loader.h \
  programy/ekran/../../bursztyn_ui/../skladacz_obrazu.h \
  programy/ekran/../../bursztyn_ui/../legacy_ui.h \
  programy/ekran/../../bursztyn_ui/../motyw.h \
+ programy/ekran/../../bursztyn_ui/../kolor_alfa.h \
  programy/ekran/../../bursztyn_ui/czcionka.h \
  programy/ekran/../../bursztyn_ui/../bsf/runtime.h \
  programy/ekran/../../bursztyn_ui/../bsf/bsf.h \
@@ -103,6 +104,7 @@ programy/ekran/../../bursztyn_ui/../bws_ota.h:
 programy/ekran/../../bursztyn_ui/../skladacz_obrazu.h:
 programy/ekran/../../bursztyn_ui/../legacy_ui.h:
 programy/ekran/../../bursztyn_ui/../motyw.h:
+programy/ekran/../../bursztyn_ui/../kolor_alfa.h:
 programy/ekran/../../bursztyn_ui/czcionka.h:
 programy/ekran/../../bursztyn_ui/../bsf/runtime.h:
 programy/ekran/../../bursztyn_ui/../bsf/bsf.h:

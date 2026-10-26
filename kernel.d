@@ -14,7 +14,7 @@ kernel.o: kernel.cpp diagnostyka_systemu.h diagnostyka_systemu_abi.h \
  sterowniki/dzwiek/hda_diag_format.h sterowniki/dzwiek/hda_transport.h \
  sterowniki/dzwiek/../dma.h sterowniki/dzwiek/hda_wewnetrzny.h \
  sterowniki/usb/usb.h aktualizacja.h aktualizacja_format.h bws_ota.h \
- stos_jadra.h motyw.h virtio_rng.h virtio_blk.h virtio_gpu.h \
+ stos_jadra.h motyw.h kolor_alfa.h virtio_rng.h virtio_blk.h virtio_gpu.h \
  prezentacja_startu.h input_device.h virtio_input.h bsf/bootstrap.inc
 diagnostyka_systemu.h:
 diagnostyka_systemu_abi.h:
@@ -75,6 +75,7 @@ aktualizacja_format.h:
 bws_ota.h:
 stos_jadra.h:
 motyw.h:
+kolor_alfa.h:
 virtio_rng.h:
 virtio_blk.h:
 virtio_gpu.h:

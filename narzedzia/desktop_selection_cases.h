@@ -15,11 +15,12 @@ static void desktop_selection_cases() {
         for(int i=0;i<4;++i) {
             auto& label=desktop_layout.items[i].label;auto box=wizualny_wpis_pulpitu(i),cell=desktop_layout.cell(i);
             auto geometry=pulpit_geometria_komorki(cell.x,cell.y,scale);
-            CHECK(label.complete);int actualWidth=0;
+            CHECK(label.count<=3);int actualWidth=0;
             for(int line=0;line<label.count;++line) {
                 std::string text(wpisy_pulpitu[i].nazwa+label.starts[line],label.ends[line]-label.starts[line]);
                 CHECK((static_cast<unsigned char>(wpisy_pulpitu[i].nazwa[label.starts[line]])&192)!=128);
                 CHECK((static_cast<unsigned char>(wpisy_pulpitu[i].nazwa[label.ends[line]])&192)!=128);
+                if(!label.complete && line==label.count-1)text+="…";
                 int measured=oblicz_szerokosc_tekstu(text.c_str(),scale);CHECK(measured==label.widths[line]);
                 if(measured>actualWidth)actualWidth=measured;
             }
@@ -35,8 +36,9 @@ static void desktop_selection_cases() {
             CHECK(box.wysokosc==metrics.ikona_wys+metrics.odstep_etykiety+label.height+2*pad);
             CHECK(box.szerokosc<cell.szerokosc);CHECK(box.wysokosc<cell.wysokosc);
             CHECK(box.x>=0 && box.y>=0 && box.x+box.szerokosc<=screen_w && box.y+box.wysokosc<=screen_h-PASEK_WYS);
-            // Comfortable click targets still occupy the full grid cell.
-            CHECK(wpis_pulpitu_w_punkcie(cell.x+1,cell.y+1)==i);
+            // Labels are clickable, unused grid-cell corners are not.
+            CHECK(wpis_pulpitu_w_punkcie(box.x+box.szerokosc/2,geometry.etykieta_y)==i);
+            CHECK(wpis_pulpitu_w_punkcie(cell.x+1,cell.y+1)!=i);
         }
         auto narrow=wizualny_wpis_pulpitu(shortItem),wide=wizualny_wpis_pulpitu(wideItem);
         CHECK(desktop_layout.items[shortItem].label.count==1);CHECK(desktop_layout.items[shortItem].label.width<metrics.ikona_szer);

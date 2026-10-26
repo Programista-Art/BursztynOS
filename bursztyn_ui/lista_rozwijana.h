@@ -29,6 +29,7 @@ private:
     public:
         explicit PopupListy(ListaRozwijana* wlasciciel) : wlasciciel_(wlasciciel) {
             lista_ = new ListaWyboru();
+            lista_->ustaw_przewijanie_poziome(false);
             dodaj_kontrolke(lista_);
             lista_->przy_zmianie_wyboru(zmieniono, this);
             lista_->przy_aktywacji(aktywacja, this);
@@ -139,8 +140,9 @@ public:
         int liczba = static_cast<int>(liczba_elementow());
         int wiersze = liczba < 1 ? 1 : (liczba < maks_widocznych_ ? liczba : maks_widocznych_);
         SkalaUI s = skala_dpi_;
-        int h = wiersze * (22 * s) + 2 * s;
-        int w = obszar_.szerokosc < 120 * s ? 120 * s : obszar_.szerokosc;
+        popup_.ustaw_skale_dpi(s);
+        int h = popup_.lista().wysokosc_dla_wierszy(wiersze) + 2 * s;
+        int w = obszar_.szerokosc;
         Prostokat kotwica = prostokat_do_ekranu(
             Prostokat(0, 0, obszar_.szerokosc, obszar_.wysokosc));
         Prostokat gdzie = z->umiesc_pod_kotwica_ekranu(kotwica, Rozmiar(w, h), true);
@@ -167,7 +169,9 @@ public:
 
     Rozmiar oblicz_naturalny_rozmiar() const override {
         SkalaUI s = skala_dpi_;
-        return Rozmiar(220 * s, 30 * s);
+        int height=CzcionkaUI::pobierz_wysokosc(s)+12*s;
+        if(height<30*s)height=30*s;
+        return Rozmiar(220 * s, height);
     }
     void rozmiesc(Prostokat r) override {
         Kontrolka::rozmiesc(r);

@@ -23,6 +23,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--reset-grid-preferences',action='store_true',help='Initialize only a copied private fixture to Sans 16 before acceptance')
+    parser.add_argument('--refresh-grid-payloads',action='store_true',help='Refresh final WM and EFI kernel within existing allocation in an offline private fixture before booting')
+    parser.add_argument('--desktop-grid',action='store_true',help='Repeated family transitions and disk-only restart anchor comparison')
     parser.add_argument('--resume',type=Path,help='Verify an already completed private test installation')
     args=parser.parse_args()
     parent = ROOT / '.bsf-test'
@@ -73,12 +76,17 @@ def main():
     settings = read_psf_file(disk, '/sloty/a/programy/ustawienia.cebula/ustawienia.bur')
     if settings != (out / 'iso/boot/ustawienia.bur').read_bytes():
         raise AssertionError('Installed Settings payload mismatch')
-    for name, extra in (
+    if args.refresh_grid_payloads:
+        if not args.desktop_grid:raise RuntimeError('Payload refresh is only for a desktop-grid fixture')
+        from prepare_desktop_grid_fixture import refresh
+        refresh(out,reset_preferences=args.reset_grid_preferences)
+    scenarios=(('apply', []),('restart',['--desktop-grid-restore',str(out/'apply')])) if args.desktop_grid else (
         ('apply', ['--expected-font-size', '16']),
         ('restart', ['--expected-font-size', '24', '--font-restore-only']),
-    ):
+    )
+    for name,extra in scenarios:
         command = [sys.executable, str(ROOT / 'narzedzia/test_husarz_qemu.py'),
-                   '--fonts-only', '--installed-disk', str(disk),
+                   '--desktop-grid-only' if args.desktop_grid else '--fonts-only', '--installed-disk', str(disk),
                    '--kernel',str(out/'iso/boot/system_operacyjny.bin'),
                    '--iso',str(out/'installer.iso'),
                    '--output', str(out / name), '--timeout', '1500'] + extra
@@ -92,7 +100,7 @@ def main():
         if len(stored) != 24:
             raise AssertionError('Persisted config length')
         magic, version, family, size, generation, checksum = struct.unpack('<6I', stored)
-        if (magic != 0x31465342 or version != 1 or size != 24 or
+        if (magic != 0x31465342 or version != 1 or size != (16 if args.desktop_grid else 24) or
                 checksum != (magic ^ version ^ family ^ size ^ 0xb5f01937)):
             raise AssertionError('Persisted config validation failed')
         print(name + ': disk-only font configuration PASS', flush=True)

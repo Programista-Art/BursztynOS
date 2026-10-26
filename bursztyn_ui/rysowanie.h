@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "../kolor_alfa.h"
 #include <stddef.h>
 #include "typy.h"
 #include "czcionka.h"
@@ -236,7 +237,7 @@ public:
                         auto &dst = pixels[size_t(gy + y - visible.y) *
                                                visible.szerokosc +
                                            gx + x - visible.x];
-                        unsigned a = alpha[y * w + x];
+                        unsigned a = alpha[y * w + x] * ((kolor >> 24) ? (kolor >> 24) : 255) / 255;
                         a += (dst >> 24) * (255 - a) / 255;
                         dst = (a << 24) | (kolor & 0xffffff);
                       }
@@ -269,19 +270,13 @@ public:
                     int left = gx < clip.x ? clip.x : gx,
                         right = gx + w > clip.prawy() ? clip.prawy() : gx + w;
                     for (int x = left; x < right; ++x) {
-                      unsigned a = alpha[y * w + x - gx];
+                      unsigned a = alpha[y * w + x - gx] * ((kolor >> 24) ? (kolor >> 24) : 255) / 255;
                       row[x - left] = (a << 24) | (kolor & 0xffffff);
                       if (cel_ && granice_celu_.zawiera(Punkt(x, gy + y))) {
                         auto &dst = cel_[size_t(gy + y - granice_celu_.y) *
                                              granice_celu_.szerokosc +
                                          x - granice_celu_.x];
-                        uint32_t c = 0;
-                        for (unsigned shift = 0; shift < 24; shift += 8)
-                          c |= ((((kolor >> shift) & 255) * a +
-                                 ((dst >> shift) & 255) * (255 - a) + 127) /
-                                255)
-                               << shift;
-                        dst = 0xff000000 | c;
+                        dst = kolor_nad(dst, (a << 24) | (kolor & 0xffffff));
                       }
                     }
                     if (!cel_ && !g_tlum_rysowanie_globalne && right > left)

@@ -1,3 +1,4 @@
+#include "kolor_alfa.h"
 #pragma once
 
 #include <stdint.h>
@@ -166,8 +167,8 @@ inline uint32_t motyw_mieszaj(uint32_t base, uint32_t overlay, unsigned weight) 
         result |= (((base>>shift&255)*(255-weight)+(overlay>>shift&255)*weight)/255)<<shift;
     return result;
 }
-// Only the root desktop interprets these two alpha tags. Other surfaces and
-// the existing 0x01000000 visible-black marker retain their RGB contract.
+// The root desktop retains straight alpha until wallpaper composition.
+// Other surfaces and the visible-black marker keep their legacy RGB contract.
 inline unsigned motyw_jasnosc_rgb(uint32_t rgb) {
     return ((rgb>>16&255)*54+(rgb>>8&255)*183+(rgb&255)*19)>>8;
 }
@@ -178,7 +179,7 @@ inline uint32_t motyw_pulpit_odcien(const BursztynMotyw& m,bool jasny,unsigned w
 }
 // Wallpaper labels need a bright foreground independent of window text.
 // Use the brighter theme surface; lift it toward white to keep a dark theme's
-// gray text readable too. Existing desktop glyph shadows cover bright regions.
+// gray text readable too. The dark selected backdrop supplies its contrast.
 inline uint32_t motyw_pulpit_tekst_zaznaczony(const BursztynMotyw& m) {
     uint32_t base=motyw_jasnosc_rgb(m.panel)>motyw_jasnosc_rgb(m.tekst)?m.panel:m.tekst;
     uint32_t out=0;
@@ -186,24 +187,16 @@ inline uint32_t motyw_pulpit_tekst_zaznaczony(const BursztynMotyw& m) {
     return out;
 }
 inline uint32_t motyw_pulpit_zaznaczenie(const BursztynMotyw& m) {
-    return 0x20000000U | motyw_pulpit_odcien(m,true,24);
+    return 0xc0000000U | motyw_pulpit_odcien(m,false,24);
 }
 inline uint32_t motyw_pulpit_ramka(const BursztynMotyw& m) {
-    return 0x70000000U | motyw_pulpit_odcien(m,true,80);
+    return 0xd0000000U | motyw_mieszaj(m.ramka,m.akcent,160);
 }
 inline uint32_t motyw_pulpit_skladaj(uint32_t background,uint32_t pixel,bool desktop,
                                     const BursztynMotyw* theme=nullptr) {
-    unsigned alpha=pixel>>24;
-    if(desktop && (alpha==32 || alpha==112)) {
-        if(theme) {
-            // Choose a theme-derived shade contrasting with the actual wallpaper
-            // pixel. The alpha remains real and identical across all themes.
-            unsigned midpoint=(motyw_jasnosc_rgb(theme->panel)+motyw_jasnosc_rgb(theme->tekst))/2;
-            bool light=motyw_jasnosc_rgb(background)<midpoint;
-            pixel=motyw_pulpit_odcien(*theme,light,alpha==32?24:80);
-        }
-        return motyw_mieszaj(background,pixel,alpha);
-    }
+    (void)theme;
+    if(desktop && pixel && pixel!=0x01000000U && (pixel>>24))
+        return kolor_nad(0xff000000U | (background&0xffffffU),pixel)&0xffffffU;
     return pixel & 0x00ffffffU;
 }
 

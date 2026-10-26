@@ -2153,3 +2153,9 @@ profile-bsf-host:
 	@mkdir -p .bsf-test
 	g++ -std=c++17 -O2 -ffunction-sections -fdata-sections narzedzia/profile_bsf.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/profile
 	.bsf-test/profile
+
+.PHONY: test-desktop-ttf-host
+test-desktop-ttf-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -fcoroutines -O0 -g0 -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_desktop_ttf.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/desktop-ttf-host
+	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/desktop-ttf-host

@@ -16,6 +16,7 @@ kontrolki4tmp.o: programy/kontrolki4/kontrolki4.cpp \
  programy/kontrolki4/../../bursztyn_ui/../skladacz_obrazu.h \
  programy/kontrolki4/../../bursztyn_ui/../legacy_ui.h \
  programy/kontrolki4/../../bursztyn_ui/../motyw.h \
+ programy/kontrolki4/../../bursztyn_ui/../kolor_alfa.h \
  programy/kontrolki4/../../bursztyn_ui/czcionka.h \
  programy/kontrolki4/../../bursztyn_ui/../bsf/runtime.h \
  programy/kontrolki4/../../bursztyn_ui/../bsf/bsf.h \
@@ -103,6 +104,7 @@ programy/kontrolki4/../../bursztyn_ui/../bws_ota.h:
 programy/kontrolki4/../../bursztyn_ui/../skladacz_obrazu.h:
 programy/kontrolki4/../../bursztyn_ui/../legacy_ui.h:
 programy/kontrolki4/../../bursztyn_ui/../motyw.h:
+programy/kontrolki4/../../bursztyn_ui/../kolor_alfa.h:
 programy/kontrolki4/../../bursztyn_ui/czcionka.h:
 programy/kontrolki4/../../bursztyn_ui/../bsf/runtime.h:
 programy/kontrolki4/../../bursztyn_ui/../bsf/bsf.h:

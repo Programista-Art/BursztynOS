@@ -11,7 +11,7 @@ static void desktop_launcher_edge_cases() {
             p.label=Desktop::wrap(name,m.etykieta_szer,m.wysokosc_linii,m.odstep_linii,16,scale,oblicz_szerokosc_tekstu);
             CHECK(p.label.complete);CHECK(name[0]=='i'?p.label.count==1:p.label.count>1);
             int dx=edge==0?-9999:edge==1?9999:0,dy=edge==2?-9999:edge==3?9999:0;
-            layout.clamp_delta(dx,dy);CHECK(layout.move_visual_group(dx,dy));auto r=layout.visual_bounds(0);
+            layout.clamp_delta(dx,dy);CHECK(layout.move_visual_group(dx,dy));auto r=layout.placement_bounds(0);
             CHECK(r.x>=0 && r.y>=0 && r.prawy()<=screen_w && r.dolny()<=screen_h-PASEK_WYS);
             if(edge==0)CHECK(r.x==0);if(edge==1)CHECK(r.prawy()==screen_w);
             if(edge==2)CHECK(r.y==0);if(edge==3)CHECK(r.dolny()==screen_h-PASEK_WYS);
@@ -22,7 +22,7 @@ static void desktop_launcher_edge_cases() {
             auto a=layout.visual_bounds(0),b=layout.visual_bounds(1);
             dx=edge==0?-9999:edge==1?9999:0;dy=edge==2?-9999:edge==3?9999:0;
             layout.clamp_delta(dx,dy);CHECK(layout.move_visual_group(dx,dy));
-            auto aa=layout.visual_bounds(0),bb=layout.visual_bounds(1),group=Desktop::unite(aa,bb);
+            auto aa=layout.visual_bounds(0),bb=layout.visual_bounds(1),group=Desktop::unite(layout.placement_bounds(0),layout.placement_bounds(1));
             CHECK(bb.x-aa.x==b.x-a.x);CHECK(bb.y-aa.y==b.y-a.y);
             if(edge==0)CHECK(group.x==0);if(edge==1)CHECK(group.prawy()==screen_w);
             if(edge==2)CHECK(group.y==0);if(edge==3)CHECK(group.dolny()==screen_h-PASEK_WYS);

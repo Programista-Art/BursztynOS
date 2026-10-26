@@ -14,24 +14,31 @@ struct Label {
 // The caller supplies the current system Unicode font measurement.
 inline Label wrap(const char* text,int width,int lineHeight,int gap,int maxLines,
                   int scale,int (*measure)(const char*,int)) {
-    Label l;char line[516]{};int start=0,pos=0,n=0;
+    Label l;char line[516]{};int start=0,pos=0;
     if(maxLines>MaxLines)maxLines=MaxLines;
     while(text && text[pos] && l.count<maxLines) {
-        uint32_t cp=0;int bytes=int(BursztynUI::CzcionkaUI::dekoduj_utf8(text,pos,&cp));
-        if(!bytes)break;
-        if(n+bytes>=512)break;
-        for(int b=0;b<bytes;++b)line[n+b]=text[pos+b];
-        line[n+bytes]=0;
-        int measured=measure(line,scale);
-        if(n && measured>width) {
-            line[n]=0;l.starts[l.count]=start;l.ends[l.count]=pos;
-            l.widths[l.count]=measure(line,scale);++l.count;start=pos;n=0;continue;
+        start=pos;int n=0,space=-1,spaceBytes=0;
+        while(text[pos]) {
+            uint32_t cp=0;int bytes=int(BursztynUI::CzcionkaUI::dekoduj_utf8(text,pos,&cp));
+            if(!bytes || n+bytes>=512)break;
+            for(int b=0;b<bytes;++b)line[n+b]=text[pos+b];
+            line[n+bytes]=0;
+            if(measure(line,scale)>width)break;
+            if(cp==' ' && n){space=pos;spaceBytes=bytes;}
+            n+=bytes;pos+=bytes;
         }
-        // A glyph wider than the region cannot be drawn safely.
-        if(measured>width)break;
-        n+=bytes;pos+=bytes;
+        if(pos==start) {
+            // Even a single over-wide glyph gets a bounded ellipsis line.
+            l.starts[l.count]=l.ends[l.count]=start;++l.count;break;
+        }
+        int end=pos;
+        if(text[pos] && space>=start){end=space;pos=space+spaceBytes;}
+        for(int b=0;b<end-start;++b)line[b]=text[start+b];
+        line[end-start]=0;
+        l.starts[l.count]=start;l.ends[l.count]=end;
+        l.widths[l.count]=measure(line,scale);++l.count;
+        while(text[pos]==' ')++pos;
     }
-    if(n && l.count<maxLines) {l.starts[l.count]=start;l.ends[l.count]=pos;l.widths[l.count]=measure(line,scale);++l.count;}
     l.complete=!text || !text[pos];
     if(!l.complete && l.count) {
         int last=l.count-1,start=l.starts[last],end=l.ends[last];
@@ -61,8 +68,10 @@ inline bool intersects(Prostokat a,Prostokat b) {
 }
 inline Prostokat visual(int x,int y,const Label& l,uint32_t scale) {
     auto g=pulpit_geometria_komorki(x,y,scale);int pad=ui_skaluj(3,scale);
+    int width=l.width<g.etykieta_szer?l.width:g.etykieta_szer;
+    int height=l.height<g.etykieta_wys?l.height:g.etykieta_wys;
     auto r=unite({g.ikona_x,g.ikona_y,g.ikona_szer,g.ikona_wys},
-        {g.etykieta_x+(g.etykieta_szer-l.width)/2,g.etykieta_y,l.width,l.height});
+        {g.etykieta_x+(g.etykieta_szer-width)/2,g.etykieta_y,width,height});
     return {r.x-pad,r.y-pad,r.szerokosc+2*pad,r.wysokosc+2*pad};
 }
 struct Position {int col=0,row=0,span=1,offsetX=0,offsetY=0;bool placed=false,selected=false,custom=false,launcher=false;Label label;};
@@ -83,7 +92,8 @@ public:
         scale=scale>=100 && scale<=400?scale:100;
         originY=originY<0?0:originY>bottom?bottom:originY;
         workWidth=width;workBottom=bottom;dpi=scale;
-        cw=ui_skaluj(120,scale);ch=ui_skaluj(100,scale);x0=ui_skaluj(20,scale);y0=originY;
+        auto metrics=pulpit_metryki(scale);
+        cw=metrics.komorka_szer;ch=metrics.komorka_wys;x0=ui_skaluj(20,scale);y0=originY;
         cols=width>2*x0?(width-2*x0)/cw:0;rows=(bottom-y0)/ch;
     }
     uint64_t candidate_limit() const {
@@ -101,15 +111,28 @@ public:
         if(x < -GeometryMax*8 || x>GeometryMax*8 || y < -GeometryMax*8 || y>GeometryMax*8 || h<0 || h>GeometryMax*8)return {};
         return {int(x),int(y),cw,int(h)};
     }
+    Prostokat placement_bounds(int i) const {
+        auto r=cell(i);
+        auto m=pulpit_metryki(dpi);
+        int pad=ui_skaluj(3,dpi);
+        return {r.x+(cw-m.etykieta_szer)/2-pad,r.y-pad,
+                m.etykieta_szer+2*pad,m.ikona_wys+m.odstep_etykiety+m.etykieta_wys+2*pad};
+    }
+    void anchor_position(int i,int x,int y) {
+        if(!index(i))return;
+        auto& p=items[i];p.col=p.row=0;
+        p.offsetX=x-x0;p.offsetY=y-y0;p.placed=p.custom=true;
+    }
     bool fits(int i,int col,int row,int dc=0,int dr=0,bool group=false) const {
         if(!index(i) || col<0 || col>=cols || row<0 || int64_t(row)+items[i].span>rows)return false;
         const auto& p=items[i];
         int64_t ax=int64_t(x0)+int64_t(col)*cw+p.offsetX,ay=int64_t(y0)+int64_t(row)*ch+p.offsetY;
         if(ax < -GeometryMax*8 || ax>GeometryMax*8 || ay < -GeometryMax*8 || ay>GeometryMax*8)return false;
-        auto a=visual(int(ax),int(ay),p.label,dpi);
+        auto a=placement_bounds(i);
+        auto current=cell(i);a.x+=int(ax)-current.x;a.y+=int(ay)-current.y;
         if(a.x<0 || a.y<0 || int64_t(a.x)+a.szerokosc>workWidth || int64_t(a.y)+a.wysokosc>workBottom)return false;
         for(int j=0;j<count;++j)if(j!=i && items[j].placed) {
-            auto b=visual_bounds(j);
+            auto b=placement_bounds(j);
             if(group && items[j].selected){b.x+=dc*cw;b.y+=dr*ch;}
             if(intersects(a,b))return false;
         }
@@ -167,7 +190,8 @@ public:
         p.offsetX=int(dx);p.offsetY=int(dy);p.placed=true;p.custom=true;
     }
     bool visible(int i) const {
-        auto r=visual_bounds(i);
+        if(cell(i).czy_pusty())return false;
+        auto r=placement_bounds(i);
         return !r.czy_pusty() && r.x>=0 && r.y>=0 && int64_t(r.x)+r.szerokosc<=workWidth && int64_t(r.y)+r.wysokosc<=workBottom;
     }
     // Retain every valid item first. Relocate only invalid/colliding entries,
@@ -180,17 +204,19 @@ public:
             bool valid=visible(i);
             for(int j=0;j<count && valid;++j)if(items[j].placed &&
                 ((items[j].launcher && !items[i].launcher) || (items[j].launcher==items[i].launcher && j<i)) &&
-                intersects(visual_bounds(i),visual_bounds(j)))valid=false;
+                intersects(placement_bounds(i),placement_bounds(j)))valid=false;
             if(!valid){items[i].placed=items[i].selected=false;++corrected;}
         }
         // Valid positions always win; priority applies only to waiting items.
         for(int pass=0;pass<2;++pass)for(int i=0;i<count;++i)if(!items[i].placed && items[i].launcher==(pass==0)) {
             items[i].selected=false;
-            auto desired=visual_bounds(i);
+            auto desired=placement_bounds(i);
             int bestX=0,bestY=0;int64_t best=INT64_MAX;
             for(int row=0;row<=rows;++row)for(int col=0;col<=cols;++col) {
                 ++searchIterations;
-                auto candidate=visual(x0+col*cw,y0+row*ch,items[i].label,dpi);
+                auto candidate=placement_bounds(i);
+                auto current=cell(i);
+                candidate.x+=x0+col*cw-current.x;candidate.y+=y0+row*ch-current.y;
                 // Partial edge cells use their real visual size.
                 if(candidate.szerokosc>workWidth || candidate.wysokosc>workBottom)continue;
                 if(candidate.x<0)candidate.x=0;
@@ -198,18 +224,21 @@ public:
                 if(candidate.prawy()>workWidth)candidate.x=workWidth-candidate.szerokosc;
                 if(candidate.dolny()>workBottom)candidate.y=workBottom-candidate.wysokosc;
                 bool free=true;
-                for(int j=0;j<count && free;++j)if(j!=i && items[j].placed && intersects(candidate,visual_bounds(j)))free=false;
+                for(int j=0;j<count && free;++j)if(j!=i && items[j].placed && intersects(candidate,placement_bounds(j)))free=false;
                 int64_t dx=int64_t(candidate.x)-desired.x,dy=int64_t(candidate.y)-desired.y,d=dx*dx+dy*dy;
                 if(free && d<best){best=d;bestX=candidate.x;bestY=candidate.y;}
             }
-            if(best!=INT64_MAX){visual_position(i,bestX,bestY);++newlyPlaced;}
+            if(best!=INT64_MAX){
+                auto footprint=placement_bounds(i);auto anchor=cell(i);
+                anchor_position(i,bestX-(footprint.x-anchor.x),bestY-(footprint.y-anchor.y));++newlyPlaced;
+            }
         }
         return corrected;
     }
     void clamp_delta(int& dx,int& dy) const {
         Prostokat bounds{};
         for(int i=0;i<count;++i)if(items[i].selected && items[i].placed)
-            bounds=unite(bounds,visual_bounds(i));
+            bounds=unite(bounds,placement_bounds(i));
         if(bounds.czy_pusty()){dx=dy=0;return;}
         if(dx < -bounds.x)dx=-bounds.x;
         if(dy < -bounds.y)dy=-bounds.y;
@@ -218,10 +247,10 @@ public:
     }
     bool visual_group_fits(int dx,int dy) const {
         for(int i=0;i<count;++i)if(items[i].selected && items[i].placed) {
-            auto moved=visual_bounds(i);moved.x+=dx;moved.y+=dy;
+            auto moved=placement_bounds(i);moved.x+=dx;moved.y+=dy;
             if(moved.x<0 || moved.y<0 || moved.prawy()>workWidth || moved.dolny()>workBottom)return false;
             for(int j=0;j<count;++j)if(!items[j].selected && items[j].placed &&
-                intersects(moved,visual_bounds(j)))return false;
+                intersects(moved,placement_bounds(j)))return false;
         }
         return true;
     }

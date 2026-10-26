@@ -47,6 +47,12 @@ inline bool number(const char* s,size_t n,int& value) {
     }
     return true;
 }
+inline bool coordinate(const char* s,size_t n,int& value,bool signedAnchor) {
+    const bool negative=signedAnchor && n && s[0]=='-';
+    if(!number(s+negative,n-negative,value))return false;
+    if(negative)value=-value;
+    return true;
+}
 inline int hex(char c) {return c>='0'&&c<='9'?c-'0':c>='A'&&c<='F'?c-'A'+10:c>='a'&&c<='f'?c-'a'+10:-1;}
 inline bool decode(const char* s,size_t n,char* out) {
     size_t p=0;
@@ -67,9 +73,9 @@ struct State {
     char buffer[BufferCapacity]{};
     Record scratch{};
     int count=0,savedDpi=100;
-    bool loaded=false,dirty=false,applied=false;
+    bool loaded=false,dirty=false,applied=false,anchorCoordinates=false;
     int matchedLaunchers=0,matchedFiles=0,stale=0;
-    void reset() {count=0;savedDpi=100;matchedLaunchers=matchedFiles=stale=0;}
+    void reset() {anchorCoordinates=false;count=0;savedDpi=100;matchedLaunchers=matchedFiles=stale=0;}
     bool parse(size_t size) {
         reset();
         constexpr char header[]="BursztynDesktopLayout=1\n";
@@ -91,6 +97,10 @@ struct State {
                 savedDpi=dpi;
                 continue;
             }
+            if(n==9 && line[0]=='a') {
+                bool match=true;for(size_t j=0;j<n;++j)if(line[j]!="anchors=1"[j])match=false;
+                if(match){anchorCoordinates=true;continue;}
+            }
             size_t dimension=0;
             if(n>=6 && line[0]=='w' && line[1]=='i' && line[2]=='d' && line[3]=='t' && line[4]=='h' && line[5]=='=')dimension=6;
             if(n>=7 && line[0]=='h' && line[1]=='e' && line[2]=='i' && line[3]=='g' && line[4]=='h' && line[5]=='t' && line[6]=='=')dimension=7;
@@ -104,7 +114,7 @@ struct State {
             size_t c=b+1;while(c<n && line[c]!='\t')++c;
             if(a==n || b>=n)continue;
             scratch=Record{};scratch.type=line[0];
-            if(!decode(line+2,a-2,scratch.id)||!number(line+a+1,b-a-1,scratch.x)||!number(line+b+1,c-b-1,scratch.y))continue;
+            if(!decode(line+2,a-2,scratch.id)||!coordinate(line+a+1,b-a-1,scratch.x,anchorCoordinates)||!coordinate(line+b+1,c-b-1,scratch.y,anchorCoordinates))continue;
             bool duplicate=false;
             for(int i=0;i<count;++i)if(records[i].type==scratch.type && equal(records[i].id,scratch.id))duplicate=true;
             // First valid record wins, regardless of unknown trailing flags.
@@ -130,24 +140,28 @@ struct State {
             for(int r=0;r<count;++r)if(records[r].type==k.type && equal(records[r].id,k.id)) {
                 int x=int(int64_t(records[r].x)*layout.dpi/savedDpi);
                 int y=int(int64_t(records[r].y)*layout.dpi/savedDpi);
-                layout.visual_position(i,x,y);
+                if(anchorCoordinates)layout.anchor_position(i,x,y);
+                else layout.visual_position(i,x,y);
                 if(k.type=='L')++matchedLaunchers;else ++matchedFiles;
                 break;
             }
         }
         stale=count-matchedLaunchers-matchedFiles;
-        int corrected=layout.reflow();dirty=corrected>0;return corrected;
+        int corrected=layout.reflow();
+        // Migrate legacy text-bound coordinates once at load, before a live
+        // family change can make their visual offset ambiguous on next boot.
+        dirty=corrected>0 || (count>0 && !anchorCoordinates);return corrected;
     }
     template<class Layout,class Keys> size_t serialize(const Layout& layout,Keys key) {
         if(layout.count<0 || layout.count>Capacity || layout.workWidth<=0 || layout.workBottom<=0)return 0;
         size_t pos=0;bool ok=true;
         auto put=[&](char c){if(pos+1>=BufferCapacity){ok=false;return;}buffer[pos++]=c;};
         auto text=[&](const char* s){while(*s)put(*s++);};
-        auto num=[&](int n){char digits[10];int c=0;do{digits[c++]=char('0'+n%10);n/=10;}while(n);while(c)put(digits[--c]);};
-        text("BursztynDesktopLayout=1\nwidth=");num(layout.workWidth);text("\nheight=");num(layout.workBottom);text("\ndpi=");num(layout.dpi);put('\n');
+        auto num=[&](int n){if(n<0){put('-');n=-n;}char digits[10];int c=0;do{digits[c++]=char('0'+n%10);n/=10;}while(n);while(c)put(digits[--c]);};
+        text("BursztynDesktopLayout=1\nanchors=1\nwidth=");num(layout.workWidth);text("\nheight=");num(layout.workBottom);text("\ndpi=");num(layout.dpi);put('\n');
         for(int i=0;i<layout.count;++i)if(layout.items[i].placed) {
-            auto k=key(i);auto r=layout.visual_bounds(i);
-            if((k.type!='L' && k.type!='F') || !identity(k.id)||r.x<0||r.y<0||r.x>CoordinateMax||r.y>CoordinateMax)return 0;
+            auto k=key(i);auto r=layout.cell(i);
+            if((k.type!='L' && k.type!='F') || !identity(k.id)||r.x < -CoordinateMax||r.y < -CoordinateMax||r.x>CoordinateMax||r.y>CoordinateMax)return 0;
             put(k.type);put('\t');
             for(size_t b=0;k.id[b];++b) {
                 unsigned char c=k.id[b];

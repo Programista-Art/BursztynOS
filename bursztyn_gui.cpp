@@ -923,13 +923,13 @@ void gui_wypisz_tekst_kolor_skala(int x,
         if(width>0&&width<=2048&&height>0&&height<=128){
             auto* pixels=new uint32_t[size_t(width)*height];
             if(pixels){for(size_t i=0;i<size_t(width)*height;++i)static_cast<volatile uint32_t*>(pixels)[i]=0;
-                BursztynUI::CzcionkaUI::rysuj_bsf(tekst,4,0,pixel_size,[&](int gx,int gy,int w,int h,const uint8_t* alpha){for(int yy=0;yy<h;++yy)for(int xx=0;xx<w;++xx)if(gx+xx>=0&&gx+xx<width&&gy+yy>=0&&gy+yy<height){auto& dst=pixels[size_t(gy+yy)*width+gx+xx];unsigned a=alpha[yy*w+xx],previous=dst>>24;a+=previous*(255-a)/255;dst=(a<<24)|(kolor&0xffffff);}});
+                BursztynUI::CzcionkaUI::rysuj_bsf(tekst,4,0,pixel_size,[&](int gx,int gy,int w,int h,const uint8_t* alpha){for(int yy=0;yy<h;++yy)for(int xx=0;xx<w;++xx)if(gx+xx>=0&&gx+xx<width&&gy+yy>=0&&gy+yy<height){auto& dst=pixels[size_t(gy+yy)*width+gx+xx];unsigned a=alpha[yy*w+xx]*((kolor>>24)?(kolor>>24):255)/255,previous=dst>>24;a+=previous*(255-a)/255;dst=(a<<24)|(kolor&0xffffff);}});
                 gui_blit_alpha(legacy_x(x)-4,legacy_y(y),width,height,pixels);delete[] pixels;return;
             }
         }
     }
     if(BursztynUI::CzcionkaUI::rysuj_bsf(tekst,legacy_x(x),legacy_y(y),pixel_size,
-        [&](int gx,int gy,int w,int h,const uint8_t* alpha){uint32_t row[BSF::MaxBitmap];for(int yy=0;yy<h;++yy){for(int xx=0;xx<w;++xx)row[xx]=(uint32_t(alpha[yy*w+xx])<<24)|(kolor&0xffffff);gui_blit_alpha(gx,gy+yy,w,1,row);}}))return;
+        [&](int gx,int gy,int w,int h,const uint8_t* alpha){uint32_t row[BSF::MaxBitmap];for(int yy=0;yy<h;++yy){for(int xx=0;xx<w;++xx)row[xx]=(uint32_t(alpha[yy*w+xx]*((kolor>>24)?(kolor>>24):255)/255)<<24)|(kolor&0xffffff);gui_blit_alpha(gx,gy+yy,w,1,row);}}))return;
 #endif
     const uint64_t kolor_skala =
         (static_cast<uint64_t>(poprawna_skala) << 32) |

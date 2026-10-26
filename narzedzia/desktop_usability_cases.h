@@ -6,7 +6,7 @@ static void desktop_ctrl(bool on) {
     auto e=desktop_event(BWS_ZDARZENIE_KLAWISZ_FIZYCZNY,1);e.kod=0x1d;e.przyciski=on?BWS_MOD_CTRL:0;obsluz_gest_pulpitu(e);
 }
 static void desktop_click(int i,bool ctrl=false) {
-    desktop_ctrl(ctrl);auto r=desktop_layout.cell(i);
+    desktop_ctrl(ctrl);auto r=wizualny_wpis_pulpitu(i);
     if(r.x+10<0 || r.y+10<0)r=wizualny_wpis_pulpitu(i);
     CHECK(obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_DOWN,r.x+10,r.y+10)));
     CHECK(test_mouse_capture);
@@ -23,7 +23,7 @@ static void desktop_usability_cases() {
         CHECK(desktop_layout.count==4+DesktopEntries::Count);
         for(int i=0;i<4;++i) {
             auto p=desktop_layout.items[i];auto cell=desktop_layout.cell(i),r=wizualny_wpis_pulpitu(i);
-            CHECK(p.placed);CHECK(p.label.complete);CHECK(p.label.count>=1);
+            CHECK(p.placed);CHECK(p.label.count<=3);CHECK(p.label.count>=1);
             CHECK(r.y>=0);CHECK(r.y+r.wysokosc<=screen_h-PASEK_WYS);CHECK(r.x>=0);CHECK(r.x+r.szerokosc<=screen_w);
             CHECK(r.wysokosc<cell.wysokosc);CHECK(r.szerokosc<cell.szerokosc);
             std::string joined;
@@ -31,9 +31,11 @@ static void desktop_usability_cases() {
                 CHECK(p.label.widths[line]<=pulpit_metryki(scale).etykieta_szer);
                 CHECK((static_cast<unsigned char>(wpisy_pulpitu[i].nazwa[p.label.starts[line]])&192)!=128);
                 CHECK((static_cast<unsigned char>(wpisy_pulpitu[i].nazwa[p.label.ends[line]])&192)!=128);
+                if(line && p.label.starts[line]>p.label.ends[line-1])joined.append(wpisy_pulpitu[i].nazwa+p.label.ends[line-1],p.label.starts[line]-p.label.ends[line-1]);
                 joined.append(wpisy_pulpitu[i].nazwa+p.label.starts[line],p.label.ends[line]-p.label.starts[line]);
             }
-            CHECK(joined==wpisy_pulpitu[i].nazwa);
+            if(p.label.complete)CHECK(joined==wpisy_pulpitu[i].nazwa);
+            else CHECK(!strncmp(wpisy_pulpitu[i].nazwa,joined.c_str(),joined.size()));
             for(int j=i+1;j<4;++j)CHECK(!Desktop::intersects(r,wizualny_wpis_pulpitu(j)));
         }
         CHECK(desktop_layout.items[3].label.count>1);
@@ -41,7 +43,7 @@ static void desktop_usability_cases() {
         desktop_click(1,true);CHECK(desktop_layout.selected_count()==2);
         desktop_click(0,true);CHECK(desktop_layout.selected_count()==1);CHECK(!desktop_layout.items[0].selected);
         desktop_click(0,true);CHECK(desktop_layout.selected_count()==2);
-        auto r=desktop_layout.cell(0);auto before=files;int rel=desktop_layout.items[1].col-desktop_layout.items[0].col;
+        auto r=wizualny_wpis_pulpitu(0);auto before=files;int rel=desktop_layout.items[1].col-desktop_layout.items[0].col;
         desktop_ctrl(false);
         CHECK(obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_DOWN,r.x+10,r.y+10)));
         CHECK(obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_RUCH,r.x+11,r.y+11)));CHECK(!desktop_gesture.dragging);
@@ -61,7 +63,7 @@ static void desktop_usability_cases() {
             for(int i=0;i<4;++i)for(int j=i+1;j<4;++j)CHECK(!Desktop::intersects(wizualny_wpis_pulpitu(i),wizualny_wpis_pulpitu(j)));
         }
         // Preserve group on right click; single-target actions are disabled.
-        r=desktop_layout.cell(0);auto right=desktop_event(BWS_ZDARZENIE_MYSZ_PRAWY_DOWN,r.x+10,r.y+10);
+        r=wizualny_wpis_pulpitu(0);auto right=desktop_event(BWS_ZDARZENIE_MYSZ_PRAWY_DOWN,r.x+10,r.y+10);
         CHECK(obsluz_prawy_klik_pulpitu(right));CHECK(desktop_layout.selected_count()==2);
         for(int index:{0,1,2,3,7})CHECK(!pulpit_menu->menu.menu().element(index)->czy_wlaczony());
         for(int index:{4,5,8})CHECK(pulpit_menu->menu.menu().element(index)->czy_wlaczony());
@@ -85,7 +87,7 @@ static void desktop_usability_cases() {
         // Isolate the two filesystem entries for this rubber-band test;
         // automatic placement now reserves the catalog before user items.
         for(int i=0;i<2;++i){auto& p=desktop_layout.items[i];p.col=i;p.row=3;p.offsetX=p.offsetY=0;p.placed=p.custom=true;}
-        r=desktop_layout.cell(0);int y=wizualny_wpis_pulpitu(0).dolny()-1;
+        r=wizualny_wpis_pulpitu(0);int y=wizualny_wpis_pulpitu(0).dolny()-1;
         obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_DOWN,0,y));
         CHECK(obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_RUCH,r.x+2*desktop_layout.cw,r.y)));
         CHECK(desktop_layout.selected_count()==2);CHECK(desktop_gesture.rubber);
@@ -109,7 +111,7 @@ static void desktop_usability_cases() {
         CHECK(obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_UP,0,0)));CHECK(!test_mouse_capture);
         // Single file/folder drag is visual only and survives listing refresh.
         for(int i=0;i<2;++i) {
-            desktop_click(i);r=desktop_layout.cell(i);before=files;
+            desktop_click(i);r=wizualny_wpis_pulpitu(i);before=files;
             obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_DOWN,r.x+10,r.y+10));
             obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_RUCH,r.x+desktop_layout.cw+10,r.y+10));
             obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_UP,r.x+desktop_layout.cw+10,r.y+10));
@@ -121,7 +123,7 @@ static void desktop_usability_cases() {
     // group when no alternate translated arrangement is free.
     static Desktop::Layout<128> bounded;bounded.count=128;
     bounded.clear_selection();for(int i=0;i<128;++i)bounded.click(i,true);CHECK(bounded.selected_count()==0); // all unplaced
-    static Desktop::Layout<4> packed;packed.count=4;packed.geometry(280,203,3,100);
+    static Desktop::Layout<4> packed;packed.count=4;packed.geometry(280,2*pulpit_metryki(100).komorka_wys+3,3,100);
     for(int i=0;i<4;++i){packed.items[i]={};packed.items[i].placed=true;packed.items[i].col=i%2;packed.items[i].row=i/2;}
     packed.items[0].selected=packed.items[3].selected=true;CHECK(packed.move_group(1,0));CHECK(packed.items[0].col==0);CHECK(packed.items[3].col==1);
     for(auto text:{std::string(55,'W'),std::string("żółćżółćżółćżółćżółćżółć"),std::string(255,'W')}) {

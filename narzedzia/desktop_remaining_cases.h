@@ -25,7 +25,7 @@ static void desktop_remaining_cases() {
         auto input=desktop_event(BWS_ZDARZENIE_TEXT_INPUT);input.kod='y';CHECK(obsluz_popupy_pulpitu(input));
         CHECK(legal==pulpit_dialog->tekst());zatwierdz_pulpit_modal();
         CHECK(files.count(std::string(SCIEZKA_PULPIT)+"/"+legal));
-        CHECK(desktop_find(legal.c_str())>=0);CHECK(desktop_layout.items[desktop_find(legal.c_str())].label.complete);
+        CHECK(desktop_find(legal.c_str())>=0);CHECK(desktop_layout.items[desktop_find(legal.c_str())].label.count<=3);
         // Longer backend listings must not fail the entire desktop refresh.
         std::string longName;for(int i=0;i<40;++i)longName+="żółć";
         files={{"/",true},{SCIEZKA_PULPIT,true},{std::string(SCIEZKA_PULPIT)+"/"+longName,true}};
@@ -40,10 +40,10 @@ static void desktop_remaining_cases() {
             auto visual=wizualny_wpis_pulpitu(0),cell=desktop_layout.cell(0);bool found=false;
             for(auto r:test_paint_rects)if(r.color==motyw_pulpit_zaznaczenie(theme)) {
                 found=true;CHECK(r.x==visual.x && r.y==visual.y && r.w==visual.szerokosc && r.h==visual.wysokosc);
-                CHECK(r.w<cell.szerokosc);CHECK(r.h<=cell.wysokosc);CHECK(r.color>>24==32);
-                CHECK((r.color&0xffffff)==motyw_pulpit_odcien(theme,true,24));
+                CHECK(r.w<cell.szerokosc);CHECK(r.h<=cell.wysokosc);CHECK(r.color>>24==192);
+                CHECK((r.color&0xffffff)==motyw_pulpit_odcien(theme,false,24));
             }
-            CHECK(found);CHECK(motyw_pulpit_ramka(theme)>>24==112);
+            CHECK(found);CHECK(motyw_pulpit_ramka(theme)>>24==208);
         }
         test_ustaw_aktywny_motyw(nullptr);
         for(bool folder:{false,true})for(int mode:{0,1,2,3}) {
@@ -53,7 +53,7 @@ static void desktop_remaining_cases() {
             desktop_layout.count=liczba_wpisow_pulpitu=0;hash_pulpitu_wazny=false;CHECK(odswiez_wpisy_pulpitu());
             int from=desktop_find("source"),to=desktop_find("target");CHECK(from>=0 && to>=0);
             desktop_ctrl(false);desktop_layout.click(from,false);
-            auto a=desktop_layout.cell(from),b=desktop_layout.cell(mode==1?from:to);
+            auto a=wizualny_wpis_pulpitu(from),b=wizualny_wpis_pulpitu(mode==1?from:to);
             deny_operation=mode==3;auto before=files;
             CHECK(obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_DOWN,a.x+10,a.y+10)));
             // A self-drop still requires crossing the drag threshold.
@@ -78,7 +78,7 @@ static void desktop_remaining_cases() {
     desktop_layout.count=liczba_wpisow_pulpitu=0;hash_pulpitu_wazny=false;CHECK(odswiez_wpisy_pulpitu());
     int a=desktop_find("a.txt"),b=desktop_find("b"),target=desktop_find("target");
     desktop_layout.click(a,false);desktop_layout.items[b].selected=true;
-    auto start=desktop_layout.cell(a),end=desktop_layout.cell(target);
+    auto start=wizualny_wpis_pulpitu(a),end=wizualny_wpis_pulpitu(target);
     obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_DOWN,start.x+10,start.y+10));
     CHECK(desktop_layout.selected_count()==2);
     obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_RUCH,end.x+10,end.y+10));CHECK(pulpit_hover_folder==target);

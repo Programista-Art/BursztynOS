@@ -10,7 +10,9 @@ test_dzwieku_tmp.o: programy/test_dzwieku/test_dzwieku.cpp \
  programy/test_dzwieku/../../pzb.h \
  programy/test_dzwieku/../../legacy_ui.h \
  programy/test_dzwieku/../../ui_skala.h \
- programy/test_dzwieku/../../motyw.h programy/test_dzwieku/../../loader.h \
+ programy/test_dzwieku/../../motyw.h \
+ programy/test_dzwieku/../../kolor_alfa.h \
+ programy/test_dzwieku/../../loader.h \
  programy/test_dzwieku/../../pamiec.h \
  programy/test_dzwieku/../../bursztyn_ui/bursztyn_ui.h \
  programy/test_dzwieku/../../bursztyn_ui/typy.h \
@@ -101,6 +103,7 @@ programy/test_dzwieku/../../pzb.h:
 programy/test_dzwieku/../../legacy_ui.h:
 programy/test_dzwieku/../../ui_skala.h:
 programy/test_dzwieku/../../motyw.h:
+programy/test_dzwieku/../../kolor_alfa.h:
 programy/test_dzwieku/../../loader.h:
 programy/test_dzwieku/../../pamiec.h:
 programy/test_dzwieku/../../bursztyn_ui/bursztyn_ui.h:

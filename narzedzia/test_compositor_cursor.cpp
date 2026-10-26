@@ -29,6 +29,7 @@ uint64_t czas_monotoniczny_ns(){return mock_now;}
 uint64_t czas_monotoniczny_us(){return mock_now/1000;}
 void* bufor_grafiki_alokuj(size_t n){return malloc(n);}
 void bufor_grafiki_zwolnij(void* p){free(p);}
+void kfree(void* p){free(p);}
 void wypisz_log(const char*){}
 bool scheduler_dodaj_zdarzenie(int,const bws_zdarzenie*){return true;}
 void grafika_pobierz_pozycje_kursora(int* x,int* y){*x=lx;*y=ly;}

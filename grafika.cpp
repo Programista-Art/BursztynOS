@@ -1,3 +1,4 @@
+#include "kolor_alfa.h"
 #include "diagnostyka_systemu.h"
 #include "boot_phase_timing.h"
 #include "xhci_pointing_diag.h"
@@ -3577,7 +3578,8 @@ static bool gui_blit_region(
             uint32_t pix = piksele[srcIdx];
             if (!zastap_przezroczyste && pix == SKLADACZ_PIKSEL_PRZEZROCZYSTY) continue;
             uint64_t dstIdx = dstRow + (uint64_t)(dx - warstwa->x);
-            if(alfa){unsigned a=pix>>24;if(!a)continue;uint32_t old=warstwa->bufor_pikseli[dstIdx];uint32_t color=0;for(unsigned shift=0;shift<24;shift+=8)color|=((((pix>>shift)&255)*a+((old>>shift)&255)*(255-a)+127)/255)<<shift;pix=0xFF000000U|color;}
+            if(alfa && warstwa->z_order==0){pix=kolor_nad(warstwa->bufor_pikseli[dstIdx],pix);}
+            else if(alfa){unsigned a=pix>>24;if(!a)continue;uint32_t old=warstwa->bufor_pikseli[dstIdx];uint32_t color=0;for(unsigned shift=0;shift<24;shift+=8)color|=((((pix>>shift)&255)*a+((old>>shift)&255)*(255-a)+127)/255)<<shift;pix=0xFF000000U|color;}
             warstwa->bufor_pikseli[dstIdx] = pix;
         }
     }

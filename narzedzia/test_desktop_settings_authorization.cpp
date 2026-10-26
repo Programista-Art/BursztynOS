@@ -27,7 +27,7 @@ struct Layout {
     int count=2,workWidth=1920,workBottom=1040,dpi=100;
     struct Item{bool placed=true;} items[2];
     struct Bounds{int x,y;};
-    Bounds visual_bounds(int i)const{return {100+i*120,200+i*100};}
+    Bounds cell(int i)const{return {100+i*120,200+i*100};}
 };
 int main(){
     std::vector<uint8_t> ram(16*1024*1024);inicjalizuj_psf(ram.data(),ram.size());

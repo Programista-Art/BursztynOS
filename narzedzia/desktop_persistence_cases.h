@@ -78,7 +78,7 @@ static void desktop_persistence_cases() {
         for(int i=0;i<30;++i)if(layout->items[i].placed) {
             CHECK(layout->visible(i));for(int j=0;j<i;++j)if(layout->items[j].placed)CHECK(!Desktop::intersects(layout->visual_bounds(i),layout->visual_bounds(j)));
         }
-        CHECK(layout->visual_bounds(0).x==0 && layout->visual_bounds(0).y==0); // unaffected valid position
+        CHECK(layout->visible(0)); // collision repair retains the full reserved footprint
         CHECK(reload->save(*layout,key,layout_test_io));CHECK(state->load(layout_test_io));
         std::vector<std::pair<int,int>> small;
         for(int i=0;i<30;++i){auto r=layout->visual_bounds(i);small.push_back({r.x,r.y});}
@@ -93,11 +93,11 @@ static void desktop_persistence_cases() {
             layout->items[0].label=Desktop::wrap("bardzo długa nazwa zażółconego folderu",m.etykieta_szer,m.wysokosc_linii,m.odstep_linii,16,dpi,oblicz_szerokosc_tekstu);
             CHECK(layout->items[0].label.count>1);
         }
-        auto bounds=layout->visual_bounds(0);
+        auto bounds=layout->placement_bounds(0);
         int x=edge==0?0:edge==1?layout->workWidth-bounds.szerokosc:300;
         int y=edge==2?0:edge==3?layout->workBottom-bounds.wysokosc:200;
-        layout->visual_position(0,x,y);state->dirty=true;CHECK(state->save(*layout,key,layout_test_io));CHECK(reload->load(layout_test_io));
-        layout->visual_position(0,400,200);CHECK(reload->apply(*layout,key)==0);CHECK(layout->visual_bounds(0).x==x && layout->visual_bounds(0).y==y);CHECK(layout->visible(0));
+        auto anchor=layout->cell(0);layout->anchor_position(0,x-(bounds.x-anchor.x),y-(bounds.y-anchor.y));state->dirty=true;CHECK(state->save(*layout,key,layout_test_io));CHECK(reload->load(layout_test_io));
+        layout->visual_position(0,400,200);CHECK(reload->apply(*layout,key)==0);CHECK(layout->placement_bounds(0).x==x && layout->placement_bounds(0).y==y);CHECK(layout->visible(0));
     }
     // All launchers + full filesystem capacity, including UTF-8 IDs.
     setup(Capacity,3840,2120,125);state->dirty=true;CHECK(state->save(*layout,key,layout_test_io));CHECK(reload->load(layout_test_io));CHECK(reload->count==Capacity);

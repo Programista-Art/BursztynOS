@@ -10,7 +10,7 @@ static bool deny_operation=false;
 static std::string deny_path;
 static int deletes=0, launches=0, checks=0;
 static std::string launched_app,launched_file;
-#define CHECK(x) do {++checks;if(!(x)){fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x);exit(1);}} while(0)
+#define CHECK(x) do {++checks;if(!(x)){fprintf(stderr,"FAIL %s:%d: %s\n",__FILE__,__LINE__,#x);exit(1);}} while(0)
 
 static std::string destination(const char* source,const char* dir) {
     const char* name=strrchr(source,'/');return std::string(dir)+(strcmp(dir,"/")?"/":"")+(name?name+1:source);

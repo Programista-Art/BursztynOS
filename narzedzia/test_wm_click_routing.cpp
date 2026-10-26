@@ -3,6 +3,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include "bursztyn_ui_host_fixture.h"
 #include "../wm_input.h"
 #include "../wm_belka_hit.h"
 #include "../wm_dekoracje.h"
@@ -10,26 +11,15 @@
 #include "../menedzer_okien.cpp"
 #undef _start
 static std::string launched;
-uint64_t bws_wywolaj(uint64_t nr,uint64_t a,uint64_t,uint64_t,uint64_t) {
-    if(nr==10) launched=reinterpret_cast<const char*>(a);
+static uint64_t launch_hook(uint64_t nr,uint64_t a,uint64_t,uint64_t,uint64_t) {
+    if(nr==10)launched=reinterpret_cast<const char*>(a);
     return 1;
 }
-int gui_pobierz_wysokosc_fontu() {return 16;}
-uint32_t gui_pobierz_okna(GuiOknoInfo*,uint32_t) {return 0;}
 void gui_ustaw_przejecie_myszy(bool) {}
-bool gui_aktywuj_okno(uint64_t) {return true;}
-void gui_odswiez() {}
 void gui_ustaw_system_overlay(bool,int,int,int,int) {}
 void rysuj_tekst_wysrodkowany(int,int,int,int,int,uint32_t,const char*) {}
-int oblicz_szerokosc_tekstu(const char* s,int scale) {return int(strlen(s))*8*scale;}
-bool gui_rejestruj_cele_drop(const BwsCelDrop*,uint32_t) {return true;}
-void gui_rysuj_prostokat(int,int,int,int,uint32_t) {}
-uint32_t motyw_kolor(uint32_t) {return 0x123456;}
-bool gui_blit(int,int,int,int,const uint32_t*) {return true;}
 void gui_odswiez_pulpit() {}
-void gui_wypisz_tekst_kolor(int,int,uint32_t,const char*) {}
-void gui_wypisz_tekst_kolor_skala(int,int,uint32_t,int,const char*) {}
-void wypisz(const char*) {}
+int bws_utworz_warstwe(int,int,int,int,int) {return 1;}
 static unsigned checks=0;
 #undef assert
 #define assert(condition) do {++checks;if(!(condition)){fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#condition);abort();}} while(0)
@@ -45,16 +35,19 @@ int main() {
     assert(wm_cel_ruchu(2,-1,-1,true)==-1); // no hit -> no app wakeup
 
     screen_w=1280;screen_h=720;metryki_ekranu();
-    auto menu_click=[](int item) {
+    g_test_bws_hook=launch_hook;
+    auto menu_click=[](const char* query) {
         obsluz_klikniecie(PRZYCISK_MENU_X+2,przycisk_menu_y()+2);
         assert(menu_start_otwarte);
-        int x,y,w,h;assert(prostokat_elementu_menu(item,&x,&y,&w,&h));
-        obsluz_klikniecie(x+w/2,y+h/2);
-        assert(!menu_start_otwarte);
+        for(const char* at=query;*at;++at){bws_zdarzenie e{};e.typ=BWS_ZDARZENIE_TEXT_INPUT;e.kod=*at;assert(start_menu->events.zdarzenie(e));}
+        bws_zdarzenie enter{};enter.typ=BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;enter.kod=BWS_KEY_SOURCE_USB|40;enter.x=1;
+        assert(start_menu->events.zdarzenie(enter));int action=start_menu->take_action();assert(action>=0);
+        zamknij_menu_i_odtworz_pulpit();obsluz_element_menu(action);
+        assert(!menu_start_otwarte && !start_menu->query()[0]);
     };
-    menu_click(0);assert(launched==SCIEZKA_POWLOKA);
-    menu_click(2);assert(launched==SCIEZKA_NOTATNIK);
-    menu_click(16);assert(launched=="/programy/diagnostyka.cebula/diagnostyka.bur");
+    menu_click("shell");assert(launched==SCIEZKA_POWLOKA);
+    menu_click("notat");assert(launched==SCIEZKA_NOTATNIK);
+    menu_click("diag");assert(launched=="/programy/diagnostyka.cebula/diagnostyka.bur");
     for(auto& launcher:DesktopEntries::Launchers) {
         launched.clear();uruchom_lub_aktywuj(launcher.path,launcher.title);
         assert(launched==launcher.path);
@@ -62,10 +55,7 @@ int main() {
     for(uint32_t scale:{100U,125U}) {
         ui_skala_procent=scale;metryki_ekranu();launched.clear();
         assert(!menu_start_otwarte);
-        obsluz_klikniecie(PRZYCISK_MENU_X+2,przycisk_menu_y()+2);
-        assert(menu_start_otwarte && launched.empty());
-        int x,y,w,h;assert(prostokat_elementu_menu(0,&x,&y,&w,&h));
-        obsluz_klikniecie(x+w/2,y+h/2);
+        menu_click("shell");
         assert(launched==SCIEZKA_POWLOKA && !menu_start_otwarte);
     }
     // Use the production kernel selection, with retained client buffers.

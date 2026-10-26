@@ -16,6 +16,7 @@ aktualizacje_tmp.o: programy/aktualizacje/aktualizacje.cpp \
  programy/aktualizacje/../../bursztyn_ui/../skladacz_obrazu.h \
  programy/aktualizacje/../../bursztyn_ui/../legacy_ui.h \
  programy/aktualizacje/../../bursztyn_ui/../motyw.h \
+ programy/aktualizacje/../../bursztyn_ui/../kolor_alfa.h \
  programy/aktualizacje/../../bursztyn_ui/czcionka.h \
  programy/aktualizacje/../../bursztyn_ui/../bsf/runtime.h \
  programy/aktualizacje/../../bursztyn_ui/../bsf/bsf.h \
@@ -103,6 +104,7 @@ programy/aktualizacje/../../bursztyn_ui/../bws_ota.h:
 programy/aktualizacje/../../bursztyn_ui/../skladacz_obrazu.h:
 programy/aktualizacje/../../bursztyn_ui/../legacy_ui.h:
 programy/aktualizacje/../../bursztyn_ui/../motyw.h:
+programy/aktualizacje/../../bursztyn_ui/../kolor_alfa.h:
 programy/aktualizacje/../../bursztyn_ui/czcionka.h:
 programy/aktualizacje/../../bursztyn_ui/../bsf/runtime.h:
 programy/aktualizacje/../../bursztyn_ui/../bsf/bsf.h:

@@ -12,6 +12,7 @@ ustawienia_tmp.o: programy/ustawienia/ustawienia.cpp \
  programy/ustawienia/../../skladacz_obrazu.h \
  programy/ustawienia/../../pzb.h programy/ustawienia/../../legacy_ui.h \
  programy/ustawienia/../../ui_skala.h programy/ustawienia/../../motyw.h \
+ programy/ustawienia/../../kolor_alfa.h \
  programy/ustawienia/../../bursztyn_ui/bursztyn_ui.h \
  programy/ustawienia/../../bursztyn_ui/typy.h \
  programy/ustawienia/../../bursztyn_ui/zdarzenia.h \
@@ -82,7 +83,8 @@ ustawienia_tmp.o: programy/ustawienia/ustawienia.cpp \
  programy/ustawienia/../../bursztyn_ui/tabela_wirtualna.h \
  programy/ustawienia/../../bursztyn_ui/powiadomienie.h \
  programy/ustawienia/../../bursztyn_ui/aplikacja.h \
- programy/ustawienia/../../loader.h programy/ustawienia/../../pamiec.h
+ programy/ustawienia/../../loader.h programy/ustawienia/../../pamiec.h \
+ programy/ustawienia/layout.h
 programy/ustawienia/../../bsf/runtime.h:
 programy/ustawienia/../../bsf/bsf.h:
 programy/ustawienia/../../bsf/config.h:
@@ -98,6 +100,7 @@ programy/ustawienia/../../pzb.h:
 programy/ustawienia/../../legacy_ui.h:
 programy/ustawienia/../../ui_skala.h:
 programy/ustawienia/../../motyw.h:
+programy/ustawienia/../../kolor_alfa.h:
 programy/ustawienia/../../bursztyn_ui/bursztyn_ui.h:
 programy/ustawienia/../../bursztyn_ui/typy.h:
 programy/ustawienia/../../bursztyn_ui/zdarzenia.h:
@@ -170,3 +173,4 @@ programy/ustawienia/../../bursztyn_ui/powiadomienie.h:
 programy/ustawienia/../../bursztyn_ui/aplikacja.h:
 programy/ustawienia/../../loader.h:
 programy/ustawienia/../../pamiec.h:
+programy/ustawienia/layout.h:

@@ -2,9 +2,12 @@
 
 #include <stdint.h>
 #include "ui_skala.h"
+#if defined(BSF_NATIVE)
+#include "bursztyn_ui/czcionka.h"
+#endif
 
 // Wszystkie czesci ikony pulpitu pochodza z jednego logicznego prostokata.
-// Komorka rezerwuje dwie linie fontu 16 px oraz odstep od obrazu.
+// Etykiety korzystaja z wysokosci BSF; komorka zachowuje logiczna siatke ikon.
 struct PulpitMetryki {
     int ikona_szer;
     int ikona_wys;
@@ -15,6 +18,7 @@ struct PulpitMetryki {
     int odstep_etykiety;
     int wysokosc_linii;
     int odstep_linii;
+    int max_linii;
 };
 
 struct PulpitGeometriaKomorki {
@@ -24,12 +28,24 @@ struct PulpitGeometriaKomorki {
 };
 
 inline PulpitMetryki pulpit_metryki(uint32_t procent) {
+    int size=16;
+#if defined(BSF_NATIVE)
+    size=BSF::ui_size();
+#endif
+    // Logical budget, independent of hhea ascent/descent and wrapped content.
+    const int logicalLine=(size*5+3)/4;
+    const int region=3*ui_skaluj(logicalLine,procent)+2*ui_skaluj(2,procent);
+    const int height=ui_skaluj(48,procent)+ui_skaluj(6,procent)+region+2*ui_skaluj(3,procent);
+    int line=ui_skaluj(16,procent);
+#if defined(BSF_NATIVE)
+    line=BursztynUI::CzcionkaUI::pobierz_wysokosc(SkalaUI::procent(procent));
+#endif
     return {
         ui_skaluj(48, procent), ui_skaluj(48, procent),
-        ui_skaluj(120, procent), ui_skaluj(100, procent),
-        ui_skaluj(112, procent), ui_skaluj(34, procent),
-        ui_skaluj(6, procent), ui_skaluj(16, procent),
-        ui_skaluj(2, procent)
+        ui_skaluj(120, procent), height,
+        ui_skaluj(112, procent), region,
+        ui_skaluj(6, procent), line,
+        ui_skaluj(2, procent), 3
     };
 }
 
@@ -43,9 +59,9 @@ inline PulpitGeometriaKomorki pulpit_geometria_komorki(int x, int y, uint32_t pr
             m.etykieta_szer, m.etykieta_wys};
 }
 
-// Etykiety ikon na pulpicie sa celowym wyjatkiem: zawsze biale z cieniem,
+// Niezaznaczone etykiety sa biale z ograniczonym cieniem; zaznaczone bez cienia,
 // poniewaz sa renderowane bezposrednio nad tapetami, a nie powierzchniami okien aplikacji.
 // Kolor nie zalezy od aktywnego motywu (np. Bursztyn Jasny nie moze zamienic go na czarny).
 inline constexpr uint32_t KANONICZNY_KOLOR_ETYKIETY_PULPITU = 0x00FFFFFF;
-inline constexpr uint32_t KANONICZNY_KOLOR_CIENIA_PULPITU   = 0x00101010;
+inline constexpr uint32_t KANONICZNY_KOLOR_CIENIA_PULPITU   = 0x80101010;
 

@@ -2,6 +2,7 @@
 #include "../../bursztyn_gui.h"
 #include "../../bursztyn_ui/bursztyn_ui.h"
 #include "../../loader.h"
+#include "layout.h"
 using namespace BursztynUI;
 extern "C" void _start();
 extern "C" {
@@ -42,16 +43,16 @@ class Settings : public Okno {
       si = 2;
     uint32_t id = index >= 0 && unsigned(index) < family_count ? ids[index] : 0;
     BSF::preview(id, sizes[si]);
-    int px = sizes[si];
+    int px = ui_skaluj(sizes[si],preview->skala_dpi().procent());
     const char *lines[] = {"Bursztyn OS", "Zażółć gęślą jaźń",
                            "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
                            "abcdefghijklmnopqrstuvwxyz", "0123456789"};
     int column = preview->obszar().szerokosc / 2;
     for (unsigned weight = 0; weight < 2; ++weight) {
-      int x = 10 + int(weight) * column, y = 8;
+      int x = ui_skaluj(10,preview->skala_dpi().procent()) + int(weight) * column, y = ui_skaluj(8,preview->skala_dpi().procent());
       ctx.rysuj_tekst_bsf({x, y}, weight ? "Bold" : "Regular",
-                          motyw_kolor(MOTYW_KOLOR_AKCENT), 14, true);
-      y += 22;
+                          motyw_kolor(MOTYW_KOLOR_AKCENT), ui_skaluj(14,preview->skala_dpi().procent()), true);
+      y += ui_skaluj(22,preview->skala_dpi().procent());
       for (auto *line : lines) {
         char part[256]{};
         unsigned used = 0;
@@ -62,7 +63,7 @@ class Settings : public Okno {
           int step = BSF::measure_cp(cp, px, weight != 0);
           if (step < 0)
             step = px / 2 + 1;
-          if (used && width + step > column - 20) {
+          if (used && width + step > column - ui_skaluj(20,preview->skala_dpi().procent())) {
             part[used] = 0;
             if (!ctx.rysuj_tekst_bsf({x, y}, part,
                                      motyw_kolor(MOTYW_KOLOR_TEKST), px,
@@ -88,44 +89,19 @@ class Settings : public Okno {
   }
 
 public:
-  Settings() : Okno("Ustawienia", 950, 680) {}
+  Settings() : Okno("Ustawienia", 950, 540) {}
   void init() {
     auto c = BSF::configuration();
-    auto &root = dodaj<Panel>(Orientacja::Pozioma);
-    root.ustaw_odstep(14);
-    root.ustaw_wypelnienie({12, 12, 12, 12});
-    auto &navigation = root.dodaj<Panel>(Orientacja::Pionowa);
-    navigation.ustaw_preferowany_rozmiar({165, -1});
-    navigation.ustaw_odstep(10);
-    navigation.dodaj<Etykieta>("Ustawienia");
-    const char *pages[] = {"Wygląd", "Czcionki", "System"};
-    for (unsigned i = 0; i < 3; ++i) {
-      auto &b = navigation.dodaj<Przycisk>(pages[i]);
-      b.ustaw_preferowany_rozmiar({-1, 36});
-      if (i == 0)
-        b.przy_kliknieciu(
-            [](Przycisk *, void *p) { static_cast<Settings *>(p)->show(0); },
-            this);
-      if (i == 1)
-        b.przy_kliknieciu(
-            [](Przycisk *, void *p) { static_cast<Settings *>(p)->show(1); },
-            this);
-      if (i == 2)
-        b.przy_kliknieciu(
-            [](Przycisk *, void *p) { static_cast<Settings *>(p)->show(2); },
-            this);
+    auto &viewport = dodaj<SettingsUI::Viewport>();
+    auto &root = *viewport.body;
+    font_page=root.fonts;placeholder=root.placeholder;placeholder_text=root.placeholder_text;
+    auto* page=root.fonts;
+    families=page->families;size=page->size;preview=page->preview;status=page->status;
+    for(unsigned i=0;i<3;++i){
+      if(i==0)root.nav[i]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(0);},this);
+      if(i==1)root.nav[i]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(1);},this);
+      if(i==2)root.nav[i]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(2);},this);
     }
-    auto &content = root.dodaj<Panel>(Orientacja::Pionowa);
-    font_page = &content.dodaj<Panel>(Orientacja::Pionowa);
-    font_page->ustaw_odstep(8);
-    font_page->dodaj<Etykieta>("Ustawienia czcionki");
-    auto &selectors = font_page->dodaj<Panel>(Orientacja::Pozioma);
-    selectors.ustaw_preferowany_rozmiar({-1, -1});
-    selectors.ustaw_odstep(12);
-    auto &family_panel = selectors.dodaj<Panel>(Orientacja::Pionowa);
-    family_panel.dodaj<Etykieta>("Systemowa czcionka");
-    families = &family_panel.dodaj<ListaRozwijana>();
-    families->ustaw_preferowany_rozmiar({-1, 34});
     for (unsigned i = 0; i < BSF::enumerate(); ++i) {
       auto *f = BSF::info(i);
       if (f->weight >= 600 || f->italic)
@@ -140,10 +116,6 @@ public:
       families->dodaj_element("Bitmapowa czcionka awaryjna", 0);
     if (families->wybrany_indeks() < 0)
       families->ustaw_wybrany_indeks(0);
-    auto &size_panel = selectors.dodaj<Panel>(Orientacja::Pionowa);
-    size_panel.ustaw_preferowany_rozmiar({150, -1});
-    size_panel.dodaj<Etykieta>("Rozmiar");
-    size = &size_panel.dodaj<ListaRozwijana>();
     const char *labels[] = {"12 px", "14 px", "16 px",
                             "18 px", "20 px", "24 px"};
     for (unsigned i = 0; i < 6; ++i) {
@@ -151,9 +123,6 @@ public:
       if (c.size == unsigned(sizes[i]))
         size->ustaw_wybrany_indeks(int(i));
     }
-    size->ustaw_preferowany_rozmiar({150, 34});
-    preview = &font_page->dodaj<PowierzchniaRysunkowa>();
-    preview->ustaw_preferowany_rozmiar({-1, 300});
     preview->przy_rysowaniu(
         [](PowierzchniaRysunkowa *, KontekstRysowania &ctx, void *p) {
           static_cast<Settings *>(p)->sample(ctx);
@@ -161,18 +130,17 @@ public:
         this);
     families->przy_zmianie_wyboru(
         [](ListaRozwijana *, int, void *p) {
+          static_cast<Settings *>(p)->przelicz_uklad();
           static_cast<Settings *>(p)->preview->uniewaznij();
         },
         this);
     size->przy_zmianie_wyboru(
         [](ListaRozwijana *, int, void *p) {
+          static_cast<Settings *>(p)->przelicz_uklad();
           static_cast<Settings *>(p)->preview->uniewaznij();
         },
         this);
-    auto &buttons = font_page->dodaj<Panel>(Orientacja::Pozioma);
-    buttons.ustaw_odstep(12);
-    auto &apply = buttons.dodaj<Przycisk>("Zastosuj");
-    apply.ustaw_preferowany_rozmiar({150, 36});
+    auto &apply=*page->apply;
     apply.przy_kliknieciu(
         [](Przycisk *, void *p) {
           auto &s = *static_cast<Settings *>(p);
@@ -182,11 +150,10 @@ public:
           c.size = unsigned(sizes[n >= 0 && n < 6 ? n : 2]);
           s.status->ustaw_tekst(BSF::apply(c)
                                     ? "Zapisano ustawienia czcionki."
-                                    : "Nie udało się zapisać ustawień. "
-                                      "Poprzednia czcionka pozostaje aktywna.");
+                                    : "Nie zapisano. Poprzednia czcionka jest aktywna.");
         },
         this);
-    auto &reset = buttons.dodaj<Przycisk>("Przywróć domyślne");
+    auto &reset = *page->reset;
     reset.przy_kliknieciu(
         [](Przycisk *, void *p) {
           auto &s = *static_cast<Settings *>(p);
@@ -194,15 +161,10 @@ public:
             if (s.ids[i] == BSF::default_id())
               s.families->ustaw_wybrany_indeks(int(i));
           s.size->ustaw_wybrany_indeks(2);
+          s.przelicz_uklad();
           s.preview->uniewaznij();
         },
         this);
-    status = &font_page->dodaj<Etykieta>(
-        "Podgląd jest lokalny. Zastosuj zapisuje zmianę dla aplikacji.");
-    font_page->dodaj<Etykieta>(
-        "Terminal zachowuje czcionkę o stałej szerokości.");
-    placeholder = &content.dodaj<Panel>(Orientacja::Pionowa);
-    placeholder_text = &placeholder->dodaj<Etykieta>("");
     show(1);
   }
 };

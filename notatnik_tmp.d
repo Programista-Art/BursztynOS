@@ -5,7 +5,8 @@ notatnik_tmp.o: notatnik.cpp loader.h pzb.h pamiec.h \
  bursztyn_ui/../bws_pliki.h bursztyn_ui/../plik_status.h \
  bursztyn_ui/../bws_api.h bursztyn_ui/../bws_nowoczesne.h \
  bursztyn_ui/../bws_ota.h bursztyn_ui/../skladacz_obrazu.h \
- bursztyn_ui/../legacy_ui.h bursztyn_ui/../motyw.h bursztyn_ui/czcionka.h \
+ bursztyn_ui/../legacy_ui.h bursztyn_ui/../motyw.h \
+ bursztyn_ui/../kolor_alfa.h bursztyn_ui/czcionka.h \
  bursztyn_ui/../bsf/runtime.h bursztyn_ui/../bsf/bsf.h \
  bursztyn_ui/../bsf/config.h bursztyn_ui/../bws_czcionka.h \
  bursztyn_ui/rysowanie.h bursztyn_ui/polecenie_ui.h \
@@ -57,6 +58,7 @@ bursztyn_ui/../bws_ota.h:
 bursztyn_ui/../skladacz_obrazu.h:
 bursztyn_ui/../legacy_ui.h:
 bursztyn_ui/../motyw.h:
+bursztyn_ui/../kolor_alfa.h:
 bursztyn_ui/czcionka.h:
 bursztyn_ui/../bsf/runtime.h:
 bursztyn_ui/../bsf/bsf.h:

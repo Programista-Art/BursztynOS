@@ -77,7 +77,7 @@ int main() {
         for(bool folder:{false,true}) {
             files[std::string(SCIEZKA_PULPIT)+"/target.txt"]=folder;hash_pulpitu_wazny=false;odswiez_wpisy_pulpitu();
             int target=-1;for(int i=0;i<liczba_wpisow_pulpitu;++i)if(!strcmp(wpisy_pulpitu[i].nazwa,"target.txt"))target=i;
-            CHECK(target>=0);prostokat_wpisu_pulpitu(target,&right.x,&right.y);++right.x;++right.y;
+            CHECK(target>=0);auto target_bounds=wizualny_wpis_pulpitu(target);right.x=target_bounds.x+target_bounds.szerokosc/2;right.y=target_bounds.y+10;
             CHECK(obsluz_prawy_klik_pulpitu(right));CHECK(zaznaczony_wpis_pulpitu==target);
             CHECK(pulpit_menu->menu.menu().element(4)->czy_wlaczony());CHECK(pulpit_menu->menu.menu().element(5)->czy_wlaczony());
             CHECK(pulpit_menu->menu.menu().element(8)->czy_wlaczony());CHECK(pulpit_menu->menu.menu().element(1)->czy_wlaczony()==!folder);
