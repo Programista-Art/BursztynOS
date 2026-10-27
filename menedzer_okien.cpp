@@ -13,6 +13,7 @@
 #include "bursztyn_gui.h"
 #include "plik_popup_ui.h"
 #include "start_menu_ui.h"
+#include "taskbar_clock.h"
 
 // Opt-in native repaint profiling. No clock reads or extra paints in release.
 #ifndef BSF_PROFILE
@@ -52,6 +53,8 @@ int screen_w = 1024;
 int screen_h = 768;
 int PASEK_WYS = 40;
 int MENU_X = 10;
+TaskbarClock::Surface* taskbar_clock=nullptr;
+int poczatek_zegara(){return taskbar_clock?taskbar_clock->bounds.x:screen_w-ui_skaluj(150,ui_skala_procent);}
 StartMenu::Surface* start_menu=nullptr;
 
 constexpr int LOGO_LOGICZNA_SZER = 24;
@@ -100,6 +103,8 @@ TASK_BUTTON_GAP=ui_skaluj(4,ui_skala_procent);
 PULPIT_GRID_W=pulpit.komorka_szer;
 PULPIT_GRID_H=pulpit.komorka_wys;
 PULPIT_GRID_Y=ui_skaluj(3,ui_skala_procent);
+if(!taskbar_clock)taskbar_clock=new TaskbarClock::Surface;
+if(taskbar_clock)taskbar_clock->configure(screen_w,screen_h,PASEK_WYS,ui_skala_procent);
 }
 
 inline int przycisk_menu_y() {
@@ -1311,6 +1316,7 @@ bool pobierz_i_zaktualizuj_czas() {
 
     // Obrona na wypadek, gdy implementacja BWS 9 zapomni o terminatorze.
     obecny_czas[BUFOR_CZASU - 1] = '\0';
+    if(!obecny_czas[0])return false; // Keep the last valid clock on a failed read.
 
     bool zmieniony = false;
     for (int i = 0; i < BUFOR_CZASU; i++) {
@@ -1533,20 +1539,25 @@ void RysujPrzyciskMenu() {
     }
 }
 
+bool RysujZegar(bool force=false) {
+    return taskbar_clock && taskbar_clock->update(ostatni_czas,force,[](Desktop::Prostokat r,const uint32_t* pixels){
+        return gui_zastap_region(r.x,r.y,r.szerokosc,r.wysokosc,pixels);
+    });
+}
 void RysujTaskbar() {
     const uint32_t tlo_paska = motyw_kolor(MOTYW_KOLOR_PANEL);
     const uint32_t ramka_paska = motyw_kolor(MOTYW_KOLOR_RAMKA);
     const uint32_t akcent = motyw_kolor(MOTYW_KOLOR_AKCENT);
     const uint32_t podniesiony = motyw_kolor(MOTYW_KOLOR_PODNIESIONY);
 
-    gui_rysuj_prostokat(0, screen_h - PASEK_WYS, screen_w, PASEK_WYS, tlo_paska);
-    gui_rysuj_prostokat(0, screen_h - PASEK_WYS, screen_w, 1, ramka_paska);
+    gui_rysuj_prostokat(0, screen_h - PASEK_WYS, poczatek_zegara(), PASEK_WYS, tlo_paska);
+    gui_rysuj_prostokat(0, screen_h - PASEK_WYS, poczatek_zegara(), 1, ramka_paska);
 
     RysujPrzyciskMenu();
     int task_x = TASK_BUTTON_X;
     for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
         const GuiOknoInfo& o = okna_taskbara[i];
-        if (o.tytul[0] == '\0' || task_x + TASK_BUTTON_W > screen_w - ui_skaluj(150,ui_skala_procent))
+        if (o.tytul[0] == '\0' || task_x + TASK_BUTTON_W > poczatek_zegara())
             continue;
         const uint32_t kolor = o.aktywne ? akcent :
             (o.stan == GUI_OKNO_ZMINIMALIZOWANE ? podniesiony : motyw_kolor(MOTYW_KOLOR_PRZYCISK));
@@ -1569,23 +1580,8 @@ void RysujTaskbar() {
         task_x += TASK_BUTTON_W + TASK_BUTTON_GAP;
     }
 
-    // Atomowe rysowanie zegara RTC na powierzchni paska zadań
-    if (ostatni_czas[0] == '\0') {
-        (void)pobierz_i_zaktualizuj_czas();
-    }
-    const int zegar_szer = ui_skaluj(150, ui_skala_procent);
-    const int zegar_wys = PASEK_WYS;
-    const int zegar_x = screen_w - zegar_szer;
-    const int zegar_y = screen_h - zegar_wys;
-    if (zegar_x >= 0 && zegar_y >= 0) {
-        gui_rysuj_prostokat(zegar_x, zegar_y, zegar_szer, zegar_wys, podniesiony);
-        gui_rysuj_prostokat(zegar_x, zegar_y, 1, zegar_wys, ramka_paska);
-        gui_rysuj_prostokat(zegar_x, zegar_y, zegar_szer, 1, ramka_paska);
-        if (ostatni_czas[0] != '\0') {
-            rysuj_tekst_wysrodkowany(zegar_x, zegar_y, zegar_szer, zegar_wys,
-                                     1, akcent, ostatni_czas);
-        }
-    }
+    if(!ostatni_czas[0])(void)pobierz_i_zaktualizuj_czas();
+    (void)RysujZegar(true);
 }
 
 void zarejestruj_pulpit_jako_cel_drop() {
@@ -2317,7 +2313,7 @@ void obsluz_klikniecie(int mx, int my) {
     int task_x = TASK_BUTTON_X;
     for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
         if (okna_taskbara[i].tytul[0] == '\0' ||
-            task_x + TASK_BUTTON_W > screen_w - ui_skaluj(150,ui_skala_procent)) continue;
+            task_x + TASK_BUTTON_W > poczatek_zegara()) continue;
         if (punkt_w_prostokacie(mx, my, task_x, screen_h - ui_skaluj(36,ui_skala_procent),
                                 TASK_BUTTON_W, SKROT_H)) {
             (void)gui_aktywuj_okno(okna_taskbara[i].window_id);
@@ -2381,8 +2377,8 @@ extern "C" __attribute__((noreturn)) void _start() {
     wm_log("[WM] _start begun\n");
 #endif
     GuiMonitorInfo mon{};if(gui_pobierz_monitor(0,&mon))ui_skala_procent=mon.scale_x1000/10;
-    metryki_ekranu();
     gui_pobierz_rozdzielczosc(&screen_w, &screen_h);
+    metryki_ekranu();
 #if BURSZTYNDIAGABSMAP
     wm_abs_geometry("startup");
 #endif
@@ -2614,11 +2610,9 @@ extern "C" __attribute__((noreturn)) void _start() {
             }
         }
 
-        // Zegar jest rysowany bezpośrednio w RysujTaskbar(). Gdy czas
-        // się zmieni, odrysowujemy pasek zadań i odświeżamy klatkę.
-        if (pobierz_i_zaktualizuj_czas()) {
-            RysujTaskbar();
-            gui_odswiez();
+        const bool clock_changed=pobierz_i_zaktualizuj_czas();
+        if(clock_changed || (taskbar_clock && taskbar_clock->needs_repaint())) {
+            if(RysujZegar())gui_odswiez();
         }
 
         if (klik) {

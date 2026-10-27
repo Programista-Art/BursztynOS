@@ -149,6 +149,8 @@ public:
         uniewaznij();
     }
 
+    void ustaw_zawijanie_naglowkow(bool value) { zawijaj_naglowki_=value;przelicz_naglowki();uniewaznij(); }
+    Prostokat prostokat_naglowka(int index)const{return index>=0 && index<liczba_kart_?strony_[index].prostokat_naglowka_:Prostokat{};}
     int liczba_kart() const { return liczba_kart_; }
     int aktywna_karta() const { return aktywna_karta_; }
     Prostokat prostokat_obszaru_strony() const {
@@ -437,20 +439,28 @@ private:
         if (w <= 0) return;
 
         int tab_h = wysokosc_paska_kart_;
+        if(zawijaj_naglowki_){
+            tab_h=CzcionkaUI::pobierz_wysokosc(skala_dpi_)+12*skala_dpi_;
+            if(tab_h<28*skala_dpi_)tab_h=28*skala_dpi_;
+        }
+        int y=2;
         int x = 2 - offset_paska_;
 
         int laczna_szerokosc = 2;
         for (int i = 0; i < liczba_kart_; ++i) {
             int tw = CzcionkaUI::zmierz_tekst(strony_[i].tytul(), skala_dpi_) + 24;
+            if(zawijaj_naglowki_)tw=CzcionkaUI::zmierz_tekst(strony_[i].tytul(),skala_dpi_)+24*skala_dpi_;
             if (strony_[i].czy_zamykalna()) tw += 16;
             if (tw < 50) tw = 50;
 
-            strony_[i].prostokat_naglowka_ = Prostokat(x, 2, tw, tab_h - 2);
+            if(zawijaj_naglowki_ && x>2 && x+tw+2>w){x=2;y+=tab_h;}
+            strony_[i].prostokat_naglowka_ = Prostokat(x, y, tw, tab_h - 2);
             x += tw + 2;
             laczna_szerokosc += tw + 2;
         }
 
-        czy_przewijany_pasek_ = (laczna_szerokosc > w);
+        if(zawijaj_naglowki_)wysokosc_paska_kart_=y+tab_h;
+        czy_przewijany_pasek_ = !zawijaj_naglowki_ && (laczna_szerokosc > w);
         if (czy_przewijany_pasek_) {
             przycisk_lewo_ = Prostokat(w - 36, 2, 16, tab_h - 4);
             przycisk_prawo_ = Prostokat(w - 18, 2, 16, tab_h - 4);
@@ -528,6 +538,7 @@ private:
     int liczba_kart_{0};
     int aktywna_karta_{-1};
     int najechana_karta_{-1};
+    bool zawijaj_naglowki_{false};
     int wysokosc_paska_kart_{28};
     int offset_paska_{0};
     int maks_offset_paska_{0};

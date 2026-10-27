@@ -36,6 +36,7 @@ def main():
     parser.add_argument('--expected-font-size',type=int,help='Assert restored native config before changing anything')
     parser.add_argument('--font-restore-only',action='store_true',help='Observe restored Settings without applying another change')
     parser.add_argument('--output', type=Path, default=ROOT / '.husarz-test/qemu')
+    parser.add_argument('--clock-support-only',action='store_true',help='Atomic clock frames and native Support/Refresh/font update acceptance')
     parser.add_argument('--desktop-grid-restore',type=Path,help='Previous grid result directory for disk-only reboot coordinate comparison')
     parser.add_argument('--desktop-grid-only',action='store_true',help='Exact image-anchor comparison over repeated live font-family changes')
     parser.add_argument('--desktop-ui-only',action='store_true',help='Desktop selection, fixed Start search/power region and Settings font sizes')
@@ -487,6 +488,16 @@ def main():
                 r,g,b=im.getpixel((1118,37))
                 return not (r>150 and g<130 and b<130)
             wait(diagnostic_closed,'diagnostic closed through native titlebar',240,interval=1)
+            if args.clock_support_only:
+                address=symbol('bsf_config_request(proces*, unsigned long, unsigned long, unsigned long)::active')
+                def config_values():
+                    values=[]
+                    for line in hmp(f'xp /6wx 0x{address:x}').splitlines():
+                        if ':' in line:values.extend(int(v,16) for v in re.findall(r'0x([0-9a-fA-F]+)',line.split(':',1)[1]))
+                    return values
+                from clock_support_qemu_cases import run
+                result.update(run(out,screenshot,click,move,key,wait,guest_ticks,launch_start,health,config_values,kernel_sha,iso_sha))
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
             if args.desktop_grid_only:
                 config_address=symbol('bsf_config_request(proces*, unsigned long, unsigned long, unsigned long)::active')
                 def config_values():

@@ -76,6 +76,7 @@ void gui_odswiez_pulpit() {}
 int bws_utworz_warstwe(int,int,int,int,int) {return 1;}
 bool gui_blit_alpha(int,int,int,int,const uint32_t*) {return true;}
 static bool inside(Prostokat outer,Prostokat r){return r.x>=0&&r.y>=0&&r.prawy()<=outer.szerokosc&&r.dolny()<=outer.wysokosc;}
+#include "clock_support_cases.h"
 int main(){
  saved.checksum=BSF::checksum(saved);g_test_bws_hook=hook;
  for(const char* name:{"DejaVuSans.ttf","DejaVuSans-Bold.ttf","DejaVuSansMono.ttf","DejaVuSerifCondensed-Italic.ttf"}){
@@ -185,5 +186,6 @@ int main(){
  CHECK(legacy->apply(migration,migrationKey)==0);CHECK(!legacy->dirty);CHECK(migration.cell(0)==migrationAnchor);
  auto wide=Desktop::wrap("W",112,20,2,3,100,[](const char* t,int){return !strcmp(t,"…")?10:1000;});
  CHECK(wide.count==1);CHECK(!wide.complete);CHECK(wide.width==10);
+ clock_support_cases();
  std::printf("Desktop TTF / Settings / Start: %u checks PASS\n",checks);
 }

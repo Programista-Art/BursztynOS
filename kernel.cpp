@@ -149,6 +149,12 @@ extern "C" uint8_t _binary_shell_bin_start[];
 extern "C" uint8_t _binary_shell_bin_end[];
 extern "C" uint8_t _binary_cytaty_txt_start[];
 extern "C" uint8_t _binary_cytaty_txt_end[];
+extern "C" uint8_t _binary_dane_sponsorze_mecenasi_txt_start[];
+extern "C" uint8_t _binary_dane_sponsorze_mecenasi_txt_end[];
+extern "C" uint8_t _binary_dane_sponsorze_sponsorzy_txt_start[];
+extern "C" uint8_t _binary_dane_sponsorze_sponsorzy_txt_end[];
+extern "C" uint8_t _binary_dane_sponsorze_wkladtworczy_txt_start[];
+extern "C" uint8_t _binary_dane_sponsorze_wkladtworczy_txt_end[];
 extern "C" uint8_t _binary_dane_sponsorze_sponsorzy_start[];
 extern "C" uint8_t _binary_dane_sponsorze_sponsorzy_end[];
 
@@ -1261,6 +1267,19 @@ void instaluj_wbudowane_programy() {
         reinterpret_cast<const char*>(_binary_dane_sponsorze_sponsorzy_start),sponsorzy_rozmiar)) {
         wypisz_log("[BSP-BLAD] Nie mozna zainstalowac listy sponsorow.");
         if(scisla_instalacja) pliki_instalacja_ok=false;
+    }
+
+    // Plain support data follows the same live/installed PSF file plan.
+    struct SupportAsset {const char* path;const uint8_t* start;const uint8_t* end;};
+    const SupportAsset support_assets[]={
+        {"/dane/sponsorze/mecenasi.txt",_binary_dane_sponsorze_mecenasi_txt_start,_binary_dane_sponsorze_mecenasi_txt_end},
+        {"/dane/sponsorze/sponsorzy.txt",_binary_dane_sponsorze_sponsorzy_txt_start,_binary_dane_sponsorze_sponsorzy_txt_end},
+        {"/dane/sponsorze/wkladtworczy.txt",_binary_dane_sponsorze_wkladtworczy_txt_start,_binary_dane_sponsorze_wkladtworczy_txt_end},
+    };
+    for(const auto& asset:support_assets){
+        uint64_t size=uint64_t(asset.end)-uint64_t(asset.start);
+        if(size>UINT32_MAX || !zapisz_plik_od_nowa(asset.path,reinterpret_cast<const char*>(asset.start),uint32_t(size)))
+            wypisz_log("[WSPARCIE] Nie zapisano opcjonalnego pliku danych.");
     }
 
     //testowy obrazek test.bmp + test1.bmp - diagnostyka i atomowość

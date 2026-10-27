@@ -20,6 +20,7 @@ namespace {
 constexpr int sizes[] = {12, 14, 16, 18, 20, 24};
 class Settings : public Okno {
   Panel *font_page{};
+  SettingsUI::SupportPage* support_page{};
   Panel *placeholder{};
   Etykieta *placeholder_text{};
   Etykieta *status{};
@@ -30,12 +31,19 @@ class Settings : public Okno {
   unsigned family_count{};
   void show(unsigned page) {
     font_page->ustaw_widoczna(page == 1);
-    placeholder->ustaw_widoczna(page != 1);
+    placeholder->ustaw_widoczna(page != 1 && page != 3);
+    support_page->ustaw_widoczna(page==3);
     placeholder_text->ustaw_tekst(
         page == 0 ? "Wygląd: motywy są dostępne w aplikacji Motywy systemowe."
                   : "System: ta sekcja nie udostępnia jeszcze ustawień.");
     przelicz_uklad();
     uniewaznij();
+  }
+  void reload_support(){
+    if(!support_page->data)return;
+    for(unsigned i=0;i<3;++i)SupportData::reload(support_page->data[i],i,pobierz_rozmiar_pliku,
+      [](const char* path,char* out,uint32_t bytes,size_t* got){uint32_t n=0;bool ok=czytaj_fragment_pliku(path,0,out,bytes,&n);*got=n;return ok;});
+    support_page->refresh();uniewaznij();
   }
   void sample(KontekstRysowania &ctx) {
     int index = families->wybrany_indeks(), si = size->wybrany_indeks();
@@ -94,12 +102,15 @@ public:
     auto c = BSF::configuration();
     auto &viewport = dodaj<SettingsUI::Viewport>();
     auto &root = *viewport.body;
+    support_page=root.support;support_page->on_reload=[](SettingsUI::SupportPage*,void* p){static_cast<Settings*>(p)->reload_support();};support_page->reload_context=this;
+    reload_support();
     font_page=root.fonts;placeholder=root.placeholder;placeholder_text=root.placeholder_text;
     auto* page=root.fonts;
     families=page->families;size=page->size;preview=page->preview;status=page->status;
-    for(unsigned i=0;i<3;++i){
+    for(unsigned i=0;i<4;++i){
       if(i==0)root.nav[i]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(0);},this);
       if(i==1)root.nav[i]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(1);},this);
+      if(i==3)root.nav[i]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(3);},this);
       if(i==2)root.nav[i]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(2);},this);
     }
     for (unsigned i = 0; i < BSF::enumerate(); ++i) {

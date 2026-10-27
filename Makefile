@@ -382,6 +382,9 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	dzwiek_blob.o \
 	cytaty_blob.o \
 	sponsorzy_blob.o \
+	wsparcie_mecenasi_blob.o \
+	wsparcie_sponsorzy_blob.o \
+	wsparcie_wkladtworczy_blob.o \
 	heap.o \
 	scheduler.o \
 	fpu.o \
@@ -846,7 +849,7 @@ check-kernel: $(KERNEL)
 # 1. Bursztyn OS (domyslny, czysty start bez autostartu testow)
 # 2. Bursztyn OS - testy automatyczne (multiboot2 bursztyn.test=automated)
 #
-$(GRUB_CFG): $(KERNEL) ustawienia_blob.o $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile narzedzia/package_bsf.py czcionki/ttf $(wildcard czcionki/ttf/*)
+$(GRUB_CFG): $(KERNEL) ustawienia_blob.o $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile narzedzia/package_bsf.py narzedzia/package_support.py $(wildcard dane/sponsorze/*.txt) czcionki/ttf $(wildcard czcionki/ttf/*)
 	@mkdir -p $(ISO_DIR)/boot/grub
 	@cp $(KERNEL) $(ISO_DIR)/boot/
 	@echo "[ISO] Kopiuje $(TAPETY_PAK) jako /boot/tapety.pak (modul Multiboot2)."
@@ -897,6 +900,7 @@ $(GRUB_CFG): $(KERNEL) ustawienia_blob.o $(TAPETY_PAK) .installer-build/BOOTX64.
 		'}' \
 		> $(GRUB_CFG)
 	$(PYTHON) narzedzia/package_bsf.py $(ISO_DIR)
+	$(PYTHON) narzedzia/package_support.py $(ISO_DIR)
 
 .installer-build/BOOTX64.EFI: narzedzia/instalator/grub-embedded.cfg Makefile
 	@mkdir -p .installer-build
@@ -2159,3 +2163,12 @@ test-desktop-ttf-host:
 	@mkdir -p .bsf-test
 	g++ -std=c++17 -fcoroutines -O0 -g0 -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_desktop_ttf.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/desktop-ttf-host
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/desktop-ttf-host
+
+wsparcie_mecenasi_blob.o: dane/sponsorze/mecenasi.txt
+	$(LD) -r -b binary $< -o $@
+
+wsparcie_sponsorzy_blob.o: dane/sponsorze/sponsorzy.txt
+	$(LD) -r -b binary $< -o $@
+
+wsparcie_wkladtworczy_blob.o: dane/sponsorze/wkladtworczy.txt
+	$(LD) -r -b binary $< -o $@
