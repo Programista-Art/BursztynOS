@@ -37,7 +37,7 @@
 #include "bursztyn_ui/rysowanie.h"
 #include "bursztyn_ui/pasek_przewijania.h"
 #include "bursztyn_ui/menu_kontekstowe.h"
-#include "wersja_systemu.h"
+#include "system_identity.h"
 using namespace BursztynUI;
 
 
@@ -1862,16 +1862,10 @@ void wykonaj_polecenie(
             return;
         }
 
-        wypisz(
-            "OS: " BURSZTYN_NAZWA_WERSJI "\n"
-            "Autor: Dymitr Wygowski\n"
-            "E-mail: programista.art@gmail.com\n"
-            "Jądro: autorskie, monolityczne, paging x86_64 4-level\n"
-            "Procesy: Ring 3 + PZB/BZL + prywatne przestrzenie adresowe\n"
-            "FS: BSP2 / Bursztynowy System Plików\n"
-            "GUI: autorski kompozytor warstw\n"
-            "Sieć: E1000, DHCP, ARP, ICMP, DNS, TCP/HTTP\n"
-        );
+        wypisz("OS: ");wypisz(SystemIdentity::Version);wypisz("\n");
+        for(const auto& property:SystemIdentity::Properties){
+            wypisz(property.label);wypisz(": ");wypisz(property.value);wypisz("\n");
+        }
         return;
     }
 
@@ -2440,7 +2434,7 @@ void _start() {
         "==================================================\n"
         " Powłoka Bursztynowa bsh v3.0 (Unicode)\n"
         " " BURSZTYN_NAZWA_WERSJI "\n"
-        " Autor: Dymitr Wygowski\n"
+        " Autor: " BURSZTYN_SYSTEM_AUTHOR "\n"
         " Ring 3 / BWS / BSP2 / PZB\n"
         "==================================================\n"
         "Wpisz 'pomoc', aby zobaczyć polecenia.\n"

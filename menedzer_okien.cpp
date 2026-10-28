@@ -1,3 +1,4 @@
+#include "app_identity.h"
 #include "ui_skala.h"
 #include "ekran_format.h"
 #include "pulpit_geometria.h"
@@ -2036,7 +2037,7 @@ void zamknij_menu_i_odtworz_pulpit() {
     RysujPrzyciskMenu();gui_odswiez();
 }
 
-bool aktywuj_istniejace(const char* prefiks_tytulu);
+bool aktywuj_istniejace(const char* executable);
 
 void uruchom_program_gui(const char* sciezka) {
     if (!sciezka) return;
@@ -2068,7 +2069,7 @@ void otworz_wpis_pulpitu(int indeks) {
         gui_ustaw_przejecie_myszy(true);
         (void)uruchom_program_z_argumentem_uzytkownika(
             SCIEZKA_EKSPLORATOR, sciezka);
-        (void)aktywuj_istniejace("Eksplorator Plików");
+        (void)aktywuj_istniejace(SCIEZKA_EKSPLORATOR);
         return;
     }
     if (konczy_sie(sciezka, ".bur")) {
@@ -2194,19 +2195,19 @@ bool obsluz_popupy_pulpitu(const bws_zdarzenie& zdarzenie) {
     return false;
 }
 
-bool aktywuj_istniejace(const char* prefiks_tytulu) {
-    odswiez_snapshot_okien();
-    for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
-        if (tekst_zaczyna_sie(okna_taskbara[i].tytul, prefiks_tytulu)) {
-            zamknij_menu_i_odtworz_pulpit();
-            return gui_aktywuj_okno(okna_taskbara[i].window_id);
-        }
+bool aktywuj_istniejace(const char* executable) {
+    GuiOknoInfo matching[SKLADACZ_MAKS_WARSTW]{};
+    uint32_t count=gui_pobierz_okna_programu(matching,SKLADACZ_MAKS_WARSTW,executable);
+    for(uint32_t i=0;i<count;++i){
+        if(!matching[i].tytul[0])continue;
+        zamknij_menu_i_odtworz_pulpit();
+        return gui_aktywuj_okno(matching[i].window_id);
     }
     return false;
 }
 
-void uruchom_lub_aktywuj(const char* sciezka, const char* prefiks_tytulu) {
-    if (!aktywuj_istniejace(prefiks_tytulu)) uruchom_program_gui(sciezka);
+void uruchom_lub_aktywuj(const char* sciezka, const char*) {
+    if (!aktywuj_istniejace(sciezka)) uruchom_program_gui(sciezka);
 }
 
 void uruchom_powloke() {
@@ -2289,7 +2290,7 @@ void obsluz_element_menu(int item_index) {
             wykonaj_restart();
             break;
         case 20:
-            uruchom_lub_aktywuj("/programy/ustawienia.cebula/ustawienia.bur", "Ustawienia");
+            uruchom_lub_aktywuj(AppIdentity::Settings, "Ustawienia");
             break;
         case 19:
             wykonaj_zamkniecie();

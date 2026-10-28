@@ -386,6 +386,7 @@ bool skladacz_obrazu_przywroc(uint64_t window_id);
 // Recreated/cleared-on-resize surfaces require a new commit; restore does not.
 bool skladacz_obrazu_publikuj_klatke(int pid);
 bool skladacz_obrazu_czy_widoczna(int pid);
+bool skladacz_obrazu_ksztalt_w_punkcie(int pid,int x,int y);
 uint64_t skladacz_obrazu_id_okna(int pid);
 uint32_t skladacz_obrazu_snapshot_okien(GuiOknoInfo* out, uint32_t max,
                                         int aktywny_pid);

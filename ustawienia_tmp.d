@@ -85,7 +85,9 @@ ustawienia_tmp.o: programy/ustawienia/ustawienia.cpp \
  programy/ustawienia/../../bursztyn_ui/aplikacja.h \
  programy/ustawienia/../../loader.h programy/ustawienia/../../pamiec.h \
  programy/ustawienia/layout.h programy/ustawienia/support_ui.h \
- programy/ustawienia/support_data.h
+ programy/ustawienia/support_data.h programy/ustawienia/system_ui.h \
+ programy/ustawienia/../../system_identity.h \
+ programy/ustawienia/../../wersja_systemu.h
 programy/ustawienia/../../bsf/runtime.h:
 programy/ustawienia/../../bsf/bsf.h:
 programy/ustawienia/../../bsf/config.h:
@@ -177,3 +179,6 @@ programy/ustawienia/../../pamiec.h:
 programy/ustawienia/layout.h:
 programy/ustawienia/support_ui.h:
 programy/ustawienia/support_data.h:
+programy/ustawienia/system_ui.h:
+programy/ustawienia/../../system_identity.h:
+programy/ustawienia/../../wersja_systemu.h:

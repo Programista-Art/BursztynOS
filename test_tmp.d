@@ -42,6 +42,7 @@ test_tmp.o: programy/test/test.cpp bursztyn_gui.h bws_zdarzenia.h \
  programy/test/../tapety/../../narzedzia/tapety-btp/tapetybtp.h \
  programy/test/ekran_testy.h programy/test/../ekran/klient.h \
  programy/test/../ekran/../../ekran_format.h \
+ programy/test/../ekran/../../app_identity.h \
  programy/test/../ekran/ekran_okno.h \
  programy/test/../../pulpit_geometria.h programy/test/../../zegar_ui.h \
  programy/test/taskbar_testy.h programy/test/../../obrazy/png_dekoder.h
@@ -141,6 +142,7 @@ programy/test/../tapety/../../narzedzia/tapety-btp/tapetybtp.h:
 programy/test/ekran_testy.h:
 programy/test/../ekran/klient.h:
 programy/test/../ekran/../../ekran_format.h:
+programy/test/../ekran/../../app_identity.h:
 programy/test/../ekran/ekran_okno.h:
 programy/test/../../pulpit_geometria.h:
 programy/test/../../zegar_ui.h:

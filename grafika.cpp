@@ -2314,7 +2314,8 @@ static int znajdz_warstwe_pod_punktem(int x, int y) {
     return wm_warstwa_pod_punktem(x,y,
         skladacz_obrazu_overlay_pod_punktem(x,y),
         [](int pid) { return skladacz_obrazu_czy_widoczna(pid) ? pobierz_warstwe(pid) : nullptr; },
-        [](int pid,int lx,int ly) { return skladacz_obrazu_dekoracja_w_punkcie(pid,lx,ly); });
+        [](int pid,int lx,int ly) { return skladacz_obrazu_dekoracja_w_punkcie(pid,lx,ly); },
+        [](int pid,int lx,int ly) { return skladacz_obrazu_ksztalt_w_punkcie(pid,lx,ly); });
 }
 
 static void ustaw_focus_gui(int pid) {

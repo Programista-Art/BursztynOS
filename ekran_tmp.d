@@ -85,7 +85,8 @@ ekran_tmp.o: programy/ekran/ekran.cpp programy/ekran/../../loader.h \
  programy/ekran/../../bursztyn_ui/tabela_wirtualna.h \
  programy/ekran/../../bursztyn_ui/powiadomienie.h \
  programy/ekran/../../bursztyn_ui/aplikacja.h programy/ekran/klient.h \
- programy/ekran/../../ekran_format.h programy/ekran/ekran_okno.h
+ programy/ekran/../../ekran_format.h programy/ekran/../../app_identity.h \
+ programy/ekran/ekran_okno.h
 programy/ekran/../../loader.h:
 programy/ekran/../../pzb.h:
 programy/ekran/../../pamiec.h:
@@ -176,4 +177,5 @@ programy/ekran/../../bursztyn_ui/powiadomienie.h:
 programy/ekran/../../bursztyn_ui/aplikacja.h:
 programy/ekran/klient.h:
 programy/ekran/../../ekran_format.h:
+programy/ekran/../../app_identity.h:
 programy/ekran/ekran_okno.h:

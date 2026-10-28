@@ -58,6 +58,21 @@ int main() {
         menu_click("shell");
         assert(launched==SCIEZKA_POWLOKA && !menu_start_otwarte);
     }
+    // Exact executable identity ignores localized/window-document titles.
+    char path[128]{};strcpy(path,AppIdentity::DisplaySettings);
+    assert(AppIdentity::equal(path,AppIdentity::DisplaySettings));assert(!AppIdentity::equal(path,AppIdentity::Settings));
+    memset(path,'x',sizeof(path));assert(!AppIdentity::equal(path,AppIdentity::Settings));
+    test_running_title="Ustawienia ekranu";test_running_executable=AppIdentity::DisplaySettings;
+    launched.clear();test_activated_window=0;uruchom_lub_aktywuj(AppIdentity::Settings,"Ustawienia");
+    assert(launched==AppIdentity::Settings && test_activated_window==0);
+    launched.clear();uruchom_lub_aktywuj(AppIdentity::DisplaySettings,"Ustawienia ekranu");
+    assert(launched.empty() && test_activated_window==42);
+    test_running_title="Ustawienia";test_running_executable=AppIdentity::Settings;
+    launched.clear();test_activated_window=0;uruchom_lub_aktywuj(AppIdentity::DisplaySettings,"Ustawienia ekranu");
+    assert(launched==AppIdentity::DisplaySettings && test_activated_window==0);
+    launched.clear();uruchom_lub_aktywuj(AppIdentity::Settings,"Ustawienia");assert(launched.empty()&&test_activated_window==42);
+    test_running_title="Changed title";launched.clear();uruchom_lub_aktywuj(AppIdentity::Settings,"Ustawienia");assert(launched.empty());
+    test_running_title=nullptr;test_running_executable=nullptr;
     // Use the production kernel selection, with retained client buffers.
     for(uint32_t scale:{100U,125U}) {
         warstwa_obrazu layers[SKLADACZ_MAKS_WARSTW]{};

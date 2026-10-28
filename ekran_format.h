@@ -4,7 +4,8 @@
 #include "ui_skala.h"
 
 constexpr uint64_t EKRAN_IPC = 0x454B52414E000001ULL;
-constexpr const char* EKRAN_PROGRAM = "/programy/ekran.cebula/ekran.bur";
+#include "app_identity.h"
+constexpr const char* EKRAN_PROGRAM = AppIdentity::DisplaySettings;
 constexpr const char* EKRAN_CFG = "/ustawienia/ekran.cfg";
 constexpr size_t EKRAN_CFG_MAX = 192;
 constexpr unsigned EKRAN_MAX_TRYBOW = 16;

@@ -109,6 +109,8 @@ bool usun_twor_uzytkownika(const char* sciezka);
 WynikPlikowy usun_drzewo_uzytkownika(const char* sciezka);
 // Replace a completed region, including transparent pixels (BWS57 mode 2).
 bool gui_zastap_region(int x,int y,int szer,int wys,const uint32_t* piksele);
+// BWS42 optional exact executable filter; same bounded snapshot ABI.
+uint32_t gui_pobierz_okna_programu(GuiOknoInfo* okna,uint32_t max,const char* path);
 bool zmien_nazwe_uzytkownika(const char* sciezka, const char* nowa_nazwa);
 bool pobierz_metadane_pliku(const char* sciezka, BwsMetadanePliku* metadane);
 bool przenies_twor_uzytkownika(const char* sciezka,

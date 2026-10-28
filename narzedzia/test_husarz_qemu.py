@@ -36,6 +36,8 @@ def main():
     parser.add_argument('--expected-font-size',type=int,help='Assert restored native config before changing anything')
     parser.add_argument('--font-restore-only',action='store_true',help='Observe restored Settings without applying another change')
     parser.add_argument('--output', type=Path, default=ROOT / '.husarz-test/qemu')
+    parser.add_argument('--system-windows-phase',choices=['full','core','late'],default='full')
+    parser.add_argument('--system-windows-only',action='store_true',help='System identity, rounded corners and concurrent Settings apps')
     parser.add_argument('--clock-support-only',action='store_true',help='Atomic clock frames and native Support/Refresh/font update acceptance')
     parser.add_argument('--desktop-grid-restore',type=Path,help='Previous grid result directory for disk-only reboot coordinate comparison')
     parser.add_argument('--desktop-grid-only',action='store_true',help='Exact image-anchor comparison over repeated live font-family changes')
@@ -488,6 +490,10 @@ def main():
                 r,g,b=im.getpixel((1118,37))
                 return not (r>150 and g<130 and b<130)
             wait(diagnostic_closed,'diagnostic closed through native titlebar',240,interval=1)
+            if args.system_windows_only:
+                from system_windows_qemu_cases import run
+                result.update(run(out,screenshot,click,move,key,wait,guest_ticks,launch_start,health,hmp,symbol,kernel_sha,iso_sha,phase=args.system_windows_phase))
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
             if args.clock_support_only:
                 address=symbol('bsf_config_request(proces*, unsigned long, unsigned long, unsigned long)::active')
                 def config_values():
@@ -551,6 +557,7 @@ def main():
                 for target in ([] if args.desktop_grid_restore else ['mono','sans','mono','sans','mono']):
                     launch_start('ustawienia')
                     wait(lambda:red_close(screenshot('grid-settings-probe'),(1033,114)),'Settings first frame',180,interval=1)
+                    click(190,299) # Czcionki, third navigation item at 16 px.
                     old=config_values();click(500,settings_positions(19)[0]);key('end' if target=='mono' else 'home');key('ret')
                     click(320,settings_positions(19)[1])
                     wait(lambda:config_values()[2]!=old[2],'live family Apply '+target,120,interval=1)
@@ -603,6 +610,7 @@ def main():
                 click(1100,650)
                 launch_start('ustawienia')
                 wait(lambda:red_close(screenshot('settings-launch-probe'),(1033,114)),'Settings first frame',180,interval=1)
+                click(190,299) # Czcionki at default 16 px.
                 # Geometry follows the measured DejaVu line height used by this fixture.
                 for target,current,line in [(12,16,19),(16,12,14),(24,16,19)]:
                     before=config_values();control=max(30,line+12);field_y,_=settings_positions(line)
@@ -621,6 +629,8 @@ def main():
                     click(1033,114);open_start();move(1000,660);screenshot('start-font-'+str(target));key('esc')
                     launch_start('ustawienia')
                     wait(lambda:red_close(screenshot('settings-reopen-probe'),(1033,114)),'Settings reopen',180,interval=1)
+                    current_line={12:14,16:19,24:28}[target];button=current_line+22
+                    click(190,128+14+current_line+12+2*(button+12)+button//2)
                 before_family=config_values()
                 click(500,234);screenshot('settings-family-dropdown-24');key('end');key('ret')
                 click(320,settings_positions(28)[1])
@@ -706,8 +716,9 @@ def main():
                 launch_start('ustawienia')
                 def settings_ready():
                     im=screenshot('settings-opening-probe')
-                    return red_close(im,(1033,114)) and im.getpixel((280,200))[0]<100
+                    return red_close(im,(1033,114))
                 wait(settings_ready,'Settings preview submitted',180,interval=1)
+                click(190,299) # Explicitly select Czcionki; System is now default.
                 screenshot('settings-fonts')
                 config_address=symbol('bsf_config_request(proces*, unsigned long, unsigned long, unsigned long)::active')
                 def font_config():

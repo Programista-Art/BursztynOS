@@ -42,7 +42,7 @@ static void clock_support_cases(){
     CHECK(page->tabs->ustaw_aktywna_karte(i));CHECK(page->tabs->aktywna_karta()==i);CHECK(page->panes[i]->rows.category==page->data+i);
     auto* pane=page->panes[i];CHECK(pane->table->obszar().dolny()<=pane->status->obszar().y);CHECK(pane->status->obszar().dolny()<=pane->wysokosc());
    }
-   if(dpi==100 && (px==16 || px==24) && width==950){
+   if(dpi==100 && (px==12 || px==16 || px==24) && width==950){
     std::ofstream f(std::string(".bsf-test/support-layout-")+std::to_string(px)+".json");
     auto rect=[&](Prostokat r){f<<"["<<r.x<<","<<r.y<<","<<r.szerokosc<<","<<r.wysokosc<<"]";};
     f<<"{\"nav\":[";for(int i=0;i<4;++i){if(i)f<<",";rect(body.nav[i]->obszar_ekranu());}f<<"],\"tabs\":[";

@@ -123,11 +123,12 @@ int main() {
     copy.x=0;copy.przyciski=0;events.push_back(copy);bytes("Q\n");
     assert(pobierz_linie(input,sizeof(input)));assert(!strcmp(input,"zaQ"));assert(copied=="żółć");
     reset();char system_command[]="system";Argumenty arguments{};arguments.dane[0]=system_command;arguments.liczba=1;wykonaj_polecenie(arguments);
-    assert(g_liczba_linii==9);
+    assert(g_liczba_linii==int(SystemIdentity::PropertyCount)+2);
     assert(!strcmp(shell_line(0).tekst,"OS: " BURSZTYN_NAZWA_WERSJI));
-    assert(!strcmp(shell_line(1).tekst,"Autor: Dymitr Wygowski"));
-    assert(!strcmp(shell_line(2).tekst,"E-mail: programista.art@gmail.com"));
-    assert(!strncmp(shell_line(3).tekst,"Jądro:",7));assert(!strncmp(shell_line(4).tekst,"Procesy:",8));
+    for(size_t i=0;i<SystemIdentity::PropertyCount;++i){
+        std::string expected=std::string(SystemIdentity::Properties[i].label)+": "+SystemIdentity::Properties[i].value;
+        assert(expected==shell_line(i+1).tekst);
+    }
     for(uint32_t scale:{100U,125U}) {
         reset();ui_skala_procent=scale;shell_w=ui_skaluj(700,scale);shell_h=ui_skaluj(450,scale);
         memset(input,'W',sizeof(input)-1);input[sizeof(input)-1]=0;g_obecny_bufor_wejscia=input;g_caret=g_input_anchor=strlen(input);

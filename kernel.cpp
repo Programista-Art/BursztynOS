@@ -1,3 +1,4 @@
+#include "system_identity.h"
 #include "diagnostyka_systemu.h"
 #include "diagnostyka_systemu_format.h"
 #include "ekran_powitalny_api.h"
@@ -2270,10 +2271,10 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
 
     wypisz_log(
         "==================================================");
-    wypisz_log(" Witamy w Bursztyn OS 64-bit ");
+    wypisz_log(" " BURSZTYN_NAZWA_WERSJI " (x86-64)");
     wypisz_log(" Polski System Operacyjny");
     wypisz_log(" Github: Programista-Art/BursztynOS ");
-    wypisz_log(" Autor: Dymitr Wygowski ");
+    wypisz_log(" Autor: " BURSZTYN_SYSTEM_AUTHOR " ");
     wypisz_log("==================================================");
 
     wypisz_ilosc_ram();

@@ -117,6 +117,11 @@ uint32_t gui_pobierz_okna(GuiOknoInfo* out,uint32_t capacity) {
     if(!test_running_title || !capacity)return 0;
     out[0]={};out[0].window_id=42;strncpy(out[0].tytul,test_running_title,sizeof(out[0].tytul)-1);return 1;
 }
+static const char* test_running_executable=nullptr;
+uint32_t gui_pobierz_okna_programu(GuiOknoInfo* out,uint32_t max,const char* path){
+    if(!test_running_executable||strcmp(test_running_executable,path))return 0;
+    return gui_pobierz_okna(out,max);
+}
 bool gui_aktywuj_okno(uint64_t id) {test_activated_window=id;return true;}
 void gui_wypisz_tekst_kolor_skala(int, int, uint32_t, int, const char*) {}
 void motyw_odswiez_lokalny() {}

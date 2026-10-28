@@ -1,3 +1,4 @@
+#include "system_identity.h"
 #include "bursztyn_gui.h"
 #include "bws_nowoczesne.h"
 #include "motyw.h"
@@ -369,7 +370,7 @@ void _start() {
         "\n"
         "==================================================\n"
         " Powłoka Bursztynowa bsh v3.0 (Unicode)\n"
-        " Autor: Dymitr Wygowski\n"
+        " Autor: " BURSZTYN_SYSTEM_AUTHOR "\n"
         " Ring 3 / BWS / BSP2 / PZB\n"
         "==================================================\n"
         "Wpisz 'pomoc', aby zobaczyć polecenia.\n"

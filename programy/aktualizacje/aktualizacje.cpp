@@ -8,6 +8,7 @@
 #include "../../loader.h"
 #include "../../bursztyn_ui/bursztyn_ui.h"
 #include "../../bws_ota.h"
+#include "../../wersja_systemu.h"
 
 using namespace BursztynUI;
 
@@ -164,7 +165,7 @@ void odswiez_widok() {
     //    Każdy wiersz zawiera etykietę i wartość (nigdy pusty prostokąt).
     if (g_stan.wartosc_wersja_biezaca) {
         ustaw_wartosc_statusu(g_stan.wartosc_wersja_biezaca,
-            s.biezaca_wersja[0] ? s.biezaca_wersja : "0.1.0", Kolory::AkcentZloty);
+            s.biezaca_wersja[0] ? s.biezaca_wersja : BURSZTYN_WERSJA_TEKST, Kolory::AkcentZloty);
     }
     if (g_stan.wartosc_slot_aktywny) {
         if (s.aktywny_slot == 0) {

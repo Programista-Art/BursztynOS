@@ -1495,9 +1495,11 @@ void zloz_dekoracje(int pid,const GuiDirtyRect& clip) {
     if(!ma_dekoracje(pid)) return;
     const auto& w=tablica_warstw[pid];
     const int bar=ui_skaluj(28,ekran_skala()),edge=ui_skaluj(1,ekran_skala());
-    if(clip.x>=w.x+edge && clip.y>=w.y+bar &&
-       clip.x+clip.width<=w.x+int(w.szerokosc)-edge &&
-       clip.y+clip.height<=w.y+int(w.wysokosc)-edge) return;
+    const WindowShape decor_shape(w.szerokosc,w.wysokosc,stan_okna[pid]==GUI_OKNO_ZMAKSYMALIZOWANE,ekran_skala(),*motyw_pobierz_aktywny());
+    int safe=decor_shape.radius+edge;
+    if(clip.x>=w.x+safe && clip.y>=w.y+bar &&
+       clip.x+clip.width<=w.x+int(w.szerokosc)-safe &&
+       clip.y+clip.height<=w.y+int(w.wysokosc)-safe) return;
     const BursztynMotyw* theme=motyw_pobierz_aktywny();
     kursor_diag_decor();
     wm_rysuj_dekoracje(w.szerokosc,w.wysokosc,title_coverage[pid].width?"":tytul_okna[pid],
@@ -1507,11 +1509,12 @@ void zloz_dekoracje(int pid,const GuiDirtyRect& clip) {
             if(x>=clip.x && y>=clip.y && x<clip.x+clip.width && y<clip.y+clip.height)
                 grafika_zapisz_surowy_piksel(x,y,color);
         });
+    const WindowShape shape(w.szerokosc,w.wysokosc,stan_okna[pid]==GUI_OKNO_ZMAKSYMALIZOWANE,ekran_skala(),*theme);
     const auto& mask=title_coverage[pid];
     int origin_x=w.x+ui_skaluj(8,ekran_skala()),origin_y=w.y+(bar-int(mask.height))/2;
     int right=w.x+int(w.szerokosc)-ui_skaluj(80,ekran_skala());
     for(unsigned yy=0;yy<mask.height;++yy){int y=origin_y+int(yy);if(y<0||y>=grafika_pobierz_wysokosc()||y<w.y||y>=w.y+bar||y<clip.y||y>=int64_t(clip.y)+clip.height)continue;
-        for(unsigned xx=0;xx<mask.width;++xx){int x=origin_x+int(xx);if(x<0||x>=grafika_pobierz_szerokosc()||x>=right||x<clip.x||x>=int64_t(clip.x)+clip.width)continue;unsigned alpha=mask.alpha[yy*mask.width+xx];if(!alpha)continue;
+        for(unsigned xx=0;xx<mask.width;++xx){int x=origin_x+int(xx);if(x<0||x>=grafika_pobierz_szerokosc()||x>=right||x<clip.x||x>=int64_t(clip.x)+clip.width)continue;unsigned alpha=mask.alpha[yy*mask.width+xx];if(!alpha||!shape.contains(x-w.x,y-w.y))continue;
             uint32_t old=grafika_pobierz_wiersz_backbuffer(y)[x],color=0;for(unsigned shift=0;shift<24;shift+=8)color|=((((theme->tekst>>shift)&255)*alpha+((old>>shift)&255)*(255-alpha)+127)/255)<<shift;grafika_zapisz_surowy_piksel(x,y,color);}
     }
 
@@ -1544,7 +1547,7 @@ void zloz_warstwe(
 
     const bool decorated=ma_dekoracje(indeks);
     const BursztynMotyw* desktop_theme=w.z_order==0?motyw_pobierz_aktywny():nullptr;
-    const int bar=ui_skaluj(28,ekran_skala());
+    const WindowShape shape(w.szerokosc,w.wysokosc,stan_okna[indeks]==GUI_OKNO_ZMAKSYMALIZOWANE,ekran_skala(),*motyw_pobierz_aktywny());
     const uint64_t szerokosc_warstwy =
         static_cast<uint64_t>(
             static_cast<uint32_t>(
@@ -1607,11 +1610,12 @@ void zloz_warstwe(
             clip.dst_y +
             y;
 
-        if(decorated && dst_y-w.y<bar) continue;
+
         for (int x = 0;
              x < clip.szer;
              ++x) {
 
+            if(decorated && !shape.client(clip.dst_x+x-w.x,dst_y-w.y))continue;
             uint32_t kolor =
                 zrodlo[x];
 
@@ -1654,12 +1658,12 @@ void zloz_snapshot_region(const LayerRenderInfo& w,const GuiDirtyRect& r) {
     if(x0>=x1||y0>=y1||!w.buffer)return;
     const bool decorated=ma_dekoracje(w.pid) && w.buffer==tablica_warstw[w.pid].bufor_pikseli;
     const BursztynMotyw* desktop_theme=w.z==0?motyw_pobierz_aktywny():nullptr;
+    const WindowShape shape(w.width,w.height,decorated && stan_okna[w.pid]==GUI_OKNO_ZMAKSYMALIZOWANE,ekran_skala(),*motyw_pobierz_aktywny());
     for(int py=y0;py<y1;++py){
-        if(decorated && py-w.y<ui_skaluj(28,ekran_skala())) continue;
         uint64_t first=(uint64_t)(py-w.y)*(uint32_t)w.width+(uint32_t)(x0-w.x);
         uint64_t len=(uint32_t)(x1-x0);if(first>w.pixels||len>w.pixels-first)return;
         const uint32_t* src=w.buffer+first;uint32_t* dst=grafika_pobierz_wiersz_backbuffer(py)+x0;
-        for(int px=x0;px<x1;++px){uint32_t c=*src++;if(c)*dst=motyw_pulpit_skladaj(*dst,c,w.z==0,desktop_theme);++dst;}
+        for(int px=x0;px<x1;++px){uint32_t c=*src++;if(c && (!decorated||shape.client(px-w.x,py-w.y)))*dst=motyw_pulpit_skladaj(*dst,c,w.z==0,desktop_theme);++dst;}
     }
     if(decorated) zloz_dekoracje(w.pid,r);
 }
@@ -2418,12 +2422,18 @@ bool skladacz_test_reset_ekranu(){
         dirty_rects[0].width==grafika_pobierz_szerokosc() && dirty_rects[0].height==grafika_pobierz_wysokosc() && !cursor_pending;
 }
 
-// Theme changes invalidate WM-owned strips only; retained client buffers survive.
+bool skladacz_obrazu_ksztalt_w_punkcie(int pid,int x,int y) {
+    if(!ma_dekoracje(pid))return true;
+    const auto& w=tablica_warstw[pid];
+    return WindowShape(w.szerokosc,w.wysokosc,stan_okna[pid]==GUI_OKNO_ZMAKSYMALIZOWANE,
+                       ekran_skala(),*motyw_pobierz_aktywny()).contains(x,y);
+}
+// Theme changes repaint complete corner bands, including a previous larger radius.
 bool skladacz_obrazu_dekoracja_w_punkcie(int pid, int lx, int ly) {
     if (!ma_dekoracje(pid)) return false;
     const auto& w=tablica_warstw[pid];
-    // Input geometry stays stable across themes. Rounded corners are visual.
-    return wm_dekoracja_w_punkcie(w.szerokosc,w.wysokosc,lx,ly,ekran_skala());
+    return WindowShape(w.szerokosc,w.wysokosc,stan_okna[pid]==GUI_OKNO_ZMAKSYMALIZOWANE,
+                       ekran_skala(),*motyw_pobierz_aktywny()).frame(lx,ly);
 }
 
 void skladacz_obrazu_odswiez_dekoracje() {
@@ -2434,7 +2444,7 @@ void skladacz_obrazu_odswiez_dekoracje() {
         skladacz_obrazu_oznacz_dirty_rect(w.x,w.y,w.szerokosc,bar);
         skladacz_obrazu_oznacz_dirty_rect(w.x,w.y+bar,edge,w.wysokosc-bar);
         skladacz_obrazu_oznacz_dirty_rect(w.x+w.szerokosc-edge,w.y+bar,edge,w.wysokosc-bar);
-        skladacz_obrazu_oznacz_dirty_rect(w.x,w.y+w.wysokosc-edge,w.szerokosc,edge);
+        skladacz_obrazu_oznacz_dirty_rect(w.x,w.y+w.wysokosc-bar,w.szerokosc,bar);
     }
 }
 

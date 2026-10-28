@@ -79,6 +79,13 @@ public:
             txt_w = maksymalna_szerokosc_ * skala_dpi_;
         }
 
+        if(czy_zawijanie_ && dostepny_rozmiar.szerokosc>0){
+            int limit=dostepny_rozmiar.szerokosc-wypelnienie_.poziomo()*skala_dpi_;
+            if(limit<1)limit=1;
+            int rows=0, widest=0;
+            linie(limit,skala,[&](const char* line){++rows;int w=CzcionkaUI::zmierz_tekst(line,skala);if(w>widest)widest=w;});
+            txt_w=widest;txt_h=rows*CzcionkaUI::pobierz_wysokosc(skala);
+        }
         Rozmiar zadany(txt_w + wypelnienie_.poziomo() * skala_dpi_,
                        txt_h + wypelnienie_.pionowo() * skala_dpi_);
 
@@ -130,10 +137,38 @@ public:
         }
         if (ty < pad_t) ty = pad_t;
 
-        ctx.rysuj_tekst_obciety(Punkt(tx, ty), tekst_, col, klient_w, skala);
+        if(czy_zawijanie_){
+            int y=pad_t;
+            linie(klient_w,skala,[&](const char* line){
+                if(y+txt_h<=pad_t+klient_h)ctx.rysuj_tekst_obciety({pad_l,y},line,col,klient_w,skala);
+                y+=txt_h;
+            });
+        }else ctx.rysuj_tekst_obciety(Punkt(tx, ty), tekst_, col, klient_w, skala);
     }
 
 private:
+    template<class Line> void linie(int width,SkalaUI scale,Line line)const {
+        size_t at=0;
+        while(tekst_[at]){
+            while(tekst_[at]==' ')++at;
+            if(!tekst_[at])break;
+            char part[MAKS_DLUGOSC_TEKSTU]{};size_t used=0,start=at,last_space=0;
+            while(tekst_[at] && tekst_[at]!='\n'){
+                uint32_t cp;size_t n=CzcionkaUI::dekoduj_utf8(tekst_,at,&cp);
+                if(!n || used+n>=sizeof(part))break;
+                for(size_t j=0;j<n;++j)part[used+j]=tekst_[at+j];
+                part[used+n]=0;
+                if(used && CzcionkaUI::zmierz_tekst(part,scale)>width){part[used]=0;break;}
+                if(cp==' ')last_space=used;
+                used+=n;at+=n;
+            }
+            if(tekst_[at] && tekst_[at]!='\n' && last_space){used=last_space;at=start+used;}
+            while(used && part[used-1]==' ')--used;
+            part[used]=0;line(part);
+            if(tekst_[at]=='\n')++at;
+            if(at==start)++at; // Defensive progress for corrupt internal text.
+        }
+    }
     int skala_czcionki_{1};
     WyrownaniePoziome wyrownanie_tekstu_{WyrownaniePoziome::Poczatek};
     WyrownaniePionowe wyrownanie_pionowe_tekstu_{WyrownaniePionowe::Srodek};

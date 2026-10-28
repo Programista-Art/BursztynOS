@@ -79,7 +79,58 @@ static void popup_restoration_cases() {
         assert(scene[(y+py)*sw+x+px]==baseline[py*w+px]);++popup_checks;
     }
 }
+static void rounded_window_cases(){
+    for(unsigned dpi:{100U,125U,150U,200U})for(uint32_t background:{0xffeeeeeeU,0xff141414U,0xff427abcU}){
+        scale=dpi;sw=1280;sh=720;overlay={};use_clock=false;
+        assert(utworz_warstwe(1,0,0,sw,sh,0)==1);auto* lower=pobierz_warstwe(1);
+        std::fill(lower->bufor_pikseli,lower->bufor_pikseli+sw*sh,background);assert(skladacz_obrazu_publikuj_klatke(1));
+        if(background==0xff427abcU){
+            assert(utworz_warstwe(3,0,0,sw,sh,5)==3);auto* lower_window=pobierz_warstwe(3);
+            assert(skladacz_obrazu_ustaw_tytul(3,"Notatnik"));
+            std::fill(lower_window->bufor_pikseli,lower_window->bufor_pikseli+sw*sh,background);
+            assert(skladacz_obrazu_publikuj_klatke(3));
+        }
+        assert(utworz_warstwe(2,180,120,400,300,10)==2);assert(skladacz_obrazu_ustaw_tytul(2,"Ustawienia"));
+        for(int stage=0;stage<6;++stage){
+            int x=180+stage*7,y=120+stage*9,w=400+stage*12,h=300+stage*8;
+            assert(zmien_geometrie_warstwy(2,x,y,w,h));auto* window=pobierz_warstwe(2);
+            // Hostile rectangular client writes may never escape WM coverage.
+            std::fill(window->bufor_pikseli,window->bufor_pikseli+w*h,0xffff00ffU);
+            stan_okna[2]=(stage==3)?GUI_OKNO_ZMAKSYMALIZOWANE:GUI_OKNO_NORMALNE;
+            compositor_theme.rogokna=(stage==5)?16:10;
+            assert(skladacz_obrazu_publikuj_klatke(2));
+            skladacz_obrazu_oznacz_dirty();skladacz_obrazu_obsluz_dirty();
+            auto full=scene;WindowShape shape(w,h,stage==3,scale,compositor_theme);
+            for(int py=0;py<h;++py)for(int px=0;px<w;++px){
+                auto pixel=scene[(y+py)*sw+x+px];
+                if(!shape.contains(px,py))assert(pixel==(background&0xffffff));
+                else if(shape.client(px,py))assert(pixel==0xff00ff);
+            }
+            assert(stage==3?shape.contains(0,0):!shape.contains(0,0));
+            // Partial repaint and full-layer paths must reproduce the same mask.
+            for(int cy:{0,h-20})for(int cx:{0,w-20}){
+                skladacz_obrazu_oznacz_dirty_rect(x+cx,y+cy,20,20);skladacz_obrazu_obsluz_dirty();
+            }
+            assert(scene==full);
+            grafika_odtworz_tlo_skladania();zloz_warstwe(1,sw,sh);if(background==0xff427abcU)zloz_warstwe(3,sw,sh);zloz_warstwe(2,sw,sh);assert(scene==full);
+            assert(skladacz_obrazu_minimalizuj(2));skladacz_obrazu_obsluz_dirty();
+            assert(scene[y*sw+x]==(background&0xffffff));
+            assert(skladacz_obrazu_przywroc(skladacz_obrazu_id_okna(2)));skladacz_obrazu_obsluz_dirty();
+            if(stage!=3)assert(scene==full);
+            int old_radius=compositor_theme.rogokna;compositor_theme.rogokna=24;
+            skladacz_obrazu_odswiez_dekoracje();skladacz_obrazu_obsluz_dirty();
+            WindowShape changed(w,h,false,scale,compositor_theme);
+            for(int py=h-ui_skaluj(28,scale);py<h;++py)for(int px=0;px<w;++px)
+                if(!changed.contains(px,py))assert(scene[(y+py)*sw+x+px]==(background&0xffffff));
+            compositor_theme.rogokna=old_radius;skladacz_obrazu_odswiez_dekoracje();skladacz_obrazu_obsluz_dirty();
+
+        }
+        usun_warstwe(2);if(background==0xff427abcU)usun_warstwe(3);usun_warstwe(1);skladacz_reset_ekranu();
+    }
+    compositor_theme=g_domyslny_motyw_fallback;
+}
 int main(){
+    rounded_window_cases();
     for(auto dpi:{100U,125U}){
         scale=dpi;sw=1280;sh=720;overlay={};
         assert(utworz_warstwe(1,0,0,sw,sh,0)==1);

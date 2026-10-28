@@ -1,6 +1,6 @@
-menedzer_okien_tmp.o: menedzer_okien.cpp ui_skala.h ekran_format.h \
- pulpit_geometria.h bursztyn_ui/czcionka.h bursztyn_ui/typy.h \
- bursztyn_ui/../bsf/runtime.h bursztyn_ui/../bsf/bsf.h \
+menedzer_okien_tmp.o: menedzer_okien.cpp app_identity.h ui_skala.h \
+ ekran_format.h pulpit_geometria.h bursztyn_ui/czcionka.h \
+ bursztyn_ui/typy.h bursztyn_ui/../bsf/runtime.h bursztyn_ui/../bsf/bsf.h \
  bursztyn_ui/../bsf/config.h bursztyn_ui/../bws_czcionka.h \
  desktop_layout.h desktop_entries.h desktop_layout_settings.h \
  obrazy/png_dekoder.h bursztyn_gui.h bws_zdarzenia.h bws_pliki.h \
@@ -38,6 +38,7 @@ menedzer_okien_tmp.o: menedzer_okien.cpp ui_skala.h ekran_format.h \
  bursztyn_ui/wykres.h bursztyn_ui/lista_wirtualna.h \
  bursztyn_ui/tabela_wirtualna.h bursztyn_ui/powiadomienie.h \
  bursztyn_ui/aplikacja.h
+app_identity.h:
 ui_skala.h:
 ekran_format.h:
 pulpit_geometria.h:

@@ -8,8 +8,8 @@ shell_tmp.o: shell.cpp bursztyn_gui.h bws_zdarzenia.h bws_pliki.h \
  bursztyn_ui/zdarzenia.h bursztyn_ui/motyw.h bursztyn_ui/polecenie_ui.h \
  bursztyn_ui/model_przewijania.h bursztyn_ui/menu_kontekstowe.h \
  bursztyn_ui/widok_menu_popup.h bursztyn_ui/popup.h bursztyn_ui/menu.h \
- bursztyn_ui/ikona_ui.h wersja_systemu.h shell_runtime_diag.h \
- shell_terminal.h shell_context.h shell_sponsors.h
+ bursztyn_ui/ikona_ui.h system_identity.h wersja_systemu.h \
+ shell_runtime_diag.h shell_terminal.h shell_context.h shell_sponsors.h
 bursztyn_gui.h:
 bws_zdarzenia.h:
 bws_pliki.h:
@@ -42,6 +42,7 @@ bursztyn_ui/widok_menu_popup.h:
 bursztyn_ui/popup.h:
 bursztyn_ui/menu.h:
 bursztyn_ui/ikona_ui.h:
+system_identity.h:
 wersja_systemu.h:
 shell_runtime_diag.h:
 shell_terminal.h:

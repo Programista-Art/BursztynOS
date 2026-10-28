@@ -415,19 +415,6 @@ public:
                 gui_blit(swiat.x, swiat.y, r.szerokosc, r.wysokosc, bufor_regionu_);
         }
 
-        if (pelne && !czy_zmaksymalizowane_) {
-            int r_okna = ui_skaluj(motyw_promien(MOTYW_ROG_OKNO), skala_dpi_.procent());
-            if (r_okna > 0 && !KontekstRysowania::g_tlum_rysowanie_globalne) {
-                for (int dy = 0; dy < r_okna; ++dy) {
-                    int inset = motyw_promien_inset(r_okna, dy);
-                    if (inset > 0) {
-                        gui_rysuj_prostokat(x_, y_ + wysokosc_ - 1 - dy, inset, 1, 0x00000000);
-                        gui_rysuj_prostokat(x_ + szerokosc_ - inset, y_ + wysokosc_ - 1 - dy, inset, 1, 0x00000000);
-                    }
-                }
-            }
-        }
-
         if (popupy_.czy_otwarty() && (popupy_.czy_brudny() || pelne)) {
             popupy_.odrysuj_popupy(pelne);
         }

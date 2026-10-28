@@ -186,6 +186,29 @@ int main(){
  CHECK(legacy->apply(migration,migrationKey)==0);CHECK(!legacy->dirty);CHECK(migration.cell(0)==migrationAnchor);
  auto wide=Desktop::wrap("W",112,20,2,3,100,[](const char* t,int){return !strcmp(t,"…")?10:1000;});
  CHECK(wide.count==1);CHECK(!wide.complete);CHECK(wide.width==10);
+ for(int px:{12,16,20,24})for(unsigned dpi:{100U,125U,150U,200U}){
+  auto config=BSF::configuration();config.size=px;CHECK(BSF::apply(config));
+  SettingsUI::Body body;body.ustaw_skale_dpi(SkalaUI::procent(dpi));
+  CHECK(!strcmp(body.nav[0]->tekst(),"System"));CHECK(!strcmp(body.nav[1]->tekst(),"Wygląd"));CHECK(!strcmp(body.nav[2]->tekst(),"Czcionki"));
+  CHECK(body.system->czy_widoczna());CHECK(!body.fonts->czy_widoczna());CHECK(!body.support->czy_widoczna());
+  for(int width:{800,950,1100}){
+   body.rozmiesc({0,0,ui_skaluj(width,dpi),ui_skaluj(512,dpi)});auto* page=body.system;
+   int bottom=0;
+   for(size_t i=0;i<SystemIdentity::PropertyCount;++i){
+    CHECK(!strcmp(page->values[i]->tekst(),SystemIdentity::Properties[i].value));
+    auto label=page->labels[i]->obszar(),value=page->values[i]->obszar();
+    CHECK(label.y>=bottom);CHECK(value.y>=bottom);CHECK(!Desktop::intersects(label,value));
+    CHECK(value.prawy()<=page->content->szerokosc());
+    auto size=page->values[i]->zmierz({value.szerokosc,10000});CHECK(size.wysokosc<=value.wysokosc);
+    bottom=value.dolny()>label.dolny()?value.dolny():label.dolny();
+   }
+   CHECK(page->content->wysokosc()>=bottom);
+  }
+ }
+ CHECK(!strcmp(SystemIdentity::Version,BURSZTYN_NAZWA_WERSJI));
+ CHECK(!strcmp(SystemIdentity::Author,"Dymitr Wygowski"));CHECK(!strcmp(SystemIdentity::Email,"programista.art@gmail.com"));
+ CHECK(BURSZTYN_WERSJA_REWIZJA==9);
+ std::printf("System UI object sizes: page=%zu label=%zu panel=%zu; 31 labels, two panels, two scrollbars plus viewport\n",sizeof(SettingsUI::SystemPage),sizeof(Etykieta),sizeof(Panel));
  clock_support_cases();
  std::printf("Desktop TTF / Settings / Start: %u checks PASS\n",checks);
 }

@@ -1,6 +1,7 @@
 #pragma once
 #include "../../bursztyn_ui/bursztyn_ui.h"
 #include "support_ui.h"
+#include "system_ui.h"
 namespace SettingsUI {
 using namespace BursztynUI;
 constexpr int Padding=14,Gap=12,SmallGap=4;
@@ -53,12 +54,12 @@ public:
 };
 class Body : public Panel {
 public:
- Etykieta* title;Przycisk* nav[4]{};FontPage* fonts;SupportPage* support;Panel* placeholder;Etykieta* placeholder_text;
+ Etykieta* title;Przycisk* nav[4]{};FontPage* fonts;SupportPage* support;SystemPage* system;Panel* placeholder;Etykieta* placeholder_text;
  Body(){
   ustaw_uklad_automatyczny(false);ustaw_wypelnienie({0,0,0,0});
   title=&dodaj<Etykieta>("Ustawienia");title->ustaw_wypelnienie({0,0,0,0});
-  const char* names[]={"Wygląd","Czcionki","System","Wsparcie"};for(int i=0;i<4;++i)nav[i]=&dodaj<Przycisk>(names[i]);
-  fonts=&dodaj<FontPage>();support=&dodaj<SupportPage>();support->ustaw_widoczna(false);placeholder=&dodaj<Panel>();placeholder_text=&placeholder->dodaj<Etykieta>("");
+  const char* names[]={"System","Wygląd","Czcionki","Wsparcie"};for(int i=0;i<4;++i)nav[i]=&dodaj<Przycisk>(names[i]);
+  system=&dodaj<SystemPage>();fonts=&dodaj<FontPage>();fonts->ustaw_widoczna(false);support=&dodaj<SupportPage>();support->ustaw_widoczna(false);placeholder=&dodaj<Panel>();placeholder->ustaw_widoczna(false);placeholder_text=&placeholder->dodaj<Etykieta>("");
   ustaw_minimalny_rozmiar({800,480});
  }
  void rozmiesc(Prostokat r)override{
@@ -68,7 +69,7 @@ public:
   title->rozmiesc({pad,pad,nav_width,line});
   for(int i=0;i<4;++i)nav[i]->rozmiesc({pad,pad+line+gap+i*(button+gap),nav_width,button});
   int x=pad+nav_width+gap,w=r.szerokosc-x-pad,h=r.wysokosc-2*pad;if(w<0)w=0;if(h<0)h=0;
-  fonts->rozmiesc({x,pad,w,h});support->rozmiesc({x,pad,w,h});placeholder->rozmiesc({x,pad,w,h});
+  system->rozmiesc({x,pad,w,h});fonts->rozmiesc({x,pad,w,h});support->rozmiesc({x,pad,w,h});placeholder->rozmiesc({x,pad,w,h});
  }
 };
 // Below the measured minimum, preserve usable controls in a scrollable client.

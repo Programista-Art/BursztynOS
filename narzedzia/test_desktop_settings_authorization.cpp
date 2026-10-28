@@ -20,6 +20,13 @@ bool czy_bezpieczny_zakres_uzytkownika_do_zapisu(void* p,size_t){return p!=nullp
 bool scheduler_dodaj_zdarzenie(int,const bws_zdarzenie*){return true;}
 uint64_t scheduler_pobierz_tick(){return 1;}
 extern "C" void bws_powiadom_zmiane_pliku(const char*,uint32_t){}
+proces_t tablica_procesow[MAKS_PROCESOW]{};
+int aktualny_pid=1;
+int bws_gui_aktywny_pid(){return 2;}
+extern "C" bool loader_pobierz_argument_startowy(int,char*,size_t){return false;}
+uint32_t skladacz_obrazu_snapshot_okien(GuiOknoInfo* out,uint32_t max,int){
+    uint32_t count=0;for(int pid=2;pid<=3 && count<max;++pid){out[count]={};out[count].pid=pid;out[count].window_id=100+pid;++count;}return count;
+}
 static unsigned checks=0;
 #define CHECK(x) do{++checks;if(!(x)){fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x);abort();}}while(0)
 // Minimal layout adapter: the serializer and storage below are production code.
@@ -30,6 +37,17 @@ struct Layout {
     Bounds cell(int i)const{return {100+i*120,200+i*100};}
 };
 int main(){
+    proces_t wm{};wm.poziom_zaufania=PZB_ZAUFANE;wm.uprawnienia=PRAWO_SYSTEM_CONFIG;
+    strcpy(tablica_procesow[2].sciezka_pliku,AppIdentity::DisplaySettings);
+    strcpy(tablica_procesow[3].sciezka_pliku,AppIdentity::Settings);
+    GuiOknoInfo windows[16]{};
+    auto snapshot=[&](const char* path,uint64_t max=16){return bws_snapshot_okien(wm,(uint64_t)windows,max,(uint64_t)path);};
+    CHECK(snapshot(nullptr)==2);CHECK(snapshot(AppIdentity::Settings)==1);CHECK(windows[0].pid==3);
+    CHECK(snapshot(AppIdentity::DisplaySettings)==1);CHECK(windows[0].pid==2);
+    CHECK(snapshot(AppIdentity::Settings,1)==1);CHECK(windows[0].pid==3); // filter before capacity
+    CHECK(snapshot("/programy/ustawienia.cebula/ustawienia.bur.extra")==0);
+    CHECK(snapshot("/programy/ustawienia")==0);CHECK(snapshot(AppIdentity::Settings,0)==0);CHECK(snapshot(AppIdentity::Settings,17)==0);
+    wm.uprawnienia=0;CHECK(snapshot(AppIdentity::Settings)==0);wm.uprawnienia=PRAWO_SYSTEM_CONFIG;
     std::vector<uint8_t> ram(16*1024*1024);inicjalizuj_psf(ram.data(),ram.size());
     proces_t p{};p.poziom_zaufania=PZB_USLUGI;p.uprawnienia=PRAWO_PLIKI_CZYTAJ|PRAWO_PLIKI_ZAPISZ;
     auto io=[&](uint64_t n,uint64_t a,uint64_t b,uint64_t c)->uint64_t {

@@ -1071,6 +1071,11 @@ bool gui_aktywuj_okno(uint64_t window_id) {
     return window_id != 0 && bws_wywolaj(43, window_id, 0, 0, 0) == 1ULL;
 }
 
+uint32_t gui_pobierz_okna_programu(GuiOknoInfo* okna,uint32_t max,const char* path) {
+    if(!okna||!max||!path)return 0;
+    return static_cast<uint32_t>(bws_wywolaj(42,reinterpret_cast<uint64_t>(okna),max,reinterpret_cast<uint64_t>(path),0));
+}
+
 bool usun_twor_uzytkownika(const char* sciezka) {
     return sciezka && bws_wywolaj(7, reinterpret_cast<uint64_t>(sciezka)) == 1ULL;
 }

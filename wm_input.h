@@ -3,8 +3,9 @@
 
 // Rendering does not add input objects. The existing owning layer receives
 // both client and decoration events; popup dismissal keeps its modal contract.
-template<class Layer, class Decoration>
-int wm_warstwa_pod_punktem(int x, int y, int overlay, Layer layer, Decoration decoration) {
+struct WmPelnePokrycie {bool operator()(int,int,int)const{return true;}};
+template<class Layer, class Decoration, class Coverage=WmPelnePokrycie>
+int wm_warstwa_pod_punktem(int x, int y, int overlay, Layer layer, Decoration decoration,Coverage coverage={}) {
     if (overlay >= 0) return overlay;
     int result = -1, z = INT32_MIN;
     for (int pid=1; pid<SKLADACZ_MAKS_WARSTW; ++pid) {
@@ -13,6 +14,7 @@ int wm_warstwa_pod_punktem(int x, int y, int overlay, Layer layer, Decoration de
             int64_t(x)>=int64_t(w->x)+w->szerokosc ||
             int64_t(y)>=int64_t(w->y)+w->wysokosc) continue;
         const int lx=x-w->x, ly=y-w->y;
+        if(!coverage(pid,lx,ly))continue;
         // The root desktop is transparent over the wallpaper but owns background input.
         if (w->z_order != 0 && !decoration(pid,lx,ly) && w->bufor_pikseli &&
             w->bufor_pikseli[uint64_t(ly)*w->szerokosc+lx]==0) continue;

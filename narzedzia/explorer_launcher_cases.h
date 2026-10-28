@@ -23,8 +23,8 @@ static void explorer_launcher_cases() {
         CHECK(view.open_context(100,100,false));
         CHECK(!view.open_modal(EditMode::CONFIRM_DELETE));CHECK(!view.open_modal(EditMode::RENAME));CHECK(!view.open_modal(EditMode::MOVE));
         view.close_context();
-        test_running_title=DesktopEntries::Launchers[id].title;test_activated_window=0;count=launches;
-        CHECK(model.activate()==Activation::STATUS);CHECK(launches==count);CHECK(test_activated_window==42);test_running_title=nullptr;
+        test_running_title=DesktopEntries::Launchers[id].title;test_running_executable=DesktopEntries::Launchers[id].path;test_activated_window=0;count=launches;
+        CHECK(model.activate()==Activation::STATUS);CHECK(launches==count);CHECK(test_activated_window==42);test_running_title=nullptr;test_running_executable=nullptr;
         // Listing updates preserve identity, including a same-name real file.
         files[std::string(DesktopEntries::Directory)+"/later.txt"]=false;
         model.refresh();CHECK(model.entry(model.selected())->type==EntryType::LAUNCHER);

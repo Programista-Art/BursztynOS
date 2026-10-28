@@ -3,7 +3,7 @@
 
 Weryfikuje:
   1. Uklad i rozmiar naglowka formatu .bur w przegladarka.cpp zgodny ze skryptem przegladarka_linker.ld.
-  2. Spojnosc sekcji ELF (TEXT=0x80000 / 512 KiB, DATA=0x80000 / 512 KiB, VA < 4 GiB, brak statycznych konstruktorow Ring 3).
+  2. Spojnosc sekcji ELF (TEXT=0x84000 / 528 KiB, DATA=0x80000 / 512 KiB, VA < 4 GiB, brak statycznych konstruktorow Ring 3).
   3. Bufor sieciowy siec_bufor zachowany w niskim BSS (256 KiB, VA < 4 GiB dla ABI BWS29/30).
   4. Zastosowanie nowoczesnego frameworka BursztynUI (AplikacjaGUI, OknoHusarz : Okno, MenuGlowne, Panel,
      Przycisk, PoleTekstowe, PasekStanu, MenuKontekstowe, PasekPrzewijania).
@@ -50,18 +50,18 @@ def test_naglowek_i_linker():
         ld_src = f.read()
 
     # Sprawdzenie zdefiniowanych stalych w cpp
-    ok_text_sz = "BUR_TEXT_SIZE = 0x80000ULL" in cpp_src or "0x80000" in cpp_src
+    ok_text_sz = "BUR_TEXT_SIZE=0x84000ULL" in cpp_src
     ok_data_sz = "BUR_DATA_SIZE = 0x80000ULL" in cpp_src or "0x80000" in cpp_src
     ok_text_va = "BUR_TEXT_VADDR = 0x1001000ULL" in cpp_src or "0x1001000" in cpp_src
-    ok_data_va = "BUR_DATA_VADDR = 0x1081000ULL" in cpp_src or "0x1081000" in cpp_src
+    ok_data_va = "BUR_DATA_VADDR=0x1085000ULL" in cpp_src
     raport("husarz_stale_adresacji_cpp", ok_text_sz and ok_data_sz and ok_text_va and ok_data_va)
 
     # Sprawdzenie skryptu linkera
-    ok_ld_text = "BUR_TEXT_SIZE     = DEFINED(HUSARZ_WORKER_BUILD) ? 0x10000 : 0x80000;" in ld_src
+    ok_ld_text = "BUR_TEXT_SIZE     = DEFINED(HUSARZ_WORKER_BUILD) ? 0x10000 : 0x84000;" in ld_src
     ok_ld_data = "BUR_DATA_SIZE     = 0x80000;" in ld_src
     ok_ld_data_offset = "BUR_DATA_OFFSET   = BUR_TEXT_OFFSET + BUR_TEXT_SIZE;" in ld_src
     ok_ld_data_va = "BUR_DATA_VADDR    = BUR_TEXT_VADDR + BUR_TEXT_SIZE;" in ld_src
-    raport("husarz_linker_segmenty_256k_512k", ok_ld_text and ok_ld_data and ok_ld_data_offset and ok_ld_data_va)
+    raport("husarz_linker_segmenty_528k_512k", ok_ld_text and ok_ld_data and ok_ld_data_offset and ok_ld_data_va)
 
 
 # ============================================================================
@@ -83,11 +83,11 @@ def test_elf_binarny():
     ok_header = (
         magic == 0x00525542 and
         to == 0x1000 and
-        ts == 0x80000 and
+        ts == 0x84000 and
         tv == 0x1001000 and
-        do == 0x81000 and
+        do == 0x85000 and
         ds == 0x80000 and
-        dv == 0x1081000 and
+        dv == 0x1085000 and
         tv <= entry < tv + ts and
         to + ts == do and
         tv + ts == dv and

@@ -20,6 +20,7 @@ namespace {
 constexpr int sizes[] = {12, 14, 16, 18, 20, 24};
 class Settings : public Okno {
   Panel *font_page{};
+  SettingsUI::SystemPage* system_page{};
   SettingsUI::SupportPage* support_page{};
   Panel *placeholder{};
   Etykieta *placeholder_text{};
@@ -30,12 +31,11 @@ class Settings : public Okno {
   uint32_t ids[BSF::MaxFiles]{};
   unsigned family_count{};
   void show(unsigned page) {
-    font_page->ustaw_widoczna(page == 1);
-    placeholder->ustaw_widoczna(page != 1 && page != 3);
+    font_page->ustaw_widoczna(page == 2);
+    system_page->ustaw_widoczna(page==0);
+    placeholder->ustaw_widoczna(page==1);
     support_page->ustaw_widoczna(page==3);
-    placeholder_text->ustaw_tekst(
-        page == 0 ? "Wygląd: motywy są dostępne w aplikacji Motywy systemowe."
-                  : "System: ta sekcja nie udostępnia jeszcze ustawień.");
+    placeholder_text->ustaw_tekst("Wygląd: motywy są dostępne w aplikacji Motywy systemowe.");
     przelicz_uklad();
     uniewaznij();
   }
@@ -102,6 +102,7 @@ public:
     auto c = BSF::configuration();
     auto &viewport = dodaj<SettingsUI::Viewport>();
     auto &root = *viewport.body;
+    system_page=root.system;
     support_page=root.support;support_page->on_reload=[](SettingsUI::SupportPage*,void* p){static_cast<Settings*>(p)->reload_support();};support_page->reload_context=this;
     reload_support();
     font_page=root.fonts;placeholder=root.placeholder;placeholder_text=root.placeholder_text;
@@ -176,7 +177,7 @@ public:
           s.preview->uniewaznij();
         },
         this);
-    show(1);
+    show(0);
   }
 };
 } // namespace

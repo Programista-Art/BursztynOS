@@ -49,7 +49,7 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,config,kernel_sha
     hit(geo(16)['refresh']);settle(500)
     if capture(16,'refresh')!=before:raise AssertionError('Refresh changed category mapping')
     # Keep the same Support model while applying through the native Font page.
-    hit(geo(16)['nav'][1]);settle();hit(geo(16)['size']);key('end');key('ret');hit(geo(16)['apply'])
+    hit(geo(16)['nav'][2]);settle();hit(geo(16)['size']);key('end');key('ret');hit(geo(16)['apply'])
     wait(lambda:config()[3]==24,'Apply 24 px with Support model retained',180,interval=1);settle(750)
     large=capture(24,'live-font')
     hit(geo(24)['refresh']);settle(500)

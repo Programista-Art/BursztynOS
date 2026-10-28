@@ -22,7 +22,7 @@ int main() {
         assert(scene[(h-1)*w+w/2]==theme.ramka);
         for(int y=ui_skaluj(28,scale);y<h-ui_skaluj(1,scale);++y)
             for(int x=ui_skaluj(1,scale);x<w-ui_skaluj(1,scale);++x)
-                assert(scene[y*w+x]==client[y*w+x]);
+                if(WindowShape(w,h,maximized,scale,theme).client(x,y))assert(scene[y*w+x]==client[y*w+x]);
         // A dirty-region callback must leave all pixels outside that region intact.
         scene.assign(w*h,0xabcdef);
         wm_rysuj_dekoracje(w,h,"ąęż",maximized,scale,theme,[&](int x,int y,uint32_t color) {
@@ -30,6 +30,12 @@ int main() {
         });
         for(int y=0;y<h;++y) for(int x=0;x<w;++x)
             if(x<100 || x>=120 || y<5 || y>=15) assert(scene[y*w+x]==0xabcdef);
+    }
+    for(uint32_t dpi:{100U,125U,150U,200U}){
+        auto theme=g_domyslny_motyw_fallback;theme.rogokna=32;
+        WindowShape shape(800,600,false,dpi,theme);
+        for(int y=ui_skaluj(4,dpi);y<ui_skaluj(24,dpi);++y)
+            for(int x=800-ui_skaluj(26,dpi);x<800-ui_skaluj(6,dpi);++x)assert(shape.contains(x,y));
     }
     printf("WM decoration renderer: %u/%u PASS\n",checks,checks);
     puts("WM decoration renderer host checks passed (100%, 125%); not runtime validation.");

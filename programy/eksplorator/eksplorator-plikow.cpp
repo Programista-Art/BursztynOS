@@ -1414,14 +1414,13 @@ private:
     }
 
     void run_launcher(const DesktopEntries::Launcher& launcher) {
-        // Same title-prefix activation policy as the desktop. The temporary
+        // Exact executable identity, shared with the desktop. The temporary
         // snapshot stays off the small Ring 3 stack and is used only on open.
         auto* windows=static_cast<GuiOknoInfo*>(gui_malloc(sizeof(GuiOknoInfo)*SKLADACZ_MAKS_WARSTW));
         if(windows) {
-            uint32_t count=gui_pobierz_okna(windows,SKLADACZ_MAKS_WARSTW);
+            uint32_t count=gui_pobierz_okna_programu(windows,SKLADACZ_MAKS_WARSTW,launcher.path);
             for(uint32_t i=0;i<count && i<SKLADACZ_MAKS_WARSTW;++i) {
-                size_t n=0;while(launcher.title[n] && launcher.title[n]==windows[i].tytul[n])++n;
-                if(!launcher.title[n] && gui_aktywuj_okno(windows[i].window_id)) {
+                if(gui_aktywuj_okno(windows[i].window_id)) {
                     gui_free(windows);set_status("Aktywowano aplikację skrótu.");return;
                 }
             }

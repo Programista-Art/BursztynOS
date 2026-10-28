@@ -1,6 +1,7 @@
 #pragma once
 #include "motyw.h"
 #include "ui_skala.h"
+#include "window_shape.h"
 #include "bursztyn_ui/czcionka.h"
 
 inline bool wm_dekoracja_w_punkcie(int w,int h,int x,int y,uint32_t scale) {
@@ -17,21 +18,21 @@ void wm_rysuj_dekoracje(int w, int h, const char* title, bool maximized,
     using BursztynUI::CzcionkaUI;
     SkalaUI s = SkalaUI::procent(scale);
     const int bar=ui_skaluj(28,scale), edge=ui_skaluj(1,scale);
-    int radius=maximized?0:ui_skaluj(theme.rogokna,scale);
-    if(radius>bar) radius=bar;
-    if(radius>w/2) radius=w/2;
+    const WindowShape shape(w,h,maximized,scale,theme);
     auto rect=[&](int x,int y,int width,int height,uint32_t color) {
         for(int py=y;py<y+height && py<h;++py)
             for(int px=x;px<x+width && px<w;++px)
-                if(px>=0 && py>=0) pixel(px,py,color);
+                if(shape.contains(px,py)) pixel(px,py,color);
     };
     for(int y=0;y<bar && y<h;++y) {
-        int inset=y<radius?motyw_promien_inset(radius,y):0;
+        int inset=shape.inset(y);
         rect(inset,y,w-2*inset,1,y<ui_skaluj(2,scale)?theme.akcent:theme.panel);
     }
-    rect(0,bar,edge,h-bar,theme.ramka);
-    rect(w-edge,bar,edge,h-bar,theme.ramka);
-    rect(0,h-edge,w,edge,theme.ramka);
+    for(int y=bar;y<h;++y) {
+        int inset=shape.inset(y);
+        if(y>=h-edge)rect(inset,y,w-2*inset,1,theme.ramka);
+        else {rect(inset,y,edge,1,theme.ramka);rect(w-inset-edge,y,edge,1,theme.ramka);}
+    }
     auto text=[&](const char* str,int x,int y,int right,uint32_t color) {
         for(size_t i=0;str && str[i];) {
             uint32_t cp;size_t n=CzcionkaUI::dekoduj_utf8(str,i,&cp);if(!n) break;i+=n;

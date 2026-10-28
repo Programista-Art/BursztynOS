@@ -1,3 +1,4 @@
+#include "app_identity.h"
 #include "wyjatek_uzytkownika.h"
 #include "cykl_wylaczania_grafiki.h"
 #include "ekran_powitalny_api.h"
@@ -2917,7 +2918,7 @@ void bws_zakoncz_biezacy_proces() {
 __attribute__((noinline)) uint64_t bws_snapshot_okien(
     proces_t& proces,
     uint64_t arg1,
-    uint64_t arg2
+    uint64_t arg2, uint64_t arg3=0
 ) {
     char test_arg[32] = {};
     const char* test_path = "/programy/test.cebula/test.bur";
@@ -2940,9 +2941,18 @@ __attribute__((noinline)) uint64_t bws_snapshot_okien(
     const size_t bytes = static_cast<size_t>(max) * sizeof(GuiOknoInfo);
     if (!czy_bezpieczny_zakres_uzytkownika_do_zapisu(
             reinterpret_cast<void*>(arg1), bytes)) return 0;
+    char executable[MAX_SCIEZKA_PLIKU_BWS] = {};
+    if(arg3 && !pobierz_sciezke_pliku(arg3,executable))return 0;
     GuiOknoInfo snapshot[SKLADACZ_MAKS_WARSTW] = {};
-    const uint32_t count = skladacz_obrazu_snapshot_okien(
-        snapshot, max, bws_gui_aktywny_pid());
+    uint32_t count = skladacz_obrazu_snapshot_okien(
+        snapshot, arg3?SKLADACZ_MAKS_WARSTW:max, bws_gui_aktywny_pid());
+    if(arg3){
+        uint32_t kept=0;
+        for(uint32_t i=0;i<count;++i){int pid=snapshot[i].pid;
+            if(pid>0 && pid<MAKS_PROCESOW && AppIdentity::equal(tablica_procesow[pid].sciezka_pliku,executable))snapshot[kept++]=snapshot[i];
+        }
+        count=kept>max?max:kept;
+    }
     return skopiuj_do_przestrzeni_uzytkownika(
                reinterpret_cast<void*>(arg1), snapshot,
                static_cast<size_t>(count) * sizeof(GuiOknoInfo))
@@ -3866,7 +3876,7 @@ static uint64_t obsluga_wywolan_systemowych_impl(
             return bws_gui_minimalizuj_warstwe(aktualny_pid) ? 1ULL : 0ULL;
 
         case 42:
-            return bws_snapshot_okien(proces, arg1, arg2);
+            return bws_snapshot_okien(proces, arg1, arg2, arg3);
 
         case 43:
             if (!operacja_systemowa_dozwolona(proces) || arg1 == 0) return 0;

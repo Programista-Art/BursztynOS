@@ -85,7 +85,8 @@ aktualizacje_tmp.o: programy/aktualizacje/aktualizacje.cpp \
  programy/aktualizacje/../../bursztyn_ui/lista_wirtualna.h \
  programy/aktualizacje/../../bursztyn_ui/tabela_wirtualna.h \
  programy/aktualizacje/../../bursztyn_ui/powiadomienie.h \
- programy/aktualizacje/../../bursztyn_ui/aplikacja.h
+ programy/aktualizacje/../../bursztyn_ui/aplikacja.h \
+ programy/aktualizacje/../../wersja_systemu.h
 programy/aktualizacje/../../loader.h:
 programy/aktualizacje/../../pzb.h:
 programy/aktualizacje/../../pamiec.h:
@@ -174,3 +175,4 @@ programy/aktualizacje/../../bursztyn_ui/lista_wirtualna.h:
 programy/aktualizacje/../../bursztyn_ui/tabela_wirtualna.h:
 programy/aktualizacje/../../bursztyn_ui/powiadomienie.h:
 programy/aktualizacje/../../bursztyn_ui/aplikacja.h:
+programy/aktualizacje/../../wersja_systemu.h:
