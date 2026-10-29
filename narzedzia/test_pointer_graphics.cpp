@@ -8,6 +8,7 @@ extern "C" bool zaktualizuj_klawisz_fizyczny_gui(uint32_t,bool,uint32_t);
 extern "C" bool zaktualizuj_klawiature_gui(char);
 extern "C" bool zaktualizuj_tekst_gui(uint32_t,uint32_t);
 void ZwolnijCiagleRamki(void*,size_t){assert(false);}
+void kfree(void* p){free(p);} // Host allocator for compositor title-mask cleanup.
 extern "C" void WybudzProcesyOczekujaceNaMysz(){}
 int main(){
     std::vector<uint32_t> native(1280*720,0);

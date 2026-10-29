@@ -794,6 +794,26 @@ bool virtio_input_activate(VirtioInputDriver* drv) {
     return true;
 }
 
+bool virtio_input_commit_geometry(VirtioInputDriver* drv,int width,int height,uint64_t generation) {
+    if(!drv || __atomic_exchange_n(&drv->service_lock,1U,__ATOMIC_ACQUIRE))return false;
+    if(!drv->initialized || !drv->eventq || drv->reset_requested) {
+        __atomic_store_n(&drv->service_lock,0U,__ATOMIC_RELEASE);return false;
+    }
+    // The cutoff belongs to the display commit, not a later device poll.
+    // Preserve existing startup/SYN_DROPPED admission and partial-report rules.
+    const uint16_t published=drv->eventq->used->idx;
+    input_dma_acquire();
+    if(drv->input_dev.report_valid)drv->discard_until_syn=true;
+    input_discard_pointer_report(&drv->input_dev);
+    drv->stale_until_used=published;
+    drv->stale_completions=uint16_t(published-drv->eventq->last_used_idx)!=0;
+    drv->pointer_width=width;drv->pointer_height=height;drv->pointer_generation=generation;
+    drv->pointer_interactive=input_pointer_geometry_ready() &&
+        __atomic_load_n(&s_desktop_ready,__ATOMIC_ACQUIRE) && !input_splash_active();
+    __atomic_store_n(&drv->service_lock,0U,__ATOMIC_RELEASE);
+    return true;
+}
+
 size_t virtio_input_poll_events(VirtioInputDriver* drv, size_t max_events) {
     if (!drv || __atomic_exchange_n(&drv->service_lock, 1U, __ATOMIC_ACQUIRE)) return 0;
     if (!__atomic_load_n(&drv->initialized, __ATOMIC_ACQUIRE) || !drv->eventq ||

@@ -2172,3 +2172,13 @@ wsparcie_sponsorzy_blob.o: dane/sponsorze/sponsorzy.txt
 
 wsparcie_wkladtworczy_blob.o: dane/sponsorze/wkladtworczy.txt
 	$(LD) -r -b binary $< -o $@
+
+.PHONY: test-display-geometry-host test-display-snapshot-host
+test-display-geometry-host: $(filter-out .wm-test/runtime-host/narzedzia/test_splash_production_path.o,$(STARTUP_HOST_OBJECTS)) .wm-test/runtime-host/pmm.o
+	g++ $(STARTUP_HOST_FLAGS) -DBURSZTYN_PMM_HOST_TEST -Wl,--gc-sections narzedzia/test_display_geometry_host.cpp ekran_format.cpp $^ -o .wm-test/display-geometry
+	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) UBSAN_OPTIONS=halt_on_error=1 .wm-test/display-geometry
+
+test-display-snapshot-host:
+	@mkdir -p .wm-test
+	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_display_snapshot.cpp -Wl,--gc-sections -o .wm-test/display-snapshot
+	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) UBSAN_OPTIONS=halt_on_error=1 .wm-test/display-snapshot

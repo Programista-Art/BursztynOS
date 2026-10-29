@@ -903,7 +903,7 @@ bool virtio_gpu_rollback_modeset(VirtioGpuDriver* drv) {
     return virtio_gpu_rollback_modeset_locked(drv);
 }
 
-bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t height) {
+bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t height,bool prepare_only) {
     if (!drv || width == 0 || height == 0 || width > 4096 || height > 4096 || virtio_gpu_is_quiescing()) {
         return false;
     }
@@ -1005,7 +1005,7 @@ bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t
 
     // Initial scanout must not expose a resource with no host-side pixels.
     // Runtime modesetting retains its existing rollback/confirmation path.
-    const bool defer_scanout=drv->resource_id==0||drv->initial_scanout_pending||PrezentacjaStartu::stan().inicjalizacja;
+    const bool defer_scanout=prepare_only||drv->resource_id==0||drv->initial_scanout_pending||PrezentacjaStartu::stan().inicjalizacja;
     SplashFirstDiag::event("gpu_scanout_prepared",gpu_monotonic_ns()/1000,new_res_id);
     if (!defer_scanout && !virtio_gpu_cmd_set_scanout(drv, drv->scanout_id, new_res_id, 0, 0, width, height)) {
         gpu_klog("[VIRTIO-GPU] BLAD: set_scanout failed!");

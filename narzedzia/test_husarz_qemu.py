@@ -38,6 +38,8 @@ def main():
     parser.add_argument('--output', type=Path, default=ROOT / '.husarz-test/qemu')
     parser.add_argument('--system-windows-phase',choices=['full','core','late'],default='full')
     parser.add_argument('--system-windows-only',action='store_true',help='System identity, rounded corners and concurrent Settings apps')
+    parser.add_argument('--display-input',choices=['usb','virtio','ps2'],default='usb')
+    parser.add_argument('--display-geometry-only',action='store_true',help='Immediate release display transaction and desktop round trips')
     parser.add_argument('--clock-support-only',action='store_true',help='Atomic clock frames and native Support/Refresh/font update acceptance')
     parser.add_argument('--desktop-grid-restore',type=Path,help='Previous grid result directory for disk-only reboot coordinate comparison')
     parser.add_argument('--desktop-grid-only',action='store_true',help='Exact image-anchor comparison over repeated live font-family changes')
@@ -183,6 +185,12 @@ def main():
            '-device', 'qemu-xhci,id=usb', '-device', 'usb-kbd,bus=usb.0', '-device', 'usb-mouse,bus=usb.0',
            '-audiodev', 'none,id=snd', '-device', 'intel-hda', '-device', 'hda-output,audiodev=snd',
            '-netdev', 'user,id=n1,guestfwd=tcp:10.0.2.100:80-cmd:' + bridge_command + ',guestfwd=tcp:10.0.2.101:80-cmd:' + bridge_command, '-device', 'virtio-net-pci,netdev=n1,disable-legacy=on']
+    if args.display_geometry_only and args.display_input!='usb':
+        device_index=cmd.index('usb-mouse,bus=usb.0')
+        if args.display_input=='virtio':cmd[device_index]='virtio-mouse-pci,disable-legacy=on'
+        else:
+            del cmd[device_index-1:device_index+1]
+            cmd[cmd.index('pc,hpet=on,i8042=off')]='pc,hpet=on'
     if args.installed_disk:
         disk=args.installed_disk.resolve()
         if not disk.is_relative_to((ROOT/'.bsf-test').resolve()) or disk.suffix!='.img' or not disk.is_file():
@@ -226,7 +234,7 @@ def main():
 
             wait(lambda: '[DIAG APP] First frame submitted' in health(), 'native desktop ready', args.timeout)
             wait(lambda: all('role=' + role + ' result=interrupt IN armed' in health()
-                             for role in ('boot-keyboard', 'boot-mouse')),
+                             for role in (('boot-keyboard',) if args.display_geometry_only and args.display_input!='usb' else ('boot-keyboard', 'boot-mouse'))),
                  'USB keyboard and mouse interrupt endpoints ready')
             q = Qmp(sock)
             # TCG screenshot encoding can exceed the shared client's 3s default.
@@ -239,7 +247,7 @@ def main():
                 return reply.get('return', '')
 
             mice = q.call('query-mice')['return']
-            mouse = next(m for m in mice if 'USB' in m['name'] or 'HID' in m['name'])
+            mouse = next(m for m in mice if (('virtio' in m['name'].lower()) if args.display_geometry_only and args.display_input=='virtio' else ('PS/2' in m['name']) if args.display_geometry_only and args.display_input=='ps2' else ('USB' in m['name'] or 'HID' in m['name'])))
             hmp(f'mouse_set {mouse["index"]}')
 
             def position():
@@ -490,6 +498,10 @@ def main():
                 r,g,b=im.getpixel((1118,37))
                 return not (r>150 and g<130 and b<130)
             wait(diagnostic_closed,'diagnostic closed through native titlebar',240,interval=1)
+            if args.display_geometry_only:
+                from display_geometry_qemu_cases import run
+                result.update(run(out,screenshot,click,move,key,wait,guest_ticks,launch_start,health,hmp,symbol,kernel_sha,iso_sha,input_kind=args.display_input))
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
             if args.system_windows_only:
                 from system_windows_qemu_cases import run
                 result.update(run(out,screenshot,click,move,key,wait,guest_ticks,launch_start,health,hmp,symbol,kernel_sha,iso_sha,phase=args.system_windows_phase))

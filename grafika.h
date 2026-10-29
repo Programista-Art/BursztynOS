@@ -1,4 +1,5 @@
 #pragma once
+#include "display_geometry.h"
 
 /*
  * Bursztyn OS - publiczny interfejs podsystemu grafiki jadra.
@@ -248,6 +249,9 @@ bool grafika_przygotuj_ekran(const TrybEkranu&, StanBuforowEkranu*);
 void grafika_pobierz_stan(StanBuforowEkranu*);
 bool grafika_zmien_sprzet(const TrybEkranu&);
 void grafika_wymien_stan(const StanBuforowEkranu&);
+// Caller holds the screen lock through buffers/layers/work-area publication.
+void grafika_zatwierdz_geometrie(uint32_t scale,uint32_t generation);
+DisplayGeometry grafika_geometria_ekranu();
 void grafika_zwolnij_stan(StanBuforowEkranu*);
 struct VirtioGpuDriver;
 bool grafika_aktywuj_virtio_gpu(VirtioGpuDriver* drv);

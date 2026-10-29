@@ -403,6 +403,21 @@ void geometry_and_extremes() {
         }
     }finish();
 }
+void committed_geometry_first_report() {
+    begin();{
+        Device m(8);CHECK_F(m.start());m.poll();
+        // Nothing is pending at commit. The very first later report is new.
+        ++display_generation;g_mock_screen_w=1920;g_mock_screen_h=1080;
+        CHECK_F(virtio_input_commit_geometry(&m.function.drv,1920,1080,display_generation));
+        m.report(17,23);m.poll();CHECK_F(actual==std::vector<Report>({{17,23}}));
+        m.fresh_capture();
+        // A complete old report still in DMA is discarded, a new one survives.
+        m.report(99,99);++display_generation;
+        CHECK_F(virtio_input_commit_geometry(&m.function.drv,1920,1080,display_generation));
+        m.poll(64,false);CHECK_F(actual.empty());
+        m.report(5,-7);m.poll(64,false);CHECK_F(actual==std::vector<Report>({{5,-7}}));
+    }finish();
+}
 void random_reference_stream() {
     for(unsigned schedule=1;schedule<=4;++schedule) {
         begin();{
@@ -470,7 +485,7 @@ int main(int argc,char** argv) {
     if(mode=="valid" || mode=="all") { valid_stream();previous_keyboard_claim();raw_large_values(); }
     if(mode=="lifecycle" || mode=="all") { boot_stream(false,false);boot_stream(true,false);boot_stream(true,true);dropped_sync(); }
     if(mode=="extended" || mode=="all") {
-        queue_wrap_and_batch();immediate_reuse();malformed_and_capacity();keyboard_and_reset();phase_matrix();geometry_and_extremes();random_reference_stream();diagnostic_records();
+        queue_wrap_and_batch();immediate_reuse();malformed_and_capacity();keyboard_and_reset();phase_matrix();geometry_and_extremes();committed_geometry_first_report();random_reference_stream();diagnostic_records();
     }
     std::printf("FORENSIC RESULT cases=%u checks=%u failures=%u digest=%016llx\n",cases,checks,failures,(unsigned long long)digest);
     return failures?1:0;

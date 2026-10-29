@@ -853,7 +853,6 @@ static Desktop::Prostokat desktop_pending_dirty;
 static uint64_t desktop_model_generation=0;
 static Desktop::Position desktop_previous[PULPIT_MAX_WPISOW];
 static DesktopSettings::State* desktop_settings=nullptr;
-static int desktop_restore_x[PULPIT_MAX_WPISOW],desktop_restore_y[PULPIT_MAX_WPISOW];
 DesktopSettings::Key klucz_ukladu_pulpitu(int i) {
     auto* launcher=DesktopEntries::launcher(wpisy_pulpitu[i].launcher);
     return {launcher?'L':'F',launcher?launcher->id:wpisy_pulpitu[i].nazwa};
@@ -1198,15 +1197,12 @@ bool odswiez_wpisy_pulpitu() {
 void aktualizuj_layout_pulpitu() {aktualizuj_layout_modelu(desktop_layout,wpisy_pulpitu,true);}
 void aktualizuj_layout_modelu(Desktop::Layout<PULPIT_MAX_WPISOW>& layout,WpisPulpitu* entries,bool track) {
     auto& desktop_layout=layout;auto* wpisy_pulpitu=entries;
-    const int previousDpi=desktop_layout.dpi;
     const auto metrics=pulpit_metryki(ui_skala_procent);
     const bool geometryChanged=desktop_layout.workWidth>0 && (desktop_layout.workWidth!=screen_w ||
         desktop_layout.workBottom!=screen_h-PASEK_WYS || desktop_layout.dpi!=ui_skala_procent ||
         desktop_layout.ch!=metrics.komorka_wys || desktop_layout.y0!=PULPIT_GRID_Y);
-    if(geometryChanged)for(int i=0;i<desktop_layout.count;++i) {
-        auto r=desktop_layout.cell(i);desktop_restore_x[i]=r.x;desktop_restore_y[i]=r.y;
-    }
-    desktop_layout.geometry(screen_w,screen_h-PASEK_WYS,PULPIT_GRID_Y,ui_skala_procent);
+    if(geometryChanged || !desktop_layout.workWidth)
+        desktop_layout.geometry(screen_w,screen_h-PASEK_WYS,PULPIT_GRID_Y,ui_skala_procent);
     auto m=pulpit_metryki(ui_skala_procent);
     int maxLines=(m.etykieta_wys+m.odstep_linii)/(m.wysokosc_linii+m.odstep_linii);
     if(maxLines>m.max_linii)maxLines=m.max_linii;
@@ -1216,9 +1212,6 @@ void aktualizuj_layout_modelu(Desktop::Layout<PULPIT_MAX_WPISOW>& layout,WpisPul
         p.label=Desktop::wrap(wpisy_pulpitu[i].nazwa,m.etykieta_szer,m.wysokosc_linii,m.odstep_linii,maxLines,int(ui_skala_procent),oblicz_szerokosc_tekstu);
         p.span=1;
     }
-    if(geometryChanged)for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].placed)
-        desktop_layout.anchor_position(i,int(int64_t(desktop_restore_x[i])*ui_skala_procent/previousDpi),
-            int(int64_t(desktop_restore_y[i])*ui_skala_procent/previousDpi));
     // Retain the existing initial row-major layout. Settings restoration and
     // display changes reserve valid visual positions before relocating others.
     for(int i=0;i<desktop_layout.count;++i)if(!desktop_layout.items[i].placed && !desktop_layout.items[i].custom) {
@@ -1233,7 +1226,10 @@ void aktualizuj_layout_modelu(Desktop::Layout<PULPIT_MAX_WPISOW>& layout,WpisPul
     // Family/theme updates only refresh labels; anchors and persistence stay put.
     desktop_layout.newlyPlaced=0;
     const int corrected=(geometryChanged || waiting)?desktop_layout.reflow():0;
-    if(track && desktop_settings && desktop_settings->applied && (corrected || desktop_layout.newlyPlaced || (geometryChanged && previousDpi!=int(ui_skala_procent))))desktop_settings->dirty=true;
+    // A display transition only transforms canonical anchors and repairs their
+    // runtime projection. Only model/user placement changes are persisted.
+    if(track && !geometryChanged && desktop_settings && desktop_settings->applied &&
+       (corrected || desktop_layout.newlyPlaced))desktop_settings->dirty=true;
 #if BURSZTYNDIAGDESKTOPLAYOUT
     if(corrected)diagnostyka_ukladu("[DESKTOP-LAYOUT] reflow=",corrected);
 #endif
@@ -2479,7 +2475,10 @@ extern "C" __attribute__((noreturn)) void _start() {
             // synchronicznie przez usluge ekranu i powodowalby clipping okien.
             // Zrodlem prawdy jest biezacy stan jadra; zdarzenie to tylko budzik.
             GuiMonitorInfo mon_now{};
-            if(gui_pobierz_monitor(0,&mon_now)&&mon_now.szer>0&&mon_now.wys>0){
+            DisplayGeometry geometry{};
+            if(gui_pobierz_geometrie_ekranu(&geometry) && geometry.width>0 && geometry.height>0) {
+                screen_w=geometry.width;screen_h=geometry.height;ui_skala_procent=geometry.scale;
+            }else if(gui_pobierz_monitor(0,&mon_now)&&mon_now.szer>0&&mon_now.wys>0){
                 if(ui_skala_poprawna(mon_now.scale_x1000/10))ui_skala_procent=mon_now.scale_x1000/10;
                 else if(ui_skala_poprawna(zdarzenie.kod))ui_skala_procent=zdarzenie.kod;
                 screen_w=mon_now.szer;screen_h=mon_now.wys;
@@ -2492,9 +2491,9 @@ extern "C" __attribute__((noreturn)) void _start() {
 #endif
             metryki_ekranu();
             zaktualizuj_cache_przycisku(ui_skala_procent);
-            if(screen_w>0&&screen_h>PASEK_WYS)
-                gui_ustaw_obszar_roboczy(0, 0, screen_w, screen_h - PASEK_WYS);
-            rozmiesc_ikony_ekranu();zarejestruj_pulpit_jako_cel_drop();aktualizuj_overlay_menu();RysujPulpit(true);zapisz_uklad_pulpitu();continue;
+            rozmiesc_ikony_ekranu();zarejestruj_pulpit_jako_cel_drop();aktualizuj_overlay_menu();RysujPulpit(true);
+            if(geometry.generation)gui_potwierdz_geometrie_pulpitu(geometry);
+            continue;
         }
         if (zdarzenie.typ == BWS_ZDARZENIE_MOTYW_ZMIENIONY) {
             BursztynUI::Motyw::pobierz_domyslny().zaktualizuj_z_systemu();

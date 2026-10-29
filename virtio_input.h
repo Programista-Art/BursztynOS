@@ -178,6 +178,9 @@ void virtio_input_quiesce_for_reboot(void);
 /* PCI preparation only, shared by normal/Installer/automated boot. */
 uint32_t virtio_input_probe_and_prepare(void);
 uint32_t virtio_input_probe_and_init(void);
+// Called under the display transaction before publishing its completion.
+// Snapshot old DMA completions now, never on the first new input report.
+bool virtio_input_commit_geometry(VirtioInputDriver* drv,int width,int height,uint64_t generation);
 size_t virtio_input_get_count(void);
 VirtioInputDriver* virtio_input_get_driver(size_t index);
 

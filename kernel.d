@@ -5,12 +5,12 @@ kernel.o: kernel.cpp system_identity.h wersja_systemu.h \
  opcje_startowe.h tapety.h tapety_format.h obrazy/skalowanie.h \
  tapety_nazwy.h pzb.h ekran.h ekran_format.h ui_skala.h app_identity.h \
  pamiec.h psf.h storage_format.h aktualizacja_rozruch.h block_device.h \
- psf_bootstrap_status.h plik_status.h psf_bootstrap.h grafika.h loader.h \
- ahci.h instalator.h instalator_format.h virtio_input_activation_diag.h \
- blokowy.h e1000.h virtio_net.h virtio_pci.h pci.h virtqueue.h \
- network_device.h siec.h heap.h scheduler.h bws_zdarzenia.h \
- skladacz_obrazu.h acpi.h sterowniki/dzwiek/hda.h \
- sterowniki/dzwiek/hda_praca_odroczona.h \
+ psf_bootstrap_status.h plik_status.h psf_bootstrap.h grafika.h \
+ display_geometry.h loader.h ahci.h instalator.h instalator_format.h \
+ virtio_input_activation_diag.h blokowy.h e1000.h virtio_net.h \
+ virtio_pci.h pci.h virtqueue.h network_device.h siec.h heap.h \
+ scheduler.h bws_zdarzenia.h skladacz_obrazu.h acpi.h \
+ sterowniki/dzwiek/hda.h sterowniki/dzwiek/hda_praca_odroczona.h \
  sterowniki/dzwiek/hda_qemu_regression.h sterowniki/dzwiek/hda_diag.h \
  sterowniki/dzwiek/hda_diag_format.h sterowniki/dzwiek/hda_transport.h \
  sterowniki/dzwiek/../dma.h sterowniki/dzwiek/hda_wewnetrzny.h \
@@ -46,6 +46,7 @@ psf_bootstrap_status.h:
 plik_status.h:
 psf_bootstrap.h:
 grafika.h:
+display_geometry.h:
 loader.h:
 ahci.h:
 instalator.h:

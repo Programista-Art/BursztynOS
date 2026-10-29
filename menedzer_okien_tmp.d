@@ -2,13 +2,13 @@ menedzer_okien_tmp.o: menedzer_okien.cpp app_identity.h ui_skala.h \
  ekran_format.h pulpit_geometria.h bursztyn_ui/czcionka.h \
  bursztyn_ui/typy.h bursztyn_ui/../bsf/runtime.h bursztyn_ui/../bsf/bsf.h \
  bursztyn_ui/../bsf/config.h bursztyn_ui/../bws_czcionka.h \
- desktop_layout.h desktop_entries.h desktop_layout_settings.h \
- obrazy/png_dekoder.h bursztyn_gui.h bws_zdarzenia.h bws_pliki.h \
- plik_status.h bws_api.h bws_nowoczesne.h bws_ota.h skladacz_obrazu.h \
- pzb.h legacy_ui.h motyw.h kolor_alfa.h plik_popup_ui.h \
- plik_operacje_ui.h bursztyn_ui/menu_kontekstowe.h \
- bursztyn_ui/widok_menu_popup.h bursztyn_ui/popup.h \
- bursztyn_ui/kontrolka.h bursztyn_ui/diagnostyka.h \
+ desktop_layout.h desktop_anchor.h desktop_entries.h \
+ desktop_layout_settings.h obrazy/png_dekoder.h bursztyn_gui.h \
+ bws_zdarzenia.h bws_pliki.h plik_status.h bws_api.h bws_nowoczesne.h \
+ display_geometry.h bws_ota.h skladacz_obrazu.h pzb.h legacy_ui.h motyw.h \
+ kolor_alfa.h plik_popup_ui.h plik_operacje_ui.h \
+ bursztyn_ui/menu_kontekstowe.h bursztyn_ui/widok_menu_popup.h \
+ bursztyn_ui/popup.h bursztyn_ui/kontrolka.h bursztyn_ui/diagnostyka.h \
  bursztyn_ui/zdarzenia.h bursztyn_ui/motyw.h bursztyn_ui/rysowanie.h \
  bursztyn_ui/polecenie_ui.h bursztyn_ui/menu.h bursztyn_ui/ikona_ui.h \
  bursztyn_ui/pole_tekstowe.h bursztyn_ui/etykieta.h \
@@ -49,6 +49,7 @@ bursztyn_ui/../bsf/bsf.h:
 bursztyn_ui/../bsf/config.h:
 bursztyn_ui/../bws_czcionka.h:
 desktop_layout.h:
+desktop_anchor.h:
 desktop_entries.h:
 desktop_layout_settings.h:
 obrazy/png_dekoder.h:
@@ -58,6 +59,7 @@ bws_pliki.h:
 plik_status.h:
 bws_api.h:
 bws_nowoczesne.h:
+display_geometry.h:
 bws_ota.h:
 skladacz_obrazu.h:
 pzb.h:

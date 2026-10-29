@@ -4,8 +4,8 @@ ekran_powitalny.o: ekran_powitalny.cpp boot_phase_timing.h \
  bursztyn_ui/../ui_skala.h bursztyn_ui/../czcionki/extronic16Bunicode.h \
  bursztyn_ui/../czcionki/extronic16B_unicode.h ekran_powitalny_api.h \
  diagnostyka_startu.h diagnostyka_klatek_startu.h prezentacja_startu.h \
- bufory_grafiki.h grafika.h ekran_format.h app_identity.h \
- skladacz_obrazu.h pzb.h
+ bufory_grafiki.h grafika.h display_geometry.h ekran_format.h \
+ app_identity.h skladacz_obrazu.h pzb.h
 boot_phase_timing.h:
 sterowniki/czas/hpet.h:
 input_coexistence_diag.h:
@@ -22,6 +22,7 @@ diagnostyka_klatek_startu.h:
 prezentacja_startu.h:
 bufory_grafiki.h:
 grafika.h:
+display_geometry.h:
 ekran_format.h:
 app_identity.h:
 skladacz_obrazu.h:

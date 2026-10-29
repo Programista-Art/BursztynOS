@@ -12,6 +12,7 @@ instalator_tmp.o: programy/instalator/instalator.cpp \
  programy/instalator/../../bursztyn_ui/../plik_status.h \
  programy/instalator/../../bursztyn_ui/../bws_api.h \
  programy/instalator/../../bursztyn_ui/../bws_nowoczesne.h \
+ programy/instalator/../../bursztyn_ui/../display_geometry.h \
  programy/instalator/../../bursztyn_ui/../bws_ota.h \
  programy/instalator/../../bursztyn_ui/../skladacz_obrazu.h \
  programy/instalator/../../bursztyn_ui/../legacy_ui.h \
@@ -101,6 +102,7 @@ programy/instalator/../../bursztyn_ui/../bws_pliki.h:
 programy/instalator/../../bursztyn_ui/../plik_status.h:
 programy/instalator/../../bursztyn_ui/../bws_api.h:
 programy/instalator/../../bursztyn_ui/../bws_nowoczesne.h:
+programy/instalator/../../bursztyn_ui/../display_geometry.h:
 programy/instalator/../../bursztyn_ui/../bws_ota.h:
 programy/instalator/../../bursztyn_ui/../skladacz_obrazu.h:
 programy/instalator/../../bursztyn_ui/../legacy_ui.h:

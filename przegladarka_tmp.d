@@ -1,11 +1,12 @@
 przegladarka_tmp.o: programy/przegladarka.cpp programy/../bursztyn_gui.h \
  programy/../bws_zdarzenia.h programy/../bws_pliki.h \
  programy/../plik_status.h programy/../bws_api.h \
- programy/../bws_nowoczesne.h programy/../bws_ota.h \
+ programy/../bws_nowoczesne.h programy/../display_geometry.h \
+ programy/../ui_skala.h programy/../bws_ota.h \
  programy/../skladacz_obrazu.h programy/../pzb.h programy/../legacy_ui.h \
- programy/../ui_skala.h programy/../motyw.h programy/../kolor_alfa.h \
- bursztyn_ui/bursztyn_ui.h bursztyn_ui/typy.h bursztyn_ui/zdarzenia.h \
- bursztyn_ui/motyw.h bursztyn_ui/czcionka.h bursztyn_ui/../bsf/runtime.h \
+ programy/../motyw.h programy/../kolor_alfa.h bursztyn_ui/bursztyn_ui.h \
+ bursztyn_ui/typy.h bursztyn_ui/zdarzenia.h bursztyn_ui/motyw.h \
+ bursztyn_ui/czcionka.h bursztyn_ui/../bsf/runtime.h \
  bursztyn_ui/../bsf/bsf.h bursztyn_ui/../bsf/config.h \
  bursztyn_ui/../bws_czcionka.h bursztyn_ui/rysowanie.h \
  bursztyn_ui/polecenie_ui.h bursztyn_ui/ikona_ui.h \
@@ -60,11 +61,12 @@ programy/../bws_pliki.h:
 programy/../plik_status.h:
 programy/../bws_api.h:
 programy/../bws_nowoczesne.h:
+programy/../display_geometry.h:
+programy/../ui_skala.h:
 programy/../bws_ota.h:
 programy/../skladacz_obrazu.h:
 programy/../pzb.h:
 programy/../legacy_ui.h:
-programy/../ui_skala.h:
 programy/../motyw.h:
 programy/../kolor_alfa.h:
 bursztyn_ui/bursztyn_ui.h:

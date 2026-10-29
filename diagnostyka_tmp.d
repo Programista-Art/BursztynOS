@@ -5,10 +5,12 @@ diagnostyka_tmp.o: programy/diagnostyka/diagnostyka.cpp \
  programy/diagnostyka/../../plik_status.h \
  programy/diagnostyka/../../bws_api.h \
  programy/diagnostyka/../../bws_nowoczesne.h \
+ programy/diagnostyka/../../display_geometry.h \
+ programy/diagnostyka/../../ui_skala.h \
  programy/diagnostyka/../../bws_ota.h \
  programy/diagnostyka/../../skladacz_obrazu.h \
  programy/diagnostyka/../../pzb.h programy/diagnostyka/../../legacy_ui.h \
- programy/diagnostyka/../../ui_skala.h programy/diagnostyka/../../motyw.h \
+ programy/diagnostyka/../../motyw.h \
  programy/diagnostyka/../../kolor_alfa.h \
  programy/diagnostyka/../../bursztyn_ui/bursztyn_ui.h \
  programy/diagnostyka/../../bursztyn_ui/typy.h \
@@ -94,11 +96,12 @@ programy/diagnostyka/../../bws_pliki.h:
 programy/diagnostyka/../../plik_status.h:
 programy/diagnostyka/../../bws_api.h:
 programy/diagnostyka/../../bws_nowoczesne.h:
+programy/diagnostyka/../../display_geometry.h:
+programy/diagnostyka/../../ui_skala.h:
 programy/diagnostyka/../../bws_ota.h:
 programy/diagnostyka/../../skladacz_obrazu.h:
 programy/diagnostyka/../../pzb.h:
 programy/diagnostyka/../../legacy_ui.h:
-programy/diagnostyka/../../ui_skala.h:
 programy/diagnostyka/../../motyw.h:
 programy/diagnostyka/../../kolor_alfa.h:
 programy/diagnostyka/../../bursztyn_ui/bursztyn_ui.h:

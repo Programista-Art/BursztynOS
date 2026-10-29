@@ -4,20 +4,20 @@ kalkulator_tmp.o: kalkulator.cpp loader.h pzb.h pamiec.h \
  bursztyn_ui/motyw.h bursztyn_ui/../bursztyn_gui.h \
  bursztyn_ui/../bws_pliki.h bursztyn_ui/../plik_status.h \
  bursztyn_ui/../bws_api.h bursztyn_ui/../bws_nowoczesne.h \
- bursztyn_ui/../bws_ota.h bursztyn_ui/../skladacz_obrazu.h \
- bursztyn_ui/../legacy_ui.h bursztyn_ui/../motyw.h \
- bursztyn_ui/../kolor_alfa.h bursztyn_ui/czcionka.h \
- bursztyn_ui/../bsf/runtime.h bursztyn_ui/../bsf/bsf.h \
- bursztyn_ui/../bsf/config.h bursztyn_ui/../bws_czcionka.h \
- bursztyn_ui/rysowanie.h bursztyn_ui/polecenie_ui.h \
- bursztyn_ui/ikona_ui.h bursztyn_ui/kontrolka.h bursztyn_ui/diagnostyka.h \
- bursztyn_ui/panel.h bursztyn_ui/etykieta.h bursztyn_ui/przycisk.h \
- bursztyn_ui/pole_wyboru.h bursztyn_ui/pole_tekstowe.h \
- bursztyn_ui/suwak.h bursztyn_ui/model_przewijania.h \
- bursztyn_ui/pasek_przewijania.h bursztyn_ui/przycisk_opcji.h \
- bursztyn_ui/ramka_grupy.h bursztyn_ui/lista_wyboru.h \
- bursztyn_ui/pole_wielowierszowe.h bursztyn_ui/popup.h \
- bursztyn_ui/lista_rozwijana.h bursztyn_ui/menu.h \
+ bursztyn_ui/../display_geometry.h bursztyn_ui/../bws_ota.h \
+ bursztyn_ui/../skladacz_obrazu.h bursztyn_ui/../legacy_ui.h \
+ bursztyn_ui/../motyw.h bursztyn_ui/../kolor_alfa.h \
+ bursztyn_ui/czcionka.h bursztyn_ui/../bsf/runtime.h \
+ bursztyn_ui/../bsf/bsf.h bursztyn_ui/../bsf/config.h \
+ bursztyn_ui/../bws_czcionka.h bursztyn_ui/rysowanie.h \
+ bursztyn_ui/polecenie_ui.h bursztyn_ui/ikona_ui.h \
+ bursztyn_ui/kontrolka.h bursztyn_ui/diagnostyka.h bursztyn_ui/panel.h \
+ bursztyn_ui/etykieta.h bursztyn_ui/przycisk.h bursztyn_ui/pole_wyboru.h \
+ bursztyn_ui/pole_tekstowe.h bursztyn_ui/suwak.h \
+ bursztyn_ui/model_przewijania.h bursztyn_ui/pasek_przewijania.h \
+ bursztyn_ui/przycisk_opcji.h bursztyn_ui/ramka_grupy.h \
+ bursztyn_ui/lista_wyboru.h bursztyn_ui/pole_wielowierszowe.h \
+ bursztyn_ui/popup.h bursztyn_ui/lista_rozwijana.h bursztyn_ui/menu.h \
  bursztyn_ui/widok_menu_popup.h bursztyn_ui/okno.h \
  bursztyn_ui/menu_kontekstowe.h bursztyn_ui/menu_glowne.h \
  bursztyn_ui/pasek_postepu.h bursztyn_ui/pole_numeryczne.h \
@@ -54,6 +54,7 @@ bursztyn_ui/../bws_pliki.h:
 bursztyn_ui/../plik_status.h:
 bursztyn_ui/../bws_api.h:
 bursztyn_ui/../bws_nowoczesne.h:
+bursztyn_ui/../display_geometry.h:
 bursztyn_ui/../bws_ota.h:
 bursztyn_ui/../skladacz_obrazu.h:
 bursztyn_ui/../legacy_ui.h:

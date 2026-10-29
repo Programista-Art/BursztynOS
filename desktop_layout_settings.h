@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "desktop_entries.h"
+#include "desktop_anchor.h"
 
 #ifndef BURSZTYNDIAGDESKTOPLAYOUT
 #define BURSZTYNDIAGDESKTOPLAYOUT 0
@@ -11,10 +12,10 @@
 namespace DesktopSettings {
 constexpr const char* Path="/ustawienia/uklad-pulpitu.cfg";
 constexpr int Capacity=DesktopEntries::ModelCapacity;
-constexpr size_t IdCapacity=512, BufferCapacity=Capacity*(3*IdCapacity+64)+256;
+constexpr size_t IdCapacity=512, BufferCapacity=Capacity*(3*IdCapacity+128)+256;
 constexpr int CoordinateMax=1000000;
 struct Key {char type;const char* id;}; // L: catalog ID; F: desktop-relative path
-struct Record {char type=0;char id[IdCapacity]{};int x=0,y=0;};
+struct Record {char type=0;char id[IdCapacity]{};int x=0,y=0;Desktop::Anchor anchor;};
 inline bool equal(const char* a,const char* b) {
     while(*a && *a==*b){++a;++b;}return *a==*b;
 }
@@ -73,9 +74,9 @@ struct State {
     char buffer[BufferCapacity]{};
     Record scratch{};
     int count=0,savedDpi=100;
-    bool loaded=false,dirty=false,applied=false,anchorCoordinates=false;
+    bool loaded=false,dirty=false,applied=false,anchorCoordinates=false,gridCoordinates=false;
     int matchedLaunchers=0,matchedFiles=0,stale=0;
-    void reset() {anchorCoordinates=false;count=0;savedDpi=100;matchedLaunchers=matchedFiles=stale=0;}
+    void reset() {anchorCoordinates=gridCoordinates=false;count=0;savedDpi=100;matchedLaunchers=matchedFiles=stale=0;}
     bool parse(size_t size) {
         reset();
         constexpr char header[]="BursztynDesktopLayout=1\n";
@@ -101,6 +102,7 @@ struct State {
                 bool match=true;for(size_t j=0;j<n;++j)if(line[j]!="anchors=1"[j])match=false;
                 if(match){anchorCoordinates=true;continue;}
             }
+            if(n==6 && line[0]=='g' && line[1]=='r' && line[2]=='i' && line[3]=='d' && line[4]=='=' && line[5]=='1') {gridCoordinates=true;continue;}
             size_t dimension=0;
             if(n>=6 && line[0]=='w' && line[1]=='i' && line[2]=='d' && line[3]=='t' && line[4]=='h' && line[5]=='=')dimension=6;
             if(n>=7 && line[0]=='h' && line[1]=='e' && line[2]=='i' && line[3]=='g' && line[4]=='h' && line[5]=='t' && line[6]=='=')dimension=7;
@@ -115,6 +117,19 @@ struct State {
             if(a==n || b>=n)continue;
             scratch=Record{};scratch.type=line[0];
             if(!decode(line+2,a-2,scratch.id)||!coordinate(line+a+1,b-a-1,scratch.x,anchorCoordinates)||!coordinate(line+b+1,c-b-1,scratch.y,anchorCoordinates))continue;
+            if(gridCoordinates) {
+                // Existing trailing flags precede the optional exact grid form.
+                size_t start=c+1;while(start<n && line[start]!='\t')++start;
+                int values[5]{};bool valid=start<n;
+                for(int k=0;k<5 && valid;++k) {
+                    size_t end=++start;while(end<n && line[end]!='\t')++end;
+                    valid=coordinate(line+start,end-start,values[k],true);start=end;
+                    if(k<4 && end==n)valid=false;
+                }
+                if(!valid || values[4]<100 || values[4]>400 ||
+                   values[0]<-8192 || values[0]>8192 || values[1]<-8192 || values[1]>8192)continue;
+                scratch.anchor={values[0],values[1],values[2],values[3],uint32_t(values[4])};
+            }
             bool duplicate=false;
             for(int i=0;i<count;++i)if(records[i].type==scratch.type && equal(records[i].id,scratch.id))duplicate=true;
             // First valid record wins, regardless of unknown trailing flags.
@@ -140,7 +155,8 @@ struct State {
             for(int r=0;r<count;++r)if(records[r].type==k.type && equal(records[r].id,k.id)) {
                 int x=int(int64_t(records[r].x)*layout.dpi/savedDpi);
                 int y=int(int64_t(records[r].y)*layout.dpi/savedDpi);
-                if(anchorCoordinates)layout.anchor_position(i,x,y);
+                if(records[r].anchor.dpi) {layout.items[i].anchor=records[r].anchor;layout.items[i].custom=true;layout.restore_anchor(i);}
+                else if(anchorCoordinates)layout.saved_anchor(i,records[r].x,records[r].y,savedDpi);
                 else layout.visual_position(i,x,y);
                 if(k.type=='L')++matchedLaunchers;else ++matchedFiles;
                 break;
@@ -150,7 +166,7 @@ struct State {
         int corrected=layout.reflow();
         // Migrate legacy text-bound coordinates once at load, before a live
         // family change can make their visual offset ambiguous on next boot.
-        dirty=corrected>0 || (count>0 && !anchorCoordinates);return corrected;
+        dirty=count>0 && !gridCoordinates;return corrected;
     }
     template<class Layout,class Keys> size_t serialize(const Layout& layout,Keys key) {
         if(layout.count<0 || layout.count>Capacity || layout.workWidth<=0 || layout.workBottom<=0)return 0;
@@ -158,9 +174,16 @@ struct State {
         auto put=[&](char c){if(pos+1>=BufferCapacity){ok=false;return;}buffer[pos++]=c;};
         auto text=[&](const char* s){while(*s)put(*s++);};
         auto num=[&](int n){if(n<0){put('-');n=-n;}char digits[10];int c=0;do{digits[c++]=char('0'+n%10);n/=10;}while(n);while(c)put(digits[--c]);};
-        text("BursztynDesktopLayout=1\nanchors=1\nwidth=");num(layout.workWidth);text("\nheight=");num(layout.workBottom);text("\ndpi=");num(layout.dpi);put('\n');
-        for(int i=0;i<layout.count;++i)if(layout.items[i].placed) {
+        text("BursztynDesktopLayout=1\nanchors=1\ngrid=1\nwidth=");num(layout.workWidth);text("\nheight=");num(layout.workBottom);text("\ndpi=");num(layout.dpi);put('\n');
+        for(int i=0;i<layout.count;++i)if(layout.items[i].placed || layout.items[i].anchor.dpi) {
             auto k=key(i);auto r=layout.cell(i);
+            auto anchor=layout.items[i].anchor;
+            if(!anchor.dpi)anchor=Desktop::capture_anchor(r.x,r.y,layout.x0,layout.y0,layout.cw,layout.ch,layout.dpi);
+            if(anchor.col < -8192 || anchor.col>8192 || anchor.row < -8192 || anchor.row>8192 ||
+               anchor.dpi<100 || anchor.dpi>400 || anchor.offsetX < -CoordinateMax || anchor.offsetX>CoordinateMax ||
+               anchor.offsetY < -CoordinateMax || anchor.offsetY>CoordinateMax)return 0;
+            r.x=layout.x0+anchor.col*layout.cw+Desktop::transform_offset(anchor.offsetX,anchor.dpi,layout.dpi);
+            r.y=layout.y0+anchor.row*layout.ch+Desktop::transform_offset(anchor.offsetY,anchor.dpi,layout.dpi);
             if((k.type!='L' && k.type!='F') || !identity(k.id)||r.x < -CoordinateMax||r.y < -CoordinateMax||r.x>CoordinateMax||r.y>CoordinateMax)return 0;
             put(k.type);put('\t');
             for(size_t b=0;k.id[b];++b) {
@@ -168,7 +191,8 @@ struct State {
                 if(c=='%' || c=='\t' || c=='\n' || c=='\r') {put('%');put("0123456789ABCDEF"[c>>4]);put("0123456789ABCDEF"[c&15]);}
                 else put(c);
             }
-            put('\t');num(r.x);put('\t');num(r.y);text("\t0\n");
+            put('\t');num(r.x);put('\t');num(r.y);text("\t0\t");
+            num(anchor.col);put('\t');num(anchor.row);put('\t');num(anchor.offsetX);put('\t');num(anchor.offsetY);put('\t');num(anchor.dpi);put('\n');
         }
         uint32_t hash=checksum(buffer,pos);text("end=");
         for(int shift=28;shift>=0;shift-=4)put("0123456789ABCDEF"[(hash>>shift)&15]);

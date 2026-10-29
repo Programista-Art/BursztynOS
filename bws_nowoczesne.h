@@ -1,4 +1,5 @@
 #pragma once
+#include "display_geometry.h"
 
 #include <stdint.h>
 #include <stddef.h>

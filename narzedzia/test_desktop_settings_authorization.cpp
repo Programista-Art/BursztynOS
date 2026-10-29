@@ -31,8 +31,8 @@ static unsigned checks=0;
 #define CHECK(x) do{++checks;if(!(x)){fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x);abort();}}while(0)
 // Minimal layout adapter: the serializer and storage below are production code.
 struct Layout {
-    int count=2,workWidth=1920,workBottom=1040,dpi=100;
-    struct Item{bool placed=true;} items[2];
+    int count=2,workWidth=1920,workBottom=1040,dpi=100,x0=20,y0=3,cw=120,ch=124;
+    struct Item{bool placed=true;Desktop::Anchor anchor;} items[2];
     struct Bounds{int x,y;};
     Bounds cell(int i)const{return {100+i*120,200+i*100};}
 };

@@ -1,6 +1,6 @@
 tls.o: tls.cpp http_target.h siec.h network_device.h grafika.h \
- ekran_format.h ui_skala.h app_identity.h sterowniki/czas/hpet.h heap.h \
- biblioteki/mbedtls/include/mbedtls/ssl.h \
+ display_geometry.h ui_skala.h ekran_format.h app_identity.h \
+ sterowniki/czas/hpet.h heap.h biblioteki/mbedtls/include/mbedtls/ssl.h \
  biblioteki/mbedtls/include/mbedtls/config.h \
  biblioteki/mbedtls/bursztyn_mbedtls_config.h \
  biblioteki/mbedtls/include/mbedtls/check_config.h \
@@ -28,8 +28,9 @@ http_target.h:
 siec.h:
 network_device.h:
 grafika.h:
-ekran_format.h:
+display_geometry.h:
 ui_skala.h:
+ekran_format.h:
 app_identity.h:
 sterowniki/czas/hpet.h:
 heap.h:

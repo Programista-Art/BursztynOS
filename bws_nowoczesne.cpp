@@ -125,12 +125,21 @@ int32_t work_y = 0;
 int32_t work_w = 0;
 int32_t work_h = 0;
 uint32_t monitor_scale = 1000;
+uint32_t desktop_geometry_generation=0;
 
-uint64_t monitor_info(proces_t& proces, uint64_t indeks, uint64_t out_user) {
+uint64_t monitor_info(proces_t& proces, uint64_t indeks, uint64_t out_user,uint64_t size=0) {
     if (!ma_prawo(proces, PRAWO_GUI)) return 0;
     if (out_user == 0) return indeks == 0 ? 1ULL : 0ULL;
+    if(size && size!=sizeof(DisplayGeometry))return 0;
+    if(size==sizeof(DisplayGeometry)) {
+        if(indeks!=0 || !czy_bezpieczny_zakres_uzytkownika_do_zapisu(reinterpret_cast<void*>(out_user),size))return 0;
+        GuardEkranu guard;
+        auto g=grafika_geometria_ekranu();g.desktop_generation=desktop_geometry_generation;
+        return skopiuj_do_przestrzeni_uzytkownika(reinterpret_cast<void*>(out_user),&g,sizeof(g))?1:0;
+    }
     if (indeks != 0 || !czy_bezpieczny_zakres_uzytkownika_do_zapisu(
             reinterpret_cast<void*>(out_user), sizeof(GuiMonitorInfo))) return 0;
+    GuardEkranu guard;
     const int szer = grafika_pobierz_szerokosc();
     const int wys = grafika_pobierz_wysokosc();
     if (szer <= 0 || wys <= 0) return 0;
@@ -149,9 +158,19 @@ uint64_t monitor_info(proces_t& proces, uint64_t indeks, uint64_t out_user) {
 }
 
 uint64_t ustaw_work_area(proces_t& proces, int32_t x, int32_t y,
-                         int32_t w, int32_t h) {
+                         int32_t w, int32_t h,uint32_t generation=0) {
     if (!pzb_ma_prawa(&proces, PRAWO_GUI | PRAWO_SYSTEM_CONFIG) ||
         !pzb_ma_co_najmniej_poziom(&proces, PZB_ZAUFANE) || w <= 0 || h <= 0) return 0;
+    GuardEkranu guard;
+    const auto current=grafika_geometria_ekranu();
+    if(generation) {
+        // WM acknowledges its published desktop; stale generations cannot
+        // rewrite a newer work area, even when the old rectangle still fits.
+        if(generation!=current.generation || x!=current.work_x || y!=current.work_y ||
+           w!=current.work_width || h!=current.work_height)return 0;
+        desktop_geometry_generation=generation;
+        return 1;
+    }
     const int sw = grafika_pobierz_szerokosc();
     const int sh = grafika_pobierz_wysokosc();
     const int64_t x1 = static_cast<int64_t>(x) + w;
@@ -1237,11 +1256,11 @@ extern "C" uint64_t bws_nowoczesne_obsluz(
             return ok?1:0;
         }
         case BWS_GUI_MONITOR_INFO:
-            return monitor_info(*proces, a1, a2);
+            return monitor_info(*proces, a1, a2,a3);
         case BWS_GUI_USTAW_WORK_AREA:
             return ustaw_work_area(*proces, static_cast<int32_t>(a1 >> 32U),
                 static_cast<int32_t>(a1), static_cast<int32_t>(a2 >> 32U),
-                static_cast<int32_t>(a2));
+                static_cast<int32_t>(a2),static_cast<uint32_t>(a3));
         case BWS_SHM_CREATE: return shm_create(*proces, a1, a2);
         case BWS_SHM_MAP: return shm_map(*proces, a1, a2);
         case BWS_SHM_UNMAP: return shm_unmap(a1);

@@ -342,7 +342,9 @@ bool virtio_gpu_cmd_resource_detach_backing(VirtioGpuDriver* drv, uint32_t resou
 bool virtio_gpu_cmd_resource_unref(VirtioGpuDriver* drv, uint32_t resource_id);
 
 bool virtio_gpu_transfer_and_flush(VirtioGpuDriver* drv, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
-bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t height);
+// A display transaction may retain the active scanout until its prepared full
+// frame has transferred. Existing direct driver callers keep their policy.
+bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t height,bool prepare_only=false);
 void virtio_gpu_free_stale_resource(VirtioGpuDriver* drv);
 bool virtio_gpu_rollback_modeset(VirtioGpuDriver* drv);
 bool virtio_gpu_test_runtime_modeset(VirtioGpuDriver* drv);

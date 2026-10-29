@@ -74,7 +74,7 @@ static void desktop_persistence_cases() {
         CHECK(layout->items[30].placed); // new filesystem entry
         names[0]="new-launcher";names[DesktopEntries::Count]="renamed-file";
         CHECK(reload->apply(*layout,key)>=0);CHECK(reload->stale==2);CHECK(layout->items[0].placed);CHECK(layout->items[DesktopEntries::Count].placed);
-        setup(30,1280,720-ui_skaluj(40,dpi),dpi);int corrected=reload->apply(*layout,key);CHECK(corrected>0);CHECK(reload->dirty);
+        setup(30,1280,720-ui_skaluj(40,dpi),dpi);int corrected=reload->apply(*layout,key);CHECK(corrected>0);CHECK(!reload->dirty);
         for(int i=0;i<30;++i)if(layout->items[i].placed) {
             CHECK(layout->visible(i));for(int j=0;j<i;++j)if(layout->items[j].placed)CHECK(!Desktop::intersects(layout->visual_bounds(i),layout->visual_bounds(j)));
         }
@@ -83,7 +83,7 @@ static void desktop_persistence_cases() {
         std::vector<std::pair<int,int>> small;
         for(int i=0;i<30;++i){auto r=layout->visual_bounds(i);small.push_back({r.x,r.y});}
         setup(30,1920,1080-ui_skaluj(40,dpi),dpi);CHECK(state->apply(*layout,key)==0);
-        for(int i=0;i<30;++i){auto r=layout->visual_bounds(i);CHECK(r.x==small[i].first && r.y==small[i].second);}
+        for(int i=0;i<30;++i){auto r=layout->visual_bounds(i);CHECK(r.x==original[i].first && r.y==original[i].second);}
     }
     // Exact visual boundaries, including wrapped labels, survive reload.
     for(unsigned dpi:{100U,125U})for(bool multiline:{false,true})for(int edge=0;edge<4;++edge) {
@@ -164,10 +164,10 @@ static void desktop_persistence_cases() {
     CHECK(obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_RUCH,-9999,-9999)));
     CHECK(obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_UP,-9999,-9999)));CHECK(!test_mouse_capture);CHECK(layout_writes==written+1);
     CHECK(wizualny_wpis_pulpitu(launch).x!=a.x || wizualny_wpis_pulpitu(launch).y!=a.y);zapisz_uklad_pulpitu();CHECK(layout_writes==written+1);layout_write_fail=false;
-    // Runtime modeset reflows only invalid entries and persists once.
-    screen_w=1280;screen_h=720;metryki_ekranu();rozmiesc_ikony_ekranu();CHECK(desktop_settings->dirty);
+    // Runtime modeset repairs only the projection and does not persist it.
+    screen_w=1280;screen_h=720;metryki_ekranu();rozmiesc_ikony_ekranu();CHECK(!desktop_settings->dirty);
     for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].placed)CHECK(desktop_layout.visible(i));
-    written=layout_writes;zapisz_uklad_pulpitu();CHECK(layout_writes==written+1);CHECK(reload->load(layout_test_io));CHECK(reload->apply(desktop_layout,klucz_ukladu_pulpitu)==0);
+    written=layout_writes;zapisz_uklad_pulpitu();CHECK(layout_writes==written);CHECK(reload->load(layout_test_io));CHECK(reload->apply(desktop_layout,klucz_ukladu_pulpitu)>=0);
     // A filesystem drop must not save the departed item's old position.
     int folder=-1;file=-1;
     for(int i=0;i<desktop_layout.count;++i){if(!strcmp(wpisy_pulpitu[i].nazwa,"folder"))folder=i;if(!strcmp(wpisy_pulpitu[i].nazwa,"plik-żółty"))file=i;}

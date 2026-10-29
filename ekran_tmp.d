@@ -11,6 +11,7 @@ ekran_tmp.o: programy/ekran/ekran.cpp programy/ekran/../../loader.h \
  programy/ekran/../../bursztyn_ui/../plik_status.h \
  programy/ekran/../../bursztyn_ui/../bws_api.h \
  programy/ekran/../../bursztyn_ui/../bws_nowoczesne.h \
+ programy/ekran/../../bursztyn_ui/../display_geometry.h \
  programy/ekran/../../bursztyn_ui/../bws_ota.h \
  programy/ekran/../../bursztyn_ui/../skladacz_obrazu.h \
  programy/ekran/../../bursztyn_ui/../legacy_ui.h \
@@ -101,6 +102,7 @@ programy/ekran/../../bursztyn_ui/../bws_pliki.h:
 programy/ekran/../../bursztyn_ui/../plik_status.h:
 programy/ekran/../../bursztyn_ui/../bws_api.h:
 programy/ekran/../../bursztyn_ui/../bws_nowoczesne.h:
+programy/ekran/../../bursztyn_ui/../display_geometry.h:
 programy/ekran/../../bursztyn_ui/../bws_ota.h:
 programy/ekran/../../bursztyn_ui/../skladacz_obrazu.h:
 programy/ekran/../../bursztyn_ui/../legacy_ui.h:

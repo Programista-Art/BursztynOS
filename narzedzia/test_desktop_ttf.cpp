@@ -63,6 +63,8 @@ bool czytaj_plik(const char *path, char *out, uint32_t capacity) {
   return true;
 }
 void wypisz(const char *) {}
+bool ipc_send(uint64_t,const BwsIpcWyslij*){return false;}
+bool ipc_receive(uint64_t,BwsIpcOdbierz*){return false;}
 
 #define _start desktop_test_entry
 #include "../menedzer_okien.cpp"
@@ -77,6 +79,7 @@ int bws_utworz_warstwe(int,int,int,int,int) {return 1;}
 bool gui_blit_alpha(int,int,int,int,const uint32_t*) {return true;}
 static bool inside(Prostokat outer,Prostokat r){return r.x>=0&&r.y>=0&&r.prawy()<=outer.szerokosc&&r.dolny()<=outer.wysokosc;}
 #include "clock_support_cases.h"
+#include "desktop_display_cases.h"
 int main(){
  saved.checksum=BSF::checksum(saved);g_test_bws_hook=hook;
  for(const char* name:{"DejaVuSans.ttf","DejaVuSans-Bold.ttf","DejaVuSansMono.ttf","DejaVuSerifCondensed-Italic.ttf"}){
@@ -84,6 +87,7 @@ int main(){
  }
  CHECK(BSF::ready());
  wpisy_pulpitu=new WpisPulpitu[PULPIT_MAX_WPISOW]{};
+ desktop_display_cases();
  StartMenu::Model model;
  for(auto pair:{std::pair<const char*,int>{"hus",4},{"usta",20},{"diag",16},{"kalk",3},{"xyz",-1},{"PRZEGLĄDARKA OBRAZÓW",5}}){model.filter(pair.first);CHECK(model.action()==pair.second);}
  uint32_t query[64]{};int qn=StartMenu::normalize("UST",query,64);

@@ -155,6 +155,15 @@ void gui_log_geom_trace(const char* caller, int old_x, int old_y, int old_w, int
                         int vis_x, int vis_y, int vis_w, int vis_h);
 uint32_t gui_liczba_monitorow();
 bool gui_pobierz_monitor(uint32_t indeks, GuiMonitorInfo* info);
+// Optional BWS62 extended snapshot; legacy 48-byte monitor ABI is unchanged.
+inline bool gui_pobierz_geometrie_ekranu(DisplayGeometry* geometry) {
+    return geometry && bws_wywolaj(BWS_GUI_MONITOR_INFO,0,reinterpret_cast<uint64_t>(geometry),sizeof(*geometry),0)==1;
+}
+inline bool gui_potwierdz_geometrie_pulpitu(const DisplayGeometry& g) {
+    return bws_wywolaj(BWS_GUI_USTAW_WORK_AREA,
+        (uint64_t(uint32_t(g.work_x))<<32)|uint32_t(g.work_y),
+        (uint64_t(uint32_t(g.work_width))<<32)|uint32_t(g.work_height),g.generation,0)==1;
+}
 bool gui_ustaw_obszar_roboczy(int x, int y, int szer, int wys);
 
 uint64_t shm_create(uint64_t rozmiar, uint32_t flagi);

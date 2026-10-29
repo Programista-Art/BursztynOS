@@ -140,8 +140,7 @@ int legacy_odskaluj_y(int y) {
 void legacy_przetworz_zdarzenie(bws_zdarzenie* e) {
     if (!legacy_wlaczony || !e) return;
     if (e->typ == BWS_ZDARZENIE_EKRAN) {
-        if (ui_skala_poprawna(e->kod)) legacy_skala = e->kod;
-        else legacy_odswiez_skale();
+        legacy_odswiez_skale();
         ui_skala_procent = legacy_skala;
         if (legacy_test_skali) {
             if (legacy_skala != 100) legacy_test_widzial_skale = true;

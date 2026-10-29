@@ -15,6 +15,7 @@
 #include "bufory_grafiki.h"
 #include "sterowniki/grafika/bochs_vbe.h"
 #include "virtio_gpu.h"
+#include "virtio_input.h"
 #include "mysz_input.h"
 #include "pamiec.h"
 #include "zegar-rtc.h"
@@ -542,6 +543,7 @@ struct AktywnyStanEkranu {
 // Publikowany wylacznie razem z wymiana buforow pod blokada ekranu.
 // Sterownik sprzetowy, compositor i wejscie nie utrzymuja osobnych granic.
 static AktywnyStanEkranu aktywny_stan{};
+static DisplayGeometry committed_geometry{};
 static uint32_t* bufor_tapety = nullptr;
 static bool tapeta_zaladowana = false;
 
@@ -3884,7 +3886,7 @@ bool grafika_zmien_sprzet(const TrybEkranu&t){
         VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
         if(!drv)return false;
         if(drv->fb_width==t.szerokosc&&drv->fb_height==t.wysokosc)return true;
-        return virtio_gpu_setup_framebuffer(drv,t.szerokosc,t.wysokosc);
+        return virtio_gpu_setup_framebuffer(drv,t.szerokosc,t.wysokosc,true);
     }
     if(ekran_caps.mozna_zmienic_runtime)return bochs_ustaw_tryb(t);
     return ekran_ten_sam(t,grafika_tryb_ekranu());
@@ -4083,7 +4085,24 @@ void grafika_pobierz_granice_kursora(int* max_x,int* max_y){
     if(max_x)*max_x=grafika_pobierz_szerokosc()-1;
     if(max_y)*max_y=grafika_pobierz_wysokosc()-1;
 }
-uint64_t grafika_generacja_ekranu(){return aktywny_stan.generacja;}
+void grafika_zatwierdz_geometrie(uint32_t scale,uint32_t generation) {
+    const auto g=display_geometry(grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc(),scale,generation);
+    mysz_x=display_clamp(mysz_x,g.cursor_max_x);
+    mysz_y=display_clamp(mysz_y,g.cursor_max_y);
+    // Geometry-bound capture must not survive the transaction. Focus/owner
+    // remain intact; clients cancel their own gesture on the display event.
+    capture_pid_gui=-1;okno_przeciagane=-1;motion_hover_pid_gui=-1;
+    for(size_t i=0;i<virtio_input_get_count();++i)
+        virtio_input_commit_geometry(virtio_input_get_driver(i),g.width,g.height,g.generation);
+    committed_geometry=g;
+}
+DisplayGeometry grafika_geometria_ekranu() {
+    if(committed_geometry.generation && committed_geometry.width==grafika_pobierz_szerokosc() &&
+       committed_geometry.height==grafika_pobierz_wysokosc())return committed_geometry;
+    // Boot/host fixtures before the display service has committed its state.
+    return display_geometry(grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc(),100,uint32_t(aktywny_stan.generacja));
+}
+uint64_t grafika_generacja_ekranu(){return grafika_geometria_ekranu().generation;}
 void grafika_zwolnij_stan(StanBuforowEkranu*s){
     if(!s)return;
     bufor_grafiki_zwolnij(s->backbuffer);bufor_grafiki_zwolnij(s->tapeta);*s={};

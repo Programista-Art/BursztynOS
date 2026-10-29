@@ -12,6 +12,7 @@ kontrolki4tmp.o: programy/kontrolki4/kontrolki4.cpp \
  programy/kontrolki4/../../bursztyn_ui/../plik_status.h \
  programy/kontrolki4/../../bursztyn_ui/../bws_api.h \
  programy/kontrolki4/../../bursztyn_ui/../bws_nowoczesne.h \
+ programy/kontrolki4/../../bursztyn_ui/../display_geometry.h \
  programy/kontrolki4/../../bursztyn_ui/../bws_ota.h \
  programy/kontrolki4/../../bursztyn_ui/../skladacz_obrazu.h \
  programy/kontrolki4/../../bursztyn_ui/../legacy_ui.h \
@@ -100,6 +101,7 @@ programy/kontrolki4/../../bursztyn_ui/../bws_pliki.h:
 programy/kontrolki4/../../bursztyn_ui/../plik_status.h:
 programy/kontrolki4/../../bursztyn_ui/../bws_api.h:
 programy/kontrolki4/../../bursztyn_ui/../bws_nowoczesne.h:
+programy/kontrolki4/../../bursztyn_ui/../display_geometry.h:
 programy/kontrolki4/../../bursztyn_ui/../bws_ota.h:
 programy/kontrolki4/../../bursztyn_ui/../skladacz_obrazu.h:
 programy/kontrolki4/../../bursztyn_ui/../legacy_ui.h:

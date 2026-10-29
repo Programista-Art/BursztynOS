@@ -514,10 +514,12 @@ public:
 
         switch (surowe_zdarzenie.typ) {
             case BWS_ZDARZENIE_EKRAN: {
-                if (!ui_skala_poprawna(surowe_zdarzenie.kod)) break;
+                GuiMonitorInfo current{};
+                const uint32_t scale=gui_pobierz_monitor(0,&current)?current.scale_x1000/10:surowe_zdarzenie.kod;
+                if (!ui_skala_poprawna(scale)) break;
                 popupy_.zamknij(PowodZamknieciaPopup::ZmianaGeometrii);
                 zwolnij_przechwycenie_myszy(); czy_przeciagane_ = false; kontrolka_najechana_ = nullptr;
-                ui_skala_procent = surowe_zdarzenie.kod;
+                ui_skala_procent = scale;
                 skala_dpi_ = ui_skala();
                 if (czy_zmaksymalizowane_) {
                     Prostokat work = pobierz_obszar_roboczy();

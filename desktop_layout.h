@@ -1,5 +1,6 @@
 #pragma once
 #include "pulpit_geometria.h"
+#include "desktop_anchor.h"
 #include "bursztyn_ui/czcionka.h"
 #include "bursztyn_ui/typy.h"
 
@@ -74,7 +75,7 @@ inline Prostokat visual(int x,int y,const Label& l,uint32_t scale) {
         {g.etykieta_x+(g.etykieta_szer-width)/2,g.etykieta_y,width,height});
     return {r.x-pad,r.y-pad,r.szerokosc+2*pad,r.wysokosc+2*pad};
 }
-struct Position {int col=0,row=0,span=1,offsetX=0,offsetY=0;bool placed=false,selected=false,custom=false,launcher=false;Label label;};
+struct Position {int col=0,row=0,span=1,offsetX=0,offsetY=0;bool placed=false,selected=false,custom=false,launcher=false;Label label;Anchor anchor;};
 template<int Capacity> class Layout {
 public:
     static constexpr int capacity=Capacity;
@@ -87,6 +88,9 @@ public:
     int newlyPlaced=0;
     bool set_count(int n) {if(n<0 || n>Capacity)return false;count=n;return true;}
     void geometry(int width,int bottom,int originY,uint32_t scale) {
+        // Capture old grid ownership exactly once. Temporary small-screen
+        // repairs never replace it, even when an item cannot currently fit.
+        for(int i=0;i<count;++i)if(items[i].placed && !items[i].anchor.dpi)remember_anchor(i);
         width=width<0?0:width>GeometryMax?GeometryMax:width;
         bottom=bottom<0?0:bottom>GeometryMax?GeometryMax:bottom;
         scale=scale>=100 && scale<=400?scale:100;
@@ -95,6 +99,7 @@ public:
         auto metrics=pulpit_metryki(scale);
         cw=metrics.komorka_szer;ch=metrics.komorka_wys;x0=ui_skaluj(20,scale);y0=originY;
         cols=width>2*x0?(width-2*x0)/cw:0;rows=(bottom-y0)/ch;
+        for(int i=0;i<count;++i)if(items[i].anchor.dpi)restore_anchor(i);
     }
     uint64_t candidate_limit() const {
         if(cols<0 || rows<0)return 0;
@@ -118,10 +123,31 @@ public:
         return {r.x+(cw-m.etykieta_szer)/2-pad,r.y-pad,
                 m.etykieta_szer+2*pad,m.ikona_wys+m.odstep_etykiety+m.etykieta_wys+2*pad};
     }
-    void anchor_position(int i,int x,int y) {
+    void remember_anchor(int i) {
+        if(!index(i))return;
+        auto r=cell(i);
+        items[i].anchor=capture_anchor(r.x,r.y,x0,y0,cw,ch,dpi);
+    }
+    void restore_anchor(int i) {
+        if(!index(i) || !items[i].anchor.dpi)return;
+        auto& p=items[i];const auto& a=p.anchor;
+        p.col=a.col;p.row=a.row;
+        p.offsetX=transform_offset(a.offsetX,a.dpi,dpi);
+        p.offsetY=transform_offset(a.offsetY,a.dpi,dpi);
+        p.placed=true;
+    }
+    void saved_anchor(int i,int x,int y,uint32_t sourceDpi) {
+        if(!index(i))return;
+        auto m=pulpit_metryki(sourceDpi);
+        items[i].anchor=capture_anchor(x,y,ui_skaluj(20,sourceDpi),ui_skaluj(3,sourceDpi),
+                                      m.komorka_szer,m.komorka_wys,sourceDpi);
+        items[i].custom=true;restore_anchor(i);
+    }
+    void anchor_position(int i,int x,int y,bool intentional=true) {
         if(!index(i))return;
         auto& p=items[i];p.col=p.row=0;
         p.offsetX=x-x0;p.offsetY=y-y0;p.placed=p.custom=true;
+        if(intentional)remember_anchor(i);
     }
     bool fits(int i,int col,int row,int dc=0,int dr=0,bool group=false) const {
         if(!index(i) || col<0 || col>=cols || row<0 || int64_t(row)+items[i].span>rows)return false;
@@ -148,7 +174,7 @@ public:
             if(d<distance){distance=d;best=r*cols+c;}
         }
         if(best<0){items[i].placed=items[i].selected=false;return false;}
-        items[i].col=best%cols;items[i].row=best/cols;items[i].placed=true;return true;
+        items[i].col=best%cols;items[i].row=best/cols;items[i].placed=true;remember_anchor(i);return true;
     }
     void clear_selection() {for(int i=0;i<count;++i)items[i].selected=false;}
     int selected_count() const {int n=0;for(int i=0;i<count;++i)n+=items[i].selected && items[i].placed;return n;}
@@ -173,7 +199,7 @@ public:
             if(d<best){best=d;bc=dc;br=dr;}
         }
         if(best==INT64_MAX)return false;
-        for(int i=0;i<count;++i)if(items[i].selected && items[i].placed){items[i].col+=bc;items[i].row+=br;items[i].custom=true;}
+        for(int i=0;i<count;++i)if(items[i].selected && items[i].placed){items[i].col+=bc;items[i].row+=br;items[i].custom=true;remember_anchor(i);}
         return true;
     }
     Prostokat visual_bounds(int i) const {
@@ -188,6 +214,9 @@ public:
         int64_t dx=int64_t(x)-origin.x,dy=int64_t(y)-origin.y;
         if(dx<INT_MIN || dx>INT_MAX || dy<INT_MIN || dy>INT_MAX){p.placed=p.selected=false;return;}
         p.offsetX=int(dx);p.offsetY=int(dy);p.placed=true;p.custom=true;
+        // Legacy visual-coordinate import establishes its canonical anchor
+        // only after its one-time validation/repair.
+        p.anchor={};
     }
     bool visible(int i) const {
         if(cell(i).czy_pusty())return false;
@@ -230,9 +259,12 @@ public:
             }
             if(best!=INT64_MAX){
                 auto footprint=placement_bounds(i);auto anchor=cell(i);
-                anchor_position(i,bestX-(footprint.x-anchor.x),bestY-(footprint.y-anchor.y));++newlyPlaced;
+                anchor_position(i,bestX-(footprint.x-anchor.x),bestY-(footprint.y-anchor.y),false);
+                if(!items[i].anchor.dpi)remember_anchor(i);
+                ++newlyPlaced;
             }
         }
+        for(int i=0;i<count;++i)if(items[i].placed && !items[i].anchor.dpi)remember_anchor(i);
         return corrected;
     }
     void clamp_delta(int& dx,int& dy) const {
@@ -283,6 +315,7 @@ public:
         }
         for(int i=0;i<count;++i)if(items[i].selected && items[i].placed) {
             items[i].offsetX+=snappedX;items[i].offsetY+=snappedY;items[i].custom=true;
+            remember_anchor(i);
         }
         return true;
     }

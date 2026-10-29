@@ -28,7 +28,6 @@ TrybEkranu boot_tryb{};
 uint64_t teraz(){return hpet_dostepny()?czas_monotoniczny_ns():scheduler_pobierz_tick()*4000000ULL;}
 bool rowne(const char*a,const char*b){for(unsigned i=0;i<64;++i){if(a[i]!=b[i])return false;if(!a[i])return true;}return false;}
 void powiadom(){
-    ++generacja;
     for(int pid=1;pid<SKLADACZ_MAKS_WARSTW;++pid){
         auto*w=pobierz_warstwe(pid);if(!w)continue;
         bws_zdarzenie e{};e.typ=BWS_ZDARZENIE_EKRAN;e.kod=skala;
@@ -76,12 +75,12 @@ bool cofnij(){
     skladacz_cofnij_ekran(&tx.warstwy);
     if(tx.fizyczna)zwolnij=tx.nowy;
     tx.oczekuje=false;++cofniecia;
+    skladacz_obrazu_zloz_klatke();
+    if(++generacja==0)++generacja;
+    grafika_zatwierdz_geometrie(skala,generacja);
     odblokuj_ekran();
     if(tx.fizyczna)grafika_zwolnij_stan(&zwolnij);
     powiadom();
-    zablokuj_ekran();
-    skladacz_obrazu_zloz_klatke();
-    odblokuj_ekran();
     if(grafika_mozliwosci_ekranu().backend==EKRAN_VIRTIO_GPU){
         VirtioGpuDriver* gdrv = virtio_gpu_get_driver(0);
         if(gdrv) virtio_gpu_free_stale_resource(gdrv);
@@ -120,11 +119,13 @@ uint32_t zastosuj(const TrybEkranu&t,uint32_t s,int owner,bool persist=true,
     }
     if(fizyczna)grafika_wymien_stan(tx.nowy);
     skala=s;bws_aktualizuj_ekran(s);skladacz_zastosuj_ekran(&tx.warstwy);++zmiany;
+    // Present the prepared surface before publishing the completed generation.
+    // Input, BWS snapshots and client geometry cannot interleave this boundary.
+    skladacz_obrazu_zloz_klatke();
+    if(++generacja==0)++generacja;
+    grafika_zatwierdz_geometrie(skala,generacja);
     odblokuj_ekran();
     powiadom();
-    zablokuj_ekran();
-    skladacz_obrazu_zloz_klatke();
-    odblokuj_ekran();
     if(grafika_mozliwosci_ekranu().backend==EKRAN_VIRTIO_GPU){
         VirtioGpuDriver* gdrv = virtio_gpu_get_driver(0);
         if(gdrv) virtio_gpu_free_stale_resource(gdrv);
@@ -147,7 +148,7 @@ void ekran_inicjalizuj(){
         "[EKRAN INIT] backend=uefi-gop-static":grafika_mozliwosci_ekranu().backend==EKRAN_VIRTIO_GPU?
         "[EKRAN INIT] backend=virtio-gpu-runtime":"[EKRAN INIT] backend=vesa-static");
     uint32_t n=rozmiar_pliku(EKRAN_CFG),got=0;
-    if(!n){bws_aktualizuj_ekran(100);klog_serial("[EKRAN INIT] cfg=missing; active=boot");return;}
+    if(!n){bws_aktualizuj_ekran(100);grafika_zatwierdz_geometrie(100,generacja);klog_serial("[EKRAN INIT] cfg=missing; active=boot");return;}
     char buf[EKRAN_CFG_MAX]{};EkranKonfiguracja c{};
     bool parsed=n<=sizeof(buf)&&czytaj_fragment_pliku(EKRAN_CFG,0,buf,n,&got)&&got==n&&ekran_parsuj(buf,n,&c);
     if(parsed&&ui_skala_poprawna(c.skala)){
@@ -166,6 +167,7 @@ void ekran_inicjalizuj(){
         skala=100;bws_aktualizuj_ekran(skala);
         klog_serial("[EKRAN] BLAD konfiguracji; tryb startowy i skala 100%.");
     }
+    grafika_zatwierdz_geometrie(skala,generacja);
 }
 
 bool ekran_obsluz(const proces_t& p, const EkranZadanie& r, EkranOdpowiedz* out);

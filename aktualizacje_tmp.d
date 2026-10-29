@@ -12,6 +12,7 @@ aktualizacje_tmp.o: programy/aktualizacje/aktualizacje.cpp \
  programy/aktualizacje/../../bursztyn_ui/../plik_status.h \
  programy/aktualizacje/../../bursztyn_ui/../bws_api.h \
  programy/aktualizacje/../../bursztyn_ui/../bws_nowoczesne.h \
+ programy/aktualizacje/../../bursztyn_ui/../display_geometry.h \
  programy/aktualizacje/../../bursztyn_ui/../bws_ota.h \
  programy/aktualizacje/../../bursztyn_ui/../skladacz_obrazu.h \
  programy/aktualizacje/../../bursztyn_ui/../legacy_ui.h \
@@ -101,6 +102,7 @@ programy/aktualizacje/../../bursztyn_ui/../bws_pliki.h:
 programy/aktualizacje/../../bursztyn_ui/../plik_status.h:
 programy/aktualizacje/../../bursztyn_ui/../bws_api.h:
 programy/aktualizacje/../../bursztyn_ui/../bws_nowoczesne.h:
+programy/aktualizacje/../../bursztyn_ui/../display_geometry.h:
 programy/aktualizacje/../../bursztyn_ui/../bws_ota.h:
 programy/aktualizacje/../../bursztyn_ui/../skladacz_obrazu.h:
 programy/aktualizacje/../../bursztyn_ui/../legacy_ui.h:

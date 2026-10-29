@@ -492,9 +492,11 @@ public:
             // warstwa BWS/surface -> layout z NOWEGO client size -> repaint.
             // Nie wolno layoutowac dzieci starą geometrią ani ruszać warstwy po layoucie.
             log_diagnostyka("before");
-            if (ui_skala_poprawna(e.kod)) {
-                ui_skala_procent = e.kod;
-                skala_dpi_ = SkalaUI::procent(e.kod);
+            GuiMonitorInfo current{};
+            const uint32_t scale=gui_pobierz_monitor(0,&current)?current.scale_x1000/10:e.kod;
+            if (ui_skala_poprawna(scale)) {
+                ui_skala_procent = scale;
+                skala_dpi_ = SkalaUI::procent(scale);
             }
             // Skala do dzieci przed layoutem (nie zmienia jeszcze geometrii okna).
             popupy_.ustaw_skale_dpi(skala_dpi_);
