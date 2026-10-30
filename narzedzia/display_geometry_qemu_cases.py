@@ -18,7 +18,7 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
                     desktop_generation=u32('(anonymous namespace)::desktop_geometry_generation'),cursor=cursor())
     root=Path(__file__).resolve().parents[1]
     observer=json.loads((root/'.bsf-test/display-observer-layout.json').read_text())
-    wm_symbols=subprocess.check_output(['nm','-C',str(root/'menedzer_okien.elf')],text=True)
+    wm_symbols=subprocess.check_output(['nm','-C',str(out/'wm.elf' if (out/'wm.elf').exists() else root/'menedzer_okien.elf')],text=True)
     wm_address=int(re.search(r'^([0-9a-f]+) [bBdD] \(anonymous namespace\)::desktop_layout$',wm_symbols,re.M)[1],16)
     def desktop():
         # Read-only page-table walk of PID 1. Process ABI offsets are checked in pzb.h.
@@ -85,7 +85,16 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
         r,g,b=im.getpixel((win['x']+win['w']-25,win['y']+22))
         return r>150 and g<130 and b<130
     wait(presented,'Display Settings first complete frame',180,interval=.1)
-    screenshot('display-initial')
+    if 'BURSZTYN_TASKBAR_LOWER' in __import__('os').environ:
+        win=window();old_y=win['y'];destination=geometry()['work_area'][3]-win['h']-8
+        move(win['x']+win['w']//2,old_y+14);hmp('mouse_button 1')
+        started=ticks();wait(lambda:ticks()>started+8,'titlebar capture',20,interval=.01)
+        move(win['x']+win['w']//2,destination+14);hmp('mouse_button 0')
+        wait(lambda:abs(window()['y']-destination)<=2,'Display Settings near lower work-area edge',60,interval=.01)
+        screenshot('display-lower-window')
+    before_image=screenshot('display-initial')
+    bar_color=before_image.getpixel((before_image.width-2,before_image.height-2))
+    first_frames=[]
     baseline=desktop();seen={(1280,720,100):baseline};records=[]
     targets=[(1920,1080,125),(1920,1080,100),(1920,1080,125),(1920,1080,150),
              (1920,1080,200),(1920,1080,150),(1920,1080,125),(1920,1080,100),
@@ -117,23 +126,38 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
         # Button release triggers Apply; no click helper sleep after this point.
         hmp('mouse_button 0')
         wait(lambda:geometry()['generation']!=old['generation'],'display commit generation',180,interval=.01)
-        committed=geometry();screenshot('immediate-apply-'+str(len(records)))
+        committed=geometry();immediate=screenshot('immediate-apply-'+str(len(records)))
         assert (committed['width'],committed['height'],committed['scale'])==(w,h,s),committed
+        # Validate visible pixels as well as the canonical metadata. Looking at
+        # DisplayGeometry alone missed the retained old-position strip.
+        def observe_frame(image,state,label):
+            assert state['taskbar'][1]+state['taskbar'][3]==state['height'],state
+            assert state['taskbar'][1]==state['height']-state['taskbar'][3],state
+            assert image.size==(state['width'],state['height']),state
+            assert image.getpixel((state['width']-2,state['height']-2))==bar_color,('missing bottom taskbar',label,state)
+            client=window()
+            if label.startswith('wm-'):
+                assert client['y']+client['h']<=state['work_area'][3],('window outside work area',client,state)
+            first_frames.append(dict(label=label,geometry=state,bottom_color=list(bar_color),window=client))
+        observe_frame(immediate,committed,'immediate-'+str(len(records)))
+        record=dict(committed=committed);records.append(record)
+        if (old['width'],old['height'])!=(w,h):key('ret')
+        # Native Enter confirms without depending on asynchronous button layout.
+        # Slow host observation must not consume the guest
+        # confirmation deadline before input is sent.
+        win=window();factor=s/100
+        wait(lambda:window()['w']==round(640*factor),'Display Settings resized for committed scale',120,interval=.01)
+        win=window()
+        layout=json.loads((Path(__file__).resolve().parents[1]/f'.bsf-test/display-layout-{s}-pending.json').read_text())
+        wait(lambda:geometry()['desktop_generation']==committed['generation'],'desktop generation acknowledgement',120,interval=.01)
+        observe_frame(screenshot('first-wm-'+str(len(records))),geometry(),'wm-'+str(len(records)))
         edges=[]
         for px,py in [(0,h-1),(w-1,h-1),(0,0),(w-1,0),(w//2,h-1)]:
             edge(px,py);edges.append(cursor())
         after_edges=geometry()
         assert (after_edges['generation'],after_edges['width'],after_edges['height'],after_edges['scale'])==(committed['generation'],w,h,s),after_edges
-        record=dict(committed=committed,edges=edges,after_edges=after_edges);records.append(record)
-        # Confirm the real UI transaction after edge observations.
-        win=window();factor=s/100
-        wait(lambda:window()['w']==round(640*factor),'Display Settings resized for committed scale',120,interval=.01)
-        win=window()
-        layout=json.loads((Path(__file__).resolve().parents[1]/f'.bsf-test/display-layout-{s}-pending.json').read_text())
-        if (old['width'],old['height'])!=(w,h):
-            keep=layout['keep']
-            click(win['x']+keep[0]+keep[2]//2,win['y']+keep[1]+keep[3]//2)
-        wait(lambda:geometry()['desktop_generation']==committed['generation'],'desktop generation acknowledgement',120,interval=.01)
+        record.update(edges=edges,after_edges=after_edges)
+        (out/'first-frames.json').write_text(json.dumps(first_frames,indent=2))
         current=desktop();record['desktop']=current
         assert [a['canonical'] for a in current['anchors']]==[a['canonical'] for a in baseline['anchors']],('canonical drift',current,baseline)
         if (w,h,s) in seen:assert current==seen[(w,h,s)],('rendered anchor drift',w,h,s)

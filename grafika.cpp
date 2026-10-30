@@ -1,4 +1,5 @@
 #include "kolor_alfa.h"
+#include "bws_gui_batch.h"
 #include "diagnostyka_systemu.h"
 #include "boot_phase_timing.h"
 #include "xhci_pointing_diag.h"
@@ -3546,7 +3547,7 @@ static bool gui_blit_region(
     int y,
     int szer,
     int wys,
-    const uint32_t* piksele, bool zastap_przezroczyste, bool alfa=false) {
+    const uint32_t* piksele, bool zastap_przezroczyste, bool alfa=false,bool batch=false) {
 
     if (!piksele) return false;
     if (!backbuffer || !aktywny_ekran ||
@@ -3586,7 +3587,7 @@ static bool gui_blit_region(
             warstwa->bufor_pikseli[dstIdx] = pix;
         }
     }
-    zapamietaj_dirty_rysowania(lx0, ly0, lx1 - lx0, ly1 - ly0);
+    if(!batch)zapamietaj_dirty_rysowania(lx0, ly0, lx1 - lx0, ly1 - ly0);
     return true;
 }
 
@@ -3598,6 +3599,36 @@ extern "C" bool bws_gui_alpha_blit(int x,int y,int w,int h,const uint32_t* pixel
 }
 extern "C" bool bws_gui_zastap_region(int x,int y,int w,int h,const uint32_t* pixels) {
     return gui_blit_region(x,y,w,h,pixels,true);
+}
+
+// The syscall validates all source mappings and holds BlokadaEkranu. Validate
+// the entire destination set before writing anything: a rejected/stale batch
+// must never leave half a selection update in a published desktop surface.
+extern "C" bool bws_gui_zastap_regiony(const BwsGuiRegion* regions,uint32_t count,uint32_t generation) {
+    auto* layer=pobierz_warstwe(aktualny_pid);
+    if(!regions || !count || count>BWS_GUI_BATCH_MAX || !layer || !layer->bufor_pikseli ||
+       !backbuffer || !aktywny_ekran || (generation && generation!=grafika_generacja_ekranu()))return false;
+    uint64_t total=0;
+    for(uint32_t i=0;i<count;++i) {
+        const auto& r=regions[i];
+        if(!r.pixels || r.width<1 || r.height<1 || r.width>2048 || r.height>2048 ||
+           r.x<layer->x || r.y<layer->y ||
+           int64_t(r.x)+r.width>int64_t(layer->x)+layer->szerokosc ||
+           int64_t(r.y)+r.height>int64_t(layer->y)+layer->wysokosc)return false;
+        total+=uint64_t(r.width)*r.height;
+        if(total>BWS_GUI_BATCH_PIXELS_MAX)return false;
+    }
+    for(uint32_t i=0;i<count;++i) {
+        const auto& r=regions[i];
+        gui_blit_region(r.x,r.y,r.width,r.height,reinterpret_cast<const uint32_t*>(r.pixels),true,false,true);
+    }
+    if(skladacz_obrazu_publikuj_klatke(aktualny_pid) && skladacz_obrazu_czy_widoczna(aktualny_pid))
+        bws_gui_powiadom_lifecycle(BWS_ZDARZENIE_OKNO_POKAZANE,aktualny_pid);
+    for(uint32_t i=0;i<count;++i) {
+        const auto& r=regions[i];
+        skladacz_obrazu_oznacz_dirty_rect_dokladny(r.x,r.y,r.width,r.height);
+    }
+    return true;
 }
 
 extern "C" bool bws_gui_ustaw_tytul_okna(const char* tytul) {

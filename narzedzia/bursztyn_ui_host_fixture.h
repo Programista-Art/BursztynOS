@@ -89,24 +89,45 @@ static int test_popup_blits=0,test_refreshes=0;
 static bool test_capture_pixels=false;
 static std::map<std::pair<int,int>,uint32_t> test_pixels;
 static bool test_capture_paints=false;
+static void (*test_live_write_observer)()=nullptr;
+static int test_surface_width=0,test_surface_height=0;
+static std::vector<uint32_t> test_surface;
+static void test_set_pixel(int x,int y,uint32_t color) {
+    if(test_capture_pixels)test_pixels[{x,y}]=color;
+    if(x>=0 && y>=0 && x<test_surface_width && y<test_surface_height)
+        test_surface[size_t(y)*test_surface_width+x]=color;
+}
 static std::vector<TestPaintRect> test_paint_rects;
 void gui_rysuj_prostokat(int x,int y,int w,int h,uint32_t color) {
     if(test_capture_paints)test_paint_rects.push_back({x,y,w,h,color});
-    if(test_capture_pixels)for(int j=0;j<h;++j)for(int i=0;i<w;++i)test_pixels[{x+i,y+j}]=color;
+    if(test_capture_pixels || test_surface_width)for(int j=0;j<h;++j)for(int i=0;i<w;++i)test_set_pixel(x+i,y+j,color);
+    if(test_live_write_observer)test_live_write_observer();
 }
 bool gui_blit(int x,int y,int w,int h,const uint32_t* data) {
     if(test_capture_paints)test_paint_rects.push_back({x,y,w,h});
-    if(test_capture_pixels)for(int j=0;j<h;++j)for(int i=0;i<w;++i)test_pixels[{x+i,y+j}]=data[j*w+i];
+    if(test_capture_pixels || test_surface_width)for(int j=0;j<h;++j)for(int i=0;i<w;++i)test_set_pixel(x+i,y+j,data[j*w+i]);
     return true;
 }
 static int test_region_replacements=0;
 bool gui_zastap_region(int x,int y,int w,int h,const uint32_t* pixels) {
     ++test_region_replacements;
     if(test_capture_paints)test_paint_rects.push_back({x,y,w,h});
-    if(test_capture_pixels)for(int j=0;j<h;++j)for(int i=0;i<w;++i)test_pixels[{x+i,y+j}]=pixels[j*w+i];
+    if(test_capture_pixels || test_surface_width)for(int j=0;j<h;++j)for(int i=0;i<w;++i)test_set_pixel(x+i,y+j,pixels[j*w+i]);
     return true;
 }
 static std::vector<uint32_t> test_popup_pixels;
+static unsigned test_region_batches=0;
+static bool test_reject_region_batch=false;
+static std::vector<TestPaintRect> test_batch_regions;
+bool gui_zastap_regiony(const BwsGuiRegion* regions,uint32_t count,uint32_t) {
+    if(test_reject_region_batch)return false;
+    ++test_region_batches;test_batch_regions.clear();
+    for(uint32_t i=0;i<count;++i) {
+        const auto& r=regions[i];test_batch_regions.push_back({r.x,r.y,r.width,r.height});
+        gui_zastap_region(r.x,r.y,r.width,r.height,reinterpret_cast<const uint32_t*>(r.pixels));
+    }
+    return true;
+}
 static struct {int x,y,szerokosc,wysokosc;} test_popup_rect;
 bool gui_blit_popup(int x,int y,int w,int h,const uint32_t* pixels) {
     ++test_popup_blits;test_popup_rect={x,y,w,h};test_popup_pixels.assign(pixels,pixels+w*h);return true;

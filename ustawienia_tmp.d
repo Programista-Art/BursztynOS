@@ -7,6 +7,7 @@ ustawienia_tmp.o: programy/ustawienia/ustawienia.cpp \
  programy/ustawienia/../../bws_pliki.h \
  programy/ustawienia/../../plik_status.h \
  programy/ustawienia/../../bws_api.h \
+ programy/ustawienia/../../bws_gui_batch.h \
  programy/ustawienia/../../bws_nowoczesne.h \
  programy/ustawienia/../../display_geometry.h \
  programy/ustawienia/../../ui_skala.h programy/ustawienia/../../bws_ota.h \
@@ -96,6 +97,7 @@ programy/ustawienia/../../bws_zdarzenia.h:
 programy/ustawienia/../../bws_pliki.h:
 programy/ustawienia/../../plik_status.h:
 programy/ustawienia/../../bws_api.h:
+programy/ustawienia/../../bws_gui_batch.h:
 programy/ustawienia/../../bws_nowoczesne.h:
 programy/ustawienia/../../display_geometry.h:
 programy/ustawienia/../../ui_skala.h:

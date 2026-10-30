@@ -2,6 +2,7 @@ motywy_tmp.o: programy/motywy/motywy.cpp programy/motywy/../../motyw.h \
  programy/motywy/../../kolor_alfa.h programy/motywy/../../bursztyn_gui.h \
  programy/motywy/../../bws_zdarzenia.h programy/motywy/../../bws_pliki.h \
  programy/motywy/../../plik_status.h programy/motywy/../../bws_api.h \
+ programy/motywy/../../bws_gui_batch.h \
  programy/motywy/../../bws_nowoczesne.h \
  programy/motywy/../../display_geometry.h \
  programy/motywy/../../ui_skala.h programy/motywy/../../bws_ota.h \
@@ -88,6 +89,7 @@ programy/motywy/../../bws_zdarzenia.h:
 programy/motywy/../../bws_pliki.h:
 programy/motywy/../../plik_status.h:
 programy/motywy/../../bws_api.h:
+programy/motywy/../../bws_gui_batch.h:
 programy/motywy/../../bws_nowoczesne.h:
 programy/motywy/../../display_geometry.h:
 programy/motywy/../../ui_skala.h:

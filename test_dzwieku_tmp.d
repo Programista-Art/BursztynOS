@@ -4,6 +4,7 @@ test_dzwieku_tmp.o: programy/test_dzwieku/test_dzwieku.cpp \
  programy/test_dzwieku/../../bws_pliki.h \
  programy/test_dzwieku/../../plik_status.h \
  programy/test_dzwieku/../../bws_api.h \
+ programy/test_dzwieku/../../bws_gui_batch.h \
  programy/test_dzwieku/../../bws_nowoczesne.h \
  programy/test_dzwieku/../../display_geometry.h \
  programy/test_dzwieku/../../ui_skala.h \
@@ -97,6 +98,7 @@ programy/test_dzwieku/../../bws_zdarzenia.h:
 programy/test_dzwieku/../../bws_pliki.h:
 programy/test_dzwieku/../../plik_status.h:
 programy/test_dzwieku/../../bws_api.h:
+programy/test_dzwieku/../../bws_gui_batch.h:
 programy/test_dzwieku/../../bws_nowoczesne.h:
 programy/test_dzwieku/../../display_geometry.h:
 programy/test_dzwieku/../../ui_skala.h:

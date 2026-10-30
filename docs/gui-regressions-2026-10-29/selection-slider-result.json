@@ -1,0 +1,15 @@
+{
+  "result": "PASS",
+  "mode": "gui-regressions",
+  "frames": 51,
+  "slider_values": [
+    23,
+    50,
+    77,
+    50,
+    23,
+    50
+  ],
+  "kernel_sha256": "c5328362b6f7db728813efb1ca5398c8a3ad894ac65bf1fdd1fc4273ecc76070",
+  "iso_sha256": "afd85424cd62716a8d5031e3a415ff50c83c9ea06b216f69ff7b820bb0337232"
+}

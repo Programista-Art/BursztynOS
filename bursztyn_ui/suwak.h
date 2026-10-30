@@ -11,6 +11,9 @@ public:
 
     Suwak() {
         styl_ = Motyw::pobierz_domyslny().styl_suwaka;
+        kolor_toru_ = motyw_kolor(MOTYW_KOLOR_PANEL);
+        kolor_wypelnienia_ = motyw_kolor(MOTYW_KOLOR_AKCENT_AKTYWNY);
+        kolor_uchwytu_ = motyw_kolor(MOTYW_KOLOR_AKCENT);
         wypelnienie_ = styl_.wypelnienie;
         czy_moze_miec_fokus_ = true;
         czy_reaguje_wizualnie_na_najechanie_ = true;
@@ -180,6 +183,12 @@ public:
 
     void rysuj_siebie(KontekstRysowania& ctx) override {
         StylStanu s = wyznacz_biezacy_styl_stanu();
+        // A dirty repaint is a complete control image. In particular, restore
+        // the former thumb and rounded-track cutouts instead of retaining
+        // pixels from an earlier value. Theme RGB zero means solid black here,
+        // never a transparent hole in Okno's zero-skipping blit.
+        ctx.rysuj_prostokat({0,0,obszar_.szerokosc,obszar_.wysokosc},
+                           0xff000000U | (s.tlo?s.tlo:motyw_kolor(MOTYW_KOLOR_OKNOTLO)));
         rysuj_tlo_i_ramke(ctx, s);
         int gr = skala_dpi_;
         Prostokat zewnetrzny(0, 0, obszar_.szerokosc, obszar_.wysokosc);
@@ -192,10 +201,14 @@ public:
         if (!g.tor.czy_pusty()) {
             uint32_t tor = czy_wlaczona_ ? kolor_toru_ : motyw_kolor(MOTYW_KOLOR_PANEL);
             uint32_t wypelnienie = czy_wlaczona_ ? kolor_wypelnienia_ : motyw_kolor(MOTYW_KOLOR_WYLACZONY);
-            ctx.rysuj_zaokraglony_prostokat(g.tor, tor, g.tor_grubosc / 2);
+            ctx.rysuj_zaokraglony_prostokat(g.tor, tor | 0xff000000U, g.tor_grubosc / 2);
             if (!g.wypelnienie.czy_pusty()) {
-                ctx.rysuj_zaokraglony_prostokat(g.wypelnienie, wypelnienie,
-                                                g.tor_grubosc / 2);
+                // Color a clipped portion of the same capsule. A short active
+                // rectangle must not grow square corners outside the track.
+                ctx.dodaj_przyciecie(g.wypelnienie);
+                ctx.rysuj_zaokraglony_prostokat(g.tor, wypelnienie | 0xff000000U,
+                                               g.tor_grubosc / 2);
+                ctx.zdejmij_przyciecie();
             }
         }
 
@@ -207,7 +220,7 @@ public:
         } else if (czy_najechana_) {
             uchwyt = motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY);
         }
-        ctx.rysuj_zaokraglony_prostokat(g.uchwyt, uchwyt, 3 * skala_dpi_);
+        ctx.rysuj_zaokraglony_prostokat(g.uchwyt, uchwyt | 0xff000000U, 3 * skala_dpi_);
         ctx.rysuj_zaokraglona_ramke(g.uchwyt, s.ramka, 3 * skala_dpi_,
                                    skala_dpi_);
 

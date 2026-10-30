@@ -21,6 +21,7 @@ warstwa_obrazu* pobierz_warstwe(int pid) {return layer.aktywna&&layer.pid==pid?&
 bool skladacz_obrazu_czy_widoczna(int pid) {return presentable&&pobierz_warstwe(pid);}
 bool skladacz_obrazu_publikuj_klatke(int pid) {assert(pobierz_warstwe(pid));if(presentable)return false;++commits;presentable=true;return true;}
 void skladacz_obrazu_oznacz_dirty_rect(int,int,int,int) {++invalidations;}
+void skladacz_obrazu_oznacz_dirty_rect_dokladny(int,int,int,int) {++invalidations;}
 void skladacz_obrazu_oznacz_dirty() {++invalidations;}
 void skladacz_obrazu_wznow() {}
 void skladacz_obrazu_podnies_warstwe(int) {}
@@ -97,6 +98,14 @@ int main() {
     bws_gui_odswiez();assert(invalidations==dirty_before+1&&presents==frames_before);
     assert(bws_gui_blit(100,100,2,2,replacement));
     bws_gui_odswiez();assert(layer.bufor_pikseli[1]==0x123456);
+    BwsGuiRegion batch[]={{100,100,2,2,reinterpret_cast<uint64_t>(replacement)},
+                          {199,199,2,2,reinterpret_cast<uint64_t>(replacement)}};
+    const uint32_t before=layer.bufor_pikseli[0];
+    assert(!bws_gui_zastap_regiony(batch,2,0));assert(layer.bufor_pikseli[0]==before);
+    batch[1]={110,110,2,2,reinterpret_cast<uint64_t>(replacement)};
+    assert(!bws_gui_zastap_regiony(batch,2,0xfffffff0));
+    assert(bws_gui_zastap_regiony(batch,2,0));
+    assert(layer.bufor_pikseli[0]==0 && layer.bufor_pikseli[10*100+11]==0x123456);
     // Real production presentation entry points select the dedicated system
     // surface, including cursor-sized presentations. The scene is retained.
     test_clock=true;test_now=0;powitanie_inicjalizuj(true);

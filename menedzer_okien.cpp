@@ -3,6 +3,7 @@
 #include "ekran_format.h"
 #include "pulpit_geometria.h"
 #include "desktop_layout.h"
+#include "desktop_selection_paint.h"
 #include "desktop_entries.h"
 #include "desktop_layout_settings.h"
 #include "obrazy/png_dekoder.h"
@@ -54,6 +55,7 @@ int screen_w = 1024;
 int screen_h = 768;
 int PASEK_WYS = 40;
 int MENU_X = 10;
+DisplayGeometry desktop_geometry{};
 TaskbarClock::Surface* taskbar_clock=nullptr;
 int poczatek_zegara(){return taskbar_clock?taskbar_clock->bounds.x:screen_w-ui_skaluj(150,ui_skala_procent);}
 StartMenu::Surface* start_menu=nullptr;
@@ -88,7 +90,9 @@ constexpr int PULPIT_REFRESH_TICKS = 3;
 
 
 void metryki_ekranu(){
-PASEK_WYS=ui_skaluj(TASKBAR_LOGICZNA_WYS,ui_skala_procent);
+if(desktop_geometry.width!=screen_w || desktop_geometry.height!=screen_h || desktop_geometry.scale!=ui_skala_procent)
+    desktop_geometry=display_geometry(screen_w,screen_h,ui_skala_procent,0);
+PASEK_WYS=desktop_geometry.taskbar_height;
 MENU_X=ui_skaluj(10,ui_skala_procent);
 PRZYCISK_MENU_X=ui_skaluj(10,ui_skala_procent);
 PRZYCISK_MENU_W=ui_skaluj(PRZYCISK_MENU_LOGICZNA_SZER,ui_skala_procent);
@@ -109,7 +113,7 @@ if(taskbar_clock)taskbar_clock->configure(screen_w,screen_h,PASEK_WYS,ui_skala_p
 }
 
 inline int przycisk_menu_y() {
-    return screen_h - PASEK_WYS + (PASEK_WYS - PRZYCISK_MENU_H) / 2;
+    return desktop_geometry.taskbar_y + (PASEK_WYS - PRZYCISK_MENU_H) / 2;
 }
 
 const char* const SCIEZKA_POWLOKA = "/shell.bur";
@@ -1531,24 +1535,34 @@ void RysujPrzyciskMenu() {
     }
     const uint32_t* buf = g_cached_przyciski[static_cast<size_t>(stan)];
     if (buf && g_cached_btn_w > 0 && g_cached_btn_h > 0) {
-        gui_blit(PRZYCISK_MENU_X, przycisk_menu_y(),
-                 g_cached_btn_w, g_cached_btn_h, buf);
+        if(pulpit_canvas) {
+            for(int y=0;y<g_cached_btn_h;++y)pulpit_canvas->rysuj_wiersz_ekranu(
+                PRZYCISK_MENU_X,przycisk_menu_y()+y,g_cached_btn_w,buf+size_t(y)*g_cached_btn_w);
+        }else {
+            const BwsGuiRegion r{PRZYCISK_MENU_X,przycisk_menu_y(),g_cached_btn_w,g_cached_btn_h,reinterpret_cast<uint64_t>(buf)};
+            (void)gui_zastap_regiony(&r,1,desktop_geometry.generation);
+        }
     }
 }
 
 bool RysujZegar(bool force=false) {
     return taskbar_clock && taskbar_clock->update(ostatni_czas,force,[](Desktop::Prostokat r,const uint32_t* pixels){
-        return gui_zastap_region(r.x,r.y,r.szerokosc,r.wysokosc,pixels);
+        if(pulpit_canvas) {
+            for(int y=0;y<r.wysokosc;++y)pulpit_canvas->rysuj_wiersz_ekranu(r.x,r.y+y,r.szerokosc,pixels+size_t(y)*r.szerokosc);
+            return true;
+        }
+        const BwsGuiRegion region{r.x,r.y,r.szerokosc,r.wysokosc,reinterpret_cast<uint64_t>(pixels)};
+        return gui_zastap_regiony(&region,1,desktop_geometry.generation);
     });
 }
-void RysujTaskbar() {
+void RysujTaskbarZawartosc() {
     const uint32_t tlo_paska = motyw_kolor(MOTYW_KOLOR_PANEL);
     const uint32_t ramka_paska = motyw_kolor(MOTYW_KOLOR_RAMKA);
     const uint32_t akcent = motyw_kolor(MOTYW_KOLOR_AKCENT);
     const uint32_t podniesiony = motyw_kolor(MOTYW_KOLOR_PODNIESIONY);
 
-    gui_rysuj_prostokat(0, screen_h - PASEK_WYS, poczatek_zegara(), PASEK_WYS, tlo_paska);
-    gui_rysuj_prostokat(0, screen_h - PASEK_WYS, poczatek_zegara(), 1, ramka_paska);
+    pulpit_prostokat(0, desktop_geometry.taskbar_y, poczatek_zegara(), PASEK_WYS, tlo_paska);
+    pulpit_prostokat(0, desktop_geometry.taskbar_y, poczatek_zegara(), 1, ramka_paska);
 
     RysujPrzyciskMenu();
     int task_x = TASK_BUTTON_X;
@@ -1560,18 +1574,18 @@ void RysujTaskbar() {
             (o.stan == GUI_OKNO_ZMINIMALIZOWANE ? podniesiony : motyw_kolor(MOTYW_KOLOR_PRZYCISK));
         const uint32_t kolor_tekst = o.aktywne ? motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU) : motyw_kolor(MOTYW_KOLOR_TEKST);
 
-        gui_rysuj_prostokat(task_x, screen_h - ui_skaluj(36,ui_skala_procent),
+        pulpit_prostokat(task_x, desktop_geometry.taskbar_y + ui_skaluj(4,ui_skala_procent),
                             TASK_BUTTON_W, SKROT_H, kolor);
         if (!o.aktywne) {
-            gui_rysuj_prostokat(task_x, screen_h - ui_skaluj(36,ui_skala_procent), TASK_BUTTON_W, 1, ramka_paska);
-            gui_rysuj_prostokat(task_x, screen_h - ui_skaluj(36,ui_skala_procent) + SKROT_H - 1, TASK_BUTTON_W, 1, ramka_paska);
-            gui_rysuj_prostokat(task_x, screen_h - ui_skaluj(36,ui_skala_procent), 1, SKROT_H, ramka_paska);
-            gui_rysuj_prostokat(task_x + TASK_BUTTON_W - 1, screen_h - ui_skaluj(36,ui_skala_procent), 1, SKROT_H, ramka_paska);
+            pulpit_prostokat(task_x, desktop_geometry.taskbar_y + ui_skaluj(4,ui_skala_procent), TASK_BUTTON_W, 1, ramka_paska);
+            pulpit_prostokat(task_x, desktop_geometry.taskbar_y + ui_skaluj(4,ui_skala_procent) + SKROT_H - 1, TASK_BUTTON_W, 1, ramka_paska);
+            pulpit_prostokat(task_x, desktop_geometry.taskbar_y + ui_skaluj(4,ui_skala_procent), 1, SKROT_H, ramka_paska);
+            pulpit_prostokat(task_x + TASK_BUTTON_W - 1, desktop_geometry.taskbar_y + ui_skaluj(4,ui_skala_procent), 1, SKROT_H, ramka_paska);
         }
         char podpis[15] = {};
         for (int c = 0; c < 14 && o.tytul[c] != '\0'; ++c)
             podpis[c] = o.tytul[c];
-        rysuj_tekst_wysrodkowany(task_x, screen_h - ui_skaluj(36,ui_skala_procent),
+        pulpit_tekst(task_x, desktop_geometry.taskbar_y + ui_skaluj(4,ui_skala_procent),
                                  TASK_BUTTON_W, SKROT_H, 1,
                                  kolor_tekst, podpis);
         task_x += TASK_BUTTON_W + TASK_BUTTON_GAP;
@@ -1579,6 +1593,20 @@ void RysujTaskbar() {
 
     if(!ostatni_czas[0])(void)pobierz_i_zaktualizuj_czas();
     (void)RysujZegar(true);
+}
+
+void RysujTaskbar() {
+    static DesktopSelectionPaint* paint=nullptr;
+    static BursztynUI::KontekstRysowania* ctx=nullptr;
+    if(!paint)paint=new DesktopSelectionPaint;
+    if(!ctx)ctx=new BursztynUI::KontekstRysowania({0,0,8192,8192});
+    if(!paint || !ctx)return;
+    paint->begin();
+    paint->add({desktop_geometry.taskbar_x,desktop_geometry.taskbar_y,
+        desktop_geometry.taskbar_width,desktop_geometry.taskbar_height},{0,0,screen_w,screen_h});
+    pulpit_canvas=ctx;
+    (void)paint->finish(*ctx,[](void*,Desktop::Prostokat){RysujTaskbarZawartosc();},nullptr,desktop_geometry.generation);
+    pulpit_canvas=nullptr;
 }
 
 void zarejestruj_pulpit_jako_cel_drop() {
@@ -1698,8 +1726,10 @@ void odrysuj_obszar_pulpitu(Desktop::Prostokat r) {
     for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].placed && Desktop::intersects(r,wizualny_wpis_pulpitu(i)))RysujWpisPulpitu(i);
 }
 void odrysuj_zaznaczenie_pulpitu() {
-    for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].placed && desktop_previous[i].selected!=desktop_layout.items[i].selected)
-        odrysuj_obszar_pulpitu(wizualny_wpis_pulpitu(i));
+    // Defined below the gesture state; selection changes share the same
+    // bounded off-screen replacement path as rubber-band movement.
+    extern bool odrysuj_rubber_pulpitu(Desktop::Prostokat,Desktop::Prostokat);
+    (void)odrysuj_rubber_pulpitu({},{});
 }
 void zapamietaj_zaznaczenie_pulpitu() {for(int i=0;i<desktop_layout.count;++i)desktop_previous[i]=desktop_layout.items[i];}
 
@@ -1744,6 +1774,30 @@ struct GestPulpitu {
     Desktop::Prostokat band;
 } desktop_gesture;
 static uint32_t desktop_modifiers=0;
+static DesktopSelectionPaint* desktop_selection_paint=nullptr;
+static BursztynUI::KontekstRysowania* desktop_selection_canvas=nullptr;
+static uint64_t desktop_selection_generation=0;
+bool odrysuj_rubber_pulpitu(Desktop::Prostokat old_band,Desktop::Prostokat new_band) {
+    if(!desktop_selection_paint)desktop_selection_paint=new DesktopSelectionPaint;
+    if(!desktop_selection_canvas)desktop_selection_canvas=new BursztynUI::KontekstRysowania({0,0,8192,8192});
+    if(!desktop_selection_paint || !desktop_selection_canvas)return false;
+    auto& paint=*desktop_selection_paint;paint.begin();
+    const Desktop::Prostokat work{0,0,screen_w,screen_h-PASEK_WYS};
+    const int t=ui_skaluj(1,ui_skala_procent);
+    paint.border(old_band,t,work);paint.border(new_band,t,work);
+    for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].placed &&
+        desktop_previous[i].selected!=desktop_layout.items[i].selected)
+        paint.add(wizualny_wpis_pulpitu(i),work);
+    pulpit_canvas=desktop_selection_canvas;
+    bool ok=paint.finish(*desktop_selection_canvas,[](void* data,Desktop::Prostokat r){
+        for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].placed &&
+            Desktop::intersects(r,wizualny_wpis_pulpitu(i)))RysujWpisPulpitu(i);
+        rysuj_ramke_pulpitu(*static_cast<Desktop::Prostokat*>(data),motyw_kolor(MOTYW_KOLOR_PULPIT_RAMKA));
+    },&new_band,desktop_geometry.generation);
+    pulpit_canvas=nullptr;
+    if(ok)++desktop_selection_generation;
+    return ok;
+}
 void odtworz_obrys(Desktop::Prostokat r) {
     int t=ui_skaluj(1,ui_skala_procent);
     odrysuj_obszar_pulpitu({r.x,r.y,r.szerokosc,t});
@@ -1758,7 +1812,7 @@ void obrysy_grupy(bool erase) {
     }
 }
 void anuluj_gest_pulpitu() {
-    if(desktop_gesture.dragging){if(desktop_gesture.rubber)odtworz_obrys(desktop_gesture.band);else obrysy_grupy(true);}
+    if(desktop_gesture.dragging){if(desktop_gesture.rubber)(void)odrysuj_rubber_pulpitu(desktop_gesture.band,{});else obrysy_grupy(true);}
     ustaw_hover_drop_pulpitu(-1);
     desktop_gesture=GestPulpitu{};gui_ustaw_capture_myszy(false);
 }
@@ -1797,25 +1851,29 @@ bool obsluz_gest_pulpitu(const bws_zdarzenie& e) {
         int target=g.rubber?-1:wpis_pulpitu_w_punkcie(e.x,e.y);
         if(!poprawny_cel_drop_pulpitu(target))target=-1;
         if(g.dragging && dx==g.dx && dy==g.dy && target==pulpit_hover_folder)return true;
-        if(target!=pulpit_hover_folder)ustaw_hover_drop_pulpitu(target);
-        if(g.dragging){if(g.rubber)odtworz_obrys(g.band);else obrysy_grupy(true);}
-        g.dragging=true;g.dx=dx;g.dy=dy;
         if(g.rubber) {
+            const auto old_band=g.dragging?g.band:Desktop::Prostokat{};
             int x=e.x<0?0:e.x>=screen_w?screen_w-1:e.x;
             int y=e.y<0?0:e.y>=screen_h-PASEK_WYS?screen_h-PASEK_WYS-1:e.y;
-            g.band={x<g.x?x:g.x,y<g.y?y:g.y,(x<g.x?g.x-x:x-g.x)+1,(y<g.y?g.y-y:y-g.y)+1};
+            const Desktop::Prostokat next{x<g.x?x:g.x,y<g.y?y:g.y,
+                (x<g.x?g.x-x:x-g.x)+1,(y<g.y?g.y-y:y-g.y)+1};
             zapamietaj_zaznaczenie_pulpitu();
             for(int i=0;i<desktop_layout.count;++i)desktop_layout.items[i].selected=
-                desktop_layout.items[i].placed && ((g.ctrl && g.base[i]) || Desktop::intersects(g.band,wizualny_wpis_pulpitu(i)));
-            odrysuj_zaznaczenie_pulpitu();rysuj_ramke_pulpitu(g.band,motyw_kolor(MOTYW_KOLOR_PULPIT_RAMKA));
-        } else {
-            desktop_layout.clamp_delta(dx,dy);g.dx=dx;g.dy=dy;obrysy_grupy(false);
+                desktop_layout.items[i].placed && ((g.ctrl && g.base[i]) || Desktop::intersects(next,wizualny_wpis_pulpitu(i)));
+            if(odrysuj_rubber_pulpitu(old_band,next)) {
+                g.dragging=true;g.dx=dx;g.dy=dy;g.band=next;gui_odswiez();
+            }else for(int i=0;i<desktop_layout.count;++i)
+                desktop_layout.items[i].selected=desktop_previous[i].selected;
+            return true;
         }
+        if(target!=pulpit_hover_folder)ustaw_hover_drop_pulpitu(target);
+        if(g.dragging)obrysy_grupy(true);
+        g.dragging=true;g.dx=dx;g.dy=dy;obrysy_grupy(false);
         gui_odswiez();return true;
     }
     if(e.typ==BWS_ZDARZENIE_MYSZ_UP && g.candidate) {
         bool layoutChanged=false;
-        if(g.dragging && g.rubber)odtworz_obrys(g.band);
+        if(g.dragging && g.rubber)(void)odrysuj_rubber_pulpitu(g.band,{});
         else if(g.dragging) {
             obrysy_grupy(true);
             int target=wpis_pulpitu_w_punkcie(e.x,e.y);
@@ -1996,7 +2054,9 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
 #endif
     if (wymus_pelne_odswiezenie) {
         // Dla procesu warstwowego BWS 19 zeruje prywatna warstwe.
-        gui_odswiez_pulpit();
+        // Keep the already committed taskbar intact until its complete new
+        // strip replaces it. Clearing the desktop must not erase that strip.
+        gui_rysuj_prostokat(0,0,screen_w,desktop_geometry.work_height,0);
         desktop_pending_dirty={};
     }
 
@@ -2375,6 +2435,10 @@ extern "C" __attribute__((noreturn)) void _start() {
 #endif
     GuiMonitorInfo mon{};if(gui_pobierz_monitor(0,&mon))ui_skala_procent=mon.scale_x1000/10;
     gui_pobierz_rozdzielczosc(&screen_w, &screen_h);
+    DisplayGeometry initial{};
+    if(gui_pobierz_geometrie_ekranu(&initial)) {
+        desktop_geometry=initial;screen_w=initial.width;screen_h=initial.height;ui_skala_procent=initial.scale;
+    }
     metryki_ekranu();
 #if BURSZTYNDIAGABSMAP
     wm_abs_geometry("startup");
@@ -2477,6 +2541,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             GuiMonitorInfo mon_now{};
             DisplayGeometry geometry{};
             if(gui_pobierz_geometrie_ekranu(&geometry) && geometry.width>0 && geometry.height>0) {
+                desktop_geometry=geometry;
                 screen_w=geometry.width;screen_h=geometry.height;ui_skala_procent=geometry.scale;
             }else if(gui_pobierz_monitor(0,&mon_now)&&mon_now.szer>0&&mon_now.wys>0){
                 if(ui_skala_poprawna(mon_now.scale_x1000/10))ui_skala_procent=mon_now.scale_x1000/10;

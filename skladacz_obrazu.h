@@ -25,6 +25,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include "display_geometry.h"
 
 #include "pzb.h"
 
@@ -163,7 +164,7 @@ struct GuiOknoInfo {
     char tytul[48];
 };
 
-inline constexpr uint32_t SKLADACZ_MAKS_DIRTY_RECT = 64;
+inline constexpr uint32_t SKLADACZ_MAKS_DIRTY_RECT = 256;
 
 /* =========================================================================
  * 4. KONTROLA ABI warstwa_obrazu
@@ -372,6 +373,7 @@ warstwa_obrazu* pobierz_warstwe(
 void skladacz_obrazu_zloz_klatke();
 void skladacz_obrazu_oznacz_dirty();
 void skladacz_obrazu_oznacz_dirty_rect(int x, int y, int width, int height);
+void skladacz_obrazu_oznacz_dirty_rect_dokladny(int x,int y,int width,int height);
 void skladacz_obrazu_oznacz_ruch_kursora(int old_x, int old_y,
                                          int new_x, int new_y);
 void skladacz_obrazu_oznacz_dirty_warstwy(int pid);
@@ -437,7 +439,7 @@ struct ZmianaWarstwyEkranu {
     bool zmiana_bufora;
 };
 struct ZmianaWarstwEkranu { ZmianaWarstwyEkranu warstwy[SKLADACZ_MAKS_WARSTW]; };
-bool skladacz_przygotuj_ekran(int sw,int sh,int work_h,ZmianaWarstwEkranu*);
+bool skladacz_przygotuj_ekran(const DisplayGeometry&,ZmianaWarstwEkranu*);
 void skladacz_zastosuj_ekran(ZmianaWarstwEkranu*);
 void skladacz_cofnij_ekran(ZmianaWarstwEkranu*);
 void skladacz_zakoncz_zmiane_ekranu(ZmianaWarstwEkranu*,bool zastosowana);

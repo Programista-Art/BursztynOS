@@ -2,6 +2,19 @@
 #include "../programy/ekran/ekran_okno.h"
 static void display_layout_probe(){
  {
+  struct SliderProbe:Suwak{size_t rect_offset(){return reinterpret_cast<char*>(&obszar_ekranu_)-reinterpret_cast<char*>(this);}};
+  SliderProbe probe;probe.ustaw_wartosc(65);
+  std::vector<unsigned char> before(sizeof(probe));memcpy(before.data(),&probe,sizeof(probe));
+  probe.ustaw_wartosc(66);size_t value_offset=0;
+  for(size_t i=0;i+4<=sizeof(probe);i+=4){int a,b;memcpy(&a,before.data()+i,4);memcpy(&b,reinterpret_cast<char*>(&probe)+i,4);if(a==65 && b==66)value_offset=i;}
+  CHECK(value_offset>0);
+  std::ofstream file(".bsf-test/gui-observer-layout.json");
+  file<<"{\"control_rect\":"<<probe.rect_offset()<<",\"slider_value\":"<<value_offset
+      <<",\"selected\":"<<offsetof(Desktop::Position,selected)
+      <<",\"gesture_dragging\":"<<offsetof(GestPulpitu,dragging)
+      <<",\"gesture_band\":"<<offsetof(GestPulpitu,band)<<"}\n";
+ }
+ {
   using L=decltype(desktop_layout);
   std::ofstream file(".bsf-test/display-observer-layout.json");
   file<<"{\"position_size\":"<<sizeof(Desktop::Position)<<",\"anchor_offset\":"<<offsetof(Desktop::Position,anchor)

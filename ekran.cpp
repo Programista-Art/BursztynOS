@@ -101,7 +101,9 @@ uint32_t zastosuj(const TrybEkranu&t,uint32_t s,int owner,bool persist=true,
             grafika_zwolnij_stan(&tx.nowy);return EKRAN_PAMIEC;
         }
     }
-    if (!skladacz_przygotuj_ekran(t.szerokosc, t.wysokosc, int(t.wysokosc) - ui_skaluj(40, s), &tx.warstwy)) {
+    uint32_t next_generation=generacja+1;if(!next_generation)++next_generation;
+    const auto next_geometry=display_geometry(t.szerokosc,t.wysokosc,s,next_generation);
+    if (!skladacz_przygotuj_ekran(next_geometry, &tx.warstwy)) {
         if (fizyczna) grafika_zwolnij_stan(&tx.nowy);
         return EKRAN_PAMIEC;
     }

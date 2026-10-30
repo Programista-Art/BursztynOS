@@ -10,6 +10,7 @@ tapety_tmp.o: programy/tapety/tapety.cpp programy/tapety/../../loader.h \
  programy/tapety/../../bursztyn_ui/../bws_pliki.h \
  programy/tapety/../../bursztyn_ui/../plik_status.h \
  programy/tapety/../../bursztyn_ui/../bws_api.h \
+ programy/tapety/../../bursztyn_ui/../bws_gui_batch.h \
  programy/tapety/../../bursztyn_ui/../bws_nowoczesne.h \
  programy/tapety/../../bursztyn_ui/../display_geometry.h \
  programy/tapety/../../bursztyn_ui/../bws_ota.h \
@@ -103,6 +104,7 @@ programy/tapety/../../bursztyn_ui/../bursztyn_gui.h:
 programy/tapety/../../bursztyn_ui/../bws_pliki.h:
 programy/tapety/../../bursztyn_ui/../plik_status.h:
 programy/tapety/../../bursztyn_ui/../bws_api.h:
+programy/tapety/../../bursztyn_ui/../bws_gui_batch.h:
 programy/tapety/../../bursztyn_ui/../bws_nowoczesne.h:
 programy/tapety/../../bursztyn_ui/../display_geometry.h:
 programy/tapety/../../bursztyn_ui/../bws_ota.h:

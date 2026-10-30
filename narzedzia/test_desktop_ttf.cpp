@@ -63,23 +63,43 @@ bool czytaj_plik(const char *path, char *out, uint32_t capacity) {
   return true;
 }
 void wypisz(const char *) {}
+bool gui_rejestruj_cele_drop(const BwsCelDrop*,uint32_t){return true;}
+bool przenies_twor_uzytkownika(const char*,const char*){return false;}
 bool ipc_send(uint64_t,const BwsIpcWyslij*){return false;}
 bool ipc_receive(uint64_t,BwsIpcOdbierz*){return false;}
 
 #define _start desktop_test_entry
-#include "../menedzer_okien.cpp"
+#ifndef BURSZTYN_DESKTOP_SOURCE
+#define BURSZTYN_DESKTOP_SOURCE "../menedzer_okien.cpp"
+#endif
+#include BURSZTYN_DESKTOP_SOURCE
 #undef _start
 #include "../programy/ustawienia/layout.h"
 int oblicz_szerokosc_tekstu(const char* text,int scale){return CzcionkaUI::zmierz_tekst(text,SkalaUI::procent(scale));}
 void gui_ustaw_przejecie_myszy(bool) {}
 void gui_ustaw_system_overlay(bool,int,int,int,int) {}
-void rysuj_tekst_wysrodkowany(int,int,int,int,int,uint32_t,const char*) {}
+void rysuj_tekst_wysrodkowany(int x,int y,int w,int h,int scale,uint32_t color,const char* text) {
+    auto* ctx=new KontekstRysowania({0,0,8192,8192});
+    ctx->rysuj_tekst_wysrodkowany({x,y,w,h},text,color,SkalaUI::procent(scale));delete ctx;
+}
 void gui_odswiez_pulpit() {}
 int bws_utworz_warstwe(int,int,int,int,int) {return 1;}
-bool gui_blit_alpha(int,int,int,int,const uint32_t*) {return true;}
+bool gui_blit_alpha(int x,int y,int w,int h,const uint32_t* pixels) {
+    if(!test_capture_pixels && !test_surface_width)return true;
+  for(int j=0;j<h;++j)for(int i=0;i<w;++i) {
+        uint32_t old=0;
+        if(test_capture_pixels)old=test_pixels[{x+i,y+j}];
+        if(x+i>=0 && y+j>=0 && x+i<test_surface_width && y+j<test_surface_height)
+            old=test_surface[size_t(y+j)*test_surface_width+x+i];
+        test_set_pixel(x+i,y+j,kolor_nad(old,pixels[j*w+i]));
+    }
+    return true;
+}
 static bool inside(Prostokat outer,Prostokat r){return r.x>=0&&r.y>=0&&r.prawy()<=outer.szerokosc&&r.dolny()<=outer.wysokosc;}
 #include "clock_support_cases.h"
 #include "desktop_display_cases.h"
+#include "desktop_rubber_pixels_cases.h"
+#include "slider_pixel_cases.h"
 int main(){
  saved.checksum=BSF::checksum(saved);g_test_bws_hook=hook;
  for(const char* name:{"DejaVuSans.ttf","DejaVuSans-Bold.ttf","DejaVuSansMono.ttf","DejaVuSerifCondensed-Italic.ttf"}){
@@ -87,7 +107,20 @@ int main(){
  }
  CHECK(BSF::ready());
  wpisy_pulpitu=new WpisPulpitu[PULPIT_MAX_WPISOW]{};
+#ifdef BURSZTYN_RUBBER_ONLY
+ desktop_rubber_pixels_cases();printf("Desktop rubber interleaving: %u checks PASS\n",checks);
+ return 0;
+#else
  desktop_display_cases();
+ desktop_rubber_pixels_cases();
+ if(getenv("BURSZTYN_RUBBER_PIXELS")){printf("Desktop rubber pixels: %u PASS\n",checks);return 0;}
+ std::vector<uint64_t> slider_signature;
+ for(int px:{12,16,20,24}) {
+  auto config=BSF::configuration();config.size=px;CHECK(BSF::apply(config));
+  auto signature=slider_pixel_cases();
+  if(!slider_signature.empty())CHECK(signature==slider_signature);
+  slider_signature=signature;
+ }
  StartMenu::Model model;
  for(auto pair:{std::pair<const char*,int>{"hus",4},{"usta",20},{"diag",16},{"kalk",3},{"xyz",-1},{"PRZEGLĄDARKA OBRAZÓW",5}}){model.filter(pair.first);CHECK(model.action()==pair.second);}
  uint32_t query[64]{};int qn=StartMenu::normalize("UST",query,64);
@@ -215,4 +248,5 @@ int main(){
  std::printf("System UI object sizes: page=%zu label=%zu panel=%zu; 31 labels, two panels, two scrollbars plus viewport\n",sizeof(SettingsUI::SystemPage),sizeof(Etykieta),sizeof(Panel));
  clock_support_cases();
  std::printf("Desktop TTF / Settings / Start: %u checks PASS\n",checks);
+#endif
 }

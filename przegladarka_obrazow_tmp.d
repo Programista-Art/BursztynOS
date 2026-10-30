@@ -5,6 +5,7 @@ przegladarka_obrazow_tmp.o: \
  programy/przegladarka-obrazow/../../bws_pliki.h \
  programy/przegladarka-obrazow/../../plik_status.h \
  programy/przegladarka-obrazow/../../bws_api.h \
+ programy/przegladarka-obrazow/../../bws_gui_batch.h \
  programy/przegladarka-obrazow/../../bws_nowoczesne.h \
  programy/przegladarka-obrazow/../../display_geometry.h \
  programy/przegladarka-obrazow/../../ui_skala.h \
@@ -19,6 +20,7 @@ programy/przegladarka-obrazow/../../bws_zdarzenia.h:
 programy/przegladarka-obrazow/../../bws_pliki.h:
 programy/przegladarka-obrazow/../../plik_status.h:
 programy/przegladarka-obrazow/../../bws_api.h:
+programy/przegladarka-obrazow/../../bws_gui_batch.h:
 programy/przegladarka-obrazow/../../bws_nowoczesne.h:
 programy/przegladarka-obrazow/../../display_geometry.h:
 programy/przegladarka-obrazow/../../ui_skala.h:

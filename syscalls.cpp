@@ -65,6 +65,7 @@
 #include "bws_zdarzenia.h"
 #include "bws_pliki.h"
 #include "bws_api.h"
+#include "bws_gui_batch.h"
 #include "bws_czcionka.h"
 #include "bws_nowoczesne.h"
 #include "bsf/asset_path.h"
@@ -193,6 +194,7 @@ bool bws_gui_blit(
 
 bool bws_gui_zastap_region(int,int,int,int,const uint32_t*);
 bool bws_gui_alpha_blit(int,int,int,int,const uint32_t*);
+bool bws_gui_zastap_regiony(const BwsGuiRegion*,uint32_t,uint32_t);
 
 extern "C" void SerialLog(
     const char* str
@@ -3927,6 +3929,29 @@ static uint64_t obsluga_wywolan_systemowych_impl(
 
         case 57: {
             if (!proces_ma_prawo(proces, PRAWO_GUI)) return 0;
+            if(arg4==4) {
+                if(arg2!=sizeof(BwsGuiBatch) || arg3)return 0;
+                BwsGuiBatch request{};
+                if(!skopiuj_z_przestrzeni_uzytkownika(&request,reinterpret_cast<const void*>(arg1),sizeof(request)) ||
+                   !request.count || request.count>BWS_GUI_BATCH_MAX)return 0;
+                // Bounded BSS scratch rather than a multi-KiB syscall stack
+                // frame. SYSCALL cannot switch processes; the screen lock also
+                // excludes composition while validation and replacement run.
+                BlokadaEkranu blokada;
+                static BwsGuiRegion regions[BWS_GUI_BATCH_MAX];
+                if(!skopiuj_z_przestrzeni_uzytkownika(regions,reinterpret_cast<const void*>(request.regions),
+                                                      request.count*sizeof(BwsGuiRegion)))return 0;
+                uint64_t total=0;
+                for(uint32_t i=0;i<request.count;++i) {
+                    const auto& r=regions[i];
+                    if(r.width<1 || r.height<1 || r.width>2048 || r.height>2048)return 0;
+                    uint64_t n=uint64_t(r.width)*r.height;total+=n;
+                    if(total>BWS_GUI_BATCH_PIXELS_MAX || !r.pixels ||
+                       !czy_bezpieczny_zakres_uzytkownika_do_odczytu(reinterpret_cast<const void*>(r.pixels),n*4) ||
+                       !bws_vmm_sprawdz_zakres_uzytkownika(reinterpret_cast<const void*>(r.pixels),n*4,false))return 0;
+                }
+                return bws_gui_zastap_regiony(regions,request.count,request.display_generation)?1:0;
+            }
             int x = gorne_i32(arg1);
             int y = dolne_i32(arg1);
             int szer = gorne_i32(arg2);

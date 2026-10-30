@@ -1,0 +1,50 @@
+
+gui-regressions-host.log
+BSF: 12201 checks PASS; cache=2097152 bitmap-live=108 hits=10464 misses=3684 evictions=3296 face=320 glyph=56 first-ns=14855203 hit-average-ns=4920
+Desktop geometry/capacity/persistence fuzz: 837103/837103 PASS (600 deterministic layouts)
+Desktop selection theme: 165/165 PASS
+Desktop settings/overflow production BWS/PZB: 209/209 PASS (RAM PSF)
+BSF UI/browser: 5876 checks PASS; proportional geometry, clipping/AA, Polish UTF-8, previews, persistence, font priority, cooperative paint and corrupt-font fallback
+WM decoration renderer: 3356387/3356387 PASS
+Compositor lifecycle/scene: 8677785/8677785 PASS
+Popup compositor background restoration: 73816/73816 PASS
+Production compositor host PASS: modeset dirty geometry, Shell-equivalent layer preserves cursor/screen/generation, coalescing and theme/decor/full scene transactions
+Cursor diagnostics host PASS: default fast frames silent; anomaly timestamps, dirty metrics and coalescing logged
+Cursor host PASS: clipping, union, 100-position coalescing, interleaved producer, clean background, scene/theme/decor redraw, final-only presents and no stale pixels
+BursztynUI polecenia: 23/23 testow udanych
+Desktop TTF / Settings / Start: 139002 checks PASS
+Wyniki: 25 zdanych, 0 oblanych
+WM routing 222/222 PASS: WM click routing passed: desktop, Start, launch, client PID, titlebar, close region, transparency, z-order, popup owner, theme and redraw
+Signed relative cursor regression: 396600 checks PASS
+InputDevice modes/readiness/API regression: 56 checks PASS
+Pointer boot order/barrier: 6 checks PASS
+User fault isolation policy: 32768 checks PASS (Ring 0, inactive PID, NMI/DF/MC remain fatal)
+Desktop production file actions: 87663/87663 PASS (RAM filesystem)
+Production keyboard / TEXTINPUT / dialogs: 7291/7291 PASS
+Wyniki: 1378 / 1379 testow udanych (99.9%)
+
+gui-app-regressions.log
+Husarz layout: 259225 checks PASS; bounded logical table grid, spans, sizing, alignment, borders, resize
+Husarz engine: 127432 checks PASS; malformed input, DOM/CSS/layout/paint/JS boundaries
+User fault isolation policy: 32768 checks PASS (Ring 0, inactive PID, NMI/DF/MC remain fatal)
+Explorer/desktop shared behavior: 15546/15546 PASS (RAM filesystem)
+Husarz selection/clipboard: 987380 checks PASS
+Husarz native runtime: 2259 checks PASS, 85 loading publications, 26 real HTTP parser requests
+
+gui-final-scene-host.log
+Compositor lifecycle/scene: 8677785/8677785 PASS
+Popup compositor background restoration: 73816/73816 PASS
+Production compositor host PASS: modeset dirty geometry, Shell-equivalent layer preserves cursor/screen/generation, coalescing and theme/decor/full scene transactions
+
+gui-final-pixels-host.log
+Display transaction / immediate physical edges: 304 checks PASS
+Desktop TTF / Settings / Start: 139003 checks PASS
+Wyniki: 1378 / 1379 testow udanych (99.9%)
+
+gui-release-build.log
+Slider creation / 100 repeats / 50-60-50 / themes: 1705 checks PASS
+BSF ISO: PASS, 7 font/license/source assets and Settings verified
+
+The earlier O1 controls run had one stale opaque-shadow assertion.
+Corrected assertion results: controls-asan-ubsan.log (1379/1379 PASS).
+Final production desktop tests: 139003 PASS.

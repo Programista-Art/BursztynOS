@@ -4,6 +4,7 @@ eksplorator_tmp.o: programy/eksplorator/eksplorator-plikow.cpp \
  programy/eksplorator/../../bws_pliki.h \
  programy/eksplorator/../../plik_status.h \
  programy/eksplorator/../../bws_api.h \
+ programy/eksplorator/../../bws_gui_batch.h \
  programy/eksplorator/../../bws_nowoczesne.h \
  programy/eksplorator/../../display_geometry.h \
  programy/eksplorator/../../ui_skala.h \
@@ -55,6 +56,7 @@ programy/eksplorator/../../bws_zdarzenia.h:
 programy/eksplorator/../../bws_pliki.h:
 programy/eksplorator/../../plik_status.h:
 programy/eksplorator/../../bws_api.h:
+programy/eksplorator/../../bws_gui_batch.h:
 programy/eksplorator/../../bws_nowoczesne.h:
 programy/eksplorator/../../display_geometry.h:
 programy/eksplorator/../../ui_skala.h:

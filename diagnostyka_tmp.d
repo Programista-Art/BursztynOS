@@ -4,6 +4,7 @@ diagnostyka_tmp.o: programy/diagnostyka/diagnostyka.cpp \
  programy/diagnostyka/../../bws_pliki.h \
  programy/diagnostyka/../../plik_status.h \
  programy/diagnostyka/../../bws_api.h \
+ programy/diagnostyka/../../bws_gui_batch.h \
  programy/diagnostyka/../../bws_nowoczesne.h \
  programy/diagnostyka/../../display_geometry.h \
  programy/diagnostyka/../../ui_skala.h \
@@ -95,6 +96,7 @@ programy/diagnostyka/../../bws_zdarzenia.h:
 programy/diagnostyka/../../bws_pliki.h:
 programy/diagnostyka/../../plik_status.h:
 programy/diagnostyka/../../bws_api.h:
+programy/diagnostyka/../../bws_gui_batch.h:
 programy/diagnostyka/../../bws_nowoczesne.h:
 programy/diagnostyka/../../display_geometry.h:
 programy/diagnostyka/../../ui_skala.h:

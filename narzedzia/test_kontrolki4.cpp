@@ -654,7 +654,7 @@ static void test_motywy_kolory_pulpit_i_kontrolki() {
 
     // 1. Kanoniczne kolory etykiety pulpitu sa stale i niezalezne od motywu
     TEST_ASSERT(KANONICZNY_KOLOR_ETYKIETY_PULPITU == 0x00FFFFFF, "Etykieta pulpitu jest czysto biala 0x00FFFFFF");
-    TEST_ASSERT(KANONICZNY_KOLOR_CIENIA_PULPITU == 0x00101010, "Cien etykiety pulpitu to 0x00101010");
+    TEST_ASSERT(KANONICZNY_KOLOR_CIENIA_PULPITU == 0x80101010, "Cien etykiety pulpitu zachowuje pojedyncza maske alfa 128/255");
 
     // 2. Weryfikacja wszystkich 5 oficjalnych motywow
     const char* const MOTYWY_ID[] = {

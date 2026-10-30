@@ -186,6 +186,15 @@ int main(){
     assert(presents==1&&recorded_count==1);
     assert(recorded_first.x==0&&recorded_first.y==0&&recorded_first.width==sw&&recorded_first.height==sh);
     mock_first_splash=false;PrezentacjaStartu::stan().pelna=false;
+    // A rubber-band outline is four thin strips, not its bounding box.
+    dirty_count=0;
+    skladacz_obrazu_oznacz_dirty_rect_dokladny(10,10,500,1);
+    skladacz_obrazu_oznacz_dirty_rect_dokladny(10,309,500,1);
+    skladacz_obrazu_oznacz_dirty_rect_dokladny(10,10,1,300);
+    skladacz_obrazu_oznacz_dirty_rect_dokladny(509,10,1,300);
+    assert(dirty_count==4);
+    uint64_t damaged=0;for(uint32_t i=0;i<dirty_count;++i)damaged+=rect_area(dirty_rects[i]);
+    assert(damaged==1600);
     // Repeated power quiesce drops bounded pending work and prevents new work.
     for(unsigned cycle=0;cycle<100;++cycle) {
         skladacz_obrazu_wznow();

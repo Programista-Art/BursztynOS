@@ -1088,6 +1088,11 @@ bool gui_zastap_region(int x,int y,int szer,int wys,const uint32_t* piksele) {
     return bws_wywolaj(57,spakuj_dwa_i32(legacy_x(x),legacy_y(y)),
         spakuj_dwa_i32(legacy_w(szer),legacy_h(wys)),reinterpret_cast<uint64_t>(piksele),2)==1;
 }
+bool gui_zastap_regiony(const BwsGuiRegion* regions,uint32_t count,uint32_t generation) {
+    if(!regions || !count || count>BWS_GUI_BATCH_MAX)return false;
+    const BwsGuiBatch batch{count,generation,reinterpret_cast<uint64_t>(regions)};
+    return bws_wywolaj(57,reinterpret_cast<uint64_t>(&batch),sizeof(batch),0,4)==1;
+}
 
 bool zmien_nazwe_uzytkownika(const char* sciezka, const char* nowa_nazwa) {
     return sciezka && nowa_nazwa &&

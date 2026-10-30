@@ -38,6 +38,7 @@ def main():
     parser.add_argument('--output', type=Path, default=ROOT / '.husarz-test/qemu')
     parser.add_argument('--system-windows-phase',choices=['full','core','late'],default='full')
     parser.add_argument('--system-windows-only',action='store_true',help='System identity, rounded corners and concurrent Settings apps')
+    parser.add_argument('--gui-regressions-only',action='store_true',help='Desktop rubber-band frames and native slider demo')
     parser.add_argument('--display-input',choices=['usb','virtio','ps2'],default='usb')
     parser.add_argument('--display-geometry-only',action='store_true',help='Immediate release display transaction and desktop round trips')
     parser.add_argument('--clock-support-only',action='store_true',help='Atomic clock frames and native Support/Refresh/font update acceptance')
@@ -498,6 +499,10 @@ def main():
                 r,g,b=im.getpixel((1118,37))
                 return not (r>150 and g<130 and b<130)
             wait(diagnostic_closed,'diagnostic closed through native titlebar',240,interval=1)
+            if args.gui_regressions_only:
+                from gui_regressions_qemu_cases import run
+                result.update(run(out,screenshot,click,move,key,wait,guest_ticks,launch_start,health,hmp,symbol,kernel_sha,iso_sha))
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
             if args.display_geometry_only:
                 from display_geometry_qemu_cases import run
                 result.update(run(out,screenshot,click,move,key,wait,guest_ticks,launch_start,health,hmp,symbol,kernel_sha,iso_sha,input_kind=args.display_input))

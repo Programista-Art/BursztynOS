@@ -43,6 +43,8 @@
  */
 
 #include "skladacz_obrazu.h"
+#include "desktop_modeset.h"
+#include "grafika.h"
 #include "gui_runtime_diag.h"
 #include "ekran.h"
 #include "wm_dekoracje.h"
@@ -1889,7 +1891,7 @@ void skladacz_obrazu_oznacz_dirty() {
     skladacz_obrazu_oznacz_dirty_rect(0,0,grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc());
 }
 
-void skladacz_obrazu_oznacz_dirty_rect(int x,int y,int width,int height){
+static void oznacz_dirty_rect(int x,int y,int width,int height,bool exact){
     if(skladacz_wyciszony)return;
     GuiDirtyRect r{x,y,width,height};const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
     if(!rect_clip(&r,sw,sh))return;
@@ -1904,7 +1906,13 @@ void skladacz_obrazu_oznacz_dirty_rect(int x,int y,int width,int height){
        rzeczywiscie oplacalny. Usuniecie przez swap nie pomija wpisu. */
     uint32_t i=0;
     while(i<dirty_count){
-        if(rect_merge_ok(dirty_rects[i],r)){
+        const auto& previous=dirty_rects[i];
+        const int ix0=previous.x>r.x?previous.x:r.x,iy0=previous.y>r.y?previous.y:r.y;
+        const int ix1=previous.x+previous.width<r.x+r.width?previous.x+previous.width:r.x+r.width;
+        const int iy1=previous.y+previous.height<r.y+r.height?previous.y+previous.height:r.y+r.height;
+        uint64_t overlap=ix1>ix0 && iy1>iy0?uint64_t(ix1-ix0)*(iy1-iy0):0;
+        const bool merge=exact?rect_area(rect_union(previous,r))==rect_area(previous)+rect_area(r)-overlap:rect_merge_ok(previous,r);
+        if(merge){
             r=rect_union(dirty_rects[i],r);
             dirty_rects[i]=dirty_rects[--dirty_count];
             i=0;
@@ -1914,6 +1922,8 @@ void skladacz_obrazu_oznacz_dirty_rect(int x,int y,int width,int height){
     else {GuiDirtyRect all=r;for(uint32_t k=0;k<dirty_count;++k)all=rect_union(all,dirty_rects[k]);dirty_rects[0]=all;dirty_count=1;}
     irq_restore(f);
 }
+void skladacz_obrazu_oznacz_dirty_rect(int x,int y,int w,int h){oznacz_dirty_rect(x,y,w,h,false);}
+void skladacz_obrazu_oznacz_dirty_rect_dokladny(int x,int y,int w,int h){oznacz_dirty_rect(x,y,w,h,true);}
 
 void skladacz_obrazu_oznacz_dirty_warstwy(int pid){warstwa_obrazu*w=pobierz_warstwe(pid);if(w)skladacz_obrazu_oznacz_dirty_rect(w->x,w->y,w->szerokosc,w->wysokosc);}
 
@@ -1964,6 +1974,10 @@ void skladacz_obrazu_obsluz_dirty() {
         return;
     }
 
+    // Own the reusable damage snapshot before consuming pending state. This
+    // keeps 256 sparse regions in BSS rather than on the 16 KiB kernel stack;
+    // a nested compositor call leaves all pending work for its owner.
+    GuardSkladania guard;if(!guard.aktywny())return;
     if(hpet_dostepny())nastepna_klatka_ns=now>UINT64_MAX-ODSTEP_KLATKI_NS?UINT64_MAX:now+ODSTEP_KLATKI_NS;
     /* Geometria jest konsumowana dopiero przez klatke, dzieki czemu wiele
        MOVE pomiedzy dwiema klatkami zastepuje poprzednia pozycje. */
@@ -1971,9 +1985,9 @@ void skladacz_obrazu_obsluz_dirty() {
     apply_pending_drag_overlay();
     bool drag_frame_work=false;
     f=irq_off();drag_frame_work=drag_frame_waiting;drag_frame_waiting=false;irq_restore(f);
-    GuiDirtyRect work[SKLADACZ_MAKS_DIRTY_RECT];uint32_t count=0;uint64_t generation_start;bool cursor_work=false;int cur_x=0,cur_y=0;
+    static GuiDirtyRect work[SKLADACZ_MAKS_DIRTY_RECT];uint32_t count=0;uint64_t generation_start;bool cursor_work=false;int cur_x=0,cur_y=0;
     f=irq_off();count=dirty_count;for(uint32_t i=0;i<count;++i)work[i]=dirty_rects[i];dirty_count=0;cursor_work=cursor_pending;cur_x=cursor_new_x;cur_y=cursor_new_y;cursor_pending=false;kursor_diag_consume(work,count);generation_start=dirty_generation;irq_restore(f);
-    GuardSkladania guard;if(!guard.aktywny()){for(uint32_t i=0;i<count;++i)skladacz_obrazu_oznacz_dirty_rect(work[i].x,work[i].y,work[i].width,work[i].height);if(cursor_work){f=irq_off();if(!cursor_pending){cursor_latest.retry(cur_x,cur_y);kursor_diag_retry();}irq_restore(f);}if(drag_frame_work){f=irq_off();drag_frame_waiting=true;irq_restore(f);}return;}
+
     const uint64_t start=hpet_dostepny()?czas_monotoniczny_us():0;LayerRenderInfo layers[MAKS_WARSTW];int layer_count=0;
     if(count)layer_count=snapshot_warstw(layers);
     int overlay_x=0,overlay_y=0,overlay_w=16,overlay_h=16;
@@ -2350,7 +2364,9 @@ void skladacz_stan_max(int pid,bool max){
     if(pid_poprawny(pid)&&stan_okna[pid]!=GUI_OKNO_ZMINIMALIZOWANE)
         stan_okna[pid]=max?GUI_OKNO_ZMAKSYMALIZOWANE:GUI_OKNO_NORMALNE;
 }
-bool skladacz_przygotuj_ekran(int sw,int sh,int work_h,ZmianaWarstwEkranu* z){
+bool skladacz_przygotuj_ekran(const DisplayGeometry& next,ZmianaWarstwEkranu* z){
+    const int sw=next.width,sh=next.height,work_h=next.work_height;
+    const auto previous=grafika_geometria_ekranu();
     if(!z||sw<=0||sh<=0||work_h<=0)return false;
     *z={};
     apply_pending_geometry(-1);
@@ -2372,8 +2388,9 @@ bool skladacz_przygotuj_ekran(int sw,int sh,int work_h,ZmianaWarstwEkranu* z){
         p.nowa.bufor_pikseli=static_cast<uint32_t*>(bufor_grafiki_alokuj(p.nowe_bajty));
         if(!p.nowa.bufor_pikseli){skladacz_zakoncz_zmiane_ekranu(z,false);return false;}
         for(int y=0;y<p.nowa.wysokosc;++y)for(int x=0;x<p.nowa.szerokosc;++x)
-            p.nowa.bufor_pikseli[size_t(y)*p.nowa.szerokosc+x]=x<w->szerokosc&&y<w->wysokosc?
-                w->bufor_pikseli[size_t(y)*w->szerokosc+x]:0;
+            p.nowa.bufor_pikseli[size_t(y)*p.nowa.szerokosc+x]=pulpit?
+                desktop_modeset_pixel(w->bufor_pikseli,w->szerokosc,w->wysokosc,previous,next,x,y):
+                (x<w->szerokosc&&y<w->wysokosc?w->bufor_pikseli[size_t(y)*w->szerokosc+x]:0);
     }
     return true;
 }

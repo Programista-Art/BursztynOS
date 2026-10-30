@@ -11,6 +11,7 @@ kontrolki2_tmp.o: programy/kontrolki2/kontrolki2.cpp \
  programy/kontrolki2/../../bursztyn_ui/../bws_pliki.h \
  programy/kontrolki2/../../bursztyn_ui/../plik_status.h \
  programy/kontrolki2/../../bursztyn_ui/../bws_api.h \
+ programy/kontrolki2/../../bursztyn_ui/../bws_gui_batch.h \
  programy/kontrolki2/../../bursztyn_ui/../bws_nowoczesne.h \
  programy/kontrolki2/../../bursztyn_ui/../display_geometry.h \
  programy/kontrolki2/../../bursztyn_ui/../bws_ota.h \
@@ -100,6 +101,7 @@ programy/kontrolki2/../../bursztyn_ui/../bursztyn_gui.h:
 programy/kontrolki2/../../bursztyn_ui/../bws_pliki.h:
 programy/kontrolki2/../../bursztyn_ui/../plik_status.h:
 programy/kontrolki2/../../bursztyn_ui/../bws_api.h:
+programy/kontrolki2/../../bursztyn_ui/../bws_gui_batch.h:
 programy/kontrolki2/../../bursztyn_ui/../bws_nowoczesne.h:
 programy/kontrolki2/../../bursztyn_ui/../display_geometry.h:
 programy/kontrolki2/../../bursztyn_ui/../bws_ota.h:

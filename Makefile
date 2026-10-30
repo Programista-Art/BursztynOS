@@ -2164,6 +2164,18 @@ test-desktop-ttf-host:
 	g++ -std=c++17 -fcoroutines -O0 -g0 -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_desktop_ttf.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/desktop-ttf-host
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/desktop-ttf-host
 
+.PHONY: test-slider-pixels-host
+test-slider-pixels-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-pie -no-pie -ffunction-sections -fdata-sections narzedzia/test_slider_pixels.cpp -Wl,--gc-sections -o .bsf-test/slider-pixels
+	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/slider-pixels
+
+.PHONY: test-desktop-rubber-host
+test-desktop-rubber-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -fcoroutines -O0 -g0 -DBURSZTYN_RUBBER_ONLY -fsanitize=address,undefined -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_desktop_ttf.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/rubber-interleave-final
+	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/rubber-interleave-final
+
 wsparcie_mecenasi_blob.o: dane/sponsorze/mecenasi.txt
 	$(LD) -r -b binary $< -o $@
 
@@ -2182,3 +2194,8 @@ test-display-snapshot-host:
 	@mkdir -p .wm-test
 	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_display_snapshot.cpp -Wl,--gc-sections -o .wm-test/display-snapshot
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) UBSAN_OPTIONS=halt_on_error=1 .wm-test/display-snapshot
+
+# Keep new retained-paint dependencies explicit for checkouts carrying older .d files.
+grafika.o syscalls.o bursztyn_gui_base.o bursztyn_gui_minimal.o menedzer_okien_tmp.o: bws_gui_batch.h
+skladacz_obrazu.o: desktop_modeset.h display_geometry.h
+menedzer_okien_tmp.o: desktop_selection_paint.h
