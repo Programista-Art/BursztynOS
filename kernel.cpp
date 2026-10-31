@@ -198,8 +198,6 @@ extern "C" uint8_t _binary_kontrolki4_bin_end[];
 extern "C" uint8_t _binary_aktualizacje_bin_start[];
 extern "C" uint8_t _binary_aktualizacje_bin_end[];
 
-extern "C" uint8_t _binary_motywy_bin_start[];
-extern "C" uint8_t _binary_motywy_bin_end[];
 extern "C" uint8_t _binary_diagnostyka_bin_start[],_binary_diagnostyka_bin_end[];
 extern "C" uint8_t _binary_test_dzwieku_bin_start[];
 extern "C" uint8_t _binary_test_dzwieku_bin_end[];
@@ -1039,7 +1037,7 @@ void instaluj_wbudowane_programy() {
         "wersja = \"1.0\"\n"
         "poziom_zaufania = 3\n"
         "plik_startowy = \"ustawienia.bur\"\n"
-        "uprawnienia = [\"okna\", \"pliki_czytaj\", \"pliki_zapisz\"]\n";
+        "uprawnienia = [\"okna\", \"pliki_czytaj\", \"pliki_zapisz\", \"system_config\"]\n";
     ModulMB2 settings_payload{};
     if(znajdz_modul_mb2(g_multiboot_info_ptr,"bsf-settings",&settings_payload)&&tekst_rowny(settings_payload.cmdline,"bsf-settings")&&settings_payload.rozmiar<=512*1024){
         (void)instaluj_paczke("/programy/ustawienia.cebula/opis.aplikacji",SETTINGS_MANIFEST,"/programy/ustawienia.cebula/ustawienia.bur",reinterpret_cast<const uint8_t*>(uintptr_t(settings_payload.start)),reinterpret_cast<const uint8_t*>(uintptr_t(settings_payload.koniec)));
@@ -1195,19 +1193,6 @@ void instaluj_wbudowane_programy() {
         "    \"pliki_zapisz\",\n"
         "    \"system_config\",\n"
         "    \"siec\"\n"
-        "]\n";
-
-    static const char MANIFEST_MOTYWY[] =
-        "nazwa = \"Motywy Systemowe\"\n"
-        "autor = \"Programista Art\"\n"
-        "wersja = \"1.0\"\n"
-        "poziom_zaufania = 3\n"
-        "plik_startowy = \"motywy.bur\"\n"
-        "uprawnienia = [\n"
-        "    \"okna\",\n"
-        "    \"pliki_czytaj\",\n"
-        "    \"pliki_zapisz\",\n"
-        "    \"system_config\"\n"
         "]\n";
 
     static const char MANIFEST_DIAGNOSTYKA[] =
@@ -1737,18 +1722,11 @@ void instaluj_wbudowane_programy() {
             "[BSP] Aktualizacje Systemu zainstalowane jako .cebula.");
     }
 
-    if (!instaluj_paczke(
-            "/programy/motywy.cebula/opis.aplikacji",
-            MANIFEST_MOTYWY,
-            "/programy/motywy.cebula/motywy.bur",
-            _binary_motywy_bin_start,
-            _binary_motywy_bin_end)) {
-        wypisz_log(
-            "[BSP-BLAD] Nie mozna zainstalowac Motywow Systemowych.");
-    } else {
-        wypisz_log(
-            "[BSP] Motywy Systemowe zainstalowane jako .cebula.");
-    }
+    // Remove only the retired system package's known payload and manifest.
+    // Existing theme definitions and motyw.cfg remain untouched on upgrades.
+    (void)usun_twor("/programy/motywy.cebula/motywy.bur");
+    (void)usun_twor("/programy/motywy.cebula/opis.aplikacji");
+    (void)usun_twor("/programy/motywy.cebula");
 
     if (!instaluj_paczke("/programy/diagnostyka.cebula/opis.aplikacji",MANIFEST_DIAGNOSTYKA,
             DIAG_APP_PATH,_binary_diagnostyka_bin_start,_binary_diagnostyka_bin_end))

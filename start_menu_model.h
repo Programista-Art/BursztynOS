@@ -8,7 +8,7 @@ inline constexpr App apps[]={
  {"Przeglądarka Obrazów","zdjęcia",5},{"Demo BursztynUI","",6},
  {"Kontrolki 2","",7},{"Kontrolki 3","",8},{"Kontrolki 4","",9},
  {"Testy systemu","",10},{"Tapety","",11},{"Ustawienia ekranu","monitor rozdzielczość",12},
- {"Aktualizacje Systemu","",13},{"Motywy Systemowe","wygląd",14},{"Test dźwięku","audio",15},
+ {"Aktualizacje Systemu","",13},{"Test dźwięku","audio",15},
  {"Diagnostyka systemu","",16},{"Snake","gry",21},{"Ustawienia","czcionki font",20}};
 constexpr int Count=sizeof(apps)/sizeof(apps[0]), QueryMax=64;
 inline uint32_t lower(uint32_t c) {

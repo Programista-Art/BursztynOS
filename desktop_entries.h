@@ -37,7 +37,6 @@ inline constexpr Launcher Launchers[]={
     {"Kontrolki 3","/programy/kontrolki3.cebula/kontrolki3.bur","Kontrolki 3",TypIkonyAplikacji::Kontrolki3,"kontrolki3"},
     {"Aktualizacje","/programy/aktualizacje.cebula/aktualizacje.bur","Aktualizacje Systemu",TypIkonyAplikacji::Aktualizacje,"aktualizacje"},
     {"Ustawienia","/programy/ustawienia.cebula/ustawienia.bur","Ustawienia",TypIkonyAplikacji::Motywy,"ustawienia"},
-    {"Motywy","/programy/motywy.cebula/motywy.bur","Motywy",TypIkonyAplikacji::Motywy,"motywy"},
     {"Kontrolki 4","/programy/kontrolki4.cebula/kontrolki4.bur","Kontrolki 4",TypIkonyAplikacji::Kontrolki4,"kontrolki4"},
     {"Test dźwięku","/programy/test_dzwieku.cebula/test_dzwieku.bur","Test dźwięku",TypIkonyAplikacji::TestDzwieku,"test-dzwieku"},
     {"Diagnostyka systemu","/programy/diagnostyka.cebula/diagnostyka.bur","Diagnostyka systemu",TypIkonyAplikacji::Diagnostyka,"diagnostyka-systemu"},

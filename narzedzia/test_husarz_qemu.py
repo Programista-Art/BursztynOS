@@ -38,6 +38,7 @@ def main():
     parser.add_argument('--output', type=Path, default=ROOT / '.husarz-test/qemu')
     parser.add_argument('--system-windows-phase',choices=['full','core','late'],default='full')
     parser.add_argument('--system-windows-only',action='store_true',help='System identity, rounded corners and concurrent Settings apps')
+    parser.add_argument('--settings-themes-power-only',action='store_true',help='Native Settings themes lifecycle and Start power popup')
     parser.add_argument('--gui-regressions-only',action='store_true',help='Desktop rubber-band frames and native slider demo')
     parser.add_argument('--display-input',choices=['usb','virtio','ps2'],default='usb')
     parser.add_argument('--display-geometry-only',action='store_true',help='Immediate release display transaction and desktop round trips')
@@ -382,12 +383,21 @@ def main():
                 for code in query:key(code)
                 key('ret')
 
+            def themes_hit(name):
+                geometry=json.loads((ROOT/'.bsf-test/support-layout-16.json').read_text())
+                r=geometry[name];click(105+r[0]+r[2]//2,128+r[1]+r[3]//2)
+
             def open_themes():
-                launch_start('motywy')
-                def themes_ready():
-                    r,g,b=screenshot('themes-opening-probe').getpixel((779,109))
-                    return r>150 and g<130 and b<130
-                wait(themes_ready,'first complete Themes frame',180,interval=1)
+                launch_start('ustawienia')
+                wait(lambda:red_close(screenshot('themes-opening-probe'),(1033,114)),
+                     'first complete Settings frame',180,interval=1)
+                geometry=json.loads((ROOT/'.bsf-test/support-layout-16.json').read_text())
+                r=geometry['nav'][2];click(105+r[0]+r[2]//2,128+r[1]+r[3]//2)
+
+            def select_theme(index):
+                r=json.loads((ROOT/'.bsf-test/support-layout-16.json').read_text())['themes_list']
+                click(105+r[0]+30,128+r[1]+5+index*25+12)
+                themes_hit('themes_apply')
 
             def navigate(name, settle=2,host="10.0.2.100"):
                 print('Navigate:', name, flush=True)
@@ -440,12 +450,11 @@ def main():
                 before_theme = screenshot('theme-before')
                 open_themes()
                 screenshot('themes-open')
-                click(210, 365)  # Bursztyn Jasny, fifth row in the native theme list.
-                click(330, 466)  # Apply, in the private Live session only.
+                select_theme(4)  # Native Settings, Bursztyn Jasny.
                 wait(lambda: min(screenshot('theme-probe').getpixel((110, 550))) > 160,
                      'light theme applied to the native window', 30)
                 screenshot('theme-applied')
-                click(784, 114)
+                click(1033, 114)
                 region = (frame['x']+10, frame['y']+30, frame['x']+frame['w']-20, frame['y']+45)
                 wait(lambda: before_theme.crop(region).tobytes() !=
                      screenshot('browser-theme-probe').crop(region).tobytes(),
@@ -461,9 +470,9 @@ def main():
                 move(1000,660); time.sleep(.3)
                 black_before=screenshot('black-theme-before')
                 open_themes()
-                click(210,262); click(330,466)
+                select_theme(0)
                 wait(lambda: max(screenshot('dark-theme-probe').getpixel((110,550)))<100,'dark desktop theme',30)
-                click(784,114); move(1000,660); time.sleep(1)
+                click(1033,114); move(1000,660); time.sleep(1)
                 black_after=screenshot('black-theme-after')
                 if page_hash(black_before)!=page_hash(black_after):
                     raise AssertionError('Black document pixels changed under dark desktop theme')
@@ -499,6 +508,10 @@ def main():
                 r,g,b=im.getpixel((1118,37))
                 return not (r>150 and g<130 and b<130)
             wait(diagnostic_closed,'diagnostic closed through native titlebar',240,interval=1)
+            if args.settings_themes_power_only:
+                from settings_themes_power_qemu_cases import run
+                result.update(run(out,screenshot,click,move,key,wait,guest_ticks,launch_start,health,hmp,symbol,kernel_sha,iso_sha))
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
             if args.gui_regressions_only:
                 from gui_regressions_qemu_cases import run
                 result.update(run(out,screenshot,click,move,key,wait,guest_ticks,launch_start,health,hmp,symbol,kernel_sha,iso_sha))
@@ -574,7 +587,7 @@ def main():
                 for target in ([] if args.desktop_grid_restore else ['mono','sans','mono','sans','mono']):
                     launch_start('ustawienia')
                     wait(lambda:red_close(screenshot('grid-settings-probe'),(1033,114)),'Settings first frame',180,interval=1)
-                    click(190,299) # Czcionki, third navigation item at 16 px.
+                    click(190,342) # Czcionki, fourth navigation item at 16 px.
                     old=config_values();click(500,settings_positions(19)[0]);key('end' if target=='mono' else 'home');key('ret')
                     click(320,settings_positions(19)[1])
                     wait(lambda:config_values()[2]!=old[2],'live family Apply '+target,120,interval=1)
@@ -627,7 +640,7 @@ def main():
                 click(1100,650)
                 launch_start('ustawienia')
                 wait(lambda:red_close(screenshot('settings-launch-probe'),(1033,114)),'Settings first frame',180,interval=1)
-                click(190,299) # Czcionki at default 16 px.
+                click(190,342) # Czcionki at default 16 px.
                 # Geometry follows the measured DejaVu line height used by this fixture.
                 for target,current,line in [(12,16,19),(16,12,14),(24,16,19)]:
                     before=config_values();control=max(30,line+12);field_y,_=settings_positions(line)
@@ -735,7 +748,7 @@ def main():
                     im=screenshot('settings-opening-probe')
                     return red_close(im,(1033,114))
                 wait(settings_ready,'Settings preview submitted',180,interval=1)
-                click(190,299) # Explicitly select Czcionki; System is now default.
+                click(190,342) # Explicitly select Czcionki; System is now default.
                 screenshot('settings-fonts')
                 config_address=symbol('bsf_config_request(proces*, unsigned long, unsigned long, unsigned long)::active')
                 def font_config():
@@ -1348,9 +1361,9 @@ def main():
                 wait(page_idle,'Stop cancels active script-driven mutation timer',90)
                 # Desktop theme changes must not recolor stable web content.
                 move(1000,660);before_theme=screenshot('js-theme-before');content_before=page_hash(before_theme)
-                open_themes();click(210,365);click(330,466)
+                open_themes();select_theme(4)
                 wait(lambda:min(screenshot('js-theme-probe').getpixel((110,550)))>160,'light desktop theme during JS milestone',30)
-                click(784,114);wait(lambda:page_hash(screenshot('js-theme-after'))==content_before,'web colors survive desktop theme change',30)
+                click(1033,114);wait(lambda:page_hash(screenshot('js-theme-after'))==content_before,'web colors survive desktop theme change',30)
                 # Replace a document before a retained timer fires.
                 navigate('js-cancel.html',settle=0)
                 navigate('js-basic.html');marker(green,'navigation cancels old script runtime')

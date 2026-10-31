@@ -154,7 +154,8 @@ gui_akcja_belki gui_hit_test_belki(int, int, int, int, int) { return GUI_BELKA_B
 void gui_rysuj_standardowa_belke(int, int, int, const char*, bool) {}
 bool gui_minimalizuj_okno() { return true; }
 __attribute__((noreturn)) void gui_zakoncz_aplikacje() { exit(0); }
-uint64_t gui_czas_monotoniczny_ns() { return 1000000000ULL; }
+static uint64_t test_monotonic_ns=1000000000ULL;
+uint64_t gui_czas_monotoniczny_ns() { return test_monotonic_ns; }
 bool gui_pobierz_zdarzenie(bws_zdarzenie*) { return false; }
 static void (*test_wait_observer)()=nullptr;
 bool gui_czekaj_na_zdarzenie(bws_zdarzenie*) { if(test_wait_observer)test_wait_observer();return false; }

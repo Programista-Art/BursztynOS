@@ -1,6 +1,7 @@
 #pragma once
 #include "../../bursztyn_ui/bursztyn_ui.h"
 #include "support_data.h"
+#include "content_metrics.h"
 namespace SettingsUI {
 using namespace BursztynUI;
 class SupportRows : public DostawcaDanychTabeli {
@@ -38,13 +39,13 @@ public:
  ~SupportPage()override{delete[] data;}
  void refresh(){if(data)for(auto* pane:panes)pane->refresh();}
  void rozmiesc(Prostokat r)override{
-  Panel::rozmiesc(r);auto s=skala_dpi_;int gap=12*s,line=CzcionkaUI::pobierz_wysokosc(s);
+  Panel::rozmiesc(r);auto s=skala_dpi_;int pad=ContentInset*s,w=r.szerokosc-2*pad,gap=12*s,line=CzcionkaUI::pobierz_wysokosc(s);
   int button=reload->zmierz({r.szerokosc,r.wysokosc}).wysokosc;if(button<line+12*s)button=line+12*s;
-  heading->rozmiesc({0,0,r.szerokosc,line});
-  int height=r.wysokosc-line-2*gap-button;if(height<0)height=0;
-  tabs->rozmiesc({0,line+gap,r.szerokosc,height});
+  heading->rozmiesc({pad,pad,w,line});
+  int height=r.wysokosc-2*pad-line-2*gap-button;if(height<0)height=0;
+  tabs->rozmiesc({pad,pad+line+gap,w,height});
   int width=CzcionkaUI::zmierz_tekst("Odśwież",s)+32*s;
-  reload->rozmiesc({0,line+2*gap+height,width,button});
+  reload->rozmiesc({pad,pad+line+2*gap+height,width,button});
  }
 };
 }

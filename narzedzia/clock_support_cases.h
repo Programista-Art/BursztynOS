@@ -31,10 +31,10 @@ static void clock_support_cases(){
  for(int px:{12,16,20,24})for(unsigned dpi:{100U,125U,150U,200U}){
   auto config=BSF::configuration();config.family=BSF::default_id();config.size=px;CHECK(BSF::apply(config));
   auto s=SkalaUI::procent(dpi);
-  SettingsUI::Body body;body.ustaw_skale_dpi(s);body.support->data[0]=categories[0];body.support->refresh();
+  SettingsUI::Body body;body.ustaw_skale_dpi(s);body.themes->description->ustaw_tekst(SettingsUI::theme_description("bursztynnocny"));body.support->data[0]=categories[0];body.support->refresh();
   for(int width:{800,950,1100}){
    body.rozmiesc({0,0,ui_skaluj(width,dpi),ui_skaluj(512,dpi)});auto* page=body.support;
-   CHECK(body.nav[0]->szerokosc()==body.nav[3]->szerokosc());CHECK(body.nav[3]->obszar().dolny()<=body.wysokosc());
+   CHECK(body.nav[0]->szerokosc()==body.nav[4]->szerokosc());CHECK(body.nav[4]->obszar().dolny()<=body.wysokosc());
    CHECK(page->heading->szerokosc()>=CzcionkaUI::zmierz_tekst("Wsparcie projektu Bursztyn OS",s));
    for(int i=0;i<3;++i){
     auto tab=page->tabs->prostokat_naglowka(i);CHECK(tab.x>=0);CHECK(tab.prawy()<=page->tabs->szerokosc());CHECK(tab.szerokosc>=CzcionkaUI::zmierz_tekst(Titles[i],s)+16*s);
@@ -45,8 +45,9 @@ static void clock_support_cases(){
    if(dpi==100 && (px==12 || px==16 || px==24) && width==950){
     std::ofstream f(std::string(".bsf-test/support-layout-")+std::to_string(px)+".json");
     auto rect=[&](Prostokat r){f<<"["<<r.x<<","<<r.y<<","<<r.szerokosc<<","<<r.wysokosc<<"]";};
-    f<<"{\"nav\":[";for(int i=0;i<4;++i){if(i)f<<",";rect(body.nav[i]->obszar_ekranu());}f<<"],\"tabs\":[";
+    f<<"{\"nav\":[";for(int i=0;i<5;++i){if(i)f<<",";rect(body.nav[i]->obszar_ekranu());}f<<"],\"tabs\":[";
     auto origin=page->tabs->obszar_ekranu();for(int i=0;i<3;++i){if(i)f<<",";auto r=page->tabs->prostokat_naglowka(i);r.x+=origin.x;r.y+=origin.y;rect(r);}f<<"],\"table\":";rect(page->panes[0]->table->obszar_ekranu());
+    f<<",\"themes_list\":";rect(body.themes->list->obszar_ekranu());f<<",\"themes_preview\":";rect(body.themes->preview->obszar_ekranu());f<<",\"themes_apply\":";rect(body.themes->apply->obszar_ekranu());f<<",\"themes_cancel\":";rect(body.themes->cancel->obszar_ekranu());f<<",\"themes_status\":";rect(body.themes->status->obszar_ekranu());f<<",\"themes_heading\":";rect(body.themes->heading->obszar_ekranu());f<<",\"themes_description\":";rect(body.themes->description->obszar_ekranu());
     f<<",\"refresh\":";rect(page->reload->obszar_ekranu());f<<",\"size\":";rect(body.fonts->size->obszar_ekranu());f<<",\"apply\":";rect(body.fonts->apply->obszar_ekranu());f<<"}";
    }
    CHECK(page->tabs->obszar().dolny()<page->reload->obszar().y);CHECK(page->reload->obszar().dolny()<=page->wysokosc());

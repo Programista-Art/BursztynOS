@@ -11,7 +11,9 @@
 #include "../menedzer_okien.cpp"
 #undef _start
 static std::string launched;
+struct PowerIntercept { uint64_t syscall; };
 static uint64_t launch_hook(uint64_t nr,uint64_t a,uint64_t,uint64_t,uint64_t) {
+    if(nr==25 || nr==26)throw PowerIntercept{nr};
     if(nr==10)launched=reinterpret_cast<const char*>(a);
     return 1;
 }
@@ -57,6 +59,20 @@ int main() {
         assert(!menu_start_otwarte);
         menu_click("shell");
         assert(launched==SCIEZKA_POWLOKA && !menu_start_otwarte);
+    }
+    // Exercise both popup activation and actual trusted WM dispatch. The BWS
+    // mock throws before a power syscall can reach any host hardware path.
+    for(int action:{19,18}) {
+        start_menu->open({0,0,1280,680},10);start_menu->open_power();
+        ZdarzenieKlawiatury power_key{};
+        if(action==18){power_key.kod_klawisza=0x48;start_menu->events.popups.obsluz_klawisz(power_key);}
+        power_key={};power_key.kod_klawisza=13;
+        assert(start_menu->events.popups.obsluz_klawisz(power_key));
+        assert(start_menu->take_action()==action);
+        bool intercepted=false;
+        try { obsluz_element_menu(action); }
+        catch(const PowerIntercept& call) { assert(call.syscall==(action==18?25U:26U));intercepted=true; }
+        assert(intercepted);
     }
     // Exact executable identity ignores localized/window-document titles.
     char path[128]{};strcpy(path,AppIdentity::DisplaySettings);

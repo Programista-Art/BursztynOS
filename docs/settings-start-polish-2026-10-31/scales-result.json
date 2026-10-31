@@ -1,0 +1,346 @@
+{
+  "result": "PASS",
+  "input_kind": "usb",
+  "desktop_anchor_validation": false,
+  "baseline": null,
+  "transitions": [
+    {
+      "committed": {
+        "width": 1920,
+        "height": 1080,
+        "scale": 125,
+        "generation": 2,
+        "work_area": [
+          0,
+          0,
+          1920,
+          1030
+        ],
+        "taskbar": [
+          0,
+          1030,
+          1920,
+          50
+        ],
+        "mouse_bounds": [
+          1919,
+          1079
+        ],
+        "desktop_generation": 0,
+        "cursor": [
+          385,
+          462
+        ]
+      },
+      "edges": [
+        [
+          0,
+          1079
+        ],
+        [
+          1919,
+          1079
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1919,
+          0
+        ],
+        [
+          960,
+          1079
+        ]
+      ],
+      "after_edges": {
+        "width": 1920,
+        "height": 1080,
+        "scale": 125,
+        "generation": 2,
+        "work_area": [
+          0,
+          0,
+          1920,
+          1030
+        ],
+        "taskbar": [
+          0,
+          1030,
+          1920,
+          50
+        ],
+        "mouse_bounds": [
+          1919,
+          1079
+        ],
+        "desktop_generation": 2,
+        "cursor": [
+          960,
+          1079
+        ]
+      },
+      "power_popup_bounds": [
+        13,
+        280,
+        428,
+        753
+      ]
+    },
+    {
+      "committed": {
+        "width": 1920,
+        "height": 1080,
+        "scale": 150,
+        "generation": 3,
+        "work_area": [
+          0,
+          0,
+          1920,
+          1020
+        ],
+        "taskbar": [
+          0,
+          1020,
+          1920,
+          60
+        ],
+        "mouse_bounds": [
+          1919,
+          1079
+        ],
+        "desktop_generation": 2,
+        "cursor": [
+          401,
+          529
+        ]
+      },
+      "edges": [
+        [
+          0,
+          1079
+        ],
+        [
+          1919,
+          1079
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1919,
+          0
+        ],
+        [
+          960,
+          1079
+        ]
+      ],
+      "after_edges": {
+        "width": 1920,
+        "height": 1080,
+        "scale": 150,
+        "generation": 3,
+        "work_area": [
+          0,
+          0,
+          1920,
+          1020
+        ],
+        "taskbar": [
+          0,
+          1020,
+          1920,
+          60
+        ],
+        "mouse_bounds": [
+          1919,
+          1079
+        ],
+        "desktop_generation": 3,
+        "cursor": [
+          960,
+          1079
+        ]
+      },
+      "power_popup_bounds": [
+        15,
+        120,
+        513,
+        903
+      ]
+    },
+    {
+      "committed": {
+        "width": 1920,
+        "height": 1080,
+        "scale": 200,
+        "generation": 4,
+        "work_area": [
+          0,
+          0,
+          1920,
+          1000
+        ],
+        "taskbar": [
+          0,
+          1000,
+          1920,
+          80
+        ],
+        "mouse_bounds": [
+          1919,
+          1079
+        ],
+        "desktop_generation": 3,
+        "cursor": [
+          418,
+          596
+        ]
+      },
+      "edges": [
+        [
+          0,
+          1079
+        ],
+        [
+          1919,
+          1079
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1919,
+          0
+        ],
+        [
+          960,
+          1079
+        ]
+      ],
+      "after_edges": {
+        "width": 1920,
+        "height": 1080,
+        "scale": 200,
+        "generation": 4,
+        "work_area": [
+          0,
+          0,
+          1920,
+          1000
+        ],
+        "taskbar": [
+          0,
+          1000,
+          1920,
+          80
+        ],
+        "mouse_bounds": [
+          1919,
+          1079
+        ],
+        "desktop_generation": 4,
+        "cursor": [
+          960,
+          1079
+        ]
+      },
+      "power_popup_bounds": [
+        20,
+        24,
+        684,
+        980
+      ]
+    },
+    {
+      "committed": {
+        "width": 1280,
+        "height": 720,
+        "scale": 100,
+        "generation": 5,
+        "work_area": [
+          0,
+          0,
+          1280,
+          680
+        ],
+        "taskbar": [
+          0,
+          680,
+          1280,
+          40
+        ],
+        "mouse_bounds": [
+          1279,
+          719
+        ],
+        "desktop_generation": 4,
+        "cursor": [
+          450,
+          719
+        ]
+      },
+      "edges": [
+        [
+          0,
+          719
+        ],
+        [
+          1279,
+          719
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1279,
+          0
+        ],
+        [
+          640,
+          719
+        ]
+      ],
+      "after_edges": {
+        "width": 1280,
+        "height": 720,
+        "scale": 100,
+        "generation": 5,
+        "work_area": [
+          0,
+          0,
+          1280,
+          680
+        ],
+        "taskbar": [
+          0,
+          680,
+          1280,
+          40
+        ],
+        "mouse_bounds": [
+          1279,
+          719
+        ],
+        "desktop_generation": 5,
+        "cursor": [
+          640,
+          719
+        ]
+      },
+      "power_popup_bounds": [
+        10,
+        80,
+        342,
+        602
+      ]
+    }
+  ],
+  "kernel_sha256": "0079c9c972228b1446bf28f1e0e75be71ce16aa37e67bfecec1555c4bc678c0c",
+  "iso_sha256": "a42ba48d8090a0ef4264a7356335e9df94f1dc875a2cb1b72298e6daade02ef1"
+}

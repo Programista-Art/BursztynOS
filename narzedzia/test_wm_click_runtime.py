@@ -135,18 +135,21 @@ def main():
         old_focus=focus();click(*exposed)
         check('Client click changes focus',old_focus!=shell['pid'] and focus()==shell['pid'])
         shot('06-shell-focused')
-        # Existing theme automation: Start entry 14, four Down, two Tab, Enter.
-        click(35,sh-20);click(100,582)
-        themes=window('Motywy');check('Theme window opened',themes is not None)
-        before_theme=theme()
-        for key in ['down','down','down','down','tab','tab','ret']:
+        # Themes are owned by native Settings; search avoids obsolete row indices.
+        click(35,sh-20)
+        for key in [*'ustawienia','ret']:
             command('human-monitor-command',{'command-line':'sendkey '+key+' 40'});time.sleep(0.2)
+        time.sleep(1)
+        themes=window('Ustawienia');check('Settings window opened',themes is not None)
+        before_theme=theme()
+        click(themes['x']+90,themes['y']+199) # Motywy
+        click(themes['x']+210,themes['y']+190) # Bursztyn Jasny
+        click(themes['x']+388,themes['y']+300) # Zastosuj
         time.sleep(1);healthy()
         check('Theme changed',theme()!=before_theme)
         shot('07-theme-changed')
-        # Close the themes window so original app chrome is unobscured.
         click(themes['x']+themes['w']-16,themes['y']+14)
-        check('Theme close button works',window('Motywy') is None)
+        check('Settings close button works',window('Ustawienia') is None)
         click(*exposed);check('Client clicks work after theme',focus()==shell['pid'])
         changed=shot('08-shell-theme')
         check('Shell chrome visibly updated',visible(shell,changed) and

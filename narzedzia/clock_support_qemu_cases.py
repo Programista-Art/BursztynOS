@@ -34,7 +34,7 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,config,kernel_sha
         wait(lambda:(lambda p:p[0]>150 and p[1]<130 and p[2]<130)(screenshot('support-opening-probe').getpixel((1033,114))),'Settings ready',240,interval=1)
         settle(250)
     def capture(px,label):
-        geometry=geo(px);hit(geometry['nav'][3]);settle()
+        geometry=geo(px);hit(geometry['nav'][4]);settle()
         result=[]
         for i,rect in enumerate(geometry['tabs']):
             hit(rect);move(1100,660);settle()
@@ -49,15 +49,29 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,config,kernel_sha
     hit(geo(16)['refresh']);settle(500)
     if capture(16,'refresh')!=before:raise AssertionError('Refresh changed category mapping')
     # Keep the same Support model while applying through the native Font page.
-    hit(geo(16)['nav'][2]);settle();hit(geo(16)['size']);key('end');key('ret');hit(geo(16)['apply'])
+    hit(geo(16)['nav'][3]);settle();hit(geo(16)['size']);key('end');key('ret');hit(geo(16)['apply'])
     wait(lambda:config()[3]==24,'Apply 24 px with Support model retained',180,interval=1);settle(750)
     large=capture(24,'live-font')
     hit(geo(24)['refresh']);settle(500)
     if capture(24,'large-refresh')!=large:raise AssertionError('Large-font Refresh changed data')
     click(1033,114);settle(250);open_settings()
     if capture(24,'reopen')!=large:raise AssertionError('Settings restart did not reload the same support files')
+    hit(geo(24)['nav'][2]);settle();screenshot('themes-native-24px')
+    hit(geo(24)['themes_preview']);settle(100)
+    def countdown_pixels(name):
+        x,y,w,h=geo(24)['themes_status']
+        return screenshot(name).crop((105+x,128+y,105+x+w,128+y+28))
+    first=countdown_pixels('countdown-native-24px-first')
+    if len(set(first.getdata()))<3:raise AssertionError('24 px countdown is not visible')
+    settle(550)
+    if first.tobytes()==countdown_pixels('countdown-native-24px-next').tobytes():
+        raise AssertionError('24 px countdown did not advance')
+    hit(geo(24)['themes_cancel']);settle()
+    click(28,700);settle(250);key('tab');key('spc');settle(250)
+    screenshot('power-popup-native-24px')
+    key('esc');settle(100);key('esc');settle(100)
     health()
-    return dict(result='PASS',mode='clock-support',clock_frames=len(samples),clock_distinct_times=len(hashes),clock_no_blank=True,
+    return dict(result='PASS',power_popup_font_size=24,visible_countdown_font_size=24,mode='clock-support',clock_frames=len(samples),clock_distinct_times=len(hashes),clock_no_blank=True,
                 clock_stable_neighbors=True,support_categories=3,support_refresh=True,support_reopen=True,font_sizes=[16,24],
                 category_sources=['/dane/sponsorze/mecenasi.txt','/dane/sponsorze/sponsorzy.txt','/dane/sponsorze/wkladtworczy.txt'],
                 kernel_sha256=kernel_sha,iso_sha256=iso_sha,no_guest_fault=True)

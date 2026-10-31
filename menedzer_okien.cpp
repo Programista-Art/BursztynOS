@@ -44,8 +44,8 @@ extern "C" {
     struct NaglowekBur naglowek = {
         {'B', 'U', 'R', '\0'},
         (uint64_t)&_start,
-        4096, 262144, 0x1001000,
-        266240, 131072, 0x1041000
+        4096, 278528, 0x1001000,
+        282624, 131072, 0x1045000
     };
 }
 
@@ -136,8 +136,6 @@ const char* const SCIEZKA_PRZEGLADARKA_OBRAZOW =
     "/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur";
 const char* const SCIEZKA_AKTUALIZACJE =
     "/programy/aktualizacje.cebula/aktualizacje.bur";
-const char* const SCIEZKA_MOTYWY =
-    "/programy/motywy.cebula/motywy.bur";
 const char* const SCIEZKA_TEST_DZWIEKU =
     "/programy/test_dzwieku.cebula/test_dzwieku.bur";
 const char* const SCIEZKA_PULPIT = DesktopEntries::Directory;
@@ -2330,9 +2328,6 @@ void obsluz_element_menu(int item_index) {
         case 13:
             uruchom_lub_aktywuj(SCIEZKA_AKTUALIZACJE, "Aktualizacje Systemu");
             break;
-        case 14:
-            uruchom_lub_aktywuj(SCIEZKA_MOTYWY, "Motywy");
-            break;
         case 15:
             uruchom_lub_aktywuj(SCIEZKA_TEST_DZWIEKU, "Test dźwięku");
             break;
@@ -2624,7 +2619,7 @@ extern "C" __attribute__((noreturn)) void _start() {
 
         if(obsluz_zmiane_plikow_pulpitu(zdarzenie))continue;
 
-        if(start_menu && start_menu->events.zdarzenie(zdarzenie)) {
+        if(start_menu && start_menu->handle(zdarzenie)) {
             const int action=start_menu->take_action();
             menu_start_otwarte=start_menu->czy_otwarta();
             if(action>=0){zamknij_menu_i_odtworz_pulpit();obsluz_element_menu(action);}

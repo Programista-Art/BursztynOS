@@ -43,16 +43,13 @@ narzedzia/aktualizacje/test_16k_bws84_irq.py
 .motywytest/
 .bursztyn-ui-test/
 narzedzia/test_motyw_host.cpp
-narzedzia/test_motywy_gui.py
 narzedzia/test_motywy_qemu.py
 narzedzia/aktualizacje/__pycache__/test_16k_bws84_irq.cpython-312.pyc
 narzedzia/test_kalkulator_gui.py
-narzedzia/test_motywy_screenshot.py
 narzedzia/test_notatnik_gui.py
 .kontrolki4-test/
 test16k_screenshot.png
 narzedzia/__pycache__/
-narzedzia/test_kontrolki4_qemu.py
 loop_log_1.txt
 loop_log_2.txt
 loop_test.sh

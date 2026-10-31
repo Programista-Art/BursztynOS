@@ -1,0 +1,25 @@
+{
+  "result": "PASS",
+  "power_popup_font_size": 24,
+  "visible_countdown_font_size": 24,
+  "mode": "clock-support",
+  "clock_frames": 100,
+  "clock_distinct_times": 10,
+  "clock_no_blank": true,
+  "clock_stable_neighbors": true,
+  "support_categories": 3,
+  "support_refresh": true,
+  "support_reopen": true,
+  "font_sizes": [
+    16,
+    24
+  ],
+  "category_sources": [
+    "/dane/sponsorze/mecenasi.txt",
+    "/dane/sponsorze/sponsorzy.txt",
+    "/dane/sponsorze/wkladtworczy.txt"
+  ],
+  "kernel_sha256": "0079c9c972228b1446bf28f1e0e75be71ce16aa37e67bfecec1555c4bc678c0c",
+  "iso_sha256": "a42ba48d8090a0ef4264a7356335e9df94f1dc875a2cb1b72298e6daade02ef1",
+  "no_guest_fault": true
+}

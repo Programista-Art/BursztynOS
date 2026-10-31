@@ -1,0 +1,35 @@
+{
+  "result": "PASS",
+  "mode": "settings-themes-power",
+  "themes": [
+    {
+      "id": "bursztynnocny",
+      "rollback": true
+    },
+    {
+      "id": "baltyckanoc",
+      "rollback": true
+    },
+    {
+      "id": "grafit",
+      "rollback": true
+    },
+    {
+      "id": "bursztynklasyczny",
+      "rollback": true
+    },
+    {
+      "id": "bursztynjasny",
+      "rollback": true
+    }
+  ],
+  "apply_cancels_rollback": true,
+  "visible_countdown": true,
+  "empty_search_top_row": true,
+  "settings_reopen": true,
+  "close_rollback": true,
+  "power_mouse_keyboard": true,
+  "unsupported_actions_disabled": true,
+  "kernel_sha256": "0079c9c972228b1446bf28f1e0e75be71ce16aa37e67bfecec1555c4bc678c0c",
+  "iso_sha256": "56d6e6a2d5f71e6541aa7baa2f08eca8637896afa9d51fa967652cf88d2d74d4"
+}

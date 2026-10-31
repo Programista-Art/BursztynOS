@@ -1,0 +1,12 @@
+{
+  "result": "PASS",
+  "theme_ids": [
+    "bursztynnocny",
+    "baltyckanoc",
+    "grafit",
+    "bursztynklasyczny",
+    "bursztynjasny"
+  ],
+  "start_and_popup": true,
+  "rollback": true
+}

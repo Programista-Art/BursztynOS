@@ -61,6 +61,10 @@ public:
         return c;
     }
     int tekst_x(SkalaUI s) const { Kolumny c=kolumny(s);return 1*s+8*s+c.znak+c.ikona; }
+    int wysokosc_wiersza(SkalaUI s) const {
+        int h=CzcionkaUI::pobierz_wysokosc(s)+8*s;
+        return h>24*s?h:24*s;
+    }
     Rozmiar wymagany_rozmiar(SkalaUI skala = 1) const {
         Kolumny c=kolumny(skala);
         int w=2*skala+16*skala+c.znak+c.ikona+c.tekst+c.strzalka;
@@ -69,7 +73,7 @@ public:
         if(!menu_) return Rozmiar(w,28*skala);
         for(size_t i=0;i<menu_->liczba_elementow();++i) {
             const ElementMenu* e=menu_->element(i);
-            if(e && e->czy_widoczny()) h+=e->czy_separator()?9*skala:24*skala;
+            if(e && e->czy_widoczny()) h+=e->czy_separator()?9*skala:wysokosc_wiersza(skala);
         }
         return Rozmiar(w,h);
     }
@@ -78,7 +82,7 @@ public:
         SkalaUI s = skala_dpi_; int y = 1 * s;
         for (int i = 0; i < static_cast<int>(menu_->liczba_elementow()); ++i) {
             const ElementMenu* e = menu_->element(i); if (!e || !e->czy_widoczny()) continue;
-            int h = e->czy_separator() ? 9 * s : 24 * s;
+            int h = e->czy_separator() ? 9 * s : wysokosc_wiersza(s);
             if (i == indeks) return Prostokat(s, y, obszar_.szerokosc - 2 * s, h);
             y += h;
         }

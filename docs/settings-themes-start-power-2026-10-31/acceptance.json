@@ -1,0 +1,19 @@
+{
+  "result": "PASS",
+  "kernel_sha256": "fd284af7605ccbc745b0d2416c37ccbc6c47419da1b53b710c8f71aae5f10d04",
+  "iso_sha256": "bfa89ff23d59f0b85756fcf63293ad5192c1a4f1a4f54d0b3c97575348488a24",
+  "themes": 5,
+  "theme_and_power_input": true,
+  "palette_rollback_checks": true,
+  "display_transitions": 13,
+  "observed_display_frames": 26,
+  "icon_anchors": 19,
+  "clock_frames": 100,
+  "support_reopen": true,
+  "native_font_sizes": [
+    16,
+    24
+  ],
+  "power_popup_native_24px": true,
+  "unexpected_guest_faults": 0
+}

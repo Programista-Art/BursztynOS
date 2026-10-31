@@ -77,7 +77,8 @@ enum MotywPolecenie : uint32_t {
     MOTYW_CMD_PODGLAD = 2,
     MOTYW_CMD_ZATWIERDZ = 3,
     MOTYW_CMD_PRZYWROC = 4,
-    MOTYW_CMD_LISTUJ = 5
+    MOTYW_CMD_LISTUJ = 5,
+    MOTYW_CMD_OPIS = 6 // arg1: bounded ID, arg2: BursztynMotyw output; read-only
 };
 
 // Struktura ABI v1 (dla kompatybilności wstecznej odczytu BWS 86)

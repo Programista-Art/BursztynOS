@@ -80,7 +80,7 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
                 return sum(1 for r,g,b in area.getdata() if min(r,g,b)>120 and max(r,g,b)-min(r,g,b)<40)>30
             wait(system_visible,'System page content visible',180,interval=1)
     def apply_size(old,new):
-        page(2,old);hit(geo(old)['size']);idle('Ustawienia')
+        page(3,old);hit(geo(old)['size']);idle('Ustawienia')
         w=win('Ustawienia');rect=geo(old)['size'];line={12:14,16:19,24:28}[old];row=max(22,line+6)
         click(w['x']+rect[0]+rect[2]//2,w['y']+28+rect[1]+rect[3]+6+{12:0,16:2,24:5}[new]*row+row//2)
         idle('Ustawienia');hit(geo(old)['apply']);wait(lambda:config()[3]==new,'live font Apply '+str(new),180)

@@ -1,7 +1,9 @@
 #pragma once
 #include "../../bursztyn_ui/bursztyn_ui.h"
+#include "content_metrics.h"
 #include "support_ui.h"
 #include "system_ui.h"
+#include "themes_ui.h"
 namespace SettingsUI {
 using namespace BursztynUI;
 constexpr int Padding=14,Gap=12,SmallGap=4;
@@ -23,22 +25,22 @@ public:
  }
  void rozmiesc(Prostokat r)override{
   Panel::rozmiesc(r);auto s=skala_dpi_;int gap=Gap*s,small=SmallGap*s;
-  int line=CzcionkaUI::pobierz_wysokosc(s),w=r.szerokosc;
+  int inset=ContentInset*s,line=CzcionkaUI::pobierz_wysokosc(s),w=r.szerokosc-2*inset;
   int control=families->oblicz_naturalny_rozmiar().wysokosc;
   int button=apply->zmierz({w,r.wysokosc}).wysokosc;if(button<line+12*s)button=line+12*s;
   int size_width=CzcionkaUI::zmierz_tekst("24 px",s)+56*s;if(size_width<100*s)size_width=100*s;
   if(size_width>w/3)size_width=w/3;
   int family_width=w-gap-size_width;
-  heading->rozmiesc({0,0,w,line});int y=line+gap;
-  family_label->rozmiesc({0,y,family_width,line});size_label->rozmiesc({family_width+gap,y,size_width,line});y+=line+small;
-  families->rozmiesc({0,y,family_width,control});size->rozmiesc({family_width+gap,y,size_width,control});y+=control+gap;
+  heading->rozmiesc({inset,inset,w,line});int y=inset+line+gap;
+  family_label->rozmiesc({inset,y,family_width,line});size_label->rozmiesc({inset+family_width+gap,y,size_width,line});y+=line+small;
+  families->rozmiesc({inset,y,family_width,control});size->rozmiesc({inset+family_width+gap,y,size_width,control});y+=control+gap;
   int preview_line=BSF::height(ui_skaluj(24,s.procent()));
   if(preview_line<1)preview_line=28*s;
   int preview_h=7*(preview_line+2*s)+28*s;
-  int available=r.wysokosc-y-button-3*gap-2*line-small;
+  int available=r.wysokosc-inset-y-button-3*gap-2*line-small;
   if(preview_h>available)preview_h=available;
   if(preview_h<0)preview_h=0;
-  preview_view->rozmiesc({0,y,w,preview_h});
+  preview_view->rozmiesc({inset,y,w,preview_h});
   const int sizes[]={12,14,16,18,20,24};int index=size->wybrany_indeks();if(index<0||index>5)index=2;
   int sample_line=BSF::height(ui_skaluj(sizes[index],s.procent()),families->wybrany_tekst());
   if(sample_line<1)sample_line=line;
@@ -48,18 +50,18 @@ public:
   int first=CzcionkaUI::zmierz_tekst("Zastosuj",s)+32*s;
   int second=CzcionkaUI::zmierz_tekst("Przywróć domyślne",s)+32*s;
   if(first+second+gap>w){first=(w-gap)/2;second=w-gap-first;}
-  apply->rozmiesc({0,y,first,button});reset->rozmiesc({first+gap,y,second,button});y+=button+gap;
-  status->rozmiesc({0,y,w,line});help->rozmiesc({0,y+line+small,w,line});
+  apply->rozmiesc({inset,y,first,button});reset->rozmiesc({inset+first+gap,y,second,button});y+=button+gap;
+  status->rozmiesc({inset,y,w,line});help->rozmiesc({inset,y+line+small,w,line});
  }
 };
 class Body : public Panel {
 public:
- Etykieta* title;Przycisk* nav[4]{};FontPage* fonts;SupportPage* support;SystemPage* system;Panel* placeholder;Etykieta* placeholder_text;
+ Etykieta* title;Przycisk* nav[5]{};ThemesPage* themes;ThemesViewport* themes_view;FontPage* fonts;SupportPage* support;SystemPage* system;Panel* placeholder;Etykieta* placeholder_text;
  Body(){
   ustaw_uklad_automatyczny(false);ustaw_wypelnienie({0,0,0,0});
   title=&dodaj<Etykieta>("Ustawienia");title->ustaw_wypelnienie({0,0,0,0});
-  const char* names[]={"System","Wygląd","Czcionki","Wsparcie"};for(int i=0;i<4;++i)nav[i]=&dodaj<Przycisk>(names[i]);
-  system=&dodaj<SystemPage>();fonts=&dodaj<FontPage>();fonts->ustaw_widoczna(false);support=&dodaj<SupportPage>();support->ustaw_widoczna(false);placeholder=&dodaj<Panel>();placeholder->ustaw_widoczna(false);placeholder_text=&placeholder->dodaj<Etykieta>("");
+  const char* names[]={"System","Wygląd","Motywy","Czcionki","Wsparcie"};for(int i=0;i<5;++i)nav[i]=&dodaj<Przycisk>(names[i]);
+  themes_view=&dodaj<ThemesViewport>();themes=themes_view->page;themes_view->ustaw_widoczna(false);system=&dodaj<SystemPage>();fonts=&dodaj<FontPage>();fonts->ustaw_widoczna(false);support=&dodaj<SupportPage>();support->ustaw_widoczna(false);placeholder=&dodaj<Panel>();placeholder->ustaw_widoczna(false);placeholder->ustaw_wypelnienie({ContentInset,ContentInset,ContentInset,ContentInset});placeholder_text=&placeholder->dodaj<Etykieta>("");placeholder_text->ustaw_wypelnienie({0,0,0,0});
   ustaw_minimalny_rozmiar({800,480});
  }
  void rozmiesc(Prostokat r)override{
@@ -67,9 +69,9 @@ public:
   int nav_width=CzcionkaUI::zmierz_tekst("Ustawienia",s)+32*s;if(nav_width<150*s)nav_width=150*s;
   int button=nav[0]->zmierz({nav_width,r.wysokosc}).wysokosc;if(button<line+12*s)button=line+12*s;
   title->rozmiesc({pad,pad,nav_width,line});
-  for(int i=0;i<4;++i)nav[i]->rozmiesc({pad,pad+line+gap+i*(button+gap),nav_width,button});
+  for(int i=0;i<5;++i)nav[i]->rozmiesc({pad,pad+line+gap+i*(button+gap),nav_width,button});
   int x=pad+nav_width+gap,w=r.szerokosc-x-pad,h=r.wysokosc-2*pad;if(w<0)w=0;if(h<0)h=0;
-  system->rozmiesc({x,pad,w,h});fonts->rozmiesc({x,pad,w,h});support->rozmiesc({x,pad,w,h});placeholder->rozmiesc({x,pad,w,h});
+  themes_view->rozmiesc({x,pad,w,h});system->rozmiesc({x,pad,w,h});fonts->rozmiesc({x,pad,w,h});support->rozmiesc({x,pad,w,h});placeholder->rozmiesc({x,pad,w,h});
  }
 };
 // Below the measured minimum, preserve usable controls in a scrollable client.

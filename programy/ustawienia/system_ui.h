@@ -1,6 +1,7 @@
 #pragma once
 #include "../../bursztyn_ui/bursztyn_ui.h"
 #include "../../system_identity.h"
+#include "content_metrics.h"
 namespace SettingsUI {
 using namespace BursztynUI;
 class SystemPage : public WidokPrzewijany {
@@ -27,7 +28,7 @@ public:
     void zaktualizuj_motyw()override{WidokPrzewijany::zaktualizuj_motyw();ustaw_grubosc_ramki(0);}
     void rozmiesc(Prostokat r)override{
         WidokPrzewijany::rozmiesc(r);auto s=skala_dpi_;
-        int line=CzcionkaUI::pobierz_wysokosc(s),gap=12*s,w=r.szerokosc-18*s;
+        int line=CzcionkaUI::pobierz_wysokosc(s),gap=12*s,pad=ContentInset*s,w=r.szerokosc-18*s-2*pad;
         if(w<1)w=1;
         int label_width=0;
         for(const auto& p:SystemIdentity::Properties){int width=CzcionkaUI::zmierz_tekst(p.label,s);if(width>label_width)label_width=width;}
@@ -43,7 +44,7 @@ public:
             values[i]->rozmiesc({value_x,y+(stacked?lh:0),value_w,vh});
             y+=(stacked?lh+vh:(lh>vh?lh:vh))+6*s;
         }
-        content->rozmiesc({0,0,w,y+gap});ustaw_rozmiar_zawartosci({w,y+gap});
+        content->rozmiesc({pad,pad,w,y+gap});ustaw_rozmiar_zawartosci({w+2*pad,y+gap+2*pad});
     }
 };
 }

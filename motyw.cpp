@@ -656,7 +656,6 @@ const BursztynMotyw* motyw_pobierz_aktywny(void) {
 
 bool motyw_ustaw_aktywny(const BursztynMotyw* m, bool trwaly) {
     if (!m || !motyw_waliduj(m)) return false;
-    g_aktywny_motyw = *m;
     if (trwaly) {
 #ifndef BURSZTYN_HOST_TEST
         zapewnij_katalog("/system");
@@ -672,10 +671,11 @@ bool motyw_ustaw_aktywny(const BursztynMotyw* m, bool trwaly) {
             ++l;
         }
         (void)utworz_plik(MOTYW_SCIEZKA_KONFIG);
-        (void)zapisz_do_pliku(MOTYW_SCIEZKA_KONFIG, linia, static_cast<uint32_t>(l));
-        (void)psf_flush_cache();
+        if (!zapisz_do_pliku(MOTYW_SCIEZKA_KONFIG, linia, static_cast<uint32_t>(l)) ||
+            !psf_flush_cache()) return false;
 #endif
     }
+    g_aktywny_motyw = *m;
     motyw_rozglos_zmiane();
     return true;
 }
@@ -808,13 +808,14 @@ bool motyw_zatwierdz_podglad_token(int pid, uint64_t token) {
     if (pid > 0 && g_podglad_pid != 0 && g_podglad_pid != pid) return false;
     if (token != 0 && token != g_podglad_token) return false;
 
+    if (!motyw_ustaw_aktywny(&g_aktywny_motyw, true)) return false;
     g_podglad_aktywny = false;
     g_podglad_pid = 0;
     g_podglad_token = 0;
     g_podglad_deadline_ms = 0;
 
     // Zapisz na stałe
-    return motyw_ustaw_aktywny(&g_aktywny_motyw, true);
+    return true;
 }
 
 bool motyw_zatwierdz_podglad(int pid) {
@@ -1090,6 +1091,26 @@ uint64_t motyw_bws_polecenie(const proces_t* proces, uint32_t polecenie, uint64_
             if (proces->pid > 0 && g_podglad_pid != 0 && static_cast<uint64_t>(g_podglad_pid) != proces->pid) return 0;
             if (arg1 != 0 && arg1 != g_podglad_token) return 0;
             return motyw_przywroc_podglad_token(static_cast<int>(proces->pid), arg1) ? 1 : 0;
+        }
+
+        case MOTYW_CMD_OPIS: {
+            if (!arg1 || !arg2) return 0;
+            char id[MOTYW_MAX_DLUGOSC_ID]{};
+            BursztynMotyw m{};
+#ifndef BURSZTYN_HOST_TEST
+            if (!czy_bezpieczny_zakres_uzytkownika_do_odczytu(reinterpret_cast<const void*>(arg1), sizeof(id)) ||
+                !czy_bezpieczny_zakres_uzytkownika_do_zapisu(reinterpret_cast<void*>(arg2), sizeof(m))) return 0;
+            if (!skopiuj_z_przestrzeni_uzytkownika(id, reinterpret_cast<const void*>(arg1), sizeof(id))) return 0;
+#else
+            __builtin_memcpy(id, reinterpret_cast<const void*>(arg1), sizeof(id));
+#endif
+            if (id[sizeof(id)-1] || !motyw_waliduj_id(id) || !motyw_zaladuj_z_pliku(id, &m)) return 0;
+#ifndef BURSZTYN_HOST_TEST
+            return skopiuj_do_przestrzeni_uzytkownika(reinterpret_cast<void*>(arg2), &m, sizeof(m)) ? 1 : 0;
+#else
+            *reinterpret_cast<BursztynMotyw*>(arg2) = m;
+            return 1;
+#endif
         }
 
         case MOTYW_CMD_LISTUJ: {

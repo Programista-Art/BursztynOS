@@ -52,7 +52,7 @@ class WindowsLauncherConfig(unittest.TestCase):
         self.assertIn('-audiodev alsa,id=snd',self.makefile)
         self.assertIn('"-boot", "order=d,menu=on"',code)
     def test_linux_canonical_and_print_only_policy(self):
-        self.assertRegex(self.makefile,r'(?m)^QEMUDISPLAYARGS\s*\?=\s*-display sdl$')
+        self.assertRegex(self.makefile,r'(?m)^QEMUDISPLAYARGS\s*\?=\s*\$\(if \$\(strip \$\(QEMU_DISPLAY_ARGS\)\),\$\(QEMU_DISPLAY_ARGS\),-display sdl\)$')
         common=self.makefile.split('QEMU_VIRTIO_COMMON_ARGS :=',1)[1].split('\n\n',1)[0]
         for name in ('virtio-keyboard-pci','virtio-mouse-pci','rng-builtin'):self.assertIn(name,common)
         self.assertNotIn('virtio-tablet-pci',common)

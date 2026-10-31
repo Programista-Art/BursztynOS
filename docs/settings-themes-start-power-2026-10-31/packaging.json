@@ -1,0 +1,9 @@
+{
+  "result": "PASS",
+  "retired_payload_symbols": false,
+  "duplicate_desktop_launcher": false,
+  "duplicate_start_launcher": false,
+  "theme_config_path": "/system/konfig/motyw.cfg",
+  "theme_abi": 2,
+  "metadata_read_command": 6
+}

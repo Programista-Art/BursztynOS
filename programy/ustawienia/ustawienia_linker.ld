@@ -1,5 +1,5 @@
 /*
- * Bursztyn OS - linker dla aplikacji Motywy Systemowe (motywy.bur)
+ * Bursztyn OS - linker dla aplikacji Ustawienia (ustawienia.bur)
  *
  * Parametry segmentow:
  *   NAGLOWEK: offset 0x0000, rozmiar 0x1000,   VA 0x1000000
@@ -128,28 +128,28 @@ SECTIONS
         *(.gnu.lto_*)
     }
 
-    ASSERT(DEFINED(_start), "MOTYWY BUR: brak _start")
-    ASSERT(DEFINED(naglowek), "MOTYWY BUR: brak naglowka")
+    ASSERT(DEFINED(_start), "USTAWIENIA BUR: brak _start")
+    ASSERT(DEFINED(naglowek), "USTAWIENIA BUR: brak naglowka")
     ASSERT(__bur_header_payload_end <= BUR_HEADER_VADDR + BUR_HEADER_SIZE,
-           "MOTYWY BUR: naglowek przekroczyl 4 KiB")
+           "USTAWIENIA BUR: naglowek przekroczyl 4 KiB")
     ASSERT(SIZEOF(.naglowek) == BUR_HEADER_SIZE,
-           "MOTYWY BUR: nieprawidlowy obszar naglowka")
+           "USTAWIENIA BUR: nieprawidlowy obszar naglowka")
     ASSERT(__bur_text_used_end <= BUR_TEXT_END,
-           "MOTYWY BUR: TEXT przekroczyl 192 KiB")
+           "USTAWIENIA BUR: TEXT przekroczyl 192 KiB")
     ASSERT(SIZEOF(.text) == BUR_TEXT_SIZE,
-           "MOTYWY BUR: nieprawidlowy TEXT")
+           "USTAWIENIA BUR: nieprawidlowy TEXT")
     ASSERT(__bur_data_file_end <= BUR_DATA_END,
-           "MOTYWY BUR: DATA przekroczylo 128 KiB")
+           "USTAWIENIA BUR: DATA przekroczylo 128 KiB")
     ASSERT(__bur_data_memory_end <= BUR_DATA_END,
-           "MOTYWY BUR: DATA+BSS przekroczyly 128 KiB")
+           "USTAWIENIA BUR: DATA+BSS przekroczyly 128 KiB")
     ASSERT(__bur_ctor_start == __bur_ctor_end,
-           "MOTYWY BUR: konstruktory nie sa obslugiwane")
+           "USTAWIENIA BUR: konstruktory nie sa obslugiwane")
     ASSERT(__bur_tls_start == __bur_tls_end,
-           "MOTYWY BUR: TLS nie jest obslugiwany")
+           "USTAWIENIA BUR: TLS nie jest obslugiwany")
     ASSERT(__bur_dynamic_start == __bur_dynamic_end,
-           "MOTYWY BUR: dynamic linking jest zabroniony")
+           "USTAWIENIA BUR: dynamic linking jest zabroniony")
     ASSERT(BUR_TEXT_OFFSET + BUR_TEXT_SIZE == BUR_DATA_OFFSET,
-           "MOTYWY BUR: niespojne offsety")
+           "USTAWIENIA BUR: niespojne offsety")
     ASSERT(BUR_TEXT_VADDR + BUR_TEXT_SIZE == BUR_DATA_VADDR,
-           "MOTYWY BUR: niespojne VA")
+           "USTAWIENIA BUR: niespojne VA")
 }

@@ -1,9 +1,10 @@
 #pragma once
 #include "start_menu_model.h"
 #include "plik_popup_ui.h"
+#include "bursztyn_ui/przycisk_obrazkowy.h"
 namespace StartMenu {
 using namespace BursztynUI;
-class Surface : public PowierzchniaPopup {
+class Surface : public PowierzchniaPopup, private ObslugaWidokuMenu {
  class Search : public PoleTekstowe {
   Surface* owner;
  public:
@@ -14,21 +15,40 @@ class Surface : public PowierzchniaPopup {
   }
  };
  class Results : public Kontrolka {
-  Surface* owner;
+  Surface* owner;int hovered=-1,pressed=-1;Etykieta* empty=nullptr;
  public:
-  explicit Results(Surface* p):owner(p){ustaw_mozliwosc_fokusu(true);}
+  explicit Results(Surface* p):owner(p){
+   ustaw_mozliwosc_fokusu(true);
+   empty=&dodaj<Etykieta>("Brak aplikacji o takiej nazwie");
+   empty->ustaw_wypelnienie({0,0,0,0});empty->ustaw_zawijanie(true);empty->ustaw_widoczna(false);
+   empty->ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI));
+  }
+  void layout_empty(){
+   auto s=skala_dpi_;int width=obszar_.szerokosc-16*s;if(width<1)width=1;
+   int height=empty->zmierz({width,obszar_.wysokosc}).wysokosc;
+   empty->rozmiesc({8*s,(owner->row_height-CzcionkaUI::pobierz_wysokosc(s))/2,width,height});
+   empty->ustaw_widoczna(owner->model.count==0);
+  }
+  void rozmiesc(Prostokat r)override{Kontrolka::rozmiesc(r);layout_empty();}
+  void zaktualizuj_motyw()override{Kontrolka::zaktualizuj_motyw();if(empty)empty->ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI));}
+  Prostokat empty_bounds()const{return empty->obszar_ekranu();}
+  bool empty_visible()const{return empty->czy_widoczna();}
+  void reset(){hovered=pressed=-1;layout_empty();uniewaznij();}
   void rysuj_siebie(KontekstRysowania& ctx)override{
    auto& m=owner->model;auto s=skala_dpi_;int row=owner->row_height;
    ctx.dodaj_przyciecie({0,0,obszar_.szerokosc,obszar_.wysokosc});
-   if(!m.count)ctx.rysuj_tekst({8*s,(obszar_.wysokosc-CzcionkaUI::pobierz_wysokosc(s))/2},"Brak wyników",motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI),s);
    for(int visible=0;visible<owner->rows&&visible+m.first<m.count;++visible){int i=visible+m.first;bool selected=i==m.selected;
-    if(selected)ctx.rysuj_prostokat({0,visible*row,obszar_.szerokosc-8*s,row},motyw_kolor(MOTYW_KOLOR_PODNIESIONY));
+    auto style=Motyw::pobierz_domyslny().styl_menu;
+    auto state=i==pressed?style.wcisniety:i==hovered?style.najechany:style.normalny;
+    if(selected&&i!=pressed&&i!=hovered){state.tlo=motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE);state.tekst=motyw_kolor_tekstu_zaznaczenia();}
+    ctx.rysuj_prostokat({0,visible*row,obszar_.szerokosc-8*s,row},state.tlo);
+    if(selected&&czy_ma_fokus())ctx.rysuj_ramke({0,visible*row,obszar_.szerokosc-8*s,row},motyw_kolor(MOTYW_KOLOR_AKCENT),s);
     const char* name=apps[m.matches[i]].name;char text[192]{};int n=0;while(name[n]&&n<180){text[n]=name[n];++n;}text[n]=0;
     int available=obszar_.szerokosc-28*s;
     if(CzcionkaUI::zmierz_tekst(text,s)>available){
      while(n){n=int(CzcionkaUI::poprzedni_znak(text,n));text[n]=char(0xe2);text[n+1]=char(0x80);text[n+2]=char(0xa6);text[n+3]=0;if(CzcionkaUI::zmierz_tekst(text,s)<=available)break;}
     }
-    ctx.rysuj_tekst({8*s,visible*row+(row-CzcionkaUI::pobierz_wysokosc(s))/2},text,motyw_kolor(MOTYW_KOLOR_TEKST),s);
+    ctx.rysuj_tekst({8*s,visible*row+(row-CzcionkaUI::pobierz_wysokosc(s))/2},text,state.tekst,s);
    }
    if(m.count>owner->rows){int h=obszar_.wysokosc;int thumb=h*owner->rows/m.count;if(thumb<8*s)thumb=8*s;
     int y=(h-thumb)*m.first/(m.count-owner->rows);ctx.rysuj_prostokat({obszar_.szerokosc-4*s,y,3*s,thumb},motyw_kolor(MOTYW_KOLOR_RAMKA));}
@@ -37,53 +57,89 @@ class Surface : public PowierzchniaPopup {
   void obsluz_wcisniecie_myszy(ZdarzenieMyszki& e)override{
    if(!e.czy_lewy_przycisk())return;
    int index=(e.y-obszar_ekranu_.y)/owner->row_height+owner->model.first;
-   if(index>=0&&index<owner->model.count){owner->model.selected=index;owner->pending=owner->model.action();}e.obsluzone=true;
+   if(index>=0&&index<owner->model.count){owner->model.selected=index;pressed=index;uniewaznij();}e.obsluzone=true;
   }
+  void obsluz_ruch_myszy(ZdarzenieMyszki& e)override{int i=(e.y-obszar_ekranu_.y)/owner->row_height+owner->model.first;if(i<0||i>=owner->model.count)i=-1;if(i!=hovered){hovered=i;uniewaznij();}}
+  void obsluz_opuszczenie_myszy()override{hovered=-1;uniewaznij();Kontrolka::obsluz_opuszczenie_myszy();}
+  void obsluz_zwolnienie_myszy(ZdarzenieMyszki& e)override{int i=(e.y-obszar_ekranu_.y)/owner->row_height+owner->model.first;if(obszar_ekranu_.zawiera(e.x,e.y)&&i==pressed&&i>=0&&i<owner->model.count)owner->pending=owner->model.action();pressed=-1;uniewaznij();e.obsluzone=true;}
   void obsluz_rolke(ZdarzenieRolki& e)override{
    owner->model.first+=e.delta_y>0?-3:3;owner->model.clamp(owner->rows);uniewaznij();e.obsluzone=true;
   }
   void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e)override{owner->command(e);}
  };
- Search* search;Results* list;Przycisk *restart,*shutdown;
+ class Power : public PrzyciskObrazkowy {
+  Surface* owner;
+ public:
+  explicit Power(Surface* p):PrzyciskObrazkowy(""),owner(p){
+   ustaw_tryb(TrybPrzyciskuObrazkowego::TylkoIkona);ustaw_ikone(102);
+   ustaw_preferowany_rozmiar({36,36});ustaw_podpowiedz("Zasilanie");
+  }
+  void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e)override{
+   if(!czy_wlaczona())return;
+   if(e.polecenie()==13 || e.polecenie()==32){owner->open_power();e.obsluzone=true;return;}
+   if(owner->command(e))return;
+   PrzyciskObrazkowy::obsluz_wcisniecie_klawisza(e);
+  }
+ };
+ Search* search;Results* list;Power* power;
+ Menu power_items;WidokMenuPopup power_popup;
+ uint64_t hover_deadline=0,leave_deadline=0;
+ bool pointer_power=false,pointer_popup=false;
+ void menu_aktywuj(WidokMenuPopup&,ElementMenu& item)override{if(item.czy_wlaczony()){pending=int(item.identyfikator());events.popups.zamknij(PowodZamknieciaPopup::Zatwierdzenie);}}
+ void menu_otworz_podmenu(WidokMenuPopup&,ElementMenu&,Prostokat)override{}
+ void menu_kierunek_poziomy(WidokMenuPopup&,int direction)override{if(direction<0)close_power();}
+ void close_power(){events.popups.zamknij_od_poziomu(1);if(czy_otwarta())events.popups.ustaw_fokus_popupu(power);hover_deadline=leave_deadline=0;}
+
  int pending=-1;
 public:
  PlikiUI::ObslugaPopup events;
  Model model;
  int row_height=30,rows=1;
  Surface(){
-  search=new Search(this);list=new Results(this);restart=new Przycisk("Uruchom ponownie");shutdown=new Przycisk("Zamknij");
-  dodaj_kontrolke(search);dodaj_kontrolke(list);dodaj_kontrolke(restart);dodaj_kontrolke(shutdown);
-  search->przy_zmianie([](PoleTekstowe*,const char* text,void* p){auto* s=static_cast<Surface*>(p);s->model.filter(text);s->list->uniewaznij();},this);
-  restart->przy_kliknieciu([](Przycisk*,void* p){static_cast<Surface*>(p)->pending=18;},this);
-  shutdown->przy_kliknieciu([](Przycisk*,void* p){static_cast<Surface*>(p)->pending=19;},this);
+  search=new Search(this);list=new Results(this);power=new Power(this);
+  dodaj_kontrolke(search);dodaj_kontrolke(list);dodaj_kontrolke(power);
+  search->przy_zmianie([](PoleTekstowe*,const char* text,void* p){auto* s=static_cast<Surface*>(p);s->model.filter(text);s->list->reset();},this);
+  power->przy_kliknieciu([](Przycisk*,void* p){static_cast<Surface*>(p)->open_power();},this);
+  power_items.dodaj_element("Zablokuj",22).ustaw_wlaczony(false).ustaw_ikone(100);
+  power_items.dodaj_element("Uśpij",23).ustaw_wlaczony(false).ustaw_ikone(101);
+  power_items.dodaj_element("Zamknij",19).ustaw_ikone(102);
+  power_items.dodaj_element("Uruchom ponownie",18).ustaw_ikone(103);
+  power_popup.ustaw(&power_items,this);
+  power_popup.przy_zamknieciu([](PowierzchniaPopup*,PowodZamknieciaPopup,void* p){auto* s=static_cast<Surface*>(p);if(s->czy_otwarta())s->events.popups.ustaw_fokus_popupu(s->power);},this);
   model.filter("");
  }
  bool command(ZdarzenieKlawiatury& e){
-  auto k=e.polecenie();if(k==0x48||k==0x50){model.move(k==0x48?-1:1,rows);list->uniewaznij();e.obsluzone=true;return true;}
+  auto k=e.polecenie();if(k==9){events.popups.ustaw_fokus_popupu(events.popups.fokus_popupu()==power?static_cast<Kontrolka*>(search):power);e.obsluzone=true;return true;}if(k==0x48||k==0x50){model.move(k==0x48?-1:1,rows);list->uniewaznij();e.obsluzone=true;return true;}
   if(k==13){pending=model.action();e.obsluzone=true;return true;}return false;
  }
  int take_action(){int result=pending;pending=-1;return result;}
  const char* query()const{return search->tekst();}
  Prostokat result_bounds()const{return list->obszar_ekranu();}
- Prostokat shutdown_bounds()const{return shutdown->obszar_ekranu();}
+ Prostokat shutdown_bounds()const{return power->obszar_ekranu();}
+ Prostokat empty_message_bounds()const{return list->empty_bounds();}
+ bool empty_message_visible()const{return list->empty_visible();}
+ Prostokat power_anchor()const{
+  int pad=10*skala_dpi_;auto r=power->obszar_ekranu();
+  return {obszar_ekranu_.x+pad,r.y,obszar_.szerokosc-2*pad,r.wysokosc};
+ }
  Prostokat search_bounds()const{return search->obszar_ekranu();}
  void rozmiesc(Prostokat r)override{
   PowierzchniaPopup::rozmiesc(r);auto s=skala_dpi_;int pad=10*s,gap=8*s;
   row_height=CzcionkaUI::pobierz_wysokosc(s)+12*s;if(row_height<30*s)row_height=30*s;
   int w=r.szerokosc-2*pad;
   search->rozmiesc({pad,pad,w,row_height});
-  shutdown->rozmiesc({pad,r.wysokosc-pad-row_height,w,row_height});
-  restart->rozmiesc({pad,r.wysokosc-pad-2*row_height-gap,w,row_height});
-  int top=pad+row_height+gap,bottom=r.wysokosc-pad-2*row_height-3*gap;
+  int side=36*s;power->rozmiesc({(r.szerokosc-side)/2,r.wysokosc-pad-side,side,side});
+  int top=pad+row_height+gap,bottom=r.wysokosc-pad-side-2*gap;
   int h=bottom-top;if(h<0)h=0;rows=h/row_height;if(rows<1)rows=1;
   list->rozmiesc({pad,top,w,h});model.visible(rows);
  }
  void rysuj_siebie(KontekstRysowania& ctx)override{
-  rysuj_zaokraglone_tlo(ctx);auto s=skala_dpi_;int y=restart->obszar().y-4*s;
+  rysuj_zaokraglone_tlo(ctx);auto s=skala_dpi_;int y=power->obszar().y-4*s;
   ctx.rysuj_prostokat({10*s,y,obszar_.szerokosc-20*s,s},motyw_kolor(MOTYW_KOLOR_RAMKA));
  }
  void open(Prostokat work,int x){
-  events.reset_input();pending=-1;search->ustaw_tekst("");model.filter("");
+  hover_deadline=leave_deadline=0;pointer_power=pointer_popup=false;
+  events.reset_input();pending=-1;list->reset();search->ustaw_tekst("");model.filter("");
   events.geometria({0,0,work.szerokosc,work.wysokosc},work);auto s=ui_skala();
   int width=340*s;for(auto& app:apps){int measured=CzcionkaUI::zmierz_tekst(app.name,s)+44*s;if(measured>width)width=measured;}
   if(width>work.szerokosc-x)width=work.szerokosc-x;
@@ -93,10 +149,45 @@ public:
   events.popups.otworz(*this,{x,work.dolny()-height,width,height},nullptr,search);
   events.popups.odrysuj_popupy(true);
  }
- void close(){events.popups.zamknij();}
+ void open_power(){
+  if(power_popup.czy_otwarta())return;
+  hover_deadline=leave_deadline=0;power_popup.zaktualizuj_motyw();
+  auto anchor=power_anchor();
+  auto where=events.popups.umiesc_pod_kotwica_ekranu(anchor,power_popup.wymagany_rozmiar(skala_dpi_),false);
+  events.popups.otworz_podmenu(power_popup,where,&power_popup);power_popup.ustaw_aktywny_indeks(2);
+  events.popups.odrysuj_popupy(true);
+ }
+ bool power_open()const{return power_popup.czy_otwarta();}
+ Prostokat power_popup_bounds()const{return power_popup.obszar();}
+ const Menu& power_menu()const{return power_items;}
+ bool handle(const bws_zdarzenie& e){
+  if(!czy_otwarta())return events.zdarzenie(e);
+  uint64_t now=gui_czas_monotoniczny_ns();
+  if(e.typ==BWS_ZDARZENIE_MYSZ_RUCH){
+   pointer_popup=power_popup.czy_otwarta()&&power_popup.obszar().zawiera(e.x,e.y);
+   pointer_power=!pointer_popup&&power->obszar_ekranu().zawiera(e.x,e.y);
+   if(pointer_power&&!power_popup.czy_otwarta()){if(!hover_deadline)hover_deadline=now+300000000ULL;}else hover_deadline=0;
+   if(power_popup.czy_otwarta()&&!pointer_popup&&!pointer_power){if(!leave_deadline)leave_deadline=now+350000000ULL;}else leave_deadline=0;
+  }
+  if(e.typ==BWS_ZDARZENIE_MYSZ_DOWN&&power_popup.czy_otwarta()&&!power_popup.obszar().zawiera(e.x,e.y))close_power();
+  if(e.typ==BWS_ZDARZENIE_TIMER){
+   if(hover_deadline&&now>=hover_deadline)open_power();
+   if(leave_deadline&&now>=leave_deadline)close_power();
+  }
+  return events.zdarzenie(e);
+ }
+ void close(){hover_deadline=leave_deadline=0;events.popups.zamknij();}
  void po_zamknieciu(PowodZamknieciaPopup p)override{
   search->ustaw_tekst("");model.filter("");PowierzchniaPopup::po_zamknieciu(p);
  }
- void refresh(){events.popups.zaktualizuj_motyw();if(czy_otwarta()){rozmiesc(obszar_);uniewaznij();events.popups.odrysuj_popupy(true);}}
+ void refresh(){
+  events.popups.zaktualizuj_motyw();
+  if(czy_otwarta()){
+   rozmiesc(obszar_);
+   if(power_popup.czy_otwarta())events.popups.przemiesc_powierzchnie(power_popup,
+    events.popups.umiesc_pod_kotwica_ekranu(power_anchor(),power_popup.wymagany_rozmiar(skala_dpi_),false));
+   uniewaznij();events.popups.odrysuj_popupy(true);
+  }
+ }
 };
 }

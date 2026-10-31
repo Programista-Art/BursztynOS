@@ -1,0 +1,14 @@
+{
+  "themes": {
+    "result": "PASS",
+    "unexpected_fault_markers": []
+  },
+  "scales": {
+    "result": "PASS",
+    "unexpected_fault_markers": []
+  },
+  "font": {
+    "result": "PASS",
+    "unexpected_fault_markers": []
+  }
+}

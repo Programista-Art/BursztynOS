@@ -1,0 +1,1094 @@
+[
+  {
+    "label": "immediate-0",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 125,
+      "generation": 2,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1030
+      ],
+      "taskbar": [
+        0,
+        1030,
+        1920,
+        50
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 0,
+      "cursor": [
+        385,
+        649
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 382,
+      "w": 640,
+      "h": 290
+    }
+  },
+  {
+    "label": "wm-1",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 125,
+      "generation": 2,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1030
+      ],
+      "taskbar": [
+        0,
+        1030,
+        1920,
+        50
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 2,
+      "cursor": [
+        385,
+        649
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 382,
+      "w": 800,
+      "h": 363
+    }
+  },
+  {
+    "label": "immediate-1",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 100,
+      "generation": 3,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1040
+      ],
+      "taskbar": [
+        0,
+        1040,
+        1920,
+        40
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 2,
+      "cursor": [
+        401,
+        716
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 382,
+      "w": 800,
+      "h": 363
+    }
+  },
+  {
+    "label": "wm-2",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 100,
+      "generation": 3,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1040
+      ],
+      "taskbar": [
+        0,
+        1040,
+        1920,
+        40
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 3,
+      "cursor": [
+        401,
+        716
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 382,
+      "w": 640,
+      "h": 290
+    }
+  },
+  {
+    "label": "immediate-2",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 125,
+      "generation": 4,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1030
+      ],
+      "taskbar": [
+        0,
+        1030,
+        1920,
+        50
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 3,
+      "cursor": [
+        385,
+        649
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 382,
+      "w": 640,
+      "h": 290
+    }
+  },
+  {
+    "label": "wm-3",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 125,
+      "generation": 4,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1030
+      ],
+      "taskbar": [
+        0,
+        1030,
+        1920,
+        50
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 4,
+      "cursor": [
+        385,
+        649
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 382,
+      "w": 800,
+      "h": 363
+    }
+  },
+  {
+    "label": "immediate-3",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 150,
+      "generation": 5,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1020
+      ],
+      "taskbar": [
+        0,
+        1020,
+        1920,
+        60
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 4,
+      "cursor": [
+        401,
+        716
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 382,
+      "w": 800,
+      "h": 363
+    }
+  },
+  {
+    "label": "wm-4",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 150,
+      "generation": 5,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1020
+      ],
+      "taskbar": [
+        0,
+        1020,
+        1920,
+        60
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 5,
+      "cursor": [
+        401,
+        716
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 382,
+      "w": 960,
+      "h": 435
+    }
+  },
+  {
+    "label": "immediate-4",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 200,
+      "generation": 6,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1000
+      ],
+      "taskbar": [
+        0,
+        1000,
+        1920,
+        80
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 5,
+      "cursor": [
+        418,
+        783
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 382,
+      "w": 960,
+      "h": 435
+    }
+  },
+  {
+    "label": "wm-5",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 200,
+      "generation": 6,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1000
+      ],
+      "taskbar": [
+        0,
+        1000,
+        1920,
+        80
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 6,
+      "cursor": [
+        418,
+        783
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 382,
+      "w": 1280,
+      "h": 580
+    }
+  },
+  {
+    "label": "immediate-5",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 150,
+      "generation": 7,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1020
+      ],
+      "taskbar": [
+        0,
+        1020,
+        1920,
+        60
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 6,
+      "cursor": [
+        450,
+        916
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 382,
+      "w": 1280,
+      "h": 580
+    }
+  },
+  {
+    "label": "wm-6",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 150,
+      "generation": 7,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1020
+      ],
+      "taskbar": [
+        0,
+        1020,
+        1920,
+        60
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 7,
+      "cursor": [
+        450,
+        916
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 382,
+      "w": 960,
+      "h": 435
+    }
+  },
+  {
+    "label": "immediate-6",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 125,
+      "generation": 8,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1030
+      ],
+      "taskbar": [
+        0,
+        1030,
+        1920,
+        50
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 7,
+      "cursor": [
+        418,
+        783
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 382,
+      "w": 960,
+      "h": 435
+    }
+  },
+  {
+    "label": "wm-7",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 125,
+      "generation": 8,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1030
+      ],
+      "taskbar": [
+        0,
+        1030,
+        1920,
+        50
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 8,
+      "cursor": [
+        418,
+        783
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 382,
+      "w": 800,
+      "h": 363
+    }
+  },
+  {
+    "label": "immediate-7",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 100,
+      "generation": 9,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1040
+      ],
+      "taskbar": [
+        0,
+        1040,
+        1920,
+        40
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 8,
+      "cursor": [
+        401,
+        716
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 382,
+      "w": 800,
+      "h": 363
+    }
+  },
+  {
+    "label": "wm-8",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 100,
+      "generation": 9,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1040
+      ],
+      "taskbar": [
+        0,
+        1040,
+        1920,
+        40
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 9,
+      "cursor": [
+        401,
+        716
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 382,
+      "w": 640,
+      "h": 290
+    }
+  },
+  {
+    "label": "immediate-8",
+    "geometry": {
+      "width": 1280,
+      "height": 720,
+      "scale": 100,
+      "generation": 10,
+      "work_area": [
+        0,
+        0,
+        1280,
+        680
+      ],
+      "taskbar": [
+        0,
+        680,
+        1280,
+        40
+      ],
+      "mouse_bounds": [
+        1279,
+        719
+      ],
+      "desktop_generation": 9,
+      "cursor": [
+        385,
+        649
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 382,
+      "w": 640,
+      "h": 290
+    }
+  },
+  {
+    "label": "wm-9",
+    "geometry": {
+      "width": 1280,
+      "height": 720,
+      "scale": 100,
+      "generation": 10,
+      "work_area": [
+        0,
+        0,
+        1280,
+        680
+      ],
+      "taskbar": [
+        0,
+        680,
+        1280,
+        40
+      ],
+      "mouse_bounds": [
+        1279,
+        719
+      ],
+      "desktop_generation": 10,
+      "cursor": [
+        385,
+        649
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 382,
+      "w": 640,
+      "h": 290
+    }
+  },
+  {
+    "label": "immediate-9",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 100,
+      "generation": 11,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1040
+      ],
+      "taskbar": [
+        0,
+        1040,
+        1920,
+        40
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 10,
+      "cursor": [
+        385,
+        649
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 382,
+      "w": 640,
+      "h": 290
+    }
+  },
+  {
+    "label": "wm-10",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 100,
+      "generation": 11,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1040
+      ],
+      "taskbar": [
+        0,
+        1040,
+        1920,
+        40
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 11,
+      "cursor": [
+        385,
+        649
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 382,
+      "w": 640,
+      "h": 290
+    }
+  },
+  {
+    "label": "immediate-10",
+    "geometry": {
+      "width": 1280,
+      "height": 720,
+      "scale": 125,
+      "generation": 12,
+      "work_area": [
+        0,
+        0,
+        1280,
+        670
+      ],
+      "taskbar": [
+        0,
+        670,
+        1280,
+        50
+      ],
+      "mouse_bounds": [
+        1279,
+        719
+      ],
+      "desktop_generation": 11,
+      "cursor": [
+        385,
+        649
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 380,
+      "w": 640,
+      "h": 290
+    }
+  },
+  {
+    "label": "wm-11",
+    "geometry": {
+      "width": 1280,
+      "height": 720,
+      "scale": 125,
+      "generation": 12,
+      "work_area": [
+        0,
+        0,
+        1280,
+        670
+      ],
+      "taskbar": [
+        0,
+        670,
+        1280,
+        50
+      ],
+      "mouse_bounds": [
+        1279,
+        719
+      ],
+      "desktop_generation": 12,
+      "cursor": [
+        385,
+        649
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 307,
+      "w": 800,
+      "h": 363
+    }
+  },
+  {
+    "label": "immediate-11",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 100,
+      "generation": 13,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1040
+      ],
+      "taskbar": [
+        0,
+        1040,
+        1920,
+        40
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 12,
+      "cursor": [
+        401,
+        641
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 307,
+      "w": 800,
+      "h": 363
+    }
+  },
+  {
+    "label": "wm-12",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 100,
+      "generation": 13,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1040
+      ],
+      "taskbar": [
+        0,
+        1040,
+        1920,
+        40
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 13,
+      "cursor": [
+        401,
+        641
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 307,
+      "w": 640,
+      "h": 290
+    }
+  },
+  {
+    "label": "immediate-12",
+    "geometry": {
+      "width": 1280,
+      "height": 720,
+      "scale": 100,
+      "generation": 14,
+      "work_area": [
+        0,
+        0,
+        1280,
+        680
+      ],
+      "taskbar": [
+        0,
+        680,
+        1280,
+        40
+      ],
+      "mouse_bounds": [
+        1279,
+        719
+      ],
+      "desktop_generation": 13,
+      "cursor": [
+        385,
+        574
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 307,
+      "w": 640,
+      "h": 290
+    }
+  },
+  {
+    "label": "wm-13",
+    "geometry": {
+      "width": 1280,
+      "height": 720,
+      "scale": 100,
+      "generation": 14,
+      "work_area": [
+        0,
+        0,
+        1280,
+        680
+      ],
+      "taskbar": [
+        0,
+        680,
+        1280,
+        40
+      ],
+      "mouse_bounds": [
+        1279,
+        719
+      ],
+      "desktop_generation": 14,
+      "cursor": [
+        385,
+        574
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 307,
+      "w": 640,
+      "h": 290
+    }
+  }
+]

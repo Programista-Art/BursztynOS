@@ -136,6 +136,15 @@ int main(){
    CHECK(page->family_label->obszar().y==page->size_label->obszar().y);
    CHECK(body.title->obszar().y==page->obszar().y);
    CHECK(body.nav[0]->szerokosc()==body.nav[1]->szerokosc());
+   auto* themes=body.themes;themes->description->ustaw_tekst(SettingsUI::theme_description("bursztynnocny"));body.themes_view->rozmiesc(body.themes_view->obszar());
+   CHECK(themes->preview->obszar().y==themes->apply->obszar().y);CHECK(themes->apply->obszar().y==themes->cancel->obszar().y);
+   CHECK(themes->preview->obszar().prawy()<themes->apply->obszar().x);CHECK(themes->apply->obszar().prawy()<themes->cancel->obszar().x);
+   CHECK(themes->cancel->obszar().prawy()<=themes->szerokosc()-SettingsUI::ContentInset*SkalaUI::procent(scale));
+   CHECK(themes->heading->obszar().x==SettingsUI::ContentInset*SkalaUI::procent(scale));CHECK(themes->list->obszar().x==themes->heading->obszar().x);
+   CHECK(page->heading->obszar().x==themes->heading->obszar().x);CHECK(body.support->heading->obszar().x==themes->heading->obszar().x);CHECK(body.system->content->obszar().x==themes->heading->obszar().x);
+   CHECK(themes->cancel->obszar().dolny()<=themes->current->obszar().y);
+   CHECK(themes->status->obszar().dolny()<=themes->wysokosc());
+
    for(size_t i=0;i<body.liczba_dzieci();++i)CHECK(inside(bounds,body.dziecko(i)->obszar()));
    for(size_t i=0;i<page->liczba_dzieci();++i)CHECK(inside(page->obszar(),page->dziecko(i)->obszar()));
    CHECK(page->preview_view->obszar().dolny()<=page->apply->obszar().y);CHECK(page->apply->obszar().dolny()<=page->status->obszar().y);
@@ -155,6 +164,12 @@ int main(){
   for(const char* q:{"hus","usta","diag","kalk","xyz",""}){start.model.filter(q);start.rozmiesc(original);CHECK(start.obszar()==original);CHECK(start.shutdown_bounds()==bottom);}
   CHECK(start.shutdown_bounds().dolny()>start.result_bounds().dolny());CHECK(start.search_bounds().dolny()<start.result_bounds().y);
   start.model.filter("");start.model.move(100,start.rows);CHECK(start.model.first>0);start.model.move(-100,start.rows);CHECK(start.model.first==0);
+  if(scale==100 && (px==12 || px==16 || px==24)){
+   StartMenu::Surface probe;probe.rozmiesc({10,80,340,600});probe.model.filter("zzzzzz");probe.rozmiesc(probe.obszar());
+   std::ofstream f(".bsf-test/start-polish-layout-"+std::to_string(px)+".json");
+   auto rect=[&](Prostokat r){f<<"["<<r.x<<","<<r.y<<","<<r.szerokosc<<","<<r.wysokosc<<"]";};
+   f<<"{\"power\":";rect(probe.shutdown_bounds());f<<",\"results\":";rect(probe.result_bounds());f<<",\"empty\":";rect(probe.empty_message_bounds());f<<",\"search\":";rect(probe.search_bounds());f<<",\"row\":"<<probe.row_height<<"}";
+  }
   screen_w=1280;screen_h=1000;metryki_ekranu();desktop_layout.set_count(1);desktop_layout.items[0]={};desktop_layout.items[0].placed=true;
   wpisy_pulpitu[0].launcher=-1;wpisy_pulpitu[0].folder=false;strcpy(wpisy_pulpitu[0].nazwa,"Przeglądarka Obrazów");
   aktualizuj_layout_pulpitu();auto region=wizualny_wpis_pulpitu(0);CHECK(desktop_layout.items[0].label.count<=3);
@@ -226,7 +241,7 @@ int main(){
  for(int px:{12,16,20,24})for(unsigned dpi:{100U,125U,150U,200U}){
   auto config=BSF::configuration();config.size=px;CHECK(BSF::apply(config));
   SettingsUI::Body body;body.ustaw_skale_dpi(SkalaUI::procent(dpi));
-  CHECK(!strcmp(body.nav[0]->tekst(),"System"));CHECK(!strcmp(body.nav[1]->tekst(),"Wygląd"));CHECK(!strcmp(body.nav[2]->tekst(),"Czcionki"));
+  CHECK(!strcmp(body.nav[0]->tekst(),"System"));CHECK(!strcmp(body.nav[1]->tekst(),"Wygląd"));CHECK(!strcmp(body.nav[2]->tekst(),"Motywy"));CHECK(!strcmp(body.nav[3]->tekst(),"Czcionki"));CHECK(!strcmp(body.nav[4]->tekst(),"Wsparcie"));
   CHECK(body.system->czy_widoczna());CHECK(!body.fonts->czy_widoczna());CHECK(!body.support->czy_widoczna());
   for(int width:{800,950,1100}){
    body.rozmiesc({0,0,ui_skaluj(width,dpi),ui_skaluj(512,dpi)});auto* page=body.system;

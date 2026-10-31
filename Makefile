@@ -307,7 +307,7 @@ PRZEGLADARKA_LINKER := programy/przegladarka_linker.ld
 
 AKTUALIZACJE_LINKER := programy/aktualizacje/aktualizacje_linker.ld
 
-MOTYWY_LINKER := programy/motywy/motywy_linker.ld
+USTAWIENIA_LINKER := programy/ustawienia/ustawienia_linker.ld
 
 MENEDZER_OKIEN_LINKER := menedzer_okien_linker.ld
 
@@ -403,7 +403,6 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	przegladarka_obrazow_blob.o \
 	aktualizacje_blob.o \
 	motyw.o \
-	motywy_blob.o \
 	test_dzwieku_blob.o \
 	diagnostyka_systemu.o diagnostyka_systemu_bws.o diagnostyka_systemu_boot.o diagnostyka_blob.o \
 	test_bmp_blob.o \
@@ -738,15 +737,6 @@ aktualizacje_blob.o: aktualizacje_tmp.o bursztyn_gui.o $(AKTUALIZACJE_LINKER)
 	$(OBJCOPY) -O binary aktualizacje.elf aktualizacje.bin
 	$(LD) -r -b binary aktualizacje.bin -o aktualizacje_blob.o
 
-# Motywy Systemowe
-motywy_tmp.o: programy/motywy/motywy.cpp bursztyn_gui.h motyw.h $(wildcard bursztyn_ui/*.h)
-	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
-
-motywy_blob.o: motywy_tmp.o bursztyn_gui.o $(MOTYWY_LINKER)
-	$(LD) -T $(MOTYWY_LINKER) $(RING3_LDFLAGS) \
-		motywy_tmp.o bursztyn_gui.o -o motywy.elf
-	$(OBJCOPY) -O binary motywy.elf motywy.bin
-	$(LD) -r -b binary motywy.bin -o motywy_blob.o
 
 # Test dźwięku — diagnostyka HDA
 BURSZTYNDIAGTESTDZWIEKU ?= 0
@@ -766,11 +756,11 @@ test_dzwieku_blob.o: test_dzwieku_tmp.o bursztyn_gui.o programy/test_dzwieku/tes
 	$(PYTHON) narzedzia/test_dzwieku_size.py test_dzwieku.bin
 	$(LD) -r -b binary test_dzwieku.bin -o test_dzwieku_blob.o
 
-ustawienia_tmp.o: programy/ustawienia/ustawienia.cpp $(wildcard bursztyn_ui/*.h) bsf/runtime.h
+ustawienia_tmp.o: programy/ustawienia/ustawienia.cpp $(wildcard programy/ustawienia/*.h) $(wildcard bursztyn_ui/*.h) bsf/runtime.h
 	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
 
-ustawienia_blob.o: ustawienia_tmp.o bursztyn_gui.o $(MOTYWY_LINKER)
-	$(LD) --gc-sections -T $(MOTYWY_LINKER) $(RING3_LDFLAGS) ustawienia_tmp.o bursztyn_gui.o -o ustawienia.elf
+ustawienia_blob.o: ustawienia_tmp.o bursztyn_gui.o $(USTAWIENIA_LINKER)
+	$(LD) --gc-sections -T $(USTAWIENIA_LINKER) $(RING3_LDFLAGS) ustawienia_tmp.o bursztyn_gui.o -o ustawienia.elf
 	$(OBJCOPY) -O binary ustawienia.elf ustawienia.bin
 	$(LD) -r -b binary ustawienia.bin -o $@
 
@@ -2199,3 +2189,9 @@ test-display-snapshot-host:
 grafika.o syscalls.o bursztyn_gui_base.o bursztyn_gui_minimal.o menedzer_okien_tmp.o: bws_gui_batch.h
 skladacz_obrazu.o: desktop_modeset.h display_geometry.h
 menedzer_okien_tmp.o: desktop_selection_paint.h
+
+.PHONY: test-settings-themes-power-host
+test-settings-themes-power-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O0 -g -fsanitize=address,undefined -fno-pie -no-pie -ffunction-sections -fdata-sections narzedzia/test_settings_themes_power.cpp -Wl,--gc-sections -o .bsf-test/settings-themes-power
+	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/settings-themes-power

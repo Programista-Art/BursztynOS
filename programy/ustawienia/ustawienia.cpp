@@ -19,6 +19,8 @@ __attribute__((section(".naglowek"), used)) NaglowekBur naglowek = {
 namespace {
 constexpr int sizes[] = {12, 14, 16, 18, 20, 24};
 class Settings : public Okno {
+  SettingsUI::ThemesPage* themes{};
+  SettingsUI::ThemesViewport* themes_view{};
   Panel *font_page{};
   SettingsUI::SystemPage* system_page{};
   SettingsUI::SupportPage* support_page{};
@@ -31,11 +33,12 @@ class Settings : public Okno {
   uint32_t ids[BSF::MaxFiles]{};
   unsigned family_count{};
   void show(unsigned page) {
-    font_page->ustaw_widoczna(page == 2);
+    font_page->ustaw_widoczna(page == 3);
     system_page->ustaw_widoczna(page==0);
     placeholder->ustaw_widoczna(page==1);
-    support_page->ustaw_widoczna(page==3);
-    placeholder_text->ustaw_tekst("Wygląd: motywy są dostępne w aplikacji Motywy systemowe.");
+    support_page->ustaw_widoczna(page==4);
+    themes_view->ustaw_widoczna(page==2);
+    placeholder_text->ustaw_tekst("Wybierz Motywy, aby zmienić wygląd całego systemu.");
     przelicz_uklad();
     uniewaznij();
   }
@@ -97,22 +100,25 @@ class Settings : public Okno {
   }
 
 public:
+  void zamknij()override{if(themes)themes->cancel_preview();Okno::zamknij();}
   Settings() : Okno("Ustawienia", 950, 540) {}
   void init() {
     auto c = BSF::configuration();
     auto &viewport = dodaj<SettingsUI::Viewport>();
     auto &root = *viewport.body;
+    themes=root.themes;themes_view=root.themes_view;themes->load();
     system_page=root.system;
     support_page=root.support;support_page->on_reload=[](SettingsUI::SupportPage*,void* p){static_cast<Settings*>(p)->reload_support();};support_page->reload_context=this;
     reload_support();
     font_page=root.fonts;placeholder=root.placeholder;placeholder_text=root.placeholder_text;
     auto* page=root.fonts;
     families=page->families;size=page->size;preview=page->preview;status=page->status;
-    for(unsigned i=0;i<4;++i){
+    root.nav[2]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(2);},this);
+    for(unsigned i=0;i<5;++i){
       if(i==0)root.nav[i]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(0);},this);
       if(i==1)root.nav[i]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(1);},this);
+      if(i==4)root.nav[i]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(4);},this);
       if(i==3)root.nav[i]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(3);},this);
-      if(i==2)root.nav[i]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(2);},this);
     }
     for (unsigned i = 0; i < BSF::enumerate(); ++i) {
       auto *f = BSF::info(i);
