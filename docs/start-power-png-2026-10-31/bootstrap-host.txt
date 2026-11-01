@@ -1,0 +1,6 @@
+g++ -std=c++17 -O1 -g -Wall -Wextra -I. -Ibiblioteki/mbedtls/include -DBURSZTYN_PSF_HOST_TEST -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined -DBURSZTYNDIAGPSFBOOTSTRAP=0 narzedzia/test_psf_bootstrap_host.cpp aktualizacja.cpp storage_format.cpp -o .installertest/test-psf-bootstrap-normal
+ASAN_OPTIONS=detect_leaks=0 .installertest/test-psf-bootstrap-normal
+PSF/bootstrap/Live production host: 25186534 checks PASS, 21 scenarios, ASan/UBSan
+g++ -std=c++17 -O1 -g -Wall -Wextra -I. -Ibiblioteki/mbedtls/include -DBURSZTYN_PSF_HOST_TEST -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined -DBURSZTYNDIAGPSFBOOTSTRAP=1 narzedzia/test_psf_bootstrap_host.cpp aktualizacja.cpp storage_format.cpp -o .installertest/test-psf-bootstrap
+ASAN_OPTIONS=detect_leaks=0 .installertest/test-psf-bootstrap
+PSF/bootstrap/Live production host: 25186244 checks PASS, 21 scenarios, ASan/UBSan

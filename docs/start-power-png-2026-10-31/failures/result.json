@@ -1,0 +1,74 @@
+{
+  "result": "PASS",
+  "missing_sleep_fallback": true,
+  "corrupt_shutdown_fallback": true,
+  "oversized_lock_fallback": true,
+  "intact_power_restart_png": true,
+  "cycles": [
+    {
+      "start": [
+        10,
+        80,
+        340,
+        600
+      ],
+      "button": [
+        306,
+        636,
+        36,
+        36
+      ],
+      "popup": [
+        144,
+        516,
+        198,
+        110
+      ]
+    },
+    {
+      "start": [
+        10,
+        80,
+        340,
+        600
+      ],
+      "button": [
+        306,
+        636,
+        36,
+        36
+      ],
+      "popup": [
+        144,
+        516,
+        198,
+        110
+      ]
+    },
+    {
+      "start": [
+        10,
+        80,
+        340,
+        600
+      ],
+      "button": [
+        306,
+        636,
+        36,
+        36
+      ],
+      "popup": [
+        144,
+        516,
+        198,
+        110
+      ]
+    }
+  ],
+  "kernel_sha256": "f30c9728394a7e4e9ba4929d9bfd701ca2aa1f5cfd82319badf3e31236e93695",
+  "iso_sha256": "c7d7ac88ca659942129ae04e10f4ede590b3565f0ca64d22e71b1044729992a6",
+  "wm_code_identical_to_release": true,
+  "wm_sha256": "d9fd0913c4f812ad4656c0e2e3b98aaa9f2a09a0fe517af2650f03c3981178a8",
+  "native_fallback_glyph_pixels_verified": true
+}

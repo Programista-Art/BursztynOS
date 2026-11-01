@@ -6,6 +6,7 @@
 
 namespace BursztynUI {
 
+class IkonaPNG;
 class Menu;
 class ElementMenu;
 
@@ -39,6 +40,8 @@ public:
     ElementMenu& ustaw_skrot(const char* s) { kopiuj(skrot_, sizeof(skrot_), s); powiadom(); return *this; }
     uint32_t ikona() const { return ikona_; }
     ElementMenu& ustaw_ikone(uint32_t i) { ikona_ = i; powiadom(); return *this; }
+    const IkonaPNG* obraz_ikony() const { return obraz_ikony_; }
+    ElementMenu& ustaw_obraz_ikony(const IkonaPNG* p) { if(obraz_ikony_!=p){obraz_ikony_=p; powiadom();} return *this; }
     uint64_t znacznik() const { return znacznik_; }
     ElementMenu& ustaw_znacznik(uint64_t z) { znacznik_ = z; return *this; }
     Menu* podmenu() const { return podmenu_; }
@@ -76,7 +79,7 @@ private:
         identyfikator_ = o.identyfikator_; wlaczony_ = o.wlaczony_; widoczny_ = o.widoczny_;
         separator_ = o.separator_; zaznaczony_ = o.zaznaczony_;
         typ_zaznaczenia_ = o.typ_zaznaczenia_; grupa_radialna_ = o.grupa_radialna_;
-        ikona_ = o.ikona_; znacznik_ = o.znacznik_; akcja_ = o.akcja_; dane_akcji_ = o.dane_akcji_;
+        obraz_ikony_ = o.obraz_ikony_; ikona_ = o.ikona_; znacznik_ = o.znacznik_; akcja_ = o.akcja_; dane_akcji_ = o.dane_akcji_;
         podmenu_ = o.podmenu_; o.podmenu_ = nullptr;
         polecenie_ = o.polecenie_;
         if (polecenie_) polecenie_->zastap_odbiorce(&o, this);
@@ -93,6 +96,7 @@ private:
     char tekst_[96]{};
     char skrot_[40]{};
     uint32_t identyfikator_{0}, ikona_{0};
+    const IkonaPNG* obraz_ikony_{nullptr};
     uint64_t znacznik_{0};
     bool wlaczony_{true}, widoczny_{true}, separator_{false}, zaznaczony_{false};
     TypZaznaczeniaMenu typ_zaznaczenia_{TypZaznaczeniaMenu::Brak};
@@ -206,7 +210,7 @@ inline void ElementMenu::wyzeruj() {
     if (polecenie_) polecenie_->odlacz(this);
     polecenie_ = nullptr;
     delete podmenu_; podmenu_ = nullptr;
-    tekst_[0] = '\0'; skrot_[0] = '\0'; identyfikator_ = 0; ikona_ = 0; znacznik_ = 0;
+    obraz_ikony_ = nullptr; tekst_[0] = '\0'; skrot_[0] = '\0'; identyfikator_ = 0; ikona_ = 0; znacznik_ = 0;
     wlaczony_ = true; widoczny_ = true; separator_ = false; zaznaczony_ = false;
     typ_zaznaczenia_ = TypZaznaczeniaMenu::Brak; grupa_radialna_ = 0;
     akcja_ = nullptr; dane_akcji_ = nullptr;

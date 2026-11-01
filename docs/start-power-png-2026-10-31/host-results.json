@@ -1,0 +1,83 @@
+{
+  "result": "PASS",
+  "tests": [
+    {
+      "name": "native-ui",
+      "result": "PASS",
+      "evidence": "native-ui-host.txt",
+      "checks": 140999
+    },
+    {
+      "name": "settings-power",
+      "result": "PASS",
+      "evidence": "settings-power-host.txt",
+      "checks": 2676
+    },
+    {
+      "name": "png-decoder",
+      "result": "PASS",
+      "evidence": "png-decoder-host.txt"
+    },
+    {
+      "name": "png-bomb",
+      "result": "PASS",
+      "evidence": "png-bomb-host.txt"
+    },
+    {
+      "name": "display-geometry",
+      "result": "PASS",
+      "evidence": "display-geometry-host.txt"
+    },
+    {
+      "name": "bootstrap",
+      "result": "PASS",
+      "evidence": "bootstrap-host.txt"
+    },
+    {
+      "name": "png-regressions",
+      "result": "PASS",
+      "evidence": "png-regressions-host.txt"
+    },
+    {
+      "name": "rounded-popups",
+      "result": "PASS",
+      "summary": "308494/308494 PASS"
+    },
+    {
+      "name": "controls",
+      "result": "PASS",
+      "summary": "1379 / 1379"
+    },
+    {
+      "name": "theme-engine",
+      "result": "PASS",
+      "summary": "155 / 155"
+    },
+    {
+      "name": "fault-isolation",
+      "result": "PASS",
+      "summary": "32768 checks PASS"
+    },
+    {
+      "name": "bsf",
+      "result": "PASS",
+      "summary": "12201 checks PASS"
+    },
+    {
+      "name": "bsf-ui",
+      "result": "PASS",
+      "summary": "5876 checks PASS"
+    },
+    {
+      "name": "display-snapshot",
+      "result": "PASS",
+      "summary": "Display snapshot ABI / stale generation / authorization: PASS"
+    },
+    {
+      "name": "png-focused",
+      "result": "PASS",
+      "checks": 975,
+      "evidence": "png-focused-host.txt"
+    }
+  ]
+}

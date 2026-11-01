@@ -2,6 +2,7 @@
 
 #include "przycisk.h"
 #include "widok_ikon.h"
+#include "ikona_png.h"
 
 namespace BursztynUI {
 
@@ -56,6 +57,8 @@ public:
         uniewaznij();
     }
 
+    void ustaw_obraz_ikony(const IkonaPNG* p) { obraz_png_=p;uniewaznij(); }
+
     Rozmiar zmierz(Rozmiar dostepny_rozmiar) override {
         (void)dostepny_rozmiar;
         SkalaUI skala = skala_dpi_;
@@ -99,7 +102,7 @@ public:
         StylStanu s = wyznacz_biezacy_styl_stanu();
         rysuj_tlo_i_ramke(ctx, s);
 
-        int ic_sz = 18 * skala;
+        int ic_sz = obraz_png_ && obraz_png_->piksele() ? obraz_png_->bok() : 18 * skala;
         int txt_w = CzcionkaUI::zmierz_tekst(tekst_, skala);
         int txt_h = CzcionkaUI::pobierz_wysokosc(skala);
 
@@ -154,11 +157,17 @@ private:
     PozycjaIkony pozycja_ikony_{PozycjaIkony::Lewo};
     TypIkonyWidoku typ_ikony_{TypIkonyWidoku::Plik};
 
+    const IkonaPNG* obraz_png_=nullptr;
     const uint32_t* piksele_ikony_{nullptr};
     int ikona_w_{0};
     int ikona_h_{0};
 
     void rysuj_ikone(KontekstRysowania& ctx, int x, int y, int w, int h) {
+        if(obraz_png_ && obraz_png_->piksele()) {
+            int side=obraz_png_->bok();
+            rysuj_png(ctx,{x+(w-side)/2,y+(h-side)/2,side,side},obraz_png_->piksele(),side,czy_wlaczona_);
+            return;
+        }
         if (ikona_id() != 0) {
             rysuj_ikone_ui(ctx, Prostokat(x, y, w, h), ikona_id(), czy_wlaczona_, skala_dpi_);
             return;

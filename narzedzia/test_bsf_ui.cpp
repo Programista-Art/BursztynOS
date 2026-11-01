@@ -1,6 +1,7 @@
 #define BSF_NATIVE 1
 #include "../bursztyn_ui/bursztyn_ui.h"
 #include "../programy/husarz/paint.h"
+#define BURSZTYN_HOST_CUSTOM_ALPHA 1
 #include "bursztyn_ui_host_fixture.h"
 #include <fstream>
 #include <iterator>

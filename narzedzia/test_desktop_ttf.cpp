@@ -1,6 +1,7 @@
 #define BSF_NATIVE 1
 #include "../bursztyn_ui/bursztyn_ui.h"
 
+#define BURSZTYN_HOST_CUSTOM_ALPHA 1
 #include "bursztyn_ui_host_fixture.h"
 #include <fstream>
 #include <iterator>
@@ -83,6 +84,12 @@ void rysuj_tekst_wysrodkowany(int x,int y,int w,int h,int scale,uint32_t color,c
     ctx->rysuj_tekst_wysrodkowany({x,y,w,h},text,color,SkalaUI::procent(scale));delete ctx;
 }
 void gui_odswiez_pulpit() {}
+static unsigned icon_reads=0;
+bool czytaj_fragment_pliku(const char* path,uint64_t offset,char* out,uint32_t capacity,uint32_t* got){
+ auto i=files.find(path);if(i==files.end()||offset>i->second.size())return false;
+ size_t n=i->second.size()-offset;if(n>capacity)n=capacity;
+ memcpy(out,i->second.data()+offset,n);*got=n;++icon_reads;return true;
+}
 int bws_utworz_warstwe(int,int,int,int,int) {return 1;}
 bool gui_blit_alpha(int x,int y,int w,int h,const uint32_t* pixels) {
     if(!test_capture_pixels && !test_surface_width)return true;
@@ -100,12 +107,19 @@ static bool inside(Prostokat outer,Prostokat r){return r.x>=0&&r.y>=0&&r.prawy()
 #include "desktop_display_cases.h"
 #include "desktop_rubber_pixels_cases.h"
 #include "slider_pixel_cases.h"
+#include "power_png_cases.h"
 int main(){
  saved.checksum=BSF::checksum(saved);g_test_bws_hook=hook;
  for(const char* name:{"DejaVuSans.ttf","DejaVuSans-Bold.ttf","DejaVuSansMono.ttf","DejaVuSerifCondensed-Italic.ttf"}){
   std::ifstream f(std::string("czcionki/ttf/")+name,std::ios::binary);files[std::string("/czcionki/ttf/")+name]={std::istreambuf_iterator<char>(f),{}};directory+=std::string("[PLIK] ")+name+"\n";
  }
+ for(const char* n:{"zasilania","zablokuj","uspij","zamknij","uruchomponownie"}){
+  std::string path=std::string("/ikonki/przycisk")+n+".png";
+  std::ifstream f(path.substr(1),std::ios::binary);files[path]={std::istreambuf_iterator<char>(f),{}};CHECK(!files[path].empty());
+ }
  CHECK(BSF::ready());
+ power_png_cases();
+ if(getenv("BURSZTYN_POWER_PNG_ONLY"))return 0;
  wpisy_pulpitu=new WpisPulpitu[PULPIT_MAX_WPISOW]{};
 #ifdef BURSZTYN_RUBBER_ONLY
  desktop_rubber_pixels_cases();printf("Desktop rubber interleaving: %u checks PASS\n",checks);

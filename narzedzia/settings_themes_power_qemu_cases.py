@@ -6,6 +6,9 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 
 def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel_sha,iso_sha):
+    from power_png_qemu_observer import PowerObserver
+    power_observer=PowerObserver(hmp,symbol)
+    power_samples=[]
     def read(address,n):
         data=[]
         for line in hmp(f'xp /{n}bx 0x{address:x}').splitlines():
@@ -41,13 +44,23 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
         click(28,700);wait(popup,'Start open',90);settle()
         if hover:
             # Fixed lower section in the default 1280x720, 100%, Sans 16 release.
-            move(180,652);settle(120)
-        else:key('tab');key('spc');settle()
+            rect=power_observer.geometry()["button"]
+            move(rect[0]+rect[2]//2,rect[1]+rect[3]//2)
+            wait(power_observer.opened,'300 ms hover opens power popup',90);settle(80)
+        else:
+            key('tab');key('spc');wait(power_observer.opened,'keyboard power popup',90);settle()
         assert popup();im=screenshot(name)
         color=struct.unpack('<I',read(theme_address+16,4))[0]
         rgb=((color>>16)&255,(color>>8)&255,color&255)
         assert im.getpixel((15,500))==rgb,('Start theme background',name,rgb,im.getpixel((15,500)))
-        assert im.getpixel((22,550))==rgb,('power popup theme background',name,rgb,im.getpixel((22,550)))
+        bounds=power_observer.geometry()['popup'];sample=(bounds[0]+4,bounds[1]+15)
+        assert im.getpixel(sample)==rgb,('power popup theme background',name,rgb,im.getpixel(sample))
+        power_samples.append(power_observer.verify(im))
+        if hover:
+            button=power_observer.geometry()['button'];bounds=power_observer.geometry()['popup']
+            move(button[0]+button[2]//2,button[1]-4)
+            move(bounds[0]+bounds[2]//2,bounds[1]+bounds[3]//2);settle(120)
+            power_samples.append(power_observer.verify(screenshot('power-gap-transit')))
     opened();original=theme();samples=[]
     # Observe the actual countdown pixels while the desktop uses the same theme.
     # A host test checks every second and the exact dirty rectangle separately.
@@ -87,7 +100,8 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
         color=struct.unpack('<I',read(theme_address+16,4))[0];rgb=((color>>16)&255,(color>>8)&255,color&255)
         def repainted():
             im=screenshot('rollback-palette-probe')
-            return im.getpixel((15,500))==rgb and im.getpixel((22,550))==rgb
+            bounds=power_observer.geometry()['popup']
+            return im.getpixel((15,500))==rgb and im.getpixel((bounds[0]+4,bounds[1]+15))==rgb
         wait(repainted,'Start and power popup repainted after rollback '+target,30,interval=.1)
         screenshot('rollback-start-'+target)
         print('Rollback observed; closing power',flush=True)
@@ -108,6 +122,6 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
     start_power('power-keyboard');key('up');key('down');key('esc');settle();assert popup();key('esc');wait(lambda:not popup(),'Start dismissed after Escape',90)
     start_power('power-outside');click(1150,600);settle();assert not popup()
     health()
-    return dict(result='PASS',mode='settings-themes-power',themes=samples,apply_cancels_rollback=True,
+    return dict(power_png_samples=power_samples,result='PASS',mode='settings-themes-power',themes=samples,apply_cancels_rollback=True,
                 visible_countdown=True,empty_search_top_row=True,settings_reopen=True,close_rollback=True,power_mouse_keyboard=True,unsupported_actions_disabled=True,
                 kernel_sha256=kernel_sha,iso_sha256=iso_sha)

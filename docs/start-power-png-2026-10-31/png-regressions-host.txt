@@ -1,0 +1,89 @@
+real PNG PASS 1920x1080 268 ms peak_decoder_heap=16605240 bytes
+wallpaper scaling PASS 1280x720 four modes
+wallpaper scaling PASS 1920x1080 four modes
+wallpaper scaling PASS 2560x1440 four modes
+wallpaper scaling PASS 3440x1440 four modes
+wallpaper scaling PASS 3840x2160 four modes
+dekoduj_png API PASS
+malformed PNG PASS 25 cases
+fixture PASS 32x24 0 ms
+fixture PASS 32x24 1 ms
+fixture PASS 32x24 1 ms
+fixture PASS 32x24 0 ms
+fixture PASS 32x24 0 ms
+fixture PASS 32x24 3 ms
+[TAPETY PAK] Zbudowano pakiet tapet: /tmp/bursztyn-pack-lysfgv7b/pak_a.pak
+[TAPETY PAK] Liczba tapet: 3
+[TAPETY PAK] Liczba miniatur: 3 (160x90, BTP2, cover)
+  [00] czerwony.png (canon: wp_b235735a9db2773d.png, miniatura: miniatury/wp_b235735a9db2773d.btp) [DEFAULT]: 287 B (CRC32: 0x41C9184A)
+  [01] polskie_góry_żółć.png (canon: wp_2654784f3d469022.png, miniatura: miniatury/wp_2654784f3d469022.btp): 153 B (CRC32: 0x9F2664D7)
+  [02] zielony_alpha.png (canon: wp_3c543ed18dd904e5.png, miniatura: miniatury/wp_3c543ed18dd904e5.btp): 269 B (CRC32: 0x80274FCD)
+[TAPETY PAK] Laczny rozmiar zrodlowych BTP: 709 B (0.00 MiB)
+[TAPETY PAK] Laczny rozmiar miniatur: 297 B (0.00 MiB)
+[TAPETY PAK] Laczny rozmiar /tmp/bursztyn-pack-lysfgv7b/pak_a.pak: 1312 B (0.00 MiB)
+[TAPETY BUILD] sources=3 entries=6 bytes=1312 crc=OK
+[TAPETY PAK] Zbudowano pakiet tapet: /tmp/bursztyn-pack-lysfgv7b/pak_mixed.pak
+[TAPETY PAK] Liczba tapet: 5
+[TAPETY PAK] Liczba miniatur: 5 (160x90, BTP2, cover)
+  [00] bursztyn01.btp (canon: bursztyn01.btp, miniatura: miniatury/bursztyn01.btp) [DEFAULT]: 96 B (CRC32: 0x47E253D5)
+  [01] czerwony.png (canon: wp_b235735a9db2773d.png, miniatura: miniatury/wp_b235735a9db2773d.btp): 287 B (CRC32: 0x41C9184A)
+  [02] polskie_góry_żółć.png (canon: wp_2654784f3d469022.png, miniatura: miniatury/wp_2654784f3d469022.btp): 153 B (CRC32: 0x9F2664D7)
+  [03] widok.jpg (canon: wp_5b775a2d37881b2c.jpg, miniatura: miniatury/wp_5b775a2d37881b2c.btp): 2448766 B (CRC32: 0x1F894A18)
+  [04] zielony_alpha.png (canon: wp_3c543ed18dd904e5.png, miniatura: miniatury/wp_3c543ed18dd904e5.btp): 269 B (CRC32: 0x80274FCD)
+[TAPETY PAK] Laczny rozmiar zrodlowych BTP: 2449571 B (2.34 MiB)
+[TAPETY PAK] Laczny rozmiar miniatur: 56446 B (0.05 MiB)
+[TAPETY PAK] Laczny rozmiar /tmp/bursztyn-pack-lysfgv7b/pak_mixed.pak: 2506480 B (2.39 MiB)
+[TAPETY BUILD] sources=5 entries=10 bytes=2506480 crc=OK
+[TAPETY PAK] Zbudowano pakiet tapet: /tmp/bursztyn-pack-lysfgv7b/pak_def.pak
+[TAPETY PAK] Liczba tapet: 5
+[TAPETY PAK] Liczba miniatur: 5 (160x90, BTP2, cover)
+  [00] czerwony.png (canon: wp_b235735a9db2773d.png, miniatura: miniatury/wp_b235735a9db2773d.btp) [DEFAULT]: 287 B (CRC32: 0x41C9184A)
+  [01] bursztyn01.btp (canon: bursztyn01.btp, miniatura: miniatury/bursztyn01.btp): 96 B (CRC32: 0x47E253D5)
+  [02] polskie_góry_żółć.png (canon: wp_2654784f3d469022.png, miniatura: miniatury/wp_2654784f3d469022.btp): 153 B (CRC32: 0x9F2664D7)
+  [03] widok.jpg (canon: wp_5b775a2d37881b2c.jpg, miniatura: miniatury/wp_5b775a2d37881b2c.btp): 2448766 B (CRC32: 0x1F894A18)
+  [04] zielony_alpha.png (canon: wp_3c543ed18dd904e5.png, miniatura: miniatury/wp_3c543ed18dd904e5.btp): 269 B (CRC32: 0x80274FCD)
+[TAPETY PAK] Laczny rozmiar zrodlowych BTP: 2449571 B (2.34 MiB)
+[TAPETY PAK] Laczny rozmiar miniatur: 56446 B (0.05 MiB)
+[TAPETY PAK] Laczny rozmiar /tmp/bursztyn-pack-lysfgv7b/pak_def.pak: 2506480 B (2.39 MiB)
+[TAPETY BUILD] sources=5 entries=10 bytes=2506480 crc=OK
+[TAPETY PAK] Zbudowano pakiet tapet: /tmp/bursztyn-pack-lysfgv7b/pak_f.pak
+[TAPETY PAK] Liczba tapet: 5
+[TAPETY PAK] Liczba miniatur: 5 (160x90, BTP2, cover)
+  [00] bursztyn01.btp (canon: bursztyn01.btp, miniatura: miniatury/bursztyn01.btp) [DEFAULT]: 96 B (CRC32: 0x47E253D5)
+  [01] czerwony.png (canon: wp_b235735a9db2773d.png, miniatura: miniatury/wp_b235735a9db2773d.btp): 287 B (CRC32: 0x41C9184A)
+  [02] polskie_góry_żółć.png (canon: wp_2654784f3d469022.png, miniatura: miniatury/wp_2654784f3d469022.btp): 153 B (CRC32: 0x9F2664D7)
+  [03] widok.jpg (canon: wp_5b775a2d37881b2c.jpg, miniatura: miniatury/wp_5b775a2d37881b2c.btp): 2448766 B (CRC32: 0x1F894A18)
+  [04] zielony_alpha.png (canon: wp_3c543ed18dd904e5.png, miniatura: miniatury/wp_3c543ed18dd904e5.btp): 269 B (CRC32: 0x80274FCD)
+[TAPETY PAK] Laczny rozmiar zrodlowych BTP: 2449571 B (2.34 MiB)
+[TAPETY PAK] Laczny rozmiar miniatur: 56446 B (0.05 MiB)
+[TAPETY PAK] Laczny rozmiar /tmp/bursztyn-pack-lysfgv7b/pak_f.pak: 2506480 B (2.39 MiB)
+[TAPETY BUILD] sources=5 entries=10 bytes=2506480 crc=OK
+[TAPETY PAK] Zbudowano pakiet tapet: /tmp/bursztyn-pack-lysfgv7b/pak_det1.pak
+[TAPETY PAK] Liczba tapet: 5
+[TAPETY PAK] Liczba miniatur: 5 (160x90, BTP2, cover)
+  [00] bursztyn01.btp (canon: bursztyn01.btp, miniatura: miniatury/bursztyn01.btp) [DEFAULT]: 96 B (CRC32: 0x47E253D5)
+  [01] czerwony.png (canon: wp_b235735a9db2773d.png, miniatura: miniatury/wp_b235735a9db2773d.btp): 287 B (CRC32: 0x41C9184A)
+  [02] polskie_góry_żółć.png (canon: wp_2654784f3d469022.png, miniatura: miniatury/wp_2654784f3d469022.btp): 153 B (CRC32: 0x9F2664D7)
+  [03] widok.jpg (canon: wp_5b775a2d37881b2c.jpg, miniatura: miniatury/wp_5b775a2d37881b2c.btp): 2448766 B (CRC32: 0x1F894A18)
+  [04] zielony_alpha.png (canon: wp_3c543ed18dd904e5.png, miniatura: miniatury/wp_3c543ed18dd904e5.btp): 269 B (CRC32: 0x80274FCD)
+[TAPETY PAK] Laczny rozmiar zrodlowych BTP: 2449571 B (2.34 MiB)
+[TAPETY PAK] Laczny rozmiar miniatur: 56446 B (0.05 MiB)
+[TAPETY PAK] Laczny rozmiar /tmp/bursztyn-pack-lysfgv7b/pak_det1.pak: 2506480 B (2.39 MiB)
+[TAPETY BUILD] sources=5 entries=10 bytes=2506480 crc=OK
+[TAPETY PAK] Zbudowano pakiet tapet: /tmp/bursztyn-pack-lysfgv7b/pak_det2.pak
+[TAPETY PAK] Liczba tapet: 5
+[TAPETY PAK] Liczba miniatur: 5 (160x90, BTP2, cover)
+  [00] bursztyn01.btp (canon: bursztyn01.btp, miniatura: miniatury/bursztyn01.btp) [DEFAULT]: 96 B (CRC32: 0x47E253D5)
+  [01] czerwony.png (canon: wp_b235735a9db2773d.png, miniatura: miniatury/wp_b235735a9db2773d.btp): 287 B (CRC32: 0x41C9184A)
+  [02] polskie_góry_żółć.png (canon: wp_2654784f3d469022.png, miniatura: miniatury/wp_2654784f3d469022.btp): 153 B (CRC32: 0x9F2664D7)
+  [03] widok.jpg (canon: wp_5b775a2d37881b2c.jpg, miniatura: miniatury/wp_5b775a2d37881b2c.btp): 2448766 B (CRC32: 0x1F894A18)
+  [04] zielony_alpha.png (canon: wp_3c543ed18dd904e5.png, miniatura: miniatury/wp_3c543ed18dd904e5.btp): 269 B (CRC32: 0x80274FCD)
+[TAPETY PAK] Laczny rozmiar zrodlowych BTP: 2449571 B (2.34 MiB)
+[TAPETY PAK] Laczny rozmiar miniatur: 56446 B (0.05 MiB)
+[TAPETY PAK] Laczny rozmiar /tmp/bursztyn-pack-lysfgv7b/pak_det2.pak: 2506480 B (2.39 MiB)
+[TAPETY BUILD] sources=5 entries=10 bytes=2506480 crc=OK
+[TEST PNG] Compiling and running test_dekoder_png with ASan/UBSan...
+[TEST PNG] C++ decoder, scaling, alpha blending, and ASan/UBSan PASS.
+[TEST PNG] Testing package generator across scenarios A through O...
+[TEST PNG] Packaging tests A through O PASS.
+[TEST PNG] ALL TESTS PASS.

@@ -82,7 +82,46 @@ class Surface : public PowierzchniaPopup, private ObslugaWidokuMenu {
   }
  };
  Search* search;Results* list;Power* power;
+ IkonaPNG power_icons[5];
  Menu power_items;WidokMenuPopup power_popup;
+ void prepare_icons(){
+  power_icons[0].przygotuj("/ikonki/przyciskzasilania.png",22*skala_dpi_);
+  power->ustaw_obraz_ikony(&power_icons[0]);
+  struct ActionIcon {uint32_t id;const char* path;};
+  static constexpr ActionIcon mapping[]={
+   {22,"/ikonki/przyciskzablokuj.png"},{23,"/ikonki/przyciskuspij.png"},
+   {19,"/ikonki/przyciskzamknij.png"},{18,"/ikonki/przyciskuruchomponownie.png"}};
+  for(unsigned i=0;i<4;++i){power_icons[i+1].przygotuj(mapping[i].path,18*skala_dpi_);
+   power_items.znajdz(mapping[i].id)->ustaw_obraz_ikony(&power_icons[i+1]);}
+ }
+ Prostokat place_power()const{
+  auto work=events.popups.obszar_roboczy_ekranu();auto button=power->obszar_ekranu();auto s=skala_dpi_;
+  int margin=4*s,gap=8*s,shadow=2*s;
+  auto size=power_popup.wymagany_rozmiar(s);
+  if(size.szerokosc<150*s)size.szerokosc=150*s;
+  int maxw=work.szerokosc-2*margin;
+  if(size.szerokosc>maxw)size.szerokosc=maxw;
+  if(size.wysokosc>work.wysokosc-2*margin)size.wysokosc=work.wysokosc-2*margin;
+  int x=button.prawy()-size.szerokosc;
+  if(x<work.x+margin)x=work.x+margin;
+  if(x+size.szerokosc>work.prawy()-margin)x=work.prawy()-margin-size.szerokosc;
+  int y=button.y-gap-shadow-size.wysokosc;
+  if(y<work.y+margin){
+   y=button.dolny()+gap;
+   if(y+size.wysokosc>work.dolny()-margin){
+    // A very short work area: use the nearest non-overlapping side.
+    y=work.y+margin;
+    int left=button.x-gap-size.szerokosc,right=button.prawy()+gap;
+    if(left>=work.x+margin)x=left;
+    else if(right+size.szerokosc<=work.prawy()-margin)x=right;
+    else { // No side fits; retain separation by clipping available height above.
+     y=work.y+margin;size.wysokosc=button.y-gap-shadow-y;
+     if(size.wysokosc<0)size.wysokosc=0;
+    }
+   }
+  }
+  return {x,y,size.szerokosc,size.wysokosc};
+ }
  uint64_t hover_deadline=0,leave_deadline=0;
  bool pointer_power=false,pointer_popup=false;
  void menu_aktywuj(WidokMenuPopup&,ElementMenu& item)override{if(item.czy_wlaczony()){pending=int(item.identyfikator());events.popups.zamknij(PowodZamknieciaPopup::Zatwierdzenie);}}
@@ -118,17 +157,15 @@ public:
  Prostokat shutdown_bounds()const{return power->obszar_ekranu();}
  Prostokat empty_message_bounds()const{return list->empty_bounds();}
  bool empty_message_visible()const{return list->empty_visible();}
- Prostokat power_anchor()const{
-  int pad=10*skala_dpi_;auto r=power->obszar_ekranu();
-  return {obszar_ekranu_.x+pad,r.y,obszar_.szerokosc-2*pad,r.wysokosc};
- }
+ Prostokat power_anchor()const{return power->obszar_ekranu();}
  Prostokat search_bounds()const{return search->obszar_ekranu();}
  void rozmiesc(Prostokat r)override{
   PowierzchniaPopup::rozmiesc(r);auto s=skala_dpi_;int pad=10*s,gap=8*s;
   row_height=CzcionkaUI::pobierz_wysokosc(s)+12*s;if(row_height<30*s)row_height=30*s;
   int w=r.szerokosc-2*pad;
   search->rozmiesc({pad,pad,w,row_height});
-  int side=36*s;power->rozmiesc({(r.szerokosc-side)/2,r.wysokosc-pad-side,side,side});
+  prepare_icons();
+  int side=36*s,inset=8*s;power->rozmiesc({r.szerokosc-inset-side,r.wysokosc-inset-side,side,side});
   int top=pad+row_height+gap,bottom=r.wysokosc-pad-side-2*gap;
   int h=bottom-top;if(h<0)h=0;rows=h/row_height;if(rows<1)rows=1;
   list->rozmiesc({pad,top,w,h});model.visible(rows);
@@ -141,8 +178,9 @@ public:
   hover_deadline=leave_deadline=0;pointer_power=pointer_popup=false;
   events.reset_input();pending=-1;list->reset();search->ustaw_tekst("");model.filter("");
   events.geometria({0,0,work.szerokosc,work.wysokosc},work);auto s=ui_skala();
+  if(x<work.x)x=work.x;
   int width=340*s;for(auto& app:apps){int measured=CzcionkaUI::zmierz_tekst(app.name,s)+44*s;if(measured>width)width=measured;}
-  if(width>work.szerokosc-x)width=work.szerokosc-x;
+  if(width>work.prawy()-x)width=work.prawy()-x;
   if(width>2048-2*s)width=2048-2*s;
   int height=600*s;if(height>work.wysokosc-12*s)height=work.wysokosc-12*s;
   if(height>2048-2*s)height=2048-2*s;
@@ -152,8 +190,7 @@ public:
  void open_power(){
   if(power_popup.czy_otwarta())return;
   hover_deadline=leave_deadline=0;power_popup.zaktualizuj_motyw();
-  auto anchor=power_anchor();
-  auto where=events.popups.umiesc_pod_kotwica_ekranu(anchor,power_popup.wymagany_rozmiar(skala_dpi_),false);
+  auto where=place_power();
   events.popups.otworz_podmenu(power_popup,where,&power_popup);power_popup.ustaw_aktywny_indeks(2);
   events.popups.odrysuj_popupy(true);
  }
@@ -185,7 +222,7 @@ public:
   if(czy_otwarta()){
    rozmiesc(obszar_);
    if(power_popup.czy_otwarta())events.popups.przemiesc_powierzchnie(power_popup,
-    events.popups.umiesc_pod_kotwica_ekranu(power_anchor(),power_popup.wymagany_rozmiar(skala_dpi_),false));
+    place_power());
    uniewaznij();events.popups.odrysuj_popupy(true);
   }
  }

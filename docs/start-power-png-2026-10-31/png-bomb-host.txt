@@ -1,0 +1,1 @@
+Bounded PNG: 3456 checks PASS, peak decoder+copy heap=1580080 bytes

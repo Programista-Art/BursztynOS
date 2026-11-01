@@ -4,6 +4,7 @@
 #include "menu.h"
 #include "czcionka.h"
 #include "ikona_ui.h"
+#include "ikona_png.h"
 
 namespace BursztynUI {
 
@@ -53,7 +54,8 @@ public:
             const ElementMenu* e=menu_->element(i);
             if(!e || !e->czy_widoczny() || e->czy_separator()) continue;
             if(e->typ_zaznaczenia()!=TypZaznaczeniaMenu::Brak || e->czy_zaznaczony()) c.znak=18*s;
-            if(e->ikona()) c.ikona=20*s;
+            if(e->obraz_ikony()) c.ikona=24*s;
+            else if(e->ikona() && c.ikona<20*s) c.ikona=20*s;
             if(e->podmenu()) c.strzalka=14*s;
             int width=CzcionkaUI::zmierz_tekst(e->tekst(),s);if(width>c.tekst) c.tekst=width;
             width=CzcionkaUI::zmierz_tekst(e->skrot(),s);if(width>c.skrot) c.skrot=width;
@@ -63,7 +65,11 @@ public:
     int tekst_x(SkalaUI s) const { Kolumny c=kolumny(s);return 1*s+8*s+c.znak+c.ikona; }
     int wysokosc_wiersza(SkalaUI s) const {
         int h=CzcionkaUI::pobierz_wysokosc(s)+8*s;
-        return h>24*s?h:24*s;
+        int minimum=24*s;
+        if(menu_)for(size_t i=0;i<menu_->liczba_elementow();++i){
+            auto* e=menu_->element(i);if(e&&e->czy_widoczny()&&e->obraz_ikony())minimum=26*s;
+        }
+        return h>minimum?h:minimum;
     }
     Rozmiar wymagany_rozmiar(SkalaUI skala = 1) const {
         Kolumny c=kolumny(skala);
@@ -131,10 +137,21 @@ public:
                     ctx.rysuj_linie_pozioma(r.x + 11 * s, ty + 11 * s, 8 * s, mark_col);
                 }
             }
-            if (e->ikona() != 0) rysuj_ikone_ui(ctx, Prostokat(r.x + 8 * s + columns.znak, r.y + 5 * s,
-                                                               14 * s, 14 * s),
-                                                e->ikona(), e->czy_wlaczony(), s);
-            ctx.rysuj_tekst(Punkt(label_x, ty), e->tekst(), kolor, s);
+            const auto* png=e->obraz_ikony();
+            if(png && png->piksele()) {
+                int side=png->bok();
+                rysuj_png(ctx,{r.x+8*s+columns.znak,r.y+(r.wysokosc-side)/2,side,side},png->piksele(),side,e->czy_wlaczony());
+            }else if(e->ikona()){int side=e->obraz_ikony()?18*s:14*s;rysuj_ikone_ui(ctx,{r.x+8*s+columns.znak,r.y+(r.wysokosc-side)/2,side,side},e->ikona(),e->czy_wlaczony(),s);}
+            int available=r.prawy()-8*s-columns.strzalka-label_x;
+            if(columns.skrot)available-=columns.skrot+12*s;
+            char label[100]{};size_t n=0;while(e->tekst()[n]&&n<96){label[n]=e->tekst()[n];++n;}
+            if(CzcionkaUI::zmierz_tekst(label,s)>available){
+                do{n=CzcionkaUI::poprzedni_znak(label,n);label[n]=char(0xe2);label[n+1]=char(0x80);label[n+2]=char(0xa6);label[n+3]=0;}
+                while(n&&CzcionkaUI::zmierz_tekst(label,s)>available);
+            }
+            ctx.dodaj_przyciecie({label_x,r.y,available>0?available:0,r.wysokosc});
+            ctx.rysuj_tekst(Punkt(label_x, ty), label, kolor, s);
+            ctx.zdejmij_przyciecie();
             if (e->skrot()[0]) {
                 int sw = CzcionkaUI::zmierz_tekst(e->skrot(), s);
                 uint32_t skrot_col = (jest_aktywny || jest_wcisniety) ? stan_wiersza.tekst

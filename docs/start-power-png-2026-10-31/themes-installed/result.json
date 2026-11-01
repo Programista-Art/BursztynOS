@@ -1,0 +1,461 @@
+{
+  "power_png_samples": [
+    {
+      "start": [
+        10,
+        80,
+        340,
+        600
+      ],
+      "button": [
+        306,
+        636,
+        36,
+        36
+      ],
+      "popup": [
+        144,
+        516,
+        198,
+        110
+      ],
+      "icons": [
+        {
+          "name": "zasilania",
+          "side": 22,
+          "pixels": 484
+        },
+        {
+          "name": "zablokuj",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "uspij",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "zamknij",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "uruchomponownie",
+          "side": 18,
+          "pixels": 324
+        }
+      ]
+    },
+    {
+      "start": [
+        10,
+        80,
+        340,
+        600
+      ],
+      "button": [
+        306,
+        636,
+        36,
+        36
+      ],
+      "popup": [
+        144,
+        516,
+        198,
+        110
+      ],
+      "icons": [
+        {
+          "name": "zasilania",
+          "side": 22,
+          "pixels": 484
+        },
+        {
+          "name": "zablokuj",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "uspij",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "zamknij",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "uruchomponownie",
+          "side": 18,
+          "pixels": 324
+        }
+      ]
+    },
+    {
+      "start": [
+        10,
+        80,
+        340,
+        600
+      ],
+      "button": [
+        306,
+        636,
+        36,
+        36
+      ],
+      "popup": [
+        144,
+        516,
+        198,
+        110
+      ],
+      "icons": [
+        {
+          "name": "zasilania",
+          "side": 22,
+          "pixels": 484
+        },
+        {
+          "name": "zablokuj",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "uspij",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "zamknij",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "uruchomponownie",
+          "side": 18,
+          "pixels": 324
+        }
+      ]
+    },
+    {
+      "start": [
+        10,
+        80,
+        340,
+        600
+      ],
+      "button": [
+        306,
+        636,
+        36,
+        36
+      ],
+      "popup": [
+        144,
+        516,
+        198,
+        110
+      ],
+      "icons": [
+        {
+          "name": "zasilania",
+          "side": 22,
+          "pixels": 484
+        },
+        {
+          "name": "zablokuj",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "uspij",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "zamknij",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "uruchomponownie",
+          "side": 18,
+          "pixels": 324
+        }
+      ]
+    },
+    {
+      "start": [
+        10,
+        80,
+        340,
+        600
+      ],
+      "button": [
+        306,
+        636,
+        36,
+        36
+      ],
+      "popup": [
+        144,
+        516,
+        198,
+        110
+      ],
+      "icons": [
+        {
+          "name": "zasilania",
+          "side": 22,
+          "pixels": 484
+        },
+        {
+          "name": "zablokuj",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "uspij",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "zamknij",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "uruchomponownie",
+          "side": 18,
+          "pixels": 324
+        }
+      ]
+    },
+    {
+      "start": [
+        10,
+        80,
+        340,
+        600
+      ],
+      "button": [
+        306,
+        636,
+        36,
+        36
+      ],
+      "popup": [
+        144,
+        516,
+        198,
+        110
+      ],
+      "icons": [
+        {
+          "name": "zasilania",
+          "side": 22,
+          "pixels": 315
+        },
+        {
+          "name": "zablokuj",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "uspij",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "zamknij",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "uruchomponownie",
+          "side": 18,
+          "pixels": 324
+        }
+      ]
+    },
+    {
+      "start": [
+        10,
+        80,
+        340,
+        600
+      ],
+      "button": [
+        306,
+        636,
+        36,
+        36
+      ],
+      "popup": [
+        144,
+        516,
+        198,
+        110
+      ],
+      "icons": [
+        {
+          "name": "zasilania",
+          "side": 22,
+          "pixels": 484
+        },
+        {
+          "name": "zablokuj",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "uspij",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "zamknij",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "uruchomponownie",
+          "side": 18,
+          "pixels": 324
+        }
+      ]
+    },
+    {
+      "start": [
+        10,
+        80,
+        340,
+        600
+      ],
+      "button": [
+        306,
+        636,
+        36,
+        36
+      ],
+      "popup": [
+        144,
+        516,
+        198,
+        110
+      ],
+      "icons": [
+        {
+          "name": "zasilania",
+          "side": 22,
+          "pixels": 484
+        },
+        {
+          "name": "zablokuj",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "uspij",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "zamknij",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "uruchomponownie",
+          "side": 18,
+          "pixels": 324
+        }
+      ]
+    },
+    {
+      "start": [
+        10,
+        80,
+        340,
+        600
+      ],
+      "button": [
+        306,
+        636,
+        36,
+        36
+      ],
+      "popup": [
+        144,
+        516,
+        198,
+        110
+      ],
+      "icons": [
+        {
+          "name": "zasilania",
+          "side": 22,
+          "pixels": 484
+        },
+        {
+          "name": "zablokuj",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "uspij",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "zamknij",
+          "side": 18,
+          "pixels": 324
+        },
+        {
+          "name": "uruchomponownie",
+          "side": 18,
+          "pixels": 324
+        }
+      ]
+    }
+  ],
+  "result": "PASS",
+  "mode": "settings-themes-power",
+  "themes": [
+    {
+      "id": "bursztynnocny",
+      "rollback": true
+    },
+    {
+      "id": "baltyckanoc",
+      "rollback": true
+    },
+    {
+      "id": "grafit",
+      "rollback": true
+    },
+    {
+      "id": "bursztynklasyczny",
+      "rollback": true
+    },
+    {
+      "id": "bursztynjasny",
+      "rollback": true
+    }
+  ],
+  "apply_cancels_rollback": true,
+  "visible_countdown": true,
+  "empty_search_top_row": true,
+  "settings_reopen": true,
+  "close_rollback": true,
+  "power_mouse_keyboard": true,
+  "unsupported_actions_disabled": true,
+  "kernel_sha256": "801e45c464b12273160f2f93d19ab844170fde4742b3a5f7b7156fde2751fa4c",
+  "iso_sha256": "c056079324457db820ca83dc4a9be8e4cae633eec903fe6ed195bdbf4b51156a",
+  "boot_mode": "installed disk only, no ISO attached"
+}

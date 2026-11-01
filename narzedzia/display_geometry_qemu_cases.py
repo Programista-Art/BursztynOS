@@ -3,6 +3,8 @@ import json,re,struct,subprocess
 from pathlib import Path
 
 def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel_sha,iso_sha,input_kind='usb'):
+    from power_png_qemu_observer import PowerObserver
+    power_observer=PowerObserver(hmp,symbol)
     def read(address,n):
         data=[]
         for line in hmp(f'xp /{n}bx 0x{address:x}').splitlines():
@@ -101,7 +103,7 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
              (1920,1080,200),(1920,1080,150),(1920,1080,125),(1920,1080,100),
              (1280,720,100),(1920,1080,100),(1280,720,125),(1920,1080,100),(1280,720,100)]
     if 'BURSZTYN_DISPLAY_SMOKE' in __import__('os').environ:
-        targets=[(1920,1080,125),(1920,1080,150),(1920,1080,200),(1280,720,100)]
+        targets=[(1920,1080,100),(1920,1080,125),(1920,1080,150),(1920,1080,200),(1280,720,200),(1280,720,150),(1280,720,125),(1280,720,100)]
     for w,h,s in targets:
         old=geometry();win=window();factor=old['scale']/100
         # Select exact popup rows through the native list. No direction-key
@@ -166,18 +168,20 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
             if (w,h,s) in seen:assert current==seen[(w,h,s)],('rendered anchor drift',w,h,s)
             else:seen[(w,h,s)]=current
         screenshot('confirmed-'+str(len(records)))
-        # Open the centered icon and its existing submenu in every committed
+        # Open the bottom-right icon and its existing submenu in every committed
         # geometry. The published union includes Start's translated shadow.
         bar=committed['taskbar'];click(bar[0]+round(28*factor),bar[1]+bar[3]//2)
         wait(lambda:read(popup_address,1)[0]!=0,'Start after display commit',60)
-        key('tab');key('spc')
+        key('tab');key('spc');wait(power_observer.opened,'power popup opened after modeset',90)
         started=ticks();wait(lambda:ticks()-started>=80,'power popup repaint after modeset',60)
         bounds=struct.unpack('<4i',read(popup_address+12,16));work=committed['work_area']
         assert bounds[0]>=work[0] and bounds[1]>=work[1],('popup origin',bounds,work)
         shadow=(2*s+50)//100  # SkalaUI rounds halves up, unlike Python round().
         assert bounds[0]+bounds[2]<=work[0]+work[2]+shadow and bounds[1]+bounds[3]<=work[1]+work[3]+shadow,('popup extent including shadow',bounds,work)
         assert bounds[0]+bounds[2]<=w and bounds[1]+bounds[3]<=h,('popup off screen',bounds,w,h)
-        screenshot('power-scale-'+str(len(records)));key('esc');key('esc')
+        image=screenshot('power-scale-'+str(len(records)))
+        record['power_png']=power_observer.verify(image,s)
+        key('esc');key('esc')
         wait(lambda:read(popup_address,1)[0]==0,'Start dismissed after modeset',60)
         record['power_popup_bounds']=list(bounds)
         (out/'progress.json').write_text(json.dumps(dict(baseline=baseline,transitions=records),indent=2))

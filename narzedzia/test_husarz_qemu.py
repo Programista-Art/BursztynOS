@@ -38,6 +38,8 @@ def main():
     parser.add_argument('--output', type=Path, default=ROOT / '.husarz-test/qemu')
     parser.add_argument('--system-windows-phase',choices=['full','core','late'],default='full')
     parser.add_argument('--system-windows-only',action='store_true',help='System identity, rounded corners and concurrent Settings apps')
+    parser.add_argument('--power-png-fonts-only',action='store_true',help='Native font matrix for Start PNG icons and measured popup')
+    parser.add_argument('--power-png-failures-only',action='store_true',help='Isolated malformed system icon fixtures with release UI code')
     parser.add_argument('--settings-themes-power-only',action='store_true',help='Native Settings themes lifecycle and Start power popup')
     parser.add_argument('--gui-regressions-only',action='store_true',help='Desktop rubber-band frames and native slider demo')
     parser.add_argument('--display-input',choices=['usb','virtio','ps2'],default='usb')
@@ -508,6 +510,14 @@ def main():
                 r,g,b=im.getpixel((1118,37))
                 return not (r>150 and g<130 and b<130)
             wait(diagnostic_closed,'diagnostic closed through native titlebar',240,interval=1)
+            if args.power_png_fonts_only:
+                from power_png_font_qemu_cases import run
+                result.update(run(out,screenshot,click,move,key,wait,guest_ticks,launch_start,health,hmp,symbol,kernel_sha,iso_sha))
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
+            if args.power_png_failures_only:
+                from power_png_failure_qemu_cases import run
+                result.update(run(out,screenshot,click,move,key,wait,guest_ticks,launch_start,health,hmp,symbol,kernel_sha,iso_sha))
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
             if args.settings_themes_power_only:
                 from settings_themes_power_qemu_cases import run
                 result.update(run(out,screenshot,click,move,key,wait,guest_ticks,launch_start,health,hmp,symbol,kernel_sha,iso_sha))

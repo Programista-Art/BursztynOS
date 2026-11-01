@@ -1,0 +1,3 @@
+g++ -std=c++17 -O0 -g -fsanitize=address,undefined -fno-pie -no-pie -ffunction-sections -fdata-sections narzedzia/test_settings_themes_power.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -Wl,--gc-sections -o .bsf-test/settings-themes-power
+ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/settings-themes-power
+Settings themes and Start power: 2676 checks PASS

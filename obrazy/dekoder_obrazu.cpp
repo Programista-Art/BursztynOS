@@ -36,9 +36,11 @@ void* memset(void* dst, int v, size_t n) {
 }
 #endif
 
+#if !defined(BURSZTYN_PNG_ONLY)
 #define STBI_ONLY_JPEG
-#define STBI_ONLY_PNG
 #define STBI_ONLY_GIF
+#endif
+#define STBI_ONLY_PNG
 #define STBI_NO_GIF_ANIMATION
 #define STBI_STRICT_JPEG_ENTROPY
 #define STBI_NO_STDIO
@@ -348,6 +350,9 @@ static BladObrazu dekoduj_obraz_impl(const uint8_t* dane, size_t n, DekodowanyOb
     *out = {};
     if (!dane || !n || n > OBRAZ_MAX_PLIK) return BladObrazu::ZaDuzy;
     const FormatObrazu f = rozpoznaj_obraz(dane, n);
+#if defined(BURSZTYN_PNG_ONLY)
+    if(f!=FormatObrazu::PNG)return BladObrazu::Format;
+#endif
     uint32_t w = 0, h = 0;
     if (f == FormatObrazu::JPEG) {
         const BladObrazu valid = sprawdz_jpeg(dane, n, &w, &h);
@@ -471,4 +476,50 @@ const char* blad_obrazu_komunikat(BladObrazu b) {
         case BladObrazu::Pamiec: return "Brak pamięci do dekodowania obrazu.";
         default: return "Błąd dekodowania obrazu.";
     }
+}
+
+namespace {
+// The shared stb decoder is serialized by its existing allocator context.
+size_t icon_live=0;
+AlokujObraz icon_alloc=nullptr;
+ZwolnijObraz icon_free=nullptr;
+struct alignas(16) IconAllocation {size_t bytes;};
+void* icon_allocate(size_t n){
+ constexpr size_t cap=2U*1024U*1024U;
+ if(n>cap-sizeof(IconAllocation)||icon_live>cap-n-sizeof(IconAllocation))return nullptr;
+ auto* p=static_cast<IconAllocation*>(icon_alloc(n+sizeof(IconAllocation)));
+ if(!p)return nullptr;
+ p->bytes=n+sizeof(IconAllocation);icon_live+=p->bytes;return p+1;
+}
+void icon_release(void* ptr){if(ptr){auto* p=static_cast<IconAllocation*>(ptr)-1;icon_live-=p->bytes;icon_free(p);}}
+}
+BladObrazu dekoduj_ikone_png(const uint8_t* data,size_t size,DekodowanyObraz* out,AlokujObraz alloc,ZwolnijObraz release){
+ if(!out||!alloc||!release)return BladObrazu::Argument;
+ *out={};if(size>256U*1024U)return BladObrazu::ZaDuzy;
+ uint32_t w=0,h=0;auto error=sprawdz_png(data,size,&w,&h);
+ if(error!=BladObrazu::OK)return error;
+ if(w>128||h>128||uint64_t(w)*h>16384)return BladObrazu::ZaDuzy;
+ // Validate every chunk CRC before invoking the existing decoder.
+ bool end=false;
+ for(size_t pos=8;pos+12<=size;){
+  uint32_t len=be32(data+pos);if(len>size-pos-12)return BladObrazu::Uszkodzony;
+  uint32_t crc=0xffffffffU;
+  for(size_t i=pos+4;i<pos+8+len;++i){crc^=data[i];for(int b=0;b<8;++b)crc=(crc>>1)^(0xedb88320U&(0U-(crc&1)));}
+  if((crc^0xffffffffU)!=be32(data+pos+8+len))return BladObrazu::Uszkodzony;
+  bool iend=data[pos+4]=='I'&&data[pos+5]=='E'&&data[pos+6]=='N'&&data[pos+7]=='D';
+  pos+=size_t(len)+12;
+  if(iend){if(len||pos!=size)return BladObrazu::Uszkodzony;end=true;break;}
+ }
+ if(!end)return BladObrazu::Uszkodzony;
+ icon_live=0;icon_alloc=alloc;icon_free=release;
+ DekodowanyObraz temp{};
+ error=dekoduj_obraz_z_alfa(data,size,&temp,icon_allocate,icon_release);
+ if(error==BladObrazu::OK){
+  // Return an ordinary caller-owned allocation; release all budgeted scratch.
+  auto* pixels=static_cast<uint8_t*>(alloc(temp.bajty));
+  if(pixels){for(size_t i=0;i<temp.bajty;++i)pixels[i]=temp.piksele[i];*out=temp;out->piksele=pixels;}
+  else error=BladObrazu::Pamiec;
+  icon_release(temp.piksele);
+ }
+ icon_alloc=nullptr;icon_free=nullptr;return error;
 }

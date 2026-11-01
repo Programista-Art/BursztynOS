@@ -61,3 +61,6 @@ inline bool dekoduj_png(const uint8_t* dane, size_t n, DekodowanyObraz* out,
 
 // Static GIF87a/89a and first frame only; full stream framing is validated.
 BladObrazu sprawdz_gif(const uint8_t*,size_t,uint32_t*,uint32_t*);
+
+// Bounded, CRC-validated UI PNG (256 KiB, 128x128, 2 MiB decoder heap).
+BladObrazu dekoduj_ikone_png(const uint8_t*,size_t,DekodowanyObraz*,AlokujObraz,ZwolnijObraz);

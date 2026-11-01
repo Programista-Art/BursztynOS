@@ -150,6 +150,11 @@ extern "C" uint8_t _binary_shell_bin_start[];
 extern "C" uint8_t _binary_shell_bin_end[];
 extern "C" uint8_t _binary_cytaty_txt_start[];
 extern "C" uint8_t _binary_cytaty_txt_end[];
+extern "C" uint8_t _binary_ikonki_przyciskzasilania_png_start[], _binary_ikonki_przyciskzasilania_png_end[];
+extern "C" uint8_t _binary_ikonki_przyciskuruchomponownie_png_start[], _binary_ikonki_przyciskuruchomponownie_png_end[];
+extern "C" uint8_t _binary_ikonki_przyciskzamknij_png_start[], _binary_ikonki_przyciskzamknij_png_end[];
+extern "C" uint8_t _binary_ikonki_przyciskuspij_png_start[], _binary_ikonki_przyciskuspij_png_end[];
+extern "C" uint8_t _binary_ikonki_przyciskzablokuj_png_start[], _binary_ikonki_przyciskzablokuj_png_end[];
 extern "C" uint8_t _binary_dane_sponsorze_mecenasi_txt_start[];
 extern "C" uint8_t _binary_dane_sponsorze_mecenasi_txt_end[];
 extern "C" uint8_t _binary_dane_sponsorze_sponsorzy_txt_start[];
@@ -1253,6 +1258,24 @@ void instaluj_wbudowane_programy() {
         reinterpret_cast<const char*>(_binary_dane_sponsorze_sponsorzy_start),sponsorzy_rozmiar)) {
         wypisz_log("[BSP-BLAD] Nie mozna zainstalowac listy sponsorow.");
         if(scisla_instalacja) pliki_instalacja_ok=false;
+    }
+
+    // The same embedded byte streams populate live PSF and the installed PSF.
+    struct PowerAsset {const char* path;const uint8_t* start;const uint8_t* end;};
+    const PowerAsset power_assets[]={
+        {"/ikonki/przyciskzasilania.png",_binary_ikonki_przyciskzasilania_png_start,_binary_ikonki_przyciskzasilania_png_end},
+        {"/ikonki/przyciskuruchomponownie.png",_binary_ikonki_przyciskuruchomponownie_png_start,_binary_ikonki_przyciskuruchomponownie_png_end},
+        {"/ikonki/przyciskzamknij.png",_binary_ikonki_przyciskzamknij_png_start,_binary_ikonki_przyciskzamknij_png_end},
+        {"/ikonki/przyciskuspij.png",_binary_ikonki_przyciskuspij_png_start,_binary_ikonki_przyciskuspij_png_end},
+        {"/ikonki/przyciskzablokuj.png",_binary_ikonki_przyciskzablokuj_png_start,_binary_ikonki_przyciskzablokuj_png_end},
+    };
+    for(const auto& asset:power_assets){
+        uint32_t bytes=0;
+        if(!pobierz_rozmiar_bloba(asset.start,asset.end,&bytes)||bytes>256U*1024U||
+           !zapisz_plik_od_nowa(asset.path,reinterpret_cast<const char*>(asset.start),bytes)){
+            wypisz_log("[IKONKI] Nie zapisano ikony zasilania.");
+            if(scisla_instalacja)pliki_instalacja_ok=false;
+        }
     }
 
     // Plain support data follows the same live/installed PSF file plan.

@@ -385,6 +385,11 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	wsparcie_mecenasi_blob.o \
 	wsparcie_sponsorzy_blob.o \
 	wsparcie_wkladtworczy_blob.o \
+	ikona_zasilania_blob.o \
+	ikona_uruchomponownie_blob.o \
+	ikona_zamknij_blob.o \
+	ikona_uspij_blob.o \
+	ikona_zablokuj_blob.o \
 	heap.o \
 	scheduler.o \
 	fpu.o \
@@ -781,9 +786,9 @@ repro_blob.o: repro_tmp.o bursztyn_gui.o programy/repro/repro_linker.ld
 menedzer_okien_tmp.o: menedzer_okien.cpp desktop_entries.h desktop_layout_settings.h desktop_layout.h bursztyn_gui.h ui_skala.h pulpit_geometria.h obrazy/png_dekoder.h plik_popup_ui.h plik_operacje_ui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -DBSF_PROFILE=$(BSF_PROFILE) -Os -fstack-usage -c menedzer_okien.cpp -o $@
 
-menedzer_okien_blob.o: menedzer_okien_tmp.o bursztyn_gui.o $(MENEDZER_OKIEN_LINKER)
+menedzer_okien_blob.o: menedzer_okien_tmp.o bursztyn_gui.o ikona_png_ring3.o image_png_ring3.o btp_ring3.o $(MENEDZER_OKIEN_LINKER)
 	$(LD) -T $(MENEDZER_OKIEN_LINKER) $(RING3_LDFLAGS) \
-		menedzer_okien_tmp.o bursztyn_gui.o -o menedzer_okien.elf
+		menedzer_okien_tmp.o bursztyn_gui.o ikona_png_ring3.o image_png_ring3.o btp_ring3.o -o menedzer_okien.elf
 	$(OBJCOPY) -O binary menedzer_okien.elf menedzer_okien.bin
 	$(LD) -r -b binary menedzer_okien.bin -o menedzer_okien_blob.o
 
@@ -839,7 +844,7 @@ check-kernel: $(KERNEL)
 # 1. Bursztyn OS (domyslny, czysty start bez autostartu testow)
 # 2. Bursztyn OS - testy automatyczne (multiboot2 bursztyn.test=automated)
 #
-$(GRUB_CFG): $(KERNEL) ustawienia_blob.o $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile narzedzia/package_bsf.py narzedzia/package_support.py $(wildcard dane/sponsorze/*.txt) czcionki/ttf $(wildcard czcionki/ttf/*)
+$(GRUB_CFG): $(KERNEL) ustawienia_blob.o $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile narzedzia/package_bsf.py narzedzia/package_support.py narzedzia/package_power_icons.py $(wildcard ikonki/przycisk*.png) $(wildcard dane/sponsorze/*.txt) czcionki/ttf $(wildcard czcionki/ttf/*)
 	@mkdir -p $(ISO_DIR)/boot/grub
 	@cp $(KERNEL) $(ISO_DIR)/boot/
 	@echo "[ISO] Kopiuje $(TAPETY_PAK) jako /boot/tapety.pak (modul Multiboot2)."
@@ -891,6 +896,7 @@ $(GRUB_CFG): $(KERNEL) ustawienia_blob.o $(TAPETY_PAK) .installer-build/BOOTX64.
 		> $(GRUB_CFG)
 	$(PYTHON) narzedzia/package_bsf.py $(ISO_DIR)
 	$(PYTHON) narzedzia/package_support.py $(ISO_DIR)
+	$(PYTHON) narzedzia/package_power_icons.py $(ISO_DIR)
 
 .installer-build/BOOTX64.EFI: narzedzia/instalator/grub-embedded.cfg Makefile
 	@mkdir -p .installer-build
@@ -2151,7 +2157,7 @@ profile-bsf-host:
 .PHONY: test-desktop-ttf-host
 test-desktop-ttf-host:
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -fcoroutines -O0 -g0 -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_desktop_ttf.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/desktop-ttf-host
+	g++ -std=c++17 -fcoroutines -O0 -g0 -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_desktop_ttf.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/desktop-ttf-host
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/desktop-ttf-host
 
 .PHONY: test-slider-pixels-host
@@ -2163,7 +2169,7 @@ test-slider-pixels-host:
 .PHONY: test-desktop-rubber-host
 test-desktop-rubber-host:
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -fcoroutines -O0 -g0 -DBURSZTYN_RUBBER_ONLY -fsanitize=address,undefined -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_desktop_ttf.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/rubber-interleave-final
+	g++ -std=c++17 -fcoroutines -O0 -g0 -DBURSZTYN_RUBBER_ONLY -fsanitize=address,undefined -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_desktop_ttf.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/rubber-interleave-final
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/rubber-interleave-final
 
 wsparcie_mecenasi_blob.o: dane/sponsorze/mecenasi.txt
@@ -2193,5 +2199,34 @@ menedzer_okien_tmp.o: desktop_selection_paint.h
 .PHONY: test-settings-themes-power-host
 test-settings-themes-power-host:
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -O0 -g -fsanitize=address,undefined -fno-pie -no-pie -ffunction-sections -fdata-sections narzedzia/test_settings_themes_power.cpp -Wl,--gc-sections -o .bsf-test/settings-themes-power
+	g++ -std=c++17 -O0 -g -fsanitize=address,undefined -fno-pie -no-pie -ffunction-sections -fdata-sections narzedzia/test_settings_themes_power.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -Wl,--gc-sections -o .bsf-test/settings-themes-power
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/settings-themes-power
+
+menedzer_okien_tmp.o: start_menu_ui.h obrazy/dekoder_obrazu.h
+
+ikona_zasilania_blob.o: ikonki/przyciskzasilania.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_uruchomponownie_blob.o: ikonki/przyciskuruchomponownie.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_zamknij_blob.o: ikonki/przyciskzamknij.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_uspij_blob.o: ikonki/przyciskuspij.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_zablokuj_blob.o: ikonki/przyciskzablokuj.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_png_ring3.o: bursztyn_ui/ikona_png.cpp bursztyn_ui/ikona_png.h
+	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
+
+.PHONY: test-power-png-host
+test-power-png-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-pie -no-pie -fno-omit-frame-pointer obrazy/test_ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -o .bsf-test/power-png-decoder
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/power-png-decoder
+
+image_png_ring3.o: obrazy/dekoder_obrazu.cpp obrazy/dekoder_obrazu.h obrazy/vendor/stb_image.h
+	$(CXX) $(RING3_FLAGS) -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Os -DBURSZTYN_PNG_ONLY=1 -fstack-usage -c $< -o $@

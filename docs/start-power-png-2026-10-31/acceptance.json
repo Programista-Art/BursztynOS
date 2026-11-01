@@ -1,0 +1,39 @@
+{
+  "result": "PASS",
+  "host": "host-results.json",
+  "packaging": "packaging.json",
+  "installed_files": "installed-files.json",
+  "qemu": [
+    {
+      "name": "fonts",
+      "result": "PASS",
+      "fault_markers": [],
+      "kernel_sha256": "801e45c464b12273160f2f93d19ab844170fde4742b3a5f7b7156fde2751fa4c",
+      "iso_sha256": "c056079324457db820ca83dc4a9be8e4cae633eec903fe6ed195bdbf4b51156a"
+    },
+    {
+      "name": "scales",
+      "result": "PASS",
+      "fault_markers": [],
+      "kernel_sha256": "801e45c464b12273160f2f93d19ab844170fde4742b3a5f7b7156fde2751fa4c",
+      "iso_sha256": "c056079324457db820ca83dc4a9be8e4cae633eec903fe6ed195bdbf4b51156a"
+    },
+    {
+      "name": "failures",
+      "result": "PASS",
+      "fault_markers": [],
+      "kernel_sha256": "f30c9728394a7e4e9ba4929d9bfd701ca2aa1f5cfd82319badf3e31236e93695",
+      "iso_sha256": "c7d7ac88ca659942129ae04e10f4ede590b3565f0ca64d22e71b1044729992a6"
+    },
+    {
+      "name": "themes-installed",
+      "result": "PASS",
+      "fault_markers": [],
+      "kernel_sha256": "801e45c464b12273160f2f93d19ab844170fde4742b3a5f7b7156fde2751fa4c",
+      "iso_sha256": "c056079324457db820ca83dc4a9be8e4cae633eec903fe6ed195bdbf4b51156a"
+    }
+  ],
+  "health": "health.json",
+  "kernel_sha256": "801e45c464b12273160f2f93d19ab844170fde4742b3a5f7b7156fde2751fa4c",
+  "iso_sha256": "c056079324457db820ca83dc4a9be8e4cae633eec903fe6ed195bdbf4b51156a"
+}

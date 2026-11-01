@@ -93,3 +93,10 @@ loop_test.sh
 
 # Native font parser, rasterizer and QEMU validation artifacts
 .bsf-test/
+
+# Shared PNG power icon build artifacts
+/ikona_*_blob.o
+/ikona_png_ring3.o
+/ikona_png_ring3.su
+/image_png_ring3.o
+/image_png_ring3.su

@@ -4,6 +4,8 @@
 #include <string>
 #include <cassert>
 using namespace BursztynUI;
+bool czytaj_fragment_pliku(const char*,uint64_t,char*,uint32_t,uint32_t*){return false;}
+
 static unsigned checks=0;
 #define CHECK(x) do{++checks;if(!(x)){fprintf(stderr,"FAIL %d %s\n",__LINE__,#x);abort();}}while(0)
 static proces_t process{};
@@ -16,6 +18,20 @@ static uint64_t hook(uint64_t n,uint64_t a,uint64_t b,uint64_t c,uint64_t){
 static void key(StartMenu::Surface& s,uint32_t k){ZdarzenieKlawiatury e{};e.kod_klawisza=k;CHECK(s.events.popups.obsluz_klawisz(e));}
 static void event(StartMenu::Surface& s,uint32_t type,int x=0,int y=0){bws_zdarzenie e{};e.typ=type;e.x=x;e.y=y;s.handle(e);}
 int main(){
+ {
+  StartMenu::Surface s;s.open({0,0,1280,680},10);s.open_power();
+  struct Probe:Kontrolka{size_t offset(){return reinterpret_cast<char*>(&obszar_ekranu_)-reinterpret_cast<char*>(this);}} probe;
+  auto* base=reinterpret_cast<const unsigned char*>(&s);
+  size_t button_slot=0;for(size_t i=0;i+sizeof(void*)<=sizeof(s);i+=alignof(void*)){void* p=nullptr;memcpy(&p,base+i,sizeof(p));if(p==s.dziecko(2)){button_slot=i;break;}}
+  auto* popup=s.events.popups.fokus_popupu();
+  auto* first=s.power_menu().element(0)->obraz_ikony()-1;
+  size_t manager_offset=0;
+  for(size_t i=0;i+sizeof(void*)<=sizeof(WidokMenuPopup);i+=alignof(void*)){void* p=nullptr;memcpy(&p,reinterpret_cast<const unsigned char*>(popup)+i,sizeof(p));if(p==&s.events.popups){manager_offset=i;break;}}
+  CHECK(manager_offset>0);
+  FILE* f=fopen(".bsf-test/power-observer.json","w");
+  fprintf(f,"{\"button_slot\":%zu,\"popup_offset\":%zu,\"rect_offset\":%zu,\"icons_offset\":%zu,\"icon_size\":%zu,\"pixel_offset\":%zu,\"manager_offset\":%zu}\n",button_slot,reinterpret_cast<const unsigned char*>(popup)-base,probe.offset(),reinterpret_cast<const unsigned char*>(first)-base,sizeof(IkonaPNG),size_t(24),manager_offset);
+  fclose(f);s.close();
+ }
  process.pid=7;process.poziom_zaufania=PZB_ZAUFANE;process.uprawnienia=PRAWO_SYSTEM_CONFIG;
  g_test_bws_hook=hook;motyw_inicjalizuj();g_aktywny_test_motyw=motyw_pobierz_aktywny();
  directory="[PLIK] grafit.motyw\n[PLIK] baltyckanoc.motyw\n[PLIK] baltycka_noc.motyw\n[PLIK] bursztynklasyczny.motyw\n[PLIK] bursztynjasny.motyw\n[PLIK] bursztynnocny.motyw\n[PLIK] missing.motyw\n[PLIK] .bad.motyw\n[KAT]  ignored.motyw\n";
@@ -69,14 +85,14 @@ int main(){
  ui_skala_procent=scale;
  StartMenu::Surface s;s.open({0,0,size.szerokosc,size.wysokosc},10);auto outer=s.obszar();auto bottom=s.shutdown_bounds();
  CHECK(bottom.szerokosc==bottom.wysokosc);CHECK(bottom.szerokosc==36*ui_skala());
- CHECK(abs(2*(bottom.x-outer.x)+bottom.szerokosc-outer.szerokosc)<=1);
+ CHECK(outer.prawy()-bottom.prawy()==8*ui_skala());CHECK(outer.dolny()-bottom.dolny()==8*ui_skala());
  auto* icon=static_cast<PrzyciskObrazkowy*>(s.dziecko(2));CHECK(!icon->tekst()[0]);CHECK(icon->ikona_id()==102);CHECK(icon->tryb()==TrybPrzyciskuObrazkowego::TylkoIkona);
  CHECK(s.power_menu().liczba_elementow()==4);CHECK(!s.power_menu().element(0)->czy_wlaczony());CHECK(!s.power_menu().element(1)->czy_wlaczony());
  for(const char* q:{"xyz","usta",""}){s.model.filter(q);s.rozmiesc(outer);CHECK(s.obszar()==outer);CHECK(s.shutdown_bounds()==bottom);
  CHECK(s.empty_message_visible()==(s.model.count==0));
  if(!s.model.count){auto empty=s.empty_message_bounds(),results=s.result_bounds();CHECK(empty.x==results.x+8*ui_skala());CHECK(empty.y>=results.y&&empty.y<results.y+s.row_height);CHECK(empty.dolny()<=results.dolny());}
  }
- key(s,9);key(s,32);CHECK(s.power_open());auto popup=s.power_popup_bounds();CHECK(popup.y>=0);CHECK(popup.dolny()<=size.wysokosc);CHECK(popup.prawy()<=size.szerokosc);CHECK(s.obszar()==outer);
+ key(s,9);key(s,32);CHECK(s.power_open());auto popup=s.power_popup_bounds();CHECK(popup.y>=0);CHECK(bottom.y-popup.dolny()==10*ui_skala());CHECK(popup.prawy()==bottom.prawy());CHECK(popup.dolny()<=size.wysokosc);CHECK(popup.prawy()<=size.szerokosc);CHECK(s.obszar()==outer);
  key(s,0x48);key(s,13);CHECK(s.take_action()==18);CHECK(!s.czy_otwarta());
  s.open({0,0,size.szerokosc,size.wysokosc},10);key(s,9);key(s,13);key(s,27);CHECK(!s.power_open());CHECK(s.czy_otwarta());
  key(s,13);CHECK(s.power_open());s.refresh();CHECK(s.power_open());
@@ -90,13 +106,25 @@ int main(){
  auto power=s.shutdown_bounds();event(s,BWS_ZDARZENIE_MYSZ_RUCH,power.x+5,power.y+5);
  test_monotonic_ns+=299000000ULL;event(s,BWS_ZDARZENIE_TIMER);CHECK(!s.power_open());
  test_monotonic_ns+=1000000ULL;event(s,BWS_ZDARZENIE_TIMER);CHECK(s.power_open());
- popup=s.power_popup_bounds();event(s,BWS_ZDARZENIE_MYSZ_RUCH,popup.x+10,popup.y+10);test_monotonic_ns+=1000000000ULL;event(s,BWS_ZDARZENIE_TIMER);CHECK(s.power_open());
+ popup=s.power_popup_bounds();
+ event(s,BWS_ZDARZENIE_MYSZ_RUCH,power.x+power.szerokosc/2,power.y-4*ui_skala());
+ test_monotonic_ns+=349000000ULL;event(s,BWS_ZDARZENIE_TIMER);CHECK(s.power_open());
+ event(s,BWS_ZDARZENIE_MYSZ_RUCH,popup.x+10,popup.y+10);test_monotonic_ns+=1000000000ULL;event(s,BWS_ZDARZENIE_TIMER);CHECK(s.power_open());
  // Disabled lock accepts no action, including pointer release.
  event(s,BWS_ZDARZENIE_MYSZ_DOWN,popup.x+10,popup.y+10);event(s,BWS_ZDARZENIE_MYSZ_UP,popup.x+10,popup.y+10);CHECK(s.take_action()==-1);
  event(s,BWS_ZDARZENIE_MYSZ_RUCH,1200,10);test_monotonic_ns+=349000000ULL;event(s,BWS_ZDARZENIE_TIMER);CHECK(s.power_open());test_monotonic_ns+=1000000ULL;event(s,BWS_ZDARZENIE_TIMER);CHECK(!s.power_open());
  s.open_power();event(s,BWS_ZDARZENIE_MYSZ_DOWN,size.szerokosc-1,0);CHECK(!s.power_open());CHECK(!s.czy_otwarta());
  s.open({0,0,size.szerokosc,size.wysokosc},10);s.open_power();s.close();CHECK(!s.power_open());CHECK(!s.czy_otwarta());
  }
+ }
+ // Bound the transient independently of Start, including nonzero work origin.
+ ui_skala_procent=100;
+ {
+  StartMenu::Surface s;s.open({400,31,160,680},410);auto start=s.obszar();s.open_power();auto popup=s.power_popup_bounds(),button=s.shutdown_bounds();
+  CHECK(popup.szerokosc>=150&&popup.szerokosc<=152);CHECK(popup.x>=404);CHECK(popup.prawy()<=556);CHECK(!popup.przecina(button));CHECK(s.obszar()==start);
+  auto* view=static_cast<WidokMenuPopup*>(s.events.popups.fokus_popupu());
+  auto* item=const_cast<Menu&>(s.power_menu()).znajdz(18);item->ustaw_tekst("Uruchom ponownie — bardzo długa nazwa Łódź źółć");
+  CHECK(view->wymagany_rozmiar().szerokosc>popup.szerokosc);s.refresh();CHECK(s.power_popup_bounds().szerokosc==152);CHECK(s.obszar()==start);s.close();
  }
  printf("Settings themes and Start power: %u checks PASS\n",checks);
 }

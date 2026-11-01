@@ -44,8 +44,8 @@ extern "C" {
     struct NaglowekBur naglowek = {
         {'B', 'U', 'R', '\0'},
         (uint64_t)&_start,
-        4096, 278528, 0x1001000,
-        282624, 131072, 0x1045000
+        4096, 294912, 0x1001000,
+        299008, 131072, 0x1049000
     };
 }
 
@@ -2356,7 +2356,11 @@ void obsluz_klikniecie(int mx, int my) {
         if(menu_start_otwarte)zamknij_menu_i_odtworz_pulpit();
         else {
             if(!start_menu)start_menu=new StartMenu::Surface();
-            if(start_menu){start_menu->open({0,0,screen_w,screen_h-PASEK_WYS},MENU_X);menu_start_otwarte=start_menu->czy_otwarta();}
+            if(start_menu){DisplayGeometry g{};
+                BursztynUI::Prostokat work{0,0,screen_w,screen_h-PASEK_WYS};
+                if(gui_pobierz_geometrie_ekranu(&g)&&g.work_width>0&&g.work_height>0)
+                    work={g.work_x,g.work_y,g.work_width,g.work_height};
+                start_menu->open(work,MENU_X);menu_start_otwarte=start_menu->czy_otwarta();}
             RysujPrzyciskMenu();gui_odswiez();
         }
         return;

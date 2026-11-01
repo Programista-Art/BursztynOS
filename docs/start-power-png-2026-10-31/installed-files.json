@@ -1,0 +1,13 @@
+{
+  "result": "PASS",
+  "assets": {
+    "przyciskzasilania.png": "ab13c734bceb1040b8a7b2aa411830b52342ff96074a820f7de0d1bf755fc230",
+    "przyciskzablokuj.png": "15d543ce350cc023216a50ed2198618aa7119392083bb5178193d2fac114ee55",
+    "przyciskuspij.png": "2c3fb56ab1c537c7706181b736a1b585577775a6b8a9d2cbb96bf797478340f7",
+    "przyciskzamknij.png": "8cddd2b9c7ebcdb732d954b4b23d42bcb036cf13047797f9b77e27036ee6daa9",
+    "przyciskuruchomponownie.png": "29662eafbded02b5487d6adfe85c99eb3f67b1d6791b2345ecdb36ce00579b93"
+  },
+  "disk": "/home/programista/Pulpit/Burstzyn/BursztynOS/.bsf-test/power-installed-v5rilsxg/target.img",
+  "kernel_sha256": "801e45c464b12273160f2f93d19ab844170fde4742b3a5f7b7156fde2751fa4c",
+  "iso_sha256": "c056079324457db820ca83dc4a9be8e4cae633eec903fe6ed195bdbf4b51156a"
+}

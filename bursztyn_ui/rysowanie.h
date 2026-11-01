@@ -100,6 +100,18 @@ public:
         } else if (!g_tlum_rysowanie_globalne) gui_blit(x,y,w,1,pixels);
     }
 
+    void rysuj_wiersz_alfa_ekranu(int x,int y,int w,const uint32_t* pixels) {
+        auto r=Prostokat(x,y,w,1).przeciecie(pobierz_przyciecie());
+        if(cel_) {
+            r=r.przeciecie(granice_celu_);
+            if(r.czy_pusty())return;
+            auto* out=cel_+size_t(y-granice_celu_.y)*granice_celu_.szerokosc;
+            for(int px=r.x;px<r.prawy();++px)
+                out[px-granice_celu_.x]=kolor_nad(out[px-granice_celu_.x],pixels[px-x]);
+        }else if(!r.czy_pusty()&&!g_tlum_rysowanie_globalne)
+            gui_blit_alpha(r.x,y,r.szerokosc,1,pixels+r.x-x);
+    }
+
     void rysuj_ramke(Prostokat r, uint32_t kolor, int grubosc = 1) {
         if (grubosc <= 0 || r.czy_pusty()) return;
         if (r.szerokosc <= 2 * grubosc || r.wysokosc <= 2 * grubosc) {
