@@ -11,25 +11,32 @@ struct AbsMapSample {
     uint64_t started=0,last_report=0;
     uint32_t reports=0,stalled_x=0,stalled_y=0,endpoints=0;
     bool valid_x=false,valid_y=false,near_edge=false;
+    bool absolute=true,seen=false;
+    uint64_t generation=0;
+    int lowest_mapped_y=0,highest_mapped_y=0;
     void record(int32_t x,int32_t y,bool changed_x,bool changed_y,
                 int32_t xmin,int32_t xmax,int32_t ymin,int32_t ymax,
-                int mx,int my,int w,int h,uint64_t now) {
+                int mx,int my,int w,int h,uint64_t now,uint64_t gen=0,bool abs=true) {
+        absolute=abs;generation=gen;
+        if(!seen){lowest_mapped_y=highest_mapped_y=my;seen=true;}
+        if(my<lowest_mapped_y)lowest_mapped_y=my;
+        if(my>highest_mapped_y)highest_mapped_y=my;
         if(!reports) {started=now;low_x=high_x=x;low_y=high_y=y;}
         if(changed_x) {
             if(valid_x&&raw_x!=x&&mapped_x==mx)++stalled_x;
             if(!valid_x||x<low_x)low_x=x;
             if(!valid_x||x>high_x)high_x=x;
             valid_x=true;
-            if(x==xmin)endpoints|=1;
-            if(x==xmax)endpoints|=2;
+            if(abs&&x==xmin)endpoints|=1;
+            if(abs&&x==xmax)endpoints|=2;
         }
         if(changed_y) {
             if(valid_y&&raw_y!=y&&mapped_y==my)++stalled_y;
             if(!valid_y||y<low_y)low_y=y;
             if(!valid_y||y>high_y)high_y=y;
             valid_y=true;
-            if(y==ymin)endpoints|=4;
-            if(y==ymax)endpoints|=8;
+            if(abs&&y==ymin)endpoints|=4;
+            if(abs&&y==ymax)endpoints|=8;
         }
         raw_x=x;raw_y=y;min_x=xmin;max_x=xmax;min_y=ymin;max_y=ymax;
         mapped_x=mx;mapped_y=my;width=w;height=h;

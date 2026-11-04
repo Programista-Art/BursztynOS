@@ -10,9 +10,16 @@ static unsigned checks=0;
 #define CHECK(x) do{++checks;if(!(x)){fprintf(stderr,"FAIL %d %s\n",__LINE__,#x);abort();}}while(0)
 static proces_t process{};
 static std::string directory;
+static BursztynMotyw extra_theme{};
+static bool extra_theme_available=false;
 static uint64_t hook(uint64_t n,uint64_t a,uint64_t b,uint64_t c,uint64_t){
  if(n==6){CHECK(!strcmp(reinterpret_cast<char*>(a),MOTYW_SCIEZKA_KATALOG));if(directory.size()+1>c)return 0;memcpy(reinterpret_cast<void*>(b),directory.c_str(),directory.size()+1);return 1;}
- if(n==87)return motyw_bws_polecenie(&process,a,b,c);
+ if(n==87){
+  if(extra_theme_available && a==MOTYW_CMD_OPIS && b && c && !strcmp(reinterpret_cast<const char*>(b),extra_theme.id)){
+   *reinterpret_cast<BursztynMotyw*>(c)=extra_theme;return 1;
+  }
+  return motyw_bws_polecenie(&process,a,b,c);
+ }
  return 0;
 }
 static void key(StartMenu::Surface& s,uint32_t k){ZdarzenieKlawiatury e{};e.kod_klawisza=k;CHECK(s.events.popups.obsluz_klawisz(e));}
@@ -52,6 +59,30 @@ int main(){
  CHECK(!g_podglad_aktywny);CHECK(!strcmp(g_aktywny_motyw.id,"grafit"));
  {SettingsUI::ThemesPage restarted;restarted.load();CHECK(restarted.selected==0);}
  directory="";{SettingsUI::ThemesPage empty;empty.load();CHECK(empty.count==0);CHECK(!empty.valid());}
+ {
+  CHECK(motyw_zaladuj_z_pliku("bursztynjasny",&extra_theme));strcpy(extra_theme.id,"fixture_extra");
+  strcpy(extra_theme.nazwa,"Additional theme fixture");extra_theme.przycisk=0x395127;extra_theme.akcent=0xc7d26b;
+  extra_theme_available=true;directory="[PLIK] grafit.motyw\n[PLIK] fixture_extra.motyw\n";
+  SettingsUI::ThemesPage enumeration;enumeration.load();CHECK(enumeration.count==2);
+  CHECK(!strcmp(enumeration.entries[1].id,"fixture_extra"));
+  auto* previous=gui_pobierz_motyw();test_ustaw_aktywny_motyw(&extra_theme);
+  StartMenu::Surface s;s.open({0,0,1280,680},10);
+  CHECK(s.dziecko(2)->styl().normalny.tlo==extra_theme.przycisk);s.close();
+  test_ustaw_aktywny_motyw(previous);extra_theme_available=false;
+ }
+ // The WM retains Start while closed. Theme broadcasts must reach its next
+ // opening as well as an already visible surface.
+ {
+  StartMenu::Surface retained;
+  for(const char* id:{"baltyckanoc","grafit","bursztynklasyczny","bursztynjasny","bursztynnocny"}){
+   CHECK(motyw_ustaw_z_pliku(id,false));Motyw::pobierz_domyslny().zaktualizuj_z_systemu();
+   retained.refresh();retained.open({0,0,1280,680},10);
+   auto* button=retained.dziecko(2);
+   CHECK(!button->czy_ma_fokus());
+   CHECK(button->wyznacz_biezacy_styl_stanu().tlo==motyw_kolor(MOTYW_KOLOR_PRZYCISK));
+   retained.close();
+  }
+ }
  // Exercise invalidation through the actual window and both scroll views.
  {
   directory="[PLIK] grafit.motyw\n[PLIK] baltyckanoc.motyw\n";

@@ -68,6 +68,9 @@ prefix = kernel[:late]
 assert prefix.count('{') == prefix.count('}'), 'late activation must be mode-independent'
 production = [ROOT / 'kernel.cpp', ROOT / 'virtio_input.cpp']
 for path in ROOT.rglob('*.cpp'):
+    # Private build snapshots are test artifacts, not additional boot callers.
+    if any(part.startswith('.') for part in path.relative_to(ROOT).parts):
+        continue
     if 'narzedzia' in path.parts or 'biblioteki' in path.parts or path in production:
         continue
     assert not re.search(r'\bvirtio_input_(?:activate|activate_prepared|probe_and_init|probe_and_prepare|prepare|init|zainicjalizuj)\s*\(',

@@ -14,13 +14,21 @@ class WindowsLauncherConfig(unittest.TestCase):
         self.assertIn('{ "gtk" } else { $DisplayBackend }',self.launcher)
         self.assertIn('"-display", $effectiveDisplay',self.launcher)
     def test_virtio_devices(self):
-        devices=re.findall(r'"-device",\s*"([^"\n]+)"',self.launcher)
+        devices=re.findall(r'"-device",\s*"([^"\n]+)"',self.launcher.split('# Explicit diagnostic A/B selection.')[0])
         names=[d.split(',')[0] for d in devices]
         self.assertEqual(names.count('virtio-mouse-pci'),1)
         self.assertEqual(names.count('virtio-keyboard-pci'),1)
         self.assertNotIn('virtio-tablet-pci',names)
         gpu=next(d for d in devices if d.startswith('virtio-vga,'))
         for option in ('disable-legacy=on','xres=1280','yres=720'):self.assertIn(option,gpu.split(','))
+    def test_pointer_probe_is_explicit_and_loopback_only(self):
+        self.assertIn('[string]$PointerDevice = "relative"',self.launcher)
+        self.assertIn('if ($PointerDevice -ne "relative")',self.launcher)
+        self.assertIn('"virtio-tablet" { $argsList += @("-device", "virtio-tablet-pci") }',self.launcher)
+        self.assertIn('"usb-tablet,bus=$tabletBus"',self.launcher)
+        self.assertIn('tcp:127.0.0.1:$QmpPort,server=on,wait=off',self.launcher)
+        self.assertIn('if ($QmpPort -gt 0)',self.launcher)
+        self.assertIn('if ($PointerDiagnostics) { $SaveLog = $true }',self.launcher)
     def test_tcg_single_for_canonical_profiles(self):
         self.assertIn('"-accel", "tcg,thread=single"',self.launcher)
         self.assertRegex(self.makefile,r'(?m)^QEMUACCEL\s*\?=\s*tcg,thread=single$')

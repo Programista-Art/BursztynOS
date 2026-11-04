@@ -74,6 +74,15 @@ class Surface : public PowierzchniaPopup, private ObslugaWidokuMenu {
    ustaw_tryb(TrybPrzyciskuObrazkowego::TylkoIkona);ustaw_ikone(102);
    ustaw_preferowany_rozmiar({36,36});ustaw_podpowiedz("Zasilanie");
   }
+  void rysuj_tlo_i_ramke(KontekstRysowania& ctx,const StylStanu& state)override{
+   // Open is an active button state, independent of keyboard focus ownership.
+   auto s=state;
+   if(czy_wlaczona() && owner->power_open()){
+    s.tlo=styl().wcisniety.tlo;s.tekst=styl().wcisniety.tekst;
+    s.ramka=czy_ma_fokus()?styl().fokus.ramka:styl().wcisniety.ramka;
+   }
+   PrzyciskObrazkowy::rysuj_tlo_i_ramke(ctx,s);
+  }
   void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e)override{
    if(!czy_wlaczona())return;
    if(e.polecenie()==13 || e.polecenie()==32){owner->open_power();e.obsluzone=true;return;}

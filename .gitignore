@@ -100,3 +100,10 @@ loop_test.sh
 /ikona_png_ring3.su
 /image_png_ring3.o
 /image_png_ring3.su
+
+# Optional windowed-pointer diagnostic media (production ISO is separate).
+/BursztynOS-pointer-window-diag.iso
+
+# Private release audit and hash-associated developer symbols
+/.release-audit/
+/.release-private/

@@ -32,6 +32,8 @@ eksplorator_tmp.o: programy/eksplorator/eksplorator-plikow.cpp \
  programy/eksplorator/../../bursztyn_ui/polecenie_ui.h \
  programy/eksplorator/../../bursztyn_ui/menu.h \
  programy/eksplorator/../../bursztyn_ui/ikona_ui.h \
+ programy/eksplorator/../../bursztyn_ui/ikona_png.h \
+ programy/eksplorator/../../bursztyn_ui/../obrazy/skalowanie.h \
  programy/eksplorator/../../bursztyn_ui/pole_tekstowe.h \
  programy/eksplorator/../../bursztyn_ui/etykieta.h \
  programy/eksplorator/../../bursztyn_ui/dialog_pliku.h \
@@ -85,6 +87,8 @@ programy/eksplorator/../../bursztyn_ui/rysowanie.h:
 programy/eksplorator/../../bursztyn_ui/polecenie_ui.h:
 programy/eksplorator/../../bursztyn_ui/menu.h:
 programy/eksplorator/../../bursztyn_ui/ikona_ui.h:
+programy/eksplorator/../../bursztyn_ui/ikona_png.h:
+programy/eksplorator/../../bursztyn_ui/../obrazy/skalowanie.h:
 programy/eksplorator/../../bursztyn_ui/pole_tekstowe.h:
 programy/eksplorator/../../bursztyn_ui/etykieta.h:
 programy/eksplorator/../../bursztyn_ui/dialog_pliku.h:

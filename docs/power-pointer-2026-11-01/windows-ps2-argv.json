@@ -1,0 +1,96 @@
+{
+  "argv": [
+    "qemu-system-x86_64.exe",
+    "-bios",
+    "C:/QEMU/OVMF.fd",
+    "-machine",
+    "pc,hpet=on",
+    "-cpu",
+    "max",
+    "-accel",
+    "tcg,thread=single",
+    "-smp",
+    "1",
+    "-m",
+    "2G",
+    "-serial",
+    "stdio",
+    "-display",
+    "gtk",
+    "-audiodev",
+    "none,id=snd",
+    "-device",
+    "intel-hda",
+    "-device",
+    "hda-output,audiodev=snd",
+    "-drive",
+    "id=disk,file=/home/programista/Pulpit/Burstzyn/BursztynOS/wirtualny_dysk.img,format=raw,if=none",
+    "-device",
+    "virtio-blk-pci,drive=disk,disable-legacy=on",
+    "-netdev",
+    "user,id=n1",
+    "-device",
+    "virtio-net-pci,netdev=n1,disable-legacy=on",
+    "-object",
+    "rng-builtin,id=rng0",
+    "-device",
+    "virtio-rng-pci,rng=rng0,disable-legacy=on",
+    "-vga",
+    "none",
+    "-device",
+    "virtio-vga,disable-legacy=on,xres=1280,yres=720",
+    "-device",
+    "virtio-keyboard-pci",
+    "-boot",
+    "order=d,menu=on",
+    "-cdrom",
+    "/home/programista/Pulpit/Burstzyn/BursztynOS/BursztynOS.iso",
+    "-qmp",
+    "tcp:127.0.0.1:4444,server=on,wait=off",
+    "-name",
+    "Bursztyn OS - UEFI VirtIO Full"
+  ],
+  "host_os": "Unix 7.0.0.31",
+  "qemu_binary": "qemu-system-x86_64.exe",
+  "topology": [
+    {
+      "order": 0,
+      "device": "intel-hda",
+      "expected_class": "audio",
+      "expected_bdf": "00:02.0"
+    },
+    {
+      "order": 1,
+      "device": "virtio-blk-pci,drive=disk,disable-legacy=on",
+      "expected_class": "storage",
+      "expected_bdf": "00:03.0"
+    },
+    {
+      "order": 2,
+      "device": "virtio-net-pci,netdev=n1,disable-legacy=on",
+      "expected_class": "network",
+      "expected_bdf": "00:04.0"
+    },
+    {
+      "order": 3,
+      "device": "virtio-rng-pci,rng=rng0,disable-legacy=on",
+      "expected_class": "rng",
+      "expected_bdf": "00:05.0"
+    },
+    {
+      "order": 4,
+      "device": "virtio-vga,disable-legacy=on,xres=1280,yres=720",
+      "expected_class": "gpu",
+      "expected_bdf": "00:06.0"
+    },
+    {
+      "order": 5,
+      "device": "virtio-keyboard-pci",
+      "expected_class": "keyboard",
+      "expected_bdf": "00:07.0"
+    }
+  ],
+  "pointer_selection": "ps2",
+  "display_backend": "gtk",
+  "executed_on": "Linux using PowerShell 7.4.6; Windows QEMU was not executed"
+}

@@ -1,0 +1,1 @@
+Launcher parity: 8 checks PASS (actual Make argv, actual PowerShell argv, dry-run runtime argv, 7 PCI devices/order, all canonical properties, single TCG, relative mouse, explicit host differences)

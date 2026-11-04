@@ -45,6 +45,8 @@ kontrolki2_tmp.o: programy/kontrolki2/kontrolki2.cpp \
  programy/kontrolki2/../../bursztyn_ui/lista_rozwijana.h \
  programy/kontrolki2/../../bursztyn_ui/menu.h \
  programy/kontrolki2/../../bursztyn_ui/widok_menu_popup.h \
+ programy/kontrolki2/../../bursztyn_ui/ikona_png.h \
+ programy/kontrolki2/../../bursztyn_ui/../obrazy/skalowanie.h \
  programy/kontrolki2/../../bursztyn_ui/okno.h \
  programy/kontrolki2/../../bursztyn_ui/menu_kontekstowe.h \
  programy/kontrolki2/../../bursztyn_ui/menu_glowne.h \
@@ -60,7 +62,6 @@ kontrolki2_tmp.o: programy/kontrolki2/kontrolki2.cpp \
  programy/kontrolki2/../../bursztyn_ui/rozdzielacz.h \
  programy/kontrolki2/../../bursztyn_ui/widok_ikon.h \
  programy/kontrolki2/../../bursztyn_ui/obraz.h \
- programy/kontrolki2/../../bursztyn_ui/../obrazy/skalowanie.h \
  programy/kontrolki2/../../bursztyn_ui/przycisk_obrazkowy.h \
  programy/kontrolki2/../../bursztyn_ui/pasek_sciezki.h \
  programy/kontrolki2/../../bursztyn_ui/kalendarz.h \
@@ -135,6 +136,8 @@ programy/kontrolki2/../../bursztyn_ui/popup.h:
 programy/kontrolki2/../../bursztyn_ui/lista_rozwijana.h:
 programy/kontrolki2/../../bursztyn_ui/menu.h:
 programy/kontrolki2/../../bursztyn_ui/widok_menu_popup.h:
+programy/kontrolki2/../../bursztyn_ui/ikona_png.h:
+programy/kontrolki2/../../bursztyn_ui/../obrazy/skalowanie.h:
 programy/kontrolki2/../../bursztyn_ui/okno.h:
 programy/kontrolki2/../../bursztyn_ui/menu_kontekstowe.h:
 programy/kontrolki2/../../bursztyn_ui/menu_glowne.h:
@@ -150,7 +153,6 @@ programy/kontrolki2/../../bursztyn_ui/tabela.h:
 programy/kontrolki2/../../bursztyn_ui/rozdzielacz.h:
 programy/kontrolki2/../../bursztyn_ui/widok_ikon.h:
 programy/kontrolki2/../../bursztyn_ui/obraz.h:
-programy/kontrolki2/../../bursztyn_ui/../obrazy/skalowanie.h:
 programy/kontrolki2/../../bursztyn_ui/przycisk_obrazkowy.h:
 programy/kontrolki2/../../bursztyn_ui/pasek_sciezki.h:
 programy/kontrolki2/../../bursztyn_ui/kalendarz.h:

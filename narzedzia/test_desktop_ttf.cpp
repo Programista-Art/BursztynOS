@@ -108,6 +108,7 @@ static bool inside(Prostokat outer,Prostokat r){return r.x>=0&&r.y>=0&&r.prawy()
 #include "desktop_rubber_pixels_cases.h"
 #include "slider_pixel_cases.h"
 #include "power_png_cases.h"
+#include "power_theme_pixel_cases.h"
 int main(){
  saved.checksum=BSF::checksum(saved);g_test_bws_hook=hook;
  for(const char* name:{"DejaVuSans.ttf","DejaVuSans-Bold.ttf","DejaVuSansMono.ttf","DejaVuSerifCondensed-Italic.ttf"}){
@@ -118,6 +119,7 @@ int main(){
   std::ifstream f(path.substr(1),std::ios::binary);files[path]={std::istreambuf_iterator<char>(f),{}};CHECK(!files[path].empty());
  }
  CHECK(BSF::ready());
+ power_theme_pixel_cases();
  power_png_cases();
  if(getenv("BURSZTYN_POWER_PNG_ONLY"))return 0;
  wpisy_pulpitu=new WpisPulpitu[PULPIT_MAX_WPISOW]{};

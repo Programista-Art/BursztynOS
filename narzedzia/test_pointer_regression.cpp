@@ -1,5 +1,6 @@
 #include "narzedzia/pointing_host_stubs.h"
 #include "ps2_mouse_parser.h"
+#include "ui_skala.h"
 #include "sterowniki/usb/hid_pointer.h"
 #include "narzedzia/pointing_test_descriptors.h"
 #include "narzedzia/virtualbox_tablet_descriptor.h"
@@ -89,4 +90,31 @@ static void api_modes(){
     CHECK(input_unregister_device(&p));p.pointer_mode=INPUT_POINTER_ABSOLUTE;p.abs_x={0,1279,0,0,0};p.abs_y={0,719,0,0,0};
     CHECK(input_register_device(&p));px=640;py=360;absolute(p,10,10);CHECK(px==10&&py==10);input_reset_all();
 }
-int main(){unsigned start=checks;signed_movement();printf("Signed relative cursor regression: %u checks PASS\n",checks-start);start=checks;early_geometry();api_modes();printf("InputDevice modes/readiness/API regression: %u checks PASS\n",checks-start);}
+static void absolute_endpoints(){
+    for(auto screen:std::vector<std::pair<int,int>>{{1280,720},{1920,1080},{1,1},{2,3},{8192,8191},{INT_MAX,INT_MAX}})
+    for(unsigned scale:{100U,125U,150U,200U})
+    for(auto range:std::vector<std::pair<int32_t,int32_t>>{{0,32767},{101,60001},{-503,9503},{-1,0},{INT_MIN,INT_MAX},{INT_MIN,INT_MIN+1},{INT_MAX-1,INT_MAX}}){
+        ui_skala_procent=scale;width=screen.first;height=screen.second;
+        InputDevice d{};d.kinds=INPUT_DEVICE_KIND_TABLET;d.bus_type=INPUT_BUS_VIRTIO;
+        d.pointer_mode=INPUT_POINTER_ABSOLUTE;d.abs_x={range.first,range.second,0,0,0};d.abs_y=d.abs_x;
+        CHECK(input_register_device(&d));absolute(d,range.first,range.first);
+        auto expected_abs=[&](int32_t raw,int extent){
+            auto clamped=std::clamp(raw,range.first,range.second);
+            return int((__int128(clamped)-range.first)*(extent-1)/(int64_t(range.second)-range.first));
+        };
+        for(int32_t raw:{range.first,range.second,int32_t(int64_t(range.first)+(int64_t(range.second)-range.first)/2),int32_t(INT_MIN),int32_t(INT_MAX)}){
+            // Independent X and Y packets must not remap the other axis.
+            const int saved_y=py;
+            InputEvent x[]={{INPUT_EV_ABS,INPUT_ABS_X,uint32_t(raw)},{INPUT_EV_SYN,0,0}};
+            input_dispatch_events(&d,x,2);if(px!=expected_abs(raw,width))fprintf(stderr,"ABS mismatch range %d..%d raw %d screen %d,%d actual %d expected %d\n",range.first,range.second,raw,width,height,px,expected_abs(raw,width));CHECK(px==expected_abs(raw,width));CHECK(py==saved_y);
+            const int saved_x=px;
+            InputEvent y[]={{INPUT_EV_ABS,INPUT_ABS_Y,uint32_t(raw)},{INPUT_EV_SYN,0,0}};
+            input_dispatch_events(&d,y,2);CHECK(py==expected_abs(raw,height));CHECK(px==saved_x);
+        }
+        absolute(d,range.first,range.first);CHECK(px==0&&py==0);
+        absolute(d,range.second,range.second);CHECK(px==width-1&&py==height-1);
+        input_reset_all();
+    }
+    ui_skala_procent=100;
+}
+int main(){unsigned start=checks;signed_movement();printf("Signed relative cursor regression: %u checks PASS\n",checks-start);start=checks;absolute_endpoints();printf("Absolute physical endpoints: %u checks PASS\n",checks-start);start=checks;early_geometry();api_modes();printf("InputDevice modes/readiness/API regression: %u checks PASS\n",checks-start);}

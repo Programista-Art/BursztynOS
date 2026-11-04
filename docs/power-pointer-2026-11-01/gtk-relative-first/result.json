@@ -1,0 +1,516 @@
+{
+  "platform": "Linux/X11 nested Xephyr, not Windows",
+  "frontend": "gtk",
+  "input": "virtio-mouse-pci relative",
+  "qemu_version": "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)\nCopyright (c) 2003-2023 Fabrice Bellard and the QEMU Project developers\n",
+  "kernel_sha256": "f8b062a9de3fec718f8c5d3bc62599174afef201048e429d45e076cf91aa2968",
+  "stages": [
+    {
+      "stage": "small",
+      "window_size": [
+        800,
+        600
+      ],
+      "samples": [
+        {
+          "target": [
+            0,
+            0
+          ],
+          "actual": {
+            "x": 0,
+            "y": 0,
+            "version": 1,
+            "generation": 1,
+            "width": 1280,
+            "height": 720,
+            "scale": 100,
+            "cursor_max_x": 1279,
+            "cursor_max_y": 719
+          }
+        },
+        {
+          "target": [
+            1279,
+            0
+          ],
+          "actual": {
+            "x": 1279,
+            "y": 0,
+            "version": 1,
+            "generation": 1,
+            "width": 1280,
+            "height": 720,
+            "scale": 100,
+            "cursor_max_x": 1279,
+            "cursor_max_y": 719
+          }
+        },
+        {
+          "target": [
+            0,
+            719
+          ],
+          "actual": {
+            "x": 0,
+            "y": 719,
+            "version": 1,
+            "generation": 1,
+            "width": 1280,
+            "height": 720,
+            "scale": 100,
+            "cursor_max_x": 1279,
+            "cursor_max_y": 719
+          }
+        },
+        {
+          "target": [
+            1279,
+            719
+          ],
+          "actual": {
+            "x": 1279,
+            "y": 719,
+            "version": 1,
+            "generation": 1,
+            "width": 1280,
+            "height": 720,
+            "scale": 100,
+            "cursor_max_x": 1279,
+            "cursor_max_y": 719
+          }
+        },
+        {
+          "target": [
+            640,
+            360
+          ],
+          "actual": {
+            "x": 640,
+            "y": 360,
+            "version": 1,
+            "generation": 1,
+            "width": 1280,
+            "height": 720,
+            "scale": 100,
+            "cursor_max_x": 1279,
+            "cursor_max_y": 719
+          }
+        }
+      ],
+      "mice": {
+        "return": [
+          {
+            "index": 2,
+            "name": "QEMU PS/2 Mouse",
+            "current": false,
+            "absolute": false
+          },
+          {
+            "index": 4,
+            "name": "QEMU Virtio Mouse",
+            "current": true,
+            "absolute": false
+          }
+        ]
+      }
+    },
+    {
+      "stage": "large",
+      "window_size": [
+        1500,
+        950
+      ],
+      "samples": [
+        {
+          "target": [
+            0,
+            0
+          ],
+          "actual": {
+            "x": 0,
+            "y": 0,
+            "version": 1,
+            "generation": 1,
+            "width": 1280,
+            "height": 720,
+            "scale": 100,
+            "cursor_max_x": 1279,
+            "cursor_max_y": 719
+          }
+        },
+        {
+          "target": [
+            1279,
+            0
+          ],
+          "actual": {
+            "x": 1279,
+            "y": 0,
+            "version": 1,
+            "generation": 1,
+            "width": 1280,
+            "height": 720,
+            "scale": 100,
+            "cursor_max_x": 1279,
+            "cursor_max_y": 719
+          }
+        },
+        {
+          "target": [
+            0,
+            719
+          ],
+          "actual": {
+            "x": 0,
+            "y": 719,
+            "version": 1,
+            "generation": 1,
+            "width": 1280,
+            "height": 720,
+            "scale": 100,
+            "cursor_max_x": 1279,
+            "cursor_max_y": 719
+          }
+        },
+        {
+          "target": [
+            1279,
+            719
+          ],
+          "actual": {
+            "x": 1279,
+            "y": 719,
+            "version": 1,
+            "generation": 1,
+            "width": 1280,
+            "height": 720,
+            "scale": 100,
+            "cursor_max_x": 1279,
+            "cursor_max_y": 719
+          }
+        },
+        {
+          "target": [
+            640,
+            360
+          ],
+          "actual": {
+            "x": 640,
+            "y": 360,
+            "version": 1,
+            "generation": 1,
+            "width": 1280,
+            "height": 720,
+            "scale": 100,
+            "cursor_max_x": 1279,
+            "cursor_max_y": 719
+          }
+        }
+      ],
+      "mice": {
+        "return": [
+          {
+            "index": 2,
+            "name": "QEMU PS/2 Mouse",
+            "current": false,
+            "absolute": false
+          },
+          {
+            "index": 4,
+            "name": "QEMU Virtio Mouse",
+            "current": true,
+            "absolute": false
+          }
+        ]
+      }
+    },
+    {
+      "stage": "maximized",
+      "window_size": [
+        1920,
+        1163
+      ],
+      "samples": [
+        {
+          "target": [
+            0,
+            0
+          ],
+          "actual": {
+            "x": 0,
+            "y": 0,
+            "version": 1,
+            "generation": 1,
+            "width": 1280,
+            "height": 720,
+            "scale": 100,
+            "cursor_max_x": 1279,
+            "cursor_max_y": 719
+          }
+        },
+        {
+          "target": [
+            1279,
+            0
+          ],
+          "actual": {
+            "x": 1279,
+            "y": 0,
+            "version": 1,
+            "generation": 1,
+            "width": 1280,
+            "height": 720,
+            "scale": 100,
+            "cursor_max_x": 1279,
+            "cursor_max_y": 719
+          }
+        },
+        {
+          "target": [
+            0,
+            719
+          ],
+          "actual": {
+            "x": 0,
+            "y": 719,
+            "version": 1,
+            "generation": 1,
+            "width": 1280,
+            "height": 720,
+            "scale": 100,
+            "cursor_max_x": 1279,
+            "cursor_max_y": 719
+          }
+        },
+        {
+          "target": [
+            1279,
+            719
+          ],
+          "actual": {
+            "x": 1279,
+            "y": 719,
+            "version": 1,
+            "generation": 1,
+            "width": 1280,
+            "height": 720,
+            "scale": 100,
+            "cursor_max_x": 1279,
+            "cursor_max_y": 719
+          }
+        },
+        {
+          "target": [
+            640,
+            360
+          ],
+          "actual": {
+            "x": 640,
+            "y": 360,
+            "version": 1,
+            "generation": 1,
+            "width": 1280,
+            "height": 720,
+            "scale": 100,
+            "cursor_max_x": 1279,
+            "cursor_max_y": 719
+          }
+        }
+      ],
+      "mice": {
+        "return": [
+          {
+            "index": 2,
+            "name": "QEMU PS/2 Mouse",
+            "current": false,
+            "absolute": false
+          },
+          {
+            "index": 4,
+            "name": "QEMU Virtio Mouse",
+            "current": true,
+            "absolute": false
+          }
+        ]
+      }
+    },
+    {
+      "stage": "fullscreen",
+      "window_size": [
+        1920,
+        1200
+      ],
+      "samples": [
+        {
+          "target": [
+            0,
+            0
+          ],
+          "actual": {
+            "x": 0,
+            "y": 0,
+            "version": 1,
+            "generation": 1,
+            "width": 1280,
+            "height": 720,
+            "scale": 100,
+            "cursor_max_x": 1279,
+            "cursor_max_y": 719
+          }
+        },
+        {
+          "target": [
+            1279,
+            0
+          ],
+          "actual": {
+            "x": 1279,
+            "y": 0,
+            "version": 1,
+            "generation": 1,
+            "width": 1280,
+            "height": 720,
+            "scale": 100,
+            "cursor_max_x": 1279,
+            "cursor_max_y": 719
+          }
+        },
+        {
+          "target": [
+            0,
+            719
+          ],
+          "actual": {
+            "x": 0,
+            "y": 719,
+            "version": 1,
+            "generation": 1,
+            "width": 1280,
+            "height": 720,
+            "scale": 100,
+            "cursor_max_x": 1279,
+            "cursor_max_y": 719
+          }
+        },
+        {
+          "target": [
+            1279,
+            719
+          ],
+          "actual": {
+            "x": 1279,
+            "y": 719,
+            "version": 1,
+            "generation": 1,
+            "width": 1280,
+            "height": 720,
+            "scale": 100,
+            "cursor_max_x": 1279,
+            "cursor_max_y": 719
+          }
+        },
+        {
+          "target": [
+            640,
+            360
+          ],
+          "actual": {
+            "x": 640,
+            "y": 360,
+            "version": 1,
+            "generation": 1,
+            "width": 1280,
+            "height": 720,
+            "scale": 100,
+            "cursor_max_x": 1279,
+            "cursor_max_y": 719
+          }
+        }
+      ],
+      "mice": {
+        "return": [
+          {
+            "index": 2,
+            "name": "QEMU PS/2 Mouse",
+            "current": false,
+            "absolute": false
+          },
+          {
+            "index": 4,
+            "name": "QEMU Virtio Mouse",
+            "current": true,
+            "absolute": false
+          }
+        ]
+      }
+    }
+  ],
+  "argv": [
+    "qemu-system-x86_64",
+    "-bios",
+    "/usr/share/ovmf/OVMF.fd",
+    "-machine",
+    "pc,hpet=on",
+    "-cpu",
+    "max",
+    "-accel",
+    "tcg,thread=single",
+    "-smp",
+    "1",
+    "-m",
+    "2G",
+    "-audiodev",
+    "none,id=snd",
+    "-device",
+    "intel-hda",
+    "-device",
+    "hda-output,audiodev=snd",
+    "-serial",
+    "file:/home/programista/Pulpit/Burstzyn/BursztynOS/docs/power-pointer-2026-11-01/gtk-relative/serial.log",
+    "-display",
+    "gtk",
+    "-drive",
+    "id=disk,file=/home/programista/Pulpit/Burstzyn/BursztynOS/docs/power-pointer-2026-11-01/gtk-relative/empty.img,format=raw,if=none",
+    "-device",
+    "virtio-blk-pci,drive=disk,disable-legacy=on",
+    "-netdev",
+    "user,id=n1",
+    "-device",
+    "virtio-net-pci,netdev=n1,disable-legacy=on",
+    "-object",
+    "rng-builtin,id=rng0",
+    "-device",
+    "virtio-rng-pci,rng=rng0,disable-legacy=on",
+    "-vga",
+    "none",
+    "-device",
+    "virtio-vga,disable-legacy=on,xres=1280,yres=720",
+    "-device",
+    "virtio-keyboard-pci",
+    "-device",
+    "virtio-mouse-pci",
+    "-boot",
+    "order=d,menu=on",
+    "-cdrom",
+    "/home/programista/Pulpit/Burstzyn/BursztynOS/BursztynOS-pointer-window-diag.iso",
+    "-name",
+    "Bursztyn pointer frontend probe",
+    "-qmp",
+    "unix:/tmp/bursztyn-gtk-pointer-7941.sock,server=on,wait=off",
+    "-no-reboot"
+  ],
+  "baseline": {
+    "x": 500,
+    "y": 300,
+    "version": 1,
+    "generation": 1,
+    "width": 1280,
+    "height": 720,
+    "scale": 100,
+    "cursor_max_x": 1279,
+    "cursor_max_y": 719
+  },
+  "status": "FAIL",
+  "error": "AssertionError(('returned', (0, 0), {'x': 679, 'y': 377, 'version': 1, 'generation': 1, 'width': 1280, 'height': 720, 'scale': 100, 'cursor_max_x': 1279, 'cursor_max_y': 719}))"
+}

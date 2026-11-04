@@ -1,0 +1,11 @@
+g++    -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer narzedzia/test_pointer_regression.cpp sterowniki/usb/hid_pointer.cpp input_device.cpp -o .pointingtest/pointer-regression
+narzedzia/test_pointer_regression.cpp: In lambda function:
+narzedzia/test_pointer_regression.cpp:103:25: warning: ISO C++ does not support ‘__int128’ for ‘type name’ [-Wpedantic]
+  103 |             return int((__int128(clamped)-range.first)*(extent-1)/(int64_t(range.second)-range.first));
+      |                         ^~~~~~~~
+.pointingtest/pointer-regression
+Signed relative cursor regression: 396600 checks PASS
+Absolute physical endpoints: 3864 checks PASS
+InputDevice modes/readiness/API regression: 56 checks PASS
+python3 narzedzia/test_pointer_boot_order.py
+Pointer boot order/barrier: 6 checks PASS

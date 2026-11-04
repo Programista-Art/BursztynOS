@@ -44,6 +44,8 @@ tapety_tmp.o: programy/tapety/tapety.cpp programy/tapety/../../loader.h \
  programy/tapety/../../bursztyn_ui/lista_rozwijana.h \
  programy/tapety/../../bursztyn_ui/menu.h \
  programy/tapety/../../bursztyn_ui/widok_menu_popup.h \
+ programy/tapety/../../bursztyn_ui/ikona_png.h \
+ programy/tapety/../../bursztyn_ui/../obrazy/skalowanie.h \
  programy/tapety/../../bursztyn_ui/okno.h \
  programy/tapety/../../bursztyn_ui/menu_kontekstowe.h \
  programy/tapety/../../bursztyn_ui/menu_glowne.h \
@@ -59,7 +61,6 @@ tapety_tmp.o: programy/tapety/tapety.cpp programy/tapety/../../loader.h \
  programy/tapety/../../bursztyn_ui/rozdzielacz.h \
  programy/tapety/../../bursztyn_ui/widok_ikon.h \
  programy/tapety/../../bursztyn_ui/obraz.h \
- programy/tapety/../../bursztyn_ui/../obrazy/skalowanie.h \
  programy/tapety/../../bursztyn_ui/przycisk_obrazkowy.h \
  programy/tapety/../../bursztyn_ui/pasek_sciezki.h \
  programy/tapety/../../bursztyn_ui/kalendarz.h \
@@ -138,6 +139,8 @@ programy/tapety/../../bursztyn_ui/popup.h:
 programy/tapety/../../bursztyn_ui/lista_rozwijana.h:
 programy/tapety/../../bursztyn_ui/menu.h:
 programy/tapety/../../bursztyn_ui/widok_menu_popup.h:
+programy/tapety/../../bursztyn_ui/ikona_png.h:
+programy/tapety/../../bursztyn_ui/../obrazy/skalowanie.h:
 programy/tapety/../../bursztyn_ui/okno.h:
 programy/tapety/../../bursztyn_ui/menu_kontekstowe.h:
 programy/tapety/../../bursztyn_ui/menu_glowne.h:
@@ -153,7 +156,6 @@ programy/tapety/../../bursztyn_ui/tabela.h:
 programy/tapety/../../bursztyn_ui/rozdzielacz.h:
 programy/tapety/../../bursztyn_ui/widok_ikon.h:
 programy/tapety/../../bursztyn_ui/obraz.h:
-programy/tapety/../../bursztyn_ui/../obrazy/skalowanie.h:
 programy/tapety/../../bursztyn_ui/przycisk_obrazkowy.h:
 programy/tapety/../../bursztyn_ui/pasek_sciezki.h:
 programy/tapety/../../bursztyn_ui/kalendarz.h:

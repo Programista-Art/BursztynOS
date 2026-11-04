@@ -1,0 +1,426 @@
+{
+  "inventory": [
+    {
+      "path": "aktualizacje.bur",
+      "size": 202368,
+      "sha256": "611aaf4877a5c224e5a57bb37412403925d15a8c7d95c8790a36506f793b1e04",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    },
+    {
+      "path": "demo_ui.bur",
+      "size": 300672,
+      "sha256": "2782a188ad260d6e81b5c42095d401fb19c86f24a46f9bc5be35c42454cf383d",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    },
+    {
+      "path": "diagnostyka.bur",
+      "size": 194176,
+      "sha256": "93ab891a24bda1aa1f4228dcced3e302fa2425da306f7ea17bfe7b5f82f471c7",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    },
+    {
+      "path": "ekran.bur",
+      "size": 235136,
+      "sha256": "bf117939326966332bcf6a42f1fc997cc5f5c7b808e3ef5b04beb058eb833dcb",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    },
+    {
+      "path": "eksplorator.bur",
+      "size": 267936,
+      "sha256": "467033e3bcb84f69886dc40cfacc80239cb5549369e977b3ca497a17325b702e",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    },
+    {
+      "path": "fpu_probe.bur",
+      "size": 69856,
+      "sha256": "31105fed9bbb11812f1ec301ac4885645cd8e9551b30d1d69bbbbdac0fff2bf9",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    },
+    {
+      "path": "husarz_worker.bur",
+      "size": 69888,
+      "sha256": "52b340d7538c93539086454fc6f21077a8a6e43796ef59f2f202b903444e705d",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    },
+    {
+      "path": "instalator.bur",
+      "size": 202368,
+      "sha256": "c06cdbbb1006212bbda68e02cdb80fad26080267da0d26d6e3c3bbcbeaf2e3c1",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    },
+    {
+      "path": "kalkulator.bur",
+      "size": 202496,
+      "sha256": "2e72ca3f9d85032bef376c5433b412b088e897e66fd1220e43e25adc0c98c791",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    },
+    {
+      "path": "kontrolki2.bur",
+      "size": 300672,
+      "sha256": "def8defd9d8f799e2c4e8c6fef4eff1aa64a032e9d1e2351e800c3ab0d1716c4",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    },
+    {
+      "path": "kontrolki3.bur",
+      "size": 218752,
+      "sha256": "442d0d4383083f0c1d318187acb500a6e6a6f107ff18a6664cda5bb7bae1bc83",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    },
+    {
+      "path": "kontrolki4.bur",
+      "size": 333888,
+      "sha256": "b0911ecd0ff5cd1edd013f3d774deb336a6b53f9a68d59977d83820a1d3aa48e",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    },
+    {
+      "path": "menedzer_okien.bur",
+      "size": 356960,
+      "sha256": "c384ff59956526413a0b5147f463fec447f878de623bc75a6ca1cebdc1544b2e",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    },
+    {
+      "path": "notatnik.bur",
+      "size": 202368,
+      "sha256": "f9f47c81d19713e053ba5279e5092ebb908a55484c44566989ec08f0947de760",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    },
+    {
+      "path": "przegladarka.bur",
+      "size": 546496,
+      "sha256": "53b191fe449c95885a19af02d20d39c53de4a7f7204ded8e174cb5dd4a364dc5",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    },
+    {
+      "path": "przegladarka_obrazow.bur",
+      "size": 136864,
+      "sha256": "75f76337372299cd1c71909311f8089ebfc356a3c504eb7983016114a8946893",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    },
+    {
+      "path": "repro.bur",
+      "size": 36864,
+      "sha256": "f702a83fd3990f3834736546cd0ddb075d72c479c7783b00d1ab8a5f51926c31",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    },
+    {
+      "path": "shell.bur",
+      "size": 153312,
+      "sha256": "d4a6551de39f60ff7aa20d94fb7322a2f0ca0ef823191de61599bb378d1673ee",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    },
+    {
+      "path": "snake.bur",
+      "size": 138752,
+      "sha256": "b95f7549adb7c2d67fc764d5f0838da018abe45cf3fd8f3daa2f18e69777a732",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    },
+    {
+      "path": "tapety.bur",
+      "size": 284320,
+      "sha256": "d33fdff3263bbff4d27b610848d54a8b9dcf4eff41a251c22a8b6f71d5b7d718",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    },
+    {
+      "path": "test.bur",
+      "size": 513696,
+      "sha256": "4166514a6807f0b88ffabd2f82253d20f97a55b86d9ecf5c2f75759901c49c0a",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    },
+    {
+      "path": "test_dzwieku.bur",
+      "size": 202368,
+      "sha256": "0383a7e2e123dbd405f4a66d32c7ab8dfb62ea6ad32c3c8d57ab77e0b0334100",
+      "type": "data",
+      "magic": "42555200001000010000000000100000",
+      "executable": true,
+      "compression": null
+    }
+  ],
+  "findings": [],
+  "string_baseline": [
+    {
+      "path": "aktualizacje.bur",
+      "strings": 1136,
+      "source_extensions": 0,
+      "paths": 0,
+      "likely_identifiers": 2,
+      "debug_test_assert": 0,
+      "private_repo": 0,
+      "elf": null
+    },
+    {
+      "path": "demo_ui.bur",
+      "strings": 1962,
+      "source_extensions": 0,
+      "paths": 0,
+      "likely_identifiers": 6,
+      "debug_test_assert": 0,
+      "private_repo": 0,
+      "elf": null
+    },
+    {
+      "path": "diagnostyka.bur",
+      "strings": 1760,
+      "source_extensions": 0,
+      "paths": 0,
+      "likely_identifiers": 0,
+      "debug_test_assert": 0,
+      "private_repo": 0,
+      "elf": null
+    },
+    {
+      "path": "ekran.bur",
+      "strings": 1568,
+      "source_extensions": 0,
+      "paths": 0,
+      "likely_identifiers": 0,
+      "debug_test_assert": 0,
+      "private_repo": 0,
+      "elf": null
+    },
+    {
+      "path": "eksplorator.bur",
+      "strings": 2463,
+      "source_extensions": 0,
+      "paths": 0,
+      "likely_identifiers": 20,
+      "debug_test_assert": 0,
+      "private_repo": 0,
+      "elf": null
+    },
+    {
+      "path": "fpu_probe.bur",
+      "strings": 39,
+      "source_extensions": 0,
+      "paths": 0,
+      "likely_identifiers": 0,
+      "debug_test_assert": 0,
+      "private_repo": 0,
+      "elf": null
+    },
+    {
+      "path": "husarz_worker.bur",
+      "strings": 621,
+      "source_extensions": 0,
+      "paths": 0,
+      "likely_identifiers": 0,
+      "debug_test_assert": 0,
+      "private_repo": 0,
+      "elf": null
+    },
+    {
+      "path": "instalator.bur",
+      "strings": 1449,
+      "source_extensions": 0,
+      "paths": 0,
+      "likely_identifiers": 0,
+      "debug_test_assert": 0,
+      "private_repo": 0,
+      "elf": null
+    },
+    {
+      "path": "kalkulator.bur",
+      "strings": 942,
+      "source_extensions": 0,
+      "paths": 0,
+      "likely_identifiers": 0,
+      "debug_test_assert": 0,
+      "private_repo": 0,
+      "elf": null
+    },
+    {
+      "path": "kontrolki2.bur",
+      "strings": 1767,
+      "source_extensions": 0,
+      "paths": 0,
+      "likely_identifiers": 7,
+      "debug_test_assert": 0,
+      "private_repo": 0,
+      "elf": null
+    },
+    {
+      "path": "kontrolki3.bur",
+      "strings": 1846,
+      "source_extensions": 0,
+      "paths": 0,
+      "likely_identifiers": 1,
+      "debug_test_assert": 0,
+      "private_repo": 0,
+      "elf": null
+    },
+    {
+      "path": "kontrolki4.bur",
+      "strings": 2885,
+      "source_extensions": 0,
+      "paths": 0,
+      "likely_identifiers": 12,
+      "debug_test_assert": 0,
+      "private_repo": 0,
+      "elf": null
+    },
+    {
+      "path": "menedzer_okien.bur",
+      "strings": 2800,
+      "source_extensions": 0,
+      "paths": 0,
+      "likely_identifiers": 5,
+      "debug_test_assert": 0,
+      "private_repo": 0,
+      "elf": null
+    },
+    {
+      "path": "notatnik.bur",
+      "strings": 1509,
+      "source_extensions": 0,
+      "paths": 0,
+      "likely_identifiers": 1,
+      "debug_test_assert": 0,
+      "private_repo": 0,
+      "elf": null
+    },
+    {
+      "path": "przegladarka.bur",
+      "strings": 4157,
+      "source_extensions": 0,
+      "paths": 0,
+      "likely_identifiers": 7,
+      "debug_test_assert": 0,
+      "private_repo": 0,
+      "elf": null
+    },
+    {
+      "path": "przegladarka_obrazow.bur",
+      "strings": 656,
+      "source_extensions": 0,
+      "paths": 0,
+      "likely_identifiers": 0,
+      "debug_test_assert": 0,
+      "private_repo": 0,
+      "elf": null
+    },
+    {
+      "path": "repro.bur",
+      "strings": 38,
+      "source_extensions": 0,
+      "paths": 0,
+      "likely_identifiers": 10,
+      "debug_test_assert": 0,
+      "private_repo": 0,
+      "elf": null
+    },
+    {
+      "path": "shell.bur",
+      "strings": 1411,
+      "source_extensions": 0,
+      "paths": 0,
+      "likely_identifiers": 8,
+      "debug_test_assert": 0,
+      "private_repo": 0,
+      "elf": null
+    },
+    {
+      "path": "snake.bur",
+      "strings": 443,
+      "source_extensions": 0,
+      "paths": 0,
+      "likely_identifiers": 0,
+      "debug_test_assert": 0,
+      "private_repo": 0,
+      "elf": null
+    },
+    {
+      "path": "tapety.bur",
+      "strings": 2585,
+      "source_extensions": 0,
+      "paths": 0,
+      "likely_identifiers": 1,
+      "debug_test_assert": 0,
+      "private_repo": 0,
+      "elf": null
+    },
+    {
+      "path": "test.bur",
+      "strings": 5018,
+      "source_extensions": 2,
+      "paths": 0,
+      "likely_identifiers": 32,
+      "debug_test_assert": 30,
+      "private_repo": 0,
+      "elf": null
+    },
+    {
+      "path": "test_dzwieku.bur",
+      "strings": 2224,
+      "source_extensions": 0,
+      "paths": 0,
+      "likely_identifiers": 1,
+      "debug_test_assert": 0,
+      "private_repo": 0,
+      "elf": null
+    }
+  ],
+  "artifact_sha256": null
+}

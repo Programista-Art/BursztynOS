@@ -10,6 +10,10 @@ param(
     [string]$Iso = "",
     [switch]$PrintArgv,
     [switch]$Audit,
+    [ValidateSet("relative", "virtio-tablet", "usb-tablet", "ps2")]
+    [string]$PointerDevice = "relative",
+    [ValidateRange(0,65535)][int]$QmpPort = 0,
+    [switch]$PointerDiagnostics,
     [string]$FirmwarePath = ""
 )
 
@@ -413,6 +417,31 @@ function Start-BursztynQemu {
         $argsList += @("-boot", "order=c")
     }
 
+    # Explicit diagnostic A/B selection. Normal profiles retain their relative
+    # devices and frontend; the guest never compensates for host decorations.
+    if ($PointerDevice -ne "relative") {
+        $filtered = @()
+        for ($i=0; $i -lt $argsList.Count; $i++) {
+            if ($argsList[$i] -eq "-device" -and $i+1 -lt $argsList.Count -and
+                $argsList[$i+1] -match '^(virtio-mouse-pci|usb-mouse)(,|$)') { $i++; continue }
+            $filtered += $argsList[$i]
+        }
+        $argsList = $filtered
+        switch ($PointerDevice) {
+            "virtio-tablet" { $argsList += @("-device", "virtio-tablet-pci") }
+            "usb-tablet" {
+                if ($VirtIoFull) { $argsList += @("-device", "qemu-xhci,id=pointerprobe") }
+                $tabletBus = if ($VirtIoFull) { "pointerprobe.0" } else { "xhci.0" }
+                $argsList += @("-device", "usb-tablet,bus=$tabletBus")
+            }
+            # pc's existing i8042 supplies PS/2 without adding a second device.
+        }
+    }
+    if ($QmpPort -gt 0) {
+        $argsList += @("-qmp", "tcp:127.0.0.1:$QmpPort,server=on,wait=off")
+    }
+    if ($PointerDiagnostics) { $SaveLog = $true }
+
     $argsList += @("-name", "Bursztyn OS - $ModeName")
 
     $pciDevices = @()
@@ -433,6 +462,8 @@ function Start-BursztynQemu {
         $topology += [ordered]@{order=$i;device=$pciDevices[$i];expected_class=$deviceClass;expected_bdf=("00:{0:x2}.0" -f ($i+2))}
     }
     $report = [ordered]@{argv=@($qemu)+$argsList;host_os=[Environment]::OSVersion.ToString();qemu_binary=$qemu;topology=$topology}
+    $report.pointer_selection = $PointerDevice
+    $report.display_backend = $effectiveDisplay
     if ($Audit) {
         $report.version = @(& $qemu --version 2>&1 | ForEach-Object { $_.ToString() })
         $report.machines = @(& $qemu -machine help 2>&1 | ForEach-Object { $_.ToString() })
@@ -473,6 +504,11 @@ function Start-BursztynQemu {
     Write-Host ""
     Write-Host "QEMU executable: $qemu"
     Write-Host "QEMU argv: $($argsList | ConvertTo-Json -Compress)"
+    Write-Host "Pointer selection: $PointerDevice (relative = canonical profile)"
+    if ($PointerDiagnostics) {
+        Write-Host "Pointer probe: use an ISO built with BURSZTYNDIAGABSMAP=1 for raw REL/ABS and generation logs."
+        Write-Host "Compare window sizes, fullscreen and return; record host Windows DPI separately from guest scale."
+    }
 
     if ($SaveLog) {
         if (-not (Test-Path -LiteralPath $LogDir)) {

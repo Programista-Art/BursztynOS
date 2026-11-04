@@ -1,0 +1,6 @@
+g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined narzedzia/test_file_popup_host.cpp -o .bursztyn-ui-test/test-file-popup
+ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-file-popup
+Rounded file popups: 308494/308494 PASS (corners, shadows, modal input, 100/125%)
+g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined narzedzia/test_user_fault_policy.cpp -o .husarz-test/user-fault-policy
+.husarz-test/user-fault-policy
+User fault isolation policy: 32768 checks PASS (Ring 0, inactive PID, NMI/DF/MC remain fatal)

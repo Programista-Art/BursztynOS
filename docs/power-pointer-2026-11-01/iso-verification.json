@@ -1,0 +1,6 @@
+{
+  "production_kernel_identical": true,
+  "production_diagnostics_disabled": true,
+  "diagnostic_markers_present": true,
+  "diagnostic_symbols_match": true
+}

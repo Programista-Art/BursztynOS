@@ -43,6 +43,8 @@ diagnostyka_tmp.o: programy/diagnostyka/diagnostyka.cpp \
  programy/diagnostyka/../../bursztyn_ui/lista_rozwijana.h \
  programy/diagnostyka/../../bursztyn_ui/menu.h \
  programy/diagnostyka/../../bursztyn_ui/widok_menu_popup.h \
+ programy/diagnostyka/../../bursztyn_ui/ikona_png.h \
+ programy/diagnostyka/../../bursztyn_ui/../obrazy/skalowanie.h \
  programy/diagnostyka/../../bursztyn_ui/okno.h \
  programy/diagnostyka/../../bursztyn_ui/menu_kontekstowe.h \
  programy/diagnostyka/../../bursztyn_ui/menu_glowne.h \
@@ -58,7 +60,6 @@ diagnostyka_tmp.o: programy/diagnostyka/diagnostyka.cpp \
  programy/diagnostyka/../../bursztyn_ui/rozdzielacz.h \
  programy/diagnostyka/../../bursztyn_ui/widok_ikon.h \
  programy/diagnostyka/../../bursztyn_ui/obraz.h \
- programy/diagnostyka/../../bursztyn_ui/../obrazy/skalowanie.h \
  programy/diagnostyka/../../bursztyn_ui/przycisk_obrazkowy.h \
  programy/diagnostyka/../../bursztyn_ui/pasek_sciezki.h \
  programy/diagnostyka/../../bursztyn_ui/kalendarz.h \
@@ -136,6 +137,8 @@ programy/diagnostyka/../../bursztyn_ui/popup.h:
 programy/diagnostyka/../../bursztyn_ui/lista_rozwijana.h:
 programy/diagnostyka/../../bursztyn_ui/menu.h:
 programy/diagnostyka/../../bursztyn_ui/widok_menu_popup.h:
+programy/diagnostyka/../../bursztyn_ui/ikona_png.h:
+programy/diagnostyka/../../bursztyn_ui/../obrazy/skalowanie.h:
 programy/diagnostyka/../../bursztyn_ui/okno.h:
 programy/diagnostyka/../../bursztyn_ui/menu_kontekstowe.h:
 programy/diagnostyka/../../bursztyn_ui/menu_glowne.h:
@@ -151,7 +154,6 @@ programy/diagnostyka/../../bursztyn_ui/tabela.h:
 programy/diagnostyka/../../bursztyn_ui/rozdzielacz.h:
 programy/diagnostyka/../../bursztyn_ui/widok_ikon.h:
 programy/diagnostyka/../../bursztyn_ui/obraz.h:
-programy/diagnostyka/../../bursztyn_ui/../obrazy/skalowanie.h:
 programy/diagnostyka/../../bursztyn_ui/przycisk_obrazkowy.h:
 programy/diagnostyka/../../bursztyn_ui/pasek_sciezki.h:
 programy/diagnostyka/../../bursztyn_ui/kalendarz.h:

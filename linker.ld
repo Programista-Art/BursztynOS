@@ -415,15 +415,10 @@ SECTIONS
         *(.gcc_except_table.*)
 
         /*
-         * Informacje debug nie powinny trafic do finalnego runtime image.
+         * DWARF pozostaje w prywatnym ELF; package_release_kernel.py usuwa go z ISO.
          * Symbole ELF moga nadal pozostac w pliku kernel.elf zależnie od
          * flags linkera; te sekcje nie sa ladowane przez kernel.
          */
-        *(.debug)
-        *(.debug_*)
-        *(.line)
-        *(.stab)
-        *(.stabstr)
         *(.gnu_debuglink)
         *(.gnu_debugdata)
 

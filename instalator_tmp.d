@@ -45,6 +45,8 @@ instalator_tmp.o: programy/instalator/instalator.cpp \
  programy/instalator/../../bursztyn_ui/lista_rozwijana.h \
  programy/instalator/../../bursztyn_ui/menu.h \
  programy/instalator/../../bursztyn_ui/widok_menu_popup.h \
+ programy/instalator/../../bursztyn_ui/ikona_png.h \
+ programy/instalator/../../bursztyn_ui/../obrazy/skalowanie.h \
  programy/instalator/../../bursztyn_ui/okno.h \
  programy/instalator/../../bursztyn_ui/menu_kontekstowe.h \
  programy/instalator/../../bursztyn_ui/menu_glowne.h \
@@ -60,7 +62,6 @@ instalator_tmp.o: programy/instalator/instalator.cpp \
  programy/instalator/../../bursztyn_ui/rozdzielacz.h \
  programy/instalator/../../bursztyn_ui/widok_ikon.h \
  programy/instalator/../../bursztyn_ui/obraz.h \
- programy/instalator/../../bursztyn_ui/../obrazy/skalowanie.h \
  programy/instalator/../../bursztyn_ui/przycisk_obrazkowy.h \
  programy/instalator/../../bursztyn_ui/pasek_sciezki.h \
  programy/instalator/../../bursztyn_ui/kalendarz.h \
@@ -136,6 +137,8 @@ programy/instalator/../../bursztyn_ui/popup.h:
 programy/instalator/../../bursztyn_ui/lista_rozwijana.h:
 programy/instalator/../../bursztyn_ui/menu.h:
 programy/instalator/../../bursztyn_ui/widok_menu_popup.h:
+programy/instalator/../../bursztyn_ui/ikona_png.h:
+programy/instalator/../../bursztyn_ui/../obrazy/skalowanie.h:
 programy/instalator/../../bursztyn_ui/okno.h:
 programy/instalator/../../bursztyn_ui/menu_kontekstowe.h:
 programy/instalator/../../bursztyn_ui/menu_glowne.h:
@@ -151,7 +154,6 @@ programy/instalator/../../bursztyn_ui/tabela.h:
 programy/instalator/../../bursztyn_ui/rozdzielacz.h:
 programy/instalator/../../bursztyn_ui/widok_ikon.h:
 programy/instalator/../../bursztyn_ui/obraz.h:
-programy/instalator/../../bursztyn_ui/../obrazy/skalowanie.h:
 programy/instalator/../../bursztyn_ui/przycisk_obrazkowy.h:
 programy/instalator/../../bursztyn_ui/pasek_sciezki.h:
 programy/instalator/../../bursztyn_ui/kalendarz.h:

@@ -7,6 +7,7 @@
 static uint64_t now_ns=100;
 static int logical_x=0,logical_y=0;
 static unsigned geom_snapshots=0;
+uint64_t grafika_generacja_ekranu(){return 42;}
 static std::vector<std::string> logs;
 void klog_serial(const char* s){logs.emplace_back(s);}
 bool hpet_dostepny(){return true;}
@@ -54,6 +55,8 @@ int main() {
     now_ns=1000000000;input_abs_map_diag_obsluz();
     assert(logs.size()==1&&geom_snapshots==1);
     assert(logs[0].find("mapped=1279,719")!=std::string::npos);
+    assert(logs[0].find("generation=42")!=std::string::npos);
+    assert(logs[0].find("session_mapped_y=0,719")!=std::string::npos);
     assert(logs[0].find("hit_x_min_max=1,1")!=std::string::npos);
     assert(logs[0].find("hit_y_min_max=1,1")!=std::string::npos);
     assert(logs[0].find("observed_x=101,60001")!=std::string::npos);
@@ -62,6 +65,14 @@ int main() {
     send(20000,3000);send(30000,4000);input_abs_map_diag_obsluz();
     assert(logs.size()==2&&logs.back().find("observed_x=20000,30000")!=std::string::npos);
     assert(logs.back().find("hit_x_min_max=0,0")!=std::string::npos);
+    input_reset_all();
+    InputDevice mouse{};mouse.kinds=INPUT_DEVICE_KIND_MOUSE;mouse.bus_type=INPUT_BUS_VIRTIO;
+    assert(input_register_device(&mouse));logs.clear();
+    InputEvent relative[]={{INPUT_EV_REL,INPUT_REL_Y,uint32_t(-100)},{INPUT_EV_SYN,0,0}};
+    input_dispatch_events(&mouse,relative,2);now_ns+=1000000000;input_abs_map_diag_obsluz();
+    assert(logs.size()==1&&logs[0].find("mode=REL")!=std::string::npos);
+    assert(logs[0].find("raw=0,-100")!=std::string::npos);
+    assert(logs[0].find("hit_y_min_max=0,0")!=std::string::npos);
     input_reset_all();
     puts("ABS diagnostics PASS: throttling, raw extrema, endpoints, rounding stalls, idle and reset");
 }

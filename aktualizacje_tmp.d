@@ -45,6 +45,8 @@ aktualizacje_tmp.o: programy/aktualizacje/aktualizacje.cpp \
  programy/aktualizacje/../../bursztyn_ui/lista_rozwijana.h \
  programy/aktualizacje/../../bursztyn_ui/menu.h \
  programy/aktualizacje/../../bursztyn_ui/widok_menu_popup.h \
+ programy/aktualizacje/../../bursztyn_ui/ikona_png.h \
+ programy/aktualizacje/../../bursztyn_ui/../obrazy/skalowanie.h \
  programy/aktualizacje/../../bursztyn_ui/okno.h \
  programy/aktualizacje/../../bursztyn_ui/menu_kontekstowe.h \
  programy/aktualizacje/../../bursztyn_ui/menu_glowne.h \
@@ -60,7 +62,6 @@ aktualizacje_tmp.o: programy/aktualizacje/aktualizacje.cpp \
  programy/aktualizacje/../../bursztyn_ui/rozdzielacz.h \
  programy/aktualizacje/../../bursztyn_ui/widok_ikon.h \
  programy/aktualizacje/../../bursztyn_ui/obraz.h \
- programy/aktualizacje/../../bursztyn_ui/../obrazy/skalowanie.h \
  programy/aktualizacje/../../bursztyn_ui/przycisk_obrazkowy.h \
  programy/aktualizacje/../../bursztyn_ui/pasek_sciezki.h \
  programy/aktualizacje/../../bursztyn_ui/kalendarz.h \
@@ -136,6 +137,8 @@ programy/aktualizacje/../../bursztyn_ui/popup.h:
 programy/aktualizacje/../../bursztyn_ui/lista_rozwijana.h:
 programy/aktualizacje/../../bursztyn_ui/menu.h:
 programy/aktualizacje/../../bursztyn_ui/widok_menu_popup.h:
+programy/aktualizacje/../../bursztyn_ui/ikona_png.h:
+programy/aktualizacje/../../bursztyn_ui/../obrazy/skalowanie.h:
 programy/aktualizacje/../../bursztyn_ui/okno.h:
 programy/aktualizacje/../../bursztyn_ui/menu_kontekstowe.h:
 programy/aktualizacje/../../bursztyn_ui/menu_glowne.h:
@@ -151,7 +154,6 @@ programy/aktualizacje/../../bursztyn_ui/tabela.h:
 programy/aktualizacje/../../bursztyn_ui/rozdzielacz.h:
 programy/aktualizacje/../../bursztyn_ui/widok_ikon.h:
 programy/aktualizacje/../../bursztyn_ui/obraz.h:
-programy/aktualizacje/../../bursztyn_ui/../obrazy/skalowanie.h:
 programy/aktualizacje/../../bursztyn_ui/przycisk_obrazkowy.h:
 programy/aktualizacje/../../bursztyn_ui/pasek_sciezki.h:
 programy/aktualizacje/../../bursztyn_ui/kalendarz.h:

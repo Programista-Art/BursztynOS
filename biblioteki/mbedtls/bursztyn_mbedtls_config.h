@@ -135,5 +135,9 @@
 #define MBEDTLS_MPI_MAX_SIZE 512
 
 #undef MBEDTLS_SELF_TEST
+/* Upstream test credentials, server mode, and __FILE__ debug traces are not used by the OS TLS client. */
+#undef MBEDTLS_CERTS_C
+#undef MBEDTLS_SSL_SRV_C
+#undef MBEDTLS_DEBUG_C
 #undef MBEDTLS_THREADING_C
 #undef MBEDTLS_THREADING_PTHREAD

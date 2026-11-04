@@ -19,16 +19,16 @@ kalkulator_tmp.o: kalkulator.cpp loader.h pzb.h pamiec.h \
  bursztyn_ui/ramka_grupy.h bursztyn_ui/lista_wyboru.h \
  bursztyn_ui/pole_wielowierszowe.h bursztyn_ui/popup.h \
  bursztyn_ui/lista_rozwijana.h bursztyn_ui/menu.h \
- bursztyn_ui/widok_menu_popup.h bursztyn_ui/okno.h \
+ bursztyn_ui/widok_menu_popup.h bursztyn_ui/ikona_png.h \
+ bursztyn_ui/../obrazy/skalowanie.h bursztyn_ui/okno.h \
  bursztyn_ui/menu_kontekstowe.h bursztyn_ui/menu_glowne.h \
  bursztyn_ui/pasek_postepu.h bursztyn_ui/pole_numeryczne.h \
  bursztyn_ui/karty.h bursztyn_ui/widok_przewijany.h bursztyn_ui/drzewo.h \
  bursztyn_ui/pasek_narzedzi.h bursztyn_ui/pasek_stanu.h \
  bursztyn_ui/podpowiedz.h bursztyn_ui/tabela.h bursztyn_ui/rozdzielacz.h \
  bursztyn_ui/widok_ikon.h bursztyn_ui/obraz.h \
- bursztyn_ui/../obrazy/skalowanie.h bursztyn_ui/przycisk_obrazkowy.h \
- bursztyn_ui/pasek_sciezki.h bursztyn_ui/kalendarz.h \
- bursztyn_ui/pole_daty.h bursztyn_ui/pole_czasu.h \
+ bursztyn_ui/przycisk_obrazkowy.h bursztyn_ui/pasek_sciezki.h \
+ bursztyn_ui/kalendarz.h bursztyn_ui/pole_daty.h bursztyn_ui/pole_czasu.h \
  bursztyn_ui/widok_drzewiasto_kolumnowy.h \
  bursztyn_ui/inspektor_wlasciwosci.h bursztyn_ui/selektor_koloru.h \
  bursztyn_ui/pole_wyszukiwania.h bursztyn_ui/pole_sugestii.h \
@@ -88,6 +88,8 @@ bursztyn_ui/popup.h:
 bursztyn_ui/lista_rozwijana.h:
 bursztyn_ui/menu.h:
 bursztyn_ui/widok_menu_popup.h:
+bursztyn_ui/ikona_png.h:
+bursztyn_ui/../obrazy/skalowanie.h:
 bursztyn_ui/okno.h:
 bursztyn_ui/menu_kontekstowe.h:
 bursztyn_ui/menu_glowne.h:
@@ -103,7 +105,6 @@ bursztyn_ui/tabela.h:
 bursztyn_ui/rozdzielacz.h:
 bursztyn_ui/widok_ikon.h:
 bursztyn_ui/obraz.h:
-bursztyn_ui/../obrazy/skalowanie.h:
 bursztyn_ui/przycisk_obrazkowy.h:
 bursztyn_ui/pasek_sciezki.h:
 bursztyn_ui/kalendarz.h:

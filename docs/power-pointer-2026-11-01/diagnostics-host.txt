@@ -1,0 +1,3 @@
+g++ -std=c++17 -O1 -g -Wall -Wextra -ffunction-sections -fdata-sections -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYNDIAGABSMAP=1 -fsanitize=address,undefined input_device.cpp narzedzia/test_abs_map_diag.cpp -Wl,--gc-sections -o .wm-test/abs-map-diag
+ASAN_OPTIONS=detect_leaks=1 .wm-test/abs-map-diag
+ABS diagnostics PASS: throttling, raw extrema, endpoints, rounding stalls, idle and reset

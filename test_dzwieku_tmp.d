@@ -46,6 +46,8 @@ test_dzwieku_tmp.o: programy/test_dzwieku/test_dzwieku.cpp \
  programy/test_dzwieku/../../bursztyn_ui/lista_rozwijana.h \
  programy/test_dzwieku/../../bursztyn_ui/menu.h \
  programy/test_dzwieku/../../bursztyn_ui/widok_menu_popup.h \
+ programy/test_dzwieku/../../bursztyn_ui/ikona_png.h \
+ programy/test_dzwieku/../../bursztyn_ui/../obrazy/skalowanie.h \
  programy/test_dzwieku/../../bursztyn_ui/okno.h \
  programy/test_dzwieku/../../bursztyn_ui/menu_kontekstowe.h \
  programy/test_dzwieku/../../bursztyn_ui/menu_glowne.h \
@@ -61,7 +63,6 @@ test_dzwieku_tmp.o: programy/test_dzwieku/test_dzwieku.cpp \
  programy/test_dzwieku/../../bursztyn_ui/rozdzielacz.h \
  programy/test_dzwieku/../../bursztyn_ui/widok_ikon.h \
  programy/test_dzwieku/../../bursztyn_ui/obraz.h \
- programy/test_dzwieku/../../bursztyn_ui/../obrazy/skalowanie.h \
  programy/test_dzwieku/../../bursztyn_ui/przycisk_obrazkowy.h \
  programy/test_dzwieku/../../bursztyn_ui/pasek_sciezki.h \
  programy/test_dzwieku/../../bursztyn_ui/kalendarz.h \
@@ -140,6 +141,8 @@ programy/test_dzwieku/../../bursztyn_ui/popup.h:
 programy/test_dzwieku/../../bursztyn_ui/lista_rozwijana.h:
 programy/test_dzwieku/../../bursztyn_ui/menu.h:
 programy/test_dzwieku/../../bursztyn_ui/widok_menu_popup.h:
+programy/test_dzwieku/../../bursztyn_ui/ikona_png.h:
+programy/test_dzwieku/../../bursztyn_ui/../obrazy/skalowanie.h:
 programy/test_dzwieku/../../bursztyn_ui/okno.h:
 programy/test_dzwieku/../../bursztyn_ui/menu_kontekstowe.h:
 programy/test_dzwieku/../../bursztyn_ui/menu_glowne.h:
@@ -155,7 +158,6 @@ programy/test_dzwieku/../../bursztyn_ui/tabela.h:
 programy/test_dzwieku/../../bursztyn_ui/rozdzielacz.h:
 programy/test_dzwieku/../../bursztyn_ui/widok_ikon.h:
 programy/test_dzwieku/../../bursztyn_ui/obraz.h:
-programy/test_dzwieku/../../bursztyn_ui/../obrazy/skalowanie.h:
 programy/test_dzwieku/../../bursztyn_ui/przycisk_obrazkowy.h:
 programy/test_dzwieku/../../bursztyn_ui/pasek_sciezki.h:
 programy/test_dzwieku/../../bursztyn_ui/kalendarz.h:

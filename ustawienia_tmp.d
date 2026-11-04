@@ -41,6 +41,8 @@ ustawienia_tmp.o: programy/ustawienia/ustawienia.cpp \
  programy/ustawienia/../../bursztyn_ui/lista_rozwijana.h \
  programy/ustawienia/../../bursztyn_ui/menu.h \
  programy/ustawienia/../../bursztyn_ui/widok_menu_popup.h \
+ programy/ustawienia/../../bursztyn_ui/ikona_png.h \
+ programy/ustawienia/../../bursztyn_ui/../obrazy/skalowanie.h \
  programy/ustawienia/../../bursztyn_ui/okno.h \
  programy/ustawienia/../../bursztyn_ui/menu_kontekstowe.h \
  programy/ustawienia/../../bursztyn_ui/menu_glowne.h \
@@ -56,7 +58,6 @@ ustawienia_tmp.o: programy/ustawienia/ustawienia.cpp \
  programy/ustawienia/../../bursztyn_ui/rozdzielacz.h \
  programy/ustawienia/../../bursztyn_ui/widok_ikon.h \
  programy/ustawienia/../../bursztyn_ui/obraz.h \
- programy/ustawienia/../../bursztyn_ui/../obrazy/skalowanie.h \
  programy/ustawienia/../../bursztyn_ui/przycisk_obrazkowy.h \
  programy/ustawienia/../../bursztyn_ui/pasek_sciezki.h \
  programy/ustawienia/../../bursztyn_ui/kalendarz.h \
@@ -136,6 +137,8 @@ programy/ustawienia/../../bursztyn_ui/popup.h:
 programy/ustawienia/../../bursztyn_ui/lista_rozwijana.h:
 programy/ustawienia/../../bursztyn_ui/menu.h:
 programy/ustawienia/../../bursztyn_ui/widok_menu_popup.h:
+programy/ustawienia/../../bursztyn_ui/ikona_png.h:
+programy/ustawienia/../../bursztyn_ui/../obrazy/skalowanie.h:
 programy/ustawienia/../../bursztyn_ui/okno.h:
 programy/ustawienia/../../bursztyn_ui/menu_kontekstowe.h:
 programy/ustawienia/../../bursztyn_ui/menu_glowne.h:
@@ -151,7 +154,6 @@ programy/ustawienia/../../bursztyn_ui/tabela.h:
 programy/ustawienia/../../bursztyn_ui/rozdzielacz.h:
 programy/ustawienia/../../bursztyn_ui/widok_ikon.h:
 programy/ustawienia/../../bursztyn_ui/obraz.h:
-programy/ustawienia/../../bursztyn_ui/../obrazy/skalowanie.h:
 programy/ustawienia/../../bursztyn_ui/przycisk_obrazkowy.h:
 programy/ustawienia/../../bursztyn_ui/pasek_sciezki.h:
 programy/ustawienia/../../bursztyn_ui/kalendarz.h:

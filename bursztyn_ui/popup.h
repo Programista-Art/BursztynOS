@@ -557,6 +557,9 @@ private:
         powierzchnie_[liczba_] = &p;
         p.zarzadca_ = this;
         p.poziom_ = liczba_;
+        // Retained surfaces may have missed theme broadcasts while detached.
+        // Refresh the whole control tree before its first layout and paint.
+        p.zaktualizuj_motyw();
         p.ustaw_skale_dpi(skala_dpi_);
         p.rozmiesc(obszar);
         ++liczba_;

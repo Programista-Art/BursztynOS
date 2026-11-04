@@ -1,0 +1,37 @@
+start_menu_ui.h:77:8:virtual void StartMenu::Surface::Power::rysuj_tlo_i_ramke(BursztynUI::KontekstRysowania&, const BursztynUI::StylStanu&)	48	static
+bursztyn_ui/popup.h:555:10:bool BursztynUI::ZarzadcaPopupow::dodaj_wewnetrznie(BursztynUI::PowierzchniaPopup&, BursztynUI::Prostokat, BursztynUI::Kontrolka*)	48	static
+input_device.cpp:467:13:void {anonymous}::forget_pointer_reports(InputDevice*)	16	static
+input_device.cpp:555:13:void input_diag_publish(InputDevice*, size_t, bool)	528	static
+input_device.cpp:547:13:void input_diag_totals()	8	static
+input_device.cpp:390:16:uint8_t {anonymous}::common_buttons()	8	static
+input_device.cpp:135:13:void {anonymous}::input_recalc_pointer_owner()	192	static
+input_device.cpp:90:15:{anonymous}::abs_report(InputDevice*, uint64_t)::<lambda(const char*, int64_t, int64_t)>	48	static
+input_device.cpp:85:13:void {anonymous}::abs_report(InputDevice*, uint64_t)	816	static
+abs_map_diag.h:17:10:void AbsMapSample::record(int32_t, int32_t, bool, bool, int32_t, int32_t, int32_t, int32_t, int, int, int, int, uint64_t, uint64_t, bool)	56	static
+input_device.cpp:400:13:void {anonymous}::publish_report(const PointerReport&)	208	dynamic,bounded
+input_device.cpp:459:13:0()	96	static
+input_device.cpp:125:17:void {anonymous}::input_device_pobierz_ostatnie_abs(int32_t*, int32_t*)	8	static
+input_device.cpp:531:14:InputDevice* input_get_pointer_owner()	8	static
+input_device.cpp:532:14:InputDevice* input_get_last_pointer_source()	8	static
+input_device.cpp:533:6:bool input_pointer_is_active(const InputDevice*)	8	static
+input_device.cpp:538:13:const char* input_bus_name(uint32_t)	8	static
+input_device.cpp:573:6:bool input_register_device(InputDevice*)	208	static
+input_device.cpp:651:6:bool input_arm_pointer(InputDevice*)	16	static
+input_device.cpp:660:6:bool input_prove_pointer(InputDevice*)	16	static
+input_device.cpp:717:6:0(InputDevice*, const InputEvent*)	128	static
+input_device.cpp:675:6:bool input_unregister_device(InputDevice*)	64	static
+input_device.cpp:698:8:size_t input_get_device_count()	8	static
+input_device.cpp:702:14:InputDevice* input_get_device(size_t)	8	static
+input_device.cpp:707:14:InputDevice* input_find_device_by_name(const char*)	8	static
+input_device.cpp:717:6:void input_dispatch_event(InputDevice*, const InputEvent*)	8	static
+input_device.cpp:811:6:void input_dispatch_events(InputDevice*, const InputEvent*, size_t)	48	static
+input_device.cpp:818:6:void input_discard_pointer_report(InputDevice*)	8	static
+input_device.cpp:827:6:void input_abs_map_diag_obsluz()	48	static
+input_device.cpp:833:6:void input_set_pointer_ready(bool)	8	static
+input_device.cpp:834:6:bool input_pointer_geometry_ready()	16	static
+input_device.cpp:838:6:void input_pointer_boot_diagnostic()	8	static
+input_device.cpp:856:6:void input_service_all()	48	static
+input_device.cpp:867:6:void input_reset_all()	16	static
+input_device.cpp:884:10:uint16_t input_ps2_scancode_to_linux(bool, uint8_t)	8	static
+input_device.cpp:923:10:uint16_t input_usb_hid_mod_to_linux(uint8_t)	8	static
+input_device.cpp:938:10:uint16_t input_usb_hid_usage_to_linux(uint8_t)	8	static

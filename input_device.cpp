@@ -16,6 +16,7 @@
 #if BURSZTYNDIAGABSMAP
 #include "sterowniki/czas/hpet.h"
 void grafika_abs_map_geometria();
+uint64_t grafika_generacja_ekranu();
 #endif
 
 #ifdef BURSZTYN_VIRTIO_HOST_TEST
@@ -87,11 +88,13 @@ static void abs_report(InputDevice* dev,uint64_t now) {
     auto text=[&](const char* s){while(*s&&n+1<sizeof(buf))buf[n++]=*s++;};
     auto num=[&](int64_t v){if(v<0){text("-");v=-v;}char b[24];unsigned i=0;do{b[i++]=char('0'+v%10);v/=10;}while(v);while(i&&n+1<sizeof(buf))buf[n++]=b[--i];};
     auto pair=[&](const char* k,int64_t x,int64_t y){text(k);num(x);text(",");num(y);text(" ");};
-    text("[ABS MAP] dev='");text(dev->name);text("' mode=ABS ");
+    text("[ABS MAP] dev='");text(dev->name);text(a->absolute?"' mode=ABS ":"' mode=REL ");
+    text("generation=");num(a->generation);text(" ");
     pair("raw=",a->raw_x,a->raw_y);pair("xrange=",a->min_x,a->max_x);pair("yrange=",a->min_y,a->max_y);
     pair("valid=",a->valid_x,a->valid_y);pair("mapped=",a->mapped_x,a->mapped_y);
     pair("logical=",grafika_pobierz_mysz_x(),grafika_pobierz_mysz_y());pair("screen=",a->width,a->height);
     pair("observed_x=",a->low_x,a->high_x);pair("observed_y=",a->low_y,a->high_y);
+    pair("session_mapped_y=",a->lowest_mapped_y,a->highest_mapped_y);
     pair("stalled=",a->stalled_x,a->stalled_y);text("near_edge=");num(a->near_edge);
     pair(" hit_x_min_max=",bool(a->endpoints&1),bool(a->endpoints&2));
     pair("hit_y_min_max=",bool(a->endpoints&4),bool(a->endpoints&8));text("reports=");num(a->reports);
@@ -411,6 +414,12 @@ static void publish_report(const PointerReport& r) {
         if(dev->bus_type==INPUT_BUS_VIRTIO)
             zaktualizuj_mysze_wzgledne_zrodlo(r.dx,r.dy,buttons,source);
         else zaktualizuj_mysze_zrodlo(r.dx,-r.dy,buttons,source);
+#if BURSZTYNDIAGABSMAP
+        if(auto* a=abs_sample(dev))a->record(r.dx,r.dy,true,true,0,0,0,0,
+            grafika_pobierz_mysz_x(),grafika_pobierz_mysz_y(),
+            grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc(),
+            hpet_dostepny()?czas_monotoniczny_ns():0,grafika_generacja_ekranu(),false);
+#endif
         published=true;
     }
     if(r.wheel || r.hwheel) {
@@ -432,7 +441,7 @@ static void publish_report(const PointerReport& r) {
         if(valid_x || valid_y) {
 #if BURSZTYNDIAGABSMAP
             if(auto* a=abs_sample(dev))a->record(r.x,r.y,r.has_x,r.has_y,dev->abs_x.min,dev->abs_x.max,
-                dev->abs_y.min,dev->abs_y.max,x,y,w,h,hpet_dostepny()?czas_monotoniczny_ns():0);
+                dev->abs_y.min,dev->abs_y.max,x,y,w,h,hpet_dostepny()?czas_monotoniczny_ns():0,grafika_generacja_ekranu());
 #endif
             zaktualizuj_mysze_pozycja_zrodlo(x,y,buttons,source);published=true;
         }

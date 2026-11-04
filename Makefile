@@ -844,9 +844,11 @@ check-kernel: $(KERNEL)
 # 1. Bursztyn OS (domyslny, czysty start bez autostartu testow)
 # 2. Bursztyn OS - testy automatyczne (multiboot2 bursztyn.test=automated)
 #
-$(GRUB_CFG): $(KERNEL) ustawienia_blob.o $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile narzedzia/package_bsf.py narzedzia/package_support.py narzedzia/package_power_icons.py $(wildcard ikonki/przycisk*.png) $(wildcard dane/sponsorze/*.txt) czcionki/ttf $(wildcard czcionki/ttf/*)
+$(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notices.py $(KERNEL) ustawienia_blob.o $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile narzedzia/package_bsf.py narzedzia/package_support.py narzedzia/package_power_icons.py $(wildcard ikonki/przycisk*.png) $(wildcard dane/sponsorze/*.txt) czcionki/ttf $(wildcard czcionki/ttf/*)
+	@rm -rf $(ISO_DIR)
 	@mkdir -p $(ISO_DIR)/boot/grub
-	@cp $(KERNEL) $(ISO_DIR)/boot/
+	$(PYTHON) narzedzia/package_release_kernel.py $(KERNEL) $(ISO_DIR)/boot/$(KERNEL) $(OBJCOPY)
+	$(PYTHON) narzedzia/package_release_notices.py $(ISO_DIR)
 	@echo "[ISO] Kopiuje $(TAPETY_PAK) jako /boot/tapety.pak (modul Multiboot2)."
 	@cp $(TAPETY_PAK) $(ISO_DIR)/boot/tapety.pak
 	@mkdir -p $(ISO_DIR)/boot/installer
@@ -1037,6 +1039,7 @@ instalator_blob.o: instalator_tmp.o bursztyn_gui.o programy/instalator/instalato
 $(ISO): check-kernel $(KERNEL) $(TAPETY_PAK) $(GRUB_CFG)
 	$(GRUB_MKRESCUE) -o $@ $(ISO_DIR) --xorriso=$(XORRISO)
 	$(PYTHON) narzedzia/verify_bsf_iso.py $@
+	$(PYTHON) narzedzia/verifyreleasemetadata.py $@ --output .release-private/release-inventory.json
 	@cmp -s $(TAPETY_PAK) $(ISO_DIR)/boot/tapety.pak || { echo "[TAPETY BUILD] BLAD: staging ISO nie jest identyczny z $(TAPETY_PAK)"; exit 1; }
 	@rm -f $(TAPETY_ISO_CHECK)
 	@$(XORRISO) -osirrox on -indev $@ -extract /boot/tapety.pak $(TAPETY_ISO_CHECK) >/dev/null 2>&1

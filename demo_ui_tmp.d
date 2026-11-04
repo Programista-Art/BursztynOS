@@ -45,6 +45,8 @@ demo_ui_tmp.o: programy/demo_ui/demo_ui.cpp \
  programy/demo_ui/../../bursztyn_ui/lista_rozwijana.h \
  programy/demo_ui/../../bursztyn_ui/menu.h \
  programy/demo_ui/../../bursztyn_ui/widok_menu_popup.h \
+ programy/demo_ui/../../bursztyn_ui/ikona_png.h \
+ programy/demo_ui/../../bursztyn_ui/../obrazy/skalowanie.h \
  programy/demo_ui/../../bursztyn_ui/okno.h \
  programy/demo_ui/../../bursztyn_ui/menu_kontekstowe.h \
  programy/demo_ui/../../bursztyn_ui/menu_glowne.h \
@@ -60,7 +62,6 @@ demo_ui_tmp.o: programy/demo_ui/demo_ui.cpp \
  programy/demo_ui/../../bursztyn_ui/rozdzielacz.h \
  programy/demo_ui/../../bursztyn_ui/widok_ikon.h \
  programy/demo_ui/../../bursztyn_ui/obraz.h \
- programy/demo_ui/../../bursztyn_ui/../obrazy/skalowanie.h \
  programy/demo_ui/../../bursztyn_ui/przycisk_obrazkowy.h \
  programy/demo_ui/../../bursztyn_ui/pasek_sciezki.h \
  programy/demo_ui/../../bursztyn_ui/kalendarz.h \
@@ -135,6 +136,8 @@ programy/demo_ui/../../bursztyn_ui/popup.h:
 programy/demo_ui/../../bursztyn_ui/lista_rozwijana.h:
 programy/demo_ui/../../bursztyn_ui/menu.h:
 programy/demo_ui/../../bursztyn_ui/widok_menu_popup.h:
+programy/demo_ui/../../bursztyn_ui/ikona_png.h:
+programy/demo_ui/../../bursztyn_ui/../obrazy/skalowanie.h:
 programy/demo_ui/../../bursztyn_ui/okno.h:
 programy/demo_ui/../../bursztyn_ui/menu_kontekstowe.h:
 programy/demo_ui/../../bursztyn_ui/menu_glowne.h:
@@ -150,7 +153,6 @@ programy/demo_ui/../../bursztyn_ui/tabela.h:
 programy/demo_ui/../../bursztyn_ui/rozdzielacz.h:
 programy/demo_ui/../../bursztyn_ui/widok_ikon.h:
 programy/demo_ui/../../bursztyn_ui/obraz.h:
-programy/demo_ui/../../bursztyn_ui/../obrazy/skalowanie.h:
 programy/demo_ui/../../bursztyn_ui/przycisk_obrazkowy.h:
 programy/demo_ui/../../bursztyn_ui/pasek_sciezki.h:
 programy/demo_ui/../../bursztyn_ui/kalendarz.h:
