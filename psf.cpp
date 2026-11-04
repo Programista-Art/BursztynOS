@@ -180,15 +180,16 @@ bool ustaw_wskaznik_bloku(wezel_indeksowy* w, uint64_t idx, uint64_t blok_id, ui
     }
     uint8_t* blk1 = pobierz_blok_danych(w->blok_posredni_2);
     if(!blk1) return false;
-    uint64_t* arr1 = reinterpret_cast<uint64_t*>(blk1);
-    uint64_t id2 = arr1[tbl];
+    uint64_t id2 = reinterpret_cast<uint64_t*>(blk1)[tbl];
     if(id2==BARK_BLOKU){
         uint64_t nid = zaalokuj_wolny_blok_danych();
         if(nid==BARK_BLOKU) return false;
         uint8_t* blk2 = pobierz_blok_danych(nid, false);
         if(!blk2){ (void)zwolnij_blok_danych(nid); return false; }
         for(uint64_t i=0;i<PTRS_PER_BLOCK;i++) reinterpret_cast<uint64_t*>(blk2)[i]=BARK_BLOKU;
-        arr1[tbl]=nid;
+        blk1 = pobierz_blok_danych(w->blok_posredni_2);
+        if(!blk1){ (void)zwolnij_blok_danych(nid); return false; }
+        reinterpret_cast<uint64_t*>(blk1)[tbl]=nid;
         uint64_t abs1 = absolutny_blok_danych(w->blok_posredni_2);
         if(abs1!=UINT64_MAX) oznacz_blok_jako_brudny(abs1);
         uint64_t abs2 = absolutny_blok_danych(nid);
@@ -215,42 +216,41 @@ bool zwolnij_wszystkie_bloki_wezla(wezel_indeksowy* w, uint64_t wezel_id) {
             w->wskazniki_blokow[k] = BARK_BLOKU;
         }
     }
-    // 2. Pojedyncze posrednie
+    // 2. Pojedyncze posrednie (odswiezamy wskaznik bloku w kazdej iteracji,
+    //    aby zwolnij_blok_danych nie wywlaszczylo tablicy z 256-wpisowego cache LRU)
     if (w->blok_posredni_1 != BARK_BLOKU) {
-        uint8_t* blk = pobierz_blok_danych(w->blok_posredni_1);
-        if (blk) {
-            uint64_t* arr = reinterpret_cast<uint64_t*>(blk);
-            for (uint64_t i = 0; i < PTRS_PER_BLOCK; ++i) {
-                if (arr[i] != BARK_BLOKU) {
-                    (void)zwolnij_blok_danych(arr[i]);
-                }
+        const uint64_t id1 = w->blok_posredni_1;
+        for (uint64_t i = 0; i < PTRS_PER_BLOCK; ++i) {
+            uint8_t* blk = pobierz_blok_danych(id1);
+            if (!blk) break;
+            const uint64_t child_id = reinterpret_cast<uint64_t*>(blk)[i];
+            if (child_id != BARK_BLOKU && child_id != id1) {
+                (void)zwolnij_blok_danych(child_id);
             }
         }
-        (void)zwolnij_blok_danych(w->blok_posredni_1);
+        (void)zwolnij_blok_danych(id1);
         w->blok_posredni_1 = BARK_BLOKU;
     }
     // 3. Podwojne posrednie
     if (w->blok_posredni_2 != BARK_BLOKU) {
-        uint8_t* blk1 = pobierz_blok_danych(w->blok_posredni_2);
-        if (blk1) {
-            uint64_t* arr1 = reinterpret_cast<uint64_t*>(blk1);
-            for (uint64_t i = 0; i < PTRS_PER_BLOCK; ++i) {
-                const uint64_t id2 = arr1[i];
-                if (id2 != BARK_BLOKU) {
+        const uint64_t id_l1 = w->blok_posredni_2;
+        for (uint64_t i = 0; i < PTRS_PER_BLOCK; ++i) {
+            uint8_t* blk1 = pobierz_blok_danych(id_l1);
+            if (!blk1) break;
+            const uint64_t id2 = reinterpret_cast<uint64_t*>(blk1)[i];
+            if (id2 != BARK_BLOKU && id2 != id_l1) {
+                for (uint64_t j = 0; j < PTRS_PER_BLOCK; ++j) {
                     uint8_t* blk2 = pobierz_blok_danych(id2);
-                    if (blk2) {
-                        uint64_t* arr2 = reinterpret_cast<uint64_t*>(blk2);
-                        for (uint64_t j = 0; j < PTRS_PER_BLOCK; ++j) {
-                            if (arr2[j] != BARK_BLOKU) {
-                                (void)zwolnij_blok_danych(arr2[j]);
-                            }
-                        }
+                    if (!blk2) break;
+                    const uint64_t leaf_id = reinterpret_cast<uint64_t*>(blk2)[j];
+                    if (leaf_id != BARK_BLOKU && leaf_id != id_l1 && leaf_id != id2) {
+                        (void)zwolnij_blok_danych(leaf_id);
                     }
-                    (void)zwolnij_blok_danych(id2);
                 }
+                (void)zwolnij_blok_danych(id2);
             }
         }
-        (void)zwolnij_blok_danych(w->blok_posredni_2);
+        (void)zwolnij_blok_danych(id_l1);
         w->blok_posredni_2 = BARK_BLOKU;
     }
     w->blok_posredni_3 = BARK_BLOKU;
@@ -2178,8 +2178,9 @@ static bool psf_sprawdz_obecnosc_slotow() {
     return w.znaleziony;
 }
 
-static const char* psf_przetlumacz_sciezke_slotu(const char* s, char bufor[160]) {
-    if (!psf_sloty_wlaczone || !s || s[0] != '/' || !psf_sprawdz_obecnosc_slotow()) return s;
+__attribute__((noinline)) static const char* psf_przetlumacz_sciezke_slotu(const char* s, char bufor[MAKS_DLUGOSC_SCIEZKI]) {
+    if (!bezpieczna_sciezka(s)) return nullptr;
+    if (!psf_sloty_wlaczone || !psf_sprawdz_obecnosc_slotow()) return s;
 
     bool jest_programy = false;
     bool jest_system = false;
@@ -2203,26 +2204,31 @@ static const char* psf_przetlumacz_sciezke_slotu(const char* s, char bufor[160])
 
     const char* pref = (psf_aktywny_slot == 1) ? "/sloty/b" : "/sloty/a";
     size_t p = 0;
-    while (pref[p] && p < 159) { bufor[p] = pref[p]; ++p; }
+    while (pref[p] && p < MAKS_DLUGOSC_SCIEZKI - 1U) { bufor[p] = pref[p]; ++p; }
 
     const char* kat = jest_programy ? "/programy" : "/system";
     size_t k = 0;
-    while (kat[k] && p < 159) { bufor[p++] = kat[k++]; }
+    while (kat[k] && p < MAKS_DLUGOSC_SCIEZKI - 1U) { bufor[p++] = kat[k++]; }
 
-    while (s[reszta] && p < 159) { bufor[p++] = s[reszta++]; }
+    while (s[reszta] && p < MAKS_DLUGOSC_SCIEZKI - 1U) { bufor[p++] = s[reszta++]; }
+    if (s[reszta] != '\0') {
+        bufor[0] = '\0';
+        return nullptr;
+    }
     bufor[p] = '\0';
     return bufor;
 }
 
-uint64_t rozwiaz_sciezke(
+__attribute__((noinline)) uint64_t rozwiaz_sciezke(
     const char* sciezka,
     char* nazwa_docelowa,
     bool zwroc_rodzica
 ) {
-    char bufor_translacji[160];
+    char bufor_translacji[MAKS_DLUGOSC_SCIEZKI];
     const char* sciezka_rzeczywista = psf_przetlumacz_sciezke_slotu(sciezka, bufor_translacji);
     if (!psf_gotowy ||
         !dysk_superblok ||
+        !sciezka_rzeczywista ||
         !bezpieczna_sciezka(
             sciezka_rzeczywista)) {
 
@@ -2627,7 +2633,9 @@ bool waliduj_katalog(
             if (wpisy[j].id_wezla >
                     calkowita_liczba_wezlow ||
                 wpisy[j].id_wezla ==
-                    id) {
+                    id ||
+                wpisy[j].id_wezla ==
+                    dysk_superblok->id_korzenia) {
 
                 return false;
             }
@@ -3277,36 +3285,10 @@ bool wskazniki_pliku_poprawne(
 
     if (w->blok_posredni_3 != BARK_BLOKU) return false;
 
-    if (w->blok_posredni_1 != BARK_BLOKU) {
-        if (!id_bloku_danych_poprawne(w->blok_posredni_1) || !czy_blok_danych_zajety(w->blok_posredni_1)) return false;
-        uint8_t* blk = pobierz_blok_danych(w->blok_posredni_1);
-        if (!blk) return false;
-        uint64_t* arr = reinterpret_cast<uint64_t*>(blk);
-        for (uint64_t i = 0; i < PTRS_PER_BLOCK; ++i) {
-            uint64_t id = arr[i];
-            if (id == BARK_BLOKU) continue;
-            if (!id_bloku_danych_poprawne(id) || !czy_blok_danych_zajety(id)) return false;
-        }
-    }
-
-    if (w->blok_posredni_2 != BARK_BLOKU) {
-        if (!id_bloku_danych_poprawne(w->blok_posredni_2) || !czy_blok_danych_zajety(w->blok_posredni_2)) return false;
-        uint8_t* blk1 = pobierz_blok_danych(w->blok_posredni_2);
-        if (!blk1) return false;
-        uint64_t* arr1 = reinterpret_cast<uint64_t*>(blk1);
-        for (uint64_t i = 0; i < PTRS_PER_BLOCK; ++i) {
-            uint64_t id2 = arr1[i];
-            if (id2 == BARK_BLOKU) continue;
-            if (!id_bloku_danych_poprawne(id2) || !czy_blok_danych_zajety(id2)) return false;
-            uint8_t* blk2 = pobierz_blok_danych(id2);
-            if (!blk2) return false;
-            uint64_t* arr2 = reinterpret_cast<uint64_t*>(blk2);
-            for (uint64_t j = 0; j < PTRS_PER_BLOCK; ++j) {
-                uint64_t id = arr2[j];
-                if (id == BARK_BLOKU) continue;
-                if (!id_bloku_danych_poprawne(id) || !czy_blok_danych_zajety(id)) return false;
-            }
-        }
+    if (w->blok_posredni_1 != BARK_BLOKU &&
+        w->blok_posredni_2 != BARK_BLOKU &&
+        w->blok_posredni_1 == w->blok_posredni_2) {
+        return false;
     }
 
     for (size_t k = 0;
@@ -3323,7 +3305,9 @@ bool wskazniki_pliku_poprawne(
         }
 
         if (!id_bloku_danych_poprawne(id) ||
-            !czy_blok_danych_zajety(id)) {
+            !czy_blok_danych_zajety(id) ||
+            id == w->blok_posredni_1 ||
+            id == w->blok_posredni_2) {
 
             return false;
         }
@@ -3336,6 +3320,72 @@ bool wskazniki_pliku_poprawne(
                 id) {
 
                 return false;
+            }
+        }
+    }
+
+    if (w->blok_posredni_1 != BARK_BLOKU) {
+        if (!id_bloku_danych_poprawne(w->blok_posredni_1) || !czy_blok_danych_zajety(w->blok_posredni_1)) return false;
+        uint8_t* blk = pobierz_blok_danych(w->blok_posredni_1);
+        if (!blk) return false;
+        uint64_t* arr = reinterpret_cast<uint64_t*>(blk);
+        for (uint64_t i = 0; i < PTRS_PER_BLOCK; ++i) {
+            uint64_t id = arr[i];
+            if (id == BARK_BLOKU) continue;
+            if (!id_bloku_danych_poprawne(id) ||
+                !czy_blok_danych_zajety(id) ||
+                id == w->blok_posredni_1 ||
+                id == w->blok_posredni_2) {
+                return false;
+            }
+            for (size_t k = 0; k < static_cast<size_t>(PSF_MAX_BLOKOW_W_WEZLE); ++k) {
+                if (w->wskazniki_blokow[k] == id) return false;
+            }
+            for (uint64_t j = 0; j < i; ++j) {
+                if (arr[j] == id) return false;
+            }
+        }
+    }
+
+    if (w->blok_posredni_2 != BARK_BLOKU) {
+        if (!id_bloku_danych_poprawne(w->blok_posredni_2) || !czy_blok_danych_zajety(w->blok_posredni_2)) return false;
+        for (uint64_t i = 0; i < PTRS_PER_BLOCK; ++i) {
+            uint8_t* blk1 = pobierz_blok_danych(w->blok_posredni_2);
+            if (!blk1) return false;
+            uint64_t* arr1 = reinterpret_cast<uint64_t*>(blk1);
+            uint64_t id2 = arr1[i];
+            if (id2 == BARK_BLOKU) continue;
+            if (!id_bloku_danych_poprawne(id2) ||
+                !czy_blok_danych_zajety(id2) ||
+                id2 == w->blok_posredni_1 ||
+                id2 == w->blok_posredni_2) {
+                return false;
+            }
+            for (size_t k = 0; k < static_cast<size_t>(PSF_MAX_BLOKOW_W_WEZLE); ++k) {
+                if (w->wskazniki_blokow[k] == id2) return false;
+            }
+            for (uint64_t j = 0; j < i; ++j) {
+                if (arr1[j] == id2) return false;
+            }
+            uint8_t* blk2 = pobierz_blok_danych(id2);
+            if (!blk2) return false;
+            uint64_t* arr2 = reinterpret_cast<uint64_t*>(blk2);
+            for (uint64_t j = 0; j < PTRS_PER_BLOCK; ++j) {
+                uint64_t id = arr2[j];
+                if (id == BARK_BLOKU) continue;
+                if (!id_bloku_danych_poprawne(id) ||
+                    !czy_blok_danych_zajety(id) ||
+                    id == w->blok_posredni_1 ||
+                    id == w->blok_posredni_2 ||
+                    id == id2) {
+                    return false;
+                }
+                for (size_t k = 0; k < static_cast<size_t>(PSF_MAX_BLOKOW_W_WEZLE); ++k) {
+                    if (w->wskazniki_blokow[k] == id) return false;
+                }
+                for (uint64_t m = 0; m < j; ++m) {
+                    if (arr2[m] == id) return false;
+                }
             }
         }
     }
@@ -4508,10 +4558,10 @@ extern "C" bool psf_przygotuj_katalog_startowy(const char* sciezka,PsfStanStartu
     for(size_t i=0;i<PSF_MAX_BLOKOW_W_WEZLE;++i)if(korzen->wskazniki_blokow[i]!=BARK_BLOKU &&
         !id_bloku_danych_poprawne(korzen->wskazniki_blokow[i])){blad_startu(PsfBladStartu::ZlyKorzen);return false;}
 #if defined(BURSZTYNDIAGPSFBOOTSTRAP) && BURSZTYNDIAGPSFBOOTSTRAP
-    char translacja[160]{};
+    char translacja[MAKS_DLUGOSC_SCIEZKI]{};
     const char* fizyczna=psf_przetlumacz_sciezke_slotu(sciezka,translacja);
     size_t n=0;
-    while(n+1<sizeof(stan->sciezkaFizyczna) && fizyczna[n]){stan->sciezkaFizyczna[n]=fizyczna[n];++n;}
+    while(fizyczna && n+1<sizeof(stan->sciezkaFizyczna) && fizyczna[n]){stan->sciezkaFizyczna[n]=fizyczna[n];++n;}
     // Counts are not maintained globally; scan only in opt-in bootstrap diagnostics.
     for(uint64_t i=1;i<=calkowita_liczba_wezlow;++i){auto* w=pobierz_wezel(i);if(w && w->typ==TYP_WOLNY)++stan->wolneWezly;}
     for(uint64_t i=0;i<calkowita_liczba_blokow_danych;++i)if(!czy_blok_danych_zajety(i))++stan->wolneBloki;
@@ -4754,8 +4804,10 @@ extern "C" PsfMoveWynik psf_przenies_twor_wynik(const char* sciezka,const char* 
     if(cel->typ!=TYP_PLIK && cel->typ!=TYP_KATALOG)return PSF_MOVE_MISSING_SOURCE;
     // Walk resolved destination inodes, not textual prefixes (slot aliases can differ).
     if(cel->typ==TYP_KATALOG) {
-        char translation[160];
+        // Chronione przez BlokadaPSF blokada (brak reentrancji, oszczednosc 512 B stosu Ring 0).
+        static char translation[MAKS_DLUGOSC_SCIEZKI];
         const char* destination=psf_przetlumacz_sciezke_slotu(folder_docelowy,translation);
+        if (!destination) return PSF_MOVE_BAD_DESTINATION;
         uint64_t ancestor=dysk_superblok->id_korzenia;size_t pos=1;
         while(destination[pos]) {
             char segment[PSF_MAX_NAZWA]{};bool last=false;

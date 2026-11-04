@@ -1,0 +1,788 @@
+{
+  "git_head": "63bbd43d251be1e30dada0ddf1c8d79888324edf",
+  "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "artifacts": {
+    "BursztynOS.iso": {
+      "size_bytes": 39974912,
+      "sha256": "d6bf2ff53bcc6214269b7535595b31711a19c9119384a220101578f908510456"
+    },
+    "system_operacyjny.bin": {
+      "size_bytes": 13810232,
+      "sha256": "d23e38aef2cf80a572a0d753b38f1690f50a4c2920529841ecf7298ab2915abc",
+      "sections_raw": "system_operacyjny.bin  :\nsection               size       addr\n.boot                   80    1048576\n.text               970896    1052672\n.rodata             295824    2027520\n.data              8900192    2326528\n.bss               3047008   11227136\n.debug_info        1367257          0\n.debug_abbrev       108560          0\n.debug_loclists     855649          0\n.debug_aranges        4176          0\n.debug_rnglists     115206          0\n.debug_line         733411          0\n.debug_str          156568          0\n.debug_line_str       3520          0\n.debug_frame         80536          0\nTotal             16638883\n\n\n"
+    },
+    "isodir/boot/system_operacyjny.bin": {
+      "size_bytes": 10182736,
+      "sha256": "3bcda5b0b0c4c9e9dfd068879a304013ca37bd1e70455f183b4e53650b10f9f5"
+    }
+  },
+  "ring3_apps": {
+    "aktualizacje.bin": {
+      "size_bytes": 202368,
+      "sha256": "611aaf4877a5c224e5a57bb37412403925d15a8c7d95c8790a36506f793b1e04"
+    },
+    "demo_ui.bin": {
+      "size_bytes": 300672,
+      "sha256": "2782a188ad260d6e81b5c42095d401fb19c86f24a46f9bc5be35c42454cf383d"
+    },
+    "diagnostyka.bin": {
+      "size_bytes": 194176,
+      "sha256": "93ab891a24bda1aa1f4228dcced3e302fa2425da306f7ea17bfe7b5f82f471c7"
+    },
+    "ekran.bin": {
+      "size_bytes": 235136,
+      "sha256": "bf117939326966332bcf6a42f1fc997cc5f5c7b808e3ef5b04beb058eb833dcb"
+    },
+    "eksplorator.bin": {
+      "size_bytes": 267936,
+      "sha256": "467033e3bcb84f69886dc40cfacc80239cb5549369e977b3ca497a17325b702e"
+    },
+    "fpu_probe.bin": {
+      "size_bytes": 69856,
+      "sha256": "31105fed9bbb11812f1ec301ac4885645cd8e9551b30d1d69bbbbdac0fff2bf9"
+    },
+    "husarz_worker.bin": {
+      "size_bytes": 69888,
+      "sha256": "52b340d7538c93539086454fc6f21077a8a6e43796ef59f2f202b903444e705d"
+    },
+    "instalator.bin": {
+      "size_bytes": 202368,
+      "sha256": "c06cdbbb1006212bbda68e02cdb80fad26080267da0d26d6e3c3bbcbeaf2e3c1"
+    },
+    "kalkulator.bin": {
+      "size_bytes": 202496,
+      "sha256": "2e72ca3f9d85032bef376c5433b412b088e897e66fd1220e43e25adc0c98c791"
+    },
+    "kontrolki2.bin": {
+      "size_bytes": 300672,
+      "sha256": "def8defd9d8f799e2c4e8c6fef4eff1aa64a032e9d1e2351e800c3ab0d1716c4"
+    },
+    "kontrolki3.bin": {
+      "size_bytes": 218752,
+      "sha256": "442d0d4383083f0c1d318187acb500a6e6a6f107ff18a6664cda5bb7bae1bc83"
+    },
+    "kontrolki4.bin": {
+      "size_bytes": 333888,
+      "sha256": "b0911ecd0ff5cd1edd013f3d774deb336a6b53f9a68d59977d83820a1d3aa48e"
+    },
+    "menedzer_okien.bin": {
+      "size_bytes": 356960,
+      "sha256": "c384ff59956526413a0b5147f463fec447f878de623bc75a6ca1cebdc1544b2e"
+    },
+    "notatnik.bin": {
+      "size_bytes": 202368,
+      "sha256": "f9f47c81d19713e053ba5279e5092ebb908a55484c44566989ec08f0947de760"
+    },
+    "przegladarka.bin": {
+      "size_bytes": 546496,
+      "sha256": "53b191fe449c95885a19af02d20d39c53de4a7f7204ded8e174cb5dd4a364dc5"
+    },
+    "przegladarka_obrazow.bin": {
+      "size_bytes": 136864,
+      "sha256": "75f76337372299cd1c71909311f8089ebfc356a3c504eb7983016114a8946893"
+    },
+    "repro.bin": {
+      "size_bytes": 36864,
+      "sha256": "f702a83fd3990f3834736546cd0ddb075d72c479c7783b00d1ab8a5f51926c31"
+    },
+    "shell.bin": {
+      "size_bytes": 153312,
+      "sha256": "d4a6551de39f60ff7aa20d94fb7322a2f0ca0ef823191de61599bb378d1673ee"
+    },
+    "snake.bin": {
+      "size_bytes": 138752,
+      "sha256": "b95f7549adb7c2d67fc764d5f0838da018abe45cf3fd8f3daa2f18e69777a732"
+    },
+    "tapety.bin": {
+      "size_bytes": 284320,
+      "sha256": "d33fdff3263bbff4d27b610848d54a8b9dcf4eff41a251c22a8b6f71d5b7d718"
+    },
+    "test.bin": {
+      "size_bytes": 513696,
+      "sha256": "4166514a6807f0b88ffabd2f82253d20f97a55b86d9ecf5c2f75759901c49c0a"
+    },
+    "test_dzwieku.bin": {
+      "size_bytes": 202368,
+      "sha256": "0383a7e2e123dbd405f4a66d32c7ab8dfb62ea6ad32c3c8d57ab77e0b0334100"
+    },
+    "ustawienia.bin": {
+      "size_bytes": 202368,
+      "sha256": "74a16c015c938ea64306a1ea6a25b8c600397c6220bb277b49884d034b1d9b48"
+    }
+  },
+  "stack_usage": {
+    "total_functions": 5778,
+    "total_frame_bytes": 606536,
+    "max_frame_bytes": 8592,
+    "top_25_functions": [
+      {
+        "file": "psf.su",
+        "location_func": "psf.cpp:4740:25:PsfMoveWynik psf_przenies_twor_wynik(const char*, const char*)",
+        "frame_bytes": 8592,
+        "qualifier": "static"
+      },
+      {
+        "file": "virtio_blk.su",
+        "location_func": "virtio_blk.cpp:1106:6:bool virtio_blk_stress_test(VirtioBlkDriver*, bool)",
+        "frame_bytes": 8320,
+        "qualifier": "static"
+      },
+      {
+        "file": "shell_tmp.su",
+        "location_func": "shell.cpp:2392:6:void _start()",
+        "frame_bytes": 6896,
+        "qualifier": "static"
+      },
+      {
+        "file": "skladacz_obrazu.su",
+        "location_func": "skladacz_obrazu.cpp:1942:6:void skladacz_obrazu_obsluz_dirty()",
+        "frame_bytes": 4912,
+        "qualifier": "static"
+      },
+      {
+        "file": "husarz_worker_tmp.su",
+        "location_func": "programy/husarz/resource.h:28:10:void Husarz::ResourceCache::remove(Husarz::ResourceEntry&)",
+        "frame_bytes": 4576,
+        "qualifier": "static"
+      },
+      {
+        "file": "przegladarka_tmp.su",
+        "location_func": "programy/husarz/resource.h:28:10:void Husarz::ResourceCache::remove(Husarz::ResourceEntry&)",
+        "frame_bytes": 4576,
+        "qualifier": "static"
+      },
+      {
+        "file": "tls.su",
+        "location_func": "tls.cpp:1156:17:bool kernel_siec_pobierz_https(uint8_t*, const char*, const char*, char*, uint32_t)",
+        "frame_bytes": 4576,
+        "qualifier": "static"
+      },
+      {
+        "file": "siec.su",
+        "location_func": "siec.cpp:4150:17:bool kernel_siec_pobierz_http(uint8_t*, const char*, const char*, char*, uint32_t)",
+        "frame_bytes": 4320,
+        "qualifier": "static"
+      },
+      {
+        "file": "motyw.su",
+        "location_func": "motyw.cpp:697:6:bool motyw_zaladuj_z_pliku(const char*, BursztynMotyw*)",
+        "frame_bytes": 4272,
+        "qualifier": "static"
+      },
+      {
+        "file": "test_dzwieku_tmp.su",
+        "location_func": "programy/test_dzwieku/test_dzwieku.cpp:726:10:void {anonymous}::OknoTestDzwieku::odswiez_wszystko()",
+        "frame_bytes": 4224,
+        "qualifier": "static"
+      },
+      {
+        "file": "kernel.su",
+        "location_func": "kernel.cpp:2064:6:bool kernel_weryfikuj_system()",
+        "frame_bytes": 4192,
+        "qualifier": "static"
+      },
+      {
+        "file": "psf.su",
+        "location_func": "psf.cpp:3674:6:bool psf_weryfikuj_dysk()",
+        "frame_bytes": 4176,
+        "qualifier": "static"
+      },
+      {
+        "file": "image_png_ring3.su",
+        "location_func": "obrazy/vendor/stb_image.h:4555:15:char* stbi_zlib_decode_malloc_guesssize(const char*, int, int, int*)",
+        "frame_bytes": 4160,
+        "qualifier": "static"
+      },
+      {
+        "file": "image_png_ring3.su",
+        "location_func": "obrazy/vendor/stb_image.h:4576:15:char* stbi_zlib_decode_malloc_guesssize_headerflag(const char*, int, int, int*, int)",
+        "frame_bytes": 4160,
+        "qualifier": "static"
+      },
+      {
+        "file": "psf.su",
+        "location_func": "psf.cpp:3693:6:bool psf_weryfikuj_dysk_step(uint64_t*, bool*)",
+        "frame_bytes": 4160,
+        "qualifier": "static"
+      },
+      {
+        "file": "image_png_ring3.su",
+        "location_func": "obrazy/vendor/stb_image.h:4603:15:char* stbi_zlib_decode_noheader_malloc(const char*, int, int*)",
+        "frame_bytes": 4144,
+        "qualifier": "static"
+      },
+      {
+        "file": "image_png_ring3.su",
+        "location_func": "obrazy/vendor/stb_image.h:4592:13:int stbi_zlib_decode_buffer(char*, int, const char*, int)",
+        "frame_bytes": 4128,
+        "qualifier": "static"
+      },
+      {
+        "file": "image_png_ring3.su",
+        "location_func": "obrazy/vendor/stb_image.h:4619:13:int stbi_zlib_decode_noheader_buffer(char*, int, const char*, int)",
+        "frame_bytes": 4128,
+        "qualifier": "static"
+      },
+      {
+        "file": "husarz_worker_tmp.su",
+        "location_func": "programy/husarz/worker.inc:23:32:void {anonymous}::browser_worker_main()",
+        "frame_bytes": 3744,
+        "qualifier": "static"
+      },
+      {
+        "file": "menedzer_okien_tmp.su",
+        "location_func": "obrazy/png_dekoder.h:109:12:int BursztynPNG::tinf_uncompress(uint8_t*, size_t*, const uint8_t*, size_t)",
+        "frame_bytes": 3552,
+        "qualifier": "static"
+      },
+      {
+        "file": "syscalls.su",
+        "location_func": "syscalls.cpp:2248:36:uint64_t {anonymous}::bws_legacy_http_do_pliku(proces_t&, uint64_t, uint64_t, uint64_t, uint64_t)",
+        "frame_bytes": 2944,
+        "qualifier": "static"
+      },
+      {
+        "file": "przegladarka_tmp.su",
+        "location_func": "programy/husarz/async_runtime.inc:151:6:void {anonymous}::queue_document_resources(Zakladka&)",
+        "frame_bytes": 2752,
+        "qualifier": "dynamic,bounded"
+      },
+      {
+        "file": "przegladarka_tmp.su",
+        "location_func": "programy/husarz/script_runtime.inc:62:6:void {anonymous}::browser_script_step(uint64_t)",
+        "frame_bytes": 2752,
+        "qualifier": "dynamic,bounded"
+      },
+      {
+        "file": "aktualizacja.su",
+        "location_func": "aktualizacja.cpp:1087:6:void aktualizacja_samotest_automatyczny()",
+        "frame_bytes": 2640,
+        "qualifier": "static"
+      },
+      {
+        "file": "eksplorator_tmp.su",
+        "location_func": "programy/eksplorator/../../bursztyn_ui/dialog_pliku.h:529:17:static bool BursztynUI::DialogPliku::normalizuj_sciezke(const char*, char*, size_t)",
+        "frame_bytes": 2624,
+        "qualifier": "static"
+      }
+    ],
+    "over_1024_bytes": [
+      {
+        "file": "psf.su",
+        "location_func": "psf.cpp:4740:25:PsfMoveWynik psf_przenies_twor_wynik(const char*, const char*)",
+        "frame_bytes": 8592,
+        "qualifier": "static"
+      },
+      {
+        "file": "virtio_blk.su",
+        "location_func": "virtio_blk.cpp:1106:6:bool virtio_blk_stress_test(VirtioBlkDriver*, bool)",
+        "frame_bytes": 8320,
+        "qualifier": "static"
+      },
+      {
+        "file": "shell_tmp.su",
+        "location_func": "shell.cpp:2392:6:void _start()",
+        "frame_bytes": 6896,
+        "qualifier": "static"
+      },
+      {
+        "file": "skladacz_obrazu.su",
+        "location_func": "skladacz_obrazu.cpp:1942:6:void skladacz_obrazu_obsluz_dirty()",
+        "frame_bytes": 4912,
+        "qualifier": "static"
+      },
+      {
+        "file": "husarz_worker_tmp.su",
+        "location_func": "programy/husarz/resource.h:28:10:void Husarz::ResourceCache::remove(Husarz::ResourceEntry&)",
+        "frame_bytes": 4576,
+        "qualifier": "static"
+      },
+      {
+        "file": "przegladarka_tmp.su",
+        "location_func": "programy/husarz/resource.h:28:10:void Husarz::ResourceCache::remove(Husarz::ResourceEntry&)",
+        "frame_bytes": 4576,
+        "qualifier": "static"
+      },
+      {
+        "file": "tls.su",
+        "location_func": "tls.cpp:1156:17:bool kernel_siec_pobierz_https(uint8_t*, const char*, const char*, char*, uint32_t)",
+        "frame_bytes": 4576,
+        "qualifier": "static"
+      },
+      {
+        "file": "siec.su",
+        "location_func": "siec.cpp:4150:17:bool kernel_siec_pobierz_http(uint8_t*, const char*, const char*, char*, uint32_t)",
+        "frame_bytes": 4320,
+        "qualifier": "static"
+      },
+      {
+        "file": "motyw.su",
+        "location_func": "motyw.cpp:697:6:bool motyw_zaladuj_z_pliku(const char*, BursztynMotyw*)",
+        "frame_bytes": 4272,
+        "qualifier": "static"
+      },
+      {
+        "file": "test_dzwieku_tmp.su",
+        "location_func": "programy/test_dzwieku/test_dzwieku.cpp:726:10:void {anonymous}::OknoTestDzwieku::odswiez_wszystko()",
+        "frame_bytes": 4224,
+        "qualifier": "static"
+      },
+      {
+        "file": "kernel.su",
+        "location_func": "kernel.cpp:2064:6:bool kernel_weryfikuj_system()",
+        "frame_bytes": 4192,
+        "qualifier": "static"
+      },
+      {
+        "file": "psf.su",
+        "location_func": "psf.cpp:3674:6:bool psf_weryfikuj_dysk()",
+        "frame_bytes": 4176,
+        "qualifier": "static"
+      },
+      {
+        "file": "image_png_ring3.su",
+        "location_func": "obrazy/vendor/stb_image.h:4555:15:char* stbi_zlib_decode_malloc_guesssize(const char*, int, int, int*)",
+        "frame_bytes": 4160,
+        "qualifier": "static"
+      },
+      {
+        "file": "image_png_ring3.su",
+        "location_func": "obrazy/vendor/stb_image.h:4576:15:char* stbi_zlib_decode_malloc_guesssize_headerflag(const char*, int, int, int*, int)",
+        "frame_bytes": 4160,
+        "qualifier": "static"
+      },
+      {
+        "file": "psf.su",
+        "location_func": "psf.cpp:3693:6:bool psf_weryfikuj_dysk_step(uint64_t*, bool*)",
+        "frame_bytes": 4160,
+        "qualifier": "static"
+      },
+      {
+        "file": "image_png_ring3.su",
+        "location_func": "obrazy/vendor/stb_image.h:4603:15:char* stbi_zlib_decode_noheader_malloc(const char*, int, int*)",
+        "frame_bytes": 4144,
+        "qualifier": "static"
+      },
+      {
+        "file": "image_png_ring3.su",
+        "location_func": "obrazy/vendor/stb_image.h:4592:13:int stbi_zlib_decode_buffer(char*, int, const char*, int)",
+        "frame_bytes": 4128,
+        "qualifier": "static"
+      },
+      {
+        "file": "image_png_ring3.su",
+        "location_func": "obrazy/vendor/stb_image.h:4619:13:int stbi_zlib_decode_noheader_buffer(char*, int, const char*, int)",
+        "frame_bytes": 4128,
+        "qualifier": "static"
+      },
+      {
+        "file": "husarz_worker_tmp.su",
+        "location_func": "programy/husarz/worker.inc:23:32:void {anonymous}::browser_worker_main()",
+        "frame_bytes": 3744,
+        "qualifier": "static"
+      },
+      {
+        "file": "menedzer_okien_tmp.su",
+        "location_func": "obrazy/png_dekoder.h:109:12:int BursztynPNG::tinf_uncompress(uint8_t*, size_t*, const uint8_t*, size_t)",
+        "frame_bytes": 3552,
+        "qualifier": "static"
+      },
+      {
+        "file": "syscalls.su",
+        "location_func": "syscalls.cpp:2248:36:uint64_t {anonymous}::bws_legacy_http_do_pliku(proces_t&, uint64_t, uint64_t, uint64_t, uint64_t)",
+        "frame_bytes": 2944,
+        "qualifier": "static"
+      },
+      {
+        "file": "przegladarka_tmp.su",
+        "location_func": "programy/husarz/async_runtime.inc:151:6:void {anonymous}::queue_document_resources(Zakladka&)",
+        "frame_bytes": 2752,
+        "qualifier": "dynamic,bounded"
+      },
+      {
+        "file": "przegladarka_tmp.su",
+        "location_func": "programy/husarz/script_runtime.inc:62:6:void {anonymous}::browser_script_step(uint64_t)",
+        "frame_bytes": 2752,
+        "qualifier": "dynamic,bounded"
+      },
+      {
+        "file": "aktualizacja.su",
+        "location_func": "aktualizacja.cpp:1087:6:void aktualizacja_samotest_automatyczny()",
+        "frame_bytes": 2640,
+        "qualifier": "static"
+      },
+      {
+        "file": "eksplorator_tmp.su",
+        "location_func": "programy/eksplorator/../../bursztyn_ui/dialog_pliku.h:529:17:static bool BursztynUI::DialogPliku::normalizuj_sciezke(const char*, char*, size_t)",
+        "frame_bytes": 2624,
+        "qualifier": "static"
+      },
+      {
+        "file": "menedzer_okien_tmp.su",
+        "location_func": "bursztyn_ui/dialog_pliku.h:529:17:static bool BursztynUI::DialogPliku::normalizuj_sciezke(const char*, char*, size_t)",
+        "frame_bytes": 2624,
+        "qualifier": "static"
+      },
+      {
+        "file": "eksplorator_tmp.su",
+        "location_func": "programy/eksplorator/eksplorator-plikow.cpp:2627:43:void _start()",
+        "frame_bytes": 2608,
+        "qualifier": "static"
+      },
+      {
+        "file": "image_png_ring3.su",
+        "location_func": "obrazy/vendor/stb_image.h:4394:12:int stbi__compute_huffman_codes(stbi__zbuf*)",
+        "frame_bytes": 2560,
+        "qualifier": "static"
+      },
+      {
+        "file": "syscalls.su",
+        "location_func": "syscalls.cpp:2086:36:uint64_t {anonymous}::bws_http_common(proces_t&, bool, uint64_t, uint64_t, uint64_t, uint64_t)",
+        "frame_bytes": 2400,
+        "qualifier": "static"
+      },
+      {
+        "file": "hid_pointer.su",
+        "location_func": "sterowniki/usb/hid_pointer.cpp:96:6:bool hid_pointer_compile(const uint8_t*, size_t, HidPointerLayout&)",
+        "frame_bytes": 2328,
+        "qualifier": "static"
+      },
+      {
+        "file": "acpi.su",
+        "location_func": "acpi.cpp:190:6:bool {anonymous}::znajdz_w_root(uint64_t, bool)",
+        "frame_bytes": 2320,
+        "qualifier": "static"
+      },
+      {
+        "file": "przegladarka_tmp.su",
+        "location_func": "programy/przegladarka.cpp:2169:32:bool {anonymous}::consume_http_response(Zakladka&, bool*, char*, const ParsedUrl&, const char*, size_t, bool)",
+        "frame_bytes": 2288,
+        "qualifier": "static"
+      },
+      {
+        "file": "przegladarka_tmp.su",
+        "location_func": "programy/husarz/async_runtime.inc:303:23:void {anonymous}::async_dispatch()",
+        "frame_bytes": 2256,
+        "qualifier": "dynamic,bounded"
+      },
+      {
+        "file": "loader.su",
+        "location_func": "loader.cpp:1447:17:bool pakiet_wczytaj_manifest(const char*, PakietManifest*)",
+        "frame_bytes": 2240,
+        "qualifier": "static"
+      },
+      {
+        "file": "storage_format.su",
+        "location_func": "storage_format.cpp:196:6:bool Storage::gpt_write(Device*, const Layout&, const uint8_t*)",
+        "frame_bytes": 2224,
+        "qualifier": "static"
+      },
+      {
+        "file": "przegladarka_tmp.su",
+        "location_func": "programy/husarz/async_runtime.inc:109:6:void {anonymous}::queue_images(Zakladka&)",
+        "frame_bytes": 2208,
+        "qualifier": "dynamic,bounded"
+      },
+      {
+        "file": "przegladarka_tmp.su",
+        "location_func": "programy/przegladarka.cpp:2728:6:void {anonymous}::Nawiguj(bool, bool)",
+        "frame_bytes": 2160,
+        "qualifier": "dynamic,bounded"
+      },
+      {
+        "file": "storage_format.su",
+        "location_func": "storage_format.cpp:258:6:bool Storage::gpt_install_step(GptInstallState*)",
+        "frame_bytes": 2160,
+        "qualifier": "static"
+      },
+      {
+        "file": "husarz_worker_tmp.su",
+        "location_func": "programy/husarz/js_dom.h:116:10:Frame*)",
+        "frame_bytes": 2144,
+        "qualifier": "static"
+      },
+      {
+        "file": "przegladarka_tmp.su",
+        "location_func": "programy/husarz/forms.h:33:13:Frame*)",
+        "frame_bytes": 2144,
+        "qualifier": "static"
+      },
+      {
+        "file": "przegladarka_tmp.su",
+        "location_func": "programy/husarz/js_dom.h:116:10:Frame*)",
+        "frame_bytes": 2144,
+        "qualifier": "static"
+      },
+      {
+        "file": "przegladarka_tmp.su",
+        "location_func": "programy/husarz/async_runtime.inc:200:31:Frame*)",
+        "frame_bytes": 2144,
+        "qualifier": "dynamic,bounded"
+      },
+      {
+        "file": "syscalls.su",
+        "location_func": "syscalls.cpp:2920:36:uint64_t {anonymous}::bws_snapshot_okien(proces_t&, uint64_t, uint64_t, uint64_t)",
+        "frame_bytes": 2144,
+        "qualifier": "static"
+      },
+      {
+        "file": "przegladarka_tmp.su",
+        "location_func": "programy/husarz/script_runtime.inc:54:6:0()",
+        "frame_bytes": 2128,
+        "qualifier": "dynamic,bounded"
+      },
+      {
+        "file": "aktualizacja.su",
+        "location_func": "aktualizacja.cpp:1335:10:uint64_t aktualizacja_bws_status(const proces_t*, uint64_t)",
+        "frame_bytes": 2096,
+        "qualifier": "static"
+      },
+      {
+        "file": "image_png_ring3.su",
+        "location_func": "obrazy/vendor/stb_image.h:1224:13:void stbi__vertical_flip(void*, int, int, int)",
+        "frame_bytes": 2096,
+        "qualifier": "static"
+      },
+      {
+        "file": "przegladarka_tmp.su",
+        "location_func": "programy/przegladarka.cpp:3143:32:void {anonymous}::otworz_argument_startowy()",
+        "frame_bytes": 2064,
+        "qualifier": "static"
+      },
+      {
+        "file": "przegladarka_tmp.su",
+        "location_func": "programy/przegladarka.cpp:1317:6:bool {anonymous}::przygotuj_adres_wyszukiwania(char*)",
+        "frame_bytes": 2056,
+        "qualifier": "static"
+      },
+      {
+        "file": "xhci.su",
+        "location_func": "./sterowniki/usb/xhci_enumeration.inc:87:6:void {anonymous}::enumeration_step(Controller&)",
+        "frame_bytes": 2048,
+        "qualifier": "dynamic,bounded"
+      },
+      {
+        "file": "eksplorator_tmp.su",
+        "location_func": "programy/eksplorator/eksplorator-plikow.cpp:1442:10:void {anonymous}::AktowkaModel::run_package(const char*, bool)",
+        "frame_bytes": 2032,
+        "qualifier": "static"
+      },
+      {
+        "file": "kernel.su",
+        "location_func": "sterowniki/dzwiek/hda_qemu_regression.h:39:13:void hda_qemu_regression_krok(bool)",
+        "frame_bytes": 1984,
+        "qualifier": "static"
+      },
+      {
+        "file": "virtio_input.su",
+        "location_func": "virtio_input.cpp:817:8:size_t virtio_input_poll_events(VirtioInputDriver*, size_t)",
+        "frame_bytes": 1824,
+        "qualifier": "static"
+      },
+      {
+        "file": "aktualizacja.su",
+        "location_func": "aktualizacja.cpp:707:6:bool aktualizacja_zainstaluj_zweryfikowany(const uint8_t*, size_t, const akt_wykaz_t*)",
+        "frame_bytes": 1808,
+        "qualifier": "static"
+      },
+      {
+        "file": "aktualizacja.su",
+        "location_func": "aktualizacja.cpp:234:6:bool aktualizacja_weryfikuj_wykaz(const char*, size_t, akt_wykaz_t*)",
+        "frame_bytes": 1792,
+        "qualifier": "static"
+      },
+      {
+        "file": "tapety.su",
+        "location_func": "tapety.cpp:1203:6:bool tapety_obsluz(const proces_t&, const TapetyZadanie&, TapetyOdpowiedz*)",
+        "frame_bytes": 1680,
+        "qualifier": "static"
+      },
+      {
+        "file": "aktualizacja.su",
+        "location_func": "aktualizacja.cpp:477:6:void aktualizacja_sprawdz_rozruch(uint64_t)",
+        "frame_bytes": 1648,
+        "qualifier": "static"
+      },
+      {
+        "file": "tapety.su",
+        "location_func": "tapety.cpp:1102:6:void tapety_inicjalizuj(uint64_t)",
+        "frame_bytes": 1648,
+        "qualifier": "static"
+      },
+      {
+        "file": "aktualizacja.su",
+        "location_func": "aktualizacja_format.h:301:19:0(const char*, size_t, akt_wykaz_t*)",
+        "frame_bytes": 1632,
+        "qualifier": "static"
+      },
+      {
+        "file": "aktualizacja.su",
+        "location_func": "aktualizacja.cpp:633:6:bool aktualizacja_potwierdz_rozruch()",
+        "frame_bytes": 1616,
+        "qualifier": "static"
+      },
+      {
+        "file": "eksplorator_tmp.su",
+        "location_func": "programy/eksplorator/eksplorator-plikow.cpp:1160:12:{anonymous}::Change {anonymous}::AktowkaModel::load(const char*, bool)",
+        "frame_bytes": 1616,
+        "qualifier": "static"
+      },
+      {
+        "file": "grafika.su",
+        "location_func": "grafika.cpp:2170:13:void przelacz_okno_klawiatura(bool)",
+        "frame_bytes": 1600,
+        "qualifier": "static"
+      },
+      {
+        "file": "siec.su",
+        "location_func": "siec.cpp:3317:6:bool {anonymous}::tcp_wyslij_internal(uint8_t, const uint8_t*, uint16_t)",
+        "frame_bytes": 1600,
+        "qualifier": "static"
+      },
+      {
+        "file": "siec.su",
+        "location_func": "siec.cpp:5122:6:void {anonymous}::obsluz_icmp(uint8_t*, size_t, const WidokIPv4&)",
+        "frame_bytes": 1584,
+        "qualifier": "static"
+      },
+      {
+        "file": "storage_format.su",
+        "location_func": "storage_format.cpp:303:6:bool Storage::complete(const Partition&, const uint8_t*)",
+        "frame_bytes": 1584,
+        "qualifier": "static"
+      },
+      {
+        "file": "menedzer_okien_tmp.su",
+        "location_func": "menedzer_okien.cpp:2252:6:bool {anonymous}::aktywuj_istniejace(const char*)",
+        "frame_bytes": 1552,
+        "qualifier": "static"
+      },
+      {
+        "file": "diagnostyka_systemu_boot.su",
+        "location_func": "diagnostyka_systemu_boot.cpp:59:6:void diag_boot_services_ready()",
+        "frame_bytes": 1504,
+        "qualifier": "static"
+      },
+      {
+        "file": "loader.su",
+        "location_func": "loader.cpp:854:13:bool uruchom_program_z_pliku_impl(const char*, uint8_t, uint64_t, bool, const char*)",
+        "frame_bytes": 1504,
+        "qualifier": "static"
+      },
+      {
+        "file": "xhci.su",
+        "location_func": "sterowniki/usb/xhci.cpp:872:6:void {anonymous}::xhci_obsluz_hid(Controller&, XhciDevice&, XhciHid*)",
+        "frame_bytes": 1440,
+        "qualifier": "static"
+      },
+      {
+        "file": "menedzer_okien_tmp.su",
+        "location_func": "menedzer_okien.cpp:2427:43:void _start()",
+        "frame_bytes": 1328,
+        "qualifier": "static"
+      },
+      {
+        "file": "image_png_ring3.su",
+        "location_func": "obrazy/vendor/stb_image.h:5113:12:int stbi__parse_png_file(stbi__png*, int, int)",
+        "frame_bytes": 1312,
+        "qualifier": "dynamic,bounded"
+      },
+      {
+        "file": "ustawienia_tmp.su",
+        "location_func": "programy/ustawienia/ustawienia.cpp:190:43:void _start()",
+        "frame_bytes": 1248,
+        "qualifier": "static"
+      },
+      {
+        "file": "instalator.su",
+        "location_func": "instalator.cpp:141:6:void {anonymous}::perform()",
+        "frame_bytes": 1152,
+        "qualifier": "dynamic,bounded"
+      },
+      {
+        "file": "syscalls.su",
+        "location_func": "syscalls.cpp:1708:36:uint64_t {anonymous}::bws_kopiuj_twor(proces_t&, uint64_t, uint64_t)",
+        "frame_bytes": 1152,
+        "qualifier": "static"
+      },
+      {
+        "file": "menedzer_okien_tmp.su",
+        "location_func": "bursztyn_ui/przycisk_obrazkowy.h:165:10:void BursztynUI::PrzyciskObrazkowy::rysuj_ikone(BursztynUI::KontekstRysowania&, int, int, int, int)",
+        "frame_bytes": 1136,
+        "qualifier": "static"
+      },
+      {
+        "file": "syscalls.su",
+        "location_func": "syscalls.cpp:1478:36:uint64_t {anonymous}::bws_przenies(proces_t&, uint64_t, uint64_t)",
+        "frame_bytes": 1120,
+        "qualifier": "static"
+      },
+      {
+        "file": "tapety.su",
+        "location_func": "tapety.cpp:810:6:bool {anonymous}::zapisz_wybor()",
+        "frame_bytes": 1120,
+        "qualifier": "static"
+      },
+      {
+        "file": "storage_format.su",
+        "location_func": "storage_format.cpp:660:6:bool Storage::rozruch_zapisz_sektory(Device*, const bursztyn_rozruch_stan*)",
+        "frame_bytes": 1104,
+        "qualifier": "static"
+      },
+      {
+        "file": "storage_format.su",
+        "location_func": "storage_format.cpp:690:6:bool Storage::rozruch_odczytaj_sektory(Device*, bursztyn_rozruch_stan*)",
+        "frame_bytes": 1104,
+        "qualifier": "static"
+      },
+      {
+        "file": "syscalls.su",
+        "location_func": "syscalls.cpp:3127:17:uint64_t obsluga_wywolan_systemowych_impl(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)",
+        "frame_bytes": 1104,
+        "qualifier": "static"
+      },
+      {
+        "file": "tapety.su",
+        "location_func": "tapety.cpp:47:10:uint32_t {anonymous}::tapety_plik_crc32(const char*, uint32_t)",
+        "frame_bytes": 1104,
+        "qualifier": "static"
+      },
+      {
+        "file": "eksplorator_tmp.su",
+        "location_func": "programy/eksplorator/../../bursztyn_ui/dialog_pliku.h:587:17:static bool BursztynUI::DialogPliku::polacz_sciezki(const char*, const char*, char*, size_t)",
+        "frame_bytes": 1088,
+        "qualifier": "static"
+      },
+      {
+        "file": "eksplorator_tmp.su",
+        "location_func": "programy/eksplorator/eksplorator-plikow.cpp:2158:10:void {anonymous}::AktowkaView::draw_workspace()",
+        "frame_bytes": 1088,
+        "qualifier": "static"
+      },
+      {
+        "file": "grafika.su",
+        "location_func": "grafika.cpp:3478:17:void bws_gui_wypisz_tekst_kolor(int, int, uint64_t, const char*)",
+        "frame_bytes": 1088,
+        "qualifier": "static"
+      },
+      {
+        "file": "menedzer_okien_tmp.su",
+        "location_func": "bursztyn_ui/dialog_pliku.h:587:17:static bool BursztynUI::DialogPliku::polacz_sciezki(const char*, const char*, char*, size_t)",
+        "frame_bytes": 1088,
+        "qualifier": "static"
+      },
+      {
+        "file": "kernel.su",
+        "location_func": "kernel.cpp:2188:17:void kernel_main(uint64_t, uint64_t)",
+        "frame_bytes": 1072,
+        "qualifier": "dynamic,bounded"
+      },
+      {
+        "file": "grafika.su",
+        "location_func": "grafika.cpp:3356:17:void bws_gui_wypisz_tekst(int, int, const char*)",
+        "frame_bytes": 1056,
+        "qualifier": "static"
+      }
+    ]
+  }
+}

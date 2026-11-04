@@ -1,0 +1,963 @@
+{
+  "compiler_flags": [
+    "-fstack-protector-strong",
+    "-mstack-protector-guard=global"
+  ],
+  "abi_mechanism": "Global symbol (__stack_chk_guard) accessed via 64-bit absolute address (movabs under -mcmodel=large), freestanding runtime in stack_protector.cpp (Ring 0) and ring3_ssp.cpp (Ring 3)",
+  "kernel_summary": {
+    "protected_objects_total": 163,
+    "objects_with_instrumented_functions": 102,
+    "total_functions": 2266,
+    "instrumented_functions": 614
+  },
+  "ring3_summary": {
+    "protected_elfs_total": 23,
+    "elfs_with_instrumented_functions": 23,
+    "total_functions": 13148,
+    "instrumented_functions": 2235
+  },
+  "excluded_kernel_objects": {
+    "boot.o": "Pure 32/64-bit early assembly entry (runs before stack_protector_early_init)",
+    "przerwania.o": "Low-level ISR/IRQ assembly stubs",
+    "syscall.o": "Low-level SYSCALL/SYSRET assembly trampoline",
+    "ring3.o": "Low-level Ring 3 transition assembly stub",
+    "stack_protector.o": "SSP runtime itself (stack_protector_early_init and __stack_chk_fail compiled with -fno-stack-protector)"
+  },
+  "excluded_ring3_objects": {
+    "ring3_ssp.o": "Ring 3 SSP runtime (__stack_chk_fail) compiled with -fno-stack-protector"
+  },
+  "kernel_objects": [
+    {
+      "object": "acpi.o",
+      "total_functions": 12,
+      "instrumented_functions": 1
+    },
+    {
+      "object": "ahci.o",
+      "total_functions": 28,
+      "instrumented_functions": 3
+    },
+    {
+      "object": "aktualizacja.o",
+      "total_functions": 38,
+      "instrumented_functions": 17
+    },
+    {
+      "object": "apic.o",
+      "total_functions": 9,
+      "instrumented_functions": 2
+    },
+    {
+      "object": "bezpieczenstwo.o",
+      "total_functions": 9,
+      "instrumented_functions": 1
+    },
+    {
+      "object": "blokowy.o",
+      "total_functions": 21,
+      "instrumented_functions": 2
+    },
+    {
+      "object": "bochs_vbe.o",
+      "total_functions": 5,
+      "instrumented_functions": 2
+    },
+    {
+      "object": "btp.o",
+      "total_functions": 5,
+      "instrumented_functions": 2
+    },
+    {
+      "object": "bufory_grafiki.o",
+      "total_functions": 6,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "bws_nowoczesne.o",
+      "total_functions": 27,
+      "instrumented_functions": 9
+    },
+    {
+      "object": "czcionka_systemowa.o",
+      "total_functions": 1,
+      "instrumented_functions": 1
+    },
+    {
+      "object": "diagnostyka_systemu.o",
+      "total_functions": 21,
+      "instrumented_functions": 2
+    },
+    {
+      "object": "diagnostyka_systemu_boot.o",
+      "total_functions": 7,
+      "instrumented_functions": 5
+    },
+    {
+      "object": "diagnostyka_systemu_bws.o",
+      "total_functions": 1,
+      "instrumented_functions": 1
+    },
+    {
+      "object": "dma.o",
+      "total_functions": 2,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "e1000.o",
+      "total_functions": 11,
+      "instrumented_functions": 3
+    },
+    {
+      "object": "ekran.o",
+      "total_functions": 16,
+      "instrumented_functions": 11
+    },
+    {
+      "object": "ekran_format.o",
+      "total_functions": 2,
+      "instrumented_functions": 2
+    },
+    {
+      "object": "ekran_powitalny.o",
+      "total_functions": 16,
+      "instrumented_functions": 2
+    },
+    {
+      "object": "fpu.o",
+      "total_functions": 3,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "gdt.o",
+      "total_functions": 2,
+      "instrumented_functions": 1
+    },
+    {
+      "object": "grafika.o",
+      "total_functions": 146,
+      "instrumented_functions": 26
+    },
+    {
+      "object": "hda.o",
+      "total_functions": 37,
+      "instrumented_functions": 11
+    },
+    {
+      "object": "hda_diag.o",
+      "total_functions": 22,
+      "instrumented_functions": 9
+    },
+    {
+      "object": "hda_transport.o",
+      "total_functions": 29,
+      "instrumented_functions": 3
+    },
+    {
+      "object": "heap.o",
+      "total_functions": 15,
+      "instrumented_functions": 2
+    },
+    {
+      "object": "hid_pointer.o",
+      "total_functions": 10,
+      "instrumented_functions": 8
+    },
+    {
+      "object": "hpet.o",
+      "total_functions": 12,
+      "instrumented_functions": 3
+    },
+    {
+      "object": "idt.o",
+      "total_functions": 13,
+      "instrumented_functions": 3
+    },
+    {
+      "object": "input_device.o",
+      "total_functions": 31,
+      "instrumented_functions": 5
+    },
+    {
+      "object": "instalator.o",
+      "total_functions": 18,
+      "instrumented_functions": 7
+    },
+    {
+      "object": "kernel.o",
+      "total_functions": 32,
+      "instrumented_functions": 16
+    },
+    {
+      "object": "klawiatura.o",
+      "total_functions": 12,
+      "instrumented_functions": 1
+    },
+    {
+      "object": "kontrolki3blob.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "kontrolki4blob.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "loader.o",
+      "total_functions": 15,
+      "instrumented_functions": 6
+    },
+    {
+      "object": "mbedtls_port.o",
+      "total_functions": 18,
+      "instrumented_functions": 1
+    },
+    {
+      "object": "motyw.o",
+      "total_functions": 23,
+      "instrumented_functions": 10
+    },
+    {
+      "object": "mysz.o",
+      "total_functions": 10,
+      "instrumented_functions": 7
+    },
+    {
+      "object": "network_device.o",
+      "total_functions": 11,
+      "instrumented_functions": 1
+    },
+    {
+      "object": "ohci.o",
+      "total_functions": 8,
+      "instrumented_functions": 1
+    },
+    {
+      "object": "pci.o",
+      "total_functions": 25,
+      "instrumented_functions": 4
+    },
+    {
+      "object": "pmm.o",
+      "total_functions": 17,
+      "instrumented_functions": 1
+    },
+    {
+      "object": "psf.o",
+      "total_functions": 80,
+      "instrumented_functions": 27
+    },
+    {
+      "object": "scheduler.o",
+      "total_functions": 22,
+      "instrumented_functions": 1
+    },
+    {
+      "object": "siec.o",
+      "total_functions": 44,
+      "instrumented_functions": 12
+    },
+    {
+      "object": "skladacz_obrazu.o",
+      "total_functions": 53,
+      "instrumented_functions": 6
+    },
+    {
+      "object": "storage_format.o",
+      "total_functions": 43,
+      "instrumented_functions": 20
+    },
+    {
+      "object": "stos_jadra.o",
+      "total_functions": 18,
+      "instrumented_functions": 5
+    },
+    {
+      "object": "syscalls.o",
+      "total_functions": 41,
+      "instrumented_functions": 29
+    },
+    {
+      "object": "tapety.o",
+      "total_functions": 40,
+      "instrumented_functions": 26
+    },
+    {
+      "object": "tls.o",
+      "total_functions": 7,
+      "instrumented_functions": 2
+    },
+    {
+      "object": "tss.o",
+      "total_functions": 8,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "uefi_gop.o",
+      "total_functions": 2,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "usb.o",
+      "total_functions": 1,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "usb_hid.o",
+      "total_functions": 4,
+      "instrumented_functions": 1
+    },
+    {
+      "object": "virtio_blk.o",
+      "total_functions": 16,
+      "instrumented_functions": 5
+    },
+    {
+      "object": "virtio_gpu.o",
+      "total_functions": 35,
+      "instrumented_functions": 20
+    },
+    {
+      "object": "virtio_input.o",
+      "total_functions": 31,
+      "instrumented_functions": 9
+    },
+    {
+      "object": "virtio_net.o",
+      "total_functions": 19,
+      "instrumented_functions": 11
+    },
+    {
+      "object": "virtio_pci.o",
+      "total_functions": 56,
+      "instrumented_functions": 3
+    },
+    {
+      "object": "virtio_rng.o",
+      "total_functions": 15,
+      "instrumented_functions": 5
+    },
+    {
+      "object": "virtqueue.o",
+      "total_functions": 8,
+      "instrumented_functions": 2
+    },
+    {
+      "object": "vmm.o",
+      "total_functions": 24,
+      "instrumented_functions": 12
+    },
+    {
+      "object": "xhci.o",
+      "total_functions": 42,
+      "instrumented_functions": 20
+    },
+    {
+      "object": "xhci_ring.o",
+      "total_functions": 5,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "zegar-rtc.o",
+      "total_functions": 8,
+      "instrumented_functions": 3
+    },
+    {
+      "object": "biblioteki/mbedtls/library/aes.o",
+      "total_functions": 20,
+      "instrumented_functions": 6
+    },
+    {
+      "object": "biblioteki/mbedtls/library/aesni.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/arc4.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/aria.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/asn1parse.o",
+      "total_functions": 18,
+      "instrumented_functions": 7
+    },
+    {
+      "object": "biblioteki/mbedtls/library/asn1write.o",
+      "total_functions": 20,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/base64.o",
+      "total_functions": 2,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/bignum.o",
+      "total_functions": 52,
+      "instrumented_functions": 18
+    },
+    {
+      "object": "biblioteki/mbedtls/library/blowfish.o",
+      "total_functions": 7,
+      "instrumented_functions": 2
+    },
+    {
+      "object": "biblioteki/mbedtls/library/camellia.o",
+      "total_functions": 8,
+      "instrumented_functions": 3
+    },
+    {
+      "object": "biblioteki/mbedtls/library/ccm.o",
+      "total_functions": 8,
+      "instrumented_functions": 3
+    },
+    {
+      "object": "biblioteki/mbedtls/library/certs.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/chacha20.o",
+      "total_functions": 7,
+      "instrumented_functions": 2
+    },
+    {
+      "object": "biblioteki/mbedtls/library/chachapoly.o",
+      "total_functions": 9,
+      "instrumented_functions": 4
+    },
+    {
+      "object": "biblioteki/mbedtls/library/cipher.o",
+      "total_functions": 22,
+      "instrumented_functions": 2
+    },
+    {
+      "object": "biblioteki/mbedtls/library/cipher_wrap.o",
+      "total_functions": 41,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/cmac.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/constant_time.o",
+      "total_functions": 13,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/ctr_drbg.o",
+      "total_functions": 15,
+      "instrumented_functions": 7
+    },
+    {
+      "object": "biblioteki/mbedtls/library/debug.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/des.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/dhm.o",
+      "total_functions": 13,
+      "instrumented_functions": 3
+    },
+    {
+      "object": "biblioteki/mbedtls/library/ecdh.o",
+      "total_functions": 13,
+      "instrumented_functions": 4
+    },
+    {
+      "object": "biblioteki/mbedtls/library/ecdsa.o",
+      "total_functions": 18,
+      "instrumented_functions": 5
+    },
+    {
+      "object": "biblioteki/mbedtls/library/ecjpake.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/ecp.o",
+      "total_functions": 54,
+      "instrumented_functions": 14
+    },
+    {
+      "object": "biblioteki/mbedtls/library/ecp_curves.o",
+      "total_functions": 12,
+      "instrumented_functions": 5
+    },
+    {
+      "object": "biblioteki/mbedtls/library/entropy.o",
+      "total_functions": 8,
+      "instrumented_functions": 3
+    },
+    {
+      "object": "biblioteki/mbedtls/library/entropy_poll.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/error.o",
+      "total_functions": 3,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/gcm.o",
+      "total_functions": 9,
+      "instrumented_functions": 4
+    },
+    {
+      "object": "biblioteki/mbedtls/library/havege.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/hkdf.o",
+      "total_functions": 3,
+      "instrumented_functions": 3
+    },
+    {
+      "object": "biblioteki/mbedtls/library/hmac_drbg.o",
+      "total_functions": 13,
+      "instrumented_functions": 2
+    },
+    {
+      "object": "biblioteki/mbedtls/library/md.o",
+      "total_functions": 21,
+      "instrumented_functions": 3
+    },
+    {
+      "object": "biblioteki/mbedtls/library/md2.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/md4.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/md5.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/memory_buffer_alloc.o",
+      "total_functions": 8,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/mps_reader.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/mps_trace.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/net_sockets.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/nist_kw.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/oid.o",
+      "total_functions": 17,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/padlock.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/pem.o",
+      "total_functions": 4,
+      "instrumented_functions": 2
+    },
+    {
+      "object": "biblioteki/mbedtls/library/pk.o",
+      "total_functions": 18,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/pk_wrap.o",
+      "total_functions": 31,
+      "instrumented_functions": 4
+    },
+    {
+      "object": "biblioteki/mbedtls/library/pkcs11.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/pkcs12.o",
+      "total_functions": 4,
+      "instrumented_functions": 3
+    },
+    {
+      "object": "biblioteki/mbedtls/library/pkcs5.o",
+      "total_functions": 3,
+      "instrumented_functions": 3
+    },
+    {
+      "object": "biblioteki/mbedtls/library/pkparse.o",
+      "total_functions": 11,
+      "instrumented_functions": 10
+    },
+    {
+      "object": "biblioteki/mbedtls/library/pkwrite.o",
+      "total_functions": 7,
+      "instrumented_functions": 6
+    },
+    {
+      "object": "biblioteki/mbedtls/library/platform.o",
+      "total_functions": 15,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/platform_util.o",
+      "total_functions": 1,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/poly1305.o",
+      "total_functions": 7,
+      "instrumented_functions": 1
+    },
+    {
+      "object": "biblioteki/mbedtls/library/psa_crypto.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/psa_crypto_aead.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/psa_crypto_cipher.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/psa_crypto_client.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/psa_crypto_driver_wrappers.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/psa_crypto_ecp.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/psa_crypto_hash.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/psa_crypto_mac.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/psa_crypto_rsa.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/psa_crypto_se.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/psa_crypto_slot_management.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/psa_crypto_storage.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/psa_its_file.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/ripemd160.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/rsa.o",
+      "total_functions": 37,
+      "instrumented_functions": 10
+    },
+    {
+      "object": "biblioteki/mbedtls/library/rsa_internal.o",
+      "total_functions": 5,
+      "instrumented_functions": 5
+    },
+    {
+      "object": "biblioteki/mbedtls/library/sha1.o",
+      "total_functions": 13,
+      "instrumented_functions": 2
+    },
+    {
+      "object": "biblioteki/mbedtls/library/sha256.o",
+      "total_functions": 13,
+      "instrumented_functions": 2
+    },
+    {
+      "object": "biblioteki/mbedtls/library/sha512.o",
+      "total_functions": 13,
+      "instrumented_functions": 2
+    },
+    {
+      "object": "biblioteki/mbedtls/library/ssl_cache.o",
+      "total_functions": 5,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/ssl_ciphersuites.o",
+      "total_functions": 8,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/ssl_cli.o",
+      "total_functions": 1,
+      "instrumented_functions": 1
+    },
+    {
+      "object": "biblioteki/mbedtls/library/ssl_cookie.o",
+      "total_functions": 7,
+      "instrumented_functions": 3
+    },
+    {
+      "object": "biblioteki/mbedtls/library/ssl_msg.o",
+      "total_functions": 47,
+      "instrumented_functions": 5
+    },
+    {
+      "object": "biblioteki/mbedtls/library/ssl_srv.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/ssl_ticket.o",
+      "total_functions": 6,
+      "instrumented_functions": 3
+    },
+    {
+      "object": "biblioteki/mbedtls/library/ssl_tls.o",
+      "total_functions": 116,
+      "instrumented_functions": 11
+    },
+    {
+      "object": "biblioteki/mbedtls/library/ssl_tls13_keys.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/threading.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/timing.o",
+      "total_functions": 0,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/version.o",
+      "total_functions": 3,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/version_features.o",
+      "total_functions": 1,
+      "instrumented_functions": 0
+    },
+    {
+      "object": "biblioteki/mbedtls/library/x509.o",
+      "total_functions": 15,
+      "instrumented_functions": 7
+    },
+    {
+      "object": "biblioteki/mbedtls/library/x509_create.o",
+      "total_functions": 5,
+      "instrumented_functions": 1
+    },
+    {
+      "object": "biblioteki/mbedtls/library/x509_crl.o",
+      "total_functions": 6,
+      "instrumented_functions": 2
+    },
+    {
+      "object": "biblioteki/mbedtls/library/x509_crt.o",
+      "total_functions": 22,
+      "instrumented_functions": 6
+    },
+    {
+      "object": "biblioteki/mbedtls/library/x509_csr.o",
+      "total_functions": 6,
+      "instrumented_functions": 3
+    },
+    {
+      "object": "biblioteki/mbedtls/library/x509write_crt.o",
+      "total_functions": 19,
+      "instrumented_functions": 7
+    },
+    {
+      "object": "biblioteki/mbedtls/library/x509write_csr.o",
+      "total_functions": 11,
+      "instrumented_functions": 4
+    },
+    {
+      "object": "biblioteki/mbedtls/library/xtea.o",
+      "total_functions": 4,
+      "instrumented_functions": 0
+    }
+  ],
+  "ring3_binaries": [
+    {
+      "elf": "aktualizacje.elf",
+      "total_functions": 334,
+      "instrumented_functions": 51
+    },
+    {
+      "elf": "demo_ui.elf",
+      "total_functions": 792,
+      "instrumented_functions": 132
+    },
+    {
+      "elf": "diagnostyka.elf",
+      "total_functions": 592,
+      "instrumented_functions": 116
+    },
+    {
+      "elf": "ekran.elf",
+      "total_functions": 407,
+      "instrumented_functions": 91
+    },
+    {
+      "elf": "eksplorator.elf",
+      "total_functions": 868,
+      "instrumented_functions": 160
+    },
+    {
+      "elf": "fpu_probe.elf",
+      "total_functions": 20,
+      "instrumented_functions": 6
+    },
+    {
+      "elf": "husarz_worker.elf",
+      "total_functions": 175,
+      "instrumented_functions": 31
+    },
+    {
+      "elf": "instalator.elf",
+      "total_functions": 325,
+      "instrumented_functions": 58
+    },
+    {
+      "elf": "kalkulator.elf",
+      "total_functions": 301,
+      "instrumented_functions": 46
+    },
+    {
+      "elf": "kontrolki2.elf",
+      "total_functions": 653,
+      "instrumented_functions": 103
+    },
+    {
+      "elf": "kontrolki3.elf",
+      "total_functions": 687,
+      "instrumented_functions": 102
+    },
+    {
+      "elf": "kontrolki4.elf",
+      "total_functions": 1128,
+      "instrumented_functions": 156
+    },
+    {
+      "elf": "menedzer_okien.elf",
+      "total_functions": 953,
+      "instrumented_functions": 167
+    },
+    {
+      "elf": "notatnik.elf",
+      "total_functions": 578,
+      "instrumented_functions": 105
+    },
+    {
+      "elf": "przegladarka.elf",
+      "total_functions": 1162,
+      "instrumented_functions": 210
+    },
+    {
+      "elf": "przegladarka_obrazow.elf",
+      "total_functions": 149,
+      "instrumented_functions": 31
+    },
+    {
+      "elf": "repro.elf",
+      "total_functions": 13,
+      "instrumented_functions": 2
+    },
+    {
+      "elf": "shell.elf",
+      "total_functions": 352,
+      "instrumented_functions": 69
+    },
+    {
+      "elf": "snake.elf",
+      "total_functions": 112,
+      "instrumented_functions": 21
+    },
+    {
+      "elf": "tapety.elf",
+      "total_functions": 874,
+      "instrumented_functions": 145
+    },
+    {
+      "elf": "test.elf",
+      "total_functions": 1515,
+      "instrumented_functions": 238
+    },
+    {
+      "elf": "test_dzwieku.elf",
+      "total_functions": 554,
+      "instrumented_functions": 99
+    },
+    {
+      "elf": "ustawienia.elf",
+      "total_functions": 604,
+      "instrumented_functions": 96
+    }
+  ]
+}

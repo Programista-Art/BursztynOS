@@ -1,0 +1,1744 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-11-04",
+  "pzb_levels": [
+    {
+      "id": 0,
+      "name": "PZB_JADRO",
+      "description": "Jadro (Ring 0 / PID 0)"
+    },
+    {
+      "id": 1,
+      "name": "PZB_STEROWNIKI",
+      "description": "Sterowniki urzadzen"
+    },
+    {
+      "id": 2,
+      "name": "PZB_USLUGI",
+      "description": "Uslugi systemowe (np. Menedzer Okien)"
+    },
+    {
+      "id": 3,
+      "name": "PZB_ZAUFANE",
+      "description": "Aplikacje zaufane (np. Instalator, OTA, Ustawienia)"
+    },
+    {
+      "id": 4,
+      "name": "PZB_UZYTKOWNIK",
+      "description": "Zwykle aplikacje uzytkownika"
+    },
+    {
+      "id": 5,
+      "name": "PZB_PIASKOWNICA",
+      "description": "Piaskownica (najniższy poziom zaufania)"
+    }
+  ],
+  "prawa_bits": [
+    {
+      "bit": 0,
+      "mask": "0x01",
+      "name": "PRAWO_PLIKI_CZYTAJ"
+    },
+    {
+      "bit": 1,
+      "mask": "0x02",
+      "name": "PRAWO_PLIKI_ZAPISZ"
+    },
+    {
+      "bit": 2,
+      "mask": "0x04",
+      "name": "PRAWO_SIEC"
+    },
+    {
+      "bit": 3,
+      "mask": "0x08",
+      "name": "PRAWO_GUI"
+    },
+    {
+      "bit": 4,
+      "mask": "0x10",
+      "name": "PRAWO_URUCHOM_PROGRAM"
+    },
+    {
+      "bit": 5,
+      "mask": "0x20",
+      "name": "PRAWO_SYSTEM_CONFIG"
+    },
+    {
+      "bit": 6,
+      "mask": "0x40",
+      "name": "PRAWO_STEROWNIK"
+    },
+    {
+      "bit": 7,
+      "mask": "0x80",
+      "name": "PRAWO_DEBUG"
+    }
+  ],
+  "policy_invariants": [
+    "High PZB trust level alone NEVER grants PRAWO_* capabilities automatically (independent checks).",
+    "Unknown permission bits (~PRAWA_ZNANE) invalidate the process descriptor and deny all capability checks.",
+    "Child processes spawned via BWS_URUCHOM_PROGRAM (10) cannot escalate PZB trust level or capability bits beyond caller policy.",
+    "System operations (BWS 25, 26, 40, 42, 43) require operacja_systemowa_dozwolona (PZB <= PZB_ZAUFANE and PRAWO_SYSTEM_CONFIG).",
+    "BWS_PULPIT_GOTOWY (88) and SYSTEM_IPC require PZB <= PZB_USLUGI, PRAWO_GUI | PRAWO_SYSTEM_CONFIG, and canonical path /menedzer_okien.bur."
+  ],
+  "syscall_privilege_matrix": [
+    {
+      "syscall_id": 1,
+      "enum_name": "BWS_WYPISZ",
+      "handler_name": "bws_wypisz",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 2,
+      "enum_name": "BWS_UTWORZ_PLIK",
+      "handler_name": "bws_utworz_plik",
+      "max_allowed_pzb_level": 4,
+      "required_rights_mask": [
+        "PRAWO_PLIKI_ZAPISZ"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_UZYTKOWNIK (<=4) or scoped write policy"
+    },
+    {
+      "syscall_id": 3,
+      "enum_name": "BWS_ZAPISZ_PLIK",
+      "handler_name": "bws_zapisz_plik",
+      "max_allowed_pzb_level": 4,
+      "required_rights_mask": [
+        "PRAWO_PLIKI_ZAPISZ"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_UZYTKOWNIK (<=4) or scoped write policy"
+    },
+    {
+      "syscall_id": 4,
+      "enum_name": "BWS_POBIERZ_ZNAK",
+      "handler_name": "scheduler_pobierz_klawisz_lub_zablokuj",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 5,
+      "enum_name": "BWS_CZYTAJ_PLIK",
+      "handler_name": "bws_czytaj_plik",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_PLIKI_CZYTAJ"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 6,
+      "enum_name": "BWS_LISTUJ_KATALOG",
+      "handler_name": "bws_wylistuj_katalog",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_PLIKI_CZYTAJ"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 7,
+      "enum_name": "BWS_USUN_TWOR",
+      "handler_name": "bws_usun_twor",
+      "max_allowed_pzb_level": 4,
+      "required_rights_mask": [
+        "PRAWO_PLIKI_ZAPISZ"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_UZYTKOWNIK (<=4) or scoped write policy"
+    },
+    {
+      "syscall_id": 8,
+      "enum_name": "BWS_ZMIEN_NAZWE",
+      "handler_name": "bws_zmien_nazwe",
+      "max_allowed_pzb_level": 4,
+      "required_rights_mask": [
+        "PRAWO_PLIKI_ZAPISZ"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_UZYTKOWNIK (<=4)"
+    },
+    {
+      "syscall_id": 9,
+      "enum_name": "BWS_CZAS_RTC",
+      "handler_name": "bws_rtc",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 10,
+      "enum_name": "BWS_URUCHOM_PROGRAM",
+      "handler_name": "bws_uruchom",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_URUCHOM_PROGRAM"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "Child PZB cannot exceed caller PZB"
+    },
+    {
+      "syscall_id": 11,
+      "enum_name": "BWS_PING",
+      "handler_name": "bws_siec_ping",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_SIEC"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 12,
+      "enum_name": "BWS_DNS_LEGACY",
+      "handler_name": "bws_dns",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_SIEC"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 13,
+      "enum_name": "BWS_HTTP_DO_PLIKU_LEGACY",
+      "handler_name": "bws_legacy_http_do_pliku",
+      "max_allowed_pzb_level": 4,
+      "required_rights_mask": [
+        "PRAWO_SIEC",
+        "PRAWO_PLIKI_ZAPISZ"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_UZYTKOWNIK (<=4)"
+    },
+    {
+      "syscall_id": 14,
+      "enum_name": "BWS_GUI_RYSUJ_OKNO",
+      "handler_name": "bws_gui_rysuj_okno",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 15,
+      "enum_name": "BWS_GUI_TEKST",
+      "handler_name": "bws_gui_wypisz_tekst",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 16,
+      "enum_name": "BWS_GUI_WYCZYSC",
+      "handler_name": "bws_gui_wyczyscz_obszar",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 17,
+      "enum_name": "BWS_GUI_ODSWIEZ",
+      "handler_name": "bws_gui_odswiez",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 18,
+      "enum_name": "BWS_GUI_POBIERZ_MYSZ",
+      "handler_name": "bws_gui_pobierz_mysz",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 19,
+      "enum_name": "BWS_GUI_ODSWIEZ_PULPIT",
+      "handler_name": "bws_gui_odswiez_pulpit",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 20,
+      "enum_name": "BWS_GUI_TEKST_KOLOR",
+      "handler_name": "bws_gui_wypisz_tekst_kolor",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 21,
+      "enum_name": "BWS_GUI_PROSTOKAT",
+      "handler_name": "bws_gui_rysuj_prostokat",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 22,
+      "enum_name": "BWS_GUI_PRZEJECIE_MYSZY",
+      "handler_name": "bws_gui_ustaw_przejecie_myszy",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 23,
+      "enum_name": "BWS_GUI_ROZDZIELCZOSC",
+      "handler_name": "bws_gui_pobierz_rozdzielczosc",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 24,
+      "enum_name": "BWS_GUI_SZEROKOSC_ZNAKU",
+      "handler_name": "bws_gui_pobierz_szerokosc_znaku",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 25,
+      "enum_name": "BWS_RESET",
+      "handler_name": "reset_ps2",
+      "max_allowed_pzb_level": 3,
+      "required_rights_mask": [
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "DENY_TRUST_LEVEL_TOO_LOW",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_ZAUFANE (<=3) via operacja_systemowa_dozwolona"
+    },
+    {
+      "syscall_id": 26,
+      "enum_name": "BWS_SHUTDOWN",
+      "handler_name": "wylacz_qemu",
+      "max_allowed_pzb_level": 3,
+      "required_rights_mask": [
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "DENY_TRUST_LEVEL_TOO_LOW",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_ZAUFANE (<=3) via operacja_systemowa_dozwolona"
+    },
+    {
+      "syscall_id": 27,
+      "enum_name": "BWS_DZWIEK_TON",
+      "handler_name": "hda_test_ton",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 28,
+      "enum_name": "BWS_DNS",
+      "handler_name": "bws_dns",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_SIEC"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 29,
+      "enum_name": "BWS_HTTP",
+      "handler_name": "bws_http_common(false)",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_SIEC"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 30,
+      "enum_name": "BWS_HTTPS",
+      "handler_name": "bws_http_common(true)",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_SIEC"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 31,
+      "enum_name": "BWS_TLS_CERTYFIKAT",
+      "handler_name": "kernel_tls_certyfikat_zaufany",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_SIEC"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 32,
+      "enum_name": "BWS_ZAKONCZ_PROCES",
+      "handler_name": "bws_zakoncz_biezacy_proces",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 33,
+      "enum_name": "BWS_GUI_UTWORZ_WARSTWE",
+      "handler_name": "utworz_warstwe",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 34,
+      "enum_name": "BWS_GUI_PRZESUN_WARSTWE",
+      "handler_name": "zaktualizuj_pozycje_warstwy",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 35,
+      "enum_name": "BWS_ALOKUJ_STERTE",
+      "handler_name": "bws_alokuj_sterte",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 36,
+      "enum_name": "BWS_GUI_CZY_ZAMKNIETO_POWLOKE",
+      "handler_name": "gui_czy_zamknieto_powloke",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 37,
+      "enum_name": "BWS_ZDARZENIE_POLL",
+      "handler_name": "scheduler_pobierz_zdarzenie",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 38,
+      "enum_name": "BWS_ZDARZENIE_CZEKAJ",
+      "handler_name": "scheduler_czekaj_na_zdarzenie",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 39,
+      "enum_name": "BWS_GUI_CAPTURE",
+      "handler_name": "bws_gui_ustaw_capture",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 40,
+      "enum_name": "BWS_GUI_SYSTEM_OVERLAY",
+      "handler_name": "skladacz_obrazu_ustaw_overlay",
+      "max_allowed_pzb_level": 3,
+      "required_rights_mask": [
+        "PRAWO_GUI",
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "DENY_TRUST_LEVEL_TOO_LOW",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_ZAUFANE (<=3) via operacja_systemowa_dozwolona"
+    },
+    {
+      "syscall_id": 41,
+      "enum_name": "BWS_GUI_MINIMALIZUJ",
+      "handler_name": "bws_gui_minimalizuj_warstwe",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 42,
+      "enum_name": "BWS_GUI_OKNA_SNAPSHOT",
+      "handler_name": "bws_snapshot_okien",
+      "max_allowed_pzb_level": 3,
+      "required_rights_mask": [
+        "PRAWO_GUI",
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "DENY_TRUST_LEVEL_TOO_LOW",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_ZAUFANE (<=3) via operacja_systemowa_dozwolona"
+    },
+    {
+      "syscall_id": 43,
+      "enum_name": "BWS_GUI_AKTYWUJ_OKNO",
+      "handler_name": "bws_gui_aktywuj_okno",
+      "max_allowed_pzb_level": 3,
+      "required_rights_mask": [
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "DENY_TRUST_LEVEL_TOO_LOW",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_ZAUFANE (<=3) via operacja_systemowa_dozwolona"
+    },
+    {
+      "syscall_id": 44,
+      "enum_name": "BWS_ROZMIAR_PLIKU",
+      "handler_name": "bws_rozmiar_pliku",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_PLIKI_CZYTAJ"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 45,
+      "enum_name": "BWS_ARGUMENT_STARTOWY",
+      "handler_name": "bws_pobierz_argument",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 46,
+      "enum_name": "BWS_UTWORZ_KATALOG",
+      "handler_name": "bws_utworz_katalog",
+      "max_allowed_pzb_level": 4,
+      "required_rights_mask": [
+        "PRAWO_PLIKI_ZAPISZ"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_UZYTKOWNIK (<=4)"
+    },
+    {
+      "syscall_id": 47,
+      "enum_name": "BWS_METADANE_PLIKU",
+      "handler_name": "bws_pobierz_metadane",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_PLIKI_CZYTAJ"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 48,
+      "enum_name": "BWS_PRZENIES_TWOR",
+      "handler_name": "bws_przenies",
+      "max_allowed_pzb_level": 4,
+      "required_rights_mask": [
+        "PRAWO_PLIKI_ZAPISZ"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_UZYTKOWNIK (<=4)"
+    },
+    {
+      "syscall_id": 49,
+      "enum_name": "BWS_GUI_CELE_DROP",
+      "handler_name": "bws_rejestruj_cele_drop",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 50,
+      "enum_name": "BWS_GUI_AKTUALIZUJ_DRAG",
+      "handler_name": "bws_aktualizuj_drag",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 51,
+      "enum_name": "BWS_GUI_WYSOKOSC_FONTU",
+      "handler_name": "bws_czcionka_kopiuj",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 52,
+      "enum_name": "BWS_SCHOWEK_PLIK_USTAW",
+      "handler_name": "bws_ustaw_schowek_plikow",
+      "max_allowed_pzb_level": 4,
+      "required_rights_mask": [
+        "PRAWO_GUI",
+        "PRAWO_PLIKI_CZYTAJ"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_UZYTKOWNICA (<=4)"
+    },
+    {
+      "syscall_id": 53,
+      "enum_name": "BWS_SCHOWEK_PLIK_POBIERZ",
+      "handler_name": "bws_pobierz_schowek_plikow",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI",
+        "PRAWO_PLIKI_CZYTAJ"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 54,
+      "enum_name": "BWS_SCHOWEK_PLIK_WYCZYSC",
+      "handler_name": "bws_wyczysc_schowek_plikow",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 55,
+      "enum_name": "BWS_KOPIUJ_TWOR",
+      "handler_name": "bws_kopiuj_twor",
+      "max_allowed_pzb_level": 4,
+      "required_rights_mask": [
+        "PRAWO_PLIKI_CZYTAJ",
+        "PRAWO_PLIKI_ZAPISZ"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_UZYTKOWNIK (<=4)"
+    },
+    {
+      "syscall_id": 56,
+      "enum_name": "BWS_GUI_POPUP_APLIKACJI",
+      "handler_name": "skladacz_obrazu_ustaw_popup_aplikacji",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5) + active window owner"
+    },
+    {
+      "syscall_id": 57,
+      "enum_name": "BWS_GUI_BLIT",
+      "handler_name": "bws_gui_blit / bws_gui_zastap_regiony",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 58,
+      "enum_name": "BWS_GUI_TYTUL_OKNA",
+      "handler_name": "bws_gui_ustaw_tytul_okna",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 59,
+      "enum_name": "BWS_CZYTAJ_FRAGMENT_PLIKU",
+      "handler_name": "bws_czytaj_fragment_pliku",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_PLIKI_CZYTAJ"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 60,
+      "enum_name": "BWS_CZAS_MONOTONICZNY_NS",
+      "handler_name": "czas_monotoniczny_ns",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 61,
+      "enum_name": "BWS_GUI_GEOMETRIA",
+      "handler_name": "zmien_geometrie_warstwy",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 62,
+      "enum_name": "BWS_GUI_MONITOR_INFO",
+      "handler_name": "monitor_info",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 63,
+      "enum_name": "BWS_GUI_USTAW_WORK_AREA",
+      "handler_name": "ustaw_work_area",
+      "max_allowed_pzb_level": 2,
+      "required_rights_mask": [
+        "PRAWO_GUI",
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "DENY_TRUST_LEVEL_TOO_LOW",
+        "PZB_UZYTKOWNIK": "DENY_TRUST_LEVEL_TOO_LOW",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_USLUGI (<=2)"
+    },
+    {
+      "syscall_id": 64,
+      "enum_name": "BWS_SHM_CREATE",
+      "handler_name": "shm_create",
+      "max_allowed_pzb_level": 4,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_UZYTKOWNIK (<=4)"
+    },
+    {
+      "syscall_id": 65,
+      "enum_name": "BWS_SHM_MAP",
+      "handler_name": "shm_map",
+      "max_allowed_pzb_level": 4,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_UZYTKOWNIK (<=4)"
+    },
+    {
+      "syscall_id": 66,
+      "enum_name": "BWS_SHM_UNMAP",
+      "handler_name": "shm_unmap",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 67,
+      "enum_name": "BWS_SHM_CLOSE",
+      "handler_name": "shm_close",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 68,
+      "enum_name": "BWS_IPC_CREATE",
+      "handler_name": "ipc_create",
+      "max_allowed_pzb_level": 4,
+      "required_rights_mask": [],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_UZYTKOWNIK (<=4)"
+    },
+    {
+      "syscall_id": 69,
+      "enum_name": "BWS_IPC_SEND",
+      "handler_name": "ipc_send / ipc_instalator / ipc_ekran / ipc_tapety",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "Channel-dependent: PRAWO_GUI / PRAWO_SYSTEM_CONFIG"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "Channel-dependent (SYSTEM_IPC: PZB_USLUGI + WM path; INSTALATOR_IPC: authorized installer PID; EKRAN_IPC: PZB_ZAUFANE + PRAWO_GUI|PRAWO_SYSTEM_CONFIG)"
+    },
+    {
+      "syscall_id": 70,
+      "enum_name": "BWS_IPC_RECEIVE",
+      "handler_name": "ipc_receive",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "Owner PID of IPC queue"
+    },
+    {
+      "syscall_id": 71,
+      "enum_name": "BWS_IPC_CLOSE",
+      "handler_name": "ipc_close",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "Owner PID of IPC queue"
+    },
+    {
+      "syscall_id": 72,
+      "enum_name": "BWS_FILE_WATCH",
+      "handler_name": "watch_dispatch",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_PLIKI_CZYTAJ"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 73,
+      "enum_name": "BWS_CLIPBOARD_ENUM",
+      "handler_name": "clipboard_enum",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 74,
+      "enum_name": "BWS_CLIPBOARD_SIZE",
+      "handler_name": "clipboard_size",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 75,
+      "enum_name": "BWS_CLIPBOARD_READ",
+      "handler_name": "clipboard_read",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 76,
+      "enum_name": "BWS_CLIPBOARD_SET",
+      "handler_name": "clipboard_set",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 77,
+      "enum_name": "BWS_GUI_CURSOR_SHAPE",
+      "handler_name": "bws_gui_ustaw_kursor_ksztalt",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 78,
+      "enum_name": "BWS_GUI_CURSOR_CUSTOM",
+      "handler_name": "bws_gui_ustaw_kursor_custom",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 79,
+      "enum_name": "BWS_SOCKET_CREATE",
+      "handler_name": "socket_create",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_SIEC"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 80,
+      "enum_name": "BWS_SOCKET_CONNECT",
+      "handler_name": "socket_connect",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_SIEC"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5) + socket owner"
+    },
+    {
+      "syscall_id": 81,
+      "enum_name": "BWS_SOCKET_SEND",
+      "handler_name": "socket_send",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_SIEC"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5) + socket owner"
+    },
+    {
+      "syscall_id": 82,
+      "enum_name": "BWS_SOCKET_RECV",
+      "handler_name": "socket_recv",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_SIEC"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5) + socket owner"
+    },
+    {
+      "syscall_id": 83,
+      "enum_name": "BWS_SOCKET_CLOSE",
+      "handler_name": "socket_close",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_SIEC"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5) + socket owner"
+    },
+    {
+      "syscall_id": 84,
+      "enum_name": "BWS_OTA_STATUS",
+      "handler_name": "aktualizacja_bws_status",
+      "max_allowed_pzb_level": 3,
+      "required_rights_mask": [
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "DENY_TRUST_LEVEL_TOO_LOW",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_ZAUFANE (<=3)"
+    },
+    {
+      "syscall_id": 85,
+      "enum_name": "BWS_OTA_POLECENIE",
+      "handler_name": "aktualizacja_bws_polecenie",
+      "max_allowed_pzb_level": 3,
+      "required_rights_mask": [
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "DENY_TRUST_LEVEL_TOO_LOW",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_ZAUFANE (<=3)"
+    },
+    {
+      "syscall_id": 86,
+      "enum_name": "BWS_MOTYW_POBIERZ",
+      "handler_name": "motyw_bws_pobierz",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    },
+    {
+      "syscall_id": 87,
+      "enum_name": "BWS_MOTYW_POLECENIE",
+      "handler_name": "motyw_bws_polecenie",
+      "max_allowed_pzb_level": 3,
+      "required_rights_mask": [
+        "PRAWO_GUI",
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "DENY_TRUST_LEVEL_TOO_LOW",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_ZAUFANE (<=3)"
+    },
+    {
+      "syscall_id": 88,
+      "enum_name": "BWS_PULPIT_GOTOWY",
+      "handler_name": "bws_potwierdz_pulpit_gotowy",
+      "max_allowed_pzb_level": 2,
+      "required_rights_mask": [
+        "PRAWO_GUI",
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "DENY_TRUST_LEVEL_TOO_LOW",
+        "PZB_UZYTKOWNIK": "DENY_TRUST_LEVEL_TOO_LOW",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_USLUGI (<=2) + path == /menedzer_okien.bur"
+    },
+    {
+      "syscall_id": 89,
+      "enum_name": "BWS_HDA_DIAG",
+      "handler_name": "bws_hda_diag",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5) for read-only; PRAWO_STEROWNIK|PRAWO_DEBUG for scan control"
+    },
+    {
+      "syscall_id": 90,
+      "enum_name": "BWS_HDA_TEST",
+      "handler_name": "bws_hda_test",
+      "max_allowed_pzb_level": 4,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_UZYTKOWNIK (<=4)"
+    },
+    {
+      "syscall_id": 91,
+      "enum_name": "BWS_DIAGNOSTYKA_SYSTEMU",
+      "handler_name": "diag_read_request",
+      "max_allowed_pzb_level": 3,
+      "required_rights_mask": [
+        "PRAWO_DEBUG"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "DENY_TRUST_LEVEL_TOO_LOW",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_ZAUFANE (<=3)"
+    },
+    {
+      "syscall_id": 92,
+      "enum_name": "BWS_BSF_CONFIG",
+      "handler_name": "bsf_config_request",
+      "max_allowed_pzb_level": 3,
+      "required_rights_mask": [
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "DENY_TRUST_LEVEL_TOO_LOW",
+        "PZB_PIASKOWNICA": "DENY_TRUST_LEVEL_TOO_LOW"
+      },
+      "additional_identity_or_state_checks": "PZB_ZAUFANE (<=3)"
+    },
+    {
+      "syscall_id": 93,
+      "enum_name": "BWS_GUI_TYTUL_ALFA",
+      "handler_name": "skladacz_obrazu_ustaw_maske_tytulu",
+      "max_allowed_pzb_level": 5,
+      "required_rights_mask": [
+        "PRAWO_GUI"
+      ],
+      "pzb_level_decisions": {
+        "PZB_JADRO": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_STEROWNIKI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_USLUGI": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_ZAUFANE": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_UZYTKOWNIK": "ALLOW_IF_RIGHTS_PRESENT",
+        "PZB_PIASKOWNICA": "ALLOW_IF_RIGHTS_PRESENT"
+      },
+      "additional_identity_or_state_checks": "PZB_PIASKOWNICA (<=5)"
+    }
+  ]
+}

@@ -1,0 +1,360 @@
+{
+  "git_head": "63bbd43d251be1e30dada0ddf1c8d79888324edf",
+  "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "artifacts": {
+    "BursztynOS.iso": {
+      "size_bytes": 40093696,
+      "sha256": "0ee36009805ebce8b2006047e138b0fa80a4fcdebc33f3aa928923556bd89ecc",
+      "baseline_size_bytes": 39974912,
+      "delta_bytes": 118784
+    },
+    "system_operacyjny.bin": {
+      "size_bytes": 13962920,
+      "sha256": "a5bb3529941f34ce46d8aaf74344a4b1c8977643bfdb02fea279d24667f13a8a",
+      "baseline_size_bytes": 13810232,
+      "delta_bytes": 152688,
+      "sections_raw": "/home/programista/Pulpit/Burstzyn/BursztynOS/system_operacyjny.bin  :\nsection               size       addr\n.boot                   80    1048576\n.text              1012240    1052672\n.rodata             296272    2068480\n.data              8978016    2367488\n.bss               3047520   11345920\n.debug_info        1380968          0\n.debug_abbrev       109923          0\n.debug_loclists     869454          0\n.debug_aranges        4224          0\n.debug_rnglists     114773          0\n.debug_line         736624          0\n.debug_str          157685          0\n.debug_line_str       3558          0\n.debug_frame         80544          0\nTotal             16791881\n\n\n",
+      "section_deltas": {
+        ".boot": {
+          "baseline": 80,
+          "after": 80,
+          "delta_bytes": 0,
+          "delta_pct": 0.0
+        },
+        ".text": {
+          "baseline": 970896,
+          "after": 1012240,
+          "delta_bytes": 41344,
+          "delta_pct": 4.258
+        },
+        ".rodata": {
+          "baseline": 295824,
+          "after": 296272,
+          "delta_bytes": 448,
+          "delta_pct": 0.151
+        },
+        ".data": {
+          "baseline": 8900192,
+          "after": 8978016,
+          "delta_bytes": 77824,
+          "delta_pct": 0.874
+        },
+        ".bss": {
+          "baseline": 3047008,
+          "after": 3047520,
+          "delta_bytes": 512,
+          "delta_pct": 0.017
+        }
+      }
+    },
+    "isodir/boot/system_operacyjny.bin": {
+      "size_bytes": 10301520,
+      "sha256": "b9554240a3b573d068ad15c037db27eed22de39b8db311a408b0912f261704cb",
+      "baseline_size_bytes": 10182736,
+      "delta_bytes": 118784
+    }
+  },
+  "ring3_apps": {
+    "aktualizacje.bin": {
+      "size_bytes": 202368,
+      "sha256": "e3e9bd6773abd8f8badd69a2e901bc1dd2fed2b6804981cc52a69df3ef3b1683",
+      "baseline_size_bytes": 202368,
+      "delta_bytes": 0
+    },
+    "demo_ui.bin": {
+      "size_bytes": 300672,
+      "sha256": "39610c68586c67b10d402cf4666016df58e32819f4c23d934013e3572c2ac4a5",
+      "baseline_size_bytes": 300672,
+      "delta_bytes": 0
+    },
+    "diagnostyka.bin": {
+      "size_bytes": 202368,
+      "sha256": "11c6a3190f11cd8a4b53fc6cf79bfc08c7efd3164ec82ce7cf7ee7cb8a284bc3",
+      "baseline_size_bytes": 194176,
+      "delta_bytes": 8192
+    },
+    "ekran.bin": {
+      "size_bytes": 235136,
+      "sha256": "3430167ededd32b68cfa88f39178eaf16cd060e933ac59353b6160d0a297cb12",
+      "baseline_size_bytes": 235136,
+      "delta_bytes": 0
+    },
+    "eksplorator.bin": {
+      "size_bytes": 284320,
+      "sha256": "76b9da5450e9e21f26dfd3a7ebfe0f61fcbc2b14aea6eaa02462e04e8734b5f7",
+      "baseline_size_bytes": 267936,
+      "delta_bytes": 16384
+    },
+    "fpu_probe.bin": {
+      "size_bytes": 69856,
+      "sha256": "4aac94321f14fd5e994a33deb7f444d5e6d17b0483014f247ec33d320593f51e",
+      "baseline_size_bytes": 69856,
+      "delta_bytes": 0
+    },
+    "husarz_worker.bin": {
+      "size_bytes": 69888,
+      "sha256": "4bd15d6e7ff06694ec8ebe1e94dca51cbeb937a73ad6cb921d7ba5d7196760aa",
+      "baseline_size_bytes": 69888,
+      "delta_bytes": 0
+    },
+    "instalator.bin": {
+      "size_bytes": 202368,
+      "sha256": "96c270653c9a4d265eb9857a561768555878d6201b25b284da3bcb265c8bb8e4",
+      "baseline_size_bytes": 202368,
+      "delta_bytes": 0
+    },
+    "kalkulator.bin": {
+      "size_bytes": 202496,
+      "sha256": "417c687434272f57094988dae4ebf257afa2d0cc31d09b0dfe5ad4100cf2d2d2",
+      "baseline_size_bytes": 202496,
+      "delta_bytes": 0
+    },
+    "kontrolki2.bin": {
+      "size_bytes": 300672,
+      "sha256": "80995f07a27aae45e04bf3d8b46993a3df97971c86796766387c99fb9881bd51",
+      "baseline_size_bytes": 300672,
+      "delta_bytes": 0
+    },
+    "kontrolki3.bin": {
+      "size_bytes": 218752,
+      "sha256": "6a45278238410e6dfb0682e282db4edb0e2b8ddd0913b6c572e7b13465f76573",
+      "baseline_size_bytes": 218752,
+      "delta_bytes": 0
+    },
+    "kontrolki4.bin": {
+      "size_bytes": 333888,
+      "sha256": "f766f5dc122cf2216dd0431a035ac6ee533da761f1ddc240d3f29c0125004dfe",
+      "baseline_size_bytes": 333888,
+      "delta_bytes": 0
+    },
+    "menedzer_okien.bin": {
+      "size_bytes": 373344,
+      "sha256": "3009f0789ec3ec02c473cf8c72cdda0f44d08f2998ba0f3743edc1c8376bb055",
+      "baseline_size_bytes": 356960,
+      "delta_bytes": 16384
+    },
+    "notatnik.bin": {
+      "size_bytes": 202368,
+      "sha256": "7a94cfaf35d74b54b87451d9b1ba94879f0de08b9d4ca91d738a155fa4316a73",
+      "baseline_size_bytes": 202368,
+      "delta_bytes": 0
+    },
+    "przegladarka.bin": {
+      "size_bytes": 562880,
+      "sha256": "d974f1e0d22a247484974c4a2f7a699969f1b63a77f1f5a7a8d679d8a9a20b55",
+      "baseline_size_bytes": 546496,
+      "delta_bytes": 16384
+    },
+    "przegladarka_obrazow.bin": {
+      "size_bytes": 136864,
+      "sha256": "777b38036046c3235e265066a957e28779280d699d466f41a7dc73135958659e",
+      "baseline_size_bytes": 136864,
+      "delta_bytes": 0
+    },
+    "repro.bin": {
+      "size_bytes": 36880,
+      "sha256": "3bb82da8181764b3d948951087b9cf07402df3fa30577a1b917c5e42db7730fa",
+      "baseline_size_bytes": 36864,
+      "delta_bytes": 16
+    },
+    "shell.bin": {
+      "size_bytes": 153312,
+      "sha256": "b261bf81d3635d418964287ad24777219a74d744fd38680a42b8f6bb91693604",
+      "baseline_size_bytes": 153312,
+      "delta_bytes": 0
+    },
+    "snake.bin": {
+      "size_bytes": 138752,
+      "sha256": "85654e685f0071d62c5a406bd86dfdcfe811ec86e3621c86c375d447091c7b25",
+      "baseline_size_bytes": 138752,
+      "delta_bytes": 0
+    },
+    "tapety.bin": {
+      "size_bytes": 284320,
+      "sha256": "efe8a31505a894f5bdeeb193c702cfc67bb9c1c4f8077660ec5e540366ef90a0",
+      "baseline_size_bytes": 284320,
+      "delta_bytes": 0
+    },
+    "test.bin": {
+      "size_bytes": 530080,
+      "sha256": "dfa855f0e3b53c64529fa9d5b75b3ce8696ab6b371f4699a73aa60fd39f79abd",
+      "baseline_size_bytes": 513696,
+      "delta_bytes": 16384
+    },
+    "test_dzwieku.bin": {
+      "size_bytes": 206464,
+      "sha256": "64eebb393553ab0d5816465d08d412e8c55f40f52991fc5353ff1d392b38e17a",
+      "baseline_size_bytes": 202368,
+      "delta_bytes": 4096
+    },
+    "ustawienia.bin": {
+      "size_bytes": 202368,
+      "sha256": "2173a9e4a39078e804ee56d85e8c08fc3c4fd92c0b3abd0b937e4f244c78905b",
+      "baseline_size_bytes": 202368,
+      "delta_bytes": 0
+    }
+  },
+  "stack_usage": {
+    "total_functions": 5788,
+    "baseline_total_functions": 5778,
+    "total_frame_bytes": 634960,
+    "baseline_total_frame_bytes": 606536,
+    "delta_total_frame_bytes": 28424,
+    "max_frame_bytes": 8832,
+    "baseline_max_frame_bytes": 8592,
+    "kernel_stack_size_bytes": 65536,
+    "max_frame_within_1024_target_except_psf_inodes": false,
+    "top_25_functions": [
+      {
+        "file": "virtio_blk.su",
+        "location_func": "virtio_blk.cpp:1106:6:bool virtio_blk_stress_test(VirtioBlkDriver*, bool)",
+        "frame_bytes": 8832,
+        "qualifier": "static"
+      },
+      {
+        "file": "psf.su",
+        "location_func": "psf.cpp:4790:25:PsfMoveWynik psf_przenies_twor_wynik(const char*, const char*)",
+        "frame_bytes": 8656,
+        "qualifier": "static"
+      },
+      {
+        "file": "shell_tmp.su",
+        "location_func": "shell.cpp:2392:6:void _start()",
+        "frame_bytes": 6912,
+        "qualifier": "static"
+      },
+      {
+        "file": "skladacz_obrazu.su",
+        "location_func": "skladacz_obrazu.cpp:1942:6:void skladacz_obrazu_obsluz_dirty()",
+        "frame_bytes": 4976,
+        "qualifier": "static"
+      },
+      {
+        "file": "husarz_worker_tmp.su",
+        "location_func": "programy/husarz/resource.h:28:10:void Husarz::ResourceCache::remove(Husarz::ResourceEntry&)",
+        "frame_bytes": 4592,
+        "qualifier": "static"
+      },
+      {
+        "file": "przegladarka_tmp.su",
+        "location_func": "programy/husarz/resource.h:28:10:void Husarz::ResourceCache::remove(Husarz::ResourceEntry&)",
+        "frame_bytes": 4592,
+        "qualifier": "static"
+      },
+      {
+        "file": "tls.su",
+        "location_func": "tls.cpp:1156:17:bool kernel_siec_pobierz_https(uint8_t*, const char*, const char*, char*, uint32_t)",
+        "frame_bytes": 4592,
+        "qualifier": "static"
+      },
+      {
+        "file": "siec.su",
+        "location_func": "siec.cpp:4150:17:bool kernel_siec_pobierz_http(uint8_t*, const char*, const char*, char*, uint32_t)",
+        "frame_bytes": 4336,
+        "qualifier": "static"
+      },
+      {
+        "file": "motyw.su",
+        "location_func": "motyw.cpp:697:6:bool motyw_zaladuj_z_pliku(const char*, BursztynMotyw*)",
+        "frame_bytes": 4304,
+        "qualifier": "static"
+      },
+      {
+        "file": "test_dzwieku_tmp.su",
+        "location_func": "programy/test_dzwieku/test_dzwieku.cpp:726:10:void {anonymous}::OknoTestDzwieku::odswiez_wszystko()",
+        "frame_bytes": 4272,
+        "qualifier": "static"
+      },
+      {
+        "file": "kernel.su",
+        "location_func": "kernel.cpp:2064:6:bool kernel_weryfikuj_system()",
+        "frame_bytes": 4192,
+        "qualifier": "static"
+      },
+      {
+        "file": "psf.su",
+        "location_func": "psf.cpp:3724:6:bool psf_weryfikuj_dysk()",
+        "frame_bytes": 4192,
+        "qualifier": "static"
+      },
+      {
+        "file": "image_png_ring3.su",
+        "location_func": "obrazy/vendor/stb_image.h:4576:15:char* stbi_zlib_decode_malloc_guesssize_headerflag(const char*, int, int, int*, int)",
+        "frame_bytes": 4176,
+        "qualifier": "static"
+      },
+      {
+        "file": "psf.su",
+        "location_func": "psf.cpp:3743:6:bool psf_weryfikuj_dysk_step(uint64_t*, bool*)",
+        "frame_bytes": 4176,
+        "qualifier": "static"
+      },
+      {
+        "file": "image_png_ring3.su",
+        "location_func": "obrazy/vendor/stb_image.h:4555:15:char* stbi_zlib_decode_malloc_guesssize(const char*, int, int, int*)",
+        "frame_bytes": 4160,
+        "qualifier": "static"
+      },
+      {
+        "file": "image_png_ring3.su",
+        "location_func": "obrazy/vendor/stb_image.h:4603:15:char* stbi_zlib_decode_noheader_malloc(const char*, int, int*)",
+        "frame_bytes": 4160,
+        "qualifier": "static"
+      },
+      {
+        "file": "eksplorator_tmp.su",
+        "location_func": "programy/eksplorator/eksplorator-plikow.cpp:2627:43:void _start()",
+        "frame_bytes": 4128,
+        "qualifier": "static"
+      },
+      {
+        "file": "image_png_ring3.su",
+        "location_func": "obrazy/vendor/stb_image.h:4592:13:int stbi_zlib_decode_buffer(char*, int, const char*, int)",
+        "frame_bytes": 4128,
+        "qualifier": "static"
+      },
+      {
+        "file": "image_png_ring3.su",
+        "location_func": "obrazy/vendor/stb_image.h:4619:13:int stbi_zlib_decode_noheader_buffer(char*, int, const char*, int)",
+        "frame_bytes": 4128,
+        "qualifier": "static"
+      },
+      {
+        "file": "husarz_worker_tmp.su",
+        "location_func": "programy/husarz/worker.inc:23:32:void {anonymous}::browser_worker_main()",
+        "frame_bytes": 3856,
+        "qualifier": "static"
+      },
+      {
+        "file": "menedzer_okien_tmp.su",
+        "location_func": "obrazy/png_dekoder.h:109:12:int BursztynPNG::tinf_uncompress(uint8_t*, size_t*, const uint8_t*, size_t)",
+        "frame_bytes": 3552,
+        "qualifier": "static"
+      },
+      {
+        "file": "syscalls.su",
+        "location_func": "syscalls.cpp:2249:36:uint64_t {anonymous}::bws_legacy_http_do_pliku(proces_t&, uint64_t, uint64_t, uint64_t, uint64_t)",
+        "frame_bytes": 2960,
+        "qualifier": "static"
+      },
+      {
+        "file": "aktualizacja.su",
+        "location_func": "aktualizacja.cpp:1087:6:void aktualizacja_samotest_automatyczny()",
+        "frame_bytes": 2912,
+        "qualifier": "static"
+      },
+      {
+        "file": "przegladarka_tmp.su",
+        "location_func": "programy/husarz/script_runtime.inc:62:6:void {anonymous}::browser_script_step(uint64_t)",
+        "frame_bytes": 2816,
+        "qualifier": "dynamic,bounded"
+      },
+      {
+        "file": "przegladarka_tmp.su",
+        "location_func": "programy/husarz/async_runtime.inc:151:6:void {anonymous}::queue_document_resources(Zakladka&)",
+        "frame_bytes": 2752,
+        "qualifier": "dynamic,bounded"
+      }
+    ]
+  }
+}

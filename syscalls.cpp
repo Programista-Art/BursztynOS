@@ -6,6 +6,7 @@
 #include "move_trace.h"
 #include "virtio_input.h"
 #include "gui_runtime_diag.h"
+#include "stack_protector.h"
 /*
  * Bursztyn OS - Bursztynowe Wywolania Systemowe (BWS)
  *
@@ -2968,8 +2969,10 @@ __attribute__((noinline)) uint64_t bws_rozmiar_pliku(
     char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
     if (!pobierz_sciezke_pliku(arg1, sciezka)) return 0;
     if(!proces_ma_prawo(proces,PRAWO_PLIKI_CZYTAJ)&&!(proces_ma_prawo(proces,PRAWO_GUI)&&BSF::trusted_asset(sciezka)))return 0;
+    psf_metadane meta{};
+    if (!pobierz_metadane_tworu(sciezka, &meta) || meta.typ != TYP_PLIK) return 0;
     /* +1 zachowuje 0 jako blad i pozwala reprezentowac pusty plik. */
-    return static_cast<uint64_t>(rozmiar_pliku(sciezka)) + 1ULL;
+    return static_cast<uint64_t>(meta.rozmiar) + 1ULL;
 }
 
 __attribute__((noinline)) uint64_t bws_pobierz_argument(
@@ -3722,6 +3725,14 @@ static uint64_t obsluga_wywolan_systemowych_impl(
          * ---------------------------------------------------------- */
 
         case 32:
+            if (arg1 == BWS_EXIT_STACK_PROTECTOR_VIOLATION) {
+                wypisz_log("\n============================================================\n");
+                wypisz_log("[STACKPROTECTORVIOLATION] Proces Ring 3 zakonczony wskutek naruszenia straznika stosu!");
+                if (proces.sciezka_pliku[0] != '\0') {
+                    wypisz_log(proces.sciezka_pliku);
+                }
+                wypisz_log("============================================================\n");
+            }
             bws_zakoncz_biezacy_proces();
 
         case 33: {
@@ -4022,10 +4033,13 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
                                  nr_funkcji == 84 ? "BWS84" : "BWS");
     }
 
-    // Kontrolowany test wywolania naruszenia guard page dla regresji
-    if (nr_funkcji == 99 && arg1 == 0xDEADBEEFCAFEULL && proc) {
+#if defined(BURSZTYN_DEBUG_STACK_OVERFLOW_BWS) && BURSZTYN_DEBUG_STACK_OVERFLOW_BWS
+    // Kontrolowany test wywolania naruszenia guard page (wylaczony w produkcji)
+    if (nr_funkcji == 99 && arg1 == 0xDEADBEEFCAFEULL && proc &&
+        operacja_systemowa_dozwolona(*proc)) {
         stos_wykonaj_test_przepelnienia(static_cast<int>(proc->pid));
     }
+#endif
 
     uint64_t res = obsluga_wywolan_systemowych_impl(nr_funkcji, arg1, arg2, arg3, arg4);
     hda_wykonaj_zaplanowana_prace_odroczona();

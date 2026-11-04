@@ -27,13 +27,16 @@ template<class Visit> bool odwiedz_bloki_usuwania(const wezel_indeksowy* w,Visit
     }
     if(w->blok_posredni_2!=BARK_BLOKU) {
         if(!block(w->blok_posredni_2))return false;
-        const auto* table=reinterpret_cast<const uint64_t*>(pobierz_blok_danych(w->blok_posredni_2));
-        if(!table)return false;
-        for(uint64_t i=0;i<PTRS_PER_BLOCK;++i)if(table[i]!=BARK_BLOKU) {
-            if(!block(table[i]))return false;
-            const auto* child=reinterpret_cast<const uint64_t*>(pobierz_blok_danych(table[i]));
-            if(!child)return false;
-            for(uint64_t j=0;j<PTRS_PER_BLOCK;++j)if(!block(child[j]))return false;
+        for(uint64_t i=0;i<PTRS_PER_BLOCK;++i) {
+            const auto* table=reinterpret_cast<const uint64_t*>(pobierz_blok_danych(w->blok_posredni_2));
+            if(!table)return false;
+            const uint64_t id2=table[i];
+            if(id2!=BARK_BLOKU) {
+                if(!block(id2))return false;
+                const auto* child=reinterpret_cast<const uint64_t*>(pobierz_blok_danych(id2));
+                if(!child)return false;
+                for(uint64_t j=0;j<PTRS_PER_BLOCK;++j)if(!block(child[j]))return false;
+            }
         }
     }
     return true;

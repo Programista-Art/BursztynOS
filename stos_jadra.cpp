@@ -448,6 +448,21 @@ StosRodzaj stos_klasyfikuj_rsp(uint64_t rsp, int* out_pid,
     return STOS_NIEZNANY;
 }
 
+#if defined(BURSZTYN_SSP_RING0_OVERFLOW_TEST) && BURSZTYN_SSP_RING0_OVERFLOW_TEST
+__attribute__((noinline))
+static int wymus_przepelnienie_stosu_ring0(size_t ile_bajtow) {
+    volatile uint8_t bufor_stosu[32];
+    for (size_t i = 0; i < 32; ++i) {
+        bufor_stosu[i] = 0x11;
+    }
+    volatile uint8_t* ptr = bufor_stosu;
+    for (size_t i = 0; i < ile_bajtow; ++i) {
+        ptr[i] = 0x55;
+    }
+    return static_cast<int>(bufor_stosu[0]);
+}
+#endif
+
 [[noreturn]] void stos_wykonaj_test_przepelnienia(int pid) {
     serial_wypisz("[STACK TEST] Rozpoczynam kontrolowany test przekroczenia guard page...\n");
     if (pid < 0 || pid >= static_cast<int>(PZB_MAKS_PROCESOW) || g_metryki[pid].stack_base == 0) {
@@ -520,10 +535,17 @@ StosRodzaj stos_klasyfikuj_rsp(uint64_t rsp, int* out_pid,
     serial_wypisz("\n[STACK TEST] present_oczekiwane=0 (strona odmapowana)");
     serial_wypisz("\n[STACK TEST] tryb=dostep_bezposredni (kontrolowany zapis, nie rekurencyjne pelzanie)\n");
 
+#if defined(BURSZTYN_SSP_RING0_OVERFLOW_TEST) && BURSZTYN_SSP_RING0_OVERFLOW_TEST
+    serial_wypisz("\n[SSP-RING0-TEST] Uruchamianie kontrolowanego przepelnienia bufora na stosie Ring 0...\n");
+    (void)wymus_przepelnienie_stosu_ring0(48);
+    serial_wypisz("\n[SSP-RING0-FAIL] BLAD: powrot z uszkodzonej ramki stosu!\n");
+    while (true) asm volatile("cli; hlt");
+#else
     // Dotykamy adresu wewnatrz unmapped guard page (stack_base - 8).
     // Sprzetowy #PF z CR2 == cel musi nastapic w nastepnej instrukcji.
     volatile uint64_t* guard_ptr = reinterpret_cast<volatile uint64_t*>(cel);
     *guard_ptr = 0xDEADBEEFCAFEULL;
 
     while (true) asm volatile("cli; hlt");
+#endif
 }

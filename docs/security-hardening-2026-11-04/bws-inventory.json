@@ -1,0 +1,2292 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-11-04",
+  "source_files": [
+    "bws_api.h",
+    "syscalls.cpp",
+    "bws_nowoczesne.cpp",
+    "pzb.h"
+  ],
+  "total_public_syscalls": 93,
+  "debug_syscall_99_status": "Removed from production builds; gated behind #if defined(BURSZTYN_DEBUG_STACK_OVERFLOW_BWS) && BURSZTYN_DEBUG_STACK_OVERFLOW_BWS and operacja_systemowa_dozwolona(*proc)",
+  "syscalls": [
+    {
+      "syscall_id": 1,
+      "enum_name": "BWS_WYPISZ",
+      "handler_name": "bws_wypisz",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg1: const char* tekst (NUL-terminated, max 512B)"
+      ],
+      "length_arguments": [],
+      "required_permissions": [],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Serial/terminal output"
+      ],
+      "preconditions": [
+        "Valid mapped user string"
+      ],
+      "failure_return": "0 on error, 1 on success"
+    },
+    {
+      "syscall_id": 2,
+      "enum_name": "BWS_UTWORZ_PLIK",
+      "handler_name": "bws_utworz_plik",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg1: const char* sciezka"
+      ],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_PLIKI_ZAPISZ"
+      ],
+      "required_trust_levels": "PZB_UZYTKOWNIK (<=4) or scoped write policy",
+      "side_effects": [
+        "Creates empty file in PSF/BSP2"
+      ],
+      "preconditions": [
+        "Safe normalized path, writable namespace"
+      ],
+      "failure_return": "0 on error, 1 on success"
+    },
+    {
+      "syscall_id": 3,
+      "enum_name": "BWS_ZAPISZ_PLIK",
+      "handler_name": "bws_zapisz_plik",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg1: const char* sciezka",
+        "arg2: const void* dane"
+      ],
+      "length_arguments": [
+        "arg3: size_t rozmiar (<= MAKS_ROZMIAR_PLIKU)"
+      ],
+      "required_permissions": [
+        "PRAWO_PLIKI_ZAPISZ"
+      ],
+      "required_trust_levels": "PZB_UZYTKOWNIK (<=4) or scoped write policy",
+      "side_effects": [
+        "Writes file contents in PSF/BSP2"
+      ],
+      "preconditions": [
+        "Safe path, readable user buffer [arg2, arg2+arg3)"
+      ],
+      "failure_return": "0 on error, 1 on success"
+    },
+    {
+      "syscall_id": 4,
+      "enum_name": "BWS_POBIERZ_ZNAK",
+      "handler_name": "scheduler_pobierz_klawisz_lub_zablokuj",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [],
+      "required_permissions": [],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Dequeues key from process keyboard queue"
+      ],
+      "preconditions": [
+        "Active Ring 3 process"
+      ],
+      "failure_return": "uint8_t char or 0"
+    },
+    {
+      "syscall_id": 5,
+      "enum_name": "BWS_CZYTAJ_PLIK",
+      "handler_name": "bws_czytaj_plik",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg1: const char* sciezka",
+        "arg2: void* bufor"
+      ],
+      "length_arguments": [
+        "arg3: size_t pojemnosc (<= MAKS_ROZMIAR_PLIKU)"
+      ],
+      "required_permissions": [
+        "PRAWO_PLIKI_CZYTAJ"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Copies file contents to user buffer"
+      ],
+      "preconditions": [
+        "Safe path, writable user buffer [arg2, arg2+arg3)"
+      ],
+      "failure_return": "Bytes read or 0"
+    },
+    {
+      "syscall_id": 6,
+      "enum_name": "BWS_LISTUJ_KATALOG",
+      "handler_name": "bws_wylistuj_katalog",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "WpisKatalogu[]"
+      ],
+      "pointer_arguments": [
+        "arg1: const char* sciezka",
+        "arg2: WpisKatalogu* bufor"
+      ],
+      "length_arguments": [
+        "arg3: size_t maks_wpisow (<= 256)"
+      ],
+      "required_permissions": [
+        "PRAWO_PLIKI_CZYTAJ"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Reads directory entries to user array"
+      ],
+      "preconditions": [
+        "Safe path, writable user buffer"
+      ],
+      "failure_return": "Entry count or 0"
+    },
+    {
+      "syscall_id": 7,
+      "enum_name": "BWS_USUN_TWOR",
+      "handler_name": "bws_usun_twor",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg1: const char* sciezka"
+      ],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_PLIKI_ZAPISZ"
+      ],
+      "required_trust_levels": "PZB_UZYTKOWNIK (<=4) or scoped write policy",
+      "side_effects": [
+        "Removes file or directory in PSF/BSP2"
+      ],
+      "preconditions": [
+        "Safe path, non-system protected path"
+      ],
+      "failure_return": "0 on error, 1 on success"
+    },
+    {
+      "syscall_id": 8,
+      "enum_name": "BWS_ZMIEN_NAZWE",
+      "handler_name": "bws_zmien_nazwe",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg1: const char* stara_sciezka",
+        "arg2: const char* nowa_sciezka"
+      ],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_PLIKI_ZAPISZ"
+      ],
+      "required_trust_levels": "PZB_UZYTKOWNIK (<=4)",
+      "side_effects": [
+        "Renames node in PSF/BSP2"
+      ],
+      "preconditions": [
+        "Safe source and destination paths"
+      ],
+      "failure_return": "0 on error, 1 on success"
+    },
+    {
+      "syscall_id": 9,
+      "enum_name": "BWS_CZAS_RTC",
+      "handler_name": "bws_rtc",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "CzasRTC (8B)"
+      ],
+      "pointer_arguments": [
+        "arg1: CzasRTC* wyjscie"
+      ],
+      "length_arguments": [
+        "sizeof(CzasRTC)"
+      ],
+      "required_permissions": [],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Reads RTC time into user struct"
+      ],
+      "preconditions": [
+        "Writable user struct arg1"
+      ],
+      "failure_return": "0 on error, 1 on success"
+    },
+    {
+      "syscall_id": 10,
+      "enum_name": "BWS_URUCHOM_PROGRAM",
+      "handler_name": "bws_uruchom",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg1: const char* sciezka",
+        "arg4: const char* arg_opcjonalny"
+      ],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_URUCHOM_PROGRAM"
+      ],
+      "required_trust_levels": "Child PZB cannot exceed caller PZB",
+      "side_effects": [
+        "Spawns new Ring 3 process from BUR image"
+      ],
+      "preconditions": [
+        "Valid BUR image, caller holds PRAWO_URUCHOM_PROGRAM"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 11,
+      "enum_name": "BWS_PING",
+      "handler_name": "bws_siec_ping",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_SIEC"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Sends ICMP echo request"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_SIEC"
+      ],
+      "failure_return": "1 on reply, 0 on timeout/deny"
+    },
+    {
+      "syscall_id": 12,
+      "enum_name": "BWS_DNS_LEGACY",
+      "handler_name": "bws_dns",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "uint8_t ip[4]"
+      ],
+      "pointer_arguments": [
+        "arg1: const char* domena",
+        "arg2: uint8_t* wyjscie_ip"
+      ],
+      "length_arguments": [
+        "4 bytes at arg2"
+      ],
+      "required_permissions": [
+        "PRAWO_SIEC"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Resolves hostname via DNS"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_SIEC, valid domain & 4B out buffer"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 13,
+      "enum_name": "BWS_HTTP_DO_PLIKU_LEGACY",
+      "handler_name": "bws_legacy_http_do_pliku",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg1: const char* host",
+        "arg2: const char* sciezka_url",
+        "arg3: const char* plik_docelowy"
+      ],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_SIEC",
+        "PRAWO_PLIKI_ZAPISZ"
+      ],
+      "required_trust_levels": "PZB_UZYTKOWNIK (<=4)",
+      "side_effects": [
+        "Downloads HTTP response and saves to PSF"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_SIEC and PRAWO_PLIKI_ZAPISZ"
+      ],
+      "failure_return": "Bytes saved or 0"
+    },
+    {
+      "syscall_id": 14,
+      "enum_name": "BWS_GUI_RYSUJ_OKNO",
+      "handler_name": "bws_gui_rysuj_okno",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg3: const char* tytul (max 64B)"
+      ],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Draws window frame in layer"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, valid title string"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 15,
+      "enum_name": "BWS_GUI_TEKST",
+      "handler_name": "bws_gui_wypisz_tekst",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg3: const char* tekst (max 1024B)"
+      ],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Draws text in layer"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, valid string"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 16,
+      "enum_name": "BWS_GUI_WYCZYSC",
+      "handler_name": "bws_gui_wyczyscz_obszar",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Clears rectangle in layer"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 17,
+      "enum_name": "BWS_GUI_ODSWIEZ",
+      "handler_name": "bws_gui_odswiez",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Triggers screen composition"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 18,
+      "enum_name": "BWS_GUI_POBIERZ_MYSZ",
+      "handler_name": "bws_gui_pobierz_mysz",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "int x",
+        "int y",
+        "uint8_t przyciski"
+      ],
+      "pointer_arguments": [
+        "arg1: int* x",
+        "arg2: int* y",
+        "arg3: uint8_t* przyciski"
+      ],
+      "length_arguments": [
+        "4B, 4B, 1B"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Copies mouse state to user pointers"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, 3 writable pointers"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 19,
+      "enum_name": "BWS_GUI_ODSWIEZ_PULPIT",
+      "handler_name": "bws_gui_odswiez_pulpit",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Refreshes desktop background"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 20,
+      "enum_name": "BWS_GUI_TEKST_KOLOR",
+      "handler_name": "bws_gui_wypisz_tekst_kolor",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg4: const char* tekst (max 1024B)"
+      ],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Draws colored text in layer"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, valid string"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 21,
+      "enum_name": "BWS_GUI_PROSTOKAT",
+      "handler_name": "bws_gui_rysuj_prostokat",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Draws filled rectangle in layer"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 22,
+      "enum_name": "BWS_GUI_PRZEJECIE_MYSZY",
+      "handler_name": "bws_gui_ustaw_przejecie_myszy",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Toggles mouse grab"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 23,
+      "enum_name": "BWS_GUI_ROZDZIELCZOSC",
+      "handler_name": "bws_gui_pobierz_rozdzielczosc",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "int szer",
+        "int wys"
+      ],
+      "pointer_arguments": [
+        "arg1: int* szer",
+        "arg2: int* wys"
+      ],
+      "length_arguments": [
+        "4B, 4B"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Writes screen resolution to user pointers"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, 2 writable int pointers"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 24,
+      "enum_name": "BWS_GUI_SZEROKOSC_ZNAKU",
+      "handler_name": "bws_gui_pobierz_szerokosc_znaku",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Queries glyph width"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI"
+      ],
+      "failure_return": "Glyph width or 0"
+    },
+    {
+      "syscall_id": 25,
+      "enum_name": "BWS_RESET",
+      "handler_name": "reset_ps2",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "required_trust_levels": "PZB_ZAUFANE (<=3) via operacja_systemowa_dozwolona",
+      "side_effects": [
+        "Reboots system via PS/2 controller"
+      ],
+      "preconditions": [
+        "operacja_systemowa_dozwolona(proces)"
+      ],
+      "failure_return": "0 on deny"
+    },
+    {
+      "syscall_id": 26,
+      "enum_name": "BWS_SHUTDOWN",
+      "handler_name": "wylacz_qemu",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "required_trust_levels": "PZB_ZAUFANE (<=3) via operacja_systemowa_dozwolona",
+      "side_effects": [
+        "Powers off system/QEMU"
+      ],
+      "preconditions": [
+        "operacja_systemowa_dozwolona(proces)"
+      ],
+      "failure_return": "0 on deny"
+    },
+    {
+      "syscall_id": 27,
+      "enum_name": "BWS_DZWIEK_TON",
+      "handler_name": "hda_test_ton",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [
+        "arg1: hz (20..20000)",
+        "arg2: ms (1..10000)"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Plays test tone via HDA"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, frequency/duration in range"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 28,
+      "enum_name": "BWS_DNS",
+      "handler_name": "bws_dns",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "uint8_t ip[4]"
+      ],
+      "pointer_arguments": [
+        "arg1: const char* domena",
+        "arg2: uint8_t* wyjscie_ip"
+      ],
+      "length_arguments": [
+        "4B"
+      ],
+      "required_permissions": [
+        "PRAWO_SIEC"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Resolves DNS A record"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_SIEC, valid string & 4B out buffer"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 29,
+      "enum_name": "BWS_HTTP",
+      "handler_name": "bws_http_common(false)",
+      "source_file": "syscalls.cpp",
+      "input_structures": [
+        "BwsHttpZadanie"
+      ],
+      "output_structures": [
+        "BwsHttpOdpowiedz"
+      ],
+      "pointer_arguments": [
+        "arg1: const BwsHttpZadanie*",
+        "arg2: BwsHttpOdpowiedz*",
+        "arg3: void* bufor_ciala"
+      ],
+      "length_arguments": [
+        "arg4: size_t pojemnosc_ciala"
+      ],
+      "required_permissions": [
+        "PRAWO_SIEC"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Performs HTTP request"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_SIEC, valid structs & body buffer"
+      ],
+      "failure_return": "Bytes read or 0"
+    },
+    {
+      "syscall_id": 30,
+      "enum_name": "BWS_HTTPS",
+      "handler_name": "bws_http_common(true)",
+      "source_file": "syscalls.cpp",
+      "input_structures": [
+        "BwsHttpZadanie"
+      ],
+      "output_structures": [
+        "BwsHttpOdpowiedz"
+      ],
+      "pointer_arguments": [
+        "arg1: const BwsHttpZadanie*",
+        "arg2: BwsHttpOdpowiedz*",
+        "arg3: void* bufor_ciala"
+      ],
+      "length_arguments": [
+        "arg4: size_t pojemnosc_ciala"
+      ],
+      "required_permissions": [
+        "PRAWO_SIEC"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Performs HTTPS TLS 1.2/1.3 request"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_SIEC, valid structs & body buffer"
+      ],
+      "failure_return": "Bytes read or 0"
+    },
+    {
+      "syscall_id": 31,
+      "enum_name": "BWS_TLS_CERTYFIKAT",
+      "handler_name": "kernel_tls_certyfikat_zaufany",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_SIEC"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Queries whether last TLS certificate was trusted"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_SIEC"
+      ],
+      "failure_return": "1 or 0"
+    },
+    {
+      "syscall_id": 32,
+      "enum_name": "BWS_ZAKONCZ_PROCES",
+      "handler_name": "bws_zakoncz_biezacy_proces",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [
+        "arg1: optional exit reason (e.g. BWS_EXIT_STACK_PROTECTOR_VIOLATION)"
+      ],
+      "required_permissions": [],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Terminates calling Ring 3 process and frees resources; logs [STACKPROTECTORVIOLATION] if arg1 == 0x53535056494F4C01"
+      ],
+      "preconditions": [
+        "Active Ring 3 process"
+      ],
+      "failure_return": "Noreturn (switches context)"
+    },
+    {
+      "syscall_id": 33,
+      "enum_name": "BWS_GUI_UTWORZ_WARSTWE",
+      "handler_name": "utworz_warstwe",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [
+        "arg1: x|y",
+        "arg2: szer|wys (>0)"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Allocates compositor layer for process"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, positive dimensions"
+      ],
+      "failure_return": "layer_id+1 or 0"
+    },
+    {
+      "syscall_id": 34,
+      "enum_name": "BWS_GUI_PRZESUN_WARSTWE",
+      "handler_name": "zaktualizuj_pozycje_warstwy",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Moves process compositor layer"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 35,
+      "enum_name": "BWS_ALOKUJ_STERTE",
+      "handler_name": "bws_alokuj_sterte",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [
+        "arg1: size_t bajty (<= limit sterty Ring 3)"
+      ],
+      "required_permissions": [],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Maps zeroed RW NX heap pages for process"
+      ],
+      "preconditions": [
+        "Size within [STERTA_PROCESU_BAZA, STERTA_PROCESU_LIMIT)"
+      ],
+      "failure_return": "Virtual address or 0"
+    },
+    {
+      "syscall_id": 36,
+      "enum_name": "BWS_GUI_CZY_ZAMKNIETO_POWLOKE",
+      "handler_name": "gui_czy_zamknieto_powloke",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [],
+      "required_permissions": [],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Checks if window close was requested"
+      ],
+      "preconditions": [
+        "None"
+      ],
+      "failure_return": "1 or 0"
+    },
+    {
+      "syscall_id": 37,
+      "enum_name": "BWS_ZDARZENIE_POLL",
+      "handler_name": "scheduler_pobierz_zdarzenie",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "bws_zdarzenie"
+      ],
+      "pointer_arguments": [
+        "arg1: bws_zdarzenie* wyjscie"
+      ],
+      "length_arguments": [
+        "sizeof(bws_zdarzenie)"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Non-blocking event dequeue"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, writable bws_zdarzenie*"
+      ],
+      "failure_return": "1 on event, 0 if empty/error"
+    },
+    {
+      "syscall_id": 38,
+      "enum_name": "BWS_ZDARZENIE_CZEKAJ",
+      "handler_name": "scheduler_czekaj_na_zdarzenie",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "bws_zdarzenie"
+      ],
+      "pointer_arguments": [
+        "arg1: bws_zdarzenie* wyjscie"
+      ],
+      "length_arguments": [
+        "sizeof(bws_zdarzenie), arg2: timeout_ms"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Blocking wait for GUI/input event"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, writable bws_zdarzenie*"
+      ],
+      "failure_return": "1 on event, 2 on timeout, 0 on error"
+    },
+    {
+      "syscall_id": 39,
+      "enum_name": "BWS_GUI_CAPTURE",
+      "handler_name": "bws_gui_ustaw_capture",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Sets mouse capture for caller"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 40,
+      "enum_name": "BWS_GUI_SYSTEM_OVERLAY",
+      "handler_name": "skladacz_obrazu_ustaw_overlay",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_GUI",
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "required_trust_levels": "PZB_ZAUFANE (<=3) via operacja_systemowa_dozwolona",
+      "side_effects": [
+        "Configures system overlay region"
+      ],
+      "preconditions": [
+        "operacja_systemowa_dozwolona && PRAWO_GUI"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 41,
+      "enum_name": "BWS_GUI_MINIMALIZUJ",
+      "handler_name": "bws_gui_minimalizuj_warstwe",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Minimizes caller window layer"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI"
+      ],
+      "failure_return": "1 or 0"
+    },
+    {
+      "syscall_id": 42,
+      "enum_name": "BWS_GUI_OKNA_SNAPSHOT",
+      "handler_name": "bws_snapshot_okien",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "BwsOknoInfo[]"
+      ],
+      "pointer_arguments": [
+        "arg1: BwsOknoInfo* bufor",
+        "arg3: uint32_t* aktywne_pid"
+      ],
+      "length_arguments": [
+        "arg2: maks_okien"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI",
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "required_trust_levels": "PZB_ZAUFANE (<=3) via operacja_systemowa_dozwolona",
+      "side_effects": [
+        "Snapshots window list for window manager"
+      ],
+      "preconditions": [
+        "operacja_systemowa_dozwolona, writable buffer"
+      ],
+      "failure_return": "Count or 0"
+    },
+    {
+      "syscall_id": 43,
+      "enum_name": "BWS_GUI_AKTYWUJ_OKNO",
+      "handler_name": "bws_gui_aktywuj_okno",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [
+        "arg1: target pid"
+      ],
+      "required_permissions": [
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "required_trust_levels": "PZB_ZAUFANE (<=3) via operacja_systemowa_dozwolona",
+      "side_effects": [
+        "Activates/focuses window of target PID"
+      ],
+      "preconditions": [
+        "operacja_systemowa_dozwolona"
+      ],
+      "failure_return": "1 or 0"
+    },
+    {
+      "syscall_id": 44,
+      "enum_name": "BWS_ROZMIAR_PLIKU",
+      "handler_name": "bws_rozmiar_pliku",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg1: const char* sciezka"
+      ],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_PLIKI_CZYTAJ"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Queries file size in PSF/BSP2"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_PLIKI_CZYTAJ, valid path"
+      ],
+      "failure_return": "File size or UINT64_MAX"
+    },
+    {
+      "syscall_id": 45,
+      "enum_name": "BWS_ARGUMENT_STARTOWY",
+      "handler_name": "bws_pobierz_argument",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "char[]"
+      ],
+      "pointer_arguments": [
+        "arg1: char* bufor"
+      ],
+      "length_arguments": [
+        "arg2: size_t pojemnosc (1..256)"
+      ],
+      "required_permissions": [],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Copies startup argument string to user buffer"
+      ],
+      "preconditions": [
+        "Writable user buffer [arg1, arg1+arg2)"
+      ],
+      "failure_return": "Length or 0"
+    },
+    {
+      "syscall_id": 46,
+      "enum_name": "BWS_UTWORZ_KATALOG",
+      "handler_name": "bws_utworz_katalog",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg1: const char* sciezka"
+      ],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_PLIKI_ZAPISZ"
+      ],
+      "required_trust_levels": "PZB_UZYTKOWNIK (<=4)",
+      "side_effects": [
+        "Creates directory in PSF/BSP2"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_PLIKI_ZAPISZ, safe path"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 47,
+      "enum_name": "BWS_METADANE_PLIKU",
+      "handler_name": "bws_pobierz_metadane",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "MetadanePliku"
+      ],
+      "pointer_arguments": [
+        "arg1: const char* sciezka",
+        "arg2: MetadanePliku* wyjscie"
+      ],
+      "length_arguments": [
+        "sizeof(MetadanePliku)"
+      ],
+      "required_permissions": [
+        "PRAWO_PLIKI_CZYTAJ"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Reads inode metadata from PSF/BSP2"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_PLIKI_CZYTAJ, safe path, writable struct"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 48,
+      "enum_name": "BWS_PRZENIES_TWOR",
+      "handler_name": "bws_przenies",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg1: const char* zrodlo",
+        "arg2: const char* cel"
+      ],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_PLIKI_ZAPISZ"
+      ],
+      "required_trust_levels": "PZB_UZYTKOWNIK (<=4)",
+      "side_effects": [
+        "Moves/renames file or directory in PSF/BSP2"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_PLIKI_ZAPISZ, safe paths"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 49,
+      "enum_name": "BWS_GUI_CELE_DROP",
+      "handler_name": "bws_rejestruj_cele_drop",
+      "source_file": "syscalls.cpp",
+      "input_structures": [
+        "BwsCelDrop[]"
+      ],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg1: const BwsCelDrop* cele"
+      ],
+      "length_arguments": [
+        "arg2: liczba_celow (<= 32)"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Registers drag-and-drop targets for window"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, readable array"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 50,
+      "enum_name": "BWS_GUI_AKTUALIZUJ_DRAG",
+      "handler_name": "bws_aktualizuj_drag",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg3: const char* etykieta"
+      ],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Updates drag state in compositor"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 51,
+      "enum_name": "BWS_GUI_WYSOKOSC_FONTU",
+      "handler_name": "bws_czcionka_kopiuj",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "uint8_t font_data[]"
+      ],
+      "pointer_arguments": [
+        "arg1: void* bufor_opcjonalny"
+      ],
+      "length_arguments": [
+        "arg2: rozmiar, arg3: tryb"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Returns font metrics or copies font data to user"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI"
+      ],
+      "failure_return": "Font height or copy status"
+    },
+    {
+      "syscall_id": 52,
+      "enum_name": "BWS_SCHOWEK_PLIK_USTAW",
+      "handler_name": "bws_ustaw_schowek_plikow",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg1: const char* sciezka"
+      ],
+      "length_arguments": [
+        "arg2: wytnij_flaga"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI",
+        "PRAWO_PLIKI_CZYTAJ"
+      ],
+      "required_trust_levels": "PZB_UZYTKOWNICA (<=4)",
+      "side_effects": [
+        "Sets file clipboard path"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI and file permissions"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 53,
+      "enum_name": "BWS_SCHOWEK_PLIK_POBIERZ",
+      "handler_name": "bws_pobierz_schowek_plikow",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "char sciezka[]",
+        "uint8_t* wytnij"
+      ],
+      "pointer_arguments": [
+        "arg1: char* bufor",
+        "arg3: uint8_t* wytnij"
+      ],
+      "length_arguments": [
+        "arg2: pojemnosc"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI",
+        "PRAWO_PLIKI_CZYTAJ"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Reads file clipboard path"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI & PRAWO_PLIKI_CZYTAJ, writable buffer"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 54,
+      "enum_name": "BWS_SCHOWEK_PLIK_WYCZYSC",
+      "handler_name": "bws_wyczysc_schowek_plikow",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Clears file clipboard"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 55,
+      "enum_name": "BWS_KOPIUJ_TWOR",
+      "handler_name": "bws_kopiuj_twor",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg1: const char* zrodlo",
+        "arg2: const char* cel"
+      ],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_PLIKI_CZYTAJ",
+        "PRAWO_PLIKI_ZAPISZ"
+      ],
+      "required_trust_levels": "PZB_UZYTKOWNIK (<=4)",
+      "side_effects": [
+        "Copies file or directory tree in PSF/BSP2"
+      ],
+      "preconditions": [
+        "Caller holds read+write file permissions, safe paths"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 56,
+      "enum_name": "BWS_GUI_POPUP_APLIKACJI",
+      "handler_name": "skladacz_obrazu_ustaw_popup_aplikacji",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [
+        "arg1: aktywny, arg2: x|y, arg3: w|h"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5) + active window owner",
+      "side_effects": [
+        "Configures popup layer for active app"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI and is active window when enabling"
+      ],
+      "failure_return": "1 or 0"
+    },
+    {
+      "syscall_id": 57,
+      "enum_name": "BWS_GUI_BLIT",
+      "handler_name": "bws_gui_blit / bws_gui_zastap_regiony",
+      "source_file": "syscalls.cpp",
+      "input_structures": [
+        "BwsGuiBatch / uint32_t pixels[]"
+      ],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg1: BwsGuiBatch* (when arg4==4) or x|y",
+        "arg3: const uint32_t* piksele"
+      ],
+      "length_arguments": [
+        "arg2: sizeof(BwsGuiBatch) or szer|wys (<=2048x2048)"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Blits ARGB pixel buffer(s) into process layer"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, overflow-checked pixel range mapped in VMM"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 58,
+      "enum_name": "BWS_GUI_TYTUL_OKNA",
+      "handler_name": "bws_gui_ustaw_tytul_okna",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg1: const char* tytul"
+      ],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Updates window title"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, valid user string"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 59,
+      "enum_name": "BWS_CZYTAJ_FRAGMENT_PLIKU",
+      "handler_name": "bws_czytaj_fragment_pliku",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg1: const char* sciezka",
+        "arg2: void* bufor"
+      ],
+      "length_arguments": [
+        "arg3: offset, arg4: rozmiar"
+      ],
+      "required_permissions": [
+        "PRAWO_PLIKI_CZYTAJ"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Reads file slice at offset"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_PLIKI_CZYTAJ, safe path, writable buffer"
+      ],
+      "failure_return": "Bytes read or 0"
+    },
+    {
+      "syscall_id": 60,
+      "enum_name": "BWS_CZAS_MONOTONICZNY_NS",
+      "handler_name": "czas_monotoniczny_ns",
+      "source_file": "syscalls.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [],
+      "required_permissions": [],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Reads monotonic HPET clock in nanoseconds"
+      ],
+      "preconditions": [
+        "None"
+      ],
+      "failure_return": "Nanoseconds or 0"
+    },
+    {
+      "syscall_id": 61,
+      "enum_name": "BWS_GUI_GEOMETRIA",
+      "handler_name": "zmien_geometrie_warstwy",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [
+        "a1: x|y, a2: w|h, a3: max_state"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Resizes/moves window layer"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 62,
+      "enum_name": "BWS_GUI_MONITOR_INFO",
+      "handler_name": "monitor_info",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "GuiMonitorInfo"
+      ],
+      "pointer_arguments": [
+        "a2: GuiMonitorInfo* wyjscie"
+      ],
+      "length_arguments": [
+        "a3: sizeof(GuiMonitorInfo)"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Copies monitor geometry/scale info to user"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, a1==0, a3>=sizeof(GuiMonitorInfo)"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 63,
+      "enum_name": "BWS_GUI_USTAW_WORK_AREA",
+      "handler_name": "ustaw_work_area",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [
+        "a1: x|y, a2: w|h, a3: skala"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI",
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "required_trust_levels": "PZB_USLUGI (<=2)",
+      "side_effects": [
+        "Updates desktop work area and UI scale"
+      ],
+      "preconditions": [
+        "proces.poziom_zaufania <= PZB_USLUGI && PRAWO_GUI && PRAWO_SYSTEM_CONFIG"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 64,
+      "enum_name": "BWS_SHM_CREATE",
+      "handler_name": "shm_create",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [
+        "a1: size_t rozmiar (1..16MiB), a2: flags (0)"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_UZYTKOWNIK (<=4)",
+      "side_effects": [
+        "Allocates shared memory object"
+      ],
+      "preconditions": [
+        "poziom <= PZB_UZYTKOWNIK && (PRAWO_GUI || poziom <= PZB_ZAUFANE)"
+      ],
+      "failure_return": "handle or 0"
+    },
+    {
+      "syscall_id": 65,
+      "enum_name": "BWS_SHM_MAP",
+      "handler_name": "shm_map",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [
+        "a1: handle, a2: flags"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_UZYTKOWNIK (<=4)",
+      "side_effects": [
+        "Maps SHM pages into caller address space"
+      ],
+      "preconditions": [
+        "Valid SHM handle, authorized caller"
+      ],
+      "failure_return": "User virtual address or 0"
+    },
+    {
+      "syscall_id": 66,
+      "enum_name": "BWS_SHM_UNMAP",
+      "handler_name": "shm_unmap",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [
+        "a1: handle"
+      ],
+      "required_permissions": [],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Unmaps SHM pages from caller address space"
+      ],
+      "preconditions": [
+        "Mapped SHM handle owned/mapped by caller"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 67,
+      "enum_name": "BWS_SHM_CLOSE",
+      "handler_name": "shm_close",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [
+        "a1: handle"
+      ],
+      "required_permissions": [],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Closes SHM handle and frees frames when refcount==0"
+      ],
+      "preconditions": [
+        "Owner or mapped participant"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 68,
+      "enum_name": "BWS_IPC_CREATE",
+      "handler_name": "ipc_create",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [],
+      "required_permissions": [],
+      "required_trust_levels": "PZB_UZYTKOWNIK (<=4)",
+      "side_effects": [
+        "Creates message queue endpoint"
+      ],
+      "preconditions": [
+        "poziom_zaufania <= PZB_UZYTKOWNIK"
+      ],
+      "failure_return": "queue handle or 0"
+    },
+    {
+      "syscall_id": 69,
+      "enum_name": "BWS_IPC_SEND",
+      "handler_name": "ipc_send / ipc_instalator / ipc_ekran / ipc_tapety",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [
+        "IpcMessage / InstalatorIpcMsg / EkranIpcKomunikat / TapetyIpcMsg"
+      ],
+      "output_structures": [],
+      "pointer_arguments": [
+        "a2: const void* msg"
+      ],
+      "length_arguments": [
+        "sizeof(struct) by channel a1"
+      ],
+      "required_permissions": [
+        "Channel-dependent: PRAWO_GUI / PRAWO_SYSTEM_CONFIG"
+      ],
+      "required_trust_levels": "Channel-dependent (SYSTEM_IPC: PZB_USLUGI + WM path; INSTALATOR_IPC: authorized installer PID; EKRAN_IPC: PZB_ZAUFANE + PRAWO_GUI|PRAWO_SYSTEM_CONFIG)",
+      "side_effects": [
+        "Sends structured IPC message or invokes system IPC service"
+      ],
+      "preconditions": [
+        "Valid channel handle and readable struct"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 70,
+      "enum_name": "BWS_IPC_RECEIVE",
+      "handler_name": "ipc_receive",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "IpcMessage"
+      ],
+      "pointer_arguments": [
+        "a2: IpcMessage* wyjscie"
+      ],
+      "length_arguments": [
+        "sizeof(IpcMessage)"
+      ],
+      "required_permissions": [],
+      "required_trust_levels": "Owner PID of IPC queue",
+      "side_effects": [
+        "Dequeues IPC message into user struct"
+      ],
+      "preconditions": [
+        "Caller is owner_pid of queue a1, writable IpcMessage*"
+      ],
+      "failure_return": "1 on message, 0 if empty/unauthorized"
+    },
+    {
+      "syscall_id": 71,
+      "enum_name": "BWS_IPC_CLOSE",
+      "handler_name": "ipc_close",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [
+        "a1: queue handle"
+      ],
+      "required_permissions": [],
+      "required_trust_levels": "Owner PID of IPC queue",
+      "side_effects": [
+        "Closes IPC queue"
+      ],
+      "preconditions": [
+        "Caller is owner_pid of queue a1"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 72,
+      "enum_name": "BWS_FILE_WATCH",
+      "handler_name": "watch_dispatch",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "FileWatchEvent"
+      ],
+      "pointer_arguments": [
+        "a2: const char* sciezka or FileWatchEvent*"
+      ],
+      "length_arguments": [
+        "a1: op, a3: handle/flags"
+      ],
+      "required_permissions": [
+        "PRAWO_PLIKI_CZYTAJ"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Creates/polls/closes filesystem watcher"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_PLIKI_CZYTAJ, valid path/buffer"
+      ],
+      "failure_return": "handle/status or 0"
+    },
+    {
+      "syscall_id": 73,
+      "enum_name": "BWS_CLIPBOARD_ENUM",
+      "handler_name": "clipboard_enum",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "uint32_t formats[]"
+      ],
+      "pointer_arguments": [
+        "a1: uint32_t* bufor"
+      ],
+      "length_arguments": [
+        "a2: max_count"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Enumerates available clipboard formats"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, writable array"
+      ],
+      "failure_return": "Format count or 0"
+    },
+    {
+      "syscall_id": 74,
+      "enum_name": "BWS_CLIPBOARD_SIZE",
+      "handler_name": "clipboard_size",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "uint64_t* rozmiar"
+      ],
+      "pointer_arguments": [
+        "a2: uint64_t* wyjscie"
+      ],
+      "length_arguments": [
+        "sizeof(uint64_t)"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Queries payload size for clipboard format a1"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, writable uint64_t*"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 75,
+      "enum_name": "BWS_CLIPBOARD_READ",
+      "handler_name": "clipboard_read",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "uint8_t dane[]",
+        "uint64_t* out_len"
+      ],
+      "pointer_arguments": [
+        "a2: void* bufor",
+        "a4: uint64_t* out_len"
+      ],
+      "length_arguments": [
+        "a3: pojemnosc (<=64KiB)"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Copies clipboard payload to user buffer"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, writable buffer and length ptr"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 76,
+      "enum_name": "BWS_CLIPBOARD_SET",
+      "handler_name": "clipboard_set",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [
+        "a2: const void* dane"
+      ],
+      "length_arguments": [
+        "a3: rozmiar (<=64KiB)"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Sets clipboard payload for format a1"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, readable user buffer"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 77,
+      "enum_name": "BWS_GUI_CURSOR_SHAPE",
+      "handler_name": "bws_gui_ustaw_kursor_ksztalt",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [
+        "a1: cursor shape enum"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Sets standard cursor shape for caller window"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 78,
+      "enum_name": "BWS_GUI_CURSOR_CUSTOM",
+      "handler_name": "bws_gui_ustaw_kursor_custom",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [
+        "GuiCustomCursorInfo"
+      ],
+      "output_structures": [],
+      "pointer_arguments": [
+        "a1: const GuiCustomCursorInfo* (contains piksele ptr)"
+      ],
+      "length_arguments": [
+        "szer*wys*4 <= 16384B (64x64 max)"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Copies custom cursor bitmap into compositor"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, valid dimensions/hotspot/format, readable pixel buffer"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 79,
+      "enum_name": "BWS_SOCKET_CREATE",
+      "handler_name": "socket_create",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [
+        "a1: typ (TCP/UDP)"
+      ],
+      "required_permissions": [
+        "PRAWO_SIEC"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Allocates network socket descriptor"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_SIEC"
+      ],
+      "failure_return": "socket handle or 0"
+    },
+    {
+      "syscall_id": 80,
+      "enum_name": "BWS_SOCKET_CONNECT",
+      "handler_name": "socket_connect",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [
+        "SocketAddrV4"
+      ],
+      "output_structures": [],
+      "pointer_arguments": [
+        "a2: const SocketAddrV4*"
+      ],
+      "length_arguments": [
+        "a3: sizeof(SocketAddrV4)"
+      ],
+      "required_permissions": [
+        "PRAWO_SIEC"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5) + socket owner",
+      "side_effects": [
+        "Connects socket to IPv4 endpoint"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_SIEC, owns socket a1, valid SocketAddrV4"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 81,
+      "enum_name": "BWS_SOCKET_SEND",
+      "handler_name": "socket_send",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [
+        "a2: const void* dane"
+      ],
+      "length_arguments": [
+        "a3: len (1..32768)"
+      ],
+      "required_permissions": [
+        "PRAWO_SIEC"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5) + socket owner",
+      "side_effects": [
+        "Sends data over connected socket"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_SIEC, owns socket a1, readable buffer"
+      ],
+      "failure_return": "Bytes sent or 0"
+    },
+    {
+      "syscall_id": 82,
+      "enum_name": "BWS_SOCKET_RECV",
+      "handler_name": "socket_recv",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "uint8_t dane[]",
+        "uint64_t* out_len"
+      ],
+      "pointer_arguments": [
+        "a2: void* bufor",
+        "a4: uint64_t* out_len"
+      ],
+      "length_arguments": [
+        "a3: capacity (1..32768)"
+      ],
+      "required_permissions": [
+        "PRAWO_SIEC"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5) + socket owner",
+      "side_effects": [
+        "Receives data from connected socket"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_SIEC, owns socket a1, writable buffer"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 83,
+      "enum_name": "BWS_SOCKET_CLOSE",
+      "handler_name": "socket_close",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [
+        "a1: socket handle"
+      ],
+      "required_permissions": [
+        "PRAWO_SIEC"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5) + socket owner",
+      "side_effects": [
+        "Closes network socket"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_SIEC and owns socket a1"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 84,
+      "enum_name": "BWS_OTA_STATUS",
+      "handler_name": "aktualizacja_bws_status",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "BwsOtaStatus"
+      ],
+      "pointer_arguments": [
+        "a1: BwsOtaStatus* wyjscie"
+      ],
+      "length_arguments": [
+        "sizeof(BwsOtaStatus)"
+      ],
+      "required_permissions": [
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "required_trust_levels": "PZB_ZAUFANE (<=3)",
+      "side_effects": [
+        "Copies OTA update status to user struct"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_SYSTEM_CONFIG and PZB <= PZB_ZAUFANE"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 85,
+      "enum_name": "BWS_OTA_POLECENIE",
+      "handler_name": "aktualizacja_bws_polecenie",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [
+        "BwsOtaPolecenieArg (optional)"
+      ],
+      "output_structures": [],
+      "pointer_arguments": [
+        "a2: const void* arg_opcjonalny"
+      ],
+      "length_arguments": [
+        "a1: kod polecenia"
+      ],
+      "required_permissions": [
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "required_trust_levels": "PZB_ZAUFANE (<=3)",
+      "side_effects": [
+        "Executes OTA update state machine command"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_SYSTEM_CONFIG and PZB <= PZB_ZAUFANE"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 86,
+      "enum_name": "BWS_MOTYW_POBIERZ",
+      "handler_name": "motyw_bws_pobierz",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "BwsMotywStan"
+      ],
+      "pointer_arguments": [
+        "a1: BwsMotywStan* wyjscie"
+      ],
+      "length_arguments": [
+        "sizeof(BwsMotywStan)"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Reads current UI theme palette/state"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, writable struct"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 87,
+      "enum_name": "BWS_MOTYW_POLECENIE",
+      "handler_name": "motyw_bws_polecenie",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [
+        "BwsMotywPolecenie (optional)"
+      ],
+      "output_structures": [],
+      "pointer_arguments": [
+        "a2: const void* dane"
+      ],
+      "length_arguments": [
+        "a1: op, a3: rozmiar"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI",
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "required_trust_levels": "PZB_ZAUFANE (<=3)",
+      "side_effects": [
+        "Applies/saves system UI theme"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI|PRAWO_SYSTEM_CONFIG and PZB <= PZB_ZAUFANE"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 88,
+      "enum_name": "BWS_PULPIT_GOTOWY",
+      "handler_name": "bws_potwierdz_pulpit_gotowy",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [],
+      "pointer_arguments": [],
+      "length_arguments": [],
+      "required_permissions": [
+        "PRAWO_GUI",
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "required_trust_levels": "PZB_USLUGI (<=2) + path == /menedzer_okien.bur",
+      "side_effects": [
+        "Marks desktop session ready for boot health confirmation"
+      ],
+      "preconditions": [
+        "poziom <= PZB_USLUGI, PRAWO_GUI|PRAWO_SYSTEM_CONFIG, sciezka == /menedzer_okien.bur"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 89,
+      "enum_name": "BWS_HDA_DIAG",
+      "handler_name": "bws_hda_diag",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "BwsHdaDiagStan / BwsHdaDiagSnapshot / BwsHdaDiagMetryki / BwsHdaDiagStrumien"
+      ],
+      "pointer_arguments": [
+        "a2: void* wyjscie"
+      ],
+      "length_arguments": [
+        "a3: rozmiar_wyjscia"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5) for read-only; PRAWO_STEROWNIK|PRAWO_DEBUG for scan control",
+      "side_effects": [
+        "Reads HDA audio diagnostic state or steps controlled scan"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, writable output struct of exact/min size"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 90,
+      "enum_name": "BWS_HDA_TEST",
+      "handler_name": "bws_hda_test",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [
+        "BwsHdaTestKonfig"
+      ],
+      "output_structures": [],
+      "pointer_arguments": [
+        "a2: const BwsHdaTestKonfig*"
+      ],
+      "length_arguments": [
+        "a3: sizeof(BwsHdaTestKonfig)"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_UZYTKOWNIK (<=4)",
+      "side_effects": [
+        "Runs controlled HDA playback test"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, valid BwsHdaTestKonfig"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 91,
+      "enum_name": "BWS_DIAGNOSTYKA_SYSTEMU",
+      "handler_name": "diag_read_request",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [],
+      "output_structures": [
+        "BwsDiagSnapshot"
+      ],
+      "pointer_arguments": [
+        "a2: void* bufor",
+        "a4: uint64_t* out_len"
+      ],
+      "length_arguments": [
+        "a3: pojemnosc"
+      ],
+      "required_permissions": [
+        "PRAWO_DEBUG"
+      ],
+      "required_trust_levels": "PZB_ZAUFANE (<=3)",
+      "side_effects": [
+        "Reads kernel diagnostic ring/metrics"
+      ],
+      "preconditions": [
+        "Authorized caller, writable buffer"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 92,
+      "enum_name": "BWS_BSF_CONFIG",
+      "handler_name": "bsf_config_request",
+      "source_file": "bws_nowoczesne.cpp",
+      "input_structures": [
+        "BsfConfigRequest"
+      ],
+      "output_structures": [
+        "BsfConfigResponse"
+      ],
+      "pointer_arguments": [
+        "a2: void* bufor"
+      ],
+      "length_arguments": [
+        "a1: op, a3: rozmiar"
+      ],
+      "required_permissions": [
+        "PRAWO_SYSTEM_CONFIG"
+      ],
+      "required_trust_levels": "PZB_ZAUFANE (<=3)",
+      "side_effects": [
+        "Reads/updates BSF package configuration"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_SYSTEM_CONFIG, PZB <= PZB_ZAUFANE"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    },
+    {
+      "syscall_id": 93,
+      "enum_name": "BWS_GUI_TYTUL_ALFA",
+      "handler_name": "skladacz_obrazu_ustaw_maske_tytulu",
+      "source_file": "syscalls.cpp",
+      "input_structures": [
+        "uint8_t alpha_mask[]"
+      ],
+      "output_structures": [],
+      "pointer_arguments": [
+        "arg2: const uint8_t* maska"
+      ],
+      "length_arguments": [
+        "arg1: w|h (w<=512, h<=128, bytes=w*h<=65536)"
+      ],
+      "required_permissions": [
+        "PRAWO_GUI"
+      ],
+      "required_trust_levels": "PZB_PIASKOWNICA (<=5)",
+      "side_effects": [
+        "Sets per-pixel alpha mask for window title bar"
+      ],
+      "preconditions": [
+        "Caller holds PRAWO_GUI, w in [0,512], h in [0,128], readable mask buffer mapped in VMM"
+      ],
+      "failure_return": "1 on success, 0 on error"
+    }
+  ]
+}

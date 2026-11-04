@@ -522,6 +522,19 @@ long_mode_start:
     andq $-16, %rsp
 
     /*
+     * Wczesna inicjalizacja straznika stosu kompilatora (__stack_chk_guard)
+     * zanim powstanie pierwsza ramka C/C++ w kernel_main().
+     * Zachowujemy %rbp (magic Multiboot2) oraz %rsi (info Multiboot2),
+     * utrzymujac 16-bajtowe wyrownanie %rsp przed CALL.
+     */
+    pushq %rbp
+    pushq %rsi
+    .extern stack_protector_early_init
+    call stack_protector_early_init
+    popq %rsi
+    popq %rbp
+
+    /*
      * Jawne zero-extension argumentow z trybu 32-bit:
      *
      * RDI = Multiboot2 magic

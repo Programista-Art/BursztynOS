@@ -119,7 +119,8 @@ CPU_FLAGS := \
 	-mno-sse2
 
 HARDEN_FLAGS := \
-	-fno-stack-protector \
+	-fstack-protector-strong \
+	-mstack-protector-guard=global \
 	-fcf-protection=none \
 	-fno-pic \
 	-fno-pie
@@ -281,7 +282,9 @@ KERNEL_LDFLAGS := \
 RING3_LDFLAGS := \
 	-nostdlib \
 	-no-pie \
-	--gc-sections
+	--gc-sections \
+	--undefined=__stack_chk_guard \
+	--undefined=__stack_chk_fail
 
 # ============================================================================
 # 5. LINKERY APLIKACJI .bur
@@ -370,6 +373,7 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	ahci.o \
 	ring3.o \
 	stos_jadra.o \
+	stack_protector.o \
 	notatnik_blob.o \
 	eksplorator_blob.o \
 	kalkulator_blob.o \
@@ -533,15 +537,24 @@ usb_hid.o: sterowniki/usb/usb_hid.cpp sterowniki/usb/usb_hid.h input_device.h
 # 11. BIBLIOTEKA GUI RING 3
 # ============================================================================
 
-bursztyn_gui.o: bursztyn_gui_base.o bsf_core.o bsf_runtime.o bsf_bitmap.o
-	$(LD) -r bursztyn_gui_base.o bsf_core.o bsf_runtime.o bsf_bitmap.o -o $@
+stack_protector.o: stack_protector.cpp stack_protector.h stos_jadra.h scheduler.h
+	$(CXX) $(KERNEL_CXXFLAGS) -fno-stack-protector -c $< -o $@
+
+ring3_ssp.o: ring3_ssp.cpp stack_protector.h bws_api.h
+	$(CXX) $(RING3_FLAGS) -fno-stack-protector -Os -ffunction-sections -fdata-sections -c $< -o $@
+
+bursztyn_gui.o: bursztyn_gui_base.o bsf_core.o bsf_runtime.o bsf_bitmap.o ring3_ssp.o
+	$(LD) -r bursztyn_gui_base.o bsf_core.o bsf_runtime.o bsf_bitmap.o ring3_ssp.o -o $@
 
 bursztyn_gui_base.o: bursztyn_gui.cpp bursztyn_gui.h bsf/runtime.h
 	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 # Background resource workers/FPU probes have no font renderer.
-bursztyn_gui_minimal.o: bursztyn_gui.cpp bursztyn_gui.h
-	$(CXX) $(RING3_FLAGS) -UBSF_NATIVE -Os -c $< -o $@
+bursztyn_gui_minimal_base.o: bursztyn_gui.cpp bursztyn_gui.h
+	$(CXX) $(RING3_FLAGS) -UBSF_NATIVE -Os -ffunction-sections -fdata-sections -c $< -o $@
+
+bursztyn_gui_minimal.o: bursztyn_gui_minimal_base.o ring3_ssp.o
+	$(LD) -r bursztyn_gui_minimal_base.o ring3_ssp.o -o $@
 
 bsf_core.o: bsf/bsf.cpp bsf/bsf.h bsf/vendor/stb_truetype.h
 	$(CXX) $(RING3_FLAGS) -msse2 -mfpmath=sse -mno-avx -Os -fstack-usage -c $< -o $@
@@ -624,7 +637,7 @@ notatnik_blob.o: notatnik_tmp.o bursztyn_gui.o $(NOTATNIK_LINKER)
 # ============================================================================
 
 eksplorator_tmp.o: programy/eksplorator/eksplorator-plikow.cpp desktop_entries.h bursztyn_gui.h plik_popup_ui.h plik_operacje_ui.h $(wildcard bursztyn_ui/*.h)
-	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
+	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -fstack-usage -c $< -o $@
 
 eksplorator_blob.o: eksplorator_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
 	$(LD) -T $(EKSPLORATOR_LINKER) $(RING3_LDFLAGS) \
@@ -2233,3 +2246,33 @@ test-power-png-host:
 
 image_png_ring3.o: obrazy/dekoder_obrazu.cpp obrazy/dekoder_obrazu.h obrazy/vendor/stb_image.h
 	$(CXX) $(RING3_FLAGS) -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Os -DBURSZTYN_PNG_ONLY=1 -fstack-usage -c $< -o $@
+
+.PHONY: test-stack-protector-host test-stack-protector-qemu test-stack-protector test-bws-abuse-qemu test-fuzz-smoke fuzz-extended test-bur-v2-aslr-host test-security-hardening
+test-stack-protector-host:
+	@mkdir -p .ssp-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -fsanitize=address,undefined narzedzia/test_stack_protector_host.cpp -o .ssp-test/test_ssp_asan
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .ssp-test/test_ssp_asan
+	g++ -std=c++17 -O2 -g -Wall -Wextra -Wpedantic -I. -fstack-protector-strong -DBURSZTYN_SSP_DEATH_TEST=1 narzedzia/test_stack_protector_host.cpp -o .ssp-test/test_ssp_death
+	.ssp-test/test_ssp_death
+
+test-stack-protector-qemu: iso
+	$(PYTHON) narzedzia/test_stack_protector_qemu.py
+
+test-stack-protector: test-stack-protector-host test-stack-protector-qemu
+
+test-bws-abuse-qemu: iso
+	$(PYTHON) narzedzia/test_bws_abuse_qemu.py
+
+test-fuzz-smoke:
+	$(PYTHON) narzedzia/run_fuzz_suite.py --mode=smoke
+
+fuzz-extended:
+	$(PYTHON) narzedzia/run_fuzz_suite.py --mode=extended
+
+test-bur-v2-aslr-host:
+	@mkdir -p .aslr-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_LOADER_HOST_TEST -fsanitize=address,undefined loader.cpp narzedzia/test_bur_v2_aslr_host.cpp -o .aslr-test/test_bur_v2_aslr_host
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .aslr-test/test_bur_v2_aslr_host
+
+test-security-hardening: test-stack-protector-host test-bur-v2-aslr-host test-fuzz-smoke
+

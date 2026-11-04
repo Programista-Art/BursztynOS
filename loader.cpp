@@ -26,6 +26,7 @@
 #include "scheduler.h"
 #include "fpu.h"
 #include "stos_jadra.h"
+#include "stack_protector.h"
 #ifndef BURSZTYN_DIAG_BOOT
 #define BURSZTYN_DIAG_BOOT 0
 #endif
@@ -1051,6 +1052,16 @@ static bool uruchom_program_z_pliku_impl(
             proba.obraz.blad = "mapuj_segment_z_pliku-dane-failed";
             mapowanie_ok = false;
         }
+#ifndef BURSZTYN_LOADER_RUNTIME_HOST_TEST
+        if (mapowanie_ok && kopiowane_dane >= sizeof(uint64_t)) {
+            (void)stack_protector_zainicjuj_segment_danych_procesu(
+                static_cast<uint64_t>(pid),
+                static_cast<uintptr_t>(naglowek.punkt_wejscia),
+                reinterpret_cast<uint8_t*>(naglowek.dane_wirtualny),
+                kopiowane_dane
+            );
+        }
+#endif
     }
 
     /*
@@ -1299,7 +1310,7 @@ extern "C" bool pakiet_parsuj_manifest_tekst(
     size_t dlugosc,
     PakietManifest* out_manifest
 ) {
-    if (!tekst || !out_manifest || dlugosc == 0 || dlugosc > 4096) return false;
+    if (!out_manifest) return false;
 
     out_manifest->nazwa[0] = '\0';
     out_manifest->autor[0] = '\0';
@@ -1307,6 +1318,8 @@ extern "C" bool pakiet_parsuj_manifest_tekst(
     out_manifest->plik_startowy[0] = '\0';
     out_manifest->poziom_zaufania = PZB_UZYTKOWNIK;
     out_manifest->uprawnienia = PRAWA_BRAK;
+
+    if (!tekst || dlugosc == 0 || dlugosc > 4096) return false;
 
     size_t pos = 0;
     while (pos < dlugosc) {
@@ -1369,13 +1382,17 @@ extern "C" bool pakiet_parsuj_manifest_tekst(
                 str[str_len] = '\0';
 
                 if (manifest_tekst_rowny(klucz, "nazwa")) {
-                    for (size_t i = 0; i < sizeof(out_manifest->nazwa); ++i) out_manifest->nazwa[i] = str[i];
+                    for (size_t i = 0; i + 1 < sizeof(out_manifest->nazwa); ++i) out_manifest->nazwa[i] = str[i];
+                    out_manifest->nazwa[sizeof(out_manifest->nazwa) - 1] = '\0';
                 } else if (manifest_tekst_rowny(klucz, "autor")) {
-                    for (size_t i = 0; i < sizeof(out_manifest->autor); ++i) out_manifest->autor[i] = str[i];
+                    for (size_t i = 0; i + 1 < sizeof(out_manifest->autor); ++i) out_manifest->autor[i] = str[i];
+                    out_manifest->autor[sizeof(out_manifest->autor) - 1] = '\0';
                 } else if (manifest_tekst_rowny(klucz, "wersja")) {
-                    for (size_t i = 0; i < sizeof(out_manifest->wersja); ++i) out_manifest->wersja[i] = str[i];
+                    for (size_t i = 0; i + 1 < sizeof(out_manifest->wersja); ++i) out_manifest->wersja[i] = str[i];
+                    out_manifest->wersja[sizeof(out_manifest->wersja) - 1] = '\0';
                 } else if (manifest_tekst_rowny(klucz, "plik_startowy")) {
-                    for (size_t i = 0; i < sizeof(out_manifest->plik_startowy); ++i) out_manifest->plik_startowy[i] = str[i];
+                    for (size_t i = 0; i + 1 < sizeof(out_manifest->plik_startowy); ++i) out_manifest->plik_startowy[i] = str[i];
+                    out_manifest->plik_startowy[sizeof(out_manifest->plik_startowy) - 1] = '\0';
                 }
             }
         } else if (manifest_tekst_rowny(klucz, "uprawnienia")) {
