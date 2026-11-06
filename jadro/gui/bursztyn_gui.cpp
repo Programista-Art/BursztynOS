@@ -1743,6 +1743,7 @@ void gui_rysuj_standardowa_belke(int x, int y, int szer,
     }
 
     gui_wypisz_tekst_kolor(x + ui_skaluj(8,p), y + ui_skaluj(7,p), kolor_tekst, tytul);
+    // Legacy path only; modern chrome is drawn by the compositor (wm_dekoracje).
     RysujPrzycisk(x + szer - ui_skaluj(74,p), y + ui_skaluj(4,p), ui_skaluj(20,p), ui_skaluj(20,p),
                   kolor_akcent, kolor_przycisk_tekst, "-");
     RysujPrzycisk(x + szer - ui_skaluj(50,p), y + ui_skaluj(4,p), ui_skaluj(20,p), ui_skaluj(20,p),

@@ -316,6 +316,13 @@ function Start-BursztynQemu {
 
     $qemu = if ($PrintArgv -and -not $Audit -and $QemuPath) { $QemuPath } else { Find-Qemu }
     $effectiveDisplay = if ([string]::IsNullOrWhiteSpace($DisplayBackend)) { "gtk" } else { $DisplayBackend }
+    # Host window: zoom-to-fit keeps the guest FB readable on HiDPI without
+    # forcing fullscreen (fullscreen was hard to close on Windows GTK).
+    $displayArg = if ($effectiveDisplay -eq "gtk") {
+        "gtk,zoom-to-fit=on"
+    } else {
+        $effectiveDisplay
+    }
 
     if (-not ($PrintArgv -or $Audit)) { Assert-QemuDisplay -Qemu $qemu -Backend $effectiveDisplay }
     if ($VirtIoFull -and -not ($PrintArgv -or $Audit)) {
@@ -340,7 +347,7 @@ function Start-BursztynQemu {
         "-smp", "1",
         "-m", "2G",
         "-serial", "stdio",
-        "-display", $effectiveDisplay
+        "-display", $displayArg
     )
 
     # Linux dodaje HDA przed urzadzeniami VirtIO. Na Windows zachowujemy identyczna
@@ -371,7 +378,7 @@ function Start-BursztynQemu {
             "-device", "virtio-rng-pci,rng=rng0,disable-legacy=on",
 
             "-vga", "none",
-            "-device", "virtio-vga,disable-legacy=on,xres=1280,yres=720",
+            "-device", "virtio-vga,disable-legacy=on,xres=1920,yres=1080",
 
             "-device", "virtio-keyboard-pci",
             "-device", "virtio-mouse-pci"

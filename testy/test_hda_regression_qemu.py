@@ -73,7 +73,7 @@ def make_iso(kernel: Path, wallpapers: Path, destination: Path, staging: Path, t
         'set timeout=0\nset default=0\n'
         'menuentry "Bursztyn OS explicit HDA regression" {\n'
         '    insmod all_video\n'
-        '    set gfxmode=1280x720x32,1024x768x32,auto\n'
+        '    set gfxmode=1920x1080x32,1280x720x32,1024x768x32,auto\n'
         '    set gfxpayload=keep\n'
         '    multiboot2 /boot/system_operacyjny.bin bursztyn.test=hda-tone\n'
         '    module2 /boot/tapety.pak tapety.pak\n'

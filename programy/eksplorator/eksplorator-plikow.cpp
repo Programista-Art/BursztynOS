@@ -5,6 +5,8 @@
 #include "../../bursztyn_ui/menu_tekstowe.h"
 #include "../../bursztyn_ui/pasek_przewijania.h"
 #include "../../bursztyn_ui/tabela_wirtualna.h"
+#include "../../bursztyn_ui/przycisk_obrazkowy.h"
+#include "../../bursztyn_ui/ikony_eksplorator_dane.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -22,8 +24,8 @@ extern "C" __attribute__((noreturn)) void _start();
 extern "C" {
 __attribute__((section(".naglowek"), used)) NaglowekBur naglowek = {
     {'B', 'U', 'R', '\0'}, reinterpret_cast<uint64_t>(&_start),
-    UINT64_C(0x1000), UINT64_C(0x44000), UINT64_C(0x1001000),
-    UINT64_C(0x45000), UINT64_C(0x20000), UINT64_C(0x1045000)};
+    UINT64_C(0x1000), UINT64_C(0x48000), UINT64_C(0x1001000),
+    UINT64_C(0x49000), UINT64_C(0x20000), UINT64_C(0x1049000)};
 }
 #endif
 
@@ -1772,6 +1774,16 @@ public:
         },this);
         table_.ustaw_dostawce(this);
         scrollbar_.ustaw_orientacje(BursztynUI::Orientacja::Pionowa);
+        using namespace BursztynUI;
+        using namespace BursztynUI::IkonyEksplorator;
+        for (unsigned i = 0; i < 12; ++i)
+            buttons_[i].ustaw_tryb(TrybPrzyciskuObrazkowego::TylkoTekst);
+        buttons_[0].ustaw_tryb(TrybPrzyciskuObrazkowego::TylkoIkona);
+        buttons_[0].ustaw_piksele_ikony(nav_wstecz, BOK, BOK);
+        buttons_[1].ustaw_tryb(TrybPrzyciskuObrazkowego::TylkoIkona);
+        buttons_[1].ustaw_piksele_ikony(nav_dalej, BOK, BOK);
+        buttons_[2].ustaw_tryb(TrybPrzyciskuObrazkowego::TylkoIkona);
+        buttons_[2].ustaw_piksele_ikony(nav_wgore, BOK, BOK);
     }
 
     AktowkaLayout layout() const { return calculate_layout(window_,model_.visible_count()); }
@@ -1937,6 +1949,18 @@ public:
         if(c==1)return entry_type_name(item->type);
         if(c==2) {if(item->creation_available && format_rtc_creation(item->creation_time,out,cap))return out;return "Niedostępna";}
         out[0]=0;if(item->pzb_available){append_text(out,cap,"PZB ");append_unsigned(out,cap,item->pzb);return out;}return "Brak";
+    }
+    int szerokosc_ikony_komorki(size_t kolumna) override { return kolumna == 0 ? 14 : 0; }
+    void rysuj_ikone_komorki(BursztynUI::KontekstRysowania& ctx, size_t wiersz, size_t kolumna,
+                            BursztynUI::Prostokat obszar) override {
+        if (kolumna != 0) return;
+        const Entry* item = model_.entry(model_.visible_entry_index(int(wiersz)));
+        if (!item) return;
+        const bool folder = item->type == EntryType::PARENT || item->type == EntryType::FOLDER;
+        blit_icon(ctx, obszar,
+                  folder ? BursztynUI::IkonyEksplorator::folder
+                         : BursztynUI::IkonyEksplorator::plik,
+                  BursztynUI::IkonyEksplorator::BOK);
     }
     BursztynUI::PoleTekstowe& active_field() {return edit_mode_==EditMode::PATH?path_field_:search_field_;}
     bool append_input(char character) {
@@ -2151,7 +2175,7 @@ public:
         const Entry* item=model_.entry(model_.selected());
         const bool selected=item && item->type!=EntryType::PARENT && item->type!=EntryType::LAUNCHER;
         const bool enabled[]={model_.can_back(),model_.can_forward(),selected,selected,selected,item && (item->type==EntryType::BUR || item->type==EntryType::CEBULA || item->type==EntryType::LAUNCHER)};
-        const char* labels[]={"<-","->","Zmień nazwę","Usuń","Przenieś","Uruchom"};
+        const char* labels[]={"","","Zmień nazwę","Usuń","Przenieś","Uruchom"};
         for(unsigned i=0;i<6;++i)if(buttons_[ix[i]].czy_wlaczona()!=enabled[i])draw_button(r[i],enabled[i],labels[i]);
         register_drop_targets();
     }
@@ -2178,9 +2202,9 @@ public:
         const AktowkaLayout value = layout();
         gui_rysuj_prostokat(value.toolbar.x, value.toolbar.y,
                             value.toolbar.w, value.toolbar.h, COLOR_PANEL_ALT);
-        draw_button(value.back, model_.can_back() ? true : false, "<-");
-        draw_button(value.forward, model_.can_forward() ? true : false, "->");
-        draw_button(value.up, true, "^");
+        draw_button(value.back, model_.can_back() ? true : false, "");
+        draw_button(value.forward, model_.can_forward() ? true : false, "");
+        draw_button(value.up, true, "");
         draw_button(value.refresh, true, "Odśwież");
         draw_button(value.new_folder, true, "Nowy folder");
         draw_button(value.new_file, true, "Nowy plik");
@@ -2219,7 +2243,18 @@ public:
             gui_rysuj_prostokat(value.left.x + 2, y,
                                 value.left.w > 4 ? value.left.w - 4 : 0,
                                 ROW_H, current ? COLOR_SELECT : COLOR_PANEL);
-            gui_rysuj_prostokat(value.left.x + 7, y + 7, 10, 10, COLOR_FOLDER);
+            {
+                const int isz = ICON > 16 ? 16 : ICON;
+                if (isz < 10) {
+                    gui_rysuj_prostokat(value.left.x + 7, y + 7, 10, 10, COLOR_FOLDER);
+                } else {
+                    drawing_.dodaj_przyciecie({value.left.x + 5, y + 2, isz + 2, ROW_H - 2});
+                    blit_icon(drawing_, {value.left.x + 5, y + (ROW_H - isz) / 2, isz, isz},
+                              BursztynUI::IkonyEksplorator::folder,
+                              BursztynUI::IkonyEksplorator::BOK);
+                    drawing_.zdejmij_przyciecie();
+                }
+            }
             draw_clipped(value.left.x + 23, y + 5, value.left.w - 29,
                          item->label, current ? COLOR_TEXT : COLOR_TEXT2, false);
             y += ROW_H;
@@ -2372,7 +2407,7 @@ private:
     char field_skip_[5]{};unsigned field_skip_count_{0},field_skip_pos_{0};
     BursztynUI::PoleTekstowe path_field_, search_field_;
     BursztynUI::MenuTekstowe text_menu_;
-    BursztynUI::Przycisk buttons_[12];
+    BursztynUI::PrzyciskObrazkowy buttons_[12];
     BursztynUI::KontekstRysowania drawing_;
     EditMode edit_mode_;
     int drop_target_entry_;
@@ -2382,6 +2417,30 @@ private:
     BursztynUI::Prostokat owner() const {return {window_.x+2,window_.y+TITLE_H,window_.w-4,window_.h-TITLE_H-2};}
     BursztynUI::Prostokat work() const {return {0,0,window_.screen_w,window_.screen_h-TASKBAR_H};}
     void paint(BursztynUI::Kontrolka& c) {c.rysuj(drawing_,true);}
+    static void blit_icon(BursztynUI::KontekstRysowania& ctx, BursztynUI::Prostokat dst,
+                          const uint32_t* src, int side) {
+        if (!src || side < 1 || dst.szerokosc < 1 || dst.wysokosc < 1) return;
+        auto off = ctx.pobierz_przesuniecie();
+        auto clip = ctx.pobierz_przyciecie();
+        const int sx0 = off.x + dst.x;
+        const int sy0 = off.y + dst.y;
+        const int rx0 = sx0 > clip.x ? sx0 : clip.x;
+        const int ry0 = sy0 > clip.y ? sy0 : clip.y;
+        const int rx1 = sx0 + dst.szerokosc < clip.prawy() ? sx0 + dst.szerokosc : clip.prawy();
+        const int ry1 = sy0 + dst.wysokosc < clip.dolny() ? sy0 + dst.wysokosc : clip.dolny();
+        uint32_t row[64];
+        int rw = rx1 - rx0;
+        if (rw > 64) rw = 64;
+        for (int py = ry0; py < ry1 && rw > 0; ++py) {
+            const int sy = ((py - sy0) * side) / dst.wysokosc;
+            for (int dx = 0; dx < rw; ++dx) {
+                const int sx = ((rx0 + dx - sx0) * side) / dst.szerokosc;
+                const uint32_t c = src[sy * side + sx];
+                row[dx] = (c >> 24) ? (c & 0x00FFFFFFU) : 0;
+            }
+            if (rw > 0) ctx.rysuj_wiersz_ekranu(rx0, py, rw, row);
+        }
+    }
     void paint_table(Rect clip) {
         auto l=layout();table_.ustaw_skale_dpi(ui_skala());
         table_.rozmiesc({l.table_header.x,l.table_header.y,l.list_body.w,l.table_header.h+l.list_body.h});

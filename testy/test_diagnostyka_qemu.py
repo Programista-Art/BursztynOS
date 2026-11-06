@@ -67,7 +67,7 @@ def main():
   shutil.copy2(kernel,boot/'system_operacyjny.bin')
   if not args.no_wallpapers:shutil.copy2(ROOT/'tapety.pak',boot/'tapety.pak')
   extra=' bursztyn.installed=1 bursztyn.slot=A' if args.installed_fixture else ''
-  (boot/'grub/grub.cfg').write_text('set timeout=0\nset default=0\nmenuentry "Diagnostics regression" {\ninsmod all_video\nset gfxmode=1280x720x32,auto\nset gfxpayload=keep\nmultiboot2 /boot/system_operacyjny.bin'+extra+'\n'+('' if args.no_wallpapers else 'module2 /boot/tapety.pak tapety.pak\n')+'boot\n}\n')
+  (boot/'grub/grub.cfg').write_text('set timeout=0\nset default=0\nmenuentry "Diagnostics regression" {\ninsmod all_video\nset gfxmode=1920x1080x32,1280x720x32,auto\nset gfxpayload=keep\nmultiboot2 /boot/system_operacyjny.bin'+extra+'\n'+('' if args.no_wallpapers else 'module2 /boot/tapety.pak tapety.pak\n')+'boot\n}\n')
   iso=temp/'diag.iso'
   with (out/'iso-build.log').open('w') as log:subprocess.run(['grub-mkrescue','-o',str(iso),str(boot.parent)],stdout=log,stderr=subprocess.STDOUT,check=True,timeout=45)
   disk=None

@@ -52,7 +52,8 @@ def ensure_custom_iso(res_w, res_h):
     shutil.copytree(ROOT / "isodir", stage_dir)
     cfg_file = stage_dir / "boot/grub/grub.cfg"
     content = cfg_file.read_text(encoding="utf-8")
-    content = content.replace("1280x720x32", f"{res_w}x{res_h}x32")
+    content = content.replace("1920x1080x32", f"{res_w}x{res_h}x32", 1)
+    content = content.replace("1280x720x32", f"{res_w}x{res_h}x32", 1)
     cfg_file.write_text(content, encoding="utf-8")
     subprocess.run(["grub-mkrescue", "-o", str(target_iso), str(stage_dir), "--xorriso=xorriso"],
                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

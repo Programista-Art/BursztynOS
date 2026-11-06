@@ -91,7 +91,7 @@ def build_disposable_iso(kernel_elf: Path, iso_out: Path, cmdline_extra: str):
         "set default=0\n"
         'menuentry "Bursztyn SSP Test" {\n'
         "    insmod all_video\n"
-        "    set gfxmode=1280x720x32,1024x768x32,auto\n"
+        "    set gfxmode=1920x1080x32,1280x720x32,1024x768x32,auto\n"
         "    set gfxpayload=keep\n"
         f"    multiboot2 /boot/system_operacyjny.bin {cmdline_extra}\n"
         "    boot\n"

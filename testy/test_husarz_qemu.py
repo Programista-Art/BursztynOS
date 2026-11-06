@@ -154,7 +154,7 @@ def main():
         boot = staging / 'boot'
         (boot / 'grub').mkdir(parents=True)
         shutil.copy2(kernel, boot / 'system_operacyjny.bin')
-        (boot/'grub/grub.cfg').write_text('set timeout=0\nset default=0\nmenuentry "User fault isolation" {\ninsmod all_video\nset gfxmode=1280x720x32,auto\nset gfxpayload=keep\nmultiboot2 /boot/system_operacyjny.bin\nboot\n}\n')
+        (boot/'grub/grub.cfg').write_text('set timeout=0\nset default=0\nmenuentry "User fault isolation" {\ninsmod all_video\nset gfxmode=1920x1080x32,1280x720x32,auto\nset gfxpayload=keep\nmultiboot2 /boot/system_operacyjny.bin\nboot\n}\n')
         args.iso = Path(temporary_iso.name)/'probe.iso'
         with (out/'iso-build.log').open('w') as iso_log:
             subprocess.run(['grub-mkrescue','-o',str(args.iso),str(staging)],stdout=iso_log,stderr=subprocess.STDOUT,check=True,timeout=45)

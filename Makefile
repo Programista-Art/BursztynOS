@@ -430,6 +430,11 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	ikona_zamknij_blob.o \
 	ikona_uspij_blob.o \
 	ikona_zablokuj_blob.o \
+	ikona_nav_wstecz_blob.o \
+	ikona_nav_dalej_blob.o \
+	ikona_nav_wgore_blob.o \
+	ikona_folder_blob.o \
+	ikona_plik_blob.o \
 	heap.o \
 	scheduler.o \
 	fpu.o \
@@ -1044,7 +1049,7 @@ $(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notic
 		'' \
 		'menuentry "Bursztyn OS" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxmode=1920x1080x32,1280x720x32,1024x768x32,auto' \
 		'    set gfxpayload=keep' \
 		'    multiboot2 /boot/system_operacyjny.bin' \
 		'    module2 /boot/tapety.pak tapety.pak' \
@@ -1053,7 +1058,7 @@ $(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notic
 		'' \
 		'menuentry "Bursztyn OS - testy automatyczne" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxmode=1920x1080x32,1280x720x32,1024x768x32,auto' \
 		'    set gfxpayload=keep' \
 		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated' \
 		'    module2 /boot/tapety.pak tapety.pak' \
@@ -1061,7 +1066,7 @@ $(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notic
 		'}' \
 		'menuentry "Bursztyn OS - testy automatyczne (niszczacy test dysku)" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxmode=1920x1080x32,1280x720x32,1024x768x32,auto' \
 		'    set gfxpayload=keep' \
 		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.test.diskdestructive=1' \
 		'    module2 /boot/tapety.pak tapety.pak' \
@@ -1069,7 +1074,7 @@ $(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notic
 		'}' \
 		'menuentry "Bursztyn OS Instalator" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxmode=1920x1080x32,1280x720x32,1024x768x32,auto' \
 		'    set gfxpayload=keep' \
 		'    echo "Ladowanie jadra..."' \
 		'    multiboot2 /boot/system_operacyjny.bin bursztyn.install=1' \
@@ -1253,7 +1258,7 @@ $(CI_TEST_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
 		'' \
 		'menuentry "Bursztyn OS - testy automatyczne" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxmode=1920x1080x32,1280x720x32,1024x768x32,auto' \
 		'    set gfxpayload=keep' \
 		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated' \
 		'    module2 /boot/tapety.pak tapety.pak' \
@@ -1273,7 +1278,7 @@ $(CI_BLK_DESTRUCTIVE_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
 		'' \
 		'menuentry "Bursztyn OS - testy automatyczne (niszczacy test dysku)" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxmode=1920x1080x32,1280x720x32,1024x768x32,auto' \
 		'    set gfxpayload=keep' \
 		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.test.diskdestructive=1' \
 		'    module2 /boot/tapety.pak tapety.pak' \
@@ -1293,7 +1298,7 @@ $(CI_DESTRUCTIVE_ONLY_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
 		'' \
 		'menuentry "Bursztyn OS - flaga niszczaca bez trybu automatycznego" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxmode=1920x1080x32,1280x720x32,1024x768x32,auto' \
 		'    set gfxpayload=keep' \
 		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test.diskdestructive=1' \
 		'    module2 /boot/tapety.pak tapety.pak' \
@@ -1326,7 +1331,7 @@ $(GRUB8K_CFG): $(KERNEL) check-test8k $(TAPETY_PAK)
 		'' \
 		'menuentry "Bursztyn OS (8K Test)" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxmode=1920x1080x32,1280x720x32,1024x768x32,auto' \
 		'    set gfxpayload=keep' \
 		'    multiboot2 /boot/system_operacyjny.bin' \
 		'    module2 /boot/tapety.pak tapety.pak' \
@@ -1378,8 +1383,8 @@ QEMU_ACCEL ?= $(QEMUACCEL)
 QEMU_RAM ?= 2G
 QEMU_SMP ?= 1
 QEMUDISPLAYARGS ?= $(if $(strip $(QEMU_DISPLAY_ARGS)),$(QEMU_DISPLAY_ARGS),-display sdl)
-QEMU_VIRTIO_XRES ?= 1280
-QEMU_VIRTIO_YRES ?= 720
+QEMU_VIRTIO_XRES ?= 1920
+QEMU_VIRTIO_YRES ?= 1080
 
 QEMUBASEARGS ?= \
 	-machine pc,hpet=on \
@@ -2406,6 +2411,21 @@ ikona_uspij_blob.o: ikonki/przyciskuspij.png
 	$(LD) -r -b binary $< -o $@
 
 ikona_zablokuj_blob.o: ikonki/przyciskzablokuj.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_nav_wstecz_blob.o: ikonki/nav_wstecz.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_nav_dalej_blob.o: ikonki/nav_dalej.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_nav_wgore_blob.o: ikonki/nav_wgore.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_folder_blob.o: ikonki/folder.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_plik_blob.o: ikonki/plik.png
 	$(LD) -r -b binary $< -o $@
 
 ikona_png_ring3.o: bursztyn_ui/ikona_png.cpp bursztyn_ui/ikona_png.h

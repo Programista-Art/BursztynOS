@@ -244,7 +244,7 @@ def main():
     found_boot_mode = False
     found_selected_initial = False
     found_scanout_cmd_ok = False
-    pattern_initial_1280x720_ok = False
+    pattern_initial_1920x1080_ok = False
     found_invalid_dims_rejected = False
     found_100x_modeset_cycles = False
     found_desktop_switched_1080 = False
@@ -253,7 +253,7 @@ def main():
     screendump_768_ok = False
     found_unconfirmed_rollback = False
     screendump_rollback_ok = False
-    found_desktop_restored_1280 = False
+    found_desktop_restored_1080 = False
     found_desktop_modeset_suite = False
 
     # In-kernel cursor test assertions
@@ -409,11 +409,11 @@ def main():
                             print(f"[INFO] Zrzut wzorca zapisany ({pattern_dump_path.stat().st_size} bajtow).")
                             w, h, pdata = parse_ppm(pattern_dump_path)
                             print(f"[INFO] Rozdzielczosc wzorca testowego: {w}x{h}")
-                            if w == 1280 and h == 720:
-                                pattern_initial_1280x720_ok = True
-                                print(f"[INFO] Poczatkowa rozdzielczosc GOP 1280x720 zachowana: PASS")
+                            if w == 1920 and h == 1080:
+                                pattern_initial_1920x1080_ok = True
+                                print(f"[INFO] Poczatkowa rozdzielczosc GOP 1920x1080 zachowana: PASS")
                             else:
-                                print(f"[BLAD] Poczatkowa rozdzielczosc != 1280x720 ({w}x{h})!")
+                                print(f"[BLAD] Poczatkowa rozdzielczosc != 1920x1080 ({w}x{h})!")
 
                             expected_points = [
                                 ("Tlo (10, 10)", 10, 10, (10, 25, 47)),
@@ -438,13 +438,13 @@ def main():
             if "[VIRTIO-GPU] GETDISPLAYINFO scanout0=" in line_str:
                 found_dinfo_scanout = True
                 gpu_lines.append(line_str)
-            if "[VIRTIO-GPU] boot mode=1280x720" in line_str:
+            if "[VIRTIO-GPU] boot mode=1920x1080" in line_str:
                 found_boot_mode = True
                 gpu_lines.append(line_str)
-            if "[VIRTIO-GPU] selected initial mode=1280x720" in line_str:
+            if "[VIRTIO-GPU] selected initial mode=1920x1080" in line_str:
                 found_selected_initial = True
                 gpu_lines.append(line_str)
-            if "[VIRTIO-GPU] SETSCANOUT 1280x720 result=OK" in line_str:
+            if "[VIRTIO-GPU] SETSCANOUT 1920x1080 result=OK" in line_str:
                 found_scanout_cmd_ok = True
                 gpu_lines.append(line_str)
             if "[VIRTIO-GPU-MODESET] Invalid dimensions rejection: PASS" in line_str:
@@ -506,8 +506,8 @@ def main():
                                 screendump_rollback_ok = True
                     except Exception as e:
                         print(f"[BLAD] Screendump rollback: {e}")
-            if "[VIRTIO-GPU-MODESET] Restored initial 1280x720: PASS" in line_str:
-                found_desktop_restored_1280 = True
+            if "[VIRTIO-GPU-MODESET] Restored initial 1920x1080: PASS" in line_str:
+                found_desktop_restored_1080 = True
                 gpu_lines.append(line_str)
             if "[VIRTIO-GPU-MODESET] Desktop modeset test suite: PASS" in line_str:
                 found_desktop_modeset_suite = True
@@ -549,11 +549,11 @@ def main():
                 desktop_dump_ok = True
                 dw, dh, ddata = parse_ppm(desktop_dump_path)
                 print(f"[INFO] Zrzut pulpitu zapisany: {dw}x{dh}, {desktop_dump_path.stat().st_size} bajtow.")
-                desktop_dim_ok = (dw == 1280 and dh == 720)
+                desktop_dim_ok = (dw == 1920 and dh == 1080)
                 if desktop_dim_ok:
-                    print(f"[INFO] Rozdzielczosc pulpitu 1280x720: PASS")
+                    print(f"[INFO] Rozdzielczosc pulpitu 1920x1080: PASS")
                 else:
-                    print(f"[BLAD] Rozdzielczosc pulpitu != 1280x720 ({dw}x{dh})!")
+                    print(f"[BLAD] Rozdzielczosc pulpitu != 1920x1080 ({dw}x{dh})!")
 
                 # Probkowanie tla tapety w poblizu pozycji poczatkowej kursora
                 bg_sample = get_pixel(ddata, dw, dh, 498, 298)
@@ -673,20 +673,20 @@ def main():
     print("-" * 65)
     print("TESTY TRYBOW GRAFICZNYCH I MODESETTINGU (VIRTIO-GPU):")
     print(f"  Odczyt GETDISPLAYINFO scanout0:          {'PASS' if found_dinfo_scanout else 'FAIL'}")
-    print(f"  Odczyt trybu boot (1280x720):            {'PASS' if found_boot_mode else 'FAIL'}")
-    print(f"  Wybor trybu poczatkowego (1280x720):     {'PASS' if found_selected_initial else 'FAIL'}")
-    print(f"  Polecenie SETSCANOUT 1280x720:           {'PASS' if found_scanout_cmd_ok else 'FAIL'}")
-    print(f"  Zachowanie trybu GOP 1280x720 (zrzut):   {'PASS' if pattern_initial_1280x720_ok else 'FAIL'}")
+    print(f"  Odczyt trybu boot (1920x1080):            {'PASS' if found_boot_mode else 'FAIL'}")
+    print(f"  Wybor trybu poczatkowego (1920x1080):     {'PASS' if found_selected_initial else 'FAIL'}")
+    print(f"  Polecenie SETSCANOUT 1920x1080:           {'PASS' if found_scanout_cmd_ok else 'FAIL'}")
+    print(f"  Zachowanie trybu GOP 1920x1080 (zrzut):   {'PASS' if pattern_initial_1920x1080_ok else 'FAIL'}")
     print(f"  Odrzucenie niepoprawnych wymiarow:       {'PASS' if found_invalid_dims_rejected else 'FAIL'}")
     print(f"  100x cykli przelaczania (PMM=0, DMA=0):  {'PASS' if found_100x_modeset_cycles else 'FAIL'}")
-    print(f"  Przelaczenie desktopu 1280x720->1920x1080: {'PASS' if found_desktop_switched_1080 else 'FAIL'}")
+    print(f"  Przelaczenie desktopu ->1920x1080: {'PASS' if found_desktop_switched_1080 else 'FAIL'}")
     print(f"  Zrzut ekranu 1920x1080 (QMP screendump): {'PASS' if screendump_1080_ok else 'FAIL'}")
     print(f"  Przelaczenie desktopu 1920x1080->1024x768: {'PASS' if found_desktop_switched_768 else 'FAIL'}")
     print(f"  Zrzut ekranu 1024x768 (QMP screendump):  {'PASS' if screendump_768_ok else 'FAIL'}")
     print(f"  Wycofanie po timeout (rollback 1024x768): {'PASS' if found_unconfirmed_rollback else 'FAIL'}")
     print(f"  Zrzut ekranu po rollback (QMP 1024x768): {'PASS' if screendump_rollback_ok else 'FAIL'}")
-    print(f"  Przywrocenie 1280x720 przed startem GUI: {'PASS' if found_desktop_restored_1280 else 'FAIL'}")
-    print(f"  Rozdzielczosc pulpitu (1280x720):        {'PASS' if desktop_dim_ok else 'FAIL'}")
+    print(f"  Przywrocenie 1920x1080 przed startem GUI: {'PASS' if found_desktop_restored_1080 else 'FAIL'}")
+    print(f"  Rozdzielczosc pulpitu (1920x1080):        {'PASS' if desktop_dim_ok else 'FAIL'}")
     print(f"  Pelny pakiet testow modesettingu desktopu: {'PASS' if found_desktop_modeset_suite else 'FAIL'}")
     print("-" * 65)
     print("TESTY JEDNOSTKOWE KURSORA (KERNEL SUITE):")
@@ -729,12 +729,12 @@ def main():
               desktop_dump_ok and desktop_dim_ok and
               found_dinfo_scanout and found_boot_mode and
               found_selected_initial and found_scanout_cmd_ok and
-              pattern_initial_1280x720_ok and
+              pattern_initial_1920x1080_ok and
               found_invalid_dims_rejected and found_100x_modeset_cycles and
               found_desktop_switched_1080 and screendump_1080_ok and
               found_desktop_switched_768 and screendump_768_ok and
               found_unconfirmed_rollback and screendump_rollback_ok and
-              found_desktop_restored_1280 and found_desktop_modeset_suite and
+              found_desktop_restored_1080 and found_desktop_modeset_suite and
               high_modes_ok == {'3440x1440', '3840x2160', '1280x720'} and
               found_cursor_center and found_cursor_movement and
               found_cursor_restore and found_cursor_clipping and

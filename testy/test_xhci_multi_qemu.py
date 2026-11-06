@@ -42,7 +42,7 @@ def main():
         shutil.copy2(ROOT / 'tapety.pak', boot / 'tapety.pak')
         (boot / 'grub' / 'grub.cfg').write_text(
             'set timeout=0\nset default=0\nmenuentry "USB multi controller regression" {\n'
-            'insmod all_video\nset gfxmode=1280x720x32,auto\nset gfxpayload=keep\n'
+            'insmod all_video\nset gfxmode=1920x1080x32,1280x720x32,auto\nset gfxpayload=keep\n'
             'multiboot2 /boot/system_operacyjny.bin\nmodule2 /boot/tapety.pak tapety.pak\nboot\n}\n')
         iso = temporary / 'usb.iso'
         with (out / 'iso-build.log').open('w') as log:

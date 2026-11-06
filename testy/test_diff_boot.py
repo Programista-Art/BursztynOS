@@ -96,7 +96,7 @@ def ensure_iso_640():
     cfg = iso_640_dir / "boot/grub/grub.cfg"
     content = cfg.read_text()
     content = content.replace("set timeout=3", "set timeout=0")
-    content = content.replace("set gfxmode=1280x720x32,1024x768x32,auto", "set gfxmode=640x480x32,auto")
+    content = content.replace("set gfxmode=1920x1080x32,1280x720x32,1024x768x32,auto", "set gfxmode=640x480x32,auto")
     content = content.replace("set gfxpayload=keep", "set gfxpayload=640x480x32")
     cfg.write_text(content)
 

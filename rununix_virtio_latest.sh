@@ -281,7 +281,7 @@ build_virtio_args() {
     local blk_dev="virtio-blk-pci,drive=disk,disable-legacy=on"
     local net_dev="virtio-net-pci,netdev=n1,disable-legacy=on"
     local rng_dev="virtio-rng-pci,rng=rng0,disable-legacy=on"
-    local gpu_dev="virtio-vga,disable-legacy=on,xres=1280,yres=720"
+    local gpu_dev="virtio-vga,disable-legacy=on,xres=1920,yres=1080"
     local kbd_dev="virtio-keyboard-pci"
     local mouse_dev="virtio-mouse-pci"
 
@@ -593,7 +593,7 @@ info_display() {
     echo "Po starcie uruchom: Ustawienia ekranu"
     echo
     echo "Sprawdz m.in.:"
-    echo "  - 1280x720"
+    echo "  - 1920x1080"
     echo "  - 1920x1080"
     echo "  - 2560x1440"
     echo "  - 3440x1440"

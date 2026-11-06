@@ -55,7 +55,7 @@ def main():
             'set default=0\n'
             'menuentry "Bursztyn OS - Guard Page Regression Test" {\n'
             '    insmod all_video\n'
-            '    set gfxmode=1280x720x32,1024x768x32,auto\n'
+            '    set gfxmode=1920x1080x32,1280x720x32,1024x768x32,auto\n'
             '    set gfxpayload=keep\n'
             '    multiboot2 /boot/system_operacyjny.bin bursztyn.test=stack_guard\n'
             '    module2 /boot/tapety.pak tapety.pak\n'

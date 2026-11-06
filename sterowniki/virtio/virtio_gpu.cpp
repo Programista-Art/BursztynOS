@@ -1339,8 +1339,8 @@ bool virtio_gpu_init(VirtioPciDevice* dev) {
         return w >= 640 && w <= 4096 && h >= 480 && h <= 4096 && (uint64_t(w) * h * 4ULL <= 64ULL * 1024 * 1024);
     };
 
-    uint32_t target_w = 1280;
-    uint32_t target_h = 720;
+    uint32_t target_w = 1920;
+    uint32_t target_h = 1080;
 
     if (is_valid_dim(boot_w, boot_h)) {
         target_w = boot_w;

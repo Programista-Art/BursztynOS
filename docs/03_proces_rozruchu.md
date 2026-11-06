@@ -20,7 +20,7 @@ Bursztyn OS wykorzystuje program rozruchowy zgodny ze specyfikacją Multiboot2. 
 
 Wewnątrz nagłówka Jądro jawnie deklaruje żądania sprzętowe od bootloadera. Zastosowano tu krytyczne wymuszenia zapobiegające błędom inicjalizacji:
 
-* Wymuszenie Trybu Graficznego (Tag Typu 5): Zamiast polegać na domyślnych ustawieniach środowiska, system twardo wymusza na programie rozruchowym zainicjowanie sprzętu w trybie graficznym (Liniowy Bufor Ramki - LFB) w precyzyjnej rozdzielczości 1280x720 z głębią 32-bitową. Gwarantuje to poprawne działanie autorskiej warstwy graficznej HAL w C++.
+* Wymuszenie Trybu Graficznego (Tag Typu 5): Zamiast polegać na domyślnych ustawieniach środowiska, system twardo wymusza na programie rozruchowym zainicjowanie sprzętu w trybie graficznym (Liniowy Bufor Ramki - LFB) w precyzyjnej rozdzielczości 1920x1080 z głębią 32-bitową. Gwarantuje to poprawne działanie autorskiej warstwy graficznej HAL w C++.
 
 * Żądania Informacyjne (Tag Typu 1): System prosi o dostarczenie mapy pamięci fizycznej (MULTIBOOT_TAG_TYPE_MEMORY_MAP), co jest kluczowe dla późniejszej inicjalizacji autorskiego Zarządcy Pamięci Fizycznej (PMM).
 

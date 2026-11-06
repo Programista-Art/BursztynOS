@@ -589,7 +589,7 @@ bool ekran_test_virtio_gpu_modeset(bool capture_modes) {
             klog_serial("[VIRTIO-GPU-MODESET] BLAD: Tryb rozruchowy nie zostal zachowany na pulpicie!");
             return false;
         }
-        klog_serial("[VIRTIO-GPU-MODESET] Boot mode 1280x720 preserved: PASS");
+        klog_serial("[VIRTIO-GPU-MODESET] Boot mode 1920x1080 preserved: PASS");
     }
 
     // Host acknowledges each captured scanout over COM1. This is a bounded
@@ -673,14 +673,14 @@ bool ekran_test_virtio_gpu_modeset(bool capture_modes) {
         while (hpet_dostepny() && czas_monotoniczny_ns() - t0 < 300000000ULL) asm volatile("pause");
     }
 
-    // 5. Przywrocenie poczatkowego trybu 1280x720 przed startem srodowiska
-    TrybEkranu t_init{bw ? bw : 1280, bh ? bh : 720, 32, (bw ? bw : 1280) * 4, 0, 0};
+    // 5. Przywrocenie poczatkowego trybu 1920x1080 przed startem srodowiska
+    TrybEkranu t_init{bw ? bw : 1920, bh ? bh : 1080, 32, (bw ? bw : 1920) * 4, 0, 0};
     uint32_t r_init = zastosuj(t_init, 100, 0, false, false);
-    if (r_init != EKRAN_OK || grafika_pobierz_szerokosc() != int(bw ? bw : 1280)) {
-        klog_serial("[VIRTIO-GPU-MODESET] BLAD: Przywrocenie trybu poczatkowego 1280x720 nie powiodlo sie!");
+    if (r_init != EKRAN_OK || grafika_pobierz_szerokosc() != int(bw ? bw : 1920)) {
+        klog_serial("[VIRTIO-GPU-MODESET] BLAD: Przywrocenie trybu poczatkowego 1920x1080 nie powiodlo sie!");
         return false;
     }
-    klog_serial("[VIRTIO-GPU-MODESET] Restored initial 1280x720: PASS");
+    klog_serial("[VIRTIO-GPU-MODESET] Restored initial 1920x1080: PASS");
     klog_serial("[VIRTIO-GPU-MODESET] Desktop modeset test suite: PASS");
     return true;
 }

@@ -2,6 +2,7 @@
 #include "motyw.h"
 #include "ui_skala.h"
 #include "window_shape.h"
+#include "wm_ikony_belki.h"
 #include "bursztyn_ui/czcionka.h"
 
 inline bool wm_dekoracja_w_punkcie(int w,int h,int x,int y,uint32_t scale) {
@@ -46,12 +47,15 @@ void wm_rysuj_dekoracje(int w, int h, const char* title, bool maximized,
         }
     };
     text(title,ui_skaluj(8,scale),ui_skaluj(7,scale),w-ui_skaluj(80,scale),theme.tekst);
-    const int offsets[]={74,50,26};const char* labels[]={"-",maximized?"v":"^","X"};
+    const int offsets[]={74,50,26};
+    const WmIkonaBelki ikony[]={
+        WmIkonaBelki::Minimalizuj,
+        maximized ? WmIkonaBelki::Przywroc : WmIkonaBelki::Maksymalizuj,
+        WmIkonaBelki::Zamknij
+    };
     for(int i=0;i<3;++i) {
         int x=w-ui_skaluj(offsets[i],scale),y=ui_skaluj(4,scale),size=ui_skaluj(20,scale);
         rect(x,y,size,size,i==2?theme.blad:theme.akcent);
-        int tx=x+(size-CzcionkaUI::zmierz_tekst(labels[i],s))/2;
-        int ty=y+(size-CzcionkaUI::pobierz_wysokosc(s))/2;
-        text(labels[i],tx,ty,x+size,theme.tekstakcentu);
+        wm_rysuj_ikone_belki(ikony[i],x,y,size,i==2?0x00FFFFFFU:theme.tekstakcentu,pixel);
     }
 }

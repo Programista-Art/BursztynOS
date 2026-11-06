@@ -61,8 +61,8 @@ multiboot_header_start:
     .short MULTIBOOT2_HEADER_TAG_FRAMEBUFFER
     .short 0
     .long 20
-    .long 1280
-    .long 720
+    .long 1920
+    .long 1080
     .long 32
 
     /*
