@@ -51,8 +51,8 @@
 #include "hda_diag.h"
 #include "hda_quirks.h"
 #include "../czas/hpet.h"
-#include "../../pamiec.h"
-#include "../../pci.h"
+#include "pamiec.h"
+#include "pci.h"
 
 #include <stdint.h>
 #include <stddef.h>

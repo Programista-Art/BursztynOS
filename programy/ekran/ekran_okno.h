@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../bursztyn_gui.h"
+#include "bursztyn_gui.h"
 #include "../../bursztyn_ui/bursztyn_ui.h"
 #include "klient.h"
 

@@ -3,7 +3,7 @@
  *   Pulpit -> Test -> plik/folder w Test -> 3 poziomy.
  * Wynik zapisuje do /logi/repro_wynik.txt i konczy proces.
  */
-#include "../../bursztyn_gui.h"
+#include "bursztyn_gui.h"
 #include <stddef.h>
 #include <stdint.h>
 

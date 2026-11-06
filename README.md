@@ -82,6 +82,7 @@ Powłoka systemowa to potężne, zintegrowane narzędzie działające w oknie. O
 
 Poniższe pliki zawierają pełną specyfikację techniczną, opisy mechanizmów oraz analizę kodu źródłowego systemu:
 
+0. [00_mapa_repozytorium.md](docs/00_mapa_repozytorium.md) – Mapa katalogów źródłowych (jądro, programy, sterowniki, testy, narzędzia).
 1. [01_wstep_i_filozofia.md](docs/01_wstep_i_filozofia.md) – Wizja projektu, założenia ideologiczne, polskie nazewnictwo i roadmapa.
 2. [02_architektura_systemu.md](docs/02_architektura_systemu.md) – Podział Ring 0/Ring 3, sprzętowy TSS oraz logiczny model bezpieczeństwa PZB (Poziom Zaufania Bursztyna).
 3. [03_proces_rozruchu.md](docs/03_proces_rozruchu.md) – Analiza wymuszeń graficznych Multiboot2, tymczasowe stronicowanie i skok do Long Mode.
@@ -249,7 +250,7 @@ LD = x86_64-elf-ld
 Otwórz terminal w folderze, w którym znajduje się Twój plik Makefile i kod źródłowy, a następnie wpisz:
 make
 
-Skrypt automatycznie skompiluje pliki boot.o, gdt.o, pmm.o, vmm.o, kernel.o itd. i połączy je za pomocą Twojego skryptu linker.ld. Jeśli nie ma błędów w kodzie, w folderze pojawi się plik system_operacyjny.bin.
+Skrypt automatycznie skompiluje jednostki z `jadro/` (boot.o, gdt.o, pmm.o, vmm.o, kernel.o itd.) i połączy je skryptem `jadro/arch/linker.ld`. Jeśli nie ma błędów w kodzie, w folderze pojawi się plik system_operacyjny.bin.
 ## Krok 3: Przygotowanie struktury pliku ISO (GRUB Multiboot2)
 Bursztyn OS operuje w 64-bitowym Long Mode, więc wymaga programu rozruchowego (GRUB), który przekaże parametry Multiboot2. Musisz zbudować prostą strukturę teczek dla obrazu płyty:
 W terminalu utwórz katalogi: 
@@ -285,7 +286,7 @@ qemu-system-x86_64 -cdrom BursztynOS.iso -m 2G -serial stdio
 ```
 
 (Flaga -m 2G przydziela 2 Gigabajty pamięci RAM dla maszyny, co przyda się przy testowaniu Zarządcy Pamięci (PMM/VMM) w Etapie 3, a -serial stdio pozwala kierować logi z jądra bezpośrednio do Twojego terminala Linux).
-Po wykonaniu tej komendy powinno wyskoczyć okno emulatora wyświetlające GRUB, a zaraz po nim kod z pliku kernel.cpp Bursztyn OS! 
+Po wykonaniu tej komendy powinno wyskoczyć okno emulatora wyświetlające GRUB, a zaraz po nim kod jądra z `jadro/rdzen/kernel.cpp` Bursztyn OS! 
 
 
 Komenda make clear - usuwa pliki .o

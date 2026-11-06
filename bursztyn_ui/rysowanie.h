@@ -1,11 +1,11 @@
 #pragma once
 
 #include <stdint.h>
-#include "../kolor_alfa.h"
+#include "kolor_alfa.h"
 #include <stddef.h>
 #include "typy.h"
 #include "czcionka.h"
-#include "../bursztyn_gui.h"
+#include "bursztyn_gui.h"
 
 namespace BursztynUI {
 

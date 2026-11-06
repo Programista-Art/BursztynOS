@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "typy.h"
-#include "../bws_zdarzenia.h"
+#include "bws_zdarzenia.h"
 
 namespace BursztynUI {
 

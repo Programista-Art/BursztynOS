@@ -1,7 +1,7 @@
 #include "../../bsf/runtime.h"
-#include "../../bursztyn_gui.h"
+#include "bursztyn_gui.h"
 #include "../../bursztyn_ui/bursztyn_ui.h"
-#include "../../loader.h"
+#include "loader.h"
 #include "layout.h"
 using namespace BursztynUI;
 extern "C" void _start();

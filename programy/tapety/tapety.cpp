@@ -1,5 +1,5 @@
 /* Tapety: pojedyncza instancja, miniatury i zatwierdzanie przez IPC. */
-#include "../../loader.h"
+#include "loader.h"
 #include "../../bursztyn_ui/bursztyn_ui.h"
 
 using namespace BursztynUI;

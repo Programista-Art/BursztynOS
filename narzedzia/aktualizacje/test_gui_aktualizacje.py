@@ -39,13 +39,13 @@ def read(rel: str) -> str:
 
 
 def test_bws_api() -> None:
-    api = read("bws_api.h")
+    api = read("jadro/bws/bws_api.h")
     raport("bws_ota_status_84", "BWS_OTA_STATUS = 84" in api)
     raport("bws_ota_polecenie_85", "BWS_OTA_POLECENIE = 85" in api)
 
 
 def test_bws_ota_abi() -> None:
-    ota = read("bws_ota.h")
+    ota = read("jadro/bws/bws_ota.h")
     raport("ota_abi_wersja_1", "BWS_OTA_ABI_WERSJA 1U" in ota)
     raport(
         "ota_status_rozmiar_384",
@@ -74,7 +74,7 @@ def test_bws_ota_abi() -> None:
 
 def test_aplikacja_ring3() -> None:
     src = read("programy/aktualizacje/aktualizacje.cpp")
-    raport("aktualizacje_include_bws_ota", '#include "../../bws_ota.h"' in src)
+    raport("aktualizacje_include_bws_ota", '#include "bws_ota.h"' in src or '#include "../../bws_ota.h"' in src)
     raport("aktualizacje_pobierz_status", "bws_ota_pobierz_status" in src)
     raport("aktualizacje_wykonaj_polecenie", "bws_ota_wykonaj_polecenie" in src)
     for cmd in (
@@ -96,7 +96,7 @@ def test_manifest() -> None:
 
 
 def test_desktop() -> None:
-    desktop = read("desktop_entries.h")
+    desktop = read("jadro/gui/desktop_entries.h")
     raport(
         "desktop_wpis_aktualizacje",
         "/programy/aktualizacje.cebula/aktualizacje.bur" in desktop,

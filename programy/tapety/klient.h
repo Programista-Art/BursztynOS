@@ -1,6 +1,6 @@
 #pragma once
-#include "../../bursztyn_gui.h"
-#include "../../tapety_format.h"
+#include "bursztyn_gui.h"
+#include "tapety_format.h"
 
 inline bool tapety_zapytaj(uint64_t endpoint, TapetyZadanie req, TapetyOdpowiedz* out) {
     if (!endpoint || !out) return false;

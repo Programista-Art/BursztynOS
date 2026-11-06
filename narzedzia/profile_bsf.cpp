@@ -7,7 +7,7 @@
 #include <vector>
 #include <cstring>
 #include <filesystem>
-#include "../bursztyn_gui.h"
+#include "bursztyn_gui.h"
 
 // Host filesystem adapter; all measurement and caching below use the native
 // implementation. Filesystem loading is outside the timed warm operations.

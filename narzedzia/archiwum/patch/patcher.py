@@ -4,16 +4,16 @@ with open("shell.cpp.bak", "r") as f:
     code = f.read()
 
 # 1. Includes
-includes_new = """#include "bursztyn_gui.h"
-#include "bws_nowoczesne.h"
-#include "motyw.h"
+includes_new = """#include "jadro/gui/bursztyn_gui.h"
+#include "jadro/bws/bws_nowoczesne.h"
+#include "jadro/gui/motyw.h"
 #include "bursztyn_ui/czcionka.h"
 #include "bursztyn_ui/rysowanie.h"
 #include "bursztyn_ui/pasek_przewijania.h"
 
 using namespace BursztynUI;
 """
-code = code.replace('#include "bursztyn_gui.h"', includes_new)
+code = code.replace('#include "jadro/gui/bursztyn_gui.h"', includes_new)
 
 # 2. State and Constants
 state_old = """constexpr int SHELL_X_START = 20;

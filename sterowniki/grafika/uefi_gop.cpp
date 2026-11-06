@@ -16,7 +16,7 @@
  */
 
 #include "uefi_gop.h"
-#include "../../diagnostyka_klatek_startu.h"
+#include "diagnostyka_klatek_startu.h"
 #include "../czas/hpet.h"
 
 #include <stdint.h>

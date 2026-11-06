@@ -78,7 +78,9 @@ def weryfikuj(wykaz, publiczny=PUB, pakiet=None):
 
 def test_format_host():
     bina = os.path.join(tempfile.gettempdir(), "test_format_host_bursztyn")
-    c = subprocess.run(["g++", "-std=c++17", "-O1", "-o", bina,
+    c = subprocess.run(["g++", "-std=c++17", "-O1",
+                        "-I.", "-Ijadro/aktualizacja", "-Ijadro/fs", "-Ijadro/bws", "-Ijadro/rdzen",
+                        "-o", bina,
                         os.path.join(NARZ, "test_format_host.cpp")],
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if c.returncode != 0:

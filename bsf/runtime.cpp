@@ -1,5 +1,5 @@
 #include "runtime.h"
-#include "../bursztyn_gui.h"
+#include "bursztyn_gui.h"
 #include <string.h>
 namespace BSF {
 namespace {

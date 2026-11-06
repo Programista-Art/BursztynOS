@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include "../bws_zdarzenia.h"
+#include "bws_zdarzenia.h"
 
 namespace BursztynUI {
 

@@ -1,7 +1,7 @@
 /* Bursztyn OS - Eksplorator Plikow. Ring 3 korzysta tylko z GUI/BWS. */
-#include "../../bursztyn_gui.h"
-#include "../../plik_popup_ui.h"
-#include "../../desktop_entries.h"
+#include "bursztyn_gui.h"
+#include "plik_popup_ui.h"
+#include "desktop_entries.h"
 #include "../../bursztyn_ui/menu_tekstowe.h"
 #include "../../bursztyn_ui/pasek_przewijania.h"
 #include "../../bursztyn_ui/tabela_wirtualna.h"

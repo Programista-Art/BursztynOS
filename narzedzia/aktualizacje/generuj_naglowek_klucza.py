@@ -20,7 +20,7 @@ def main():
                     help="Tryb zaufania (domyslnie: release)")
     ap.add_argument("--publiczny", default=None,
                     help="Sciezka do klucza publicznego PEM (domyslnie wg trybu)")
-    ap.add_argument("--wyjscie", default=os.path.join(REPO, "aktualizacja_klucz.h"),
+    ap.add_argument("--wyjscie", default=os.path.join(REPO, "jadro/aktualizacja/aktualizacja_klucz.h"),
                     help="Sciezka wyjsciowa naglowka (domyslnie: aktualizacja_klucz.h)")
     args = ap.parse_args()
 

@@ -9,13 +9,13 @@
  */
 
 #define BURSZTYN_UI_CZCIONKA_SYSTEMOWA 1
-#include "../../bursztyn_gui.h"
-#include "../../loader.h"
+#include "bursztyn_gui.h"
+#include "loader.h"
 #include "../../bursztyn_ui/bursztyn_ui.h"
-#include "../../bws_hda_diag.h"
-#include "../../plik_status.h"
-#include "../../test_dzwieku_trace.h"
-#include "../../wersja_systemu.h"
+#include "bws_hda_diag.h"
+#include "plik_status.h"
+#include "test_dzwieku_trace.h"
+#include "wersja_systemu.h"
 #include "../../sterowniki/dzwiek/hda_diag_format.h"
 
 #include <stdint.h>

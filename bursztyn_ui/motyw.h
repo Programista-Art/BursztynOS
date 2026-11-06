@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 #include "typy.h"
-#include "../bursztyn_gui.h"
+#include "bursztyn_gui.h"
 
 namespace BursztynUI {
 

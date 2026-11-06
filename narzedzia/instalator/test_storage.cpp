@@ -1,10 +1,10 @@
 // Host exercises the production partition/GPT/FAT and BSP2 code with a faulting backend.
-#include "../../storage_format.h"
-#include "../../psf.h"
-#include "../../diagnostyka_systemu_format.h"
-#include "../../zegar-rtc.h"
-#include "../../instalator_format.h"
-#include "../../tapety.h"
+#include "storage_format.h"
+#include "psf.h"
+#include "diagnostyka_systemu_format.h"
+#include "../../sterowniki/czas/zegar-rtc.h"
+#include "instalator_format.h"
+#include "tapety.h"
 #include <array>
 #include <map>
 #include <vector>
@@ -313,21 +313,21 @@ static bool exists(const char* path) {psf_metadane m{};return pobierz_metadane_t
 static void native_move_cases() {
     unsigned start=checks;
     CHECK(utworz_katalog("/desktop"));CHECK(utworz_katalog("/dest"));
-    for(const char* name:{"empty","one","nested","żółć"}) {
+    for(const char* name:{"empty","one","nested","���"}) {
         std::string src=std::string("/desktop/")+name,dst=std::string("/dest/")+name;
         CHECK(utworz_katalog(src.c_str()));
-        if(strcmp(name,"empty")) {CHECK(utworz_katalog((src+"/sub").c_str()));CHECK(utworz_plik((src+"/sub/źródło.txt").c_str()));CHECK(zapisz_do_pliku((src+"/sub/źródło.txt").c_str(),"payload",7));}
+        if(strcmp(name,"empty")) {CHECK(utworz_katalog((src+"/sub").c_str()));CHECK(utworz_plik((src+"/sub/�r�d�o.txt").c_str()));CHECK(zapisz_do_pliku((src+"/sub/�r�d�o.txt").c_str(),"payload",7));}
         CHECK(przenies_twor(src.c_str(),"/dest"));CHECK(!exists(src.c_str()));CHECK(exists(dst.c_str()));
-        if(strcmp(name,"empty")) {char b[8]{};uint32_t got=0;CHECK(czytaj_fragment_pliku((dst+"/sub/źródło.txt").c_str(),0,b,7,&got));CHECK(got==7 && !memcmp(b,"payload",7));}
+        if(strcmp(name,"empty")) {char b[8]{};uint32_t got=0;CHECK(czytaj_fragment_pliku((dst+"/sub/�r�d�o.txt").c_str(),0,b,7,&got));CHECK(got==7 && !memcmp(b,"payload",7));}
         CHECK(przenies_twor(dst.c_str(),"/desktop"));CHECK(exists(src.c_str()));CHECK(!exists(dst.c_str()));CHECK(!psf_test_lock_held());
     }
     CHECK(utworz_plik("/desktop/file"));CHECK(przenies_twor("/desktop/file","/dest"));CHECK(!exists("/desktop/file"));CHECK(exists("/dest/file"));
-    CHECK(przenies_twor("/desktop/nested","/desktop"));CHECK(exists("/desktop/nested/sub/źródło.txt"));
-    CHECK(zmien_nazwe_tworu("/desktop/nested","renamed"));CHECK(exists("/desktop/renamed/sub/źródło.txt"));
+    CHECK(przenies_twor("/desktop/nested","/desktop"));CHECK(exists("/desktop/nested/sub/�r�d�o.txt"));
+    CHECK(zmien_nazwe_tworu("/desktop/nested","renamed"));CHECK(exists("/desktop/renamed/sub/�r�d�o.txt"));
     CHECK(utworz_katalog("/dest/one"));
     struct Case {const char* src;const char* dst;PsfMoveWynik result;};
     for(auto c:{Case{"/desktop/one","/dest",PSF_MOVE_COLLISION},Case{"/desktop/one","/desktop/one",PSF_MOVE_SELF_DESCENDANT},Case{"/desktop/one","/desktop/one/sub",PSF_MOVE_SELF_DESCENDANT},Case{"/desktop/empty","/missing",PSF_MOVE_BAD_DESTINATION},Case{"/desktop/empty","/dest/file",PSF_MOVE_BAD_DESTINATION},Case{"/missing","/dest",PSF_MOVE_MISSING_SOURCE},Case{"/","/dest",PSF_MOVE_ROOT},Case{"relative","/dest",PSF_MOVE_BAD_PATH}}) {
-        CHECK(psf_przenies_twor_wynik(c.src,c.dst)==c.result);CHECK(!psf_test_lock_held());CHECK(exists("/desktop/one/sub/źródło.txt"));CHECK(exists("/desktop/empty"));CHECK(!exists("/dest/empty"));CHECK(utworz_plik("/probe"));CHECK(usun_twor("/probe"));
+        CHECK(psf_przenies_twor_wynik(c.src,c.dst)==c.result);CHECK(!psf_test_lock_held());CHECK(exists("/desktop/one/sub/�r�d�o.txt"));CHECK(exists("/desktop/empty"));CHECK(!exists("/dest/empty"));CHECK(utworz_plik("/probe"));CHECK(usun_twor("/probe"));
     }
     for(unsigned stage:{1U,2U,3U}) {
         psf_test_move_failure(stage);CHECK(!przenies_twor("/desktop/empty","/dest"));psf_test_move_failure(0);

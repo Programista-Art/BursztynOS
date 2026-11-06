@@ -9,10 +9,10 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "../../bws_api.h"
-#include "../../bws_zdarzenia.h"
-#include "../../bws_nowoczesne.h"
-#include "../../skladacz_obrazu.h"
+#include "bws_api.h"
+#include "bws_zdarzenia.h"
+#include "bws_nowoczesne.h"
+#include "skladacz_obrazu.h"
 
 // =====================================================================
 // KANONICZNY UKŁAD PAMIĘCI APLIKACJI RING 3

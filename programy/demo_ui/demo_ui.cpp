@@ -14,7 +14,7 @@
  *  - Podpowiedz (Tooltips) dla kontrolek
  */
 
-#include "../../loader.h"
+#include "loader.h"
 #include "../../bursztyn_ui/bursztyn_ui.h"
 
 using namespace BursztynUI;

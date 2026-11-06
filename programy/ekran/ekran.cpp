@@ -1,5 +1,5 @@
 /* Ustawienia ekranu: pojedyncze okno, prawdziwe mozliwosci HAL przez BWS69/70. */
-#include "../../loader.h"
+#include "loader.h"
 #include "../../bursztyn_ui/bursztyn_ui.h"
 #include "klient.h"
 #include "ekran_okno.h"

@@ -1,6 +1,6 @@
 #pragma once
-#include "../../bursztyn_gui.h"
-#include "../../tapety_format.h"
+#include "bursztyn_gui.h"
+#include "tapety_format.h"
 #include "../../narzedzia/tapety-btp/tapetybtp.h"
 
 // Dziesiec malych buforow; jeden plik i jeden obraz zrodlowy naraz.

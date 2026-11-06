@@ -13,7 +13,7 @@ Plik obejmuje:
 
 ### Bezpieczeństwo runtime (2026-11-04)
 
-Zob. [bursztyn_security_hardening_stack_fuzz_2026-11-04.md](bursztyn_security_hardening_stack_fuzz_2026-11-04.md) oraz metryki w [security-hardening-2026-11-04/](security-hardening-2026-11-04/):
+Zob. [bursztyn_security_hardening_stack_fuzz_2026-11-04.md](audyty/bursztyn_security_hardening_stack_fuzz_2026-11-04.md) oraz metryki w [security-hardening-2026-11-04/](security-hardening-2026-11-04/):
 
 - SSP Ring 0/3 (`-fstack-protector-strong`, global guard),
 - 7 fuzzerów (BWS / BUR / BSP2) + smoke/extended,
@@ -124,19 +124,19 @@ Duże rozbudowanie (+467 / −132):
 - Sprawdzanie dostępności urządzeń VirtIO (`Assert-QemuVirtioDevices`).
 - Topologia PCI zgodna z Linux: **Intel HDA** + `virtio-blk` → `net` → `rng` → `gpu` → keyboard → mouse.
 - Backend audio hosta: `none` (unika błędu DirectSound przy zachowaniu HDA w gościu).
-- Audyty launchera (`narzedzia/test_windows_launcher_config.py`).
+- Audyty launchera (`testy/test_windows_launcher_config.py`).
 
 ### 2.8. Testy
 
 Zaktualizowane / rozbudowane:
 
-- `narzedzia/test_xhci_boot_coexistence.cpp`
-- `narzedzia/test_xhci_physical_mouse.cpp`
-- `narzedzia/test_xhci_pointer.cpp`
-- `narzedzia/test_virtio_pci.cpp`
-- `narzedzia/test_powitanie.cpp`
-- `narzedzia/test_input_diagnostic_parity.py`
-- `narzedzia/test_windows_launcher_config.py`
+- `testy/test_xhci_boot_coexistence.cpp`
+- `testy/test_xhci_physical_mouse.cpp`
+- `testy/test_xhci_pointer.cpp`
+- `testy/test_virtio_pci.cpp`
+- `testy/test_powitanie.cpp`
+- `testy/test_input_diagnostic_parity.py`
+- `testy/test_windows_launcher_config.py`
 
 Artefakty walidacji (nieśledzone): `.hda-test/`, `.pointingtest/coexistence-validation/parity/…`, `.pointingtest/launcher-audit/…`.
 

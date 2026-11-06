@@ -7,7 +7,7 @@ def replace_lines(start, end, new_content):
 
 # 1. Includes (lines 1-13)
 # Actually, I'll just append includes at the top.
-lines.insert(37, '#include "bws_nowoczesne.h"\n#include "motyw.h"\n#include "bursztyn_ui/czcionka.h"\n#include "bursztyn_ui/rysowanie.h"\n#include "bursztyn_ui/pasek_przewijania.h"\nusing namespace BursztynUI;\n')
+lines.insert(37, '#include "jadro/bws/bws_nowoczesne.h"\n#include "jadro/gui/motyw.h"\n#include "bursztyn_ui/czcionka.h"\n#include "bursztyn_ui/rysowanie.h"\n#include "bursztyn_ui/pasek_przewijania.h"\nusing namespace BursztynUI;\n')
 
 # 2. _start (lines 2353 to end)
 start_new = """extern "C"

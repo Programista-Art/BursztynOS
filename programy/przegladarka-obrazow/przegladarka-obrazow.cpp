@@ -3,7 +3,7 @@
  * Ring 3, paczka .cebula, otwieranie .bmp (24/32, BI_RGB)
  * Zgodna z bursztyn_gui.h, BWS, PZB, loaderem
  */
-#include "../../bursztyn_gui.h"
+#include "bursztyn_gui.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>

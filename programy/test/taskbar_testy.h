@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../../ui_skala.h"
-#include "../../bursztyn_gui.h"
+#include "ui_skala.h"
+#include "bursztyn_gui.h"
 #include "../../obrazy/png_dekoder.h"
 
 static void wykonaj_testy_taskbara() {

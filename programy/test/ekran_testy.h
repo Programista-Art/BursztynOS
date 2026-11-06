@@ -1,9 +1,9 @@
 #pragma once
 #include "../ekran/klient.h"
 #include "../ekran/ekran_okno.h"
-#include "../../pulpit_geometria.h"
-#include "../../zegar_ui.h"
-#include "../../legacy_ui.h"
+#include "pulpit_geometria.h"
+#include "zegar_ui.h"
+#include "legacy_ui.h"
 // Tymczasowa diagnostyka regresji live-resize: taguje ktora asercja padla.
 // Nie zmienia semantyki PASS/FAIL, tylko dokleja [EKRAN LIVE FAIL] <tag>.
 static void bws_sprawdz_tag(bool warunek, const char* tag) {

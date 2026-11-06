@@ -1,6 +1,6 @@
 import re
 
-with open("backend.cpp", "r") as f:
+with open("jadro/gui/backend.cpp", "r") as f:
     code = f.read()
 
 # Replace vypisz_pomoc() entirely
@@ -100,7 +100,7 @@ code = code.replace('wypisz("powloka> ");', '')
 # The new UI will handle the prompt, so we don't need the prompt printed before pobierz_linie
 # We will just print the typed command to the history log!
 
-with open("backend.cpp", "w") as f:
+with open("jadro/gui/backend.cpp", "w") as f:
     f.write(code)
 
 print("Backend patched.")

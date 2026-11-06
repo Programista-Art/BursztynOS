@@ -2,7 +2,9 @@
 
 Mapa lokalnych gate’ów bezpieczeństwa i regresji Bursztyn OS. Nie wymaga GitHub Actions — wystarczy Linux/WSL z cross-toolchainem `x86_64-linux-gnu-*`, `make`, `python3` i QEMU.
 
-Szczegóły hardeningu (SSP, fuzz, ASLR): [bursztyn_security_hardening_stack_fuzz_2026-11-04.md](bursztyn_security_hardening_stack_fuzz_2026-11-04.md).
+Źródła jądra leżą w `jadro/` (wariant B); mapa katalogów: [00_mapa_repozytorium.md](00_mapa_repozytorium.md). Po przenosinach źródeł: `make clean` przed pierwszym `make kernel` / gate’ami (stale `*.d`).
+
+Szczegóły hardeningu (SSP, fuzz, ASLR): [bursztyn_security_hardening_stack_fuzz_2026-11-04.md](audyty/bursztyn_security_hardening_stack_fuzz_2026-11-04.md).
 
 ---
 
@@ -97,5 +99,5 @@ Na samym Windowsie bez WSL suite nie zbuduje jądra — użyj WSL/Linux Mint zgo
 |---------|------|
 | [narzedzia/run_local_suite.py](../narzedzia/run_local_suite.py) | Orkiestrator warstw + JSON |
 | [narzedzia/run_fuzz_suite.py](../narzedzia/run_fuzz_suite.py) | Fuzz smoke / extended |
-| [narzedzia/fuzz/](../narzedzia/fuzz/) | Cele fuzz (BWS, BUR, BSP2) |
+| [testy/fuzz/](../testy/fuzz/) | Cele fuzz (BWS, BUR, BSP2) |
 | `make help` | Lista celów w tym sekcja lokalnej weryfikacji |

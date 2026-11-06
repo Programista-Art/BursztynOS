@@ -59,7 +59,7 @@ def main():
         for mode, iso in [('bsf', args.iso.resolve()), ('bitmap', bitmap_iso)]:
             print('Profiling ' + mode, flush=True)
             with (out / (mode + '.log')).open('w') as log:
-                subprocess.run([sys.executable, str(ROOT / 'narzedzia/test_husarz_qemu.py'),
+                subprocess.run([sys.executable, str(ROOT / 'testy/test_husarz_qemu.py'),
                                 '--font-profile-only', '--iso', str(iso),
                                 '--kernel', str(args.kernel.resolve()),
                                 '--output', str(out / mode), '--timeout', '1800'],

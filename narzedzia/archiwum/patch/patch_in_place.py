@@ -4,7 +4,7 @@ with open("shell.cpp.bak", "r") as f:
     code = f.read()
 
 # 1. Add headers
-code = code.replace('#include "bursztyn_gui.h"', '#include "bursztyn_gui.h"\n#include "bws_nowoczesne.h"\n#include "motyw.h"\n#include "bursztyn_ui/czcionka.h"\n#include "bursztyn_ui/rysowanie.h"\n#include "bursztyn_ui/pasek_przewijania.h"\nusing namespace BursztynUI;\n')
+code = code.replace('#include "jadro/gui/bursztyn_gui.h"', '#include "jadro/gui/bursztyn_gui.h"\n#include "jadro/bws/bws_nowoczesne.h"\n#include "jadro/gui/motyw.h"\n#include "bursztyn_ui/czcionka.h"\n#include "bursztyn_ui/rysowanie.h"\n#include "bursztyn_ui/pasek_przewijania.h"\nusing namespace BursztynUI;\n')
 
 # 2. Replace shell_ekran array and geometry with logical buffer
 code = re.sub(r'char shell_ekran\[SHELL_ROWS\]\[SHELL_COLS \+ 1\] = \{\};.*?int shell_drag_window_y = 0;',

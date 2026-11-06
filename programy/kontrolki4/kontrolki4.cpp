@@ -5,7 +5,7 @@
  * TabelaWirtualna, Powiadomienie i MenedzerPowiadomien,
  * oraz infrastruktura PolecenieUI, MenuKontekstowe i motywy systemowe.
  */
-#include "../../loader.h"
+#include "loader.h"
 #include "../../bursztyn_ui/bursztyn_ui.h"
 
 using namespace BursztynUI;

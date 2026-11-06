@@ -1,4 +1,4 @@
-#include "../../diagnostyka_systemu.h"
+#include "diagnostyka_systemu.h"
 // OHCI 1.0 root-port HID driver. Polled schedules, no IRQ callbacks. DMA
 // objects have controller lifetime, including failed enumeration and unplug.
 #include "sterowniki/usb/ohci.h"

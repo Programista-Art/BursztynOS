@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "../../aktualizacja_format.h"
+#include "aktualizacja_format.h"
 
 static int zdane = 0;
 static int zlane = 0;

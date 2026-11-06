@@ -1,5 +1,5 @@
 #pragma once
-#include "../../http_target.h"
+#include "http_target.h"
 #include "document.h"
 namespace Husarz {
 constexpr size_t MaxUrl = 2048;

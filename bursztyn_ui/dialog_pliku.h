@@ -12,7 +12,7 @@
 #include "etykieta.h"
 #include "panel.h"
 #include "panel_dokowany.h"
-#include "../bursztyn_gui.h"
+#include "bursztyn_gui.h"
 
 namespace BursztynUI {
 

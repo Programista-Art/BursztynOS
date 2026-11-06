@@ -1,4 +1,4 @@
-#include "../../../tapety_format.h"
+#include "tapety_format.h"
 #include "../tapetybtp.h"
 #include <cstdio>
 #include <cstdlib>
