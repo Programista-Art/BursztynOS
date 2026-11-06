@@ -160,6 +160,21 @@ extern "C" uint8_t _binary_ikonki_nav_dalej_png_start[], _binary_ikonki_nav_dale
 extern "C" uint8_t _binary_ikonki_nav_wgore_png_start[], _binary_ikonki_nav_wgore_png_end[];
 extern "C" uint8_t _binary_ikonki_folder_png_start[], _binary_ikonki_folder_png_end[];
 extern "C" uint8_t _binary_ikonki_plik_png_start[], _binary_ikonki_plik_png_end[];
+extern "C" uint8_t _binary_ikonki_app_notatnik_png_start[], _binary_ikonki_app_notatnik_png_end[];
+extern "C" uint8_t _binary_ikonki_app_kalkulator_png_start[], _binary_ikonki_app_kalkulator_png_end[];
+extern "C" uint8_t _binary_ikonki_app_husarz_png_start[], _binary_ikonki_app_husarz_png_end[];
+extern "C" uint8_t _binary_ikonki_app_testy_png_start[], _binary_ikonki_app_testy_png_end[];
+extern "C" uint8_t _binary_ikonki_app_snake_png_start[], _binary_ikonki_app_snake_png_end[];
+extern "C" uint8_t _binary_ikonki_app_eksplorator_png_start[], _binary_ikonki_app_eksplorator_png_end[];
+extern "C" uint8_t _binary_ikonki_app_obrazy_png_start[], _binary_ikonki_app_obrazy_png_end[];
+extern "C" uint8_t _binary_ikonki_app_demo_ui_png_start[], _binary_ikonki_app_demo_ui_png_end[];
+extern "C" uint8_t _binary_ikonki_app_kontrolki2_png_start[], _binary_ikonki_app_kontrolki2_png_end[];
+extern "C" uint8_t _binary_ikonki_app_kontrolki3_png_start[], _binary_ikonki_app_kontrolki3_png_end[];
+extern "C" uint8_t _binary_ikonki_app_kontrolki4_png_start[], _binary_ikonki_app_kontrolki4_png_end[];
+extern "C" uint8_t _binary_ikonki_app_aktualizacje_png_start[], _binary_ikonki_app_aktualizacje_png_end[];
+extern "C" uint8_t _binary_ikonki_app_ustawienia_png_start[], _binary_ikonki_app_ustawienia_png_end[];
+extern "C" uint8_t _binary_ikonki_app_test_dzwieku_png_start[], _binary_ikonki_app_test_dzwieku_png_end[];
+extern "C" uint8_t _binary_ikonki_app_diagnostyka_png_start[], _binary_ikonki_app_diagnostyka_png_end[];
 extern "C" uint8_t _binary_dane_sponsorze_mecenasi_txt_start[];
 extern "C" uint8_t _binary_dane_sponsorze_mecenasi_txt_end[];
 extern "C" uint8_t _binary_dane_sponsorze_sponsorzy_txt_start[];
@@ -1278,6 +1293,21 @@ void instaluj_wbudowane_programy() {
         {"/ikonki/nav_wgore.png",_binary_ikonki_nav_wgore_png_start,_binary_ikonki_nav_wgore_png_end},
         {"/ikonki/folder.png",_binary_ikonki_folder_png_start,_binary_ikonki_folder_png_end},
         {"/ikonki/plik.png",_binary_ikonki_plik_png_start,_binary_ikonki_plik_png_end},
+        {"/ikonki/app_notatnik.png",_binary_ikonki_app_notatnik_png_start,_binary_ikonki_app_notatnik_png_end},
+        {"/ikonki/app_kalkulator.png",_binary_ikonki_app_kalkulator_png_start,_binary_ikonki_app_kalkulator_png_end},
+        {"/ikonki/app_husarz.png",_binary_ikonki_app_husarz_png_start,_binary_ikonki_app_husarz_png_end},
+        {"/ikonki/app_testy.png",_binary_ikonki_app_testy_png_start,_binary_ikonki_app_testy_png_end},
+        {"/ikonki/app_snake.png",_binary_ikonki_app_snake_png_start,_binary_ikonki_app_snake_png_end},
+        {"/ikonki/app_eksplorator.png",_binary_ikonki_app_eksplorator_png_start,_binary_ikonki_app_eksplorator_png_end},
+        {"/ikonki/app_obrazy.png",_binary_ikonki_app_obrazy_png_start,_binary_ikonki_app_obrazy_png_end},
+        {"/ikonki/app_demo_ui.png",_binary_ikonki_app_demo_ui_png_start,_binary_ikonki_app_demo_ui_png_end},
+        {"/ikonki/app_kontrolki2.png",_binary_ikonki_app_kontrolki2_png_start,_binary_ikonki_app_kontrolki2_png_end},
+        {"/ikonki/app_kontrolki3.png",_binary_ikonki_app_kontrolki3_png_start,_binary_ikonki_app_kontrolki3_png_end},
+        {"/ikonki/app_kontrolki4.png",_binary_ikonki_app_kontrolki4_png_start,_binary_ikonki_app_kontrolki4_png_end},
+        {"/ikonki/app_aktualizacje.png",_binary_ikonki_app_aktualizacje_png_start,_binary_ikonki_app_aktualizacje_png_end},
+        {"/ikonki/app_ustawienia.png",_binary_ikonki_app_ustawienia_png_start,_binary_ikonki_app_ustawienia_png_end},
+        {"/ikonki/app_test_dzwieku.png",_binary_ikonki_app_test_dzwieku_png_start,_binary_ikonki_app_test_dzwieku_png_end},
+        {"/ikonki/app_diagnostyka.png",_binary_ikonki_app_diagnostyka_png_start,_binary_ikonki_app_diagnostyka_png_end},
     };
     for(const auto& asset:power_assets){
         uint32_t bytes=0;

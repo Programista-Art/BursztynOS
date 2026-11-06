@@ -59,7 +59,18 @@ constexpr int DEF_W = 900;
 constexpr int DEF_H = 600;
 constexpr int MIN_W = 600;
 constexpr int MIN_H = 400;
-constexpr int TASKBAR_H = 40;
+static int taskbar_h() {
+    GuiMonitorInfo mon{};
+    if (gui_pobierz_monitor(0, &mon) && mon.work_wys > 0 && mon.wys > mon.work_wys)
+        return mon.wys - mon.work_wys;
+    return ui_skaluj(40, ui_skala_procent);
+}
+static int work_h(int screen_h) {
+    GuiMonitorInfo mon{};
+    if (gui_pobierz_monitor(0, &mon) && mon.work_wys > 0) return mon.work_wys;
+    int h = screen_h - taskbar_h();
+    return h > 0 ? h : screen_h;
+}
 constexpr int Z_ORDER = 10;
 #define TITLE_H ui_skaluj(28,ui_skala_procent)
 #define MARGIN ui_skaluj(6, ui_skala_procent)
@@ -1503,7 +1514,7 @@ public:
     void clamp() {
         if (screen_w < 1) screen_w = 1;
         if (screen_h < 1) screen_h = 1;
-        int available_h = screen_h - TASKBAR_H;
+        int available_h = work_h(screen_h);
         if (available_h < 1) available_h = screen_h;
         const int effective_min_w = screen_w < MIN_W ? screen_w : MIN_W;
         const int effective_min_h = available_h < MIN_H ? available_h : MIN_H;
@@ -1531,7 +1542,7 @@ public:
             x = 0;
             y = 0;
             w = screen_w;
-            h = screen_h - TASKBAR_H;
+            h = work_h(screen_h);
             if (h < 1) h = screen_h;
         } else {
             x = restore_x;
@@ -2415,7 +2426,7 @@ private:
     int hover_entry_;
     char input_utf8_[5]{};size_t input_bytes_{0},input_expected_{0};
     BursztynUI::Prostokat owner() const {return {window_.x+2,window_.y+TITLE_H,window_.w-4,window_.h-TITLE_H-2};}
-    BursztynUI::Prostokat work() const {return {0,0,window_.screen_w,window_.screen_h-TASKBAR_H};}
+    BursztynUI::Prostokat work() const {return {0,0,window_.screen_w,work_h(window_.screen_h)};}
     void paint(BursztynUI::Kontrolka& c) {c.rysuj(drawing_,true);}
     static void blit_icon(BursztynUI::KontekstRysowania& ctx, BursztynUI::Prostokat dst,
                           const uint32_t* src, int side) {
@@ -2719,11 +2730,15 @@ extern "C" __attribute__((noreturn)) void _start() {
         if (!gui_czekaj_na_zdarzenie(&event)) continue;
         if(event.typ==BWS_ZDARZENIE_MOTYW_ZMIENIONY) {view.theme_refresh();continue;}
         if (event.typ == BWS_ZDARZENIE_EKRAN) {
-            view.close_transient();if(ui_skala_poprawna(event.kod))ui_skala_procent=event.kod;
-            gui_pobierz_rozdzielczosc(&window.screen_w,&window.screen_h);
+            view.close_transient();
+            GuiMonitorInfo mon{};
+            const uint32_t scale=gui_pobierz_monitor(0,&mon)?mon.scale_x1000/10:event.kod;
+            if(ui_skala_poprawna(scale))ui_skala_procent=scale;
+            if(mon.szer>0&&mon.wys>0){window.screen_w=mon.szer;window.screen_h=mon.wys;}
+            else gui_pobierz_rozdzielczosc(&window.screen_w,&window.screen_h);
             if (window.maximized) {
                 window.x=0; window.y=0; window.w=window.screen_w;
-                window.h=window.screen_h-TASKBAR_H;
+                window.h=work_h(window.screen_h);
             } else {
                 window.w=window.restore_w; window.h=window.restore_h;
             }

@@ -36,6 +36,8 @@ class Surface : public PowierzchniaPopup, private ObslugaWidokuMenu {
   void reset(){hovered=pressed=-1;layout_empty();uniewaznij();}
   void rysuj_siebie(KontekstRysowania& ctx)override{
    auto& m=owner->model;auto s=skala_dpi_;int row=owner->row_height;
+   const int icon_side=owner->list_icon_side();
+   const int text_x=8*s+(icon_side?icon_side+6*s:0);
    ctx.dodaj_przyciecie({0,0,obszar_.szerokosc,obszar_.wysokosc});
    for(int visible=0;visible<owner->rows&&visible+m.first<m.count;++visible){int i=visible+m.first;bool selected=i==m.selected;
     auto style=Motyw::pobierz_domyslny().styl_menu;
@@ -43,12 +45,19 @@ class Surface : public PowierzchniaPopup, private ObslugaWidokuMenu {
     if(selected&&i!=pressed&&i!=hovered){state.tlo=motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE);state.tekst=motyw_kolor_tekstu_zaznaczenia();}
     ctx.rysuj_prostokat({0,visible*row,obszar_.szerokosc-8*s,row},state.tlo);
     if(selected&&czy_ma_fokus())ctx.rysuj_ramke({0,visible*row,obszar_.szerokosc-8*s,row},motyw_kolor(MOTYW_KOLOR_AKCENT),s);
-    const char* name=apps[m.matches[i]].name;char text[192]{};int n=0;while(name[n]&&n<180){text[n]=name[n];++n;}text[n]=0;
-    int available=obszar_.szerokosc-28*s;
+    const int app_index=m.matches[i];
+    if(icon_side>0){
+     auto& icon=owner->list_icons[app_index];
+     if(icon.piksele()&&icon.bok()==icon_side)
+      rysuj_png(ctx,{8*s,visible*row+(row-icon_side)/2,icon_side,icon_side},icon.piksele(),icon_side,true);
+    }
+    const char* name=apps[app_index].name;char text[192]{};int n=0;while(name[n]&&n<180){text[n]=name[n];++n;}text[n]=0;
+    int available=obszar_.szerokosc-text_x-20*s;
+    if(available<1)available=1;
     if(CzcionkaUI::zmierz_tekst(text,s)>available){
      while(n){n=int(CzcionkaUI::poprzedni_znak(text,n));text[n]=char(0xe2);text[n+1]=char(0x80);text[n+2]=char(0xa6);text[n+3]=0;if(CzcionkaUI::zmierz_tekst(text,s)<=available)break;}
     }
-    ctx.rysuj_tekst({8*s,visible*row+(row-CzcionkaUI::pobierz_wysokosc(s))/2},text,state.tekst,s);
+    ctx.rysuj_tekst({text_x,visible*row+(row-CzcionkaUI::pobierz_wysokosc(s))/2},text,state.tekst,s);
    }
    if(m.count>owner->rows){int h=obszar_.wysokosc;int thumb=h*owner->rows/m.count;if(thumb<8*s)thumb=8*s;
     int y=(h-thumb)*m.first/(m.count-owner->rows);ctx.rysuj_prostokat({obszar_.szerokosc-4*s,y,3*s,thumb},motyw_kolor(MOTYW_KOLOR_RAMKA));}
@@ -72,7 +81,7 @@ class Surface : public PowierzchniaPopup, private ObslugaWidokuMenu {
  public:
   explicit Power(Surface* p):PrzyciskObrazkowy(""),owner(p){
    ustaw_tryb(TrybPrzyciskuObrazkowego::TylkoIkona);ustaw_ikone(102);
-   ustaw_preferowany_rozmiar({36,36});ustaw_podpowiedz("Zasilanie");
+   auto s=ui_skala();ustaw_preferowany_rozmiar({36*s,36*s});ustaw_podpowiedz("Zasilanie");
   }
   void rysuj_tlo_i_ramke(KontekstRysowania& ctx,const StylStanu& state)override{
    // Open is an active button state, independent of keyboard focus ownership.
@@ -92,7 +101,10 @@ class Surface : public PowierzchniaPopup, private ObslugaWidokuMenu {
  };
  Search* search;Results* list;Power* power;
  IkonaPNG power_icons[5];
+ IkonaPNG list_icons[Count];
+ int list_icon_side_=0;
  Menu power_items;WidokMenuPopup power_popup;
+ int list_icon_side()const{return list_icon_side_;}
  void prepare_icons(){
   power_icons[0].przygotuj("/ikonki/przyciskzasilania.png",22*skala_dpi_);
   power->ustaw_obraz_ikony(&power_icons[0]);
@@ -102,6 +114,12 @@ class Surface : public PowierzchniaPopup, private ObslugaWidokuMenu {
    {19,"/ikonki/przyciskzamknij.png"},{18,"/ikonki/przyciskuruchomponownie.png"}};
   for(unsigned i=0;i<4;++i){power_icons[i+1].przygotuj(mapping[i].path,18*skala_dpi_);
    power_items.znajdz(mapping[i].id)->ustaw_obraz_ikony(&power_icons[i+1]);}
+  list_icon_side_=20*skala_dpi_;
+  if(list_icon_side_<12)list_icon_side_=12;
+  if(list_icon_side_>48)list_icon_side_=48;
+  for(int i=0;i<Count;++i){
+   if(apps[i].icon_png)list_icons[i].przygotuj(apps[i].icon_png,list_icon_side_);
+  }
  }
  Prostokat place_power()const{
   auto work=events.popups.obszar_roboczy_ekranu();auto button=power->obszar_ekranu();auto s=skala_dpi_;
@@ -188,7 +206,7 @@ public:
   events.reset_input();pending=-1;list->reset();search->ustaw_tekst("");model.filter("");
   events.geometria({0,0,work.szerokosc,work.wysokosc},work);auto s=ui_skala();
   if(x<work.x)x=work.x;
-  int width=340*s;for(auto& app:apps){int measured=CzcionkaUI::zmierz_tekst(app.name,s)+44*s;if(measured>width)width=measured;}
+  int width=340*s;for(auto& app:apps){int measured=CzcionkaUI::zmierz_tekst(app.name,s)+68*s;if(measured>width)width=measured;}
   if(width>work.prawy()-x)width=work.prawy()-x;
   if(width>2048-2*s)width=2048-2*s;
   int height=600*s;if(height>work.wysokosc-12*s)height=work.wysokosc-12*s;

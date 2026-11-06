@@ -69,3 +69,52 @@ inline bool skaluj_obraz(const uint32_t* src, uint32_t sw, uint32_t sh, size_t s
     }
     return true;
 }
+
+// Bilinear (fixed-point 16.16), bez FPU. Tylko dla malych ikon UI (IkonaPNG).
+// Probuje kanaly RGBA niezaleznie; tlo wypelniane przed zapisem jak w skaluj_obraz.
+inline bool skaluj_obraz_bilinear(const uint32_t* src, uint32_t sw, uint32_t sh, size_t src_bytes,
+                                  uint32_t* dst, uint32_t dw, uint32_t dh, uint32_t stride,
+                                  size_t dst_bytes, TrybSkalowaniaObrazu tryb, uint32_t tlo) {
+    GeometriaObrazu g{};
+    if (!src || !dst || !geometria_obrazu(sw, sh, dw, dh, tryb, &g) || stride < dw ||
+        !g.dst_w || !g.dst_h || !g.src_w || !g.src_h ||
+        static_cast<uint64_t>(sw) * sh * 4 > src_bytes ||
+        static_cast<uint64_t>(stride) * dh * 4 > dst_bytes) return false;
+    for (uint32_t y = 0; y < dh; ++y)
+        for (uint32_t x = 0; x < dw; ++x) dst[static_cast<size_t>(y) * stride + x] = tlo;
+    const uint32_t x_step = g.dst_w > 1
+        ? static_cast<uint32_t>(((uint64_t(g.src_w) - 1U) << 16) / (g.dst_w - 1U)) : 0;
+    const uint32_t y_step = g.dst_h > 1
+        ? static_cast<uint32_t>(((uint64_t(g.src_h) - 1U) << 16) / (g.dst_h - 1U)) : 0;
+    for (uint32_t y = 0; y < g.dst_h; ++y) {
+        const uint32_t fy = y_step * y;
+        const uint32_t sy0 = g.src_y + (fy >> 16);
+        uint32_t sy1 = sy0 + 1;
+        if (sy1 >= g.src_y + g.src_h) sy1 = g.src_y + g.src_h - 1;
+        const uint32_t wy = fy & 0xffffU;
+        const uint32_t* row0 = src + static_cast<size_t>(sy0) * sw;
+        const uint32_t* row1 = src + static_cast<size_t>(sy1) * sw;
+        uint32_t* out = dst + static_cast<size_t>(y + g.dst_y) * stride + g.dst_x;
+        for (uint32_t x = 0; x < g.dst_w; ++x) {
+            const uint32_t fx = x_step * x;
+            const uint32_t sx0 = g.src_x + (fx >> 16);
+            uint32_t sx1 = sx0 + 1;
+            if (sx1 >= g.src_x + g.src_w) sx1 = g.src_x + g.src_w - 1;
+            const uint32_t wx = fx & 0xffffU;
+            const uint32_t c00 = row0[sx0], c10 = row0[sx1], c01 = row1[sx0], c11 = row1[sx1];
+            uint32_t out_c = 0;
+            for (int shift = 0; shift <= 24; shift += 8) {
+                const uint32_t p00 = (c00 >> shift) & 0xffU;
+                const uint32_t p10 = (c10 >> shift) & 0xffU;
+                const uint32_t p01 = (c01 >> shift) & 0xffU;
+                const uint32_t p11 = (c11 >> shift) & 0xffU;
+                const uint32_t top = p00 * (65536U - wx) + p10 * wx;
+                const uint32_t bot = p01 * (65536U - wx) + p11 * wx;
+                const uint32_t mix = ((top >> 16) * (65536U - wy) + (bot >> 16) * wy) >> 16;
+                out_c |= (mix & 0xffU) << shift;
+            }
+            if (out_c != 0) out[x] = out_c;
+        }
+    }
+    return true;
+}

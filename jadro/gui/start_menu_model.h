@@ -1,15 +1,26 @@
 #pragma once
 #include "bursztyn_ui/czcionka.h"
 namespace StartMenu {
-struct App {const char* name;const char* alias;int action;};
+struct App {const char* name;const char* alias;int action;const char* icon_png;};
 inline constexpr App apps[]={
- {"Powłoka Bursztyna","terminal shell",0},{"Eksplorator Plików","pliki foldery",1},
- {"Notatnik","tekst",2},{"Kalkulator","liczenie",3},{"Husarz","przeglądarka internet",4},
- {"Przeglądarka Obrazów","zdjęcia",5},{"Demo BursztynUI","",6},
- {"Kontrolki 2","",7},{"Kontrolki 3","",8},{"Kontrolki 4","",9},
- {"Testy systemu","",10},{"Tapety","",11},{"Ustawienia ekranu","monitor rozdzielczość",12},
- {"Aktualizacje Systemu","",13},{"Test dźwięku","audio",15},
- {"Diagnostyka systemu","",16},{"Snake","gry",21},{"Ustawienia","czcionki font",20}};
+ {"Powłoka Bursztyna","terminal shell",0,nullptr},
+ {"Eksplorator Plików","pliki foldery",1,"/ikonki/app_eksplorator.png"},
+ {"Notatnik","tekst",2,"/ikonki/app_notatnik.png"},
+ {"Kalkulator","liczenie",3,"/ikonki/app_kalkulator.png"},
+ {"Husarz","przeglądarka internet",4,"/ikonki/app_husarz.png"},
+ {"Przeglądarka Obrazów","zdjęcia",5,"/ikonki/app_obrazy.png"},
+ {"Demo BursztynUI","",6,"/ikonki/app_demo_ui.png"},
+ {"Kontrolki 2","",7,"/ikonki/app_kontrolki2.png"},
+ {"Kontrolki 3","",8,"/ikonki/app_kontrolki3.png"},
+ {"Kontrolki 4","",9,"/ikonki/app_kontrolki4.png"},
+ {"Testy systemu","",10,"/ikonki/app_testy.png"},
+ {"Tapety","",11,nullptr},
+ {"Ustawienia ekranu","monitor rozdzielczość",12,nullptr},
+ {"Aktualizacje Systemu","",13,"/ikonki/app_aktualizacje.png"},
+ {"Test dźwięku","audio",15,"/ikonki/app_test_dzwieku.png"},
+ {"Diagnostyka systemu","",16,"/ikonki/app_diagnostyka.png"},
+ {"Snake","gry",21,"/ikonki/app_snake.png"},
+ {"Ustawienia","czcionki font",20,"/ikonki/app_ustawienia.png"}};
 constexpr int Count=sizeof(apps)/sizeof(apps[0]), QueryMax=64;
 inline uint32_t lower(uint32_t c) {
  if(c>='A'&&c<='Z')return c+32;

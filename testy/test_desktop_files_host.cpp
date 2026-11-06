@@ -13,6 +13,7 @@ void rysuj_tekst_wysrodkowany(int,int,int,int,int,uint32_t color,const char* tex
 static void (*test_layer_clear_observer)()=nullptr;
 void gui_odswiez_pulpit() {if(test_layer_clear_observer)test_layer_clear_observer();}
 int bws_utworz_warstwe(int,int,int,int,int) {return 1;}
+bool czytaj_fragment_pliku(const char*, uint64_t, char*, uint32_t, uint32_t*) { return false; }
 
 #include "desktop_usability_cases.h"
 #include "desktop_remaining_cases.h"

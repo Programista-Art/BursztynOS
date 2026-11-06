@@ -13,6 +13,7 @@
  */
 
 #include "bursztyn_gui.h"
+#include "bursztyn_ui/ikona_png.h"
 #include "plik_popup_ui.h"
 #include "start_menu_ui.h"
 #include "taskbar_clock.h"
@@ -89,6 +90,35 @@ int PULPIT_GRID_Y = 3;
 constexpr int PULPIT_REFRESH_TICKS = 3;
 
 
+// Heap-only: no static IkonaPNG (Ring3 forbids global ctors/dtors).
+static BursztynUI::IkonaPNG* pulpit_ikony_app=nullptr;
+static BursztynUI::IkonaPNG* pulpit_ikona_folder=nullptr;
+static BursztynUI::IkonaPNG* pulpit_ikona_plik=nullptr;
+static uint32_t pulpit_ikony_skala=0;
+
+static bool ensure_ikony_pulpitu(){
+    if(pulpit_ikony_app&&pulpit_ikona_folder&&pulpit_ikona_plik)return true;
+    if(!pulpit_ikony_app)pulpit_ikony_app=new BursztynUI::IkonaPNG[DesktopEntries::Count];
+    if(!pulpit_ikona_folder)pulpit_ikona_folder=new BursztynUI::IkonaPNG;
+    if(!pulpit_ikona_plik)pulpit_ikona_plik=new BursztynUI::IkonaPNG;
+    return pulpit_ikony_app&&pulpit_ikona_folder&&pulpit_ikona_plik;
+}
+
+static void przygotuj_ikony_pulpitu(){
+    if(!ensure_ikony_pulpitu())return;
+    const PulpitMetryki pulpit=pulpit_metryki(ui_skala_procent);
+    int side=pulpit.ikona_szer;
+    if(side<1)side=1;
+    if(side>128)side=128;
+    if(pulpit_ikony_skala==ui_skala_procent &&
+       pulpit_ikony_app[0].bok()==side)return;
+    for(int i=0;i<DesktopEntries::Count;++i)
+        pulpit_ikony_app[i].przygotuj(DesktopEntries::Launchers[i].icon_png,side);
+    pulpit_ikona_folder->przygotuj("/ikonki/folder.png",side);
+    pulpit_ikona_plik->przygotuj("/ikonki/plik.png",side);
+    pulpit_ikony_skala=ui_skala_procent;
+}
+
 void metryki_ekranu(){
 if(desktop_geometry.width!=screen_w || desktop_geometry.height!=screen_h || desktop_geometry.scale!=ui_skala_procent)
     desktop_geometry=display_geometry(screen_w,screen_h,ui_skala_procent,0);
@@ -108,6 +138,7 @@ TASK_BUTTON_GAP=ui_skaluj(4,ui_skala_procent);
 PULPIT_GRID_W=pulpit.komorka_szer;
 PULPIT_GRID_H=pulpit.komorka_wys;
 PULPIT_GRID_Y=ui_skaluj(3,ui_skala_procent);
+przygotuj_ikony_pulpitu();
 if(!taskbar_clock)taskbar_clock=new TaskbarClock::Surface;
 if(taskbar_clock)taskbar_clock->configure(screen_w,screen_h,PASEK_WYS,ui_skala_procent);
 }
@@ -773,6 +804,19 @@ static constexpr uint32_t IKONA_SNAKE_FRAGMENTOW =
 // koniec ikony
 
 static BursztynUI::KontekstRysowania* pulpit_canvas=nullptr;
+static bool rysuj_png_pulpit(int x,int y,const BursztynUI::IkonaPNG& ikona){
+    if(!ikona.piksele()||ikona.bok()<1)return false;
+    const int side=ikona.bok();
+    if(pulpit_canvas){
+        BursztynUI::rysuj_png(*pulpit_canvas,{x,y,side,side},ikona.piksele(),side,true);
+        return true;
+    }
+    static BursztynUI::KontekstRysowania* screen=nullptr;
+    if(!screen)screen=new BursztynUI::KontekstRysowania({0,0,8192,8192});
+    if(!screen)return false;
+    BursztynUI::rysuj_png(*screen,{x,y,side,side},ikona.piksele(),side,true);
+    return true;
+}
 static void pulpit_prostokat(int x,int y,int w,int h,uint32_t color) {
     if(pulpit_canvas)pulpit_canvas->rysuj_prostokat({x,y,w,h},color);
     else gui_rysuj_prostokat(x,y,w,h,color);
@@ -1652,25 +1696,31 @@ void RysujWpisPulpitu(int i) {
     if(auto* launcher=DesktopEntries::launcher(wpisy_pulpitu[i].launcher)) {
         AplikacjaPulpitu app{x,y,launcher->icon};
         rysuj_ikone_aplikacji(app);
+    } else if(wpisy_pulpitu[i].folder) {
+        if(!pulpit_ikona_folder||!rysuj_png_pulpit(g.ikona_x,g.ikona_y,*pulpit_ikona_folder)) {
+            rysuj_fragment_ikony(g.ikona_x,g.ikona_y,4,4,40,40,0x00FFBF00);
+            rysuj_fragment_ikony(g.ikona_x,g.ikona_y,8,0,18,8,0x00FFBF00);
+        }
     } else if(PlikiUI::tekstowy(wpisy_pulpitu[i].nazwa,wpisy_pulpitu[i].folder)) {
-        // Native document silhouette, folded corner and text strokes, using
-        // the same scaled fragments as the existing desktop icon renderer.
-        uint32_t paper=motyw_kolor(MOTYW_KOLOR_PANEL);
-        uint32_t ink=motyw_kolor(MOTYW_KOLOR_TEKST);
-        if(!paper)paper=0x01000000U;
-        if(!ink)ink=0x01000000U;
-        rysuj_fragment_ikony(g.ikona_x,g.ikona_y,9,2,25,42,ink);
-        rysuj_fragment_ikony(g.ikona_x,g.ikona_y,10,3,23,40,paper);
-        rysuj_fragment_ikony(g.ikona_x,g.ikona_y,34,10,6,34,ink);
-        rysuj_fragment_ikony(g.ikona_x,g.ikona_y,34,11,5,32,paper);
-        for(int n=0;n<7;++n)rysuj_fragment_ikony(g.ikona_x,g.ikona_y,33,3+n,1+n,1,ink);
-        for(int n=0;n<4;++n)rysuj_fragment_ikony(g.ikona_x,g.ikona_y,15,18+n*5,n==3?14:19,2,ink);
+        if(!pulpit_ikona_plik||!rysuj_png_pulpit(g.ikona_x,g.ikona_y,*pulpit_ikona_plik)) {
+            uint32_t paper=motyw_kolor(MOTYW_KOLOR_PANEL);
+            uint32_t ink=motyw_kolor(MOTYW_KOLOR_TEKST);
+            if(!paper)paper=0x01000000U;
+            if(!ink)ink=0x01000000U;
+            rysuj_fragment_ikony(g.ikona_x,g.ikona_y,9,2,25,42,ink);
+            rysuj_fragment_ikony(g.ikona_x,g.ikona_y,10,3,23,40,paper);
+            rysuj_fragment_ikony(g.ikona_x,g.ikona_y,34,10,6,34,ink);
+            rysuj_fragment_ikony(g.ikona_x,g.ikona_y,34,11,5,32,paper);
+            for(int n=0;n<7;++n)rysuj_fragment_ikony(g.ikona_x,g.ikona_y,33,3+n,1+n,1,ink);
+            for(int n=0;n<4;++n)rysuj_fragment_ikony(g.ikona_x,g.ikona_y,15,18+n*5,n==3?14:19,2,ink);
+        }
     } else {
-        uint32_t color=wpisy_pulpitu[i].folder?0x00FFBF00:0x00708090;
-        if(konczy_sie(wpisy_pulpitu[i].nazwa,".bur"))color=0x0038B000;
-        else if(konczy_sie(wpisy_pulpitu[i].nazwa,".cebula"))color=0x00D050A0;
-        rysuj_fragment_ikony(g.ikona_x,g.ikona_y,4,4,40,40,color);
-        if(wpisy_pulpitu[i].folder)rysuj_fragment_ikony(g.ikona_x,g.ikona_y,8,0,18,8,color);
+        if(!pulpit_ikona_plik||!rysuj_png_pulpit(g.ikona_x,g.ikona_y,*pulpit_ikona_plik)) {
+            uint32_t color=0x00708090;
+            if(konczy_sie(wpisy_pulpitu[i].nazwa,".bur"))color=0x0038B000;
+            else if(konczy_sie(wpisy_pulpitu[i].nazwa,".cebula"))color=0x00D050A0;
+            rysuj_fragment_ikony(g.ikona_x,g.ikona_y,4,4,40,40,color);
+        }
     }
     auto m=pulpit_metryki(ui_skala_procent);
     for(int line=0;line<p.label.count;++line) {
@@ -1921,6 +1971,11 @@ void rysuj_ikone_aplikacji(const AplikacjaPulpitu& aplikacja) {
         pulpit_geometria_komorki(aplikacja.x, aplikacja.y, ui_skala_procent);
     const int x = g.ikona_x;
     const int y = g.ikona_y;
+    if(pulpit_ikony_app)for(int i=0;i<DesktopEntries::Count;++i){
+        if(DesktopEntries::Launchers[i].icon!=aplikacja.typ_ikony)continue;
+        if(rysuj_png_pulpit(x,y,pulpit_ikony_app[i]))return;
+        break;
+    }
     switch (aplikacja.typ_ikony) {
         case TypIkonyAplikacji::Notatnik:
             rysuj_fragment_ikony(x,y,0,0,48,48,0x00FFBF00);

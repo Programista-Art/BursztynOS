@@ -435,6 +435,21 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	ikona_nav_wgore_blob.o \
 	ikona_folder_blob.o \
 	ikona_plik_blob.o \
+	ikona_app_notatnik_blob.o \
+	ikona_app_kalkulator_blob.o \
+	ikona_app_husarz_blob.o \
+	ikona_app_testy_blob.o \
+	ikona_app_snake_blob.o \
+	ikona_app_eksplorator_blob.o \
+	ikona_app_obrazy_blob.o \
+	ikona_app_demo_ui_blob.o \
+	ikona_app_kontrolki2_blob.o \
+	ikona_app_kontrolki3_blob.o \
+	ikona_app_kontrolki4_blob.o \
+	ikona_app_aktualizacje_blob.o \
+	ikona_app_ustawienia_blob.o \
+	ikona_app_test_dzwieku_blob.o \
+	ikona_app_diagnostyka_blob.o \
 	heap.o \
 	scheduler.o \
 	fpu.o \
@@ -1859,7 +1874,7 @@ test-abs-map-diag:
 .PHONY: test-explorer-host
 test-explorer-host:
 	@mkdir -p .bursztyn-ui-test
-	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined testy/test_explorer_host.cpp -o .bursztyn-ui-test/test-explorer
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined testy/test_explorer_host.cpp -o .bursztyn-ui-test/test-explorer
 	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-explorer
 
 .PHONY: test-tapety-bur
@@ -1889,7 +1904,7 @@ test-hda-diag:
 .PHONY: test-desktop-files-host
 test-desktop-files-host:
 	@mkdir -p .bursztyn-ui-test
-	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined testy/test_desktop_files_host.cpp -o .bursztyn-ui-test/test-desktop-files
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined testy/test_desktop_files_host.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -o .bursztyn-ui-test/test-desktop-files
 	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-desktop-files
 
 .PHONY: test-desktop-capacity-host
@@ -2426,6 +2441,51 @@ ikona_folder_blob.o: ikonki/folder.png
 	$(LD) -r -b binary $< -o $@
 
 ikona_plik_blob.o: ikonki/plik.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_notatnik_blob.o: ikonki/app_notatnik.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_kalkulator_blob.o: ikonki/app_kalkulator.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_husarz_blob.o: ikonki/app_husarz.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_testy_blob.o: ikonki/app_testy.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_snake_blob.o: ikonki/app_snake.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_eksplorator_blob.o: ikonki/app_eksplorator.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_obrazy_blob.o: ikonki/app_obrazy.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_demo_ui_blob.o: ikonki/app_demo_ui.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_kontrolki2_blob.o: ikonki/app_kontrolki2.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_kontrolki3_blob.o: ikonki/app_kontrolki3.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_kontrolki4_blob.o: ikonki/app_kontrolki4.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_aktualizacje_blob.o: ikonki/app_aktualizacje.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_ustawienia_blob.o: ikonki/app_ustawienia.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_test_dzwieku_blob.o: ikonki/app_test_dzwieku.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_diagnostyka_blob.o: ikonki/app_diagnostyka.png
 	$(LD) -r -b binary $< -o $@
 
 ikona_png_ring3.o: bursztyn_ui/ikona_png.cpp bursztyn_ui/ikona_png.h
