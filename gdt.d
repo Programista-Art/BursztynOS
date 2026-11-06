@@ -1,1 +1,0 @@
-gdt.o: gdt.cpp
