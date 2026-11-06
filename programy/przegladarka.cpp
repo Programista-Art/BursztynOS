@@ -60,8 +60,8 @@ using namespace BursztynUI;
  * przegladarka_linker.ld MUSI miec ten sam layout:
  *
  *   HEADER  off 0x0000  VA 0x1000000  region 0x1000
- *   TEXT    off 0x1000  VA 0x1001000  region 0x80000
- *   DATA    off 0x81000 VA 0x1081000  memory 0x80000
+ *   TEXT    off 0x1000  VA 0x1001000  region 0xD8000
+ *   DATA    off 0xD9000 VA 0x10D9000  memory 0x80000
  */
 struct NaglowekBur {
     uint8_t magia[4];
@@ -100,7 +100,7 @@ extern "C" {
 #ifdef HUSARZ_WORKER_ONLY
 constexpr uint64_t BUR_TEXT_SIZE=0x10000ULL,BUR_DATA_OFFSET=0x11000ULL,BUR_DATA_VADDR=0x1011000ULL;
 #else
-constexpr uint64_t BUR_TEXT_SIZE=0x88000ULL,BUR_DATA_OFFSET=0x89000ULL,BUR_DATA_VADDR=0x1089000ULL;
+constexpr uint64_t BUR_TEXT_SIZE=0xD8000ULL,BUR_DATA_OFFSET=0xD9000ULL,BUR_DATA_VADDR=0x10D9000ULL;
 #endif
 __attribute__((section(".naglowek"), used))
 NaglowekBur naglowek = {

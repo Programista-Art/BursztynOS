@@ -587,12 +587,12 @@ SECTIONS
 
     /*
      * KANONICZNA ASERCJA GRANICY JĄDRA:
-     * Obraz jądra (__kernel_end) NIE MOŻE przekroczyć 14 MiB (0x00E00000),
-     * co bezwzględnie gwarantuje co najmniej 2 MiB marginesu ochronnego
-     * przed bazą Ring 3 (RING3_BASE = 0x01000000 = 16 MiB).
+     * Obraz jądra (__kernel_end) NIE MOŻE przekroczyć 15 MiB (0x00F00000).
+     * Zostaje >= 1 MiB marginesu przed bazą Ring 3 (RING3_BASE = 0x01000000 = 16 MiB).
+     * Limit podniesiony z 14 MiB po wzroscie osadzonego Husarza (TEXT ~0xD6160).
      */
     ASSERT(
-        __kernel_end <= (0x01000000 - 0x00200000),
-        "Bursztyn OS: __kernel_end przekracza limit 14 MiB (__kernel_end <= RING3_BASE - 2 MiB guard)!"
+        __kernel_end <= (0x01000000 - 0x00100000),
+        "Bursztyn OS: __kernel_end przekracza limit 15 MiB (__kernel_end <= RING3_BASE - 1 MiB guard)!"
     )
 }

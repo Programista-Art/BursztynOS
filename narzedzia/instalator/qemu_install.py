@@ -80,7 +80,21 @@ class Qmp:
             self.hmp(f'mouse_move {dx} {dy}'); x-=dx; y-=dy; time.sleep(.15)
         self.hmp('mouse_button 1');time.sleep(.12);self.hmp('mouse_button 0');time.sleep(.4)
     def key(self, text): self.hmp('sendkey '+text);time.sleep(.15)
-    def screenshot(self, path): self.call('screendump', {'filename':str(path),'format':'png'})
+    def screenshot(self, path):
+        # QEMU 6.x/Ubuntu nie akceptuje arguments.format dla screendump (PPM domyslnie).
+        # Zachowujemy kompatybilnosc: dump bez formatu, potem konwersja do PNG gdy trzeba.
+        path = Path(path)
+        ppm = path if path.suffix.lower() == '.ppm' else path.with_suffix('.ppm')
+        self.call('screendump', {'filename': str(ppm)})
+        if path.suffix.lower() == '.png' and ppm != path:
+            try:
+                from PIL import Image
+                Image.open(ppm).save(path)
+            except Exception:
+                # Fallback: zostaw PPM pod oczekiwana sciezka nazwy .png (harness i tak
+                # uzywa pliku glownie jako artefakt diagnostyczny).
+                if ppm.exists() and not path.exists():
+                    ppm.replace(path)
 
 class Guest:
     def __init__(self, directory, target, sentinel, iso=None, usb=False, visible=False):

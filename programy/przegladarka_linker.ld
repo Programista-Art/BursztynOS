@@ -8,12 +8,12 @@
  * Uklad surowego pliku .bur po `objcopy -O binary`:
  *
  *   plik 0x00000 .. 0x00FFF   HEADER  -> VA 0x1000000
- *   plik 0x01000 .. 0x80FFF   TEXT    -> VA 0x1001000, 0x80000 bajtow
- *   plik 0x81000 ..           DATA    -> VA 0x1081000
+ *   plik 0x01000 .. 0xD8FFF   TEXT    -> VA 0x1001000, 0xD8000 bajtow
+ *   plik 0xD9000 ..           DATA    -> VA 0x10D9000
  *
  * Loader rezerwuje dla DATA+BSS lacznie 0x80000 bajtow:
  *
- *   VA 0x1010000 .. 0x108FFFF
+ *   VA 0x10D9000 .. 0x1158FFF
  *
  * BSS jest NOLOAD: nie powieksza pliku .bur. Loader kopiuje dostepna czesc
  * DATA z pliku i zeruje pozostala pamiec segmentu do rozmiaru 0x80000.
@@ -36,7 +36,8 @@ BUR_HEADER_SIZE   = 0x01000;
 BUR_HEADER_VADDR  = 0x1000000;
 
 BUR_TEXT_OFFSET   = 0x01000;
-BUR_TEXT_SIZE     = DEFINED(HUSARZ_WORKER_BUILD) ? 0x10000 : 0x88000;
+/* Zmierzone uzycie TEXT ~0xd6160; 0xD8000 = ALIGN+zapas, bez zbędnego paddingu w ISO. */
+BUR_TEXT_SIZE     = DEFINED(HUSARZ_WORKER_BUILD) ? 0x10000 : 0xD8000;
 BUR_TEXT_VADDR    = 0x1001000;
 
 BUR_DATA_OFFSET   = BUR_TEXT_OFFSET + BUR_TEXT_SIZE;

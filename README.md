@@ -92,6 +92,7 @@ Poniższe pliki zawierają pełną specyfikację techniczną, opisy mechanizmów
 8. [08_bursztynowy_slownik_i_architektura.md](docs/08_bursztynowy_slownik_i_architektura.md) – Oficjalny słownik pojęć (Teczka, Włókno, Planista) oraz rendering UTF-8.
 9. [09_tryb_graficzny.md](docs/09_tryb_graficzny.md) - Zorientowana obiektowo warstwa HAL (UEFI GOP, VESA), Double Buffering i Z-Order.
 10. [10_siec.md](docs/10_siec.md) - Stos sieciowy: E1000, ICMP, DHCP, klient DNS (UDP) oraz pobieranie plików (TCP/HTTP).
+12. [12_lokalna_weryfikacja.md](docs/12_lokalna_weryfikacja.md) – Lokalne gate’y smoke/security/regresji bez GitHuba (`make test`, `test-local-suite`).
 
 ---
 

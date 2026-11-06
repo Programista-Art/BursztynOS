@@ -12,6 +12,9 @@
 #   make runuefi        - QEMU UEFI/OVMF + VirtIO Full (domyslnie)
 #   make run-legacy     - QEMU BIOS bez VirtIO (AHCI/E1000/STD VGA/PS2)
 #   make runuefi-legacy - QEMU UEFI bez VirtIO (AHCI/E1000/GOP-STD VGA/PS2)
+#   make test / test-smoke / test-security / test-regression / test-nightly
+#                       - lokalna weryfikacja (bez GitHuba; docs/12_lokalna_weryfikacja.md)
+#   make test-local-suite MODE=smoke|security|regression|nightly
 #
 # Ten sam kernel Multiboot2 jest ladowany przez GRUB zarowno po starcie
 # legacy BIOS, jak i po starcie GRUB-a z firmware UEFI.
@@ -428,7 +431,9 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	run runuefi run-legacy runuefi-legacy run-installed run-installed-legacy \
 	run8k run-test run-geom-trace runusb runusbkbd runusbmouse runusbhid \
 	check-kernel check-test8k check-tools check-ovmf \
-	prepare-disk clean clear distclean cdysk rm help
+	prepare-disk clean clear distclean cdysk rm help \
+	test test-smoke test-security test-security-host test-regression test-nightly \
+	test-local-suite
 
 all: $(KERNEL) $(TAPETY_PAK)
 
@@ -1522,6 +1527,15 @@ help:
 	@echo "  make clean     - usun artefakty kompilacji"
 	@echo "  make cdysk     - usun wirtualny dysk"
 	@echo "  make distclean - clean + cdysk"
+	@echo ""
+	@echo "Lokalna weryfikacja (bez GitHuba; szczegoly: docs/12_lokalna_weryfikacja.md):"
+	@echo "  make test / test-smoke - szybki gate przed commitem"
+	@echo "  make test-security     - SSP, fuzz smoke, QEMU abuse, guard-page"
+	@echo "  make test-security STACK_AUDIT=1 - j.w. + audit-stos-jadra"
+	@echo "  make test-regression   - VirtIO/OTA/instalator/Husarz/HDA/input"
+	@echo "  make test-nightly      - security + regression + fuzz-extended"
+	@echo "  make test-local-suite MODE=smoke|security|regression|nightly"
+	@echo "                         - orkiestrator JSON (.local-ci/)"
 
 # Manifest zmienia timestamp tylko wtedy, gdy zmieni sie posortowany zestaw nazw.
 # Zaleznosc od katalogu wykrywa dodanie, usuniecie i zmiane nazwy pliku.
@@ -2274,5 +2288,35 @@ test-bur-v2-aslr-host:
 	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_LOADER_HOST_TEST -fsanitize=address,undefined loader.cpp narzedzia/test_bur_v2_aslr_host.cpp -o .aslr-test/test_bur_v2_aslr_host
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .aslr-test/test_bur_v2_aslr_host
 
-test-security-hardening: test-stack-protector-host test-bur-v2-aslr-host test-fuzz-smoke
+# Host-only security slice (szybki fragment gate'u security).
+test-security-host: test-stack-protector-host test-bur-v2-aslr-host test-fuzz-smoke
+
+# Pelny gate bezpieczenstwa: host + QEMU SSP/abuse + guard-page.
+# Opcjonalnie: make test-security STACK_AUDIT=1
+test-security: test-security-host test-stack-protector-qemu test-bws-abuse-qemu test-guard-page
+	@if [ "$(STACK_AUDIT)" = "1" ]; then $(MAKE) audit-stos-jadra; fi
+
+# Alias wstecznie kompatybilny — teraz obejmuje tez QEMU abuse i guard-page.
+test-security-hardening: test-security
+
+# Szybki lokalny gate przed commitem (bez fuzz-extended).
+test-smoke: test-stack-protector-host test-bur-v2-aslr-host test-fuzz-smoke \
+	test-virtio-pci test-motywy-unit test-wm-click-routing test-normal-boot
+
+test: test-smoke
+
+# Regresja produktowa (dluzsza matryca QEMU/host).
+test-regression: test-virtio-qemu test-virtio-blk-qemu test-virtio-net-qemu \
+	test-virtio-gpu-qemu test-virtio-input-qemu \
+	test-ota installer-test \
+	test-husarz-engine-host test-input-coexistence-host \
+	test-hda-regression-qemu
+
+# Nocny przebieg: security + regression + pelny fuzz.
+test-nightly: test-security test-regression fuzz-extended
+
+# Orkiestrator z timeoutami i raportem JSON w .local-ci/
+MODE ?= smoke
+test-local-suite:
+	$(PYTHON) narzedzia/run_local_suite.py --mode=$(MODE)
 
