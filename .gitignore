@@ -62,6 +62,10 @@ logi_qemu/
 
 # --- Sekrety / lokalne klucze ---
 aktualizacja_klucz.h
+jadro/aktualizacja/aktualizacja_klucz.h
+
+# --- Binaria host-harnessów budowane w drzewie źródeł ---
+testy/test_bur_loader
 
 # --- Prywatne audyty release ---
 /.release-audit/
