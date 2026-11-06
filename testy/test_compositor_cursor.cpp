@@ -129,8 +129,54 @@ static void rounded_window_cases(){
     }
     compositor_theme=g_domyslny_motyw_fallback;
 }
+/* Fast-path: nieprzezroczyste okno, pulpit z alfa, częściowy dirty — te same piksele. */
+static void opaque_fastpath_cases(){
+    scale=100;sw=640;sh=480;overlay={};use_clock=false;scene.assign(sw*sh,0x123456);
+    assert(utworz_warstwe(1,0,0,sw,sh,0)==1);
+    auto* desktop=pobierz_warstwe(1);
+    std::fill(desktop->bufor_pikseli,desktop->bufor_pikseli+sw*sh,0xff203040U);
+    desktop->bufor_pikseli[10+20*sw]=0x70ffffffU; // selection alpha tag
+    desktop->bufor_pikseli[11+20*sw]=0x20000000U;
+    assert(skladacz_obrazu_publikuj_klatke(1));
+
+    assert(utworz_warstwe(2,100,80,200,120,10)==2); // bez tytułu → bez dekoracji
+    auto* window=pobierz_warstwe(2);
+    std::fill(window->bufor_pikseli,window->bufor_pikseli+200*120,0x00aabbccU);
+    window->bufor_pikseli[0]=0; // transparent corner
+    window->bufor_pikseli[1]=0x01000000U; // visible black marker
+    assert(skladacz_obrazu_publikuj_klatke(2));
+
+    grafika_odtworz_tlo_skladania();
+    zloz_snapshot_region({desktop->bufor_pikseli,0,0,sw,sh,0,1,uint64_t(sw)*sh},{0,0,sw,sh});
+    zloz_snapshot_region({window->bufor_pikseli,100,80,200,120,10,2,200ull*120},{0,0,sw,sh});
+    auto via_snapshot=scene;
+
+    grafika_odtworz_tlo_skladania();
+    zloz_warstwe(1,sw,sh);zloz_warstwe(2,sw,sh);
+    assert(scene==via_snapshot);
+
+    const uint32_t desk_rgb=motyw_pulpit_skladaj(0x123456,0xff203040U,true);
+    const uint32_t sel_rgb=motyw_pulpit_skladaj(0x123456,0x70ffffffU,true);
+    assert(via_snapshot[0]==desk_rgb);
+    assert(via_snapshot[20*sw+10]==sel_rgb);
+    assert(via_snapshot[80*sw+100]==desk_rgb); // transparent window pixel keeps desktop
+    assert(via_snapshot[80*sw+101]==0); // visible-black marker → RGB 0
+    assert(via_snapshot[80*sw+102]==0xaabbcc);
+
+    // Partial dirty must match a full compose for that rect.
+    grafika_odtworz_tlo_skladania();
+    GuiDirtyRect partial{110,90,40,30};
+    zloz_snapshot_region({desktop->bufor_pikseli,0,0,sw,sh,0,1,uint64_t(sw)*sh},partial);
+    zloz_snapshot_region({window->bufor_pikseli,100,80,200,120,10,2,200ull*120},partial);
+    for(int py=partial.y;py<partial.y+partial.height;++py)
+        for(int px=partial.x;px<partial.x+partial.width;++px)
+            assert(scene[py*sw+px]==via_snapshot[py*sw+px]);
+
+    usun_warstwe(2);usun_warstwe(1);skladacz_reset_ekranu();
+}
 int main(){
     rounded_window_cases();
+    opaque_fastpath_cases();
     for(auto dpi:{100U,125U}){
         scale=dpi;sw=1280;sh=720;overlay={};
         assert(utworz_warstwe(1,0,0,sw,sh,0)==1);

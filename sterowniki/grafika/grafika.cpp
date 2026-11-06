@@ -237,6 +237,32 @@ int znajdz_pierwsza_warstwe_gui() {
 
 } // namespace
 
+/* RAM→RAM: kompilator generuje rep movs / SIMD zamiast petli C na piksel. */
+static inline void kopiuj_wiersz32(uint32_t* dst, const uint32_t* src, uint32_t count) {
+    if (count)
+        __builtin_memcpy(dst, src, static_cast<size_t>(count) * sizeof(uint32_t));
+}
+
+/*
+ * RAM→LFB: wylacznie volatile store'y. VirtIO/UC nie toleruja zwyklego
+ * memcpy (cacheable stores moga nie dojsc do scanoutu); rozwijamy po 4
+ * dwordy, zeby obciac narzut petli bez utraty widocznosci zapisow.
+ */
+static inline void kopiuj_wiersz_lfb(volatile uint32_t* dst, const uint32_t* src, uint32_t count) {
+    uint32_t i = 0;
+    for (; i + 3 < count; i += 4) {
+        dst[i] = src[i];
+        dst[i + 1] = src[i + 1];
+        dst[i + 2] = src[i + 2];
+        dst[i + 3] = src[i + 3];
+    }
+    for (; i < count; ++i) dst[i] = src[i];
+}
+
+static inline void wypelnij_wiersz32(uint32_t* dst, uint32_t kolor, uint32_t count) {
+    for (uint32_t i = 0; i < count; ++i) dst[i] = kolor;
+}
+
 // =========================================================================
 // HAL EKRANU
 // =========================================================================
@@ -262,9 +288,7 @@ protected:
             const uint32_t* src =
                 reinterpret_cast<const uint32_t*>(
                     bufor + offset);
-            for (uint32_t x = 0; x < szerokosc; ++x) {
-                dst[x] = src[x];
-            }
+            kopiuj_wiersz_lfb(dst, src, szerokosc);
 #ifdef BURSZTYN_GRAPHICS_HOST_TEST
             if(KopiaWidoczna()) {
                 extern void grafika_host_wiersz_opublikowany(uint32_t);
@@ -321,9 +345,7 @@ protected:
                 reinterpret_cast<const uint32_t*>(
                     bufor + offset);
 
-            for (uint32_t i = 0; i < pikseli_w_wierszu; ++i) {
-                dst[i] = src[i];
-            }
+            kopiuj_wiersz_lfb(dst, src, pikseli_w_wierszu);
         }
         if(BURSZTYNDIAGSPLASHRUNTIMEFRAMES&&KopiaWidoczna())KlatkiStartuDiag::event("KopiujFragment32",Backend(),czas_monotoniczny_us(),
             const_cast<const uint8_t*>(framebuffer_fizyczny),bufor,0,{int(start_x),int(start_y),int(end_x-start_x),int(end_y-start_y)},
@@ -1150,8 +1172,7 @@ void grafika_odtworz_tlo_skladania() {
                 static_cast<uint64_t>(y) *
                     static_cast<uint64_t>(szer);
 
-            for (int x = 0; x < szer; ++x)
-                dst[x] = src[x];
+            kopiuj_wiersz32(dst, src, static_cast<uint32_t>(szer));
         }
     } else {
         const BursztynMotyw* m = motyw_pobierz_aktywny();
@@ -1162,8 +1183,7 @@ void grafika_odtworz_tlo_skladania() {
                     backbuffer +
                     static_cast<uint64_t>(y) * pitch);
 
-            for (int x = 0; x < szer; ++x)
-                dst[x] = kolor_pulpitu;
+            wypelnij_wiersz32(dst, kolor_pulpitu, static_cast<uint32_t>(szer));
         }
     }
 }
@@ -1180,15 +1200,16 @@ void grafika_odtworz_tlo_regionu(int x, int y, int szer, int wys) {
     const uint32_t pitch = aktywny_ekran->PobierzPitch();
     const BursztynMotyw* m = motyw_pobierz_aktywny();
     const uint32_t kolor_pulpitu = m ? m->pulpit : g_domyslny_motyw_fallback.pulpit;
+    const uint32_t row_w = static_cast<uint32_t>(x1 - x0);
     for (int py = y0; py < y1; ++py) {
         uint32_t* dst = reinterpret_cast<uint32_t*>(backbuffer +
             static_cast<uint64_t>(py) * pitch) + x0;
         if (tapeta_zaladowana && bufor_tapety) {
             const uint32_t* src = bufor_tapety +
                 static_cast<uint64_t>(py) * ekran_szer + x0;
-            for (int px = x0; px < x1; ++px) *dst++ = *src++;
+            kopiuj_wiersz32(dst, src, row_w);
         } else {
-            for (int px = x0; px < x1; ++px) *dst++ = kolor_pulpitu;
+            wypelnij_wiersz32(dst, kolor_pulpitu, row_w);
         }
     }
 }

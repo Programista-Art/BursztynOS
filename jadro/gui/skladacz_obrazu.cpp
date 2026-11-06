@@ -1522,6 +1522,31 @@ void zloz_dekoracje(int pid,const GuiDirtyRect& clip) {
 
 }
 
+/*
+ * Nie-pulpitowe warstwy: motyw_pulpit_skladaj == (c & 0xffffff).
+ * Ciągłe runy 0x00RRGGBB kopiujemy memcpy — bez narzutu na piksel przy
+ * nieprzezroczystych oknach (główny koszt przy wysokiej rozdzielczości).
+ */
+void zloz_wiersz_nieprzezroczysty(uint32_t* dst, const uint32_t* src, int count) {
+    int i = 0;
+    while (i < count) {
+        while (i < count && src[i] == 0) ++i;
+        const int start = i;
+        while (i < count && src[i] != 0) ++i;
+        if (start >= i) continue;
+        bool plain = true;
+        for (int j = start; j < i; ++j) {
+            if (src[j] & 0xff000000U) { plain = false; break; }
+        }
+        if (plain) {
+            __builtin_memcpy(dst + start, src + start,
+                             static_cast<size_t>(i - start) * sizeof(uint32_t));
+        } else {
+            for (int j = start; j < i; ++j) dst[j] = src[j] & 0x00ffffffU;
+        }
+    }
+}
+
 void zloz_warstwe(
     int indeks,
     int ekran_szer,
@@ -1548,7 +1573,8 @@ void zloz_warstwe(
     }
 
     const bool decorated=ma_dekoracje(indeks);
-    const BursztynMotyw* desktop_theme=w.z_order==0?motyw_pobierz_aktywny():nullptr;
+    const bool desktop=w.z_order==0;
+    const BursztynMotyw* desktop_theme=desktop?motyw_pobierz_aktywny():nullptr;
     const WindowShape shape(w.szerokosc,w.wysokosc,stan_okna[indeks]==GUI_OKNO_ZMAKSYMALIZOWANE,ekran_skala(),*motyw_pobierz_aktywny());
     const uint64_t szerokosc_warstwy =
         static_cast<uint64_t>(
@@ -1612,6 +1638,30 @@ void zloz_warstwe(
             clip.dst_y +
             y;
 
+        uint32_t* dst_row = grafika_pobierz_wiersz_backbuffer(dst_y);
+        if (!dst_row) continue;
+        dst_row += clip.dst_x;
+
+        if (!desktop && !decorated) {
+            zloz_wiersz_nieprzezroczysty(dst_row, zrodlo, clip.szer);
+            continue;
+        }
+
+        if (!desktop && decorated) {
+            const int ly = dst_y - w.y;
+            if (ly >= shape.bar && ly < w.wysokosc - shape.edge) {
+                const int inset = shape.inset(ly);
+                const int cx0 = w.x + inset + shape.edge;
+                const int cx1 = w.x + w.szerokosc - inset - shape.edge;
+                const int fx0 = clip.dst_x > cx0 ? clip.dst_x : cx0;
+                const int fx1 = clip.dst_x + clip.szer < cx1 ? clip.dst_x + clip.szer : cx1;
+                if (fx0 < fx1) {
+                    const int off = fx0 - clip.dst_x;
+                    zloz_wiersz_nieprzezroczysty(dst_row + off, zrodlo + off, fx1 - fx0);
+                }
+                continue;
+            }
+        }
 
         for (int x = 0;
              x < clip.szer;
@@ -1640,14 +1690,7 @@ void zloz_warstwe(
              * Root desktop supports the two selection alpha tags; all other
              * surfaces retain RGB marker semantics.
              */
-            kolor = motyw_pulpit_skladaj(grafika_pobierz_wiersz_backbuffer(dst_y)[clip.dst_x+x],
-                kolor,w.z_order==0,desktop_theme);
-
-            grafika_zapisz_surowy_piksel(
-                clip.dst_x + x,
-                dst_y,
-                kolor
-            );
+            dst_row[x] = motyw_pulpit_skladaj(dst_row[x], kolor, desktop, desktop_theme);
         }
     }
     zloz_dekoracje(indeks,{0,0,ekran_szer,ekran_wys});
@@ -1659,13 +1702,33 @@ void zloz_snapshot_region(const LayerRenderInfo& w,const GuiDirtyRect& r) {
     int y1=w.y+w.height<r.y+r.height?w.y+w.height:r.y+r.height;
     if(x0>=x1||y0>=y1||!w.buffer)return;
     const bool decorated=ma_dekoracje(w.pid) && w.buffer==tablica_warstw[w.pid].bufor_pikseli;
-    const BursztynMotyw* desktop_theme=w.z==0?motyw_pobierz_aktywny():nullptr;
+    const bool desktop=w.z==0;
+    const BursztynMotyw* desktop_theme=desktop?motyw_pobierz_aktywny():nullptr;
     const WindowShape shape(w.width,w.height,decorated && stan_okna[w.pid]==GUI_OKNO_ZMAKSYMALIZOWANE,ekran_skala(),*motyw_pobierz_aktywny());
+    const int row_w=x1-x0;
     for(int py=y0;py<y1;++py){
         uint64_t first=(uint64_t)(py-w.y)*(uint32_t)w.width+(uint32_t)(x0-w.x);
-        uint64_t len=(uint32_t)(x1-x0);if(first>w.pixels||len>w.pixels-first)return;
+        uint64_t len=(uint32_t)row_w;if(first>w.pixels||len>w.pixels-first)return;
         const uint32_t* src=w.buffer+first;uint32_t* dst=grafika_pobierz_wiersz_backbuffer(py)+x0;
-        for(int px=x0;px<x1;++px){uint32_t c=*src++;if(c && (!decorated||shape.client(px-w.x,py-w.y)))*dst=motyw_pulpit_skladaj(*dst,c,w.z==0,desktop_theme);++dst;}
+        if(!desktop && !decorated){
+            zloz_wiersz_nieprzezroczysty(dst,src,row_w);
+            continue;
+        }
+        /* Dekorowane okno: prostokątny pas klienta bez shape.client na piksel. */
+        if(!desktop && decorated){
+            const int ly=py-w.y;
+            if(ly>=shape.bar && ly<w.height-shape.edge){
+                const int inset=shape.inset(ly);
+                const int cx0=w.x+inset+shape.edge;
+                const int cx1=w.x+w.width-inset-shape.edge;
+                const int fx0=x0>cx0?x0:cx0;
+                const int fx1=x1<cx1?x1:cx1;
+                if(fx0<fx1)
+                    zloz_wiersz_nieprzezroczysty(dst+(fx0-x0),src+(fx0-x0),fx1-fx0);
+                continue;
+            }
+        }
+        for(int px=x0;px<x1;++px){uint32_t c=*src++;if(c && (!decorated||shape.client(px-w.x,py-w.y)))*dst=motyw_pulpit_skladaj(*dst,c,desktop,desktop_theme);++dst;}
     }
     if(decorated) zloz_dekoracje(w.pid,r);
 }
