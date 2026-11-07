@@ -62,36 +62,43 @@ double square_root(double x) {
 #include "vendor/stb_truetype.h"
 #pragma GCC diagnostic pop
 namespace BSF {
+#include "unicode.inc"
+
 static uint32_t tag(const char *s) {
   return (uint32_t(uint8_t(s[0])) << 24) | (uint32_t(uint8_t(s[1])) << 16) |
          (uint32_t(uint8_t(s[2])) << 8) | uint8_t(s[3]);
 }
+// Unicode name records only. Prefer Windows English, then platform Unicode.
 static void name(Bytes table, unsigned kind, char *out, unsigned cap) {
-  if (!table.has(0, 6))
-    return;
-  unsigned count = table.u16(2), strings = table.u16(4);
-  if (count > 512 || !table.has(6, count * 12))
-    return;
-  for (unsigned i = 0; i < count; ++i) {
-    unsigned o = 6 + i * 12;
-    if (table.u16(o + 6) != kind || table.u16(o) != 3)
-      continue;
-    unsigned len = table.u16(o + 8), off = table.u16(o + 10);
-    if (!table.has(size_t(strings) + off, len) || len % 2)
-      continue;
-    unsigned used = 0;
-    for (unsigned j = 0; j < len && used + 1 < cap; j += 2) {
-      unsigned c = table.u16(strings + off + j);
-      if (c >= 32 && c < 127 && c != '/' && c != '\\')
-        out[used++] = char(c);
-      else if (c >= 128 && c < 2048 && used + 2 < cap) {
-        out[used++] = char(0xc0 | (c >> 6));
-        out[used++] = char(0x80 | (c & 63));
-      }
+  if (!table.has(0, 6) || table.u16(0) > 1) return;
+  unsigned count=table.u16(2), strings=table.u16(4);
+  if (count>512 || !table.has(6,size_t(count)*12) || strings<6+count*12) return;
+  int best=-1;
+  for(unsigned i=0;i<count;++i){
+    unsigned o=6+i*12, platform=table.u16(o), encoding=table.u16(o+2);
+    if(table.u16(o+6)!=kind || !(platform==0 || (platform==3 && (encoding==1 || encoding==10)))) continue;
+    unsigned len=table.u16(o+8), off=table.u16(o+10);
+    if(!len || len%2 || !table.has(size_t(strings)+off,len)) continue;
+    int rank=platform==3 && table.u16(o+4)==0x409 ? 3 : platform==0 ? 2 : 1;
+    if(rank<=best) continue;
+    char decoded[128]{}; unsigned used=0; bool valid=true;
+    for(unsigned j=0;j<len;j+=2){
+      uint32_t cp=table.u16(strings+off+j);
+      if(cp>=0xd800 && cp<=0xdbff){
+        if(j+2>=len){valid=false;break;}
+        unsigned low=table.u16(strings+off+j+2);
+        if(low<0xdc00 || low>0xdfff){valid=false;break;}
+        cp=0x10000+((cp-0xd800)<<10)+(low-0xdc00); j+=2;
+      }else if(cp>=0xdc00 && cp<=0xdfff){valid=false;break;}
+      if(cp<32 || cp==127){valid=false;break;}
+      unsigned n=cp<128?1:cp<2048?2:cp<65536?3:4;
+      // Reject truncation rather than splitting a scalar or conflating families.
+      if(used+n>=cap || used+n>=sizeof(decoded)){valid=false;break;}
+      if(n==1) decoded[used++]=char(cp);
+      else {decoded[used++]=char((n==2?0xc0:n==3?0xe0:0xf0)|(cp>>(6*(n-1))));
+        for(unsigned k=n-1;k;--k) decoded[used++]=char(0x80|((cp>>(6*(k-1)))&63));}
     }
-    out[used] = 0;
-    if (used)
-      return;
+    if(valid && used){memcpy(out,decoded,used+1);best=rank;}
   }
 }
 bool Face::open(const void *ptr, size_t size, uint32_t identity) {
@@ -185,7 +192,7 @@ bool Face::parse(const void *ptr, size_t size, uint32_t identity) {
     weight = os2.u16(4);
   if (weight < 100 || weight > 900)
     weight = 400;
-  italic = (head.u16(44) & 2) != 0;
+  italic = (head.u16(44) & 2) != 0 || (os2.has(62, 2) && (os2.u16(62) & 1));
   mono = post.has(0, 16) && post.u32(12) != 0;
   serif =
       os2.has(32, 10) && os2.p[32] == 2 && os2.p[33] >= 2 && os2.p[33] <= 10;
@@ -247,7 +254,7 @@ bool Face::parse(const void *ptr, size_t size, uint32_t identity) {
       cmap = c;
     } else if (format == 4 && (!cmap.p || cmap.u16(0) != 12)) {
       unsigned segments = c.u16(6) / 2;
-      if (!c.has(0, 16) || !segments || segments > 4096 ||
+      if (!c.has(0, 16) || (c.u16(6) & 1) || !segments || segments > 4096 ||
           !c.has(14, segments * 8 + 2))
         return false;
       unsigned last = 0;
@@ -255,8 +262,8 @@ bool Face::parse(const void *ptr, size_t size, uint32_t identity) {
         unsigned end = c.u16(14 + j * 2),
                  start = c.u16(16 + segments * 2 + j * 2),
                  ro = 16 + segments * 6 + j * 2, range = c.u16(ro);
-        if (start > end || (j && end < last) ||
-            (range && !c.has(size_t(ro) + range, size_t(end - start + 1) * 2)))
+        if (start > end || (j && start <= last) ||
+            (range & 1) || (range && !c.has(size_t(ro) + range, size_t(end - start + 1) * 2)))
           return false;
         last = end;
       }
@@ -268,6 +275,10 @@ bool Face::parse(const void *ptr, size_t size, uint32_t identity) {
   id = identity;
   name(names, 1, family, sizeof(family));
   name(names, 2, style, sizeof(style));
+  name(names, 16, family, sizeof(family));
+  name(names, 17, style, sizeof(style));
+  name(names, 4, full_name, sizeof(full_name));
+  name(names, 6, postscript, sizeof(postscript));
   if (!family[0])
     memcpy(family, "Unnamed TrueType", 17);
   return true;

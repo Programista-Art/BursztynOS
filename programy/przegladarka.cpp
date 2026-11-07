@@ -100,7 +100,7 @@ extern "C" {
 #ifdef HUSARZ_WORKER_ONLY
 constexpr uint64_t BUR_TEXT_SIZE=0x10000ULL,BUR_DATA_OFFSET=0x11000ULL,BUR_DATA_VADDR=0x1011000ULL;
 #else
-constexpr uint64_t BUR_TEXT_SIZE=0x88000ULL,BUR_DATA_OFFSET=0x89000ULL,BUR_DATA_VADDR=0x1089000ULL;
+constexpr uint64_t BUR_TEXT_SIZE=0x8c000ULL,BUR_DATA_OFFSET=0x8d000ULL,BUR_DATA_VADDR=0x108d000ULL;
 #endif
 __attribute__((section(".naglowek"), used))
 NaglowekBur naglowek = {
@@ -2817,7 +2817,7 @@ const uint16_t* bitmap_font(void*,uint32_t cp){return CzcionkaUI::bitmapa_znaku(
 int width_font(void*,uint32_t cp){return CzcionkaUI::szerokosc_znaku(cp);}
 #if defined(BSF_NATIVE)
 uint32_t browser_font_generation{};
-int advance_family(void*,uint32_t cp,int px,bool bold,bool,uint32_t family){int a=BSF::measure_cp(cp,px,bold,BSF::family_name(family));return a>=0?a:BSF::family_monospace(family)?px:advance_font(nullptr,cp,px,bold,false);}
+int advance_family(void*,uint32_t cp,int px,bool bold,bool italic,uint32_t family){int a=BSF::measure_styled_cp(cp,px,bold,BSF::family_name(family),italic);return a>=0?a:BSF::family_monospace(family)?px:advance_font(nullptr,cp,px,bold,false);}
 int height_family(void*,int px,uint32_t family){int h=BSF::height(px,BSF::family_name(family));return h>0?h:px;}
 bool alpha_font(void*,uint32_t cp,int px,bool bold,bool italic,uint32_t family,Husarz::AlphaGlyph& out){const char* name=BSF::family_name(family);auto* g=BSF::glyph(cp,px,bold,name,italic);if(!g)return false;BSF::pin(g);out.width=g->width;out.height=g->height;out.x=g->x;out.y=BSF::ascent(px,name)+g->y;out.pixels=g->alpha;out.lease=const_cast<BSF::Glyph*>(g);out.release=BSF::unpin;return true;}
 bool cached_font(void*,uint32_t cp,int px,bool bold,bool italic,uint32_t family){return BSF::cached(cp,px,bold,BSF::family_name(family),italic);}

@@ -13,12 +13,12 @@ public:
  ListaRozwijana *families,*size;
  PowierzchniaRysunkowa* preview;
  WidokPrzewijany* preview_view;
- Przycisk *apply,*reset;
+ Przycisk *apply,*reset,*refresh;
  FontPage(){
   ustaw_uklad_automatyczny(false);ustaw_wypelnienie({0,0,0,0});
   heading=&dodaj<Etykieta>("Ustawienia czcionki");family_label=&dodaj<Etykieta>("Systemowa czcionka");size_label=&dodaj<Etykieta>("Rozmiar");
   families=&dodaj<ListaRozwijana>();size=&dodaj<ListaRozwijana>();preview_view=&dodaj<WidokPrzewijany>();preview_view->ustaw_tryb_paska_poziomego(TrybPaskaPrzewijania::Nigdy);preview=&preview_view->dodaj<PowierzchniaRysunkowa>();
-  apply=&dodaj<Przycisk>("Zastosuj");reset=&dodaj<Przycisk>("Przywróć domyślne");
+  apply=&dodaj<Przycisk>("Zastosuj");reset=&dodaj<Przycisk>("Przywróć domyślne");refresh=&dodaj<Przycisk>("Odśwież fonty");
   status=&dodaj<Etykieta>("Zastosuj zapisuje zmianę dla aplikacji.");help=&dodaj<Etykieta>("Terminal zachowuje czcionkę stałej szerokości.");
   Etykieta* labels[]={heading,family_label,size_label,status,help};
   for(auto* label:labels)label->ustaw_wypelnienie({0,0,0,0});
@@ -49,8 +49,9 @@ public:
   preview->rozmiesc({0,0,w-18*s,sample_height});y+=preview_h+gap;
   int first=CzcionkaUI::zmierz_tekst("Zastosuj",s)+32*s;
   int second=CzcionkaUI::zmierz_tekst("Przywróć domyślne",s)+32*s;
-  if(first+second+gap>w){first=(w-gap)/2;second=w-gap-first;}
-  apply->rozmiesc({inset,y,first,button});reset->rozmiesc({inset+first+gap,y,second,button});y+=button+gap;
+  int third=CzcionkaUI::zmierz_tekst("Odśwież fonty",s)+32*s;
+  if(first+second+third+2*gap>w){first=(w-2*gap)/3;second=first;third=w-2*gap-first-second;}
+  apply->rozmiesc({inset,y,first,button});reset->rozmiesc({inset+first+gap,y,second,button});refresh->rozmiesc({inset+first+second+2*gap,y,third,button});y+=button+gap;
   status->rozmiesc({inset,y,w,line});help->rozmiesc({inset,y+line+small,w,line});
  }
 };

@@ -1,0 +1,15 @@
+g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections narzedzia/test_bsf.cpp bsf/bsf.cpp -Wl,--gc-sections -o .bsf-test/bsf-host
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/bsf-host
+BSF: 12200 checks PASS; cache=2097152 bitmap-live=108 hits=10464 misses=3683 evictions=3295 face=544 glyph=56 first-ns=145036 hit-average-ns=3944
+g++ -std=c++17 -fcoroutines -O0 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_bsf_ui.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/ui-host
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/ui-host
+BSF UI/browser: 7998 checks PASS; proportional geometry, clipping/AA, Polish UTF-8, previews, persistence, font priority, cooperative paint and corrupt-font fallback
+g++ -std=c++17 -O0 -g -fsanitize=address,undefined -fno-pie -no-pie -ffunction-sections -fdata-sections narzedzia/test_settings_themes_power.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -Wl,--gc-sections -o .bsf-test/settings-themes-power
+ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/settings-themes-power
+Settings themes and Start power: 2696 checks PASS
+g++ -std=c++17 -fcoroutines -O0 -g0 -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_desktop_ttf.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/desktop-ttf-host
+ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/desktop-ttf-host
+Power PNG / BSF geometry: 975 checks PASS
+Desktop selection patches: metadata=4648 bytes, reused pixels=262144 bytes, generation=102
+System UI object sizes: page=2408 label=2048 panel=2056; 31 labels, two panels, two scrollbars plus viewport
+Desktop TTF / Settings / Start: 187840 checks PASS

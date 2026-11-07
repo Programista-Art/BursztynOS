@@ -1,0 +1,79 @@
+[
+  {
+    "linker": "programy/eksplorator/eksplorator_linker.ld",
+    "old_text": 278528,
+    "new_text": 290816,
+    "observed_used": 283776,
+    "source": "programy/eksplorator/eksplorator-plikow.cpp"
+  },
+  {
+    "linker": "programy/shell_bsf_linker.ld",
+    "old_text": 151552,
+    "new_text": 167936,
+    "observed_used": 159872,
+    "source": "shell.cpp"
+  },
+  {
+    "linker": "programy/test/test_linker.ld",
+    "old_text": 524288,
+    "new_text": 536576,
+    "observed_used": 530432,
+    "source": "programy/test/test.cpp"
+  },
+  {
+    "linker": "programy/kontrolki3/kontrolki3_linker.ld",
+    "old_text": 212992,
+    "new_text": 229376,
+    "observed_used": 224640,
+    "source": "programy/kontrolki3/kontrolki3.cpp"
+  },
+  {
+    "linker": "programy/kontrolki4/kontrolki4_linker.ld",
+    "old_text": 327680,
+    "new_text": 344064,
+    "observed_used": 336800,
+    "source": "programy/kontrolki4/kontrolki4.cpp"
+  },
+  {
+    "linker": "programy/ustawienia/ustawienia_linker.ld",
+    "old_text": 196608,
+    "new_text": 208896,
+    "observed_used": 203168,
+    "source": "programy/ustawienia/ustawienia.cpp"
+  },
+  {
+    "linker": "programy/instalator/instalator_linker.ld",
+    "old_text": 196608,
+    "new_text": 212992,
+    "observed_used": 206496,
+    "source": "programy/instalator/instalator.cpp"
+  },
+  {
+    "linker": "programy/ekran/ekran_linker.ld",
+    "old_text": 229376,
+    "new_text": 245760,
+    "observed_used": 240928,
+    "source": "programy/ekran/ekran.cpp"
+  },
+  {
+    "linker": "programy/tapety/tapety_linker.ld",
+    "old_text": 282624,
+    "new_text": 299008,
+    "observed_used": 293216,
+    "source": "programy/tapety/tapety.cpp"
+  },
+  {
+    "linker": "programy/przegladarka_linker.ld",
+    "old_text": 557056,
+    "new_text": 573440,
+    "observed_used": 566272,
+    "source": "programy/przegladarka.cpp"
+  },
+  {
+    "linker": "menedzer_okien_linker.ld",
+    "old_text": 311296,
+    "new_text": 319488,
+    "observed_used": 313024,
+    "source": "menedzer_okien.cpp"
+  }
+]

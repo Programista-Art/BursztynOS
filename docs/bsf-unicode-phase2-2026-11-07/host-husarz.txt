@@ -1,0 +1,16 @@
+g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -I. narzedzia/test_husarz_engine.cpp -o .husarz-test/engine
+ASAN_OPTIONS=detect_leaks=1 .husarz-test/engine
+fixture plain.txt      height=92 fragments=8 checksum=6ce5958a58a47d11
+fixture headings.html  height=361 fragments=13 checksum=561b65d83ba82a1d
+fixture nested.html    height=106 fragments=4 checksum=aea4e7f6833c36fe
+fixture inline.html    height=164 fragments=13 checksum=87af642df0ea9b30
+fixture lists.html     height=164 fragments=10 checksum=1752dc29834aef62
+fixture tables.html    height=116 fragments=12 checksum=43c1429e8942ca4a
+fixture links.html     height=80 fragments=3 checksum=58cd323c16642018
+fixture images.html    height=124 fragments=8 checksum=75991d70e6174fcc
+fixture box.html       height=62 fragments=2 checksum=f1b3006b306f937a
+fixture percent.html   height=68 fragments=5 checksum=fd3d9b14cd18054b
+fixture wrapping.html  height=208 fragments=15 checksum=149e309485d136bd
+fixture radius.html    height=76 fragments=1 checksum=9c697fe3f8c8250b
+fixture scroll.html    height=7710 fragments=2104 checksum=b949fa171b126a48
+Husarz engine: 127432 checks PASS; malformed input, DOM/CSS/layout/paint/JS boundaries

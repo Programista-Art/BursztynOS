@@ -1,0 +1,164 @@
+{
+  "iso_sha256": "41d88c080d372c2de5d1cea35c769401e64509edc5ac54f6b22b57aa3e79ef04",
+  "iso_bytes": 40314880,
+  "findings": [],
+  "inventory_entries": 616,
+  "kernel": {
+    "path": "boot/system_operacyjny.bin",
+    "size": 10506960,
+    "sha256": "6141f3ef1eefa1979ee11880af4ce2c35e5cb7a63bcd7a158bc90dceedb2a109",
+    "type": "ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, stripped",
+    "magic": "7f454c46020101030000000000000000",
+    "executable": true,
+    "compression": null
+  },
+  "kernel_baseline": {
+    "path": "boot/system_operacyjny.bin",
+    "strings": 66292,
+    "source_extensions": 1,
+    "paths": 0,
+    "likely_identifiers": 154,
+    "debug_test_assert": 102,
+    "private_repo": 0,
+    "elf": {
+      "type": 2,
+      "sections": [
+        {
+          "name": "",
+          "type": 0,
+          "flags": 0,
+          "size": 0,
+          "offset": 0,
+          "entries": 0
+        },
+        {
+          "name": ".boot",
+          "type": 1,
+          "flags": 2,
+          "size": 80,
+          "offset": 4096,
+          "entries": 0
+        },
+        {
+          "name": ".text",
+          "type": 1,
+          "flags": 6,
+          "size": 1018352,
+          "offset": 8192,
+          "entries": 0
+        },
+        {
+          "name": ".rodata",
+          "type": 1,
+          "flags": 2,
+          "size": 298032,
+          "offset": 1028096,
+          "entries": 0
+        },
+        {
+          "name": ".data",
+          "type": 1,
+          "flags": 3,
+          "size": 9179360,
+          "offset": 1327104,
+          "entries": 0
+        },
+        {
+          "name": ".bss",
+          "type": 8,
+          "flags": 3,
+          "size": 3048672,
+          "offset": 10506464,
+          "entries": 0
+        },
+        {
+          "name": ".shstrtab",
+          "type": 3,
+          "flags": 0,
+          "size": 42,
+          "offset": 10506464,
+          "entries": 0
+        }
+      ],
+      "symbols": 0,
+      "debug_bytes": 0
+    },
+    "pe": null
+  },
+  "font_assets": [
+    {
+      "path": "czcionki/ttf/DejaVuSans-Bold.ttf",
+      "size": 708920,
+      "sha256": "5c1247acef7f2b8522a31742c76d6adcb5569bacc0be7ceaa4dc39dd252ce895",
+      "type": "TrueType Font data, 19 tables, 1st \"FFTM\", 26 names, Macintosh",
+      "magic": "0001000000130100000400304646544d",
+      "executable": false,
+      "compression": null
+    },
+    {
+      "path": "czcionki/ttf/DejaVuSans.ttf",
+      "size": 759720,
+      "sha256": "ae7b7855e115a5966d8b1b3f80f254ccc117ec86f9965e202ee2940453837280",
+      "type": "TrueType Font data, 20 tables, 1st \"FFTM\", 26 names, Macintosh",
+      "magic": "0001000000140100000400404646544d",
+      "executable": false,
+      "compression": null
+    },
+    {
+      "path": "czcionki/ttf/DejaVuSansMono.ttf",
+      "size": 333636,
+      "sha256": "dfbac4c793ca4b896c34af5c7ccbbaf37924b46cd521a5ecff9130b9c331f575",
+      "type": "TrueType Font data, 18 tables, 1st \"FFTM\", 22 names, Macintosh",
+      "magic": "0001000000120100000400204646544d",
+      "executable": false,
+      "compression": null
+    },
+    {
+      "path": "czcionki/ttf/DejaVuSerifCondensed-Italic.ttf",
+      "size": 338140,
+      "sha256": "768a97e45559f627a05acc0709938db5b75f017dc38ef5ba00e95043d6476f60",
+      "type": "TrueType Font data, 19 tables, 1st \"FFTM\", 26 names, Macintosh",
+      "magic": "0001000000130100000400304646544d",
+      "executable": false,
+      "compression": null
+    },
+    {
+      "path": "czcionki/ttf/LICENSE-DejaVu.txt",
+      "size": 8816,
+      "sha256": "7a083b136e64d064794c3419751e5c7dd10d2f64c108fe5ba161eae5e5958a93",
+      "type": "Unicode text, UTF-8 text",
+      "magic": "466f6e74732061726520286329204269",
+      "executable": false,
+      "compression": null
+    },
+    {
+      "path": "czcionki/ttf/LICENSE-stb.txt",
+      "size": 2510,
+      "sha256": "bebfe904b14301657e4e5d655c811d51fd31b97c455b9cc2d8600d6bac6cff63",
+      "type": "ASCII text",
+      "magic": "5468697320736f667477617265206973",
+      "executable": false,
+      "compression": null
+    },
+    {
+      "path": "czcionki/ttf/SOURCE.txt",
+      "size": 1033,
+      "sha256": "12d14484760688f0d6da0c4290f103c350fb7b44dc49ee3adc4e9fdcd20d8796",
+      "type": "ASCII text",
+      "magic": "44656a61567520666f6e74732c206874",
+      "executable": false,
+      "compression": null
+    }
+  ],
+  "unicode_notice": {
+    "path": "licenses/Unicode.txt",
+    "size": 1995,
+    "sha256": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96",
+    "type": "Unicode text, UTF-8 text",
+    "magic": "554e49434f4445204c4943454e534520",
+    "executable": false,
+    "compression": null
+  },
+  "compiler": "x86_64-linux-gnu-g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "linker": "GNU ld (GNU Binutils for Ubuntu) 2.42"
+}

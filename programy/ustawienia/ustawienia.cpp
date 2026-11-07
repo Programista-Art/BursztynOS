@@ -3,6 +3,7 @@
 #include "../../bursztyn_ui/bursztyn_ui.h"
 #include "../../loader.h"
 #include "layout.h"
+#include <string.h>
 using namespace BursztynUI;
 extern "C" void _start();
 extern "C" {
@@ -10,13 +11,14 @@ __attribute__((section(".naglowek"), used)) NaglowekBur naglowek = {
     {'B', 'U', 'R', '\0'},
     reinterpret_cast<uint64_t>(&_start),
     0x1000,
-    0x30000,
+    0x33000,
     0x1001000,
-    0x31000,
+    0x34000,
     0x20000,
-    0x1031000};
+    0x1034000};
 }
 namespace {
+bool same_font_name(const char* a,const char* b){for(unsigned i=0;i<96;++i){if(a[i]!=b[i])return false;if(!a[i])return true;}return false;}
 constexpr int sizes[] = {12, 14, 16, 18, 20, 24};
 class Settings : public Okno {
   SettingsUI::ThemesPage* themes{};
@@ -32,6 +34,22 @@ class Settings : public Okno {
   PowierzchniaRysunkowa *preview{};
   uint32_t ids[BSF::MaxFiles]{};
   unsigned family_count{};
+  void reload_fonts() {
+    auto c=BSF::configuration(); families->wyczysc(); family_count=0;
+    for(unsigned i=0;i<BSF::enumerate();++i){
+      auto* f=BSF::info(i);bool duplicate=false;
+      for(unsigned j=0;j<family_count;++j) if(same_font_name(BSF::family_name(ids[j]),f->family))duplicate=true;
+      if(duplicate)continue;
+      // Prefer a regular representative, retain families with incomplete styles.
+      for(unsigned j=i;j<BSF::enumerate();++j){auto* candidate=BSF::info(j);
+        if(same_font_name(candidate->family,f->family)&&!candidate->italic&&candidate->weight<600){f=candidate;break;}}
+      families->dodaj_element(f->family,f->id);ids[family_count]=f->id;
+      if(c.family==f->id || (!c.family && f->id==BSF::default_id()))families->ustaw_wybrany_indeks(int(family_count));
+      ++family_count;
+    }
+    if(!family_count)families->dodaj_element("Bitmapowa czcionka awaryjna",0);
+    if(families->wybrany_indeks()<0)families->ustaw_wybrany_indeks(0);
+  }
   void show(unsigned page) {
     font_page->ustaw_widoczna(page == 3);
     system_page->ustaw_widoczna(page==0);
@@ -56,8 +74,8 @@ class Settings : public Okno {
     BSF::preview(id, sizes[si]);
     int px = ui_skaluj(sizes[si],preview->skala_dpi().procent());
     const char *lines[] = {"Bursztyn OS", "Zażółć gęślą jaźń",
-                           "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-                           "abcdefghijklmnopqrstuvwxyz", "0123456789"};
+                           "Привет мир · Привіт світ",
+                           "Καλημέρα κόσμε · Αθήνα", "e\xcc\x81 a\xcc\x88 · Ґґ Єє Іі Її Ўў"};
     int column = preview->obszar().szerokosc / 2;
     for (unsigned weight = 0; weight < 2; ++weight) {
       int x = ui_skaluj(10,preview->skala_dpi().procent()) + int(weight) * column, y = ui_skaluj(8,preview->skala_dpi().procent());
@@ -120,20 +138,10 @@ public:
       if(i==4)root.nav[i]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(4);},this);
       if(i==3)root.nav[i]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(3);},this);
     }
-    for (unsigned i = 0; i < BSF::enumerate(); ++i) {
-      auto *f = BSF::info(i);
-      if (f->weight >= 600 || f->italic)
-        continue;
-      families->dodaj_element(f->family, f->id);
-      ids[family_count] = f->id;
-      if ((c.family ? c.family : BSF::default_id()) == f->id)
-        families->ustaw_wybrany_indeks(int(family_count));
-      ++family_count;
-    }
-    if (!family_count)
-      families->dodaj_element("Bitmapowa czcionka awaryjna", 0);
-    if (families->wybrany_indeks() < 0)
-      families->ustaw_wybrany_indeks(0);
+    reload_fonts();
+    page->refresh->przy_kliknieciu([](Przycisk*,void* p){auto* self=static_cast<Settings*>(p);
+      BSF::rescan();self->reload_fonts();self->status->ustaw_tekst("Odświeżono listę fontów.");
+      self->przelicz_uklad();self->preview->uniewaznij();},this);
     const char *labels[] = {"12 px", "14 px", "16 px",
                             "18 px", "20 px", "24 px"};
     for (unsigned i = 0; i < 6; ++i) {

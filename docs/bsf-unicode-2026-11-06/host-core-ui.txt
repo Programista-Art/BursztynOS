@@ -1,0 +1,6 @@
+g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections narzedzia/test_bsf.cpp bsf/bsf.cpp -Wl,--gc-sections -o .bsf-test/bsf-host
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/bsf-host
+BSF: 12204 checks PASS; cache=2097152 bitmap-live=108 hits=10464 misses=3683 evictions=3295 face=544 glyph=56 first-ns=96201 hit-average-ns=709
+g++ -std=c++17 -fcoroutines -O0 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_bsf_ui.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/ui-host
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/ui-host
+BSF UI/browser: 7998 checks PASS; proportional geometry, clipping/AA, Polish UTF-8, previews, persistence, font priority, cooperative paint and corrupt-font fallback

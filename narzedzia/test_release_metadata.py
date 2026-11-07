@@ -85,6 +85,25 @@ class ReleaseGateTests(unittest.TestCase):
         (self.root / 'kernel.bin').write_bytes(b'\x7fELF')
         self.assertEqual(self.kinds(), {'malformed-executable'})
 
+    def test_efi_filesystem_members_are_scanned(self):
+        image = self.root / 'efi.img'
+        subprocess.run(['mformat', '-C', '-i', str(image), '-f', '1440', '::'],
+                       check=True, capture_output=True)
+        with tempfile.TemporaryDirectory() as td:
+            payload = pathlib.Path(td) / 'private.map'
+            payload.write_bytes(b'private symbol map')
+            subprocess.run(['mcopy', '-i', str(image), str(payload), '::/'],
+                           check=True, capture_output=True)
+        result = inspect(self.root)
+        self.assertIn('efi.img!/private.map',
+                      {f['path'] for f in result['inventory']})
+        self.assertIn({'path': 'efi.img!/private.map', 'kind': 'development-file'},
+                      result['findings'])
+
+    def test_invalid_efi_filesystem_cannot_pass(self):
+        (self.root / 'efi.img').write_bytes(b'invalid filesystem')
+        self.assertIn('efi-extraction-failed', self.kinds())
+
 
 if __name__ == '__main__':
     unittest.main()

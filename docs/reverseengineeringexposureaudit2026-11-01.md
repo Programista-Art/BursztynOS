@@ -1,7 +1,7 @@
 # Comprehensive Defensive Reverse-Engineering Exposure Audit of Bursztyn OS (2026-11-01)
 
 > Resumed on 2026-11-05 against the current working tree. Sections 3–6 and 12
-> contain the historical November 1 measurements. See section 15 for fresh
+> contain the historical November 1 measurements. See sections 15–16 for fresh
 > artifact hashes, verification results and remaining acceptance failures.
 > The NX/W^X assurance in the earlier report was incorrect and is corrected
 > in section 11. This report does not certify release readiness.
@@ -482,3 +482,58 @@ leakage**, and **Very Low → Moderate effort for detailed implementation
 recovery**. Architectural identification and public ABI recovery remain easy.
 These are qualitative estimates, not an exploitation-resistance score or a
 release-readiness certification.
+
+## 16. Resumed verification — 2026-11-07
+
+The release metadata gate now extracts the GRUB `efi.img` FAT filesystem with
+`mcopy` and applies the same inventory, executable-metadata, development-file,
+path, secret and diagnostic checks to its members. JSON paths use
+`efi.img!/EFI/...` to associate each member with its container. The container
+itself remains inventoried; member sizes must not be added to the ISO size.
+Missing mtools, extraction failures and empty EFI filesystems fail the gate.
+This supersedes section 15.2's EFI enumeration limitation; arbitrary other
+containers and compression formats are still not recursively decoded.
+
+Two added tests prove that a private `.map` inside a valid FAT image is
+inventoried and rejected, and an invalid EFI filesystem cannot pass.
+All 10 release gate tests pass; see
+[test evidence](reverseengineering-exposure-2026-11-01/resumed-gate-tests-2026-11-07.txt).
+The existing installer storage host target also passes with ASan/UBSan:
+10,512 storage/BSP2 checks and 138 native directory/file move assertions.
+Leak detection is disabled by that existing target; this is not a leak-sanitizer
+result or an installer GUI completion test.
+
+The ISO target now depends explicitly on the verifier so a verifier edit
+invalidates an existing ISO target. Changes in this continuation cover that
+Makefile dependency, `narzedzia/verifyreleasemetadata.py`, its tests, and audit
+documentation. No runtime code or hardening flags changed.
+The QEMU failures and incomplete installer acceptance in section 15.3 remain
+open until independently retested.
+
+### 16.1 Fresh production artifact
+
+`make -j4 iso` completed successfully, including BSF asset verification and
+metadata verification: **615 inventory entries, zero findings**. These comprise
+614 files extracted from the ISO and one member of the embedded EFI filesystem:
+`efi.img!/efi/boot/bootx64.efi` (208,896 bytes). The EFI executable has no COFF
+symbols or PE debug directory. Its `file` description mentions external PDB
+stripping; no PDB was shipped or discovered by this inventory.
+
+| Metric | Value |
+|---|---|
+| ISO bytes | 40,097,792 |
+| ISO SHA-256 | `ff2dd94f2497536f7d1ed865b66f33ac71544e2e24574572a40497682b6be20f` |
+| Public kernel bytes | 10,305,616 |
+| Public kernel SHA-256 | `6a621c4be13c139dbb30009ff2408fb346190ace8ffd604e01fef25ca5007803` |
+| Public kernel symbols / DWARF bytes / build-path matches | 0 / 0 / 0 |
+| Public kernel printable strings / likely identifiers | 63,985 / 154 |
+| Public kernel DEBUG/TEST/ASSERT string candidates | 102 |
+
+[Complete inventory, string baseline and findings](reverseengineering-exposure-2026-11-01/resumed-2026-11-07.json).
+[Installer host sanitizer evidence](reverseengineering-exposure-2026-11-01/resumed-installer-host-2026-11-07.txt).
+The build log remains locally at `/tmp/bursztyn-resumed-release-2026-11-07.log`.
+The matching private developer artifacts are under
+`.release-private/6a621c4be13c139dbb30009ff2408fb346190ace8ffd604e01fef25ca5007803/`.
+The zero findings apply to the verifier's implemented patterns and supported
+formats. This continuation did not repeat QEMU acceptance or prove reproducible
+rebuilds; the outstanding acceptance limitations in section 15 remain open.

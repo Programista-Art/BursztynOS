@@ -5,11 +5,11 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+from bsf_release_assets import assets as release_assets
 
 root = pathlib.Path(__file__).resolve().parents[1]
 iso = pathlib.Path(sys.argv[1]).resolve()
-assets = sorted(p for p in (root / 'czcionki/ttf').iterdir()
-                if p.is_file() and p.suffix.lower() in ('.ttf', '.txt'))
+assets = release_assets(root)
 with tempfile.TemporaryDirectory(prefix='bsf-iso-') as directory:
     target = pathlib.Path(directory)
     for source, destination in [('/czcionki/ttf', target / 'fonts'),

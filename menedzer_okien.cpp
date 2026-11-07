@@ -44,8 +44,8 @@ extern "C" {
     struct NaglowekBur naglowek = {
         {'B', 'U', 'R', '\0'},
         (uint64_t)&_start,
-        0x1000ULL, 0x4c000ULL, 0x1001000ULL,
-        0x4d000ULL, 0x20000ULL, 0x104d000ULL
+        0x1000ULL, 0x4e000ULL, 0x1001000ULL,
+        0x4f000ULL, 0x20000ULL, 0x104f000ULL
     };
 }
 

@@ -1,0 +1,15 @@
+Screenshot: browser-launch-menu
+Screenshot: browser-open
+Screenshot: notepad-font-16
+Screenshot: calculator-font-16
+Screenshot: explorer-font-16
+Navigate: fonts.html
+Screenshot: fonts-web
+Screenshot: settings-fonts
+Screenshot: settings-preview-24
+Screenshot: settings-applied-24
+Screenshot: browser-font-24
+Screenshot: notepad-font-24
+Screenshot: calculator-font-24
+Screenshot: explorer-font-24
+Screenshot: start-font-24

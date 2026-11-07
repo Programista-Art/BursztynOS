@@ -1,6 +1,7 @@
 #pragma once
 #include "css.h"
 #include "forms.h"
+#include "../../bsf/bsf.h"
 namespace Husarz {
 struct Flow {
     uint16_t node{};
@@ -10,6 +11,9 @@ struct Flow {
     bool pending_space{};
 };
 inline int advance(Metrics m, uint32_t cp, const Style &s) {
+#if defined(BSF_NATIVE)
+    if(m.family_advance && (BSF::combining(cp)||BSF::default_ignorable(cp))) return 0;
+#endif
     int base = m.family_advance?m.family_advance(m.user,cp,s.font,s.bold,s.italic,s.native_family):m.advance ? m.advance(m.user, cp, s.font, s.bold, s.italic) : (s.font * 9 + 8) / 16;
     return clamp64(int64_t(base) + s.letter_spacing + (cp == ' ' ? s.word_spacing : 0), 0, 2048);
 }

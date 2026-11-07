@@ -183,6 +183,19 @@ int main() {
     Face f;
     CHECK(!f.open(v.data(), v.size(), 33));
   }
+  {
+    auto v=regular;size_t at=Bytes{v.data(),v.size()}.u32(table(v,"name")+8);
+    Bytes names{v.data()+at,v.size()-at};unsigned strings=names.u16(4);
+    for(unsigned i=0;i<names.u16(2);++i)if(names.u16(6+i*12+6)==16)put16(v,at+6+i*12+6,0);
+    size_t record=at+6;put16(v,record,3);put16(v,record+2,10);put16(v,record+4,0x409);
+    put16(v,record+6,16);put16(v,record+8,6);put16(v,record+10,0);
+    put16(v,at+strings,0x4e2d);put16(v,at+strings+2,0xd83d);put16(v,at+strings+4,0xde00);
+    Face unicode;CHECK(unicode.open(v.data(),v.size(),88));
+    CHECK(!strcmp(unicode.family,"\xe4\xb8\xad\xf0\x9f\x98\x80"));
+    put16(v,at+strings+4,'A'); // invalid surrogate pair: record rejected independently
+    CHECK(unicode.open(v.data(),v.size(),89));
+    CHECK(strcmp(unicode.family,"\xe4\xb8\xad\xf0\x9f\x98\x80")!=0);
+  }
   uint32_t random = 123;
   for (unsigned i = 0; i < 1200; ++i) {
     auto v = regular;

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Inspect a final ISO (or extracted directory). Never emit secret values.
-Requires xorriso/file for ISO extraction and file typing. JSON is the audit baseline.
+Requires xorriso/file and mtools for ISO/EFI extraction and file typing.
+JSON is the audit baseline. EFI members use container.img!/member paths.
 Third-party GRUB relocatable modules require symbol tables: explicit path exception.
 """
 import argparse, hashlib, json, pathlib, re, struct, subprocess, tempfile
@@ -49,7 +50,7 @@ def pe(data):
  debug_rva, debug_size=struct.unpack_from('<II',data,base+6*8) if count>6 else (0,0)
  return dict(symbols=symbols,symbol_offset=symoff,debug_rva=debug_rva,debug_bytes=debug_size)
 
-def inspect(root):
+def inspect(root, scan_efi=True):
  inventory=[]; findings=[]; baselines=[]
  for p in sorted(root.rglob('*')):
   rel=p.relative_to(root).as_posix()
@@ -85,6 +86,26 @@ def inspect(root):
   ss=re.findall(rb'[\x20-\x7e]{4,}',data)
   src_ext=sum(bool(any(m.group() not in PUBLIC_SOURCE_ALLOWLIST for m in SOURCE.finditer(s))) for s in ss)
   baselines.append(dict(path=rel,strings=len(ss),source_extensions=src_ext,paths=len(paths),likely_identifiers=sum(bool(re.search(rb'_Z\w+|\b\w+::\w+|\b(?:scheduler|paging|syscall|virtio|BursztynUI|Husarz|PZB|BWS)\w*',s)) for s in ss),debug_test_assert=sum(bool(re.search(rb'\b(?:DEBUG|TEST|ASSERT)\b',s)) for s in ss),private_repo=sum(b'/Burstzyn/BursztynOS' in s for s in ss),elf=e,pe=portable))
+ # GRUB's EFI boot filesystem is a second shipped filesystem. Scanning only
+ # its raw bytes misses file names, symbol tables and other member metadata.
+ if scan_efi:
+  for p in sorted(root.rglob('efi.img')):
+   if not p.is_file() or p.is_symlink(): continue
+   prefix=p.relative_to(root).as_posix()+'!/'
+   with tempfile.TemporaryDirectory(prefix='bursztyn-efi-') as td:
+    try:
+     subprocess.run(['mcopy','-s','-i',str(p.resolve()),'::*',td],
+                    check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+                    timeout=60)
+     nested=inspect(pathlib.Path(td),scan_efi=False)
+     if not nested['inventory']:
+      findings.append(dict(path=prefix,kind='empty-efi-filesystem'))
+     for key, target in [('inventory',inventory),('findings',findings),
+                         ('string_baseline',baselines)]:
+      for item in nested[key]:
+       item['path']=prefix+item['path']; target.append(item)
+    except (OSError,subprocess.SubprocessError):
+     findings.append(dict(path=prefix,kind='efi-extraction-failed'))
  return dict(inventory=inventory,findings=findings,string_baseline=baselines)
 
 def main():

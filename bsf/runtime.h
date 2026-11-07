@@ -16,6 +16,14 @@ const FontInfo *info(unsigned);
 Config configuration();
 bool apply(Config);
 void refresh();
+// Explicit directory rescan, at an idle event boundary (not during paint).
+void rescan();
+uint32_t resolved_face(uint32_t cp, bool bold=false, const char* family=nullptr, bool italic=false);
+// A zero result requests explicit per-scalar mixed-font fallback.
+uint32_t resolved_cluster(const char*,size_t,bool bold=false,const char* family=nullptr,bool italic=false);
+const Glyph* glyph_face(uint32_t cp,uint32_t face,int px,bool bold=false,bool italic=false);
+int advance_face(uint32_t cp,uint32_t face,int px);
+int kern_face(uint32_t left,uint32_t right,uint32_t face,int px);
 void monospace(bool);
 bool monospace();
 int ui_size();
@@ -23,6 +31,7 @@ uint32_t generation();
 // family is a CSS family list, never a filesystem path; null means system UI.
 int measure_cp(uint32_t cp, int px, bool bold = false,
                const char *family = nullptr);
+int measure_styled_cp(uint32_t cp,int px,bool bold,const char* family,bool italic);
 int measure_text(const char *, int px, bool bold = false,
                  const char *family = nullptr, size_t limit = 65536);
 uint32_t resolve_family(const char *);

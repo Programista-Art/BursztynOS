@@ -179,12 +179,12 @@ inline Prostokat shell_obszar_klienta() {
 
 
 constexpr uint64_t BUR_TEXT_OFFSET = 0x1000ULL;
-constexpr uint64_t BUR_TEXT_SIZE   = 0x24000ULL;
+constexpr uint64_t BUR_TEXT_SIZE   = 0x29000ULL;
 constexpr uint64_t BUR_TEXT_VADDR  = 0x1001000ULL;
 
-constexpr uint64_t BUR_DATA_OFFSET = 0x25000ULL;
+constexpr uint64_t BUR_DATA_OFFSET = 0x2a000ULL;
 constexpr uint64_t BUR_DATA_SIZE   = 0x40000ULL;
-constexpr uint64_t BUR_DATA_VADDR  = 0x1025000ULL;
+constexpr uint64_t BUR_DATA_VADDR  = 0x102a000ULL;
 
 constexpr size_t SHELL_INPUT_CAPACITY = 2048;
 #include "shell_context.h"

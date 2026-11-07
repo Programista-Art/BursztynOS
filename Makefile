@@ -877,7 +877,7 @@ check-kernel: $(KERNEL)
 # 1. Bursztyn OS (domyslny, czysty start bez autostartu testow)
 # 2. Bursztyn OS - testy automatyczne (multiboot2 bursztyn.test=automated)
 #
-$(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notices.py $(KERNEL) ustawienia_blob.o $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile narzedzia/package_bsf.py narzedzia/package_support.py narzedzia/package_power_icons.py $(wildcard ikonki/przycisk*.png) $(wildcard dane/sponsorze/*.txt) czcionki/ttf $(wildcard czcionki/ttf/*)
+$(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notices.py $(KERNEL) ustawienia_blob.o $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile narzedzia/package_bsf.py narzedzia/package_support.py narzedzia/package_power_icons.py $(wildcard ikonki/przycisk*.png) $(wildcard dane/sponsorze/*.txt) czcionki/ttf $(shell $(PYTHON) -c 'from pathlib import Path; from narzedzia.bsf_release_assets import assets; print(" ".join(str(p) for p in assets(Path("."))))')
 	@rm -rf $(ISO_DIR)
 	@mkdir -p $(ISO_DIR)/boot/grub
 	$(PYTHON) narzedzia/package_release_kernel.py $(KERNEL) $(ISO_DIR)/boot/$(KERNEL) $(OBJCOPY)
@@ -1069,7 +1069,7 @@ instalator_blob.o: instalator_tmp.o bursztyn_gui.o programy/instalator/instalato
 	$(BUR_CONVERT) instalator.elf instalator.bin
 	$(LD) -r -b binary instalator.bin -o $@
 
-$(ISO): check-kernel $(KERNEL) $(TAPETY_PAK) $(GRUB_CFG)
+$(ISO): check-kernel $(KERNEL) $(TAPETY_PAK) $(GRUB_CFG) narzedzia/verifyreleasemetadata.py
 	$(GRUB_MKRESCUE) -o $@ $(ISO_DIR) --xorriso=$(XORRISO)
 	$(PYTHON) narzedzia/verify_bsf_iso.py $@
 	$(PYTHON) narzedzia/verifyreleasemetadata.py $@ --output .release-private/release-inventory.json
@@ -2310,3 +2310,12 @@ bur-v2:
 
 test-bur-v2-qemu: all
 	$(PYTHON) narzedzia/test_bur_v2_qemu.py
+
+.PHONY: test-bsf-graphemes-host
+test-bsf-graphemes-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-pie -no-pie narzedzia/test_bsf_graphemes.cpp bsf/bsf.cpp -o .bsf-test/graphemes
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/graphemes
+
+$(GRUB_CFG): czcionki/release-fonts.txt narzedzia/bsf_release_assets.py
+bsf_core.o: bsf/unicode.inc bsf/unicode_data.inc

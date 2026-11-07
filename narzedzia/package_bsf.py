@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """Bounded, flat trusted-font packaging. Preserve font bytes and notices."""
 import pathlib,sys,shutil,re
+from bsf_release_assets import assets
 root=pathlib.Path(__file__).resolve().parents[1]
 stage=pathlib.Path(sys.argv[1]);dest=stage/'czcionki/ttf';dest.mkdir(parents=True,exist_ok=True)
 source=root/'czcionki/ttf'
 if dest.resolve()==source.resolve():raise SystemExit('Refusing source directory as staging')
 for old in dest.iterdir():
  if old.is_file() and old.suffix.lower() in ('.ttf','.txt'):old.unlink()
-fonts=sorted(p for p in source.iterdir() if p.is_file() and p.suffix.lower()=='.ttf')
+release=assets(root)
+fonts=[p for p in release if p.suffix.lower()=='.ttf']
 if len(fonts)>32:raise SystemExit('BSF: maximum 32 font files')
-notices=sorted(p for p in source.iterdir() if p.is_file() and p.suffix.lower()=='.txt')
+notices=[p for p in release if p.suffix.lower()=='.txt']
 if len(notices)>4 or any(p.stat().st_size>128*1024 for p in notices):raise SystemExit('BSF: notice limit exceeded')
 if sum(p.stat().st_size for p in fonts+notices)>16*1024*1024:raise SystemExit('BSF: asset budget exceeded')
 for p in fonts+notices:

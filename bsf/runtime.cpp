@@ -16,6 +16,15 @@ void byte_set(void *target, int v, size_t n) {
 }
 FontInfo catalog[MaxFiles];
 unsigned count{};
+uint32_t catalog_epoch{};
+struct Resolution { uint32_t primary{}, cp{}, result{}; unsigned style{}; bool valid{}; };
+constexpr unsigned ResolutionSlots=128;
+Resolution resolutions[ResolutionSlots];
+unsigned resolution_cursor{};
+struct ClusterResolution { uint32_t primary{},result{}; unsigned style{},size{}; bool valid{}; char text[128]{}; };
+ClusterResolution clusters[16];unsigned cluster_cursor{};
+void invalidate_resolution() { for(auto& r:resolutions) r=Resolution{}; resolution_cursor=0;for(auto& r:clusters)r.valid=false;cluster_cursor=0; }
+
 bool initialized{}, disabled{};
 Config config{}, temporary{};
 bool previewing{};
@@ -33,6 +42,9 @@ uint32_t identity(const char *name) {
     h = (h ^ c) * 16777619u;
   }
   return h && h != 0xffffffffU ? h : 1;
+}
+int compare(const char* a,const char* b){
+  for(unsigned i=0;i<8192;++i){unsigned x=uint8_t(a[i]),y=uint8_t(b[i]);if(x!=y)return int(x)-int(y);if(!x)return 0;}return 0;
 }
 bool same(const char *a, const char *b) {
   for (unsigned i = 0; i < 160; ++i) {
@@ -83,6 +95,20 @@ void init() {
     wypisz("[BSF] Font directory unavailable; bitmap fallback.\n");
     return;
   }
+  // Sort all bounded directory records before applying the file-count cap.
+  auto** records=new char*[1024]; auto* sorted=new char[8192];
+  if(!records || !sorted){delete[] records;delete[] sorted;delete[] list;return;}
+  unsigned lines=0; size_t begin=0;
+  for(size_t i=0;i<8191 && list[i];++i) if(list[i]=='\n'){
+    list[i]=0;if(lines<1024)records[lines++]=list+begin;begin=i+1;
+  }
+  if(begin<8191 && list[begin] && lines<1024)records[lines++]=list+begin;
+  for(unsigned i=1;i<lines;++i){auto* value=records[i];unsigned j=i;
+    while(j && compare(records[j-1],value)>0){records[j]=records[j-1];--j;}records[j]=value;}
+  size_t bytes=0;
+  for(unsigned i=0;i<lines;++i){size_t n=0;while(records[i][n])++n;if(n+1>=8192-bytes)break;
+    byte_copy(sorted+bytes,records[i],n);bytes+=n;sorted[bytes++]='\n';}
+  sorted[bytes]=0;delete[] records;delete[] list;list=sorted;
   unsigned examined = 0;
   for (size_t at = 0; at < 8191 && list[at] && examined < MaxFiles;) {
     size_t end = at;
@@ -140,6 +166,14 @@ void init() {
     at = end + (end < 8191 && list[end] == '\n');
   }
   delete[] list;
+  // Stable ordering for family/style UI and fallback priority.
+  for(unsigned i=1;i<count;++i){
+    FontInfo value=catalog[i]; unsigned j=i;
+    while(j && (compare(catalog[j-1].family,value.family)>0 ||
+      (!compare(catalog[j-1].family,value.family) && compare(catalog[j-1].path,value.path)>0))){
+      catalog[j]=catalog[j-1];--j;
+    }catalog[j]=value;
+  }
   bool selected_found = !config.family;
   for (unsigned i = 0; i < count; ++i)
     selected_found |= catalog[i].id == config.family;
@@ -272,7 +306,58 @@ Face *face(const char *families, bool bold = false, bool italic = false) {
     }
   return nullptr;
 }
+// One face resolution path for measurement, drawing and cache queries.
+const FontInfo* resolve(uint32_t cp,const char* family,bool bold,bool italic){
+  const auto* primary=choose(family,bold,italic);
+  if(!primary || cp>0x10ffff || (cp>=0xd800 && cp<=0xdfff)) return nullptr;
+  unsigned style=unsigned(bold)|(unsigned(italic)<<1);
+  for(const auto& r:resolutions) if(r.valid && r.primary==primary->id && r.cp==cp && r.style==style){
+    if(!r.result) return nullptr;
+    for(unsigned i=0;i<count;++i) if(catalog[i].id==r.result) return catalog+i;
+  }
+  const FontInfo* result=nullptr;
+  auto supports=[&](const FontInfo* item){auto* f=load(item);return f && f->glyph(cp)!=0;};
+  if(supports(primary)) result=primary;
+  // Same family first, then matching weight/style, then remaining installed faces.
+  for(unsigned pass=0;pass<3 && !result;++pass)
+    for(unsigned i=0;i<count;++i){
+      const auto* candidate=catalog+i;
+      bool eligible=pass==0 ? same(primary->family,candidate->family) :
+        pass==1 ? candidate->italic==italic && (candidate->weight>=600)==bold : true;
+      if(eligible && supports(candidate)){result=candidate;break;}
+    }
+  auto& r=resolutions[resolution_cursor++%ResolutionSlots];
+  r={primary->id,cp,result?result->id:0,style,true};
+  return result;
+}
 } // namespace
+uint32_t resolved_cluster(const char* text,size_t size,bool bold,const char* family,bool italic){
+  if(!text || !size || size>65536)return 0;
+  const auto* primary=choose(family,bold,italic);if(!primary)return 0;
+  unsigned style=unsigned(bold)|(unsigned(italic)<<1);
+  if(size<=128)for(const auto& r:clusters)if(r.valid&&r.primary==primary->id&&r.style==style&&r.size==size){
+    bool equal=true;for(size_t i=0;i<size;++i)equal&=r.text[i]==text[i];if(equal)return r.result;
+  }
+  bool tried[MaxFiles]{};
+  auto covers=[&](const FontInfo* item){
+    size_t index=size_t(item-catalog);if(tried[index])return false;tried[index]=true;
+    auto* f=load(item);if(!f)return false;
+    for(size_t at=0;at<size;){uint32_t cp;at+=utf8(text+at,size-at,cp);if(!default_ignorable(cp)&&!f->glyph(cp))return false;}
+    return true;
+  };
+  uint32_t result=covers(primary)?primary->id:0;
+  for(unsigned pass=0;pass<3&&!result;++pass)for(unsigned i=0;i<count;++i){
+    auto* candidate=catalog+i;
+    bool eligible=pass==0?same(primary->family,candidate->family):pass==1?candidate->italic==italic&&(candidate->weight>=600)==bold:true;
+    if(eligible&&covers(candidate)){result=candidate->id;break;}
+  }
+  if(size<=128){auto& r=clusters[cluster_cursor++%16];r.primary=primary->id;r.result=result;r.style=style;r.size=unsigned(size);r.valid=true;byte_copy(r.text,text,size);}
+  return result;
+}
+Face* by_id(uint32_t id){init();for(unsigned i=0;i<count;++i)if(catalog[i].id==id)return load(catalog+i);return nullptr;}
+const Glyph* glyph_face(uint32_t cp,uint32_t id,int px,bool bold,bool italic){auto* f=by_id(id);return f&&cache?cache->get(*f,cp,px,unsigned(bold)|(unsigned(italic)<<1)):nullptr;}
+int advance_face(uint32_t cp,uint32_t id,int px){if(combining(cp)||default_ignorable(cp))return 0;auto* f=by_id(id);return f?f->advance(f->glyph(cp),px):-1;}
+int kern_face(uint32_t l,uint32_t r,uint32_t id,int px){auto* f=by_id(id);return f?f->kerning(f->glyph(l),f->glyph(r),px):0;}
 unsigned enumerate() {
   init();
   return count;
@@ -333,20 +418,18 @@ int ui_size() {
 }
 uint32_t generation() {
   init();
-  return config.generation;
+  return config.generation+catalog_epoch;
 }
-int measure_cp(uint32_t cp, int px, bool bold, const char *family) {
-  auto *f = face(family, bold);
-  if (!f)
-    return -1;
-  if (f->glyph(cp))
-    return f->advance(f->glyph(cp), px);
-  for (unsigned i = 0; i < count; ++i) {
-    f = load(catalog + i);
-    if (f && f->glyph(cp))
-      return f->advance(f->glyph(cp), px);
-  }
-  return -1;
+uint32_t resolved_face(uint32_t cp,bool bold,const char* family,bool italic){
+  const auto* item=resolve(cp,family,bold,italic);return item?item->id:0;
+}
+int measure_cp(uint32_t cp,int px,bool bold,const char* family){
+  return measure_styled_cp(cp,px,bold,family,false);
+}
+int measure_styled_cp(uint32_t cp, int px, bool bold, const char *family, bool italic) {
+  if(combining(cp)||default_ignorable(cp)) return 0;
+  auto* f=load(resolve(cp,family,bold,italic));
+  return f?f->advance(f->glyph(cp),px):-1;
 }
 int measure_text(const char *text, int px, bool bold, const char *family,
                  size_t limit) {
@@ -356,17 +439,17 @@ int measure_text(const char *text, int px, bool bold, const char *family,
   while (n < limit && text[n])
     ++n;
   int64_t width = 0;
-  uint32_t previous = 0;
-  for (size_t at = 0; at < n;) {
-    uint32_t cp;
-    at += utf8(text + at, n - at, cp);
-    int a = measure_cp(cp, px, bold, family);
-    if (a < 0)
-      a = px / 2 + 1;
-    width += a + (previous ? kern(previous, cp, px, bold, family) : 0);
-    if (width > INT32_MAX)
-      return INT32_MAX;
-    previous = cp;
+  uint32_t previous=0,previous_face=0;
+  for(size_t start=0;start<n;){
+    size_t end=next_cluster(text,start,n);uint32_t selected=resolved_cluster(text+start,end-start,bold,family);
+    for(size_t at=start;at<end;){uint32_t cp;at+=utf8(text+at,end-at,cp);
+      if(default_ignorable(cp)||combining(cp))continue;
+      uint32_t id=selected?selected:resolved_face(cp,bold,family);
+      int advance=id?advance_face(cp,id,px):px/2+1;
+      width+=advance+(previous&&id&&id==previous_face?kern_face(previous,cp,id,px):0);
+      if(width>INT32_MAX)return INT32_MAX;
+      previous=cp;previous_face=id;
+    }start=end;
   }
   return int(width);
 }
@@ -386,8 +469,12 @@ const char *family_name(uint32_t id) {
   return nullptr;
 }
 int kern(uint32_t l, uint32_t r, int px, bool bold, const char *family) {
-  auto *f = face(family, bold);
-  return f ? f->kerning(f->glyph(l), f->glyph(r), px) : 0;
+  if(combining(l) || combining(r))return 0;
+  const auto* left=resolve(l,family,bold,false);
+  const auto* right=resolve(r,family,bold,false);
+  if(!left || !right || left->id!=right->id) return 0;
+  auto* f=load(left);
+  return f?f->kerning(f->glyph(l),f->glyph(r),px):0;
 }
 int height(int px, const char *family) {
   auto *f = face(family);
@@ -400,20 +487,10 @@ int ascent(int px, const char *family) {
 bool ready(const char *family) { return face(family) != nullptr; }
 const Glyph *glyph(uint32_t cp, int px, bool bold, const char *family,
                    bool italic) {
-  auto *f = face(family, bold, italic);
-  if (!f || !cache)
-    return nullptr;
-  if (!f->glyph(cp)) {
-    for (unsigned i = 0; i < count; ++i) {
-      auto *other = load(catalog + i);
-      if (other && other->glyph(cp))
-        return cache->get(*other, cp, px,
-                          unsigned(bold) | (unsigned(italic) << 1));
-    }
-    return nullptr;
-  }
-  return cache->get(*f, cp, px, unsigned(bold) | (unsigned(italic) << 1));
+  auto* f=load(resolve(cp,family,bold,italic));
+  return f && cache?cache->get(*f,cp,px,unsigned(bold)|(unsigned(italic)<<1)):nullptr;
 }
+
 bool family_monospace(uint32_t id) {
   init();
   if (id == 0xffffffffU)
@@ -428,7 +505,7 @@ const Statistics &statistics() {
   return cache ? cache->stats : empty;
 }
 bool cached(uint32_t cp, int px, bool bold, const char *family, bool italic) {
-  const auto *chosen = choose(family, bold, italic);
+  const auto *chosen = resolve(cp, family, bold, italic);
   if (!cache || !chosen)
     return false;
   for (const auto &loaded_face : loaded)
@@ -453,7 +530,16 @@ void preview(uint32_t id, int size) {
   previewing = true;
 }
 void end_preview() { previewing = false; }
+void rescan() {
+  ++catalog_epoch;
+  // Font operations are serialized by the app event loop. Pinned masks stay
+  // valid across Cache::clear; file-backed Faces are never exposed to callers.
+  if(cache) cache->clear();
+  for(auto& item:loaded){delete[] item.bytes;item=Loaded{};}
+  invalidate_resolution(); initialized=false; init();
+}
 void shutdown() {
+  invalidate_resolution();
   for (auto &item : loaded) {
     delete[] item.bytes;
     item = Loaded{};
