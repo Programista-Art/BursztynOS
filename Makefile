@@ -191,7 +191,8 @@ KERNEL_CXXFLAGS := \
 	$(MBEDTLS_CONFIG) \
 	$(MBEDTLS_INCLUDES) \
 	$(STEROWNIKI_INCLUDES) \
-	$(JADRO_INCLUDES)
+	$(JADRO_INCLUDES) \
+	-DBURSZTYN_DEFAULT_DISPLAY_720P=1
 
 MBEDTLS_CFLAGS := \
 	-std=gnu11 \
@@ -1064,35 +1065,35 @@ $(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notic
 		'' \
 		'menuentry "Bursztyn OS" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1920x1080x32,1280x720x32,1024x768x32,auto' \
-		'    set gfxpayload=keep' \
-		'    multiboot2 /boot/system_operacyjny.bin' \
+		'    set gfxmode=1280x720x32' \
+		'    set gfxpayload=1280x720x32' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
 		'' \
 		'menuentry "Bursztyn OS - testy automatyczne" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1920x1080x32,1280x720x32,1024x768x32,auto' \
-		'    set gfxpayload=keep' \
-		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated' \
+		'    set gfxmode=1280x720x32' \
+		'    set gfxpayload=1280x720x32' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
 		'menuentry "Bursztyn OS - testy automatyczne (niszczacy test dysku)" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1920x1080x32,1280x720x32,1024x768x32,auto' \
-		'    set gfxpayload=keep' \
-		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.test.diskdestructive=1' \
+		'    set gfxmode=1280x720x32' \
+		'    set gfxpayload=1280x720x32' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.test.diskdestructive=1 bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
 		'menuentry "Bursztyn OS Instalator" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1920x1080x32,1280x720x32,1024x768x32,auto' \
-		'    set gfxpayload=keep' \
+		'    set gfxmode=1280x720x32' \
+		'    set gfxpayload=1280x720x32' \
 		'    echo "Ladowanie jadra..."' \
-		'    multiboot2 /boot/system_operacyjny.bin bursztyn.install=1' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.install=1 bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    echo "Ladowanie zasobow instalatora..."' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    module2 /boot/installer/BOOTX64.EFI installer.efi' \
@@ -1273,9 +1274,9 @@ $(CI_TEST_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
 		'' \
 		'menuentry "Bursztyn OS - testy automatyczne" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1920x1080x32,1280x720x32,1024x768x32,auto' \
-		'    set gfxpayload=keep' \
-		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated' \
+		'    set gfxmode=1280x720x32' \
+		'    set gfxpayload=1280x720x32' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
@@ -1293,9 +1294,9 @@ $(CI_BLK_DESTRUCTIVE_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
 		'' \
 		'menuentry "Bursztyn OS - testy automatyczne (niszczacy test dysku)" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1920x1080x32,1280x720x32,1024x768x32,auto' \
-		'    set gfxpayload=keep' \
-		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.test.diskdestructive=1' \
+		'    set gfxmode=1280x720x32' \
+		'    set gfxpayload=1280x720x32' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.test.diskdestructive=1 bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
@@ -1313,9 +1314,9 @@ $(CI_DESTRUCTIVE_ONLY_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
 		'' \
 		'menuentry "Bursztyn OS - flaga niszczaca bez trybu automatycznego" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1920x1080x32,1280x720x32,1024x768x32,auto' \
-		'    set gfxpayload=keep' \
-		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test.diskdestructive=1' \
+		'    set gfxmode=1280x720x32' \
+		'    set gfxpayload=1280x720x32' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test.diskdestructive=1 bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
@@ -1346,9 +1347,9 @@ $(GRUB8K_CFG): $(KERNEL) check-test8k $(TAPETY_PAK)
 		'' \
 		'menuentry "Bursztyn OS (8K Test)" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1920x1080x32,1280x720x32,1024x768x32,auto' \
-		'    set gfxpayload=keep' \
-		'    multiboot2 /boot/system_operacyjny.bin' \
+		'    set gfxmode=1280x720x32' \
+		'    set gfxpayload=1280x720x32' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    module2 /boot/test8k.bmp test8k.bmp' \
 		'    boot' \
@@ -1393,13 +1394,18 @@ prepare-disk: $(VIRTUAL_DISK)
 #   make runuefi QEMU_DISPLAY_ARGS="-display gtk,zoom-to-fit=off"
 #
 
+BURSZTYN_REFRESH_HZ ?= 60
+ifneq ($(filter 60 120 144 165 240,$(BURSZTYN_REFRESH_HZ)),$(BURSZTYN_REFRESH_HZ))
+$(error BURSZTYN_REFRESH_HZ musi byc jedna z wartosci: 60, 120, 144, 165, 240)
+endif
+
 QEMUACCEL ?= tcg,thread=single
 QEMU_ACCEL ?= $(QEMUACCEL)
 QEMU_RAM ?= 2G
 QEMU_SMP ?= 1
 QEMUDISPLAYARGS ?= $(if $(strip $(QEMU_DISPLAY_ARGS)),$(QEMU_DISPLAY_ARGS),-display sdl)
-QEMU_VIRTIO_XRES ?= 1920
-QEMU_VIRTIO_YRES ?= 1080
+QEMU_VIRTIO_XRES ?= 1280
+QEMU_VIRTIO_YRES ?= 720
 
 QEMUBASEARGS ?= \
 	-machine pc,hpet=on \
@@ -1849,7 +1855,7 @@ virtio_input.o: jadro/gui/gui_runtime_diag.h
 .PHONY: test-gui-runtime-diag
 test-gui-runtime-diag:
 	mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -fsanitize=address,undefined testy/test_gui_runtime_diag.cpp -o .wm-test/gui-runtime-diag
+	g++ -std=c++17 -O1 -g -I. -Ijadro/gui -Ijadro/bws -Isterowniki/czas -fsanitize=address,undefined testy/test_gui_runtime_diag.cpp -o .wm-test/gui-runtime-diag
 	ASAN_OPTIONS=detect_leaks=0 .wm-test/gui-runtime-diag
 
 .PHONY: test-compositor-cursor
@@ -1907,6 +1913,12 @@ test-desktop-files-host:
 	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined testy/test_desktop_files_host.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -o .bursztyn-ui-test/test-desktop-files
 	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-desktop-files
 
+.PHONY: test-usluga-ui-protokol-host
+test-usluga-ui-protokol-host:
+	@mkdir -p .bursztyn-ui-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -I. -fsanitize=address,undefined testy/test_usluga_ui_protokol_host.cpp -o .bursztyn-ui-test/test-usluga-ui-protokol
+	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-usluga-ui-protokol
+
 .PHONY: test-desktop-capacity-host
 test-desktop-capacity-host:
 	@mkdir -p .bursztyn-ui-test
@@ -1937,7 +1949,7 @@ test-desktop-selection-theme:
 .PHONY: test-file-popup-host
 test-file-popup-host:
 	@mkdir -p .bursztyn-ui-test
-	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined testy/test_file_popup_host.cpp -o .bursztyn-ui-test/test-file-popup
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined testy/test_file_popup_host.cpp -o .bursztyn-ui-test/test-file-popup
 	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-file-popup
 
 .PHONY: test-desktop-settings-host
@@ -1965,7 +1977,7 @@ kernel.o: jadro/rdzen/opcje_startowe.h
 .PHONY: test-powitanie
 test-powitanie:
 	@mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -fsanitize=address,undefined testy/test_powitanie.cpp -o .wm-test/powitanie
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -fsanitize=address,undefined testy/test_powitanie.cpp -o .wm-test/powitanie
 	ASAN_OPTIONS=detect_leaks=0 .wm-test/powitanie
 	$(PYTHON) testy/test_powitanie_policy.py
 
@@ -1987,7 +1999,7 @@ test-powitanie-reboot:
 .PHONY: test-gpu-quiesce-host
 test-gpu-quiesce-host:
 	@mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined testy/test_gpu_quiesce_host.cpp -Wl,--gc-sections -o .wm-test/gpu-quiesce
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -ffunction-sections -fdata-sections -fsanitize=address,undefined testy/test_gpu_quiesce_host.cpp -Wl,--gc-sections -o .wm-test/gpu-quiesce
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/gpu-quiesce
 
 # Opt-in sparse splash timing diagnostics; production default has no frame logs.
@@ -2397,7 +2409,7 @@ test-display-geometry-host: $(filter-out .wm-test/runtime-host/testy/test_splash
 
 test-display-snapshot-host:
 	@mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined testy/test_display_snapshot.cpp -Wl,--gc-sections -o .wm-test/display-snapshot
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -ffunction-sections -fdata-sections -fsanitize=address,undefined testy/test_display_snapshot.cpp -Wl,--gc-sections -o .wm-test/display-snapshot
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) UBSAN_OPTIONS=halt_on_error=1 .wm-test/display-snapshot
 
 # Keep new retained-paint dependencies explicit for checkouts carrying older .d files.

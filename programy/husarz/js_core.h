@@ -107,7 +107,7 @@ class Runtime : public ScriptExecutor {
             if(c.kind!=CompletionKind::Throw&&h.frame!=frame_count)break;
             if((c.kind==CompletionKind::Jump||c.kind==CompletionKind::Normal)&&c.target>=meta.begin&&c.target<meta.end)break;
             while(frame_count>h.frame){auto f=frames[--frame_count];while(scope&&scope!=f.scope)co_await leave_scope();scope=f.scope;sp=f.base;this_value=f.receiver;budget.leave();}
-            while(scope!=h.scope&&scope)co_await leave_scope();scope=h.scope;sp=h.sp;
+            while(scope!=h.scope&&scope){co_await leave_scope();}scope=h.scope;sp=h.sp;
             if(h.phase==2){--handler_count;continue;}
             if(c.kind==CompletionKind::Throw&&h.phase==0&&meta.caught){h.phase=1;thrown=c.value;ip=meta.caught;co_return;}
             if(meta.finalizer){h.phase=2;h.pending=c;ip=meta.finalizer;co_return;}
@@ -146,7 +146,7 @@ class Runtime : public ScriptExecutor {
         for(size_t p=0;p<n;){size_t used=0;uint32_t cp=utf8(s+p,n-p,used);if(!s[p] || (cp==0xfffd && (used!=3 || uint8_t(s[p])!=0xef))){fail(Error::Type);return 0;}p+=used;}
         // Strings are immutable arena allocations. Name equality is by bounded bytes.
         unsigned id=string_count++;strings[id]={bytes_used,uint16_t(n)};
-        for(unsigned i=0;i<n;++i)bytes[bytes_used++]=s[i];bytes[bytes_used++]=0;return id;
+        for(unsigned i=0;i<n;++i){bytes[bytes_used++]=s[i];}bytes[bytes_used++]=0;return id;
     }
     bool is(unsigned s,const char *v)const{return equal(text(s),v);}
     unsigned constant(Value v){if(constant_count==2048){fail(Error::Memory);return 0;}constants[constant_count]=v;return constant_count++;}
@@ -340,7 +340,7 @@ struct Lexer {
                         if(n+used>StringLimit){r.fail(Error::Range);break;}scratch[n++]=c;for(size_t i=1;i<used;++i)scratch[n++]=take();
                     }else {if(n==StringLimit){r.fail(Error::Range);break;}scratch[n++]=c;}
                 }
-                if(!closed)r.fail(Error::Syntax);t.kind=StringToken;t.text=uint16_t(r.string(scratch,n));
+                if(!closed){r.fail(Error::Syntax);}t.kind=StringToken;t.text=uint16_t(r.string(scratch,n));
             }else {
                 char d=peek();
                 if(c=='='&&d=='>'){take();t.kind=Arrow;}
@@ -476,7 +476,7 @@ class Compiler {
             co_await block();emit(Op::EndTry);bool caught=false,finalizer=false;
             if(word("catch")){caught=true;++pos;need('(');if(t().kind!=Identifier){r.fail(Error::Syntax);--depth;co_return;}unsigned name=t().text;++pos;need(')');r.handler_code[id].caught=uint16_t(r.code_count);emit(Op::Enter);++block_depth;emit(Op::Catch,name);co_await block();emit(Op::Leave);--block_depth;emit(Op::EndTry);}
             if(word("finally")){finalizer=true;++pos;r.handler_code[id].finalizer=uint16_t(r.code_count);co_await block();emit(Op::EndFinally);}
-            if(!caught&&!finalizer)r.fail(Error::Syntax);r.handler_code[id].end=uint16_t(r.code_count);
+            if(!caught&&!finalizer){r.fail(Error::Syntax);}r.handler_code[id].end=uint16_t(r.code_count);
         }else if(word("if")){
             ++pos;need('(');Expr e;co_await expression(e);need(')');unsigned no=emit(Op::JumpFalse);co_await statement();
             if(word("else")){++pos;unsigned end=emit(Op::Jump);patch(no,r.code_count);co_await statement();patch(end,r.code_count);}else patch(no,r.code_count);
@@ -558,7 +558,7 @@ inline Work Runtime::property(Value base,Value key,bool write,Value &value){
         if(base.ref==PromiseCtor&&!write){value=is(name,"resolve")?method(PromiseResolve):is(name,"reject")?method(PromiseReject):Value{};co_return;}
         if(write){fail(Error::Type);co_return;}
         if(is(name,"prototype")){value=base.ref==ObjectCtor?object_prototype:base.ref==ArrayCtor?array_prototype:base.ref==FunctionCtor?function_prototype:base.ref==StringCtor?string_prototype:base.ref==NumberCtor?number_prototype:Value{};co_return;}
-        unsigned id=base.ref==ObjectCtor?(is(name,"create")?ObjectCreate:is(name,"getPrototypeOf")?ObjectGetPrototype:is(name,"setPrototypeOf")?ObjectSetPrototype:0):base.ref==NumberCtor?(is(name,"isNaN")?NumberNaN:is(name,"isFinite")?NumberFinite:0):0;
+        unsigned id=base.ref==ObjectCtor?(is(name,"create")?ObjectCreate:is(name,"getPrototypeOf")?ObjectGetPrototype:is(name,"setPrototypeOf")?ObjectSetPrototype:NativeNone):base.ref==NumberCtor?(is(name,"isNaN")?NumberNaN:is(name,"isFinite")?NumberFinite:NativeNone):NativeNone;
         if(id){value=method(id);co_return;}
         if(base.ref==NumberCtor){if(is(name,"NaN"))value=Value::num(Numeric::nan());else if(is(name,"POSITIVE_INFINITY"))value=Value::num(Numeric::infinity());else if(is(name,"NEGATIVE_INFINITY"))value=Value::num(-Numeric::infinity());else if(is(name,"EPSILON"))value=Value::num(Numeric::bits(0x3cb0000000000000ULL));else if(is(name,"MAX_VALUE"))value=Value::num(Numeric::bits(0x7fefffffffffffffULL));else if(is(name,"MIN_VALUE"))value=Value::num(Numeric::bits(1));else if(is(name,"MAX_SAFE_INTEGER"))value=Value::num(9007199254740991.0);else if(is(name,"MIN_SAFE_INTEGER"))value=Value::num(-9007199254740991.0);else value={};co_return;}
         value={};co_return;
@@ -607,7 +607,7 @@ inline Work Runtime::native(Value fn,Value *args,unsigned count,Value &out){
     }
     if(fn.ref>=ErrorCtor&&fn.ref<=SyntaxErrorCtor){
         if(count>1){fail(Error::Type);co_return;}out=error_object(fn.ref==ReferenceErrorCtor?Error::Reference:fn.ref==RangeErrorCtor?Error::Range:fn.ref==SyntaxErrorCtor?Error::Syntax:Error::Type);
-        if(error!=Error::None)co_return;auto &o=objects[out.ref];if(fn.ref==ErrorCtor)o.props[0].value=Value::handle(Kind::String,string("Error",5));if(count){unsigned message=0;co_await convert_string(args[0],message);o.props[1].value=Value::handle(Kind::String,message);}co_return;
+        if(error!=Error::None){co_return;}auto &o=objects[out.ref];if(fn.ref==ErrorCtor)o.props[0].value=Value::handle(Kind::String,string("Error",5));if(count){unsigned message=0;co_await convert_string(args[0],message);o.props[1].value=Value::handle(Kind::String,message);}co_return;
     }
     if(fn.ref==ObjectCtor){if(count>1){fail(Error::Type);co_return;}out=count&&object_like(args[0])?args[0]:object(object_prototype);co_return;}
     if(fn.ref==ObjectCreate){if(count!=1||(args[0].kind!=Kind::Object&&args[0].kind!=Kind::Null)){fail(Error::Type);co_return;}out=object(args[0]);co_return;}
@@ -641,10 +641,10 @@ inline Work Runtime::native(Value fn,Value *args,unsigned count,Value &out){
     if(fn.ref==CharAt || fn.ref==Slice){
         if(count<1 || count>2 || args[0].kind!=Kind::Number || (count==2&&args[1].kind!=Kind::Number)){fail(Error::Type);co_return;}
         Numeric a=args[0].number,b=fn.ref==CharAt?a+1:count==2?args[1].number:Numeric(StringLimit);
-        if(a<0)a=0;if(b<a)b=a;if(a>StringLimit || a!=a || b!=b){out=Value::handle(Kind::String,string("",0));co_return;}
+        if(a<0){a=0;}if(b<a){b=a;}if(a>StringLimit || a!=a || b!=b){out=Value::handle(Kind::String,string("",0));co_return;}
         unsigned start=0,end=0,cp=0;
         for(unsigned i=0;i<size(receiver.ref);){co_await point();if(Numeric(cp)<a)start=i;size_t used=0;utf8(text(receiver.ref)+i,size(receiver.ref)-i,used);i+=unsigned(used);if(Numeric(cp)<a)start=i;if(Numeric(cp)<b)end=i;++cp;}
-        if(end<start)end=start;out=Value::handle(Kind::String,string(text(receiver.ref)+start,end-start));co_return;
+        if(end<start){end=start;}out=Value::handle(Kind::String,string(text(receiver.ref)+start,end-start));co_return;
     }
     if(fn.ref==IndexOf){
         if(count!=1||args[0].kind!=Kind::String){fail(Error::Type);co_return;}unsigned n=size(receiver.ref),m=size(args[0].ref),cp=0;

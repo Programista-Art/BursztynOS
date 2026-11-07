@@ -825,6 +825,7 @@ bool scheduler_dodaj_zdarzenie(
         }
         if (znaleziono) {
             q.wpisy[szukaj] = *zdarzenie;
+            if(zdarzenie->typ!=BWS_ZDARZENIE_TIMER)gui_perf_mark_input();
             if (odczytaj_stan_procesu(tablica_procesow[pid]) ==
                 PROCES_ZABLOKOWANY_ZDARZENIE) {
                 __atomic_store_n(&termin_wybudzenia_zdarzenia[pid], 0,
@@ -867,6 +868,7 @@ bool scheduler_dodaj_zdarzenie(
         ++q.przepelnienia;
     }
     q.wpisy[glowa] = *zdarzenie;
+    if(zdarzenie->typ!=BWS_ZDARZENIE_TIMER)gui_perf_mark_input();
     q.glowa = nastepna;
     if (odczytaj_stan_procesu(tablica_procesow[pid]) ==
         PROCES_ZABLOKOWANY_ZDARZENIE) {

@@ -31,6 +31,17 @@ int main() {
     CHECK(otworz_pulpit_context(638,438,-1));
     CHECK(!pulpit_menu->menu.menu().element(0)->czy_wlaczony());
     CHECK(!pulpit_menu->menu.menu().element(2)->czy_wlaczony());
+    {
+        bool arrange=false;
+        for(size_t i=0;i<pulpit_menu->menu.menu().liczba_elementow();++i) {
+            auto* a=pulpit_menu->menu.menu().element(i);
+            if(static_cast<PlikiUI::Akcja>(a->identyfikator())==PlikiUI::Akcja::ARRANGE_ICONS) {
+                arrange=true;CHECK(a->czy_wlaczony());
+                CHECK(!strcmp(a->tekst(),"Ułóż ikony automatycznie"));
+            }
+        }
+        CHECK(arrange);
+    }
     bws_zdarzenie click{};click.typ=BWS_ZDARZENIE_MYSZ_DOWN;click.x=0;click.y=0;
     CHECK(obsluz_popupy_pulpitu(click));CHECK(!pulpit_context_open);CHECK(launches==0);
     click.typ=BWS_ZDARZENIE_MYSZ_UP;CHECK(obsluz_popupy_pulpitu(click));CHECK(launches==0);

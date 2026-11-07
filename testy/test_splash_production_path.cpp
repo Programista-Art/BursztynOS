@@ -171,7 +171,19 @@ int main(){
                 if(line.find("[SPLASH RUNTIME]")!=std::string::npos)fprintf(log,"%s\n",line.c_str());
             fclose(log);
         }
-        powitanie_wycisz();PrezentacjaStartu::zakoncz_inicjalizacje();
+        powitanie_wycisz();
+        // With the optional splash surface gone, exercise the production
+        // dirty RAM -> VirtIO backing copy path rather than its full-frame
+        // startup publication path.
+        const auto dirty_copy_visible_before=gpu_scanout_model.visible.size();
+        grafika_rozpocznij_skladanie();
+        grafika_odtworz_tlo_regionu(20,30,32,16);
+        grafika_zapisz_surowy_piksel(20,30,0x00123456U);
+        grafika_prezentuj_region(20,30,32,16);
+        grafika_zakoncz_scene();
+        assert(gpu_scanout_model.visible.size()==dirty_copy_visible_before+1);
+        assert(gpu_scanout_model.visible.back().pixels[30U*1024U+20U]==0x00123456U);
+        PrezentacjaStartu::zakoncz_inicjalizacje();
         assert(virtio_gpu_reset(gpu));virtio_gpu_reset_all();gpu_scanout_model.reset(false);
         StanBuforowEkranu final{};grafika_pobierz_stan(&final);
         grafika_wymien_stan({});grafika_zwolnij_stan(&final);

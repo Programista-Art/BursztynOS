@@ -103,6 +103,7 @@ void powitanie_publikacja() {
     }
 }
 bool powitanie_aktywne(){return sekwencja.aktywny()||zakonczenie_oczekuje;}
+bool powitanie_pulpit_potwierdzony(){return __atomic_load_n(&pulpit_gotowy,__ATOMIC_ACQUIRE);}
 void powitanie_inicjalizuj(bool wlacz){
     BootTiming::splash_expected=wlacz;
     powitanie_wycisz();
@@ -138,6 +139,14 @@ void powitanie_pulpit_gotowy(bool tapeta,int pid){
 static void powitanie_aktualizuj_stan(bool pacing){
     if(!powitanie_aktywne()||!animacja_rozpoczeta)return;
     const uint64_t now=czas_monotoniczny_us();
+    // Watchdog: after desktop handshake a stuck fade/hold must not leave the
+    // pointer without a visible cursor forever (full-scene commit required).
+    if(__atomic_load_n(&pulpit_gotowy,__ATOMIC_ACQUIRE) && sekwencja.gotowy_od &&
+       now>sekwencja.gotowy_od && now-sekwencja.gotowy_od>10000000ULL) {
+        zakoncz_powitanie();
+        skladacz_obrazu_oznacz_dirty();
+        return;
+    }
     if(pacing&&now<nastepny)return;
     if(pacing)nastepny=now>UINT64_MAX-33333?UINT64_MAX:now+33333;
     const auto stan=sekwencja.stan;

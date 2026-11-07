@@ -17,6 +17,8 @@ struct MockGpuScanout {
     uint32_t resource=0;
     MockGpuImage images[3];
     std::vector<MockGpuVisible> visible;
+    std::vector<VirtioGpuRect> transfer_rects;
+    std::vector<VirtioGpuRect> flush_rects;
     bool invalid=false;
     unsigned display_resets=0;
     void reset(bool on=true) { *this={};enabled=on; }
@@ -57,6 +59,7 @@ struct MockGpuScanout {
             const auto& r=*static_cast<const VirtioGpuTransferToHost2d*>(data);
             if(r.resource_id>=3){invalid=true;return;}
             auto& image=images[r.resource_id];
+            transfer_rects.push_back(r.r);
             if(uint64_t(r.r.x)+r.r.width>image.w||uint64_t(r.r.y)+r.r.height>image.h){invalid=true;return;}
             for(unsigned row=0;row<r.r.height;++row)
                 if(!copy_backing(image,r.offset+uint64_t(row)*image.w*4,
@@ -68,6 +71,7 @@ struct MockGpuScanout {
             if(resource){const auto& i=images[resource];visible.push_back({type,resource,i.w,i.h,i.complete,i.pixels});}
         } else if(type==VIRTIO_GPU_CMD_RESOURCE_FLUSH&&size>=sizeof(VirtioGpuResourceFlush)) {
             const auto& r=*static_cast<const VirtioGpuResourceFlush*>(data);
+            flush_rects.push_back(r.r);
             if(r.resource_id==resource&&resource){const auto& i=images[resource];visible.push_back({type,resource,i.w,i.h,i.complete,i.pixels});}
         } else if(type==VIRTIO_GPU_CMD_RESOURCE_UNREF&&size>=sizeof(VirtioGpuResourceUnref)) {
             const auto& r=*static_cast<const VirtioGpuResourceUnref*>(data);

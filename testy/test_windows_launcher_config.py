@@ -12,7 +12,9 @@ class WindowsLauncherConfig(unittest.TestCase):
     def test_windows_default_and_empty_override_use_gtk(self):
         self.assertRegex(self.launcher,r'\[string\]\$DisplayBackend\s*=\s*"gtk"')
         self.assertIn('{ "gtk" } else { $DisplayBackend }',self.launcher)
-        self.assertIn('"-display", $effectiveDisplay',self.launcher)
+        self.assertIn('"-display", $displayArg',self.launcher)
+        self.assertIn('"gtk,zoom-to-fit=on"',self.launcher)
+        self.assertIn('Start-QemuWindowLimiter',self.launcher)
     def test_virtio_devices(self):
         devices=re.findall(r'"-device",\s*"([^"\n]+)"',self.launcher.split('# Explicit diagnostic A/B selection.')[0])
         names=[d.split(',')[0] for d in devices]
@@ -20,7 +22,9 @@ class WindowsLauncherConfig(unittest.TestCase):
         self.assertEqual(names.count('virtio-keyboard-pci'),1)
         self.assertNotIn('virtio-tablet-pci',names)
         gpu=next(d for d in devices if d.startswith('virtio-vga,'))
-        for option in ('disable-legacy=on','xres=1280','yres=720'):self.assertIn(option,gpu.split(','))
+        for option in ('disable-legacy=on','xres=$GuestWidth','yres=$GuestHeight'):self.assertIn(option,gpu.split(','))
+        self.assertRegex(self.launcher,r'\$GuestWidth\s*=\s*1280')
+        self.assertRegex(self.launcher,r'\$GuestHeight\s*=\s*720')
     def test_pointer_probe_is_explicit_and_loopback_only(self):
         self.assertIn('[string]$PointerDevice = "relative"',self.launcher)
         self.assertIn('if ($PointerDevice -ne "relative")',self.launcher)

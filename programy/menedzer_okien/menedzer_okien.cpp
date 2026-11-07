@@ -52,6 +52,10 @@ extern "C" {
 
 namespace {
 
+bool wm_refresh_batch_active=false;
+bool wm_refresh_pending=false;
+static void wm_gui_odswiez();
+
 int screen_w = 1024;
 int screen_h = 768;
 int PASEK_WYS = 40;
@@ -989,7 +993,7 @@ bool otworz_pulpit_modal(PulpitModalTyp typ,const char* message=nullptr) {
         if(!pulpit_wybor)pulpit_wybor=new PlikiUI::WyborKatalogu();
         BursztynUI::Prostokat work{0,0,screen_w,screen_h-PASEK_WYS};
         if(!pulpit_wybor->otworz(pulpit_cel,SCIEZKA_PULPIT,work,work))return false;
-        pulpit_modal_typ=typ;(void)gui_rejestruj_cele_drop(nullptr,0);gui_odswiez();return true;
+        pulpit_modal_typ=typ;(void)gui_rejestruj_cele_drop(nullptr,0);wm_gui_odswiez();return true;
     }
     const char* initial=typ==PulpitModalTyp::PLIK?"Nowy plik.txt":typ==PulpitModalTyp::MOVE?SCIEZKA_PULPIT:"";
     if(typ==PulpitModalTyp::RENAME) {
@@ -1004,7 +1008,7 @@ bool otworz_pulpit_modal(PulpitModalTyp typ,const char* message=nullptr) {
         typ==PulpitModalTyp::OPEN_WITH?"Aplikacja: Notatnik (pliki tekstowe)":typ==PulpitModalTyp::MOVE?"Ścieżka folderu docelowego:":nullptr;
     if(!pulpit_dialog->otworz(title,confirmation?nullptr:initial,question,work,work,typ==PulpitModalTyp::MOVE?511:55,
             typ==PulpitModalTyp::REMOVE?"Usuń":typ==PulpitModalTyp::OPEN_WITH?"Otwórz":"OK"))return false;
-    pulpit_modal_typ=typ;(void)gui_rejestruj_cele_drop(nullptr,0);gui_odswiez();return true;
+    pulpit_modal_typ=typ;(void)gui_rejestruj_cele_drop(nullptr,0);wm_gui_odswiez();return true;
 }
 void zatwierdz_pulpit_modal() {
     const char* text=pulpit_modal_typ==PulpitModalTyp::MOVE?pulpit_wybor->wybrana_sciezka():pulpit_dialog->tekst();
@@ -1258,14 +1262,14 @@ void aktualizuj_layout_modelu(Desktop::Layout<PULPIT_MAX_WPISOW>& layout,WpisPul
         p.label=Desktop::wrap(wpisy_pulpitu[i].nazwa,m.etykieta_szer,m.wysokosc_linii,m.odstep_linii,maxLines,int(ui_skala_procent),oblicz_szerokosc_tekstu);
         p.span=1;
     }
-    // Retain the existing initial row-major layout. Settings restoration and
-    // display changes reserve valid visual positions before relocating others.
+    // Default auto-place is column-major (left column top→bottom), like Windows.
+    // Settings restoration and display changes keep valid saved positions first.
     for(int i=0;i<desktop_layout.count;++i)if(!desktop_layout.items[i].placed && !desktop_layout.items[i].custom) {
         // Catalog priority without changing model indices or valid saved positions.
         int order=wpisy_pulpitu[i].launcher>=0?wpisy_pulpitu[i].launcher:DesktopEntries::Count+i;
         auto& p=desktop_layout.items[i];
-        p.col=desktop_layout.cols?order%desktop_layout.cols:0;
-        p.row=desktop_layout.cols?order/desktop_layout.cols:0;
+        if(desktop_layout.rows>0){p.row=order%desktop_layout.rows;p.col=order/desktop_layout.rows;}
+        else {p.row=0;p.col=0;}
     }
     bool waiting=false;
     for(int i=0;i<desktop_layout.count;++i)if(!desktop_layout.items[i].placed)waiting=true;
@@ -1761,7 +1765,7 @@ bool odrysuj_transakcje_pulpitu() {
     }
     if(ok)for(auto* t=head;t;t=t->next)
         if(!gui_zastap_region(t->r.x,t->r.y,t->r.szerokosc,t->r.wysokosc,t->pixels)){ok=false;break;}
-    if(ok){desktop_pending_dirty={};gui_odswiez();}
+    if(ok){desktop_pending_dirty={};wm_gui_odswiez();}
     while(head){auto* t=head;head=t->next;delete[] t->pixels;delete t;}
     return ok;
 }
@@ -1873,7 +1877,7 @@ bool obsluz_gest_pulpitu(const bws_zdarzenie& e) {
         if(e.x && a && (desktop_modifiers&BWS_MOD_CTRL)) {
             zapamietaj_zaznaczenie_pulpitu();
             for(int i=0;i<desktop_layout.count;++i)desktop_layout.items[i].selected=desktop_layout.items[i].placed;
-            odrysuj_zaznaczenie_pulpitu();gui_odswiez();return true;
+            odrysuj_zaznaczenie_pulpitu();wm_gui_odswiez();return true;
         }
         return false;
     }
@@ -1890,7 +1894,7 @@ bool obsluz_gest_pulpitu(const bws_zdarzenie& e) {
         for(int k=0;k<desktop_layout.count;++k)g.base[k]=desktop_layout.items[k].selected;
         desktop_layout.drag_click(i,g.ctrl);zaznaczony_wpis_pulpitu=i;
         odrysuj_zaznaczenie_pulpitu();
-        g.candidate=true;g.x=e.x;g.y=e.y;gui_ustaw_capture_myszy(true);gui_odswiez();return true;
+        g.candidate=true;g.x=e.x;g.y=e.y;gui_ustaw_capture_myszy(true);wm_gui_odswiez();return true;
     }
     if(e.typ==BWS_ZDARZENIE_MYSZ_RUCH && g.candidate) {
         int dx=e.x-g.x,dy=e.y-g.y,threshold=ui_skaluj(4,ui_skala_procent);
@@ -1909,7 +1913,7 @@ bool obsluz_gest_pulpitu(const bws_zdarzenie& e) {
             for(int i=0;i<desktop_layout.count;++i)desktop_layout.items[i].selected=
                 desktop_layout.items[i].placed && ((g.ctrl && g.base[i]) || Desktop::intersects(next,wizualny_wpis_pulpitu(i)));
             if(odrysuj_rubber_pulpitu(old_band,next)) {
-                g.dragging=true;g.dx=dx;g.dy=dy;g.band=next;gui_odswiez();
+                g.dragging=true;g.dx=dx;g.dy=dy;g.band=next;wm_gui_odswiez();
             }else for(int i=0;i<desktop_layout.count;++i)
                 desktop_layout.items[i].selected=desktop_previous[i].selected;
             return true;
@@ -1917,7 +1921,7 @@ bool obsluz_gest_pulpitu(const bws_zdarzenie& e) {
         if(target!=pulpit_hover_folder)ustaw_hover_drop_pulpitu(target);
         if(g.dragging)obrysy_grupy(true);
         g.dragging=true;g.dx=dx;g.dy=dy;obrysy_grupy(false);
-        gui_odswiez();return true;
+        wm_gui_odswiez();return true;
     }
     if(e.typ==BWS_ZDARZENIE_MYSZ_UP && g.candidate) {
         bool layoutChanged=false;
@@ -1929,7 +1933,7 @@ bool obsluz_gest_pulpitu(const bws_zdarzenie& e) {
             if(target>=0 && wpisy_pulpitu[target].folder) {
                 // Release capture and finish the gesture before entering BWS.
                 g=GestPulpitu{};gui_ustaw_capture_myszy(false);
-                (void)wykonaj_drop_pulpitu(target);gui_odswiez();return true;
+                (void)wykonaj_drop_pulpitu(target);wm_gui_odswiez();return true;
             }
             zapamietaj_zaznaczenie_pulpitu();
             desktop_layout.move_visual_group(g.dx,g.dy);
@@ -1959,7 +1963,7 @@ bool obsluz_gest_pulpitu(const bws_zdarzenie& e) {
         } else if(g.item>=0 && !g.ctrl) {
             zapamietaj_zaznaczenie_pulpitu();desktop_layout.click(g.item,false);odrysuj_zaznaczenie_pulpitu();
         }
-        g=GestPulpitu{};gui_ustaw_capture_myszy(false);gui_odswiez();if(layoutChanged)zapisz_uklad_pulpitu();return true;
+        g=GestPulpitu{};gui_ustaw_capture_myszy(false);wm_gui_odswiez();if(layoutChanged)zapisz_uklad_pulpitu();return true;
     }
     return false;
 }
@@ -2121,7 +2125,7 @@ void RysujPulpit(bool wymus_pelne_odswiezenie) {
 
     // BWS 17 sklada warstwy i prezentuje gotowa klatke.
     zarejestruj_pulpit_jako_cel_drop();
-    gui_odswiez();
+    wm_gui_odswiez();
 #if BSF_PROFILE
     const uint64_t profile_elapsed=gui_czas_monotoniczny_ns()-profile_start;
     char profile_line[160]{};unsigned profile_n=0;
@@ -2143,7 +2147,7 @@ void zamknij_menu_i_odtworz_pulpit() {
     aktualizuj_overlay_menu();
 
     if(start_menu)start_menu->close();
-    RysujPrzyciskMenu();gui_odswiez();
+    RysujPrzyciskMenu();wm_gui_odswiez();
 }
 
 bool aktywuj_istniejace(const char* executable);
@@ -2201,7 +2205,7 @@ void zamknij_pulpit_context() {
     const bool was_open=pulpit_context_open;
     if(pulpit_menu)pulpit_menu->zamknij();
     pulpit_context_open=false;zarejestruj_pulpit_jako_cel_drop();
-    if(was_open)gui_odswiez();
+    if(was_open)wm_gui_odswiez();
 }
 bool obsluz_zmiane_plikow_pulpitu(const bws_zdarzenie& event) {
     if(event.typ!=BWS_ZDARZENIE_PLIKI_ZMIENIONE)return false;
@@ -2230,7 +2234,7 @@ bool otworz_pulpit_context(int x,int y,int wpis) {
     BursztynUI::Prostokat work{0,0,screen_w,screen_h-PASEK_WYS};
     pulpit_menu->events.geometria(work,work);pulpit_menu->otworz(x,y,target,true);
     pulpit_context_open=pulpit_menu->menu.czy_otwarte();
-    (void)gui_rejestruj_cele_drop(nullptr,0);gui_odswiez();return pulpit_context_open;
+    (void)gui_rejestruj_cele_drop(nullptr,0);wm_gui_odswiez();return pulpit_context_open;
 }
 bool obsluz_prawy_klik_pulpitu(const bws_zdarzenie& e) {
     if(e.typ!=BWS_ZDARZENIE_MYSZ_PRAWY_DOWN)return false;
@@ -2249,10 +2253,18 @@ void wykonaj_pulpit_context(PulpitContextAction action) {
     for(int i=0;i<desktop_layout.count;++i)if(desktop_layout.items[i].selected && wpisy_pulpitu[i].launcher>=0)protectedSelection=true;
     zamknij_pulpit_context();
     if(protectedSelection && action!=PulpitContextAction::OPEN && action!=PulpitContextAction::NEW_FILE &&
-        action!=PulpitContextAction::NEW_FOLDER && action!=PulpitContextAction::REFRESH)return;
+        action!=PulpitContextAction::NEW_FOLDER && action!=PulpitContextAction::REFRESH &&
+        action!=PulpitContextAction::ARRANGE_ICONS)return;
     switch(action) {
     case PulpitContextAction::NEW_FILE:otworz_pulpit_modal(PulpitModalTyp::PLIK);return;
     case PulpitContextAction::NEW_FOLDER:otworz_pulpit_modal(PulpitModalTyp::FOLDER);return;
+    case PulpitContextAction::ARRANGE_ICONS: {
+        (void)desktop_layout.arrange_column_major();
+        desktop_pending_dirty=Desktop::Prostokat{0,0,screen_w,screen_h-PASEK_WYS};
+        if(desktop_settings)desktop_settings->dirty=true;
+        (void)odrysuj_transakcje_pulpitu();zapisz_uklad_pulpitu();
+        wm_gui_odswiez();return;
+    }
     case PulpitContextAction::REMOVE:
         if(!zapisz_batch_pulpitu())return;
         opis_batch("Usunąć trwale elementy: ",pulpit_batch_count,pulpit_batch_count);
@@ -2278,27 +2290,27 @@ void wykonaj_pulpit_context(PulpitContextAction action) {
     case PulpitContextAction::REFRESH:odswiez_pulpit_natychmiast();break;
     default:break;
     }
-    gui_odswiez();
+    wm_gui_odswiez();
 }
 
 bool obsluz_popupy_pulpitu(const bws_zdarzenie& zdarzenie) {
     if(pulpit_modal_typ==PulpitModalTyp::MOVE && pulpit_wybor->events.zdarzenie(zdarzenie)) {
         if(pulpit_wybor->wynik_pliku()==BursztynUI::WynikDialoguPliku::Wybrano){zatwierdz_pulpit_modal();return true;}
         else if(!pulpit_wybor->czy_otwarta()){pulpit_batch_count=0;zamknij_pulpit_modal();}
-        if(pulpit_wybor->events.wymaga_odswiezenia())gui_odswiez();
+        if(pulpit_wybor->events.wymaga_odswiezenia())wm_gui_odswiez();
         return true;
     }
     if(pulpit_dialog->zdarzenie(zdarzenie)) {
         if(pulpit_dialog->wynik()==1){zatwierdz_pulpit_modal();return true;}
         else if(pulpit_dialog->wynik()==2 || !pulpit_dialog->czy_otwarta()){pulpit_batch_count=0;zamknij_pulpit_modal();}
-        if(pulpit_dialog->events.wymaga_odswiezenia())gui_odswiez();
+        if(pulpit_dialog->events.wymaga_odswiezenia())wm_gui_odswiez();
         return true;
     }
     if(pulpit_menu->events.zdarzenie(zdarzenie)) {
         auto action=pulpit_menu->pobierz_akcje();pulpit_context_open=pulpit_menu->menu.czy_otwarte();
         if(action!=PulpitContextAction::NONE)wykonaj_pulpit_context(action);
         if(!pulpit_context_open)zarejestruj_pulpit_jako_cel_drop();
-        if(pulpit_menu->events.wymaga_odswiezenia())gui_odswiez();
+        if(pulpit_menu->events.wymaga_odswiezenia())wm_gui_odswiez();
         return true;
     }
     return false;
@@ -2416,7 +2428,7 @@ void obsluz_klikniecie(int mx, int my) {
                 if(gui_pobierz_geometrie_ekranu(&g)&&g.work_width>0&&g.work_height>0)
                     work={g.work_x,g.work_y,g.work_width,g.work_height};
                 start_menu->open(work,MENU_X);menu_start_otwarte=start_menu->czy_otwarta();}
-            RysujPrzyciskMenu();gui_odswiez();
+            RysujPrzyciskMenu();wm_gui_odswiez();
         }
         return;
     }
@@ -2439,6 +2451,24 @@ void rozmiesc_ikony_ekranu(){
     aktualizuj_layout_pulpitu();
 }
 
+static void wm_gui_odswiez() {
+    if (wm_refresh_batch_active) {
+        wm_refresh_pending=true;
+        return;
+    }
+    gui_odswiez();
+}
+
+struct WmRefreshBatch {
+    WmRefreshBatch() { wm_refresh_batch_active=true; }
+    ~WmRefreshBatch() {
+        wm_refresh_batch_active=false;
+        if(wm_refresh_pending) {
+            wm_refresh_pending=false;
+            gui_odswiez();
+        }
+    }
+};
 
 } // namespace
 
@@ -2563,16 +2593,14 @@ extern "C" __attribute__((noreturn)) void _start() {
 #if BURSZTYN_DIAG_BOOT
     wm_log("[WM-BOOT] desktop-render-complete\n");
 #endif
-    // The model flag is set only after launchers and saved/default positions
-    // are prepared. Filesystem enumeration failure is retried by the WM timer.
-    bool start_pulpitu_gotowy=false;
-    if(hash_pulpitu_wazny) {
-        start_pulpitu_gotowy=gui_potwierdz_gotowosc_pulpitu();
+    // Unlock VirtIO/pointer as soon as the root layer is painted. Kernel
+    // validates the layer; waiting on hash_pulpitu_wazny alone could leave the
+    // QEMU VirtIO mouse discarding events until a later FS refresh succeeds.
+    bool start_pulpitu_gotowy=gui_potwierdz_gotowosc_pulpitu();
 #if BURSZTYN_DIAG_BOOT
-        wm_log_i32("[WM-BOOT] handshake-result=",start_pulpitu_gotowy);
+    wm_log_i32("[WM-BOOT] handshake-result=",start_pulpitu_gotowy);
 #endif
-        if(start_pulpitu_gotowy)wm_log("[WM] Initial Desktop ready\n");
-    }
+    if(start_pulpitu_gotowy)wm_log("[WM] Initial Desktop ready\n");
 
     int last_desktop_click = -1;
     uint64_t last_desktop_click_time = 0;
@@ -2580,6 +2608,7 @@ extern "C" __attribute__((noreturn)) void _start() {
     while (true) {
         bws_zdarzenie zdarzenie{};
         if (!gui_czekaj_na_zdarzenie(&zdarzenie)) continue;
+        WmRefreshBatch frame_batch;
         if(zdarzenie.typ==BWS_ZDARZENIE_KLAWISZ_FIZYCZNY)desktop_modifiers=zdarzenie.przyciski;
         if(zdarzenie.typ==BWS_ZDARZENIE_BLUR)obsluz_gest_pulpitu(zdarzenie);
         if(zdarzenie.typ==BWS_ZDARZENIE_EKRAN){
@@ -2626,7 +2655,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             zaktualizuj_cache_przycisku(ui_skala_procent);
             RysujPulpit(true);
             RysujTaskbar();
-            gui_odswiez();
+            wm_gui_odswiez();
             continue;
         }
         const uint64_t stara_sygnatura = sygnatura_okien();
@@ -2636,7 +2665,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             zdarzenie.typ <= BWS_ZDARZENIE_OKNO_TYTUL;
         if (lifecycle || sygnatura_okien() != stara_sygnatura) {
             RysujTaskbar();
-            gui_odswiez();
+            wm_gui_odswiez();
         }
         const int mx = zdarzenie.x;
         const int my = zdarzenie.y;
@@ -2649,7 +2678,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             if (hover_now != menu_przycisk_hover) {
                 menu_przycisk_hover = hover_now;
                 RysujPrzyciskMenu();
-                gui_odswiez();
+                wm_gui_odswiez();
             }
         } else if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_DOWN) {
             if (punkt_w_prostokacie(mx, my,
@@ -2658,14 +2687,14 @@ extern "C" __attribute__((noreturn)) void _start() {
                 if (!menu_przycisk_wcisniety) {
                     menu_przycisk_wcisniety = true;
                     RysujPrzyciskMenu();
-                    gui_odswiez();
+                    wm_gui_odswiez();
                 }
             }
         } else if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_UP) {
             if (menu_przycisk_wcisniety) {
                 menu_przycisk_wcisniety = false;
                 RysujPrzyciskMenu();
-                gui_odswiez();
+                    wm_gui_odswiez();
             }
         }
 
@@ -2682,7 +2711,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             const int action=start_menu->take_action();
             menu_start_otwarte=start_menu->czy_otwarta();
             if(action>=0){zamknij_menu_i_odtworz_pulpit();obsluz_element_menu(action);}
-            else {RysujPrzyciskMenu();gui_odswiez();}
+            else {RysujPrzyciskMenu();wm_gui_odswiez();}
             if(zdarzenie.typ!=BWS_ZDARZENIE_TIMER)continue;
         }
         if(obsluz_popupy_pulpitu(zdarzenie))continue;
@@ -2722,16 +2751,17 @@ extern "C" __attribute__((noreturn)) void _start() {
                 pulpit_refresh_ticks = 0;
                 (void)odswiez_wpisy_pulpitu();
                 (void)odrysuj_transakcje_pulpitu();zapisz_uklad_pulpitu();
-                if(!start_pulpitu_gotowy&&hash_pulpitu_wazny) {
+                if(!start_pulpitu_gotowy) {
                     RysujPulpit(true);
                     start_pulpitu_gotowy=gui_potwierdz_gotowosc_pulpitu();
+                    if(start_pulpitu_gotowy)wm_log("[WM] Initial Desktop ready\n");
                 }
             }
         }
 
         const bool clock_changed=pobierz_i_zaktualizuj_czas();
         if(clock_changed || (taskbar_clock && taskbar_clock->needs_repaint())) {
-            if(RysujZegar())gui_odswiez();
+            if(RysujZegar())wm_gui_odswiez();
         }
 
         if (klik) {

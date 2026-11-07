@@ -355,8 +355,9 @@ void phase_matrix() {
             const auto activation_events=m.function.drv.total_events_processed;
             for(size_t i=0;i<activation_events;++i){m.reference.event(m.written.front().first,false);m.written.pop_front();}
             if(scenario==3 || scenario==4) {
+                // Splash alone no longer gates admission; keep desktop_ready
+                // false so the pre-handshake discard path is what we measure.
                 simulated_splash=true;
-                if(virtio_input_set_desktop_ready)virtio_input_set_desktop_ready(true);
                 for(unsigned n=0;n<1000;++n){m.report(1,-1);m.poll(64,false);}
                 simulated_splash=false;
             }

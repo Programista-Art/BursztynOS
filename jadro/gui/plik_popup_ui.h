@@ -10,18 +10,21 @@ namespace PlikiUI {
 using namespace BursztynUI;
 enum class Akcja : uint8_t {
     NONE, OPEN, RUN, COPY, CUT, RENAME, REMOVE, PROPERTIES,
-    PASTE, NEW_FILE, NEW_FOLDER, REFRESH, OPEN_WITH, NOTEPAD, MOVE
+    PASTE, NEW_FILE, NEW_FOLDER, REFRESH, OPEN_WITH, NOTEPAD, MOVE,
+    ARRANGE_ICONS
 };
 struct CelMenu { bool selected{false}, directory{false}, text{false}, program{false}, paste{false}; unsigned count{1}; bool protected_launcher{false}; };
 inline bool dostepna(Akcja a, CelMenu t) {
     if(t.protected_launcher && a!=Akcja::OPEN && a!=Akcja::RUN &&
-        a!=Akcja::NEW_FOLDER && a!=Akcja::NEW_FILE && a!=Akcja::REFRESH)return false;
+        a!=Akcja::NEW_FOLDER && a!=Akcja::NEW_FILE && a!=Akcja::REFRESH &&
+        a!=Akcja::ARRANGE_ICONS)return false;
     switch (a) {
     case Akcja::COPY: case Akcja::CUT: case Akcja::REMOVE: return t.selected;
     case Akcja::OPEN: case Akcja::RENAME: case Akcja::MOVE: case Akcja::PROPERTIES: return t.selected && t.count==1;
     case Akcja::OPEN_WITH: case Akcja::NOTEPAD: return t.selected && t.count==1 && !t.directory && t.text;
     case Akcja::RUN: return t.selected && t.count==1 && t.program;
     case Akcja::PASTE: return t.paste;
+    case Akcja::ARRANGE_ICONS: return true;
     default: return true;
     }
 }
@@ -128,13 +131,13 @@ public:
         menu.ukryj(); events.reset_input();menu.menu().wyczysc(); pending_=Akcja::NONE;
         const Akcja actions[]={Akcja::OPEN,Akcja::OPEN_WITH,Akcja::NOTEPAD,Akcja::RENAME,
             Akcja::CUT,Akcja::COPY,Akcja::PASTE,Akcja::MOVE,Akcja::REMOVE,
-            Akcja::NEW_FOLDER,Akcja::NEW_FILE,Akcja::REFRESH};
+            Akcja::NEW_FOLDER,Akcja::NEW_FILE,Akcja::REFRESH,Akcja::ARRANGE_ICONS};
         const char* labels[]={"Otwórz","Otwórz za pomocą","Notatnik","Zmień nazwę",
             "Wytnij","Kopiuj","Wklej","Przenieś","Usuń",
-            "Utwórz folder","Utwórz plik tekstowy","Odśwież"};
-        for (unsigned i=0;i<12;++i) {
-            // Same safe policy on desktop and Explorer; empty targets remain disabled.
-            (void)desktop;
+            "Utwórz folder","Utwórz plik tekstowy","Odśwież","Ułóż ikony automatycznie"};
+        for (unsigned i=0;i<13;++i) {
+            // Arrange Icons is a desktop UX action; Explorer keeps it disabled.
+            if(actions[i]==Akcja::ARRANGE_ICONS && !desktop)continue;
             menu.menu().dodaj_element(labels[i],static_cast<uint32_t>(actions[i]),activate,this)
                 .ustaw_wlaczony(dostepna(actions[i],target));
         }

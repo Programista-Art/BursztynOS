@@ -169,12 +169,34 @@ public:
         int best=-1;int64_t distance=INT64_MAX;
         desiredCol=desiredCol<0?0:desiredCol>cols?cols:desiredCol;
         desiredRow=desiredRow<0?0:desiredRow>rows?rows:desiredRow;
-        for(int r=0;r<rows;++r)for(int c=0;c<cols;++c)if(fits(i,c,r)) {
+        // Column-major scan (left column top→bottom) matches Windows auto-arrange
+        // when several cells share the same distance from the desired slot.
+        for(int c=0;c<cols;++c)for(int r=0;r<rows;++r)if(fits(i,c,r)) {
             int64_t dx=c-desiredCol,dy=r-desiredRow,d=dx*dx+dy*dy;
-            if(d<distance){distance=d;best=r*cols+c;}
+            if(d<distance){distance=d;best=c*rows+r;}
         }
         if(best<0){items[i].placed=items[i].selected=false;return false;}
-        items[i].col=best%cols;items[i].row=best/cols;items[i].placed=true;remember_anchor(i);return true;
+        items[i].col=rows?best/rows:0;items[i].row=rows?best%rows:0;items[i].placed=true;remember_anchor(i);return true;
+    }
+    // Reset intentional positions and pack icons into the left columns from the top.
+    int arrange_column_major() {
+        for(int i=0;i<count;++i) {
+            items[i].custom=false;items[i].placed=false;items[i].selected=false;
+            items[i].offsetX=items[i].offsetY=0;items[i].anchor={};
+        }
+        int order=0;
+        for(int pass=0;pass<2;++pass)for(int i=0;i<count;++i)if(items[i].launcher==(pass==0)) {
+            if(rows>0){items[i].row=order%rows;items[i].col=order/rows;}
+            else {items[i].row=0;items[i].col=0;}
+            ++order;
+        }
+        const int corrected=reflow();
+        // reflow's anchor_position marks custom=true; auto-arrange is not a user drag.
+        for(int i=0;i<count;++i)if(items[i].placed) {
+            items[i].custom=false;
+            remember_anchor(i);
+        }
+        return corrected;
     }
     void clear_selection() {for(int i=0;i<count;++i)items[i].selected=false;}
     int selected_count() const {int n=0;for(int i=0;i<count;++i)n+=items[i].selected && items[i].placed;return n;}
@@ -241,7 +263,7 @@ public:
             items[i].selected=false;
             auto desired=placement_bounds(i);
             int bestX=0,bestY=0;int64_t best=INT64_MAX;
-            for(int row=0;row<=rows;++row)for(int col=0;col<=cols;++col) {
+            for(int col=0;col<=cols;++col)for(int row=0;row<=rows;++row) {
                 ++searchIterations;
                 auto candidate=placement_bounds(i);
                 auto current=cell(i);

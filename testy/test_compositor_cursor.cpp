@@ -1,4 +1,5 @@
 #include <cassert>
+#include <algorithm>
 #include <cstdlib>
 #include <cstdio>
 #include <vector>
@@ -14,6 +15,8 @@ static uint32_t scale=100;
 static std::vector<uint32_t> scene(1920*1080,0x123456);
 static GuiDirtyRect overlay{};
 static unsigned presents=0;
+static unsigned hardware_moves=0;
+static bool mock_hardware_cursor=false;
 static bool mock_first_splash=false;
 static uint32_t recorded_count=0;
 static GuiDirtyRect recorded_first{};
@@ -33,7 +36,15 @@ void kfree(void* p){free(p);}
 void wypisz_log(const char*){}
 bool scheduler_dodaj_zdarzenie(int,const bws_zdarzenie*){return true;}
 void grafika_pobierz_pozycje_kursora(int* x,int* y){*x=lx;*y=ly;}
+bool grafika_czy_kursor_sprzetowy(){return mock_hardware_cursor;}
 void grafika_pobierz_overlay_kursora(int* x,int* y,int* w,int* h,bool* visible){*x=overlay.x;*y=overlay.y;*w=overlay.width;*h=overlay.height;*visible=overlay.width>0;}
+void grafika_pobierz_region_kursora(int nx,int ny,int* x,int* y,int* w,int* h){
+    int x0=overlay.width>0?std::min(overlay.x,nx):nx;
+    int y0=overlay.height>0?std::min(overlay.y,ny):ny;
+    int x1=std::max(overlay.width>0?overlay.x+overlay.width:nx+16,nx+16);
+    int y1=std::max(overlay.height>0?overlay.y+overlay.height:ny+16,ny+16);
+    *x=x0;*y=y0;*w=x1-x0;*h=y1-y0;
+}
 void grafika_rozpocznij_skladanie(){}
 void grafika_zakoncz_scene(){}
 void grafika_zakoncz_skladanie(){++presents;}
@@ -44,6 +55,12 @@ void grafika_naloz_okno_terminala_region(int,int,int,int){}
 const BursztynMotyw* motyw_pobierz_aktywny(){return &compositor_theme;}
 void grafika_prezentuj_region(int,int,int,int){++presents;}
 void grafika_prezentuj_scene_z_kursorem(const GuiDirtyRect* r,uint32_t count,int x,int y){
+    if(mock_hardware_cursor){
+        for(uint32_t i=0;i<count;++i)++presents;
+        overlay={x,y,16,16};
+        ++hardware_moves;
+        return;
+    }
     recorded_count=count;if(count)recorded_first=r[0];
     uint32_t scratch[64*64]{};
     overlay=kursor_prezentuj_transakcje(scene.data(),sw,sw,sh,overlay,x,y,16,16,scratch,r,count,
@@ -216,9 +233,18 @@ int main(){
         mock_now+=1000000;skladacz_obrazu_oznacz_dirty();
         lx=100;ly=100;skladacz_obrazu_oznacz_ruch_kursora(1919,1079,lx,ly);
         presents=0;skladacz_obrazu_obsluz_dirty();
-        assert(presents==1&&!cursor_pending&&dirty_count==1); // cursor bypasses scene pacing
+        assert(presents==0&&cursor_pending&&dirty_count==1); // queued scene work blocks stale cursor-only publication
         mock_now+=17000000;presents=0;skladacz_obrazu_obsluz_dirty();
-        assert(presents==1&&dirty_count==0); // full scene reuses final cursor transaction
+        assert(presents==1&&!cursor_pending&&dirty_count==0); // full scene reuses final cursor transaction
+        mock_hardware_cursor=true;
+        skladacz_obrazu_oznacz_dirty();skladacz_obrazu_obsluz_dirty();
+        mock_now+=1000000;
+        skladacz_obrazu_oznacz_dirty_rect(10,10,20,20);
+        skladacz_obrazu_oznacz_ruch_kursora(lx,ly,120,130);
+        lx=120;ly=130;presents=0;hardware_moves=0;
+        skladacz_obrazu_obsluz_dirty();
+        assert(presents==0&&hardware_moves==1&&!cursor_pending&&dirty_count>0);
+        mock_hardware_cursor=false;
         use_clock=false;
         usun_warstwe(2);usun_warstwe(1);skladacz_reset_ekranu();
     }

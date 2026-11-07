@@ -12,7 +12,11 @@ check('opcja_startowa_obecna(cmdline, token)' in body(kernel,'bool zadano_automa
 check('skladacz_obrazu_czy_widoczna(pid)' in body(kernel,'bool system_potwierdz_gotowosc_pulpitu('), 'handshake rejects unpublished desktop')
 check('powitanie_pulpit_gotowy(grafika_czy_tapeta(),pid)' in kernel,'wallpaper or intentional fallback')
 check(wm_start.index('odswiez_wpisy_pulpitu()')<wm_start.index('RysujPulpit(true)')<wm_start.index('gui_potwierdz_gotowosc_pulpitu()'),'catalog and restored positions precede first full paint and handshake')
-check('if(hash_pulpitu_wazny)' in wm_start and '!start_pulpitu_gotowy&&hash_pulpitu_wazny' in wm_start,'catalog failures retry before readiness')
+# Pointer unlock must not wait on hash_pulpitu_wazny; retry until handshake OK.
+check('start_pulpitu_gotowy=gui_potwierdz_gotowosc_pulpitu()' in wm_start and
+      'if(!start_pulpitu_gotowy)' in wm_start and 'hash_pulpitu_wazny' not in
+      wm_start[wm_start.index('gui_potwierdz_gotowosc_pulpitu()'):wm_start.index('if(!start_pulpitu_gotowy)')+len('if(!start_pulpitu_gotowy)')],
+      'handshake after first paint; timer retries without catalog hash gate')
 check('powitanie_zrodlo(' in body(gfx[gfx.index('// PREZENTACJA EKRANU'):],'void PrzeniesNaEkran('),'full presentation covered')
 check('powitanie_zrodlo(' in body(gfx[gfx.index('// PREZENTACJA EKRANU'):],'void PrzeniesFragmentNaEkran('),'partial presentation covered')
 check('powitanie_tick();' in body(comp,'void skladacz_obrazu_obsluz_dirty('),'idle desktop still advances state without busy-wait')

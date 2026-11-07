@@ -2052,7 +2052,7 @@ __attribute__((noinline)) bool ustaw_url_z_location(
     size_t n=0;const char *scheme=obecny.https?"https://":"http://";bool ok=true;
     auto add=[&](const char *text){for(size_t i=0;text[i];++i){if(n+1>=sizeof(scratch->base))return false;scratch->base[n++]=text[i];}scratch->base[n]=0;return true;};
     ok=add(scheme)&&add(obecny.domena)&&add(obecny.sciezka);
-    if(ok)ok=Husarz::resolve_resource_url(scratch->base,location,cel,pojemnosc);delete scratch;return ok;
+    if(ok){ok=Husarz::resolve_resource_url(scratch->base,location,cel,pojemnosc);}delete scratch;return ok;
 }
 
 // Parsing is independent of viewport geometry and painting.
@@ -3354,7 +3354,7 @@ void resource_address(const char *url,Husarz::ResourceType type){
     (void)url;(void)type;
 #endif
 }
-Husarz::Work debug_computed_style(Husarz::Document &d,uint16_t node){
+[[maybe_unused]] Husarz::Work debug_computed_style(Husarz::Document &d,uint16_t node){
 #if HUSARZ_DEBUG_RESOURCES
     if(node>=d.node_count)co_return;
     resource_field("CSS COMPUTED node",*d.attr(node,"id")?d.attr(node,"id"):d.str(d.nodes[node].tag));

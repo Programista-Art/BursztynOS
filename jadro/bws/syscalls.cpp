@@ -3403,6 +3403,7 @@ static uint64_t obsluga_wywolan_systemowych_impl(
 
             BlokadaEkranu blokada;
 
+            gui_perf_add(aktualny_pid,GP_BWS_REFRESH);
             bws_gui_odswiez();
 
             return 1;

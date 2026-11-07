@@ -4705,7 +4705,58 @@ void test_virtio_gpu_resource_flush() {
 }
 
 // ----------------------------------------------------------------------------
-// 95. VirtIO-GPU: Obsluga nieprawidlowej/blednej odpowiedzi urzadzenia
+// 95. VirtIO-GPU: Batch dirty rectangles has one bounding flush
+// ----------------------------------------------------------------------------
+void test_virtio_gpu_batched_dirty_publication() {
+    virtio_gpu_reset_all();
+    gpu_scanout_model.reset();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
+
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(virtio_gpu_transfer_and_flush(drv, 0, 0, drv->fb_width, drv->fb_height),
+                "Publish complete first resource before batch test");
+
+    const uint32_t width = drv->fb_width;
+    auto* framebuffer = static_cast<uint32_t*>(drv->fb_vaddr);
+    framebuffer[20U * width + 10U] = 0x00112233U;
+    framebuffer[80U * width + 100U] = 0x00445566U;
+
+    g_mock.gpu_commands_seen.clear();
+    gpu_scanout_model.transfer_rects.clear();
+    gpu_scanout_model.flush_rects.clear();
+    const VirtioGpuRect rects[] = {
+        {10, 20, 20, 10},
+        {100, 80, 30, 20}
+    };
+    TEST_ASSERT(virtio_gpu_transfer_rects_and_flush(drv, rects, 2),
+                "Batch dirty rectangles transfer succeeds");
+    const std::vector<uint32_t> expected_commands = {
+        VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D,
+        VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D,
+        VIRTIO_GPU_CMD_RESOURCE_FLUSH
+    };
+    TEST_ASSERT(g_mock.gpu_commands_seen == expected_commands,
+                "Batch emits two transfers and one flush");
+    TEST_ASSERT(gpu_scanout_model.transfer_rects.size() == 2 &&
+                    gpu_scanout_model.flush_rects.size() == 1,
+                "Mock observed exact batch command counts");
+    const VirtioGpuRect& flush = gpu_scanout_model.flush_rects.back();
+    TEST_ASSERT(flush.x == 10 && flush.y == 20 &&
+                    flush.width == 120 && flush.height == 80,
+                "Flush covers the union of dirty rectangles");
+    TEST_ASSERT(!gpu_scanout_model.visible.empty() &&
+                    gpu_scanout_model.visible.back().pixels[20U * width + 10U] == 0x00112233U &&
+                    gpu_scanout_model.visible.back().pixels[80U * width + 100U] == 0x00445566U,
+                "Transferred dirty pixels are visible before the flush publication");
+
+    virtio_gpu_reset(drv);
+    virtio_gpu_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 96. VirtIO-GPU: Obsluga nieprawidlowej/blednej odpowiedzi urzadzenia
 // ----------------------------------------------------------------------------
 void test_virtio_gpu_malformed_response() {
     virtio_gpu_reset_all();
@@ -7147,6 +7198,7 @@ int main() {
     RUN_TEST(test_virtio_gpu_set_scanout);
     RUN_TEST(test_virtio_gpu_transfer_to_host_2d);
     RUN_TEST(test_virtio_gpu_resource_flush);
+    RUN_TEST(test_virtio_gpu_batched_dirty_publication);
     RUN_TEST(test_virtio_gpu_malformed_response);
     RUN_TEST(test_virtio_gpu_command_timeout);
     RUN_TEST(test_virtio_gpu_completion_at_deadline);

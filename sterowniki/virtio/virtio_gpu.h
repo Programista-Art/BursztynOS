@@ -131,6 +131,16 @@ struct VirtioGpuRect {
 static_assert(sizeof(VirtioGpuRect) == 16, "VirtioGpuRect must be 16 bytes");
 #endif
 
+/* Pozycja kursora w kolejce cursorq (VirtIO-GPU 1.0). */
+struct VirtioGpuCursorPos {
+    uint32_t scanout;
+    uint32_t x;
+    uint32_t y;
+};
+#ifdef __cplusplus
+static_assert(sizeof(VirtioGpuCursorPos) == 12, "VirtioGpuCursorPos must be 12 bytes");
+#endif
+
 /* Informacja o pojedynczym scanoucie */
 struct VirtioGpuDisplayOne {
     VirtioGpuRect r;
@@ -236,6 +246,27 @@ struct VirtioGpuResourceUnref {
 static_assert(sizeof(VirtioGpuResourceUnref) == 32, "VirtioGpuResourceUnref must be 32 bytes");
 #endif
 
+/* Polecenia kolejki kursora nie zwracaja osobnej odpowiedzi. */
+struct VirtioGpuUpdateCursor {
+    VirtioGpuCtrlHdr hdr;
+    VirtioGpuCursorPos pos;
+    uint32_t resource_id;
+    uint32_t hot_x;
+    uint32_t hot_y;
+};
+#ifdef __cplusplus
+static_assert(sizeof(VirtioGpuUpdateCursor) == 48, "VirtioGpuUpdateCursor must be 48 bytes");
+#endif
+
+struct VirtioGpuMoveCursor {
+    VirtioGpuCtrlHdr hdr;
+    VirtioGpuCursorPos pos;
+    uint32_t padding;
+};
+#ifdef __cplusplus
+static_assert(sizeof(VirtioGpuMoveCursor) == 40, "VirtioGpuMoveCursor must be 40 bytes");
+#endif
+
 #pragma pack(pop)
 
 /* =========================================================================
@@ -281,6 +312,21 @@ struct VirtioGpuDriver {
     bool               is_contiguous_dma;
     DmaBuffer          fb_dma;
     void**             allocated_frames;
+
+    /* Opcjonalna sprzetowa plaszczyzna kursora. */
+    uint32_t cursor_resource_id;
+    void*    cursor_cmd_vaddr;
+    uint64_t cursor_cmd_paddr;
+    size_t   cursor_cmd_pages;
+    void*    cursor_vaddr;
+    void**   cursor_frames;
+    size_t   cursor_pages;
+    VirtioGpuMemEntry* cursor_mem_entries;
+    uint32_t cursor_nr_entries;
+    bool     cursor_ready;
+    bool     cursor_faulted;
+    bool     cursor_inflight;
+    bool     cursor_visible;
 
     /* Stary zasob oczekujacy na zwolnienie lub wycofanie (atomic modesetting) */
     uint32_t old_resource_id;
@@ -341,6 +387,18 @@ bool virtio_gpu_cmd_resource_flush(VirtioGpuDriver* drv, uint32_t resource_id, u
 bool virtio_gpu_cmd_resource_detach_backing(VirtioGpuDriver* drv, uint32_t resource_id);
 bool virtio_gpu_cmd_resource_unref(VirtioGpuDriver* drv, uint32_t resource_id);
 
+bool virtio_gpu_transfer_rects_and_flush(VirtioGpuDriver* drv,
+                                         const VirtioGpuRect* rects,
+                                         uint32_t count);
+bool virtio_gpu_cursor_available(const VirtioGpuDriver* drv);
+bool virtio_gpu_cursor_set_shape(VirtioGpuDriver* drv,
+                                 const uint32_t* pixels,
+                                 uint32_t width,
+                                 uint32_t height,
+                                 uint32_t hotspot_x,
+                                 uint32_t hotspot_y);
+bool virtio_gpu_cursor_move(VirtioGpuDriver* drv, int x, int y);
+bool virtio_gpu_cursor_hide(VirtioGpuDriver* drv);
 bool virtio_gpu_transfer_and_flush(VirtioGpuDriver* drv, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
 // A display transaction may retain the active scanout until its prepared full
 // frame has transferred. Existing direct driver callers keep their policy.

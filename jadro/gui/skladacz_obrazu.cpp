@@ -192,8 +192,12 @@ uint64_t dirty_area_drag=0,cursor_fast_present_count=0;
 uint64_t mouse_reports=0,mouse_moves=0;
 bool drag_frame_waiting=false;
 uint64_t dirty_generation = 1;
+uint64_t scene_committed_generation = 0;
 uint64_t nastepna_klatka_ns = 0;
-constexpr uint64_t ODSTEP_KLATKI_NS = 16666667ULL;
+constexpr uint32_t MIN_ODSWIEZANIE_HZ = 60;
+constexpr uint32_t MAX_ODSWIEZANIE_HZ = 240;
+constexpr uint64_t DOMYSLNY_ODSTEP_KLATKI_NS = 16666667ULL;
+uint64_t odstep_klatki_ns = DOMYSLNY_ODSTEP_KLATKI_NS;
 uint64_t licznik_dirty=0,licznik_klatek=0,licznik_full=0,licznik_region=0;
 uint64_t suma_compose_us=0,maks_compose_us=0,suma_present_us=0,maks_present_us=0;
 uint64_t suma_dirty_px=0,suma_rect=0,maks_dirty_px=0;
@@ -899,9 +903,11 @@ extern void grafika_zakoncz_skladanie_regionu(int,int,int,int);
 extern void grafika_prezentuj_region(int,int,int,int);
 extern void grafika_prezentuj_kursor();
 extern void grafika_prezentuj_kursor_w(int,int);
+extern bool grafika_czy_kursor_sprzetowy();
 extern void grafika_prezentuj_scene_z_kursorem(const GuiDirtyRect*,uint32_t,int,int);
 extern void grafika_pobierz_pozycje_kursora(int*,int*);
 extern void grafika_pobierz_overlay_kursora(int*,int*,int*,int*,bool*);
+extern void grafika_pobierz_region_kursora(int,int,int*,int*,int*,int*);
 extern void grafika_zakoncz_scene();
 extern "C" void grafika_naloz_okno_terminala_region(int x, int y,
                                                        int szer, int wys);
@@ -1950,6 +1956,18 @@ void skladacz_obrazu_wycisz() {
     diag_start_reboot("[STARTUP] compositor quiesce");
 }
 void skladacz_obrazu_wznow() {skladacz_wyciszony=false;}
+void skladacz_obrazu_ustaw_odswiezanie(uint32_t hz) {
+    if(hz<MIN_ODSWIEZANIE_HZ)hz=MIN_ODSWIEZANIE_HZ;
+    if(hz>MAX_ODSWIEZANIE_HZ)hz=MAX_ODSWIEZANIE_HZ;
+    odstep_klatki_ns=1000000000ULL/hz;
+    nastepna_klatka_ns=0;
+}
+uint64_t skladacz_obrazu_generacja_sceny() {
+    uint64_t f=irq_off();
+    const uint64_t generation=scene_committed_generation;
+    irq_restore(f);
+    return generation;
+}
 void skladacz_obrazu_oznacz_dirty() {
     skladacz_obrazu_oznacz_dirty_rect(0,0,grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc());
 }
@@ -1992,11 +2010,11 @@ void skladacz_obrazu_oznacz_dirty_warstwy(int pid){warstwa_obrazu*w=pobierz_wars
 
 void skladacz_obrazu_oznacz_ruch_kursora(int old_x,int old_y,int new_x,int new_y){
     if(skladacz_wyciszony)return;
-    (void)old_x; (void)old_y;
     const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
     if(sw<=0||sh<=0){kursor_diag_drop();return;}
     if(new_x<-64||new_y<-64||new_x>=sw+64||new_y>=sh+64){kursor_diag_drop();return;}
-    uint64_t f=irq_off();++licznik_dirty;++dirty_generation;
+    (void)old_x; (void)old_y;
+    uint64_t f=irq_off();
     kursor_diag_queue(cursor_pending);
     cursor_latest.queue(new_x,new_y);
     irq_restore(f);
@@ -2013,6 +2031,12 @@ void skladacz_obrazu_obsluz_dirty() {
     extern void grafika_runtime_diag_snapshot();
     grafika_runtime_diag_snapshot();
 #endif
+    /*
+     * CursorMotion is deliberately not SceneDamage. The mailbox below is
+     * consumed by the cursor plane, while dirty_count remains reserved for
+     * changes to the cursor-free scene. This keeps input bounded and avoids
+     * turning every pointer report into a layer compose.
+     */
     uint64_t f=irq_off();bool ma_dirty=dirty_count!=0,ma_cursor=cursor_pending;irq_restore(f);
     const bool ma_geometrie=ma_pending_geometry();
     const bool ma_drag=ma_pending_drag_overlay();
@@ -2021,8 +2045,12 @@ void skladacz_obrazu_obsluz_dirty() {
     uint64_t now=hpet_dostepny()?czas_monotoniczny_ns():0;
     const bool klatka_potrzebna=ma_dirty||ma_geometrie||ma_drag;
     if(klatka_potrzebna&&hpet_dostepny()&&nastepna_klatka_ns&&now<nastepna_klatka_ns){
-        /* Kursor nie czeka na pacing duzych warstw. Restore i overlay nadal
-           wykonuje petla PID 0, nigdy IRQ myszy. */
+        /*
+         * Software cursor presentation is safe only when the scene backbuffer
+         * is current. A real hardware cursor plane is independent from the
+         * scanout resource, so it may move while the scene waits for pacing.
+         */
+        if(!grafika_czy_kursor_sprzetowy())return;
         int cx=0,cy=0;bool ruch=false;
         f=irq_off();if(cursor_pending){ruch=cursor_latest.take(cx,cy);kursor_diag_consume(dirty_rects,dirty_count);}irq_restore(f);
         if(ruch){grafika_prezentuj_kursor_w(cx,cy);++cursor_fast_present_count;}
@@ -2041,7 +2069,7 @@ void skladacz_obrazu_obsluz_dirty() {
     // keeps 256 sparse regions in BSS rather than on the 16 KiB kernel stack;
     // a nested compositor call leaves all pending work for its owner.
     GuardSkladania guard;if(!guard.aktywny())return;
-    if(hpet_dostepny())nastepna_klatka_ns=now>UINT64_MAX-ODSTEP_KLATKI_NS?UINT64_MAX:now+ODSTEP_KLATKI_NS;
+    if(hpet_dostepny())nastepna_klatka_ns=now>UINT64_MAX-odstep_klatki_ns?UINT64_MAX:now+odstep_klatki_ns;
     /* Geometria jest konsumowana dopiero przez klatke, dzieki czemu wiele
        MOVE pomiedzy dwiema klatkami zastepuje poprzednia pozycje. */
     apply_pending_geometry(-1);
@@ -2106,6 +2134,15 @@ void skladacz_obrazu_obsluz_dirty() {
     }
     else for(uint32_t ri=0;ri<count;++ri){const auto& r=work[ri];grafika_prezentuj_region(r.x,r.y,r.width,r.height);}
     grafika_zakoncz_scene();
+    /*
+     * A scene generation advances only after the cursor-free scene has been
+     * composed and submitted. CursorMotion alone never changes this value.
+     */
+    if(count) {
+        uint64_t committed = scene_committed_generation + 1;
+        if(committed == 0) committed = 1;
+        scene_committed_generation = committed;
+    }
     if(drag_frame_work)++drag_frames_presented;
     MoveTrace::compose();
     const uint64_t present_end=hpet_dostepny()?czas_monotoniczny_us():0;
@@ -2125,6 +2162,7 @@ void skladacz_obrazu_obsluz_dirty() {
 #endif
     if(count) zakoncz_snapshot();
     ++licznik_klatek;
+    gui_perf_frame_presented();
 #if BURSZTYNDIAGSPLASHTIMING || BURSZTYNDIAGSPLASHFIRSTFRAME
     powitanie_diag_prezentacja();
 #endif
@@ -2461,7 +2499,8 @@ void skladacz_reset_ekranu(){
     powitanie_reset_ekranu();
     if(application_popup.otwarty)skladacz_obrazu_ustaw_popup_aplikacji(application_popup.pid,false,0,0,0,0);
     system_overlay={false,-1,{0,0,0,0}};drag_overlay={false,-1,0,0};pending_drag_overlay={};
-    uint64_t f=irq_off();dirty_count=0;cursor_pending=false;nastepna_klatka_ns=0;
+    uint64_t f=irq_off();dirty_count=0;cursor_pending=false;
+    scene_committed_generation=0;nastepna_klatka_ns=0;
     for(auto& p:pending_geometry)p={};
     irq_restore(f);skladacz_obrazu_oznacz_dirty();
 }

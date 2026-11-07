@@ -41,7 +41,7 @@ class BrowserRuntime : public Runtime {
     void bind(Document &d,uint32_t owner,uint32_t nav,const char *url){document=&d;generation=d.generation;tab=owner;navigation=nav;unsigned n=unsigned(length(url,2047));for(unsigned i=0;i<n;++i)location[i]=url[i];location[n]=0;}
     bool owns(uint32_t owner,uint32_t nav,uint32_t doc)const{return !cancelled&&tab==owner&&navigation==nav&&generation==doc;}
     unsigned resolve(unsigned identity)const {
-        if(!alive()||!identity||identity>65535)return 0;return ScriptDom(*document).by_identity(uint16_t(identity)).id;
+        if(!alive()||!identity||identity>65535){return 0;}return ScriptDom(*document).by_identity(uint16_t(identity)).id;
     }
     Value node(unsigned id)const{return id&&id<document->node_count?Value::handle(Kind::Node,document->nodes[id].identity,generation):Value::handle(Kind::Null);}
     bool node_arg(Value value,unsigned &out){if(value.kind!=Kind::Node||value.aux!=generation||!(out=resolve(value.ref))){fail(Error::Type);return false;}return true;}
@@ -102,7 +102,7 @@ class BrowserRuntime : public Runtime {
         if(!parent||parent>=m.count||!child||child>=m.count||before>=m.count||m.nodes[parent].is_text)return false;
         if(before && m.nodes[before].parent!=parent)return false;
         unsigned depth=0;for(unsigned p=parent;p;p=m.nodes[p].parent){if(p==child||++depth>MaxDepth)return false;}
-        if(before==child)return true;unlink(m,child);auto &n=m.nodes[child];auto &p=m.nodes[parent];
+        if(before==child){return true;}unlink(m,child);auto &n=m.nodes[child];auto &p=m.nodes[parent];
         n.parent=uint16_t(parent);n.next=uint16_t(before);n.previous=before?m.nodes[before].previous:p.last;
         if(n.previous)m.nodes[n.previous].next=uint16_t(child);else p.first=uint16_t(child);
         if(before)m.nodes[before].previous=uint16_t(child);else p.last=uint16_t(child);return true;
@@ -176,7 +176,7 @@ class BrowserRuntime : public Runtime {
 inline Work BrowserRuntime::property(Value base,Value key,bool write,Value &value){
     if(base.kind==Kind::Storage){
         auto *s=base.ref?session_storage:local_storage;if(write||key.kind!=Kind::String||!s||!s->loaded){fail(Error::Type);co_return;}
-        if(is(key.ref,"length"))value=Value::num(s->count);else {unsigned id=is(key.ref,"key")?StorageKeyAt:is(key.ref,"getItem")?StorageGet:is(key.ref,"setItem")?StorageSet:is(key.ref,"removeItem")?StorageRemove:is(key.ref,"clear")?StorageClear:0;value=id?method(id,base):Value{};}co_return;
+        if(is(key.ref,"length"))value=Value::num(s->count);else {unsigned id=is(key.ref,"key")?StorageKeyAt:is(key.ref,"getItem")?StorageGet:is(key.ref,"setItem")?StorageSet:is(key.ref,"removeItem")?StorageRemove:is(key.ref,"clear")?StorageClear:NativeNone;value=id?method(id,base):Value{};}co_return;
     }
     if(base.kind==Kind::Response){
         if(write||base.aux!=generation||base.ref>=fetch_count||!fetches[base.ref].entry||key.kind!=Kind::String){fail(Error::Type);co_return;}auto &f=fetches[base.ref];
@@ -198,7 +198,7 @@ inline Work BrowserRuntime::property(Value base,Value key,bool write,Value &valu
                 // the complete bounded URL together, never a yielded prefix.
                 co_await point((size(value.ref)+63)/64+1);if(budget_exceeded){fail(Error::Budget);co_return;}
                 for(unsigned i=0;i<=size(value.ref);++i)navigation_request[i]=text(value.ref)[i];}
-            else value=Value::handle(Kind::String,string(location,length(location,sizeof(location))));co_return;}
+            else{value=Value::handle(Kind::String,string(location,length(location,sizeof(location))));}co_return;}
     }
     if(base.kind==Kind::Console){if(write){fail(Error::Type);co_return;}value=is(name,"log")?method(Log):is(name,"warn")?method(Warn):is(name,"error")?method(ConsoleError):Value{};co_return;}
     if(base.kind==Kind::Document){
@@ -315,7 +315,8 @@ inline Work BrowserRuntime::native(Value fn,Value *args,unsigned count,Value &ou
         co_await point(size(key)+size(value)+1);int index=s->find(text(key),size(key));
         if(fn.ref==StorageGet)out=index<0?Value::handle(Kind::Null):Value::handle(Kind::String,string(s->entries[index].value,s->entries[index].value_size));
         else if(fn.ref==StorageRemove){if(index>=0)s->remove(unsigned(index));}
-        else if(!s->set(text(key),size(key),text(value),size(value)))fail(Error::Range);co_return;
+        else if(!s->set(text(key),size(key),text(value),size(value))){fail(Error::Range);}
+        co_return;
     }
     if(fn.ref==Fetch){
         if(count<1||count>2||args[0].kind!=Kind::String||size(args[0].ref)>2047||!Origin::parse(location).valid){fail(Error::Type);co_return;}
@@ -333,7 +334,7 @@ inline Work BrowserRuntime::native(Value fn,Value *args,unsigned count,Value &ou
     if(fn.ref==Log||fn.ref==Warn||fn.ref==ConsoleError){
         // No argument serialization: secrets (including page-read passwords)
         // never flow to BWS diagnostics. Retain bounded call counters only.
-        if(console_lines<64)++console_lines;co_return;
+        if(console_lines<64){++console_lines;}co_return;
     }
     if(fn.ref==Prevent||fn.ref==StopPropagation){
         if(count||receiver.kind!=Kind::Event||!event_active||fn.number!=Numeric(active_event)){fail(Error::Type);co_return;}
@@ -342,7 +343,7 @@ inline Work BrowserRuntime::native(Value fn,Value *args,unsigned count,Value &ou
     if(fn.ref==Timeout||fn.ref==Interval){
         if(count<1||count>2||args[0].kind!=Kind::Function||(count==2&&args[1].kind!=Kind::Number)){fail(Error::Type);co_return;}
         Numeric delay=count==2?args[1].number:10;
-        if(delay!=delay||delay>3600000)delay=3600000;if(delay<10)delay=10;
+        if(delay!=delay||delay>3600000){delay=3600000;}if(delay<10)delay=10;
         unsigned active=0;for(auto &timer:timers)if(timer.active)++active;if(active>=limits.timers||active>=TimerLimit){fail(Error::Range);co_return;}
         for(auto &timer:timers){co_await point();if(timer.active)continue;
             if(timer_serial==UINT32_MAX){fail(Error::Range);co_return;}uint64_t ns=uint64_t(delay)*1000000;
@@ -386,7 +387,7 @@ inline Work BrowserRuntime::native(Value fn,Value *args,unsigned count,Value &ou
     if(fn.ref==GetAttribute||fn.ref==SetAttribute||fn.ref==RemoveAttribute){
         if(count!=(fn.ref==SetAttribute?2U:1U)||args[0].kind!=Kind::String||(count==2&&args[1].kind!=Kind::String)){fail(Error::Type);co_return;}
         if(fn.ref==GetAttribute){const char *s=document->attr(uint16_t(id),text(args[0].ref));out=document->has_attr(uint16_t(id),text(args[0].ref))?Value::handle(Kind::String,string(s,length(s,MaxAttrLength))):Value::handle(Kind::Null);}
-        else co_await attributes(id,args[0].ref,count==2?args[1].ref:0,fn.ref==RemoveAttribute);co_return;
+        else{co_await attributes(id,args[0].ref,count==2?args[1].ref:0,fn.ref==RemoveAttribute);}co_return;
     }
     if(fn.ref>=ClassAdd&&fn.ref<=ClassToggle){
         if(count!=1||args[0].kind!=Kind::String||!size(args[0].ref)||size(args[0].ref)>64){fail(Error::Type);co_return;}
@@ -401,7 +402,7 @@ inline Work BrowserRuntime::native(Value fn,Value *args,unsigned count,Value &ou
     }
     if(fn.ref==Append||fn.ref==Remove||fn.ref==Insert||fn.ref==Replace){
         if(count!=(fn.ref==Insert||fn.ref==Replace?2U:1U)){fail(Error::Type);co_return;}unsigned child=0,other=0;
-        if(!node_arg(args[0],child))co_return;if(count==2&&args[1].kind!=Kind::Null&&!node_arg(args[1],other))co_return;
+        if(!node_arg(args[0],child)){co_return;}if(count==2&&args[1].kind!=Kind::Null&&!node_arg(args[1],other))co_return;
         if((fn.ref==Remove && document->nodes[child].parent!=id)||(fn.ref==Replace&&(!other||document->nodes[other].parent!=id))){fail(Error::Type);co_return;}
         struct Owner{TreeMutation *p{new TreeMutation};~Owner(){delete p;}} owner;if(!owner.p){fail(Error::Memory);co_return;}auto &m=*owner.p;co_await stage(m);
         if(fn.ref==Remove)unlink(m,child);

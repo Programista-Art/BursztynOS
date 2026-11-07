@@ -45,6 +45,7 @@ extern "C" void odblokuj_ekran();
 #include "heap.h"
 #include "scheduler.h"
 #include "skladacz_obrazu.h"
+#include "gui_runtime_diag.h"
 #include "acpi.h"
 #include "sterowniki/czas/hpet.h"
 #include "sterowniki/dzwiek/hda.h"
@@ -875,6 +876,31 @@ bool zadano_automatyczne_testy(uint64_t mbi, const char* token = "bursztyn.test=
         off = (off + tag->rozmiar + 7ULL) & ~7ULL;
     }
     return false;
+}
+
+uint32_t odczytaj_odswiezanie_klatek(uint64_t mbi) {
+    constexpr uint32_t profile_hz[] = {60, 120, 144, 165, 240};
+    for (const uint32_t hz : profile_hz) {
+        char token[32]{};
+        unsigned pos = 0;
+        const char prefix[] = "bursztyn.refresh=";
+        while (prefix[pos] && pos + 1U < sizeof(token)) {
+            token[pos] = prefix[pos];
+            ++pos;
+        }
+        uint32_t value = hz;
+        char digits[12]{};
+        unsigned digit_count = 0;
+        do {
+            digits[digit_count++] = static_cast<char>('0' + value % 10U);
+            value /= 10U;
+        } while (value && digit_count < sizeof(digits));
+        while (digit_count && pos + 1U < sizeof(token))
+            token[pos++] = digits[--digit_count];
+        token[pos] = '\0';
+        if (zadano_automatyczne_testy(mbi, token)) return hz;
+    }
+    return 60;
 }
 
 bool zadano_test_stack_guard(uint64_t mbi) {
@@ -2252,6 +2278,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     }
 
     g_multiboot_info_ptr = multiboot_info_ptr;
+    skladacz_obrazu_ustaw_odswiezanie(
+        odczytaj_odswiezanie_klatek(g_multiboot_info_ptr));
 #if defined(BURSZTYN_DIAG_PCI_TRACE) && BURSZTYN_DIAG_PCI_TRACE
     {
         const volatile uint32_t* info =
@@ -2787,10 +2815,18 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
          * STI przed HLT chroni idle przed przypadkowym pozostawieniem IF=0
          * przez kod, ktory w przyszlosci moze wejsc do tej petli.
          */
+        /*
+         * Keep HLT time out of PID 0's runnable CPU bucket. The diagnostic
+         * bracket is inert in normal builds and does not alter scheduling.
+         * CLI makes the begin/sti-hlt transition atomic with respect to IRQs.
+         */
+        asm volatile("cli" ::: "memory");
+        gui_perf_idle_begin();
         asm volatile(
             "sti; hlt"
             :
             :
             : "memory");
+        gui_perf_idle_end();
     }
 }

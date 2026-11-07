@@ -202,7 +202,7 @@ void finish_resource_task(const Husarz::ResourceTask &task,Husarz::ResourceEntry
     auto &state=*browser_resources; const auto &task=state.active;
     if(storage_task(task)){
         if(!state.payload||state.payload->magic!=Husarz::AsyncMagic||state.payload->request!=task.request||state.payload->kind!=uint32_t(task.kind)||state.payload->size>sizeof(state.payload->raw))co_return;
-        if(task.script>=Husarz::StorageOrigins)co_return;auto *s=Husarz::browser_storage.local[task.script];if(!s)co_return;auto &p=*state.payload;
+        if(task.script>=Husarz::StorageOrigins){co_return;}auto *s=Husarz::browser_storage.local[task.script];if(!s){co_return;}auto &p=*state.payload;
         if(task.kind==Husarz::RequestKind::StorageRead){
             s->loading=false;co_await Husarz::WorkPoint{256};
             if(p.success&&p.size<=Husarz::StorageDiskCapacity&&Husarz::storage_decode(*s,p.raw,p.size,s->origin))s->loaded=true;else {s->loaded=true;s->failed=true;}

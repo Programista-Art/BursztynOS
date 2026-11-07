@@ -83,6 +83,7 @@ void grafika_zakoncz_skladanie_regionu(int x, int y, int szer, int wys);
 void grafika_prezentuj_region(int x, int y, int szer, int wys);
 void grafika_prezentuj_kursor();
 void grafika_prezentuj_kursor_w(int x, int y);
+bool grafika_czy_kursor_sprzetowy();
 void grafika_zakoncz_scene();
 void grafika_naloz_kursor_regionu(int x, int y, int szer, int wys);
 void grafika_pobierz_pozycje_kursora(int* x, int* y);

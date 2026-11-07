@@ -91,7 +91,7 @@ static uint64_t input_geometry_generation() {
     return grafika_generacja_ekranu();
 #endif
 }
-static bool input_splash_active() {
+[[maybe_unused]] static bool input_splash_active() {
 #ifdef BURSZTYN_VIRTIO_HOST_TEST
     return host_virtio_input_splash_active && host_virtio_input_splash_active();
 #else
@@ -808,8 +808,10 @@ bool virtio_input_commit_geometry(VirtioInputDriver* drv,int width,int height,ui
     drv->stale_until_used=published;
     drv->stale_completions=uint16_t(published-drv->eventq->last_used_idx)!=0;
     drv->pointer_width=width;drv->pointer_height=height;drv->pointer_generation=generation;
+    // Splash may still fade after the desktop handshake. Pointer admission
+    // follows desktop readiness + geometry only; presentation owns the overlay.
     drv->pointer_interactive=input_pointer_geometry_ready() &&
-        __atomic_load_n(&s_desktop_ready,__ATOMIC_ACQUIRE) && !input_splash_active();
+        __atomic_load_n(&s_desktop_ready,__ATOMIC_ACQUIRE);
     __atomic_store_n(&drv->service_lock,0U,__ATOMIC_RELEASE);
     return true;
 }
@@ -838,7 +840,8 @@ size_t virtio_input_poll_events(VirtioInputDriver* drv, size_t max_events) {
     const int width=grafika_pobierz_szerokosc(),height=grafika_pobierz_wysokosc();
     const auto generation=input_geometry_generation();
     const bool geometry=input_pointer_geometry_ready();
-    const bool interactive=geometry && __atomic_load_n(&s_desktop_ready,__ATOMIC_ACQUIRE) && !input_splash_active();
+    // Desktop handshake unlocks the pointer; splash fade must not discard motion.
+    const bool interactive=geometry && __atomic_load_n(&s_desktop_ready,__ATOMIC_ACQUIRE);
     if(interactive!=drv->pointer_interactive || width!=drv->pointer_width ||
        height!=drv->pointer_height || generation!=drv->pointer_generation) {
         // No event timestamp exists on the wire. The first consumer turn at a

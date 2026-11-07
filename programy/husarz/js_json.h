@@ -56,12 +56,12 @@ struct JsonCodec {
         if(v.kind==Kind::String){co_await escape(v.ref);co_return;}
         if(v.kind==Kind::Number&&v.number.finite()){char number[64];unsigned n=numeric_format(v.number,number);for(unsigned i=0;i<n;++i)put(number[i]);co_return;}
         if(v.kind!=Kind::Object&&v.kind!=Kind::Array){const char *s=v.kind==Kind::Boolean?(v.number?"true":"false"):"null";for(unsigned i=0;s[i];++i)put(s[i]);co_return;}
-        for(unsigned i=0;i<depth;++i)if(r.same(path[i],v)){r.fail(Error::Type);co_return;}path[depth]=v;
+        for(unsigned i=0;i<depth;++i){if(r.same(path[i],v)){r.fail(Error::Type);co_return;}}path[depth]=v;
         bool array=v.kind==Kind::Array;if((array&&v.ref>=r.array_count)||(!array&&v.ref>=r.object_count)){r.fail(Error::Type);co_return;}
         put(array?'[':'{');unsigned count=array?r.arrays[v.ref].count:r.objects[v.ref].count,written=0;
         for(unsigned i=0;i<count;++i){co_await r.point();Value child=array?r.arrays[v.ref].values[i]:r.objects[v.ref].props[i].value;
             if(!array&&(child.kind==Kind::Undefined||child.kind==Kind::Function||child.kind==Kind::Native))continue;
-            if(written++)put(',');if(!array){co_await escape(r.objects[v.ref].props[i].name);put(':');}co_await stringify(child,depth+1);if(r.error!=Error::None)co_return;
+            if(written++){put(',');}if(!array){co_await escape(r.objects[v.ref].props[i].name);put(':');}co_await stringify(child,depth+1);if(r.error!=Error::None)co_return;
         }put(array?']':'}');
     }
 };

@@ -380,6 +380,8 @@ void skladacz_obrazu_oznacz_dirty_warstwy(int pid);
 void skladacz_obrazu_zastosuj_pending_geometrii(int pid);
 void skladacz_obrazu_zarejestruj_raport_myszy(bool ruch);
 void skladacz_obrazu_obsluz_dirty();
+void skladacz_obrazu_ustaw_odswiezanie(uint32_t hz);
+uint64_t skladacz_obrazu_generacja_sceny();
 void skladacz_obrazu_podnies_warstwe(int pid);
 bool skladacz_obrazu_ustaw_tytul(int pid, const char* tytul);
 bool skladacz_obrazu_minimalizuj(int pid);

@@ -244,9 +244,9 @@ static inline void kopiuj_wiersz32(uint32_t* dst, const uint32_t* src, uint32_t 
 }
 
 /*
- * RAM→LFB: wylacznie volatile store'y. VirtIO/UC nie toleruja zwyklego
- * memcpy (cacheable stores moga nie dojsc do scanoutu); rozwijamy po 4
- * dwordy, zeby obciac narzut petli bez utraty widocznosci zapisow.
+ * RAM→LFB/UC: wylacznie volatile store'y. Firmware LFB/UC nie toleruje
+ * zwyklego memcpy (cacheable stores moga nie dojsc do scanoutu); rozwijamy
+ * po 4 dwordy, zeby obciac narzut petli bez utraty widocznosci zapisow.
  */
 static inline void kopiuj_wiersz_lfb(volatile uint32_t* dst, const uint32_t* src, uint32_t count) {
     uint32_t i = 0;
@@ -259,6 +259,17 @@ static inline void kopiuj_wiersz_lfb(volatile uint32_t* dst, const uint32_t* src
     for (; i < count; ++i) dst[i] = src[i];
 }
 
+/*
+ * VirtIO backing is ordinary cacheable RAM, not a firmware LFB or UC MMIO.
+ * Keep this path separate from kopiuj_wiersz_lfb(): volatile scalar stores
+ * make every dirty-region publication unnecessarily expensive under TCG.
+ */
+static inline void kopiuj_wiersz_ram32(uint32_t* dst, const uint32_t* src,
+                                       uint32_t count) {
+    if (count)
+        __builtin_memcpy(dst, src, static_cast<size_t>(count) * sizeof(uint32_t));
+}
+
 static inline void wypelnij_wiersz32(uint32_t* dst, uint32_t kolor, uint32_t count) {
     for (uint32_t i = 0; i < count; ++i) dst[i] = kolor;
 }
@@ -266,6 +277,12 @@ static inline void wypelnij_wiersz32(uint32_t* dst, uint32_t kolor, uint32_t cou
 // =========================================================================
 // HAL EKRANU
 // =========================================================================
+
+struct CursorPlaneCaps {
+    bool hardware = false;
+    uint32_t max_width = 0;
+    uint32_t max_height = 0;
+};
 
 class SterownikEkranu {
 protected:
@@ -353,6 +370,60 @@ protected:
             szerokosc,wysokosc,pitch/4,true);
     }
 
+    void KopiujCalyBufor32Ram(uint8_t* bufor) {
+        if (!PrezentacjaStartu::dozwolona() || !bufor || !framebuffer_fizyczny ||
+            bpp != 32) {
+            return;
+        }
+
+        for (uint32_t rzad = 0; rzad < wysokosc; ++rzad) {
+            const uint64_t offset =
+                static_cast<uint64_t>(rzad) * static_cast<uint64_t>(pitch);
+            uint32_t* dst = reinterpret_cast<uint32_t*>(
+                const_cast<uint8_t*>(framebuffer_fizyczny + offset));
+            const uint32_t* src = reinterpret_cast<const uint32_t*>(
+                bufor + offset);
+            kopiuj_wiersz_ram32(dst, src, szerokosc);
+        }
+    }
+
+    void KopiujFragment32Ram(uint8_t* bufor,
+                             int x,
+                             int y,
+                             int szer,
+                             int wys) {
+        if (!PrezentacjaStartu::dozwolona() || !bufor || !framebuffer_fizyczny ||
+            bpp != 32 || szer <= 0 || wys <= 0) {
+            return;
+        }
+
+        int64_t start_x = static_cast<int64_t>(x);
+        int64_t start_y = static_cast<int64_t>(y);
+        int64_t end_x = start_x + static_cast<int64_t>(szer);
+        int64_t end_y = start_y + static_cast<int64_t>(wys);
+
+        if (start_x < 0) start_x = 0;
+        if (start_y < 0) start_y = 0;
+        if (end_x > static_cast<int64_t>(szerokosc))
+            end_x = static_cast<int64_t>(szerokosc);
+        if (end_y > static_cast<int64_t>(wysokosc))
+            end_y = static_cast<int64_t>(wysokosc);
+        if (start_x >= end_x || start_y >= end_y) return;
+
+        const uint32_t pikseli_w_wierszu =
+            static_cast<uint32_t>(end_x - start_x);
+        for (int64_t rzad = start_y; rzad < end_y; ++rzad) {
+            const uint64_t offset =
+                static_cast<uint64_t>(rzad) * static_cast<uint64_t>(pitch) +
+                static_cast<uint64_t>(start_x) * 4ULL;
+            uint32_t* dst = reinterpret_cast<uint32_t*>(
+                const_cast<uint8_t*>(framebuffer_fizyczny + offset));
+            const uint32_t* src = reinterpret_cast<const uint32_t*>(
+                bufor + offset);
+            kopiuj_wiersz_ram32(dst, src, pikseli_w_wierszu);
+        }
+    }
+
 public:
     virtual const char* Backend() const { return "native"; }
     virtual uint32_t ZasobScanoutu() const { return 0; }
@@ -396,6 +467,17 @@ public:
                                        int y,
                                        int szer,
                                        int wys) = 0;
+    virtual void RozpocznijBatch() {}
+    virtual void ZakonczBatch() {}
+    virtual CursorPlaneCaps PobierzCapsKursora() const {
+        return {};
+    }
+    virtual bool UstawKsztaltKursora(const uint32_t*, uint32_t, uint32_t,
+                                     uint32_t, uint32_t) {
+        return false;
+    }
+    virtual bool PrzesunKursor(int, int) { return false; }
+    virtual bool UkryjKursor() { return false; }
 
     uint32_t PobierzSzerokosc() const { return szerokosc; }
     uint32_t PobierzWysokosc() const { return wysokosc; }
@@ -455,6 +537,9 @@ class SterownikVirtioGPU final : public SterownikEkranu {
 private:
     VirtioGpuDriver* drv = nullptr;
     bool opublikowano=false;
+    bool batch_active=false;
+    uint32_t batch_count=0;
+    VirtioGpuRect batch_rects[SKLADACZ_MAKS_DIRTY_RECT]{};
 
 public:
     const char* Backend() const override { return "VirtIO"; }
@@ -493,12 +578,43 @@ public:
     }
 
     VirtioGpuDriver* PobierzSterownikGPU() const { return drv; }
+    CursorPlaneCaps PobierzCapsKursora() const override {
+        if (virtio_gpu_cursor_available(drv)) return {true, 64, 64};
+        return {};
+    }
+    bool UstawKsztaltKursora(const uint32_t* pixels, uint32_t w,
+                             uint32_t h, uint32_t hx, uint32_t hy) override {
+        return virtio_gpu_cursor_set_shape(drv, pixels, w, h, hx, hy);
+    }
+    bool PrzesunKursor(int x, int y) override {
+        return virtio_gpu_cursor_move(drv, x, y);
+    }
+    bool UkryjKursor() override {
+        return virtio_gpu_cursor_hide(drv);
+    }
+
+    void RozpocznijBatch() override {
+        batch_count=0;
+        batch_active=drv && drv->initialized && !virtio_gpu_is_quiescing();
+    }
+
+    void ZakonczBatch() override {
+        if(!batch_active)return;
+        batch_active=false;
+        if(!batch_count)return;
+        const auto start=gui_perf_now();
+        opublikowano=virtio_gpu_transfer_rects_and_flush(drv,batch_rects,batch_count);
+        const auto elapsed=gui_perf_now()-start;
+        gui_perf_add(0,GP_GPU_NS,elapsed);
+        gui_perf_max(0,GP_GPU_MAX_NS,elapsed);
+        batch_count=0;
+    }
 
     void KopiujNaEkran(uint8_t* bufor) override {
         opublikowano=false;
         if (!PrezentacjaStartu::dozwolona() || virtio_gpu_is_quiescing() || !drv || !drv->initialized || drv->has_error) return;
         if (static_cast<const void*>(bufor) != static_cast<const void*>(const_cast<const uint8_t*>(framebuffer_fizyczny))) {
-            KopiujCalyBufor32(bufor);
+            KopiujCalyBufor32Ram(bufor);
         }
         MoveTrace::flush_request();
         opublikowano=virtio_gpu_transfer_and_flush(drv, 0, 0, szerokosc, wysokosc);
@@ -528,9 +644,18 @@ public:
 
         const auto copy_start=gui_perf_now();
         if (static_cast<const void*>(bufor) != static_cast<const void*>(const_cast<const uint8_t*>(framebuffer_fizyczny))) {
-            KopiujFragment32(bufor, rx, ry, rw, rh);
+            KopiujFragment32Ram(bufor, rx, ry, rw, rh);
         }
         gui_perf_add(0,GP_COPY_NS,gui_perf_now()-copy_start);
+        if(batch_active) {
+            if(batch_count<SKLADACZ_MAKS_DIRTY_RECT) {
+                batch_rects[batch_count++]={static_cast<uint32_t>(rx),static_cast<uint32_t>(ry),
+                    static_cast<uint32_t>(rw),static_cast<uint32_t>(rh)};
+                opublikowano=true;
+                return;
+            }
+            ZakonczBatch();
+        }
         const auto gpu_start=gui_perf_now();
         MoveTrace::flush_request();
         opublikowano=virtio_gpu_transfer_and_flush(drv, static_cast<uint32_t>(rx), static_cast<uint32_t>(ry),
@@ -569,6 +694,16 @@ static AktywnyStanEkranu aktywny_stan{};
 static DisplayGeometry committed_geometry{};
 static uint32_t* bufor_tapety = nullptr;
 static bool tapeta_zaladowana = false;
+
+static void grafika_rozpocznij_batch_gpu() {
+    if(aktywny_ekran && ekran_caps.backend==EKRAN_VIRTIO_GPU)
+        aktywny_ekran->RozpocznijBatch();
+}
+
+static void grafika_zakoncz_batch_gpu() {
+    if(aktywny_ekran && ekran_caps.backend==EKRAN_VIRTIO_GPU)
+        aktywny_ekran->ZakonczBatch();
+}
 
 // -1 = stary tryb terminalowy jadra.
 // >=0 = PID procesu, ktory ostatnio aktywowal GUI Ring 3.
@@ -1145,6 +1280,7 @@ void grafika_rozpocznij_skladanie() {
         return;
 
     tryb_skladania_obrazu = true;
+    grafika_rozpocznij_batch_gpu();
 }
 
 void grafika_odtworz_tlo_skladania() {
@@ -1233,10 +1369,14 @@ void grafika_zakoncz_skladanie() {
     const GuiDirtyRect dirty{0,0,grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc()};
     int cx=0,cy=0;grafika_pobierz_pozycje_kursora(&cx,&cy);
     grafika_prezentuj_scene_z_kursorem(&dirty,1,cx,cy);
+    grafika_zakoncz_batch_gpu();
     tryb_skladania_obrazu = false;
 }
 
 static uint32_t kursor_tlo_kopia[64 * 64];
+static uint32_t kursor_plane_piksele[64 * 64];
+static bool kursor_plane_ksztalt_brudny = true;
+static bool kursor_plane_aktywny = false;
 #ifndef BURSZTYN_DIAG_GEOM_TRACE
 #define BURSZTYN_DIAG_GEOM_TRACE 0
 #endif
@@ -1296,20 +1436,101 @@ void grafika_zakoncz_skladanie_regionu(int x,int y,int szer,int wys) {
     const GuiDirtyRect dirty{x,y,szer,wys};
     int cx=0,cy=0;grafika_pobierz_pozycje_kursora(&cx,&cy);
     grafika_prezentuj_scene_z_kursorem(&dirty,1,cx,cy);
+    grafika_zakoncz_batch_gpu();
     tryb_skladania_obrazu=false;
 }
 
 void grafika_prezentuj_region(int x,int y,int szer,int wys){PrzeniesFragmentNaEkran(x,y,szer,wys);}
+
+static bool grafika_cursor_plane_przygotuj(const StanKursoraProcesu* stan,
+                                           int x, int y) {
+    if (!aktywny_ekran) return false;
+    const CursorPlaneCaps caps=aktywny_ekran->PobierzCapsKursora();
+    if (!caps.hardware) {
+        if (kursor_plane_aktywny) {
+            aktywny_ekran->UkryjKursor();
+            kursor_plane_ksztalt_brudny=true;
+        }
+        kursor_plane_aktywny=false;
+        return false;
+    }
+
+    int kw=16,kh=16,hx=0,hy=0;
+    parametry_kursora(stan,&kw,&kh,&hx,&hy);
+    if (kw<=0||kh<=0||kw>int(caps.max_width)||kh>int(caps.max_height)) {
+        if (kursor_plane_aktywny) {
+            aktywny_ekran->UkryjKursor();
+            kursor_plane_ksztalt_brudny=true;
+        }
+        kursor_plane_aktywny=false;
+        return false;
+    }
+    // After a hide, the GPU plane has no resource; force UPDATE_CURSOR again.
+    if (!kursor_plane_aktywny) kursor_plane_ksztalt_brudny=true;
+    if (kursor_plane_ksztalt_brudny) {
+        for (uint32_t i=0;i<64U*64U;++i) kursor_plane_piksele[i]=0;
+        for (int py=0;py<kh;++py) {
+            for (int px=0;px<kw;++px) {
+                uint32_t kolor=0;
+                if (piksel_kursora(stan,px,py,&kolor)) {
+                    kursor_plane_piksele[py*64+px]=
+                        (kolor&0x00FFFFFFU)|0xFF000000U;
+                }
+            }
+        }
+        if (!aktywny_ekran->UstawKsztaltKursora(
+                kursor_plane_piksele,static_cast<uint32_t>(kw),
+                static_cast<uint32_t>(kh),static_cast<uint32_t>(hx),
+                static_cast<uint32_t>(hy))) {
+            if (kursor_plane_aktywny) aktywny_ekran->UkryjKursor();
+            kursor_plane_aktywny=false;
+            return false;
+        }
+        kursor_plane_ksztalt_brudny=false;
+    }
+    if (!aktywny_ekran->PrzesunKursor(x,y)) {
+        kursor_plane_aktywny=false;
+        return false;
+    }
+    kursor_plane_aktywny=true;
+    kursor_overlay_widoczny=false;
+    return true;
+}
+
+bool grafika_czy_kursor_sprzetowy() {
+    return aktywny_ekran &&
+           aktywny_ekran->PobierzCapsKursora().hardware;
+}
 
 void grafika_prezentuj_scene_z_kursorem(const GuiDirtyRect* dirty, uint32_t count,
                                       int cursor_x, int cursor_y) {
     if (!aktywny_ekran || !backbuffer) return;
     const int sw=grafika_pobierz_szerokosc(),sh=grafika_pobierz_wysokosc();
     if(sw<=0||sh<=0||count>SKLADACZ_MAKS_DIRTY_RECT)return;
-    // A completed system overlay is committed once, never through each cursor
-    // dirty rectangle. The compositor still owns only generic scene regions.
-    if(powitanie_aktywne()) {
-        PrzeniesNaEkran();kursor_overlay_widoczny=false;return;
+    const bool owns_batch=!tryb_skladania_obrazu;
+    if(owns_batch)grafika_rozpocznij_batch_gpu();
+    // Pre-handshake splash owns the whole scanout (no pointer overlay).
+    // After the desktop handshake, continue into normal cursor presentation so
+    // a delayed fade cannot leave the user without a visible, clickable cursor.
+    if(powitanie_aktywne() && !powitanie_pulpit_potwierdzony()) {
+        if(kursor_plane_aktywny) {
+            aktywny_ekran->UkryjKursor();
+            kursor_plane_aktywny=false;
+            kursor_plane_ksztalt_brudny=true;
+        }
+        PrzeniesNaEkran();kursor_overlay_widoczny=false;
+        if(owns_batch)grafika_zakoncz_batch_gpu();
+        return;
+    }
+    if(powitanie_aktywne() && powitanie_pulpit_potwierdzony()) {
+        // Finish the farewell scanout, then fall through so the pointer glyph
+        // is restored immediately after (or on top of) the last splash frame.
+        PrzeniesNaEkran();
+        if(powitanie_aktywne()) {
+            // Still fading: keep software overlay available; HW plane may be empty
+            // after the pre-handshake hide until shape is re-uploaded below.
+            kursor_plane_ksztalt_brudny=true;
+        }
     }
     if(count==1&&dirty[0].x==0&&dirty[0].y==0&&dirty[0].width==sw&&dirty[0].height==sh)
         PrezentacjaStartu::przygotowana();
@@ -1318,6 +1539,19 @@ void grafika_prezentuj_scene_z_kursorem(const GuiDirtyRect* dirty, uint32_t coun
     const auto* active=aktywny_stan_kursora();
     if(active)shape=*active;
     const auto* stan=active?&shape:nullptr;
+    if (grafika_cursor_plane_przygotuj(stan,cursor_x,cursor_y)) {
+        /*
+         * Hardware cursorq is independent from the scanout resource. Scene
+         * regions can therefore be transferred while the pointer moves
+         * without restoring or repainting a software overlay.
+         */
+        for (uint32_t ri=0;ri<count;++ri) {
+            const auto& r=dirty[ri];
+            PrzeniesFragmentNaEkran(r.x,r.y,r.width,r.height);
+        }
+        if(owns_batch)grafika_zakoncz_batch_gpu();
+        return;
+    }
     int kw=16,kh=16,hx=0,hy=0;
     parametry_kursora(stan,&kw,&kh,&hx,&hy);
     if(kw>64)kw=64;
@@ -1341,6 +1575,7 @@ void grafika_prezentuj_scene_z_kursorem(const GuiDirtyRect* dirty, uint32_t coun
 #endif
     // Logical position is input-owned. Never commit an older consumed sample.
     kursor_diag_finish();
+    if(owns_batch)grafika_zakoncz_batch_gpu();
 }
 #if BURSZTYNDIAGABSMAP
 void grafika_abs_map_geometria() {
@@ -1380,15 +1615,23 @@ void grafika_runtime_diag_snapshot() {
 #endif
 
 void grafika_prezentuj_kursor_w(int x,int y) {
-    // The system surface has no pointer overlay. A cursor-only request cannot
-    // create a second publication of the same splash animation transaction.
-    if(powitanie_aktywne())return;
+    // Cursor-only presents stay off during the pre-handshake splash so they
+    // cannot republish a welcome frame. After handshake, allow the overlay.
+    if(powitanie_aktywne() && !powitanie_pulpit_potwierdzony())return;
     grafika_prezentuj_scene_z_kursorem(nullptr,0,x,y);
 }
 
 void grafika_prezentuj_kursor(){int x=0,y=0;grafika_pobierz_pozycje_kursora(&x,&y);grafika_prezentuj_kursor_w(x,y);}
 
-void grafika_zakoncz_scene(){tryb_skladania_obrazu=false;}
+void grafika_zakoncz_scene(){
+    /*
+     * The compositor owns the batch between grafika_rozpocznij_skladanie()
+     * and this boundary. Leaving it open silently discarded all queued
+     * VirtIO transfer rectangles at the next frame's batch reset.
+     */
+    if (tryb_skladania_obrazu) grafika_zakoncz_batch_gpu();
+    tryb_skladania_obrazu=false;
+}
 
 void grafika_pobierz_pozycje_kursora(int* x,int* y) {
 #ifndef BURSZTYN_GRAPHICS_HOST_TEST
@@ -1408,6 +1651,33 @@ void grafika_pobierz_overlay_kursora(int* x,int* y,int* w,int* h,bool* widoczny)
     if(w) *w=kursor_overlay_w;
     if(h) *h=kursor_overlay_h;
     if(widoczny) *widoczny=kursor_overlay_widoczny;
+}
+
+void grafika_pobierz_region_kursora(int nowy_x, int nowy_y,
+                                    int* x, int* y, int* w, int* h) {
+    if (!x || !y || !w || !h) return;
+    const int sw = grafika_pobierz_szerokosc();
+    const int sh = grafika_pobierz_wysokosc();
+    if (sw <= 0 || sh <= 0) {
+        *x = *y = *w = *h = 0;
+        return;
+    }
+
+    const auto* state = aktywny_stan_kursora();
+    int kw = 16, kh = 16, hx = 0, hy = 0;
+    parametry_kursora(state, &kw, &kh, &hx, &hy);
+    const GuiDirtyRect old = kursor_overlay_widoczny
+        ? GuiDirtyRect{kursor_overlay_x, kursor_overlay_y,
+                       kursor_overlay_w, kursor_overlay_h}
+        : GuiDirtyRect{};
+    const GuiDirtyRect next{
+        nowy_x - hx, nowy_y - hy, kw, kh};
+    GuiDirtyRect region = kursor_union(old, next);
+    region = kursor_clip(region, sw, sh);
+    *x = region.x;
+    *y = region.y;
+    *w = region.width;
+    *h = region.height;
 }
 
 // =========================================================================
@@ -2265,6 +2535,14 @@ extern "C" bool zaktualizuj_tekst_gui(
 // =========================================================================
 
 void UkryjKursor() {
+    if (kursor_plane_aktywny && aktywny_ekran) {
+        aktywny_ekran->UkryjKursor();
+        kursor_plane_aktywny=false;
+        // VirtIO UPDATE_CURSOR with resource_id=0 clears the plane. The next
+        // show must re-upload pixels; MOVE_CURSOR alone leaves an invisible tip.
+        kursor_plane_ksztalt_brudny=true;
+        return;
+    }
     if (!kursor_overlay_widoczny || !backbuffer || !aktywny_ekran) return;
     PrzeniesFragmentNaEkran(kursor_overlay_x,kursor_overlay_y,
                             kursor_overlay_w,kursor_overlay_h);
@@ -2349,6 +2627,7 @@ static void ustaw_focus_gui(int pid) {
         (void)skladacz_obrazu_ustaw_popup_aplikacji(
             stary, false, 0, 0, 0, 0);
     aktywny_pid_gui = pid;
+    kursor_plane_ksztalt_brudny = true;
 #if BURSZTYN_DEBUG_GUI_INPUT
     SerialLog("[FOCUS] old="); SerialLiczba(stary);
     SerialLog(" new="); SerialLiczba(pid); SerialLog("\n");
@@ -3736,6 +4015,8 @@ extern "C" bool bws_gui_ustaw_kursor_ksztalt(int pid, uint32_t typ) {
     kursory_procesow[pid] = nowy;
     if (stare) kfree(stare);
     if (aktywny_pid_gui == pid)
+        kursor_plane_ksztalt_brudny = true;
+    if (aktywny_pid_gui == pid)
         skladacz_obrazu_oznacz_ruch_kursora(mysz_x, mysz_y, mysz_x, mysz_y);
     return true;
 }
@@ -3775,6 +4056,8 @@ extern "C" bool bws_gui_ustaw_kursor_custom(
     uint32_t* stare = kursory_procesow[pid].piksele;
     kursory_procesow[pid] = nowy;
     if (stare) kfree(stare);
+    if (aktywny_pid_gui == pid)
+        kursor_plane_ksztalt_brudny = true;
     if (aktywny_pid_gui == pid)
         skladacz_obrazu_oznacz_ruch_kursora(mysz_x, mysz_y, mysz_x, mysz_y);
     return true;
@@ -4040,6 +4323,8 @@ bool grafika_aktywuj_virtio_gpu(VirtioGpuDriver* drv) {
     kursor_overlay_widoczny = false;
     kursor_overlay_x = 0;
     kursor_overlay_y = 0;
+    kursor_plane_ksztalt_brudny = true;
+    kursor_plane_aktywny = false;
 
     // A new graphics generation cannot inherit a publishable splash surface.
     powitanie_reset_ekranu();
@@ -4084,6 +4369,10 @@ void grafika_zakoncz_wybor_backendu() {
 bool grafika_przywroc_boot_backend() {
     if (!boot_sterownik || boot_lfb_va == 0) return false;
 
+    if (aktywny_ekran && kursor_plane_aktywny) {
+        aktywny_ekran->UkryjKursor();
+        kursor_plane_ksztalt_brudny = true;
+    }
     aktywny_ekran = boot_sterownik;
     ekran_caps = boot_ekran_caps;
     ekran_lfb_va = boot_lfb_va;
@@ -4102,6 +4391,8 @@ bool grafika_przywroc_boot_backend() {
     kursor_overlay_widoczny = false;
     kursor_overlay_x = 0;
     kursor_overlay_y = 0;
+    kursor_plane_ksztalt_brudny = true;
+    kursor_plane_aktywny = false;
 
     PrzeniesNaEkran();
     PokazKursor();
@@ -4111,6 +4402,11 @@ bool grafika_przywroc_boot_backend() {
 }
 
 void grafika_wymien_stan(const StanBuforowEkranu&s){
+    if (aktywny_ekran && kursor_plane_aktywny) {
+        aktywny_ekran->UkryjKursor();
+        kursor_plane_aktywny=false;
+        kursor_plane_ksztalt_brudny=true;
+    }
     if (ekran_caps.backend == EKRAN_VIRTIO_GPU) {
         VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
         if (drv && drv->fb_vaddr) {
@@ -4130,6 +4426,7 @@ void grafika_wymien_stan(const StanBuforowEkranu&s){
     kursor_overlay_widoczny=false;
     kursor_overlay_x=0;
     kursor_overlay_y=0;
+    kursor_plane_ksztalt_brudny=true;
     for(unsigned i=0;i<SKLADACZ_MAKS_WARSTW;++i)ma_oczekujacy_dirty[i]=false;
     log_granice_kursora("cursor", s.tryb.szerokosc, s.tryb.wysokosc, aktywny_stan.generacja);
 }

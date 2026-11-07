@@ -13,6 +13,10 @@
 #include "idt.h"
 #include "apic.h"
 
+#ifndef BURSZTYN_DEFAULT_DISPLAY_720P
+#define BURSZTYN_DEFAULT_DISPLAY_720P 0
+#endif
+
 #ifdef BURSZTYN_VIRTIO_HOST_TEST
 #include <cstdio>
 #include <cstdlib>
@@ -801,6 +805,254 @@ bool virtio_gpu_cmd_resource_unref(VirtioGpuDriver* drv, uint32_t resource_id) {
     return virtio_gpu_cmd_resource_unref_locked(drv, resource_id);
 }
 
+static bool virtio_gpu_cursor_submit_locked(VirtioGpuDriver* drv,
+                                             const void* command,
+                                             uint32_t command_size) {
+    if (!drv || !drv->cursorq || !drv->cursor_cmd_vaddr || !command ||
+        command_size == 0 || command_size > VIRTIO_GPU_CMD_RESP_OFFSET ||
+        !drv->cursor_ready || virtio_gpu_is_quiescing()) {
+        return false;
+    }
+
+    auto reap = [&]() {
+        if (!drv->cursor_inflight) return true;
+        if (!virtqueue_has_used(drv->cursorq)) return false;
+        void* cookie = nullptr;
+        uint32_t used_len = 0;
+        const int popped = virtqueue_pop_used(drv->cursorq, &cookie, &used_len);
+        if (popped < 0) {
+            drv->has_error = true;
+            drv->cursor_faulted = true;
+            drv->error_count++;
+            return false;
+        }
+        drv->cursor_inflight = false;
+        return true;
+    };
+    if (drv->cursor_inflight && !reap()) {
+        return false;
+    }
+
+    gpu_memcpy(drv->cursor_cmd_vaddr, command, command_size);
+    const VirtqBuffer buffer{
+        drv->cursor_cmd_paddr, command_size, false
+    };
+    if (virtqueue_submit(drv->cursorq, &buffer, 1, nullptr) < 0) {
+        drv->cursor_faulted = true;
+        return false;
+    }
+    if (!virtqueue_kick(drv->cursorq, true)) {
+        drv->cursor_faulted = true;
+        return false;
+    }
+    drv->cursor_inflight = true;
+    /*
+     * The cursor command buffer is dedicated to cursorq and must not be
+     * overwritten until the device returns the descriptor.
+     * Cursor commands are intentionally synchronous and bounded; unlike a
+     * scene flush this is only a tiny control transaction.
+     */
+    for (uint32_t spin=0;spin<100000U;++spin) {
+        if (reap()) return true;
+        asm volatile("pause" ::: "memory");
+    }
+    drv->cursor_faulted = true;
+    return false;
+}
+
+static void virtio_gpu_cursor_release_locked(VirtioGpuDriver* drv,
+                                               bool device_reset) {
+    if (!drv) return;
+    if (!device_reset && !drv->has_error && drv->cursor_resource_id != 0) {
+        virtio_gpu_cmd_resource_detach_backing_locked(
+            drv, drv->cursor_resource_id);
+        virtio_gpu_cmd_resource_unref_locked(drv, drv->cursor_resource_id);
+    }
+    if (drv->cursor_vaddr) {
+        gpu_fb_free(drv->cursor_vaddr, drv->cursor_frames,
+                    drv->cursor_pages);
+    }
+    if (drv->cursor_mem_entries) {
+        gpu_heap_free(drv->cursor_mem_entries);
+    }
+    if (drv->cursor_frames) {
+        gpu_heap_free(drv->cursor_frames);
+    }
+    drv->cursor_resource_id = 0;
+    if (drv->cursor_cmd_vaddr) {
+        gpu_dma_free(drv->cursor_cmd_vaddr, drv->cursor_cmd_paddr,
+                     drv->cursor_cmd_pages);
+    }
+    drv->cursor_cmd_vaddr = nullptr;
+    drv->cursor_cmd_paddr = 0;
+    drv->cursor_cmd_pages = 0;
+    drv->cursor_vaddr = nullptr;
+    drv->cursor_frames = nullptr;
+    drv->cursor_pages = 0;
+    drv->cursor_mem_entries = nullptr;
+    drv->cursor_nr_entries = 0;
+    drv->cursor_ready = false;
+    drv->cursor_faulted = false;
+    drv->cursor_inflight = false;
+    drv->cursor_visible = false;
+}
+
+[[maybe_unused]] static bool virtio_gpu_cursor_init(VirtioGpuDriver* drv) {
+    if (!drv || !drv->dev || !drv->controlq) return false;
+    if (!drv->cursorq) return false;
+
+    constexpr uint32_t CURSOR_RESOURCE = 3;
+    constexpr uint32_t CURSOR_W = 64;
+    constexpr uint32_t CURSOR_H = 64;
+    constexpr size_t CURSOR_BYTES = CURSOR_W * CURSOR_H * sizeof(uint32_t);
+    constexpr size_t CURSOR_PAGES = (CURSOR_BYTES + 4095U) / 4096U;
+
+    if (!gpu_dma_alloc(4096, 4096, &drv->cursor_cmd_vaddr,
+                       &drv->cursor_cmd_paddr, &drv->cursor_cmd_pages)) {
+        virtqueue_destroy(drv->cursorq);
+        drv->cursorq = nullptr;
+        return false;
+    }
+
+    void** frames = static_cast<void**>(
+        gpu_heap_alloc(sizeof(void*) * CURSOR_PAGES));
+    VirtioGpuMemEntry* entries = static_cast<VirtioGpuMemEntry*>(
+        gpu_heap_alloc(sizeof(VirtioGpuMemEntry) * CURSOR_PAGES));
+    void* pixels = nullptr;
+    size_t actual_pages = 0;
+    if (!frames || !entries ||
+        !gpu_fb_alloc(CURSOR_BYTES, &pixels, frames, CURSOR_PAGES,
+                      &actual_pages)) {
+        if (pixels) gpu_fb_free(pixels, frames, actual_pages);
+        if (entries) gpu_heap_free(entries);
+        if (frames) gpu_heap_free(frames);
+        gpu_dma_free(drv->cursor_cmd_vaddr, drv->cursor_cmd_paddr,
+                     drv->cursor_cmd_pages);
+        drv->cursor_cmd_vaddr = nullptr;
+        drv->cursor_cmd_paddr = 0;
+        drv->cursor_cmd_pages = 0;
+        virtqueue_destroy(drv->cursorq);
+        drv->cursorq = nullptr;
+        return false;
+    }
+    gpu_secure_zero(pixels, CURSOR_BYTES);
+    gpu_secure_zero(entries, sizeof(VirtioGpuMemEntry) * CURSOR_PAGES);
+
+    uint32_t nr_entries = 0;
+    for (size_t i = 0; i < actual_pages; ++i) {
+        const uint64_t pa = reinterpret_cast<uint64_t>(frames[i]);
+        if (nr_entries > 0 &&
+            entries[nr_entries - 1].addr +
+                entries[nr_entries - 1].length == pa) {
+            entries[nr_entries - 1].length += 4096;
+        } else {
+            entries[nr_entries] = {pa, 4096, 0};
+            ++nr_entries;
+        }
+    }
+
+    if (!virtio_gpu_cmd_resource_create_2d(
+            drv, CURSOR_RESOURCE, VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM,
+            CURSOR_W, CURSOR_H) ||
+        !virtio_gpu_cmd_resource_attach_backing(
+            drv, CURSOR_RESOURCE, entries, nr_entries)) {
+        if (!drv->has_error) {
+            virtio_gpu_cmd_resource_detach_backing(drv, CURSOR_RESOURCE);
+            virtio_gpu_cmd_resource_unref(drv, CURSOR_RESOURCE);
+        }
+        gpu_fb_free(pixels, frames, actual_pages);
+        gpu_heap_free(entries);
+        gpu_heap_free(frames);
+        gpu_dma_free(drv->cursor_cmd_vaddr, drv->cursor_cmd_paddr,
+                     drv->cursor_cmd_pages);
+        drv->cursor_cmd_vaddr = nullptr;
+        drv->cursor_cmd_paddr = 0;
+        drv->cursor_cmd_pages = 0;
+        virtqueue_destroy(drv->cursorq);
+        drv->cursorq = nullptr;
+        return false;
+    }
+
+    drv->cursor_resource_id = CURSOR_RESOURCE;
+    drv->cursor_vaddr = pixels;
+    drv->cursor_frames = frames;
+    drv->cursor_pages = actual_pages;
+    drv->cursor_mem_entries = entries;
+    drv->cursor_nr_entries = nr_entries;
+    drv->cursor_ready = true;
+    return true;
+}
+
+bool virtio_gpu_cursor_available(const VirtioGpuDriver* drv) {
+    return drv && drv->initialized && drv->cursor_ready &&
+           drv->cursorq != nullptr && !drv->has_error &&
+           !drv->cursor_faulted &&
+           !virtio_gpu_is_quiescing();
+}
+
+bool virtio_gpu_cursor_set_shape(VirtioGpuDriver* drv,
+                                 const uint32_t* pixels,
+                                 uint32_t width,
+                                 uint32_t height,
+                                 uint32_t hotspot_x,
+                                 uint32_t hotspot_y) {
+    if (!virtio_gpu_cursor_available(drv) || !pixels ||
+        width == 0 || height == 0 || width > 64 || height > 64 ||
+        hotspot_x >= width || hotspot_y >= height) {
+        return false;
+    }
+    GpuSpinLockGuard guard(drv->lock);
+    gpu_secure_zero(drv->cursor_vaddr, 64U * 64U * sizeof(uint32_t));
+    for (uint32_t y = 0; y < height; ++y) {
+        gpu_memcpy(static_cast<uint8_t*>(drv->cursor_vaddr) +
+                       static_cast<size_t>(y) * 64U * sizeof(uint32_t),
+                   pixels + static_cast<size_t>(y) * width,
+                   static_cast<size_t>(width) * sizeof(uint32_t));
+    }
+    VirtioGpuUpdateCursor command{};
+    command.hdr.type = VIRTIO_GPU_CMD_UPDATE_CURSOR;
+    command.pos.scanout = drv->scanout_id;
+    command.pos.x = 0;
+    command.pos.y = 0;
+    command.resource_id = drv->cursor_resource_id;
+    command.hot_x = hotspot_x;
+    command.hot_y = hotspot_y;
+    const bool submitted = virtio_gpu_cursor_submit_locked(
+        drv, &command, sizeof(command));
+    if (submitted) drv->cursor_visible = true;
+    return submitted;
+}
+
+bool virtio_gpu_cursor_move(VirtioGpuDriver* drv, int x, int y) {
+    if (!virtio_gpu_cursor_available(drv)) return false;
+    GpuSpinLockGuard guard(drv->lock);
+    VirtioGpuMoveCursor command{};
+    command.hdr.type = VIRTIO_GPU_CMD_MOVE_CURSOR;
+    command.pos.scanout = drv->scanout_id;
+    command.pos.x = static_cast<uint32_t>(x);
+    command.pos.y = static_cast<uint32_t>(y);
+    const bool submitted = virtio_gpu_cursor_submit_locked(
+        drv, &command, sizeof(command));
+    if (submitted) drv->cursor_visible = true;
+    return submitted;
+}
+
+bool virtio_gpu_cursor_hide(VirtioGpuDriver* drv) {
+    if (!drv || !drv->initialized || !drv->cursor_ready ||
+        !drv->cursorq || drv->has_error || virtio_gpu_is_quiescing()) {
+        return false;
+    }
+    GpuSpinLockGuard guard(drv->lock);
+    VirtioGpuUpdateCursor command{};
+    command.hdr.type = VIRTIO_GPU_CMD_UPDATE_CURSOR;
+    command.pos.scanout = drv->scanout_id;
+    command.resource_id = 0;
+    const bool submitted = virtio_gpu_cursor_submit_locked(
+        drv, &command, sizeof(command));
+    if (submitted) drv->cursor_visible = false;
+    return submitted;
+}
+
 /* =========================================================================
  * 3. ZARZADZANIE BUFOREM RAMKI I INICJALIZACJA 2D
  * ========================================================================= */
@@ -1093,6 +1345,53 @@ bool virtio_gpu_transfer_and_flush(VirtioGpuDriver* drv, uint32_t x, uint32_t y,
     return true;
 }
 
+bool virtio_gpu_transfer_rects_and_flush(VirtioGpuDriver* drv,
+                                         const VirtioGpuRect* rects,
+                                         uint32_t count) {
+    constexpr uint32_t MAX_BATCH_RECTS = 256;
+    if (!drv || !rects || count == 0 || count > MAX_BATCH_RECTS ||
+        !PrezentacjaStartu::dozwolona() || virtio_gpu_is_quiescing() ||
+        !drv->initialized || drv->has_error || drv->resource_id == 0) {
+        return false;
+    }
+
+    if (drv->initial_scanout_pending) {
+        if (count != 1 ||
+            rects[0].x != 0 || rects[0].y != 0 ||
+            rects[0].width != drv->fb_width ||
+            rects[0].height != drv->fb_height) {
+            return false;
+        }
+        return virtio_gpu_transfer_and_flush(
+            drv, rects[0].x, rects[0].y, rects[0].width, rects[0].height);
+    }
+
+    uint32_t left = drv->fb_width;
+    uint32_t top = drv->fb_height;
+    uint32_t right = 0;
+    uint32_t bottom = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        const VirtioGpuRect& r = rects[i];
+        if (r.width == 0 || r.height == 0 ||
+            r.x > drv->fb_width || r.y > drv->fb_height ||
+            r.width > drv->fb_width - r.x ||
+            r.height > drv->fb_height - r.y) {
+            return false;
+        }
+        if (!virtio_gpu_cmd_transfer_to_host_2d(
+                drv, drv->resource_id, r.x, r.y, r.width, r.height)) {
+            return false;
+        }
+        if (r.x < left) left = r.x;
+        if (r.y < top) top = r.y;
+        if (r.x + r.width > right) right = r.x + r.width;
+        if (r.y + r.height > bottom) bottom = r.y + r.height;
+    }
+    if (right <= left || bottom <= top) return false;
+    return virtio_gpu_cmd_resource_flush(
+        drv, drv->resource_id, left, top, right - left, bottom - top);
+}
+
 /*
  * Renderuje deterministyczny wzorzec testowy do bufora ramki i wykonuje transfer+flush.
  * Wzorzec uzywany przez testy integracyjne QEMU i weryfikacje pikseli screendump:
@@ -1242,6 +1541,19 @@ bool virtio_gpu_init(VirtioPciDevice* dev) {
         virtio_pci_set_status(dev, VIRTIO_STATUS_FAILED);
         return false;
     }
+    /*
+     * Configure the optional cursor queue before DRIVER_OK. The resource is
+     * created later, after the driver is marked initialized and controlq can
+     * safely service the setup commands. Host transport fixtures keep the
+     * legacy queue topology; dedicated CursorPlane tests exercise the
+     * compositor contract without changing allocator expectations here.
+     */
+#ifndef BURSZTYN_VIRTIO_HOST_TEST
+    drv->cursorq = virtqueue_create(dev, 1);
+    if (!drv->cursorq) {
+        gpu_klog("[VIRTIO-GPU] cursorq unavailable; using software cursor.");
+    }
+#endif
 
     /* Konfiguracja MSI-X (jesli urzadzenie obsluguje MSI-X) */
     if (dev->has_msix) {
@@ -1289,6 +1601,10 @@ bool virtio_gpu_init(VirtioPciDevice* dev) {
         }
         virtqueue_destroy(drv->controlq);
         drv->controlq = nullptr;
+        if (drv->cursorq) {
+            virtqueue_destroy(drv->cursorq);
+            drv->cursorq = nullptr;
+        }
         gpu_dma_free(drv->cmd_vaddr, drv->cmd_paddr, drv->cmd_pages);
         drv->cmd_vaddr = nullptr;
         virtio_pci_set_status(dev, VIRTIO_STATUS_FAILED);
@@ -1296,6 +1612,13 @@ bool virtio_gpu_init(VirtioPciDevice* dev) {
     }
 
     drv->initialized = true;
+#ifndef BURSZTYN_VIRTIO_HOST_TEST
+    if (virtio_gpu_cursor_init(drv)) {
+        gpu_klog("[VIRTIO-GPU] Sprzetowa plaszczyzna kursora aktywna.");
+    } else {
+        gpu_klog("[VIRTIO-GPU] Brak cursorq/resource kursora; fallback software.");
+    }
+#endif
 
     /* Pobranie informacji o wyswietlaczu */
     VirtioGpuRespDisplayInfo dinfo{};
@@ -1339,9 +1662,21 @@ bool virtio_gpu_init(VirtioPciDevice* dev) {
         return w >= 640 && w <= 4096 && h >= 480 && h <= 4096 && (uint64_t(w) * h * 4ULL <= 64ULL * 1024 * 1024);
     };
 
+    /*
+     * The launcher and GRUB use 1280x720 as the canonical guest profile.
+     * Do not let a stale/host-provided boot framebuffer silently promote the
+     * runtime surface back to 1920x1080; that breaks the input/display
+     * coordinate contract and makes the QEMU viewport unnecessarily large.
+     */
+#if BURSZTYN_DEFAULT_DISPLAY_720P
+    uint32_t target_w = 1280;
+    uint32_t target_h = 720;
+#else
     uint32_t target_w = 1920;
     uint32_t target_h = 1080;
+#endif
 
+#if !BURSZTYN_DEFAULT_DISPLAY_720P
     if (is_valid_dim(boot_w, boot_h)) {
         target_w = boot_w;
         target_h = boot_h;
@@ -1349,6 +1684,7 @@ bool virtio_gpu_init(VirtioPciDevice* dev) {
         target_w = dinfo_w;
         target_h = dinfo_h;
     }
+#endif
 
     char smsg[64]{};
     size_t sp = 0;
@@ -1669,6 +2005,7 @@ bool virtio_gpu_reset(VirtioGpuDriver* drv) {
 
     /* Sprzet potwierdzil reset: mozemy bezpiecznie zwolnic kolejki i DMA */
     virtio_gpu_free_stale_resource_locked(drv,true);
+    virtio_gpu_cursor_release_locked(drv,true);
     if (drv->controlq) {
         virtqueue_destroy(drv->controlq);
         drv->controlq = nullptr;

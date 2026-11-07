@@ -21,6 +21,29 @@ static void desktop_usability_cases() {
             files[std::string(SCIEZKA_PULPIT)+"/"+name]=strcmp(name,"a.txt")!=0;
         liczba_wpisow_pulpitu=0;desktop_layout.count=0;hash_pulpitu_wazny=false;CHECK(odswiez_wpisy_pulpitu());
         CHECK(desktop_layout.count==4+DesktopEntries::Count);
+        // Default packing is column-major: catalog order 0 anchors the left column.
+        {
+            int first=-1;
+            for(int i=0;i<desktop_layout.count;++i)if(wpisy_pulpitu[i].launcher==0){first=i;break;}
+            CHECK(first>=0);CHECK(desktop_layout.items[first].placed);
+            CHECK(desktop_layout.items[first].col==0);
+            // Later catalog entries stay in column 0 until that column is full.
+            if(desktop_layout.rows>1) {
+                int second=-1;
+                for(int i=0;i<desktop_layout.count;++i)if(wpisy_pulpitu[i].launcher==1){second=i;break;}
+                CHECK(second>=0);CHECK(desktop_layout.items[second].placed);
+                CHECK(desktop_layout.items[second].col==0 || desktop_layout.items[second].row>desktop_layout.items[first].row);
+            }
+            desktop_layout.items[first].custom=true;desktop_layout.items[first].col=
+                desktop_layout.cols>2?2:desktop_layout.items[first].col;
+            desktop_layout.items[first].row=
+                desktop_layout.rows>2?2:desktop_layout.items[first].row;
+            (void)desktop_layout.arrange_column_major();
+            CHECK(!desktop_layout.items[first].custom);
+            CHECK(desktop_layout.items[first].placed);
+            CHECK(desktop_layout.items[first].col==0);
+            CHECK(desktop_layout.items[first].row==0);
+        }
         for(int i=0;i<4;++i) {
             auto p=desktop_layout.items[i];auto cell=desktop_layout.cell(i),r=wizualny_wpis_pulpitu(i);
             CHECK(p.placed);CHECK(p.label.count<=3);CHECK(p.label.count>=1);
@@ -84,17 +107,20 @@ static void desktop_usability_cases() {
         hash_pulpitu_wazny=false;CHECK(odswiez_wpisy_pulpitu());
         for(int i=0;i<desktop_layout.count;++i)desktop_layout.items[i]=Desktop::Position{};
         aktualizuj_layout_pulpitu();desktop_layout.clear_selection();
-        // Isolate the two filesystem entries for this rubber-band test;
-        // automatic placement now reserves the catalog before user items.
-        for(int i=0;i<2;++i){auto& p=desktop_layout.items[i];p.col=i;p.row=3;p.offsetX=p.offsetY=0;p.placed=p.custom=true;}
-        r=wizualny_wpis_pulpitu(0);int y=wizualny_wpis_pulpitu(0).dolny()-1;
-        obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_DOWN,0,y));
-        CHECK(obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_RUCH,r.x+2*desktop_layout.cw,r.y)));
+        // Isolate the two filesystem entries for this rubber-band test. Column-
+        // major auto-place fills the left columns with launchers, so park the
+        // files in the rightmost column away from the catalog.
+        const int fileCol=desktop_layout.cols>1?desktop_layout.cols-1:0;
+        for(int i=0;i<2;++i){auto& p=desktop_layout.items[i];p.col=fileCol;p.row=i;p.offsetX=p.offsetY=0;p.placed=p.custom=true;}
+        r=wizualny_wpis_pulpitu(0);int y=wizualny_wpis_pulpitu(1).dolny()-1;
+        const int bandLeft=r.x-2;const int bandRight=r.x+desktop_layout.cw+2;
+        obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_DOWN,bandLeft,y));
+        CHECK(obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_RUCH,bandRight,wizualny_wpis_pulpitu(0).y)));
         CHECK(desktop_layout.selected_count()==2);CHECK(desktop_gesture.rubber);
-        obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_UP,r.x+2*desktop_layout.cw,r.y));CHECK(!test_mouse_capture);
-        desktop_ctrl(true);obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_DOWN,0,y));
-        obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_RUCH,5,y-10));CHECK(desktop_layout.selected_count()==2);
-        obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_UP,5,y-10));
+        obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_UP,bandRight,wizualny_wpis_pulpitu(0).y));CHECK(!test_mouse_capture);
+        desktop_ctrl(true);obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_DOWN,bandLeft,y));
+        obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_RUCH,bandLeft+5,y-10));CHECK(desktop_layout.selected_count()==2);
+        obsluz_gest_pulpitu(desktop_event(BWS_ZDARZENIE_MYSZ_UP,bandLeft+5,y-10));
         for(auto source:{PLIK_BURSZTYN_JASNY,PLIK_BURSZTYN_NOCNY,PLIK_BURSZTYN_KLASYCZNY,PLIK_GRAFIT,PLIK_BALTYCKA_NOC}) {
             BursztynMotyw theme{};CHECK(motyw_parsuj(source,strlen(source),&theme));
             test_ustaw_aktywny_motyw(&theme);test_paint_rects.clear();test_capture_paints=true;RysujWpisyPulpitu();test_capture_paints=false;
