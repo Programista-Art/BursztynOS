@@ -465,6 +465,16 @@ bool ZmapujStroneSprawdzona(void* va,void* pa,uint32_t flagi);
  * replaced, but an existing USER page must never be overwritten. */
 extern "C" bool VmmMapujNowaStroneProcesu(void* va, void* pa, bool zapis);
 
+/* Loader-only equivalent that edits a trusted, non-active process PML4.
+ * Keeping the target CR3 inactive lets the loader leave interrupts enabled
+ * between short VMM critical sections while the new address space is built. */
+extern "C" bool VmmMapujNowaStroneWPrzestrzeniProcesu(
+    void* pml4,
+    void* va,
+    void* pa,
+    bool zapis
+);
+
 /* Waskie API dla natywnych obiektow SHM. Operuje tylko na aktualnym CR3,
  * stronach 4 KiB USER i nigdy nie publikuje adresu fizycznego Ring 3. */
 extern "C" bool VmmMapujStroneWspoldzielona(

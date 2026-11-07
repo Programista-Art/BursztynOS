@@ -2654,8 +2654,6 @@ extern "C" __attribute__((noreturn)) void _start() {
             g_cached_skala = 0;
             zaktualizuj_cache_przycisku(ui_skala_procent);
             RysujPulpit(true);
-            RysujTaskbar();
-            wm_gui_odswiez();
             continue;
         }
         const uint64_t stara_sygnatura = sygnatura_okien();

@@ -579,7 +579,12 @@ public:
 
     VirtioGpuDriver* PobierzSterownikGPU() const { return drv; }
     CursorPlaneCaps PobierzCapsKursora() const override {
-        if (virtio_gpu_cursor_available(drv)) return {true, 64, 64};
+        /*
+         * The VirtIO cursor plane is not part of the scanout resource used by
+         * QEMU screendump/diagnostic paths and can report successful commands
+         * while the visible desktop still has no cursor. Keep the software
+         * overlay canonical until the plane has a visibility proof.
+         */
         return {};
     }
     bool UstawKsztaltKursora(const uint32_t* pixels, uint32_t w,
@@ -1377,6 +1382,8 @@ static uint32_t kursor_tlo_kopia[64 * 64];
 static uint32_t kursor_plane_piksele[64 * 64];
 static bool kursor_plane_ksztalt_brudny = true;
 static bool kursor_plane_aktywny = false;
+/* Jedna awaria komendy kursora nie może pozostawić niewidocznego wskaźnika. */
+static bool kursor_plane_zablokowany = false;
 #ifndef BURSZTYN_DIAG_GEOM_TRACE
 #define BURSZTYN_DIAG_GEOM_TRACE 0
 #endif
@@ -1445,6 +1452,7 @@ void grafika_prezentuj_region(int x,int y,int szer,int wys){PrzeniesFragmentNaEk
 static bool grafika_cursor_plane_przygotuj(const StanKursoraProcesu* stan,
                                            int x, int y) {
     if (!aktywny_ekran) return false;
+    if (kursor_plane_zablokowany) return false;
     const CursorPlaneCaps caps=aktywny_ekran->PobierzCapsKursora();
     if (!caps.hardware) {
         if (kursor_plane_aktywny) {
@@ -1484,12 +1492,17 @@ static bool grafika_cursor_plane_przygotuj(const StanKursoraProcesu* stan,
                 static_cast<uint32_t>(hy))) {
             if (kursor_plane_aktywny) aktywny_ekran->UkryjKursor();
             kursor_plane_aktywny=false;
+            kursor_plane_ksztalt_brudny=true;
+            kursor_plane_zablokowany=true;
             return false;
         }
         kursor_plane_ksztalt_brudny=false;
     }
     if (!aktywny_ekran->PrzesunKursor(x,y)) {
+        if (kursor_plane_aktywny) aktywny_ekran->UkryjKursor();
         kursor_plane_aktywny=false;
+        kursor_plane_ksztalt_brudny=true;
+        kursor_plane_zablokowany=true;
         return false;
     }
     kursor_plane_aktywny=true;
@@ -1499,7 +1512,8 @@ static bool grafika_cursor_plane_przygotuj(const StanKursoraProcesu* stan,
 
 bool grafika_czy_kursor_sprzetowy() {
     return aktywny_ekran &&
-           aktywny_ekran->PobierzCapsKursora().hardware;
+           !kursor_plane_zablokowany &&
+           kursor_plane_aktywny;
 }
 
 void grafika_prezentuj_scene_z_kursorem(const GuiDirtyRect* dirty, uint32_t count,
@@ -4325,6 +4339,7 @@ bool grafika_aktywuj_virtio_gpu(VirtioGpuDriver* drv) {
     kursor_overlay_y = 0;
     kursor_plane_ksztalt_brudny = true;
     kursor_plane_aktywny = false;
+    kursor_plane_zablokowany = false;
 
     // A new graphics generation cannot inherit a publishable splash surface.
     powitanie_reset_ekranu();
@@ -4393,6 +4408,7 @@ bool grafika_przywroc_boot_backend() {
     kursor_overlay_y = 0;
     kursor_plane_ksztalt_brudny = true;
     kursor_plane_aktywny = false;
+    kursor_plane_zablokowany = false;
 
     PrzeniesNaEkran();
     PokazKursor();
@@ -4427,6 +4443,8 @@ void grafika_wymien_stan(const StanBuforowEkranu&s){
     kursor_overlay_x=0;
     kursor_overlay_y=0;
     kursor_plane_ksztalt_brudny=true;
+    kursor_plane_aktywny=false;
+    kursor_plane_zablokowany=false;
     for(unsigned i=0;i<SKLADACZ_MAKS_WARSTW;++i)ma_oczekujacy_dirty[i]=false;
     log_granice_kursora("cursor", s.tryb.szerokosc, s.tryb.wysokosc, aktywny_stan.generacja);
 }

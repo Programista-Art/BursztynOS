@@ -240,6 +240,24 @@ ifneq ($(filter 1 yes true,$(BURSZTYN_DEBUG_GUI_LAYERS)),)
 KERNEL_CXXFLAGS += -DBURSZTYN_DEBUG_GUI_LAYERS=1
 endif
 
+# Metryki kosztu skladania/prezentacji sceny. Wylaczone w obrazie produkcyjnym.
+BURSZTYN_DEBUG_PERF ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DEBUG_PERF)),)
+	KERNEL_CXXFLAGS += -DBURSZTYN_DEBUG_PERF=1
+endif
+
+# Metryki ruchu kursora, drag i coalescingu dirty. Wylaczone domyslnie.
+BURSZTYN_DEBUG_GUI_PERF ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DEBUG_GUI_PERF)),)
+	KERNEL_CXXFLAGS += -DBURSZTYN_DEBUG_GUI_PERF=1
+endif
+
+# Pomiar etapow BWS10/BUR bez zmiany semantyki loadera.
+BURSZTYN_DEBUG_LOADER_PERF ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DEBUG_LOADER_PERF)),)
+	KERNEL_CXXFLAGS += -DBURSZTYN_DEBUG_LOADER_PERF=1
+endif
+
 # Diagnostyczny 16 KiB stos jadra (reprodukcja historycznego overflow).
 # Wylacznie do kontrolowanych testow: make iso BURSZTYN_DIAG_STOS16K=1
 BURSZTYN_DIAG_STOS16K ?= 0
@@ -1677,7 +1695,7 @@ clean:
 	rm -f tapety.pak tapety.pak.d $(TAPETY_SOURCES_MANIFEST) $(TAPETY_ISO_CHECK) $(GRUB_ISO_CHECK) tapety_manifest.h tapetyzasoby.S tapetyzasoby.d tapety_zasoby.rsp tapety_zasoby.d tapety_zasoby.S tapety_zasoby.o
 	rm -f biblioteki/mbedtls/library/*.o biblioteki/mbedtls/library/*.su
 	rm -f $(OVMF_VARS_RUNTIME)
-	rm -rf $(ISO_DIR) $(ISO8K_DIR) $(CI_TEST_DIR) $(CI_BLK_DIR) $(CI_DEST_ONLY_DIR) isodir_test
+	rm -rf $(ISO_DIR) $(ISO8K_DIR) $(CI_TEST_DIR) $(CI_BLK_DIR) $(CI_DEST_ONLY_DIR) .build-config isodir_test
 
 #
 # Zachowanie starej nazwy `clear`.
@@ -1847,7 +1865,15 @@ ifeq ($(BURSZTYNDIAGGUIRUNTIME),1)
 KERNEL_CXXFLAGS += -DBURSZTYNDIAGGUIRUNTIME=1
 RING3_FLAGS += -DBURSZTYNDIAGGUIRUNTIME=1
 endif
-scheduler.o syscalls.o grafika.o skladacz_obrazu.o: jadro/gui/gui_runtime_diag.h
+
+GUI_PERF_BUILD_CONFIG := .build-config/gui-perf
+.PHONY: gui-perf-build-config-force
+gui-perf-build-config-force:
+$(GUI_PERF_BUILD_CONFIG): gui-perf-build-config-force
+	@mkdir -p .build-config
+	@$(PYTHON) -c "from pathlib import Path; p=Path('$@'); v='runtime=$(BURSZTYNDIAGGUIRUNTIME) perf=$(BURSZTYN_DEBUG_PERF) gui_perf=$(BURSZTYN_DEBUG_GUI_PERF) loader=$(BURSZTYN_DEBUG_LOADER_PERF)'; p.write_text(v) if not p.exists() or p.read_text()!=v else None"
+
+scheduler.o syscalls.o grafika.o skladacz_obrazu.o loader.o kernel.o virtio_input.o: jadro/gui/gui_runtime_diag.h $(GUI_PERF_BUILD_CONFIG)
 shell_tmp.o: programy/shell/shell_runtime_diag.h
 
 virtio_input.o: jadro/gui/gui_runtime_diag.h

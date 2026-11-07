@@ -2217,6 +2217,14 @@ extern "C" bool system_potwierdz_gotowosc_pulpitu(int pid) {
     powitanie_pulpit_gotowy(grafika_czy_tapeta(),pid);
     virtio_input_set_desktop_ready(true);
 
+    // The splash may have hidden both cursor backends. Queue a same-position
+    // cursor transaction so the first stationary pointer is painted
+    // immediately after the desktop becomes interactive.
+    int cursor_x = 0;
+    int cursor_y = 0;
+    grafika_pobierz_pozycje_kursora(&cursor_x, &cursor_y);
+    skladacz_obrazu_oznacz_ruch_kursora(cursor_x, cursor_y, cursor_x, cursor_y);
+
     // Dokoncz pierwsze pelne zlozenie i flush pulpitu na scanout
     zablokuj_ekran();
     skladacz_obrazu_obsluz_dirty();

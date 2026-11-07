@@ -30,6 +30,13 @@
 #ifndef BURSZTYN_DIAG_BOOT
 #define BURSZTYN_DIAG_BOOT 0
 #endif
+#ifndef BURSZTYN_DEBUG_LOADER_PERF
+#define BURSZTYN_DEBUG_LOADER_PERF 0
+#endif
+#if BURSZTYN_DEBUG_LOADER_PERF
+#include "sterowniki/czas/hpet.h"
+extern void wypisz_log(const char*);
+#endif
 
 extern "C" void* PobierzAktualnePML4();
 #include "psf.h"
@@ -85,6 +92,43 @@ namespace {
 
 constexpr uint64_t ROZMIAR_STRONY = 4096ULL;
 constexpr uint64_t MASKA_STRONY = ROZMIAR_STRONY - 1ULL;
+
+#if BURSZTYN_DEBUG_LOADER_PERF
+static uint64_t loader_perf_now() {
+    return hpet_dostepny() ? czas_monotoniczny_ns() : 0;
+}
+
+static void loader_perf_log(int pid, uint64_t rozmiar,
+                            uint64_t total_start, uint64_t image_start,
+                            uint64_t image_end, uint64_t map_start,
+                            uint64_t map_end, uint64_t total_end) {
+    if (!total_start || !image_start || !image_end || !map_start ||
+        !map_end || !total_end) {
+        return;
+    }
+    char line[192]{};
+    size_t n = 0;
+    auto text = [&](const char* value) {
+        while (*value && n + 1 < sizeof(line)) line[n++] = *value++;
+    };
+    auto number = [&](uint64_t value) {
+        char digits[24]{};
+        size_t count = 0;
+        do {
+            digits[count++] = static_cast<char>('0' + value % 10);
+            value /= 10;
+        } while (value && count < sizeof(digits));
+        while (count && n + 1 < sizeof(line)) line[n++] = digits[--count];
+    };
+    text("[LOADER PERF] pid="); number(static_cast<uint64_t>(pid));
+    text(" bytes="); number(rozmiar);
+    text(" total_us="); number((total_end - total_start) / 1000ULL);
+    text(" image_us="); number((image_end - image_start) / 1000ULL);
+    text(" map_us="); number((map_end - map_start) / 1000ULL);
+    line[n] = '\0';
+    wypisz_log(line);
+}
+#endif
 
 #ifndef BURSZTYN_LOADER_HOST_TEST
 constexpr size_t MAKS_DLUGOSC_SCIEZKI = 64;
@@ -693,6 +737,7 @@ static inline bool poprawny_naglowek_bur(
 }
 
 static bool mapuj_segment_z_pliku(
+    void* pml4,
     uint64_t adres_wirtualny,
     uint64_t rozmiar_w_pamieci,
     const uint8_t* dane_pliku,
@@ -746,7 +791,8 @@ static bool mapuj_segment_z_pliku(
          * Dane zapisujemy do fizycznej ramki PRZED mapowaniem.
          * Dzieki temu segment kodu mozna od razu zmapowac bez FLAGA_ZAPIS.
          */
-        if (!VmmMapujNowaStroneProcesu(
+        if (!VmmMapujNowaStroneWPrzestrzeniProcesu(
+            pml4,
             reinterpret_cast<void*>(
                 adres_wirtualny + przesuniecie),
             ramka,
@@ -762,6 +808,7 @@ static bool mapuj_segment_z_pliku(
 }
 
 static bool mapuj_stos_uzytkownika(
+    void* pml4,
     uint32_t flagi,
     uint64_t liczba_stron
 ) {
@@ -788,7 +835,8 @@ static bool mapuj_stos_uzytkownika(
             p[j] = 0;
         }
 
-        if (!VmmMapujNowaStroneProcesu(
+        if (!VmmMapujNowaStroneWPrzestrzeniProcesu(
+            pml4,
             reinterpret_cast<void*>(
                 BAZA_STOSU_USER +
                 i * ROZMIAR_STRONY),
@@ -859,6 +907,9 @@ static bool uruchom_program_z_pliku_impl(
     bool z_syscalla,
     const char* argument_startowy
 ) {
+#if BURSZTYN_DEBUG_LOADER_PERF
+    const uint64_t loader_perf_total_start = loader_perf_now();
+#endif
     ProbaUruchomienia proba;
     /*
      * Bursztynowe Poziomy Zaufania maja zakres 0..5.
@@ -925,11 +976,17 @@ static bool uruchom_program_z_pliku_impl(
         return false;
     }
 
+#if BURSZTYN_DEBUG_LOADER_PERF
+    const uint64_t loader_perf_image_start = loader_perf_now();
+#endif
     if (!bsp_wczytaj_obraz_bur(bezpieczna_sciezka, &proba.obraz,
             BUR_MAKS_ROZMIAR_PLIKU, bur_blad_naglowka)) {
         zwolnij_rezerwacje_procesu(pid);
         return false;
     }
+#if BURSZTYN_DEBUG_LOADER_PERF
+    const uint64_t loader_perf_image_end = loader_perf_now();
+#endif
     const uint64_t rozmiar_pliku = proba.obraz.rozmiar;
     const uint8_t* bufor_pliku = proba.obraz.dane;
     const NaglowekBur& naglowek = proba.obraz.naglowek;
@@ -987,17 +1044,9 @@ static bool uruchom_program_z_pliku_impl(
         return false;
     }
 
-    /*
-     * VmmMapujNowaStroneProcesu() pracuje na aktualnym CR3. Na czas budowania nowej
-     * przestrzeni blokujemy przerwania, aby timer nie przelaczyl procesu
-     * podczas gdy CR3 wskazuje na niedokonczona hierarchie stron.
-     */
-    const StanPrzerwan stan_przerwan =
-        wylacz_przerwania();
-
-    UstawPrzestrzenAdresowa(
-        pml4_procesu
-    );
+#if BURSZTYN_DEBUG_LOADER_PERF
+    const uint64_t loader_perf_map_start = loader_perf_now();
+#endif
 
     const uint32_t flagi_kod =
         FLAGA_OBECNA |
@@ -1015,6 +1064,7 @@ static bool uruchom_program_z_pliku_impl(
      * Segment jest mapowany bez prawa zapisu z Ring 3.
      */
     if (!mapuj_segment_z_pliku(
+            pml4_procesu,
             naglowek.tekst_wirtualny,
             naglowek.tekst_rozmiar,
             bufor_pliku +
@@ -1043,6 +1093,7 @@ static bool uruchom_program_z_pliku_impl(
                 : dostepne_dane;
 
         if (!mapuj_segment_z_pliku(
+                pml4_procesu,
                 naglowek.dane_wirtualny,
                 naglowek.dane_rozmiar,
                 bufor_pliku +
@@ -1054,12 +1105,16 @@ static bool uruchom_program_z_pliku_impl(
         }
 #ifndef BURSZTYN_LOADER_RUNTIME_HOST_TEST
         if (mapowanie_ok && kopiowane_dane >= sizeof(uint64_t)) {
+            const StanPrzerwan stan_ssp = wylacz_przerwania();
+            UstawPrzestrzenAdresowa(pml4_procesu);
             (void)stack_protector_zainicjuj_segment_danych_procesu(
                 static_cast<uint64_t>(pid),
                 static_cast<uintptr_t>(naglowek.punkt_wejscia),
                 reinterpret_cast<uint8_t*>(naglowek.dane_wirtualny),
                 kopiowane_dane
             );
+            UstawPrzestrzenAdresowa(poprzednie_pml4);
+            przywroc_przerwania(stan_ssp);
         }
 #endif
     }
@@ -1071,25 +1126,14 @@ static bool uruchom_program_z_pliku_impl(
      */
     if (mapowanie_ok &&
         !mapuj_stos_uzytkownika(
+            pml4_procesu,
             flagi_dane,
             liczba_stron_stosu)) {
         proba.obraz.blad = "mapuj_stos_uzytkownika-failed";
         mapowanie_ok = false;
     }
 
-    /*
-     * Przed jakakolwiek obsluga bledu lub publikacja procesu wracamy
-     * do przestrzeni adresowej, na ktorej loader zostal wywolany.
-     */
-    UstawPrzestrzenAdresowa(
-        poprzednie_pml4
-    );
-
     if (!mapowanie_ok) {
-        przywroc_przerwania(
-            stan_przerwan
-        );
-
         posprzataj_przestrzen_po_bledzie(
             pml4_procesu
         );
@@ -1134,9 +1178,6 @@ static bool uruchom_program_z_pliku_impl(
             pml4_procesu,
             &pml4_procesu_fiz)) {
         proba.obraz.blad = "process-cr3-translation-failed";
-        przywroc_przerwania(
-            stan_przerwan
-        );
         posprzataj_przestrzen_po_bledzie(
             pml4_procesu
         );
@@ -1175,7 +1216,6 @@ static bool uruchom_program_z_pliku_impl(
 
     if (!kopiuj_argument_startowy(
             argument_startowy_procesu[pid], bezpieczny_argument)) {
-        przywroc_przerwania(stan_przerwan);
         return false;
     }
 
@@ -1213,10 +1253,14 @@ static bool uruchom_program_z_pliku_impl(
 #endif
 
     proba.sukces = true;
-    przywroc_przerwania(
-        stan_przerwan
-    );
 
+#if BURSZTYN_DEBUG_LOADER_PERF
+    const uint64_t loader_perf_map_end = loader_perf_now();
+    loader_perf_log(pid, rozmiar_pliku, loader_perf_total_start,
+                    loader_perf_image_start, loader_perf_image_end,
+                    loader_perf_map_start, loader_perf_map_end,
+                    loader_perf_now());
+#endif
     return true;
 }
 

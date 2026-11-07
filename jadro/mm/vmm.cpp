@@ -1814,20 +1814,39 @@ void ZmapujStrone(void* va,void* pa,uint32_t flags) {
     (void)ZmapujStroneSprawdzona(va,pa,flags);
 }
 
-extern "C" bool VmmMapujNowaStroneProcesu(void* va, void* pa, bool zapis) {
-    BlokadaVMM blokada;
+static bool vmm_mapuj_nowa_strone_procesu_wewnetrznie(
+    uint64_t* pml4,
+    void* va,
+    void* pa,
+    bool zapis
+) {
     const uint64_t adres = reinterpret_cast<uint64_t>(va);
-    if (!vmm_zainicjalizowany || !pa || adres < RING3_BASE ||
+    if (!vmm_zainicjalizowany || !pml4 || !pa || adres < RING3_BASE ||
         !adres_user_kanoniczny(adres) || (adres & 4095U) ||
         (reinterpret_cast<uint64_t>(pa) & 4095U)) return false;
-    uint64_t* pml4 = pml4_z_cr3();
-    if (!pml4) return false;
     const auto obecne = sprawdz_mapowanie(pml4, adres);
     if (obecne.obecna && obecne.user) return false;
     uint32_t flagi = VMM_FLAGA_OBECNA | VMM_FLAGA_USER;
     if (zapis) flagi |= VMM_FLAGA_ZAPIS;
     return mapuj_strone_wewnetrznie(pml4, adres,
         reinterpret_cast<uint64_t>(pa), flagi);
+}
+
+extern "C" bool VmmMapujNowaStroneProcesu(void* va, void* pa, bool zapis) {
+    BlokadaVMM blokada;
+    return vmm_mapuj_nowa_strone_procesu_wewnetrznie(
+        pml4_z_cr3(), va, pa, zapis);
+}
+
+extern "C" bool VmmMapujNowaStroneWPrzestrzeniProcesu(
+    void* pml4,
+    void* va,
+    void* pa,
+    bool zapis
+) {
+    BlokadaVMM blokada;
+    return vmm_mapuj_nowa_strone_procesu_wewnetrznie(
+        static_cast<uint64_t*>(pml4), va, pa, zapis);
 }
 
 extern "C" bool VmmMapujNowaStroneJadra(void* va, void* pa) {

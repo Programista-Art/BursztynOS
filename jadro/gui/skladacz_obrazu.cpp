@@ -296,6 +296,30 @@ bool rect_merge_ok(const GuiDirtyRect&a,const GuiDirtyRect&b){
                           (a.y<b.y+b.height&&b.y<a.y+a.height&&a.x<=b.x+b.width&&b.x<=a.x+a.width);
     return touch_or_overlap||ua<=sum+sum/2;
 }
+uint32_t coalesce_present_rects(GuiDirtyRect* rects,uint32_t count){
+    if(!rects||count<2)return count;
+    /*
+     * BWS57 keeps exact dirty regions while the scene is composed. The GPU
+     * present path has a different cost model: a small gap between two
+     * already-correct backbuffer regions is cheaper to transfer once than to
+     * submit as two VirtIO requests. Never change the compose list itself,
+     * because its regions are also used for wallpaper/layer reconstruction.
+     */
+    bool merged=false;
+    do {
+        merged=false;
+        for(uint32_t i=0;i<count&&!merged;++i) {
+            for(uint32_t j=i+1;j<count;++j) {
+                if(!rect_merge_ok(rects[i],rects[j]))continue;
+                rects[i]=rect_union(rects[i],rects[j]);
+                rects[j]=rects[--count];
+                merged=true;
+                break;
+            }
+        }
+    } while(merged);
+    return count;
+}
 
 #ifndef BURSZTYN_DEBUG_PERF
 #define BURSZTYN_DEBUG_PERF 0
@@ -2086,10 +2110,6 @@ void skladacz_obrazu_obsluz_dirty() {
     grafika_pobierz_overlay_kursora(&overlay_x,&overlay_y,&overlay_w,
                                     &overlay_h,&overlay_widoczny);
     const GuiDirtyRect overlay_rect{overlay_x,overlay_y,overlay_w,overlay_h};
-    bool dirty_przecina_kursor=false;
-    if(overlay_widoczny)for(uint32_t ri=0;ri<count;++ri){
-        if(rect_przecina(work[ri],overlay_rect)){dirty_przecina_kursor=true;break;}
-    }
     kursor_diag_compose();
     grafika_rozpocznij_skladanie();uint64_t pixels=0;
     /* Faza A: wszystkie regiony trafiaja w calosci do scene backbufferu.
@@ -2117,6 +2137,18 @@ void skladacz_obrazu_obsluz_dirty() {
         }
         grafika_naloz_okno_terminala_region(r.x,r.y,r.width,r.height);
     }
+    /*
+     * Keep exact regions for composition but reduce VirtIO transfer count.
+     * The backbuffer already contains the correct pixels in any small gap
+     * introduced by this present-only merge.
+     */
+    static GuiDirtyRect present_work[SKLADACZ_MAKS_DIRTY_RECT];
+    for(uint32_t ri=0;ri<count;++ri)present_work[ri]=work[ri];
+    const uint32_t present_count=coalesce_present_rects(present_work,count);
+    bool dirty_przecina_kursor=false;
+    if(overlay_widoczny)for(uint32_t ri=0;ri<present_count;++ri){
+        if(rect_przecina(present_work[ri],overlay_rect)){dirty_przecina_kursor=true;break;}
+    }
     const uint64_t compose_end=hpet_dostepny()?czas_monotoniczny_us():0;
     gui_perf_add(0,GP_COMPOSE_NS,(compose_end>=start?compose_end-start:0)*1000);
     /* Faza B: prezentujemy dopiero gotowe wiersze, a kursor nakladamy raz,
@@ -2127,12 +2159,12 @@ void skladacz_obrazu_obsluz_dirty() {
     /* Scene nigdy nie zawiera kursora. Bez ruchu myszy overlay pozostaje
        nietkniety, dopoki dirty faktycznie nie przecina jego 16x16. */
     if(cursor_work||dirty_przecina_kursor||!overlay_widoczny){
-        grafika_prezentuj_scene_z_kursorem(work,count,cursor_x,cursor_y);++cursor_fast_present_count;
+        grafika_prezentuj_scene_z_kursorem(present_work,present_count,cursor_x,cursor_y);++cursor_fast_present_count;
 #if BURSZTYN_DEBUG_GUI_PERF
         if(dirty_przecina_kursor)++cursor_reoverlay_after_dirty;
 #endif
     }
-    else for(uint32_t ri=0;ri<count;++ri){const auto& r=work[ri];grafika_prezentuj_region(r.x,r.y,r.width,r.height);}
+    else for(uint32_t ri=0;ri<present_count;++ri){const auto& r=present_work[ri];grafika_prezentuj_region(r.x,r.y,r.width,r.height);}
     grafika_zakoncz_scene();
     /*
      * A scene generation advances only after the cursor-free scene has been

@@ -210,6 +210,17 @@ int main(){
         }
         desktop->bufor_pikseli[0]=0;
         popup_restoration_cases();
+        // A stationary pointer must still get its first visible transaction
+        // after the desktop handshake queues the current position.
+        overlay={};dirty_count=0;cursor_pending=false;lx=320;ly=240;
+        skladacz_obrazu_oznacz_ruch_kursora(lx,ly,lx,ly);
+        presents=0;skladacz_obrazu_obsluz_dirty();
+        assert(presents==1&&overlay.x==lx&&overlay.y==ly);
+        // A repaint away from the pointer must not invalidate its visible
+        // position or require another mouse packet.
+        skladacz_obrazu_oznacz_dirty_rect(0,0,10,10);
+        presents=0;skladacz_obrazu_obsluz_dirty();
+        assert(presents==1&&overlay.x==lx&&overlay.y==ly);
         lx=1279;ly=719;skladacz_obrazu_oznacz_ruch_kursora(0,0,lx,ly);skladacz_obrazu_obsluz_dirty();
         sw=1920;sh=1080;++generation;skladacz_reset_ekranu();
         assert(dirty_count==1&&dirty_rects[0].width==1920&&dirty_rects[0].height==1080);
@@ -246,6 +257,10 @@ int main(){
         assert(presents==0&&hardware_moves==1&&!cursor_pending&&dirty_count>0);
         mock_hardware_cursor=false;
         use_clock=false;
+        lx=150;ly=140;
+        skladacz_obrazu_oznacz_ruch_kursora(120,130,lx,ly);
+        presents=0;skladacz_obrazu_obsluz_dirty();
+        assert(presents>=1&&!cursor_pending&&overlay.x==lx&&overlay.y==ly);
         usun_warstwe(2);usun_warstwe(1);skladacz_reset_ekranu();
     }
     // Several initial element dirty regions produce a single full splash commit.
@@ -258,6 +273,13 @@ int main(){
     assert(presents==1&&recorded_count==1);
     assert(recorded_first.x==0&&recorded_first.y==0&&recorded_first.width==sw&&recorded_first.height==sh);
     mock_first_splash=false;PrezentacjaStartu::stan().pelna=false;
+    // Exact scene regions stay separate for reconstruction, but nearby
+    // regions share one present transfer when the backbuffer gap is cheap.
+    dirty_count=0;cursor_pending=false;overlay={};recorded_count=0;
+    skladacz_obrazu_oznacz_dirty_rect_dokladny(10,10,10,10);
+    skladacz_obrazu_oznacz_dirty_rect_dokladny(25,10,10,10);
+    skladacz_obrazu_obsluz_dirty();
+    assert(recorded_count==1&&recorded_first.x==10&&recorded_first.width==25);
     // A rubber-band outline is four thin strips, not its bounding box.
     dirty_count=0;
     skladacz_obrazu_oznacz_dirty_rect_dokladny(10,10,500,1);
