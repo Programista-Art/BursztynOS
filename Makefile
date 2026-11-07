@@ -184,6 +184,22 @@ RING3_FLAGS := \
 	-fno-rtti \
 	-fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new
 
+# Explicit rollout switch: v1 remains the release default until guest acceptance.
+BUR_FORMAT ?= 1
+ifeq ($(filter $(BUR_FORMAT),1 2),)
+$(error BUR_FORMAT must be 1 or 2)
+endif
+ifeq ($(BUR_FORMAT),2)
+RING3_FLAGS := $(filter-out -mcmodel=large -fno-pic -fno-pie,$(RING3_FLAGS)) -mcmodel=small -fPIE -fvisibility=hidden
+BUR_CONVERT = $(PYTHON) narzedzia/elftoburv2.py
+bur_linker = bur_v2_linker.ld
+BUR_ORPHANS =
+else
+BUR_CONVERT = $(OBJCOPY) -O binary
+bur_linker = $(1)
+BUR_ORPHANS = --orphan-handling=error
+endif
+
 BURSZTYN_DIAG_GEOM_TRACE ?= 0
 ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_GEOM_TRACE) $(GEOM_TRACE)),)
 RING3_FLAGS += -DBURSZTYN_DIAG_GEOM_TRACE=1
@@ -286,6 +302,10 @@ RING3_LDFLAGS := \
 	--undefined=__stack_chk_guard \
 	--undefined=__stack_chk_fail
 
+ifeq ($(BUR_FORMAT),2)
+RING3_LDFLAGS := $(filter-out -no-pie,$(RING3_LDFLAGS)) -shared -Bsymbolic --no-undefined -z text
+endif
+
 # ============================================================================
 # 5. LINKERY APLIKACJI .bur
 # ============================================================================
@@ -325,7 +345,7 @@ MBEDTLS_OBJS := $(MBEDTLS_SRCS:.c=.o)
 # 7. OBIEKTY JADRA
 # ============================================================================
 
-OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o ekran.o ekran_format.o bufory_grafiki.o bochs_vbe.o tapety_blob.o tapety.o btp.o \
+OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o ekran.o ekran_format.o bufory_grafiki.o bochs_vbe.o tapety_blob.o tapety.o btp.o \
 	boot.o \
 	gdt.o \
 	tss.o \
@@ -578,9 +598,9 @@ shell_tmp.o: shell.cpp shell_terminal.h shell_context.h shell_sponsors.h wersja_
 shellblob.o: shell_blob.o
 
 shell_blob.o: shell_tmp.o bursztyn_gui.o programy/shell_bsf_linker.ld
-	$(LD) -T programy/shell_bsf_linker.ld $(RING3_LDFLAGS) \
+	$(LD) -T $(call bur_linker,programy/shell_bsf_linker.ld) $(RING3_LDFLAGS) \
 		shell_tmp.o bursztyn_gui.o -o shell.elf
-	$(OBJCOPY) -O binary shell.elf shell.bin
+	$(BUR_CONVERT) shell.elf shell.bin
 	$(LD) -r -b binary shell.bin -o shell_blob.o
 
 # ============================================================================
@@ -606,17 +626,17 @@ przegladarka_tmp.o: programy/przegladarka.cpp Makefile programy/http_kody.h burs
 	$(CXX) $(RING3_FLAGS) -msse2 -mfpmath=sse -mno-avx -fcoroutines -fcheck-new -DHUSARZ_DEBUG_RESOURCES=$(HUSARZ_RESOURCE_DEBUG) -DHUSARZ_PERF=$(HUSARZ_PERF) -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c $< -o $@
 
 przegladarka_blob.o: przegladarka_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o $(PRZEGLADARKA_LINKER)
-	$(LD) --gc-sections -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) \
+	$(LD) --gc-sections -T $(call bur_linker,$(PRZEGLADARKA_LINKER)) $(RING3_LDFLAGS) \
 		przegladarka_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o -o przegladarka.elf
-	$(OBJCOPY) -O binary przegladarka.elf przegladarka.bin
+	$(BUR_CONVERT) przegladarka.elf przegladarka.bin
 	$(LD) -r -b binary przegladarka.bin -o przegladarka_blob.o
 
 husarz_worker_tmp.o: programy/przegladarka.cpp Makefile $(wildcard programy/husarz/*.h) $(wildcard programy/husarz/*.inc)
 	$(CXX) $(RING3_FLAGS) -msse2 -mfpmath=sse -mno-avx -fcoroutines -fcheck-new -DHUSARZ_DEBUG_RESOURCES=$(HUSARZ_RESOURCE_DEBUG) -DHUSARZ_PERF=$(HUSARZ_PERF) -DHUSARZ_WORKER_ONLY=1 -Wno-unused-function -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c $< -o $@
 
 husarz_worker_blob.o: husarz_worker_tmp.o bursztyn_gui_minimal.o image_ring3.o btp_ring3.o $(PRZEGLADARKA_LINKER)
-	$(LD) --defsym=HUSARZ_WORKER_BUILD=1 --gc-sections -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) husarz_worker_tmp.o bursztyn_gui_minimal.o image_ring3.o btp_ring3.o -o husarz_worker.elf
-	$(OBJCOPY) -O binary husarz_worker.elf husarz_worker.bin
+	$(LD) --defsym=HUSARZ_WORKER_BUILD=1 --gc-sections -T $(call bur_linker,$(PRZEGLADARKA_LINKER)) $(RING3_LDFLAGS) husarz_worker_tmp.o bursztyn_gui_minimal.o image_ring3.o btp_ring3.o -o husarz_worker.elf
+	$(BUR_CONVERT) husarz_worker.elf husarz_worker.bin
 	$(LD) -r -b binary husarz_worker.bin -o husarz_worker_blob.o
 
 # ============================================================================
@@ -627,9 +647,9 @@ notatnik_tmp.o: notatnik.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 notatnik_blob.o: notatnik_tmp.o bursztyn_gui.o $(NOTATNIK_LINKER)
-	$(LD) --gc-sections -T $(NOTATNIK_LINKER) $(RING3_LDFLAGS) \
+	$(LD) --gc-sections -T $(call bur_linker,$(NOTATNIK_LINKER)) $(RING3_LDFLAGS) \
 		notatnik_tmp.o bursztyn_gui.o -o notatnik.elf
-	$(OBJCOPY) -O binary notatnik.elf notatnik.bin
+	$(BUR_CONVERT) notatnik.elf notatnik.bin
 	$(LD) -r -b binary notatnik.bin -o notatnik_blob.o
 
 # ============================================================================
@@ -640,9 +660,9 @@ eksplorator_tmp.o: programy/eksplorator/eksplorator-plikow.cpp desktop_entries.h
 	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -fstack-usage -c $< -o $@
 
 eksplorator_blob.o: eksplorator_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
-	$(LD) -T $(EKSPLORATOR_LINKER) $(RING3_LDFLAGS) \
+	$(LD) -T $(call bur_linker,$(EKSPLORATOR_LINKER)) $(RING3_LDFLAGS) \
 		eksplorator_tmp.o bursztyn_gui.o -o eksplorator.elf
-	$(OBJCOPY) -O binary eksplorator.elf eksplorator.bin
+	$(BUR_CONVERT) eksplorator.elf eksplorator.bin
 	$(LD) -r -b binary eksplorator.bin -o eksplorator_blob.o
 
 # ============================================================================
@@ -653,9 +673,9 @@ kalkulator_tmp.o: kalkulator.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 kalkulator_blob.o: kalkulator_tmp.o bursztyn_gui.o $(KALKULATOR_LINKER)
-	$(LD) --gc-sections -T $(KALKULATOR_LINKER) $(RING3_LDFLAGS) \
+	$(LD) --gc-sections -T $(call bur_linker,$(KALKULATOR_LINKER)) $(RING3_LDFLAGS) \
 		kalkulator_tmp.o bursztyn_gui.o -o kalkulator.elf
-	$(OBJCOPY) -O binary kalkulator.elf kalkulator.bin
+	$(BUR_CONVERT) kalkulator.elf kalkulator.bin
 	$(LD) -r -b binary kalkulator.bin -o kalkulator_blob.o
 
 # Test
@@ -663,9 +683,9 @@ test_tmp.o: programy/test/test.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 test_blob.o: test_tmp.o ekran_format_ring3.o btp_ring3.o bursztyn_gui.o programy/test/test_linker.ld
-	$(LD) --gc-sections -T programy/test/test_linker.ld $(RING3_LDFLAGS) \
+	$(LD) --gc-sections -T $(call bur_linker,programy/test/test_linker.ld) $(RING3_LDFLAGS) \
 		test_tmp.o ekran_format_ring3.o btp_ring3.o bursztyn_gui.o -o test.elf
-	$(OBJCOPY) -O binary test.elf test.bin
+	$(BUR_CONVERT) test.elf test.bin
 	$(LD) -r -b binary test.bin -o test_blob.o
 
 # BursztynUI Demo
@@ -673,9 +693,9 @@ demo_ui_tmp.o: programy/demo_ui/demo_ui.cpp bursztyn_gui.h $(wildcard bursztyn_u
 	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 demo_ui_blob.o: demo_ui_tmp.o bursztyn_gui.o programy/demo_ui/demo_ui_linker.ld
-	$(LD) --gc-sections -T programy/demo_ui/demo_ui_linker.ld $(RING3_LDFLAGS) \
+	$(LD) --gc-sections -T $(call bur_linker,programy/demo_ui/demo_ui_linker.ld) $(RING3_LDFLAGS) \
 		demo_ui_tmp.o bursztyn_gui.o -o demo_ui.elf
-	$(OBJCOPY) -O binary demo_ui.elf demo_ui.bin
+	$(BUR_CONVERT) demo_ui.elf demo_ui.bin
 	$(LD) -r -b binary demo_ui.bin -o demo_ui_blob.o
 
 # BursztynUI Kontrolki 2
@@ -683,9 +703,9 @@ kontrolki2_tmp.o: programy/kontrolki2/kontrolki2.cpp bursztyn_gui.h $(wildcard b
 	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 kontrolki2_blob.o: kontrolki2_tmp.o bursztyn_gui.o programy/demo_ui/demo_ui_linker.ld
-	$(LD) --gc-sections -T programy/demo_ui/demo_ui_linker.ld $(RING3_LDFLAGS) \
+	$(LD) --gc-sections -T $(call bur_linker,programy/demo_ui/demo_ui_linker.ld) $(RING3_LDFLAGS) \
 		kontrolki2_tmp.o bursztyn_gui.o -o kontrolki2.elf
-	$(OBJCOPY) -O binary kontrolki2.elf kontrolki2.bin
+	$(BUR_CONVERT) kontrolki2.elf kontrolki2.bin
 	$(LD) -r -b binary kontrolki2.bin -o kontrolki2_blob.o
 
 # BursztynUI Kontrolki 3. Zaleznosc wildcard wymusza przebudowe aplikacji
@@ -695,9 +715,9 @@ kontrolki3tmp.o: programy/kontrolki3/kontrolki3.cpp bursztyn_gui.h $(wildcard bu
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 kontrolki3blob.o: kontrolki3tmp.o bursztyn_gui.o programy/kontrolki3/kontrolki3_linker.ld
-	$(LD) --gc-sections -T programy/kontrolki3/kontrolki3_linker.ld $(RING3_LDFLAGS) \
+	$(LD) --gc-sections -T $(call bur_linker,programy/kontrolki3/kontrolki3_linker.ld) $(RING3_LDFLAGS) \
 		kontrolki3tmp.o bursztyn_gui.o -o kontrolki3.elf
-	$(OBJCOPY) -O binary kontrolki3.elf kontrolki3.bin
+	$(BUR_CONVERT) kontrolki3.elf kontrolki3.bin
 	$(LD) -r -b binary kontrolki3.bin -o kontrolki3blob.o
 
 # BursztynUI Kontrolki 4 - Showroom nowych komponentow retained-mode.
@@ -705,9 +725,9 @@ kontrolki4tmp.o: programy/kontrolki4/kontrolki4.cpp bursztyn_gui.h $(wildcard bu
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 kontrolki4blob.o: kontrolki4tmp.o bursztyn_gui.o programy/kontrolki4/kontrolki4_linker.ld
-	$(LD) --gc-sections -T programy/kontrolki4/kontrolki4_linker.ld $(RING3_LDFLAGS) \
+	$(LD) --gc-sections -T $(call bur_linker,programy/kontrolki4/kontrolki4_linker.ld) $(RING3_LDFLAGS) \
 		kontrolki4tmp.o bursztyn_gui.o -o kontrolki4.elf
-	$(OBJCOPY) -O binary kontrolki4.elf kontrolki4.bin
+	$(BUR_CONVERT) kontrolki4.elf kontrolki4.bin
 	$(LD) -r -b binary kontrolki4.bin -o kontrolki4blob.o
 
 # Obraz testowy test.bmp	
@@ -730,9 +750,9 @@ snake_tmp.o: gry/snake/snake.cpp bursztyn_gui.h
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
 
 snake_blob.o: snake_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
-	$(LD) -T $(RING3_STD_LINKER) $(RING3_LDFLAGS) \
+	$(LD) -T $(call bur_linker,$(RING3_STD_LINKER)) $(RING3_LDFLAGS) \
 		snake_tmp.o bursztyn_gui.o -o snake.elf
-	$(OBJCOPY) -O binary snake.elf snake.bin
+	$(BUR_CONVERT) snake.elf snake.bin
 	$(LD) -r -b binary snake.bin -o snake_blob.o
 
 # Przegladarka Obrazow
@@ -740,9 +760,9 @@ przegladarka_obrazow_tmp.o: programy/przegladarka-obrazow/przegladarka-obrazow.c
 	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
 
 przegladarka_obrazow_blob.o: przegladarka_obrazow_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
-	$(LD) -T $(RING3_STD_LINKER) $(RING3_LDFLAGS) \
+	$(LD) -T $(call bur_linker,$(RING3_STD_LINKER)) $(RING3_LDFLAGS) \
 		przegladarka_obrazow_tmp.o bursztyn_gui.o -o przegladarka_obrazow.elf
-	$(OBJCOPY) -O binary przegladarka_obrazow.elf przegladarka_obrazow.bin
+	$(BUR_CONVERT) przegladarka_obrazow.elf przegladarka_obrazow.bin
 	$(LD) -r -b binary przegladarka_obrazow.bin -o przegladarka_obrazow_blob.o
 
 # Aktualizacje Systemu
@@ -750,9 +770,9 @@ aktualizacje_tmp.o: programy/aktualizacje/aktualizacje.cpp bursztyn_gui.h bws_ot
 	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
 
 aktualizacje_blob.o: aktualizacje_tmp.o bursztyn_gui.o $(AKTUALIZACJE_LINKER)
-	$(LD) -T $(AKTUALIZACJE_LINKER) $(RING3_LDFLAGS) \
+	$(LD) -T $(call bur_linker,$(AKTUALIZACJE_LINKER)) $(RING3_LDFLAGS) \
 		aktualizacje_tmp.o bursztyn_gui.o -o aktualizacje.elf
-	$(OBJCOPY) -O binary aktualizacje.elf aktualizacje.bin
+	$(BUR_CONVERT) aktualizacje.elf aktualizacje.bin
 	$(LD) -r -b binary aktualizacje.bin -o aktualizacje_blob.o
 
 
@@ -768,9 +788,9 @@ test_dzwieku_tmp.o: programy/test_dzwieku/test_dzwieku.cpp bursztyn_gui.h bws_hd
 	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
 
 test_dzwieku_blob.o: test_dzwieku_tmp.o bursztyn_gui.o programy/test_dzwieku/test_dzwieku_linker.ld narzedzia/test_dzwieku_size.py
-	$(LD) --orphan-handling=error -T programy/test_dzwieku/test_dzwieku_linker.ld $(RING3_LDFLAGS) \
+	$(LD) $(BUR_ORPHANS) -T $(call bur_linker,programy/test_dzwieku/test_dzwieku_linker.ld) $(RING3_LDFLAGS) \
 		test_dzwieku_tmp.o bursztyn_gui.o -o test_dzwieku.elf
-	$(OBJCOPY) -O binary test_dzwieku.elf test_dzwieku.bin
+	$(BUR_CONVERT) test_dzwieku.elf test_dzwieku.bin
 	$(PYTHON) narzedzia/test_dzwieku_size.py test_dzwieku.bin
 	$(LD) -r -b binary test_dzwieku.bin -o test_dzwieku_blob.o
 
@@ -778,8 +798,8 @@ ustawienia_tmp.o: programy/ustawienia/ustawienia.cpp $(wildcard programy/ustawie
 	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
 
 ustawienia_blob.o: ustawienia_tmp.o bursztyn_gui.o $(USTAWIENIA_LINKER)
-	$(LD) --gc-sections -T $(USTAWIENIA_LINKER) $(RING3_LDFLAGS) ustawienia_tmp.o bursztyn_gui.o -o ustawienia.elf
-	$(OBJCOPY) -O binary ustawienia.elf ustawienia.bin
+	$(LD) --gc-sections -T $(call bur_linker,$(USTAWIENIA_LINKER)) $(RING3_LDFLAGS) ustawienia_tmp.o bursztyn_gui.o -o ustawienia.elf
+	$(BUR_CONVERT) ustawienia.elf ustawienia.bin
 	$(LD) -r -b binary ustawienia.bin -o $@
 
 # REPRO (tylko diagnostyka BWS2/BWS46)
@@ -787,9 +807,9 @@ repro_tmp.o: programy/repro/repro.cpp bursztyn_gui.h
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
 
 repro_blob.o: repro_tmp.o bursztyn_gui.o programy/repro/repro_linker.ld
-	$(LD) -T programy/repro/repro_linker.ld $(RING3_LDFLAGS) \
+	$(LD) -T $(call bur_linker,programy/repro/repro_linker.ld) $(RING3_LDFLAGS) \
 		repro_tmp.o bursztyn_gui.o -o repro.elf
-	$(OBJCOPY) -O binary repro.elf repro.bin
+	$(BUR_CONVERT) repro.elf repro.bin
 	$(LD) -r -b binary repro.bin -o repro_blob.o
 
 # ============================================================================
@@ -800,9 +820,9 @@ menedzer_okien_tmp.o: menedzer_okien.cpp desktop_entries.h desktop_layout_settin
 	$(CXX) $(RING3_FLAGS) -DBSF_PROFILE=$(BSF_PROFILE) -Os -fstack-usage -c menedzer_okien.cpp -o $@
 
 menedzer_okien_blob.o: menedzer_okien_tmp.o bursztyn_gui.o ikona_png_ring3.o image_png_ring3.o btp_ring3.o $(MENEDZER_OKIEN_LINKER)
-	$(LD) -T $(MENEDZER_OKIEN_LINKER) $(RING3_LDFLAGS) \
+	$(LD) -T $(call bur_linker,$(MENEDZER_OKIEN_LINKER)) $(RING3_LDFLAGS) \
 		menedzer_okien_tmp.o bursztyn_gui.o ikona_png_ring3.o image_png_ring3.o btp_ring3.o -o menedzer_okien.elf
-	$(OBJCOPY) -O binary menedzer_okien.elf menedzer_okien.bin
+	$(BUR_CONVERT) menedzer_okien.elf menedzer_okien.bin
 	$(LD) -r -b binary menedzer_okien.bin -o menedzer_okien_blob.o
 
 # ============================================================================
@@ -1045,8 +1065,8 @@ run-installer: iso
 instalator_tmp.o: programy/instalator/instalator.cpp instalator_format.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
 instalator_blob.o: instalator_tmp.o bursztyn_gui.o programy/instalator/instalator_linker.ld
-	$(LD) --gc-sections -T programy/instalator/instalator_linker.ld $(RING3_LDFLAGS) instalator_tmp.o bursztyn_gui.o -o instalator.elf
-	$(OBJCOPY) -O binary instalator.elf instalator.bin
+	$(LD) --gc-sections -T $(call bur_linker,programy/instalator/instalator_linker.ld) $(RING3_LDFLAGS) instalator_tmp.o bursztyn_gui.o -o instalator.elf
+	$(BUR_CONVERT) instalator.elf instalator.bin
 	$(LD) -r -b binary instalator.bin -o $@
 
 $(ISO): check-kernel $(KERNEL) $(TAPETY_PAK) $(GRUB_CFG)
@@ -1573,8 +1593,8 @@ tapety_blob.o: tapety_tmp.o btp_ring3.o image_ring3.o bursztyn_gui.o programy/ta
 		echo "[TAPETY BUILD] tapety_tmp.o jest pusty lub uszkodzony - ponowna kompilacja..."; \
 		$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c programy/tapety/tapety.cpp -o tapety_tmp.o; \
 	fi
-	$(LD) --gc-sections -T programy/tapety/tapety_linker.ld $(RING3_LDFLAGS) tapety_tmp.o btp_ring3.o image_ring3.o bursztyn_gui.o -o tapety.elf
-	$(OBJCOPY) -O binary tapety.elf tapety.bin
+	$(LD) --gc-sections -T $(call bur_linker,programy/tapety/tapety_linker.ld) $(RING3_LDFLAGS) tapety_tmp.o btp_ring3.o image_ring3.o bursztyn_gui.o -o tapety.elf
+	$(BUR_CONVERT) tapety.elf tapety.bin
 	$(PYTHON) narzedzia/test_tapety_size.py tapety.bin
 	$(LD) -r -b binary tapety.bin -o $@
 
@@ -1590,8 +1610,8 @@ bochs_vbe.o: sterowniki/grafika/bochs_vbe.cpp sterowniki/grafika/bochs_vbe.h ekr
 ekran_tmp.o: programy/ekran/ekran.cpp programy/ekran/klient.h programy/ekran/ekran_okno.h ekran_format.h ui_skala.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
 ekran_blob.o: ekran_tmp.o bursztyn_gui.o programy/ekran/ekran_linker.ld
-	$(LD) --gc-sections -T programy/ekran/ekran_linker.ld $(RING3_LDFLAGS) ekran_tmp.o bursztyn_gui.o -o ekran.elf
-	$(OBJCOPY) -O binary ekran.elf ekran.bin
+	$(LD) --gc-sections -T $(call bur_linker,programy/ekran/ekran_linker.ld) $(RING3_LDFLAGS) ekran_tmp.o bursztyn_gui.o -o ekran.elf
+	$(BUR_CONVERT) ekran.elf ekran.bin
 	$(LD) -r -b binary ekran.bin -o $@
 $(filter %_tmp.o,$(OBJS)) bursztyn_gui.o: ui_skala.h
 
@@ -2017,8 +2037,8 @@ diagnostyka_tmp.o: programy/diagnostyka/diagnostyka.cpp programy/diagnostyka/mod
 	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
 
 diagnostyka_blob.o: diagnostyka_tmp.o bursztyn_gui.o programy/diagnostyka/diagnostyka_linker.ld
-	$(LD) --orphan-handling=error -T programy/diagnostyka/diagnostyka_linker.ld $(RING3_LDFLAGS) diagnostyka_tmp.o bursztyn_gui.o -o diagnostyka.elf
-	$(OBJCOPY) -O binary diagnostyka.elf diagnostyka.bin
+	$(LD) $(BUR_ORPHANS) -T $(call bur_linker,programy/diagnostyka/diagnostyka_linker.ld) $(RING3_LDFLAGS) diagnostyka_tmp.o bursztyn_gui.o -o diagnostyka.elf
+	$(BUR_CONVERT) diagnostyka.elf diagnostyka.bin
 	$(LD) -r -b binary diagnostyka.bin -o diagnostyka_blob.o
 
 .PHONY: test-diagnostyka-systemu-host
@@ -2069,8 +2089,8 @@ test-user-fault-policy:
 test-user-fault-qemu-build: all
 	@mkdir -p .husarz-test/user-fault
 	$(CC) $(ASM_FLAGS) -c narzedzia/fixtures/husarz/user_fault.S -o .husarz-test/user-fault/probe.o
-	$(LD) --gc-sections -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) .husarz-test/user-fault/probe.o -o .husarz-test/user-fault/probe.elf
-	$(OBJCOPY) -O binary .husarz-test/user-fault/probe.elf .husarz-test/user-fault/przegladarka.bin
+	$(LD) --gc-sections -T $(call bur_linker,$(PRZEGLADARKA_LINKER)) $(RING3_LDFLAGS) .husarz-test/user-fault/probe.o -o .husarz-test/user-fault/probe.elf
+	$(BUR_CONVERT) .husarz-test/user-fault/probe.elf .husarz-test/user-fault/przegladarka.bin
 	cd .husarz-test/user-fault && $(LD) -r -b binary przegladarka.bin -o probe-blob.o
 	$(CXX) $(KERNEL_LDFLAGS) -o .husarz-test/user-fault/kernel.bin $(filter-out przegladarka_blob.o,$(OBJS)) .husarz-test/user-fault/probe-blob.o -lgcc
 
@@ -2078,8 +2098,8 @@ test-user-fault-qemu-build: all
 test-user-page-fault-qemu-build: all
 	@mkdir -p .husarz-test/user-page-fault
 	$(CC) $(ASM_FLAGS) -DHUSARZ_FAULT_PAGE=1 -c narzedzia/fixtures/husarz/user_fault.S -o .husarz-test/user-page-fault/probe.o
-	$(LD) --gc-sections -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) .husarz-test/user-page-fault/probe.o -o .husarz-test/user-page-fault/probe.elf
-	$(OBJCOPY) -O binary .husarz-test/user-page-fault/probe.elf .husarz-test/user-page-fault/przegladarka.bin
+	$(LD) --gc-sections -T $(call bur_linker,$(PRZEGLADARKA_LINKER)) $(RING3_LDFLAGS) .husarz-test/user-page-fault/probe.o -o .husarz-test/user-page-fault/probe.elf
+	$(BUR_CONVERT) .husarz-test/user-page-fault/probe.elf .husarz-test/user-page-fault/przegladarka.bin
 	cd .husarz-test/user-page-fault && $(LD) -r -b binary przegladarka.bin -o probe-blob.o
 	$(CXX) $(KERNEL_LDFLAGS) -o .husarz-test/user-page-fault/kernel.bin $(filter-out przegladarka_blob.o,$(OBJS)) .husarz-test/user-page-fault/probe-blob.o -lgcc
 
@@ -2132,8 +2152,8 @@ test-fpu-host:
 fpu_probe_tmp.o: programy/fpu_probe.cpp fpu.h bursztyn_gui.h
 	$(CXX) $(RING3_FLAGS) -mgeneral-regs-only -I. -Os -c $< -o $@
 fpu_probe_blob.o: fpu_probe_tmp.o bursztyn_gui_minimal.o $(PRZEGLADARKA_LINKER)
-	$(LD) --defsym=HUSARZ_WORKER_BUILD=1 --gc-sections -T $(PRZEGLADARKA_LINKER) $(RING3_LDFLAGS) fpu_probe_tmp.o bursztyn_gui_minimal.o -o fpu_probe.elf
-	$(OBJCOPY) -O binary fpu_probe.elf fpu_probe.bin
+	$(LD) --defsym=HUSARZ_WORKER_BUILD=1 --gc-sections -T $(call bur_linker,$(PRZEGLADARKA_LINKER)) $(RING3_LDFLAGS) fpu_probe_tmp.o bursztyn_gui_minimal.o -o fpu_probe.elf
+	$(BUR_CONVERT) fpu_probe.elf fpu_probe.bin
 	$(LD) -r -b binary fpu_probe.bin -o $@
 
 .PHONY: test-kernel-simd
@@ -2276,3 +2296,17 @@ test-bur-v2-aslr-host:
 
 test-security-hardening: test-stack-protector-host test-bur-v2-aslr-host test-fuzz-smoke
 
+
+.PHONY: bur-format-force bur-v1 bur-v2 test-bur-v2-qemu test-bur-v2-converter
+.bur-format-config: bur-format-force
+	@printf '%s\n' '$(BUR_FORMAT)' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
+aktualizacje_tmp.o bsf_bitmap.o bsf_core.o bsf_runtime.o btp_ring3.o bursztyn_gui_base.o bursztyn_gui_minimal_base.o demo_ui_tmp.o diagnostyka_tmp.o ekran_format_ring3.o ekran_tmp.o eksplorator_tmp.o fpu_probe_tmp.o husarz_worker_tmp.o ikona_png_ring3.o image_png_ring3.o image_ring3.o instalator_tmp.o kalkulator_tmp.o kontrolki2_tmp.o kontrolki3tmp.o kontrolki4tmp.o menedzer_okien_tmp.o notatnik_tmp.o przegladarka_obrazow_tmp.o przegladarka_tmp.o repro_tmp.o ring3_ssp.o shell_tmp.o snake_tmp.o tapety_tmp.o test_dzwieku_tmp.o test_tmp.o ustawienia_tmp.o: .bur-format-config
+bur-v1:
+	$(MAKE) BUR_FORMAT=1 all
+bur-v2:
+	$(MAKE) BUR_FORMAT=2 all
+
+test-bur-v2-qemu: all
+	$(PYTHON) narzedzia/test_bur_v2_qemu.py

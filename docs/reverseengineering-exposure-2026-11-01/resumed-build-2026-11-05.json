@@ -1,0 +1,174 @@
+{
+  "date": "2026-11-05",
+  "git_commit": "5b05925fadeaa88e9db117c780ad497660ea9fc0",
+  "working_tree_dirty": true,
+  "build_command": "make -j4 iso",
+  "compiler": "x86_64-linux-gnu-g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "linker": "GNU ld (GNU Binutils for Ubuntu) 2.42",
+  "variables": {
+    "BURSZTYN_AKT_TRUST_ROOT": "release",
+    "RING3_LDFLAGS": "-nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail",
+    "KERNEL_CXXFLAGS": "-mgeneral-regs-only -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage -DMBEDTLS_USER_CONFIG_FILE=\\\"bursztyn_mbedtls_config.h\\\" -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP",
+    "LD": "x86_64-linux-gnu-ld",
+    "RING3_FLAGS": "-std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP",
+    "CXX": "x86_64-linux-gnu-g++",
+    "CC": "x86_64-linux-gnu-gcc"
+  },
+  "iso_sha256": "cd5d9fe15c6c8c0bc78843a79398145ce7b16c3f30a6d4c14bae5cae421048bf",
+  "iso_size": 40093696,
+  "public_kernel_sha256": "0b5d4ac34db8553a05ecd30634c3729d3137037e20fb779a9d3ecedcc0964016",
+  "public_kernel_size": 10301520,
+  "private_kernel_sha256": "945f6b1589e430af4f179c49c40b2044f8f01c03313c1097f5a89be519510487",
+  "private_kernel_size": 13962920,
+  "private_elf": {
+    "type": 2,
+    "sections": [
+      {
+        "name": "",
+        "type": 0,
+        "flags": 0,
+        "size": 0,
+        "offset": 0,
+        "entries": 0
+      },
+      {
+        "name": ".boot",
+        "type": 1,
+        "flags": 2,
+        "size": 80,
+        "offset": 4096,
+        "entries": 0
+      },
+      {
+        "name": ".text",
+        "type": 1,
+        "flags": 6,
+        "size": 1012240,
+        "offset": 8192,
+        "entries": 0
+      },
+      {
+        "name": ".rodata",
+        "type": 1,
+        "flags": 2,
+        "size": 296272,
+        "offset": 1024000,
+        "entries": 0
+      },
+      {
+        "name": ".data",
+        "type": 1,
+        "flags": 3,
+        "size": 8978016,
+        "offset": 1323008,
+        "entries": 0
+      },
+      {
+        "name": ".bss",
+        "type": 8,
+        "flags": 3,
+        "size": 3047520,
+        "offset": 10301024,
+        "entries": 0
+      },
+      {
+        "name": ".debug_info",
+        "type": 1,
+        "flags": 0,
+        "size": 1380968,
+        "offset": 10301024,
+        "entries": 0
+      },
+      {
+        "name": ".debug_abbrev",
+        "type": 1,
+        "flags": 0,
+        "size": 109923,
+        "offset": 11681992,
+        "entries": 0
+      },
+      {
+        "name": ".debug_loclists",
+        "type": 1,
+        "flags": 0,
+        "size": 869454,
+        "offset": 11791915,
+        "entries": 0
+      },
+      {
+        "name": ".debug_aranges",
+        "type": 1,
+        "flags": 0,
+        "size": 4224,
+        "offset": 12661369,
+        "entries": 0
+      },
+      {
+        "name": ".debug_rnglists",
+        "type": 1,
+        "flags": 0,
+        "size": 114773,
+        "offset": 12665593,
+        "entries": 0
+      },
+      {
+        "name": ".debug_line",
+        "type": 1,
+        "flags": 0,
+        "size": 736624,
+        "offset": 12780366,
+        "entries": 0
+      },
+      {
+        "name": ".debug_str",
+        "type": 1,
+        "flags": 48,
+        "size": 157685,
+        "offset": 13516990,
+        "entries": 157685
+      },
+      {
+        "name": ".debug_line_str",
+        "type": 1,
+        "flags": 48,
+        "size": 3558,
+        "offset": 13674675,
+        "entries": 3558
+      },
+      {
+        "name": ".debug_frame",
+        "type": 1,
+        "flags": 0,
+        "size": 80544,
+        "offset": 13678240,
+        "entries": 0
+      },
+      {
+        "name": ".symtab",
+        "type": 2,
+        "flags": 0,
+        "size": 94488,
+        "offset": 13758784,
+        "entries": 3937
+      },
+      {
+        "name": ".strtab",
+        "type": 3,
+        "flags": 0,
+        "size": 108311,
+        "offset": 13853272,
+        "entries": 0
+      },
+      {
+        "name": ".shstrtab",
+        "type": 3,
+        "flags": 0,
+        "size": 183,
+        "offset": 13961583,
+        "entries": 0
+      }
+    ],
+    "symbols": 3937,
+    "debug_bytes": 3457753
+  }
+}

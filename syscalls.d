@@ -1,6 +1,6 @@
-syscalls.o: syscalls.cpp app_identity.h wyjatek_uzytkownika.h \
- cykl_wylaczania_grafiki.h ekran_powitalny_api.h skladacz_obrazu.h \
- display_geometry.h ui_skala.h pzb.h grafika.h ekran_format.h \
+syscalls.o: syscalls.cpp uklad_procesu.h pzb.h app_identity.h \
+ wyjatek_uzytkownika.h cykl_wylaczania_grafiki.h ekran_powitalny_api.h \
+ skladacz_obrazu.h display_geometry.h ui_skala.h grafika.h ekran_format.h \
  diagnostyka_startu.h move_trace.h virtio_input.h virtio_pci.h pci.h \
  virtqueue.h input_device.h gui_runtime_diag.h stack_protector.h \
  tapety_format.h obrazy/skalowanie.h tapety_nazwy.h zegar-rtc.h siec.h \
@@ -11,6 +11,8 @@ syscalls.o: syscalls.cpp app_identity.h wyjatek_uzytkownika.h \
  instalator.h instalator_format.h acpi.h sterowniki/czas/hpet.h \
  sterowniki/dzwiek/hda_praca_odroczona.h sterowniki/dzwiek/hda.h \
  stos_jadra.h virtio_gpu.h sterowniki/dma.h
+uklad_procesu.h:
+pzb.h:
 app_identity.h:
 wyjatek_uzytkownika.h:
 cykl_wylaczania_grafiki.h:
@@ -18,7 +20,6 @@ ekran_powitalny_api.h:
 skladacz_obrazu.h:
 display_geometry.h:
 ui_skala.h:
-pzb.h:
 grafika.h:
 ekran_format.h:
 diagnostyka_startu.h:

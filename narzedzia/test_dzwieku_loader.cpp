@@ -4,6 +4,8 @@
 #include "../psf_bootstrap.h"
 #include "../scheduler.h"
 #include "../stos_jadra.h"
+#include "../bur_v2.h"
+#include "../uklad_procesu.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -38,7 +40,8 @@ bool skopiuj_string_z_uzytkownika(char* dst, const char* src, size_t cap) {
     std::memcpy(dst, src, std::strlen(src) + 1); return true;
 }
 proces_t tablica_procesow[MAKS_PROCESOW]{};
-struct Page { uint8_t* bytes; uint32_t flags; };
+void fpu_reset_process(int) {}
+struct Page { uint8_t* bytes; uint64_t flags; };
 static int original_root;
 static void* current_root = &original_root;
 static std::map<void*, std::map<uint64_t, Page>> spaces;
@@ -55,6 +58,14 @@ void* FizycznyZakresDoWirtualnego(uint64_t p, size_t n) {
     return reinterpret_cast<void*>(p);
 }
 static bool vmm_zainicjalizowany = true;
+static bool nx_aktywny = true, secure_entropy = true;
+static constexpr uint64_t PTE_WRITE=2,PTE_PRESENT=1,PTE_USER=4,PTE_NX=1ULL<<63;
+extern "C" bool entropia_pobierz_bajty(uint8_t* out,size_t n) {
+    if(!secure_entropy)return false;
+    static uint64_t seed=1;
+    for(size_t i=0;i<n;++i) { seed^=seed<<13;seed^=seed>>7;seed^=seed<<17;out[i]=uint8_t(seed); }
+    return true;
+}
 struct BlokadaVMM { ~BlokadaVMM() {} };
 static uint64_t* pml4_z_cr3() { return static_cast<uint64_t*>(current_root); }
 struct WynikWalkera { bool obecna, user; };
@@ -65,7 +76,7 @@ static WynikWalkera sprawdz_mapowanie(uint64_t* root, uint64_t address) {
     // The real base CR3 has supervisor identity mappings below 4 GiB.
     return {address < (1ULL << 32), false};
 }
-static bool mapuj_strone_wewnetrznie(uint64_t* root, uint64_t address, uint64_t pa, uint32_t flags) {
+static bool mapuj_strone_wewnetrznie(uint64_t* root, uint64_t address, uint64_t pa, uint64_t flags) {
     CHECK(current_root != &original_root);
     CHECK(root == current_root); CHECK(!(address & 4095)); CHECK(frames.count(reinterpret_cast<void*>(pa)));
     if (!map_budget) return false;
@@ -186,7 +197,7 @@ static void mapping() {
     release_process(1); clean();
 }
 int main(int argc, char** argv) {
-    CHECK(argc == 2); std::ifstream file(argv[1], std::ios::binary);
+    CHECK(argc == 2 || argc == 3); std::ifstream file(argv[1], std::ios::binary);
     executable.assign(std::istreambuf_iterator<char>(file), {}); CHECK(executable.size() >= sizeof(header));
     std::memcpy(&header, executable.data(), sizeof(header));
     CHECK(executable.size() < 512 * 1024); CHECK(!bur_blad_naglowka(header, executable.size()));
@@ -294,5 +305,31 @@ int main(int argc, char** argv) {
     char small[32]; bur_formatuj_blad(small, sizeof(small), "x\n'y", corrupt); CHECK(small[31] == 0);
     char full[640]; bur_formatuj_blad(full, sizeof(full), "x\n'y", corrupt);
     CHECK(std::strstr(full, "mapped=overflow")); CHECK(!std::strchr(full, '\n')); clean();
+    if(argc==3) {
+        std::ifstream v2file(argv[2],std::ios::binary);
+        std::vector<uint8_t> v2((std::istreambuf_iterator<char>(v2file)),{});
+        CHECK(bur_v2_waliduj_plik(v2.data(),v2.size(),ASLR_PIE_WINDOW_BASE)==BUR_V2_OK);
+        NaglowekBurV2 n{};std::memcpy(&n,v2.data(),sizeof(n));
+        CHECK(zapisz_plik_od_nowa(bad_path,reinterpret_cast<const char*>(v2.data()),v2.size()));
+        psf_allocations=allocations;
+        for(unsigned i=0;i<4;++i) {
+            CHECK(bws_uruchom_program_z_pliku(bad_path,3,rights,false));
+            const auto layout=uklady_procesow[1];CHECK(layout.wersja==2);
+            const auto& pages=spaces.at(tablica_procesow[1].przestrzen_adresowa);
+            CHECK(!(pages.at(layout.baza_obrazu+n.tekst_rva).flags & (PTE_WRITE|PTE_NX)));
+            CHECK((pages.at(layout.canary).flags & (PTE_WRITE|PTE_NX))==PTE_NX);
+            CHECK((pages.at(layout.baza_obrazu+n.dane_rva).flags & (PTE_WRITE|PTE_NX))==(PTE_WRITE|PTE_NX));
+            CHECK(!pages.count(layout.stos_dol-4096));
+            release_process(1);clean();
+        }
+        secure_entropy=false;CHECK(!bws_uruchom_program_z_pliku(bad_path,3,rights,false));secure_entropy=true;clean();
+        nx_aktywny=false;CHECK(!bws_uruchom_program_z_pliku(bad_path,3,rights,false));nx_aktywny=true;clean();
+        const unsigned count=(n.tekst_rozmiar+n.rodata_rozmiar+n.dane_rozmiar_pamieci)/4096+1+n.domyślne_strony_stosu;
+        for(unsigned budget=0;budget<count;++budget) {
+            frame_budget=budget;CHECK(!bws_uruchom_program_z_pliku(bad_path,3,rights,false));frame_budget=-1;clean();
+            map_budget=budget;CHECK(!bws_uruchom_program_z_pliku(bad_path,3,rights,false));map_budget=-1;clean();
+        }
+        std::printf("BUR v2 production loader rollback: %u frame and mapping failure stages PASS; NX/entropy denial PASS\n",count);
+    }
     std::printf("Test dzwieku loader/package: %u scenarios, %u checks PASS; ASan+UBSan\n", scenarios, checks);
 }

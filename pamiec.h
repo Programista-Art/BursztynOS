@@ -588,3 +588,6 @@ extern "C" void* VmmOdmapujStroneJadra(void* va);
 extern "C" void* VmmOdmapujBuforGrafiki(void* va);
 // Regresja: utworzenie i zniszczenie CR3 nie moze zwolnic wysokich tablic jadra.
 extern "C" bool VmmTestujWspoldzieloneMapowanieJadra(const void* va);
+
+extern "C" bool VmmNxGotowy();
+extern "C" bool VmmMapujStroneBurV2(void*, void*, uint64_t);

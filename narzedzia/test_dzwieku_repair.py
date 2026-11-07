@@ -58,7 +58,7 @@ def extract_filesystem_bws():
 def extract_checked_vmm():
     source = (ROOT / "vmm.cpp").read_text()
     (OUT / "vmm_actual.inc").write_text("\n".join(function(source, name) for name in
-        ("adres_kanoniczny", "adres_user_kanoniczny", "VmmMapujNowaStroneProcesu")))
+        ("adres_kanoniczny", "adres_user_kanoniczny", "VmmMapujNowaStroneProcesu", "VmmNxGotowy", "VmmMapujStroneBurV2")))
 
 
 def run(cmd, env=None):

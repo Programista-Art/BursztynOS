@@ -1,0 +1,47 @@
+{
+  "timestamp": "2026-11-04T23:16:30+01:00",
+  "git_commit": "5b05925",
+  "kernel_elf_sha256": "a5bb3529941f34ce46d8aaf74344a4b1c8977643bfdb02fea279d24667f13a8a",
+  "public_kernel_sha256": "b9554240a3b573d068ad15c037db27eed22de39b8db311a408b0912f261704cb",
+  "iso_sha256": "9f1cb4336f881a19146a63e39231ef058fc1caa10c77ffc56de8c3ebc8903dde",
+  "current_app_format": "BUR v1 (fixed-address static binary with 60-byte NaglowekBur in 4096-byte .naglowek prefix)",
+  "bur_v1_header_size_bytes": 60,
+  "bur_v1_header_discrepancy_resolution": "struct NaglowekBur in loader.h is __attribute__((packed)) with 4-byte magic (\"BUR\\0\") + 7 * uint64_t fields = 60 bytes (enforced by static_assert(sizeof(NaglowekBur) == 60)). Narrative references to 64 bytes in prior prose arose from unpacked 8-byte alignment assumptions (4 + 4 pad + 56 = 64). Actual binary ABI on disk is strictly 60 bytes at offset 0 inside a 4096-byte (.naglowek) page.",
+  "ring3_memory_layout_v1": {
+    "RING3_BASE": "0x0000000001000000",
+    "RING3_DEFAULT_TEXT_VA": "0x0000000001001000",
+    "RING3_DEFAULT_DATA_VA": "0x0000000001005000",
+    "RING3_HEAP_BASE": "0x0000000800000000",
+    "RING3_HEAP_LIMIT": "0x0000000810000000",
+    "RING3_SHM_BASE": "0x0000000900000000",
+    "RING3_STACK_TOP_BASE": "0x00007FFFF0000000",
+    "RING3_STACK_INITIAL_RSP": "0x00007FFFF0040000"
+  },
+  "stack_protector_baseline": {
+    "ring0": "Compiler -fstack-protector-strong -mstack-protector-guard=global; __stack_chk_guard initialized in stack_protector_inicjalizuj() before subsystem init",
+    "ring3": "ring3_ssp.cpp places BUR_SSP_GUARD_PLACEHOLDER (0x4750535352554200ULL) in writable .data.ssp_guard; loader replaces placeholder with per-process random canary during load"
+  },
+  "entropy_baseline": {
+    "sources": ["VirtIO-RNG (virtio_rng_read)", "RDSEED", "RDRAND", "RDTSC", "CMOS RTC"],
+    "functions": ["bursztyn_krypto_wypelnij_losowe (bezpieczenstwo.cpp)", "stack_protector_losowy_kanarek_procesu (stack_protector.cpp)"],
+    "csprng_whitening": "SplitMix64 mixing in stack_protector.cpp; mbedtls_chacha20 available in tree but not yet wired as unified entropia.h CSPRNG"
+  },
+  "bur_v2_status_at_baseline": {
+    "host_prototype_only": ["bur_v2.h", "narzedzia/test_bur_v2_aslr_host.cpp"],
+    "kernel_production_loader": "Not yet wired in loader.cpp or psf.cpp (only BUR v1 \"BUR\\0\" loaded)"
+  },
+  "legacy_bur_v1_fixtures": {
+    "narzedzia/fixtures/bur_v1_legacy/fpu_probe.bin": "4aac94321f14fd5e994a33deb7f444d5e6d17b0483014f247ec33d320593f51e",
+    "narzedzia/fixtures/bur_v1_legacy/kalkulator.bin": "417c687434272f57094988dae4ebf257afa2d0cc31d09b0dfe5ad4100cf2d2d2",
+    "narzedzia/fixtures/bur_v1_legacy/notatnik.bin": "7a94cfaf35d74b54b87451d9b1ba94879f0de08b9d4ca91d738a155fa4316a73",
+    "narzedzia/fixtures/bur_v1_legacy/repro.bin": "3bb82da8181764b3d948951087b9cf07402df3fa30577a1b917c5e42db7730fa",
+    "narzedzia/fixtures/bur_v1_legacy/shell.bin": "b261bf81d3635d418964287ad24777219a74d744fd38680a42b8f6bb91693604",
+    "narzedzia/fixtures/bur_v1_legacy/test.bin": "dfa855f0e3b53c64529fa9d5b75b3ce8696ab6b371f4699a73aa60fd39f79abd",
+    "narzedzia/fixtures/bur_v1_legacy/aktualizacje.bin": "e3e9bd6773abd8f8badd69a2e901bc1dd2fed2b6804981cc52a69df3ef3b1683"
+  },
+  "existing_tests": {
+    "test-bur-loader": "PASS (35 C++ unit tests + 17 aktualizacje.bin binary integrity checks)",
+    "test-bur-v2-aslr-host": "PASS (host prototype only)",
+    "test-stack-protector-host": "PASS (2007 assertions)"
+  }
+}

@@ -1,7 +1,7 @@
-bws_nowoczesne.o: bws_nowoczesne.cpp diagnostyka_systemu.h \
- diagnostyka_systemu_abi.h ekran.h ekran_format.h ui_skala.h \
- app_identity.h pzb.h instalator.h instalator_format.h bws_api.h siec.h \
- bws_nowoczesne.h display_geometry.h bws_ota.h bws_zdarzenia.h \
+bws_nowoczesne.o: bws_nowoczesne.cpp uklad_procesu.h pzb.h \
+ diagnostyka_systemu.h diagnostyka_systemu_abi.h ekran.h ekran_format.h \
+ ui_skala.h app_identity.h instalator.h instalator_format.h bws_api.h \
+ siec.h bws_nowoczesne.h display_geometry.h bws_ota.h bws_zdarzenia.h \
  scheduler.h skladacz_obrazu.h grafika.h pamiec.h heap.h psf.h \
  storage_format.h aktualizacja_rozruch.h block_device.h \
  psf_bootstrap_status.h plik_status.h tapety.h tapety_format.h \
@@ -11,13 +11,14 @@ bws_nowoczesne.o: bws_nowoczesne.cpp diagnostyka_systemu.h \
  sterowniki/dzwiek/hda.h sterowniki/dzwiek/hda_diag.h \
  sterowniki/dzwiek/hda_transport.h sterowniki/dzwiek/../dma.h \
  sterowniki/dzwiek/hda_wewnetrzny.h bsf/config_kernel.inc bsf/config.h
+uklad_procesu.h:
+pzb.h:
 diagnostyka_systemu.h:
 diagnostyka_systemu_abi.h:
 ekran.h:
 ekran_format.h:
 ui_skala.h:
 app_identity.h:
-pzb.h:
 instalator.h:
 instalator_format.h:
 bws_api.h:

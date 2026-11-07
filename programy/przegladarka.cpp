@@ -2447,30 +2447,7 @@ __attribute__((noinline)) bool pobierz_jeden_url(
         return false;
     }
 
-    /*
-     * Bounce buffer musi byc niskim adresem z powodu aktualnego BWS29/30.
-     */
-    const uint64_t adres_bufora =
-        reinterpret_cast<uint64_t>(
-            siec_bufor
-        );
-
-    if (adres_bufora >
-        UINT32_MAX) {
-
-        ustaw_tresc(
-            z,
-            "Blad ABI: bufor HTTP aplikacji nie miesci sie w 32-bitowym adresie BWS29/BWS30.",
-            false
-        );
-
-        ustaw_status(
-            "Blad ABI HTTP."
-        );
-
-        return false;
-    }
-
+    // BWS94/95 preserve full-width pointers for relocatable applications.
     wyzeruj(
         siec_bufor,
         sizeof(

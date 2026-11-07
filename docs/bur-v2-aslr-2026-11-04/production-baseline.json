@@ -1,0 +1,134 @@
+{
+  "artifacts": [
+    {
+      "path": "BursztynOS.iso",
+      "size": 40093696,
+      "sha256": "cd5d9fe15c6c8c0bc78843a79398145ce7b16c3f30a6d4c14bae5cae421048bf"
+    },
+    {
+      "path": "system_operacyjny.bin",
+      "size": 13962920,
+      "sha256": "945f6b1589e430af4f179c49c40b2044f8f01c03313c1097f5a89be519510487"
+    },
+    {
+      "path": "test.bin",
+      "size": 530080,
+      "sha256": "dfa855f0e3b53c64529fa9d5b75b3ce8696ab6b371f4699a73aa60fd39f79abd"
+    },
+    {
+      "path": "ustawienia.bin",
+      "size": 202368,
+      "sha256": "2173a9e4a39078e804ee56d85e8c08fc3c4fd92c0b3abd0b937e4f244c78905b"
+    },
+    {
+      "path": "kontrolki2.bin",
+      "size": 300672,
+      "sha256": "80995f07a27aae45e04bf3d8b46993a3df97971c86796766387c99fb9881bd51"
+    },
+    {
+      "path": "test_dzwieku.bin",
+      "size": 206464,
+      "sha256": "64eebb393553ab0d5816465d08d412e8c55f40f52991fc5353ff1d392b38e17a"
+    },
+    {
+      "path": "kalkulator.bin",
+      "size": 202496,
+      "sha256": "417c687434272f57094988dae4ebf257afa2d0cc31d09b0dfe5ad4100cf2d2d2"
+    },
+    {
+      "path": "tapety.bin",
+      "size": 284320,
+      "sha256": "efe8a31505a894f5bdeeb193c702cfc67bb9c1c4f8077660ec5e540366ef90a0"
+    },
+    {
+      "path": "husarz_worker.bin",
+      "size": 69888,
+      "sha256": "4bd15d6e7ff06694ec8ebe1e94dca51cbeb937a73ad6cb921d7ba5d7196760aa"
+    },
+    {
+      "path": "eksplorator.bin",
+      "size": 284320,
+      "sha256": "76b9da5450e9e21f26dfd3a7ebfe0f61fcbc2b14aea6eaa02462e04e8734b5f7"
+    },
+    {
+      "path": "kontrolki3.bin",
+      "size": 218752,
+      "sha256": "6a45278238410e6dfb0682e282db4edb0e2b8ddd0913b6c572e7b13465f76573"
+    },
+    {
+      "path": "przegladarka.bin",
+      "size": 562880,
+      "sha256": "d974f1e0d22a247484974c4a2f7a699969f1b63a77f1f5a7a8d679d8a9a20b55"
+    },
+    {
+      "path": "ekran.bin",
+      "size": 235136,
+      "sha256": "3430167ededd32b68cfa88f39178eaf16cd060e933ac59353b6160d0a297cb12"
+    },
+    {
+      "path": "aktualizacje.bin",
+      "size": 202368,
+      "sha256": "e3e9bd6773abd8f8badd69a2e901bc1dd2fed2b6804981cc52a69df3ef3b1683"
+    },
+    {
+      "path": "przegladarka_obrazow.bin",
+      "size": 136864,
+      "sha256": "777b38036046c3235e265066a957e28779280d699d466f41a7dc73135958659e"
+    },
+    {
+      "path": "snake.bin",
+      "size": 138752,
+      "sha256": "85654e685f0071d62c5a406bd86dfdcfe811ec86e3621c86c375d447091c7b25"
+    },
+    {
+      "path": "kontrolki4.bin",
+      "size": 333888,
+      "sha256": "f766f5dc122cf2216dd0431a035ac6ee533da761f1ddc240d3f29c0125004dfe"
+    },
+    {
+      "path": "fpu_probe.bin",
+      "size": 69856,
+      "sha256": "4aac94321f14fd5e994a33deb7f444d5e6d17b0483014f247ec33d320593f51e"
+    },
+    {
+      "path": "shell.bin",
+      "size": 153312,
+      "sha256": "b261bf81d3635d418964287ad24777219a74d744fd38680a42b8f6bb91693604"
+    },
+    {
+      "path": "notatnik.bin",
+      "size": 202368,
+      "sha256": "7a94cfaf35d74b54b87451d9b1ba94879f0de08b9d4ca91d738a155fa4316a73"
+    },
+    {
+      "path": "repro.bin",
+      "size": 36880,
+      "sha256": "3bb82da8181764b3d948951087b9cf07402df3fa30577a1b917c5e42db7730fa"
+    },
+    {
+      "path": "diagnostyka.bin",
+      "size": 202368,
+      "sha256": "11c6a3190f11cd8a4b53fc6cf79bfc08c7efd3164ec82ce7cf7ee7cb8a284bc3"
+    },
+    {
+      "path": "instalator.bin",
+      "size": 202368,
+      "sha256": "96c270653c9a4d265eb9857a561768555878d6201b25b284da3bcb265c8bb8e4"
+    },
+    {
+      "path": "menedzer_okien.bin",
+      "size": 373344,
+      "sha256": "3009f0789ec3ec02c473cf8c72cdda0f44d08f2998ba0f3743edc1c8376bb055"
+    },
+    {
+      "path": "demo_ui.bin",
+      "size": 300672,
+      "sha256": "39610c68586c67b10d402cf4666016df58e32819f4c23d934013e3572c2ac4a5"
+    }
+  ],
+  "legacy_header_size": 60,
+  "entry_offset": 4,
+  "production_loader": "BUR v1 only",
+  "entropy": "raw RDRAND/VirtIO provider; no entropia.h or ChaCha CSPRNG interface",
+  "qemu_baseline": "See resumed 2026-11-05 audit: desktop boots; cursor/countdown acceptance failures"
+}

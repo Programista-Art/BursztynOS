@@ -1,3 +1,4 @@
+#include "uklad_procesu.h"
 #include "diagnostyka_systemu.h"
 #include "ekran.h"
 #include "instalator.h"
@@ -314,7 +315,8 @@ uint64_t shm_map(proces_t&, uint64_t handle, uint64_t flags64) {
     for (uint32_t i = 0; i < SHM_MAPOWAN_NA_PROCES; ++i)
         if (!mapy[i].aktywne) { slot = i; break; }
     if (slot == SHM_MAPOWAN_NA_PROCES) return 0;
-    const uint64_t adres = SHM_BAZA + static_cast<uint64_t>(slot) * SHM_SLOT_STRIDE;
+    const auto& layout = uklady_procesow[aktualny_pid];
+    const uint64_t adres = (layout.wersja == 2 ? layout.shm_baza : SHM_BAZA) + static_cast<uint64_t>(slot) * SHM_SLOT_STRIDE;
     uint32_t mapped = 0;
     for (; mapped < o->stron; ++mapped) {
         const uint64_t va = adres + static_cast<uint64_t>(mapped) * STRONA;

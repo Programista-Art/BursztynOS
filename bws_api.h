@@ -113,6 +113,17 @@ enum BwsNumer : uint64_t {
     BWS_DIAGNOSTYKA_SYSTEMU = 91,
     BWS_BSF_CONFIG = 92,
     BWS_GUI_TYTUL_ALFA = 93,
-    BWS_PIERWSZY_WOLNY = 94
+    BWS_HTTP64 = 94,
+    BWS_HTTPS64 = 95,
+    BWS_PIERWSZY_WOLNY = 96
 };
+
+/* Additive ABI for buffers above 4 GiB. Arguments 1..3 retain BWS29/30
+ * meanings; argument 4 points to this snapshot. flags bit 0 requests count+1. */
+struct BwsBuforSieci64 {
+    uint64_t adres;
+    uint32_t pojemnosc;
+    uint32_t flagi;
+};
+static_assert(sizeof(BwsBuforSieci64) == 16, "BWS HTTP64 ABI");
 
