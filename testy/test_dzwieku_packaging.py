@@ -74,7 +74,7 @@ def main() -> int:
     desktop = (ROOT / "jadro/gui/desktop_entries.h").read_text(encoding="utf-8", errors="replace")
     kernel = (ROOT / "jadro/rdzen/kernel.cpp").read_text(encoding="utf-8", errors="replace")
     psf = (ROOT / "jadro/fs/psf_bootstrap.h").read_text(encoding="utf-8", errors="replace")
-    wm = (root / "programy/menedzer_okien/menedzer_okien.cpp").read_text(encoding="utf-8", errors="replace")
+    wm = (ROOT / "programy/menedzer_okien/menedzer_okien.cpp").read_text(encoding="utf-8", errors="replace")
 
     pkg = "/programy/test_dzwieku.cebula"
     exe = "test_dzwieku.bur"

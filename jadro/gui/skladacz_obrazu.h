@@ -380,6 +380,15 @@ void skladacz_obrazu_oznacz_dirty_warstwy(int pid);
 void skladacz_obrazu_zastosuj_pending_geometrii(int pid);
 void skladacz_obrazu_zarejestruj_raport_myszy(bool ruch);
 void skladacz_obrazu_obsluz_dirty();
+
+/*
+ * Realizuje odroczona zmiane geometrii zgloszona przez medium.
+ *
+ * MUSI byc wolane POZA zablokuj_ekran(): transakcja zmiany trybu sama
+ * bierze te blokade, a jest to spinlock bez reentrancji.
+ * Zwraca true, gdy tryb zostal zmieniony.
+ */
+bool skladacz_obrazu_wykonaj_zmiane_geometrii();
 void skladacz_obrazu_ustaw_odswiezanie(uint32_t hz);
 uint64_t skladacz_obrazu_generacja_sceny();
 void skladacz_obrazu_podnies_warstwe(int pid);

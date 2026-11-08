@@ -4,6 +4,7 @@
 #include "psf_bootstrap.h"
 #include "scheduler.h"
 #include "stos_jadra.h"
+#include "podpis_paczki.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -38,7 +39,7 @@ bool skopiuj_string_z_uzytkownika(char* dst, const char* src, size_t cap) {
     std::memcpy(dst, src, std::strlen(src) + 1); return true;
 }
 proces_t tablica_procesow[MAKS_PROCESOW]{};
-struct Page { uint8_t* bytes; uint32_t flags; };
+struct Page { uint8_t* bytes; uint64_t flags; };
 static int original_root;
 static void* current_root = &original_root;
 static std::map<void*, std::map<uint64_t, Page>> spaces;
@@ -57,6 +58,34 @@ void* FizycznyZakresDoWirtualnego(uint64_t p, size_t n) {
 static bool vmm_zainicjalizowany = true;
 struct BlokadaVMM { ~BlokadaVMM() {} };
 static uint64_t* pml4_z_cr3() { return static_cast<uint64_t*>(current_root); }
+/* The loader resets per-process FPU state; the host has no hardware to reset. */
+void fpu_reset_process(int) {}
+/*
+ * Host stand-in for the kernel entropy-based ASLR offset.
+ *
+ * Returns a deterministic but non-zero offset so the test can assert that the
+ * stack base is NOT the compile-time constant. Returning 0 everywhere would
+ * silently disable ASLR coverage.
+ */
+extern "C" unsigned long stack_protector_losowy_offset_stron(
+    unsigned long maks_stron, unsigned long sol) {
+    if (maks_stron <= 1) return 0;
+    return ((sol * 2654435761UL + 12345UL) % (maks_stron - 1)) + 1;
+}
+/*
+ * Host stand-in for package signature verification.
+ *
+ * The loader regression focuses on BUR header validation, W^X mapping and
+ * ASLR layout - not on RSA. Real signature enforcement is covered by
+ * test_bws_abuse_qemu.py. Accepting here keeps the loader test hermetic
+ * (no mbedTLS dependency) without weakening the production path.
+ */
+extern "C" PodpisPaczkiWynik podpis_paczki_weryfikuj(const char*, const uint8_t*, uint64_t) {
+    return PodpisPaczkiWynik::Ok;
+}
+extern "C" const char* podpis_paczki_blad(PodpisPaczkiWynik) {
+    return "ok";
+}
 struct WynikWalkera { bool obecna, user; };
 static WynikWalkera sprawdz_mapowanie(uint64_t* root, uint64_t address) {
     const auto& pages = spaces.at(root);
@@ -65,9 +94,15 @@ static WynikWalkera sprawdz_mapowanie(uint64_t* root, uint64_t address) {
     // The real base CR3 has supervisor identity mappings below 4 GiB.
     return {address < (1ULL << 32), false};
 }
-static bool mapuj_strone_wewnetrznie(uint64_t* root, uint64_t address, uint64_t pa, uint32_t flags) {
-    CHECK(current_root != &original_root);
-    CHECK(root == current_root); CHECK(!(address & 4095)); CHECK(frames.count(reinterpret_cast<void*>(pa)));
+static bool mapuj_strone_wewnetrznie(uint64_t* root, uint64_t address, uint64_t pa, uint64_t flags) {
+    /*
+     * Loader mapuje w NIEAKTYWNEJ przestrzeni nowego procesu (celowo, aby
+     * nie przelaczac CR3). Stub musi to dopuszczac, ale tylko dla PML4,
+     * ktory powstal przez UtworzPrzestrzenAdresowaProcesu().
+     */
+    CHECK(spaces.count(root) == 1);
+    CHECK(root != reinterpret_cast<uint64_t*>(&original_root));
+    CHECK(!(address & 4095)); CHECK(frames.count(reinterpret_cast<void*>(pa)));
     if (!map_budget) return false;
     if (map_budget > 0) --map_budget;
     CHECK(spaces[root].emplace(address, Page{reinterpret_cast<uint8_t*>(pa), flags}).second);
@@ -140,15 +175,29 @@ static void mapping() {
     auto* frame = reinterpret_cast<RejestryStanowe*>(p.kernel_rsp);
     CHECK(frame->adres_powrotu == header.punkt_wejscia);
     CHECK(frame->rejestr_cs == 0x23); CHECK(frame->stary_ss == 0x1b);
-    CHECK(frame->stary_rsp == RING3_STACK_TOP + 4 * 4096 - 8);
+    /*
+     * ASLR stosu: szczyt musi lezec w dozwolonym oknie i byc wyrownany,
+     * a nie rowny stalej kompilacyjnej. Test NIE zaklada konkretnej
+     * wartosci, bo zalezy ona od entropii.
+     */
+    CHECK(frame->stary_rsp > RING3_STACK_TOP - 4096UL * 4096UL);
+    CHECK(frame->stary_rsp <= RING3_STACK_TOP + 4 * 4096 - 8);
+    CHECK(((frame->stary_rsp + 8) & 0xFFF) == 0);
     CHECK((frame->rflags & 0x202) == 0x202);
     auto& pages = spaces.at(reinterpret_cast<void*>(p.cr3));
-    CHECK(pages.size() == (header.tekst_rozmiar + header.dane_rozmiar) / 4096 + 4);
+    /* Stack size is now 64 pages (256 KiB); see LICZBA_STRON_STOSU_USER. */
+    CHECK(pages.size() == (header.tekst_rozmiar + header.dane_rozmiar) / 4096 + 64);
     auto verify = [&](uint64_t va, uint64_t memory, uint64_t off, uint64_t stored, bool writable) {
         for (uint64_t i = 0; i < memory; i += 4096) {
             const auto& page = pages.at(va + i);
             CHECK((page.flags & (FLAGA_USER | FLAGA_OBECNA)) == (FLAGA_USER | FLAGA_OBECNA));
             CHECK(bool(page.flags & FLAGA_ZAPIS) == writable);
+            /*
+             * W^X: dane nigdy nie sa wykonywalne, kod nigdy nie jest
+             * zapisywalny. Regresja, ktora usunie NX ze stron danych,
+             * musi zatrzymac ten test.
+             */
+            CHECK(bool(page.flags & VMM_FLAGA_NX) == writable);
             for (uint64_t j = 0; j < 4096; ++j) {
                 const auto expected = i + j < stored ? executable.at(off + i + j) : 0;
                 CHECK(page.bytes[j] == expected);
@@ -213,18 +262,18 @@ int main(int argc, char** argv) {
     ++scenarios;
     void* root = UtworzPrzestrzenAdresowaProcesu(); UstawPrzestrzenAdresowa(root);
     void* physical = ZaalokujRamke(); const auto va = reinterpret_cast<void*>(RING3_DEFAULT_TEXT_VA);
-    vmm_zainicjalizowany = false; CHECK(!VmmMapujNowaStroneProcesu(va, physical, false));
+    vmm_zainicjalizowany = false; CHECK(!VmmMapujNowaStroneProcesu(va, physical, false, true));
     vmm_zainicjalizowany = true;
-    CHECK(!VmmMapujNowaStroneProcesu(va, nullptr, false));
-    CHECK(!VmmMapujNowaStroneProcesu(reinterpret_cast<void*>(RING3_BASE - 4096), physical, false));
-    CHECK(!VmmMapujNowaStroneProcesu(reinterpret_cast<void*>(RING3_BASE + 1), physical, false));
-    CHECK(!VmmMapujNowaStroneProcesu(va, static_cast<uint8_t*>(physical) + 1, false));
-    CHECK(!VmmMapujNowaStroneProcesu(reinterpret_cast<void*>(0xffff800000000000ULL), physical, false));
-    CHECK(!VmmMapujNowaStroneProcesu(reinterpret_cast<void*>(0x0000800000000000ULL), physical, false));
-    UstawPrzestrzenAdresowa(nullptr); CHECK(!VmmMapujNowaStroneProcesu(va, physical, false));
+    CHECK(!VmmMapujNowaStroneProcesu(va, nullptr, false, true));
+    CHECK(!VmmMapujNowaStroneProcesu(reinterpret_cast<void*>(RING3_BASE - 4096), physical, false, true));
+    CHECK(!VmmMapujNowaStroneProcesu(reinterpret_cast<void*>(RING3_BASE + 1), physical, false, true));
+    CHECK(!VmmMapujNowaStroneProcesu(va, static_cast<uint8_t*>(physical) + 1, false, true));
+    CHECK(!VmmMapujNowaStroneProcesu(reinterpret_cast<void*>(0xffff800000000000ULL), physical, false, true));
+    CHECK(!VmmMapujNowaStroneProcesu(reinterpret_cast<void*>(0x0000800000000000ULL), physical, false, true));
+    UstawPrzestrzenAdresowa(nullptr); CHECK(!VmmMapujNowaStroneProcesu(va, physical, false, true));
     UstawPrzestrzenAdresowa(root);
-    CHECK(VmmMapujNowaStroneProcesu(va, physical, false));
-    CHECK(!VmmMapujNowaStroneProcesu(va, physical, true)); // preserve existing USER mapping
+    CHECK(VmmMapujNowaStroneProcesu(va, physical, false, true));
+    CHECK(!VmmMapujNowaStroneProcesu(va, physical, true, true)); // preserve existing USER mapping
     CHECK(!(spaces.at(root).at(RING3_DEFAULT_TEXT_VA).flags & FLAGA_ZAPIS));
     UstawPrzestrzenAdresowa(&original_root); ZniszczPrzestrzenAdresowaProcesu(root); clean();
     // A valid larger image demonstrates removal of the obsolete 512 KiB

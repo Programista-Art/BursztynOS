@@ -76,3 +76,24 @@ narzedzia/build_iso_until_ok.sh
 narzedzia/probe_td_linker.ld
 narzedzia/probe_test_dzwieku_link.sh
 narzedzia/run_probe_td.sh
+
+# --- Artefakty sesji QEMU / logi prob (2026-11) ---
+.qemu-*.err
+.qemu-*.out
+qemu_*.log
+test_serial_probe.log
+prze*.log
+q7*.log
+qsdl.log
+qgeom.log
+qkeep.log
+qhost.log
+qfix.log
+qres.log
+qvga.log
+qfinal.log
+boot*.log
+
+.build-config/
+.isodir_*/
+

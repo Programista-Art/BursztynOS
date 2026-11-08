@@ -57,8 +57,18 @@ def extract_filesystem_bws():
 
 def extract_checked_vmm():
     source = (ROOT / "jadro/mm/vmm.cpp").read_text()
-    (OUT / "vmm_actual.inc").write_text("\n".join(function(source, name) for name in
-        ("adres_kanoniczny", "adres_user_kanoniczny", "VmmMapujNowaStroneProcesu")))
+    # Host stand-in for the real NX capability probe. The host never runs the
+    # kernel's EFER setup, so the test pins NX to a known state. It must be
+    # declared before the extracted mapping function that consumes it.
+    prologue = (
+        "// Host stand-in for the real NX capability probe.\n"
+        "static bool nx_aktywny = true;\n"
+        "extern \"C\" bool vmm_nx_aktywny() { return nx_aktywny; }\n")
+    (OUT / "vmm_actual.inc").write_text(prologue + "\n".join(
+        function(source, name) for name in
+        ("adres_kanoniczny", "adres_user_kanoniczny",
+         "vmm_mapuj_nowa_strone_procesu_wewnetrznie", "VmmMapujNowaStroneProcesu",
+         "VmmMapujNowaStroneWPrzestrzeniProcesu")))
 
 
 def run(cmd, env=None):
@@ -90,6 +100,7 @@ def main():
              "-I.", "-Ijadro/arch", "-Ijadro/mm", "-Ijadro/fs", "-Ijadro/bws", "-Ijadro/gui",
              "-Ijadro/siec", "-Ijadro/aktualizacja", "-Ijadro/diag", "-Ijadro/rdzen",
              "-Isterowniki/pci", "-Isterowniki/virtio", "-Isterowniki/czas", "-Isterowniki/platforma",
+             "-Isterowniki/magazyn", "-Isterowniki/grafika", "-Isterowniki/siec", "-Isterowniki/wejscie",
              "-Isterowniki"]
     env = dict(os.environ, ASAN_OPTIONS="detect_leaks=1:halt_on_error=1",
                UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1")
