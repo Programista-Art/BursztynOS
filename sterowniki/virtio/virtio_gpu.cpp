@@ -1155,6 +1155,92 @@ bool virtio_gpu_rollback_modeset(VirtioGpuDriver* drv) {
     return virtio_gpu_rollback_modeset_locked(drv);
 }
 
+/*
+ * Sprawdza, czy host zglosil zmiane geometrii okna.
+ *
+ * Zwraca true i wypelnia out_w/out_h, gdy przyszlo VIRTIO_GPU_EVENT_DISPLAY
+ * z nowym rozmiarem roznym od biezacego. Bufor zdarzenia jest od razu
+ * oddawany hostowi, zeby kolejne zmiany tez byly widoczne.
+ *
+ * Funkcja jest lekka i bezpieczna do wywolania z petli kompozytora.
+ */
+bool virtio_gpu_pobierz_zmiane_rozmiaru(VirtioGpuDriver* drv,
+                                        uint32_t* out_w, uint32_t* out_h) {
+    if (!drv || !drv->eventq || !drv->event_vaddr || !out_w || !out_h) return false;
+    if (virtio_gpu_is_quiescing() || drv->has_error) return false;
+    if (!virtqueue_has_used(drv->eventq)) return false;
+
+    void* cookie = nullptr;
+    uint32_t used_len = 0;
+    if (virtqueue_pop_used(drv->eventq, &cookie, &used_len) < 0) return false;
+
+    /*
+     * Struktura odpowiedzi zdarzenia:
+     *   u32 type (VIRTIO_GPU_EVENT_DISPLAY = 1)
+     *   u32 width, u32 height
+     *
+     * Czytamy ostroznie: jesli host zwrocil za malo bajtow, ignorujemy.
+     */
+    const uint8_t* dane = static_cast<const uint8_t*>(drv->event_vaddr);
+    uint32_t typ = 0, w = 0, h = 0;
+    if (used_len >= 12) {
+        gpu_memcpy(&typ, dane + 0, 4);
+        gpu_memcpy(&w, dane + 4, 4);
+        gpu_memcpy(&h, dane + 8, 4);
+    }
+
+    /* Bufor musi wrocic do hosta, inaczej nie zobaczymy kolejnego zdarzenia. */
+    VirtqBuffer buf{};
+    buf.phys_addr = drv->event_paddr;
+    buf.len = 32;
+    buf.is_write = true;
+    if (virtqueue_submit(drv->eventq, &buf, 1, nullptr) >= 0) {
+        (void)virtqueue_kick(drv->eventq, true);
+    }
+
+    constexpr uint32_t VIRTIO_GPU_EVENT_DISPLAY = 1;
+    if (typ != VIRTIO_GPU_EVENT_DISPLAY) return false;
+    if (w < 640 || h < 480 || w > 4096 || h > 4096) return false;
+    if (w == drv->fb_width && h == drv->fb_height) return false;
+
+    drv->event_last_width = w;
+    drv->event_last_height = h;
+    *out_w = w;
+    *out_h = h;
+    return true;
+}
+
+/*
+ * Odczytuje geometrie zadeklarowana przez hosta (GET_DISPLAYINFO).
+ *
+ * To jest zrodlo prawdy o tym, jak duze jest okno QEMU albo jaki tryb ma
+ * monitor VM. Kompozytor odpytuje te funkcje okresowo, zeby przeskalowac
+ * sie do medium, gdy uzytkownik zmieni rozmiar okna w trakcie pracy.
+ *
+ * Zwraca true tylko gdy host zadeklarowal poprawny, wlaczony scanout
+ * o sensownych wymiarach. W przeciwnym razie out_* zostaja nietkniete.
+ */
+bool virtio_gpu_pobierz_geometrie_hosta(VirtioGpuDriver* drv,
+                                        uint32_t* out_w, uint32_t* out_h) {
+    if (!drv || !out_w || !out_h) return false;
+    if (virtio_gpu_is_quiescing() || drv->has_error || !drv->initialized) return false;
+
+    VirtioGpuRespDisplayInfo info{};
+    if (!virtio_gpu_cmd_get_display_info(drv, &info)) return false;
+
+    const uint32_t w = info.pmodes[0].r.width;
+    const uint32_t h = info.pmodes[0].r.height;
+    const uint32_t enabled = info.pmodes[0].enabled;
+
+    if (enabled == 0) return false;
+    if (w < 640 || h < 480 || w > 4096 || h > 4096) return false;
+    if (static_cast<uint64_t>(w) * h * 4ULL > 64ULL * 1024 * 1024) return false;
+
+    *out_w = w;
+    *out_h = h;
+    return true;
+}
+
 bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t height,bool prepare_only) {
     if (!drv || width == 0 || height == 0 || width > 4096 || height > 4096 || virtio_gpu_is_quiescing()) {
         return false;
@@ -1553,6 +1639,38 @@ bool virtio_gpu_init(VirtioPciDevice* dev) {
     if (!drv->cursorq) {
         gpu_klog("[VIRTIO-GPU] cursorq unavailable; using software cursor.");
     }
+
+    /*
+     * Kolejka zdarzen hosta (indeks 2). Host zglasza tu zmiane rozmiaru
+     * okna QEMU / trybu monitora. Bez niej system nie wie, ze medium
+     * zmienilo geometrie i zostaje w trybie z bootu.
+     *
+     * Kolejka jest opcjonalna: jesli host jej nie oferuje, system dziala
+     * w trybie z bootu (zachowanie jak dotad).
+     */
+    drv->eventq = virtqueue_create(dev, 2);
+    if (drv->eventq) {
+        constexpr size_t ROZMIAR_ZDARZENIA = 32;
+        if (gpu_dma_alloc(ROZMIAR_ZDARZENIA, 16, &drv->event_vaddr,
+                          &drv->event_paddr, &drv->event_pages)) {
+            VirtqBuffer buf{};
+            buf.phys_addr = drv->event_paddr;
+            buf.len = static_cast<uint32_t>(ROZMIAR_ZDARZENIA);
+            buf.is_write = true;
+            if (virtqueue_submit(drv->eventq, &buf, 1, nullptr) >= 0) {
+                (void)virtqueue_kick(drv->eventq, true);
+                gpu_klog("[VIRTIO-GPU] eventq gotowa (reakcja na zmiane rozmiaru okna).");
+            } else {
+                gpu_klog("[VIRTIO-GPU] eventq: submit bufora nie powiodl sie.");
+                drv->eventq = nullptr;
+            }
+        } else {
+            gpu_klog("[VIRTIO-GPU] eventq: brak DMA dla bufora zdarzen.");
+            drv->eventq = nullptr;
+        }
+    } else {
+        gpu_klog("[VIRTIO-GPU] eventq niedostepna; tryb stalego rozmiaru.");
+    }
 #endif
 
     /* Konfiguracja MSI-X (jesli urzadzenie obsluguje MSI-X) */
@@ -1663,10 +1781,23 @@ bool virtio_gpu_init(VirtioPciDevice* dev) {
     };
 
     /*
-     * The launcher and GRUB use 1280x720 as the canonical guest profile.
-     * Do not let a stale/host-provided boot framebuffer silently promote the
-     * runtime surface back to 1920x1080; that breaks the input/display
-     * coordinate contract and makes the QEMU viewport unnecessarily large.
+     * WYBOR ROZDZIELCZOSCI: system dostosowuje sie do medium, ktore go wyswietla.
+     *
+     * Kolejnosc zaufania (pierwsze poprawne wygrywa):
+     *
+     *   1. Tryb narzucony przez bootloader (GRUB gfxpayload). To jawna decyzja
+     *      medium startowego - jesli GRUB ustawil 1280x720, system ma byc 720p.
+     *   2. Tryb zadeklarowany przez hosta (GET_DISPLAYINFO). Odpowiada temu,
+     *      jak duze jest okno QEMU / jaki tryb ma monitor VM.
+     *   3. Profil domyslny (BURSZTYN_DEFAULT_DISPLAY_720P).
+     *
+     * Wczesniej krok 1 byl IGNOROWANY przy buildzie 720p: system na sile
+     * ustawial 1280x720 nawet gdy medium oferowalo inny tryb, i odwrotnie
+     * w buildzie domyslnym nadpisywal 720p hosta. Oba warianty lamialy zasade
+     * "skaluj sie do tego, co cie wyswietla".
+     *
+     * Gdy zaden tryb nie jest poprawny, zostaje profil domyslny - system
+     * nigdy nie startuje bez grafiki z powodu dziwnej geometrii medium.
      */
 #if BURSZTYN_DEFAULT_DISPLAY_720P
     uint32_t target_w = 1280;
@@ -1676,15 +1807,36 @@ bool virtio_gpu_init(VirtioPciDevice* dev) {
     uint32_t target_h = 1080;
 #endif
 
-#if !BURSZTYN_DEFAULT_DISPLAY_720P
-    if (is_valid_dim(boot_w, boot_h)) {
-        target_w = boot_w;
-        target_h = boot_h;
-    } else if (dinfo_enabled && is_valid_dim(dinfo_w, dinfo_h)) {
+    const char* zrodlo_trybu = "default";
+
+    /*
+     * Priorytet: HOST > bootloader > domyslny profil.
+     *
+     * GET_DISPLAYINFO mowi, jak duzy jest realny scanout — czyli okno QEMU
+     * albo tryb monitora VM. To jest wlasciwe "medium, ktore nas wyswietla".
+     *
+     * Tryb z bootloadera jest tylko fallbackiem: OVMF i GRUB czesto narzucaja
+     * wlasny tryb tekstowy (np. 1920x1080), ktory nie ma nic wspolnego
+     * z rozmiarem okna. Kierowanie sie nim prowadzilo do wyswietlania
+     * 1920x1080 w oknie 1280x800, czyli do rozmycia po skalowaniu.
+     */
+    if (dinfo_enabled && is_valid_dim(dinfo_w, dinfo_h)) {
         target_w = dinfo_w;
         target_h = dinfo_h;
+        zrodlo_trybu = "host-display";
+    } else if (is_valid_dim(boot_w, boot_h)) {
+        target_w = boot_w;
+        target_h = boot_h;
+        zrodlo_trybu = "bootloader";
     }
-#endif
+
+    {
+        char zmsg[96]{};
+        size_t zp = 0;
+        log_append_str(zmsg, sizeof(zmsg), zp, "[VIRTIO-GPU] mode source=");
+        log_append_str(zmsg, sizeof(zmsg), zp, zrodlo_trybu);
+        gpu_klog(zmsg);
+    }
 
     char smsg[64]{};
     size_t sp = 0;

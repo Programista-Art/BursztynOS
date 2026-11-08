@@ -433,6 +433,7 @@ OBJS := instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o e
 	eksplorator_blob.o \
 	kalkulator_blob.o \
 	loader.o \
+	podpis_paczki.o \
 	czcionka_systemowa.o \
 	kernel.o \
 	shell_blob.o \
@@ -593,6 +594,8 @@ instalator.o: jadro/gui/instalator.cpp
 kernel.o: jadro/rdzen/kernel.cpp
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 loader.o: jadro/fs/loader.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+podpis_paczki.o: jadro/fs/podpis_paczki.cpp jadro/fs/podpis_paczki.h jadro/aktualizacja/aktualizacja_klucz.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 missing_backend.o: jadro/gui/missing_backend.cpp
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
@@ -1084,7 +1087,7 @@ $(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notic
 		'menuentry "Bursztyn OS" {' \
 		'    insmod all_video' \
 		'    set gfxmode=1280x720x32' \
-		'    set gfxpayload=1280x720x32' \
+		'    set gfxpayload=keep' \
 		'    multiboot2 /boot/system_operacyjny.bin bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
@@ -1093,7 +1096,7 @@ $(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notic
 		'menuentry "Bursztyn OS - testy automatyczne" {' \
 		'    insmod all_video' \
 		'    set gfxmode=1280x720x32' \
-		'    set gfxpayload=1280x720x32' \
+		'    set gfxpayload=keep' \
 		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
@@ -1101,7 +1104,7 @@ $(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notic
 		'menuentry "Bursztyn OS - testy automatyczne (niszczacy test dysku)" {' \
 		'    insmod all_video' \
 		'    set gfxmode=1280x720x32' \
-		'    set gfxpayload=1280x720x32' \
+		'    set gfxpayload=keep' \
 		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.test.diskdestructive=1 bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
@@ -1109,7 +1112,7 @@ $(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notic
 		'menuentry "Bursztyn OS Instalator" {' \
 		'    insmod all_video' \
 		'    set gfxmode=1280x720x32' \
-		'    set gfxpayload=1280x720x32' \
+		'    set gfxpayload=keep' \
 		'    echo "Ladowanie jadra..."' \
 		'    multiboot2 /boot/system_operacyjny.bin bursztyn.install=1 bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    echo "Ladowanie zasobow instalatora..."' \
@@ -1293,7 +1296,7 @@ $(CI_TEST_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
 		'menuentry "Bursztyn OS - testy automatyczne" {' \
 		'    insmod all_video' \
 		'    set gfxmode=1280x720x32' \
-		'    set gfxpayload=1280x720x32' \
+		'    set gfxpayload=keep' \
 		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
@@ -1313,7 +1316,7 @@ $(CI_BLK_DESTRUCTIVE_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
 		'menuentry "Bursztyn OS - testy automatyczne (niszczacy test dysku)" {' \
 		'    insmod all_video' \
 		'    set gfxmode=1280x720x32' \
-		'    set gfxpayload=1280x720x32' \
+		'    set gfxpayload=keep' \
 		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.test.diskdestructive=1 bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
@@ -1333,7 +1336,7 @@ $(CI_DESTRUCTIVE_ONLY_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
 		'menuentry "Bursztyn OS - flaga niszczaca bez trybu automatycznego" {' \
 		'    insmod all_video' \
 		'    set gfxmode=1280x720x32' \
-		'    set gfxpayload=1280x720x32' \
+		'    set gfxpayload=keep' \
 		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test.diskdestructive=1 bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
@@ -1366,7 +1369,7 @@ $(GRUB8K_CFG): $(KERNEL) check-test8k $(TAPETY_PAK)
 		'menuentry "Bursztyn OS (8K Test)" {' \
 		'    insmod all_video' \
 		'    set gfxmode=1280x720x32' \
-		'    set gfxpayload=1280x720x32' \
+		'    set gfxpayload=keep' \
 		'    multiboot2 /boot/system_operacyjny.bin bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    module2 /boot/test8k.bmp test8k.bmp' \

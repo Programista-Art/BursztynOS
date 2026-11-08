@@ -143,6 +143,12 @@ uint32_t zastosuj(const TrybEkranu&t,uint32_t s,int owner,bool persist=true,
 }
 }
 uint32_t ekran_skala(){return skala;}
+
+uint32_t ekran_zastosuj_tryb(const TrybEkranu& tryb, uint32_t nowa_skala,
+                             int owner, bool persist, bool wymagaj_potwierdzenia) {
+    return zastosuj(tryb, nowa_skala, owner, persist, wymagaj_potwierdzenia);
+}
+
 void ekran_inicjalizuj(){
     boot_tryb=grafika_tryb_ekranu();log_tryb("[EKRAN INIT] boot=",boot_tryb);
     klog_serial(grafika_mozliwosci_ekranu().backend==EKRAN_BOCHS?

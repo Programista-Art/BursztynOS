@@ -351,6 +351,21 @@ struct VirtioGpuDriver {
     /* Blokada spinlock */
     uint32_t lock;
 
+    /*
+     * Kolejka zdarzen hosta (VIRTIO_GPU_QUEUE_EVENTS = 2).
+     *
+     * Host wysyla tu VIRTIO_GPU_EVENT_DISPLAY, gdy zmieni sie rozmiar okna
+     * QEMU albo tryb monitora VM. Bez tej kolejki system nie wie, ze medium
+     * zmienilo geometrie, i wyswietla obraz w stalym trybie.
+     */
+    VirtQueue* eventq;
+    void*    event_vaddr;
+    uint64_t event_paddr;
+    size_t   event_pages;
+    volatile uint32_t event_pending;
+    uint32_t event_last_width;
+    uint32_t event_last_height;
+
     /* Liczniki diagnostyczne */
     uint64_t cmd_count;
     uint64_t transfer_count;
@@ -403,6 +418,23 @@ bool virtio_gpu_transfer_and_flush(VirtioGpuDriver* drv, uint32_t x, uint32_t y,
 // A display transaction may retain the active scanout until its prepared full
 // frame has transferred. Existing direct driver callers keep their policy.
 bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t height,bool prepare_only=false);
+/*
+ * Sprawdza zdarzenie zmiany geometrii zgloszone przez hosta.
+ *
+ * Zwraca true i wypelnia out_w/out_h, gdy okno QEMU (albo tryb monitora VM)
+ * zmienilo rozmiar. System uzywa tego, aby przeskalowac sie do medium,
+ * ktore go aktualnie wyswietla - zamiast pozostawac w trybie z bootu.
+ */
+bool virtio_gpu_pobierz_zmiane_rozmiaru(VirtioGpuDriver* drv,
+                                        uint32_t* out_w, uint32_t* out_h);
+/*
+ * Odczytuje geometrie zadeklarowana przez hosta (GET_DISPLAYINFO).
+ *
+ * Kompozytor odpytuje to okresowo (nie co klatke), aby przeskalowac sie
+ * do okna QEMU / monitora VM, gdy zmieni sie w trakcie pracy.
+ */
+bool virtio_gpu_pobierz_geometrie_hosta(VirtioGpuDriver* drv,
+                                        uint32_t* out_w, uint32_t* out_h);
 void virtio_gpu_free_stale_resource(VirtioGpuDriver* drv);
 bool virtio_gpu_rollback_modeset(VirtioGpuDriver* drv);
 bool virtio_gpu_test_runtime_modeset(VirtioGpuDriver* drv);
