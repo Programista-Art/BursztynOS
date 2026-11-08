@@ -13,8 +13,9 @@
  */
 
 #include "loader.h"
-#include "pamiec.h"
+#include "podpis_paczki.h"
 #include "pzb.h"
+#include "pamiec.h"
 #include "test_dzwieku_trace.h"
 
 #include <stdint.h>
@@ -151,16 +152,124 @@ constexpr uint64_t BAZA_STERTY_USER = RING3_HEAP_BASE;
 
 /*
  * Stos Ring 3 znajduje sie wysoko w dolnej, kanonicznej polowie adresow.
- * Cztery strony = 16 KiB. Strona bezposrednio ponizej pozostaje
- * niezmapowana i naturalnie pelni role guard page.
+ * Strona bezposrednio ponizej pozostaje niezmapowana i naturalnie pelni
+ * role guard page.
+ *
+ * 256 KiB zamiast poprzednich 16 KiB: realny program z buforami na stosie
+ * (parser obrazu, silnik HTML, przyszle biblioteki POSIX) potrzebuje
+ * zapasu. Nadal miesci sie w oknie ASLR i nie koliduje z SHM.
  */
 constexpr uint64_t BAZA_STOSU_USER = RING3_STACK_TOP;
-constexpr uint64_t LICZBA_STRON_STOSU_USER = 4ULL;
+constexpr uint64_t LICZBA_STRON_STOSU_USER = 64ULL;
 constexpr uint64_t ROZMIAR_STOSU_USER =
     LICZBA_STRON_STOSU_USER * ROZMIAR_STRONY;
-constexpr uint64_t LICZBA_STRON_STOSU_TEST = 16ULL;
+constexpr uint64_t LICZBA_STRON_STOSU_TEST = 64ULL;
 constexpr uint64_t MAKS_ROZMIAR_STOSU_USER =
     LICZBA_STRON_STOSU_TEST * ROZMIAR_STRONY;
+
+/*
+ * Gorna granica bazy stosu. Szczyt stosu = baza + ROZMIAR_STOSU_USER,
+ * wiec baza nie moze przekroczyc RING3_STACK_TOP - rozmiar. Bez tego
+ * stos 256 KiB wystawalby ponad zarezerwowane okno RING3.
+ */
+constexpr uint64_t GORNA_BAZA_STOSU_USER =
+    RING3_STACK_TOP - ROZMIAR_STOSU_USER;
+
+/*
+ * ASLR stosu Ring 3.
+ *
+ * Baza stosu jest przesuwana w dol o losowa liczbe stron w oknie
+ * [GORNA_BAZA_STOSU_USER - ASLR_STOS_ROZMIAR, GORNA_BAZA_STOSU_USER].
+ * Okno ma 16 MiB (12 bitow entropii), a segmenty .bur leza ponizej 1 GiB,
+ * wiec losowanie nigdy nie moze wejsc w obszar tekstu ani danych.
+ *
+ * Efekt: adres powrotu i kanarek stosu nie sa stale miedzy uruchomieniami,
+ * co utrudnia wykorzystanie klasycznych przepelnien bufora na stosie.
+ */
+constexpr uint64_t ASLR_STOS_STRON = 4096ULL;
+constexpr uint64_t ASLR_STOS_ROZMIAR =
+    ASLR_STOS_STRON * ROZMIAR_STRONY;
+constexpr uint64_t MIN_BAZA_STOSU_USER =
+    GORNA_BAZA_STOSU_USER - ASLR_STOS_ROZMIAR;
+
+static_assert(MIN_BAZA_STOSU_USER > 0x0000000100000000ULL,
+              "Okno ASLR stosu musi pozostac daleko powyzej segmentow .bur");
+
+/*
+ * Dolna granica calego mozliwego okna stosu. Uzywana przez walidacje
+ * naglowka, ktora nie zna jeszcze PID i nie wie, gdzie wypadnie losowanie.
+ * Sprawdzanie calego okna jest ostrzejsze niz sprawdzanie jednej pozycji.
+ */
+constexpr uint64_t STOS_OKNO_DOL =
+    MIN_BAZA_STOSU_USER - ROZMIAR_STRONY;
+
+static bool takie_same_sciezki(const char* a, const char* b);
+
+/*
+ * Czy sciezka lezy w katalogu instalowanym z zaufanego obrazu systemu.
+ *
+ * Paczki z tych katalogow pochodza z ISO podpisanego przez release i sa
+ * instalowane przez jadro podczas bootu, wiec ich integralnosc wynika
+ * z integralnosci medium. Wszystko inne wymaga wlasnego podpisu.
+ */
+bool zakres_sciezki_systemowej(const char* sciezka) {
+    if (!sciezka) {
+        return false;
+    }
+
+    static const char* const KATALOGI[] = {
+        "/programy/",
+        "/gry/"
+    };
+
+    for (const char* katalog : KATALOGI) {
+        size_t i = 0;
+        while (katalog[i] != '\0' && sciezka[i] == katalog[i]) {
+            ++i;
+        }
+        if (katalog[i] == '\0') {
+            return true;
+        }
+    }
+
+    /*
+     * Pliki instalowane bezposrednio w korzeniu PSF przez bootstrap jadra
+     * (Menedzer Okien, powloka) sa rowniez czescia zaufanego obrazu.
+     */
+    static const char* const PLIKI_SYSTEMOWE[] = {
+        "/menedzer_okien.bur",
+        "/shell.bur"
+    };
+
+    for (const char* plik : PLIKI_SYSTEMOWE) {
+        if (takie_same_sciezki(sciezka, plik)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/*
+ * Globalny przelacznik trybu scislego. Ustawiany opcja startowa
+ * `bursztyn.podpis=wymagaj`, uzywany przez testy regresyjne i dystrybucje
+ * wymagajace podpisu od kazdej aplikacji bez wyjatkow.
+ */
+bool g_podpis_wymagany_dla_wszystkiego = false;
+
+bool loader_wymaga_podpisu_wszystkiego() {
+    return g_podpis_wymagany_dla_wszystkiego;
+}
+
+extern "C" void loader_ustaw_podpis_wymagany(bool stan) {
+    g_podpis_wymagany_dla_wszystkiego = stan;
+}
+
+/*
+ * Rzeczywista baza stosu per PID, ustalona przy tworzeniu procesu.
+ * 0 oznacza brak rezerwacji. Indeksowane PID, bez zmian w ABI proces_t.
+ */
+uint64_t g_baza_stosu_user[PZB_MAKS_PROCESOW] = {};
 
 /*
  * Ograniczenia rozmiarow segmentow pochodza z loader.h:
@@ -455,6 +564,9 @@ static void zwolnij_rezerwacje_procesu(
     wyzeruj_znane_pola_procesu(proces);
     argument_startowy_procesu[pid][0] = '\0';
 
+    /* PID-y sa recyklingowane, wiec losowa baza stosu nie moze przetrwac. */
+    g_baza_stosu_user[pid] = 0;
+
     __atomic_store_n(
         &proces.stan,
         PROCES_PUSTY,
@@ -617,8 +729,13 @@ extern "C" const char* bur_blad_naglowka(
 
     /*
      * 3. Sprawdzenie braku kolizji ze stosem Ring 3 oraz strona straznika.
+     *
+     * Sprawdzamy CALE okno ASLR stosu, nie tylko jedna pozycje. Losowanie
+     * moze umiescic baze gdziekolwiek w oknie, wiec segment nie moze
+     * wchodzic w zaden jego fragment. To jest ostrzejsze niz poprzednia
+     * walidacja punktowa.
      */
-    const uint64_t stos_obszar_start = BAZA_STOSU_USER - ROZMIAR_STRONY;
+    const uint64_t stos_obszar_start = STOS_OKNO_DOL;
     uint64_t stos_obszar_koniec = 0;
     if (!dodaj_bez_przepelnienia(
             BAZA_STOSU_USER,
@@ -748,6 +865,12 @@ static bool mapuj_segment_z_pliku(
     if (!dane_pliku && rozmiar_danych_pliku != 0) return false;
     if (rozmiar_danych_pliku > rozmiar_w_pamieci) return false;
 
+    /*
+     * Segment bez prawa zapisu jest kodem i pozostaje wykonywalny.
+     * Segment z prawem zapisu to dane (BSS/.data) - dostaje NX.
+     */
+    const bool wykonuj = (flagi & FLAGA_ZAPIS) == 0;
+
     uint64_t przesuniecie = 0;
 
     while (przesuniecie < rozmiar_w_pamieci) {
@@ -796,7 +919,8 @@ static bool mapuj_segment_z_pliku(
             reinterpret_cast<void*>(
                 adres_wirtualny + przesuniecie),
             ramka,
-            (flagi & FLAGA_ZAPIS) != 0)) {
+            (flagi & FLAGA_ZAPIS) != 0,
+            wykonuj)) {
             ZwolnijRamke(ramka);
             return false;
         }
@@ -810,7 +934,8 @@ static bool mapuj_segment_z_pliku(
 static bool mapuj_stos_uzytkownika(
     void* pml4,
     uint32_t flagi,
-    uint64_t liczba_stron
+    uint64_t liczba_stron,
+    uint64_t baza_stosu
 ) {
     for (uint64_t i = 0;
          i < liczba_stron;
@@ -838,10 +963,11 @@ static bool mapuj_stos_uzytkownika(
         if (!VmmMapujNowaStroneWPrzestrzeniProcesu(
             pml4,
             reinterpret_cast<void*>(
-                BAZA_STOSU_USER +
+                baza_stosu +
                 i * ROZMIAR_STRONY),
             ramka,
-            (flagi & FLAGA_ZAPIS) != 0)) {
+            (flagi & FLAGA_ZAPIS) != 0,
+            false)) {
             ZwolnijRamke(ramka);
             return false;
         }
@@ -976,6 +1102,30 @@ static bool uruchom_program_z_pliku_impl(
         return false;
     }
 
+    /*
+     * ASLR stosu: losujemy przesuniecie w dol od RING3_STACK_TOP.
+     * Sol zawiera pid, wiec dwa procesy nigdy nie dostana identycznego
+     * ukladu nawet przy slabszej entropii sprzetowej.
+     */
+    const uint64_t losowy_offset_stron =
+        stack_protector_losowy_offset_stron(
+            ASLR_STOS_STRON,
+            static_cast<uint64_t>(pid) * 0x9E3779B97F4A7C15ULL
+        );
+
+    const uint64_t baza_stosu =
+        GORNA_BAZA_STOSU_USER -
+        losowy_offset_stron * ROZMIAR_STRONY;
+
+    if (baza_stosu < MIN_BAZA_STOSU_USER ||
+        baza_stosu > GORNA_BAZA_STOSU_USER) {
+        zwolnij_rezerwacje_procesu(pid);
+        proba.obraz.blad = "stack-aslr-out-of-window";
+        return false;
+    }
+
+    g_baza_stosu_user[pid] = baza_stosu;
+
 #if BURSZTYN_DEBUG_LOADER_PERF
     const uint64_t loader_perf_image_start = loader_perf_now();
 #endif
@@ -990,6 +1140,36 @@ static bool uruchom_program_z_pliku_impl(
     const uint64_t rozmiar_pliku = proba.obraz.rozmiar;
     const uint8_t* bufor_pliku = proba.obraz.dane;
     const NaglowekBur& naglowek = proba.obraz.naglowek;
+
+    /*
+     * Integralnosc binarki.
+     *
+     * Podpis jest weryfikowany PRZED alokacja stosu i mapowaniem stron,
+     * wiec niepodpisana lub zmieniona paczka nie dostaje zadnych zasobow.
+     *
+     * Polityka:
+     *   - paczki systemowe z /programy i /gry (instalowane z obrazu ISO
+     *     podczas bootu) sa zaufane przez pochodzenie medium,
+     *   - kazda inna sciezka wymaga poprawnego podpisu.
+     * Tryb "wymagaj podpisu od wszystkiego" da sie wlaczyc opcja startowa
+     * bursztyn.podpis=wymagaj (uzywane przy testach regresyjnych).
+     */
+    {
+        const bool sciezka_systemowa =
+            zakres_sciezki_systemowej(bezpieczna_sciezka);
+
+        if (!sciezka_systemowa || loader_wymaga_podpisu_wszystkiego()) {
+            const PodpisPaczkiWynik podpis = podpis_paczki_weryfikuj(
+                bezpieczna_sciezka, bufor_pliku, rozmiar_pliku);
+
+            if (podpis != PodpisPaczkiWynik::Ok) {
+                proba.obraz.blad = podpis_paczki_blad(podpis);
+                zwolnij_rezerwacje_procesu(pid);
+                return false;
+            }
+        }
+    }
+
 #if BURSZTYNDIAGTESTDZWIEKU
     const bool trace_app = takie_same_sciezki(bezpieczna_sciezka,
         "/programy/test_dzwieku.cebula/test_dzwieku.bur");
@@ -1128,7 +1308,8 @@ static bool uruchom_program_z_pliku_impl(
         !mapuj_stos_uzytkownika(
             pml4_procesu,
             flagi_dane,
-            liczba_stron_stosu)) {
+            liczba_stron_stosu,
+            baza_stosu)) {
         proba.obraz.blad = "mapuj_stos_uzytkownika-failed";
         mapowanie_ok = false;
     }
@@ -1152,7 +1333,7 @@ static bool uruchom_program_z_pliku_impl(
      * dlatego zachowujemy takie ustawienie.
      */
     const uint64_t wirtualny_szczyt_stosu =
-        BAZA_STOSU_USER +
+        baza_stosu +
         rozmiar_stosu -
         8ULL;
 

@@ -108,6 +108,8 @@ static void wykonaj_selftest_sieci() {
 extern "C" void InicjalizujGDT();
 extern "C" void InicjalizujIDT();
 extern "C" void inicjalizuj_apic();
+/* Tryb scisly podpisu paczek (patrz jadro/fs/podpis_paczki.cpp). */
+extern "C" void loader_ustaw_podpis_wymagany(bool stan);
 extern "C" bool InicjalizujMyszPS2();
 extern "C" bool ps2_inicjalizuj_klawiature();
 extern "C" InputDevice* ps2_klawiatura_pobierz_urzadzenie();
@@ -2501,6 +2503,17 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
         wypisz_log("[NORMAL BOOT] VirtIO self-tests skipped.");
     }
 
+    /*
+     * Tryb scisly podpisu paczek. Domyslnie paczki systemowe z /programy
+     * i /gry sa zaufane przez pochodzenie obrazu; ta opcja wymaga
+     * poprawnego podpisu od KAZDEJ aplikacji, takze systemowej.
+     */
+    if (zadano_automatyczne_testy(
+            g_multiboot_info_ptr, "bursztyn.podpis=wymagaj")) {
+        loader_ustaw_podpis_wymagany(true);
+        wypisz_log("[PODPIS] Tryb scisly: kazda aplikacja wymaga podpisu.");
+    }
+
     virtio_pci_diag_trace_type(VIRTIO_ID_RNG, "driver probe begin");
     if (virtio_rng_probe_and_init()) {
         VirtioRngDriver* rng_drv = virtio_rng_get_driver();
@@ -2665,6 +2678,33 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
 
     aktualizacja_sprawdz_rozruch(g_multiboot_info_ptr);
     utworz_drabine_katalogow();
+    /*
+     * Rozszerzenia drzewa katalogow z pliku konfiguracyjnego.
+     *
+     * Baza jest kompilowana (bootstrap dziala przed montazem PSF), ale po
+     * pierwszym montazu mozna dodac katalogi bez rekompilacji jadra.
+     * Format: jedna sciezka na linie, '#' komentarz. Wpisy niepoprawne
+     * (wzgledne, z "..", za dlugie) sa pomijane bez blokowania bootu.
+     */
+    {
+        static constexpr const char* KATALOGI_CFG =
+            "/system/konfig/katalogi.cfg";
+        const uint32_t rozmiar_cfg = rozmiar_pliku(KATALOGI_CFG);
+        if (rozmiar_cfg > 0 && rozmiar_cfg <= 4096) {
+            static char bufor_cfg[4096];
+            for (uint32_t i = 0; i < 4096; ++i) bufor_cfg[i] = '\0';
+            if (czytaj_z_pliku(KATALOGI_CFG, bufor_cfg, rozmiar_cfg)) {
+                uint32_t przetworzonych = 0;
+                const char* linia = bufor_cfg;
+                while (*linia && przetworzonych < 128) {
+                    (void)psf_utworz_katalog_z_linii(linia);
+                    ++przetworzonych;
+                    while (*linia && *linia != '\n') ++linia;
+                    if (*linia == '\n') ++linia;
+                }
+            }
+        }
+    }
     aktualizacja_przygotuj_system_plikow();
 
 #if BURSZTYN_TESTY_PSF
@@ -2819,6 +2859,12 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
         zablokuj_ekran();
         skladacz_obrazu_obsluz_dirty();
         odblokuj_ekran();
+        /*
+         * Odroczona zmiana geometrii. Musi byc POZA blokada ekranu, bo
+         * transakcja zmiany trybu sama ja bierze (spinlock bez reentrancji).
+         * Petla kompozytora tylko zglasza zadanie; my je tu realizujemy.
+         */
+        (void)skladacz_obrazu_wykonaj_zmiane_geometrii();
         /*
          * STI przed HLT chroni idle przed przypadkowym pozostawieniem IF=0
          * przez kod, ktory w przyszlosci moze wejsc do tej petli.

@@ -125,3 +125,60 @@ inline void psf_start_log(size_t krok,const char* path,bool live,const PsfStanSt
     (void)krok;(void)path;(void)live;(void)s;
 #endif
 }
+
+/*
+ * Rozszerzalna lista katalogow startowych.
+ *
+ * Baza w KATALOGI_SYSTEMOWE jest kompilowana, bo bootstrap dziala PRZED
+ * zamontowaniem PSF - nie ma skad wczytac konfiguracji. Aby jednak dodanie
+ * katalogu nie wymagalo rekompilacji jadra, po bazie odczytywany jest
+ * opcjonalny plik /system/konfig/katalogi.cfg (jedna sciezka na linie,
+ * '#' komentarz). Wpisy z pliku sa walidowane tak samo jak wbudowane.
+ *
+ * Plik jest czytany przez warstwe PSF w kernel.cpp po pierwszym montazu
+ * i przekazywany tu jako tablica linii.
+ */
+inline bool psf_sciezka_startowa_poprawna(const char* s) {
+    if (!s || s[0] != '/') return false;
+    size_t dlugosc = 0;
+    while (s[dlugosc]) {
+        /* Tylko bezpieczne znaki: brak '..', brak podwojnych ukosnikow. */
+        if (s[dlugosc] == '\\') return false;
+        if (s[dlugosc] == '/' && s[dlugosc + 1] == '/') return false;
+        if (s[dlugosc] == '.' && s[dlugosc + 1] == '.') return false;
+        if (dlugosc >= 200) return false;
+        ++dlugosc;
+    }
+    return dlugosc >= 2;
+}
+
+/*
+ * Przetwarza jedna linie konfiguracji i wywoluje akcje tworzenia katalogu.
+ * Zwraca false tylko przy bledzie systemu plikow; linie puste i komentarze
+ * sa pomijane bez bledu.
+ */
+inline bool psf_utworz_katalog_z_linii(const char* linia) {
+    if (!linia) return true;
+
+    char sciezka[208]{};
+    size_t n = 0;
+    while (*linia == ' ' || *linia == '\t') ++linia;
+    if (*linia == '\0' || *linia == '#' || *linia == '\n' || *linia == '\r') {
+        return true;
+    }
+    while (linia[n] && linia[n] != '\n' && linia[n] != '\r' &&
+           linia[n] != ' ' && linia[n] != '\t') {
+        if (n + 1 >= sizeof(sciezka)) return true;
+        sciezka[n] = linia[n];
+        ++n;
+    }
+    sciezka[n] = '\0';
+
+    if (!psf_sciezka_startowa_poprawna(sciezka)) {
+        return true; /* wpis niepoprawny jest ignorowany, nie blokuje bootu */
+    }
+
+    if (katalog_istnieje(sciezka)) return true;
+
+    return zapewnij_katalog_startowy(sciezka);
+}
