@@ -13,4 +13,7 @@ _start:
     mov (%rax),%rax
 #endif
     ud2
+.section .data,"aw",@progbits
+.align 8
+.quad 0
 .section .note.GNU-stack,"",@progbits

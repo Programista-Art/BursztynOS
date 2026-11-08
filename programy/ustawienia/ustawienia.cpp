@@ -140,8 +140,17 @@ public:
     }
     reload_fonts();
     page->refresh->przy_kliknieciu([](Przycisk*,void* p){auto* self=static_cast<Settings*>(p);
-      BSF::rescan();self->reload_fonts();self->status->ustaw_tekst("Odświeżono listę fontów.");
+      BSF::rescan();self->reload_fonts();auto limits=BSF::resources();
+      self->status->ustaw_tekst(limits.directory_error?"Nie odczytano katalogu fontów (limit 64 KiB).":limits.catalog_limit?"Osiągnięto limit katalogu: 128 fontów / 1024 wpisy.":"Odświeżono listę fontów.");
       self->przelicz_uklad();self->preview->uniewaznij();},this);
+    page->install->przy_kliknieciu([](Przycisk*,void* p){auto* self=static_cast<Settings*>(p);
+      auto result=BSF::install_font(self->font_page?static_cast<SettingsUI::FontPage*>(self->font_page)->import_path->tekst():nullptr);
+      const char* message=result==BSF::InstallResult::Ok?"Zainstalowano font. Uruchom ponownie inne aplikacje, aby go wykryły.":
+        result==BSF::InstallResult::Exists?"Font o tej nazwie pliku już istnieje; nie został zastąpiony.":
+        result==BSF::InstallResult::BadPath?"Podaj ścieżkę do pliku TTF (nazwa do 55 bajtów).":
+        result==BSF::InstallResult::InvalidFont?"Nie odczytano poprawnego, obsługiwanego TTF (limit 16 MiB).":"Nie udało się zainstalować fontu (uprawnienia lub błąd zapisu).";
+      if(result==BSF::InstallResult::Ok)self->reload_fonts();self->status->ustaw_tekst(message);self->przelicz_uklad();self->preview->uniewaznij();
+    },this);
     const char *labels[] = {"12 px", "14 px", "16 px",
                             "18 px", "20 px", "24 px"};
     for (unsigned i = 0; i < 6; ++i) {

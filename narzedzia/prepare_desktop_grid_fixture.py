@@ -25,7 +25,7 @@ def refresh(directory, reset_preferences=False):
         raise RuntimeError('Installation is incomplete')
     payload = (ROOT/'menedzer_okien.bin').read_bytes()
     kernel = ROOT/'system_operacyjny.bin'
-    if payload[:4] != b'BUR\0' or kernel.read_bytes()[:4] != b'\x7fELF':
+    if payload[:4] not in (b'BUR\0', b'BUR\x02') or kernel.read_bytes()[:4] != b'\x7fELF':
         raise RuntimeError('Invalid final payloads')
     with disk.open('r+b') as file, mmap.mmap(file.fileno(),0) as image:
         if image[512:520] != b'EFI PART':

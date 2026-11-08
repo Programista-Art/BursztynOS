@@ -30,6 +30,7 @@ FIXTURES = ROOT / 'narzedzia/fixtures/husarz'
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--bios',action='store_true',help='Boot the production ISO through SeaBIOS and its CD boot path')
     parser.add_argument('--iso', type=Path, default=ROOT / 'BursztynOS.iso')
     parser.add_argument('--kernel', type=Path, default=ROOT / 'system_operacyjny.bin', help='Matching unmodified kernel ELF for symbol observation and artifact hashing')
     parser.add_argument('--installed-disk',type=Path,help='Private disposable .bsf-test/*.img; disk-only font persistence test')
@@ -68,11 +69,20 @@ def main():
     parser.add_argument('--modern-javascript-only', action='store_true', help='New FPU/modern JavaScript acceptance; run --javascript-only separately for existing JS regression')
     parser.add_argument('--modern-javascript', action='store_true', help='Binary64, prototypes, exceptions, Promise/async, fetch/JSON and storage plus existing JS regression')
     parser.add_argument('--javascript-only', action='store_true', help='Native bounded JavaScript, DOM, events, forms, timers and external cache')
+    parser.add_argument('--font-size-matrix-only',action='store_true')
+    parser.add_argument('--live-font-install-only',action='store_true')
+    parser.add_argument('--font-resources-only',action='store_true')
+    parser.add_argument('--expected-font-count',type=int,default=128)
+    parser.add_argument('--expected-resident-bytes',type=int,default=0)
+    parser.add_argument('--terminal-unicode-only',action='store_true',help='Production Terminal TTF/grid/grapheme editing, byte output and bitmap recovery')
+    parser.add_argument('--unicode-trace-only',action='store_true',help='Private diagnostic: capture one native left command, no acceptance verdict')
+    parser.add_argument('--unicode-editing-only',action='store_true',help='Native browser cluster editing and Notepad save/reopen verified through clipboard/form bytes')
     parser.add_argument('--editing-only', action='store_true', help='Release UTF-8 selection, OS clipboard, password protection and GIF pixels')
     parser.add_argument('--images-only', action='store_true', help='Focused native PNG/JPEG pixels and shared-cache regression')
     parser.add_argument('--fault-vector', type=int, choices=[6,14], default=6)
     parser.add_argument('--fault-probe', type=Path, help='Private test kernel with a deliberately faulting Ring 3 browser payload')
     args = parser.parse_args()
+    if args.unicode_trace_only:args.unicode_editing_only=True
     if args.font_profile_only:
         for name in ('heavy-mixed.html', 'bsf-text-heavy.html'):
             fixture = FIXTURES / name
@@ -86,6 +96,10 @@ def main():
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=True)
     (out / 'result.json').unlink(missing_ok=True)
+    if args.unicode_editing_only:
+        with (out/'observer-build.txt').open('w') as log:
+            subprocess.run(['make','bsf-editor-observer'],cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,check=True)
+        shutil.copyfile(ROOT/'notatnik.elf',out/'notepad.elf')
     requests = []
     finished_responses = []
     requests_lock = threading.Lock()
@@ -189,6 +203,15 @@ def main():
            '-device', 'qemu-xhci,id=usb', '-device', 'usb-kbd,bus=usb.0', '-device', 'usb-mouse,bus=usb.0',
            '-audiodev', 'none,id=snd', '-device', 'intel-hda', '-device', 'hda-output,audiodev=snd',
            '-netdev', 'user,id=n1,guestfwd=tcp:10.0.2.100:80-cmd:' + bridge_command + ',guestfwd=tcp:10.0.2.101:80-cmd:' + bridge_command, '-device', 'virtio-net-pci,netdev=n1,disable-legacy=on']
+    if args.bios:
+        if args.installed_disk:raise RuntimeError('Installed fixture uses the UEFI installer')
+        index=cmd.index('-bios');del cmd[index:index+2]
+        index=cmd.index(f'file={args.iso.resolve()},id=boot,if=none,format=raw,readonly=on')
+        del cmd[index-1:index+1]
+        index=cmd.index('virtio-blk-pci,drive=boot,disable-legacy=on,bootindex=1');del cmd[index-1:index+1]
+        index=cmd.index('virtio-vga,disable-legacy=on,xres=1280,yres=720');del cmd[index-1:index+1]
+        cmd[cmd.index('none',cmd.index('-vga'))]='std'
+        cmd+=['-global','VGA.vgamem_mb=64','-cdrom',str(args.iso.resolve()),'-boot','d']
     if args.display_geometry_only and args.display_input!='usb':
         device_index=cmd.index('usb-mouse,bus=usb.0')
         if args.display_input=='virtio':cmd[device_index]='virtio-mouse-pci,disable-legacy=on'
@@ -205,7 +228,7 @@ def main():
     vm = None
     deadline = time.monotonic() + args.timeout
     frame = {'x': 100, 'y': 100, 'w': 800, 'h': 550}
-    result = {}
+    result = {'boot_environment':'BIOS' if args.bios else 'UEFI'}
     with (out / 'qemu.log').open('w') as log:
         try:
             vm = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)
@@ -277,12 +300,14 @@ def main():
             def click(x, y, double=False):
                 move(x, y)
                 for _ in range(2 if double else 1):
-                    started = guest_ticks()
+                    button_address=symbol('zaktualizuj_mysze_wspolne(long, long, unsigned char, char const*)::poprzednie_przyciski_gui')
+                    def buttons():return int(re.search(r':\s*0x([0-9a-fA-F]+)',hmp(f'xp /1bx 0x{button_address:x}'))[1],16)
                     hmp('mouse_button 1')
-                    wait(lambda: guest_ticks() - started >= 32, 'guest consumed mouse press', 30)
-                    started = guest_ticks()
+                    wait(lambda:buttons()&1, 'guest acknowledged mouse press', 30)
                     hmp('mouse_button 0')
-                    wait(lambda: guest_ticks() - started >= 32, 'guest consumed mouse release', 30)
+                    wait(lambda:not buttons()&1, 'guest acknowledged mouse release', 30)
+                    started=guest_ticks()
+                    wait(lambda:guest_ticks()-started>=32,'GUI dispatch after release',30)
                 time.sleep(.5)
 
             def guest_ticks():
@@ -528,7 +553,7 @@ def main():
                 (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
             if args.display_geometry_only:
                 from display_geometry_qemu_cases import run
-                result.update(run(out,screenshot,click,move,key,wait,guest_ticks,launch_start,health,hmp,symbol,kernel_sha,iso_sha,input_kind=args.display_input))
+                result.update(run(out,screenshot,click,move,key,wait,guest_ticks,launch_start,health,hmp,symbol,kernel_sha,iso_sha,input_kind=args.display_input,q=q))
                 (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
             if args.system_windows_only:
                 from system_windows_qemu_cases import run
@@ -716,6 +741,158 @@ def main():
                     return r > 150 and g < 130 and b < 130
                 wait(browser_ready, 'first complete native browser frame',240)
             screenshot('browser-open')
+            if args.font_size_matrix_only:
+                from bsf_process_observer import ProcessObserver
+                import struct
+                navigate('bsf-size-matrix.html')
+                observer=ProcessObserver(hmp,symbol,ROOT/'przegladarka.elf','Husarz')
+                def mask_inventory():
+                    cache=observer.value('BSF::(anonymous namespace)::cache','<Q')
+                    slots=struct.unpack('<Q',observer.user(cache,8))[0]
+                    if not slots:return set(),set()
+                    data=observer.user(slots,128*56)
+                    faces=set();sizes=set()
+                    for i in range(128):
+                        face,glyph,px=struct.unpack_from('<IHH',data,i*56)
+                        if face:faces.add(face);sizes.add(px)
+                    (out/'mask-inventory.json').write_text(json.dumps(dict(faces=sorted(faces),sizes=sorted(sizes))))
+                    return faces,sizes
+                wait(lambda:len(mask_inventory()[0])>=3 and 32 in mask_inventory()[1],
+                     'native glyph masks for three families including 32 px',180)
+                faces,sizes=mask_inventory();im=screenshot('native-font-size-family-matrix');health()
+                catalog=observer.catalog()
+                for family in ('DejaVu Sans','DejaVu Sans Mono','DejaVu Serif'):
+                    assert faces & {r['id'] for r in catalog if r['family']==family},family
+                # A bounded mask cache may evict earlier sizes while painting
+                # the complete table. Verify the actual six rendered rows.
+                ys=[]
+                for y in range(frame['y']+130,frame['y']+330):
+                    if any(r>100 and r>g*1.7 and r>b*1.3 for r,g,b in [im.getpixel((x,y)) for x in range(frame['x'],frame['x']+200)]):ys.append(y)
+                bands=[]
+                for y in ys:
+                    if not bands or y>bands[-1][-1]+3:bands.append([y,y])
+                    else:bands[-1][-1]=y
+                assert len(bands)==6,bands
+                heights=[b-a+1 for a,b in bands]
+                assert heights==sorted(heights) and heights[-1]>heights[0]*1.8,heights
+                result.update(result='PASS',mode='font-size-family-matrix',faces=sorted(faces),cached_sizes=sorted(sizes),rendered_row_heights=heights,fixture_sizes=[12,14,16,20,24,32],kernel_sha256=kernel_sha,iso_sha256=iso_sha)
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
+            if args.live_font_install_only:
+                from bsf_live_font_qemu_cases import run_live
+                run_live(locals());return
+            if args.font_resources_only:
+                from bsf_resource_qemu_cases import run_resource
+                run_resource(locals());return
+            if args.terminal_unicode_only:
+                from bsf_terminal_qemu_cases import run_terminal
+                run_terminal(locals())
+                result.update(result='PASS',mode='terminal-unicode-only',ttf_grid=True,edit_output_bytes=True,bitmap_recovery=True,
+                              no_guest_fault=True,kernel_sha256=kernel_sha,iso_sha256=iso_sha)
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
+            if args.unicode_editing_only:
+                import struct
+                editor_layout=json.loads((ROOT/'.bsf-test/editor-observer.json').read_text())
+                editor_symbols=subprocess.check_output(['nm','-C',str(out/'notepad.elf')],text=True)
+                editor_address=int(re.search(r'^([0-9a-f]+) [bBdD] g_notatnik$',editor_symbols,re.M)[1],16)
+                editor_samples=[]
+                def read_phys(address,n):
+                    values=[]
+                    for row in hmp(f'xp /{n}bx 0x{address:x}').splitlines():
+                        if ':' in row:values.extend(int(v,16) for v in re.findall(r'0x([0-9a-fA-F]+)',row.split(':',1)[1]))
+                    assert len(values)==n;return bytes(values)
+                def editor_snapshot(label):
+                    names=read_phys(symbol('(anonymous namespace)::tytul_okna'),16*48)
+                    pid=next(i for i in range(1,16) if names[i*48:(i+1)*48].startswith(b'Notatnik'))
+                    cr3=struct.unpack('<Q',read_phys(symbol('tablica_procesow')+pid*144+0x38,8))[0]
+                    def user(address,n):
+                        output=b''
+                        while n:
+                            table=cr3&0x000ffffffffff000
+                            for shift in (39,30,21,12):
+                                entry=struct.unpack('<Q',read_phys(table+((address>>shift)&511)*8,8))[0]
+                                assert entry&1
+                                if shift==12 or shift in (30,21) and entry&128:
+                                    physical=(entry&0x000ffffffffff000&~((1<<shift)-1))+(address&((1<<shift)-1));break
+                                table=entry&0x000ffffffffff000
+                            size=min(n,4096-(address&4095));output+=read_phys(physical,size);n-=size;address+=size
+                        return output
+                    pointer=lambda address:struct.unpack('<Q',user(address,8))[0]
+                    memo=pointer(editor_address+editor_layout['memo'])
+                    cursor=pointer(memo+editor_layout['cursor']);length=pointer(memo+editor_layout['length']);anchor=pointer(memo+editor_layout['anchor'])
+                    buffer=pointer(memo+editor_layout['buffer'])
+                    bits=user(memo+editor_layout['boundaries']+(max(0,length-16)//64)*8,16)
+                    base=(max(0,length-16)//64)*64
+                    boundaries=[i for i in range(max(0,length-16),length+1) if bits[(i-base)//8]&(1<<((i-base)%8))]
+                    row=dict(label=label,cursor=cursor,anchor=anchor,length=length,boundaries=boundaries,tail=user(buffer+max(0,length-20),min(20,length)).hex())
+                    editor_samples.append(row);(out/'editor-observer.json').write_text(json.dumps(editor_samples,indent=2)+'\n');return row
+                navigate('unicode.html')
+                click(frame['x']+45,frame['y']+140);key('ctrl','a');key('ctrl','c')
+                screenshot('unicode-browser-source')
+                move(80,28);hmp('mouse_button 2');time.sleep(.5);hmp('mouse_button 0')
+                wait(lambda:screenshot('native-menu-probe').getpixel((110,55))[0]<100,'Notepad launch menu',90)
+                click(105,43)
+                def unicode_notepad_ready():
+                    r,g,b=screenshot('native-opening-probe').getpixel((759,109))
+                    return r>150 and g<130 and b<130
+                wait(unicode_notepad_ready,'native Notepad ready',180,interval=1)
+                click(250,300);key('ctrl','v');screenshot('unicode-notepad-pasted')
+                if args.unicode_trace_only:
+                    key('ctrl','end');editor_snapshot('end');key('left');editor_snapshot('left')
+                    screenshot('trace-left')
+                    result.update(result='DIAGNOSTIC',mode='unicode-trace-only',kernel_sha256=kernel_sha,iso_sha256=iso_sha)
+                    (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
+                key('ctrl','a');key('ctrl','c')
+                click(120,700);activated=guest_ticks()
+                wait(lambda:guest_ticks()-activated>=500,'browser activation for initial byte check',120)
+                click(frame['x']+45,frame['y']+190);key('ctrl','a');key('ctrl','v')
+                with requests_lock:initial_before=len(requests)
+                click(frame['x']+70,frame['y']+244)
+                def initial_submitted():
+                    with requests_lock:return next((p for p in requests[initial_before:] if p.startswith('/unicode.html?')),None)
+                wait(initial_submitted,'initial Notepad paste byte check',60)
+                from urllib.parse import parse_qs,urlsplit
+                initial=parse_qs(urlsplit(initial_submitted()).query)
+                original='Polski Zażółć gęślą jaźń. English Hello world. Русский Привет мир. Українська Привіт світ. Ελληνικά Καλημέρα κόσμε. ἀᾀῷ 😀 | ä́'
+                (out/'initial-observed.json').write_text(json.dumps(initial,ensure_ascii=False,indent=2))
+                if initial.get('source')!=[original] or initial.get('result')!=[original]:raise AssertionError('Initial source/paste bytes differ: '+repr(initial))
+                wait(page_idle,'byte-check page complete',120);click(250,700);activated=guest_ticks()
+                wait(lambda:guest_ticks()-activated>=500,'Notepad activation for cluster edit',120)
+                click(250,300)
+                key('ctrl','end');before_edit=editor_snapshot('end')
+                key('left');after_left=editor_snapshot('left');screenshot('unicode-notepad-before-delete')
+                if after_left['cursor']!=before_edit['length']-5:raise AssertionError('Native left boundary: '+repr(after_left))
+                key('delete');after_delete=editor_snapshot('delete');screenshot('unicode-notepad-after-delete')
+                if after_delete['length']!=before_edit['length']-5:raise AssertionError('Native delete boundary: '+repr(after_delete))
+                key('z')
+                screenshot('unicode-notepad-edited')
+                key('ctrl','s');time.sleep(2)
+                key('ctrl','a')
+                for ch in '/uzytkownicy/unicode.txt':key({'/':'slash','.':'dot'}.get(ch,ch))
+                screenshot('unicode-notepad-save-prompt');key('ret');time.sleep(2)
+                screenshot('unicode-notepad-saved')
+                key('ctrl','n');key('ctrl','o');time.sleep(1);key('ctrl','a')
+                for ch in '/uzytkownicy/unicode.txt':key({'/':'slash','.':'dot'}.get(ch,ch))
+                key('ret');time.sleep(2)
+                screenshot('unicode-notepad-reopened');key('ctrl','a');key('ctrl','c')
+                click(120,700);activated=guest_ticks()
+                wait(lambda:guest_ticks()-activated>=500,'browser activation after Notepad',120)
+                click(frame['x']+45,frame['y']+190);key('ctrl','a');key('ctrl','v')
+                with requests_lock:before=len(requests)
+                click(frame['x']+70,frame['y']+244)
+                def unicode_submitted():
+                    with requests_lock:return next((p for p in requests[before:] if p.startswith('/unicode.html?')),None)
+                wait(unicode_submitted,'saved/reopened UTF-8 form bytes',60)
+                from urllib.parse import parse_qs,urlsplit
+                value=parse_qs(urlsplit(unicode_submitted()).query).get('result')
+                expected='Polski Zażółć gęślą jaźń. English Hello world. Русский Привет мир. Українська Привіт світ. Ελληνικά Καλημέρα κόσμε. ἀᾀῷ 😀 | z'
+                (out/'final-observed.json').write_text(json.dumps(parse_qs(urlsplit(unicode_submitted()).query),ensure_ascii=False,indent=2))
+                if value!=[expected]:raise AssertionError('Native Notepad edit/save/reopen bytes differ: '+repr(value))
+                (out/'saved-expected.txt').write_bytes(expected.encode('utf-8'))
+                (out/'saved-observed.txt').write_bytes(value[0].encode('utf-8'))
+                result.update(result='PASS',mode='unicode-editing-only',notepad_save_reopen_bytes=True,
+                              cluster_left_delete=True,native_clipboard=True,no_guest_fault=True,
+                              kernel_sha256=kernel_sha,iso_sha256=iso_sha,http_requests=request_log())
+                (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
             if args.theme_only:
                 theme_regression()
                 result.update(result='PASS',mode='theme-only',kernel_sha256=kernel_sha,iso_sha256=iso_sha,no_guest_fault=True,http_requests=request_log())

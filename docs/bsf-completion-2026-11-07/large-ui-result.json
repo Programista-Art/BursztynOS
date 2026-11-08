@@ -1,0 +1,18 @@
+{
+  "result": "PASS",
+  "mode": "native-font-resources",
+  "catalog_count": 1,
+  "examined": 1,
+  "rejected": 0,
+  "resident": 16777184,
+  "peak_resident": 16777184,
+  "catalog": [
+    {
+      "id": 132583076,
+      "path": "/czcionki/ttf/DejaVuSans.ttf",
+      "family": "DejaVu Sans"
+    }
+  ],
+  "kernel_sha256": "a863a2c56e1c94ba11edbb05ebda4c997aba5a4313c2825964d843e5e52015e4",
+  "iso_sha256": "89e8e800e905bfb28eb3714889d5077ca3dc5f86cca895592c1e7114a533fc6d"
+}

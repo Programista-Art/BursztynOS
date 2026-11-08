@@ -23,7 +23,9 @@ test_dzwieku_tmp.o: programy/test_dzwieku/test_dzwieku.cpp \
  programy/test_dzwieku/../../bursztyn_ui/czcionka.h \
  programy/test_dzwieku/../../bursztyn_ui/../bsf/runtime.h \
  programy/test_dzwieku/../../bursztyn_ui/../bsf/bsf.h \
+ programy/test_dzwieku/../../bursztyn_ui/../bsf/limits.h \
  programy/test_dzwieku/../../bursztyn_ui/../bsf/config.h \
+ programy/test_dzwieku/../../bursztyn_ui/../bsf/edit.h \
  programy/test_dzwieku/../../bursztyn_ui/../bws_czcionka.h \
  programy/test_dzwieku/../../bursztyn_ui/rysowanie.h \
  programy/test_dzwieku/../../bursztyn_ui/polecenie_ui.h \
@@ -118,7 +120,9 @@ programy/test_dzwieku/../../bursztyn_ui/motyw.h:
 programy/test_dzwieku/../../bursztyn_ui/czcionka.h:
 programy/test_dzwieku/../../bursztyn_ui/../bsf/runtime.h:
 programy/test_dzwieku/../../bursztyn_ui/../bsf/bsf.h:
+programy/test_dzwieku/../../bursztyn_ui/../bsf/limits.h:
 programy/test_dzwieku/../../bursztyn_ui/../bsf/config.h:
+programy/test_dzwieku/../../bursztyn_ui/../bsf/edit.h:
 programy/test_dzwieku/../../bursztyn_ui/../bws_czcionka.h:
 programy/test_dzwieku/../../bursztyn_ui/rysowanie.h:
 programy/test_dzwieku/../../bursztyn_ui/polecenie_ui.h:

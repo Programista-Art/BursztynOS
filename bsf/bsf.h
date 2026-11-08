@@ -1,12 +1,13 @@
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
+#include "limits.h"
 // Bursztynowy System Czcionek. This API and all parsers are userspace only.
 namespace BSF {
-constexpr unsigned MaxFile = 2 * 1024 * 1024, MaxTables = 64, MaxGlyphs = 16384;
+constexpr unsigned MaxTables = 64, MaxGlyphs = 16384;
 constexpr unsigned MaxPoints = 4096, MaxContours = 128, MaxVertices = 8192,
                    MaxCompoundDepth = 8;
-constexpr unsigned MaxFiles = 32, MaxFaces = 4, MaxBitmap = 128,
+constexpr unsigned MaxFaces = 4, MaxBitmap = 128,
                    CacheSlots = 128;
 constexpr unsigned CacheBytes = CacheSlots * MaxBitmap * MaxBitmap;
 struct Bytes {

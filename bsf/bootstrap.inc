@@ -1,4 +1,5 @@
 // Generic opaque Multiboot asset import. The kernel never opens TTF tables.
+#include "limits.h"
 void bsf_import_fonts() {
   if (!g_multiboot_info_ptr)
     return;
@@ -11,7 +12,7 @@ void bsf_import_fonts() {
     return;
   unsigned count = 0;
   uint64_t bytes = 0;
-  for (uint64_t off = 8; off + 8 <= total && count < 36;) {
+  for (uint64_t off = 8; off + 8 <= total && count < BSF::MaxFiles;) {
     const auto *tag = reinterpret_cast<const WpisTaguMB2 *>(mbi + off);
     if (tag->rozmiar < 8 || tag->rozmiar > total - off)
       break;
@@ -20,8 +21,11 @@ void bsf_import_fonts() {
                end = *reinterpret_cast<const uint32_t *>(mbi + off + 12);
       const char *label = reinterpret_cast<const char *>(mbi + off + 16);
       unsigned cap = tag->rozmiar - 16;
+      if (label[0]=='b' && label[1]=='s' && label[2]=='f' && label[3]=='/' &&
+          end>start && end-start>BSF::MaxFile)
+        wypisz_log("[BSF] Boot asset exceeds bounded font-file payload; skipped.");
       if (label[0] == 'b' && label[1] == 's' && label[2] == 'f' &&
-          label[3] == '/' && end > start && end - start <= 2 * 1024 * 1024) {
+          label[3] == '/' && end > start && end - start <= BSF::MaxFile) {
         char path[128] = "/czcionki/ttf/";
         unsigned n = 0;
         bool safe = true;
@@ -36,13 +40,13 @@ void bsf_import_fonts() {
         if (n + 4 >= cap || label[n + 4] || n < 5)
           safe = false;
         path[14 + n] = 0;
-        if (safe && bytes + end - start <= 16 * 1024 * 1024) {
-          (void)zapisz_plik_od_nowa(
+        if (safe && bytes + end - start <= BSF::MaxLoadedBytes) {
+          if (zapisz_plik_od_nowa(
               path, reinterpret_cast<const char *>(uintptr_t(start)),
-              end - start);
-          bytes += end - start;
-          ++count;
-        }
+              end - start)) { bytes += end - start; ++count; }
+          else wypisz_log("[BSF] Boot asset write failed; fallback retained.");
+        } else if (safe)
+          wypisz_log("[BSF] Boot asset budget reached; skipped.");
       }
     }
     if (!tag->typ)

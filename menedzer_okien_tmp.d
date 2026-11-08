@@ -1,9 +1,10 @@
 menedzer_okien_tmp.o: menedzer_okien.cpp app_identity.h ui_skala.h \
  ekran_format.h pulpit_geometria.h bursztyn_ui/czcionka.h \
  bursztyn_ui/typy.h bursztyn_ui/../bsf/runtime.h bursztyn_ui/../bsf/bsf.h \
- bursztyn_ui/../bsf/config.h bursztyn_ui/../bws_czcionka.h \
- desktop_layout.h desktop_anchor.h desktop_selection_paint.h \
- bws_gui_batch.h bursztyn_ui/rysowanie.h bursztyn_ui/../kolor_alfa.h \
+ bursztyn_ui/../bsf/limits.h bursztyn_ui/../bsf/config.h \
+ bursztyn_ui/../bsf/edit.h bursztyn_ui/../bws_czcionka.h desktop_layout.h \
+ desktop_anchor.h desktop_selection_paint.h bws_gui_batch.h \
+ bursztyn_ui/rysowanie.h bursztyn_ui/../kolor_alfa.h \
  bursztyn_ui/../bursztyn_gui.h bursztyn_ui/../bws_zdarzenia.h \
  bursztyn_ui/../bws_pliki.h bursztyn_ui/../plik_status.h \
  bursztyn_ui/../bws_api.h bursztyn_ui/../bws_nowoczesne.h \
@@ -52,7 +53,9 @@ bursztyn_ui/czcionka.h:
 bursztyn_ui/typy.h:
 bursztyn_ui/../bsf/runtime.h:
 bursztyn_ui/../bsf/bsf.h:
+bursztyn_ui/../bsf/limits.h:
 bursztyn_ui/../bsf/config.h:
+bursztyn_ui/../bsf/edit.h:
 bursztyn_ui/../bws_czcionka.h:
 desktop_layout.h:
 desktop_anchor.h:

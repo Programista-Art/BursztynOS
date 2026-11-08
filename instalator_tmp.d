@@ -22,7 +22,9 @@ instalator_tmp.o: programy/instalator/instalator.cpp \
  programy/instalator/../../bursztyn_ui/czcionka.h \
  programy/instalator/../../bursztyn_ui/../bsf/runtime.h \
  programy/instalator/../../bursztyn_ui/../bsf/bsf.h \
+ programy/instalator/../../bursztyn_ui/../bsf/limits.h \
  programy/instalator/../../bursztyn_ui/../bsf/config.h \
+ programy/instalator/../../bursztyn_ui/../bsf/edit.h \
  programy/instalator/../../bursztyn_ui/../bws_czcionka.h \
  programy/instalator/../../bursztyn_ui/rysowanie.h \
  programy/instalator/../../bursztyn_ui/polecenie_ui.h \
@@ -114,7 +116,9 @@ programy/instalator/../../bursztyn_ui/../kolor_alfa.h:
 programy/instalator/../../bursztyn_ui/czcionka.h:
 programy/instalator/../../bursztyn_ui/../bsf/runtime.h:
 programy/instalator/../../bursztyn_ui/../bsf/bsf.h:
+programy/instalator/../../bursztyn_ui/../bsf/limits.h:
 programy/instalator/../../bursztyn_ui/../bsf/config.h:
+programy/instalator/../../bursztyn_ui/../bsf/edit.h:
 programy/instalator/../../bursztyn_ui/../bws_czcionka.h:
 programy/instalator/../../bursztyn_ui/rysowanie.h:
 programy/instalator/../../bursztyn_ui/polecenie_ui.h:

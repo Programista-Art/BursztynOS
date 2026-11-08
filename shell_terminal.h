@@ -15,46 +15,40 @@ size_t g_paint_capacity = 0;
 // Ring 3 has a 16 KiB stack. Layout and drawing nest, so their scratch buffers
 // must not live in their call frames. The Shell event loop is single-threaded.
 char g_layout_text[4260], g_render_text[4260], g_hit_text[4260], g_copy_text[4260];
-char g_measure_text[2048];
+#include "shell_font.h"
 
 size_t shell_length(const char* s) { size_t n=0; if(s) while(s[n]) ++n; return n; }
-size_t shell_next(const char* s, size_t i) {
-    uint32_t cp; return i + CzcionkaUI::dekoduj_utf8(s, i, &cp);
-}
-size_t shell_previous(const char* s, size_t i) {
-    if(i) --i;
-    while(i && (static_cast<uint8_t>(s[i]) & 0xc0U)==0x80U) --i;
-    return i;
-}
+size_t shell_next(const char* s, size_t i) { return BSF::next_cluster(s,i,shell_length(s)); }
+size_t shell_previous(const char* s, size_t i) { return BSF::previous_cluster(s,i); }
 int shell_prefix_width(const char* s, size_t end) {
-    size_t i=0;
-    while(s && i<end && i+1<sizeof(g_measure_text)) { g_measure_text[i]=s[i]; ++i; }
-    g_measure_text[i]=0; return CzcionkaUI::zmierz_tekst(g_measure_text,ui_skala());
+    size_t size=shell_length(s);end=BSF::cluster_floor(s,size,end);int x=0;
+    for(size_t at=0;at<end;){size_t next=BSF::next_cluster(s,at,size);x+=shell_cluster_width(s,at,next,x);at=next;}
+    return x;
 }
 Prostokat shell_scrollbar_rect() {
     Prostokat c=shell_obszar_klienta(); const uint32_t p=ui_skala_procent;
-    int h=c.wysokosc-ui_skaluj(38,p); if(h<ui_skaluj(16,p)) h=ui_skaluj(16,p);
+    int h=c.wysokosc-shell_row_height()-ui_skaluj(20,p); if(h<ui_skaluj(16,p)) h=ui_skaluj(16,p);
     return Prostokat(c.prawy()-ui_skaluj(14,p),c.y+ui_skaluj(4,p),ui_skaluj(12,p),h);
 }
 Prostokat shell_output_rect() {
     Prostokat c=shell_obszar_klienta(); int x=c.x+ui_skaluj(8,ui_skala_procent);
     return Prostokat(x,c.y+ui_skaluj(4,ui_skala_procent),
         shell_scrollbar_rect().x-ui_skaluj(4,ui_skala_procent)-x,
-        c.wysokosc-ui_skaluj(38,ui_skala_procent));
+        c.wysokosc-shell_row_height()-ui_skaluj(20,ui_skala_procent));
 }
 Prostokat shell_input_rect() {
     Prostokat c=shell_obszar_klienta();
-    int y=c.dolny()-ui_skaluj(30,ui_skala_procent);
+    int y=c.dolny()-shell_row_height()-ui_skaluj(12,ui_skala_procent);
     return Prostokat(c.x,y+1,shell_scrollbar_rect().x-c.x, c.dolny()-y-1);
 }
 Prostokat shell_edit_rect() {
     Prostokat r=shell_input_rect(); int x=r.x+ui_skaluj(8,ui_skala_procent);
-    int prompt=CzcionkaUI::zmierz_tekst("powłoka> ",ui_skala());
+    int prompt=shell_prefix_width("powłoka> ",shell_length("powłoka> "));
     if(r.prawy()-x-prompt>ui_skaluj(20,ui_skala_procent)) x+=prompt;
     return Prostokat(x,r.y,r.prawy()-x-ui_skaluj(4,ui_skala_procent),r.wysokosc);
 }
 int shell_page_rows() {
-    int n=shell_output_rect().wysokosc/ui_skaluj(16,ui_skala_procent);
+    int n=shell_output_rect().wysokosc/shell_row_height();
     return n>0 ? (n<SHELL_MAX_VISIBLE_ROWS?n:SHELL_MAX_VISIBLE_ROWS) : 1;
 }
 ShellLine& shell_line(int line) { return g_linie[(g_pierwsza_linia+line)%MAXSCROLLBACKLINES]; }
@@ -63,10 +57,6 @@ void shell_line_text(int line, char* out) {
     for(size_t i=0;l.tekst[i];++i) out[n++]=l.tekst[i];
     if(l.opis_x>0 && l.opis[0]) { out[n++]='\t'; for(size_t i=0;l.opis[i];++i) out[n++]=l.opis[i]; }
     out[n]=0;
-}
-int shell_advance(uint32_t cp,int x,int column) {
-    if(cp=='\t') return x<column ? column-x : ui_skaluj(16,ui_skala_procent);
-    return CzcionkaUI::postep_znaku(cp,ui_skala());
 }
 bool shell_before(ShellPosition a,ShellPosition b) {
     return a.line<b.line || (a.line==b.line && a.byte<b.byte);
@@ -77,12 +67,11 @@ void shell_draw_row(KontekstRysowania& ctx,ShellVisualRow row,int y) {
     ShellPosition a=g_selection_anchor,b=g_selection_end;
     if(shell_before(b,a)) { ShellPosition t=a;a=b;b=t; }
     for(size_t i=row.begin;i<row.end;) {
-        uint32_t cp; size_t n=CzcionkaUI::dekoduj_utf8(text,i,&cp);
-        int w=shell_advance(cp,x,ui_skaluj(shell_line(row.line).opis_x,ui_skala_procent));
+        size_t next=BSF::next_cluster(text,i,row.end),n=next-i;
+        int w=shell_cluster_width(text,i,next,x,ui_skaluj(shell_line(row.line).opis_x,ui_skala_procent));
         bool selected=g_output_selection && !shell_before({row.line,i},a) && shell_before({row.line,i},b);
-        if(selected) ctx.rysuj_prostokat(Prostokat(area.x+x,y,w,ui_skaluj(16,ui_skala_procent)),motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));
-        if(cp!='\t') { char glyph[5]; CzcionkaUI::zakoduj_utf8(cp,glyph);
-            ctx.rysuj_tekst(Punkt(area.x+x,y),glyph,selected?motyw_kolor_tekstu_zaznaczenia():motyw_kolor(MOTYW_KOLOR_TEKST),ui_skala()); }
+        if(selected) ctx.rysuj_prostokat(Prostokat(area.x+x,y,w,shell_row_height()),motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));
+        shell_draw_cluster(ctx,text,i,next,area.x+x,y,w,selected?motyw_kolor_tekstu_zaznaczenia():motyw_kolor(MOTYW_KOLOR_TEKST));
         x+=w;i+=n;
     }
 }
@@ -90,16 +79,16 @@ void shell_draw_row(KontekstRysowania& ctx,ShellVisualRow row,int y) {
 void shell_layout_rows(KontekstRysowania* ctx=nullptr) {
     int total=0; g_visible_count=0; Prostokat area=shell_output_rect();
     for(int l=0;l<g_liczba_linii;++l) {
-        char* text=g_layout_text; shell_line_text(l,text); size_t begin=0, i=0;
+        char* text=g_layout_text; shell_line_text(l,text); size_t begin=0, i=0,size=shell_length(text);
         int indent=ui_skaluj(shell_line(l).tekst_x,ui_skala_procent),x=indent;
         do {
-            uint32_t cp=0; size_t n=CzcionkaUI::dekoduj_utf8(text,i,&cp);
-            int w=n?shell_advance(cp,x,ui_skaluj(shell_line(l).opis_x,ui_skala_procent)):0;
+            size_t next=BSF::next_cluster(text,i,size),n=next-i;
+            int w=n?shell_cluster_width(text,i,next,x,ui_skaluj(shell_line(l).opis_x,ui_skala_procent)):0;
             if(!n || (x+w>area.szerokosc && i>begin)) {
                 ShellVisualRow row{l,begin,i,indent};
                 if(total>=g_scroll_linia && total<g_scroll_linia+shell_page_rows()) {
                     g_visible_rows[g_visible_count++]=row;
-                    if(ctx) shell_draw_row(*ctx,row,area.y+(total-g_scroll_linia)*ui_skaluj(16,ui_skala_procent));
+                    if(ctx) shell_draw_row(*ctx,row,area.y+(total-g_scroll_linia)*shell_row_height());
                 }
                 ++total; if(!n) break;
                 begin=i;
@@ -107,7 +96,7 @@ void shell_layout_rows(KontekstRysowania* ctx=nullptr) {
                     ?ui_skaluj(shell_line(l).opis_x,ui_skala_procent):0;
                 if(indent>=area.szerokosc) indent=0;
                 x=indent;
-                w=shell_advance(cp,x,ui_skaluj(shell_line(l).opis_x,ui_skala_procent));
+                w=shell_cluster_width(text,i,next,x,ui_skaluj(shell_line(l).opis_x,ui_skala_procent));
             }
             x+=w;i+=n;
         } while(true);
@@ -212,34 +201,35 @@ void shell_draw_input(KontekstRysowania& ctx) {
     Prostokat row=shell_input_rect(),edit=shell_edit_rect();
     const char* text=g_obecny_bufor_wejscia?g_obecny_bufor_wejscia:"";
     int caret=shell_prefix_width(text,g_caret),cw=ui_skaluj(2,ui_skala_procent);
-    int maximum=CzcionkaUI::zmierz_tekst(text,ui_skala())-edit.szerokosc+cw;
+    int maximum=shell_prefix_width(text,shell_length(text))-edit.szerokosc+cw;
     if(maximum<0) maximum=0;
     if(g_input_scroll_px>maximum) g_input_scroll_px=maximum;
     if(caret<g_input_scroll_px) g_input_scroll_px=caret;
     if(caret-g_input_scroll_px>edit.szerokosc-cw) g_input_scroll_px=caret-edit.szerokosc+cw;
     if(g_input_scroll_px<0) g_input_scroll_px=0;
-    int y=row.y+(row.wysokosc-ui_skaluj(16,ui_skala_procent))/2;
+    int y=row.y+(row.wysokosc-shell_row_height())/2;
     ctx.dodaj_przyciecie(row);
     if(edit.x>row.x+ui_skaluj(8,ui_skala_procent))
-        ctx.rysuj_tekst(Punkt(row.x+ui_skaluj(8,ui_skala_procent),y),"powłoka> ",motyw_kolor(MOTYW_KOLOR_AKCENT),ui_skala());
+        for(size_t at=0;at<shell_length("powłoka> ");){const char* prompt="powłoka> ";size_t next=BSF::next_cluster(prompt,at,shell_length(prompt));
+            shell_draw_cluster(ctx,prompt,at,next,row.x+ui_skaluj(8,ui_skala_procent)+shell_prefix_width(prompt,at),y,shell_cluster_width(prompt,at,next),motyw_kolor(MOTYW_KOLOR_AKCENT));at=next;}
     ctx.dodaj_przyciecie(edit);
     size_t a=g_caret<g_input_anchor?g_caret:g_input_anchor,b=g_caret>g_input_anchor?g_caret:g_input_anchor;
-    int x=edit.x-g_input_scroll_px;
-    for(size_t i=0;text[i];) {
-        uint32_t cp;size_t n=CzcionkaUI::dekoduj_utf8(text,i,&cp);int w=CzcionkaUI::postep_znaku(cp,ui_skala());
+    int x=edit.x-g_input_scroll_px;size_t text_size=shell_length(text);
+    for(size_t i=0;i<text_size;) {
+        size_t next=BSF::next_cluster(text,i,text_size),n=next-i;int w=shell_cluster_width(text,i,next);
         bool selected=i>=a && i<b;
-        if(x+w>edit.x && x<edit.prawy()) {
-            if(selected) ctx.rysuj_prostokat(Prostokat(x,y,w,ui_skaluj(16,ui_skala_procent)),motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));
-            char glyph[5];CzcionkaUI::zakoduj_utf8(cp,glyph);
-            ctx.rysuj_tekst(Punkt(x,y),glyph,selected?motyw_kolor_tekstu_zaznaczenia():motyw_kolor(MOTYW_KOLOR_TEKST),ui_skala());
+        if(x+(w?w:g_terminal_cell)>edit.x && x<edit.prawy()) {
+            if(selected) ctx.rysuj_prostokat(Prostokat(x,y,w,shell_row_height()),motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));
+            shell_draw_cluster(ctx,text,i,next,x,y,w,selected?motyw_kolor_tekstu_zaznaczenia():motyw_kolor(MOTYW_KOLOR_TEKST));
         }
         x+=w;i+=n;
     }
-    ctx.rysuj_prostokat(Prostokat(edit.x+caret-g_input_scroll_px,y,cw,ui_skaluj(16,ui_skala_procent)),motyw_kolor(MOTYW_KOLOR_TEKST));
+    ctx.rysuj_prostokat(Prostokat(edit.x+caret-g_input_scroll_px,y,cw,shell_row_height()),motyw_kolor(MOTYW_KOLOR_TEKST));
     ctx.zdejmij_przyciecie();ctx.zdejmij_przyciecie();
 }
 void shell_odswiez_linie_wejsciowa() {
     if(shell_minimized) return;
+    shell_sync_font();
     SHELL_PERF(row);
     Prostokat r=shell_input_rect();KontekstRysowania ctx;
     if(!shell_begin_paint(ctx,r)) return;
@@ -248,6 +238,7 @@ void shell_odswiez_linie_wejsciowa() {
 }
 void shell_rysuj_terminal() {
     if(shell_minimized) return;
+    shell_sync_font();
     SHELL_PERF(full);
     static int last_x=-1,last_y=-1,last_w=-1,last_h=-1;static uint32_t last_scale=0;
     if(last_x!=shell_x || last_y!=shell_y || last_w!=shell_w || last_h!=shell_h || last_scale!=ui_skala_procent) {
@@ -282,10 +273,10 @@ void shell_wypisz(const char* text) {
 size_t shell_hit_input(int mouse_x) {
     const char* text=g_obecny_bufor_wejscia?g_obecny_bufor_wejscia:"";
     int target=mouse_x-shell_edit_rect().x+g_input_scroll_px,x=0;
-    size_t i=0;
-    while(text[i]) {
-        uint32_t cp;size_t n=CzcionkaUI::dekoduj_utf8(text,i,&cp);
-        int w=CzcionkaUI::postep_znaku(cp,ui_skala());
+    size_t i=0,text_size=shell_length(text);
+    while(i<text_size) {
+        size_t next=BSF::next_cluster(text,i,text_size),n=next-i;
+        int w=shell_cluster_width(text,i,next);
         if(target<x+w/2) break;
         x+=w;i+=n;
     }
@@ -293,14 +284,14 @@ size_t shell_hit_input(int mouse_x) {
 }
 ShellPosition shell_hit_output(int mouse_x,int mouse_y) {
     if(!g_visible_count) return {0,0};
-    Prostokat area=shell_output_rect();int r=(mouse_y-area.y)/ui_skaluj(16,ui_skala_procent);
+    Prostokat area=shell_output_rect();int r=(mouse_y-area.y)/shell_row_height();
     if(r<0) r=0;
     if(r>=g_visible_count) r=g_visible_count-1;
     ShellVisualRow row=g_visible_rows[r];char* text=g_hit_text;shell_line_text(row.line,text);
     int x=row.indent,target=mouse_x-area.x;size_t i=row.begin;
     while(i<row.end) {
-        uint32_t cp;size_t n=CzcionkaUI::dekoduj_utf8(text,i,&cp);
-        int w=shell_advance(cp,x,ui_skaluj(shell_line(row.line).opis_x,ui_skala_procent));
+        size_t next=BSF::next_cluster(text,i,row.end),n=next-i;
+        int w=shell_cluster_width(text,i,next,x,ui_skaluj(shell_line(row.line).opis_x,ui_skala_procent));
         if(target<x+w/2) break;
         x+=w;i+=n;
     }
@@ -332,7 +323,7 @@ void shell_delete_range(char* text,size_t begin,size_t end) {
     size_t length=shell_length(text);
     if(begin>end || end>length) return;
     for(size_t i=end;i<=length;++i) text[begin+i-end]=text[i];
-    g_caret=g_input_anchor=begin;
+    g_caret=g_input_anchor=BSF::cluster_ceil(text,shell_length(text),begin);
 }
 void shell_delete_input_selection(char* text) {
     size_t a=g_caret<g_input_anchor?g_caret:g_input_anchor,b=g_caret>g_input_anchor?g_caret:g_input_anchor;

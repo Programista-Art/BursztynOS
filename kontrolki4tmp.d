@@ -22,7 +22,9 @@ kontrolki4tmp.o: programy/kontrolki4/kontrolki4.cpp \
  programy/kontrolki4/../../bursztyn_ui/czcionka.h \
  programy/kontrolki4/../../bursztyn_ui/../bsf/runtime.h \
  programy/kontrolki4/../../bursztyn_ui/../bsf/bsf.h \
+ programy/kontrolki4/../../bursztyn_ui/../bsf/limits.h \
  programy/kontrolki4/../../bursztyn_ui/../bsf/config.h \
+ programy/kontrolki4/../../bursztyn_ui/../bsf/edit.h \
  programy/kontrolki4/../../bursztyn_ui/../bws_czcionka.h \
  programy/kontrolki4/../../bursztyn_ui/rysowanie.h \
  programy/kontrolki4/../../bursztyn_ui/polecenie_ui.h \
@@ -113,7 +115,9 @@ programy/kontrolki4/../../bursztyn_ui/../kolor_alfa.h:
 programy/kontrolki4/../../bursztyn_ui/czcionka.h:
 programy/kontrolki4/../../bursztyn_ui/../bsf/runtime.h:
 programy/kontrolki4/../../bursztyn_ui/../bsf/bsf.h:
+programy/kontrolki4/../../bursztyn_ui/../bsf/limits.h:
 programy/kontrolki4/../../bursztyn_ui/../bsf/config.h:
+programy/kontrolki4/../../bursztyn_ui/../bsf/edit.h:
 programy/kontrolki4/../../bursztyn_ui/../bws_czcionka.h:
 programy/kontrolki4/../../bursztyn_ui/rysowanie.h:
 programy/kontrolki4/../../bursztyn_ui/polecenie_ui.h:

@@ -1,4 +1,5 @@
 #include "../bsf/bsf.h"
+#include "../bsf/edit.h"
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -19,13 +20,18 @@ int main(){
     for(unsigned k=n-1;k;--k)text+=char(0x80|((cp>>(6*(k-1)))&63));}
   }
   if(expected.empty())continue;++cases;
+  BSF::BoundaryIndex<> index;index.rebuild(text.data(),text.size());
   std::vector<size_t> actual{0};size_t at=0;
   while(at<text.size()){size_t next=BSF::next_cluster(text.data(),at,text.size());if(next<=at)std::abort();at=next;actual.push_back(at);}
   if(actual!=expected){std::fprintf(stderr,"FAIL case %u: %s\n",cases,line.c_str());return 1;}
   if(BSF::cluster_count(text.data(),text.size())+1!=expected.size())return 3;
+  for(size_t i=0;i<expected.size();++i)if(index.rank(text.data(),expected[i])!=i)return 13;
   for(size_t i=1;i<expected.size();++i)if(BSF::previous_cluster(text.data(),expected[i])!=expected[i-1])return 4;
   for(size_t i=0;i<=text.size();++i){bool boundary=false;for(auto p:expected)boundary|=p==i;
-   if(BSF::cluster_boundary(text.data(),text.size(),i)!=boundary)return 5;}
+   if(BSF::cluster_boundary(text.data(),text.size(),i)!=boundary)return 5;
+   if(index.floor(text.data(),i)!=BSF::cluster_floor(text.data(),text.size(),i))return 11;
+   if(index.previous(text.data(),i)!=(i?BSF::cluster_floor(text.data(),text.size(),i-1):0))return 12;
+  }
  }
  for(unsigned value=0;value<256;++value){char invalid[4]={char(value),char(0xff),char(0x80),0};
   for(size_t at=0;at<3;){auto next=BSF::next_cluster(invalid,at,3);if(next<=at||next>3)return 6;at=next;}}

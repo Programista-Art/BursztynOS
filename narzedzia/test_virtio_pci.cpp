@@ -6727,12 +6727,16 @@ void test_input_repeat() {
     ps2_klawiatura_przetworz_scancode(0x9E);
     TEST_ASSERT(g_mock_input_capture.last_key_val == 0, "PS/2 release");
 
-    // 2. USB repeat: powtorne nadeslanie tego samego raportu klawiatury
+    // 2. USB identical state reports respect a typematic delay.
+    g_host_use_mock_time=true;g_host_mock_time_ns=0;
     uint8_t rep_a[8] = { 0, 0, 0x04, 0, 0, 0, 0, 0 };
     usb_hid_przetworz_raport(rep_a);
     TEST_ASSERT(g_mock_input_capture.last_key_val == 1, "USB initial press");
     TEST_ASSERT(pobierz_znak_klawiatury() == 'a', "USB pierwszy znak 'a'");
 
+    usb_hid_przetworz_raport(rep_a);
+    TEST_ASSERT(pobierz_znak_klawiatury()==0,"USB unchanged report before repeat delay emits no text");
+    g_host_mock_time_ns=400000000ULL;
     usb_hid_przetworz_raport(rep_a);
     TEST_ASSERT(g_mock_input_capture.last_key_val == 2, "USB repeat 1");
     TEST_ASSERT(pobierz_znak_klawiatury() == 'a', "USB powtorzony znak 'a'");
@@ -6741,6 +6745,7 @@ void test_input_repeat() {
     usb_hid_przetworz_raport(rep_empty);
     TEST_ASSERT(g_mock_input_capture.last_key_val == 0, "USB release");
 
+    g_host_use_mock_time=false;
     // 3. VirtIO repeat: zdarzenie z value == 2
     test_virtio_send_key(&drv, INPUT_KEY_A, 1);
     TEST_ASSERT(g_mock_input_capture.last_key_val == 1, "VirtIO initial press");

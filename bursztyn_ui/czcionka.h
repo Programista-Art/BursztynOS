@@ -5,6 +5,7 @@
 #include "typy.h"
 #if defined(BSF_NATIVE)
 #include "../bsf/runtime.h"
+#include "../bsf/edit.h"
 #endif
 #if defined(BSF_NATIVE)
 #include "../bws_czcionka.h"
@@ -339,7 +340,7 @@ public:
     // Zwraca szerokość tekstu od początku do bajt_limit
     static int pozycja_x_z_bajtu(const char* tekst, size_t bajt_limit, SkalaUI skala = 1) {
 #if defined(BSF_NATIVE)
-        if(BSF::ready()){size_t boundary=0;while(tekst&&tekst[boundary]&&boundary<bajt_limit){uint32_t cp;size_t n=dekoduj_utf8(tekst,boundary,&cp);if(!n||n>bajt_limit-boundary)break;boundary+=n;}return BSF::measure_text(tekst,ui_skaluj(BSF::ui_size(),skala.procent()),false,nullptr,boundary);}
+        if(BSF::ready())return BSF::measure_prefix(tekst,bajt_limit,ui_skaluj(BSF::ui_size(),skala.procent()));
 #endif
         if (!tekst || tekst[0] == '\0' || bajt_limit == 0) return 0;
         SkalaUI s = skala;
@@ -358,6 +359,9 @@ public:
     // Zwraca przesunięcie w bajtach dla zadanej współrzędnej X wewnątrz tekstu
     static size_t znak_z_pozycji_x(const char* tekst, int target_x, SkalaUI skala = 1) {
         if (!tekst || tekst[0] == '\0' || target_x <= 0) return 0;
+#if defined(BSF_NATIVE)
+        if(BSF::ready())return BSF::hit_test(tekst,target_x,ui_skaluj(BSF::ui_size(),skala.procent()));
+#endif
         SkalaUI s = skala;
         size_t biezacy_bajt = 0;
         int poprz_x = 0;

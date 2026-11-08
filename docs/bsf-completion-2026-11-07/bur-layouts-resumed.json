@@ -1,0 +1,186 @@
+[
+  {
+    "path": "aktualizacje.bin",
+    "bytes": 203296,
+    "text_bytes": 196608,
+    "data_capacity": 131072,
+    "data_file_bytes": 2592,
+    "sha256": "2470b4c1ceccbdf602ab2fb2334d5a0cfa060ed7a1e9dc2c7f0cd1c66058e552"
+  },
+  {
+    "path": "demo_ui.bin",
+    "bytes": 301600,
+    "text_bytes": 294912,
+    "data_capacity": 131072,
+    "data_file_bytes": 2592,
+    "sha256": "26c9e1daf76208d8f2b1633ff29d33ecbdf1f9b1784210357a824f080059adc3"
+  },
+  {
+    "path": "diagnostyka.bin",
+    "bytes": 223776,
+    "text_bytes": 217088,
+    "data_capacity": 1638400,
+    "data_file_bytes": 2592,
+    "sha256": "161bc8200c14bda6412115081c878e672c2d6a1a94263234315c57b7d5e99dfc"
+  },
+  {
+    "path": "ekran.bin",
+    "bytes": 252448,
+    "text_bytes": 245760,
+    "data_capacity": 131072,
+    "data_file_bytes": 2592,
+    "sha256": "97364e222ed9672f7a747ae44596e7e2416fafe9a37b6f73ca5f70f30d156a86"
+  },
+  {
+    "path": "eksplorator.bin",
+    "bytes": 297536,
+    "text_bytes": 290816,
+    "data_capacity": 131072,
+    "data_file_bytes": 2624,
+    "sha256": "820e4aad2fbaa8816e8f32e3fa8afacd85d83e34fa94fe28dfeaeda0694784c8"
+  },
+  {
+    "path": "fpu_probe.bin",
+    "bytes": 69856,
+    "text_bytes": 65536,
+    "data_capacity": 524288,
+    "data_file_bytes": 224,
+    "sha256": "4aac94321f14fd5e994a33deb7f444d5e6d17b0483014f247ec33d320593f51e"
+  },
+  {
+    "path": "husarz_worker.bin",
+    "bytes": 69888,
+    "text_bytes": 65536,
+    "data_capacity": 524288,
+    "data_file_bytes": 256,
+    "sha256": "10e3d9efb2f2562d2f8a42f1afa4e52299348de67d72a2212c5f964f136823cd"
+  },
+  {
+    "path": "instalator.bin",
+    "bytes": 219680,
+    "text_bytes": 212992,
+    "data_capacity": 131072,
+    "data_file_bytes": 2592,
+    "sha256": "984192c322045e74e0930ec2fa93dd211b098b17cbb490005306980f71c47636"
+  },
+  {
+    "path": "kalkulator.bin",
+    "bytes": 203424,
+    "text_bytes": 196608,
+    "data_capacity": 131072,
+    "data_file_bytes": 2720,
+    "sha256": "8073d809c5f8b225e58e0bbf838544b6a084cd964a283b46d255da09e5568ca9"
+  },
+  {
+    "path": "kontrolki2.bin",
+    "bytes": 301600,
+    "text_bytes": 294912,
+    "data_capacity": 131072,
+    "data_file_bytes": 2592,
+    "sha256": "a6454213076350e4aa2b1658716de0f6542877bc61e99f014d3dad33a9bc55d4"
+  },
+  {
+    "path": "kontrolki3.bin",
+    "bytes": 236064,
+    "text_bytes": 229376,
+    "data_capacity": 131072,
+    "data_file_bytes": 2592,
+    "sha256": "d3c2f7e7f9de29d2961157ac0e6e51870fbfc0dc0dd2b35869e8448525064ca3"
+  },
+  {
+    "path": "kontrolki4.bin",
+    "bytes": 351200,
+    "text_bytes": 344064,
+    "data_capacity": 131072,
+    "data_file_bytes": 3040,
+    "sha256": "f058e4385e8fd64d4b90d1b621ff1177b434f0ace7edaf54b5ebf325ef0ea1e6"
+  },
+  {
+    "path": "menedzer_okien.bin",
+    "bytes": 382464,
+    "text_bytes": 319488,
+    "data_capacity": 131072,
+    "data_file_bytes": 58880,
+    "sha256": "2e5d872ff6ee1c3e5a677388a70a4570d909b9f0fe9193d660f44e5e67a79fcf"
+  },
+  {
+    "path": "notatnik.bin",
+    "bytes": 203296,
+    "text_bytes": 196608,
+    "data_capacity": 131072,
+    "data_file_bytes": 2592,
+    "sha256": "1740faec63cca787a0c06a83e172c47b3471cf49c0dc612ac372533fab0ffe04"
+  },
+  {
+    "path": "przegladarka.bin",
+    "bytes": 580192,
+    "text_bytes": 573440,
+    "data_capacity": 524288,
+    "data_file_bytes": 2656,
+    "sha256": "a258a80a7829858411d2367f15678c6799741399c601149ab3e7d624e5b9b75f"
+  },
+  {
+    "path": "przegladarka_obrazow.bin",
+    "bytes": 137792,
+    "text_bytes": 131072,
+    "data_capacity": 262144,
+    "data_file_bytes": 2624,
+    "sha256": "2566cacb7aa3956e41b1d505ca2ecfe9d5106140b639b6b79ddb97d5c2f0590a"
+  },
+  {
+    "path": "repro.bin",
+    "bytes": 36880,
+    "text_bytes": 32768,
+    "data_capacity": 131072,
+    "data_file_bytes": 16,
+    "sha256": "3bb82da8181764b3d948951087b9cf07402df3fa30577a1b917c5e42db7730fa"
+  },
+  {
+    "path": "shell.bin",
+    "bytes": 174720,
+    "text_bytes": 167936,
+    "data_capacity": 262144,
+    "data_file_bytes": 2688,
+    "sha256": "b0f6c1e5c68f10dfa8a9eccbdaf4373ed997441b1936e764e313b756dab936f1"
+  },
+  {
+    "path": "snake.bin",
+    "bytes": 139680,
+    "text_bytes": 131072,
+    "data_capacity": 262144,
+    "data_file_bytes": 4512,
+    "sha256": "9246eec5264286fa781ae59ce688ff80a1e56f8c3586376f8148b6c712464e03"
+  },
+  {
+    "path": "tapety.bin",
+    "bytes": 305728,
+    "text_bytes": 299008,
+    "data_capacity": 131072,
+    "data_file_bytes": 2624,
+    "sha256": "849b0c977df07b3e12ae6e4a2ce706abcdb0106b842f896aed19736a11d32607"
+  },
+  {
+    "path": "test.bin",
+    "bytes": 543296,
+    "text_bytes": 536576,
+    "data_capacity": 131072,
+    "data_file_bytes": 2624,
+    "sha256": "a6d4256ee5cf14eee396a9e3611fb70ab2a4b140a2dfbf95076561e042118db2"
+  },
+  {
+    "path": "test_dzwieku.bin",
+    "bytes": 223776,
+    "text_bytes": 217088,
+    "data_capacity": 4501504,
+    "data_file_bytes": 2592,
+    "sha256": "031c2810c77425f0a517fc6f9a19e0b59670968800ea02bf6ba7595b4e3b49d4"
+  },
+  {
+    "path": "ustawienia.bin",
+    "bytes": 215584,
+    "text_bytes": 208896,
+    "data_capacity": 131072,
+    "data_file_bytes": 2592,
+    "sha256": "8654b48a45e9ea013c83bca8e0ecb9e3516e3f6fcfdc14beff431594c24ae547"
+  }
+]

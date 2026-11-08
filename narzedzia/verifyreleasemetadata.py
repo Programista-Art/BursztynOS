@@ -62,7 +62,7 @@ def inspect(root, scan_efi=True):
   except (struct.error, IndexError, ValueError):
    findings.append(dict(path=rel,kind='malformed-executable'))
    e=None; portable=None
-  inventory.append(dict(path=rel,size=len(data),sha256=sha(data),type=typ,magic=data[:16].hex(),executable=bool(e or data.startswith((b'MZ',b'BUR\0'))),compression=next((x for x in ('gzip','XZ','bzip2','compressed') if x in typ),None)))
+  inventory.append(dict(path=rel,size=len(data),sha256=sha(data),type=typ,magic=data[:16].hex(),executable=bool(e or data.startswith((b'MZ',b'BUR\0',b'BUR\x02'))),compression=next((x for x in ('gzip','XZ','bzip2','compressed') if x in typ),None)))
   def issue(kind,**kw):findings.append(dict(path=rel,kind=kind,**kw))
   if (p.suffix in BAD_SUFFIX and rel not in GRUB_RUNTIME_OBJECTS) or BAD_DIR.intersection(pathlib.PurePosixPath(rel).parts):issue('development-file')
   for category,pattern in SECRET.items():

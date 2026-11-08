@@ -184,8 +184,8 @@ RING3_FLAGS := \
 	-fno-rtti \
 	-fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new
 
-# Explicit rollout switch: v1 remains the release default until guest acceptance.
-BUR_FORMAT ?= 1
+# Explicit rollout switch: v2 (relocatable PIE + Ring 3 ASLR) is the release default; BUR_FORMAT=1 remains supported.
+BUR_FORMAT ?= 2
 ifeq ($(filter $(BUR_FORMAT),1 2),)
 $(error BUR_FORMAT must be 1 or 2)
 endif
@@ -591,15 +591,15 @@ bsf_bitmap.o: bsf/bitmap.cpp bsf/runtime.h
 # 12. SHELL .bur
 # ============================================================================
 
-shell_tmp.o: shell.cpp shell_terminal.h shell_context.h shell_sponsors.h wersja_systemu.h bursztyn_gui.h bursztyn_ui/czcionka.h bursztyn_ui/rysowanie.h bursztyn_ui/pasek_przewijania.h bursztyn_ui/menu_kontekstowe.h
+shell_tmp.o: shell.cpp shell_font.h shell_terminal.h shell_context.h shell_sponsors.h wersja_systemu.h bursztyn_gui.h bursztyn_ui/czcionka.h bursztyn_ui/rysowanie.h bursztyn_ui/pasek_przewijania.h bursztyn_ui/menu_kontekstowe.h
 	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
 
 .PHONY: shellblob.o
 shellblob.o: shell_blob.o
 
-shell_blob.o: shell_tmp.o bursztyn_gui.o programy/shell_bsf_linker.ld
+shell_blob.o: shell_tmp.o bsf_terminal.o bursztyn_gui.o programy/shell_bsf_linker.ld
 	$(LD) -T $(call bur_linker,programy/shell_bsf_linker.ld) $(RING3_LDFLAGS) \
-		shell_tmp.o bursztyn_gui.o -o shell.elf
+		shell_tmp.o bsf_terminal.o bursztyn_gui.o -o shell.elf
 	$(BUR_CONVERT) shell.elf shell.bin
 	$(LD) -r -b binary shell.bin -o shell_blob.o
 
@@ -1640,7 +1640,7 @@ test-wm-dekoracje:
 
 test-shell-host:
 	@mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_shell_terminal.cpp -Wl,--gc-sections -o .wm-test/shell
+	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_shell_terminal.cpp bsf/bsf.cpp bsf/terminal.cpp -Wl,--gc-sections -o .wm-test/shell
 	ASAN_OPTIONS=detect_leaks=0 .wm-test/shell
 
 BURSZTYNDIAGCURSORPERF ?= 0
@@ -2089,7 +2089,7 @@ test-user-fault-policy:
 test-user-fault-qemu-build: all
 	@mkdir -p .husarz-test/user-fault
 	$(CC) $(ASM_FLAGS) -c narzedzia/fixtures/husarz/user_fault.S -o .husarz-test/user-fault/probe.o
-	$(LD) --gc-sections -T $(call bur_linker,$(PRZEGLADARKA_LINKER)) $(RING3_LDFLAGS) .husarz-test/user-fault/probe.o -o .husarz-test/user-fault/probe.elf
+	$(LD) --gc-sections -T $(call bur_linker,$(PRZEGLADARKA_LINKER)) $(RING3_LDFLAGS) .husarz-test/user-fault/probe.o ring3_ssp.o -o .husarz-test/user-fault/probe.elf
 	$(BUR_CONVERT) .husarz-test/user-fault/probe.elf .husarz-test/user-fault/przegladarka.bin
 	cd .husarz-test/user-fault && $(LD) -r -b binary przegladarka.bin -o probe-blob.o
 	$(CXX) $(KERNEL_LDFLAGS) -o .husarz-test/user-fault/kernel.bin $(filter-out przegladarka_blob.o,$(OBJS)) .husarz-test/user-fault/probe-blob.o -lgcc
@@ -2098,7 +2098,7 @@ test-user-fault-qemu-build: all
 test-user-page-fault-qemu-build: all
 	@mkdir -p .husarz-test/user-page-fault
 	$(CC) $(ASM_FLAGS) -DHUSARZ_FAULT_PAGE=1 -c narzedzia/fixtures/husarz/user_fault.S -o .husarz-test/user-page-fault/probe.o
-	$(LD) --gc-sections -T $(call bur_linker,$(PRZEGLADARKA_LINKER)) $(RING3_LDFLAGS) .husarz-test/user-page-fault/probe.o -o .husarz-test/user-page-fault/probe.elf
+	$(LD) --gc-sections -T $(call bur_linker,$(PRZEGLADARKA_LINKER)) $(RING3_LDFLAGS) .husarz-test/user-page-fault/probe.o ring3_ssp.o -o .husarz-test/user-page-fault/probe.elf
 	$(BUR_CONVERT) .husarz-test/user-page-fault/probe.elf .husarz-test/user-page-fault/przegladarka.bin
 	cd .husarz-test/user-page-fault && $(LD) -r -b binary przegladarka.bin -o probe-blob.o
 	$(CXX) $(KERNEL_LDFLAGS) -o .husarz-test/user-page-fault/kernel.bin $(filter-out przegladarka_blob.o,$(OBJS)) .husarz-test/user-page-fault/probe-blob.o -lgcc
@@ -2302,11 +2302,11 @@ test-security-hardening: test-stack-protector-host test-bur-v2-aslr-host test-fu
 	@printf '%s\n' '$(BUR_FORMAT)' > $@.tmp
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
-aktualizacje_tmp.o bsf_bitmap.o bsf_core.o bsf_runtime.o btp_ring3.o bursztyn_gui_base.o bursztyn_gui_minimal_base.o demo_ui_tmp.o diagnostyka_tmp.o ekran_format_ring3.o ekran_tmp.o eksplorator_tmp.o fpu_probe_tmp.o husarz_worker_tmp.o ikona_png_ring3.o image_png_ring3.o image_ring3.o instalator_tmp.o kalkulator_tmp.o kontrolki2_tmp.o kontrolki3tmp.o kontrolki4tmp.o menedzer_okien_tmp.o notatnik_tmp.o przegladarka_obrazow_tmp.o przegladarka_tmp.o repro_tmp.o ring3_ssp.o shell_tmp.o snake_tmp.o tapety_tmp.o test_dzwieku_tmp.o test_tmp.o ustawienia_tmp.o: .bur-format-config
+aktualizacje_tmp.o bsf_bitmap.o bsf_core.o bsf_runtime.o bsf_terminal.o btp_ring3.o bursztyn_gui_base.o bursztyn_gui_minimal_base.o demo_ui_tmp.o diagnostyka_tmp.o ekran_format_ring3.o ekran_tmp.o eksplorator_tmp.o fpu_probe_tmp.o husarz_worker_tmp.o ikona_png_ring3.o image_png_ring3.o image_ring3.o instalator_tmp.o kalkulator_tmp.o kontrolki2_tmp.o kontrolki3tmp.o kontrolki4tmp.o menedzer_okien_tmp.o notatnik_tmp.o przegladarka_obrazow_tmp.o przegladarka_tmp.o repro_tmp.o ring3_ssp.o shell_tmp.o snake_tmp.o tapety_tmp.o test_dzwieku_tmp.o test_tmp.o ustawienia_tmp.o: .bur-format-config
 bur-v1:
-	$(MAKE) BUR_FORMAT=1 all
+	$(MAKE) BUR_FORMAT=1 all ustawienia_blob.o
 bur-v2:
-	$(MAKE) BUR_FORMAT=2 all
+	$(MAKE) BUR_FORMAT=2 all ustawienia_blob.o
 
 test-bur-v2-qemu: all
 	$(PYTHON) narzedzia/test_bur_v2_qemu.py
@@ -2319,3 +2319,56 @@ test-bsf-graphemes-host:
 
 $(GRUB_CFG): czcionki/release-fonts.txt narzedzia/bsf_release_assets.py
 bsf_core.o: bsf/unicode.inc bsf/unicode_data.inc
+
+.PHONY: test-notepad-unicode-host
+test-notepad-unicode-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -fcoroutines -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_notepad_unicode.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/notepad-unicode
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/notepad-unicode
+
+.PHONY: fuzz-bsf-coverage-host
+fuzz-bsf-coverage-host:
+	@mkdir -p .bsf-test/fuzz-corpus
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fsanitize-coverage=trace-pc -fno-omit-frame-pointer -fno-pie -ffunction-sections -fdata-sections -c bsf/bsf.cpp -o .bsf-test/bsf-coverage.o
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections narzedzia/fuzz_bsf_coverage.cpp .bsf-test/bsf-coverage.o -Wl,--gc-sections -o .bsf-test/fuzz-bsf-coverage
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/fuzz-bsf-coverage czcionki/ttf/DejaVuSans.ttf .bsf-test/fuzz-corpus 10000
+
+.PHONY: bsf-editor-observer
+bsf-editor-observer: .bsf-test/editor-observer.json
+.bsf-test/editor-observer.json: narzedzia/bsf_editor_observer.cpp notatnik.cpp $(wildcard bursztyn_ui/*.h) bsf/edit.h
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -fcoroutines -O0 -ffunction-sections -fdata-sections -Wno-invalid-offsetof $< -Wl,--gc-sections -o .bsf-test/editor-observer
+	.bsf-test/editor-observer > $@
+
+.PHONY: test-usb-keyboard-repeat-host
+test-usb-keyboard-repeat-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-pie -no-pie -I. narzedzia/test_usb_keyboard_repeat.cpp -o .bsf-test/usb-keyboard-repeat
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/usb-keyboard-repeat
+
+.PHONY: test-bsf-resources-host
+test-bsf-resources-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -fcheck-new -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_bsf_resources.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/resources
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/resources
+
+bsf_terminal.o: bsf/terminal.cpp bsf/terminal.h bsf/terminal_width.inc
+	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
+
+.PHONY: test-shell-ttf-host
+test-shell-ttf-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -DBSF_NATIVE=1 -ffunction-sections -fdata-sections -fsanitize=address,undefined -fno-pie -no-pie narzedzia/test_shell_terminal.cpp bsf/bsf.cpp bsf/terminal.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/shell-ttf
+	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/shell-ttf
+
+.PHONY: bsf-display-layout
+bsf-display-layout:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -I. -ffunction-sections -fdata-sections narzedzia/bsf_display_layout.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/display-layout-generator
+	.bsf-test/display-layout-generator
+
+.PHONY: bsf-installer-observer
+bsf-installer-observer:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -fcoroutines -O0 -ffunction-sections -fdata-sections -I. narzedzia/bsf_installer_observer.cpp -Wl,--gc-sections -o .bsf-test/installer-observer
+	.bsf-test/installer-observer > .bsf-test/installer-observer.json

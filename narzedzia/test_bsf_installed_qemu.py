@@ -28,6 +28,7 @@ def main():
     parser.add_argument('--desktop-grid',action='store_true',help='Repeated family transitions and disk-only restart anchor comparison')
     parser.add_argument('--resume',type=Path,help='Verify an already completed private test installation')
     args=parser.parse_args()
+    subprocess.run(['make','bsf-installer-observer'],cwd=ROOT,stdout=subprocess.DEVNULL,check=True)
     parent = ROOT / '.bsf-test'
     parent.mkdir(exist_ok=True)
     out = args.resume.resolve() if args.resume else Path(tempfile.mkdtemp(prefix='installed-', dir=parent))
@@ -84,12 +85,16 @@ def main():
         ('apply', ['--expected-font-size', '16']),
         ('restart', ['--expected-font-size', '24', '--font-restore-only']),
     )
+    public_kernel=out/'iso/boot/system_operacyjny.bin'
+    observation_kernel=ROOT/'.release-private'/sha(public_kernel)/'kernel.elf'
+    if not observation_kernel.is_file():raise RuntimeError('Matching split-debug ELF unavailable: '+str(observation_kernel))
     for name,extra in scenarios:
         command = [sys.executable, str(ROOT / 'narzedzia/test_husarz_qemu.py'),
                    '--desktop-grid-only' if args.desktop_grid else '--fonts-only', '--installed-disk', str(disk),
-                   '--kernel',str(out/'iso/boot/system_operacyjny.bin'),
+                   '--kernel',str(observation_kernel),
                    '--iso',str(out/'installer.iso'),
                    '--output', str(out / name), '--timeout', '1500'] + extra
+        if name=='apply' and not args.desktop_grid:command+=['--native-font-apps']
         with (out / (name + '.log')).open('w') as log:
             subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
                            check=True, timeout=1550)

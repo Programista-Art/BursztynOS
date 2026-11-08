@@ -17,6 +17,7 @@ bool skopiuj_string_z_uzytkownika(char* dst,const char* src,size_t n){if(!src||s
 bool skopiuj_do_przestrzeni_uzytkownika(void* d,const void* s,size_t n){memcpy(d,s,n);return true;}
 bool skopiuj_z_przestrzeni_uzytkownika(void* d,const void* s,size_t n){memcpy(d,s,n);return true;}
 bool czy_bezpieczny_zakres_uzytkownika_do_zapisu(void* p,size_t){return p!=nullptr;}
+extern "C" bool bws_vmm_sprawdz_zakres_uzytkownika(const void* p,uint64_t,bool){return p!=nullptr;}
 bool scheduler_dodaj_zdarzenie(int,const bws_zdarzenie*){return true;}
 uint64_t scheduler_pobierz_tick(){return 1;}
 extern "C" void bws_powiadom_zmiane_pliku(const char*,uint32_t){}
@@ -97,5 +98,16 @@ int main(){
     for(size_t cap:{size_t(1),size_t(4),size_t(8),first,first+1,first+4}) {
         CHECK(!bws_wylistuj_katalog(p,(uint64_t)DesktopEntries::Directory,(uint64_t)listing.get(),cap));CHECK(!psf_test_lock_held());
     }
+    // GUI-only font reads stay restricted to validated public asset paths.
+    CHECK(utworz_katalog_z_pzb("/czcionki",PZB_USLUGI));CHECK(utworz_katalog_z_pzb("/czcionki/ttf",PZB_USLUGI));
+    CHECK(utworz_plik_z_pzb("/czcionki/ttf/Ω font.ttf",PZB_USLUGI));CHECK(zapisz_do_pliku("/czcionki/ttf/Ω font.ttf","font",4));
+    proces_t gui{};gui.poziom_zaufania=PZB_UZYTKOWNIK;gui.uprawnienia=PRAWO_GUI;char font_bytes[4]{};
+    CHECK(bws_czytaj_fragment_pliku(gui,(uint64_t)"/czcionki/ttf/Ω font.ttf",0,(uint64_t)font_bytes,4)==5);CHECK(!memcmp(font_bytes,"font",4));
+    CHECK(!bws_czytaj_fragment_pliku(gui,(uint64_t)"/source/copied",0,(uint64_t)font_bytes,4));
+    CHECK(!bws_czytaj_fragment_pliku(gui,(uint64_t)"/czcionki/ttf/../x.ttf",0,(uint64_t)font_bytes,4));
+    CHECK(!bws_czytaj_fragment_pliku(gui,(uint64_t)"/czcionki/ttf/Ω font.ttf",BSF::MaxFile,(uint64_t)font_bytes,4));
+    CHECK(bws_wylistuj_katalog(gui,(uint64_t)"/czcionki/ttf",(uint64_t)listing.get(),BSF::DirectoryBytes));
+    CHECK(!bws_utworz_plik(gui,(uint64_t)"/czcionki/ttf/new.ttf"));
+    gui.uprawnienia|=PRAWO_PLIKI_ZAPISZ;CHECK(!bws_utworz_plik(gui,(uint64_t)"/czcionki/ttf/new.ttf"));
     printf("Desktop settings/overflow production BWS/PZB: %u/%u PASS (RAM PSF)\n",checks,checks);
 }

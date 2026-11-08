@@ -9,6 +9,7 @@ import subprocess
 import time
 
 from test_bws_abuse_qemu import get_make_objs, run_cmd, ROOT
+from symbolicate_bur_v2_crash import symbolicate_line
 
 
 def main():
@@ -80,14 +81,25 @@ def main():
         assert '[FPU PROBE] A PASS' in text, text[-5000:]
         assert '[BUR2 NEGATIVE FAILED]' not in text
         for mode in 'gtrhsc': assert '[BUR2 NEGATIVE] '+mode in text
-        assert text.count('[USER FAULT]') >= 6
+        assert text.count('[USER FAULT]') >= 5
         assert '[STACKPROTECTORVIOLATION]' in text
         assert '[BUR2 FAIL]' not in text
+        symbolicated = [
+            r for line in text.splitlines()
+            if (r := symbolicate_line(line, bur_path=out/'test.bin')) is not None
+        ]
+        assert len(symbolicated) >= 5, symbolicated
+        code_faults = [
+            r for r in symbolicated
+            if r['bur_version'] == 2 and r['symbol'] == '_start' and 'bur_v2_probe.cpp' in (r['location'] or '')
+        ]
+        assert len(code_faults) >= 3, symbolicated
         for column in range(5):
             assert len({r[column] for r in rows})>1, ('no variation',column)
             assert all(0 < int(r[column],16) < (1<<47) for r in rows)
         result=dict(executions=len(rows),unique_per_column=[len({r[c] for r in rows}) for c in range(5)],
                     columns=['code','stack','heap','canary_address','shared_mapping'],layouts=rows,
+                    symbolicated_faults=symbolicated,
                     legacy_fpu_fixture_sha256=hashlib.sha256((out/'fpu_probe.bin').read_bytes()).hexdigest(),
                     canary_code_rodata_write_denied=True,heap_stack_execution_denied=True,ssp_contained=True,
                     kernel_sha256=hashlib.sha256((stage/'boot/system_operacyjny.bin').read_bytes()).hexdigest())

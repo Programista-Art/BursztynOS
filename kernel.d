@@ -16,7 +16,8 @@ kernel.o: kernel.cpp system_identity.h wersja_systemu.h \
  sterowniki/dzwiek/../dma.h sterowniki/dzwiek/hda_wewnetrzny.h \
  sterowniki/usb/usb.h aktualizacja.h aktualizacja_format.h bws_ota.h \
  stos_jadra.h motyw.h kolor_alfa.h virtio_rng.h virtio_blk.h virtio_gpu.h \
- prezentacja_startu.h input_device.h virtio_input.h bsf/bootstrap.inc
+ prezentacja_startu.h input_device.h virtio_input.h bsf/bootstrap.inc \
+ bsf/limits.h
 system_identity.h:
 wersja_systemu.h:
 diagnostyka_systemu.h:
@@ -87,3 +88,4 @@ prezentacja_startu.h:
 input_device.h:
 virtio_input.h:
 bsf/bootstrap.inc:
+bsf/limits.h:

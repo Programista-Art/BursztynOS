@@ -87,6 +87,13 @@ int main() {
     window.obsluz_zdarzenie(key(BWS_KEY_SOURCE_E0|0x53));CHECK(!strcmp(field->tekst(),"Żłty"));
     window.obsluz_zdarzenie(key(BWS_KEY_SOURCE_E0|0x4d,BWS_MOD_SHIFT));window.obsluz_zdarzenie(text(0x00f3));
     CHECK(!strcmp(field->tekst(),"Żóty"));
+    // A complete physical arrow press/release must move the caret only once.
+    field->ustaw_tekst("Aąb");stream.clear();
+    klawiatura_obsluz_klawisz(105,1);klawiatura_obsluz_klawisz(105,0);
+    unsigned arrow_presses=0;
+    for(auto event:stream){if(event.typ==BWS_ZDARZENIE_KLAWISZ_FIZYCZNY&&event.x)++arrow_presses;window.obsluz_zdarzenie(event);}
+    CHECK(arrow_presses==1);CHECK(field->pozycja_kursora()==3);
+    field->ustaw_tekst("Żóty");
     for(uint32_t invalid:{0U,8U,9U,13U,127U,159U,0xd800U,0xdfffU,0x110000U,0xffffffffU})window.obsluz_zdarzenie(text(invalid));
     CHECK(!strcmp(field->tekst(),"Żóty"));
     field->ustaw_tekst("");for(unsigned i=0;i<300;++i)window.obsluz_zdarzenie(text('8'));

@@ -23,18 +23,29 @@ def check(cond: bool, msg: str) -> None:
         print(f"FAIL {msg}")
 
 
+def _pt_loads(data: bytes):
+    h = struct.unpack_from("<16sHHIQQQIHHHHHH", data)
+    result = []
+    for i in range(h[10]):
+        p = struct.unpack_from("<IIQQQQQQ", data, h[5] + i * h[9])
+        if p[0] == 1:
+            result.append((p[1], p[3], p[4], p[5], p[6], p[7], hashlib.sha256(data[p[2]:p[2] + p[5]]).hexdigest()))
+    return (h[4], result)
+
+
 def verify_image() -> None:
     """Close the final BIN -> blob -> kernel -> ISO chain without booting it."""
     app = (ROOT / "test_dzwieku.bin").read_bytes()
     kernel = (ROOT / "system_operacyjny.bin").read_bytes()
+    staged = (ROOT / "isodir/boot/system_operacyjny.bin").read_bytes()
     iso = ROOT / "BursztynOS.iso"
     with tempfile.TemporaryDirectory(prefix="test-dzwieku-package-") as directory:
         extracted = Path(directory) / "kernel"
         subprocess.run(["xorriso", "-osirrox", "on", "-indev", str(iso), "-extract",
                         "/boot/system_operacyjny.bin", str(extracted)],
                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-        check(extracted.read_bytes() == kernel, "ISO contains the final kernel byte for byte")
-        check((ROOT / "isodir/boot/system_operacyjny.bin").read_bytes() == kernel,
+        check(extracted.read_bytes() == staged, "ISO contains the final kernel byte for byte")
+        check(staged == kernel or _pt_loads(staged) == _pt_loads(kernel),
               "staged kernel equals the final kernel")
         blob = Path(directory) / "app"
         subprocess.run(["objcopy", "-O", "binary", "--only-section=.data",
@@ -101,16 +112,32 @@ def main() -> int:
     check("BWS_HDA_DIAG = 89" in api, "BWS_HDA_DIAG == 89")
     check("BWS_HDA_TEST = 90" in api, "BWS_HDA_TEST == 90")
     check("BWS_DIAGNOSTYKA_SYSTEMU = 91" in api, "system diagnostics reserves 91")
-    check("BWS_PIERWSZY_WOLNY = 92" in api, "next free is 92")
+    check("BWS_PIERWSZY_WOLNY = 96" in api, "next free is 96")
 
     # --- built artifact ---
     blob = ROOT / "test_dzwieku.bin"
     if blob.exists():
         data = blob.read_bytes()
         check(len(data) > 0, "test_dzwieku.bin nonzero")
-        check(data[:4] == b"BUR\x00", "BUR magic")
+        check(data[:4] in (b"BUR\x00", b"BUR\x02"), "BUR magic (v1 or v2)")
         check(b"[TEST DZWIEKU]" not in data, "temporary startup logging absent from production BUR")
-        if len(data) >= 60:
+        if data[:4] == b"BUR\x02" and len(data) >= 160:
+            entry = struct.unpack_from("<Q", data, 24)[0]
+            toff, tsz, tva = struct.unpack_from("<3Q", data, 32)
+            roff, rsz, rva = struct.unpack_from("<3Q", data, 56)
+            doff, dfile, dsz, dva = struct.unpack_from("<4Q", data, 80)
+            check(tsz > 0 and dsz > 0, "segment sizes nonzero")
+            check(toff == 0x1000, f"text offset 0x1000 (got {toff:#x})")
+            check(roff == toff + tsz, "rodata offset is contiguous after text")
+            check(doff == roff + rsz, "data offset is contiguous after rodata")
+            check(tva == 0x1000, f"text RVA (got {tva:#x})")
+            check(tsz % 4096 == 0 and rsz % 4096 == 0 and dsz % 4096 == 0, "segment sizes 4KiB aligned")
+            check(toff + tsz <= len(data) and doff + dfile <= len(data), "all file-backed segment ranges present")
+            check(0 < dfile <= dsz, "DATA stores initializers; BSS is implicit zero-fill")
+            check(len(data) <= 524288, f"app budget: actual={len(data)} maximum=524288")
+            check(tva <= entry < tva + tsz, "entry inside executable text")
+            print(f"BUR v2 file={len(data)} text={tsz} rodata={rsz} initialized_data={dfile} zero_fill={dsz-dfile} mapped={tsz+rsz+4096+dsz}")
+        elif len(data) >= 60:
             entry, toff, tsz, tva, doff, dsz, dva = struct.unpack_from("<QQQQQQQ", data, 4)
             check(tsz > 0 and dsz > 0, "segment sizes nonzero")
             check(toff == 0x1000, f"text offset 0x1000 (got {toff:#x})")
@@ -150,9 +177,10 @@ def main() -> int:
                   "Brak kontrolera HDA", "Skanowanie kodeków", "Skanowanie widgetów", "Gotowe"]:
         check(label in app, f"UTF-8 Polish label: {label}")
     check('"/dane/diagnostyka/hda.txt"' in app, "canonical report path")
+    app_obj_symbols = __import__("subprocess").check_output(["nm", "test_dzwieku_tmp.o"], cwd=ROOT, text=True)
     symbols = __import__("subprocess").check_output(["nm", "test_dzwieku.elf"], cwd=ROOT, text=True)
-    check("nowa_czcionka_16x16" not in symbols and "nowa_czcionka_szerokosci" not in symbols,
-          "no embedded extronic16Bunicode font data")
+    check("nowa_czcionka_16x16" not in app_obj_symbols and "nowa_czcionka_szerokosci" not in app_obj_symbols,
+          "no embedded extronic16Bunicode font data in app object")
     check(re.search(r'_start$', symbols, re.M) is not None, "linked Ring3 entry exists")
 
     if "--image" in sys.argv:

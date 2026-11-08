@@ -1,0 +1,19 @@
+{
+  "iso": {
+    "path": "BursztynOS.iso",
+    "bytes": 40318976,
+    "sha256": "778fbca5fde28fceaca324f0671faa6510436adca547342b8977839ba250e9c9"
+  },
+  "public_kernel": {
+    "path": "isodir/boot/system_operacyjny.bin",
+    "bytes": 10511056,
+    "sha256": "f25e01a1e519ce7bba0525f461876b449f45a237e9316f2a678a83eab9e54321"
+  },
+  "observer_elf": {
+    "path": "system_operacyjny.bin",
+    "bytes": 14199240,
+    "sha256": "a96c92e539f254d48916238d09978d1a86d397381a46ade4ffa50af18d99f27e"
+  },
+  "findings": [],
+  "inventory_entries": 616
+}

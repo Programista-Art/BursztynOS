@@ -1,0 +1,36 @@
+[
+  {
+    "label": "end",
+    "cursor": 204,
+    "anchor": 204,
+    "length": 204,
+    "boundaries": [
+      188,
+      191,
+      192,
+      196,
+      197,
+      198,
+      199,
+      204
+    ],
+    "tail": "80e1be80e1bfb720f09f9880207c2061cc88cc81"
+  },
+  {
+    "label": "left",
+    "cursor": 198,
+    "anchor": 198,
+    "length": 204,
+    "boundaries": [
+      188,
+      191,
+      192,
+      196,
+      197,
+      198,
+      199,
+      204
+    ],
+    "tail": "80e1be80e1bfb720f09f9880207c2061cc88cc81"
+  }
+]

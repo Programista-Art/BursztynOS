@@ -9,7 +9,13 @@ struct FontInfo {
   char path[160]{}, family[96]{}, style[48]{};
   uint16_t weight{};
   bool italic{}, mono{}, serif{};
+  uint8_t coverage[34]{}; // Conservative cmap coverage in 4,096-scalar blocks.
 };
+enum class InstallResult { Ok, BadPath, InvalidFont, Exists, IO };
+// Uses normal caller BWS permissions; never replaces an existing system font.
+InstallResult install_font(const char* source);
+struct ResourceInfo {unsigned examined{},rejected{},resident_bytes{},peak_resident_bytes{};bool catalog_limit{},directory_error{};uint64_t loads{},io_bytes{},scalar_hits{},cluster_hits{};};
+ResourceInfo resources();
 unsigned enumerate();
 uint32_t default_id();
 const FontInfo *info(unsigned);
@@ -34,6 +40,16 @@ int measure_cp(uint32_t cp, int px, bool bold = false,
 int measure_styled_cp(uint32_t cp,int px,bool bold,const char* family,bool italic);
 int measure_text(const char *, int px, bool bold = false,
                  const char *family = nullptr, size_t limit = 65536);
+struct TextMetrics {
+  int64_t width{};uint32_t previous{},previous_face{};
+  void cluster(const char*,size_t start,size_t end,int px,bool bold=false,const char* family=nullptr);
+};
+// Logical LTR caret metrics: offsets inside a grapheme floor to its start.
+// The full bounded string determines cluster coverage, including trailing marks.
+int measure_prefix(const char*,size_t offset,int px,bool bold=false,
+                   const char* family=nullptr,size_t limit=65536);
+size_t hit_test(const char*,int x,int px,bool bold=false,
+                const char* family=nullptr,size_t limit=65536);
 uint32_t resolve_family(const char *);
 const char *family_name(uint32_t);
 bool family_monospace(uint32_t);
@@ -43,6 +59,7 @@ int height(int px, const char *family = nullptr);
 int ascent(int px, const char *family = nullptr);
 const Glyph *glyph(uint32_t cp, int px, bool bold = false,
                    const char *family = nullptr, bool italic = false);
+bool cached_face(uint32_t cp,uint32_t face,int px,bool bold=false,bool italic=false);
 bool cached(uint32_t cp, int px, bool bold, const char *family, bool italic);
 void pin(const Glyph *);
 void unpin(void *);

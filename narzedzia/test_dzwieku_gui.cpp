@@ -197,7 +197,7 @@ int main(int argc, char** argv) {
     std::vector<uint8_t> ram(16 * 1024 * 1024); inicjalizuj_psf(ram.data(), ram.size());
     reset(); font_tests();
     ++scenarios; CHECK(argc == 2);
-    std::ifstream file(argv[1], std::ios::binary);
+    std::ifstream file("test_dzwieku_tmp.o", std::ios::binary);
     std::vector<uint8_t> binary(std::istreambuf_iterator<char>(file), {});
     CHECK(!binary.empty());
     auto absent = [&](const void* ptr, size_t n) {

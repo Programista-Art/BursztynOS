@@ -216,6 +216,9 @@ void NotatnikApp::aktualizuj_stan() {
     size_t linia = 1;
     size_t kolumna = 1;
 
+#if defined(BSF_NATIVE)
+    (void)kursor;(void)txt;memo->pozycja_logiczna(linia,kolumna);
+#else
     for (size_t i = 0; i < kursor && txt && txt[i]; ++i) {
         if (txt[i] == '\n') {
             ++linia;
@@ -224,6 +227,7 @@ void NotatnikApp::aktualizuj_stan() {
             ++kolumna;
         }
     }
+#endif
 
     char buf_poz[48];
     char l_str[16];
@@ -266,9 +270,19 @@ bool NotatnikApp::otworz_plik(const char* sciezka) {
     if (!sciezka || sciezka[0] == '\0') return false;
 
     static char bufor_odczytu[65536];
-    bufor_odczytu[0] = '\0';
+    uint32_t rozmiar=0;
+    if(!pobierz_rozmiar_pliku(sciezka,&rozmiar) || rozmiar>=sizeof(bufor_odczytu)){
+        if(pasek_stanu)pasek_stanu->ustaw_tekst(0,"Błąd: plik przekracza limit 65535 bajtów lub jest niedostępny.");
+        return false;
+    }
+    bufor_odczytu[rozmiar]=0;
     if (!czytaj_plik(sciezka, bufor_odczytu, sizeof(bufor_odczytu) - 1)) {
         if (pasek_stanu) pasek_stanu->ustaw_tekst(0, "Błąd: nie można otworzyć pliku!");
+        return false;
+    }
+
+    for(uint32_t b=0;b<rozmiar;++b)if(!bufor_odczytu[b]){
+        if(pasek_stanu)pasek_stanu->ustaw_tekst(0,"Błąd: plik zawiera bajt NUL; nie otwarto jako tekst.");
         return false;
     }
 
@@ -314,6 +328,11 @@ bool NotatnikApp::zapisz_plik_jako(const char* sciezka) {
     const char* dane = memo->tekst();
     size_t len = memo->dlugosc();
 
+    uint32_t poprzedni_rozmiar=0;
+    if(!pobierz_rozmiar_pliku(sciezka,&poprzedni_rozmiar) && !utworz(sciezka)){
+        if(pasek_stanu)pasek_stanu->ustaw_tekst(0,"Błąd: nie można utworzyć pliku w wybranym katalogu.");
+        return false;
+    }
     if (!zapisz_plik(sciezka, dane, static_cast<uint32_t>(len))) {
         if (pasek_stanu) pasek_stanu->ustaw_tekst(0, "Błąd zapisu pliku!");
         return false;

@@ -2,6 +2,9 @@
 #include "css.h"
 #include "forms.h"
 #include "../../bsf/bsf.h"
+#if defined(BSF_NATIVE)
+#include "../../bsf/runtime.h"
+#endif
 namespace Husarz {
 struct Flow {
     uint16_t node{};
@@ -32,6 +35,53 @@ inline uint32_t transformed(uint32_t cp, Transform t, bool word_start) {
             return lo[i];
     }
     return cp;
+}
+// Source offsets stay in logical UTF-8 order. This is fallback, not shaping.
+struct TextCluster { size_t begin{},end{}; uint32_t face{}; };
+inline TextCluster text_cluster(const char* text,size_t size,size_t at,Metrics m,const Style& s,bool first=false){
+    size_t used;utf8(text+at,size-at,used);TextCluster c{at,at+used,0};
+#if defined(BSF_NATIVE)
+    c.end=BSF::next_cluster(text,at,size);
+    if(m.family_advance){
+        const char* bytes=text+at;size_t length=c.end-at;char changed[128];
+        if(s.transform!=Transform::None){
+            size_t n=0;
+            for(size_t p=at;p<c.end;){size_t z;uint32_t cp=utf8(text+p,c.end-p,z);char b[4];unsigned k=encode(transformed(cp,s.transform,first&&p==at),b);
+                if(k>sizeof(changed)-n)return c;
+                for(unsigned j=0;j<k;++j)changed[n++]=b[j];p+=z;
+            }bytes=changed;length=n;
+        }
+        c.face=BSF::resolved_cluster(bytes,length,s.bold,BSF::family_name(s.native_family),s.italic);
+    }
+#else
+    (void)m;(void)s;(void)first;
+#endif
+    return c;
+}
+inline bool text_space(const char* text,size_t size,size_t at){
+    if(!space(text[at]))return false;
+#if defined(BSF_NATIVE)
+    return BSF::next_cluster(text,at,size)==at+1;
+#else
+    (void)size;return true;
+#endif
+}
+inline int cluster_step(Metrics m,uint32_t cp,const Style& s,uint32_t face){
+#if defined(BSF_NATIVE)
+    if(face){
+        if(BSF::combining(cp)||BSF::default_ignorable(cp))return 0;
+        return clamp64(int64_t(BSF::advance_face(cp,face,s.font))+s.letter_spacing+(cp==' '?s.word_spacing:0),0,2048);
+    }
+#else
+    (void)face;
+#endif
+    return advance(m,cp,s);
+}
+inline int cluster_width(const char* text,TextCluster c,Metrics m,const Style& s,bool first=false){
+    int w=0;
+    for(size_t p=c.begin;p<c.end;){size_t z;uint32_t cp=utf8(text+p,c.end-p,z);
+        w=clamp64(int64_t(w)+cluster_step(m,transformed(cp,s.transform,first&&p==c.begin),s,c.face));p+=z;
+    }return w;
 }
 inline int font_height(Metrics m, const Style &s) {
     return clamp64(m.family_height?m.family_height(m.user,s.font,s.native_family):m.height ? m.height(m.user, s.font) : s.font, 1, MaxFont * 2);
@@ -115,7 +165,7 @@ inline Work layout_text_work(Document &d, Flow &f, uint16_t id, uint32_t offset,
             ++p;
             continue;
         }
-        if (space(text[p])) {
+        if (text_space(text,size,p)) {
             if (pre) {
                 int w = advance(m, ' ', s);
                 if (text[p] == '\t')
@@ -132,12 +182,10 @@ inline Work layout_text_work(Document &d, Flow &f, uint16_t id, uint32_t offset,
         }
         size_t start = p;
         int width = 0;
-        while (p < size && !space(text[p])) {
+        while (p < size && !text_space(text,size,p)) {
             co_await WorkPoint{1};
-            size_t used;
-            uint32_t cp = utf8(text + p, size - p, used);
-            width = clamp64(int64_t(width) + advance(m, transformed(cp, s.transform, p == start), s));
-            p += used;
+            auto c=text_cluster(text,size,p,m,s,p==start);
+            width=clamp64(int64_t(width)+cluster_width(text,c,m,s,p==start));p=c.end;
         }
         int gap = f.pending_space ? advance(m, ' ', s) : 0;
         if (wrap && f.pen && int64_t(f.pen) + gap + width > f.width) {
@@ -154,9 +202,8 @@ inline Work layout_text_work(Document &d, Flow &f, uint16_t id, uint32_t offset,
         int chunk_width = 0;
         for (size_t k = start; k < p;) {
             co_await WorkPoint{1};
-            size_t used;
-            uint32_t cp = utf8(text + k, p - k, used);
-            int w = advance(m, transformed(cp, s.transform, k == start), s);
+            auto c=text_cluster(text,p,k,m,s,k==start);
+            int w=cluster_width(text,c,m,s,k==start);
             if (chunk_width && int64_t(f.pen) + chunk_width + w > f.width) {
                 emit(d, f, id, offset + uint32_t(chunk), uint32_t(k - chunk), chunk_width, m);
                 co_await finish_line_work(d, f);
@@ -164,7 +211,7 @@ inline Work layout_text_work(Document &d, Flow &f, uint16_t id, uint32_t offset,
                 chunk_width = 0;
             }
             chunk_width = clamp64(int64_t(chunk_width) + w);
-            k += used;
+            k = c.end;
         }
         if (chunk < p)
             emit(d, f, id, offset + uint32_t(chunk), uint32_t(p - chunk), chunk_width, m);
@@ -322,11 +369,10 @@ inline Work intrinsic_width_work(const Document &d, uint16_t id, Metrics metrics
             continue;
         for (size_t p = 0; p < n.text_length;) {
             co_await WorkPoint{1};
-            size_t used;
-            uint32_t cp = utf8(d.str(n.text) + p, n.text_length - p, used);
-            p += used;
+            auto cluster=text_cluster(d.str(n.text),n.text_length,p,metrics,s);
+            p=cluster.end;
             bool collapse = s.white != WhiteSpace::Pre && s.white != WhiteSpace::PreWrap;
-            if (collapse && cp < 128 && space(char(cp))) {
+            if (collapse && text_space(d.str(n.text),n.text_length,cluster.begin)) {
                 if (word > longest)
                     longest = word;
                 word = 0;
@@ -337,7 +383,7 @@ inline Work intrinsic_width_work(const Document &d, uint16_t id, Metrics metrics
                 sum = clamp64(int64_t(sum) + advance(metrics, ' ', s), 0, 8192);
                 pending_space = false;
             }
-            int width = advance(metrics, cp, s);
+            int width = cluster_width(d.str(n.text),cluster,metrics,s);
             word = clamp64(int64_t(word) + width, 0, 8192);
             sum = clamp64(int64_t(sum) + width, 0, 8192);
             int decorated_word = clamp64(int64_t(word) + decoration[relative_depth], 0, 8192);
@@ -475,8 +521,9 @@ inline Work cell_intrinsic_work(Document &d, uint16_t cell, Metrics metrics, Int
                 break;
             size_t used;
             uint32_t cp = utf8(d.str(node.text) + p, node.text_length - p, used);
-            int w = advance(metrics, transformed(cp, style.transform, !word), style);
-            if (space(char(cp)) && cp < 128 && style.white != WhiteSpace::NoWrap &&
+            auto cluster=text_cluster(d.str(node.text),node.text_length,p,metrics,style,!word);
+            int w=cluster_width(d.str(node.text),cluster,metrics,style,!word);
+            if (text_space(d.str(node.text),node.text_length,cluster.begin) && style.white != WhiteSpace::NoWrap &&
                 style.white != WhiteSpace::Pre) {
                 if (word > minimum)
                     minimum = word;
@@ -489,7 +536,7 @@ inline Work cell_intrinsic_work(Document &d, uint16_t cell, Metrics metrics, Int
                 line = 0;
             } else
                 line = clamp64(int64_t(line) + w);
-            p += used;
+            p=cluster.end;
         }
     }
     if (word > minimum)
@@ -1190,10 +1237,8 @@ inline Work reflow_work(Document &d, int width, Metrics metrics) {
                 int intrinsic = 0;
                 for (size_t p = 0; p < n.text_length;) {
                     co_await WorkPoint{1};
-                    size_t used;
-                    auto cp = utf8(d.str(n.text) + p, n.text_length - p, used);
-                    intrinsic = clamp64(int64_t(intrinsic) + advance(metrics, cp, s));
-                    p += used;
+                    auto c=text_cluster(d.str(n.text),n.text_length,p,metrics,s,p==0);
+                    intrinsic=clamp64(int64_t(intrinsic)+cluster_width(d.str(n.text),c,metrics,s,p==0));p=c.end;
                 }
                 const auto *image = d.image(id);
                 Length image_width = s.width, image_height = s.height;
@@ -1500,9 +1545,8 @@ inline Work reflow_work(Document &d, int width, Metrics metrics) {
         const char *text = d.str(g.content);
         for (size_t p = 0, n = length(text, MaxVariableName); p < n;) {
             co_await WorkPoint{1};
-            size_t used;
-            natural += advance(metrics, utf8(text + p, n - p, used), s);
-            p += used;
+            auto c=text_cluster(text,n,p,metrics,s,p==0);
+            natural=clamp64(int64_t(natural)+cluster_width(text,c,metrics,s,p==0));p=c.end;
         }
         g.width = resolve(s.width, b.content_width, s.font, d.root_font, natural);
         g.height = resolve(s.height, b.content_height, s.font, d.root_font, *text ? s.line : 0);

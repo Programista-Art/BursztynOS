@@ -17,16 +17,18 @@ struct ControlTextWalker {
         return password?'*':cp;
     }
     int step_width(uint32_t cp)const {return advance(metrics,cp=='\t'?' ':cp,d.styles[c.node])*(cp=='\t'?4:1);}
+    TextCluster cluster()const{return text_cluster(c.value,c.length,pos,metrics,d.styles[c.node],pos==0);}
+    int current_width()const{size_t n;uint32_t cp=codepoint(n);return password?step_width('*'):cp=='\t'?step_width(cp):cluster_width(c.value,cluster(),metrics,d.styles[c.node],pos==0);}
     void prepare() {
         if(pos>=c.length)return;
         size_t used;uint32_t cp=codepoint(used);
-        if(wrap && cp!='\n' && x && int64_t(x)+step_width(cp)>width){x=0;y=clamp64(int64_t(y)+line);}
+        if(wrap && cp!='\n' && x && int64_t(x)+current_width()>width){x=0;y=clamp64(int64_t(y)+line);}
     }
     void next() {
         if(pos>=c.length)return;
-        size_t used;uint32_t cp=codepoint(used);pos+=unsigned(used);
+        size_t used;uint32_t cp=codepoint(used);int width=current_width();pos=unsigned(cluster().end);
         if(multiline && cp=='\n'){x=0;y=clamp64(int64_t(y)+line);}
-        else x=clamp64(int64_t(x)+step_width(cp));
+        else x=clamp64(int64_t(x)+width);
     }
 };
 struct ControlTextGeometry {int caret_x{},caret_y{},width{},height{};};

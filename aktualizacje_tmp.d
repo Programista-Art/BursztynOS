@@ -22,7 +22,9 @@ aktualizacje_tmp.o: programy/aktualizacje/aktualizacje.cpp \
  programy/aktualizacje/../../bursztyn_ui/czcionka.h \
  programy/aktualizacje/../../bursztyn_ui/../bsf/runtime.h \
  programy/aktualizacje/../../bursztyn_ui/../bsf/bsf.h \
+ programy/aktualizacje/../../bursztyn_ui/../bsf/limits.h \
  programy/aktualizacje/../../bursztyn_ui/../bsf/config.h \
+ programy/aktualizacje/../../bursztyn_ui/../bsf/edit.h \
  programy/aktualizacje/../../bursztyn_ui/../bws_czcionka.h \
  programy/aktualizacje/../../bursztyn_ui/rysowanie.h \
  programy/aktualizacje/../../bursztyn_ui/polecenie_ui.h \
@@ -114,7 +116,9 @@ programy/aktualizacje/../../bursztyn_ui/../kolor_alfa.h:
 programy/aktualizacje/../../bursztyn_ui/czcionka.h:
 programy/aktualizacje/../../bursztyn_ui/../bsf/runtime.h:
 programy/aktualizacje/../../bursztyn_ui/../bsf/bsf.h:
+programy/aktualizacje/../../bursztyn_ui/../bsf/limits.h:
 programy/aktualizacje/../../bursztyn_ui/../bsf/config.h:
+programy/aktualizacje/../../bursztyn_ui/../bsf/edit.h:
 programy/aktualizacje/../../bursztyn_ui/../bws_czcionka.h:
 programy/aktualizacje/../../bursztyn_ui/rysowanie.h:
 programy/aktualizacje/../../bursztyn_ui/polecenie_ui.h:

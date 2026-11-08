@@ -1,0 +1,3 @@
+g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-pie -no-pie narzedzia/test_bsf_graphemes.cpp bsf/bsf.cpp -o .bsf-test/graphemes
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/graphemes
+Unicode 15.1.0 official GraphemeBreakTest: 1187 cases PASS; next/previous/count/all byte boundaries and malformed UTF-8 / 10000 deterministic mutation inputs PASS

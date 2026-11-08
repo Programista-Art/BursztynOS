@@ -3,7 +3,8 @@ shell_tmp.o: shell.cpp bursztyn_gui.h bws_zdarzenia.h bws_pliki.h \
  display_geometry.h ui_skala.h bws_ota.h skladacz_obrazu.h pzb.h \
  legacy_ui.h motyw.h kolor_alfa.h bursztyn_ui/czcionka.h \
  bursztyn_ui/typy.h bursztyn_ui/../bsf/runtime.h bursztyn_ui/../bsf/bsf.h \
- bursztyn_ui/../bsf/config.h bursztyn_ui/../bws_czcionka.h \
+ bursztyn_ui/../bsf/limits.h bursztyn_ui/../bsf/config.h \
+ bursztyn_ui/../bsf/edit.h bursztyn_ui/../bws_czcionka.h \
  bursztyn_ui/rysowanie.h bursztyn_ui/pasek_przewijania.h \
  bursztyn_ui/kontrolka.h bursztyn_ui/diagnostyka.h \
  bursztyn_ui/zdarzenia.h bursztyn_ui/motyw.h bursztyn_ui/polecenie_ui.h \
@@ -11,7 +12,8 @@ shell_tmp.o: shell.cpp bursztyn_gui.h bws_zdarzenia.h bws_pliki.h \
  bursztyn_ui/widok_menu_popup.h bursztyn_ui/popup.h bursztyn_ui/menu.h \
  bursztyn_ui/ikona_ui.h bursztyn_ui/ikona_png.h \
  bursztyn_ui/../obrazy/skalowanie.h system_identity.h wersja_systemu.h \
- shell_runtime_diag.h shell_terminal.h shell_context.h shell_sponsors.h
+ bsf/terminal.h shell_runtime_diag.h shell_terminal.h shell_font.h \
+ shell_context.h shell_sponsors.h
 bursztyn_gui.h:
 bws_zdarzenia.h:
 bws_pliki.h:
@@ -31,7 +33,9 @@ bursztyn_ui/czcionka.h:
 bursztyn_ui/typy.h:
 bursztyn_ui/../bsf/runtime.h:
 bursztyn_ui/../bsf/bsf.h:
+bursztyn_ui/../bsf/limits.h:
 bursztyn_ui/../bsf/config.h:
+bursztyn_ui/../bsf/edit.h:
 bursztyn_ui/../bws_czcionka.h:
 bursztyn_ui/rysowanie.h:
 bursztyn_ui/pasek_przewijania.h:
@@ -50,7 +54,9 @@ bursztyn_ui/ikona_png.h:
 bursztyn_ui/../obrazy/skalowanie.h:
 system_identity.h:
 wersja_systemu.h:
+bsf/terminal.h:
 shell_runtime_diag.h:
 shell_terminal.h:
+shell_font.h:
 shell_context.h:
 shell_sponsors.h:

@@ -76,13 +76,28 @@ struct Glyphs {
     bool (*alpha)(void*,uint32_t,int,bool,bool,uint32_t,AlphaGlyph&){};
     bool (*cached)(void*,uint32_t,int,bool,bool,uint32_t){};
 };
-inline Work paint_alpha_glyph_work(Surface& target,uint32_t cp,int x,int y,const Style& s,Glyphs glyphs,Clip clip,bool& rendered,BSF::MarkPen* marks=nullptr,int step=0){
+inline Work paint_alpha_glyph_work(Surface& target,uint32_t cp,int x,int y,const Style& s,Glyphs glyphs,Clip clip,bool& rendered,BSF::MarkPen* marks=nullptr,int step=0,uint32_t face=0){
     rendered=false;if(!glyphs.alpha)co_return;
 #if defined(BSF_NATIVE)
     if(BSF::default_ignorable(cp)){rendered=true;co_return;}
 #endif
-    if(glyphs.cached&&!glyphs.cached(glyphs.user,cp,s.font,s.bold,s.italic,s.native_family))co_await WorkPoint{MaxSliceWork};
-    AlphaGlyph g;if(!glyphs.alpha(glyphs.user,cp,s.font,s.bold,s.italic,s.native_family,g))co_return;rendered=true;
+    AlphaGlyph g;
+#if defined(BSF_NATIVE)
+    if(face){
+        if(!BSF::cached_face(cp,face,s.font,s.bold,s.italic))co_await WorkPoint{MaxSliceWork};
+        auto* native=BSF::glyph_face(cp,face,s.font,s.bold,s.italic);if(!native)co_return;
+        BSF::pin(native);g.width=native->width;g.height=native->height;g.x=native->x;
+        g.y=BSF::ascent(s.font,BSF::family_name(s.native_family))+native->y;g.pixels=native->alpha;
+        g.lease=const_cast<BSF::Glyph*>(native);g.release=BSF::unpin;
+    }else
+#else
+    (void)face;
+#endif
+    {
+        if(glyphs.cached&&!glyphs.cached(glyphs.user,cp,s.font,s.bold,s.italic,s.native_family))co_await WorkPoint{MaxSliceWork};
+        if(!glyphs.alpha(glyphs.user,cp,s.font,s.bold,s.italic,s.native_family,g))co_return;
+    }
+    rendered=true;
 #if defined(BSF_NATIVE)
     if(marks){int gx=x+g.x,gy=y+g.y;marks->place(cp,x,gx,gy,g.width,g.height,step);g.x=gx-x;g.y=gy-y;}
 #else
@@ -275,9 +290,12 @@ inline Work paint_menu_label_work(Surface &target,const char *text,int x,int y,c
                              Metrics metrics,Glyphs glyphs,Clip clip) {
     size_t size=length(text,MaxAttrLength);
     BSF::MarkPen marks;marks.base=x;
+    TextCluster cluster;
     for (size_t p=0;p<size && target.budget && x<clip.x+clip.width;) { co_await WorkPoint{1};
-        size_t used; uint32_t cp=utf8(text+p,size-p,used); p+=used;
-        bool rendered=false;co_await paint_alpha_glyph_work(target,cp,x,y,style,glyphs,clip,rendered,&marks,advance(metrics,cp,style));
+        if(p==cluster.end)cluster=text_cluster(text,size,p,metrics,style,p==0);
+        size_t used; uint32_t cp=transformed(utf8(text+p,size-p,used),style.transform,p==0);p+=used;
+        int step=cluster_step(metrics,cp,style,cluster.face);
+        bool rendered=false;co_await paint_alpha_glyph_work(target,cp,x,y,style,glyphs,clip,rendered,&marks,step,cluster.face);
         const uint16_t *bits=!rendered&&glyphs.bitmap?glyphs.bitmap(glyphs.user,cp):nullptr;
         int gw=glyphs.width?glyphs.width(glyphs.user,cp):8;
         int dw=clamp64((int64_t(gw)*style.font+8)/16,1,256),dh=font_height(metrics,style);
@@ -290,7 +308,7 @@ inline Work paint_menu_label_work(Surface &target,const char *text,int x,int y,c
                 if(style.bold && tx+1<clip.x+clip.width)target.pixel(tx+1,ty,style.color,unsigned(style.color_alpha)*style.paint_opacity/255);
             }
         } }
-        x=clamp64(int64_t(x)+advance(metrics,cp,style),-MaxDimension);
+        x=clamp64(int64_t(x)+step,-MaxDimension);
     }
 }
 inline void paint_menu_label(Surface &target,const char *text,int x,int y,const Style &style,Metrics metrics,Glyphs glyphs,Clip clip) { finish_work(paint_menu_label_work(target,text,x,y,style,metrics,glyphs,clip)); }
@@ -318,13 +336,21 @@ inline Work paint_control_text_work(Document &d,FormControl &c,Surface &target,i
         co_await WorkPoint{1};w.prepare();
         int x=b.content_x+w.x-c.scroll_x,y=b.content_y+w.y-c.scroll_y-scroll;
         if(w.pos>=c.length)break;
-        size_t used;uint32_t cp=w.codepoint(used);int adv=w.step_width(cp);
-        if((!w.multiline || cp!='\n') && x<int64_t(clip.x)+clip.width && int64_t(x)+adv>clip.x && y<int64_t(clip.y)+clip.height && y+w.line>clip.y) {
+        size_t used;uint32_t cp=w.codepoint(used);int adv=w.current_width();
+        if((!w.multiline || cp!='\n') && cp!='\t' && x<int64_t(clip.x)+clip.width && int64_t(x)+adv>clip.x && y<int64_t(clip.y)+clip.height && y+w.line>clip.y) {
             bool selected=w.pos>=start && w.pos<end && d.focused_control==c.node;
             Style ink=s;
             if(selected){co_await target.rect_work(x,y,adv,w.line,0x245ac4,255,clip);ink.color=0xffffff;ink.color_alpha=255;}
-            char text[5]{};encode(cp,text);
-            co_await paint_menu_label_work(target,text,x,y,ink,metrics,glyphs,clip);
+            if(w.password){co_await paint_menu_label_work(target,"*",x,y,ink,metrics,glyphs,clip);}
+            else {
+                auto cluster=w.cluster();BSF::MarkPen marks;marks.base=x;int pen=x;
+                for(size_t at=cluster.begin;at<cluster.end;){co_await WorkPoint{1};size_t n;uint32_t value=utf8(c.value+at,cluster.end-at,n);
+                    value=transformed(value,ink.transform,at==0);int step=cluster_step(metrics,value,ink,cluster.face);bool rendered=false;
+                    co_await paint_alpha_glyph_work(target,value,pen,y,ink,glyphs,clip,rendered,&marks,step,cluster.face);
+                    if(!rendered){char scalar[5]{};encode(value,scalar);co_await paint_menu_label_work(target,scalar,pen,y,ink,metrics,glyphs,clip);}
+                    pen=clamp64(int64_t(pen)+step);at+=n;
+                }
+            }
         } else if(w.multiline && cp=='\n' && w.pos>=start && w.pos<end && d.focused_control==c.node)
             co_await target.rect_work(x,y,advance(metrics,' ',s),w.line,0x245ac4,255,clip);
         w.next();
@@ -454,15 +480,16 @@ inline Work paint_work(Document &d, Surface &target, int scroll, Metrics metrics
             if (f.y - scroll >= target.height || f.y - scroll + f.height <= 0)
                 continue;
             int x = f.x, y = f.y - scroll;BSF::MarkPen marks;marks.base=x;
-            size_t p = 0;
+            size_t p = 0;TextCluster cluster;
             const char *text = d.str(f.text);
             while (p < f.length && target.budget) { co_await WorkPoint{1};
+                if(p==cluster.end)cluster=text_cluster(text,f.length,p,metrics,s,p==0);
                 size_t used;
                 uint32_t cp = utf8(text + p, f.length - p, used);
                 cp = transformed(cp,s.transform,p == 0);
-                int adv = advance(metrics, cp, s);
+                int adv = cluster_step(metrics, cp, s,cluster.face);
                 if(x>=int64_t(fc.x)+fc.width)break;
-                bool rendered=false;co_await paint_alpha_glyph_work(target,cp,x,y,s,glyphs,fc,rendered,&marks,adv);
+                bool rendered=false;co_await paint_alpha_glyph_work(target,cp,x,y,s,glyphs,fc,rendered,&marks,adv,cluster.face);
                 int gw = glyphs.width ? glyphs.width(glyphs.user, cp) : 8;
                 int dw = clamp64((int64_t(gw) * s.font + 8) / 16, 1, 256), dh = font_height(metrics, s);
                 bool ink_visible=int64_t(x)+dw+(s.italic?(dh-1)/5:0)+(s.bold?1:0)>fc.x && y+dh>fc.y && y<int64_t(fc.y)+fc.height;

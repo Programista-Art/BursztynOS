@@ -75,6 +75,34 @@ def test_aktualizacje_bin_integrity():
         data = f.read()
 
     file_len = len(data)
+    BUR_MAKS_TEKST = 64 * 1024 * 1024
+    BUR_MAKS_DANE = 64 * 1024 * 1024
+    BUR_MAKS_CALKOWITY = 128 * 1024 * 1024
+    RING3_HEAP_BASE = 0x0000000800000000
+    RING3_STACK_TOP = 0x00007FFFF0000000
+
+    if data[:4] == b"BUR\x02":
+        raport("aktualizacje-bin-rozmiar-naglowka", file_len >= 160)
+        entry = struct.unpack_from("<Q", data, 24)[0]
+        toff, tsz, tva = struct.unpack_from("<3Q", data, 32)
+        roff, rsz, rva = struct.unpack_from("<3Q", data, 56)
+        doff, dfile, dsz, dva = struct.unpack_from("<4Q", data, 80)
+        raport("aktualizacje-bin-magia-BUR0", data[:4] == b"BUR\x02")
+        raport("aktualizacje-bin-text-przesuniecie-4k", (toff % 4096) == 0 and toff == 0x1000)
+        raport("aktualizacje-bin-text-rozmiar-4k", (tsz % 4096) == 0 and tsz > 0)
+        raport("aktualizacje-bin-text-va-4k", (tva % 4096) == 0 and tva == 0x1000)
+        raport("aktualizacje-bin-data-przesuniecie-4k", (doff % 4096) == 0 and doff == toff + tsz + rsz)
+        raport("aktualizacje-bin-data-rozmiar-4k", (dsz % 4096) == 0 and dsz > 0)
+        raport("aktualizacje-bin-data-va-4k", (dva % 4096) == 0 and dva == tva + tsz + rsz + 0x1000)
+        raport("aktualizacje-bin-entry-point-w-tekscie", tva <= entry < tva + tsz)
+        raport("aktualizacje-bin-tekst-miesci-sie-w-pliku", toff + tsz <= file_len and doff + dfile <= file_len)
+        raport("aktualizacje-bin-text-pod-limitem-64m", tsz <= BUR_MAKS_TEKST)
+        raport("aktualizacje-bin-data-pod-limitem-64m", dsz <= BUR_MAKS_DANE)
+        raport("aktualizacje-bin-calkowity-pod-limitem-128m", tsz + rsz + 4096 + dsz <= BUR_MAKS_CALKOWITY)
+        raport("aktualizacje-bin-brak-kolizji-ze-sterta", (dva + dsz < RING3_HEAP_BASE))
+        raport("aktualizacje-bin-brak-kolizji-ze-stosem", (dva + dsz < RING3_STACK_TOP))
+        return
+
     raport("aktualizacje-bin-rozmiar-naglowka", file_len >= 60)
 
     magic, entry, toff, tsz, tva, doff, dsz, dva = struct.unpack("<4sQQQQQQQ", data[:60])
@@ -87,13 +115,6 @@ def test_aktualizacje_bin_integrity():
     raport("aktualizacje-bin-data-va-4k", (dva % 4096) == 0 and dva == tva + tsz)
     raport("aktualizacje-bin-entry-point-w-tekscie", tva <= entry < tva + tsz)
     raport("aktualizacje-bin-tekst-miesci-sie-w-pliku", toff + tsz <= file_len)
-
-    # Limity
-    BUR_MAKS_TEKST = 64 * 1024 * 1024
-    BUR_MAKS_DANE = 64 * 1024 * 1024
-    BUR_MAKS_CALKOWITY = 128 * 1024 * 1024
-    RING3_HEAP_BASE = 0x0000000800000000
-    RING3_STACK_TOP = 0x00007FFFF0000000
 
     raport("aktualizacje-bin-text-pod-limitem-64m", tsz <= BUR_MAKS_TEKST)
     raport("aktualizacje-bin-data-pod-limitem-64m", dsz <= BUR_MAKS_DANE)

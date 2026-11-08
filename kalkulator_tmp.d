@@ -9,7 +9,8 @@ kalkulator_tmp.o: kalkulator.cpp loader.h pzb.h pamiec.h \
  bursztyn_ui/../legacy_ui.h bursztyn_ui/../motyw.h \
  bursztyn_ui/../kolor_alfa.h bursztyn_ui/czcionka.h \
  bursztyn_ui/../bsf/runtime.h bursztyn_ui/../bsf/bsf.h \
- bursztyn_ui/../bsf/config.h bursztyn_ui/../bws_czcionka.h \
+ bursztyn_ui/../bsf/limits.h bursztyn_ui/../bsf/config.h \
+ bursztyn_ui/../bsf/edit.h bursztyn_ui/../bws_czcionka.h \
  bursztyn_ui/rysowanie.h bursztyn_ui/polecenie_ui.h \
  bursztyn_ui/ikona_ui.h bursztyn_ui/kontrolka.h bursztyn_ui/diagnostyka.h \
  bursztyn_ui/panel.h bursztyn_ui/etykieta.h bursztyn_ui/przycisk.h \
@@ -65,7 +66,9 @@ bursztyn_ui/../kolor_alfa.h:
 bursztyn_ui/czcionka.h:
 bursztyn_ui/../bsf/runtime.h:
 bursztyn_ui/../bsf/bsf.h:
+bursztyn_ui/../bsf/limits.h:
 bursztyn_ui/../bsf/config.h:
+bursztyn_ui/../bsf/edit.h:
 bursztyn_ui/../bws_czcionka.h:
 bursztyn_ui/rysowanie.h:
 bursztyn_ui/polecenie_ui.h:

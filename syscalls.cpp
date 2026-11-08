@@ -1310,7 +1310,7 @@ __attribute__((noinline)) uint64_t bws_wylistuj_katalog(
     }
 
     if(!proces_ma_prawo(proces,PRAWO_PLIKI_CZYTAJ)&&
-       !(proces_ma_prawo(proces,PRAWO_GUI)&&BSF::trusted_asset(sciezka,true)&&arg3<=8192))return 0;
+       !(proces_ma_prawo(proces,PRAWO_GUI)&&BSF::trusted_asset(sciezka,true)&&arg3<=BSF::DirectoryBytes))return 0;
 
     if (arg2 == 0 ||
         arg3 == 0 ||
@@ -3035,7 +3035,6 @@ __attribute__((noinline)) uint64_t bws_czytaj_fragment_pliku(
     uint64_t arg3,
     uint64_t arg4
 ) {
-    if (!proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ)) return 0;
     char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
     if (!pobierz_sciezke_pliku(arg1, sciezka)) return 0;
     uint64_t offset = arg2;
@@ -3048,6 +3047,8 @@ __attribute__((noinline)) uint64_t bws_czytaj_fragment_pliku(
     if (!bws_vmm_sprawdz_zakres_uzytkownika(reinterpret_cast<void*>(buf_u), len, true)) return 0;
     uint64_t end = 0;
     if (__builtin_add_overflow(offset, (uint64_t)len, &end)) return 0;
+    if(!proces_ma_prawo(proces,PRAWO_PLIKI_CZYTAJ) &&
+       !(proces_ma_prawo(proces,PRAWO_GUI)&&BSF::trusted_asset(sciezka)&&end<=BSF::MaxFile))return 0;
     uint32_t got = 0;
     if (!czytaj_fragment_pliku(
             sciezka, offset, reinterpret_cast<char*>(buf_u), len,

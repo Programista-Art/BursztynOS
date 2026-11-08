@@ -18,6 +18,9 @@ unsigned conjunct(uint32_t cp){return property(unicode_incb,sizeof(unicode_incb)
 unsigned combining_class(uint32_t cp){return property(unicode_ccc,sizeof(unicode_ccc),cp);}
 bool default_ignorable(uint32_t cp){return property(unicode_ignorable,sizeof(unicode_ignorable),cp)!=0;}
 bool combining(uint32_t cp){return combining_class(cp)!=0;}
+bool terminal_attachment(uint32_t cp){
+ unsigned p=grapheme_property(cp);return p==4||p==5||p==8;
+}
 size_t next_cluster(const char* text,size_t at,size_t size){
  if(!text||at>=size)return size;
  uint32_t cp;at+=utf8(text+at,size-at,cp);

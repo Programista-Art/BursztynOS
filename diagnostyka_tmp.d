@@ -20,7 +20,9 @@ diagnostyka_tmp.o: programy/diagnostyka/diagnostyka.cpp \
  programy/diagnostyka/../../bursztyn_ui/czcionka.h \
  programy/diagnostyka/../../bursztyn_ui/../bsf/runtime.h \
  programy/diagnostyka/../../bursztyn_ui/../bsf/bsf.h \
+ programy/diagnostyka/../../bursztyn_ui/../bsf/limits.h \
  programy/diagnostyka/../../bursztyn_ui/../bsf/config.h \
+ programy/diagnostyka/../../bursztyn_ui/../bsf/edit.h \
  programy/diagnostyka/../../bursztyn_ui/../bws_czcionka.h \
  programy/diagnostyka/../../bursztyn_ui/rysowanie.h \
  programy/diagnostyka/../../bursztyn_ui/polecenie_ui.h \
@@ -114,7 +116,9 @@ programy/diagnostyka/../../bursztyn_ui/motyw.h:
 programy/diagnostyka/../../bursztyn_ui/czcionka.h:
 programy/diagnostyka/../../bursztyn_ui/../bsf/runtime.h:
 programy/diagnostyka/../../bursztyn_ui/../bsf/bsf.h:
+programy/diagnostyka/../../bursztyn_ui/../bsf/limits.h:
 programy/diagnostyka/../../bursztyn_ui/../bsf/config.h:
+programy/diagnostyka/../../bursztyn_ui/../bsf/edit.h:
 programy/diagnostyka/../../bursztyn_ui/../bws_czcionka.h:
 programy/diagnostyka/../../bursztyn_ui/rysowanie.h:
 programy/diagnostyka/../../bursztyn_ui/polecenie_ui.h:

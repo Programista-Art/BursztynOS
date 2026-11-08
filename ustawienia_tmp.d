@@ -1,6 +1,7 @@
 ustawienia_tmp.o: programy/ustawienia/ustawienia.cpp \
  programy/ustawienia/../../bsf/runtime.h \
  programy/ustawienia/../../bsf/bsf.h \
+ programy/ustawienia/../../bsf/limits.h \
  programy/ustawienia/../../bsf/config.h \
  programy/ustawienia/../../bursztyn_gui.h \
  programy/ustawienia/../../bws_zdarzenia.h \
@@ -19,6 +20,7 @@ ustawienia_tmp.o: programy/ustawienia/ustawienia.cpp \
  programy/ustawienia/../../bursztyn_ui/zdarzenia.h \
  programy/ustawienia/../../bursztyn_ui/motyw.h \
  programy/ustawienia/../../bursztyn_ui/czcionka.h \
+ programy/ustawienia/../../bursztyn_ui/../bsf/edit.h \
  programy/ustawienia/../../bursztyn_ui/../bws_czcionka.h \
  programy/ustawienia/../../bursztyn_ui/rysowanie.h \
  programy/ustawienia/../../bursztyn_ui/polecenie_ui.h \
@@ -94,6 +96,7 @@ ustawienia_tmp.o: programy/ustawienia/ustawienia.cpp \
  programy/ustawienia/themes_ui.h
 programy/ustawienia/../../bsf/runtime.h:
 programy/ustawienia/../../bsf/bsf.h:
+programy/ustawienia/../../bsf/limits.h:
 programy/ustawienia/../../bsf/config.h:
 programy/ustawienia/../../bursztyn_gui.h:
 programy/ustawienia/../../bws_zdarzenia.h:
@@ -115,6 +118,7 @@ programy/ustawienia/../../bursztyn_ui/typy.h:
 programy/ustawienia/../../bursztyn_ui/zdarzenia.h:
 programy/ustawienia/../../bursztyn_ui/motyw.h:
 programy/ustawienia/../../bursztyn_ui/czcionka.h:
+programy/ustawienia/../../bursztyn_ui/../bsf/edit.h:
 programy/ustawienia/../../bursztyn_ui/../bws_czcionka.h:
 programy/ustawienia/../../bursztyn_ui/rysowanie.h:
 programy/ustawienia/../../bursztyn_ui/polecenie_ui.h:

@@ -94,7 +94,11 @@ def main():
         run(flags + ["-DBURSZTYN_LOADER_RUNTIME_HOST_TEST", "-DBURSZTYN_PSF_HOST_TEST",
                      f"-DBURSZTYNDIAGTESTDZWIEKU={trace}", "loader.cpp", "storage_format.cpp",
                      "narzedzia/test_dzwieku_loader.cpp", "-o", binary])
-        run([binary, ROOT / "test_dzwieku.bin"], env)
+        current_bin = ROOT / "test_dzwieku.bin"
+        if current_bin.read_bytes()[:4] == b"BUR\x02":
+            run([binary, ROOT / "narzedzia/fixtures/bur_v1_legacy/aktualizacje.bin", current_bin], env)
+        else:
+            run([binary, current_bin], env)
     run(flags + ["-DBURSZTYNDIAGTESTDZWIEKU=1", "narzedzia/test_dzwieku_gui.cpp", "storage_format.cpp", "-o", OUT / "gui"])
     run([OUT / "gui", ROOT / "test_dzwieku.bin"], env)
     run(flags + ["-DBURSZTYN_HDA_HOST_TEST", "narzedzia/test_dzwieku_hda_bws.cpp", "sterowniki/dzwiek/hda_transport.cpp", "sterowniki/dzwiek/hda_diag.cpp", "-o", OUT / "hda-bws"])

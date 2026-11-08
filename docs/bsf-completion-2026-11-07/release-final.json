@@ -1,0 +1,19 @@
+{
+  "iso": {
+    "path": "BursztynOS.iso",
+    "bytes": 40349696,
+    "sha256": "8574c34d8bfada1c0504bc13e27423bfa44fbacef486a16d1f399644c1e4053f"
+  },
+  "public_kernel": {
+    "path": "isodir/boot/system_operacyjny.bin",
+    "bytes": 10541104,
+    "sha256": "022fedc2dd88d1557b22e56a526fa29e6251381f1acaca30a9b0b3016588a9cf"
+  },
+  "observation_elf": {
+    "path": "system_operacyjny.bin",
+    "bytes": 14235448,
+    "sha256": "3f6c2879e766d3b7ff2323c9a5a407b00f613faa00426baae3cab558db72c771"
+  },
+  "build": "make -B -j4 iso, followed by the measured native-allocation boundary and diagnostic fixes",
+  "native_acceptance": "in progress"
+}

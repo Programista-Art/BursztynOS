@@ -17,6 +17,7 @@ static uint8_t s_prev_raport[8] = {};
 extern "C" {
 
 void usb_klawiatura_zresetuj_stan(void) {
+    s_usb_keyboard_dev.keyboard_repeat_usage=0;s_usb_keyboard_dev.keyboard_repeat_sent=false;
     for (size_t i = 0; i < 8; ++i) {
         s_prev_raport[i] = 0;
     }

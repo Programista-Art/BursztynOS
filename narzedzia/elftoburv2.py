@@ -114,7 +114,7 @@ def convert(data):
         return offset, s[5], s[3]
     tx = append(text)
     rd = append(ro)
-    dt = append(rw)
+    dt = append(rw) if rw[5] else (len(out), 0, rw[3])
     reloc_offset = len(out) if relocs else 0
     for r in relocs:
         out.extend(struct.pack('<QqII', *r))

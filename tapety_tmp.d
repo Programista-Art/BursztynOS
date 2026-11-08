@@ -21,7 +21,9 @@ tapety_tmp.o: programy/tapety/tapety.cpp programy/tapety/../../loader.h \
  programy/tapety/../../bursztyn_ui/czcionka.h \
  programy/tapety/../../bursztyn_ui/../bsf/runtime.h \
  programy/tapety/../../bursztyn_ui/../bsf/bsf.h \
+ programy/tapety/../../bursztyn_ui/../bsf/limits.h \
  programy/tapety/../../bursztyn_ui/../bsf/config.h \
+ programy/tapety/../../bursztyn_ui/../bsf/edit.h \
  programy/tapety/../../bursztyn_ui/../bws_czcionka.h \
  programy/tapety/../../bursztyn_ui/rysowanie.h \
  programy/tapety/../../bursztyn_ui/polecenie_ui.h \
@@ -116,7 +118,9 @@ programy/tapety/../../bursztyn_ui/../kolor_alfa.h:
 programy/tapety/../../bursztyn_ui/czcionka.h:
 programy/tapety/../../bursztyn_ui/../bsf/runtime.h:
 programy/tapety/../../bursztyn_ui/../bsf/bsf.h:
+programy/tapety/../../bursztyn_ui/../bsf/limits.h:
 programy/tapety/../../bursztyn_ui/../bsf/config.h:
+programy/tapety/../../bursztyn_ui/../bsf/edit.h:
 programy/tapety/../../bursztyn_ui/../bws_czcionka.h:
 programy/tapety/../../bursztyn_ui/rysowanie.h:
 programy/tapety/../../bursztyn_ui/polecenie_ui.h:

@@ -2,7 +2,7 @@
 import json,re,struct,subprocess
 from pathlib import Path
 
-def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel_sha,iso_sha,input_kind='usb'):
+def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel_sha,iso_sha,input_kind='usb',q=None):
     from power_png_qemu_observer import PowerObserver
     power_observer=PowerObserver(hmp,symbol)
     def read(address,n):
@@ -104,6 +104,10 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
              (1280,720,100),(1920,1080,100),(1280,720,125),(1920,1080,100),(1280,720,100)]
     if 'BURSZTYN_DISPLAY_SMOKE' in __import__('os').environ:
         targets=[(1920,1080,100),(1920,1080,125),(1920,1080,150),(1920,1080,200),(1280,720,200),(1280,720,150),(1280,720,125),(1280,720,100)]
+    if 'BURSZTYN_BSF_MATRIX' in __import__('os').environ:
+        targets=[(800,600,100),(1024,768,100),(1280,720,100),(1366,768,100),(1920,1080,125),
+                 (1920,1080,150),(1920,1080,175),(1920,1080,200),(2560,1440,100),(1280,720,100)]
+    if __import__('os').environ.get('BURSZTYN_BSF_MATRIX')=='1366':targets=[(1366,768,100),(2560,1440,100),(1280,720,100)]
     for w,h,s in targets:
         old=geometry();win=window();factor=old['scale']/100
         # Select exact popup rows through the native list. No direction-key
@@ -115,8 +119,17 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
             mode=layout['mode'];click(win['x']+mode[0]+mode[2]//2,win['y']+mode[1]+mode[3]//2)
             wait(lambda:read(popup_address,1)[0]!=0,'native mode popup',30,interval=.01)
             popup=struct.unpack('<4i',read(popup_address+12,16))
-            screenshot('mode-popup-'+str(len(records)))
-            click(popup[0]+round(200*factor),popup[1]+round(6*factor)+({(1280,720):2,(1920,1080):6}[(w,h)]-2)*row+row//2)
+            if 'BURSZTYN_BSF_MATRIX' in __import__('os').environ:
+                assert q is not None
+                move(popup[0]+popup[2]//2,popup[1]+popup[3]//2)
+                q.call('input-send-event',{'events':[{'type':'btn','data':{'button':'wheel-up','down':down}} for _ in range(8) for down in (True,False)]})
+                started=ticks();wait(lambda:ticks()-started>=80,'resolution list scrolls to first row',60)
+                index={(800,600):0,(1024,768):1,(1280,720):2,(1366,768):4,(1920,1080):6,(2560,1440):7}[(w,h)]
+                screenshot('mode-popup-'+str(len(records)))
+                click(popup[0]+round(200*factor),popup[1]+round(6*factor)+index*row+row//2)
+            else:
+                screenshot('mode-popup-'+str(len(records)))
+                click(popup[0]+round(200*factor),popup[1]+round(6*factor)+({(1280,720):2,(1920,1080):6}[(w,h)]-2)*row+row//2)
             wait(lambda:read(popup_address,1)[0]==0,'mode popup selection committed',30,interval=.01)
         if s!=old['scale']:
             scale=layout['scale'];click(win['x']+scale[0]+scale[2]//2,win['y']+scale[1]+scale[3]//2)
@@ -179,6 +192,13 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
         shadow=(2*s+50)//100  # SkalaUI rounds halves up, unlike Python round().
         assert bounds[0]+bounds[2]<=work[0]+work[2]+shadow and bounds[1]+bounds[3]<=work[1]+work[3]+shadow,('popup extent including shadow',bounds,work)
         assert bounds[0]+bounds[2]<=w and bounds[1]+bounds[3]<=h,('popup off screen',bounds,w,h)
+        def power_frame_ready():
+            # Popup metadata precedes its compositor submission. The first
+            # failed capture can still contain only Start, without the submenu.
+            # Wait for the unchanged full pixel oracle, never weaken it.
+            try:power_observer.verify(screenshot('power-ready-probe'),s);return True
+            except AssertionError:return False
+        wait(power_frame_ready,'complete native power popup pixels',90,interval=.3)
         image=screenshot('power-scale-'+str(len(records)))
         record['power_png']=power_observer.verify(image,s)
         key('esc');key('esc')
