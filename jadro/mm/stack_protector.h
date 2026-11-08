@@ -76,6 +76,21 @@ uintptr_t stack_protector_generuj_dla_procesu(
 );
 
 /*
+ * Zwraca liczbe stron (4 KiB) przesuniecia ASLR dla jednego regionu.
+ *
+ * Zrodlo entropii: RDRAND jesli dostepny, w przeciwnym razie mieszanka
+ * RDTSC/RTC/pid z SplitMix64 (ta sama droga co straznik stosu). Wynik jest
+ * zawsze < maks_stron, wiec wywolujacy musi jedynie sprawdzic argument.
+ *
+ * Brak sprzetowej entropii NIE jest bledem: losowosc spada, ale uklad
+ * pozostaje nieprzewidywalny miedzy uruchomieniami.
+ */
+uint64_t stack_protector_losowy_offset_stron(
+    uint64_t maks_stron,
+    uint64_t sol
+);
+
+/*
  * Podmienia znacznik `BUR_SSP_GUARD_PLACEHOLDER` w prywatnym segmencie `.data`
  * nowo tworzonego procesu Ring 3 na unikalny straznik dla tego procesu.
  * Zwraca liczbe zaktualizowanych 64-bitowych slow.

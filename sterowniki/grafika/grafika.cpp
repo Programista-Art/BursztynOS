@@ -3886,6 +3886,12 @@ static bool gui_blit_region(
     int ly1 = y1 > warstwa->y + (int)warstwa->wysokosc ? warstwa->y + (int)warstwa->wysokosc : y1;
     if (lx0 >= lx1 || ly0 >= ly1) return false;
 
+    /*
+     * SMAP: bufor pikseli nalezy do Ring 3. Cala petla kopiujaca musi
+     * pozostac w oknie AC, inaczej pierwszy odczyt wywola #PF.
+     */
+    OknoUzytkownika okno(piksele, (size_t)cnt * sizeof(uint32_t));
+
     for (int dy = ly0; dy < ly1; ++dy) {
         int srcY = dy - y;
         uint64_t srcRow = (uint64_t)srcY * (uint64_t)szer;
@@ -3922,6 +3928,12 @@ extern "C" bool bws_gui_zastap_regiony(const BwsGuiRegion* regions,uint32_t coun
     auto* layer=pobierz_warstwe(aktualny_pid);
     if(!regions || !count || count>BWS_GUI_BATCH_MAX || !layer || !layer->bufor_pikseli ||
        !backbuffer || !aktywny_ekran || (generation && generation!=grafika_generacja_ekranu()))return false;
+
+    /*
+     * SMAP: deskryptory regionow sa kopiowane do BSS przez syscall, wiec
+     * regions[] to pamiec jadra. Bufor pikseli kazdego regionu pozostaje
+     * w Ring 3 - jego odczyt zabezpiecza gui_blit_region() wlasnym oknem.
+     */
     uint64_t total=0;
     for(uint32_t i=0;i<count;++i) {
         const auto& r=regions[i];

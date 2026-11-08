@@ -1807,6 +1807,41 @@ void ZwolnijRamke(
         return;
     }
 
+    /*
+     * Higiena pamieci: zwalniana ramka nie moze zachowac tresci poprzedniego
+     * wlasciciela. Bez tego kolejny proces dostaje strone z danymi innego
+     * procesu (klucze, fragmenty plikow, hasla), co jest realnym wyciekiem
+     * miedzyprocesowym, a nie tylko teoretycznym.
+     *
+     * Czyscimy PRZED oznaczeniem ramki jako wolnej: dopoki bit jest zajety,
+     * zaden inny kod nie moze jej zaalokowac rownolegle.
+     *
+     * UWAGA: nie wolno tu uzyc FizycznyZakresDoWirtualnego(), bo bierze
+     * BlokadaPMM, ktora jest juz trzymana przez te funkcje (spinlock bez
+     * reentrancji = zakleszczenie). Adres HHDM liczymy wiec wprost.
+     */
+    /*
+     * W buildzie hostowym nie istnieje HHDM, wiec zerowanie jest pomijane
+     * i weryfikowane osobno przez test QEMU. Na sprzecie zachowanie jest
+     * zawsze aktywne.
+     */
+#ifndef BURSZTYN_PMM_HOST_TEST
+    if (numer_ramki <
+            ROZMIAR_MAPOWANIA_FIZYCZNEGO / ROZMIAR_STRONY &&
+        !zakresy_hhdm_przepelnione) {
+        volatile uint64_t* slowa =
+            reinterpret_cast<volatile uint64_t*>(
+                BAZA_MAPOWANIA_FIZYCZNEGO + adres
+            );
+
+        for (size_t i = 0;
+             i < ROZMIAR_STRONY / sizeof(uint64_t);
+             ++i) {
+            slowa[i] = 0;
+        }
+    }
+#endif
+
     ustaw_ramke_wolna(
         numer_ramki
     );
@@ -1838,6 +1873,34 @@ void ZwolnijCiagleRamki(void* adres_fizyczny, size_t liczba_ramek) {
     for (uint64_t i = 0; i < n; ++i) {
         if (!ramka_dostepna(start + i) || ramka_wolna(start + i)) return;
     }
+
+    /*
+     * Ta sama higiena pamieci co w ZwolnijRamke: bufor DMA/ciagly nie moze
+     * zachowac tresci poprzedniego wlasciciela po zwolnieniu.
+     *
+     * Adres HHDM liczymy wprost, bo BlokadaPMM jest juz trzymana powyzej
+     * (FizycznyZakresDoWirtualnego zakleszczylby na spinlocku).
+     */
+#ifndef BURSZTYN_PMM_HOST_TEST
+    const uint64_t koniec_bajtow = adres + n * ROZMIAR_STRONY;
+
+    if (koniec_bajtow <= ROZMIAR_MAPOWANIA_FIZYCZNEGO &&
+        !zakresy_hhdm_przepelnione) {
+        volatile uint64_t* slowa =
+            reinterpret_cast<volatile uint64_t*>(
+                BAZA_MAPOWANIA_FIZYCZNEGO + adres
+            );
+
+        const size_t liczba_slow =
+            static_cast<size_t>(
+                n * (ROZMIAR_STRONY / sizeof(uint64_t)));
+
+        for (size_t i = 0; i < liczba_slow; ++i) {
+            slowa[i] = 0;
+        }
+    }
+#endif
+
     for (uint64_t i = 0; i < n; ++i) ustaw_ramke_wolna(start + i);
     if (start < ostatnia_alokacja) ostatnia_alokacja = start;
 }

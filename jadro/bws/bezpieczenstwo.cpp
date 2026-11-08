@@ -30,6 +30,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "virtio_rng.h"
+#include "pamiec.h"
 
 namespace {
 
@@ -188,6 +189,13 @@ bool skopiuj_z_przestrzeni_uzytkownika(
     uint8_t* dst = static_cast<uint8_t*>(bufor_jadra);
     const uint8_t* src = static_cast<const uint8_t*>(ptr_uzytkownika);
 
+    /*
+     * SMAP: jedyne miejsce, w ktorym jadro legalnie czyta pamiec Ring 3.
+     * Okno jest zakladane po walidacji PTE, wiec obejmuje wylacznie
+     * strony, ktore VMM juz potwierdzil jako USER|PRESENT.
+     */
+    OknoUzytkownika okno(ptr_uzytkownika, rozmiar);
+
     size_t pozostalo = rozmiar;
     size_t offset = 0;
 
@@ -332,6 +340,11 @@ bool skopiuj_do_przestrzeni_uzytkownika(
     uint8_t* dst = static_cast<uint8_t*>(ptr_uzytkownika);
     const uint8_t* src = static_cast<const uint8_t*>(bufor_jadra);
 
+    /*
+     * SMAP: jedyne miejsce, w ktorym jadro legalnie pisze do pamieci Ring 3.
+     */
+    OknoUzytkownika okno(ptr_uzytkownika, rozmiar);
+
     size_t pozostalo = rozmiar;
     size_t offset = 0;
 
@@ -374,6 +387,9 @@ bool skopiuj_string_z_uzytkownika(
     bufor_jadra[0] = '\0';
 
     if (ptr_uzytkownika == nullptr) return false;
+
+    /* SMAP: caly odczyt napisu musi pozostac w oknie AC. */
+    OknoUzytkownika okno(ptr_uzytkownika, max_rozmiar);
 
     for (size_t i = 0; i < max_rozmiar - 1; i++) {
         const char* adres_znaku = ptr_uzytkownika + i;

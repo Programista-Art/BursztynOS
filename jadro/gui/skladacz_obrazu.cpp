@@ -54,6 +54,7 @@
 #include "bufory_grafiki.h"
 #include "ekran_format.h"
 #include "sterowniki/czas/hpet.h"
+#include "virtio_gpu.h"
 #include "scheduler.h"
 
 extern void wypisz_log(const char* tekst);
@@ -61,6 +62,7 @@ extern int grafika_pobierz_szerokosc();
 extern int grafika_pobierz_wysokosc();
 extern uint32_t* grafika_pobierz_wiersz_backbuffer(int y);
 #include "heap.h"
+#include "pamiec.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -2044,6 +2046,140 @@ void skladacz_obrazu_oznacz_ruch_kursora(int old_x,int old_y,int new_x,int new_y
     irq_restore(f);
 }
 
+/*
+ * Reakcja na zmiane geometrii zgloszona przez medium (okno QEMU, monitor VM).
+ *
+ * Wywolywane raz na klatke, ale z wlasnym progiem czasowym: GET_DISPLAYINFO
+ * to pelna komenda na controlq, wiec nie wolno jej wysylac co klatke.
+ * Sprawdzamy najwyzej raz na ~500 ms.
+ *
+ * Dlaczego odpytywanie, a nie eventq: QEMU z virtio-vga oferuje tylko dwie
+ * kolejki (control + cursor), wiec kolejka zdarzen (indeks 2) nie istnieje.
+ * GET_DISPLAYINFO dziala na kazdym urzadzeniu virtio-gpu.
+ *
+ * Zwraca true, gdy tryb zostal zmieniony - kompozytor musi wtedy zlozyc
+ * pelna klatke od nowa.
+ */
+/* Odroczone zadanie zmiany geometrii (patrz sprawdz_zmiane_geometrii_medium). */
+static volatile uint32_t g_geometria_oczekuje = 0;
+static uint32_t g_oczekujaca_geometria_w = 0;
+static uint32_t g_oczekujaca_geometria_h = 0;
+
+static bool sprawdz_zmiane_geometrii_medium() {
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    if (!drv || !drv->initialized || drv->has_error) return false;
+
+    /* Prog czasowy: 500 ms. Klatki ida 60-240 Hz, wiec to ~30x rzadziej. */
+    static uint64_t nastepne_sprawdzenie_ns = 0;
+    const uint64_t teraz_ns = hpet_dostepny() ? czas_monotoniczny_ns() : 0;
+    if (teraz_ns != 0 && nastepne_sprawdzenie_ns != 0 &&
+        teraz_ns < nastepne_sprawdzenie_ns) {
+        return false;
+    }
+    if (teraz_ns != 0) {
+        nastepne_sprawdzenie_ns = teraz_ns + 500000000ULL;
+    }
+
+    uint32_t nowa_szer = 0, nowa_wys = 0;
+    if (!virtio_gpu_pobierz_geometrie_hosta(drv, &nowa_szer, &nowa_wys)) {
+        return false;
+    }
+
+    const uint32_t stara_szer = static_cast<uint32_t>(grafika_pobierz_szerokosc());
+    const uint32_t stara_wys = static_cast<uint32_t>(grafika_pobierz_wysokosc());
+
+    if (nowa_szer == stara_szer && nowa_wys == stara_wys) {
+        return false;
+    }
+
+    /*
+     * Histereza: ignorujemy roznice mniejsze niz 32 px.
+     *
+     * GET_DISPLAYINFO zwraca rozmiar scanoutu, ktory chwilowo obejmuje tez
+     * ramke okna hosta (np. 1054 zamiast 1024). Bez tej bariery kompozytor
+     * przelaczalby tryb tam i z powrotem, za kazdym razem realokujac bufor
+     * ramki - to widoczne migotanie i niepotrzebna praca.
+     *
+     * Prawdziwa zmiana okna (uzytkownik rozciaga je o setki pikseli) zawsze
+     * przekracza ten prog.
+     */
+    const uint32_t roznica_w = nowa_szer > stara_szer
+        ? nowa_szer - stara_szer : stara_szer - nowa_szer;
+    const uint32_t roznica_h = nowa_wys > stara_wys
+        ? nowa_wys - stara_wys : stara_wys - nowa_wys;
+
+    if (roznica_w < 32U && roznica_h < 32U) {
+        return false;
+    }
+
+    char msg[112]{};
+    size_t p = 0;
+    auto dopisz = [&](const char* t) { while (*t && p + 1 < sizeof(msg)) msg[p++] = *t++; };
+    auto liczba = [&](uint32_t v) {
+        char tmp[12]; int n = 0;
+        if (v == 0) tmp[n++] = '0';
+        while (v > 0 && n < 11) { tmp[n++] = char('0' + v % 10); v /= 10; }
+        for (int i = n - 1; i >= 0; --i) if (p + 1 < sizeof(msg)) msg[p++] = tmp[i];
+    };
+    dopisz("[GEOMETRIA] Medium zmienilo rozmiar ");
+    liczba(stara_szer); dopisz("x"); liczba(stara_wys);
+    dopisz(" -> "); liczba(nowa_szer); dopisz("x"); liczba(nowa_wys);
+    msg[p] = '\0';
+    wypisz_log(msg);
+
+    /*
+     * NIE przelaczamy trybu tutaj.
+     *
+     * Ta funkcja jest wolana z wnetrza skladacz_obrazu_obsluz_dirty(), ktore
+     * trzyma zablokuj_ekran() (spinlock bez reentrancji). ekran_zastosuj_tryb()
+     * probuje wziac te sama blokade - zakleszczenie i caly system staje.
+     *
+     * Zamiast tego zapisujemy zadanie; realizuje je
+     * skladacz_obrazu_wykonaj_zmiane_geometrii() z wnetrza petli idle,
+     * gdzie blokada nie jest trzymana.
+     */
+    g_oczekujaca_geometria_w = nowa_szer;
+    g_oczekujaca_geometria_h = nowa_wys;
+    __atomic_store_n(&g_geometria_oczekuje, 1U, __ATOMIC_RELEASE);
+    return false;
+}
+
+/*
+ * Wykonuje odroczona zmiane geometrii. Wolane z petli idle (poza blokada
+ * ekranu), wiec moze bezpiecznie uzyc pelnej transakcji zmiany trybu.
+ *
+ * Zwraca true, gdy tryb zostal zmieniony.
+ */
+bool skladacz_obrazu_wykonaj_zmiane_geometrii() {
+    if (__atomic_load_n(&g_geometria_oczekuje, __ATOMIC_ACQUIRE) == 0) {
+        return false;
+    }
+
+    /* Jeden konsument: zdejmujemy flage przed praca, zeby nie petlic. */
+    if (__atomic_exchange_n(&g_geometria_oczekuje, 0U, __ATOMIC_ACQ_REL) == 0) {
+        return false;
+    }
+
+    const uint32_t w = g_oczekujaca_geometria_w;
+    const uint32_t h = g_oczekujaca_geometria_h;
+    if (w < 640 || h < 480) return false;
+
+    /*
+     * Skala UI zostaje bez zmian - zmienia sie tylko rozmiar powierzchni.
+     * Uzytkownik moze miec ustawione 150%, a my dostosowujemy sie do okna.
+     */
+    const TrybEkranu nowy{w, h, 32u, w * 4u, 0u, 0u};
+    const uint32_t wynik = ekran_zastosuj_tryb(nowy, ekran_skala(), 0, false, false);
+
+    if (wynik != 0) {
+        wypisz_log("[GEOMETRIA] Nie udalo sie przelaczyc trybu - zostaje poprzedni.");
+        return false;
+    }
+
+    wypisz_log("[GEOMETRIA] Tryb przelaczony; kompozytor sklada pelna klatke.");
+    return true;
+}
+
 void skladacz_obrazu_obsluz_dirty() {
     KlatkiStartuDiag::Sciezka diagnostic_path("compositor/dirty");
     if(skladacz_wyciszony)return;
@@ -2064,6 +2200,16 @@ void skladacz_obrazu_obsluz_dirty() {
     uint64_t f=irq_off();bool ma_dirty=dirty_count!=0,ma_cursor=cursor_pending;irq_restore(f);
     const bool ma_geometrie=ma_pending_geometry();
     const bool ma_drag=ma_pending_drag_overlay();
+
+    /*
+     * Medium moze zmienic geometrie w trakcie pracy (uzytkownik rozciaga okno
+     * QEMU, przelacza monitor VM). Host zglasza to zdarzeniem na eventq.
+     * Sprawdzamy je raz na klatke i przelaczamy tryb ekranu - system skaluje
+     * sie do tego, co go aktualnie wyswietla, zamiast zostawac w trybie
+     * z bootu.
+     */
+    (void)sprawdz_zmiane_geometrii_medium();
+
     if(!ma_dirty&&!ma_cursor&&!ma_geometrie&&!ma_drag)return;
 
     uint64_t now=hpet_dostepny()?czas_monotoniczny_ns():0;
@@ -2603,5 +2749,7 @@ bool skladacz_obrazu_ustaw_maske_tytulu(int pid,int w,int h,const uint8_t* alpha
     if(!pid_poprawny(pid)||!warstwa_bufor_spojny(pid)||w<0||h<0||w>512||h>128)return false;
     auto& mask=title_coverage[pid];if(!w||!h){mask.width=mask.height=0;skladacz_obrazu_odswiez_dekoracje();return true;}if(!alpha)return false;
     uint32_t bytes=uint32_t(w*h);if(bytes>mask.capacity){auto* buffer=static_cast<uint8_t*>(kmalloc(bytes));if(!buffer)return false;kfree(mask.alpha);mask.alpha=buffer;mask.capacity=bytes;}
+    /* SMAP: alpha[] nalezy do Ring 3 - odczyt wymaga okna AC. */
+    OknoUzytkownika okno(alpha, bytes);
     for(uint32_t i=0;i<bytes;++i)mask.alpha[i]=alpha[i];mask.height=uint16_t(h);mask.width=uint16_t(w);skladacz_obrazu_odswiez_dekoracje();return true;
 }

@@ -71,6 +71,13 @@ constexpr uint64_t MASKA_ADRESU_2M =
 constexpr uint64_t MASKA_ADRESU_1G =
     0x000FFFFFC0000000ULL;
 
+/*
+ * Maska flag liscia 4 KiB MUSI zawierac PTE_NX.
+ *
+ * Bez bitu 63 kazda strona Ring 3 pozostawala wykonywalna, nawet gdy
+ * EFER.NXE bylo wlaczone - PTE_NX byl po prostu obcinany przez maske.
+ * To lamalo deklarowane W^X dla .data, sterty i stosu aplikacji.
+ */
 constexpr uint64_t MASKA_FLAG_LISCIA_4K =
     PTE_PRESENT |
     PTE_WRITE |
@@ -81,7 +88,13 @@ constexpr uint64_t MASKA_FLAG_LISCIA_4K =
     PTE_DIRTY |
     PTE_PAT_4K |
     PTE_GLOBAL |
-    PTE_SHARED;
+    PTE_SHARED |
+    PTE_NX;
+
+static_assert(
+    (MASKA_FLAG_LISCIA_4K & PTE_NX) != 0,
+    "Maska flag liscia 4 KiB musi zachowywac bit NX (bit 63)"
+);
 
 constexpr uint64_t MASKA_FLAG_ZACHOWANYCH_Z_2M =
     PTE_PRESENT |
@@ -127,6 +140,31 @@ constexpr uint32_t CPUID_EXTENDED_FEATURES =
 
 constexpr uint32_t CPUID_NX_BIT =
     1U << 20;
+
+/*
+ * CPUID.(EAX=7,ECX=0):EBX
+ *   bit 7  = SMEP (Supervisor Mode Execution Prevention)
+ *   bit 20 = SMAP (Supervisor Mode Access Prevention)
+ */
+constexpr uint32_t CPUID_STRUCTURED_FEATURES =
+    7U;
+
+constexpr uint32_t CPUID_SMEP_BIT =
+    1U << 7;
+
+constexpr uint32_t CPUID_SMAP_BIT =
+    1U << 20;
+
+/*
+ * CR4:
+ *   bit 20 = SMEP
+ *   bit 21 = SMAP
+ */
+constexpr uint64_t CR4_SMEP =
+    1ULL << 20;
+
+constexpr uint64_t CR4_SMAP =
+    1ULL << 21;
 
 constexpr uint32_t IA32_EFER_MSR =
     0xC0000080U;
@@ -205,6 +243,10 @@ uint32_t blokada_vmm = 0;
 bool vmm_zainicjalizowany = false;
 
 bool nx_aktywny = false;
+
+bool smep_aktywny = false;
+
+bool smap_aktywny = false;
 
 static bool tabela_fizyczna_bezposrednio_dostepna(
     uint64_t adres
@@ -439,6 +481,94 @@ static void wlacz_nx_jezeli_obslugiwane() {
     );
 
     nx_aktywny = true;
+}
+
+/*
+ * Wlacza SMEP i SMAP, jezeli procesor je obsluguje.
+ *
+ * SMEP: Ring 0 nie moze WYKONYWAC kodu z pamieci Ring 3. Zamyka cala klase
+ * atakow "ret2usr", w ktorej jadro zostaje zmuszone do skoku pod adres
+ * kontrolowany przez aplikacje.
+ *
+ * SMAP: Ring 0 nie moze CZYTAC ani PISAC pamieci Ring 3 bez flagi AC.
+ * Wymaga to istnienia straznikow stac()/clt() wokol kazdego celowego
+ * dostepu - patrz OknoUzytkownika w pamiec.h.
+ *
+ * Brak wsparcia sprzetowego nie jest bledem: system dziala dalej, tylko
+ * z slabsza izolacja. Flaga jest raportowana w diagnostyce.
+ */
+static void wlacz_smep_smap_jezeli_obslugiwane() {
+    uint32_t maksymalny_lisc = 0;
+
+    asm volatile(
+        "cpuid"
+        : "=a"(maksymalny_lisc)
+        : "a"(0U)
+        : "rbx", "rcx", "rdx", "memory"
+    );
+
+    if (maksymalny_lisc < CPUID_STRUCTURED_FEATURES) {
+        return;
+    }
+
+    uint32_t eax = CPUID_STRUCTURED_FEATURES;
+    uint32_t ebx = 0;
+    uint32_t ecx = 0;
+    uint32_t edx = 0;
+
+    asm volatile(
+        "cpuid"
+        : "+a"(eax),
+          "=b"(ebx),
+          "=c"(ecx),
+          "=d"(edx)
+        : "c"(0U)
+        : "memory"
+    );
+
+    uint64_t nowe_flagi = 0;
+
+    if ((ebx & CPUID_SMEP_BIT) != 0) {
+        nowe_flagi |= CR4_SMEP;
+    }
+    if ((ebx & CPUID_SMAP_BIT) != 0) {
+        nowe_flagi |= CR4_SMAP;
+    }
+
+    if (nowe_flagi == 0) {
+        return;
+    }
+
+    uint64_t cr4 = 0;
+    asm volatile(
+        "mov %%cr4, %0"
+        : "=r"(cr4)
+        :
+        : "memory"
+    );
+
+    cr4 |= nowe_flagi;
+
+    asm volatile(
+        "mov %0, %%cr4"
+        :
+        : "r"(cr4)
+        : "memory"
+    );
+
+    /* Potwierdzamy odczytem, ze sprzet przyjal oba bity. */
+    uint64_t po = 0;
+    asm volatile(
+        "mov %%cr4, %0"
+        : "=r"(po)
+        :
+        : "memory"
+    );
+
+    smep_aktywny =
+        (po & CR4_SMEP) != 0;
+    smap_aktywny =
+        (po & CR4_SMAP) != 0;
 }
 
 /* =========================================================================
@@ -971,7 +1101,7 @@ static bool mapuj_strone_wewnetrznie(
     uint64_t* pml4,
     uint64_t adres_wirtualny,
     uint64_t adres_fizyczny,
-    uint32_t flagi
+    uint64_t flagi
 ) {
     if (!pml4) return false;
 
@@ -986,8 +1116,7 @@ static bool mapuj_strone_wewnetrznie(
     }
 
     const bool user =
-        (static_cast<uint64_t>(flagi) &
-         PTE_USER) != 0;
+        (flagi & PTE_USER) != 0;
 
     if (user) {
         if (!adres_user_kanoniczny(
@@ -1033,7 +1162,7 @@ static bool mapuj_strone_wewnetrznie(
     }
 
     uint64_t flagi_liscia =
-        static_cast<uint64_t>(flagi) &
+        flagi &
         MASKA_FLAG_LISCIA_4K;
 
     /*
@@ -1764,6 +1893,36 @@ static bool przygotuj_mapowania_jadra() {
 } // namespace
 
 /* =========================================================================
+ * PUBLICZNY STAN NX
+ * ========================================================================= */
+
+/*
+ * Warstwy, ktore publikuja strony Ring 3 (sterta BWS, SHM, loader), musza
+ * wiedziec, czy sprzet obsluguje bit NX. Bez tego nie da sie uczciwie
+ * zdecydowac, czy strona danych ma byc niewykonywalna.
+ */
+extern "C" bool vmm_nx_aktywny() {
+    return nx_aktywny;
+}
+
+extern "C" bool vmm_smep_aktywny() {
+    return smep_aktywny;
+}
+
+extern "C" bool vmm_smap_aktywny() {
+    return smap_aktywny;
+}
+
+extern "C" int& vmm_okno_uzytkownika_glebokosc() {
+    /*
+     * Licznik zagniezdzen okien SMAP. Jednordzeniowe jadro nie jest
+     * wywlaszczane w trakcie obslugi BWS, wiec zwykly int wystarcza.
+     */
+    static int glebokosc = 0;
+    return glebokosc;
+}
+
+/* =========================================================================
  * PUBLICZNY WSKAZNIK DLA ZGODNOSCI ZE STARYM KODEM
  * ========================================================================= */
 
@@ -1814,11 +1973,43 @@ void ZmapujStrone(void* va,void* pa,uint32_t flags) {
     (void)ZmapujStroneSprawdzona(va,pa,flags);
 }
 
+bool ZmapujStrone64Sprawdzona(
+    void* adres_wirtualny,
+    void* adres_fizyczny,
+    uint64_t flagi
+) {
+    BlokadaVMM blokada;
+
+    if (!vmm_zainicjalizowany) {
+        return false;
+    }
+
+    uint64_t* aktualne =
+        pml4_z_cr3();
+
+    if (!aktualne) {
+        return false;
+    }
+
+    globalne_pml4 =
+        aktualne;
+
+    return mapuj_strone_wewnetrznie(
+        aktualne,
+        reinterpret_cast<uint64_t>(
+            adres_wirtualny),
+        reinterpret_cast<uint64_t>(
+            adres_fizyczny),
+        flagi
+    );
+}
+
 static bool vmm_mapuj_nowa_strone_procesu_wewnetrznie(
     uint64_t* pml4,
     void* va,
     void* pa,
-    bool zapis
+    bool zapis,
+    bool wykonuj
 ) {
     const uint64_t adres = reinterpret_cast<uint64_t>(va);
     if (!vmm_zainicjalizowany || !pml4 || !pa || adres < RING3_BASE ||
@@ -1826,27 +2017,44 @@ static bool vmm_mapuj_nowa_strone_procesu_wewnetrznie(
         (reinterpret_cast<uint64_t>(pa) & 4095U)) return false;
     const auto obecne = sprawdz_mapowanie(pml4, adres);
     if (obecne.obecna && obecne.user) return false;
-    uint32_t flagi = VMM_FLAGA_OBECNA | VMM_FLAGA_USER;
+
+    uint64_t flagi = VMM_FLAGA_OBECNA | VMM_FLAGA_USER;
     if (zapis) flagi |= VMM_FLAGA_ZAPIS;
+
+    /*
+     * Strona Ring 3 jest wykonywalna tylko wtedy, gdy wywolujacy jawnie
+     * o to poprosil (segment kodu). Wszystkie pozostale mapowania uzyskuja
+     * NX, o ile sprzet obsluguje bit 63 - inaczej W^X bylby pozorny.
+     */
+    if (!wykonuj && nx_aktywny) {
+        flagi |= VMM_FLAGA_NX;
+    }
+
     return mapuj_strone_wewnetrznie(pml4, adres,
         reinterpret_cast<uint64_t>(pa), flagi);
 }
 
-extern "C" bool VmmMapujNowaStroneProcesu(void* va, void* pa, bool zapis) {
+extern "C" bool VmmMapujNowaStroneProcesu(
+    void* va,
+    void* pa,
+    bool zapis,
+    bool wykonuj
+) {
     BlokadaVMM blokada;
     return vmm_mapuj_nowa_strone_procesu_wewnetrznie(
-        pml4_z_cr3(), va, pa, zapis);
+        pml4_z_cr3(), va, pa, zapis, wykonuj);
 }
 
 extern "C" bool VmmMapujNowaStroneWPrzestrzeniProcesu(
     void* pml4,
     void* va,
     void* pa,
-    bool zapis
+    bool zapis,
+    bool wykonuj
 ) {
     BlokadaVMM blokada;
     return vmm_mapuj_nowa_strone_procesu_wewnetrznie(
-        static_cast<uint64_t*>(pml4), va, pa, zapis);
+        static_cast<uint64_t*>(pml4), va, pa, zapis, wykonuj);
 }
 
 extern "C" bool VmmMapujNowaStroneJadra(void* va, void* pa) {
@@ -1872,9 +2080,11 @@ extern "C" bool VmmMapujStroneWspoldzielona(
     const uint64_t va = reinterpret_cast<uint64_t>(adres_wirtualny);
     const uint64_t pa = reinterpret_cast<uint64_t>(adres_fizyczny);
     if (sprawdz_mapowanie(aktualne, va).obecna) return false;
-    uint32_t flagi = VMM_FLAGA_OBECNA | VMM_FLAGA_USER |
+    uint64_t flagi = VMM_FLAGA_OBECNA | VMM_FLAGA_USER |
                      VMM_FLAGA_WSPOLDZIELONA;
     if (zapis) flagi |= VMM_FLAGA_ZAPIS;
+    /* Pamiec wspoldzielona jest danymi, nigdy kodem. */
+    if (nx_aktywny) flagi |= VMM_FLAGA_NX;
     return mapuj_strone_wewnetrznie(aktualne, va, pa, flagi);
 }
 
@@ -1903,6 +2113,8 @@ void InicjalizujVMM() {
     }
 
     wlacz_nx_jezeli_obslugiwane();
+
+    wlacz_smep_smap_jezeli_obslugiwane();
 
     if (!przygotuj_mapowania_jadra()) {
         return;

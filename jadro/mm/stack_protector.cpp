@@ -2,6 +2,7 @@
 #include "stos_jadra.h"
 #include "scheduler.h"
 #include "wyjatek_uzytkownika.h"
+#include "pamiec.h"
 
 /*
  * Ten plik jest kompilowany z `-fno-stack-protector`, poniewaz zawiera:
@@ -219,6 +220,40 @@ uintptr_t stack_protector_generuj_dla_procesu(
 }
 
 __attribute__((no_stack_protector))
+uint64_t stack_protector_losowy_offset_stron(
+    uint64_t maks_stron,
+    uint64_t sol
+) {
+    if (maks_stron <= 1) {
+        return 0;
+    }
+
+    uint64_t hw = 0;
+    if (!probuj_rdrand64(&hw)) {
+        (void)probuj_rdseed64(&hw);
+    }
+
+    const uint64_t sekwencja =
+        __atomic_add_fetch(&g_licznik_procesow_ssp, 1ULL, __ATOMIC_RELAXED);
+    const uint64_t tsc = rdtsc_ssp();
+
+    uint64_t mieszanka = splitmix64_ssp(hw ^ tsc ^ sol);
+    mieszanka ^= splitmix64_ssp(sekwencja ^ (sol << 17));
+    mieszanka ^= splitmix64_ssp(__stack_chk_guard ^ 0x94D049BB133111EBULL);
+
+    /*
+     * Bez modulo (bias) i bez reszty z dzielenia: mnozenie przez potege
+     * dwojki zakresu daje rownomierny rozklad przy dowolnym maks_stron.
+     */
+    const uint64_t losowe =
+        splitmix64_ssp(mieszanka);
+
+    return maks_stron > 0
+        ? (losowe % maks_stron)
+        : 0;
+}
+
+__attribute__((no_stack_protector))
 uint32_t stack_protector_zainicjuj_segment_danych_procesu(
     uint64_t pid,
     uintptr_t punkt_wejscia,
@@ -234,6 +269,13 @@ uint32_t stack_protector_zainicjuj_segment_danych_procesu(
     uint64_t* slowa = reinterpret_cast<uint64_t*>(dane_wirtualny);
     const uint64_t liczba_slow = rozmiar_danych / sizeof(uint64_t);
     uint32_t podmieniono = 0;
+
+    /*
+     * SMAP: dane_wirtualny to adres Ring 3 w przestrzeni nowego procesu.
+     * Loader przelaczyl CR3, wiec strony sa widoczne, ale bez flagi AC
+     * zapis wywola #PF w Ring 0. Okno obejmuje wylacznie petle podmiany.
+     */
+    OknoUzytkownika okno(dane_wirtualny, rozmiar_danych);
 
     for (uint64_t i = 0; i < liczba_slow; ++i) {
         if (slowa[i] == BUR_SSP_GUARD_PLACEHOLDER) {

@@ -362,11 +362,9 @@ inline constexpr uint32_t VMM_FLAGA_WSPOLDZIELONA =
     1U << 9;
 
 /*
- * Execute Disable znajduje sie w bicie 63 wpisu PTE i dlatego nie miesci sie
- * w obecnym 32-bitowym parametrze flag funkcji ZmapujStrone().
- *
- * Gdy VMM zostanie rozszerzony o NX, typ argumentu flag powinien zostac
- * zmieniony na uint64_t w pamiec.h i pamiec.cpp jednoczesnie.
+ * Execute Disable znajduje sie w bicie 63 wpisu PTE. Parametr flag musi byc
+ * 64-bitowy, inaczej ten bit jest obcinany i strony Ring 3 pozostaja
+ * wykonywalne. Uzywaj VMM_FLAGA_NX dla danych, sterty i stosu.
  */
 inline constexpr uint64_t VMM_FLAGA_NX =
     1ULL << 63;
@@ -447,6 +445,9 @@ void InicjalizujPMM(uint64_t adres_info_multiboot);
  *   - adres_fizyczny powinien byc wyrownany do 4096,
  *   - flagi powinny odpowiadac bitom PTE obslugiwanym przez pamiec.cpp.
  *
+ * UWAGA: parametr flag jest 32-bitowy, wiec NIE mozna przez niego przekazac
+ * VMM_FLAGA_NX. Dla stron Ring 3 z NX uzywaj ZmapujStrone64Sprawdzona().
+ *
  * Obecne API zwraca void, wiec kod wywolujacy nie moze jeszcze wykryc
  * bledu mapowania. Docelowo warto zmienic wynik na bool.
  */
@@ -459,20 +460,44 @@ void ZmapujStrone(
 // Checked equivalent for hardware mappings; preserves the existing mapping API.
 bool ZmapujStroneSprawdzona(void* va,void* pa,uint32_t flagi);
 
+/*
+ * 64-bitowy wariant mapowania w aktualnej przestrzeni adresowej.
+ *
+ * Rozni sie od ZmapujStrone() wylacznie typem flag: pozwala przekazac
+ * VMM_FLAGA_NX (bit 63), ktory nie miesci sie w uint32_t. Zwraca false,
+ * gdy mapowanie nie zostalo opublikowane.
+ */
+bool ZmapujStrone64Sprawdzona(
+    void* adres_wirtualny,
+    void* adres_fizyczny,
+    uint64_t flagi
+);
+
 /* Loader-only checked mapping in the current private process CR3. A successful
  * call transfers ownership of the frame to that address space; a failed call
  * leaves the frame with the caller. Supervisor identity mappings may be
- * replaced, but an existing USER page must never be overwritten. */
-extern "C" bool VmmMapujNowaStroneProcesu(void* va, void* pa, bool zapis);
+ * replaced, but an existing USER page must never be overwritten.
+ *
+ * wykonuj = false oznacza strone danych (RW+NX), true oznacza strone kodu (RX).
+ * Executable data is never published to Ring 3. */
+extern "C" bool VmmMapujNowaStroneProcesu(
+    void* va,
+    void* pa,
+    bool zapis,
+    bool wykonuj
+);
 
 /* Loader-only equivalent that edits a trusted, non-active process PML4.
  * Keeping the target CR3 inactive lets the loader leave interrupts enabled
- * between short VMM critical sections while the new address space is built. */
+ * between short VMM critical sections while the new address space is built.
+ *
+ * wykonuj = false oznacza RW+NX, true oznacza RX. */
 extern "C" bool VmmMapujNowaStroneWPrzestrzeniProcesu(
     void* pml4,
     void* va,
     void* pa,
-    bool zapis
+    bool zapis,
+    bool wykonuj
 );
 
 /* Waskie API dla natywnych obiektow SHM. Operuje tylko na aktualnym CR3,
@@ -487,6 +512,12 @@ extern "C" bool VmmOdmapujStroneWspoldzielona(
     void* adres_wirtualny
 );
 
+/* Czy sprzet obsluguje bit NX i czy EFER.NXE jest wlaczony.
+ *
+ * Warstwy publikujace strony Ring 3 (sterta BWS, SHM, loader) uzywaja tego
+ * do ustawienia VMM_FLAGA_NX na stronach danych. Zwraca false na sprzetach
+ * bez NX, gdzie ochrona jest niedostepna sprzetowo. */
+extern "C" bool vmm_nx_aktywny();
 /*
  * Inicjalizuje docelowe tablice stron jadra.
  */
@@ -570,6 +601,83 @@ void* FizycznyZakresDoWirtualnego(
     uint64_t adres_fizyczny,
     size_t rozmiar
 );
+
+/* =========================================================================
+ * 13. SMAP - OKNO DOSTEPU DO PAMIECI UZYTKOWNIKA
+ * ========================================================================= */
+
+/*
+ * Gdy SMAP jest aktywny (CR4.SMAP=1), Ring 0 NIE moze czytac ani pisac
+ * pamieci Ring 3 bez flagi AC w RFLAGS. Kazdy celowy dostep musi byc
+ * objety para stac()/clt().
+ *
+ * Reguly:
+ *   - stac()/clt() sa No-Op, gdy SMAP nie jest aktywny,
+ *   - okno musi byc mozliwie krotkie (bez syscalli i bez kmalloc),
+ *   - nie wolno zostawic STAC aktywnego poza blokiem,
+ *   - klase RAII (OknoUzytkownika) preferuj ponad reczne pary.
+ */
+extern "C" bool vmm_smep_aktywny();
+extern "C" bool vmm_smap_aktywny();
+
+/*
+ * Licznik zagniezdzen okien SMAP. Jeden globalny licznik wystarcza, bo
+ * jadro jest jednordzeniowe i nie jest wywlaszczane w trakcie obslugi
+ * BWS (patrz komentarz przy BWS57).
+ */
+extern "C" int& vmm_okno_uzytkownika_glebokosc();
+
+inline void smap_stac() {
+    if (vmm_smap_aktywny()) {
+        asm volatile("stac" ::: "memory");
+    }
+}
+
+inline void smap_clt() {
+    if (vmm_smap_aktywny()) {
+        asm volatile("clac" ::: "memory");
+    }
+}
+
+/*
+ * Zakresowy straznik dostepu do bufora Ring 3.
+ *
+ * Uzycie:
+ *   {
+ *       OknoUzytkownika okno(ptr, rozmiar);
+ *       ... odczyt ptr[i] ...
+ *   }
+ *
+ * Destruktor zawsze zdejmuje STAC, takze przy wczesnym return.
+ *
+ * Okna moga sie zagniezdzac (np. batch regionow wola blit pojedynczego
+ * regionu). Licznik glebokosci sprawia, ze STAC jest zdejmowany dopiero
+ * po wyjsciu z najbardziej zewnetrznego okna.
+ */
+extern "C" int& vmm_okno_uzytkownika_glebokosc();
+
+class OknoUzytkownika {
+public:
+    OknoUzytkownika(const void* ptr, size_t rozmiar) {
+        aktywny_ = ptr != nullptr && rozmiar != 0 && vmm_smap_aktywny();
+        if (aktywny_) {
+            int& glebokosc = vmm_okno_uzytkownika_glebokosc();
+            if (glebokosc == 0) smap_stac();
+            ++glebokosc;
+        }
+    }
+    ~OknoUzytkownika() {
+        if (aktywny_) {
+            int& glebokosc = vmm_okno_uzytkownika_glebokosc();
+            if (glebokosc > 0) --glebokosc;
+            if (glebokosc == 0) smap_clt();
+        }
+    }
+    OknoUzytkownika(const OknoUzytkownika&) = delete;
+    OknoUzytkownika& operator=(const OknoUzytkownika&) = delete;
+private:
+    bool aktywny_;
+};
 
 inline void* FizycznyDoWirtualnego(
     uint64_t adres_fizyczny
