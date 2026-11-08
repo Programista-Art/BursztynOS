@@ -46,7 +46,11 @@ ROOT = Path(__file__).resolve().parents[1]
 GLOBAL_TIMEOUT = 120
 INACTIVITY_TIMEOUT = 60
 WALLPAPER_GRACE_TIMEOUT = 15.0
-
+# Ekran powitalny zanika 600 ms po gotowosci pulpitu i do tego czasu celowo nie
+# pokazuje kursora. Zrzut QMP musi zdazyc po tym oknie, ale nie moze czekac
+# w nieskonczonosc, gdy kursor naprawde nie jest rysowany.
+CURSOR_PROBE_ATTEMPTS = 12
+CURSOR_PROBE_DELAY = 0.25
 def parse_ppm(ppm_path):
     with open(ppm_path, "rb") as f:
         header = f.readline().decode('latin1').strip()
@@ -360,12 +364,26 @@ def main():
             if m_hid:
                 qmp.hmp(f"mouse_set {m_hid.group(1)}")
 
-            # Zrzut pulpitu
-            qmp.screendump(desktop_dump_path)
-            if desktop_dump_path.exists() and desktop_dump_path.stat().st_size > 0:
+            # Zrzut pulpitu. Ekran powitalny jest widoczny jeszcze przez FADE_US
+            # (600 ms) po zgloszeniu gotowosci pulpitu i celowo nie pokazuje
+            # kursora, wiec pojedynczy natychmiastowy zrzut lapal klatke
+            # przejsciowa. Ponawiamy ograniczona liczbe razy, az kursor bedzie
+            # widoczny albo uplynie okno przejscia.
+            dw, dh, ddata = 0, 0, b""
+            is_cur_init, cur_init_details = False, {}
+            for proba in range(CURSOR_PROBE_ATTEMPTS):
+                qmp.screendump(desktop_dump_path)
+                if not (desktop_dump_path.exists() and desktop_dump_path.stat().st_size > 0):
+                    time.sleep(0.05)
+                    continue
                 desktop_dump_ok = True
                 dw, dh, ddata = parse_ppm(desktop_dump_path)
-
+                is_cur_init, cur_init_details = check_cursor_at(ddata, dw, dh, 500, 300)
+                if is_cur_init:
+                    break
+                if proba + 1 < CURSOR_PROBE_ATTEMPTS:
+                    time.sleep(CURSOR_PROBE_DELAY)
+            if desktop_dump_ok:
                 # Weryfikacja braku wzorca testowego (brak kolorow Amber #FFBF00 na (100, 100))
                 p_amber_slot = get_pixel(ddata, dw, dh, 100, 100)
                 if p_amber_slot != (255, 191, 0):
@@ -374,7 +392,6 @@ def main():
                 else:
                     print(f"[BLAD] Wykryto obecnosc wzorca testowego w normalnym rozruchu!")
 
-                is_cur_init, cur_init_details = check_cursor_at(ddata, dw, dh, 500, 300)
                 if is_cur_init:
                     cursor_initial_visible = True
                     print("[INFO] Kursor w pozycji domyslnej (500, 300): WIDOCZNY (PASS)")

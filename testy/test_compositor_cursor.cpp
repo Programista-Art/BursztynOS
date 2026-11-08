@@ -68,6 +68,26 @@ void grafika_prezentuj_scene_z_kursorem(const GuiDirtyRect* r,uint32_t count,int
         [](GuiDirtyRect rect){assert(rect.x>=0&&rect.y>=0&&rect.x+rect.width<=sw&&rect.y+rect.height<=sh);++presents;},[](int){});
 }
 void grafika_prezentuj_kursor_w(int x,int y){grafika_prezentuj_scene_z_kursorem(nullptr,0,x,y);}
+
+// --- VirtIO GPU: fixture hostowy nie ma sprzetu ---
+// Kompozytor odpytuje sterownik o geometrie hosta (GET_DISPLAYINFO). Bez
+// urzadzenia musi to byc bezpieczne "brak kierowcy / brak zmiany", a nie
+// niezdefiniowana referencja na etapie linkowania.
+static VirtioGpuDriver fixture_gpu{};
+static bool fixture_gpu_obecny=false;
+static uint32_t fixture_host_w=0,fixture_host_h=0;
+static unsigned fixture_gpu_odczyty=0;
+VirtioGpuDriver* virtio_gpu_get_driver(uint32_t index){
+    return index==0&&fixture_gpu_obecny?&fixture_gpu:nullptr;
+}
+uint32_t virtio_gpu_get_driver_count(){return fixture_gpu_obecny?1u:0u;}
+bool virtio_gpu_pobierz_geometrie_hosta(VirtioGpuDriver* drv,uint32_t* out_w,uint32_t* out_h){
+    ++fixture_gpu_odczyty;
+    if(!drv||!drv->initialized||drv->has_error||!fixture_host_w||!fixture_host_h)return false;
+    if(out_w)*out_w=fixture_host_w;
+    if(out_h)*out_h=fixture_host_h;
+    return true;
+}
 static unsigned popup_checks=0;
 static void popup_restoration_cases() {
     use_clock=false;skladacz_obrazu_oznacz_dirty();skladacz_obrazu_obsluz_dirty();

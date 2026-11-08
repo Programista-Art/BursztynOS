@@ -17,6 +17,11 @@ static BursztynMotyw test_theme=g_domyslny_motyw_fallback;
 static warstwa_obrazu layer{};
 static bool presentable=false;
 int aktualny_pid=0;
+// Host nie ma sprzetu SMAP ani okien Ring 3: oba symbole pochodza z vmm.cpp,
+// ktorego ten test nie linkuje. Stuby zachowuja semantyke "brak SMAP".
+extern "C" bool vmm_smep_aktywny() {return false;}
+extern "C" bool vmm_smap_aktywny() {return false;}
+extern "C" int& vmm_okno_uzytkownika_glebokosc() {static int glebokosc=0;return glebokosc;}
 warstwa_obrazu* pobierz_warstwe(int pid) {return layer.aktywna&&layer.pid==pid?&layer:nullptr;}
 bool skladacz_obrazu_czy_widoczna(int pid) {return presentable&&pobierz_warstwe(pid);}
 bool skladacz_obrazu_publikuj_klatke(int pid) {assert(pobierz_warstwe(pid));if(presentable)return false;++commits;presentable=true;return true;}
@@ -137,15 +142,16 @@ int main() {
         // A cursor-sized first dirty rect still publishes a complete frame once.
         PrzeniesFragmentNaEkran(0,0,1,1);
         assert(presents==before+1&&powitanie_pierwsza_klatka_gotowa());
-        const auto g=Powitanie::geometria(1280,720,100,sekwencja.komunikat);
+        const auto g=Powitanie::geometria(1280,720,100,sekwencja.postep,sekwencja.wagi());
         auto ink=[&](Powitanie::Obszar r){
             for(int y=r.y;y<r.y+r.h;++y)for(int x=r.x;x<r.x+r.w;++x)
                 if(display.scanout[y*1280+x]!=Powitanie::TLO)return true;
             return false;
         };
-        assert(ink(g.tytul)&&ink(Powitanie::centrum(1280,720,100)));
+        assert(ink(g.logo));
+    assert(sekwencja.alfa_linia1==0||ink(Powitanie::centrum(1280,720,100)));
         assert(display.scanout[0]==Powitanie::TLO&&display.scanout[1280*720-1]==Powitanie::TLO);
-        assert(sekwencja.komunikat==0&&sekwencja.start==delay);
+        assert(sekwencja.krok==0&&sekwencja.start==delay);
         powitanie_reset_ekranu();assert(!powitanie_pierwsza_klatka_gotowa());
         PrzeniesFragmentNaEkran(0,0,1,1);assert(presents==before+2);
     }
@@ -158,7 +164,7 @@ int main() {
     grafika_reset_startu();assert(!grafika_wyciszona);
     grafika_zakoncz_wybor_backendu();
     test_now=0;powitanie_inicjalizuj(true);
-    assert(sekwencja.komunikat==0&&sekwencja.start==0);
+    assert(sekwencja.krok==0&&sekwencja.start==0);
     powitanie_wycisz();
     powitanie_inicjalizuj(false);
     const GuiDirtyRect complete_desktop{0,0,1280,720};

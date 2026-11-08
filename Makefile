@@ -936,6 +936,12 @@ test1_bmp_blob.o: obrazy/test1.bmp
 logo_png_blob.o: obrazy/logo.png
 	$(LD) -r -b binary obrazy/logo.png -o logo_png_blob.o
 
+# Maska pokrycia logotypu dla ekranu powitalnego. Jadro nie dekoduje PNG na
+# sciezce startu: naglowek jest generowany z obrazy/logo.png i wersjonowany.
+LOGO_MASKA_H := jadro/gui/logo_maska_dane.h
+$(LOGO_MASKA_H): obrazy/logo.png narzedzia/generuj_maske_logo.py
+	$(PYTHON) narzedzia/generuj_maske_logo.py --zrodlo obrazy/logo.png --wyjscie $@
+
 
 
 
@@ -1992,22 +1998,27 @@ grafika.o skladacz_obrazu.o kernel.o: jadro/gui/skladacz_obrazu.h
 # Host-only: production compositor lifecycle + kernel graphics + boot policy.
 test-startup-visibility:
 	@mkdir -p .wm-test
-	g++ -std=c++17 -O0 -g0 -ffunction-sections -fdata-sections -fsanitize=address,undefined testy/test_startup_visibility.cpp -Wl,--gc-sections -o .wm-test/startup-visibility
+	g++ -std=c++17 -O0 -g0 $(HOST_INCLUDES) -ffunction-sections -fdata-sections -fsanitize=address,undefined testy/test_startup_visibility.cpp -Wl,--gc-sections -o .wm-test/startup-visibility
 	ASAN_OPTIONS=detect_leaks=0 .wm-test/startup-visibility
-	g++ -std=c++17 -O0 -g0 -ffunction-sections -fdata-sections -fsanitize=address,undefined testy/test_boot_graphics.cpp -Wl,--gc-sections -o .wm-test/boot-graphics
+	g++ -std=c++17 -O0 -g0 $(HOST_INCLUDES) -ffunction-sections -fdata-sections -fsanitize=address,undefined testy/test_boot_graphics.cpp -Wl,--gc-sections -o .wm-test/boot-graphics
 	ASAN_OPTIONS=detect_leaks=0 .wm-test/boot-graphics
 	$(PYTHON) testy/test_startup_policy.py
 
 # Welcome layer dependencies and deterministic host regression suite.
-ekran_powitalny.o: jadro/gui/ekran_powitalny.h jadro/gui/ekran_powitalny_api.h bursztyn_ui/czcionka.h jadro/gui/ui_skala.h
+ekran_powitalny.o: jadro/gui/ekran_powitalny.h jadro/gui/ekran_powitalny_api.h bursztyn_ui/czcionka.h jadro/gui/ui_skala.h $(LOGO_MASKA_H)
 grafika.o skladacz_obrazu.o kernel.o: jadro/gui/ekran_powitalny_api.h
 kernel.o: jadro/rdzen/opcje_startowe.h
+
+.PHONY: test-logo-maska
+test-logo-maska:
+	$(PYTHON) testy/test_logo_maska.py
 
 .PHONY: test-powitanie
 test-powitanie:
 	@mkdir -p .wm-test
 	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -fsanitize=address,undefined testy/test_powitanie.cpp -o .wm-test/powitanie
 	ASAN_OPTIONS=detect_leaks=0 .wm-test/powitanie
+	$(PYTHON) testy/test_logo_maska.py
 	$(PYTHON) testy/test_powitanie_policy.py
 
 BURSZTYNDIAGSTARTUPREBOOT ?= 0
@@ -2022,7 +2033,7 @@ syscalls.o: jadro/gui/cykl_wylaczania_grafiki.h
 .PHONY: test-powitanie-reboot
 test-powitanie-reboot:
 	@mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -pthread -fsanitize=address,undefined testy/test_powitanie_reboot.cpp -o .wm-test/powitanie-reboot
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -pthread -fsanitize=address,undefined testy/test_powitanie_reboot.cpp -o .wm-test/powitanie-reboot
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/powitanie-reboot
 
 .PHONY: test-gpu-quiesce-host
@@ -2040,7 +2051,7 @@ endif
 .PHONY: test-splash-timing test-windows-launcher
 test-splash-timing:
 	@mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -DBURSZTYNDIAGSPLASHTIMING=1 -fsanitize=address,undefined testy/test_splash_timing.cpp -o .wm-test/splash-timing
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -DBURSZTYNDIAGSPLASHTIMING=1 -fsanitize=address,undefined testy/test_splash_timing.cpp -o .wm-test/splash-timing
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/splash-timing
 
 test-windows-launcher:
@@ -2055,7 +2066,7 @@ grafika.o: sterowniki/virtio/virtio_gpu.h
 .PHONY: test-splash-first-frame
 test-splash-first-frame:
 	@mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -DBURSZTYNDIAGSPLASHFIRSTFRAME=1 -fsanitize=address,undefined testy/test_splash_first_frame.cpp -o .wm-test/splash-first-frame
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -DBURSZTYNDIAGSPLASHFIRSTFRAME=1 -fsanitize=address,undefined testy/test_splash_first_frame.cpp -o .wm-test/splash-first-frame
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/splash-first-frame
 
 BURSZTYNDIAGSPLASHRUNTIMEFRAMES ?= 0
@@ -2067,7 +2078,7 @@ grafika.o ekran_powitalny.o skladacz_obrazu.o virtio_gpu.o virtio_pci.o uefi_gop
 .PHONY: test-splash-snapshots
 test-splash-snapshots:
 	@mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -fsanitize=address,undefined testy/test_splash_snapshots.cpp -o .wm-test/splash-snapshots
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -fsanitize=address,undefined testy/test_splash_snapshots.cpp -o .wm-test/splash-snapshots
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/splash-snapshots
 
 # Restricted ptrace environments may override only leak checking; ASan/UBSan
@@ -2581,7 +2592,8 @@ test-security-hardening: test-security
 
 # Szybki lokalny gate przed commitem (bez fuzz-extended).
 test-smoke: test-stack-protector-host test-bur-v2-aslr-host test-fuzz-smoke \
-	test-virtio-pci test-motywy-unit test-wm-click-routing test-normal-boot
+	test-virtio-pci test-motywy-unit test-wm-click-routing test-normal-boot \
+	test-startup-visibility test-compositor-cursor test-powitanie
 
 test: test-smoke
 

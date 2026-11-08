@@ -22,7 +22,11 @@ bool zakonczenie_oczekuje=false;
 bool pelne_rysowanie=false;
 bool pierwsza_klatka_gotowa=false, pierwsza_klatka_opublikowana=false;
 bool animacja_rozpoczeta=false;
-unsigned poprzedni_tekst=99,poprzednie_przenikanie=999;
+uint64_t poprzedni_krok=UINT64_MAX;
+// Sygnatura ostatnio wyrenderowanej tresci. Brud wynika z tego, co widac,
+// a nie z uplywu czasu: w holdzie ekran jest identyczny przez sekundy i nie
+// wolno wtedy skladac pelnej klatki ani transferowac jej do GPU.
+uint64_t poprzednia_sygnatura=UINT64_MAX;
 #if BURSZTYNDIAGSPLASHTIMING
 uint64_t prezentacje=0;
 void diag_czas(const char* event,uint64_t now) {
@@ -64,7 +68,7 @@ void zakoncz_powitanie() {
     zwolnij_powierzchnie();
     zakonczenie_oczekuje=false;pulpit_gotowy=false;gotowosc_utracona=false;tlo_tapeta=false;pulpit_pid=0;
     sekwencja={};sekwencja.stan=Powitanie::Stan::Zakonczony;
-    nastepny=0;pelne_rysowanie=false;poprzedni_tekst=99;poprzednie_przenikanie=999;
+    nastepny=0;pelne_rysowanie=false;poprzedni_krok=UINT64_MAX;
 }
 }
 void powitanie_wycisz() {
@@ -75,14 +79,14 @@ void powitanie_wycisz() {
     zakonczenie_oczekuje=false;pulpit_gotowy=false;gotowosc_utracona=false;tlo_tapeta=false;pulpit_pid=0;
     zwolnij_powierzchnie();
     sekwencja={};sekwencja.stan=Powitanie::Stan::Zniszczony;
-    nastepny=0;pelne_rysowanie=false;poprzedni_tekst=99;poprzednie_przenikanie=999;
+    nastepny=0;pelne_rysowanie=false;poprzedni_krok=UINT64_MAX;
 }
 void powitanie_reset_ekranu() {
     PrezentacjaStartu::uniewaznij();
     const bool aktywne=powitanie_aktywne();
     zwolnij_powierzchnie();pulpit_gotowy=false;gotowosc_utracona=false;tlo_tapeta=false;pulpit_pid=0;
     zakonczenie_oczekuje=false;pelne_rysowanie=true;nastepny=0;
-    poprzedni_tekst=99;poprzednie_przenikanie=999;
+    poprzedni_krok=UINT64_MAX;
     if(aktywne) {sekwencja.stan=Powitanie::Stan::Widoczny;sekwencja.gotowy=false;sekwencja.fade=0;sekwencja.odsloniecie=0;}
 }
 bool powitanie_pierwsza_klatka_gotowa(){return pierwsza_klatka_gotowa;}
@@ -151,8 +155,8 @@ static void powitanie_aktualizuj_stan(bool pacing){
     if(pacing)nastepny=now>UINT64_MAX-33333?UINT64_MAX:now+33333;
     const auto stan=sekwencja.stan;
     const unsigned poprzednie_odsloniecie=sekwencja.odsloniecie;
-    const unsigned tekst=sekwencja.komunikat,przenikanie=sekwencja.przenikanie;
-    const unsigned kolejny=sekwencja.nastepny_komunikat;
+    const uint64_t krok=sekwencja.krok;
+    Powitanie::Faza faza=sekwencja.faza;
     sekwencja.gotowy=__atomic_load_n(&pulpit_gotowy,__ATOMIC_ACQUIRE);
     if(sekwencja.gotowy&&pulpit_pid>0){
         auto* w=pobierz_warstwe(pulpit_pid);
@@ -172,16 +176,27 @@ static void powitanie_aktualizuj_stan(bool pacing){
     if(sekwencja.gotowy)sekwencja.tlo=tlo_tapeta?Powitanie::Tlo::Tapeta:Powitanie::Tlo::Zastepcze;
     sekwencja.aktualizuj(now);
     // Log sampled transitions only. A stall may jump straight to a later hold/end.
-    if(tekst!=sekwencja.komunikat)diag_czas(sekwencja.komunikat==1?"message_1_hold":"message_2_hold",now);
-    else if(kolejny!=sekwencja.nastepny_komunikat&&sekwencja.nastepny_komunikat!=tekst)diag_czas(tekst==0?"message_0_to_1":"message_1_to_2",now);
+    // Diagnostyka emituje ETAPY, nie klatki: probka 12.5 Hz nie moze generowac
+    // jednego wpisu na krok, bo seria startowa mialaby dziesiatki linii.
+    if(krok!=sekwencja.krok&&faza!=sekwencja.faza)diag_czas(Powitanie::nazwa_fazy(sekwencja.faza),now);
+    faza=sekwencja.faza;
     if(stan==Powitanie::Stan::Widoczny&&sekwencja.stan!=stan)diag_czas("fade_start",now);
     if(stan!=Powitanie::Stan::Zakonczony&&sekwencja.stan==Powitanie::Stan::Zakonczony)diag_czas("fade_end",now);
     if(stan!=Powitanie::Stan::Zanikanie&&sekwencja.stan==Powitanie::Stan::Zanikanie)diag_start_reboot("[STARTUP] fade started");
     if(stan==Powitanie::Stan::Zanikanie||sekwencja.stan==Powitanie::Stan::Zanikanie||!sekwencja.aktywny())
         skladacz_obrazu_oznacz_dirty();
-    else if(tekst!=sekwencja.komunikat||przenikanie!=sekwencja.przenikanie){
-        // Animation is one complete visual transaction, including after a
-        // geometry/DPI change. No partial text band can retain an older row.
+    else if(sekwencja.sygnatura()!=poprzednia_sygnatura){
+        // Brud tylko wtedy, gdy zmienil sie WIDOCZNY obraz. Wczesniej warunkiem
+        // byla zmiana probki czasu, wiec faza hold (ekran staly przez 2,2 s)
+        // generowala ~12 pelnych klatek 1280x720 na sekunde wraz z transferem
+        // do GPU - to bylo widoczne jako zaciecie i wysokie obciazenie CPU.
+        // Animacja pozostaje jedna kompletna transakcja: przy zmianie geometrii
+        // lub DPI cala klatka jest przebudowywana od tla.
+        //
+        // Znacznik ustawiamy JUZ TUTAJ, a nie po renderze: powitanie_zrodlo()
+        // wolajace to samo aktualizuj_stan(false) oznaczyloby ten sam stan
+        // drugi raz i kazda zmiana kosztowalaby dwie pelne klatki.
+        poprzednia_sygnatura=sekwencja.sygnatura();
         skladacz_obrazu_oznacz_dirty();
     }
     if(sekwencja.stan==Powitanie::Stan::Zakonczony&&!zakonczenie_oczekuje){
@@ -226,7 +241,7 @@ uint8_t* powitanie_zrodlo(uint8_t* scena,int w,int h,int pitch,int x,int y,int r
         if(rebuild) {
             // The first visible welcome stays at time zero until publication;
             // subsequent geometry changes use the current absolute state.
-            SplashFirstDiag::id().message_index=sekwencja.komunikat;
+            SplashFirstDiag::id().message_index=unsigned(sekwencja.krok);
             SplashFirstDiag::event("render_begin",czas_monotoniczny_us());
         }
         // Freeze one absolute-time state for both glyph passes. Always rebuild
@@ -234,7 +249,7 @@ uint8_t* powitanie_zrodlo(uint8_t* scena,int w,int h,int pitch,int x,int y,int r
         const auto frame=sekwencja;
         Powitanie::rysuj(dst,w,h,pitch/4,skala,frame,true);
         ++SplashFirstDiag::id().frame;
-        poprzedni_tekst=sekwencja.komunikat;poprzednie_przenikanie=sekwencja.przenikanie;pelne_rysowanie=false;
+        poprzedni_krok=sekwencja.krok;poprzednia_sygnatura=sekwencja.sygnatura();pelne_rysowanie=false;
     }
     if(sekwencja.stan==Powitanie::Stan::Zanikanie||zakonczenie_oczekuje){
         // Blend a newly reconstructed complete frame, never the last blend.
@@ -249,9 +264,11 @@ uint8_t* powitanie_zrodlo(uint8_t* scena,int w,int h,int pitch,int x,int y,int r
                     if(dst[size_t(yy)*(pitch/4)+xx]!=Powitanie::TLO)return true;
             return false;
         };
-        const auto g=Powitanie::geometria(w,h,skala,sekwencja.komunikat);
-        SplashFirstDiag::id().title=ink(g.tytul);
-        SplashFirstDiag::id().message=ink(Powitanie::centrum(w,h,skala));
+        const auto znak=Powitanie::obszar_znaku(w,h,skala);
+        SplashFirstDiag::id().title=ink(znak);
+        // Komunikaty pojawiaja sie dopiero po zapelnieniu paska, wiec pierwsza
+        // klatka sprawdza gotowosc ich obszaru, a nie atrament (go jeszcze nie ma).
+        SplashFirstDiag::id().message=1;
 #endif
         SplashFirstDiag::event("render_end",czas_monotoniczny_us());
         // The surface becomes publishable only after all CPU rendering.
@@ -263,11 +280,12 @@ uint8_t* powitanie_zrodlo(uint8_t* scena,int w,int h,int pitch,int x,int y,int r
     // completed full render, not only a surface rebuild, restores readiness.
     PrezentacjaStartu::przygotowana();
 #if BURSZTYNDIAGSPLASHRUNTIMEFRAMES
-    const auto g=Powitanie::geometria(w,h,skala,0);
+    const auto znak=Powitanie::obszar_znaku(w,h,skala);
+    const auto napisy=Powitanie::centrum(w,h,skala);
     KlatkiStartuDiag::info()={SplashFirstDiag::id().frame,true,pierwsza_klatka_gotowa,
-        {g.tytul.x,g.tytul.y,g.tytul.w,g.tytul.h},
-        {g.komunikat.x,g.komunikat.y,g.komunikat.w,g.komunikat.h},Powitanie::TLO};
-    KlatkiStartuDiag::info().message_index=sekwencja.komunikat;
+        {znak.x,znak.y,znak.w,znak.h},
+        {napisy.x,napisy.y,napisy.w,napisy.h},Powitanie::TLO};
+    KlatkiStartuDiag::info().message_index=unsigned(sekwencja.krok);
 #endif
     return powierzchnia;
 }

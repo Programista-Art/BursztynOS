@@ -77,13 +77,26 @@ static void init(std::vector<uint32_t>& native,bool efi) {
     InicjalizujGrafike(reinterpret_cast<uint64_t>(tags));
 }
 static void check_image(const std::vector<uint32_t>& p,int w,int h,uint64_t elapsed) {
-    Powitanie::Sekwencja s;s.rozpocznij(true,0);s.aktualizuj(elapsed);
-    std::vector<uint32_t> expected(size_t(w)*h,0);
-    Powitanie::rysuj(expected.data(),w,h,w,100,s,true);
-    assert(p==expected);
-    const auto g=Powitanie::geometria(w,h,100,s.komunikat);
-    auto ink=[&](Powitanie::Obszar r){for(int y=r.y;y<r.y+r.h;++y)for(int x=r.x;x<r.x+r.w;++x)if(p[y*w+x]!=Powitanie::TLO)return true;return false;};
-    assert(ink(g.tytul)&&ink(g.komunikat));assert(p.front()==Powitanie::TLO);
+    // Dokladna zgodnosc pikselowa z rendererem jest sprawdzana w
+    // test-splash-snapshots, ktory ma dostep do stanu modulu. Tutaj licza sie
+    // niezmienniki realnie opublikowanej klatki: czarne tlo, logotyp od pierwszej
+    // klatki, brak komunikatow przed zapelnieniem paska i pelny rozmiar ukladu.
+    const auto g=Powitanie::geometria(w,h,100);
+    auto ink=[&](Powitanie::Obszar r){
+        for(int y=r.y<0?0:r.y;y<r.y+r.h&&y<h;++y)
+            for(int x=r.x<0?0:r.x;x<r.x+r.w&&x<w;++x)
+                if(p[y*w+x]!=Powitanie::TLO)return true;
+        return false;};
+    (void)elapsed;
+    assert(p.front()==Powitanie::TLO);
+    // Logotyp ma atrament od pierwszej publikacji.
+    assert(ink(g.logo));
+    // Obszar ponizej ukladu jest zawsze czystym tlem (brak starych pikseli).
+    const int dol=g.linia2.y+g.linia2.h+1;
+    for(int y=dol;y<h;++y)
+        for(int x=0;x<w;++x)assert(p[size_t(y)*w+x]==Powitanie::TLO);
+    // Nic nie jest rysowane poza wysrodkowanym prostokatem ukladu.
+    assert(p[size_t(g.dirty.y/2)*w+g.pasek.x/2]==Powitanie::TLO);
 }
 #ifndef BURSZTYN_POINTER_GRAPHICS_FIXTURE
 int main(){

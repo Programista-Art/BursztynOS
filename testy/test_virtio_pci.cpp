@@ -5137,48 +5137,53 @@ void grafika_pobierz_boot_rozmiar(uint32_t* out_w, uint32_t* out_h) {
 }
 
 // ----------------------------------------------------------------------------
-// 108. VirtIO-GPU: Zachowanie trybu rozruchowego UEFI GOP (1280x720 zamiast 640x480)
+// 108. VirtIO-GPU: wybor poczatkowego trybu (HOST > bootloader > profil domyslny)
 // ----------------------------------------------------------------------------
 void test_virtio_gpu_boot_mode_preservation() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
-    TEST_ASSERT(setup_mock_gpu_device(&dev, 640, 480), "Setup mock GPU z dinfo=640x480");
 
-    // Przypadek 1: Boot mode 1280x720 (UEFI GOP) jest zachowywany zamiast 640x480
-    g_mock_boot_w = 1280;
-    g_mock_boot_h = 720;
-    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU z poprawnym boot mode");
-
+    /*
+     * Priorytet zrodel trybu jest udokumentowana polityka produktowa:
+     * "system dostosowuje sie do medium, ktore go wyswietla". GET_DISPLAYINFO
+     * opisuje realny scanout (okno QEMU / monitor VM), wiec wygrywa z trybem
+     * bootloadera, ktory OVMF/GRUB czesto narzucaja niezaleznie od okna.
+     */
+    // Przypadek 1: host 1280x800, bootloader 640x480 -> wygrywa host.
+    g_mock_boot_w = 640;
+    g_mock_boot_h = 480;
+    TEST_ASSERT(setup_mock_gpu_device(&dev, 1280, 800), "Setup mock GPU z dinfo=1280x800");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU przy zgodzie host/bootloader");
     VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
     TEST_ASSERT(drv != nullptr, "drv != nullptr");
-    TEST_ASSERT(drv->fb_width == 1280, "fb_width == 1280 (zachowano GOP)");
-    TEST_ASSERT(drv->fb_height == 720, "fb_height == 720 (zachowano GOP)");
-    TEST_ASSERT(drv->display_width == 1280, "display_width == 1280");
-    TEST_ASSERT(drv->display_height == 720, "display_height == 720");
+    TEST_ASSERT(drv->fb_width == 1280, "fb_width == 1280 (tryb hosta)");
+    TEST_ASSERT(drv->fb_height == 800, "fb_height == 800 (tryb hosta)");
+    TEST_ASSERT(drv->display_width == 1280, "display_width == 1280 (tryb hosta)");
+    TEST_ASSERT(drv->display_height == 800, "display_height == 800 (tryb hosta)");
 
     virtio_gpu_reset(drv);
     virtio_gpu_reset_all();
 
-    // Przypadek 2: Boot mode niepoprawny (0x0) -> fallback do dinfo
-    g_mock_boot_w = 0;
-    g_mock_boot_h = 0;
-    TEST_ASSERT(setup_mock_gpu_device(&dev, 640, 480), "Setup mock GPU 640x480");
-    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU z pustym boot mode");
+    // Przypadek 2: host oferuje inny tryb niz bootloader -> host ma priorytet.
+    g_mock_boot_w = 1280;
+    g_mock_boot_h = 720;
+    TEST_ASSERT(setup_mock_gpu_device(&dev, 1024, 768), "Setup mock GPU z dinfo=1024x768");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU przy roznym trybie hosta i bootloadera");
     drv = virtio_gpu_get_driver(0);
-    TEST_ASSERT(drv->fb_width == 640, "fb_width == 640 fallback do dinfo");
-    TEST_ASSERT(drv->fb_height == 480, "fb_height == 480 fallback do dinfo");
+    TEST_ASSERT(drv->fb_width == 1024, "fb_width == 1024 (host bije bootloader GOP)");
+    TEST_ASSERT(drv->fb_height == 768, "fb_height == 768 (host bije bootloader GOP)");
 
     virtio_gpu_reset(drv);
     virtio_gpu_reset_all();
 
-    // Przypadek 3: Boot mode za duzy (> 64 MiB) -> fallback do dinfo
+    // Przypadek 3: bootloader za duzy (> 64 MiB) -> odrzucony, wygrywa host.
     g_mock_boot_w = 50000;
     g_mock_boot_h = 50000;
     TEST_ASSERT(setup_mock_gpu_device(&dev, 1024, 768), "Setup mock GPU 1024x768");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU z niepoprawnym boot mode");
     drv = virtio_gpu_get_driver(0);
-    TEST_ASSERT(drv->fb_width == 1024, "fb_width == 1024 fallback do dinfo");
-    TEST_ASSERT(drv->fb_height == 768, "fb_height == 768 fallback do dinfo");
+    TEST_ASSERT(drv->fb_width == 1024, "fb_width == 1024 (odrzucony boot mode)");
+    TEST_ASSERT(drv->fb_height == 768, "fb_height == 768 (odrzucony boot mode)");
 
     virtio_gpu_reset(drv);
     virtio_gpu_reset_all();
@@ -5194,7 +5199,7 @@ void test_virtio_gpu_runtime_modeset_and_rollback() {
     VirtioPciDevice dev{};
     g_mock_boot_w = 1280;
     g_mock_boot_h = 720;
-    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
+    TEST_ASSERT(setup_mock_gpu_device(&dev, 1280, 720), "Probe GPU");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU z 1280x720");
 
     VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
@@ -5253,7 +5258,7 @@ void test_virtio_gpu_confirmation_lifecycle_and_injected_failures() {
     VirtioPciDevice dev{};
     g_mock_boot_w = 1280;
     g_mock_boot_h = 720;
-    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
+    TEST_ASSERT(setup_mock_gpu_device(&dev, 1280, 720), "Probe GPU");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU z 1280x720");
 
     VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
