@@ -11,6 +11,8 @@
 
 # --- ISO i staging GRUB ---
 *.iso
+# Wyjatek: publikowany obraz startowy jest wersjonowany celowo.
+!/BursztynOS.iso
 /isodir/
 .isodir_ci_test/
 
