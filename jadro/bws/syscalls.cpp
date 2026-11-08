@@ -1841,38 +1841,31 @@ __attribute__((noinline)) uint64_t bws_uruchom(
         return a[i] == '\0' && b[i] == '\0';
     };
 
-    /* BWS10 uruchamia plik_startowy bez parsera .cebula. Ograniczamy maske
-       do praw deklarowanych przez zaufane, wbudowane paczki. */
-    uint64_t wymagane = prawa_dziecka;
-    if (rowna_sciezka(sciezka, "/programy/notatnik.cebula/notatnik.bur"))
-        wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ | PRAWO_PLIKI_ZAPISZ;
-    else if (rowna_sciezka(
-                sciezka,
-                "/programy/eksplorator.cebula/eksplorator-plikow.bur"))
-        wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ | PRAWO_PLIKI_ZAPISZ |
-                   PRAWO_URUCHOM_PROGRAM;
-    else if (rowna_sciezka(sciezka,
-                           "/programy/przegladarka.cebula/przegladarka.bur"))
-        wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ | PRAWO_SIEC | PRAWO_URUCHOM_PROGRAM;
-    else if (rowna_sciezka(sciezka,"/programy/husarz-worker.cebula/husarz-worker.bur"))
-        wymagane = PRAWO_GUI | PRAWO_SIEC;
-    else if (rowna_sciezka(sciezka,
-                           "/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur"))
-        wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ;
-    else if (rowna_sciezka(sciezka, "/programy/tapety.cebula/tapety.bur"))
-        wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ;
-    else if (rowna_sciezka(sciezka,
-                           "/programy/kalkulator.cebula/kalkulator.bur"))
-        wymagane = PRAWO_GUI;
-    else if (rowna_sciezka(sciezka,
-                           "/programy/test.cebula/test.bur"))
-        wymagane = PRAWO_GUI | PRAWO_URUCHOM_PROGRAM | PRAWO_PLIKI_CZYTAJ;
-    else if (rowna_sciezka(sciezka,
-                           "/gry/snake.cebula/snake.bur"))
-        wymagane = PRAWO_GUI;
-    else if (rowna_sciezka(sciezka, "/shell.bur"))
+    /*
+     * Zrodlem prawdy o uprawnieniach jest manifest opis.aplikacji.
+     *
+     * Wczesniejsza wersja utrzymywala 11-pozycyjny whitelist sciezek
+     * w kodzie jadra, ktory (a) duplikowal dane z manifestow, (b) wymagal
+     * rekompilacji jadra po dodaniu aplikacji, (c) maskowal bledy manifestu.
+     *
+     * Teraz: manifest decyduje. Gdy manifestu brak, obowiazuje zasada
+     * najmniejszego przywileju - aplikacja dostaje wylacznie GUI i odczyt
+     * plikow, czyli minimum potrzebne do narysowania okna i wczytania
+     * wlasnych zasobow. Zadnych Sieci, zapisu ani uruchamiania programow.
+     */
+    uint64_t wymagane =
+        PRAWO_GUI | PRAWO_PLIKI_CZYTAJ;
+
+    /*
+     * Powloka jest usluga systemowa instalowana przez jadro z obrazu i nie
+     * ma manifestu paczki. Jej zestaw praw jest staly i jawny, bo potrzebuje
+     * pelnego dostepu do plikow, sieci i uruchamiania programow.
+     */
+    if (rowna_sciezka(sciezka, "/shell.bur")) {
         wymagane = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ | PRAWO_PLIKI_ZAPISZ |
                    PRAWO_SIEC | PRAWO_URUCHOM_PROGRAM;
+    }
+
     // Only the trusted system manager can grant display settings privileges.
     if(rowna_sciezka(sciezka,"/programy/ekran.cebula/ekran.bur")) {
         if(!pzb_ma_co_najmniej_poziom(&rodzic,PZB_ZAUFANE)||
@@ -2785,14 +2778,19 @@ __attribute__((noinline)) uint64_t bws_alokuj_sterte(
             ROZMIAR_STRONY
         );
 
-        ZmapujStrone(
+        /*
+         * Sterta jest danymi: RW + NX. Uzywamy wariantu 64-bitowego, bo
+         * ZmapujStrone() przyjmuje uint32_t i obcina bit 63.
+         */
+        (void)ZmapujStrone64Sprawdzona(
             reinterpret_cast<void*>(
                 adres
             ),
             ramka,
             VMM_FLAGA_OBECNA |
             VMM_FLAGA_ZAPIS |
-            VMM_FLAGA_USER
+            VMM_FLAGA_USER |
+            (vmm_nx_aktywny() ? VMM_FLAGA_NX : 0ULL)
         );
 
         if (!bws_vmm_sprawdz_zakres_uzytkownika(
@@ -3039,11 +3037,33 @@ __attribute__((noinline)) uint64_t bws_czytaj_fragment_pliku(
     if (!bws_vmm_sprawdz_zakres_uzytkownika(reinterpret_cast<void*>(buf_u), len, true)) return 0;
     uint64_t end = 0;
     if (__builtin_add_overflow(offset, (uint64_t)len, &end)) return 0;
+
+    /*
+     * PSF nie moze pisac bezposrednio do bufora Ring 3:
+     *   - lamie to kontrakt copy_to_user (SMAP zablokuje taki zapis #PF),
+     *   - pozostawia bufor uzytkownika czesciowo zapisany przy bledzie I/O.
+     * Czytamy do bufora jadra i publikujemy jedna kontrolaowana kopie.
+     */
+    BuforKernelowy bufor(len, false);
+
+    if (!bufor) {
+        return 0;
+    }
+
     uint32_t got = 0;
     if (!czytaj_fragment_pliku(
-            sciezka, offset, reinterpret_cast<char*>(buf_u), len,
+            sciezka, offset, bufor.jako_char(), len,
             &got)) return 0;
     if (got > len) return 0;
+
+    if (got != 0 &&
+        !skopiuj_do_przestrzeni_uzytkownika(
+            reinterpret_cast<void*>(buf_u),
+            bufor.get(),
+            got)) {
+        return 0;
+    }
+
     return (uint64_t)got + 1ULL;
 }
 

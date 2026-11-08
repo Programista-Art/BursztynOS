@@ -202,6 +202,28 @@ bool socket_close(uint64_t handle);
 bool ustawienia_sciezka(const char* app_id, const char* klucz,
                         char* wynik, uint32_t pojemnosc);
 
+/*
+ * Trwale ustawienia per aplikacja.
+ *
+ * Kazdy klucz to osobny plik pod /uzytkownicy/domyslny/Ustawienia/<app>/<klucz>.
+ * Plik jest maly (do 4096 B) i tekstowy, wiec mozna go podejrzec
+ * w Eksploratorze i Notatniku.
+ *
+ * ustawienia_zapisz: tworzy katalog aplikacji, jesli go nie ma, i zapisuje
+ *                    wartosc. Nadpisuje poprzednia.
+ * ustawienia_wczytaj: zwraca false, gdy klucza nie ma. Bufor jest wtedy
+ *                     wyzerowany - brak danych nie jest bledem fatalnym.
+ * ustawienia_usun:   usuwa pojedynczy klucz.
+ *
+ * Wszystkie funkcje uzywaja PSF przez BWS (PRAWO_PLIKI_*), wiec podlegaja
+ * tej samej kontroli PZB co reszta operacji plikowych aplikacji.
+ */
+bool ustawienia_zapisz(const char* app_id, const char* klucz,
+                       const char* wartosc);
+bool ustawienia_wczytaj(const char* app_id, const char* klucz,
+                        char* wynik, uint32_t pojemnosc);
+bool ustawienia_usun(const char* app_id, const char* klucz);
+
 /* =========================================================================
  * 2b. WSPOLNY DIALOG MODALNY DLA APLIKACJI GUI
  * ========================================================================= */

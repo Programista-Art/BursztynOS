@@ -1593,6 +1593,114 @@ bool ustawienia_sciezka(const char* app_id, const char* klucz,
 }
 
 /* =========================================================================
+ * 4b. TRWALE USTAWIENIA PER APLIKACJA
+ * ========================================================================= */
+
+namespace {
+
+/* Maksymalny rozmiar jednej wartosci. Ustawienie to krotki tekst, nie plik. */
+constexpr uint32_t USTAWIENIA_MAKS_WARTOSC = 4096U;
+
+/*
+ * Katalog aplikacji jest tworzony jednorazowo. PSF nie ma "mkdir -p",
+ * wiec tworzymy jawnie i ignorujemy blad "juz istnieje".
+ */
+bool zapewnij_katalog_aplikacji(const char* app_id) {
+    char katalog[192];
+
+    if (!ustawienia_sciezka(app_id, "x", katalog, sizeof(katalog))) {
+        return false;
+    }
+
+    /* Odetnij ostatni segment ("/x") zostawiajac katalog aplikacji. */
+    for (int i = static_cast<int>(sizeof(katalog)) - 1; i >= 0; --i) {
+        if (katalog[i] == '/') {
+            katalog[i] = '\0';
+            break;
+        }
+    }
+
+    if (katalog[0] == '\0') return false;
+
+    /* utworz_katalog_uzytkownika zwraca false takze gdy katalog juz jest. */
+    (void)utworz_katalog_uzytkownika(katalog);
+    return true;
+}
+
+} // namespace
+
+bool ustawienia_zapisz(const char* app_id, const char* klucz,
+                       const char* wartosc) {
+    if (!app_id || !klucz || !wartosc) return false;
+
+    uint32_t dlugosc = 0;
+    while (wartosc[dlugosc] != '\0') {
+        if (dlugosc + 1U >= USTAWIENIA_MAKS_WARTOSC) return false;
+        ++dlugosc;
+    }
+
+    if (!zapewnij_katalog_aplikacji(app_id)) return false;
+
+    char sciezka[256];
+
+    if (!ustawienia_sciezka(app_id, klucz, sciezka, sizeof(sciezka))) {
+        return false;
+    }
+
+    /*
+     * BWS 2 tworzy plik, jesli go nie ma; istniejący zostawia bez zmian.
+     * Bez tego pierwszy zapis klucza zawsze by sie nie powiodl, bo
+     * BWS 3 wymaga istniejacego pliku.
+     */
+    (void)bws_wywolaj(2, reinterpret_cast<uint64_t>(sciezka), 0, 0, 0);
+
+    return zapisz_plik(sciezka, wartosc, dlugosc);
+}
+
+bool ustawienia_wczytaj(const char* app_id, const char* klucz,
+                        char* wynik, uint32_t pojemnosc) {
+    if (!app_id || !klucz || !wynik || pojemnosc < 2) return false;
+
+    wynik[0] = '\0';
+
+    char sciezka[256];
+
+    if (!ustawienia_sciezka(app_id, klucz, sciezka, sizeof(sciezka))) {
+        return false;
+    }
+
+    uint32_t rozmiar = 0;
+
+    if (!pobierz_rozmiar_pliku(sciezka, &rozmiar)) return false;
+    if (rozmiar == 0 || rozmiar >= pojemnosc || rozmiar >= USTAWIENIA_MAKS_WARTOSC) {
+        return false;
+    }
+
+    uint32_t odczytano = 0;
+
+    if (!czytaj_fragment_pliku(sciezka, 0, wynik, rozmiar, &odczytano)) {
+        return false;
+    }
+
+    if (odczytano != rozmiar) return false;
+
+    wynik[rozmiar] = '\0';
+    return true;
+}
+
+bool ustawienia_usun(const char* app_id, const char* klucz) {
+    if (!app_id || !klucz) return false;
+
+    char sciezka[256];
+
+    if (!ustawienia_sciezka(app_id, klucz, sciezka, sizeof(sciezka))) {
+        return false;
+    }
+
+    return usun_twor_uzytkownika(sciezka);
+}
+
+/* =========================================================================
  * 5.1 IMPLEMENTACJA PODSYSTEMU MOTYWOW (Ring 3)
  * ========================================================================= */
 

@@ -24,6 +24,7 @@
 #include "aktualizacja.h"
 #include "motyw.h"
 #include "bws_hda_diag.h"
+#include "bws_procesy.h"
 #include "sterowniki/dzwiek/hda.h"
 #include "sterowniki/dzwiek/hda_diag.h"
 #include "sterowniki/dzwiek/hda_transport.h"
@@ -920,6 +921,154 @@ uint64_t socket_close(proces_t& p, uint64_t handle) {
 
 } // namespace
 
+/* =========================================================================
+ * 22. ZARZADZANIE PROCESAMI (BWS 94/95)
+ * ========================================================================= */
+
+namespace {
+
+/* Uprawnienie do wgladu w liste procesow i do ich konczenia. */
+bool ma_prawo_zarzadzania_procesami(const proces_t& p) {
+    return p.poziom_zaufania <= PZB_USLUGI &&
+           ma_prawo(p, PRAWO_SYSTEM_CONFIG);
+}
+
+/*
+ * Wyodrebniona nazwa pliku ze sciezki procesu.
+ * Zwraca "?" gdy proces nie ma sciezki (np. slot pusty lub PID 0).
+ */
+void nazwa_z_sciezki(const char* sciezka, char* out, size_t pojemnosc) {
+    if (!out || pojemnosc == 0) return;
+    out[0] = '\0';
+    if (!sciezka || sciezka[0] == '\0') {
+        if (pojemnosc > 2) { out[0] = '?'; out[1] = '\0'; }
+        return;
+    }
+
+    size_t dlugosc = 0;
+    while (sciezka[dlugosc] != '\0' && dlugosc < 512) ++dlugosc;
+
+    size_t start = dlugosc;
+    while (start > 0 && sciezka[start - 1] != '/') --start;
+
+    size_t out_len = 0;
+    while (start < dlugosc && out_len + 1 < pojemnosc) {
+        out[out_len++] = sciezka[start++];
+    }
+    out[out_len] = '\0';
+}
+
+uint64_t procesy_lista(proces_t& p, uint64_t out_user, uint64_t max64) {
+    if (!ma_prawo_zarzadzania_procesami(p)) return 0;
+    if (out_user == 0 || max64 == 0) return 0;
+
+    if (max64 > BWS_PROCESY_MAKS) max64 = BWS_PROCESY_MAKS;
+
+    const uint64_t bajtow = max64 * sizeof(BwsProcesInfo);
+
+    if (!czy_bezpieczny_zakres_uzytkownika_do_zapisu(
+            reinterpret_cast<void*>(out_user), static_cast<size_t>(bajtow))) {
+        return 0;
+    }
+
+    /* Ograniczony bufor BSS: brak duzej ramki stosu w syscallu. */
+    static BwsProcesInfo wpisy[BWS_PROCESY_MAKS];
+    uint64_t liczba = 0;
+
+    for (int pid = 0;
+         pid < static_cast<int>(PZB_MAKS_PROCESOW) &&
+         liczba < max64;
+         ++pid) {
+        const proces_t& q = tablica_procesow[pid];
+
+        /*
+         * Pomijamy wylacznie calkowicie puste sloty. Proces konczacy sie
+         * jest nadal raportowany - to diagnostycznie uzyteczne, a stan
+         * mowi wprost, ze jest w trakcie sprzatania.
+         */
+        if (q.stan == PROCES_PUSTY && pid != 0) continue;
+
+        BwsProcesInfo& w = wpisy[liczba];
+        w = {};
+        w.wersja = BWS_PROCESOW_ABI;
+        w.pid = static_cast<uint32_t>(pid);
+        w.stan = static_cast<uint32_t>(q.stan);
+        w.poziom_pzb = q.poziom_zaufania;
+        w.uprawnienia = q.uprawnienia;
+
+        const uint64_t sterta =
+            (q.granica_sterty > RING3_HEAP_BASE)
+                ? q.granica_sterty - RING3_HEAP_BASE
+                : 0;
+        w.sterta_bajtow = sterta;
+        w.pamiec_bajtow = sterta;
+
+        nazwa_z_sciezki(q.sciezka_pliku, w.nazwa, sizeof(w.nazwa));
+        if (pid == 0 && w.nazwa[0] == '?') {
+            const char* jadro = "jadro";
+            size_t i = 0;
+            while (jadro[i] != '\0' && i + 1 < sizeof(w.nazwa)) {
+                w.nazwa[i] = jadro[i];
+                ++i;
+            }
+            w.nazwa[i] = '\0';
+        }
+
+        ++liczba;
+    }
+
+    if (liczba == 0) return 0;
+
+    if (!skopiuj_do_przestrzeni_uzytkownika(
+            reinterpret_cast<void*>(out_user),
+            wpisy,
+            static_cast<size_t>(liczba * sizeof(BwsProcesInfo)))) {
+        return 0;
+    }
+
+    return liczba;
+}
+
+uint64_t proces_zabij(proces_t& p, uint64_t pid64) {
+    if (!ma_prawo_zarzadzania_procesami(p)) return 0;
+    if (pid64 == 0 || pid64 >= PZB_MAKS_PROCESOW) return 0;
+
+    const int pid = static_cast<int>(pid64);
+
+    /* Nie mozna ubic samego siebie tym syscallem - od tego jest BWS 32. */
+    if (pid == aktualny_pid) return 0;
+
+    proces_t& cel = tablica_procesow[pid];
+
+    if (cel.stan == PROCES_PUSTY || cel.stan == PROCES_KONCZACY) {
+        return 0;
+    }
+
+    /*
+     * Proces o wyzszym (nizszym numerycznie) zaufaniu nie moze byc
+     * zakonczony przez mniej uprzywilejowanego wywolujacego.
+     */
+    if (cel.poziom_zaufania < p.poziom_zaufania) return 0;
+
+    /*
+     * Zakonczenie realizuje scheduler: oznacza stan i czeka na timer,
+     * ktory bezpiecznie przeniesie CPU na inny stos jadra. Nie zwalniamy
+     * tu PML4 ani stron - robi to posprzataj_zakonczone_procesy().
+     *
+     * Zapis stanu jest atomowy (RELEASE), dokladnie jak w loaderze, aby
+     * timer nie zobaczyl czesciowo zmienionego deskryptora.
+     */
+    cel.poziom_zaufania = PZB_PIASKOWNICA;
+    cel.uprawnienia = 0;
+    __atomic_store_n(&cel.stan, PROCES_KONCZACY, __ATOMIC_RELEASE);
+
+    scheduler_usun_zdarzenia_procesu(pid);
+
+    return BWS_ZABIJ_OK;
+}
+
+} // namespace
+
 void bws_ipc_inicjalizuj_tapety() {
     // Wywolanie jednorazowe przed uruchomieniem pierwszego procesu Ring 3.
     endpoints[0] = {};
@@ -1319,6 +1468,8 @@ extern "C" uint64_t bws_nowoczesne_obsluz(
         case BWS_SOCKET_SEND: return socket_send(*proces, a1, a2, a3, a4);
         case BWS_SOCKET_RECV: return socket_recv(*proces, a1, a2, a3, a4);
         case BWS_SOCKET_CLOSE: return socket_close(*proces, a1);
+        case BWS_PROCESY_LISTA: return procesy_lista(*proces, a1, a2);
+        case BWS_PROCES_ZABIJ: return proces_zabij(*proces, a1);
         case BWS_OTA_STATUS:
             return aktualizacja_bws_status(proces, a1);
         case BWS_OTA_POLECENIE:

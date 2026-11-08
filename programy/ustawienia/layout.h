@@ -3,6 +3,7 @@
 #include "content_metrics.h"
 #include "support_ui.h"
 #include "system_ui.h"
+#include "power_ui.h"
 #include "themes_ui.h"
 namespace SettingsUI {
 using namespace BursztynUI;
@@ -56,12 +57,12 @@ public:
 };
 class Body : public Panel {
 public:
- Etykieta* title;Przycisk* nav[5]{};ThemesPage* themes;ThemesViewport* themes_view;FontPage* fonts;SupportPage* support;SystemPage* system;Panel* placeholder;Etykieta* placeholder_text;
+ Etykieta* title;Przycisk* nav[6]{};ThemesPage* themes;ThemesViewport* themes_view;FontPage* fonts;SupportPage* support;SystemPage* system;PowerPage* power;Panel* placeholder;Etykieta* placeholder_text;
  Body(){
   ustaw_uklad_automatyczny(false);ustaw_wypelnienie({0,0,0,0});
   title=&dodaj<Etykieta>("Ustawienia");title->ustaw_wypelnienie({0,0,0,0});
-  const char* names[]={"System","Wygląd","Motywy","Czcionki","Wsparcie"};for(int i=0;i<5;++i)nav[i]=&dodaj<Przycisk>(names[i]);
-  themes_view=&dodaj<ThemesViewport>();themes=themes_view->page;themes_view->ustaw_widoczna(false);system=&dodaj<SystemPage>();fonts=&dodaj<FontPage>();fonts->ustaw_widoczna(false);support=&dodaj<SupportPage>();support->ustaw_widoczna(false);placeholder=&dodaj<Panel>();placeholder->ustaw_widoczna(false);placeholder->ustaw_wypelnienie({ContentInset,ContentInset,ContentInset,ContentInset});placeholder_text=&placeholder->dodaj<Etykieta>("");placeholder_text->ustaw_wypelnienie({0,0,0,0});
+  const char* names[]={"System","Energia","Wygląd","Motywy","Czcionki","Wsparcie"};for(int i=0;i<6;++i)nav[i]=&dodaj<Przycisk>(names[i]);
+  themes_view=&dodaj<ThemesViewport>();themes=themes_view->page;themes_view->ustaw_widoczna(false);system=&dodaj<SystemPage>();power=&dodaj<PowerPage>();power->ustaw_widoczna(false);fonts=&dodaj<FontPage>();fonts->ustaw_widoczna(false);support=&dodaj<SupportPage>();support->ustaw_widoczna(false);placeholder=&dodaj<Panel>();placeholder->ustaw_widoczna(false);placeholder->ustaw_wypelnienie({ContentInset,ContentInset,ContentInset,ContentInset});placeholder_text=&placeholder->dodaj<Etykieta>("");placeholder_text->ustaw_wypelnienie({0,0,0,0});
   ustaw_minimalny_rozmiar({800,480});
  }
  void rozmiesc(Prostokat r)override{
@@ -69,9 +70,9 @@ public:
   int nav_width=CzcionkaUI::zmierz_tekst("Ustawienia",s)+32*s;if(nav_width<150*s)nav_width=150*s;
   int button=nav[0]->zmierz({nav_width,r.wysokosc}).wysokosc;if(button<line+12*s)button=line+12*s;
   title->rozmiesc({pad,pad,nav_width,line});
-  for(int i=0;i<5;++i)nav[i]->rozmiesc({pad,pad+line+gap+i*(button+gap),nav_width,button});
+  for(int i=0;i<6;++i)nav[i]->rozmiesc({pad,pad+line+gap+i*(button+gap),nav_width,button});
   int x=pad+nav_width+gap,w=r.szerokosc-x-pad,h=r.wysokosc-2*pad;if(w<0)w=0;if(h<0)h=0;
-  themes_view->rozmiesc({x,pad,w,h});system->rozmiesc({x,pad,w,h});fonts->rozmiesc({x,pad,w,h});support->rozmiesc({x,pad,w,h});placeholder->rozmiesc({x,pad,w,h});
+  themes_view->rozmiesc({x,pad,w,h});system->rozmiesc({x,pad,w,h});power->rozmiesc({x,pad,w,h});fonts->rozmiesc({x,pad,w,h});support->rozmiesc({x,pad,w,h});placeholder->rozmiesc({x,pad,w,h});
  }
 };
 // Below the measured minimum, preserve usable controls in a scrollable client.

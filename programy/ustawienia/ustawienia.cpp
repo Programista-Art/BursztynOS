@@ -23,6 +23,7 @@ class Settings : public Okno {
   SettingsUI::ThemesViewport* themes_view{};
   Panel *font_page{};
   SettingsUI::SystemPage* system_page{};
+  SettingsUI::PowerPage* power_page{};
   SettingsUI::SupportPage* support_page{};
   Panel *placeholder{};
   Etykieta *placeholder_text{};
@@ -32,12 +33,14 @@ class Settings : public Okno {
   PowierzchniaRysunkowa *preview{};
   uint32_t ids[BSF::MaxFiles]{};
   unsigned family_count{};
+  /* Strony: 0=System, 1=Energia, 2=Wyglad, 3=Motywy, 4=Czcionki, 5=Wsparcie. */
   void show(unsigned page) {
-    font_page->ustaw_widoczna(page == 3);
+    font_page->ustaw_widoczna(page == 4);
     system_page->ustaw_widoczna(page==0);
-    placeholder->ustaw_widoczna(page==1);
-    support_page->ustaw_widoczna(page==4);
-    themes_view->ustaw_widoczna(page==2);
+    if(power_page)power_page->ustaw_widoczna(page==1);
+    placeholder->ustaw_widoczna(page==2);
+    support_page->ustaw_widoczna(page==5);
+    themes_view->ustaw_widoczna(page==3);
     placeholder_text->ustaw_tekst("Wybierz Motywy, aby zmienić wygląd całego systemu.");
     przelicz_uklad();
     uniewaznij();
@@ -104,22 +107,66 @@ public:
   Settings() : Okno("Ustawienia", 950, 540) {}
   void init() {
     auto c = BSF::configuration();
+
+    /*
+     * Preferencje lokalne maja pierwszenstwo nad konfiguracja systemowa.
+     * Klucz jest zapisywany przez apply (patrz nizej), wiec ostatni wybor
+     * uzytkownika przezywa restart niezaleznie od /system/konfig.
+     */
+    {
+      char zapisany_rozmiar[8];
+      if (ustawienia_wczytaj("ustawienia", "czcionka-rozmiar",
+                             zapisany_rozmiar, sizeof(zapisany_rozmiar))) {
+        unsigned wartosc = 0;
+        bool poprawna = zapisany_rozmiar[0] != '\0';
+        for (unsigned i = 0; zapisany_rozmiar[i] != '\0'; ++i) {
+          if (zapisany_rozmiar[i] < '0' || zapisany_rozmiar[i] > '9') {
+            poprawna = false;
+            break;
+          }
+          wartosc = wartosc * 10U + unsigned(zapisany_rozmiar[i] - '0');
+        }
+        if (poprawna && wartosc >= 8U && wartosc <= 64U) {
+          c.size = wartosc;
+        }
+      }
+    }
     auto &viewport = dodaj<SettingsUI::Viewport>();
     auto &root = *viewport.body;
     themes=root.themes;themes_view=root.themes_view;themes->load();
     system_page=root.system;
-    support_page=root.support;support_page->on_reload=[](SettingsUI::SupportPage*,void* p){static_cast<Settings*>(p)->reload_support();};support_page->reload_context=this;
+    power_page=root.power;
+    if(power_page){
+      power_page->odswiez();
+      power_page->save->przy_kliknieciu(
+        [](Przycisk*,void* p){
+          auto*s=static_cast<Settings*>(p);
+          if(s->power_page)s->power_page->zapisz();
+        },this);
+      power_page->reset->przy_kliknieciu(
+        [](Przycisk*,void* p){
+          auto*s=static_cast<Settings*>(p);
+          if(s->power_page)s->power_page->przywroc_domyslne();
+        },this);
+    }    support_page=root.support;support_page->on_reload=[](SettingsUI::SupportPage*,void* p){static_cast<Settings*>(p)->reload_support();};support_page->reload_context=this;
     reload_support();
     font_page=root.fonts;placeholder=root.placeholder;placeholder_text=root.placeholder_text;
     auto* page=root.fonts;
     families=page->families;size=page->size;preview=page->preview;status=page->status;
-    root.nav[2]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(2);},this);
-    for(unsigned i=0;i<5;++i){
-      if(i==0)root.nav[i]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(0);},this);
-      if(i==1)root.nav[i]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(1);},this);
-      if(i==4)root.nav[i]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(4);},this);
-      if(i==3)root.nav[i]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(3);},this);
+    for(unsigned i=0;i<6;++i){
+      root.nav[i]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(0);},this);
     }
+    /* Indeksy stron: 0=System, 1=Energia, 2=Wyglad, 3=Motywy, 4=Czcionki, 5=Wsparcie. */
+    root.nav[0]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(0);},this);
+    root.nav[1]->przy_kliknieciu([](Przycisk*,void* p){
+      auto*s=static_cast<Settings*>(p);
+      if(s->power_page)s->power_page->odswiez();
+      s->show(1);
+    },this);
+    root.nav[2]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(2);},this);
+    root.nav[3]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(3);},this);
+    root.nav[4]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(4);},this);
+    root.nav[5]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(5);},this);
     for (unsigned i = 0; i < BSF::enumerate(); ++i) {
       auto *f = BSF::info(i);
       if (f->weight >= 600 || f->italic)
@@ -169,6 +216,22 @@ public:
           s.status->ustaw_tekst(BSF::apply(c)
                                     ? "Zapisano ustawienia czcionki."
                                     : "Nie zapisano. Poprzednia czcionka jest aktywna.");
+          /*
+           * Trwaly zapis preferencji per aplikacja. Dzieki temu ustawienia
+           * przezywaja restart: aplikacja nie musi polegac wylacznie na
+           * konfiguracji BSF zapisanej w /system/konfig.
+           */
+          char rozmiar_txt[8];
+          unsigned wartosc = c.size;
+          int indeks = 7;
+          rozmiar_txt[indeks--] = '\0';
+          if (wartosc == 0) rozmiar_txt[indeks--] = '0';
+          while (wartosc != 0 && indeks >= 0) {
+            rozmiar_txt[indeks--] = char('0' + (wartosc % 10U));
+            wartosc /= 10U;
+          }
+          (void)ustawienia_zapisz("ustawienia", "czcionka-rozmiar",
+                                  &rozmiar_txt[indeks + 1]);
         },
         this);
     auto &reset = *page->reset;

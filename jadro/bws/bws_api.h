@@ -113,6 +113,20 @@ enum BwsNumer : uint64_t {
     BWS_DIAGNOSTYKA_SYSTEMU = 91,
     BWS_BSF_CONFIG = 92,
     BWS_GUI_TYTUL_ALFA = 93,
-    BWS_PIERWSZY_WOLNY = 94
+
+    /*
+     * Zarzadzanie procesami.
+     *
+     * BWS_PROCESY_LISTA wypelnia tablice BwsProcesInfo dla WSZYSTKICH
+     * aktywnych slotow (nie wymyslonych danych). BWS_PROCES_ZABIJ konczy
+     * proces o podanym PID - to jedyny sposob na zamkniecie zawieszonej
+     * aplikacji bez restartu systemu.
+     *
+     * Wymagane: PRAWO_SYSTEM_CONFIG i PZB <= PZB_USLUGI.
+     */
+    BWS_PROCESY_LISTA = 94,
+    BWS_PROCES_ZABIJ = 95,
+
+    BWS_PIERWSZY_WOLNY = 96
 };
 
