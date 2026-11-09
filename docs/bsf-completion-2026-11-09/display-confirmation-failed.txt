@@ -1,0 +1,14 @@
+Screenshot: display-initial
+Screenshot: mode-popup-0
+Screenshot: immediate-apply-0
+Traceback (most recent call last):
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/test_husarz_qemu.py", line 1834, in <module>
+    return
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/test_husarz_qemu.py", line 558, in main
+    if args.power_png_failures_only:
+                      ^^^^^^^^^^^^^^^
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/display_geometry_qemu_cases.py", line 171, in run
+    wait(lambda:geometry()['desktop_generation']==committed['generation'],'desktop generation acknowledgement',120,interval=.01)
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/test_husarz_qemu.py", line 260, in wait
+    raise TimeoutError(label)
+TimeoutError: desktop generation acknowledgement

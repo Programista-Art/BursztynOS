@@ -27,7 +27,10 @@ Resolution resolutions[ResolutionSlots];
 unsigned resolution_cursor{};
 struct ClusterResolution { uint32_t primary{},result{}; unsigned style{},size{}; bool valid{}; char text[128]{}; };
 ClusterResolution clusters[16];unsigned cluster_cursor{};
-void invalidate_resolution() { for(auto& r:resolutions) r=Resolution{}; resolution_cursor=0;for(auto& r:clusters)r.valid=false;cluster_cursor=0; }
+struct SystemChoice { uint32_t primary{}; unsigned index{MaxFiles}; };
+SystemChoice system_choices[4];
+unsigned default_index{MaxFiles},last_info_index{MaxFiles};
+void invalidate_resolution() { for(auto& r:resolutions) r=Resolution{}; resolution_cursor=0;for(auto& r:clusters)r.valid=false;cluster_cursor=0;for(auto& r:system_choices)r=SystemChoice{};default_index=last_info_index=MaxFiles; }
 
 bool initialized{}, disabled{};
 Config config{}, temporary{};
@@ -192,23 +195,34 @@ void init() {
 const FontInfo *default_info() {
   // Config family=0 means the stable system default. A newly installed family
   // sorting before DejaVu must not silently become the selected UI font.
+  if(default_index<count)return catalog+default_index;
   for (unsigned i = 0; i < count; ++i)
     if (same(catalog[i].family,"DejaVu Sans") && !catalog[i].italic &&
-        catalog[i].weight < 600 && !catalog[i].mono)
+        catalog[i].weight < 600 && !catalog[i].mono) {
+      default_index=i;
       return &catalog[i];
+    }
   for (unsigned i = 0; i < count; ++i)
-    if (!catalog[i].mono && !catalog[i].italic && catalog[i].weight < 600)
+    if (!catalog[i].mono && !catalog[i].italic && catalog[i].weight < 600) {
+      default_index=i;
       return &catalog[i];
+    }
   for (unsigned i = 0; i < count; ++i)
-    if (!catalog[i].italic && catalog[i].weight < 600)
+    if (!catalog[i].italic && catalog[i].weight < 600) {
+      default_index=i;
       return &catalog[i];
-  return count ? catalog : nullptr;
+    }
+  if(count){default_index=0;return catalog;}
+  return nullptr;
+}
+const FontInfo* catalog_info(uint32_t id) {
+  if(last_info_index<count&&catalog[last_info_index].id==id)return catalog+last_info_index;
+  for(unsigned i=0;i<count;++i)if(catalog[i].id==id){last_info_index=i;return catalog+i;}
+  return nullptr;
 }
 const FontInfo *selected() {
   const auto &c = previewing ? temporary : config;
-  for (unsigned i = 0; i < count; ++i)
-    if (catalog[i].id == c.family)
-      return catalog + i;
+  if(c.family)if(auto* item=catalog_info(c.family))return item;
   return default_info();
 }
 const FontInfo *choose(const char *families, bool bold, bool italic) {
@@ -216,6 +230,13 @@ const FontInfo *choose(const char *families, bool bold, bool italic) {
     return nullptr;
   init();
   const FontInfo *base = selected();
+  unsigned style=unsigned(bold)|(unsigned(italic)<<1);
+  if(!families&&base&&system_choices[style].primary==base->id&&system_choices[style].index<count)
+    return catalog+system_choices[style].index;
+  auto remember=[&](const FontInfo* item){
+    if(!families&&item)system_choices[style]={base->id,unsigned(item-catalog)};
+    return item;
+  };
   if (families) {
     size_t at = 0;
     while (families[at] && at < 2048) {
@@ -272,12 +293,12 @@ const FontInfo *choose(const char *families, bool bold, bool italic) {
   for (unsigned i = 0; i < count; ++i)
     if (same(base->family, catalog[i].family) && catalog[i].italic == italic &&
         ((catalog[i].weight >= 600) == bold))
-      return catalog + i;
+      return remember(catalog + i);
   for (unsigned i = 0; i < count; ++i)
     if (same(base->family, catalog[i].family) && !catalog[i].italic &&
         ((catalog[i].weight >= 600) == bold))
-      return catalog + i;
-  return regular;
+      return remember(catalog + i);
+  return remember(regular);
 }
 void evict(unsigned index){
   resource_info.resident_bytes-=loaded[index].size;delete[] loaded[index].bytes;loaded[index]=Loaded{};
@@ -366,7 +387,7 @@ uint32_t resolved_cluster(const char* text,size_t size,bool bold,const char* fam
   if(size<=128){auto& r=clusters[cluster_cursor++%16];r.primary=primary->id;r.result=result;r.style=style;r.size=unsigned(size);r.valid=true;byte_copy(r.text,text,size);}
   return result;
 }
-Face* by_id(uint32_t id){init();for(unsigned i=0;i<count;++i)if(catalog[i].id==id)return load(catalog+i);return nullptr;}
+Face* by_id(uint32_t id){init();return load(catalog_info(id));}
 const Glyph* glyph_face(uint32_t cp,uint32_t id,int px,bool bold,bool italic){auto* f=by_id(id);return f&&cache?cache->get(*f,cp,px,unsigned(bold)|(unsigned(italic)<<1)):nullptr;}
 int advance_face(uint32_t cp,uint32_t id,int px){if(combining(cp)||default_ignorable(cp))return 0;auto* f=by_id(id);return f?f->advance(f->glyph(cp),px):-1;}
 int kern_face(uint32_t l,uint32_t r,uint32_t id,int px){auto* f=by_id(id);return f?f->kerning(f->glyph(l),f->glyph(r),px):0;}
@@ -521,10 +542,7 @@ const char *family_name(uint32_t id) {
   init();
   if (id == 0xffffffffU)
     return "monospace";
-  for (unsigned i = 0; i < count; ++i)
-    if (catalog[i].id == id)
-      return catalog[i].family;
-  return nullptr;
+  auto* item=catalog_info(id);return item?item->family:nullptr;
 }
 int kern(uint32_t l, uint32_t r, int px, bool bold, const char *family) {
   if(combining(l) || combining(r))return 0;

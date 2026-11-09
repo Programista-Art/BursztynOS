@@ -1,0 +1,15 @@
+DejaVu fonts, https://dejavu-fonts.github.io/
+DejaVuSans.ttf and DejaVuSans-Bold.ttf version 2.37 from Ubuntu fonts-dejavu-core 2.37-8.
+Existing repository assets DejaVuSansMono.ttf and DejaVuSerifCondensed-Italic.ttf
+identify as version 2.33 in their name tables. Their original import provenance
+is not recorded here; upstream family source: https://github.com/dejavu-fonts/dejavu-fonts/tree/version_2_33
+They retain upstream names.
+See LICENSE-DejaVu.txt. These fonts are not original Bursztyn designs.
+
+Regular/Bold input files: /usr/share/fonts/truetype/dejavu/
+Upstream release: https://github.com/dejavu-fonts/dejavu-fonts/tree/version_2_37
+SHA-256 of distributed font bytes:
+5c1247acef7f2b8522a31742c76d6adcb5569bacc0be7ceaa4dc39dd252ce895  DejaVuSans-Bold.ttf
+ae7b7855e115a5966d8b1b3f80f254ccc117ec86f9965e202ee2940453837280  DejaVuSans.ttf
+dfbac4c793ca4b896c34af5c7ccbbaf37924b46cd521a5ecff9130b9c331f575  DejaVuSansMono.ttf
+768a97e45559f627a05acc0709938db5b75f017dc38ef5ba00e95043d6476f60  DejaVuSerifCondensed-Italic.ttf

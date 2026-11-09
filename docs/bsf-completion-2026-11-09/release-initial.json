@@ -1,0 +1,17 @@
+{
+  "BursztynOS.iso": {
+    "bytes": 40353792,
+    "sha256": "9afe354a068028db4517bda31cf13678705e53bd695d968869f8366166e0ea43"
+  },
+  "isodir/boot/system_operacyjny.bin": {
+    "bytes": 10545200,
+    "sha256": "b2e86fd5d127404d96c142b65f9c55191a5cba0d78fae845c9d1c9fda0ccafa9"
+  },
+  "build": "make -j4 BUR_FORMAT=1 iso (full source rebuild after absent production artifacts)",
+  "native_acceptance": "in progress",
+  "observation_elf": {
+    "bytes": 14247576,
+    "sha256": "50987de4441bc8e1ffb7c71bfb6e5a45fce3eb6e6144ca41d2ed8f25c1d12c64"
+  },
+  "native_result_kernel_hash": "Native harness kernel_sha256 identifies the matching unstripped observation ELF; public kernel hash is recorded separately."
+}

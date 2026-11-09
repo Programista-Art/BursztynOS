@@ -1,0 +1,11 @@
+{
+  "boot_environment": "BIOS",
+  "result": "PASS",
+  "mode": "terminal-unicode-only",
+  "ttf_grid": true,
+  "edit_output_bytes": true,
+  "bitmap_recovery": true,
+  "no_guest_fault": true,
+  "kernel_sha256": "50987de4441bc8e1ffb7c71bfb6e5a45fce3eb6e6144ca41d2ed8f25c1d12c64",
+  "iso_sha256": "9afe354a068028db4517bda31cf13678705e53bd695d968869f8366166e0ea43"
+}

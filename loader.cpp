@@ -1000,7 +1000,9 @@ static bool uruchom_program_z_pliku_impl(
         if (!canary) { proba.obraz.blad = "bur-v2-invalid-guard";
             zwolnij_rezerwacje_procesu(pid); return false; }
         for (auto& value : random) value = 0;
-        relocs = reinterpret_cast<const BurV2Relokacja*>(bufor_pliku + n2.reloc_przesuniecie);
+        relocs = n2.reloc_liczba
+            ? reinterpret_cast<const BurV2Relokacja*>(bufor_pliku + n2.reloc_przesuniecie)
+            : nullptr;
         uint64_t end = 0;
         for (uint32_t i = 0; i < n2.reloc_liczba; ++i) {
             uint64_t value = 0; size_t width = 0;

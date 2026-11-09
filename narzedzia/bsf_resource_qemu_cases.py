@@ -4,11 +4,36 @@ from pathlib import Path
 
 def run_resource(c):
     root=Path(__file__).resolve().parents[1];out=c['out'];args=c['args']
-    o=ProcessObserver(c['hmp'],c['symbol'],root/'ustawienia.elf','Ustawienia')
-    c['launch_start']('ustawienia');c['wait'](o.pid,'native Settings process',180)
-    c['wait'](lambda:o.value('BSF::(anonymous namespace)::initialized','<?'),'Settings BSF initialized',180)
+    o=ProcessObserver(c['hmp'],c['symbol'],root/'ustawienia.elf','Ustawienia',image_file='ustawienia.bur')
+    def settings_process():
+        pid=o.pid()
+        if not pid:
+            data=o.physical(c['symbol']('tablica_procesow'),16*144)
+            import struct
+            records=[dict(pid=i,state=struct.unpack_from('<i',data,i*144+136)[0],
+                          image=data[i*144+72:i*144+136].split(b'\0',1)[0].decode('utf-8','replace')) for i in range(16)]
+            (out/'process-wait.json').write_text(json.dumps(records,ensure_ascii=False,indent=2)+'\n')
+        return pid
+    c['launch_start']('ustawienia');c['wait'](settings_process,'native Settings process',180)
+    def startup_state():
+        import struct
+        pid=o.pid()
+        snapshot=dict(pid=pid,initialized=o.value('BSF::(anonymous namespace)::initialized','<?'),count=o.value('BSF::(anonymous namespace)::count'),registers=c['hmp']('info registers'))
+        record=o.physical(c['symbol']('tablica_procesow')+pid*144,144)
+        stack=struct.unpack_from('<Q',record,32)[0]
+        snapshot['kernel_rsp']=stack
+        try:
+            snapshot['saved_context']=list(struct.unpack('<5Q',o.user(stack+136,40))) if stack else []
+        except AssertionError:
+            snapshot['context_unavailable']=True
+        (out/'settings-startup.json').write_text(json.dumps(snapshot,indent=2)+'\n')
+        return snapshot
+    c['wait'](lambda:startup_state()['initialized'],'Settings BSF initialized',180)
     # A complete first frame establishes that font loading/rasterization finished.
-    c['wait'](lambda:c['screenshot']('resource-opening-probe').getpixel((1033,114))[0]>150,'Settings initial frame',240)
+    def first_frame():
+        startup_state()
+        return c['screenshot']('resource-opening-probe').getpixel((1033,114))[0]>150
+    c['wait'](first_frame,'Settings initial frame',240)
     body=(280,150,1010,610)
     before=c['screenshot']('resource-before-fonts').crop(body).tobytes()
     c['click'](800,113) # Explicit window activation before a content action.

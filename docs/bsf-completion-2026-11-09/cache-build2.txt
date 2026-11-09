@@ -1,0 +1,562 @@
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -msse2 -mfpmath=sse -mno-avx -fcoroutines -fcheck-new -DHUSARZ_DEBUG_RESOURCES=0 -DHUSARZ_PERF=0 -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c programy/przegladarka.cpp -o przegladarka_tmp.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -msse2 -mfpmath=sse -mno-avx -fcoroutines -fcheck-new -DHUSARZ_DEBUG_RESOURCES=0 -DHUSARZ_PERF=0 -DHUSARZ_WORKER_ONLY=1 -Wno-unused-function -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c programy/przegladarka.cpp -o husarz_worker_tmp.o
+x86_64-linux-gnu-ld --defsym=HUSARZ_WORKER_BUILD=1 --gc-sections -T programy/przegladarka_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail fpu_probe_tmp.o bursztyn_gui_minimal.o -o fpu_probe.elf
+x86_64-linux-gnu-objcopy -O binary fpu_probe.elf fpu_probe.bin
+x86_64-linux-gnu-ld -r -b binary fpu_probe.bin -o fpu_probe_blob.o
+x86_64-linux-gnu-ld --gc-sections -T notatnik_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	notatnik_tmp.o bursztyn_gui.o -o notatnik.elf
+x86_64-linux-gnu-objcopy -O binary notatnik.elf notatnik.bin
+x86_64-linux-gnu-ld -r -b binary notatnik.bin -o notatnik_blob.o
+x86_64-linux-gnu-ld -T programy/eksplorator/eksplorator_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	eksplorator_tmp.o bursztyn_gui.o -o eksplorator.elf
+[AKTUALIZACJA BUILD] Klucz aktualizacji RELEASE (odcisk: aceba052f9096313...)
+x86_64-linux-gnu-objcopy -O binary eksplorator.elf eksplorator.bin
+x86_64-linux-gnu-ld -r -b binary eksplorator.bin -o eksplorator_blob.o
+x86_64-linux-gnu-ld --gc-sections -T kalkulator_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	kalkulator_tmp.o bursztyn_gui.o -o kalkulator.elf
+x86_64-linux-gnu-ld -T programy/shell_bsf_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	shell_tmp.o bsf_terminal.o bursztyn_gui.o -o shell.elf
+x86_64-linux-gnu-objcopy -O binary kalkulator.elf kalkulator.bin
+x86_64-linux-gnu-objcopy -O binary shell.elf shell.bin
+x86_64-linux-gnu-ld -r -b binary kalkulator.bin -o kalkulator_blob.o
+x86_64-linux-gnu-ld -r -b binary shell.bin -o shell_blob.o
+x86_64-linux-gnu-ld -T menedzer_okien_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	menedzer_okien_tmp.o bursztyn_gui.o ikona_png_ring3.o image_png_ring3.o btp_ring3.o -o menedzer_okien.elf
+x86_64-linux-gnu-g++ -mgeneral-regs-only -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage -DMBEDTLS_USER_CONFIG_FILE=\"bursztyn_mbedtls_config.h\" -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c aktualizacja.cpp -o aktualizacja.o
+x86_64-linux-gnu-objcopy -O binary menedzer_okien.elf menedzer_okien.bin
+x86_64-linux-gnu-ld -r -b binary menedzer_okien.bin -o menedzer_okien_blob.o
+x86_64-linux-gnu-ld --gc-sections -T programy/test/test_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	test_tmp.o ekran_format_ring3.o btp_ring3.o bursztyn_gui.o -o test.elf
+x86_64-linux-gnu-objcopy -O binary test.elf test.bin
+x86_64-linux-gnu-ld -r -b binary test.bin -o test_blob.o
+x86_64-linux-gnu-ld --gc-sections -T programy/demo_ui/demo_ui_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	demo_ui_tmp.o bursztyn_gui.o -o demo_ui.elf
+x86_64-linux-gnu-objcopy -O binary demo_ui.elf demo_ui.bin
+x86_64-linux-gnu-ld -r -b binary demo_ui.bin -o demo_ui_blob.o
+x86_64-linux-gnu-ld --gc-sections -T programy/demo_ui/demo_ui_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	kontrolki2_tmp.o bursztyn_gui.o -o kontrolki2.elf
+x86_64-linux-gnu-objcopy -O binary kontrolki2.elf kontrolki2.bin
+x86_64-linux-gnu-ld -r -b binary kontrolki2.bin -o kontrolki2_blob.o
+x86_64-linux-gnu-ld --gc-sections -T programy/kontrolki3/kontrolki3_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	kontrolki3tmp.o bursztyn_gui.o -o kontrolki3.elf
+x86_64-linux-gnu-objcopy -O binary kontrolki3.elf kontrolki3.bin
+x86_64-linux-gnu-ld -r -b binary kontrolki3.bin -o kontrolki3blob.o
+x86_64-linux-gnu-ld --gc-sections -T programy/kontrolki4/kontrolki4_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	kontrolki4tmp.o bursztyn_gui.o -o kontrolki4.elf
+x86_64-linux-gnu-objcopy -O binary kontrolki4.elf kontrolki4.bin
+x86_64-linux-gnu-ld -r -b binary kontrolki4.bin -o kontrolki4blob.o
+x86_64-linux-gnu-ld -T programy/repro/repro_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	repro_tmp.o bursztyn_gui.o -o repro.elf
+x86_64-linux-gnu-objcopy -O binary repro.elf repro.bin
+x86_64-linux-gnu-ld -r -b binary repro.bin -o repro_blob.o
+x86_64-linux-gnu-ld -T shell_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	snake_tmp.o bursztyn_gui.o -o snake.elf
+x86_64-linux-gnu-objcopy -O binary snake.elf snake.bin
+x86_64-linux-gnu-ld -r -b binary snake.bin -o snake_blob.o
+x86_64-linux-gnu-ld -T shell_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	przegladarka_obrazow_tmp.o bursztyn_gui.o -o przegladarka_obrazow.elf
+x86_64-linux-gnu-objcopy -O binary przegladarka_obrazow.elf przegladarka_obrazow.bin
+x86_64-linux-gnu-ld -r -b binary przegladarka_obrazow.bin -o przegladarka_obrazow_blob.o
+x86_64-linux-gnu-ld -T programy/aktualizacje/aktualizacje_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	aktualizacje_tmp.o bursztyn_gui.o -o aktualizacje.elf
+x86_64-linux-gnu-objcopy -O binary aktualizacje.elf aktualizacje.bin
+x86_64-linux-gnu-ld -r -b binary aktualizacje.bin -o aktualizacje_blob.o
+x86_64-linux-gnu-ld --orphan-handling=error -T programy/test_dzwieku/test_dzwieku_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	test_dzwieku_tmp.o bursztyn_gui.o -o test_dzwieku.elf
+x86_64-linux-gnu-objcopy -O binary test_dzwieku.elf test_dzwieku.bin
+python3 narzedzia/test_dzwieku_size.py test_dzwieku.bin
+Test dźwięku: file=227920 maximum=524288 margin=296368
+x86_64-linux-gnu-ld -r -b binary test_dzwieku.bin -o test_dzwieku_blob.o
+x86_64-linux-gnu-ld --orphan-handling=error -T programy/diagnostyka/diagnostyka_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail diagnostyka_tmp.o bursztyn_gui.o -o diagnostyka.elf
+x86_64-linux-gnu-objcopy -O binary diagnostyka.elf diagnostyka.bin
+In file included from programy/husarz/paint.h:2,
+                 from programy/husarz/pipeline.h:2,
+                 from programy/przegladarka.cpp:33:
+programy/husarz/layout.h: In function ‘Husarz::TextCluster Husarz::text_cluster(const char*, size_t, size_t, Metrics, const Style&, bool)’:
+programy/husarz/layout.h:51:17: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+   51 |                 for(unsigned j=0;j<k;++j)changed[n++]=b[j];p+=z;
+      |                 ^~~
+programy/husarz/layout.h:51:60: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+   51 |                 for(unsigned j=0;j<k;++j)changed[n++]=b[j];p+=z;
+      |                                                            ^
+x86_64-linux-gnu-ld -r -b binary diagnostyka.bin -o diagnostyka_blob.o
+x86_64-linux-gnu-ld --gc-sections -T programy/ustawienia/ustawienia_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail ustawienia_tmp.o bursztyn_gui.o -o ustawienia.elf
+x86_64-linux-gnu-ld:programy/ustawienia/ustawienia_linker.ld:66 cannot move location counter backwards (from 0000000001034020 to 0000000001034000)
+make: *** [Makefile:801: ustawienia_blob.o] Error 1
+make: *** Waiting for unfinished jobs....
+In file included from programy/husarz/js_core.h:4,
+                 from programy/husarz/js_dom.h:2,
+                 from programy/przegladarka.cpp:39:
+programy/husarz/js_number.h: In function ‘Husarz::Js::Numeric Husarz::Js::numeric_parse(const char*, unsigned int, bool&)’:
+programy/husarz/js_number.h:51:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   51 |         if(dot)--exponent;if(c!='0')significant=true;
+      |         ^~
+programy/husarz/js_number.h:51:27: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   51 |         if(dot)--exponent;if(c!='0')significant=true;
+      |                           ^~
+programy/husarz/js_number.h:56:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   56 |     if(i!=n)return Numeric::nan();ok=true;double v=double(mantissa);
+      |     ^~
+programy/husarz/js_number.h:56:35: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   56 |     if(i!=n)return Numeric::nan();ok=true;double v=double(mantissa);
+      |                                   ^~
+programy/husarz/js_number.h:58:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   58 |     if(exponent>400)return neg?-Numeric::infinity():Numeric::infinity();if(exponent< -400)return neg?-0.0:0.0;
+      |     ^~
+programy/husarz/js_number.h:58:73: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   58 |     if(exponent>400)return neg?-Numeric::infinity():Numeric::infinity();if(exponent< -400)return neg?-0.0:0.0;
+      |                                                                         ^~
+programy/husarz/js_core.h: In member function ‘Husarz::Work Husarz::Js::Runtime::complete(Husarz::Js::Completion)’:
+programy/husarz/js_core.h:110:13: warning: this ‘while’ clause does not guard... [-Wmisleading-indentation]
+  110 |             while(scope!=h.scope&&scope)co_await leave_scope();scope=h.scope;sp=h.sp;
+      |             ^~~~~
+programy/husarz/js_core.h:110:64: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘while’
+  110 |             while(scope!=h.scope&&scope)co_await leave_scope();scope=h.scope;sp=h.sp;
+      |                                                                ^~~~~
+programy/husarz/js_core.h: In member function ‘unsigned int Husarz::Js::Runtime::string(const char*, size_t)’:
+programy/husarz/js_core.h:149:9: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+  149 |         for(unsigned i=0;i<n;++i)bytes[bytes_used++]=s[i];bytes[bytes_used++]=0;return id;
+      |         ^~~
+programy/husarz/js_core.h:149:59: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+  149 |         for(unsigned i=0;i<n;++i)bytes[bytes_used++]=s[i];bytes[bytes_used++]=0;return id;
+      |                                                           ^~~~~
+In file included from programy/husarz/paint.h:2,
+                 from programy/husarz/pipeline.h:2,
+                 from programy/przegladarka.cpp:33:
+programy/husarz/layout.h: In function ‘Husarz::TextCluster Husarz::text_cluster(const char*, size_t, size_t, Metrics, const Style&, bool)’:
+programy/husarz/layout.h:51:17: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+   51 |                 for(unsigned j=0;j<k;++j)changed[n++]=b[j];p+=z;
+      |                 ^~~
+programy/husarz/layout.h:51:60: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+   51 |                 for(unsigned j=0;j<k;++j)changed[n++]=b[j];p+=z;
+      |                                                            ^
+programy/husarz/js_core.h: In member function ‘Husarz::Work Husarz::Js::Lexer::scan()’:
+programy/husarz/js_core.h:343:17: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  343 |                 if(!closed)r.fail(Error::Syntax);t.kind=StringToken;t.text=uint16_t(r.string(scratch,n));
+      |                 ^~
+programy/husarz/js_core.h:343:50: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  343 |                 if(!closed)r.fail(Error::Syntax);t.kind=StringToken;t.text=uint16_t(r.string(scratch,n));
+      |                                                  ^
+programy/husarz/js_core.h: In member function ‘Husarz::Work Husarz::Js::Compiler::statement()’:
+programy/husarz/js_core.h:479:13: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  479 |             if(!caught&&!finalizer)r.fail(Error::Syntax);r.handler_code[id].end=uint16_t(r.code_count);
+      |             ^~
+programy/husarz/js_core.h:479:58: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  479 |             if(!caught&&!finalizer)r.fail(Error::Syntax);r.handler_code[id].end=uint16_t(r.code_count);
+      |                                                          ^
+programy/husarz/js_core.h: In member function ‘virtual Husarz::Work Husarz::Js::Runtime::property(Husarz::Js::Value, Husarz::Js::Value, bool, Husarz::Js::Value&)’:
+programy/husarz/js_core.h:561:144: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  561 |         unsigned id=base.ref==ObjectCtor?(is(name,"create")?ObjectCreate:is(name,"getPrototypeOf")?ObjectGetPrototype:is(name,"setPrototypeOf")?ObjectSetPrototype:0):base.ref==NumberCtor?(is(name,"isNaN")?NumberNaN:is(name,"isFinite")?NumberFinite:0):0;
+      |                                                                                                                       ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~
+programy/husarz/js_core.h:561:235: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  561 |         unsigned id=base.ref==ObjectCtor?(is(name,"create")?ObjectCreate:is(name,"getPrototypeOf")?ObjectGetPrototype:is(name,"setPrototypeOf")?ObjectSetPrototype:0):base.ref==NumberCtor?(is(name,"isNaN")?NumberNaN:is(name,"isFinite")?NumberFinite:0):0;
+      |                                                                                                                                                                                                                        ~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~
+programy/husarz/js_core.h: In member function ‘virtual Husarz::Work Husarz::Js::Runtime::native(Husarz::Js::Value, Husarz::Js::Value*, unsigned int, Husarz::Js::Value&)’:
+programy/husarz/js_core.h:610:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  610 |         if(error!=Error::None)co_return;auto &o=objects[out.ref];if(fn.ref==ErrorCtor)o.props[0].value=Value::handle(Kind::String,string("Error",5));if(count){unsigned message=0;co_await convert_string(args[0],message);o.props[1].value=Value::handle(Kind::String,message);}co_return;
+      |         ^~
+programy/husarz/js_core.h:610:41: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  610 |         if(error!=Error::None)co_return;auto &o=objects[out.ref];if(fn.ref==ErrorCtor)o.props[0].value=Value::handle(Kind::String,string("Error",5));if(count){unsigned message=0;co_await convert_string(args[0],message);o.props[1].value=Value::handle(Kind::String,message);}co_return;
+      |                                         ^~~~
+programy/husarz/js_core.h:644:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  644 |         if(a<0)a=0;if(b<a)b=a;if(a>StringLimit || a!=a || b!=b){out=Value::handle(Kind::String,string("",0));co_return;}
+      |         ^~
+programy/husarz/js_core.h:644:20: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  644 |         if(a<0)a=0;if(b<a)b=a;if(a>StringLimit || a!=a || b!=b){out=Value::handle(Kind::String,string("",0));co_return;}
+      |                    ^~
+programy/husarz/js_core.h:647:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  647 |         if(end<start)end=start;out=Value::handle(Kind::String,string(text(receiver.ref)+start,end-start));co_return;
+      |         ^~
+programy/husarz/js_core.h:647:32: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  647 |         if(end<start)end=start;out=Value::handle(Kind::String,string(text(receiver.ref)+start,end-start));co_return;
+      |                                ^~~
+In file included from programy/husarz/js_core.h:746:
+programy/husarz/js_json.h: In member function ‘Husarz::Work Husarz::Js::JsonCodec::stringify(Husarz::Js::Value, unsigned int)’:
+programy/husarz/js_json.h:59:9: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+   59 |         for(unsigned i=0;i<depth;++i)if(r.same(path[i],v)){r.fail(Error::Type);co_return;}path[depth]=v;
+      |         ^~~
+programy/husarz/js_json.h:59:91: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+   59 |         for(unsigned i=0;i<depth;++i)if(r.same(path[i],v)){r.fail(Error::Type);co_return;}path[depth]=v;
+      |                                                                                           ^~~~
+programy/husarz/js_json.h:64:13: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   64 |             if(written++)put(',');if(!array){co_await escape(r.objects[v.ref].props[i].name);put(':');}co_await stringify(child,depth+1);if(r.error!=Error::None)co_return;
+      |             ^~
+programy/husarz/js_json.h:64:35: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   64 |             if(written++)put(',');if(!array){co_await escape(r.objects[v.ref].props[i].name);put(':');}co_await stringify(child,depth+1);if(r.error!=Error::None)co_return;
+      |                                   ^~
+In file included from programy/husarz/js_dom.h:6:
+programy/husarz/storage.h: In member function ‘bool Husarz::StorageNamespace::set(const char*, unsigned int, const char*, unsigned int)’:
+programy/husarz/storage.h:10:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   10 |         if(ks>StorageKey||vs>StorageValue||revision==UINT32_MAX)return false;int index=find(key,ks);unsigned previous=index<0?0:entries[index].key_size+entries[index].value_size;
+      |         ^~
+programy/husarz/storage.h:10:78: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   10 |         if(ks>StorageKey||vs>StorageValue||revision==UINT32_MAX)return false;int index=find(key,ks);unsigned previous=index<0?0:entries[index].key_size+entries[index].value_size;
+      |                                                                              ^~~
+programy/husarz/storage.h: In function ‘unsigned int Husarz::storage_encode(const StorageNamespace&, uint8_t*, unsigned int)’:
+programy/husarz/storage.h:21:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   21 |     if(cap<StorageDiskCapacity||!s.origin.valid||s.count>StorageEntries)return 0;char origin[280];unsigned os=origin_key(s.origin,origin),pos=24;
+      |     ^~
+programy/husarz/storage.h:21:82: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   21 |     if(cap<StorageDiskCapacity||!s.origin.valid||s.count>StorageEntries)return 0;char origin[280];unsigned os=origin_key(s.origin,origin),pos=24;
+      |                                                                                  ^~~~
+programy/husarz/storage.h: In member function ‘Husarz::StorageNamespace* Husarz::BrowserStorage::get(const Husarz::Origin&, uint32_t)’:
+programy/husarz/storage.h:60:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   60 |         if(!origin.valid)return nullptr;auto **slots=tab?sessions:local;unsigned limit=tab?StorageSessions:StorageOrigins;
+      |         ^~
+programy/husarz/storage.h:60:41: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   60 |         if(!origin.valid)return nullptr;auto **slots=tab?sessions:local;unsigned limit=tab?StorageSessions:StorageOrigins;
+      |                                         ^~~~
+programy/husarz/storage.h:62:9: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+   62 |         for(unsigned i=0;i<limit;++i)if(!slots[i]){auto *s=new StorageNamespace;if(!s)return nullptr;s->origin=origin;s->tab=tab;s->loaded=tab!=0;s->saved=1;slots[i]=s;return s;}return nullptr;
+      |         ^~~
+programy/husarz/storage.h:62:179: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+   62 |         for(unsigned i=0;i<limit;++i)if(!slots[i]){auto *s=new StorageNamespace;if(!s)return nullptr;s->origin=origin;s->tab=tab;s->loaded=tab!=0;s->saved=1;slots[i]=s;return s;}return nullptr;
+      |                                                                                                                                                                                   ^~~~~~
+programy/husarz/js_dom.h: In member function ‘unsigned int Husarz::Js::BrowserRuntime::resolve(unsigned int) const’:
+programy/husarz/js_dom.h:44:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   44 |         if(!alive()||!identity||identity>65535)return 0;return ScriptDom(*document).by_identity(uint16_t(identity)).id;
+      |         ^~
+programy/husarz/js_dom.h:44:57: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   44 |         if(!alive()||!identity||identity>65535)return 0;return ScriptDom(*document).by_identity(uint16_t(identity)).id;
+      |                                                         ^~~~~~
+programy/husarz/js_dom.h: In member function ‘bool Husarz::Js::BrowserRuntime::link(Husarz::Js::TreeMutation&, unsigned int, unsigned int, unsigned int)’:
+programy/husarz/js_dom.h:105:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  105 |         if(before==child)return true;unlink(m,child);auto &n=m.nodes[child];auto &p=m.nodes[parent];
+      |         ^~
+programy/husarz/js_dom.h:105:38: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  105 |         if(before==child)return true;unlink(m,child);auto &n=m.nodes[child];auto &p=m.nodes[parent];
+      |                                      ^~~~~~
+programy/husarz/js_dom.h: In member function ‘virtual Husarz::Work Husarz::Js::BrowserRuntime::property(Husarz::Js::Value, Husarz::Js::Value, bool, Husarz::Js::Value&)’:
+programy/husarz/js_dom.h:179:233: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  179 |         if(is(key.ref,"length"))value=Value::num(s->count);else {unsigned id=is(key.ref,"key")?StorageKeyAt:is(key.ref,"getItem")?StorageGet:is(key.ref,"setItem")?StorageSet:is(key.ref,"removeItem")?StorageRemove:is(key.ref,"clear")?StorageClear:0;value=id?method(id,base):Value{};}co_return;
+      |                                                                                                                                                                                                                      ~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~
+programy/husarz/js_dom.h:201:13: warning: this ‘else’ clause does not guard... [-Wmisleading-indentation]
+  201 |             else value=Value::handle(Kind::String,string(location,length(location,sizeof(location))));co_return;}
+      |             ^~~~
+programy/husarz/js_dom.h:201:103: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘else’
+  201 |             else value=Value::handle(Kind::String,string(location,length(location,sizeof(location))));co_return;}
+      |                                                                                                       ^~~~~~~~~
+programy/husarz/js_dom.h: In member function ‘virtual Husarz::Work Husarz::Js::BrowserRuntime::native(Husarz::Js::Value, Husarz::Js::Value*, unsigned int, Husarz::Js::Value&)’:
+programy/husarz/js_dom.h:318:9: warning: this ‘else’ clause does not guard... [-Wmisleading-indentation]
+  318 |         else if(!s->set(text(key),size(key),text(value),size(value)))fail(Error::Range);co_return;
+      |         ^~~~
+programy/husarz/js_dom.h:318:89: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘else’
+  318 |         else if(!s->set(text(key),size(key),text(value),size(value)))fail(Error::Range);co_return;
+      |                                                                                         ^~~~~~~~~
+In file included from programy/husarz/js_core.h:4,
+                 from programy/husarz/js_dom.h:2,
+                 from programy/przegladarka.cpp:39:
+programy/husarz/js_number.h: In function ‘Husarz::Js::Numeric Husarz::Js::numeric_parse(const char*, unsigned int, bool&)’:
+programy/husarz/js_number.h:51:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   51 |         if(dot)--exponent;if(c!='0')significant=true;
+      |         ^~
+programy/husarz/js_number.h:51:27: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   51 |         if(dot)--exponent;if(c!='0')significant=true;
+      |                           ^~
+programy/husarz/js_number.h:56:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   56 |     if(i!=n)return Numeric::nan();ok=true;double v=double(mantissa);
+      |     ^~
+programy/husarz/js_number.h:56:35: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   56 |     if(i!=n)return Numeric::nan();ok=true;double v=double(mantissa);
+      |                                   ^~
+programy/husarz/js_number.h:58:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   58 |     if(exponent>400)return neg?-Numeric::infinity():Numeric::infinity();if(exponent< -400)return neg?-0.0:0.0;
+      |     ^~
+programy/husarz/js_number.h:58:73: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   58 |     if(exponent>400)return neg?-Numeric::infinity():Numeric::infinity();if(exponent< -400)return neg?-0.0:0.0;
+      |                                                                         ^~
+programy/husarz/js_dom.h:336:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  336 |         if(console_lines<64)++console_lines;co_return;
+      |         ^~
+programy/husarz/js_dom.h:336:45: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  336 |         if(console_lines<64)++console_lines;co_return;
+      |                                             ^~~~~~~~~
+programy/husarz/js_dom.h:345:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  345 |         if(delay!=delay||delay>3600000)delay=3600000;if(delay<10)delay=10;
+      |         ^~
+programy/husarz/js_dom.h:345:54: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  345 |         if(delay!=delay||delay>3600000)delay=3600000;if(delay<10)delay=10;
+      |                                                      ^~
+programy/husarz/js_dom.h:389:9: warning: this ‘else’ clause does not guard... [-Wmisleading-indentation]
+  389 |         else co_await attributes(id,args[0].ref,count==2?args[1].ref:0,fn.ref==RemoveAttribute);co_return;
+      |         ^~~~
+programy/husarz/js_dom.h:389:97: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘else’
+  389 |         else co_await attributes(id,args[0].ref,count==2?args[1].ref:0,fn.ref==RemoveAttribute);co_return;
+      |                                                                                                 ^~~~~~~~~
+programy/husarz/js_dom.h:404:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  404 |         if(!node_arg(args[0],child))co_return;if(count==2&&args[1].kind!=Kind::Null&&!node_arg(args[1],other))co_return;
+      |         ^~
+programy/husarz/js_dom.h:404:47: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  404 |         if(!node_arg(args[0],child))co_return;if(count==2&&args[1].kind!=Kind::Null&&!node_arg(args[1],other))co_return;
+      |                                               ^~
+programy/husarz/js_core.h: In member function ‘Husarz::Work Husarz::Js::Runtime::complete(Husarz::Js::Completion)’:
+programy/husarz/js_core.h:110:13: warning: this ‘while’ clause does not guard... [-Wmisleading-indentation]
+  110 |             while(scope!=h.scope&&scope)co_await leave_scope();scope=h.scope;sp=h.sp;
+      |             ^~~~~
+programy/husarz/js_core.h:110:64: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘while’
+  110 |             while(scope!=h.scope&&scope)co_await leave_scope();scope=h.scope;sp=h.sp;
+      |                                                                ^~~~~
+programy/husarz/js_core.h: In member function ‘unsigned int Husarz::Js::Runtime::string(const char*, size_t)’:
+programy/husarz/js_core.h:149:9: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+  149 |         for(unsigned i=0;i<n;++i)bytes[bytes_used++]=s[i];bytes[bytes_used++]=0;return id;
+      |         ^~~
+programy/husarz/js_core.h:149:59: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+  149 |         for(unsigned i=0;i<n;++i)bytes[bytes_used++]=s[i];bytes[bytes_used++]=0;return id;
+      |                                                           ^~~~~
+programy/husarz/js_core.h: In member function ‘Husarz::Work Husarz::Js::Lexer::scan()’:
+programy/husarz/js_core.h:343:17: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  343 |                 if(!closed)r.fail(Error::Syntax);t.kind=StringToken;t.text=uint16_t(r.string(scratch,n));
+      |                 ^~
+programy/husarz/js_core.h:343:50: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  343 |                 if(!closed)r.fail(Error::Syntax);t.kind=StringToken;t.text=uint16_t(r.string(scratch,n));
+      |                                                  ^
+programy/przegladarka.cpp: In function ‘bool {anonymous}::ustaw_url_z_location(char*, size_t, const char*, const ParsedUrl&)’:
+programy/przegladarka.cpp:2055:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+ 2055 |     if(ok)ok=Husarz::resolve_resource_url(scratch->base,location,cel,pojemnosc);delete scratch;return ok;
+      |     ^~
+programy/przegladarka.cpp:2055:81: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+ 2055 |     if(ok)ok=Husarz::resolve_resource_url(scratch->base,location,cel,pojemnosc);delete scratch;return ok;
+      |                                                                                 ^~~~~~
+programy/husarz/js_core.h: In member function ‘Husarz::Work Husarz::Js::Compiler::statement()’:
+programy/husarz/js_core.h:479:13: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  479 |             if(!caught&&!finalizer)r.fail(Error::Syntax);r.handler_code[id].end=uint16_t(r.code_count);
+      |             ^~
+programy/husarz/js_core.h:479:58: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  479 |             if(!caught&&!finalizer)r.fail(Error::Syntax);r.handler_code[id].end=uint16_t(r.code_count);
+      |                                                          ^
+In file included from programy/przegladarka.cpp:3446:
+programy/husarz/async_runtime.inc: In function ‘Husarz::Work {anonymous}::apply_worker_result_work()’:
+programy/husarz/async_runtime.inc:205:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  205 |         if(task.script>=Husarz::StorageOrigins)co_return;auto *s=Husarz::browser_storage.local[task.script];if(!s)co_return;auto &p=*state.payload;
+      |         ^~
+programy/husarz/async_runtime.inc:205:58: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  205 |         if(task.script>=Husarz::StorageOrigins)co_return;auto *s=Husarz::browser_storage.local[task.script];if(!s)co_return;auto &p=*state.payload;
+      |                                                          ^~~~
+programy/husarz/js_core.h: In member function ‘virtual Husarz::Work Husarz::Js::Runtime::property(Husarz::Js::Value, Husarz::Js::Value, bool, Husarz::Js::Value&)’:
+programy/husarz/js_core.h:561:144: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  561 |         unsigned id=base.ref==ObjectCtor?(is(name,"create")?ObjectCreate:is(name,"getPrototypeOf")?ObjectGetPrototype:is(name,"setPrototypeOf")?ObjectSetPrototype:0):base.ref==NumberCtor?(is(name,"isNaN")?NumberNaN:is(name,"isFinite")?NumberFinite:0):0;
+      |                                                                                                                       ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~
+programy/husarz/js_core.h:561:235: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  561 |         unsigned id=base.ref==ObjectCtor?(is(name,"create")?ObjectCreate:is(name,"getPrototypeOf")?ObjectGetPrototype:is(name,"setPrototypeOf")?ObjectSetPrototype:0):base.ref==NumberCtor?(is(name,"isNaN")?NumberNaN:is(name,"isFinite")?NumberFinite:0):0;
+      |                                                                                                                                                                                                                        ~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~
+In file included from programy/przegladarka.cpp:3448:
+programy/husarz/script_runtime.inc: In member function ‘void {anonymous}::WidokStrony::script_default_click(uint16_t, int, int, bool)’:
+programy/husarz/script_runtime.inc:33:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   33 |     if(!liczba_zakladek)return;auto &z=zakladki[aktywna_zakladka];if(!z.dokument)return;auto &d=*z.dokument;if(!id||id>=d.node_count||d.nodes[id].detached)return;
+      |     ^~
+programy/husarz/script_runtime.inc:33:32: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   33 |     if(!liczba_zakladek)return;auto &z=zakladki[aktywna_zakladka];if(!z.dokument)return;auto &d=*z.dokument;if(!id||id>=d.node_count||d.nodes[id].detached)return;
+      |                                ^~~~
+programy/husarz/script_runtime.inc:38:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   38 |         if(d.has_attr(id,"disabled"))return;d.focused_control=id;
+      |         ^~
+programy/husarz/script_runtime.inc:38:45: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   38 |         if(d.has_attr(id,"disabled"))return;d.focused_control=id;
+      |                                             ^
+programy/husarz/script_runtime.inc:51:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   51 |         if(ready)g_husarz.przejdz_do_url(scratch->url);delete scratch;break;
+      |         ^~
+programy/husarz/script_runtime.inc:51:56: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   51 |         if(ready)g_husarz.przejdz_do_url(scratch->url);delete scratch;break;
+      |                                                        ^~~~~~
+programy/husarz/script_runtime.inc: In function ‘void {anonymous}::browser_script_step(uint64_t)’:
+programy/husarz/script_runtime.inc:106:174: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  106 |                 else if(action==4){ZdarzenieKlawiatury key;key.kod_klawisza=event.native_key;key.kod_skanu=event.native_key|KLAWISZ_FIZYCZNY_GUI;key.modyfikatory=(event.ctrl?BWS_MOD_CTRL:0)|(event.shift?BWS_MOD_SHIFT:0)|(event.alt?BWS_MOD_ALT:0);browser_key_bypass=true;g_husarz.widok_strony->obsluz_wcisniecie_klawisza(key);browser_key_bypass=false;}
+      |                                                                                                                                                                    ~~~~~~~~~~^~~~~~~~~~~~~~~
+programy/husarz/script_runtime.inc:106:203: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  106 |                 else if(action==4){ZdarzenieKlawiatury key;key.kod_klawisza=event.native_key;key.kod_skanu=event.native_key|KLAWISZ_FIZYCZNY_GUI;key.modyfikatory=(event.ctrl?BWS_MOD_CTRL:0)|(event.shift?BWS_MOD_SHIFT:0)|(event.alt?BWS_MOD_ALT:0);browser_key_bypass=true;g_husarz.widok_strony->obsluz_wcisniecie_klawisza(key);browser_key_bypass=false;}
+      |                                                                                                                                                                                                ~~~~~~~~~~~^~~~~~~~~~~~~~~~
+programy/husarz/script_runtime.inc:106:231: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  106 |                 else if(action==4){ZdarzenieKlawiatury key;key.kod_klawisza=event.native_key;key.kod_skanu=event.native_key|KLAWISZ_FIZYCZNY_GUI;key.modyfikatory=(event.ctrl?BWS_MOD_CTRL:0)|(event.shift?BWS_MOD_SHIFT:0)|(event.alt?BWS_MOD_ALT:0);browser_key_bypass=true;g_husarz.widok_strony->obsluz_wcisniecie_klawisza(key);browser_key_bypass=false;}
+      |                                                                                                                                                                                                                              ~~~~~~~~~^~~~~~~~~~~~~~
+programy/husarz/script_runtime.inc:114:17: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  114 |                 if(valid&&int(i)==aktywna_zakladka)g_husarz.przejdz_do_url(scratch->url);delete scratch;}
+      |                 ^~
+programy/husarz/script_runtime.inc:114:90: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  114 |                 if(valid&&int(i)==aktywna_zakladka)g_husarz.przejdz_do_url(scratch->url);delete scratch;}
+      |                                                                                          ^~~~~~
+programy/husarz/script_runtime.inc: In function ‘void {anonymous}::browser_flush_storage()’:
+programy/husarz/script_runtime.inc:128:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  128 |         if(!pending)break;browser_storage_tick();async_tick();
+      |         ^~
+programy/husarz/script_runtime.inc:128:27: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  128 |         if(!pending)break;browser_storage_tick();async_tick();
+      |                           ^~~~~~~~~~~~~~~~~~~~
+programy/husarz/js_core.h: In member function ‘virtual Husarz::Work Husarz::Js::Runtime::native(Husarz::Js::Value, Husarz::Js::Value*, unsigned int, Husarz::Js::Value&)’:
+programy/husarz/js_core.h:610:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  610 |         if(error!=Error::None)co_return;auto &o=objects[out.ref];if(fn.ref==ErrorCtor)o.props[0].value=Value::handle(Kind::String,string("Error",5));if(count){unsigned message=0;co_await convert_string(args[0],message);o.props[1].value=Value::handle(Kind::String,message);}co_return;
+      |         ^~
+programy/husarz/js_core.h:610:41: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  610 |         if(error!=Error::None)co_return;auto &o=objects[out.ref];if(fn.ref==ErrorCtor)o.props[0].value=Value::handle(Kind::String,string("Error",5));if(count){unsigned message=0;co_await convert_string(args[0],message);o.props[1].value=Value::handle(Kind::String,message);}co_return;
+      |                                         ^~~~
+programy/husarz/js_core.h:644:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  644 |         if(a<0)a=0;if(b<a)b=a;if(a>StringLimit || a!=a || b!=b){out=Value::handle(Kind::String,string("",0));co_return;}
+      |         ^~
+programy/husarz/js_core.h:644:20: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  644 |         if(a<0)a=0;if(b<a)b=a;if(a>StringLimit || a!=a || b!=b){out=Value::handle(Kind::String,string("",0));co_return;}
+      |                    ^~
+programy/husarz/js_core.h:647:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  647 |         if(end<start)end=start;out=Value::handle(Kind::String,string(text(receiver.ref)+start,end-start));co_return;
+      |         ^~
+programy/husarz/js_core.h:647:32: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  647 |         if(end<start)end=start;out=Value::handle(Kind::String,string(text(receiver.ref)+start,end-start));co_return;
+      |                                ^~~
+In file included from programy/husarz/js_core.h:746:
+programy/husarz/js_json.h: In member function ‘Husarz::Work Husarz::Js::JsonCodec::stringify(Husarz::Js::Value, unsigned int)’:
+programy/husarz/js_json.h:59:9: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+   59 |         for(unsigned i=0;i<depth;++i)if(r.same(path[i],v)){r.fail(Error::Type);co_return;}path[depth]=v;
+      |         ^~~
+programy/husarz/js_json.h:59:91: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+   59 |         for(unsigned i=0;i<depth;++i)if(r.same(path[i],v)){r.fail(Error::Type);co_return;}path[depth]=v;
+      |                                                                                           ^~~~
+programy/husarz/js_json.h:64:13: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   64 |             if(written++)put(',');if(!array){co_await escape(r.objects[v.ref].props[i].name);put(':');}co_await stringify(child,depth+1);if(r.error!=Error::None)co_return;
+      |             ^~
+programy/husarz/js_json.h:64:35: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   64 |             if(written++)put(',');if(!array){co_await escape(r.objects[v.ref].props[i].name);put(':');}co_await stringify(child,depth+1);if(r.error!=Error::None)co_return;
+      |                                   ^~
+In file included from programy/husarz/js_dom.h:6:
+programy/husarz/storage.h: In member function ‘bool Husarz::StorageNamespace::set(const char*, unsigned int, const char*, unsigned int)’:
+programy/husarz/storage.h:10:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   10 |         if(ks>StorageKey||vs>StorageValue||revision==UINT32_MAX)return false;int index=find(key,ks);unsigned previous=index<0?0:entries[index].key_size+entries[index].value_size;
+      |         ^~
+programy/husarz/storage.h:10:78: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   10 |         if(ks>StorageKey||vs>StorageValue||revision==UINT32_MAX)return false;int index=find(key,ks);unsigned previous=index<0?0:entries[index].key_size+entries[index].value_size;
+      |                                                                              ^~~
+programy/husarz/storage.h: In function ‘unsigned int Husarz::storage_encode(const StorageNamespace&, uint8_t*, unsigned int)’:
+programy/husarz/storage.h:21:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   21 |     if(cap<StorageDiskCapacity||!s.origin.valid||s.count>StorageEntries)return 0;char origin[280];unsigned os=origin_key(s.origin,origin),pos=24;
+      |     ^~
+programy/husarz/storage.h:21:82: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   21 |     if(cap<StorageDiskCapacity||!s.origin.valid||s.count>StorageEntries)return 0;char origin[280];unsigned os=origin_key(s.origin,origin),pos=24;
+      |                                                                                  ^~~~
+programy/husarz/storage.h: In member function ‘Husarz::StorageNamespace* Husarz::BrowserStorage::get(const Husarz::Origin&, uint32_t)’:
+programy/husarz/storage.h:60:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   60 |         if(!origin.valid)return nullptr;auto **slots=tab?sessions:local;unsigned limit=tab?StorageSessions:StorageOrigins;
+      |         ^~
+programy/husarz/storage.h:60:41: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   60 |         if(!origin.valid)return nullptr;auto **slots=tab?sessions:local;unsigned limit=tab?StorageSessions:StorageOrigins;
+      |                                         ^~~~
+programy/husarz/storage.h:62:9: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+   62 |         for(unsigned i=0;i<limit;++i)if(!slots[i]){auto *s=new StorageNamespace;if(!s)return nullptr;s->origin=origin;s->tab=tab;s->loaded=tab!=0;s->saved=1;slots[i]=s;return s;}return nullptr;
+      |         ^~~
+programy/husarz/storage.h:62:179: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+   62 |         for(unsigned i=0;i<limit;++i)if(!slots[i]){auto *s=new StorageNamespace;if(!s)return nullptr;s->origin=origin;s->tab=tab;s->loaded=tab!=0;s->saved=1;slots[i]=s;return s;}return nullptr;
+      |                                                                                                                                                                                   ^~~~~~
+programy/husarz/js_dom.h: In member function ‘unsigned int Husarz::Js::BrowserRuntime::resolve(unsigned int) const’:
+programy/husarz/js_dom.h:44:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   44 |         if(!alive()||!identity||identity>65535)return 0;return ScriptDom(*document).by_identity(uint16_t(identity)).id;
+      |         ^~
+programy/husarz/js_dom.h:44:57: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   44 |         if(!alive()||!identity||identity>65535)return 0;return ScriptDom(*document).by_identity(uint16_t(identity)).id;
+      |                                                         ^~~~~~
+programy/husarz/js_dom.h: In member function ‘bool Husarz::Js::BrowserRuntime::link(Husarz::Js::TreeMutation&, unsigned int, unsigned int, unsigned int)’:
+programy/husarz/js_dom.h:105:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  105 |         if(before==child)return true;unlink(m,child);auto &n=m.nodes[child];auto &p=m.nodes[parent];
+      |         ^~
+programy/husarz/js_dom.h:105:38: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  105 |         if(before==child)return true;unlink(m,child);auto &n=m.nodes[child];auto &p=m.nodes[parent];
+      |                                      ^~~~~~
+programy/husarz/js_dom.h: In member function ‘virtual Husarz::Work Husarz::Js::BrowserRuntime::property(Husarz::Js::Value, Husarz::Js::Value, bool, Husarz::Js::Value&)’:
+programy/husarz/js_dom.h:179:233: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  179 |         if(is(key.ref,"length"))value=Value::num(s->count);else {unsigned id=is(key.ref,"key")?StorageKeyAt:is(key.ref,"getItem")?StorageGet:is(key.ref,"setItem")?StorageSet:is(key.ref,"removeItem")?StorageRemove:is(key.ref,"clear")?StorageClear:0;value=id?method(id,base):Value{};}co_return;
+      |                                                                                                                                                                                                                      ~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~
+programy/husarz/js_dom.h:201:13: warning: this ‘else’ clause does not guard... [-Wmisleading-indentation]
+  201 |             else value=Value::handle(Kind::String,string(location,length(location,sizeof(location))));co_return;}
+      |             ^~~~
+programy/husarz/js_dom.h:201:103: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘else’
+  201 |             else value=Value::handle(Kind::String,string(location,length(location,sizeof(location))));co_return;}
+      |                                                                                                       ^~~~~~~~~
+programy/husarz/js_dom.h: In member function ‘virtual Husarz::Work Husarz::Js::BrowserRuntime::native(Husarz::Js::Value, Husarz::Js::Value*, unsigned int, Husarz::Js::Value&)’:
+programy/husarz/js_dom.h:318:9: warning: this ‘else’ clause does not guard... [-Wmisleading-indentation]
+  318 |         else if(!s->set(text(key),size(key),text(value),size(value)))fail(Error::Range);co_return;
+      |         ^~~~
+programy/husarz/js_dom.h:318:89: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘else’
+  318 |         else if(!s->set(text(key),size(key),text(value),size(value)))fail(Error::Range);co_return;
+      |                                                                                         ^~~~~~~~~
+programy/husarz/js_dom.h:336:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  336 |         if(console_lines<64)++console_lines;co_return;
+      |         ^~
+programy/husarz/js_dom.h:336:45: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  336 |         if(console_lines<64)++console_lines;co_return;
+      |                                             ^~~~~~~~~
+programy/husarz/js_dom.h:345:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  345 |         if(delay!=delay||delay>3600000)delay=3600000;if(delay<10)delay=10;
+      |         ^~
+programy/husarz/js_dom.h:345:54: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  345 |         if(delay!=delay||delay>3600000)delay=3600000;if(delay<10)delay=10;
+      |                                                      ^~
+programy/husarz/js_dom.h:389:9: warning: this ‘else’ clause does not guard... [-Wmisleading-indentation]
+  389 |         else co_await attributes(id,args[0].ref,count==2?args[1].ref:0,fn.ref==RemoveAttribute);co_return;
+      |         ^~~~
+programy/husarz/js_dom.h:389:97: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘else’
+  389 |         else co_await attributes(id,args[0].ref,count==2?args[1].ref:0,fn.ref==RemoveAttribute);co_return;
+      |                                                                                                 ^~~~~~~~~
+programy/husarz/js_dom.h:404:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  404 |         if(!node_arg(args[0],child))co_return;if(count==2&&args[1].kind!=Kind::Null&&!node_arg(args[1],other))co_return;
+      |         ^~
+programy/husarz/js_dom.h:404:47: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  404 |         if(!node_arg(args[0],child))co_return;if(count==2&&args[1].kind!=Kind::Null&&!node_arg(args[1],other))co_return;
+      |                                               ^~
+programy/przegladarka.cpp: In function ‘bool {anonymous}::ustaw_url_z_location(char*, size_t, const char*, const ParsedUrl&)’:
+programy/przegladarka.cpp:2055:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+ 2055 |     if(ok)ok=Husarz::resolve_resource_url(scratch->base,location,cel,pojemnosc);delete scratch;return ok;
+      |     ^~
+programy/przegladarka.cpp:2055:81: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+ 2055 |     if(ok)ok=Husarz::resolve_resource_url(scratch->base,location,cel,pojemnosc);delete scratch;return ok;
+      |                                                                                 ^~~~~~
+In file included from programy/przegladarka.cpp:3446:
+programy/husarz/async_runtime.inc: In function ‘Husarz::Work {anonymous}::apply_worker_result_work()’:
+programy/husarz/async_runtime.inc:205:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  205 |         if(task.script>=Husarz::StorageOrigins)co_return;auto *s=Husarz::browser_storage.local[task.script];if(!s)co_return;auto &p=*state.payload;
+      |         ^~
+programy/husarz/async_runtime.inc:205:58: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  205 |         if(task.script>=Husarz::StorageOrigins)co_return;auto *s=Husarz::browser_storage.local[task.script];if(!s)co_return;auto &p=*state.payload;
+      |                                                          ^~~~
+In file included from programy/przegladarka.cpp:3448:
+programy/husarz/script_runtime.inc: In member function ‘void {anonymous}::WidokStrony::script_default_click(uint16_t, int, int, bool)’:
+programy/husarz/script_runtime.inc:33:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   33 |     if(!liczba_zakladek)return;auto &z=zakladki[aktywna_zakladka];if(!z.dokument)return;auto &d=*z.dokument;if(!id||id>=d.node_count||d.nodes[id].detached)return;
+      |     ^~
+programy/husarz/script_runtime.inc:33:32: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   33 |     if(!liczba_zakladek)return;auto &z=zakladki[aktywna_zakladka];if(!z.dokument)return;auto &d=*z.dokument;if(!id||id>=d.node_count||d.nodes[id].detached)return;
+      |                                ^~~~
+programy/husarz/script_runtime.inc:38:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   38 |         if(d.has_attr(id,"disabled"))return;d.focused_control=id;
+      |         ^~
+programy/husarz/script_runtime.inc:38:45: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   38 |         if(d.has_attr(id,"disabled"))return;d.focused_control=id;
+      |                                             ^
+programy/husarz/script_runtime.inc:51:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   51 |         if(ready)g_husarz.przejdz_do_url(scratch->url);delete scratch;break;
+      |         ^~
+programy/husarz/script_runtime.inc:51:56: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   51 |         if(ready)g_husarz.przejdz_do_url(scratch->url);delete scratch;break;
+      |                                                        ^~~~~~
+programy/husarz/script_runtime.inc: In function ‘void {anonymous}::browser_script_step(uint64_t)’:
+programy/husarz/script_runtime.inc:106:174: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  106 |                 else if(action==4){ZdarzenieKlawiatury key;key.kod_klawisza=event.native_key;key.kod_skanu=event.native_key|KLAWISZ_FIZYCZNY_GUI;key.modyfikatory=(event.ctrl?BWS_MOD_CTRL:0)|(event.shift?BWS_MOD_SHIFT:0)|(event.alt?BWS_MOD_ALT:0);browser_key_bypass=true;g_husarz.widok_strony->obsluz_wcisniecie_klawisza(key);browser_key_bypass=false;}
+      |                                                                                                                                                                    ~~~~~~~~~~^~~~~~~~~~~~~~~
+programy/husarz/script_runtime.inc:106:203: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  106 |                 else if(action==4){ZdarzenieKlawiatury key;key.kod_klawisza=event.native_key;key.kod_skanu=event.native_key|KLAWISZ_FIZYCZNY_GUI;key.modyfikatory=(event.ctrl?BWS_MOD_CTRL:0)|(event.shift?BWS_MOD_SHIFT:0)|(event.alt?BWS_MOD_ALT:0);browser_key_bypass=true;g_husarz.widok_strony->obsluz_wcisniecie_klawisza(key);browser_key_bypass=false;}
+      |                                                                                                                                                                                                ~~~~~~~~~~~^~~~~~~~~~~~~~~~
+programy/husarz/script_runtime.inc:106:231: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  106 |                 else if(action==4){ZdarzenieKlawiatury key;key.kod_klawisza=event.native_key;key.kod_skanu=event.native_key|KLAWISZ_FIZYCZNY_GUI;key.modyfikatory=(event.ctrl?BWS_MOD_CTRL:0)|(event.shift?BWS_MOD_SHIFT:0)|(event.alt?BWS_MOD_ALT:0);browser_key_bypass=true;g_husarz.widok_strony->obsluz_wcisniecie_klawisza(key);browser_key_bypass=false;}
+      |                                                                                                                                                                                                                              ~~~~~~~~~^~~~~~~~~~~~~~
+programy/husarz/script_runtime.inc:114:17: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  114 |                 if(valid&&int(i)==aktywna_zakladka)g_husarz.przejdz_do_url(scratch->url);delete scratch;}
+      |                 ^~
+programy/husarz/script_runtime.inc:114:90: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  114 |                 if(valid&&int(i)==aktywna_zakladka)g_husarz.przejdz_do_url(scratch->url);delete scratch;}
+      |                                                                                          ^~~~~~
+programy/husarz/script_runtime.inc: In function ‘void {anonymous}::browser_flush_storage()’:
+programy/husarz/script_runtime.inc:128:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  128 |         if(!pending)break;browser_storage_tick();async_tick();
+      |         ^~
+programy/husarz/script_runtime.inc:128:27: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  128 |         if(!pending)break;browser_storage_tick();async_tick();
+      |                           ^~~~~~~~~~~~~~~~~~~~
+programy/przegladarka.cpp: At global scope:
+programy/przegladarka.cpp:3334:14: warning: ‘Husarz::Work {anonymous}::debug_computed_style(Husarz::Document&, uint16_t)’ defined but not used [-Wunused-function]
+ 3334 | Husarz::Work debug_computed_style(Husarz::Document &d,uint16_t node){
+      |              ^~~~~~~~~~~~~~~~~~~~

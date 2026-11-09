@@ -1,0 +1,31 @@
+Screenshot: display-initial
+Screenshot: mode-popup-0
+Screenshot: immediate-apply-0
+Screenshot: first-wm-1
+Screenshot: confirmed-1
+Screenshot: power-scale-1
+Screenshot: mode-popup-1
+Screenshot: immediate-apply-1
+Screenshot: first-wm-2
+Screenshot: confirmed-2
+Screenshot: power-scale-2
+Screenshot: mode-popup-2
+Screenshot: immediate-apply-2
+Screenshot: first-wm-3
+Screenshot: confirmed-3
+Screenshot: power-scale-3
+Screenshot: mode-popup-3
+Screenshot: immediate-apply-3
+Screenshot: first-wm-4
+Screenshot: confirmed-4
+Traceback (most recent call last):
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/test_husarz_qemu.py", line 1832, in <module>
+    main()
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/test_husarz_qemu.py", line 556, in main
+    result.update(run(out,screenshot,click,move,key,wait,guest_ticks,launch_start,health,hmp,symbol,kernel_sha,iso_sha,input_kind=args.display_input,q=q))
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/display_geometry_qemu_cases.py", line 203, in run
+    wait(power_frame_ready,'complete native power popup pixels',90,interval=.3)
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/test_husarz_qemu.py", line 260, in wait
+    raise TimeoutError(label)
+TimeoutError: complete native power popup pixels

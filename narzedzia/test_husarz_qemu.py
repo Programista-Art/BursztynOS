@@ -35,6 +35,7 @@ def main():
     parser.add_argument('--kernel', type=Path, default=ROOT / 'system_operacyjny.bin', help='Matching unmodified kernel ELF for symbol observation and artifact hashing')
     parser.add_argument('--installed-disk',type=Path,help='Private disposable .bsf-test/*.img; disk-only font persistence test')
     parser.add_argument('--expected-font-size',type=int,help='Assert restored native config before changing anything')
+    parser.add_argument('--expected-font-family',type=int,help='Assert the persisted family identity on disk-only boot')
     parser.add_argument('--font-restore-only',action='store_true',help='Observe restored Settings without applying another change')
     parser.add_argument('--output', type=Path, default=ROOT / '.husarz-test/qemu')
     parser.add_argument('--system-windows-phase',choices=['full','core','late'],default='full')
@@ -43,7 +44,7 @@ def main():
     parser.add_argument('--power-png-failures-only',action='store_true',help='Isolated malformed system icon fixtures with release UI code')
     parser.add_argument('--settings-themes-power-only',action='store_true',help='Native Settings themes lifecycle and Start power popup')
     parser.add_argument('--gui-regressions-only',action='store_true',help='Desktop rubber-band frames and native slider demo')
-    parser.add_argument('--display-input',choices=['usb','virtio','ps2'],default='usb')
+    parser.add_argument('--display-input',choices=['usb','virtio','ps2'],help='Native mouse transport; defaults to VirtIO for disk-only app tests and USB otherwise')
     parser.add_argument('--display-geometry-only',action='store_true',help='Immediate release display transaction and desktop round trips')
     parser.add_argument('--clock-support-only',action='store_true',help='Atomic clock frames and native Support/Refresh/font update acceptance')
     parser.add_argument('--desktop-grid-restore',type=Path,help='Previous grid result directory for disk-only reboot coordinate comparison')
@@ -82,6 +83,9 @@ def main():
     parser.add_argument('--fault-vector', type=int, choices=[6,14], default=6)
     parser.add_argument('--fault-probe', type=Path, help='Private test kernel with a deliberately faulting Ring 3 browser payload')
     args = parser.parse_args()
+    if args.display_input is None:args.display_input='virtio' if args.installed_disk else 'usb'
+    if args.installed_disk and (args.installed_disk.parent/'app-elfs').is_dir():
+        os.environ['BURSZTYN_APP_SYMBOLS']=str((args.installed_disk.parent/'app-elfs').resolve())
     if args.unicode_trace_only:args.unicode_editing_only=True
     if args.font_profile_only:
         for name in ('heavy-mixed.html', 'bsf-text-heavy.html'):
@@ -212,7 +216,7 @@ def main():
         index=cmd.index('virtio-vga,disable-legacy=on,xres=1280,yres=720');del cmd[index-1:index+1]
         cmd[cmd.index('none',cmd.index('-vga'))]='std'
         cmd+=['-global','VGA.vgamem_mb=64','-cdrom',str(args.iso.resolve()),'-boot','d']
-    if args.display_geometry_only and args.display_input!='usb':
+    if args.display_input!='usb':
         device_index=cmd.index('usb-mouse,bus=usb.0')
         if args.display_input=='virtio':cmd[device_index]='virtio-mouse-pci,disable-legacy=on'
         else:
@@ -228,7 +232,7 @@ def main():
     vm = None
     deadline = time.monotonic() + args.timeout
     frame = {'x': 100, 'y': 100, 'w': 800, 'h': 550}
-    result = {'boot_environment':'BIOS' if args.bios else 'UEFI'}
+    result = {'boot_environment':'BIOS' if args.bios else 'UEFI','mouse_transport':args.display_input}
     with (out / 'qemu.log').open('w') as log:
         try:
             vm = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)
@@ -261,7 +265,7 @@ def main():
 
             wait(lambda: '[DIAG APP] First frame submitted' in health(), 'native desktop ready', args.timeout)
             wait(lambda: all('role=' + role + ' result=interrupt IN armed' in health()
-                             for role in (('boot-keyboard',) if args.display_geometry_only and args.display_input!='usb' else ('boot-keyboard', 'boot-mouse'))),
+                             for role in (('boot-keyboard',) if args.display_input!='usb' else ('boot-keyboard', 'boot-mouse'))),
                  'USB keyboard and mouse interrupt endpoints ready')
             q = Qmp(sock)
             # TCG screenshot encoding can exceed the shared client's 3s default.
@@ -274,7 +278,7 @@ def main():
                 return reply.get('return', '')
 
             mice = q.call('query-mice')['return']
-            mouse = next(m for m in mice if (('virtio' in m['name'].lower()) if args.display_geometry_only and args.display_input=='virtio' else ('PS/2' in m['name']) if args.display_geometry_only and args.display_input=='ps2' else ('USB' in m['name'] or 'HID' in m['name'])))
+            mouse = next(m for m in mice if (('virtio' in m['name'].lower()) if args.display_input=='virtio' else ('PS/2' in m['name']) if args.display_input=='ps2' else ('USB' in m['name'] or 'HID' in m['name'])))
             hmp(f'mouse_set {mouse["index"]}')
 
             def position():
@@ -290,11 +294,18 @@ def main():
                 for _ in range(60):
                     health()
                     old = position()
-                    dx, dy = max(-64, min(64, x-old[0])), max(-64, min(64, y-old[1]))
+                    step=8192 if args.display_input=='virtio' else 64
+                    dx, dy = max(-step, min(step, x-old[0])), max(-step, min(step, y-old[1]))
                     if not dx and not dy:
                         return
                     hmp(f'mouse_move {dx} {dy}')
-                    wait(lambda: position() != old, 'guest consumed mouse movement', 10)
+                    try:
+                        wait(lambda: position() != old, 'guest consumed mouse movement', 10)
+                    except TimeoutError:
+                        current=position()
+                        if current==old:
+                            (out/'mouse-ack-failure.json').write_text(json.dumps(dict(before=old,current=current,target=[x,y],ticks=guest_ticks()),indent=2)+'\n')
+                            raise
                 raise RuntimeError('Cursor did not reach target')
 
             def click(x, y, double=False):
@@ -324,19 +335,21 @@ def main():
                 # 48 native 250 Hz ticks include release and USB polling latency.
                 wait(lambda: guest_ticks() - started >= 48, 'guest consumed key press/release', 30)
 
-            def screenshot(name):
+            def screenshot(name,resume=True):
                 if not name.endswith('probe') and name not in ('browser-opening', 'notepad-after-fault'):
                     print('Screenshot:', name, flush=True)
-                probe=name.endswith('probe') or name=='browser-opening'
-                path = out / (name + ('.ppm' if probe else '.png'))
+                # QEMU 8.2's PPM path corrupts RGB row alignment at widths
+                # such as 1366. PNG captures of that same native geometry are
+                # correct; keep pixel acceptance independent of PPM padding.
+                path = out / (name + '.png')
                 # Freeze virtual device time only while observing the frame.
                 # Host image encoding/file IO must not consume the guest GPU's
                 # 500 ms control-command deadline with its backend blocked by QMP.
                 q.call('stop')
                 try:
-                    q.call('screendump', {'filename': str(path), 'format': 'ppm' if probe else 'png'})
+                    q.call('screendump', {'filename': str(path), 'format': 'png'})
                 finally:
-                    q.call('cont')
+                    if resume:q.call('cont')
                 with Image.open(path) as im:
                     return im.convert('RGB').copy()
 
@@ -393,9 +406,9 @@ def main():
                 click((left+right)//2,frame['y']+100)
 
             def settings_positions(line):
-                control=max(30,line+12);button=line+22;top=2*line+16+control+12
-                preview=min(238,484-top-button-36-2*line-4)
-                return 142+2*line+16+control//2,142+top+preview+12+button//2
+                control=max(30,line+12);button=line+22;top=12+2*line+16+control+12
+                preview=min(238,484-12-top-button-48-3*line-8-control)
+                return 142+12+2*line+16+control//2,142+top+preview+12+button//2
 
             def red_close(im,xy):
                 r,g,b=im.getpixel(xy);return r>150 and g<130 and b<130
@@ -407,7 +420,26 @@ def main():
 
             def launch_start(query):
                 open_start()
-                for code in query:key(code)
+                # A published menu frame can precede focus transfer from the
+                # previous app. Focus its search field through ordinary input
+                # before typing, including with a cold expanded font catalog.
+                popup=symbol('(anonymous namespace)::application_popup')
+                def popup_values():
+                    values=[]
+                    for line in hmp(f'xp /4dw 0x{popup+12:x}').splitlines():
+                        if ':' in line:values.extend(int(v) for v in line.split(':',1)[1].split())
+                    return values
+                bounds=popup_values()
+                if len(bounds)!=4:raise AssertionError('Start geometry unavailable')
+                click(bounds[0]+40,bounds[1]+20)
+                key('ctrl','a')
+                from power_png_qemu_observer import PowerObserver
+                start_observer=PowerObserver(hmp,symbol)
+                typed=''
+                for code in query:
+                    key(code);typed+=code
+                    wait(lambda:start_observer.query()==typed.encode(),'Start consumed search text '+typed,30)
+                screenshot('launch-query-'+query)
                 key('ret')
 
             def themes_hit(name):
@@ -545,7 +577,7 @@ def main():
                 (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
             if args.settings_themes_power_only:
                 from settings_themes_power_qemu_cases import run
-                result.update(run(out,screenshot,click,move,key,wait,guest_ticks,launch_start,health,hmp,symbol,kernel_sha,iso_sha))
+                result.update(run(out,screenshot,click,move,key,wait,guest_ticks,launch_start,health,hmp,symbol,kernel_sha,iso_sha,q=q))
                 (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
             if args.gui_regressions_only:
                 from gui_regressions_qemu_cases import run
@@ -680,7 +712,7 @@ def main():
                 for target,current,line in [(12,16,19),(16,12,14),(24,16,19)]:
                     before=config_values();control=max(30,line+12);field_y,_=settings_positions(line)
                     click(986,field_y)
-                    popup_y=142+2*line+16+control
+                    popup_y=142+12+2*line+16+control
                     row=max(22,line+6)
                     screenshot('settings-size-dropdown-'+str(current))
                     click(986,popup_y+6+{12:0,16:2,24:5}[target]*row+row//2)
@@ -695,7 +727,7 @@ def main():
                     launch_start('ustawienia')
                     wait(lambda:red_close(screenshot('settings-reopen-probe'),(1033,114)),'Settings reopen',180,interval=1)
                     current_line={12:14,16:19,24:28}[target];button=current_line+22
-                    click(190,128+14+current_line+12+2*(button+12)+button//2)
+                    click(190,128+14+current_line+12+3*(button+12)+button//2)
                 before_family=config_values()
                 click(500,234);screenshot('settings-family-dropdown-24');key('end');key('ret')
                 click(320,settings_positions(28)[1])
@@ -726,11 +758,21 @@ def main():
                 wait(lambda:screenshot('fpu-shell-probe').crop((300,116,930,142)).tobytes()!=shell_header,'FPU launcher shell closed',60)
                 screenshot('fpu-shell-closed')
             move(320,28)
+            menu_background=screenshot('browser-menu-before-probe')
             hmp('mouse_button 2'); time.sleep(.2); hmp('mouse_button 0'); time.sleep(.5)
             def launch_menu_visible():
+                address=symbol('(anonymous namespace)::application_popup')
+                data=[]
+                for row in hmp(f'xp /28bx 0x{address:x}').splitlines():
+                    if ':' in row:data.extend(int(v,16) for v in re.findall(r'0x([0-9a-fA-F]+)',row.split(':',1)[1]))
+                if len(data)!=28 or not data[0]:return False
+                raw=bytes(data);x,y,w,h=(int.from_bytes(raw[i:i+4],'little',signed=True) for i in (12,16,20,24))
+                if w<16 or h<16:return False
                 im=screenshot('browser-launch-menu-probe')
-                r,g,b=im.getpixel((350,55))
-                return 25<r<80 and abs(r-g)<12 and abs(g-b)<16
+                # Sample the far side of the first row: at 24 px the old
+                # fixed point lands on the white Open label, not its background.
+                box=(max(0,x+3*w//4),max(0,y+3),min(im.width,x+w-3),min(im.height,y+19))
+                return box[2]>box[0] and box[3]>box[1] and im.crop(box).tobytes()!=menu_background.crop(box).tobytes()
             wait(launch_menu_visible,'native desktop context menu submitted',180,interval=1)
             screenshot('browser-launch-menu')
             click(345,43)  # Open after native popup submission.
@@ -817,7 +859,9 @@ def main():
                             size=min(n,4096-(address&4095));output+=read_phys(physical,size);n-=size;address+=size
                         return output
                     pointer=lambda address:struct.unpack('<Q',user(address,8))[0]
-                    memo=pointer(editor_address+editor_layout['memo'])
+                    img_base=struct.unpack('<Q',read_phys(symbol('uklady_procesow')+pid*72,8))[0] or 0x1000000
+                    editor_va=img_base+(editor_address-0x1000000 if editor_address>=0x1000000 else editor_address)
+                    memo=pointer(editor_va+editor_layout['memo'])
                     cursor=pointer(memo+editor_layout['cursor']);length=pointer(memo+editor_layout['length']);anchor=pointer(memo+editor_layout['anchor'])
                     buffer=pointer(memo+editor_layout['buffer'])
                     bits=user(memo+editor_layout['boundaries']+(max(0,length-16)//64)*8,16)
@@ -898,8 +942,25 @@ def main():
                 result.update(result='PASS',mode='theme-only',kernel_sha256=kernel_sha,iso_sha256=iso_sha,no_guest_fault=True,http_requests=request_log())
                 (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
             if args.fonts_only or args.font_fallback_only:
+                import struct
+                from bsf_process_observer import ProcessObserver
                 native_apps=[]
+                native_observers={}
+                config_address=symbol('bsf_config_request(proces*, unsigned long, unsigned long, unsigned long)::active')
+                def font_config():
+                    values=[]
+                    for line in hmp(f'xp /6wx 0x{config_address:x}').splitlines():
+                        if ':' in line:values.extend(int(v,16) for v in re.findall(r'0x([0-9a-fA-F]+)',line.split(':',1)[1]))
+                    if len(values)!=6:raise RuntimeError('Font config observer unavailable')
+                    return values
+                def app_memory():
+                    q.call('stop')
+                    try:return {name:observer.mapped_user_bytes() for name,observer in native_observers.items()}
+                    finally:q.call('cont')
                 if args.native_font_apps:
+                    from bsf_process_observer import ProcessObserver
+                    for label,elf,title,image in [('browser','przegladarka.elf','Husarz','przegladarka.bur'),('notepad','notatnik.elf','Notatnik','notatnik.bur'),('calculator','kalkulator.elf','Kalkulator','kalkulator.bur'),('explorer','eksplorator.elf','Eksplorator','eksplorator.bur')]:
+                        native_observers[label]=ProcessObserver(hmp,symbol,ROOT/elf,title,image_file=image)
                     for label,icon,close in [('notepad',80,(759,109)),('calculator',200,(379,109)),('explorer',680,(949,59))]:
                         move(icon,28);hmp('mouse_button 2');time.sleep(.5);hmp('mouse_button 0')
                         wait(lambda:screenshot('native-menu-probe').getpixel((icon+30,55))[0]<100,'native launch menu',90)
@@ -935,45 +996,66 @@ def main():
                     im=screenshot('settings-opening-probe')
                     return red_close(im,(1033,114))
                 wait(settings_ready,'Settings preview submitted',180,interval=1)
-                click(190,342) # Explicitly select Czcionki; System is now default.
+                settings_observer=ProcessObserver(hmp,symbol,ROOT/'ustawienia.elf','Ustawienia',image_file='ustawienia.bur')
+                sx,sy,sw,sh=settings_observer.window()
+                font_layout=json.loads((ROOT/f'.bsf-test/live-font-layout-{font_config()[3]}.json').read_text())
+                nav=font_layout['nav'];click(sx+nav[0]+nav[2]//2,sy+nav[1]+nav[3]//2)
+                font_page=settings_observer.object('SettingsUI::FontPage');assert font_page
+                wait(lambda:settings_observer.visible(font_page),'native Fonts page visible',90)
                 screenshot('settings-fonts')
-                config_address=symbol('bsf_config_request(proces*, unsigned long, unsigned long, unsigned long)::active')
-                def font_config():
-                    dump=hmp(f'xp /6wx 0x{config_address:x}')
-                    values=[]
-                    for line in dump.splitlines():
-                        if ':' in line:values.extend(int(v,16) for v in re.findall(r'0x([0-9a-fA-F]+)',line.split(':',1)[1]))
-                    if len(values)!=6:raise RuntimeError('Font config observer unavailable')
-                    return values
                 before=font_config()
+                if native_observers:result['app_mapped_user_bytes_before']=app_memory()
                 if args.expected_font_size is not None and before[3]!=args.expected_font_size:
                     raise AssertionError('Persisted font size was not restored: '+str(before))
+                expected_family=args.expected_font_family
+                previous_apply=out.parent/'apply/result.json'
+                if args.installed_disk and args.font_restore_only and expected_family is None and previous_apply.exists():
+                    expected_family=json.loads(previous_apply.read_text()).get('applied_family')
+                if expected_family is not None and before[2]!=expected_family:
+                    raise AssertionError('Persisted font family was not restored: '+str(before))
                 if args.font_restore_only:
-                    result.update(result='PASS',mode='font-restored',restored_size=before[3],disk_only=bool(args.installed_disk),no_guest_fault=True,kernel_sha256=kernel_sha,iso_sha256=iso_sha)
+                    result.update(result='PASS',mode='font-restored',restored_size=before[3],restored_family=before[2],disk_only=bool(args.installed_disk),no_guest_fault=True,kernel_sha256=kernel_sha,iso_sha256=iso_sha)
                     (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');return
+                if args.installed_disk:
+                    rows=settings_observer.catalog()
+                    current=next((r['family'] for r in rows if r['id']==before[2]),None)
+                    family=font_layout['families'];click(sx+family[0]+family[2]//2,sy+family[1]+family[3]//2)
+                    key('home' if rows and current==rows[-1]['family'] else 'end');key('ret')
                 # Focus and change the size using ordinary popup keyboard input.
-                click(986,settings_positions(19)[0]);key('end');key('ret')
+                family=font_layout['families'];click(sx+sw-60,sy+family[1]+family[3]//2);key('end');key('ret')
                 time.sleep(2)
                 if font_config()!=before:raise AssertionError('Local preview changed global config')
                 im=screenshot('settings-preview-24')
                 # Locate the end of the fixed preview canvas, so panel spacing
                 # and real font line metrics do not become hardcoded test input.
-                click(320,settings_positions(19)[1])
+                apply_started=time.perf_counter_ns()
+                apply_rect=font_layout['apply'];click(sx+apply_rect[0]+apply_rect[2]//2,sy+apply_rect[1]+apply_rect[3]//2)
                 wait(lambda:font_config()[3]==24 and font_config()[4]!=before[4],'Settings Apply publishes font generation',90)
                 header=(310,145,760,175)
                 before_header=im.crop(header).tobytes()
                 if not args.font_fallback_only:
                     wait(lambda:screenshot('settings-reflow-probe').crop(header).tobytes()!=before_header,'live Settings font reflow',90,interval=1)
                 screenshot('settings-applied-24')
-                result.update(local_preview=True,apply_size=24,font_generation=font_config()[4])
+                result['font_apply_to_settings_frame_host_ns']=time.perf_counter_ns()-apply_started
+                result.update(local_preview=True,apply_size=24,applied_family=font_config()[2],font_generation=font_config()[4])
+                if args.installed_disk:assert result['applied_family']!=before[2],'Alternative installed family was not selected'
                 if native_apps:
                     click(1033,114)
                     for index,label in enumerate(['browser']+native_apps):
                         click(120+116*index,700)
                         started=guest_ticks()
                         wait(lambda:guest_ticks()-started>=500,label+' font repaint',90)
+                        if label in native_observers:
+                            observer=native_observers[label]
+                            def applied_config():
+                                cfg=struct.unpack('<6I',observer.user(observer.address('BSF::(anonymous namespace)::config'),24))
+                                return cfg[2:5]==tuple(font_config()[2:5])
+                            wait(applied_config,label+' consumes the persisted font generation',90)
+                        if label=='browser' and not args.font_fallback_only:
+                            wait(font_pixels,'CSS author colors survive the system font change',240,interval=1)
                         screenshot(label+'-font-24')
                     result['native_apps_repainted']=native_apps
+                    result['app_mapped_user_bytes_after']=app_memory()
                 if not args.font_fallback_only:
                     started=guest_ticks()
                     wait(lambda:guest_ticks()-started>=500,'desktop font generation consumed',90)

@@ -218,27 +218,67 @@ bool skopiuj_z_przestrzeni_uzytkownika(
 }
 
 /* Kernelowy provider entropii. mbedTLS zna tylko ten kontrakt i nie posiada
- * polityki sprzetowej. Laczy sprzetowy RDRAND (jesli dostepny w CPU) oraz
- * urzadzenie sprzetowe VirtIO-RNG (jesli dostepne). Brak obu zrodel
- * odmawia pracy (fail-closed). */
+ * polityki sprzetowej. Laczy sprzetowy RDSEED, RDRAND (jesli dostepne w CPU)
+ * oraz urzadzenie sprzetowe VirtIO-RNG (jesli dostepne). Brak wszystkich
+ * zaufanych zrodel sprzetowych odmawia pracy (fail-closed) — zegar RDTSC/RTC
+ * nigdy nie jest traktowany jako samodzielne zrodlo entropii kryptograficznej. */
 extern "C" bool bursztyn_krypto_wypelnij_losowe(uint8_t* bufor,
                                                  size_t dlugosc) {
     if (!bufor && dlugosc != 0) return false;
     if (dlugosc == 0) return true;
+    virtio_rng_secure_zero(bufor, dlugosc);
 
     bool has_rdrand = false;
-    uint32_t a = 0, b = 0, c = 0, d = 0;
-    asm volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d)
-                 : "a"(1U), "c"(0U));
-    (void)a; (void)b; (void)d;
-    if ((c & (1U << 30)) != 0) {
-        has_rdrand = true;
+    bool has_rdseed = false;
+    {
+        uint32_t a = 0, b = 0, c = 0, d = 0;
+        asm volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d)
+                     : "a"(0U), "c"(0U));
+        const uint32_t max_leaf = a;
+        a = 1U; c = 0U;
+        asm volatile("cpuid" : "+a"(a), "=b"(b), "+c"(c), "=d"(d));
+        if ((c & (1U << 30)) != 0) {
+            has_rdrand = true;
+        }
+        if (max_leaf >= 7U) {
+            a = 7U; c = 0U;
+            asm volatile("cpuid" : "+a"(a), "=b"(b), "+c"(c), "=d"(d));
+            if ((b & (1U << 18)) != 0) {
+                has_rdseed = true;
+            }
+        }
     }
 
     const bool has_virtio = virtio_rng_is_ready();
 
-    if (!has_rdrand && !has_virtio) {
+    if (!has_rdseed && !has_rdrand && !has_virtio) {
         return false;
+    }
+
+    bool rdseed_ok = false;
+    if (has_rdseed) {
+        size_t off = 0;
+        rdseed_ok = true;
+        while (off < dlugosc) {
+            uint64_t v = 0;
+            unsigned char ok = 0;
+            for (unsigned proba = 0; proba < 16 && !ok; ++proba) {
+                asm volatile("rdseed %0; setc %1" : "=r"(v), "=qm"(ok) :: "cc");
+                if (ok && (v == 0ULL || v == ~0ULL)) {
+                    ok = 0;
+                }
+            }
+            if (!ok) {
+                rdseed_ok = false;
+                break;
+            }
+            for (unsigned i = 0; i < 8 && off < dlugosc; ++i, ++off) {
+                bufor[off] ^= static_cast<uint8_t>(v >> (i * 8));
+            }
+        }
+        if (!rdseed_ok) {
+            virtio_rng_secure_zero(bufor, dlugosc);
+        }
     }
 
     bool rdrand_ok = false;
@@ -250,37 +290,28 @@ extern "C" bool bursztyn_krypto_wypelnij_losowe(uint8_t* bufor,
             unsigned char ok = 0;
             for (unsigned proba = 0; proba < 16 && !ok; ++proba) {
                 asm volatile("rdrand %0; setc %1" : "=r"(v), "=qm"(ok) :: "cc");
+                if (ok && (v == 0ULL || v == ~0ULL)) {
+                    ok = 0;
+                }
             }
             if (!ok) {
                 rdrand_ok = false;
                 break;
             }
             for (unsigned i = 0; i < 8 && off < dlugosc; ++i, ++off) {
-                bufor[off] = static_cast<uint8_t>(v >> (i * 8));
+                bufor[off] ^= static_cast<uint8_t>(v >> (i * 8));
             }
         }
+        if (!rdrand_ok && !rdseed_ok) {
+            virtio_rng_secure_zero(bufor, dlugosc);
+        }
     }
 
-    if (!rdrand_ok) {
-        // Jezeli RDRAND jest niedostepny lub zawiodl, czerpiemy pelna entropie z VirtIO-RNG
-        if (!has_virtio) {
-            virtio_rng_secure_zero(bufor, dlugosc);
-            return false;
-        }
-        const size_t got = virtio_rng_read(bufor, dlugosc);
-        if (got < dlugosc) {
-            // Fail-closed: nie zwracamy niepelnego/niezainicjalizowanego bufora
-            virtio_rng_secure_zero(bufor, dlugosc);
-            return false;
-        }
-        return true;
-    }
-
-    // Gdy RDRAND zadzialal poprawnie, a dostepny jest takze VirtIO-RNG,
-    // mieszamy dodatkowa entropie sprzetowa do bufora poprzez XOR.
+    bool virtio_ok = false;
     if (has_virtio) {
         uint8_t mix_buf[64];
         size_t off = 0;
+        virtio_ok = true;
         while (off < dlugosc) {
             size_t chunk = dlugosc - off;
             if (chunk > sizeof(mix_buf)) {
@@ -290,13 +321,18 @@ extern "C" bool bursztyn_krypto_wypelnij_losowe(uint8_t* bufor,
             for (size_t i = 0; i < got; ++i) {
                 bufor[off + i] ^= mix_buf[i];
             }
-            // Prawdziwe, nieoptymalizowalne czyszczenie tymczasowego bufora na stosie
             virtio_rng_secure_zero(mix_buf, sizeof(mix_buf));
             if (got < chunk) {
+                virtio_ok = false;
                 break;
             }
             off += got;
         }
+    }
+
+    if (!rdseed_ok && !rdrand_ok && !virtio_ok) {
+        virtio_rng_secure_zero(bufor, dlugosc);
+        return false;
     }
 
     return true;

@@ -2,12 +2,13 @@
 import json,re,struct,subprocess
 from pathlib import Path
 from PIL import Image
+from bsf_process_observer import app_elf
 ROOT=Path(__file__).resolve().parents[1]
 class PowerObserver:
     def __init__(self,hmp,symbol):
         self.hmp=hmp;self.symbol=symbol
         self.layout=json.loads((ROOT/'.bsf-test/power-observer.json').read_text())
-        symbols=subprocess.check_output(['nm','-C',str(ROOT/'menedzer_okien.elf')],text=True)
+        symbols=subprocess.check_output(['nm','-C',str(app_elf(ROOT,'menedzer_okien.elf'))],text=True)
         self.slot=int(re.search(r'^([0-9a-f]+) [bBdD] \(anonymous namespace\)::start_menu$',symbols,re.M)[1],16)
     def read(self,a,n):
         data=[]
@@ -29,13 +30,20 @@ class PowerObserver:
             count=min(n,4096-(a&4095));data+=self.read(physical(a),count);a+=count;n-=count
         return data
     def pointer(self,a):return struct.unpack('<Q',self.user(a,8))[0]
+    def slot_va(self):
+        base=struct.unpack('<Q',self.read(self.symbol('uklady_procesow')+72,8))[0] or 0x1000000
+        return base+(self.slot-0x1000000 if self.slot>=0x1000000 else self.slot)
     def geometry(self):
-        base=self.pointer(self.slot);l=self.layout
+        base=self.pointer(self.slot_va());l=self.layout
         rect=lambda a:list(struct.unpack('<4i',self.user(a+l['rect_offset'],16)))
         return dict(start=rect(base),button=rect(self.pointer(base+l['button_slot'])),popup=rect(base+l['popup_offset']))
     def opened(self):
-        base=self.pointer(self.slot);l=self.layout
+        base=self.pointer(self.slot_va());l=self.layout
         return bool(self.pointer(base+l['popup_offset']+l['manager_offset']))
+    def query(self):
+        base=self.pointer(self.slot_va());l=self.layout
+        search=self.pointer(base+l['search_slot'])
+        return self.user(search+l['query_offset'],l['query_bytes']).split(b'\0',1)[0]
     def verify(self,image,scale=100):
         assert self.opened(),'power popup must actually be open' 
         cursor=tuple(struct.unpack('<i',self.read(self.symbol(n),4))[0] for n in ('mysz_x','mysz_y'))
@@ -46,7 +54,7 @@ class PowerObserver:
         assert button[2]==button[3]==scaled(36),g
         assert button[1]-popup[1]-popup[3]==scaled(8)+scaled(2),g
         assert popup[0]+popup[2]==button[0]+button[2],g
-        base=self.pointer(self.slot);l=self.layout;icons=[]
+        base=self.pointer(self.slot_va());l=self.layout;icons=[]
         for i,name in enumerate(('zasilania','zablokuj','uspij','zamknij','uruchomponownie')):
             cache=base+l['icons_offset']+i*l['icon_size'];ptr=self.pointer(cache+l['pixel_offset']);side=scaled(22 if i==0 else 18)
             assert ptr,('missing PNG',name)

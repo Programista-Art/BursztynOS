@@ -1,13 +1,21 @@
 """Read-only QMP observation of a Ring 3 process; no guest-state writes."""
-import re,struct,subprocess
+import os,re,struct,subprocess
+from pathlib import Path
+def app_elf(root,name):
+    return Path(os.environ.get('BURSZTYN_APP_SYMBOLS',root))/name
 class ProcessObserver:
-    def __init__(self,hmp,symbol,elf,title):
+    def __init__(self,hmp,symbol,elf,title,image_file=None):
         self.hmp,self.symbol,self.title=hmp,symbol,title.encode()
+        self.image_file=image_file.encode() if image_file else None
+        elf=app_elf(Path(elf).parent,Path(elf).name)
         self.symbols=subprocess.check_output(['nm','-C',str(elf)],text=True)
     def address(self,name):
         m=re.search(r'^([0-9a-f]+) [bBdDvVrRtT] '+re.escape(name)+r'$',self.symbols,re.M)
         if not m:raise AssertionError('Missing observer symbol '+name)
-        return int(m[1],16)
+        raw=int(m[1],16)
+        p=self.pid();assert p
+        base=struct.unpack('<Q',self.physical(self.symbol('uklady_procesow')+p*72,8))[0] or 0x1000000
+        return base+(raw-0x1000000 if raw>=0x1000000 else raw)
     def physical(self,a,n):
         result=[]
         for row in self.hmp(f'xp /{n}bx 0x{a:x}').splitlines():
@@ -16,7 +24,13 @@ class ProcessObserver:
         return bytes(result)
     def pid(self):
         names=self.physical(self.symbol('(anonymous namespace)::tytul_okna'),16*48)
-        return next((i for i in range(1,16) if names[i*48:(i+1)*48].startswith(self.title)),None)
+        visible=next((i for i in range(1,16) if names[i*48:(i+1)*48].startswith(self.title)),None)
+        if visible is not None or self.image_file is None:return visible
+        records=self.physical(self.symbol('tablica_procesow'),16*144)
+        for i in range(1,16):
+            record=records[i*144:(i+1)*144]
+            if struct.unpack_from('<i',record,136)[0] not in (0,6) and record[72:136].split(b'\0',1)[0].endswith(b'/'+self.image_file):return i
+        return None
     def user(self,a,n):
         p=self.pid();assert p
         root=struct.unpack('<Q',self.physical(self.symbol('tablica_procesow')+p*144+0x38,8))[0]
@@ -32,6 +46,28 @@ class ProcessObserver:
         return result
     def value(self,name,fmt='<I'):
         return struct.unpack(fmt,self.user(self.address(name),struct.calcsize(fmt)))[0]
+    def mapped_user_bytes(self):
+        """Present user mappings, including shared buffers; call while paused.
+
+        This is a sampled mapping size, not private RSS or an allocation peak.
+        """
+        p=self.pid();assert p
+        root=struct.unpack('<Q',self.physical(self.symbol('tablica_procesow')+p*144+0x38,8))[0]
+        memo={}
+        def walk(table,level):
+            key=(table,level)
+            if key in memo:return memo[key]
+            assert len(memo)<1024,'Bounded memory observer exceeded page-table limit'
+            memo[key]=0
+            total=0
+            for entry in struct.unpack('<512Q',self.physical(table,4096)):
+                if entry&5!=5:continue
+                if level==1:total+=4096
+                elif level in (2,3) and entry&128:total+=1<<(12+9*(level-1))
+                else:total+=walk(entry&0x000ffffffffff000,level-1)
+            memo[key]=total
+            return total
+        return walk(root&0x000ffffffffff000,4)
     def catalog(self):
         n=self.value('BSF::(anonymous namespace)::count');assert n<=128
         pointer=self.value('BSF::(anonymous namespace)::catalog','<Q')

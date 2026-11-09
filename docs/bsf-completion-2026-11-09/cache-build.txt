@@ -1,0 +1,28 @@
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -Os -fstack-usage -c programy/ustawienia/ustawienia.cpp -o ustawienia_tmp.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Os -fstack-usage -c bsf/runtime.cpp -o bsf_runtime.o
+[AKTUALIZACJA BUILD] Klucz aktualizacji RELEASE (odcisk: aceba052f9096313...)
+x86_64-linux-gnu-g++ -mgeneral-regs-only -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage -DMBEDTLS_USER_CONFIG_FILE=\"bursztyn_mbedtls_config.h\" -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c aktualizacja.cpp -o aktualizacja.o
+programy/ustawienia/ustawienia.cpp: In lambda function:
+programy/ustawienia/ustawienia.cpp:157:7: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  157 |       if(result==BSF::InstallResult::Ok)self->reload_fonts();self->status->ustaw_tekst(message);self->przelicz_uklad();self->preview->uniewaznij();
+      |       ^~
+programy/ustawienia/ustawienia.cpp:157:62: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  157 |       if(result==BSF::InstallResult::Ok)self->reload_fonts();self->status->ustaw_tekst(message);self->przelicz_uklad();self->preview->uniewaznij();
+      |                                                              ^~~~
+x86_64-linux-gnu-ld -r bursztyn_gui_base.o bsf_core.o bsf_runtime.o bsf_bitmap.o ring3_ssp.o -o bursztyn_gui.o
+x86_64-linux-gnu-ld --gc-sections -T programy/instalator/instalator_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail instalator_tmp.o bursztyn_gui.o -o instalator.elf
+x86_64-linux-gnu-ld --gc-sections -T programy/ekran/ekran_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail ekran_tmp.o bursztyn_gui.o -o ekran.elf
+x86_64-linux-gnu-objcopy -O binary instalator.elf instalator.bin
+x86_64-linux-gnu-objcopy -O binary ekran.elf ekran.bin
+x86_64-linux-gnu-ld -r -b binary instalator.bin -o instalator_blob.o
+x86_64-linux-gnu-ld -r -b binary ekran.bin -o ekran_blob.o
+x86_64-linux-gnu-ld --gc-sections -T programy/przegladarka_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	przegladarka_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o -o przegladarka.elf
+x86_64-linux-gnu-ld --gc-sections -T programy/tapety/tapety_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail tapety_tmp.o btp_ring3.o image_ring3.o bursztyn_gui.o -o tapety.elf
+x86_64-linux-gnu-objcopy -O binary tapety.elf tapety.bin
+x86_64-linux-gnu-ld:programy/przegladarka_linker.ld:130 cannot move location counter backwards (from 000000000108d1c0 to 000000000108d000)
+make: *** [Makefile:629: przegladarka_blob.o] Error 1
+make: *** Waiting for unfinished jobs....
+python3 narzedzia/test_tapety_size.py tapety.bin
+Tapety: file=305776 maximum=524288 margin=218512
+x86_64-linux-gnu-ld -r -b binary tapety.bin -o tapety_blob.o

@@ -1,0 +1,74 @@
+In file included from /usr/include/c++/13/cstddef:50,
+                 from narzedzia/bsf_installer_observer.cpp:2:
+narzedzia/bsf_installer_observer.cpp: In function ‘int main()’:
+narzedzia/bsf_installer_observer.cpp:16:116: warning: ‘offsetof’ within non-standard-layout type ‘{anonymous}::Wizard’ is conditionally-supported [-Winvalid-offsetof]
+   16 | int main(){printf("{\"page\":%zu,\"selected\":%zu,\"word\":%zu,\"enabled\":%zu,\"source_checked\":%zu}\n",offsetof(Wizard,page),offsetof(Wizard,selected),offsetof(Wizard,word),offsetof(Wizard,buttonenabled),offsetof(Wizard,sourceackchecked));}
+      |                                                                                                                    ^
+narzedzia/bsf_installer_observer.cpp:16:138: warning: ‘offsetof’ within non-standard-layout type ‘{anonymous}::Wizard’ is conditionally-supported [-Winvalid-offsetof]
+   16 | int main(){printf("{\"page\":%zu,\"selected\":%zu,\"word\":%zu,\"enabled\":%zu,\"source_checked\":%zu}\n",offsetof(Wizard,page),offsetof(Wizard,selected),offsetof(Wizard,word),offsetof(Wizard,buttonenabled),offsetof(Wizard,sourceackchecked));}
+      |                                                                                                                                          ^
+narzedzia/bsf_installer_observer.cpp:16:164: warning: ‘offsetof’ within non-standard-layout type ‘{anonymous}::Wizard’ is conditionally-supported [-Winvalid-offsetof]
+   16 | int main(){printf("{\"page\":%zu,\"selected\":%zu,\"word\":%zu,\"enabled\":%zu,\"source_checked\":%zu}\n",offsetof(Wizard,page),offsetof(Wizard,selected),offsetof(Wizard,word),offsetof(Wizard,buttonenabled),offsetof(Wizard,sourceackchecked));}
+      |                                                                                                                                                                    ^
+narzedzia/bsf_installer_observer.cpp:16:186: warning: ‘offsetof’ within non-standard-layout type ‘{anonymous}::Wizard’ is conditionally-supported [-Winvalid-offsetof]
+   16 | int main(){printf("{\"page\":%zu,\"selected\":%zu,\"word\":%zu,\"enabled\":%zu,\"source_checked\":%zu}\n",offsetof(Wizard,page),offsetof(Wizard,selected),offsetof(Wizard,word),offsetof(Wizard,buttonenabled),offsetof(Wizard,sourceackchecked));}
+      |                                                                                                                                                                                          ^
+narzedzia/bsf_installer_observer.cpp:16:217: warning: ‘offsetof’ within non-standard-layout type ‘{anonymous}::Wizard’ is conditionally-supported [-Winvalid-offsetof]
+   16 | int main(){printf("{\"page\":%zu,\"selected\":%zu,\"word\":%zu,\"enabled\":%zu,\"source_checked\":%zu}\n",offsetof(Wizard,page),offsetof(Wizard,selected),offsetof(Wizard,word),offsetof(Wizard,buttonenabled),offsetof(Wizard,sourceackchecked));}
+      |                                                                                                                                                                                                                         ^
+Artifacts: /home/programista/Pulpit/Burstzyn/BursztynOS/.bsf-test/installed-gq23es3x
+Traceback (most recent call last):
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/test_bsf_installed_qemu.py", line 121, in <module>
+    main()
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/test_bsf_installed_qemu.py", line 46, in main
+    install(guest, disk, sentinel, target_fingerprint(disk), sentinel_sha)
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/instalator/qemu_install.py", line 191, in install
+    g.wait('[INSTALL] Installer mode ready',timeout=300)
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/instalator/qemu_install.py", line 168, in wait
+    self.q.screenshot(self.dir/'timeout.png');raise TimeoutError(needle+'\n'+text[-2000:])
+                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TimeoutError: [INSTALL] Installer mode ready
+ache ip=10.0.2.2
+[ARP] resolved ip=10.0.2.2
+[SIEC] Brama domyslna (ARP) rozwiazana pomyslnie.
+[SIEC] Inicjalizacja stosu sieciowego zakonczona.
+[HDA] PCI 0x00:0x03.0 Intel HDA (vendor=0x8086 device=0x2668)
+[HDA] codec CAD=0 vendor=0x1AF4 device=0x0012
+[HDA] AFG NID=0x01
+[HDA] speaker pin NID=0x03 (cel=Line Out ocena=40)
+[HDA] route: 0x02 -> 0x03
+[HDA] widget NID=0x02 typ=Audio Output awcap=0x0000001D out_amp=0x80034A4A power=D0
+[HDA] widget NID=0x03 typ=Pin Complex awcap=0x00400101 pin_caps=0x00000010 power=D0
+[HDA] Karta HDA gotowa.
+[BSP] Sprawdzanie nosnika blokowego w poszukiwaniu BSP2...
+[BSP] Brak zamontowanej partycji. System plikow tylko w RAM; zero zapisow dysku.
+[PSF] total_blocks=32768
+[PSF] bitmap_start=1 count=1
+[PSF] inode_start=2 count=1024
+[PSF] data_start=1026 count=31742
+[ROZRUCH] Srodowisko instalacyjne / Live ISO. Pominiecie walidacji partycji A/B LBA 2046/2047.
+[PCI] Rozpoczynam skanowanie PCI...
+[PCI] Skan zakonczony; raport zapisany do /logi/pci.txt.
+[BSP] Drzewiasty system plikow PSF gotowy.
+[BSP] Wbudowana Powloka zainstalowana.
+[BSP] /cytaty.txt zainstalowany.
+[BSP] /obrazy/logo.png dodany do planu instalacji.
+[BSP] Przegladarka Husarz zainstalowana jako .cebula.
+[BSP] Notatnik zainstalowany jako .cebula.
+[BSP] Eksplorator Plikow zainstalowany jako .cebula.
+[BSP] Aplikacja Testowa zainstalowana jako .cebula.
+[BSP] Gra snake zainstalowana jako .cebula.
+[BSP] Przegladarka Obrazow zainstalowana jako .cebula.
+[BSP] BursztynUI Demo zainstalowane jako .cebula.
+[BSP] Kontrolki 2 zainstalowane jako .cebula.
+[EKRAN] Aplikacja zainstalowana.
+[TAPETA] Aplikacja Tapety zainstalowana.
+[BSP] Kontrolki 3 zainstalowane jako .cebula.
+[BSP] Kontrolki 4 zainstalowane jako .cebula.
+[BSP] Aktualizacje Systemu zainstalowane jako .cebula.
+[BSP] Test dzwieku zainstalowany jako .cebula.
+[BSP] Kalkulator zainstalowany jako .cebula.
+[BSP] Menedzer Okien zainstalowany.
+[TAPETA] Znaleziono modul tapety.pak, bajtow: 10977056
+[TAPETA] Pakiet tapety.pak, liczba plikow: 28
+

@@ -2291,7 +2291,9 @@ fuzz-extended:
 
 test-bur-v2-aslr-host:
 	@mkdir -p .aslr-test
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_LOADER_HOST_TEST -fsanitize=address,undefined loader.cpp narzedzia/test_bur_v2_aslr_host.cpp -o .aslr-test/test_bur_v2_aslr_host
+	gcc -std=gnu11 -O1 -g -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -DMBEDTLS_USER_CONFIG_FILE=\"bursztyn_mbedtls_config.h\" -fsanitize=address,undefined -c biblioteki/mbedtls/library/chacha20.c -o .aslr-test/chacha20.o
+	gcc -std=gnu11 -O1 -g -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -DMBEDTLS_USER_CONFIG_FILE=\"bursztyn_mbedtls_config.h\" -fsanitize=address,undefined -c biblioteki/mbedtls/library/platform_util.c -o .aslr-test/platform_util.o
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -pthread -I. -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -DMBEDTLS_USER_CONFIG_FILE=\"bursztyn_mbedtls_config.h\" -DBURSZTYN_LOADER_HOST_TEST -fsanitize=address,undefined loader.cpp entropia.cpp narzedzia/test_bur_v2_aslr_host.cpp .aslr-test/chacha20.o .aslr-test/platform_util.o -o .aslr-test/test_bur_v2_aslr_host
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .aslr-test/test_bur_v2_aslr_host
 
 test-security-hardening: test-stack-protector-host test-bur-v2-aslr-host test-fuzz-smoke
@@ -2372,3 +2374,9 @@ bsf-installer-observer:
 	@mkdir -p .bsf-test
 	g++ -std=c++17 -fcoroutines -O0 -ffunction-sections -fdata-sections -I. narzedzia/bsf_installer_observer.cpp -Wl,--gc-sections -o .bsf-test/installer-observer
 	.bsf-test/installer-observer > .bsf-test/installer-observer.json
+
+.PHONY: bsf-settings-layout
+bsf-settings-layout:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -fcoroutines -fno-access-control -O0 -ffunction-sections -fdata-sections -I. narzedzia/bsf_settings_layout.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp bsf/bsf.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/settings-layout
+	.bsf-test/settings-layout

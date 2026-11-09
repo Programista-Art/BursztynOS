@@ -30,9 +30,11 @@ def run(out, screenshot, click, move, key, wait, ticks, launch, health, hmp,
         while n:
             count=min(n,4096-(address&4095));data+=read(physical(address),count);address+=count;n-=count
         return data
-    def address(elf,name):
+    def address(elf,name,pid=1):
         symbols=subprocess.check_output(['nm','-C',str(elf)],text=True)
-        return int(re.search(r'^([0-9a-f]+) [bBdD] '+re.escape(name)+r'$',symbols,re.M)[1],16)
+        raw=int(re.search(r'^([0-9a-f]+) [bBdD] '+re.escape(name)+r'$',symbols,re.M)[1],16)
+        base=struct.unpack('<Q',read(symbol('uklady_procesow')+pid*72,8))[0] or 0x1000000
+        return base+(raw-0x1000000 if raw>=0x1000000 else raw)
     titles=symbol('(anonymous namespace)::tytul_okna');layers=symbol('tablica_warstw')
     def window():
         names=read(titles,16*48);meta=read(layers,16*40)
@@ -41,7 +43,7 @@ def run(out, screenshot, click, move, key, wait, ticks, launch, health, hmp,
                 _,z,x,y,w,h=struct.unpack_from('<6i',meta,pid*40)
                 return dict(pid=pid,x=x,y=y,w=w,h=h)
     wm=out/'wm.elf' if (out/'wm.elf').exists() else root/'menedzer_okien.elf'
-    gesture=address(wm,'(anonymous namespace)::desktop_gesture')
+    gesture=address(wm,'(anonymous namespace)::desktop_gesture',1)
     def band():return list(struct.unpack('<4i',user(1,gesture+layout['gesture_band'],16)))
     click(1100, 610)
     screenshot('selection-before')
@@ -72,7 +74,7 @@ def run(out, screenshot, click, move, key, wait, ticks, launch, health, hmp,
     launch('demo')
     wait(lambda:window() is not None,'component demo window',180,interval=.1)
     win=window()
-    demo=address(root/'demo_ui.elf','g_demo')
+    demo=address(root/'demo_ui.elf','g_demo',win['pid'])
     slider=struct.unpack('<Q',user(win['pid'],demo+11*8,8))[0]
     assert slider
     def slider_value():return struct.unpack('<i',user(win['pid'],slider+layout['slider_value'],4))[0]

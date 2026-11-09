@@ -28,9 +28,42 @@
 #include <cassert>
 #include <vector>
 #include <set>
+#include <array>
+#include <thread>
+#include <atomic>
 
 #include "../loader.h"
 #include "../bur_v2.h"
+#include "../entropia.h"
+
+namespace {
+static std::atomic<bool> g_mock_hw_entropy_available{true};
+static std::atomic<bool> g_mock_constant_hw_seed{false};
+static std::atomic<uint64_t> g_mock_hw_counter{0x9E3779B97F4A7C15ULL};
+}
+
+extern "C" bool bursztyn_krypto_wypelnij_losowe(uint8_t* bufor, size_t dlugosc) {
+    if (!bufor && dlugosc != 0) return false;
+    if (dlugosc == 0) return true;
+    if (!g_mock_hw_entropy_available.load(std::memory_order_acquire)) {
+        std::memset(bufor, 0, dlugosc);
+        return false;
+    }
+    if (g_mock_constant_hw_seed.load(std::memory_order_acquire)) {
+        for (size_t i = 0; i < dlugosc; ++i) {
+            bufor[i] = static_cast<uint8_t>(0xA5U ^ (i * 17U));
+        }
+        return true;
+    }
+    uint64_t x = g_mock_hw_counter.fetch_add(0xBF58476D1CE4E5B9ULL, std::memory_order_relaxed);
+    for (size_t i = 0; i < dlugosc; ++i) {
+        x ^= (x >> 30);
+        x *= 0x94D049BB133111EBULL;
+        x ^= (x >> 31);
+        bufor[i] = static_cast<uint8_t>((x >> ((i & 7U) * 8U)) ^ (i * 31U));
+    }
+    return true;
+}
 
 static NaglowekBurV2 utworz_poprawny_bur_v2(bool straznik_ro = true) {
     NaglowekBurV2 n{};
@@ -306,11 +339,71 @@ static void test_aslr_planner_10000_trials() {
     assert(unique_stack_tops.size() > 8500);
 }
 
+static void test_chacha20_entropy_and_fail_closed() {
+    // 1. Fail-closed when trusted hardware entropy (VirtIO-RNG, RDSEED, RDRAND) is unavailable:
+    g_mock_hw_entropy_available.store(false, std::memory_order_release);
+    uint8_t buf[32];
+    std::memset(buf, 0xCC, sizeof(buf));
+    assert(!entropia_pobierz_bajty(buf, sizeof(buf)));
+    assert(!entropia_czy_gotowa());
+    for (uint8_t b : buf) {
+        assert(b == 0);
+    }
+
+    // 2. Successful ChaCha20 initialization, seed construction, readiness, and reseeding:
+    g_mock_hw_entropy_available.store(true, std::memory_order_release);
+    const uint64_t before_reseeds = entropia_liczba_reseedow();
+    uint8_t out1[32]{};
+    uint8_t out2[32]{};
+    assert(entropia_pobierz_bajty(out1, sizeof(out1)));
+    assert(entropia_czy_gotowa());
+    assert(entropia_liczba_reseedow() == before_reseeds + 1ULL);
+
+    // Even if hardware seed bytes were identical across two calls, fast-key-erasure chaining
+    // and the monotonic reseed counter guarantee distinct ChaCha20 outputs:
+    g_mock_constant_hw_seed.store(true, std::memory_order_release);
+    uint8_t c1[32]{};
+    uint8_t c2[32]{};
+    assert(entropia_pobierz_bajty(c1, sizeof(c1)));
+    assert(entropia_pobierz_bajty(c2, sizeof(c2)));
+    assert(std::memcmp(c1, c2, sizeof(c1)) != 0);
+    g_mock_constant_hw_seed.store(false, std::memory_order_release);
+
+    assert(entropia_pobierz_bajty(out2, sizeof(out2)));
+    assert(std::memcmp(out1, out2, sizeof(out1)) != 0);
+
+    // 3. Invalid parameters rejected safely:
+    assert(!entropia_pobierz_bajty(nullptr, 16));
+    assert(!entropia_pobierz_bajty(out1, 0));
+    assert(!entropia_pobierz_bajty(out1, 4097));
+
+    // 4. Concurrent callers across 8 threads (250 calls each = 2,000 calls):
+    constexpr int kThreads = 8;
+    constexpr int kPerThread = 250;
+    std::vector<std::array<uint8_t, 32>> results(kThreads * kPerThread);
+    std::vector<std::thread> threads;
+    for (int t = 0; t < kThreads; ++t) {
+        threads.emplace_back([t, &results]() {
+            for (int i = 0; i < kPerThread; ++i) {
+                auto& slot = results[t * kPerThread + i];
+                const bool ok = entropia_pobierz_bajty(slot.data(), slot.size());
+                assert(ok);
+            }
+        });
+    }
+    for (auto& th : threads) {
+        th.join();
+    }
+    std::set<std::array<uint8_t, 32>> unique_outputs(results.begin(), results.end());
+    assert(unique_outputs.size() == results.size());
+}
+
 int main() {
     test_bur_v1_backward_compatibility();
     test_bur_v2_header_validation();
     test_bur_v2_relocations();
     test_aslr_planner_10000_trials();
-    std::printf("[BUR-V2-ASLR-HOST] PASS: BUR v1 compat, BUR v2 validator, W^X relocator, and 10,000 ASLR layout trials verified!\n");
+    test_chacha20_entropy_and_fail_closed();
+    std::printf("[BUR-V2-ASLR-HOST] PASS: BUR v1 compat, BUR v2 validator, W^X relocator, ChaCha20 CSPRNG (fail-closed + concurrency), and 10,000 ASLR layout trials verified!\n");
     return 0;
 }

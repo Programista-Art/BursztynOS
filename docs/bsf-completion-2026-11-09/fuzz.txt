@@ -1,0 +1,4 @@
+g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fsanitize-coverage=trace-pc -fno-omit-frame-pointer -fno-pie -ffunction-sections -fdata-sections -c bsf/bsf.cpp -o .bsf-test/bsf-coverage.o
+g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections narzedzia/fuzz_bsf_coverage.cpp .bsf-test/bsf-coverage.o -Wl,--gc-sections -o .bsf-test/fuzz-bsf-coverage
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/fuzz-bsf-coverage czcionki/ttf/DejaVuSans.ttf .bsf-test/fuzz-corpus 10000
+BSF GCC trace-pc coverage-guided campaign: executions=10001 coverage-buckets=602 retained-inputs=8 retained-bytes=4997016 seed=0x425346 PASS

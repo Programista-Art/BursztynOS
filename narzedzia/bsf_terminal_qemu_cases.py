@@ -5,11 +5,15 @@ def run_terminal(c):
     out, root=c['out'],c['ROOT'] if 'ROOT' in c else __import__('pathlib').Path(__file__).resolve().parents[1]
     key,click,wait,screenshot=c['key'],c['click'],c['wait'],c['screenshot']
     hmp,symbol=c['hmp'],c['symbol']
-    symbols=subprocess.check_output(['nm','-C',str(root/'shell.elf')],text=True)
+    from bsf_process_observer import app_elf
+    symbols=subprocess.check_output(['nm','-C',str(app_elf(root,'shell.elf'))],text=True)
     def addr(name):
         m=re.search(r'^([0-9a-f]+) [bBdD] '+re.escape('(anonymous namespace)::'+name)+r'$',symbols,re.M)
         if not m:raise AssertionError('Missing Shell observer: '+name)
-        return int(m[1],16)
+        raw=int(m[1],16)
+        p=pid();assert p
+        base=struct.unpack('<Q',physical(symbol('uklady_procesow')+p*72,8))[0] or 0x1000000
+        return base+(raw-0x1000000 if raw>=0x1000000 else raw)
     def physical(a,n):
         vals=[]
         for line in hmp(f'xp /{n}bx 0x{a:x}').splitlines():

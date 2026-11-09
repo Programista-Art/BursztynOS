@@ -1,0 +1,16 @@
+{
+  "boot_environment": "UEFI",
+  "result": "PASS",
+  "mode": "unicode-editing-only",
+  "notepad_save_reopen_bytes": true,
+  "cluster_left_delete": true,
+  "native_clipboard": true,
+  "no_guest_fault": true,
+  "kernel_sha256": "50987de4441bc8e1ffb7c71bfb6e5a45fce3eb6e6144ca41d2ed8f25c1d12c64",
+  "iso_sha256": "9afe354a068028db4517bda31cf13678705e53bd695d968869f8366166e0ea43",
+  "http_requests": [
+    "/unicode.html",
+    "/unicode.html?source=[redacted]&result=[redacted]",
+    "/unicode.html?source=[redacted]&result=[redacted]"
+  ]
+}

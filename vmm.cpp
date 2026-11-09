@@ -1036,7 +1036,9 @@ static bool mapuj_strone_wewnetrznie(
         static_cast<uint64_t>(flagi) &
         MASKA_FLAG_LISCIA_4K;
 
-    if (user && (flagi_liscia & PTE_WRITE) && nx_aktywny) flagi_liscia |= PTE_NX;
+    if (nx_aktywny && ((flagi & PTE_NX) != 0ULL || (user && (flagi_liscia & PTE_WRITE) != 0ULL))) {
+        flagi_liscia |= PTE_NX;
+    }
 
     /*
      * ZmapujStrone oznacza utworzenie aktywnego mapowania.
@@ -1858,7 +1860,7 @@ extern "C" bool VmmMapujNowaStroneJadra(void* va, void* pa) {
     uint64_t* pml4 = pml4_z_cr3();
     if (!pml4 || sprawdz_mapowanie(pml4, reinterpret_cast<uint64_t>(va)).obecna) return false;
     return mapuj_strone_wewnetrznie(pml4, reinterpret_cast<uint64_t>(va),
-        reinterpret_cast<uint64_t>(pa), VMM_FLAGA_OBECNA | VMM_FLAGA_ZAPIS);
+        reinterpret_cast<uint64_t>(pa), VMM_FLAGA_OBECNA | VMM_FLAGA_ZAPIS | VMM_FLAGA_NX);
 }
 
 extern "C" bool VmmMapujStroneWspoldzielona(
@@ -1873,8 +1875,8 @@ extern "C" bool VmmMapujStroneWspoldzielona(
     const uint64_t va = reinterpret_cast<uint64_t>(adres_wirtualny);
     const uint64_t pa = reinterpret_cast<uint64_t>(adres_fizyczny);
     if (sprawdz_mapowanie(aktualne, va).obecna) return false;
-    uint32_t flagi = VMM_FLAGA_OBECNA | VMM_FLAGA_USER |
-                     VMM_FLAGA_WSPOLDZIELONA;
+    uint64_t flagi = VMM_FLAGA_OBECNA | VMM_FLAGA_USER |
+                     VMM_FLAGA_WSPOLDZIELONA | VMM_FLAGA_NX;
     if (zapis) flagi |= VMM_FLAGA_ZAPIS;
     return mapuj_strone_wewnetrznie(aktualne, va, pa, flagi);
 }

@@ -1,0 +1,15 @@
+Screenshot: browser-launch-menu
+Screenshot: browser-open
+Traceback (most recent call last):
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/test_husarz_qemu.py", line 1832, in <module>
+    bridge(int(sys.argv[2]))
+    ^^^^^^
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/test_husarz_qemu.py", line 785, in main
+    if args.font_resources_only:
+        ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/bsf_resource_qemu_cases.py", line 8, in run_resource
+    c['launch_start']('ustawienia');c['wait'](o.pid,'native Settings process',180)
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/test_husarz_qemu.py", line 260, in wait
+    raise TimeoutError(label)
+TimeoutError: native Settings process

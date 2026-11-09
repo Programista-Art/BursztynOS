@@ -106,7 +106,7 @@ class Qmp:
     def screenshot(self, path): self.call('screendump', {'filename':str(path),'format':'png'})
 
 class Guest:
-    def __init__(self, directory, target, sentinel, iso=None, usb=False, visible=False):
+    def __init__(self, directory, target, sentinel, iso=None, usb=False, visible=False, virtio_media=False):
         self.dir=directory;directory.mkdir()
         self.log=directory/'serial.log'
         self.qmp_path=Path('/tmp')/f'bursztyn-inst-{os.getpid()}-{directory.name}.sock'
@@ -129,7 +129,11 @@ class Guest:
         shutil.copyfile(ovmf,guest_ovmf)
         args+=['-drive',f'if=pflash,format=raw,file={guest_ovmf}']
         if iso:
-            if usb:
+            if virtio_media:
+                if usb: raise ValueError('Choose one installation media backend')
+                args+=['-drive',f'if=none,id=media,format=raw,readonly=on,file={iso}',
+                       '-device','virtio-blk-pci,drive=media,disable-legacy=on,bootindex=1']
+            elif usb:
                 args+=['-device','qemu-xhci,id=xhci','-drive',f'if=none,id=media,format=raw,readonly=on,file={iso}',
                        '-device','usb-storage,drive=media,bus=xhci.0,bootindex=1']
             else:

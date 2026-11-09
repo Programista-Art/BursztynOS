@@ -457,7 +457,8 @@ inline BurV2KodBledu bur_v2_waliduj_naglowek_kod(
             reloc_koniec > rozmiar_pliku) {
             return BUR_V2_BLAD_TABLICA_RELOKACJI;
         }
-    } else if (n.reloc_rozmiar_wpisu != 0 && n.reloc_rozmiar_wpisu != sizeof(BurV2Relokacja)) {
+    } else if ((n.reloc_rozmiar_wpisu != 0 && n.reloc_rozmiar_wpisu != sizeof(BurV2Relokacja)) ||
+               n.reloc_przesuniecie > rozmiar_pliku) {
         return BUR_V2_BLAD_TABLICA_RELOKACJI;
     }
 

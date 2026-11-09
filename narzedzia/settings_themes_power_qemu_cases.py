@@ -5,7 +5,7 @@ import struct
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 
-def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel_sha,iso_sha):
+def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel_sha,iso_sha,q=None):
     from power_png_qemu_observer import PowerObserver
     power_observer=PowerObserver(hmp,symbol)
     power_samples=[]
@@ -52,7 +52,7 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
         wait(lambda:observer.visible(target),'native Themes viewport visible',90)
         settle(250)
         screenshot('settings-themes')
-    def start_power(name,hover=False):
+    def start_power(name,hover=False,expected_preview=None):
         click(28,700);wait(popup,'Start open',90);settle()
         if hover:
             # Fixed lower section in the default 1280x720, 100%, Sans 16 release.
@@ -61,13 +61,28 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
             wait(power_observer.opened,'300 ms hover opens power popup',90);settle(80)
         else:
             key('tab');key('spc');wait(power_observer.opened,'keyboard power popup',90);settle()
-        assert popup();im=screenshot(name)
-        color=struct.unpack('<I',read(theme_address+16,4))[0]
-        rgb=((color>>16)&255,(color>>8)&255,color&255)
-        assert im.getpixel((15,500))==rgb,('Start theme background',name,rgb,im.getpixel((15,500)))
-        bounds=power_observer.geometry()['popup'];sample=(bounds[0]+4,bounds[1]+15)
-        assert im.getpixel(sample)==rgb,('power popup theme background',name,rgb,im.getpixel(sample))
-        power_samples.append(power_observer.verify(im))
+        assert popup()
+        observed=[]
+        def power_pixels_ready():
+            q.call('stop')
+            try:
+                im=screenshot('theme-power-ready-probe',resume=False)
+                if expected_preview is not None:assert preview() and theme()==expected_preview
+                color=struct.unpack('<I',read(theme_address+16,4))[0]
+                rgb=((color>>16)&255,(color>>8)&255,color&255)
+                assert im.getpixel((15,500))==rgb,('Start theme background',name,rgb,im.getpixel((15,500)))
+                bounds=power_observer.geometry()['popup'];sample=(bounds[0]+4,bounds[1]+15)
+                assert im.getpixel(sample)==rgb,('power popup theme background',name,rgb,im.getpixel(sample))
+                result=power_observer.verify(im)
+                observed[:]=[(im,result)]
+                return True
+            except AssertionError as error:
+                (out/'theme-power-failure.json').write_text(json.dumps(dict(reason=str(error),theme=theme(),preview=preview(),ticks=ticks()),indent=2)+'\n')
+                return False
+            finally:q.call('cont')
+        wait(power_pixels_ready,'complete themed power popup pixels',90,interval=.3)
+        im,result=observed[0];im.save(out/(name+'.png'))
+        power_samples.append(result)
         if hover:
             button=power_observer.geometry()['button'];bounds=power_observer.geometry()['popup']
             move(button[0]+button[2]//2,button[1]-4)
@@ -99,6 +114,7 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
     # No-result text occupies the first app row and clears when matches return.
     click(28,700);wait(popup,'Start for empty search',90)
     for char in 'zzzzzz':key(char)
+    wait(lambda:power_observer.query()==b'zzzzzz','empty-search input consumed',30)
     settle();empty_image=screenshot('start-empty-search')
     start_layout=json.loads((ROOT/'.bsf-test/start-polish-layout-16.json').read_text())
     x,y,width,height=start_layout['results'];row=start_layout['row']
@@ -106,7 +122,10 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
     assert len(set(empty_image.crop(top_box).getdata()))>2,'empty message must render at the top'
     middle=empty_image.crop((x+8,y+height//2,x+width-8,y+height//2+row))
     assert len(set(middle.getdata()))==1,'empty message must not be vertically centered'
-    key('ctrl','a');key('backspace');settle();restored=screenshot('start-search-restored')
+    key('ctrl','a');key('backspace')
+    wait(lambda:power_observer.query()==b'','Start search cleared',30)
+    wait(lambda:screenshot('start-search-restored-probe').crop(top_box).tobytes()!=empty_image.crop(top_box).tobytes(),'matching rows submitted after search clears',90)
+    restored=screenshot('start-search-restored')
     assert restored.crop(top_box).tobytes()!=empty_image.crop(top_box).tobytes(),'matching rows must replace the message'
     key('esc');wait(lambda:not popup(),'Start dismissed after Escape',90)
     # On-disk registration order; list de-duplicates the compatibility aliases.
@@ -116,7 +135,7 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
         print("Theme acceptance:",target,flush=True)
         select_theme(i)
         hit(geometry['themes_preview']);wait(lambda:preview() and theme()==target,'preview '+target,120,interval=.05)
-        screenshot('preview-'+target);start_power('power-'+target)
+        screenshot('preview-'+target);start_power('power-'+target,expected_preview=target)
         wait(lambda:not preview(),'kernel 15-second rollback '+target,180,interval=.1)
         assert theme()==original
         color=struct.unpack('<I',read(theme_address+16,4))[0];rgb=((color>>16)&255,(color>>8)&255,color&255)

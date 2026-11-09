@@ -1,0 +1,695 @@
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -I. -Os -ffunction-sections -fdata-sections -c programy/test/test.cpp -o test_tmp.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -c ekran_format.cpp -o ekran_format_ring3.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -Os -ffunction-sections -fdata-sections -c programy/demo_ui/demo_ui.cpp -o demo_ui_tmp.o
+[AKTUALIZACJA BUILD] Klucz aktualizacji RELEASE (odcisk: aceba052f9096313...)
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -Os -ffunction-sections -fdata-sections -c programy/kontrolki2/kontrolki2.cpp -o kontrolki2_tmp.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -I. -Os -ffunction-sections -fdata-sections -c programy/kontrolki3/kontrolki3.cpp -o kontrolki3tmp.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -I. -Os -ffunction-sections -fdata-sections -c programy/kontrolki4/kontrolki4.cpp -o kontrolki4tmp.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -c programy/repro/repro.cpp -o repro_tmp.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -c gry/snake/snake.cpp -o snake_tmp.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -Os -c programy/przegladarka-obrazow/przegladarka-obrazow.cpp -o przegladarka_obrazow_tmp.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -Os -c programy/aktualizacje/aktualizacje.cpp -o aktualizacje_tmp.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -Os -fstack-usage -c programy/test_dzwieku/test_dzwieku.cpp -o test_dzwieku_tmp.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -Os -fstack-usage -c programy/diagnostyka/diagnostyka.cpp -o diagnostyka_tmp.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -Os -fstack-usage -c programy/ustawienia/ustawienia.cpp -o ustawienia_tmp.o
+programy/ustawienia/ustawienia.cpp: In lambda function:
+programy/ustawienia/ustawienia.cpp:156:7: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  156 |       if(result==BSF::InstallResult::Ok)self->reload_fonts();self->status->ustaw_tekst(message);self->przelicz_uklad();self->preview->uniewaznij();
+      |       ^~
+programy/ustawienia/ustawienia.cpp:156:62: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  156 |       if(result==BSF::InstallResult::Ok)self->reload_fonts();self->status->ustaw_tekst(message);self->przelicz_uklad();self->preview->uniewaznij();
+      |                                                              ^~~~
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -c programy/instalator/instalator.cpp -o instalator_tmp.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -Os -ffunction-sections -fdata-sections -c bursztyn_gui.cpp -o bursztyn_gui_base.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -msse2 -mfpmath=sse -mno-avx -Os -fstack-usage -c bsf/bsf.cpp -o bsf_core.o
+In file included from bsf/bsf.cpp:62:
+bsf/vendor/stb_truetype.h: In function ‘int stbtt__solve_cubic(float, float, float, float*)’:
+bsf/vendor/stb_truetype.h:4561:13: warning: unused variable ‘v’ [-Wunused-variable]
+ 4561 |       float v = (float) STBTT_acos(-STBTT_sqrt(-27/p3) * q / 2) / 3; // p3 must be negative, since d is negative
+      |             ^
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Os -fstack-usage -c bsf/runtime.cpp -o bsf_runtime.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -Os -c bsf/bitmap.cpp -o bsf_bitmap.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -fno-stack-protector -Os -ffunction-sections -fdata-sections -c ring3_ssp.cpp -o ring3_ssp.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -c programy/ekran/ekran.cpp -o ekran_tmp.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -I. -Os -ffunction-sections -fdata-sections -c programy/tapety/tapety.cpp -o tapety_tmp.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -Os -ffunction-sections -fdata-sections -c narzedzia/tapety-btp/tapetybtp.cpp -o btp_ring3.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Os -ffunction-sections -fdata-sections -Wno-unused-function -Wno-unused-parameter -c obrazy/dekoder_obrazu.cpp -o image_ring3.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -msse2 -mfpmath=sse -mno-avx -fcoroutines -fcheck-new -DHUSARZ_DEBUG_RESOURCES=0 -DHUSARZ_PERF=0 -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c programy/przegladarka.cpp -o przegladarka_tmp.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -msse2 -mfpmath=sse -mno-avx -fcoroutines -fcheck-new -DHUSARZ_DEBUG_RESOURCES=0 -DHUSARZ_PERF=0 -DHUSARZ_WORKER_ONLY=1 -Wno-unused-function -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c programy/przegladarka.cpp -o husarz_worker_tmp.o
+In file included from programy/husarz/paint.h:2,
+                 from programy/husarz/pipeline.h:2,
+                 from programy/przegladarka.cpp:33:
+programy/husarz/layout.h: In function ‘Husarz::TextCluster Husarz::text_cluster(const char*, size_t, size_t, Metrics, const Style&, bool)’:
+programy/husarz/layout.h:51:17: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+   51 |                 for(unsigned j=0;j<k;++j)changed[n++]=b[j];p+=z;
+      |                 ^~~
+programy/husarz/layout.h:51:60: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+   51 |                 for(unsigned j=0;j<k;++j)changed[n++]=b[j];p+=z;
+      |                                                            ^
+In file included from programy/husarz/js_core.h:4,
+                 from programy/husarz/js_dom.h:2,
+                 from programy/przegladarka.cpp:39:
+programy/husarz/js_number.h: In function ‘Husarz::Js::Numeric Husarz::Js::numeric_parse(const char*, unsigned int, bool&)’:
+programy/husarz/js_number.h:51:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   51 |         if(dot)--exponent;if(c!='0')significant=true;
+      |         ^~
+programy/husarz/js_number.h:51:27: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   51 |         if(dot)--exponent;if(c!='0')significant=true;
+      |                           ^~
+programy/husarz/js_number.h:56:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   56 |     if(i!=n)return Numeric::nan();ok=true;double v=double(mantissa);
+      |     ^~
+programy/husarz/js_number.h:56:35: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   56 |     if(i!=n)return Numeric::nan();ok=true;double v=double(mantissa);
+      |                                   ^~
+programy/husarz/js_number.h:58:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   58 |     if(exponent>400)return neg?-Numeric::infinity():Numeric::infinity();if(exponent< -400)return neg?-0.0:0.0;
+      |     ^~
+programy/husarz/js_number.h:58:73: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   58 |     if(exponent>400)return neg?-Numeric::infinity():Numeric::infinity();if(exponent< -400)return neg?-0.0:0.0;
+      |                                                                         ^~
+programy/husarz/js_core.h: In member function ‘Husarz::Work Husarz::Js::Runtime::complete(Husarz::Js::Completion)’:
+programy/husarz/js_core.h:110:13: warning: this ‘while’ clause does not guard... [-Wmisleading-indentation]
+  110 |             while(scope!=h.scope&&scope)co_await leave_scope();scope=h.scope;sp=h.sp;
+      |             ^~~~~
+programy/husarz/js_core.h:110:64: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘while’
+  110 |             while(scope!=h.scope&&scope)co_await leave_scope();scope=h.scope;sp=h.sp;
+      |                                                                ^~~~~
+programy/husarz/js_core.h: In member function ‘unsigned int Husarz::Js::Runtime::string(const char*, size_t)’:
+programy/husarz/js_core.h:149:9: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+  149 |         for(unsigned i=0;i<n;++i)bytes[bytes_used++]=s[i];bytes[bytes_used++]=0;return id;
+      |         ^~~
+programy/husarz/js_core.h:149:59: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+  149 |         for(unsigned i=0;i<n;++i)bytes[bytes_used++]=s[i];bytes[bytes_used++]=0;return id;
+      |                                                           ^~~~~
+programy/husarz/js_core.h: In member function ‘Husarz::Work Husarz::Js::Lexer::scan()’:
+programy/husarz/js_core.h:343:17: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  343 |                 if(!closed)r.fail(Error::Syntax);t.kind=StringToken;t.text=uint16_t(r.string(scratch,n));
+      |                 ^~
+programy/husarz/js_core.h:343:50: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  343 |                 if(!closed)r.fail(Error::Syntax);t.kind=StringToken;t.text=uint16_t(r.string(scratch,n));
+      |                                                  ^
+In file included from programy/husarz/paint.h:2,
+                 from programy/husarz/pipeline.h:2,
+                 from programy/przegladarka.cpp:33:
+programy/husarz/layout.h: In function ‘Husarz::TextCluster Husarz::text_cluster(const char*, size_t, size_t, Metrics, const Style&, bool)’:
+programy/husarz/layout.h:51:17: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+   51 |                 for(unsigned j=0;j<k;++j)changed[n++]=b[j];p+=z;
+      |                 ^~~
+programy/husarz/layout.h:51:60: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+   51 |                 for(unsigned j=0;j<k;++j)changed[n++]=b[j];p+=z;
+      |                                                            ^
+programy/husarz/js_core.h: In member function ‘Husarz::Work Husarz::Js::Compiler::statement()’:
+programy/husarz/js_core.h:479:13: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  479 |             if(!caught&&!finalizer)r.fail(Error::Syntax);r.handler_code[id].end=uint16_t(r.code_count);
+      |             ^~
+programy/husarz/js_core.h:479:58: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  479 |             if(!caught&&!finalizer)r.fail(Error::Syntax);r.handler_code[id].end=uint16_t(r.code_count);
+      |                                                          ^
+programy/husarz/js_core.h: In member function ‘virtual Husarz::Work Husarz::Js::Runtime::property(Husarz::Js::Value, Husarz::Js::Value, bool, Husarz::Js::Value&)’:
+programy/husarz/js_core.h:561:144: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  561 |         unsigned id=base.ref==ObjectCtor?(is(name,"create")?ObjectCreate:is(name,"getPrototypeOf")?ObjectGetPrototype:is(name,"setPrototypeOf")?ObjectSetPrototype:0):base.ref==NumberCtor?(is(name,"isNaN")?NumberNaN:is(name,"isFinite")?NumberFinite:0):0;
+      |                                                                                                                       ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~
+programy/husarz/js_core.h:561:235: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  561 |         unsigned id=base.ref==ObjectCtor?(is(name,"create")?ObjectCreate:is(name,"getPrototypeOf")?ObjectGetPrototype:is(name,"setPrototypeOf")?ObjectSetPrototype:0):base.ref==NumberCtor?(is(name,"isNaN")?NumberNaN:is(name,"isFinite")?NumberFinite:0):0;
+      |                                                                                                                                                                                                                        ~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~
+programy/husarz/js_core.h: In member function ‘virtual Husarz::Work Husarz::Js::Runtime::native(Husarz::Js::Value, Husarz::Js::Value*, unsigned int, Husarz::Js::Value&)’:
+programy/husarz/js_core.h:610:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  610 |         if(error!=Error::None)co_return;auto &o=objects[out.ref];if(fn.ref==ErrorCtor)o.props[0].value=Value::handle(Kind::String,string("Error",5));if(count){unsigned message=0;co_await convert_string(args[0],message);o.props[1].value=Value::handle(Kind::String,message);}co_return;
+      |         ^~
+programy/husarz/js_core.h:610:41: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  610 |         if(error!=Error::None)co_return;auto &o=objects[out.ref];if(fn.ref==ErrorCtor)o.props[0].value=Value::handle(Kind::String,string("Error",5));if(count){unsigned message=0;co_await convert_string(args[0],message);o.props[1].value=Value::handle(Kind::String,message);}co_return;
+      |                                         ^~~~
+programy/husarz/js_core.h:644:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  644 |         if(a<0)a=0;if(b<a)b=a;if(a>StringLimit || a!=a || b!=b){out=Value::handle(Kind::String,string("",0));co_return;}
+      |         ^~
+programy/husarz/js_core.h:644:20: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  644 |         if(a<0)a=0;if(b<a)b=a;if(a>StringLimit || a!=a || b!=b){out=Value::handle(Kind::String,string("",0));co_return;}
+      |                    ^~
+programy/husarz/js_core.h:647:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  647 |         if(end<start)end=start;out=Value::handle(Kind::String,string(text(receiver.ref)+start,end-start));co_return;
+      |         ^~
+programy/husarz/js_core.h:647:32: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  647 |         if(end<start)end=start;out=Value::handle(Kind::String,string(text(receiver.ref)+start,end-start));co_return;
+      |                                ^~~
+In file included from programy/husarz/js_core.h:746:
+programy/husarz/js_json.h: In member function ‘Husarz::Work Husarz::Js::JsonCodec::stringify(Husarz::Js::Value, unsigned int)’:
+programy/husarz/js_json.h:59:9: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+   59 |         for(unsigned i=0;i<depth;++i)if(r.same(path[i],v)){r.fail(Error::Type);co_return;}path[depth]=v;
+      |         ^~~
+programy/husarz/js_json.h:59:91: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+   59 |         for(unsigned i=0;i<depth;++i)if(r.same(path[i],v)){r.fail(Error::Type);co_return;}path[depth]=v;
+      |                                                                                           ^~~~
+programy/husarz/js_json.h:64:13: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   64 |             if(written++)put(',');if(!array){co_await escape(r.objects[v.ref].props[i].name);put(':');}co_await stringify(child,depth+1);if(r.error!=Error::None)co_return;
+      |             ^~
+programy/husarz/js_json.h:64:35: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   64 |             if(written++)put(',');if(!array){co_await escape(r.objects[v.ref].props[i].name);put(':');}co_await stringify(child,depth+1);if(r.error!=Error::None)co_return;
+      |                                   ^~
+In file included from programy/husarz/js_dom.h:6:
+programy/husarz/storage.h: In member function ‘bool Husarz::StorageNamespace::set(const char*, unsigned int, const char*, unsigned int)’:
+programy/husarz/storage.h:10:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   10 |         if(ks>StorageKey||vs>StorageValue||revision==UINT32_MAX)return false;int index=find(key,ks);unsigned previous=index<0?0:entries[index].key_size+entries[index].value_size;
+      |         ^~
+programy/husarz/storage.h:10:78: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   10 |         if(ks>StorageKey||vs>StorageValue||revision==UINT32_MAX)return false;int index=find(key,ks);unsigned previous=index<0?0:entries[index].key_size+entries[index].value_size;
+      |                                                                              ^~~
+programy/husarz/storage.h: In function ‘unsigned int Husarz::storage_encode(const StorageNamespace&, uint8_t*, unsigned int)’:
+programy/husarz/storage.h:21:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   21 |     if(cap<StorageDiskCapacity||!s.origin.valid||s.count>StorageEntries)return 0;char origin[280];unsigned os=origin_key(s.origin,origin),pos=24;
+      |     ^~
+programy/husarz/storage.h:21:82: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   21 |     if(cap<StorageDiskCapacity||!s.origin.valid||s.count>StorageEntries)return 0;char origin[280];unsigned os=origin_key(s.origin,origin),pos=24;
+      |                                                                                  ^~~~
+programy/husarz/storage.h: In member function ‘Husarz::StorageNamespace* Husarz::BrowserStorage::get(const Husarz::Origin&, uint32_t)’:
+programy/husarz/storage.h:60:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   60 |         if(!origin.valid)return nullptr;auto **slots=tab?sessions:local;unsigned limit=tab?StorageSessions:StorageOrigins;
+      |         ^~
+programy/husarz/storage.h:60:41: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   60 |         if(!origin.valid)return nullptr;auto **slots=tab?sessions:local;unsigned limit=tab?StorageSessions:StorageOrigins;
+      |                                         ^~~~
+programy/husarz/storage.h:62:9: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+   62 |         for(unsigned i=0;i<limit;++i)if(!slots[i]){auto *s=new StorageNamespace;if(!s)return nullptr;s->origin=origin;s->tab=tab;s->loaded=tab!=0;s->saved=1;slots[i]=s;return s;}return nullptr;
+      |         ^~~
+programy/husarz/storage.h:62:179: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+   62 |         for(unsigned i=0;i<limit;++i)if(!slots[i]){auto *s=new StorageNamespace;if(!s)return nullptr;s->origin=origin;s->tab=tab;s->loaded=tab!=0;s->saved=1;slots[i]=s;return s;}return nullptr;
+      |                                                                                                                                                                                   ^~~~~~
+programy/husarz/js_dom.h: In member function ‘unsigned int Husarz::Js::BrowserRuntime::resolve(unsigned int) const’:
+programy/husarz/js_dom.h:44:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   44 |         if(!alive()||!identity||identity>65535)return 0;return ScriptDom(*document).by_identity(uint16_t(identity)).id;
+      |         ^~
+programy/husarz/js_dom.h:44:57: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   44 |         if(!alive()||!identity||identity>65535)return 0;return ScriptDom(*document).by_identity(uint16_t(identity)).id;
+      |                                                         ^~~~~~
+programy/husarz/js_dom.h: In member function ‘bool Husarz::Js::BrowserRuntime::link(Husarz::Js::TreeMutation&, unsigned int, unsigned int, unsigned int)’:
+programy/husarz/js_dom.h:105:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  105 |         if(before==child)return true;unlink(m,child);auto &n=m.nodes[child];auto &p=m.nodes[parent];
+      |         ^~
+programy/husarz/js_dom.h:105:38: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  105 |         if(before==child)return true;unlink(m,child);auto &n=m.nodes[child];auto &p=m.nodes[parent];
+      |                                      ^~~~~~
+programy/husarz/js_dom.h: In member function ‘virtual Husarz::Work Husarz::Js::BrowserRuntime::property(Husarz::Js::Value, Husarz::Js::Value, bool, Husarz::Js::Value&)’:
+programy/husarz/js_dom.h:179:233: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  179 |         if(is(key.ref,"length"))value=Value::num(s->count);else {unsigned id=is(key.ref,"key")?StorageKeyAt:is(key.ref,"getItem")?StorageGet:is(key.ref,"setItem")?StorageSet:is(key.ref,"removeItem")?StorageRemove:is(key.ref,"clear")?StorageClear:0;value=id?method(id,base):Value{};}co_return;
+      |                                                                                                                                                                                                                      ~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~
+programy/husarz/js_dom.h:201:13: warning: this ‘else’ clause does not guard... [-Wmisleading-indentation]
+  201 |             else value=Value::handle(Kind::String,string(location,length(location,sizeof(location))));co_return;}
+      |             ^~~~
+programy/husarz/js_dom.h:201:103: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘else’
+  201 |             else value=Value::handle(Kind::String,string(location,length(location,sizeof(location))));co_return;}
+      |                                                                                                       ^~~~~~~~~
+In file included from programy/husarz/js_core.h:4,
+                 from programy/husarz/js_dom.h:2,
+                 from programy/przegladarka.cpp:39:
+programy/husarz/js_number.h: In function ‘Husarz::Js::Numeric Husarz::Js::numeric_parse(const char*, unsigned int, bool&)’:
+programy/husarz/js_number.h:51:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   51 |         if(dot)--exponent;if(c!='0')significant=true;
+      |         ^~
+programy/husarz/js_number.h:51:27: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   51 |         if(dot)--exponent;if(c!='0')significant=true;
+      |                           ^~
+programy/husarz/js_number.h:56:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   56 |     if(i!=n)return Numeric::nan();ok=true;double v=double(mantissa);
+      |     ^~
+programy/husarz/js_number.h:56:35: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   56 |     if(i!=n)return Numeric::nan();ok=true;double v=double(mantissa);
+      |                                   ^~
+programy/husarz/js_number.h:58:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   58 |     if(exponent>400)return neg?-Numeric::infinity():Numeric::infinity();if(exponent< -400)return neg?-0.0:0.0;
+      |     ^~
+programy/husarz/js_number.h:58:73: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   58 |     if(exponent>400)return neg?-Numeric::infinity():Numeric::infinity();if(exponent< -400)return neg?-0.0:0.0;
+      |                                                                         ^~
+programy/husarz/js_dom.h: In member function ‘virtual Husarz::Work Husarz::Js::BrowserRuntime::native(Husarz::Js::Value, Husarz::Js::Value*, unsigned int, Husarz::Js::Value&)’:
+programy/husarz/js_dom.h:318:9: warning: this ‘else’ clause does not guard... [-Wmisleading-indentation]
+  318 |         else if(!s->set(text(key),size(key),text(value),size(value)))fail(Error::Range);co_return;
+      |         ^~~~
+programy/husarz/js_dom.h:318:89: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘else’
+  318 |         else if(!s->set(text(key),size(key),text(value),size(value)))fail(Error::Range);co_return;
+      |                                                                                         ^~~~~~~~~
+programy/husarz/js_dom.h:336:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  336 |         if(console_lines<64)++console_lines;co_return;
+      |         ^~
+programy/husarz/js_dom.h:336:45: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  336 |         if(console_lines<64)++console_lines;co_return;
+      |                                             ^~~~~~~~~
+programy/husarz/js_dom.h:345:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  345 |         if(delay!=delay||delay>3600000)delay=3600000;if(delay<10)delay=10;
+      |         ^~
+programy/husarz/js_dom.h:345:54: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  345 |         if(delay!=delay||delay>3600000)delay=3600000;if(delay<10)delay=10;
+      |                                                      ^~
+programy/husarz/js_dom.h:389:9: warning: this ‘else’ clause does not guard... [-Wmisleading-indentation]
+  389 |         else co_await attributes(id,args[0].ref,count==2?args[1].ref:0,fn.ref==RemoveAttribute);co_return;
+      |         ^~~~
+programy/husarz/js_dom.h:389:97: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘else’
+  389 |         else co_await attributes(id,args[0].ref,count==2?args[1].ref:0,fn.ref==RemoveAttribute);co_return;
+      |                                                                                                 ^~~~~~~~~
+programy/husarz/js_core.h: In member function ‘Husarz::Work Husarz::Js::Runtime::complete(Husarz::Js::Completion)’:
+programy/husarz/js_core.h:110:13: warning: this ‘while’ clause does not guard... [-Wmisleading-indentation]
+  110 |             while(scope!=h.scope&&scope)co_await leave_scope();scope=h.scope;sp=h.sp;
+      |             ^~~~~
+programy/husarz/js_core.h:110:64: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘while’
+  110 |             while(scope!=h.scope&&scope)co_await leave_scope();scope=h.scope;sp=h.sp;
+      |                                                                ^~~~~
+programy/husarz/js_dom.h:404:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  404 |         if(!node_arg(args[0],child))co_return;if(count==2&&args[1].kind!=Kind::Null&&!node_arg(args[1],other))co_return;
+      |         ^~
+programy/husarz/js_dom.h:404:47: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  404 |         if(!node_arg(args[0],child))co_return;if(count==2&&args[1].kind!=Kind::Null&&!node_arg(args[1],other))co_return;
+      |                                               ^~
+programy/husarz/js_core.h: In member function ‘unsigned int Husarz::Js::Runtime::string(const char*, size_t)’:
+programy/husarz/js_core.h:149:9: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+  149 |         for(unsigned i=0;i<n;++i)bytes[bytes_used++]=s[i];bytes[bytes_used++]=0;return id;
+      |         ^~~
+programy/husarz/js_core.h:149:59: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+  149 |         for(unsigned i=0;i<n;++i)bytes[bytes_used++]=s[i];bytes[bytes_used++]=0;return id;
+      |                                                           ^~~~~
+programy/husarz/js_core.h: In member function ‘Husarz::Work Husarz::Js::Lexer::scan()’:
+programy/husarz/js_core.h:343:17: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  343 |                 if(!closed)r.fail(Error::Syntax);t.kind=StringToken;t.text=uint16_t(r.string(scratch,n));
+      |                 ^~
+programy/husarz/js_core.h:343:50: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  343 |                 if(!closed)r.fail(Error::Syntax);t.kind=StringToken;t.text=uint16_t(r.string(scratch,n));
+      |                                                  ^
+programy/przegladarka.cpp: In function ‘bool {anonymous}::ustaw_url_z_location(char*, size_t, const char*, const ParsedUrl&)’:
+programy/przegladarka.cpp:2055:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+ 2055 |     if(ok)ok=Husarz::resolve_resource_url(scratch->base,location,cel,pojemnosc);delete scratch;return ok;
+      |     ^~
+programy/przegladarka.cpp:2055:81: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+ 2055 |     if(ok)ok=Husarz::resolve_resource_url(scratch->base,location,cel,pojemnosc);delete scratch;return ok;
+      |                                                                                 ^~~~~~
+programy/husarz/js_core.h: In member function ‘Husarz::Work Husarz::Js::Compiler::statement()’:
+programy/husarz/js_core.h:479:13: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  479 |             if(!caught&&!finalizer)r.fail(Error::Syntax);r.handler_code[id].end=uint16_t(r.code_count);
+      |             ^~
+programy/husarz/js_core.h:479:58: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  479 |             if(!caught&&!finalizer)r.fail(Error::Syntax);r.handler_code[id].end=uint16_t(r.code_count);
+      |                                                          ^
+programy/husarz/js_core.h: In member function ‘virtual Husarz::Work Husarz::Js::Runtime::property(Husarz::Js::Value, Husarz::Js::Value, bool, Husarz::Js::Value&)’:
+programy/husarz/js_core.h:561:144: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  561 |         unsigned id=base.ref==ObjectCtor?(is(name,"create")?ObjectCreate:is(name,"getPrototypeOf")?ObjectGetPrototype:is(name,"setPrototypeOf")?ObjectSetPrototype:0):base.ref==NumberCtor?(is(name,"isNaN")?NumberNaN:is(name,"isFinite")?NumberFinite:0):0;
+      |                                                                                                                       ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~
+programy/husarz/js_core.h:561:235: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  561 |         unsigned id=base.ref==ObjectCtor?(is(name,"create")?ObjectCreate:is(name,"getPrototypeOf")?ObjectGetPrototype:is(name,"setPrototypeOf")?ObjectSetPrototype:0):base.ref==NumberCtor?(is(name,"isNaN")?NumberNaN:is(name,"isFinite")?NumberFinite:0):0;
+      |                                                                                                                                                                                                                        ~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~
+programy/husarz/js_core.h: In member function ‘virtual Husarz::Work Husarz::Js::Runtime::native(Husarz::Js::Value, Husarz::Js::Value*, unsigned int, Husarz::Js::Value&)’:
+programy/husarz/js_core.h:610:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  610 |         if(error!=Error::None)co_return;auto &o=objects[out.ref];if(fn.ref==ErrorCtor)o.props[0].value=Value::handle(Kind::String,string("Error",5));if(count){unsigned message=0;co_await convert_string(args[0],message);o.props[1].value=Value::handle(Kind::String,message);}co_return;
+      |         ^~
+programy/husarz/js_core.h:610:41: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  610 |         if(error!=Error::None)co_return;auto &o=objects[out.ref];if(fn.ref==ErrorCtor)o.props[0].value=Value::handle(Kind::String,string("Error",5));if(count){unsigned message=0;co_await convert_string(args[0],message);o.props[1].value=Value::handle(Kind::String,message);}co_return;
+      |                                         ^~~~
+In file included from programy/przegladarka.cpp:3446:
+programy/husarz/async_runtime.inc: In function ‘Husarz::Work {anonymous}::apply_worker_result_work()’:
+programy/husarz/async_runtime.inc:205:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  205 |         if(task.script>=Husarz::StorageOrigins)co_return;auto *s=Husarz::browser_storage.local[task.script];if(!s)co_return;auto &p=*state.payload;
+      |         ^~
+programy/husarz/async_runtime.inc:205:58: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  205 |         if(task.script>=Husarz::StorageOrigins)co_return;auto *s=Husarz::browser_storage.local[task.script];if(!s)co_return;auto &p=*state.payload;
+      |                                                          ^~~~
+programy/husarz/js_core.h:644:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  644 |         if(a<0)a=0;if(b<a)b=a;if(a>StringLimit || a!=a || b!=b){out=Value::handle(Kind::String,string("",0));co_return;}
+      |         ^~
+programy/husarz/js_core.h:644:20: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  644 |         if(a<0)a=0;if(b<a)b=a;if(a>StringLimit || a!=a || b!=b){out=Value::handle(Kind::String,string("",0));co_return;}
+      |                    ^~
+programy/husarz/js_core.h:647:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  647 |         if(end<start)end=start;out=Value::handle(Kind::String,string(text(receiver.ref)+start,end-start));co_return;
+      |         ^~
+programy/husarz/js_core.h:647:32: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  647 |         if(end<start)end=start;out=Value::handle(Kind::String,string(text(receiver.ref)+start,end-start));co_return;
+      |                                ^~~
+In file included from programy/przegladarka.cpp:3448:
+programy/husarz/script_runtime.inc: In member function ‘void {anonymous}::WidokStrony::script_default_click(uint16_t, int, int, bool)’:
+programy/husarz/script_runtime.inc:33:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   33 |     if(!liczba_zakladek)return;auto &z=zakladki[aktywna_zakladka];if(!z.dokument)return;auto &d=*z.dokument;if(!id||id>=d.node_count||d.nodes[id].detached)return;
+      |     ^~
+programy/husarz/script_runtime.inc:33:32: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   33 |     if(!liczba_zakladek)return;auto &z=zakladki[aktywna_zakladka];if(!z.dokument)return;auto &d=*z.dokument;if(!id||id>=d.node_count||d.nodes[id].detached)return;
+      |                                ^~~~
+programy/husarz/script_runtime.inc:38:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   38 |         if(d.has_attr(id,"disabled"))return;d.focused_control=id;
+      |         ^~
+programy/husarz/script_runtime.inc:38:45: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   38 |         if(d.has_attr(id,"disabled"))return;d.focused_control=id;
+      |                                             ^
+programy/husarz/script_runtime.inc:51:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   51 |         if(ready)g_husarz.przejdz_do_url(scratch->url);delete scratch;break;
+      |         ^~
+programy/husarz/script_runtime.inc:51:56: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   51 |         if(ready)g_husarz.przejdz_do_url(scratch->url);delete scratch;break;
+      |                                                        ^~~~~~
+programy/husarz/script_runtime.inc: In function ‘void {anonymous}::browser_script_step(uint64_t)’:
+programy/husarz/script_runtime.inc:106:174: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  106 |                 else if(action==4){ZdarzenieKlawiatury key;key.kod_klawisza=event.native_key;key.kod_skanu=event.native_key|KLAWISZ_FIZYCZNY_GUI;key.modyfikatory=(event.ctrl?BWS_MOD_CTRL:0)|(event.shift?BWS_MOD_SHIFT:0)|(event.alt?BWS_MOD_ALT:0);browser_key_bypass=true;g_husarz.widok_strony->obsluz_wcisniecie_klawisza(key);browser_key_bypass=false;}
+      |                                                                                                                                                                    ~~~~~~~~~~^~~~~~~~~~~~~~~
+programy/husarz/script_runtime.inc:106:203: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  106 |                 else if(action==4){ZdarzenieKlawiatury key;key.kod_klawisza=event.native_key;key.kod_skanu=event.native_key|KLAWISZ_FIZYCZNY_GUI;key.modyfikatory=(event.ctrl?BWS_MOD_CTRL:0)|(event.shift?BWS_MOD_SHIFT:0)|(event.alt?BWS_MOD_ALT:0);browser_key_bypass=true;g_husarz.widok_strony->obsluz_wcisniecie_klawisza(key);browser_key_bypass=false;}
+      |                                                                                                                                                                                                ~~~~~~~~~~~^~~~~~~~~~~~~~~~
+programy/husarz/script_runtime.inc:106:231: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  106 |                 else if(action==4){ZdarzenieKlawiatury key;key.kod_klawisza=event.native_key;key.kod_skanu=event.native_key|KLAWISZ_FIZYCZNY_GUI;key.modyfikatory=(event.ctrl?BWS_MOD_CTRL:0)|(event.shift?BWS_MOD_SHIFT:0)|(event.alt?BWS_MOD_ALT:0);browser_key_bypass=true;g_husarz.widok_strony->obsluz_wcisniecie_klawisza(key);browser_key_bypass=false;}
+      |                                                                                                                                                                                                                              ~~~~~~~~~^~~~~~~~~~~~~~
+programy/husarz/script_runtime.inc:114:17: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  114 |                 if(valid&&int(i)==aktywna_zakladka)g_husarz.przejdz_do_url(scratch->url);delete scratch;}
+      |                 ^~
+programy/husarz/script_runtime.inc:114:90: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  114 |                 if(valid&&int(i)==aktywna_zakladka)g_husarz.przejdz_do_url(scratch->url);delete scratch;}
+      |                                                                                          ^~~~~~
+programy/husarz/script_runtime.inc: In function ‘void {anonymous}::browser_flush_storage()’:
+programy/husarz/script_runtime.inc:128:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  128 |         if(!pending)break;browser_storage_tick();async_tick();
+      |         ^~
+programy/husarz/script_runtime.inc:128:27: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  128 |         if(!pending)break;browser_storage_tick();async_tick();
+      |                           ^~~~~~~~~~~~~~~~~~~~
+In file included from programy/husarz/js_core.h:746:
+programy/husarz/js_json.h: In member function ‘Husarz::Work Husarz::Js::JsonCodec::stringify(Husarz::Js::Value, unsigned int)’:
+programy/husarz/js_json.h:59:9: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+   59 |         for(unsigned i=0;i<depth;++i)if(r.same(path[i],v)){r.fail(Error::Type);co_return;}path[depth]=v;
+      |         ^~~
+programy/husarz/js_json.h:59:91: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+   59 |         for(unsigned i=0;i<depth;++i)if(r.same(path[i],v)){r.fail(Error::Type);co_return;}path[depth]=v;
+      |                                                                                           ^~~~
+programy/husarz/js_json.h:64:13: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   64 |             if(written++)put(',');if(!array){co_await escape(r.objects[v.ref].props[i].name);put(':');}co_await stringify(child,depth+1);if(r.error!=Error::None)co_return;
+      |             ^~
+programy/husarz/js_json.h:64:35: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   64 |             if(written++)put(',');if(!array){co_await escape(r.objects[v.ref].props[i].name);put(':');}co_await stringify(child,depth+1);if(r.error!=Error::None)co_return;
+      |                                   ^~
+In file included from programy/husarz/js_dom.h:6:
+programy/husarz/storage.h: In member function ‘bool Husarz::StorageNamespace::set(const char*, unsigned int, const char*, unsigned int)’:
+programy/husarz/storage.h:10:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   10 |         if(ks>StorageKey||vs>StorageValue||revision==UINT32_MAX)return false;int index=find(key,ks);unsigned previous=index<0?0:entries[index].key_size+entries[index].value_size;
+      |         ^~
+programy/husarz/storage.h:10:78: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   10 |         if(ks>StorageKey||vs>StorageValue||revision==UINT32_MAX)return false;int index=find(key,ks);unsigned previous=index<0?0:entries[index].key_size+entries[index].value_size;
+      |                                                                              ^~~
+programy/husarz/storage.h: In function ‘unsigned int Husarz::storage_encode(const StorageNamespace&, uint8_t*, unsigned int)’:
+programy/husarz/storage.h:21:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   21 |     if(cap<StorageDiskCapacity||!s.origin.valid||s.count>StorageEntries)return 0;char origin[280];unsigned os=origin_key(s.origin,origin),pos=24;
+      |     ^~
+programy/husarz/storage.h:21:82: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   21 |     if(cap<StorageDiskCapacity||!s.origin.valid||s.count>StorageEntries)return 0;char origin[280];unsigned os=origin_key(s.origin,origin),pos=24;
+      |                                                                                  ^~~~
+programy/husarz/storage.h: In member function ‘Husarz::StorageNamespace* Husarz::BrowserStorage::get(const Husarz::Origin&, uint32_t)’:
+programy/husarz/storage.h:60:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   60 |         if(!origin.valid)return nullptr;auto **slots=tab?sessions:local;unsigned limit=tab?StorageSessions:StorageOrigins;
+      |         ^~
+programy/husarz/storage.h:60:41: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   60 |         if(!origin.valid)return nullptr;auto **slots=tab?sessions:local;unsigned limit=tab?StorageSessions:StorageOrigins;
+      |                                         ^~~~
+programy/husarz/storage.h:62:9: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+   62 |         for(unsigned i=0;i<limit;++i)if(!slots[i]){auto *s=new StorageNamespace;if(!s)return nullptr;s->origin=origin;s->tab=tab;s->loaded=tab!=0;s->saved=1;slots[i]=s;return s;}return nullptr;
+      |         ^~~
+programy/husarz/storage.h:62:179: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+   62 |         for(unsigned i=0;i<limit;++i)if(!slots[i]){auto *s=new StorageNamespace;if(!s)return nullptr;s->origin=origin;s->tab=tab;s->loaded=tab!=0;s->saved=1;slots[i]=s;return s;}return nullptr;
+      |                                                                                                                                                                                   ^~~~~~
+programy/husarz/js_dom.h: In member function ‘unsigned int Husarz::Js::BrowserRuntime::resolve(unsigned int) const’:
+programy/husarz/js_dom.h:44:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   44 |         if(!alive()||!identity||identity>65535)return 0;return ScriptDom(*document).by_identity(uint16_t(identity)).id;
+      |         ^~
+programy/husarz/js_dom.h:44:57: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   44 |         if(!alive()||!identity||identity>65535)return 0;return ScriptDom(*document).by_identity(uint16_t(identity)).id;
+      |                                                         ^~~~~~
+programy/husarz/js_dom.h: In member function ‘bool Husarz::Js::BrowserRuntime::link(Husarz::Js::TreeMutation&, unsigned int, unsigned int, unsigned int)’:
+programy/husarz/js_dom.h:105:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  105 |         if(before==child)return true;unlink(m,child);auto &n=m.nodes[child];auto &p=m.nodes[parent];
+      |         ^~
+programy/husarz/js_dom.h:105:38: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  105 |         if(before==child)return true;unlink(m,child);auto &n=m.nodes[child];auto &p=m.nodes[parent];
+      |                                      ^~~~~~
+programy/husarz/js_dom.h: In member function ‘virtual Husarz::Work Husarz::Js::BrowserRuntime::property(Husarz::Js::Value, Husarz::Js::Value, bool, Husarz::Js::Value&)’:
+programy/husarz/js_dom.h:179:233: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  179 |         if(is(key.ref,"length"))value=Value::num(s->count);else {unsigned id=is(key.ref,"key")?StorageKeyAt:is(key.ref,"getItem")?StorageGet:is(key.ref,"setItem")?StorageSet:is(key.ref,"removeItem")?StorageRemove:is(key.ref,"clear")?StorageClear:0;value=id?method(id,base):Value{};}co_return;
+      |                                                                                                                                                                                                                      ~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~
+programy/husarz/js_dom.h:201:13: warning: this ‘else’ clause does not guard... [-Wmisleading-indentation]
+  201 |             else value=Value::handle(Kind::String,string(location,length(location,sizeof(location))));co_return;}
+      |             ^~~~
+programy/husarz/js_dom.h:201:103: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘else’
+  201 |             else value=Value::handle(Kind::String,string(location,length(location,sizeof(location))));co_return;}
+      |                                                                                                       ^~~~~~~~~
+programy/husarz/js_dom.h: In member function ‘virtual Husarz::Work Husarz::Js::BrowserRuntime::native(Husarz::Js::Value, Husarz::Js::Value*, unsigned int, Husarz::Js::Value&)’:
+programy/husarz/js_dom.h:318:9: warning: this ‘else’ clause does not guard... [-Wmisleading-indentation]
+  318 |         else if(!s->set(text(key),size(key),text(value),size(value)))fail(Error::Range);co_return;
+      |         ^~~~
+programy/husarz/js_dom.h:318:89: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘else’
+  318 |         else if(!s->set(text(key),size(key),text(value),size(value)))fail(Error::Range);co_return;
+      |                                                                                         ^~~~~~~~~
+programy/husarz/js_dom.h:336:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  336 |         if(console_lines<64)++console_lines;co_return;
+      |         ^~
+programy/husarz/js_dom.h:336:45: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  336 |         if(console_lines<64)++console_lines;co_return;
+      |                                             ^~~~~~~~~
+programy/husarz/js_dom.h:345:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  345 |         if(delay!=delay||delay>3600000)delay=3600000;if(delay<10)delay=10;
+      |         ^~
+programy/husarz/js_dom.h:345:54: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  345 |         if(delay!=delay||delay>3600000)delay=3600000;if(delay<10)delay=10;
+      |                                                      ^~
+programy/husarz/js_dom.h:389:9: warning: this ‘else’ clause does not guard... [-Wmisleading-indentation]
+  389 |         else co_await attributes(id,args[0].ref,count==2?args[1].ref:0,fn.ref==RemoveAttribute);co_return;
+      |         ^~~~
+programy/husarz/js_dom.h:389:97: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘else’
+  389 |         else co_await attributes(id,args[0].ref,count==2?args[1].ref:0,fn.ref==RemoveAttribute);co_return;
+      |                                                                                                 ^~~~~~~~~
+programy/husarz/js_dom.h:404:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  404 |         if(!node_arg(args[0],child))co_return;if(count==2&&args[1].kind!=Kind::Null&&!node_arg(args[1],other))co_return;
+      |         ^~
+programy/husarz/js_dom.h:404:47: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  404 |         if(!node_arg(args[0],child))co_return;if(count==2&&args[1].kind!=Kind::Null&&!node_arg(args[1],other))co_return;
+      |                                               ^~
+programy/przegladarka.cpp: In function ‘bool {anonymous}::ustaw_url_z_location(char*, size_t, const char*, const ParsedUrl&)’:
+programy/przegladarka.cpp:2055:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+ 2055 |     if(ok)ok=Husarz::resolve_resource_url(scratch->base,location,cel,pojemnosc);delete scratch;return ok;
+      |     ^~
+programy/przegladarka.cpp:2055:81: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+ 2055 |     if(ok)ok=Husarz::resolve_resource_url(scratch->base,location,cel,pojemnosc);delete scratch;return ok;
+      |                                                                                 ^~~~~~
+In file included from programy/przegladarka.cpp:3446:
+programy/husarz/async_runtime.inc: In function ‘Husarz::Work {anonymous}::apply_worker_result_work()’:
+programy/husarz/async_runtime.inc:205:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  205 |         if(task.script>=Husarz::StorageOrigins)co_return;auto *s=Husarz::browser_storage.local[task.script];if(!s)co_return;auto &p=*state.payload;
+      |         ^~
+programy/husarz/async_runtime.inc:205:58: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  205 |         if(task.script>=Husarz::StorageOrigins)co_return;auto *s=Husarz::browser_storage.local[task.script];if(!s)co_return;auto &p=*state.payload;
+      |                                                          ^~~~
+In file included from programy/przegladarka.cpp:3448:
+programy/husarz/script_runtime.inc: In member function ‘void {anonymous}::WidokStrony::script_default_click(uint16_t, int, int, bool)’:
+programy/husarz/script_runtime.inc:33:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   33 |     if(!liczba_zakladek)return;auto &z=zakladki[aktywna_zakladka];if(!z.dokument)return;auto &d=*z.dokument;if(!id||id>=d.node_count||d.nodes[id].detached)return;
+      |     ^~
+programy/husarz/script_runtime.inc:33:32: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   33 |     if(!liczba_zakladek)return;auto &z=zakladki[aktywna_zakladka];if(!z.dokument)return;auto &d=*z.dokument;if(!id||id>=d.node_count||d.nodes[id].detached)return;
+      |                                ^~~~
+programy/husarz/script_runtime.inc:38:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   38 |         if(d.has_attr(id,"disabled"))return;d.focused_control=id;
+      |         ^~
+programy/husarz/script_runtime.inc:38:45: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   38 |         if(d.has_attr(id,"disabled"))return;d.focused_control=id;
+      |                                             ^
+programy/husarz/script_runtime.inc:51:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+   51 |         if(ready)g_husarz.przejdz_do_url(scratch->url);delete scratch;break;
+      |         ^~
+programy/husarz/script_runtime.inc:51:56: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+   51 |         if(ready)g_husarz.przejdz_do_url(scratch->url);delete scratch;break;
+      |                                                        ^~~~~~
+programy/husarz/script_runtime.inc: In function ‘void {anonymous}::browser_script_step(uint64_t)’:
+programy/husarz/script_runtime.inc:106:174: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  106 |                 else if(action==4){ZdarzenieKlawiatury key;key.kod_klawisza=event.native_key;key.kod_skanu=event.native_key|KLAWISZ_FIZYCZNY_GUI;key.modyfikatory=(event.ctrl?BWS_MOD_CTRL:0)|(event.shift?BWS_MOD_SHIFT:0)|(event.alt?BWS_MOD_ALT:0);browser_key_bypass=true;g_husarz.widok_strony->obsluz_wcisniecie_klawisza(key);browser_key_bypass=false;}
+      |                                                                                                                                                                    ~~~~~~~~~~^~~~~~~~~~~~~~~
+programy/husarz/script_runtime.inc:106:203: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  106 |                 else if(action==4){ZdarzenieKlawiatury key;key.kod_klawisza=event.native_key;key.kod_skanu=event.native_key|KLAWISZ_FIZYCZNY_GUI;key.modyfikatory=(event.ctrl?BWS_MOD_CTRL:0)|(event.shift?BWS_MOD_SHIFT:0)|(event.alt?BWS_MOD_ALT:0);browser_key_bypass=true;g_husarz.widok_strony->obsluz_wcisniecie_klawisza(key);browser_key_bypass=false;}
+      |                                                                                                                                                                                                ~~~~~~~~~~~^~~~~~~~~~~~~~~~
+programy/husarz/script_runtime.inc:106:231: warning: enumerated and non-enumerated type in conditional expression [-Wextra]
+  106 |                 else if(action==4){ZdarzenieKlawiatury key;key.kod_klawisza=event.native_key;key.kod_skanu=event.native_key|KLAWISZ_FIZYCZNY_GUI;key.modyfikatory=(event.ctrl?BWS_MOD_CTRL:0)|(event.shift?BWS_MOD_SHIFT:0)|(event.alt?BWS_MOD_ALT:0);browser_key_bypass=true;g_husarz.widok_strony->obsluz_wcisniecie_klawisza(key);browser_key_bypass=false;}
+      |                                                                                                                                                                                                                              ~~~~~~~~~^~~~~~~~~~~~~~
+programy/husarz/script_runtime.inc:114:17: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  114 |                 if(valid&&int(i)==aktywna_zakladka)g_husarz.przejdz_do_url(scratch->url);delete scratch;}
+      |                 ^~
+programy/husarz/script_runtime.inc:114:90: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  114 |                 if(valid&&int(i)==aktywna_zakladka)g_husarz.przejdz_do_url(scratch->url);delete scratch;}
+      |                                                                                          ^~~~~~
+programy/husarz/script_runtime.inc: In function ‘void {anonymous}::browser_flush_storage()’:
+programy/husarz/script_runtime.inc:128:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  128 |         if(!pending)break;browser_storage_tick();async_tick();
+      |         ^~
+programy/husarz/script_runtime.inc:128:27: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  128 |         if(!pending)break;browser_storage_tick();async_tick();
+      |                           ^~~~~~~~~~~~~~~~~~~~
+programy/przegladarka.cpp: At global scope:
+programy/przegladarka.cpp:3334:14: warning: ‘Husarz::Work {anonymous}::debug_computed_style(Husarz::Document&, uint16_t)’ defined but not used [-Wunused-function]
+ 3334 | Husarz::Work debug_computed_style(Husarz::Document &d,uint16_t node){
+      |              ^~~~~~~~~~~~~~~~~~~~
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -UBSF_NATIVE -Os -ffunction-sections -fdata-sections -c bursztyn_gui.cpp -o bursztyn_gui_minimal_base.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -mgeneral-regs-only -I. -Os -c programy/fpu_probe.cpp -o fpu_probe_tmp.o
+programy/fpu_probe.cpp: In function ‘void _start()’:
+programy/fpu_probe.cpp:17:5: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+   17 |     for(unsigned i=160;i<416;++i)expected.bytes[i]=uint8_t(i*(follower?29:13)+(follower?1:0));expected.bytes[25]=follower?0x5f:0x3f;expected.bytes[1]=follower?0x0b:0x07;fpu_restore(expected);
+      |     ^~~
+programy/fpu_probe.cpp:17:95: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+   17 |     for(unsigned i=160;i<416;++i)expected.bytes[i]=uint8_t(i*(follower?29:13)+(follower?1:0));expected.bytes[25]=follower?0x5f:0x3f;expected.bytes[1]=follower?0x0b:0x07;fpu_restore(expected);
+      |                                                                                               ^~~~~~~~
+programy/fpu_probe.cpp:22:9: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+   22 |         for(unsigned j=0;j<10000;++j)asm volatile("pause");fpu_save(actual);if(!identical(expected,actual)){ok=false;break;}
+      |         ^~~
+programy/fpu_probe.cpp:22:60: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+   22 |         for(unsigned j=0;j<10000;++j)asm volatile("pause");fpu_save(actual);if(!identical(expected,actual)){ok=false;break;}
+      |                                                            ^~~~~~~~
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -I. -Os -ffunction-sections -fdata-sections -c notatnik.cpp -o notatnik_tmp.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -Os -ffunction-sections -fdata-sections -fstack-usage -c programy/eksplorator/eksplorator-plikow.cpp -o eksplorator_tmp.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -I. -Os -ffunction-sections -fdata-sections -c kalkulator.cpp -o kalkulator_tmp.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -Os -fstack-usage -c shell.cpp -o shell_tmp.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -Os -c bsf/terminal.cpp -o bsf_terminal.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -DBSF_PROFILE=0 -Os -fstack-usage -c menedzer_okien.cpp -o menedzer_okien_tmp.o
+menedzer_okien.cpp:1270:6: warning: ‘bool {anonymous}::tekst_zaczyna_sie(const char*, const char*)’ defined but not used [-Wunused-function]
+ 1270 | bool tekst_zaczyna_sie(const char* tekst, const char* prefiks) {
+      |      ^~~~~~~~~~~~~~~~~
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -Os -fstack-usage -c bursztyn_ui/ikona_png.cpp -o ikona_png_ring3.o
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -MMD -MP -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Os -DBURSZTYN_PNG_ONLY=1 -fstack-usage -c obrazy/dekoder_obrazu.cpp -o image_png_ring3.o
+In file included from obrazy/dekoder_obrazu.cpp:57:
+obrazy/vendor/stb_image.h:1080:12: warning: ‘int stbi__mul2shorts_valid(int, int)’ defined but not used [-Wunused-function]
+ 1080 | static int stbi__mul2shorts_valid(int a, int b)
+      |            ^~~~~~~~~~~~~~~~~~~~~~
+obrazy/vendor/stb_image.h:1072:12: warning: ‘int stbi__addints_valid(int, int)’ defined but not used [-Wunused-function]
+ 1072 | static int stbi__addints_valid(int a, int b)
+      |            ^~~~~~~~~~~~~~~~~~~
+x86_64-linux-gnu-g++ -mgeneral-regs-only -std=gnu++17 -O2 -g -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage -DMBEDTLS_USER_CONFIG_FILE=\"bursztyn_mbedtls_config.h\" -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -MMD -MP -c aktualizacja.cpp -o aktualizacja.o
+x86_64-linux-gnu-ld -r bursztyn_gui_base.o bsf_core.o bsf_runtime.o bsf_bitmap.o ring3_ssp.o -o bursztyn_gui.o
+x86_64-linux-gnu-ld -r bursztyn_gui_minimal_base.o ring3_ssp.o -o bursztyn_gui_minimal.o
+x86_64-linux-gnu-ld --gc-sections -T notatnik_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	notatnik_tmp.o bursztyn_gui.o -o notatnik.elf
+x86_64-linux-gnu-objcopy -O binary notatnik.elf notatnik.bin
+x86_64-linux-gnu-ld -r -b binary notatnik.bin -o notatnik_blob.o
+x86_64-linux-gnu-ld -T programy/eksplorator/eksplorator_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	eksplorator_tmp.o bursztyn_gui.o -o eksplorator.elf
+x86_64-linux-gnu-objcopy -O binary eksplorator.elf eksplorator.bin
+x86_64-linux-gnu-ld -r -b binary eksplorator.bin -o eksplorator_blob.o
+x86_64-linux-gnu-ld --gc-sections -T kalkulator_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	kalkulator_tmp.o bursztyn_gui.o -o kalkulator.elf
+x86_64-linux-gnu-objcopy -O binary kalkulator.elf kalkulator.bin
+x86_64-linux-gnu-ld -r -b binary kalkulator.bin -o kalkulator_blob.o
+x86_64-linux-gnu-ld -T programy/shell_bsf_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	shell_tmp.o bsf_terminal.o bursztyn_gui.o -o shell.elf
+x86_64-linux-gnu-objcopy -O binary shell.elf shell.bin
+x86_64-linux-gnu-ld -r -b binary shell.bin -o shell_blob.o
+x86_64-linux-gnu-ld --gc-sections -T programy/test/test_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	test_tmp.o ekran_format_ring3.o btp_ring3.o bursztyn_gui.o -o test.elf
+x86_64-linux-gnu-objcopy -O binary test.elf test.bin
+x86_64-linux-gnu-ld -r -b binary test.bin -o test_blob.o
+x86_64-linux-gnu-ld --gc-sections -T programy/demo_ui/demo_ui_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	demo_ui_tmp.o bursztyn_gui.o -o demo_ui.elf
+x86_64-linux-gnu-objcopy -O binary demo_ui.elf demo_ui.bin
+x86_64-linux-gnu-ld -r -b binary demo_ui.bin -o demo_ui_blob.o
+x86_64-linux-gnu-ld --gc-sections -T programy/demo_ui/demo_ui_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	kontrolki2_tmp.o bursztyn_gui.o -o kontrolki2.elf
+x86_64-linux-gnu-objcopy -O binary kontrolki2.elf kontrolki2.bin
+x86_64-linux-gnu-ld -r -b binary kontrolki2.bin -o kontrolki2_blob.o
+x86_64-linux-gnu-ld --gc-sections -T programy/kontrolki3/kontrolki3_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	kontrolki3tmp.o bursztyn_gui.o -o kontrolki3.elf
+x86_64-linux-gnu-objcopy -O binary kontrolki3.elf kontrolki3.bin
+x86_64-linux-gnu-ld -r -b binary kontrolki3.bin -o kontrolki3blob.o
+x86_64-linux-gnu-ld --gc-sections -T programy/kontrolki4/kontrolki4_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	kontrolki4tmp.o bursztyn_gui.o -o kontrolki4.elf
+x86_64-linux-gnu-objcopy -O binary kontrolki4.elf kontrolki4.bin
+x86_64-linux-gnu-ld -r -b binary kontrolki4.bin -o kontrolki4blob.o
+x86_64-linux-gnu-ld -T programy/repro/repro_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	repro_tmp.o bursztyn_gui.o -o repro.elf
+x86_64-linux-gnu-objcopy -O binary repro.elf repro.bin
+x86_64-linux-gnu-ld -r -b binary repro.bin -o repro_blob.o
+x86_64-linux-gnu-ld -T shell_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	snake_tmp.o bursztyn_gui.o -o snake.elf
+x86_64-linux-gnu-objcopy -O binary snake.elf snake.bin
+x86_64-linux-gnu-ld -r -b binary snake.bin -o snake_blob.o
+x86_64-linux-gnu-ld -T shell_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	przegladarka_obrazow_tmp.o bursztyn_gui.o -o przegladarka_obrazow.elf
+x86_64-linux-gnu-objcopy -O binary przegladarka_obrazow.elf przegladarka_obrazow.bin
+x86_64-linux-gnu-ld -r -b binary przegladarka_obrazow.bin -o przegladarka_obrazow_blob.o
+x86_64-linux-gnu-ld -T programy/aktualizacje/aktualizacje_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	aktualizacje_tmp.o bursztyn_gui.o -o aktualizacje.elf
+x86_64-linux-gnu-objcopy -O binary aktualizacje.elf aktualizacje.bin
+x86_64-linux-gnu-ld -r -b binary aktualizacje.bin -o aktualizacje_blob.o
+x86_64-linux-gnu-ld --orphan-handling=error -T programy/test_dzwieku/test_dzwieku_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	test_dzwieku_tmp.o bursztyn_gui.o -o test_dzwieku.elf
+x86_64-linux-gnu-objcopy -O binary test_dzwieku.elf test_dzwieku.bin
+python3 narzedzia/test_dzwieku_size.py test_dzwieku.bin
+Test dźwięku: file=223776 maximum=524288 margin=300512
+x86_64-linux-gnu-ld -r -b binary test_dzwieku.bin -o test_dzwieku_blob.o
+x86_64-linux-gnu-ld --orphan-handling=error -T programy/diagnostyka/diagnostyka_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail diagnostyka_tmp.o bursztyn_gui.o -o diagnostyka.elf
+x86_64-linux-gnu-objcopy -O binary diagnostyka.elf diagnostyka.bin
+x86_64-linux-gnu-ld -r -b binary diagnostyka.bin -o diagnostyka_blob.o
+x86_64-linux-gnu-ld --gc-sections -T programy/ustawienia/ustawienia_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail ustawienia_tmp.o bursztyn_gui.o -o ustawienia.elf
+x86_64-linux-gnu-objcopy -O binary ustawienia.elf ustawienia.bin
+x86_64-linux-gnu-ld -r -b binary ustawienia.bin -o ustawienia_blob.o
+x86_64-linux-gnu-ld --gc-sections -T programy/instalator/instalator_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail instalator_tmp.o bursztyn_gui.o -o instalator.elf
+x86_64-linux-gnu-objcopy -O binary instalator.elf instalator.bin
+x86_64-linux-gnu-ld -r -b binary instalator.bin -o instalator_blob.o
+x86_64-linux-gnu-ld --gc-sections -T programy/ekran/ekran_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail ekran_tmp.o bursztyn_gui.o -o ekran.elf
+x86_64-linux-gnu-objcopy -O binary ekran.elf ekran.bin
+x86_64-linux-gnu-ld -r -b binary ekran.bin -o ekran_blob.o
+x86_64-linux-gnu-ld --gc-sections -T programy/tapety/tapety_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail tapety_tmp.o btp_ring3.o image_ring3.o bursztyn_gui.o -o tapety.elf
+x86_64-linux-gnu-objcopy -O binary tapety.elf tapety.bin
+python3 narzedzia/test_tapety_size.py tapety.bin
+Tapety: file=305728 maximum=524288 margin=218560
+x86_64-linux-gnu-ld -r -b binary tapety.bin -o tapety_blob.o
+x86_64-linux-gnu-ld --defsym=HUSARZ_WORKER_BUILD=1 --gc-sections -T programy/przegladarka_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail husarz_worker_tmp.o bursztyn_gui_minimal.o image_ring3.o btp_ring3.o -o husarz_worker.elf
+x86_64-linux-gnu-objcopy -O binary husarz_worker.elf husarz_worker.bin
+x86_64-linux-gnu-ld -r -b binary husarz_worker.bin -o husarz_worker_blob.o
+x86_64-linux-gnu-ld --defsym=HUSARZ_WORKER_BUILD=1 --gc-sections -T programy/przegladarka_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail fpu_probe_tmp.o bursztyn_gui_minimal.o -o fpu_probe.elf
+x86_64-linux-gnu-objcopy -O binary fpu_probe.elf fpu_probe.bin
+x86_64-linux-gnu-ld -r -b binary fpu_probe.bin -o fpu_probe_blob.o
+x86_64-linux-gnu-ld --gc-sections -T programy/przegladarka_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	przegladarka_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o -o przegladarka.elf
+x86_64-linux-gnu-objcopy -O binary przegladarka.elf przegladarka.bin
+x86_64-linux-gnu-ld -r -b binary przegladarka.bin -o przegladarka_blob.o
+x86_64-linux-gnu-ld -T menedzer_okien_linker.ld -nostdlib -no-pie --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail \
+	menedzer_okien_tmp.o bursztyn_gui.o ikona_png_ring3.o image_png_ring3.o btp_ring3.o -o menedzer_okien.elf
+x86_64-linux-gnu-objcopy -O binary menedzer_okien.elf menedzer_okien.bin
+x86_64-linux-gnu-ld -r -b binary menedzer_okien.bin -o menedzer_okien_blob.o
+x86_64-linux-gnu-g++ -T linker.ld -nostdlib -no-pie -static -Wl,-z,noexecstack -Wl,-z,max-page-size=0x1000 -Wl,--build-id=none -o system_operacyjny.bin entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o ekran.o ekran_format.o bufory_grafiki.o bochs_vbe.o tapety_blob.o tapety.o btp.o boot.o gdt.o tss.o acpi.o hpet.o dma.o usb.o xhci.o xhci_ring.o usb_hid.o hid_pointer.o ohci.o apic.o idt.o przerwania.o network_device.o e1000.o siec.o hda.o hda_diag.o hda_transport.o klawiatura.o przegladarka_blob.o husarz_worker_blob.o fpu_probe_blob.o mysz.o zegar-rtc.o pmm.o vmm.o psf.o grafika.o ekran_powitalny.o syscall.o syscalls.o bws_nowoczesne.o pci.o virtio_pci.o virtqueue.o virtio_rng.o virtio_blk.o virtio_net.o virtio_gpu.o virtio_input.o input_device.o ahci.o ring3.o stos_jadra.o stack_protector.o notatnik_blob.o eksplorator_blob.o kalkulator_blob.o loader.o czcionka_systemowa.o kernel.o shell_blob.o menedzer_okien_blob.o uefi_gop.o dzwiek_blob.o cytaty_blob.o sponsorzy_blob.o wsparcie_mecenasi_blob.o wsparcie_sponsorzy_blob.o wsparcie_wkladtworczy_blob.o ikona_zasilania_blob.o ikona_uruchomponownie_blob.o ikona_zamknij_blob.o ikona_uspij_blob.o ikona_zablokuj_blob.o heap.o scheduler.o fpu.o skladacz_obrazu.o mbedtls_port.o tls.o bezpieczenstwo.o aktualizacja.o test_blob.o demo_ui_blob.o kontrolki2_blob.o kontrolki3blob.o kontrolki4blob.o repro_blob.o snake_blob.o przegladarka_obrazow_blob.o aktualizacje_blob.o motyw.o test_dzwieku_blob.o diagnostyka_systemu.o diagnostyka_systemu_bws.o diagnostyka_systemu_boot.o diagnostyka_blob.o test_bmp_blob.o test1_bmp_blob.o logo_png_blob.o biblioteki/mbedtls/library/aes.o biblioteki/mbedtls/library/aesni.o biblioteki/mbedtls/library/arc4.o biblioteki/mbedtls/library/aria.o biblioteki/mbedtls/library/asn1parse.o biblioteki/mbedtls/library/asn1write.o biblioteki/mbedtls/library/base64.o biblioteki/mbedtls/library/bignum.o biblioteki/mbedtls/library/blowfish.o biblioteki/mbedtls/library/camellia.o biblioteki/mbedtls/library/ccm.o biblioteki/mbedtls/library/certs.o biblioteki/mbedtls/library/chacha20.o biblioteki/mbedtls/library/chachapoly.o biblioteki/mbedtls/library/cipher.o biblioteki/mbedtls/library/cipher_wrap.o biblioteki/mbedtls/library/cmac.o biblioteki/mbedtls/library/constant_time.o biblioteki/mbedtls/library/ctr_drbg.o biblioteki/mbedtls/library/debug.o biblioteki/mbedtls/library/des.o biblioteki/mbedtls/library/dhm.o biblioteki/mbedtls/library/ecdh.o biblioteki/mbedtls/library/ecdsa.o biblioteki/mbedtls/library/ecjpake.o biblioteki/mbedtls/library/ecp.o biblioteki/mbedtls/library/ecp_curves.o biblioteki/mbedtls/library/entropy.o biblioteki/mbedtls/library/entropy_poll.o biblioteki/mbedtls/library/error.o biblioteki/mbedtls/library/gcm.o biblioteki/mbedtls/library/havege.o biblioteki/mbedtls/library/hkdf.o biblioteki/mbedtls/library/hmac_drbg.o biblioteki/mbedtls/library/md.o biblioteki/mbedtls/library/md2.o biblioteki/mbedtls/library/md4.o biblioteki/mbedtls/library/md5.o biblioteki/mbedtls/library/memory_buffer_alloc.o biblioteki/mbedtls/library/mps_reader.o biblioteki/mbedtls/library/mps_trace.o biblioteki/mbedtls/library/net_sockets.o biblioteki/mbedtls/library/nist_kw.o biblioteki/mbedtls/library/oid.o biblioteki/mbedtls/library/padlock.o biblioteki/mbedtls/library/pem.o biblioteki/mbedtls/library/pk.o biblioteki/mbedtls/library/pk_wrap.o biblioteki/mbedtls/library/pkcs11.o biblioteki/mbedtls/library/pkcs12.o biblioteki/mbedtls/library/pkcs5.o biblioteki/mbedtls/library/pkparse.o biblioteki/mbedtls/library/pkwrite.o biblioteki/mbedtls/library/platform.o biblioteki/mbedtls/library/platform_util.o biblioteki/mbedtls/library/poly1305.o biblioteki/mbedtls/library/psa_crypto.o biblioteki/mbedtls/library/psa_crypto_aead.o biblioteki/mbedtls/library/psa_crypto_cipher.o biblioteki/mbedtls/library/psa_crypto_client.o biblioteki/mbedtls/library/psa_crypto_driver_wrappers.o biblioteki/mbedtls/library/psa_crypto_ecp.o biblioteki/mbedtls/library/psa_crypto_hash.o biblioteki/mbedtls/library/psa_crypto_mac.o biblioteki/mbedtls/library/psa_crypto_rsa.o biblioteki/mbedtls/library/psa_crypto_se.o biblioteki/mbedtls/library/psa_crypto_slot_management.o biblioteki/mbedtls/library/psa_crypto_storage.o biblioteki/mbedtls/library/psa_its_file.o biblioteki/mbedtls/library/ripemd160.o biblioteki/mbedtls/library/rsa.o biblioteki/mbedtls/library/rsa_internal.o biblioteki/mbedtls/library/sha1.o biblioteki/mbedtls/library/sha256.o biblioteki/mbedtls/library/sha512.o biblioteki/mbedtls/library/ssl_cache.o biblioteki/mbedtls/library/ssl_ciphersuites.o biblioteki/mbedtls/library/ssl_cli.o biblioteki/mbedtls/library/ssl_cookie.o biblioteki/mbedtls/library/ssl_msg.o biblioteki/mbedtls/library/ssl_srv.o biblioteki/mbedtls/library/ssl_ticket.o biblioteki/mbedtls/library/ssl_tls.o biblioteki/mbedtls/library/ssl_tls13_keys.o biblioteki/mbedtls/library/threading.o biblioteki/mbedtls/library/timing.o biblioteki/mbedtls/library/version.o biblioteki/mbedtls/library/version_features.o biblioteki/mbedtls/library/x509.o biblioteki/mbedtls/library/x509_create.o biblioteki/mbedtls/library/x509_crl.o biblioteki/mbedtls/library/x509_crt.o biblioteki/mbedtls/library/x509_csr.o biblioteki/mbedtls/library/x509write_crt.o biblioteki/mbedtls/library/x509write_csr.o biblioteki/mbedtls/library/xtea.o -lgcc
+[OK] system_operacyjny.bin jest poprawnym obrazem Multiboot2.
+python3 narzedzia/package_release_kernel.py system_operacyjny.bin isodir/boot/system_operacyjny.bin x86_64-linux-gnu-objcopy
+Public kernel: b2e86fd5d127404d96c142b65f9c55191a5cba0d78fae845c9d1c9fda0ccafa9 private symbols: .release-private/b2e86fd5d127404d96c142b65f9c55191a5cba0d78fae845c9d1c9fda0ccafa9
+python3 narzedzia/package_release_notices.py isodir
+[ISO] Kopiuje tapety.pak jako /boot/tapety.pak (modul Multiboot2).
+python3 narzedzia/package_bsf.py isodir
+BSF: packaged 4 TTF files and license notices
+python3 narzedzia/package_support.py isodir
+Support: staged three byte-identical source files
+python3 narzedzia/package_power_icons.py isodir
+Power: staged five byte-identical PNG assets
+grub-mkrescue -o BursztynOS.iso isodir --xorriso=xorriso
+xorriso 1.5.6 : RockRidge filesystem manipulator, libburnia project.
+
+Drive current: -outdev 'stdio:BursztynOS.iso'
+Media current: stdio file, overwriteable
+Media status : is blank
+Media summary: 0 sessions, 0 data blocks, 0 data, 3452m free
+Added to ISO image: directory '/'='/tmp/grub.7njpF9'
+xorriso : UPDATE :     598 files added in 1 seconds
+Added to ISO image: directory '/'='/home/programista/Pulpit/Burstzyn/BursztynOS/isodir'
+xorriso : UPDATE :     636 files added in 1 seconds
+xorriso : NOTE : Copying to System Area: 512 bytes from file '/usr/lib/grub/i386-pc/boot_hybrid.img'
+xorriso : UPDATE :  20.16% done
+ISO image produced: 19704 sectors
+Written to medium : 19704 sectors at LBA 0
+Writing to 'stdio:BursztynOS.iso' completed successfully.
+
+python3 narzedzia/verify_bsf_iso.py BursztynOS.iso
+BSF ISO: PASS, 7 font/license/source assets and Settings verified
+python3 narzedzia/verifyreleasemetadata.py BursztynOS.iso --output .release-private/release-inventory.json
+Release audit: 616 files, 0 findings; .release-private/release-inventory.json
+[TAPETY BUILD] SHA256 host/staged/ISO:
+ffa3092541786c066b4121354ad0f81d84f6e3da26268546b0e1b3bd64e432e1  tapety.pak
+ffa3092541786c066b4121354ad0f81d84f6e3da26268546b0e1b3bd64e432e1  isodir/boot/tapety.pak
+ffa3092541786c066b4121354ad0f81d84f6e3da26268546b0e1b3bd64e432e1  .tapety-iso-check.pak
+[TAPETY BUILD] Wpisy GRUB Multiboot2:
+    multiboot2 /boot/system_operacyjny.bin
+    module2 /boot/tapety.pak tapety.pak
+    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated
+    module2 /boot/tapety.pak tapety.pak
+    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.test.diskdestructive=1
+    module2 /boot/tapety.pak tapety.pak
+    multiboot2 /boot/system_operacyjny.bin bursztyn.install=1
+    module2 /boot/tapety.pak tapety.pak

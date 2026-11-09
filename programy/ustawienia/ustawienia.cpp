@@ -11,11 +11,11 @@ __attribute__((section(".naglowek"), used)) NaglowekBur naglowek = {
     {'B', 'U', 'R', '\0'},
     reinterpret_cast<uint64_t>(&_start),
     0x1000,
-    0x33000,
-    0x1001000,
     0x34000,
+    0x1001000,
+    0x35000,
     0x20000,
-    0x1034000};
+    0x1035000};
 }
 namespace {
 bool same_font_name(const char* a,const char* b){for(unsigned i=0;i<96;++i){if(a[i]!=b[i])return false;if(!a[i])return true;}return false;}
@@ -36,14 +36,15 @@ class Settings : public Okno {
   unsigned family_count{};
   void reload_fonts() {
     auto c=BSF::configuration(); families->wyczysc(); family_count=0;
+    const char* names[BSF::MaxFiles]{};
     for(unsigned i=0;i<BSF::enumerate();++i){
       auto* f=BSF::info(i);bool duplicate=false;
-      for(unsigned j=0;j<family_count;++j) if(same_font_name(BSF::family_name(ids[j]),f->family))duplicate=true;
+      for(unsigned j=0;j<family_count;++j) if(same_font_name(names[j],f->family))duplicate=true;
       if(duplicate)continue;
       // Prefer a regular representative, retain families with incomplete styles.
       for(unsigned j=i;j<BSF::enumerate();++j){auto* candidate=BSF::info(j);
         if(same_font_name(candidate->family,f->family)&&!candidate->italic&&candidate->weight<600){f=candidate;break;}}
-      families->dodaj_element(f->family,f->id);ids[family_count]=f->id;
+      families->dodaj_element(f->family,f->id);ids[family_count]=f->id;names[family_count]=f->family;
       if(c.family==f->id || (!c.family && f->id==BSF::default_id()))families->ustaw_wybrany_indeks(int(family_count));
       ++family_count;
     }
@@ -85,14 +86,20 @@ class Settings : public Okno {
       for (auto *line : lines) {
         char part[256]{};
         unsigned used = 0;
-        int width = 0;
-        for (size_t at = 0; line[at];) {
-          uint32_t cp;
-          size_t bytes = CzcionkaUI::dekoduj_utf8(line, at, &cp);
-          int step = BSF::measure_cp(cp, px, weight != 0);
-          if (step < 0)
-            step = px / 2 + 1;
-          if (used && width + step > column - ui_skaluj(20,preview->skala_dpi().procent())) {
+        size_t length = 0;
+        while (line[length]) ++length;
+        for (size_t at = 0; at < length;) {
+          size_t next = BSF::next_cluster(line, at, length);
+          size_t bytes = next - at;
+          // Samples fit this fixed buffer. Measure the actual candidate run,
+          // retaining cluster fallback and kerning used by the painter.
+          if (bytes >= sizeof(part) - used)
+            break;
+          for (size_t j = 0; j < bytes; ++j)
+            part[used + j] = line[at + j];
+          part[used + bytes] = 0;
+          int width = BSF::measure_text(part, px, weight != 0);
+          if (used && width > column - ui_skaluj(20,preview->skala_dpi().procent())) {
             part[used] = 0;
             if (!ctx.rysuj_tekst_bsf({x, y}, part,
                                      motyw_kolor(MOTYW_KOLOR_TEKST), px,
@@ -100,12 +107,10 @@ class Settings : public Okno {
               ctx.rysuj_tekst({x, y}, part, motyw_kolor(MOTYW_KOLOR_TEKST));
             y += BSF::height(px) > 0 ? BSF::height(px) + 2 : 18;
             used = 0;
-            width = 0;
           }
           for (size_t j = 0; j < bytes && used + 1 < sizeof(part); ++j)
             part[used++] = line[at + j];
-          at += bytes;
-          width += step;
+          at = next;
         }
         part[used] = 0;
         if (!ctx.rysuj_tekst_bsf({x, y}, part, motyw_kolor(MOTYW_KOLOR_TEKST),

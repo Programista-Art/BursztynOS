@@ -40,10 +40,12 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
             while n:
                 count=min(n,4096-(va&4095));data+=read(physical(va),count);va+=count;n-=count
             return data
-        count=struct.unpack('<i',user(wm_address+observer['count_offset'],4))[0]
+        wm_base=struct.unpack('<Q',read(symbol('uklady_procesow')+72,8))[0] or 0x1000000
+        wm_va=wm_base+(wm_address-0x1000000 if wm_address>=0x1000000 else wm_address)
+        count=struct.unpack('<i',user(wm_va+observer['count_offset'],4))[0]
         assert 16<=count<=144,count
-        x0,y0,cw,ch=struct.unpack('<4i',user(wm_address+observer['origin_offset'],16))
-        data=user(wm_address,count*observer['position_size'])
+        x0,y0,cw,ch=struct.unpack('<4i',user(wm_va+observer['origin_offset'],16))
+        data=user(wm_va,count*observer['position_size'])
         anchors=[]
         for i in range(count):
             offset=i*observer['position_size']
@@ -72,6 +74,10 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
                      'input displacement consumed after commit',10,interval=.01)
             except TimeoutError:
                 evidence=dict(target=[x,y],before=old,current=geometry(),ticks=ticks())
+                if evidence['current']['cursor']!=old:
+                    # The same acknowledgement may land between the final
+                    # deadline poll and diagnostic read. It has been observed.
+                    continue
                 (out/'edge-failure.json').write_text(json.dumps(evidence,indent=2))
                 screenshot('edge-failure');raise AssertionError(evidence)
         raise AssertionError(('unreachable edge',x,y,cursor(),geometry()))
@@ -110,6 +116,7 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
     if __import__('os').environ.get('BURSZTYN_BSF_MATRIX')=='1366':targets=[(1366,768,100),(2560,1440,100),(1280,720,100)]
     for w,h,s in targets:
         old=geometry();win=window();factor=old['scale']/100
+        confirmations=health().count('[EKRAN] Tryb zatwierdzony.')
         # Select exact popup rows through the native list. No direction-key
         # repeat or duplicate key representation can alter the target.
         layout=json.loads((root/f'.bsf-test/display-layout-{old["scale"]}.json').read_text())
@@ -158,10 +165,16 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
             first_frames.append(dict(label=label,geometry=state,bottom_color=list(bar_color),window=client))
         observe_frame(immediate,committed,'immediate-'+str(len(records)))
         record=dict(committed=committed);records.append(record)
-        if (old['width'],old['height'])!=(w,h):key('ret')
-        # Native Enter confirms without depending on asynchronous button layout.
-        # Slow host observation must not consume the guest
-        # confirmation deadline before input is sent.
+        if (old['width'],old['height'])!=(w,h):
+            def confirm_native_mode():
+                if health().count('[EKRAN] Tryb zatwierdzony.')>confirmations:return True
+                assert geometry()['generation']==committed['generation'],'mode rolled back before confirmation'
+                # The kernel commit can precede the app's pending-state event.
+                # An early Enter is ignored; observe actual confirmation before
+                # proceeding instead of assuming that input acknowledged it.
+                key('ret')
+                return health().count('[EKRAN] Tryb zatwierdzony.')>confirmations
+            wait(confirm_native_mode,'native display confirmation',30,interval=.1)
         win=window();factor=s/100
         wait(lambda:window()['w']==round(640*factor),'Display Settings resized for committed scale',120,interval=.01)
         win=window()

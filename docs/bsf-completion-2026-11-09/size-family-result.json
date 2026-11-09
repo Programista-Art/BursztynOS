@@ -1,0 +1,35 @@
+{
+  "boot_environment": "UEFI",
+  "result": "PASS",
+  "mode": "font-size-family-matrix",
+  "faces": [
+    132583076,
+    154674832,
+    2501929319
+  ],
+  "cached_sizes": [
+    14,
+    16,
+    20,
+    24,
+    32
+  ],
+  "rendered_row_heights": [
+    11,
+    13,
+    15,
+    19,
+    23,
+    30
+  ],
+  "fixture_sizes": [
+    12,
+    14,
+    16,
+    20,
+    24,
+    32
+  ],
+  "kernel_sha256": "50987de4441bc8e1ffb7c71bfb6e5a45fce3eb6e6144ca41d2ed8f25c1d12c64",
+  "iso_sha256": "9afe354a068028db4517bda31cf13678705e53bd695d968869f8366166e0ea43"
+}

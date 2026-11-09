@@ -248,3 +248,117 @@ The first private resource ISO also omitted the separate `bsf-settings`
 Multiboot module. Its missing Settings process was a fixture-packaging failure,
 not loss of other apps or RAM-filesystem exhaustion. The resource-image tool
 now preserves that production module. Both failures are retained.
+
+## Continuation — 2026-11-09
+
+Resumed from thread `01a1b5bf-4aff-7502-bde4-eebef6d7a2db` after inspecting
+the actual tree and later evidence. Subsequent independent loader/security
+changes already exist in the repository. They are preserved, not attributed
+to BSF work. This continuation explicitly builds `BUR_FORMAT=1`; the repository
+default is not changed. All 23 generated application contracts pass the BUR
+segment verifier. The linker enforces their existing segment capacities.
+
+Settings' production font preview still wrapped scalar by scalar. It now
+appends complete BSF graphemes and measures each candidate line with
+`BSF::measure_text`, retaining the same fallback and kerning as its painter.
+The fixed sample strings remain byte-preserved. Explicit bounded copying and
+length counting keep this path freestanding: an initial build exposed unwanted
+host `strlen`/`__memcpy_chk` references, which were removed before release.
+
+Fresh ASan/UBSan results in `bsf-completion-2026-11-09/`:
+
+- Official Unicode 15.1: 1,187 cases plus 10,000 deterministic malformed and
+  mutation inputs PASS (`host.txt`).
+- Expanded catalog/resource/failure handling: 4,604 checks PASS, including
+  32/64/128 records, 3 MiB and 16,777,184-byte fixtures (`host.txt`).
+- Production Notepad: 60,662 checks PASS, including exact save/reopen bytes;
+  60,000 backward movements took 10,734,644,436 ns in this sanitizer run.
+- Native-font Shell host harness: 2,201 checks PASS (`host.txt`).
+- Core: 12,204; shared UI/browser: 9,084; Husarz selection/clipboard:
+  987,380 checks PASS. BUR loader: 17 groups PASS (`regressions.txt`).
+- GCC trace-pc parser campaign: 10,001 executions, 602 coverage buckets,
+  eight retained inputs / 4,997,016 bytes, seed `0x425346`, no reported
+  sanitizer finding (`fuzz.txt`).
+
+Build command: `make -j4 BUR_FORMAT=1 iso`; kernel and application sources
+were rebuilt after the initial absence of production build artifacts. ISO
+asset and release metadata verification passed. Exact artifact hashes and
+native acceptance status are recorded in
+`bsf-completion-2026-11-09/release.json`. Fresh native acceptance is running;
+earlier installed-disk results must not be attributed to this new kernel.
+
+### Fresh native findings and harness corrections
+
+- Editing on the new release ISO: PASS, including cluster-left/Delete and
+  exact saved/reopened UTF-8 bytes (`editing-result.json`).
+- Terminal UEFI: PASS, exact native clipboard/input/output/history plus
+  TTF/bitmap recovery (`terminal-result.json`, `terminal-terminal-observed.json`).
+- Desktop/Settings/Start host regression: 188,032 checks PASS; themes and
+  power controls: 2,696 checks PASS (`desktop.txt`).
+- The first IDE-CD installer run timed out before installer readiness. Its
+  serial log progressed through GRUB module loading and RAM provisioning;
+  it did not complete an installation. Evidence is retained as
+  `installer-ide-failed.txt` and `installer-ide-serial.txt`. The harness now
+  offers explicit `--installer-media virtio`, using the same supported
+  read-only VirtIO ISO backend as the ordinary live acceptance driver. The
+  IDE default, 300-second boot bound, installer completion assertion,
+  sentinel checks and disk-only reboot requirements remain unchanged.
+- At 1366x768 the QEMU 8.2 PPM probe had skewed RGB rows, while PNG at the
+  same native geometry was correct (`display-1366-ppm-probe.png`
+  versus `display-1366-native-png.png`). Captures now consistently use PNG;
+  pixel assertions remain unchanged. No OS display code was modified.
+- A subsequent matrix run rolled back 800x600: the driver sent Enter after
+  kernel commit but before the app consumed its pending-state event. The
+  driver now observes `[EKRAN] Tryb zatwierdzony.` before proceeding and
+  rejects a rollback; an ignored early Enter can be sent again through
+  ordinary input. The failed run remains in the evidence directory.
+- The initial resource run did not launch Settings after browser activation,
+  so it is not a native catalog verdict. Start launches now explicitly focus
+  the search field and capture the typed query before Enter. The catalog,
+  parsing, resident-memory and pixel assertions are retained.
+
+The two matrix failures and the catalog launch failure remain FAIL, regardless
+of subsequent rerun outcomes. Host profiling (`profile.txt`) records a
+2,097,152-byte mask capacity, 200,000 cache hits and one miss in its repeated
+mask workload. Timings are observations under concurrent QEMU/build load,
+not a controlled baseline comparison or a claim of improved performance.
+
+### Bounded lookup acceleration and final rebuild
+
+Further read-only observation corrected the initial launch diagnosis: Settings
+had an active process before it published a window. The observer now optionally
+identifies the process by its executable path during initialization, while
+still requiring actual native window pixels for acceptance. An interrupted
+diagnostic run sampled Ring 3 execution in repeated family comparisons and
+text metrics; it found 128 catalog entries, only two resident face loads and
+3,693,376 I/O bytes. Its later window capture and stack snapshots are
+diagnostic evidence, not PASS (`catalog-stack-full.json`).
+
+Production BSF now retains four system-style choices keyed by primary face ID,
+the default catalog index, and the most recent face-ID index. These add exactly
+40 static bytes, keep catalog indices rather than file-backed Face pointers,
+and are cleared with existing resolver invalidation at rescan/shutdown. Choice
+keys account for preview/configured-family changes. CSS family parsing,
+cluster/scalar fallback order, glyph masks and advances are unchanged. Settings
+also keeps at most 128 temporary family-name pointers on its reload stack
+(1,024 bytes on x86-64), eliminating repeated ID-to-family scans during grouping.
+Those pointers never survive reload or rescan.
+
+ASan/UBSan after this change: UI/browser 9,084; resource handling 4,604;
+Terminal 2,201 checks PASS (`cache-host.txt`). The first rebuild measured
+Husarz TEXT+rodata 448 bytes past its old boundary; the next measured Settings
+32 bytes past its boundary. Each received exactly one aligned 4 KiB TEXT page,
+with its BUR v1 header and DATA offset/VA updated together. No DATA/BSS, heap,
+parser or cache budget was expanded. All 23 binary contracts pass again
+(`bur-layouts-cached.json`). The final rebuilt ISO passed font asset and release
+metadata verification (`cache-build3.txt`). Its exact hashes are in
+`release.json`; results for the earlier image remain tied to
+`release-initial.json`.
+
+The initial-image display run passed all ten transitions, including 1366x768,
+2560x1440 and all five scales (`display-result.json`). The initial-image
+installer reached `COMPLETE verified` at 100%. A fresh installation and native
+regressions were started for the final cached build; completion is still
+pending. Installed fixtures now snapshot matching app ELFs as well as selecting
+the kernel ELF by public-kernel hash, so a later local rebuild cannot corrupt
+read-only observation of an older installed image.

@@ -12,6 +12,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import shutil
 
 from instalator.qemu_install import (
     Guest, install, installer_iso, sha, sparse, target_fingerprint,
@@ -23,11 +24,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--installer-media',choices=['ide','virtio'],default='ide',help='Read-only installation medium; disk-only verification always disconnects it')
     parser.add_argument('--reset-grid-preferences',action='store_true',help='Initialize only a copied private fixture to Sans 16 before acceptance')
     parser.add_argument('--refresh-grid-payloads',action='store_true',help='Refresh final WM and EFI kernel within existing allocation in an offline private fixture before booting')
     parser.add_argument('--desktop-grid',action='store_true',help='Repeated family transitions and disk-only restart anchor comparison')
     parser.add_argument('--resume',type=Path,help='Verify an already completed private test installation')
+    parser.add_argument('--continue-validation',action='store_true',help='Reuse matching successful app phases and retry unfinished phases after --resume')
     args=parser.parse_args()
+    if args.continue_validation and (not args.resume or args.desktop_grid):parser.error('--continue-validation requires a non-grid --resume fixture')
     subprocess.run(['make','bsf-installer-observer'],cwd=ROOT,stdout=subprocess.DEVNULL,check=True)
     parent = ROOT / '.bsf-test'
     parent.mkdir(exist_ok=True)
@@ -37,11 +41,13 @@ def main():
     print('Artifacts:', out, flush=True)
     disk, sentinel = out / 'target.img', out / 'sentinel.img'
     if not args.resume:
+        (out/'app-elfs').mkdir()
+        for source in ROOT.glob('*.elf'):shutil.copyfile(source,out/'app-elfs'/source.name)
         sparse(disk, 4 * 1024**3)
         sparse(sentinel, 64 * 1024**2)
         sentinel_sha = sha(sentinel)
         iso = installer_iso(out)
-        guest = Guest(out / 'installer', disk, sentinel, iso)
+        guest = Guest(out / 'installer', disk, sentinel, iso, virtio_media=args.installer_media=='virtio')
         try:
             install(guest, disk, sentinel, target_fingerprint(disk), sentinel_sha)
         finally:
@@ -88,6 +94,12 @@ def main():
     public_kernel=out/'iso/boot/system_operacyjny.bin'
     observation_kernel=ROOT/'.release-private'/sha(public_kernel)/'kernel.elf'
     if not observation_kernel.is_file():raise RuntimeError('Matching split-debug ELF unavailable: '+str(observation_kernel))
+    def completed(name):
+        path=out/name/'result.json'
+        if not args.continue_validation or not path.is_file():return False
+        result=json.loads(path.read_text())
+        return (result.get('result')=='PASS' and result.get('kernel_sha256')==sha(observation_kernel)
+                and result.get('iso_sha256')==sha(out/'installer.iso'))
     for name,extra in scenarios:
         command = [sys.executable, str(ROOT / 'narzedzia/test_husarz_qemu.py'),
                    '--desktop-grid-only' if args.desktop_grid else '--fonts-only', '--installed-disk', str(disk),
@@ -95,9 +107,13 @@ def main():
                    '--iso',str(out/'installer.iso'),
                    '--output', str(out / name), '--timeout', '1500'] + extra
         if name=='apply' and not args.desktop_grid:command+=['--native-font-apps']
-        with (out / (name + '.log')).open('w') as log:
-            subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
-                           check=True, timeout=1550)
+        if completed(name):print(name+': matching prior PASS retained',flush=True)
+        else:
+            old_log=out/(name+'.log')
+            if old_log.exists():shutil.copyfile(old_log,out/(name+'-previous.log'))
+            with old_log.open('w') as log:
+                subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
+                               check=True, timeout=1550)
         result = json.loads((out / name / 'result.json').read_text())
         if result['result'] != 'PASS':
             raise AssertionError(result)
@@ -109,10 +125,25 @@ def main():
                 checksum != (magic ^ version ^ family ^ size ^ 0xb5f01937)):
             raise AssertionError('Persisted config validation failed')
         print(name + ': disk-only font configuration PASS', flush=True)
+    if not args.desktop_grid:
+        command=[sys.executable,str(ROOT/'narzedzia/test_husarz_qemu.py'),
+                 '--terminal-unicode-only','--installed-disk',str(disk),
+                 '--kernel',str(observation_kernel),'--iso',str(out/'installer.iso'),
+                 '--output',str(out/'terminal'),'--timeout','1500']
+        if not completed('terminal'):
+            with (out/'terminal.log').open('w') as log:
+                subprocess.run(command,cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=1550)
+        if json.loads((out/'terminal/result.json').read_text())['result']!='PASS':
+            raise AssertionError('Installed Terminal acceptance failed')
+        print('Terminal: disk-only Unicode editing/output PASS',flush=True)
     result = dict(result='PASS', assets=assets, settings_bytes=len(settings),
-                  apply=True, restart=True, disk_only=True,
+                  apply=True, restart=True, disk_only=True, terminal=not args.desktop_grid,
                   kernel_sha256=sha(out/'iso/boot/system_operacyjny.bin'),
                   sentinel_sha256=sentinel_sha)
+    if not args.desktop_grid:
+        result['applied_family']=json.loads((out/'apply/result.json').read_text())['applied_family']
+        result['restored_family']=json.loads((out/'restart/result.json').read_text())['restored_family']
+        assert result['applied_family']==result['restored_family'],'Selected family did not persist across disk-only reboot'
     (out / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
     print('Installed BSF: PASS', flush=True)
 

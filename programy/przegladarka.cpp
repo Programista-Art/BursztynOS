@@ -100,7 +100,7 @@ extern "C" {
 #ifdef HUSARZ_WORKER_ONLY
 constexpr uint64_t BUR_TEXT_SIZE=0x10000ULL,BUR_DATA_OFFSET=0x11000ULL,BUR_DATA_VADDR=0x1011000ULL;
 #else
-constexpr uint64_t BUR_TEXT_SIZE=0x8c000ULL,BUR_DATA_OFFSET=0x8d000ULL,BUR_DATA_VADDR=0x108d000ULL;
+constexpr uint64_t BUR_TEXT_SIZE=0x8d000ULL,BUR_DATA_OFFSET=0x8e000ULL,BUR_DATA_VADDR=0x108e000ULL;
 #endif
 __attribute__((section(".naglowek"), used))
 NaglowekBur naglowek = {

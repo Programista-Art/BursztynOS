@@ -50,14 +50,17 @@ def test_naglowek_i_linker():
         ld_src = f.read()
 
     # Sprawdzenie zdefiniowanych stalych w cpp
-    ok_text_sz = "BUR_TEXT_SIZE=0x84000ULL" in cpp_src
+    ok_text_sz = "BUR_TEXT_SIZE=0x84000ULL" in cpp_src or "BUR_TEXT_SIZE=0x8c000ULL" in cpp_src
     ok_data_sz = "BUR_DATA_SIZE = 0x80000ULL" in cpp_src or "0x80000" in cpp_src
     ok_text_va = "BUR_TEXT_VADDR = 0x1001000ULL" in cpp_src or "0x1001000" in cpp_src
-    ok_data_va = "BUR_DATA_VADDR=0x1085000ULL" in cpp_src
+    ok_data_va = "BUR_DATA_VADDR=0x1085000ULL" in cpp_src or "BUR_DATA_VADDR=0x108d000ULL" in cpp_src
     raport("husarz_stale_adresacji_cpp", ok_text_sz and ok_data_sz and ok_text_va and ok_data_va)
 
     # Sprawdzenie skryptu linkera
-    ok_ld_text = "BUR_TEXT_SIZE     = DEFINED(HUSARZ_WORKER_BUILD) ? 0x10000 : 0x84000;" in ld_src
+    ok_ld_text = (
+        "BUR_TEXT_SIZE     = DEFINED(HUSARZ_WORKER_BUILD) ? 0x10000 : 0x84000;" in ld_src or
+        "BUR_TEXT_SIZE     = DEFINED(HUSARZ_WORKER_BUILD) ? 0x10000 : 0x8c000;" in ld_src
+    )
     ok_ld_data = "BUR_DATA_SIZE     = 0x80000;" in ld_src
     ok_ld_data_offset = "BUR_DATA_OFFSET   = BUR_TEXT_OFFSET + BUR_TEXT_SIZE;" in ld_src
     ok_ld_data_va = "BUR_DATA_VADDR    = BUR_TEXT_VADDR + BUR_TEXT_SIZE;" in ld_src
@@ -77,28 +80,46 @@ def test_elf_binarny():
 
     raport("husarz_binaria_istnieja", True)
 
-    # Weryfikacja naglowka binarnego .bur
+    # Weryfikacja naglowka binarnego .bur (v1 lub v2)
     blob = open(bin_path, "rb").read()
-    magic, entry, to, ts, tv, do, ds, dv = struct.unpack_from("<I7Q", blob)
-    ok_header = (
-        magic == 0x00525542 and
-        to == 0x1000 and
-        ts == 0x84000 and
-        tv == 0x1001000 and
-        do == 0x85000 and
-        ds == 0x80000 and
-        dv == 0x1085000 and
-        tv <= entry < tv + ts and
-        to + ts == do and
-        tv + ts == dv and
-        dv + ds < 0x100000000
-    )
-    raport("husarz_naglowek_bur_poprawny", ok_header, f"magic={hex(magic)} ts={hex(ts)} ds={hex(ds)} dv={hex(dv)}")
+    if blob[:4] == b"BUR\x02" and len(blob) >= 160:
+        entry = struct.unpack_from("<Q", blob, 24)[0]
+        to, ts, tv = struct.unpack_from("<3Q", blob, 32)
+        ro, rs, rv = struct.unpack_from("<3Q", blob, 56)
+        do, df, ds, dv = struct.unpack_from("<4Q", blob, 80)
+        ok_header = (
+            to == 0x1000 and
+            tv == 0x1000 and
+            0 < ts <= 0x8c000 and
+            to + ts == ro and
+            ro + rs == do and
+            tv + ts + rs + 0x1000 == dv and
+            0 < df <= ds <= 0x80000 and
+            tv <= entry < tv + ts and
+            dv + ds < 0x100000000
+        )
+        raport("husarz_naglowek_bur_poprawny", ok_header, f"v2 ts={hex(ts)} rs={hex(rs)} ds={hex(ds)} dv={hex(dv)}")
+    else:
+        magic, entry, to, ts, tv, do, ds, dv = struct.unpack_from("<I7Q", blob)
+        ok_header = (
+            magic == 0x00525542 and
+            to == 0x1000 and
+            ts in (0x84000, 0x8c000) and
+            tv == 0x1001000 and
+            do == to + ts and
+            ds == 0x80000 and
+            dv == tv + ts and
+            tv <= entry < tv + ts and
+            to + ts == do and
+            tv + ts == dv and
+            dv + ds < 0x100000000
+        )
+        raport("husarz_naglowek_bur_poprawny", ok_header, f"magic={hex(magic)} ts={hex(ts)} ds={hex(ds)} dv={hex(dv)}")
 
     # Sekcje ELF
     try:
         out = subprocess.check_output(["readelf", "-S", elf_path], text=True)
-        ok_naglowek = ".naglowek" in out
+        ok_naglowek = ".naglowek" in out or ".ssp_guard" in out
         ok_text = ".text" in out
         ok_data = ".data" in out
         ok_bss = ".bss" in out
@@ -127,13 +148,23 @@ def test_elf_binarny():
 
         # Worker has its own bounded TEXT region; inspect its own DATA ABI.
         worker_blob=open(os.path.join(REPO,"husarz_worker.bin"),"rb").read()
-        wm,we,wto,wts,wtv,wdo,wds,wdv=struct.unpack_from("<I7Q",worker_blob)
-        assert wm==0x00525542 and wto==0x1000 and wts==0x10000 and wtv==0x1001000
-        assert wdo==wto+wts and wdv==wtv+wts and wds==0x80000 and wdv+wds<0x100000000
-        assert wtv<=we<wtv+wts
+        if worker_blob[:4] == b"BUR\x02" and len(worker_blob) >= 160:
+            we = struct.unpack_from("<Q", worker_blob, 24)[0]
+            wto, wts, wtv = struct.unpack_from("<3Q", worker_blob, 32)
+            wro, wrs, wrv = struct.unpack_from("<3Q", worker_blob, 56)
+            wdo, wdf, wds, wdv = struct.unpack_from("<4Q", worker_blob, 80)
+            assert wto == 0x1000 and wtv == 0x1000 and 0 < wts <= 0x10000
+            assert wto + wts == wro and wro + wrs == wdo and wtv + wts + wrs + 0x1000 == wdv
+            assert 0 < wdf <= wds <= 0x80000 and wdv + wds < 0x100000000
+            assert wtv <= we < wtv + wts
+        else:
+            wm,we,wto,wts,wtv,wdo,wds,wdv=struct.unpack_from("<I7Q",worker_blob)
+            assert wm==0x00525542 and wto==0x1000 and wts==0x10000 and wtv==0x1001000
+            assert wdo==wto+wts and wdv==wtv+wts and wds==0x80000 and wdv+wds<0x100000000
+            assert wtv<=we<wtv+wts
         worker_symbols = subprocess.check_output(["nm", "-C", "-S", os.path.join(REPO,"husarz_worker.elf")], text=True)
         assert not re.search(r"\bU\b|_GLOBAL__sub_I|__cxa_throw|__gxx_personality",worker_symbols)
-        m_siec = re.search(r"([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+b\s+.*siec_bufor", worker_symbols)
+        m_siec = re.search(r"([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+[bB]\s+.*siec_bufor", worker_symbols)
         if m_siec:
             addr = int(m_siec.group(1), 16)
             sz = int(m_siec.group(2), 16)

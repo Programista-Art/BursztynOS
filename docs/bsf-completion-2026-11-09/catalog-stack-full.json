@@ -1,0 +1,103 @@
+{
+  "regs": [
+    6711120,
+    5409888,
+    1658608,
+    1658432,
+    246628352,
+    6,
+    104,
+    13639736,
+    0,
+    0,
+    13724035,
+    13724088,
+    659,
+    140737219934624,
+    13724064,
+    32,
+    0,
+    1467307,
+    8,
+    514,
+    18446625326454213296,
+    16
+  ],
+  "frames": [
+    {
+      "slot": 70,
+      "address": "0x1010401",
+      "location": "(anonymous namespace)::Settings::show(unsigned int)\nustawienia.cpp:?"
+    },
+    {
+      "slot": 146,
+      "address": "0x101c6e5",
+      "location": "gui_czas_monotoniczny_ns()\n??:?"
+    },
+    {
+      "slot": 147,
+      "address": "0x1010b8e",
+      "location": "BursztynUI::Okno::obsluz_zdarzenie(bws_zdarzenie const&)\n??:?"
+    },
+    {
+      "slot": 148,
+      "address": "0x1010670",
+      "location": "BursztynUI::Okno::rysuj(BursztynUI::KontekstRysowania&, bool)\n??:?"
+    },
+    {
+      "slot": 151,
+      "address": "0x101c997",
+      "location": "gui_pobierz_zdarzenie(bws_zdarzenie*)\n??:?"
+    },
+    {
+      "slot": 152,
+      "address": "0x101c6e5",
+      "location": "gui_czas_monotoniczny_ns()\n??:?"
+    },
+    {
+      "slot": 155,
+      "address": "0x101c6e5",
+      "location": "gui_czas_monotoniczny_ns()\n??:?"
+    },
+    {
+      "slot": 156,
+      "address": "0x101c997",
+      "location": "gui_pobierz_zdarzenie(bws_zdarzenie*)\n??:?"
+    },
+    {
+      "slot": 159,
+      "address": "0x1010670",
+      "location": "BursztynUI::Okno::rysuj(BursztynUI::KontekstRysowania&, bool)\n??:?"
+    },
+    {
+      "slot": 160,
+      "address": "0x1010b8e",
+      "location": "BursztynUI::Okno::obsluz_zdarzenie(bws_zdarzenie const&)\n??:?"
+    },
+    {
+      "slot": 168,
+      "address": "0x101ca2d",
+      "location": "gui_czekaj_na_zdarzenie(bws_zdarzenie*)\n??:?"
+    }
+  ],
+  "config": [
+    826692418,
+    1,
+    0,
+    16,
+    1,
+    2226539108
+  ],
+  "resources": [
+    128,
+    0,
+    1468640,
+    1468640,
+    true,
+    false,
+    2,
+    3693376,
+    0,
+    162390
+  ]
+}

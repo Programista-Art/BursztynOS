@@ -1,9 +1,11 @@
-import json,struct
+import json,struct,time
 from pathlib import Path
 from bsf_process_observer import ProcessObserver
 
 def run_live(c):
     root=Path(__file__).resolve().parents[1];out=c['out'];click,key,wait=c['click'],c['key'],c['wait']
+    observed_layout=json.loads((root/'.bsf-test/font-observer.json').read_text())
+    timings={}
     o=ProcessObserver(c['hmp'],c['symbol'],root/'ustawienia.elf','Ustawienia')
     c['launch_start']('ustawienia');wait(o.pid,'Settings for native font installation',180)
     wait(lambda:c['screenshot']('live-font-opening-probe').getpixel((1033,114))[0]>150,'Settings complete frame',180)
@@ -22,21 +24,61 @@ def run_live(c):
     before=o.catalog();assert not any(r['family']=='Bursztyn Test' for r in before)
     hit('source');key('ctrl','a')
     for ch in '/live.ttf':key({'/':'slash','.':'dot'}.get(ch,ch))
-    hit('install')
+    started=time.perf_counter_ns();hit('install')
     wait(lambda:len(o.catalog())==len(before)+1,'Settings installs TTF using ordinary BWS',120)
     after=o.catalog();installed=next(r for r in after if r['family']=='Bursztyn Test');assert installed['path']=='/czcionki/ttf/live.ttf'
+    timings['install_and_rescan_host_ns']=time.perf_counter_ns()-started
     assert cfg()==before_config,'Installation unexpectedly changed selected system font'
-    c['screenshot']('live-font-installed');hit('refresh');assert len(o.catalog())==len(after)
+    c['screenshot']('live-font-installed')
+    epoch=o.value('BSF::(anonymous namespace)::catalog_epoch');started=time.perf_counter_ns();hit('refresh')
+    wait(lambda:o.value('BSF::(anonymous namespace)::catalog_epoch')!=epoch and len(o.catalog())==len(after),'native explicit font rescan complete',120)
+    timings['refresh_host_ns']=time.perf_counter_ns()-started
     hit('families');key('home');key('ret');hit('apply')
     wait(lambda:cfg()[2]==installed['id'],'new family selected and persisted',120)
     hit('source');key('ctrl','a')
     for _ in range(4):key('shift','a')
-    def imported_mask():
-        cache=o.value('BSF::(anonymous namespace)::cache','<Q');slots=struct.unpack('<Q',o.user(cache,8))[0]
-        data=o.user(slots,128*56)
-        return any(struct.unpack_from('<I',data,i*56)[0]==installed['id'] for i in range(128))
+    def mask_faces(observer):
+        cache=observer.value('BSF::(anonymous namespace)::cache','<Q');slots=struct.unpack('<Q',observer.user(cache+observed_layout['cache_slots'],8))[0]
+        if not slots:return set()
+        stride=observed_layout['glyph_stride'];data=observer.user(slots,128*stride)
+        return {struct.unpack_from('<I',data,i*stride+observed_layout['glyph_face'])[0] for i in range(128)}-{0}
+    def imported_mask():return installed['id'] in mask_faces(o)
     wait(imported_mask,'new font renders a supported A mask',120)
+    c['q'].call('stop')
+    try:
+        expected=(c['args'].installed_disk.parent/'live-font.ttf').read_bytes()
+        stride=observed_layout['loaded_stride'];loaded=o.user(o.address('BSF::(anonymous namespace)::loaded'),4*stride)
+        actual=None
+        for i in range(4):
+            at=i*stride
+            if struct.unpack_from('<I',loaded,at+observed_layout['loaded_id'])[0]!=installed['id']:continue
+            pointer=struct.unpack_from('<Q',loaded,at+observed_layout['loaded_bytes'])[0]
+            size=struct.unpack_from('<I',loaded,at+observed_layout['loaded_size'])[0]
+            if pointer and size==len(expected):actual=o.user(pointer,size)
+        assert actual==expected,'Native installed font file differs from the incoming bytes'
+        settings_mapped=o.mapped_user_bytes()
+    finally:c['q'].call('cont')
     c['screenshot']('live-font-selected-fallback')
+    c['launch_start']('notatnik')
+    note=ProcessObserver(c['hmp'],c['symbol'],root/'notatnik.elf','Notatnik',image_file='notatnik.bur')
+    wait(lambda:note.pid() and note.window()[2]>0,'Notepad uses newly installed family',180)
+    editor=json.loads((root/'.bsf-test/editor-observer.json').read_text())
+    def editor_text():
+        memo=struct.unpack('<Q',note.user(note.address('(anonymous namespace)::g_notatnik')+editor['memo'],8))[0]
+        if not memo:return None
+        pointer=struct.unpack('<Q',note.user(memo+editor['buffer'],8))[0]
+        size=struct.unpack('<Q',note.user(memo+editor['length'],8))[0]
+        return note.user(pointer,size) if pointer and size else b''
+    wait(lambda:editor_text()==b'','native Notepad buffer ready',120)
+    x,y,w,h=note.window();click(x+200,y+200)
+    for _ in range(4):key('shift','a')
+    key('z');wait(lambda:editor_text()==b'AAAAz','Notepad text with primary and fallback glyphs',120)
+    wait(lambda:installed['id'] in mask_faces(note) and bool(mask_faces(note)-{installed['id']}),'Notepad uses imported face and bundled fallback masks',120)
+    c['screenshot']('live-font-notepad-primary-fallback')
+    c['q'].call('stop')
+    try:notepad_mapped=note.mapped_user_bytes()
+    finally:c['q'].call('cont')
+    click(236,700) # Settings is the second native taskbar window.
     # Restore a bundled family before deleting the disposable imported font.
     hit('families');key('home');key('down');key('ret');hit('apply')
     wait(lambda:cfg()[2]!=installed['id'],'bundled family restored before removal',120)
@@ -50,8 +92,10 @@ def run_live(c):
     x,y,w,h=shell.window();click(x+300,y+h-20)
     for ch in 'usun /czcionki/ttf/live.ttf':key({'/':'slash','.':'dot',' ':'spc'}.get(ch,ch))
     key('ret');wait(lambda:input_text()==b'','font removal command complete',120)
-    x,y,w,h=o.window();click(x+200,y+10);hit('refresh')
+    click(236,700);epoch=o.value('BSF::(anonymous namespace)::catalog_epoch');started=time.perf_counter_ns();hit('refresh')
     wait(lambda:len(o.catalog())==len(before),'catalog removes font and clears caches',120)
+    assert o.value('BSF::(anonymous namespace)::catalog_epoch')!=epoch
+    timings['remove_refresh_host_ns']=time.perf_counter_ns()-started
     assert all(r['id']!=installed['id'] for r in o.catalog())
     c['screenshot']('live-font-removed');c['health']()
-    (out/'result.json').write_text(json.dumps(dict(result='PASS',mode='native-live-font-install-refresh-remove',before=before,installed=installed,final=o.catalog(),selected_font_unchanged_on_install=True,ordinary_bws=True,kernel_sha256=c['kernel_sha'],iso_sha256=c['iso_sha']),ensure_ascii=False,indent=2)+'\n')
+    (out/'result.json').write_text(json.dumps(dict(result='PASS',mode='native-live-font-install-refresh-remove',before=before,installed=installed,final=o.catalog(),selected_font_unchanged_on_install=True,ordinary_bws=True,installed_bytes_equal=True,notepad_primary_and_fallback=True,sampled_user_mapped_bytes=dict(settings=settings_mapped,notepad=notepad_mapped),host_timings_ns=timings,kernel_sha256=c['kernel_sha'],iso_sha256=c['iso_sha']),ensure_ascii=False,indent=2)+'\n')

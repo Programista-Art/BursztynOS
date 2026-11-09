@@ -3,8 +3,8 @@
  *
  * Parametry segmentow:
  *   NAGLOWEK: offset 0x0000, rozmiar 0x1000,   VA 0x1000000
- *   TEXT:     offset 0x1000, rozmiar 0x33000,  VA 0x1001000 (192 KiB)
- *   DATA/BSS: offset 0x34000, rozmiar 0x20000, VA 0x1034000 (128 KiB)
+ *   TEXT:     offset 0x1000, rozmiar 0x34000,  VA 0x1001000 (208 KiB)
+ *   DATA/BSS: offset 0x35000, rozmiar 0x20000, VA 0x1035000 (128 KiB)
  */
 
 OUTPUT_FORMAT(elf64-x86-64)
@@ -16,12 +16,13 @@ BUR_HEADER_SIZE   = 0x1000;
 BUR_HEADER_VADDR  = 0x1000000;
 
 BUR_TEXT_OFFSET   = 0x1000;
-BUR_TEXT_SIZE     = 0x33000;
+/* Measured TEXT+rodata exceeded 0x33000 by 32 bytes. */
+BUR_TEXT_SIZE     = 0x34000;
 BUR_TEXT_VADDR    = 0x1001000;
 
-BUR_DATA_OFFSET   = 0x34000;
+BUR_DATA_OFFSET   = 0x35000;
 BUR_DATA_SIZE     = 0x20000;
-BUR_DATA_VADDR    = 0x1034000;
+BUR_DATA_VADDR    = 0x1035000;
 
 BUR_TEXT_END      = BUR_TEXT_VADDR + BUR_TEXT_SIZE;
 BUR_DATA_END      = BUR_DATA_VADDR + BUR_DATA_SIZE;

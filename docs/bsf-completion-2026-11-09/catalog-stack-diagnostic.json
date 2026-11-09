@@ -1,0 +1,158 @@
+{
+  "pid": 3,
+  "registers": [
+    16992792,
+    16992792,
+    0,
+    0,
+    16915428,
+    34359751544,
+    34359785996,
+    1,
+    34359787040,
+    34359751708,
+    34359786160,
+    0,
+    98,
+    34359742496,
+    0,
+    32,
+    0,
+    16921402,
+    35,
+    582,
+    140737219932528,
+    27
+  ],
+  "stack": [
+    16901146,
+    16902196,
+    16992280,
+    83,
+    0,
+    16992184,
+    32,
+    16906686,
+    16992280,
+    0,
+    16992792,
+    140737219932768,
+    16992792,
+    1,
+    16992184,
+    16914108,
+    16992792,
+    8736865796703742720,
+    493921239040,
+    0,
+    0,
+    3,
+    16,
+    140737219933272,
+    16992792,
+    16922475,
+    1,
+    140737219933322,
+    1,
+    140737219933274,
+    16901146,
+    16902196,
+    140737219932904,
+    4,
+    16901122,
+    16992184,
+    16901146,
+    16910303,
+    32,
+    16992296,
+    16376,
+    16380,
+    231928233986,
+    4294967383,
+    14379550507024,
+    15200022404530734,
+    83,
+    34360426308,
+    16376,
+    8736865796703742720,
+    132583076,
+    140737219933144,
+    2,
+    3,
+    16,
+    140737219933272,
+    16992792,
+    16924095,
+    16992280,
+    68736391366,
+    0,
+    0,
+    498216206336,
+    8736865796703742720
+  ],
+  "frames": [
+    {
+      "slot": 0,
+      "address": "0x101e41a",
+      "location": "BSF::Bytes::u16(unsigned long) const\n??:?"
+    },
+    {
+      "slot": 1,
+      "address": "0x101e834",
+      "location": "BSF::Bytes::u32(unsigned long) const\n??:?"
+    },
+    {
+      "slot": 7,
+      "address": "0x101f9be",
+      "location": "BSF::Face::glyph(unsigned int) const\n??:?"
+    },
+    {
+      "slot": 15,
+      "address": "0x10216bc",
+      "location": "BSF::utf8(char const*, unsigned long, unsigned int&)\n??:?"
+    },
+    {
+      "slot": 25,
+      "address": "0x102376b",
+      "location": "BSF::resolved_cluster(char const*, unsigned long, bool, char const*, bool)\n??:?"
+    },
+    {
+      "slot": 30,
+      "address": "0x101e41a",
+      "location": "BSF::Bytes::u16(unsigned long) const\n??:?"
+    },
+    {
+      "slot": 31,
+      "address": "0x101e834",
+      "location": "BSF::Bytes::u32(unsigned long) const\n??:?"
+    },
+    {
+      "slot": 34,
+      "address": "0x101e402",
+      "location": "BSF::Bytes::u16(unsigned long) const\n??:?"
+    },
+    {
+      "slot": 36,
+      "address": "0x101e41a",
+      "location": "BSF::Bytes::u16(unsigned long) const\n??:?"
+    },
+    {
+      "slot": 37,
+      "address": "0x10207df",
+      "location": "BSF::Face::kerning(unsigned int, unsigned int, int) const\n??:?"
+    },
+    {
+      "slot": 57,
+      "address": "0x1023dbf",
+      "location": "BSF::TextMetrics::cluster(char const*, unsigned long, unsigned long, int, bool, char const*)\n??:?"
+    }
+  ],
+  "config": [
+    826692418,
+    1,
+    0,
+    16,
+    1,
+    2226539108
+  ]
+}

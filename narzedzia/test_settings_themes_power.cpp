@@ -30,13 +30,16 @@ int main(){
   struct Probe:Kontrolka{size_t offset(){return reinterpret_cast<char*>(&obszar_ekranu_)-reinterpret_cast<char*>(this);}} probe;
   auto* base=reinterpret_cast<const unsigned char*>(&s);
   size_t button_slot=0;for(size_t i=0;i+sizeof(void*)<=sizeof(s);i+=alignof(void*)){void* p=nullptr;memcpy(&p,base+i,sizeof(p));if(p==s.dziecko(2)){button_slot=i;break;}}
+  size_t search_slot=0;for(size_t i=0;i+sizeof(void*)<=sizeof(s);i+=alignof(void*)){void* p=nullptr;memcpy(&p,base+i,sizeof(p));if(p==s.dziecko(0)){search_slot=i;break;}}
+  auto* search=static_cast<PoleTekstowe*>(s.dziecko(0));
+  size_t query_offset=reinterpret_cast<const unsigned char*>(search->tekst())-reinterpret_cast<const unsigned char*>(search);
   auto* popup=s.events.popups.fokus_popupu();
   auto* first=s.power_menu().element(0)->obraz_ikony()-1;
   size_t manager_offset=0;
   for(size_t i=0;i+sizeof(void*)<=sizeof(WidokMenuPopup);i+=alignof(void*)){void* p=nullptr;memcpy(&p,reinterpret_cast<const unsigned char*>(popup)+i,sizeof(p));if(p==&s.events.popups){manager_offset=i;break;}}
   CHECK(manager_offset>0);
   FILE* f=fopen(".bsf-test/power-observer.json","w");
-  fprintf(f,"{\"button_slot\":%zu,\"popup_offset\":%zu,\"rect_offset\":%zu,\"icons_offset\":%zu,\"icon_size\":%zu,\"pixel_offset\":%zu,\"manager_offset\":%zu}\n",button_slot,reinterpret_cast<const unsigned char*>(popup)-base,probe.offset(),reinterpret_cast<const unsigned char*>(first)-base,sizeof(IkonaPNG),size_t(24),manager_offset);
+  fprintf(f,"{\"button_slot\":%zu,\"popup_offset\":%zu,\"rect_offset\":%zu,\"icons_offset\":%zu,\"icon_size\":%zu,\"pixel_offset\":%zu,\"manager_offset\":%zu,\"search_slot\":%zu,\"query_offset\":%zu,\"query_bytes\":%d}\n",button_slot,reinterpret_cast<const unsigned char*>(popup)-base,probe.offset(),reinterpret_cast<const unsigned char*>(first)-base,sizeof(IkonaPNG),size_t(24),manager_offset,search_slot,query_offset,StartMenu::QueryMax);
   fclose(f);s.close();
  }
  process.pid=7;process.poziom_zaufania=PZB_ZAUFANE;process.uprawnienia=PRAWO_SYSTEM_CONFIG;

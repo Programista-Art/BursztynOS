@@ -2,6 +2,7 @@
 #include "bws_api.h"
 #include "bursztyn_gui.h"
 #include "stack_protector.h"
+
 extern "C" uint64_t bws_wywolaj(uint64_t nr, uint64_t a, uint64_t b, uint64_t c, uint64_t d) {
     register uint64_t r8 asm("r8") = nr;
     register uint64_t r9 asm("r9") = a;
@@ -12,55 +13,91 @@ extern "C" uint64_t bws_wywolaj(uint64_t nr, uint64_t a, uint64_t b, uint64_t c,
     asm volatile("syscall" : "=a"(result) : "r"(r8), "r"(r9), "r"(r10), "r"(r12), "r"(r13) : "rcx", "r11", "memory", "cc");
     return result;
 }
+
 extern "C" {
-__attribute__((section(".data.ssp_guard"),used)) uintptr_t __stack_chk_guard = 0;
+__attribute__((section(".data.ssp_guard"), used)) uintptr_t __stack_chk_guard = 0;
 [[noreturn]] __attribute__((no_stack_protector)) void __stack_chk_fail() {
-    bws_wywolaj(BWS_ZAKONCZ_PROCES, BWS_EXIT_STACK_PROTECTOR_VIOLATION,0,0,0);
+    bws_wywolaj(BWS_ZAKONCZ_PROCES, BWS_EXIT_STACK_PROTECTOR_VIOLATION, 0, 0, 0);
     for (;;) asm volatile("ud2");
 }
 }
-static void say(const char* s) { bws_wywolaj(BWS_WYPISZ,(uint64_t)s,0,0,0); }
+
+static void say(const char* s) { bws_wywolaj(BWS_WYPISZ, (uint64_t)s, 0, 0, 0); }
 static void value(uint64_t n) {
     char s[19] = "0x0000000000000000";
-    for (int i=17;i>=2;--i) { s[i]="0123456789abcdef"[n&15]; n>>=4; }
+    for (int i = 17; i >= 2; --i) { s[i] = "0123456789abcdef"[n & 15]; n >>= 4; }
     say(s);
 }
+
 static void callback() { say("[BUR2 CALLBACK OK]\n"); }
 static void (*volatile relocated_callback)() = callback;
+
+__attribute__((section(".rodata"), aligned(16), used))
+static const uint8_t rodata_exec_stub[16] = {0xc3, 0x90, 0x90, 0x90};
+
+__attribute__((section(".data"), aligned(16), used))
+static uint8_t data_exec_stub[16] = {0xc3, 0x90, 0x90, 0x90};
+
+__attribute__((section(".bss"), aligned(16), used))
+static uint8_t bss_exec_stub[16];
+
 __attribute__((noinline)) static void smash() {
     volatile char buffer[16]{};
-    volatile char* p=buffer;
+    volatile char* p = buffer;
     asm volatile("" : "+r"(p) :: "memory");
-    for(unsigned i=0;i<64;++i) p[i]='A';
+    for (unsigned i = 0; i < 64; ++i) p[i] = 'A';
     asm volatile("" :: "r"(buffer) : "memory");
 }
+
 extern "C" [[noreturn]] void _start() {
-    volatile uint64_t local=123;
+    volatile uint64_t local = 123;
     relocated_callback();
-    auto heap=bws_wywolaj(BWS_ALOKUJ_STERTE,4096,0,0,0);
+    auto heap = bws_wywolaj(BWS_ALOKUJ_STERTE, 4096, 0, 0, 0);
     if (!heap || !__stack_chk_guard) { say("[BUR2 FAIL]\n"); __stack_chk_fail(); }
-    *reinterpret_cast<uint64_t*>(heap)=456;
-    uint64_t object=bws_wywolaj(BWS_SHM_CREATE,4096,3,0,0);
-    uint64_t shm=object ? bws_wywolaj(BWS_SHM_MAP,object,3,0,0) : 0;
-    say("[BUR2 LAYOUT] code=");value((uint64_t)&_start);
-    say(" stack=");value((uint64_t)&local);
-    say(" heap=");value(heap);
-    say(" guard=");value((uint64_t)&__stack_chk_guard);
-    say(" shm=");value(shm);say("\n[BUR2 EXEC PASS]\n");
-    if(shm)bws_wywolaj(BWS_SHM_UNMAP,shm,0,0,0);
-    if(object)bws_wywolaj(BWS_SHM_CLOSE,object,0,0,0);
+    *reinterpret_cast<uint64_t*>(heap) = 456;
+    bss_exec_stub[0] = 0xc3;
+    uint64_t object = bws_wywolaj(BWS_SHM_CREATE, 4096, 3, 0, 0);
+    uint64_t shm = object ? bws_wywolaj(BWS_SHM_MAP, object, 3, 0, 0) : 0;
+    if (!shm) { say("[BUR2 FAIL]\n"); __stack_chk_fail(); }
+    *reinterpret_cast<uint8_t*>(shm) = 0xc3;
+
+    say("[BUR2 LAYOUT] code="); value((uint64_t)&_start);
+    say(" stack="); value((uint64_t)&local);
+    say(" heap="); value(heap);
+    say(" guard="); value((uint64_t)&__stack_chk_guard);
+    say(" shm="); value(shm);
+    say(" rodata="); value((uint64_t)rodata_exec_stub);
+    say(" data="); value((uint64_t)data_exec_stub);
+    say(" bss="); value((uint64_t)bss_exec_stub);
+    say("\n[BUR2 EXEC PASS]\n");
+
     char mode[32]{};
-    bws_wywolaj(BWS_ARGUMENT_STARTOWY,(uint64_t)mode,sizeof(mode),0,0);
-    if(mode[0]) {
-        say("[BUR2 NEGATIVE] ");say(mode);say("\n");
-        if(mode[0]=='g') *reinterpret_cast<volatile uintptr_t*>(&__stack_chk_guard)=0;
-        if(mode[0]=='t') *reinterpret_cast<volatile uint8_t*>(&_start)=0;
-        if(mode[0]=='r') *reinterpret_cast<volatile uint8_t*>(const_cast<char*>("read-only"))=0;
-        if(mode[0]=='h') { *reinterpret_cast<uint8_t*>(heap)=0xc3; reinterpret_cast<void(*)()>(heap)(); }
-        if(mode[0]=='s') { volatile uint8_t code=0xc3; reinterpret_cast<void(*)()>((uintptr_t)&code)(); }
-        if(mode[0]=='c') smash();
+    bws_wywolaj(BWS_ARGUMENT_STARTOWY, (uint64_t)mode, sizeof(mode), 0, 0);
+    if (mode[0] == 'p') {
+        say("[BUR2 PTE HOLD]\n");
+        auto until = bws_wywolaj(BWS_CZAS_MONOTONICZNY_NS, 0, 0, 0, 0) + 1500000000ULL;
+        while (bws_wywolaj(BWS_CZAS_MONOTONICZNY_NS, 0, 0, 0, 0) < until) asm volatile("pause");
+    } else if (mode[0]) {
+        say("[BUR2 NEGATIVE] "); say(mode); say("\n");
+        if (mode[0] == 'g') *reinterpret_cast<volatile uintptr_t*>(&__stack_chk_guard) = 0;
+        if (mode[0] == 't') *reinterpret_cast<volatile uint8_t*>(&_start) = 0;
+        if (mode[0] == 'r') *reinterpret_cast<volatile uint8_t*>(const_cast<uint8_t*>(rodata_exec_stub)) = 0;
+        if (mode[0] == 'e') reinterpret_cast<void(*)()>((uintptr_t)rodata_exec_stub)();
+        if (mode[0] == 'd') reinterpret_cast<void(*)()>((uintptr_t)data_exec_stub)();
+        if (mode[0] == 'b') reinterpret_cast<void(*)()>((uintptr_t)bss_exec_stub)();
+        if (mode[0] == 'h') { *reinterpret_cast<uint8_t*>(heap) = 0xc3; reinterpret_cast<void(*)()>(heap)(); }
+        if (mode[0] == 's') { volatile uint8_t code = 0xc3; reinterpret_cast<void(*)()>((uintptr_t)&code)(); }
+        if (mode[0] == 'm') reinterpret_cast<void(*)()>(shm)();
+        if (mode[0] == 'u') {
+            uintptr_t sp_page = ((uintptr_t)&local) & ~0xFFFULL;
+            *reinterpret_cast<volatile uint64_t*>(sp_page - 16ULL * 4096ULL) = 1;
+        }
+        if (mode[0] == 'c') smash();
         say("[BUR2 NEGATIVE FAILED]\n");
     }
-    bws_wywolaj(BWS_ZAKONCZ_PROCES,0,0,0,0);
+
+    if (shm) bws_wywolaj(BWS_SHM_UNMAP, shm, 0, 0, 0);
+    if (object) bws_wywolaj(BWS_SHM_CLOSE, object, 0, 0, 0);
+    bws_wywolaj(BWS_ZAKONCZ_PROCES, 0, 0, 0, 0);
     for (;;) asm volatile("ud2");
 }

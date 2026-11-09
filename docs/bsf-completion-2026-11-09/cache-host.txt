@@ -1,0 +1,28 @@
+g++ -std=c++17 -fcoroutines -O0 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_bsf_ui.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/ui-host
+g++ -std=c++17 -O1 -g -fcheck-new -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_bsf_resources.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/resources
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/resources
+[BSF] Bounded catalog limit reached (128 faces / 1024 records).
+[BSF] Bounded catalog limit reached (128 faces / 1024 records).
+[BSF] Sort OOM.
+[BSF] Rejected font; fallback retained.
+[BSF] No usable TTF; bitmap fallback remains active.
+[BSF] Rejected font; fallback retained.
+[BSF] No usable TTF; bitmap fallback remains active.
+[BSF] Rejected font; fallback retained.
+[BSF] No usable TTF; bitmap fallback remains active.
+[BSF] Rejected font; fallback retained.
+[BSF] No usable TTF; bitmap fallback remains active.
+[BSF] Rejected font; fallback retained.
+[BSF] No usable TTF; bitmap fallback remains active.
+catalog=32 discover_ns=326898356 catalog_bytes=44544 io_bytes=48622080
+catalog=64 discover_ns=562079074 catalog_bytes=44544 io_bytes=97244160
+catalog=128 discover_ns=271008961 catalog_bytes=44544 io_bytes=194488320
+file=3145728 discover_ns=53233421 load_raster_ns=9609417 resident=3145728 peak=3145728
+file=16777184 discover_ns=129183644 load_raster_ns=60089281 resident=16777184 peak=16777184
+BSF expanded catalog/large-file/budget/failure tests: 4604 checks PASS
+g++ -std=c++17 -O1 -g -DBSF_NATIVE=1 -ffunction-sections -fdata-sections -fsanitize=address,undefined -fno-pie -no-pie narzedzia/test_shell_terminal.cpp bsf/bsf.cpp bsf/terminal.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/shell-ttf
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/ui-host
+BSF UI/browser: 9084 checks PASS; proportional geometry, clipping/AA, Polish UTF-8, previews, persistence, font priority, cooperative paint and corrupt-font fallback
+ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/shell-ttf
+Shell host: 2201/2201 PASS
+Host checks passed: editor, popup, clipboard, sponsors and version (100%, 125%); not OS runtime validation.
