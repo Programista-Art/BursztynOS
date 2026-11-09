@@ -1,6 +1,6 @@
-#include "../../loader.h"
+#include "loader.h"
 #include "../../bursztyn_ui/bursztyn_ui.h"
-#include "../../instalator_format.h"
+#include "instalator_format.h"
 using namespace BursztynUI;
 extern "C" void _start();
 extern "C" {

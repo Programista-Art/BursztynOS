@@ -1,7 +1,7 @@
 #define BURSZTYN_UI_CZCIONKA_SYSTEMOWA 1
-#include "../../bursztyn_gui.h"
+#include "bursztyn_gui.h"
 #include "../../bursztyn_ui/bursztyn_ui.h"
-#include "../../loader.h"
+#include "loader.h"
 #include "model.h"
 using namespace BursztynUI;
 namespace {

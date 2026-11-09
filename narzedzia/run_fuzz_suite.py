@@ -18,53 +18,53 @@ CORPUS_DIR = ROOT / ".fuzz-corpus"
 METRICS_OUT = ROOT / "docs/security-hardening-2026-11-04/fuzzing-metrics.json"
 
 FUZZERS = [
-    {"name":"fuzz_bur_v2", "sources":["narzedzia/fuzz/fuzz_bur_v2.cpp"],
+    {"name":"fuzz_bur_v2", "sources":["testy/fuzz/fuzz_bur_v2.cpp"],
      "extra_flags":[], "smoke_iters":10000, "extended_iters":50000},
     {
         "name": "fuzz_bws",
-        "sources": ["narzedzia/fuzz/fuzz_bws.cpp"],
+        "sources": ["testy/fuzz/fuzz_bws.cpp"],
         "extra_flags": [],
         "smoke_iters": 10000,
         "extended_iters": 50000,
     },
     {
         "name": "fuzz_bur_loader",
-        "sources": ["narzedzia/fuzz/fuzz_bur_loader.cpp", "loader.cpp"],
+        "sources": ["testy/fuzz/fuzz_bur_loader.cpp", "jadro/fs/loader.cpp"],
         "extra_flags": ["-DBURSZTYN_LOADER_HOST_TEST"],
         "smoke_iters": 10000,
         "extended_iters": 50000,
     },
     {
         "name": "fuzz_bsp2_superblock",
-        "sources": ["narzedzia/fuzz/fuzz_bsp2_superblock.cpp", "storage_format.cpp", "psf.cpp"],
+        "sources": ["testy/fuzz/fuzz_bsp2_superblock.cpp", "jadro/fs/storage_format.cpp", "jadro/fs/psf.cpp"],
         "extra_flags": ["-DBURSZTYN_PSF_HOST_TEST", "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections"],
         "smoke_iters": 2500,
         "extended_iters": 10000,
     },
     {
         "name": "fuzz_bsp2_inode",
-        "sources": ["narzedzia/fuzz/fuzz_bsp2_inode.cpp", "storage_format.cpp", "psf.cpp"],
+        "sources": ["testy/fuzz/fuzz_bsp2_inode.cpp", "jadro/fs/storage_format.cpp", "jadro/fs/psf.cpp"],
         "extra_flags": ["-DBURSZTYN_PSF_HOST_TEST", "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections"],
         "smoke_iters": 2500,
         "extended_iters": 10000,
     },
     {
         "name": "fuzz_bsp2_dir",
-        "sources": ["narzedzia/fuzz/fuzz_bsp2_dir.cpp", "storage_format.cpp", "psf.cpp"],
+        "sources": ["testy/fuzz/fuzz_bsp2_dir.cpp", "jadro/fs/storage_format.cpp", "jadro/fs/psf.cpp"],
         "extra_flags": ["-DBURSZTYN_PSF_HOST_TEST", "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections"],
         "smoke_iters": 2500,
         "extended_iters": 10000,
     },
     {
         "name": "fuzz_bsp2_path",
-        "sources": ["narzedzia/fuzz/fuzz_bsp2_path.cpp", "storage_format.cpp", "psf.cpp"],
+        "sources": ["testy/fuzz/fuzz_bsp2_path.cpp", "jadro/fs/storage_format.cpp", "jadro/fs/psf.cpp"],
         "extra_flags": ["-DBURSZTYN_PSF_HOST_TEST", "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections"],
         "smoke_iters": 5000,
         "extended_iters": 25000,
     },
     {
         "name": "fuzz_bsp2_ops",
-        "sources": ["narzedzia/fuzz/fuzz_bsp2_ops.cpp", "storage_format.cpp", "psf.cpp"],
+        "sources": ["testy/fuzz/fuzz_bsp2_ops.cpp", "jadro/fs/storage_format.cpp", "jadro/fs/psf.cpp"],
         "extra_flags": ["-DBURSZTYN_PSF_HOST_TEST", "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections"],
         "smoke_iters": 2500,
         "extended_iters": 10000,
@@ -103,22 +103,27 @@ def main():
         "g++", "-std=c++17", "-O1", "-g",
         "-Wall", "-Wextra", "-Wno-unused-parameter",
         "-I.", "-Ibiblioteki/mbedtls/include",
+        "-Isterowniki/pci", "-Isterowniki/virtio", "-Isterowniki/magazyn",
+        "-Isterowniki/siec", "-Isterowniki/wejscie", "-Isterowniki/czas",
+        "-Isterowniki/platforma", "-Isterowniki/grafika", "-Isterowniki",
+        "-Ijadro/arch", "-Ijadro/mm", "-Ijadro/fs", "-Ijadro/bws", "-Ijadro/gui",
+        "-Ijadro/siec", "-Ijadro/aktualizacja", "-Ijadro/diag", "-Ijadro/rdzen",
         "-fsanitize=address,undefined",
         "-fsanitize-coverage=trace-pc",
     ]
 
     psf_o = BUILD_DIR / "psf_fuzz.o"
     storage_o = BUILD_DIR / "storage_fuzz.o"
-    print("[FUZZ] Kompilacja wspolnych obiektow psf.cpp + storage_format.cpp (ASan/UBSan/trace-pc)...")
+    print("[FUZZ] Kompilacja wspolnych obiektow jadro/fs/psf.cpp + jadro/fs/storage_format.cpp (ASan/UBSan/trace-pc)...")
     run_cmd([
         *base_cxxflags,
         "-DBURSZTYN_PSF_HOST_TEST", "-ffunction-sections", "-fdata-sections",
-        "-c", "psf.cpp", "-o", str(psf_o),
+        "-c", "jadro/fs/psf.cpp", "-o", str(psf_o),
     ])
     run_cmd([
         *base_cxxflags,
         "-DBURSZTYN_PSF_HOST_TEST", "-ffunction-sections", "-fdata-sections",
-        "-c", "storage_format.cpp", "-o", str(storage_o),
+        "-c", "jadro/fs/storage_format.cpp", "-o", str(storage_o),
     ])
 
     env = os.environ.copy()
@@ -138,9 +143,9 @@ def main():
 
         srcs = []
         for s in f["sources"]:
-            if s == "psf.cpp":
+            if s == "jadro/fs/psf.cpp":
                 srcs.append(str(psf_o))
-            elif s == "storage_format.cpp":
+            elif s == "jadro/fs/storage_format.cpp":
                 srcs.append(str(storage_o))
             else:
                 srcs.append(s)
@@ -175,37 +180,37 @@ def main():
         "deterministic_regression_bugs_verified": [
             {
                 "id": "BUG-1",
-                "component": "syscalls.cpp (obsluga_wywolan_systemowych)",
+                "component": "jadro/bws/syscalls.cpp (obsluga_wywolan_systemowych)",
                 "description": "Unauthenticated BWS 99 (arg1 == 0xDEADBEEFCAFEULL) Ring 3 kernel stack overflow panic trigger removed from production builds and gated behind BURSZTYN_DEBUG_STACK_OVERFLOW_BWS + operacja_systemowa_dozwolona.",
                 "verified_by": ["fuzz_bws", "test_bws_abuse_qemu.py"],
             },
             {
                 "id": "BUG-2",
-                "component": "psf.cpp (psf_przetlumacz_sciezke_slotu)",
+                "component": "jadro/fs/psf.cpp (psf_przetlumacz_sciezke_slotu)",
                 "description": "Fixed 160-byte buffer silent path truncation and missing pre-translation bezpieczna_sciezka validation on A/B slot-translated paths (/programy, /system).",
                 "verified_by": ["fuzz_bsp2_path"],
             },
             {
                 "id": "BUG-3",
-                "component": "psf.cpp (wskazniki_pliku_poprawne, waliduj_katalog)",
+                "component": "jadro/fs/psf.cpp (wskazniki_pliku_poprawne, waliduj_katalog)",
                 "description": "Fixed missing uniqueness/aliasing validation across direct blocks, blok_posredni_1, blok_posredni_2, and indirect entries, plus root-inode directory cycle rejection.",
                 "verified_by": ["fuzz_bsp2_inode", "fuzz_bsp2_dir"],
             },
             {
                 "id": "BUG-4",
-                "component": "psf.cpp & psf_usuwanie.inc (zwolnij_wszystkie_bloki_wezla, ustaw_wskaznik_bloku, odwiedz_bloki_usuwania)",
+                "component": "jadro/fs/psf.cpp & jadro/fs/psf_usuwanie.inc (zwolnij_wszystkie_bloki_wezla, ustaw_wskaznik_bloku, odwiedz_bloki_usuwania)",
                 "description": "Fixed 256-slot LRU data block cache eviction of indirect pointer table block (blok_posredni_1/blok_posredni_2) while freeing/zeroing >256 data blocks of a large file, which previously corrupted the indirect pointer table mid-loop and freed block 0.",
                 "verified_by": ["fuzz_bsp2_ops"],
             },
             {
                 "id": "BUG-5",
-                "component": "loader.cpp (pakiet_parsuj_manifest_tekst)",
+                "component": "jadro/fs/loader.cpp (pakiet_parsuj_manifest_tekst)",
                 "description": "Discovered by fuzz_bur_loader: when 'wersja' in opis.aplikacji was >= 32 bytes, pakiet_parsuj_manifest_tekst copied 32 bytes from a 64-byte temporary buffer into out_manifest->wersja[32] without a NUL terminator, causing C-string overread into adjacent struct fields; also left out_manifest uninitialized on early error return.",
                 "verified_by": ["fuzz_bur_loader"],
             },
             {
                 "id": "BUG-6",
-                "component": "syscalls.cpp (bws_rozmiar_pliku)",
+                "component": "jadro/bws/syscalls.cpp (bws_rozmiar_pliku)",
                 "description": "Discovered by test_bws_abuse_qemu.py: bws_rozmiar_pliku (BWS_ROZMIAR_PLIKU=44) unconditionally returned rozmiar_pliku(sciezka) + 1ULL (= 1ULL) even when sciezka was invalid (e.g. '/../../cytaty.txt'), non-existent, or a directory, causing Ring 3 pobierz_rozmiar_pliku() to report success with size 0. Fixed to verify pobierz_metadane_tworu(sciezka, &meta) && meta.typ == TYP_PLIK before returning meta.rozmiar + 1ULL.",
                 "verified_by": ["fuzz_bws", "test_bws_abuse_qemu.py"],
             },

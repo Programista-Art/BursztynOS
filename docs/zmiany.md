@@ -1,10 +1,38 @@
 # Ostatnie zmiany w BursztynOS
 
-Podsumowanie pracy z ostatnich dni (październik 2026). Stan na: **2026-10-11**.
+Podsumowanie pracy z ostatnich dni (październik–listopad 2026). Stan changelogu bazowego: **2026-10-11**; sekcja lokalnej weryfikacji: **2026-11-06**.
 
 Plik obejmuje:
 1. Ostatnie commity na `main` (już zatwierdzone).
 2. Zmiany robocze w drzewie (jeszcze **niezacommitowane**).
+3. Lokalną weryfikację i hardening bezpieczeństwa (listopad 2026).
+
+---
+
+## 0. Lokalna weryfikacja i hardening (2026-11)
+
+### Bezpieczeństwo runtime (2026-11-04)
+
+Zob. [bursztyn_security_hardening_stack_fuzz_2026-11-04.md](audyty/bursztyn_security_hardening_stack_fuzz_2026-11-04.md) oraz metryki w [security-hardening-2026-11-04/](security-hardening-2026-11-04/):
+
+- SSP Ring 0/3 (`-fstack-protector-strong`, global guard),
+- 7 fuzzerów (BWS / BUR / BSP2) + smoke/extended,
+- poprawki memory-safety wykryte fuzzem / QEMU abuse,
+- prototyp BUR v2 ASLR (host).
+
+### Lokalne CI bez GitHuba (2026-11-06)
+
+Mapa: [12_lokalna_weryfikacja.md](12_lokalna_weryfikacja.md).
+
+| Cel | Rola |
+|-----|------|
+| `make test` / `test-smoke` | Gate przed commitem |
+| `make test-security` | SSP + fuzz smoke + QEMU abuse + guard-page (`test-security-hardening` = alias) |
+| `make test-regression` | VirtIO / OTA / instalator / Husarz / HDA / input |
+| `make test-nightly` | security + regression + `fuzz-extended` |
+| `make test-local-suite MODE=…` | Orkiestrator JSON → `.local-ci/` ([narzedzia/run_local_suite.py](../narzedzia/run_local_suite.py)) |
+
+Higiena: artefakty `*.d`/`*.o`/`*.bak` wycofane z indeksu git; jednorazowe `patch_*.py` w `narzedzia/archiwum/patch/`.
 
 ---
 
@@ -96,19 +124,19 @@ Duże rozbudowanie (+467 / −132):
 - Sprawdzanie dostępności urządzeń VirtIO (`Assert-QemuVirtioDevices`).
 - Topologia PCI zgodna z Linux: **Intel HDA** + `virtio-blk` → `net` → `rng` → `gpu` → keyboard → mouse.
 - Backend audio hosta: `none` (unika błędu DirectSound przy zachowaniu HDA w gościu).
-- Audyty launchera (`narzedzia/test_windows_launcher_config.py`).
+- Audyty launchera (`testy/test_windows_launcher_config.py`).
 
 ### 2.8. Testy
 
 Zaktualizowane / rozbudowane:
 
-- `narzedzia/test_xhci_boot_coexistence.cpp`
-- `narzedzia/test_xhci_physical_mouse.cpp`
-- `narzedzia/test_xhci_pointer.cpp`
-- `narzedzia/test_virtio_pci.cpp`
-- `narzedzia/test_powitanie.cpp`
-- `narzedzia/test_input_diagnostic_parity.py`
-- `narzedzia/test_windows_launcher_config.py`
+- `testy/test_xhci_boot_coexistence.cpp`
+- `testy/test_xhci_physical_mouse.cpp`
+- `testy/test_xhci_pointer.cpp`
+- `testy/test_virtio_pci.cpp`
+- `testy/test_powitanie.cpp`
+- `testy/test_input_diagnostic_parity.py`
+- `testy/test_windows_launcher_config.py`
 
 Artefakty walidacji (nieśledzone): `.hda-test/`, `.pointingtest/coexistence-validation/parity/…`, `.pointingtest/launcher-audit/…`.
 
@@ -135,7 +163,9 @@ Artefakty walidacji (nieśledzone): `.hda-test/`, `.pointingtest/coexistence-val
 2. Przejść walidację xHCI po maszynie stanów portów (koegzystencja touchpad / mysz USB).
 3. Złapać timeline boot pod `BURSZTYNDIAGBOOTXHCITIMING` i porównać z audytami w `docs/`.
 4. Zacommitować spójny zestaw zmian (HDA diag + Test dźwięku + timing + xHCI + Makefile/runwindows).
+5. Utrzymywać lokalne CI: `make test-smoke` przed commitem, `make test-nightly` nocą; porównywać metryki fuzz z `docs/security-hardening-2026-11-04/`.
+6. Dokończyć produkcyjny BUR v2 ASLR w loaderze (dziś prototyp host).
 
 ---
 
-*Wygenerowano automatycznie na podstawie `git log` i `git diff` (2026-10-11).*
+*Wygenerowano automatycznie na podstawie `git log` i `git diff` (2026-10-11); uzupełniono o lokalną weryfikację (2026-11-06).*

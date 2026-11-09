@@ -8,10 +8,10 @@
 #include "../bsf/edit.h"
 #endif
 #if defined(BSF_NATIVE)
-#include "../bws_czcionka.h"
+#include "bws_czcionka.h"
 #elif defined(BURSZTYN_UI_CZCIONKA_SYSTEMOWA)
-#include "../bws_czcionka.h"
-#include "../bursztyn_gui.h"
+#include "bws_czcionka.h"
+#include "bursztyn_gui.h"
 #else
 #include "../czcionki/extronic16Bunicode.h"
 #endif

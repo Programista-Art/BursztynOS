@@ -16,11 +16,11 @@
 //   6. diagnostyka wlascicielstwa blokady (owner/depth/site).
 //
 // Sciezki OTA (GuardOTA) wymagaja srodowiska jadra i sa weryfikowane
-// audytem statycznym (narzedzia/test_wspolbieznosc.py) oraz zachowaniem
+// audytem statycznym (testy/test_wspolbieznosc.py) oraz zachowaniem
 // live w QEMU (BWS 84 wywoluje zagniezdzony GuardOTA przy kazdym odswiezeniu).
-#include "../../storage_format.h"
-#include "../../psf.h"
-#include "../../zegar-rtc.h"
+#include "storage_format.h"
+#include "psf.h"
+#include "../../sterowniki/czas/zegar-rtc.h"
 #include <map>
 #include <array>
 #include <vector>

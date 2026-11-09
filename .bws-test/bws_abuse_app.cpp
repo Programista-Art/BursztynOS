@@ -1,9 +1,9 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include "bws_api.h"
-#include "pzb.h"
-#include "bursztyn_gui.h"
+#include "jadro/bws/bws_api.h"
+#include "jadro/bws/pzb.h"
+#include "jadro/gui/bursztyn_gui.h"
 
 struct NaglowekBur {
     uint8_t magia[4];
@@ -93,6 +93,11 @@ extern "C" __attribute__((noreturn)) void _start() {
     log_s("[BWS-ABUSE-QEMU] 4/6 Odrzucanie przepelnien rozmiarow (sterta/blit): OK\n");
 
     /* 5. Egzekwowanie PZB i PRAWO_* dla operacji systemowych z PZB_UZYTKOWNIK */
+    uint8_t process_list[2048] = {};
+    CHECK_BWS(bws_wywolaj(BWS_PROCESY_LISTA, reinterpret_cast<uint64_t>(process_list), 1, 0, 0) == 0,
+              "Unprivileged process enumerated privileged process metadata");
+    CHECK_BWS(bws_wywolaj(BWS_PROCES_ZABIJ, 1, 0, 0, 0) == 0,
+              "Unprivileged process killed the system manager");
     CHECK_BWS(bws_wywolaj(BWS_RESET, 0, 0, 0, 0) == 0,
               "Unprivileged process allowed to call BWS_RESET");
     CHECK_BWS(bws_wywolaj(BWS_SHUTDOWN, 0, 0, 0, 0) == 0,

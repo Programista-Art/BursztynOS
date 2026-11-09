@@ -1,5 +1,5 @@
 /* BursztynUI Kontrolki 3 - osiem kontrolek retained-mode. */
-#include "../../loader.h"
+#include "loader.h"
 #include "../../bursztyn_ui/bursztyn_ui.h"
 
 using namespace BursztynUI;

@@ -3,8 +3,8 @@
 // Called before a link reset invalidates a running playback stream.
 void hda_powiadom_reset_kontrolera(uint32_t);
 #ifndef BURSZTYN_HDA_HOST_TEST
-#include "../../pamiec.h"
-#include "../../pci.h"
+#include "pamiec.h"
+#include "pci.h"
 #include "../czas/hpet.h"
 void wypisz_log(const char*);
 #endif

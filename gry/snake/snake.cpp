@@ -9,8 +9,8 @@
  * - WASD + strzalki (sekwencje ANSI)
  */
 
-#include "../../bursztyn_gui.h"
-#include "../../bws_zdarzenia.h"
+#include "bursztyn_gui.h"
+#include "bws_zdarzenia.h"
 
 /* ========================================================================
  * Standardowy naglowek programu .bur

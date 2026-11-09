@@ -7,7 +7,7 @@ struct StorageNamespace {
     Origin origin{};StorageEntry entries[StorageEntries]{};unsigned count{},bytes{},revision{1},saved{};bool loaded{},loading{},saving{},failed{};uint32_t tab{};
     int find(const char *key,unsigned size)const{for(unsigned i=0;i<count;++i)if(entries[i].key_size==size){bool same=true;for(unsigned j=0;j<size;++j)if(entries[i].key[j]!=key[j]){same=false;break;}if(same)return int(i);}return -1;}
     bool set(const char *key,unsigned ks,const char *value,unsigned vs){
-        if(ks>StorageKey||vs>StorageValue||revision==UINT32_MAX)return false;int index=find(key,ks);unsigned previous=index<0?0:entries[index].key_size+entries[index].value_size;
+        if(ks>StorageKey||vs>StorageValue||revision==UINT32_MAX){return false;}int index=find(key,ks);unsigned previous=index<0?0:entries[index].key_size+entries[index].value_size;
         if(bytes-previous+ks+vs>StorageQuota||(index<0&&count==StorageEntries))return false;
         unsigned slot=index<0?count++:unsigned(index);auto &e=entries[slot];for(unsigned i=0;i<ks;++i)e.key[i]=key[i];e.key[ks]=0;for(unsigned i=0;i<vs;++i)e.value[i]=value[i];e.value[vs]=0;e.key_size=uint16_t(ks);e.value_size=uint16_t(vs);bytes=bytes-previous+ks+vs;++revision;return true;
     }
@@ -18,7 +18,7 @@ inline uint32_t storage_checksum(const uint8_t *data,unsigned n){uint32_t hash=2
 inline void storage_u32(uint8_t *out,uint32_t value){for(unsigned i=0;i<4;++i)out[i]=uint8_t(value>>(i*8));}
 inline uint32_t storage_read_u32(const uint8_t *in){uint32_t v=0;for(unsigned i=0;i<4;++i)v|=uint32_t(in[i])<<(i*8);return v;}
 inline unsigned storage_encode(const StorageNamespace &s,uint8_t *out,unsigned cap){
-    if(cap<StorageDiskCapacity||!s.origin.valid||s.count>StorageEntries)return 0;char origin[280];unsigned os=origin_key(s.origin,origin),pos=24;
+    if(cap<StorageDiskCapacity||!s.origin.valid||s.count>StorageEntries){return 0;}char origin[280];unsigned os=origin_key(s.origin,origin),pos=24;
     for(unsigned i=0;i<os;++i)out[pos++]=uint8_t(origin[i]);
     for(unsigned i=0;i<s.count;++i){auto &e=s.entries[i];if(e.key_size>StorageKey||e.value_size>StorageValue||pos+8+e.key_size+e.value_size>cap)return 0;storage_u32(out+pos,e.key_size);pos+=4;storage_u32(out+pos,e.value_size);pos+=4;for(unsigned j=0;j<e.key_size;++j)out[pos++]=uint8_t(e.key[j]);for(unsigned j=0;j<e.value_size;++j)out[pos++]=uint8_t(e.value[j]);}
     storage_u32(out,0x31545348);storage_u32(out+4,pos);storage_u32(out+8,s.revision);storage_u32(out+12,s.count);storage_u32(out+16,os);storage_u32(out+20,storage_checksum(out+24,pos-24)^storage_checksum(out,20));return pos;
@@ -57,9 +57,9 @@ struct BrowserStorage {
     StorageNamespace *local[StorageOrigins]{},*sessions[StorageSessions]{};
     void clear(){for(auto *&p:local){delete p;p=nullptr;}for(auto *&p:sessions){delete p;p=nullptr;}}
     StorageNamespace *get(const Origin &origin,uint32_t tab=0){
-        if(!origin.valid)return nullptr;auto **slots=tab?sessions:local;unsigned limit=tab?StorageSessions:StorageOrigins;
+        if(!origin.valid){return nullptr;}auto **slots=tab?sessions:local;unsigned limit=tab?StorageSessions:StorageOrigins;
         for(unsigned i=0;i<limit;++i)if(slots[i]&&slots[i]->tab==tab&&slots[i]->origin.same(origin))return slots[i];
-        for(unsigned i=0;i<limit;++i)if(!slots[i]){auto *s=new StorageNamespace;if(!s)return nullptr;s->origin=origin;s->tab=tab;s->loaded=tab!=0;s->saved=1;slots[i]=s;return s;}return nullptr;
+        for(unsigned i=0;i<limit;++i){if(!slots[i]){auto *s=new StorageNamespace;if(!s)return nullptr;s->origin=origin;s->tab=tab;s->loaded=tab!=0;s->saved=1;slots[i]=s;return s;}}return nullptr;
     }
     void close(uint32_t tab){if(tab)for(auto *&s:sessions)if(s&&s->tab==tab){delete s;s=nullptr;}}
 };

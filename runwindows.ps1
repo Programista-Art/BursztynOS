@@ -7,6 +7,8 @@ param(
     [string]$DiskSize = "4G",
     [ValidateSet("gtk", "sdl", "")]
     [string]$DisplayBackend = "gtk",
+    [ValidateRange(640,1280)][int]$GuestWidth = 1280,
+    [ValidateRange(360,720)][int]$GuestHeight = 720,
     [string]$Iso = "",
     [switch]$PrintArgv,
     [switch]$Audit,
@@ -305,6 +307,63 @@ function Assert-QemuVirtioDevices {
     }
 }
 
+function Start-QemuWindowLimiter {
+    param(
+        [Parameter(Mandatory = $true)][string]$TitleFragment,
+        [Parameter(Mandatory = $true)][int]$MaxWidth,
+        [Parameter(Mandatory = $true)][int]$MaxHeight
+    )
+
+    Start-Job -ArgumentList $TitleFragment, $MaxWidth, $MaxHeight -ScriptBlock {
+        param($fragment, $maxWidth, $maxHeight)
+
+        Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class BursztynQemuWindowApi {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetWindowPos(
+        IntPtr hWnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+}
+"@ | Out-Null
+
+        $SWP_NOMOVE = 0x0002
+        $SWP_NOZORDER = 0x0004
+        $SWP_NOACTIVATE = 0x0010
+        while ($true) {
+            $processes = @(Get-Process -Name "qemu-system-x86_64" -ErrorAction SilentlyContinue)
+            foreach ($process in $processes) {
+                try {
+                    $process.Refresh()
+                    if ($process.MainWindowHandle -eq [IntPtr]::Zero -or
+                        $process.MainWindowTitle -notlike "*$fragment*") { continue }
+                    $rect = New-Object BursztynQemuWindowApi+RECT
+                    if (-not [BursztynQemuWindowApi]::GetWindowRect(
+                            $process.MainWindowHandle, [ref]$rect)) { continue }
+                    $width = $rect.Right - $rect.Left
+                    $height = $rect.Bottom - $rect.Top
+                    if ($width -gt $maxWidth -or $height -gt $maxHeight) {
+                        $targetWidth = [Math]::Min($width, $maxWidth)
+                        $targetHeight = [Math]::Min($height, $maxHeight)
+                        [BursztynQemuWindowApi]::SetWindowPos(
+                            $process.MainWindowHandle, [IntPtr]::Zero, 0, 0,
+                            $targetWidth, $targetHeight,
+                            $SWP_NOMOVE -bor $SWP_NOZORDER -bor $SWP_NOACTIVATE) | Out-Null
+                    }
+                    exit 0
+                } catch {
+                    # The GTK window can be recreated during startup; retry.
+                }
+            }
+            Start-Sleep -Milliseconds 100
+        }
+    }
+}
+
 function Start-BursztynQemu {
     param(
         [Parameter(Mandatory = $true)][string]$ModeName,
@@ -316,6 +375,13 @@ function Start-BursztynQemu {
 
     $qemu = if ($PrintArgv -and -not $Audit -and $QemuPath) { $QemuPath } else { Find-Qemu }
     $effectiveDisplay = if ([string]::IsNullOrWhiteSpace($DisplayBackend)) { "gtk" } else { $DisplayBackend }
+    # Keep the guest framebuffer at the requested mode while allowing GTK to
+    # fit it inside the bounded native QEMU window on HiDPI/smaller displays.
+    $displayArg = if ($effectiveDisplay -eq "gtk") {
+        "gtk,zoom-to-fit=on"
+    } else {
+        $effectiveDisplay
+    }
 
     if (-not ($PrintArgv -or $Audit)) { Assert-QemuDisplay -Qemu $qemu -Backend $effectiveDisplay }
     if ($VirtIoFull -and -not ($PrintArgv -or $Audit)) {
@@ -340,7 +406,7 @@ function Start-BursztynQemu {
         "-smp", "1",
         "-m", "2G",
         "-serial", "stdio",
-        "-display", $effectiveDisplay
+        "-display", $displayArg
     )
 
     # Linux dodaje HDA przed urzadzeniami VirtIO. Na Windows zachowujemy identyczna
@@ -371,7 +437,7 @@ function Start-BursztynQemu {
             "-device", "virtio-rng-pci,rng=rng0,disable-legacy=on",
 
             "-vga", "none",
-            "-device", "virtio-vga,disable-legacy=on,xres=1280,yres=720",
+            "-device", "virtio-vga,disable-legacy=on,xres=$GuestWidth,yres=$GuestHeight",
 
             "-device", "virtio-keyboard-pci",
             "-device", "virtio-mouse-pci"
@@ -483,6 +549,7 @@ function Start-BursztynQemu {
     Write-Host "Display:      $($effectiveDisplay.ToUpperInvariant())"
     Write-Host "CPU:          TCG thread=single / 1 vCPU"
     Write-Host "RAM:          2 GiB"
+    Write-Host "Guest video:  ${GuestWidth}x${GuestHeight} (bounded viewport <= 1280x720)"
     if ($VirtIoFull) {
         Write-Host "Storage:      VirtIO-BLK"
         Write-Host "Network:      VirtIO-NET"
@@ -510,6 +577,10 @@ function Start-BursztynQemu {
         Write-Host "Compare window sizes, fullscreen and return; record host Windows DPI separately from guest scale."
     }
 
+    $windowLimiter = Start-QemuWindowLimiter `
+        -TitleFragment "Bursztyn OS - $ModeName" `
+        -MaxWidth 1280 -MaxHeight 720
+    try {
     if ($SaveLog) {
         if (-not (Test-Path -LiteralPath $LogDir)) {
             New-Item -ItemType Directory -Path $LogDir | Out-Null
@@ -526,6 +597,12 @@ function Start-BursztynQemu {
     else {
         & $qemu @argsList
         $exitCode = $LASTEXITCODE
+    }
+    } finally {
+        if ($windowLimiter) {
+            Stop-Job -Job $windowLimiter -ErrorAction SilentlyContinue | Out-Null
+            Remove-Job -Job $windowLimiter -Force -ErrorAction SilentlyContinue
+        }
     }
 
     if ($exitCode -ne 0) {

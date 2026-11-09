@@ -2,7 +2,7 @@
 
 #include "kontrolka.h"
 #include "rysowanie.h"
-#include "../bursztyn_gui.h"
+#include "bursztyn_gui.h"
 
 namespace BursztynUI {
 

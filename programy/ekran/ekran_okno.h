@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../bursztyn_gui.h"
+#include "bursztyn_gui.h"
 #include "../../bursztyn_ui/bursztyn_ui.h"
 #include "klient.h"
 
@@ -390,7 +390,7 @@ public:
     void domyslne_akcje() {
         int idx = 0;
         for (unsigned i = 0; i < stan_.liczba_trybow; ++i) {
-            if (stan_.tryby[i].szerokosc == 1280 && stan_.tryby[i].wysokosc == 720) {
+            if (stan_.tryby[i].szerokosc == 1920 && stan_.tryby[i].wysokosc == 1080) {
                 idx = i;
                 break;
             }

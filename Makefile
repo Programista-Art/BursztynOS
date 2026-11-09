@@ -12,6 +12,9 @@
 #   make runuefi        - QEMU UEFI/OVMF + VirtIO Full (domyslnie)
 #   make run-legacy     - QEMU BIOS bez VirtIO (AHCI/E1000/STD VGA/PS2)
 #   make runuefi-legacy - QEMU UEFI bez VirtIO (AHCI/E1000/GOP-STD VGA/PS2)
+#   make test / test-smoke / test-security / test-regression / test-nightly
+#                       - lokalna weryfikacja (bez GitHuba; docs/12_lokalna_weryfikacja.md)
+#   make test-local-suite MODE=smoke|security|regression|nightly
 #
 # Ten sam kernel Multiboot2 jest ladowany przez GRUB zarowno po starcie
 # legacy BIOS, jak i po starcie GRUB-a z firmware UEFI.
@@ -143,6 +146,33 @@ MBEDTLS_INCLUDES := \
 	-Ibiblioteki/mbedtls/include \
 	-Ibiblioteki/mbedtls
 
+# Nagłówki sterowników po przenosinach z korzenia (sterowniki/pci/pci.h, virtio_*.h, …).
+STEROWNIKI_INCLUDES := \
+	-Isterowniki/pci \
+	-Isterowniki/virtio \
+	-Isterowniki/magazyn \
+	-Isterowniki/siec \
+	-Isterowniki/wejscie \
+	-Isterowniki/czas \
+	-Isterowniki/platforma \
+	-Isterowniki/grafika \
+	-Isterowniki
+
+# Nagłówki jądra po przenosinach do jadro/ (wariant B).
+JADRO_INCLUDES := \
+	-Ijadro/arch \
+	-Ijadro/mm \
+	-Ijadro/fs \
+	-Ijadro/bws \
+	-Ijadro/gui \
+	-Ijadro/siec \
+	-Ijadro/aktualizacja \
+	-Ijadro/diag \
+	-Ijadro/rdzen
+
+# Wspólne -I dla harnessów host (g++ lokalny).
+HOST_INCLUDES := -I. $(STEROWNIKI_INCLUDES) $(JADRO_INCLUDES)
+
 MBEDTLS_CONFIG := \
 	-DMBEDTLS_USER_CONFIG_FILE=\"bursztyn_mbedtls_config.h\"
 
@@ -150,6 +180,7 @@ KERNEL_CXXFLAGS := \
 	-mgeneral-regs-only \
 	-std=gnu++17 \
 	-O2 -g \
+	-I. \
 	$(FREESTANDING_FLAGS) \
 	$(CPU_FLAGS) \
 	$(HARDEN_FLAGS) \
@@ -158,7 +189,10 @@ KERNEL_CXXFLAGS := \
 	-fno-rtti \
 	-fstack-usage \
 	$(MBEDTLS_CONFIG) \
-	$(MBEDTLS_INCLUDES)
+	$(MBEDTLS_INCLUDES) \
+	$(STEROWNIKI_INCLUDES) \
+	$(JADRO_INCLUDES) \
+	-DBURSZTYN_DEFAULT_DISPLAY_720P=1
 
 MBEDTLS_CFLAGS := \
 	-std=gnu11 \
@@ -174,6 +208,7 @@ MBEDTLS_CFLAGS := \
 RING3_FLAGS := \
 	-std=gnu++17 \
 	-O2 \
+	-I. \
 	$(FREESTANDING_FLAGS) \
 	$(CPU_FLAGS) \
 	$(HARDEN_FLAGS) \
@@ -182,7 +217,9 @@ RING3_FLAGS := \
 	-fdata-sections \
 	-fno-exceptions \
 	-fno-rtti \
-	-fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new
+	-fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new \
+	$(STEROWNIKI_INCLUDES) \
+	$(JADRO_INCLUDES)
 
 # Explicit rollout switch: v2 (relocatable PIE + Ring 3 ASLR) is the release default; BUR_FORMAT=1 remains supported.
 BUR_FORMAT ?= 2
@@ -217,6 +254,24 @@ endif
 BURSZTYN_DEBUG_GUI_LAYERS ?= 0
 ifneq ($(filter 1 yes true,$(BURSZTYN_DEBUG_GUI_LAYERS)),)
 KERNEL_CXXFLAGS += -DBURSZTYN_DEBUG_GUI_LAYERS=1
+endif
+
+# Metryki kosztu skladania/prezentacji sceny. Wylaczone w obrazie produkcyjnym.
+BURSZTYN_DEBUG_PERF ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DEBUG_PERF)),)
+	KERNEL_CXXFLAGS += -DBURSZTYN_DEBUG_PERF=1
+endif
+
+# Metryki ruchu kursora, drag i coalescingu dirty. Wylaczone domyslnie.
+BURSZTYN_DEBUG_GUI_PERF ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DEBUG_GUI_PERF)),)
+	KERNEL_CXXFLAGS += -DBURSZTYN_DEBUG_GUI_PERF=1
+endif
+
+# Pomiar etapow BWS10/BUR bez zmiany semantyki loadera.
+BURSZTYN_DEBUG_LOADER_PERF ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DEBUG_LOADER_PERF)),)
+	KERNEL_CXXFLAGS += -DBURSZTYN_DEBUG_LOADER_PERF=1
 endif
 
 # Diagnostyczny 16 KiB stos jadra (reprodukcja historycznego overflow).
@@ -287,7 +342,7 @@ ASM_FLAGS := \
 	-fno-pie
 
 KERNEL_LDFLAGS := \
-	-T linker.ld \
+	-T jadro/arch/linker.ld \
 	-nostdlib \
 	-no-pie \
 	-static \
@@ -318,21 +373,21 @@ endif
 #
 # Dlatego korzystaja ze wspolnego, zweryfikowanego shell_linker.ld.
 #
-RING3_STD_LINKER := shell_linker.ld
+RING3_STD_LINKER := programy/shell/shell_linker.ld
 
-NOTATNIK_LINKER := notatnik_linker.ld
+NOTATNIK_LINKER := programy/notatnik/notatnik_linker.ld
 
-KALKULATOR_LINKER := kalkulator_linker.ld
+KALKULATOR_LINKER := programy/kalkulator/kalkulator_linker.ld
 
 EKSPLORATOR_LINKER := programy/eksplorator/eksplorator_linker.ld
 
-PRZEGLADARKA_LINKER := programy/przegladarka_linker.ld
+PRZEGLADARKA_LINKER := programy/przegladarka/przegladarka_linker.ld
 
 AKTUALIZACJE_LINKER := programy/aktualizacje/aktualizacje_linker.ld
 
 USTAWIENIA_LINKER := programy/ustawienia/ustawienia_linker.ld
 
-MENEDZER_OKIEN_LINKER := menedzer_okien_linker.ld
+MENEDZER_OKIEN_LINKER := programy/menedzer_okien/menedzer_okien_linker.ld
 
 # ============================================================================
 # 6. MBEDTLS
@@ -398,6 +453,7 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	eksplorator_blob.o \
 	kalkulator_blob.o \
 	loader.o \
+	podpis_paczki.o \
 	czcionka_systemowa.o \
 	kernel.o \
 	shell_blob.o \
@@ -414,6 +470,26 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	ikona_zamknij_blob.o \
 	ikona_uspij_blob.o \
 	ikona_zablokuj_blob.o \
+	ikona_nav_wstecz_blob.o \
+	ikona_nav_dalej_blob.o \
+	ikona_nav_wgore_blob.o \
+	ikona_folder_blob.o \
+	ikona_plik_blob.o \
+	ikona_app_notatnik_blob.o \
+	ikona_app_kalkulator_blob.o \
+	ikona_app_husarz_blob.o \
+	ikona_app_testy_blob.o \
+	ikona_app_snake_blob.o \
+	ikona_app_eksplorator_blob.o \
+	ikona_app_obrazy_blob.o \
+	ikona_app_demo_ui_blob.o \
+	ikona_app_kontrolki2_blob.o \
+	ikona_app_kontrolki3_blob.o \
+	ikona_app_kontrolki4_blob.o \
+	ikona_app_aktualizacje_blob.o \
+	ikona_app_ustawienia_blob.o \
+	ikona_app_test_dzwieku_blob.o \
+	ikona_app_diagnostyka_blob.o \
 	heap.o \
 	scheduler.o \
 	fpu.o \
@@ -448,7 +524,9 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	run runuefi run-legacy runuefi-legacy run-installed run-installed-legacy \
 	run8k run-test run-geom-trace runusb runusbkbd runusbmouse runusbhid \
 	check-kernel check-test8k check-tools check-ovmf \
-	prepare-disk clean clear distclean cdysk rm help
+	prepare-disk clean clear distclean cdysk rm help \
+	test test-smoke test-security test-security-host test-regression test-nightly \
+	test-local-suite
 
 all: $(KERNEL) $(TAPETY_PAK)
 
@@ -495,6 +573,85 @@ biblioteki/mbedtls/library/%.o: biblioteki/mbedtls/library/%.c
 # 10. OBIEKTY ZE SPECJALNYMI SCIEZKAMI
 # ============================================================================
 
+
+# --- jadro/* explicit object rules (wariant B) ---
+backend.o: jadro/gui/backend.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+bezpieczenstwo.o: jadro/bws/bezpieczenstwo.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+boot.o: jadro/arch/boot.S
+	$(CC) $(ASM_FLAGS) -c $< -o $@
+bufory_grafiki.o: jadro/gui/bufory_grafiki.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+czcionka_systemowa.o: jadro/gui/czcionka_systemowa.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+diagnostyka_systemu.o: jadro/diag/diagnostyka_systemu.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+diagnostyka_systemu_boot.o: jadro/diag/diagnostyka_systemu_boot.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+diagnostyka_systemu_bws.o: jadro/diag/diagnostyka_systemu_bws.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+ekran.o: jadro/gui/ekran.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+ekran_format.o: jadro/gui/ekran_format.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+ekran_powitalny.o: jadro/gui/ekran_powitalny.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+fpu.o: jadro/arch/fpu.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+frontend.o: jadro/gui/frontend.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+gdt.o: jadro/arch/gdt.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+gui_image.o: jadro/gui/gui_image.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+heap.o: jadro/mm/heap.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+idt.o: jadro/arch/idt.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+instalator.o: jadro/gui/instalator.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+kernel.o: jadro/rdzen/kernel.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+loader.o: jadro/fs/loader.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+podpis_paczki.o: jadro/fs/podpis_paczki.cpp jadro/fs/podpis_paczki.h jadro/aktualizacja/aktualizacja_klucz.h
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+missing_backend.o: jadro/gui/missing_backend.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+motyw.o: jadro/gui/motyw.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+pmm.o: jadro/mm/pmm.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+przerwania.o: jadro/arch/przerwania.S
+	$(CC) $(ASM_FLAGS) -c $< -o $@
+psf.o: jadro/fs/psf.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+ring3.o: jadro/arch/ring3.S
+	$(CC) $(ASM_FLAGS) -c $< -o $@
+scheduler.o: jadro/bws/scheduler.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+siec.o: jadro/siec/siec.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+skladacz_obrazu.o: jadro/gui/skladacz_obrazu.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+storage_format.o: jadro/fs/storage_format.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+stos_jadra.o: jadro/mm/stos_jadra.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+syscall.o: jadro/arch/syscall.S
+	$(CC) $(ASM_FLAGS) -c $< -o $@
+tapety.o: jadro/gui/tapety.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+test.o: jadro/rdzen/test.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+tls.o: jadro/siec/tls.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+tss.o: jadro/arch/tss.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+vmm.o: jadro/mm/vmm.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+
 # ============================================================================
 # KONFIGURACJA KLUCZA AKTUALIZACJI
 # ============================================================================
@@ -504,11 +661,11 @@ BURSZTYN_AKT_TRUST_ROOT ?= release
 
 .PHONY: .aktualizacja_klucz_check
 .aktualizacja_klucz_check:
-	@$(PYTHON) narzedzia/aktualizacje/generuj_naglowek_klucza.py --tryb $(BURSZTYN_AKT_TRUST_ROOT) $(if $(BURSZTYN_AKT_KLUCZ_PUBLICZNY),--publiczny $(BURSZTYN_AKT_KLUCZ_PUBLICZNY),) --wyjscie aktualizacja_klucz.h
+	@$(PYTHON) narzedzia/aktualizacje/generuj_naglowek_klucza.py --tryb $(BURSZTYN_AKT_TRUST_ROOT) $(if $(BURSZTYN_AKT_KLUCZ_PUBLICZNY),--publiczny $(BURSZTYN_AKT_KLUCZ_PUBLICZNY),) --wyjscie jadro/aktualizacja/aktualizacja_klucz.h
 
-aktualizacja_klucz.h: .aktualizacja_klucz_check
+jadro/aktualizacja/aktualizacja_klucz.h: .aktualizacja_klucz_check
 
-aktualizacja.o: aktualizacja.cpp aktualizacja.h aktualizacja_format.h aktualizacja_klucz.h .aktualizacja_klucz_check
+aktualizacja.o: jadro/aktualizacja/aktualizacja.cpp jadro/aktualizacja/aktualizacja.h jadro/aktualizacja/aktualizacja_format.h jadro/aktualizacja/aktualizacja_klucz.h .aktualizacja_klucz_check
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
 mbedtls_port.o: biblioteki/mbedtls/mbedtls_port.cpp biblioteki/mbedtls/bursztyn_mbedtls_config.h
@@ -517,16 +674,16 @@ mbedtls_port.o: biblioteki/mbedtls/mbedtls_port.cpp biblioteki/mbedtls/bursztyn_
 # Bounded resource tables in the modern BWS layer are intentionally dynamic;
 # optimize its dispatcher for size so the fixed pre-Ring3 kernel VA contract
 # (kernel <= 14 MiB with >= 2 MiB guard below RING3_BASE at 16 MiB) remains intact.
-bws_nowoczesne.o: bws_nowoczesne.cpp bws_nowoczesne.h bws_api.h bws_hda_diag.h sterowniki/dzwiek/hda.h sterowniki/dzwiek/hda_diag.h sterowniki/dzwiek/hda_diag_format.h
+bws_nowoczesne.o: jadro/bws/bws_nowoczesne.cpp jadro/bws/bws_nowoczesne.h jadro/bws/bws_api.h jadro/bws/bws_hda_diag.h sterowniki/dzwiek/hda.h sterowniki/dzwiek/hda_diag.h sterowniki/dzwiek/hda_diag_format.h
 	$(CXX) $(KERNEL_CXXFLAGS) -Os -c $< -o $@
 
-syscalls.o: syscalls.cpp bws_api.h
+syscalls.o: jadro/bws/syscalls.cpp jadro/bws/bws_api.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
-hda.o: sterowniki/dzwiek/hda.cpp sterowniki/dzwiek/hda_transport.h sterowniki/dzwiek/hda.h sterowniki/dzwiek/hda_wewnetrzny.h sterowniki/dzwiek/hda_diag_format.h pamiec.h pci.h
+hda.o: sterowniki/dzwiek/hda.cpp sterowniki/dzwiek/hda_transport.h sterowniki/dzwiek/hda.h sterowniki/dzwiek/hda_wewnetrzny.h sterowniki/dzwiek/hda_diag_format.h jadro/mm/pamiec.h sterowniki/pci/pci.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
-hda_transport.o: sterowniki/dzwiek/hda_transport.cpp sterowniki/dzwiek/hda_transport.h sterowniki/dzwiek/hda_diag_format.h pamiec.h pci.h sterowniki/dma.h sterowniki/czas/hpet.h
+hda_transport.o: sterowniki/dzwiek/hda_transport.cpp sterowniki/dzwiek/hda_transport.h sterowniki/dzwiek/hda_diag_format.h jadro/mm/pamiec.h sterowniki/pci/pci.h sterowniki/dma.h sterowniki/czas/hpet.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c sterowniki/dzwiek/hda_transport.cpp -o $@
 
 hda_diag.o: sterowniki/dzwiek/hda_diag.cpp sterowniki/dzwiek/hda_transport.h sterowniki/dzwiek/hda_diag.h sterowniki/dzwiek/hda_diag_format.h sterowniki/dzwiek/hda_wewnetrzny.h sterowniki/dzwiek/hda.h
@@ -535,10 +692,10 @@ hda_diag.o: sterowniki/dzwiek/hda_diag.cpp sterowniki/dzwiek/hda_transport.h ste
 uefi_gop.o: sterowniki/grafika/uefi_gop.cpp sterowniki/grafika/uefi_gop.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
-hpet.o: sterowniki/czas/hpet.cpp sterowniki/czas/hpet.h acpi.h pamiec.h
+hpet.o: sterowniki/czas/hpet.cpp sterowniki/czas/hpet.h sterowniki/platforma/acpi.h jadro/mm/pamiec.h
 	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
 
-dma.o: sterowniki/dma.cpp sterowniki/dma.h pamiec.h
+dma.o: sterowniki/dma.cpp sterowniki/dma.h jadro/mm/pamiec.h
 	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
 
 usb.o: sterowniki/usb/usb.cpp sterowniki/usb/usb.h sterowniki/usb/xhci.h
@@ -550,27 +707,84 @@ xhci.o: sterowniki/usb/xhci.cpp sterowniki/usb/xhci.h sterowniki/usb/xhci_ring.h
 xhci_ring.o: sterowniki/usb/xhci_ring.cpp sterowniki/usb/xhci_ring.h sterowniki/usb/xhci_trb.h
 	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
 
-usb_hid.o: sterowniki/usb/usb_hid.cpp sterowniki/usb/usb_hid.h input_device.h
+usb_hid.o: sterowniki/usb/usb_hid.cpp sterowniki/usb/usb_hid.h sterowniki/wejscie/input_device.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+pci.o: sterowniki/pci/pci.cpp sterowniki/pci/pci.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+virtqueue.o: sterowniki/virtio/virtqueue.cpp sterowniki/virtio/virtqueue.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+virtio_pci.o: sterowniki/virtio/virtio_pci.cpp sterowniki/virtio/virtio_pci.h sterowniki/virtio/virtqueue.h sterowniki/pci/pci.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+virtio_gpu.o: sterowniki/virtio/virtio_gpu.cpp sterowniki/virtio/virtio_gpu.h sterowniki/virtio/virtio_pci.h sterowniki/virtio/virtqueue.h sterowniki/pci/pci.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+virtio_rng.o: sterowniki/virtio/virtio_rng.cpp sterowniki/virtio/virtio_rng.h sterowniki/virtio/virtio_pci.h sterowniki/virtio/virtqueue.h sterowniki/pci/pci.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+virtio_blk.o: sterowniki/virtio/virtio_blk.cpp sterowniki/virtio/virtio_blk.h sterowniki/virtio/virtio_pci.h sterowniki/virtio/virtqueue.h sterowniki/pci/pci.h sterowniki/magazyn/blokowy.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+virtio_net.o: sterowniki/virtio/virtio_net.cpp sterowniki/virtio/virtio_net.h sterowniki/virtio/virtio_pci.h sterowniki/virtio/virtqueue.h sterowniki/pci/pci.h sterowniki/siec/network_device.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+virtio_input.o: sterowniki/virtio/virtio_input.cpp sterowniki/virtio/virtio_input.h sterowniki/virtio/virtio_pci.h sterowniki/virtio/virtqueue.h sterowniki/pci/pci.h sterowniki/wejscie/input_device.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+ahci.o: sterowniki/magazyn/ahci.cpp sterowniki/magazyn/ahci.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+blokowy.o: sterowniki/magazyn/blokowy.cpp sterowniki/magazyn/blokowy.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+e1000.o: sterowniki/siec/e1000.cpp sterowniki/siec/e1000.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+network_device.o: sterowniki/siec/network_device.cpp sterowniki/siec/network_device.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+klawiatura.o: sterowniki/wejscie/klawiatura.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+mysz.o: sterowniki/wejscie/mysz.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+input_device.o: sterowniki/wejscie/input_device.cpp sterowniki/wejscie/input_device.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+acpi.o: sterowniki/platforma/acpi.cpp sterowniki/platforma/acpi.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+apic.o: sterowniki/platforma/apic.cpp sterowniki/platforma/apic.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+grafika.o: sterowniki/grafika/grafika.cpp sterowniki/grafika/grafika.h
+	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
+
+zegar-rtc.o: sterowniki/czas/zegar-rtc.cpp sterowniki/czas/zegar-rtc.h
 	$(CXX) $(KERNEL_CXXFLAGS) -I. -c $< -o $@
 
 # ============================================================================
 # 11. BIBLIOTEKA GUI RING 3
 # ============================================================================
 
-stack_protector.o: stack_protector.cpp stack_protector.h stos_jadra.h scheduler.h
+stack_protector.o: jadro/mm/stack_protector.cpp jadro/mm/stack_protector.h jadro/mm/stos_jadra.h jadro/bws/scheduler.h
 	$(CXX) $(KERNEL_CXXFLAGS) -fno-stack-protector -c $< -o $@
 
-ring3_ssp.o: ring3_ssp.cpp stack_protector.h bws_api.h
+ring3_ssp.o: jadro/mm/ring3_ssp.cpp jadro/mm/stack_protector.h jadro/bws/bws_api.h
 	$(CXX) $(RING3_FLAGS) -fno-stack-protector -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 bursztyn_gui.o: bursztyn_gui_base.o bsf_core.o bsf_runtime.o bsf_bitmap.o ring3_ssp.o
 	$(LD) -r bursztyn_gui_base.o bsf_core.o bsf_runtime.o bsf_bitmap.o ring3_ssp.o -o $@
 
-bursztyn_gui_base.o: bursztyn_gui.cpp bursztyn_gui.h bsf/runtime.h
+bursztyn_gui_base.o: jadro/gui/bursztyn_gui.cpp jadro/gui/bursztyn_gui.h bsf/runtime.h
 	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 # Background resource workers/FPU probes have no font renderer.
-bursztyn_gui_minimal_base.o: bursztyn_gui.cpp bursztyn_gui.h
+bursztyn_gui_minimal_base.o: jadro/gui/bursztyn_gui.cpp jadro/gui/bursztyn_gui.h
 	$(CXX) $(RING3_FLAGS) -UBSF_NATIVE -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 bursztyn_gui_minimal.o: bursztyn_gui_minimal_base.o ring3_ssp.o
@@ -591,14 +805,14 @@ bsf_bitmap.o: bsf/bitmap.cpp bsf/runtime.h
 # 12. SHELL .bur
 # ============================================================================
 
-shell_tmp.o: shell.cpp shell_font.h shell_terminal.h shell_context.h shell_sponsors.h wersja_systemu.h bursztyn_gui.h bursztyn_ui/czcionka.h bursztyn_ui/rysowanie.h bursztyn_ui/pasek_przewijania.h bursztyn_ui/menu_kontekstowe.h
-	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
+shell_tmp.o: programy/shell/shell.cpp programy/shell/shell_terminal.h programy/shell/shell_context.h programy/shell/shell_sponsors.h jadro/rdzen/wersja_systemu.h jadro/gui/bursztyn_gui.h bursztyn_ui/czcionka.h bursztyn_ui/rysowanie.h bursztyn_ui/pasek_przewijania.h bursztyn_ui/menu_kontekstowe.h
+	$(CXX) $(RING3_FLAGS) -I. -Os -fstack-usage -c $< -o $@
 
 .PHONY: shellblob.o
 shellblob.o: shell_blob.o
 
-shell_blob.o: shell_tmp.o bsf_terminal.o bursztyn_gui.o programy/shell_bsf_linker.ld
-	$(LD) -T $(call bur_linker,programy/shell_bsf_linker.ld) $(RING3_LDFLAGS) \
+shell_blob.o: shell_tmp.o bsf_terminal.o bursztyn_gui.o programy/shell/shell_bsf_linker.ld
+	$(LD) -T $(call bur_linker,programy/shell/shell_bsf_linker.ld) $(RING3_LDFLAGS) \
 		shell_tmp.o bsf_terminal.o bursztyn_gui.o -o shell.elf
 	$(BUR_CONVERT) shell.elf shell.bin
 	$(LD) -r -b binary shell.bin -o shell_blob.o
@@ -620,9 +834,9 @@ menedzer_okien_tmp.o: .bsf-test/profile-build-config
 .husarz-test/build-config: husarz-build-config-force
 	@mkdir -p .husarz-test
 	@$(PYTHON) -c "from pathlib import Path; p=Path('$@'); v='debug=$(HUSARZ_RESOURCE_DEBUG) perf=$(HUSARZ_PERF)'; p.write_text(v) if not p.exists() or p.read_text()!=v else None"
-przegladarka_tmp.o husarz_worker_tmp.o: .husarz-test/build-config http_target.h
-tls.o: http_target.h
-przegladarka_tmp.o: programy/przegladarka.cpp Makefile programy/http_kody.h bursztyn_gui.h $(wildcard bursztyn_ui/*.h) $(wildcard programy/husarz/*.h) $(wildcard programy/husarz/*.inc)
+przegladarka_tmp.o husarz_worker_tmp.o: .husarz-test/build-config jadro/siec/http_target.h
+tls.o: jadro/siec/http_target.h
+przegladarka_tmp.o: programy/przegladarka/przegladarka.cpp Makefile programy/http_kody.h jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h) $(wildcard programy/husarz/*.h) $(wildcard programy/husarz/*.inc)
 	$(CXX) $(RING3_FLAGS) -msse2 -mfpmath=sse -mno-avx -fcoroutines -fcheck-new -DHUSARZ_DEBUG_RESOURCES=$(HUSARZ_RESOURCE_DEBUG) -DHUSARZ_PERF=$(HUSARZ_PERF) -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c $< -o $@
 
 przegladarka_blob.o: przegladarka_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o $(PRZEGLADARKA_LINKER)
@@ -631,7 +845,7 @@ przegladarka_blob.o: przegladarka_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o
 	$(BUR_CONVERT) przegladarka.elf przegladarka.bin
 	$(LD) -r -b binary przegladarka.bin -o przegladarka_blob.o
 
-husarz_worker_tmp.o: programy/przegladarka.cpp Makefile $(wildcard programy/husarz/*.h) $(wildcard programy/husarz/*.inc)
+husarz_worker_tmp.o: programy/przegladarka/przegladarka.cpp Makefile $(wildcard programy/husarz/*.h) $(wildcard programy/husarz/*.inc)
 	$(CXX) $(RING3_FLAGS) -msse2 -mfpmath=sse -mno-avx -fcoroutines -fcheck-new -DHUSARZ_DEBUG_RESOURCES=$(HUSARZ_RESOURCE_DEBUG) -DHUSARZ_PERF=$(HUSARZ_PERF) -DHUSARZ_WORKER_ONLY=1 -Wno-unused-function -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c $< -o $@
 
 husarz_worker_blob.o: husarz_worker_tmp.o bursztyn_gui_minimal.o image_ring3.o btp_ring3.o $(PRZEGLADARKA_LINKER)
@@ -643,7 +857,7 @@ husarz_worker_blob.o: husarz_worker_tmp.o bursztyn_gui_minimal.o image_ring3.o b
 # 14. NOTATNIK .bur
 # ============================================================================
 
-notatnik_tmp.o: notatnik.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
+notatnik_tmp.o: programy/notatnik/notatnik.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 notatnik_blob.o: notatnik_tmp.o bursztyn_gui.o $(NOTATNIK_LINKER)
@@ -656,7 +870,7 @@ notatnik_blob.o: notatnik_tmp.o bursztyn_gui.o $(NOTATNIK_LINKER)
 # 15. EKSPLORATOR PLIKOW .bur
 # ============================================================================
 
-eksplorator_tmp.o: programy/eksplorator/eksplorator-plikow.cpp desktop_entries.h bursztyn_gui.h plik_popup_ui.h plik_operacje_ui.h $(wildcard bursztyn_ui/*.h)
+eksplorator_tmp.o: programy/eksplorator/eksplorator-plikow.cpp jadro/gui/desktop_entries.h jadro/gui/bursztyn_gui.h jadro/gui/plik_popup_ui.h jadro/gui/plik_operacje_ui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -fstack-usage -c $< -o $@
 
 eksplorator_blob.o: eksplorator_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
@@ -669,7 +883,7 @@ eksplorator_blob.o: eksplorator_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
 # 16. KALKULATOR .bur
 # ============================================================================
 
-kalkulator_tmp.o: kalkulator.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
+kalkulator_tmp.o: programy/kalkulator/kalkulator.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 kalkulator_blob.o: kalkulator_tmp.o bursztyn_gui.o $(KALKULATOR_LINKER)
@@ -679,7 +893,7 @@ kalkulator_blob.o: kalkulator_tmp.o bursztyn_gui.o $(KALKULATOR_LINKER)
 	$(LD) -r -b binary kalkulator.bin -o kalkulator_blob.o
 
 # Test
-test_tmp.o: programy/test/test.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
+test_tmp.o: programy/test/test.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 test_blob.o: test_tmp.o ekran_format_ring3.o btp_ring3.o bursztyn_gui.o programy/test/test_linker.ld
@@ -689,7 +903,7 @@ test_blob.o: test_tmp.o ekran_format_ring3.o btp_ring3.o bursztyn_gui.o programy
 	$(LD) -r -b binary test.bin -o test_blob.o
 
 # BursztynUI Demo
-demo_ui_tmp.o: programy/demo_ui/demo_ui.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
+demo_ui_tmp.o: programy/demo_ui/demo_ui.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 demo_ui_blob.o: demo_ui_tmp.o bursztyn_gui.o programy/demo_ui/demo_ui_linker.ld
@@ -699,7 +913,7 @@ demo_ui_blob.o: demo_ui_tmp.o bursztyn_gui.o programy/demo_ui/demo_ui_linker.ld
 	$(LD) -r -b binary demo_ui.bin -o demo_ui_blob.o
 
 # BursztynUI Kontrolki 2
-kontrolki2_tmp.o: programy/kontrolki2/kontrolki2.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
+kontrolki2_tmp.o: programy/kontrolki2/kontrolki2.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 kontrolki2_blob.o: kontrolki2_tmp.o bursztyn_gui.o programy/demo_ui/demo_ui_linker.ld
@@ -711,7 +925,7 @@ kontrolki2_blob.o: kontrolki2_tmp.o bursztyn_gui.o programy/demo_ui/demo_ui_link
 # BursztynUI Kontrolki 3. Zaleznosc wildcard wymusza przebudowe aplikacji
 # po zmianie dowolnej publicznej kontrolki; analogiczna zaleznosc test_tmp.o
 # znajduje sie powyzej.
-kontrolki3tmp.o: programy/kontrolki3/kontrolki3.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
+kontrolki3tmp.o: programy/kontrolki3/kontrolki3.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 kontrolki3blob.o: kontrolki3tmp.o bursztyn_gui.o programy/kontrolki3/kontrolki3_linker.ld
@@ -721,7 +935,7 @@ kontrolki3blob.o: kontrolki3tmp.o bursztyn_gui.o programy/kontrolki3/kontrolki3_
 	$(LD) -r -b binary kontrolki3.bin -o kontrolki3blob.o
 
 # BursztynUI Kontrolki 4 - Showroom nowych komponentow retained-mode.
-kontrolki4tmp.o: programy/kontrolki4/kontrolki4.cpp bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
+kontrolki4tmp.o: programy/kontrolki4/kontrolki4.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
 kontrolki4blob.o: kontrolki4tmp.o bursztyn_gui.o programy/kontrolki4/kontrolki4_linker.ld
@@ -730,7 +944,7 @@ kontrolki4blob.o: kontrolki4tmp.o bursztyn_gui.o programy/kontrolki4/kontrolki4_
 	$(BUR_CONVERT) kontrolki4.elf kontrolki4.bin
 	$(LD) -r -b binary kontrolki4.bin -o kontrolki4blob.o
 
-# Obraz testowy test.bmp	
+# Obraz testowy test.bmp
 test_bmp_blob.o: obrazy/test.bmp
 	$(LD) -r -b binary obrazy/test.bmp -o test_bmp_blob.o
 
@@ -742,11 +956,17 @@ test1_bmp_blob.o: obrazy/test1.bmp
 logo_png_blob.o: obrazy/logo.png
 	$(LD) -r -b binary obrazy/logo.png -o logo_png_blob.o
 
+# Maska pokrycia logotypu dla ekranu powitalnego. Jadro nie dekoduje PNG na
+# sciezce startu: naglowek jest generowany z obrazy/logo.png i wersjonowany.
+LOGO_MASKA_H := jadro/gui/logo_maska_dane.h
+$(LOGO_MASKA_H): obrazy/logo.png narzedzia/generuj_maske_logo.py
+	$(PYTHON) narzedzia/generuj_maske_logo.py --zrodlo obrazy/logo.png --wyjscie $@
+
 
 
 
 # Snake
-snake_tmp.o: gry/snake/snake.cpp bursztyn_gui.h
+snake_tmp.o: gry/snake/snake.cpp jadro/gui/bursztyn_gui.h
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
 
 snake_blob.o: snake_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
@@ -756,7 +976,7 @@ snake_blob.o: snake_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
 	$(LD) -r -b binary snake.bin -o snake_blob.o
 
 # Przegladarka Obrazow
-przegladarka_obrazow_tmp.o: programy/przegladarka-obrazow/przegladarka-obrazow.cpp bursztyn_gui.h
+przegladarka_obrazow_tmp.o: programy/przegladarka-obrazow/przegladarka-obrazow.cpp jadro/gui/bursztyn_gui.h
 	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
 
 przegladarka_obrazow_blob.o: przegladarka_obrazow_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
@@ -766,7 +986,7 @@ przegladarka_obrazow_blob.o: przegladarka_obrazow_tmp.o bursztyn_gui.o $(RING3_S
 	$(LD) -r -b binary przegladarka_obrazow.bin -o przegladarka_obrazow_blob.o
 
 # Aktualizacje Systemu
-aktualizacje_tmp.o: programy/aktualizacje/aktualizacje.cpp bursztyn_gui.h bws_ota.h $(wildcard bursztyn_ui/*.h)
+aktualizacje_tmp.o: programy/aktualizacje/aktualizacje.cpp jadro/gui/bursztyn_gui.h jadro/bws/bws_ota.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
 
 aktualizacje_blob.o: aktualizacje_tmp.o bursztyn_gui.o $(AKTUALIZACJE_LINKER)
@@ -783,15 +1003,15 @@ KERNEL_CXXFLAGS += -DBURSZTYNDIAGTESTDZWIEKU=1
 RING3_FLAGS += -DBURSZTYNDIAGTESTDZWIEKU=1
 endif
 
-test_dzwieku_tmp.o: programy/test_dzwieku/test_dzwieku.cpp bursztyn_gui.h bws_hda_diag.h bws_czcionka.h test_dzwieku_trace.h \
-		sterowniki/dzwiek/hda_diag_format.h wersja_systemu.h $(wildcard bursztyn_ui/*.h)
+test_dzwieku_tmp.o: programy/test_dzwieku/test_dzwieku.cpp jadro/gui/bursztyn_gui.h jadro/bws/bws_hda_diag.h jadro/bws/bws_czcionka.h jadro/gui/test_dzwieku_trace.h \
+		sterowniki/dzwiek/hda_diag_format.h jadro/rdzen/wersja_systemu.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
 
-test_dzwieku_blob.o: test_dzwieku_tmp.o bursztyn_gui.o programy/test_dzwieku/test_dzwieku_linker.ld narzedzia/test_dzwieku_size.py
+test_dzwieku_blob.o: test_dzwieku_tmp.o bursztyn_gui.o programy/test_dzwieku/test_dzwieku_linker.ld testy/test_dzwieku_size.py
 	$(LD) $(BUR_ORPHANS) -T $(call bur_linker,programy/test_dzwieku/test_dzwieku_linker.ld) $(RING3_LDFLAGS) \
 		test_dzwieku_tmp.o bursztyn_gui.o -o test_dzwieku.elf
 	$(BUR_CONVERT) test_dzwieku.elf test_dzwieku.bin
-	$(PYTHON) narzedzia/test_dzwieku_size.py test_dzwieku.bin
+	$(PYTHON) testy/test_dzwieku_size.py test_dzwieku.bin
 	$(LD) -r -b binary test_dzwieku.bin -o test_dzwieku_blob.o
 
 ustawienia_tmp.o: programy/ustawienia/ustawienia.cpp $(wildcard programy/ustawienia/*.h) $(wildcard bursztyn_ui/*.h) bsf/runtime.h
@@ -803,7 +1023,7 @@ ustawienia_blob.o: ustawienia_tmp.o bursztyn_gui.o $(USTAWIENIA_LINKER)
 	$(LD) -r -b binary ustawienia.bin -o $@
 
 # REPRO (tylko diagnostyka BWS2/BWS46)
-repro_tmp.o: programy/repro/repro.cpp bursztyn_gui.h
+repro_tmp.o: programy/repro/repro.cpp jadro/gui/bursztyn_gui.h
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
 
 repro_blob.o: repro_tmp.o bursztyn_gui.o programy/repro/repro_linker.ld
@@ -816,8 +1036,8 @@ repro_blob.o: repro_tmp.o bursztyn_gui.o programy/repro/repro_linker.ld
 # 16. MENEDZER OKIEN .bur
 # ============================================================================
 
-menedzer_okien_tmp.o: menedzer_okien.cpp desktop_entries.h desktop_layout_settings.h desktop_layout.h bursztyn_gui.h ui_skala.h pulpit_geometria.h obrazy/png_dekoder.h plik_popup_ui.h plik_operacje_ui.h $(wildcard bursztyn_ui/*.h)
-	$(CXX) $(RING3_FLAGS) -DBSF_PROFILE=$(BSF_PROFILE) -Os -fstack-usage -c menedzer_okien.cpp -o $@
+menedzer_okien_tmp.o: programy/menedzer_okien/menedzer_okien.cpp jadro/gui/desktop_entries.h jadro/gui/desktop_layout_settings.h jadro/gui/desktop_layout.h jadro/gui/bursztyn_gui.h jadro/gui/ui_skala.h jadro/gui/pulpit_geometria.h obrazy/png_dekoder.h jadro/gui/plik_popup_ui.h jadro/gui/plik_operacje_ui.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -I. -DBSF_PROFILE=$(BSF_PROFILE) -Os -fstack-usage -c $< -o $@
 
 menedzer_okien_blob.o: menedzer_okien_tmp.o bursztyn_gui.o ikona_png_ring3.o image_png_ring3.o btp_ring3.o $(MENEDZER_OKIEN_LINKER)
 	$(LD) -T $(call bur_linker,$(MENEDZER_OKIEN_LINKER)) $(RING3_LDFLAGS) \
@@ -842,13 +1062,13 @@ cytaty_blob.o: cytaty.txt
 sponsorzy_blob.o: dane/sponsorze/sponsorzy
 	$(LD) -r -b binary $< -o $@
 
-kernel.o aktualizacja.o: wersja_systemu.h
+kernel.o aktualizacja.o: jadro/rdzen/wersja_systemu.h
 
 # ============================================================================
 # 18. LINKOWANIE JADRA
 # ============================================================================
 
-$(KERNEL): $(OBJS) linker.ld
+$(KERNEL): $(OBJS) jadro/arch/linker.ld
 	$(CXX) $(KERNEL_LDFLAGS) -o $@ $(OBJS) -lgcc
 
 # ============================================================================
@@ -892,35 +1112,35 @@ $(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notic
 		'' \
 		'menuentry "Bursztyn OS" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxmode=1280x720x32' \
 		'    set gfxpayload=keep' \
-		'    multiboot2 /boot/system_operacyjny.bin' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
 		'' \
 		'menuentry "Bursztyn OS - testy automatyczne" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxmode=1280x720x32' \
 		'    set gfxpayload=keep' \
-		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
 		'menuentry "Bursztyn OS - testy automatyczne (niszczacy test dysku)" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxmode=1280x720x32' \
 		'    set gfxpayload=keep' \
-		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.test.diskdestructive=1' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.test.diskdestructive=1 bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
 		'menuentry "Bursztyn OS Instalator" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxmode=1280x720x32' \
 		'    set gfxpayload=keep' \
 		'    echo "Ladowanie jadra..."' \
-		'    multiboot2 /boot/system_operacyjny.bin bursztyn.install=1' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.install=1 bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    echo "Ladowanie zasobow instalatora..."' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    module2 /boot/installer/BOOTX64.EFI installer.efi' \
@@ -941,92 +1161,92 @@ $(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notic
 
 test-network-device:
 	@mkdir -p .nettest
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_NET_HOST_TEST -fsanitize=address,undefined network_device.cpp narzedzia/test_network_device.cpp -o .nettest/test-network-device
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic $(HOST_INCLUDES) -DBURSZTYN_NET_HOST_TEST -fsanitize=address,undefined sterowniki/siec/network_device.cpp testy/test_network_device.cpp -o .nettest/test-network-device
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .nettest/test-network-device
 
 test-e1000-qemu: iso
-	$(PYTHON) narzedzia/test_e1000_qemu.py
+	$(PYTHON) testy/test_e1000_qemu.py
 
 .PHONY: test-virtio-input-events
 test-virtio-input-events:
 	@mkdir -p .virtiotest
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_PMM_HOST_TEST \
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic $(HOST_INCLUDES) -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_PMM_HOST_TEST \
 		-fsanitize=address,undefined -pthread \
-		input_device.cpp narzedzia/test_virtio_input_events.cpp -o .virtiotest/test-virtio-input-events
+		sterowniki/wejscie/input_device.cpp testy/test_virtio_input_events.cpp -o .virtiotest/test-virtio-input-events
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) UBSAN_OPTIONS=halt_on_error=1 .virtiotest/test-virtio-input-events
 
 test-virtio-pci:
-	$(PYTHON) narzedzia/test_input_boot_order.py
+	$(PYTHON) testy/test_input_boot_order.py
 	@mkdir -p .virtiotest
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_PMM_HOST_TEST $(if $(filter 1 yes true,$(BURSZTYNDIAGVIRTIOINPUTINIT)),-DBURSZTYNDIAGVIRTIOINPUTINIT=1) $(if $(filter 1,$(BURSZTYNDIAGVIRTIOINPUTQEMU)),-DBURSZTYNDIAGVIRTIOINPUTQEMU=1) -fsanitize=address,undefined -pthread pci.cpp pmm.cpp virtio_pci.cpp virtqueue.cpp virtio_rng.cpp virtio_blk.cpp network_device.cpp virtio_net.cpp virtio_gpu.cpp input_device.cpp virtio_input.cpp sterowniki/usb/usb_hid.cpp klawiatura.cpp narzedzia/test_virtio_pci.cpp -o .virtiotest/test-virtio-pci
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic $(HOST_INCLUDES) -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_PMM_HOST_TEST $(if $(filter 1 yes true,$(BURSZTYNDIAGVIRTIOINPUTINIT)),-DBURSZTYNDIAGVIRTIOINPUTINIT=1) $(if $(filter 1,$(BURSZTYNDIAGVIRTIOINPUTQEMU)),-DBURSZTYNDIAGVIRTIOINPUTQEMU=1) -fsanitize=address,undefined -pthread sterowniki/pci/pci.cpp jadro/mm/pmm.cpp sterowniki/virtio/virtio_pci.cpp sterowniki/virtio/virtqueue.cpp sterowniki/virtio/virtio_rng.cpp sterowniki/virtio/virtio_blk.cpp sterowniki/siec/network_device.cpp sterowniki/virtio/virtio_net.cpp sterowniki/virtio/virtio_gpu.cpp sterowniki/wejscie/input_device.cpp sterowniki/virtio/virtio_input.cpp sterowniki/usb/usb_hid.cpp sterowniki/wejscie/klawiatura.cpp testy/test_virtio_pci.cpp -o .virtiotest/test-virtio-pci
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) UBSAN_OPTIONS=halt_on_error=1 .virtiotest/test-virtio-pci
 
 .PHONY: test-input-init-locks
 test-input-init-locks:
 	@mkdir -p .virtiotest
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_LOCK_HOST_TEST -DBURSZTYN_PMM_HOST_TEST -DBURSZTYNDIAGVIRTIOINPUTINIT=1 -ffunction-sections -fdata-sections -fsanitize=address,undefined -pthread heap.cpp pmm.cpp pci.cpp narzedzia/test_input_init_locks.cpp -Wl,--gc-sections -o .virtiotest/test-input-init-locks
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic $(HOST_INCLUDES) -DBURSZTYN_LOCK_HOST_TEST -DBURSZTYN_PMM_HOST_TEST -DBURSZTYNDIAGVIRTIOINPUTINIT=1 -ffunction-sections -fdata-sections -fsanitize=address,undefined -pthread jadro/mm/heap.cpp jadro/mm/pmm.cpp sterowniki/pci/pci.cpp testy/test_input_init_locks.cpp -Wl,--gc-sections -o .virtiotest/test-input-init-locks
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) UBSAN_OPTIONS=halt_on_error=1 .virtiotest/test-input-init-locks
 
 test-virtio-qemu: $(CI_TEST_ISO)
-	$(PYTHON) narzedzia/test_virtio_qemu.py
+	$(PYTHON) testy/test_virtio_qemu.py
 
 test-virtio-blk-qemu: $(CI_TEST_ISO)
-	$(PYTHON) narzedzia/test_virtio_blk_qemu.py
+	$(PYTHON) testy/test_virtio_blk_qemu.py
 
 test-virtio-net-qemu: $(CI_TEST_ISO)
-	$(PYTHON) narzedzia/test_virtio_net_qemu.py
+	$(PYTHON) testy/test_virtio_net_qemu.py
 
 test-virtio-gpu-qemu: $(CI_TEST_ISO)
-	$(PYTHON) narzedzia/test_virtio_gpu_qemu.py
+	$(PYTHON) testy/test_virtio_gpu_qemu.py
 
 test-virtio-input-qemu: $(CI_TEST_ISO)
-	$(PYTHON) narzedzia/test_virtio_input_qemu.py
+	$(PYTHON) testy/test_virtio_input_qemu.py
 
 test-normal-boot: iso
-	$(PYTHON) narzedzia/test_normal_boot_qemu.py
+	$(PYTHON) testy/test_normal_boot_qemu.py
 
 test-diff-boot: iso
-	$(PYTHON) narzedzia/test_diff_boot.py
+	$(PYTHON) testy/test_diff_boot.py
 
 test-kontrolki4:
 	@mkdir -p .kontrolki4-test
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined narzedzia/test_kontrolki4.cpp -o .kontrolki4-test/test-k4
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined testy/test_kontrolki4.cpp -o .kontrolki4-test/test-k4
 	ASAN_OPTIONS=detect_leaks=0 .kontrolki4-test/test-k4
 
 test-kontrolki4-qemu: iso
-	$(PYTHON) narzedzia/test_kontrolki4_qemu.py
+	$(PYTHON) testy/test_kontrolki4_qemu.py
 
 test-bursztyn-ui-polecenia:
 	@mkdir -p .bursztyn-ui-test
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined narzedzia/test_bursztyn_ui_polecenia.cpp -o .bursztyn-ui-test/test-polecenia
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined testy/test_bursztyn_ui_polecenia.cpp -o .bursztyn-ui-test/test-polecenia
 	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-polecenia
 
 test-motywy-unit:
 	@mkdir -p .motywytest
-	g++ -std=c++17 -O2 -Wall -Wextra narzedzia/test_motyw_host.cpp -o .motywytest/test_motyw_host
+	g++ -std=c++17 -O2 -Wall -Wextra $(HOST_INCLUDES) testy/test_motyw_host.cpp -o .motywytest/test_motyw_host
 	.motywytest/test_motyw_host
 
 test-motywy-gui:
-	$(PYTHON) narzedzia/test_motywy_gui.py
+	$(PYTHON) testy/test_motywy_gui.py
 
 test-notatnik-gui: notatnik_blob.o
-	$(PYTHON) narzedzia/test_notatnik_gui.py
+	$(PYTHON) testy/test_notatnik_gui.py
 
 test-kalkulator-gui: kalkulator_blob.o
-	$(PYTHON) narzedzia/test_kalkulator_gui.py
+	$(PYTHON) testy/test_kalkulator_gui.py
 
 test-przegladarka-gui: przegladarka_blob.o husarz_worker_blob.o
-	$(PYTHON) narzedzia/test_przegladarka_gui.py
+	$(PYTHON) testy/test_przegladarka_gui.py
 
 test-motywy: test-motywy-unit test-motywy-gui test-notatnik-gui test-kalkulator-gui
 
 test-motywy-qemu: $(CI_TEST_ISO) prepare-disk
-	$(PYTHON) narzedzia/test_motywy_qemu.py
+	$(PYTHON) testy/test_motywy_qemu.py
 
 test-16k-bws84:
 	$(PYTHON) narzedzia/aktualizacje/test_16k_bws84_irq.py
 test-bur-loader:
-	$(PYTHON) narzedzia/test_bur_loader.py
+	$(PYTHON) testy/test_bur_loader.py
 test-aktualizacje:
 	$(PYTHON) narzedzia/aktualizacje/test_aktualizacje.py
 test-rozruch:
@@ -1038,7 +1258,7 @@ test-aktualizacja-qemu: iso
 test-rozruch-qemu: test-aktualizacja-qemu
 test-ota: test-bur-loader test-aktualizacje test-rozruch test-aktualizacje-gui test-aktualizacja-qemu
 test-guard-page: iso
-	$(PYTHON) narzedzia/test_guard_page.py
+	$(PYTHON) testy/test_guard_page.py
 # Audyt ramek stosu jadra: celowo NIE jest czescia normalnego `make`, poniewaz
 # wymaga czystej diagnostycznej przebudowy wszystkich obiektow jadra.
 # Sprawdza pelne pokrycie .su (w tym biblioteki/mbedtls), najwieksze ramki
@@ -1052,17 +1272,17 @@ audit-stos-jadra:
 	$(PYTHON) narzedzia/analiza_stosu.py --dir . --makefile Makefile --fail-on-missing --max-frame 6144 --warn-frame 3072
 test-stos-jadra: audit-stos-jadra
 test-wspolbieznosc:
-	$(PYTHON) narzedzia/test_wspolbieznosc.py
+	$(PYTHON) testy/test_wspolbieznosc.py
 installer-unit-test:
 	@mkdir -p .installertest
-	g++ -std=c++17 -O1 -g -Wall -Wextra -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined narzedzia/instalator/test_storage.cpp storage_format.cpp psf.cpp -o .installertest/test-storage
+	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined narzedzia/instalator/test_storage.cpp jadro/fs/storage_format.cpp jadro/fs/psf.cpp -o .installertest/test-storage
 	ASAN_OPTIONS=detect_leaks=0 .installertest/test-storage
 installer-test: iso installer-unit-test
 	$(PYTHON) narzedzia/instalator/qemu_install.py test
 run-installer: iso
 	$(PYTHON) narzedzia/instalator/qemu_install.py run
 
-instalator_tmp.o: programy/instalator/instalator.cpp instalator_format.h $(wildcard bursztyn_ui/*.h)
+instalator_tmp.o: programy/instalator/instalator.cpp jadro/gui/instalator_format.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
 instalator_blob.o: instalator_tmp.o bursztyn_gui.o programy/instalator/instalator_linker.ld
 	$(LD) --gc-sections -T $(call bur_linker,programy/instalator/instalator_linker.ld) $(RING3_LDFLAGS) instalator_tmp.o bursztyn_gui.o -o instalator.elf
@@ -1101,9 +1321,9 @@ $(CI_TEST_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
 		'' \
 		'menuentry "Bursztyn OS - testy automatyczne" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxmode=1280x720x32' \
 		'    set gfxpayload=keep' \
-		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
@@ -1121,9 +1341,9 @@ $(CI_BLK_DESTRUCTIVE_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
 		'' \
 		'menuentry "Bursztyn OS - testy automatyczne (niszczacy test dysku)" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxmode=1280x720x32' \
 		'    set gfxpayload=keep' \
-		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.test.diskdestructive=1' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.test.diskdestructive=1 bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
@@ -1141,9 +1361,9 @@ $(CI_DESTRUCTIVE_ONLY_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
 		'' \
 		'menuentry "Bursztyn OS - flaga niszczaca bez trybu automatycznego" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxmode=1280x720x32' \
 		'    set gfxpayload=keep' \
-		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test.diskdestructive=1' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test.diskdestructive=1 bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
@@ -1174,9 +1394,9 @@ $(GRUB8K_CFG): $(KERNEL) check-test8k $(TAPETY_PAK)
 		'' \
 		'menuentry "Bursztyn OS (8K Test)" {' \
 		'    insmod all_video' \
-		'    set gfxmode=1280x720x32,1024x768x32,auto' \
+		'    set gfxmode=1280x720x32' \
 		'    set gfxpayload=keep' \
-		'    multiboot2 /boot/system_operacyjny.bin' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    module2 /boot/test8k.bmp test8k.bmp' \
 		'    boot' \
@@ -1220,6 +1440,11 @@ prepare-disk: $(VIRTUAL_DISK)
 # Przydatny wariant developerski:
 #   make runuefi QEMU_DISPLAY_ARGS="-display gtk,zoom-to-fit=off"
 #
+
+BURSZTYN_REFRESH_HZ ?= 60
+ifneq ($(filter 60 120 144 165 240,$(BURSZTYN_REFRESH_HZ)),$(BURSZTYN_REFRESH_HZ))
+$(error BURSZTYN_REFRESH_HZ musi byc jedna z wartosci: 60, 120, 144, 165, 240)
+endif
 
 QEMUACCEL ?= tcg,thread=single
 QEMU_ACCEL ?= $(QEMUACCEL)
@@ -1499,7 +1724,7 @@ clean:
 	rm -f tapety.pak tapety.pak.d $(TAPETY_SOURCES_MANIFEST) $(TAPETY_ISO_CHECK) $(GRUB_ISO_CHECK) tapety_manifest.h tapetyzasoby.S tapetyzasoby.d tapety_zasoby.rsp tapety_zasoby.d tapety_zasoby.S tapety_zasoby.o
 	rm -f biblioteki/mbedtls/library/*.o biblioteki/mbedtls/library/*.su
 	rm -f $(OVMF_VARS_RUNTIME)
-	rm -rf $(ISO_DIR) $(ISO8K_DIR) $(CI_TEST_DIR) $(CI_BLK_DIR) $(CI_DEST_ONLY_DIR) isodir_test
+	rm -rf $(ISO_DIR) $(ISO8K_DIR) $(CI_TEST_DIR) $(CI_BLK_DIR) $(CI_DEST_ONLY_DIR) .build-config isodir_test
 
 #
 # Zachowanie starej nazwy `clear`.
@@ -1542,6 +1767,15 @@ help:
 	@echo "  make clean     - usun artefakty kompilacji"
 	@echo "  make cdysk     - usun wirtualny dysk"
 	@echo "  make distclean - clean + cdysk"
+	@echo ""
+	@echo "Lokalna weryfikacja (bez GitHuba; szczegoly: docs/12_lokalna_weryfikacja.md):"
+	@echo "  make test / test-smoke - szybki gate przed commitem"
+	@echo "  make test-security     - SSP, fuzz smoke, QEMU abuse, guard-page"
+	@echo "  make test-security STACK_AUDIT=1 - j.w. + audit-stos-jadra"
+	@echo "  make test-regression   - VirtIO/OTA/instalator/Husarz/HDA/input"
+	@echo "  make test-nightly      - security + regression + fuzz-extended"
+	@echo "  make test-local-suite MODE=smoke|security|regression|nightly"
+	@echo "                         - orkiestrator JSON (.local-ci/)"
 
 # Manifest zmienia timestamp tylko wtedy, gdy zmieni sie posortowany zestaw nazw.
 # Zaleznosc od katalogu wykrywa dodanie, usuniecie i zmiane nazwy pliku.
@@ -1556,21 +1790,13 @@ $(TAPETY_PAK): $(TAPETY_SOURCES_MANIFEST) narzedzia/tapety-btp/generujpakiet.py 
 
 btp.o: narzedzia/tapety-btp/tapetybtp.cpp narzedzia/tapety-btp/tapetybtp.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
-tapety_format.h: tapety_nazwy.h
-tapety.o: tapety.cpp tapety.h tapety_format.h tapety_nazwy.h pamiec.h bufory_grafiki.h obrazy/skalowanie.h narzedzia/tapety-btp/tapetybtp.h
-kernel.o bws_nowoczesne.o: tapety.h tapety_format.h tapety_nazwy.h obrazy/skalowanie.h
-syscalls.o: tapety_format.h tapety_nazwy.h
-instalator.o ekran.o: tapety.h tapety_format.h tapety_nazwy.h
+jadro/gui/tapety_format.h: jadro/gui/tapety_nazwy.h
+tapety.o: jadro/gui/tapety.cpp jadro/gui/tapety.h jadro/gui/tapety_format.h jadro/gui/tapety_nazwy.h jadro/mm/pamiec.h jadro/gui/bufory_grafiki.h obrazy/skalowanie.h narzedzia/tapety-btp/tapetybtp.h
+kernel.o bws_nowoczesne.o: jadro/gui/tapety.h jadro/gui/tapety_format.h jadro/gui/tapety_nazwy.h obrazy/skalowanie.h
+syscalls.o: jadro/gui/tapety_format.h jadro/gui/tapety_nazwy.h
+instalator.o ekran.o: jadro/gui/tapety.h jadro/gui/tapety_format.h jadro/gui/tapety_nazwy.h
 
-pci.o: pci.cpp pci.h
-virtio_pci.o: virtio_pci.cpp virtio_pci.h virtqueue.h pci.h
-virtio_gpu.o: virtio_gpu.cpp virtio_gpu.h virtio_pci.h virtqueue.h pci.h idt.h apic.h grafika.h ekran.h ekran_format.h
-virtio_rng.o: virtio_rng.cpp virtio_rng.h virtio_pci.h virtqueue.h pci.h
-virtio_blk.o: virtio_blk.cpp virtio_blk.h virtio_pci.h virtqueue.h pci.h blokowy.h
-virtio_net.o: virtio_net.cpp virtio_net.h virtio_pci.h virtqueue.h pci.h network_device.h
-virtio_input.o: virtio_input.cpp virtio_input.h virtio_pci.h virtqueue.h pci.h input_device.h
-kernel.o: virtio_pci.h virtio_blk.h virtio_net.h virtio_gpu.h virtio_rng.h virtio_input.h
-
+kernel.o: sterowniki/virtio/virtio_pci.h sterowniki/virtio/virtio_blk.h sterowniki/virtio/virtio_net.h sterowniki/virtio/virtio_gpu.h sterowniki/virtio/virtio_rng.h sterowniki/virtio/virtio_input.h
 
 btp_ring3.o: narzedzia/tapety-btp/tapetybtp.cpp narzedzia/tapety-btp/tapetybtp.h
 	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -c $< -o $@
@@ -1585,62 +1811,62 @@ test-image:
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 /tmp/bursztyn-test-tapety-jpeg
 	$(CXX) -std=c++17 -O1 -g -fsanitize=address,undefined obrazy/test_tapety_manifest.cpp -o /tmp/bursztyn-test-tapety-manifest
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 /tmp/bursztyn-test-tapety-manifest
-tapety_tmp.o: programy/tapety/tapety.cpp programy/tapety/klient.h programy/tapety/miniatury.h tapety_format.h obrazy/skalowanie.h obrazy/dekoder_obrazu.h narzedzia/tapety-btp/tapetybtp.h $(wildcard bursztyn_ui/*.h)
+tapety_tmp.o: programy/tapety/tapety.cpp programy/tapety/klient.h programy/tapety/miniatury.h jadro/gui/tapety_format.h obrazy/skalowanie.h obrazy/dekoder_obrazu.h narzedzia/tapety-btp/tapetybtp.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 	@test -s $@ || { rm -f $@; echo "[BLAD] tapety_tmp.o jest pusty"; exit 1; }
-tapety_blob.o: tapety_tmp.o btp_ring3.o image_ring3.o bursztyn_gui.o programy/tapety/tapety_linker.ld narzedzia/test_tapety_size.py
+tapety_blob.o: tapety_tmp.o btp_ring3.o image_ring3.o bursztyn_gui.o programy/tapety/tapety_linker.ld testy/test_tapety_size.py
 	@if [ ! -s tapety_tmp.o ]; then \
 		echo "[TAPETY BUILD] tapety_tmp.o jest pusty lub uszkodzony - ponowna kompilacja..."; \
 		$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c programy/tapety/tapety.cpp -o tapety_tmp.o; \
 	fi
 	$(LD) --gc-sections -T $(call bur_linker,programy/tapety/tapety_linker.ld) $(RING3_LDFLAGS) tapety_tmp.o btp_ring3.o image_ring3.o bursztyn_gui.o -o tapety.elf
 	$(BUR_CONVERT) tapety.elf tapety.bin
-	$(PYTHON) narzedzia/test_tapety_size.py tapety.bin
+	$(PYTHON) testy/test_tapety_size.py tapety.bin
 	$(LD) -r -b binary tapety.bin -o $@
 
 $(filter %tmp.o %_tmp.o,$(wildcard *.o)): obrazy/skalowanie.h
 
-test_tmp.o: programy/test/tapety_testy.h programy/tapety/klient.h programy/tapety/miniatury.h tapety_format.h narzedzia/tapety-btp/tapetybtp.h
+test_tmp.o: programy/test/tapety_testy.h programy/tapety/klient.h programy/tapety/miniatury.h jadro/gui/tapety_format.h narzedzia/tapety-btp/tapetybtp.h
 
 test_tmp.o: programy/test/kontrolki3_stabilizacja.h
 
-bochs_vbe.o: sterowniki/grafika/bochs_vbe.cpp sterowniki/grafika/bochs_vbe.h ekran_format.h
+bochs_vbe.o: sterowniki/grafika/bochs_vbe.cpp sterowniki/grafika/bochs_vbe.h jadro/gui/ekran_format.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
-ekran_tmp.o: programy/ekran/ekran.cpp programy/ekran/klient.h programy/ekran/ekran_okno.h ekran_format.h ui_skala.h $(wildcard bursztyn_ui/*.h)
+ekran_tmp.o: programy/ekran/ekran.cpp programy/ekran/klient.h programy/ekran/ekran_okno.h jadro/gui/ekran_format.h jadro/gui/ui_skala.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
 ekran_blob.o: ekran_tmp.o bursztyn_gui.o programy/ekran/ekran_linker.ld
 	$(LD) --gc-sections -T $(call bur_linker,programy/ekran/ekran_linker.ld) $(RING3_LDFLAGS) ekran_tmp.o bursztyn_gui.o -o ekran.elf
 	$(BUR_CONVERT) ekran.elf ekran.bin
 	$(LD) -r -b binary ekran.bin -o $@
-$(filter %_tmp.o,$(OBJS)) bursztyn_gui.o: ui_skala.h
+$(filter %_tmp.o,$(OBJS)) bursztyn_gui.o: jadro/gui/ui_skala.h
 
-ekran_format_ring3.o: ekran_format.cpp ekran_format.h
+ekran_format_ring3.o: jadro/gui/ekran_format.cpp jadro/gui/ekran_format.h
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
-bws_nowoczesne.o ekran.o grafika.o kernel.o: ekran.h ekran_format.h bufory_grafiki.h
-test_tmp.o: programy/test/ekran_testy.h programy/ekran/klient.h programy/ekran/ekran_okno.h ekran_format.h pulpit_geometria.h
+bws_nowoczesne.o ekran.o grafika.o kernel.o: jadro/gui/ekran.h jadro/gui/ekran_format.h jadro/gui/bufory_grafiki.h
+test_tmp.o: programy/test/ekran_testy.h programy/ekran/klient.h programy/ekran/ekran_okno.h jadro/gui/ekran_format.h jadro/gui/pulpit_geometria.h
 
 # Central WM chrome and shared popup layout dependencies.
-skladacz_obrazu.o: wm_dekoracje.h motyw.h bursztyn_ui/czcionka.h ui_skala.h
-motyw.o: skladacz_obrazu.h
+skladacz_obrazu.o: jadro/gui/wm_dekoracje.h jadro/gui/motyw.h bursztyn_ui/czcionka.h jadro/gui/ui_skala.h
+motyw.o: jadro/gui/skladacz_obrazu.h
 shell_tmp.o: bursztyn_ui/widok_menu_popup.h
-grafika.o: wm_input.h
-bursztyn_gui.o: wm_belka_hit.h
+grafika.o: jadro/gui/wm_input.h
+bursztyn_gui.o: jadro/gui/wm_belka_hit.h
 
 .PHONY: test-wm-click-routing test-wm-dekoracje test-shell-host
 test-wm-click-routing:
 	@mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_wm_click_routing.cpp -Wl,--gc-sections -o .wm-test/click-routing
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -ffunction-sections -fdata-sections -fsanitize=address,undefined testy/test_wm_click_routing.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -Wl,--gc-sections -o .wm-test/click-routing
 	ASAN_OPTIONS=detect_leaks=0 .wm-test/click-routing
 
 test-wm-dekoracje:
 	@mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -fsanitize=address,undefined narzedzia/test_wm_dekoracje.cpp -o .wm-test/dekoracje
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -fsanitize=address,undefined testy/test_wm_dekoracje.cpp -o .wm-test/dekoracje
 	ASAN_OPTIONS=detect_leaks=0 .wm-test/dekoracje
 
 test-shell-host:
 	@mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_shell_terminal.cpp bsf/bsf.cpp bsf/terminal.cpp -Wl,--gc-sections -o .wm-test/shell
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -ffunction-sections -fdata-sections -fsanitize=address,undefined testy/test_shell_terminal.cpp bsf/bsf.cpp bsf/terminal.cpp -Wl,--gc-sections -o .wm-test/shell
 	ASAN_OPTIONS=detect_leaks=0 .wm-test/shell
 
 BURSZTYNDIAGCURSORPERF ?= 0
@@ -1651,16 +1877,16 @@ endif
 .PHONY: test-cursor-host
 test-cursor-host:
 	mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined narzedzia/test_cursor_host.cpp -o .wm-test/cursor
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -Wall -Wextra -fsanitize=address,undefined testy/test_cursor_host.cpp -o .wm-test/cursor
 	ASAN_OPTIONS=detect_leaks=0 .wm-test/cursor
 
-grafika.o skladacz_obrazu.o: kursor_prezentacja.h kursor_diag.h
-virtio_input.o: kursor_diag.h
+grafika.o skladacz_obrazu.o: jadro/gui/kursor_prezentacja.h jadro/gui/kursor_diag.h
+virtio_input.o: jadro/gui/kursor_diag.h
 
 .PHONY: test-cursor-hover
 test-cursor-hover:
 	mkdir -p .wm-test
-	g++ -std=c++17 -O0 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_cursor_hover.cpp -Wl,--gc-sections -o .wm-test/cursor-hover
+	g++ $(HOST_INCLUDES) -std=c++17 -O0 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined testy/test_cursor_hover.cpp -Wl,--gc-sections -o .wm-test/cursor-hover
 	ASAN_OPTIONS=detect_leaks=0 .wm-test/cursor-hover
 
 BURSZTYNDIAGGUIRUNTIME ?= 0
@@ -1668,21 +1894,29 @@ ifeq ($(BURSZTYNDIAGGUIRUNTIME),1)
 KERNEL_CXXFLAGS += -DBURSZTYNDIAGGUIRUNTIME=1
 RING3_FLAGS += -DBURSZTYNDIAGGUIRUNTIME=1
 endif
-scheduler.o syscalls.o grafika.o skladacz_obrazu.o: gui_runtime_diag.h
-shell_tmp.o: shell_runtime_diag.h
 
-virtio_input.o: gui_runtime_diag.h
+GUI_PERF_BUILD_CONFIG := .build-config/gui-perf
+.PHONY: gui-perf-build-config-force
+gui-perf-build-config-force:
+$(GUI_PERF_BUILD_CONFIG): gui-perf-build-config-force
+	@mkdir -p .build-config
+	@$(PYTHON) -c "from pathlib import Path; p=Path('$@'); v='runtime=$(BURSZTYNDIAGGUIRUNTIME) perf=$(BURSZTYN_DEBUG_PERF) gui_perf=$(BURSZTYN_DEBUG_GUI_PERF) loader=$(BURSZTYN_DEBUG_LOADER_PERF)'; p.write_text(v) if not p.exists() or p.read_text()!=v else None"
+
+scheduler.o syscalls.o grafika.o skladacz_obrazu.o loader.o kernel.o virtio_input.o: jadro/gui/gui_runtime_diag.h $(GUI_PERF_BUILD_CONFIG)
+shell_tmp.o: programy/shell/shell_runtime_diag.h
+
+virtio_input.o: jadro/gui/gui_runtime_diag.h
 
 .PHONY: test-gui-runtime-diag
 test-gui-runtime-diag:
 	mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -fsanitize=address,undefined narzedzia/test_gui_runtime_diag.cpp -o .wm-test/gui-runtime-diag
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -I. -Ijadro/gui -Ijadro/bws -Isterowniki/czas -fsanitize=address,undefined testy/test_gui_runtime_diag.cpp -o .wm-test/gui-runtime-diag
 	ASAN_OPTIONS=detect_leaks=0 .wm-test/gui-runtime-diag
 
 .PHONY: test-compositor-cursor
 test-compositor-cursor:
 	mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_compositor_cursor.cpp -Wl,--gc-sections -o .wm-test/compositor-cursor
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -ffunction-sections -fdata-sections -fsanitize=address,undefined testy/test_compositor_cursor.cpp -Wl,--gc-sections -o .wm-test/compositor-cursor
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/compositor-cursor
 
 BURSZTYNDIAGABSMAP ?= 0
@@ -1690,54 +1924,60 @@ ifeq ($(BURSZTYNDIAGABSMAP),1)
 KERNEL_CXXFLAGS += -DBURSZTYNDIAGABSMAP=1
 RING3_FLAGS += -DBURSZTYNDIAGABSMAP=1
 endif
-input_device.o: abs_map_diag.h
+input_device.o: jadro/gui/abs_map_diag.h
 
 .PHONY: test-abs-map-diag
 test-abs-map-diag:
 	@mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -Wall -Wextra -ffunction-sections -fdata-sections -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYNDIAGABSMAP=1 -fsanitize=address,undefined input_device.cpp narzedzia/test_abs_map_diag.cpp -Wl,--gc-sections -o .wm-test/abs-map-diag
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -Wall -Wextra -ffunction-sections -fdata-sections -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYNDIAGABSMAP=1 -fsanitize=address,undefined sterowniki/wejscie/input_device.cpp testy/test_abs_map_diag.cpp -Wl,--gc-sections -o .wm-test/abs-map-diag
 	ASAN_OPTIONS=detect_leaks=1 .wm-test/abs-map-diag
 
 .PHONY: test-explorer-host
 test-explorer-host:
 	@mkdir -p .bursztyn-ui-test
-	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined narzedzia/test_explorer_host.cpp -o .bursztyn-ui-test/test-explorer
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined testy/test_explorer_host.cpp -o .bursztyn-ui-test/test-explorer
 	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-explorer
 
 .PHONY: test-tapety-bur
 test-tapety-bur: tapety_blob.o
-	$(PYTHON) narzedzia/test_tapety_regression.py
+	$(PYTHON) testy/test_tapety_regression.py
 
 .PHONY: test-hda-physical test-hda-tone test-hda-regression-qemu test-hda-diag test-dzwieku-packaging test-dzwieku-repair
 test-hda-physical:
-	$(PYTHON) narzedzia/test_hda_physical.py
+	$(PYTHON) testy/test_hda_physical.py
 test-hda-tone:
-	$(PYTHON) narzedzia/test_hda_tone.py
+	$(PYTHON) testy/test_hda_tone.py
 test-hda-regression-qemu: all
-	$(PYTHON) narzedzia/test_hda_regression_qemu.py
+	$(PYTHON) testy/test_hda_regression_qemu.py
 test-dzwieku-repair: test_dzwieku_blob.o
-	$(PYTHON) narzedzia/test_dzwieku_repair.py
+	$(PYTHON) testy/test_dzwieku_repair.py
 
 test-dzwieku-packaging: test_dzwieku_blob.o
-	$(PYTHON) narzedzia/test_dzwieku_packaging.py
+	$(PYTHON) testy/test_dzwieku_packaging.py
 
 test-hda-diag:
 	@mkdir -p .hda-test
-	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined narzedzia/test_hda_diag.cpp -o .hda-test/test-hda-diag
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined testy/test_hda_diag.cpp -o .hda-test/test-hda-diag
 	ASAN_OPTIONS=detect_leaks=0 .hda-test/test-hda-diag
-	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined narzedzia/test_hda_bws_isolation.cpp -o .hda-test/test-hda-bws
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined testy/test_hda_bws_isolation.cpp -o .hda-test/test-hda-bws
 	ASAN_OPTIONS=detect_leaks=0 .hda-test/test-hda-bws
 
 .PHONY: test-desktop-files-host
 test-desktop-files-host:
 	@mkdir -p .bursztyn-ui-test
-	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined narzedzia/test_desktop_files_host.cpp -o .bursztyn-ui-test/test-desktop-files
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined testy/test_desktop_files_host.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -o .bursztyn-ui-test/test-desktop-files
 	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-desktop-files
+
+.PHONY: test-usluga-ui-protokol-host
+test-usluga-ui-protokol-host:
+	@mkdir -p .bursztyn-ui-test
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -Wall -Wextra -I. -fsanitize=address,undefined testy/test_usluga_ui_protokol_host.cpp -o .bursztyn-ui-test/test-usluga-ui-protokol
+	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-usluga-ui-protokol
 
 .PHONY: test-desktop-capacity-host
 test-desktop-capacity-host:
 	@mkdir -p .bursztyn-ui-test
-	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined narzedzia/test_desktop_capacity_host.cpp -o .bursztyn-ui-test/test-desktop-capacity
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined testy/test_desktop_capacity_host.cpp -o .bursztyn-ui-test/test-desktop-capacity
 	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-desktop-capacity
 
 # Opt-in aggregate move diagnostics; no normal-build logging or GPU behavior changes.
@@ -1745,76 +1985,81 @@ BURSZTYNDIAGMOVE ?= 0
 ifeq ($(BURSZTYNDIAGMOVE),1)
 KERNEL_CXXFLAGS += -DBURSZTYNDIAGMOVE=1
 endif
-syscalls.o grafika.o skladacz_obrazu.o: move_trace.h
+syscalls.o grafika.o skladacz_obrazu.o: jadro/gui/move_trace.h
 
 .PHONY: test-filesystem-move-host
 test-filesystem-move-host: installer-unit-test
 	@mkdir -p .installertest
-	g++ -std=c++17 -O0 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined narzedzia/test_move_authorization.cpp storage_format.cpp psf.cpp -o .installertest/test-move-authorization
+	g++ $(HOST_INCLUDES) -std=c++17 -O0 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined testy/test_move_authorization.cpp jadro/fs/storage_format.cpp jadro/fs/psf.cpp -o .installertest/test-move-authorization
 	ASAN_OPTIONS=detect_leaks=0 .installertest/test-move-authorization
 
-bursztyn_gui.o syscalls.o: bws_pliki.h motyw.h
+bursztyn_gui.o syscalls.o: jadro/bws/bws_pliki.h jadro/gui/motyw.h
 
 .PHONY: test-desktop-selection-theme
 test-desktop-selection-theme:
 	@mkdir -p .motywytest
-	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined narzedzia/test_desktop_selection_theme.cpp -o .motywytest/test-desktop-selection
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined testy/test_desktop_selection_theme.cpp -o .motywytest/test-desktop-selection
 	ASAN_OPTIONS=detect_leaks=0 .motywytest/test-desktop-selection
 
 .PHONY: test-file-popup-host
 test-file-popup-host:
 	@mkdir -p .bursztyn-ui-test
-	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined narzedzia/test_file_popup_host.cpp -o .bursztyn-ui-test/test-file-popup
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined testy/test_file_popup_host.cpp -o .bursztyn-ui-test/test-file-popup
 	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-file-popup
 
 .PHONY: test-desktop-settings-host
 test-desktop-settings-host:
 	@mkdir -p .installertest
-	g++ -std=c++17 -O0 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined narzedzia/test_desktop_settings_authorization.cpp storage_format.cpp psf.cpp -o .installertest/test-desktop-settings
+	g++ $(HOST_INCLUDES) -std=c++17 -O0 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined testy/test_desktop_settings_authorization.cpp jadro/fs/storage_format.cpp jadro/fs/psf.cpp -o .installertest/test-desktop-settings
 	ASAN_OPTIONS=detect_leaks=0 .installertest/test-desktop-settings
 
 .PHONY: test-startup-visibility
-grafika.o skladacz_obrazu.o kernel.o: skladacz_obrazu.h
+grafika.o skladacz_obrazu.o kernel.o: jadro/gui/skladacz_obrazu.h
 # Host-only: production compositor lifecycle + kernel graphics + boot policy.
 test-startup-visibility:
 	@mkdir -p .wm-test
-	g++ -std=c++17 -O0 -g0 -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_startup_visibility.cpp -Wl,--gc-sections -o .wm-test/startup-visibility
+	g++ -std=c++17 -O0 -g0 $(HOST_INCLUDES) -ffunction-sections -fdata-sections -fsanitize=address,undefined testy/test_startup_visibility.cpp -Wl,--gc-sections -o .wm-test/startup-visibility
 	ASAN_OPTIONS=detect_leaks=0 .wm-test/startup-visibility
-	g++ -std=c++17 -O0 -g0 -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_boot_graphics.cpp -Wl,--gc-sections -o .wm-test/boot-graphics
+	g++ -std=c++17 -O0 -g0 $(HOST_INCLUDES) -ffunction-sections -fdata-sections -fsanitize=address,undefined testy/test_boot_graphics.cpp -Wl,--gc-sections -o .wm-test/boot-graphics
 	ASAN_OPTIONS=detect_leaks=0 .wm-test/boot-graphics
-	$(PYTHON) narzedzia/test_startup_policy.py
+	$(PYTHON) testy/test_startup_policy.py
 
 # Welcome layer dependencies and deterministic host regression suite.
-ekran_powitalny.o: ekran_powitalny.h ekran_powitalny_api.h bursztyn_ui/czcionka.h ui_skala.h
-grafika.o skladacz_obrazu.o kernel.o: ekran_powitalny_api.h
-kernel.o: opcje_startowe.h
+ekran_powitalny.o: jadro/gui/ekran_powitalny.h jadro/gui/ekran_powitalny_api.h bursztyn_ui/czcionka.h jadro/gui/ui_skala.h $(LOGO_MASKA_H)
+grafika.o skladacz_obrazu.o kernel.o: jadro/gui/ekran_powitalny_api.h
+kernel.o: jadro/rdzen/opcje_startowe.h
+
+.PHONY: test-logo-maska
+test-logo-maska:
+	$(PYTHON) testy/test_logo_maska.py
 
 .PHONY: test-powitanie
 test-powitanie:
 	@mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -fsanitize=address,undefined narzedzia/test_powitanie.cpp -o .wm-test/powitanie
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -fsanitize=address,undefined testy/test_powitanie.cpp -o .wm-test/powitanie
 	ASAN_OPTIONS=detect_leaks=0 .wm-test/powitanie
-	$(PYTHON) narzedzia/test_powitanie_policy.py
+	$(PYTHON) testy/test_logo_maska.py
+	$(PYTHON) testy/test_powitanie_policy.py
 
 BURSZTYNDIAGSTARTUPREBOOT ?= 0
 ifeq ($(BURSZTYNDIAGSTARTUPREBOOT),1)
 KERNEL_CXXFLAGS += -DBURSZTYNDIAGSTARTUPREBOOT=1
 endif
-grafika.o skladacz_obrazu.o syscalls.o ekran_powitalny.o: diagnostyka_startu.h
-syscalls.o: ekran_powitalny_api.h skladacz_obrazu.h
+grafika.o skladacz_obrazu.o syscalls.o ekran_powitalny.o: jadro/diag/diagnostyka_startu.h
+syscalls.o: jadro/gui/ekran_powitalny_api.h jadro/gui/skladacz_obrazu.h
 
-syscalls.o: cykl_wylaczania_grafiki.h
+syscalls.o: jadro/gui/cykl_wylaczania_grafiki.h
 
 .PHONY: test-powitanie-reboot
 test-powitanie-reboot:
 	@mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -pthread -fsanitize=address,undefined narzedzia/test_powitanie_reboot.cpp -o .wm-test/powitanie-reboot
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -pthread -fsanitize=address,undefined testy/test_powitanie_reboot.cpp -o .wm-test/powitanie-reboot
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/powitanie-reboot
 
 .PHONY: test-gpu-quiesce-host
 test-gpu-quiesce-host:
 	@mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_gpu_quiesce_host.cpp -Wl,--gc-sections -o .wm-test/gpu-quiesce
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -ffunction-sections -fdata-sections -fsanitize=address,undefined testy/test_gpu_quiesce_host.cpp -Wl,--gc-sections -o .wm-test/gpu-quiesce
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/gpu-quiesce
 
 # Opt-in sparse splash timing diagnostics; production default has no frame logs.
@@ -1826,34 +2071,34 @@ endif
 .PHONY: test-splash-timing test-windows-launcher
 test-splash-timing:
 	@mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -DBURSZTYNDIAGSPLASHTIMING=1 -fsanitize=address,undefined narzedzia/test_splash_timing.cpp -o .wm-test/splash-timing
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -DBURSZTYNDIAGSPLASHTIMING=1 -fsanitize=address,undefined testy/test_splash_timing.cpp -o .wm-test/splash-timing
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/splash-timing
 
 test-windows-launcher:
-	$(PYTHON) narzedzia/test_windows_launcher_config.py
+	$(PYTHON) testy/test_windows_launcher_config.py
 
 BURSZTYNDIAGSPLASHFIRSTFRAME ?= 0
 ifeq ($(BURSZTYNDIAGSPLASHFIRSTFRAME),1)
 KERNEL_CXXFLAGS += -DBURSZTYNDIAGSPLASHFIRSTFRAME=1
 endif
-virtio_gpu.o: diagnostyka_startu.h
-grafika.o: virtio_gpu.h
+virtio_gpu.o: jadro/diag/diagnostyka_startu.h
+grafika.o: sterowniki/virtio/virtio_gpu.h
 .PHONY: test-splash-first-frame
 test-splash-first-frame:
 	@mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -DBURSZTYNDIAGSPLASHFIRSTFRAME=1 -fsanitize=address,undefined narzedzia/test_splash_first_frame.cpp -o .wm-test/splash-first-frame
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -DBURSZTYNDIAGSPLASHFIRSTFRAME=1 -fsanitize=address,undefined testy/test_splash_first_frame.cpp -o .wm-test/splash-first-frame
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/splash-first-frame
 
 BURSZTYNDIAGSPLASHRUNTIMEFRAMES ?= 0
 ifeq ($(BURSZTYNDIAGSPLASHRUNTIMEFRAMES),1)
 KERNEL_CXXFLAGS += -DBURSZTYNDIAGSPLASHRUNTIMEFRAMES=1
 endif
-grafika.o ekran_powitalny.o skladacz_obrazu.o virtio_gpu.o virtio_pci.o uefi_gop.o kernel.o: prezentacja_startu.h diagnostyka_klatek_startu.h
+grafika.o ekran_powitalny.o skladacz_obrazu.o virtio_gpu.o virtio_pci.o uefi_gop.o kernel.o: jadro/gui/prezentacja_startu.h jadro/diag/diagnostyka_klatek_startu.h
 
 .PHONY: test-splash-snapshots
 test-splash-snapshots:
 	@mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -fsanitize=address,undefined narzedzia/test_splash_snapshots.cpp -o .wm-test/splash-snapshots
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -fsanitize=address,undefined testy/test_splash_snapshots.cpp -o .wm-test/splash-snapshots
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/splash-snapshots
 
 # Restricted ptrace environments may override only leak checking; ASan/UBSan
@@ -1861,47 +2106,47 @@ test-splash-snapshots:
 STARTUP_ASAN_OPTIONS ?= detect_leaks=1
 
 .PHONY: test-splash-production-path
-STARTUP_HOST_FLAGS := -std=c++17 -O1 -g -I. -ffunction-sections -fdata-sections -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_GRAPHICS_HOST_TEST -DBURSZTYN_COMPOSITOR_HOST_TEST -DBURSZTYNDIAGSPLASHRUNTIMEFRAMES=1 -fsanitize=address,undefined -pthread
-STARTUP_HOST_SOURCES := narzedzia/test_splash_production_path.cpp grafika.cpp ekran_powitalny.cpp skladacz_obrazu.cpp sterowniki/grafika/uefi_gop.cpp pci.cpp virtio_pci.cpp virtqueue.cpp virtio_rng.cpp virtio_blk.cpp network_device.cpp virtio_net.cpp virtio_gpu.cpp input_device.cpp virtio_input.cpp sterowniki/usb/usb_hid.cpp klawiatura.cpp
-.wm-test/runtime-host/narzedzia/test_splash_production_path.o .wm-test/runtime-host/pmm.o: STARTUP_HOST_FLAGS += -DBURSZTYN_PMM_HOST_TEST
+STARTUP_HOST_FLAGS := -std=c++17 -O1 -g $(HOST_INCLUDES) -ffunction-sections -fdata-sections -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_GRAPHICS_HOST_TEST -DBURSZTYN_COMPOSITOR_HOST_TEST -DBURSZTYNDIAGSPLASHRUNTIMEFRAMES=1 -fsanitize=address,undefined -pthread
+STARTUP_HOST_SOURCES := testy/test_splash_production_path.cpp sterowniki/grafika/grafika.cpp jadro/gui/ekran_powitalny.cpp jadro/gui/skladacz_obrazu.cpp sterowniki/grafika/uefi_gop.cpp sterowniki/pci/pci.cpp sterowniki/virtio/virtio_pci.cpp sterowniki/virtio/virtqueue.cpp sterowniki/virtio/virtio_rng.cpp sterowniki/virtio/virtio_blk.cpp sterowniki/siec/network_device.cpp sterowniki/virtio/virtio_net.cpp sterowniki/virtio/virtio_gpu.cpp sterowniki/wejscie/input_device.cpp sterowniki/virtio/virtio_input.cpp sterowniki/usb/usb_hid.cpp sterowniki/wejscie/klawiatura.cpp
+.wm-test/runtime-host/testy/test_splash_production_path.o .wm-test/runtime-host/pmm.o: STARTUP_HOST_FLAGS += -DBURSZTYN_PMM_HOST_TEST
 STARTUP_HOST_OBJECTS := $(addprefix .wm-test/runtime-host/,$(STARTUP_HOST_SOURCES:.cpp=.o))
 .wm-test/runtime-host/%.o: %.cpp
 	@mkdir -p $(@D)
-	g++ $(STARTUP_HOST_FLAGS) -MMD -MP -c $< -o $@
+	g++ $(HOST_INCLUDES) $(STARTUP_HOST_FLAGS) -MMD -MP -c $< -o $@
 -include $(STARTUP_HOST_OBJECTS:.o=.d)
 test-splash-production-path: $(STARTUP_HOST_OBJECTS) .wm-test/runtime-host/pmm.o
 	@mkdir -p .wm-test
-	g++ $(STARTUP_HOST_FLAGS) -Wl,--gc-sections $(STARTUP_HOST_OBJECTS) .wm-test/runtime-host/pmm.o -o .wm-test/splash-production-path
+	g++ $(HOST_INCLUDES) $(STARTUP_HOST_FLAGS) -Wl,--gc-sections $(STARTUP_HOST_OBJECTS) .wm-test/runtime-host/pmm.o -o .wm-test/splash-production-path
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/splash-production-path
 
 # Bootstrap status is shared with kernel early startup; explicit first-build
 # edges complement generated dependencies when upgrading an existing worktree.
-psf.o kernel.o: psf.h psf_bootstrap_status.h
-psf.o: psf_usuwanie.inc plik_status.h
-bursztyn_gui.o syscalls.o: plik_status.h
-kernel.o: psf_bootstrap.h
--include $(wildcard *.d biblioteki/mbedtls/library/*.d)
+psf.o kernel.o: jadro/fs/psf.h jadro/fs/psf_bootstrap_status.h
+psf.o: jadro/fs/psf_usuwanie.inc jadro/fs/plik_status.h
+bursztyn_gui.o syscalls.o: jadro/fs/plik_status.h
+kernel.o: jadro/fs/psf_bootstrap.h
+-include $(wildcard *.d jadro/*/*.d biblioteki/mbedtls/library/*.d)
 
-PSF_BOOTSTRAP_HOST_FLAGS := -std=c++17 -O1 -g -Wall -Wextra -I. -Ibiblioteki/mbedtls/include -DBURSZTYN_PSF_HOST_TEST -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined
+PSF_BOOTSTRAP_HOST_FLAGS := -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -Ibiblioteki/mbedtls/include -DBURSZTYN_PSF_HOST_TEST -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined
 .PHONY: test-gui-text-input-host test-recursive-delete-host test-file-watch-host
 test-file-watch-host:
 	@mkdir -p .installertest
-	g++ $(PSF_BOOTSTRAP_HOST_FLAGS) narzedzia/test_file_watch_host.cpp -o .installertest/test-file-watch
+	g++ $(HOST_INCLUDES) $(PSF_BOOTSTRAP_HOST_FLAGS) testy/test_file_watch_host.cpp -o .installertest/test-file-watch
 	ASAN_OPTIONS=detect_leaks=0 .installertest/test-file-watch
 test-gui-text-input-host:
 	@mkdir -p .bursztyn-ui-test
-	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined narzedzia/test_gui_text_input.cpp klawiatura.cpp -o .bursztyn-ui-test/test-gui-text-input
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined testy/test_gui_text_input.cpp sterowniki/wejscie/klawiatura.cpp -o .bursztyn-ui-test/test-gui-text-input
 	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-gui-text-input
 test-recursive-delete-host:
 	@mkdir -p .installertest
-	g++ $(PSF_BOOTSTRAP_HOST_FLAGS) narzedzia/test_recursive_delete_host.cpp storage_format.cpp -o .installertest/test-recursive-delete
+	g++ $(HOST_INCLUDES) $(PSF_BOOTSTRAP_HOST_FLAGS) testy/test_recursive_delete_host.cpp jadro/fs/storage_format.cpp -o .installertest/test-recursive-delete
 	ASAN_OPTIONS=detect_leaks=0 .installertest/test-recursive-delete
 .PHONY: test-psf-bootstrap-host
 test-psf-bootstrap-host:
 	@mkdir -p .installertest
-	g++ $(PSF_BOOTSTRAP_HOST_FLAGS) -DBURSZTYNDIAGPSFBOOTSTRAP=0 narzedzia/test_psf_bootstrap_host.cpp aktualizacja.cpp storage_format.cpp -o .installertest/test-psf-bootstrap-normal
+	g++ $(HOST_INCLUDES) $(PSF_BOOTSTRAP_HOST_FLAGS) -DBURSZTYNDIAGPSFBOOTSTRAP=0 testy/test_psf_bootstrap_host.cpp jadro/aktualizacja/aktualizacja.cpp jadro/fs/storage_format.cpp -o .installertest/test-psf-bootstrap-normal
 	ASAN_OPTIONS=detect_leaks=0 .installertest/test-psf-bootstrap-normal
-	g++ $(PSF_BOOTSTRAP_HOST_FLAGS) -DBURSZTYNDIAGPSFBOOTSTRAP=1 narzedzia/test_psf_bootstrap_host.cpp aktualizacja.cpp storage_format.cpp -o .installertest/test-psf-bootstrap
+	g++ $(HOST_INCLUDES) $(PSF_BOOTSTRAP_HOST_FLAGS) -DBURSZTYNDIAGPSFBOOTSTRAP=1 testy/test_psf_bootstrap_host.cpp jadro/aktualizacja/aktualizacja.cpp jadro/fs/storage_format.cpp -o .installertest/test-psf-bootstrap
 	ASAN_OPTIONS=detect_leaks=0 .installertest/test-psf-bootstrap
 
 
@@ -1920,21 +2165,21 @@ ifeq ($(BURSZTYNDIAGUSBHID),1)
 KERNEL_CXXFLAGS += -DBURSZTYNDIAGUSBHID=1
 endif
 
-POINTING_HOST_FLAGS := $(if $(filter 1,$(BURSZTYNDIAGXHCIPOINTING)),-DBURSZTYNDIAGXHCIPOINTING=1) $(if $(filter 1,$(BURSZTYNDIAGPS2)),-DBURSZTYNDIAGPS2=1) $(if $(filter 1,$(BURSZTYNDIAGUSBHID)),-DBURSZTYNDIAGUSBHID=1) -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer
+POINTING_HOST_FLAGS := $(if $(filter 1,$(BURSZTYNDIAGXHCIPOINTING)),-DBURSZTYNDIAGXHCIPOINTING=1) $(if $(filter 1,$(BURSZTYNDIAGPS2)),-DBURSZTYNDIAGPS2=1) $(if $(filter 1,$(BURSZTYNDIAGUSBHID)),-DBURSZTYNDIAGUSBHID=1) -std=c++17 -O1 -g -Wall -Wextra -Wpedantic $(HOST_INCLUDES) -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer
 .PHONY: test-pointing-host
 test-pointing-host:
 	@mkdir -p .pointingtest
-	g++ $(POINTING_HOST_FLAGS) narzedzia/test_pointing.cpp sterowniki/usb/hid_pointer.cpp input_device.cpp -o .pointingtest/pointing
+	g++ $(HOST_INCLUDES) $(POINTING_HOST_FLAGS) testy/test_pointing.cpp sterowniki/usb/hid_pointer.cpp sterowniki/wejscie/input_device.cpp -o .pointingtest/pointing
 	.pointingtest/pointing
-	g++ $(POINTING_HOST_FLAGS) -pthread -DBURSZTYN_PS2_HOST_TEST -DREAL_KEYBOARD=1 narzedzia/test_ps2_controller.cpp input_device.cpp klawiatura.cpp sterowniki/usb/usb_hid.cpp -o .pointingtest/ps2-controller
+	g++ $(HOST_INCLUDES) $(POINTING_HOST_FLAGS) -pthread -DBURSZTYN_PS2_HOST_TEST -DREAL_KEYBOARD=1 testy/test_ps2_controller.cpp sterowniki/wejscie/input_device.cpp sterowniki/wejscie/klawiatura.cpp sterowniki/usb/usb_hid.cpp -o .pointingtest/ps2-controller
 	.pointingtest/ps2-controller
-	g++ $(POINTING_HOST_FLAGS) narzedzia/test_ohci.cpp sterowniki/usb/hid_pointer.cpp input_device.cpp -o .pointingtest/ohci
+	g++ $(HOST_INCLUDES) $(POINTING_HOST_FLAGS) testy/test_ohci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/wejscie/input_device.cpp -o .pointingtest/ohci
 	.pointingtest/ohci
-	g++ $(POINTING_HOST_FLAGS) -ffunction-sections -fdata-sections -DBURSZTYN_IDT_HOST_TEST narzedzia/test_xhci_pointer.cpp idt.cpp pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp input_device.cpp -Wl,--gc-sections -o .pointingtest/xhci-pointer
+	g++ $(HOST_INCLUDES) $(POINTING_HOST_FLAGS) -ffunction-sections -fdata-sections -DBURSZTYN_IDT_HOST_TEST testy/test_xhci_pointer.cpp jadro/arch/idt.cpp sterowniki/pci/pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp sterowniki/wejscie/input_device.cpp -Wl,--gc-sections -o .pointingtest/xhci-pointer
 	.pointingtest/xhci-pointer
 
-mysz.o: ps2_mouse_parser.h pointing_diag.h
-hid_pointer.o: pointing_diag.h input_device.h
+mysz.o: jadro/gui/ps2_mouse_parser.h jadro/gui/pointing_diag.h
+hid_pointer.o: jadro/gui/pointing_diag.h sterowniki/wejscie/input_device.h
 xhci.o usb.o: sterowniki/usb/ohci.h sterowniki/usb/hid_pointer.h
 
 # One bounded shared diagnostic stream; production default is silent.
@@ -1942,25 +2187,25 @@ BURSZTYNDIAGXHCIPOINTING ?= 0
 ifeq ($(BURSZTYNDIAGXHCIPOINTING),1)
 KERNEL_CXXFLAGS += -DBURSZTYNDIAGXHCIPOINTING=1
 endif
-input_device.o mysz.o grafika.o hid_pointer.o xhci.o ohci.o idt.o: xhci_pointing_diag.h
+input_device.o mysz.o grafika.o hid_pointer.o xhci.o ohci.o idt.o: jadro/gui/xhci_pointing_diag.h
 
 .PHONY: test-irq-allocation-host
 test-irq-allocation-host:
 	@mkdir -p .pointingtest
-	g++ $(POINTING_HOST_FLAGS) -DBURSZTYN_IDT_HOST_TEST -ffunction-sections -fdata-sections idt.cpp narzedzia/test_irq_allocation.cpp -Wl,--gc-sections -o .pointingtest/irq-allocation
+	g++ $(HOST_INCLUDES) $(POINTING_HOST_FLAGS) -DBURSZTYN_IDT_HOST_TEST -ffunction-sections -fdata-sections jadro/arch/idt.cpp testy/test_irq_allocation.cpp -Wl,--gc-sections -o .pointingtest/irq-allocation
 	.pointingtest/irq-allocation
 
 .PHONY: test-pointer-regression-host
 test-pointer-regression-host:
 	@mkdir -p .pointingtest
-	g++ $(POINTING_HOST_FLAGS) narzedzia/test_pointer_regression.cpp sterowniki/usb/hid_pointer.cpp input_device.cpp -o .pointingtest/pointer-regression
+	g++ $(HOST_INCLUDES) $(POINTING_HOST_FLAGS) testy/test_pointer_regression.cpp sterowniki/usb/hid_pointer.cpp sterowniki/wejscie/input_device.cpp -o .pointingtest/pointer-regression
 	.pointingtest/pointer-regression
-	$(PYTHON) narzedzia/test_pointer_boot_order.py
-input_device.o grafika.o hid_pointer.o: pointer_coordinates.h
+	$(PYTHON) testy/test_pointer_boot_order.py
+input_device.o grafika.o hid_pointer.o: jadro/gui/pointer_coordinates.h
 
 .PHONY: test-pointer-graphics-host
-test-pointer-graphics-host: $(filter-out .wm-test/runtime-host/narzedzia/test_splash_production_path.o,$(STARTUP_HOST_OBJECTS))
-	g++ $(STARTUP_HOST_FLAGS) -DBURSZTYN_PMM_HOST_TEST -Wl,--gc-sections narzedzia/test_pointer_graphics.cpp sterowniki/usb/hid_pointer.cpp $^ -o .wm-test/pointer-graphics
+test-pointer-graphics-host: $(filter-out .wm-test/runtime-host/testy/test_splash_production_path.o,$(STARTUP_HOST_OBJECTS))
+	g++ $(HOST_INCLUDES) $(STARTUP_HOST_FLAGS) -DBURSZTYN_PMM_HOST_TEST -Wl,--gc-sections testy/test_pointer_graphics.cpp sterowniki/usb/hid_pointer.cpp $^ -o .wm-test/pointer-graphics
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/pointer-graphics
 
 # Physical hardware diagnostics: bounded, deferred, no polling or timing changes.
@@ -1974,9 +2219,9 @@ xhci.o hid_pointer.o input_device.o: sterowniki/usb/xhci_physical_diag.h
 .PHONY: test-xhci-physical-mouse-host
 test-xhci-physical-mouse-host:
 	@mkdir -p .pointingtest
-	g++ $(POINTING_HOST_FLAGS) -DBURSZTYN_XHCI_HOST_TEST -DBURSZTYN_IDT_HOST_TEST -DBURSZTYNDIAGXHCIPHYSICALMOUSE=0 -ffunction-sections -fdata-sections narzedzia/test_xhci_physical_mouse.cpp idt.cpp pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp input_device.cpp -Wl,--gc-sections -o .pointingtest/xhci-physical-mouse-production
+	g++ $(HOST_INCLUDES) $(POINTING_HOST_FLAGS) -DBURSZTYN_XHCI_HOST_TEST -DBURSZTYN_IDT_HOST_TEST -DBURSZTYNDIAGXHCIPHYSICALMOUSE=0 -ffunction-sections -fdata-sections testy/test_xhci_physical_mouse.cpp jadro/arch/idt.cpp sterowniki/pci/pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp sterowniki/wejscie/input_device.cpp -Wl,--gc-sections -o .pointingtest/xhci-physical-mouse-production
 	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 .pointingtest/xhci-physical-mouse-production
-	g++ $(POINTING_HOST_FLAGS) -DBURSZTYN_XHCI_HOST_TEST -DBURSZTYN_IDT_HOST_TEST -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -ffunction-sections -fdata-sections narzedzia/test_xhci_physical_mouse.cpp idt.cpp pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp input_device.cpp -Wl,--gc-sections -o .pointingtest/xhci-physical-mouse
+	g++ $(HOST_INCLUDES) $(POINTING_HOST_FLAGS) -DBURSZTYN_XHCI_HOST_TEST -DBURSZTYN_IDT_HOST_TEST -DBURSZTYNDIAGXHCIPHYSICALMOUSE=1 -ffunction-sections -fdata-sections testy/test_xhci_physical_mouse.cpp jadro/arch/idt.cpp sterowniki/pci/pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp sterowniki/wejscie/input_device.cpp -Wl,--gc-sections -o .pointingtest/xhci-physical-mouse
 	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 .pointingtest/xhci-physical-mouse
 
 BURSZTYNDIAGINPUTCOEXISTENCE ?= 0
@@ -1986,7 +2231,7 @@ endif
 
 .PHONY: test-input-coexistence-host
 test-input-coexistence-host:
-	python3 narzedzia/test_input_diagnostic_parity.py
+	python3 testy/test_input_diagnostic_parity.py
 
 BURSZTYNDIAGBOOTXHCITIMING ?= 0
 BURSZTYNDIAGVIRTIOINPUTQEMU ?= 0
@@ -2003,37 +2248,37 @@ endif
 
 .PHONY: test-launcher-parity
 test-launcher-parity:
-	$(PYTHON) narzedzia/test_launcher_parity.py
+	$(PYTHON) testy/test_launcher_parity.py
 
 .PHONY: test-virtio-input-qemu-parity-host
 test-virtio-input-qemu-parity-host:
-	$(PYTHON) narzedzia/test_virtio_input_qemu_parity.py
+	$(PYTHON) testy/test_virtio_input_qemu_parity.py
 
 .PHONY: test-virtio-input-forensic-host
 test-virtio-input-forensic-host:
 	@mkdir -p .virtiotest/forensic-validation
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_PMM_HOST_TEST -DBURSZTYNDIAGVIRTIOINPUTFORENSIC=$(BURSZTYNDIAGVIRTIOINPUTFORENSIC) -fsanitize=address,undefined -pthread pci.cpp pmm.cpp virtio_pci.cpp virtqueue.cpp virtio_rng.cpp virtio_blk.cpp network_device.cpp virtio_net.cpp virtio_gpu.cpp input_device.cpp virtio_input.cpp sterowniki/usb/usb_hid.cpp klawiatura.cpp narzedzia/test_virtio_input_forensic.cpp -o .virtiotest/forensic-validation/queue-$(BURSZTYNDIAGVIRTIOINPUTFORENSIC)
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic $(HOST_INCLUDES) -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_PMM_HOST_TEST -DBURSZTYNDIAGVIRTIOINPUTFORENSIC=$(BURSZTYNDIAGVIRTIOINPUTFORENSIC) -fsanitize=address,undefined -pthread sterowniki/pci/pci.cpp jadro/mm/pmm.cpp sterowniki/virtio/virtio_pci.cpp sterowniki/virtio/virtqueue.cpp sterowniki/virtio/virtio_rng.cpp sterowniki/virtio/virtio_blk.cpp sterowniki/siec/network_device.cpp sterowniki/virtio/virtio_net.cpp sterowniki/virtio/virtio_gpu.cpp sterowniki/wejscie/input_device.cpp sterowniki/virtio/virtio_input.cpp sterowniki/usb/usb_hid.cpp sterowniki/wejscie/klawiatura.cpp testy/test_virtio_input_forensic.cpp -o .virtiotest/forensic-validation/queue-$(BURSZTYNDIAGVIRTIOINPUTFORENSIC)
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) UBSAN_OPTIONS=halt_on_error=1 .virtiotest/forensic-validation/queue-$(BURSZTYNDIAGVIRTIOINPUTFORENSIC)
 
 .PHONY: test-usb-composite-host
 test-usb-composite-host:
 	@mkdir -p .pointingtest
-	g++ $(POINTING_HOST_FLAGS) -no-pie narzedzia/test_usb_composite.cpp sterowniki/usb/hid_pointer.cpp input_device.cpp -o .pointingtest/usb-composite
+	g++ $(HOST_INCLUDES) $(POINTING_HOST_FLAGS) -no-pie testy/test_usb_composite.cpp sterowniki/usb/hid_pointer.cpp sterowniki/wejscie/input_device.cpp -o .pointingtest/usb-composite
 	.pointingtest/usb-composite
 
 .PHONY: test-xhci-multi-host
 test-xhci-multi-host:
 	@mkdir -p .pointingtest
-	g++ $(POINTING_HOST_FLAGS) -no-pie -DBURSZTYN_BOOT_TIMING_HOST_TEST -DBURSZTYN_XHCI_HOST_TEST -DBURSZTYN_IDT_HOST_TEST -ffunction-sections -fdata-sections narzedzia/test_xhci_multi.cpp idt.cpp pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp input_device.cpp -Wl,--gc-sections -o .pointingtest/xhci-multi
+	g++ $(HOST_INCLUDES) $(POINTING_HOST_FLAGS) -no-pie -DBURSZTYN_BOOT_TIMING_HOST_TEST -DBURSZTYN_XHCI_HOST_TEST -DBURSZTYN_IDT_HOST_TEST -ffunction-sections -fdata-sections testy/test_xhci_multi.cpp jadro/arch/idt.cpp sterowniki/pci/pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp sterowniki/wejscie/input_device.cpp -Wl,--gc-sections -o .pointingtest/xhci-multi
 	.pointingtest/xhci-multi
 
 .PHONY: test-xhci-multi-qemu
 test-xhci-multi-qemu: all
-	$(PYTHON) narzedzia/test_xhci_multi_qemu.py
-	$(PYTHON) narzedzia/test_xhci_multi_qemu.py --virtio-input
+	$(PYTHON) testy/test_xhci_multi_qemu.py
+	$(PYTHON) testy/test_xhci_multi_qemu.py --virtio-input
 
 # Native read-only system diagnostics utility (.cebula / BUR v1).
-diagnostyka_tmp.o: programy/diagnostyka/diagnostyka.cpp programy/diagnostyka/model.h diagnostyka_systemu_abi.h diagnostyka_systemu_format.h $(wildcard bursztyn_ui/*.h)
+diagnostyka_tmp.o: programy/diagnostyka/diagnostyka.cpp programy/diagnostyka/model.h jadro/diag/diagnostyka_systemu_abi.h jadro/diag/diagnostyka_systemu_format.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
 
 diagnostyka_blob.o: diagnostyka_tmp.o bursztyn_gui.o programy/diagnostyka/diagnostyka_linker.ld
@@ -2044,44 +2289,44 @@ diagnostyka_blob.o: diagnostyka_tmp.o bursztyn_gui.o programy/diagnostyka/diagno
 .PHONY: test-diagnostyka-systemu-host
 test-diagnostyka-systemu-host:
 	@mkdir -p .input-test/diagnostyka
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pthread -I. -DDIAG_HOST_TEST -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined diagnostyka_systemu.cpp diagnostyka_systemu_bws.cpp input_device.cpp narzedzia/test_diagnostyka_systemu.cpp -o .input-test/diagnostyka/host
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pthread $(HOST_INCLUDES) -DDIAG_HOST_TEST -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined jadro/diag/diagnostyka_systemu.cpp jadro/diag/diagnostyka_systemu_bws.cpp sterowniki/wejscie/input_device.cpp testy/test_diagnostyka_systemu.cpp -o .input-test/diagnostyka/host
 	ASAN_OPTIONS=detect_leaks=1 .input-test/diagnostyka/host
 
 .PHONY: test-diagnostyka-qemu
 test-diagnostyka-qemu: all
-	$(PYTHON) narzedzia/test_diagnostyka_qemu.py
+	$(PYTHON) testy/test_diagnostyka_qemu.py
 
 .PHONY: test-diagnostyka-xhci-host
 test-diagnostyka-xhci-host:
 	@mkdir -p .input-test/diagnostyka
-	g++ $(POINTING_HOST_FLAGS) -no-pie -DDIAG_HOST_TEST -DBURSZTYN_BOOT_TIMING_HOST_TEST -DBURSZTYN_XHCI_HOST_TEST -DBURSZTYN_IDT_HOST_TEST -ffunction-sections -fdata-sections narzedzia/test_diagnostyka_xhci.cpp diagnostyka_systemu.cpp idt.cpp pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp input_device.cpp -Wl,--gc-sections -o .input-test/diagnostyka/xhci
+	g++ $(HOST_INCLUDES) $(POINTING_HOST_FLAGS) -no-pie -DDIAG_HOST_TEST -DBURSZTYN_BOOT_TIMING_HOST_TEST -DBURSZTYN_XHCI_HOST_TEST -DBURSZTYN_IDT_HOST_TEST -ffunction-sections -fdata-sections testy/test_diagnostyka_xhci.cpp jadro/diag/diagnostyka_systemu.cpp jadro/arch/idt.cpp sterowniki/pci/pci.cpp sterowniki/usb/hid_pointer.cpp sterowniki/usb/xhci_ring.cpp sterowniki/wejscie/input_device.cpp -Wl,--gc-sections -o .input-test/diagnostyka/xhci
 	.input-test/diagnostyka/xhci
 
 .PHONY: test-diagnostyka-packaging
 test-diagnostyka-packaging: diagnostyka_blob.o
-	$(PYTHON) narzedzia/test_diagnostyka_packaging.py
+	$(PYTHON) testy/test_diagnostyka_packaging.py
 
 .PHONY: test-husarz-engine-host test-husarz-runtime-host
 
 test-husarz-engine-host:
 	@mkdir -p .husarz-test
-	g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -I. narzedzia/test_husarz_engine.cpp -o .husarz-test/engine
+	g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer $(HOST_INCLUDES) testy/test_husarz_engine.cpp -o .husarz-test/engine
 	ASAN_OPTIONS=detect_leaks=1 .husarz-test/engine
 
 test-husarz-runtime-host:
 	@mkdir -p .husarz-test
-	g++ -std=c++17 -fcoroutines -O1 -fno-inline -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_husarz_runtime.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -Wl,--gc-sections -o .husarz-test/runtime
+	g++ -std=c++17 -fcoroutines -O1 -fno-inline -g -Wall -Wextra -Wpedantic -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections $(HOST_INCLUDES) testy/test_husarz_runtime.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -Wl,--gc-sections -o .husarz-test/runtime
 	ASAN_OPTIONS=detect_leaks=1 .husarz-test/runtime
 
 .PHONY: test-husarz-qemu
 test-husarz-qemu: iso
-	$(PYTHON) narzedzia/test_husarz_qemu.py
+	$(PYTHON) testy/test_husarz_qemu.py
 
 .PHONY: test-user-fault-policy test-user-fault-qemu-build
 
 test-user-fault-policy:
 	@mkdir -p .husarz-test
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined narzedzia/test_user_fault_policy.cpp -o .husarz-test/user-fault-policy
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined testy/test_user_fault_policy.cpp -o .husarz-test/user-fault-policy
 	.husarz-test/user-fault-policy
 
 # Substitute only the browser payload in a separate linked test kernel. The
@@ -2105,51 +2350,51 @@ test-user-page-fault-qemu-build: all
 
 .PHONY: test-husarz-stack
 test-husarz-stack: przegladarka_tmp.o
-	$(PYTHON) narzedzia/test_husarz_stack.py
+	$(PYTHON) testy/test_husarz_stack.py
 
 .PHONY: test-husarz-fidelity-host
 test-husarz-fidelity-host:
 	@mkdir -p .husarz-test
-	g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -I. narzedzia/test_husarz_fidelity.cpp -o .husarz-test/fidelity
+	g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie $(HOST_INCLUDES) testy/test_husarz_fidelity.cpp -o .husarz-test/fidelity
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .husarz-test/fidelity
 
 .PHONY: test-husarz-layout-host
 test-husarz-layout-host:
 	@mkdir -p .husarz-test
-	g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -I. narzedzia/test_husarz_layout.cpp -o .husarz-test/layout
+	g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie $(HOST_INCLUDES) testy/test_husarz_layout.cpp -o .husarz-test/layout
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .husarz-test/layout
 
 .PHONY: test-husarz-performance-host
 test-husarz-performance-host:
 	@mkdir -p .husarz-test
-	g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -I. narzedzia/test_husarz_performance.cpp -o .husarz-test/performance
+	g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie $(HOST_INCLUDES) testy/test_husarz_performance.cpp -o .husarz-test/performance
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .husarz-test/performance
 
 .PHONY: test-husarz-selection-host
 test-husarz-selection-host:
 	@mkdir -p .husarz-test
-	g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -I. narzedzia/test_husarz_selection.cpp -o .husarz-test/selection
+	g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie $(HOST_INCLUDES) testy/test_husarz_selection.cpp -o .husarz-test/selection
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .husarz-test/selection
 
 .PHONY: test-husarz-gif-host
 test-husarz-gif-host:
 	@mkdir -p .husarz-test
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Wno-unused-function -Wno-unused-parameter -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -I. narzedzia/test_husarz_gif.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -o .husarz-test/gif
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wno-unused-function -Wno-unused-parameter -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie $(HOST_INCLUDES) testy/test_husarz_gif.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -o .husarz-test/gif
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .husarz-test/gif
 
 .PHONY: test-husarz-javascript-host
 test-husarz-javascript-host:
 	@mkdir -p .husarz-test
-	g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wno-misleading-indentation -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -I. narzedzia/test_husarz_javascript.cpp -o .husarz-test/javascript
+	g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wno-misleading-indentation -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie $(HOST_INCLUDES) testy/test_husarz_javascript.cpp -o .husarz-test/javascript
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .husarz-test/javascript
 
 .PHONY: test-fpu-host
 test-fpu-host:
 	@mkdir -p .husarz-test
-	g++ -std=c++17 -O2 -mno-sse -mno-sse2 -mno-mmx -I. narzedzia/test_fpu_host.cpp -o .husarz-test/fpu
+	g++ -std=c++17 -O2 -mno-sse -mno-sse2 -mno-mmx $(HOST_INCLUDES) testy/test_fpu_host.cpp -o .husarz-test/fpu
 	.husarz-test/fpu
 
-fpu_probe_tmp.o: programy/fpu_probe.cpp fpu.h bursztyn_gui.h
+fpu_probe_tmp.o: programy/fpu_probe.cpp jadro/arch/fpu.h jadro/gui/bursztyn_gui.h
 	$(CXX) $(RING3_FLAGS) -mgeneral-regs-only -I. -Os -c $< -o $@
 fpu_probe_blob.o: fpu_probe_tmp.o bursztyn_gui_minimal.o $(PRZEGLADARKA_LINKER)
 	$(LD) --defsym=HUSARZ_WORKER_BUILD=1 --gc-sections -T $(call bur_linker,$(PRZEGLADARKA_LINKER)) $(RING3_LDFLAGS) fpu_probe_tmp.o bursztyn_gui_minimal.o -o fpu_probe.elf
@@ -2158,54 +2403,54 @@ fpu_probe_blob.o: fpu_probe_tmp.o bursztyn_gui_minimal.o $(PRZEGLADARKA_LINKER)
 
 .PHONY: test-kernel-simd
 test-kernel-simd: $(KERNEL)
-	$(PYTHON) narzedzia/test_kernel_simd.py $(KERNEL)
+	$(PYTHON) testy/test_kernel_simd.py $(KERNEL)
 
 .PHONY: test-network-lease-host
 test-network-lease-host:
 	@mkdir -p .husarz-test
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-pie -no-pie -I. narzedzia/test_network_lease.cpp -o .husarz-test/network-lease
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-pie -no-pie $(HOST_INCLUDES) testy/test_network_lease.cpp -o .husarz-test/network-lease
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .husarz-test/network-lease
 
 .PHONY: test-husarz-css-host
 test-husarz-css-host:
 	@mkdir -p .husarz-test
-	g++ -std=c++17 -fcoroutines -O0 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -I. narzedzia/test_husarz_css_compat.cpp -o .husarz-test/css-compat
+	g++ -std=c++17 -fcoroutines -O0 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie $(HOST_INCLUDES) testy/test_husarz_css_compat.cpp -o .husarz-test/css-compat
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .husarz-test/css-compat
 
 .PHONY: test-bsf-host
 test-bsf-host:
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections narzedzia/test_bsf.cpp bsf/bsf.cpp -Wl,--gc-sections -o .bsf-test/bsf-host
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections testy/test_bsf.cpp bsf/bsf.cpp -Wl,--gc-sections -o .bsf-test/bsf-host
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/bsf-host
 
 .PHONY: test-bsf-ui-host
 test-bsf-ui-host:
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -fcoroutines -O0 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_bsf_ui.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/ui-host
+	g++ -std=c++17 -fcoroutines -O0 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections $(HOST_INCLUDES) testy/test_bsf_ui.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/ui-host
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/ui-host
 
 .PHONY: profile-bsf-host
 profile-bsf-host:
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -O2 -ffunction-sections -fdata-sections narzedzia/profile_bsf.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/profile
+	g++ $(HOST_INCLUDES) -std=c++17 -O2 -ffunction-sections -fdata-sections narzedzia/profile_bsf.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/profile
 	.bsf-test/profile
 
 .PHONY: test-desktop-ttf-host
 test-desktop-ttf-host:
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -fcoroutines -O0 -g0 -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_desktop_ttf.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/desktop-ttf-host
+	g++ -std=c++17 -fcoroutines -O0 -g0 -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections $(HOST_INCLUDES) testy/test_desktop_ttf.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/desktop-ttf-host
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/desktop-ttf-host
 
 .PHONY: test-slider-pixels-host
 test-slider-pixels-host:
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-pie -no-pie -ffunction-sections -fdata-sections narzedzia/test_slider_pixels.cpp -Wl,--gc-sections -o .bsf-test/slider-pixels
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -fsanitize=address,undefined -fno-pie -no-pie -ffunction-sections -fdata-sections testy/test_slider_pixels.cpp -Wl,--gc-sections -o .bsf-test/slider-pixels
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/slider-pixels
 
 .PHONY: test-desktop-rubber-host
 test-desktop-rubber-host:
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -fcoroutines -O0 -g0 -DBURSZTYN_RUBBER_ONLY -fsanitize=address,undefined -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_desktop_ttf.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/rubber-interleave-final
+	g++ -std=c++17 -fcoroutines -O0 -g0 -DBURSZTYN_RUBBER_ONLY -fsanitize=address,undefined -fno-pie -no-pie -ffunction-sections -fdata-sections $(HOST_INCLUDES) testy/test_desktop_ttf.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/rubber-interleave-final
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/rubber-interleave-final
 
 wsparcie_mecenasi_blob.o: dane/sponsorze/mecenasi.txt
@@ -2218,27 +2463,27 @@ wsparcie_wkladtworczy_blob.o: dane/sponsorze/wkladtworczy.txt
 	$(LD) -r -b binary $< -o $@
 
 .PHONY: test-display-geometry-host test-display-snapshot-host
-test-display-geometry-host: $(filter-out .wm-test/runtime-host/narzedzia/test_splash_production_path.o,$(STARTUP_HOST_OBJECTS)) .wm-test/runtime-host/pmm.o
-	g++ $(STARTUP_HOST_FLAGS) -DBURSZTYN_PMM_HOST_TEST -Wl,--gc-sections narzedzia/test_display_geometry_host.cpp ekran_format.cpp $^ -o .wm-test/display-geometry
+test-display-geometry-host: $(filter-out .wm-test/runtime-host/testy/test_splash_production_path.o,$(STARTUP_HOST_OBJECTS)) .wm-test/runtime-host/pmm.o
+	g++ $(HOST_INCLUDES) $(STARTUP_HOST_FLAGS) -DBURSZTYN_PMM_HOST_TEST -Wl,--gc-sections testy/test_display_geometry_host.cpp jadro/gui/ekran_format.cpp $^ -o .wm-test/display-geometry
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) UBSAN_OPTIONS=halt_on_error=1 .wm-test/display-geometry
 
 test-display-snapshot-host:
 	@mkdir -p .wm-test
-	g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_display_snapshot.cpp -Wl,--gc-sections -o .wm-test/display-snapshot
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -ffunction-sections -fdata-sections -fsanitize=address,undefined testy/test_display_snapshot.cpp -Wl,--gc-sections -o .wm-test/display-snapshot
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) UBSAN_OPTIONS=halt_on_error=1 .wm-test/display-snapshot
 
 # Keep new retained-paint dependencies explicit for checkouts carrying older .d files.
-grafika.o syscalls.o bursztyn_gui_base.o bursztyn_gui_minimal.o menedzer_okien_tmp.o: bws_gui_batch.h
-skladacz_obrazu.o: desktop_modeset.h display_geometry.h
-menedzer_okien_tmp.o: desktop_selection_paint.h
+grafika.o syscalls.o bursztyn_gui_base.o bursztyn_gui_minimal.o menedzer_okien_tmp.o: jadro/bws/bws_gui_batch.h
+skladacz_obrazu.o: jadro/gui/desktop_modeset.h jadro/gui/display_geometry.h
+menedzer_okien_tmp.o: jadro/gui/desktop_selection_paint.h
 
 .PHONY: test-settings-themes-power-host
 test-settings-themes-power-host:
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -O0 -g -fsanitize=address,undefined -fno-pie -no-pie -ffunction-sections -fdata-sections narzedzia/test_settings_themes_power.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -Wl,--gc-sections -o .bsf-test/settings-themes-power
+	g++ $(HOST_INCLUDES) -std=c++17 -O0 -g -fsanitize=address,undefined -fno-pie -no-pie -ffunction-sections -fdata-sections testy/test_settings_themes_power.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -Wl,--gc-sections -o .bsf-test/settings-themes-power
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/settings-themes-power
 
-menedzer_okien_tmp.o: start_menu_ui.h obrazy/dekoder_obrazu.h
+menedzer_okien_tmp.o: jadro/gui/start_menu_ui.h obrazy/dekoder_obrazu.h
 
 ikona_zasilania_blob.o: ikonki/przyciskzasilania.png
 	$(LD) -r -b binary $< -o $@
@@ -2255,13 +2500,73 @@ ikona_uspij_blob.o: ikonki/przyciskuspij.png
 ikona_zablokuj_blob.o: ikonki/przyciskzablokuj.png
 	$(LD) -r -b binary $< -o $@
 
+ikona_nav_wstecz_blob.o: ikonki/nav_wstecz.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_nav_dalej_blob.o: ikonki/nav_dalej.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_nav_wgore_blob.o: ikonki/nav_wgore.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_folder_blob.o: ikonki/folder.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_plik_blob.o: ikonki/plik.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_notatnik_blob.o: ikonki/app_notatnik.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_kalkulator_blob.o: ikonki/app_kalkulator.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_husarz_blob.o: ikonki/app_husarz.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_testy_blob.o: ikonki/app_testy.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_snake_blob.o: ikonki/app_snake.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_eksplorator_blob.o: ikonki/app_eksplorator.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_obrazy_blob.o: ikonki/app_obrazy.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_demo_ui_blob.o: ikonki/app_demo_ui.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_kontrolki2_blob.o: ikonki/app_kontrolki2.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_kontrolki3_blob.o: ikonki/app_kontrolki3.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_kontrolki4_blob.o: ikonki/app_kontrolki4.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_aktualizacje_blob.o: ikonki/app_aktualizacje.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_ustawienia_blob.o: ikonki/app_ustawienia.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_test_dzwieku_blob.o: ikonki/app_test_dzwieku.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_diagnostyka_blob.o: ikonki/app_diagnostyka.png
+	$(LD) -r -b binary $< -o $@
+
 ikona_png_ring3.o: bursztyn_ui/ikona_png.cpp bursztyn_ui/ikona_png.h
 	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
 
 .PHONY: test-power-png-host
 test-power-png-host:
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-pie -no-pie -fno-omit-frame-pointer obrazy/test_ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -o .bsf-test/power-png-decoder
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -fsanitize=address,undefined -fno-pie -no-pie -fno-omit-frame-pointer obrazy/test_ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -o .bsf-test/power-png-decoder
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/power-png-decoder
 
 image_png_ring3.o: obrazy/dekoder_obrazu.cpp obrazy/dekoder_obrazu.h obrazy/vendor/stb_image.h
@@ -2270,18 +2575,18 @@ image_png_ring3.o: obrazy/dekoder_obrazu.cpp obrazy/dekoder_obrazu.h obrazy/vend
 .PHONY: test-stack-protector-host test-stack-protector-qemu test-stack-protector test-bws-abuse-qemu test-fuzz-smoke fuzz-extended test-bur-v2-aslr-host test-security-hardening
 test-stack-protector-host:
 	@mkdir -p .ssp-test
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -fsanitize=address,undefined narzedzia/test_stack_protector_host.cpp -o .ssp-test/test_ssp_asan
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic $(HOST_INCLUDES) -fsanitize=address,undefined testy/test_stack_protector_host.cpp -o .ssp-test/test_ssp_asan
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .ssp-test/test_ssp_asan
-	g++ -std=c++17 -O2 -g -Wall -Wextra -Wpedantic -I. -fstack-protector-strong -DBURSZTYN_SSP_DEATH_TEST=1 narzedzia/test_stack_protector_host.cpp -o .ssp-test/test_ssp_death
+	g++ -std=c++17 -O2 -g -Wall -Wextra -Wpedantic $(HOST_INCLUDES) -fstack-protector-strong -DBURSZTYN_SSP_DEATH_TEST=1 testy/test_stack_protector_host.cpp -o .ssp-test/test_ssp_death
 	.ssp-test/test_ssp_death
 
 test-stack-protector-qemu: iso
-	$(PYTHON) narzedzia/test_stack_protector_qemu.py
+	$(PYTHON) testy/test_stack_protector_qemu.py
 
 test-stack-protector: test-stack-protector-host test-stack-protector-qemu
 
 test-bws-abuse-qemu: iso
-	$(PYTHON) narzedzia/test_bws_abuse_qemu.py
+	$(PYTHON) testy/test_bws_abuse_qemu.py
 
 test-fuzz-smoke:
 	$(PYTHON) narzedzia/run_fuzz_suite.py --mode=smoke
@@ -2291,10 +2596,41 @@ fuzz-extended:
 
 test-bur-v2-aslr-host:
 	@mkdir -p .aslr-test
-	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_LOADER_HOST_TEST -fsanitize=address,undefined loader.cpp narzedzia/test_bur_v2_aslr_host.cpp -o .aslr-test/test_bur_v2_aslr_host
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic $(HOST_INCLUDES) -DBURSZTYN_LOADER_HOST_TEST -fsanitize=address,undefined jadro/fs/loader.cpp testy/test_bur_v2_aslr_host.cpp -o .aslr-test/test_bur_v2_aslr_host
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .aslr-test/test_bur_v2_aslr_host
 
-test-security-hardening: test-stack-protector-host test-bur-v2-aslr-host test-fuzz-smoke
+# Host-only security slice (szybki fragment gate'u security).
+test-security-host: test-stack-protector-host test-bur-v2-aslr-host test-fuzz-smoke
+
+# Pelny gate bezpieczenstwa: host + QEMU SSP/abuse + guard-page.
+# Opcjonalnie: make test-security STACK_AUDIT=1
+test-security: test-security-host test-stack-protector-qemu test-bws-abuse-qemu test-guard-page
+	@if [ "$(STACK_AUDIT)" = "1" ]; then $(MAKE) audit-stos-jadra; fi
+
+# Alias wstecznie kompatybilny — teraz obejmuje tez QEMU abuse i guard-page.
+test-security-hardening: test-security
+
+# Szybki lokalny gate przed commitem (bez fuzz-extended).
+test-smoke: test-stack-protector-host test-bur-v2-aslr-host test-fuzz-smoke \
+	test-virtio-pci test-motywy-unit test-wm-click-routing test-normal-boot \
+	test-startup-visibility test-compositor-cursor test-powitanie
+
+test: test-smoke
+
+# Regresja produktowa (dluzsza matryca QEMU/host).
+test-regression: test-virtio-qemu test-virtio-blk-qemu test-virtio-net-qemu \
+	test-virtio-gpu-qemu test-virtio-input-qemu \
+	test-ota installer-test \
+	test-husarz-engine-host test-input-coexistence-host \
+	test-hda-regression-qemu
+
+# Nocny przebieg: security + regression + pelny fuzz.
+test-nightly: test-security test-regression fuzz-extended
+
+# Orkiestrator z timeoutami i raportem JSON w .local-ci/
+MODE ?= smoke
+test-local-suite:
+	$(PYTHON) narzedzia/run_local_suite.py --mode=$(MODE)
 
 
 .PHONY: bur-format-force bur-v1 bur-v2 test-bur-v2-qemu test-bur-v2-converter
@@ -2314,7 +2650,7 @@ test-bur-v2-qemu: all
 .PHONY: test-bsf-graphemes-host
 test-bsf-graphemes-host:
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-pie -no-pie narzedzia/test_bsf_graphemes.cpp bsf/bsf.cpp -o .bsf-test/graphemes
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -fsanitize=address,undefined -fno-pie -no-pie narzedzia/test_bsf_graphemes.cpp bsf/bsf.cpp -o .bsf-test/graphemes
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/graphemes
 
 $(GRUB_CFG): czcionki/release-fonts.txt narzedzia/bsf_release_assets.py
@@ -2323,33 +2659,33 @@ bsf_core.o: bsf/unicode.inc bsf/unicode_data.inc
 .PHONY: test-notepad-unicode-host
 test-notepad-unicode-host:
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -fcoroutines -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_notepad_unicode.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/notepad-unicode
+	g++ $(HOST_INCLUDES) -std=c++17 -fcoroutines -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_notepad_unicode.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/notepad-unicode
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/notepad-unicode
 
 .PHONY: fuzz-bsf-coverage-host
 fuzz-bsf-coverage-host:
 	@mkdir -p .bsf-test/fuzz-corpus
-	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fsanitize-coverage=trace-pc -fno-omit-frame-pointer -fno-pie -ffunction-sections -fdata-sections -c bsf/bsf.cpp -o .bsf-test/bsf-coverage.o
-	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections narzedzia/fuzz_bsf_coverage.cpp .bsf-test/bsf-coverage.o -Wl,--gc-sections -o .bsf-test/fuzz-bsf-coverage
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -fsanitize=address,undefined -fsanitize-coverage=trace-pc -fno-omit-frame-pointer -fno-pie -ffunction-sections -fdata-sections -c bsf/bsf.cpp -o .bsf-test/bsf-coverage.o
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections narzedzia/fuzz_bsf_coverage.cpp .bsf-test/bsf-coverage.o -Wl,--gc-sections -o .bsf-test/fuzz-bsf-coverage
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/fuzz-bsf-coverage czcionki/ttf/DejaVuSans.ttf .bsf-test/fuzz-corpus 10000
 
 .PHONY: bsf-editor-observer
 bsf-editor-observer: .bsf-test/editor-observer.json
-.bsf-test/editor-observer.json: narzedzia/bsf_editor_observer.cpp notatnik.cpp $(wildcard bursztyn_ui/*.h) bsf/edit.h
+.bsf-test/editor-observer.json: narzedzia/bsf_editor_observer.cpp programy/notatnik/notatnik.cpp $(wildcard bursztyn_ui/*.h) bsf/edit.h
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -fcoroutines -O0 -ffunction-sections -fdata-sections -Wno-invalid-offsetof $< -Wl,--gc-sections -o .bsf-test/editor-observer
+	g++ $(HOST_INCLUDES) -std=c++17 -fcoroutines -O0 -ffunction-sections -fdata-sections -Wno-invalid-offsetof $< -Wl,--gc-sections -o .bsf-test/editor-observer
 	.bsf-test/editor-observer > $@
 
 .PHONY: test-usb-keyboard-repeat-host
 test-usb-keyboard-repeat-host:
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-pie -no-pie -I. narzedzia/test_usb_keyboard_repeat.cpp -o .bsf-test/usb-keyboard-repeat
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -fsanitize=address,undefined -fno-pie -no-pie -I. narzedzia/test_usb_keyboard_repeat.cpp -o .bsf-test/usb-keyboard-repeat
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/usb-keyboard-repeat
 
 .PHONY: test-bsf-resources-host
 test-bsf-resources-host:
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -O1 -g -fcheck-new -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_bsf_resources.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/resources
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -fcheck-new -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_bsf_resources.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/resources
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/resources
 
 bsf_terminal.o: bsf/terminal.cpp bsf/terminal.h bsf/terminal_width.inc
@@ -2358,17 +2694,21 @@ bsf_terminal.o: bsf/terminal.cpp bsf/terminal.h bsf/terminal_width.inc
 .PHONY: test-shell-ttf-host
 test-shell-ttf-host:
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -O1 -g -DBSF_NATIVE=1 -ffunction-sections -fdata-sections -fsanitize=address,undefined -fno-pie -no-pie narzedzia/test_shell_terminal.cpp bsf/bsf.cpp bsf/terminal.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/shell-ttf
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -DBSF_NATIVE=1 -ffunction-sections -fdata-sections -fsanitize=address,undefined -fno-pie -no-pie testy/test_shell_terminal.cpp bsf/bsf.cpp bsf/terminal.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/shell-ttf
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/shell-ttf
 
 .PHONY: bsf-display-layout
 bsf-display-layout:
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -O1 -I. -ffunction-sections -fdata-sections narzedzia/bsf_display_layout.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/display-layout-generator
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -I. -ffunction-sections -fdata-sections narzedzia/bsf_display_layout.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/display-layout-generator
 	.bsf-test/display-layout-generator
 
 .PHONY: bsf-installer-observer
 bsf-installer-observer:
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -fcoroutines -O0 -ffunction-sections -fdata-sections -I. narzedzia/bsf_installer_observer.cpp -Wl,--gc-sections -o .bsf-test/installer-observer
+	g++ $(HOST_INCLUDES) -std=c++17 -fcoroutines -O0 -ffunction-sections -fdata-sections -I. narzedzia/bsf_installer_observer.cpp -Wl,--gc-sections -o .bsf-test/installer-observer
 	.bsf-test/installer-observer > .bsf-test/installer-observer.json
+
+.PHONY: test-package-signature-host
+test-package-signature-host: test_dzwieku_blob.o
+	$(PYTHON) testy/test_podpis_paczki.py

@@ -15,6 +15,10 @@ public:
     virtual int szerokosc_kolumny(size_t kolumna) = 0;
     virtual const char* pobierz_komorke(size_t wiersz, size_t kolumna, char* bufor, size_t rozmiar_bufora) = 0;
     virtual void zazadaj_sortowania(size_t kolumna, bool rosnaco) { (void)kolumna; (void)rosnaco; }
+    // Opcjonalna ikona w komorce (DIP); 0 = brak. Rysowana przed tekstem.
+    virtual int szerokosc_ikony_komorki(size_t /*kolumna*/) { return 0; }
+    virtual void rysuj_ikone_komorki(KontekstRysowania& /*ctx*/, size_t /*wiersz*/, size_t /*kolumna*/,
+                                    Prostokat /*obszar*/) {}
 };
 
 class TabelaWirtualna : public Kontrolka {
@@ -200,9 +204,20 @@ public:
                     ++liczba_zapytan_;
                     const char* cell_txt = dostawca_->pobierz_komorke(r, c, bufor, sizeof(bufor));
                     if (!cell_txt) cell_txt = "";
-
-                    ctx.rysuj_tekst_obciety(Punkt(cur_x + pad_text, y + (row_h - font_h) / 2),
-                                            cell_txt, c_txt, cw - 2 * pad_text, s);
+                    const int icon_dip = dostawca_->szerokosc_ikony_komorki(c);
+                    const int icon_px = icon_dip * s;
+                    int text_pad = pad_text;
+                    if (icon_px > 0) {
+                        const int isz = icon_px > row_h - 4 ? row_h - 4 : icon_px;
+                        const int iy = y + (row_h - isz) / 2;
+                        dostawca_->rysuj_ikone_komorki(ctx, r, c,
+                            Prostokat(cur_x + pad_text, iy, isz, isz));
+                        text_pad = pad_text + isz + 4 * s;
+                    }
+                    const int text_w = cw - text_pad - pad_text;
+                    if (text_w > 0)
+                        ctx.rysuj_tekst_obciety(Punkt(cur_x + text_pad, y + (row_h - font_h) / 2),
+                                                cell_txt, c_txt, text_w, s);
                     ctx.rysuj_linie_pionowa(cur_x + cw, y, row_h, motyw_kolor(MOTYW_KOLOR_RAMKA));
                 }
                 cur_x += cw;

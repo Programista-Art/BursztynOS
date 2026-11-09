@@ -1,5 +1,5 @@
 #include "bochs_vbe.h"
-#include "../../pci.h"
+#include "pci.h"
 namespace {
 bool wykryty=false;
 uint64_t pamiec=0;

@@ -1,0 +1,77 @@
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -I. -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -Isterowniki/pci -Isterowniki/virtio -Isterowniki/magazyn -Isterowniki/siec -Isterowniki/wejscie -Isterowniki/czas -Isterowniki/platforma -Isterowniki/grafika -Isterowniki -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -mcmodel=small -fPIE -fvisibility=hidden -MMD -MP -Os -fstack-usage -c programy/ustawienia/ustawienia.cpp -o ustawienia_tmp.o
+grub-mkstandalone -O x86_64-efi --locales="" --fonts="" --modules="part_gpt fat loadenv test normal multiboot2 configfile search search_fs_file all_video gfxterm" -o .installer-build/BOOTX64.EFI "boot/grub/grub.cfg=narzedzia/instalator/grub-embedded.cfg"
+x86_64-linux-gnu-g++ -std=gnu++17 -O2 -I. -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-threadsafe-statics -DBSF_NATIVE=1 -fcheck-new -Isterowniki/pci -Isterowniki/virtio -Isterowniki/magazyn -Isterowniki/siec -Isterowniki/wejscie -Isterowniki/czas -Isterowniki/platforma -Isterowniki/grafika -Isterowniki -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -mcmodel=small -fPIE -fvisibility=hidden -MMD -MP -msse2 -mfpmath=sse -mno-avx -fcoroutines -fcheck-new -DHUSARZ_DEBUG_RESOURCES=0 -DHUSARZ_PERF=0 -DHUSARZ_WORKER_ONLY=1 -Wno-unused-function -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c programy/przegladarka/przegladarka.cpp -o husarz_worker_tmp.o
+[AKTUALIZACJA BUILD] Klucz aktualizacji RELEASE (odcisk: aceba052f9096313...)
+x86_64-linux-gnu-g++ -mgeneral-regs-only -std=gnu++17 -O2 -g -I. -ffreestanding -fno-asynchronous-unwind-tables -fno-unwind-tables -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fstack-protector-strong -mstack-protector-guard=global -fcf-protection=none -fno-pic -fno-pie -Wall -Wextra -Wpedantic -fno-exceptions -fno-rtti -fstack-usage -DMBEDTLS_USER_CONFIG_FILE=\"bursztyn_mbedtls_config.h\" -Ibiblioteki/mbedtls/include -Ibiblioteki/mbedtls -Isterowniki/pci -Isterowniki/virtio -Isterowniki/magazyn -Isterowniki/siec -Isterowniki/wejscie -Isterowniki/czas -Isterowniki/platforma -Isterowniki/grafika -Isterowniki -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -DBURSZTYN_DEFAULT_DISPLAY_720P=1 -MMD -MP -c jadro/aktualizacja/aktualizacja.cpp -o aktualizacja.o
+programy/ustawienia/ustawienia.cpp: In lambda function:
+programy/ustawienia/ustawienia.cpp:199:7: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  199 |       if(result==BSF::InstallResult::Ok)self->reload_fonts();self->status->ustaw_tekst(message);self->przelicz_uklad();self->preview->uniewaznij();
+      |       ^~
+programy/ustawienia/ustawienia.cpp:199:62: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  199 |       if(result==BSF::InstallResult::Ok)self->reload_fonts();self->status->ustaw_tekst(message);self->przelicz_uklad();self->preview->uniewaznij();
+      |                                                              ^~~~
+In file included from programy/przegladarka/../husarz/paint.h:2,
+                 from programy/przegladarka/../husarz/pipeline.h:2,
+                 from programy/przegladarka/przegladarka.cpp:33:
+programy/przegladarka/../husarz/layout.h: In function ‘Husarz::TextCluster Husarz::text_cluster(const char*, size_t, size_t, Metrics, const Style&, bool)’:
+programy/przegladarka/../husarz/layout.h:51:17: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+   51 |                 for(unsigned j=0;j<k;++j)changed[n++]=b[j];p+=z;
+      |                 ^~~
+programy/przegladarka/../husarz/layout.h:51:60: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+   51 |                 for(unsigned j=0;j<k;++j)changed[n++]=b[j];p+=z;
+      |                                                            ^
+x86_64-linux-gnu-ld --gc-sections -T bur_v2_linker.ld -nostdlib --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail -shared -Bsymbolic --no-undefined -z text ustawienia_tmp.o bursztyn_gui.o -o ustawienia.elf
+python3 narzedzia/elftoburv2.py ustawienia.elf ustawienia.bin
+BUR v2: ustawienia.bin bytes=240096 relocations=1300
+x86_64-linux-gnu-ld -r -b binary ustawienia.bin -o ustawienia_blob.o
+make: 'ustawienia_blob.o' is up to date.
+x86_64-linux-gnu-ld --defsym=HUSARZ_WORKER_BUILD=1 --gc-sections -T bur_v2_linker.ld -nostdlib --gc-sections --undefined=__stack_chk_guard --undefined=__stack_chk_fail -shared -Bsymbolic --no-undefined -z text husarz_worker_tmp.o bursztyn_gui_minimal.o image_ring3.o btp_ring3.o -o husarz_worker.elf
+python3 narzedzia/elftoburv2.py husarz_worker.elf husarz_worker.bin
+BUR v2: husarz_worker.bin bytes=61440 relocations=0
+x86_64-linux-gnu-ld -r -b binary husarz_worker.bin -o husarz_worker_blob.o
+x86_64-linux-gnu-g++ -T jadro/arch/linker.ld -nostdlib -no-pie -static -Wl,-z,noexecstack -Wl,-z,max-page-size=0x1000 -Wl,--build-id=none -o system_operacyjny.bin entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o ekran.o ekran_format.o bufory_grafiki.o bochs_vbe.o tapety_blob.o tapety.o btp.o boot.o gdt.o tss.o acpi.o hpet.o dma.o usb.o xhci.o xhci_ring.o usb_hid.o hid_pointer.o ohci.o apic.o idt.o przerwania.o network_device.o e1000.o siec.o hda.o hda_diag.o hda_transport.o klawiatura.o przegladarka_blob.o husarz_worker_blob.o fpu_probe_blob.o mysz.o zegar-rtc.o pmm.o vmm.o psf.o grafika.o ekran_powitalny.o syscall.o syscalls.o bws_nowoczesne.o pci.o virtio_pci.o virtqueue.o virtio_rng.o virtio_blk.o virtio_net.o virtio_gpu.o virtio_input.o input_device.o ahci.o ring3.o stos_jadra.o stack_protector.o notatnik_blob.o eksplorator_blob.o kalkulator_blob.o loader.o podpis_paczki.o czcionka_systemowa.o kernel.o shell_blob.o menedzer_okien_blob.o uefi_gop.o dzwiek_blob.o cytaty_blob.o sponsorzy_blob.o wsparcie_mecenasi_blob.o wsparcie_sponsorzy_blob.o wsparcie_wkladtworczy_blob.o ikona_zasilania_blob.o ikona_uruchomponownie_blob.o ikona_zamknij_blob.o ikona_uspij_blob.o ikona_zablokuj_blob.o ikona_nav_wstecz_blob.o ikona_nav_dalej_blob.o ikona_nav_wgore_blob.o ikona_folder_blob.o ikona_plik_blob.o ikona_app_notatnik_blob.o ikona_app_kalkulator_blob.o ikona_app_husarz_blob.o ikona_app_testy_blob.o ikona_app_snake_blob.o ikona_app_eksplorator_blob.o ikona_app_obrazy_blob.o ikona_app_demo_ui_blob.o ikona_app_kontrolki2_blob.o ikona_app_kontrolki3_blob.o ikona_app_kontrolki4_blob.o ikona_app_aktualizacje_blob.o ikona_app_ustawienia_blob.o ikona_app_test_dzwieku_blob.o ikona_app_diagnostyka_blob.o heap.o scheduler.o fpu.o skladacz_obrazu.o mbedtls_port.o tls.o bezpieczenstwo.o aktualizacja.o test_blob.o demo_ui_blob.o kontrolki2_blob.o kontrolki3blob.o kontrolki4blob.o repro_blob.o snake_blob.o przegladarka_obrazow_blob.o aktualizacje_blob.o motyw.o test_dzwieku_blob.o diagnostyka_systemu.o diagnostyka_systemu_bws.o diagnostyka_systemu_boot.o diagnostyka_blob.o test_bmp_blob.o test1_bmp_blob.o logo_png_blob.o biblioteki/mbedtls/library/aes.o biblioteki/mbedtls/library/aesni.o biblioteki/mbedtls/library/arc4.o biblioteki/mbedtls/library/aria.o biblioteki/mbedtls/library/asn1parse.o biblioteki/mbedtls/library/asn1write.o biblioteki/mbedtls/library/base64.o biblioteki/mbedtls/library/bignum.o biblioteki/mbedtls/library/blowfish.o biblioteki/mbedtls/library/camellia.o biblioteki/mbedtls/library/ccm.o biblioteki/mbedtls/library/certs.o biblioteki/mbedtls/library/chacha20.o biblioteki/mbedtls/library/chachapoly.o biblioteki/mbedtls/library/cipher.o biblioteki/mbedtls/library/cipher_wrap.o biblioteki/mbedtls/library/cmac.o biblioteki/mbedtls/library/constant_time.o biblioteki/mbedtls/library/ctr_drbg.o biblioteki/mbedtls/library/debug.o biblioteki/mbedtls/library/des.o biblioteki/mbedtls/library/dhm.o biblioteki/mbedtls/library/ecdh.o biblioteki/mbedtls/library/ecdsa.o biblioteki/mbedtls/library/ecjpake.o biblioteki/mbedtls/library/ecp.o biblioteki/mbedtls/library/ecp_curves.o biblioteki/mbedtls/library/entropy.o biblioteki/mbedtls/library/entropy_poll.o biblioteki/mbedtls/library/error.o biblioteki/mbedtls/library/gcm.o biblioteki/mbedtls/library/havege.o biblioteki/mbedtls/library/hkdf.o biblioteki/mbedtls/library/hmac_drbg.o biblioteki/mbedtls/library/md.o biblioteki/mbedtls/library/md2.o biblioteki/mbedtls/library/md4.o biblioteki/mbedtls/library/md5.o biblioteki/mbedtls/library/memory_buffer_alloc.o biblioteki/mbedtls/library/mps_reader.o biblioteki/mbedtls/library/mps_trace.o biblioteki/mbedtls/library/net_sockets.o biblioteki/mbedtls/library/nist_kw.o biblioteki/mbedtls/library/oid.o biblioteki/mbedtls/library/padlock.o biblioteki/mbedtls/library/pem.o biblioteki/mbedtls/library/pk.o biblioteki/mbedtls/library/pk_wrap.o biblioteki/mbedtls/library/pkcs11.o biblioteki/mbedtls/library/pkcs12.o biblioteki/mbedtls/library/pkcs5.o biblioteki/mbedtls/library/pkparse.o biblioteki/mbedtls/library/pkwrite.o biblioteki/mbedtls/library/platform.o biblioteki/mbedtls/library/platform_util.o biblioteki/mbedtls/library/poly1305.o biblioteki/mbedtls/library/psa_crypto.o biblioteki/mbedtls/library/psa_crypto_aead.o biblioteki/mbedtls/library/psa_crypto_cipher.o biblioteki/mbedtls/library/psa_crypto_client.o biblioteki/mbedtls/library/psa_crypto_driver_wrappers.o biblioteki/mbedtls/library/psa_crypto_ecp.o biblioteki/mbedtls/library/psa_crypto_hash.o biblioteki/mbedtls/library/psa_crypto_mac.o biblioteki/mbedtls/library/psa_crypto_rsa.o biblioteki/mbedtls/library/psa_crypto_se.o biblioteki/mbedtls/library/psa_crypto_slot_management.o biblioteki/mbedtls/library/psa_crypto_storage.o biblioteki/mbedtls/library/psa_its_file.o biblioteki/mbedtls/library/ripemd160.o biblioteki/mbedtls/library/rsa.o biblioteki/mbedtls/library/rsa_internal.o biblioteki/mbedtls/library/sha1.o biblioteki/mbedtls/library/sha256.o biblioteki/mbedtls/library/sha512.o biblioteki/mbedtls/library/ssl_cache.o biblioteki/mbedtls/library/ssl_ciphersuites.o biblioteki/mbedtls/library/ssl_cli.o biblioteki/mbedtls/library/ssl_cookie.o biblioteki/mbedtls/library/ssl_msg.o biblioteki/mbedtls/library/ssl_srv.o biblioteki/mbedtls/library/ssl_ticket.o biblioteki/mbedtls/library/ssl_tls.o biblioteki/mbedtls/library/ssl_tls13_keys.o biblioteki/mbedtls/library/threading.o biblioteki/mbedtls/library/timing.o biblioteki/mbedtls/library/version.o biblioteki/mbedtls/library/version_features.o biblioteki/mbedtls/library/x509.o biblioteki/mbedtls/library/x509_create.o biblioteki/mbedtls/library/x509_crl.o biblioteki/mbedtls/library/x509_crt.o biblioteki/mbedtls/library/x509_csr.o biblioteki/mbedtls/library/x509write_crt.o biblioteki/mbedtls/library/x509write_csr.o biblioteki/mbedtls/library/xtea.o -lgcc
+[OK] system_operacyjny.bin jest poprawnym obrazem Multiboot2.
+python3 narzedzia/package_release_kernel.py system_operacyjny.bin isodir/boot/system_operacyjny.bin x86_64-linux-gnu-objcopy
+Public kernel: 871baa5e773dfaee2267975772956f58f9849cd04828660d7573281be2f381ac private symbols: .release-private/871baa5e773dfaee2267975772956f58f9849cd04828660d7573281be2f381ac
+python3 narzedzia/package_release_notices.py isodir
+[ISO] Kopiuje tapety.pak jako /boot/tapety.pak (modul Multiboot2).
+python3 narzedzia/package_bsf.py isodir
+BSF: packaged 4 TTF files and license notices
+python3 narzedzia/package_support.py isodir
+Support: staged three byte-identical source files
+python3 narzedzia/package_power_icons.py isodir
+Power: staged five byte-identical PNG assets
+grub-mkrescue -o BursztynOS.iso isodir --xorriso=xorriso
+xorriso 1.5.6 : RockRidge filesystem manipulator, libburnia project.
+
+Drive current: -outdev 'stdio:BursztynOS.iso'
+Media current: stdio file, overwriteable
+Media status : is blank
+Media summary: 0 sessions, 0 data blocks, 0 data, 3233m free
+Added to ISO image: directory '/'='/tmp/grub.UTEcbF'
+xorriso : UPDATE :     598 files added in 1 seconds
+Added to ISO image: directory '/'='/home/programista/Pulpit/Burstzyn/BursztynOS/isodir'
+xorriso : UPDATE :     636 files added in 1 seconds
+xorriso : NOTE : Copying to System Area: 512 bytes from file '/usr/lib/grub/i386-pc/boot_hybrid.img'
+xorriso : UPDATE :  7.78% done
+ISO image produced: 19795 sectors
+Written to medium : 19795 sectors at LBA 0
+Writing to 'stdio:BursztynOS.iso' completed successfully.
+
+python3 narzedzia/verify_bsf_iso.py BursztynOS.iso
+BSF ISO: PASS, 7 font/license/source assets and Settings verified
+python3 narzedzia/verifyreleasemetadata.py BursztynOS.iso --output .release-private/release-inventory.json
+Release audit: 616 files, 0 findings; .release-private/release-inventory.json
+[TAPETY BUILD] SHA256 host/staged/ISO:
+ffa3092541786c066b4121354ad0f81d84f6e3da26268546b0e1b3bd64e432e1  tapety.pak
+ffa3092541786c066b4121354ad0f81d84f6e3da26268546b0e1b3bd64e432e1  isodir/boot/tapety.pak
+ffa3092541786c066b4121354ad0f81d84f6e3da26268546b0e1b3bd64e432e1  .tapety-iso-check.pak
+[TAPETY BUILD] Wpisy GRUB Multiboot2:
+    multiboot2 /boot/system_operacyjny.bin bursztyn.refresh=60
+    module2 /boot/tapety.pak tapety.pak
+    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.refresh=60
+    module2 /boot/tapety.pak tapety.pak
+    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.test.diskdestructive=1 bursztyn.refresh=60
+    module2 /boot/tapety.pak tapety.pak
+    multiboot2 /boot/system_operacyjny.bin bursztyn.install=1 bursztyn.refresh=60
+    module2 /boot/tapety.pak tapety.pak

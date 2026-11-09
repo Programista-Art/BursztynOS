@@ -1,0 +1,149 @@
+// Mock-clock timing i prawdziwy renderer; bez emulatora i bez rzeczywistego czekania.
+#define main suite_powitania_main
+#include "test_powitanie.cpp"
+#undef main
+// Czy w obszarze jest atrament (cokolwiek poza tlem).
+static bool atrament_w(const std::vector<uint32_t>& p,int w,int h,Powitanie::Obszar r) {
+    for(int y=r.y<0?0:r.y;y<h&&y<r.y+r.h;++y)
+        for(int x=r.x<0?0:r.x;x<w&&x<r.x+r.w;++x)
+            if(p[size_t(y)*w+x]!=Powitanie::TLO)return true;
+    return false;
+}
+int main(){
+    using namespace Powitanie;
+    auto krok=[](unsigned n){return n*KROK_US;};
+    // Probki kluczowych etapow animacji.
+    struct Sample {uint64_t us;const char* opis;};
+    // Etapy tylko jako opis probki; faza jest wyliczana z kwantowanego czasu,
+    // wiec test nie powtarza tej arytmetyki, a sprawdza spojnosc klatki.
+    const Sample cases[]={
+        {0,"start"},
+        {300000,"logo fade-in"},
+        {LOGO_IN_US+KROK_US,"logo pelny"},
+        {ZNAK_PELNY_US+KROK_US,"napis pelny"},
+        {PASEK_IN_US+KROK_US,"tor paska"},
+        {PASEK_PELNY_US,"pasek 100%"},
+        {LINIA1_IN_US+500000,"pierwszy komunikat"},
+        {LINIA2_PELNA_US+KROK_US,"drugi komunikat"},
+        {MINIMUM_US,"hold koncowy"}
+    };
+    for(unsigned dpi:{100U,125U}) {
+        std::vector<uint32_t> piksele(1280*720);
+        for(const auto& c:cases) {
+            Sekwencja s;s.rozpocznij(true,0);s.przelicz(c.us);
+            rysuj(piksele.data(),1280,720,1280,dpi,s,true);
+            // Kazda klatka ma atrament logotypu - nigdy pusty ekran.
+            const auto g=geometria(1280,720,dpi);
+            assert(atrament_w(piksele,1280,720,g.logo));
+            // Logotyp jest zawsze w pelni nasycony po fazie wejscia.
+            if(c.us>=LOGO_IN_US)assert(s.alfa_logo==LOGO_ALFA_KONIEC);
+            if(c.us>=ZNAK_PELNY_US)assert(s.alfa_znak==255);
+            if(c.us>=PASEK_PELNY_US)assert(s.postep==1000);
+        }
+        // Kazdy krok interpolacji paska ma niepuste, spojne wypelnienie.
+        for(unsigned step=0;step<=40;++step) {
+            const uint64_t t=PASEK_START_US+(PASEK_PELNY_US-PASEK_START_US)*step/40;
+            Sekwencja s;s.rozpocznij(true,0);s.przelicz(t);
+            rysuj(piksele.data(),1280,720,1280,dpi,s,true);
+            const auto g=geometria(1280,720,dpi,s.postep);
+            assert(atrament_w(piksele,1280,720,g.pasek));
+            // Wartosc postepu jest kwantyzowana do poziomow KROK_US, wiec pasek
+            // moze osiagnac 100% najwyzej o jeden poziom przed koncem przedzialu
+            // (nigdy wczesniej i nigdy powyzej 100%).
+            assert(s.postep<=1000);
+            if(step<39)assert(s.postep<1000||t+KROK_US>=PASEK_PELNY_US);
+        }
+        // Pasek domyka sie dokladnie na koncu przedzialu.
+        {
+            Sekwencja s;s.rozpocznij(true,0);s.przelicz(PASEK_PELNY_US);
+            assert(s.postep==1000);
+            s.przelicz(PASEK_PELNY_US+KROK_US*100);assert(s.postep==1000);
+        }
+        // Pelny render jest idempotentny wzgledem tego samego stanu.
+        Sekwencja s;s.rozpocznij(true,0);s.przelicz(2600000);
+        std::vector<uint32_t> a,b;
+        a.assign(1280*720,0xDEADBEEFu);b.assign(1280*720,0xC0FFEEu);
+        rysuj(a.data(),1280,720,1280,dpi,s,true);
+        rysuj(b.data(),1280,720,1280,dpi,s,true);
+        assert(a==b);
+        // Przyciecie ogranicza sie wylacznie do podanego prostokata: piksele
+        // poza nim pozostaja nietkniete.
+        auto clipped=b;
+        rysuj(clipped.data(),1280,720,1280,dpi,s,false,{100,100,50,50});
+        for(int y=0;y<720;++y)for(int x=0;x<1280;++x) {
+            const bool wewnatrz=x>=100&&x<150&&y>=100&&y<150;
+            if(!wewnatrz)assert(clipped[size_t(y)*1280+x]==b[size_t(y)*1280+x]);
+        }
+        // Ten fragment ukladu nie przecina przyciecia 100..150, wiec w srodku
+        // musi byc czyste tlo.
+        assert(clipped[size_t(120)*1280+120]==TLO);
+    }
+    // Absolutny czas: probka po dlugim przestoju pokazuje stan docelowy,
+    // a nie odtwarza pominiete klatki po klatce.
+    Sekwencja s;s.rozpocznij(true,0);
+    for(uint64_t t:{100000ULL,2500000ULL,5200000ULL,7500000ULL}) {
+        s.przelicz(t);
+        Sekwencja direct;direct.rozpocznij(true,0);direct.przelicz(t);
+        assert(s.sygnatura()==direct.sygnatura());
+    }
+    s.gotowy=true;s.aktualizuj(MINIMUM_US);assert(s.stan==Stan::Zanikanie);
+    assert(s.fade==MINIMUM_US);
+
+    // Prawdziwy modul: najwyzej jedna akcja brudna na probke, takze po przestoju.
+    width=1280;height=720;
+    std::vector<uint32_t> scene(size_t(width)*height,0x234567);
+    auto source=[&](bool whole=true){
+        auto* p=reinterpret_cast<uint32_t*>(powitanie_zrodlo(
+            reinterpret_cast<uint8_t*>(scene.data()),width,height,width*4,0,0,
+            whole?width:1,whole?height:1,100));
+        powitanie_publikacja();return p;};
+    for(uint64_t stall:{500000ULL,1500000ULL,3000000ULL}) {
+        now=0;powitanie_inicjalizuj(true);source();powitanie_pulpit_gotowy();
+        advance(1900000);
+        unsigned przed=full+partial;
+        advance(1900000+stall);
+        assert(full+partial-przed<=1);
+        Sekwencja expected;expected.rozpocznij(true,0);expected.aktualizuj(now);
+        assert(sekwencja.postep==expected.postep);
+        assert(source()!=scene.data());
+        przed=full+partial;powitanie_tick();
+        assert(full+partial-przed<=1);
+        powitanie_wycisz();assert(live==0);
+    }
+    // Zakonczenie nadal wymaga pelnej, spojnej transakcji pulpitu.
+    now=0;powitanie_inicjalizuj(true);source();powitanie_pulpit_gotowy();
+    for(uint64_t t:{100000ULL,2500000ULL,5200000ULL}){advance(t);source();}
+    advance(7500000);assert(zakonczenie_oczekuje&&powitanie_aktywne());
+    assert(source(false)!=scene.data());
+    assert(source()==scene.data());
+    assert(live==0&&!powitanie_aktywne());
+    // Pulpit gotowy przed przestojem: zachowany znacznik, bez drugiego zanikania.
+    now=0;powitanie_inicjalizuj(true);source();
+    root_layer={};root_layer.szerokosc=width;root_layer.wysokosc=height;root_visible=true;
+    now=1000000;powitanie_pulpit_gotowy(false,2);advance(8000000);
+    assert(sekwencja.fade==MINIMUM_US&&zakonczenie_oczekuje);
+    assert(source()==scene.data()&&live==0);
+    // Pulpit spozniony dostaje pelne zanikanie od znacznika gotowosci.
+    now=0;powitanie_inicjalizuj(true);source();advance(8000000);
+    assert(sekwencja.stan==Stan::Widoczny);
+    powitanie_pulpit_gotowy();advance(8100000);
+    assert(sekwencja.fade==8000000&&sekwencja.odsloniecie==42);
+    advance(8600000);assert(source()==scene.data()&&live==0);
+    // Jawne wylaczenie jest natychmiastowe.
+    powitanie_inicjalizuj(false);advance(10000000);
+    assert(source()==scene.data());
+#if BURSZTYNDIAGSPLASHTIMING
+    logged_strings.clear();now=0;powitanie_inicjalizuj(true);source();powitanie_pulpit_gotowy();
+    for(unsigned ms=0;ms<=7000;ms+=40){advance(uint64_t(ms)*1000);source();powitanie_diag_prezentacja();}
+    assert(!powitanie_aktywne()&&live==0);
+    auto logged=[&](const char* text){for(auto& m:logged_strings)if(m.find(text)!=std::string::npos)return true;return false;};
+    assert(logged("start now_us=0"));
+    // Diagnostyka loguje etapy (start, fazy, gotowosc, zanikanie, usuniecie),
+    // a nie klatki: liczba wpisow rosnie z liczba etapow, nie z FPS.
+    assert(logged_strings.size()<=32);
+    printf("Wpisy diagnostyczne: %zu przy 176 probkach\n",logged_strings.size());
+    (void)logged;
+#endif
+    printf("Splash timing / absolute sampling / stalls / centering: %u/%u PASS\n",checks,checks);
+    return 0;
+}

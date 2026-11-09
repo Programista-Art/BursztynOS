@@ -1,0 +1,35 @@
+---
+description: Priorytet bezpieczeństwa, stabilności, walidowalnych poprawek i szybkiej regresji w BursztynOS
+alwaysApply: true
+---
+
+# Bezpieczeństwo, stabilność, regresja
+
+## Cel zmian
+
+- Główny fokus: **bezpieczne i walidowalne** poprawki, które podnoszą **stabilność** i jednocześnie **bezpieczeństwo** systemu.
+- Każda istotna poprawka powinna dać się sprawdzić lokalnie (`make test` / `test-smoke`, a przy ryzyku ABI/bezpieczeństwa także `test-security` lub odpowiedni cel z `docs/12_lokalna_weryfikacja.md`).
+- Preferuj małe, audytowalne diffy z jasnym uzasadnieniem „dlaczego bezpieczniej / stabilniej”.
+
+## Podatności — zawsze łataj
+
+- Jeśli podczas testów, fuzzu, QEMU abuse, review lub pracy nad **innym** zadaniem wykryjesz podatność (BWS, PZB, PSF/BSP, loader `.bur`, overflow, brak walidacji wskaźników, zły exit code, race itd.) — **załataj ją od razu**, niezależnie od bieżącego zadania.
+- Nie odkładaj „na później” exploitowalnych lub crashujących ścieżek Ring 0/3.
+- Po łacie dodaj lub rozszerz regresję (host ASan/UBSan, fuzz smoke, QEMU), żeby problem nie wrócił.
+
+## Jakość kodu — tylko gdy przynosi efekt
+
+- Słaby ciąg funkcji / nieczytelny kod wolno poprawić **tylko jeśli** poprawka realnie zwiększa bezpieczeństwo, stabilność, testowalność albo usuwa konkretne ryzyko błędu.
+- Refaktor kosmetyczny, przenosiny katalogów „dla porządku” i szum stylistyczny — **zakazane**, gdy nie służą powyższemu.
+
+## Minimalny zakres
+
+- Nie ruszaj miejsc, które **nie są potrzebne** w bieżącej pracy.
+- Nie rozszerzaj zakresu o „przy okazji” poza: (1) znalezioną podatnością, (2) bezpośrednią przyczyną regresji, (3) niezbędną walidacją/testem.
+
+## Regresje — wykrywaj szybko, niweluj od razu
+
+- Po zmianach jądra / BWS / sterowników / loader / PSF odpal najpierw najszybszy sensowny gate (`make test-smoke` lub węższy cel domenowy).
+- Wykrytą regresję **napraw w tej samej sesji**; nie zostawiaj czerwonego testu „do wyjaśnienia”.
+- Nowe pokrycie testowe ma być wąskie i szybkie (preferuj host + ASan przed ciężkim QEMU, gdy wystarcza).
+- `fuzz-extended` / pełne `test-nightly` nie blokują codziennej pracy, ale krytyczne ścieżki bezpieczeństwa muszą przejść przynajmniej smoke / `test-security` przed uznaniem poprawki za domkniętą.

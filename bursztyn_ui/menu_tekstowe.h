@@ -1,5 +1,5 @@
 #pragma once
-#include "../plik_popup_ui.h"
+#include "plik_popup_ui.h"
 
 namespace BursztynUI {
 // Reusable adapter for a PoleTekstowe owned by an application without Okno.

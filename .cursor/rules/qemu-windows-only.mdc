@@ -1,0 +1,12 @@
+---
+description: QEMU tylko na natywnym Windows — nigdy przez WSL
+alwaysApply: true
+---
+
+# QEMU: tylko Windows
+
+- Uruchamiaj Bursztyn OS wyłącznie przez **natywne QEMU na Windows** (`qemu-system-x86_64.exe`, zwykle `C:\Program Files\qemu\`).
+- **Zakaz** startowania QEMU z WSL (`wsl … qemu-system-x86_64`, `make run` w WSL tylko po to, by odpalić gościa).
+- WSL wolno używać wyłącznie do builda (`make iso`, kompilacja), jeśli toolchain jest tam — nie do okna gościa.
+- Nie uruchamiaj QEMU „przy okazji”; tylko gdy użytkownik o to prosi.
+- Preferuj SDL/GTK display Windows; ścieżki ISO/dysku jako Windows paths (`BursztynOS.iso`, `wirtualny_dysk.img`).

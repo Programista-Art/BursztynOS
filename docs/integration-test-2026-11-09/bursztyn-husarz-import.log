@@ -1,0 +1,141 @@
+usage: test_husarz_qemu.py [-h] [--bios] [--iso ISO] [--kernel KERNEL]
+                           [--installed-disk INSTALLED_DISK]
+                           [--expected-font-size EXPECTED_FONT_SIZE]
+                           [--font-restore-only] [--output OUTPUT]
+                           [--system-windows-phase {full,core,late}]
+                           [--system-windows-only] [--power-png-fonts-only]
+                           [--power-png-failures-only]
+                           [--settings-themes-power-only]
+                           [--gui-regressions-only]
+                           [--display-input {usb,virtio,ps2}]
+                           [--display-geometry-only] [--clock-support-only]
+                           [--desktop-grid-restore DESKTOP_GRID_RESTORE]
+                           [--desktop-grid-only] [--desktop-ui-only]
+                           [--fonts-only] [--native-font-apps]
+                           [--font-fallback-only] [--theme-only] [--css-only]
+                           [--real-css] [--tomato-only] [--timeout TIMEOUT]
+                           [--diagnostics-only] [--font-profile-only]
+                           [--performance] [--layout-only] [--render-only]
+                           [--scroll-only] [--javascript-forms-only]
+                           [--javascript-cancellation-only]
+                           [--javascript-storage-only]
+                           [--modern-javascript-only] [--modern-javascript]
+                           [--javascript-only] [--font-size-matrix-only]
+                           [--live-font-install-only] [--font-resources-only]
+                           [--expected-font-count EXPECTED_FONT_COUNT]
+                           [--expected-resident-bytes EXPECTED_RESIDENT_BYTES]
+                           [--terminal-unicode-only] [--unicode-trace-only]
+                           [--unicode-editing-only] [--editing-only]
+                           [--images-only] [--fault-vector {6,14}]
+                           [--fault-probe FAULT_PROBE]
+
+Interactive native Husarz regression over real HTTP, USB input and BWS. Boots
+the built ISO read-only, without guest data disks. An isolated loopback HTTP
+server supplies fixtures through QEMU's guestfwd virtual HTTP endpoint. No
+browser or kernel test entry points are installed. Screenshots observe native
+controls.
+
+options:
+  -h, --help            show this help message and exit
+  --bios                Boot the production ISO through SeaBIOS and its CD
+                        boot path
+  --iso ISO
+  --kernel KERNEL       Matching unmodified kernel ELF for symbol observation
+                        and artifact hashing
+  --installed-disk INSTALLED_DISK
+                        Private disposable .bsf-test/*.img; disk-only font
+                        persistence test
+  --expected-font-size EXPECTED_FONT_SIZE
+                        Assert restored native config before changing anything
+  --font-restore-only   Observe restored Settings without applying another
+                        change
+  --output OUTPUT
+  --system-windows-phase {full,core,late}
+  --system-windows-only
+                        System identity, rounded corners and concurrent
+                        Settings apps
+  --power-png-fonts-only
+                        Native font matrix for Start PNG icons and measured
+                        popup
+  --power-png-failures-only
+                        Isolated malformed system icon fixtures with release
+                        UI code
+  --settings-themes-power-only
+                        Native Settings themes lifecycle and Start power popup
+  --gui-regressions-only
+                        Desktop rubber-band frames and native slider demo
+  --display-input {usb,virtio,ps2}
+  --display-geometry-only
+                        Immediate release display transaction and desktop
+                        round trips
+  --clock-support-only  Atomic clock frames and native Support/Refresh/font
+                        update acceptance
+  --desktop-grid-restore DESKTOP_GRID_RESTORE
+                        Previous grid result directory for disk-only reboot
+                        coordinate comparison
+  --desktop-grid-only   Exact image-anchor comparison over repeated live font-
+                        family changes
+  --desktop-ui-only     Desktop selection, fixed Start search/power region and
+                        Settings font sizes
+  --fonts-only          Native BSF alpha typography and Settings font page
+  --native-font-apps    Also exercise Notepad, Calculator and Explorer across
+                        the font update
+  --font-fallback-only  Readable native bitmap fallback with rejected font
+                        assets
+  --theme-only          Focused desktop/web theme isolation and navigation
+                        cancellation regression
+  --css-only            External CSS redirects, variables, pixels, flex/media
+                        resize and cancellation
+  --real-css            Observe public Tomato and WordPress pages; Internet
+                        required, no deterministic PASS assertion
+  --tomato-only         Observe only the requested real Tomato page
+  --timeout TIMEOUT
+  --diagnostics-only    Development counters observed through serial, without
+                        screenshot polling during work
+  --font-profile-only   BSF_PROFILE=1 HUSARZ_PERF=1 private build: desktop and
+                        repeated heavy-page native timings
+  --performance         Heavy supported pages, repeated maximize/restore,
+                        cancellation and long scrolling
+  --layout-only         Native table spans, border conflict and signed margin
+                        pixels with resize
+  --render-only         Development pass over resources, forms and theme
+                        isolation
+  --scroll-only         Release scrolling, refresh anchoring, resize and
+                        history regression
+  --javascript-forms-only
+                        Focused native JavaScript form and keyboard diagnostic
+  --javascript-cancellation-only
+                        Focused pending async fetch navigation and tab-close
+                        cancellation
+  --javascript-storage-only
+                        Focused ordinary-ISO storage persistence and isolation
+                        acceptance
+  --modern-javascript-only
+                        New FPU/modern JavaScript acceptance; run
+                        --javascript-only separately for existing JS
+                        regression
+  --modern-javascript   Binary64, prototypes, exceptions, Promise/async,
+                        fetch/JSON and storage plus existing JS regression
+  --javascript-only     Native bounded JavaScript, DOM, events, forms, timers
+                        and external cache
+  --font-size-matrix-only
+  --live-font-install-only
+  --font-resources-only
+  --expected-font-count EXPECTED_FONT_COUNT
+  --expected-resident-bytes EXPECTED_RESIDENT_BYTES
+  --terminal-unicode-only
+                        Production Terminal TTF/grid/grapheme editing, byte
+                        output and bitmap recovery
+  --unicode-trace-only  Private diagnostic: capture one native left command,
+                        no acceptance verdict
+  --unicode-editing-only
+                        Native browser cluster editing and Notepad save/reopen
+                        verified through clipboard/form bytes
+  --editing-only        Release UTF-8 selection, OS clipboard, password
+                        protection and GIF pixels
+  --images-only         Focused native PNG/JPEG pixels and shared-cache
+                        regression
+  --fault-vector {6,14}
+  --fault-probe FAULT_PROBE
+                        Private test kernel with a deliberately faulting Ring
+                        3 browser payload

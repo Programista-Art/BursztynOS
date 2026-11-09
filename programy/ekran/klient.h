@@ -1,6 +1,6 @@
 #pragma once
-#include "../../bursztyn_gui.h"
-#include "../../ekran_format.h"
+#include "bursztyn_gui.h"
+#include "ekran_format.h"
 inline bool ekran_zapytaj(uint64_t endpoint,EkranZadanie req,EkranOdpowiedz*out){
     if(!endpoint||!out)return false;
     req.wersja=1;req.odpowiedz=endpoint;

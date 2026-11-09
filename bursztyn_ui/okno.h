@@ -7,7 +7,7 @@
 #include "popup.h"
 #include "menu_kontekstowe.h"
 #include "polecenie_ui.h"
-#include "../bursztyn_gui.h"
+#include "bursztyn_gui.h"
 
 namespace BursztynUI {
 

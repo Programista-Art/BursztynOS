@@ -1,4 +1,4 @@
-/* Tapety: 256 KiB TEXT, 128 KiB DATA. */
+/* Tapety: 288 KiB TEXT (zmierzone uzycie ~0x450e0), 128 KiB DATA. */
 OUTPUT_FORMAT(elf64-x86-64)
 OUTPUT_ARCH(i386:x86-64)
 ENTRY(_start)

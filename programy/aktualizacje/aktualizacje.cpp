@@ -5,10 +5,10 @@
  * Caly interfejs w jezyku polskim z pelnym zakresem znakow Unicode.
  */
 
-#include "../../loader.h"
+#include "loader.h"
 #include "../../bursztyn_ui/bursztyn_ui.h"
-#include "../../bws_ota.h"
-#include "../../wersja_systemu.h"
+#include "bws_ota.h"
+#include "wersja_systemu.h"
 
 using namespace BursztynUI;
 

@@ -14,7 +14,8 @@
  * PoleWielowierszowe, Drzewo i Tabela.
  */
 
-#include "../../loader.h"
+#include "loader.h"
+#include "bws_procesy.h"
 #include "../../bursztyn_ui/bursztyn_ui.h"
 
 using namespace BursztynUI;
@@ -117,28 +118,63 @@ static void zbuduj_zakladke_dane(Panel& p) {
     tab.dodaj_kolumne("PZB Poziom", 80, WyrownaniePoziome::Srodek);
     tab.dodaj_kolumne("Status", 100, WyrownaniePoziome::Poczatek);
 
-    static const char* const PROCESY[] = {
-        "menedzer_okien.bur", "shell.bur", "notatnik.bur", "kalkulator.bur",
-        "hussar.bur", "snake.bur", "przegladarka.bur", "eksplorator.bur",
-        "sterownik_ahci", "sterownik_e1000", "stos_tcp_ip", "serwer_bws"
-    };
-
+    /*
+     * Tabela procesow korzysta z BWS_PROCESY_LISTA (96), wiec pokazuje
+     * rzeczywisty stan tablica_procesow[]: realne PID-y, realny stan,
+     * realna pamiec i realne PZB. Poprzednia wersja generowala 1000
+     * fikcyjnych wierszy z indeksu petli - to byla atrapa.
+     */
     tab.rozpocznij_aktualizacje();
-    char buf_id[16];
-    char buf_ram[24];
-    for (int i = 0; i < 1000; ++i) {
-        formatuj_liczbe(buf_id, sizeof(buf_id), i + 1);
-        int ram_kb = 64 + (i * 37) % 512;
-        formatuj_liczbe(buf_ram, sizeof(buf_ram), ram_kb);
-        size_t l = 0; while (buf_ram[l]) ++l;
-        buf_ram[l++] = ' '; buf_ram[l++] = 'K'; buf_ram[l++] = 'B'; buf_ram[l] = '\0';
 
-        const char* nazwa = PROCESY[i % 12];
-        const char* pzb = (i % 3 == 0) ? "PZB-1" : ((i % 3 == 1) ? "PZB-2" : "PZB-4");
-        const char* status = (i % 4 == 0) ? "Czuwanie" : ((i % 4 == 1) ? "Aktywny" : "Uśpiony");
+    static BwsProcesInfo wpisy[BWS_PROCESY_MAKS];
+    const uint64_t liczba = bws_wywolaj(
+        BWS_PROCESY_LISTA,
+        reinterpret_cast<uint64_t>(wpisy),
+        BWS_PROCESY_MAKS, 0, 0);
 
-        tab.dodaj_wiersz(buf_id, nazwa, buf_ram, pzb, status);
+    if (liczba == 0) {
+        tab.dodaj_wiersz("-", "(brak dostepu do listy procesow)",
+                        "-", "-", "-");
+    } else {
+        char buf_id[16];
+        char buf_ram[24];
+        char buf_pzb[16];
+
+        for (uint64_t i = 0; i < liczba && i < BWS_PROCESY_MAKS; ++i) {
+            const BwsProcesInfo& w = wpisy[i];
+
+            formatuj_liczbe(buf_id, sizeof(buf_id), w.pid);
+            formatuj_liczbe(buf_ram, sizeof(buf_ram),
+                            w.pamiec_bajtow / 1024ULL);
+
+            size_t l = 0;
+            while (buf_ram[l]) ++l;
+            if (l + 3 < sizeof(buf_ram)) {
+                buf_ram[l++] = ' '; buf_ram[l++] = 'K'; buf_ram[l++] = 'B';
+                buf_ram[l] = '\0';
+            }
+
+            buf_pzb[0] = 'P'; buf_pzb[1] = 'Z'; buf_pzb[2] = 'B';
+            buf_pzb[3] = '-';
+            buf_pzb[4] = static_cast<char>('0' + (w.poziom_pzb % 10));
+            buf_pzb[5] = '\0';
+
+            const char* status = "Nieznany";
+            switch (w.stan) {
+                case 0: status = "Pusty"; break;
+                case 1: status = "Gotowy"; break;
+                case 2: status = "Zablokowany"; break;
+                case 3: status = "Czeka (mysz)"; break;
+                case 4: status = "Czeka (zdarzenie)"; break;
+                case 5: status = "Czeka (klawiatura)"; break;
+                case 6: status = "Kończy się"; break;
+                default: break;
+            }
+
+            tab.dodaj_wiersz(buf_id, w.nazwa, buf_ram, buf_pzb, status);
+        }
     }
+
     tab.zakoncz_aktualizacje();
 
     tab.przy_zmianie_zaznaczenia([](Tabela* t, int row, void*) {

@@ -567,7 +567,8 @@ def main():
             ""
         ]
         for t in tapety:
-            linie_d.append(f"{t['sciezka'].replace(' ', '\\ ')}:")
+            sciezka_dep = t["sciezka"].replace(" ", "\\ ")
+            linie_d.append(f"{sciezka_dep}:")
         linie_d.append("")
         zapisz_tekst_jesli_zmieniono(args.dep, "\n".join(linie_d))
 

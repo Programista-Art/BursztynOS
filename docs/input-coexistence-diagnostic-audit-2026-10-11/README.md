@@ -11,7 +11,7 @@ make test-input-coexistence-host
 Reproduce the comparison with the saved starting controller:
 
 ```sh
-python3 narzedzia/test_input_diagnostic_parity.py --baseline docs/input-coexistence-diagnostic-audit-2026-10-11/baseline-xhci.cpp.txt
+python3 testy/test_input_diagnostic_parity.py --baseline docs/input-coexistence-diagnostic-audit-2026-10-11/baseline-xhci.cpp.txt
 ```
 
 Recreate the current compilation audit:

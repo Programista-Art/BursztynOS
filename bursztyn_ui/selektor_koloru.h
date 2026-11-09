@@ -2,7 +2,7 @@
 #include "pole_tekstowe.h"
 #include "przycisk.h"
 #include "popup.h"
-#include "../bursztyn_gui.h"
+#include "bursztyn_gui.h"
 
 namespace BursztynUI {
 

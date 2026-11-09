@@ -1,0 +1,13 @@
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+
+Program received signal SIGINT, Interrupt.
+0x000055555579c07e in BSF::utf8 (s=s@entry=0x55555599b667 <(anonymous namespace)::g_layout_text+7> "ąęż", n=n@entry=6, cp=@0x7ffff4817b30: 65533) at bsf/bsf.cpp:778
+778	  if (!len || len > n)
+#0  0x000055555579c07e in BSF::utf8 (s=s@entry=0x55555599b667 <(anonymous namespace)::g_layout_text+7> "ąęż", n=n@entry=6, cp=@0x7ffff4817b30: 65533) at bsf/bsf.cpp:778
+#1  0x000055555579c3f7 in BSF::next_cluster (text=text@entry=0x55555599b660 <(anonymous namespace)::g_layout_text> "wiersz ąęż", at=at@entry=7, size=size@entry=13) at bsf/unicode.inc:26
+#2  0x000055555573d565 in (anonymous namespace)::shell_layout_rows (ctx=ctx@entry=0x0) at testy/../programy/shell/shell_terminal.h:85
+#3  0x000055555573d96b in (anonymous namespace)::shell_max_scroll () at testy/../programy/shell/shell_terminal.h:111
+#4  0x00005555557709d3 in (anonymous namespace)::shell_rysuj_terminal () at testy/../programy/shell/shell_terminal.h:248
+#5  0x0000555555773765 in (anonymous namespace)::shell_wypisz (text=text@entry=0x5555557dace0 "\nwiersz ąęż") at testy/../programy/shell/shell_terminal.h:270
+#6  0x0000555555790911 in main () at testy/test_shell_terminal.cpp:167

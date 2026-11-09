@@ -48,14 +48,14 @@ inline Numeric numeric_parse(const char *s,unsigned n,bool &ok){
     }
     uint64_t mantissa=0;unsigned kept=0,digits=0;int exponent=0;bool dot=false,significant=false;
     for(;i<n;++i){char c=s[i];if(c=='.'&&!dot){dot=true;continue;}if(c<'0'||c>'9')break;++digits;
-        if(dot)--exponent;if(c!='0')significant=true;
+        if(dot){--exponent;}if(c!='0')significant=true;
         if(significant){if(kept<19){mantissa=mantissa*10+unsigned(c-'0');++kept;}else ++exponent;}
     }
     if(!digits)return Numeric::nan();
     if(i<n&&(s[i]=='e'||s[i]=='E')){++i;bool minus=false;if(i<n&&(s[i]=='+'||s[i]=='-'))minus=s[i++]=='-';unsigned start=i,e=0;for(;i<n&&s[i]>='0'&&s[i]<='9';++i)if(e<10000)e=e*10+unsigned(s[i]-'0');if(i==start)return Numeric::nan();exponent+=minus?-int(e):int(e);}
-    if(i!=n)return Numeric::nan();ok=true;double v=double(mantissa);
+    if(i!=n){return Numeric::nan();}ok=true;double v=double(mantissa);
     if(!mantissa)return neg?-0.0:0.0;
-    if(exponent>400)return neg?-Numeric::infinity():Numeric::infinity();if(exponent< -400)return neg?-0.0:0.0;
+    if(exponent>400){return neg?-Numeric::infinity():Numeric::infinity();}if(exponent< -400)return neg?-0.0:0.0;
     // Split underflow scaling: pow(10,324) itself is not representable.
     if(exponent< -308){v/=1e308;exponent+=308;}
     double power=1,base=10;unsigned e=unsigned(exponent<0?-exponent:exponent);

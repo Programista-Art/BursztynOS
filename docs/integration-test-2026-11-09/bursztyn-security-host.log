@@ -1,0 +1,40 @@
+g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -Isterowniki/pci -Isterowniki/virtio -Isterowniki/magazyn -Isterowniki/siec -Isterowniki/wejscie -Isterowniki/czas -Isterowniki/platforma -Isterowniki/grafika -Isterowniki -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -fsanitize=address,undefined testy/test_stack_protector_host.cpp -o .ssp-test/test_ssp_asan
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .ssp-test/test_ssp_asan
+[SSP-HOST] PASS (2007 asercji zweryfikowanych)
+g++ -std=c++17 -O2 -g -Wall -Wextra -Wpedantic -I. -Isterowniki/pci -Isterowniki/virtio -Isterowniki/magazyn -Isterowniki/siec -Isterowniki/wejscie -Isterowniki/czas -Isterowniki/platforma -Isterowniki/grafika -Isterowniki -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -fstack-protector-strong -DBURSZTYN_SSP_DEATH_TEST=1 testy/test_stack_protector_host.cpp -o .ssp-test/test_ssp_death
+.ssp-test/test_ssp_death
+[SSP-HOST] PASS (2007 asercji zweryfikowanych)
+g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -Isterowniki/pci -Isterowniki/virtio -Isterowniki/magazyn -Isterowniki/siec -Isterowniki/wejscie -Isterowniki/czas -Isterowniki/platforma -Isterowniki/grafika -Isterowniki -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -DBURSZTYN_LOADER_HOST_TEST -fsanitize=address,undefined jadro/fs/loader.cpp testy/test_bur_v2_aslr_host.cpp -o .aslr-test/test_bur_v2_aslr_host
+jadro/fs/loader.cpp:210:13: warning: ‘bool {anonymous}::takie_same_sciezki(const char*, const char*)’ declared ‘static’ but never defined [-Wunused-function]
+  210 | static bool takie_same_sciezki(const char* a, const char* b);
+      |             ^~~~~~~~~~~~~~~~~~
+jadro/fs/loader.cpp:276:10: warning: ‘{anonymous}::g_baza_stosu_user’ defined but not used [-Wunused-variable]
+  276 | uint64_t g_baza_stosu_user[PZB_MAKS_PROCESOW] = {};
+      |          ^~~~~~~~~~~~~~~~~
+jadro/fs/loader.cpp:264:6: warning: ‘bool {anonymous}::loader_wymaga_podpisu_wszystkiego()’ defined but not used [-Wunused-function]
+  264 | bool loader_wymaga_podpisu_wszystkiego() {
+      |      ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+jadro/fs/loader.cpp:219:6: warning: ‘bool {anonymous}::zakres_sciezki_systemowej(const char*)’ defined but not used [-Wunused-function]
+  219 | bool zakres_sciezki_systemowej(const char* sciezka) {
+      |      ^~~~~~~~~~~~~~~~~~~~~~~~~
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .aslr-test/test_bur_v2_aslr_host
+[BUR-V2-ASLR-HOST] PASS: BUR v1 compat, BUR v2 validator, W^X relocator, and 10,000 ASLR layout trials verified!
+python3 narzedzia/run_fuzz_suite.py --mode=smoke
+[FUZZ] Kompilacja wspolnych obiektow jadro/fs/psf.cpp + jadro/fs/storage_format.cpp (ASan/UBSan/trace-pc)...
+[FUZZ] Kompilacja fuzz_bur_v2...
+[FUZZ fuzz_bur_v2         ] PASS | iters=10000 seeds=2->52 cov_edges=244 regressions=5 time=13766ms
+[FUZZ] Kompilacja fuzz_bws...
+[FUZZ fuzz_bws            ] PASS | iters=10000 seeds=15->116 cov_edges=213 regressions=2 time=3697ms
+[FUZZ] Kompilacja fuzz_bur_loader...
+[FUZZ fuzz_bur_loader     ] PASS | iters=10000 seeds=9->150 cov_edges=415 regressions=2 time=4110ms
+[FUZZ] Kompilacja fuzz_bsp2_superblock...
+[FUZZ fuzz_bsp2_superblock] PASS | iters=2500 seeds=25->28 cov_edges=553 regressions=0 time=6607ms
+[FUZZ] Kompilacja fuzz_bsp2_inode...
+[FUZZ fuzz_bsp2_inode     ] PASS | iters=2500 seeds=6->33 cov_edges=1216 regressions=0 time=9222ms
+[FUZZ] Kompilacja fuzz_bsp2_dir...
+[FUZZ fuzz_bsp2_dir       ] PASS | iters=2500 seeds=6->20 cov_edges=861 regressions=0 time=11481ms
+[FUZZ] Kompilacja fuzz_bsp2_path...
+[FUZZ fuzz_bsp2_path      ] PASS | iters=5000 seeds=21->62 cov_edges=559 regressions=0 time=1839ms
+[FUZZ] Kompilacja fuzz_bsp2_ops...
+[FUZZ fuzz_bsp2_ops       ] PASS | iters=2500 seeds=3->155 cov_edges=1157 regressions=0 time=9786ms
+[FUZZ] Saved aggregated metrics to /home/programista/Pulpit/Burstzyn/BursztynOS/docs/security-hardening-2026-11-04/fuzzing-metrics.json (total_executions=45096, crashes=0).

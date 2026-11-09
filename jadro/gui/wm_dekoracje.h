@@ -1,0 +1,61 @@
+#pragma once
+#include "motyw.h"
+#include "ui_skala.h"
+#include "window_shape.h"
+#include "wm_ikony_belki.h"
+#include "bursztyn_ui/czcionka.h"
+
+inline bool wm_dekoracja_w_punkcie(int w,int h,int x,int y,uint32_t scale) {
+    if(x<0 || y<0 || x>=w || y>=h) return false;
+    const int bar=ui_skaluj(28,scale),edge=ui_skaluj(1,scale);
+    return y<bar || x<edge || x>=w-edge || y>=h-edge;
+}
+
+// Compositor-owned chrome. The callback clips to the current dirty region.
+// No application buffers or window metadata are modified.
+template<class Pixel>
+void wm_rysuj_dekoracje(int w, int h, const char* title, bool maximized,
+                       uint32_t scale, const BursztynMotyw& theme, Pixel pixel) {
+    using BursztynUI::CzcionkaUI;
+    SkalaUI s = SkalaUI::procent(scale);
+    const int bar=ui_skaluj(28,scale), edge=ui_skaluj(1,scale);
+    const WindowShape shape(w,h,maximized,scale,theme);
+    auto rect=[&](int x,int y,int width,int height,uint32_t color) {
+        for(int py=y;py<y+height && py<h;++py)
+            for(int px=x;px<x+width && px<w;++px)
+                if(shape.contains(px,py)) pixel(px,py,color);
+    };
+    for(int y=0;y<bar && y<h;++y) {
+        int inset=shape.inset(y);
+        rect(inset,y,w-2*inset,1,y<ui_skaluj(2,scale)?theme.akcent:theme.panel);
+    }
+    for(int y=bar;y<h;++y) {
+        int inset=shape.inset(y);
+        if(y>=h-edge)rect(inset,y,w-2*inset,1,theme.ramka);
+        else {rect(inset,y,edge,1,theme.ramka);rect(w-inset-edge,y,edge,1,theme.ramka);}
+    }
+    auto text=[&](const char* str,int x,int y,int right,uint32_t color) {
+        for(size_t i=0;str && str[i];) {
+            uint32_t cp;size_t n=CzcionkaUI::dekoduj_utf8(str,i,&cp);if(!n) break;i+=n;
+            int width=CzcionkaUI::szerokosc_znaku(cp);
+            if(x+width*s>right) break;
+            const uint16_t* glyph=CzcionkaUI::bitmapa_znaku(cp);
+            for(int gy=0;gy<16;++gy) for(int gx=0;gx<width;++gx)
+                if(glyph[gy]&(1U<<(15-gx)))
+                    rect(x+gx*s,y+gy*s,(gx+1)*s-gx*s,(gy+1)*s-gy*s,color);
+            x+=CzcionkaUI::postep_znaku(cp,s);
+        }
+    };
+    text(title,ui_skaluj(8,scale),ui_skaluj(7,scale),w-ui_skaluj(80,scale),theme.tekst);
+    const int offsets[]={74,50,26};
+    const WmIkonaBelki ikony[]={
+        WmIkonaBelki::Minimalizuj,
+        maximized ? WmIkonaBelki::Przywroc : WmIkonaBelki::Maksymalizuj,
+        WmIkonaBelki::Zamknij
+    };
+    for(int i=0;i<3;++i) {
+        int x=w-ui_skaluj(offsets[i],scale),y=ui_skaluj(4,scale),size=ui_skaluj(20,scale);
+        rect(x,y,size,size,i==2?theme.blad:theme.akcent);
+        wm_rysuj_ikone_belki(ikony[i],x,y,size,i==2?0x00FFFFFFU:theme.tekstakcentu,pixel);
+    }
+}

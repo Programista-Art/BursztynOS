@@ -1,0 +1,138 @@
+{
+  "schema_version": "1.0",
+  "mode": "smoke",
+  "sanitizers": [
+    "AddressSanitizer",
+    "UndefinedBehaviorSanitizer",
+    "SanitizerCoverage(trace-pc)"
+  ],
+  "total_targets": 7,
+  "total_executions": 35145,
+  "sum_unique_edges_across_targets": 4888,
+  "total_crashes": 0,
+  "deterministic_regression_bugs_verified": [
+    {
+      "id": "BUG-1",
+      "component": "jadro/bws/syscalls.cpp (obsluga_wywolan_systemowych)",
+      "description": "Unauthenticated BWS 99 (arg1 == 0xDEADBEEFCAFEULL) Ring 3 kernel stack overflow panic trigger removed from production builds and gated behind BURSZTYN_DEBUG_STACK_OVERFLOW_BWS + operacja_systemowa_dozwolona.",
+      "verified_by": [
+        "fuzz_bws",
+        "test_bws_abuse_qemu.py"
+      ]
+    },
+    {
+      "id": "BUG-2",
+      "component": "jadro/fs/psf.cpp (psf_przetlumacz_sciezke_slotu)",
+      "description": "Fixed 160-byte buffer silent path truncation and missing pre-translation bezpieczna_sciezka validation on A/B slot-translated paths (/programy, /system).",
+      "verified_by": [
+        "fuzz_bsp2_path"
+      ]
+    },
+    {
+      "id": "BUG-3",
+      "component": "jadro/fs/psf.cpp (wskazniki_pliku_poprawne, waliduj_katalog)",
+      "description": "Fixed missing uniqueness/aliasing validation across direct blocks, blok_posredni_1, blok_posredni_2, and indirect entries, plus root-inode directory cycle rejection.",
+      "verified_by": [
+        "fuzz_bsp2_inode",
+        "fuzz_bsp2_dir"
+      ]
+    },
+    {
+      "id": "BUG-4",
+      "component": "jadro/fs/psf.cpp & jadro/fs/psf_usuwanie.inc (zwolnij_wszystkie_bloki_wezla, ustaw_wskaznik_bloku, odwiedz_bloki_usuwania)",
+      "description": "Fixed 256-slot LRU data block cache eviction of indirect pointer table block (blok_posredni_1/blok_posredni_2) while freeing/zeroing >256 data blocks of a large file, which previously corrupted the indirect pointer table mid-loop and freed block 0.",
+      "verified_by": [
+        "fuzz_bsp2_ops"
+      ]
+    },
+    {
+      "id": "BUG-5",
+      "component": "jadro/fs/loader.cpp (pakiet_parsuj_manifest_tekst)",
+      "description": "Discovered by fuzz_bur_loader: when 'wersja' in opis.aplikacji was >= 32 bytes, pakiet_parsuj_manifest_tekst copied 32 bytes from a 64-byte temporary buffer into out_manifest->wersja[32] without a NUL terminator, causing C-string overread into adjacent struct fields; also left out_manifest uninitialized on early error return.",
+      "verified_by": [
+        "fuzz_bur_loader"
+      ]
+    },
+    {
+      "id": "BUG-6",
+      "component": "jadro/bws/syscalls.cpp (bws_rozmiar_pliku)",
+      "description": "Discovered by test_bws_abuse_qemu.py: bws_rozmiar_pliku (BWS_ROZMIAR_PLIKU=44) unconditionally returned rozmiar_pliku(sciezka) + 1ULL (= 1ULL) even when sciezka was invalid (e.g. '/../../cytaty.txt'), non-existent, or a directory, causing Ring 3 pobierz_rozmiar_pliku() to report success with size 0. Fixed to verify pobierz_metadane_tworu(sciezka, &meta) && meta.typ == TYP_PLIK before returning meta.rozmiar + 1ULL.",
+      "verified_by": [
+        "fuzz_bws",
+        "test_bws_abuse_qemu.py"
+      ]
+    }
+  ],
+  "targets": [
+    {
+      "target": "fuzz_bws",
+      "executions": 10023,
+      "seed_corpus_count": 21,
+      "final_corpus_count": 120,
+      "unique_edges": 209,
+      "regressions_verified": 2,
+      "elapsed_ms": 1883,
+      "crashes_found": 0
+    },
+    {
+      "target": "fuzz_bur_loader",
+      "executions": 10021,
+      "seed_corpus_count": 19,
+      "final_corpus_count": 152,
+      "unique_edges": 381,
+      "regressions_verified": 2,
+      "elapsed_ms": 1982,
+      "crashes_found": 0
+    },
+    {
+      "target": "fuzz_bsp2_superblock",
+      "executions": 2525,
+      "seed_corpus_count": 25,
+      "final_corpus_count": 29,
+      "unique_edges": 553,
+      "regressions_verified": 0,
+      "elapsed_ms": 3163,
+      "crashes_found": 0
+    },
+    {
+      "target": "fuzz_bsp2_inode",
+      "executions": 2518,
+      "seed_corpus_count": 18,
+      "final_corpus_count": 41,
+      "unique_edges": 1178,
+      "regressions_verified": 0,
+      "elapsed_ms": 5335,
+      "crashes_found": 0
+    },
+    {
+      "target": "fuzz_bsp2_dir",
+      "executions": 2518,
+      "seed_corpus_count": 18,
+      "final_corpus_count": 35,
+      "unique_edges": 864,
+      "regressions_verified": 0,
+      "elapsed_ms": 4874,
+      "crashes_found": 0
+    },
+    {
+      "target": "fuzz_bsp2_path",
+      "executions": 5023,
+      "seed_corpus_count": 23,
+      "final_corpus_count": 78,
+      "unique_edges": 553,
+      "regressions_verified": 0,
+      "elapsed_ms": 1049,
+      "crashes_found": 0
+    },
+    {
+      "target": "fuzz_bsp2_ops",
+      "executions": 2517,
+      "seed_corpus_count": 17,
+      "final_corpus_count": 173,
+      "unique_edges": 1150,
+      "regressions_verified": 0,
+      "elapsed_ms": 2905,
+      "crashes_found": 0
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+
+Program received signal SIGINT, Interrupt.
+0x0000000000442e67 in std::_Rb_tree<void*, void*, std::_Identity<void*>, std::less<void*>, std::allocator<void*> >::_S_key (__x=<optimized out>) at /usr/include/c++/13/bits/stl_tree.h:777
+777		return _KeyOfValue()(*__x->_M_valptr());
+#0  0x0000000000442e67 in std::_Rb_tree<void*, void*, std::_Identity<void*>, std::less<void*>, std::allocator<void*> >::_S_key (__x=<optimized out>) at /usr/include/c++/13/bits/stl_tree.h:777
+#1  std::_Rb_tree<void*, void*, std::_Identity<void*>, std::less<void*>, std::allocator<void*> >::_M_lower_bound (__k=@0x7ffff473dc20: 0x525005902000, __y=0x504000092950, __x=0x504000092910, this=0x5c9880 <frames>) at /usr/include/c++/13/bits/stl_tree.h:1952
+#2  std::_Rb_tree<void*, void*, std::_Identity<void*>, std::less<void*>, std::allocator<void*> >::equal_range (this=this@entry=0x5c9880 <frames>, __k=@0x7ffff473dc20: 0x525005902000) at /usr/include/c++/13/bits/stl_tree.h:2031
+#3  0x0000000000444158 in std::_Rb_tree<void*, void*, std::_Identity<void*>, std::less<void*>, std::allocator<void*> >::erase (this=this@entry=0x5c9880 <frames>, __x=@0x7ffff473dc20: 0x525005902000) at /usr/include/c++/13/bits/stl_tree.h:2519
+#4  0x0000000000445402 in std::set<void*, std::less<void*>, std::allocator<void*> >::erase (__x=@0x7ffff473dc20: 0x525005902000, this=0x5c9880 <frames>) at /usr/include/c++/13/bits/stl_set.h:686
+#5  ZwolnijRamke (p=0x525005902000) at testy/test_dzwieku_loader.cpp:55
+#6  0x0000000000453c24 in ZniszczPrzestrzenAdresowaProcesu (root=0x502000001230) at testy/test_dzwieku_loader.cpp:132
+#7  0x000000000040f12c in (anonymous namespace)::posprzataj_przestrzen_po_bledzie (pml4_procesu=0x502000001230) at jadro/fs/loader.cpp:1008
+#8  uruchom_program_z_pliku_impl (sciezka_pliku=<optimized out>, bzl_poziom=<optimized out>, flagi_praw=<optimized out>, z_syscalla=<optimized out>, argument_startowy=argument_startowy@entry=0x0) at jadro/fs/loader.cpp:1417
+#9  0x000000000041113a in bws_uruchom_program_z_pliku (sciezka_pliku=<optimized out>, bzl_poziom=<optimized out>, flagi_praw=<optimized out>, z_syscalla=<optimized out>) at jadro/fs/loader.cpp:1556
+#10 0x000000000047c3be in main (argc=<optimized out>, argv=<optimized out>) at testy/test_dzwieku_loader.cpp:377

@@ -30,12 +30,12 @@ bool browser_script_event(Husarz::Document &d,uint16_t node,const char *type,uns
     }return false;
 }
 void WidokStrony::script_default_click(uint16_t id,int x,int y,bool shift){
-    if(!liczba_zakladek)return;auto &z=zakladki[aktywna_zakladka];if(!z.dokument)return;auto &d=*z.dokument;if(!id||id>=d.node_count||d.nodes[id].detached)return;
+    if(!liczba_zakladek){return;}auto &z=zakladki[aktywna_zakladka];if(!z.dokument){return;}auto &d=*z.dokument;if(!id||id>=d.node_count||d.nodes[id].detached){return;}
     for(uint16_t p=id;p;p=d.nodes[p].parent)if(Husarz::is_control(d,p)||d.tag(p,"label")){id=p;break;}
     if(d.tag(id,"label")){const char *target=d.attr(id,"for");for(unsigned i=0;i<d.control_count;++i){uint16_t node=d.controls[i].node;if((*target&&Husarz::equal(d.attr(node,"id"),target))||(!*target&&d.nodes[node].parent==id)){id=node;break;}}}
     uint16_t old=d.focused_control;
     if(auto *c=Husarz::control(d,id)){
-        if(d.has_attr(id,"disabled"))return;d.focused_control=id;
+        if(d.has_attr(id,"disabled")){return;}d.focused_control=id;
         if(old!=id){if(old)browser_script_event(d,old,"blur");browser_script_event(d,id,"focus");}
         if(Husarz::selectable(d,*c)){Husarz::control_pointer(d,*c,browser_metrics,x,y,shift);selection_node_=id;selection_generation_=d.generation;selection_revision_=d.revision;selection_tab_=uint32_t(aktywna_zakladka);}
         else c->cursor=c->anchor=c->length;
@@ -48,7 +48,7 @@ void WidokStrony::script_default_click(uint16_t id,int x,int y,bool shift){
     for(uint16_t p=id;p;p=d.nodes[p].parent){if(!d.tag(p,"a")||!d.has_attr(p,"href"))continue;
         struct Scratch{ParsedUrl base{};char url[URL_POJEMNOSC]{};};auto *scratch=new Scratch;if(!scratch)return;
         bool ready=document_url_base(z.url,&d,scratch->base)&&ustaw_url_z_location(scratch->url,sizeof(scratch->url),d.attr(p,"href"),scratch->base);
-        if(ready)g_husarz.przejdz_do_url(scratch->url);delete scratch;break;
+        if(ready){g_husarz.przejdz_do_url(scratch->url);}delete scratch;break;
     }
 }
 void browser_storage_tick(){
@@ -103,7 +103,7 @@ void browser_script_step(uint64_t now){
             if(int(i)==aktywna_zakladka && target){
                 if(action==1)g_husarz.widok_strony->script_default_click(uint16_t(target),event.x,event.y,event.shift);
                 else if(action==2){browser_script_bypass=true;submit_browser_form(*z.dokument,uint16_t(control?control:target));browser_script_bypass=false;}
-                else if(action==4){ZdarzenieKlawiatury key;key.kod_klawisza=event.native_key;key.kod_skanu=event.native_key|KLAWISZ_FIZYCZNY_GUI;key.modyfikatory=(event.ctrl?BWS_MOD_CTRL:0)|(event.shift?BWS_MOD_SHIFT:0)|(event.alt?BWS_MOD_ALT:0);browser_key_bypass=true;g_husarz.widok_strony->obsluz_wcisniecie_klawisza(key);browser_key_bypass=false;}
+                else if(action==4){ZdarzenieKlawiatury key;key.kod_klawisza=event.native_key;key.kod_skanu=event.native_key|KLAWISZ_FIZYCZNY_GUI;key.modyfikatory=(event.ctrl?uint32_t(BWS_MOD_CTRL):0u)|(event.shift?uint32_t(BWS_MOD_SHIFT):0u)|(event.alt?uint32_t(BWS_MOD_ALT):0u);browser_key_bypass=true;g_husarz.widok_strony->obsluz_wcisniecie_klawisza(key);browser_key_bypass=false;}
                 else if(action==5&&z.dokument->focused_control==target){bool edited=false;if(Husarz::form_insert(*z.dokument,event.key,&edited)){if(auto *c=Husarz::control(*z.dokument,uint16_t(target)))Husarz::control_keep_caret(*z.dokument,*c,browser_metrics);if(edited)browser_script_event(*z.dokument,uint16_t(target),"input");g_husarz.widok_strony->przygotuj();}}
             }
             return; // A default navigation may have destroyed this runtime.
@@ -111,7 +111,7 @@ void browser_script_step(uint64_t now){
         if(runtime->navigation_request[0]){
             struct Scratch{ParsedUrl base{};char url[URL_POJEMNOSC]{};};auto *scratch=new Scratch;
             if(scratch){bool valid=document_url_base(z.url,z.dokument,scratch->base)&&ustaw_url_z_location(scratch->url,sizeof(scratch->url),runtime->navigation_request,scratch->base);runtime->navigation_request[0]=0;
-                if(valid&&int(i)==aktywna_zakladka)g_husarz.przejdz_do_url(scratch->url);delete scratch;}
+                if(valid&&int(i)==aktywna_zakladka){g_husarz.przejdz_do_url(scratch->url);}delete scratch;}
         }
         return;
     }
@@ -125,7 +125,7 @@ void browser_script_step(uint64_t now){
     uint64_t start=gui_czas_monotoniczny_ns();
     for(unsigned turn=0;turn<512;++turn){
         bool pending=false;for(auto *s:Husarz::browser_storage.local)if(s&&!s->failed&&s->loaded&&(s->saving||s->revision!=s->saved))pending=true;
-        if(!pending)break;browser_storage_tick();async_tick();
+        if(!pending){break;}browser_storage_tick();async_tick();
         uint64_t now=gui_czas_monotoniczny_ns();if(now>=start&&now-start>=2000000000ULL)break;
         bws_zdarzenie event{};gui_czekaj_na_zdarzenie_z_timeoutem(&event,1);
     }

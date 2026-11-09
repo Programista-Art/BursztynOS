@@ -1,6 +1,6 @@
 #include "runtime.h"
 #include "asset_path.h"
-#include "../bursztyn_gui.h"
+#include "bursztyn_gui.h"
 #include <string.h>
 namespace BSF {
 namespace {

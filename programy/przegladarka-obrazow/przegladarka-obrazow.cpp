@@ -3,7 +3,8 @@
  * Ring 3, paczka .cebula, otwieranie .bmp (24/32, BI_RGB)
  * Zgodna z bursztyn_gui.h, BWS, PZB, loaderem
  */
-#include "../../bursztyn_gui.h"
+#include "bursztyn_gui.h"
+#include "ui_skala.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -43,16 +44,27 @@ NaglowekBur naglowek = {
  * 2. STAŁE I LIMITY
  * ========================================================================= */
 namespace {
-constexpr int TASKBAR_H = 40;
 constexpr int WIN_X0 = 80;
 constexpr int WIN_Y0 = 60;
 constexpr int WIN_W0 = 740;
 constexpr int WIN_H0 = 500;
 constexpr int WIN_MIN_W = 360;
 constexpr int WIN_MIN_H = 260;
-constexpr int BELKA_H = 28;
-constexpr int STATUS_H = 22;
 constexpr int IMAGE_MARGIN = 2;
+inline int belka_h() { return ui_skaluj(28, ui_skala_procent); }
+inline int status_h() { return ui_skaluj(22, ui_skala_procent); }
+inline int taskbar_h() {
+    GuiMonitorInfo mon{};
+    if (gui_pobierz_monitor(0, &mon) && mon.work_wys > 0 && mon.wys > mon.work_wys)
+        return mon.wys - mon.work_wys;
+    return ui_skaluj(40, ui_skala_procent);
+}
+inline int work_h(int screen_h) {
+    GuiMonitorInfo mon{};
+    if (gui_pobierz_monitor(0, &mon) && mon.work_wys > 0) return mon.work_wys;
+    int h = screen_h - taskbar_h();
+    return h > 0 ? h : screen_h;
+}
 
 constexpr uint32_t MAX_W = 8192;
 constexpr uint32_t MAX_H = 8192;
@@ -326,9 +338,9 @@ bws_zdarzenie event_buf[EVENT_BATCH] = {};
 ProstokatObrazu pobierz_prostokat_obrazu() {
     ProstokatObrazu r{
         win_x + IMAGE_MARGIN,
-        win_y + BELKA_H + IMAGE_MARGIN,
+        win_y + belka_h() + IMAGE_MARGIN,
         win_w - 2 * IMAGE_MARGIN,
-        win_h - BELKA_H - STATUS_H - 2 * IMAGE_MARGIN
+        win_h - belka_h() - status_h() - 2 * IMAGE_MARGIN
     };
     if (r.w < 0) r.w = 0;
     if (r.h < 0) r.h = 0;
@@ -375,7 +387,7 @@ void ogranicz_geometrie() {
     if (screen_w < 1) screen_w = 1;
     if (screen_h < 1) screen_h = 1;
     int max_w = screen_w;
-    int max_h = screen_h - TASKBAR_H;
+    int max_h = work_h(screen_h);
     if (max_h < 1) max_h = screen_h;
     if (win_w < WIN_MIN_W) win_w = WIN_MIN_W;
     if (win_h < WIN_MIN_H) win_h = WIN_MIN_H;
@@ -1335,7 +1347,7 @@ void rysuj_obraz() {
 GeometriaKontrolek pobierz_geometrie_kontrolek() {
     GeometriaKontrolek g{};
     g.bar = ProstokatObrazu{
-        win_x + 1, win_y + win_h - STATUS_H - 1, win_w - 2, STATUS_H};
+        win_x + 1, win_y + win_h - status_h() - 1, win_w - 2, status_h()};
     if (g.bar.w < 0) g.bar.w = 0;
 
     const int w_1do1 = oblicz_szerokosc_tekstu("1:1", 1) + 2 * BUTTON_PAD_X;
@@ -1604,6 +1616,33 @@ extern "C" __attribute__((noreturn)) void _start() {
                 }
             }
 
+            if (ev.typ == BWS_ZDARZENIE_EKRAN) {
+                GuiMonitorInfo mon{};
+                const uint32_t scale = gui_pobierz_monitor(0, &mon)
+                    ? mon.scale_x1000 / 10 : ev.kod;
+                if (ui_skala_poprawna(scale)) ui_skala_procent = scale;
+                if (mon.szer > 0 && mon.wys > 0) {
+                    screen_w = mon.szer;
+                    screen_h = mon.wys;
+                } else {
+                    gui_pobierz_rozdzielczosc(&screen_w, &screen_h);
+                }
+                if (zmaksymalizowane) {
+                    win_x = 0;
+                    win_y = 0;
+                    win_w = screen_w;
+                    win_h = work_h(screen_h);
+                }
+                ogranicz_geometrie();
+                if (bws_utworz_warstwe(win_x, win_y, win_w, win_h, 10) < 0)
+                    gui_zakoncz_aplikacje();
+                uniewaznij_cache_rozmiaru();
+                redraw = true;
+                redraw_controls = true;
+                pelne = true;
+                continue;
+            }
+
             if (ev.typ == BWS_ZDARZENIE_FOCUS && zminimalizowane) {
                 zminimalizowane = false;
                 redraw = true;
@@ -1676,7 +1715,7 @@ extern "C" __attribute__((noreturn)) void _start() {
                             win_restore_w = win_w;
                             win_restore_h = win_h;
                             int nW = screen_w;
-                            int nH = screen_h - TASKBAR_H;
+                            int nH = work_h(screen_h);
                             if (nW < WIN_MIN_W) nW = WIN_MIN_W;
                             if (nH < WIN_MIN_H) nH = WIN_MIN_H;
                             win_x = 0;
@@ -1734,7 +1773,7 @@ extern "C" __attribute__((noreturn)) void _start() {
                 int nx = mx - drag_off_x;
                 int ny = my - drag_off_y;
                 int maxX = screen_w - win_w;
-                int maxY = screen_h - TASKBAR_H - win_h;
+                int maxY = work_h(screen_h) - win_h;
                 if (maxX < 0) maxX = 0;
                 if (maxY < 0) maxY = 0;
                 if (nx < 0) nx = 0;

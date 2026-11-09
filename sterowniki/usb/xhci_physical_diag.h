@@ -1,5 +1,5 @@
 #pragma once
-#include "../../pointing_diag.h"
+#include "pointing_diag.h"
 #ifndef BURSZTYNDIAGXHCIPHYSICALMOUSE
 #define BURSZTYNDIAGXHCIPHYSICALMOUSE 0
 #endif

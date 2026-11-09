@@ -9,10 +9,10 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "../../bws_api.h"
-#include "../../bws_zdarzenia.h"
-#include "../../bws_nowoczesne.h"
-#include "../../skladacz_obrazu.h"
+#include "bws_api.h"
+#include "bws_zdarzenia.h"
+#include "bws_nowoczesne.h"
+#include "skladacz_obrazu.h"
 
 // =====================================================================
 // KANONICZNY UKŁAD PAMIĘCI APLIKACJI RING 3
@@ -36,11 +36,11 @@ static inline uint64_t bws_wywolaj(uint64_t nr_funkcji, uint64_t arg1 = 0, uint6
     register uint64_t r12 asm("r12") = arg3;
     register uint64_t r13 asm("r13") = arg4;
     register uint64_t rax asm("rax");
-    
+
     asm volatile (
-        "syscall" 
-        : "=a" (rax) 
-        : "r" (r8), "r" (r9), "r" (r10), "r" (r12), "r" (r13) 
+        "syscall"
+        : "=a" (rax)
+        : "r" (r8), "r" (r9), "r" (r10), "r" (r12), "r" (r13)
         : "rcx", "r11", "memory"
     );
     return rax;

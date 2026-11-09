@@ -1,4 +1,4 @@
-#include "../bws_czcionka.h"
+#include "bws_czcionka.h"
 #include "../czcionki/extronic16Bunicode.h"
 #include "runtime.h"
 namespace BSF {

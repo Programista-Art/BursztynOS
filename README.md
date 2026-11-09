@@ -1,9 +1,9 @@
 
-# Bursztyn OS 
+# Bursztyn OS
 
 ![Logo Bursztyn OS](image/logo-bursztyn-os.png)
 
-Witaj w oficjalnej dokumentacji **Bursztyn OS** – niezależnego, 64-bitowego systemu operacyjnego z polską duszą inżynieryjną, tworzonego całkowicie od zera (czysty bare-metal). 
+Witaj w oficjalnej dokumentacji **Bursztyn OS** – niezależnego, 64-bitowego systemu operacyjnego z polską duszą inżynieryjną, tworzonego całkowicie od zera (czysty bare-metal).
 
 System jest rozwijany z myślą o architekturze x86-64, implementując własne Jądro, natywny stos sieciowy TCP/IP, autorski system plików na dyskach AHCI SATA, niezależny logiczny model bezpieczeństwa (PZB) oraz w pełni graficzne środowisko uruchomieniowe (GUI) dla programów w Ring 3.
 
@@ -11,7 +11,7 @@ System jest rozwijany z myślą o architekturze x86-64, implementując własne J
 
 ## 🖥️ Środowisko Graficzne i Aplikacje (Ring 3)
 
-Bursztyn OS to pełnoprawny system okienkowy. Posiada autorską warstwę HAL (obsługa UEFI GOP oraz VESA VBE) i proporcjonalne czcionki UTF-8. 
+Bursztyn OS to pełnoprawny system okienkowy. Posiada autorską warstwę HAL (obsługa UEFI GOP oraz VESA VBE) i proporcjonalne czcionki UTF-8.
 
 **Menedżer Okien (Pulpit) v systemu v.1.0.0.7 wielozadaniowa**
 System uruchamia interaktywny pulpit z paskiem zadań, rozwijanym menu i wsparciem dla myszy PS/2 (Z-Order, Drag & Drop).
@@ -82,6 +82,7 @@ Powłoka systemowa to potężne, zintegrowane narzędzie działające w oknie. O
 
 Poniższe pliki zawierają pełną specyfikację techniczną, opisy mechanizmów oraz analizę kodu źródłowego systemu:
 
+0. [00_mapa_repozytorium.md](docs/00_mapa_repozytorium.md) – Mapa katalogów źródłowych (jądro, programy, sterowniki, testy, narzędzia).
 1. [01_wstep_i_filozofia.md](docs/01_wstep_i_filozofia.md) – Wizja projektu, założenia ideologiczne, polskie nazewnictwo i roadmapa.
 2. [02_architektura_systemu.md](docs/02_architektura_systemu.md) – Podział Ring 0/Ring 3, sprzętowy TSS oraz logiczny model bezpieczeństwa PZB (Poziom Zaufania Bursztyna).
 3. [03_proces_rozruchu.md](docs/03_proces_rozruchu.md) – Analiza wymuszeń graficznych Multiboot2, tymczasowe stronicowanie i skok do Long Mode.
@@ -92,6 +93,7 @@ Poniższe pliki zawierają pełną specyfikację techniczną, opisy mechanizmów
 8. [08_bursztynowy_slownik_i_architektura.md](docs/08_bursztynowy_slownik_i_architektura.md) – Oficjalny słownik pojęć (Teczka, Włókno, Planista) oraz rendering UTF-8.
 9. [09_tryb_graficzny.md](docs/09_tryb_graficzny.md) - Zorientowana obiektowo warstwa HAL (UEFI GOP, VESA), Double Buffering i Z-Order.
 10. [10_siec.md](docs/10_siec.md) - Stos sieciowy: E1000, ICMP, DHCP, klient DNS (UDP) oraz pobieranie plików (TCP/HTTP).
+12. [12_lokalna_weryfikacja.md](docs/12_lokalna_weryfikacja.md) – Lokalne gate’y smoke/security/regresji bez GitHuba (`make test`, `test-local-suite`).
 
 ---
 
@@ -118,11 +120,11 @@ cd D:\Bursztyn-OS\
 Będąc już w folderze, w którym leży plik BursztynOS.iso, odwołaj się do programu zainstalowanego na dysku C:. Skopiuj całą tę linijkę (z zachowaniem cudzysłowów) i wklej do konsoli:
 ```
 "C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom BursztynOS.iso -m 2G
-``` 
+```
 
 
-## Jak uruchomić w power shell w QEMU na Windows 11 
-Jeżeli masz pobrnay obraz iso w folderze na pustym miejscu kliknij prawym przyciskiem myszy i wybierz Otwórz w terminalu dalej wpisz to 
+## Jak uruchomić w power shell w QEMU na Windows 11
+Jeżeli masz pobrnay obraz iso w folderze na pustym miejscu kliknij prawym przyciskiem myszy i wybierz Otwórz w terminalu dalej wpisz to
 ```
 & "C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom BursztynOS.iso -m 2G
 ```
@@ -162,7 +164,7 @@ Najszybsza metoda w systemach takich jak Linux Mint:
 (Alternatywnie możesz użyć komendy cd, np. cd ~/Pulpit/Bursztyn\ OS/kod).
 
 ## Krok 2: Wpisz komendę uruchamiającą
-1. W Linuksie program QEMU jest dodany do globalnych ścieżek systemu, więc nie musisz podawać do niego pełnej ścieżki w cudzysłowach tak jak na Windowsie. 
+1. W Linuksie program QEMU jest dodany do globalnych ścieżek systemu, więc nie musisz podawać do niego pełnej ścieżki w cudzysłowach tak jak na Windowsie.
 1. Po prostu wklej to:
 ```
 
@@ -201,7 +203,7 @@ qemu-system-x86_64 -enable-kvm -cdrom BursztynOS.iso -m 2G
 ```
 
 
-# Kompilowanie systemu ze źródel na Linux Mint i uruchomienie w QEMU 
+# Kompilowanie systemu ze źródel na Linux Mint i uruchomienie w QEMU
 ### Przygotowanie Środowiska w Linux Mint
 1. Otwórz natywny terminal i wykonaj te trzy polecenia:
 1. Aktualizacja repozytoriów:
@@ -248,19 +250,19 @@ LD = x86_64-elf-ld
 Otwórz terminal w folderze, w którym znajduje się Twój plik Makefile i kod źródłowy, a następnie wpisz:
 make
 
-Skrypt automatycznie skompiluje pliki boot.o, gdt.o, pmm.o, vmm.o, kernel.o itd. i połączy je za pomocą Twojego skryptu linker.ld. Jeśli nie ma błędów w kodzie, w folderze pojawi się plik system_operacyjny.bin.
+Skrypt automatycznie skompiluje jednostki z `jadro/` (boot.o, gdt.o, pmm.o, vmm.o, kernel.o itd.) i połączy je skryptem `jadro/arch/linker.ld`. Jeśli nie ma błędów w kodzie, w folderze pojawi się plik system_operacyjny.bin.
 ## Krok 3: Przygotowanie struktury pliku ISO (GRUB Multiboot2)
 Bursztyn OS operuje w 64-bitowym Long Mode, więc wymaga programu rozruchowego (GRUB), który przekaże parametry Multiboot2. Musisz zbudować prostą strukturę teczek dla obrazu płyty:
-W terminalu utwórz katalogi: 
+W terminalu utwórz katalogi:
 ```
-mkdir -p isodir/boot/grub 
+mkdir -p isodir/boot/grub
 ```
-Skopiuj swoje skompilowane jądro do katalogu /boot: 
+Skopiuj swoje skompilowane jądro do katalogu /boot:
 ```
-cp system_operacyjny.bin isodir/boot/ 
+cp system_operacyjny.bin isodir/boot/
 ```
 
-Stwórz plik konfiguracyjny GRUBa o nazwie grub.cfg (np. za pomocą xed isodir/boot/grub/grub.cfg lub nano isodir/boot/grub/grub.cfg) i wklej do niego ten kod: 
+Stwórz plik konfiguracyjny GRUBa o nazwie grub.cfg (np. za pomocą xed isodir/boot/grub/grub.cfg lub nano isodir/boot/grub/grub.cfg) i wklej do niego ten kod:
 
 set timeout=0
 set default=0
@@ -273,7 +275,7 @@ menuentry "Bursztyn OS" {
 ## Krok 4: Generowanie bootowalnego obrazu ISO
 Mając gotową strukturę (isodir), użyj zainstalowanego wcześniej narzędzia grub-mkrescue, aby "zamknąć" to w plik .iso:
 
-grub-mkrescue -o BursztynOS.iso isodir 
+grub-mkrescue -o BursztynOS.iso isodir
 
 W głównym folderze pojawi się nowy plik BursztynOS.iso.
 
@@ -284,7 +286,7 @@ qemu-system-x86_64 -cdrom BursztynOS.iso -m 2G -serial stdio
 ```
 
 (Flaga -m 2G przydziela 2 Gigabajty pamięci RAM dla maszyny, co przyda się przy testowaniu Zarządcy Pamięci (PMM/VMM) w Etapie 3, a -serial stdio pozwala kierować logi z jądra bezpośrednio do Twojego terminala Linux).
-Po wykonaniu tej komendy powinno wyskoczyć okno emulatora wyświetlające GRUB, a zaraz po nim kod z pliku kernel.cpp Bursztyn OS! 
+Po wykonaniu tej komendy powinno wyskoczyć okno emulatora wyświetlające GRUB, a zaraz po nim kod jądra z `jadro/rdzen/kernel.cpp` Bursztyn OS!
 
 
 Komenda make clear - usuwa pliki .o
@@ -292,15 +294,15 @@ Komenda make clear - usuwa pliki .o
 make clear
 ```
 
-Skompiluj wszystko od nowa wpisując: 
+Skompiluj wszystko od nowa wpisując:
 
-make 
+make
 
-Teraz kompilator przejdzie przez wszystkie moduły (włącznie z systemem plików psf.o i urządzeniami), a na końcu wyświetli Ci poprawnie sklejony plik system_operacyjny.bin, który będziesz mógł podpiąć do GRUBa za pomocą komendy 
+Teraz kompilator przejdzie przez wszystkie moduły (włącznie z systemem plików psf.o i urządzeniami), a na końcu wyświetli Ci poprawnie sklejony plik system_operacyjny.bin, który będziesz mógł podpiąć do GRUBa za pomocą komendy
 
 
 Ostatnie kroki w terminalu:
-Wpisz po kolei te polecenia 
+Wpisz po kolei te polecenia
 1. Skompiluj kod:
 ```
 make
@@ -328,5 +330,5 @@ make run
 ```
 Budownaie w trybie UEFI ```make runuefu``` i wszystko się zrobi automatycznie
 ```
-make run 
+make run
 ```

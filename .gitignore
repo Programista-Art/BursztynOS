@@ -1,65 +1,45 @@
+# Bursztyn OS — artefakty lokalne (nie pushować na GitHub)
 
-# Bursztyn OS - artefakty QEMU/testow
-.test_run/
-.testrun/
-wirtualny_dysk.img
+# --- Kompilacja / link / zależności ---
+*.o
+*.su
+*.d
+*.bak
+/*.elf
+/*.bin
+/*.pak
 
-# Bursztyn OS - QEMU / testy / artefakty tymczasowe
-.qt/
-.test_run/
-.testrun/
-logi_qemu/
-
-# Dyski QEMU
-wirtualny_dysk.img
-*.img
-
-# Tymczasowe ISO testowe
-.bursztyn_ci_test.iso
+# --- ISO i staging GRUB ---
+*.iso
+# Wyjatek: publikowany obraz startowy jest wersjonowany celowo.
+!/BursztynOS.iso
+/isodir/
 .isodir_ci_test/
 
-# Tymczasowe pliki QEMU
+# --- Lokalne CI, fuzz, scratch testów bezpieczeństwa ---
+.local-ci/
+.fuzz-build/
+.fuzz-corpus/
+.aslr-test/
+.bws-test/
+.ssp-test/
+.tapety-sources.manifest
+
+# --- QEMU / dyski / logi ---
+*.img
 *.pid
 *.log
-*.d
+.qt/
+.logi_qemu/
+logi_qemu/
+.test_run/
+.testrun/
+.test_run_*/
 .installer-build/
 .installertest/
 .installer-run/
-instalator.bin
-instalator.elf
-narzedzia/instalator/__pycache__/
-aktualizacja_klucz.h
-.test_run_uefi/aktualizacje.png
-.test_run_uefi/desktop.png
-.test_run_uefi/desktop.png
-narzedzia/aktualizacje/__pycache__/qemu_aktualizacja_te
-narzedzia/aktualizacje/qemu_aktualizacja_test.py
-narzedzia/aktualizacje/test_gui_aktualizacje.py
-.test_run_16k/
-.test_run_16k2/
-.test_run_16k3/
-.test_run_live/
-narzedzia/aktualizacje/test_16k_bws84_irq.py
-.motywytest/
-.bursztyn-ui-test/
-narzedzia/test_motyw_host.cpp
-narzedzia/test_motywy_qemu.py
-narzedzia/aktualizacje/__pycache__/test_16k_bws84_irq.cpython-312.pyc
-narzedzia/test_kalkulator_gui.py
-narzedzia/test_notatnik_gui.py
-.kontrolki4-test/
-test16k_screenshot.png
-narzedzia/__pycache__/
-loop_log_1.txt
-loop_log_2.txt
-loop_test.sh
-.hda-test/physical/reproduce-before
-.hda-test/physical/reproduce-before.cpp
-.hda-test/physical/transport-before.cpp
-.hda-test/physical/transport-debug
-.hda-test/regression-qemu/
-.hda-test/regression/
-.hda-test/tone/
+
+# --- Katalogi testów QEMU / regresji (scratch) ---
 .hda-test/
 .kontrolki4-qemu/
 .kontrolki4-test/
@@ -70,40 +50,57 @@ loop_test.sh
 .pointingtest/
 .qemu_ci/
 .suite_test/
-.test_run_uefi/
 .virtiotest/
 .wm-test/
-
-
-
-
-
-
-
-
-
-
-
-
-# Modern input regression artifacts
 .input-test/
-
-# Husarz parser, renderer and isolated QEMU regression artifacts
 .husarz-test/
-
-# Native font parser, rasterizer and QEMU validation artifacts
 .bsf-test/
+.bursztyn-ui-test/
 
-# Shared PNG power icon build artifacts
-/ikona_*_blob.o
-/ikona_png_ring3.o
-/ikona_png_ring3.su
-/image_png_ring3.o
-/image_png_ring3.su
+# --- Python ---
+**/__pycache__/
+*.pyc
+*.pyo
 
-# Optional windowed-pointer diagnostic media (production ISO is separate).
-/BursztynOS-pointer-window-diag.iso
+# --- Sekrety / lokalne klucze ---
+aktualizacja_klucz.h
+jadro/aktualizacja/aktualizacja_klucz.h
 
-# Private release audit and hash-associated developer symbols
+# --- Binaria host-harnessów budowane w drzewie źródeł ---
+testy/test_bur_loader
+
+# --- Prywatne audyty release ---
 /.release-audit/
 /.release-private/
+
+# --- Jednorazowe skrypty probe (lokalny debug linkera) ---
+narzedzia/build_iso_until_ok.sh
+narzedzia/probe_td_linker.ld
+narzedzia/probe_test_dzwieku_link.sh
+narzedzia/run_probe_td.sh
+
+# --- Artefakty sesji QEMU / logi prob (2026-11) ---
+.qemu-*.err
+.qemu-*.out
+qemu_*.log
+test_serial_probe.log
+prze*.log
+q7*.log
+qsdl.log
+qgeom.log
+qkeep.log
+qhost.log
+qfix.log
+qres.log
+qvga.log
+qfinal.log
+boot*.log
+
+.build-config/
+.isodir_*/
+
+.splash-preview/
+
+# Local integration verification outputs
+/.signature-test/
+/BursztynOS.iso

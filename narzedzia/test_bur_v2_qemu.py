@@ -7,6 +7,10 @@ import re
 import shutil
 import subprocess
 import time
+import sys
+import socket
+import os
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "testy"))
 
 from test_bws_abuse_qemu import get_make_objs, run_cmd, ROOT
 from symbolicate_bur_v2_crash import symbolicate_line
@@ -15,7 +19,7 @@ from symbolicate_bur_v2_crash import symbolicate_line
 def main():
     out = ROOT / '.aslr-test/guest'
     out.mkdir(parents=True, exist_ok=True)
-    flags = ['x86_64-linux-gnu-g++', '-I.', '-std=c++17', '-O2', '-g', '-ffreestanding',
+    flags = ['x86_64-linux-gnu-g++', '-I.', '-Ijadro/bws', '-Ijadro/gui', '-Ijadro/mm', '-Ijadro/rdzen', '-Ijadro/fs', '-Ijadro/arch', '-std=c++17', '-O2', '-g', '-ffreestanding',
              '-mno-red-zone', '-fno-exceptions', '-fno-rtti', '-fno-asynchronous-unwind-tables',
              '-fno-unwind-tables', '-fstack-protector-strong', '-mstack-protector-guard=global']
     run_cmd([*flags, '-fPIE', '-fvisibility=hidden', '-c', 'narzedzia/bur_v2_probe.cpp',
@@ -25,15 +29,23 @@ def main():
     run_cmd(['python3', 'narzedzia/elftoburv2.py', str(out/'probe.elf'), str(out/'test.bin')])
     # Legacy WM launch ABI, running simultaneously with v2 children.
     source = (ROOT/'narzedzia/fixtures/bur_v1_launcher_prefix.inc').read_text()
-    source += 'extern "C" __attribute__((noreturn)) void _start() {'
+    source += '#include "jadro/bws/bws_procesy.h"\nextern "C" __attribute__((noreturn)) void _start() {'
     start = source.index('extern "C" __attribute__((noreturn)) void _start() {')
     source = source[:start] + '''extern "C" __attribute__((noreturn)) void _start() {
       bws_wywolaj(BWS_URUCHOM_PROGRAM,(uint64_t)"/programy/fpu-a.cebula/fpu-a.bur",0,0,0);
       unsigned iteration=0;
       static const char* modes[]={"g","t","r","h","s","c"};
       for (;;) {
+        BwsProcesInfo entries[BWS_PROCESY_MAKS]{};
+        auto count=bws_wywolaj(BWS_PROCESY_LISTA,(uint64_t)entries,BWS_PROCESY_MAKS,0,0);
+        if (!count) { bws_wywolaj(BWS_WYPISZ,(uint64_t)"[BUR2 PROCESS LIST DENIED]",0,0,0); for(;;)asm volatile("pause"); }
+        bool running=false;
+        for(unsigned i=0;i<count;++i) {
+          const char* name=entries[i].nazwa;
+          if(name[0]=='t'&&name[1]=='e'&&name[2]=='s'&&name[3]=='t'&&name[4]=='.'&&name[5]=='b'&&name[6]=='u'&&name[7]=='r'&&name[8]==0)running=true;
+        }
         const char* mode=iteration<6 ? modes[iteration] : "";
-        if(bws_wywolaj(BWS_URUCHOM_PROGRAM,(uint64_t)"/programy/test.cebula/test.bur",(mode[0] ? (uint64_t)mode : 0),0,0)) ++iteration;
+        if(!running && bws_wywolaj(BWS_URUCHOM_PROGRAM,(uint64_t)"/programy/test.cebula/test.bur",(mode[0] ? (uint64_t)mode : 0),0,0)) ++iteration;
         auto until=bws_wywolaj(BWS_CZAS_MONOTONICZNY_NS,0,0,0,0)+500000000ULL;
         while(bws_wywolaj(BWS_CZAS_MONOTONICZNY_NS,0,0,0,0)<until) asm volatile("pause");
       }
@@ -41,7 +53,7 @@ def main():
 '''
     (out/'launcher.cpp').write_text(source)
     run_cmd([*flags, '-mcmodel=large', '-fno-pie', '-c', str(out/'launcher.cpp'), '-o', str(out/'launcher.o')])
-    run_cmd(['x86_64-linux-gnu-ld', '--gc-sections', '-T', 'menedzer_okien_linker.ld',
+    run_cmd(['x86_64-linux-gnu-ld', '--gc-sections', '-T', 'programy/menedzer_okien/menedzer_okien_linker.ld',
              '-nostdlib', '-no-pie', '--undefined=__stack_chk_guard', '--undefined=__stack_chk_fail',
              str(out/'launcher.o'), 'bursztyn_gui.o', '-o', str(out/'launcher.elf')])
     run_cmd(['objcopy', '-O', 'binary', str(out/'launcher.elf'), str(out/'menedzer_okien.bin')])
@@ -50,7 +62,7 @@ def main():
         run_cmd(['ld','-r','-b','binary',app+'.bin','-o',app+'_blob.o'], cwd=out)
     objects = [str(out/o) if o in ('test_blob.o','menedzer_okien_blob.o','fpu_probe_blob.o') else o
                for o in get_make_objs()]
-    run_cmd(['x86_64-linux-gnu-g++','-T','linker.ld','-nostdlib','-no-pie','-static',
+    run_cmd(['x86_64-linux-gnu-g++','-T','jadro/arch/linker.ld','-nostdlib','-no-pie','-static',
              '-Wl,-z,noexecstack','-Wl,-z,max-page-size=0x1000','-Wl,--build-id=none',
              '-o',str(out/'kernel.elf'),*objects,'-lgcc'])
     stage = out/'iso'
@@ -61,15 +73,17 @@ def main():
     iso=out/'test.iso'
     run_cmd(['grub-mkrescue','-o',str(iso),str(stage)])
     log=out/'serial.log'; log.write_text('')
+    monitor=out/'monitor.sock'
+    monitor.unlink(missing_ok=True)
     vm=subprocess.Popen(['qemu-system-x86_64','-machine','pc,hpet=on','-cpu','max',
         '-accel','tcg','-m','2048','-bios','/usr/share/ovmf/OVMF.fd','-display','none',
         '-vga','none','-device','virtio-vga,disable-legacy=on',
         '-drive',f'file={iso},format=raw,if=none,id=boot,readonly=on',
         '-device','virtio-blk-pci,drive=boot,disable-legacy=on,bootindex=1',
-        '-device','virtio-rng-pci,disable-legacy=on','-serial',f'file:{log}','-no-reboot'],
+        '-device','virtio-rng-pci,disable-legacy=on','-serial',f'file:{log}','-monitor',f'unix:{monitor},server=on,wait=off','-no-reboot'],
         stdout=subprocess.DEVNULL,stderr=(out/'qemu.log').open('w'))
     try:
-        deadline=time.monotonic()+300
+        deadline=time.monotonic()+float(os.environ.get("BURSZTYN_QEMU_TIMEOUT", "300"))
         while time.monotonic()<deadline:
             text=log.read_text(errors='replace')
             if text.count('[BUR2 EXEC PASS]')>=26 and '[FPU PROBE] A PASS' in text: break
@@ -97,7 +111,20 @@ def main():
         for column in range(5):
             assert len({r[column] for r in rows})>1, ('no variation',column)
             assert all(0 < int(r[column],16) < (1<<47) for r in rows)
-        result=dict(executions=len(rows),unique_per_column=[len({r[c] for r in rows}) for c in range(5)],
+        with socket.socket(socket.AF_UNIX) as control:
+            control.settimeout(10)
+            control.connect(str(monitor))
+            control.recv(4096)
+            control.sendall(b'info registers\n')
+            registers=b''
+            while b'(qemu)' not in registers:
+                registers+=control.recv(65536)
+        (out/'registers.txt').write_bytes(registers)
+        cr4=int(re.search(rb'CR4=([0-9a-fA-F]+)',registers)[1],16)
+        efer=int(re.search(rb'EFER=([0-9a-fA-F]+)',registers)[1],16)
+        assert cr4 & (1<<20) and cr4 & (1<<21), ('SMEP/SMAP disabled',hex(cr4))
+        assert efer & (1<<11), ('NX disabled',hex(efer))
+        result=dict(cr4=hex(cr4),efer=hex(efer),smep_smap_nx_enabled=True,executions=len(rows),unique_per_column=[len({r[c] for r in rows}) for c in range(5)],
                     columns=['code','stack','heap','canary_address','shared_mapping'],layouts=rows,
                     symbolicated_faults=symbolicated,
                     legacy_fpu_fixture_sha256=hashlib.sha256((out/'fpu_probe.bin').read_bytes()).hexdigest(),

@@ -1,1 +1,0 @@
-tss.o: tss.cpp

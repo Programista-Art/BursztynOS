@@ -1,0 +1,85 @@
+g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections testy/test_bsf.cpp bsf/bsf.cpp -Wl,--gc-sections -o .bsf-test/bsf-host
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/bsf-host
+BSF: 12204 checks PASS; cache=2097152 bitmap-live=108 hits=10464 misses=3683 evictions=3295 face=544 glyph=56 first-ns=111564 hit-average-ns=841
+g++ -std=c++17 -fcoroutines -O0 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. -Isterowniki/pci -Isterowniki/virtio -Isterowniki/magazyn -Isterowniki/siec -Isterowniki/wejscie -Isterowniki/czas -Isterowniki/platforma -Isterowniki/grafika -Isterowniki -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen testy/test_bsf_ui.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/ui-host
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/ui-host
+BSF UI/browser: 9084 checks PASS; proportional geometry, clipping/AA, Polish UTF-8, previews, persistence, font priority, cooperative paint and corrupt-font fallback
+g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-pie -no-pie narzedzia/test_bsf_graphemes.cpp bsf/bsf.cpp -o .bsf-test/graphemes
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/graphemes
+Unicode 15.1.0 official GraphemeBreakTest: 1187 cases PASS; next/previous/count/all byte boundaries and malformed UTF-8 / 10000 deterministic mutation inputs PASS
+g++ -std=c++17 -fcoroutines -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_notepad_unicode.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/notepad-unicode
+In file included from narzedzia/test_notepad_unicode.cpp:4:
+narzedzia/../programy/notatnik/notatnik.cpp:9:10: fatal error: loader.h: No such file or directory
+    9 | #include "loader.h"
+      |          ^~~~~~~~~~
+compilation terminated.
+bsf/runtime.cpp:3:10: fatal error: bursztyn_gui.h: No such file or directory
+    3 | #include "bursztyn_gui.h"
+      |          ^~~~~~~~~~~~~~~~
+compilation terminated.
+bsf/bitmap.cpp:1:10: fatal error: bws_czcionka.h: No such file or directory
+    1 | #include "bws_czcionka.h"
+      |          ^~~~~~~~~~~~~~~~
+compilation terminated.
+make: *** [Makefile:2662: test-notepad-unicode-host] Error 1
+g++ -std=c++17 -O1 -g -fcheck-new -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_bsf_resources.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/resources
+In file included from narzedzia/test_bsf_resources.cpp:3:
+narzedzia/../jadro/gui/bursztyn_gui.h:15:10: fatal error: bws_zdarzenia.h: No such file or directory
+   15 | #include "bws_zdarzenia.h"
+      |          ^~~~~~~~~~~~~~~~~
+compilation terminated.
+bsf/runtime.cpp:3:10: fatal error: bursztyn_gui.h: No such file or directory
+    3 | #include "bursztyn_gui.h"
+      |          ^~~~~~~~~~~~~~~~
+compilation terminated.
+bsf/bitmap.cpp:1:10: fatal error: bws_czcionka.h: No such file or directory
+    1 | #include "bws_czcionka.h"
+      |          ^~~~~~~~~~~~~~~~
+compilation terminated.
+make: *** [Makefile:2688: test-bsf-resources-host] Error 1
+g++ -std=c++17 -O1 -g -I. -Isterowniki/pci -Isterowniki/virtio -Isterowniki/magazyn -Isterowniki/siec -Isterowniki/wejscie -Isterowniki/czas -Isterowniki/platforma -Isterowniki/grafika -Isterowniki -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -ffunction-sections -fdata-sections -fsanitize=address,undefined testy/test_shell_terminal.cpp bsf/bsf.cpp bsf/terminal.cpp -Wl,--gc-sections -o .wm-test/shell
+ASAN_OPTIONS=detect_leaks=0 .wm-test/shell
+Terminated
+make: *** [Makefile:1870: test-shell-host] Error 143
+g++ -std=c++17 -O1 -g -DBSF_NATIVE=1 -ffunction-sections -fdata-sections -fsanitize=address,undefined -fno-pie -no-pie testy/test_shell_terminal.cpp bsf/bsf.cpp bsf/terminal.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/shell-ttf
+In file included from testy/test_shell_terminal.cpp:12:
+testy/../programy/shell/shell.cpp:32:10: fatal error: bursztyn_gui.h: No such file or directory
+   32 | #include "bursztyn_gui.h"
+      |          ^~~~~~~~~~~~~~~~
+compilation terminated.
+bsf/runtime.cpp:3:10: fatal error: bursztyn_gui.h: No such file or directory
+    3 | #include "bursztyn_gui.h"
+      |          ^~~~~~~~~~~~~~~~
+compilation terminated.
+bsf/bitmap.cpp:1:10: fatal error: bws_czcionka.h: No such file or directory
+    1 | #include "bws_czcionka.h"
+      |          ^~~~~~~~~~~~~~~~
+compilation terminated.
+make: *** [Makefile:2697: test-shell-ttf-host] Error 1
+g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-pie -no-pie -I. narzedzia/test_usb_keyboard_repeat.cpp -o .bsf-test/usb-keyboard-repeat
+In file included from narzedzia/test_usb_keyboard_repeat.cpp:2:
+narzedzia/../sterowniki/usb/usb_hid.h:12:10: fatal error: input_device.h: No such file or directory
+   12 | #include "input_device.h"
+      |          ^~~~~~~~~~~~~~~~
+compilation terminated.
+make: *** [Makefile:2682: test-usb-keyboard-repeat-host] Error 1
+g++ -std=c++17 -O1 -g -I. -Isterowniki/pci -Isterowniki/virtio -Isterowniki/magazyn -Isterowniki/siec -Isterowniki/wejscie -Isterowniki/czas -Isterowniki/platforma -Isterowniki/grafika -Isterowniki -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -ffunction-sections -fdata-sections -fsanitize=address,undefined testy/test_wm_click_routing.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -Wl,--gc-sections -o .wm-test/click-routing
+ASAN_OPTIONS=detect_leaks=0 .wm-test/click-routing
+WM routing 229/229 PASS: WM click routing passed: desktop, Start, launch, client PID, titlebar, close region, transparency, z-order, popup owner, theme and redraw
+g++ -std=c++17 -O0 -g -fsanitize=address,undefined -fno-pie -no-pie -ffunction-sections -fdata-sections testy/test_settings_themes_power.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -Wl,--gc-sections -o .bsf-test/settings-themes-power
+In file included from testy/test_settings_themes_power.cpp:1:
+testy/bursztyn_ui_host_fixture.h:12:10: fatal error: motyw.h: No such file or directory
+   12 | #include "motyw.h"
+      |          ^~~~~~~~~
+compilation terminated.
+In file included from bursztyn_ui/ikona_png.h:2,
+                 from bursztyn_ui/ikona_png.cpp:1:
+bursztyn_ui/rysowanie.h:4:10: fatal error: kolor_alfa.h: No such file or directory
+    4 | #include "kolor_alfa.h"
+      |          ^~~~~~~~~~~~~~
+compilation terminated.
+make: *** [Makefile:2483: test-settings-themes-power-host] Error 1
+g++ -std=c++17 -O1 -g -Wall -Wextra -I. -Isterowniki/pci -Isterowniki/virtio -Isterowniki/magazyn -Isterowniki/siec -Isterowniki/wejscie -Isterowniki/czas -Isterowniki/platforma -Isterowniki/grafika -Isterowniki -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined narzedzia/instalator/test_storage.cpp jadro/fs/storage_format.cpp jadro/fs/psf.cpp -o .installertest/test-storage
+ASAN_OPTIONS=detect_leaks=0 .installertest/test-storage
+Native directory/file move: 138 assertions PASS (RAM)
+Storage/BSP2 host: 10512 PASS, 0 FAIL (includes outside-partition sentinel, faults, >2 TiB GPT, A/B ESP, BlockDevice abstraction)

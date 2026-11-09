@@ -1,10 +1,10 @@
 #define BSF_NATIVE 1
 #define _start notepad_test_entry
 #define __dso_handle notepad_test_dso_handle
-#include "../notatnik.cpp"
+#include "../programy/notatnik/notatnik.cpp"
 #undef _start
 #undef __dso_handle
-#include "bursztyn_ui_host_fixture.h"
+#include "../testy/bursztyn_ui_host_fixture.h"
 #include <string>
 #include <memory>
 #include <chrono>

@@ -6,12 +6,12 @@
 
 #define BURSZTYN_HOST_TEST 1
 
-#include "../motyw.h"
-#include "../stos_jadra.h"
-#include "../motyw.cpp"
+#include "motyw.h"
+#include "stos_jadra.h"
+#include "../jadro/gui/motyw.cpp"
 
-#include "../bursztyn_gui.h"
-#include "../pulpit_geometria.h"
+#include "bursztyn_gui.h"
+#include "pulpit_geometria.h"
 
 // Mocks for BursztynUI in host test
 extern "C" {

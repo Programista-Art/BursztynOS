@@ -1,5 +1,5 @@
 #pragma once
-#include "../../diagnostyka_systemu_format.h"
+#include "diagnostyka_systemu_format.h"
 struct DiagAppModel {
  DiagSummary summary{};DiagDevice devices[DIAG_MAX_DEVICES]{};
  DiagLog logs[DIAG_MAX_LOG]{};uint32_t order[DIAG_MAX_DEVICES]{},drivers[DIAG_MAX_DEVICES]{},visible_logs[DIAG_MAX_LOG]{};

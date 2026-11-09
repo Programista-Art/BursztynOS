@@ -1,6 +1,6 @@
 #pragma once
 #include "../../bursztyn_ui/bursztyn_ui.h"
-#include "../../system_identity.h"
+#include "system_identity.h"
 #include "content_metrics.h"
 namespace SettingsUI {
 using namespace BursztynUI;

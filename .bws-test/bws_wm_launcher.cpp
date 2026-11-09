@@ -1,7 +1,7 @@
 
 #include <stdint.h>
-#include "bws_api.h"
-#include "bursztyn_gui.h"
+#include "jadro/bws/bws_api.h"
+#include "jadro/gui/bursztyn_gui.h"
 
 struct NaglowekBur {
     uint8_t magia[4];
