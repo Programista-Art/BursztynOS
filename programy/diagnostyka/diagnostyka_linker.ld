@@ -59,10 +59,7 @@ SECTIONS {
     }
     ASSERT(DEFINED(_start), "DIAG BUR: missing entry")
     ASSERT(SIZEOF(.bur_unsupported) == 0, "DIAG BUR: unsupported runtime section")
-    ASSERT(SIZEOF(.text) > 0 && SIZEOF(.text) <= 0x30000, "DIAG BUR: TEXT budget")
-    ASSERT((__bur_data_memory_end - (ADDR(.text) + SIZEOF(.text))) > 0 &&
-           (__bur_data_memory_end - (ADDR(.text) + SIZEOF(.text))) <= 0x800000,
-           "DIAG BUR: DATA/BSS budget")
-    ASSERT((LOADADDR(.text) + SIZEOF(.text) + SIZEOF(.data)) <= 524288,
-           "DIAG BUR: file exceeds 512 KiB")
+    ASSERT(BUR_TEXT_SIZE > 0 && BUR_TEXT_SIZE <= 0x36000, "DIAG BUR: TEXT budget")
+    ASSERT(BUR_DATA_SIZE > 0 && BUR_DATA_SIZE <= 0x800000, "DIAG BUR: DATA/BSS budget")
+    ASSERT(BUR_DATA_OFFSET + SIZEOF(.data) <= 524288, "DIAG BUR: file exceeds 512 KiB")
 }

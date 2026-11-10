@@ -1,0 +1,187 @@
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01HBdsDxe: loading Boot0001 "UEFI QEMU DVD-ROM QM00001 " from PciRoot(0x0)/Pci(0x1,0x1)/Ata(Primary,Master,0x0)
+BdsDxe: starting Boot0001 "UEFI QEMU DVD-ROM QM00001 " from PciRoot(0x0)/Pci(0x1,0x1)/Ata(Primary,Master,0x0)
+Ladowanie jadra...
+Ladowanie zasobow instalatora...
+Uruchamianie instalatora...
+[BOCHS VBE] VRAM: 67108864 B, max: 16000x12000@32
+[HAL] Aktywacja sterownika UEFI GOP.
+[MOUSE BOUNDS] source=cursor screen=1280x720 max=1279x719 gen=1
+[EKRAN] Backend Bochs VBE (PCI/BAR/DISPI potwierdzone).
+[SYSTEM] Bursztyn OS HAL gotowy!
+==================================================
+ Bursztyn OS v1.0.1.9 (x86-64)
+ Polski System Operacyjny
+ Github: Programista-Art/BursztynOS 
+ Autor: Dymitr Wygowski 
+==================================================
+[PMM] Skan pamieci fizycznej. Wykryto: 2046 MB RAM
+[VMM] Paging 4-poziomowy aktywowany.
+[HEAP] Sterta jadra 16 MiB gotowa.
+[STACK] Podsystem chronionych stosow Ring 0 zainicjalizowany.
+[ACPI] Multiboot2 ACPI new RSDP znaleziony.
+[ACPI] SDT FACP
+[ACPI] FADT bez obslugi RESET_REG.
+[ACPI] DSDT _S5 gotowy.
+[ACPI] SDT APIC
+[ACPI] SDT HPET
+[ACPI] SDT WAET
+[ACPI] SDT BGRT
+[ACPI] Uzywam XSDT.
+[HPET] ACPI HPET znaleziony.
+[HPET] MMIO=0xFED00000
+[HPET] period=10000000 fs
+[HPET] frequency=100000000 Hz
+[HPET-TEST] 32-bit wrap monotonic: OK
+[SCHED] PID 0 (idle) przygotowany.
+[KRYPTO] Pula mbedTLS gotowa.
+[PCI] Rozpoczynam skanowanie PCI...
+[TIMER] LAPIC measured=67050400 Hz
+[TIMER] Scheduler=250 Hz
+[TIMER] LAPIC initial_count=268202
+[APIC] LAPIC/IOAPIC uruchomiony.
+[USB] Inicjalizacja podsystemu USB.
+[USB] Brak aktywnego kontrolera xHCI.
+[PS/2] controller detected
+[INPUT REGISTER] dev='ps2-keyboard' bus=PS2 id=0 kinds=0x1 prio=10
+[PS/2] keyboard detected, streaming enabled
+[INPUT REGISTER] dev='ps2-mouse' bus=PS2 id=3 kinds=0x2 prio=10
+[INPUT OWNER] Preferred pointer source: 'ps2-mouse' bus=PS2 id=3 prio=10
+[PS/2] auxiliary mouse detected, streaming enabled
+[BWS] API Wywolan Systemowych gotowe.
+[AHCI] Szukam kontrolera SATA AHCI...
+[AHCI] Nie znaleziono kontrolera AHCI.
+[VIRTIO-PCI] device=VirtIO-BLK (Urzadzenie blokowe) modern transport found (BDF 00:05.0)
+[VIRTIO-PCI] common cfg BAR=4 offset=0x0 len=0x1000
+[VIRTIO-PCI] notify cfg BAR=4 offset=0x3000 len=0x1000 multiplier=4
+[VIRTIO-PCI] features device=0x10130006E54 driver=0x100000000
+[VIRTIO-PCI] device=VirtIO-BLK (Urzadzenie blokowe) modern transport found (BDF 00:06.0)
+[VIRTIO-PCI] common cfg BAR=4 offset=0x0 len=0x1000
+[VIRTIO-PCI] notify cfg BAR=4 offset=0x3000 len=0x1000 multiplier=4
+[VIRTIO-PCI] features device=0x10130006E54 driver=0x100000000
+[NORMAL BOOT] VirtIO self-tests skipped.
+[VIRTIO-BLK] MSI-X configured successfully (entry 0)
+[VIRTIO-BLK] Successfully initialized and registered VirtIO-BLK device
+[VIRTIO-BLK] MSI-X configured successfully (entry 0)
+[VIRTIO-BLK] Successfully initialized and registered VirtIO-BLK device
+[VIRTIO-BLK] Sanity check: OK (read LBA 0).
+[E1000] Szukam Intel 82540EM (8086:100E)...
+[E1000] MAC: 52:54:00:12:34:56
+[E1000] Karta gotowa; link aktywny.
+[E1000] Zarejestrowano jako NetworkDevice (eth0).
+[DHCP] Wysylam DHCPDISCOVER...
+[DHCP] DHCPOFFER odebrany, wysylam DHCPREQUEST...
+[DHCP] IPv4: 10.0.2.15
+[DHCP] Brama: 10.0.2.2
+[DHCP] Maska: 255.255.255.0
+[DHCP] DNS: 10.0.2.3
+[ROUTE] local subnet
+[ROUTE] next_hop=10.0.2.2
+[ARP] cache miss ip=10.0.2.2
+[ARP] request ip=10.0.2.2
+[ARP] reply/cache ip=10.0.2.2
+[ARP] resolved ip=10.0.2.2
+[SIEC] Brama domyslna (ARP) rozwiazana pomyslnie.
+[SIEC] Inicjalizacja stosu sieciowego zakonczona.
+[HDA] PCI 0x00:0x03.0 Intel HDA (vendor=0x8086 device=0x2668)
+[HDA] codec CAD=0 vendor=0x1AF4 device=0x0012
+[HDA] AFG NID=0x01
+[HDA] speaker pin NID=0x03 (cel=Line Out ocena=40)
+[HDA] route: 0x02 -> 0x03
+[HDA] widget NID=0x02 typ=Audio Output awcap=0x0000001D out_amp=0x80034A4A power=D0
+[HDA] widget NID=0x03 typ=Pin Complex awcap=0x00400101 pin_caps=0x00000010 power=D0
+[HDA] Karta HDA gotowa.
+[BSP] Sprawdzanie nosnika blokowego w poszukiwaniu BSP2...
+[BSP] Brak zamontowanej partycji. System plikow tylko w RAM; zero zapisow dysku.
+[PSF] total_blocks=32768
+[PSF] bitmap_start=1 count=1
+[PSF] inode_start=2 count=1024
+[PSF] data_start=1026 count=31742
+[ROZRUCH] Srodowisko instalacyjne / Live ISO. Pominiecie walidacji partycji A/B LBA 2046/2047.
+[PCI] Rozpoczynam skanowanie PCI...
+[PCI] Skan zakonczony; raport zapisany do /logi/pci.txt.
+[BSP] Drzewiasty system plikow PSF gotowy.
+[BSP] Wbudowana Powloka zainstalowana.
+[BSP] /cytaty.txt zainstalowany.
+[BSP] /obrazy/logo.png dodany do planu instalacji.
+[BSP] Przegladarka Husarz zainstalowana jako .cebula.
+[BSP] Notatnik zainstalowany jako .cebula.
+[BSP] Eksplorator Plikow zainstalowany jako .cebula.
+[BSP] Aplikacja Testowa zainstalowana jako .cebula.
+[BSP] Gra snake zainstalowana jako .cebula.
+[BSP] Przegladarka Obrazow zainstalowana jako .cebula.
+[BSP] BursztynUI Demo zainstalowane jako .cebula.
+[BSP] Kontrolki 2 zainstalowane jako .cebula.
+[EKRAN] Aplikacja zainstalowana.
+[TAPETA] Aplikacja Tapety zainstalowana.
+[BSP] Kontrolki 3 zainstalowane jako .cebula.
+[BSP] Kontrolki 4 zainstalowane jako .cebula.
+[BSP] Aktualizacje Systemu zainstalowane jako .cebula.
+[BSP] Test dzwieku zainstalowany jako .cebula.
+[BSP] Kalkulator zainstalowany jako .cebula.
+[BSP] Menedzer Okien zainstalowany.
+[TAPETA] Znaleziono modul tapety.pak, bajtow: 10977056
+[TAPETA] Pakiet tapety.pak, liczba plikow: 28
+[TAPETA] Zainstalowano brakujacych: 28
+[TAPETA] Zachowano istniejacych: 0
+[EKRAN INIT] boot=1280x720x32
+[EKRAN INIT] backend=bochs-runtime
+[EKRAN INIT] cfg=missing; active=boot
+[DIAG] Boot report saved: /logi/BOOTLOG.TXT
+[INSTALL] Installer mode ready; disk sector writes before GUI = 0 (enforced live RAM filesystem).
+[SCHED] Wielozadaniowosc Round-Robin aktywna.
+--------------------------------------------------
+[KERNEL] Jadro i scheduler gotowe.
+[BOOT-TELEMETRY] kernel_ready_time_us=7759529 desktop_ready_time_us=9441115 delta_us=1681586
+[SYSTEM] Pulpit gotowy.
+System operacyjny gotowy!
+[WM] Initial Desktop ready
+[MOUSE BOUNDS] source=ps2-mouse screen=1280x720 max=1279x719 cur=500,300 dx=-100 dy=100 res=400,200 gen=1
+[TAPETA] Tapeta gotowa.
+[DIAG] Boot report saved: /logi/BOOTLOG.TXT
+[INSTALL] progress=0 stage=GPT
+[INSTALL] Explicit final confirmation accepted. No disk sectors written before this point.
+[INSTALL] progress=0 stage=GPT
+[INSTALL] progress=10 stage=GPT
+[INSTALL] progress=12 stage=ESP
+[INSTALL PERF] stage=GPT durationus=2103089 longestblockus=230228 interrupts=1 timerirq=4941 switches=307
+[INSTALL LATENCY] stage=GPT maxnonyieldus=230228
+[INSTALL] progress=12 stage=ESP
+[INSTALL] progress=20 stage=ESP
+[INSTALL] progress=30 stage=ESP
+[INSTALL] progress=30 stage=BSP2FORMAT
+[INSTALL PERF] stage=ESP durationus=77915590 longestblockus=1177556 interrupts=1 timerirq=28550 switches=337
+[INSTALL LATENCY] stage=ESP maxnonyieldus=1177556
+[INSTALL] progress=30 stage=BSP2FORMAT
+[INSTALL] progress=40 stage=BSP2FORMAT
+[INSTALL] progress=45 stage=SYSTEMFILES
+[INSTALL PERF] stage=BSP2FORMAT durationus=15526755 longestblockus=454638 interrupts=1 timerirq=7508 switches=171
+[INSTALL LATENCY] stage=BSP2FORMAT maxnonyieldus=454638
+[INSTALL] progress=45 stage=SYSTEMFILES
+[BSP] Wbudowana Powloka zainstalowana.
+[BSP] /cytaty.txt zainstalowany.
+[BSP] /obrazy/logo.png dodany do planu instalacji.
+[BSP] Przegladarka Husarz zainstalowana jako .cebula.
+[BSP] Notatnik zainstalowany jako .cebula.
+[BSP] Eksplorator Plikow zainstalowany jako .cebula.
+[BSP] Aplikacja Testowa zainstalowana jako .cebula.
+[BSP] Gra snake zainstalowana jako .cebula.
+[BSP] Przegladarka Obrazow zainstalowana jako .cebula.
+[BSP] BursztynUI Demo zainstalowane jako .cebula.
+[BSP] Kontrolki 2 zainstalowane jako .cebula.
+[EKRAN] Aplikacja dodana do planu instalacji.
+[TAPETA] Aplikacja Tapety dodana do planu instalacji.
+[BSP] Kontrolki 3 zainstalowane jako .cebula.
+[BSP] Kontrolki 4 zainstalowane jako .cebula.
+[BSP] Aktualizacje Systemu zainstalowane jako .cebula.
+[BSP] Test dzwieku zainstalowany jako .cebula.
+[BSP] Kalkulator zainstalowany jako .cebula.
+[BSP] Menedzer Okien zainstalowany.
+[PZB] directory_create=DENY
+[PZB] file_create=DENY
+[PZB] file_write=DENY
+[DESKTOP-LAYOUT] save failed
+[INSTALL] progress=50 stage=SYSTEMFILES
+[PZB] directory_create=DENY
+[PZB] file_create=DENY
+[PZB] file_write=DENY
+[DESKTOP-LAYOUT] save failed

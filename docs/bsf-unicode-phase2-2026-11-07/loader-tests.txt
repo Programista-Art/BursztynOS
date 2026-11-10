@@ -1,0 +1,63 @@
+==================================================
+  Bursztyn OS - Weryfikacja Loadera i Aktualizacji
+==================================================
+--- 1. Uruchamianie testow jednostkowych C++ ---
+PASS harness-kompilacja
+=== TESTY LOADERA BURSZTYN OS (.bur) ===
+  PASS [1.1 small-existing-app-32k]
+  PASS [2.1 aktualizacje-systemu-192k]
+  PASS [3.1 exactly-at-text-maximum-64m]
+  PASS [4.1 64m-plus-1-byte-rejected]
+  PASS [4.2 unaligned-text-size-rejected]
+  PASS [4.3 unaligned-text-offset-rejected]
+  PASS [4.4 unaligned-text-va-rejected]
+  PASS [4.5 unaligned-data-size-rejected]
+  PASS [4.6 unaligned-data-offset-rejected]
+  PASS [4.7 unaligned-data-va-rejected]
+  PASS [5.1 truncated-text-rejected]
+  PASS [6.1 oversized-text-rejected]
+  PASS [7.1 text-file-offset-overflow-rejected]
+  PASS [7.2 text-va-overflow-rejected]
+  PASS [8.1 total-size-exceeds-128m-rejected]
+  PASS [8.2 text-plus-data-arithmetic-overflow-rejected]
+  PASS [9.1 data-va-overlap-rejected]
+  PASS [9.2 data-file-overlap-rejected]
+  PASS [10.1 text-stack-overlap-rejected]
+  PASS [10.2 text-stack-guard-overlap-rejected]
+  PASS [10.3 data-stack-overlap-rejected]
+  PASS [11.1 entry-below-text-rejected]
+  PASS [11.2 entry-at-text-end-rejected]
+  PASS [11.3 entry-in-data-rejected]
+  PASS [11.4 entry-in-stack-rejected]
+  PASS [12.1 file-size-less-than-header-rejected]
+  PASS [12.2 file-size-zero-rejected]
+  PASS [12.3 corrupted-magic-rejected]
+  PASS [12.4 null-magic-rejected]
+  PASS [12.5 elf-magic-rejected]
+  PASS [12.6 zero-text-size-rejected]
+  PASS [12.7 text-offset-less-than-header-rejected]
+  PASS [13.1 canonical-bur0-accepted]
+  PASS [13.2 unknown-version-bur1-rejected]
+  PASS [13.3 unknown-version-bur2-rejected]
+========================================
+WYNIKI TESTOW: zdane=35, zlane=0
+PASS harness-wszystkie-testy-wykonane
+--- 2. Weryfikacja binarnego pliku aktualizacje.bin ---
+PASS aktualizacje-bin-rozmiar-naglowka
+PASS aktualizacje-bin-magia-BUR0
+PASS aktualizacje-bin-text-przesuniecie-4k
+PASS aktualizacje-bin-text-rozmiar-4k
+PASS aktualizacje-bin-text-va-4k
+PASS aktualizacje-bin-data-przesuniecie-4k
+PASS aktualizacje-bin-data-rozmiar-4k
+PASS aktualizacje-bin-data-va-4k
+PASS aktualizacje-bin-entry-point-w-tekscie
+PASS aktualizacje-bin-tekst-miesci-sie-w-pliku
+PASS aktualizacje-bin-text-pod-limitem-64m
+PASS aktualizacje-bin-data-pod-limitem-64m
+PASS aktualizacje-bin-calkowity-pod-limitem-128m
+PASS aktualizacje-bin-brak-kolizji-ze-sterta
+PASS aktualizacje-bin-brak-kolizji-ze-stosem
+==================================================
+PODSUMOWANIE: zdane=17, zlane=0
+LOADER BUR: WSZYSTKIE TESTY ZDANE.

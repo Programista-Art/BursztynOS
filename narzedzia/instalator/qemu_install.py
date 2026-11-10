@@ -11,6 +11,7 @@ import errno
 import re
 from pathlib import Path
 import shutil
+import struct
 import socket
 import subprocess
 import tempfile
@@ -54,13 +55,27 @@ def no_writes(guest):
             assert device['stats']['wr_operations']==0,device
 
 class Qmp:
-    def __init__(self, path):
+    def __init__(self, path, kernel=None):
         self.sock = socket.socket(socket.AF_UNIX)
         self.sock.settimeout(60)
         self.sock.connect(str(path))
         self.f = self.sock.makefile('rwb', buffering=0)
         self.f.readline()
         self.call('qmp_capabilities')
+        symbols=subprocess.check_output(['nm','-C',str(kernel or ROOT/'system_operacyjny.bin')],text=True)
+        self.symbols=symbols
+        self.tick_address=int(re.search(r'^([0-9a-f]+) [bBdD] licznik_tykniec_zegara$',symbols,re.M)[1],16)
+    def symbol(self,name):
+        m=re.search(r'^([0-9a-f]+) [bBdD] '+re.escape(name)+r'$',self.symbols,re.M)
+        if not m:raise RuntimeError('Missing kernel observer '+name)
+        return int(m[1],16)
+    def settle(self, ticks=500):
+        def now():
+            return int(re.search(r':\s*0x([0-9a-fA-F]+)',self.hmp(f'xp /1gx 0x{self.tick_address:x}'))[1],16)
+        start=now();deadline=time.monotonic()+45
+        while now()-start<ticks:
+            if time.monotonic()>deadline:raise TimeoutError('Installer GUI guest-time progress')
+            time.sleep(.05)
     def call(self, cmd, args=None):
         obj = {'execute': cmd}
         if args is not None: obj['arguments'] = args
@@ -70,7 +85,7 @@ class Qmp:
             if 'error' in r: raise RuntimeError(r)
             if 'return' in r: return r['return']
     def hmp(self, command): return self.call('human-monitor-command', {'command-line': command})
-    def click(self, x, y):
+    def click(self, x, y, settle=True):
         # Kontroler wzgledny moze miec tylko jeden oczekujacy raport. Dajemy
         # gosciowi czas na odebranie kazdego ruchu; szybka seria sama w sobie
         # testowalaby przepełnienie kontrolera QEMU, a nie trafienie w GUI.
@@ -78,23 +93,17 @@ class Qmp:
         while x or y:
             dx, dy = min(x,100), min(y,100)
             self.hmp(f'mouse_move {dx} {dy}'); x-=dx; y-=dy; time.sleep(.15)
-        self.hmp('mouse_button 1');time.sleep(.12);self.hmp('mouse_button 0');time.sleep(.4)
-    def key(self, text): self.hmp('sendkey '+text);time.sleep(.15)
-    def screenshot(self, path):
-        # QEMU 6.x/Ubuntu nie akceptuje arguments.format dla screendump (PPM domyslnie).
-        # Zachowujemy kompatybilnosc: dump bez formatu, potem konwersja do PNG gdy trzeba.
-        path = Path(path)
-        ppm = path if path.suffix.lower() == '.ppm' else path.with_suffix('.ppm')
-        self.call('screendump', {'filename': str(ppm)})
-        if path.suffix.lower() == '.png' and ppm != path:
-            try:
-                from PIL import Image
-                Image.open(ppm).save(path)
-            except Exception:
-                # Fallback: zostaw PPM pod oczekiwana sciezka nazwy .png (harness i tak
-                # uzywa pliku glownie jako artefakt diagnostyczny).
-                if ppm.exists() and not path.exists():
-                    ppm.replace(path)
+        address=self.symbol('zaktualizuj_mysze_wspolne(long, long, unsigned char, char const*)::poprzednie_przyciski_gui')
+        def buttons():return int(re.search(r':\s*0x([0-9a-fA-F]+)',self.hmp(f'xp /1bx 0x{address:x}'))[1],16)
+        def acknowledged(down):
+            deadline=time.monotonic()+30
+            while bool(buttons()&1)!=down:
+                if time.monotonic()>deadline:raise TimeoutError('Native mouse button acknowledgement')
+                time.sleep(.05)
+        self.hmp('mouse_button 1');acknowledged(True);self.hmp('mouse_button 0');acknowledged(False)
+        if settle:self.settle()
+    def key(self, text): self.hmp('sendkey '+text);self.settle(60)
+    def screenshot(self, path): self.call('screendump', {'filename':str(path),'format':'png'})
 
 class Guest:
     def __init__(self, directory, target, sentinel, iso=None, usb=False, visible=False):
@@ -137,9 +146,11 @@ class Guest:
             if self.proc.poll() is not None: raise RuntimeError((directory/'qemu.log').read_text())
             if time.monotonic()>deadline: raise TimeoutError('QMP socket')
             time.sleep(.1)
-        self.q=Qmp(self.qmp_path)
+        public=directory.parent/'iso/boot/system_operacyjny.bin'
+        private=ROOT/'.release-private'/sha(public)/'kernel.elf' if public.is_file() else ROOT/'system_operacyjny.bin'
+        self.q=Qmp(self.qmp_path,kernel=private)
     def wait(self, needle, timeout=300):
-        end=time.monotonic()+timeout
+        end=time.monotonic()+timeout;next_snapshot=time.monotonic()+60
         while time.monotonic()<end:
             text=self.log.read_text(errors='replace') if self.log.exists() else ''
             if needle in text:return text
@@ -149,6 +160,10 @@ class Guest:
                 s_log = self.log.read_text(errors='replace') if self.log.exists() else ''
                 q_log = (self.dir/'qemu.log').read_text(errors='replace') if (self.dir/'qemu.log').exists() else ''
                 raise RuntimeError(f'QEMU exited: qemu.log={q_log}\nserial.log=\n{s_log[-2000:]}')
+            if needle=='[INSTALL] COMPLETE verified' and time.monotonic()>=next_snapshot:
+                evidence=dict(blockstats=self.q.call('query-blockstats'),registers=self.q.hmp('info registers'),serial_tail=text[-2000:])
+                (self.dir/f'waiting-{int(timeout-(end-time.monotonic()))}.json').write_text(json.dumps(evidence,indent=2))
+                next_snapshot=time.monotonic()+60
             time.sleep(.25)
         self.q.screenshot(self.dir/'timeout.png');raise TimeoutError(needle+'\n'+text[-2000:])
     def close(self):
@@ -170,31 +185,59 @@ def install(g,target,sentinel,before_target,before_sentinel):
     # Czysty start TCG obejmuje przygotowanie zasobow live w RAM i na
     # wolniejszych hostach moze przekroczyc trzy minuty. To nie jest limit
     # czasu samej transakcji instalatora.
-    g.wait('[INSTALL] Installer mode ready',timeout=300);time.sleep(2)
-    g.q.screenshot(g.dir/'welcome.png')
-    # Powloka moze zakonczyc start ulamek chwili po instalatorze i znalezc
-    # sie nad nim. Pierwsze klikniecie jedynie aktywuje okno, wiec jawnie
-    # ustawiamy fokus na widocznej czesci paska tytulowego instalatora.
-    g.q.click(800,68)
-    # Coordinates for 1280x720 framebuffer, centered 840x570 installer.
-    g.q.click(860,590) # welcome -> disks
-    g.q.screenshot(g.dir/'disks.png')
-    g.q.click(550,230) # target, second registered block device (VirtIO-BLK)
-    g.q.click(860,590) # options
-    g.q.click(860,590) # whole disk / preview
-    g.q.screenshot(g.dir/'summary.png')
+    import sys
+    sys.path.insert(0,str(ROOT/'narzedzia'))
+    from bsf_process_observer import ProcessObserver
+    g.wait('[INSTALL] Installer mode ready',timeout=300)
+    g.wait('[SYSTEM] Pulpit gotowy',timeout=180)
+    layout=json.loads((ROOT/'.bsf-test/installer-observer.json').read_text())
+    observer=ProcessObserver(g.q.hmp,g.q.symbol,ROOT/'instalator.elf','Instalator')
+    deadline=time.monotonic()+90
+    while not observer.pid():
+        if time.monotonic()>deadline:raise TimeoutError('Installer GUI process')
+        time.sleep(.1)
+    table=observer.address('vtable for (anonymous namespace)::Wizard')+16
+    block=observer.value('(anonymous namespace)::poczatek_sterty','<Q');wizard=None
+    for _ in range(2048):
+        if not block:break
+        data=observer.user(block,40)
+        if not data[8] and struct.unpack_from('<Q',data,32)[0]==table:wizard=block+32;break
+        block=struct.unpack_from('<Q',data,16)[0]
+    if wizard is None:raise RuntimeError('Native installer Wizard not found')
+    def value(name,fmt='<I'):return struct.unpack(fmt,observer.user(wizard+layout[name],struct.calcsize(fmt)))[0]
+    def until(predicate,label,seconds=20):
+        deadline=time.monotonic()+seconds
+        while time.monotonic()<deadline:
+            if predicate():return True
+            time.sleep(.1)
+        return False
+    def next_page(page):
+        for attempt in range(3):
+            current=value('page')
+            if current==page:return
+            if current!=page-1:raise AssertionError(('unexpected installer page',current,page))
+            g.q.click(860,590)
+            if until(lambda:value('page')==page,'installer page '+str(page)):return
+            g.q.screenshot(g.dir/f'page-{page}-retry-{attempt}.png')
+        raise AssertionError(('installer page did not advance',value('page'),page))
+    g.q.screenshot(g.dir/'welcome.png');g.q.click(800,68)
+    next_page(1);g.q.screenshot(g.dir/'disks.png')
+    for attempt in range(3):
+        g.q.click(550,230)
+        if until(lambda:value('selected')==1,'target disk selected'):break
+    assert value('selected')==1,'Disposable target was not selected'
+    next_page(2);next_page(3);g.q.screenshot(g.dir/'summary.png')
     no_writes(g)
     assert target_fingerprint(target)==before_target,'Target changed before confirmation'
     assert sha(sentinel)==before_sentinel,'Sentinel changed during discovery'
-    g.q.click(860,590) # first confirmation
-    g.q.screenshot(g.dir/'confirmation.png')
-    g.q.click(255,430) # source warning acknowledgement
-    g.q.click(380,480) # text field
+    next_page(4);g.q.screenshot(g.dir/'confirmation.png')
+    g.q.click(255,430);g.q.click(380,480);g.q.key('ctrl-a')
     for c in 'bursztyn':g.q.key('shift-'+c)
     g.q.screenshot(g.dir/'typed.png')
+    assert until(lambda:value('enabled','<?'),'final confirmation enabled'),'Final native confirmation remains disabled'
     no_writes(g)
     assert target_fingerprint(target)==before_target,'Typing confirmation changed target'
-    g.q.click(860,590) # final destructive confirmation
+    g.q.click(860,590,settle=False)
     text=g.wait('[INSTALL] COMPLETE verified',timeout=3600)
     time.sleep(1);g.q.screenshot(g.dir/'complete.png')
     assert '[PF]' not in text and '[KERNEL-PANIC]' not in text

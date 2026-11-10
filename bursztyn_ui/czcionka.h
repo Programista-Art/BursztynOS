@@ -5,6 +5,7 @@
 #include "typy.h"
 #if defined(BSF_NATIVE)
 #include "../bsf/runtime.h"
+#include "../bsf/edit.h"
 #endif
 #if defined(BSF_NATIVE)
 #include "bws_czcionka.h"
@@ -23,12 +24,21 @@ public:
     template<class Mask>
     static bool rysuj_bsf(const char* text,int x,int y,int px,Mask mask,bool bold=false,const char* family=nullptr) {
         if(!BSF::ready(family)||px<1||px>128)return false;
-        size_t size=0;while(text&&text[size]&&size<65536)++size;uint32_t previous=0;
-        for(size_t at=0;at<size;){uint32_t cp=0;at+=BSF::utf8(text+at,size-at,cp);if(previous)x+=BSF::kern(previous,cp,px,bold,family);
-            const auto* g=BSF::glyph(cp,px,bold,family);
-            if(g){mask(x+g->x,y+BSF::ascent(px,family)+g->y,g->width,g->height,g->alpha);x+=g->advance;}
-            else {int w=(szerokosc_znaku(cp)*px+8)/16,h=px;if(w>128)w=128;if(h>128)h=128;auto* a=new uint8_t[size_t(w)*h];if(a){const auto* bits=bitmapa_znaku(cp);for(int yy=0;yy<h;++yy)for(int xx=0;xx<w;++xx)a[yy*w+xx]=(bits[yy*16/h]&(1u<<(15-xx*16/px)))?255:0;mask(x,y,w,h,a);delete[] a;}x+=(szerokosc_znaku(cp)+1)*px/16;}
-            previous=cp;
+        size_t size=0;while(text&&text[size]&&size<65536)++size;uint32_t previous=0,previous_face=0,cluster_face=0;size_t cluster_end=0,cluster_begin=0;BSF::MarkPen marks;marks.base=x;
+        for(size_t at=0;at<size;){
+            if(at==cluster_end){cluster_begin=at;cluster_end=BSF::next_cluster(text,at,size);cluster_face=BSF::resolved_cluster(text+at,cluster_end-at,bold,family);}
+            size_t byte_begin=at;uint32_t cp=0;at+=BSF::utf8(text+at,size-at,cp);if(BSF::default_ignorable(cp))continue;
+            uint32_t id=cluster_face?cluster_face:BSF::resolved_face(cp,bold,family);
+            bool mark=BSF::combining(cp);if(previous&&!mark&&id&&id==previous_face)x+=BSF::kern_face(previous,cp,id,px);
+            const auto* g=id?BSF::glyph_face(cp,id,px,bold):nullptr;
+            if(g){
+                int gx=x+g->x,gy=y+BSF::ascent(px,family)+g->y;
+                marks.place(cp,x,gx,gy,g->width,g->height,g->advance);
+                BSF::PositionedGlyph positioned{g->face,g->id,mark?0:g->advance,gx-x,gy-y,byte_begin,at,cluster_begin,BSF::TextDirection::LogicalLTR};
+                mask(x+positioned.offset_x,y+positioned.offset_y,g->width,g->height,g->alpha);x+=positioned.advance;
+            }
+            else {int w=(szerokosc_znaku(cp)*px+8)/16,h=px;if(w>128)w=128;if(h>128)h=128;auto* a=new uint8_t[size_t(w)*h];if(a){const auto* bits=bitmapa_znaku(cp);for(int yy=0;yy<h;++yy)for(int xx=0;xx<w;++xx)a[yy*w+xx]=(bits[yy*16/h]&(1u<<(15-xx*16/px)))?255:0;mask(x,y,w,h,a);delete[] a;}if(!mark)x+=(szerokosc_znaku(cp)+1)*px/16;}
+            if(!mark){previous=cp;previous_face=id;}
         }return true;
     }
 #endif
@@ -330,7 +340,7 @@ public:
     // Zwraca szerokość tekstu od początku do bajt_limit
     static int pozycja_x_z_bajtu(const char* tekst, size_t bajt_limit, SkalaUI skala = 1) {
 #if defined(BSF_NATIVE)
-        if(BSF::ready()){size_t boundary=0;while(tekst&&tekst[boundary]&&boundary<bajt_limit){uint32_t cp;size_t n=dekoduj_utf8(tekst,boundary,&cp);if(!n||n>bajt_limit-boundary)break;boundary+=n;}return BSF::measure_text(tekst,ui_skaluj(BSF::ui_size(),skala.procent()),false,nullptr,boundary);}
+        if(BSF::ready())return BSF::measure_prefix(tekst,bajt_limit,ui_skaluj(BSF::ui_size(),skala.procent()));
 #endif
         if (!tekst || tekst[0] == '\0' || bajt_limit == 0) return 0;
         SkalaUI s = skala;
@@ -349,6 +359,9 @@ public:
     // Zwraca przesunięcie w bajtach dla zadanej współrzędnej X wewnątrz tekstu
     static size_t znak_z_pozycji_x(const char* tekst, int target_x, SkalaUI skala = 1) {
         if (!tekst || tekst[0] == '\0' || target_x <= 0) return 0;
+#if defined(BSF_NATIVE)
+        if(BSF::ready())return BSF::hit_test(tekst,target_x,ui_skaluj(BSF::ui_size(),skala.procent()));
+#endif
         SkalaUI s = skala;
         size_t biezacy_bajt = 0;
         int poprz_x = 0;
@@ -390,6 +403,9 @@ public:
     // Przesuwa indeks w przód o 1 punkt kodowy
     static size_t nastepny_znak(const char* tekst, size_t pos, size_t max_len) {
         if (!tekst || pos >= max_len) return max_len;
+#if defined(BSF_NATIVE)
+        return BSF::next_cluster(tekst,pos,max_len);
+#endif
         pos++;
         while (pos < max_len && (static_cast<uint8_t>(tekst[pos]) & 0xC0U) == 0x80U) {
             pos++;
@@ -400,6 +416,9 @@ public:
     // Przesuwa indeks w tył o 1 punkt kodowy
     static size_t poprzedni_znak(const char* tekst, size_t pos) {
         if (!tekst || pos == 0) return 0;
+#if defined(BSF_NATIVE)
+        return BSF::previous_cluster(tekst,pos);
+#endif
         pos--;
         while (pos > 0 && (static_cast<uint8_t>(tekst[pos]) & 0xC0U) == 0x80U) {
             pos--;

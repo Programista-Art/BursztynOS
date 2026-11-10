@@ -26,6 +26,9 @@ extern void host_idt_irq_restore(unsigned long);
 #include "pzb.h"
 #include "stos_jadra.h"
 #include "wyjatek_uzytkownika.h"
+#ifndef BURSZTYN_IDT_HOST_TEST
+#include "uklad_procesu.h"
+#endif
 
 #include "sterowniki/dzwiek/hda_praca_odroczona.h"
 
@@ -832,6 +835,15 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
             uint_do_dec_str(uint64_t(aktualny_pid),value,sizeof(value));serial_wypisz(value);
             serial_wypisz(" vector=");uint_do_dec_str(wektor64,value,sizeof(value));serial_wypisz(value);
             serial_wypisz(" rip=0x");uint_do_hex_str(stan->adres_powrotu,value);serial_wypisz(value);
+#ifndef BURSZTYN_IDT_HOST_TEST
+            const UkladProcesu& uklad = uklady_procesow[aktualny_pid];
+            const uint64_t rva = stan->adres_powrotu >= uklad.baza_obrazu
+                ? (stan->adres_powrotu - uklad.baza_obrazu)
+                : 0ULL;
+            serial_wypisz(" base=0x");uint_do_hex_str(uklad.baza_obrazu,value);serial_wypisz(value);
+            serial_wypisz(" rva=0x");uint_do_hex_str(rva,value);serial_wypisz(value);
+            serial_wypisz(" bur=v");uint_do_dec_str(uint64_t(uklad.wersja ? uklad.wersja : 1U),value,sizeof(value));serial_wypisz(value);
+#endif
             serial_wypisz(" program=");serial_wypisz(tablica_procesow[aktualny_pid].sciezka_pliku);serial_wypisz("\n");
             syscalls_zakoncz_proces_po_wyjatku();
         }

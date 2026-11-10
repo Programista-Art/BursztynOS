@@ -57,9 +57,6 @@ def extract_filesystem_bws():
 
 def extract_checked_vmm():
     source = (ROOT / "jadro/mm/vmm.cpp").read_text()
-    # Host stand-in for the real NX capability probe. The host never runs the
-    # kernel's EFER setup, so the test pins NX to a known state. It must be
-    # declared before the extracted mapping function that consumes it.
     prologue = (
         "// Host stand-in for the real NX capability probe.\n"
         "static bool nx_aktywny = true;\n"
@@ -68,7 +65,7 @@ def extract_checked_vmm():
         function(source, name) for name in
         ("adres_kanoniczny", "adres_user_kanoniczny",
          "vmm_mapuj_nowa_strone_procesu_wewnetrznie", "VmmMapujNowaStroneProcesu",
-         "VmmMapujNowaStroneWPrzestrzeniProcesu")))
+         "VmmMapujNowaStroneWPrzestrzeniProcesu", "VmmNxGotowy", "VmmMapujStroneBurV2")))
 
 
 def run(cmd, env=None):
@@ -109,7 +106,11 @@ def main():
         run(flags + ["-DBURSZTYN_LOADER_RUNTIME_HOST_TEST", "-DBURSZTYN_PSF_HOST_TEST",
                      f"-DBURSZTYNDIAGTESTDZWIEKU={trace}", "jadro/fs/loader.cpp", "jadro/fs/storage_format.cpp",
                      "testy/test_dzwieku_loader.cpp", "-o", binary])
-        run([binary, ROOT / "test_dzwieku.bin"], env)
+        current_bin = ROOT / "test_dzwieku.bin"
+        if current_bin.read_bytes()[:4] == b"BUR\x02":
+            run([binary, ROOT / "narzedzia/fixtures/bur_v1_legacy/aktualizacje.bin", current_bin], env)
+        else:
+            run([binary, current_bin], env)
     run(flags + ["-DBURSZTYNDIAGTESTDZWIEKU=1", "testy/test_dzwieku_gui.cpp", "jadro/fs/storage_format.cpp", "-o", OUT / "gui"])
     run([OUT / "gui", ROOT / "test_dzwieku.bin"], env)
     run(flags + ["-DBURSZTYN_HDA_HOST_TEST", "testy/test_dzwieku_hda_bws.cpp", "sterowniki/dzwiek/hda_transport.cpp", "sterowniki/dzwiek/hda_diag.cpp", "-o", OUT / "hda-bws"])

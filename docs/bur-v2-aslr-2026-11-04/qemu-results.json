@@ -1,0 +1,295 @@
+{
+  "mixed_v1_v2_aslr_probe_suite": {
+    "executions": 26,
+    "unique_per_column": [
+      26,
+      26,
+      26,
+      26,
+      26
+    ],
+    "columns": [
+      "code",
+      "stack",
+      "heap",
+      "canary_address",
+      "shared_mapping"
+    ],
+    "layouts": [
+      [
+        "0x00000001d7100160",
+        "0x00007fffe9ca3f98",
+        "0x00000008649aa000",
+        "0x00000001d7102000",
+        "0x00000010ac4c5000"
+      ],
+      [
+        "0x00000001281d6160",
+        "0x00007fffed970f98",
+        "0x0000000804605000",
+        "0x00000001281d8000",
+        "0x000000102cccc000"
+      ],
+      [
+        "0x0000000101cc1160",
+        "0x00007fffe3854f98",
+        "0x00000008083c5000",
+        "0x0000000101cc3000",
+        "0x000000104893d000"
+      ],
+      [
+        "0x0000000116dbc160",
+        "0x00007fffe7405f98",
+        "0x00000008b2474000",
+        "0x0000000116dbe000",
+        "0x00000010f6d34000"
+      ],
+      [
+        "0x000000014100b160",
+        "0x00007fffe284bf98",
+        "0x0000000878f28000",
+        "0x000000014100d000",
+        "0x0000001038d5d000"
+      ],
+      [
+        "0x000000019a3f1160",
+        "0x00007fffe11fcf98",
+        "0x000000083ac0d000",
+        "0x000000019a3f3000",
+        "0x0000001077e15000"
+      ],
+      [
+        "0x00000001ec17c160",
+        "0x00007fffe370af98",
+        "0x00000008ce43a000",
+        "0x00000001ec17e000",
+        "0x00000010589e7000"
+      ],
+      [
+        "0x0000000169b64160",
+        "0x00007fffe51a0f98",
+        "0x00000008136fa000",
+        "0x0000000169b66000",
+        "0x00000010f04e4000"
+      ],
+      [
+        "0x0000000193536160",
+        "0x00007fffe4ba3f98",
+        "0x0000000819403000",
+        "0x0000000193538000",
+        "0x000000101b16e000"
+      ],
+      [
+        "0x00000001ded39160",
+        "0x00007fffee5f1f98",
+        "0x00000008cd4ba000",
+        "0x00000001ded3b000",
+        "0x00000010bead0000"
+      ],
+      [
+        "0x00000001b6f1d160",
+        "0x00007fffe27a2f98",
+        "0x0000000899d39000",
+        "0x00000001b6f1f000",
+        "0x00000010cd6b6000"
+      ],
+      [
+        "0x0000000155817160",
+        "0x00007fffef5b2f98",
+        "0x00000008a4cc4000",
+        "0x0000000155819000",
+        "0x0000001014532000"
+      ],
+      [
+        "0x0000000132d1f160",
+        "0x00007fffe1b3af98",
+        "0x0000000802f63000",
+        "0x0000000132d21000",
+        "0x00000010f156c000"
+      ],
+      [
+        "0x00000001f0686160",
+        "0x00007fffefde7f98",
+        "0x000000082ceb0000",
+        "0x00000001f0688000",
+        "0x00000010a0626000"
+      ],
+      [
+        "0x000000018a4db160",
+        "0x00007fffe1c97f98",
+        "0x00000008c606f000",
+        "0x000000018a4dd000",
+        "0x000000100ff2b000"
+      ],
+      [
+        "0x00000001f1a9d160",
+        "0x00007fffea723f98",
+        "0x00000008a1201000",
+        "0x00000001f1a9f000",
+        "0x00000010f3a16000"
+      ],
+      [
+        "0x000000013b397160",
+        "0x00007fffee2baf98",
+        "0x00000008f1283000",
+        "0x000000013b399000",
+        "0x000000103b056000"
+      ],
+      [
+        "0x00000001aa6b1160",
+        "0x00007fffea0dbf98",
+        "0x000000084a9c0000",
+        "0x00000001aa6b3000",
+        "0x00000010c0021000"
+      ],
+      [
+        "0x00000001a147a160",
+        "0x00007fffeae69f98",
+        "0x00000008531df000",
+        "0x00000001a147c000",
+        "0x000000108c858000"
+      ],
+      [
+        "0x000000016b28f160",
+        "0x00007fffe7441f98",
+        "0x00000008acb62000",
+        "0x000000016b291000",
+        "0x00000010c38be000"
+      ],
+      [
+        "0x0000000162fae160",
+        "0x00007fffeb2dcf98",
+        "0x000000089504a000",
+        "0x0000000162fb0000",
+        "0x00000010597e3000"
+      ],
+      [
+        "0x00000001bd521160",
+        "0x00007fffeb3d9f98",
+        "0x00000008bc424000",
+        "0x00000001bd523000",
+        "0x00000010d2a72000"
+      ],
+      [
+        "0x00000001b203e160",
+        "0x00007fffe9461f98",
+        "0x0000000832a9a000",
+        "0x00000001b2040000",
+        "0x00000010f8ffc000"
+      ],
+      [
+        "0x00000001864ab160",
+        "0x00007fffee510f98",
+        "0x00000008100e8000",
+        "0x00000001864ad000",
+        "0x00000010df739000"
+      ],
+      [
+        "0x0000000175554160",
+        "0x00007fffefe36f98",
+        "0x00000008c77fe000",
+        "0x0000000175556000",
+        "0x00000010f1ecd000"
+      ],
+      [
+        "0x00000001dfc65160",
+        "0x00007fffe5024f98",
+        "0x000000088b484000",
+        "0x00000001dfc67000",
+        "0x00000010cd7a2000"
+      ]
+    ],
+    "symbolicated_faults": [
+      {
+        "pid": 3,
+        "vector": 14,
+        "rip": "0x1d7100376",
+        "base": "0x1d70ff000",
+        "rva": "0x1376",
+        "bur_version": 2,
+        "program": "/programy/test.cebula/test.bur",
+        "elf": ".release-private/apps/cf02a44f9383ea39ee0705ca4bb1fdda0263935ec5d2e762019a1c369fcb5702/app.elf",
+        "symbol": "_start",
+        "location": "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/bur_v2_probe.cpp:56 (discriminator 1)"
+      },
+      {
+        "pid": 3,
+        "vector": 14,
+        "rip": "0x1281d633a",
+        "base": "0x1281d5000",
+        "rva": "0x133a",
+        "bur_version": 2,
+        "program": "/programy/test.cebula/test.bur",
+        "elf": ".release-private/apps/cf02a44f9383ea39ee0705ca4bb1fdda0263935ec5d2e762019a1c369fcb5702/app.elf",
+        "symbol": "_start",
+        "location": "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/bur_v2_probe.cpp:57 (discriminator 1)"
+      },
+      {
+        "pid": 3,
+        "vector": 14,
+        "rip": "0x101cc138f",
+        "base": "0x101cc0000",
+        "rva": "0x138f",
+        "bur_version": 2,
+        "program": "/programy/test.cebula/test.bur",
+        "elf": ".release-private/apps/cf02a44f9383ea39ee0705ca4bb1fdda0263935ec5d2e762019a1c369fcb5702/app.elf",
+        "symbol": "_start",
+        "location": "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/bur_v2_probe.cpp:58 (discriminator 1)"
+      },
+      {
+        "pid": 3,
+        "vector": 14,
+        "rip": "0x8b2474000",
+        "base": "0x116dbb000",
+        "rva": "0x79b6b9000",
+        "bur_version": 2,
+        "program": "/programy/test.cebula/test.bur",
+        "elf": ".release-private/apps/cf02a44f9383ea39ee0705ca4bb1fdda0263935ec5d2e762019a1c369fcb5702/app.elf",
+        "symbol": "??",
+        "location": "??:0"
+      },
+      {
+        "pid": 3,
+        "vector": 14,
+        "rip": "0x7fffe284bf97",
+        "base": "0x14100a000",
+        "rva": "0x7ffea1841f97",
+        "bur_version": 2,
+        "program": "/programy/test.cebula/test.bur",
+        "elf": ".release-private/apps/cf02a44f9383ea39ee0705ca4bb1fdda0263935ec5d2e762019a1c369fcb5702/app.elf",
+        "symbol": "??",
+        "location": "??:0"
+      },
+      {
+        "pid": 3,
+        "vector": 6,
+        "rip": "0x10011a0",
+        "base": "0x1000000",
+        "rva": "0x11a0",
+        "bur_version": 1,
+        "program": "/programy/fpu-b.cebula/fpu-b.bur",
+        "elf": ".release-private/apps/cf02a44f9383ea39ee0705ca4bb1fdda0263935ec5d2e762019a1c369fcb5702/app.elf",
+        "symbol": "_start",
+        "location": "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/bur_v2_probe.cpp:7"
+      }
+    ],
+    "legacy_fpu_fixture_sha256": "4aac94321f14fd5e994a33deb7f444d5e6d17b0483014f247ec33d320593f51e",
+    "canary_code_rodata_write_denied": true,
+    "heap_stack_execution_denied": true,
+    "ssp_contained": true,
+    "kernel_sha256": "42b836e40a5544649ec739de42bc5759900df2ba49b63ce7cb82a15cd816051f"
+  },
+  "bws_abuse_suite": {
+    "status": "PASS",
+    "categories_verified": 6
+  },
+  "production_iso_desktop_boot": {
+    "status": "PASS",
+    "iso_sha256": "c7829432b49381e44aaf53adf060872b307158ca9684cd335ab89f9456fbe37a",
+    "public_kernel_sha256": "4cb6ae70b2f155c3f802733330d27cec4f68934180dd1aca3dce6a73616b3b1b",
+    "desktop_ready": true,
+    "diag_ring3_ready": true,
+    "user_faults": 0,
+    "bur_failures": 0
+  }
+}

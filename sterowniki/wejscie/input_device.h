@@ -251,6 +251,10 @@ struct InputDevice {
     int32_t      last_abs_x, last_abs_y;
     uint8_t      published_buttons;
     int          last_abs_width, last_abs_height;
+    // USB HID reports describe state; unchanged reports are not immediate taps.
+    uint64_t     keyboard_repeat_started, keyboard_repeat_last;
+    uint16_t     keyboard_repeat_usage;
+    bool         keyboard_repeat_sent;
 };
 
 /* =========================================================================

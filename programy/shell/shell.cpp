@@ -38,6 +38,8 @@
 #include "bursztyn_ui/pasek_przewijania.h"
 #include "bursztyn_ui/menu_kontekstowe.h"
 #include "system_identity.h"
+#include "bsf/edit.h"
+#include "bsf/terminal.h"
 using namespace BursztynUI;
 
 
@@ -179,12 +181,12 @@ inline Prostokat shell_obszar_klienta() {
 
 
 constexpr uint64_t BUR_TEXT_OFFSET = 0x1000ULL;
-constexpr uint64_t BUR_TEXT_SIZE   = 0x24000ULL;
+constexpr uint64_t BUR_TEXT_SIZE   = 0x29000ULL;
 constexpr uint64_t BUR_TEXT_VADDR  = 0x1001000ULL;
 
-constexpr uint64_t BUR_DATA_OFFSET = 0x25000ULL;
+constexpr uint64_t BUR_DATA_OFFSET = 0x2a000ULL;
 constexpr uint64_t BUR_DATA_SIZE   = 0x40000ULL;
-constexpr uint64_t BUR_DATA_VADDR  = 0x1025000ULL;
+constexpr uint64_t BUR_DATA_VADDR  = 0x102a000ULL;
 
 constexpr size_t SHELL_INPUT_CAPACITY = 2048;
 #include "shell_context.h"
@@ -735,6 +737,14 @@ int pobierz_znak_blokujaco() {
             if ((e.przyciski & BWS_MOD_CTRL) && ((usb && baza==6U) || (!usb && baza==0x2EU))) {
                 shell_copy_selection();continue;
             }
+            if ((e.przyciski & BWS_MOD_CTRL) && ((usb && baza==25U) || (!usb && baza==0x2FU))) {
+                g_context_input=g_obecny_bufor_wejscia!=nullptr;
+                shell_context_paste();shell_odswiez_linie_wejsciowa();continue;
+            }
+            if ((e.przyciski & BWS_MOD_CTRL) && ((usb && baza==4U) || (!usb && baza==0x1EU))) {
+                if(g_obecny_bufor_wejscia){g_input_anchor=0;g_caret=shell_length(g_obecny_bufor_wejscia);shell_odswiez_linie_wejsciowa();}
+                continue;
+            }
             // Physical keys are authoritative; their following ANSI byte stream is discarded.
             if ((usb && baza==80U) || (!usb && (e.kod&BWS_KEY_SOURCE_E0) && baza==0x4BU)) return SHELL_LEFT;
             if ((usb && baza==79U) || (!usb && (e.kod&BWS_KEY_SOURCE_E0) && baza==0x4DU)) return SHELL_RIGHT;
@@ -819,7 +829,7 @@ bool pobierz_linie(char* bufor, size_t pojemnosc) {
         shell_delete_input_selection(bufor);length=shell_length(bufor);
         for(size_t i=length+1;i>g_caret;--i) bufor[i+count-1]=bufor[i-1];
         for(int i=0;i<count;++i) bufor[g_caret+i]=bytes[i];
-        g_caret+=count;g_input_anchor=g_caret;
+        g_caret=BSF::cluster_ceil(bufor,shell_length(bufor),g_caret+count);g_input_anchor=g_caret;
         shell_odswiez_linie_wejsciowa();
     }
 }
@@ -1679,6 +1689,26 @@ void wykonaj_polecenie(
     const char* cmd =
         a.dane[0];
 
+    if (tekst_rowny(cmd,"czcionka")) {
+#if defined(BSF_NATIVE)
+        if(a.liczba==1) {
+            wypisz(g_terminal_face?BSF::family_name(g_terminal_face):"Bitmapowa");wypisz("\n");
+        } else if(a.liczba==2) {
+            bool bitmap=tekst_rowny(a.dane[1],"bitmap");
+            bool automatic=tekst_rowny(a.dane[1],"ttf");
+            if(!bitmap&&!automatic&&!BSF::terminal_face(a.dane[1])) {
+                wypisz("Brak fontu o równych metrykach ASCII.\n");return;
+            }
+            kopiuj_tekst(g_terminal_family,sizeof(g_terminal_family),bitmap||automatic?"":a.dane[1]);
+            g_terminal_ttf=!bitmap;BSF::monospace(bitmap);g_terminal_generation=~0U;
+            shell_sync_font();shell_rysuj_terminal();
+        } else wypisz("Składnia: czcionka [ttf|bitmap|\"rodzina\"]\n");
+#else
+        wypisz("Bitmapowa\n");
+#endif
+        return;
+    }
+
     if (tekst_rowny(
             cmd,
             "pomoc") ||
@@ -2391,7 +2421,8 @@ extern "C"
 __attribute__((noreturn))
 void _start() {
 #if defined(BSF_NATIVE)
-    BSF::monospace(true); // Terminal columns retain the existing bitmap path.
+    BSF::monospace(false);
+    shell_sync_font();
 #endif
 
     g_linie = new ShellLine[MAXSCROLLBACKLINES]{};

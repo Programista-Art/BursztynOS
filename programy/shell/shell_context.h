@@ -24,7 +24,7 @@ void shell_context_paste() {
     if(!clipboard_size("text/plain",&size) || !size || size>BWS_CLIPBOARD_FORMAT_MAX) return;
     char* source=new char[static_cast<size_t>(size)+1];if(!source) return;
     if(!clipboard_read("text/plain",source,size,&read) || read>size) { delete[] source;return; }
-    size_t bounded=read<sizeof(g_clipboard_input)-1?read:sizeof(g_clipboard_input)-1;
+    size_t bounded=BSF::cluster_prefix(source,read, sizeof(g_clipboard_input)-1);
     for(size_t i=0;i<bounded;++i) g_clipboard_input[i]=source[i];
     delete[] source;read=bounded;
     g_clipboard_input[read]=0;
@@ -42,12 +42,13 @@ void shell_context_paste() {
         }
         n+=cp;i+=cp;
     }
+    n=BSF::cluster_prefix(g_clipboard_input,read,n);
     if(!n) return;
     shell_delete_range(g_obecny_bufor_wejscia,a,b);
     length=shell_length(g_obecny_bufor_wejscia);
     for(size_t i=length+1;i>a;--i) g_obecny_bufor_wejscia[i+n-1]=g_obecny_bufor_wejscia[i-1];
     for(size_t i=0;i<n;++i) g_obecny_bufor_wejscia[a+i]=g_clipboard_input[i];
-    g_caret=g_input_anchor=a+n;
+    g_caret=g_input_anchor=BSF::cluster_ceil(g_obecny_bufor_wejscia,shell_length(g_obecny_bufor_wejscia),a+n);
 }
 void shell_context_action(ElementMenu& item,void*) {
     if(!item.czy_wlaczony()) return;

@@ -81,7 +81,9 @@ static void test_brak_surowych_verbow() {
     CHECK(BWS_HDA_DIAG == 89);
     CHECK(BWS_HDA_TEST == 90);
     CHECK(BWS_DIAGNOSTYKA_SYSTEMU == 91);
-    CHECK(BWS_PIERWSZY_WOLNY == 92);
+    CHECK(BWS_HTTP64 == 94);
+    CHECK(BWS_HTTPS64 == 95);
+    CHECK(BWS_PIERWSZY_WOLNY == 96);
 
     /* Istniejace numery nie ulegly zmianie. */
     CHECK(BWS_DZWIEK_TON == 27);

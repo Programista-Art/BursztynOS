@@ -1,0 +1,23 @@
+g++ -std=c++17 -O1 -g -fcheck-new -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_bsf_resources.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/resources
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/resources
+[BSF] Bounded catalog limit reached (128 faces / 1024 records).
+[BSF] Bounded catalog limit reached (128 faces / 1024 records).
+[BSF] Rejected font; fallback retained.
+[BSF] No usable TTF; bitmap fallback remains active.
+[BSF] Rejected font; fallback retained.
+[BSF] No usable TTF; bitmap fallback remains active.
+[BSF] Rejected font; fallback retained.
+[BSF] No usable TTF; bitmap fallback remains active.
+[BSF] Rejected font; fallback retained.
+[BSF] No usable TTF; bitmap fallback remains active.
+[BSF] Rejected font; fallback retained.
+[BSF] No usable TTF; bitmap fallback remains active.
+catalog=32 discover_ns=253694393 catalog_bytes=44544 io_bytes=48622080
+catalog=64 discover_ns=1822320071 catalog_bytes=44544 io_bytes=97244160
+catalog=128 discover_ns=1167525744 catalog_bytes=44544 io_bytes=194488320
+file=3145728 discover_ns=15886794 load_raster_ns=8552909 resident=3145728 peak=3145728
+file=16777216 discover_ns=10024632 load_raster_ns=7590907 resident=16777216 peak=16777216
+BSF expanded catalog/large-file/budget/failure tests: 4593 checks PASS
+g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-pie -no-pie narzedzia/test_bsf_graphemes.cpp bsf/bsf.cpp -o .bsf-test/graphemes
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/graphemes
+Unicode 15.1.0 official GraphemeBreakTest: 1187 cases PASS; next/previous/count/all byte boundaries and malformed UTF-8 / 10000 deterministic mutation inputs PASS

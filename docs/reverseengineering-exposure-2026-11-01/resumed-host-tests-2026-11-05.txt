@@ -1,0 +1,122 @@
+g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -fsanitize=address,undefined narzedzia/test_stack_protector_host.cpp -o .ssp-test/test_ssp_asan
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .ssp-test/test_ssp_asan
+[SSP-HOST] PASS (2007 asercji zweryfikowanych)
+g++ -std=c++17 -O2 -g -Wall -Wextra -Wpedantic -I. -fstack-protector-strong -DBURSZTYN_SSP_DEATH_TEST=1 narzedzia/test_stack_protector_host.cpp -o .ssp-test/test_ssp_death
+.ssp-test/test_ssp_death
+[SSP-HOST] PASS (2007 asercji zweryfikowanych)
+g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -DBURSZTYN_LOADER_HOST_TEST -fsanitize=address,undefined loader.cpp narzedzia/test_bur_v2_aslr_host.cpp -o .aslr-test/test_bur_v2_aslr_host
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .aslr-test/test_bur_v2_aslr_host
+[BUR-V2-ASLR-HOST] PASS: BUR v1 compat, BUR v2 validator, W^X relocator, and 10,000 ASLR layout trials verified!
+python3 narzedzia/run_fuzz_suite.py --mode=smoke
+[FUZZ] Kompilacja wspolnych obiektow psf.cpp + storage_format.cpp (ASan/UBSan/trace-pc)...
+[FUZZ] Kompilacja fuzz_bws...
+[FUZZ fuzz_bws            ] PASS | iters=10000 seeds=5->112 cov_edges=219 regressions=2 time=10336ms
+[FUZZ] Kompilacja fuzz_bur_loader...
+[FUZZ fuzz_bur_loader     ] PASS | iters=10000 seeds=3->143 cov_edges=406 regressions=2 time=5678ms
+[FUZZ] Kompilacja fuzz_bsp2_superblock...
+[FUZZ fuzz_bsp2_superblock] PASS | iters=2500 seeds=9->12 cov_edges=559 regressions=0 time=13546ms
+[FUZZ] Kompilacja fuzz_bsp2_inode...
+[FUZZ fuzz_bsp2_inode     ] PASS | iters=2500 seeds=2->35 cov_edges=1201 regressions=0 time=24023ms
+[FUZZ] Kompilacja fuzz_bsp2_dir...
+[FUZZ fuzz_bsp2_dir       ] PASS | iters=2500 seeds=2->18 cov_edges=869 regressions=0 time=33371ms
+[FUZZ] Kompilacja fuzz_bsp2_path...
+[FUZZ fuzz_bsp2_path      ] PASS | iters=5000 seeds=7->63 cov_edges=569 regressions=0 time=7974ms
+[FUZZ] Kompilacja fuzz_bsp2_ops...
+[FUZZ fuzz_bsp2_ops       ] PASS | iters=2500 seeds=1->179 cov_edges=1157 regressions=0 time=8703ms
+[FUZZ] Saved aggregated metrics to /home/programista/Pulpit/Burstzyn/BursztynOS/docs/security-hardening-2026-11-04/fuzzing-metrics.json (total_executions=35033, crashes=0).
+g++ -std=c++17 -O1 -g -Wall -Wextra -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined narzedzia/instalator/test_storage.cpp storage_format.cpp psf.cpp -o .installertest/test-storage
+ASAN_OPTIONS=detect_leaks=0 .installertest/test-storage
+Native directory/file move: 138 assertions PASS (RAM)
+Storage/BSP2 host: 10512 PASS, 0 FAIL (includes outside-partition sentinel, faults, >2 TiB GPT, A/B ESP, BlockDevice abstraction)
+python3 narzedzia/test_bur_loader.py
+==================================================
+  Bursztyn OS - Weryfikacja Loadera i Aktualizacji
+==================================================
+--- 1. Uruchamianie testow jednostkowych C++ ---
+PASS harness-kompilacja
+=== TESTY LOADERA BURSZTYN OS (.bur) ===
+  PASS [1.1 small-existing-app-32k]
+  PASS [2.1 aktualizacje-systemu-192k]
+  PASS [3.1 exactly-at-text-maximum-64m]
+  PASS [4.1 64m-plus-1-byte-rejected]
+  PASS [4.2 unaligned-text-size-rejected]
+  PASS [4.3 unaligned-text-offset-rejected]
+  PASS [4.4 unaligned-text-va-rejected]
+  PASS [4.5 unaligned-data-size-rejected]
+  PASS [4.6 unaligned-data-offset-rejected]
+  PASS [4.7 unaligned-data-va-rejected]
+  PASS [5.1 truncated-text-rejected]
+  PASS [6.1 oversized-text-rejected]
+  PASS [7.1 text-file-offset-overflow-rejected]
+  PASS [7.2 text-va-overflow-rejected]
+  PASS [8.1 total-size-exceeds-128m-rejected]
+  PASS [8.2 text-plus-data-arithmetic-overflow-rejected]
+  PASS [9.1 data-va-overlap-rejected]
+  PASS [9.2 data-file-overlap-rejected]
+  PASS [10.1 text-stack-overlap-rejected]
+  PASS [10.2 text-stack-guard-overlap-rejected]
+  PASS [10.3 data-stack-overlap-rejected]
+  PASS [11.1 entry-below-text-rejected]
+  PASS [11.2 entry-at-text-end-rejected]
+  PASS [11.3 entry-in-data-rejected]
+  PASS [11.4 entry-in-stack-rejected]
+  PASS [12.1 file-size-less-than-header-rejected]
+  PASS [12.2 file-size-zero-rejected]
+  PASS [12.3 corrupted-magic-rejected]
+  PASS [12.4 null-magic-rejected]
+  PASS [12.5 elf-magic-rejected]
+  PASS [12.6 zero-text-size-rejected]
+  PASS [12.7 text-offset-less-than-header-rejected]
+  PASS [13.1 canonical-bur0-accepted]
+  PASS [13.2 unknown-version-bur1-rejected]
+  PASS [13.3 unknown-version-bur2-rejected]
+========================================
+WYNIKI TESTOW: zdane=35, zlane=0
+PASS harness-wszystkie-testy-wykonane
+--- 2. Weryfikacja binarnego pliku aktualizacje.bin ---
+PASS aktualizacje-bin-rozmiar-naglowka
+PASS aktualizacje-bin-magia-BUR0
+PASS aktualizacje-bin-text-przesuniecie-4k
+PASS aktualizacje-bin-text-rozmiar-4k
+PASS aktualizacje-bin-text-va-4k
+PASS aktualizacje-bin-data-przesuniecie-4k
+PASS aktualizacje-bin-data-rozmiar-4k
+PASS aktualizacje-bin-data-va-4k
+PASS aktualizacje-bin-entry-point-w-tekscie
+PASS aktualizacje-bin-tekst-miesci-sie-w-pliku
+PASS aktualizacje-bin-text-pod-limitem-64m
+PASS aktualizacje-bin-data-pod-limitem-64m
+PASS aktualizacje-bin-calkowity-pod-limitem-128m
+PASS aktualizacje-bin-brak-kolizji-ze-sterta
+PASS aktualizacje-bin-brak-kolizji-ze-stosem
+==================================================
+PODSUMOWANIE: zdane=17, zlane=0
+LOADER BUR: WSZYSTKIE TESTY ZDANE.
+g++ -std=c++17 -O0 -g -fsanitize=address,undefined -fno-pie -no-pie -ffunction-sections -fdata-sections narzedzia/test_settings_themes_power.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -Wl,--gc-sections -o .bsf-test/settings-themes-power
+ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/settings-themes-power
+Settings themes and Start power: 2696 checks PASS
+g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-pie -no-pie -fno-omit-frame-pointer obrazy/test_ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -o .bsf-test/power-png-decoder
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/power-png-decoder
+Bounded PNG: 3446 checks PASS, peak decoder+copy heap=132272 bytes
+g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined narzedzia/test_display_snapshot.cpp -Wl,--gc-sections -o .wm-test/display-snapshot
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .wm-test/display-snapshot
+Display snapshot ABI / stale generation / authorization: PASS
+g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections narzedzia/test_bsf.cpp bsf/bsf.cpp -Wl,--gc-sections -o .bsf-test/bsf-host
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/bsf-host
+BSF: 12201 checks PASS; cache=2097152 bitmap-live=108 hits=10464 misses=3684 evictions=3296 face=320 glyph=56 first-ns=5212473 hit-average-ns=5133
+g++ -std=c++17 -fcoroutines -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -I. narzedzia/test_husarz_engine.cpp -o .husarz-test/engine
+ASAN_OPTIONS=detect_leaks=1 .husarz-test/engine
+fixture plain.txt      height=92 fragments=8 checksum=6ce5958a58a47d11
+fixture headings.html  height=361 fragments=13 checksum=561b65d83ba82a1d
+fixture nested.html    height=106 fragments=4 checksum=aea4e7f6833c36fe
+fixture inline.html    height=164 fragments=13 checksum=87af642df0ea9b30
+fixture lists.html     height=164 fragments=10 checksum=1752dc29834aef62
+fixture tables.html    height=116 fragments=12 checksum=43c1429e8942ca4a
+fixture links.html     height=80 fragments=3 checksum=58cd323c16642018
+fixture images.html    height=124 fragments=8 checksum=75991d70e6174fcc
+fixture box.html       height=62 fragments=2 checksum=f1b3006b306f937a
+fixture percent.html   height=68 fragments=5 checksum=fd3d9b14cd18054b
+fixture wrapping.html  height=208 fragments=15 checksum=149e309485d136bd
+fixture radius.html    height=76 fragments=1 checksum=9c697fe3f8c8250b
+fixture scroll.html    height=7710 fragments=2104 checksum=b949fa171b126a48
+Husarz engine: 127432 checks PASS; malformed input, DOM/CSS/layout/paint/JS boundaries

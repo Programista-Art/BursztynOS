@@ -14,14 +14,16 @@ public:
  ListaRozwijana *families,*size;
  PowierzchniaRysunkowa* preview;
  WidokPrzewijany* preview_view;
- Przycisk *apply,*reset;
+ Przycisk *apply,*reset,*refresh,*install;
+ PoleTekstowe* import_path;Etykieta* import_label;
  FontPage(){
   ustaw_uklad_automatyczny(false);ustaw_wypelnienie({0,0,0,0});
   heading=&dodaj<Etykieta>("Ustawienia czcionki");family_label=&dodaj<Etykieta>("Systemowa czcionka");size_label=&dodaj<Etykieta>("Rozmiar");
   families=&dodaj<ListaRozwijana>();size=&dodaj<ListaRozwijana>();preview_view=&dodaj<WidokPrzewijany>();preview_view->ustaw_tryb_paska_poziomego(TrybPaskaPrzewijania::Nigdy);preview=&preview_view->dodaj<PowierzchniaRysunkowa>();
-  apply=&dodaj<Przycisk>("Zastosuj");reset=&dodaj<Przycisk>("Przywróć domyślne");
+  apply=&dodaj<Przycisk>("Zastosuj");reset=&dodaj<Przycisk>("Przywróć domyślne");refresh=&dodaj<Przycisk>("Odśwież fonty");
+  import_label=&dodaj<Etykieta>("Plik TTF do zainstalowania");import_path=&dodaj<PoleTekstowe>("/uzytkownicy/font.ttf");install=&dodaj<Przycisk>("Zainstaluj TTF");
   status=&dodaj<Etykieta>("Zastosuj zapisuje zmianę dla aplikacji.");help=&dodaj<Etykieta>("Terminal zachowuje czcionkę stałej szerokości.");
-  Etykieta* labels[]={heading,family_label,size_label,status,help};
+  Etykieta* labels[]={heading,family_label,size_label,status,help,import_label};
   for(auto* label:labels)label->ustaw_wypelnienie({0,0,0,0});
  }
  void rozmiesc(Prostokat r)override{
@@ -38,7 +40,7 @@ public:
   int preview_line=BSF::height(ui_skaluj(24,s.procent()));
   if(preview_line<1)preview_line=28*s;
   int preview_h=7*(preview_line+2*s)+28*s;
-  int available=r.wysokosc-inset-y-button-3*gap-2*line-small;
+  int available=r.wysokosc-inset-y-button-4*gap-3*line-2*small-control;
   if(preview_h>available)preview_h=available;
   if(preview_h<0)preview_h=0;
   preview_view->rozmiesc({inset,y,w,preview_h});
@@ -50,8 +52,12 @@ public:
   preview->rozmiesc({0,0,w-18*s,sample_height});y+=preview_h+gap;
   int first=CzcionkaUI::zmierz_tekst("Zastosuj",s)+32*s;
   int second=CzcionkaUI::zmierz_tekst("Przywróć domyślne",s)+32*s;
-  if(first+second+gap>w){first=(w-gap)/2;second=w-gap-first;}
-  apply->rozmiesc({inset,y,first,button});reset->rozmiesc({inset+first+gap,y,second,button});y+=button+gap;
+  int third=CzcionkaUI::zmierz_tekst("Odśwież fonty",s)+32*s;
+  if(first+second+third+2*gap>w){first=(w-2*gap)/3;second=first;third=w-2*gap-first-second;}
+  apply->rozmiesc({inset,y,first,button});reset->rozmiesc({inset+first+gap,y,second,button});refresh->rozmiesc({inset+first+second+2*gap,y,third,button});y+=button+gap;
+  import_label->rozmiesc({inset,y,w,line});y+=line+small;
+  int install_width=CzcionkaUI::zmierz_tekst("Zainstaluj TTF",s)+32*s;if(install_width>w/2)install_width=w/2;
+  import_path->rozmiesc({inset,y,w-gap-install_width,control});install->rozmiesc({inset+w-install_width,y,install_width,control});y+=control+gap;
   status->rozmiesc({inset,y,w,line});help->rozmiesc({inset,y+line+small,w,line});
  }
 };

@@ -5,10 +5,17 @@
 #include <cstdio>
 #include <vector>
 #include <string>
+#include <map>
+#include <fstream>
+#include <iterator>
 #define _start shell_test_entry
 #include "../programy/shell/shell.cpp"
 #undef _start
+#undef wypisz
+void wypisz(const char*) {}
 
+static std::map<std::string,std::string> font_files;
+static BSF::Config font_config;
 static unsigned checks=0;
 #undef assert
 #define assert(c) do {++checks;if(!(c)){fprintf(stderr,"FAIL %d: %s\n",__LINE__,#c);abort();}}while(0)
@@ -29,7 +36,7 @@ bool gui_ustaw_popup_aplikacji(bool open,int x,int y,int w,int h) { popup_open=o
 bool gui_blit_popup(int,int,int w,int h,const uint32_t* data) { assert(w>0 && h>0 && data);++popup_paints;popup_pixels.assign(data,data+w*h);return true; }
 bool clipboard_size(const char*,uint64_t* n) { *n=copied.size()+1;return true; }
 bool clipboard_read(const char*,void* out,uint64_t capacity,uint64_t* n) { if(capacity<copied.size()+1) return false;*n=copied.size()+1;memcpy(out,copied.c_str(),*n);return true; }
-bool pobierz_rozmiar_pliku(const char* path,uint32_t* n) { assert(!strcmp(path,SHELL_SPONSOR_PATH));*n=sponsor_file.size();return sponsor_exists; }
+bool pobierz_rozmiar_pliku(const char* path,uint32_t* n) { if(font_files.count(path)){*n=font_files[path].size();return true;} assert(!strcmp(path,SHELL_SPONSOR_PATH));*n=sponsor_file.size();return sponsor_exists; }
 bool gui_czekaj_na_zdarzenie(bws_zdarzenie* e) {
     assert(event_index<events.size());
     if(expect_live_theme && events[event_index].typ==BWS_ZDARZENIE_BLUR) {
@@ -62,10 +69,16 @@ gui_akcja_belki gui_hit_test_belki(int,int,int,int,int) { return GUI_BELKA_BRAK;
 bool gui_pobierz_monitor(uint32_t,GuiMonitorInfo*) { return false; }
 void gui_pobierz_rozdzielczosc(int* w,int* h) { *w=1280;*h=720; }
 extern "C" void gui_zakoncz_aplikacje() { std::abort(); }
-uint64_t bws_wywolaj(uint64_t,uint64_t,uint64_t,uint64_t,uint64_t) { assert(false);return 0; }
+uint64_t bws_wywolaj(uint64_t fn,uint64_t a,uint64_t b,uint64_t c,uint64_t) {
+    if(fn==92){if(a)font_config=*(BSF::Config*)b;else *(BSF::Config*)b=font_config;return 1;}
+    if(fn==6){std::string list;for(auto& f:font_files)list+="[F] "+f.first.substr(14)+"\n";assert(list.size()+1<=c);memcpy((void*)b,list.c_str(),list.size()+1);return 1;}
+    return 0;
+}
+bool wylistuj_katalog_uzytkownika(const char*,char* out,uint32_t n){return bws_wywolaj(6,0,(uint64_t)out,n,0);}
+bool gui_blit_alpha(int,int,int,int,const uint32_t*) {return true;}
 bool utworz(const char*) { assert(false);return false; }
 bool zapisz_plik(const char*,const char*,uint32_t) { assert(false);return false; }
-bool czytaj_plik(const char* path,char* out,uint32_t n) { assert(!strcmp(path,SHELL_SPONSOR_PATH));assert(sponsor_file.size()<=n);memcpy(out,sponsor_file.data(),sponsor_file.size());return sponsor_exists; }
+bool czytaj_plik(const char* path,char* out,uint32_t n) { if(font_files.count(path)){assert(font_files[path].size()<=n);memcpy(out,font_files[path].data(),font_files[path].size());return true;} assert(!strcmp(path,SHELL_SPONSOR_PATH));assert(sponsor_file.size()<=n);memcpy(out,sponsor_file.data(),sponsor_file.size());return sponsor_exists; }
 void bws_dzwiek_test(uint32_t,uint32_t) { assert(false); }
 bool bws_siec_dns(const char*,uint8_t*) { assert(false);return false; }
 bool bws_siec_pobierz_http(uint8_t*,const char*,const char*,char*,uint32_t) { assert(false);return false; }
@@ -81,6 +94,16 @@ static void reset() {
     g_linie[0]={};g_output_selection=false;historia_ilosc=0;g_rows_dirty=true;
 }
 int main() {
+#if defined(BSF_NATIVE)
+    font_config.checksum=BSF::checksum(font_config);
+    for(const char* name:{"DejaVuSans.ttf","DejaVuSansMono.ttf"}){
+        std::string path=std::string("czcionki/ttf/")+name;std::ifstream f(path,std::ios::binary);
+        font_files["/"+path]=std::string(std::istreambuf_iterator<char>(f),{});assert(!font_files["/"+path].empty());
+    }
+    shell_sync_font();assert(g_terminal_face);assert(BSF::terminal_face("DejaVu Sans")==0);
+    auto mono=g_terminal_face;assert(BSF::family_monospace(mono));
+    for(uint32_t cp=32;cp<127;++cp)assert(BSF::advance_face(cp,mono,16)==g_terminal_cell);
+#endif
     g_linie=new ShellLine[MAXSCROLLBACKLINES]{};g_pasek_przewijania=new PasekPrzewijania();
     char input[SHELL_INPUT_CAPACITY];
     // Execute the production first client paint with two resolved theme palettes.
@@ -116,8 +139,8 @@ int main() {
     assert(pobierz_linie(input,sizeof(input)));assert(!strcmp(input,"roboczeą"));
     reset();bytes("zażółć");
     bws_zdarzenie mouse{};mouse.typ=BWS_ZDARZENIE_MYSZ_DOWN;
-    mouse.x=shell_edit_rect().x+CzcionkaUI::zmierz_tekst("za",ui_skala());mouse.y=shell_input_rect().y+8;events.push_back(mouse);
-    mouse.typ=BWS_ZDARZENIE_MYSZ_RUCH;mouse.x=shell_edit_rect().x+CzcionkaUI::zmierz_tekst("zażółć",ui_skala())+1;events.push_back(mouse);
+    mouse.x=shell_edit_rect().x+shell_prefix_width("za",2);mouse.y=shell_input_rect().y+8;events.push_back(mouse);
+    mouse.typ=BWS_ZDARZENIE_MYSZ_RUCH;mouse.x=shell_edit_rect().x+shell_prefix_width("zażółć",strlen("zażółć"))+1;events.push_back(mouse);
     mouse.typ=BWS_ZDARZENIE_MYSZ_UP;events.push_back(mouse);
     bws_zdarzenie copy{};copy.typ=BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;copy.x=1;copy.kod=BWS_KEY_SOURCE_USB|6;copy.przyciski=BWS_MOD_CTRL;events.push_back(copy);bytes("c");
     copy.x=0;copy.przyciski=0;events.push_back(copy);bytes("Q\n");
@@ -276,6 +299,32 @@ int main() {
     shell_delete_range(input,2,SIZE_MAX);assert(!strcmp(input,"abc"));g_caret=g_input_anchor=3;
     shell_context_open(500,350);bws_zdarzenie close{};close.typ=BWS_ZDARZENIE_ZAMKNIJ;shell_context_event(close);assert(!popup_open);
     shell_context_open(500,350);close.typ=BWS_ZDARZENIE_KLAWISZ;close.kod=27;assert(shell_context_event(close));assert(!popup_open);
+    for(const char* sample:{"ä́","ά","й","😀","𐐀","界","🇵🇱","👩‍💻"}) {
+        size_t n=strlen(sample);assert(shell_next(sample,0)==n);assert(shell_previous(sample,n)==0);
+        unsigned cells=BSF::terminal_cells(sample,n);assert(cells>=1 && cells<=2);
+        assert(BSF::terminal_cells("ä́",5)==1);assert(BSF::terminal_cells("界",3)==2);
+    }
+    assert(BSF::terminal_cells("\xcc\x81",2)==0);
+    assert(BSF::terminal_cells("\xe2\x83\x9d",3)==0); // CCC=0 enclosing circle.
+    assert(BSF::terminal_cells("\xe0\xa4\x83",3)==0); // SpacingMark, no independent cell.
+    reset();bytes("pisz ä́");key(80,"\x1b[D");key(76,"\x1b[3~");bytes("z\n");
+    assert(pobierz_linie(input,sizeof(input)));assert(!strcmp(input,"pisz z"));
+    reset();bytes("pisz ä́");bytes("\b");bytes("z\n");
+    assert(pobierz_linie(input,sizeof(input)));assert(!strcmp(input,"pisz z"));
+#if defined(BSF_NATIVE)
+    ui_skala_procent=100;shell_sync_font();assert(g_terminal_face);
+    uint32_t pixels[128*64]{};KontekstRysowania ctx;ctx.ustaw_cel(pixels,{0,0,128,64});
+    shell_draw_cluster(ctx,"ä́",0,5,10,5,g_terminal_cell,0xffffff);
+    unsigned ink=0;for(int y=0;y<64;++y)for(int x=0;x<128;++x)if(pixels[y*128+x]){++ink;assert(x>=10&&x<10+g_terminal_cell);}
+    assert(ink);auto rasters=BSF::statistics().rasterizations;
+    shell_draw_cluster(ctx,"ä́",0,5,10,5,g_terminal_cell,0xffffff);assert(BSF::statistics().rasterizations==rasters);
+    memset(pixels,0,sizeof(pixels));shell_draw_cluster(ctx,"\xcc\x81",0,2,10,5,0,0xffffff);
+    ink=0;for(int y=0;y<64;++y)for(int x=0;x<128;++x)if(pixels[y*128+x]){++ink;assert(x>=10&&x<10+g_terminal_cell);}
+    assert(ink); // A leading zero-cell mark still paints at its source origin.
+    g_terminal_ttf=false;g_terminal_generation=~0U;shell_sync_font();assert(!g_terminal_face);
+    g_terminal_ttf=true;g_terminal_generation=~0U;shell_sync_font();assert(g_terminal_face);
+    BSF::shutdown();
+#endif
     printf("Shell host: %u/%u PASS\n",checks,checks);
     puts("Host checks passed: editor, popup, clipboard, sponsors and version (100%, 125%); not OS runtime validation.");
 }

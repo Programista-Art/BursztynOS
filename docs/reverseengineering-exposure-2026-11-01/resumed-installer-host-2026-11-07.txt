@@ -1,0 +1,4 @@
+g++ -std=c++17 -O1 -g -Wall -Wextra -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined narzedzia/instalator/test_storage.cpp storage_format.cpp psf.cpp -o .installertest/test-storage
+ASAN_OPTIONS=detect_leaks=0 .installertest/test-storage
+Native directory/file move: 138 assertions PASS (RAM)
+Storage/BSP2 host: 10512 PASS, 0 FAIL (includes outside-partition sentinel, faults, >2 TiB GPT, A/B ESP, BlockDevice abstraction)

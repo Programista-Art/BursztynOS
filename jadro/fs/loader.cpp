@@ -28,6 +28,10 @@
 #include "fpu.h"
 #include "stos_jadra.h"
 #include "stack_protector.h"
+#include "bur_v2.h"
+#include "entropia.h"
+#include "uklad_procesu.h"
+UkladProcesu uklady_procesow[PZB_MAKS_PROCESOW]{};
 #ifndef BURSZTYN_DIAG_BOOT
 #define BURSZTYN_DIAG_BOOT 0
 #endif
@@ -935,7 +939,7 @@ static bool mapuj_stos_uzytkownika(
     void* pml4,
     uint32_t flagi,
     uint64_t liczba_stron,
-    uint64_t baza_stosu
+    uint64_t baza_stosu = BAZA_STOSU_USER
 ) {
     for (uint64_t i = 0;
          i < liczba_stron;
@@ -1026,6 +1030,38 @@ struct ProbaUruchomienia {
 };
 }
 
+// Each page is populated through its supervisor HHDM alias before its final
+// user PTE exists. No user-visible writable executable preparation mapping.
+static bool mapuj_segment_v2(uint64_t va, uint64_t mem, const uint8_t* src,
+    uint64_t bytes, uint64_t flags, const NaglowekBurV2& n,
+    const BurV2Relokacja* reloc, uint64_t base, bool data_segment = false) {
+    uint32_t next = 0;
+    for (uint64_t off = 0; off < mem; off += 4096) {
+        void* frame = ZaalokujRamke();
+        if (!frame) return false;
+        auto* dst = static_cast<uint8_t*>(FizycznyZakresDoWirtualnego(
+            reinterpret_cast<uint64_t>(frame), 4096));
+        if (!dst) { ZwolnijRamke(frame); return false; }
+        for (uint64_t j = 0; j < 4096; ++j)
+            dst[j] = off + j < bytes ? src[off+j] : 0;
+        if (data_segment) while (next < n.reloc_liczba &&
+            reloc[next].offset_w_obrazie < n.dane_rva + off + 4096) {
+            uint64_t value = 0; size_t width = 0;
+            if (bur_v2_oblicz_wartosc_relokacji(n, reloc[next], base, &value, &width) != BUR_V2_OK) {
+                ZwolnijRamke(frame); return false;
+            }
+            const uint64_t in_page = reloc[next].offset_w_obrazie - n.dane_rva - off;
+            if (in_page > 4096 - width) { ZwolnijRamke(frame); return false; }
+            for (size_t j = 0; j < width; ++j) dst[in_page+j] = value >> (8*j);
+            ++next;
+        }
+        if (!VmmMapujStroneBurV2(reinterpret_cast<void*>(va+off), frame, flags)) {
+            ZwolnijRamke(frame); return false;
+        }
+    }
+    return true;
+}
+
 static bool uruchom_program_z_pliku_impl(
     const char* sciezka_pliku,
     uint8_t bzl_poziom,
@@ -1078,10 +1114,10 @@ static bool uruchom_program_z_pliku_impl(
         SCIEZKA_TEST[indeks_sciezki] != '\0') {
         aplikacja_testowa = false;
     }
-    const uint64_t liczba_stron_stosu = aplikacja_testowa
+    uint64_t liczba_stron_stosu = aplikacja_testowa
         ? LICZBA_STRON_STOSU_TEST
         : LICZBA_STRON_STOSU_USER;
-    const uint64_t rozmiar_stosu = liczba_stron_stosu * ROZMIAR_STRONY;
+    uint64_t rozmiar_stosu = liczba_stron_stosu * ROZMIAR_STRONY;
 
     /*
      * Rezerwacja i kontrola single-instance sa jedna operacja atomowa
@@ -1170,6 +1206,53 @@ static bool uruchom_program_z_pliku_impl(
         }
     }
 
+    const bool v2 = bufor_pliku[3] == 2;
+    NaglowekBurV2 n2{};
+    PlanUkladuAslrRing3 layout{};
+    uint64_t canary = 0;
+    const BurV2Relokacja* relocs = nullptr;
+    uklady_procesow[pid] = {};
+    if (v2) {
+        if (rozmiar_pliku < sizeof(n2)) {
+            proba.obraz.blad = "bur-v2-truncated";
+            zwolnij_rezerwacje_procesu(pid); return false;
+        }
+        KopiujPamiec(&n2, bufor_pliku, sizeof(n2));
+        const auto error = bur_v2_waliduj_plik(bufor_pliku, rozmiar_pliku, ASLR_PIE_WINDOW_BASE);
+        constexpr uint32_t required = BUR_V2_FLAGA_PIE | BUR_V2_FLAGA_SSP |
+            BUR_V2_FLAGA_WX_SCISLY | BUR_V2_FLAGA_STRAZNIK_RO | BUR_V2_FLAGA_SUMA_KONTROLNA;
+        if (error != BUR_V2_OK || (n2.flagi & required) != required ||
+            (n2.metadane_uprawnien & ~flagi_praw) || !VmmNxGotowy()) {
+            proba.obraz.blad = error == BUR_V2_OK ? "bur-v2-security-requirements" : bur_v2_opis_bledu(error);
+            zwolnij_rezerwacje_procesu(pid); return false;
+        }
+        uint64_t random[5]{};
+        if (!entropia_pobierz_bajty(reinterpret_cast<uint8_t*>(random), sizeof(random)) ||
+            !bur_v2_zaplanuj_aslr(n2, random[0], random[1], random[2], random[3], &layout)) {
+            proba.obraz.blad = "bur-v2-secure-entropy-or-layout-unavailable";
+            zwolnij_rezerwacje_procesu(pid); return false;
+        }
+        canary = random[4] & ~255ULL;
+        if (!canary) { proba.obraz.blad = "bur-v2-invalid-guard";
+            zwolnij_rezerwacje_procesu(pid); return false; }
+        for (auto& value : random) value = 0;
+        relocs = reinterpret_cast<const BurV2Relokacja*>(bufor_pliku + n2.reloc_przesuniecie);
+        uint64_t end = 0;
+        for (uint32_t i = 0; i < n2.reloc_liczba; ++i) {
+            uint64_t value = 0; size_t width = 0;
+            if (relocs[i].typ != BUR_V2_RELOC_ABS64 ||
+                bur_v2_oblicz_wartosc_relokacji(n2, relocs[i], layout.baza_obrazu, &value, &width) != BUR_V2_OK ||
+                (i && relocs[i].offset_w_obrazie < end)) {
+                proba.obraz.blad = "bur-v2-invalid-relocation";
+                zwolnij_rezerwacje_procesu(pid); return false;
+            }
+            end = relocs[i].offset_w_obrazie + width;
+        }
+        liczba_stron_stosu = n2.domyślne_strony_stosu;
+        rozmiar_stosu = liczba_stron_stosu * 4096;
+    }
+    const uint64_t entry = v2 ? layout.punkt_wejscia_va : naglowek.punkt_wejscia;
+    const uint64_t stack_base = v2 ? layout.stos_dol : baza_stosu;
 #if BURSZTYNDIAGTESTDZWIEKU
     const bool trace_app = takie_same_sciezki(bezpieczna_sciezka,
         "/programy/test_dzwieku.cebula/test_dzwieku.bur");
@@ -1243,7 +1326,7 @@ static bool uruchom_program_z_pliku_impl(
      * 1. Kod.
      * Segment jest mapowany bez prawa zapisu z Ring 3.
      */
-    if (!mapuj_segment_z_pliku(
+    if (!v2 && !mapuj_segment_z_pliku(
             pml4_procesu,
             naglowek.tekst_wirtualny,
             naglowek.tekst_rozmiar,
@@ -1260,7 +1343,7 @@ static bool uruchom_program_z_pliku_impl(
      * Brakujaca koncowka pliku jest automatycznie zerowana,
      * co daje obecnemu formatowi BUR prosta obsluge BSS.
      */
-    if (mapowanie_ok &&
+    if (!v2 && mapowanie_ok &&
         naglowek.dane_rozmiar != 0) {
         const uint64_t dostepne_dane =
             rozmiar_pliku -
@@ -1299,6 +1382,19 @@ static bool uruchom_program_z_pliku_impl(
 #endif
     }
 
+    if (v2) {
+        mapowanie_ok = mapuj_segment_v2(layout.tekst_va, n2.tekst_rozmiar,
+            bufor_pliku+n2.tekst_przesuniecie, n2.tekst_rozmiar, 0, n2, relocs, layout.baza_obrazu) &&
+            mapuj_segment_v2(layout.rodata_va, n2.rodata_rozmiar,
+            bufor_pliku+n2.rodata_przesuniecie, n2.rodata_rozmiar, VMM_FLAGA_NX, n2, relocs, layout.baza_obrazu) &&
+            mapuj_segment_v2(layout.dane_va, n2.dane_rozmiar_pamieci,
+            bufor_pliku+n2.dane_przesuniecie, n2.dane_rozmiar_pliku, VMM_FLAGA_NX | FLAGA_ZAPIS,
+            n2, relocs, layout.baza_obrazu, true) &&
+            mapuj_segment_v2(layout.straznik_stosu_va, 4096,
+            reinterpret_cast<const uint8_t*>(&canary), sizeof(canary), VMM_FLAGA_NX, n2, relocs, layout.baza_obrazu);
+        if (!mapowanie_ok) proba.obraz.blad = "bur-v2-image-mapping-failed";
+        canary = 0;
+    }
     /*
      * 3. Stos Ring 3. Zwykle aplikacje zachowuja 16 KiB. Test dostaje
      * 64 KiB, poniewaz pelna regresja BursztynUI ma duze lokalne obiekty,
@@ -1308,8 +1404,7 @@ static bool uruchom_program_z_pliku_impl(
         !mapuj_stos_uzytkownika(
             pml4_procesu,
             flagi_dane,
-            liczba_stron_stosu,
-            baza_stosu)) {
+            liczba_stron_stosu, stack_base)) {
         proba.obraz.blad = "mapuj_stos_uzytkownika-failed";
         mapowanie_ok = false;
     }
@@ -1333,7 +1428,7 @@ static bool uruchom_program_z_pliku_impl(
      * dlatego zachowujemy takie ustawienie.
      */
     const uint64_t wirtualny_szczyt_stosu =
-        baza_stosu +
+        stack_base +
         rozmiar_stosu -
         8ULL;
 
@@ -1346,8 +1441,7 @@ static bool uruchom_program_z_pliku_impl(
      */
     rama->wektor_przerwania = 0;
     rama->kod_bledu = 0;
-    rama->adres_powrotu =
-        naglowek.punkt_wejscia;
+    rama->adres_powrotu = entry;
     rama->rejestr_cs = 0x23;
     rama->rflags = 0x202;
     rama->stary_rsp =
@@ -1392,8 +1486,12 @@ static bool uruchom_program_z_pliku_impl(
         szczyt_stosu_jadra;
     proces.cr3 =
         pml4_procesu_fiz;
-    proces.granica_sterty =
-        BAZA_STERTY_USER;
+    proces.granica_sterty = v2 ? layout.sterta_baza : BAZA_STERTY_USER;
+    uklady_procesow[pid] = {v2 ? layout.baza_obrazu : RING3_BASE,
+        entry, stack_base, stack_base + rozmiar_stosu,
+        v2 ? layout.straznik_stosu_va : 0,
+        proces.granica_sterty, v2 ? layout.sterta_limit : (RING3_HEAP_BASE + 256ULL*1024*1024),
+        v2 ? layout.shm_baza : RING3_SHM_BASE, v2 ? 2U : 1U};
 
     if (!kopiuj_argument_startowy(
             argument_startowy_procesu[pid], bezpieczny_argument)) {

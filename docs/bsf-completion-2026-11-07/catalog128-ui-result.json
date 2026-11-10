@@ -1,0 +1,653 @@
+{
+  "result": "PASS",
+  "mode": "native-font-resources",
+  "catalog_count": 128,
+  "examined": 128,
+  "rejected": 0,
+  "resident": 1468640,
+  "peak_resident": 1468640,
+  "catalog": [
+    {
+      "id": 1284460777,
+      "path": "/czcionki/ttf/test-000.ttf",
+      "family": "Bursztyn Test 000"
+    },
+    {
+      "id": 2808996146,
+      "path": "/czcionki/ttf/test-001.ttf",
+      "family": "Bursztyn Test 001"
+    },
+    {
+      "id": 502869411,
+      "path": "/czcionki/ttf/test-002.ttf",
+      "family": "Bursztyn Test 002"
+    },
+    {
+      "id": 2462845108,
+      "path": "/czcionki/ttf/test-003.ttf",
+      "family": "Bursztyn Test 003"
+    },
+    {
+      "id": 1795835493,
+      "path": "/czcionki/ttf/test-004.ttf",
+      "family": "Bursztyn Test 004"
+    },
+    {
+      "id": 681388894,
+      "path": "/czcionki/ttf/test-005.ttf",
+      "family": "Bursztyn Test 005"
+    },
+    {
+      "id": 3625442143,
+      "path": "/czcionki/ttf/test-006.ttf",
+      "family": "Bursztyn Test 006"
+    },
+    {
+      "id": 1940271600,
+      "path": "/czcionki/ttf/test-007.ttf",
+      "family": "Bursztyn Test 007"
+    },
+    {
+      "id": 3105568369,
+      "path": "/czcionki/ttf/test-008.ttf",
+      "family": "Bursztyn Test 008"
+    },
+    {
+      "id": 121847482,
+      "path": "/czcionki/ttf/test-009.ttf",
+      "family": "Bursztyn Test 009"
+    },
+    {
+      "id": 1668020644,
+      "path": "/czcionki/ttf/test-010.ttf",
+      "family": "Bursztyn Test 010"
+    },
+    {
+      "id": 4008921555,
+      "path": "/czcionki/ttf/test-011.ttf",
+      "family": "Bursztyn Test 011"
+    },
+    {
+      "id": 3046362594,
+      "path": "/czcionki/ttf/test-012.ttf",
+      "family": "Bursztyn Test 012"
+    },
+    {
+      "id": 442253465,
+      "path": "/czcionki/ttf/test-013.ttf",
+      "family": "Bursztyn Test 013"
+    },
+    {
+      "id": 1145447136,
+      "path": "/czcionki/ttf/test-014.ttf",
+      "family": "Bursztyn Test 014"
+    },
+    {
+      "id": 3485837135,
+      "path": "/czcionki/ttf/test-015.ttf",
+      "family": "Bursztyn Test 015"
+    },
+    {
+      "id": 912846030,
+      "path": "/czcionki/ttf/test-016.ttf",
+      "family": "Bursztyn Test 016"
+    },
+    {
+      "id": 2033201941,
+      "path": "/czcionki/ttf/test-017.ttf",
+      "family": "Bursztyn Test 017"
+    },
+    {
+      "id": 2615500108,
+      "path": "/czcionki/ttf/test-018.ttf",
+      "family": "Bursztyn Test 018"
+    },
+    {
+      "id": 76042075,
+      "path": "/czcionki/ttf/test-019.ttf",
+      "family": "Bursztyn Test 019"
+    },
+    {
+      "id": 1763715275,
+      "path": "/czcionki/ttf/test-020.ttf",
+      "family": "Bursztyn Test 020"
+    },
+    {
+      "id": 1076064316,
+      "path": "/czcionki/ttf/test-021.ttf",
+      "family": "Bursztyn Test 021"
+    },
+    {
+      "id": 352656785,
+      "path": "/czcionki/ttf/test-022.ttf",
+      "family": "Bursztyn Test 022"
+    },
+    {
+      "id": 2459629146,
+      "path": "/czcionki/ttf/test-023.ttf",
+      "family": "Bursztyn Test 023"
+    },
+    {
+      "id": 3767405767,
+      "path": "/czcionki/ttf/test-024.ttf",
+      "family": "Bursztyn Test 024"
+    },
+    {
+      "id": 1432821912,
+      "path": "/czcionki/ttf/test-025.ttf",
+      "family": "Bursztyn Test 025"
+    },
+    {
+      "id": 212453133,
+      "path": "/czcionki/ttf/test-026.ttf",
+      "family": "Bursztyn Test 026"
+    },
+    {
+      "id": 1894062310,
+      "path": "/czcionki/ttf/test-027.ttf",
+      "family": "Bursztyn Test 027"
+    },
+    {
+      "id": 2469382595,
+      "path": "/czcionki/ttf/test-028.ttf",
+      "family": "Bursztyn Test 028"
+    },
+    {
+      "id": 505556308,
+      "path": "/czcionki/ttf/test-029.ttf",
+      "family": "Bursztyn Test 029"
+    },
+    {
+      "id": 1476110190,
+      "path": "/czcionki/ttf/test-030.ttf",
+      "family": "Bursztyn Test 030"
+    },
+    {
+      "id": 3009208117,
+      "path": "/czcionki/ttf/test-031.ttf",
+      "family": "Bursztyn Test 031"
+    },
+    {
+      "id": 2079876608,
+      "path": "/czcionki/ttf/test-032.ttf",
+      "family": "Bursztyn Test 032"
+    },
+    {
+      "id": 125299311,
+      "path": "/czcionki/ttf/test-033.ttf",
+      "family": "Bursztyn Test 033"
+    },
+    {
+      "id": 3226745986,
+      "path": "/czcionki/ttf/test-034.ttf",
+      "family": "Bursztyn Test 034"
+    },
+    {
+      "id": 1005517625,
+      "path": "/czcionki/ttf/test-035.ttf",
+      "family": "Bursztyn Test 035"
+    },
+    {
+      "id": 2602450116,
+      "path": "/czcionki/ttf/test-036.ttf",
+      "family": "Bursztyn Test 036"
+    },
+    {
+      "id": 265502963,
+      "path": "/czcionki/ttf/test-037.ttf",
+      "family": "Bursztyn Test 037"
+    },
+    {
+      "id": 769756438,
+      "path": "/czcionki/ttf/test-038.ttf",
+      "family": "Bursztyn Test 038"
+    },
+    {
+      "id": 2303540797,
+      "path": "/czcionki/ttf/test-039.ttf",
+      "family": "Bursztyn Test 039"
+    },
+    {
+      "id": 764001837,
+      "path": "/czcionki/ttf/test-040.ttf",
+      "family": "Bursztyn Test 040"
+    },
+    {
+      "id": 2457326470,
+      "path": "/czcionki/ttf/test-041.ttf",
+      "family": "Bursztyn Test 041"
+    },
+    {
+      "id": 35702631,
+      "path": "/czcionki/ttf/test-042.ttf",
+      "family": "Bursztyn Test 042"
+    },
+    {
+      "id": 1984473784,
+      "path": "/czcionki/ttf/test-043.ttf",
+      "family": "Bursztyn Test 043"
+    },
+    {
+      "id": 1287086257,
+      "path": "/czcionki/ttf/test-044.ttf",
+      "family": "Bursztyn Test 044"
+    },
+    {
+      "id": 2640012538,
+      "path": "/czcionki/ttf/test-045.ttf",
+      "family": "Bursztyn Test 045"
+    },
+    {
+      "id": 2739721451,
+      "path": "/czcionki/ttf/test-046.ttf",
+      "family": "Bursztyn Test 046"
+    },
+    {
+      "id": 2010493788,
+      "path": "/czcionki/ttf/test-047.ttf",
+      "family": "Bursztyn Test 047"
+    },
+    {
+      "id": 401914021,
+      "path": "/czcionki/ttf/test-048.ttf",
+      "family": "Bursztyn Test 048"
+    },
+    {
+      "id": 3157874078,
+      "path": "/czcionki/ttf/test-049.ttf",
+      "family": "Bursztyn Test 049"
+    },
+    {
+      "id": 2221840232,
+      "path": "/czcionki/ttf/test-050.ttf",
+      "family": "Bursztyn Test 050"
+    },
+    {
+      "id": 3488462615,
+      "path": "/czcionki/ttf/test-051.ttf",
+      "family": "Bursztyn Test 051"
+    },
+    {
+      "id": 2736269622,
+      "path": "/czcionki/ttf/test-052.ttf",
+      "family": "Bursztyn Test 052"
+    },
+    {
+      "id": 4270053981,
+      "path": "/czcionki/ttf/test-053.ttf",
+      "family": "Bursztyn Test 053"
+    },
+    {
+      "id": 797121164,
+      "path": "/czcionki/ttf/test-054.ttf",
+      "family": "Bursztyn Test 054"
+    },
+    {
+      "id": 2977087899,
+      "path": "/czcionki/ttf/test-055.ttf",
+      "family": "Bursztyn Test 055"
+    },
+    {
+      "id": 2222262698,
+      "path": "/czcionki/ttf/test-056.ttf",
+      "family": "Bursztyn Test 056"
+    },
+    {
+      "id": 1147481249,
+      "path": "/czcionki/ttf/test-057.ttf",
+      "family": "Bursztyn Test 057"
+    },
+    {
+      "id": 4046492960,
+      "path": "/czcionki/ttf/test-058.ttf",
+      "family": "Bursztyn Test 058"
+    },
+    {
+      "id": 1667355023,
+      "path": "/czcionki/ttf/test-059.ttf",
+      "family": "Bursztyn Test 059"
+    },
+    {
+      "id": 1423640655,
+      "path": "/czcionki/ttf/test-060.ttf",
+      "family": "Bursztyn Test 060"
+    },
+    {
+      "id": 3378217952,
+      "path": "/czcionki/ttf/test-061.ttf",
+      "family": "Bursztyn Test 061"
+    },
+    {
+      "id": 4265972757,
+      "path": "/czcionki/ttf/test-062.ttf",
+      "family": "Bursztyn Test 062"
+    },
+    {
+      "id": 3145616846,
+      "path": "/czcionki/ttf/test-063.ttf",
+      "family": "Bursztyn Test 063"
+    },
+    {
+      "id": 1946725075,
+      "path": "/czcionki/ttf/test-064.ttf",
+      "family": "Bursztyn Test 064"
+    },
+    {
+      "id": 3900791460,
+      "path": "/czcionki/ttf/test-065.ttf",
+      "family": "Bursztyn Test 065"
+    },
+    {
+      "id": 2675024281,
+      "path": "/czcionki/ttf/test-066.ttf",
+      "family": "Bursztyn Test 066"
+    },
+    {
+      "id": 984166114,
+      "path": "/czcionki/ttf/test-067.ttf",
+      "family": "Bursztyn Test 067"
+    },
+    {
+      "id": 3244645079,
+      "path": "/czcionki/ttf/test-068.ttf",
+      "family": "Bursztyn Test 068"
+    },
+    {
+      "id": 1978022696,
+      "path": "/czcionki/ttf/test-069.ttf",
+      "family": "Bursztyn Test 069"
+    },
+    {
+      "id": 4065760786,
+      "path": "/czcionki/ttf/test-070.ttf",
+      "family": "Bursztyn Test 070"
+    },
+    {
+      "id": 2953967433,
+      "path": "/czcionki/ttf/test-071.ttf",
+      "family": "Bursztyn Test 071"
+    },
+    {
+      "id": 4132248596,
+      "path": "/czcionki/ttf/test-072.ttf",
+      "family": "Bursztyn Test 072"
+    },
+    {
+      "id": 2225668227,
+      "path": "/czcionki/ttf/test-073.ttf",
+      "family": "Bursztyn Test 073"
+    },
+    {
+      "id": 2350792382,
+      "path": "/czcionki/ttf/test-074.ttf",
+      "family": "Bursztyn Test 074"
+    },
+    {
+      "id": 3889799621,
+      "path": "/czcionki/ttf/test-075.ttf",
+      "family": "Bursztyn Test 075"
+    },
+    {
+      "id": 4034235728,
+      "path": "/czcionki/ttf/test-076.ttf",
+      "family": "Bursztyn Test 076"
+    },
+    {
+      "id": 587239487,
+      "path": "/czcionki/ttf/test-077.ttf",
+      "family": "Bursztyn Test 077"
+    },
+    {
+      "id": 1791354138,
+      "path": "/czcionki/ttf/test-078.ttf",
+      "family": "Bursztyn Test 078"
+    },
+    {
+      "id": 108839249,
+      "path": "/czcionki/ttf/test-079.ttf",
+      "family": "Bursztyn Test 079"
+    },
+    {
+      "id": 1838093185,
+      "path": "/czcionki/ttf/test-080.ttf",
+      "family": "Bursztyn Test 080"
+    },
+    {
+      "id": 2117251850,
+      "path": "/czcionki/ttf/test-081.ttf",
+      "family": "Bursztyn Test 081"
+    },
+    {
+      "id": 2872180219,
+      "path": "/czcionki/ttf/test-082.ttf",
+      "family": "Bursztyn Test 082"
+    },
+    {
+      "id": 1063378796,
+      "path": "/czcionki/ttf/test-083.ttf",
+      "family": "Bursztyn Test 083"
+    },
+    {
+      "id": 241344317,
+      "path": "/czcionki/ttf/test-084.ttf",
+      "family": "Bursztyn Test 084"
+    },
+    {
+      "id": 3002527254,
+      "path": "/czcionki/ttf/test-085.ttf",
+      "family": "Bursztyn Test 085"
+    },
+    {
+      "id": 3383451767,
+      "path": "/czcionki/ttf/test-086.ttf",
+      "family": "Bursztyn Test 086"
+    },
+    {
+      "id": 2541286856,
+      "path": "/czcionki/ttf/test-087.ttf",
+      "family": "Bursztyn Test 087"
+    },
+    {
+      "id": 3238288441,
+      "path": "/czcionki/ttf/test-088.ttf",
+      "family": "Bursztyn Test 088"
+    },
+    {
+      "id": 1164549506,
+      "path": "/czcionki/ttf/test-089.ttf",
+      "family": "Bursztyn Test 089"
+    },
+    {
+      "id": 1342321948,
+      "path": "/czcionki/ttf/test-090.ttf",
+      "family": "Bursztyn Test 090"
+    },
+    {
+      "id": 2029869739,
+      "path": "/czcionki/ttf/test-091.ttf",
+      "family": "Bursztyn Test 091"
+    },
+    {
+      "id": 2354618298,
+      "path": "/czcionki/ttf/test-092.ttf",
+      "family": "Bursztyn Test 092"
+    },
+    {
+      "id": 1043371889,
+      "path": "/czcionki/ttf/test-093.ttf",
+      "family": "Bursztyn Test 093"
+    },
+    {
+      "id": 1699079544,
+      "path": "/czcionki/ttf/test-094.ttf",
+      "family": "Bursztyn Test 094"
+    },
+    {
+      "id": 3662394919,
+      "path": "/czcionki/ttf/test-095.ttf",
+      "family": "Bursztyn Test 095"
+    },
+    {
+      "id": 2213612102,
+      "path": "/czcionki/ttf/test-096.ttf",
+      "family": "Bursztyn Test 096"
+    },
+    {
+      "id": 478710765,
+      "path": "/czcionki/ttf/test-097.ttf",
+      "family": "Bursztyn Test 097"
+    },
+    {
+      "id": 400648628,
+      "path": "/czcionki/ttf/test-098.ttf",
+      "family": "Bursztyn Test 098"
+    },
+    {
+      "id": 2735640227,
+      "path": "/czcionki/ttf/test-099.ttf",
+      "family": "Bursztyn Test 099"
+    },
+    {
+      "id": 2747322186,
+      "path": "/czcionki/ttf/test-100.ttf",
+      "family": "Bursztyn Test 100"
+    },
+    {
+      "id": 2085282753,
+      "path": "/czcionki/ttf/test-101.ttf",
+      "family": "Bursztyn Test 101"
+    },
+    {
+      "id": 1734922668,
+      "path": "/czcionki/ttf/test-102.ttf",
+      "family": "Bursztyn Test 102"
+    },
+    {
+      "id": 3077689915,
+      "path": "/czcionki/ttf/test-103.ttf",
+      "family": "Bursztyn Test 103"
+    },
+    {
+      "id": 3632494422,
+      "path": "/czcionki/ttf/test-104.ttf",
+      "family": "Bursztyn Test 104"
+    },
+    {
+      "id": 446854013,
+      "path": "/czcionki/ttf/test-105.ttf",
+      "family": "Bursztyn Test 105"
+    },
+    {
+      "id": 2746899720,
+      "path": "/czcionki/ttf/test-106.ttf",
+      "family": "Bursztyn Test 106"
+    },
+    {
+      "id": 4013522103,
+      "path": "/czcionki/ttf/test-107.ttf",
+      "family": "Bursztyn Test 107"
+    },
+    {
+      "id": 1794619842,
+      "path": "/czcionki/ttf/test-108.ttf",
+      "family": "Bursztyn Test 108"
+    },
+    {
+      "id": 3909935481,
+      "path": "/czcionki/ttf/test-109.ttf",
+      "family": "Bursztyn Test 109"
+    },
+    {
+      "id": 1910718983,
+      "path": "/czcionki/ttf/test-110.ttf",
+      "family": "Bursztyn Test 110"
+    },
+    {
+      "id": 3912782296,
+      "path": "/czcionki/ttf/test-111.ttf",
+      "family": "Bursztyn Test 111"
+    },
+    {
+      "id": 2692310349,
+      "path": "/czcionki/ttf/test-112.ttf",
+      "family": "Bursztyn Test 112"
+    },
+    {
+      "id": 461832998,
+      "path": "/czcionki/ttf/test-113.ttf",
+      "family": "Bursztyn Test 113"
+    },
+    {
+      "id": 4243572491,
+      "path": "/czcionki/ttf/test-114.ttf",
+      "family": "Bursztyn Test 114"
+    },
+    {
+      "id": 3938802300,
+      "path": "/czcionki/ttf/test-115.ttf",
+      "family": "Bursztyn Test 115"
+    },
+    {
+      "id": 3256971473,
+      "path": "/czcionki/ttf/test-116.ttf",
+      "family": "Bursztyn Test 116"
+    },
+    {
+      "id": 644519066,
+      "path": "/czcionki/ttf/test-117.ttf",
+      "family": "Bursztyn Test 117"
+    },
+    {
+      "id": 3735371711,
+      "path": "/czcionki/ttf/test-118.ttf",
+      "family": "Bursztyn Test 118"
+    },
+    {
+      "id": 2887400656,
+      "path": "/czcionki/ttf/test-119.ttf",
+      "family": "Bursztyn Test 119"
+    },
+    {
+      "id": 4008288288,
+      "path": "/czcionki/ttf/test-120.ttf",
+      "family": "Bursztyn Test 120"
+    },
+    {
+      "id": 1629150351,
+      "path": "/czcionki/ttf/test-121.ttf",
+      "family": "Bursztyn Test 121"
+    },
+    {
+      "id": 3817263886,
+      "path": "/czcionki/ttf/test-122.ttf",
+      "family": "Bursztyn Test 122"
+    },
+    {
+      "id": 642652501,
+      "path": "/czcionki/ttf/test-123.ttf",
+      "family": "Bursztyn Test 123"
+    },
+    {
+      "id": 2227973924,
+      "path": "/czcionki/ttf/DejaVuSans-Bold.ttf",
+      "family": "DejaVu Sans"
+    },
+    {
+      "id": 132583076,
+      "path": "/czcionki/ttf/DejaVuSans.ttf",
+      "family": "DejaVu Sans"
+    },
+    {
+      "id": 2501929319,
+      "path": "/czcionki/ttf/DejaVuSansMono.ttf",
+      "family": "DejaVu Sans Mono"
+    },
+    {
+      "id": 154674832,
+      "path": "/czcionki/ttf/DejaVuSerifCondensed-Italic.ttf",
+      "family": "DejaVu Serif"
+    }
+  ],
+  "kernel_sha256": "a863a2c56e1c94ba11edbb05ebda4c997aba5a4313c2825964d843e5e52015e4",
+  "iso_sha256": "e2d6e57b2878bf041ca205f901d21d5f4208c75090c1eef4ddcd80ffbbe857d6"
+}

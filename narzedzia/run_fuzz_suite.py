@@ -18,6 +18,8 @@ CORPUS_DIR = ROOT / ".fuzz-corpus"
 METRICS_OUT = ROOT / "docs/security-hardening-2026-11-04/fuzzing-metrics.json"
 
 FUZZERS = [
+    {"name":"fuzz_bur_v2", "sources":["narzedzia/fuzz/fuzz_bur_v2.cpp"],
+     "extra_flags":[], "smoke_iters":10000, "extended_iters":50000},
     {
         "name": "fuzz_bws",
         "sources": ["testy/fuzz/fuzz_bws.cpp"],
@@ -89,6 +91,7 @@ def run_cmd(cmd, env=None):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", choices=["smoke", "extended"], default="smoke")
+    ap.add_argument("--target", choices=[f["name"] for f in FUZZERS])
     args = ap.parse_args()
 
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
@@ -132,6 +135,7 @@ def main():
     total_edges = 0
 
     for f in FUZZERS:
+        if args.target and f["name"] != args.target: continue
         name = f["name"]
         bin_path = BUILD_DIR / name
         corpus_sub = CORPUS_DIR / name

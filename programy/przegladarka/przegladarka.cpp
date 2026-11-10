@@ -2447,30 +2447,7 @@ __attribute__((noinline)) bool pobierz_jeden_url(
         return false;
     }
 
-    /*
-     * Bounce buffer musi byc niskim adresem z powodu aktualnego BWS29/30.
-     */
-    const uint64_t adres_bufora =
-        reinterpret_cast<uint64_t>(
-            siec_bufor
-        );
-
-    if (adres_bufora >
-        UINT32_MAX) {
-
-        ustaw_tresc(
-            z,
-            "Blad ABI: bufor HTTP aplikacji nie miesci sie w 32-bitowym adresie BWS29/BWS30.",
-            false
-        );
-
-        ustaw_status(
-            "Blad ABI HTTP."
-        );
-
-        return false;
-    }
-
+    // BWS94/95 preserve full-width pointers for relocatable applications.
     wyzeruj(
         siec_bufor,
         sizeof(
@@ -2840,7 +2817,7 @@ const uint16_t* bitmap_font(void*,uint32_t cp){return CzcionkaUI::bitmapa_znaku(
 int width_font(void*,uint32_t cp){return CzcionkaUI::szerokosc_znaku(cp);}
 #if defined(BSF_NATIVE)
 uint32_t browser_font_generation{};
-int advance_family(void*,uint32_t cp,int px,bool bold,bool,uint32_t family){int a=BSF::measure_cp(cp,px,bold,BSF::family_name(family));return a>=0?a:BSF::family_monospace(family)?px:advance_font(nullptr,cp,px,bold,false);}
+int advance_family(void*,uint32_t cp,int px,bool bold,bool italic,uint32_t family){int a=BSF::measure_styled_cp(cp,px,bold,BSF::family_name(family),italic);return a>=0?a:BSF::family_monospace(family)?px:advance_font(nullptr,cp,px,bold,false);}
 int height_family(void*,int px,uint32_t family){int h=BSF::height(px,BSF::family_name(family));return h>0?h:px;}
 bool alpha_font(void*,uint32_t cp,int px,bool bold,bool italic,uint32_t family,Husarz::AlphaGlyph& out){const char* name=BSF::family_name(family);auto* g=BSF::glyph(cp,px,bold,name,italic);if(!g)return false;BSF::pin(g);out.width=g->width;out.height=g->height;out.x=g->x;out.y=BSF::ascent(px,name)+g->y;out.pixels=g->alpha;out.lease=const_cast<BSF::Glyph*>(g);out.release=BSF::unpin;return true;}
 bool cached_font(void*,uint32_t cp,int px,bool bold,bool italic,uint32_t family){return BSF::cached(cp,px,bold,BSF::family_name(family),italic);}

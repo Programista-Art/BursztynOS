@@ -1,0 +1,14 @@
+Artifacts: /home/programista/Pulpit/Burstzyn/BursztynOS/.installertest/guest-ij13u19y
+Traceback (most recent call last):
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/instalator/qemu_install.py", line 242, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/instalator/qemu_install.py", line 220, in main
+    try:install(g,target,sentinel,target_hash,sentinel_hash)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/instalator/qemu_install.py", line 184, in install
+    text=g.wait('[INSTALL] COMPLETE verified',timeout=3600)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/instalator/qemu_install.py", line 138, in wait
+    time.sleep(.25)
+KeyboardInterrupt

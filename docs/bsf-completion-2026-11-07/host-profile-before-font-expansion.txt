@@ -1,0 +1,8 @@
+g++ -std=c++17 -O2 -ffunction-sections -fdata-sections narzedzia/profile_bsf.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/profile
+.bsf-test/profile
+[BSF] Rejected font; fallback retained.
+[BSF] Rejected font; fallback retained.
+[BSF] Rejected font; fallback retained.
+[BSF] Rejected font; fallback retained.
+Face=544 Glyph=56 Cache=72 FontInfo=316 catalog=10112 file=759720 cache_capacity=2097152 used=108 first_ns=60369 hit_ns=514 hits=200000 misses=1
+runtime_measure_ns=74293 sample_width=418 sample_utf8_bytes=64

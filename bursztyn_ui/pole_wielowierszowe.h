@@ -6,6 +6,7 @@
 
 namespace BursztynUI {
 
+
 class PoleWielowierszowe : public Kontrolka {
 public:
     static constexpr size_t DOMYSLNA_POJEMNOSC = 8192;
@@ -124,6 +125,15 @@ public:
         }
     }
 
+    void pozycja_logiczna(size_t& row,size_t& column)const{
+        size_t li=linia_dla_bajtu(kursor_);row=linie_[li].logiczna+1;
+        while(li&&linie_[li-1].logiczna==linie_[li].logiczna)--li;
+#if defined(BSF_NATIVE)
+        column=granice_.rank(bufor_,kursor_)-granice_.rank(bufor_,linie_[li].start)+1;
+#else
+        column=1;for(size_t p=linie_[li].start;p<kursor_;p=CzcionkaUI::nastepny_znak(bufor_,p,dlugosc_))++column;
+#endif
+    }
     size_t liczba_wierszy() const { return liczba_logicznych_; }
     size_t liczba_linii_wizualnych() const { return liczba_wizualnych_; }
     size_t liczba_ostatnio_narysowanych_linii() const { return ostatnio_narysowane_; }
@@ -512,19 +522,36 @@ private:
     }
 
     void przelicz_linie_dla_limitu(int limit) {
+#if defined(BSF_NATIVE)
+        granice_.rebuild(bufor_,dlugosc_);
+        for(auto& point:pomiary_)point.offset=size_t(-1);
+#endif
         liczba_wizualnych_ = 0; liczba_logicznych_ = 1; maks_szerokosc_ = 0;
         size_t start = 0, logiczna = 0;
         if (limit < 1) limit = 1;
         while (start <= dlugosc_ && liczba_wizualnych_ < MAKS_LINII_WIZUALNYCH) {
             size_t koniec_log = start;
             while (koniec_log < dlugosc_ && bufor_[koniec_log] != '\n') ++koniec_log;
+            size_t nastepna_log=koniec_log;
+            if(koniec_log>start && bufor_[koniec_log-1]=='\r')--koniec_log;
             size_t p = start;
             if (p == koniec_log) dodaj_linie(p, p, logiczna, 0);
             while (p < koniec_log && liczba_wizualnych_ < MAKS_LINII_WIZUALNYCH) {
                 size_t q = p; int szer = 0, ostatnia_spacja = -1, szer_spacji = 0;
+#if defined(BSF_NATIVE)
+                BSF::TextMetrics pen;
+#endif
                 while (q < koniec_log) {
                     uint32_t cp=0; size_t z=CzcionkaUI::dekoduj_utf8(bufor_,q,&cp); if (!z) break;
                     int krok=CzcionkaUI::postep_znaku(cp,skala_dpi_);
+#if defined(BSF_NATIVE)
+                    if(q<65536){auto& point=pomiary_[q/64];if(point.offset==size_t(-1)||point.line!=p){point.offset=q;point.line=p;point.pen=pen;point.pen.width=szer;}}
+                    z=BSF::next_cluster(bufor_,q,koniec_log)-q;
+                    if(BSF::ready()){
+                        auto next=pen;next.cluster(bufor_,q,q+z,ui_skaluj(BSF::ui_size(),skala_dpi_.procent()));
+                        krok=int(next.width-pen.width);pen=next;
+                    }
+#endif
                     if (zawijanie_ && szer+krok>limit && q>p) break;
                     szer+=krok; q+=z;
                     if (cp==' ' || cp=='\t') { ostatnia_spacja=static_cast<int>(q); szer_spacji=szer; }
@@ -533,8 +560,8 @@ private:
                 if (q==p) q=CzcionkaUI::nastepny_znak(bufor_,p,koniec_log);
                 dodaj_linie(p,q,logiczna,szer); p=q;
             }
-            if (koniec_log >= dlugosc_) break;
-            start=koniec_log+1; ++logiczna; ++liczba_logicznych_;
+            if (nastepna_log >= dlugosc_) break;
+            start=nastepna_log+1; ++logiczna; ++liczba_logicznych_;
         }
         if (liczba_wizualnych_==0) dodaj_linie(0,0,0,0);
     }
@@ -552,10 +579,25 @@ private:
         return szerokosc_fragmentu(linie_[li].start,bajt);
     }
     int szerokosc_fragmentu(size_t a,size_t b) const {
+#if defined(BSF_NATIVE)
+        if(b<=65536){
+            size_t at=a;BSF::TextMetrics pen;
+            size_t page=b/64;if(page>=1025)page=1024;
+            while(true){const auto& point=pomiary_[page];if(point.offset!=size_t(-1)&&point.line==a&&point.offset<=b){at=point.offset;pen=point.pen;break;}if(!page||page*64<=a)break;--page;}
+            while(at<b){size_t end=BSF::next_cluster(bufor_,at,b);
+                if(BSF::ready())pen.cluster(bufor_,at,end,ui_skaluj(BSF::ui_size(),skala_dpi_.procent()));
+                else for(size_t p=at;p<end;){uint32_t cp;size_t z=CzcionkaUI::dekoduj_utf8(bufor_,p,&cp);pen.width+=CzcionkaUI::postep_znaku(cp,skala_dpi_);p+=z;}
+                at=end;
+            }return int(pen.width);
+        }
+#endif
         int x=0; while(a<b && a<dlugosc_){uint32_t cp=0;size_t z=CzcionkaUI::dekoduj_utf8(bufor_,a,&cp);if(!z)break;x+=CzcionkaUI::postep_znaku(cp,skala_dpi_);a+=z;} return x;
     }
     size_t bajt_z_x(size_t li,int x) const {
         if(li>=liczba_wizualnych_) return dlugosc_;
+#if defined(BSF_NATIVE)
+        if(BSF::ready())return linie_[li].start+BSF::hit_test(bufor_+linie_[li].start,x,ui_skaluj(BSF::ui_size(),skala_dpi_.procent()),false,nullptr,linie_[li].koniec-linie_[li].start);
+#endif
         size_t p=linie_[li].start; int px=0;
         while(p<linie_[li].koniec){uint32_t cp=0;size_t z=CzcionkaUI::dekoduj_utf8(bufor_,p,&cp);int k=CzcionkaUI::postep_znaku(cp,skala_dpi_);if(x<px+k/2)return p;px+=k;p+=z;}return linie_[li].koniec;
     }
@@ -575,8 +617,21 @@ private:
         }
         return bajt_z_x(li, x - g.widok.x + static_cast<int>(poziomy_->wartosc()));
     }
-    size_t granica_utf8(size_t b) const { if(b>=dlugosc_)return dlugosc_;while(b>0&&(static_cast<uint8_t>(bufor_[b])&0xC0U)==0x80U)--b;return b; }
-    size_t poprzedni_bajt(size_t p,bool slowo) const { if(!p)return 0;p=CzcionkaUI::poprzedni_znak(bufor_,p);if(slowo){while(p>0&&bufor_[p]==' ')p=CzcionkaUI::poprzedni_znak(bufor_,p);while(p>0&&bufor_[CzcionkaUI::poprzedni_znak(bufor_,p)]!=' '&&bufor_[CzcionkaUI::poprzedni_znak(bufor_,p)]!='\n')p=CzcionkaUI::poprzedni_znak(bufor_,p);}return p; }
+    size_t granica_utf8(size_t b) const {
+#if defined(BSF_NATIVE)
+        return granice_.floor(bufor_,b);
+#else
+        if(b>=dlugosc_)return dlugosc_;while(b>0&&(static_cast<uint8_t>(bufor_[b])&0xC0U)==0x80U)--b;return b;
+#endif
+    }
+    size_t poprzedni_klaster(size_t p)const{
+#if defined(BSF_NATIVE)
+        return granice_.previous(bufor_,p);
+#else
+        return CzcionkaUI::poprzedni_znak(bufor_,p);
+#endif
+    }
+    size_t poprzedni_bajt(size_t p,bool slowo) const { if(!p)return 0;p=poprzedni_klaster(p);if(slowo){while(p>0&&bufor_[p]==' ')p=poprzedni_klaster(p);while(p>0&&bufor_[poprzedni_klaster(p)]!=' '&&bufor_[poprzedni_klaster(p)]!='\n')p=poprzedni_klaster(p);}return p; }
     size_t nastepny_bajt(size_t p,bool slowo) const { if(p>=dlugosc_)return dlugosc_;p=CzcionkaUI::nastepny_znak(bufor_,p,dlugosc_);if(slowo){while(p<dlugosc_&&bufor_[p]!=' '&&bufor_[p]!='\n')p=CzcionkaUI::nastepny_znak(bufor_,p,dlugosc_);while(p<dlugosc_&&bufor_[p]==' ')p=CzcionkaUI::nastepny_znak(bufor_,p,dlugosc_);}return p; }
     void przesun_pionowo(int delta){size_t li=linia_dla_bajtu(kursor_);int n=static_cast<int>(li)+delta;if(n<0)n=0;if(n>=static_cast<int>(liczba_wizualnych_))n=static_cast<int>(liczba_wizualnych_)-1;kursor_=bajt_z_x(static_cast<size_t>(n),preferowane_x_);}
 
@@ -587,9 +642,22 @@ private:
         if(czy_ma_zaznaczenie()&&a<b){int x1=g.widok.x-offx+szerokosc_fragmentu(ln.start,a);int x2=g.widok.x-offx+szerokosc_fragmentu(ln.start,b);ctx.rysuj_prostokat(Prostokat(x1,y,x2-x1,CzcionkaUI::pobierz_wysokosc(skala_dpi_)),motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));}
         size_t n=ln.koniec-ln.start;if(n>=pojemnosc_)n=pojemnosc_-1;for(size_t i=0;i<n;++i)roboczy_[i]=bufor_[ln.start+i];roboczy_[n]='\0';
         ctx.rysuj_tekst(Punkt(g.widok.x-offx,y),roboczy_,czy_wlaczona_?styl.tekst:motyw_kolor(MOTYW_KOLOR_WYLACZONY),skala_dpi_);
-        if(czy_ma_zaznaczenie()&&a<b){size_t m=b-a;if(m>=pojemnosc_)m=pojemnosc_-1;for(size_t i=0;i<m;++i)roboczy_[i]=bufor_[a+i];roboczy_[m]='\0';int x=g.widok.x-offx+szerokosc_fragmentu(ln.start,a);ctx.rysuj_tekst(Punkt(x,y),roboczy_,motyw_kolor_tekstu_zaznaczenia(),skala_dpi_);}
+        if(czy_ma_zaznaczenie()&&a<b){
+            int x1=g.widok.x-offx+szerokosc_fragmentu(ln.start,a),x2=g.widok.x-offx+szerokosc_fragmentu(ln.start,b);
+            ctx.dodaj_przyciecie(Prostokat(x1,y,x2-x1,CzcionkaUI::pobierz_wysokosc(skala_dpi_)));
+            ctx.rysuj_tekst(Punkt(g.widok.x-offx,y),roboczy_,motyw_kolor_tekstu_zaznaczenia(),skala_dpi_);ctx.zdejmij_przyciecie();
+        }
     }
-    void ustaw_tekst_bez_historii(const char* src){size_t j=0;for(size_t i=0;src[i]&&j+1<pojemnosc_;++i){if(src[i]=='\r'){if(src[i+1]=='\n')++i;bufor_[j++]='\n';}else bufor_[j++]=src[i];}bufor_[j]='\0';dlugosc_=j;kursor_=kotwica_=dlugosc_;przelicz_linie();aktualizuj_przewijanie();przewin_do_kursora();uniewaznij_obszar(geometria().widok);}
+    void ustaw_tekst_bez_historii(const char* src){
+        size_t n=0;while(src[n])++n;size_t j=n<pojemnosc_?n:pojemnosc_-1;
+#if defined(BSF_NATIVE)
+        j=BSF::cluster_prefix(src,n,j);
+#else
+        while(j&&(static_cast<uint8_t>(src[j])&0xc0U)==0x80U)--j;
+#endif
+        for(size_t i=0;i<j;++i)bufor_[i]=src[i];
+        bufor_[j]=0;dlugosc_=j;kursor_=kotwica_=j;przelicz_linie();aktualizuj_przewijanie();przewin_do_kursora();uniewaznij_obszar(geometria().widok);
+    }
     void wstaw_fragment(const char* src) {
         if (!src) return;
         size_t znaki = CzcionkaUI::liczba_znakow(bufor_);
@@ -599,6 +667,10 @@ private:
         size_t n = 0;
         while (src[n]) ++n;
         size_t src_zn = CzcionkaUI::liczba_znakow(src);
+#if defined(BSF_NATIVE)
+        znaki=BSF::cluster_count(bufor_,dlugosc_);src_zn=BSF::cluster_count(src,n);
+#endif
+        size_t source_size=n;
         size_t sel_zn = 0;
         for (size_t p = sel; p < end;
              p = CzcionkaUI::nastepny_znak(bufor_, p, end)) ++sel_zn;
@@ -610,7 +682,12 @@ private:
         }
         if (dlugosc_ - usun + n >= pojemnosc_)
             n = pojemnosc_ - 1 - (dlugosc_ - usun);
+#if defined(BSF_NATIVE)
+        n=BSF::cluster_prefix(src,source_size,n);
+#else
+        (void)source_size;
         while (n > 0 && (static_cast<uint8_t>(src[n]) & 0xC0U) == 0x80U) --n;
+#endif
 
         zapisz_historie();
         if (n <= usun) {
@@ -628,10 +705,13 @@ private:
         dlugosc_ = dlugosc_ - usun + n;
         bufor_[dlugosc_] = '\0';
         kursor_ = kotwica_ = sel + n;
+#if defined(BSF_NATIVE)
+        kursor_=kotwica_=BSF::cluster_ceil(bufor_,dlugosc_,kursor_);
+#endif
         po_edycji(sel);
     }
     void usun_zaznaczenie(){if(!czy_ma_zaznaczenie())return;wstaw_fragment("");}
-    void usun_wstecz(){if(czy_ma_zaznaczenie()){usun_zaznaczenie();return;}if(!kursor_)return;kotwica_=CzcionkaUI::poprzedni_znak(bufor_,kursor_);wstaw_fragment("");}
+    void usun_wstecz(){if(czy_ma_zaznaczenie()){usun_zaznaczenie();return;}if(!kursor_)return;kotwica_=poprzedni_klaster(kursor_);wstaw_fragment("");}
     void usun_w_przod(){if(czy_ma_zaznaczenie()){usun_zaznaczenie();return;}if(kursor_>=dlugosc_)return;kotwica_=CzcionkaUI::nastepny_znak(bufor_,kursor_,dlugosc_);wstaw_fragment("");}
     void po_edycji(size_t od){przelicz_linie();aktualizuj_przewijanie();przewin_do_kursora();size_t li=linia_dla_bajtu(od);Geometria g=geometria();int pierwszy=static_cast<int>(pionowy_->wartosc());int y=g.widok.y+(static_cast<int>(li)-pierwszy)*wysokosc_linii();if(y<g.widok.y)y=g.widok.y;uniewaznij_obszar(Prostokat(g.widok.x,y,g.widok.szerokosc,g.widok.dolny()-y));powiadom_zmiane();}
     void kopiuj(){if(!czy_ma_zaznaczenie())return;size_t a=poczatek_zaznaczenia(),n=koniec_zaznaczenia()-a;if(n>=pojemnosc_)n=pojemnosc_-1;for(size_t i=0;i<n;++i)schowek_[i]=bufor_[a+i];schowek_[n]='\0';clipboard_set("text/plain",schowek_,n+1);}
@@ -642,6 +722,11 @@ private:
     void powiadom_zmiane(){if(cb_zmiana_)cb_zmiana_(this,bufor_,dane_zmiany_);if(cb_zmiana_wartosci_)cb_zmiana_wartosci_(this,dane_zmiany_wartosci_);}
     void uniewaznij_zaznaczenie(size_t,size_t){uniewaznij_obszar(geometria().widok);}
 
+#if defined(BSF_NATIVE)
+    BSF::BoundaryIndex<> granice_;
+    struct PunktPomiaru{size_t offset{size_t(-1)},line{};BSF::TextMetrics pen;};
+    PunktPomiaru pomiary_[1025];
+#endif
     char* bufor_{nullptr}; char* roboczy_{nullptr}; char* schowek_{nullptr}; size_t pojemnosc_{0},dlugosc_{0},kursor_{0},kotwica_{0};
     char placeholder_[128]{}; size_t maks_znakow_{0}; bool zawijanie_{true},pozwol_poziomy_{true},pozwol_pionowy_{true},zaznaczanie_{false}; int odstep_linii_{2},preferowane_x_{0},maks_szerokosc_{0};
     Linia linie_[MAKS_LINII_WIZUALNYCH]; size_t liczba_wizualnych_{0},liczba_logicznych_{1}; mutable size_t ostatnio_narysowane_{0};

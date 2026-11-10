@@ -1,3 +1,4 @@
+#include "uklad_procesu.h"
 #include "app_identity.h"
 #include "wyjatek_uzytkownika.h"
 #include "cykl_wylaczania_grafiki.h"
@@ -2083,7 +2084,8 @@ __attribute__((noinline)) uint64_t bws_http_common(
     uint64_t arg1,
     uint64_t arg2,
     uint64_t arg3,
-    uint64_t arg4
+    uint64_t arg4,
+    bool wide = false
 ) {
     if (!proces_ma_prawo(
             proces,
@@ -3182,6 +3184,9 @@ static uint64_t obsluga_wywolan_systemowych_impl(
         BlokadaEkranu lock;
         return skladacz_obrazu_ustaw_maske_tytulu(aktualny_pid,w,h,reinterpret_cast<const uint8_t*>(arg2))?1:0;
     }
+    if (nr_funkcji == BWS_HTTP64 || nr_funkcji == BWS_HTTPS64)
+        return bws_http_common(proces, nr_funkcji == BWS_HTTPS64,
+            arg1, arg2, arg3, arg4, true);
     if (nr_funkcji >= BWS_GUI_GEOMETRIA &&
         nr_funkcji < BWS_PIERWSZY_WOLNY) {
         return bws_nowoczesne_obsluz(

@@ -1,6 +1,9 @@
 #pragma once
 #include "document.h"
 #include "work.h"
+#if defined(BSF_NATIVE)
+#include "../../bsf/edit.h"
+#endif
 namespace Husarz {
 inline bool editable(const Document &,const FormControl &);
 inline bool selectable(const Document &,const FormControl &);
@@ -24,7 +27,13 @@ inline void control_display(Document &d,FormControl &c) {
         out[n++]=c.checked?'x':' ';
         out[n++]=input_type(d,c.node,"radio")?')':']';
     } else if (input_type(d,c.node,"password")) {
-        for (size_t i=0;i<c.length;) { size_t used; utf8(c.value+i,c.length-i,used); i+=used; out[n++]='*'; }
+        for (size_t i=0;i<c.length;) {
+#if defined(BSF_NATIVE)
+            i=BSF::next_cluster(c.value,i,c.length);
+#else
+            size_t used;utf8(c.value+i,c.length-i,used);i+=used;
+#endif
+            out[n++]='*'; }
     } else { for (;n<c.length;++n) out[n]=c.value[n]; }
     if (!n) out[n++]=' ';
     out[n]=0; d.nodes[c.node].text=c.display; d.nodes[c.node].text_length=n;
@@ -83,18 +92,30 @@ inline bool editable(const Document &d,const FormControl &c) {
 // are bounded by MaxFormValue, independent of document size.
 inline unsigned form_previous(const FormControl &c,unsigned p) {
     if (p>c.length) p=c.length;
+#if defined(BSF_NATIVE)
+    return BSF::previous_cluster(c.value,BSF::cluster_floor(c.value,c.length,p));
+#else
     if (p) { --p; while (p && (uint8_t(c.value[p])&0xc0)==0x80) --p; }
     return p;
+#endif
 }
 inline unsigned form_next(const FormControl &c,unsigned p) {
     if (p>=c.length) return c.length;
+#if defined(BSF_NATIVE)
+    return BSF::next_cluster(c.value,p,c.length);
+#else
     size_t used; utf8(c.value+p,c.length-p,used); return p+unsigned(used);
+#endif
 }
 inline unsigned selection_start(const FormControl &c) {return c.anchor<c.cursor?c.anchor:c.cursor;}
 inline unsigned selection_end(const FormControl &c) {return c.anchor>c.cursor?c.anchor:c.cursor;}
 inline void form_move(Document &d,FormControl &c,unsigned p,bool extend) {
     p=p>c.length?c.length:p;
+#if defined(BSF_NATIVE)
+    p=BSF::cluster_floor(c.value,c.length,p);
+#else
     while (p && p<c.length && (uint8_t(c.value[p])&0xc0)==0x80) --p;
+#endif
     if(c.cursor==p && (extend || c.anchor==p))return;
     c.cursor=uint16_t(p); if(!extend)c.anchor=c.cursor;
     c.preferred_x=-1;c.reveal_caret=true;d.invalidate(c.node,1);
@@ -113,6 +134,9 @@ inline bool form_replace(Document &d,FormControl &c,const char *text,size_t size
         if(cp==127 || ((cp=='\n' || cp=='\t') && !d.tag(c.node,"textarea")))break;
         accepted+=unsigned(used);
     }
+#if defined(BSF_NATIVE)
+    accepted=unsigned(BSF::cluster_prefix(text,size,accepted));
+#endif
     if(!accepted && size)return true; // A full field must keep its selection.
     if(!accepted && start==end)return true;
     for(unsigned i=end;i<=c.length;++i) c.value[start+i-end]=c.value[i];
@@ -120,6 +144,9 @@ inline bool form_replace(Document &d,FormControl &c,const char *text,size_t size
     for(unsigned i=c.length+1;i>start;--i)c.value[i+accepted-1]=c.value[i-1];
     for(unsigned i=0;i<accepted;++i)c.value[start+i]=text[i];
     c.length+=uint16_t(accepted);c.cursor=c.anchor=uint16_t(start+accepted);c.preferred_x=-1;
+#if defined(BSF_NATIVE)
+    c.cursor=c.anchor=uint16_t(BSF::cluster_ceil(c.value,c.length,c.cursor));
+#endif
     control_display(d,c);if(changed)*changed=true;return true;
 }
 inline bool form_insert(Document &d,uint32_t cp,bool *changed=nullptr) {

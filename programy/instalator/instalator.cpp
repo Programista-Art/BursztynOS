@@ -5,7 +5,7 @@ using namespace BursztynUI;
 extern "C" void _start();
 extern "C" {
 __attribute__((section(".naglowek"),used)) NaglowekBur naglowek={
-    {'B','U','R',0},(uint64_t)&_start,0x1000,0x30000,0x1001000,0x31000,0x20000,0x1031000};
+    {'B','U','R',0},(uint64_t)&_start,0x1000,0x34000,0x1001000,0x35000,0x20000,0x1035000};
 }
 namespace {
 void append(char* out, unsigned capacity, unsigned* length, const char* text) {

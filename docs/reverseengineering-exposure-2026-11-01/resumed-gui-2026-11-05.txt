@@ -1,0 +1,12 @@
+Screenshot: settings-themes
+Screenshot: countdown-first
+Traceback (most recent call last):
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/test_husarz_qemu.py", line 1653, in <module>
+    main()
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/test_husarz_qemu.py", line 523, in main
+    result.update(run(out,screenshot,click,move,key,wait,guest_ticks,launch_start,health,hmp,symbol,kernel_sha,iso_sha))
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/settings_themes_power_qemu_cases.py", line 72, in run
+    first=status_pixels('countdown-first');assert len(set(first.getdata()))>2,'countdown label must be visible'
+                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: countdown label must be visible

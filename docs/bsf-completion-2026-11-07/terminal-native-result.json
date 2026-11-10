@@ -1,0 +1,10 @@
+{
+  "result": "PASS",
+  "mode": "terminal-unicode-only",
+  "ttf_grid": true,
+  "edit_output_bytes": true,
+  "bitmap_recovery": true,
+  "no_guest_fault": true,
+  "kernel_sha256": "dd3c341de601984ebaa4aa0e1ba2102d00628ef00c8bea8b54f4589031d46b87",
+  "iso_sha256": "680ea9ce148f3fa7a2c56a95d2f5acb6a8820bc209d2d91ae71825a794d837a3"
+}

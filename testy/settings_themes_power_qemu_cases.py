@@ -37,9 +37,21 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
         w=window();rect=geometry['themes_list']
         # Sans 16 release rows are 25 px (19 px font + 6 px list padding).
         click(w['x']+rect[0]+30,w['y']+28+rect[1]+5+index*25+12);settle()
+    theme_observer=None;theme_page=None
     def opened():
+        nonlocal theme_observer,theme_page
         launch('ustawienia');wait(lambda:window() is not None,'native Settings',180,interval=.1);settle(250)
-        hit(geometry['nav'][2]);screenshot('settings-themes')
+        from bsf_process_observer import ProcessObserver
+        observer=ProcessObserver(hmp,symbol,ROOT/'ustawienia.elf','Ustawienia')
+        theme_observer=observer;theme_page=observer.object('SettingsUI::ThemesPage');assert theme_page
+        target=observer.object('SettingsUI::ThemesViewport');assert target
+        w=window();click(w['x']+w['w']//2,w['y']+12)
+        for _ in range(3):
+            hit(geometry['nav'][2])
+            if observer.visible(target):break
+        wait(lambda:observer.visible(target),'native Themes viewport visible',90)
+        settle(250)
+        screenshot('settings-themes')
     def start_power(name,hover=False):
         click(28,700);wait(popup,'Start open',90);settle()
         if hover:
@@ -69,8 +81,18 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
     def status_pixels(name):
         w=window();x,y,width,height=geometry['themes_status']
         return screenshot(name).crop((w['x']+x,w['y']+28+y,w['x']+x+width,w['y']+28+y+height))
+    control_layout=json.loads((ROOT/'.bsf-test/control-layout.json').read_text())
+    def countdown_model():
+        pointer=struct.unpack('<Q',theme_observer.user(theme_page+control_layout['theme_status'],8))[0]
+        text=theme_observer.user(pointer+control_layout['text'],128).split(b'\0',1)[0]
+        seconds=struct.unpack('<I',theme_observer.user(theme_page+control_layout['theme_seconds'],4))[0]
+        (out/'theme-label-observed.json').write_text(json.dumps(dict(text=text.decode('utf-8'),seconds=seconds,kernel_preview=preview()),ensure_ascii=False))
+        return text
+    wait(lambda:b'Podgl' in countdown_model() and b'aktywny' in countdown_model(),'countdown label model updated after preview syscall',90)
+    wait(lambda:len(set(status_pixels('countdown-visible-probe').getdata()))>2,'countdown label pixels submitted',90)
     first=status_pixels('countdown-first');assert len(set(first.getdata()))>2,'countdown label must be visible'
     settle(550)
+    wait(lambda:status_pixels('countdown-progress-probe').tobytes()!=first.tobytes(),'visible countdown pixels advance',90)
     second=status_pixels('countdown-next');assert first.tobytes()!=second.tobytes(),'visible countdown must advance'
     hit(geometry['themes_cancel']);wait(lambda:not preview(),'countdown explicit restore',120)
     assert theme()==original

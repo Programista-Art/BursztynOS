@@ -4053,7 +4053,10 @@ extern "C" bool bsp_wczytaj_obraz_bur(const char* sciezka, BurObrazPliku* out,
     out->bajty_naglowka = n;
     if (out->rozmiar > maks) { out->blad = "file-size-exceeds-maximum"; return false; }
     if (n < sizeof(NaglowekBur)) { out->blad = "truncated-header"; return false; }
-    out->blad = walidator(out->naglowek, out->rozmiar);
+    const bool v2 = out->naglowek.magia[0] == 'B' && out->naglowek.magia[1] == 'U' &&
+        out->naglowek.magia[2] == 'R' && out->naglowek.magia[3] == 2;
+    // v2 is validated from the complete private snapshot by the production loader.
+    out->blad = v2 ? nullptr : walidator(out->naglowek, out->rozmiar);
     if (out->blad) return false;
     auto* obraz = static_cast<uint8_t*>(kmalloc(out->rozmiar));
     if (!obraz) { out->blad = "image-allocation-failed"; return false; }

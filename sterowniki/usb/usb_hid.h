@@ -29,8 +29,18 @@ void usb_klawiatura_zresetuj_stan(void);
 #endif
 
 #ifdef __cplusplus
+#if defined(BURSZTYN_VIRTIO_HOST_TEST)
+extern uint64_t host_czas_monotoniczny_ns() __attribute__((weak));
+inline uint64_t usb_hid_repeat_now(){return host_czas_monotoniczny_ns?host_czas_monotoniczny_ns():0;}
+#else
+#include "sterowniki/czas/hpet.h"
+extern uint64_t scheduler_pobierz_tick();
+inline uint64_t usb_hid_repeat_now(){return hpet_dostepny()?czas_monotoniczny_ns():scheduler_pobierz_tick()*4000000ULL;}
+#endif
+constexpr uint64_t UsbRepeatDelay=400000000ULL,UsbRepeatInterval=33000000ULL;
 inline bool usb_hid_keyboard_register(InputDevice& device) {
     if(device.registered)return true;
+    device.keyboard_repeat_usage=0;device.keyboard_repeat_sent=false;
     const char* name="usb-keyboard";
     for(size_t i=0;name[i]&&i+1<sizeof(device.name);++i)device.name[i]=name[i];
     device.kinds=INPUT_DEVICE_KIND_KEYBOARD;device.bus_type=INPUT_BUS_USB;
@@ -42,6 +52,7 @@ inline void usb_hid_keyboard_report(InputDevice& device, uint8_t* previous, cons
 
     if(!usb_hid_keyboard_register(device))return;
 
+    const uint64_t now=usb_hid_repeat_now();
     const uint8_t raw_mod = raport[0];
     const uint8_t prev_mod = previous[0];
 
@@ -72,6 +83,7 @@ inline void usb_hid_keyboard_report(InputDevice& device, uint8_t* previous, cons
             }
         }
         if (!nadal) {
+            if(device.keyboard_repeat_usage==old_u){device.keyboard_repeat_usage=0;device.keyboard_repeat_sent=false;}
             const uint16_t linux_kc = input_usb_hid_usage_to_linux(old_u);
             if (linux_kc != 0 && n < 31) {
                 evs[n++] = { INPUT_EV_KEY, linux_kc, 0U };
@@ -105,14 +117,16 @@ inline void usb_hid_keyboard_report(InputDevice& device, uint8_t* previous, cons
         if (linux_kc == 0) continue;
 
         if (!byl) {
-            // Nowe wcisniecie
+            // New press starts a bounded typematic delay for the latest key.
+            device.keyboard_repeat_usage=u;device.keyboard_repeat_started=now;device.keyboard_repeat_sent=false;
             if (n < 31) {
                 evs[n++] = { INPUT_EV_KEY, linux_kc, 1U };
             }
         } else if (identyczny) {
-            // Raport przyszedl ponownie bez zmian ze stabilnie trzymanym klawiszem -> repeat
-            if (n < 31) {
-                evs[n++] = { INPUT_EV_KEY, linux_kc, 2U };
+            if(!device.keyboard_repeat_usage){device.keyboard_repeat_usage=u;device.keyboard_repeat_started=now;device.keyboard_repeat_sent=false;}
+            if(device.keyboard_repeat_usage==u && now-device.keyboard_repeat_started>=UsbRepeatDelay &&
+               (!device.keyboard_repeat_sent || now-device.keyboard_repeat_last>=UsbRepeatInterval) && n<31){
+                evs[n++]={INPUT_EV_KEY,linux_kc,2U};device.keyboard_repeat_last=now;device.keyboard_repeat_sent=true;
             }
         }
     }

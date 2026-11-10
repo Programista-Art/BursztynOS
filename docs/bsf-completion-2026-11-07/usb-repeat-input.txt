@@ -1,0 +1,6 @@
+g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-pie -no-pie -I. narzedzia/test_usb_keyboard_repeat.cpp -o .bsf-test/usb-keyboard-repeat
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/usb-keyboard-repeat
+USB HID: one tap, unchanged reports, delayed repeat, repeat rate and release PASS
+g++ -std=c++17 -O1 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined narzedzia/test_gui_text_input.cpp klawiatura.cpp -o .bursztyn-ui-test/test-gui-text-input
+ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-gui-text-input
+Production keyboard / TEXTINPUT / dialogs: 7293/7293 PASS

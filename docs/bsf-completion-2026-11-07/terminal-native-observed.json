@@ -1,0 +1,18 @@
+{
+  "cell_px": 10,
+  "row_px": 21,
+  "input_hex": "7069737a2022506f6c736b69205a61c5bcc3b3c582c4872067c499c59b6cc485206a61c5bac5842e20d0a0d183d181d181d0bad0b8d0b920d09fd180d0b8d0b2d0b5d18220d0bcd0b8d1802e20d0a3d0bad180d0b0d197d0bdd181d18cd0bad0b020d09fd180d0b8d0b2d196d18220d181d0b2d196d1822e20ce95cebbcebbceb7cebdceb9cebaceac20ce9aceb1cebbceb7cebcceadcf81ceb120cebacf8ccf83cebcceb52e20e1bc80e1be80e1bfb720f09f9880207c207a22",
+  "output": [
+    "",
+    "==================================================",
+    " Powłoka Bursztynowa bsh v3.0 (Unicode)",
+    " Bursztyn OS v1.0.1.9",
+    " Autor: Dymitr Wygowski",
+    " Ring 3 / BWS / BSP2 / PZB",
+    "==================================================",
+    "Wpisz 'pomoc', aby zobaczyć polecenia.",
+    "powłoka> pisz \"Polski Zażółć gęślą jaźń. Русский Привет мир. Українська Привіт світ. Ελληνικά Καλημέρα κόσμε. ἀᾀῷ 😀 | z\"",
+    "Polski Zażółć gęślą jaźń. Русский Привет мир. Українська Привіт світ. Ελληνικά Καλημέρα κόσμε. ἀᾀῷ 😀 | z",
+    ""
+  ]
+}

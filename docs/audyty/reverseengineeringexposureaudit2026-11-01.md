@@ -1,5 +1,11 @@
 # Comprehensive Defensive Reverse-Engineering Exposure Audit of Bursztyn OS (2026-11-01)
 
+> Resumed on 2026-11-05 against the current working tree. Sections 3–6 and 12
+> contain the historical November 1 measurements. See sections 15–16 for fresh
+> artifact hashes, verification results and remaining acceptance failures.
+> The NX/W^X assurance in the earlier report was incorrect and is corrected
+> in section 11. This report does not certify release readiness.
+
 ## 1. Executive Summary & Purpose
 
 This audit evaluates the public release artifact of **Bursztyn OS** (`BursztynOS.iso`) from the perspective of an external reverse engineer who receives only distributed release media.
@@ -7,8 +13,8 @@ This audit evaluates the public release artifact of **Bursztyn OS** (`BursztynOS
 **Explicit Scope and Philosophy:**
 - **Bursztyn OS remains reverse engineerable.** Once native x86-64 machine code is distributed in a bootable ISO, a skilled analyst using standard disassemblers and decompilers (`Ghidra`, `IDA`, `Binary Ninja`, `radare2`, `objdump`, `QEMU` + GDB stub) can recover control flow, system-call dispatchers, hardware register protocols, and binary formats.
 - **No malware-style anti-analysis or obfuscation was introduced.** No anti-debugger traps, VM/hypervisor detection, timing-based traps, self-modifying code, runtime unpackers, encrypted code segments with embedded keys, corrupted ELF/BUR headers, crash-on-debugger behavior, Ghidra/IDA signatures, or bogus control-flow graphs were added.
-- **Security does not rely on obscurity.** Ring 0 / Ring 3 isolation, page-level W^X (`CR0.WP` + `IA32_EFER.NXE`), user-pointer validation (`bws_vmm_sprawdz_zakres_uzytkownika`), BUR loader bounds checking, and PZB/BZL capability enforcement remain the sole security boundaries—never secrecy of syscall numbers, manifest syntax, or filesystem layouts.
-- **Goal achieved:** Minimize accidental implementation leakage in the public ISO (unstripped ELF symbol tables, embedded upstream test private keys, unused TLS server/debug instrumentation, and unarchived debug metadata) while preserving full developer debuggability through deterministic split-symbol archiving (`.release-private/<public_kernel_sha256>/`), third-party license compliance (`/licenses/`), and automated CI release verification (`narzedzia/verifyreleasemetadata.py`).
+- **Security does not rely on obscurity.** Ring 0 / Ring 3 isolation, page-table isolation and write protection (`CR0.WP`; see the NX limitation in section 11), user-pointer validation (`bws_vmm_sprawdz_zakres_uzytkownika`), BUR loader bounds checking, and PZB/BZL capability enforcement remain the sole security boundaries—never secrecy of syscall numbers, manifest syntax, or filesystem layouts.
+- **Implemented exposure cleanup:** Minimize accidental implementation leakage in the public ISO (unstripped ELF symbol tables, embedded upstream test private keys, unused TLS server/debug instrumentation, and unarchived debug metadata) while preserving full developer debuggability through deterministic split-symbol archiving (`.release-private/<public_kernel_sha256>/`), third-party attribution notices (`/licenses/`; distribution source obligations require separate verification), and automated CI release verification (`narzedzia/verifyreleasemetadata.py`).
 
 ---
 
@@ -58,8 +64,8 @@ This audit evaluates the public release artifact of **Bursztyn OS** (`BursztynOS
 ## 4. Complete Shipped ISO Inventory & Development Artifact Search
 
 The complete machine-readable inventories are stored in:
-- Pre-remediation baseline: [`docs/reverseengineering-exposure-2026-11-01/before.json`](file:///home/programista/Pulpit/Burstzyn/BursztynOS/docs/reverseengineering-exposure-2026-11-01/before.json)
-- Post-remediation baseline: [`docs/reverseengineering-exposure-2026-11-01/after.json`](file:///home/programista/Pulpit/Burstzyn/BursztynOS/docs/reverseengineering-exposure-2026-11-01/after.json) (and `.release-private/release-inventory.json`)
+- Pre-remediation baseline: [`docs/reverseengineering-exposure-2026-11-01/before.json`](reverseengineering-exposure-2026-11-01/before.json)
+- Post-remediation baseline: [`docs/reverseengineering-exposure-2026-11-01/after.json`](reverseengineering-exposure-2026-11-01/after.json) (and `.release-private/release-inventory.json`)
 
 ### 4.1 Summary of All 614 Files in `BursztynOS.iso`
 | Path / Category | Count | Total Size (B) | Format / Magic | Purpose & Classification |
@@ -161,7 +167,7 @@ Strings remaining in `/boot/system_operacyjny.bin` and `.bur` apps are classifie
 
 ## 7. Secret Scanning & Cryptographic Material Audit
 
-### 7.1 Critical/High Finding Remediated: Embedded mbedTLS Test Private Keys
+### 7.1 Removed Public mbedTLS Test Private-Key Fixtures
 During the pre-remediation secret scan of `BursztynOS.iso`, `verifyreleasemetadata.py` detected **10 PEM-encoded private keys** (`-----BEGIN RSA PRIVATE KEY-----` and `-----BEGIN EC PRIVATE KEY-----`) inside `/boot/system_operacyjny.bin`:
 
 | File | Byte Offset (Before) | Secret Category | Redacted SHA-256 Fingerprint | Origin |
@@ -171,7 +177,7 @@ During the pre-remediation secret scan of `BursztynOS.iso`, `verifyreleasemetada
 | `boot/system_operacyjny.bin` | `1,225,792`, `1,245,440` | `private-key` (PEM) | `bba1f3fa6459b7d9` | `biblioteki/mbedtls/library/certs.c` (`MBEDTLS_CERTS_C`) |
 | `boot/system_operacyjny.bin` | `1,229,824`, `1,254,304` | `private-key` (PEM) | `184a146ccd4b5d90` | `biblioteki/mbedtls/library/certs.c` (`MBEDTLS_CERTS_C`) |
 
-**Analysis & Fix:** Although these were upstream mbedTLS sample test keys (`mbedtls_test_ca_key_*`, `mbedtls_test_srv_key_*`, `mbedtls_test_cli_key_*`) rather than Bursztyn OS infrastructure secrets, shipping any private keys in a production kernel image is unacceptable release hygiene and wastes `.rodata` space. Adding `#undef MBEDTLS_CERTS_C` in [`biblioteki/mbedtls/bursztyn_mbedtls_config.h`](file:///home/programista/Pulpit/Burstzyn/BursztynOS/biblioteki/mbedtls/bursztyn_mbedtls_config.h#L137-L141) completely removed all 10 PEM private keys and their DER equivalents (**0 secret findings after remediation**).
+**Analysis & Fix:** Although these were upstream mbedTLS sample test keys (`mbedtls_test_ca_key_*`, `mbedtls_test_srv_key_*`, `mbedtls_test_cli_key_*`) rather than Bursztyn OS infrastructure secrets, shipping any private keys in a production kernel image is unacceptable release hygiene and wastes `.rodata` space. Adding `#undef MBEDTLS_CERTS_C` in [`biblioteki/mbedtls/bursztyn_mbedtls_config.h`](../biblioteki/mbedtls/bursztyn_mbedtls_config.h#L137-L141) completely removed all 10 PEM private keys and their DER equivalents (**0 secret findings after remediation**).
 
 ### 7.2 Intentional Public Cryptographic Roots
 - **OTA Update Verification Public Key (`aktualizacja_klucz.h`):** Generated by `narzedzia/aktualizacje/generuj_naglowek_klucza.py --tryb release` (public key fingerprint `aceba052f9096313...`). This is a **public verification key** (never a private signing key) required by the kernel to authenticate signed OTA update packages.
@@ -189,8 +195,8 @@ During the pre-remediation secret scan of `BursztynOS.iso`, `verifyreleasemetada
   - `0x14..0x1B` (`8` B): `tekst_rozmiar` (4 KiB-aligned size of `.text` + `.rodata`)
   - `0x1C..0x23` (`8` B): `tekst_wirtualny` (`0x1001000`, mapped read/execute, user-mode read-only)
   - `0x24..0x2B` (`8` B): `dane_przesuniecie` (`0x1000 + tekst_rozmiar`, page-aligned)
-  - `0x2C..0x33` (`8` B): `dane_rozmiar` (4 KiB-aligned total memory size of `.data` + `.bss`; bytes beyond EOF up to `dane_rozmiar` are zero-filled by `loader.cpp`)
-  - `0x34..0x3B` (`8` B): `dane_wirtualny` (`0x1001000 + tekst_rozmiar`, mapped read/write + `PTE_NX`)
+  - `0x2C..0x33` (`8` B): `dane_rozmiar` (total memory size of `.data` + `.bss`; bytes beyond EOF up to `dane_rozmiar` are zero-filled by `loader.cpp`)
+  - `0x34..0x3B` (`8` B): `dane_wirtualny` (`0x1001000 + tekst_rozmiar`, mapped read/write; NX is not established (section 11))
 - **What an external analyst can recover:** Entry point VA, code/rodata segment bounds, data/BSS segment bounds, x86-64 instructions (`syscall` numbers passed in `%rax`), and UI string literals.
 - **What is absent:** Because `objcopy -O binary` emits only raw loadable segments and `RING3_FLAGS` omits `-g` and disables RTTI/exceptions/unwind tables, `.bur` files contain **zero** ELF headers, **zero** section headers, **zero** symbol tables, **zero** relocation records, **zero** source file names (except the intentional `extronic16B_unicode.h` test label in `test.bur`), and **zero** build paths.
 
@@ -213,7 +219,7 @@ During the pre-remediation secret scan of `BursztynOS.iso`, `verifyreleasemetada
 - **Installed Disk Boot (`/boot/installer/BOOTX64.EFI`):** Generated via `grub-mkstandalone -O x86_64-efi --locales="" --fonts=""` with embedded `narzedzia/instalator/grub-embedded.cfg` supporting A/B kernel slot selection (`bursztyn.slot=A/B`).
 - Both `/efi/boot/bootx64.efi` (`208,896` B) and `/boot/installer/BOOTX64.EFI` (`3,809,280` B) are stripped PE32+ EFI executables containing zero developer home paths.
 
-### 9.2 Third-Party License Compliance (`/licenses/`)
+### 9.2 Third-Party License Notices (`/licenses/`)
 `narzedzia/package_release_notices.py` packages all required license notices into `/licenses/` on `BursztynOS.iso` (in addition to `/czcionki/ttf/LICENSE-DejaVu.txt` and `/czcionki/ttf/LICENSE-stb.txt`):
 - `/licenses/BursztynOS.md` — Bursztyn OS project license and attribution (`License.md`).
 - `/licenses/mbedtls.txt` — Apache-2.0 license for `mbedTLS 2.28.x`.
@@ -226,28 +232,25 @@ During the pre-remediation secret scan of `BursztynOS.iso`, `verifyreleasemetada
 ## 10. Public System Call Interface (BWS) & PZB / BZL Security Architecture Review
 
 ### 10.1 BWS Syscall Reconstructibility
-- An external researcher disassembling `.bur` apps or `syscalls.cpp` / `bws_nowoczesne.cpp` can straightforwardly identify the `syscall` instruction entry point (`MSR_LSTAR`) and the dispatch table for **BWS 1..93** (`bws_api.h`).
+- An external researcher disassembling `.bur` apps or the kernel can straightforwardly identify the `syscall` instruction entry point (`MSR_LSTAR`) and the dispatch table for **BWS 1..93** (`bws_api.h`).
 - **Architectural Verification:** BWS numbers are a public ABI contract required by Ring 3 applications. Security does not rely on hiding syscall numbers:
-  1. **Pointer & Range Validation (`bezpieczenstwo.cpp` + `vmm.cpp`):** Every user buffer/string passed to a BWS handler is validated by `zakres_numerycznie_poprawny()` (`0x1000 <= addr < 0x0000800000000000`, overflow-safe length check) AND `bws_vmm_sprawdz_zakres_uzytkownika()` (walking the active process's 4-level page tables to verify `PTE_PRESENT | PTE_USER`, plus `PTE_WRITE` for output buffers), and copied into kernel buffers via `skopiuj_z_przestrzeni_uzytkownika()` / `skopiuj_string_z_uzytkownika()` before use (preventing double-fetch/TOCTOU and kernel pointer dereference).
+  1. **Pointer & Range Validation (`bezpieczenstwo.cpp` + `vmm.cpp`):** The intended validation path uses `zakres_numerycznie_poprawny()` (`0x1000 <= addr < 0x0000800000000000`, overflow-safe length check) AND `bws_vmm_sprawdz_zakres_uzytkownika()` (walking the active process's 4-level page tables to verify `PTE_PRESENT | PTE_USER`, plus `PTE_WRITE` for output buffers), and copied into kernel buffers via `skopiuj_z_przestrzeni_uzytkownika()` / `skopiuj_string_z_uzytkownika()` before use. This is not a proof that every handler is free of double-fetch/TOCTOU or pointer-validation bugs.
   2. **Capability & Trust Enforcement (`pzb.h`):** Each process descriptor (`proces_t`) carries both `poziom_zaufania` (`PZB 0..5`, where `3 = PZB_ZAUFANE`, `4 = PZB_UZYTKOWNIK`, `5 = PZB_PIASKOWNICA`) and an explicit 64-bit `uprawnienia` mask (`PRAWO_PLIKI_CZYTAJ`, `PRAWO_PLIKI_ZAPISZ`, `PRAWO_SIEC`, `PRAWO_GUI`, `PRAWO_URUCHOM_PROGRAM`, `PRAWO_SYSTEM_CONFIG`, `PRAWO_STEROWNIK`, `PRAWO_DEBUG`).
   3. **Negative Test Verification:**
      - Lower-trust processes attempting privileged BWS calls (e.g. `BWS_OTA_POLECENIE = 85`, `BWS_RESET = 25`, `BWS_SHUTDOWN = 26`, `BWS_HDA_TEST = 90`, or cross-tier file deletion/move on `/system` or higher-trust directories) are deterministically denied (`test-move-authorization`, `test-desktop-settings-host`, `test-hda-diag`, `test-aktualizacje`).
-     - Malformed manifests (`opis.aplikacji` with unknown permission bits outside `PRAWA_ZNANE`, `poziom_bzl > 5`, or privilege escalation above package policy) and malformed `.bur` headers (overlapping segments, non-4K alignment, `entry` outside `.text`, stack/guard-page overlap, or BSS overflow) are rejected fail-closed (`test-bur-loader`).
+     - Existing loader tests exercise malformed manifests and malformed `.bur` headers (overlapping segments, non-4K alignment, `entry` outside `.text`, stack/guard-page overlap, or BSS overflow) are rejected fail-closed (`test-bur-loader`).
 
 ---
 
 ## 11. Exploit Hardening Review: NX / W^X & ASLR Status
 
-### 11.1 NX / W^X Enforcement (Verified Active)
+### 11.1 NX / W^X Review (Correction on 2026-11-05)
 - **Hardware Activation (`vmm.cpp`):** During VMM initialization, `vmm.cpp` checks `CPUID(0x80000001).EDX[20]` and sets `IA32_EFER.NXE` (`bit 11` of `MSR 0xC0000080`) and `CR0.WP` (`bit 16` of `CR0`, enforcing read-only pages even in Ring 0).
-- **Kernel Image Mapping:** `.boot` (`R`, `NX`), `.text` (`R-X`, writable bit cleared), `.rodata` (`R`, `NX`), `.data`/`.bss` (`RW`, `NX`).
-- **Ring 3 Process Mappings (`loader.cpp` + `vmm.cpp`):**
-  - `.bur` TEXT segment (`0x1001000`): Mapped `PTE_PRESENT | PTE_USER` (read + execute, **not writable**). Physical frames are populated via HHDM *before* mapping into the process page tables so Ring 3 code pages never need `PTE_WRITE`.
-  - `.bur` DATA + BSS segment: Mapped `PTE_PRESENT | PTE_USER | PTE_WRITE | PTE_NX` (writable, **non-executable**).
-  - Ring 3 User Stack (`RING3_STACK_TOP = 0x00007FFFFFFF0000`, 16 KiB with unmapped guard page below): Mapped `PTE_PRESENT | PTE_USER | PTE_WRITE | PTE_NX` (**non-executable**).
-  - Ring 3 Heap (`BWS_ALOKUJ_STERTE = 35`, starting at `RING3_HEAP_BASE = 32 GiB`) and Shared Memory (`BWS_SHM_MAP = 65`): Mapped `PTE_PRESENT | PTE_USER | PTE_WRITE | PTE_NX` (**non-executable**).
-  - Ring 0 Per-Process Kernel Stacks (`stos_jadra.cpp`): 64 KiB with an unmapped guard page below and a 64-bit stack canary checked on every BWS/IRQ return.
-  - **No arbitrary RWX syscall exists in BWS.**
+- **Kernel image:** ELF program headers declare R, RX and RW segments. Those flags describe the load image; they do not prove runtime page permissions or exclude writable aliases.
+- **Confirmed limitation:** `ZmapujStroneSprawdzona()` and `mapuj_strone_wewnetrznie()` take `uint32_t` flags, which cannot carry the NX bit (bit 63). `pamiec.h` explicitly documents this limitation. `VmmMapujNowaStroneProcesu()` accepts only a write boolean and sets PRESENT/USER/WRITE. The loader uses it for both application segments and stacks. User code is mapped without WRITE, but writable user data and stacks are not demonstrated NX. Enabling EFER.NXE alone does not enforce W^X.
+- **Heap/shared mappings:** non-executable protection is not established by this audit. There is no public arbitrary-page-mapping syscall, but that alone does not prevent writable executable pages.
+- **Recommendation:** introduce explicit execute permission throughout the mapping API, audit all callers and aliases, then run execution-negative tests on data, stack, heap and shared pages. This requires a separate correctness-sensitive memory-management change. No NX/KASLR/ASLR runtime changes were made while resuming this exposure audit.
+- **Earlier text corrected:** the previous version of this section incorrectly described user stacks, heaps and data as NX. Do not use that statement as security assurance.
 
 ### 11.2 ASLR / Address Predictability Status (Reported Separately)
 - **Current Status:** Neither KASLR (Ring 0) nor Ring 3 ASLR is currently enabled.
@@ -295,9 +298,9 @@ During the pre-remediation secret scan of `BursztynOS.iso`, `verifyreleasemetada
 
 ## 13. External Researcher Simulation (Artifact-Only Analysis)
 
-An automated clean-room style inspection ([`docs/reverseengineering-exposure-2026-11-01/artifact-observations.json`](file:///home/programista/Pulpit/Burstzyn/BursztynOS/docs/reverseengineering-exposure-2026-11-01/artifact-observations.json)) was executed against the extracted ISO artifacts using only `xorriso`, `file`, `readelf`, `objdump`, and `strings`:
+An automated artifact-only inspection (performed after source access, so not an independent clean-room experiment) ([`docs/reverseengineering-exposure-2026-11-01/artifact-observations.json`](reverseengineering-exposure-2026-11-01/artifact-observations.json)) was executed against the extracted ISO artifacts using only `xorriso`, `file`, `readelf`, `objdump`, and `strings`:
 
-| Discovery Target | Time / Effort | Evidence in Public Artifact | Intentional vs. Accidental |
+| Discovery Target | Estimated effort (not measured analyst time) | Evidence in Public Artifact | Intentional vs. Accidental |
 |---|---|---|---|
 | **Boot Architecture & Kernel Format** | `< 1 min` (Trivial) | `grub.cfg` (`multiboot2 /boot/system_operacyjny.bin`), `readelf -l` showing 64-bit static ELF at `0x100000` | **Intentional / Inherent** (Standard Multiboot2 x86-64 boot contract) |
 | **Major Subsystems & Drivers** | `~2 min` (Low) | Boot/diagnostic strings for `VirtIO-PCI`, `VirtIO-GPU`, `VirtIO-BLK`, `VirtIO-NET`, `VirtIO-RNG`, `VirtIO-INPUT`, `Intel E1000`, `AHCI`, `xHCI`, `OHCI`, `Intel HDA` | **Intentional** (Supportable hardware diagnostics) |
@@ -305,7 +308,7 @@ An automated clean-room style inspection ([`docs/reverseengineering-exposure-202
 | **App Packaging (`.bur` / `.cebula`)** | `~5 min` (Low) | `/boot/ustawienia.bur` starting with `42 55 52 00` (`BUR\0`) + embedded `/programy/*.cebula/*.bur` and `opis.aplikacji` manifests | **Intentional** (OS executable & manifest format) |
 | **GUI & Font Architecture (`BursztynUI` / `BSF`)** | `~5 min` (Low) | `/czcionki/ttf/DejaVu*.ttf`, `/licenses/stb-truetype.txt`, UI strings `BursztynUI`, `Husarz` | **Intentional** (Public UI identity & font licensing) |
 | **Syscall Interface (`BWS`) & Trust Model (`PZB`)** | `~15-30 min` (Moderate) | `syscall` wrappers in `.bur` binaries (`mov $N, %eax; syscall`), `[PZB] file_create=DENY`, `poziom_bzl` / `uprawnienia` in `opis.aplikacji` | **Intentional** (Auditable security policy & OS ABI) |
-| **Internal Kernel Function & Source File Mapping** | **Before:** `< 1 min` (`nm -C` dumped 4,096 symbols)<br>**After:** **Hours of manual decompilation** | **Before:** `.symtab` named every C++ function, anonymous namespace variable, and `.cpp` file.<br>**After:** `.symtab`/`.strtab` removed; analyst must reconstruct call graphs in Ghidra/IDA from stripped machine code. | **Accidental before -> Remediated** |
+| **Internal Kernel Function & Source File Mapping** | **Before:** `< 1 min` (`nm -C` dumped 4,096 symbols)<br>**After:** **Additional manual decompilation (not timed)** | **Before:** `.symtab` named every C++ function, anonymous namespace variable, and `.cpp` file.<br>**After:** `.symtab`/`.strtab` removed; analyst must reconstruct call graphs in Ghidra/IDA from stripped machine code. | **Accidental before -> Remediated** |
 
 ---
 
@@ -314,12 +317,12 @@ An automated clean-room style inspection ([`docs/reverseengineering-exposure-202
 ### 14.1 Findings Classification
 | ID | Severity | Finding | Status |
 |---|---|---|---|
-| **RE-01** | **HIGH** *(Secret-Scanner Critical Pattern)* | 10 upstream mbedTLS test PEM private keys (`mbedtls_test_ca_key_*`, `mbedtls_test_srv_key_*`, `mbedtls_test_cli_key_*`) compiled into `/boot/system_operacyjny.bin` via `MBEDTLS_CERTS_C`. | **FIXED** (`#undef MBEDTLS_CERTS_C` in `bursztyn_mbedtls_config.h`) |
+| **RE-01** | **LOW** *(public upstream test fixtures; no deployment secret demonstrated)* | 10 upstream mbedTLS test PEM private keys (`mbedtls_test_ca_key_*`, `mbedtls_test_srv_key_*`, `mbedtls_test_cli_key_*`) compiled into `/boot/system_operacyjny.bin` via `MBEDTLS_CERTS_C`. | **FIXED** (`#undef MBEDTLS_CERTS_C` in `bursztyn_mbedtls_config.h`) |
 | **RE-02** | **MEDIUM** | Public `/boot/system_operacyjny.bin` in `BursztynOS.iso` shipped unstripped with `4,096` ELF symbols (`98,304` B `.symtab` + `112,433` B `.strtab`), exposing all internal function names, C++ mangled names, and `STT_FILE` source filenames. | **FIXED** (`narzedzia/package_release_kernel.py` strips ISO kernel and archives private ELF/symbols in `.release-private/<sha256>/`) |
 | **RE-03** | **MEDIUM** | `linker.ld` discarded `.debug_*` sections at link time, preventing developers from having DWARF symbols in private builds while still shipping `.symtab` publicly. | **FIXED** (`linker.ld` retains DWARF in private developer ELF; `package_release_kernel.py` strips DWARF/symbols from public ISO kernel) |
 | **RE-04** | **LOW** | Unused mbedTLS TLS 1.2 Server code (`MBEDTLS_SSL_SRV_C`) and `__FILE__` debug instrumentation (`MBEDTLS_DEBUG_C` leaking `biblioteki/mbedtls/library/ssl_*.c`) compiled into kernel `.text`/`.rodata`. | **FIXED** (`#undef MBEDTLS_SSL_SRV_C` and `#undef MBEDTLS_DEBUG_C` in `bursztyn_mbedtls_config.h`, saving `~122 KiB` of `.text`/`.rodata`) |
 | **RE-05** | **LOW** | Root-level `/licenses/` directory consolidating Bursztyn OS, mbedTLS, stb, DejaVu, and GRUB GPLv3 notices was not generated during ISO staging. | **FIXED** (`narzedzia/package_release_notices.py` integrated into `Makefile`) |
-| **RE-06** | **INFORMATIONAL** | Architecture identity (`x86_64` monolithic Multiboot2 kernel), `BUR\0` flat binary header, `.cebula` manifests (`opis.aplikacji`), `BSP2` filesystem structures, and `BWS 1..93` syscall numbers are recoverable from release artifacts. | **BY DESIGN** (Required runtime formats and public ABI; security verified independent of format secrecy) |
+| **RE-06** | **INFORMATIONAL** | Architecture identity (`x86_64` monolithic Multiboot2 kernel), `BUR\0` flat binary header, `.cebula` manifests (`opis.aplikacji`), `BSP2` filesystem structures, and `BWS 1..93` syscall numbers are recoverable from release artifacts. | **BY DESIGN** (Required runtime formats and public ABI; see validation limits below) |
 
 ### 14.2 Qualitative Scores Before & After Remediation
 | Metric | Before Remediation | After Remediation |
@@ -328,10 +331,209 @@ An automated clean-room style inspection ([`docs/reverseengineering-exposure-202
 | **Reverse-Engineering Effort** | **Very Low** (`nm -C` and `readelf -s` immediately named every kernel function and global variable) | **Moderate** (No symbol tables or DWARF in public kernel or `.bur` apps; requires control-flow and cross-reference analysis in a decompiler, while remaining standard un-obfuscated native code) |
 
 ### 14.3 Source & Build Files Modified/Added
-1. [`Makefile`](file:///home/programista/Pulpit/Burstzyn/BursztynOS/Makefile) — Integrated `narzedzia/package_release_kernel.py`, `narzedzia/package_release_notices.py`, and `narzedzia/verifyreleasemetadata.py` into canonical `$(GRUB_CFG)` / `$(ISO)` targets.
-2. [`linker.ld`](file:///home/programista/Pulpit/Burstzyn/BursztynOS/linker.ld) — Retained DWARF `.debug_*` sections in the private developer ELF (`system_operacyjny.bin` / `.release-private/<sha256>/kernel.elf`) while `package_release_kernel.py` strips them from `isodir/boot/system_operacyjny.bin`.
-3. [`biblioteki/mbedtls/bursztyn_mbedtls_config.h`](file:///home/programista/Pulpit/Burstzyn/BursztynOS/biblioteki/mbedtls/bursztyn_mbedtls_config.h) — Added `#undef MBEDTLS_CERTS_C`, `#undef MBEDTLS_SSL_SRV_C`, and `#undef MBEDTLS_DEBUG_C`.
-4. [`narzedzia/package_release_kernel.py`](file:///home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/package_release_kernel.py) — Strips public ISO kernel (`--strip-all`), verifies `PT_LOAD` and entry-point identity, and archives matching private DWARF ELF + `kernel.nm` + `manifest.json` under `.release-private/<public_kernel_sha256>/`.
-5. [`narzedzia/package_release_notices.py`](file:///home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/package_release_notices.py) — Stages `/licenses/` (`BursztynOS.md`, `mbedtls.txt`, `stb-truetype.txt`, `stb-image.txt`, `DejaVu.txt`, `GRUB-copyright.txt`, `GPL-3.txt`, `README.txt`) into `isodir`.
-6. [`narzedzia/verifyreleasemetadata.py`](file:///home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/verifyreleasemetadata.py) — Automated CI/release metadata verifier checking all ISO files (or individual binaries) for DWARF/debug sections, unexpected ELF symbol tables, build paths, development files/directories, secret patterns, and forbidden diagnostic markers.
-7. [`.gitignore`](file:///home/programista/Pulpit/Burstzyn/BursztynOS/.gitignore) — Added `/.release-private/` and `/.release-audit/` so private symbol archives are never committed or packaged.
+1. [`Makefile`](../Makefile) — Integrated `narzedzia/package_release_kernel.py`, `narzedzia/package_release_notices.py`, and `narzedzia/verifyreleasemetadata.py` into canonical `$(GRUB_CFG)` / `$(ISO)` targets.
+2. [`linker.ld`](../linker.ld) — Retained DWARF `.debug_*` sections in the private developer ELF (`system_operacyjny.bin` / `.release-private/<sha256>/kernel.elf`) while `package_release_kernel.py` strips them from `isodir/boot/system_operacyjny.bin`.
+3. [`biblioteki/mbedtls/bursztyn_mbedtls_config.h`](../biblioteki/mbedtls/bursztyn_mbedtls_config.h) — Added `#undef MBEDTLS_CERTS_C`, `#undef MBEDTLS_SSL_SRV_C`, and `#undef MBEDTLS_DEBUG_C`.
+4. [`narzedzia/package_release_kernel.py`](../narzedzia/package_release_kernel.py) — Strips public ISO kernel (`--strip-all`), verifies `PT_LOAD` and entry-point identity, and archives matching private DWARF ELF + `kernel.nm` + `manifest.json` under `.release-private/<public_kernel_sha256>/`.
+5. [`narzedzia/package_release_notices.py`](../narzedzia/package_release_notices.py) — Stages `/licenses/` (`BursztynOS.md`, `mbedtls.txt`, `stb-truetype.txt`, `stb-image.txt`, `DejaVu.txt`, `GRUB-copyright.txt`, `GPL-3.txt`, `README.txt`) into `isodir`.
+6. [`narzedzia/verifyreleasemetadata.py`](../narzedzia/verifyreleasemetadata.py) — Automated CI/release metadata verifier checking all ISO files (or individual binaries) for DWARF/debug sections, unexpected ELF symbol tables, build paths, development files/directories, secret patterns, and forbidden diagnostic markers.
+7. [`.gitignore`](../.gitignore) — Added `/.release-private/` and `/.release-audit/` so private symbol archives are never committed or packaged.
+
+
+## 15. Resumed Verification — 2026-11-05
+
+This verification resumes session `01a19938-c2da-7e22-b469-154c6a5e2daa`.
+The tree has subsequently gained stack protection and a host-only BUR v2/ASLR
+prototype. Those existing changes were preserved. The production loader still
+loads BUR v1 at fixed addresses; passing the prototype's ASLR tests is not
+production ASLR coverage.
+
+### 15.1 Fresh production artifact and measured exposure
+
+`make -j4 iso` succeeded using GCC 13.3.0 and GNU ld 2.42. This was the normal
+production target from the current dirty tree, not a checkout/rebuild of the
+historical November 1 source. Existing dependency-tracked objects were reused;
+a from-scratch, hermetic build and bit-for-bit reproducibility were not proven.
+The production target reconstructed the ISO and ran both BSF verification and
+metadata verification. No runtime or compiler hardening settings were changed
+in this resumed audit.
+
+| Metric | Current production value |
+|---|---|
+| ISO SHA-256 | `cd5d9fe15c6c8c0bc78843a79398145ce7b16c3f30a6d4c14bae5cae421048bf` |
+| ISO bytes | 40,093,696 |
+| Public kernel SHA-256 | `0b5d4ac34db8553a05ecd30634c3729d3137037e20fb779a9d3ecedcc0964016` |
+| Public kernel bytes | 10,301,520 |
+| Public kernel symbols / DWARF bytes / build-path matches | 0 / 0 / 0 |
+| Public kernel printable strings / likely identifiers | 63,857 / 153 |
+| Public kernel DEBUG/TEST/ASSERT strings | 102 (heuristic count; includes intentional self-tests) |
+| Public kernel source-extension string candidates | 1 beyond allowlist; `AuiCxk.h` appears in binary payload, not demonstrated to be a source filename |
+| Private developer ELF bytes / symbols / DWARF bytes | 13,962,920 / 3,937 / 3,457,753 |
+| ISO inventory / metadata findings | 614 files / 0 findings |
+| Embedded BUR payloads matched byte-for-byte and scanned | 22 / 0 findings |
+
+The current public kernel is 3,661,400 bytes smaller than its matching private
+ELF, while retaining identical entry point and PT_LOAD contents. The earlier
+before/after size table concerns November 1; later functional changes mean it
+cannot be treated as a controlled size comparison for this resumed build.
+The private matching ELF remains under
+`.release-private/0b5d4ac34db8553a05ecd30634c3729d3137037e20fb779a9d3ecedcc0964016/`.
+
+Machine-readable evidence:
+
+- [Complete ISO inventory and string baseline](reverseengineering-exposure-2026-11-01/resumed-2026-11-05.json).
+- [Compiler, linker, flags, private ELF sections and artifact hashes](reverseengineering-exposure-2026-11-01/resumed-build-2026-11-05.json).
+- [Embedded app offsets, hashes and string baseline](reverseengineering-exposure-2026-11-01/resumed-apps-2026-11-05.json).
+- [Sanitizer fuzzing results](reverseengineering-exposure-2026-11-01/resumed-fuzzing-2026-11-05.json).
+
+### 15.2 Release gate changes
+
+The verifier previously exempted every ELF below `boot/grub/` from symbol-table
+checks. The exception now requires an ELF relocatable object at an expected
+GRUB architecture/module path. An ordinary executable placed below that
+prefix no longer bypasses the gate. Upstream modules still retain symbols
+needed by GRUB's loader. Both ELF32 and ELF64 remain supported.
+
+PE/EFI images now receive COFF symbol-table and debug-directory checks.
+Truncated executable metadata becomes a recorded failure rather than a Python
+traceback. Missing inputs and empty artifacts cannot produce a passing audit.
+Eight tests cover those rejection paths, source paths, diagnostics, token/key
+redaction and the distinction between PEM parser markers and complete PEM
+private-key payloads. Run `python3 narzedzia/test_release_metadata.py`.
+
+The scanner is a conservative release-hygiene gate, not an exhaustive secret
+finder. Its zero findings mean none of its patterns matched. Raw binary
+scanning does not decode arbitrary compression, cryptographic containers or
+custom archive formats; the EFI filesystem image is inventoried as a file,
+not recursively enumerated. Embedded app scans use exact matches against
+local build payloads, so they are not independent clean-room reconstruction.
+
+### 15.3 Verification and limits
+
+| Check | Result |
+|---|---|
+| Fresh production ISO, BSF packaging and final metadata gate | PASS; 614 files, zero gate findings |
+| Release-gate tests | PASS; 8 tests |
+| Stack-protector host ASan/UBSan and death test | PASS; 2,007 checks per run |
+| BUR v2 prototype/legacy-loader host ASan/UBSan | PASS; includes 10,000 layout trials; prototype is not production ASLR |
+| Fuzz smoke ASan/UBSan | PASS; 35,033 executions, zero crashes |
+| Installer storage host ASan/UBSan | PASS |
+| Existing BUR loader tests | PASS; 17 groups |
+| Settings themes / Start power host ASan/UBSan | PASS; 2,696 checks |
+| Bounded PNG host ASan/UBSan | PASS; 3,446 checks |
+| Display snapshot permissions/stale generation host ASan/UBSan | PASS |
+| BSF font host ASan/UBSan | PASS; 12,201 checks |
+| Husarz engine host ASan/UBSan | PASS; 127,432 checks |
+| Isolated BWS abuse QEMU ISO | PASS; all six denial/validation categories |
+| Normal production BIOS QEMU test, default limits | FAIL; no kernel readiness before the 60-second inactivity timeout |
+| Same BIOS test with 240-second global / 180-second inactivity limits | FAIL overall; desktop ready at 126.80 s, boot/storage/network/wallpaper/initial-cursor checks PASS; cursor movement/restoration FAIL |
+| Production UEFI Settings/themes/power QEMU | FAIL; desktop and Settings reached; `countdown label must be visible` assertion |
+| Installer GUI integration QEMU | INCOMPLETE; manually interrupted after more than 11 minutes, at 50% / SYSTEMFILES; GPT, ESP, BSP2 format and package-installation progress observed, but completion, disk-only reboot and reinstall were not validated |
+
+[Host test log](reverseengineering-exposure-2026-11-01/resumed-host-tests-2026-11-05.txt),
+[BWS denial log](reverseengineering-exposure-2026-11-01/resumed-bws-2026-11-05.txt),
+[extended BIOS log](reverseengineering-exposure-2026-11-01/resumed-normal-boot-extended-2026-11-05.txt),
+[UEFI GUI failure](reverseengineering-exposure-2026-11-01/resumed-gui-2026-11-05.txt).
+
+[Installer observation](reverseengineering-exposure-2026-11-01/resumed-installer-serial-2026-11-05.txt).
+The installer test's own transaction timeout is 3,600 seconds; this run was
+manually interrupted, not a timeout verdict from its harness. Its disposable
+disks and screenshots remain in `.installertest/guest-ij13u19y/` for inspection.
+
+No runtime source changed during this resumed audit. These acceptance failures
+are observed on the supplied tree; a before/after runtime regression comparison
+against the November 1 binaries was not performed. Their exact causes have not
+been established. In particular, the initial BIOS timeout is not evidence of
+an unbootable ISO, because the longer run reaches the desktop. The BWS write
+protection test does not test NX execution denial.
+
+Full audio/input/DisplayGeometry/OTA and all app workflows were not exhaustively
+exercised in QEMU. The report does not certify full functional acceptance.
+
+### 15.4 Remaining exposures and review work
+
+- **Exploit hardening:** writable user mappings are not proven NX. The explicit
+  mapping API limitation is documented in section 11. No ASLR or KASLR was
+  introduced; the host BUR v2 prototype is not wired into production loading.
+- **Reproducibility:** hashes associate public/private files exactly, but
+  bit-for-bit rebuilds, ISO timestamp normalization and a complete toolchain
+  lock were not tested. A private symbol archive alone does not establish
+  reproducibility.
+- **Licensing:** the ISO preserves notices. Corresponding GRUB source/patches
+  or a suitable source-distribution arrangement were not verified. Notice
+  presence is not a completed redistribution-compliance assessment.
+- **Diagnostics:** public UI strings, security denials, fixed ABI values,
+  module identities and intentional self-test strings remain visible. The
+  normal ISO has an explicit automated-test boot menu; it is not a binary
+  from which all self-test code has been removed. Forbidden pointer forensic
+  markers are checked, but the gate does not prove absence of every possible
+  diagnostic array or entry point.
+- **Compiler/dead code:** existing Ring 3 section garbage collection is retained.
+  LTO, kernel-wide section garbage collection and visibility changes were
+  not enabled without a runtime-reference audit. No complete linker-map
+  reachability proof or dynamic-table-safe dead-driver removal was performed.
+- **Researcher simulation:** discovery-time entries in section 13 are effort
+  estimates, not measured timings from an independent researcher. Native
+  code, BUR segment boundaries, syscall wrappers, policy manifests, driver
+  identities and GUI behavior remain recoverable after stripping.
+
+The qualitative exposure assessment remains **High → Low accidental metadata
+leakage**, and **Very Low → Moderate effort for detailed implementation
+recovery**. Architectural identification and public ABI recovery remain easy.
+These are qualitative estimates, not an exploitation-resistance score or a
+release-readiness certification.
+
+## 16. Resumed verification — 2026-11-07
+
+The release metadata gate now extracts the GRUB `efi.img` FAT filesystem with
+`mcopy` and applies the same inventory, executable-metadata, development-file,
+path, secret and diagnostic checks to its members. JSON paths use
+`efi.img!/EFI/...` to associate each member with its container. The container
+itself remains inventoried; member sizes must not be added to the ISO size.
+Missing mtools, extraction failures and empty EFI filesystems fail the gate.
+This supersedes section 15.2's EFI enumeration limitation; arbitrary other
+containers and compression formats are still not recursively decoded.
+
+Two added tests prove that a private `.map` inside a valid FAT image is
+inventoried and rejected, and an invalid EFI filesystem cannot pass.
+All 10 release gate tests pass; see
+[test evidence](reverseengineering-exposure-2026-11-01/resumed-gate-tests-2026-11-07.txt).
+The existing installer storage host target also passes with ASan/UBSan:
+10,512 storage/BSP2 checks and 138 native directory/file move assertions.
+Leak detection is disabled by that existing target; this is not a leak-sanitizer
+result or an installer GUI completion test.
+
+The ISO target now depends explicitly on the verifier so a verifier edit
+invalidates an existing ISO target. Changes in this continuation cover that
+Makefile dependency, `narzedzia/verifyreleasemetadata.py`, its tests, and audit
+documentation. No runtime code or hardening flags changed.
+The QEMU failures and incomplete installer acceptance in section 15.3 remain
+open until independently retested.
+
+### 16.1 Fresh production artifact
+
+`make -j4 iso` completed successfully, including BSF asset verification and
+metadata verification: **615 inventory entries, zero findings**. These comprise
+614 files extracted from the ISO and one member of the embedded EFI filesystem:
+`efi.img!/efi/boot/bootx64.efi` (208,896 bytes). The EFI executable has no COFF
+symbols or PE debug directory. Its `file` description mentions external PDB
+stripping; no PDB was shipped or discovered by this inventory.
+
+| Metric | Value |
+|---|---|
+| ISO bytes | 40,097,792 |
+| ISO SHA-256 | `ff2dd94f2497536f7d1ed865b66f33ac71544e2e24574572a40497682b6be20f` |
+| Public kernel bytes | 10,305,616 |
+| Public kernel SHA-256 | `6a621c4be13c139dbb30009ff2408fb346190ace8ffd604e01fef25ca5007803` |
+| Public kernel symbols / DWARF bytes / build-path matches | 0 / 0 / 0 |
+| Public kernel printable strings / likely identifiers | 63,985 / 154 |
+| Public kernel DEBUG/TEST/ASSERT string candidates | 102 |
+
+[Complete inventory, string baseline and findings](reverseengineering-exposure-2026-11-01/resumed-2026-11-07.json).
+[Installer host sanitizer evidence](reverseengineering-exposure-2026-11-01/resumed-installer-host-2026-11-07.txt).
+The build log remains locally at `/tmp/bursztyn-resumed-release-2026-11-07.log`.
+The matching private developer artifacts are under
+`.release-private/6a621c4be13c139dbb30009ff2408fb346190ace8ffd604e01fef25ca5007803/`.
+The zero findings apply to the verifier's implemented patterns and supported
+formats. This continuation did not repeat QEMU acceptance or prove reproducible
+rebuilds; the outstanding acceptance limitations in section 15 remain open.

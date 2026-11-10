@@ -3,7 +3,7 @@
 import pathlib,shutil,sys
 root=pathlib.Path(__file__).resolve().parents[1]
 dest=pathlib.Path(sys.argv[1])/'licenses';dest.mkdir(parents=True,exist_ok=True)
-for src,name in [('License.md','BursztynOS.md'),('biblioteki/mbedtls/LICENSE','mbedtls.txt'),('bsf/vendor/LICENSE','stb-truetype.txt'),('czcionki/ttf/LICENSE-DejaVu.txt','DejaVu.txt')]:
+for src,name in [('narzedzia/unicode/LICENSE.txt','Unicode.txt'),('License.md','BursztynOS.md'),('biblioteki/mbedtls/LICENSE','mbedtls.txt'),('bsf/vendor/LICENSE','stb-truetype.txt'),('czcionki/ttf/LICENSE-DejaVu.txt','DejaVu.txt')]:
  shutil.copy2(root/src,dest/name)
 text=(root/'obrazy/vendor/stb_image.h').read_text()
 start=text.rfind('ALTERNATIVE A - MIT License')

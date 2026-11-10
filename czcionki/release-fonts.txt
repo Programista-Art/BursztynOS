@@ -1,0 +1,8 @@
+# Audited release assets. Runtime discovery is independent of this packaging list.
+DejaVuSans.ttf
+DejaVuSans-Bold.ttf
+DejaVuSansMono.ttf
+DejaVuSerifCondensed-Italic.ttf
+LICENSE-DejaVu.txt
+LICENSE-stb.txt
+SOURCE.txt

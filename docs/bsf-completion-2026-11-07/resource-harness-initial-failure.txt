@@ -1,0 +1,33 @@
+g++ -std=c++17 -O1 -g -fcheck-new -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_bsf_resources.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/resources
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/resources
+[BSF] Bounded catalog limit reached (128 faces / 1024 records).
+[BSF] Bounded catalog limit reached (128 faces / 1024 records).
+=================================================================
+==16304==ERROR: AddressSanitizer: alloc-dealloc-mismatch (operator new [] vs free) on 0x502000000010
+    #0 0x76dfb04fc4d8 in free ../../../../src/libsanitizer/asan/asan_malloc_linux.cpp:52
+    #1 0x4055dc in operator delete[](void*) (/home/programista/Pulpit/Burstzyn/BursztynOS/.bsf-test/resources+0x4055dc) (BuildId: 5f8da39c7bb387944d031ccc36111dfc2b2c361c)
+    #2 0x4301da in outline bsf/bsf.cpp:581
+    #3 0x430e7d in BSF::rasterize(BSF::Face const&, unsigned int, int, BSF::Glyph&, unsigned char*, unsigned long) bsf/bsf.cpp:634
+    #4 0x438d37 in BSF::Cache::get(BSF::Face const&, unsigned int, int, unsigned int) bsf/bsf.cpp:740
+    #5 0x44318c in BSF::glyph(unsigned int, int, bool, char const*, bool) bsf/runtime.cpp:520
+    #6 0x41ef0a in main (/home/programista/Pulpit/Burstzyn/BursztynOS/.bsf-test/resources+0x41ef0a) (BuildId: 5f8da39c7bb387944d031ccc36111dfc2b2c361c)
+    #7 0x76dfaf42a1c9 in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #8 0x76dfaf42a28a in __libc_start_main_impl ../csu/libc-start.c:360
+    #9 0x403b34 in _start (/home/programista/Pulpit/Burstzyn/BursztynOS/.bsf-test/resources+0x403b34) (BuildId: 5f8da39c7bb387944d031ccc36111dfc2b2c361c)
+
+0x502000000010 is located 0 bytes inside of 11-byte region [0x502000000010,0x50200000001b)
+allocated by thread T0 here:
+    #0 0x76dfb04fe990 in operator new[](unsigned long, std::nothrow_t const&) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:104
+    #1 0x42da3d in outline bsf/bsf.cpp:523
+    #2 0x430e7d in BSF::rasterize(BSF::Face const&, unsigned int, int, BSF::Glyph&, unsigned char*, unsigned long) bsf/bsf.cpp:634
+    #3 0x438d37 in BSF::Cache::get(BSF::Face const&, unsigned int, int, unsigned int) bsf/bsf.cpp:740
+    #4 0x44318c in BSF::glyph(unsigned int, int, bool, char const*, bool) bsf/runtime.cpp:520
+    #5 0x41ef0a in main (/home/programista/Pulpit/Burstzyn/BursztynOS/.bsf-test/resources+0x41ef0a) (BuildId: 5f8da39c7bb387944d031ccc36111dfc2b2c361c)
+    #6 0x76dfaf42a1c9 in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #7 0x76dfaf42a28a in __libc_start_main_impl ../csu/libc-start.c:360
+    #8 0x403b34 in _start (/home/programista/Pulpit/Burstzyn/BursztynOS/.bsf-test/resources+0x403b34) (BuildId: 5f8da39c7bb387944d031ccc36111dfc2b2c361c)
+
+SUMMARY: AddressSanitizer: alloc-dealloc-mismatch ../../../../src/libsanitizer/asan/asan_malloc_linux.cpp:52 in free
+==16304==HINT: if you don't care about these errors you may set ASAN_OPTIONS=alloc_dealloc_mismatch=0
+==16304==ABORTING
+make: *** [Makefile:2353: test-bsf-resources-host] Error 1

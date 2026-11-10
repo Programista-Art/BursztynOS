@@ -1,0 +1,19 @@
+{
+  "local_preview": true,
+  "apply_size": 24,
+  "font_generation": 2,
+  "native_apps_repainted": [
+    "notepad",
+    "calculator",
+    "explorer"
+  ],
+  "result": "PASS",
+  "mode": "fonts-only",
+  "ttf_alpha_pixels": true,
+  "kernel_sha256": "a96c92e539f254d48916238d09978d1a86d397381a46ade4ffa50af18d99f27e",
+  "iso_sha256": "778fbca5fde28fceaca324f0671faa6510436adca547342b8977839ba250e9c9",
+  "no_guest_fault": true,
+  "http_requests": [
+    "/fonts.html"
+  ]
+}

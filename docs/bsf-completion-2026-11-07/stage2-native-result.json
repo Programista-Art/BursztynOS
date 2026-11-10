@@ -1,0 +1,15 @@
+{
+  "result": "PASS",
+  "mode": "unicode-editing-only",
+  "notepad_save_reopen_bytes": true,
+  "cluster_left_delete": true,
+  "native_clipboard": true,
+  "no_guest_fault": true,
+  "kernel_sha256": "2315e30ec839cc497e589b8621aecd4b1a44e950b6abddc9a7dbd835ff8c6959",
+  "iso_sha256": "1ee5ca6c91c44878a61a75b168b0098e0618516d92509ba0b3c4880add074b69",
+  "http_requests": [
+    "/unicode.html",
+    "/unicode.html?source=[redacted]&result=[redacted]",
+    "/unicode.html?source=[redacted]&result=[redacted]"
+  ]
+}

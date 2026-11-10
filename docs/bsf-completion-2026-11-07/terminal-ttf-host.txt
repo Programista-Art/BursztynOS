@@ -1,0 +1,4 @@
+g++ -std=c++17 -O1 -g -DBSF_NATIVE=1 -ffunction-sections -fdata-sections -fsanitize=address,undefined -fno-pie -no-pie narzedzia/test_shell_terminal.cpp bsf/bsf.cpp bsf/terminal.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/shell-ttf
+ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/shell-ttf
+Shell host: 2192/2192 PASS
+Host checks passed: editor, popup, clipboard, sponsors and version (100%, 125%); not OS runtime validation.

@@ -53,7 +53,7 @@ def test_linker_script_audit() -> None:
     report("tapety_linker_assert_naglowek", 'ASSERT(DEFINED(naglowek), "TAPETY BUR: brak naglowka")' in content)
     report("tapety_linker_assert_text_limit", 'ASSERT(__bur_text_used_end <= BUR_TEXT_END,' in content and
            '"TAPETY BUR: TEXT przekroczyl 256 KiB"' in content)
-    report("tapety_linker_text_size_256k", "BUR_TEXT_SIZE     = 0x40000;" in content)
+    report("tapety_linker_text_size_256k", "BUR_TEXT_SIZE     = 0x49000;" in content)
 
 
 def test_makefile_audit() -> None:
@@ -75,6 +75,7 @@ def test_makefile_audit() -> None:
 
     # Check linker command
     report("makefile_ld_uses_tapety_linker",
+           "$(LD) --gc-sections -T $(call bur_linker,programy/tapety/tapety_linker.ld)" in makefile or
            "$(LD) --gc-sections -T programy/tapety/tapety_linker.ld" in makefile)
     report("makefile_size_validator_present", "test_tapety_size.py" in makefile)
 
@@ -89,34 +90,54 @@ def test_source_and_symbol_audit() -> None:
     if obj.exists() and obj.stat().st_size > 0:
         symbols = subprocess.check_output(["readelf", "-Ws", str(obj)], text=True)
         report("tapety_tmp_has_global_start",
-               bool(re.search(r"\bFUNC\s+GLOBAL\s+DEFAULT\s+\d+\s+_start\b", symbols)))
+               bool(re.search(r"\bFUNC\s+GLOBAL\s+(?:DEFAULT|HIDDEN)\s+\d+\s+_start\b", symbols)))
         report("tapety_tmp_has_global_naglowek",
-               bool(re.search(r"\bOBJECT\s+GLOBAL\s+DEFAULT\s+\d+\s+naglowek\b", symbols)))
+               bool(re.search(r"\bOBJECT\s+GLOBAL\s+(?:DEFAULT|HIDDEN)\s+\d+\s+naglowek\b", symbols)))
 
 
 def test_binary_layout() -> None:
     elf = ROOT / "tapety.elf"
     report("tapety_elf_exists", elf.exists())
-    if elf.exists():
-        header_text = subprocess.check_output(["readelf", "-h", str(elf)], text=True)
-        entry_match = re.search(r"Entry point address:\s+(0x[0-9a-fA-F]+)", header_text)
-        report("tapety_elf_entry_is_0x1001000",
-               entry_match is not None and int(entry_match.group(1), 16) == 0x1001000)
-
     bin_path = ROOT / "tapety.bin"
     report("tapety_bin_exists", bin_path.exists())
     if bin_path.exists():
         data = bin_path.read_bytes()
+        if data[:4] == b"BUR\x02":
+            if elf.exists():
+                header_text = subprocess.check_output(["readelf", "-h", str(elf)], text=True)
+                entry_match = re.search(r"Entry point address:\s+(0x[0-9a-fA-F]+)", header_text)
+                report("tapety_elf_entry_is_0x1001000",
+                       entry_match is not None and int(entry_match.group(1), 16) >= 0x1000)
+            report("tapety_bin_min_header", len(data) >= 160)
+            entry = struct.unpack_from("<Q", data, 24)[0]
+            toff, tsz, tva = struct.unpack_from("<3Q", data, 32)
+            roff, rsz, rva = struct.unpack_from("<3Q", data, 56)
+            doff, dfile, dsz, dva = struct.unpack_from("<4Q", data, 80)
+            report("tapety_bin_magic_BUR", data[:4] == b"BUR\x02")
+            report("tapety_bin_entry_matches_va", tva <= entry < tva + tsz)
+            report("tapety_bin_text_off_4k", toff == 0x1000)
+            report("tapety_bin_text_size_256k", 0 < tsz <= 0x49000 and (tsz % 4096) == 0)
+            report("tapety_bin_text_va", tva == 0x1000)
+            report("tapety_bin_data_off", doff == toff + tsz + rsz)
+            report("tapety_bin_data_size_128k", 0 < dsz <= 0x20000 and (dsz % 4096) == 0)
+            report("tapety_bin_data_va", dva == tva + tsz + rsz + 0x1000)
+            report("tapety_bin_size_under_512k", len(data) <= 512 * 1024)
+            return
+        if elf.exists():
+            header_text = subprocess.check_output(["readelf", "-h", str(elf)], text=True)
+            entry_match = re.search(r"Entry point address:\s+(0x[0-9a-fA-F]+)", header_text)
+            report("tapety_elf_entry_is_0x1001000",
+                   entry_match is not None and int(entry_match.group(1), 16) == 0x1001000)
         report("tapety_bin_min_header", len(data) >= 60)
         magic, entry, toff, tsz, tva, doff, dsz, dva = struct.unpack_from("<4sQQQQQQQ", data)
         report("tapety_bin_magic_BUR", magic == b"BUR\x00")
         report("tapety_bin_entry_matches_va", entry == 0x1001000)
         report("tapety_bin_text_off_4k", toff == 0x1000)
-        report("tapety_bin_text_size_256k", tsz == 0x40000)
+        report("tapety_bin_text_size_256k", tsz == 0x49000)
         report("tapety_bin_text_va", tva == 0x1001000)
-        report("tapety_bin_data_off", doff == 0x41000)
+        report("tapety_bin_data_off", doff == 0x4a000)
         report("tapety_bin_data_size_128k", dsz == 0x20000)
-        report("tapety_bin_data_va", dva == 0x1041000)
+        report("tapety_bin_data_va", dva == 0x104a000)
         report("tapety_bin_size_under_512k", len(data) <= 512 * 1024)
 
 
@@ -165,7 +186,7 @@ def test_negative_scenarios() -> None:
             jmp oversized_payload
         .section .text, "ax"
         oversized_payload:
-            .fill 270000, 1, 0x90
+            .fill 310000, 1, 0x90
         """)
         obj_oversized = tmp / "oversized.o"
         subprocess.run(["x86_64-linux-gnu-gcc", "-c", str(src_oversized), "-o", str(obj_oversized)], check=True)

@@ -42,7 +42,11 @@ public:
         for (; i < MAKS_BUFOR - 1 && nowy_tekst[i] != '\0'; ++i) {
             bufor_[i] = nowy_tekst[i];
         }
+#if defined(BSF_NATIVE)
+        size_t size=i;while(nowy_tekst[size])++size;i=BSF::cluster_prefix(nowy_tekst,size,i);
+#else
         while(i>0 && (static_cast<uint8_t>(nowy_tekst[i])&0xC0U)==0x80U)--i;
+#endif
         bufor_[i] = '\0';
         dlugosc_ = i;
         bajt_kursora_ = dlugosc_;
@@ -128,7 +132,11 @@ public:
         size_t od = poczatek_zaznaczenia();
         size_t ile = dlugosc_zaznaczenia();
         if (ile >= pojemnosc) ile = pojemnosc - 1;
+#if defined(BSF_NATIVE)
+        ile=BSF::cluster_prefix(bufor_+od,dlugosc_zaznaczenia(),ile);
+#else
         while(ile>0 && (static_cast<uint8_t>(bufor_[od+ile])&0xC0U)==0x80U)--ile;
+#endif
 
         for (size_t i = 0; i < ile; ++i) {
             out_bufor[i] = bufor_[od + i];
@@ -150,11 +158,17 @@ public:
             while (nowy_fragment[nowy_rozmiar] != '\0') ++nowy_rozmiar;
         }
 
+        size_t source_size=nowy_rozmiar;
         if (dlugosc_ - stary_rozmiar + nowy_rozmiar >= MAKS_BUFOR) {
             nowy_rozmiar = MAKS_BUFOR - 1 - (dlugosc_ - stary_rozmiar);
         }
 
+#if defined(BSF_NATIVE)
+        nowy_rozmiar=BSF::cluster_prefix(nowy_fragment,source_size,nowy_rozmiar);
+#else
+        (void)source_size;
         while(nowy_fragment && nowy_rozmiar>0 && (static_cast<uint8_t>(nowy_fragment[nowy_rozmiar])&0xC0U)==0x80U)--nowy_rozmiar;
+#endif
 
         if (nowy_rozmiar > stary_rozmiar) {
             size_t roznica = nowy_rozmiar - stary_rozmiar;
@@ -176,6 +190,9 @@ public:
         dlugosc_ = dlugosc_ - stary_rozmiar + nowy_rozmiar;
         bufor_[dlugosc_] = '\0';
         bajt_kursora_ = od + nowy_rozmiar;
+#if defined(BSF_NATIVE)
+        bajt_kursora_=BSF::cluster_ceil(bufor_,dlugosc_,bajt_kursora_);
+#endif
         bajt_kotwicy_ = bajt_kursora_;
 
         dopasuj_przewiniecie();
@@ -325,25 +342,10 @@ public:
                 Prostokat sel_rect(x_start, klient_y - 2 * skala, x_end - x_start, font_h + 4 * skala);
                 ctx.rysuj_zaznaczenie(sel_rect, motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));
 
-                // Tekst przed zaznaczeniem
-                if (sel_od > 0) {
-                    char pre[MAKS_BUFOR];
-                    for (size_t i = 0; i < sel_od; ++i) pre[i] = wyswietlany[i];
-                    pre[sel_od] = '\0';
-                    ctx.rysuj_tekst(Punkt(klient_x - przewiniecie_x_, klient_y), pre, s.tekst, skala);
-                }
-
-                // Zaznaczony tekst
-                char sel_text[MAKS_BUFOR];
-                size_t sel_len = sel_do - sel_od;
-                for (size_t i = 0; i < sel_len; ++i) sel_text[i] = wyswietlany[sel_od + i];
-                sel_text[sel_len] = '\0';
-                ctx.rysuj_tekst(Punkt(x_start, klient_y), sel_text, motyw_kolor_tekstu_zaznaczenia(), skala);
-
-                // Tekst po zaznaczeniu
-                if (sel_do < dlugosc_) {
-                    ctx.rysuj_tekst(Punkt(x_end, klient_y), &wyswietlany[sel_do], s.tekst, skala);
-                }
+                ctx.rysuj_tekst(Punkt(klient_x-przewiniecie_x_,klient_y),wyswietlany,s.tekst,skala);
+                ctx.dodaj_przyciecie(Prostokat(x_start,klient_y,x_end-x_start,font_h));
+                ctx.rysuj_tekst(Punkt(klient_x-przewiniecie_x_,klient_y),wyswietlany,motyw_kolor_tekstu_zaznaczenia(),skala);
+                ctx.zdejmij_przyciecie();
             } else {
                 ctx.rysuj_tekst(Punkt(klient_x - przewiniecie_x_, klient_y), wyswietlany, s.tekst, skala);
             }
@@ -649,14 +651,22 @@ private:
 
     size_t dopasuj_do_granicy_utf8(size_t bajt) const {
         if (bajt >= dlugosc_) return dlugosc_;
+#if defined(BSF_NATIVE)
+        return BSF::cluster_floor(bufor_,dlugosc_,bajt);
+#else
         while (bajt > 0 && (static_cast<uint8_t>(bufor_[bajt]) & 0xC0U) == 0x80U) {
             bajt--;
         }
         return bajt;
+#endif
     }
 
     size_t utf8_liczba_znakow() const {
+#if defined(BSF_NATIVE)
+        return BSF::cluster_count(bufor_,dlugosc_);
+#else
         return CzcionkaUI::liczba_znakow(bufor_);
+#endif
     }
 
     void usun_wstecz() {
@@ -671,6 +681,9 @@ private:
         bajt_kursora_ = prev_byte;
         bajt_kotwicy_ = bajt_kursora_;
         bufor_[dlugosc_] = '\0';
+#if defined(BSF_NATIVE)
+        bajt_kursora_=BSF::cluster_floor(bufor_,dlugosc_,bajt_kursora_);bajt_kotwicy_=bajt_kursora_;
+#endif
         dopasuj_przewiniecie();
         uniewaznij();
         powiadom_o_zmianie();
@@ -687,6 +700,9 @@ private:
         dlugosc_ -= char_len;
         bajt_kotwicy_ = bajt_kursora_;
         bufor_[dlugosc_] = '\0';
+#if defined(BSF_NATIVE)
+        bajt_kursora_=BSF::cluster_floor(bufor_,dlugosc_,bajt_kursora_);bajt_kotwicy_=bajt_kursora_;
+#endif
         dopasuj_przewiniecie();
         uniewaznij();
         powiadom_o_zmianie();
@@ -731,9 +747,7 @@ private:
             return CzcionkaUI::pozycja_x_z_bajtu(bufor_, bajt_limit, skala);
         } else {
             size_t znakow = 0;
-            for (size_t i = 0; i < bajt_limit; ++i) {
-                if ((static_cast<uint8_t>(bufor_[i]) & 0xC0U) != 0x80U) ++znakow;
-            }
+            for(size_t p=0;p<bajt_limit;){size_t next=CzcionkaUI::nastepny_znak(bufor_,p,dlugosc_);if(next>bajt_limit)break;++znakow;p=next;}
             char temp[MAKS_BUFOR];
             if (znakow >= sizeof(temp)) znakow = sizeof(temp) - 1;
             for (size_t i = 0; i < znakow; ++i) temp[i] = znak_maskowania_;
