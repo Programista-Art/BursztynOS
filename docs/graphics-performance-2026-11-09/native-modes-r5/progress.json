@@ -1,0 +1,267 @@
+{
+  "baseline": null,
+  "transitions": [
+    {
+      "committed": {
+        "width": 1920,
+        "height": 1080,
+        "scale": 100,
+        "generation": 2,
+        "work_area": [
+          0,
+          0,
+          1920,
+          1040
+        ],
+        "taskbar": [
+          0,
+          1040,
+          1920,
+          40
+        ],
+        "mouse_bounds": [
+          1919,
+          1079
+        ],
+        "desktop_generation": 0,
+        "cursor": [
+          385,
+          462
+        ]
+      },
+      "edges": [
+        [
+          0,
+          1079
+        ],
+        [
+          1919,
+          1079
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1919,
+          0
+        ],
+        [
+          960,
+          1079
+        ]
+      ],
+      "after_edges": {
+        "width": 1920,
+        "height": 1080,
+        "scale": 100,
+        "generation": 2,
+        "work_area": [
+          0,
+          0,
+          1920,
+          1040
+        ],
+        "taskbar": [
+          0,
+          1040,
+          1920,
+          40
+        ],
+        "mouse_bounds": [
+          1919,
+          1079
+        ],
+        "desktop_generation": 2,
+        "cursor": [
+          960,
+          1079
+        ]
+      },
+      "power_png": {
+        "start": [
+          10,
+          440,
+          340,
+          600
+        ],
+        "button": [
+          306,
+          996,
+          36,
+          36
+        ],
+        "popup": [
+          144,
+          876,
+          198,
+          110
+        ],
+        "icons": [
+          {
+            "name": "zasilania",
+            "side": 22,
+            "pixels": 484
+          },
+          {
+            "name": "zablokuj",
+            "side": 18,
+            "pixels": 324
+          },
+          {
+            "name": "uspij",
+            "side": 18,
+            "pixels": 324
+          },
+          {
+            "name": "zamknij",
+            "side": 18,
+            "pixels": 324
+          },
+          {
+            "name": "uruchomponownie",
+            "side": 18,
+            "pixels": 324
+          }
+        ]
+      },
+      "power_popup_bounds": [
+        10,
+        440,
+        342,
+        602
+      ]
+    },
+    {
+      "committed": {
+        "width": 2560,
+        "height": 1440,
+        "scale": 100,
+        "generation": 3,
+        "work_area": [
+          0,
+          0,
+          2560,
+          1400
+        ],
+        "taskbar": [
+          0,
+          1400,
+          2560,
+          40
+        ],
+        "mouse_bounds": [
+          2559,
+          1439
+        ],
+        "desktop_generation": 2,
+        "cursor": [
+          385,
+          462
+        ]
+      },
+      "edges": [
+        [
+          0,
+          1439
+        ],
+        [
+          2559,
+          1439
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          2559,
+          0
+        ],
+        [
+          1280,
+          1439
+        ]
+      ],
+      "after_edges": {
+        "width": 2560,
+        "height": 1440,
+        "scale": 100,
+        "generation": 3,
+        "work_area": [
+          0,
+          0,
+          2560,
+          1400
+        ],
+        "taskbar": [
+          0,
+          1400,
+          2560,
+          40
+        ],
+        "mouse_bounds": [
+          2559,
+          1439
+        ],
+        "desktop_generation": 3,
+        "cursor": [
+          1280,
+          1439
+        ]
+      },
+      "power_png": {
+        "start": [
+          10,
+          800,
+          340,
+          600
+        ],
+        "button": [
+          306,
+          1356,
+          36,
+          36
+        ],
+        "popup": [
+          144,
+          1236,
+          198,
+          110
+        ],
+        "icons": [
+          {
+            "name": "zasilania",
+            "side": 22,
+            "pixels": 484
+          },
+          {
+            "name": "zablokuj",
+            "side": 18,
+            "pixels": 324
+          },
+          {
+            "name": "uspij",
+            "side": 18,
+            "pixels": 324
+          },
+          {
+            "name": "zamknij",
+            "side": 18,
+            "pixels": 324
+          },
+          {
+            "name": "uruchomponownie",
+            "side": 18,
+            "pixels": 324
+          }
+        ]
+      },
+      "power_popup_bounds": [
+        10,
+        800,
+        342,
+        602
+      ]
+    }
+  ]
+}

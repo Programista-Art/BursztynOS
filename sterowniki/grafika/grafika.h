@@ -241,6 +241,7 @@ struct StanBuforowEkranu {
     uint32_t* tapeta;
     size_t bajty, tapeta_bajty;
     bool ma_tapete;
+    bool backbuffer_pozyczony=false; // VirtIO backing remains driver-owned.
 };
 const MozliwosciEkranu& grafika_mozliwosci_ekranu();
 TrybEkranu grafika_tryb_ekranu();

@@ -22,6 +22,7 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
     observer=json.loads((root/'.bsf-test/display-observer-layout.json').read_text())
     wm_symbols=subprocess.check_output(['nm','-C',str(out/'wm.elf' if (out/'wm.elf').exists() else root/'menedzer_okien.elf')],text=True)
     wm_address=int(re.search(r'^([0-9a-f]+) [bBdD] \(anonymous namespace\)::desktop_layout$',wm_symbols,re.M)[1],16)
+    wm_address=power_observer.relocate(wm_address)
     def desktop():
         # Read-only page-table walk of PID 1. Process ABI offsets are checked in pzb.h.
         cr3=struct.unpack('<Q',read(symbol('tablica_procesow')+144+0x38,8))[0]
@@ -108,6 +109,8 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
         targets=[(800,600,100),(1024,768,100),(1280,720,100),(1366,768,100),(1920,1080,125),
                  (1920,1080,150),(1920,1080,175),(1920,1080,200),(2560,1440,100),(1280,720,100)]
     if __import__('os').environ.get('BURSZTYN_BSF_MATRIX')=='1366':targets=[(1366,768,100),(2560,1440,100),(1280,720,100)]
+    if __import__('os').environ.get('BURSZTYN_BSF_MATRIX')=='graphics':
+        targets=[(1920,1080,100),(2560,1440,100),(3440,1440,100),(1280,720,100)]
     for w,h,s in targets:
         old=geometry();win=window();factor=old['scale']/100
         # Select exact popup rows through the native list. No direction-key
@@ -124,9 +127,14 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
                 move(popup[0]+popup[2]//2,popup[1]+popup[3]//2)
                 q.call('input-send-event',{'events':[{'type':'btn','data':{'button':'wheel-up','down':down}} for _ in range(8) for down in (True,False)]})
                 started=ticks();wait(lambda:ticks()-started>=80,'resolution list scrolls to first row',60)
-                index={(800,600):0,(1024,768):1,(1280,720):2,(1366,768):4,(1920,1080):6,(2560,1440):7}[(w,h)]
+                index={(800,600):0,(1024,768):1,(1280,720):2,(1366,768):4,(1920,1080):6,(2560,1440):7,(3440,1440):8}[(w,h)]
                 screenshot('mode-popup-'+str(len(records)))
-                click(popup[0]+round(200*factor),popup[1]+round(6*factor)+index*row+row//2)
+                if index>=8:
+                    # Native popup shows eight rows. End/Up reveals the
+                    # penultimate ultrawide mode before Enter commits it.
+                    key('end');key('up');key('ret')
+                else:
+                    click(popup[0]+round(200*factor),popup[1]+round(6*factor)+index*row+row//2)
             else:
                 screenshot('mode-popup-'+str(len(records)))
                 click(popup[0]+round(200*factor),popup[1]+round(6*factor)+({(1280,720):2,(1920,1080):6}[(w,h)]-2)*row+row//2)
@@ -197,7 +205,9 @@ def run(out,screenshot,click,move,key,wait,ticks,launch,health,hmp,symbol,kernel
             # failed capture can still contain only Start, without the submenu.
             # Wait for the unchanged full pixel oracle, never weaken it.
             try:power_observer.verify(screenshot('power-ready-probe'),s);return True
-            except AssertionError:return False
+            except AssertionError as error:
+                (out/'power-frame-error.json').write_text(json.dumps(dict(error=repr(error),geometry=power_observer.geometry()),indent=2))
+                return False
         wait(power_frame_ready,'complete native power popup pixels',90,interval=.3)
         image=screenshot('power-scale-'+str(len(records)))
         record['power_png']=power_observer.verify(image,s)

@@ -1,3 +1,4 @@
+#include "jadro/gui/display_mode_policy.h"
 #include "system_identity.h"
 #include "diagnostyka_systemu.h"
 #include "diagnostyka_systemu_format.h"
@@ -2288,6 +2289,22 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     }
 
     g_multiboot_info_ptr = multiboot_info_ptr;
+    display_mode_policy.follow_host=zadano_automatyczne_testy(g_multiboot_info_ptr,"bursztyn.display=host");
+    display_mode_policy.observe_host=zadano_automatyczne_testy(g_multiboot_info_ptr,"bursztyn.display=observe");
+    // Explicit guest mode, independent of OVMF's fallback GOP and host DPI.
+    static constexpr uint32_t startup_modes[][2]={{800,600},{1024,768},{1280,720},{1280,800},{1366,768},{1600,900},{1920,1080},{2560,1440},{3440,1440},{3840,2160}};
+    for(const auto& mode:startup_modes){
+        char option[48]="bursztyn.video=";unsigned n=sizeof("bursztyn.video=")-1;
+        for(unsigned dim=0;dim<2;++dim){
+            char digits[12];unsigned len=0,value=mode[dim];
+            do{digits[len++]=char('0'+value%10);value/=10;}while(value);
+            while(len)option[n++]=digits[--len];
+            if(!dim)option[n++]='x';
+        }
+        if(zadano_automatyczne_testy(g_multiboot_info_ptr,option)){
+            display_mode_policy.initial_width=mode[0];display_mode_policy.initial_height=mode[1];break;
+        }
+    }
     skladacz_obrazu_ustaw_odswiezanie(
         odczytaj_odswiezanie_klatek(g_multiboot_info_ptr));
 #if defined(BURSZTYN_DIAG_PCI_TRACE) && BURSZTYN_DIAG_PCI_TRACE

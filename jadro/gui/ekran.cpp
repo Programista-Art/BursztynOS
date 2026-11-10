@@ -1,3 +1,5 @@
+#include "graphics_perf.h"
+#include "display_mode_policy.h"
 #include "ekran.h"
 #include "grafika.h"
 #include "skladacz_obrazu.h"
@@ -78,6 +80,7 @@ bool cofnij(){
     skladacz_obrazu_zloz_klatke();
     if(++generacja==0)++generacja;
     grafika_zatwierdz_geometrie(skala,generacja);
+    GraphicsPerf::mode(GraphicsPerf::Rollback,grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc(),skala);
     odblokuj_ekran();
     if(tx.fizyczna)grafika_zwolnij_stan(&zwolnij);
     powiadom();
@@ -85,14 +88,20 @@ bool cofnij(){
         VirtioGpuDriver* gdrv = virtio_gpu_get_driver(0);
         if(gdrv) virtio_gpu_free_stale_resource(gdrv);
     }
+    display_mode_policy.transaction_pending=false;
     return true;
 }
 uint32_t zastosuj(const TrybEkranu&t,uint32_t s,int owner,bool persist=true,
-                  bool wymagaj_potwierdzenia=true){
+                  bool wymagaj_potwierdzenia=true,GraphicsPerf::ModeSource source=GraphicsPerf::Guest){
+    GraphicsPerf::add(GraphicsPerf::ModeRequests);
     if(tx.oczekuje)return EKRAN_ZAJETY;
     if(!ui_skala_poprawna(s)||!grafika_tryb_obslugiwany(t))return EKRAN_NIEOBSLUGIWANY;
     const bool fizyczna=!ekran_ten_sam(t,grafika_tryb_ekranu());
     if(!fizyczna&&s==skala)return EKRAN_OK;
+    struct BufferTransactionGuard {
+        BufferTransactionGuard(){display_mode_policy.transaction_pending=true;}
+        ~BufferTransactionGuard(){if(!tx.oczekuje)display_mode_policy.transaction_pending=false;}
+    } buffer_transaction_guard;
     tx={};tx.fizyczna=fizyczna;tx.stara_skala=skala;tx.nowa_skala=s;tx.owner=owner;tx.id=++nastepna;
     grafika_pobierz_stan(&tx.stary);
     if(fizyczna){
@@ -126,6 +135,8 @@ uint32_t zastosuj(const TrybEkranu&t,uint32_t s,int owner,bool persist=true,
     skladacz_obrazu_zloz_klatke();
     if(++generacja==0)++generacja;
     grafika_zatwierdz_geometrie(skala,generacja);
+    GraphicsPerf::add(GraphicsPerf::ModeCommits);
+    GraphicsPerf::mode(source,t.szerokosc,t.wysokosc,s);
     odblokuj_ekran();
     powiadom();
     if(grafika_mozliwosci_ekranu().backend==EKRAN_VIRTIO_GPU){
@@ -146,7 +157,7 @@ uint32_t ekran_skala(){return skala;}
 
 uint32_t ekran_zastosuj_tryb(const TrybEkranu& tryb, uint32_t nowa_skala,
                              int owner, bool persist, bool wymagaj_potwierdzenia) {
-    return zastosuj(tryb, nowa_skala, owner, persist, wymagaj_potwierdzenia);
+    return zastosuj(tryb, nowa_skala, owner, persist, wymagaj_potwierdzenia,GraphicsPerf::Host);
 }
 
 void ekran_inicjalizuj(){
@@ -160,10 +171,11 @@ void ekran_inicjalizuj(){
     char buf[EKRAN_CFG_MAX]{};EkranKonfiguracja c{};
     bool parsed=n<=sizeof(buf)&&czytaj_fragment_pliku(EKRAN_CFG,0,buf,n,&got)&&got==n&&ekran_parsuj(buf,n,&c);
     if(parsed&&ui_skala_poprawna(c.skala)){
+        display_mode_policy.guest_selected();
         TrybEkranu t{c.szerokosc,c.wysokosc,c.bpp,c.szerokosc*4,0,0};
         if(!ekran_ten_sam(t,boot_tryb)&&grafika_tryb_obslugiwany(t)){
             log_tryb("[EKRAN INIT] mode change source=configrestore target=",t);
-            uint32_t result=zastosuj(t,c.skala,0,false,false);
+            uint32_t result=zastosuj(t,c.skala,0,false,false,GraphicsPerf::Config);
             if(result!=EKRAN_OK){
                 klog_serial("[EKRAN] Nie udalo sie przelaczyc trybu sprzetowego przy starcie; zachowano skale.");
                 skala=c.skala;bws_aktualizuj_ekran(skala);
@@ -547,7 +559,7 @@ bool ekran_obsluz(const proces_t& p, const EkranZadanie& r, EkranOdpowiedz* out)
     }
     uint32_t status=EKRAN_NIEOBSLUGIWANY;
     if(r.operacja==EKRAN_ZASTOSUJ){
-        if(r.szerokosc<=UINT32_MAX/4){TrybEkranu t{r.szerokosc,r.wysokosc,r.bpp,r.szerokosc*4,0,0};status=zastosuj(t,r.skala,p.pid,!test);}
+        if(r.szerokosc<=UINT32_MAX/4){TrybEkranu t{r.szerokosc,r.wysokosc,r.bpp,r.szerokosc*4,0,0};status=zastosuj(t,r.skala,p.pid,!test);if(status==EKRAN_OK||status==EKRAN_OCZEKUJE)display_mode_policy.guest_selected();}
     }else if(r.operacja==EKRAN_ZACHOWAJ||r.operacja==EKRAN_PRZYWROC){
         if(!tx.oczekuje||r.transakcja!=tx.id){
             status=EKRAN_NIEOBSLUGIWANY;
@@ -562,7 +574,7 @@ bool ekran_obsluz(const proces_t& p, const EkranZadanie& r, EkranOdpowiedz* out)
                 else{
                     skladacz_zakoncz_zmiane_ekranu(&tx.warstwy,true);
                     grafika_zwolnij_stan(&tx.stary);
-                    tx.oczekuje=false;
+                    tx.oczekuje=false;display_mode_policy.transaction_pending=false;
                     status=EKRAN_OK;
                     klog_serial("[EKRAN] Tryb zatwierdzony.");
                 }

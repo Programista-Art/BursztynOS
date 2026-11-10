@@ -1,0 +1,535 @@
+{
+  "boot_environment": "UEFI",
+  "result": "PASS",
+  "input_kind": "virtio",
+  "desktop_anchor_validation": false,
+  "baseline": null,
+  "transitions": [
+    {
+      "committed": {
+        "width": 1920,
+        "height": 1080,
+        "scale": 100,
+        "generation": 2,
+        "work_area": [
+          0,
+          0,
+          1920,
+          1040
+        ],
+        "taskbar": [
+          0,
+          1040,
+          1920,
+          40
+        ],
+        "mouse_bounds": [
+          1919,
+          1079
+        ],
+        "desktop_generation": 0,
+        "cursor": [
+          385,
+          462
+        ]
+      },
+      "edges": [
+        [
+          0,
+          1079
+        ],
+        [
+          1919,
+          1079
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1919,
+          0
+        ],
+        [
+          960,
+          1079
+        ]
+      ],
+      "after_edges": {
+        "width": 1920,
+        "height": 1080,
+        "scale": 100,
+        "generation": 2,
+        "work_area": [
+          0,
+          0,
+          1920,
+          1040
+        ],
+        "taskbar": [
+          0,
+          1040,
+          1920,
+          40
+        ],
+        "mouse_bounds": [
+          1919,
+          1079
+        ],
+        "desktop_generation": 2,
+        "cursor": [
+          960,
+          1079
+        ]
+      },
+      "power_png": {
+        "start": [
+          10,
+          440,
+          340,
+          600
+        ],
+        "button": [
+          306,
+          996,
+          36,
+          36
+        ],
+        "popup": [
+          144,
+          876,
+          198,
+          110
+        ],
+        "icons": [
+          {
+            "name": "zasilania",
+            "side": 22,
+            "pixels": 484
+          },
+          {
+            "name": "zablokuj",
+            "side": 18,
+            "pixels": 324
+          },
+          {
+            "name": "uspij",
+            "side": 18,
+            "pixels": 324
+          },
+          {
+            "name": "zamknij",
+            "side": 18,
+            "pixels": 324
+          },
+          {
+            "name": "uruchomponownie",
+            "side": 18,
+            "pixels": 324
+          }
+        ]
+      },
+      "power_popup_bounds": [
+        10,
+        440,
+        342,
+        602
+      ]
+    },
+    {
+      "committed": {
+        "width": 2560,
+        "height": 1440,
+        "scale": 100,
+        "generation": 3,
+        "work_area": [
+          0,
+          0,
+          2560,
+          1400
+        ],
+        "taskbar": [
+          0,
+          1400,
+          2560,
+          40
+        ],
+        "mouse_bounds": [
+          2559,
+          1439
+        ],
+        "desktop_generation": 2,
+        "cursor": [
+          385,
+          462
+        ]
+      },
+      "edges": [
+        [
+          0,
+          1439
+        ],
+        [
+          2559,
+          1439
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          2559,
+          0
+        ],
+        [
+          1280,
+          1439
+        ]
+      ],
+      "after_edges": {
+        "width": 2560,
+        "height": 1440,
+        "scale": 100,
+        "generation": 3,
+        "work_area": [
+          0,
+          0,
+          2560,
+          1400
+        ],
+        "taskbar": [
+          0,
+          1400,
+          2560,
+          40
+        ],
+        "mouse_bounds": [
+          2559,
+          1439
+        ],
+        "desktop_generation": 3,
+        "cursor": [
+          1280,
+          1439
+        ]
+      },
+      "power_png": {
+        "start": [
+          10,
+          800,
+          340,
+          600
+        ],
+        "button": [
+          306,
+          1356,
+          36,
+          36
+        ],
+        "popup": [
+          144,
+          1236,
+          198,
+          110
+        ],
+        "icons": [
+          {
+            "name": "zasilania",
+            "side": 22,
+            "pixels": 484
+          },
+          {
+            "name": "zablokuj",
+            "side": 18,
+            "pixels": 324
+          },
+          {
+            "name": "uspij",
+            "side": 18,
+            "pixels": 324
+          },
+          {
+            "name": "zamknij",
+            "side": 18,
+            "pixels": 324
+          },
+          {
+            "name": "uruchomponownie",
+            "side": 18,
+            "pixels": 324
+          }
+        ]
+      },
+      "power_popup_bounds": [
+        10,
+        800,
+        342,
+        602
+      ]
+    },
+    {
+      "committed": {
+        "width": 3440,
+        "height": 1440,
+        "scale": 100,
+        "generation": 4,
+        "work_area": [
+          0,
+          0,
+          3440,
+          1400
+        ],
+        "taskbar": [
+          0,
+          1400,
+          3440,
+          40
+        ],
+        "mouse_bounds": [
+          3439,
+          1439
+        ],
+        "desktop_generation": 3,
+        "cursor": [
+          385,
+          462
+        ]
+      },
+      "edges": [
+        [
+          0,
+          1439
+        ],
+        [
+          3439,
+          1439
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          3439,
+          0
+        ],
+        [
+          1720,
+          1439
+        ]
+      ],
+      "after_edges": {
+        "width": 3440,
+        "height": 1440,
+        "scale": 100,
+        "generation": 4,
+        "work_area": [
+          0,
+          0,
+          3440,
+          1400
+        ],
+        "taskbar": [
+          0,
+          1400,
+          3440,
+          40
+        ],
+        "mouse_bounds": [
+          3439,
+          1439
+        ],
+        "desktop_generation": 4,
+        "cursor": [
+          1720,
+          1439
+        ]
+      },
+      "power_png": {
+        "start": [
+          10,
+          800,
+          340,
+          600
+        ],
+        "button": [
+          306,
+          1356,
+          36,
+          36
+        ],
+        "popup": [
+          144,
+          1236,
+          198,
+          110
+        ],
+        "icons": [
+          {
+            "name": "zasilania",
+            "side": 22,
+            "pixels": 484
+          },
+          {
+            "name": "zablokuj",
+            "side": 18,
+            "pixels": 324
+          },
+          {
+            "name": "uspij",
+            "side": 18,
+            "pixels": 324
+          },
+          {
+            "name": "zamknij",
+            "side": 18,
+            "pixels": 324
+          },
+          {
+            "name": "uruchomponownie",
+            "side": 18,
+            "pixels": 324
+          }
+        ]
+      },
+      "power_popup_bounds": [
+        10,
+        800,
+        342,
+        602
+      ]
+    },
+    {
+      "committed": {
+        "width": 1280,
+        "height": 720,
+        "scale": 100,
+        "generation": 5,
+        "work_area": [
+          0,
+          0,
+          1280,
+          680
+        ],
+        "taskbar": [
+          0,
+          680,
+          1280,
+          40
+        ],
+        "mouse_bounds": [
+          1279,
+          719
+        ],
+        "desktop_generation": 4,
+        "cursor": [
+          385,
+          462
+        ]
+      },
+      "edges": [
+        [
+          0,
+          719
+        ],
+        [
+          1279,
+          719
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1279,
+          0
+        ],
+        [
+          640,
+          719
+        ]
+      ],
+      "after_edges": {
+        "width": 1280,
+        "height": 720,
+        "scale": 100,
+        "generation": 5,
+        "work_area": [
+          0,
+          0,
+          1280,
+          680
+        ],
+        "taskbar": [
+          0,
+          680,
+          1280,
+          40
+        ],
+        "mouse_bounds": [
+          1279,
+          719
+        ],
+        "desktop_generation": 5,
+        "cursor": [
+          640,
+          719
+        ]
+      },
+      "power_png": {
+        "start": [
+          10,
+          80,
+          340,
+          600
+        ],
+        "button": [
+          306,
+          636,
+          36,
+          36
+        ],
+        "popup": [
+          144,
+          516,
+          198,
+          110
+        ],
+        "icons": [
+          {
+            "name": "zasilania",
+            "side": 22,
+            "pixels": 484
+          },
+          {
+            "name": "zablokuj",
+            "side": 18,
+            "pixels": 324
+          },
+          {
+            "name": "uspij",
+            "side": 18,
+            "pixels": 324
+          },
+          {
+            "name": "zamknij",
+            "side": 18,
+            "pixels": 324
+          },
+          {
+            "name": "uruchomponownie",
+            "side": 18,
+            "pixels": 324
+          }
+        ]
+      },
+      "power_popup_bounds": [
+        10,
+        80,
+        342,
+        602
+      ]
+    }
+  ],
+  "kernel_sha256": "a42f746343b24e2833f63d539cebbb10671efccb74f3ef64b89481a6b1f6924d",
+  "iso_sha256": "209c917bf5d8e41afc532690201a91a4a8ceffe907bdc1b0c9cc88f9469a87a5"
+}

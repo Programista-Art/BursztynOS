@@ -1,0 +1,23 @@
+{
+  "error": "AssertionError(('PNG cache differs', 'zasilania', 100))",
+  "geometry": {
+    "start": [
+      10,
+      440,
+      340,
+      600
+    ],
+    "button": [
+      306,
+      996,
+      36,
+      36
+    ],
+    "popup": [
+      144,
+      876,
+      198,
+      110
+    ]
+  }
+}

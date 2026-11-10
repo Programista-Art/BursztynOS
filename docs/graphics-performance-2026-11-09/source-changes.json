@@ -1,0 +1,102 @@
+[
+  {
+    "path": ".pointingtest/launcher-audit/linux.json",
+    "sha256": "18a9843b1f9bc8e0b16639f6b2e546c4b6c4bfa94ff34f6e5e3f2b95a8892321"
+  },
+  {
+    "path": "Makefile",
+    "sha256": "adbfc3fbf411bc391a81df1326ff92bb9ded1908d61e0ab15d85d1d0af5315f8"
+  },
+  {
+    "path": "jadro/gui/bufory_grafiki.cpp",
+    "sha256": "14061de7be87d85105a22ba47acc07fc4290cf094d86838a48c8e704e32e0b09"
+  },
+  {
+    "path": "jadro/gui/display_mode_policy.h",
+    "sha256": "0f2dc2d6fc9b962881947cdbd15f6cc2d7bcb61be4381c115f6fbb81a7faa443"
+  },
+  {
+    "path": "jadro/gui/ekran.cpp",
+    "sha256": "48adee2e6fcaf128215a489f543b5ee0bd9bf0c6b08959d57ded45d937e54d6f"
+  },
+  {
+    "path": "jadro/gui/graphics_copy.h",
+    "sha256": "54bbb6cb43778eb2d7a16b4cf1a937df1e6c341b32b9d113f3cca30e3a68caf6"
+  },
+  {
+    "path": "jadro/gui/graphics_perf.h",
+    "sha256": "7235569266eb092f782c0d1321e4215e668f5b5b9ece188f3d90e623107bde3c"
+  },
+  {
+    "path": "jadro/gui/skladacz_obrazu.cpp",
+    "sha256": "ba5a925aed02655eabee6351c82f3df102f703c16e8b5de41c09af7c135998cb"
+  },
+  {
+    "path": "jadro/rdzen/kernel.cpp",
+    "sha256": "a5f15f597d40ec1316b86a3b61931d2753437baf44f9cad698ee002b9b8f5c17"
+  },
+  {
+    "path": "narzedzia/bsf_display_layout.cpp",
+    "sha256": "548cae9647b9efab62658e014dc15255663cb0226abdbdc27be6e416697dc499"
+  },
+  {
+    "path": "narzedzia/graphics_perf_capture.py",
+    "sha256": "503481adbadd3925123c4e4687feaf533ef8c2ceb039e3953cbcdb7c331f49d2"
+  },
+  {
+    "path": "narzedzia/graphics_perf_qemu.py",
+    "sha256": "49976c20c1e26da4f2dd5b21a04bf45dc9b17d8057402eb840a6b34ea733acfe"
+  },
+  {
+    "path": "narzedzia/qemu_process_layout.cpp",
+    "sha256": "c32ddb7ce16e553fbebd4c0dc9ff093838f5d994d8700a43cdce9a940af2ae7d"
+  },
+  {
+    "path": "rununix_virtio_latest.sh",
+    "sha256": "ea2f937919b5ab6bb55cf68b5cdf4c0b662e89df4dd9f4059b59b39c6ec87376"
+  },
+  {
+    "path": "runwindows.ps1",
+    "sha256": "b282c071af601af316e567dd79cf206ccfe83807a5163c3b4577812105560d8e"
+  },
+  {
+    "path": "sterowniki/grafika/grafika.cpp",
+    "sha256": "d60c1aa8a0ecdd8650b0ab126f1753c7c47aa1b23821f314cc805fd5bb337fe4"
+  },
+  {
+    "path": "sterowniki/grafika/grafika.h",
+    "sha256": "1eb4cb421d00ec4a7df86e09af1ea5f26c0ff26e895abd3e323fdf6b00e940ef"
+  },
+  {
+    "path": "sterowniki/virtio/virtio_gpu.cpp",
+    "sha256": "9b6a37b430fb7e5923c637b0f310aba9858481516f95f6cd4589a481d26f4645"
+  },
+  {
+    "path": "sterowniki/virtio/virtio_gpu.h",
+    "sha256": "6676b13d34630ece087ad25a74ceed1e7b2b788877d423fdec30fc8a44b5e7bb"
+  },
+  {
+    "path": "testy/display_geometry_qemu_cases.py",
+    "sha256": "cf62292dbcd7e7c3ef7374823df9a10fde3cf325d6c13d98032d17fa249ad2b4"
+  },
+  {
+    "path": "testy/power_png_qemu_observer.py",
+    "sha256": "a38a895938af50ddd41550dfc812c7140921983b2a2911584d00c3a9c4bd17e4"
+  },
+  {
+    "path": "testy/test_compositor_cursor.cpp",
+    "sha256": "67e7c16594f1f2fcc4c72366db7d288372d543fbb18ccaceee68927dc62be286"
+  },
+  {
+    "path": "testy/test_display_geometry_host.cpp",
+    "sha256": "caff30b4153801bfd56f8f9c77e18c1676683af2168a9bf7b6a395d0fae89a9c"
+  },
+  {
+    "path": "testy/test_display_mode_policy.cpp",
+    "sha256": "44c7327cf155507126fad99ab00695b9cd9974b825a198a8186a3e8d17c58ef3"
+  },
+  {
+    "path": "testy/test_husarz_qemu.py",
+    "sha256": "7ce759dfdc2f9054901736c46de3952e2e2c984a291f0430f985e74e3feac61c"
+  }
+]

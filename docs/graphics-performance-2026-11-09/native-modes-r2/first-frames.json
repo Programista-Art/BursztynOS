@@ -1,0 +1,86 @@
+[
+  {
+    "label": "immediate-0",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 100,
+      "generation": 2,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1040
+      ],
+      "taskbar": [
+        0,
+        1040,
+        1920,
+        40
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 0,
+      "cursor": [
+        385,
+        462
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 195,
+      "w": 640,
+      "h": 290
+    }
+  },
+  {
+    "label": "wm-1",
+    "geometry": {
+      "width": 1920,
+      "height": 1080,
+      "scale": 100,
+      "generation": 2,
+      "work_area": [
+        0,
+        0,
+        1920,
+        1040
+      ],
+      "taskbar": [
+        0,
+        1040,
+        1920,
+        40
+      ],
+      "mouse_bounds": [
+        1919,
+        1079
+      ],
+      "desktop_generation": 2,
+      "cursor": [
+        385,
+        462
+      ]
+    },
+    "bottom_color": [
+      38,
+      43,
+      49
+    ],
+    "window": {
+      "pid": 2,
+      "x": 320,
+      "y": 195,
+      "w": 640,
+      "h": 290
+    }
+  }
+]

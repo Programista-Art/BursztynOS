@@ -1,0 +1,13 @@
+=================================================================
+ BURSZTYN OS - WERYFIKACJA RESTARTU GOSCIA (VIRTIO-GPU QUIESCE)
+=================================================================
+
+========================================================
+ URUCHAMIANIE: TEST_2_JPEG_WALLPAPER
+ Scenariusz: Zmiana 1 tapety JPEG
+========================================================
+[TEST_2_JPEG_WALLPAPER] Start procesu QEMU...
+[TEST_2_JPEG_WALLPAPER] Czekam na boot do pulpitu (max 90s)...
+[TEST_2_JPEG_WALLPAPER] FAIL: Pulpit nie zglosil gotowosci w czasie!
+
+[BLAD] TEST 2 nie powiodl sie: FAIL_BOOT

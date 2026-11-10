@@ -1,0 +1,9 @@
+{
+  "kernel": "/tmp/bursztyn-graphics-candidate-kernel.bin",
+  "kernel_sha256": "a42f746343b24e2833f63d539cebbb10671efccb74f3ef64b89481a6b1f6924d",
+  "qemu": "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)",
+  "firmware": "/usr/share/ovmf/OVMF.fd",
+  "boot_medium": "virtio",
+  "disk_attached": false,
+  "results": []
+}

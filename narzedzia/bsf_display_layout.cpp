@@ -1,5 +1,5 @@
 #define BSF_NATIVE 1
-#include "narzedzia/bursztyn_ui_host_fixture.h"
+#include "testy/bursztyn_ui_host_fixture.h"
 #include "programy/ekran/ekran_okno.h"
 #include <cstdio>
 #include <fstream>

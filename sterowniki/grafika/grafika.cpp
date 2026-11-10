@@ -1,3 +1,6 @@
+#include "jadro/gui/display_mode_policy.h"
+#include "jadro/gui/graphics_perf.h"
+#include "jadro/gui/graphics_copy.h"
 #include "kolor_alfa.h"
 #include "bws_gui_batch.h"
 #include "diagnostyka_systemu.h"
@@ -240,7 +243,7 @@ int znajdz_pierwsza_warstwe_gui() {
 /* RAM→RAM: kompilator generuje rep movs / SIMD zamiast petli C na piksel. */
 static inline void kopiuj_wiersz32(uint32_t* dst, const uint32_t* src, uint32_t count) {
     if (count)
-        __builtin_memcpy(dst, src, static_cast<size_t>(count) * sizeof(uint32_t));
+        graphics_copy_pixels(dst,src,count);
 }
 
 /*
@@ -267,7 +270,7 @@ static inline void kopiuj_wiersz_lfb(volatile uint32_t* dst, const uint32_t* src
 static inline void kopiuj_wiersz_ram32(uint32_t* dst, const uint32_t* src,
                                        uint32_t count) {
     if (count)
-        __builtin_memcpy(dst, src, static_cast<size_t>(count) * sizeof(uint32_t));
+        graphics_copy_pixels(dst,src,count);
 }
 
 static inline void wypelnij_wiersz32(uint32_t* dst, uint32_t kolor, uint32_t count) {
@@ -619,6 +622,8 @@ public:
         opublikowano=false;
         if (!PrezentacjaStartu::dozwolona() || virtio_gpu_is_quiescing() || !drv || !drv->initialized || drv->has_error) return;
         if (static_cast<const void*>(bufor) != static_cast<const void*>(const_cast<const uint8_t*>(framebuffer_fizyczny))) {
+            GraphicsPerf::Timer copy_timer(GraphicsPerf::CopyNs);
+            GraphicsPerf::add(GraphicsPerf::CopyBytes,uint64_t(szerokosc)*wysokosc*4);
             KopiujCalyBufor32Ram(bufor);
         }
         MoveTrace::flush_request();
@@ -649,6 +654,8 @@ public:
 
         const auto copy_start=gui_perf_now();
         if (static_cast<const void*>(bufor) != static_cast<const void*>(const_cast<const uint8_t*>(framebuffer_fizyczny))) {
+            GraphicsPerf::Timer copy_timer(GraphicsPerf::CopyNs);
+            GraphicsPerf::add(GraphicsPerf::CopyBytes,uint64_t(rw)*rh*4);
             KopiujFragment32Ram(bufor, rx, ry, rw, rh);
         }
         gui_perf_add(0,GP_COPY_NS,gui_perf_now()-copy_start);
@@ -679,6 +686,7 @@ void grafika_host_bezposrednia_kopia(uint8_t* p) {
 }
 #endif
 static uint8_t* backbuffer = nullptr;
+static bool backbuffer_pozyczony=false;
 static size_t backbuffer_bajty=0;
 static uint64_t ekran_lfb_va=0, ekran_vram=0;
 static uint64_t boot_lfb_va = 0;
@@ -1169,7 +1177,31 @@ void boot_log_gui(const char* tekst) {
 // PREZENTACJA EKRANU
 // =========================================================================
 
+// During the splash the scene and overlay remain independent surfaces. After
+// it ends, compose directly into ordinary VirtIO backing RAM. TRANSFER copies
+// to the host image only after the complete damaged scene/cursor transaction.
+static bool przygotuj_wlasnosc_sceny(){
+    if(!aktywny_ekran||!backbuffer)return true;
+    if(powitanie_aktywne()&&backbuffer_pozyczony){
+        auto* owned=static_cast<uint8_t*>(bufor_grafiki_alokuj(backbuffer_bajty));
+        if(!owned)return false;
+        graphics_copy_pixels(reinterpret_cast<uint32_t*>(owned),reinterpret_cast<const uint32_t*>(backbuffer),backbuffer_bajty/4);
+        backbuffer=owned;backbuffer_pozyczony=false;
+    }else if(!powitanie_aktywne()&&!backbuffer_pozyczony&&!display_mode_policy.transaction_pending&&ekran_caps.backend==EKRAN_VIRTIO_GPU){
+        auto* drv=virtio_gpu_get_driver(0);
+        if(drv&&drv->fb_vaddr&&drv->fb_stride==aktywny_ekran->PobierzPitch()&&
+           drv->fb_width==aktywny_ekran->PobierzSzerokosc()&&drv->fb_height==aktywny_ekran->PobierzWysokosc()){
+            const size_t bytes=size_t(drv->fb_stride)*drv->fb_height;
+            if(bytes>backbuffer_bajty)return false;
+            graphics_copy_pixels(static_cast<uint32_t*>(drv->fb_vaddr),reinterpret_cast<const uint32_t*>(backbuffer),bytes/4);
+            bufor_grafiki_zwolnij(backbuffer);backbuffer=static_cast<uint8_t*>(drv->fb_vaddr);backbuffer_bajty=bytes;backbuffer_pozyczony=true;
+        }
+    }
+    return true;
+}
+
 void PrzeniesNaEkran() {
+    if(!przygotuj_wlasnosc_sceny())return;
     if (grafika_wyciszona || !backbuffer || !aktywny_ekran)
         return;
 
@@ -1281,6 +1313,7 @@ static inline void ZapiszPikselBackbuffer(int x,
 }
 
 void grafika_rozpocznij_skladanie() {
+    (void)przygotuj_wlasnosc_sceny();
     if (!backbuffer || !aktywny_ekran)
         return;
 
@@ -1578,7 +1611,12 @@ void grafika_prezentuj_scene_z_kursorem(const GuiDirtyRect* dirty, uint32_t coun
         sw,sh,old,cursor_x-hx,cursor_y-hy,kw,kh,kursor_tlo_kopia,dirty,count,
         [&](int x,int y,uint32_t& c){return piksel_kursora(stan,x,y,&c);},
         [&](GuiDirtyRect r){kursor_diag_present(r);PrzeniesFragmentNaEkran(r.x,r.y,r.width,r.height);},
-        [&](int stage){kursor_diag_stage(stage);});
+        [&](int stage){
+            kursor_diag_stage(stage);
+            // Flush while the cursor is still in driver backing. The shared
+            // transaction restores only guest RAM afterwards, never host ink.
+            if(stage==3&&backbuffer_pozyczony)grafika_zakoncz_batch_gpu();
+        });
     kursor_overlay_x=next.x;kursor_overlay_y=next.y;
     kursor_overlay_w=next.width;kursor_overlay_h=next.height;
     kursor_overlay_widoczny=next.width>0;
@@ -2721,6 +2759,7 @@ static void zaktualizuj_mysze_wspolne(int64_t dx,
     if (!backbuffer || !aktywny_ekran)
         return;
 
+    GraphicsPerf::input();
     skladacz_obrazu_zarejestruj_raport_myszy(dx != 0 || dy != 0);
 
     NaprawWlascicielaMyszyJesliProcesZniknal();
@@ -3404,7 +3443,7 @@ void InicjalizujGrafike(uint64_t adres_mb2) {
 
     backbuffer=static_cast<uint8_t*>(bufor_grafiki_alokuj(lfb_waga));
     if(!backbuffer) { SerialLog("[EKRAN] BLAD backbuffer PMM/VMM.\n"); while(true) asm volatile("cli; hlt"); }
-    backbuffer_bajty=lfb_waga;
+    backbuffer_bajty=lfb_waga;backbuffer_pozyczony=false;
     ekran_lfb_va=framebuffer_wirtualny;
 
     if (mamy_efi) {
@@ -4226,17 +4265,18 @@ bool grafika_tryb_obslugiwany(const TrybEkranu&t){
     return ekran_caps.mozna_zmienic_runtime&&bochs_sprawdz_tryb(t);
 }
 void grafika_pobierz_stan(StanBuforowEkranu* s){
-    if(s)*s={grafika_tryb_ekranu(),backbuffer,bufor_tapety,backbuffer_bajty,tapeta_zmapowane_bajty,tapeta_zaladowana};
+    if(s)*s={grafika_tryb_ekranu(),backbuffer,bufor_tapety,backbuffer_bajty,tapeta_zmapowane_bajty,tapeta_zaladowana,backbuffer_pozyczony};
 }
 bool grafika_przygotuj_ekran(const TrybEkranu&t,StanBuforowEkranu* s){
     if(!s||!grafika_tryb_obslugiwany(t))return false;
     *s={};s->tryb=t;
     if(!ekran_rozmiar(t,&s->bajty))return false;
     s->tapeta_bajty=size_t(t.szerokosc)*t.wysokosc*4;
-    s->backbuffer=static_cast<uint8_t*>(bufor_grafiki_alokuj(s->bajty));
+    s->backbuffer_pozyczony=ekran_caps.backend==EKRAN_VIRTIO_GPU&&!powitanie_aktywne();
+    if(!s->backbuffer_pozyczony)s->backbuffer=static_cast<uint8_t*>(bufor_grafiki_alokuj(s->bajty));
     s->tapeta=static_cast<uint32_t*>(bufor_grafiki_alokuj(s->tapeta_bajty));
-    if(!s->backbuffer||!s->tapeta){grafika_zwolnij_stan(s);return false;}
-    for(size_t i=0;i<s->bajty;++i)s->backbuffer[i]=0;
+    if((!s->backbuffer&&!s->backbuffer_pozyczony)||!s->tapeta){grafika_zwolnij_stan(s);return false;}
+    if(s->backbuffer)for(size_t i=0;i<s->bajty;++i)s->backbuffer[i]=0;
     s->ma_tapete=tapeta_zaladowana;
     return true;
 }
@@ -4325,10 +4365,10 @@ bool grafika_aktywuj_virtio_gpu(VirtioGpuDriver* drv) {
     if (backbuffer_bajty < wymagane_bajty) {
         uint8_t* nowy_bb = static_cast<uint8_t*>(bufor_grafiki_alokuj(wymagane_bajty));
         if (nowy_bb) {
-            if (backbuffer) {
+            if (backbuffer && !backbuffer_pozyczony) {
                 bufor_grafiki_zwolnij(backbuffer);
             }
-            backbuffer = nowy_bb;
+            backbuffer = nowy_bb;backbuffer_pozyczony=false;
             backbuffer_bajty = wymagane_bajty;
             // The new scanout is not a source of valid desktop pixels.
         }
@@ -4395,6 +4435,25 @@ void grafika_zakoncz_wybor_backendu() {
 
 bool grafika_przywroc_boot_backend() {
     if (!boot_sterownik || boot_lfb_va == 0) return false;
+    if(backbuffer_pozyczony || backbuffer_bajty<size_t(boot_pitch)*boot_wys){
+        const auto bytes=size_t(boot_pitch)*boot_wys;
+        auto* owned=static_cast<uint8_t*>(bufor_grafiki_alokuj(bytes));
+        if(!owned)return false;
+        for(size_t i=0;i<bytes/4;++i)reinterpret_cast<uint32_t*>(owned)[i]=0;
+        // Preserve the completed scene when leaving driver-owned backing.
+        // The firmware mode can have a different pitch and dimensions.
+        const auto old_pitch=aktywny_ekran?aktywny_ekran->PobierzPitch():0;
+        const auto old_w=aktywny_ekran?aktywny_ekran->PobierzSzerokosc():0;
+        const auto old_h=aktywny_ekran?aktywny_ekran->PobierzWysokosc():0;
+        const auto copy_w=old_w<boot_szer?old_w:boot_szer;
+        const auto copy_h=old_h<boot_wys?old_h:boot_wys;
+        if(backbuffer&&old_pitch&&size_t(old_pitch)*copy_h<=backbuffer_bajty)
+            for(uint32_t y=0;y<copy_h;++y)
+                graphics_copy_pixels(reinterpret_cast<uint32_t*>(owned+size_t(y)*boot_pitch),
+                    reinterpret_cast<const uint32_t*>(backbuffer+size_t(y)*old_pitch),copy_w);
+        if(backbuffer&&!backbuffer_pozyczony)bufor_grafiki_zwolnij(backbuffer);
+        backbuffer=owned;backbuffer_bajty=bytes;backbuffer_pozyczony=false;
+    }
 
     if (aktywny_ekran && kursor_plane_aktywny) {
         aktywny_ekran->UkryjKursor();
@@ -4442,7 +4501,9 @@ void grafika_wymien_stan(const StanBuforowEkranu&s){
         }
     }
     aktywny_ekran->Inicjalizuj(ekran_lfb_va,s.tryb.szerokosc,s.tryb.wysokosc,s.tryb.pitch,s.tryb.bpp);
-    backbuffer=s.backbuffer;bufor_tapety=s.tapeta;backbuffer_bajty=s.bajty;
+    backbuffer=s.backbuffer;backbuffer_pozyczony=s.backbuffer_pozyczony;
+    if(backbuffer_pozyczony){auto* drv=virtio_gpu_get_driver(0);backbuffer=drv?static_cast<uint8_t*>(drv->fb_vaddr):nullptr;}
+    bufor_tapety=s.tapeta;backbuffer_bajty=s.bajty;
     tapeta_zmapowane_bajty=s.tapeta_bajty;bufor_tapety_zmapowany=bufor_tapety!=nullptr;tapeta_zaladowana=s.ma_tapete;
     aktywny_stan.szerokosc=s.tryb.szerokosc;aktywny_stan.wysokosc=s.tryb.wysokosc;
     aktywny_stan.pitch=s.tryb.pitch;aktywny_stan.bpp=s.tryb.bpp;
@@ -4484,7 +4545,8 @@ DisplayGeometry grafika_geometria_ekranu() {
 uint64_t grafika_generacja_ekranu(){return grafika_geometria_ekranu().generation;}
 void grafika_zwolnij_stan(StanBuforowEkranu*s){
     if(!s)return;
-    bufor_grafiki_zwolnij(s->backbuffer);bufor_grafiki_zwolnij(s->tapeta);*s={};
+    if(!s->backbuffer_pozyczony)bufor_grafiki_zwolnij(s->backbuffer);
+    bufor_grafiki_zwolnij(s->tapeta);*s={};
 }
 
 bool grafika_test_kursor_suite(VirtioGpuDriver* gpu_drv) {

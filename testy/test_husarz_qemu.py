@@ -530,13 +530,13 @@ def main():
             # window before sending input, including a cold userspace font load.
             def diagnostic_drawn():
                 im=screenshot('diagnostic-opening-probe')
-                r,g,b=im.getpixel((1118,37))
+                r,g,b=im.getpixel((1116,44))
                 return r>150 and g<130 and b<130
             wait(diagnostic_drawn,'diagnostic first frame visible',240,interval=1)
             click(1124, 44)
             def diagnostic_closed():
                 im=screenshot('diagnostic-closing-probe')
-                r,g,b=im.getpixel((1118,37))
+                r,g,b=im.getpixel((1116,44))
                 return not (r>150 and g<130 and b<130)
             wait(diagnostic_closed,'diagnostic closed through native titlebar',240,interval=1)
             if args.power_png_fonts_only:

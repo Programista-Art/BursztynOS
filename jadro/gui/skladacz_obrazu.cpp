@@ -44,6 +44,9 @@
 
 #include "skladacz_obrazu.h"
 #include "desktop_modeset.h"
+#include "graphics_perf.h"
+#include "graphics_copy.h"
+#include "display_mode_policy.h"
 #include "grafika.h"
 #include "gui_runtime_diag.h"
 #include "ekran.h"
@@ -1556,27 +1559,21 @@ void zloz_dekoracje(int pid,const GuiDirtyRect& clip) {
 
 /*
  * Nie-pulpitowe warstwy: motyw_pulpit_skladaj == (c & 0xffffff).
- * Ciągłe runy 0x00RRGGBB kopiujemy memcpy — bez narzutu na piksel przy
- * nieprzezroczystych oknach (główny koszt przy wysokiej rozdzielczości).
+ * Opaque groups are read once and stored as masked pairs. Exact zero remains
+ * transparent; all legacy high-byte markers are stripped without blending.
  */
 void zloz_wiersz_nieprzezroczysty(uint32_t* dst, const uint32_t* src, int count) {
-    int i = 0;
-    while (i < count) {
-        while (i < count && src[i] == 0) ++i;
-        const int start = i;
-        while (i < count && src[i] != 0) ++i;
-        if (start >= i) continue;
-        bool plain = true;
-        for (int j = start; j < i; ++j) {
-            if (src[j] & 0xff000000U) { plain = false; break; }
-        }
-        if (plain) {
-            __builtin_memcpy(dst + start, src + start,
-                             static_cast<size_t>(i - start) * sizeof(uint32_t));
-        } else {
-            for (int j = start; j < i; ++j) dst[j] = src[j] & 0x00ffffffU;
+    int i=0;
+    for(;i+4<=count;i+=4){
+        uint64_t a,b;__builtin_memcpy(&a,src+i,8);__builtin_memcpy(&b,src+i+2,8);
+        if(uint32_t(a)&&uint32_t(a>>32)&&uint32_t(b)&&uint32_t(b>>32)){
+            a&=0x00ffffff00ffffffULL;b&=0x00ffffff00ffffffULL;
+            __builtin_memcpy(dst+i,&a,8);__builtin_memcpy(dst+i+2,&b,8);
+        }else{
+            for(int k=0;k<4;++k)if(src[i+k])dst[i+k]=src[i+k]&0xffffffU;
         }
     }
+    for(;i<count;++i)if(src[i])dst[i]=src[i]&0xffffffU;
 }
 
 void zloz_warstwe(
@@ -1742,6 +1739,17 @@ void zloz_snapshot_region(const LayerRenderInfo& w,const GuiDirtyRect& r) {
         uint64_t first=(uint64_t)(py-w.y)*(uint32_t)w.width+(uint32_t)(x0-w.x);
         uint64_t len=(uint32_t)row_w;if(first>w.pixels||len>w.pixels-first)return;
         const uint32_t* src=w.buffer+first;uint32_t* dst=grafika_pobierz_wiersz_backbuffer(py)+x0;
+        // The root surface is usually empty above the wallpaper. Skip whole
+        // transparent groups while retaining straight alpha for actual ink.
+        if(desktop){
+            int i=0;
+            for(;i+4<=row_w;i+=4){
+                if(!(src[i]|src[i+1]|src[i+2]|src[i+3]))continue;
+                for(int k=0;k<4;++k)if(src[i+k])dst[i+k]=motyw_pulpit_skladaj(dst[i+k],src[i+k],true,desktop_theme);
+            }
+            for(;i<row_w;++i)if(src[i])dst[i]=motyw_pulpit_skladaj(dst[i],src[i],true,desktop_theme);
+            continue;
+        }
         if(!desktop && !decorated){
             zloz_wiersz_nieprzezroczysty(dst,src,row_w);
             continue;
@@ -2046,102 +2054,29 @@ void skladacz_obrazu_oznacz_ruch_kursora(int old_x,int old_y,int new_x,int new_y
     irq_restore(f);
 }
 
-/*
- * Reakcja na zmiane geometrii zgloszona przez medium (okno QEMU, monitor VM).
- *
- * Wywolywane raz na klatke, ale z wlasnym progiem czasowym: GET_DISPLAYINFO
- * to pelna komenda na controlq, wiec nie wolno jej wysylac co klatke.
- * Sprawdzamy najwyzej raz na ~500 ms.
- *
- * Dlaczego odpytywanie, a nie eventq: QEMU z virtio-vga oferuje tylko dwie
- * kolejki (control + cursor), wiec kolejka zdarzen (indeks 2) nie istnieje.
- * GET_DISPLAYINFO dziala na kazdym urzadzeniu virtio-gpu.
- *
- * Zwraca true, gdy tryb zostal zmieniony - kompozytor musi wtedy zlozyc
- * pelna klatke od nowa.
- */
-/* Odroczone zadanie zmiany geometrii (patrz sprawdz_zmiane_geometrii_medium). */
-static volatile uint32_t g_geometria_oczekuje = 0;
-static uint32_t g_oczekujaca_geometria_w = 0;
-static uint32_t g_oczekujaca_geometria_h = 0;
-
+// Host geometry following is explicitly opt-in. Poll outside the render lock;
+// stability is evaluated even without a new event, after the debounce interval.
+static volatile uint32_t g_geometria_oczekuje=0;
+static uint32_t g_oczekujaca_geometria_w=0,g_oczekujaca_geometria_h=0;
 static bool sprawdz_zmiane_geometrii_medium() {
-    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
-    if (!drv || !drv->initialized || drv->has_error) return false;
-
-    /* Prog czasowy: 500 ms. Klatki ida 60-240 Hz, wiec to ~30x rzadziej. */
-    static uint64_t nastepne_sprawdzenie_ns = 0;
-    const uint64_t teraz_ns = hpet_dostepny() ? czas_monotoniczny_ns() : 0;
-    if (teraz_ns != 0 && nastepne_sprawdzenie_ns != 0 &&
-        teraz_ns < nastepne_sprawdzenie_ns) {
-        return false;
+    if(!display_mode_policy.follow_host&&!display_mode_policy.observe_host)return false;
+    auto* drv=virtio_gpu_get_driver(0);
+    if(!drv||!drv->initialized||drv->has_error)return false;
+    static uint64_t next_poll=0;
+    const auto now=GraphicsPerf::now();
+    if(!now||now<next_poll)return false;
+    next_poll=now+500000000ULL;
+    uint32_t w=0,h=0;
+    GraphicsPerf::add(GraphicsPerf::HostPolls);
+    if(!virtio_gpu_pobierz_geometrie_hosta(drv,&w,&h))return false;
+    static uint32_t hint_w=0,hint_h=0;
+    if(w!=hint_w||h!=hint_h){
+        GraphicsPerf::add(GraphicsPerf::HostHintChanges);GraphicsPerf::hint(w,h);hint_w=w;hint_h=h;
     }
-    if (teraz_ns != 0) {
-        nastepne_sprawdzenie_ns = teraz_ns + 500000000ULL;
-    }
-
-    uint32_t nowa_szer = 0, nowa_wys = 0;
-    if (!virtio_gpu_pobierz_geometrie_hosta(drv, &nowa_szer, &nowa_wys)) {
-        return false;
-    }
-
-    const uint32_t stara_szer = static_cast<uint32_t>(grafika_pobierz_szerokosc());
-    const uint32_t stara_wys = static_cast<uint32_t>(grafika_pobierz_wysokosc());
-
-    if (nowa_szer == stara_szer && nowa_wys == stara_wys) {
-        return false;
-    }
-
-    /*
-     * Histereza: ignorujemy roznice mniejsze niz 32 px.
-     *
-     * GET_DISPLAYINFO zwraca rozmiar scanoutu, ktory chwilowo obejmuje tez
-     * ramke okna hosta (np. 1054 zamiast 1024). Bez tej bariery kompozytor
-     * przelaczalby tryb tam i z powrotem, za kazdym razem realokujac bufor
-     * ramki - to widoczne migotanie i niepotrzebna praca.
-     *
-     * Prawdziwa zmiana okna (uzytkownik rozciaga je o setki pikseli) zawsze
-     * przekracza ten prog.
-     */
-    const uint32_t roznica_w = nowa_szer > stara_szer
-        ? nowa_szer - stara_szer : stara_szer - nowa_szer;
-    const uint32_t roznica_h = nowa_wys > stara_wys
-        ? nowa_wys - stara_wys : stara_wys - nowa_wys;
-
-    if (roznica_w < 32U && roznica_h < 32U) {
-        return false;
-    }
-
-    char msg[112]{};
-    size_t p = 0;
-    auto dopisz = [&](const char* t) { while (*t && p + 1 < sizeof(msg)) msg[p++] = *t++; };
-    auto liczba = [&](uint32_t v) {
-        char tmp[12]; int n = 0;
-        if (v == 0) tmp[n++] = '0';
-        while (v > 0 && n < 11) { tmp[n++] = char('0' + v % 10); v /= 10; }
-        for (int i = n - 1; i >= 0; --i) if (p + 1 < sizeof(msg)) msg[p++] = tmp[i];
-    };
-    dopisz("[GEOMETRIA] Medium zmienilo rozmiar ");
-    liczba(stara_szer); dopisz("x"); liczba(stara_wys);
-    dopisz(" -> "); liczba(nowa_szer); dopisz("x"); liczba(nowa_wys);
-    msg[p] = '\0';
-    wypisz_log(msg);
-
-    /*
-     * NIE przelaczamy trybu tutaj.
-     *
-     * Ta funkcja jest wolana z wnetrza skladacz_obrazu_obsluz_dirty(), ktore
-     * trzyma zablokuj_ekran() (spinlock bez reentrancji). ekran_zastosuj_tryb()
-     * probuje wziac te sama blokade - zakleszczenie i caly system staje.
-     *
-     * Zamiast tego zapisujemy zadanie; realizuje je
-     * skladacz_obrazu_wykonaj_zmiane_geometrii() z wnetrza petli idle,
-     * gdzie blokada nie jest trzymana.
-     */
-    g_oczekujaca_geometria_w = nowa_szer;
-    g_oczekujaca_geometria_h = nowa_wys;
-    __atomic_store_n(&g_geometria_oczekuje, 1U, __ATOMIC_RELEASE);
-    return false;
+    if(!display_mode_policy.observe(w,h,grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc(),now))return false;
+    g_oczekujaca_geometria_w=w;g_oczekujaca_geometria_h=h;
+    __atomic_store_n(&g_geometria_oczekuje,1U,__ATOMIC_RELEASE);
+    return true;
 }
 
 /*
@@ -2151,6 +2086,7 @@ static bool sprawdz_zmiane_geometrii_medium() {
  * Zwraca true, gdy tryb zostal zmieniony.
  */
 bool skladacz_obrazu_wykonaj_zmiane_geometrii() {
+    (void)sprawdz_zmiane_geometrii_medium();
     if (__atomic_load_n(&g_geometria_oczekuje, __ATOMIC_ACQUIRE) == 0) {
         return false;
     }
@@ -2168,6 +2104,9 @@ bool skladacz_obrazu_wykonaj_zmiane_geometrii() {
      * Skala UI zostaje bez zmian - zmienia sie tylko rozmiar powierzchni.
      * Uzytkownik moze miec ustawione 150%, a my dostosowujemy sie do okna.
      */
+    if(!display_mode_policy.follow_host)return false;
+    const uint32_t old_w=grafika_pobierz_szerokosc(),old_h=grafika_pobierz_wysokosc();
+    if(w==old_w&&h==old_h)return false;
     const TrybEkranu nowy{w, h, 32u, w * 4u, 0u, 0u};
     const uint32_t wynik = ekran_zastosuj_tryb(nowy, ekran_skala(), 0, false, false);
 
@@ -2176,7 +2115,8 @@ bool skladacz_obrazu_wykonaj_zmiane_geometrii() {
         return false;
     }
 
-    wypisz_log("[GEOMETRIA] Tryb przelaczony; kompozytor sklada pelna klatke.");
+    display_mode_policy.committed(old_w,old_h,GraphicsPerf::now());
+    wypisz_log("[GEOMETRIA] source=host-stable mode committed.");
     return true;
 }
 
@@ -2201,15 +2141,6 @@ void skladacz_obrazu_obsluz_dirty() {
     const bool ma_geometrie=ma_pending_geometry();
     const bool ma_drag=ma_pending_drag_overlay();
 
-    /*
-     * Medium moze zmienic geometrie w trakcie pracy (uzytkownik rozciaga okno
-     * QEMU, przelacza monitor VM). Host zglasza to zdarzeniem na eventq.
-     * Sprawdzamy je raz na klatke i przelaczamy tryb ekranu - system skaluje
-     * sie do tego, co go aktualnie wyswietla, zamiast zostawac w trybie
-     * z bootu.
-     */
-    (void)sprawdz_zmiane_geometrii_medium();
-
     if(!ma_dirty&&!ma_cursor&&!ma_geometrie&&!ma_drag)return;
 
     uint64_t now=hpet_dostepny()?czas_monotoniczny_ns():0;
@@ -2223,14 +2154,14 @@ void skladacz_obrazu_obsluz_dirty() {
         if(!grafika_czy_kursor_sprzetowy())return;
         int cx=0,cy=0;bool ruch=false;
         f=irq_off();if(cursor_pending){ruch=cursor_latest.take(cx,cy);kursor_diag_consume(dirty_rects,dirty_count);}irq_restore(f);
-        if(ruch){grafika_prezentuj_kursor_w(cx,cy);++cursor_fast_present_count;}
+        if(ruch){auto stamp=GraphicsPerf::take_input();grafika_prezentuj_kursor_w(cx,cy);GraphicsPerf::latency(stamp,GraphicsPerf::now());GraphicsPerf::add(GraphicsPerf::CursorPresents);++cursor_fast_present_count;}
         if(hpet_dostepny())perf_log(now);
         return;
     }
     if(!klatka_potrzebna){
         int cx=0,cy=0;bool ruch=false;
         f=irq_off();if(cursor_pending){ruch=cursor_latest.take(cx,cy);kursor_diag_consume(dirty_rects,dirty_count);}irq_restore(f);
-        if(ruch){grafika_prezentuj_kursor_w(cx,cy);++cursor_fast_present_count;}
+        if(ruch){auto stamp=GraphicsPerf::take_input();grafika_prezentuj_kursor_w(cx,cy);GraphicsPerf::latency(stamp,GraphicsPerf::now());GraphicsPerf::add(GraphicsPerf::CursorPresents);++cursor_fast_present_count;}
         if(hpet_dostepny())perf_log(now);
         return;
     }
@@ -2249,6 +2180,7 @@ void skladacz_obrazu_obsluz_dirty() {
     static GuiDirtyRect work[SKLADACZ_MAKS_DIRTY_RECT];uint32_t count=0;uint64_t generation_start;bool cursor_work=false;int cur_x=0,cur_y=0;
     f=irq_off();count=dirty_count;for(uint32_t i=0;i<count;++i)work[i]=dirty_rects[i];dirty_count=0;cursor_work=cursor_pending;cur_x=cursor_new_x;cur_y=cursor_new_y;cursor_pending=false;kursor_diag_consume(work,count);generation_start=dirty_generation;irq_restore(f);
 
+    const uint64_t input_stamp=GraphicsPerf::take_input();
     const uint64_t start=hpet_dostepny()?czas_monotoniczny_us():0;LayerRenderInfo layers[MAKS_WARSTW];int layer_count=0;
     if(count)layer_count=snapshot_warstw(layers);
     int overlay_x=0,overlay_y=0,overlay_w=16,overlay_h=16;
@@ -2349,6 +2281,8 @@ void skladacz_obrazu_obsluz_dirty() {
     if(pixels>maks_dirty_px)maks_dirty_px=pixels;
     const bool pelny_compose=count==1U&&work[0].x==0&&work[0].y==0&&
         work[0].width>=sw&&work[0].height>=sh;
+    GraphicsPerf::frame(present_end*1000,(compose_end-start)*1000,(present_end-compose_end)*1000,pixels,count,input_stamp);
+    if(pelny_compose)GraphicsPerf::add(GraphicsPerf::FullFrames);
     if(pelny_compose)++licznik_full;else if(count!=0U)++licznik_region;
     /* Nowe dirty powstale podczas klatki pozostaly w kolejce. Generation
        sluzy jako jawna kontrola, ze nie wolno ich skasowac na koncu. */
@@ -2591,9 +2525,14 @@ bool skladacz_obrazu_blit_popup(int pid, int x, int y, int szer, int wys,
     int x1 = x + szer < p.x + p.width ? x + szer : p.x + p.width;
     int y1 = y + wys < p.y + p.height ? y + wys : p.y + p.height;
     if (x0 >= x1 || y0 >= y1) return false;
+    {
+#ifndef BURSZTYN_COMPOSITOR_HOST_TEST
+        OknoUzytkownika access(src,size_t(szer)*size_t(wys)*sizeof(uint32_t));
+#endif
     for (int py = y0; py < y1; ++py) for (int px = x0; px < x1; ++px) {
         uint32_t v = src[static_cast<uint64_t>(py-y)*szer + (px-x)];
         application_popup.tlo[static_cast<uint64_t>(py-p.y)*p.width + (px-p.x)] = v;
+    }
     }
     skladacz_obrazu_oznacz_dirty_rect(x0, y0, x1 - x0, y1 - y0);
     skladacz_obrazu_obsluz_dirty();

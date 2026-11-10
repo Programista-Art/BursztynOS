@@ -1114,7 +1114,7 @@ $(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notic
 		'    insmod all_video' \
 		'    set gfxmode=1280x720x32' \
 		'    set gfxpayload=keep' \
-		'    multiboot2 /boot/system_operacyjny.bin bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.refresh=$(BURSZTYN_REFRESH_HZ) bursztyn.video=$(BURSZTYN_VIDEO_MODE)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
@@ -1123,7 +1123,7 @@ $(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notic
 		'    insmod all_video' \
 		'    set gfxmode=1280x720x32' \
 		'    set gfxpayload=keep' \
-		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.refresh=$(BURSZTYN_REFRESH_HZ) bursztyn.video=$(BURSZTYN_VIDEO_MODE)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
@@ -1131,7 +1131,7 @@ $(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notic
 		'    insmod all_video' \
 		'    set gfxmode=1280x720x32' \
 		'    set gfxpayload=keep' \
-		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.test.diskdestructive=1 bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.test.diskdestructive=1 bursztyn.refresh=$(BURSZTYN_REFRESH_HZ) bursztyn.video=$(BURSZTYN_VIDEO_MODE)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
@@ -1140,7 +1140,7 @@ $(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notic
 		'    set gfxmode=1280x720x32' \
 		'    set gfxpayload=keep' \
 		'    echo "Ladowanie jadra..."' \
-		'    multiboot2 /boot/system_operacyjny.bin bursztyn.install=1 bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.install=1 bursztyn.refresh=$(BURSZTYN_REFRESH_HZ) bursztyn.video=$(BURSZTYN_VIDEO_MODE)' \
 		'    echo "Ladowanie zasobow instalatora..."' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    module2 /boot/installer/BOOTX64.EFI installer.efi' \
@@ -1323,7 +1323,7 @@ $(CI_TEST_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
 		'    insmod all_video' \
 		'    set gfxmode=1280x720x32' \
 		'    set gfxpayload=keep' \
-		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.refresh=$(BURSZTYN_REFRESH_HZ) bursztyn.video=$(BURSZTYN_VIDEO_MODE)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
@@ -1343,7 +1343,7 @@ $(CI_BLK_DESTRUCTIVE_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
 		'    insmod all_video' \
 		'    set gfxmode=1280x720x32' \
 		'    set gfxpayload=keep' \
-		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.test.diskdestructive=1 bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test=automated bursztyn.test.diskdestructive=1 bursztyn.refresh=$(BURSZTYN_REFRESH_HZ) bursztyn.video=$(BURSZTYN_VIDEO_MODE)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
@@ -1363,7 +1363,7 @@ $(CI_DESTRUCTIVE_ONLY_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
 		'    insmod all_video' \
 		'    set gfxmode=1280x720x32' \
 		'    set gfxpayload=keep' \
-		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test.diskdestructive=1 bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.test.diskdestructive=1 bursztyn.refresh=$(BURSZTYN_REFRESH_HZ) bursztyn.video=$(BURSZTYN_VIDEO_MODE)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    boot' \
 		'}' \
@@ -1396,7 +1396,7 @@ $(GRUB8K_CFG): $(KERNEL) check-test8k $(TAPETY_PAK)
 		'    insmod all_video' \
 		'    set gfxmode=1280x720x32' \
 		'    set gfxpayload=keep' \
-		'    multiboot2 /boot/system_operacyjny.bin bursztyn.refresh=$(BURSZTYN_REFRESH_HZ)' \
+		'    multiboot2 /boot/system_operacyjny.bin bursztyn.refresh=$(BURSZTYN_REFRESH_HZ) bursztyn.video=$(BURSZTYN_VIDEO_MODE)' \
 		'    module2 /boot/tapety.pak tapety.pak' \
 		'    module2 /boot/test8k.bmp test8k.bmp' \
 		'    boot' \
@@ -1441,6 +1441,10 @@ prepare-disk: $(VIRTUAL_DISK)
 #   make runuefi QEMU_DISPLAY_ARGS="-display gtk,zoom-to-fit=off"
 #
 
+BURSZTYN_VIDEO_MODE ?= 1280x720
+ifneq ($(filter 800x600 1024x768 1280x720 1280x800 1366x768 1600x900 1920x1080 2560x1440 3440x1440 3840x2160,$(BURSZTYN_VIDEO_MODE)),$(BURSZTYN_VIDEO_MODE))
+$(error Unsupported BURSZTYN_VIDEO_MODE)
+endif
 BURSZTYN_REFRESH_HZ ?= 60
 ifneq ($(filter 60 120 144 165 240,$(BURSZTYN_REFRESH_HZ)),$(BURSZTYN_REFRESH_HZ))
 $(error BURSZTYN_REFRESH_HZ musi byc jedna z wartosci: 60, 120, 144, 165, 240)
@@ -2712,3 +2716,24 @@ bsf-installer-observer:
 .PHONY: test-package-signature-host
 test-package-signature-host: test_dzwieku_blob.o
 	$(PYTHON) testy/test_podpis_paczki.py
+
+# Bounded graphics telemetry is shared by production and host fixtures.
+grafika.o skladacz_obrazu.o virtio_gpu.o ekran.o: jadro/gui/graphics_perf.h
+
+grafika.o skladacz_obrazu.o ekran.o kernel.o: jadro/gui/display_mode_policy.h
+
+grafika.o skladacz_obrazu.o: jadro/gui/graphics_copy.h
+
+bufory_grafiki.o: jadro/gui/graphics_perf.h
+.PHONY: test-display-mode-policy
+test-display-mode-policy:
+	@mkdir -p .wm-test
+	g++ -std=c++17 -O2 -I. -fsanitize=address,undefined testy/test_display_mode_policy.cpp -o .wm-test/display-mode-policy
+	.wm-test/display-mode-policy
+
+# The source moved to jadro/mm; retain the shared host fixture object path.
+.wm-test/runtime-host/pmm.o: jadro/mm/pmm.cpp
+	@mkdir -p $(@D)
+	g++ $(HOST_INCLUDES) $(STARTUP_HOST_FLAGS) -MMD -MP -c $< -o $@
+
+virtio_gpu.o: jadro/gui/display_mode_policy.h
